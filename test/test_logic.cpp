@@ -14310,10 +14310,9 @@ static void test_ou_stale() {
                     !ou_page_holds_over(reg)); // live -> a non-zero CT reading is real standby draw
                 ct_rows++;
             }
-            // The high-side pill's AT-REST source. The compressor's own HP transducer is a 0x20 row
-            // and freezes with that page, so the browser falls back to this one — and the inspector
-            // now names it as the source line beside the number. That only holds while it is LIVE:
-            // on a held-over page it would be the same stale bar under a more trustworthy name.
+            // A twinned profile's high side (trend_select_high_side): the pressure pill reads this
+            // row at rest as well, and the inspector names it as the source line beside the number.
+            // That only holds while it is LIVE: on a held-over page it would be a stale bar.
             if (logic::lwt_ci_contains(l, "refrigerant pressure sensor")) {
                 CHECK(!ou_page_holds_over(reg)); // 0x62, the hydronic side — resampled at rest
                 rp_rows++;

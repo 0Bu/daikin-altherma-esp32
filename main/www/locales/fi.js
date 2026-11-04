@@ -1,4 +1,4 @@
-// translation-source: 5453eeaa5ecebfac9d729776d8b40e937dbfce10d0a431843b3f3298cd22a9ff
+// translation-source: b5d29da273c417b207489763facc3fda04530140b4b0389affcd7643d701cd08
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -1157,7 +1157,7 @@ MB_DELTA_I18N.fi = mbDeltaValues([
 ]);
 
 INSPECT_I18N.fi = inspectValues(
-  ["Ei nykyistä mittausta:", "kompressori on pysähtynyt ja ulkoyksikkö päivittää omia antureitaan vain käydessään. Edellisen käynnin arvo piilotetaan, ettei sitä näytetä nykyisenä mittauksena."],
+  ["Ei nykyistä mittausta:", "kompressori on pysähtynyt ja ulkoyksikkö päivittää omia antureitaan vain käydessään. Edellisen käynnin arvo piilotetaan, ettei sitä näytetä nykyisenä mittauksena.", "Kompressorin nopeutta ei voi lukea, joten ulkoyksikön arvot voivat olla edelliseltä käynniltä."],
   [
     ["Toimintatila", "Toimintatila", "Sisäyksikön tila. Se ei yksin vahvista kompressorin käyntiä tai virtaamaa."], // status
     ["ENV III", "ENV III -olosuhteet", "Liitetyn ENV III:n lämpötila, kosteus ja ilmanpaine. Sijoitus ratkaisee, kuvaavatko arvot sisä- vai ulko-olosuhteita."], // env3
@@ -1192,7 +1192,7 @@ INSPECT_I18N.fi = inspectValues(
     ["PHE:n veden ΔT", "PHE:n veden lämpötilaero", "Lähdön R1T miinus tulon R4T. Lasketaan kahdesta anturista; virtaaman kanssa se kuvaa lämmönsiirtoa, mutta ei mittaa rakennuksen lämmönluovuttimien meno- ja paluulämpöä.", (d) => d.dtStale ? "Ei toimivaa ΔT:tä — pumppu ja virtaama eivät vahvista veden liikettä. Jäähtyvien anturien ero ei ole toimintapiste."
       : d.dt == null ? null : !compressorRunning(d, 5) ? `${fmt1(d.dt)} K vain pumpulla — jälkilämmön tasaantumista, ei tehoa.`
       : d.thermalMode === "cool" ? `${fmt1(d.dt)} K. Jäähdytyksessä R1T:n tulee olla R4T:tä alempi, joten ero on negatiivinen.`
-      : `${fmt1(d.dt)} K${d.dtSet != null ? `, tavoite ${fmt1(d.dtSet)} K` : ""}. Positiivinen arvo tarkoittaa lämmön siirtymistä veteen.`], // dt
+      : `${fmt1(d.dt)} K. Positiivinen arvo tarkoittaa lämmön siirtymistä veteen.`], // dt
     [(d) => d && d.pthKind === "cooling" ? "Jäähdytysteho (arvio)" : "Lämpöteho (arvio)", "PHE:n arvioitu lämpöteho", (d) => d && d.pthKind === "cooling" ? "Vedestä poistetun lämmön arvio: virtaama × (R4T−R1T) × 4,186 olettaen veden. Anturit ja glykoli rajoittavat tarkkuutta; arvo näytetään vain vahvistetussa jäähdytyksessä." : "Veteen siirtyneen lämmön arvio: virtaama × (R1T−R4T) × 4,186 olettaen veden. Anturit ja glykoli rajoittavat tarkkuutta; R1T:n jälkeinen BUH ei sisälly.", (d) => d.dtStale ? d.bsh === true ? "PHE:n siirtoa ei voi laskea ilman vahvistettua kiertoa. BSH voi yhä lämmittää säiliötä, mutta sen lämpö ohittaa PHE-anturit eikä väylä ilmoita tehoa." : "Tehoa ei voi laskea ilman vahvistettua veden liikettä PHE:n läpi. Toimintapiste puuttuu; teho ei ole 0 kW."
       : d.pth == null ? null : d.pthKind === "cooling" ? `≈ ${fmt1(d.pth)} kW jäähdytystä${d.cop != null ? `, EER ${fmt1(d.cop)}` : ""}.` : `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `, COP ${fmt1(d.cop)}` : ""}.`], // pth
     [(d) => d && d.efficiencyKind === "eer" ? "Lämpöpumpun EER (arvio)" : d && d.copScope === "plant" ? "COP BUH:n jälkeen (arvio)" : "Lämpöpumpun COP (arvio)", "Arvioitu hyötysuhde", (d) => d && d.efficiencyKind === "eer" ? "Arvioitu jäähdytysteho jaettuna arvioidulla sähköteholla. Tulos perii nesteen, anturien, jännitteen ja tehokertoimen oletukset; hetkellinen, ei kausittainen EER." : "Arvioitu lämpöteho jaettuna saman taserajan sähköteholla. CT:llä lämpö voidaan laskea BUH:n jälkeen, invertterivirralla vain lämpöpumpulle; CT-kytkentä määrää mukana olevat kuormat. Tulos perii neste-, anturi-, jännite- ja tehokerroinoletukset ja on hetkellinen, ei kausittainen.", (d) => d.copBlock === "tank_heater" ? "COP ei saatavilla — säiliövastus käy. Sen sähkö voi sisältyä taseeseen, mutta lämpö menee suoraan säiliöön vesipuolen anturien ohi."

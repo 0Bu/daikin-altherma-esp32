@@ -93,7 +93,7 @@ export function readHistoryLifecycle(source = DEFAULT_APP_SOURCE) {
 }
 
 // Locale modules are deliberately outside app.sources so they do not consume the dashboard's
-// 160 KiB single-response startup budget. Focused host tests can still execute the exact separately
+// single-response startup budget. Focused host tests can still execute the exact separately
 // shipped source rather than copying translations into fixtures.
 export function readUiLocale(code) {
   if (!/^[a-z]{2}$/.test(code)) fail(`invalid locale code: ${code}`);

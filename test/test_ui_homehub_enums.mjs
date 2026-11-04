@@ -8,10 +8,12 @@ import { readAppFragments, readUiLocale } from "../tools/ui/read_app_source.mjs"
 const appStateSource = readAppFragments(["app_state.js"]);
 const schematicSource = readAppFragments(["schematic.js"]);
 
+const pickValueSource = appStateSource.match(/function pickValue\(re\) \{[\s\S]*?\n\}/)[0];
+
 function renderer(lang, removeNativePrecedence = false) {
   let source = readAppFragments(["i18n.js"]) +
     (lang === "en" ? "" : readUiLocale(lang)) +
-    readAppFragments(["history.js", "descriptions.js", "schematic.js"]);
+    readAppFragments(["history.js", "descriptions.js", "schematic.js"]) + pickValueSource;
   if (removeNativePrecedence) {
     const anchor = "const preferSourceDesc = fb && desc?.sourceQualified;";
     assert.equal(source.split(anchor).length, 2, "unique production mutation anchor");
@@ -34,7 +36,7 @@ function renderer(lang, removeNativePrecedence = false) {
       _values: [], _modbus: [], descOpen: new Set(), hist: new Map(), histPin: new Map() },
   };
   vm.createContext(context);
-  vm.runInContext(source + "\nthis.__ui = { displayValue, displayUnit, displayReadingLabel, displayHomeHubLabel, descFor, mbNoteHtml, vDescRow, inspectSig, renderInspect, INSPECT, state: S, operationModeText, operationModeFromFlags, labels: I18N[LANG]," +
+  vm.runInContext(source + "\nthis.__ui = { displayValue, displayUnit, displayReadingLabel, displayHomeHubLabel, descFor, mbNoteHtml, vDescRow, inspectSig, renderInspect, INSPECT, state: S, operationModeText, operationModeFromFlags, schematicOperationMode, labels: I18N[LANG]," +
     " sgModeText: (mode) => t(`sg.mode${mode}`)," +
     " sgBoostText: () => t(\"schem.sg_boost\") };", context,
     { filename: "main/www/app.sources" });
@@ -276,6 +278,28 @@ assert.equal(de.operationModeFromFlags(false, false), "Stopp",
   "inactive HomeHub flags feed the same German schematic vocabulary");
 assert.equal(de.operationModeFromFlags(null, false), null,
   "incomplete HomeHub flags do not guess an operation mode");
+// The headline names the hydronic mode. The outdoor controller's row is a different quantity, and a
+// sweep that lost the hydronic page must blank the headline rather than print that row under its name.
+const OUTDOOR_MODE = { label: "Operation Mode", value: "Fan Only", reg: 0x10 };
+const HYDRONIC_MODE = { label: "I/U operation mode", value: "Heating", reg: 0x60 };
+en.state._values = [OUTDOOR_MODE, HYDRONIC_MODE];
+assert.equal(en.schematicOperationMode(), "Heating", "the hydronic row answers");
+en.state._values = [OUTDOOR_MODE, { ...HYDRONIC_MODE, value: null }];
+assert.equal(en.schematicOperationMode(), null, "a hydronic row without a value does not fall through");
+en.state._values = [OUTDOOR_MODE];
+assert.equal(en.schematicOperationMode(), null, "nor does a hydronic page missing from the sweep");
+en.state._values = [{ label: "Operation Mode", value: "Heating", reg: 0x55 }];
+assert.equal(en.schematicOperationMode(), "Heating", "Protocol S carries its one mode row on another page");
+// The value table states a number as the exact reference, so it carries the doubt about the row's age
+// for as long as liveData has not settled it.
+const UNKNOWN_AGE = { label: "Discharge pipe temp.", value: "58.0", unit: "°C", reg: 0x20, held_unknown: true };
+en.state.live = { ouUnknown: true };
+assert.match(en.vDescRow(UNKNOWN_AGE), /may be from the last run/, "a row of unknown age says so");
+en.state.live = { ouUnknown: false };
+assert.doesNotMatch(en.vDescRow(UNKNOWN_AGE), /may be from the last run/,
+  "and stops once the HomeHub's compressor flag has settled it");
+en.state.live = null;
+en.state._values = [];
 const modelLabels = {
   capacity: "Nennleistung der Außeneinheit",
   capacity_iu: "Nennleistung der Inneneinheit",

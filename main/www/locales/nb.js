@@ -1,4 +1,4 @@
-// translation-source: 5453eeaa5ecebfac9d729776d8b40e937dbfce10d0a431843b3f3298cd22a9ff
+// translation-source: b5d29da273c417b207489763facc3fda04530140b4b0389affcd7643d701cd08
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -940,7 +940,7 @@ I18N.nb = localeValues([
 ]);
 
 INSPECT_I18N.nb = inspectValues(
-  ["Ingen aktuell måling:", "kompressoren står, og utedelen oppdaterer bare egne sensorer når den går. Siste syklus skjules, så den ikke vises som fersk."],
+  ["Ingen aktuell måling:", "kompressoren står, og utedelen oppdaterer bare egne sensorer når den går. Siste syklus skjules, så den ikke vises som fersk.", "Kompressorhastigheten kan ikke leses, så utedelens verdier kan være fra siste syklus."],
   [
     ["Driftsmodus", 0, "Innedelens modus; bekrefter ikke alene kompressor eller vannmengde."], // status
     ["Uteklima", "Uteklima fra ENV III", "Temperatur, fuktighet og trykk fra ENV III; plasseringen avgjør om verdien er uteluft."], // env3
@@ -987,7 +987,7 @@ INSPECT_I18N.nb = inspectValues(
       : d.dt == null ? null
       : !compressorRunning(d, 5) ? `${fmt1(d.dt)} K med bare pumpedrift: utjevning av restvarme, ikke varmeeffekt.`
       : d.thermalMode === "cool" ? `${fmt1(d.dt)} K. Ved aktiv kjøling skal R1T være lavere enn R4T, derfor negativ verdi.`
-      : `${fmt1(d.dt)} K${d.dtSet != null ? ` mot varmemål ${fmt1(d.dtSet)} K` : ""}. Positiv verdi betyr at PHE tilfører vannet varme.`], // dt
+      : `${fmt1(d.dt)} K. Positiv verdi betyr at PHE tilfører vannet varme.`], // dt
     [(d) => d && d.pthKind === "cooling" ? "Anslått kjøleeffekt" : "Anslått varmeeffekt", "Anslått varmeeffekt ved PHE", (d) => d && d.pthKind === "cooling"
       ? "Anslag for uttatt varme: vannmengde/60 × (R4T−R1T) × ρ·cp (≈ 4,186 kJ/(l·K)), antatt vann. Avhenger av vannmengde, sensorer og væske; glykol endrer resultatet. Vises bare med kompressor og kjølerettet ΔT."
       : "Anslag for levert varme: vannmengde/60 × (R1T−R4T) × ρ·cp (≈ 4,186 kJ/(l·K)), antatt vann. Avhenger av vannmengde, sensorer og væske; glykol endrer resultatet. BUH etter R1T er utenfor.", (d) => d.dtStale

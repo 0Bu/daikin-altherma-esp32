@@ -31,6 +31,7 @@ const DEMO = (() => {
     ["leaving_water_post_buh", "Leaving water temp. after BUH (R2T)"],
     ["return_water", "Inlet water temp.(R4T)"],
     ["refrigerant_liquid", "Refrig. Temp. liquid side (R3T)"],
+    ["circuit_pressure", "Refrigerant pressure sensor"],
     ["dhw_tank", "DHW tank temp. (R5T)"],
     ["outdoor_air", "R1T-Outdoor air temp."],
     ["outdoor_heat_exchanger", "O/U Heat Exch. Temp.(R4T)"],
@@ -107,7 +108,7 @@ const DEMO = (() => {
     const v = state || source === "env3" ? x : source === "modbus"
       ? x.map((n, i) => n == null ? 53 + i : n + (i % 3 === 0 ? 1 : 0))
       : x;
-    const unit = state ? "" : id === "flow" ? "l/min"
+    const unit = state ? "" : id === "flow" ? "l/min" : id === "circuit_pressure" ? "bar"
       : id === "env3_humidity" ? "%" : id === "env3_pressure" ? "hPa" : "°C";
     return { id, source: id === "circulation_state" ? "mqtt" : source,
              label: id, dt: 300, unit, t0: 1768720920, b0: 5895736,

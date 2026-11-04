@@ -68,9 +68,9 @@ it, and this is where the review earns its keep.
 2. **Is a new reading attributed to the right sensor?** The audit checks that a pill sits on *a*
    pipe; only you can check it is *the* pipe. R1T is at the exchanger's water outlet **before** the
    backup heater — which is why its sub-label says "pre-BUH" and why `logic/lwt_select.hpp` exists.
-   The high-pressure pill draws `d.circP` (the compressor's transducer while running, the live
-   refrigerant sensor at rest), so its headline must resolve **that** row and not the HP row on
-   principle. A number under the wrong name is the failure this whole card is built to avoid.
+   The high-pressure pill draws `d.circP` from the firmware's `circuit_pressure` row, the one the
+   chart and the refrigerant service read, so its headline must resolve **that** row and not one
+   found by label. A number under the wrong name is the failure this whole card is built to avoid.
 
 3. **Does it blank when it must?** `logic/ou_stale.hpp`: the outdoor unit stops refreshing its own
    pages while it rests, so held X10A values never repeat the last run as current. Discharge and the
@@ -79,6 +79,9 @@ it, and this is where the review earns its keep.
    restore the stale X10A one or claim there is no current reading. Its trend may overlay the blue
    X10A gap with the independent petrol HomeHub ring, but must label both sources and align the same
    5-minute bucket — never splice them into one repaired line. ΔT blanks with the pump stopped.
+   The HomeHub's compressor flag settles a row of unknown age (`held_unknown`) where it answers.
+   Otherwise the row keeps its number with the inspector's note, takes the same HomeHub stand-in,
+   and feeds no estimate.
    A new pill on page `0x20`/`0x21` needs the same held-over treatment, and the gate cannot see that
    the value it draws is stale.
 

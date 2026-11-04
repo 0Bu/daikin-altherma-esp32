@@ -1,4 +1,4 @@
-// translation-source: 5453eeaa5ecebfac9d729776d8b40e937dbfce10d0a431843b3f3298cd22a9ff
+// translation-source: b5d29da273c417b207489763facc3fda04530140b4b0389affcd7643d701cd08
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -939,7 +939,7 @@ I18N.cs = localeValues([
   /* hist.cop_none */ "Graf COP chybí pro příkon z CT: zapojení určuje spotřebiče a teplo před BUH nezahrnuje BSH, takže hranice bilance nemusí souhlasit.",
 ]);
 INSPECT_I18N.cs = inspectValues(
-  ["Chybí aktuální hodnota:", "kompresor stojí a venkovní jednotka obnovuje své snímače jen za chodu. Hodnota z minulého běhu je skryta, aby nepůsobila jako aktuální měření."],
+  ["Chybí aktuální hodnota:", "kompresor stojí a venkovní jednotka obnovuje své snímače jen za chodu. Hodnota z minulého běhu je skryta, aby nepůsobila jako aktuální měření.", "Otáčky kompresoru nelze přečíst, takže hodnoty venkovní jednotky mohou být z minulého běhu."],
   [
     ["Provozní režim", 0, "Režim vnitřní jednotky; sám nepotvrzuje chod kompresoru ani průtok."], // status
     ["Venkovní podmínky", "Venkovní podmínky z ENV III", "Teplota, vlhkost a tlak ze snímače ENV III u ESP32."], // env3
@@ -974,7 +974,7 @@ INSPECT_I18N.cs = inspectValues(
     ["ΔT vody na PHE", "Rozdíl teplot vody na PHE", "R1T na výstupu minus R4T na vstupu. Počítá se ze dvou snímačů; s průtokem popisuje výměnu, ale neměří teploty u spotřebičů domu.", (d) => d.dtStale ? "Chybí pracovní ΔT — čerpadlo a průtok nepotvrzují pohyb vody. Rozdíl chladnoucích snímačů není pracovní bod."
       : d.dt == null ? null : !compressorRunning(d, 5) ? `${fmt1(d.dt)} K při chodu samotného čerpadla — vyrovnávání zbytkového tepla, ne výkon.`
       : d.thermalMode === "cool" ? `${fmt1(d.dt)} K. Při chlazení má být R1T pod R4T, proto je rozdíl záporný.`
-      : `${fmt1(d.dt)} K${d.dtSet != null ? ` proti cíli ${fmt1(d.dtSet)} K` : ""}. Kladná hodnota znamená předávání tepla vodě.`], // dt
+      : `${fmt1(d.dt)} K. Kladná hodnota znamená předávání tepla vodě.`], // dt
     [(d) => d && d.pthKind === "cooling" ? "Chladicí výkon (odhad)" : "Tepelný výkon (odhad)", "Odhadovaný tepelný výkon na PHE", (d) => d && d.pthKind === "cooling" ? "Odhad tepla odebraného vodě: průtok × (R4T−R1T) × 4,186 při předpokladu vody. Snímače a glykol omezují přesnost; hodnota se ukáže jen při potvrzeném chlazení." : "Odhad tepla předaného vodě: průtok × (R1T−R4T) × 4,186 při předpokladu vody. Snímače a glykol omezují přesnost; BUH za R1T není zahrnut.", (d) => d.dtStale ? d.bsh === true ? "Přenos na PHE nelze spočítat bez potvrzeného oběhu. Těleso může dál ohřívat zásobník, ale jeho teplo míjí snímače PHE a sběrnice neudává jeho výkon." : "Výkon nelze spočítat bez potvrzeného pohybu vody přes PHE. Jde o chybějící pracovní bod, ne nulový výkon."
       : d.pth == null ? null : d.pthKind === "cooling" ? `≈ ${fmt1(d.pth)} kW chlazení${d.cop != null ? `, EER ${fmt1(d.cop)}` : ""}.` : `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `, COP ${fmt1(d.cop)}` : ""}.`], // pth
     [(d) => d && d.efficiencyKind === "eer" ? "EER tepelného čerpadla (odhad)" : d && d.copScope === "plant" ? "COP za BUH (odhad)" : "COP tepelného čerpadla (odhad)", "Odhadovaná účinnost", (d) => d && d.efficiencyKind === "eer" ? "Odhadovaný chladicí výkon dělený odhadovaným příkonem. Výsledek přebírá předpoklady o kapalině, snímačích, napětí a účiníku; je okamžitý, ne sezonní." : "Odhadovaný tepelný výkon dělený příkonem se stejnou bilanční hranicí. U CT může být teplo za BUH, u proudu měniče jen tepelné čerpadlo; zapojení CT určuje zahrnuté spotřebiče. Výsledek přebírá předpoklady o kapalině, snímačích, napětí a účiníku a je okamžitý, nikoli sezonní.", (d) => d.copBlock === "tank_heater" ? "COP není dostupný — těleso zásobníku je zapnuté. Jeho příkon může být v elektrické bilanci, ale teplo jde přímo do zásobníku a míjí vodní snímače."
