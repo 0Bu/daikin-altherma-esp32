@@ -1,4 +1,4 @@
-// translation-source: 5453eeaa5ecebfac9d729776d8b40e937dbfce10d0a431843b3f3298cd22a9ff
+// translation-source: b5d29da273c417b207489763facc3fda04530140b4b0389affcd7643d701cd08
 I18N.it = localeValues([
   /* sys.nodata */ "Nessun dato",
   /* sys.unreachable */ "Non raggiungibile",
@@ -939,7 +939,7 @@ I18N.it = localeValues([
   /* hist.cop_none */ "Nessuna curva COP quando la potenza elettrica proviene dalle pinze CT. I carichi inclusi dipendono dal cablaggio; la potenza termica registrata termina prima di BUH e non comprende il calore diretto di BSH, quindi non è garantito lo stesso confine di bilancio.",
 ]);
 INSPECT_I18N.it = inspectValues(
-  ["Nessuna lettura attuale:", "il compressore è fermo e l’unità esterna aggiorna i propri sensori solo durante il funzionamento. Il valore dell’ultimo ciclo viene nascosto per non mostrarlo come attuale."],
+  ["Nessuna lettura attuale:", "il compressore è fermo e l’unità esterna aggiorna i propri sensori solo durante il funzionamento. Il valore dell’ultimo ciclo viene nascosto per non mostrarlo come attuale.", "Velocità del compressore non leggibile: i valori dell’unità esterna possono essere dell’ultimo ciclo."],
   [
     ["Modalità di funzionamento", 0, "Modalità dell’unità interna. Da sola non conferma compressore né portata."], // status
     ["Clima esterno", "Clima esterno da ENV III", "Temperatura, umidità e pressione di ENV III; la posizione condiziona la misura esterna."], // env3
@@ -984,7 +984,7 @@ INSPECT_I18N.it = inspectValues(
       : d.dt == null ? null
       : !compressorRunning(d, 5) ? `${fmt1(d.dt)} K con sola pompa: equalizzazione del calore residuo, non potenza termica.`
       : d.thermalMode === "cool" ? `${fmt1(d.dt)} K. Nel raffrescamento attivo R1T deve essere sotto R4T; la differenza con segno è quindi negativa.`
-      : `${fmt1(d.dt)} K${d.dtSet != null ? ` rispetto all’obiettivo di riscaldamento di ${fmt1(d.dtSet)} K` : ""}. Positivo significa che il PHE cede calore all’acqua.`], // dt
+      : `${fmt1(d.dt)} K. Positivo significa che il PHE cede calore all’acqua.`], // dt
     [(d) => d && d.pthKind === "cooling" ? "Potenza frigorifera stimata" : "Potenza termica stimata", "Potenza termica stimata sul PHE", (d) => d && d.pthKind === "cooling"
       ? "Stima del calore sottratto: portata/60 × (R4T−R1T) × ρ·cp (≈ 4,186 kJ/(l·K)) assumendo acqua. Dipende da portata, sensori e fluido; il glicole cambia il calcolo. Mostrata solo con compressore in marcia e differenza nella direzione di raffrescamento."
       : "Stima del calore ceduto: portata/60 × (R1T−R4T) × ρ·cp (≈ 4,186 kJ/(l·K)) assumendo acqua. Dipende da portata, sensori e fluido; il glicole cambia il calcolo. BUH è dopo R1T e resta fuori dal valore.", (d) => d.dtStale ? d.bsh === true

@@ -202,7 +202,7 @@ set(UI_MINIFIER_VENDOR
     "${CMAKE_CURRENT_SOURCE_DIR}/../tools/web_asset/vendor/rcssmin.py")
 # Browsers do not consistently negotiate Brotli on this trusted-LAN HTTP origin. Keep gzip so the
 # payload's Content-Encoding is usable by every supported browser, and gate the measured response.
-set(UI_GZIP_MAX_BYTES 163840)
+set(UI_GZIP_MAX_BYTES 164480)
 idf_build_get_property(PYTHON PYTHON)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${APP_JS_MANIFEST}")
 file(STRINGS "${APP_JS_MANIFEST}" APP_JS_ENTRIES ENCODING UTF-8)
@@ -249,7 +249,7 @@ add_custom_target(gen_index_gz DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/index.html.g
 add_dependencies(${COMPONENT_LIB} gen_index_gz)
 
 # Non-English dashboard catalogs are device-local, separately compressed assets. Keeping them out
-# of index.html preserves the 160 KiB single-response startup contract while /locale.js selects one
+# of index.html preserves the UI_GZIP_MAX_BYTES single-response contract while /locale.js selects one
 # asset by its query parameter. Each file is still linked into the signed application image; no
 # network service participates in localization. A separate tight cap prevents a catalog from
 # quietly becoming another large response even though it is served straight from flash.

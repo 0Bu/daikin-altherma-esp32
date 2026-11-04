@@ -86,7 +86,9 @@ missing baselines and regressed edge counts.
 
 `scripts/check-presenter-parity.sh` can run independently. It compares the browser's production
 leaving-water, post-BUH, COP-scope and held-outdoor rules with the C++ policy headers over the real
-catalog. Browser-only policies cannot be proven by testing only their C++ reference. A binding made
+catalog, and checks non-exempt schematic patterns for at most one qualified row per profile, with
+documented exceptions. Browser-only policies
+cannot be proven by testing only their C++ reference. A binding made
 unreachable fails instead of producing an empty comparison. Ordinary presenter and entity-ID
 audits freshly compile the current C++ inputs. `--golden`/`--binary` reuse is limited to fresh
 selftest mutations after the pristine fixture passes; `scripts/run-host-audit-reuse-tests.sh` proves

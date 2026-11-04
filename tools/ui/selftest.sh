@@ -38,8 +38,22 @@ cp -R "$proj/main/www" "$tmp/main/www"
 cp "$proj/test/test_ui_use_cases.mjs" "$tmp/test/"
 cp "$proj/test/test_ui_modal_scroll.mjs" "$tmp/test/"
 cp "$proj/test/test_ui_status_truth.mjs" "$tmp/test/"
+cp "$proj/test/test_ui_live_i18n.mjs" "$tmp/test/"
 cp "$proj/test/test_ui_card_navigation.mjs" "$tmp/test/"
 cp -R "$proj/tools/ui" "$tmp/tools/ui"
+
+# An unread compressor witness must not turn into a measured stop in the activity line.
+(cd "$tmp" && node test/test_ui_live_i18n.mjs >/dev/null 2>&1) || {
+  echo "ui selftest: live-state fixture fails before mutation" >&2; exit 1; }
+sed 's/if (d.rps == null && d.compressorOn == null)/if (d.ouUnknown)/' \
+  "$proj/main/www/js/app_state.js" > "$tmp/main/www/js/app_state.js"
+if (cd "$tmp" && node test/test_ui_live_i18n.mjs >"$tmp/unknown-activity.log" 2>&1); then
+  echo "ui selftest: unknown compressor reported as stopped escaped the activity checks" >&2; exit 1
+fi
+grep -q 'an unknown compressor state must not become standby' "$tmp/unknown-activity.log" || {
+  echo "ui selftest: unknown-activity mutation failed outside its intended assertion" >&2; exit 1; }
+cp "$proj/main/www/js/app_state.js" "$tmp/main/www/js/app_state.js"
+echo "ui selftest: an unknown compressor reported as stopped is detected"
 
 # Removing the whole-card opt-in must fail the executed render/reconcile contract, even when a
 # nonempty passive observation could otherwise keep the diagnosis card alive.
@@ -380,6 +394,28 @@ cp "$proj/test/test_ui_source_matrix.mjs" "$matrix_tmp/test/"
   exit 1; }
 
 cp "$matrix_tmp/main/www/js/schematic.js" "$matrix_tmp/schematic.orig"
+
+# An independent HomeHub ON witness must not be replaced by an unknown-age explanation.
+sed 's/^  d.pelUnknown =.*$/  d.pelUnknown = d.pel == null \&\& !d.pelHeld \&\& speedUnread;/' \
+  "$matrix_tmp/schematic.orig" > "$matrix_tmp/main/www/js/schematic.js"
+if (cd "$matrix_tmp" && node test/test_ui_source_matrix.mjs >"$matrix_tmp/known-compressor.log" 2>&1); then
+  echo "ui selftest: known compressor reported as unknown escaped the source matrix" >&2; exit 1
+fi
+grep -q 'a known HomeHub compressor state cannot receive an unknown-age explanation' \
+  "$matrix_tmp/known-compressor.log" || {
+  echo "ui selftest: known-compressor mutation failed outside its intended assertion" >&2; exit 1; }
+cp "$matrix_tmp/schematic.orig" "$matrix_tmp/main/www/js/schematic.js"
+echo "ui selftest: a known HomeHub compressor reported as unknown is detected"
+
+sed 's/if (d.rps == null \&\& d.compressorOn == null \&\& COMPRESSOR_NOW/if (d.ouUnknown \&\& COMPRESSOR_NOW/' \
+  "$matrix_tmp/schematic.orig" > "$matrix_tmp/main/www/js/schematic.js"
+if (cd "$matrix_tmp" && node test/test_ui_source_matrix.mjs >"$matrix_tmp/absent-outdoor.log" 2>&1); then
+  echo "ui selftest: absent outdoor pages reported as stopped escaped the inspector checks" >&2; exit 1
+fi
+grep -q 'absent outdoor pages cannot become a stopped compressor' "$matrix_tmp/absent-outdoor.log" || {
+  echo "ui selftest: absent-outdoor mutation failed outside its intended assertion" >&2; exit 1; }
+cp "$matrix_tmp/schematic.orig" "$matrix_tmp/main/www/js/schematic.js"
+echo "ui selftest: absent outdoor pages reported as stopped in an inspector are detected"
 
 # (a) a fifth reason the production cascade can return, explained nowhere.
 sed 's|^\(  if (pelSrc == null)\)|  if (pelSrc === "XX")   return { scope: "plant",  block: "ghost_code",  postBuh: false };\n\1|' \

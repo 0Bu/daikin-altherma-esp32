@@ -65,7 +65,10 @@ const MODEL_DESCRIPTION_LOCALE_KEYS = ("health_fault health_dhw_loss health_cycl
   "health_pressure health_flow health_heater health_retries free_heap max_alloc capacity capacity_iu " +
   "candidates candidates_nocap oueeprom").split(" ");
 function inspectValues(held, values) {
-  const catalog = { held: { lead: held[0], why: held[1] } };
+  const catalog = {
+    held: { lead: held[0], why: held[1] },
+    held_unknown: held[2],
+  };
   values.forEach((value, index) => {
     const entry = { t: value[0], aria: value[1] || value[0], what: value[2] };
     if (value.length === 4) entry.now = value[3];
@@ -135,6 +138,7 @@ function localeReady(lang) {
   const descriptions = DESCRIPTION_I18N[lang], models = MODEL_DESCRIPTION_I18N[lang];
   const faultCodes = FAULT_CODE_I18N[lang], mbDeltas = MB_DELTA_I18N[lang];
   return !!inspect && INSPECT_LOCALE_KEYS.every((key) => !!inspect[key]) && !!inspect.held &&
+         !!inspect.held_unknown &&
          !!homehub && HOMEHUB_LOCALE_OFFSETS.every((offset) => homehub[offset] != null) &&
          Array.isArray(descriptions) && descriptions.length === DESCRIPTION_LOCALE_COUNT &&
          !!models && MODEL_DESCRIPTION_LOCALE_KEYS.every((key) => !!models[key]) &&
@@ -934,8 +938,12 @@ function operationModeFromFlags(dhw, space) {
 function schematicOperationMode() {
   const hp = S.status?.hp || {};
   if (hp.connected) {
-    return operationModeText(pickValue(/i\/u operation mode/i) ||
-                             pickValue(/operation mode|^mode$/i));
+    // The hydronic row. The outdoor controller's "Operation Mode" on page 0x10 is a different quantity,
+    // and a lost hydronic page must blank this headline rather than print that row under its name.
+    // Protocol S has no hydronic row: its one mode row, on another page, is the answer there.
+    const row = (S._values || []).find((x) => /i\/u operation mode/i.test(x.label || "") ||
+                                              (x.reg !== 0x10 && /^operation mode$/i.test(x.label || "")));
+    return operationModeText(row?.value);
   }
   return mbLive() ? operationModeFromFlags(mbBool(52), mbBool(53)) : null;
 }

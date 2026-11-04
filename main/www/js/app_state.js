@@ -548,10 +548,10 @@ function renderApp() {
   // Header is a fixed product title ("daikin-altherma-esp32", set in index.html) — the detected
   // model name lives in the Model card (statusCardsHtml), not the header.
 
-  // The schematic's own status block: operation mode + fault state. Prefer the hydronic I/U mode
-  // (conv 315 — Stop/Heating/Cooling/DHW/…) over the outdoor unit's Operation Mode: during a DHW run
+  // The schematic's own status block: operation mode + fault state. The mode is the hydronic I/U row
+  // (conv 315 — Stop/Heating/Cooling/DHW/…), never the outdoor unit's Operation Mode: during a DHW run
   // the outdoor unit still reports "Heating" (it IS heating — the tank), but the user-relevant answer
-  // is what the water side is doing. Plain first-match sorted the outdoor row first.
+  // is what the water side is doing.
   const mode = schematicOperationMode();
   const fault = faultValue();
   const faulted = fault && !FAULT_OK.test(String(fault).trim());
@@ -664,6 +664,7 @@ const PLANT_CIRC = { key: "sys.circulating", tone: "" };
 const PLANT_COOL_RESIDUAL = { key: "sys.residual_circulating", tone: "idle" };
 const PLANT_BSH = { key: "sys.bsh_active", tone: "" };
 const PLANT_STANDBY = { key: "sys.standby", tone: "idle" };
+const PLANT_UNKNOWN = { key: "dyn.state_gate", tone: "warn" };
 function plantState(d) {
   if (!d) return PLANT_STANDBY;
   if (d.defrost === true) return PLANT_DEFROST;
@@ -671,6 +672,7 @@ function plantState(d) {
   // It is still active plant operation — and expensive resistive heat — so the exact X10A BSH flag
   // takes precedence over the generic compressor/pump states below.
   if (d.bsh === true) return PLANT_BSH;
+  if (d.rps == null && d.compressorOn == null) return PLANT_UNKNOWN;
   if (compressorRunning(d)) return PLANT_RUNNING;
   // Compressor off but water still moving: pump overrun, or the backup heater carrying the load on
   // its own. Something IS happening — it just isn't the heat pump, which is the point of saying so.

@@ -309,7 +309,7 @@ function checkLocalizedRows(code, rows, schema, kind) {
 for (const code of codes.slice(2)) {
   const inspect = catalogContext.__inspectCopy[code];
   assert.ok(inspect, `${code} specialist inspector copy did not register itself`);
-  assert.deepEqual(Object.keys(inspect).filter((key) => key !== "held").sort(), inspectKeys,
+  assert.deepEqual(Object.keys(inspect).filter((key) => key !== "held" && key !== "held_unknown").sort(), inspectKeys,
     `${code} specialist inspector targets differ from the SVG`);
   for (const key of inspectKeys) {
     assert.ok(["string", "function"].includes(typeof inspect[key].t),
@@ -322,6 +322,7 @@ for (const code of codes.slice(2)) {
   }
   assert.equal(typeof inspect.held?.lead, "string", `${code}/INSPECT.held.lead is missing`);
   assert.equal(typeof inspect.held?.why, "string", `${code}/INSPECT.held.why is missing`);
+  assert.equal(typeof inspect.held_unknown, "string", `${code}/INSPECT.held_unknown is missing`);
 
   const labels = catalogContext.__homeHubCopy[code];
   assert.ok(labels, `${code} HomeHub label table did not register itself`);

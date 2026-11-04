@@ -1,4 +1,4 @@
-// translation-source: 5453eeaa5ecebfac9d729776d8b40e937dbfce10d0a431843b3f3298cd22a9ff
+// translation-source: b5d29da273c417b207489763facc3fda04530140b4b0389affcd7643d701cd08
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -939,7 +939,7 @@ I18N.fr = localeValues([
   /* hist.cop_none */ "Aucune courbe de COP lorsque la puissance électrique provient des pinces CT. Les charges prises en compte dépendent du câblage ; la puissance thermique enregistrée s’arrête avant BUH et n’inclut pas la chaleur directe de BSH, donc une même frontière de bilan n’est pas garantie.",
 ]);
 INSPECT_I18N.fr = inspectValues(
-  ["Aucun relevé actuel :", "le compresseur est arrêté et l’unité extérieure n’actualise ses propres capteurs qu’en fonctionnement. La valeur du dernier cycle est masquée pour ne pas la présenter comme actuelle."],
+  ["Aucun relevé actuel :", "le compresseur est arrêté et l’unité extérieure n’actualise ses propres capteurs qu’en fonctionnement. La valeur du dernier cycle est masquée pour ne pas la présenter comme actuelle.", "Vitesse du compresseur illisible : les valeurs de l’unité extérieure peuvent venir du dernier cycle."],
   [
     ["Mode de fonctionnement", 0, "Mode de l’unité intérieure. Il ne confirme à lui seul ni compresseur ni débit."], // status
     ["Climat extérieur", "Climat extérieur ENV III", "Température, humidité et pression de l’ENV III ; son emplacement conditionne la mesure extérieure."], // env3
@@ -984,7 +984,7 @@ INSPECT_I18N.fr = inspectValues(
       : d.dt == null ? null
       : !compressorRunning(d, 5) ? `${fmt1(d.dt)} K avec pompe seule : égalisation de chaleur résiduelle, pas puissance thermique.`
       : d.thermalMode === "cool" ? `${fmt1(d.dt)} K. En froid actif R1T doit être sous R4T ; la différence signée est donc négative.`
-      : `${fmt1(d.dt)} K${d.dtSet != null ? ` pour une cible chauffage de ${fmt1(d.dtSet)} K` : ""}. Positif signifie que le PHE apporte de la chaleur à l’eau.`], // dt
+      : `${fmt1(d.dt)} K. Positif signifie que le PHE apporte de la chaleur à l’eau.`], // dt
     [(d) => d && d.pthKind === "cooling" ? "Puissance froid estimée" : "Puissance thermique estimée", "Puissance thermique estimée au PHE", (d) => d && d.pthKind === "cooling"
       ? "Estimation de la chaleur retirée : débit/60 × (R4T−R1T) × ρ·cp (≈ 4,186 kJ/(l·K)) en supposant de l’eau. Dépend du débit, des capteurs et du fluide ; le glycol change le calcul. Affichée seulement avec compresseur en marche et écart dans le sens froid."
       : "Estimation de la chaleur transmise : débit/60 × (R1T−R4T) × ρ·cp (≈ 4,186 kJ/(l·K)) en supposant de l’eau. Dépend du débit, des capteurs et du fluide ; le glycol change le calcul. Le BUH est après R1T et hors de cette valeur.", (d) => d.dtStale ? d.bsh === true

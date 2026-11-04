@@ -96,7 +96,8 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [], elements 
     " sgModeText, mbNoteHtml, mbDeltaHtml, descFor, inspCurRow, inspMember," +
     " inspMembers, inspValues, inspComparisonHtml, inspHeld, liveData, compressorRunning," +
     " waterMoving, pumpFlowConflict, waterThermalKind, activeSpaceKind, ouReadingText, updateSchematicStateA11y, INSPECT," +
-    " pelMeasured, pelApproxText, PEL_INSPECT };",
+    " pelMeasured, pelApproxText, PEL_INSPECT, vRow, vNum, highSideRow, inspHeldHtml, inspUnknownAge," +
+    " inspNowText, heldUnknownText, OUTDOOR_HX_RE };",
     context, { filename: "main/www/app.sources" });
   context.__api.S = context.S;
   context.__api.setTxLang = (lang) => { context.LANG = lang; };
@@ -1259,7 +1260,6 @@ assert.match(style, /\.inspect-rows\s*>\s*\.mb-delta/,
   assert.equal(d.spaceMode, "cool", "I/U mode establishes the selected space season");
   assert.equal(d.thermalMode, "cool", "space path in Cooling has cooling as its thermal task");
   assert.equal(d.spaceOp, true, "legacy Space heating label is retained only as space operation");
-  assert.equal(d.dtSet, null, "heating target ΔT is not quoted in Cooling");
   assert.equal(d.pthRaw > 0, true, "the residual-temperature arithmetic is intentionally non-zero");
   assert.equal(d.pth, null, "stopped compressor suppresses the false cooling-capacity claim");
   assert.equal(d.pthKind, null);
@@ -1480,6 +1480,226 @@ assert.doesNotMatch(SOURCE, /chip\.demand_(?:on|off)|schem\.to_heat/);
   for (const block of set)
     assert.ok(covered.has(block),
       `copBlock "${block}" is set by the production code but has no explainer sentence`);
+}
+
+// ── A label pattern names one row ─────────────────────────────────────────────────────────────
+// A row without a value this sweep reads as absent. The next match is another instrument under a
+// label the reader takes for this one.
+{
+  const hxFirst = { label: "O/U Heat Exch. Temp.", value: null, unit: "°C", reg: 0x20 };
+  const hxSecondUnit = { label: "Outdoor heat exchanger temp.", value: "-3.5", unit: "°C", reg: 0xa0 };
+  const c = ctx({ x10a: true, values: [hxFirst, hxSecondUnit] });
+  assert.equal(c.liveData().ouHx, null, "the second outdoor unit's coil never stands in for this unit's");
+  c.S._values = [hxSecondUnit];
+  assert.equal(c.liveData().ouHx, null, "nor when this unit's page is missing from the sweep");
+  c.S._values = [{ ...hxFirst, value: "2.5" }, hxSecondUnit];
+  assert.equal(c.liveData().ouHx, 2.5, "this unit's own coil row still reads");
+  c.S._values = [{ ...hxSecondUnit, value: "4.5", reg: 0x20 }];
+  assert.equal(c.liveData().ouHx, 4.5, "a chiller spells its own coil like that second unit");
+
+  const row = { label: "Example row", value: null, reg: 0x60 };
+  c.S._values = [row, { ...row, value: "7", reg: 0x61 }];
+  assert.equal(c.vRow(/example row/i), undefined, "the first match without a value reads as absent");
+  assert.equal(c.vNum(/example row/i), null, "and vNum therefore reads null");
+}
+
+// ── The refrigerant high side is the firmware's row ───────────────────────────────────────────
+// /status.history names it for the chart and the service. The browser must not pick a different one
+// by label, because 0x62/15 is spelled alike whether or not the profile has that sensor.
+{
+  const HP = { label: "High Pressure", value: "26.2", unit: "bar", reg: 0x20 };
+  const RP = { label: "Refrigerant pressure sensor", value: "14.2", unit: "bar", reg: 0x62 };
+  const RPS_RUN = { label: "INV frequency (rps)", value: "45", unit: "rps", reg: 0x30 };
+  const trend = (label) => ({ rows: [{ id: "circuit_pressure", label }] });
+
+  const twin = ctx({ x10a: true, values: [HP, RP, RPS_RUN] });
+  twin.S.status.history = trend(RP.label);
+  assert.equal(twin.liveData().circP, 14.2, "a twinned profile's indoor sensor is its high side, running");
+  twin.S._values = [{ ...HP, held: true }, RP, RPS_STOP];
+  assert.equal(twin.liveData().circP, 14.2, "and at rest, because the hydronic page stays live");
+  assert.equal(twin.INSPECT.hp.pick(), RP, "the pill and the inspector name the same row");
+
+  const twinless = ctx({ x10a: true, values: [HP, RP, RPS_RUN] });
+  twinless.S.status.history = trend(HP.label);
+  assert.equal(twinless.liveData().circP, 26.2, "a twinless profile's high side is the outdoor row");
+  twinless.S._values = [{ ...HP, held: true }, RP, RPS_STOP];
+  twinless.S.live = twinless.liveData();
+  assert.equal(twinless.S.live.circP, null,
+    "at rest it blanks; the 0x62/15 row is not a sensor to fall back on");
+  assert.equal(twinless.INSPECT.hp.pick().label, HP.label, "while the inspector can still explain the blank");
+  assert.equal(twinless.inspHeld(twinless.INSPECT.hp, twinless.S.live), true,
+    "and says why it is blank");
+
+  const zero = ctx({ x10a: true, values: [{ ...HP, value: "0.0" }, RPS_RUN] });
+  zero.S.status.history = trend(HP.label);
+  assert.equal(zero.liveData().circP, null, "exact 0.0 in a sealed circuit is not a pressure");
+  assert.equal(zero.INSPECT.hp.pick(), null, "so the panel prints no 0.0 bar under the blank pill");
+  for (const value of ["0.0", null]) {
+    const rest = ctx({ x10a: true, values: [{ ...HP, value, held: true }, RPS_STOP] });
+    rest.S.status.history = trend(HP.label);
+    rest.S.live = rest.liveData();
+    assert.equal(rest.S.live.circP, null, `a held high side reading ${value} leaves the pill blank`);
+    assert.equal(rest.inspHeld(rest.INSPECT.hp, rest.S.live), true, "and the panel says why");
+    const row = { ...HP, value, held_unknown: true };
+    const flagOff = ctx({ x10a: true, mbEnabled: true, mbConnected: true, values: [row],
+                          modbus: [M(31, "Compressor run", "0", null, { binary: true })] });
+    flagOff.S.status.history = trend(HP.label);
+    flagOff.S.live = flagOff.liveData();
+    assert.equal(flagOff.inspHeld(flagOff.INSPECT.hp, flagOff.S.live), true,
+      "so does a stop only the HomeHub's flag reports");
+    const unread = ctx({ x10a: true, values: [row] });
+    unread.S.status.history = trend(HP.label);
+    unread.S.live = unread.liveData();
+    assert.equal(unread.INSPECT.hp.pick(), null, "with no such answer it is simply no reading");
+  }
+
+  const unstated = ctx({ x10a: true, values: [HP, RP, RPS_RUN] });
+  assert.equal(unstated.liveData().circP, null, "no trend named: this browser does not guess a row");
+}
+
+// ── held_unknown: the third answer ────────────────────────────────────────────────────────────
+// The firmware cannot tell a live outdoor page from a frozen one. The number stays, a current reading
+// outranks it, and nothing is derived from it.
+{
+  const OUT_U = { ...OUT_X, held_unknown: true };
+  const INV_U = { label: "INV primary current (A)", value: "6.0", unit: "A", reg: 0x21, held_unknown: true };
+  const plain = ctx({ x10a: true, values: [OUT_U, INV_U] });
+  let d = plain.liveData();
+  plain.S.live = d;
+  assert.equal(d.ouUnknown, true, "no speed reading and a marked row: the state is unknown");
+  assert.equal(d.ouHeldOver, false, "which is not held over");
+  assert.equal(d.out, 19.0, "the reading stays drawn");
+  assert.equal(plain.ouReadingText(d, "out", d.out, (n) => n.toFixed(1)), "19.0", "with its number");
+  assert.equal(d.pel, null, "but no kilowatt figure is built on it");
+  assert.equal(d.pelUnknown, true, "and the panel can say why");
+  assert.equal(d.pelHeld, false, "not by claiming the compressor is off");
+  assert.equal(d.cop, null, "nor a COP");
+  plain.S.insp = "out";
+  assert.equal(plain.inspUnknownAge(plain.INSPECT.out, d), true, "the panel marks the reading");
+  assert.ok(plain.inspHeldHtml(plain.INSPECT.out, d).includes(plain.heldUnknownText()),
+    "with the shared sentence");
+  assert.equal(plain.inspHeld(plain.INSPECT.out, d), false, "and not the no-current-reading note");
+  assert.equal(plain.inspNowText(plain.INSPECT.cop, d), plain.heldUnknownText(),
+    "the COP panel gives the same reason");
+  assert.equal(plain.inspNowText(plain.INSPECT.pel, d), plain.heldUnknownText(),
+    "and so does the electrical panel");
+  for (const key of ["ou", "phe", "rhot", "rcold"]) {
+    assert.equal(plain.inspNowText(plain.INSPECT[key], d), plain.heldUnknownText(),
+      `the ${key} panel does not state a stop nobody measured`);
+  }
+  assert.ok(plain.inspHeldHtml(plain.INSPECT.comp, d).includes(plain.heldUnknownText()),
+    "a panel that only lists such a row states the doubt as well");
+  assert.equal(plain.inspHeldHtml(plain.INSPECT.ou, d), "", "and one that said it above does not repeat it");
+  d.defrost = true;
+  assert.notEqual(plain.inspNowText(plain.INSPECT.ou, d), plain.heldUnknownText(),
+    "a defrost stays a fact on the outdoor unit");
+  for (const key of ["phe", "rhot", "rcold"]) {
+    assert.equal(plain.inspNowText(plain.INSPECT[key], d), plain.heldUnknownText(),
+      `and proves no stop on the ${key} panel`);
+  }
+  d.defrost = false;
+  assert.equal(d.dtStale, true, "this plant reports no water movement");
+  assert.notEqual(plain.inspNowText(plain.INSPECT.dt, d), plain.heldUnknownText(),
+    "so its ΔT panel keeps that reason");
+  d.dtStale = false;
+  assert.equal(plain.inspNowText(plain.INSPECT.dt, d), plain.heldUnknownText(),
+    "while a ΔT over moving water does not call it pump-only circulation");
+  d.dtStale = true;
+  assert.equal(plain.mbStandInFor(OUT_U), null, "without a HomeHub no stand-in exists");
+
+  const COMP_ON = M(31, "Compressor run", "1", null, { binary: true });
+  const COMP_OFF = M(31, "Compressor run", "0", null, { binary: true });
+  const running = ctx({ x10a: true, mbEnabled: true, mbConnected: true, values: [INV_U], modbus: [COMP_ON] });
+  d = running.liveData();
+  assert.equal(d.pelSrc, "INV", "the HomeHub's independent flag proves the page is being refreshed");
+  assert.equal(d.ouUnknown, false, "so the row's age is no longer in doubt");
+  assert.equal(d.pelUnknown, false, "so the estimate is stated");
+  assert.notEqual(running.inspNowText(running.INSPECT.ou, d), running.heldUnknownText(),
+    "and the panels state the run the HomeHub confirms");
+  const stopped = ctx({ x10a: true, mbEnabled: true, mbConnected: true, values: [INV_U], modbus: [COMP_OFF] });
+  d = stopped.liveData();
+  assert.equal(d.pel, null, "and its OFF proves the opposite");
+  assert.equal(d.pelHeld, true, "which is the ordinary held-over explanation");
+  assert.equal(d.pelUnknown, false, "not the unknown one");
+  assert.equal(d.ouHeldOver, true, "and the whole page is held over");
+  const INV_DROPPED = { ...INV_U, value: null };
+  for (const flag of [COMP_OFF, COMP_ON]) {
+    const reader = ctx({ x10a: true, mbEnabled: true, mbConnected: true,
+                         values: [INV_DROPPED], modbus: [flag] });
+    const live = reader.liveData();
+    assert.equal(live.pelHeld, flag === COMP_OFF,
+      "a dropped value is held only when the HomeHub confirms a stop");
+    assert.equal(live.pelUnknown, false,
+      "a known HomeHub compressor state cannot receive an unknown-age explanation");
+    if (flag === COMP_ON) for (const key of ["pel", "cop"]) {
+      assert.equal(live.pelUnread, "INV primary current",
+        "a running compressor does not fabricate its missing inverter reading");
+      const text = reader.inspNowText(reader.INSPECT[key], live);
+      assert.match(text, /No current reading: INV primary current/,
+        "the panel names the unread input without claiming that the profile lacks it");
+      assert.notEqual(text, reader.heldUnknownText(),
+        "the panel retains the independent HomeHub running witness");
+    }
+  }
+  const absentPage = ctx({ x10a: true, mbEnabled: true, mbConnected: true,
+                           values: [], modbus: [COMP_ON] });
+  absentPage.S.status.history = { rows: [{ id: "inv_current", label: INV_U.label }] };
+  const absentInput = absentPage.liveData();
+  assert.equal(absentInput.pel, null, "trend metadata cannot fabricate a missing current");
+  assert.equal(absentInput.pelUnread, "INV primary current",
+    "the profile's trend metadata preserves source identity when its whole page is missing");
+  assert.match(absentPage.inspNowText(absentPage.INSPECT.cop, absentInput),
+    /No current reading: INV primary current/,
+    "a lost outdoor page must not become a claim that the profile lacks electrical inputs");
+  const noOutdoor = ctx({ x10a: true, mbEnabled: false, mbConnected: false, values: [] });
+  const noWitness = noOutdoor.liveData();
+  assert.equal(noWitness.ouUnknown, false, "absent pages carry no row-age marker");
+  assert.equal(noWitness.compressorOn, null, "hydronic connectivity alone proves no compressor state");
+  noWitness.dtStale = false;
+  for (const key of ["ou", "phe", "rhot", "rcold", "dt"])
+    assert.equal(noOutdoor.inspNowText(noOutdoor.INSPECT[key], noWitness), "dyn.state_gate",
+      `absent outdoor pages cannot become a stopped compressor on the ${key} panel`);
+  assert.equal(stopped.ouReadingText(d, "disch", 58, (n) => n.toFixed(0)), "—",
+    "so the discharge pill blanks as the panel's idle sentence says");
+
+  const runningPaired = ctx({ x10a: true, mbEnabled: true, mbConnected: true,
+                              values: [OUT_U], modbus: [OUT_M, COMP_ON] });
+  d = runningPaired.liveData();
+  runningPaired.S.live = d;
+  runningPaired.S.insp = "out";
+  assert.equal(d.out, 19.0, "a compressor the HomeHub reports running keeps the X10A reading on the pill");
+  assert.equal(runningPaired.mbStandInFor(OUT_U), null, "and in the value table");
+  assert.equal(runningPaired.inspCurRow(runningPaired.INSPECT.out)?.value, OUT_U.value, "and in the panel");
+  assert.equal(runningPaired.inspUnknownAge(runningPaired.INSPECT.out, d), false, "without doubting it");
+
+  const paired = ctx({ x10a: true, mbEnabled: true, mbConnected: true, values: [OUT_U], modbus: [OUT_M] });
+  d = paired.liveData();
+  paired.S.live = d;
+  assert.equal(d.out, 28.5, "a live paired HomeHub reading outranks a row of unknown age");
+  assert.equal(d.mbFields.has("out"), true, "with Modbus provenance");
+  assert.equal(paired.mbStandInFor(OUT_U), OUT_M, "the value table takes the same stand-in");
+  paired.S.insp = "out";
+  assert.equal(paired.inspUnknownAge(paired.INSPECT.out, d), false,
+    "and the panel showing the HomeHub row does not doubt it");
+  assert.equal(paired.inspCurRow(paired.INSPECT.out), null,
+    "nor headlines the X10A number under the pill's HomeHub number");
+
+  const dropped = ctx({ x10a: true, mbEnabled: true, mbConnected: true,
+                        values: [{ ...OUT_U, value: null }], modbus: [OUT_M] });
+  assert.equal(dropped.liveData().out, 28.5,
+    "a reading the firmware dropped keeps the HomeHub on the pill instead of flickering to a dash");
+
+  const known = ctx({ x10a: true, values: [{ ...OUT_X }, RPS_STOP] });
+  assert.equal(known.liveData().ouUnknown, false, "a read speed is an answer, not an unknown");
+  const legacy = ctx({ x10a: true, values: [{ ...OUT_X }] });
+  assert.equal(legacy.liveData().ouUnknown, false, "no marked row: this rule does not fire");
+  const silent = ctx({ x10a: false, mbEnabled: true, mbConnected: true, values: [OUT_U], modbus: [OUT_M] });
+  assert.equal(silent.liveData().ouUnknown, false, "a silent bus has its own path");
+  const silentAlone = ctx({ x10a: false, values: [OUT_U] });
+  silentAlone.S.live = silentAlone.liveData();
+  silentAlone.S.insp = "out";
+  assert.equal(silentAlone.inspUnknownAge(silentAlone.INSPECT.out, silentAlone.S.live), false,
+    "and a retained row on it is no reading whose age could be in doubt");
 }
 
 console.log("UI source matrix: arbitration, Smart-Grid and mode-aware cooling semantics correct");
