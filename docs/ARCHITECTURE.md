@@ -293,9 +293,8 @@ and freezes it. The drain then offers it after every live hour as a short record
 
 Hourly diagnosis state grows by source, not by bucket. Each byte added to `CheckupBucket` or
 `DhwLossBucket` is held 24 times in `.noinit` (23 completed hours and the open one) and once per
-journal record. Restore reads one record at a time into the existing destination; it has no
-multi-record sector scratch (see Memory constraints). No other hourly diagnosis source exists yet.
-An observation that needs more hourly
+journal record, and 23 stored records must still fit the 4 KiB sector scratch (see Memory
+constraints). No other hourly diagnosis source exists yet. An observation that needs more hourly
 state must add one: one record per hour within `HISTORY_JOURNAL_PAYLOAD_BYTES`, with its own
 fingerprint, coverage clocks and late-completion replay. In RAM it keeps the open hour, the sum of
 its completed hours and a restore index bounded like `CHECKUP_JOURNAL_INDEX_CAP`, not like the

@@ -2340,6 +2340,54 @@
     "room_ring_reset": {
       "pattern": "^daik::logic::TrendRing::reset_with_gaps\\(unsigned\\ int\\)$",
       "max_bytes": 32
+    },
+    "checkup_detect_schema": {
+      "pattern": "^daik::checkup_reset_on_detect\\(",
+      "max_bytes": 128
+    },
+    "checkup_schema": {
+      "pattern": "^daik::logic::checkup_model_fingerprint\\(",
+      "max_bytes": 80
+    },
+    "checkup_schema_row": {
+      "pattern": "^daik::logic::checkup_schema_row_fingerprint\\(",
+      "max_bytes": 48
+    },
+    "checkup_schema_consumer": {
+      "pattern": "^daik::logic::checkup_consumes_row\\(",
+      "max_bytes": 32
+    },
+    "checkup_schema_adjudicated_view": {
+      "pattern": "^daik::logic::adjudicated\\(daik::logic::ProfileView",
+      "max_bytes": 80
+    },
+    "checkup_schema_adjudicated_row": {
+      "pattern": "^daik::logic::adjudicated\\(daik::ValueDef",
+      "max_bytes": 96
+    },
+    "checkup_schema_availability": {
+      "pattern": "^daik::availability_rule\\(",
+      "max_bytes": 32
+    },
+    "checkup_schema_rps": {
+      "pattern": "^daik::logic::ou_is_rps_witness\\(",
+      "max_bytes": 32
+    },
+    "checkup_schema_contains": {
+      "pattern": "^daik::logic::lwt_ci_contains\\(",
+      "max_bytes": 32
+    },
+    "checkup_schema_crc": {
+      "pattern": "^daik::logic::checkup_fp_u32\\(",
+      "max_bytes": 48
+    },
+    "checkup_schema_profile_lookup": {
+      "pattern": "^daik::def::lookup\\(",
+      "max_bytes": 48
+    },
+    "checkup_schema_profile_view": {
+      "pattern": "^daik::def::resolved\\(",
+      "max_bytes": 96
     }
   },
   "paths": {
@@ -6078,6 +6126,51 @@
       "multipliers": {},
       "base_bytes": 1536,
       "max_bytes": 5120
+    },
+    "poll_checkup_schema": {
+      "symbols": [
+        "poll_task",
+        "checkup_detect_schema",
+        "checkup_schema",
+        "checkup_schema_row",
+        "checkup_schema_consumer",
+        "checkup_schema_adjudicated_view",
+        "checkup_schema_adjudicated_row",
+        "checkup_schema_availability",
+        "checkup_schema_rps",
+        "checkup_schema_contains",
+        "checkup_schema_crc",
+        "checkup_schema_profile_lookup",
+        "checkup_schema_profile_view",
+        "cycling_seal",
+        "cycling_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "httpd_checkup_schema": {
+      "symbols": [
+        "config_hp",
+        "config_document",
+        "checkup_detect_schema",
+        "checkup_schema",
+        "checkup_schema_row",
+        "checkup_schema_consumer",
+        "checkup_schema_adjudicated_view",
+        "checkup_schema_adjudicated_row",
+        "checkup_schema_availability",
+        "checkup_schema_rps",
+        "checkup_schema_contains",
+        "checkup_schema_crc",
+        "checkup_schema_profile_lookup",
+        "checkup_schema_profile_view",
+        "cycling_seal",
+        "cycling_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
     }
   },
   "tasks": {
@@ -6126,7 +6219,8 @@
         "httpd_shutdown_env3_journal",
         "httpd_shutdown_env3_checkup",
         "httpd_mcp_health_number",
-        "httpd_direct_health_number"
+        "httpd_direct_health_number",
+        "httpd_checkup_schema"
       ]
     },
     "main": {
@@ -6242,7 +6336,8 @@
         "poll_board_journal",
         "poll_board_restore",
         "poll_board_restore_diagnostic",
-        "poll_board_restore_console"
+        "poll_board_restore_console",
+        "poll_checkup_schema"
       ]
     },
     "modbus": {
