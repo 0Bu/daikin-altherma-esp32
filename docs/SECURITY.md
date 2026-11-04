@@ -120,7 +120,7 @@ another offer. Source commit subjects selected for the public feed must contain 
 |---|---|
 | OTA receives unsigned/tampered data | Validation fails before boot selection; running slot remains selected. |
 | OTA boots a signed but broken candidate | Pending-image probation can roll back to the previous valid slot. |
-| Signed but older image | Manifest and embedded-version checks refuse it unless the caller explicitly requests a channel downgrade. |
+| Signed older image from a feed | Manifest and embedded-version checks refuse it unless the caller explicitly requests a channel downgrade. [Local dev uploads](#ota-image-signing) are a separate test path. |
 | Direct USB/Web Serial writes a bad image | No automatic rollback promise; prevent it with trusted signed artifacts and the flash guard. ROM USB recovery remains available. |
 
 A full `@flash_args` flash rewrites bootloader/table/otadata and writes `ota_0` directly. There is no

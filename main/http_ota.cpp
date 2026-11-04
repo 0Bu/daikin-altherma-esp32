@@ -94,8 +94,8 @@ static esp_err_t ota_check(httpd_req_t* req) {
 // POST /ota/update?after=...&channel=...&version=...&sha256=...[&downgrade=1] — atomically
 // consume one completed check's exact artifact lease and start its download.
 //
-// ?downgrade=1 is the channel switch, and the only way to install a build that is older than the
-// running one (dev -> the last release). It is a query FLAG rather than a body field on purpose and
+// For feed updates, ?downgrade=1 permits a build older than the running one (dev -> the last
+// release). It is a query FLAG rather than a body field on purpose and
 // passes through the host-tested query_flag_on, so ?downgrade=0 cannot mean the same thing as
 // ?downgrade=1. The permission travels with THIS POST only — it is never stored, so a later
 // automatic check can never inherit it — and it relaxes nothing but the version ordering
