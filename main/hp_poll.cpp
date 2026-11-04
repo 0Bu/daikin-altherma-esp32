@@ -270,9 +270,17 @@ static void refrigerant_service_record_poll_gap(uint32_t generation) {
                                                generation);
 }
 
-static void poll_once() {
+static void checkup_record_poll_gap(uint32_t generation, bool profile_confirmed = false) {
+    checkup_record(nullptr, 0, false, false, logic::CheckupCoverage{}, generation,
+                   checkup_consent_epoch(), profile_confirmed);
+}
+
+// Overlay sweep locals with the task's other branches instead of stacking both frames. The
+// target stack gate rejects an outlined sweep, including optimizer-generated clones.
+[[gnu::always_inline]] inline static void poll_once() {
+    const uint32_t consent_epoch    = checkup_consent_epoch();
     const uint32_t cycle_generation = hp_poll_generation();
-    const Config& c    = config();
+    const Config&  c                = config();
     // The task-level branch is advisory: /detect can switch a concrete profile to "auto" after
     // that decision but before this function captures its own stable config snapshot. Refuse that
     // stale entry before profile lookup or UART work; a later switch is caught by the generation
@@ -315,7 +323,7 @@ static void poll_once() {
     // reserved pins, so this is a belt-and-braces guard rather than the common path.)
     if (!hp_uart_init(c.rx_pin, c.tx_pin)) {
         retire_saturation_witness();
-        checkup_record(nullptr, 0, false, false, checkup_coverage, cycle_generation);
+        checkup_record(nullptr, 0, false, false, checkup_coverage, cycle_generation, consent_epoch);
         dwell_record(nullptr, 0, cycle_generation); // a cycle went by unread: blind, not unchanged
         char eb[48];
         snprintf(eb, sizeof(eb), "UART init failed (rx=%d tx=%d)", c.rx_pin, c.tx_pin);
@@ -547,7 +555,7 @@ static void poll_once() {
     // state is handed over rather than re-derived, so the checkup and the held-over marking above
     // can never disagree about whether the unit was running.
     checkup_record(fresh.data(), fresh.size(), rps_known, rps_running, checkup_coverage,
-                   cycle_generation);
+                   cycle_generation, consent_epoch);
 
     // And how long each switched row has read what it reads (logic/state_dwell.hpp). Here for
     // the reasons above and one of its own: a row that did not answer is simply ABSENT from
@@ -881,7 +889,7 @@ static void poll_task(void*) {
             retire_saturation_witness();
             s_network_quiesced.store(true, std::memory_order_release);
             const uint32_t generation = hp_poll_generation();
-            checkup_record(nullptr, 0, false, false, logic::CheckupCoverage{}, generation, false);
+            checkup_record_poll_gap(generation);
             dwell_record(nullptr, 0, generation);
             refrigerant_service_record_poll_gap(generation);
             esp_task_wdt_reset();  // explicit on the held path; keep this true if code moves above it
@@ -929,7 +937,7 @@ static void poll_task(void*) {
                 // Deliberately here rather than beside history_record_board() above — a resolved
                 // profile must be fed by poll_once() alone, or two samples would share one instant.
                 const uint32_t generation = hp_poll_generation();
-                checkup_record(nullptr, 0, false, false, logic::CheckupCoverage{}, generation);
+                checkup_record_poll_gap(generation, true);
                 // Same argument one feature over: a board whose X10A stops answering across a
                 // reboot would otherwise present the FROZEN pre-reboot state ages as current.
                 dwell_record(nullptr, 0, generation);
@@ -971,7 +979,7 @@ static void poll_task(void*) {
             // has already been logged. The bounded diagnostic ring does not allocate.
             s_cycles_skipped.fetch_add(1, std::memory_order_relaxed);
             const uint32_t generation = hp_poll_generation();
-            checkup_record(nullptr, 0, false, false, logic::CheckupCoverage{}, generation, false);
+            checkup_record_poll_gap(generation);
             dwell_record(nullptr, 0, generation);
             refrigerant_service_record_poll_gap(generation);
             if (failures.first_failure()) diag_printf("poll: cycle skipped (%s)\n", e.what());
@@ -979,7 +987,7 @@ static void poll_task(void*) {
             retire_saturation_witness();
             s_cycles_skipped.fetch_add(1, std::memory_order_relaxed);
             const uint32_t generation = hp_poll_generation();
-            checkup_record(nullptr, 0, false, false, logic::CheckupCoverage{}, generation, false);
+            checkup_record_poll_gap(generation);
             dwell_record(nullptr, 0, generation);
             refrigerant_service_record_poll_gap(generation);
             if (failures.first_failure()) diag_printf("poll: cycle skipped (oom?)\n");

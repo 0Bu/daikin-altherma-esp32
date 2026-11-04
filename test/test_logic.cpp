@@ -22098,9 +22098,12 @@ static void test_checkup_decoder_identity() {
     CHECK(checkup_model_fingerprint("generic", def::lookup_view("generic")) != 0);
     CHECK(checkup_profile_name_fingerprint(nullptr) == checkup_profile_name_fingerprint(""));
     CHECK(checkup_profile_name_fingerprint(a.profile_id) != model_a);
-    // CRC-zero preimage for method 6: a valid identity must reserve zero for refusal, even for
+    // CRC-zero preimage for method 7: a valid identity must reserve zero for refusal, even for
     // adversarial names. Update this witness deliberately when the evidence method changes.
-    CHECK(checkup_fixture_model("zero-fixture-\x2e\xd2\x77\x62") == 1);
+    const char* zero_profile = "zero-fixture-\x04\x45\xb8\xa8";
+    CHECK(config_crc32_final(checkup_fp_u32(checkup_profile_name_crc(zero_profile),
+                                            CHECKUP_EVIDENCE_METHOD_VERSION)) == 0);
+    CHECK(checkup_fixture_model(zero_profile) == 1);
     auto invalid       = a;
     invalid.profile_id = nullptr;
     CHECK(checkup_model_fingerprint(a.profile_id, invalid) == 0);
