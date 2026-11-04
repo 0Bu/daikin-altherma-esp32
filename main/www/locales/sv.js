@@ -1,4 +1,4 @@
-// translation-source: 5453eeaa5ecebfac9d729776d8b40e937dbfce10d0a431843b3f3298cd22a9ff
+// translation-source: 0453076e060746fab49e69b0c361605fc752f497de371724830903a4370462c3
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -940,7 +940,7 @@ I18N.sv = localeValues([
 ]);
 
 INSPECT_I18N.sv = inspectValues(
-  ["Ingen aktuell mätning:", "Kompressorn står; utomhusgivare som bara uppdateras i drift döljer gamla värden."],
+  ["Ingen aktuell mätning:", "Kompressorn står; utomhusgivare som bara uppdateras i drift döljer gamla värden.", "Kompressorvarvtalet kan inte läsas, så utomhusdelens värden kan vara från senaste drift."],
   [
     ["Driftläge", 0, "Inomhusenhetens läge; bevisar inte kompressor- eller vattendrift."], // status
     ["Uteklimat", "Uteklimat från ENV III", "ENV III mäter temperatur, fukt och tryck; placeringen avgör om värdet är uteluft."], // env3

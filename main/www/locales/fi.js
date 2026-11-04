@@ -1,4 +1,4 @@
-// translation-source: 5453eeaa5ecebfac9d729776d8b40e937dbfce10d0a431843b3f3298cd22a9ff
+// translation-source: 0453076e060746fab49e69b0c361605fc752f497de371724830903a4370462c3
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -1157,7 +1157,7 @@ MB_DELTA_I18N.fi = mbDeltaValues([
 ]);
 
 INSPECT_I18N.fi = inspectValues(
-  ["Ei nykyistä mittausta:", "kompressori on pysähtynyt ja ulkoyksikkö päivittää omia antureitaan vain käydessään. Edellisen käynnin arvo piilotetaan, ettei sitä näytetä nykyisenä mittauksena."],
+  ["Ei nykyistä mittausta:", "kompressori on pysähtynyt ja ulkoyksikkö päivittää omia antureitaan vain käydessään. Edellisen käynnin arvo piilotetaan, ettei sitä näytetä nykyisenä mittauksena.", "Kompressorin nopeutta ei voi lukea, joten ulkoyksikön arvot voivat olla edelliseltä käynniltä."],
   [
     ["Toimintatila", "Toimintatila", "Sisäyksikön tila. Se ei yksin vahvista kompressorin käyntiä tai virtaamaa."], // status
     ["ENV III", "ENV III -olosuhteet", "Liitetyn ENV III:n lämpötila, kosteus ja ilmanpaine. Sijoitus ratkaisee, kuvaavatko arvot sisä- vai ulko-olosuhteita."], // env3

@@ -361,10 +361,23 @@ assert.deepEqual(Array.from(S.hist.get("dt").v), [null, 60, 60],
 // That is not a two-phase installation and must never become a plausible partial input sum. Both
 // derived consumers follow the live card: fall back to the INV ring until every CT phase declared
 // by this snapshot is present; only a complete positive CT set owns the whole-unit boundary.
-const threeCtPhases = { ct_l1: true, ct_l2: true, ct_l3: true, inv_current: true };
+const threeCtPhases = { ct_l1: true, ct_l2: true, ct_l3: true, inv_current: true, comp_rps: true };
 assert.equal(h.DERIVED.pel.fn(
   { ct_l1: 10, ct_l2: 10, ct_l3: null, inv_current: 5 }, threeCtPhases), 1.15,
   "a withheld CT-L3 bucket must use INV current instead of publishing the L1+L2 partial sum");
+// Without a compressor-speed ring the firmware cannot store a held gap, so the inverter ring keeps
+// the last run's number at rest. A complete CT set is unaffected; the inverter input is refused.
+const noSpeedRing = { ct_l1: true, ct_l2: true, ct_l3: true, inv_current: true };
+assert.equal(h.DERIVED.pel.fn(
+  { ct_l1: 10, ct_l2: 10, ct_l3: null, inv_current: 5 }, noSpeedRing), null,
+  "an inverter ring without a speed ring must not be drawn as a live kilowatt");
+assert.equal(h.DERIVED.pel.fn(
+  { ct_l1: 10, ct_l2: 10, ct_l3: 10, inv_current: 5 }, noSpeedRing), 6.9,
+  "a complete CT set needs no speed ring");
+assert.equal(!!h.DERIVED.pel.ready({ inv_current: true }), false,
+  "a profile with only an inverter ring and no speed ring offers no electrical curve");
+assert.equal(!!h.DERIVED.pel.ready({ inv_current: true, comp_rps: true }), true,
+  "the inverter ring is offered beside a speed ring");
 assert.equal(h.DERIVED.pel.fn(
   { ct_l1: 10, ct_l2: 10, ct_l3: 10, inv_current: 5 }, threeCtPhases), 6.9,
   "a complete positive CT set remains the preferred whole-unit electrical estimate");

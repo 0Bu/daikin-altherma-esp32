@@ -1,4 +1,4 @@
-// translation-source: 5453eeaa5ecebfac9d729776d8b40e937dbfce10d0a431843b3f3298cd22a9ff
+// translation-source: 0453076e060746fab49e69b0c361605fc752f497de371724830903a4370462c3
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
@@ -939,7 +939,7 @@ I18N.zh = localeValues([
   /* hist.cop_none */ "CT 供电功率时不画 COP：所含负载取决于接线，而热功率止于 BUH 前且不含 BSH，电热边界可能不一致。",
 ]);
 INSPECT_I18N.zh = inspectValues(
-  ["无当前读数：", "压缩机已停；仅运行时更新的室外传感器会隐藏旧值。"],
+  ["无当前读数：", "压缩机已停；仅运行时更新的室外传感器会隐藏旧值。", "无法读取压缩机转速，室外机读数可能来自上次运行。"],
   [
     ["运行模式", "运行模式", "室内机模式；不能单独证明压缩机或水流运行。"], // status
     ["室外气象", "ENV III 室外气象", "ENV III 温湿度和气压；位置决定是否代表室外。"], // env3

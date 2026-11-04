@@ -5,19 +5,41 @@
 // missing tank/room sensor hides that schematic part entirely (.no-dhw/.no-room). The DOM is
 // static (index.html) and updated in place: an innerHTML rebuild like #valueGroups' would restart
 // the CSS flow animations on every poll.
-const vRow = (re) => (S._values || []).find((x) => re.test(x.label || "") && x.value != null);
-const vRowGroup = (re, group) => (S._values || []).find((x) =>
-  re.test(x.label || "") && x.x10a_group === group && x.value != null);
-const vNum = (re) => { const r = vRow(re); if (!r) return null; const n = parseFloat(r.value); return Number.isFinite(n) ? n : null; };
+//
+// A pattern names ONE row. The row that row has no value this sweep reads as absent; it never falls
+// through to the next row the pattern happens to match, because that row is another instrument under
+// a label the reader takes for this one. tools/presenter/presenter_parity.mjs holds every pattern to
+// one row on every detectable profile, so a catalog change cannot reintroduce the choice.
+const vRow = (re) => {
+  const r = (S._values || []).find((x) => re.test(x.label || ""));
+  return r && r.value != null ? r : undefined;
+};
+const vRowGroup = (re, group) => {
+  const r = (S._values || []).find((x) => re.test(x.label || "") && x.x10a_group === group);
+  return r && r.value != null ? r : undefined;
+};
+const vNum =(re) => { const r = vRow(re); if (!r) return null; const n = parseFloat(r.value); return Number.isFinite(n) ? n : null; };
 // Bit-flag values arrive as numeric 1/0 (logic/convert.hpp conv 300-307). null = row absent.
 const vOn = (re) => { const r = vRow(re); return r ? String(r.value).trim() === "1" : null; };
 
 // Page 0x20 / offset 2 across the supported model catalog. The sensor's physical role is stable
 // while Daikin's labels are not: ordinary air-source units call it the outdoor heat exchanger,
 // other families call the same location a deicer or two-phase thermistor. Keep the alternatives
-// exact so "Heat exchanger mid-temp." at offset 8 can never substitute for this R4T curve.
-const OUTDOOR_HX_RE = /^(?:2 phase thermistor \(R4T\)|O\/U Heat Exch\. Temp\.(?:\(R4T\))?|O\/U Heat Exchanger Temp|Outdoor heat exchanger temp\.|R4T-Deicer temp\.)$/i;
+// exact so "Heat exchanger mid-temp." at offset 8 can never substitute for this R4T curve, and the
+// second outdoor unit's "Outdoor heat exchanger temp." on page 0xA0 can never stand in for it.
+const OUTDOOR_HX_RE = /^(?:2 phase thermistor \(R4T\)|O\/U Heat Exch\. Temp\.(?:\(R4T\))?|O\/U Heat Exchanger Temp|R4T-Deicer temp\.)$/i;
 const ROOM_TEMP_RE = /^(?:indoor ambient temp|RT Temp\.$)/i;
+
+// The refrigerant high side is one row per profile, and the firmware names it: /status.history's
+// `circuit_pressure` trend resolves the same structural rule as the refrigerant service
+// (logic/history.hpp trend_select_high_side). A browser pattern cannot make that choice, because the
+// 0x62/15 row is spelled alike on profiles where it is a sensor and on those where the installer
+// guides document no such sensor. Null when this profile charts no high side.
+const highSideRow = () => {
+  const entry = (S.status?.history?.rows || []).find((r) => r.id === "circuit_pressure");
+  const row = entry && (S._values || []).find((x) => x.label === entry.label);
+  return row && row.value != null ? row : null;
+};
 
 // The outdoor unit's OWN register pages — logic/ou_stale.hpp's ou_page_holds_over(), transcribed:
 // 0x20 (outdoor sensors) and 0x21 (inverter) are only refreshed while the compressor runs, so with
@@ -233,9 +255,7 @@ function liveData() {
     flow: vNum(/flow sensor/i),
     wp: vNum(/^water pressure$/i),
     rps: vNum(/inv frequency/i),
-    hp: vNum(/^high pressure$/i),
     lp: vNum(/^low pressure$/i),
-    rp: vNum(/^refrigerant pressure sensor$/i),
     disch: vNum(/discharge pipe temp/i),
     eev: vNum(/expansion valve ?1/i),
     r2t: postBuh && Number.isFinite(parseFloat(postBuh.value)) ? parseFloat(postBuh.value) : null,
@@ -324,35 +344,34 @@ function liveData() {
   // dead-bus rule ("an idle plant with no readings, not a stale one"), applied to one sleeping unit.
   // A held-over 19.0 °C is exactly the legacy-35–legacy-39 shape: well-formed, plausible, and false — and it is
   // what made an idle plant look like a running one next to a "not running" headline.
-  // UNKNOWN rps (a profile with no such row) reads as CURRENT, never as held over: that is absence
-  // of evidence, and blanking on a guess would cost a reading that may well be live.
   d.ouHeldOver = d.rps != null && d.rps === 0;
+  // The third answer: the firmware marks these pages `held_unknown` in a sweep without a readable
+  // speed (logic/ou_stale.hpp), on a profile without that row for good. That is absence of evidence
+  // either way. A reading stays drawn, because blanking on a guess would cost one that may well be
+  // live; only the inspector says it may be old, and anything DERIVED from it is refused below.
+  d.ouUnknown = d.rps == null && (S._values || []).some((x) => x.held_unknown === true);
   // X10A's outdoor-air row is held over at rest, but the independently polled HomeHub register can
   // continue changing. Prefer that register value to a blank pill, while retaining ouHeldOver so every
   // other page-0x20/0x21 value (notably discharge temperature) is still withheld. The pairing is the
   // firmware's structural concept, never a browser label guess; a missing/disconnected HomeHub still
-  // leaves the ordinary "—" behaviour intact.
+  // leaves the ordinary "—" behaviour intact. A row of unknown age takes the same stand-in: a reading
+  // known to be current outranks one that may not be.
   const takeMb = (key, cid) => {
     const r = mbByConcept(cid);
     if (!r) return;
     const n = parseFloat(r.value);
     if (Number.isFinite(n)) { d[key] = n; d.mbFields.add(key); }
   };
-  if (d.ouHeldOver) takeMb("out", "outdoor_air");
-  // Circuit refrigerant pressure for the schematic's high-side badge. The outdoor unit's own High
-  // Pressure transducer (reg 0x20) reads 0 bar while the compressor is off — but a sealed R32 circuit
-  // use exact 0.0 as an absent value, so publishing it paints a live-looking fault. Fall back to the
-  // always-live Refrigerant pressure sensor (reg 0x62/15), which reports the real equalised system
-  // pressure at rest (~14 bar for R32 near 20 °C). When the compressor runs, High Pressure is the true
-  // discharge pressure and wins. Neither present (17 profiles carry no pressure row) → null → "—".
-  // Gated on ouHeldOver too: this unit reads 0 bar at rest so the fallback already fires, but a unit
-  // whose 0x20 freezes at a NON-zero pressure would otherwise show that stale bar as the live one.
-  // The chosen ROW is kept, not just its number: the inspector names it as the source line beside the
-  // headline, so picking the pill's number here and the pill's source there would let the two drift
-  // into naming High Pressure while showing the refrigerant sensor's bar.
-  d.circPRow = (!d.ouHeldOver && d.hp != null && d.hp > 0 ? vRow(/^high pressure$/i)
-                                                          : vRow(/^refrigerant pressure sensor$/i)) || null;
-  d.circP = !d.ouHeldOver && d.hp != null && d.hp > 0 ? d.hp : d.rp;
+  if (d.ouHeldOver || d.ouUnknown) takeMb("out", "outdoor_air");
+  // Circuit refrigerant pressure for the schematic's high-side badge: the row the chart and the
+  // refrigerant service read (highSideRow). On a profile whose high side is the outdoor 0x20/12
+  // transducer the pill is blank at rest, since that page holds over and no other row is a sensor for
+  // it. A sealed R32 circuit uses exact 0.0 as an absent value, so that blanks too rather than paint a
+  // live-looking fault. The ROW is kept with its number: the inspector names it beside the headline.
+  const hsRow = highSideRow();
+  const hsBar = hsRow && !rowHeldOver(hsRow, d) ? parseFloat(hsRow.value) : NaN;
+  d.circPRow = hsBar > 0 ? hsRow : null;
+  d.circP = hsBar > 0 ? hsBar : null;
   // ΔT is a WORKING POINT across the exchanger — it needs water moving to mean anything. With the
   // pump off, R1T and R4T are two stagnant sensors cooling at different rates, and their difference
   // (measured: 14.6 K on a plant idle for an hour) is not a small ΔT, it is no ΔT at all. Decided
@@ -377,7 +396,10 @@ function liveData() {
   // amps as a live kW figure right beside the "not running" headline: plausible, well-formed, false
   // — the legacy-35–legacy-39 shape, and the same reason d.circP already gates. Asserted against the whole
   // catalog by logic/ou_stale.hpp's test (which page each of these two rows lives on).
-  const invLive = !d.ouHeldOver && inv != null;
+  // A row of unknown age is refused for the same reason unless the HomeHub's independent flag says
+  // the compressor runs. Unlike a reading under its own name, a kW figure is a claim built on the row,
+  // and on every profile without a speed row this inverter current is the only electrical source.
+  const invLive = !d.ouHeldOver && inv != null && (!d.ouUnknown || d.compressorOn === true);
   const ctLive  = ctComplete && ct > 0;
   d.pel = ctLive ? ct * 230 / 1000 : invLive ? inv * 230 / 1000 : null;
   // NULL when neither source is usable — the third state the old two-way expression could not say.
@@ -385,8 +407,12 @@ function liveData() {
   d.pelSrc = ctLive ? "CT" : invLive ? "INV" : null;
   // Why the pill is blank, when it is: the INV source EXISTS but is frozen, which is a different
   // statement from "this profile has no current sensor" (the sub-label's other empty case) — so the
-  // sub-label stays silent here and the explainer says which of the two it is.
-  d.pelHeld = d.pel == null && d.ouHeldOver && inv != null;
+  // sub-label stays silent here and the explainer says which of the two it is. With the speed unread
+  // it is a third statement again: the source exists and may be frozen, or (the HomeHub says the
+  // compressor is off) it is.
+  const invRowExists = (S._values || []).some((x) => /inv primary current/i.test(x.label || ""));
+  d.pelHeld = d.pel == null && inv != null && (d.ouHeldOver || (d.ouUnknown && d.compressorOn === false));
+  d.pelUnknown = d.pel == null && !d.pelHeld && d.ouUnknown && invRowExists;
   // ── WHICH COP this quotient is, and when it is none ─────────────────────────────────────────
   // Transcribed from logic/cop_scope.hpp's cop_plan() — same branches, same order, so a change
   // there is visibly a change here (test_cop_scope gates the rule against the whole catalog).
@@ -449,6 +475,7 @@ function liveData() {
                           "sgSrc", "mbFields"]);
     Object.keys(d).forEach((k) => { if (!KEEP.has(k)) d[k] = null; });
     d.ouHeldOver = false;         // nothing to hold over: the whole bus is silent, not one unit
+    d.ouUnknown = false;
     MB_PAIRS.forEach((p) => takeMb(p.fld, p.cid));
     // The HomeHub MEASURES the electrical input; X10A has no such row and the dashboard estimates it
     // from CT clamps at an assumed 230 V. So on this path the figure is better than usual, and it is
@@ -906,7 +933,7 @@ const INSPECT = {
               de: "Standby — der Verdichter steht, daher findet kein aktiver Heiz- oder Kühltransfer statt. X10A aktualisiert die eigenen Sensoren der Außeneinheit im Stillstand nicht mehr; die Außentemperatur stammt deshalb aus dem HomeHub-Modbus-Register, die Heißgastemperatur bleibt „—“. Das Register wird erfolgreich gelesen, trägt aber keinen Quellzeitstempel; das Alter der zugrunde liegenden Messung ist daher unbekannt." }
           : { en: "Idle — the compressor is stopped, so no active heating or cooling transfer is taking place. The outdoor unit also stops refreshing its own sensors while it rests, so outdoor air and discharge temperature read \"—\" rather than repeat the last run's values.",
               de: "Standby — der Verdichter steht, daher findet kein aktiver Heiz- oder Kühltransfer statt. Die Außeneinheit aktualisiert im Stillstand auch ihre eigenen Sensoren nicht mehr; Außenluft und Heißgastemperatur zeigen daher „—“ statt die Werte des letzten Laufs zu wiederholen." },
-    rows: [/outdoor air/i, OUTDOOR_HX_RE, /inv frequency/i, /^high pressure$/i, /discharge pipe temp/i, /expansion valve ?1/i, /defrost operation/i],
+    rows: [/outdoor air/i, OUTDOOR_HX_RE, /inv frequency/i, highSideRow, /discharge pipe temp/i, /expansion valve ?1/i, /defrost operation/i],
   },
   comp: {
     t: { en: "Compressor", de: "Verdichter" },
@@ -936,19 +963,17 @@ const INSPECT = {
   // is to say which sensor it came from. Each still lists the other as a member row, since they do
   // describe one point in the circuit.
   hp: {
-    // The pill draws d.circP — the compressor's own HP transducer while it runs, the always-live
-    // refrigerant sensor at rest — so the headline must resolve THE SAME row, not the HP row on
-    // principle. Reading the HP row here showed the idle unit's stale/zero bar next to a pill
-    // reading the real equalised pressure, and named a source the number had not come from.
-    pick: () => (S.live ? S.live.circPRow : null),
+    // The pill draws d.circP from this profile's one high-side row, so the headline resolves THE SAME
+    // row. It stays selected while held over, so that the panel can say why the pill is blank.
+    pick: highSideRow,
     t: { en: "High pressure", de: "Hochdruck" },
     sample: "High pressure",
-    rows: [/^high pressure$/i, /^refrigerant pressure sensor$/i, /discharge pipe temp/i],
+    rows: [highSideRow, /discharge pipe temp/i],
   },
   disch: {
     t: { en: "Discharge temperature", de: "Heißgastemperatur" },
     re: /discharge pipe temp/i, sample: "Discharge pipe temp.",
-    rows: [/discharge pipe temp/i, /^high pressure$/i],
+    rows: [/discharge pipe temp/i, highSideRow],
     // Keep the last run visible as a curve while the compressor rests. The current 0x20 reading is
     // intentionally withheld then because the outdoor unit only repeats its held-over value, but
     // the history ring preserves the samples that were genuinely measured during operation.
@@ -1575,22 +1600,38 @@ const HELD_OVER_NOW = {
     en: "the compressor is stopped, and the outdoor unit only refreshes its own sensors while it runs. The last run's value is withheld rather than shown as if it were being measured now.",
     de: "der Verdichter steht, und die Außeneinheit aktualisiert ihre eigenen Fühler nur im Betrieb. Der Wert des letzten Laufs wird zurückgehalten statt als gerade gemessen dargestellt.",
   },
+  // The third answer, which keeps its number: the pill cannot say the number may be old without
+  // becoming a second, dimmer class of reading, so the panel has to. One sentence, because it also
+  // explains the withheld electrical estimate and COP, and this copy lands in every locale's flash.
+  unknown: {
+    en: "The compressor speed cannot be read, so the outdoor unit's readings may be from the last run.",
+    de: "Die Verdichterdrehzahl ist nicht lesbar, daher können die Werte der Außeneinheit vom letzten Lauf stammen.",
+  },
 };
 // A held X10A row is still unavailable, but it is no longer a blank headline when the drawing has
 // substituted a live HomeHub reading for this target. In that case the inspector names the Modbus
 // row and must not append a contradictory "No current reading" note.
 const inspHeld = (e, d) => !!d && rowHeldOver(inspRow(e), d) && !mbForInspect(S.insp);
 const inspHeldHtml = (e, d) => {
+  if (inspUnknownAge(e, d)) return heldUnknownNoteHtml();
   if (!inspHeld(e, d)) return "";
   const localized = INSPECT_I18N[LANG]?.held;
   return descNoteHtml(localized?.lead || tx(HELD_OVER_NOW.lead),
                       localized?.why || tx(HELD_OVER_NOW.why));
 };
+const inspUnknownAge = (e, d) => {
+  const r = inspRow(e);
+  return !!d && !!r && r.held_unknown === true && !mbForInspect(S.insp);
+};
+const heldUnknownText = () => INSPECT_I18N[LANG]?.held_unknown || tx(HELD_OVER_NOW.unknown);
+// One note for the panel and the value table, which both state a reading of unknown age as a number.
+const heldUnknownNoteHtml = () => descNoteHtml("", heldUnknownText());
 
 // The live sentence above the timeless description — dropped entirely while the reading is held
 // over, where the note below the description answers instead.
 const inspNowText = (e, d) => {
   if (!d || inspHeld(e, d)) return null;
+  if (d.pelUnknown && (e.i18nKey === "pel" || e.i18nKey === "cop")) return heldUnknownText();
   return (e.now || INSPECT_I18N[LANG]?.[e.i18nKey]?.now) ? inspFieldText(e, "now", d) : null;
 };
 
@@ -1644,7 +1685,8 @@ function inspectSig(e) {
   // happens to be spelled identically in both dictionaries.
   return [LANG, S.insp, inspTitleText(e, d), inspVal(row, d), inspectModbusSignature(fb),
           d && e.head ? e.head(d) : "",
-          inspNowText(e, d) || "", inspHeld(e, d) ? "held" : "", rows, roomSig].join("|");
+          inspNowText(e, d) || "", inspHeld(e, d) ? "held" : "",
+          inspUnknownAge(e, d) ? "unknown_age" : "", rows, roomSig].join("|");
 }
 
 // The trend under the inspector: the same chart the value list draws. A resolved X10A row chooses

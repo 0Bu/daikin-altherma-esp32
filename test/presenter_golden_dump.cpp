@@ -19,6 +19,8 @@
 // or structural trap.
 #include "def/overlay.hpp"
 #include "def/registry.hpp"
+#include "def/signatures.hpp"      // is_detection_model
+#include "logic/availability.hpp"  // row_publishable
 #include "logic/conv_override.hpp" // adjudicated() — the row AS PUBLISHED, label override included
 #include "logic/cop_scope.hpp"
 #include "logic/label_override.hpp"
@@ -132,6 +134,20 @@ int main() {
         }
     }
     for (const auto& e : seen) emit_row(e.first, e.second);
+
+    // ── Each detectable profile's rows, as /values serves them ─────────────────────────────────
+    // What the parity gate holds the browser's label patterns against: one pattern, one row.
+    for (const auto& p : def::profiles) {
+        if (!def::is_detection_model(p.id)) continue;
+        const auto v = def::resolved(p);
+        for (size_t i = 0; i < v.count(); i++) {
+            if (!row_publishable(v[i])) continue;
+            const ValueDef row = adjudicated(v, i);
+            require_clean(row.label);
+            std::printf("PROFILEROW\t%s\t%u\t%u\t%s\n", p.id, static_cast<unsigned>(row.reg),
+                        static_cast<unsigned>(row.offset), row.label);
+        }
+    }
     // A COLLAPSE guard, deliberately not a pin: the catalog produces 179 distinct (label, register)
     // pairs today and gaining one is routine, so an equality here would fail on every generator run
     // and teach the reader to re-baseline it without looking. What must never happen quietly is the

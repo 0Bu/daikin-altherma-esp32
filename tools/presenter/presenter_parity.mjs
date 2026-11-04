@@ -43,7 +43,7 @@ try {
   vm.runInContext(
     SOURCE +
       "\nthis.__api = { lwtIsPreBuh, lwtIsMeasurement, rwtIsR4t, rwtIsMeasurement, isPostBuhRow, copPlan, OU_HELD_PAGES," +
-      " lwtRow, rwtRow, postBuhRow, vLwt, vRwt };",
+      " lwtRow, rwtRow, postBuhRow, vLwt, vRwt, vRow, OUTDOOR_HX_RE, ROOM_TEMP_RE };",
     context, { filename: "main/www/app.sources" });
 } catch (e) {
   // A renamed or inlined-away rule lands here as a bare ReferenceError. Say what it means instead of
@@ -75,6 +75,7 @@ const lines = fs.readFileSync(goldenPath, "utf8").split("\n");
 const fails = [];
 const counts = { ROW: 0, PICK: 0, COP: 0 };
 const picks = new Map();   // case id -> rows, in the order the dumper emitted them
+const profileRows = new Map();   // detectable profile -> its publishable rows
 
 const bad = (kind, subject, field, want, got) =>
   fails.push(`${kind} ${JSON.stringify(subject)} — ${field}: C++ says ${want}, browser says ${got}`);
@@ -144,6 +145,12 @@ for (const raw of lines) {
       counts.COP++;
       break;
     }
+    case "PROFILEROW": {
+      const [, profile, reg, off, label] = f;
+      if (!profileRows.has(profile)) profileRows.set(profile, []);
+      profileRows.get(profile).push({ reg: Number(reg), off: Number(off), label });
+      break;
+    }
     default:
       console.error(`presenter_parity: unknown record type ${JSON.stringify(f[0])}`);
       process.exit(2);
@@ -177,12 +184,56 @@ if (ui.vLwt && ui.vLwt() !== null) {
 }
 context.S._values = [];
 
+// A pattern names one row: a matching row without a value reads as absent, and the next match is
+// another instrument the reader would take for this one.
+context.S._values = [
+  { label: "Outdoor air temp.", reg: 0x20, value: null, unit: "°C" },
+  { label: "Outdoor air temp.", reg: 0x54, value: "5.0", unit: "°C" }
+];
+if (ui.vRow(/outdoor air/i) !== undefined) {
+  bad("PICK_NULL", "vrow-null", "vRow must not fall through to the next row with a value", "undefined", ui.vRow(/outdoor air/i)?.reg);
+}
+context.S._values = [];
+
+// ── One pattern, one row, on every detectable profile ──────────────────────────────────────────
+// vRow reads one row, so a pattern that matches two would silently ignore the second, or read it
+// whenever the first is missing from a sweep. The patterns come from the production source, because
+// a list kept here would stop covering a pattern the moment one was added there. Each entry below
+// is a pattern that matches several rows on purpose, with the reason it is not a substitution.
+const SEVERAL_ROWS = new Map([
+  // The status panel lists the first code; faultValue() is what reads both controllers.
+  ["/(error|fault) code/i", "each controller carries its own Error Code"],
+  // Only reached through vRowGroup, which pins the page group.
+  ["/thermostat on/i", "the group qualifier selects the row"],
+  // The electrical panel lists the first phase beside the estimate, which sums the complete set.
+  ["/current measured by ct/i", "the three phases of one clamp set"],
+]);
+const schematic = readAppFragments(["schematic.js"]);
+const patterns = new Map();
+const literal = /\/(?:\\.|[^/\\\n])+\/[a-z]*/g;
+const addPattern = (text) => {
+  const end = text.lastIndexOf("/");
+  patterns.set(text, new RegExp(text.slice(1, end), text.slice(end + 1)));
+};
+for (const m of schematic.matchAll(/\b(?:vNum|vOn|vRow|vRowGroup|stateOf)\(\s*(\/(?:\\.|[^/\\\n])+\/[a-z]*)/g)) addPattern(m[1]);
+for (const m of schematic.matchAll(/\b(?:re|sel):\s*(\/(?:\\.|[^/\\\n])+\/[a-z]*)/g)) addPattern(m[1]);
+for (const m of schematic.matchAll(/\brows:\s*\[([^\]]*)\]/g)) (m[1].match(literal) || []).forEach(addPattern);
+addPattern(String(ui.OUTDOOR_HX_RE));
+addPattern(String(ui.ROOM_TEMP_RE));
+for (const [text, regex] of patterns) {
+  if (SEVERAL_ROWS.has(text)) continue;
+  for (const [profile, rows] of profileRows) {
+    const places = new Set(rows.filter((r) => regex.test(r.label)).map((r) => `0x${r.reg.toString(16)}/${r.off}`));
+    if (places.size > 1) bad("ONE_ROW", text, profile, "at most one row", [...places].join(" "));
+  }
+}
+
 // A vector file that produced no comparisons passes every assertion above. Refuse it: "no vectors
 // found" must never read as "the two copies agree", which is the one thing a parity gate exists to
 // establish.
-if (counts.ROW === 0 || counts.PICK === 0 || counts.COP === 0) {
+if (counts.ROW === 0 || counts.PICK === 0 || counts.COP === 0 || profileRows.size < 30 || patterns.size < 25) {
   console.error(`presenter_parity: incomplete vector file (rows=${counts.ROW} picks=${counts.PICK} ` +
-                `cop=${counts.COP}) — every family must be exercised`);
+                `cop=${counts.COP} profiles=${profileRows.size} patterns=${patterns.size}) — every family must be exercised`);
   process.exit(2);
 }
 
@@ -197,4 +248,5 @@ if (fails.length) {
 }
 
 console.log(`presenter parity OK: ${counts.ROW} catalog/adversarial rows, ${counts.PICK} ordering ` +
-            `cases, ${counts.COP} COP-scope combinations agree`);
+            `cases, ${counts.COP} COP-scope combinations agree; ${patterns.size} label patterns name ` +
+            `one row each on ${profileRows.size} profiles`);

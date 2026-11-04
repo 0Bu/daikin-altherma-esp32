@@ -1,4 +1,4 @@
-// translation-source: 5453eeaa5ecebfac9d729776d8b40e937dbfce10d0a431843b3f3298cd22a9ff
+// translation-source: 0453076e060746fab49e69b0c361605fc752f497de371724830903a4370462c3
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -940,7 +940,7 @@ I18N.nb = localeValues([
 ]);
 
 INSPECT_I18N.nb = inspectValues(
-  ["Ingen aktuell måling:", "kompressoren står, og utedelen oppdaterer bare egne sensorer når den går. Siste syklus skjules, så den ikke vises som fersk."],
+  ["Ingen aktuell måling:", "kompressoren står, og utedelen oppdaterer bare egne sensorer når den går. Siste syklus skjules, så den ikke vises som fersk.", "Kompressorhastigheten kan ikke leses, så utedelens verdier kan være fra siste syklus."],
   [
     ["Driftsmodus", 0, "Innedelens modus; bekrefter ikke alene kompressor eller vannmengde."], // status
     ["Uteklima", "Uteklima fra ENV III", "Temperatur, fuktighet og trykk fra ENV III; plasseringen avgjør om verdien er uteluft."], // env3
