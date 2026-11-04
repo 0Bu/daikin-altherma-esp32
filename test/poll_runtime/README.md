@@ -9,7 +9,7 @@ tallies, saturation carry, tickets and the boot capture budget do not leak betwe
   Its mutation removes the profile context and must reproduce the old scale failure.
 
 - `oom_raii` keeps the original seven task iterations, real reserve/copy allocation failures,
-  cache aging, quiescence, recovery and mutex-unwind checks and their six semantic controls.
+  cache aging, quiescence, recovery and mutex-unwind checks and their semantic controls.
 - Detection cases feed the real `poll_detect()` with independent adapter sweeps: adjacent agreeing
   incomplete results, silence, no-match, changed representatives and an in-flight generation change.
   A real allocator failpoint after an allocation-free result return targets the production profile
