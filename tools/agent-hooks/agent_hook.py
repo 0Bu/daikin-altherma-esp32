@@ -270,7 +270,7 @@ def shell_mentions_sensitive_env(command: str) -> bool:
 def shell_injects_credential_wrapper(command: str) -> bool:
     # A separately proven literal source search does not invoke the wrapper. Keep the later
     # credential-path and environment checks active rather than exempting the whole command.
-    if literal_rg_inspection(command):
+    if literal_rg_inspection(command) or literal_source_metadata_inspection(command):
         return False
     normalized = normalize_ansi_c_quotes(command).replace("\n", " ; ")
     try:
@@ -1447,6 +1447,32 @@ def read_only_ota_git_inspection(tokens: list[str]) -> bool:
     return True
 
 
+def literal_source_metadata_inspection(command: str) -> bool:
+    """Recognize plain checksums/stat, without executing a named source or following check files."""
+    if re.search(r"[;$`|&<>\\\r\n]", command):
+        return False
+    try:
+        tokens = shlex.split(command, posix=True)
+    except ValueError:
+        return False
+    if not tokens or tokens[0] not in {"shasum", "/usr/bin/shasum", "sha256sum", "/usr/bin/sha256sum",
+                                       "stat", "/usr/bin/stat"}:
+        return False
+    executable, args = Path(tokens[0]).name, tokens[1:]
+    if executable == "shasum" and args[:3] == ["-a", "256", "--"]:
+        paths = args[3:]
+    elif executable == "sha256sum" and args[:1] == ["--"]:
+        paths = args[1:]
+    elif executable == "stat" and len(args) >= 4 and args[0] in {"-f", "-c"} and args[2] == "--" \
+            and re.fullmatch(r"[%A-Za-z0-9_ .:/-]+", args[1]):
+        paths = args[3:]
+    else:
+        return False
+    return bool(paths) and all(re.fullmatch(r"[A-Za-z0-9_./-]+", path) is not None and
+                               not path.startswith("-") and ".." not in Path(path).parts
+                               for path in paths)
+
+
 def read_only_gate_inspection(command: str) -> bool:
     """Allow source inspection to name the gate without allowing an execution wrapper."""
     # Session coordination only needs PIDs. Do not admit pgrep flags that expose argv/env,
@@ -1469,6 +1495,10 @@ def read_only_gate_inspection(command: str) -> bool:
             if not literal or literal[0] not in {"git", "/usr/bin/git"}:
                 return False
             if read_only_ota_git_inspection(tokens):
+                continue
+            return False
+        if executable in {"shasum", "sha256sum", "stat"}:
+            if literal_source_metadata_inspection(command):
                 continue
             return False
         if executable not in {"cat", "diff", "grep", "head", "nl", "rg", "sed", "tail"}:
@@ -1762,6 +1792,10 @@ def partition_segment_is_read_only(tokens: list[str]) -> bool:
 def shell_writes_partitions(command: str) -> bool:
     if any(is_partitions_path(target) for target in patch_targets(command)):
         return True
+    # A source filename such as agent-python.sh is not an interpreter invocation. Admit only
+    # the independently parsed, literal metadata forms before the conservative writer heuristic.
+    if literal_source_metadata_inspection(command):
+        return False
     if re.search(r"\bpartitions\b", command, re.IGNORECASE) and ".csv" in command and re.search(
         r"[$+]|\b(?:python|python3|node|awk)\b", command
     ):
