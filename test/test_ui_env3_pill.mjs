@@ -209,6 +209,8 @@ const forecastClock = new Date((currentUnix + 3600) * 1000)
 assert.equal(sandbox.__api.tooltip(3),
   `${forecastClock}\nOpen-Meteo · Prognose\nTemperatur  22,0 °C\nLuftfeuchte  46,0 %\nLuftdruck  1.008,0 hPa`,
   "the same tooltip path must expose every provider-timestamped future value");
+assert.equal(sandbox.__api.tooltipHtml(99), "",
+  "a selection retired by an asynchronous history refresh must render no invented forecast");
 assert.equal(sandbox.__api.tooltipHtml(3),
   `<span class="vhist-tip-meta">Open-Meteo · Prognose</span>` +
   `<span class="vhist-tip-rows">` +

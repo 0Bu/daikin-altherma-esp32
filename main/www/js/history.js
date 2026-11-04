@@ -1663,7 +1663,7 @@ function scrubText(h, i, includeTime = true) {
 // injection path through translations, units or device data.
 function histReadout(h, i) {
   const text = scrubText(h, i, false);
-  if (h.id !== ENV3_COMBINED_ID) return esc(text);
+  if (!text || h.id !== ENV3_COMBINED_ID) return esc(text);
   const lines = text.split("\n");
   // Forecast provenance precedes the coloured measurement rows; measured bubbles need no header.
   const meta = i >= h.v.length ? lines.shift() : "";
