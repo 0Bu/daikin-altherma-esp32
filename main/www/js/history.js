@@ -1540,9 +1540,9 @@ function histReadout(h, i) {
 // The reserved row stays present, so a comparison never moves the plot or its time labels.
 function histTipsHtml(h, pi, frac) {
   const shapes = new Set(Array.from({length:h.v.length + (forecastScrubView(h)?.points.length || 0)},
-    (_, i) => scrubText(h, i, false).replace(/\d/g, "8")));
+    (_, i) => histReadout(h, i).replace(/\d/g, "8")));
   return `<div class="vhist-tips"><div class="vhist-tip vhist-reserve mono num" aria-hidden="true">` +
-    [...shapes].map(text => `<span>${esc(text)}</span>`).join("") +
+    [...shapes].map(html => `<span>${html}</span>`).join("") +
     `</div><div class="vhist-tip vhist-live mono num" hidden></div>` + (pi >= 0
       ? `<div class="vhist-tip vhist-pinned mono num" style="--tip-p:${(frac * 100).toFixed(3)}">${histReadout(h, pi)}</div>`
       : "") + `</div>`;
@@ -1667,14 +1667,13 @@ function scrubText(h, i, includeTime = true) {
 // injection path through translations, units or device data.
 function env3ScrubHtml(h, i) {
   const lines = scrubText(h, i, false).split("\n");
-  const firstMeasurement = i >= h.v.length ? 1 : 0;
-  const classes = histVisibleSeries(h).map((s) => env3SeriesClass(s.source));
   // Forecast provenance precedes the coloured measurement rows; measured bubbles need no header.
-  const meta = lines.slice(0, firstMeasurement).join(" · ");
+  const meta = i >= h.v.length ? lines.shift() : "";
   return (meta ? `<span class="vhist-tip-line vhist-tip-meta">${esc(meta)}</span>` : "") +
-    lines.slice(firstMeasurement).map((line, index) =>
-      `<span class="vhist-tip-line ${classes[index]}">${esc(line)}</span>`
-    ).join("");
+    `<span class="vhist-tip-rows">` + histVisibleSeries(h).map((s, index) =>
+      `<span class="vhist-tip-line ${env3SeriesClass(s.source)}"><span>` +
+      esc(lines[index]).replace("  ", "</span><span>") + `</span></span>`
+    ).join("") + `</span>`;
 }
 
 function placeScrubReadout(graph, h, i, frac) {
