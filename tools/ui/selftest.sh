@@ -38,8 +38,22 @@ cp -R "$proj/main/www" "$tmp/main/www"
 cp "$proj/test/test_ui_use_cases.mjs" "$tmp/test/"
 cp "$proj/test/test_ui_modal_scroll.mjs" "$tmp/test/"
 cp "$proj/test/test_ui_status_truth.mjs" "$tmp/test/"
+cp "$proj/test/test_ui_live_i18n.mjs" "$tmp/test/"
 cp "$proj/test/test_ui_card_navigation.mjs" "$tmp/test/"
 cp -R "$proj/tools/ui" "$tmp/tools/ui"
+
+# An unread compressor witness must not turn into a measured stop in the activity line.
+(cd "$tmp" && node test/test_ui_live_i18n.mjs >/dev/null 2>&1) || {
+  echo "ui selftest: live-state fixture fails before mutation" >&2; exit 1; }
+sed '/if (d.ouUnknown) return PLANT_UNKNOWN;/d' \
+  "$proj/main/www/js/app_state.js" > "$tmp/main/www/js/app_state.js"
+if (cd "$tmp" && node test/test_ui_live_i18n.mjs >"$tmp/unknown-activity.log" 2>&1); then
+  echo "ui selftest: unknown compressor reported as stopped escaped the activity checks" >&2; exit 1
+fi
+grep -q 'an unknown compressor state must not become standby' "$tmp/unknown-activity.log" || {
+  echo "ui selftest: unknown-activity mutation failed outside its intended assertion" >&2; exit 1; }
+cp "$proj/main/www/js/app_state.js" "$tmp/main/www/js/app_state.js"
+echo "ui selftest: an unknown compressor reported as stopped is detected"
 
 # Removing the whole-card opt-in must fail the executed render/reconcile contract, even when a
 # nonempty passive observation could otherwise keep the diagnosis card alive.

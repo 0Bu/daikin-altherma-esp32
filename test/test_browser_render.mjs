@@ -442,6 +442,48 @@ async function assertStatusTruth(page, context) {
   }
 }
 
+async function assertUnknownCompressorActivity(page, context) {
+  await page.evaluate(`(() => {
+    window.__unknownActivityPrevious = { status: S.status, values: S._values, modbus: S._modbus };
+    S.status = { ...S.status, hp: { ...S.status.hp, connected: true },
+      modbus: { ...S.status.modbus, enabled: false, connected: false } };
+    S._modbus = [];
+    S._values = S._values.map((row) => ({ ...row,
+      value: /inv frequency/i.test(row.label) ? null : row.value }));
+    S._values.push(
+      { label: "INV primary current(A)", value: "6.0", unit: "A", reg: 0x21,
+        held_unknown: true, group: "Electrical" },
+      { label: "Outdoor air temp.(R1T)", value: "5.2", unit: "°C", reg: 0x20,
+        held_unknown: true, group: "Outdoor unit" },
+      { label: "Water pump operation", value: "0", binary: true, reg: 0x60, group: "Operation" },
+      { label: "Flow sensor(l/min)", value: "0.0", unit: "l/min", reg: 0x61, group: "Water circuit" });
+    return true;
+  })()`);
+  try {
+    for (const moving of [false, true]) {
+      await page.evaluate(`(() => {
+        S._values = S._values.map((row) => ({ ...row,
+          value: /water pump operation/i.test(row.label) ? ${moving ? '"1"' : '"0"'}
+            : /flow sensor/i.test(row.label) ? ${moving ? '"12.0"' : '"0.0"'} : row.value }));
+        S.clickHold = false; renderApp(); return true;
+      })()`);
+      await page.frame();
+      assert.deepEqual(await page.evaluate(`({ unknown: S.live.ouUnknown,
+        activityUnknown: document.getElementById("svStatus").textContent === t("dyn.state_gate"),
+        pumpOn: S.live.pumpOn, electrical: S.live.pel })`),
+      { unknown: true, activityUnknown: true, pumpOn: moving, electrical: null },
+      `${context}/${moving}: unread compressor cannot become a stopped-unit status or electrical estimate`);
+      assertLayout(await page.evaluate(layoutAudit), `${context}/${moving}`);
+    }
+    await captureNativeEvidence(page, context, "svStatus");
+  } finally {
+    await page.evaluate(`S.status = window.__unknownActivityPrevious.status;
+      S._values = window.__unknownActivityPrevious.values;
+      S._modbus = window.__unknownActivityPrevious.modbus; delete window.__unknownActivityPrevious;
+      S.clickHold = false; renderApp(); true`);
+  }
+}
+
 // Native A4 metadata belongs to each cached /values row. Use the actual Modbus card/accordions,
 // including the exact numeric enums, rather than a second renderer or an X10A fallback fixture.
 const nativeAltherma4Rows = Object.freeze([
@@ -2292,6 +2334,7 @@ try {
       await assertFlowSwitchWords(page, `${viewport.name}/${locale}/flow-switch`);
       await assertPlantDiagnosis(page, `${viewport.name}/${locale}/diagnosis`);
       await assertStatusTruth(page, `${viewport.name}/${locale}/status-truth`);
+      await assertUnknownCompressorActivity(page, `${viewport.name}/${locale}/unknown-activity`);
       await assertNativeAltherma4(page, `${viewport.name}/${locale}/native-altherma4`);
       nativeAltherma4Checks++;
       await assertHybridRoom(page, `${viewport.name}/${locale}/hybrid-room`, locale);

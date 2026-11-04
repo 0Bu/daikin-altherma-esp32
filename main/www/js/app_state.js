@@ -664,6 +664,7 @@ const PLANT_CIRC = { key: "sys.circulating", tone: "" };
 const PLANT_COOL_RESIDUAL = { key: "sys.residual_circulating", tone: "idle" };
 const PLANT_BSH = { key: "sys.bsh_active", tone: "" };
 const PLANT_STANDBY = { key: "sys.standby", tone: "idle" };
+const PLANT_UNKNOWN = { key: "dyn.state_gate", tone: "warn" };
 function plantState(d) {
   if (!d) return PLANT_STANDBY;
   if (d.defrost === true) return PLANT_DEFROST;
@@ -671,6 +672,7 @@ function plantState(d) {
   // It is still active plant operation — and expensive resistive heat — so the exact X10A BSH flag
   // takes precedence over the generic compressor/pump states below.
   if (d.bsh === true) return PLANT_BSH;
+  if (d.ouUnknown) return PLANT_UNKNOWN;
   if (compressorRunning(d)) return PLANT_RUNNING;
   // Compressor off but water still moving: pump overrun, or the backup heater carrying the load on
   // its own. Something IS happening — it just isn't the heat pump, which is the point of saying so.
