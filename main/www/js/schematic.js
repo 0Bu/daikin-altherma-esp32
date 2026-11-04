@@ -1644,8 +1644,9 @@ const inspNowText = (e, d) => {
     if (d.pelUnread) return `${INSPECT_I18N[LANG]?.held?.lead || tx(HELD_OVER_NOW.lead)} ${d.pelUnread}`;
   }
   // The outdoor unit's defrost is a fact, and a ΔT without measured water movement has its own reason.
-  if (d.ouUnknown && COMPRESSOR_NOW.test(e.i18nKey) &&
-      !(e.i18nKey === "ou" ? d.defrost : e.i18nKey === "dt" && d.dtStale)) return heldUnknownText();
+  if (d.rps == null && d.compressorOn == null && COMPRESSOR_NOW.test(e.i18nKey) &&
+      !(e.i18nKey === "ou" ? d.defrost : e.i18nKey === "dt" && d.dtStale))
+    return d.ouUnknown ? heldUnknownText() : t("dyn.state_gate");
   return (e.now || INSPECT_I18N[LANG]?.[e.i18nKey]?.now) ? inspFieldText(e, "now", d) : null;
 };
 

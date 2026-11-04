@@ -446,7 +446,10 @@ async function assertUnknownCompressorActivity(page, context) {
   await page.evaluate(`(() => {
     window.__unknownActivityPrevious = { ...S };
     S.status = { ...S.status, hp: { ...S.status.hp, connected: true },
-      modbus: { ...S.status.modbus, enabled: false, connected: false } };
+      modbus: { ...S.status.modbus, enabled: false, connected: false },
+      history: { ...S.status.history, rows: [
+        ...(S.status.history?.rows || []).filter(row => row.id !== "inv_current"),
+        { id: "inv_current", label: "INV primary current(A)" } ] } };
     S._modbus = [];
     S._values = S._values.map((row) => ({ ...row,
       value: /inv frequency/i.test(row.label) ? null : row.value }));
@@ -480,6 +483,18 @@ async function assertUnknownCompressorActivity(page, context) {
         assertLayout(await page.evaluate(layoutAudit), `${context}/${outdoorPresent}/${moving}`);
       }
       await captureNativeEvidence(page, `${context}/${outdoorPresent ? "unread" : "missing"}`, "schem");
+      for (const key of ["phe", "dt", "pel", "cop"]) {
+        await clickElement(page, key === "phe" ? '[data-insp="phe"] > text'
+                                               : `[data-insp="${key}"]`);
+        await page.frame();
+        assert.equal(await page.evaluate(`(() => {
+          const lead = INSPECT_I18N[LANG]?.held?.lead || tx(HELD_OVER_NOW.lead);
+          const expected = ${outdoorPresent} ? heldUnknownText()
+            : ${key === "pel" || key === "cop"} ? lead + " INV primary current" : t("dyn.state_gate");
+          return document.getElementById("inspBody").innerText.includes(expected);
+        })()`), true,
+        `${context}/${outdoorPresent}/${key}: inspector cannot infer a stop or pump-only heat from missing witnesses`);
+      }
     }
     await page.evaluate(`(() => {
       S._values = window.__unknownActivityValues.map(row => ({ ...row,
@@ -553,7 +568,8 @@ async function clickElement(page, selector) {
     const rect = button.getBoundingClientRect();
     if (!rect.width || !rect.height) throw new Error("hidden pointer target: " + ${JSON.stringify(selector)});
     const point = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-    if (document.elementFromPoint(point.x, point.y)?.closest("button, [role=button]") !== button)
+    if (document.elementFromPoint(point.x, point.y)?.closest("button, [role=button]") !==
+        button.closest("button, [role=button]"))
       throw new Error("pointer target is obstructed: " + ${JSON.stringify(selector)});
     return point;
   })()`);
@@ -2542,7 +2558,9 @@ try {
   let unknownActivityChecks = 0;
   for (const viewport of viewports) {
     await page.viewport(viewport.width, viewport.height);
+    await page.send("Page.bringToFront");
     await page.navigate(server.url);
+    await page.send("Page.bringToFront");
     await page.waitFor("typeof S !== 'undefined' && S.status && Array.isArray(S._values)");
     await page.evaluate("pollStop(); pollSchedule = () => {}; true");
     for (const locale of browserLocales) {

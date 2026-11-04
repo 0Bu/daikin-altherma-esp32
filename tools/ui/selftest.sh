@@ -407,6 +407,16 @@ grep -q 'a known HomeHub compressor state cannot receive an unknown-age explanat
 cp "$matrix_tmp/schematic.orig" "$matrix_tmp/main/www/js/schematic.js"
 echo "ui selftest: a known HomeHub compressor reported as unknown is detected"
 
+sed 's/if (d.rps == null \&\& d.compressorOn == null \&\& COMPRESSOR_NOW/if (d.ouUnknown \&\& COMPRESSOR_NOW/' \
+  "$matrix_tmp/schematic.orig" > "$matrix_tmp/main/www/js/schematic.js"
+if (cd "$matrix_tmp" && node test/test_ui_source_matrix.mjs >"$matrix_tmp/absent-outdoor.log" 2>&1); then
+  echo "ui selftest: absent outdoor pages reported as stopped escaped the inspector checks" >&2; exit 1
+fi
+grep -q 'absent outdoor pages cannot become a stopped compressor' "$matrix_tmp/absent-outdoor.log" || {
+  echo "ui selftest: absent-outdoor mutation failed outside its intended assertion" >&2; exit 1; }
+cp "$matrix_tmp/schematic.orig" "$matrix_tmp/main/www/js/schematic.js"
+echo "ui selftest: absent outdoor pages reported as stopped in an inspector are detected"
+
 # (a) a fifth reason the production cascade can return, explained nowhere.
 sed 's|^\(  if (pelSrc == null)\)|  if (pelSrc === "XX")   return { scope: "plant",  block: "ghost_code",  postBuh: false };\n\1|' \
   "$matrix_tmp/schematic.orig" > "$matrix_tmp/main/www/js/schematic.js"

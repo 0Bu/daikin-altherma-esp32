@@ -1651,6 +1651,14 @@ assert.doesNotMatch(SOURCE, /chip\.demand_(?:on|off)|schem\.to_heat/);
   assert.match(absentPage.inspNowText(absentPage.INSPECT.cop, absentInput),
     /No current reading: INV primary current/,
     "a lost outdoor page must not become a claim that the profile lacks electrical inputs");
+  const noOutdoor = ctx({ x10a: true, mbEnabled: false, mbConnected: false, values: [] });
+  const noWitness = noOutdoor.liveData();
+  assert.equal(noWitness.ouUnknown, false, "absent pages carry no row-age marker");
+  assert.equal(noWitness.compressorOn, null, "hydronic connectivity alone proves no compressor state");
+  noWitness.dtStale = false;
+  for (const key of ["ou", "phe", "rhot", "rcold", "dt"])
+    assert.equal(noOutdoor.inspNowText(noOutdoor.INSPECT[key], noWitness), "dyn.state_gate",
+      `absent outdoor pages cannot become a stopped compressor on the ${key} panel`);
   assert.equal(stopped.ouReadingText(d, "disch", 58, (n) => n.toFixed(0)), "—",
     "so the discharge pill blanks as the panel's idle sentence says");
 
