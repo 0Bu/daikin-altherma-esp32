@@ -933,6 +933,17 @@ def reviewed_ota_upload_paths() -> dict[str, tuple[str, list[str], dict[str, int
     SDK/ROM allowance; verification additionally names the complete RSA allocation descent.
     """
     result = {}
+    # The sequential boot lookups retain only one call's frames. These allocation and lookup
+    # continuations are the source-pinned sys_thread_sem_get tails already used by TLS profiles.
+    prime = ["ota_task", "tls_sys_thread_sem_get", "tls_sys_thread_sem_init", "tls_pthread_setspecific"]
+    result["ota_lwip_boot_allocate"] = (
+        "ota", prime + ["tls_calloc", "sdk_malloc_default", "sdk_malloc_caps", "sdk_malloc_base",
+                        "sdk_malloc_aligned", "sdk_multi_aligned_offset", "sdk_multi_aligned_impl",
+                        "sdk_multi_lock", "sdk_queue_critical", "sdk_queue_compare_swap",
+                        "runtime_task_entry"], {}, 1536, 10752)
+    result["ota_lwip_boot_specific"] = (
+        "ota", prime + ["tls_find_key", "sdk_queue_critical", "sdk_queue_compare_swap",
+                        "runtime_task_entry"], {}, 1536, 10752)
     root = ["ota_task", "ota_activate"]
     for phase, sdk in (("end", ["ota_sdk_end", "ota_sdk_verify_partition"]),
                        ("select", ["ota_sdk_select", "ota_sdk_image_validate"])):
@@ -986,6 +997,19 @@ def validate_ota_upload_paths(budgets: dict[str, Any], sources: dict[str, str]) 
     ota = code["main/ota_update.cpp"]
     http = code["main/http_ota.cpp"]
     common = code["main/http_common.cpp"]
+    worker = stack_function_body(ota, "ota_task")
+    loop = re.search(r"\bfor\s*\(\s*;\s*;\s*\)", worker)
+    prologue = worker[:loop.start()] if loop else ""
+    prime = re.search(r"sys_sem_t\s*\*\s*const\s+thread_sem\s*=\s*sys_thread_sem_get\(\)\s*;", prologue)
+    retained = re.search(r"if\s*\(thread_sem\s*==\s*nullptr\s*\|\|\s*"
+                         r"sys_thread_sem_get\(\)\s*!=\s*thread_sem\)\s*\{", prologue)
+    ready = prologue.find("s_ota_lwip_ready.store(true, std::memory_order_release)")
+    if (not prime or not retained or retained.start() <= prime.end() or ready <= retained.end()
+            or "vTaskSuspend(nullptr)" not in prologue[retained.end():ready]
+            or "std::abort()" not in prologue[retained.end():ready]
+            or len(re.findall(r"\bsys_thread_sem_get\s*\(", prologue)) != 2
+            or len(re.findall(r"\bsys_thread_sem_get\s*\(", worker)) != 2):
+        raise BudgetError("OTA upload source: unreviewed worker boot-primer/readiness placement")
     for parent, child, source in (("run_upload", "activate_update", ota),
                                   ("run_update", "activate_update", ota),
                                   ("ota_task", "run_upload", ota),
@@ -3124,7 +3148,7 @@ def self_test() -> None:
         'daik::(anonymous namespace)::start_locked(daik::(anonymous namespace)::OtaTaskArgs const&, unsigned long)': 32,
         'daik::http_send_json(httpd_req*, char const*)': 32,
         'daik::http_begin_ota_upload(httpd_req*, httpd_req**)': 32,
-        'daik::http_complete_ota_upload(httpd_req*)': 32,
+        'daik::http_complete_ota_upload(httpd_req*)': 48,
         'daik::(anonymous namespace)::receive_with_budget(void*, int, char*, unsigned int, int)': 32,
         'esp_ota_end': 48,
         'esp_ota_set_boot_partition': 32,
@@ -3518,7 +3542,29 @@ def self_test() -> None:
             else:
                 raise AssertionError(f"self-test accepted upload {mutation}: {name}")
             upload_stack_controls += 1
+    for path, members in (
+        ("ota_lwip_boot_allocate", ("tls_sys_thread_sem_get", "tls_sys_thread_sem_init",
+                                    "tls_pthread_setspecific", "tls_calloc", "sdk_malloc_caps")),
+        ("ota_lwip_boot_specific", ("tls_sys_thread_sem_get", "tls_sys_thread_sem_init",
+                                    "tls_pthread_setspecific", "tls_find_key")),
+    ):
+        for member in members:
+            changed = json.loads(json.dumps(budgets))
+            changed["paths"][path]["symbols"].remove(member)
+            try:
+                validate_ota_upload_paths(changed, upload_sources)
+            except BudgetError as exc:
+                assert "OTA upload path" in str(exc)
+            else:
+                raise AssertionError(f"self-test accepted missing boot-primer member {path}/{member}")
+            upload_stack_controls += 1
     for name, before, after in (
+        ("main/ota_update.cpp", "sys_sem_t* const thread_sem = sys_thread_sem_get();", "sys_sem_t* const thread_sem = nullptr;"),
+        ("main/ota_update.cpp", "sys_thread_sem_get() != thread_sem", "false"),
+        ("main/ota_update.cpp", "thread_sem == nullptr || ", ""),
+        ("main/ota_update.cpp", "s_ota_lwip_ready.store(true, std::memory_order_release);", ""),
+        ("main/ota_update.cpp", "s_ota_lwip_ready.store(true, std::memory_order_release);\n\n    for (;;) {",
+         "s_ota_lwip_ready.store(true, std::memory_order_release);\n\n    for (;;) { sys_thread_sem_get();"),
         ("main/ota_update.cpp", "activate_update(resources, update_partition, avail)", "other_activation(resources, update_partition, avail)"),
         ("main/ota_update.cpp", "activate_update(resources, partition, image.version, &upload)", "other_activation(resources, partition, image.version, &upload)"),
         ("main/http_ota.cpp", "upload_read, upload_complete", "other_read, upload_complete"),
