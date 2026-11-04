@@ -239,7 +239,7 @@ explicitly read-only parent session and verify the actual child permission mode.
 that parent proves only that invocation. Report skipped hooks, missing events or unobserved sandbox
 or approval-policy evidence as pending.
 
-The focused native review entry point creates that separate parent without changing configuration:
+By default, the focused review entry point creates that separate parent without changing configuration:
 
 ```bash
 scripts/run-codex-review.sh doc_drift_checker <full-base-sha> <full-head-sha> AGENTS.md docs \
@@ -255,21 +255,28 @@ is unavailable or subagent tools are disabled. It disables every observed MCP na
 tools and plugin tools for that invocation, sets `--ephemeral --sandbox read-only`, and requests
 approval policy `never`
 both through the CLI option and an explicit configuration override. It grants no trust or bypass.
-The parent must spawn only the selected actual role with `fork_context=false`, wait for its response
-and close it when the toolset supports closing. Otherwise it must verify completion and report
-the lifecycle limit. The task separates the scoped committed range from staged, unstaged and intended
-untracked changes and prohibits file-changing tests, builds, GitHub operations and live-system
+In this default mode, the parent must spawn only the selected actual role with `fork_context=false`,
+wait for its response and close it when the toolset supports closing. Otherwise it must verify
+completion and report the lifecycle limit. The task separates the scoped committed range from staged,
+unstaged and intended untracked changes and prohibits file-changing tests, builds, GitHub operations and live-system
 contact. The launcher does not pin a model or persist settings. Its argument tests prove requested
 configuration; only a native run with actual permission and approval-policy evidence proves the
 effective restrictions for that run.
 Report `approval_policy` separately from `approvals_reviewer`: `auto_review` names the reviewer,
 not the policy. An unexposed actual approval policy remains unobserved.
 Use the harness-injected runtime permissions; do not query process environments or attempt writes
-to probe access. The coordinator verifies role selection from the actual native spawn call and result.
+to probe access. In the default mode, the coordinator verifies role selection from the actual native
+spawn call and result.
 The process exit status alone does not prove that the selected reviewer completed its work. A usable
 review record must identify the actual named role, verified read-only mode, exact base/head and scope,
 local changes included, findings and completed review. Check that evidence independently before
 recording a review; the launcher never checks PR boxes or creates an acceptance stamp.
+
+Source-bound local OTA evidence uses a separate mode: the launcher loads the selected canonical
+profile's developer instructions directly into one independent session and forbids another spawn.
+The helper verifies the actual CLI thread identity, profile digest, source/build binding and
+completed findings; actual permissions still require inspection. Follow the
+[local-test procedure](MAINTENANCE.md#local-dev-ota-tests) for its entry point and retained evidence.
 
 The formatter records a correlated pre-edit state only for eligible project source files and
 computes formatting in memory. It emits a bounded suggestion, never writes a source file.

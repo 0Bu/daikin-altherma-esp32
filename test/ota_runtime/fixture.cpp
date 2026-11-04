@@ -1,10 +1,12 @@
 // Compile and execute the entire current OTA component; only SDK and service boundaries are fake.
 #include "sdk.hpp"
 #include <algorithm>
+#include <condition_variable>
 #include <cstdio>
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #ifndef OTA_PRODUCTION_SOURCE
 #error "Compile against the complete current main/ota_update.cpp"
 #endif
@@ -12,6 +14,96 @@
 
 namespace sdk {
 State state;
+namespace {
+struct WorkerScheduler {
+    std::mutex              mutex;
+    std::condition_variable changed;
+    std::thread             task;
+    void (*entry)(void*)       = nullptr;
+    void*              arg     = nullptr;
+    bool               waiting = false, execute = false, stop = false, finished = false;
+    std::exception_ptr failure;
+    ~WorkerScheduler() { stop_worker(); }
+} worker;
+thread_local bool      in_worker    = false;
+thread_local bool      sem_retained = false;
+thread_local sys_sem_t thread_sem, other_sem;
+} // namespace
+
+void boot_worker() {
+    worker.waiting = worker.execute = worker.stop = worker.finished = false;
+    worker.failure                                                  = nullptr;
+    worker.task                                                     = std::thread([] {
+        in_worker = true;
+        try {
+            worker.entry(worker.arg);
+        } catch (const Stop&) {
+        } catch (...) {
+            worker.failure = std::current_exception();
+        }
+        std::lock_guard<std::mutex> lock(worker.mutex);
+        worker.finished = true;
+        worker.changed.notify_all();
+    });
+    std::unique_lock<std::mutex> lock(worker.mutex);
+    worker.changed.wait(lock, [] { return worker.waiting || worker.finished; });
+    if (worker.failure) std::rethrow_exception(worker.failure);
+}
+
+void prepare_worker(void (*entry)(void*), void* arg) {
+    worker.entry = entry;
+    worker.arg   = arg;
+    if (!state.defer_worker_boot) boot_worker();
+}
+
+void stop_worker() noexcept {
+    if (!worker.task.joinable()) return;
+    {
+        std::lock_guard<std::mutex> lock(worker.mutex);
+        worker.stop = true;
+    }
+    worker.changed.notify_all();
+    worker.task.join();
+}
+
+uint32_t wait_worker() {
+    std::unique_lock<std::mutex> lock(worker.mutex);
+    if (state.notifications != 0) {
+        ++state.notifications;
+        throw Stop{};
+    }
+    state.prime_finished = true;
+    worker.waiting       = true;
+    worker.changed.notify_all();
+    worker.changed.wait(lock, [] { return worker.execute || worker.stop; });
+    if (worker.stop) throw Stop{};
+    ++state.notifications;
+    return 1;
+}
+
+void run_worker(void*) {
+    std::unique_lock<std::mutex> lock(worker.mutex);
+    worker.execute = true;
+    worker.changed.notify_all();
+    worker.changed.wait(lock, [] { return worker.finished; });
+    lock.unlock();
+    worker.task.join();
+    if (worker.failure) std::rethrow_exception(worker.failure);
+}
+
+void park_worker() {
+    state.worker_parked = true;
+    throw Stop{};
+}
+
+void network_use() noexcept {
+    ++state.network_uses;
+    if (!in_worker || !state.prime_finished ||
+        !daik::s_ota_lwip_ready.load(std::memory_order_acquire) ||
+        sys_thread_sem_get() != &thread_sem)
+        state.invalid_network_use = true;
+}
+
 void  inject(Fault fault) {
     if (state.fault == fault && !state.injected) {
         state.injected = true;
@@ -19,6 +111,28 @@ void  inject(Fault fault) {
     }
 }
 } // namespace sdk
+
+sys_sem_t* sys_thread_sem_get() {
+    auto& s = sdk::state;
+    if (!sdk::in_worker) {
+        s.invalid_network_use = true;
+        return nullptr;
+    }
+    if (!s.prime_finished) {
+        ++s.prime_gets;
+        if (daik::s_ota_lwip_ready.load(std::memory_order_acquire)) s.invalid_network_use = true;
+    }
+    if (s.prime == sdk::Prime::Null || (s.prime == sdk::Prime::Lost && s.prime_gets > 1))
+        return nullptr;
+    if (sdk::sem_retained) return &sdk::thread_sem;
+    if (s.reject_sem_allocation) return nullptr;
+    ++s.sem_allocations;
+    if (s.prime == sdk::Prime::Unregistered)
+        return s.prime_gets == 1 ? &sdk::thread_sem : &sdk::other_sem;
+    sdk::sem_retained = true;
+    return &sdk::thread_sem;
+}
+void sys_thread_sem_deinit() { sdk::sem_retained = false; }
 
 void* operator new(size_t n) {
     if (sdk::state.reject_new) throw std::bad_alloc();
@@ -334,6 +448,7 @@ struct AssertionFailure : std::runtime_error {
 constexpr const char* long_version = "1.0.8-dev.12345678901234567890";
 
 void reset(sdk::Fault fault) {
+    sdk::stop_worker();
     sdk::state  = sdk::State{};
     auto& s     = sdk::state;
     s.fault     = fault;
@@ -358,6 +473,7 @@ void reset(sdk::Fault fault) {
     daik::s_busy         = false;
     daik::s_install_held = false;
     daik::s_ota_task     = nullptr;
+    daik::s_ota_lwip_ready.store(false);
     daik::s_generation = 0;
     daik::s_health_gate_armed.store(false);
     daik::s_task_args = daik::OtaTaskArgs{};
@@ -517,6 +633,7 @@ struct Upload {
     Input input = Input::Complete;
 
     static int read(void* context, char* out, size_t requested) {
+        sdk::network_use();
         auto& upload       = *static_cast<Upload*>(context);
         upload.max_request = std::max(upload.max_request, requested);
         if (upload.input == Input::Exception) throw std::bad_alloc();
@@ -533,17 +650,61 @@ struct Upload {
         return static_cast<int>(count);
     }
     static void complete(void* context, bool installed, uint32_t generation) noexcept {
+        sdk::network_use();
         auto& upload = *static_cast<Upload*>(context);
         ++upload.completed;
         upload.installed  = installed;
         upload.generation = generation;
         const auto& s     = sdk::state;
-        if (s.ota_live || s.hash_live || s.active_buffers || s.active_clients ||
+        if (s.invalid_network_use || s.ota_live || s.hash_live || s.active_buffers ||
+            s.active_clients ||
             (installed && (s.selected != 1 || s.ota_ended != 1 || s.restart != 0)))
             upload.invalid_completion = true;
     }
     daik::OtaUploadSource source() { return {this, 4096, read, complete}; }
 };
+
+void worker_priming(const char* name) {
+    reset(sdk::Fault::None);
+    using namespace daik;
+    auto&      s        = sdk::state;
+    const bool deferred = std::strcmp(name, "worker_unprimed") == 0;
+    s.defer_worker_boot = deferred;
+    if (std::strcmp(name, "worker_prime_null") == 0) s.prime = sdk::Prime::Null;
+    if (std::strcmp(name, "worker_prime_unregistered") == 0) s.prime = sdk::Prime::Unregistered;
+    if (std::strcmp(name, "worker_prime_lost") == 0) s.prime = sdk::Prime::Lost;
+    ota_update_init();
+    REQUIRE(s_ota_task != nullptr && s.static_creations == 1);
+    Upload upload;
+    if (deferred) {
+        REQUIRE(!s_ota_lwip_ready.load() && s.prime_gets == 0);
+        REQUIRE(ota_upload_async(upload.source(), upload_sha256) == 0);
+        REQUIRE(ota_check_async(0) == 0);
+        REQUIRE(start_locked(update_request(), 0) == 0);
+        REQUIRE(!ota_busy() && s_generation == 0 && s.worker_wakeups == 0);
+        REQUIRE(upload.completed == 0 && s.ota_begun == 0);
+        sdk::boot_worker();
+    }
+    const bool ready = s.prime == sdk::Prime::Stable;
+    REQUIRE(s_ota_lwip_ready.load() == ready);
+    REQUIRE(s.prime_gets == (s.prime == sdk::Prime::Null ? 1U : 2U));
+    REQUIRE(!s.invalid_network_use && s.network_uses == 0);
+    REQUIRE(s.worker_parked == !ready);
+    if (ready) {
+        REQUIRE(s.prime_finished && s.sem_allocations == 1);
+    } else {
+        REQUIRE(!s.prime_finished);
+        REQUIRE(ota_upload_async(upload.source(), upload_sha256) == 0);
+        REQUIRE(ota_check_async(0) == 0);
+        REQUIRE(start_locked(update_request(), 0) == 0);
+        REQUIRE(!ota_busy() && s_generation == 0 && s.worker_wakeups == 0);
+        REQUIRE(upload.completed == 0 && s.ota_begun == 0);
+        const auto gets = s.prime_gets;
+        ota_update_init();
+        REQUIRE(s.prime_gets == gets && s.static_creations == 1);
+    }
+    sdk::stop_worker();
+}
 
 void upload_admission() {
     reset(sdk::Fault::None);
@@ -637,6 +798,10 @@ void upload_worker(const char* name) {
     if (scenario == "upload_heap") s.largest_block = 1024;
     if (scenario == "upload_held") s.reset_hold = true;
     ota_update_init();
+    REQUIRE(s.prime_gets == 2 && s.sem_allocations == 1 && s.prime_finished);
+    // Runtime lwIP allocation is now unavailable: the first failed-upload response must use the
+    // semaphore retained at boot even when no receive occurred before quiescence/buffer refusal.
+    s.reject_sem_allocation = true;
     auto source = upload.source();
     char digest[65];
     std::strcpy(digest, upload_sha256);
@@ -655,6 +820,9 @@ void upload_worker(const char* name) {
     REQUIRE(upload.completed == 1 && upload.installed == success &&
             upload.generation == generation);
     REQUIRE(!upload.invalid_completion);
+    REQUIRE(!s.invalid_network_use && s.prime_gets == 2 && s.sem_allocations == 1);
+    if (scenario == "upload_quiesce" || scenario == "upload_buffer")
+        REQUIRE(upload.offset == 0 && s.network_uses == 1);
     REQUIRE(!ota_busy() && !ota_download_active());
     REQUIRE(s.withdraw == 1 && s.pause == 1 && s.resume == 1);
     REQUIRE(!s.invalid_release && !s.ota_live && !s.hash_live && !s.deadline_armed);
@@ -871,6 +1039,18 @@ int main(int argc, char** argv) {
         {"begin_probation", sdk::Fault::BeginProbation},
     };
     int count = 0;
+    for (const char* name : {"worker_prime_ready", "worker_prime_null", "worker_prime_unregistered",
+                             "worker_prime_lost", "worker_unprimed"}) {
+        if (argc > 1 && std::strcmp(argv[1], name) != 0) continue;
+        try {
+            test::worker_priming(name);
+        } catch (const std::exception& e) {
+            std::cerr << "ASSERT " << name << ": " << e.what() << '\n';
+            return 1;
+        }
+        std::cout << "PASS " << name << '\n';
+        ++count;
+    }
     const char* upload_cases[] = {"upload_admission",
                                   "upload_success",
                                   "upload_equal",

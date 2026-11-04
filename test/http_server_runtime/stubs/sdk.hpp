@@ -53,6 +53,7 @@ struct httpd_config_t {
 inline httpd_config_t HTTPD_DEFAULT_CONFIG() { return {}; }
 namespace sdk {
 inline unsigned async_begun = 0, async_completed = 0;
+inline void (*async_complete_observer)() = nullptr;
 struct Session {
     void*               context      = nullptr;
     httpd_free_ctx_fn_t free_context = nullptr;
@@ -94,6 +95,7 @@ inline esp_err_t httpd_req_async_handler_begin(httpd_req_t* req, httpd_req_t** c
     return ESP_OK;
 }
 inline esp_err_t httpd_req_async_handler_complete(httpd_req_t* req) {
+    if (sdk::async_complete_observer) sdk::async_complete_observer();
     delete req;
     ++sdk::async_completed;
     return ESP_OK;

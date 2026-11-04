@@ -44,12 +44,18 @@ const flags = ["-std=c++20", "-O0", "-g", "-Wall", "-Wextra", "-Wno-unused-param
   `-I${path.join(fixture,"stubs")}`, `-I${path.join(root,"main")}`];
 const cxx = process.env.CXX || "c++";
 const mutations = [
+  { name: "upload-media-guidance-json", file: "common", scenario: "post_media_policy",
+    before: '"application/octet-stream required"', after: '"application/json required"' },
+  { name: "async-shutdown-failure-released", file: "common", scenario: "async_upload_shutdown_enomem",
+    before: "if (shutdown_result != 0 && shutdown_errno != ENOTCONN) std::abort();",
+    after: "(void)shutdown_result; (void)shutdown_errno;" },
   { name: "async-body-settled-synchronously", file: "common", scenario: "async_upload_ownership",
     before: "if (result == HTTP_ASYNC_ACCEPTED) return ESP_OK;", after: "/* mutation: settle transferred body */" },
   { name: "async-upload-budget-not-extended", file: "common", scenario: "async_upload_ownership",
     before: "if (result == ESP_OK) state->budget.limit_us = OTA_UPLOAD_BUDGET_US;", after: "/* mutation: retain short budget */" },
   { name: "async-upload-socket-reused", file: "common", scenario: "async_upload_ownership",
-    before: "shutdown(httpd_req_to_sockfd(req), SHUT_RDWR);", after: "/* mutation: allow binary suffix reuse */" },
+    before: "const int shutdown_result = shutdown(httpd_req_to_sockfd(req), SHUT_RDWR);",
+    after: "const int shutdown_result = 0; /* mutation: allow binary suffix reuse */" },
   { name: "empty-header-treated-absent", file: "common", scenario: "lan_header_policy",
     before: /present\s*= result != ESP_ERR_NOT_FOUND;/, after: "present = len != 0;" },
   { name: "empty-version-treated-absent", file: "mcp", scenario: "protocol_header_guard",
@@ -162,8 +168,16 @@ function compile(tag, mutation) {
 }
 try {
   const compiler = execute(cxx,["--version"]).stdout.trim();
-  const baseline = execute(compile("production"),[]);
+  const production = compile("production");
+  const baseline = execute(production,[]);
   assert.match(baseline.stdout,/PASS total=32\b/);
+  const shutdownControls = ["enomem","ebadf","reset"].map(error => {
+    const scenario = `async_upload_shutdown_${error}`;
+    const result = execute(production,[scenario]);
+    assert.match(result.stdout,/PASS async_upload_shutdown_fail_closed/);
+    console.log(`shutdown fail-closed control ${error}: retained lease through real SIGABRT`);
+    return { scenario, stdout:result.stdout, stderr:result.stderr };
+  });
   const wireResponses = [];
   const decoder = new TextDecoder("utf-8", { fatal: true });
   for (const line of baseline.stdout.trim().split("\n")) {
@@ -252,7 +266,7 @@ try {
   const head = execute("git",["-c","core.fsmonitor=false","rev-parse","HEAD"]).stdout.trim();
   const record = { compiler, sanitizers: sanitizer ? "undefined-no-recover" : "none", commands,
     baseline: baseline.stdout.split("\n").filter(line => !line.startsWith("JSONHEX ")).join("\n"),
-    wireResponses, negativeControls, sanitizerControl, sourceHashes, compiledInputs,
+    wireResponses, shutdownControls, negativeControls, sanitizerControl, sourceHashes, compiledInputs,
     productionHead: head, routeGroupSha256: sha(fs.readFileSync(routeGroupPath)),
     claimLimits: [
       "Complete unextracted production http_common.cpp, http_server.cpp and mcp_server.cpp translation units execute.",

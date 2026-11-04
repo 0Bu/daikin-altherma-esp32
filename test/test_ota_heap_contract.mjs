@@ -112,8 +112,22 @@ assert.match(ota,
 assert.match(ota,
   /void\s+ota_update_init\(\)[\s\S]{0,300}?xTaskCreateStatic\(ota_task,[\s\S]{0,180}?s_ota_task_stack,[\s\S]{0,80}?s_ota_task_storage/,
   "the OTA stack and TCB must be allocated statically before an operation needs TLS heap");
-assert.match(ota,
-  /void\s+ota_task\(void\*\)[\s\S]{0,180}?for\s*\(;;\)[\s\S]{0,120}?ulTaskNotifyTake\(pdTRUE,\s*portMAX_DELAY\)/,
+const workerStart = ota.indexOf("void ota_task(void*) {");
+const workerEnd = ota.indexOf("\nuint32_t next_generation(",workerStart);
+assert.ok(workerStart >= 0 && workerEnd > workerStart,"resident OTA worker boundaries missing");
+const worker = ota.slice(workerStart,workerEnd);
+const workerPrime = worker.indexOf("sys_thread_sem_get()");
+const workerRetained = worker.indexOf("sys_thread_sem_get() != thread_sem",workerPrime);
+const workerPark = worker.indexOf("vTaskSuspend(nullptr)",workerRetained);
+const workerReady = worker.indexOf("s_ota_lwip_ready.store(true",workerPark);
+const workerLoop = worker.indexOf("for (;;)",workerReady);
+assert.ok(workerPrime >= 0 && workerRetained > workerPrime && workerPark > workerRetained &&
+          workerReady > workerPark && workerLoop > workerReady,
+  "the OTA worker must verify retained task-local lwIP state and park failure before readiness/idle");
+assert.match(worker,/thread_sem == nullptr \|\| sys_thread_sem_get\(\) != thread_sem/,
+  "a missing or unretained semaphore must not publish readiness");
+assert.match(worker.slice(workerLoop),
+  /^for\s*\(;;\)[\s\S]{0,120}?ulTaskNotifyTake\(pdTRUE,\s*portMAX_DELAY\)/,
   "the static OTA worker must remain resident and sleep between operation notifications");
 assert.doesNotMatch(ota, /xTaskCreate\(ota_task/,
   "an OTA operation must not allocate its own task stack from runtime heap");

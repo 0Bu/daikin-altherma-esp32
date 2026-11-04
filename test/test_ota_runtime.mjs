@@ -45,10 +45,42 @@ function replaceOnce(text, before, after, name) {
 try {
   const baseline = execute(compile(sourcePath, "production"), []);
   assert.equal(baseline.status, 0, `production OTA cases\n${baseline.stdout}${baseline.stderr}`);
-  assert.match(baseline.stdout, /PASS total=81\b/);
+  assert.match(baseline.stdout, /PASS total=86\b/);
   console.log(baseline.stdout.trim());
 
   const mutations = [
+    {
+      name: "worker-null-prime", scenario: "worker_prime_null",
+      before: "thread_sem == nullptr || sys_thread_sem_get() != thread_sem",
+      after: "(static_cast<void>(thread_sem), false)",
+    },
+    {
+      name: "worker-retained-prime", scenario: "worker_prime_unregistered",
+      before: "sys_thread_sem_get() != thread_sem",
+      after: "(static_cast<void>(sys_thread_sem_get()), false)",
+    },
+    {
+      name: "worker-publish-before-prime", scenario: "worker_prime_ready",
+      before: "sys_sem_t* const thread_sem = sys_thread_sem_get();",
+      after: "s_ota_lwip_ready.store(true, std::memory_order_release);\n"
+        + "    sys_sem_t* const thread_sem = sys_thread_sem_get();",
+    },
+    {
+      name: "worker-unprimed-handoff", scenario: "worker_unprimed",
+      before: "if (!s_ota_task || !s_ota_lwip_ready.load(std::memory_order_acquire)) return 0;",
+      after: "if (!s_ota_task) return 0;",
+    },
+    {
+      name: "worker-failed-prime-park", scenario: "worker_prime_null",
+      before: "vTaskSuspend(nullptr);",
+      after: "return; /* mutation: a failed worker exits instead of parking */",
+    },
+    ...["upload_buffer", "upload_quiesce"].map(scenario => ({
+      name: `worker-discard-prime-${scenario}`, scenario,
+      before: "s_ota_lwip_ready.store(true, std::memory_order_release);",
+      after: "s_ota_lwip_ready.store(true, std::memory_order_release);\n"
+        + "    sys_thread_sem_deinit(); /* mutation: defer semaphore allocation until response */",
+    })),
     {
       name: "upload-channel-admission", scenario: "upload_admission", header: "ota_upload.hpp",
       before: "channel == OtaChannel::Dev && length >= 4096",
@@ -263,7 +295,7 @@ try {
       `${mutation.name}: only the specific assertion failure counts`);
     console.log(`negative control ${mutation.name}: rejected by ${mutation.scenario}`);
   }
-  console.log(`production OTA runtime: 81 cases, ${mutations.length} negative controls; source sha256=`
+  console.log(`production OTA runtime: 86 cases, ${mutations.length} negative controls; source sha256=`
     + createHash("sha256").update(source).digest("hex"));
 } finally {
   fs.rmSync(dir, { recursive: true, force: true });

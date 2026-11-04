@@ -411,16 +411,17 @@ that earlier boots did not occur.
 <a id="ota-signing-partitions"></a>
 ## OTA and shared heap coordination
 
-A boot-resident OTA worker owns feed checks, changelog, downloads and direct dev test uploads. Its 11,776-byte
-stack and control block are static and created before network services. Requests notify it; they do
+A boot-resident OTA worker owns feed checks, changelog, downloads and direct dev test uploads. Its
+11,776-byte stack and control block are static and created before network services. Startup verifies
+task-local lwIP state before accepting work. Requests notify it; they do
 not allocate a new delivery task beside a fragmented TLS heap. Artifact identity is one completed
 check generation plus channel, version and application SHA. Acceptance atomically captures that
 lease; the worker rechecks the manifest and complete downloaded digest before signed-image
 validation and boot selection. A local upload instead pins the complete signed binary's digest;
 the saved `dev` channel grants this separate test mode, including equal/older versions. It uses
 the same worker, signature/boot-selection path and health gate. The HTTP handler transfers an
-ESP-IDF async request to that worker, which closes/releases it on every exit; binary reception and
-RSA validation never occupy the HTTP task. Its receive budget is bounded from the first header,
+ESP-IDF async request to that worker, which terminates the connection before releasing the request;
+binary reception and RSA validation never occupy the HTTP task. Its receive budget is bounded from the first header,
 as specified in [API.md](API.md#ota-operation-contract). [SECURITY.md](SECURITY.md) owns trust and
 rollback conditions.
 

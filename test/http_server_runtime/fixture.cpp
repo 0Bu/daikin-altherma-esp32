@@ -1,25 +1,31 @@
 #include "sdk.hpp"
 #include <cstdarg>
 #include <cstdlib>
+#include <csignal>
+#include <cerrno>
 #include <functional>
 #include <new>
 #include <stdexcept>
 #include <unistd.h>
 #include <fcntl.h>
+#include <sys/socket.h>
 #include "http_handlers.hpp"
 #include "stack_watch.hpp"
 
 namespace fixture {
-inline std::string oracle;
-inline bool        ap = false, download = false, busy = false;
+inline std::string  oracle;
+inline bool         ap = false, download = false, busy = false;
 inline bool         dev            = true;
 inline bool         async_upload   = false;
 inline httpd_req_t* upload_request = nullptr;
-inline size_t      largest       = 32768;
-inline unsigned    handler_calls = 0, status_calls = 0, values_calls = 0, stack_samples = 0;
-inline unsigned    status_generation = 7, values_generation = 19;
-inline int         failure = 0;
-inline bool        fail_nothrow = false;
+inline size_t       largest        = 32768;
+inline unsigned     handler_calls = 0, status_calls = 0, values_calls = 0, stack_samples = 0;
+inline unsigned     status_generation = 7, values_generation = 19;
+inline int          failure                             = 0;
+inline bool         fail_nothrow                        = false;
+inline int          shutdown_error                      = 0;
+inline volatile std::sig_atomic_t expected_upload_abort = 0, failed_upload_shutdown = 0,
+                                  released_upload_lease = 0, upload_shutdown_attempts = 0;
 inline std::string status_prefix, status_suffix, values_prefix, values_suffix;
 [[noreturn]] void  fail(const char* reason) {
     std::fprintf(stderr, "FAIL %s: %s\n", oracle.c_str(), reason);
@@ -40,7 +46,18 @@ void* operator new(size_t size, const std::nothrow_t&) noexcept {
     }
 }
 
+int fixture_shutdown(int socket, int how) {
+    fixture::upload_shutdown_attempts = fixture::upload_shutdown_attempts + 1;
+    if (fixture::shutdown_error) {
+        fixture::failed_upload_shutdown = 1;
+        errno                           = fixture::shutdown_error;
+        return -1;
+    }
+    return ::shutdown(socket, how);
+}
+#define shutdown fixture_shutdown
 #include HTTP_COMMON_SOURCE
+#undef shutdown
 #include HTTP_SERVER_SOURCE
 #include MCP_SERVER_SOURCE
 #include ROUTE_GROUP_SOURCE
@@ -61,7 +78,13 @@ void reset() {
     async_upload         = false;
     upload_request       = nullptr;
     sdk::async_begun = sdk::async_completed = 0;
-    largest              = 32768;
+    sdk::async_complete_observer            = nullptr;
+    shutdown_error                          = 0;
+    expected_upload_abort                   = 0;
+    failed_upload_shutdown                  = 0;
+    released_upload_lease                   = 0;
+    upload_shutdown_attempts                = 0;
+    largest                                 = 32768;
     handler_calls = status_calls = values_calls = stack_samples = 0;
     status_generation                                           = 7;
     values_generation                                           = 19;
@@ -258,8 +281,39 @@ esp_err_t http_send_values_json(httpd_req_t* req, std::string_view prefix,
 int main(int argc, char** argv) {
     using namespace fixture;
     const std::string selected = argc > 1 ? argv[1] : "";
-    unsigned          cases    = 0;
-    auto              run      = [&](const char* name, const std::function<void()>& fn) {
+    if (selected.rfind("async_upload_shutdown_", 0) == 0) {
+        oracle = selected;
+        reset();
+        start();
+        SocketPair socket;
+        auto       req              = request("unread binary suffix");
+        req.sockfd                  = socket.fd[1];
+        req.headers["Content-Type"] = "application/octet-stream";
+        async_upload                = true;
+        check(dispatch(req, "/ota/upload", HTTP_POST) == ESP_OK && upload_request,
+              "async failure fixture did not acquire request");
+        shutdown_error               = selected == "async_upload_shutdown_enomem"  ? ENOMEM
+                                       : selected == "async_upload_shutdown_ebadf" ? EBADF
+                                                                                   : ECONNRESET;
+        expected_upload_abort        = 1;
+        sdk::async_complete_observer = [] { released_upload_lease = 1; };
+        std::signal(SIGABRT, [](int) {
+            // Observe the real abort at the exact shutdown/lease boundary. Unknown aborts fail.
+            const bool pass = expected_upload_abort && failed_upload_shutdown &&
+                              !released_upload_lease && upload_shutdown_attempts == 1;
+            constexpr char ok[]  = "PASS async_upload_shutdown_fail_closed\n";
+            constexpr char bad[] = "UNEXPECTED async upload abort\n";
+            if (pass)
+                (void)::write(STDOUT_FILENO, ok, sizeof(ok) - 1);
+            else
+                (void)::write(STDERR_FILENO, bad, sizeof(bad) - 1);
+            std::_Exit(pass ? 0 : 2);
+        });
+        daik::http_complete_ota_upload(upload_request);
+        fail("failed shutdown released the async lease");
+    }
+    unsigned cases = 0;
+    auto     run   = [&](const char* name, const std::function<void()>& fn) {
         if (!selected.empty() && selected != name) return;
         oracle = name;
         reset();
@@ -415,6 +469,8 @@ int main(int argc, char** argv) {
             check(dispatch(req, "/set_wifi", HTTP_POST) == ESP_OK &&
                       req.status == "415 Unsupported Media Type" && handler_calls == 0,
                   "non-JSON body reached route");
+            check(req.content_type == "text/plain" && req.response == "application/json required",
+                  "JSON refusal gave wrong media guidance");
         }
         auto missing = request("{}");
         missing.headers.erase("Content-Type");
@@ -432,17 +488,24 @@ int main(int argc, char** argv) {
         check(dispatch(empty, "/detect", HTTP_POST) == ESP_OK && empty.status == "200 OK",
               "bodyless action requires fake JSON");
         for (const auto* type : {"application/json", "text/plain", "multipart/form-data"}) {
-            auto req                    = request("binary");
-            req.headers["Content-Type"] = type;
-            check(dispatch(req, "/ota/upload", HTTP_POST) == ESP_OK &&
-                      req.status == "415 Unsupported Media Type",
-                  "upload accepted a non-binary body type");
+            for (const auto* uri : {"/ota/upload", "/ota/upload?sha256=abc"}) {
+                auto req                    = request("binary");
+                req.headers["Content-Type"] = type;
+                check(dispatch(req, uri, HTTP_POST) == ESP_OK &&
+                          req.status == "415 Unsupported Media Type",
+                      "upload accepted a non-binary body type");
+                check(req.content_type == "text/plain" &&
+                          req.response == "application/octet-stream required",
+                      "upload refusal gave wrong media guidance");
+            }
         }
         auto binary                    = request("binary");
         binary.headers["Content-Type"] = "application/octet-stream";
         check(dispatch(binary, "/set_wifi", HTTP_POST) == ESP_OK &&
                   binary.status == "415 Unsupported Media Type",
               "binary exception escaped the upload path");
+        check(binary.response == "application/json required",
+              "non-upload refusal claimed binary media");
         binary                         = request("binary");
         binary.headers["Content-Type"] = "application/octet-stream";
         check(dispatch(binary, "/ota/upload", HTTP_POST) == ESP_OK && binary.status == "200 OK",
@@ -603,6 +666,17 @@ int main(int argc, char** argv) {
         char byte;
         check(recv(socket.fd[0], &byte, 1, MSG_DONTWAIT) == 0,
               "completed upload socket could reuse an unread binary suffix");
+        SocketPair detached;
+        req                         = request("binary");
+        req.sockfd                  = detached.fd[1];
+        req.headers["Content-Type"] = "application/octet-stream";
+        check(dispatch(req, "/ota/upload", HTTP_POST) == ESP_OK && upload_request,
+              "detached upload did not acquire request");
+        check(::shutdown(detached.fd[1], SHUT_RDWR) == 0, "detach host socket");
+        shutdown_error = ENOTCONN;
+        daik::http_complete_ota_upload(upload_request);
+        upload_request = nullptr;
+        check(sdk::async_completed == 2, "already detached socket retained async request");
     });
     run("streamed_tool_snapshots", [] {
         start();
