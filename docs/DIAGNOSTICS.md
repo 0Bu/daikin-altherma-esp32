@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: c37d4ea5d0b127b0095483fe796f94f3fdcabb974edcdcc3f1613224a42edd70 -->
+<!-- user-docs-contract: 57a47ed9757f043804a3c5fcf3df783b6c53b955f70750267b0ce19c4ac3363b -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default. Enable **Plant diagnostics** under **Settings → Firmware** to start an evidence
@@ -39,7 +39,8 @@ source confirmation. A software restart, such as an update or a settings save th
 board, also tries to save the open hour. It cannot when that hour shares its clock hour with the
 previous saved hour. Other open and unsaved hours may be lost. Whole hourly records expire when their
 beginning leaves the rolling day, even if polling stops. Changed X10A identity or incompatible
-diagnosis format starts fresh collection; changing the independent circulation witness clears only
+diagnosis format or measurement definition starts fresh collection; changing the independent
+circulation witness clears only
 tank-cooling evidence.
 The current format cannot reuse older diagnosis intervals or restart handoffs; trend history has
 a separate compatibility contract. See [PLANT.md](PLANT.md#reboot-and-persistence).

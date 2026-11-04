@@ -70,9 +70,12 @@ The window holds 23 completed one-hour buckets plus the pending hour, at most 24
 **Every boot retires completed `.noinit` diagnosis hours and undated open counters.** Completed hours
 can restore only from compatible, dated history-journal records after clock synchronization and
 **current-boot confirmation of the full X10A source**. Records bind endpoint, full profile/link scope,
-diagnostics-consent generation, layout/threshold fingerprint and CRC. DHW additionally binds the
+diagnostics-consent generation, consumer-schema/method fingerprint and CRC
+([identity contract](ARCHITECTURE.md#history-and-diagnosis-persistence)). DHW additionally binds the
 circulation configuration; a mismatch empties only its bucket, preserving independent X10A evidence.
-Old unscoped formats are rejected; a cached model guess cannot admit records.
+Old unscoped formats are rejected; a cached model guess cannot admit records. Introducing the
+consumer-schema identity rejects earlier diagnosis records and ongoing-filter handoffs once;
+new compatible records can restore normally. Raw trends keep their separate compatibility rule.
 
 **A software restart (any `esp_restart()`) tries to save the open hour.**
 Software restarts include:

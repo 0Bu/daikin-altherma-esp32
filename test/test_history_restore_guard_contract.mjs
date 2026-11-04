@@ -286,11 +286,13 @@ assert.match(explicitReset, /s_source_confirmed = false;/);
 assert.match(explicitReset, /s_source_fp = 0;/);
 assert.match(explicitReset, /s_model_fp = 0;/);
 const detect = body(checkup, "void checkup_reset_on_detect(");
-assert.match(detect, /s_source_confirmed = source_fp != 0;/);
+assert.match(detect, /s_source_confirmed = source_fp != 0 && fp != 0;/);
+assert.match(detect, /checkup_model_fingerprint\(profile_id, def::lookup_view\(profile_id\)\)/);
+assert.match(detect, /if \(s_source_confirmed && s_boot_handoff_valid/);
 assert.match(detect, /s_boot_handoff\.source_fp == source_fp/);
 assert.match(detect, /s_boot_handoff\.dhw_source_fp == s_dhw_source_fp/,
   "an intentional restart cannot revive a candidate from a replaced circulation witness");
-assert.match(detect, /!s_reset_requested\.load\(\) && !s_dhw_reset_requested\.load\(\)/);
+assert.match(detect, /!s_reset_requested\.load\(\) &&\s*!s_dhw_reset_requested\.load\(\)/);
 assert.match(detect, /s_boot_handoff_valid = false;/);
 assert.match(body(checkup, "void checkup_reboot_save()"), /h\.payload\.pending = kEmptyDhwLossBucket;/);
 assert.match(body(checkup, "void checkup_reboot_save()"), /h\.payload\.dhw_source_fp = s_dhw_source_fp;/);

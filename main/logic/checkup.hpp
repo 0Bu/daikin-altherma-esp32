@@ -126,6 +126,14 @@ inline constexpr CheckupLocator CHECKUP_LOC_R5T      = {0x61, 10, 105};  // DHW 
 inline constexpr CheckupLocator CHECKUP_LOC_IU_MODE  = {0x60,  2, 315};  // Heating/Cooling/DHW
 inline constexpr CheckupLocator CHECKUP_LOC_OUTDOOR  = {0x20,  0, 105};  // R1T outdoor air, 0.1 °C
 
+// Fixed inputs consumed by checkup, including optional outdoor context (which has no capability
+// flag). RPS witnesses, fault classes and retry counters use their shared predicates separately.
+inline constexpr CheckupLocator CHECKUP_INPUT_LOCATORS[] = {
+    CHECKUP_LOC_BSH,     CHECKUP_LOC_PUMP,    CHECKUP_LOC_PRESSURE, CHECKUP_LOC_FLOW,
+    CHECKUP_LOC_VALVE,   CHECKUP_LOC_IU_MODE, CHECKUP_LOC_R5T,      CHECKUP_LOC_OUTDOOR,
+    CHECKUP_LOC_DEFROST, CHECKUP_LOC_BUH1,    CHECKUP_LOC_BUH2,
+};
+
 // Does this row carry the value a locator addresses? Three exact comparisons; no matching, no
 // heuristics, and nothing that a re-spelling or a translation could move.
 constexpr bool checkup_row_matches(const CheckupLocator& l, unsigned reg, unsigned off, int conv) {

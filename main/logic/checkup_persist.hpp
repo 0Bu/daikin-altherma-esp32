@@ -18,12 +18,16 @@
 // gap plus the restart allowance as blind time; a settle/charge-only handoff adds no candidate
 // evidence. Undated completed pending counters are discarded. Edge state is never carried.
 #include "logic/checkup.hpp"
+#include "logic/availability.hpp"
+#include "logic/conv_override.hpp"
+#include "logic/convert.hpp"
 #include "logic/config_store.hpp"     // config_crc32_* — the firmware's ONE CRC implementation
 #include "logic/history_persist.hpp"  // history_reset_preserves_ram — ONE answer to "did DRAM survive?"
 
 #include <algorithm> // std::rotate in checkup_journal_rebuild
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 
 namespace daik::logic {
 
@@ -141,13 +145,17 @@ inline uint32_t checkup_fp_loc(uint32_t crc, const CheckupLocator& l) {
 // Everything that decides what a stored counter MEANS. Geometry first (a bucket that changed size
 // or a ring that changed length cannot be read at all), then the row locators (which sensor a
 // counter was read from), then the constants that decide what gets counted — a DHW window length or
-// a high-loss threshold moving makes yesterday's `high_windows` a different statistic under the same
-// name, which is exactly the substitution a CRC cannot see.
+// a high-loss threshold moving makes yesterday's `high_windows` a different statistic under the
+// same name, which is exactly the substitution a CRC cannot see. Bump when converter arithmetic,
+// formatting/plausibility or counting changes the meaning of retained evidence without changing its
+// row metadata. Row-schema changes are bound separately.
+inline constexpr uint32_t CHECKUP_EVIDENCE_METHOD_VERSION = 6;
+
 inline uint32_t checkup_layout_fingerprint() {
     uint32_t crc = CONFIG_CRC32_INIT;
-    // Net DHW sensor cooling retains draw-like/pump-active windows with explicit context.
-    // Older filtered rates and candidates must not be interpreted under this observation rule.
-    crc = checkup_fp_u32(crc, 5u);
+    // Method 6 adds consumer-schema identity; earlier profile-only records and candidates must
+    // not be interpreted as if their measurement definitions had been confirmed.
+    crc = checkup_fp_u32(crc, CHECKUP_EVIDENCE_METHOD_VERSION);
     crc = checkup_fp_u32(crc, static_cast<uint32_t>(sizeof(CheckupBucket)));
     crc = checkup_fp_u32(crc, static_cast<uint32_t>(sizeof(DhwLossBucket)));
     crc = checkup_fp_u32(crc, static_cast<uint32_t>(sizeof(CheckupRing)));
@@ -159,11 +167,7 @@ inline uint32_t checkup_layout_fingerprint() {
     crc = checkup_fp_u32(crc, CHECKUP_CYCLING_DHW_TAIL_S);
     crc = checkup_fp_u32(crc, CHECKUP_CYCLING_GAP_S);
     crc = checkup_fp_u32(crc, CHECKUP_CYCLING_CLASSIFIED_PCT);
-    for (const CheckupLocator& l : {CHECKUP_LOC_BSH, CHECKUP_LOC_PUMP, CHECKUP_LOC_PRESSURE,
-                                    CHECKUP_LOC_FLOW, CHECKUP_LOC_VALVE, CHECKUP_LOC_IU_MODE,
-                                    CHECKUP_LOC_R5T, CHECKUP_LOC_OUTDOOR,
-                                    CHECKUP_LOC_DEFROST, CHECKUP_LOC_BUH1, CHECKUP_LOC_BUH2})
-        crc = checkup_fp_loc(crc, l);
+    for (const CheckupLocator& l : CHECKUP_INPUT_LOCATORS) crc = checkup_fp_loc(crc, l);
     // The retry counters are addressed by a predicate rather than a table, so the fingerprint asks
     // it the same question the recorder does, over the page it answers for. A moved or added counter
     // changes the mapping and therefore the record.
@@ -198,19 +202,109 @@ inline uint32_t checkup_layout_fingerprint() {
 //
 // First detection confirms this boot's source for later journal admission and the scoped DHW
 // filter handoff. Later source changes retire the old window.
-// This fingerprint binds the model portion: every checkup locator is fixed, and the profile selects
-// its decoding. The separate source_fp additionally binds the existing X10A profile/pins/protocol
-// target scope.
-inline uint32_t checkup_model_fingerprint(const char* profile_id) {
+inline uint32_t checkup_profile_name_crc(const char* profile_id) {
     uint32_t crc = CONFIG_CRC32_INIT;
+    if (profile_id)
+        crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(profile_id),
+                                  std::strlen(profile_id));
     const uint8_t nul = 0;
-    if (profile_id) {
-        size_t n = 0;
-        while (profile_id[n]) n++;
-        crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(profile_id), n);
+    return config_crc32_update(crc, &nul, 1);
+}
+
+// Preserve the pre-existing name-only dwell scope. This is NOT a diagnosis admission identity.
+inline uint32_t checkup_profile_name_fingerprint(const char* profile_id) {
+    return config_crc32_final(checkup_profile_name_crc(profile_id));
+}
+
+// Reuse the fixed locator contract and the production RPS/fault/retry predicates. Optional outdoor
+// context belongs here even though it has no CheckupCoverage flag. Display text matters only via
+// the RPS role and the applied availability rules.
+inline bool checkup_consumes_row(const ValueDef& row) {
+    for (const CheckupLocator& l : CHECKUP_INPUT_LOCATORS)
+        if (checkup_row_matches(l, row.reg, row.offset, row.conv)) return true;
+    return ou_is_rps_witness(row.label, row.reg) || checkup_is_fault_class(row.conv) ||
+           checkup_retry_index(row.reg, row.offset, row.conv) >= 0;
+}
+
+inline uint32_t checkup_schema_row_key(const ValueDef& row) {
+    return (static_cast<uint32_t>(row.reg) << 24) | (static_cast<uint32_t>(row.offset) << 16) |
+           row.conv;
+}
+
+inline uint32_t checkup_schema_row_fingerprint(const ProfileView& view, const ValueDef& row) {
+    uint32_t crc                 = checkup_fp_u32(CONFIG_CRC32_INIT, row.size);
+    crc                          = checkup_fp_u32(crc, static_cast<uint32_t>(row.type));
+    crc                          = checkup_fp_u32(crc, ou_is_rps_witness(row.label, row.reg));
+    const AvailabilityRule* rule = availability_rule(row); // hp_format uses the adjudicated row
+    crc = checkup_fp_u32(crc, static_cast<uint32_t>(availability_policy(row)));
+    if (rule && rule->policy == AvailabilityPolicy::AboveRangeIsAbsent) {
+        static_assert(sizeof(double) == sizeof(uint64_t), "availability ceiling needs IEEE double");
+        uint64_t bits;
+        std::memcpy(&bits, &rule->ceiling, sizeof(bits));
+        crc = checkup_fp_u32(crc, static_cast<uint32_t>(bits));
+        crc = checkup_fp_u32(crc, static_cast<uint32_t>(bits >> 32));
     }
-    crc = config_crc32_update(crc, &nul, 1);
+    const PageAbsenceRule* page = page_absence_rule(row.reg);
+    crc = checkup_fp_u32(crc, page ? 1u + static_cast<uint32_t>(page->signature) : 0u);
+    if (page) crc = checkup_fp_u32(crc, static_cast<uint32_t>(page->min_len));
+    // hp_format's pressure plausibility searches the BASE table, not the overlay. A 405 twin
+    // can change acceptance of zero even though checkup never consumes that twin itself.
+    crc = checkup_fp_u32(crc, is_refrigerant_pressure(row, view.base, view.base_count));
     return config_crc32_final(crc);
+}
+
+// Bind the resolved consumer schema as well as the name. Canonical key order preserves harmless
+// reordering; multiplicity stays explicit. Conflicting duplicate selectors or multiple distinct
+// compressor witnesses fail closed instead of letting first-row order establish identity.
+// No allocation, source text hash or borrowed transient readings are involved.
+inline uint32_t checkup_model_fingerprint(const char* profile_id, const ProfileView& view) {
+    if (!profile_id || !*profile_id || !view.profile_id ||
+        std::strcmp(profile_id, view.profile_id) != 0 || std::strcmp(profile_id, "auto") == 0 ||
+        (view.base_count && !view.base) || (view.extra_count && !view.extra) ||
+        (view.extra2_count && !view.extra2))
+        return 0;
+    uint32_t crc               = checkup_profile_name_crc(profile_id);
+    crc                        = checkup_fp_u32(crc, CHECKUP_EVIDENCE_METHOD_VERSION);
+    const size_t count         = view.count();
+    bool         have_previous = false, have_rps = false;
+    uint32_t     previous = 0;
+    for (;;) {
+        size_t   selected = count;
+        uint32_t key      = UINT32_MAX;
+        for (size_t i = 0; i < count; ++i) {
+            if (!row_publishable(view[i])) continue; // poll checks RAW publishability
+            const ValueDef row = adjudicated(view, i);
+            if (!checkup_consumes_row(row)) continue;
+            const uint32_t candidate = checkup_schema_row_key(row);
+            if ((!have_previous || candidate > previous) &&
+                (selected == count || candidate < key)) {
+                selected = i;
+                key      = candidate;
+            }
+        }
+        if (selected == count) break;
+        const ValueDef row    = adjudicated(view, selected);
+        const uint32_t row_fp = checkup_schema_row_fingerprint(view, row);
+        uint32_t       copies = 0;
+        for (size_t i = 0; i < count; ++i) {
+            if (!row_publishable(view[i])) continue;
+            const ValueDef other = adjudicated(view, i);
+            if (!checkup_consumes_row(other) || checkup_schema_row_key(other) != key) continue;
+            if (checkup_schema_row_fingerprint(view, other) != row_fp) return 0;
+            ++copies;
+        }
+        if (ou_is_rps_witness(row.label, row.reg)) {
+            if (have_rps) return 0;
+            have_rps = true;
+        }
+        crc           = checkup_fp_u32(crc, key);
+        crc           = checkup_fp_u32(crc, row_fp);
+        crc           = checkup_fp_u32(crc, copies);
+        previous      = key;
+        have_previous = true;
+    }
+    const uint32_t result = config_crc32_final(crc);
+    return result ? result : 1u; // zero is never a confirmed decoder identity
 }
 
 // The electrical circulation witness is independently configured. Its broker, value/time mapping
@@ -593,7 +687,7 @@ inline bool checkup_dhw_handoff_valid(uint32_t magic, uint16_t version,
                                       uint32_t expected_model_fp, uint32_t stored_crc,
                                       const DhwLossHandoffPayload& payload) {
     return magic == CHECKUP_DHW_HANDOFF_MAGIC && version == CHECKUP_DHW_HANDOFF_VERSION &&
-           layout_fp == checkup_dhw_handoff_layout_fingerprint() &&
+           layout_fp == checkup_dhw_handoff_layout_fingerprint() && model_fp != 0 &&
            model_fp == expected_model_fp &&
            stored_crc == checkup_dhw_handoff_crc(model_fp, payload);
 }

@@ -189,7 +189,7 @@ Important target boundaries covered by source contracts include:
 |---|---|
 | Config/JSON ingress | Revision refusal before copying/writing, staged blobs, link-only X10A save, reconfigure only after saved results; actual body byte counts, depth-16 single-document cJSON/Weather preflight and bounded room-source body |
 | Recovery/history | Early crash guard/static NVS lock, no automatic NVS erase, conditional WiFi-driver NVS; per-raster age guards, boot liveness/seals and adopted-tail journal safety |
-| Checkup restart | Completed hours only from dated compatible journal records after clock/current-source confirmation; RAM completed hours retired, scoped one-shot DHW handoff, exact slot expiry and `flash_pending`/`fresh`/`flash` states |
+| Checkup restart | Dated compatible journal records require clock/current-source confirmation and matching consumer schema/method; RAM hours retire, scoped DHW handoff and exact slot expiry remain separate |
 | Deployment helpers | Production `{values:[...]}` envelope; malformed/held values, missing MQTT evidence, stale ages, invalid heap, non-200 and curl failures reject synthetic endpoints |
 | Signed OTA | Stable 56/24 KiB INTERNAL handshake gates and separate 24/12 KiB gates for both verifier passes; TLS cleanup before validation, static task storage, deadline and quiescence orchestration |
 

@@ -21963,6 +21963,186 @@ static void test_state_dwell() {
 // samples. These pin the retained RAM-integrity predicate and scoped journal admission.
 // Current startup retires completed RAM hours regardless of internal Accept; selected compatible
 // journal intervals alone establish restored completed-hour evidence and public Flash provenance.
+// Named empty profiles deliberately isolate identity/age mechanics in synthetic persistence tests.
+static uint32_t checkup_fixture_model(const char* id) {
+    daik::logic::ProfileView view;
+    view.profile_id = id;
+    return daik::logic::checkup_model_fingerprint(id, view);
+}
+
+static void test_checkup_decoder_identity() {
+    using namespace daik;
+    using namespace daik::logic;
+    const ValueDef original[] = {
+        {0x62, 11, 105, 2, 2, "Water pressure"},
+        {0x30, 0, 152, 1, -1, "INV frequency (rps)"},
+        {0x10, 4, 203, 1, -1, "Error type"},
+    };
+    auto view = [](const ValueDef* rows, size_t count) {
+        ProfileView v = profile_view(rows, count, nullptr, 0, 0);
+        v.profile_id  = "schema-fixture";
+        return v;
+    };
+    const auto     a       = view(original, 3);
+    const uint32_t model_a = checkup_model_fingerprint(a.profile_id, a);
+    CHECK(model_a != 0);
+    const uint32_t        link = history_x10a_target_fingerprint(a.profile_id, 44, 43, 'I');
+    CheckupJournalPayload stored{};
+    stored.model_fp               = model_a;
+    stored.source_fp              = link;
+    stored.diagnostics_generation = 7;
+    stored.end_unix_s             = 3600;
+    stored.checkup.min_bar        = 39;
+    const auto admits             = [&](uint32_t model) {
+        return checkup_journal_restore_admits(stored, checkup_journal_bucket(stored.end_unix_s),
+                                                          7200, true, model, link, 7, false);
+    };
+    CHECK(admits(model_a));
+
+    // Same name/link/locator/converter, different publication units: raw 40 means 3.9 bar or
+    // 4.0 degrees. The baseline hp_format + journal witness admits the incompatible old minimum.
+    std::vector<ValueDef> changed(std::begin(original), std::end(original));
+    changed[0].type     = 1;
+    const uint8_t raw[] = {40, 0};
+    const Reading pa = convert(original[0], raw, 0), pb = convert(changed[0], raw, 0);
+    CHECK(pa.ok && pb.ok);
+    CHECK(value_for_publication(original[0].type, pa.value) !=
+          value_for_publication(changed[0].type, pb.value));
+    const auto     b       = view(changed.data(), changed.size());
+    const uint32_t model_b = checkup_model_fingerprint(b.profile_id, b);
+    CHECK(model_b != model_a && !admits(model_b));
+    CHECK(history_x10a_target_fingerprint(b.profile_id, 44, 43, 'I') == link);
+    CHECK(!checkup_flash_source_ready(true, 0, link, false));
+
+    // The independent intentional-restart filter requires the same strengthened model identity.
+    const DhwLossHandoffPayload handoff{};
+    const uint32_t              handoff_crc = checkup_dhw_handoff_crc(model_a, handoff);
+    CHECK(checkup_dhw_handoff_valid(CHECKUP_DHW_HANDOFF_MAGIC, CHECKUP_DHW_HANDOFF_VERSION,
+                                    checkup_dhw_handoff_layout_fingerprint(), model_a, model_a,
+                                    handoff_crc, handoff));
+    CHECK(!checkup_dhw_handoff_valid(CHECKUP_DHW_HANDOFF_MAGIC, CHECKUP_DHW_HANDOFF_VERSION,
+                                     checkup_dhw_handoff_layout_fingerprint(), model_a, model_b,
+                                     handoff_crc, handoff));
+    CHECK(!checkup_dhw_handoff_valid(CHECKUP_DHW_HANDOFF_MAGIC, CHECKUP_DHW_HANDOFF_VERSION,
+                                     checkup_dhw_handoff_layout_fingerprint(), 0, 0,
+                                     checkup_dhw_handoff_crc(0, handoff), handoff));
+
+    for (int mutation = 0; mutation < 4; ++mutation) {
+        changed.assign(std::begin(original), std::end(original));
+        if (mutation == 0) changed[0].size = 1;
+        if (mutation == 1) changed[0].conv = 106;
+        if (mutation == 2) changed[0].no_publish = true;
+        if (mutation == 3) changed[1].label = "Not a compressor witness";
+        const auto v = view(changed.data(), changed.size());
+        CHECK(checkup_model_fingerprint(v.profile_id, v) != model_a);
+        CHECK(!admits(checkup_model_fingerprint(v.profile_id, v)));
+    }
+    changed.assign(std::begin(original), std::end(original));
+    changed[0].label = "Renamed display text";
+    changed[1].label = "INV frequency (rps), renamed";
+    std::reverse(changed.begin(), changed.end());
+    changed.push_back({0x61, 22, 105, 2, 1, "Unrelated display sensor"});
+    auto equivalent = view(changed.data(), changed.size());
+    CHECK(checkup_model_fingerprint(equivalent.profile_id, equivalent) == model_a);
+    CHECK(admits(checkup_model_fingerprint(equivalent.profile_id, equivalent)));
+
+    // Adding a non-consumed 405 twin in the BASE table changes zero-pressure plausibility.
+    changed.assign(std::begin(original), std::end(original));
+    changed.push_back({0x62, 11, 405, 2, 1, "Pressure saturation twin"});
+    auto paired = view(changed.data(), changed.size());
+    CHECK(!is_refrigerant_pressure(original[0], a.base, a.base_count));
+    CHECK(is_refrigerant_pressure(changed[0], paired.base, paired.base_count));
+    CHECK(checkup_model_fingerprint(paired.profile_id, paired) != model_a);
+    auto overlay       = profile_view(original, 3, &changed.back(), 1, 0x62);
+    overlay.profile_id = a.profile_id;
+    CHECK(checkup_model_fingerprint(overlay.profile_id, overlay) == model_a);
+    const ValueDef retry{0x10, 10, 310, 1, -1, "Retry"};
+    overlay            = profile_view(original, 3, &retry, 1, 0x10);
+    overlay.profile_id = a.profile_id;
+    CHECK(checkup_model_fingerprint(overlay.profile_id, overlay) != model_a);
+
+    // Optional outdoor context is consumed even though CheckupCoverage has no outdoor flag.
+    changed.assign(std::begin(original), std::end(original));
+    changed.push_back({0x20, 0, 105, 2, 1, "Outdoor air"});
+    const auto     with_outdoor = view(changed.data(), changed.size());
+    const uint32_t outdoor_fp   = checkup_model_fingerprint(with_outdoor.profile_id, with_outdoor);
+    CHECK(outdoor_fp != model_a);
+    changed.back().type = -1;
+    CHECK(checkup_model_fingerprint(with_outdoor.profile_id, with_outdoor) != outdoor_fp);
+    for (const CheckupLocator& l : CHECKUP_INPUT_LOCATORS)
+        CHECK(checkup_consumes_row({l.reg, l.off, l.conv, 2, -1, "Input"}));
+
+    // Conflicting first-match rows cannot use order to establish a retained identity. Identical
+    // duplicate rows retain explicit multiplicity instead of cancelling in an XOR digest.
+    changed.assign(std::begin(original), std::end(original));
+    changed.push_back(original[0]);
+    auto duplicate = view(changed.data(), changed.size());
+    CHECK(checkup_model_fingerprint(duplicate.profile_id, duplicate) != 0);
+    CHECK(checkup_model_fingerprint(duplicate.profile_id, duplicate) != model_a);
+    changed.back().type = 1;
+    CHECK(checkup_model_fingerprint(duplicate.profile_id, duplicate) == 0);
+    std::reverse(changed.begin(), changed.end());
+    CHECK(checkup_model_fingerprint(duplicate.profile_id, duplicate) == 0);
+    changed.assign(std::begin(original), std::end(original));
+    changed.push_back({0x31, 0, 152, 1, -1, "INV frequency (rps), another unit"});
+    auto competing = view(changed.data(), changed.size());
+    CHECK(checkup_model_fingerprint(competing.profile_id, competing) == 0);
+
+    CHECK(checkup_model_fingerprint(nullptr, a) == 0);
+    CHECK(checkup_model_fingerprint("", a) == 0);
+    CHECK(checkup_model_fingerprint("unknown", def::lookup_view("unknown")) == 0);
+    CHECK(checkup_model_fingerprint("auto", def::lookup_view("auto")) == 0);
+    auto automatic       = a;
+    automatic.profile_id = "auto";
+    CHECK(checkup_model_fingerprint("auto", automatic) == 0);
+    CHECK(checkup_model_fingerprint("generic", def::lookup_view("generic")) != 0);
+    CHECK(checkup_profile_name_fingerprint(nullptr) == checkup_profile_name_fingerprint(""));
+    CHECK(checkup_profile_name_fingerprint(a.profile_id) != model_a);
+    // CRC-zero preimage for method 6: a valid identity must reserve zero for refusal, even for
+    // adversarial names. Update this witness deliberately when the evidence method changes.
+    CHECK(checkup_fixture_model("zero-fixture-\x2e\xd2\x77\x62") == 1);
+    auto invalid       = a;
+    invalid.profile_id = nullptr;
+    CHECK(checkup_model_fingerprint(a.profile_id, invalid) == 0);
+    invalid      = a;
+    invalid.base = nullptr;
+    CHECK(checkup_model_fingerprint(invalid.profile_id, invalid) == 0);
+    invalid             = a;
+    invalid.extra_count = 1;
+    CHECK(checkup_model_fingerprint(invalid.profile_id, invalid) == 0);
+    invalid              = a;
+    invalid.extra2_count = 1;
+    CHECK(checkup_model_fingerprint(invalid.profile_id, invalid) == 0);
+
+    // Applied policy, not display/why prose, participates in schema. Exercise the range and page
+    // rule representations too, although current ordinary checkup locators do not require them.
+    const ValueDef fin{0x21, 6, 105, 2, 1, "Fan1 Fin temp."};
+    auto           brine = fin;
+    brine.label          = "Brine inlet temp.";
+    CHECK(checkup_schema_row_fingerprint(a, fin) != checkup_schema_row_fingerprint(a, brine));
+    CHECK(checkup_schema_row_fingerprint(a, {0x30, 3, 151, 2, -1, "EEV"}) != 0);
+    CHECK(checkup_schema_row_fingerprint(a, {0xA0, 0, 105, 2, 1, "Auxiliary"}) != 0);
+    CHECK(checkup_schema_row_fingerprint(a, {0xA1, 0, 105, 2, 1, "Auxiliary"}) != 0);
+
+    // Every actual resolved catalog remains admissible; unrelated rows and display reordering do
+    // not retire its diagnosis. No model table is altered for this check.
+    for (const auto& profile : def::profiles) {
+        const auto     resolved = def::resolved(profile);
+        const uint32_t fp       = checkup_model_fingerprint(profile.id, resolved);
+        CHECK(fp != 0);
+        std::vector<ValueDef> reordered;
+        // Keep base-only pressure plausibility identical when rebuilding the view.
+        for (size_t i = resolved.base_count; i > 0; --i) reordered.push_back(resolved[i - 1]);
+        for (size_t i = resolved.base_count; i < resolved.count(); ++i)
+            reordered.push_back(resolved[i]);
+        auto reversed        = profile_view(reordered.data(), resolved.base_count, nullptr, 0, 0);
+        reversed.profile_id  = profile.id;
+        reversed.extra       = reordered.data() + resolved.base_count;
+        reversed.extra_count = static_cast<uint16_t>(resolved.count() - resolved.base_count);
+        CHECK(checkup_model_fingerprint(profile.id, reversed) == fp);
+    }
+}
+
 static void test_checkup_persist() {
     using namespace logic;
 
@@ -22109,14 +22289,11 @@ static void test_checkup_persist() {
 
     // The model identity is separate and is compared at detection. Different profile, different
     // window; the same profile re-detected on a fresh boot is the same unit and keeps its day.
-    CHECK(checkup_model_fingerprint("altherma3_r_erga") ==
-          checkup_model_fingerprint("altherma3_r_erga"));
-    CHECK(checkup_model_fingerprint("altherma3_r_erga") !=
-          checkup_model_fingerprint("altherma_top_grade"));
-    CHECK(checkup_model_fingerprint("generic") != checkup_model_fingerprint(nullptr));
+    CHECK(checkup_fixture_model("altherma3_r_erga") == checkup_fixture_model("altherma3_r_erga"));
+    CHECK(checkup_fixture_model("altherma3_r_erga") != checkup_fixture_model("altherma_top_grade"));
+    CHECK(checkup_fixture_model("generic") != checkup_fixture_model(nullptr));
     // A prefix must not collide with the longer id it is a prefix of — the NUL is fed deliberately.
-    CHECK(checkup_model_fingerprint("altherma_gshp") !=
-          checkup_model_fingerprint("altherma_gshp2"));
+    CHECK(checkup_fixture_model("altherma_gshp") != checkup_fixture_model("altherma_gshp2"));
 
     // The intentional-reboot handoff is separately sealed from the completed ring. Its reserved
     // pending counters remain CRC-covered for layout integrity; startup discards them because
@@ -22130,7 +22307,7 @@ static void test_checkup_persist() {
     dhw_handoff.pending.observed_s             = 3599;
     dhw_handoff.pending.windows                = 1;
     dhw_handoff.pending.max_loss_tenths_k_h    = 7;
-    const uint32_t model_fp                    = checkup_model_fingerprint("altherma3_r_erga");
+    const uint32_t model_fp                    = checkup_fixture_model("altherma3_r_erga");
     const uint32_t handoff_fp                  = checkup_dhw_handoff_layout_fingerprint();
     const uint32_t handoff_crc                 = checkup_dhw_handoff_crc(model_fp, dhw_handoff);
     CHECK(checkup_dhw_handoff_valid(CHECKUP_DHW_HANDOFF_MAGIC, CHECKUP_DHW_HANDOFF_VERSION,
@@ -23472,7 +23649,7 @@ static void test_history_persist() {
     // records. Its own layout fingerprint, hourly raster and word-rounded payload width are all
     // mandatory, and CRC covers the exact persisted CheckupBucket + DhwLossBucket bytes.
     CheckupJournalPayload checkup_payload;
-    checkup_payload.model_fp                             = checkup_model_fingerprint("altherma3");
+    checkup_payload.model_fp                             = checkup_fixture_model("altherma3");
     checkup_payload.end_unix_s                           = 1'700'002'800;
     checkup_payload.checkup.rps_observed_s               = 3'599;
     checkup_payload.checkup.starts                       = 7;
@@ -28169,7 +28346,7 @@ static void test_history_adoption_booking() {
 // Fresh-instance reconstruction oracle: durable absolute endpoints, not boot counts, own age.
 static void test_checkup_scoped_flash_age() {
     using namespace daik::logic;
-    const uint32_t        model  = checkup_model_fingerprint("profile-p");
+    const uint32_t        model  = checkup_fixture_model("profile-p");
     const uint32_t        link_a = history_x10a_target_fingerprint("profile-p", 44, 43, 'I');
     const uint32_t        link_b = history_x10a_target_fingerprint("profile-p", 1, 2, 'I');
     CheckupJournalPayload stored{};
@@ -28242,7 +28419,7 @@ static void test_checkup_scoped_flash_age() {
         volatile size_t  count = c.count;
         CHECK(checkup_journal_next_live_bucket(after, newest, count) == c.expected);
     }
-    const uint32_t model_b = checkup_model_fingerprint("profile-q");
+    const uint32_t model_b = checkup_fixture_model("profile-q");
     struct AdmissionCase {
         int64_t  wall;
         bool     confirmed;
@@ -28618,6 +28795,7 @@ int main() {
     test_instrument_registry();
     test_state_dwell();
     test_checkup_persist();
+    test_checkup_decoder_identity();
     test_room_history();
     test_checkup_journal_revisions();
     test_checkup_planned_restart_seal();
