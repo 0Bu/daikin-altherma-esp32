@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: a6ed42d4f1aea101daaebe0c8fe3672754d520d88c216227820c81566bc86057 -->
+<!-- diagnostic-evidence-contract: c1c7082c668127eaf69a24242d895e97a8f96b6f0c0264d0b2e34b38a4466e2f -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -20,6 +20,12 @@ refrigerant test. No manufacturer settling duration can therefore be inferred fr
 X10A evidence is scoped to the configured target generation. Changed wiring, profile or detected
 source discards an in-flight old-source sample and retires pending restoration for that boot.
 A manual profile selection establishes a decoding contract, not a physical reply.
+Retained checkup counters additionally require the same resolved consumer schema and evidence
+method. A changed measurement definition cannot borrow an old counter merely because its profile
+name is unchanged; [ARCHITECTURE.md](ARCHITECTURE.md#history-and-diagnosis-persistence) owns the
+identity and method-version maintenance contract. This does not admit an archive as a golden
+fixture: historical firmware/decoder/schema/method provenance and qualification must be established
+for each case. The existing population fixture is synthetic, not a reconstructed field event.
 
 At read time the diagnosis publishes elapsed span separately from usable signal coverage and the
 age of the last nonempty X10A sample. A source older than the 15-second project bound cannot support

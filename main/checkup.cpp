@@ -11,6 +11,7 @@
 #include "safe_mode.hpp"         // safe_mode_active — nothing ages the window there
 #include "mqtt_ha.hpp"           // independent circulation-pump electrical witness
 #include "config.hpp"            // allocation-free circulation identity snapshot
+#include "def/overlay.hpp"       // same resolved decoder rows as the poll engine
 #include "sntp_time.hpp"         // pressure minimum carries a real source observation timestamp
 
 #include "esp_attr.h"            // __NOINIT_ATTR — warm handoff and startup integrity metadata
@@ -521,17 +522,18 @@ void checkup_reset() {
 // Startup cached identity is only an expectation for a separately sealed handoff. Explicit resets
 // retire pending journal adoption for this boot, even if selection names the same profile/link.
 void checkup_reset_on_detect(const char* profile_id, uint32_t source_fp) {
-    const uint32_t fp = logic::checkup_model_fingerprint(profile_id);
+    const uint32_t fp = logic::checkup_model_fingerprint(profile_id, def::lookup_view(profile_id));
     if (!s_mtx) return;
     Lock lk(s_mtx);
     if (!lk.acquired()) return;
     const bool first   = !s_source_confirmed;
-    s_source_confirmed = source_fp != 0;
+    s_source_confirmed = source_fp != 0 && fp != 0;
     s_model_fp         = fp;
     s_source_fp        = source_fp;
     if (first) {
         // The stored startup scope was only an expectation. This call confirms the current source.
-        if (s_boot_handoff_valid && !s_reset_requested.load() && !s_dhw_reset_requested.load() &&
+        if (s_source_confirmed && s_boot_handoff_valid && !s_reset_requested.load() &&
+            !s_dhw_reset_requested.load() &&
             s_diagnostics_enabled.load(std::memory_order_acquire) && s_boot_handoff_model == fp &&
             s_boot_handoff.source_fp == source_fp &&
             s_boot_handoff.dhw_source_fp == s_dhw_source_fp) {

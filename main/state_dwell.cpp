@@ -3,7 +3,7 @@
 // is host-tested; this file is the static table, one mutex, and the fold from a poll cycle.
 #include "state_dwell.hpp"
 #include "diag_log.hpp"
-#include "logic/checkup_persist.hpp"  // checkup_model_fingerprint — the ONE profile-id identity
+#include "logic/checkup_persist.hpp" // preserved name-only profile identity for dwell
 #include "logic/crashinfo.hpp"   // crash_reason_slug — one reset vocabulary
 #include "logic/state_dwell.hpp"
 #include "safe_mode.hpp"         // safe_mode_active — nothing ages the table there
@@ -193,10 +193,9 @@ void dwell_forget() {
 // costs once a feature actually survives a reboot: the table is adopted at boot and thrown away four
 // seconds later, on exactly the boards that have a heat pump attached.
 void dwell_reset_on_detect(const char* profile_id) {
-    // The same "which unit is this" hash the checkup uses, reused rather than copied: a second
-    // six-line CRC over the same string is a second thing that can disagree about whether the unit
-    // changed, and both features answer that question for the same reason on the same event.
-    const uint32_t fp = logic::checkup_model_fingerprint(profile_id);
+    // Keep dwell's historical name-only scope. Diagnosis admission additionally binds consumer
+    // schema and method; changing that independent contract must not retire these state ages.
+    const uint32_t fp = logic::checkup_profile_name_fingerprint(profile_id);
     if (!s_mtx) return;
     Lock lk(s_mtx);
     if (!lk.acquired()) return;

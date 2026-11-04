@@ -1451,6 +1451,7 @@ CONFIG_DOCUMENT_PATHS = frozenset({
     "httpd_config_weather", "httpd_config_diagnostics", "httpd_config_circulation",
     "httpd_hp_query_probe", "httpd_config_save", "httpd_config_save_link", "httpd_mqtt_tls",
     "httpd_i2c_read", "httpd_i2c_write", "httpd_i2c_receive",
+    "httpd_checkup_schema",
     *(f"httpd_shutdown_{name}_{phase}" for name in SHUTDOWN_HTTP_CALLERS
       for phase in ("journal", "checkup")),
 })
@@ -1582,6 +1583,42 @@ def validate_room_history_paths(budgets: dict[str, Any], sources: dict[str, str]
         raise BudgetError("room history: publisher/recorder caller inventory changed")
 
 
+CHECKUP_SCHEMA_CHAIN = [
+    "checkup_detect_schema", "checkup_schema", "checkup_schema_row", "checkup_schema_consumer",
+    "checkup_schema_adjudicated_view", "checkup_schema_adjudicated_row",
+    "checkup_schema_availability", "checkup_schema_rps", "checkup_schema_contains",
+    "checkup_schema_crc", "checkup_schema_profile_lookup", "checkup_schema_profile_view",
+    "cycling_seal", "cycling_crc",
+]
+
+
+def validate_checkup_schema_paths(budgets: dict[str, Any], sources: dict[str, str]) -> None:
+    # Conservatively add every schema descendant, including mutually exclusive branches. Keep
+    # the existing SDK/ROM continuation and task reserves; a generic pass must not omit this chain.
+    for name, task, prefix, maximum in (
+        ("poll_checkup_schema", "poll", ["poll_task"], 7168),
+        ("httpd_checkup_schema", "httpd", ["config_hp", "config_document"], 8192),
+    ):
+        rule = budgets["paths"].get(name, {})
+        if (rule.get("symbols") != prefix + CHECKUP_SCHEMA_CHAIN
+                or rule.get("multipliers") != {} or rule.get("base_bytes") != 1536
+                or rule.get("max_bytes") != maximum
+                or name not in budgets["tasks"][task]["paths"]):
+            raise BudgetError(f"checkup schema path {name}: reviewed caller/continuation changed")
+    for path, caller in (("main/hp_poll.cpp", "poll_detect"),
+                         ("main/http_config.cpp", "set_hp")):
+        if not re.search(r"\bcheckup_reset_on_detect\s*\(",
+                         stack_function_body(sources[path], caller)):
+            raise BudgetError(f"checkup schema caller {caller}: reset path moved")
+    reset = stack_function_body(sources["main/checkup.cpp"], "checkup_reset_on_detect")
+    if not re.search(r"\bcheckup_model_fingerprint\s*\(", reset):
+        raise BudgetError("checkup schema caller: fingerprint path moved")
+    calls = sum(len(re.findall(r"\bcheckup_reset_on_detect\s*\(", stack_source_code(text)))
+                for path, text in sources.items() if path.endswith(".cpp"))
+    if calls != 3:  # definition plus the two measured callers
+        raise BudgetError("checkup schema caller inventory changed")
+
+
 def validate_source_contract(budgets: dict[str, Any]) -> None:
     sources = {path: (REPO / path).read_text(encoding="utf-8")
                for path, _ in TASK_ALLOCATIONS.values()}
@@ -1602,6 +1639,7 @@ def validate_source_contract(budgets: dict[str, Any]) -> None:
         (REPO / "main/logic/ota_manifest.hpp").read_text(encoding="utf-8"))
     validate_http_stack(budgets, (REPO / "main/http_server.cpp").read_text(encoding="utf-8"))
     validate_status_diagnosis_paths(budgets, sources)
+    validate_checkup_schema_paths(budgets, sources)
     validate_staged_stack_paths(budgets, sources,
                                 (REPO / "main/logic/mqtt_group.hpp").read_text(encoding="utf-8"))
     validate_room_history_paths(budgets, sources)
@@ -2444,6 +2482,18 @@ def self_test() -> None:
      'daik::hp_format(daik::ValueDef const&, unsigned char const*, int, int, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >&, daik::ValueDef const*, unsigned int, daik::SaturationWitness)': 64,
      'daik::history_record(daik::CachedValue const*, unsigned int, unsigned long)': 64,
      'daik::checkup_report()': 64,
+     'daik::checkup_reset_on_detect(char const*, unsigned long)': 64,
+     'daik::logic::checkup_model_fingerprint(char const*, daik::logic::ProfileView const&)': 64,
+     'daik::logic::checkup_schema_row_fingerprint(daik::logic::ProfileView const&, daik::ValueDef const&)': 32,
+     'daik::logic::checkup_consumes_row(daik::ValueDef const&)': 32,
+     'daik::logic::adjudicated(daik::logic::ProfileView const&, unsigned int)': 64,
+     'daik::logic::adjudicated(daik::ValueDef const&, char const*)': 64,
+     'daik::availability_rule(daik::ValueDef const&)': 32,
+     'daik::logic::ou_is_rps_witness(char const*, unsigned int)': 32,
+     'daik::logic::lwt_ci_contains(char const*, char const*)': 32,
+     'daik::logic::checkup_fp_u32(unsigned long, unsigned long)': 32,
+     'daik::def::lookup(char const*)': 32,
+     'daik::def::resolved(daik::def::Profile const&)': 64,
      'daik::checkup_cycling_evidence()': 64,
      'daik::expire_restored_locked()': 48,
      'daik::history_service_flash_restore()': 416,
@@ -3009,6 +3059,28 @@ def self_test() -> None:
     staged_stack_controls = staged_stack_self_test(budgets)
     room_history_controls = room_history_stack_self_test(budgets)
     validate_source_contract(budgets)
+    schema_sources = {path: (REPO / path).read_text(encoding="utf-8")
+                      for path in ("main/hp_poll.cpp", "main/http_config.cpp", "main/checkup.cpp")}
+    for mutation in ("omit_member", "omit_continuation", "omit_task", "move_caller", "new_caller"):
+        changed_budget = json.loads(json.dumps(budgets))
+        changed_source = dict(schema_sources)
+        if mutation == "omit_member":
+            changed_budget["paths"]["poll_checkup_schema"]["symbols"].remove("checkup_schema")
+        elif mutation == "omit_continuation":
+            changed_budget["paths"]["httpd_checkup_schema"]["base_bytes"] = 0
+        elif mutation == "omit_task":
+            changed_budget["tasks"]["poll"]["paths"].remove("poll_checkup_schema")
+        elif mutation == "move_caller":
+            changed_source["main/hp_poll.cpp"] = changed_source["main/hp_poll.cpp"].replace(
+                "checkup_reset_on_detect(", "untracked_schema_reset(")
+        else:
+            changed_source["main/new_task.cpp"] = "void run() { checkup_reset_on_detect(); }"
+        try:
+            validate_checkup_schema_paths(changed_budget, changed_source)
+        except BudgetError as exc:
+            assert "checkup schema" in str(exc)
+        else:
+            raise AssertionError(f"self-test accepted changed schema stack path: {mutation}")
     frames = parse_frames(fixture)
 
     selected = evaluate(frames, budgets)
