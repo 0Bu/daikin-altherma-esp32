@@ -30,6 +30,10 @@ using CheckupFlashRecord = logic::CheckupJournalRecord;
 
 enum class CheckupFlashRestoreResult : uint8_t { Deferred, Ignored, Restored };
 
+// Capture before collecting a poll's inputs, not after the sweep. Admission rejects a token from
+// before any diagnostics transition; this live epoch is independent of the saved generation.
+uint32_t checkup_consent_epoch();
+
 // Feed one poll cycle. Called from the poll task right after a sweep with that cycle's values — NOT
 // under the cache mutex (this takes its own, and holding two would invent a lock order this file
 // has no reason to have, exactly like history_record).
@@ -43,7 +47,7 @@ enum class CheckupFlashRestoreResult : uint8_t { Deferred, Ignored, Restored };
 // metadata. Neither an empty sample nor that flag establishes a successful bus observation.
 void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_running,
                     const logic::CheckupCoverage& coverage, uint32_t source_generation,
-                    bool profile_confirmed = true);
+                    uint32_t consent_epoch, bool profile_confirmed = true);
 
 // Judge the previous boot's handoff integrity and retire completed RAM hours. app_main calls ONCE,
 // before any producer task exists, which is what makes the decision single-threaded and lock-free.

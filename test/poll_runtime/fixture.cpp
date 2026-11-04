@@ -47,9 +47,29 @@ std::string              committed_eeprom;
 std::vector<std::string> raw_lines;
 void (*on_detect)()       = nullptr;
 void (*on_query)(uint8_t) = nullptr;
+void (*on_config)()       = nullptr;
+void (*on_uart_init)()    = nullptr;
+void (*on_history)()      = nullptr;
+uint32_t consent_epoch    = 1;
+unsigned consent_reads    = 0;
+struct CheckupCall {
+    size_t   count;
+    uint32_t source_generation;
+    uint32_t consent_epoch;
+};
+CheckupCall checkup_calls[4]{};
+size_t      checkup_call_count              = 0;
+unsigned    checkup_gaps_preserving_profile = 0;
 } // namespace adapter
 namespace daik {
-Config             config() { return adapter::cfg; }
+Config config() {
+    if (adapter::on_config) {
+        const auto callback = adapter::on_config;
+        adapter::on_config  = nullptr;
+        callback();
+    }
+    return adapter::cfg;
+}
 std::string        config_profile() { return adapter::cfg.profile; }
 ConfigLinkSnapshot config_link_snapshot() {
     return {adapter::cfg.proto, adapter::cfg.rx_pin, adapter::cfg.tx_pin};
@@ -79,6 +99,11 @@ bool config_commit_detected_model(uint32_t, std::string profile, uint32_t, int, 
 }
 bool hp_uart_init(int, int) {
     ++sdk::uart_inits;
+    if (adapter::on_uart_init) {
+        const auto callback   = adapter::on_uart_init;
+        adapter::on_uart_init = nullptr;
+        callback();
+    }
     // The next allocation is production fresh.reserve(view.count()), not an adapter throw.
     if (sdk::fail_poll_reserve && adapter::uart_ok) sdk::fail_next_new = true;
     return adapter::uart_ok;
@@ -133,24 +158,44 @@ void diag_printf(const char* format, ...) {
         adapter::raw_lines.emplace_back(line);
     }
 }
-void     stack_watch_sample(StackWatch) noexcept { ++sdk::stack_samples; }
-void     heap_guard_sample() {}
-void     history_liveness_touch() noexcept {}
-void     history_record_board() {}
-void     history_record(const CachedValue* values, size_t count, uint32_t) {
+void stack_watch_sample(StackWatch) noexcept { ++sdk::stack_samples; }
+void heap_guard_sample() {}
+void history_liveness_touch() noexcept {}
+void history_record_board() {}
+void history_record(const CachedValue* values, size_t count, uint32_t) {
     ++sdk::history_commits;
     sdk::history_outdoor_values = 0;
     for (size_t i = 0; i < count; ++i)
         if ((values[i].reg == 0x20 || values[i].reg == 0x21) && !values[i].value.empty())
             ++sdk::history_outdoor_values;
+    if (adapter::on_history) {
+        const auto callback = adapter::on_history;
+        adapter::on_history = nullptr;
+        callback();
+    }
 }
 void     history_reset_on_detect(uint32_t) {}
 uint32_t history_x10a_identity(const char*, int32_t, int32_t, char) { return 0x13103; }
 void     checkup_reset_on_detect(const char*, uint32_t) {}
 void     dwell_reset_on_detect(const char*) {}
-void     checkup_record(const CachedValue* values, size_t count, bool, bool,
-                        const logic::CheckupCoverage&, uint32_t, bool) {
-    if (!values && !count) ++sdk::checkup_unread;
+uint32_t checkup_consent_epoch() {
+    ++adapter::consent_reads;
+    return adapter::consent_epoch;
+}
+void checkup_set_diagnostics(bool, uint32_t) {
+    // External service boundary only: record the live epoch change, no admission implementation.
+    ++adapter::consent_epoch;
+}
+void checkup_record(const CachedValue* values, size_t       count, bool, bool,
+                    const logic::CheckupCoverage&, uint32_t generation, uint32_t consent_epoch,
+                    bool profile_confirmed) {
+    if (adapter::checkup_call_count < 4)
+        adapter::checkup_calls[adapter::checkup_call_count] = {count, generation, consent_epoch};
+    ++adapter::checkup_call_count;
+    if (!values && !count) {
+        ++sdk::checkup_unread;
+        if (!profile_confirmed) ++adapter::checkup_gaps_preserving_profile;
+    }
 }
 void dwell_record(const CachedValue* values, size_t count, uint32_t, uint32_t,
                   const HpValuesIdentity*) {
@@ -217,6 +262,8 @@ static void after_delay(TickType_t ticks) {
                "recent_last_good_source_preserved");
         oracle(sdk::checkup_unread == 1 && sdk::dwell_unread == 1,
                "oom_records_unread_observation");
+        oracle(adapter::checkup_gaps_preserving_profile == sdk::checkup_unread,
+               "empty_gap_preserves_profile_capability");
         sdk::now_us = good_time + 16000000;
     } else if (sdk::delay_count == 3) {
         oracle(hp_skipped_cycles() == 2 && sdk::failures == 2, "repeated_failure_survived");
@@ -273,6 +320,8 @@ static void after_delay(TickType_t ticks) {
         oracle(hp_skipped_cycles() == 3 && sdk::skipped_logs == 2 && sdk::history_commits == 3 &&
                    sdk::takes == sdk::gives && sdk::stack_samples == 7,
                "episodes_have_balanced_completion");
+        oracle(sdk::checkup_unread == 4 && adapter::checkup_gaps_preserving_profile == 4,
+               "all_oom_and_tls_gaps_preserve_profile_capability");
         throw sdk::Stop{};
     } else
         oracle(false, "bounded_task_execution");
@@ -1101,6 +1150,59 @@ static void run_held(const char* name) {
         oracle(false, "known_held_case");
 }
 
+static void consent_off_on() {
+    daik::checkup_set_diagnostics(false, 24);
+    daik::checkup_set_diagnostics(true, 25);
+}
+
+static void run_consent(const char* name) {
+    const bool config  = !std::strcmp(name, "consent_before_config");
+    const bool uart    = !std::strcmp(name, "consent_during_uart");
+    const bool history = !std::strcmp(name, "consent_after_history");
+    const bool unread  = !std::strcmp(name, "consent_uart_failure");
+    oracle(config || uart || history || unread, "known_consent_case");
+    setup_populated();
+    const uint32_t consent_before = adapter::consent_epoch;
+    const uint32_t generation     = daik::hp_poll_generation();
+    const unsigned queries_before = sdk::queries;
+    const unsigned history_before = sdk::history_commits;
+    const unsigned reads_before   = adapter::consent_reads;
+    if (config)
+        adapter::on_config = consent_off_on;
+    else if (history)
+        adapter::on_history = consent_off_on;
+    else
+        adapter::on_uart_init = consent_off_on;
+    adapter::uart_ok = !unread;
+    daik::poll_once();
+    oracle(adapter::consent_epoch == consent_before + 2 && daik::hp_poll_generation() == generation,
+           "poll_consent_changes_without_x10a_reconfigure");
+    oracle(adapter::checkup_call_count == 1, "poll_consent_one_observation");
+    const auto& old = adapter::checkup_calls[0];
+    oracle(old.consent_epoch == consent_before && old.source_generation == generation,
+           config ? "poll_consent_token_precedes_config" : "poll_consent_forwards_original_token");
+    oracle(adapter::consent_reads == reads_before + 1, "poll_consent_single_capture_per_sweep");
+    if (unread)
+        oracle(old.count == 0 && sdk::queries == queries_before &&
+                   sdk::history_commits == history_before && sdk::checkup_unread == 1,
+               "poll_consent_unread_uart_path_preserves_token");
+    else
+        oracle(old.count > 0 && sdk::queries > queries_before &&
+                   sdk::history_commits == history_before + 1,
+               "poll_consent_actual_sweep_precedes_submission");
+
+    // The following real sweep takes the newly enabled interval's token and submits real rows.
+    adapter::uart_ok = true;
+    sdk::now_us += 1000000;
+    daik::poll_once();
+    oracle(adapter::checkup_call_count == 2 && adapter::checkup_calls[1].count > 0 &&
+               adapter::checkup_calls[1].consent_epoch == adapter::consent_epoch &&
+               adapter::checkup_calls[1].consent_epoch != consent_before &&
+               adapter::checkup_calls[1].source_generation == generation &&
+               adapter::consent_reads == reads_before + 2,
+           "poll_consent_new_sweep_positive_control");
+}
+
 int main(int argc, char** argv) {
     const char* name = argc > 1 ? argv[1] : "oom_raii";
     if (!std::strcmp(name, "oom_raii"))
@@ -1121,6 +1223,8 @@ int main(int argc, char** argv) {
         run_refrigerant(name);
     else if (!std::strncmp(name, "held_", 5))
         run_held(name);
+    else if (!std::strncmp(name, "consent_", 8))
+        run_consent(name);
     else
         oracle(false, "known_runtime_case");
     std::printf("PASS CASE %s\n", name);

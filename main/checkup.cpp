@@ -118,6 +118,9 @@ std::atomic<bool>     s_reset_requested{false};
 std::atomic<bool>     s_dhw_reset_requested{false};
 std::atomic<uint32_t>  s_dhw_identity_generation{1};
 std::atomic<bool>     s_diagnostics_enabled{false};
+// Live admission epoch is independent of the durable consent identity: even a repeated saved
+// generation cannot let a poll begun before an off/on transition enter the new interval.
+std::atomic<uint32_t> s_diagnostics_epoch{1};
 uint32_t              s_diagnostics_generation = 0; // guarded by s_mtx after startup
 bool                  s_reboot_saved_this_boot = false;
 // End of the newest COMPLETED bucket in this boot's monotonic clock.  Unlike P().span_us this is
@@ -480,6 +483,7 @@ void checkup_set_diagnostics(bool enabled, uint32_t generation) {
     if (!s_mtx) return;
     Lock lk(s_mtx);
     if (!lk.acquired()) return;
+    s_diagnostics_epoch.fetch_add(1, std::memory_order_acq_rel);
     s_diagnostics_enabled.store(enabled, std::memory_order_release);
     s_diagnostics_generation = generation;
     s_boot_handoff_valid     = false;
@@ -558,9 +562,11 @@ void checkup_dhw_reset() {
     s_dhw_reset_requested.store(true);
 }
 
+uint32_t checkup_consent_epoch() { return s_diagnostics_epoch.load(std::memory_order_acquire); }
+
 void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_running,
                     const logic::CheckupCoverage& coverage, uint32_t source_generation,
-                    bool profile_confirmed) {
+                    uint32_t consent_epoch, bool profile_confirmed) {
     if (!s_diagnostics_enabled.load(std::memory_order_acquire)) return;
     if (!s_mtx) return;   // checkup_start() creates it; absent means its alloc failed -> no observation
     if (!v && n) return;
@@ -648,7 +654,9 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
 
     Lock lk(s_mtx);
     if (!lk.acquired()) return;
-    if (!s_diagnostics_enabled.load(std::memory_order_acquire)) return;
+    if (!s_diagnostics_enabled.load(std::memory_order_acquire) ||
+        consent_epoch != s_diagnostics_epoch.load(std::memory_order_acquire))
+        return;
     if (!hp_poll_generation_matches(source_generation)) return;
     // A software restart sealed the open hour for the shutdown drain: keep it as it was dated.
     if (s_seal_bucket != INT64_MIN) return;
