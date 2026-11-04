@@ -481,7 +481,8 @@ they are not patches. An omitted topic or both omitted coordinate strings disabl
 
 `POST /set_diagnostics {enabled:boolean}` persists consent and applies live. Every transition
 advances a durable generation; off clears old diagnosis and additional room/forecast/circulation
-state, on begins new evidence. X10A, HomeHub, history, ENV III and heartbeat remain active.
+state, on begins new evidence. In-flight diagnosis samples cannot enter the new interval.
+X10A, HomeHub, history, ENV III and heartbeat remain active.
 
 `POST /set_ref_temp` fields:
 

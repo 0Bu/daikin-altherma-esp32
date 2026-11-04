@@ -270,7 +270,10 @@ Circulation broker/mapping/interpretation
 identity gates only DHW buckets; changed circulation must not retire independent X10A evidence.
 A narrowly scoped one-shot DHW handoff may preserve an unfinished candidate; it cannot lend coverage
 to completed checks. Disabling diagnostics clears runtime evidence; re-enabling starts a new
-generation. Same-boot journal creation is not proof of reboot restoration. `DIAGNOSTICS.md` explains
+generation. Each diagnosis sample binds a separate live consent epoch before staging and rechecks it under
+the checkup mutex. A transition rejects the old sample even if the saved generation repeats;
+X10A and circulation epochs remain independent. Same-boot journal creation is not proof of reboot
+restoration. `DIAGNOSTICS.md` explains
 results; `PLANT.md` owns lifecycle.
 A run is booked into the hour in which it started, but only when it stops. When that hour was
 already journaled, it and every later live hour are appended again; the boot index keeps each

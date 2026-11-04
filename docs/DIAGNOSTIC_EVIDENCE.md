@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: c1c7082c668127eaf69a24242d895e97a8f96b6f0c0264d0b2e34b38a4466e2f -->
+<!-- diagnostic-evidence-contract: ccdbca14eeb5ccfa304852973247e19fca5ffaca05d6da551250a6e957c4607c -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -12,6 +12,7 @@ For every row in the **Plant diagnostics · 24 h** card, this page answers four 
 The whole feature is an explicit opt-in under Settings › Firmware and is off by default. Turning it
 on begins a fresh evidence generation; turning it off stops and clears the diagnosis and its
 additional room, forecast, and circulation sources. None of the results below is a recommendation.
+Diagnosis samples in preparation at a consent transition are not evidence for the new generation.
 
 The card observes ordinary operation; it does not command service mode, full load, or a stationary
 refrigerant test. No manufacturer settling duration can therefore be inferred from a complete

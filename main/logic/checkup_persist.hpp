@@ -149,12 +149,12 @@ inline uint32_t checkup_fp_loc(uint32_t crc, const CheckupLocator& l) {
 // same name, which is exactly the substitution a CRC cannot see. Bump when converter arithmetic,
 // formatting/plausibility or counting changes the meaning of retained evidence without changing its
 // row metadata. Row-schema changes are bound separately.
-inline constexpr uint32_t CHECKUP_EVIDENCE_METHOD_VERSION = 6;
+inline constexpr uint32_t CHECKUP_EVIDENCE_METHOD_VERSION = 7;
 
 inline uint32_t checkup_layout_fingerprint() {
     uint32_t crc = CONFIG_CRC32_INIT;
-    // Method 6 adds consumer-schema identity; earlier profile-only records and candidates must
-    // not be interpreted as if their measurement definitions had been confirmed.
+    // Method 7 rejects samples staged before a consent transition. Older records may include an
+    // endpoint from the preceding consent interval and cannot prove the corrected admission rule.
     crc = checkup_fp_u32(crc, CHECKUP_EVIDENCE_METHOD_VERSION);
     crc = checkup_fp_u32(crc, static_cast<uint32_t>(sizeof(CheckupBucket)));
     crc = checkup_fp_u32(crc, static_cast<uint32_t>(sizeof(DhwLossBucket)));
