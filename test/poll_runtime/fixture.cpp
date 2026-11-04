@@ -58,7 +58,7 @@ struct CheckupCall {
     uint32_t consent_epoch;
 };
 CheckupCall checkup_calls[4]{};
-size_t      checkup_call_count = 0;
+size_t      checkup_call_count              = 0;
 unsigned    checkup_gaps_preserving_profile = 0;
 } // namespace adapter
 namespace daik {
