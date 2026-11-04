@@ -22,6 +22,45 @@ import merge_payload
 
 
 class AgentHookFastTests(unittest.TestCase):
+    def test_literal_source_metadata_does_not_execute_protected_source_arguments(self):
+        paths = "partitions.csv scripts/agent-python.sh scripts/dev-ota-upload.py scripts/gh-with-git-credentials.sh"
+        prefixes = ("shasum -a 256 -- ", "/usr/bin/shasum -a 256 -- ", "sha256sum -- ",
+                    "stat -f '%Lp %z %HT %N' -- ", "stat -c '%a %s %F %n' -- ")
+        for prefix in prefixes:
+            for files in (paths, " ".join("/tmp/public-build/" + path for path in paths.split())):
+                command = prefix + files
+                with self.subTest(command=command):
+                    self.assertTrue(agent_hook.literal_source_metadata_inspection(command))
+                    self.assertTrue(agent_hook.read_only_gate_inspection(command))
+                    self.assertFalse(agent_hook.shell_writes_partitions(command))
+                    self.assertEqual(self.run_pre_tool({"cwd": str(ROOT), "tool_name": "exec_command",
+                                                       "tool_input": {"cmd": command}}), (0, ""))
+
+    def test_source_metadata_permission_cannot_read_secrets_or_wrap_execute_write(self):
+        source = "shasum -a 256 -- scripts/dev-ota-upload.py partitions.csv"
+        for command in ("env " + source, "bash -c '" + source + "'", source + "; true",
+                        source + " | sh", source + " > /tmp/out", source + "\ntrue",
+                        source.replace("shasum", "/tmp/shasum"),
+                        source.replace("-a 256", "--check"), source.replace("-a 256", "-ac 256"),
+                        source.replace(" -- ", " "), source.replace("partitions.csv", "../partitions.csv"),
+                        source.replace("partitions.csv", "$INPUT"), source + " *.py",
+                        "stat -f '%N' -- scripts/dev-ota-upload.py > partitions.csv"):
+            with self.subTest(command=command):
+                self.assertFalse(agent_hook.literal_source_metadata_inspection(command))
+                self.assertFalse(agent_hook.read_only_gate_inspection(command))
+                self.assertIsNotNone(agent_hook.production_ota_violation(
+                    {"cwd": str(ROOT), "tool_name": "exec_command", "tool_input": {"cmd": command}}))
+        for secret in ("/tmp/private.pem", "/tmp/.git-credentials", "/tmp/id_rsa"):
+            command = source + " " + secret
+            result, output = self.run_pre_tool({"cwd": str(ROOT), "tool_name": "exec_command",
+                                               "tool_input": {"cmd": command}})
+            self.assertEqual(result, 0)
+            self.assertEqual(json.loads(output)["hookSpecificOutput"]["permissionDecision"], "deny")
+        for command in ("python3 -c 'open(\"partitions.csv\",\"w\").write(\"x\")'",
+                        "cp replacement.csv partitions.csv", "tee partitions.csv",
+                        "sed -i '1d' partitions.csv"):
+            self.assertTrue(agent_hook.shell_writes_partitions(command))
+
     def test_literal_source_staging_is_not_an_upload_or_a_broad_git_exception(self):
         scope = " -- scripts/dev-ota-upload.py main/http_ota.cpp"
         def payload(command, cwd=ROOT):

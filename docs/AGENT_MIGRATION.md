@@ -140,6 +140,9 @@ fails closed on both missing and extra project skills.
   statically inspectable command; never treat hook silence as authorization.
 - Native review reads admit Git metadata with `-c core.fsmonitor=false` and
   `--no-optional-locks`; diffs use `--no-ext-diff --no-textconv` to prevent configured execution.
+  Literal source metadata may use `shasum -a 256 --`, `sha256sum --`, or formatted `stat -f`/`stat -c`
+  with file paths after `--`. This exception rejects check-file modes, wrappers, expansions and
+  redirections; naming a protected source does not execute it or grant access to secrets.
   `nl` followed by a literal `sed` print selector is also admitted. OTA source inspection
   rejects redirections and `sed` execution or file-writing scripts. A narrow direct `rg` form
   distinguishes a single-quoted query from stdin-shell or extglob syntax; unknown flags, wrappers,
