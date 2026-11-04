@@ -2431,7 +2431,7 @@
     },
     "http_upload_complete": {
       "pattern": "^daik::http_complete_ota_upload\\(httpd_req\\*\\)$",
-      "max_bytes": 32
+      "max_bytes": 48
     },
     "http_upload_receive_budget": {
       "pattern": "^daik::\\(anonymous\\ namespace\\)::receive_with_budget\\(void\\*,\\ int,\\ char\\*,\\ unsigned\\ int,\\ int\\)$",
@@ -6604,6 +6604,43 @@
       "multipliers": {},
       "base_bytes": 1536,
       "max_bytes": 4096
+    },
+    "ota_lwip_boot_allocate": {
+      "symbols": [
+        "ota_task",
+        "tls_sys_thread_sem_get",
+        "tls_sys_thread_sem_init",
+        "tls_pthread_setspecific",
+        "tls_calloc",
+        "sdk_malloc_default",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "ota_lwip_boot_specific": {
+      "symbols": [
+        "ota_task",
+        "tls_sys_thread_sem_get",
+        "tls_sys_thread_sem_init",
+        "tls_pthread_setspecific",
+        "tls_find_key",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
     }
   },
   "tasks": {
@@ -6913,7 +6950,9 @@
         "ota_upload_response",
         "ota_upload_socket_close",
         "ota_upload_request_release",
-        "ota_upload_receive"
+        "ota_upload_receive",
+        "ota_lwip_boot_allocate",
+        "ota_lwip_boot_specific"
       ]
     },
     "ota_health": {
