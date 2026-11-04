@@ -157,6 +157,8 @@ esp_err_t esp_http_client_set_header(esp_http_client_handle_t c, const char*, co
 }
 const esp_partition_t* esp_ota_get_next_update_partition(const esp_partition_t*) {
     static esp_partition_t partition;
+    if (sdk::state.no_partition) return nullptr;
+    partition.size = sdk::state.partition_size;
     return &partition;
 }
 const esp_partition_t* esp_ota_get_running_partition() {
@@ -208,6 +210,7 @@ esp_err_t esp_ota_set_boot_partition(const esp_partition_t*) {
     return s.fault == sdk::Fault::SelectionError ? ESP_FAIL : ESP_OK;
 }
 psa_status_t psa_hash_setup(psa_hash_operation_t* op, int) {
+    if (sdk::state.fault == sdk::Fault::HashSetupError) return -1;
     op->active           = true;
     sdk::state.hash_live = true;
     ++sdk::state.hash_setup;
@@ -226,6 +229,7 @@ psa_status_t psa_hash_update(psa_hash_operation_t* op, const uint8_t* data, size
 psa_status_t psa_hash_finish(psa_hash_operation_t* op, uint8_t* out, size_t, size_t* len) {
     auto& s = sdk::state;
     if (!op->active || op->bytes != s.image_size) s.invalid_release = true;
+    if (s.fault == sdk::Fault::HashFinishError) return -1;
     op->active  = false;
     s.hash_live = false;
     ++s.hash_finished;
@@ -242,7 +246,9 @@ psa_status_t psa_hash_abort(psa_hash_operation_t* op) noexcept {
 }
 
 namespace daik {
-OtaChannel    config_ota_channel() { return OtaChannel::Dev; }
+OtaChannel config_ota_channel() {
+    return sdk::state.dev_channel ? OtaChannel::Dev : OtaChannel::Release;
+}
 bool          hp_poll_ota_quiesced() { return sdk::state.stalled_service != 1; }
 bool          mqtt_publish_network_quiesced() { return sdk::state.stalled_service != 2; }
 bool          mqtt_transport_network_quiesced() { return sdk::state.stalled_service != 3; }
@@ -334,6 +340,7 @@ void reset(sdk::Fault fault) {
     s.interrupt = fault == sdk::Fault::ResumeException || fault == sdk::Fault::ResumeBufferNull ||
                   fault == sdk::Fault::ResumeSuccess || fault == sdk::Fault::WrongRange;
     std::strcpy(s.app.version, "1.0.7");
+    std::strcpy(s.app.project_name, "daikin-altherma-esp32");
     std::snprintf(s.manifest, sizeof(s.manifest),
                   "{\"version\":\"%s\",\"provenance\":{\"app_sha256\":\"%s\"}}", long_version,
                   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
@@ -343,6 +350,7 @@ void reset(sdk::Fault fault) {
     esp_app_desc_t app{};
     app.magic_word = ESP_APP_DESC_MAGIC_WORD;
     std::strcpy(app.version, long_version);
+    std::strcpy(app.project_name, s.app.project_name);
     std::memcpy(s.image, &header, sizeof(header));
     std::memcpy(s.image + sizeof(header) + sizeof(esp_image_segment_header_t), &app, sizeof(app));
     daik::s_status = daik::OtaStatus{};
@@ -492,6 +500,189 @@ void worker(sdk::Fault fault, int stalled_service = 0, bool malformed_manifest =
             REQUIRE(s.injected);
         if (fault == sdk::Fault::ResumeException || fault == sdk::Fault::ResumeBufferNull)
             REQUIRE(s.firmware_acquired == 2 && s.buffer_freed == 1);
+    }
+}
+
+constexpr const char* upload_sha256 =
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+// A fragmented ingress plus an independent completion ledger. The SDK adapters above compare
+// every hash/write chunk to the original bytes; this source owns no image-sized allocation.
+struct Upload {
+    size_t   offset = 0, available = 4096, max_request = 0;
+    unsigned completed  = 0;
+    uint32_t generation = 0;
+    bool     installed = false, invalid_completion = false;
+    enum class Input { Complete, ShortHeader, ShortBody, ReadError, Timeout, Exception, Oversized };
+    Input input = Input::Complete;
+
+    static int read(void* context, char* out, size_t requested) {
+        auto& upload       = *static_cast<Upload*>(context);
+        upload.max_request = std::max(upload.max_request, requested);
+        if (upload.input == Input::Exception) throw std::bad_alloc();
+        if (upload.input == Input::Timeout) {
+            sdk::state.ticks += 300000;
+            return -3;
+        }
+        if (upload.input == Input::Oversized) return static_cast<int>(requested + 1);
+        if (upload.input == Input::ReadError && upload.offset >= 288) return -1;
+        if (upload.offset == upload.available) return 0;
+        const size_t count = std::min({requested, upload.available - upload.offset, size_t{17}});
+        std::memcpy(out, sdk::state.image + upload.offset, count);
+        upload.offset += count;
+        return static_cast<int>(count);
+    }
+    static void complete(void* context, bool installed, uint32_t generation) noexcept {
+        auto& upload = *static_cast<Upload*>(context);
+        ++upload.completed;
+        upload.installed  = installed;
+        upload.generation = generation;
+        const auto& s     = sdk::state;
+        if (s.ota_live || s.hash_live || s.active_buffers || s.active_clients ||
+            (installed && (s.selected != 1 || s.ota_ended != 1 || s.restart != 0)))
+            upload.invalid_completion = true;
+    }
+    daik::OtaUploadSource source() { return {this, 4096, read, complete}; }
+};
+
+void upload_admission() {
+    reset(sdk::Fault::None);
+    using namespace daik;
+    Upload upload;
+    auto   source = upload.source();
+    REQUIRE(ota_upload_async(source, upload_sha256) == 0); // no boot worker
+    ota_update_init();
+    sdk::state.dev_channel = false;
+    REQUIRE(ota_upload_async(source, upload_sha256) == 0);
+    sdk::state.dev_channel  = true;
+    sdk::state.no_partition = true;
+    REQUIRE(ota_upload_async(source, upload_sha256) == 0);
+    sdk::state.no_partition = false;
+    source.length           = 4095;
+    REQUIRE(ota_upload_async(source, upload_sha256) == 0);
+    source.length = 8193;
+    REQUIRE(ota_upload_async(source, upload_sha256) == 0);
+    source = upload.source();
+    REQUIRE(ota_upload_async(source, "bad") == 0);
+    auto incomplete    = source;
+    incomplete.context = nullptr;
+    REQUIRE(ota_upload_async(incomplete, upload_sha256) == 0);
+    incomplete      = source;
+    incomplete.read = nullptr;
+    REQUIRE(ota_upload_async(incomplete, upload_sha256) == 0);
+    incomplete          = source;
+    incomplete.complete = nullptr;
+    REQUIRE(ota_upload_async(incomplete, upload_sha256) == 0);
+    sdk::state.reset_latched = true;
+    REQUIRE(ota_upload_async(source, upload_sha256) == 0);
+    sdk::state.reset_latched = false;
+    s_install_held           = true;
+    REQUIRE(ota_upload_async(source, upload_sha256) == 0);
+    REQUIRE(!ota_busy() && upload.completed == 0 && sdk::state.ota_begun == 0);
+    s_install_held = false;
+    REQUIRE(ota_upload_async(source, upload_sha256) != 0);
+    REQUIRE(ota_busy());
+    REQUIRE(ota_upload_async(source, upload_sha256) == 0);
+    REQUIRE(ota_check_async(0) == 0);
+    REQUIRE(upload.completed == 0 && sdk::state.ota_begun == 0);
+    // The accepted source belongs to the worker even when quiescence fails.
+    sdk::state.stalled_service = 1;
+    try {
+        s_ota_task->fn(s_ota_task->arg);
+    } catch (const sdk::Stop&) {}
+    REQUIRE(upload.completed == 1 && !upload.installed && !upload.invalid_completion);
+    REQUIRE(!ota_busy() && !ota_download_active());
+}
+
+void upload_worker(const char* name) {
+    const std::string scenario(name);
+    sdk::Fault        fault = sdk::Fault::None;
+    for (const auto& entry : {std::make_pair("upload_buffer", sdk::Fault::BufferNull),
+                              std::make_pair("upload_write", sdk::Fault::WriteError),
+                              std::make_pair("upload_hash", sdk::Fault::HashError),
+                              std::make_pair("upload_hash_setup", sdk::Fault::HashSetupError),
+                              std::make_pair("upload_hash_finish", sdk::Fault::HashFinishError),
+                              std::make_pair("upload_hash_exception", sdk::Fault::HashException),
+                              std::make_pair("upload_sha", sdk::Fault::HashMismatch),
+                              std::make_pair("upload_signature", sdk::Fault::ValidationError),
+                              std::make_pair("upload_selection", sdk::Fault::SelectionError),
+                              std::make_pair("upload_probation", sdk::Fault::BeginProbation)})
+        if (scenario == entry.first) fault = entry.second;
+    reset(fault);
+    using namespace daik;
+    auto& s      = sdk::state;
+    s.image_size = 4096;
+    Upload         upload;
+    esp_app_desc_t image{};
+    std::memcpy(&image, s.image + sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t),
+                sizeof(image));
+    if (scenario == "upload_equal") std::strcpy(image.version, s.app.version);
+    if (scenario == "upload_older") std::strcpy(image.version, "0.9.0");
+    if (scenario == "upload_project") std::strcpy(image.project_name, "other-firmware");
+    if (scenario == "upload_descriptor") image.magic_word = 0;
+    if (scenario == "upload_version_empty") image.version[0] = '\0';
+    if (scenario == "upload_version_unterminated")
+        std::memset(image.version, 'v', sizeof(image.version));
+    std::memcpy(s.image + sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t), &image,
+                sizeof(image));
+    if (scenario == "upload_magic") s.image[0] = 0;
+    if (scenario == "upload_chip") s.image[offsetof(esp_image_header_t, chip_id)] ^= 1;
+    if (scenario == "upload_short_header") upload.available = 17;
+    if (scenario == "upload_short_body") upload.available = 1000;
+    if (scenario == "upload_read") upload.input = Upload::Input::ReadError;
+    if (scenario == "upload_timeout") upload.input = Upload::Input::Timeout;
+    if (scenario == "upload_exception") upload.input = Upload::Input::Exception;
+    if (scenario == "upload_oversized_read") upload.input = Upload::Input::Oversized;
+    if (scenario == "upload_quiesce") s.stalled_service = 3;
+    if (scenario == "upload_heap") s.largest_block = 1024;
+    if (scenario == "upload_held") s.reset_hold = true;
+    ota_update_init();
+    auto source = upload.source();
+    char digest[65];
+    std::strcpy(digest, upload_sha256);
+    const auto generation = ota_upload_async(source, digest);
+    REQUIRE(generation != 0 && upload.completed == 0);
+    REQUIRE(s_status.state == "updating" && ota_busy());
+    // Caller storage may change immediately after return: the accepted worker must use its copy.
+    source.context = nullptr;
+    digest[0]      = 'b';
+    if (scenario == "upload_channel_changed") s.dev_channel = false;
+    try {
+        s_ota_task->fn(s_ota_task->arg);
+    } catch (const sdk::Stop&) {}
+    const bool success = scenario == "upload_success" || scenario == "upload_equal" ||
+                         scenario == "upload_older" || scenario == "upload_held";
+    REQUIRE(upload.completed == 1 && upload.installed == success &&
+            upload.generation == generation);
+    REQUIRE(!upload.invalid_completion);
+    REQUIRE(!ota_busy() && !ota_download_active());
+    REQUIRE(s.withdraw == 1 && s.pause == 1 && s.resume == 1);
+    REQUIRE(!s.invalid_release && !s.ota_live && !s.hash_live && !s.deadline_armed);
+    REQUIRE(s.active_clients == 0 && s.client_acquired == 0 && s.active_buffers == 0);
+    REQUIRE(s.buffer_acquired == s.buffer_freed);
+    REQUIRE(s.ota_begun == s.ota_ended + s.ota_aborted);
+    REQUIRE(s.hash_setup == s.hash_finished + s.hash_aborted);
+    REQUIRE(upload.max_request <= 1024);
+    if (success) {
+        REQUIRE(s.selected == 1 && s.ota_ended == 1 && s.written == s.image_size);
+        REQUIRE(s.restart == (scenario == "upload_held" ? 0 : 1));
+        REQUIRE(s_status.state == "done" && s_status.progress == 100);
+        REQUIRE(upload.offset == 4096);
+    } else {
+        REQUIRE(s.restart == 0 && s_status.state == "error");
+        REQUIRE(s.selected == (scenario == "upload_selection" ? 1 : 0));
+        if (scenario == "upload_channel_changed" || scenario == "upload_quiesce" ||
+            scenario == "upload_magic" || scenario == "upload_chip" ||
+            scenario == "upload_project" || scenario == "upload_descriptor" ||
+            scenario == "upload_version_empty" || scenario == "upload_version_unterminated" ||
+            scenario == "upload_short_header" || scenario == "upload_timeout" ||
+            scenario == "upload_exception" || scenario == "upload_oversized_read" ||
+            scenario == "upload_probation")
+            REQUIRE(s.ota_begun == 0 && s.written == 0);
+        if (scenario == "upload_channel_changed" || scenario == "upload_quiesce")
+            REQUIRE(upload.offset == 0 && s.buffer_acquired == 0);
+        if (scenario == "upload_sha" || scenario == "upload_heap") REQUIRE(s.ota_ended == 0);
+        if (scenario == "upload_signature") REQUIRE(s.ota_ended == 1 && s.selected == 0);
     }
 }
 
@@ -680,6 +871,51 @@ int main(int argc, char** argv) {
         {"begin_probation", sdk::Fault::BeginProbation},
     };
     int count = 0;
+    const char* upload_cases[] = {"upload_admission",
+                                  "upload_success",
+                                  "upload_equal",
+                                  "upload_older",
+                                  "upload_channel_changed",
+                                  "upload_magic",
+                                  "upload_chip",
+                                  "upload_project",
+                                  "upload_descriptor",
+                                  "upload_version_empty",
+                                  "upload_version_unterminated",
+                                  "upload_short_header",
+                                  "upload_short_body",
+                                  "upload_read",
+                                  "upload_timeout",
+                                  "upload_exception",
+                                  "upload_oversized_read",
+                                  "upload_quiesce",
+                                  "upload_buffer",
+                                  "upload_write",
+                                  "upload_hash",
+                                  "upload_hash_setup",
+                                  "upload_hash_finish",
+                                  "upload_hash_exception",
+                                  "upload_sha",
+                                  "upload_signature",
+                                  "upload_selection",
+                                  "upload_heap",
+                                  "upload_probation",
+                                  "upload_held"};
+    for (const auto* name : upload_cases) {
+        if (argc > 1 && std::strcmp(argv[1], name) != 0) continue;
+        try {
+            if (std::strcmp(name, "upload_admission") == 0)
+                test::upload_admission();
+            else
+                test::upload_worker(name);
+        } catch (const std::exception& e) {
+            std::cerr << (dynamic_cast<const test::AssertionFailure*>(&e) ? "ASSERT " : "ERROR ")
+                      << name << ": " << e.what() << '\n';
+            return dynamic_cast<const test::AssertionFailure*>(&e) ? 1 : 2;
+        }
+        std::cout << "PASS " << name << '\n';
+        ++count;
+    }
     if (argc == 1 || std::strcmp(argv[1], "mutex_storage") == 0) {
         try {
             test::mutex_storage();

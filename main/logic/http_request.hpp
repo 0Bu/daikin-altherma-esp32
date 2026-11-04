@@ -86,7 +86,7 @@ inline bool http_lan_request_allowed(const HttpRequestHeaders& h, std::string_vi
     return true;
 }
 
-// Every POST with a body in this firmware is JSON. Requiring its real media type removes the
+// Ordinary POST bodies are JSON. Requiring their real media type removes the
 // CORS-safelisted text/plain/form shapes that can be emitted cross-origin without preflight.
 inline bool http_json_content_type(std::string_view value) {
     while (!value.empty() && (value.front() == ' ' || value.front() == '\t')) value.remove_prefix(1);
@@ -109,8 +109,17 @@ inline bool http_json_content_type(std::string_view value) {
 // are early-rejected with 503 so background browser polling doesn't fragment the TLS receive heap.
 inline bool http_is_ota_route(std::string_view uri, bool is_post = false) {
     uri = uri.substr(0, uri.find('?'));
-    if (is_post) return uri == "/ota/update";
+    if (is_post) return uri == "/ota/update" || uri == "/ota/upload";
     return uri == "/ota/status" || uri == "/ota/check" || uri == "/ota/changelog";
+}
+
+inline bool http_is_ota_upload(std::string_view uri) {
+    return uri.substr(0, uri.find('?')) == "/ota/upload";
+}
+
+inline bool http_post_content_type(std::string_view uri, std::string_view type) {
+    if (!http_is_ota_upload(uri)) return http_json_content_type(type);
+    return http_ascii_iequal(type, "application/octet-stream");
 }
 
 inline std::string_view http_accept_trim_ows(std::string_view value) {

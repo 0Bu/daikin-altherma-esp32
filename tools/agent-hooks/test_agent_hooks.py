@@ -22,6 +22,131 @@ import merge_payload
 
 
 class AgentHookFastTests(unittest.TestCase):
+    def test_literal_source_staging_is_not_an_upload_or_a_broad_git_exception(self):
+        scope = " -- scripts/dev-ota-upload.py main/http_ota.cpp"
+        def payload(command, cwd=ROOT):
+            return {"cwd": str(cwd), "tool_name": "exec_command", "tool_input": {"cmd": command}}
+        for prefix in ("git add", "git -c core.fsmonitor=false add",
+                       "/usr/bin/git --no-optional-locks add"):
+            command = prefix + scope
+            self.assertTrue(agent_hook.canonical_ota_source_staging(payload(command), command))
+            self.assertFalse(agent_hook.read_only_gate_inspection(command))
+            self.assertEqual(self.run_pre_tool(payload(command)), (0, ""))
+        command = "git add" + scope
+        for candidate in ("env " + command, command + "; true", command + " > /tmp/staged",
+                          command + "\ntrue", command.replace("git add", "git -c core.hooksPath=/tmp/hooks add"),
+                          command.replace("git add", "git -C /tmp add"),
+                          command.replace("git add", "git add --all"),
+                          command.replace("git add", "git add --force"),
+                          command.replace(" -- ", " -- . "), command + " ../outside.py",
+                          command + " /tmp/outside.py", command + " .git/config",
+                          command + " scripts/*.py", command + " ':(glob)**'",
+                          command + " scripts/missing-source.py"):
+            with self.subTest(command=candidate):
+                self.assertFalse(agent_hook.canonical_ota_source_staging(payload(candidate), candidate))
+                self.assertIsNotNone(agent_hook.production_ota_violation(payload(candidate)))
+        self.assertFalse(agent_hook.canonical_ota_source_staging(payload(command, ROOT.parent), command))
+
+    def test_ota_source_git_inspection_cannot_invoke_external_tools_or_write(self):
+        scope = " -- scripts/dev-ota-upload.py main/http_ota.cpp"
+        commands = ["git ls-files --others --exclude-standard" + scope,
+                    "git -c core.fsmonitor=false --no-optional-locks ls-files" + scope,
+                    "git diff --no-ext-diff --no-textconv --stat " + "a" * 40 + "..." + "b" * 40 + scope,
+                    "git diff --no-ext-diff --no-textconv --numstat" + scope,
+                    "git diff --no-ext-diff --no-textconv --cached --stat" + scope,
+                    "git --no-pager diff --no-ext-diff --no-textconv HEAD" + scope]
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertTrue(agent_hook.read_only_gate_inspection(command))
+                self.assertEqual(self.run_pre_tool({"cwd": str(ROOT), "tool_name": "exec_command",
+                                                   "tool_input": {"cmd": command}}), (0, ""))
+        for command in ("env " + commands[0], commands[0] + "; true", commands[0] + " > /tmp/out",
+                        commands[1].replace("core.fsmonitor=false", "core.pager=sh"),
+                        commands[3].replace("--no-textconv", "--textconv"),
+                        commands[3].replace("--no-ext-diff", "--ext-diff"),
+                        commands[3].replace("--numstat", "--output=/tmp/out"),
+                        commands[3].replace("--numstat", "--no-index"),
+                        commands[3].replace(" -- ", " --config-env=diff.external=TOOL -- ")):
+            with self.subTest(command=command):
+                self.assertFalse(agent_hook.read_only_gate_inspection(command))
+                self.assertIsNotNone(agent_hook.production_ota_violation(
+                    {"cwd": str(ROOT), "tool_name": "exec_command", "tool_input": {"cmd": command}}))
+
+    def test_isolated_read_only_review_accepts_ota_script_as_literal_scope(self):
+        command = ("scripts/run-codex-review.sh doc_drift_checker " + "a" * 40 + " " + "b" * 40 +
+                   " scripts/dev-ota-upload.py docs/API.md --intent 'Review local upload documentation'")
+        def payload(value):
+            return {"cwd": str(ROOT), "tool_name": "exec_command", "tool_input": {"cmd": value}}
+        self.assertTrue(agent_hook.canonical_scoped_ota_review(payload(command), command))
+        self.assertEqual(self.run_pre_tool(payload(command)), (0, ""))
+        for value in ("env " + command, "bash " + command, command + "; true",
+                      command.replace("doc_drift_checker", "default"), command.replace("docs/API.md", "../API.md"),
+                      command.replace("a" * 40, "abc"), command.replace("scripts/run-codex-review.sh", "/tmp/run-codex-review.sh")):
+            with self.subTest(value=value):
+                self.assertFalse(agent_hook.canonical_scoped_ota_review(payload(value), value))
+                self.assertIsNotNone(agent_hook.production_ota_violation(payload(value)))
+
+    def test_local_dev_upload_requires_canonical_bound_command(self):
+        command = ("scripts/dev-ota-upload.py --confirm-production-test production --image /tmp/app.bin "
+                   "--expected-app-sha256 " + "b" * 64 +
+                   " --expected-current-version 1.2.3-dev.4 --expected-current-elf abc123def"
+                   " --evidence /tmp/receipt.json --expected-source-sha256 " + "c" * 64)
+        def payload(value):
+            return {"cwd": str(ROOT), "tool_name": "exec_command", "tool_input": {"cmd": value}}
+        for value in (command, command + " --execute", "scripts/dev-ota-upload.py --help"):
+            self.assertTrue(agent_hook.canonical_dev_ota_command(payload(value), value))
+            self.assertEqual(self.run_pre_tool(payload(value)), (0, ""))
+        for value in ("python3 " + command, "env " + command, command + "; true",
+                      command + " --execute --execute", command + " --host unrelated.invalid",
+                      command.replace("production --image", "bench --image"),
+                      command.replace("/tmp/app.bin", "app.bin"),
+                      command.replace("abc123def", "unknown"),
+                      command.replace("scripts/dev-ota-upload.py", "/tmp/dev-ota-upload.py"),
+                      command.replace("/tmp/app.bin", "$IMAGE")):
+            with self.subTest(value=value):
+                self.assertFalse(agent_hook.canonical_dev_ota_command(payload(value), value))
+                self.assertIsNotNone(agent_hook.production_ota_violation(payload(value)))
+        for flag, value in (("--evidence", "/tmp/receipt.json"), ("--expected-source-sha256", "c" * 64)):
+            candidate = command.replace(" " + flag + " " + value, "")
+            self.assertFalse(agent_hook.canonical_dev_ota_command(payload(candidate), candidate))
+        with tempfile.TemporaryDirectory() as directory:
+            copied = Path(directory) / "uploader"
+            copied.write_bytes((ROOT / "scripts/dev-ota-upload.py").read_bytes())
+            linked = Path(directory) / "linked"
+            linked.symlink_to(ROOT / "scripts/dev-ota-upload.py")
+            for path in (copied, linked):
+                value = command.replace("scripts/dev-ota-upload.py", str(path))
+                self.assertIsNotNone(agent_hook.production_ota_violation(payload(value)))
+
+    def test_local_evidence_runner_accepts_only_fixed_non_write_actions(self):
+        command = ("scripts/local-ota-evidence.py --evidence /tmp/receipt.json review --role heap_safety_reviewer "
+                   "--scope main scripts/dev-ota-upload.py --intent 'Review the complete local candidate'")
+        def payload(value):
+            return {"cwd": str(ROOT), "tool_name": "exec_command", "tool_input": {"cmd": value}}
+        self.assertTrue(agent_hook.canonical_local_ota_evidence_command(payload(command), command))
+        self.assertEqual(self.run_pre_tool(payload(command)), (0, ""))
+        for candidate in ("env " + command, command + "; true", command.replace("review --role", "upload --role"),
+                          command.replace("heap_safety_reviewer", "default"), command.replace("--scope main", "--scope ../foreign")):
+            self.assertFalse(agent_hook.canonical_local_ota_evidence_command(payload(candidate), candidate))
+            self.assertIsNotNone(agent_hook.production_ota_violation(payload(candidate)))
+
+    def test_upload_route_shares_direct_write_evasion_protection(self):
+        commands = [
+            "curl --data-binary @/tmp/app.bin http://production.invalid/ota/upload",
+            "curl -X POST http://production.invalid/ota/up%6coad",
+            "curl -X POST http://production.invalid/ota/{upload,status}",
+            "curl -X POST http://production.invalid/ota/up*",
+            "curl -X POST http://production.invalid/ota/'up''load'",
+            "python3 -c 'import requests; requests.post(\"http://production.invalid/ota/upload\",data=b\"x\")'",
+        ]
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertTrue(agent_hook.direct_ota_update_write(command))
+                result, output = self.run_pre_tool({"cwd": str(ROOT), "tool_name": "exec_command",
+                                                    "tool_input": {"cmd": command}})
+                self.assertEqual(result, 0)
+                self.assertEqual(json.loads(output)["hookSpecificOutput"]["permissionDecision"], "deny")
+
     def test_canonical_ota_feed_and_version_are_bound_together(self):
         base = "https://0bu.github.io/daikin-altherma-esp32/"
 

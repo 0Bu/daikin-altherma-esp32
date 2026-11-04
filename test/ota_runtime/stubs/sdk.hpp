@@ -123,6 +123,8 @@ enum class Fault {
     ReadError,
     WriteError,
     HashError,
+    HashSetupError,
+    HashFinishError,
     HashMismatch,
     ValidationError,
     SelectionError,
@@ -138,6 +140,8 @@ struct State {
     bool      injected = false, invalid_release = false, deadline_armed = false;
     bool      reject_new = false, interrupt = false;
     bool      fail_task_create = false, health_offline = false;
+    bool      dev_channel = true, no_partition = false;
+    size_t    partition_size = 8192;
     bool      recovery_ap = false, hp_live = false, x10a_required = false, x10a_proven = false;
     // Factory-reset latch adapter: `reset_latched` is what nvs_factory_reset_latched() reads
     // (operation start); `reset_hold` is what the last-moment restart refusal answers.
@@ -172,7 +176,7 @@ struct State {
     void*          buffers[8]{};
     FakeHttpClient clients[8]{};
     char           manifest[256]{};
-    uint8_t        image[2048]{};
+    uint8_t        image[8192]{};
     size_t         image_size = 2048;
     esp_app_desc_t app{};
 };

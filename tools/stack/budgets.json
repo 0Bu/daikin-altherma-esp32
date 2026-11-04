@@ -2388,6 +2388,122 @@
     "checkup_schema_profile_view": {
       "pattern": "^daik::def::resolved\\(",
       "max_bytes": 96
+    },
+    "ota_activate": {
+      "pattern": "^daik::\\(anonymous\\ namespace\\)::activate_update\\(daik::\\(anonymous\\ namespace\\)::OtaUpdateResources\\&,\\ esp_partition_t\\ const\\*,\\ char\\ const\\*,\\ daik::\\(anonymous\\ namespace\\)::OtaUploadRequest\\*\\)$",
+      "max_bytes": 80
+    },
+    "ota_upload_finish": {
+      "pattern": "^daik::\\(anonymous\\ namespace\\)::OtaUploadRequest::finish\\(bool\\)$",
+      "max_bytes": 32
+    },
+    "ota_upload_complete": {
+      "pattern": "^daik::upload_complete\\(void\\*,\\ bool,\\ unsigned\\ long\\)$",
+      "max_bytes": 96
+    },
+    "ota_upload_read": {
+      "pattern": "^daik::upload_read\\(void\\*,\\ char\\*,\\ unsigned\\ int\\)$",
+      "max_bytes": 32
+    },
+    "ota_upload_read_lambda": {
+      "pattern": "^daik::\\(anonymous\\ namespace\\)::run_upload\\(daik::\\(anonymous\\ namespace\\)::OtaTaskArgs\\ const\\&,\\ daik::\\(anonymous\\ namespace\\)::OtaUploadRequest\\&\\)::\\{lambda\\(unsigned\\ int,\\ unsigned\\ int\\)\\x231\\}::operator\\(\\)\\(unsigned\\ int,\\ unsigned\\ int\\)\\ const$",
+      "max_bytes": 32
+    },
+    "ota_upload_http": {
+      "pattern": "^daik::ota_upload\\(httpd_req\\*\\)$",
+      "max_bytes": 208
+    },
+    "ota_upload_start": {
+      "pattern": "^daik::ota_upload_async\\(daik::OtaUploadSource\\ const\\&,\\ char\\ const\\*\\)$",
+      "max_bytes": 704
+    },
+    "ota_start_locked": {
+      "pattern": "^daik::\\(anonymous\\ namespace\\)::start_locked\\(daik::\\(anonymous\\ namespace\\)::OtaTaskArgs\\ const\\&,\\ unsigned\\ long\\)$",
+      "max_bytes": 32
+    },
+    "http_upload_json": {
+      "pattern": "^daik::http_send_json\\(httpd_req\\*,\\ char\\ const\\*\\)$",
+      "max_bytes": 32
+    },
+    "http_upload_begin": {
+      "pattern": "^daik::http_begin_ota_upload\\(httpd_req\\*,\\ httpd_req\\*\\*\\)$",
+      "max_bytes": 32
+    },
+    "http_upload_complete": {
+      "pattern": "^daik::http_complete_ota_upload\\(httpd_req\\*\\)$",
+      "max_bytes": 32
+    },
+    "http_upload_receive_budget": {
+      "pattern": "^daik::\\(anonymous\\ namespace\\)::receive_with_budget\\(void\\*,\\ int,\\ char\\*,\\ unsigned\\ int,\\ int\\)$",
+      "max_bytes": 32
+    },
+    "ota_sdk_end": {
+      "pattern": "^esp_ota_end$",
+      "max_bytes": 48
+    },
+    "ota_sdk_select": {
+      "pattern": "^esp_ota_set_boot_partition$",
+      "max_bytes": 32
+    },
+    "ota_sdk_verify_partition": {
+      "pattern": "^ota_verify_partition$",
+      "max_bytes": 320
+    },
+    "ota_sdk_image_validate": {
+      "pattern": "^image_validate$",
+      "max_bytes": 304
+    },
+    "ota_sdk_image_verify": {
+      "pattern": "^esp_image_verify$",
+      "max_bytes": 32
+    },
+    "ota_sdk_image_load": {
+      "pattern": "^image_load$",
+      "max_bytes": 160
+    },
+    "ota_sdk_sbv2": {
+      "pattern": "^esp_secure_boot_verify_sbv2_signature_block$",
+      "max_bytes": 192
+    },
+    "ota_sdk_rsa_verify": {
+      "pattern": "^verify_rsa_signature_block$",
+      "max_bytes": 112
+    },
+    "ota_sdk_rsa_import": {
+      "pattern": "^mbedtls_psa_rsa_import_key$",
+      "max_bytes": 48
+    },
+    "ota_sdk_async_begin": {
+      "pattern": "^httpd_req_async_handler_begin$",
+      "max_bytes": 48
+    },
+    "ota_sdk_async_complete": {
+      "pattern": "^httpd_req_async_handler_complete$",
+      "max_bytes": 48
+    },
+    "ota_sdk_http_response": {
+      "pattern": "^httpd_resp_send$",
+      "max_bytes": 64
+    },
+    "ota_sdk_http_receive": {
+      "pattern": "^httpd_req_recv$",
+      "max_bytes": 48
+    },
+    "ota_sdk_http_recv": {
+      "pattern": "^httpd_recv$",
+      "max_bytes": 32
+    },
+    "ota_sdk_http_recv_opt": {
+      "pattern": "^httpd_recv_with_opt$",
+      "max_bytes": 48
+    },
+    "ota_sdk_shutdown": {
+      "pattern": "^lwip_shutdown$",
+      "max_bytes": 32
+    },
+    "ota_sdk_netconn_shutdown": {
+      "pattern": "^netconn_shutdown$",
+      "max_bytes": 32
     }
   },
   "paths": {
@@ -3975,6 +4091,7 @@
     "ota_shutdown_journal": {
       "symbols": [
         "ota_task",
+        "ota_activate",
         "sdk_restart",
         "history_shutdown",
         "history_journal",
@@ -3988,6 +4105,7 @@
     "ota_shutdown_checkup": {
       "symbols": [
         "ota_task",
+        "ota_activate",
         "sdk_restart",
         "checkup_shutdown",
         "checkup_shutdown_reset"
@@ -6171,6 +6289,321 @@
       "multipliers": {},
       "base_bytes": 1536,
       "max_bytes": 8192
+    },
+    "ota_image_end_pss_adding": {
+      "symbols": [
+        "ota_task",
+        "ota_activate",
+        "ota_sdk_end",
+        "ota_sdk_verify_partition",
+        "ota_sdk_image_verify",
+        "ota_sdk_image_load",
+        "ota_sdk_sbv2",
+        "ota_sdk_rsa_verify",
+        "tls_psa_verify_hash",
+        "tls_psa_verify_hash_builtin",
+        "tls_mbedtls_psa_rsa_verify_hash",
+        "tls_mbedtls_rsa_pkcs1_verify",
+        "tls_mbedtls_rsa_rsassa_pss_verify_ext",
+        "tls_mbedtls_rsa_public",
+        "tls_mbedtls_mpi_exp_mod_unsafe",
+        "tls_mbedtls_mpi_exp_mod",
+        "tls_calculate_rinv",
+        "tls_mbedtls_mpi_mod_mpi",
+        "tls_mbedtls_mpi_div_mpi",
+        "tls_mbedtls_mpi_mul_int",
+        "tls_mbedtls_mpi_mul_mpi",
+        "tls_mpi_mult_mpi_overlong_isra_0",
+        "tls_mbedtls_mpi_add_mpi",
+        "tls_add_sub_mpi",
+        "tls_mbedtls_mpi_add_abs",
+        "tls_mbedtls_mpi_copy",
+        "tls_mbedtls_mpi_grow",
+        "tls_mbedtls_calloc",
+        "tls_esp_mbedtls_mem_calloc",
+        "tls_heap_caps_calloc",
+        "tls_heap_caps_calloc_base",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "ota_image_end_pss_recursive": {
+      "symbols": [
+        "ota_task",
+        "ota_activate",
+        "ota_sdk_end",
+        "ota_sdk_verify_partition",
+        "ota_sdk_image_verify",
+        "ota_sdk_image_load",
+        "ota_sdk_sbv2",
+        "ota_sdk_rsa_verify",
+        "tls_psa_verify_hash",
+        "tls_psa_verify_hash_builtin",
+        "tls_mbedtls_psa_rsa_verify_hash",
+        "tls_mbedtls_rsa_pkcs1_verify",
+        "tls_mbedtls_rsa_rsassa_pss_verify_ext",
+        "tls_mbedtls_rsa_public",
+        "tls_mbedtls_mpi_exp_mod_unsafe",
+        "tls_mbedtls_mpi_exp_mod",
+        "tls_calculate_rinv",
+        "tls_mbedtls_mpi_mod_mpi",
+        "tls_mbedtls_mpi_div_mpi",
+        "tls_mbedtls_mpi_mul_int",
+        "tls_mbedtls_mpi_mul_mpi",
+        "tls_mpi_mult_mpi_overlong_isra_0",
+        "tls_mbedtls_mpi_grow",
+        "tls_mbedtls_calloc",
+        "tls_esp_mbedtls_mem_calloc",
+        "tls_heap_caps_calloc",
+        "tls_heap_caps_calloc_base",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {
+        "tls_mbedtls_mpi_mul_mpi": 2
+      },
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "ota_image_end_key_import": {
+      "symbols": [
+        "ota_task",
+        "ota_activate",
+        "ota_sdk_end",
+        "ota_sdk_verify_partition",
+        "ota_sdk_image_verify",
+        "ota_sdk_image_load",
+        "ota_sdk_sbv2",
+        "ota_sdk_rsa_verify",
+        "tls_psa_import_key",
+        "tls_psa_driver_wrapper_import_key",
+        "tls_psa_import_key_into_slot",
+        "ota_sdk_rsa_import"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "ota_image_select_pss_adding": {
+      "symbols": [
+        "ota_task",
+        "ota_activate",
+        "ota_sdk_select",
+        "ota_sdk_image_validate",
+        "ota_sdk_image_verify",
+        "ota_sdk_image_load",
+        "ota_sdk_sbv2",
+        "ota_sdk_rsa_verify",
+        "tls_psa_verify_hash",
+        "tls_psa_verify_hash_builtin",
+        "tls_mbedtls_psa_rsa_verify_hash",
+        "tls_mbedtls_rsa_pkcs1_verify",
+        "tls_mbedtls_rsa_rsassa_pss_verify_ext",
+        "tls_mbedtls_rsa_public",
+        "tls_mbedtls_mpi_exp_mod_unsafe",
+        "tls_mbedtls_mpi_exp_mod",
+        "tls_calculate_rinv",
+        "tls_mbedtls_mpi_mod_mpi",
+        "tls_mbedtls_mpi_div_mpi",
+        "tls_mbedtls_mpi_mul_int",
+        "tls_mbedtls_mpi_mul_mpi",
+        "tls_mpi_mult_mpi_overlong_isra_0",
+        "tls_mbedtls_mpi_add_mpi",
+        "tls_add_sub_mpi",
+        "tls_mbedtls_mpi_add_abs",
+        "tls_mbedtls_mpi_copy",
+        "tls_mbedtls_mpi_grow",
+        "tls_mbedtls_calloc",
+        "tls_esp_mbedtls_mem_calloc",
+        "tls_heap_caps_calloc",
+        "tls_heap_caps_calloc_base",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "ota_image_select_pss_recursive": {
+      "symbols": [
+        "ota_task",
+        "ota_activate",
+        "ota_sdk_select",
+        "ota_sdk_image_validate",
+        "ota_sdk_image_verify",
+        "ota_sdk_image_load",
+        "ota_sdk_sbv2",
+        "ota_sdk_rsa_verify",
+        "tls_psa_verify_hash",
+        "tls_psa_verify_hash_builtin",
+        "tls_mbedtls_psa_rsa_verify_hash",
+        "tls_mbedtls_rsa_pkcs1_verify",
+        "tls_mbedtls_rsa_rsassa_pss_verify_ext",
+        "tls_mbedtls_rsa_public",
+        "tls_mbedtls_mpi_exp_mod_unsafe",
+        "tls_mbedtls_mpi_exp_mod",
+        "tls_calculate_rinv",
+        "tls_mbedtls_mpi_mod_mpi",
+        "tls_mbedtls_mpi_div_mpi",
+        "tls_mbedtls_mpi_mul_int",
+        "tls_mbedtls_mpi_mul_mpi",
+        "tls_mpi_mult_mpi_overlong_isra_0",
+        "tls_mbedtls_mpi_grow",
+        "tls_mbedtls_calloc",
+        "tls_esp_mbedtls_mem_calloc",
+        "tls_heap_caps_calloc",
+        "tls_heap_caps_calloc_base",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {
+        "tls_mbedtls_mpi_mul_mpi": 2
+      },
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "ota_image_select_key_import": {
+      "symbols": [
+        "ota_task",
+        "ota_activate",
+        "ota_sdk_select",
+        "ota_sdk_image_validate",
+        "ota_sdk_image_verify",
+        "ota_sdk_image_load",
+        "ota_sdk_sbv2",
+        "ota_sdk_rsa_verify",
+        "tls_psa_import_key",
+        "tls_psa_driver_wrapper_import_key",
+        "tls_psa_import_key_into_slot",
+        "ota_sdk_rsa_import"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "ota_upload_response": {
+      "symbols": [
+        "ota_task",
+        "ota_activate",
+        "ota_upload_finish",
+        "ota_upload_complete",
+        "http_upload_json",
+        "ota_sdk_http_response"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "ota_upload_socket_close": {
+      "symbols": [
+        "ota_task",
+        "ota_activate",
+        "ota_upload_finish",
+        "ota_upload_complete",
+        "http_upload_complete",
+        "ota_sdk_shutdown",
+        "ota_sdk_netconn_shutdown"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "ota_upload_request_release": {
+      "symbols": [
+        "ota_task",
+        "ota_activate",
+        "ota_upload_finish",
+        "ota_upload_complete",
+        "http_upload_complete",
+        "ota_sdk_async_complete"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "ota_upload_receive": {
+      "symbols": [
+        "ota_task",
+        "ota_upload_read_lambda",
+        "ota_upload_read",
+        "ota_sdk_http_receive",
+        "ota_sdk_http_recv",
+        "ota_sdk_http_recv_opt",
+        "http_upload_receive_budget",
+        "tls_lwip_recvfrom",
+        "tls_lwip_recv_tcp"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "httpd_ota_upload_admission": {
+      "symbols": [
+        "ota_upload_http",
+        "ota_upload_start",
+        "ota_start_locked"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 4096
+    },
+    "httpd_ota_upload_async_begin": {
+      "symbols": [
+        "ota_upload_http",
+        "http_upload_begin",
+        "ota_sdk_async_begin"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 4096
+    },
+    "httpd_ota_upload_socket_close": {
+      "symbols": [
+        "ota_upload_http",
+        "http_upload_complete",
+        "ota_sdk_shutdown",
+        "ota_sdk_netconn_shutdown"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 4096
+    },
+    "httpd_ota_upload_request_release": {
+      "symbols": [
+        "ota_upload_http",
+        "http_upload_complete",
+        "ota_sdk_async_complete"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 4096
     }
   },
   "tasks": {
@@ -6220,7 +6653,11 @@
         "httpd_shutdown_env3_checkup",
         "httpd_mcp_health_number",
         "httpd_direct_health_number",
-        "httpd_checkup_schema"
+        "httpd_checkup_schema",
+        "httpd_ota_upload_admission",
+        "httpd_ota_upload_async_begin",
+        "httpd_ota_upload_socket_close",
+        "httpd_ota_upload_request_release"
       ]
     },
     "main": {
@@ -6466,7 +6903,17 @@
       "paths": [
         "ota_task_manifest_fetch",
         "ota_shutdown_journal",
-        "ota_shutdown_checkup"
+        "ota_shutdown_checkup",
+        "ota_image_end_pss_adding",
+        "ota_image_end_pss_recursive",
+        "ota_image_end_key_import",
+        "ota_image_select_pss_adding",
+        "ota_image_select_pss_recursive",
+        "ota_image_select_key_import",
+        "ota_upload_response",
+        "ota_upload_socket_close",
+        "ota_upload_request_release",
+        "ota_upload_receive"
       ]
     },
     "ota_health": {
@@ -6599,7 +7046,12 @@
       "spi_flash/spi_flash_chip_generic.c": "11c39de130afef9a3459aa13918b420ca2b27a2d5a494d96544619095ecf6800",
       "spi_flash/spi_flash_chip_winbond.c": "12a415aa6b50d7666c9f9e81504c37c2c09c340bb35700e9a1d013bf93374818",
       "spi_flash/memspi_host_driver.c": "2586901bcc4692d526a284f7cfeb9fda7dc06c01ecd0726c4465b2ce4b846921",
-      "spi_flash/spi_flash_os_func_app.c": "88ba993676ebd0349c4d94302bc098199a6d1dcea76fcda92dc649f1c7c6f966"
+      "spi_flash/spi_flash_os_func_app.c": "88ba993676ebd0349c4d94302bc098199a6d1dcea76fcda92dc649f1c7c6f966",
+      "app_update/esp_ota_ops.c": "526bee796363f147de53bb51b8b6f021800ddc50c5ce4f9f63680a66fe8a06ee",
+      "bootloader_support/src/esp_image_format.c": "49d4775bb094615290eb60bd982dc81f44eb34da506df19670c3ef12054de5b5",
+      "bootloader_support/src/secure_boot_v2/secure_boot_signatures_app.c": "ac2329ae185c839bd098cbe0a88cb6a56f6f08ea9a712696d9f14e22cc0bc9eb",
+      "bootloader_support/src/secure_boot_v2/secure_boot_rsa_signature.c": "cd2a75305b40d0233af2128e542f73bd5e896413ff8a3cd136ebbe9b67dd2069",
+      "esp_http_server/src/httpd_txrx.c": "622df880632b33057dd4c3f2f651baf81536a5b2b5cef872c1ba94d392387b62"
     },
     "config_macros": {
       "CONFIG_ESP_MAIN_TASK_STACK_SIZE": 6144,

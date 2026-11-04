@@ -41,6 +41,15 @@ PACKED_ENTRY_SYMBOLS = frozenset({
     'esp_http_client_connect',
     'esp_http_client_fetch_headers',
     'esp_http_client_read',
+    'lwip_shutdown',
+    'netconn_shutdown',
+    'httpd_recv_with_opt',
+    'httpd_recv',
+    'httpd_resp_send',
+    'httpd_req_recv',
+    'httpd_req_async_handler_begin',
+    'httpd_req_async_handler_complete',
+    'mbedtls_psa_rsa_import_key',
     '_ZN4daikL15mqtt_enqueue_idERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKciii$constprop$0$isra$0',
     '__wrap_mbedtls_ssl_handshake_client_step',
     '__wrap_mbedtls_ssl_read',
@@ -341,11 +350,16 @@ SHUTDOWN_CALLERS = {
        for name, symbol in SHUTDOWN_HTTP_CALLERS.items()},
     "poll_shutdown": ["poll_task", "heap_guard", "sdk_restart"],
     "eth_shutdown": ["eth_task", "sdk_restart"],
-    "ota_shutdown": ["ota_task", "sdk_restart"],
+    "ota_shutdown": ["ota_task", "ota_activate", "sdk_restart"],
     "ota_health_shutdown": ["ota_health_task", "sdk_restart"],
 }
 SDK_PUBLIC_FILES = (
     "esp_http_client/esp_http_client.c",
+    "app_update/esp_ota_ops.c",
+    "bootloader_support/src/esp_image_format.c",
+    "bootloader_support/src/secure_boot_v2/secure_boot_signatures_app.c",
+    "bootloader_support/src/secure_boot_v2/secure_boot_rsa_signature.c",
+    "esp_http_server/src/httpd_txrx.c",
     "mbedtls/mbedtls/tf-psa-crypto/include/psa/crypto_sizes.h",
     "mbedtls/mbedtls/tf-psa-crypto/drivers/builtin/src/psa_crypto_rsa.c",
     "mbedtls/mbedtls/tf-psa-crypto/drivers/builtin/src/psa_crypto_ecp.c",
@@ -666,21 +680,35 @@ def validate_shutdown_inlining(disassembly: str, budgets: dict[str, Any]) -> Non
         # run_update's chunk lambda is emitted separately, but it returns before the task's
         # restart. A nominal helper/cloned helper would need its own newly reviewed frame.
         nominal = ("{lambda" not in name
-                   and re.search(r"\b(?:factory_reset|run_update)\(", name))
-        raw_clone = re.match(r"^_Z.*(?:13factory_reset|10run_update)E", name)
+                   and re.search(r"\b(?:factory_reset|run_update|run_upload)\(", name))
+        raw_clone = re.match(r"^_Z.*(?:13factory_reset|10run_update|10run_upload)E", name)
         if nominal or raw_clone:
             raise BudgetError(f"shutdown inlining: outlined helper {name} needs frame accounting")
-        if ("{lambda" in name and "run_update" in name
+        if ("{lambda" in name and any(part in name for part in ("run_update", "run_upload"))
                 and any("<esp_restart" in line for line in lines)):
             raise BudgetError("shutdown inlining: update lambda now contains a restart")
     direct = re.compile(r"^\s*[0-9a-f]+:\s+[0-9a-f]+\s+call8\s+[0-9a-f]+\s+<esp_restart>\s*$")
-    for key in ("button_task", "ota_task"):
+    for key in ("button_task", "ota_activate"):
         pattern = re.compile(budgets["symbols"][key]["pattern"])
         matches = [lines for name, lines in blocks.items() if pattern.search(name)]
         if (len(matches) != 1
                 or sum(bool(direct.match(line)) for line in matches[0]) != 1
                 or sum("<esp_restart" in line for line in matches[0]) != 1):
             raise BudgetError(f"shutdown inlining: {key} must contain its sole direct restart")
+    task = re.compile(budgets["symbols"]["ota_task"]["pattern"])
+    activation = re.compile(budgets["symbols"]["ota_activate"]["pattern"])
+    calls = []
+    for caller, lines in blocks.items():
+        for line in lines:
+            target = re.search(r"<(.+)>", line)
+            if target and activation.search(target[1]):
+                if not task.search(caller) or not re.search(r"\bcall8\b", line):
+                    raise BudgetError("shutdown inlining: activation has an unreviewed ELF caller")
+                calls.append(line)
+        if task.search(caller) and any("<esp_restart" in line for line in lines):
+            raise BudgetError("shutdown inlining: OTA restart bypasses activation")
+    if len(calls) != 2:
+        raise BudgetError("shutdown inlining: both task transports must call measured activation")
 
 
 def validate_poll_inlining(disassembly: str) -> None:
@@ -897,6 +925,84 @@ def stack_function_body(source: str, name: str) -> str:
     raise BudgetError(f"shutdown source: unclosed body of {name}")
 
 
+def reviewed_ota_upload_paths() -> dict[str, tuple[str, list[str], dict[str, int], int, int]]:
+    """Both inlined transports retain the task frame while calling measured activation.
+
+    RSA-PSS uses the same source-pinned PSA/MP division and one-level multiplication paths as
+    the TLS profiles. Import and socket/library descendants retain the established 1536-byte
+    SDK/ROM allowance; verification additionally names the complete RSA allocation descent.
+    """
+    result = {}
+    root = ["ota_task", "ota_activate"]
+    for phase, sdk in (("end", ["ota_sdk_end", "ota_sdk_verify_partition"]),
+                       ("select", ["ota_sdk_select", "ota_sdk_image_validate"])):
+        prefix = root + sdk + ["ota_sdk_image_verify", "ota_sdk_image_load", "ota_sdk_sbv2",
+                               "ota_sdk_rsa_verify"]
+        rsa = ["tls_psa_verify_hash", "tls_psa_verify_hash_builtin", "tls_mbedtls_psa_rsa_verify_hash",
+               "tls_mbedtls_rsa_pkcs1_verify", "tls_mbedtls_rsa_rsassa_pss_verify_ext",
+               "tls_mbedtls_rsa_public", "tls_mbedtls_mpi_exp_mod_unsafe", "tls_mbedtls_mpi_exp_mod",
+               "tls_calculate_rinv", "tls_mbedtls_mpi_mod_mpi", "tls_mbedtls_mpi_div_mpi",
+               "tls_mbedtls_mpi_mul_int", "tls_mbedtls_mpi_mul_mpi", "tls_mpi_mult_mpi_overlong_isra_0"]
+        allocation = ["tls_mbedtls_mpi_grow", "tls_mbedtls_calloc", "tls_esp_mbedtls_mem_calloc",
+                      "tls_heap_caps_calloc", "tls_heap_caps_calloc_base", "sdk_malloc_base",
+                      "sdk_malloc_aligned", "sdk_multi_aligned_offset", "sdk_multi_aligned_impl",
+                      "sdk_multi_lock", "sdk_queue_critical", "sdk_queue_compare_swap",
+                      "runtime_task_entry"]
+        adding = ["tls_mbedtls_mpi_add_mpi", "tls_add_sub_mpi", "tls_mbedtls_mpi_add_abs",
+                  "tls_mbedtls_mpi_copy"]
+        result[f"ota_image_{phase}_pss_adding"] = (
+            "ota", prefix + rsa + adding + allocation, {}, 1536, 10752)
+        result[f"ota_image_{phase}_pss_recursive"] = (
+            "ota", prefix + rsa + allocation, {"tls_mbedtls_mpi_mul_mpi": 2}, 1536, 10752)
+        result[f"ota_image_{phase}_key_import"] = (
+            "ota", prefix + ["tls_psa_import_key", "tls_psa_driver_wrapper_import_key",
+                              "tls_psa_import_key_into_slot", "ota_sdk_rsa_import"], {}, 1536, 10752)
+    complete = root + ["ota_upload_finish", "ota_upload_complete"]
+    result.update({
+        "ota_upload_response": ("ota", complete + ["http_upload_json", "ota_sdk_http_response"], {}, 1536, 10752),
+        "ota_upload_socket_close": ("ota", complete + ["http_upload_complete", "ota_sdk_shutdown",
+                                                        "ota_sdk_netconn_shutdown"], {}, 1536, 10752),
+        "ota_upload_request_release": ("ota", complete + ["http_upload_complete", "ota_sdk_async_complete"], {}, 1536, 10752),
+        "ota_upload_receive": ("ota", ["ota_task", "ota_upload_read_lambda", "ota_upload_read",
+                                       "ota_sdk_http_receive", "ota_sdk_http_recv", "ota_sdk_http_recv_opt",
+                                       "http_upload_receive_budget", "tls_lwip_recvfrom", "tls_lwip_recv_tcp"], {}, 1536, 10752),
+        "httpd_ota_upload_admission": ("httpd", ["ota_upload_http", "ota_upload_start", "ota_start_locked"], {}, 1536, 4096),
+        "httpd_ota_upload_async_begin": ("httpd", ["ota_upload_http", "http_upload_begin", "ota_sdk_async_begin"], {}, 1536, 4096),
+        "httpd_ota_upload_socket_close": ("httpd", ["ota_upload_http", "http_upload_complete", "ota_sdk_shutdown",
+                                                   "ota_sdk_netconn_shutdown"], {}, 1536, 4096),
+        "httpd_ota_upload_request_release": ("httpd", ["ota_upload_http", "http_upload_complete", "ota_sdk_async_complete"], {}, 1536, 4096),
+    })
+    return result
+
+
+def validate_ota_upload_paths(budgets: dict[str, Any], sources: dict[str, str]) -> None:
+    for name, (owner, members, multipliers, base, maximum) in reviewed_ota_upload_paths().items():
+        rule = budgets["paths"].get(name, {})
+        if (name not in budgets["tasks"][owner]["paths"] or rule.get("symbols") != members
+                or rule.get("multipliers") != multipliers or rule.get("base_bytes") != base
+                or rule.get("max_bytes") != maximum):
+            raise BudgetError(f"OTA upload path {name}: caller/SDK/reserve accounting changed")
+    code = {name: stack_source_code(source) for name, source in sources.items()}
+    ota = code["main/ota_update.cpp"]
+    http = code["main/http_ota.cpp"]
+    common = code["main/http_common.cpp"]
+    for parent, child, source in (("run_upload", "activate_update", ota),
+                                  ("run_update", "activate_update", ota),
+                                  ("ota_task", "run_upload", ota),
+                                  ("ota_task", "run_update", ota),
+                                  ("upload_complete", "http_complete_ota_upload", http),
+                                  ("upload_complete", "http_send_json", http),
+                                  ("upload_read", "httpd_req_recv", http),
+                                  ("http_begin_ota_upload", "httpd_req_async_handler_begin", common),
+                                  ("http_complete_ota_upload", "shutdown", common),
+                                  ("http_complete_ota_upload", "httpd_req_async_handler_complete", common)):
+        if len(re.findall(r"\b" + child + r"\s*\(", stack_function_body(source, parent))) != 1:
+            raise BudgetError(f"OTA upload source: {parent}/{child} caller changed")
+    if not re.search(r"OtaUploadSource\s+source\s*\{\s*copy,\s*req->content_len,\s*"
+                     r"upload_read,\s*upload_complete\s*\}", http):
+        raise BudgetError("OTA upload source: unreviewed indirect ingress/completion callbacks")
+
+
 def validate_shutdown_paths(budgets: dict[str, Any], sources: dict[str, str]) -> None:
     expected = shutdown_path_members()
     modeled = {name for name in budgets["paths"]
@@ -930,7 +1036,7 @@ def validate_shutdown_paths(budgets: dict[str, Any], sources: dict[str, str]) ->
                        ("main/net.cpp", "eth_fallback_task"),
                        ("main/recovery_button.cpp", "factory_reset"),
                        ("main/wifi.cpp", "wifi_finish_sta_rollback"),
-                       ("main/ota_update.cpp", "run_update"),
+                       ("main/ota_update.cpp", "activate_update"),
                        ("main/ota_update.cpp", "health_gate_task")):
         bodies[name] = stack_function_body(code[path], name)
         if len(re.findall(r"\besp_restart\s*\(\s*\)", bodies[name])) != 1:
@@ -944,11 +1050,15 @@ def validate_shutdown_paths(budgets: dict[str, Any], sources: dict[str, str]) ->
     for path, parent, child in (("main/hp_poll.cpp", "poll_task", "heap_guard_sample"),
                                 ("main/hp_poll.cpp", "poll_task", "history_record_board"),
                                 ("main/recovery_button.cpp", "button_task", "factory_reset"),
-                                ("main/ota_update.cpp", "ota_task", "run_update")):
+                                ("main/ota_update.cpp", "ota_task", "run_update"),
+                                ("main/ota_update.cpp", "ota_task", "run_upload"),
+                                ("main/ota_update.cpp", "run_update", "activate_update"),
+                                ("main/ota_update.cpp", "run_upload", "activate_update")):
         if len(re.findall(r"\b" + child + r"\s*\(", stack_function_body(code[path], parent))) != 1:
             raise BudgetError(f"shutdown source: {parent}/{child} caller changed")
     for name, count in (("heap_guard_sample", 2), ("history_record_board", 2),
-                        ("factory_reset", 2), ("run_update", 2), ("wifi_start_sta", 2),
+                        ("factory_reset", 2), ("run_update", 2), ("run_upload", 2),
+                        ("activate_update", 3), ("wifi_start_sta", 2),
                         ("wifi_finish_sta_rollback", 2), ("checkup_reboot_save", 1),
                         ("history_flash_save", 1), ("history_flash_service_journal", 4)):
         actual = sum(len(re.findall(r"\b" + name + r"\s*\(", source))
@@ -1656,6 +1766,7 @@ def validate_source_contract(budgets: dict[str, Any]) -> None:
                                 (REPO / "main/logic/mqtt_group.hpp").read_text(encoding="utf-8"))
     validate_room_history_paths(budgets, sources)
     validate_shutdown_paths(budgets, sources)
+    validate_ota_upload_paths(budgets, sources)
     validate_json_recursion(
         budgets, (REPO / "main/logic/payload_complete.hpp").read_text(encoding="utf-8"),
         (REPO / "main/logic/mcp.hpp").read_text(encoding="utf-8"),
@@ -2388,7 +2499,8 @@ def self_test() -> None:
    4: 004136          entry a1, 1120
 00000005 <daik::(anonymous namespace)::ota_task(void*)>:
    5: 004136          entry a1, 2608
-   8: fff7a5          call8 1000 <esp_restart>
+   8: fff7a5          call8 1000 <daik::(anonymous namespace)::activate_update(daik::(anonymous namespace)::OtaUpdateResources&, esp_partition_t const*, char const*, daik::(anonymous namespace)::OtaUploadRequest*)>
+   b: fff7a5          call8 1000 <daik::(anonymous namespace)::activate_update(daik::(anonymous namespace)::OtaUpdateResources&, esp_partition_t const*, char const*, daik::(anonymous namespace)::OtaUploadRequest*)>
 00000006 <daik::ota_stat(httpd_req*)>:
    6: 004136          entry a1, 5088
 00000007 <daik::(anonymous namespace)::fetch_manifest_identity_once(std::string const&, daik::OtaManifestIdentity&, char const*&, bool&)>:
@@ -2999,8 +3111,43 @@ def self_test() -> None:
         'daik::wifi_forget_persisted_config()': 192,
     })
     extra_frames.update({name: maximum for name, maximum in ROOM_HISTORY_FRAMES.values()})
+
+    # Exact final-ELF anchors for the shared verifier and asynchronous HTTP upload.
+    extra_frames.update({
+        'daik::(anonymous namespace)::activate_update(daik::(anonymous namespace)::OtaUpdateResources&, esp_partition_t const*, char const*, daik::(anonymous namespace)::OtaUploadRequest*)': 80,
+        'daik::(anonymous namespace)::OtaUploadRequest::finish(bool)': 32,
+        'daik::upload_complete(void*, bool, unsigned long)': 96,
+        'daik::upload_read(void*, char*, unsigned int)': 32,
+        'daik::(anonymous namespace)::run_upload(daik::(anonymous namespace)::OtaTaskArgs const&, daik::(anonymous namespace)::OtaUploadRequest&)::{lambda(unsigned int, unsigned int)#1}::operator()(unsigned int, unsigned int) const': 32,  # audit-allow-issue-ref: literal ELF lambda ordinal
+        'daik::ota_upload(httpd_req*)': 208,
+        'daik::ota_upload_async(daik::OtaUploadSource const&, char const*)': 704,
+        'daik::(anonymous namespace)::start_locked(daik::(anonymous namespace)::OtaTaskArgs const&, unsigned long)': 32,
+        'daik::http_send_json(httpd_req*, char const*)': 32,
+        'daik::http_begin_ota_upload(httpd_req*, httpd_req**)': 32,
+        'daik::http_complete_ota_upload(httpd_req*)': 32,
+        'daik::(anonymous namespace)::receive_with_budget(void*, int, char*, unsigned int, int)': 32,
+        'esp_ota_end': 48,
+        'esp_ota_set_boot_partition': 32,
+        'ota_verify_partition': 320,
+        'image_validate': 304,
+        'esp_image_verify': 32,
+        'image_load': 160,
+        'esp_secure_boot_verify_sbv2_signature_block': 192,
+        'verify_rsa_signature_block': 112,
+        'mbedtls_psa_rsa_import_key': 48,
+        'httpd_req_async_handler_begin': 48,
+        'httpd_req_async_handler_complete': 48,
+        'httpd_resp_send': 64,
+        'httpd_req_recv': 48,
+        'httpd_recv': 32,
+        'httpd_recv_with_opt': 48,
+        'lwip_shutdown': 32,
+        'netconn_shutdown': 32,
+    })
     for index, (name, frame) in enumerate(extra_frames.items(), 0x1000):
         fixture += f"\n{index:08x} <{name}>:\n{index:x}: 004136 entry a1, {frame}\n"
+        if name == 'daik::(anonymous namespace)::activate_update(daik::(anonymous namespace)::OtaUpdateResources&, esp_partition_t const*, char const*, daik::(anonymous namespace)::OtaUploadRequest*)':
+            fixture += f"{index + 3:x}: fff7a5 call8 1000 <esp_restart>\n"
         if name == 'daik::(anonymous namespace)::button_task(void*)':
             fixture += f"{index + 3:x}: fff7a5 call8 1000 <esp_restart>\n"
         if name in INTEGER_BUILDERS:
@@ -3345,6 +3492,51 @@ def self_test() -> None:
             raise AssertionError(f"self-test accepted changed numeric serializer source: {before}")
         diagnosis_controls += 1
 
+    upload_sources = {name: (REPO / name).read_text(encoding="utf-8")
+                      for name in ("main/ota_update.cpp", "main/http_ota.cpp", "main/http_common.cpp")}
+    validate_ota_upload_paths(budgets, upload_sources)
+    upload_stack_controls = 0
+    for name, (owner, members, _, _, _) in reviewed_ota_upload_paths().items():
+        for mutation in ("owner", "path", "member", "base", "ceiling", "recursion"):
+            changed = json.loads(json.dumps(budgets))
+            if mutation == "owner":
+                changed["tasks"][owner]["paths"].remove(name)
+            elif mutation == "path":
+                del changed["paths"][name]
+            elif mutation == "member":
+                changed["paths"][name]["symbols"].remove(members[-1])
+            elif mutation == "base":
+                changed["paths"][name]["base_bytes"] -= 16
+            elif mutation == "ceiling":
+                changed["paths"][name]["max_bytes"] += 16
+            else:
+                changed["paths"][name]["multipliers"] = {members[0]: 2}
+            try:
+                validate_ota_upload_paths(changed, upload_sources)
+            except BudgetError as exc:
+                assert "OTA upload path" in str(exc)
+            else:
+                raise AssertionError(f"self-test accepted upload {mutation}: {name}")
+            upload_stack_controls += 1
+    for name, before, after in (
+        ("main/ota_update.cpp", "activate_update(resources, update_partition, avail)", "other_activation(resources, update_partition, avail)"),
+        ("main/ota_update.cpp", "activate_update(resources, partition, image.version, &upload)", "other_activation(resources, partition, image.version, &upload)"),
+        ("main/http_ota.cpp", "upload_read, upload_complete", "other_read, upload_complete"),
+        ("main/http_ota.cpp", "http_complete_ota_upload(req)", "other_complete(req)"),
+        ("main/http_common.cpp", "shutdown(httpd_req_to_sockfd(req), SHUT_RDWR)", "other_shutdown(httpd_req_to_sockfd(req), SHUT_RDWR)"),
+        ("main/http_common.cpp", "httpd_req_async_handler_complete(req)", "other_async_complete(req)"),
+    ):
+        changed = dict(upload_sources)
+        assert before in changed[name], before
+        changed[name] = changed[name].replace(before, after, 1)
+        try:
+            validate_ota_upload_paths(budgets, changed)
+        except BudgetError as exc:
+            assert "OTA upload source" in str(exc)
+        else:
+            raise AssertionError(f"self-test accepted changed upload source {before}")
+        upload_stack_controls += 1
+
     shutdown_sources = {str(path.relative_to(REPO)): path.read_text(encoding="utf-8")
                         for path in (REPO / "main").glob("*.cpp")}
     validate_shutdown_paths(budgets, shutdown_sources)
@@ -3462,8 +3654,10 @@ def self_test() -> None:
     for name in (
         'daik::(anonymous namespace)::factory_reset()',
         'daik::(anonymous namespace)::run_update(daik::(anonymous namespace)::OtaTaskArgs const&)',
+        'daik::(anonymous namespace)::run_upload(daik::(anonymous namespace)::OtaTaskArgs const&, daik::(anonymous namespace)::OtaUploadRequest&)',
         '_ZN4daik12_GLOBAL__N_1L13factory_resetEv$constprop$0',
         '_ZN4daik12_GLOBAL__N_1L10run_updateERKNS0_11OtaTaskArgsE$isra$0',
+        '_ZN4daik12_GLOBAL__N_1L10run_uploadERKNS0_11OtaTaskArgsERNS0_16OtaUploadRequestE$isra$0',
     ):
         reject_disassembly("outlined shutdown helper " + name, fixture +
                            f"\n00003000 <{name}>:\n3000: 004136 entry a1, 32\n",
@@ -3472,7 +3666,10 @@ def self_test() -> None:
     button_match = re.search(r"<daik::\(anonymous namespace\)::button_task\(void\*\)>:\n"
                              r"[^\n]+\n([^\n]*call8[^\n]*<esp_restart>)", fixture)
     assert button_match is not None
-    for call in (button_match.group(1), "   8: fff7a5          call8 1000 <esp_restart>"):
+    activation_match = re.search(r"<" + re.escape('daik::(anonymous namespace)::activate_update(daik::(anonymous namespace)::OtaUpdateResources&, esp_partition_t const*, char const*, daik::(anonymous namespace)::OtaUploadRequest*)') + r">:\n"
+                                 r"[^\n]+\n([^\n]*call8[^\n]*<esp_restart>)", fixture)
+    assert activation_match is not None
+    for call in (button_match.group(1), activation_match.group(1)):
         for replacement in ("", call.replace("call8", "l32r a8,"), call + "\n" + call):
             reject_disassembly("changed task-level shutdown call", fixture.replace(call, replacement),
                                "shutdown inlining")
@@ -4306,6 +4503,7 @@ def self_test() -> None:
           f"{room_history_controls} room-history-source/path, "
           f"{diagnosis_controls} diagnosis-source/path, "
           f"{numeric_disassembly_controls} diagnosis-numeric-calls, "
+          f"{upload_stack_controls} OTA-upload-source/path, "
           f"{shutdown_controls} shutdown-source/path, "
           f"{shutdown_optimizer_controls} shutdown-inlining, "
           f"{poll_inlining_controls} poll-inlining, "
