@@ -43,6 +43,7 @@
 #include "stack_watch.hpp"
 #include "weather_forecast.hpp"
 #include "wifi.hpp"
+#include "arch/sys_arch.h"
 #include "esp_app_desc.h"
 #include "esp_app_format.h"
 #include "esp_crt_bundle.h"
@@ -64,6 +65,7 @@
 #include <atomic>
 #include <cstdio>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <exception>
 #include <memory>
@@ -234,6 +236,7 @@ constexpr UBaseType_t kTaskPrio  = TASK_PRIO_OTA; // see main/task_config.hpp fo
 StaticTask_t          s_ota_task_storage{};
 StackType_t           s_ota_task_stack[kTaskStack]{};
 TaskHandle_t          s_ota_task     = nullptr;
+std::atomic<bool>     s_ota_lwip_ready{false};
 constexpr int         kHttpTimeoutMs = 15000;
 // A peer which sends one byte inside every socket timeout is still not allowed to hold MQTT,
 // HomeHub and Syslog quiesced forever. The remaining-time setter bounds each ordinary IDF call;
@@ -1845,6 +1848,18 @@ void run_update(const OtaTaskArgs& request) {
 // update CHECK ran out of memory would be absurd (AGENTS.md → Memory, concurrency, and HTTP
 // safety).
 void ota_task(void*) {
+    // An upload can fail before its first receive, making its error response this task's first
+    // socket operation. Reserve lwIP's per-task semaphore at boot, before runtime heap pressure.
+    // The pinned port ignores pthread_setspecific failure: require the same retained pointer.
+    sys_sem_t* const thread_sem = sys_thread_sem_get();
+    if (thread_sem == nullptr || sys_thread_sem_get() != thread_sem) {
+        diag_printf("ota: lwIP worker prime failed; OTA disabled\n");
+        stack_watch_sample(StackWatch::Ota);
+        vTaskSuspend(nullptr);
+        std::abort(); // a failed worker must remain parked even after an unexpected resume
+    }
+    s_ota_lwip_ready.store(true, std::memory_order_release);
+
     for (;;) {
         (void)ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
@@ -1919,7 +1934,7 @@ uint32_t next_generation(uint32_t current) {
 // accepted by an already-created worker; no operation-path task-stack allocation can consume the
 // contiguous block the following TLS gate is about to measure.
 uint32_t start_locked(const OtaTaskArgs& request, uint32_t previous_generation) {
-    if (!s_ota_task) return 0;
+    if (!s_ota_task || !s_ota_lwip_ready.load(std::memory_order_acquire)) return 0;
     // No new operation once an install's restart was held, nor while a factory reset is erasing:
     // an install finishing then could only be held too, with nothing gained.
     if (s_install_held || nvs_factory_reset_latched()) return 0;
@@ -1944,6 +1959,7 @@ uint32_t start_check(const OtaFeedUrls* hil_feed) {
     // independent lock; the second check below is the authoritative race-closing acceptance.
     {
         Lock lk(s_mtx);
+        if (!s_ota_lwip_ready.load(std::memory_order_acquire)) return 0;
         if (s_busy || !s_ota_task) return 0;
     }
     const OtaChannel channel = config_ota_channel();
@@ -2029,6 +2045,7 @@ uint32_t ota_update_async(uint32_t after_generation, const char* expected_channe
 }
 
 uint32_t ota_upload_async(const OtaUploadSource& source, const char* expected_sha256) {
+    if (!s_ota_lwip_ready.load(std::memory_order_acquire)) return 0;
     if (!source.context || !source.read || !source.complete) return 0;
     const auto* partition = esp_ota_get_next_update_partition(nullptr);
     if (!partition ||

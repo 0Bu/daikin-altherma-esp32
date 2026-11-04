@@ -20,6 +20,7 @@
 #include "esp_err.h"
 #include "esp_timer.h"
 #include <cstring>
+#include <cstdlib>
 #include <new>          // std::bad_alloc
 #include <cerrno>
 #include <unistd.h>
@@ -189,7 +190,9 @@ static esp_err_t handle_all(httpd_req_t* req) {
         // without preflight. Bodyless actions (/detect, /ota/update, /crash/dismiss and the clear
         // endpoints) remain available to native clients without inventing an empty JSON envelope.
         if (!json_post_allowed(req))
-            return reject_request(req, "415 Unsupported Media Type", "application/json required");
+            return reject_request(req, "415 Unsupported Media Type",
+                                  http_is_ota_upload(req->uri) ? "application/octet-stream required"
+                                                               : "application/json required");
         return fn(req);
     } catch (const std::bad_alloc&) {
         httpd_resp_set_status(req, "503 Service Unavailable");
@@ -228,7 +231,12 @@ esp_err_t http_begin_ota_upload(httpd_req_t* req, httpd_req_t** copy) {
 void http_complete_ota_upload(httpd_req_t* req) noexcept {
     // Never let an unread binary suffix become a keep-alive request. Shutdown while the async
     // lease still protects the session, then release it; the server observes EOF and closes it.
-    shutdown(httpd_req_to_sockfd(req), SHUT_RDWR);
+    errno                     = 0;
+    const int shutdown_result = shutdown(httpd_req_to_sockfd(req), SHUT_RDWR);
+    const int shutdown_errno  = errno;
+    // ENOTCONN already excludes further input. Every other failure leaves the socket unsafe to
+    // reuse; match the outgoing deadline watchdog's fail-closed rule before releasing the lease.
+    if (shutdown_result != 0 && shutdown_errno != ENOTCONN) std::abort();
     (void)httpd_req_async_handler_complete(req);
 }
 

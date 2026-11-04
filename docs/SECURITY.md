@@ -33,7 +33,9 @@ Beyond those bounds the connection closes. During active OTA or below a 6,144-by
 the common guard refuses every non-OTA route, including assets and both `/diag` forms.
 The admitted dev-only binary upload has a separate 300-second receive budget from the same
 first-header start; progress cannot extend it. It closes its connection instead of purging an
-unread image. [API.md](API.md#ota-operation-contract) owns its framing and error contract.
+unread image. Failed task-local lwIP initialization disables OTA for the boot. An upload socket that
+cannot be shut down causes an abort before the async lease is released, excluding unread binary
+input from subsequent request parsing. [API.md](API.md#ota-operation-contract) owns framing and errors.
 
 The two transient HIL HTTPS headers on `/ota/check` add outbound-HTTPS/SSRF capability for trusted
 LAN clients. They carry no controller bearer token/device credential, cap URLs at 255 bytes and
