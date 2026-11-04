@@ -1035,11 +1035,10 @@ button.vhist-source:focus-visible { outline: 2px solid var(--brand); outline-off
   box-shadow: 0 4px 14px rgba(16,20,28,.12); }
 .vhist-env3 .vhist-tip-rows { display: grid; grid-template-columns: max-content minmax(0, 1fr);
   gap: 0 1ch; text-align: left; }
-.vhist-env3 .vhist-tip-line { display: contents; }
 .vhist-env3 .vhist-tip-meta { display: block; }
-.vhist-env3 .vhist-tip-line.env-temperature { color: var(--flow-hot); }
-.vhist-env3 .vhist-tip-line.env-humidity { color: var(--flow-cold); }
-.vhist-env3 .vhist-tip-line.env-pressure { color: var(--env-pressure); }
+.vhist-tip-rows .env-temperature { color: var(--flow-hot); }
+.vhist-tip-rows .env-humidity { color: var(--flow-cold); }
+.vhist-tip-rows .env-pressure { color: var(--env-pressure); }
 .vhist-line { fill: none; stroke: var(--brand-sky); stroke-width: 1.6px; stroke-linejoin: round;
   stroke-linecap: round; opacity: 1; }
 .vhist-area { fill: var(--brand-sky); opacity: .14; stroke: none; }

@@ -2017,7 +2017,7 @@ async function assertHistoryReadouts(page, context) {
           const view=historyView(plot.dataset.hist,plot.dataset.source || "");
           const i=scrubIndex(plot,plot.getBoundingClientRect().left + plot.clientWidth * ${fraction});
           const valuesAligned = el => {
-            const values = [...el.querySelectorAll(".vhist-tip-rows .vhist-tip-line > span:last-child")];
+            const values = [...el.querySelectorAll(".vhist-tip-rows > span:nth-child(even)")];
             return values.length === 3 && values.every(value =>
               Math.abs(rect(value).left-rect(values[0]).left)<1 && getComputedStyle(value).textAlign === "left");
           };

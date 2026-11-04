@@ -1667,10 +1667,10 @@ function histReadout(h, i) {
   const lines = text.split("\n");
   // Forecast provenance precedes the coloured measurement rows; measured bubbles need no header.
   const meta = i >= h.v.length ? lines.shift() : "";
-  return (meta ? `<span class="vhist-tip-line vhist-tip-meta">${esc(meta)}</span>` : "") +
+  return (meta ? `<span class="vhist-tip-meta">${esc(meta)}</span>` : "") +
     `<span class="vhist-tip-rows">` + histVisibleSeries(h).map((s, index) =>
-      `<span class="vhist-tip-line ${env3SeriesClass(s.source)}"><span>` +
-      esc(lines[index]).replace("  ", "</span><span>") + `</span></span>`
+      lines[index].split("  ").map(cell =>
+        `<span class="${env3SeriesClass(s.source)}">${esc(cell)}</span>`).join("")
     ).join("") + `</span>`;
 }
 
