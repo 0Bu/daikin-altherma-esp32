@@ -369,11 +369,15 @@ assert.match(body(checkup, "void expire_restored_locked()"),
 assert.match(body(checkup, "void expire_restored_locked()"),
   /P\(\)\.ring\.pending = logic::CheckupBucket\{\};[\s\S]*changed = true; \} if \(changed\) checkup_persist_seal\(\);/,
   "pending-only expiry must reseal even when no completed slot expired");
-const emptyCallback = /checkup_record\(nullptr, 0, false, false, logic::CheckupCoverage\{\}, generation, false\);/g;
-assert.equal(count(task, emptyCallback), 3,
+const gapCallback = body(poll, "static void checkup_record_poll_gap(");
+assert.match(gapCallback, /bool profile_confirmed = false\)/,
+  "temporary gap callbacks preserve capabilities unless their caller explicitly withdraws them");
+assert.match(gapCallback,
+  /checkup_record\(nullptr, 0, false, false, logic::CheckupCoverage\{\}, generation, checkup_consent_epoch\(\), profile_confirmed\);/,
+  "the gap helper forwards its caller's capability decision and captures the current consent");
+assert.equal(count(task, /checkup_record_poll_gap\(generation\);/g), 3,
   "the TLS hold and both OOM handlers preserve resolved profile capabilities");
-assert.equal(count(task,
-  /checkup_record\(nullptr, 0, false, false, logic::CheckupCoverage\{\}, generation\);/g), 1,
+assert.equal(count(task, /checkup_record_poll_gap\(generation, true\);/g), 1,
   "the unidentified-profile path still explicitly withdraws profile capability");
 
 // The blind-time and DHW-scope rules in logic/checkup.hpp are host-tested; these pin the facts the

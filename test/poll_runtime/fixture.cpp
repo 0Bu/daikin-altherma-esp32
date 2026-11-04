@@ -59,6 +59,7 @@ struct CheckupCall {
 };
 CheckupCall checkup_calls[4]{};
 size_t      checkup_call_count = 0;
+unsigned    checkup_gaps_preserving_profile = 0;
 } // namespace adapter
 namespace daik {
 Config config() {
@@ -187,11 +188,14 @@ void checkup_set_diagnostics(bool, uint32_t) {
 }
 void checkup_record(const CachedValue* values, size_t       count, bool, bool,
                     const logic::CheckupCoverage&, uint32_t generation, uint32_t consent_epoch,
-                    bool) {
+                    bool profile_confirmed) {
     if (adapter::checkup_call_count < 4)
         adapter::checkup_calls[adapter::checkup_call_count] = {count, generation, consent_epoch};
     ++adapter::checkup_call_count;
-    if (!values && !count) ++sdk::checkup_unread;
+    if (!values && !count) {
+        ++sdk::checkup_unread;
+        if (!profile_confirmed) ++adapter::checkup_gaps_preserving_profile;
+    }
 }
 void dwell_record(const CachedValue* values, size_t count, uint32_t, uint32_t,
                   const HpValuesIdentity*) {
@@ -258,6 +262,8 @@ static void after_delay(TickType_t ticks) {
                "recent_last_good_source_preserved");
         oracle(sdk::checkup_unread == 1 && sdk::dwell_unread == 1,
                "oom_records_unread_observation");
+        oracle(adapter::checkup_gaps_preserving_profile == sdk::checkup_unread,
+               "empty_gap_preserves_profile_capability");
         sdk::now_us = good_time + 16000000;
     } else if (sdk::delay_count == 3) {
         oracle(hp_skipped_cycles() == 2 && sdk::failures == 2, "repeated_failure_survived");
@@ -314,6 +320,8 @@ static void after_delay(TickType_t ticks) {
         oracle(hp_skipped_cycles() == 3 && sdk::skipped_logs == 2 && sdk::history_commits == 3 &&
                    sdk::takes == sdk::gives && sdk::stack_samples == 7,
                "episodes_have_balanced_completion");
+        oracle(sdk::checkup_unread == 4 && adapter::checkup_gaps_preserving_profile == 4,
+               "all_oom_and_tls_gaps_preserve_profile_capability");
         throw sdk::Stop{};
     } else
         oracle(false, "bounded_task_execution");

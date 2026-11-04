@@ -683,6 +683,17 @@ def validate_shutdown_inlining(disassembly: str, budgets: dict[str, Any]) -> Non
             raise BudgetError(f"shutdown inlining: {key} must contain its sole direct restart")
 
 
+def validate_poll_inlining(disassembly: str) -> None:
+    """The poll budget measures sweep locals inside the task frame, never as a nested frame."""
+    for line in disassembly.splitlines():
+        if header := FUNCTION_RE.match(line):
+            name = header.group(2)
+            nominal = re.match(r"^daik::(?:\(anonymous namespace\)::)?poll_once\(", name)
+            raw_clone = re.match(r"^_ZN4daik(?:12_GLOBAL__N_1)?L?9poll_onceE", name)
+            if "{lambda" not in name and (nominal or raw_clone):
+                raise BudgetError(f"poll inlining: outlined sweep {name} needs frame accounting")
+
+
 def validate_status_numeric_calls(disassembly: str, budgets: dict[str, Any]) -> None:
     """Keep the outlined nullable-number helper on its sole serializer caller."""
     references: list[tuple[str, str]] = []
@@ -703,6 +714,7 @@ def validate_status_numeric_calls(disassembly: str, budgets: dict[str, Any]) -> 
 
 
 def parse_frames(disassembly: str, budgets: dict[str, Any] | None = None) -> dict[str, int]:
+    validate_poll_inlining(disassembly)
     if budgets is None:
         budgets = load_budgets(DEFAULT_BUDGETS)
     required = [re.compile(rule["pattern"]) for rule in budgets["symbols"].values()]
@@ -3433,6 +3445,19 @@ def self_test() -> None:
         reject_disassembly("changed nullable-number caller", altered, "diagnosis numeric calls")
         numeric_disassembly_controls += 1
 
+    poll_inlining_controls = 0
+    for name in (
+        'daik::poll_once()',
+        'daik::(anonymous namespace)::poll_once()',
+        'daik::poll_once() [clone .constprop.0]',
+        '_ZN4daikL9poll_onceEv$constprop$0',
+        '_ZN4daikL9poll_onceEv$isra$0',
+    ):
+        reject_disassembly("outlined poll sweep " + name, fixture +
+                           f"\n00003000 <{name}>:\n3000: 004136 entry a1, 1568\n",
+                           "poll inlining")
+        poll_inlining_controls += 1
+
     shutdown_optimizer_controls = 0
     for name in (
         'daik::(anonymous namespace)::factory_reset()',
@@ -4283,6 +4308,7 @@ def self_test() -> None:
           f"{numeric_disassembly_controls} diagnosis-numeric-calls, "
           f"{shutdown_controls} shutdown-source/path, "
           f"{shutdown_optimizer_controls} shutdown-inlining, "
+          f"{poll_inlining_controls} poll-inlining, "
           f"{i2c_dynamic_controls} I2C-dynamic, {i2c_source_controls} I2C-source, "
           f"{sdk_controls} SDK-source/config controls)")
 

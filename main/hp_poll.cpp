@@ -275,7 +275,9 @@ static void checkup_record_poll_gap(uint32_t generation, bool profile_confirmed 
                    checkup_consent_epoch(), profile_confirmed);
 }
 
-static void poll_once() {
+// Overlay sweep locals with the task's other branches instead of stacking both frames. The
+// target stack gate rejects an outlined sweep, including optimizer-generated clones.
+[[gnu::always_inline]] inline static void poll_once() {
     const uint32_t consent_epoch    = checkup_consent_epoch();
     const uint32_t cycle_generation = hp_poll_generation();
     const Config&  c                = config();

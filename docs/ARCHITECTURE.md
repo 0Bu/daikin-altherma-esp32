@@ -564,6 +564,8 @@ Stack is a separate budget. `scripts/check-stack-budget.py` reads the exact ESP3
 frames and conservative call paths, failing when required symbols disappear, dynamic stack
 adjustments change or source-bound task reserves are exceeded. `tools/stack/budgets.json` owns
 limits and reviewed HTTP/TLS/exception allowances; raising a budget is a review decision.
+The poll sweep stays inlined in its task so their locals share one frame; an outlined sweep fails
+the ELF gate instead of silently escaping the modeled call path.
 Parser budgets count all accepted recursion frames. Startup persistence, payload construction,
 network writes and smaller application tasks have separate paths. WiFi initialization returns
 before credential persistence; heartbeat, Weather and heating-curve builders return before

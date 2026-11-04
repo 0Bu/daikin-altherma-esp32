@@ -141,6 +141,10 @@ for case in selected_cases:
     print(('EXPECTED REGRESSION ' + case + ': ' if expected else '') + output, end='')
 source_text = SOURCE.read_text()
 mutations = {
+    'replace_empty_gap_capability': (
+        'static void checkup_record_poll_gap(uint32_t generation, bool profile_confirmed = false) {',
+        'static void checkup_record_poll_gap(uint32_t generation, bool profile_confirmed = true) {',
+        'empty_gap_preserves_profile_capability', 'oom_raii'),
     'capture_consent_after_config': (
         ['const uint32_t consent_epoch = checkup_consent_epoch();', 'const Config& c = config();'],
         ['', 'const Config& c = config(); const uint32_t consent_epoch = checkup_consent_epoch();'],
