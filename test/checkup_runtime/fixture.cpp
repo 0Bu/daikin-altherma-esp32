@@ -97,8 +97,10 @@ void boot() {
 void sample(int64_t at_s, const std::vector<CachedValue>& rows, const CheckupCoverage& cov,
             bool rps_known = true, bool running = false, bool confirmed = true,
             uint32_t generation = 7) {
-    sdk::now_us = at_s * 1000000;
-    checkup_record(rows.data(), rows.size(), rps_known, running, cov, generation, confirmed);
+    const uint32_t consent_epoch = checkup_consent_epoch();
+    sdk::now_us                  = at_s * 1000000;
+    checkup_record(rows.data(), rows.size(), rps_known, running, cov, generation, consent_epoch,
+                   confirmed);
 }
 std::vector<CachedValue> heater(const char* first, const char* second, const char* bsh) {
     std::vector<CachedValue> v;
@@ -435,7 +437,9 @@ void consent_staged_sample(const std::string& name) {
         name == "consent_lock_new_generation" || name == "consent_lock_same_generation";
     const bool sampling =
         name == "consent_sampling_new_generation" || name == "consent_sampling_same_generation";
-    require(lock || sampling, "unknown_case");
+    const bool caller =
+        name == "consent_caller_new_generation" || name == "consent_caller_same_generation";
+    require(lock || sampling || caller, "unknown_case");
     boot();
     auto cov    = coverage();
     auto normal = heater("0", "0", "0");
@@ -446,25 +450,35 @@ void consent_staged_sample(const std::string& name) {
     sample(11, normal, cov);
     consent_restore_generation       = name.find("same_generation") != std::string::npos ? 23 : 25;
     const uint32_t source_generation = adapter::poll_generation;
-    auto           old               = heater("1", "0", "1");
+    // Capture before the caller acquires its old endpoint, not when it finally submits the rows.
+    const uint32_t consent_epoch = checkup_consent_epoch();
+    auto           old           = heater("1", "0", "1");
     old.push_back(fault(0, 1));
     old.push_back(fault(1, 0));
     old.push_back(row(CHECKUP_LOC_PRESSURE, "0.9"));
     if (lock)
         sdk::before_take = consent_off_on;
-    else
+    else if (sampling)
         adapter::on_circulation = consent_off_on;
-    sample(21, old, cov, true, false, true, source_generation);
+    else
+        consent_off_on();
+    sdk::now_us = 21000000;
+    checkup_record(old.data(), old.size(), true, false, cov, source_generation, consent_epoch,
+                   true);
     const auto after = checkup_report();
     require(adapter::poll_generation == source_generation, "consent_does_not_change_x10a_epoch");
+    require(checkup_consent_epoch() != consent_epoch, "consent_runtime_epoch_changed");
     require(!consent_reenabled_report.source_fresh && consent_reenabled_report.available == 0 &&
                 consent_reenabled_report.pressure_current_tenths == -1,
             "consent_reenable_report_empty");
-    require(!after.source_fresh && after.available == 0 && after.covered_s == 0 &&
-                after.pressure_current_tenths == -1 && after[CheckupCheck::Pressure].a == -1 &&
-                after[CheckupCheck::Fault].a == -1 && after[CheckupCheck::Heater].c == -1 &&
-                after[CheckupCheck::Heater].d == -1,
-            "consent_epoch_discards_staged_sample");
+    require(!after.source_fresh && after.source_age_s == UINT32_MAX && after.available == 0 &&
+                after.covered_s == 0 && after.pressure_current_tenths == -1 &&
+                after[CheckupCheck::Pressure].a == -1 && after[CheckupCheck::Fault].a == -1 &&
+                after[CheckupCheck::Fault].verdict == CheckupVerdict::Unavailable &&
+                after[CheckupCheck::Heater].a == -1 && after[CheckupCheck::Heater].b == -1 &&
+                after[CheckupCheck::Heater].c == -1 && after[CheckupCheck::Heater].d == -1,
+            caller ? "consent_epoch_discards_already_collected_sample"
+                   : "consent_epoch_discards_staged_sample");
     sample(31, normal, cov, true, false, true, source_generation);
     const auto first = checkup_report();
     require(first.source_fresh && first.source_age_s == 0 && first.covered_s == 0 &&
@@ -515,7 +529,8 @@ int main(int argc, char** argv) {
             pending_expiry();
         else if (name == "restored_expiry")
             restored_expiry();
-        else if (name.rfind("consent_lock_", 0) == 0 || name.rfind("consent_sampling_", 0) == 0)
+        else if (name.rfind("consent_lock_", 0) == 0 || name.rfind("consent_sampling_", 0) == 0 ||
+                 name.rfind("consent_caller_", 0) == 0)
             consent_staged_sample(name);
         else
             throw std::runtime_error("unknown_case");

@@ -23,6 +23,7 @@ CASES = [
     "circulation_reset", "circulation_inflight", "pending_expiry", "restored_expiry",
     "consent_lock_new_generation", "consent_sampling_new_generation",
     "consent_lock_same_generation", "consent_sampling_same_generation",
+    "consent_caller_new_generation", "consent_caller_same_generation",
 ]
 
 parser = argparse.ArgumentParser(description=__doc__)
@@ -103,7 +104,8 @@ def build(source, tag):
 
 baseline = build(SOURCE, "baseline")
 vacuity_controls = []
-for case in ["buh_unknown_case", "fault_unknown_case", "consent_sampling_unknown_case"]:
+for case in ["buh_unknown_case", "fault_unknown_case", "consent_sampling_unknown_case",
+             "consent_caller_unknown_case"]:
     result = command([str(baseline), case], timeout=15)
     if result.returncode != 1 or "FAIL oracle=unknown_case case=" + case not in result.stdout:
         raise RuntimeError("Unknown case was not rejected: " + case + "\n" + result.stdout + result.stderr)
@@ -118,31 +120,29 @@ for case in CASES:
     print(result.stdout.strip(), flush=True)
 
 source_text = SOURCE.read_text()
-capture = "    const uint32_t diagnostics_epoch = s_diagnostics_epoch.load(std::memory_order_acquire);\n"
+entry = "    uint32_t consent_epoch, bool profile_confirmed) {\n"
 guard = (
     "    if (!s_diagnostics_enabled.load(std::memory_order_acquire) ||\n"
-    "        diagnostics_epoch != s_diagnostics_epoch.load(std::memory_order_acquire))\n"
+    "        consent_epoch != s_diagnostics_epoch.load(std::memory_order_acquire))\n"
     "        return;"
 )
-sampler = "    const CirculationPumpSample circulation = circulation_pump_sample();"
-for name, anchor in [("entry capture", capture), ("commit guard", guard), ("sampler", sampler)]:
+for name, anchor in [("record entry", entry), ("commit guard", guard)]:
     if source_text.count(anchor) != 1:
         raise RuntimeError("Expected one production " + name + " anchor")
 mutations = [
     ("omit_consent_epoch_guard",
      source_text.replace(guard, "    if (!s_diagnostics_enabled.load(std::memory_order_acquire)) return;"),
-     "consent_lock_new_generation"),
-    ("capture_consent_epoch_after_sampling",
-     source_text.replace(capture, "").replace(sampler, sampler + "\n" + capture.rstrip("\n")),
-     "consent_sampling_same_generation"),
+     "consent_lock_new_generation", "consent_epoch_discards_staged_sample"),
+    ("recapture_consent_epoch_at_record_entry",
+     source_text.replace(entry, entry + "    consent_epoch = checkup_consent_epoch();\n"),
+     "consent_caller_same_generation", "consent_epoch_discards_already_collected_sample"),
 ]
 negative_controls = []
-for name, contents, case in mutations:
+for name, contents, case, oracle in mutations:
     source = OUT / (name + ".cpp")
     source.write_text(contents)
     binary = build(source, name)
     result = command([str(binary), case], timeout=15)
-    oracle = "consent_epoch_discards_staged_sample"
     if result.returncode != 1 or "FAIL oracle=" + oracle + " case=" + case not in result.stdout:
         raise RuntimeError("Negative control not detected at its oracle: " + name + "\n" + result.stdout + result.stderr)
     negative_controls.append({"name": name, "case": case, "expected_oracle": oracle,

@@ -36,6 +36,12 @@ tallies, saturation carry, tickets and the boot capture budget do not leak betwe
   lost speed after a run, a stop read too long ago or under an older target generation, a witness that
   never answered and a profile without one (readings kept and marked unknown), plus the heartbeat's
   verdict ending with the link and with the source age.
+- Consent cases toggle the modeled external checkup service at the real config, UART-init and late
+  history callbacks. The actual `poll_once()` must capture its token before config/UART work and
+  forward that same token to the populated and UART-failure observations; a following sweep must
+  submit the new token. Two mutations delay capture past config or capture again at submission.
+  The checkup adapter only records tokens and calls. Production admission is tested separately by
+  `test/checkup_runtime`; these are separate component proofs, not a combined physical timing test.
 
 Every semantic mutation must compile and fail its named oracle. Compile commands, complete input
 hashes, case results and mutation output are retained in the printed temporary `evidence.json`.

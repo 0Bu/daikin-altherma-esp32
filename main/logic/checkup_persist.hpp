@@ -153,7 +153,7 @@ inline constexpr uint32_t CHECKUP_EVIDENCE_METHOD_VERSION = 7;
 
 inline uint32_t checkup_layout_fingerprint() {
     uint32_t crc = CONFIG_CRC32_INIT;
-    // Method 7 rejects samples staged before a consent transition. Older records may include an
+    // Method 7 rejects polls begun before a consent transition. Older records may include an
     // endpoint from the preceding consent interval and cannot prove the corrected admission rule.
     crc = checkup_fp_u32(crc, CHECKUP_EVIDENCE_METHOD_VERSION);
     crc = checkup_fp_u32(crc, static_cast<uint32_t>(sizeof(CheckupBucket)));

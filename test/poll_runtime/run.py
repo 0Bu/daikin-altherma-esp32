@@ -28,6 +28,7 @@ CASES = [
     'held_standing_unknown',
     'held_new_generation', 'held_expired_verdict', 'held_link_lost',
     'held_no_witness_profile',
+    'consent_before_config', 'consent_during_uart', 'consent_after_history', 'consent_uart_failure',
 ]
 REGRESSION_ORACLES = {
     'detect_silent': 'detect_silence_breaks_confirmation',
@@ -49,6 +50,8 @@ REGRESSION_ORACLES = {
     'refrigerant_unidentified_row': 'refrigerant_unidentified_row_never_high_side',
     'refrigerant_unpaired_pressure': 'refrigerant_unpaired_pressure_never_low_side',
     'outdoor_hx_scale': 'outdoor_hx_profile_scale_reaches_cache',
+    'consent_before_config': 'poll_consent_token_precedes_config',
+    'consent_after_history': 'poll_consent_forwards_original_token',
 }
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--root', type=Path, default=HERE.parents[1], help='Repository root; defaults to installed test directory parent')
@@ -111,6 +114,15 @@ inputs_before = hashes(dependency_inputs([OUT / 'preflight-poll.d', OUT / 'prefl
 command([COMPILER, *FLAGS, '-MMD', '-MF', str(OUT / 'format.d'),
          '-c', str(FORMAT), '-o', str(OUT / 'format.o')])
 binary = build(SOURCE, 'baseline')
+vacuity_controls = []
+unknown_args = [str(binary), 'consent_unknown_case']
+commands.append(shlex.join(unknown_args))
+unknown = subprocess.run(unknown_args, cwd=HERE, capture_output=True, text=True, timeout=15)
+unknown_output = unknown.stdout + unknown.stderr
+if unknown.returncode != 1 or 'FAIL oracle=known_consent_case' not in unknown_output:
+    raise RuntimeError('Unknown consent case was not rejected: ' + unknown_output)
+vacuity_controls.append({'case': 'consent_unknown_case', 'exit_code': unknown.returncode,
+                         'output': unknown_output})
 case_results = []
 selected_cases = args.case or CASES
 for case in selected_cases:
@@ -129,6 +141,16 @@ for case in selected_cases:
     print(('EXPECTED REGRESSION ' + case + ': ' if expected else '') + output, end='')
 source_text = SOURCE.read_text()
 mutations = {
+    'capture_consent_after_config': (
+        ['const uint32_t consent_epoch = checkup_consent_epoch();', 'const Config& c = config();'],
+        ['', 'const Config& c = config(); const uint32_t consent_epoch = checkup_consent_epoch();'],
+        'poll_consent_token_precedes_config', 'consent_before_config'),
+    'recapture_consent_at_submission': (
+        ['checkup_record(fresh.data(), fresh.size(), rps_known, rps_running, checkup_coverage, cycle_generation, consent_epoch);',
+         'checkup_record(nullptr, 0, false, false, checkup_coverage, cycle_generation, consent_epoch);'],
+        ['checkup_record(fresh.data(), fresh.size(), rps_known, rps_running, checkup_coverage, cycle_generation, checkup_consent_epoch());',
+         'checkup_record(nullptr, 0, false, false, checkup_coverage, cycle_generation, checkup_consent_epoch());'],
+        'poll_consent_forwards_original_token', 'consent_after_history'),
     'omit_outdoor_hx_profile_context': (
         'const ValueDef def = logic::adjudicated(view, k);',
         'const ValueDef def = logic::adjudicated(view[k]);',
@@ -411,11 +433,13 @@ if manifest != inputs_before:
     raise RuntimeError('Compile inputs changed during run: ' + repr(changed))
 git_head = subprocess.run(['git', '-c', 'core.fsmonitor=false', '-C', str(REPO), 'rev-parse', 'HEAD'], capture_output=True, text=True, timeout=5)
 record = {'compiler': version.strip(), 'sanitizers': SANITIZERS, 'commands': commands, 'cases': case_results,
+          'harness_vacuity_controls': vacuity_controls,
           'negative_controls': results, 'input_sha256': manifest,
           'production_head': git_head.stdout.strip() if git_head.returncode == 0 else None,
           'claim_limits': ['Host adapters replace RTOS scheduling, mutex implementation, UART transport, config store, diag ring, history/checkup/dwell stores, heap/watchdog samplers and OTA/weather request flags.',
                            'Real complete hp_poll.cpp task, detection commit, probe submit/service and poll/readers, hp_convert.cpp, production profile tables and logic/RAII headers execute.',
                            'A joined host thread pauses the actual old probe service at its UART adapter; deterministic semaphore callbacks model timeout, a later submitter and late completion. This is not RTOS timing or a complete concurrency proof.',
+                           'Consent cases exercise actual poll_once capture and forwarding across config/UART/history callbacks; checkup service is an external token-recording adapter, not the production checkup TU or proof of cross-TU physical timing.',
                            'No ESP32 heap/stack timing, physical source truth, NVS persistence, live HTTP or board behavior is proven.']}
 (OUT / 'evidence.json').write_text(json.dumps(record, indent=2) + '\n')
 (OUT / 'inputs.sha256').write_text(''.join(sha + '  ' + path + '\n' for path, sha in manifest.items()))

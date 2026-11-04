@@ -21,14 +21,16 @@ resets, and producerless expiry of pending/completed hours. Completed synthetic 
 created by ordinary modeled polls; dated synthetic records enter through public
 `checkup_flash_restore()`. Its host `flash` slug is not evidence of a physical flash read or reboot.
 
-Four consent cases interrupt an already-staged sample with public OFF/ON calls, before mutex
-acquisition or during external sampling. Both new and repeated persisted-generation arguments must
+Six consent cases capture the public token before preparing an old endpoint, then interrupt it with
+public OFF/ON calls before submission, before mutex acquisition or during external sampling.
+Both new and repeated persisted-generation arguments must
 leave the new interval empty until a genuinely new sample arrives: its first endpoint adds no
 observed seconds, and the next endpoint adds ten. Repeated-generation cases establish the live
 admission epoch's independence, not durable-record safety for arbitrary generation reuse.
 
 The default run compiles exactly two additional production mutations: omit the live epoch guard,
-and capture that epoch only after sampling. Each must compile and fail the specified consent oracle;
+and ignore the caller's token by capturing it again at record entry. Each must compile and fail its
+specified internal or caller-boundary consent oracle;
 compiler errors and unrelated failures do not count. Unknown test-case names are also refused.
 
 This proves component behavior at modeled interleavings, not FreeRTOS scheduling, raw X10A decode,
