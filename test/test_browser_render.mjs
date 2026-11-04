@@ -444,7 +444,7 @@ async function assertStatusTruth(page, context) {
 
 async function assertUnknownCompressorActivity(page, context) {
   await page.evaluate(`(() => {
-    window.__unknownActivityPrevious = { status: S.status, values: S._values, modbus: S._modbus };
+    window.__unknownActivityPrevious = { ...S };
     S.status = { ...S.status, hp: { ...S.status.hp, connected: true },
       modbus: { ...S.status.modbus, enabled: false, connected: false } };
     S._modbus = [];
@@ -457,30 +457,56 @@ async function assertUnknownCompressorActivity(page, context) {
         held_unknown: true, group: "Outdoor unit" },
       { label: "Water pump operation", value: "0", binary: true, reg: 0x60, group: "Operation" },
       { label: "Flow sensor(l/min)", value: "0.0", unit: "l/min", reg: 0x61, group: "Water circuit" });
+    window.__unknownActivityValues = S._values;
     return true;
   })()`);
   try {
-    for (const moving of [false, true]) {
-      await page.evaluate(`(() => {
-        S._values = S._values.map((row) => ({ ...row,
-          value: /water pump operation/i.test(row.label) ? ${moving ? '"1"' : '"0"'}
-            : /flow sensor/i.test(row.label) ? ${moving ? '"12.0"' : '"0.0"'} : row.value }));
-        S.clickHold = false; renderApp(); return true;
-      })()`);
-      await page.frame();
-      assert.deepEqual(await page.evaluate(`({ unknown: S.live.ouUnknown,
-        activityUnknown: document.getElementById("svStatus").textContent === t("dyn.state_gate"),
-        pumpOn: S.live.pumpOn, electrical: S.live.pel })`),
-      { unknown: true, activityUnknown: true, pumpOn: moving, electrical: null },
-      `${context}/${moving}: unread compressor cannot become a stopped-unit status or electrical estimate`);
-      assertLayout(await page.evaluate(layoutAudit), `${context}/${moving}`);
+    for (const outdoorPresent of [true, false]) {
+      await page.evaluate(`S._values = window.__unknownActivityValues.filter(row =>
+        ${outdoorPresent} || ![0x20, 0x21].includes(row.reg)); true`);
+      for (const moving of [false, true]) {
+        await page.evaluate(`(() => {
+          S._values = S._values.map((row) => ({ ...row,
+            value: /water pump operation/i.test(row.label) ? ${moving ? '"1"' : '"0"'}
+              : /flow sensor/i.test(row.label) ? ${moving ? '"12.0"' : '"0.0"'} : row.value }));
+          S.clickHold = false; renderApp(); return true;
+        })()`);
+        await page.frame();
+        assert.deepEqual(await page.evaluate(`({ unknown: S.live.ouUnknown,
+          activityUnknown: document.getElementById("svStatus").textContent === t("dyn.state_gate"),
+          pumpOn: S.live.pumpOn, electrical: S.live.pel })`),
+        { unknown: outdoorPresent, activityUnknown: true, pumpOn: moving, electrical: null },
+        `${context}/${outdoorPresent}/${moving}: unread compressor cannot become a stopped-unit status or electrical estimate`);
+        assertLayout(await page.evaluate(layoutAudit), `${context}/${outdoorPresent}/${moving}`);
+      }
+      await captureNativeEvidence(page, `${context}/${outdoorPresent ? "unread" : "missing"}`, "schem");
     }
-    await captureNativeEvidence(page, context, "svStatus");
+    await page.evaluate(`(() => {
+      S._values = window.__unknownActivityValues.map(row => ({ ...row,
+        value: /inv primary current/i.test(row.label) ? null : row.value }));
+      S.status.modbus = { ...S.status.modbus, host: "192.0.2.30", enabled: true, connected: true };
+      S._modbus = [{ off: 31, label: "Compressor run", value: 1, binary: true, unit: "" }];
+      S.clickHold = false; renderApp(); return true;
+    })()`);
+    for (const key of ["pel", "cop"]) {
+      await clickElement(page, `[data-insp="${key}"]`);
+      await page.frame();
+      assert.deepEqual(await page.evaluate(`(() => {
+        const text = document.getElementById("inspect").innerText;
+        const lead = INSPECT_I18N[LANG]?.held?.lead || tx(HELD_OVER_NOW.lead);
+        return { running: S.live.compressorOn, electrical: S.live.pel,
+          namesMissingInput: text.includes(lead + " INV primary current"),
+          claimsUnknownAge: text.includes(heldUnknownText()) };
+      })()`), { running: true, electrical: null, namesMissingInput: true, claimsUnknownAge: false },
+      `${context}/${key}: HomeHub-confirmed operation names the missing current without an age claim`);
+      assertLayout(await page.evaluate(layoutAudit), `${context}/${key}`);
+    }
   } finally {
-    await page.evaluate(`S.status = window.__unknownActivityPrevious.status;
-      S._values = window.__unknownActivityPrevious.values;
-      S._modbus = window.__unknownActivityPrevious.modbus; delete window.__unknownActivityPrevious;
-      S.clickHold = false; renderApp(); true`);
+    await page.waitFor("!S.clickHold");
+    await page.evaluate(`Object.assign(S, window.__unknownActivityPrevious);
+      S.inspSig = null; S.inspHistSig = null;
+      delete window.__unknownActivityPrevious; delete window.__unknownActivityValues;
+      S.clickHold = false; renderApp(); window.scrollTo(0, 0); true`);
   }
 }
 
@@ -527,7 +553,7 @@ async function clickElement(page, selector) {
     const rect = button.getBoundingClientRect();
     if (!rect.width || !rect.height) throw new Error("hidden pointer target: " + ${JSON.stringify(selector)});
     const point = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-    if (document.elementFromPoint(point.x, point.y)?.closest("button") !== button)
+    if (document.elementFromPoint(point.x, point.y)?.closest("button, [role=button]") !== button)
       throw new Error("pointer target is obstructed: " + ${JSON.stringify(selector)});
     return point;
   })()`);
@@ -2334,7 +2360,6 @@ try {
       await assertFlowSwitchWords(page, `${viewport.name}/${locale}/flow-switch`);
       await assertPlantDiagnosis(page, `${viewport.name}/${locale}/diagnosis`);
       await assertStatusTruth(page, `${viewport.name}/${locale}/status-truth`);
-      await assertUnknownCompressorActivity(page, `${viewport.name}/${locale}/unknown-activity`);
       await assertNativeAltherma4(page, `${viewport.name}/${locale}/native-altherma4`);
       nativeAltherma4Checks++;
       await assertHybridRoom(page, `${viewport.name}/${locale}/hybrid-room`, locale);
@@ -2511,6 +2536,25 @@ try {
     }
   }
   await page.reducedMotion(false);
+
+  // Keep these source-frame replacements in a fresh document, separate from the navigation and
+  // native Altherma 4 fixtures. Restoring S alone cannot cancel requests or callbacks from an inspector.
+  let unknownActivityChecks = 0;
+  for (const viewport of viewports) {
+    await page.viewport(viewport.width, viewport.height);
+    await page.navigate(server.url);
+    await page.waitFor("typeof S !== 'undefined' && S.status && Array.isArray(S._values)");
+    await page.evaluate("pollStop(); pollSchedule = () => {}; true");
+    for (const locale of browserLocales) {
+      await activateLocale(page, locale);
+      await page.evaluate("showStage('dashboard'); window.scrollTo(0, 0); true");
+      await assertUnknownCompressorActivity(page, `${viewport.name}/${locale}/unknown-activity`);
+      unknownActivityChecks++;
+      console.log(`browser unknown activity checked: ${viewport.name}/${locale}`);
+    }
+  }
+  assert.equal(unknownActivityChecks, viewports.length * browserLocales.length,
+    "unknown and missing outdoor inputs require every locale and viewport");
 
   assert.equal(routedKeyboardOpens, routedKeyboardBudget,
     "every routed modal requires one real browser History roundtrip per viewport");

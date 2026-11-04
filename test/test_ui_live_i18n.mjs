@@ -135,8 +135,8 @@ function assertPersistentBannerRepaints(name, status) {
   assert.equal(api.plantState({ rps: null, compressorOn: true, pumpOn: true,
                                 thermalMode: "heat", pthRaw: 7.8 }).key,
     "sys.operating", "the HomeHub compressor witness keeps Modbus-only DHW in active operation");
-  for (const pumpOn of [false, true]) {
-    const unknown = { rps: null, compressorOn: null, ouUnknown: true, pumpOn };
+  for (const pumpOn of [false, true]) for (const ouUnknown of [false, true]) {
+    const unknown = { rps: null, compressorOn: null, ouUnknown, pumpOn };
     assert.equal(api.plantState(unknown).key, "dyn.state_gate",
       "an unknown compressor state must not become standby or compressor-off circulation");
     assert.equal(api.plantState(unknown).tone, "warn",

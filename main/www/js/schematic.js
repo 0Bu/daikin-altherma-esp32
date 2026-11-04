@@ -248,7 +248,9 @@ function liveData() {
   const ctComplete = ctRows.length > 0 && ctRows.every((x) =>
     x.value != null && Number.isFinite(Number(x.value)));
   const ct = ctComplete ? ctRows.reduce((a, x) => a + Number(x.value), 0) : 0;
-  const inv = vNum(/inv primary current/i);
+  const invRow = (S._values || []).find((x) => /inv primary current/i.test(x.label || "")) ||
+    (S.status?.history?.rows || []).find((r) => r.id === "inv_current");
+  const inv = rowNum(invRow);
   const postBuh = postBuhRow();
   const d = {
     lwt, ret,
@@ -410,9 +412,10 @@ function liveData() {
   // sub-label stays silent here and the explainer says which of the two it is. With the speed unread
   // it is a third statement again: the source may be frozen. Asked of the row and not of its value,
   // since a value the firmware dropped leaves this profile's source in place.
-  const invRowExists = (S._values || []).some((x) => /inv primary current/i.test(x.label || ""));
-  d.pelHeld = d.pel == null && invRowExists && d.ouHeldOver;
-  d.pelUnknown = d.pel == null && !d.pelHeld && speedUnread;
+  d.pelHeld = d.pel == null && !!invRow && d.ouHeldOver;
+  d.pelUnknown = d.pel == null && d.ouUnknown;
+  d.pelUnread = d.pel == null && !d.pelHeld && !d.pelUnknown && invRow
+    ? displayReadingLabel(invRow.label) : null;
   // ── WHICH COP this quotient is, and when it is none ─────────────────────────────────────────
   // Transcribed from logic/cop_scope.hpp's cop_plan() — same branches, same order, so a change
   // there is visibly a change here (test_cop_scope gates the rule against the whole catalog).
@@ -1607,8 +1610,8 @@ const HELD_OVER_NOW = {
   // becoming a second, dimmer class of reading, so the panel has to. One sentence, because it also
   // explains the withheld electrical estimate and COP, and this copy lands in every locale's flash.
   unknown: {
-    en: "The compressor speed cannot be read, so the outdoor unit's readings may be from the last run.",
-    de: "Die Verdichterdrehzahl ist nicht lesbar, daher können die Werte der Außeneinheit vom letzten Lauf stammen.",
+    en: "Compressor speed unreadable; outdoor unit values may be from the last run.",
+    de: "Verdichterdrehzahl nicht lesbar; Außengerätewerte können vom letzten Lauf stammen.",
   },
 };
 // A held X10A row is still unavailable, but it is no longer a blank headline when the drawing has
@@ -1636,7 +1639,10 @@ const COMPRESSOR_NOW = /^(?:ou|phe|rhot|rcold|dt)$/;
 // over, where the note below the description answers instead.
 const inspNowText = (e, d) => {
   if (!d || inspHeld(e, d)) return null;
-  if (d.pelUnknown && (e.i18nKey === "pel" || e.i18nKey === "cop")) return heldUnknownText();
+  if (e.i18nKey === "pel" || e.i18nKey === "cop") {
+    if (d.pelUnknown) return heldUnknownText();
+    if (d.pelUnread) return `${INSPECT_I18N[LANG]?.held?.lead || tx(HELD_OVER_NOW.lead)} ${d.pelUnread}`;
+  }
   // The outdoor unit's defrost is a fact, and a ΔT without measured water movement has its own reason.
   if (d.ouUnknown && COMPRESSOR_NOW.test(e.i18nKey) &&
       !(e.i18nKey === "ou" ? d.defrost : e.i18nKey === "dt" && d.dtStale)) return heldUnknownText();

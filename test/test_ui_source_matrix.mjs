@@ -1623,10 +1623,34 @@ assert.doesNotMatch(SOURCE, /chip\.demand_(?:on|off)|schem\.to_heat/);
   assert.equal(d.pelUnknown, false, "not the unknown one");
   assert.equal(d.ouHeldOver, true, "and the whole page is held over");
   const INV_DROPPED = { ...INV_U, value: null };
-  for (const [flag, field] of [[COMP_OFF, "pelHeld"], [COMP_ON, "pelUnknown"]]) {
-    const live = ctx({ x10a: true, mbEnabled: true, mbConnected: true, values: [INV_DROPPED], modbus: [flag] }).liveData();
-    assert.equal(live[field], true, "a value the firmware dropped leaves this profile's source in place");
+  for (const flag of [COMP_OFF, COMP_ON]) {
+    const reader = ctx({ x10a: true, mbEnabled: true, mbConnected: true,
+                         values: [INV_DROPPED], modbus: [flag] });
+    const live = reader.liveData();
+    assert.equal(live.pelHeld, flag === COMP_OFF,
+      "a dropped value is held only when the HomeHub confirms a stop");
+    assert.equal(live.pelUnknown, false,
+      "a known HomeHub compressor state cannot receive an unknown-age explanation");
+    if (flag === COMP_ON) for (const key of ["pel", "cop"]) {
+      assert.equal(live.pelUnread, "INV primary current",
+        "a running compressor does not fabricate its missing inverter reading");
+      const text = reader.inspNowText(reader.INSPECT[key], live);
+      assert.match(text, /No current reading: INV primary current/,
+        "the panel names the unread input without claiming that the profile lacks it");
+      assert.notEqual(text, reader.heldUnknownText(),
+        "the panel retains the independent HomeHub running witness");
+    }
   }
+  const absentPage = ctx({ x10a: true, mbEnabled: true, mbConnected: true,
+                           values: [], modbus: [COMP_ON] });
+  absentPage.S.status.history = { rows: [{ id: "inv_current", label: INV_U.label }] };
+  const absentInput = absentPage.liveData();
+  assert.equal(absentInput.pel, null, "trend metadata cannot fabricate a missing current");
+  assert.equal(absentInput.pelUnread, "INV primary current",
+    "the profile's trend metadata preserves source identity when its whole page is missing");
+  assert.match(absentPage.inspNowText(absentPage.INSPECT.cop, absentInput),
+    /No current reading: INV primary current/,
+    "a lost outdoor page must not become a claim that the profile lacks electrical inputs");
   assert.equal(stopped.ouReadingText(d, "disch", 58, (n) => n.toFixed(0)), "—",
     "so the discharge pill blanks as the panel's idle sentence says");
 
