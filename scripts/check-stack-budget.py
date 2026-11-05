@@ -23,6 +23,9 @@ from typing import Any
 
 
 REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO / "tools/stack"))
+import stop_observation as stop_stack
+from packed_config import CONFIG_PACKED_SYMBOLS, restore_packed_config, self_test as packed_config_self_test
 DEFAULT_BUDGETS = REPO / "tools/stack/budgets.json"
 FUNCTION_RE = re.compile(r"^\s*([0-9a-fA-F]+)\s+<(.+)>:\s*$")
 INSTRUCTION_RE = re.compile(r"^\s*([0-9a-fA-F]+):\s+([0-9a-fA-F]+)(?:\s+(.*))?$")
@@ -265,6 +268,7 @@ PACKED_ENTRY_SYMBOLS = frozenset({
     'xQueueGenericCreate',
     'xTaskGetTickCountFromISR',
 })
+PACKED_ENTRY_SYMBOLS = PACKED_ENTRY_SYMBOLS | CONFIG_PACKED_SYMBOLS
 SDK_TLS_LIMIT = 4608
 SDK_TLS_ROM = 192
 SDK_TRANSPORT_PREFIX_LIMIT = 880
@@ -311,6 +315,8 @@ INTEGER_LENGTH_SYMBOL = (
     "unsigned int std::__detail::__to_chars_len<unsigned long long>(unsigned long long, int)")
 INTEGER_DIGITS_SYMBOL = (
     "void std::__detail::__to_chars_10_impl<unsigned long long>(char*, unsigned int, unsigned long long)")
+INTEGER_TO_CHARS_SYMBOL = (
+    "std::to_chars_result std::__detail::__to_chars_10<unsigned long long>(char*, char*, unsigned long long)")
 INTEGER_BUILDERS = {
     "daik::build_heartbeat_json[abi:cxx11](daik::HeartbeatFields const&)": 33,
     "daik::build_heating_curve_mqtt_json[abi:cxx11](daik::HeatingCurveMqttFields const&)": 21,
@@ -651,8 +657,9 @@ def validate_integer_formatter(disassembly: str) -> None:
             string + "::append(char const*, unsigned int)",
             "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEpLEPKc$isra$0",
             string + "::push_back(char)", string + "::append(char const*, unsigned int)",
-            INTEGER_LENGTH_SYMBOL, INTEGER_DIGITS_SYMBOL,
+            INTEGER_TO_CHARS_SYMBOL,
         ],
+        INTEGER_TO_CHARS_SYMBOL: [INTEGER_LENGTH_SYMBOL, INTEGER_DIGITS_SYMBOL],
         INTEGER_LENGTH_SYMBOL: ["__udivdi3"],
         INTEGER_DIGITS_SYMBOL: ["memcpy", "__umoddi3", "__udivdi3"],
     }
@@ -660,10 +667,23 @@ def validate_integer_formatter(disassembly: str) -> None:
         if name in blocks and calls(name) != targets:
             raise BudgetError(f"integer formatter: decimal/append/ROM continuation changed in {name}")
     helper = "\n".join(blocks[INTEGER_APPEND_SYMBOL])
-    if (not re.search(r"movi\s+a12,\s*10\n[^\n]+\n[^\n]+\ncall8\s+[0-9a-f]+\s+<"
-                      + re.escape(INTEGER_LENGTH_SYMBOL) + r">", helper)
-            or not re.search(r"movi\.n\s+a8,\s*20\n[^\n]+\naddi\s+a5,\s*a1,\s*20\n", helper)):
+    wrapper = "\n".join(blocks.get(INTEGER_TO_CHARS_SYMBOL, []))
+    if (not re.search(r"movi(?:\.n)?\s+a12,\s*10\n[^\n]+\ncall8\s+[0-9a-f]+\s+<"
+                      + re.escape(INTEGER_LENGTH_SYMBOL) + r">", wrapper)
+            or not re.search(r"addi\s+a11,\s*a1,\s*20\nor\s+a10,\s*a1,\s*a1\ncall8\s+[0-9a-f]+\s+<"
+                             + re.escape(INTEGER_TO_CHARS_SYMBOL) + r">", helper)):
         raise BudgetError("integer formatter: decimal base / fixed 20-byte destination changed")
+    stop_number = re.sub(r"\\(.)", r"\1", stop_stack.SYMBOLS["stop_json_mqtt_number"]["pattern"][1:-1])
+    wrapper_callers = {}
+    for caller, instructions in blocks.items():
+        references = [line for line in instructions if "<" + INTEGER_TO_CHARS_SYMBOL + ">" in line]
+        if references:
+            if any(not re.fullmatch(r"call8\s+[0-9a-f]+\s+<" + re.escape(INTEGER_TO_CHARS_SYMBOL) + r">", line)
+                   for line in references):
+                raise BudgetError("integer formatter: unreviewed indirect charconv wrapper reference")
+            wrapper_callers[caller] = len(references)
+    if wrapper_callers != {INTEGER_APPEND_SYMBOL: 1, stop_number: 1}:
+        raise BudgetError("integer formatter: exact append/MQTT wrapper caller inventory changed")
 
 
 def validate_shutdown_inlining(disassembly: str, budgets: dict[str, Any]) -> None:
@@ -743,6 +763,7 @@ def validate_status_numeric_calls(disassembly: str, budgets: dict[str, Any]) -> 
 
 def parse_frames(disassembly: str, budgets: dict[str, Any] | None = None) -> dict[str, int]:
     validate_poll_inlining(disassembly)
+    stop_stack.validate_inlining(disassembly, BudgetError)
     if budgets is None:
         budgets = load_budgets(DEFAULT_BUDGETS)
     required = [re.compile(rule["pattern"]) for rule in budgets["symbols"].values()]
@@ -799,6 +820,8 @@ def parse_frames(disassembly: str, budgets: dict[str, Any] | None = None) -> dic
                 frame = int(entry.group(1), 0)
             elif (current in PACKED_ENTRY_SYMBOLS and len(instruction.group(2)) == 8 and
                   (not mnemonic or re.fullmatch(r"\.word\s+0x[0-9a-fA-F]{8}", mnemonic))):
+                if current in CONFIG_PACKED_SYMBOLS:
+                    raise BudgetError(f"symbol {current}: packed config needs complete ELF/body decoding")
                 # Standard SDK objdump can print a packed word with no mnemonic; raw objdump
                 # can label it .word. Decode only reviewed first words at their exact symbol
                 # addresses. A later ENTRY cannot supply a bound.
@@ -892,16 +915,15 @@ def shutdown_path_members() -> dict[str, list[str]]:
     # existing 1536 B SDK/ROM continuation, including smaller reset/seal descendants.
     paths = {}
     for name, prefix in SHUTDOWN_CALLERS.items():
-        paths[name + "_journal"] = prefix + ["history_shutdown", "history_journal",
-                                             "history_append", "history_append_at"]
+        paths[name + "_journal"] = prefix + ["history_shutdown", "history_journal", "history_append"]
         paths[name + "_checkup"] = prefix + ["checkup_shutdown", "checkup_shutdown_reset"]
     # A successful factory reset has already forgotten the journal; the liveness touch and
     # independently registered checkup handler still run. Keep that exclusion source-bound.
     paths["button_shutdown_history_touch"] = ["button_task", "sdk_restart", "history_shutdown"]
     paths["button_shutdown_checkup"] = ["button_task", "sdk_restart", "checkup_shutdown",
                                         "checkup_shutdown_reset"]
-    paths["poll_board_journal"] = ["poll_task", "history_board", "history_journal",
-                                   "history_append", "history_append_at"]
+    paths["poll_board_journal"] = ["poll_task", "history_board", "history_journal", "history_append"]
+    paths.update({name: spec[1] for name, spec in stop_stack.shutdown_specs().items()})
     return paths
 
 
@@ -1037,9 +1059,12 @@ def validate_shutdown_paths(budgets: dict[str, Any], sources: dict[str, str]) ->
         rule = budgets["paths"][name]
         owner = "ota_health" if name.startswith("ota_health_") else name.split("_")[0]
         task = budgets["tasks"][owner]
-        if (rule["symbols"] != members or rule["multipliers"] != {}
-                or rule["base_bytes"] != 1536
-                or rule["max_bytes"] != task["stack_bytes"] - task["reserve_bytes"]):
+        reviewed = stop_stack.shutdown_specs().get(name)
+        base = 1536 if reviewed is None else reviewed[2]
+        maximum = task["stack_bytes"] - task["reserve_bytes"] if reviewed is None else reviewed[3]
+        if (reviewed is not None and reviewed[0] != owner
+                or rule["symbols"] != members or rule["multipliers"] != {}
+                or rule["base_bytes"] != base or rule["max_bytes"] != maximum):
             raise BudgetError(f"shutdown path {name}: caller/handler/SDK continuation changed")
     code = {name: stack_source_code(source) for name, source in sources.items()}
     counts = {"main/http_config.cpp": 1, "main/heap_guard.cpp": 1,
@@ -1176,6 +1201,8 @@ def validate_task_stacks(budgets: dict[str, Any], sources: dict[str, str]) -> No
             expected = {"http_deadline_watchdog": "deadline", "ota_health_gate": "ota_health",
                         "ota_health_shutdown_journal": "ota_health",
                         "ota_health_shutdown_checkup": "ota_health"}.get(path)
+            if path in stop_stack.PATHS:
+                expected = stop_stack.PATHS[path][0]
             if expected is None:
                 candidates = [owner for owner in tasks if path.startswith(owner + "_")]
                 if len(candidates) != 1:
@@ -1601,6 +1628,9 @@ CONFIG_DOCUMENT_PATHS = frozenset({
     *(f"httpd_shutdown_{name}_{phase}" for name in SHUTDOWN_HTTP_CALLERS
       for phase in ("journal", "checkup")),
 })
+CONFIG_DOCUMENT_PATHS |= frozenset(
+    name for name, (owner, rule) in stop_stack.PATHS.items()
+    if owner == "httpd" and set(rule["symbols"]) & CONFIG_DOCUMENT_OWNERS)
 STAGED_STACK_LIMITS = {"config_document": 48, "http_values_snapshot": 208,
                        "mqtt_modbus_count": 80, "mqtt_modbus_emit": 48}
 CONFIG_DOCUMENT_CALLS = {
@@ -1769,7 +1799,9 @@ def validate_source_contract(budgets: dict[str, Any]) -> None:
     sources = {path: (REPO / path).read_text(encoding="utf-8")
                for path, _ in TASK_ALLOCATIONS.values()}
     sources.update({str(path.relative_to(REPO)): path.read_text(encoding="utf-8")
-                    for suffix in ("*.cpp", "*.hpp") for path in (REPO / "main").glob(suffix)})
+                    for suffix in ("*.cpp", "*.hpp") for path in (REPO / "main").rglob(suffix)})
+    sources.update({path: (REPO / path).read_text(encoding="utf-8") for path in stop_stack.EXTRA_SOURCES})
+    validate_stop_observation_paths(budgets, sources)
     validate_task_inventory(sources)
     validate_syslog_queue(sources["main/syslog.cpp"])
     validate_small_task_diagnostics(sources)
@@ -1802,10 +1834,13 @@ def validate_source_contract(budgets: dict[str, Any]) -> None:
     for owner in ("heartbeat", "curve"):
         path = budgets["paths"].get(f"mqtt_{owner}_build", {})
         if (path.get("symbols") != ["mqtt_task", f"mqtt_{owner}_builder", f"mqtt_{owner}_payload",
-                                    "json_integer_append", "json_integer_length", "json_integer_digits"]
+                                    "json_integer_append", "json_integer_to_chars", "json_integer_length", "json_integer_digits"]
                 or path.get("multipliers") != {} or path.get("base_bytes") != 1536
                 or path.get("max_bytes") != 5120):
             raise BudgetError(f"integer formatter path {owner}: reviewed builder/decimal/library bound changed")
+    if budgets["symbols"].get("json_integer_to_chars") != {
+            "pattern": "^" + re.escape(INTEGER_TO_CHARS_SYMBOL) + "$", "max_bytes": 48}:
+        raise BudgetError("integer formatter path: exact ENTRY48 charconv wrapper rule changed")
     mqtt_depth = r"json_payload_depth_ok\(std::string_view\(frame\.payload,\s*frame\.payload_len\)\)"
     if (len(re.findall(mqtt_depth, sources["main/mqtt_ha.cpp"])) != 2
             or len(re.findall(r"\bjson_payload_depth_ok\s*\(", sources["main/mqtt_ha.cpp"])) != 2
@@ -1814,6 +1849,28 @@ def validate_source_contract(budgets: dict[str, Any]) -> None:
             or not re.search(r"json_payload_depth_ok\(payload,\s*JSON_MAX_DEPTH\)",
                              sources["main/weather_forecast.cpp"])):
         raise BudgetError("MQTT/Weather cJSON source depth checks require review")
+
+
+def validate_stop_observation_paths(budgets: dict[str, Any], sources: dict[str, str]) -> None:
+    stop_stack.validate_sources(budgets, sources, BudgetError)
+
+
+def validate_packed_config_inventory(disassembly: str) -> None:
+    names = [match.group(2) for line in disassembly.splitlines()
+             if (match := FUNCTION_RE.match(line))]
+    if any(names.count(name) != 1 for name in CONFIG_PACKED_SYMBOLS):
+        raise BudgetError("packed config inventory: all six exact reviewed bodies are required")
+    bodies = function_instructions(disassembly)
+    if any(not instruction or instruction.startswith('.') or
+           instruction.split()[0] in {'ill', 'ill.n', 'unknown'}
+           for name in CONFIG_PACKED_SYMBOLS for instruction in bodies.get(name, [])):
+        raise BudgetError("packed config inventory: complete body decoding required; no hidden opcodes")
+    for name in names:
+        if name in CONFIG_PACKED_SYMBOLS:
+            continue
+        if any(name.startswith(exact + " [clone") or
+               name.startswith(exact + "$") for exact in CONFIG_PACKED_SYMBOLS):
+            raise BudgetError("packed config inventory: unreviewed additional clone " + name)
 
 
 def reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -2209,7 +2266,8 @@ def disassemble(elf: Path, objdump: str) -> str:
     before = hashlib.sha256(data).digest()
     try:
         text = stack_tool_output([objdump, "-d", "-C", str(elf)])
-        return restore_raw_detect(text, data, elf, objdump)
+        text = restore_raw_detect(text, data, elf, objdump)
+        return restore_packed_config(text, data, elf, objdump, stack_tool_output, raw_detect_body, BudgetError)
     finally:
         try:
             after = hashlib.sha256(elf.read_bytes()).digest()
@@ -2298,7 +2356,10 @@ def raw_detect_self_test(fixture: str, budgets: dict[str, Any]) -> int:
                 return subprocess.CompletedProcess(arguments, 1 if failure == calls[-1] else 0,
                                                    output, "injected SDK reader failure")
 
-            with patch.object(subprocess, "run", tool):
+            # This isolated ELF fixture owns only hp_detect; the six config bodies have their
+            # own complete per-symbol ELF/body tests and are not fabricated inside this image.
+            with patch.object(subprocess, "run", tool), patch.dict(
+                    globals(), restore_packed_config=lambda text, *_args: text):
                 return disassemble(elf, objdump), calls
 
     restored, calls = exercise()
@@ -2669,7 +2730,6 @@ def self_test() -> None:
      'daik::set_ntp(httpd_req*)': 64,
      'daik::history_flash_service_journal(unsigned int, unsigned long)': 64,
      'daik::(anonymous namespace)::flash_append_record(daik::(anonymous namespace)::FlashJournalRecord&)': 64,
-     '_ZN4daik12_GLOBAL__N_1L22flash_append_record_atERNS0_18FlashJournalRecordERj$constprop$0': 64,
      'daik::mb_task(void*)': 64,
      'daik::mb_poll_once()': 64,
      'daik::history_record_modbus(daik::CachedValue const*, unsigned int, unsigned long)': 64,
@@ -2987,7 +3047,8 @@ def self_test() -> None:
      'sys_mbox_post': 48,
      INTEGER_APPEND_SYMBOL: 80,
      INTEGER_LENGTH_SYMBOL: 48,
-     INTEGER_DIGITS_SYMBOL: 240}
+     INTEGER_DIGITS_SYMBOL: 240,
+     INTEGER_TO_CHARS_SYMBOL: 48}
     # Keep generated anchors outside the hand-written decimal/I2C fixtures below. Otherwise
     # a packed-prologue mutation can also replace an unrelated first instruction at 0x220.
     # Exact current MQTT/journal continuation fixture; omission and growth are rejected below.
@@ -3135,6 +3196,12 @@ def self_test() -> None:
         'daik::wifi_forget_persisted_config()': 192,
     })
     extra_frames.update({name: maximum for name, maximum in ROOM_HISTORY_FRAMES.values()})
+    # Minimal positive ENTRY fixtures exercise the new exact inventory without combining the
+    # old artificial maximum-size HTTP fixture with a different ELF's stop-body frames. Actual
+    # stop frames and the complete caller sums are checked against the real ELF, not these bytes.
+    for key, rule in stop_stack.SYMBOLS.items():
+        name = re.sub(r"\\(.)", r"\1", rule["pattern"][1:-1])
+        extra_frames[name] = 32
 
     # Exact final-ELF anchors for the shared verifier and asynchronous HTTP upload.
     extra_frames.update({
@@ -3187,15 +3254,16 @@ def self_test() -> None:
 80d: 0008e0 callx8 a8
 810: 000081 l32r a8, 1 <literal> (1 <{string}::append(char const*, unsigned int)>)
 813: 0008e0 callx8 a8
-816: 00000c movi a12, 10
-819: 00000c or a10, a6, a6
-81c: 00000c mov.n a11, a7
-81f: fff7a5 call8 900 <{INTEGER_LENGTH_SYMBOL}>
-822: 00000c movi.n a8, 20
-825: 00000c mov.n a4, a10
-828: 00000c addi a5, a1, 20
-82b: fff7a5 call8 a00 <{INTEGER_DIGITS_SYMBOL}>
+816: 00000c addi a11, a1, 20
+819: 00000c or a10, a1, a1
+81c: fff7a5 call8 b00 <{INTEGER_TO_CHARS_SYMBOL}>
 """
+        if name == INTEGER_TO_CHARS_SYMBOL:
+            fixture += (f"b01: 00000c movi.n a12, 10\nb04: 00000c mov.n a10, a3\n"
+                        f"b07: fff7a5 call8 900 <{INTEGER_LENGTH_SYMBOL}>\n"
+                        f"b0a: fff7a5 call8 a00 <{INTEGER_DIGITS_SYMBOL}>\n")
+        if name == re.sub(r"\\(.)", r"\1", stop_stack.SYMBOLS["stop_json_mqtt_number"]["pattern"][1:-1]):
+            fixture += f"{index + 3:x}: fff7a5 call8 b00 <{INTEGER_TO_CHARS_SYMBOL}>\n"
         if name == INTEGER_LENGTH_SYMBOL:
             fixture += "901: 000081 l32r a8, 1 <literal> (40002544 <__udivdi3>)\n904: 0008e0 callx8 a8\n"
         if name == INTEGER_DIGITS_SYMBOL:
@@ -3238,7 +3306,33 @@ def self_test() -> None:
     fixture = fixture.replace("   3: 004136          entry a1, 4848\n",
                               "   3: 004136          entry a1, 4848\n" + number_calls)
     budgets = load_budgets(DEFAULT_BUDGETS)
+    validate_packed_config_inventory(fixture)
+    packed_inventory_controls = 0
+    for name in CONFIG_PACKED_SYMBOLS:
+        for replacement in ("unreviewed_config_body", name + " [clone .constprop.99]"):
+            try:
+                validate_packed_config_inventory(fixture.replace("<" + name + ">:",
+                                                                 "<" + replacement + ">:"))
+            except BudgetError:
+                packed_inventory_controls += 1
+            else:
+                raise AssertionError("accepted missing/replaced exact packed body " + name)
+        block = re.search(r"<" + re.escape(name) + r">:\n([^\n]+)", fixture)
+        assert block is not None
+        address = block.group(1).split(":", 1)[0]
+        try:
+            parse_frames(fixture.replace(block.group(1), f"{address}: 00006136 .word 0x00006136"), budgets)
+        except BudgetError as exc:
+            assert "complete ELF/body" in str(exc)
+            packed_inventory_controls += 1
+        else:
+            raise AssertionError("accepted config packed word without complete ELF/body " + name)
     raw_detect_controls = raw_detect_self_test(fixture, budgets)
+    packed_config_controls = packed_config_self_test(BudgetError, raw_detect_body)
+    stop_sources = {str(path.relative_to(REPO)): path.read_text(encoding="utf-8")
+                    for suffix in ("*.cpp", "*.hpp") for path in (REPO / "main").rglob(suffix)}
+    stop_sources.update({path: (REPO / path).read_text(encoding="utf-8") for path in stop_stack.EXTRA_SOURCES})
+    stop_controls = stop_stack.self_test(budgets, stop_sources, BudgetError)
     staged_stack_controls = staged_stack_self_test(budgets)
     room_history_controls = room_history_stack_self_test(budgets)
     validate_source_contract(budgets)
@@ -3825,9 +3919,9 @@ def self_test() -> None:
         diagnostic_controls += 1
     integer_disassembly_controls = 0
     for name, altered, expected in (
-        ("decimal base", fixture.replace("816: 00000c movi a12, 10", "816: 00000c movi a12, 16"),
+        ("decimal base", fixture.replace("b01: 00000c movi.n a12, 10", "b01: 00000c movi.n a12, 16"),
          "decimal base"),
-        ("destination bound", fixture.replace("828: 00000c addi a5, a1, 20", "828: 00000c addi a5, a1, 32"),
+        ("destination bound", fixture.replace("816: 00000c addi a11, a1, 20", "816: 00000c addi a11, a1, 32"),
          "20-byte destination"),
         ("ROM division dispatch", fixture.replace("40002544 <__udivdi3>", "40002544 <unreviewed_division>"),
          "ROM continuation"),
@@ -3845,6 +3939,16 @@ def self_test() -> None:
          "880: 004136 entry a1, 32\n", "newly outlined"),
         ("dynamic integer helper", fixture.replace("801: 000081 l32r a8,", "800: 001810 movsp a1, a8\n801: 000081 l32r a8,"),
          "unreviewed dynamic stack"),
+        ("new charconv caller", fixture + f"\n00000880 <unreviewed_payload()>:\n"
+         f"880: 004136 entry a1, 32\n883: fff7a5 call8 b00 <{INTEGER_TO_CHARS_SYMBOL}>\n",
+         "wrapper caller inventory"),
+        ("indirect charconv reference", fixture + f"\n00000880 <unreviewed_payload()>:\n"
+         f"880: 004136 entry a1, 32\n883: 000081 l32r a8, b00 <{INTEGER_TO_CHARS_SYMBOL}>\n",
+         "indirect charconv wrapper reference"),
+        ("missing charconv child", fixture.replace(f"b07: fff7a5 call8 900 <{INTEGER_LENGTH_SYMBOL}>", "b07: 000000 nop"),
+         "ROM continuation"),
+        ("dynamic charconv wrapper", fixture.replace("b01: 00000c movi.n a12, 10",
+         "b00: 001810 movsp a1, a8\nb01: 00000c movi.n a12, 10"), "unreviewed dynamic stack"),
     ):
         assert altered != fixture
         reject_disassembly(f"integer formatter {name}", altered, expected)
@@ -3882,7 +3986,7 @@ def self_test() -> None:
         raise AssertionError("self-test accepted an additional integer builder source caller")
     integer_source_controls += 1
     for owner in ("heartbeat", "curve"):
-        for member in ("json_integer_append", "json_integer_length", "json_integer_digits"):
+        for member in ("json_integer_append", "json_integer_to_chars", "json_integer_length", "json_integer_digits"):
             altered_budget = json.loads(json.dumps(budgets))
             altered_budget["paths"][f"mqtt_{owner}_build"]["symbols"].remove(member)
             try:
@@ -3941,8 +4045,8 @@ def self_test() -> None:
     else:
         raise AssertionError("self-test accepted two undecodable first prologues")
     packed_controls = 0
-    for name in sorted(PACKED_ENTRY_SYMBOLS - {"parse_value", "parse_string", "cJSON_Delete",
-                                              "cJSON_ParseWithLengthOpts"}):
+    for name in sorted(PACKED_ENTRY_SYMBOLS - CONFIG_PACKED_SYMBOLS - {
+            "parse_value", "parse_string", "cJSON_Delete", "cJSON_ParseWithLengthOpts"}):
         match = re.search(r"<" + re.escape(name) + r">:\n([^\n]+)", fixture)
         assert match is not None
         original = match.group(1)
@@ -4538,6 +4642,8 @@ def self_test() -> None:
                 {} if multiplier is None else {"tls_esp_aes_process_dma": multiplier})
             reject_document("changed bounded DMA recursion", mutated, "one-level/sibling recursion contract")
     print(f"stack budget self-test: PASS ({negative_checks} malformed schemas rejected, "
+          f"{stop_controls} stop-source/path/callback/shortcut, {packed_config_controls} complete packed-config controls, "
+          f"{packed_inventory_controls} exact-config/ELF-only controls, "
           f"{inventory_controls} inventory/growth/allocation/reserve controls, "
           f"9 dynamic/first-prologue, {packed_controls} packed SDK, {raw_detect_controls} raw-app controls, "
           f"{queue_controls} queue-source, {diagnostic_controls} diagnostic-source, "
@@ -4593,6 +4699,7 @@ def main(argv: list[str]) -> int:
             text = args.disassembly.read_text(encoding="utf-8")
         except (OSError, UnicodeError) as exc:
             raise BudgetError(f"cannot read {args.disassembly}: {exc}") from exc
+    validate_packed_config_inventory(text)
     validate_shutdown_inlining(text, budgets)
     validate_status_numeric_calls(text, budgets)
     result = evaluate(parse_frames(text, budgets), budgets)
