@@ -67,9 +67,9 @@
 //     and always fire on the small ones. The unit raises 7H itself when flow is genuinely
 //     insufficient, and that reaches the fault check below. The minimum is REPORTED; no verdict is
 //     attached to it.
-//   * A DAILY START-COUNT THRESHOLD. 24 starts on a cold day is one per hour and healthy; 24 starts
-//     in the shoulder season is cycling. A start count alone does not know the load. The MEAN RUN
-//     LENGTH does — see CHECKUP_CYCLING_SHORT_RUN_S.
+//   * A DAILY START-COUNT THRESHOLD. Start count and mean run length do not establish building
+//     load or a universal healthy operating pattern. The class-qualified assessment is a bounded
+//     project heuristic; see CHECKUP_CYCLING_SHORT_RUN_S and the Cycling branch below.
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
