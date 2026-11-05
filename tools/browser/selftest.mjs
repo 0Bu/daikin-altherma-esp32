@@ -111,13 +111,21 @@ console.log("browser render selftest passed: overflow was rejected, delayed moda
   "completion were awaited, duplicate real History transitions were bounded, and route isolation " +
   "was observed");
 
-const eagerHistory = spawnSync(process.execPath,
-  [path.join(root, "test/test_browser_render.mjs"), "--viewport", "phone"], {
-    cwd: root, encoding: "utf8",
-    env: { ...process.env, DAIKIN_BROWSER_MUTATION: "history-eager" },
-  });
-assert.notEqual(eagerHistory.status, 0, "eager hidden chart construction must fail the live-poll browser test");
-assert.match(`${eagerHistory.stdout || ""}\n${eagerHistory.stderr || ""}`,
-  /polls must not rebuild cached charts in closed rows/,
-  "history canary must fail on recurring chart work, not a fixture or browser setup error");
-console.log("browser history selftest passed: recurring hidden chart construction was rejected");
+for (const [mutation, assertion, extra] of [
+  ["history-eager", /polls must not rebuild cached charts in closed rows/],
+  ["history-stall", /history frame responsiveness budget exceeded/],
+  ["history-replace", /unchanged plot must remain mounted/],
+  ["history-restart", /preserve running CSSAnimation instance/],
+  ["history-unknown", /history inspector inventory must classify every production entry/],
+  ["history-disclosure-replace", /unchanged plot must remain mounted/, ["--history-motion-case", "board"]],
+]) {
+  const result = spawnSync(process.execPath,
+    [path.join(root, "test/test_browser_render.mjs"), "--viewport", "phone", ...(extra || [])], {
+      cwd: root, encoding: "utf8", env: { ...process.env, DAIKIN_BROWSER_MUTATION: mutation },
+    });
+  const output = (result.stdout || "") + "\n" + (result.stderr || "");
+  assert.notEqual(result.status, 0, mutation + ": the seeded temporal defect must fail");
+  assert.match(output, assertion,
+    mutation + ": must fail on its own motion assertion, not a fixture or browser setup error");
+  console.log("browser history selftest passed: " + mutation + " rejected by its temporal assertion");
+}

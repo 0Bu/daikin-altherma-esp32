@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { launchBrowser } from "../tools/browser/cdp_browser.mjs";
 import { startFixtureServer } from "../tools/browser/fixture_server.mjs";
-import { assertHistoryMotion } from "./test_browser_history_motion.mjs";
+import { assertHistoryMotion, HISTORY_MOTION_MUTATIONS } from "./test_browser_history_motion.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const pageFile = process.env.DAIKIN_BROWSER_PAGE;
@@ -16,7 +16,7 @@ const mutation = process.env.DAIKIN_BROWSER_MUTATION || "";
 if (mutation && ![
   "root-overflow", "modal-focus-delay", "history-flood", "route-hashchange-manual",
   "route-isolation-bypass",
-  "history-eager",
+  ...HISTORY_MOTION_MUTATIONS,
 ].includes(mutation))
   throw new Error(`unknown browser selftest mutation: ${mutation}`);
 
@@ -2165,15 +2165,6 @@ try {
   // replaces those frames with the server's baseline in the middle of a native pointer sequence.
   // Poll cadence and visibility-resume behavior have separate production-function contract tests.
   await page.evaluate("pollStop(); window.__browserPollSchedule = pollSchedule; pollSchedule = () => {}; true");
-  if (mutation === "history-eager") {
-    await page.evaluate(`(() => {
-      const code = descAccordion.toString();
-      if (!code.includes('open && trendId')) throw new Error('history mutation target missing');
-      descAccordion = window.eval('(' + code.replace('open && trendId', 'trendId') + ')');
-      return true;
-    })()`);
-  }
-
   assert.equal(await page.evaluate(`(() => {
     const feedback = document.getElementById("toasts");
     return feedback.getAttribute("role") === "status" &&
@@ -2327,7 +2318,8 @@ try {
     }
     assert.deepEqual(page.diagnostics, [], "room source states must emit no browser errors");
     console.log(`focused room rendering passed: ${browserLocales.length} locales; ${viewports.length} viewports`);
-  } else if (mutation === "history-eager" || process.argv.includes("--history-motion-only")) {
+  } else if (HISTORY_MOTION_MUTATIONS.includes(mutation) ||
+             process.argv.includes("--history-motion-only") || process.argv.includes("--history-motion-case")) {
     for (const viewport of viewports) {
       await page.viewport(viewport.width, viewport.height);
       await assertHistoryMotion(page, server, `${viewport.name}/history-motion`);

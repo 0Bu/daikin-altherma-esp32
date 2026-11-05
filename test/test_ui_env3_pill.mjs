@@ -62,6 +62,9 @@ function element() {
     },
     setAttribute(name, value) { this.attrs[name] = String(value); },
     removeAttribute(name) { delete this.attrs[name]; },
+    // This VM checks generated copy; real chart-island identity is covered by the browser matrix.
+    querySelectorAll() { return []; },
+    replaceChildren(fragment) { this.innerHTML = fragment.markup; },
   };
 }
 
@@ -111,6 +114,11 @@ const S = {
 const document = {
   getElementById(id) { return elements[id] || null; },
   querySelectorAll(selector) { return selector === "#schem .sc-hit" ? [elements.gEnv3] : []; },
+  createElement(tag) {
+    assert.equal(tag, "template");
+    const content = { markup: "", querySelectorAll: () => [] };
+    return { content, set innerHTML(markup) { content.markup = markup; } };
+  },
 };
 const sandbox = vm.createContext({
   S, document, renderSettings() {},

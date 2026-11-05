@@ -213,17 +213,9 @@ function histVisibleSeries(h) {
   return fallback ? h.series.filter((s) => visible.includes(s) || s === fallback) : visible;
 }
 
-// Polls replace whole card containers, while the inspector can replace only its history. Preserve
-// an active legend control in either path so keyboard users can continue toggling the same series.
-function replaceHistoryHtml(host, html) {
-  const active = globalThis.document?.activeElement;
-  const { histId, histSeries } = active?.dataset || {};
-  const restore = histSeries && host.contains?.(active);
-  host.innerHTML = html;
-  if (restore) for (const button of host.querySelectorAll("[data-hist-series]")) {
-    if (button.dataset.histId === histId && button.dataset.histSeries === histSeries)
-      button.focus({ preventScroll: true });
-  }
+// Include the lifetime and time anchor even when a new flat ring draws identical SVG geometry.
+function histRevision(view) {
+  return ` data-rev="${esc([S.histEpoch, view.gen, view.t0].join("/"))}"`;
 }
 
 function histLegendHtml(h, s, cls) {
@@ -995,7 +987,7 @@ function stateHistHtml(id, name, view, wrap, cfg) {
       `<span class="vhist-range mono num">${esc(totalText)}</span></div>` + levelLegend +
     `<div class="vhist-graph vhist-state-graph">` +
       histTipsHtml(view, pi, pi >= 0 ? scrubFrac(pi, n) : 0) +
-      `<div class="vhist-plot vhist-state-plot" data-hist="${esc(id)}"${sourceAttr} data-n="${n}" tabindex="0" role="img"` +
+      `<div class="vhist-plot vhist-state-plot" data-hist="${esc(id)}"${sourceAttr}${histRevision(view)} data-n="${n}" tabindex="0" role="img"` +
         ` aria-label="${esc(t(cfg.aria, name || id, totalText))}">` + tracks + pinCross +
         `<span class="vhist-cross vhist-live" hidden></span>` +
       `</div>` + histTimesHtml(view, pi, pi >= 0 ? scrubFrac(pi, n) : 0) +
@@ -1223,7 +1215,7 @@ function histHtml(id, unit, name, source = "") {
     `<span class="vhist-range mono num">${esc(rng)}</span></div>` + legend +
     `<div class="vhist-graph">` +
       histTipsHtml(view, pi, pi >= 0 ? scrubFrac(pi, n) : 0) +
-      `<div class="vhist-plot" data-hist="${esc(id)}"${sourceAttr} data-n="${n}" tabindex="0" role="img"` +
+      `<div class="vhist-plot" data-hist="${esc(id)}"${sourceAttr}${histRevision(view)} data-n="${n}" tabindex="0" role="img"` +
         ` aria-label="${esc(t(pi >= 0 ? "hist.aria_pinned" : "hist.aria", name || id, pi >= 0 ? scrubText(view, pi) : ""))}">` +
         `<svg viewBox="0 0 ${HIST_W} ${HIST_H}" preserveAspectRatio="none" aria-hidden="true">${phaseBands}${area}${line}${dots}</svg>` +
         nowDots + pinCross + pinMarks +
@@ -1394,7 +1386,7 @@ function env3HistHtml() {
       `<span class="vhist-range">${esc(t("env.history_scales"))}</span></div>` + legend +
     `<div class="vhist-graph">` +
       histTipsHtml(view, pi, pinFrac) +
-      `<div class="vhist-plot" data-hist="${ENV3_COMBINED_ID}" data-n="${n}" ` +
+      `<div class="vhist-plot" data-hist="${ENV3_COMBINED_ID}"${histRevision(view)} data-n="${n}" ` +
         `data-measured-p="${(measuredEndFrac * 100).toFixed(3)}" tabindex="0" role="img" ` +
         `aria-label="${esc(t(pi >= 0 ? "hist.aria_pinned" : "hist.aria", t("env.history_title"),
           pi >= 0 ? scrubText(view, pi) : ""))}">` +
@@ -1535,12 +1527,14 @@ function scrubTime(h, i) {
 // replacing them deduplicates samples without losing a possible wrapped line or phase label.
 // The reserved row stays present, so a comparison never moves the plot or its time labels.
 function histTipsHtml(h, pi, frac) {
+  // One auxiliary scan per rendered view, not one full-day scan for every sample's readout.
+  const aux = dhwAuxPhases(h);
   const shapes = new Set(Array.from({length:h.v.length + (forecastScrubView(h)?.points.length || 0)},
-    (_, i) => histReadout(h, i).replace(/\d/g, "8")));
+    (_, i) => histReadout(h, i, aux).replace(/\d/g, "8")));
   return `<div class="vhist-tips"><div class="vhist-tip vhist-reserve mono num" aria-hidden="true">` +
     [...shapes].map(html => `<span>${html}</span>`).join("") +
     `</div><div class="vhist-tip vhist-live mono num" hidden></div>` + (pi >= 0
-      ? `<div class="vhist-tip vhist-pinned mono num" style="--tip-p:${(frac * 100).toFixed(3)}">${histReadout(h, pi)}</div>`
+      ? `<div class="vhist-tip vhist-pinned mono num" style="--tip-p:${(frac * 100).toFixed(3)}">${histReadout(h, pi, aux)}</div>`
       : "") + `</div>`;
 }
 
@@ -1552,7 +1546,7 @@ function histTimesHtml(h, pi, frac) {
 
 // Accessibility keeps time and readings together. Visible numeric bubbles omit the selected time;
 // state phase intervals remain evidence about the whole phase, distinct from the selected instant.
-function scrubText(h, i, includeTime = true) {
+function scrubText(h, i, includeTime = true, aux = dhwAuxPhases(h)) {
   if (h.id === ENV3_COMBINED_ID && i >= h.v.length) {
     const forecast = forecastScrubView(h);
     const point = forecast?.points[i - h.v.length];
@@ -1644,7 +1638,6 @@ function scrubText(h, i, includeTime = true) {
     : valueText(h.series ? h.series[0] : h);
   let res = (includeTime ? scrubTime(h, i) + " · " : "") + val;
   if (h.id === "dhw_tank") {
-    const aux = dhwAuxPhases(h);
     if (aux) {
       const active = [];
       if (aux.boost[i]) active.push(t("hist.boost_active"));
@@ -1661,8 +1654,8 @@ function scrubText(h, i, includeTime = true) {
 // content formatter for accessibility and tests. Every line is escaped before this helper returns
 // markup, so switching the live bubble from textContent to innerHTML below does not create an HTML
 // injection path through translations, units or device data.
-function histReadout(h, i) {
-  const text = scrubText(h, i, false);
+function histReadout(h, i, aux) {
+  const text = scrubText(h, i, false, aux);
   if (!text || h.id !== ENV3_COMBINED_ID) return esc(text);
   const lines = text.split("\n");
   // Forecast provenance precedes the coloured measurement rows; measured bubbles need no header.
@@ -1785,6 +1778,44 @@ function scrubEnd(plot) {
     plot.parentElement.querySelector(".vhist-time.vhist-live").hidden = true;
   }
   if (S.scrub) { S.scrub = null; renderTrendHosts(); }   // resume the frozen per-poll rebuild
+}
+
+// Polls replace whole card containers, while the inspector can replace only its history. Preserve
+// an active control in either path so keyboard users can continue exploring the same series.
+function replaceHistoryHtml(host, html) {
+  const active = globalThis.document?.activeElement;
+  const { histId, histSeries, hist, source = "" } = active?.dataset || {};
+  const owner = node => node?.closest?.(".vitem")?.querySelector("[data-desc]")?.dataset.desc;
+  const focusedOwner = owner(active);
+  const focused = host.contains?.(active);
+  if (!html.includes('class="vhist')) host.innerHTML = html;
+  else {
+    const roots = root => [...root.querySelectorAll(".vhist")]
+      .filter(node => !node.parentElement?.closest(".vhist"));
+    const prior = roots(host), template = document.createElement("template");
+    template.innerHTML = html;
+    const rebuilding = S.trendRebuilding;
+    S.trendRebuilding = true;
+    try {
+      for (const node of roots(template.content)) {
+        if (!node.querySelector("[data-hist]")) continue;
+        const sig = JSON.stringify([owner(node), node.outerHTML]);
+        const index = prior.findIndex(old => old._histMarkup === sig);
+        if (index < 0) node._histMarkup = sig;
+        else node.replaceWith(prior.splice(index, 1)[0]);
+      }
+      host.replaceChildren(template.content);
+    } finally { S.trendRebuilding = rebuilding; }
+  }
+  if (focused && active.isConnected) active.focus({ preventScroll: true });
+  else if (focused && hist) for (const plot of host.querySelectorAll("[data-hist]")) {
+    if (plot.dataset.hist === hist && (plot.dataset.source || "") === source && owner(plot) === focusedOwner)
+      plot.focus({ preventScroll: true });
+  }
+  else if (focused && histSeries) for (const button of host.querySelectorAll("[data-hist-series]")) {
+    if (button.dataset.histId === histId && button.dataset.histSeries === histSeries)
+      button.focus({ preventScroll: true });
+  }
 }
 
 // The three places a trend is drawn — the value row's explainer, the schematic inspector and the
@@ -2204,7 +2235,8 @@ function toggleDesc(btn) {
   // another SVG in every collapsed row on every two-second poll. Mount it only on disclosure,
   // including a cache hit (ensureHistPair then returns without triggering a repaint).
   if (open && trend && !item.querySelector(".vhist"))
-    item.querySelector(".vdesc-body").insertAdjacentHTML("beforeend",
+    replaceHistoryHtml(item.querySelector(".vdesc-body"),
+      item.querySelector(".vdesc-body").innerHTML +
       histHtml(trend, btn.dataset.unit || "", btn.querySelector(".vrow-label").textContent));
   // Fetch the trend only once the panel is actually opened — a device that buffers eleven series
   // would otherwise answer a request per row on every page load, for panels nobody looked at.

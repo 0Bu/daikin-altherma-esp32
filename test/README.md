@@ -255,7 +255,7 @@ OTA reload adoption and stable narrow-row interaction.
 |---|---|
 | `run-ui-localization-audit.sh` | All shipped locale keys, types, function arities, specialist tables, language selection and asset budgets; canonical-copy changes invalidate stale translations |
 | `run-schematic-audit.sh` | Real SVG IDs/targets/translations, geometry, pill attribution, rotors, text fit, branch/tap boundaries and source bindings |
-| `run-browser-render-tests.sh` | Assembled production page in real Chrome at 320/1200 px across shipped locales; overflow, console, native accessibility tree, keyboard, Escape and reduced motion |
+| `run-browser-render-tests.sh` | Assembled production page in real Chrome at 320/1200 px; static locale/accessibility/interaction matrix plus full-history live-polling continuity and responsiveness |
 | `run-ui-gif-audit.sh` | Recording fingerprint, frame/timing and GIF/stamp currency; stale or unverifiable footage blocks merge |
 
 Localization binds the complete key catalog across thirteen languages, each locale's 32 KiB gzip cap and
@@ -273,6 +273,15 @@ The browser gate uses a local fixture server, not device HTTP. Mechanical geomet
 that the pictured sensor belongs to the right component, and accessibility assertions do not replace
 a real click-through. [DESIGN.md](../docs/DESIGN.md) owns the observable UI contract; the applicable
 review skills cover visual truth and complete interaction.
+
+The temporal matrix inventories every production inspector and the four disclosure families. It
+uses full 288-sample source rings and three real two-second updates per case, checking unchanged
+plot/prose nodes, continuous CSS animations, collapsed-chart work and native input delivery. The
+fixed maximum frame gap and individual native key-event roundtrip are 250 ms; these fixture budgets catch recurring stalls,
+not guarantee a frame rate on every device. Negative controls reintroduce hidden-chart work, plot or
+animation replacement and a blocking poll. Static locale snapshots, reduced-motion cases and GIF
+poses remain separate evidence; Chromium fixtures do not prove physical iPad Safari performance.
+
 `DAIKIN_BROWSER_TIMEOUT_MS` bounds the entire runner (default 600000 ms, maximum 3600000 ms).
 Browser launch shares one absolute deadline across endpoint headers/body, socket and initialization;
 worker/browser process groups are joined before the temporary page is removed.
