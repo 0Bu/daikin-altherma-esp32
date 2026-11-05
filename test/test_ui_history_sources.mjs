@@ -203,7 +203,7 @@ const lifecycleSource = appState.slice(appState.indexOf("// ── History sourc
   appState.indexOf("// ── Navigation (dashboard ⇄ Settings)"));
 vm.runInContext(lifecycleSource + readAppFragments(["history.js"]) +
   "\nthis.__api = { hasHist, hasModbusHist, hasRoomHist, histCacheKey, historyView, histHtml, scrubText," +
-  " scrubMove, histSeriesToggle, ensureHist, ensureHistPair, ensureDerived, DERIVED, syncHistSources, invalidateHistSources };", context,
+  " histTipsHtml, scrubMove, histSeriesToggle, ensureHist, ensureHistPair, ensureDerived, DERIVED, syncHistSources, invalidateHistSources };", context,
   { filename: "main/www/js/history.js" });
 const h = context.__api;
 
@@ -1054,5 +1054,37 @@ S.status.reference_temperature.configured = false;
 h.syncHistSources();
 assert.equal(S.hist.size, 0, "deleting a room mapping retires its cached readings");
 assert.equal(h.histHtml("room_temp", "°C", "Raumtemperatur"), "");
+
+// Reserving tooltip shapes must scan the auxiliary day once, not once per sample. A later render
+// must still read changed auxiliary data even when it uses the same numeric view object.
+S.status.history = { rows: ["dhw_tank", "smart_grid_mode", "bsh_state"].map(id => ({id, label:id})),
+  modbus_rows: [] };
+S.hist.clear();
+const fullRing = value => ({gen:1,dt:300,b0:100,unit:"°C",v:Array(288).fill(value)});
+S.hist.set("dhw_tank", fullRing(450));
+S.hist.set("smart_grid_mode", fullRing(20));
+S.hist.set("bsh_state", fullRing(10));
+vm.runInContext("this.originalAuxScan = dhwAuxPhases; this.auxScans = 0; " +
+  "dhwAuxPhases = (...args) => { auxScans++; return originalAuxScan(...args); };", context);
+try {
+  const view = h.historyView("dhw_tank");
+  const first = h.histTipsHtml(view, -1, 0);
+  assert.equal(context.auxScans, 1, "288 tooltip readouts must share one auxiliary scan");
+  assert.match(first, /Boost aktiv/);
+  assert.match(first, /Heizstab aktiv/);
+  S.hist.set("smart_grid_mode", fullRing(0));
+  const second = h.histTipsHtml(view, -1, 0);
+  assert.equal(context.auxScans, 2, "the next rendered view must refresh its auxiliary snapshot");
+  assert.doesNotMatch(second, /Boost aktiv/);
+  assert.match(second, /Heizstab aktiv/);
+  // Re-seed the previous per-readout work: the same measured operation budget must reject it.
+  vm.runInContext("this.originalReadout = histReadout; auxScans = 0; " +
+    "histReadout = (view, index) => originalReadout(view, index);", context);
+  h.histTipsHtml(view, -1, 0);
+  assert.ok(context.auxScans >= 289, "the old per-sample scan must exceed the one-scan budget");
+} finally {
+  vm.runInContext("dhwAuxPhases = originalAuxScan; " +
+    "if (this.originalReadout) histReadout = originalReadout;", context);
+}
 
 console.log("UI history sources: X10A, Modbus and MQTT room rings align, gap, render and fetch independently");
