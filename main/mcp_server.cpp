@@ -6,6 +6,7 @@
 #include "logic/mcp.hpp"
 #include "logic/http_request.hpp"
 #include "ota_update.hpp"
+#include "config.hpp"
 #include "esp_app_desc.h"
 #include "esp_http_server.h"
 #include <string>
@@ -82,6 +83,13 @@ static esp_err_t mcp_post(httpd_req_t* req) {
                 mcp_tool_result_end(suffix);
                 mcp_result_end(suffix);
                 return http_send_status_json(req, response, suffix, false);
+            } else if (r.tool == "get_ota_info") {
+                mcp_tool_result_begin(
+                    response,
+                    "Signed HTTP upload for explicitly authorized local tests on the dev channel.");
+                mcp_append_ota_info(response, config_ota_channel() == OtaChannel::Dev, ota_busy());
+                mcp_tool_result_end(response);
+                break;
             } else {
                 // The complete reference-profile values object is larger than the target's normal
                 // largest contiguous heap block. Keep only the small JSON-RPC framing strings here;

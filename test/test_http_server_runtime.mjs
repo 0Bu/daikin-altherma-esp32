@@ -44,6 +44,18 @@ const flags = ["-std=c++20", "-O0", "-g", "-Wall", "-Wextra", "-Wno-unused-param
   `-I${path.join(fixture,"stubs")}`, `-I${path.join(root,"main")}`];
 const cxx = process.env.CXX || "c++";
 const mutations = [
+  { name: "upload-media-guidance-json", file: "common", scenario: "post_media_policy",
+    before: '"application/octet-stream required"', after: '"application/json required"' },
+  { name: "async-shutdown-failure-released", file: "common", scenario: "async_upload_shutdown_enomem",
+    before: "if (shutdown_result != 0 && shutdown_errno != ENOTCONN) std::abort();",
+    after: "(void)shutdown_result; (void)shutdown_errno;" },
+  { name: "async-body-settled-synchronously", file: "common", scenario: "async_upload_ownership",
+    before: "if (result == HTTP_ASYNC_ACCEPTED) return ESP_OK;", after: "/* mutation: settle transferred body */" },
+  { name: "async-upload-budget-not-extended", file: "common", scenario: "async_upload_ownership",
+    before: "if (result == ESP_OK) state->budget.limit_us = OTA_UPLOAD_BUDGET_US;", after: "/* mutation: retain short budget */" },
+  { name: "async-upload-socket-reused", file: "common", scenario: "async_upload_ownership",
+    before: "const int shutdown_result = shutdown(httpd_req_to_sockfd(req), SHUT_RDWR);",
+    after: "const int shutdown_result = 0; /* mutation: allow binary suffix reuse */" },
   { name: "empty-header-treated-absent", file: "common", scenario: "lan_header_policy",
     before: /present\s*= result != ESP_ERR_NOT_FOUND;/, after: "present = len != 0;" },
   { name: "empty-version-treated-absent", file: "mcp", scenario: "protocol_header_guard",
@@ -86,7 +98,7 @@ const mutations = [
   { name: "oom-response-regression", file: "common", scenario: "exception_boundary",
     before: 'httpd_resp_sendstr(req, "out of memory")', after: 'httpd_resp_sendstr(req, "handler error")' },
   { name: "route-capacity-regression", file: "server", scenario: "registration_oracle",
-    before: "cfg.max_uri_handlers = 39;", after: "cfg.max_uri_handlers = 38;" },
+    before: "cfg.max_uri_handlers = 40;", after: "cfg.max_uri_handlers = 39;" },
   { name: "open-ap-mcp-exposure", file: "mcp", scenario: "registration_oracle",
     before: 'http_register_on(s, surface, "/mcp", HTTP_POST, mcp_post);',
     after: 'http_register(s, "/mcp", HTTP_POST, mcp_post);' },
@@ -99,7 +111,7 @@ const mutations = [
   { name: "headerless-march-default", file: "mcp", scenario: "protocol_header_guard",
     before: "if (!version_present && r.method != McpMethod::Initialize)", after: "if (false)" },
   { name: "unknown-tool-accepted", file: "mcpLogic", scenario: "unsupported_write_dispatch",
-    before: 'if (out.tool != "get_status" && out.tool != "get_hp_values")', after: "if (false)" },
+    before: 'if (out.tool != "get_status" && out.tool != "get_hp_values" && out.tool != "get_ota_info")', after: "if (false)" },
   { name: "arguments-write-accepted", file: "mcpLogic", scenario: "unsupported_write_dispatch",
     before: "if (seen_arguments || !no_arguments_object(r)) return false;", after: "if (seen_arguments || !r.value()) return false;" },
   { name: "malformed-notification-accepted", file: "mcpLogic", scenario: "malformed_notifications",
@@ -117,7 +129,7 @@ const mutations = [
     before: /accepted\s*= http_quality_nonzero\(http_accept_trim_ows\(parameter.substr\(equal \+ 1\)\)\);/, after: "accepted = true;" },
   { name: "legacy-ota-prefix-exemption", file: "request", scenario: "ota_exact_route_guard", special: "legacy-ota" },
   { name: "ota-method-exemption", file: "request", scenario: "ota_exact_route_guard",
-    before: 'if (is_post) return uri == "/ota/update";', after: 'if (uri == "/ota/update") return true;' },
+    before: 'if (is_post) return uri == "/ota/update" || uri == "/ota/upload";', after: 'if (uri == "/ota/update") return true;' },
 ];
 function changedSource(mutation) {
   if (mutation.special === "legacy-ota") {
@@ -156,8 +168,16 @@ function compile(tag, mutation) {
 }
 try {
   const compiler = execute(cxx,["--version"]).stdout.trim();
-  const baseline = execute(compile("production"),[]);
-  assert.match(baseline.stdout,/PASS total=30\b/);
+  const production = compile("production");
+  const baseline = execute(production,[]);
+  assert.match(baseline.stdout,/PASS total=32\b/);
+  const shutdownControls = ["enomem","ebadf","reset"].map(error => {
+    const scenario = `async_upload_shutdown_${error}`;
+    const result = execute(production,[scenario]);
+    assert.match(result.stdout,/PASS async_upload_shutdown_fail_closed/);
+    console.log(`shutdown fail-closed control ${error}: retained lease through real SIGABRT`);
+    return { scenario, stdout:result.stdout, stderr:result.stderr };
+  });
   const wireResponses = [];
   const decoder = new TextDecoder("utf-8", { fatal: true });
   for (const line of baseline.stdout.trim().split("\n")) {
@@ -178,7 +198,7 @@ try {
         assert.deepEqual(response.result.serverInfo,{ name:"daikin-altherma-esp32",version:"fixture-version" });
       }
       if (response.result?.tools) {
-        assert.deepEqual(response.result.tools.map(tool => tool.name),["get_status","get_hp_values"]);
+        assert.deepEqual(response.result.tools.map(tool => tool.name),["get_status","get_hp_values","get_ota_info"]);
         for (const tool of response.result.tools) {
           assert.deepEqual(tool.inputSchema,{ type:"object",properties:{},additionalProperties:false });
           assert.deepEqual(tool.annotations,{ readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false });
@@ -189,6 +209,14 @@ try {
         assert.equal(result.isError,false);
         assert.equal(typeof result.structuredContent,"object");
         assert.equal(Array.isArray(result.structuredContent),false);
+        if (oracle === "ota_info_discovery") {
+          assert.equal(result.structuredContent.upload.path,"/ota/upload");
+          assert.equal(result.structuredContent.upload.enabled,result.structuredContent.channel === "dev");
+          assert.equal(result.structuredContent.upload.signed_image_required,true);
+          assert.deepEqual(result.content,[{type:"text",text:"Signed HTTP upload for explicitly authorized local tests on the dev channel."}]);
+          wireResponses.push({ oracle,hex });
+          continue;
+        }
         const isStatus = Object.hasOwn(result.structuredContent,"version");
         assert.deepEqual(result.content,[{ type:"text",text:isStatus
           ? "Current device and heat-pump status." : "Current decoded heat-pump readings." }]);
@@ -238,16 +266,16 @@ try {
   const head = execute("git",["-c","core.fsmonitor=false","rev-parse","HEAD"]).stdout.trim();
   const record = { compiler, sanitizers: sanitizer ? "undefined-no-recover" : "none", commands,
     baseline: baseline.stdout.split("\n").filter(line => !line.startsWith("JSONHEX ")).join("\n"),
-    wireResponses, negativeControls, sanitizerControl, sourceHashes, compiledInputs,
+    wireResponses, shutdownControls, negativeControls, sanitizerControl, sourceHashes, compiledInputs,
     productionHead: head, routeGroupSha256: sha(fs.readFileSync(routeGroupPath)),
     claimLimits: [
       "Complete unextracted production http_common.cpp, http_server.cpp and mcp_server.cpp translation units execute.",
       "Only the four status/config/OTA/captive registration functions are extracted verbatim. Their service bodies are counted adapters; production body/config/OTA implementations are not exercised.",
-      "The SDK registration adapter invokes the production common trampoline; independent checked-in URI/method/order oracles assert AP5 and LAN39.",
+      "The SDK registration adapter invokes the production common trampoline; independent checked-in URI/method/order oracles assert AP5 and LAN40.",
       "MCP parser, version/notification/dispatch/catalog/framing and common HTTP headers/body/time/exception guards run against SDK-shaped adapters; snapshot serializers are controlled shared adapters.",
       "HTTP sockets, FreeRTOS scheduling, live device heap/stack, NVS, physical source truth, signing, OTA delivery and rendered browser behavior are separate evidence.",
     ] };
   if (process.env.HTTP_RUNTIME_RECORD) fs.writeFileSync(process.env.HTTP_RUNTIME_RECORD,JSON.stringify(record,null,2)+"\n");
-  console.log(`production HTTP server runtime: 30 cases, ${negativeControls.length} compiling negative controls; sanitizer=${record.sanitizers}`);
+  console.log(`production HTTP server runtime: 32 cases, ${negativeControls.length} compiling negative controls; sanitizer=${record.sanitizers}`);
   for (const [file,hash] of Object.entries(sourceHashes)) console.log(`input ${file} sha256=${hash}`);
 } finally { fs.rmSync(temporary,{ recursive: true, force: true }); }

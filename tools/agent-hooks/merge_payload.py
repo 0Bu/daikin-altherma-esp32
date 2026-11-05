@@ -1007,6 +1007,32 @@ def parse_gh(tokens: list[str], index: int, inherited: dict[str, str]) -> dict[s
     return None
 
 
+def literal_source_metadata_inspection(command: str) -> bool:
+    """Prove direct checksum/stat operands are data; callers must still check secret paths."""
+    if re.search(r"[;$`|&<>\\\r\n]", command):
+        return False
+    try:
+        tokens = shlex.split(command, posix=True)
+    except ValueError:
+        return False
+    if not tokens or tokens[0] not in {"shasum", "/usr/bin/shasum", "sha256sum", "/usr/bin/sha256sum",
+                                       "stat", "/usr/bin/stat"}:
+        return False
+    program, args = Path(tokens[0]).name, tokens[1:]
+    if program == "shasum" and args[:3] == ["-a", "256", "--"]:
+        paths = args[3:]
+    elif program == "sha256sum" and args[:1] == ["--"]:
+        paths = args[1:]
+    elif program == "stat" and len(args) >= 4 and args[0] in {"-f", "-c"} and args[2] == "--" \
+            and re.fullmatch(r"[%A-Za-z0-9_ .:/-]+", args[1]):
+        paths = args[3:]
+    else:
+        return False
+    return bool(paths) and all(re.fullmatch(r"[A-Za-z0-9_./-]+", path) is not None and
+                               not path.startswith("-") and ".." not in Path(path).parts
+                               for path in paths)
+
+
 def literal_rg_inspection(source: str) -> bool:
     """Prove one narrow, direct search is data, without exempting other shell commands.
 
@@ -1061,8 +1087,9 @@ def find_merge(source: str, depth: int = 0) -> dict[str, str] | None:
     create_tokens = literal_pr_create_form(source)
     if create_tokens is not None:
         return parse_gh(create_tokens, 0, {})
-    if literal_rg_inspection(source):
-        return None  # Literal query text is not a GitHub action; callers still check secret paths.
+    if literal_rg_inspection(source) or (depth == 0 and literal_source_metadata_inspection(source)):
+        # Only the raw direct metadata form gains reader proof, never a decoded nested wrapper.
+        return None  # Source operands are not GitHub actions; callers still check secret paths.
     original_source = source
     source = normalize_shell_source(source)
     graphql_action = next(

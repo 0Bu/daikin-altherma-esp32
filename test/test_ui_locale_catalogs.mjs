@@ -559,6 +559,6 @@ assert.match(status,
   /http_send_gzip\(req,\s*"text\/javascript; charset=utf-8",\s*asset\.start,\s*asset\.end\)/,
   "locale route must serve the checked gzip artifacts");
 assert.match(status, /"\/locale\.js", HTTP_GET, h_locale/);
-assert.match(server, /cfg\.max_uri_handlers = 39/);
+assert.match(server, /cfg\.max_uri_handlers = 40/);
 
 console.log(`UI locales: ${codes.length} catalogs × ${englishKeys.length} keys; lazy assets bounded and routed`);

@@ -25,6 +25,7 @@ from urllib.parse import unquote
 
 from merge_payload import find_merge as classify_github_action
 from merge_payload import literal_rg_inspection
+from merge_payload import literal_source_metadata_inspection
 from merge_payload import normalized_tool
 from merge_payload import shell_executes_stdin
 import format_snapshot
@@ -270,7 +271,7 @@ def shell_mentions_sensitive_env(command: str) -> bool:
 def shell_injects_credential_wrapper(command: str) -> bool:
     # A separately proven literal source search does not invoke the wrapper. Keep the later
     # credential-path and environment checks active rather than exempting the whole command.
-    if literal_rg_inspection(command):
+    if literal_rg_inspection(command) or literal_source_metadata_inspection(command):
         return False
     normalized = normalize_ansi_c_quotes(command).replace("\n", " ; ")
     try:
@@ -987,26 +988,149 @@ def canonical_production_ota_command(payload: dict[str, Any], command: str) -> b
     )
 
 
+def canonical_scoped_ota_review(payload: dict[str, Any], command: str) -> bool:
+    """A literal source path in the isolated read-only reviewer is scope, not an OTA execution."""
+    if "\n" in command or re.search(r"[;&|`<>$*?\[\]{}]", command):
+        return False
+    try:
+        tokens = shlex.split(command, posix=True)
+    except ValueError:
+        return False
+    effective_cwd, cwd_error = effective_shell_cwd(payload)
+    if cwd_error or len(tokens) < 7:
+        return False
+    executable = Path(tokens[0]).expanduser()
+    if not executable.is_absolute():
+        executable = effective_cwd / executable
+    canonical = HOOK_ROOT / "scripts/run-codex-review.sh"
+    if Path(os.path.abspath(executable)) != canonical or canonical.is_symlink() or \
+       tokens[1] not in {"doc_drift_checker", "heap_safety_reviewer", "x10a_decode_reviewer"} or \
+       any(re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", sha) is None for sha in tokens[2:4]) or \
+       tokens[-2] != "--intent" or not tokens[-1].strip() or len(tokens[-1].encode()) > 4096:
+        return False
+    paths = tokens[4:-2]
+    if not 1 <= len(paths) <= 128:
+        return False
+    for value in paths:
+        path = Path(value)
+        if path.is_absolute() or not value or value.startswith("-") or ".." in path.parts or \
+           "\\" in value or any(ord(char) < 32 for char in value):
+            return False
+        current = HOOK_ROOT
+        for part in path.parts:
+            current /= part
+            if current.is_symlink():
+                return False
+        if not current.exists():
+            return False
+    return True
+
+
+def canonical_dev_ota_command(payload: dict[str, Any], command: str) -> bool:
+    """Only the reviewed inventory-bound local-test uploader may bypass official promotion."""
+    if "\n" in command or re.search(r"[;&|`<>$*?\[\]{}]", command):
+        return False
+    try:
+        tokens = shlex.split(command, posix=True)
+    except ValueError:
+        return False
+    effective_cwd, cwd_error = effective_shell_cwd(payload)
+    if cwd_error or not tokens:
+        return False
+    executable = Path(tokens[0]).expanduser()
+    if not executable.is_absolute():
+        executable = effective_cwd / executable
+    canonical = HOOK_ROOT / "scripts/dev-ota-upload.py"
+    if Path(os.path.abspath(executable)) != canonical or canonical.is_symlink():
+        return False
+    if tokens[1:] == ["--help"]:
+        return True
+    expected = {"--confirm-production-test", "--image", "--expected-app-sha256",
+                "--expected-current-version", "--expected-current-elf", "--evidence", "--expected-source-sha256"}
+    values: dict[str, str] = {}
+    execute = False
+    index = 1
+    while index < len(tokens):
+        token = tokens[index]
+        if token == "--execute" and not execute:
+            execute = True
+            index += 1
+            continue
+        if token not in expected or token in values or index + 1 >= len(tokens):
+            return False
+        values[token] = tokens[index + 1]
+        index += 2
+    return set(values) == expected and values["--confirm-production-test"] == "production" and \
+        Path(values["--image"]).is_absolute() and values["--image"].endswith(".bin") and \
+        Path(values["--evidence"]).is_absolute() and values["--evidence"].endswith(".json") and \
+        re.fullmatch(r"[0-9a-f]{64}", values["--expected-source-sha256"]) is not None and \
+        re.fullmatch(r"[0-9a-f]{64}", values["--expected-app-sha256"]) is not None and \
+        re.fullmatch(r"[0-9A-Za-z._+-]+", values["--expected-current-version"]) is not None and \
+        re.fullmatch(r"[0-9a-f]{9}", values["--expected-current-elf"]) is not None
+
+
+def canonical_local_ota_evidence_command(payload: dict[str, Any], command: str) -> bool:
+    """The local evidence runner owns fixed read/check/review operations, never a device write."""
+    if "\n" in command or re.search(r"[;&|`<>$*?\[\]{}]", command):
+        return False
+    try:
+        tokens = shlex.split(command, posix=True)
+    except ValueError:
+        return False
+    cwd, error = effective_shell_cwd(payload)
+    if error or not tokens:
+        return False
+    executable = Path(tokens[0]).expanduser()
+    if not executable.is_absolute():
+        executable = cwd / executable
+    canonical = HOOK_ROOT / "scripts/local-ota-evidence.py"
+    if Path(os.path.abspath(executable)) != canonical or canonical.is_symlink():
+        return False
+    if tokens[1:] == ["--help"]:
+        return True
+    if len(tokens) < 4 or tokens[1] != "--evidence" or not Path(tokens[2]).is_absolute() or \
+       not tokens[2].endswith(".json"):
+        return False
+    action, args = tokens[3], tokens[4:]
+    if action == "snapshot":
+        return len(args) == 2 and args[0] == "--coordinator-id" and \
+            re.fullmatch(r"[0-9A-Za-z_./:-]{1,160}", args[1]) is not None
+    if action == "check":
+        return len(args) == 2 and args[0] == "--check" and re.fullmatch(r"[a-z-]{1,32}", args[1]) is not None
+    if action == "verify":
+        return len(args) == 4 and args[0] == "--signed-image" and Path(args[1]).is_absolute() and \
+            args[1].endswith(".bin") and args[2] == "--expected-source-sha256" and \
+            re.fullmatch(r"[0-9a-f]{64}", args[3]) is not None
+    if action != "review" or len(args) < 6 or args[:1] != ["--role"] or \
+       args[1] not in {"doc_drift_checker", "heap_safety_reviewer", "x10a_decode_reviewer"} or \
+       args[2] != "--scope" or args[-2] != "--intent" or not args[-1].strip() or len(args[-1].encode()) > 4096:
+        return False
+    return all(path and not path.startswith("-") and not Path(path).is_absolute() and
+               ".." not in Path(path).parts for path in args[3:-2])
+
+
 def possible_ota_update_route(command: str) -> bool:
     """Recognize literal OTA routes and common shell-built equivalents."""
     decoded = unquote(unquote(command))
     compact = re.sub(r"[\s'\"+\\]", "", decoded.lower())
-    if "/ota/update" in compact or "ota/update" in compact:
+    if any("ota/" + action in compact for action in ("update", "upload")):
         return True
-    if re.search(r"https?://[^'\";&|]*[$`][\s\S]{0,160}/update", decoded, re.IGNORECASE):
+    if re.search(r"https?://[^'\";&|]*[$`][\s\S]{0,160}/(?:update|upload)", decoded, re.IGNORECASE):
         return True
     for token in shell_syntax_tokens(decoded):
-        if "/update" in token.lower() and re.search(r"[$`]", token):
+        if any("/" + action in token.lower() for action in ("update", "upload")) and re.search(r"[$`]", token):
             return True
         for expanded in expand_static_braces(token):
             if expanded == "__AGENT_AMBIGUOUS_BRACE__":
-                return "ota" in token.lower() and "update" in token.lower()
+                return "ota" in token.lower() and any(action in token.lower() for action in ("update", "upload"))
             candidate = unquote(unquote(expanded)).lower()
             segments = candidate.split("/")
             for index in range(len(segments) - 1):
                 route = segments[index]
                 action = re.split(r"[?#]", segments[index + 1], maxsplit=1)[0]
-                if fnmatch.fnmatchcase("ota", route) and fnmatch.fnmatchcase("update", action):
+                if fnmatch.fnmatchcase("ota", route) and any(
+                    fnmatch.fnmatchcase(expected, action) for expected in ("update", "upload")
+                ):
                     return True
     return False
 
@@ -1246,6 +1370,84 @@ def direct_ota_update_write(command: str) -> bool:
     return False
 
 
+def canonical_ota_source_staging(payload: dict[str, Any], command: str) -> bool:
+    """Naming a source in literal Git staging does not execute an OTA client."""
+    if re.search(r"[;$`|&<>\\\r\n]", command):
+        return False
+    cwd, error = effective_shell_cwd(payload)
+    if error or cwd != HOOK_ROOT:
+        return False
+    try:
+        tokens = shlex.split(command, posix=True)
+    except ValueError:
+        return False
+    if not tokens or tokens[0] not in {"git", "/usr/bin/git"}:
+        return False
+    args = tokens[1:]
+    while args:
+        if args[:2] == ["-c", "core.fsmonitor=false"]:
+            args = args[2:]
+        elif args[0] in {"--no-optional-locks", "--no-pager"}:
+            args = args[1:]
+        else:
+            break
+    if args[:2] != ["add", "--"] or len(args) < 3:
+        return False
+    for path in args[2:]:
+        if re.fullmatch(r"[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*", path) is None or \
+           path.startswith("-") or any(part in {".", "..", ".git", ".ssh", ".aws", ".gnupg"}
+                                       for part in Path(path).parts) or is_sensitive_path(path):
+            return False
+        candidate = HOOK_ROOT / path
+        try:
+            if candidate.is_symlink() or not candidate.is_file() or \
+               not candidate.resolve().is_relative_to(HOOK_ROOT):
+                return False
+        except OSError:
+            return False
+    return True
+
+
+def read_only_ota_git_inspection(tokens: list[str]) -> bool:
+    """Literal Git inventory/diffs may name an OTA source without executing it or a converter."""
+    if not tokens or tokens[0] not in {"git", "/usr/bin/git"}:
+        return False
+    args = tokens[1:]
+    while args:
+        if args[:2] == ["-c", "core.fsmonitor=false"]:
+            args = args[2:]
+        elif args[0] in {"--no-optional-locks", "--no-pager"}:
+            args = args[1:]
+        else:
+            break
+    if not args or "--" not in args:
+        return False
+    boundary = args.index("--")
+    options, paths = args[1:boundary], args[boundary + 1:]
+    if not paths or any(not path or path.startswith("-") or Path(path).is_absolute() or
+                        ".." in Path(path).parts or "\\" in path for path in paths):
+        return False
+    if args[0] == "ls-files":
+        return all(option in {"--others", "--exclude-standard", "--cached", "--stage"}
+                   for option in options)
+    if args[0] != "diff" or not {"--no-ext-diff", "--no-textconv"}.issubset(options):
+        return False
+    allowed = {"--cached", "--staged", "--stat", "--numstat", "--shortstat", "--name-only",
+               "--name-status", "--no-color", "--no-renames", "--no-ext-diff", "--no-textconv",
+               "--check", "--raw"}
+    sha = r"(?:[0-9a-f]{40}|[0-9a-f]{64})"
+    refs = 0
+    for option in options:
+        if option in allowed or re.fullmatch(r"(?:--unified=|-U)(?:[0-9]|1[0-9]|20)", option):
+            continue
+        if option == "HEAD" or re.fullmatch(sha + r"(?:\.{2,3}" + sha + r")?", option):
+            refs += 1
+            if refs <= 1:
+                continue
+        return False
+    return True
+
+
 def read_only_gate_inspection(command: str) -> bool:
     """Allow source inspection to name the gate without allowing an execution wrapper."""
     # Session coordination only needs PIDs. Do not admit pgrep flags that expose argv/env,
@@ -1260,6 +1462,20 @@ def read_only_gate_inspection(command: str) -> bool:
     for tokens in token_sets:
         executable = Path(tokens[0]).name
         args = tokens[1:]
+        if executable == "git":
+            try:
+                literal = shlex.split(command, posix=True)
+            except ValueError:
+                return False
+            if not literal or literal[0] not in {"git", "/usr/bin/git"}:
+                return False
+            if read_only_ota_git_inspection(tokens):
+                continue
+            return False
+        if executable in {"shasum", "sha256sum", "stat"}:
+            if literal_source_metadata_inspection(command):
+                continue
+            return False
         if executable not in {"cat", "diff", "grep", "head", "nl", "rg", "sed", "tail"}:
             return False
         if executable == "diff" and any(
@@ -1283,12 +1499,13 @@ def read_only_gate_inspection(command: str) -> bool:
     return True
 
 
-def aliases_canonical_ota_gate(payload: dict[str, Any], command: str) -> bool:
+def aliases_canonical_ota_gate(payload: dict[str, Any], command: str,
+                               script_name: str = "production-ota-gate.py") -> bool:
     """Reject renamed aliases or exact copies, including launcher arguments."""
     effective_cwd, cwd_error = effective_shell_cwd(payload)
     if cwd_error:
         return False
-    canonical = HOOK_ROOT / "scripts/production-ota-gate.py"
+    canonical = HOOK_ROOT / "scripts" / script_name
     token_sets = shell_token_sets(command)
     raw_tokens = shell_syntax_tokens(command)
     if raw_tokens:
@@ -1325,11 +1542,28 @@ def production_ota_violation(payload: dict[str, Any]) -> str | None:
         return None
     if canonical_production_ota_command(payload, command):
         return None
+    if canonical_dev_ota_command(payload, command):
+        return None
+    if canonical_scoped_ota_review(payload, command):
+        return None
+    if canonical_local_ota_evidence_command(payload, command):
+        return None
+    if canonical_ota_source_staging(payload, command):
+        return None
     compact = re.sub(r"[\s'\"+\\]", "", unquote(unquote(command)).lower())
     names_gate = "production-ota-gate.py" in compact or any(
         token_may_name_command(token, "production-ota-gate.py")
         for tokens, _ in shell_token_sets(command)
         for token in tokens
+    )
+    names_upload = "dev-ota-upload.py" in compact or any(
+        token_may_name_command(token, "dev-ota-upload.py")
+        for tokens, _ in shell_token_sets(command)
+        for token in tokens
+    )
+    names_upload = names_upload or (
+        re.search(r"[$`]", command) is not None and
+        ("--confirm-production-test" in compact or ("dev-ota-" in compact and "upload.py" in compact))
     )
     names_gate = names_gate or (
         re.search(r"[$`]", command) is not None
@@ -1350,6 +1584,9 @@ def production_ota_violation(payload: dict[str, Any]) -> str | None:
         )
     )
     read_only_inspection = read_only_gate_inspection(command)
+    if (names_upload or aliases_canonical_ota_gate(payload, command, "dev-ota-upload.py")) and \
+       not read_only_inspection:
+        return "local dev OTA requires the canonical direct, unchained inventory- and artifact-bound uploader"
     if (aliases_canonical_ota_gate(payload, command) and not read_only_inspection) or \
        (names_gate and not read_only_inspection):
         return "the OTA gate is not a canonical direct, unchained, role- and artifact-bound command"
@@ -1530,6 +1767,10 @@ def partition_segment_is_read_only(tokens: list[str]) -> bool:
 def shell_writes_partitions(command: str) -> bool:
     if any(is_partitions_path(target) for target in patch_targets(command)):
         return True
+    # A source filename such as agent-python.sh is not an interpreter invocation. Admit only
+    # the independently parsed, literal metadata forms before the conservative writer heuristic.
+    if literal_source_metadata_inspection(command):
+        return False
     if re.search(r"\bpartitions\b", command, re.IGNORECASE) and ".csv" in command and re.search(
         r"[$+]|\b(?:python|python3|node|awk)\b", command
     ):

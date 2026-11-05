@@ -95,6 +95,10 @@ template <typename... Args> void record(const char* format, Args... args) {
     log += '\n';
 }
 } // namespace sdk
+inline esp_err_t httpd_req_async_handler_begin(httpd_req_t*, httpd_req_t**) {
+    return ESP_FAIL; // streaming response fixtures never hand a request to an OTA worker
+}
+inline esp_err_t httpd_req_async_handler_complete(httpd_req_t*) { return ESP_OK; }
 inline int   httpd_req_to_sockfd(httpd_req_t* req) { return req->sockfd; }
 inline void* httpd_sess_get_transport_ctx(httpd_handle_t, int fd) {
     const auto it = sdk::sessions.find(fd);

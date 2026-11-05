@@ -7,21 +7,23 @@ privacy; [ARCHITECTURE.md](ARCHITECTURE.md) describes ownership. HTTP implementa
 
 ## Surface and errors
 
-The trusted-LAN route count of 39 includes assets, aliases and the catch-all. The open setup AP
+The trusted-LAN route count of 40 includes assets, aliases and the catch-all. The open setup AP
 serves only provisioning (`/`, `/index.html`, `/favicon.ico`, `/set_wifi` and captive GET fallback).
 A withheld GET serves the setup page; a withheld POST is 404. `/scan`, live data, configuration other
 than WiFi, OTA and MCP are not available on that AP.
 
-Body-bearing POSTs require `Content-Type: application/json`. Bodies are reassembled to the route's
-fixed capacity with room for a terminator; empty, oversized, truncated or stalled bodies are rejected.
+Body-bearing POSTs require `Content-Type: application/json`, except the binary OTA upload below.
+JSON bodies are reassembled to the route's fixed capacity with room for a terminator; empty,
+oversized, truncated or stalled bodies are rejected.
 Configuration JSON requires one object and at most 16 container levels; scalars, arrays, raw or
 decoded NUL and trailing non-whitespace fail before any setting is applied.
 Request bodies use Content-Length; Transfer-Encoding is unsupported. A supplied length must match
 the SDK's representable body length; mismatched or unsupported framing closes the connection.
 Supplied configuration fields must have their documented JSON type; integer fields require finite,
 representable whole numbers. Missing fields retain the route's documented meaning.
-Incoming socket reads share one 30-second monotonic budget across headers, body and SDK purge;
-progress cannot extend it. A blocking receive can add its five-second timeout. Successful body
+Incoming socket reads normally share one 30-second monotonic budget across headers, body and SDK
+purge; an admitted OTA upload gets 300 seconds from the same first-header start. Progress cannot
+extend either budget. A blocking receive can add its five-second timeout. Successful body
 settlement resets the budget for the next keep-alive request. Unread-body
 cleanup admits receives for two seconds and checks an 8 KiB cap after each 128-byte receive
 (up to 8 KiB + 128 bytes); an active receive can add its socket timeout. Larger/slower cleanup
@@ -528,8 +530,9 @@ trigger, not a successful fetch; observe the exact four causal tokens and succes
 
 ## OTA operation contract
 
-Agent-run writes use [MAINTENANCE.md](MAINTENANCE.md#role-pinned-ota); the routes below document the
-firmware/client contract, not permission to bypass its delivery gate.
+Agent-run writes follow [MAINTENANCE.md](MAINTENANCE.md#local-dev-ota-tests) for an explicitly
+requested local dev test or its ordinary [role-pinned promotion](MAINTENANCE.md#role-pinned-ota).
+The routes below document the firmware/client contract; endpoint discovery grants no write authority.
 
 | Route | Contract |
 |---|---|
@@ -537,10 +540,27 @@ firmware/client contract, not permission to bypass its delivery gate.
 | `GET /ota/status[?redact=1]` | Allocation-free compact progress snapshot; fields below. Redaction hides effective feed URLs while keeping unset strings empty. |
 | `GET /ota/changelog?after=<generation>` | One-shot UTF-8 text for a completed offer; 204 no usable notes, 409 consumed/expired/replaced offer, 400 invalid generation. Notes are presentation only. |
 | `POST /ota/update?after=<generation>&channel=<release|dev>&version=<version>&sha256=<64-lowercase-hex>[&downgrade=1]` | Accepts only the exact completed offer under its mutex; returns immediate successor generation. Missing query keys, query overflow or invalid `after` are 400; invalid artifact identity, busy/replaced/unavailable offer are 503. |
+| `POST /ota/upload?sha256=<64-lowercase-hex>` | Direct signed binary test upload, only with saved channel `dev`; contract below. |
 
 Update captures identity in fixed storage, re-fetches the captured feed, checks manifest version/SHA,
 hashes the complete stream and validates its signature before boot selection. `downgrade=1` relaxes
 ordering for that request only; equal versions remain refused and signature/digest checks stay active.
+
+The upload body is the complete signed application image, with `Content-Type:
+application/octet-stream` and a fixed `Content-Length`; multipart and Transfer-Encoding are refused.
+The SHA-256 query binds those exact signed bytes. The image must fit the inactive application slot
+and be at least 4,096 bytes. The worker rechecks the saved channel before flash acquisition, verifies
+the ESP32-S3 image header and project identity, streams in 1 KiB chunks, then checks digest, signature
+and boot-selection validation. This explicit dev test path accepts equal or older versions without
+a feed check, merge or publication. It changes no saved channel, NVS or partition table.
+
+Upload responses are 403 outside `dev`, 400 for missing/malformed SHA or empty body, and 503 if not
+accepted, including busy/unavailable service or a non-fitting length. An accepted upload holds its
+HTTP response asynchronously: 200 `{ok:true,generation}` means validation and boot selection
+completed, before reboot; 422 `{ok:false,generation}` means the operation failed. `/ota/status`
+reports progress and the failure message. After asynchronous handoff the upload connection always
+closes; transfer, digest or image-validation failure leaves the running slot selected. A success response does not prove the
+subsequent boot, probation or requested behavior; the existing health gate remains armed.
 
 The LAN-only bounded HTTPS header pair `X-Daikin-HIL-Manifest-URL` and
 `X-Daikin-HIL-Firmware-Base-URL` overrides only one check generation. Both required, each at most
@@ -565,6 +585,7 @@ this also applies to `/status` and `/diag`.
 
 ## MCP POST
 
-`POST /mcp` implements stateless `initialize`, `tools/list`, `tools/call` with exactly `get_status`
-and `get_hp_values`. Results use the status/values serializers with bounded JSON-RPC framing.
+`POST /mcp` implements stateless `initialize`, `tools/list`, `tools/call` with `get_status`,
+`get_hp_values` and read-only `get_ota_info`. Snapshot results use the status/values serializers with
+bounded JSON-RPC framing; OTA discovery describes the separate HTTP upload without executing it.
 Notifications return 202; no SSE, session or write tool. Protocol and client setup: [MCP.md](MCP.md).

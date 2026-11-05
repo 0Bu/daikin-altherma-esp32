@@ -24,6 +24,9 @@ measurements, incident history, and field-by-field reference material in the lin
 - An explicit `$deploy-test` or `$flash-esp32` request, and a `$deploy-test` run inside a
   `$deploy-prod` chain, authorizes the unchained key-by-path signing command and the unchanged
   repository flash plan described below.
+- An explicit local HTTP OTA test request authorizes building, key-by-path signing and the
+  requested upload to the inventory production board, only while its saved channel is `dev`.
+  It can precede merge and publication; it does not authorize changing the channel, merging or publishing.
 - A standalone `$deploy-test` authorizes scoped fixes and host checks, but commits require separate
   explicit authorization. Repeat hardware testing only after an authorized clean fix head exists;
   the inherited `$deploy-prod` chain already authorizes its fix commits.
@@ -183,12 +186,20 @@ This attribution request does not add conditions to the MIT License.
 - Never claim flash, OTA, persistence, or rollback success from a build artifact alone. After an
   authorized device update, verify version/signature, reboot reason, rollback/safe-mode state, heap
   and stack health, X10A/Modbus link state, connectivity, and the requested user-visible behavior.
-- Every agent-run OTA write must use direct, unchained `scripts/production-ota-gate.py`.
+- Official agent-run OTA promotion must use direct, unchained `scripts/production-ota-gate.py`.
   Official dev delivery, or an explicitly requested stable Release delivery, to `bench` uses
   `--confirm-bench bench --install-bench` and cannot contact production. Production promotion uses
   the distinct `--confirm-production production --execute` transaction. Each mode binds the signed
   artifact, official feed and source without changing the saved channel, permits one un-retried
   target POST, and requires probation and stress; follow [the runbook](docs/MAINTENANCE.md#role-pinned-ota).
+- Exception for an explicitly requested local test: `POST /ota/upload` can install a locally built,
+  signed image on the inventory production board while the saved channel is `dev`, before merge
+  or feed publication. Use direct, unchained `scripts/dev-ota-upload.py` with its explicit
+  `--confirm-production-test production --execute` mode, following the
+  [local test procedure](docs/MAINTENANCE.md#local-dev-ota-tests). Require current source/check/review/build
+  evidence without requiring a commit. Bind target identity, retain signing/health checks and report
+  local test evidence. MCP only advertises this HTTP capability. PR gates and official promotion
+  stay required.
 - Signed, NVS-preserving USB writes to the inventory roles are limited to bootstrap, recovery, and
   the explicitly requested pre-merge test of an exact local head on the bench (`$deploy-test`, or
   `$flash-esp32` naming the bench under the same rules). Production takes USB only for bootstrap and
@@ -198,11 +209,11 @@ This attribution request does not add conditions to the MIT License.
   Exception: a confirmed cumulative dev-changelog capacity overflow automatically authorizes the
   existing release workflow for the already validated main head, without another approval. Follow
   `$deploy-prod`'s release-baseline handoff; other failures do not qualify.
-  A faulty production image that passed probation requires a reviewed fix or revert and the same
-  bench-first roll-forward chain; failed probation is handled by bootloader rollback.
-- Completed validation, positive heap minima, `ota_stack_min_free_bytes`, target probation and
-  stress remain mandatory. Production requires bench staging first, a read-only canary and retained
-  X10A proof. A failed gate is a stop, never permission to retry or substitute a write.
+  A faulty official production image that passed probation requires a reviewed fix or revert and
+  the same bench-first roll-forward chain; failed probation is handled by bootloader rollback.
+- For official promotion, completed validation, positive heap minima, `ota_stack_min_free_bytes`,
+  target probation and stress remain mandatory. Production requires bench staging first, a read-only
+  canary and retained X10A proof. A failed gate is a stop, never permission to retry or substitute a write.
 - Manual `workflow_dispatch` with `release: true` authorizes publication only: one signed build,
   release feed, exact-source tag and GitHub Release, without the mechanical PR suite or board
   contact. Hardware acceptance is a separate authorized chain; see the runbook.

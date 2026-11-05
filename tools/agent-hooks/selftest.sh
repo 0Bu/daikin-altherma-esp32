@@ -289,6 +289,10 @@ guard_case "non-GitHub curl remains allowed" \
     "$(payload exec_command command "curl -sS https://example.com/health")" ""
 guard_case "direct production OTA POST is denied" \
     "$(payload exec_command command "curl -fsS -X POST http://production.invalid/ota/update")" deny
+guard_case "direct signed binary upload is denied outside its canonical local-test command" \
+    "$(payload exec_command command "curl --data-binary @/tmp/app.bin http://production.invalid/ota/upload")" deny
+guard_case "encoded local upload cannot evade the OTA write guard" \
+    "$(payload exec_command command "curl -X POST http://production.invalid/ota/up%6coad")" deny
 guard_case "direct test-board OTA POST is denied too" \
     "$(payload exec_command command "curl -fsS --request POST http://bench.invalid/ota/update")" deny
 guard_case "HTTPie direct test-board OTA POST is denied" \
@@ -543,6 +547,17 @@ guard_case "quote-split production OTA path is denied" \
 guard_case "foreign production gate copy is denied" \
     "$(payload exec_command command "/tmp/production-ota-gate.py --execute")" deny
 canonical_ota_gate="$root/scripts/production-ota-gate.py --manifest-url https://0bu.github.io/daikin-altherma-esp32/dev/manifest.json --expected-source-sha abcdef1234567890abcdef1234567890abcdef12 --expected-version 1.2.3-dev.4 --expected-app-sha256 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb --expected-current-version 1.2.3 --confirm-production production --execute"
+canonical_dev_upload="$root/scripts/dev-ota-upload.py --confirm-production-test production --image /tmp/app.bin --expected-app-sha256 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb --expected-current-version 1.2.3-dev.4 --expected-current-elf abc123def --evidence /tmp/receipt.json --expected-source-sha256 cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+guard_case "canonical dev upload preflight is allowed" \
+    "$(payload exec_command command "$canonical_dev_upload")" ""
+guard_case "canonical dev upload execution is allowed" \
+    "$(payload exec_command command "$canonical_dev_upload --execute")" ""
+guard_case "dev upload cannot bypass the production identity lease" \
+    "$(payload exec_command command "$canonical_dev_upload --host foreign.invalid --execute")" deny
+guard_case "dev upload cannot run through an interpreter wrapper" \
+    "$(payload exec_command command "python3 $canonical_dev_upload --execute")" deny
+guard_case "dev upload cannot be chained into another command" \
+    "$(payload exec_command command "$canonical_dev_upload --execute; true")" deny
 guard_case "canonical argument-bound production OTA gate is allowed" \
     "$(payload exec_command command "$canonical_ota_gate")" ""
 canonical_bench_ota_gate="$root/scripts/production-ota-gate.py --manifest-url https://0bu.github.io/daikin-altherma-esp32/dev/manifest.json --expected-source-sha abcdef1234567890abcdef1234567890abcdef12 --expected-version 1.2.3-dev.4 --expected-app-sha256 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb --expected-current-version 1.2.3-dev.3 --confirm-bench bench --install-bench"
@@ -1690,6 +1705,14 @@ pr_case "CI heap-sensitive changes require independent heap review" 2 \
     "$tmp/no-heap-review.md" "$tmp/heap-files.txt"
 pr_case "CI heap-sensitive changes accept current independent heap review" 0 \
     "$tmp/all-gates.md" "$tmp/heap-files.txt"
+printf '%s\n' 'scripts/dev-ota-upload.py' >"$tmp/dev-upload-files.txt"
+pr_case "CI local uploader changes retain independent heap review" 2 \
+    "$tmp/no-heap-review.md" "$tmp/dev-upload-files.txt"
+grep -vF '$feature-docs' "$tmp/all-gates.md" >"$tmp/no-feature-review.md"
+pr_case "CI local uploader changes retain feature documentation review" 2 \
+    "$tmp/no-feature-review.md" "$tmp/dev-upload-files.txt"
+pr_case "CI local uploader accepts current existing reviews" 0 \
+    "$tmp/all-gates.md" "$tmp/dev-upload-files.txt"
 sed "s/$head_sha/deadbee/" "$tmp/all-gates.md" >"$tmp/stale.md"
 pr_case "CI stale stamps fail closed" 2 "$tmp/stale.md" "$tmp/all-files.txt"
 short_head_sha="${head_sha:0:12}"

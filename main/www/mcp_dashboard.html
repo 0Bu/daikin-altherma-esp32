@@ -40,8 +40,8 @@
     <h2>Connect an AI client to your heat pump</h2>
     <p>
       MCP is an open protocol that lets compatible AI assistants and automation tools discover
-      structured capabilities. This device exposes two local tools for reading its current status
-      and decoded heat-pump values. It cannot change settings or control the heat pump.
+      structured capabilities. This device exposes three local tools for reading status,
+      heat-pump values and firmware upload requirements. MCP cannot install firmware or change settings.
     </p>
   </section>
 
@@ -89,7 +89,7 @@
 
   <section class="section-heading">
     <span class="eyebrow">Available capabilities</span>
-    <h2>Two tools, both read-only</h2>
+    <h2>Three tools, all read-only</h2>
   </section>
 
   <div class="tool-grid">
@@ -106,6 +106,14 @@
       <div>
         <h3><code>get_hp_values</code></h3>
         <p>Current X10A snapshot plus live HomeHub Modbus readings when they are available.</p>
+        <span class="pill success">No arguments</span>
+      </div>
+    </article>
+    <article class="card tool-card">
+      <div class="tool-icon" aria-hidden="true">↥</div>
+      <div>
+        <h3><code>get_ota_info</code></h3>
+        <p>HTTP upload endpoint and requirements for signed local firmware tests on the dev channel.</p>
         <span class="pill success">No arguments</span>
       </div>
     </article>

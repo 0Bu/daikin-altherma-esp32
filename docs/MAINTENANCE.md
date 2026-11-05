@@ -112,9 +112,68 @@ and places history at `0x400000`; an older table needs one signed USB/Web Serial
 cannot deliver a table. An older firmware may refuse a newer config blob; that is not evidence that
 stored configuration was erased.
 
+## Local dev OTA tests
+
+An explicitly requested local test may send a locally built, signed application directly to the
+inventory production board before merge or dev-feed publication. The target must already
+have its saved release channel set to `dev`; the upload never changes that setting. If it is on
+`release`, stop: changing the channel requires a separate explicit request. MCP's read-only
+`get_ota_info` describes the endpoint and current
+availability; discovering it does not authorize a write.
+
+Create a private receipt outside the checkout, then run each check and reviewer named in the
+snapshot's `required` result. Replace the placeholders in these commands:
+
+```bash
+scripts/local-ota-evidence.py --evidence /absolute/private/ota/receipt.json snapshot --coordinator-id '<current-session-id>'
+scripts/local-ota-evidence.py --evidence /absolute/private/ota/receipt.json check --check '<required-check>'
+scripts/local-ota-evidence.py --evidence /absolute/private/ota/receipt.json check --check build
+scripts/local-ota-evidence.py --evidence /absolute/private/ota/receipt.json review --role '<required-reviewer>' --scope . --intent '<changed-function test plan>'
+```
+
+Snapshot scope starts at the merge-base of `HEAD` and `origin/main`, covering committed, staged
+and unstaged changes, deletions and non-ignored new files. Fetch missing history before creating
+the snapshot; a commit is not required. Checks use
+the repository entrypoints and the build uses a fresh source copy with the pinned ESP32-S3 Docker
+toolchain. Review records require an actual separate read-only reviewer, completed findings and
+observed permissions; successful process exit alone is insufficient. Inspect the retained transcript.
+Complete the build before review: its unsigned-image, ELF and stack evidence also bind the review.
+Build evidence reserves the signature sector and enforces both OTA-slot capacity and the existing
+CI image-size budget before review or signing.
+Replacing the build invalidates those reviews even if the source did not change.
+
+Sign the receipt's exact unsigned image using the existing key-by-path procedure. Run
+`scripts/local-ota-evidence.py --evidence /absolute/private/ota/receipt.json verify --signed-image /absolute/path/daikin-altherma-esp32.signed.bin --expected-source-sha256 '<64 lowercase hex>'`.
+The uploader
+verifies the current source fingerprint, required check/review records, ELF, unsigned image and
+signed-image correspondence before device contact and again before writing. Any source edit
+requires new evidence. Bind the target to its expected physical identity. Use the direct, unchained
+command on one line, replacing the quoted placeholders:
+
+```bash
+scripts/dev-ota-upload.py --confirm-production-test production --evidence /absolute/private/ota/receipt.json --expected-source-sha256 '<64 lowercase hex>' --image /absolute/path/daikin-altherma-esp32.signed.bin --expected-app-sha256 '<64 lowercase hex>' --expected-current-version '<current version>' --expected-current-elf '<9 hex>'
+```
+
+The default checks the artifact and board without writing. Add `--execute` only for the requested
+test: it sends one upload POST with no retry, then observes the exact image's reboot and probation
+within a bound. The binary HTTP contract, including digest, framing, response codes and
+same/older-version allowance, is in [API.md](API.md#ota-operation-contract). One failed or timed-out
+upload is not permission to retry; inspect `/ota/status` and device health first. A lost response
+does not prove that installation failed.
+An exclusive attempt marker is retained in the private evidence directory before the one POST;
+that receipt cannot execute another upload. Do not create fresh evidence to disguise a retry.
+
+After upload, verify the actual boot, rollback/safe-mode state, heap/stack, source connectivity and
+requested behavior. The observer must see `pending_verify` followed by `valid` within the same
+distinct boot. A first-seen `valid` state cannot exclude an unobserved same-build rollback and is
+incomplete evidence. A 200 response proves completed validation and boot selection, not probation
+or plant behavior. Report this as a local test of the uploaded bytes. PR review/CI gates still apply
+before merge; official artifact delivery retains the separate bench-first promotion chain below.
+
 ## Role-pinned OTA
 
-Every agent-run OTA write uses the **direct, unchained** `scripts/production-ota-gate.py`. It requires
+Every official agent-run OTA promotion uses the **direct, unchained** `scripts/production-ota-gate.py`.
+The explicitly authorized [local dev test](#local-dev-ota-tests) is a separate path. Promotion requires
 a clean exact source tree, an official manifest, expected source/version/application SHA,
 ESP32-S3 metadata, signature, range behavior and host contracts. Device targets come exclusively
 from the local schema-versioned inventory, never a hostname argument:

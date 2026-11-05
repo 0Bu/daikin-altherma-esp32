@@ -30,6 +30,7 @@ inline bool http_content_length_matches(std::string_view text, size_t declared) 
 struct HttpIngressBudget {
     int64_t started_us = 0;
     bool    active     = false;
+    int64_t limit_us   = HTTP_INGRESS_BUDGET_US;
 
     bool admit(int64_t now_us) noexcept {
         if (now_us < 0) return false;
@@ -40,9 +41,12 @@ struct HttpIngressBudget {
         return !expired(now_us);
     }
     bool expired(int64_t now_us) const noexcept {
-        return active && (now_us < started_us || now_us - started_us >= HTTP_INGRESS_BUDGET_US);
+        return active && (now_us < started_us || now_us - started_us >= limit_us);
     }
-    void finish() noexcept { active = false; }
+    void finish() noexcept {
+        active   = false;
+        limit_us = HTTP_INGRESS_BUDGET_US;
+    }
 };
 
 } // namespace daik

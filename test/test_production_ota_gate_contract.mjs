@@ -1864,7 +1864,9 @@ assert.match(gate,
 assert.match(gate, /expected_generation\s*=\s*1 if check_generation == 0xFFFFFFFF else check_generation \+ 1/);
 assert.match(gate, /did not settle on the exact gated artifact within \{OTA_CHECK_TIMEOUT_S\} seconds/);
 assert.match(httpOta, /available_sha256[\s\S]{0,180}?available_channel/);
-assert.equal(occurrences(httpOta, "503 Service Unavailable"), 2);
+const feedHttpOta = section(httpOta, "static esp_err_t ota_check(", "\nstatic int upload_read(");
+assert.equal(occurrences(feedHttpOta, "503 Service Unavailable"), 2,
+  "both original feed check/update admissions retain their explicit refusal; binary upload is separate");
 
 const production = gate.slice(gate.indexOf("if args.confirm_production != PRODUCTION_ROLE"));
 assert.equal(occurrences(production, "post_update_once("), 1,

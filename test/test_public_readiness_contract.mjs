@@ -247,7 +247,7 @@ try {
   const originalApi = fs.readFileSync(apiFile, "utf8");
   fs.writeFileSync(
     apiFile,
-    originalApi.replace("trusted-LAN route count of 39", "trusted-LAN route count of 38"),
+    originalApi.replace("trusted-LAN route count of 40", "trusted-LAN route count of 39"),
   );
   let seeded = spawnSync("/bin/bash", ["scripts/run-public-readiness-audit.sh"], {
     cwd: seededRoot,

@@ -25,6 +25,7 @@
 #include "logic/payload_complete.hpp"
 #include "logic/redact.hpp"
 #include "logic/ota_transport.hpp"
+#include "logic/ota_upload.hpp"
 #include "logic/version_cmp.hpp"
 #include "config.hpp"
 #include "diag_log.hpp"
@@ -42,6 +43,7 @@
 #include "stack_watch.hpp"
 #include "weather_forecast.hpp"
 #include "wifi.hpp"
+#include "arch/sys_arch.h"
 #include "esp_app_desc.h"
 #include "esp_app_format.h"
 #include "esp_crt_bundle.h"
@@ -63,6 +65,7 @@
 #include <atomic>
 #include <cstdio>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <exception>
 #include <memory>
@@ -153,7 +156,7 @@ using ChangelogBuffer = std::unique_ptr<char, ChangelogBufferDeleter>;
 // is enough to carry an exact update expectation across the asynchronous task boundary. It is
 // populated before the worker notification while s_busy owns the slot and copied by value after
 // wake-up; no request string or live config is consulted after acceptance.
-enum class OtaTaskMode : uint8_t { Check, Update, Downgrade };
+enum class OtaTaskMode : uint8_t { Check, Update, Downgrade, Upload };
 struct OtaTaskArgs {
     OtaTaskMode mode       = OtaTaskMode::Check;
     OtaChannel  channel    = OtaChannel::Release;
@@ -162,8 +165,9 @@ struct OtaTaskArgs {
     // remaining fixed identity in this same global busy-owned slot; it then becomes the retained
     // offer lease which an accepted update copies by value back across the task boundary.
     OtaOfferBinding offer{};
+    OtaUploadSource upload{};
 };
-static_assert(sizeof(OtaTaskArgs) <= 656,
+static_assert(sizeof(OtaTaskArgs) <= 704,
               "OTA task arguments must stay within the reviewed fixed stack allowance");
 OtaTaskArgs s_task_args;
 
@@ -205,8 +209,8 @@ const char* ota_runtime_image_state_name(OtaRuntimeImageState state) {
 // while the MQTT publisher still competed for the largest contiguous block. The guard lives around
 // the whole task operation so every manifest/download exit and exception clears it in one place.
 // Unlike Weather, the lease also withdraws a connected publisher's retained `online` before the
-// clean MQTT stop: an install restarts the board while that client is stopped, and an install
-// always follows a check (logic/mqtt_publish_gate.hpp).
+// clean MQTT stop: an install restarts the board while that client is stopped. Both feed checks
+// and direct uploads acquire this lease (logic/mqtt_publish_gate.hpp).
 struct OtaNetworkFlag {
     OtaNetworkFlag() {
         s_network_active.store(true, std::memory_order_release);
@@ -232,6 +236,7 @@ constexpr UBaseType_t kTaskPrio  = TASK_PRIO_OTA; // see main/task_config.hpp fo
 StaticTask_t          s_ota_task_storage{};
 StackType_t           s_ota_task_stack[kTaskStack]{};
 TaskHandle_t          s_ota_task     = nullptr;
+std::atomic<bool>     s_ota_lwip_ready{false};
 constexpr int         kHttpTimeoutMs = 15000;
 // A peer which sends one byte inside every socket timeout is still not allowed to hold MQTT,
 // HomeHub and Syslog quiesced forever. The remaining-time setter bounds each ordinary IDF call;
@@ -1037,6 +1042,221 @@ void record_installed_image_held() {
     s_status.message = "Installed; starts on next reboot (factory reset)";
 }
 
+// Own the async request even when service quiescence, image validation or a task allocation fails.
+struct OtaUploadRequest {
+    OtaUploadSource source;
+    uint32_t        generation;
+    void            finish(bool installed) noexcept {
+        if (!source.context) return;
+        void* context  = source.context;
+        source.context = nullptr;
+        source.complete(context, installed, generation);
+    }
+    ~OtaUploadRequest() { finish(false); }
+};
+
+// Both transports share the exact signature, heap, boot-selection and reboot path.
+void activate_update(OtaUpdateResources& resources, const esp_partition_t* update_partition,
+                     const char* avail, OtaUploadRequest* upload = nullptr) {
+    auto&         ota_handle = resources.ota_handle;
+    auto&         ota_open   = resources.ota_open;
+    esp_err_t     e          = ESP_OK;
+    OtaHeapSample verify_heap{};
+    if (!wait_for_ota_headroom("validation", OTA_VALIDATION_HEADROOM,
+                               kValidationHeadroomMaxAttempts, verify_heap)) {
+        if (ota_open) {
+            esp_ota_abort(ota_handle);
+            ota_open = false;
+        }
+        set_state("error", "Not enough memory to verify the update — retry after reboot");
+        return;
+    }
+
+    // esp_ota_end() is the SAME IDF RSA-3072 Secure-Boot-v2 verifier selected by
+    // CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT=y.  It runs only after TLS cleanup and only
+    // with the headroom gate above; no unsigned/tampered image can reach the boot selector.  The
+    // handle becomes invalid regardless of result, so mark it closed before the call.
+    ota_open = false;
+    e        = esp_ota_end(ota_handle);
+    if (e != ESP_OK) {
+        const OtaHeapSample after = ota_heap_sample();
+        if (e == ESP_ERR_OTA_VALIDATE_FAILED) {
+            // IDF deliberately collapses bad image structure, digest/signature failure AND verifier
+            // allocation failure into ESP_ERR_OTA_VALIDATE_FAILED.  Do not claim which one
+            // occurred.
+            diag_printf("ota: image validation failed (%s; before free=%u B largest=%u B; "
+                        "after free=%u B largest=%u B) — running image intact\n",
+                        esp_err_to_name(e), static_cast<unsigned>(verify_heap.free_bytes),
+                        static_cast<unsigned>(verify_heap.largest_internal_block),
+                        static_cast<unsigned>(after.free_bytes),
+                        static_cast<unsigned>(after.largest_internal_block));
+            set_state("error", "Update rejected: image validation failed");
+        } else {
+            diag_printf("ota: %s failed (%s; free=%u B largest=%u B)\n", "esp_ota_end",
+                        esp_err_to_name(e), static_cast<unsigned>(after.free_bytes),
+                        static_cast<unsigned>(after.largest_internal_block));
+            set_state("error", "Couldn't install the update");
+        }
+        return;
+    }
+
+    // Selection is deliberately separate and strictly AFTER successful validation. IDF validates
+    // once more while setting otadata, so protect that second RSA/PSA pass with the same
+    // independent post-TLS budget. A refusal still leaves the running slot selected and is safe to
+    // retry.
+    OtaHeapSample selection_heap{};
+    if (!wait_for_ota_headroom("boot selection", OTA_VALIDATION_HEADROOM,
+                               kValidationHeadroomMaxAttempts, selection_heap)) {
+        set_state("error", "Not enough memory to activate the update — retry after reboot");
+        return;
+    }
+    e = esp_ota_set_boot_partition(update_partition);
+    if (e != ESP_OK) {
+        const OtaHeapSample after = ota_heap_sample();
+        diag_printf("ota: %s failed (%s; free=%u B largest=%u B)\n",
+                    "validated image but boot selection", esp_err_to_name(e),
+                    static_cast<unsigned>(after.free_bytes),
+                    static_cast<unsigned>(after.largest_internal_block));
+        set_state("error", e == ESP_ERR_OTA_VALIDATE_FAILED
+                               ? "Update rejected: image validation failed"
+                               : "Couldn't activate the update");
+        return;
+    }
+
+    // esp_ota_set_boot_partition performs a second image verification. Capture its retrospective
+    // low-water mark before publishing `done`; the operation intentionally reboots instead of
+    // reaching the worker's ordinary completion tail on this success path.
+    stack_watch_sample(StackWatch::Ota);
+
+    diag_printf("ota: installed %s, rebooting (health gate arms on next boot)\n", avail);
+    {
+        Lock lk(s_mtx);
+        s_status.state    = "done";
+        s_status.progress = 100;
+        s_status.message  = "Rebooting into the new firmware";
+    }
+    if (upload && upload->source.context) upload->finish(true);
+    // Outlive both the 1 Hz browser and the gate's 2 Hz connection-churn-bounded observer, with
+    // enough LAN/HTTPD scheduling margin for either to retain completed-verifier evidence.
+    vTaskDelay(pdMS_TO_TICKS(kDoneBeforeRebootMs));
+    // Checked after that wait, at the last moment: see record_installed_image_held.
+    if (nvs_restart_held_by_factory_reset("ota")) {
+        record_installed_image_held();
+        return;
+    }
+    esp_restart();
+}
+
+void run_upload(const OtaTaskArgs& request, OtaUploadRequest& upload) {
+    const auto* partition = esp_ota_get_next_update_partition(nullptr);
+    // Recheck the saved channel after worker handoff, before any flash acquisition. The shared
+    // busy guard refuses HTTP configuration writes throughout the accepted operation.
+    if (!partition || !ota_upload_allowed(config_ota_channel(), request.upload.length,
+                                          partition->size, request.offer.app_sha256.data())) {
+        set_state("error", "Upload requires the dev channel and a fitting signed image");
+        return;
+    }
+    set_state("updating", "Receiving a local test image");
+    {
+        Lock lk(s_mtx);
+        s_status.update_available = false;
+        s_status.downgrade        = false;
+        s_status.available.clear();
+        s_status.available_sha256.fill('\0');
+        s_status.available_channel.clear();
+    }
+    OtaUpdateResources resources;
+    resources.buffer =
+        static_cast<uint8_t*>(heap_caps_malloc(kOtaBufSize, MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL));
+    if (!resources.buffer) {
+        set_state("error", "Not enough memory for the upload — retry after reboot");
+        return;
+    }
+    constexpr size_t probe_size =
+        sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t) + sizeof(esp_app_desc_t);
+    static_assert(probe_size <= kOtaBufSize);
+    const TickType_t started = xTaskGetTickCount();
+    auto             read    = [&](size_t offset, size_t length) {
+        if (http_deadline_reached(started, kFirmwareDeadline)) return -1;
+        const int n = request.upload.read(
+            request.upload.context, reinterpret_cast<char*>(resources.buffer + offset), length);
+        if (http_deadline_reached(started, kFirmwareDeadline) || n <= 0 ||
+            static_cast<size_t>(n) > length)
+            return -1;
+        return n;
+    };
+    size_t received = 0;
+    while (received < probe_size) {
+        const int n = read(received, probe_size - received);
+        if (n < 0) {
+            set_state("error", "Upload interrupted or timed out");
+            return;
+        }
+        received += static_cast<size_t>(n);
+    }
+    esp_image_header_t header{};
+    esp_app_desc_t     image{};
+    std::memcpy(&header, resources.buffer, sizeof(header));
+    std::memcpy(&image, resources.buffer + sizeof(header) + sizeof(esp_image_segment_header_t),
+                sizeof(image));
+    const auto* running = esp_app_get_description();
+    if (header.magic != ESP_IMAGE_HEADER_MAGIC || header.chip_id != CONFIG_IDF_FIRMWARE_CHIP_ID ||
+        image.magic_word != ESP_APP_DESC_MAGIC_WORD ||
+        std::memcmp(image.project_name, running->project_name, sizeof(image.project_name)) != 0 ||
+        image.version[0] == '\0' || !std::memchr(image.version, '\0', sizeof(image.version))) {
+        set_state("error", "Upload rejected: wrong project or invalid image header");
+        return;
+    }
+    // Local test images intentionally allow equal and older versions; this never changes feed
+    // policy.
+    esp_err_t e = esp_ota_begin(partition, OTA_WITH_SEQUENTIAL_WRITES, &resources.ota_handle);
+    if (e != ESP_OK) {
+        set_state("error", "Upload could not start; check firmware probation and memory");
+        return;
+    }
+    resources.ota_open = true;
+    if (psa_hash_setup(&resources.hash_operation, PSA_ALG_SHA_256) != PSA_SUCCESS) {
+        set_state("error", "Upload hash could not start");
+        return;
+    }
+    resources.hash_active = true;
+    size_t written        = 0;
+    for (;;) {
+        if (psa_hash_update(&resources.hash_operation, resources.buffer, received) != PSA_SUCCESS ||
+            esp_ota_write(resources.ota_handle, resources.buffer, received) != ESP_OK) {
+            set_state("error", "Upload could not be written or hashed");
+            return;
+        }
+        written += received;
+        ota_heap_sample();
+        {
+            Lock lk(s_mtx);
+            s_status.progress = static_cast<int>((written * 100ULL) / request.upload.length);
+        }
+        if (written == request.upload.length) break;
+        const int n =
+            read(0, std::min(static_cast<size_t>(kOtaBufSize), request.upload.length - written));
+        if (n < 0) {
+            set_state("error", "Upload interrupted or timed out");
+            return;
+        }
+        received = static_cast<size_t>(n);
+    }
+    uint8_t            digest[32]{};
+    size_t             digest_length = 0;
+    const psa_status_t hash =
+        psa_hash_finish(&resources.hash_operation, digest, sizeof(digest), &digest_length);
+    if (hash != PSA_SUCCESS) psa_hash_abort(&resources.hash_operation);
+    resources.hash_active = false;
+    resources.release_buffer();
+    if (hash != PSA_SUCCESS || digest_length != sizeof(digest) ||
+        !ota_sha256_matches(digest, request.offer.app_sha256.data())) {
+        set_state("error", "Upload rejected: SHA-256 mismatch");
+        return;
+    }
+    activate_update(resources, partition, image.version, &upload);
+}
+
 void run_update(const OtaTaskArgs& request) {
     const bool       allow_downgrade = request.mode == OtaTaskMode::Downgrade;
     const char*      running         = esp_app_get_description()->version;
@@ -1618,89 +1838,7 @@ void run_update(const OtaTaskArgs& request) {
         return;
     }
 
-    OtaHeapSample verify_heap{};
-    if (!wait_for_ota_headroom("validation", OTA_VALIDATION_HEADROOM,
-                               kValidationHeadroomMaxAttempts, verify_heap)) {
-        if (ota_open) {
-            esp_ota_abort(ota_handle);
-            ota_open = false;
-        }
-        set_state("error", "Not enough memory to verify the update — retry after reboot");
-        return;
-    }
-
-    // esp_ota_end() is the SAME IDF RSA-3072 Secure-Boot-v2 verifier selected by
-    // CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT=y.  It runs only after TLS cleanup and only
-    // with the headroom gate above; no unsigned/tampered image can reach the boot selector.  The
-    // handle becomes invalid regardless of result, so mark it closed before the call.
-    ota_open = false;
-    e        = esp_ota_end(ota_handle);
-    if (e != ESP_OK) {
-        const OtaHeapSample after = ota_heap_sample();
-        if (e == ESP_ERR_OTA_VALIDATE_FAILED) {
-            // IDF deliberately collapses bad image structure, digest/signature failure AND verifier
-            // allocation failure into ESP_ERR_OTA_VALIDATE_FAILED.  Do not claim which one
-            // occurred.
-            diag_printf("ota: image validation failed (%s; before free=%u B largest=%u B; "
-                        "after free=%u B largest=%u B) — running image intact\n",
-                        esp_err_to_name(e), static_cast<unsigned>(verify_heap.free_bytes),
-                        static_cast<unsigned>(verify_heap.largest_internal_block),
-                        static_cast<unsigned>(after.free_bytes),
-                        static_cast<unsigned>(after.largest_internal_block));
-            set_state("error", "Update rejected: image validation failed");
-        } else {
-            diag_printf("ota: %s failed (%s; free=%u B largest=%u B)\n", "esp_ota_end",
-                        esp_err_to_name(e), static_cast<unsigned>(after.free_bytes),
-                        static_cast<unsigned>(after.largest_internal_block));
-            set_state("error", "Couldn't install the update");
-        }
-        return;
-    }
-
-    // Selection is deliberately separate and strictly AFTER successful validation. IDF validates
-    // once more while setting otadata, so protect that second RSA/PSA pass with the same
-    // independent post-TLS budget. A refusal still leaves the running slot selected and is safe to
-    // retry.
-    OtaHeapSample selection_heap{};
-    if (!wait_for_ota_headroom("boot selection", OTA_VALIDATION_HEADROOM,
-                               kValidationHeadroomMaxAttempts, selection_heap)) {
-        set_state("error", "Not enough memory to activate the update — retry after reboot");
-        return;
-    }
-    e = esp_ota_set_boot_partition(update_partition);
-    if (e != ESP_OK) {
-        const OtaHeapSample after = ota_heap_sample();
-        diag_printf("ota: %s failed (%s; free=%u B largest=%u B)\n",
-                    "validated image but boot selection", esp_err_to_name(e),
-                    static_cast<unsigned>(after.free_bytes),
-                    static_cast<unsigned>(after.largest_internal_block));
-        set_state("error", e == ESP_ERR_OTA_VALIDATE_FAILED
-                               ? "Update rejected: image validation failed"
-                               : "Couldn't activate the update");
-        return;
-    }
-
-    // esp_ota_set_boot_partition performs a second image verification. Capture its retrospective
-    // low-water mark before publishing `done`; the operation intentionally reboots instead of
-    // reaching the worker's ordinary completion tail on this success path.
-    stack_watch_sample(StackWatch::Ota);
-
-    diag_printf("ota: installed %s, rebooting (health gate arms on next boot)\n", avail);
-    {
-        Lock lk(s_mtx);
-        s_status.state    = "done";
-        s_status.progress = 100;
-        s_status.message  = "Rebooting into the new firmware";
-    }
-    // Outlive both the 1 Hz browser and the gate's 2 Hz connection-churn-bounded observer, with
-    // enough LAN/HTTPD scheduling margin for either to retain completed-verifier evidence.
-    vTaskDelay(pdMS_TO_TICKS(kDoneBeforeRebootMs));
-    // Checked after that wait, at the last moment: see record_installed_image_held.
-    if (nvs_restart_held_by_factory_reset("ota")) {
-        record_installed_image_held();
-        return;
-    }
-    esp_restart();
+    activate_update(resources, update_partition, avail);
 }
 
 // One boot-resident task body handles both operations, so the reviewed 11,776-byte stack is never
@@ -1710,6 +1848,18 @@ void run_update(const OtaTaskArgs& request) {
 // update CHECK ran out of memory would be absurd (AGENTS.md → Memory, concurrency, and HTTP
 // safety).
 void ota_task(void*) {
+    // An upload can fail before its first receive, making its error response this task's first
+    // socket operation. Reserve lwIP's per-task semaphore at boot, before runtime heap pressure.
+    // The pinned port ignores pthread_setspecific failure: require the same retained pointer.
+    sys_sem_t* const thread_sem = sys_thread_sem_get();
+    if (thread_sem == nullptr || sys_thread_sem_get() != thread_sem) {
+        diag_printf("ota: lwIP worker prime failed; OTA disabled\n");
+        stack_watch_sample(StackWatch::Ota);
+        vTaskSuspend(nullptr);
+        std::abort(); // a failed worker must remain parked even after an unexpected resume
+    }
+    s_ota_lwip_ready.store(true, std::memory_order_release);
+
     for (;;) {
         (void)ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
@@ -1722,6 +1872,7 @@ void ota_task(void*) {
             request = s_task_args;
         }
         const bool update = request.mode != OtaTaskMode::Check;
+        OtaUploadRequest upload{request.upload, request.generation};
         ota_heap_operation_reset();
         {
             OtaNetworkFlag active;
@@ -1744,6 +1895,8 @@ void ota_task(void*) {
                 } else if (!wait_for_weather_quiesce()) {
                     set_state("error",
                               "Another network operation is still using memory — retry shortly");
+                } else if (request.mode == OtaTaskMode::Upload) {
+                    run_upload(request, upload);
                 } else if (update) {
                     run_update(request);
                 } else {
@@ -1757,6 +1910,7 @@ void ota_task(void*) {
                 set_state("error", "Update failed");
             }
         }
+        upload.finish(false);
         // Captures checks, refused installs and every caught-exception path before the worker
         // sleeps again, and an install whose restart a factory reset held. Other successful
         // installs sample explicitly after boot selection because they reboot from run_update()
@@ -1780,7 +1934,7 @@ uint32_t next_generation(uint32_t current) {
 // accepted by an already-created worker; no operation-path task-stack allocation can consume the
 // contiguous block the following TLS gate is about to measure.
 uint32_t start_locked(const OtaTaskArgs& request, uint32_t previous_generation) {
-    if (!s_ota_task) return 0;
+    if (!s_ota_task || !s_ota_lwip_ready.load(std::memory_order_acquire)) return 0;
     // No new operation once an install's restart was held, nor while a factory reset is erasing:
     // an install finishing then could only be held too, with nothing gained.
     if (s_install_held || nvs_factory_reset_latched()) return 0;
@@ -1805,6 +1959,7 @@ uint32_t start_check(const OtaFeedUrls* hil_feed) {
     // independent lock; the second check below is the authoritative race-closing acceptance.
     {
         Lock lk(s_mtx);
+        if (!s_ota_lwip_ready.load(std::memory_order_acquire)) return 0;
         if (s_busy || !s_ota_task) return 0;
     }
     const OtaChannel channel = config_ota_channel();
@@ -1886,6 +2041,29 @@ uint32_t ota_update_async(uint32_t after_generation, const char* expected_channe
     const uint32_t generation = start_update(after_generation, expected_channel, expected_version,
                                              expected_app_sha256, allow_downgrade);
     if (!generation) ESP_LOGW("ota", "update ignored: OTA busy or task unavailable");
+    return generation;
+}
+
+uint32_t ota_upload_async(const OtaUploadSource& source, const char* expected_sha256) {
+    if (!s_ota_lwip_ready.load(std::memory_order_acquire)) return 0;
+    if (!source.context || !source.read || !source.complete) return 0;
+    const auto* partition = esp_ota_get_next_update_partition(nullptr);
+    if (!partition ||
+        !ota_upload_allowed(config_ota_channel(), source.length, partition->size, expected_sha256))
+        return 0;
+    OtaTaskArgs request{};
+    request.mode    = OtaTaskMode::Upload;
+    request.channel = OtaChannel::Dev;
+    request.upload  = source;
+    std::memcpy(request.offer.app_sha256.data(), expected_sha256, 65);
+    Lock lk(s_mtx);
+    if (s_busy) return 0;
+    const uint32_t generation = start_locked(request, s_generation);
+    if (generation) {
+        s_status.state    = "updating";
+        s_status.progress = 0;
+        s_status.message  = "Waiting for local test upload";
+    }
     return generation;
 }
 

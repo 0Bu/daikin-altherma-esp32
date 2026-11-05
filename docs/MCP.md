@@ -1,14 +1,14 @@
 # MCP integration
 
-The device offers two read-only Model Context Protocol tools at **`POST /mcp`**. They reuse cached
-HTTP status/value snapshots; they do not command the heat pump, alter configuration or reach another
-source. Keep this unauthenticated, plaintext HTTP endpoint on a trusted LAN.
+The device offers three read-only Model Context Protocol tools at **`POST /mcp`**: cached status,
+values and OTA endpoint discovery. They do not command the heat pump, alter configuration, install
+firmware or reach another source. Keep this unauthenticated, plaintext endpoint on a trusted LAN.
 
 ## Set up a client
 
 Open `http://daikin-altherma-esp32.local/mcp` in a browser. **`GET /mcp`** is a device-local setup
 page, not an event stream. It shows the actual serving URL, copyable configuration, a curl example
-and the two tools. It makes no API or external requests (`connect-src 'none'`). An SSE-only GET
+and the tools. It makes no API or external requests (`connect-src 'none'`). An SSE-only GET
 receives **405** because this device does not offer an event stream.
 
 For a client accepting the common `mcpServers` HTTP shape:
@@ -32,10 +32,17 @@ Use the current device IP if mDNS does not resolve. Configure the URL format req
 |---|---|---|
 | `get_status` | Omitted or empty object | Complete `GET /status` snapshot as `structuredContent`. |
 | `get_hp_values` | Omitted or empty object | Complete `GET /values` X10A/HomeHub snapshot as `structuredContent`. |
+| `get_ota_info` | Omitted or empty object | Saved channel, OTA busy state and the direct HTTP upload contract. Upload is enabled only in `dev` while OTA is idle. |
 
-Each result also has a short text summary. The full JSON is emitted once, in 1 KiB chunks, instead of
-being duplicated as escaped text. X10A/HomeHub values are staged before the first byte. Source
-absence/held readings and HTTP fields follow [API.md](API.md); read-only access does not strengthen
+`get_ota_info` advertises `POST /ota/upload?sha256=<64-lowercase-hex>`, its binary media type,
+complete signed-image digest, version policy and retained health checks. It never performs the
+upload. Endpoint availability is a snapshot, not a reservation or authorization. An explicitly
+requested test uses the separate HTTP endpoint; [API.md](API.md#ota-operation-contract) owns its
+complete request, response and error contract.
+
+Each result also has a short text summary. Status/value JSON is emitted once, in 1 KiB chunks,
+instead of being duplicated as escaped text. X10A/HomeHub values are staged before the first byte.
+Source absence/held readings and HTTP fields follow [API.md](API.md); read-only access does not strengthen
 the physical truth of a reading. In `get_status`, `detect.model` contains only identity fields
 established by the candidate set: unestablished fields are null, or the whole object is null if
 nothing is established. `profile.id` names the table actually read; its best pick among
@@ -48,7 +55,7 @@ state. Request bodies must declare `application/json` and are bounded to **1 KiB
 
 - `initialize` negotiates `2025-06-18` or `2025-11-25`; missing/unsupported requested
   revision receives the latest supported revision, `2025-11-25`.
-- `tools/list` returns exactly the two tools with read-only annotations.
+- `tools/list` returns exactly the three tools with read-only annotations.
 - `tools/call` accepts only those names and no non-empty arguments.
 - Valid notifications return HTTP **202** with no body; supplied params must be an object.
 - Parse/request/method/parameter errors use `-32700` / `-32600` / `-32601` / `-32602`. Unknown tools use
