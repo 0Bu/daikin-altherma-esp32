@@ -13945,11 +13945,13 @@ static void test_http_request_policy() {
     CHECK(http_json_content_type("application/json"));
     CHECK(http_json_content_type("Application/JSON; charset=utf-8"));
     CHECK(http_json_content_type(" application/json ; charset=UTF-8 "));
+    CHECK(http_json_content_type("\tapplication/json\t;\tcharset=UTF-8\t"));
     CHECK(!http_json_content_type(""));
     CHECK(!http_json_content_type("text/plain"));
     CHECK(!http_json_content_type("application/x-www-form-urlencoded"));
     CHECK(!http_json_content_type("application/jsonp"));
     CHECK(!http_json_content_type("application/json;"));
+    CHECK(!http_json_content_type("application/json; \t"));
 
     CHECK(!http_is_ota_route("/ota"));
     CHECK(!http_is_ota_route("/ota?foo=1"));

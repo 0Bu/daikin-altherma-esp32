@@ -1214,6 +1214,62 @@
         "gcc-13-linux-ubuntu24": "c138193d669b8afec1075e971c0afc69e2b3714ef5d39d731b0f24d106c8a936",
         "gcc-15-linux-ubuntu26": "9607f04dfd6fff16d2544133133c6ca694aabf8efc12122ecd027ba1d7b38d78"
       }
+    },
+    {
+      "runner": "Canonical run-mock-tests.sh compiler/gcov commands; unchanged check_gcov_report.py with committed baseline references",
+      "base_commit": "e4225007c7e0dfa2691a43cf5ab0c061e520d9c0",
+      "scope": "Two HTTP media-type cases accept TAB optional whitespace and reject an OWS-only parameter. They cover four additional GCC outcomes without changing production logic, checker rules, line floor or historical ratios.",
+      "compilers": {
+        "clang-17-darwin": "Apple Clang 17.0.0",
+        "gcc-13-linux-ubuntu24": "GCC/gcov 13 in the pinned ESP-IDF v6.1 container",
+        "gcc-15-linux-ubuntu26": "g++/gcov 15.2.0-16ubuntu1 in Ubuntu 26.04 ARM64 Docker",
+        "gcc-15-github-linux-ubuntu26": "g++/gcov 15.2.0-16ubuntu1 in local Ubuntu 26.04 AMD64 Docker; hosted execution is separate"
+      },
+      "architectures": {
+        "clang-17-darwin": "arm64",
+        "gcc-13-linux-ubuntu24": "aarch64",
+        "gcc-15-linux-ubuntu26": "aarch64",
+        "gcc-15-github-linux-ubuntu26": "x86_64"
+      },
+      "amd64_base_image": "ubuntu@sha256:157dc3d6e4a3e4f2c68d12df9df9ed6e808b59af6d4c3757b432b4f519916725",
+      "hosted_prior_evidence": "PR 276 run 41941226549 at e4225007 recorded 204/234 before these cases. AMD64 gcov includes a normal/throw pair at http_is_ota_upload substr; the exception remains untaken. The tests cover real TAB alternatives rather than forcing that unreachable exception.",
+      "sources": {
+        "main/logic/http_request.hpp": "64d26c454a7e34b98b3ec4c0c0cf4f89bef47b8bd093bf05e2580e5b3bd02d53"
+      },
+      "test_source_sha256": "19f14b3372d282166ccaf109b49323307139b3c8d9de797b3545657831b892a0",
+      "measured_branch_counts": {
+        "clang-17-darwin": {
+          "main/logic/http_request.hpp": {
+            "taken": 154,
+            "outcomes": 164
+          }
+        },
+        "gcc-13-linux-ubuntu24": {
+          "main/logic/http_request.hpp": {
+            "taken": 207,
+            "outcomes": 232
+          }
+        },
+        "gcc-15-linux-ubuntu26": {
+          "main/logic/http_request.hpp": {
+            "taken": 207,
+            "outcomes": 232
+          }
+        },
+        "gcc-15-github-linux-ubuntu26": {
+          "main/logic/http_request.hpp": {
+            "taken": 208,
+            "outcomes": 234
+          }
+        }
+      },
+      "raw_report_sha256": {
+        "clang-17-darwin": "f04b111807a7fa9be8a02c45e36031dfab9095d5790bdd481ebcd10f00ee90aa",
+        "gcc-13-linux-ubuntu24": "613548dcbcc3faf116df73be7087a642f9a0b5e3372fe33b149dc43b97fd0108",
+        "gcc-15-linux-ubuntu26": "ee98c1ef33dbdac87384760425f86fb3baacd0efaa4bf684b662c771d4f6452d",
+        "gcc-15-github-linux-ubuntu26": "9e496f0978bf32ce1ca965df3c94b8ca315d381e55e04910bb71899e02c0f4b2"
+      },
+      "validation_boundary": "All four compiler runs pass the pure C++ suite and executable-line floor. Clang completes the canonical entrypoint; GCC corrections use retained raw reports. AMD64 uses the exact compiler/gcov commands and the host checker because Python installation crashes under emulation. Containers do not establish authoritative hosted CI or device behavior."
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
@@ -1826,7 +1882,7 @@
         "taken": 2
       },
       "main/logic/http_request.hpp": {
-        "taken": 203,
+        "taken": 207,
         "outcomes": 232
       },
       "main/logic/http_surface.hpp": {
@@ -2252,8 +2308,8 @@
         "taken": 2
       },
       "main/logic/http_request.hpp": {
-        "taken": 203,
-        "outcomes": 232
+        "taken": 208,
+        "outcomes": 234
       },
       "main/logic/http_surface.hpp": {
         "outcomes": 12,
@@ -2678,7 +2734,7 @@
         "taken": 2
       },
       "main/logic/http_request.hpp": {
-        "taken": 203,
+        "taken": 207,
         "outcomes": 232
       },
       "main/logic/http_surface.hpp": {
