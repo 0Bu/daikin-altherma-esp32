@@ -72,6 +72,7 @@ constexpr int HTTP_POST = 1, HTTP_GET = 0, HTTPD_414_URI_TOO_LONG = 414,
               HTTPD_400_BAD_REQUEST = 400, HTTPD_RESP_USE_STRLEN = -1;
 struct httpd_req_t {
     std::string body, response, status = "200 OK", content_type, query;
+    size_t      content_len = 0;
     bool        body_failed = false;
     unsigned    chunks = 0, final_chunks = 0;
 };
@@ -93,6 +94,7 @@ inline esp_err_t httpd_resp_send_chunk(httpd_req_t* req, const char* bytes, size
     return ESP_OK;
 }
 size_t    httpd_req_get_url_query_len(httpd_req_t*);
+int       httpd_req_recv(httpd_req_t*, char*, size_t);
 esp_err_t httpd_req_get_url_query_str(httpd_req_t*, char*, size_t);
 esp_err_t httpd_query_key_value(const char*, const char*, char*, size_t);
 size_t    httpd_req_get_hdr_value_len(httpd_req_t*, const char*);
