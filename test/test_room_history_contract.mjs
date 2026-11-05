@@ -152,7 +152,7 @@ const sourceEnum = source.match(/^enum class HistorySource[^\n]+/m)?.[0];
 assert.ok(journalStart >= 0 && journalEnd > journalStart && sourceEnum);
 let restoreFixture = fixture.slice(0, fixture.indexOf("\nvoid runtime_boot("));
 assert.ok(restoreFixture.endsWith('throw std::runtime_error(why); }'));
-restoreFixture = '#include "logic/checkup_persist.hpp"\n' + restoreFixture;
+restoreFixture = '#include "logic/checkup_persist.hpp"\n#include "stop_observation_store.hpp"\n' + restoreFixture;
 const lockModel = String.raw`
 int flash_depth=0, history_depth=0, owned_reads=0;
 bool flash_contended=false;
@@ -208,7 +208,7 @@ ExistingStore& P(){return existing_store;}
 alignas(8) unsigned char s_flash_sector[HISTORY_FLASH_ERASE_BYTES];
 HistorySample s_flash_restore_blocks[4][HISTORY_SAMPLES],s_splice_live[HISTORY_SAMPLES],s_splice_out[HISTORY_SAMPLES];
 FlashJournalRecord stored[4];
-int flash_reads=0,checkup_calls=0; bool queue_reset=false;
+int flash_reads=0,checkup_calls=0,stop_expirations=0,stop_services=0; bool queue_reset=false;
 void diag_printf(const char*,...){}
 const char* esp_err_to_name(int){return "fixture";}
 bool time_synced(){return true;}
@@ -235,10 +235,24 @@ CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord*,size_t
  need(flash_depth==1,"checkup restore lost caller flash owner");need(n==1,"checkup record selection");
  ++checkup_calls;return CheckupFlashRestoreResult::Restored;
 }
+// This fixture has only room/core-checkup records. Keep the new independent observation boundary
+// typed against production and guarded rather than removing its calls from the extracted path.
+void checkup_stop_context_expire(int64_t sample_us){
+ need(flash_depth==0&&history_depth==0,"stop expiry acquired under a journal/history owner");
+ need(sample_us==now_us,"stop expiry must receive the current monotonic time");++stop_expirations;
+}
+bool flash_read_stop_observation(uint16_t,int64_t&,uint64_t&,logic::ObservationHourlyPayload&){
+ throw std::runtime_error("unexpected observation read in room-only fixture");
+}
+void stop_observation_flash_service(StopObservationReader reader){
+ need(flash_depth==1&&history_depth==0,"stop restore service without sole flash owner");
+ need(reader==flash_read_stop_observation,"stop restore received a different reader");++stop_services;
+}
 ` + restoreFunctions + String.raw`
 void prepare_restore(){
  need(flash_depth==0&&history_depth==0,"fixture leaked owner");
- flash_contended=false;after_flash_release=nullptr;queue_reset=false;flash_reads=checkup_calls=0;
+ flash_contended=false;after_flash_release=nullptr;queue_reset=false;
+ flash_reads=checkup_calls=stop_expirations=stop_services=0;
  Lock flash(s_flash_mtx);room_wipe_locked(101);s_room_identity.store(101);
  s_flash_scan_ok=true;s_flash_restore_done=false;s_flash_checkup_restore_done=false;
  s_flash_restore_ring=kTotalRings-1;s_flash_restored_rings=0;
@@ -263,6 +277,7 @@ void prepare_restore(){
 void run_restore(){
  prepare_restore();history_service_flash_restore();
  need(flash_depth==0&&history_depth==0,"restore released all locks");
+ need(stop_expirations==1&&stop_services==1,"independent stop boundary serviced exactly once");
  need(flash_reads==3&&checkup_calls==1,"checkup and room scanned once without recursive flash acquisition");
  HistorySample value=0;need(R().ring.count==2,"actual source block restored");
  need(R().ring.sample_from_newest(0,value)&&value==240,"actual latest sample restored");
@@ -270,6 +285,7 @@ void run_restore(){
 
  prepare_restore();queue_reset=true;history_service_flash_restore();
  need(flash_depth==0&&history_depth==0,"concurrent reset releases all locks");
+ need(stop_expirations==1&&stop_services==1,"source reset cannot skip independent stop boundary");
  need(R().identity==202&&R().ring.count==0,"queued actual source reset retires entire restored block");
  {Lock flash(s_flash_mtx);const size_t room=static_cast<size_t>(HistoryJournalSource::Room);
   need(s_flash_newest_bucket[room]==INT64_MIN&&s_flash_oldest_bucket[room]==INT64_MIN,"reset endpoints remain cleared");
@@ -279,6 +295,7 @@ void run_restore(){
  prepare_restore();flash_contended=true;int before=owned_reads;
  history_service_flash_restore();
  need(owned_reads==before&&flash_reads==0&&checkup_calls==0,"nonblocking restore touches no owned metadata on contention");
+ need(stop_expirations==1&&stop_services==0,"contention keeps expiry outside flash and refuses observation service");
  flash_contended=false;need(flash_depth==0&&history_depth==0,"contended restore owns nothing");
 }
 }
@@ -314,11 +331,23 @@ try {
     ["recursive-checkup-flash",
       "static void history_restore_checkup_flash() {",
       "static void history_restore_checkup_flash() { Lock nested(s_flash_mtx,0); if(!nested.acquired())return;"],
+    ["stop-expiry-under-flash-lock",
+      "    stop_observation_flash_service(flash_read_stop_observation);",
+      "    checkup_stop_context_expire(esp_timer_get_time());\n    stop_observation_flash_service(flash_read_stop_observation);"],
+    ["stop-service-before-flash-lock",
+      "void history_service_flash_restore() {",
+      "void history_service_flash_restore() { stop_observation_flash_service(flash_read_stop_observation);"],
   ]) {
     assert.equal(restoreFixture.split(before).length,2,`one restore mutation site ${name}`);
     const bad=run(restoreFixture.replace(before,after),name);
     assert.notEqual(bad.status,0,`${name}: broken production restore must fail`);
-    assert.match(bad.stderr,name==="unguarded-restore-index" ? /unguarded restore metadata read/ : /recursive flash acquisition/);
+    const diagnostic = {
+      "unguarded-restore-index": /unguarded restore metadata read/,
+      "recursive-checkup-flash": /recursive flash acquisition/,
+      "stop-expiry-under-flash-lock": /stop expiry acquired under a journal\/history owner/,
+      "stop-service-before-flash-lock": /stop restore service without sole flash owner/,
+    }[name];
+    assert.match(bad.stderr,diagnostic);
   }
-  console.log("room history: production record/reset/snapshot/adoption plus locked flash/checkup restore and reset interleaving; six negative controls passed");
+  console.log("room history: production record/reset/snapshot/adoption plus locked flash/checkup/stop restore and reset interleaving; eight negative controls passed");
 } finally { fs.rmSync(dir,{recursive:true,force:true}); }

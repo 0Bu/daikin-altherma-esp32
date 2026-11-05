@@ -1,4 +1,4 @@
-// translation-source: b5d29da273c417b207489763facc3fda04530140b4b0389affcd7643d701cd08
+// translation-source: 3e8092cf0e419496e78d337338f27af53fbda73918ad45f0bbe0970b83ebeddc
 I18N.ja = localeValues([
   /* sys.nodata */ "データなし",
   /* sys.unreachable */ "接続不可",
@@ -223,6 +223,16 @@ I18N.ja = localeValues([
   /* check.cycling_cooling */ (n) => `冷房${n}件を除外`,
   /* check.cycling_censored */ (n) => `未分類${n}件`,
   /* check.cycling_causes */ "遷移|再起動/記録|開始未観測",
+  /* check.stop.title */ "停止時の状況",
+  /* check.stop.population */ (n) => `直近の暖房後に観測した停止 ${n} 回`,
+  /* check.stop.coverage */ (d, h) => `圧縮機の読取可能時間 ${d} · 時間枠 ${h} 個`,
+  /* check.stop.categories */ "低速と主目標との差|室内機要求の撤回|除霜作動|給湯への移行|流路/モードの変化",
+  /* check.stop.counts */ "陽性 / 評価可能 / 完全",
+  /* check.stop.other */ "未分類|不明|部分的|打切り|目標変更|時間超過",
+  /* check.stop.loss */ (n) => `保存データ欠落通知 ${n}`,
+  /* check.stop.states */ "データ源未確認|日時付き観測|日時なし観測|24 時間の観測範囲が不完全|保存時間枠の復元は時計/データ源の確認待ち|完了した観測は保存待ち|1 回の停止が後半の標本待ち|カウンター飽和：表示値は下限|非対応|読取可能な停止母集団はまだありません。",
+  /* check.stop.rule */ "暫定プロジェクト窓：境界を含む ±30 秒、標本間隔は 15 秒以下。暖房が確認されたとき：0 < 圧縮機回転数 ≤22 回転/秒、報告された電気補助ヒーター前の出水温度 R1T ≥報告された主ゾーン目標 +2 K、目標が 30 秒間安定。",
+  /* check.stop.limits */ "停止の分類と補足情報は、同じ保存済み停止の中で重複します。評価可能とは陽性または完全な標本窓を意味し、標本範囲内の陰性は完全な場合のみ示せます。標本間の信号は除外できません。R1T は電気補助ヒーター前の報告された出口水温です。報告された主ゾーン目標との差は観測差であり、制御されたオーバーシュートの実測ではありません。停止原因、最低変調、外部サーモスタットの要求は確定できません。",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} 最低 ${min} °C · 平均 ${mean} °C`,
   /* check.min */ (m) => `${m}分`,

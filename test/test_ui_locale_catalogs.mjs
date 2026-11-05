@@ -1,5 +1,5 @@
 // Complete, device-local UI locale contract: selection, compact-catalog parity, lazy loading,
-// specialist copy for every visible explainer, and bounded separately compressed assets.
+// specialist copy for every visible explainer, and bounded lossless asset delivery.
 import assert from "node:assert/strict";
 import childProcess from "node:child_process";
 import fs from "node:fs";
@@ -61,9 +61,11 @@ const catalog = catalogContext.__catalog;
 const lazyDomainCodes = ["zh", "ja", "nb", "sv", "fi"];
 const englishKeys = Object.keys(catalog.en).sort();
 const englishKeyOrder = Object.keys(catalog.en);
-assert.equal(englishKeys.length, 937, "the test must track the complete current UI catalog");
+assert.equal(englishKeys.length, 947, "the test must track the complete current UI catalog");
 for (const [code, source] of localeSources) {
-  const specialist = source.indexOf(`INSPECT_I18N.${code}`);
+  const sections = [`INSPECT_I18N.${code}`, `MODEL_DESCRIPTION_I18N.${code}`]
+    .map(marker => source.indexOf(marker)).filter(index => index >= 0);
+  const specialist = sections.length ? Math.min(...sections) : -1;
   const baseSource = specialist < 0 ? source : source.slice(0, specialist);
   const annotatedKeys = [...baseSource.matchAll(/\/\*\s*([^*]+?)\s*\*\//g)]
     .map((match) => match[1].trim());
@@ -91,6 +93,49 @@ for (const code of codes) {
     assert.ok(translatedStrings > stringCount * 0.65,
       `${code} translates too little of the catalog (${translatedStrings}/${stringCount})`);
   }
+}
+// Stop classifications require a positive compressor witness and confirmed Heating. A numerical
+// upper bound alone also accepts OFF and must not replace that eligibility in any shipped locale.
+// Storage-loss notices are a separate boot-local counter watermark, outside the six overlapping
+// qualifiers of the retained-stop denominator. Keep all three boundaries visible in native copy.
+const stopEligibility = {
+  en: /During confirmed heating/, de: /Während bestätigten Heizbetriebs/,
+  es: /Durante calefacción confirmada/, fr: /En chauffage confirmé/,
+  it: /Durante il riscaldamento confermato/, pl: /Podczas potwierdzonego ogrzewania/,
+  cs: /Při potvrzeném vytápění/, uk: /Під час підтвердженого опалення/,
+  zh: /已确认供暖时/, ja: /暖房が確認されたとき/, nb: /Ved bekreftet oppvarming/,
+  sv: /Under bekräftad uppvärmning/, fi: /Vahvistetun lämmityksen aikana/,
+};
+const stopPreHeater = {
+  en: /pre-backup-heater/, de: /vor dem Zusatzheizer/, es: /antes del calentador de apoyo/,
+  fr: /avant l’appoint électrique/, it: /prima del riscaldatore di supporto/,
+  pl: /przed grzałką wspomagającą/, cs: /před přídavným ohřívačem/,
+  uk: /перед додатковим нагрівачем/, zh: /电辅助加热器前/, ja: /電気補助ヒーター前/,
+  nb: /før tilleggsvarmeren/, sv: /före tillsatsvärmaren/, fi: /ennen lisälämmitintä/,
+};
+const stopLossLabels = {
+  en: "Storage loss notices", de: "Speicherverlustmeldungen",
+  es: "Avisos de pérdida de almacenamiento", fr: "Avis de perte de stockage",
+  it: "Avvisi di perdita di archiviazione", pl: "Zgłoszenia utraty danych w pamięci",
+  cs: "Hlášení ztrát v úložišti", uk: "Повідомлення про втрати у сховищі",
+  zh: "存储丢失通知", ja: "保存データ欠落通知", nb: "Varsler om lagringstap",
+  sv: "Meddelanden om lagringsförlust", fi: "Tallennushäviöilmoituksia",
+};
+for (const code of codes) {
+  const dict = catalog[code];
+  assert.equal(dict["check.stop.other"].split("|").length, 6,
+    `${code}: loss notices must not become a seventh retained-stop qualifier`);
+  assert.match(dict["check.stop.rule"], stopEligibility[code],
+    `${code}: stop temperature context must require confirmed Heating`);
+  assert.match(dict["check.stop.rule"], /0 < [^;，、,]+≤22/,
+    `${code}: stop temperature context must exclude a zero-speed compressor`);
+  assert.match(dict["check.stop.rule"], stopPreHeater[code],
+    `${code}: reported LWT must name the sensor before the backup heater`);
+  const loss = dict["check.stop.loss"]("≥123");
+  assert.equal((loss.match(/≥123/g) || []).length, 1,
+    `${code}: loss watermark must preserve one explicit lower bound`);
+  assert.equal(loss, `${stopLossLabels[code]} ≥123`,
+    `${code}: the separate storage-loss notice must stay plain and retain its lower bound`);
 }
 // Completed DHW windows are counts. The current candidate and settling remainder are durations;
 // there is no six-hour assessment target and no second unit may be added to a duration.
@@ -306,6 +351,23 @@ function checkLocalizedRows(code, rows, schema, kind) {
     }
   });
 }
+// German model explanations share the existing lazy asset; loading only its short UI catalog
+// cannot mark a partial module ready. English remains the inlined fallback.
+assert.deepEqual(Object.keys(catalogContext.__modelDescriptionCopy.de), Object.keys(modelSchema),
+  "German external model copy must cover the complete canonical model scope");
+assert.deepEqual([...sourceAssignment(localeSources.get("de"), "MODEL_DESCRIPTION_I18N.de", "\n]);")
+  .matchAll(/\/\*\s*([^*]+?)\s*\*\//g)].map(match => match[1].trim()), Object.keys(modelSchema),
+  "German model-copy comments must preserve the canonical key order");
+checkLocalizedRows("de", Object.values(catalogContext.__modelDescriptionCopy.de),
+  Object.values(modelSchema), "model-description");
+assert.equal(vm.runInContext("localeReady('de')", catalogContext), true);
+assert.equal(vm.runInContext(`(() => {
+  const saved = MODEL_DESCRIPTION_I18N.de;
+  MODEL_DESCRIPTION_I18N.de = null;
+  const ready = localeReady('de');
+  MODEL_DESCRIPTION_I18N.de = saved;
+  return ready;
+})()`, catalogContext), false, "an incomplete German module must retain the English fallback");
 for (const code of codes.slice(2)) {
   const inspect = catalogContext.__inspectCopy[code];
   assert.ok(inspect, `${code} specialist inspector copy did not register itself`);
@@ -493,6 +555,7 @@ for (const code of codes.slice(1)) assert.doesNotMatch(app, new RegExp(`I18N\\.$
 const work = fs.mkdtempSync(path.join(os.tmpdir(), "daikin-locales-"));
 let localeGzipTotal = 0;
 let firmwareLocaleGzipTotal = 0;
+let bundleGzipTotal = 0;
 try {
   const tool = path.join(root, "tools/web_asset/minify_js_and_gzip.py");
   for (const code of codes.slice(1)) {
@@ -509,9 +572,8 @@ try {
     assert.doesNotThrow(() => new vm.Script(minified, { filename: `${code}.min.js` }),
       `${code} minified locale must still parse`);
     {
-      // The firmware uses the same pinned encoder as index.html. Keep the independent zlib
-      // default available to host-only consumers, and prove the build choice changes no bytes
-      // after decoding while reducing the flash occupied by the catalogs.
+      // Keep both independent per-source encoders checked even though the firmware embeds one
+      // joint bundle. Neither encoding may change any minified source byte or exceed 32 KiB.
       const packed = path.join(work, `${code}.zopfli.js.gz`);
       const encode = () => childProcess.spawnSync("python3", [
         tool, "--input", path.join(root, `main/www/locales/${code}.js`), "--output", packed,
@@ -531,28 +593,49 @@ try {
       }
     }
   }
+  const bundle = path.join(work, "locale-bundle.js.gz");
+  const metadata = path.join(work, "locale-bundle.json");
+  const bundled = childProcess.spawnSync("python3", [
+    path.join(root, "tools/web_asset/build_locale_bundle.py"),
+    "--locale-dir", path.join(root, "main/www/locales"), "--locales", ...codes.slice(1),
+    "--output", bundle, "--metadata", metadata, "--max-gzip-bytes", "289792",
+  ], { cwd: root, encoding: "utf8" });
+  assert.equal(bundled.status, 0, bundled.stderr || bundled.stdout);
+  bundleGzipTotal = fs.statSync(bundle).size;
+  const manifest = JSON.parse(fs.readFileSync(metadata, "utf8"));
+  assert.deepEqual(manifest.locales, codes.slice(1), "joint resource must include every external locale");
+  assert.equal(manifest.bundle_gzip_bytes, bundleGzipTotal);
+  assert.equal(manifest.sources.reduce((n, item) => n + item.source_gzip_bytes, 0),
+    firmwareLocaleGzipTotal, "bundle quality gates must use the same per-file minifier and encoder");
+  assert.ok(manifest.framed_bytes <= 1048576, "decoded locale frame must stay within 1 MiB");
 } finally {
   fs.rmSync(work, { recursive: true, force: true });
 }
-// Native Altherma 4 labels, enums and bounded explanations total 288626 measured locale bytes.
-// The three explicit interpretation limits add 1869 bytes. Retain a tight 283 KiB growth guard,
-// the per-locale 32 KiB cap and the independent firmware image-size gate.
-assert.ok(localeGzipTotal <= 289792,
-  `locale assets use ${localeGzipTotal} bytes and exceed the 283 KiB aggregate-growth guard`);
+// Apply the existing 283 KiB flash-growth guard to the bytes actually embedded. Per-source 32 KiB
+// quality caps, decoded-source parity (test_locale_bundle.mjs), and the signed image gate remain
+// independent. A less efficient host-only zlib proxy no longer represents the firmware resource.
+assert.ok(bundleGzipTotal <= 289792,
+  `embedded locale bundle uses ${bundleGzipTotal} bytes and exceeds the 283 KiB growth guard`);
 assert.ok(firmwareLocaleGzipTotal <= localeGzipTotal - 4096,
-  "firmware catalog compression must recover at least one flash sector without dropping copy");
+  "pinned per-source compression must recover at least one flash sector without dropping copy");
+assert.ok(bundleGzipTotal <= firmwareLocaleGzipTotal - 4096,
+  "joint locale delivery must recover at least one flash sector without dropping copy");
 
 const cmake = fs.readFileSync(path.join(root, "main/CMakeLists.txt"), "utf8");
 const status = fs.readFileSync(path.join(root, "main/http_status.cpp"), "utf8");
 const server = fs.readFileSync(path.join(root, "main/http_server.cpp"), "utf8");
 assert.match(cmake, /set\(UI_LOCALE_CODES de es fr it pl cs uk zh ja nb sv fi\)/);
 assert.match(cmake, /set\(UI_LOCALE_GZIP_MAX_BYTES 32768\)/);
+assert.match(cmake, /set\(UI_LOCALE_BUNDLE_MAX_BYTES 289792\)/);
+assert.match(cmake, /"\$\{UI_LOCALE_BUNDLE_GZIP\}"/, "the joint locale resource must be embedded");
+assert.doesNotMatch(cmake, /EMBED_FILES[\s\S]*\$\{UI_LOCALE_GZIP_FILES\}/,
+  "individual quality-check artifacts must not also consume firmware flash");
 assert.match(cmake, /--output "\$\{locale_gz\}"\s+--gzip-encoder zopfli/,
   "firmware locales must retain the pinned compression that fits the signed image");
 assert.match(cmake, /DEPENDS "\$\{locale_src\}" "\$\{UI_LOCALE_MINIFIER\}" "\$\{UI_MINIFIER\}"/,
   "locale assets must rebuild when the shared JavaScript minifier changes");
 for (const code of codes.slice(1)) {
-  assert.match(status, new RegExp(`\\{"${code}", locale_${code}_js_gz_start, locale_${code}_js_gz_end\\}`),
+  assert.match(status, new RegExp(`\\{"${code}", locale_bundle_js_gz_start, locale_bundle_js_gz_end\\}`),
     `${code} compressed asset is not routed`);
 }
 assert.match(status,

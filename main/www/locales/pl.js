@@ -1,4 +1,4 @@
-// translation-source: b5d29da273c417b207489763facc3fda04530140b4b0389affcd7643d701cd08
+// translation-source: 3e8092cf0e419496e78d337338f27af53fbda73918ad45f0bbe0970b83ebeddc
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -228,6 +228,16 @@ I18N.pl = localeValues([
   /* check.cycling_cooling */ (n) => `chłodzenie: wykluczono ${n}`,
   /* check.cycling_censored */ (n) => `${n} ${plNoun(n, "niesklasyfikowany", "niesklasyfikowane", "niesklasyfikowanych")}`,
   /* check.cycling_causes */ "przejście|restart/dziennik|nieobserwowany start",
+  /* check.stop.title */ "Kontekst zatrzymań",
+  /* check.stop.population */ (n) => `${n} zaobserwowanych zatrzymań po niedawnym grzaniu`,
+  /* check.stop.coverage */ (d, h) => `Czytelny czas sprężarki ${d} · ${h} przedziałów godzinowych`,
+  /* check.stop.categories */ "niska prędkość + różnica względem celu głównego|wycofanie żądania jednostki wewnętrznej|aktywne odszranianie|przejście ciepłej wody|zmiana obiegu/trybu",
+  /* check.stop.counts */ "dodatnich / ocenialnych / kompletnych",
+  /* check.stop.other */ "niesklasyfikowane|nieznane|częściowe|przerwane|zmiana celu|przepełnienie czasu",
+  /* check.stop.loss */ (n) => `Zgłoszenia utraty danych w pamięci ${n}`,
+  /* check.stop.states */ "Źródło niepotwierdzone|Obserwacja z datą|Obserwacja bez daty|Niepełne pokrycie 24 godzin|Przywracanie zapisanych godzin czeka na potwierdzenie zegara/źródła|Zakończone obserwacje czekają na zapis|Jedno zatrzymanie czeka na późniejsze próbki|Liczniki nasycone: dolne granice|nieobsługiwane|Brak czytelnej populacji zatrzymań.",
+  /* check.stop.rule */ "Tymczasowe okno projektu: ±30 s włącznie, bez odstępu próbek >15 s. Podczas potwierdzonego ogrzewania: 0 < prędkość sprężarki ≤22 obr./s, raportowana temperatura zasilania R1T przed grzałką wspomagającą ≥raportowany cel strefy głównej +2 K, cel stabilny przez 30 s.",
+  /* check.stop.limits */ "Kategorie i kwalifikatory nakładają się dla tych samych zachowanych zatrzymań. Ocenialne oznacza wynik dodatni lub kompletne próbkowane okno; tylko kompletne pozwala na wynik ujemny w próbkach. Odczyty nie wykluczają sygnałów między próbkami. R1T to raportowana temperatura zasilania przed elektryczną grzałką pomocniczą. Różnica względem raportowanego celu strefy głównej jest zaobserwowaną różnicą, a nie zmierzonym przeregulowaniem regulacji. Nie dowodzi przyczyny zatrzymania, minimalnej modulacji ani żądania zewnętrznego termostatu.",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · średnia ${mean} °C`,
   /* check.min */ (m) => `${m} min`,

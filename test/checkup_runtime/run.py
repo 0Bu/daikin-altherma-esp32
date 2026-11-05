@@ -24,6 +24,8 @@ CASES = [
     "consent_lock_new_generation", "consent_sampling_new_generation",
     "consent_lock_same_generation", "consent_sampling_same_generation",
     "consent_caller_new_generation", "consent_caller_same_generation",
+    "stop_overlap", "stop_optional", "stop_route", "stop_idle_expiry", "stop_reset",
+    "stop_consent", "stop_shutdown", "stop_tick_wait",
 ]
 
 parser = argparse.ArgumentParser(description=__doc__)
@@ -89,6 +91,11 @@ checked([*compiler, *flags, "-MM", "-MF", str(preflight),
 depwords = shlex.split(preflight.read_text().replace("\\\n", " ").partition(":")[2])
 inputs = {Path(__file__).resolve(), HERE / "fixture.cpp", SOURCE}
 inputs.update((Path(name) if Path(name).is_absolute() else ROOT / name).resolve() for name in depwords)
+store_preflight = OUT / "store-preflight.d"
+checked([*compiler, *flags, "-MM", "-MF", str(store_preflight),
+         str(ROOT / "main/stop_observation_store.cpp")])
+store_deps = shlex.split(store_preflight.read_text().replace("\\\n", " ").partition(":")[2])
+inputs.update((Path(name) if Path(name).is_absolute() else ROOT / name).resolve() for name in store_deps)
 inputs.update((HERE / "stubs").rglob("*.h"))
 inputs.update((HERE / "stubs").rglob("*.hpp"))
 before = {input_label(path): sha256(path) for path in sorted(inputs)}
@@ -98,7 +105,7 @@ def build(source, tag):
     binary = OUT / tag
     checked([*compiler, *flags, "-MMD", "-MF", str(OUT / (tag + ".d")),
              "-DCHECKUP_PRODUCTION_SOURCE=" + json.dumps(str(source)),
-             str(HERE / "fixture.cpp"), "-o", str(binary)])
+             str(HERE / "fixture.cpp"), str(ROOT / "main/stop_observation_store.cpp"), "-o", str(binary)])
     return binary
 
 
@@ -137,6 +144,16 @@ mutations = [
      source_text.replace(entry, entry + "    consent_epoch = checkup_consent_epoch();\n"),
      "consent_caller_same_generation", "consent_epoch_discards_already_collected_sample"),
 ]
+expire_start = source_text.index("void checkup_stop_context_expire(int64_t) {")
+expire_end = source_text.index("\nCheckupStopContextReport checkup_stop_context_report()", expire_start)
+expire_body = source_text[expire_start:expire_end]
+clock_line = "    const int64_t now_us = esp_timer_get_time();\n"
+if expire_body.count(clock_line) != 1:
+    raise RuntimeError("Expected one admitted expiry clock")
+old_clock_body = expire_body.replace("expire(int64_t)", "expire(int64_t now_us)", 1).replace(clock_line, "", 1)
+mutations.append(("use_stale_history_tick_clock",
+                  source_text[:expire_start] + old_clock_body + source_text[expire_end:],
+                  "stop_tick_wait", "stop_tick_flushes_before_journal_service"))
 negative_controls = []
 for name, contents, case, oracle in mutations:
     source = OUT / (name + ".cpp")

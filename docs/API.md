@@ -52,10 +52,13 @@ lead), `/values` waits in 250-ms steps for at most four seconds, then returns bu
 | `/`, `/index.html` | Embedded gzip device UI; setup page on the provisioning surface |
 | `/favicon.ico` | Embedded setup/dashboard icon |
 | `/heat-pump-icon.png` | Dashboard app icon; LAN only |
-| `/locale.js?lang=<code>` | Device-local compressed locale with app-image ETag; LAN only |
+| `/locale.js?lang=<code>` | Shared device-local locale bundle with app-image ETag; LAN only |
 | `/mcp` | Embedded MCP setup page; no API or external requests. SSE-only GET receives 405; see [MCP.md](MCP.md) |
 
 The UI locale codes are `en`, `de`, `es`, `fr`, `it`, `pl`, `cs`, `uk`, `zh`, `ja`, `nb`, `sv`, `fi`.
+English is embedded in the startup page; each of the other supported codes serves the same bundle,
+which registers all twelve external languages. A missing language argument returns 400; an
+unsupported code (including `en` on this asset route) returns 404.
 Catalog value labels and API error prose remain English. The browser UI polls; there is no `/events`
 or live WebSocket route.
 
@@ -268,6 +271,48 @@ and blocks an assessment. Counter saturation or inconsistent cause totals also b
 `split` identifies an eligible heating-only assessment. No pooled all-mode assessment exists;
 legacy `mean_run_s` remains present as null. Transition/gap rules and limitations are in
 [DIAGNOSTIC_EVIDENCE.md](DIAGNOSTIC_EVIDENCE.md#diagnosis-cycling).
+
+`cycling.stop_context` is an independent observation object; it changes no legacy cycling field or
+verdict. `denominator` names `witnessed_stops_recent_heating`, the separately counted witnessed
+compressor stops with recent confirmed heating context. Counts overlap and must not be summed as
+exclusive causes. `categories` contains `low_rps_above_main_target`, `request_withdrawal`, `defrost`,
+`dhw_transition` and `route_mode_transition`, each with `supported`, `positive`, `evaluable` and
+`complete`. Evaluable means a positive was established or the complete sampled window was readable;
+complete alone permits a sampled-window negative. Readable endpoints do not exclude pulses between
+polls. Unsupported categories have null counts; all counts are null before confirmed readable
+coverage. A covered population with no stops is zero.
+
+These overlapping qualifiers count stops in that same retained population, not individual signal
+changes. They age with the original stop hour and reset with its observation lifecycle.
+
+| Field | A stop contributes one when… |
+|---|---|
+| `unclassified_stops` | No positive category was established; this is not a proven negative. |
+| `unknown_stops` | At least one of the five categories is not evaluable, including unsupported input. |
+| `partial_stops` | At least one category lacks a complete sampled window. |
+| `censored_stops` | Its pending window ended early. |
+| `target_changed` | A reported target change was observed within its window. |
+| `time_overflow` | Its monotonic deadline could not be represented. |
+
+`saturated` marks clamped counters as lower bounds. Separately, `dropped` is a lower bound on
+reported loss notices in the collection lifecycle. Each boot's local watermark and retained
+watermarks are merged by maximum, not added. A discarded hourly delta or finalized event can each
+produce a notice; this is neither a 24-hour stop count nor a count of lost hours or seconds. A
+known loss keeps the lifecycle limited until reset. Source/schema, consent and explicit reset
+boundaries retire the evidence; compatible restoration can retain an earlier boot's maximum.
+
+`capability_mask` follows the category order above. `readable_s` counts only paired readable RPS
+endpoints at most `max_gap_s` apart; `observed_hours` is a lower bound on represented hours, not
+coverage duration. `confirmed`, `dated`, `coverage_partial`, `restore_pending`,
+`persistence_pending` and `pending` separate source, clock, coverage, storage and unfinished-window
+state. Owner reads validate clock agreement even without new producer samples. A wall/monotonic
+offset change beyond two seconds withdraws the dated view and queues a durable fence; source
+confirmation remains independent. Collection resumes in a fresh lifecycle or boot. Power loss
+before fence commit can still restore earlier compatible records. There is no inferred source
+timestamp. The parameters `window_s:30` (each side),
+`max_gap_s:15`, `low_rps:22` and `above_main_target_k:2` are project observation rules, not Daikin
+limits. [DIAGNOSTIC_EVIDENCE.md](DIAGNOSTIC_EVIDENCE.md#diagnosis-cycling) owns their interpretation;
+[ARCHITECTURE.md](ARCHITECTURE.md#history-and-diagnosis-persistence) owns restoration and reset limits.
 
 `min_unix_s` is the pressure minimum's earliest dated occurrence in the retained window, null without
 a synchronized clock; equal minima keep the earliest known time, not an inferred pressure dip.

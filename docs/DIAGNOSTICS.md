@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: ffb2cd94563aa6e6634524dea91ba5b59e0c4ef64d76cadc82fa5c825c715cb3 -->
+<!-- user-docs-contract: 705e5d7937d7faf9eb2e37f3b7a8ff59b1343b7f9c8380a2138e980b51ad969a -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default. Enable **Plant diagnostics** under **Settings → Firmware** to start an evidence
@@ -131,6 +131,23 @@ run. A lost run goes unnoticed and tends to be a long one, so cycling can look s
 the row stays **MEASURED** only while lost runs are a large enough share of all runs or of their
 runtime, or leave too few completed runs. If the compressor stops during a defrost, one heating run
 counts as several; whether it does has not been checked yet.
+
+The row also shows **stop context**, a separate count of witnessed stops with recent heating
+context. Overlapping observations describe low speed with a reported temperature/target gap,
+indoor request withdrawal, defrost or a route/mode transition. The positive/usable/complete
+counts describe different evidence; they are not shares of proven causes. A witnessed positive
+remains usable even when its sampled window is incomplete. Missing inputs leave
+only the affected observation unknown. A pending stop needs further readings; incomplete coverage,
+an unusable clock alignment or a pending save remains visible. Storage-loss notices are separate
+from stop counts and give only a lower bound; they do not count lost stops or hours.
+
+The provisional window is 30 seconds before and after the stop, with at most 15 seconds between
+readable endpoints. During confirmed space heating, the temperature category needs positive speed
+at most 22 rps and reported
+pre-backup-heater R1T at least 2 K above the reported main-zone target, stable for 30 seconds.
+That difference is not a measured controller overshoot or the configured stop setting. The request
+bit belongs to the indoor unit and does not identify an external thermostat. These counts change
+no cycling assessment and prove neither oversizing, closed valves nor an incorrect heating curve.
 
 **Evidence and limits:** [Compressor cycling](DIAGNOSTIC_EVIDENCE.md#diagnosis-cycling)
 

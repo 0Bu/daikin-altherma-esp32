@@ -1,4 +1,4 @@
-// translation-source: b5d29da273c417b207489763facc3fda04530140b4b0389affcd7643d701cd08
+// translation-source: 3e8092cf0e419496e78d337338f27af53fbda73918ad45f0bbe0970b83ebeddc
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -223,6 +223,16 @@ I18N.cs = localeValues([
   /* check.cycling_cooling */ (n) => `chlazení ${n} vyloučeno`,
   /* check.cycling_censored */ (n) => `${n} ${n === 1 ? "nezařazený" : n >= 2 && n <= 4 ? "nezařazené" : "nezařazených"}`,
   /* check.cycling_causes */ "přechod|restart/žurnál|nepozorovaný start",
+  /* check.stop.title */ "Kontext zastavení",
+  /* check.stop.population */ (n) => `${n} pozorovaných zastavení po nedávném vytápění`,
+  /* check.stop.coverage */ (d, h) => `Čitelná doba kompresoru ${d} · ${h} hodinových bloků`,
+  /* check.stop.categories */ "nízké otáčky + rozdíl od hlavního cíle|stažení požadavku vnitřní jednotky|aktivní odmrazování|přechod teplé vody|změna okruhu/režimu",
+  /* check.stop.counts */ "pozitivních / vyhodnotitelných / úplných",
+  /* check.stop.other */ "nezařazené|neznámé|částečné|přerušené|změna cíle|přetečení času",
+  /* check.stop.loss */ (n) => `Hlášení ztrát v úložišti ${n}`,
+  /* check.stop.states */ "Zdroj nepotvrzen|Datované pozorování|Pozorování bez data|Neúplné pokrytí 24 hodin|Obnova uložených hodin čeká na potvrzení hodin/zdroje|Dokončená pozorování čekají na uložení|Jedno zastavení čeká na následné vzorky|Čítače nasyceny: dolní meze|nepodporováno|Dosud není čitelný soubor zastavení.",
+  /* check.stop.rule */ "Předběžné projektové okno: včetně ±30 s, bez mezery vzorků >15 s. Při potvrzeném vytápění: 0 < otáčky kompresoru ≤22 ot./s, hlášená výstupní teplota R1T před přídavným ohřívačem ≥hlášený cíl hlavní zóny +2 K, cíl stabilní 30 s.",
+  /* check.stop.limits */ "Kategorie a doplňující údaje se překrývají pro stejná uchovaná zastavení. Vyhodnotitelné znamená pozitivní nebo úplné vzorkované okno; jen úplné dovoluje záporný výsledek ve vzorcích. Dotazování nevylučuje signály mezi vzorky. R1T je hlášená výstupní teplota vody před elektrickým záložním ohřívačem. Rozdíl od hlášeného cíle hlavní zóny je pozorovaný rozdíl, nikoli změřený regulační překmit. Neprokazuje příčinu zastavení, minimální modulaci ani požadavek externího termostatu.",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · průměr ${mean} °C`,
   /* check.min */ (m) => `${m} min`,

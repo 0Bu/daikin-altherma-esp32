@@ -1,4 +1,4 @@
-// translation-source: b5d29da273c417b207489763facc3fda04530140b4b0389affcd7643d701cd08
+// translation-source: 3e8092cf0e419496e78d337338f27af53fbda73918ad45f0bbe0970b83ebeddc
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -223,6 +223,16 @@ I18N.sv = localeValues([
   /* check.cycling_cooling */ (n) => `Kylning ${n} ${n === 1 ? "utelämnad" : "utelämnade"}`,
   /* check.cycling_censored */ (n) => `${n} utan klass`,
   /* check.cycling_causes */ "övergång|omstart/journal|start ej observerad",
+  /* check.stop.title */ "Sammanhang vid stopp",
+  /* check.stop.population */ (n) => `${n} observerade stopp efter nylig uppvärmning`,
+  /* check.stop.coverage */ (d, h) => `Läsbar kompressortid ${d} · ${h} timblock`,
+  /* check.stop.categories */ "låg hastighet + avstånd till huvudmål|indelens begäran återtagen|aktiv avfrostning|varmvattenövergång|ändrad krets/driftform",
+  /* check.stop.counts */ "positiva / bedömbara / fullständiga",
+  /* check.stop.other */ "oklassificerade|okända|delvisa|avbrutna|mål ändrat|tidsöverflöde",
+  /* check.stop.loss */ (n) => `Meddelanden om lagringsförlust ${n}`,
+  /* check.stop.states */ "Källa inte bekräftad|Daterad observation|Odaterad observation|Ofullständig täckning av 24 timmar|Återställning av sparade timmar väntar på klock-/källbekräftelse|Avslutade observationer väntar på lagring|Ett stopp väntar på efterföljande prover|Räknare mättade: nedre gränser|stöds inte|Ingen läsbar stopppopulation ännu.",
+  /* check.stop.rule */ "Preliminärt projektfönster: inklusive ±30 s, inga provluckor >15 s. Under bekräftad uppvärmning: 0 < kompressorvarvtal ≤22 varv/s, rapporterad framledningstemperatur R1T före tillsatsvärmaren ≥rapporterat huvudzonmål +2 K, målet stabilt i 30 s.",
+  /* check.stop.limits */ "Stoppkategorier och tilläggsuppgifter överlappar för samma sparade stopp. Bedömbar betyder positiv eller ett fullständigt provtaget fönster; endast fullständigt medger ett negativt resultat i proverna. Avläsningar utesluter inte signaler mellan prover. R1T är rapporterad framledningstemperatur före den elektriska tillsatsvärmaren. Avståndet till rapporterat huvudzonmål är en observerad skillnad, inte uppmätt reglerad översvängning. Detta fastställer varken stopporsak, lägsta modulering eller begäran från en extern termostat.",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · medel ${mean} °C`,
   /* check.min */ (m) => `${m} min`,

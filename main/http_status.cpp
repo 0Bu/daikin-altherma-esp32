@@ -84,30 +84,8 @@ extern const unsigned char favicon_ico_gz_start[] asm("_binary_favicon_ico_gz_st
 extern const unsigned char favicon_ico_gz_end[] asm("_binary_favicon_ico_gz_end");
 extern const unsigned char heat_pump_icon_png_start[] asm("_binary_heat_pump_icon_png_start");
 extern const unsigned char heat_pump_icon_png_end[]   asm("_binary_heat_pump_icon_png_end");
-extern const unsigned char locale_de_js_gz_start[] asm("_binary_locale_de_js_gz_start");
-extern const unsigned char locale_de_js_gz_end[]   asm("_binary_locale_de_js_gz_end");
-extern const unsigned char locale_es_js_gz_start[] asm("_binary_locale_es_js_gz_start");
-extern const unsigned char locale_es_js_gz_end[]   asm("_binary_locale_es_js_gz_end");
-extern const unsigned char locale_fr_js_gz_start[] asm("_binary_locale_fr_js_gz_start");
-extern const unsigned char locale_fr_js_gz_end[]   asm("_binary_locale_fr_js_gz_end");
-extern const unsigned char locale_it_js_gz_start[] asm("_binary_locale_it_js_gz_start");
-extern const unsigned char locale_it_js_gz_end[]   asm("_binary_locale_it_js_gz_end");
-extern const unsigned char locale_pl_js_gz_start[] asm("_binary_locale_pl_js_gz_start");
-extern const unsigned char locale_pl_js_gz_end[]   asm("_binary_locale_pl_js_gz_end");
-extern const unsigned char locale_cs_js_gz_start[] asm("_binary_locale_cs_js_gz_start");
-extern const unsigned char locale_cs_js_gz_end[]   asm("_binary_locale_cs_js_gz_end");
-extern const unsigned char locale_uk_js_gz_start[] asm("_binary_locale_uk_js_gz_start");
-extern const unsigned char locale_uk_js_gz_end[]   asm("_binary_locale_uk_js_gz_end");
-extern const unsigned char locale_zh_js_gz_start[] asm("_binary_locale_zh_js_gz_start");
-extern const unsigned char locale_zh_js_gz_end[]   asm("_binary_locale_zh_js_gz_end");
-extern const unsigned char locale_ja_js_gz_start[] asm("_binary_locale_ja_js_gz_start");
-extern const unsigned char locale_ja_js_gz_end[]   asm("_binary_locale_ja_js_gz_end");
-extern const unsigned char locale_nb_js_gz_start[] asm("_binary_locale_nb_js_gz_start");
-extern const unsigned char locale_nb_js_gz_end[]   asm("_binary_locale_nb_js_gz_end");
-extern const unsigned char locale_sv_js_gz_start[] asm("_binary_locale_sv_js_gz_start");
-extern const unsigned char locale_sv_js_gz_end[]   asm("_binary_locale_sv_js_gz_end");
-extern const unsigned char locale_fi_js_gz_start[] asm("_binary_locale_fi_js_gz_start");
-extern const unsigned char locale_fi_js_gz_end[]   asm("_binary_locale_fi_js_gz_end");
+extern const unsigned char locale_bundle_js_gz_start[] asm("_binary_locale_bundle_js_gz_start");
+extern const unsigned char locale_bundle_js_gz_end[] asm("_binary_locale_bundle_js_gz_end");
 
 namespace daik {
 
@@ -262,18 +240,18 @@ static esp_err_t h_locale(httpd_req_t* req) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing locale");
     }
     static const LocaleAsset assets[] = {
-        {"de", locale_de_js_gz_start, locale_de_js_gz_end},
-        {"es", locale_es_js_gz_start, locale_es_js_gz_end},
-        {"fr", locale_fr_js_gz_start, locale_fr_js_gz_end},
-        {"it", locale_it_js_gz_start, locale_it_js_gz_end},
-        {"pl", locale_pl_js_gz_start, locale_pl_js_gz_end},
-        {"cs", locale_cs_js_gz_start, locale_cs_js_gz_end},
-        {"uk", locale_uk_js_gz_start, locale_uk_js_gz_end},
-        {"zh", locale_zh_js_gz_start, locale_zh_js_gz_end},
-        {"ja", locale_ja_js_gz_start, locale_ja_js_gz_end},
-        {"nb", locale_nb_js_gz_start, locale_nb_js_gz_end},
-        {"sv", locale_sv_js_gz_start, locale_sv_js_gz_end},
-        {"fi", locale_fi_js_gz_start, locale_fi_js_gz_end},
+        {"de", locale_bundle_js_gz_start, locale_bundle_js_gz_end},
+        {"es", locale_bundle_js_gz_start, locale_bundle_js_gz_end},
+        {"fr", locale_bundle_js_gz_start, locale_bundle_js_gz_end},
+        {"it", locale_bundle_js_gz_start, locale_bundle_js_gz_end},
+        {"pl", locale_bundle_js_gz_start, locale_bundle_js_gz_end},
+        {"cs", locale_bundle_js_gz_start, locale_bundle_js_gz_end},
+        {"uk", locale_bundle_js_gz_start, locale_bundle_js_gz_end},
+        {"zh", locale_bundle_js_gz_start, locale_bundle_js_gz_end},
+        {"ja", locale_bundle_js_gz_start, locale_bundle_js_gz_end},
+        {"nb", locale_bundle_js_gz_start, locale_bundle_js_gz_end},
+        {"sv", locale_bundle_js_gz_start, locale_bundle_js_gz_end},
+        {"fi", locale_bundle_js_gz_start, locale_bundle_js_gz_end},
     };
     for (const auto& asset : assets) {
         if (strcmp(lang, asset.code) != 0) continue;
@@ -1509,6 +1487,9 @@ static void append_status_json(JsonOut& j, bool redact) {
                 j += ",\"split\":";
                 j += hr.cycling_split ? "true" : "false";
                 outdoor_context(hr.cycling_outdoor);
+                j += ",\"stop_context\":";
+                append_stop_context_json(
+                    j, stop_context_payload_fields(checkup_stop_context_report()));
                 break;
             case logic::CheckupCheck::Defrost: {
                 num("count", ck.a);

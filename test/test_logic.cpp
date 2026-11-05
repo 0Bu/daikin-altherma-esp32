@@ -51,6 +51,8 @@
 #include "logic/heating_curve_mqtt.hpp"
 #include "logic/error_codes.hpp"
 #include "logic/checkup.hpp"
+#include "logic/stop_context_input.hpp"
+#include "logic/observation_hourly.hpp"
 #include "checkup_population_fixture.hpp"
 #include "logic/health_gate.hpp"
 #include "logic/version_cmp.hpp"
@@ -5352,28 +5354,35 @@ static void test_heartbeat() {
     // FLAT payload: the former wifi/mqtt/bus sub-objects are gone, each field carried under its
     // block name as a prefix (wifi_connected, mqtt_count, bus_rx_received, …). MAC/BSSID ride the
     // wifi_ set.
-    CHECK(j == "{\"version\":\"1.2.3\",\"platform\":\"esp32s3\","
-               "\"uptime_s\":680731,\"uptime\":\"007+21:05:31.860\","
-               "\"free_heap\":170000,\"min_free_heap\":150000,\"max_alloc\":87000,"
-               "\"heap_restarts\":2,"
-               "\"httpd_stack_min_free_bytes\":1872,\"poll_stack_min_free_bytes\":520,"
-               "\"mqtt_stack_min_free_bytes\":null,\"weather_stack_min_free_bytes\":null,"
-               "\"reset_reason\":\"panic\",\"reset_reason_code\":4,\"reset_fault\":1,"
-               "\"wifi_connected\":1,\"wifi_rssi\":-76,\"wifi_reconnects\":3,"
-               "\"wifi_mac\":\"02:00:00:00:00:01\",\"wifi_bssid\":\"02:00:00:00:00:02\","
-               "\"net_link\":1,\"eth_present\":0,\"eth_link\":0,"
-               "\"mqtt_connected\":1,\"mqtt_count\":89282,\"mqtt_fails\":0,\"mqtt_reconnects\":1,"
-               "\"mqtt_skipped\":337,\"mqtt_quiesced\":42,\"poll_skipped\":32,"
-               "\"cycling_censored_transition_runs\":null,\"cycling_censored_handover_runs\":null,"
-               "\"cycling_censored_unreadable_runs\":null,\"cycling_censored_restart_runs\":null,"
-               "\"cycling_censored_start_runs\":null,\"cycling_classified_runtime_s\":null,"
-               "\"cycling_censored_runtime_s\":null,\"cycling_runtime_saturated\":null,"
-               "\"bus_connected\":1,\"bus_proto\":\"I\",\"bus_registers\":10,\"bus_values\":48,"
-               "\"bus_last_ok_s\":1,\"bus_rx_received\":763732,\"bus_rx_fails\":2,"
-               "\"bus_crc_err\":0,\"bus_timeout_err\":2,\"bus_ou_held_over\":0,"
-               "\"bus_tx_reads\":763734,"
-               "\"modbus_enabled\":0,\"modbus_connected\":0,\"modbus_rx\":0,\"modbus_fails\":0,"
-               "\"modbus_stack_min_free_bytes\":null}");
+    const size_t stop_begin = j.find(",\"stop_context_confirmed\":");
+    const size_t stop_end   = j.find(",\"bus_connected\":", stop_begin);
+    CHECK(stop_begin != std::string::npos && stop_end != std::string::npos);
+    std::string legacy_heartbeat = j;
+    if (stop_begin != std::string::npos && stop_end != std::string::npos)
+        legacy_heartbeat.erase(stop_begin, stop_end - stop_begin);
+    CHECK(legacy_heartbeat ==
+          "{\"version\":\"1.2.3\",\"platform\":\"esp32s3\","
+          "\"uptime_s\":680731,\"uptime\":\"007+21:05:31.860\","
+          "\"free_heap\":170000,\"min_free_heap\":150000,\"max_alloc\":87000,"
+          "\"heap_restarts\":2,"
+          "\"httpd_stack_min_free_bytes\":1872,\"poll_stack_min_free_bytes\":520,"
+          "\"mqtt_stack_min_free_bytes\":null,\"weather_stack_min_free_bytes\":null,"
+          "\"reset_reason\":\"panic\",\"reset_reason_code\":4,\"reset_fault\":1,"
+          "\"wifi_connected\":1,\"wifi_rssi\":-76,\"wifi_reconnects\":3,"
+          "\"wifi_mac\":\"02:00:00:00:00:01\",\"wifi_bssid\":\"02:00:00:00:00:02\","
+          "\"net_link\":1,\"eth_present\":0,\"eth_link\":0,"
+          "\"mqtt_connected\":1,\"mqtt_count\":89282,\"mqtt_fails\":0,\"mqtt_reconnects\":1,"
+          "\"mqtt_skipped\":337,\"mqtt_quiesced\":42,\"poll_skipped\":32,"
+          "\"cycling_censored_transition_runs\":null,\"cycling_censored_handover_runs\":null,"
+          "\"cycling_censored_unreadable_runs\":null,\"cycling_censored_restart_runs\":null,"
+          "\"cycling_censored_start_runs\":null,\"cycling_classified_runtime_s\":null,"
+          "\"cycling_censored_runtime_s\":null,\"cycling_runtime_saturated\":null,"
+          "\"bus_connected\":1,\"bus_proto\":\"I\",\"bus_registers\":10,\"bus_values\":48,"
+          "\"bus_last_ok_s\":1,\"bus_rx_received\":763732,\"bus_rx_fails\":2,"
+          "\"bus_crc_err\":0,\"bus_timeout_err\":2,\"bus_ou_held_over\":0,"
+          "\"bus_tx_reads\":763734,"
+          "\"modbus_enabled\":0,\"modbus_connected\":0,\"modbus_rx\":0,\"modbus_fails\":0,"
+          "\"modbus_stack_min_free_bytes\":null}");
     HeartbeatFields      cycling_fields;
     logic::CheckupWindow cycling_window;
     cycling_fields.cycling = checkup_cycling_evidence(cycling_window, true);
@@ -23511,7 +23520,7 @@ static void test_history_persist() {
     }
     CHECK(HISTORY_FLASH_FUTURE_HOURS == 72);
     CHECK(HISTORY_FLASH_FUTURE_SAMPLES == 864);
-    CHECK(HISTORY_FLASH_FUTURE_RECORDS == 3600);
+    CHECK(HISTORY_FLASH_FUTURE_RECORDS == 3888);
     CHECK(HISTORY_JOURNAL_SLOT_COUNT >= HISTORY_FLASH_FUTURE_RECORDS);
     CHECK(HISTORY_FLASH_PARTITION_OFFSET == 0x400000);
 
@@ -28706,7 +28715,909 @@ static void test_checkup_scoped_flash_age() {
                                      handoff));
 }
 
+namespace stop_context_host_tests {
+using namespace daik::logic;
+static constexpr int64_t S = 1000000;
+static uint8_t           mask(StopContextCategory c) { return stop_context_mask(c); }
+static StopContextSample sample(bool on = true) {
+    StopContextSample s;
+    s.rps_known = s.rps_value_known = true;
+    s.rps_running                   = on;
+    s.rps_tenths                    = on ? 120 : 0;
+    s.request                       = StopContextBit::On;
+    s.defrost                       = StopContextBit::Off;
+    s.route                         = StopContextRoute::Space;
+    s.mode                          = StopContextMode::Heating;
+    s.lwt_known = s.target_known = true;
+    s.lwt_tenths                 = 370;
+    s.target_tenths              = 350;
+    return s;
+}
+struct Trace {
+    StopContextState  st;
+    StopContextSample s          = sample(false);
+    uint32_t          generation = 7;
+    int64_t           t          = 0;
+    StopContextEvent  at(int64_t sec) {
+        t = sec;
+        return stop_context_step(st, s, sec * S, generation);
+    }
+    StopContextEvent next() { return at(t + 1); }
+    void             run(int64_t stop = 40) {
+        CHECK(!at(0).valid);
+        s = sample();
+        while (t < stop - 1) CHECK(!next().valid);
+    }
+    void stop() {
+        s.rps_running = false;
+        s.rps_tenths  = 0;
+        CHECK(!next().valid);
+        CHECK(st.pending.valid);
+    }
+    StopContextEvent finish() {
+        StopContextEvent e;
+        const int64_t    end = st.pending.stop_us / S + 30;
+        CHECK(st.pending.valid && t < end);
+        while (t < end) {
+            e = next();
+            CHECK(e.valid == (t == end));
+        }
+        CHECK(!st.pending.valid);
+        return e;
+    }
+};
+static void test_overlap_and_coverage() {
+    Trace t;
+    t.run();
+    t.s.request = StopContextBit::Off;
+    t.stop();
+    auto e = t.finish();
+    CHECK(e.valid && e.stop_us == 40 * S && e.source_generation == 7);
+    CHECK(e.positive == (mask(StopContextCategory::LowRpsAboveMainTarget) |
+                         mask(StopContextCategory::RequestWithdrawal)));
+    CHECK(e.complete == STOP_CONTEXT_ALL && e.evaluable == STOP_CONTEXT_ALL);
+    CHECK(e.pre_complete == STOP_CONTEXT_ALL && e.post_complete == STOP_CONTEXT_ALL);
+    CHECK(e.flags == 0 && e.finish == StopContextFinish::WindowEnd);
+    const auto c = stop_context_counters(e);
+    CHECK(c.witnessed_stops_recent_heating == 1 && c.positive[0] == 1 && c.positive[1] == 1);
+    CHECK(!c.partial && !c.unknown && !c.censored && !c.unclassified);
+    CHECK(!stop_context_expire(t.st, 100 * S).valid);
+}
+static void test_route_mode_before_at_after() {
+    for (int offset : {-1, 0, 1}) {
+        Trace t;
+        t.run();
+        if (offset == -1) {
+            t.s.route = StopContextRoute::Dhw;
+            t.s.mode  = StopContextMode::Dhw;
+            CHECK(!t.next().valid);
+        }
+        if (offset == 0) {
+            t.s.route = StopContextRoute::Dhw;
+            t.s.mode  = StopContextMode::Dhw;
+        }
+        t.stop();
+        if (offset == 1) {
+            t.s.route = StopContextRoute::Dhw;
+            t.s.mode  = StopContextMode::Dhw;
+        }
+        auto e = t.finish();
+        CHECK(e.positive & mask(StopContextCategory::DhwTransition));
+        CHECK(e.positive & mask(StopContextCategory::RouteModeTransition));
+        CHECK(e.positive & mask(StopContextCategory::LowRpsAboveMainTarget));
+    }
+    Trace t;
+    t.run();
+    t.stop();
+    for (unsigned k = 0; k < 29; ++k) CHECK(!t.next().valid);
+    t.s.route    = StopContextRoute::Dhw;
+    t.s.mode     = StopContextMode::Dhw;
+    const auto e = t.at(71);
+    CHECK(e.valid && e.stop_us == 40 * S && e.complete == STOP_CONTEXT_ALL);
+    CHECK(!(e.positive & mask(StopContextCategory::DhwTransition)));
+}
+static void test_missing_optional() {
+    Trace t;
+    t.s         = sample(false);
+    t.s.request = StopContextBit::Unknown;
+    CHECK(!t.at(0).valid);
+    t.s         = sample();
+    t.s.request = StopContextBit::Unknown;
+    while (t.t < 39) CHECK(!t.next().valid);
+    t.stop();
+    auto e = t.finish();
+    CHECK(e.positive == mask(StopContextCategory::LowRpsAboveMainTarget));
+    CHECK(!(e.evaluable & mask(StopContextCategory::RequestWithdrawal)));
+    CHECK(e.evaluable & mask(StopContextCategory::Defrost));
+    CHECK(stop_context_counters(e).unknown == 1 && stop_context_counters(e).partial == 1);
+    Trace u;
+    u.run();
+    u.s.lwt_known = false;
+    u.s.defrost   = StopContextBit::Unknown;
+    u.s.request   = StopContextBit::Off;
+    u.stop();
+    e = u.finish();
+    CHECK(e.positive & mask(StopContextCategory::RequestWithdrawal));
+    CHECK(e.positive & mask(StopContextCategory::LowRpsAboveMainTarget));
+    CHECK(!(e.complete & mask(StopContextCategory::LowRpsAboveMainTarget)));
+    CHECK(!(e.evaluable & mask(StopContextCategory::Defrost)));
+    Trace v;
+    v.s                 = sample(false);
+    v.s.rps_value_known = false;
+    CHECK(!v.at(0).valid);
+    v.s                 = sample();
+    v.s.rps_value_known = false;
+    while (v.t < 39) CHECK(!v.next().valid);
+    v.s.request = StopContextBit::Off;
+    v.stop();
+    e = v.finish();
+    CHECK(e.positive == mask(StopContextCategory::RequestWithdrawal));
+    CHECK(!(e.evaluable & mask(StopContextCategory::LowRpsAboveMainTarget)));
+}
+static void test_startup_gap_and_exclusions() {
+    StopContextState st;
+    auto             s = sample();
+    for (int64_t t = 0; t < 40; ++t) CHECK(!stop_context_step(st, s, t * S, 1).valid);
+    s = sample(false);
+    CHECK(!stop_context_step(st, s, 40 * S, 1).valid);
+    CHECK(!st.pending.valid);
+    s = sample();
+    CHECK(!stop_context_step(st, s, 41 * S, 1).valid);
+    s = sample(false);
+    CHECK(!stop_context_step(st, s, 42 * S, 1).valid);
+    CHECK(st.pending.valid);
+    auto e = stop_context_seal(st);
+    CHECK(e.valid && e.finish == StopContextFinish::Shutdown);
+    CHECK(e.stop_us == 42 * S && !e.complete && !st.pending.valid);
+    for (auto mode : {StopContextMode::Cooling, StopContextMode::Dhw}) {
+        Trace t;
+        t.s.mode  = mode;
+        t.s.route = mode == StopContextMode::Dhw ? StopContextRoute::Dhw : StopContextRoute::Space;
+        CHECK(!t.at(0).valid);
+        t.s.rps_running = true;
+        t.s.rps_tenths  = 120;
+        for (int k = 1; k < 40; ++k) CHECK(!t.next().valid);
+        t.s.rps_running = false;
+        t.s.rps_tenths  = 0;
+        CHECK(!t.next().valid);
+        CHECK(!t.st.pending.valid);
+    }
+    Trace g;
+    g.run();
+    g.s.rps_known = false;
+    CHECK(!g.at(54).valid);
+    g.s = sample(false);
+    CHECK(!g.at(55).valid);
+    CHECK(!g.st.pending.valid);
+    g.s = sample();
+    CHECK(!g.next().valid);
+    g.stop();
+    CHECK(g.st.pending.valid);
+    e = stop_context_seal(g.st);
+    CHECK(e.valid && e.stop_us == 57 * S);
+    Trace boundary;
+    boundary.run();
+    boundary.s = sample(false);
+    CHECK(!boundary.at(54).valid);
+    CHECK(boundary.st.pending.valid);
+    Trace expired;
+    expired.run();
+    expired.s.route = StopContextRoute::Dhw;
+    expired.s.mode  = StopContextMode::Dhw;
+    for (int k = 0; k < 31; ++k) CHECK(!expired.next().valid);
+    expired.s.rps_running = false;
+    expired.s.rps_tenths  = 0;
+    CHECK(!expired.next().valid);
+    CHECK(!expired.st.pending.valid);
+}
+static void test_target_stability() {
+    Trace t;
+    t.run();
+    t.s.target_tenths = 351;
+    t.s.lwt_tenths    = 371;
+    t.stop();
+    auto e = t.finish();
+    CHECK(!(e.positive & mask(StopContextCategory::LowRpsAboveMainTarget)));
+    CHECK(e.flags & STOP_CONTEXT_F_TARGET_CHANGED);
+    CHECK(!(e.evaluable & mask(StopContextCategory::LowRpsAboveMainTarget)));
+    Trace u;
+    u.run();
+    u.stop();
+    u.s.target_tenths = 351;
+    u.s.lwt_tenths    = 371;
+    e                 = u.finish();
+    CHECK(!(e.positive & mask(StopContextCategory::LowRpsAboveMainTarget)));
+    CHECK(e.flags & STOP_CONTEXT_F_TARGET_CHANGED);
+    Trace v;
+    v.run(20);
+    v.s.target_tenths = 351;
+    v.s.lwt_tenths    = 371;
+    CHECK(!v.next().valid);
+    while (v.t < 50) CHECK(!v.next().valid);
+    v.stop();
+    e = v.finish();
+    CHECK(e.positive & mask(StopContextCategory::LowRpsAboveMainTarget));
+    CHECK(!(e.flags & STOP_CONTEXT_F_TARGET_CHANGED));
+    Trace w;
+    w.run();
+    w.s.target_known = false;
+    CHECK(!w.next().valid);
+    w.s.target_known  = true;
+    w.s.target_tenths = 352;
+    CHECK(!w.next().valid);
+    w.stop();
+    e = w.finish();
+    CHECK(!(e.positive & mask(StopContextCategory::LowRpsAboveMainTarget)));
+}
+static void test_restart_expire_reset() {
+    Trace t;
+    t.run();
+    t.s.request = StopContextBit::Off;
+    t.stop();
+    t.s    = sample();
+    auto e = t.next();
+    CHECK(e.valid && e.finish == StopContextFinish::Restart && e.stop_us == 40 * S);
+    CHECK(e.positive & mask(StopContextCategory::RequestWithdrawal));
+    CHECK(e.positive & mask(StopContextCategory::LowRpsAboveMainTarget));
+    CHECK(e.post_complete == 0 && e.complete == 0 && stop_context_counters(e).censored == 1);
+    t.stop();
+    e = stop_context_seal(t.st);
+    CHECK(e.valid && e.stop_us == 42 * S);
+    CHECK(!(e.positive & mask(StopContextCategory::LowRpsAboveMainTarget)));
+    Trace u;
+    u.run();
+    u.stop();
+    for (unsigned k = 0; k < 29; ++k) CHECK(!u.next().valid);
+    CHECK(!stop_context_expire(u.st, 69 * S).valid);
+    e = stop_context_expire(u.st, 70 * S);
+    CHECK(e.valid && e.stop_us == 40 * S && e.post_complete == 0);
+    CHECK(e.positive & mask(StopContextCategory::LowRpsAboveMainTarget));
+    CHECK(!stop_context_expire(u.st, 100000 * S).valid);
+    Trace v;
+    v.run();
+    v.stop();
+    e = stop_context_reset(v.st, 8);
+    CHECK(e.valid && e.source_generation == 7 && e.finish == StopContextFinish::SourceReset);
+    CHECK(v.st.source_generation == 8 && !v.st.pending.valid && !v.st.armed_off);
+    Trace w;
+    w.run();
+    w.stop();
+    ++w.generation;
+    e = w.next();
+    CHECK(e.valid && e.source_generation == 7 && w.st.source_generation == 8);
+    w.s = sample();
+    CHECK(!w.next().valid);
+    w.stop();
+    CHECK(w.st.pending.valid);
+    Trace gap;
+    gap.run();
+    gap.stop();
+    e = gap.at(56);
+    CHECK(e.valid && e.finish == StopContextFinish::Gap && e.stop_us == 40 * S);
+    CHECK(e.positive & mask(StopContextCategory::LowRpsAboveMainTarget));
+    Trace clock;
+    clock.run();
+    clock.stop();
+    e = clock.at(39);
+    CHECK(e.valid && e.finish == StopContextFinish::ClockInvalid && e.stop_us == 40 * S);
+}
+static void test_boundaries_and_saturation() {
+    for (uint16_t rps : {uint16_t(220), uint16_t(221), uint16_t(0)}) {
+        Trace t;
+        t.s = sample(false);
+        CHECK(!t.at(0).valid);
+        t.s            = sample();
+        t.s.rps_tenths = rps;
+        while (t.t < 39) CHECK(!t.next().valid);
+        t.stop();
+        auto e = t.finish();
+        CHECK(bool(e.positive & 1) == (rps == 220));
+    }
+    for (int16_t water : {int16_t(369), int16_t(370), std::numeric_limits<int16_t>::min(),
+                          std::numeric_limits<int16_t>::max()}) {
+        Trace t;
+        t.s = sample(false);
+        CHECK(!t.at(0).valid);
+        t.s            = sample();
+        t.s.lwt_tenths = water;
+        while (t.t < 39) CHECK(!t.next().valid);
+        t.stop();
+        auto e = t.finish();
+        CHECK(bool(e.positive & 1) == (water >= 370));
+    }
+    Trace t;
+    t.run();
+    t.stop();
+    auto one   = stop_context_counters(t.finish());
+    auto total = one;
+    for (int k = 0; k < 15; ++k) stop_context_merge(total, total);
+    CHECK(total.witnessed_stops_recent_heating == 32768 && !total.saturated);
+    stop_context_merge(total, total);
+    CHECK(total.witnessed_stops_recent_heating == 65535 && total.saturated);
+    CHECK(total.positive[0] == 65535 && total.complete[4] == 65535);
+    stop_context_merge(total, one);
+    CHECK(total.witnessed_stops_recent_heating == 65535 && total.saturated);
+    CHECK(stop_context_counters(StopContextEvent{}).witnessed_stops_recent_heating == 0);
+    StopContextState st;
+    auto             s    = sample(false);
+    const int64_t    base = INT64_MAX - 10 * S;
+    CHECK(!stop_context_step(st, s, base, 42).valid);
+    s = sample();
+    CHECK(!stop_context_step(st, s, base + S, 42).valid);
+    s = sample(false);
+    CHECK(!stop_context_step(st, s, base + 2 * S, 42).valid);
+    auto e = stop_context_step(st, s, INT64_MAX, 42);
+    CHECK(e.valid && e.stop_us == base + 2 * S && e.source_generation == 42);
+    CHECK(e.flags & STOP_CONTEXT_F_TIME_OVERFLOW);
+    CHECK(e.complete == 0);
+    CHECK(!stop_context_step(st, s, -1, 42).valid && st.last_sample_us == -1);
+}
+static void test_positive_aging_and_unknowns() {
+    for (int late : {0, 1}) {
+        Trace t;
+        t.run(32); // last pre sample31 is exactly target-stable and qualifies
+        t.s.lwt_tenths = 350;
+        while (t.t < 60 + late) CHECK(!t.next().valid);
+        t.stop();
+        auto e = t.finish();
+        CHECK(bool(e.positive & 1) == (late == 0)); // positive31, stop61/62: inclusive30s only
+    }
+    for (int late : {0, 1}) {
+        Trace t;
+        t.run(10);
+        t.s.request = StopContextBit::Off;
+        CHECK(!t.next().valid);
+        while (t.t < 39 + late) CHECK(!t.next().valid);
+        t.stop();
+        auto e = t.finish();
+        CHECK(bool(e.positive & mask(StopContextCategory::RequestWithdrawal)) == (late == 0));
+    }
+    Trace t;
+    t.run();
+    t.s.mode    = StopContextMode::Unknown;
+    t.s.route   = StopContextRoute::Unknown;
+    t.s.request = StopContextBit::Off;
+    t.s.defrost = StopContextBit::On;
+    t.stop();
+    auto e = t.finish();
+    CHECK(e.positive & mask(StopContextCategory::RequestWithdrawal));
+    CHECK(e.positive & mask(StopContextCategory::Defrost));
+    CHECK(!(e.evaluable & mask(StopContextCategory::DhwTransition)));
+    CHECK(!(e.evaluable & mask(StopContextCategory::RouteModeTransition)));
+    Trace short_run;
+    short_run.run(2);
+    short_run.stop();
+    e = short_run.finish();
+    CHECK(e.positive == 0 && e.complete == 0 && e.pre_complete == 0 &&
+          e.post_complete == STOP_CONTEXT_ALL);
+    auto c = stop_context_counters(e);
+    CHECK(c.unclassified == 1 && c.unknown == 1 && c.partial == 1);
+    Trace partial;
+    partial.run();
+    partial.stop();
+    partial.s.request = StopContextBit::Unknown;
+    CHECK(!partial.next().valid);
+    partial.s.request = StopContextBit::Off;
+    e                 = partial.finish();
+    CHECK(e.positive &
+          mask(StopContextCategory::RequestWithdrawal)); // endpoint withdrawal still witnessed
+    CHECK(!(e.complete & mask(StopContextCategory::RequestWithdrawal)));
+    CHECK(e.evaluable & mask(StopContextCategory::RequestWithdrawal));
+}
+static void test_lifecycle_edges() {
+    CHECK(!stop_context_recent(5, 4));
+    StopContextState empty;
+    CHECK(!stop_context_expire(empty, -1).valid);
+    Trace a;
+    a.run();
+    a.stop();
+    auto e = stop_context_expire(a.st, 56 * S);
+    CHECK(e.valid && e.finish == StopContextFinish::Gap && e.stop_us == 40 * S);
+    CHECK(e.positive & 1);
+    CHECK(!a.st.armed_off);
+    Trace b;
+    b.run();
+    b.stop();
+    for (int k = 0; k < 29; ++k) CHECK(!b.next().valid);
+    b.s = sample();
+    e   = b.at(71);
+    CHECK(e.valid && e.finish == StopContextFinish::WindowEnd && e.stop_us == 40 * S);
+    CHECK(e.post_complete == 0);
+    Trace c;
+    c.run();
+    c.stop();
+    auto s = sample();
+    e      = stop_context_step(c.st, s, -1, 99);
+    CHECK(e.valid && e.source_generation == 7 && e.finish == StopContextFinish::SourceReset);
+    CHECK(c.st.source_generation == 99 && !c.st.pending.valid && c.st.last_sample_us == -1);
+    Trace d;
+    d.run();
+    d.stop();
+    e = stop_context_expire(d.st, 39 * S);
+    CHECK(e.valid && e.finish == StopContextFinish::ClockInvalid);
+    Trace f;
+    f.run();
+    f.stop();
+    for (int k = 0; k < 29; ++k) CHECK(!f.next().valid);
+    f.s.target_tenths = 351;
+    e                 = f.at(71);
+    CHECK(e.valid && (e.positive & 1)); // outside-window change cannot erase the pre positive
+    CHECK(!(e.complete & 1) && !(e.flags & STOP_CONTEXT_F_TARGET_CHANGED));
+    Trace g;
+    g.run();
+    g.stop();
+    g.s.rps_known = false;
+    CHECK(!g.at(55).valid); // exact15 readable gap retained
+    e = stop_context_expire(g.st, 56 * S);
+    CHECK(e.valid && e.finish == StopContextFinish::Gap && (e.positive & 1));
+    Trace h;
+    h.run();
+    h.s           = sample(false);
+    h.s.rps_known = false;
+    CHECK(!h.next().valid);
+    h.s.rps_known = true;
+    CHECK(!h.next().valid);
+    CHECK(h.st.pending.valid && h.st.pending.stop_us == 41 * S);
+    CHECK(h.st.pending.pre_complete ==
+          (STOP_CONTEXT_ALL & ~mask(StopContextCategory::LowRpsAboveMainTarget)));
+    Trace unknown_target;
+    unknown_target.run();
+    unknown_target.s.target_known = false;
+    unknown_target.stop();
+    e = unknown_target.finish();
+    CHECK(e.positive & 1);
+    CHECK(!(e.complete & 1));
+}
+static uint32_t random_word(uint32_t& x) {
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    return x;
+}
+static void test_deterministic_trace_safety() {
+    StopContextState    st;
+    uint32_t            seed = 0x230, generation = 1;
+    int64_t             t = 0;
+    StopContextCounters aggregate;
+    for (unsigned k = 0; k < 100000; ++k) {
+        const uint32_t r  = random_word(seed);
+        auto           s  = sample((r & 15) != 0);
+        s.rps_known       = (r & 31) != 0;
+        s.rps_value_known = (r & 63) != 0;
+        s.rps_tenths      = s.rps_running ? static_cast<uint16_t>((r >> 5) % 500) : 0;
+        s.request         = static_cast<StopContextBit>((r >> 2) % 3);
+        s.defrost         = static_cast<StopContextBit>((r >> 4) % 3);
+        s.route           = static_cast<StopContextRoute>((r >> 6) % 3);
+        s.mode            = static_cast<StopContextMode>((r >> 8) % 5);
+        s.lwt_known       = (r & 127) != 0;
+        s.target_known    = (r & 255) != 0;
+        s.lwt_tenths      = static_cast<int16_t>(r >> 16);
+        s.target_tenths   = static_cast<int16_t>(r);
+        t += (r % 17000000);
+        if (k % 211 == 0) ++generation;
+        StopContextEvent e;
+        if (k % 97 == 0)
+            e = stop_context_reset(st, generation);
+        else if (k % 89 == 0)
+            e = stop_context_seal(st);
+        else if (k % 83 == 0)
+            e = stop_context_expire(st, t);
+        else
+            e = stop_context_step(st, s, t, generation);
+        CHECK((e.positive & ~STOP_CONTEXT_ALL) == 0 && (e.complete & ~STOP_CONTEXT_ALL) == 0);
+        if (e.valid) {
+            CHECK(e.stop_us >= 0 && e.stop_us <= t);
+            CHECK(e.evaluable == (e.positive | e.complete));
+            CHECK(e.complete == (e.pre_complete & e.post_complete));
+            stop_context_merge(aggregate, stop_context_counters(e));
+        }
+        CHECK(!st.pending.valid || st.pending.stop_us <= t);
+    }
+}
+} // namespace stop_context_host_tests
+static void test_observation_hourly() {
+    using namespace daik::logic;
+    ObservationIdentity id{1, 2, 3, 4};
+    CHECK(observation_identity_valid(id));
+    CHECK(observation_identity_equal(id, id));
+    auto other      = id;
+    other.schema_fp = 5;
+    CHECK(!observation_identity_equal(id, other));
+    CHECK(!observation_identity_valid({}));
+    CHECK(observation_fingerprint() != 0);
+    CHECK(observation_fingerprint() != checkup_journal_fingerprint());
+    CHECK(observation_bucket(-1) == INT64_MIN);
+    CHECK(observation_bucket(OBSERVATION_HOUR_US) == 1);
+    CHECK(observation_in_window(100, 123 * OBSERVATION_HOUR_US));
+    CHECK(!observation_in_window(100, 124 * OBSERVATION_HOUR_US));
+    CHECK(!observation_in_window(125, 124 * OBSERVATION_HOUR_US));
+    ObservationHourlyPayload p;
+    p.identity                                = id;
+    p.first_unix_us                           = 100 * OBSERVATION_HOUR_US;
+    p.last_unix_us                            = p.first_unix_us + 1;
+    p.readable_us                             = 1;
+    p.counters.witnessed_stops_recent_heating = 1;
+    CHECK(observation_payload_valid(p, 100));
+    uint8_t encoded[OBSERVATION_PAYLOAD_BYTES];
+    observation_encode(p, encoded);
+    ObservationHourlyPayload decoded;
+    std::memcpy(&decoded, encoded, sizeof(decoded));
+    CHECK(observation_payload_valid(decoded, 100));
+    CHECK(decoded.counters.witnessed_stops_recent_heating == 1);
+    CHECK(!observation_payload_valid(p, 99));
+    auto bad              = p;
+    bad.identity.model_fp = 0;
+    CHECK(!observation_payload_valid(bad, 100));
+    bad                  = p;
+    bad.counters.unknown = 2;
+    CHECK(!observation_payload_valid(bad, 100));
+    bad                       = p;
+    bad.counters.evaluable[0] = 2;
+    CHECK(!observation_payload_valid(bad, 100));
+    bad                      = p;
+    bad.counters.positive[0] = 1;
+    CHECK(!observation_payload_valid(bad, 100));
+    bad                      = p;
+    bad.counters.complete[0] = 1;
+    CHECK(!observation_payload_valid(bad, 100));
+    bad       = p;
+    bad.flags = 0x8000;
+    CHECK(!observation_payload_valid(bad, 100));
+    bad             = p;
+    bad.readable_us = OBSERVATION_HOUR_US + 1;
+    CHECK(!observation_payload_valid(bad, 100));
+    bad       = p;
+    bad.flags = OBSERVATION_BARRIER;
+    CHECK(!observation_payload_valid(bad, 100));
+    bad.counters     = {};
+    bad.readable_us  = 0;
+    bad.last_unix_us = bad.first_unix_us;
+    CHECK(observation_payload_valid(bad, 100));
+    bad.dropped = 1;
+    CHECK(!observation_payload_valid(bad, 100));
+    bad = p;
+    bad.first_unix_us -= 1;
+    observation_merge(p, bad);
+    CHECK(p.first_unix_us == bad.first_unix_us);
+    CHECK(p.counters.witnessed_stops_recent_heating == 2 && p.readable_us == 2);
+    bad.readable_us = OBSERVATION_HOUR_US;
+    bad.last_unix_us += 1;
+    bad.dropped                                 = UINT16_MAX;
+    bad.counters.witnessed_stops_recent_heating = UINT16_MAX;
+    observation_merge(p, bad);
+    observation_merge(p, bad);
+    CHECK(p.readable_us == OBSERVATION_HOUR_US);
+    CHECK((p.flags & OBSERVATION_PARTIAL) && p.counters.saturated);
+    ObservationIndex ix;
+    observation_index_add(ix, 100, 10, 1);
+    observation_index_add(ix, 100, 9, 2);
+    CHECK(ix.count == 1 && ix.entries[0].slot == 1);
+    observation_index_add(ix, 100, 11, 2);
+    CHECK(ix.count == 1 && ix.entries[0].slot == 2);
+    observation_index_add(ix, 100, 12, 3, true);
+    observation_index_add(ix, 100, 12, 3, true);
+    CHECK(ix.count == 2);
+    for (int i = 0; i < 216; ++i) observation_index_add(ix, 101 + i, 20 + i, 4);
+    CHECK(ix.count == OBSERVATION_INDEX_CAP && !ix.clipped);
+    ObservationIndex pressure;
+    for (size_t i = 0; i <= OBSERVATION_INDEX_CAP; ++i)
+        observation_index_add(pressure, 100, i + 1, i, true);
+    CHECK(pressure.count == OBSERVATION_INDEX_CAP && pressure.clipped);
+    CHECK(pressure.clipped_until_bucket == 124);
+    HistoryJournalHeader h{};
+    h.magic       = HISTORY_JOURNAL_MAGIC;
+    h.version     = HISTORY_JOURNAL_VERSION;
+    h.source      = static_cast<uint8_t>(HistoryJournalSource::Checkup);
+    h.catalog_fp  = observation_fingerprint();
+    h.commit      = HISTORY_JOURNAL_COMMITTED;
+    h.value_count = OBSERVATION_WORDS;
+    h.slot_bytes  = HISTORY_JOURNAL_SLOT_BYTES;
+    h.sequence    = 1;
+    h.bucket      = 100;
+    h.dt_s        = 3600;
+    h.rings[0]    = TREND_COUNT;
+    h.rings[1]    = HOMEHUB_HISTORY_COUNT;
+    h.rings[2]    = ENV3_HISTORY_COUNT;
+    CHECK(observation_header_matches(h));
+    CHECK(history_journal_checkup_header_structural_matches(h, 3600));
+    h.catalog_fp ^= 1;
+    CHECK(!observation_header_matches(h));
+    h.catalog_fp = observation_fingerprint();
+    h.source     = static_cast<uint8_t>(HistoryJournalSource::X10a);
+    CHECK(!observation_header_matches(h));
+    {
+        const ObservationIdentity identity{1, 2, 3, 4};
+        uint32_t ObservationIdentity::*identity_fields[] = {
+            &ObservationIdentity::source_fp, &ObservationIdentity::model_fp,
+            &ObservationIdentity::schema_fp, &ObservationIdentity::consent_generation};
+        for (auto field : identity_fields) {
+            auto mismatch = identity;
+            ++(mismatch.*field);
+            CHECK(!observation_identity_equal(identity, mismatch));
+        }
+        for (auto field : {&ObservationIdentity::source_fp, &ObservationIdentity::schema_fp}) {
+            auto missing   = identity;
+            missing.*field = 0;
+            CHECK(!observation_identity_valid(missing));
+        }
+        CHECK(!observation_in_window(-1, OBSERVATION_DAY_US));
+        CHECK(!observation_in_window(1, -1));
+        ObservationHourlyPayload good;
+        good.identity                                = identity;
+        good.first_unix_us                           = 100 * OBSERVATION_HOUR_US;
+        good.last_unix_us                            = good.first_unix_us + 1;
+        good.counters.witnessed_stops_recent_heating = 1;
+        uint16_t StopContextCounters::*populations[] = {
+            &StopContextCounters::unclassified,   &StopContextCounters::unknown,
+            &StopContextCounters::partial,        &StopContextCounters::censored,
+            &StopContextCounters::target_changed, &StopContextCounters::time_overflow};
+        for (auto field : populations) {
+            auto invalid            = good;
+            invalid.counters.*field = 2;
+            CHECK(!observation_payload_valid(invalid, 100));
+        }
+        CHECK(!observation_payload_valid(good, -1));
+        CHECK(!observation_payload_valid(good, INT64_MAX / OBSERVATION_HOUR_US));
+        auto invalid          = good;
+        invalid.first_unix_us = -1;
+        CHECK(!observation_payload_valid(invalid, 100));
+        invalid              = good;
+        invalid.last_unix_us = invalid.first_unix_us - 1;
+        CHECK(!observation_payload_valid(invalid, 100));
+        invalid              = good;
+        invalid.last_unix_us = 101 * OBSERVATION_HOUR_US;
+        CHECK(!observation_payload_valid(invalid, 100));
+        invalid              = good;
+        invalid.last_unix_us = invalid.first_unix_us;
+        invalid.flags        = OBSERVATION_BARRIER;
+        CHECK(!observation_payload_valid(invalid, 100)); // barrier with event population
+        invalid.counters           = {};
+        invalid.counters.saturated = true;
+        CHECK(!observation_payload_valid(invalid, 100));
+        invalid.counters.saturated = false;
+        ++invalid.last_unix_us;
+        CHECK(!observation_payload_valid(invalid, 100));
+        ObservationHourlyPayload empty;
+        observation_merge(empty, good);
+        CHECK(empty.first_unix_us == good.first_unix_us);
+        ObservationIndex unsorted;
+        for (size_t i = 0; i < OBSERVATION_INDEX_CAP; ++i)
+            observation_index_add(unsorted, 100 + i, i + 1, i);
+        observation_index_add(unsorted, 90, 1000, 1);
+        CHECK(!unsorted.clipped && unsorted.count == OBSERVATION_INDEX_CAP);
+        ObservationIndex repeated_pressure;
+        for (size_t i = 0; i < OBSERVATION_INDEX_CAP + 2; ++i)
+            observation_index_add(repeated_pressure, 100, i + 1, i, true);
+        CHECK(repeated_pressure.clipped_until_bucket == 124);
+    }
+}
+
+static void test_stop_context_output() {
+    StopContextPayloadFields f;
+    const auto               nested = [&] {
+        std::string json;
+        append_stop_context_json(json, f);
+        return json;
+    };
+    auto json = nested();
+    CHECK(json.find("{\"confirmed\":false,") == 0);
+    CHECK(json.size() >= 3 && json.substr(json.size() - 3) == "}}}");
+    CHECK(json.find("\"capability_mask\":null") != std::string::npos);
+    CHECK(json.find("\"witnessed_stops_recent_heating\":null") != std::string::npos);
+    CHECK(json.find("\"supported\":null") != std::string::npos);
+    CHECK(json.find("\"positive\":0") == std::string::npos);
+    CHECK(json.find("\"window_s\":30,\"max_gap_s\":15,\"low_rps\":22,\"above_main_target_k\":2") !=
+          std::string::npos);
+    f.confirmed       = true;
+    f.capability_mask = logic::STOP_CONTEXT_ALL;
+    json              = nested();
+    CHECK(json.find("\"supported\":true") != std::string::npos);
+    CHECK(json.find("\"witnessed_stops_recent_heating\":null") != std::string::npos);
+    f.has_readable   = true;
+    f.readable_s     = 60;
+    f.observed_hours = 1;
+    json             = nested();
+    CHECK(json.find("\"witnessed_stops_recent_heating\":0") != std::string::npos);
+    CHECK(json.find("\"positive\":0,\"evaluable\":0,\"complete\":0") != std::string::npos);
+    CHECK(json.find("\"readable_s\":60,\"observed_hours\":1") != std::string::npos);
+    f.counters.witnessed_stops_recent_heating = 1;
+    f.counters.positive[0] = f.counters.positive[1] = 1;
+    f.counters.evaluable[0] = f.counters.evaluable[1] = 1;
+    f.counters.partial = f.counters.unknown = f.counters.censored = 1;
+    f.counters.saturated                                          = true;
+    json                                                          = nested();
+    CHECK(json.find("\"witnessed_stops_recent_heating\":1") != std::string::npos);
+    CHECK(json.find("\"low_rps_above_main_target\":{\"supported\":true,\"positive\":1,"
+                    "\"evaluable\":1,\"complete\":0}") != std::string::npos);
+    CHECK(json.find("\"request_withdrawal\":{\"supported\":true,\"positive\":1,\"evaluable\":1,"
+                    "\"complete\":0}") != std::string::npos);
+    CHECK(json.find("\"unknown_stops\":1,\"partial_stops\":1,\"censored_stops\":1") !=
+          std::string::npos);
+    CHECK(json.find("\"saturated\":true") != std::string::npos);
+    f.capability_mask &= ~logic::stop_context_mask(logic::StopContextCategory::Defrost);
+    json = nested();
+    CHECK(json.find("\"defrost\":{\"supported\":false,\"positive\":null,\"evaluable\":null,"
+                    "\"complete\":null}") != std::string::npos);
+    std::string flat;
+    append_stop_context_json(flat, f, true);
+    CHECK(flat.find(",\"stop_context_confirmed\":1,") == 0);
+    CHECK(flat.find("\"stop_context_defrost_supported\":0") != std::string::npos);
+    CHECK(flat.find("\"stop_context_defrost_positive\":null") != std::string::npos);
+    CHECK(flat.find("\"stop_context_request_withdrawal_positive\":1") != std::string::npos);
+    CHECK(flat.find("\"stop_context_saturated\":1") != std::string::npos);
+}
+
+static void test_stop_context_inputs() {
+    using namespace daik::logic;
+    const char* id   = "altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw";
+    const auto  view = daik::def::lookup_view(id);
+    const auto  p    = stop_context_input_plan(id, view);
+    CHECK(p.schema_fp != 0 && p.supported == 127);
+    CHECK(stop_context_capabilities(p) == STOP_CONTEXT_ALL);
+    CHECK(stop_context_input_plan("auto", view).schema_fp == 0);
+    CHECK(stop_context_input_plan("wrong", view).schema_fp == 0);
+    CHECK(stop_context_input_plan(nullptr, view).schema_fp == 0);
+    CHECK(stop_context_input_plan(id, {}).schema_fp == 0);
+    ProfileView empty_view;
+    empty_view.profile_id = id;
+    const auto empty_plan = stop_context_input_plan(id, empty_view);
+    CHECK(empty_plan.supported == 0 && empty_plan.schema_fp != 0);
+    struct Row {
+        uint8_t     reg = 0, off = 0;
+        uint16_t    conv = 0;
+        bool        held = false, held_unknown = false;
+        std::string value;
+    };
+    Row         rows[STOP_CONTEXT_INPUTS + 1];
+    const char* values[] = {"12", "39.7", "35.7", "1", "0", "0", "Heating"};
+    ValueDef    defs[STOP_CONTEXT_INPUTS];
+    for (size_t k = 0; k < STOP_CONTEXT_INPUTS; ++k) {
+        const auto r = instrument_resolve(view, STOP_CONTEXT_INSTRUMENTS[k]);
+        CHECK(r.state == InstrumentState::Supported);
+        defs[k] = adjudicated(view, static_cast<size_t>(r.row));
+        rows[k] = {defs[k].reg, defs[k].offset, defs[k].conv, false, false, values[k]};
+    }
+    const auto collect = [&] {
+        return stop_context_collect(p, rows, STOP_CONTEXT_INPUTS, true, true);
+    };
+    auto a = collect();
+    CHECK(a.rps_known && a.rps_running && a.rps_tenths == 120);
+    CHECK(a.lwt_known && a.target_known && a.lwt_tenths == 397 && a.target_tenths == 357);
+    CHECK(a.request == StopContextBit::On && a.defrost == StopContextBit::Off);
+    CHECK(a.route == StopContextRoute::Space && a.mode == StopContextMode::Heating);
+    CHECK(!stop_context_collect(p, rows, STOP_CONTEXT_INPUTS, false, true).rps_known);
+    CHECK(!stop_context_collect(p, rows, STOP_CONTEXT_INPUTS, true, false).rps_known);
+    rows[0].value = "0";
+    CHECK(!collect().rps_known);
+    CHECK(stop_context_collect(p, rows, STOP_CONTEXT_INPUTS, true, false).rps_known);
+    for (const char* invalid : {"", "?", "-1", "NaN", "6554"}) {
+        rows[0].value = invalid;
+        CHECK(!collect().rps_known);
+    }
+    rows[0].value = "12";
+    for (size_t k = 0; k < STOP_CONTEXT_INPUTS; ++k) {
+        rows[k].held = true;
+        CHECK(stop_context_input_row(p, static_cast<StopContextInput>(k), rows,
+                                     STOP_CONTEXT_INPUTS) == nullptr);
+        rows[k].held         = false;
+        rows[k].held_unknown = true;
+        CHECK(stop_context_input_row(p, static_cast<StopContextInput>(k), rows,
+                                     STOP_CONTEXT_INPUTS) == nullptr);
+        rows[k].held_unknown      = false;
+        rows[STOP_CONTEXT_INPUTS] = rows[k];
+        CHECK(stop_context_input_row(p, static_cast<StopContextInput>(k), rows,
+                                     STOP_CONTEXT_INPUTS + 1) == nullptr);
+    }
+    rows[3].value = "2";
+    CHECK(collect().request == StopContextBit::Unknown);
+    rows[3].value = "ON";
+    CHECK(collect().request == StopContextBit::Unknown);
+    rows[3].value = "0";
+    CHECK(collect().request == StopContextBit::Off);
+    rows[4].value = "?";
+    CHECK(collect().defrost == StopContextBit::Unknown);
+    rows[5].value = "1";
+    CHECK(collect().route == StopContextRoute::Dhw);
+    rows[5].value = "2";
+    CHECK(collect().route == StopContextRoute::Unknown);
+    rows[6].value = "Heating + DHW";
+    CHECK(collect().mode == StopContextMode::Heating);
+    rows[6].value = "Cooling + DHW";
+    CHECK(collect().mode == StopContextMode::Cooling);
+    rows[6].value = "DHW";
+    CHECK(collect().mode == StopContextMode::Dhw);
+    rows[6].value = "Stop";
+    CHECK(collect().mode == StopContextMode::Other);
+    rows[6].value = "0";
+    CHECK(collect().mode == StopContextMode::Unknown);
+    rows[1].value = "3276.8";
+    CHECK(!collect().lwt_known);
+    rows[2].value = "-3276.9";
+    CHECK(!collect().target_known);
+    CHECK(!stop_context_collect(p, static_cast<const Row*>(nullptr), 0, true, true).rps_known);
+    // A target-only decoder change retires this observation, without retiring the core journal.
+    ProfileView minimal;
+    minimal.base       = defs;
+    minimal.base_count = STOP_CONTEXT_INPUTS;
+    minimal.profile_id = id;
+    const auto q       = stop_context_input_plan(id, minimal);
+    CHECK(q.supported == 127 && q.schema_fp != 0);
+    std::reverse(std::begin(defs), std::end(defs));
+    CHECK(stop_context_input_plan(id, minimal).schema_fp == q.schema_fp);
+    std::reverse(std::begin(defs), std::end(defs));
+    const auto core_before = checkup_model_fingerprint(id, minimal);
+    defs[2].size           = 3;
+    CHECK(stop_context_input_plan(id, minimal).schema_fp != q.schema_fp);
+    CHECK(checkup_model_fingerprint(id, minimal) == core_before);
+    defs[2].size        = 2;
+    defs[3].no_publish  = true;
+    const auto withheld = stop_context_input_plan(id, minimal);
+    CHECK(!stop_context_input_supported(withheld, StopContextInput::Request));
+    CHECK(!(stop_context_capabilities(withheld) &
+            stop_context_mask(StopContextCategory::RequestWithdrawal)));
+    CHECK(stop_context_capabilities(withheld) & stop_context_mask(StopContextCategory::Defrost));
+    auto absent = withheld;
+    absent.supported &= ~(1u << static_cast<unsigned>(StopContextInput::Mode));
+    CHECK(stop_context_capabilities(absent) == 0);
+
+    {
+        CHECK(stop_context_input_plan("", view).schema_fp == 0);
+        auto auto_view       = view;
+        auto_view.profile_id = "auto";
+        CHECK(stop_context_input_plan("auto", auto_view).schema_fp == 0);
+        for (unsigned span = 0; span < 3; ++span) {
+            auto malformed = view;
+            if (span == 0) {
+                malformed.base       = nullptr;
+                malformed.base_count = 1;
+            }
+            if (span == 1) {
+                malformed.extra       = nullptr;
+                malformed.extra_count = 1;
+            }
+            if (span == 2) {
+                malformed.extra2       = nullptr;
+                malformed.extra2_count = 1;
+            }
+            CHECK(stop_context_input_plan(id, malformed).schema_fp == 0);
+        }
+        for (auto input :
+             {StopContextInput::Rps, StopContextInput::Route, StopContextInput::Mode,
+              StopContextInput::Lwt, StopContextInput::Target, StopContextInput::Defrost}) {
+            auto missing = p;
+            missing.supported &= ~(1u << static_cast<unsigned>(input));
+            CHECK(stop_context_input_row(missing, input, rows, STOP_CONTEXT_INPUTS) == nullptr);
+            const auto mask = stop_context_capabilities(missing);
+            if (input == StopContextInput::Rps || input == StopContextInput::Route ||
+                input == StopContextInput::Mode)
+                CHECK(mask == 0);
+            if (input == StopContextInput::Lwt || input == StopContextInput::Target)
+                CHECK(!(mask & stop_context_mask(StopContextCategory::LowRpsAboveMainTarget)));
+            if (input == StopContextInput::Defrost)
+                CHECK(!(mask & stop_context_mask(StopContextCategory::Defrost)));
+        }
+    }
+}
+
+static void test_stop_context() {
+    using namespace stop_context_host_tests;
+    test_overlap_and_coverage();
+    test_route_mode_before_at_after();
+    test_missing_optional();
+    test_startup_gap_and_exclusions();
+    test_target_stability();
+    test_restart_expire_reset();
+    test_boundaries_and_saturation();
+    test_positive_aging_and_unknowns();
+    test_lifecycle_edges();
+    test_deterministic_trace_safety();
+}
+
 int main() {
+    test_stop_context();
+    test_stop_context_inputs();
+    test_stop_context_output();
+    test_observation_hourly();
     test_value_def_layout();
     test_diag_tail();
     test_http_cache();

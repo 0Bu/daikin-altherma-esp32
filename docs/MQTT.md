@@ -131,6 +131,13 @@ silently fork existing series. See [DIAGNOSTIC_EVIDENCE.md](DIAGNOSTIC_EVIDENCE.
 
 ## Independent retained sources
 
+The heartbeat additionally publishes numeric `stop_context_*` fields, with five category prefixes
+such as `stop_context_request_withdrawal_positive`. These share the HTTP
+[`cycling.stop_context` contract](API.md) and independent population, including null counts before
+readable coverage and for unsupported categories. Metadata flags are `0`/`1`; existing fields and
+HA entities are unchanged. The HTTP-only `denominator` string is represented by the numeric field
+`stop_context_witnessed_stops_recent_heating` on MQTT.
+
 ### HomeHub
 
 `<base>/modbus` is a flat object keyed by each register label slug. It is never merged into X10A

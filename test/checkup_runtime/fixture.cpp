@@ -27,11 +27,13 @@ const Config& config_ref_locked() { return adapter::cfg; }
 void diag_printf(const char*, ...) {}
 bool history_checkup_flash_pending() { return adapter::journal_pending; }
 bool safe_mode_active() { return false; }
+bool time_synced() { return true; }
 void time_now(int64_t& s, int32_t& ms) {
     s  = adapter::unix_origin + sdk::now_us / 1000000;
     ms = 0;
 }
 bool     hp_poll_generation_matches(uint32_t g) { return g == adapter::poll_generation; }
+uint32_t              hp_poll_generation() { return adapter::poll_generation; }
 uint32_t circulation_source_generation() { return adapter::circulation_generation; }
 CirculationPumpSample circulation_pump_sample() {
     ++adapter::circulation_samples;
@@ -494,12 +496,119 @@ void consent_staged_sample(const std::string& name) {
                 pair[CheckupCheck::Heater].c == 10 && pair[CheckupCheck::Heater].d == 10,
             "new_consent_positive_control");
 }
+std::vector<CachedValue> stop_rows(bool running, bool request = true, bool target = true) {
+    std::vector<CachedValue> v = {
+        row({0x30, 0, 152}, running ? "12" : "0"),
+        row({0x61, 2, 105}, "39.7"),
+        row({0x60, 2, 303}, request ? "1" : "0"),
+        row(CHECKUP_LOC_DEFROST, "0"),
+        row(CHECKUP_LOC_VALVE, "0"),
+        row(CHECKUP_LOC_IU_MODE, "Heating"),
+    };
+    if (target) v.push_back(row({0x60, 9, 105}, "35.7"));
+    return v;
+}
+
+void stop_context_case(const std::string& name) {
+    require(name == "stop_overlap" || name == "stop_optional" || name == "stop_route" ||
+                name == "stop_idle_expiry" || name == "stop_reset" || name == "stop_consent" ||
+                name == "stop_shutdown" || name == "stop_tick_wait",
+            "unknown_case");
+    boot();
+    const auto cov    = coverage();
+    const bool target = name != "stop_optional";
+    sample(1, stop_rows(false, true, target), cov, true, false);
+    for (int t = 2; t < 41; ++t) {
+        auto v = stop_rows(true, true, target);
+        if (name == "stop_route" && t >= 39) {
+            v[4].value = "1";
+            v[5].value = "DHW";
+        }
+        sample(t, v, cov, true, true);
+    }
+    auto stopped = stop_rows(false, false, target);
+    if (name == "stop_route") {
+        stopped[4].value = "1";
+        stopped[5].value = "DHW";
+    }
+    sample(41, stopped, cov, true, false);
+    const auto pending = checkup_stop_context_report();
+    require(pending.pending && pending.capability_mask == STOP_CONTEXT_ALL,
+            "stop_source_bound_pending");
+    require(pending.observation.counters.witnessed_stops_recent_heating == 0,
+            "stop_pending_not_a_final_count");
+    if (name == "stop_reset") {
+        checkup_reset();
+        const auto r = checkup_stop_context_report();
+        require(!r.pending && !r.observation.confirmed &&
+                    r.observation.counters.witnessed_stops_recent_heating == 0,
+                "stop_reset_immediate_read_barrier");
+        require(r.observation.persistence_pending, "stop_reset_durability_remains_pending");
+        return;
+    }
+    if (name == "stop_consent") {
+        const auto old_epoch = checkup_consent_epoch();
+        checkup_set_diagnostics(false, 23);
+        checkup_set_diagnostics(true, 23);
+        sdk::now_us = 42000000;
+        checkup_record(stopped.data(), stopped.size(), true, false, cov, adapter::poll_generation,
+                       old_epoch, true);
+        const auto r = checkup_stop_context_report();
+        require(!r.pending && r.observation.readable_us == 0 &&
+                    r.observation.counters.witnessed_stops_recent_heating == 0,
+                "stop_consent_rejects_staged_inputs");
+        return;
+    }
+    if (name == "stop_tick_wait") {
+        sdk::now_us      = 42000000;
+        sdk::before_take = [] { sdk::now_us = 57000000; };
+        checkup_stop_context_expire(42000000);
+        require(stop_observation_report().counters.witnessed_stops_recent_heating == 1,
+                "stop_tick_flushes_before_journal_service");
+        require(!checkup_stop_context_report().pending, "stop_tick_uses_clock_after_owner_lock");
+    } else if (name == "stop_idle_expiry") {
+        sdk::now_us = 57000000;
+        checkup_stop_context_expire(sdk::now_us);
+    } else if (name == "stop_shutdown") {
+        require(sdk::shutdown != nullptr, "stop_shutdown_hook_registered");
+        sdk::shutdown();
+    } else {
+        for (int t = 42; t <= 71; ++t) sample(t, stopped, cov, true, false);
+    }
+    const auto  r = checkup_stop_context_report();
+    const auto& c = r.observation.counters;
+    require(!r.pending && c.witnessed_stops_recent_heating == 1,
+            "stop_finalized_once_in_named_population");
+    require(c.positive[1] == 1, "stop_request_overlap_observed");
+    require(c.positive[0] == (target ? 1 : 0), "stop_target_only_dependent_category");
+    if (name == "stop_idle_expiry" || name == "stop_shutdown" || name == "stop_tick_wait") {
+        require(c.censored == 1 && c.partial == 1 && c.complete[1] == 0,
+                "stop_stalled_or_shutdown_window_censored");
+    } else if (name == "stop_route") {
+        require(c.positive[3] == 1 && c.positive[4] == 1, "stop_route_transition_overlap");
+        const auto core = checkup_report();
+        require(core[CheckupCheck::Cycling].c == 0 && core[CheckupCheck::Cycling].g == 1 &&
+                    core.cycling_censored_handover_runs == 1,
+                "stop_mixed_run_does_not_enter_completed_heating");
+    } else {
+        require(c.complete[1] == 1 && c.censored == 0, "stop_complete_window_readable");
+        if (!target)
+            require(c.evaluable[0] == 0 && c.unknown == 1, "stop_optional_input_independent");
+        const auto core = checkup_report();
+        require(core[CheckupCheck::Cycling].c == 1, "stop_legacy_completed_heating_preserved");
+    }
+    sdk::now_us += 1;
+    require(checkup_stop_context_report().observation.counters.witnessed_stops_recent_heating == 1,
+            "stop_repeat_report_does_not_duplicate");
+}
 } // namespace
 int main(int argc, char** argv) {
     std::string name = argc == 2 ? argv[1] : "";
     try {
-        if (name.rfind("buh_", 0) == 0 || name == "heaters_both_on" ||
-            name == "legacy_text_unknown" || name == "single_declared_buh_step")
+        if (name.rfind("stop_", 0) == 0)
+            stop_context_case(name);
+        else if (name.rfind("buh_", 0) == 0 || name == "heaters_both_on" ||
+                 name == "legacy_text_unknown" || name == "single_declared_buh_step")
             heater_case(name);
         else if (name == "independent_heaters")
             independent_heaters();
@@ -535,6 +644,8 @@ int main(int argc, char** argv) {
         else
             throw std::runtime_error("unknown_case");
         require(sdk::takes == sdk::gives && !sdk::mutex.owned, "modeled_mutex_balanced");
+        for (const auto& mutex : sdk::additional_mutexes)
+            require(!mutex.owned, "modeled_independent_mutex_balanced");
         std::cout << "PASS case=" << name << " assertions=" << assertions << "\n";
         return 0;
     } catch (const std::exception& e) {

@@ -158,7 +158,7 @@ assert.equal(releases.length, 1, "exactly one site releases the writer's latch")
 const appendFn = functionBody("esp_err_t flash_append_record(FlashJournalRecord& r) {",
   "// Log, once per source and episode");
 assert.match(appendFn,
-  /flash_note_append_success\(slot\);[\s\S]*if \(!flash_is_manifest\(r\.header\)\) s_flash_ahead_logged\[r\.header\.source\] = false;/,
+  /flash_note_append_success\(slot\);[\s\S]*if \(!flash_is_manifest\(r\.header\) && !logic::observation_header_matches\(r\.header\)\)\s+s_flash_ahead_logged\[r\.header\.source\] = false;/,
   "the latch is released by a successful data append, not by a manifest or an observation");
 const noteRestore = functionBody("void flash_note_restore_ahead(", "// The next record of source");
 assert.match(noteRestore, /s_flash_restore_ahead_logged\[src_i\]\s*\|\|\s*!logic::history_cursor_in_future\(newest,\s*wall_bucket\)/,

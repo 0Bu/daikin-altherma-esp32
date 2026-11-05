@@ -1283,7 +1283,7 @@ function descriptionCopy(d) {
   return index < 0 ? null : DESCRIPTION_I18N[LANG]?.[index] || null;
 }
 function modelDescriptionCopy(id) {
-  return LANG === "en" || LANG === "de" ? null : MODEL_DESCRIPTION_I18N[LANG]?.[id] || null;
+  return LANG === "en" ? null : MODEL_DESCRIPTION_I18N[LANG]?.[id] || null;
 }
 function descBodyHtml(d, currentValue, localized = null, normalLabelKey = "normal.label") {
   const b = (LANG === "de" && d.de) ? d.de : d;   // German copy when present, else the English row

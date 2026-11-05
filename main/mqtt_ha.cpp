@@ -203,8 +203,16 @@ struct ReferenceMqttFrame {
     bool   retained = false;
 };
 static QueueHandle_t       s_ref_queue = nullptr;
-static ReferenceMqttFrame  s_ref_rx;
-static ReferenceMqttFrame  s_ref_task_frame;          // mqtt_task-owned; keeps ~1.2 KB off its stack
+// These scratch objects are never consumed before the event path fills their metadata or the
+// task receives a complete frame from its queue. A zero-only startup image keeps their buffers in
+// BSS; time_now always replaces the event timestamp, including -1 before clock synchronization.
+constexpr ReferenceMqttFrame reference_frame_scratch() {
+    ReferenceMqttFrame frame;
+    frame.received_unix_s = 0;
+    return frame;
+}
+static ReferenceMqttFrame  s_ref_rx          = reference_frame_scratch();
+static ReferenceMqttFrame  s_ref_task_frame  = reference_frame_scratch(); // mqtt_task-owned
 static bool                s_ref_rx_active = false;
 static size_t              s_ref_rx_received = 0;
 // Written by the event task, read + reported by mqtt_task — the same split as the flags above, and
@@ -1936,6 +1944,7 @@ static __attribute__((noinline)) std::string build_heartbeat_payload() {
     f.modbus_fails     = mbs.rx_fail;
     f.modbus_stack_min_free_bytes = stack_watch_min_free_bytes(StackWatch::Modbus);
     f.cycling                     = checkup_cycling_evidence();
+    f.stop_context                = stop_context_payload_fields(checkup_stop_context_report());
     return build_heartbeat_json(f);
 }
 

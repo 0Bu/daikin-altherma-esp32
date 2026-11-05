@@ -73,8 +73,8 @@ missing, sentinel and boundary inputs.
 <a id="physical-instruments"></a>
 ### Physical instruments
 
-A new diagnosis observation finds its inputs through `logic/instrument.hpp`, never by matching rows
-itself; no firmware code calls it yet. Each instrument has exact page/offset/converter locators.
+A new diagnosis observation finds its inputs through `logic/instrument.hpp`; stop context resolves
+its own consumer plan there at source confirmation. Each instrument has exact page/offset/converter locators.
 Where one coordinate means different instruments on different profiles, a label token also
 decides; refrigerant pressures use the structural rule in `convert.hpp`, and 0x20/14 is the low
 side only beside a 0x20/12 pressure, whatever its label says. On a resolved profile an instrument
@@ -297,17 +297,29 @@ and freezes it. The drain then offers it after every live hour as a short record
 Hourly diagnosis state grows by source, not by bucket. Each byte added to `CheckupBucket` or
 `DhwLossBucket` is held 24 times in `.noinit` (23 completed hours and the open one) and once per
 journal record, and 23 stored records must still fit the 4 KiB sector scratch (see Memory
-constraints). No other hourly diagnosis source exists yet. An observation that needs more hourly
-state must add one: one record per hour within `HISTORY_JOURNAL_PAYLOAD_BYTES`, with its own
-fingerprint, coverage clocks and late-completion replay. In RAM it keeps the open hour, the sum of
-its completed hours and a restore index bounded like `CHECKUP_JOURNAL_INDEX_CAP`, not like the
-trend raster. The history owner rebuilds that sum at restoration, after each of its hourly records
+constraints). Stop context uses an independent hourly source in `stop_observation_store.cpp`, with
+its own schema/method, source/model/consent identity, readable clock and late-stop replay. Its
+payload fits `HISTORY_JOURNAL_PAYLOAD_BYTES`; it keeps an open hour, a bounded four-entry append
+queue, a completed sum and a 47-entry restore index, rather than another 24-hour RAM ring or trend
+raster. The history owner rebuilds that sum at restoration, after each of its hourly records
 is committed to the journal, after a replay, and when its oldest hour expires, even if the producer
-stops. It reads one stored record at a time on a measured stack path under its own flash lock and
+stops. It reuses one 96-byte flash-owner payload scratch and the history sector scratch, then
 swaps the result in under a zero-wait take of the observation's lock; report and record paths never
 read the journal. A missing record leaves its hour unobserved; it is never inferred from the core
 bucket. The journal capacity assertion in `history_persist.hpp` must count the new records; static
 memory and stack paths are measured on the target ELF.
+
+Stop records use the existing physical Checkup envelope with a distinct format fingerprint and
+width. Older firmware can discover their physical sequence/head without interpreting their payload
+as core diagnosis. The core bucket, its fingerprint and the five wire source IDs are unchanged.
+Finalized stop contexts revise the original stop hour; pending candidates never restore. Explicit
+resets require a committed barrier before reset durability is established. Power loss before that
+append can still restore older same-scope hours. Source changes and consent transitions withdraw
+live evidence immediately. Whole-hour aging also runs without further polls; missing records never
+borrow the core clock. New hourly observations must preserve these independent-source boundaries.
+The observation owner also rechecks wall/monotonic agreement on reports and flash service. An offset
+change beyond two seconds withdraws the dated view, fences the old archive and pauses this
+collection lifecycle; a fresh lifecycle or boot establishes a new anchor.
 
 The former small history partition is unsupported. OTA cannot install a partition table: an
 old-layout device needs an explicitly authorized signed USB/Web Serial update to the official
@@ -321,6 +333,17 @@ The UI polls `/values` every two seconds and `/status` every eight seconds in on
 backs off to 30 seconds while unreachable, and suspends ordinary polling while hidden. There is no
 `/events` route or WebSocket broadcaster; building HTTP state never runs on the UART owner.
 [DESIGN.md](DESIGN.md) owns user-visible states and modal behavior.
+
+English and the application code remain in the startup page. A first non-English locale request
+loads one device-local gzip resource containing all twelve external catalogs. The build preserves
+the minified source bytes in a bounded LZMA frame; the browser validates its header, exact decoded
+length and CRC before synchronous script registration. The dictionary is fixed at 512 KiB and the
+decoded frame is capped at 1 MiB. Per-catalog 32 KiB quality checks and the aggregate flash cap
+remain build gates. The decoder and its license ship in that resource; no CDN or runtime download
+is needed. This reduces firmware flash at the cost of a larger first locale transfer and transient
+browser memory/CPU. Later language changes reuse the registered tables; failure retains English.
+The producer, pinned dependencies and integrity tests live under `tools/web_asset/` and
+`test/test_locale_bundle.mjs`.
 
 Registration goes through the common exception boundary. The open setup AP exposes provisioning;
 the configured LAN exposes the full API. The surface follows whether that AP is running, not the

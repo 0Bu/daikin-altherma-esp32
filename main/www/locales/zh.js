@@ -1,4 +1,4 @@
-// translation-source: b5d29da273c417b207489763facc3fda04530140b4b0389affcd7643d701cd08
+// translation-source: 3e8092cf0e419496e78d337338f27af53fbda73918ad45f0bbe0970b83ebeddc
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
@@ -223,6 +223,16 @@ I18N.zh = localeValues([
   /* check.cycling_cooling */ (n) => `制冷：排除 ${n} 个`,
   /* check.cycling_censored */ (n) => `${n} 个未分类`,
   /* check.cycling_causes */ "过渡|重启/日志|未观察到启动",
+  /* check.stop.title */ "停机上下文",
+  /* check.stop.population */ (n) => `近期制热后见证的停机：${n} 次`,
+  /* check.stop.coverage */ (d, h) => `压缩机可读观测时间 ${d} · ${h} 个小时桶`,
+  /* check.stop.categories */ "低转速及主目标温差|室内机请求撤回|除霜有效|生活热水切换|水路/模式变化",
+  /* check.stop.counts */ "阳性 / 可评估 / 完整",
+  /* check.stop.other */ "未分类|未知|不完整|被截断|目标变化|时间溢出",
+  /* check.stop.loss */ (n) => `存储丢失通知 ${n}`,
+  /* check.stop.states */ "来源未确认|已定时观测|无日期观测|24 小时覆盖不完整|已存小时的恢复等待时钟/来源确认|已完成的观测等待存储|一次停机正在等待窗口后段样本|计数已饱和：数值为下限|不支持|尚无可读数据支持的停机总体。",
+  /* check.stop.rule */ "项目暂定窗口：含边界 ±30 秒，采样间隙不超过 15 秒。已确认供暖时：0 < 压缩机转速 ≤22 转/秒，报告的电辅助加热器前出水温度 R1T ≥报告的主区域目标 +2 K，目标稳定 30 秒。",
+  /* check.stop.limits */ "停机类别和限定信息可在同一组保留的停机中重叠。可评估表示阳性或采样窗口完整；仅完整窗口允许作出采样范围内的阴性结果。轮询无法排除样本之间的信号。R1T 是电辅助加热器之前报告的出水温度。它与报告的主区域目标之差只是观测到的差值，并非测得的受控超调。这不能确定停机原因、最低调制水平或外部温控器请求。",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} 最低 ${min} °C · 平均 ${mean} °C`,
   /* check.min */ (m) => `${m} 分钟`,
