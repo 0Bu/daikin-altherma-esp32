@@ -135,16 +135,16 @@ export function makeHistoryMotionFixture(originalStatus, lang = "en") {
       rows: HISTORY_MOTION_ROWS.map(({ id, label }) => ({ id, label })),
       modbus_rows: MODBUS_HISTORY_ROWS.map(({ id, label }) => ({ id, label })),
       env3_rows: ENV3_HISTORY_ROWS.map(({ id, label }) => ({ id, label })),
-      room_rows: [{ id: "room_temp", label: "Fixture room sensor" }],
+      room_rows: [{ id: "room_temp", label: "Example room" }],
     },
     env3: { ...status.env3, supported: true, enabled: true, connected: true,
       sda: 5, scl: 6, fresh: true, age_s: 0, error: "", samples: 288, errors: 0,
       temperature_c: 8.2, humidity_pct: 72, pressure_hpa: 1013 },
     weather_forecast: { ...status.weather_forecast, configured: true, available: true, fresh: true,
-      latitude: "50.0", longitude: "10.0", fetching: false,
+      latitude: "12.345678", longitude: "23.456789", fetching: false,
       hourly: Array.from({ length: 6 }, (_, index) => ({ time_unix_s: END + (index + 1) * 3600,
         temperature_c: 8.5 + index / 2, humidity_pct: 71 - index, pressure_hpa: 1013 + index / 2 })) },
-    reference_temperature: { configured: true, name: "Fixture room sensor", topic: "fixture/room",
+    reference_temperature: { configured: true, name: "Example room", topic: "fixture/room",
       temperature_path: "temperature", timestamp_topic: "", timestamp_path: "timestamp",
       source_id: "fixture-room", calibration_k: 0, max_age_s: 300,
       temperature_min_c: -10, temperature_max_c: 50,
@@ -153,7 +153,7 @@ export function makeHistoryMotionFixture(originalStatus, lang = "en") {
       control_eligible: false, reason: "disabled", freshness_reason: "fresh", age_s: 0,
       received_at: END, received_ago_s: 0, source_at: END, source_unix_s: END,
       timestamp_source: "source", retained: false },
-    circulation_source: { configured: true, name: "Fixture circulation pump", topic: "fixture/circulation",
+    circulation_source: { configured: true, name: "Example circulation pump", topic: "fixture/circulation",
       power_path: "power", timestamp_path: "timestamp", max_age_s: 300,
       on_threshold_w: 5, off_threshold_w: 2, confirm_s: 30,
       subscribed: true, has_value: true, power_w: 25, fresh: true, state: "on", age_s: 0,
@@ -163,7 +163,7 @@ export function makeHistoryMotionFixture(originalStatus, lang = "en") {
   for (const row of HISTORY_MOTION_ROWS) histories[`x10a:${row.id}`] = ring(row, "x10a");
   for (const row of MODBUS_HISTORY_ROWS) histories[`modbus:${row.id}`] = ring(row, "modbus");
   for (const row of ENV3_HISTORY_ROWS) histories[`env3:${row.id}`] = ring(row, "env3");
-  histories["room:room_temp"] = ring({ id: "room_temp", label: "Fixture room sensor",
+  histories["room:room_temp"] = ring({ id: "room_temp", label: "Example room",
     value: 21.3, unit: "°C" }, "room");
 
   const values = (tick = 0) => ({
