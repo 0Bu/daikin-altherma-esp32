@@ -79,11 +79,35 @@ markup. Check:
 Use deterministic fixtures for visual states. Do not write device configuration during a pre-merge
 review unless the user explicitly requested a live-device test.
 
+## 3b. Review continuity under live polling
+
+For polling, rendering, history or animation changes, run the browser gate's temporal matrix as well
+as its static locale matrix. Derive the entry inventory from production: every schematic inspector
+must either exercise its history or have an explicit no-history classification. Include catalog,
+Modbus-only, board-memory and circulation disclosures, derived/categorical graphs, ENV III and the
+independent room source. Use full 288-sample rings, source-specific gaps and changing live values
+through the real two-second polling/render loop at phone and desktop widths.
+
+Observe at least three real updates per case. Require unchanged plots and prose to retain their
+nodes, no chart construction in collapsed rows, persistent advancing flow/rotor `CSSAnimation`
+objects, and the fixed frame/input responsiveness budgets in the browser test. Finite
+`CSSTransition`s may finish normally; distinguish them from stopped continuous animations. Exercise
+open/close and cached reopen, and require no console errors. Legitimate categorical/history changes
+must update the chart and settle before checking continuity again.
+
+Report temporal evidence separately from screenshots, reduced-motion states, GIF poses and device
+measurements. A fixture-browser pass does not establish performance on a physical iPad or device
+HTTP behavior. The test scope and budget are documented in [test/README.md](../../../test/README.md#ui-interaction-rendering-and-recording).
+
 ## 4. Review failure coverage
 
 For every bug fixed in the PR, identify the exact test that fails when the bug is reintroduced. Add a
 targeted selftest mutation when the main suite could otherwise pass vacuously. A source regex alone
 is insufficient for an interaction defect; execute the handler and assert its outcome.
+For continuity changes, prove that the temporal checks reject eager hidden-chart construction,
+visible plot/animation replacement and a synchronous polling stall above the fixed budget. A missing
+mutation insertion point must fail the control; do not accept an unrelated setup failure or increase
+the budget to accommodate a regression.
 
 Block the merge on any uncaught exception, missing handler, action without the promised state change,
 unrepresented new use case, live UI assertion failure, or visual/accessibility regression.

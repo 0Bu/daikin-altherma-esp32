@@ -252,6 +252,9 @@ Static SVG nodes update in place so polls do not restart animation. The schemati
 when a source fails. Model-absent branches are omitted; a temporary source loss blanks readings
 rather than hiding installed parts. Reduced motion stops nonessential motion while active paths
 remain visually identifiable.
+Full histories and an open inspector or value disclosure must preserve this continuity during live
+polling: unchanged plots remain mounted and input remains responsive. Collapsed disclosures build
+no history SVG; a static screenshot or posed recording cannot establish this temporal behavior.
 
 A pipe's flow overlay, hit target and measurement attribution end at the same junction. Each branch
 owns both legs; the common run owns only shared pipe. Every drawn pipe is inspectable. Enlarged tap

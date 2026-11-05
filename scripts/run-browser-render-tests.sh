@@ -8,7 +8,7 @@ export NODE_OPTIONS="${NODE_OPTIONS:-} --experimental-websocket"
 
 if [[ "${1:-}" == "--if-ui-changed" ]]; then
   shift
-  ui_pattern='^(main/www/|main/def/|main/http_|test/test_browser|test/test_ui|tools/browser/|tools/ui/|tools/schematic/|tools/web_asset/|tools/presenter/|tools/ui_localization/|tools/localization/|scripts/run-browser-render-tests[.]sh|[.]github/workflows/build[.]yml$)'
+  ui_pattern='^(main/www/|main/def/|main/http_|main/logic/(history|homehub_map)[.]hpp$|test/test_browser|test/test_ui|tools/browser/|tools/ui/|tools/schematic/|tools/web_asset/|tools/presenter/|tools/ui_localization/|tools/localization/|scripts/run-browser-render-tests[.]sh|[.]github/workflows/build[.]yml$)'
 
   range=""
   before_candidate="${BEFORE:-${GITHUB_EVENT_BEFORE:-}}"

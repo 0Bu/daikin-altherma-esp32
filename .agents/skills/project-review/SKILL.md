@@ -41,6 +41,11 @@ A holistic pass before a PR merges. Not a linter — it checks the things that r
    redaction, dependency/tool execution, signing/installer provenance and trusted-base CI/credential
    handling. Assign an independent security pass within this review; a doc comparison alone is
    insufficient. Keep evidence at the reviewed head and retain the existing gate records.
+8. **UI runtime, when affected.** Trace recurring polling/render work, history construction and DOM
+   ownership. Require the [live-polling review](../ui-use-case-review/SKILL.md#3b-review-continuity-under-live-polling)
+   for UI/history changes: static snapshots, posed GIF frames and mocked renderers cannot establish
+   responsiveness. Uncovered history entry paths, recurring hidden-chart work or failed continuity
+   and responsiveness assertions block a clean review.
 
 Report findings grouped by the above; contradictions, unjustified duplication, unreadable guidance
 and untested logic block a clean review.
