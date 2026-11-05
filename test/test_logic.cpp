@@ -63,6 +63,7 @@
 #include "logic/payload_complete.hpp"
 #include "logic/task_failure.hpp"
 #include "logic/ota_transport.hpp"
+#include "logic/ota_upload.hpp"
 #include "logic/heartbeat.hpp"
 #include "logic/hp_query_log.hpp"
 #include "logic/modbus_profile.hpp"
@@ -152,6 +153,21 @@ template <typename T> static T rt(T v) {
 }
 
 using namespace daik;
+
+static void test_value_def_layout() {
+    CHECK(sizeof(ValueDef) == 8 + sizeof(const char*));
+    const ValueDef empty;
+    CHECK(empty.reg == 0 && empty.offset == 0 && empty.conv == 0 && empty.size == 0 &&
+          empty.type == 0 && !empty.no_publish && empty.label == nullptr);
+    const char*    label = "layout witness";
+    const ValueDef row{0x61, 10, 105, 2, -1, label};
+    CHECK(row.reg == 0x61 && row.offset == 10 && row.conv == 105 && row.size == 2 &&
+          row.type == -1 && !row.no_publish && row.label == label);
+    const ValueDef detect_only{0x61, 10, 105, 2, -1, label, true};
+    CHECK(detect_only.reg == row.reg && detect_only.offset == row.offset &&
+          detect_only.conv == row.conv && detect_only.size == row.size &&
+          detect_only.type == row.type && detect_only.no_publish && detect_only.label == label);
+}
 
 static void test_http_cache() {
     constexpr std::string_view tag = "\"012345abcdef\"";
@@ -10025,6 +10041,11 @@ static void test_http139_boundaries() {
     CHECK(!budget.admit(99'999'999));
     budget.finish();
     CHECK(budget.admit(200'000'000));
+    budget.limit_us = OTA_UPLOAD_BUDGET_US;
+    CHECK(budget.admit(200'000'000 + OTA_UPLOAD_BUDGET_US - 1));
+    CHECK(!budget.admit(200'000'000 + OTA_UPLOAD_BUDGET_US));
+    budget.finish();
+    CHECK(budget.limit_us == HTTP_INGRESS_BUDGET_US);
 
     using F = HttpConfigFieldType;
     for (const auto expected : {F::String, F::Boolean, F::Number, F::Integer, F::Other}) {
@@ -13489,7 +13510,7 @@ static void test_mcp() {
     CHECK(parse("{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/list\",\"params\":null}").error ==
           -32602);
 
-    // Both tools accept an omitted or empty arguments object and nothing else. Escaped ASCII in a
+    // All tools accept an omitted or empty arguments object and nothing else. Escaped ASCII in a
     // JSON key/value is decoded before dispatch, so a standards-compliant encoder cannot miss
     // tools.
     r = parse("{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\","
@@ -13498,6 +13519,12 @@ static void test_mcp() {
     r = parse("{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\","
               "\"params\":{\"arguments\":{},\"name\":\"get_hp_\\u0076alues\"}}");
     CHECK(!r.error && r.tool == "get_hp_values");
+    r = parse(R"({"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"get_ota_info"}})");
+    CHECK(!r.error && r.tool == "get_ota_info");
+    CHECK(
+        parse(
+            R"({"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"get_ota_info","arguments":{"execute":true}}})")
+            .error == -32602);
     CHECK(parse("{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\"}").error == -32602);
     CHECK(parse("{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\",\"params\":{}}").error ==
           -32602);
@@ -13571,7 +13598,7 @@ static void test_mcp() {
     parse_err.error = -32602;
     CHECK(std::string(mcp_error_message(parse_err)) == "Invalid params");
 
-    // Fixed results expose exactly the two read-only no-argument tools and the full server name.
+    // Fixed results expose three read-only no-argument tools and the full server name.
     const std::string init = mcp_initialize_result("2025-11-25", "v9.9.9");
     CHECK(init.find("\"protocolVersion\":\"2025-11-25\"") != std::string::npos);
     CHECK(init.find("\"capabilities\":{\"tools\":{}}") != std::string::npos);
@@ -13580,6 +13607,23 @@ static void test_mcp() {
     const std::string catalog = mcp_tools_list_result();
     CHECK(catalog.find("\"name\":\"get_status\"") != std::string::npos);
     CHECK(catalog.find("\"name\":\"get_hp_values\"") != std::string::npos);
+    CHECK(catalog.find("\"name\":\"get_ota_info\"") != std::string::npos);
+    for (const bool dev : {false, true}) {
+        for (const bool busy : {false, true}) {
+            std::string info;
+            mcp_append_ota_info(info, dev, busy);
+            CHECK(info.find(dev && !busy ? "\"enabled\":true" : "\"enabled\":false") !=
+                  std::string::npos);
+            CHECK(info.find("\"path\":\"/ota/upload\"") != std::string::npos);
+            CHECK(info.find("\"signed_image_required\":true") != std::string::npos);
+        }
+    }
+    const char* upload_sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    CHECK(ota_upload_allowed(OtaChannel::Dev, 8192, 8192, upload_sha));
+    CHECK(!ota_upload_allowed(OtaChannel::Release, 8192, 8192, upload_sha));
+    CHECK(!ota_upload_allowed(OtaChannel::Dev, 8193, 8192, upload_sha));
+    CHECK(!ota_upload_allowed(OtaChannel::Dev, 4095, 8192, upload_sha));
+    CHECK(!ota_upload_allowed(OtaChannel::Dev, 8192, 8192, "invalid"));
     CHECK(catalog.find("\"name\":\"set_") == std::string::npos);
     CHECK(catalog.find("\"additionalProperties\":false") != std::string::npos);
     CHECK(catalog.find("\"readOnlyHint\":true") != std::string::npos);
@@ -13797,29 +13841,14 @@ static void test_http_surface() {
     const HttpSurface lan = HttpSurface::TrustedLan;
 
     // Trusted LAN exposes the full API — every route, either method.
-    for (const char* p : {"/",
-                          "/index.html",
-                          "/favicon.ico",
-                          "/locale.js",
-                          "/scan",
-                          "/status",
-                          "/values",
-                          "/diag",
-                          "/diag/clear",
-                          "/coredump",
-                          "/coredump/clear",
-                          "/crash/dismiss",
-                          "/models",
-                          "/set_wifi",
-                          "/set_mqtt",
-                          "/set_ntp",
-                          "/set_weather",
-                          "/set_hp",
-                          "/detect",
-                          "/ota/check",
-                          "/ota/update",
-                          "/ota/changelog",
-                          "/mcp"}) {
+    for (const char* p : {"/",           "/index.html",     "/favicon.ico",
+                          "/locale.js",  "/scan",           "/status",
+                          "/values",     "/diag",           "/diag/clear",
+                          "/coredump",   "/coredump/clear", "/crash/dismiss",
+                          "/models",     "/set_wifi",       "/set_mqtt",
+                          "/set_ntp",    "/set_weather",    "/set_hp",
+                          "/detect",     "/ota/check",      "/ota/update",
+                          "/ota/upload", "/ota/changelog",  "/mcp"}) {
         CHECK(http_surface_serves(lan, p, false));
         CHECK(http_surface_serves(lan, p, true));
     }
@@ -13854,6 +13883,7 @@ static void test_http_surface() {
     CHECK(!http_surface_serves(ap, "/detect", true));
     CHECK(!http_surface_serves(ap, "/ota/check", false));
     CHECK(!http_surface_serves(ap, "/ota/update", true));
+    CHECK(!http_surface_serves(ap, "/ota/upload", true));
     CHECK(!http_surface_serves(ap, "/ota/changelog", false));
     CHECK(!http_surface_serves(ap, "/mcp", false)); // GET dashboard is LAN-only too
     CHECK(!http_surface_serves(ap, "/mcp", true));
@@ -13915,17 +13945,26 @@ static void test_http_request_policy() {
     CHECK(http_json_content_type("application/json"));
     CHECK(http_json_content_type("Application/JSON; charset=utf-8"));
     CHECK(http_json_content_type(" application/json ; charset=UTF-8 "));
+    CHECK(http_json_content_type("\tapplication/json\t;\tcharset=UTF-8\t"));
     CHECK(!http_json_content_type(""));
     CHECK(!http_json_content_type("text/plain"));
     CHECK(!http_json_content_type("application/x-www-form-urlencoded"));
     CHECK(!http_json_content_type("application/jsonp"));
     CHECK(!http_json_content_type("application/json;"));
+    CHECK(!http_json_content_type("application/json; \t"));
 
     CHECK(!http_is_ota_route("/ota"));
     CHECK(!http_is_ota_route("/ota?foo=1"));
     CHECK(!http_is_ota_route("/ota/"));
     CHECK(http_is_ota_route("/ota/update", true));
     CHECK(http_is_ota_route("/ota/update?url=http://foo", true));
+    CHECK(http_is_ota_route("/ota/upload?sha256=abc", true));
+    CHECK(!http_is_ota_route("/ota/upload"));
+    CHECK(!http_is_ota_upload("/ota/upload/extra"));
+    CHECK(http_post_content_type("/ota/upload?sha256=abc", "application/octet-stream"));
+    CHECK(!http_post_content_type("/ota/upload", "application/json"));
+    CHECK(!http_post_content_type("/ota/upload", "text/plain"));
+    CHECK(!http_post_content_type("/set_ota", "application/octet-stream"));
     CHECK(!http_is_ota_route("/ota/update"));
     CHECK(!http_is_ota_route("/ota/status", true));
     CHECK(!http_is_ota_route("/ota/check", true));
@@ -28668,6 +28707,7 @@ static void test_checkup_scoped_flash_age() {
 }
 
 int main() {
+    test_value_def_layout();
     test_diag_tail();
     test_http_cache();
     test_crc();

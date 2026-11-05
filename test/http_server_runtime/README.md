@@ -8,7 +8,7 @@ validated independently using Node's fatal UTF-8 decoder and native `JSON.parse`
 The complete `http_common.cpp`, `http_server.cpp` and `mcp_server.cpp` production units execute with
 SDK-shaped transport adapters. Four route-registration functions from status/config/OTA are copied
 verbatim, retaining their conditions and method/order, while their unrelated service handlers are
-counted adapters. An independent fixed AP5/LAN39 oracle checks actual registration, the real common
+counted adapters. An independent fixed AP5/LAN40 oracle checks actual registration, the real common
 trampoline and catch-all order. MCP invokes controlled shared status/values stream adapters; their
 production serializers and physical readings remain outside this fixture.
 
@@ -16,8 +16,11 @@ Cases cover startup and route-capacity failures, LAN/AP and Ethernet identities,
 Metadata and JSON media policy, exact OTA-route exemptions, exception and stack-sample boundaries,
 bounded unread-body settlement, absolute incoming header/body budgets, real host socket fragments,
 failed-admission close ownership, early-response wire framing, MCP revisions, initialize/catalog,
-both bounded tool envelopes, independent snapshot generations, notifications, malformed documents,
-UTF-8, null parse-error IDs, unsupported writes, GET gzip headers and SSE rejection. Compiling
+bounded snapshot envelopes and read-only OTA capability discovery, independent snapshot generations,
+notifications, malformed documents,
+UTF-8, null parse-error IDs, unsupported writes, GET gzip headers and SSE rejection. Shutdown controls
+cover ENOTCONN and three real SIGABRT paths that retain the async lease after a failed shutdown.
+A compiling mutation proves that ignoring that failure breaks the lease oracle. Other compiling
 mutants restore the old OTA-prefix exemption and remove individual guards/dispatch choices; each
 must fail its named independent oracle. Host socket pairs do not prove the ESP32 SDK parser or lwIP,
 hardware, NVS,

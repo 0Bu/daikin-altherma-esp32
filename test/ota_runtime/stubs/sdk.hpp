@@ -39,6 +39,9 @@ struct FakeMutex {
 };
 using SemaphoreHandle_t = FakeMutex*;
 using StaticSemaphore_t = FakeMutex;
+struct sys_sem_t {};
+sys_sem_t* sys_thread_sem_get();
+void       sys_thread_sem_deinit();
 struct esp_app_desc_t {
     uint32_t magic_word = 0, secure_version = 0, reserv1[2]{};
     char     version[32]{}, project_name[32]{}, time[16]{}, date[16]{}, idf_ver[32]{};
@@ -112,6 +115,7 @@ struct psa_hash_operation_t {
 constexpr unsigned MALLOC_CAP_8BIT = 1, MALLOC_CAP_INTERNAL = 2;
 namespace sdk {
 struct Stop {};
+enum class Prime { Stable, Null, Unregistered, Lost };
 enum class Fault {
     None,
     HeaderException,
@@ -123,6 +127,8 @@ enum class Fault {
     ReadError,
     WriteError,
     HashError,
+    HashSetupError,
+    HashFinishError,
     HashMismatch,
     ValidationError,
     SelectionError,
@@ -138,6 +144,12 @@ struct State {
     bool      injected = false, invalid_release = false, deadline_armed = false;
     bool      reject_new = false, interrupt = false;
     bool      fail_task_create = false, health_offline = false;
+    Prime     prime             = Prime::Stable;
+    bool      defer_worker_boot = false, worker_parked = false, prime_finished = false;
+    bool      reject_sem_allocation = false, invalid_network_use = false;
+    unsigned  prime_gets = 0, sem_allocations = 0, network_uses = 0, worker_wakeups = 0;
+    bool      dev_channel = true, no_partition = false;
+    size_t    partition_size = 8192;
     bool      recovery_ap = false, hp_live = false, x10a_required = false, x10a_proven = false;
     // Factory-reset latch adapter: `reset_latched` is what nvs_factory_reset_latched() reads
     // (operation start); `reset_hold` is what the last-moment restart refusal answers.
@@ -172,12 +184,19 @@ struct State {
     void*          buffers[8]{};
     FakeHttpClient clients[8]{};
     char           manifest[256]{};
-    uint8_t        image[2048]{};
+    uint8_t        image[8192]{};
     size_t         image_size = 2048;
     esp_app_desc_t app{};
 };
 extern State state;
 void         inject(Fault);
+void         prepare_worker(void (*)(void*), void*);
+void         boot_worker();
+void         run_worker(void*);
+void         stop_worker() noexcept;
+uint32_t     wait_worker();
+void         park_worker();
+void         network_use() noexcept;
 } // namespace sdk
 inline SemaphoreHandle_t xSemaphoreCreateMutex() {
     return nullptr; // deterministic dynamic-mutex allocation failure, including static init
@@ -218,6 +237,10 @@ inline TaskHandle_t xTaskCreateStatic(void (*fn)(void*), const char* name, unsig
         sdk::state.health_entry       = fn;
     }
     task = {fn, arg};
+    if (std::strcmp(name, "ota") == 0) {
+        sdk::prepare_worker(fn, arg);
+        task = {sdk::run_worker, nullptr};
+    }
     return &task;
 }
 inline BaseType_t xTaskCreate(void (*fn)(void*), const char*, unsigned, void* arg, unsigned,
@@ -230,11 +253,9 @@ inline BaseType_t xTaskCreate(void (*fn)(void*), const char*, unsigned, void* ar
     if (out) *out = &task;
     return pdPASS;
 }
-inline uint32_t ulTaskNotifyTake(BaseType_t, TickType_t) {
-    if (sdk::state.notifications++ != 0) throw sdk::Stop{};
-    return 1;
-}
-inline void          xTaskNotifyGive(TaskHandle_t) {}
+inline uint32_t      ulTaskNotifyTake(BaseType_t, TickType_t) { return sdk::wait_worker(); }
+inline void          xTaskNotifyGive(TaskHandle_t) { ++sdk::state.worker_wakeups; }
+inline void          vTaskSuspend(TaskHandle_t) { sdk::park_worker(); }
 inline TimerHandle_t xTimerCreateStatic(const char*, TickType_t, BaseType_t, void*,
                                         void (*)(TimerHandle_t), StaticTimer_t* storage) {
     return storage;

@@ -247,7 +247,7 @@ jobs:
           # agent-hooks drives the merge gate, which runs the UI, absence and UI-GIF suites; its
           # formatter suggestion cases copy .clang-format, and it pins the exact command shapes of
           # gh-with-git-credentials.sh and production-ota-gate.py.
-          emit agent_hooks '^(tools/(agent-hooks|agent-policy|absence|ui|uigif|skill_audit)/|\.githooks/|\.agents/hooks\.json$|\.clang-format$|\.github/pull_request_template\.md$|scripts/(agent-python|run-(agent-policy|agentic-setup-audit|ui-use-case-tests|ui-gif-audit|skill-audit)|gh-with-git-credentials|production-ota-gate)\.(sh|py)$)'
+          emit agent_hooks '^(tools/(agent-hooks|agent-policy|absence|ui|uigif|skill_audit|dev_ota)/|\.githooks/|\.agents/hooks\.json$|\.clang-format$|\.github/pull_request_template\.md$|scripts/(agent-python|run-(agent-policy|agentic-setup-audit|ui-use-case-tests|ui-gif-audit|skill-audit)|gh-with-git-credentials|production-ota-gate|dev-ota-upload|local-ota-evidence)\.(sh|py)$)'
           # agent-config's canaries run scripts/run-agent-instructions-budget.sh over a fixture built
           # from .agents/, generated .codex/, scoped AGENTS.md files and .mcp.json.
           emit agent_config '(^|/)AGENTS\.md$|^(tools/(agent-config|skill_audit)/|\.agents/|\.codex/|\.mcp\.json$|scripts/(agent-python|setup-codex|check-codex-setup|run-codex-review|gh-with-git-credentials|run-agent-instructions-budget|run-agentic-setup-audit|run-skill-audit)\.sh$)'
@@ -265,7 +265,7 @@ jobs:
           emit schematic '^(tools/schematic/|scripts/run-schematic-audit\.sh$|main/(www|def)/|docs/DESIGN\.md$)'
           emit esp_idf_matrix '^(tools/esp_idf_matrix/|scripts/run-esp-idf-matrix-audit\.sh$|main/|partitions\.csv$|sdkconfig\.defaults$|docs/ESP_IDF_MATRIX\.md$)'
           # The OTA canaries also read MQTT startup, shared HTTP/poll/source ownership and stack data.
-          emit ota '^(tools/(ota|production_ota|stack)/|tools/agent-hooks/agent_hook\.py$|scripts/(production-ota-gate|check-manifest-provenance)\.py$|test/test_.*ota.*|main/(CMakeLists\.txt$|[^/]+\.(cpp|hpp)$|logic/)|sdkconfig\.defaults$|docs/(SECURITY|FEATURES)\.md$|\.github/workflows/build\.yml$)'
+          emit ota '^(tools/(ota|production_ota|dev_ota|stack)/|tools/agent-hooks/agent_hook\.py$|scripts/(production-ota-gate|dev-ota-upload|local-ota-evidence|check-manifest-provenance)\.py$|test/(test_.*ota.*|dev_ota_upload/)|main/(CMakeLists\.txt$|[^/]+\.(cpp|hpp)$|logic/)|sdkconfig\.defaults$|docs/(SECURITY|FEATURES)\.md$|\.github/workflows/build\.yml$)'
 
       # Contributor-authored text: does the commit range this PR carries, or its title/description,
       # hold personal information (an email outside GitHub's own noreply/example patterns, a phone

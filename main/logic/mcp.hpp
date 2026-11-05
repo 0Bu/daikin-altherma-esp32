@@ -425,7 +425,7 @@ inline McpRequest mcp_parse(const char* body, int len) {
             out.error = -32602;
             return out;
         }
-        if (out.tool != "get_status" && out.tool != "get_hp_values") {
+        if (out.tool != "get_status" && out.tool != "get_hp_values" && out.tool != "get_ota_info") {
             out.error = -32601;
             out.error_message = "Tool not found";
         }
@@ -492,20 +492,41 @@ inline std::string mcp_initialize_result(const std::string& protocol_version,
 }
 
 inline const char* mcp_tools_list_result() {
-    return
-        "{\"tools\":["
-        "{\"name\":\"get_status\","
-        "\"description\":\"Read-only device and heat-pump status (version, uptime, WiFi, MQTT, "
-        "bus health, detected model).\","
-        "\"inputSchema\":{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false},"
-        "\"annotations\":{\"readOnlyHint\":true,\"destructiveHint\":false,"
-        "\"idempotentHint\":true,\"openWorldHint\":false}},"
-        "{\"name\":\"get_hp_values\","
-        "\"description\":\"Read-only snapshot of the latest decoded heat-pump readings.\","
-        "\"inputSchema\":{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false},"
-        "\"annotations\":{\"readOnlyHint\":true,\"destructiveHint\":false,"
-        "\"idempotentHint\":true,\"openWorldHint\":false}}"
-        "]}";
+    return "{\"tools\":["
+           "{\"name\":\"get_status\","
+           "\"description\":\"Read-only device and heat-pump status (version, uptime, WiFi, MQTT, "
+           "bus health, detected model).\","
+           "\"inputSchema\":{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false},"
+           "\"annotations\":{\"readOnlyHint\":true,\"destructiveHint\":false,"
+           "\"idempotentHint\":true,\"openWorldHint\":false}},"
+           "{\"name\":\"get_hp_values\","
+           "\"description\":\"Read-only snapshot of the latest decoded heat-pump readings.\","
+           "\"inputSchema\":{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false},"
+           "\"annotations\":{\"readOnlyHint\":true,\"destructiveHint\":false,"
+           "\"idempotentHint\":true,\"openWorldHint\":false}},"
+           "{\"name\":\"get_ota_info\","
+           "\"description\":\"Discover the signed HTTP firmware upload endpoint and its "
+           "dev-channel requirement. Does not install firmware.\","
+           "\"inputSchema\":{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false},"
+           "\"annotations\":{\"readOnlyHint\":true,\"destructiveHint\":false,"
+           "\"idempotentHint\":true,\"openWorldHint\":false}}"
+           "]}";
+}
+
+template <typename JsonOut> inline void mcp_append_ota_info(JsonOut& out, bool dev, bool busy) {
+    out += "{\"channel\":";
+    out += dev ? "\"dev\"" : "\"release\"";
+    out += ",\"busy\":";
+    out += busy ? "true" : "false";
+    out += ",\"upload\":{\"enabled\":";
+    out += dev && !busy ? "true" : "false";
+    out += ",\"method\":\"POST\",\"path\":\"/ota/upload\","
+           "\"content_type\":\"application/octet-stream\","
+           "\"required_query\":\"sha256=<SHA-256 of the entire signed binary, 64 lowercase hex>\","
+           "\"content_length_required\":true,\"signed_image_required\":true,"
+           "\"allows_same_or_older_version\":true,\"receive_budget_seconds\":300},"
+           "\"status_path\":\"/ota/status\",\"explicit_user_authorization_required\":true,"
+           "\"pr_gates_required\":true,\"boot_health_check_required\":true}";
 }
 
 template <typename JsonOut>
