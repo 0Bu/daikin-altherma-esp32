@@ -226,7 +226,7 @@ I18N.es = localeValues([
   /* check.stop.title */ "Contexto de parada",
   /* check.stop.population */ (n) => `${n} paradas observadas tras calefacción reciente`,
   /* check.stop.coverage */ (d, h) => `Tiempo de compresor legible ${d} · ${h} bloques horarios`,
-  /* check.stop.categories */ "baja velocidad + diferencia con consigna principal|retirada de solicitud de unidad interior|desescarche activo|transición a agua caliente|cambio de circuito/modo",
+  /* check.stop.categories */ "baja velocidad + diferencia con consigna principal|retirada de solicitud de unidad interior|desescarche activo|cambio hacia/desde agua caliente|cambio de circuito/modo",
   /* check.stop.counts */ "positivas / evaluables / completas",
   /* check.stop.other */ "sin clasificar|desconocidas|parciales|interrumpidas|consigna cambiada|desbordamiento temporal",
   /* check.stop.loss */ (n) => `Avisos de pérdida de almacenamiento ${n}`,

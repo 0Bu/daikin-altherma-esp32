@@ -226,7 +226,7 @@ I18N.ja = localeValues([
   /* check.stop.title */ "停止時の状況",
   /* check.stop.population */ (n) => `直近の暖房後に観測した停止 ${n} 回`,
   /* check.stop.coverage */ (d, h) => `圧縮機の読取可能時間 ${d} · 時間枠 ${h} 個`,
-  /* check.stop.categories */ "低速と主目標との差|室内機要求の撤回|除霜作動|給湯への移行|流路/モードの変化",
+  /* check.stop.categories */ "低速と主目標との差|室内機要求の撤回|除霜作動|給湯切替|流路/モードの変化",
   /* check.stop.counts */ "陽性 / 評価可能 / 完全",
   /* check.stop.other */ "未分類|不明|部分的|打切り|目標変更|時間超過",
   /* check.stop.loss */ (n) => `保存データ欠落通知 ${n}`,
