@@ -1834,7 +1834,7 @@ function renderInspect() {
     const valueRow = (label, value) =>
       `<div class="inspect-row"><span>${esc(label)}</span><span>${esc(value)}</span></div>`;
     setTxt("inspTitle", inspTitleText(e, null));
-    setTxt("inspSrc", "ENV III");
+    setHtml("inspSrc", "ENV III", false);
     $("inspSrc").hidden = false;
     inspectSourceStyle();
     $("inspNow").hidden = false;
@@ -1842,15 +1842,15 @@ function renderInspect() {
     // Values precede the chart so the combined timeline is the final, full-width evidence block in
     // the infobox. Temperature is repeated deliberately: the header mirrors the pill while this
     // list keeps the three ENV III instruments directly comparable and independently labelled.
-    $("inspBody").innerHTML =
+    setHtml("inspBody",
       `<div class="inspect-env-state ${state.cls}">${esc(t("env.sensor_state"))}: ${esc(state.text)}</div>` +
       `<div class="vdesc-p">${esc(t("env.history_help"))}</div>` +
       `<div class="inspect-rows inspect-env-values">` +
         valueRow(t("env.temperature"), env3Value(env, "temperature_c", 1, "°C")) +
         valueRow(t("env.humidity"), env3Value(env, "humidity_pct", 0, "%")) +
         valueRow(t("env.pressure"), env3Value(env, "pressure_hpa", 0, "hPa")) +
-      `</div>`;
-    $("inspRows").innerHTML = "";
+      `</div>`, false);
+    setHtml("inspRows", "", false);
     return;
   }
   // `d` is the drawing's snapshot and is NOT null merely because X10A is silent — liveData() still
@@ -1867,13 +1867,13 @@ function renderInspect() {
   if (S.insp === "room" && !row && !fb && roomReferencePresent()) {
     const r = S.status.reference_temperature;
     setTxt("inspTitle", inspTitleText(e, d));
-    setTxt("inspSrc", roomHistName());
+    setHtml("inspSrc", esc(roomHistName()), false);
     $("inspSrc").hidden = false;
     inspectSourceStyle(false, true);
     setTxt("inspNow", `${fmt1(roomReferenceValue())} °C`);
     $("inspNow").hidden = false;
-    $("inspBody").innerHTML = descParaHtml(esc(roomSourceStatusText(roomSourceStatus(r, S.status?.mqtt || {}))));
-    $("inspRows").innerHTML = "";
+    setHtml("inspBody", descParaHtml(esc(roomSourceStatusText(roomSourceStatus(r, S.status?.mqtt || {})))), false);
+    setHtml("inspRows", "", false);
     return;
   }
   setTxt("inspTitle", inspTitleText(e, d));
@@ -1887,8 +1887,8 @@ function renderInspect() {
   // reading; this was the one place it did not.
   const srcName = fb ? displayHomeHubLabel(fb)
                      : displayReadingLabel(row ? row.label : (e.sample || ""), row);
-  $("inspSrc").innerHTML = esc(srcName) +
-    (fb ? ` <span class="mb-tag">${esc(t("src.modbus_tag"))}</span>` : "");
+  setHtml("inspSrc", esc(srcName) +
+    (fb ? ` <span class="mb-tag">${esc(t("src.modbus_tag"))}</span>` : ""), false);
   $("inspSrc").hidden = !(row || fb || e.sample);
   // Headline = the ONE compact reading this target stands for (its row, or a derived `head` for the
   // computed pills). An assembly like the outdoor unit has no single number, so it gets no headline
@@ -1925,9 +1925,11 @@ function renderInspect() {
                        : (desc ? descBodyHtml(desc, (row || fb)?.value, descriptionCopy(desc)) : "");
   // Prose stays prose. Every live reading, including a leaf headline's second source, is rendered
   // together after the chart in the divided value list below.
-  $("inspBody").innerHTML = what + (sentence ? descParaHtml(esc(sentence)) : "")
-    + inspHeldHtml(e, d);
-  $("inspRows").innerHTML = !d ? "" : inspValues(e, row, fb)
+  // The inspector records its signature immediately, so its writes cannot wait for clickHold.
+  // setHtml still preserves identical prose while a values poll changes the headline number.
+  setHtml("inspBody", what + (sentence ? descParaHtml(esc(sentence)) : "")
+    + inspHeldHtml(e, d), false);
+  let rows = !d ? "" : inspValues(e, row, fb)
     // A member reading with a twin gets the gateway's value as its OWN row, labelled "(Modbus)" and
     // petrol throughout — never appended to the X10A value in the same cell, which is what this did
     // first and which rendered as "46.2 °C 46.0 °C": two numbers of equal weight, jammed together,
@@ -1950,10 +1952,10 @@ function renderInspect() {
         inspComparisonHtml(m, d);
     })
     .join("");
-  if (S.insp === "room" && roomReferencePresent()) {
-    $("inspRows").innerHTML += `<div class="inspect-row room-row"><span>${esc(roomHistName())}</span>` +
+  if (S.insp === "room" && roomReferencePresent())
+    rows += `<div class="inspect-row room-row"><span>${esc(roomHistName())}</span>` +
       `<span>${esc(fmt1(roomReferenceValue()))} °C</span></div>`;
-  }
+  setHtml("inspRows", rows, false);
 }
 
 // Name every schematic hit target from its INSPECT entry. An SVG <title> is BOTH the native hover

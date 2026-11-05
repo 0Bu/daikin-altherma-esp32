@@ -429,9 +429,8 @@ function initNavigation() { applyRouteFromLocation(); }
 // The cache is deliberately NOT updated when a write is skipped for reason 2 — recording markup that
 // was never written would make the next identical render skip a write the DOM still needs.
 const _html = {};
-function setHtml(id, html) {
-  if (S.clickHold) return;
-  if (_html[id] === html) return;
+function setHtml(id, html, hold = true) {
+  if ((hold && S.clickHold) || _html[id] === html) return;
   _html[id] = html;
   if (typeof replaceHistoryHtml === "function") replaceHistoryHtml($(id), html);
   else $(id).innerHTML = html;

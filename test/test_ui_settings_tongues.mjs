@@ -218,6 +218,11 @@ assert.match(circulationButton, /aria-label="[^"]*Example circulation pump · L�
   "a row whose face carries its condition in colour must say that condition in its accessible name");
 let circulationTongue = circulationHtml.match(/id="diagnostics-circulation-detail">([\s\S]*?)<\/div><\/div><\/div><\/div>/)?.[1] || "";
 assert.match(circulationTongue, /<span class="vdesc-n">Erkannter Zustand<\/span> Läuft/);
+assert.doesNotMatch(circulationTongue, /class="vhist/,
+  "a collapsed circulation tongue must not rebuild a cached history on every poll");
+S.descOpen.add("diagnostics:circulation");
+circulationHtml = sandbox.__renderCirculation();
+circulationTongue = circulationHtml.match(/id="diagnostics-circulation-detail">([\s\S]*?)<\/div><\/div><\/div><\/div>/)?.[1] || "";
 assert.match(circulationTongue, /<div class="vhist vhist-state">TIMELINE/,
   "the current assessment and its categorical history must share the information tongue");
 
