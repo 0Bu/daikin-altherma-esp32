@@ -2562,11 +2562,11 @@
       "max_bytes": 224
     },
     "stop_stopcontextinput__int___const": {
-      "pattern": "^daik::logic::stop_context_collect<daik::CachedValue>\\(daik::logic::StopContextInputPlan\\ const\\&,\\ daik::CachedValue\\ const\\*,\\ unsigned\\ int,\\ bool,\\ bool\\)::\\{lambda\\(daik::logic::StopContextInput,\\ int\\&\\)\\#1\\}::operator\\(\\)\\(daik::logic::StopContextInput,\\ int\\&\\)\\ const$",
+      "pattern": "^daik::logic::stop_context_collect<daik::CachedValue>\\(daik::logic::StopContextInputPlan\\ const\\&,\\ daik::CachedValue\\ const\\*,\\ unsigned\\ int,\\ bool,\\ bool\\)::\\{lambda\\(daik::logic::StopContextInput,\\ int\\&\\)\\x231\\}::operator\\(\\)\\(daik::logic::StopContextInput,\\ int\\&\\)\\ const$",
       "max_bytes": 32
     },
     "stop_stopcontextinput__const": {
-      "pattern": "^daik::logic::stop_context_collect<daik::CachedValue>\\(daik::logic::StopContextInputPlan\\ const\\&,\\ daik::CachedValue\\ const\\*,\\ unsigned\\ int,\\ bool,\\ bool\\)::\\{lambda\\(daik::logic::StopContextInput\\)\\#2\\}::operator\\(\\)\\(daik::logic::StopContextInput\\)\\ const$",
+      "pattern": "^daik::logic::stop_context_collect<daik::CachedValue>\\(daik::logic::StopContextInputPlan\\ const\\&,\\ daik::CachedValue\\ const\\*,\\ unsigned\\ int,\\ bool,\\ bool\\)::\\{lambda\\(daik::logic::StopContextInput\\)\\x232\\}::operator\\(\\)\\(daik::logic::StopContextInput\\)\\ const$",
       "max_bytes": 48
     },
     "stop_cachedvalue_const___unsigned_int__bool__bool_": {
@@ -2694,15 +2694,15 @@
       "max_bytes": 48
     },
     "stop_json_http_key": {
-      "pattern": "^daik::append_stop_context_json<daik::BoundedChunkSink<daik::HttpChunkEmitter,\\ 1024u>\\ >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter,\\ 1024u>\\&,\\ daik::StopContextPayloadFields\\ const\\&,\\ bool\\)::\\{lambda\\(char\\ const\\*,\\ char\\ const\\*\\)\\#1\\}::operator\\(\\)\\(char\\ const\\*,\\ char\\ const\\*\\)\\ const$",
+      "pattern": "^daik::append_stop_context_json<daik::BoundedChunkSink<daik::HttpChunkEmitter,\\ 1024u>\\ >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter,\\ 1024u>\\&,\\ daik::StopContextPayloadFields\\ const\\&,\\ bool\\)::\\{lambda\\(char\\ const\\*,\\ char\\ const\\*\\)\\x231\\}::operator\\(\\)\\(char\\ const\\*,\\ char\\ const\\*\\)\\ const$",
       "max_bytes": 32
     },
     "stop_json_http_number": {
-      "pattern": "^daik::append_stop_context_json<daik::BoundedChunkSink<daik::HttpChunkEmitter,\\ 1024u>\\ >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter,\\ 1024u>\\&,\\ daik::StopContextPayloadFields\\ const\\&,\\ bool\\)::\\{lambda\\(unsigned\\ long\\ long,\\ bool\\)\\#2\\}::operator\\(\\)\\(unsigned\\ long\\ long,\\ bool\\)\\ const$",
+      "pattern": "^daik::append_stop_context_json<daik::BoundedChunkSink<daik::HttpChunkEmitter,\\ 1024u>\\ >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter,\\ 1024u>\\&,\\ daik::StopContextPayloadFields\\ const\\&,\\ bool\\)::\\{lambda\\(unsigned\\ long\\ long,\\ bool\\)\\x232\\}::operator\\(\\)\\(unsigned\\ long\\ long,\\ bool\\)\\ const$",
       "max_bytes": 64
     },
     "stop_json_http_flag": {
-      "pattern": "^daik::append_stop_context_json<daik::BoundedChunkSink<daik::HttpChunkEmitter,\\ 1024u>\\ >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter,\\ 1024u>\\&,\\ daik::StopContextPayloadFields\\ const\\&,\\ bool\\)::\\{lambda\\(bool,\\ bool\\)\\#3\\}::operator\\(\\)\\(bool,\\ bool\\)\\ const$",
+      "pattern": "^daik::append_stop_context_json<daik::BoundedChunkSink<daik::HttpChunkEmitter,\\ 1024u>\\ >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter,\\ 1024u>\\&,\\ daik::StopContextPayloadFields\\ const\\&,\\ bool\\)::\\{lambda\\(bool,\\ bool\\)\\x233\\}::operator\\(\\)\\(bool,\\ bool\\)\\ const$",
       "max_bytes": 32
     },
     "stop_json_http_body": {
@@ -2710,15 +2710,15 @@
       "max_bytes": 80
     },
     "stop_json_mqtt_key": {
-      "pattern": "^daik::append_stop_context_json<std::__cxx11::basic_string<char,\\ std::char_traits<char>,\\ std::allocator<char>\\ >\\ >\\(std::__cxx11::basic_string<char,\\ std::char_traits<char>,\\ std::allocator<char>\\ >\\&,\\ daik::StopContextPayloadFields\\ const\\&,\\ bool\\)::\\{lambda\\(char\\ const\\*,\\ char\\ const\\*\\)\\#1\\}::operator\\(\\)\\(char\\ const\\*,\\ char\\ const\\*\\)\\ const$",
+      "pattern": "^daik::append_stop_context_json<std::__cxx11::basic_string<char,\\ std::char_traits<char>,\\ std::allocator<char>\\ >\\ >\\(std::__cxx11::basic_string<char,\\ std::char_traits<char>,\\ std::allocator<char>\\ >\\&,\\ daik::StopContextPayloadFields\\ const\\&,\\ bool\\)::\\{lambda\\(char\\ const\\*,\\ char\\ const\\*\\)\\x231\\}::operator\\(\\)\\(char\\ const\\*,\\ char\\ const\\*\\)\\ const$",
       "max_bytes": 32
     },
     "stop_json_mqtt_flag": {
-      "pattern": "^daik::append_stop_context_json<std::__cxx11::basic_string<char,\\ std::char_traits<char>,\\ std::allocator<char>\\ >\\ >\\(std::__cxx11::basic_string<char,\\ std::char_traits<char>,\\ std::allocator<char>\\ >\\&,\\ daik::StopContextPayloadFields\\ const\\&,\\ bool\\)::\\{lambda\\(bool,\\ bool\\)\\#3\\}::operator\\(\\)\\(bool,\\ bool\\)\\ const$",
+      "pattern": "^daik::append_stop_context_json<std::__cxx11::basic_string<char,\\ std::char_traits<char>,\\ std::allocator<char>\\ >\\ >\\(std::__cxx11::basic_string<char,\\ std::char_traits<char>,\\ std::allocator<char>\\ >\\&,\\ daik::StopContextPayloadFields\\ const\\&,\\ bool\\)::\\{lambda\\(bool,\\ bool\\)\\x233\\}::operator\\(\\)\\(bool,\\ bool\\)\\ const$",
       "max_bytes": 32
     },
     "stop_json_mqtt_number": {
-      "pattern": "^daik::append_stop_context_json<std::__cxx11::basic_string<char,\\ std::char_traits<char>,\\ std::allocator<char>\\ >\\ >\\(std::__cxx11::basic_string<char,\\ std::char_traits<char>,\\ std::allocator<char>\\ >\\&,\\ daik::StopContextPayloadFields\\ const\\&,\\ bool\\)::\\{lambda\\(unsigned\\ long\\ long,\\ bool\\)\\#2\\}::operator\\(\\)\\(unsigned\\ long\\ long,\\ bool\\)\\ const$",
+      "pattern": "^daik::append_stop_context_json<std::__cxx11::basic_string<char,\\ std::char_traits<char>,\\ std::allocator<char>\\ >\\ >\\(std::__cxx11::basic_string<char,\\ std::char_traits<char>,\\ std::allocator<char>\\ >\\&,\\ daik::StopContextPayloadFields\\ const\\&,\\ bool\\)::\\{lambda\\(unsigned\\ long\\ long,\\ bool\\)\\x232\\}::operator\\(\\)\\(unsigned\\ long\\ long,\\ bool\\)\\ const$",
       "max_bytes": 64
     },
     "stop_json_mqtt_body": {
@@ -2752,6 +2752,26 @@
     "json_integer_to_chars": {
       "pattern": "^std::to_chars_result\\ std::__detail::__to_chars_10<unsigned\\ long\\ long>\\(char\\*,\\ char\\*,\\ unsigned\\ long\\ long\\)$",
       "max_bytes": 48
+    },
+    "stop_index_fence_sequence": {
+      "pattern": "^daik::logic::observation_index_fence_sequence\\(daik::logic::ObservationIndex\\ const\\&,\\ daik::logic::ObservationIdentity\\ const\\&\\)$",
+      "max_bytes": 48
+    },
+    "stop_index_add": {
+      "pattern": "^daik::logic::observation_index_add\\(daik::logic::ObservationIndex\\&,\\ long\\ long,\\ unsigned\\ long\\ long,\\ unsigned\\ short,\\ daik::logic::ObservationIdentity\\ const\\*\\)$",
+      "max_bytes": 96
+    },
+    "stop_index_is_fence": {
+      "pattern": "^daik::logic::observation_index_is_fence\\(daik::logic::ObservationIndex\\ const\\&,\\ unsigned\\ int\\)$",
+      "max_bytes": 32
+    },
+    "stop_index_set": {
+      "pattern": "^daik::logic::observation_index_set\\(daik::logic::ObservationIndex\\&,\\ unsigned\\ int,\\ unsigned\\ long\\ long,\\ unsigned\\ long\\ long,\\ unsigned\\ long\\ long,\\ bool\\)$",
+      "max_bytes": 32
+    },
+    "stop_index_incomplete": {
+      "pattern": "^daik::stop_observation_flash_index_incomplete\\(\\)$",
+      "max_bytes": 32
     }
   },
   "paths": {
@@ -8110,6 +8130,772 @@
       "multipliers": {},
       "base_bytes": 192,
       "max_bytes": 2048
+    },
+    "main_stop_index": {
+      "symbols": [
+        "main_task",
+        "boot_sequence",
+        "history_start",
+        "stop_historyjournalheader_const__",
+        "stop_observation_fingerprint",
+        "history_config_crc",
+        "stop_observationhourlypayload_const___42",
+        "stop_observationhourlypayload_const___long_long_",
+        "stop_index_add",
+        "stop_index_is_fence",
+        "stop_index_set",
+        "stop_index_incomplete"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "poll_stop_restore_fence": {
+      "symbols": [
+        "poll_task",
+        "history_board",
+        "history_flash_restore",
+        "stop_observationhourlypayload___",
+        "stop_index_fence_sequence",
+        "stop_index_is_fence"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_stop_journal_fence": {
+      "symbols": [
+        "poll_task",
+        "history_board",
+        "history_journal",
+        "stop_observationhourlypayload___",
+        "stop_index_fence_sequence",
+        "stop_index_is_fence"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_stop_journal_next_fence": {
+      "symbols": [
+        "poll_task",
+        "history_board",
+        "history_journal",
+        "stop_observationhourlypayload___46",
+        "stop_index_fence_sequence",
+        "stop_index_is_fence"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_stop_journal_index": {
+      "symbols": [
+        "poll_task",
+        "history_board",
+        "history_journal",
+        "history_append",
+        "stop_observationhourlypayload_const___44",
+        "stop_observationhourlypayload_const___42",
+        "stop_observationhourlypayload_const___long_long_",
+        "stop_index_add",
+        "stop_index_is_fence",
+        "stop_index_set"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_stop_journal_index_invalid": {
+      "symbols": [
+        "poll_task",
+        "history_board",
+        "history_journal",
+        "history_append",
+        "stop_observationhourlypayload_const___44",
+        "stop_observationhourlypayload_const___42",
+        "stop_observationhourlypayload_const___long_long_",
+        "stop_index_incomplete"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "httpd_shutdown_wifi_journal_stop_fence": {
+      "symbols": [
+        "config_wifi",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "stop_observationhourlypayload___",
+        "stop_index_fence_sequence",
+        "stop_index_is_fence"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_wifi_journal_stop_next_fence": {
+      "symbols": [
+        "config_wifi",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "stop_observationhourlypayload___46",
+        "stop_index_fence_sequence",
+        "stop_index_is_fence"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_wifi_journal_stop_index": {
+      "symbols": [
+        "config_wifi",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_observationhourlypayload_const___44",
+        "stop_observationhourlypayload_const___42",
+        "stop_observationhourlypayload_const___long_long_",
+        "stop_index_add",
+        "stop_index_is_fence",
+        "stop_index_set"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_wifi_journal_stop_index_invalid": {
+      "symbols": [
+        "config_wifi",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_observationhourlypayload_const___44",
+        "stop_observationhourlypayload_const___42",
+        "stop_observationhourlypayload_const___long_long_",
+        "stop_index_incomplete"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_mqtt_journal_stop_fence": {
+      "symbols": [
+        "config_mqtt",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "stop_observationhourlypayload___",
+        "stop_index_fence_sequence",
+        "stop_index_is_fence"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_mqtt_journal_stop_next_fence": {
+      "symbols": [
+        "config_mqtt",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "stop_observationhourlypayload___46",
+        "stop_index_fence_sequence",
+        "stop_index_is_fence"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_mqtt_journal_stop_index": {
+      "symbols": [
+        "config_mqtt",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_observationhourlypayload_const___44",
+        "stop_observationhourlypayload_const___42",
+        "stop_observationhourlypayload_const___long_long_",
+        "stop_index_add",
+        "stop_index_is_fence",
+        "stop_index_set"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_mqtt_journal_stop_index_invalid": {
+      "symbols": [
+        "config_mqtt",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_observationhourlypayload_const___44",
+        "stop_observationhourlypayload_const___42",
+        "stop_observationhourlypayload_const___long_long_",
+        "stop_index_incomplete"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_syslog_journal_stop_fence": {
+      "symbols": [
+        "config_syslog",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "stop_observationhourlypayload___",
+        "stop_index_fence_sequence",
+        "stop_index_is_fence"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_syslog_journal_stop_next_fence": {
+      "symbols": [
+        "config_syslog",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "stop_observationhourlypayload___46",
+        "stop_index_fence_sequence",
+        "stop_index_is_fence"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_syslog_journal_stop_index": {
+      "symbols": [
+        "config_syslog",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_observationhourlypayload_const___44",
+        "stop_observationhourlypayload_const___42",
+        "stop_observationhourlypayload_const___long_long_",
+        "stop_index_add",
+        "stop_index_is_fence",
+        "stop_index_set"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_syslog_journal_stop_index_invalid": {
+      "symbols": [
+        "config_syslog",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_observationhourlypayload_const___44",
+        "stop_observationhourlypayload_const___42",
+        "stop_observationhourlypayload_const___long_long_",
+        "stop_index_incomplete"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_ntp_journal_stop_fence": {
+      "symbols": [
+        "config_ntp",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "stop_observationhourlypayload___",
+        "stop_index_fence_sequence",
+        "stop_index_is_fence"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_ntp_journal_stop_next_fence": {
+      "symbols": [
+        "config_ntp",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "stop_observationhourlypayload___46",
+        "stop_index_fence_sequence",
+        "stop_index_is_fence"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_ntp_journal_stop_index": {
+      "symbols": [
+        "config_ntp",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_observationhourlypayload_const___44",
+        "stop_observationhourlypayload_const___42",
+        "stop_observationhourlypayload_const___long_long_",
+        "stop_index_add",
+        "stop_index_is_fence",
+        "stop_index_set"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_ntp_journal_stop_index_invalid": {
+      "symbols": [
+        "config_ntp",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_observationhourlypayload_const___44",
+        "stop_observationhourlypayload_const___42",
+        "stop_observationhourlypayload_const___long_long_",
+        "stop_index_incomplete"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_board_journal_stop_fence": {
+      "symbols": [
+        "config_board",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "stop_observationhourlypayload___",
+        "stop_index_fence_sequence",
+        "stop_index_is_fence"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_board_journal_stop_next_fence": {
+      "symbols": [
+        "config_board",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "stop_observationhourlypayload___46",
+        "stop_index_fence_sequence",
+        "stop_index_is_fence"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_board_journal_stop_index": {
+      "symbols": [
+        "config_board",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_observationhourlypayload_const___44",
+        "stop_observationhourlypayload_const___42",
+        "stop_observationhourlypayload_const___long_long_",
+        "stop_index_add",
+        "stop_index_is_fence",
+        "stop_index_set"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_board_journal_stop_index_invalid": {
+      "symbols": [
+        "config_board",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_observationhourlypayload_const___44",
+        "stop_observationhourlypayload_const___42",
+        "stop_observationhourlypayload_const___long_long_",
+        "stop_index_incomplete"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_env3_journal_stop_fence": {
+      "symbols": [
+        "config_env3",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "stop_observationhourlypayload___",
+        "stop_index_fence_sequence",
+        "stop_index_is_fence"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_env3_journal_stop_next_fence": {
+      "symbols": [
+        "config_env3",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "stop_observationhourlypayload___46",
+        "stop_index_fence_sequence",
+        "stop_index_is_fence"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_env3_journal_stop_index": {
+      "symbols": [
+        "config_env3",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_observationhourlypayload_const___44",
+        "stop_observationhourlypayload_const___42",
+        "stop_observationhourlypayload_const___long_long_",
+        "stop_index_add",
+        "stop_index_is_fence",
+        "stop_index_set"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_env3_journal_stop_index_invalid": {
+      "symbols": [
+        "config_env3",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_observationhourlypayload_const___44",
+        "stop_observationhourlypayload_const___42",
+        "stop_observationhourlypayload_const___long_long_",
+        "stop_index_incomplete"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "poll_shutdown_journal_stop_fence": {
+      "symbols": [
+        "poll_task",
+        "heap_guard",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "stop_observationhourlypayload___",
+        "stop_index_fence_sequence",
+        "stop_index_is_fence"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_shutdown_journal_stop_next_fence": {
+      "symbols": [
+        "poll_task",
+        "heap_guard",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "stop_observationhourlypayload___46",
+        "stop_index_fence_sequence",
+        "stop_index_is_fence"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_shutdown_journal_stop_index": {
+      "symbols": [
+        "poll_task",
+        "heap_guard",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_observationhourlypayload_const___44",
+        "stop_observationhourlypayload_const___42",
+        "stop_observationhourlypayload_const___long_long_",
+        "stop_index_add",
+        "stop_index_is_fence",
+        "stop_index_set"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_shutdown_journal_stop_index_invalid": {
+      "symbols": [
+        "poll_task",
+        "heap_guard",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_observationhourlypayload_const___44",
+        "stop_observationhourlypayload_const___42",
+        "stop_observationhourlypayload_const___long_long_",
+        "stop_index_incomplete"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "eth_shutdown_journal_stop_fence": {
+      "symbols": [
+        "eth_task",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "stop_observationhourlypayload___",
+        "stop_index_fence_sequence",
+        "stop_index_is_fence"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "eth_shutdown_journal_stop_next_fence": {
+      "symbols": [
+        "eth_task",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "stop_observationhourlypayload___46",
+        "stop_index_fence_sequence",
+        "stop_index_is_fence"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "eth_shutdown_journal_stop_index": {
+      "symbols": [
+        "eth_task",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_observationhourlypayload_const___44",
+        "stop_observationhourlypayload_const___42",
+        "stop_observationhourlypayload_const___long_long_",
+        "stop_index_add",
+        "stop_index_is_fence",
+        "stop_index_set"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "eth_shutdown_journal_stop_index_invalid": {
+      "symbols": [
+        "eth_task",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_observationhourlypayload_const___44",
+        "stop_observationhourlypayload_const___42",
+        "stop_observationhourlypayload_const___long_long_",
+        "stop_index_incomplete"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "ota_shutdown_journal_stop_fence": {
+      "symbols": [
+        "ota_task",
+        "ota_activate",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "stop_observationhourlypayload___",
+        "stop_index_fence_sequence",
+        "stop_index_is_fence"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "ota_shutdown_journal_stop_next_fence": {
+      "symbols": [
+        "ota_task",
+        "ota_activate",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "stop_observationhourlypayload___46",
+        "stop_index_fence_sequence",
+        "stop_index_is_fence"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "ota_shutdown_journal_stop_index": {
+      "symbols": [
+        "ota_task",
+        "ota_activate",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_observationhourlypayload_const___44",
+        "stop_observationhourlypayload_const___42",
+        "stop_observationhourlypayload_const___long_long_",
+        "stop_index_add",
+        "stop_index_is_fence",
+        "stop_index_set"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "ota_shutdown_journal_stop_index_invalid": {
+      "symbols": [
+        "ota_task",
+        "ota_activate",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_observationhourlypayload_const___44",
+        "stop_observationhourlypayload_const___42",
+        "stop_observationhourlypayload_const___long_long_",
+        "stop_index_incomplete"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "ota_health_shutdown_journal_stop_fence": {
+      "symbols": [
+        "ota_health_task",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "stop_observationhourlypayload___",
+        "stop_index_fence_sequence",
+        "stop_index_is_fence"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "ota_health_shutdown_journal_stop_next_fence": {
+      "symbols": [
+        "ota_health_task",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "stop_observationhourlypayload___46",
+        "stop_index_fence_sequence",
+        "stop_index_is_fence"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "ota_health_shutdown_journal_stop_index": {
+      "symbols": [
+        "ota_health_task",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_observationhourlypayload_const___44",
+        "stop_observationhourlypayload_const___42",
+        "stop_observationhourlypayload_const___long_long_",
+        "stop_index_add",
+        "stop_index_is_fence",
+        "stop_index_set"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "ota_health_shutdown_journal_stop_index_invalid": {
+      "symbols": [
+        "ota_health_task",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_observationhourlypayload_const___44",
+        "stop_observationhourlypayload_const___42",
+        "stop_observationhourlypayload_const___long_long_",
+        "stop_index_incomplete"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
     }
   },
   "tasks": {
@@ -8193,7 +8979,31 @@
         "httpd_shutdown_env3_journal_stop_cpu",
         "httpd_shutdown_env3_journal_stop_syslog",
         "httpd_shutdown_env3_journal_stop_console",
-        "httpd_shutdown_env3_checkup_stop_record"
+        "httpd_shutdown_env3_checkup_stop_record",
+        "httpd_shutdown_wifi_journal_stop_fence",
+        "httpd_shutdown_wifi_journal_stop_next_fence",
+        "httpd_shutdown_wifi_journal_stop_index",
+        "httpd_shutdown_wifi_journal_stop_index_invalid",
+        "httpd_shutdown_mqtt_journal_stop_fence",
+        "httpd_shutdown_mqtt_journal_stop_next_fence",
+        "httpd_shutdown_mqtt_journal_stop_index",
+        "httpd_shutdown_mqtt_journal_stop_index_invalid",
+        "httpd_shutdown_syslog_journal_stop_fence",
+        "httpd_shutdown_syslog_journal_stop_next_fence",
+        "httpd_shutdown_syslog_journal_stop_index",
+        "httpd_shutdown_syslog_journal_stop_index_invalid",
+        "httpd_shutdown_ntp_journal_stop_fence",
+        "httpd_shutdown_ntp_journal_stop_next_fence",
+        "httpd_shutdown_ntp_journal_stop_index",
+        "httpd_shutdown_ntp_journal_stop_index_invalid",
+        "httpd_shutdown_board_journal_stop_fence",
+        "httpd_shutdown_board_journal_stop_next_fence",
+        "httpd_shutdown_board_journal_stop_index",
+        "httpd_shutdown_board_journal_stop_index_invalid",
+        "httpd_shutdown_env3_journal_stop_fence",
+        "httpd_shutdown_env3_journal_stop_next_fence",
+        "httpd_shutdown_env3_journal_stop_index",
+        "httpd_shutdown_env3_journal_stop_index_invalid"
       ]
     },
     "main": {
@@ -8209,7 +9019,8 @@
         "main_wifi_wait",
         "main_initial_mqtt_client",
         "main_stop_start",
-        "main_stop_scan"
+        "main_stop_scan",
+        "main_stop_index"
       ]
     },
     "mqtt": {
@@ -8327,7 +9138,16 @@
         "poll_shutdown_journal_stop_cpu",
         "poll_shutdown_journal_stop_syslog",
         "poll_shutdown_journal_stop_console",
-        "poll_shutdown_checkup_stop_record"
+        "poll_shutdown_checkup_stop_record",
+        "poll_stop_restore_fence",
+        "poll_stop_journal_fence",
+        "poll_stop_journal_next_fence",
+        "poll_stop_journal_index",
+        "poll_stop_journal_index_invalid",
+        "poll_shutdown_journal_stop_fence",
+        "poll_shutdown_journal_stop_next_fence",
+        "poll_shutdown_journal_stop_index",
+        "poll_shutdown_journal_stop_index_invalid"
       ]
     },
     "modbus": {
@@ -8435,7 +9255,11 @@
         "eth_shutdown_journal_stop_cpu",
         "eth_shutdown_journal_stop_syslog",
         "eth_shutdown_journal_stop_console",
-        "eth_shutdown_checkup_stop_record"
+        "eth_shutdown_checkup_stop_record",
+        "eth_shutdown_journal_stop_fence",
+        "eth_shutdown_journal_stop_next_fence",
+        "eth_shutdown_journal_stop_index",
+        "eth_shutdown_journal_stop_index_invalid"
       ]
     },
     "dns": {
@@ -8478,7 +9302,11 @@
         "ota_shutdown_journal_stop_cpu",
         "ota_shutdown_journal_stop_syslog",
         "ota_shutdown_journal_stop_console",
-        "ota_shutdown_checkup_stop_record"
+        "ota_shutdown_checkup_stop_record",
+        "ota_shutdown_journal_stop_fence",
+        "ota_shutdown_journal_stop_next_fence",
+        "ota_shutdown_journal_stop_index",
+        "ota_shutdown_journal_stop_index_invalid"
       ]
     },
     "ota_health": {
@@ -8491,7 +9319,11 @@
         "ota_health_shutdown_journal_stop_cpu",
         "ota_health_shutdown_journal_stop_syslog",
         "ota_health_shutdown_journal_stop_console",
-        "ota_health_shutdown_checkup_stop_record"
+        "ota_health_shutdown_checkup_stop_record",
+        "ota_health_shutdown_journal_stop_fence",
+        "ota_health_shutdown_journal_stop_next_fence",
+        "ota_health_shutdown_journal_stop_index",
+        "ota_health_shutdown_journal_stop_index_invalid"
       ]
     },
     "deadline": {

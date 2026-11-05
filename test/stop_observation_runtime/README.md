@@ -12,8 +12,10 @@ endpoint coverage and gaps; missing, torn and CRC-damaged slots; source/model/sc
 binding; future/undated/backwards/corrected clocks; zero-wait commit/failure acknowledgements;
 reset during an archive read; report/service/producer lock interleavings at an hour boundary;
 expiry during a one-record read; explicit bounded-queue loss and saturation; nine days of hourly
-revisions; whole-hour expiry without either producer or flash service; reset-fence pressure and
-its expiry; and the unchanged physical Checkup envelope interpreted by the old structural reader.
+revisions; whole-hour expiry without either producer or flash service; bounded reset-fence
+pressure; and the unchanged physical Checkup envelope interpreted by the old structural reader.
+Reset cases keep sequence ordering independent of wall time, future/aged timestamps and physical
+slot reuse. Missing reset-index completeness stays limited until a complete physical reindex.
 Restored loss notices survive their original hour's expiry and another reboot. Reader cases verify
 scratch reuse, independently owned output, CRC/commit/manifest refusal and failed physical reads.
 The compatibility case prints actual host POD/index/queue sizes and verifies the existing core

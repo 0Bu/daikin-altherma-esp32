@@ -12,6 +12,10 @@ import re
 from stop_observation_rules import SYMBOLS, UPDATED_LIMITS, PATHS, BODIES, HEADERS, CALLERS
 
 EXTRA_SOURCES = tuple(HEADERS)
+INLINED_INDEX_HELPERS = (
+    'observation_identity_word', 'observation_index_note_loss', 'observation_index_incomplete',
+    'flash_index_stop_observation_record', 'flash_journal_scan',
+)
 TOKEN = re.compile(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|/\*.*?\*/|//[^\n]*', re.S)
 DEFINITION = re.compile(r'\b([A-Za-z_]\w*)\s*\([^;{}]*?\)\s*(?:const\s*)?(?:noexcept\s*)?\{')
 KEYWORDS = {'if', 'for', 'while', 'switch', 'catch', 'sizeof', 'alignof', 'decltype', 'static_assert'}
@@ -158,6 +162,16 @@ def validate_sources(budgets, sources, error):
             or positions[2] < positions[3] or positions[4] < positions[5]
             or callback in normalized(body(history, 'flash_append_record_at', error))):
         raise error('stop observation flash owner: expiry/lock/append lifetime changed')
+    service = normalized(body(store, 'stop_observation_flash_service', error))
+    next_record = normalized(body(store, 'stop_observation_flash_next', error))
+    admission = normalized(body(store, 'stop_observation_flash_index', error))
+    incomplete = normalized(body(store, 'stop_observation_flash_index_incomplete', error))
+    if ('observation_index_fence_sequence(s_index,identity)' not in service
+            or 'observation_index_fence_sequence(s_index,payload.identity)' not in next_record
+            or 'if(s_index.clipped_until_bucket==INT64_MAX)returnfalse;' not in next_record
+            or 'stop_observation_flash_index_incomplete();' not in admission
+            or incomplete != 'observation_index_incomplete(s_index);s_rebuild=true;'):
+        raise error('stop observation fence: exact snapshot/admission/unknown-write guard changed')
     if re.search(r'\b(?:alloca|__builtin_alloca)\s*\(', '\n'.join(sources[p] for p in HEADERS)):
         raise error('stop observation source: unreviewed dynamic stack allocation')
     # Explicit body leases cover the complete success/error branches, not only convenient calls.
@@ -171,14 +185,27 @@ def validate_sources(budgets, sources, error):
 
 
 def validate_inlining(disassembly, error):
+    exact = {re.sub(r'\\(.)', r'\1', rule['pattern'][1:-1]) for rule in SYMBOLS.values()}
     for name in re.findall(r'^\s*[0-9a-fA-F]+\s+<(.+)>:\s*$', disassembly, re.M):
         if ('flash_append_record_at(' in name or
                 re.match(r'^_Z.*22flash_append_record_at', name)):
             raise error('stop observation inlining: newly outlined append_at requires frame/path review')
+        if any(re.search(r'\b' + helper + r'\(', name) or
+               re.match(r'^_Z.*' + str(len(helper)) + helper, name)
+               for helper in INLINED_INDEX_HELPERS):
+            raise error('stop observation inlining: newly outlined index/scan helper needs frame/path review')
+        if (re.match(r'^daik::logic::ObservationIndexEntry::(?:bucket|sequence|slot)\(', name)
+                or re.match(r'^_ZNK4daik5logic21ObservationIndexEntry(?:6bucket|8sequence|4slot)E', name)):
+            raise error('stop observation inlining: newly outlined index accessor needs frame/path review')
+        if ((name.startswith('daik::logic::observation_index_') or
+             re.match(r'^_Z.*\d+observation_index_', name)) and name not in exact):
+            raise error('stop observation inlining: unreviewed outlined index function/clone')
 
 
 def self_test(budgets, sources, error):
     validate_sources(budgets, sources, error)
+    if 'main/http_handlers.hpp' not in sources:
+        raise AssertionError('existing-header caller controls need the real loaded HTTP header')
     count = 0
     def reject(changed_budget=budgets, changed_source=sources):
         nonlocal count
@@ -224,12 +251,19 @@ def self_test(budgets, sources, error):
         ('main/new_alias.cpp', '', 'void fake() __attribute__((alias("_Z_stop_observation_record")));'),
         ('main/new_alias.cpp', '', 'void escape() { auto fn = &stop_observation_record; }'),
         ('main/new_alias.cpp', '', 'void escape() { auto p = &s_flash_payload; }'),
-        ('main/http_common.hpp', '',
+        ('main/http_handlers.hpp', '',
          'inline void new_header_caller() { stop_observation_record(0, false, {}); }'),
         ('main/logic/new_callback.hpp', '',
          'inline auto new_header_callback = &flash_read_stop_observation;'),
-        ('main/http_common.hpp', '',
+        ('main/http_handlers.hpp', '',
          'inline void new_header_alias() { auto fn = &stop_observation_record; }'),
+        ('main/stop_observation_store.cpp', 'observation_index_fence_sequence(s_index, identity)', '0'),
+        ('main/stop_observation_store.cpp', 'observation_index_fence_sequence(s_index, payload.identity)', '0'),
+        ('main/stop_observation_store.cpp', 's_index.clipped_until_bucket == INT64_MAX', 'false'),
+        ('main/stop_observation_store.cpp', 'stop_observation_flash_index_incomplete();', ''),
+        ('main/logic/observation_hourly.hpp', 'if (sequence > (fence ? e.words[2] : e.sequence()))',
+         'if (true)'),
+        ('main/logic/observation_hourly.hpp', 'e.words[0] != a || e.words[1] != b', 'e.words[0] != a'),
     ]
     for path, before, after in mutations:
         altered = dict(sources)
@@ -248,4 +282,21 @@ def self_test(budgets, sources, error):
             count += 1
         else:
             raise AssertionError('accepted newly outlined append_at')
+    for name in [
+            candidate for helper in INLINED_INDEX_HELPERS
+            for candidate in ('daik::logic::' + helper + '(x)', '_Z' + str(len(helper)) + helper + 'Eclone')
+    ] + [
+            'daik::logic::ObservationIndexEntry::' + method + '() const'
+            for method in ('bucket', 'sequence', 'slot')
+    ] + [
+            '_ZNK4daik5logic21ObservationIndexEntry' + str(len(method)) + method + 'Ev'
+            for method in ('bucket', 'sequence', 'slot')
+    ] + ['daik::logic::observation_index_set(x) [clone .isra.9]',
+         '_ZN4daik5logic21observation_index_setEclone$constprop$99']:
+        try:
+            validate_inlining('100 <' + name + '>:\n100: 004136 entry a1, 32\n', error)
+        except error:
+            count += 1
+        else:
+            raise AssertionError('accepted unmeasured outlined index/scan helper ' + name)
     return count

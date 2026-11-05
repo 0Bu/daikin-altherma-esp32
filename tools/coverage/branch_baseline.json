@@ -1432,6 +1432,104 @@
       "inventory_review": "Apple CRC call normal/unwind pairs disappear at config_store.hpp:317/424 and mqtt_retirement_store.hpp:54/67, with unchanged source and improved ratios. New collector calls emit all 12 checkup_operating_mode outcomes. Added numeric rejection cases cover history_parse_tenths upper-bound refusal. Raw committed-base versus current inventories were compared.",
       "uncovered_outcomes": "Fixed fingerprint-zero fallbacks and compiler unwind edges remain untaken. Reducer guards also retain unreachable invalid-state alternatives: an unarmed known-off endpoint, a changed known route with neither endpoint DHW, and a missing stable-target timestamp after readable admission.",
       "validation_boundary": "All four profiles are measured locally from identical immutable pure-source/test snapshots. GCC 13 uses the CI-pinned ESP-IDF v6.1 image; GCC 15 uses separate Ubuntu 26.04 ARM64 and AMD64 containers. AMD64 explicitly selects the hosted-candidate profile; it is not hosted CI proof. Authoritative GitHub CI must confirm before merge. No device behavior is established."
+    },
+    {
+      "runner": "scripts/run-mock-tests.sh --coverage; unchanged checker against fresh HEAD and HEAD^1 baseline exports",
+      "base_commit": "47619c0c5244d9228e3c821753dce18b372774ae",
+      "scope": "Clock-fence index helpers: explicit compact fence tags, identity-keyed highest sequence, pressure and incomplete-index guards. Only observation_hourly.hpp inventories change. All added measured outcomes are taken; the sole untaken fixed fingerprint fallback is unchanged. Existing branch ratios and the 95-percent executable-line floor are preserved.",
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2)",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+        "gcc-15-github-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+      },
+      "architectures": {
+        "clang-17-darwin": "arm64-apple-darwin27.2.0",
+        "gcc-13-linux-ubuntu24": "aarch64-linux-gnu",
+        "gcc-15-github-linux-ubuntu26": "x86_64-linux-gnu",
+        "gcc-15-linux-ubuntu26": "aarch64-linux-gnu"
+      },
+      "container_images": {
+        "gcc-13-linux-ubuntu24": "sha256:81893c71bb5e570088901f21def8684c25cd2a9020281bd01b843a7655edb18c",
+        "gcc-15-github-linux-ubuntu26": "sha256:9b56853ffad97b6c81d3707524a96205df27582fe0e0ec8dbd1fe189b28fdf14",
+        "gcc-15-linux-ubuntu26": "sha256:4acd0a343f2aca0bc022a78657ffd0dfa8379cd4810b88fad6442ecc638b5e27"
+      },
+      "sources": {
+        "main/logic/observation_hourly.hpp": "d199a6a1daac1d02d043a684c2813819c48bee636e2a659f29b5577c60b755bd"
+      },
+      "test_source_sha256": "a6c5033e4d27c37694faa1ae4bf99b5cd0b62c075621e4d222a6758f9151854e",
+      "measured_branch_counts": {
+        "clang-17-darwin": {
+          "main/logic/observation_hourly.hpp": {
+            "taken": 135,
+            "outcomes": 136
+          }
+        },
+        "gcc-13-linux-ubuntu24": {
+          "main/logic/observation_hourly.hpp": {
+            "taken": 153,
+            "outcomes": 154
+          }
+        },
+        "gcc-15-github-linux-ubuntu26": {
+          "main/logic/observation_hourly.hpp": {
+            "taken": 153,
+            "outcomes": 154
+          }
+        },
+        "gcc-15-linux-ubuntu26": {
+          "main/logic/observation_hourly.hpp": {
+            "taken": 153,
+            "outcomes": 154
+          }
+        }
+      },
+      "measured_line_counts": {
+        "clang-17-darwin": {
+          "covered": 10842,
+          "executable": 11016
+        },
+        "gcc-13-linux-ubuntu24": {
+          "covered": 10331,
+          "executable": 10615
+        },
+        "gcc-15-github-linux-ubuntu26": {
+          "covered": 10323,
+          "executable": 10617
+        },
+        "gcc-15-linux-ubuntu26": {
+          "covered": 10327,
+          "executable": 10617
+        }
+      },
+      "raw_report_sha256": {
+        "clang-17-darwin": "3b80e1a15bb019b1a063ad56210fa8bb04f820ab5ba351d57a33796e476c3e10",
+        "gcc-13-linux-ubuntu24": "f55e02b8fbec70298337dfc60ebb520b77a59b8caae88698580d0e20aa7b6710",
+        "gcc-15-github-linux-ubuntu26": "3803cddb3f5e49a07d782af0256fc7664e113df8219c387f454169cbee0659a2",
+        "gcc-15-linux-ubuntu26": "258ba24c9b220952e3143e55ebbaa0e37840749a8ca55eedb6ad2a56c57b6eb5"
+      },
+      "baseline_references": {
+        "HEAD": {
+          "commit": "47619c0c5244d9228e3c821753dce18b372774ae",
+          "sha256": "9b11e199dae9443074a81825c28da6e9a24a4096f4e209752a0299326f59f520",
+          "query": [
+            "git",
+            "show",
+            "HEAD:tools/coverage/branch_baseline.json"
+          ]
+        },
+        "HEAD^1": {
+          "commit": "acd674874230b44548ab70c9c027d38f29f73563",
+          "sha256": "9b11e199dae9443074a81825c28da6e9a24a4096f4e209752a0299326f59f520",
+          "query": [
+            "git",
+            "show",
+            "HEAD^1:tools/coverage/branch_baseline.json"
+          ]
+        }
+      },
+      "hosted_confirmation": "GCC 15 linux/amd64 is local Docker hosted-candidate evidence with the exact hosted profile selected. No GitHub Actions execution is claimed; authoritative CI confirmation remains required.",
+      "validation_boundary": "Four independent current-byte snapshots measured the same frozen pure headers/profiles/test translation unit. Exact-argument snapshot adapters return the freshly exported committed baseline bytes only. The unchanged checker and 95-percent floor are retained. Store/runtime integration, target build, actual repository final invocation and device behavior are separate evidence."
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
@@ -1870,8 +1968,8 @@
         "outcomes": 84
       },
       "main/logic/observation_hourly.hpp": {
-        "taken": 109,
-        "outcomes": 110
+        "taken": 135,
+        "outcomes": 136
       }
     },
     "gcc-13-linux-ubuntu24": {
@@ -2308,8 +2406,8 @@
         "outcomes": 238
       },
       "main/logic/observation_hourly.hpp": {
-        "taken": 119,
-        "outcomes": 120
+        "taken": 153,
+        "outcomes": 154
       }
     },
     "gcc-15-github-linux-ubuntu26": {
@@ -2746,8 +2844,8 @@
         "outcomes": 238
       },
       "main/logic/observation_hourly.hpp": {
-        "taken": 119,
-        "outcomes": 120
+        "taken": 153,
+        "outcomes": 154
       }
     },
     "gcc-15-linux-ubuntu26": {
@@ -3184,8 +3282,8 @@
         "outcomes": 238
       },
       "main/logic/observation_hourly.hpp": {
-        "taken": 119,
-        "outcomes": 120
+        "taken": 153,
+        "outcomes": 154
       }
     }
   },

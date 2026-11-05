@@ -11469,10 +11469,10 @@ static void test_config_store() {
     // older-version suffix rather than folded into the literals, so a new blob version is one edit
     // here instead of fifteen scattered ones — and each literal still reads as the blocks v<N>
     // predates.
-    const size_t base_suffix_bytes        = 2;
-    const size_t ref_multi_suffix_bytes   = 2 + 2 + 4;
-    const size_t discovery_suffix_bytes   = 1;
-    const size_t diagnostics_suffix_bytes = 1 + 4;
+    const size_t base_suffix_bytes            = 2;
+    const size_t ref_multi_suffix_bytes       = 2 + 2 + 4;
+    const size_t discovery_suffix_bytes       = 1;
+    const size_t diagnostics_suffix_bytes     = 1 + 4;
     const size_t room_generation_suffix_bytes = 4;
     const size_t current_suffix_bytes         = base_suffix_bytes + ref_multi_suffix_bytes +
                                         discovery_suffix_bytes + diagnostics_suffix_bytes +
@@ -17677,7 +17677,7 @@ static void test_checkup() {
         }
         // No confirmed opening (or no readable input) also means no completed hour. Missing
         // coverage stays missing; this is not an all-clear or a claim about the cause.
-        dhw.aborts = 0;
+        dhw.aborts             = 0;
         dhw.abort_reasons      = 0;
         const auto no_attempts = checkup_evaluate(w, cov, FaultClass::Normal, dhw);
         CHECK(no_attempts[CheckupCheck::DhwLoss].verdict == CheckupVerdict::Unavailable);
@@ -18156,7 +18156,7 @@ static void test_checkup() {
         CHECK(r[CheckupCheck::Cycling].verdict == CheckupVerdict::Collecting);
         CHECK(r[CheckupCheck::Cycling].reason == CheckupReason::InputCoverage);
         w.rps_observed_s = CHECKUP_REQUIRED_S;
-        w.full_span = false;
+        w.full_span      = false;
         r                = checkup_evaluate(w, split, FaultClass::Normal);
         CHECK(r[CheckupCheck::Cycling].verdict == CheckupVerdict::Collecting);
         CHECK(r[CheckupCheck::Cycling].reason == CheckupReason::DayIncomplete);
@@ -18241,7 +18241,7 @@ static void test_checkup() {
 
         w          = day();
         w.defrosts = w.paired_defrosts = CHECKUP_DEFROST_MIN_COUNT;
-        w.dfr_observed_s = CHECKUP_REQUIRED_S - 1;
+        w.dfr_observed_s               = CHECKUP_REQUIRED_S - 1;
         CHECK(checkup_evaluate(w, full, FaultClass::Normal)[CheckupCheck::Defrost].verdict ==
               CheckupVerdict::Collecting);
         w.dfr_observed_s      = CHECKUP_REQUIRED_S;
@@ -18478,7 +18478,7 @@ static void test_checkup() {
         good.space_runs  = 12;
         good.space_run_s = 12u * 3600;
         good.defrosts = good.paired_defrosts = CHECKUP_DEFROST_MIN_COUNT;
-        CheckupCoverage all = full;
+        CheckupCoverage all                  = full;
         all.valve = all.mode = all.r5t = true;
         DhwLossWindow clean_dhw;
         clean_dhw.observed_s          = 6 * DHW_LOSS_WINDOW_S;
@@ -29291,19 +29291,24 @@ static void test_observation_hourly() {
     ObservationIndex ix;
     observation_index_add(ix, 100, 10, 1);
     observation_index_add(ix, 100, 9, 2);
-    CHECK(ix.count == 1 && ix.entries[0].slot == 1);
+    CHECK(ix.count == 1 && ix.entries[0].slot() == 1);
     observation_index_add(ix, 100, 11, 2);
-    CHECK(ix.count == 1 && ix.entries[0].slot == 2);
-    observation_index_add(ix, 100, 12, 3, true);
-    observation_index_add(ix, 100, 12, 3, true);
+    CHECK(ix.count == 1 && ix.entries[0].slot() == 2);
+    const ObservationIdentity scope{1, 2, 3, 4};
+    observation_index_add(ix, 100, 12, 3, &scope);
+    observation_index_add(ix, 100, 12, 3, &scope);
     CHECK(ix.count == 2);
     for (int i = 0; i < 216; ++i) observation_index_add(ix, 101 + i, 20 + i, 4);
-    CHECK(ix.count == OBSERVATION_INDEX_CAP && !ix.clipped);
+    CHECK(ix.count == OBSERVATION_INDEX_CAP && ix.clipped);
+    CHECK(observation_index_fence_sequence(ix, scope) == 12);
     ObservationIndex pressure;
-    for (size_t i = 0; i <= OBSERVATION_INDEX_CAP; ++i)
-        observation_index_add(pressure, 100, i + 1, i, true);
+    for (size_t i = 0; i <= OBSERVATION_INDEX_CAP; ++i) {
+        auto distinct = scope;
+        distinct.source_fp += i;
+        observation_index_add(pressure, 100, i + 1, i, &distinct);
+    }
     CHECK(pressure.count == OBSERVATION_INDEX_CAP && pressure.clipped);
-    CHECK(pressure.clipped_until_bucket == 124);
+    CHECK(pressure.clipped_until_bucket == INT64_MAX);
     HistoryJournalHeader h{};
     h.magic       = HISTORY_JOURNAL_MAGIC;
     h.version     = HISTORY_JOURNAL_VERSION;
@@ -29384,11 +29389,92 @@ static void test_observation_hourly() {
         for (size_t i = 0; i < OBSERVATION_INDEX_CAP; ++i)
             observation_index_add(unsorted, 100 + i, i + 1, i);
         observation_index_add(unsorted, 90, 1000, 1);
-        CHECK(!unsorted.clipped && unsorted.count == OBSERVATION_INDEX_CAP);
+        CHECK(unsorted.clipped && unsorted.clipped_until_bucket == 114 &&
+              unsorted.count == OBSERVATION_INDEX_CAP);
         ObservationIndex repeated_pressure;
         for (size_t i = 0; i < OBSERVATION_INDEX_CAP + 2; ++i)
-            observation_index_add(repeated_pressure, 100, i + 1, i, true);
-        CHECK(repeated_pressure.clipped_until_bucket == 124);
+            observation_index_add(repeated_pressure, 100, i + 1, i, &identity);
+        CHECK(!repeated_pressure.clipped && repeated_pressure.count == 1);
+        CHECK(observation_index_fence_sequence(repeated_pressure, identity) ==
+              OBSERVATION_INDEX_CAP + 2);
+    }
+    {
+        CHECK(sizeof(ObservationIndex) == 1144 && sizeof(ObservationIndexEntry) == 24);
+        ObservationIndex tags;
+        tags.count = OBSERVATION_INDEX_CAP;
+        for (size_t i = 0; i < OBSERVATION_INDEX_CAP; ++i) {
+            observation_index_set(tags, i, 100 + i, UINT64_MAX - i, UINT16_MAX - i, i % 2);
+            CHECK(observation_index_is_fence(tags, i) == (i % 2 != 0));
+            CHECK(tags.entries[i].bucket() == static_cast<int64_t>(100 + i));
+            CHECK(tags.entries[i].sequence() == UINT64_MAX - i);
+            CHECK(tags.entries[i].slot() == UINT16_MAX - i);
+            observation_index_set(tags, i, 200 + i, 1, 0, !(i % 2));
+            CHECK(observation_index_is_fence(tags, i) == (i % 2 == 0));
+        }
+        CHECK(!(tags.fence_bits[5] & 0x80));
+        CHECK(!observation_index_is_fence(tags, OBSERVATION_INDEX_CAP));
+        const ObservationIdentity exact{UINT32_MAX, 0x80000000u, 0x80000001u, UINT32_MAX};
+        ObservationIndex          identities;
+        observation_index_add(identities, 1000, UINT64_MAX, UINT16_MAX, &exact);
+        CHECK(observation_index_fence_sequence(identities, exact) == UINT64_MAX);
+        for (auto field :
+             {&ObservationIdentity::source_fp, &ObservationIdentity::model_fp,
+              &ObservationIdentity::schema_fp, &ObservationIdentity::consent_generation}) {
+            auto other = exact;
+            other.*field ^= 1;
+            CHECK(observation_index_fence_sequence(identities, other) == 0);
+            observation_index_add(identities, 1, 9, 0, &other);
+            CHECK(observation_index_fence_sequence(identities, other) == 9);
+        }
+        CHECK(identities.count == 5);
+        auto zero_consent               = exact;
+        zero_consent.consent_generation = 0;
+        observation_index_add(identities, 1, 10, 0, &zero_consent);
+        CHECK(observation_index_fence_sequence(identities, zero_consent) == 10);
+        const uint64_t sequences[] = {1, UINT64_MAX, 2};
+        for (size_t first = 0; first < 3; ++first)
+            for (size_t second = 0; second < 3; ++second) {
+                if (second == first) continue;
+                ObservationIndex permutation;
+                for (size_t i : {first, second, 3 - first - second})
+                    observation_index_add(permutation, 1000 - i * 400, sequences[i], i, &exact);
+                CHECK(permutation.count == 1 && !permutation.clipped);
+                CHECK(observation_index_fence_sequence(permutation, exact) == UINT64_MAX);
+            }
+        ObservationIndex replace;
+        for (size_t i = 0; i < OBSERVATION_INDEX_CAP; ++i)
+            observation_index_add(replace, 100 + i, i + 1, i);
+        observation_index_add(replace, 1, 100, 0, &exact);
+        CHECK(replace.count == OBSERVATION_INDEX_CAP && replace.clipped);
+        CHECK(replace.clipped_until_bucket == 124);
+        CHECK(observation_index_fence_sequence(replace, exact) == 100);
+        observation_index_add(replace, 100000, 101, 1);
+        CHECK(observation_index_fence_sequence(replace, exact) == 100);
+        CHECK(replace.clipped_until_bucket == 125); // a future candidate cannot hide current loss
+        ObservationIndex full_fences;
+        for (size_t i = 0; i < OBSERVATION_INDEX_CAP; ++i) {
+            auto distinct = exact;
+            distinct.source_fp -= i;
+            observation_index_add(full_fences, 100, i + 1, i, &distinct);
+        }
+        observation_index_add(full_fences, 100, 1000, 0, &exact);
+        CHECK(!full_fences.clipped && full_fences.count == OBSERVATION_INDEX_CAP);
+        CHECK(observation_index_fence_sequence(full_fences, exact) == 1000);
+        observation_index_add(full_fences, 100, 1001, 0);
+        CHECK(full_fences.clipped && full_fences.clipped_until_bucket == 124);
+        auto extra = exact;
+        extra.source_fp -= OBSERVATION_INDEX_CAP;
+        observation_index_add(full_fences, 1, 1002, 0, &extra);
+        CHECK(full_fences.clipped_until_bucket == INT64_MAX);
+        observation_index_add(full_fences, 101, 1003, 0);
+        observation_index_add(full_fences, 101, 1004, 0, &exact);
+        CHECK(full_fences.clipped_until_bucket == INT64_MAX);
+        CHECK(observation_index_fence_sequence(full_fences, exact) == 1004);
+        ObservationIndex overflow;
+        observation_index_note_loss(overflow, INT64_MAX);
+        CHECK(overflow.clipped && overflow.clipped_until_bucket == INT64_MAX);
+        observation_index_incomplete(identities);
+        CHECK(identities.clipped && identities.clipped_until_bucket == INT64_MAX);
     }
 }
 

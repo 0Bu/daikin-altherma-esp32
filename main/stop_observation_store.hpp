@@ -35,6 +35,8 @@ void checkup_stop_context_expire(int64_t now_us);
 using StopObservationReader = bool (*)(uint16_t slot, int64_t& bucket, uint64_t& sequence,
                                        logic::ObservationHourlyPayload& payload);
 void stop_observation_flash_index_reset();
+// A recognizable committed observation was damaged, so its reset/data kind cannot be trusted.
+void stop_observation_flash_index_incomplete();
 void stop_observation_flash_index(int64_t bucket, uint64_t sequence, uint16_t slot,
                                   const logic::ObservationHourlyPayload& payload);
 bool stop_observation_flash_next(StopObservationReader reader, int64_t& bucket,

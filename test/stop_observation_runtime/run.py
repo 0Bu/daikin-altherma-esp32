@@ -54,7 +54,10 @@ cases = ["late_replay", "independent_clock", "busy_and_failure", "reset_and_cons
          "queue_and_saturation", "long_retention_and_expiry", "compatibility", "clock_and_undated",
          "reset_before_commit", "barrier_pressure_and_epoch", "identity_and_invalid_wire",
          "clock_lock_interleaves", "idle_clock_correction", "restored_loss_watermark",
-         "reader_scratch_isolation"]
+         "reader_scratch_isolation", "aged_clock_fence", "future_clock_fence", "old_fence_capacity",
+         "future_fence_late_merge", "indexed_fence_read_failure", "same_scope_fences", "fence_slot_reuse",
+         "fence_geometry_wrap", "cold_fence_corruption", "data_loss_qualification", "future_base_late_merge",
+         "fence_identity_scopes", "fence_scan_permutation", "finite_index_rebuild"]
 results = []
 for case in cases:
     result = subprocess.run([str(binary), case], cwd=ROOT, text=True, capture_output=True, timeout=30)

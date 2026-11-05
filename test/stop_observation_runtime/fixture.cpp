@@ -23,11 +23,11 @@ struct Slot {
     HistoryJournalHeader     header{};
     ObservationHourlyPayload payload;
 };
-std::array<Slot, 512> flash;
-uint64_t              next_sequence = 1;
-uint16_t              next_slot     = 0;
-unsigned              assertions    = 0;
-void (*before_read)()               = nullptr;
+std::array<Slot, HISTORY_JOURNAL_SLOT_COUNT> flash;
+uint64_t                                     next_sequence = 1;
+uint16_t                                     next_slot     = 0;
+unsigned                                     assertions    = 0;
+void (*before_read)()                                      = nullptr;
 void require(bool ok, const char* oracle) {
     ++assertions;
     if (!ok) throw std::runtime_error(oracle);
@@ -52,6 +52,11 @@ int           flash_read_record(size_t slot, FlashJournalRecord& out) {
 #include "history_reader.hpp" // execute the exact production scratch/CRC admission path
 bool reader(uint16_t slot, int64_t& bucket, uint64_t& sequence, ObservationHourlyPayload& p) {
     return flash_read_stop_observation(slot, bucket, sequence, p);
+}
+void index_slot(uint16_t slot) {
+    FlashJournalRecord record;
+    require(flash_read_record(slot, record) == ESP_OK, "scan port reads a complete physical slot");
+    flash_index_stop_observation_record(record, slot);
 }
 Slot make_slot(int64_t bucket, ObservationHourlyPayload p, uint64_t sequence) {
     Slot s;
@@ -83,12 +88,7 @@ void boot(bool clear_flash = true, uint32_t consent = 11) {
     stop_observation_flash_index_reset();
     stop_observation_start(true, consent);
     stop_observation_bind(101, 202, 303, 7);
-    for (uint16_t i = 0; i < next_slot; ++i) {
-        int64_t                  bucket;
-        uint64_t                 sequence;
-        ObservationHourlyPayload p;
-        if (reader(i, bucket, sequence, p)) stop_observation_flash_index(bucket, sequence, i, p);
-    }
+    for (uint16_t i = 0; i < flash.size(); ++i) index_slot(i);
     stop_observation_flash_service(reader);
 }
 void tick(int64_t at_s, bool readable = true, StopContextEvent e = {}) {
@@ -110,7 +110,8 @@ bool append(bool busy_receipt = false) {
     require(next_slot < flash.size(), "fixture flash capacity");
     flash[next_slot] = make_slot(bucket, p, next_sequence);
     if (busy_receipt) s_mutex->owned = true;
-    stop_observation_flash_appended(bucket, next_sequence++, next_slot++, p);
+    stop_observation_flash_appended(bucket, next_sequence++, next_slot, p);
+    next_slot = (next_slot + 1) % flash.size();
     if (busy_receipt) {
         stop_observation_flash_service(reader); // must be zero-wait and preserve the transaction
         s_mutex->owned = false;
@@ -132,7 +133,9 @@ ObservationHourlyPayload payload(int64_t bucket, uint16_t count = 1) {
 }
 void put(int64_t bucket, ObservationHourlyPayload p) {
     flash[next_slot] = make_slot(bucket, p, next_sequence);
-    stop_observation_flash_index(bucket, next_sequence++, next_slot++, p);
+    index_slot(next_slot);
+    ++next_sequence;
+    next_slot = (next_slot + 1) % flash.size();
 }
 void late_replay() {
     boot();
@@ -320,7 +323,8 @@ void reader_scratch_isolation() {
     flash[1].header.flags  = HISTORY_JOURNAL_FLAG_CATALOG_MANIFEST;
     require(!reader(1, bucket, sequence, first),
             "reader never admits a manifest as an observation");
-    require(!reader(512, bucket, sequence, first), "physical read failure stays unavailable");
+    require(!reader(flash.size(), bucket, sequence, first),
+            "physical read failure stays unavailable");
 }
 void long_retention_and_expiry() {
     boot();
@@ -476,9 +480,17 @@ void barrier_pressure_and_epoch() {
     const int64_t later = observation_bucket(sdk::origin_us + sdk::now_us);
     put(later - 1, payload(later - 1, 2));
     stop_observation_flash_service(reader);
-    require(!s_index.clipped, "pressure refusal expires with the affected rolling day");
-    require(stop_observation_report().counters.witnessed_stops_recent_heating == 2,
-            "new compatible hour returns after pressure expiry");
+    require(s_index.clipped && s_index.clipped_until_bucket == INT64_MAX,
+            "missing fence completeness cannot be repaired by wall time");
+    require(stop_observation_report().counters.witnessed_stops_recent_heating == 0,
+            "new hour cannot hide unknown discarded scope fences");
+    boot(false);
+    require(s_index.clipped, "full scan with the same distinct-scope pressure still refuses");
+    for (size_t i = 1; i <= 55; ++i) flash[i] = {};
+    boot(false);
+    require(!s_index.clipped &&
+                stop_observation_report().counters.witnessed_stops_recent_heating == 2,
+            "actual capacity-complete physical reindex can recover after obsolete records leave");
     s_rebuild   = true;
     before_read = [] { stop_observation_reset(); };
     stop_observation_flash_service(reader);
@@ -544,13 +556,323 @@ void clock_lock_interleaves() {
     require(stop_observation_report().restore_pending,
             "expired rebuild remains pending for a new bounded reconstruction");
 }
+ObservationHourlyPayload fence_payload(int64_t bucket) {
+    auto p         = payload(bucket, 0);
+    p.flags        = OBSERVATION_BARRIER;
+    p.readable_us  = 0;
+    p.last_unix_us = p.first_unix_us;
+    return p;
+}
+void aged_clock_fence() {
+    boot();
+    sdk::now_us              = 3 * OBSERVATION_HOUR_US;
+    const int64_t old_bucket = observation_bucket(sdk::origin_us + sdk::now_us) - 1;
+    put(old_bucket, payload(old_bucket, 9));
+    stop_observation_flash_service(reader);
+    require(stop_observation_report().counters.witnessed_stops_recent_heating == 9,
+            "positive before rewind");
+    sdk::origin_us -= 2 * OBSERVATION_HOUR_US;
+    require(!stop_observation_report().dated, "clock withdrawn");
+    drain();
+    boot(false);
+    require(stop_observation_report().counters.witnessed_stops_recent_heating == 0,
+            "first corrected boot");
+    sdk::now_us += 24 * OBSERVATION_HOUR_US;
+    boot(false);
+    require(stop_observation_report().counters.witnessed_stops_recent_heating == 0,
+            "aged fence must still retire earlier future data");
+}
+void future_clock_fence() {
+    boot();
+    const int64_t current = observation_bucket(sdk::origin_us + sdk::now_us);
+    put(current - 1, payload(current - 1, 9));
+    put(current + 2, fence_payload(current + 2));
+    boot(false);
+    require(stop_observation_report().counters.witnessed_stops_recent_heating == 0,
+            "future-stamped fence is still a committed sequence reset");
+}
+void old_fence_capacity() {
+    boot();
+    const int64_t current = observation_bucket(sdk::origin_us + sdk::now_us);
+    put(current + 100, payload(current + 100, 9));
+    stop_observation_reset();
+    stop_observation_bind(101, 202, 303, 7, false);
+    drain();
+    for (int hour = 1; hour <= 60; ++hour) {
+        sdk::now_us = hour * OBSERVATION_HOUR_US + 1000000;
+        put(current + hour - 1, payload(current + hour - 1, 0));
+    }
+    sdk::now_us = 101 * OBSERVATION_HOUR_US;
+    boot(false);
+    require(stop_observation_report().counters.witnessed_stops_recent_heating == 0,
+            "old fence survives replacement while future pre-fence data remains");
+}
+void future_fence_late_merge() {
+    boot();
+    sdk::now_us           = 3 * OBSERVATION_HOUR_US;
+    const int64_t current = observation_bucket(sdk::origin_us + sdk::now_us);
+    put(current - 1, payload(current - 1, 9));
+    put(current + 1, fence_payload(current + 1));
+    stop_observation_flash_service(reader);
+    tick(10830, false, event(10798));
+    require(append(), "late delta committed");
+    require(flash[next_slot - 1].payload.counters.witnessed_stops_recent_heating == 1,
+            "late delta cannot merge old revision behind future-stamped fence");
+    boot(false);
+    require(stop_observation_report().counters.witnessed_stops_recent_heating == 1,
+            "new revision restores exactly the post-fence late delta");
+}
+void indexed_fence_read_failure() {
+    boot();
+    const int64_t current = observation_bucket(sdk::origin_us + sdk::now_us);
+    put(current - 1, payload(current - 1, 9));
+    stop_observation_reset();
+    stop_observation_bind(101, 202, 303, 7, false);
+    drain();
+    require(stop_observation_report().counters.witnessed_stops_recent_heating == 0,
+            "committed fence baseline");
+    flash[next_slot - 1].header.crc ^= 1;
+    const auto reads = sdk::reads;
+    s_rebuild        = true;
+    stop_observation_flash_service(reader);
+    require(sdk::reads == reads, "validated fence metadata is never reread from its old slot");
+    require(stop_observation_report().counters.witnessed_stops_recent_heating == 0,
+            "indexed fence reader failure cannot resurrect old evidence");
+}
+void same_scope_fences() {
+    boot();
+    const int64_t current = observation_bucket(sdk::origin_us + sdk::now_us);
+    put(current - 1, payload(current - 1, 9));
+    for (unsigned i = 0; i < 80; ++i) {
+        const int64_t bucket = current + (i % 2 ? 100 : -100);
+        put(bucket, fence_payload(bucket));
+    }
+    stop_observation_flash_service(reader);
+    require(s_index.count == 2 && !s_index.clipped, "same-scope fences coalesce before capacity");
+    require(stop_observation_report().counters.witnessed_stops_recent_heating == 0,
+            "arbitrary fence timestamps cannot restore pre-reset counts");
+    put(current - 1, payload(current - 1, 2));
+    stop_observation_flash_service(reader);
+    require(stop_observation_report().counters.witnessed_stops_recent_heating == 2,
+            "post-fence data remains available despite repeated reset churn");
+    boot(false);
+    require(s_index.count == 2 && !s_index.clipped &&
+                stop_observation_report().counters.witnessed_stops_recent_heating == 2,
+            "physical reindex selects the same maximum fence and latest revision");
+}
+void fence_slot_reuse() {
+    boot();
+    const int64_t current = observation_bucket(sdk::origin_us + sdk::now_us);
+    put(current - 1, payload(current - 1, 9));
+    put(current, fence_payload(current));
+    const uint64_t fence_sequence = next_sequence - 1;
+    flash[1] = make_slot(current - 1, payload(current - 1, 2), next_sequence++);
+    index_slot(1);
+    stop_observation_flash_service(reader);
+    require(observation_index_fence_sequence(s_index, payload(current).identity) == fence_sequence,
+            "reused slot does not alter a validated reset snapshot");
+    require(stop_observation_report().counters.witnessed_stops_recent_heating == 2,
+            "new slot contents remain ordinary post-fence measurement data");
+    flash[1].header.crc ^= 1;
+    s_rebuild = true;
+    stop_observation_flash_service(reader);
+    require(stop_observation_report().partial &&
+                stop_observation_report().counters.witnessed_stops_recent_heating == 0,
+            "failed data reader qualifies loss without forgetting the reset");
+}
+void fence_geometry_wrap() {
+    boot();
+    require(flash.size() == HISTORY_FLASH_PARTITION_BYTES / HISTORY_JOURNAL_SLOT_BYTES,
+            "port uses actual target slot geometry");
+    const int64_t current = observation_bucket(sdk::origin_us + sdk::now_us);
+    put(current - 1, payload(current - 1, 9));
+    put(current, fence_payload(current));
+    for (size_t i = 0; i < HISTORY_JOURNAL_SLOT_COUNT; ++i) {
+        if (next_slot % HISTORY_JOURNAL_SLOTS_PER_SECTOR == 0)
+            for (size_t j = 0; j < HISTORY_JOURNAL_SLOTS_PER_SECTOR; ++j) flash[next_slot + j] = {};
+        put(current - 1, payload(current - 1, 2));
+    }
+    stop_observation_flash_service(reader);
+    require(observation_index_fence_sequence(s_index, payload(current).identity) == 2,
+            "cached fence survives recycling of its physical sector");
+    require(stop_observation_report().counters.witnessed_stops_recent_heating == 2,
+            "normal physical wrap does not strand post-fence data");
+    boot(false);
+    require(observation_index_fence_sequence(s_index, payload(current).identity) == 0,
+            "cold scan does not invent a physically recycled fence");
+    require(stop_observation_report().counters.witnessed_stops_recent_heating == 2,
+            "cold scan after a complete ring wrap restores only surviving data");
+}
+void cold_fence_corruption() {
+    for (unsigned mode = 0; mode < 8; ++mode) {
+        boot();
+        const int64_t current = observation_bucket(sdk::origin_us + sdk::now_us);
+        put(current - 1, payload(current - 1, 9));
+        put(current, fence_payload(current));
+        if (mode == 0) flash[1].header.crc ^= 1;
+        if (mode == 1) {
+            auto invalid                                    = fence_payload(current);
+            invalid.counters.witnessed_stops_recent_heating = 1;
+            flash[1]                                        = make_slot(current, invalid, 2);
+        }
+        if (mode == 2) {
+            flash[1].header.dt_s = 12;
+            flash[1].header.crc  = history_journal_crc_bytes(flash[1].header, &flash[1].payload,
+                                                             OBSERVATION_PAYLOAD_BYTES);
+        }
+        if (mode == 3) flash[1].header.commit = HISTORY_JOURNAL_ERASED;
+        if (mode == 4) flash[1].header.catalog_fp ^= 1;
+        if (mode == 5) flash[1].header.magic ^= 1;
+        if (mode == 6) flash[1].header.source = static_cast<uint8_t>(HistoryJournalSource::X10a);
+        boot(false);
+        const bool damaged_current = mode < 3;
+        require((s_index.clipped_until_bucket == INT64_MAX) == damaged_current,
+                "recognizable committed current damage marks fence completeness unknown");
+        require(stop_observation_report().counters.witnessed_stops_recent_heating ==
+                    (mode >= 3 && mode <= 6 ? 9 : 0),
+                "torn/foreign/unrecognizable precommit limits stay explicit; valid fence retires");
+        if (damaged_current) {
+            tick(3599, false, event(3590));
+            tick(3601, false);
+            require(!append(), "unknown fence completeness blocks late-delta writes");
+            stop_observation_start(true, 11);
+            stop_observation_bind(101, 202, 303, 7);
+            stop_observation_flash_service(reader);
+            require(s_index.clipped_until_bucket == INT64_MAX,
+                    "producer lifecycle cannot masquerade as a physical reindex");
+            stop_observation_reset();
+            stop_observation_bind(101, 202, 303, 8, false);
+            require(append(), "a required new reset fence may still become durable");
+            require(s_index.clipped_until_bucket == INT64_MAX &&
+                        stop_observation_report().counters.witnessed_stops_recent_heating == 0,
+                    "successful reset receipt does not certify unknown index completeness");
+            tick(3610, false, event(3605, 8));
+            stop_observation_seal();
+            require(!append(), "new live delta still cannot merge against unknown fence history");
+        }
+    }
+}
+void data_loss_qualification() {
+    boot();
+    const int64_t current = observation_bucket(sdk::origin_us + sdk::now_us);
+    put(current - 1, payload(current - 1, 9));
+    for (size_t i = 0; i < OBSERVATION_INDEX_CAP; ++i)
+        put(current + 1000 + i, payload(current + 1000 + i, 0));
+    require(s_index.clipped && s_index.clipped_until_bucket == current + 23,
+            "future maximum hour cannot certify a discarded current hour expired");
+    stop_observation_flash_service(reader);
+    require(s_index.clipped && stop_observation_report().partial,
+            "only actual current wall time controls finite data-loss qualification");
+    sdk::now_us += 24 * OBSERVATION_HOUR_US;
+    stop_observation_flash_service(reader);
+    require(!s_index.clipped && s_index.clipped_until_bucket != INT64_MAX,
+            "ordinary data loss can expire without inventing missing-fence completeness");
+}
+void future_base_late_merge() {
+    boot();
+    auto p = payload(observation_bucket(sdk::origin_us));
+    put(observation_bucket(sdk::origin_us), p);
+    stop_observation_flash_service(reader);
+    tick(20, false, event(10));
+    stop_observation_seal();
+    require(!append(), "a future-stamped measurement base is not merged into a dated delta");
+    require(s_claim_token == 0, "refused future base releases the queue claim for retry");
+    sdk::now_us = OBSERVATION_HOUR_US;
+    stop_observation_flash_service(reader);
+    require(append(), "once eligible the same measurement base and delta can be committed");
+    require(flash[next_slot - 1].payload.counters.witnessed_stops_recent_heating == 2,
+            "eligible base plus late delta are merged exactly once");
+}
+void fence_identity_scopes() {
+    for (auto field : {&ObservationIdentity::source_fp, &ObservationIdentity::model_fp,
+                       &ObservationIdentity::schema_fp, &ObservationIdentity::consent_generation}) {
+        boot();
+        sdk::now_us           = 3 * OBSERVATION_HOUR_US;
+        const int64_t current = observation_bucket(sdk::origin_us + sdk::now_us);
+        put(current - 1, payload(current - 1, 9));
+        auto other = fence_payload(current + 100);
+        other.identity.*field ^= 1;
+        put(current + 100, other);
+        stop_observation_flash_service(reader);
+        require(stop_observation_report().counters.witnessed_stops_recent_heating == 9,
+                "a fence differing in any one identity field cannot retire this scope");
+        put(current - 100, fence_payload(current - 100));
+        put(current - 1, payload(current - 1, 2));
+        stop_observation_flash_service(reader);
+        tick(10830, false, event(10798));
+        require(append(), "post-fence exact-scope late delta commits");
+        require(flash[next_slot - 1].payload.counters.witnessed_stops_recent_heating == 3,
+                "post-fence base2 plus late delta1 merges exactly once");
+        boot(false);
+        require(stop_observation_report().counters.witnessed_stops_recent_heating == 3,
+                "exact scope and delta revision survive a physical rescan");
+    }
+}
+void fence_scan_permutation() {
+    boot();
+    const int64_t current = observation_bucket(sdk::origin_us + sdk::now_us);
+    put(current - 3, payload(current - 3, 9));
+    put(current, fence_payload(current));
+    put(current - 2, payload(current - 2, 2));
+    put(current + 100, fence_payload(current + 100));
+    put(current - 1, payload(current - 1, 3));
+    std::swap(flash[1], flash[3]); // a physical scan can encounter newer sequence first
+    boot(false);
+    require(observation_index_fence_sequence(s_index, payload(current).identity) == 4,
+            "later physical position of an older fence cannot lower the reset sequence");
+    require(stop_observation_report().counters.witnessed_stops_recent_heating == 3,
+            "only measurements after the maximum matching fence survive scan permutations");
+}
+void finite_index_rebuild() {
+    boot();
+    const int64_t current = observation_bucket(sdk::origin_us + sdk::now_us);
+    put(current - 1, payload(current - 1, 9));
+    for (size_t i = 0; i < OBSERVATION_INDEX_CAP; ++i) put(current + i, payload(current + i, 2));
+    stop_observation_flash_service(reader);
+    require(s_index.clipped &&
+                stop_observation_report().counters.witnessed_stops_recent_heating == 0,
+            "finite pressure withholds the incomplete cached aggregate");
+    sdk::now_us += 23 * OBSERVATION_HOUR_US;
+    stop_observation_flash_service(reader);
+    require(!s_index.clipped, "actual wall time retires the one lost measurement hour");
+    require(stop_observation_report().counters.witnessed_stops_recent_heating == 46,
+            "expiry alone rebuilds the remaining23 completed hours without a new append");
+}
 } // namespace
 
 int main(int argc, char** argv) {
     try {
         if (argc != 2) throw std::runtime_error("one case required");
         const std::string name = argv[1];
-        if (name == "late_replay")
+        if (name == "aged_clock_fence")
+            aged_clock_fence();
+        else if (name == "future_clock_fence")
+            future_clock_fence();
+        else if (name == "old_fence_capacity")
+            old_fence_capacity();
+        else if (name == "future_fence_late_merge")
+            future_fence_late_merge();
+        else if (name == "indexed_fence_read_failure")
+            indexed_fence_read_failure();
+        else if (name == "same_scope_fences")
+            same_scope_fences();
+        else if (name == "fence_slot_reuse")
+            fence_slot_reuse();
+        else if (name == "fence_geometry_wrap")
+            fence_geometry_wrap();
+        else if (name == "cold_fence_corruption")
+            cold_fence_corruption();
+        else if (name == "data_loss_qualification")
+            data_loss_qualification();
+        else if (name == "future_base_late_merge")
+            future_base_late_merge();
+        else if (name == "fence_identity_scopes")
+            fence_identity_scopes();
+        else if (name == "fence_scan_permutation")
+            fence_scan_permutation();
+        else if (name == "finite_index_rebuild")
+            finite_index_rebuild();
+        else if (name == "late_replay")
             late_replay();
         else if (name == "independent_clock")
             independent_clock();

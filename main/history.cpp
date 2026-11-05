@@ -1985,6 +1985,25 @@ bool flash_read_stop_observation(uint16_t slot, int64_t& bucket, uint64_t& seque
     return logic::observation_payload_valid(payload, bucket);
 }
 
+void flash_index_stop_observation_record(const FlashJournalRecord& record, uint16_t slot) {
+    const auto& h = record.header;
+    if (h.magic != logic::HISTORY_JOURNAL_MAGIC || h.commit != logic::HISTORY_JOURNAL_COMMITTED ||
+        h.source != static_cast<uint8_t>(logic::HistoryJournalSource::Checkup) ||
+        h.catalog_fp != logic::observation_fingerprint())
+        return;
+    // A committed current-format record might have been a reset. Refusing its damaged bytes
+    // cannot establish that no reset occurred; keep completed restoration unavailable instead.
+    if (!logic::observation_header_matches(h) ||
+        h.crc !=
+            logic::history_journal_crc_bytes(h, record.payload, logic::OBSERVATION_PAYLOAD_BYTES)) {
+        stop_observation_flash_index_incomplete();
+        return;
+    }
+    logic::ObservationHourlyPayload payload;
+    std::memcpy(&payload, record.payload, sizeof(payload));
+    stop_observation_flash_index(h.bucket, h.sequence, slot, payload);
+}
+
 // Pass 1 finds the newest committed record and each source's latest bucket. Pass 2 walks backwards
 // from that physical head and remembers only slots inside the source's last 24-hour window; the
 // checkup source keeps up to CHECKUP_JOURNAL_INDEX_CAP candidate hours, because a revision
@@ -2021,6 +2040,7 @@ bool flash_journal_scan() {
             const uint8_t* raw = s_flash_sector + local * logic::HISTORY_JOURNAL_SLOT_BYTES;
             FlashJournalRecord r;
             std::memcpy(&r, raw, sizeof(r));
+            flash_index_stop_observation_record(r, static_cast<uint16_t>(slot));
             if (!flash_record_physically_valid(r)) {
                 if (r.header.magic == logic::HISTORY_JOURNAL_MAGIC &&
                     r.header.commit == logic::HISTORY_JOURNAL_COMMITTED &&
@@ -2029,12 +2049,6 @@ bool flash_journal_scan() {
                 continue;
             }
             valid_records++;
-            if (logic::observation_header_matches(r.header)) {
-                logic::ObservationHourlyPayload payload;
-                std::memcpy(&payload, r.payload, sizeof(payload));
-                stop_observation_flash_index(r.header.bucket, r.header.sequence,
-                                             static_cast<uint16_t>(slot), payload);
-            }
             if (flash_is_manifest(r.header)) (void)flash_manifest_cache_add(r);
             if (r.header.sequence > highest_sequence) {
                 highest_sequence = r.header.sequence;

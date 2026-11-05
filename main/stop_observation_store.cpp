@@ -180,8 +180,8 @@ bool read_entry(StopObservationReader reader, const ObservationIndexEntry& e,
                 ObservationHourlyPayload& p) {
     int64_t  bucket   = INT64_MIN;
     uint64_t sequence = 0;
-    return reader && reader(e.slot, bucket, sequence, p) && bucket == e.bucket &&
-           sequence == e.sequence && observation_payload_valid(p, bucket);
+    return reader && reader(e.slot(), bucket, sequence, p) && bucket == e.bucket() &&
+           sequence == e.sequence() && observation_payload_valid(p, bucket);
 }
 void apply_receipt() {
     if (!s_receipt.pending) return;
@@ -407,8 +407,16 @@ void stop_observation_flash_index_reset() {
 }
 void stop_observation_flash_index(int64_t bucket, uint64_t sequence, uint16_t slot,
                                   const logic::ObservationHourlyPayload& payload) {
-    if (observation_payload_valid(payload, bucket))
-        observation_index_add(s_index, bucket, sequence, slot, payload.flags & OBSERVATION_BARRIER);
+    if (!observation_payload_valid(payload, bucket)) {
+        stop_observation_flash_index_incomplete();
+        return;
+    }
+    observation_index_add(s_index, bucket, sequence, slot,
+                          (payload.flags & OBSERVATION_BARRIER) ? &payload.identity : nullptr);
+    s_rebuild = true;
+}
+void stop_observation_flash_index_incomplete() {
+    observation_index_incomplete(s_index);
     s_rebuild = true;
 }
 
@@ -422,8 +430,10 @@ void stop_observation_flash_service(StopObservationReader reader) {
         if (!lk || !s_enabled || !s_confirmed) return;
         now_wall = wall_now();
         if (!date_clock(esp_timer_get_time(), now_wall)) return;
-        if (s_index.clipped && observation_bucket(now_wall) >= s_index.clipped_until_bucket)
+        if (s_index.clipped && observation_bucket(now_wall) >= s_index.clipped_until_bucket) {
             s_index.clipped = false;
+            s_rebuild       = true;
+        }
         apply_receipt();
         expire_live(now_wall);
         if (!s_rebuild && !s_restore_pending &&
@@ -435,29 +445,18 @@ void stop_observation_flash_service(StopObservationReader reader) {
     }
     if (blocked) return;
     StopObservationReport rebuilt;
-    rebuilt.partial         = s_index.clipped;
-    rebuilt.restore_pending = false;
-    int64_t  expiry         = INT64_MIN;
-    int64_t  newest_bucket  = INT64_MIN;
-    uint64_t barrier        = 0;
-    bool     read_failed    = false;
-    // The barrier is a durable source reset fence, not a guessed boot epoch. One small record
-    // at a time is read under the caller's flash lock. Nothing here takes the checkup mutex.
+    rebuilt.partial              = s_index.clipped;
+    rebuilt.restore_pending      = false;
+    int64_t        expiry        = INT64_MIN;
+    int64_t        newest_bucket = INT64_MIN;
+    const uint64_t barrier       = observation_index_fence_sequence(s_index, identity);
+    bool           read_failed   = false;
+    // Fences are validated snapshot metadata. Never reread a recycled fence slot or date a
+    // sequence-order reset as measurement coverage. Only measurement entries use the reader.
     for (size_t i = 0; i < s_index.count && !s_index.clipped; ++i) {
         const auto& e = s_index.entries[i];
-        if (!e.barrier) continue;
-        auto& p = s_flash_payload;
-        if (!read_entry(reader, e, p)) {
-            read_failed = true;
-            continue;
-        }
-        if (p.last_unix_us <= now_wall && observation_in_window(e.bucket, now_wall) &&
-            observation_identity_equal(p.identity, identity) && e.sequence > barrier)
-            barrier = e.sequence;
-    }
-    for (size_t i = 0; i < s_index.count && !s_index.clipped; ++i) {
-        const auto& e = s_index.entries[i];
-        if (e.barrier || e.sequence <= barrier || !observation_in_window(e.bucket, now_wall))
+        if (observation_index_is_fence(s_index, i) || e.sequence() <= barrier ||
+            !observation_in_window(e.bucket(), now_wall))
             continue;
         auto& p = s_flash_payload;
         if (!read_entry(reader, e, p)) {
@@ -468,8 +467,8 @@ void stop_observation_flash_service(StopObservationReader reader) {
             continue;
         add_report(rebuilt, p);
         ++rebuilt.observed_hours;
-        if (e.bucket > newest_bucket) newest_bucket = e.bucket;
-        const int64_t end = (e.bucket + 24) * OBSERVATION_HOUR_US;
+        if (e.bucket() > newest_bucket) newest_bucket = e.bucket();
+        const int64_t end = (e.bucket() + 24) * OBSERVATION_HOUR_US;
         if (expiry == INT64_MIN || end < expiry) expiry = end;
     }
     rebuilt.partial |= read_failed;
@@ -518,6 +517,7 @@ bool stop_observation_flash_next(StopObservationReader reader, int64_t& bucket,
             return true;
         }
         if (!clock_valid) return false;
+        if (s_index.clipped_until_bucket == INT64_MAX) return false;
         if (s_restore_pending) return false;
         Queued* chosen = nullptr;
         for (auto& q : s_queue)
@@ -537,28 +537,22 @@ bool stop_observation_flash_next(StopObservationReader reader, int64_t& bucket,
     }
     // A late event is a delta until the owner reads the hour's newest committed revision. Do
     // not resurrect pre-reset records; service/index filtering and the explicit barrier bind it.
-    uint64_t barrier = 0;
+    const uint64_t barrier = observation_index_fence_sequence(s_index, payload.identity);
     for (size_t i = 0; i < s_index.count; ++i) {
         const auto& e = s_index.entries[i];
-        if (!e.barrier) continue;
-        auto& p = s_flash_payload;
-        if (!read_entry(reader, e, p)) {
-            stop_observation_flash_failed();
-            return false;
-        }
-        if (p.last_unix_us <= now_wall && observation_in_window(e.bucket, now_wall) &&
-            observation_identity_equal(p.identity, payload.identity) && e.sequence > barrier)
-            barrier = e.sequence;
-    }
-    for (size_t i = 0; i < s_index.count; ++i) {
-        const auto& e = s_index.entries[i];
-        if (e.barrier || e.bucket != bucket || e.sequence <= barrier) continue;
+        if (observation_index_is_fence(s_index, i) || e.bucket() != bucket ||
+            e.sequence() <= barrier)
+            continue;
         auto& base = s_flash_payload;
         if (!read_entry(reader, e, base)) {
             stop_observation_flash_failed();
             return false;
         }
         if (observation_identity_equal(base.identity, payload.identity)) {
+            if (!observation_in_window(e.bucket(), now_wall) || base.last_unix_us > now_wall) {
+                stop_observation_flash_failed();
+                return false;
+            }
             observation_merge(base, payload);
             payload = base;
         }

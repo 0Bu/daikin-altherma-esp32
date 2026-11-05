@@ -612,6 +612,11 @@ def validate_dynamic_stack(disassembly: str, frames: dict[str, int],
     frames[name] += 336  # round 328 up to the exact 16-byte alignment above
 
 
+def exact_symbol_name(pattern: str) -> str:
+    # JSON follows the existing audit-safe spelling of literal ELF lambda ordinals.
+    return re.sub(r"\\(.)", r"\1", pattern[1:-1].replace(r"\x23", "#"))
+
+
 def validate_integer_formatter(disassembly: str) -> None:
     """Keep the uint64 decimal conversion and its two callers in the reviewed fixed paths."""
     blocks = function_instructions(disassembly)
@@ -673,7 +678,7 @@ def validate_integer_formatter(disassembly: str) -> None:
             or not re.search(r"addi\s+a11,\s*a1,\s*20\nor\s+a10,\s*a1,\s*a1\ncall8\s+[0-9a-f]+\s+<"
                              + re.escape(INTEGER_TO_CHARS_SYMBOL) + r">", helper)):
         raise BudgetError("integer formatter: decimal base / fixed 20-byte destination changed")
-    stop_number = re.sub(r"\\(.)", r"\1", stop_stack.SYMBOLS["stop_json_mqtt_number"]["pattern"][1:-1])
+    stop_number = exact_symbol_name(stop_stack.SYMBOLS["stop_json_mqtt_number"]["pattern"])
     wrapper_callers = {}
     for caller, instructions in blocks.items():
         references = [line for line in instructions if "<" + INTEGER_TO_CHARS_SYMBOL + ">" in line]
@@ -3200,8 +3205,9 @@ def self_test() -> None:
     # old artificial maximum-size HTTP fixture with a different ELF's stop-body frames. Actual
     # stop frames and the complete caller sums are checked against the real ELF, not these bytes.
     for key, rule in stop_stack.SYMBOLS.items():
-        name = re.sub(r"\\(.)", r"\1", rule["pattern"][1:-1])
-        extra_frames[name] = 32
+        name = exact_symbol_name(rule["pattern"])
+        # These five newly outlined index helpers use their measured target ENTRY fixtures.
+        extra_frames[name] = rule["max_bytes"] if key.startswith("stop_index_") else 32
 
     # Exact final-ELF anchors for the shared verifier and asynchronous HTTP upload.
     extra_frames.update({
@@ -3262,7 +3268,7 @@ def self_test() -> None:
             fixture += (f"b01: 00000c movi.n a12, 10\nb04: 00000c mov.n a10, a3\n"
                         f"b07: fff7a5 call8 900 <{INTEGER_LENGTH_SYMBOL}>\n"
                         f"b0a: fff7a5 call8 a00 <{INTEGER_DIGITS_SYMBOL}>\n")
-        if name == re.sub(r"\\(.)", r"\1", stop_stack.SYMBOLS["stop_json_mqtt_number"]["pattern"][1:-1]):
+        if name == exact_symbol_name(stop_stack.SYMBOLS["stop_json_mqtt_number"]["pattern"]):
             fixture += f"{index + 3:x}: fff7a5 call8 b00 <{INTEGER_TO_CHARS_SYMBOL}>\n"
         if name == INTEGER_LENGTH_SYMBOL:
             fixture += "901: 000081 l32r a8, 1 <literal> (40002544 <__udivdi3>)\n904: 0008e0 callx8 a8\n"

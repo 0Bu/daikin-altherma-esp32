@@ -301,7 +301,14 @@ constraints). Stop context uses an independent hourly source in `stop_observatio
 its own schema/method, source/model/consent identity, readable clock and late-stop replay. Its
 payload fits `HISTORY_JOURNAL_PAYLOAD_BYTES`; it keeps an open hour, a bounded four-entry append
 queue, a completed sum and a 47-entry restore index, rather than another 24-hour RAM ring or trend
-raster. The history owner rebuilds that sum at restoration, after each of its hourly records
+raster. The index keeps CRC/commit-admitted reset identities and sequences as metadata; a newer
+same-scope reset supersedes its predecessor. Reset fences do not expire with measurement hours or
+depend on rereading a subsequently reused physical slot. If capacity cannot preserve a complete
+fence set, completed restoration stays limited until a complete physical reindex establishes it.
+Recognizable committed current-format records with invalid headers, CRCs or payloads also make
+the reset index incomplete: damaged flags cannot prove that no reset occurred. This is not a
+redundant archive capable of reconstructing erased or unrecognizable reset records.
+The history owner rebuilds the sum at restoration, after each of its hourly records
 is committed to the journal, after a replay, and when its oldest hour expires, even if the producer
 stops. It reuses one 96-byte flash-owner payload scratch and the history sector scratch, then
 swaps the result in under a zero-wait take of the observation's lock; report and record paths never
@@ -313,7 +320,9 @@ Stop records use the existing physical Checkup envelope with a distinct format f
 width. Older firmware can discover their physical sequence/head without interpreting their payload
 as core diagnosis. The core bucket, its fingerprint and the five wire source IDs are unchanged.
 Finalized stop contexts revise the original stop hour; pending candidates never restore. Explicit
-resets require a committed barrier before reset durability is established. Power loss before that
+resets require a committed barrier before reset durability is established. Fence ordering uses
+sequence and exact scope, independently of wall time; a backward clock correction cannot make a
+pre-reset future hour eligible after the fence ages. Power loss before that
 append can still restore older same-scope hours. Source changes and consent transitions withdraw
 live evidence immediately. Whole-hour aging also runs without further polls; missing records never
 borrow the core clock. New hourly observations must preserve these independent-source boundaries.
