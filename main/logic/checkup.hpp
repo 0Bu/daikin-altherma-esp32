@@ -1821,22 +1821,14 @@ constexpr uint32_t CHECKUP_REQUIRED_S     = CHECKUP_WINDOW_S * 9u / 10u; // 90% 
 constexpr uint32_t CHECKUP_MIN_S_PRESSURE = CHECKUP_PRESSURE_CONFIRM_S;
 constexpr uint32_t CHECKUP_MIN_S_FLOW     = 60;         // steady flow after run-up, observation only
 
-// CYCLING. Two conditions, both required, and the second is the one that knows the load. The
-// 10-minute window mean is this project's diagnostic heuristic, not a Daikin service limit:
-// expected run length varies with model, load, weather, control and emitter system. Long DHW charges
-// and cooling runs can mask short space-heating runs in the pooled fallback. The start count guards
-// against reading a mean off two samples, and a match is Info, never a fault/limit verdict.
-//
-// A DHW charge is a LONG run, and on the reference installation every DHW cycle terminates on the
-// ~100 °C discharge limit, so one tank charge is several legitimate compressor starts. Where the
-// 3-way valve and I/U mode are readable those loads are now separated (see the Cycling branch)
-// instead of raising a pooled mean that could carry a short-cycling space circuit over this bound;
-// where they are not, the pooled mean and this masking both remain, which is the honest fallback
-// rather than a second heuristic invented for a profile with less evidence.
-//
-// The bound stays at twelve and stays a bound on the JUDGED class. Twelve space starts is a day
-// with a real duty cycle behind it; lowering it because a split leaves fewer starts on each side
-// would be trading evidence for sensitivity, which is a domain decision with its own measurement.
+// CYCLING. Only completed, continuously classified heating runs can support an assessment.
+// DHW/cooling runs and unfinished runs do not enter the heating mean. Both run-count and
+// heating-runtime population coverage must pass before interpreting that mean.
+// Missing class evidence leaves starts as observations with an explicit reason; there is no
+// pooled all-mode fallback. A short-run finding may surface before the full rolling day, while
+// an absence-of-short-run assessment also needs the full day and readable classification time.
+// Twelve heating runs, ten minutes and both 90% population gates are project heuristics,
+// not Daikin service limits; expected run length varies with the installation and conditions.
 constexpr uint32_t CHECKUP_CYCLING_MIN_STARTS   = 12;
 constexpr uint32_t CHECKUP_CYCLING_SHORT_RUN_S  = 600;    // 10 minutes, mean over the window
 constexpr uint32_t CHECKUP_CYCLING_CLASSIFIED_PCT = 90;   // completed runs with a usable class
