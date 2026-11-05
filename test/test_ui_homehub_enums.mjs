@@ -3,7 +3,7 @@
 // while structural enum metadata keeps the visual UI readable and true flags remain 0/1 -> ON/OFF.
 import assert from "node:assert/strict";
 import vm from "node:vm";
-import { readAppFragments, readUiLocale } from "../tools/ui/read_app_source.mjs";
+import { readAppFragments, readHtmlRenderer, readUiLocale } from "../tools/ui/read_app_source.mjs";
 
 const appStateSource = readAppFragments(["app_state.js"]);
 const schematicSource = readAppFragments(["schematic.js"]);
@@ -13,7 +13,7 @@ const pickValueSource = appStateSource.match(/function pickValue\(re\) \{[\s\S]*
 function renderer(lang, removeNativePrecedence = false) {
   let source = readAppFragments(["i18n.js"]) +
     (lang === "en" ? "" : readUiLocale(lang)) +
-    readAppFragments(["history.js", "descriptions.js", "schematic.js"]) + pickValueSource;
+    readAppFragments(["history.js", "descriptions.js", "schematic.js"]) + pickValueSource + readHtmlRenderer();
   if (removeNativePrecedence) {
     const anchor = "const preferSourceDesc = fb && desc?.sourceQualified;";
     assert.equal(source.split(anchor).length, 2, "unique production mutation anchor");

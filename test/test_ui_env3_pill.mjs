@@ -5,16 +5,13 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
-import { readAppFragments, readHistoryLifecycle, readUiLocale } from "../tools/ui/read_app_source.mjs";
+import { readAppFragments, readHistoryLifecycle, readHtmlRenderer, readUiLocale } from "../tools/ui/read_app_source.mjs";
 
 const index = fs.readFileSync(new URL("../main/www/index.html", import.meta.url), "utf8");
 const dashboard = fs.readFileSync(new URL("../main/www/js/dashboard.js", import.meta.url), "utf8");
 const style = fs.readFileSync(new URL("../main/www/style.css", import.meta.url), "utf8");
-const state = readAppFragments(["app_state.js"]);
-const htmlHelper = state.match(/const _html = \{\};\nfunction setHtml[\s\S]*?\n\}/)?.[0];
-assert.ok(htmlHelper, "the fixture must execute the production unchanged-HTML helper");
 const source = readAppFragments(["i18n.js"]) + readUiLocale("de") +
-  readHistoryLifecycle() + htmlHelper + "\n" +
+  readHistoryLifecycle() + readHtmlRenderer() + "\n" +
   readAppFragments(["dashboard.js", "descriptions.js", "history.js", "schematic.js"]);
 
 assert.match(index,
