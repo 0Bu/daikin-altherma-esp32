@@ -120,7 +120,7 @@ vm.runInContext(`${source}
     render: () => { LANG = "de"; renderEnv3Pill(); renderInspect(); },
     pill: () => { LANG = "de"; renderEnv3Pill(); },
     tooltip: (i) => { LANG = "de"; return scrubText(historyView(ENV3_COMBINED_ID), i); },
-    tooltipHtml: (i) => { LANG = "de"; return env3ScrubHtml(historyView(ENV3_COMBINED_ID), i); },
+    tooltipHtml: (i) => { LANG = "de"; return histReadout(historyView(ENV3_COMBINED_ID), i); },
     toggle: (source) => histSeriesToggle(ENV3_COMBINED_ID, source),
   };`, sandbox, { filename: "main/www/app.sources" });
 
@@ -183,36 +183,40 @@ assert.match(style, /\.vhist-multi \.vhist-area\s*\{[^}]*opacity:\s*\.09/,
   "measured ENV III areas must use the shared multi-series transparency");
 assert.match(style, /\.vhist-line\.env-forecast-temperature\s*\{[^}]*opacity:\s*\.68/,
   "forecast upper-edge lines must be quieter than measured upper-edge lines");
-assert.match(style, /\.vhist-env3 \.vhist-tip-line\.env-temperature\s*\{[^}]*color:\s*var\(--flow-hot\)/);
-assert.match(style, /\.vhist-env3 \.vhist-tip-line\.env-humidity\s*\{[^}]*color:\s*var\(--flow-cold\)/);
-assert.match(style, /\.vhist-env3 \.vhist-tip-line\.env-pressure\s*\{[^}]*color:\s*var\(--env-pressure\)/);
+assert.match(style, /\.vhist-tip-rows \.env-temperature\s*\{[^}]*color:\s*var\(--flow-hot\)/);
+assert.match(style, /\.vhist-tip-rows \.env-humidity\s*\{[^}]*color:\s*var\(--flow-cold\)/);
+assert.match(style, /\.vhist-tip-rows \.env-pressure\s*\{[^}]*color:\s*var\(--env-pressure\)/);
 assert.match(style, /\.vhist-graph\s*\{[^}]*grid-template-rows:\s*auto 12px auto 24px;/,
   "climate readouts share the compact row above the curve and times share the lower axis");
 assert.doesNotMatch(style, /\.vhist-env3 \.vhist-graph\s*\{/,
   "climate tooltip height must not alter graph layout");
 assert.match(style,
-  /\.vhist-env3 \.vhist-tip-line\s*\{[^}]*display:\s*block/,
-  "every viewport must stack the same tooltip rows while the plot stays fixed underneath");
+  /\.vhist-env3 \.vhist-tip-rows\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*max-content minmax\(0, 1fr\);[^}]*text-align:\s*left/,
+  "climate tooltip rows must share a left-aligned value column at every viewport");
 const measuredClock = new Date(currentUnix * 1000)
   .toLocaleTimeString("de", { hour: "2-digit", minute: "2-digit" });
 assert.equal(sandbox.__api.tooltip(2),
   `${measuredClock}\nTemperatur  21,5 °C\nLuftfeuchte  48,0 %\nLuftdruck  1.007,0 hPa`,
   "one readable tooltip must report the selected instant and all three measurements");
 assert.equal(sandbox.__api.tooltipHtml(2),
-  `<span class="vhist-tip-line env-temperature">Temperatur  21,5 °C</span>` +
-  `<span class="vhist-tip-line env-humidity">Luftfeuchte  48,0 %</span>` +
-  `<span class="vhist-tip-line env-pressure">Luftdruck  1.007,0 hPa</span>`,
+  `<span class="vhist-tip-rows">` +
+  `<span class="env-temperature">Temperatur</span><span class="env-temperature">21,5 °C</span>` +
+  `<span class="env-humidity">Luftfeuchte</span><span class="env-humidity">48,0 %</span>` +
+  `<span class="env-pressure">Luftdruck</span><span class="env-pressure">1.007,0 hPa</span></span>`,
   "each measured tooltip row must colour its name and value with the matching series token");
 const forecastClock = new Date((currentUnix + 3600) * 1000)
   .toLocaleTimeString("de", { hour: "2-digit", minute: "2-digit" });
 assert.equal(sandbox.__api.tooltip(3),
   `${forecastClock}\nOpen-Meteo · Prognose\nTemperatur  22,0 °C\nLuftfeuchte  46,0 %\nLuftdruck  1.008,0 hPa`,
   "the same tooltip path must expose every provider-timestamped future value");
+assert.equal(sandbox.__api.tooltipHtml(99), "",
+  "a selection retired by an asynchronous history refresh must render no invented forecast");
 assert.equal(sandbox.__api.tooltipHtml(3),
-  `<span class="vhist-tip-line vhist-tip-meta">Open-Meteo · Prognose</span>` +
-  `<span class="vhist-tip-line env-temperature">Temperatur  22,0 °C</span>` +
-  `<span class="vhist-tip-line env-humidity">Luftfeuchte  46,0 %</span>` +
-  `<span class="vhist-tip-line env-pressure">Luftdruck  1.008,0 hPa</span>`,
+  `<span class="vhist-tip-meta">Open-Meteo · Prognose</span>` +
+  `<span class="vhist-tip-rows">` +
+  `<span class="env-temperature">Temperatur</span><span class="env-temperature">22,0 °C</span>` +
+  `<span class="env-humidity">Luftfeuchte</span><span class="env-humidity">46,0 %</span>` +
+  `<span class="env-pressure">Luftdruck</span><span class="env-pressure">1.008,0 hPa</span></span>`,
   "forecast provenance stays neutral while all three forecast rows keep their series colours");
 
 sandbox.__api.toggle("env3_humidity");
@@ -221,7 +225,7 @@ assert.doesNotMatch(elements.inspHist.innerHTML, /class="vhist-line env-humidity
 assert.doesNotMatch(elements.inspHist.innerHTML, /class="vhist-line env-forecast-humidity"/,
   "a climate legend controls both measured and forecast curves");
 assert.doesNotMatch(sandbox.__api.tooltipHtml(3), /Luftfeuchte/);
-assert.match(sandbox.__api.tooltipHtml(3), /vhist-tip-line env-pressure">Luftdruck/,
+assert.match(sandbox.__api.tooltipHtml(3), /env-pressure">Luftdruck/,
   "hiding the middle reading must preserve the other measurement colours");
 sandbox.__api.toggle("env3_temperature");
 assert.match(elements.inspHist.innerHTML, /data-hist-series="env3_pressure" aria-pressed="true" disabled/);
@@ -231,9 +235,9 @@ assert.match(elements.inspHist.innerHTML, /class="vhist-line env-pressure"/,
 const pressureRing = S.hist.get("env3:env3_pressure");
 const pressureValues = pressureRing.v;
 pressureRing.v = pressureValues.map(() => null);
-assert.match(sandbox.__api.tooltipHtml(3), /env-temperature">Temperatur  22,0 °C/,
+assert.match(sandbox.__api.tooltipHtml(3), /env-temperature">Temperatur<\/span><span class="env-temperature">22,0 °C/,
   "source fallback must keep forecast temperature on its own colour");
-assert.match(sandbox.__api.tooltipHtml(3), /env-pressure">Luftdruck  1.008,0 hPa/,
+assert.match(sandbox.__api.tooltipHtml(3), /env-pressure">Luftdruck<\/span><span class="env-pressure">1.008,0 hPa/,
   "source fallback must keep forecast pressure on its own colour");
 pressureRing.v = pressureValues;
 sandbox.__api.toggle("env3_humidity");

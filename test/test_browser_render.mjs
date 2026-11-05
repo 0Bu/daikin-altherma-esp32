@@ -2016,7 +2016,13 @@ async function assertHistoryReadouts(page, context) {
             /^rgb\\(/.test(getComputedStyle(el).backgroundColor) && getComputedStyle(el).opacity === "1";
           const view=historyView(plot.dataset.hist,plot.dataset.source || "");
           const i=scrubIndex(plot,plot.getBoundingClientRect().left + plot.clientWidth * ${fraction});
+          const valuesAligned = el => {
+            const values = [...el.querySelectorAll(".vhist-tip-rows > span:nth-child(even)")];
+            return values.length === 3 && values.every(value =>
+              Math.abs(rect(value).left-rect(values[0]).left)<1 && getComputedStyle(value).textAlign === "left");
+          };
           return {visible:!live.hidden && !liveTime.hidden && a.height > 0 && b.height > 0,
+            valuesAligned:valuesAligned(pin) && valuesAligned(live),
             overlap:a.right > b.left && b.right > a.left, timeOverlap:c.right>d.left && d.right>c.left,
             shared:Math.abs(a.bottom-b.bottom)<1, sameAxis:Math.abs(c.top-d.top)<1,
             tipFront:foreground(live,pin),timeFront:foreground(liveTime,pinTime),
@@ -2044,6 +2050,8 @@ async function assertHistoryReadouts(page, context) {
         assert.ok(Math.abs(state.pinTimeTop-baseline.timeTop)<1,`${label}: showing or moving a preview must not move the pinned time: ${JSON.stringify({baseline,state:state.bounds})}`);
         assert.equal(state.axisTime,state.expectedTime,`${label}: the axis follows the selected sample`);
         assert.equal(state.selectedTimeInBubble,false,`${label}: measurement tooltips contain values, with time on the axis`);
+        if(id === "env3_combined")
+          assert.equal(state.valuesAligned,true,`${label}: measured and forecast values share a left-aligned column`);
         assert.equal(state.pin,baseline.tip,`${label}: movement must preserve the pinned reading`);
         assert.equal(state.pinTime,baseline.time,`${label}: movement must preserve its pinned instant`);
         assert.equal(state.cross,true,`${label}: the pinned crosshair remains visible`);
