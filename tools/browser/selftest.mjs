@@ -110,3 +110,14 @@ assert.match(isolationBypassOutput, /route-isolated keyboard open must keep the 
 console.log("browser render selftest passed: overflow was rejected, delayed modal focus and route " +
   "completion were awaited, duplicate real History transitions were bounded, and route isolation " +
   "was observed");
+
+const eagerHistory = spawnSync(process.execPath,
+  [path.join(root, "test/test_browser_render.mjs"), "--viewport", "phone"], {
+    cwd: root, encoding: "utf8",
+    env: { ...process.env, DAIKIN_BROWSER_MUTATION: "history-eager" },
+  });
+assert.notEqual(eagerHistory.status, 0, "eager hidden chart construction must fail the live-poll browser test");
+assert.match(`${eagerHistory.stdout || ""}\n${eagerHistory.stderr || ""}`,
+  /polls must not rebuild cached charts in closed rows/,
+  "history canary must fail on recurring chart work, not a fixture or browser setup error");
+console.log("browser history selftest passed: recurring hidden chart construction was rejected");

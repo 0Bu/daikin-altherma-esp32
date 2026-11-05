@@ -631,7 +631,8 @@ function circulationSettingsCardHtml() {
       body += descNoteHtml(t("circ.detail.age"), checkupDuration(c.age_s));
     body += `<div class="vdesc-p">${esc(t("circ.settings_help"))}</div>`;
   }
-  body += typeof histHtml === "function" ? histHtml("circulation_state", "", t("circ.row")) : "";
+  if (S.descOpen.has("diagnostics:circulation"))
+    body += typeof histHtml === "function" ? histHtml("circulation_state", "", t("circ.row")) : "";
   const sourceName = c.configured ? (c.name || "MQTT") : t("circ.not_configured");
   // The face NAMES the source and states its condition in colour — the room-source row's shape. That
   // makes the colour load-bearing, so DESIGN.md §9 requires the accessible name to spell the same
@@ -1186,8 +1187,7 @@ function memoryRows(sys) {
     const val = esc(fmtKiB(bytes));
     if (!hid && !d) return vrow(label, fmtKiB(bytes), { cls: "mono num" });
     return descAccordion(`board:${id}`, label, val, "mono num",
-                         (d ? descBodyHtml(d, undefined, modelDescriptionCopy(id)) : "") +
-                         histHtml(hid, "KiB", label), hid);
+                         d ? descBodyHtml(d, undefined, modelDescriptionCopy(id)) : "", hid, "KiB");
   };
   return row("free_heap", "card.freeheap", sys.free_heap) +
          row("max_alloc", "card.maxalloc", sys.max_alloc);

@@ -92,6 +92,14 @@ export function readHistoryLifecycle(source = DEFAULT_APP_SOURCE) {
   return state.slice(start, end);
 }
 
+// Focused inspector harnesses supply S themselves but still execute the shared DOM-write guard.
+export function readHtmlRenderer(source = DEFAULT_APP_SOURCE) {
+  const state = readAppFragments(["app_state.js"], source);
+  const matches = state.match(/const _html = \{\};\nfunction setHtml[\s\S]*?\n\}/g);
+  if (matches?.length !== 1) fail("app_state.js HTML renderer is missing or duplicated");
+  return matches[0];
+}
+
 // Locale modules are deliberately outside app.sources so they do not consume the dashboard's
 // single-response startup budget. Focused host tests can still execute the exact separately
 // shipped source rather than copying translations into fixtures.

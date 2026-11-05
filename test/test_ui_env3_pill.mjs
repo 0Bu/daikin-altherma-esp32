@@ -5,13 +5,13 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
-import { readAppFragments, readHistoryLifecycle, readUiLocale } from "../tools/ui/read_app_source.mjs";
+import { readAppFragments, readHistoryLifecycle, readHtmlRenderer, readUiLocale } from "../tools/ui/read_app_source.mjs";
 
 const index = fs.readFileSync(new URL("../main/www/index.html", import.meta.url), "utf8");
 const dashboard = fs.readFileSync(new URL("../main/www/js/dashboard.js", import.meta.url), "utf8");
 const style = fs.readFileSync(new URL("../main/www/style.css", import.meta.url), "utf8");
 const source = readAppFragments(["i18n.js"]) + readUiLocale("de") +
-  readHistoryLifecycle() +
+  readHistoryLifecycle() + readHtmlRenderer() + "\n" +
   readAppFragments(["dashboard.js", "descriptions.js", "history.js", "schematic.js"]);
 
 assert.match(index,
@@ -54,7 +54,12 @@ function classList() {
 
 function element() {
   return {
-    textContent: "", innerHTML: "", hidden: false, style: {}, attrs: {}, classList: classList(),
+    textContent: "", _html: "", hidden: false, style: {}, attrs: {}, classList: classList(),
+    get innerHTML() { return this._html; },
+    set innerHTML(html) {
+      this._html = html;
+      this.textContent = html.replace(/<[^>]*>/g, "");
+    },
     setAttribute(name, value) { this.attrs[name] = String(value); },
     removeAttribute(name) { delete this.attrs[name]; },
   };

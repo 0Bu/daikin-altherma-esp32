@@ -1979,11 +1979,12 @@ function displayHomeHubLabel(row) {
 // `trendId` is the series the panel carries, if any: the toggle fetches and un-pins by it, so the
 // id is derived ONCE (here, where the body was built) instead of again from the key — which for a
 // board row is not a catalog label and could not be looked up at all.
-function descAccordion(key, label, valHtml, cls, bodyHtml, trendId) {
+function descAccordion(key, label, valHtml, cls, bodyHtml, trendId, unit = "") {
   const open = S.descOpen.has(key);
+  if (open && trendId) bodyHtml += histHtml(trendId, unit, label);
   return `<div class="vitem${open ? " open" : ""}">` +
     `<button class="vrow vrow-desc" type="button" data-desc="${esc(key)}"` +
-    (trendId ? ` data-trend="${esc(trendId)}"` : "") + ` aria-expanded="${open ? "true" : "false"}">` +
+    (trendId ? ` data-trend="${esc(trendId)}" data-unit="${esc(unit)}"` : "") + ` aria-expanded="${open ? "true" : "false"}">` +
     `<span class="vrow-label">${esc(label)}</span>` +
     `<span class="vrow-end"><span class="vrow-val ${cls}">${valHtml}</span>${chevIcon}</span>` +
     `</button>` +
@@ -2049,8 +2050,7 @@ function vDescRow(v) {
   // below it is the same sentence on every device and at every hour.
   return descAccordion(key, shownLabel, val, cls,
                        dwell + unknownAge + (d ? descBodyHtml(d, src.value, descriptionCopy(d)) : "") +
-                       mbNoteHtml(v, cmp) +
-                       histHtml(hid, displayUnit(v), shownLabel), hid);
+                       mbNoteHtml(v, cmp), hid, displayUnit(v));
 }
 
 // A Model-card row: the same accordion as a value row when copy exists for it, else the plain row
@@ -2195,16 +2195,20 @@ function toggleDesc(btn) {
   if (!item) return;
   const key = btn.dataset.desc || "";
   const trend = btn.dataset.trend || "";
-  const trends = (btn.dataset.trends || "").split(",").filter(Boolean);
-  if (trend) trends.unshift(trend);
   const open = !item.classList.contains("open");
   item.classList.toggle("open", open);
   btn.setAttribute("aria-expanded", open ? "true" : "false");
   if (open) S.descOpen.add(key);
-  else { S.descOpen.delete(key); for (const id of trends) S.histPin.delete(id); }
+  else { S.descOpen.delete(key); S.histPin.delete(trend); }
+  // Opening a schematic history also fills the cache used by value rows. Do not build and parse
+  // another SVG in every collapsed row on every two-second poll. Mount it only on disclosure,
+  // including a cache hit (ensureHistPair then returns without triggering a repaint).
+  if (open && trend && !item.querySelector(".vhist"))
+    item.querySelector(".vdesc-body").insertAdjacentHTML("beforeend",
+      histHtml(trend, btn.dataset.unit || "", btn.querySelector(".vrow-label").textContent));
   // Fetch the trend only once the panel is actually opened — a device that buffers eleven series
   // would otherwise answer a request per row on every page load, for panels nobody looked at.
-  if (open) for (const id of trends) ensureHistPair(id);
+  if (open && trend) ensureHistPair(trend);
 }
 
 // Heat-pump value groups (grouped by domain, §6) as card markup. Hidden entirely while the
@@ -2308,8 +2312,7 @@ function modbusOnlyGroupHtml(all) {
         `<span class="vrow-val src-val-mb">${val}</span></div>`;
     }
     return descAccordion(label, shown, val, "src-val-mb",
-                         (d ? descBodyHtml(d, m.value, descriptionCopy(d)) : "") +
-                         histHtml(hid, unit, shown), hid);
+                         d ? descBodyHtml(d, m.value, descriptionCopy(d)) : "", hid, unit);
   }).join("");
   // The heading has to match what is IN the card: "Modbus only" is true of the unpaired handful and
   // false the moment `all` folds the paired rows in beside them.
