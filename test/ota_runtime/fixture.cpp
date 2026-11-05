@@ -802,7 +802,7 @@ void upload_worker(const char* name) {
     // Runtime lwIP allocation is now unavailable: the first failed-upload response must use the
     // semaphore retained at boot even when no receive occurred before quiescence/buffer refusal.
     s.reject_sem_allocation = true;
-    auto source = upload.source();
+    auto source             = upload.source();
     char digest[65];
     std::strcpy(digest, upload_sha256);
     const auto generation = ota_upload_async(source, digest);
