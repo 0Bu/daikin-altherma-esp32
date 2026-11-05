@@ -101,8 +101,8 @@ assert.match(ota,
   /uint32_t\s+ota_check_async[\s\S]{0,300}?return generation;[\s\S]{0,1600}?uint32_t\s+ota_update_async[\s\S]{0,500}?return generation;/,
   "both asynchronous operations must return their accepted generation to HTTP");
 assert.match(ota,
-  /struct OtaTaskArgs[\s\S]{0,300}?uint32_t\s+generation[\s\S]{0,500}?OtaOfferBinding\s+offer\{\}[\s\S]{0,180}?static_assert\(sizeof\(OtaTaskArgs\)\s*<=\s*656/,
-  "the asynchronous task identity must use one size-ratcheted fixed offer slot");
+  /struct OtaTaskArgs[\s\S]{0,300}?uint32_t\s+generation[\s\S]{0,500}?OtaOfferBinding\s+offer\{\}[\s\S]{0,100}?OtaUploadSource\s+upload\{\}[\s\S]{0,180}?static_assert\(sizeof\(OtaTaskArgs\)\s*<=\s*704/,
+  "the asynchronous identity and upload callbacks must use one size-ratcheted fixed slot");
 assert.match(hilFeed,
   /struct OtaOfferBinding[\s\S]{0,300}?std::array<char,\s*8>\s+channel[\s\S]{0,100}?std::array<char,\s*32>\s+version[\s\S]{0,100}?std::array<char,\s*65>\s+app_sha256[\s\S]{0,100}?OtaFeedUrls\s+feed/,
   "the task offer must keep channel/version/SHA/feed in fixed-capacity storage");
@@ -112,8 +112,22 @@ assert.match(ota,
 assert.match(ota,
   /void\s+ota_update_init\(\)[\s\S]{0,300}?xTaskCreateStatic\(ota_task,[\s\S]{0,180}?s_ota_task_stack,[\s\S]{0,80}?s_ota_task_storage/,
   "the OTA stack and TCB must be allocated statically before an operation needs TLS heap");
-assert.match(ota,
-  /void\s+ota_task\(void\*\)[\s\S]{0,180}?for\s*\(;;\)[\s\S]{0,120}?ulTaskNotifyTake\(pdTRUE,\s*portMAX_DELAY\)/,
+const workerStart = ota.indexOf("void ota_task(void*) {");
+const workerEnd = ota.indexOf("\nuint32_t next_generation(",workerStart);
+assert.ok(workerStart >= 0 && workerEnd > workerStart,"resident OTA worker boundaries missing");
+const worker = ota.slice(workerStart,workerEnd);
+const workerPrime = worker.indexOf("sys_thread_sem_get()");
+const workerRetained = worker.indexOf("sys_thread_sem_get() != thread_sem",workerPrime);
+const workerPark = worker.indexOf("vTaskSuspend(nullptr)",workerRetained);
+const workerReady = worker.indexOf("s_ota_lwip_ready.store(true",workerPark);
+const workerLoop = worker.indexOf("for (;;)",workerReady);
+assert.ok(workerPrime >= 0 && workerRetained > workerPrime && workerPark > workerRetained &&
+          workerReady > workerPark && workerLoop > workerReady,
+  "the OTA worker must verify retained task-local lwIP state and park failure before readiness/idle");
+assert.match(worker,/thread_sem == nullptr \|\| sys_thread_sem_get\(\) != thread_sem/,
+  "a missing or unretained semaphore must not publish readiness");
+assert.match(worker.slice(workerLoop),
+  /^for\s*\(;;\)[\s\S]{0,120}?ulTaskNotifyTake\(pdTRUE,\s*portMAX_DELAY\)/,
   "the static OTA worker must remain resident and sleep between operation notifications");
 assert.doesNotMatch(ota, /xTaskCreate\(ota_task/,
   "an OTA operation must not allocate its own task stack from runtime heap");
@@ -132,7 +146,8 @@ const otaWorkerInitAt = appMain.indexOf("ota_update_init()", deadlineInitAt);
 const httpStartAt = appMain.indexOf("http_start()", otaWorkerInitAt);
 assert.ok(deadlineInitAt >= 0 && otaWorkerInitAt > deadlineInitAt && httpStartAt > otaWorkerInitAt,
   "the static OTA worker must be initialized before the HTTP surface can accept operations");
-assert.equal(occurrences(httpOta, '503 Service Unavailable'), 2,
+const feedHttp = httpOta.slice(0, httpOta.indexOf("static int upload_read("));
+assert.equal(occurrences(feedHttp, '503 Service Unavailable'), 2,
   "busy or unavailable check/update starts must both be HTTP non-success");
 assert.equal(occurrences(httpOta, '{\\"ok\\":true,\\"generation\\":%lu}'), 2,
   "both accepted operation responses must carry their generation token");
@@ -486,10 +501,35 @@ assert.doesNotMatch(ota, /esp_https_ota_(?:begin|perform|finish)\s*\(/,
   "the opaque HTTPS helper cannot release its TLS heap before its built-in validation step");
 
 const updateStart = ota.indexOf("void run_update(");
-const updateEnd = ota.indexOf("uint32_t next_generation(", updateStart);
-assert.ok(updateStart >= 0 && updateEnd > updateStart,
+const updateEnd = ota.indexOf("void ota_task(", updateStart);
+const activateStart = ota.indexOf("void activate_update(");
+const uploadStart = ota.indexOf("void run_upload(", activateStart);
+assert.ok(activateStart >= 0 && uploadStart > activateStart &&
+          updateStart > uploadStart && updateEnd > updateStart,
   "the OTA install boundary must remain identifiable");
-const update = ota.slice(updateStart, updateEnd);
+const activation = ota.slice(activateStart, uploadStart);
+const pull = ota.slice(updateStart, updateEnd);
+const upload = ota.slice(uploadStart, updateStart);
+assert.equal(occurrences(pull, "activate_update(resources, update_partition, avail)"), 1,
+  "feed installs must enter the shared signature and boot-selection path exactly once");
+assert.equal(occurrences(upload, "activate_update(resources, partition, image.version, &upload)"), 1,
+  "direct uploads must enter the same signature and boot-selection path exactly once");
+const uploadHash = upload.indexOf("ota_sha256_matches(digest, request.offer.app_sha256.data())");
+const uploadActivation = upload.indexOf("activate_update(resources, partition, image.version, &upload)");
+const pullActivation = pull.indexOf("activate_update(resources, update_partition, avail)");
+assert.ok(uploadHash >= 0 && uploadActivation > uploadHash &&
+          /return\s*;/.test(upload.slice(uploadHash, uploadActivation)),
+  "an upload SHA refusal must return before entering the shared signature verifier");
+assert.match(upload.slice(0, uploadActivation), /resources\.release_buffer\(\)/,
+  "an upload must free its receive buffer before the common RSA validation");
+assert.ok(pullActivation > pull.indexOf("ota_sha256_matches("),
+  "feed installs must retain exact artifact binding before common activation");
+assert.equal(occurrences(ota, "esp_ota_end("), 1,
+  "both transports must share one actual signed-image verifier");
+assert.equal(occurrences(ota, "esp_ota_set_boot_partition("), 1,
+  "both transports must share one actual post-validation boot selector");
+// Follow the executable pull -> activation call path rather than its physical source order.
+const update = pull + activation;
 assert.match(ota, /kManifestDeadline\s*=\s*pdMS_TO_TICKS\(30000\)/,
   "a trickling manifest must have a bounded operation deadline");
 assert.match(ota, /kFirmwareDeadline\s*=\s*pdMS_TO_TICKS\(5 \* 60 \* 1000\)/,

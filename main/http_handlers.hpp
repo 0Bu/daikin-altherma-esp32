@@ -18,6 +18,10 @@ int       http_read_body(httpd_req_t* req, char* buf, size_t max);
 // Install the total receive budget before the SDK starts parsing a new socket's request.
 esp_err_t http_open_session(httpd_handle_t server, int socket);
 void      http_close_session(httpd_handle_t server, int socket);
+// Private dispatcher sentinel: the async copy owns body settlement and socket shutdown.
+inline constexpr esp_err_t HTTP_ASYNC_ACCEPTED = 0x7f01;
+esp_err_t                  http_begin_ota_upload(httpd_req_t* req, httpd_req_t** copy);
+void                       http_complete_ota_upload(httpd_req_t* req) noexcept;
 
 // Stream an optional small protocol prefix/suffix around the exact /status or /values object. Both
 // device routes and MCP use the same bounded sink; neither materialises a complete response whose
@@ -28,10 +32,12 @@ esp_err_t http_send_values_json(httpd_req_t* req, std::string_view prefix = {},
                                 std::string_view suffix = {});
 
 // Register a route whose handler runs under the shared handle_all LAN-browser policy and try/catch
-// OOM guard: Host/Origin/Fetch Metadata are checked globally, body-bearing POSTs must be JSON, and an uncaught
+// OOM guard: Host/Origin/Fetch Metadata are checked globally, body-bearing POSTs require JSON
+// (the exact OTA upload route requires binary data), and an uncaught
 // std::bad_alloc (tight heap: WiFi+MQTT+TLS) becomes a 503 instead of unwinding through
 // esp_http_server's C dispatch to std::terminate -> reboot. Register EVERY route through this, not
-// httpd_register_uri_handler directly. See http_common.cpp and docs/ARCHITECTURE.md -> Memory constraints.
+// httpd_register_uri_handler directly. See http_common.cpp and docs/ARCHITECTURE.md -> Memory
+// constraints.
 void http_register(httpd_handle_t s, const char* uri, httpd_method_t method,
                    esp_err_t (*fn)(httpd_req_t*));
 

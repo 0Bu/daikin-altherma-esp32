@@ -513,6 +513,19 @@ try {
     ["the signed-image verifier is bypassed", () =>
       replaceOnce("main/ota_update.cpp", "esp_ota_end(ota_handle)",
         "esp_ota_end_bypassed(ota_handle)")],
+    ["feed installs bypass the shared activation verifier", () =>
+      replaceOnce("main/ota_update.cpp", "activate_update(resources, update_partition, avail)",
+        "activate_update_bypassed(resources, update_partition, avail)")],
+    ["direct uploads bypass the shared activation verifier", () =>
+      replaceOnce("main/ota_update.cpp", "activate_update(resources, partition, image.version, &upload)",
+        "activate_update_bypassed(resources, partition, image.version, &upload)")],
+    ["direct uploads bypass exact-artifact binding before activation", () =>
+      replaceOnce("main/ota_update.cpp", "ota_sha256_matches(digest, request.offer.app_sha256.data())",
+        "ota_sha256_matches_bypassed(digest, request.offer.app_sha256.data())")],
+    ["direct uploads retain the receive buffer during RSA validation", () =>
+      replaceOnce("main/ota_update.cpp",
+        /(void run_upload\([\s\S]*?)resources.release_buffer\(\);/,
+        "$1resources.release_buffer_after_validation();")],
     ["boot selection revalidation loses its heap gate", () =>
       replaceOnce("main/ota_update.cpp",
         /if\s*\(!wait_for_ota_headroom\(\s*"boot selection"([\s\S]{0,180}?)\)\)\s*\{/,
