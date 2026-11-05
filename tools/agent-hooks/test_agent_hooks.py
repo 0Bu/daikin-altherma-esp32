@@ -23,21 +23,27 @@ import merge_payload
 
 class AgentHookFastTests(unittest.TestCase):
     def test_literal_source_metadata_does_not_execute_protected_source_arguments(self):
-        paths = "partitions.csv scripts/agent-python.sh scripts/dev-ota-upload.py scripts/gh-with-git-credentials.sh"
+        self.assertIs(agent_hook.literal_source_metadata_inspection, merge_payload.literal_source_metadata_inspection)
+        wrapper = "scripts/gh-with-git-credentials.sh"
+        others = ["partitions.csv", "scripts/idf-docker.sh", "scripts/agent-python.sh", "scripts/dev-ota-upload.py"]
+        groups = [[wrapper, "scripts/idf-docker.sh"], [wrapper, *others],
+                  [*others[:2], wrapper, *others[2:]], [*others, wrapper]]
         prefixes = ("shasum -a 256 -- ", "/usr/bin/shasum -a 256 -- ", "sha256sum -- ",
                     "stat -f '%Lp %z %HT %N' -- ", "stat -c '%a %s %F %n' -- ")
         for prefix in prefixes:
-            for files in (paths, " ".join("/tmp/public-build/" + path for path in paths.split())):
-                command = prefix + files
-                with self.subTest(command=command):
-                    self.assertTrue(agent_hook.literal_source_metadata_inspection(command))
-                    self.assertTrue(agent_hook.read_only_gate_inspection(command))
-                    self.assertFalse(agent_hook.shell_writes_partitions(command))
-                    self.assertEqual(self.run_pre_tool({"cwd": str(ROOT), "tool_name": "exec_command",
-                                                       "tool_input": {"cmd": command}}), (0, ""))
+            for group in groups:
+                for root in ("", str(ROOT) + "/", "/tmp/public-build/"):
+                    command = prefix + " ".join(root + path for path in group)
+                    with self.subTest(command=command):
+                        self.assertTrue(agent_hook.literal_source_metadata_inspection(command))
+                        self.assertIsNone(merge_payload.find_merge(command))
+                        self.assertTrue(agent_hook.read_only_gate_inspection(command))
+                        self.assertFalse(agent_hook.shell_writes_partitions(command))
+                        self.assertEqual(self.run_pre_tool({"cwd": str(ROOT), "tool_name": "exec_command",
+                                                           "tool_input": {"cmd": command}}), (0, ""))
 
     def test_source_metadata_permission_cannot_read_secrets_or_wrap_execute_write(self):
-        source = "shasum -a 256 -- scripts/dev-ota-upload.py partitions.csv"
+        source = "shasum -a 256 -- scripts/dev-ota-upload.py partitions.csv scripts/gh-with-git-credentials.sh"
         for command in ("env " + source, "bash -c '" + source + "'", source + "; true",
                         source + " | sh", source + " > /tmp/out", source + "\ntrue",
                         source.replace("shasum", "/tmp/shasum"),
@@ -50,7 +56,7 @@ class AgentHookFastTests(unittest.TestCase):
                 self.assertFalse(agent_hook.read_only_gate_inspection(command))
                 self.assertIsNotNone(agent_hook.production_ota_violation(
                     {"cwd": str(ROOT), "tool_name": "exec_command", "tool_input": {"cmd": command}}))
-        for secret in ("/tmp/private.pem", "/tmp/.git-credentials", "/tmp/id_rsa"):
+        for secret in ("/tmp/private.pem", "/tmp/.git-credentials", "/tmp/id_rsa", "$GH_TOKEN", "${OTA_SIGNING_KEY_FILE}"):
             command = source + " " + secret
             result, output = self.run_pre_tool({"cwd": str(ROOT), "tool_name": "exec_command",
                                                "tool_input": {"cmd": command}})
@@ -60,6 +66,65 @@ class AgentHookFastTests(unittest.TestCase):
                         "cp replacement.csv partitions.csv", "tee partitions.csv",
                         "sed -i '1d' partitions.csv"):
             self.assertTrue(agent_hook.shell_writes_partitions(command))
+        for command in ("cat scripts/gh-with-git-credentials.sh scripts/idf-docker.sh",
+                        "bash scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 pr view 1",
+                        "scripts/gh-with-git-credentials.sh stat scripts/idf-docker.sh"):
+            with self.subTest(command=command):
+                self.assertFalse(agent_hook.literal_source_metadata_inspection(command))
+                self.assertIsNotNone(agent_hook.secret_violation(
+                    {"cwd": str(ROOT), "tool_name": "exec_command", "tool_input": {"cmd": command}}))
+
+    def test_metadata_passes_both_native_hooks_without_pr_discovery_or_suites(self):
+        wrapper = "scripts/gh-with-git-credentials.sh"
+        others = ["scripts/idf-docker.sh", "scripts/agent-python.sh"]
+        groups = [[wrapper, *others], [others[0], wrapper, others[1]], [*others, wrapper]]
+        commands = ["stat -f '%Lp %z %HT %N' -- " + wrapper + " " + others[0]]
+        for prefix in ("stat -f '%Lp %z %HT %N' -- ", "shasum -a 256 -- "):
+            for group in groups:
+                for root in ("", str(ROOT) + "/", "/tmp/public-build/"):
+                    commands.append(prefix + " ".join(root + path for path in group))
+        with tempfile.TemporaryDirectory() as temporary:
+            for command in commands:
+                with self.subTest(command=command):
+                    payload = {"cwd": str(ROOT), "tool_name": "exec_command", "tool_input": {"cmd": command}}
+                    self.assertEqual(self.run_pre_tool(payload), (0, ""))
+                    result = self.run_offline_pr_gate(payload, Path(temporary))
+                    self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
+
+    def test_metadata_proof_cannot_hide_github_actions_or_wrapped_read_mode_tricks(self):
+        metadata = "stat -f '%N' -- scripts/gh-with-git-credentials.sh scripts/idf-docker.sh"
+        commands = ["env " + metadata, "bash -c " + shlex.quote(metadata),
+                    metadata + " | sh", metadata + "; gh pr merge 123", metadata + " > partitions.csv",
+                    metadata.replace("stat -f", "stat --help -f"), metadata.replace(" -- ", " "),
+                    metadata.replace("stat -f '%N'", "shasum --check"),
+                    "scripts/gh-with-git-credentials.sh stat scripts/idf-docker.sh",
+                    "gh metadata-alias scripts/gh-with-git-credentials.sh",
+                    "gh api --method POST repos/0Bu/daikin-altherma-esp32/issues -f title=fixture"]
+        with tempfile.TemporaryDirectory() as temporary:
+            for command in commands:
+                with self.subTest(command=command):
+                    self.assertFalse(merge_payload.literal_source_metadata_inspection(command))
+                    parsed = merge_payload.find_merge(command)
+                    self.assertIsNotNone(parsed)
+                    self.assertTrue(parsed["error"])
+                    payload = {"cwd": str(ROOT), "tool_name": "exec_command", "tool_input": {"cmd": command}}
+                    result, output = self.run_pre_tool(payload)
+                    self.assertEqual(result, 0)
+                    self.assertEqual(json.loads(output)["hookSpecificOutput"]["permissionDecision"], "deny")
+                    self.assertEqual(self.run_offline_pr_gate(payload, Path(temporary)).returncode, 2)
+
+    def run_offline_pr_gate(self, payload: dict, directory: Path) -> subprocess.CompletedProcess:
+        path = directory / "payload.json"
+        path.write_text(json.dumps(payload))
+        environment = {key: value for key, value in os.environ.items() if not key.startswith("AGENT_")}
+        # Discovery is disabled. Poisoned CI inputs also prove non-actions stop before review
+        # evidence or local suites, rather than succeeding through a PR-discovery fallback.
+        environment.update({"AGENT_POLICY_CI": "1", "AGENT_PR_BODY_FILE": str(directory / "must-not-read.md"),
+                            "AGENT_CHANGED_FILES_FILE": str(directory / "must-not-read.txt"),
+                            "AGENT_PR_HEAD_SHA": "invalid", "PYTHONDONTWRITEBYTECODE": "1"})
+        return subprocess.run(["bash", str(ROOT / "tools/agent-hooks/require-pr-gates.sh"),
+                               "--payload-file", str(path), "--no-discovery"], cwd=ROOT, env=environment,
+                              capture_output=True, text=True, timeout=10)
 
     def test_literal_source_staging_is_not_an_upload_or_a_broad_git_exception(self):
         scope = " -- scripts/dev-ota-upload.py main/http_ota.cpp"
