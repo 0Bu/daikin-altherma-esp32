@@ -14897,6 +14897,8 @@ static void test_history() {
         CHECK(history_parse_tenths("-7.5", v) && v == -75);
         CHECK(history_parse_tenths("0.0", v) && v == 0);
         CHECK(history_parse_tenths("23", v) && v == 230); // no decimal point is still a number
+        CHECK(history_parse_tenths("3276.7", v) && v == INT16_MAX);
+        CHECK(!history_parse_tenths("3276.8", v)); // above the largest representable reading
         // Reject legacy/corrupt nonnumeric states rather than letting strtof turn them into a
         // confident 0.0 line. Current binary values reach history as numeric 1/0.
         CHECK(!history_parse_tenths("ON", v));
@@ -29593,6 +29595,46 @@ static void test_stop_context_inputs() {
         rows[STOP_CONTEXT_INPUTS] = rows[k];
         CHECK(stop_context_input_row(p, static_cast<StopContextInput>(k), rows,
                                      STOP_CONTEXT_INPUTS + 1) == nullptr);
+    }
+    // Real bit converters publish canonical one-digit 0/1. A malformed optional witness
+    // must not become OFF/ON through rounding, prefix parsing or an embedded NUL.
+    for (size_t k : {size_t(3), size_t(4), size_t(5)}) {
+        CHECK(conv_is_binary(defs[k].conv) && display_decimals(defs[k].conv) == 0);
+        const auto original = rows[k].value;
+        for (const std::string& invalid :
+             {std::string("0.01"), std::string("1.01"), std::string("0junk"), std::string("1junk"),
+              std::string("0.0"), std::string("1.0"), std::string(" 0"), std::string("1 "),
+              std::string("0\0x", 3), std::string("1\0x", 3), std::string("2"),
+              std::string("ON")}) {
+            rows[k].value             = invalid;
+            const auto invalid_sample = collect();
+            CHECK(invalid_sample.rps_known && invalid_sample.lwt_known &&
+                  invalid_sample.target_known && invalid_sample.mode == StopContextMode::Heating);
+            CHECK(invalid_sample.request ==
+                  (k == 3 ? StopContextBit::Unknown : StopContextBit::On));
+            CHECK(invalid_sample.defrost ==
+                  (k == 4 ? StopContextBit::Unknown : StopContextBit::Off));
+            CHECK(invalid_sample.route ==
+                  (k == 5 ? StopContextRoute::Unknown : StopContextRoute::Space));
+        }
+        rows[k].value = original;
+    }
+    for (size_t k : {size_t(0), size_t(1), size_t(2)}) {
+        const auto original = rows[k].value;
+        for (const std::string& invalid :
+             {std::string("12junk"), std::string("0junk"), std::string("39.7 C"),
+              std::string("12\0x", 4), std::string("1000000"), std::string("-1000000"),
+              std::string("NaN"), std::string("inf")}) {
+            rows[k].value             = invalid;
+            const auto invalid_sample = collect();
+            CHECK(invalid_sample.rps_known == (k != 0));
+            CHECK(invalid_sample.lwt_known == (k != 1));
+            CHECK(invalid_sample.target_known == (k != 2));
+            CHECK(invalid_sample.request == StopContextBit::On &&
+                  invalid_sample.defrost == StopContextBit::Off &&
+                  invalid_sample.route == StopContextRoute::Space);
+        }
+        rows[k].value = original;
     }
     rows[3].value = "2";
     CHECK(collect().request == StopContextBit::Unknown);

@@ -281,6 +281,8 @@ exclusive causes. `categories` contains `low_rps_above_main_target`, `request_wi
 complete alone permits a sampled-window negative. Readable endpoints do not exclude pulses between
 polls. Unsupported categories have null counts; all counts are null before confirmed readable
 coverage. A covered population with no stops is zero.
+Numeric source values must be consumed completely; binary witnesses require the converter's exact
+`0` or `1` token. Malformed values leave the affected observation unknown.
 
 These overlapping qualifiers count stops in that same retained population, not individual signal
 changes. They age with the original stop hour and reset with its observation lifecycle.

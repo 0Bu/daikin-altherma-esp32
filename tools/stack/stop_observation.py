@@ -172,6 +172,13 @@ def validate_sources(budgets, sources, error):
             or 'stop_observation_flash_index_incomplete();' not in admission
             or incomplete != 'observation_index_incomplete(s_index);s_rebuild=true;'):
         raise error('stop observation fence: exact snapshot/admission/unknown-write guard changed')
+    collector = normalized(body(sources['main/logic/stop_context_input.hpp'], 'stop_context_collect', error))
+    if (collector.count('std::strtod(text,&end)') != 1
+            or 'end!=text+row->value.size()' not in collector
+            or 'row->value.size()!=1' not in collector
+            or "row->value[0]=='1'" not in collector or "row->value[0]=='0'" not in collector
+            or 'history_parse_tenths(' in collector):
+        raise error('stop observation collector: canonical bits/full numeric token contract changed')
     if re.search(r'\b(?:alloca|__builtin_alloca)\s*\(', '\n'.join(sources[p] for p in HEADERS)):
         raise error('stop observation source: unreviewed dynamic stack allocation')
     # Explicit body leases cover the complete success/error branches, not only convenient calls.
@@ -264,6 +271,10 @@ def self_test(budgets, sources, error):
         ('main/logic/observation_hourly.hpp', 'if (sequence > (fence ? e.words[2] : e.sequence()))',
          'if (true)'),
         ('main/logic/observation_hourly.hpp', 'e.words[0] != a || e.words[1] != b', 'e.words[0] != a'),
+        ('main/logic/stop_context_input.hpp', 'row->value.size() != 1', 'row->value.size() < 1'),
+        ('main/logic/stop_context_input.hpp', 'end != text + row->value.size()', 'false'),
+        ('main/logic/stop_context_input.hpp', 'end != text + row->value.size()',
+         'end != text + std::strlen(text)'),
     ]
     for path, before, after in mutations:
         altered = dict(sources)

@@ -31,7 +31,7 @@ inline StopContextInputPlan stop_context_input_plan(const char*        profile_i
         (view.base_count && !view.base) || (view.extra_count && !view.extra) ||
         (view.extra2_count && !view.extra2))
         return p;
-    uint32_t crc = checkup_fp_u32(CONFIG_CRC32_INIT, 1); // stop-input method version
+    uint32_t crc = checkup_fp_u32(CONFIG_CRC32_INIT, 2); // canonical binary-token input method
     for (size_t k = 0; k < STOP_CONTEXT_INPUTS; ++k) {
         const auto r = instrument_resolve(view, STOP_CONTEXT_INSTRUMENTS[k]);
         crc          = checkup_fp_u32(crc, static_cast<uint32_t>(r.state));
@@ -88,12 +88,26 @@ inline StopContextSample stop_context_collect(const StopContextInputPlan& p, con
     StopContextSample s;
     const auto        numeric = [&](StopContextInput i, int& out) {
         const Row* row = stop_context_input_row(p, i, rows, count);
-        return row && history_parse_tenths(row->value.c_str(), out);
+        if (!row) return false;
+        const char*  text  = row->value.c_str();
+        char*        end   = nullptr;
+        const double value = std::strtod(text, &end);
+        // Keep the history tenths/range convention, but require the whole cached value.
+        if (end == text || end != text + row->value.size() || !(value > -1e6 && value < 1e6))
+            return false;
+        const long tenths = static_cast<long>(value * 10.0 + (value < 0 ? -0.5 : 0.5));
+        if (tenths <= static_cast<long>(HISTORY_HELD_OVER) || tenths > INT16_MAX) return false;
+        out = static_cast<int>(tenths);
+        return true;
     };
     const auto bit = [&](StopContextInput i) {
-        int n = 0;
-        if (!numeric(i, n) || (n != 0 && n != 10)) return StopContextBit::Unknown;
-        return n == 10 ? StopContextBit::On : StopContextBit::Off;
+        const Row* row = stop_context_input_row(p, i, rows, count);
+        // hp_format emits exactly one digit for converters 300-307. Rounding a different
+        // number or accepting a numeric prefix would invent a binary observation.
+        if (!row || row->value.size() != 1) return StopContextBit::Unknown;
+        if (row->value[0] == '1') return StopContextBit::On;
+        if (row->value[0] == '0') return StopContextBit::Off;
+        return StopContextBit::Unknown;
     };
     int n = 0;
     if (rps_known && numeric(StopContextInput::Rps, n) && n >= 0 && (n > 0) == rps_running) {
@@ -101,7 +115,7 @@ inline StopContextSample stop_context_collect(const StopContextInputPlan& p, con
         s.rps_running                   = rps_running;
         s.rps_tenths                    = static_cast<uint16_t>(n);
     }
-    // The shared parse already bounds tenths to the non-sentinel int16 domain.
+    // The numeric consumer already bounds tenths to the non-sentinel int16 domain.
     if (numeric(StopContextInput::Lwt, n)) {
         s.lwt_known  = true;
         s.lwt_tenths = static_cast<int16_t>(n);

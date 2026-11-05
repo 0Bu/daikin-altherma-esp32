@@ -298,8 +298,9 @@ Hourly diagnosis state grows by source, not by bucket. Each byte added to `Check
 `DhwLossBucket` is held 24 times in `.noinit` (23 completed hours and the open one) and once per
 journal record, and 23 stored records must still fit the 4 KiB sector scratch (see Memory
 constraints). Stop context uses an independent hourly source in `stop_observation_store.cpp`, with
-its own schema/method, source/model/consent identity, readable clock and late-stop replay. Its
-payload fits `HISTORY_JOURNAL_PAYLOAD_BYTES`; it keeps an open hour, a bounded four-entry append
+its own schema/method (including input-admission rules), source/model/consent identity, readable
+clock and late-stop replay. Its payload fits `HISTORY_JOURNAL_PAYLOAD_BYTES`; it keeps an open hour,
+a bounded four-entry append
 queue, a completed sum and a 47-entry restore index, rather than another 24-hour RAM ring or trend
 raster. The index keeps CRC/commit-admitted reset identities and sequences as metadata; a newer
 same-scope reset supersedes its predecessor. Reset fences do not expire with measurement hours or

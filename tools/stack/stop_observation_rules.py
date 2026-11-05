@@ -16,8 +16,8 @@ SYMBOLS = {
     'stop_checkup_start': {'pattern': '^daik::checkup_start\\(bool,\\ unsigned\\ long\\)$', 'max_bytes': 240},
     'stop_checkup_stop_context_expire': {'pattern': '^daik::checkup_stop_context_expire\\(long\\ long\\)$', 'max_bytes': 64},
     'stop_checkup_stop_context_report': {'pattern': '^daik::checkup_stop_context_report\\(\\)$', 'max_bytes': 224},
-    'stop_stopcontextinput__int___const': {'pattern': '^daik::logic::stop_context_collect<daik::CachedValue>\\(daik::logic::StopContextInputPlan\\ const\\&,\\ daik::CachedValue\\ const\\*,\\ unsigned\\ int,\\ bool,\\ bool\\)::\\{lambda\\(daik::logic::StopContextInput,\\ int\\&\\)\\x231\\}::operator\\(\\)\\(daik::logic::StopContextInput,\\ int\\&\\)\\ const$', 'max_bytes': 32},
-    'stop_stopcontextinput__const': {'pattern': '^daik::logic::stop_context_collect<daik::CachedValue>\\(daik::logic::StopContextInputPlan\\ const\\&,\\ daik::CachedValue\\ const\\*,\\ unsigned\\ int,\\ bool,\\ bool\\)::\\{lambda\\(daik::logic::StopContextInput\\)\\x232\\}::operator\\(\\)\\(daik::logic::StopContextInput\\)\\ const$', 'max_bytes': 48},
+    'stop_stopcontextinput__int___const': {'pattern': '^daik::logic::stop_context_collect<daik::CachedValue>\\(daik::logic::StopContextInputPlan\\ const\\&,\\ daik::CachedValue\\ const\\*,\\ unsigned\\ int,\\ bool,\\ bool\\)::\\{lambda\\(daik::logic::StopContextInput,\\ int\\&\\)\\x231\\}::operator\\(\\)\\(daik::logic::StopContextInput,\\ int\\&\\)\\ const$', 'max_bytes': 48},
+    'stop_stopcontextinput__const': {'pattern': '^daik::logic::stop_context_collect<daik::CachedValue>\\(daik::logic::StopContextInputPlan\\ const\\&,\\ daik::CachedValue\\ const\\*,\\ unsigned\\ int,\\ bool,\\ bool\\)::\\{lambda\\(daik::logic::StopContextInput\\)\\x232\\}::operator\\(\\)\\(daik::logic::StopContextInput\\)\\ const$', 'max_bytes': 32},
     'stop_cachedvalue_const___unsigned_int__bool__bool_': {'pattern': '^daik::logic::StopContextSample\\ daik::logic::stop_context_collect<daik::CachedValue>\\(daik::logic::StopContextInputPlan\\ const\\&,\\ daik::CachedValue\\ const\\*,\\ unsigned\\ int,\\ bool,\\ bool\\)$', 'max_bytes': 128},
     'stop_checkupcoverage_const___unsigned_long__unsigned_long__bool_': {'pattern': '^daik::checkup_record\\(daik::CachedValue\\ const\\*,\\ unsigned\\ int,\\ bool,\\ bool,\\ daik::logic::CheckupCoverage\\ const\\&,\\ unsigned\\ long,\\ unsigned\\ long,\\ bool\\)$', 'max_bytes': 416},
     'stop_dated': {'pattern': '^daik::\\(anonymous\\ namespace\\)::dated\\(long\\ long\\)$', 'max_bytes': 32},
@@ -91,7 +91,7 @@ PATHS = {
     'main_stop_scan': ['main', {'symbols': ['main_task', 'boot_sequence', 'history_start', 'diag_log', 'diag_syslog'], 'multipliers': {}, 'base_bytes': 1536, 'max_bytes': 5120}],
     'poll_stop_schema': ['poll', {'symbols': ['poll_task', 'checkup_detect_schema', 'diag_log', 'diag_syslog'], 'multipliers': {}, 'base_bytes': 1536, 'max_bytes': 7168}],
     'httpd_stop_schema': ['httpd', {'symbols': ['config_hp', 'config_document', 'checkup_detect_schema', 'diag_log', 'diag_syslog'], 'multipliers': {}, 'base_bytes': 1536, 'max_bytes': 8192}],
-    'poll_stop_collect': ['poll', {'symbols': ['poll_task', 'stop_checkupcoverage_const___unsigned_long__unsigned_long__bool_', 'stop_cachedvalue_const___unsigned_int__bool__bool_', 'stop_stopcontextinput__const', 'stop_stopcontextinput__int___const', 'stop_callee_61'], 'multipliers': {}, 'base_bytes': 1536, 'max_bytes': 7168}],
+    'poll_stop_collect': ['poll', {'symbols': ['poll_task', 'stop_checkupcoverage_const___unsigned_long__unsigned_long__bool_', 'stop_cachedvalue_const___unsigned_int__bool__bool_', 'stop_stopcontextinput__const', 'stop_stopcontextinput__int___const', 'stop_cachedvalue_const___unsigned_int_'], 'multipliers': {}, 'base_bytes': 1536, 'max_bytes': 7168}],
     'poll_stop_reduce': ['poll', {'symbols': ['poll_task', 'stop_checkupcoverage_const___unsigned_long__unsigned_long__bool_', 'stop_stopcontextsample_const___long_long__unsigned_long_', 'stop_stopcontextfinish_', 'stop_stopcontextfinish__bool_'], 'multipliers': {}, 'base_bytes': 1536, 'max_bytes': 7168}],
     'poll_stop_input_plan': ['poll', {'symbols': ['poll_task', 'checkup_detect_schema', 'stop_profileview_const___11', 'stop_instrument_', 'stop_profileview_const__', 'checkup_schema_adjudicated_view'], 'multipliers': {}, 'base_bytes': 1536, 'max_bytes': 7168}],
     'httpd_stop_input_plan': ['httpd', {'symbols': ['config_hp', 'config_document', 'checkup_detect_schema', 'stop_profileview_const___11', 'stop_instrument_', 'stop_profileview_const__', 'checkup_schema_adjudicated_view'], 'multipliers': {}, 'base_bytes': 1536, 'max_bytes': 8192}],
@@ -206,7 +206,7 @@ BODIES = {
 
 HEADERS = {
     'main/logic/stop_context.hpp': '67728d0cea632b4bbccec96db83af51b5d5079d19391c4144c5cf4cdb1856b5a',
-    'main/logic/stop_context_input.hpp': '1aff709e8355f9ccaaa42953d3a458f0cff3667c748303068ef185ca741c0e01',
+    'main/logic/stop_context_input.hpp': '94b80bcd12a9d290ac4cf4da3515ed39932d721d05c9c47e44508871032ce407',
     'main/logic/observation_hourly.hpp': '3589e1e7006bc5a71453ac4642d1c9a9505d0b8269593233604ec9e5de55870b',
     'main/logic/heartbeat.hpp': '7e915487758d6e71c2335b70027af43afb0b9d9eaf5f77fb2cca41401e1d8d7a',
     'main/logic/instrument.hpp': 'd55abe4a7f5b1d99886a866780a50242dfebb03eec2b0d4fbd7e814f9fe4d232',

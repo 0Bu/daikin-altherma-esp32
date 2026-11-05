@@ -1530,6 +1530,104 @@
       },
       "hosted_confirmation": "GCC 15 linux/amd64 is local Docker hosted-candidate evidence with the exact hosted profile selected. No GitHub Actions execution is claimed; authoritative CI confirmation remains required.",
       "validation_boundary": "Four independent current-byte snapshots measured the same frozen pure headers/profiles/test translation unit. Exact-argument snapshot adapters return the freshly exported committed baseline bytes only. The unchanged checker and 95-percent floor are retained. Store/runtime integration, target build, actual repository final invocation and device behavior are separate evidence."
+    },
+    {
+      "runner": "scripts/run-mock-tests.sh --coverage; unchanged checker against fresh HEAD and HEAD^1 baseline exports",
+      "base_commit": "4e2f79b496cec1d3f834a36ba92d0ac570db3692",
+      "scope": "Stop-input consumer method 2: exact canonical 0/1 flag tokens and fully consumed finite numeric tokens with sentinel/int16 bounds. New malformed fraction, prefix, embedded-NUL, NaN and bound checks; a direct legacy history upper-bound assertion preserves its prior ratchet after collector parser isolation. Only stop_context_input.hpp branch inventories change. All new functional outcomes are taken; existing fixed fingerprint and GCC caller exception edges remain visible. No exception, floor or prior ratio is weakened.",
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2)",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+        "gcc-15-github-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+      },
+      "architectures": {
+        "clang-17-darwin": "arm64-apple-darwin27.2.0",
+        "gcc-13-linux-ubuntu24": "aarch64-linux-gnu",
+        "gcc-15-github-linux-ubuntu26": "x86_64-linux-gnu",
+        "gcc-15-linux-ubuntu26": "aarch64-linux-gnu"
+      },
+      "container_images": {
+        "gcc-13-linux-ubuntu24": "sha256:81893c71bb5e570088901f21def8684c25cd2a9020281bd01b843a7655edb18c",
+        "gcc-15-github-linux-ubuntu26": "sha256:9b56853ffad97b6c81d3707524a96205df27582fe0e0ec8dbd1fe189b28fdf14",
+        "gcc-15-linux-ubuntu26": "sha256:4acd0a343f2aca0bc022a78657ffd0dfa8379cd4810b88fad6442ecc638b5e27"
+      },
+      "sources": {
+        "main/logic/stop_context_input.hpp": "9d286bb9402f5b4901da7415bcf5c554a8480b01e4c8255f472a52aa429fda61"
+      },
+      "test_source_sha256": "bb9e9f5ecac19b67e670f8b44010c2a48c3fb0a374177b0afa79daf4e52e5048",
+      "measured_branch_counts": {
+        "clang-17-darwin": {
+          "main/logic/stop_context_input.hpp": {
+            "taken": 97,
+            "outcomes": 98
+          }
+        },
+        "gcc-13-linux-ubuntu24": {
+          "main/logic/stop_context_input.hpp": {
+            "taken": 123,
+            "outcomes": 130
+          }
+        },
+        "gcc-15-github-linux-ubuntu26": {
+          "main/logic/stop_context_input.hpp": {
+            "taken": 123,
+            "outcomes": 130
+          }
+        },
+        "gcc-15-linux-ubuntu26": {
+          "main/logic/stop_context_input.hpp": {
+            "taken": 123,
+            "outcomes": 130
+          }
+        }
+      },
+      "measured_line_counts": {
+        "clang-17-darwin": {
+          "covered": 10854,
+          "executable": 11028
+        },
+        "gcc-13-linux-ubuntu24": {
+          "covered": 10342,
+          "executable": 10626
+        },
+        "gcc-15-github-linux-ubuntu26": {
+          "covered": 10334,
+          "executable": 10628
+        },
+        "gcc-15-linux-ubuntu26": {
+          "covered": 10338,
+          "executable": 10628
+        }
+      },
+      "raw_report_sha256": {
+        "clang-17-darwin": "097ce422215520f8ff1df67f420d3e3ef8b7785cc8b7bba09a261be40908a1ab",
+        "gcc-13-linux-ubuntu24": "403c019f8e9c6f8565fe4944a9136e09bd7b1f4dc5f7e1f6cb42655d67b38be4",
+        "gcc-15-github-linux-ubuntu26": "8fb21150da28014c79b4a5abb8acfb1368b70b5f4ae03bb58b7cf41b98816b56",
+        "gcc-15-linux-ubuntu26": "532d9cf10cfaaf2f01a0264f365f6234618dac0ae502117b3bb6eefee6c94026"
+      },
+      "baseline_references": {
+        "HEAD": {
+          "commit": "4e2f79b496cec1d3f834a36ba92d0ac570db3692",
+          "sha256": "13635c0e8ad65f9189290ac81f161e3125607ef1397d5bf4279afefdce9f6dcf",
+          "query": [
+            "git",
+            "show",
+            "HEAD:tools/coverage/branch_baseline.json"
+          ]
+        },
+        "HEAD^1": {
+          "commit": "f6bfaf9b60508500d7f15ec119d1542f4e4bd992",
+          "sha256": "13635c0e8ad65f9189290ac81f161e3125607ef1397d5bf4279afefdce9f6dcf",
+          "query": [
+            "git",
+            "show",
+            "HEAD^1:tools/coverage/branch_baseline.json"
+          ]
+        }
+      },
+      "hosted_confirmation": "GCC 15 linux/amd64 is local Docker hosted-candidate evidence with the exact hosted profile selected. No GitHub Actions execution is claimed; authoritative CI confirmation remains required.",
+      "validation_boundary": "Four independent current-byte snapshots measured the same frozen 168 pure headers/profiles/test inputs. Exact-argument snapshot adapters return freshly exported committed baseline bytes only. The unchanged checker and 95-percent floor are retained. Store/runtime integration, target build, actual repository final invocation and device behavior are separate evidence."
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
@@ -1964,8 +2062,8 @@
         "outcomes": 234
       },
       "main/logic/stop_context_input.hpp": {
-        "taken": 83,
-        "outcomes": 84
+        "taken": 97,
+        "outcomes": 98
       },
       "main/logic/observation_hourly.hpp": {
         "taken": 135,
@@ -2398,8 +2496,8 @@
         "outcomes": 8
       },
       "main/logic/stop_context_input.hpp": {
-        "taken": 110,
-        "outcomes": 118
+        "taken": 123,
+        "outcomes": 130
       },
       "main/logic/stop_context.hpp": {
         "taken": 235,
@@ -2836,8 +2934,8 @@
         "outcomes": 8
       },
       "main/logic/stop_context_input.hpp": {
-        "taken": 110,
-        "outcomes": 118
+        "taken": 123,
+        "outcomes": 130
       },
       "main/logic/stop_context.hpp": {
         "taken": 235,
@@ -3274,8 +3372,8 @@
         "outcomes": 8
       },
       "main/logic/stop_context_input.hpp": {
-        "taken": 110,
-        "outcomes": 118
+        "taken": 123,
+        "outcomes": 130
       },
       "main/logic/stop_context.hpp": {
         "taken": 235,

@@ -2563,11 +2563,11 @@
     },
     "stop_stopcontextinput__int___const": {
       "pattern": "^daik::logic::stop_context_collect<daik::CachedValue>\\(daik::logic::StopContextInputPlan\\ const\\&,\\ daik::CachedValue\\ const\\*,\\ unsigned\\ int,\\ bool,\\ bool\\)::\\{lambda\\(daik::logic::StopContextInput,\\ int\\&\\)\\x231\\}::operator\\(\\)\\(daik::logic::StopContextInput,\\ int\\&\\)\\ const$",
-      "max_bytes": 32
+      "max_bytes": 48
     },
     "stop_stopcontextinput__const": {
       "pattern": "^daik::logic::stop_context_collect<daik::CachedValue>\\(daik::logic::StopContextInputPlan\\ const\\&,\\ daik::CachedValue\\ const\\*,\\ unsigned\\ int,\\ bool,\\ bool\\)::\\{lambda\\(daik::logic::StopContextInput\\)\\x232\\}::operator\\(\\)\\(daik::logic::StopContextInput\\)\\ const$",
-      "max_bytes": 48
+      "max_bytes": 32
     },
     "stop_cachedvalue_const___unsigned_int__bool__bool_": {
       "pattern": "^daik::logic::StopContextSample\\ daik::logic::stop_context_collect<daik::CachedValue>\\(daik::logic::StopContextInputPlan\\ const\\&,\\ daik::CachedValue\\ const\\*,\\ unsigned\\ int,\\ bool,\\ bool\\)$",
@@ -7081,7 +7081,7 @@
         "stop_cachedvalue_const___unsigned_int__bool__bool_",
         "stop_stopcontextinput__const",
         "stop_stopcontextinput__int___const",
-        "stop_callee_61"
+        "stop_cachedvalue_const___unsigned_int_"
       ],
       "multipliers": {},
       "base_bytes": 1536,
