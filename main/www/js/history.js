@@ -1531,18 +1531,14 @@ function scrubTime(h, i) {
   return ageH < 0.05 ? t("hist.now") : t("hist.rel", histFmt1(ageH));
 }
 
-function histReadout(h, i) {
-  return h.id === ENV3_COMBINED_ID ? env3ScrubHtml(h, i) : esc(scrubText(h, i, false));
-}
-
 // Measure every distinct readout shape in a hidden grid cell. Tabular digits have equal widths;
 // replacing them deduplicates samples without losing a possible wrapped line or phase label.
 // The reserved row stays present, so a comparison never moves the plot or its time labels.
 function histTipsHtml(h, pi, frac) {
   const shapes = new Set(Array.from({length:h.v.length + (forecastScrubView(h)?.points.length || 0)},
-    (_, i) => scrubText(h, i, false).replace(/\d/g, "8")));
+    (_, i) => histReadout(h, i).replace(/\d/g, "8")));
   return `<div class="vhist-tips"><div class="vhist-tip vhist-reserve mono num" aria-hidden="true">` +
-    [...shapes].map(text => `<span>${esc(text)}</span>`).join("") +
+    [...shapes].map(html => `<span>${html}</span>`).join("") +
     `</div><div class="vhist-tip vhist-live mono num" hidden></div>` + (pi >= 0
       ? `<div class="vhist-tip vhist-pinned mono num" style="--tip-p:${(frac * 100).toFixed(3)}">${histReadout(h, pi)}</div>`
       : "") + `</div>`;
@@ -1665,16 +1661,17 @@ function scrubText(h, i, includeTime = true) {
 // content formatter for accessibility and tests. Every line is escaped before this helper returns
 // markup, so switching the live bubble from textContent to innerHTML below does not create an HTML
 // injection path through translations, units or device data.
-function env3ScrubHtml(h, i) {
-  const lines = scrubText(h, i, false).split("\n");
-  const firstMeasurement = i >= h.v.length ? 1 : 0;
-  const classes = histVisibleSeries(h).map((s) => env3SeriesClass(s.source));
+function histReadout(h, i) {
+  const text = scrubText(h, i, false);
+  if (!text || h.id !== ENV3_COMBINED_ID) return esc(text);
+  const lines = text.split("\n");
   // Forecast provenance precedes the coloured measurement rows; measured bubbles need no header.
-  const meta = lines.slice(0, firstMeasurement).join(" · ");
-  return (meta ? `<span class="vhist-tip-line vhist-tip-meta">${esc(meta)}</span>` : "") +
-    lines.slice(firstMeasurement).map((line, index) =>
-      `<span class="vhist-tip-line ${classes[index]}">${esc(line)}</span>`
-    ).join("");
+  const meta = i >= h.v.length ? lines.shift() : "";
+  return (meta ? `<span class="vhist-tip-meta">${esc(meta)}</span>` : "") +
+    `<span class="vhist-tip-rows">` + histVisibleSeries(h).map((s, index) =>
+      lines[index].split("  ").map(cell =>
+        `<span class="${env3SeriesClass(s.source)}">${esc(cell)}</span>`).join("")
+    ).join("") + `</span>`;
 }
 
 function placeScrubReadout(graph, h, i, frac) {
