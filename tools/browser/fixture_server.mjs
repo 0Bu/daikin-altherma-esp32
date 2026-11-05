@@ -77,6 +77,9 @@ export async function startFixtureServer({ pageFile, projectRoot }) {
   } finally { fs.rmSync(setupWork, { recursive: true, force: true }); }
   const setupRequests = [];
   let setupReply = { status: 200, body: { ok: true, reboot: true } };
+  let telemetry = { status: STATUS, values: VALUES, histories: {} };
+  const historyRequests = [];
+  let valuesRequests = 0;
 
   const server = http.createServer((request, response) => {
     const url = new URL(request.url, "http://127.0.0.1");
@@ -112,15 +115,23 @@ export async function startFixtureServer({ pageFile, projectRoot }) {
     }
     if (url.pathname === "/status") {
       response.writeHead(200, JSON_HEADERS);
-      return response.end(JSON.stringify(STATUS));
+      return response.end(JSON.stringify(telemetry.status));
     }
     if (url.pathname === "/values") {
+      valuesRequests++;
       response.writeHead(200, JSON_HEADERS);
-      return response.end(JSON.stringify(VALUES));
+      return response.end(JSON.stringify(typeof telemetry.values === "function"
+        ? telemetry.values() : telemetry.values));
+    }
+    if (url.pathname === "/history") {
+      const key = `${url.searchParams.get("source") || "x10a"}:${url.searchParams.get("row")}`;
+      historyRequests.push(key);
+      response.writeHead(200, JSON_HEADERS);
+      return response.end(JSON.stringify(telemetry.histories[key] || { ok: false, error: "unknown row" }));
     }
     if (url.pathname === "/ota/status") {
       response.writeHead(200, JSON_HEADERS);
-      return response.end(JSON.stringify({ state: "idle", busy: false, current: STATUS.version }));
+      return response.end(JSON.stringify({ state: "idle", busy: false, current: telemetry.status.version }));
     }
     if (request.method === "POST") {
       response.writeHead(200, JSON_HEADERS);
@@ -137,6 +148,9 @@ export async function startFixtureServer({ pageFile, projectRoot }) {
   return {
     url: `http://127.0.0.1:${address.port}/`,
     setupRequests,
+    historyRequests,
+    get valuesRequests() { return valuesRequests; },
+    setTelemetry(frame) { telemetry = frame || { status: STATUS, values: VALUES, histories: {} }; },
     setSetupReply(reply) { setupReply = reply; },
     close: () => new Promise((resolve, reject) => {
       server.closeIdleConnections?.();
