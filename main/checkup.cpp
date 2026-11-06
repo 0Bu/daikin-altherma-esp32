@@ -96,12 +96,13 @@ logic::StopContextInputPlan s_stop_inputs;
 uint32_t                    s_stop_generation    = 0;
 bool                        s_stop_allow_restore = true;
 int64_t                     s_stop_read_fence_us = -1;
+constexpr logic::StopContextState kEmptyStopContext{};
 
 // Called only with the Checkup lock. Recovery latches independently, before Store startup or
 // while an owner is busy; retire the producer too so pending windows cannot outlive that intent.
 bool stop_context_suppressed_locked() {
     if (!stop_observation_suppressed()) return false;
-    s_stop_context = {};
+    s_stop_context = kEmptyStopContext;
     return true;
 }
 

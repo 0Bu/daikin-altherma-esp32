@@ -1042,20 +1042,15 @@ void forget_claim_merge() {
     require_suppressed();
 }
 void forget_cold_boot() {
-    early_forget();
-    require_suppressed();
-    // Model genuine cold-boot static initialization ONLY in this fixture. Production has no
-    // clear-latch API; lifecycle calls in forget_lifecycle prove same-boot suppression persists.
-    s_forgotten.store(false, std::memory_order_relaxed);
-    s_mutex.store(nullptr, std::memory_order_relaxed);
-    s_start_mutex = nullptr;
-    sdk::created = sdk::create_calls = 0;
-    for (auto& mutex : sdk::mutexes) mutex = {};
+    // The runner launches this in a fresh process, separately from the same-boot forget cases.
+    // Observe real static initialization; never clear production-private state in the fixture.
+    require(!stop_observation_suppressed() && sdk::created == 0,
+            "fresh process starts with no forget request or store mutex");
     boot();
     tick(1, true, event(1));
     require(!stop_observation_suppressed() &&
                 stop_observation_report().counters.witnessed_stops_recent_heating == 1,
-            "only cold boot can restore observation after forget");
+            "fresh process permits ordinary observation");
 }
 } // namespace
 

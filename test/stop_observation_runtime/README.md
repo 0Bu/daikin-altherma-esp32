@@ -30,7 +30,8 @@ No ongoing stop candidate or readable endpoint clock is restored across a reboot
 Forget cases cover recovery before startup, allocation/first-lock failures, unpublished mutex
 initialization, busy-store and staged-reader interleavings, late claims/receipts and attempted
 same-boot re-enablement. Suppressed reports have no pending restoration or persistence. Only a
-fixture-modeled cold boot clears the latch. Three compiling controls remove the latch, clear it
+fresh process permits collection again; no test clears production-private state. Three compiling
+controls remove the latch, clear it
 from startup or publish the mutex early; each must fail its exact semantic assertion. The runner
 retains these outputs and a source-hashed receipt. These are deterministic interleavings, not a
 test of the FreeRTOS scheduler or simultaneous execution on two cores.

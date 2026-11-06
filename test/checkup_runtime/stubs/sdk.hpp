@@ -20,9 +20,9 @@ inline HostMutex mutex;
 inline HostMutex additional_mutexes[3];
 inline unsigned  mutex_count = 0;
 inline unsigned  takes = 0, gives = 0;
-inline bool      fail_take_once = false;
+inline bool      fail_take_once   = false;
 inline bool      fail_create_once = false;
-inline void (*before_take)() = nullptr;
+inline void (*before_take)()      = nullptr;
 inline void (*shutdown)()    = nullptr;
 } // namespace sdk
 inline int64_t     esp_timer_get_time() { return sdk::now_us; }
