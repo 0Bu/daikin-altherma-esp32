@@ -1,6 +1,7 @@
 // Compile the complete production History TU; physical flash and external services are host ports.
 #include "sdk.hpp"
 #include <cstring>
+#include <fstream>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -100,8 +101,8 @@ void     require(bool ok, const char* oracle) {
     ++assertions;
     if (!ok) throw std::runtime_error(oracle);
 }
-void boot() {
-    journal_sdk::flash.assign(HISTORY_FLASH_PARTITION_BYTES, 0xff);
+void boot(bool clear_flash = true) {
+    if (clear_flash) journal_sdk::flash.assign(HISTORY_FLASH_PARTITION_BYTES, 0xff);
     stop_observation_start(true, 11);
     history_start();
     stop_observation_bind(101, 202, 404, 7);
@@ -171,8 +172,7 @@ void append_case(bool barrier, const std::string& phase) {
     const bool accepted = phase == "success" || phase == "commit_accepted_error";
     const auto result   = flash_append_record(record);
     require((result == ESP_OK) == accepted, "verified_readback_is_commit_authority");
-    require(s_flash_next_sequence == sequence + (accepted ? 1 : 0),
-            "sequence_advances_only_after_verified_commit");
+    require(s_flash_next_sequence == sequence + 1, "every_append_attempt_consumes_one_sequence");
     FlashJournalRecord physical;
     require(flash_read_record(slot, physical) == ESP_OK,
             "independent_transport_read_after_attempt");
@@ -198,7 +198,7 @@ void append_case(bool barrier, const std::string& phase) {
               << " pending=" << report.persistence_pending << " readable_us=" << report.readable_us
               << " stops=" << report.counters.witnessed_stops_recent_heating << '\n';
     require(retried == (accepted ? 0u : 1u), "failed_append_releases_claim_for_real_service_retry");
-    require(s_flash_next_sequence == sequence + 1 && !report.persistence_pending &&
+    require(s_flash_next_sequence == sequence + (accepted ? 1 : 2) && !report.persistence_pending &&
                 report.readable_us == (barrier ? 0u : 10000000u) &&
                 report.counters.witnessed_stops_recent_heating == (barrier ? 0u : 1u),
             "retry_commits_exactly_one_population_or_barrier_ack");
@@ -219,7 +219,73 @@ void append_case(bool barrier, const std::string& phase) {
                 "erase_is_exact_landing_sector_range");
     if (phase == "readback")
         std::cout << "LIMIT initial_outcome=unverified physical_commit=present "
-                     "retry_same_sequence=1\n";
+                     "retry_uses_reserved_new_sequence=1\n";
+}
+void core_sequence(const std::string& phase) {
+    boot();
+    const auto core           = static_cast<size_t>(HistoryJournalSource::Checkup);
+    journal_sdk::core_pending = true;
+    journal_sdk::core_bucket  = journal_sdk::unix_origin / 3600 - 1;
+    FlashJournalRecord record;
+    require(flash_build_for_service(core, record, 0), "real_core_builder_creates_sequence_request");
+    const auto sequence = record.header.sequence;
+    if (phase == "prepare")
+        journal_sdk::fail_read = journal_sdk::reads + 1;
+    else if (phase == "readback")
+        journal_sdk::fail_read = journal_sdk::reads + 2;
+    else if (phase == "commit_error") {
+        journal_sdk::fail_write       = journal_sdk::writes + 2;
+        journal_sdk::accept_then_fail = true;
+    } else
+        throw std::runtime_error("unknown_case");
+    const bool accepted = phase == "commit_error";
+    require((flash_append_record(record) == ESP_OK) == accepted,
+            "core_readback_alone_decides_acknowledgment");
+    require(s_flash_next_sequence == sequence + 1, "every_append_attempt_consumes_one_sequence");
+    require(journal_sdk::core_pending == !accepted &&
+                journal_sdk::core_appended == (accepted ? 1u : 0u),
+            "failed_or_unverified_core_attempt_does_not_acknowledge");
+    journal_sdk::fail_read = journal_sdk::fail_write = 0;
+    journal_sdk::accept_then_fail                    = false;
+    require(history_flash_service_journal(1, 0) == (accepted ? 0u : 1u),
+            "real_service_retries_pending_core_with_new_sequence");
+    require(s_flash_next_sequence == sequence + (accepted ? 1 : 2) && !journal_sdk::core_pending &&
+                journal_sdk::core_appended == 1,
+            "core_retry_reserves_distinct_sequence_and_acknowledges_once");
+    require(history_flash_service_journal(1, 0) == 0 && journal_sdk::core_appended == 1,
+            "core_retry_never_acknowledges_twice");
+}
+void sequence_rejections() {
+    boot();
+    const auto core           = static_cast<size_t>(HistoryJournalSource::Checkup);
+    journal_sdk::core_pending = true;
+    journal_sdk::core_bucket  = journal_sdk::unix_origin / 3600 - 1;
+    FlashJournalRecord record;
+    require(flash_build_for_service(core, record, 0),
+            "real_core_builder_creates_rejection_control");
+    const auto original = record;
+    for (const uint64_t invalid : {uint64_t{0}, original.header.sequence + 1}) {
+        record.header.sequence = invalid;
+        const auto reads = journal_sdk::reads, writes = journal_sdk::writes,
+                   erases = journal_sdk::erases;
+        require(flash_append_record(record) == ESP_ERR_INVALID_ARG &&
+                    s_flash_next_sequence == original.header.sequence,
+                "zero_or_out_of_order_request_is_refused_without_consuming_sequence");
+        require(journal_sdk::reads == reads && journal_sdk::writes == writes &&
+                    journal_sdk::erases == erases,
+                "sequence_rejection_precedes_all_flash_io");
+    }
+    record = original;
+    require(flash_append_record(record) == ESP_OK && journal_sdk::core_appended == 1,
+            "exact_current_request_can_still_commit_after_rejections");
+    const auto reads = journal_sdk::reads, writes = journal_sdk::writes,
+               erases = journal_sdk::erases;
+    require(flash_append_record(record) == ESP_ERR_INVALID_ARG &&
+                s_flash_next_sequence == original.header.sequence + 1,
+            "already_consumed_request_is_rejected_as_stale");
+    require(journal_sdk::reads == reads && journal_sdk::writes == writes &&
+                journal_sdk::erases == erases && journal_sdk::core_appended == 1,
+            "stale_request_has_no_flash_io_or_duplicate_ack");
 }
 void core_ahead() {
     boot();
@@ -294,11 +360,101 @@ void read_admission() {
     require(!flash_read_stop_observation(static_cast<uint16_t>(slot), bucket, sequence, payload),
             "actual_reader_rejects_committed_payload_with_bad_crc");
 }
+void seed_late_correction(const char* transport_path) {
+    boot();
+    // Establish a non-sector-first append position through a real independent Core append.
+    const auto core           = static_cast<size_t>(HistoryJournalSource::Checkup);
+    journal_sdk::core_pending = true;
+    journal_sdk::core_bucket  = journal_sdk::unix_origin / 3600 - 1;
+    FlashJournalRecord record;
+    require(flash_build_for_service(core, record, 0) && flash_append_record(record) == ESP_OK,
+            "real_core_append_places_stop_attempt_at_slot_one");
+    require(s_flash_next_slot == 1, "stop_attempt_is_not_sector_first");
+
+    sdk::now_us = 3590000000LL;
+    stop_observation_record(sdk::now_us, true);
+    sdk::now_us = 3595000000LL;
+    stop_observation_record(sdk::now_us, true);
+    sdk::now_us = 3605000000LL;
+    stop_observation_record(sdk::now_us, false); // closes the old hour without sealing the producer
+    require(flash_build_next_stop_observation(record),
+            "ordinary_hour_closure_creates_pending_data");
+    journal_sdk::fail_read = journal_sdk::reads + 2; // preparation succeeds; verification fails
+    require(flash_append_record(record) != ESP_OK, "mid_slot_commit_outcome_is_unverified");
+    journal_sdk::fail_read = 0;
+    FlashJournalRecord original;
+    require(flash_read_record(1, original) == ESP_OK && flash_record_physically_valid(original),
+            "unverified_mid_slot_attempt_physically_committed");
+    ObservationHourlyPayload original_payload;
+    std::memcpy(&original_payload, original.payload, sizeof(original_payload));
+    require(original_payload.readable_us == 5000000 &&
+                original_payload.counters.witnessed_stops_recent_heating == 0,
+            "first_physical_copy_precedes_late_correction");
+
+    sdk::now_us = 3620000000LL;
+    StopContextEvent event;
+    event.valid             = true;
+    event.stop_us           = 3598000000LL;
+    event.source_generation = 7;
+    event.positive = event.evaluable = event.complete = STOP_CONTEXT_ALL;
+    stop_observation_record(sdk::now_us, false, event);
+    require(stop_observation_report().counters.witnessed_stops_recent_heating == 1,
+            "ordinary_late_event_corrects_queued_old_hour");
+    require(history_flash_service_journal(1, 0) == 1,
+            "real_shared_retry_acknowledges_late_correction");
+    const auto report = stop_observation_report();
+    require(!report.persistence_pending && report.readable_us == 5000000 &&
+                report.counters.witnessed_stops_recent_heating == 1,
+            "same_boot_acknowledged_population_includes_late_correction");
+    const size_t       retry_slot = HISTORY_JOURNAL_SLOTS_PER_SECTOR;
+    FlashJournalRecord retry;
+    require(flash_read_record(retry_slot, retry) == ESP_OK && flash_record_physically_valid(retry),
+            "retry_lands_in_next_sector_preserving_unverified_copy");
+    ObservationHourlyPayload retry_payload;
+    std::memcpy(&retry_payload, retry.payload, sizeof(retry_payload));
+    require(retry_payload.counters.witnessed_stops_recent_heating == 1 &&
+                retry.header.bucket == original.header.bucket && journal_sdk::erased_ranges.empty(),
+            "two_committed_revisions_survive_without_erasing_the_old_sector");
+    std::cout << "WITNESS original_slot=1 original_sequence=" << original.header.sequence
+              << " original_stops=" << original_payload.counters.witnessed_stops_recent_heating
+              << " retry_slot=" << retry_slot << " retry_sequence=" << retry.header.sequence
+              << " retry_stops=" << retry_payload.counters.witnessed_stops_recent_heating
+              << " acknowledged_stops=" << report.counters.witnessed_stops_recent_heating << '\n';
+    std::ofstream transport(transport_path, std::ios::binary);
+    transport.write(reinterpret_cast<const char*>(journal_sdk::flash.data()),
+                    static_cast<std::streamsize>(journal_sdk::flash.size()));
+    require(static_cast<bool>(transport), "save_only_synthetic_nor_transport_bytes");
+}
+void restore_late_correction(const char* transport_path) {
+    journal_sdk::flash.resize(HISTORY_FLASH_PARTITION_BYTES);
+    std::ifstream transport(transport_path, std::ios::binary);
+    transport.read(reinterpret_cast<char*>(journal_sdk::flash.data()),
+                   static_cast<std::streamsize>(journal_sdk::flash.size()));
+    require(static_cast<bool>(transport) && transport.peek() == std::char_traits<char>::eof(),
+            "cold_process_loads_exact_synthetic_partition_bytes");
+    sdk::now_us = 3620000000LL;
+    boot(false); // real cold statics, real History scan and real Store reconstruction
+    const auto report = stop_observation_report();
+    std::cout << "WITNESS fresh_restored_stops=" << report.counters.witnessed_stops_recent_heating
+              << " acknowledged_stops=1 readable_us=" << report.readable_us
+              << " pending=" << report.persistence_pending << '\n';
+    require(report.counters.witnessed_stops_recent_heating == 1,
+            "fresh_restore_retains_acknowledged_late_correction");
+    require(report.readable_us == 5000000 && !report.persistence_pending &&
+                journal_sdk::writes == 0 && journal_sdk::erases == 0,
+            "cold_restore_preserves_exact_dated_population_without_writes");
+}
 } // namespace
 int main(int argc, char** argv) {
-    const std::string name = argc == 2 ? argv[1] : "unknown_case";
+    const std::string name = argc >= 2 ? argv[1] : "unknown_case";
     try {
-        if (name == "commit_rejected")
+        if (name == "seed_late_correction" && argc == 3)
+            seed_late_correction(argv[2]);
+        else if (name == "restore_late_correction" && argc == 3)
+            restore_late_correction(argv[2]);
+        else if (argc != 2)
+            throw std::runtime_error("unknown_case");
+        else if (name == "commit_rejected")
             append_case(false, "commit");
         else if (name == "core_ahead")
             core_ahead();
@@ -306,6 +462,14 @@ int main(int argc, char** argv) {
             nor_contract();
         else if (name == "read_admission")
             read_admission();
+        else if (name == "sequence_rejections")
+            sequence_rejections();
+        else if (name == "core_sequence_prepare")
+            core_sequence("prepare");
+        else if (name == "core_sequence_readback")
+            core_sequence("readback");
+        else if (name == "core_sequence_commit_error")
+            core_sequence("commit_error");
         else if (name.rfind("data_", 0) == 0 || name.rfind("barrier_", 0) == 0) {
             const bool barrier = name.rfind("barrier_", 0) == 0;
             const auto phase   = name.substr(barrier ? 8 : 5);

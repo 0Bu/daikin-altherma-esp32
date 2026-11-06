@@ -16,7 +16,10 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--out", type=Path)
 parser.add_argument("--sanitizer", choices=["none", "undefined"], default="undefined")
 parser.add_argument("--expect-red", action="store_true")
+parser.add_argument("--expect-red-case", choices=["claim", "late-correction"], default="claim")
 args = parser.parse_args()
+if args.expect_red_case != "claim" and not args.expect_red:
+    parser.error("--expect-red-case requires --expect-red")
 if args.out:
     OUT = args.out.resolve()
     OUT.mkdir(parents=True, mode=0o700, exist_ok=False)
@@ -64,6 +67,8 @@ hashes = {str(path.relative_to(ROOT)): digest(path) for path in sorted(inputs)}
 (OUT / "stop-store-production-baseline.cpp").write_bytes(sources[1].read_bytes())
 (OUT / "observation-hourly-baseline.hpp").write_bytes(
     (ROOT / "main/logic/observation_hourly.hpp").read_bytes())
+(OUT / "history-persist-baseline.hpp").write_bytes(
+    (ROOT / "main/logic/history_persist.hpp").read_bytes())
 results = []
 mutants = []
 
@@ -85,8 +90,8 @@ def build(source, name):
     return binary
 
 
-def execute(binary, case, label):
-    result = run([str(binary), case])
+def execute(binary, case, label, extra=()):
+    result = run([str(binary), case, *(str(value) for value in extra)])
     (OUT / (label + ".stdout.txt")).write_text(result.stdout)
     (OUT / (label + ".stderr.txt")).write_text(result.stderr)
     return result
@@ -100,10 +105,11 @@ def oracle_failed(result, case, oracle):
 baseline = build(SOURCE, "baseline")
 phases = ["prepare_read", "prepare_erase", "body", "commit", "readback",
           "commit_accepted_error", "success"]
-cases = ["commit_rejected", "core_ahead", "nor_contract", "read_admission"] + [
+cases = ["commit_rejected", "core_ahead", "nor_contract", "read_admission", "sequence_rejections",
+         "core_sequence_prepare", "core_sequence_readback", "core_sequence_commit_error"] + [
     kind + "_" + phase for kind in ["data", "barrier"] for phase in phases]
 if args.expect_red:
-    cases = ["commit_rejected"]
+    cases = ["commit_rejected"] if args.expect_red_case == "claim" else []
 for case in cases:
     result = execute(baseline, case, case)
     expected = oracle_failed(result, case, "failed_append_releases_claim_for_real_service_retry") \
@@ -114,8 +120,27 @@ for case in cases:
     if not expected:
         (OUT / "failure.json").write_text(json.dumps(results[-1], indent=2) + "\n")
         raise RuntimeError("Unexpected semantic outcome: " + case)
+transport_evidence = []
+if not args.expect_red or args.expect_red_case == "late-correction":
+    transport = OUT / "late-correction.synthetic-nor.bin"
+    for case in ["seed_late_correction", "restore_late_correction"]:
+        result = execute(baseline, case, case, [transport])
+        expected_failure = args.expect_red and case == "restore_late_correction"
+        expected = oracle_failed(result, case, "fresh_restore_retains_acknowledged_late_correction") \
+            if expected_failure else result.returncode == 0 and "PASS case=" + case + " " in result.stdout
+        results.append({"case": case, "exit_code": result.returncode,
+                        "stdout": result.stdout, "stderr": result.stderr,
+                        "expected_red": expected_failure, "pass": expected})
+        print(result.stdout, end="", flush=True)
+        if not expected:
+            (OUT / "failure.json").write_text(json.dumps(results[-1], indent=2) + "\n")
+            raise RuntimeError("Unexpected paired-process semantic outcome: " + case)
+    transport_evidence.append({"path": str(transport), "sha256": digest(transport),
+                               "bytes": transport.stat().st_size,
+                               "only_cross_process_state": "synthetic NOR partition bytes"})
 unknowns = []
-for case in ["unknown_case", "data_unknown", "barrier_unknown"]:
+for case in ["unknown_case", "data_unknown", "barrier_unknown",
+             "seed_late_correction", "restore_late_correction"]:
     result = execute(baseline, case, case)
     ok = oracle_failed(result, case, "unknown_case")
     unknowns.append({"case": case, "pass": ok})
@@ -158,13 +183,56 @@ if not args.expect_red:
                 raise RuntimeError("Mutation escaped named semantic oracle: " + name + " " + case)
             print("PASS compiling control=" + name + " case=" + case, flush=True)
 
+    # Undo only reservation timing, restoring the old success-only sequence increment. The
+    # paired seed must still pass; its fresh process must lose the acknowledged late correction.
+    name = "reuse_sequence_until_verified_success"
+    reserve = "    if (!logic::history_journal_reserve_sequence(s_flash_next_sequence, r.header.sequence))\n" \
+              "        return ESP_ERR_INVALID_ARG;\n"
+    success = "    s_flash_next_slot = (slot + 1) % logic::HISTORY_JOURNAL_SLOT_COUNT;\n"
+    if text.count(reserve) != 1 or text.count(success) != 1:
+        raise RuntimeError("Expected unique sequence timing mutation anchors")
+    source = OUT / (name + ".cpp")
+    source.write_text(text.replace(reserve, "", 1).replace(
+        success, success + "    s_flash_next_sequence++;\n", 1))
+    binary = build(source, name)
+    mutations.append((name,))
+    for case in ["data_commit", "barrier_commit", "core_sequence_readback"]:
+        result = execute(binary, case, name + "-" + case)
+        oracle = "every_append_attempt_consumes_one_sequence"
+        ok = oracle_failed(result, case, oracle)
+        mutants.append({"mutation": name, "case": case, "compiled": True, "oracle": oracle,
+                        "stdout": result.stdout, "stderr": result.stderr,
+                        "exit_code": result.returncode, "binary_sha256": digest(binary), "pass": ok})
+        if not ok:
+            raise RuntimeError("Sequence timing mutation escaped generic source oracle: " + case)
+        print("PASS compiling control=" + name + " case=" + case, flush=True)
+    transport = OUT / (name + ".synthetic-nor.bin")
+    seed = execute(binary, "seed_late_correction", name + "-seed", [transport])
+    if seed.returncode or "PASS case=seed_late_correction " not in seed.stdout or seed.stderr:
+        raise RuntimeError("Sequence mutation paired seed failed before the cold-restore oracle")
+    case = "restore_late_correction"
+    result = execute(binary, case, name + "-restore", [transport])
+    oracle = "fresh_restore_retains_acknowledged_late_correction"
+    ok = oracle_failed(result, case, oracle)
+    mutants.append({"mutation": name, "case": case, "compiled": True, "oracle": oracle,
+                    "seed_stdout": seed.stdout, "stdout": result.stdout, "stderr": result.stderr,
+                    "exit_code": result.returncode, "binary_sha256": digest(binary), "pass": ok})
+    transport_evidence.append({"path": str(transport), "sha256": digest(transport),
+                               "bytes": transport.stat().st_size, "mutation": name,
+                               "only_cross_process_state": "synthetic NOR partition bytes"})
+    if not ok:
+        raise RuntimeError("Sequence mutation escaped fresh-process acknowledged-population oracle")
+    print("PASS compiling control=" + name + " case=" + case, flush=True)
+
 unchanged = all(digest(ROOT / name) == value for name, value in hashes.items())
 receipt = {"utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
            "compiler": version, "sanitizer": args.sanitizer,
            "whole_history_translation_unit": True, "real_stop_store": True,
            "baseline_production_body_rewrite": False, "expected_red": args.expect_red,
+           "expected_red_case": args.expect_red_case if args.expect_red else None,
            "source_hashes": hashes, "baseline_binary_sha256": digest(baseline),
            "cases": results, "compiling_controls": mutants, "unknown_guards": unknowns,
+           "transport_evidence": transport_evidence,
            "inputs_unchanged": unchanged,
            "pass": unchanged and all(r["pass"] for r in results + mutants + unknowns)}
 (OUT / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")

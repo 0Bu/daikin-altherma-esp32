@@ -29228,6 +29228,18 @@ static void test_observation_hourly() {
     CHECK(!observation_identity_valid({}));
     CHECK(observation_fingerprint() != 0);
     CHECK(observation_fingerprint() != checkup_journal_fingerprint());
+    uint64_t next_sequence = 1;
+    CHECK(!history_journal_reserve_sequence(next_sequence, 0) && next_sequence == 1);
+    CHECK(!history_journal_reserve_sequence(next_sequence, 2) && next_sequence == 1);
+    CHECK(history_journal_reserve_sequence(next_sequence, 1) && next_sequence == 2);
+    CHECK(!history_journal_reserve_sequence(next_sequence, 1) && next_sequence == 2);
+    CHECK(history_journal_reserve_sequence(next_sequence, 2) && next_sequence == 3);
+    next_sequence = UINT64_MAX - 1;
+    CHECK(history_journal_reserve_sequence(next_sequence, UINT64_MAX - 1) &&
+          next_sequence == UINT64_MAX);
+    CHECK(history_journal_reserve_sequence(next_sequence, UINT64_MAX) && next_sequence == 0);
+    CHECK(!history_journal_reserve_sequence(next_sequence, UINT64_MAX) && next_sequence == 0);
+    CHECK(!history_journal_reserve_sequence(next_sequence, 0) && next_sequence == 0);
     CHECK(observation_bucket(-1) == INT64_MIN);
     CHECK(observation_bucket(OBSERVATION_HOUR_US) == 1);
     CHECK(observation_in_window(100, 123 * OBSERVATION_HOUR_US));
