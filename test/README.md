@@ -285,14 +285,21 @@ not guarantee a frame rate on every device. Negative controls reintroduce hidden
 animation replacement and a blocking poll. Static locale snapshots, reduced-motion cases and GIF
 poses remain separate evidence.
 Native open/pin actions, viewport positioning and one programmatic focus settle before the polling
-baseline. The plot must be visible; schematic witnesses share its vertical viewport whenever they
+baseline. Each first opening renews its existing source caches through real history requests and
+waits for the matching mounted revision. A separate natural-poll case covers the regular 60-second
+cache expiry, generation change and permitted plot replacement before checking unchanged continuity.
+The plot must be visible; schematic witnesses share its vertical viewport whenever they
 fit, with actual geometry recorded separately from animation clocks. Focus setup is also recorded
 separately. No frame from the first or subsequent measured poll is discarded.
 
 The WebKit phase reuses this complete temporal matrix at 834×1194 and 1194×834 CSS pixels with the
 pinned iPad Pro 11 device descriptor, touch/mobile behavior and trusted native taps, including plot
 pin/unpin and cached reopen. Its orientations run consecutively, each with a foreground browser;
-Chromium retains parallel viewport workers with native focus emulation. A tight flow-stroke screenshot sequence under real polling verifies
+Chromium retains parallel viewport workers with native focus emulation. Its normal full gate runs
+infrastructure checks first, then holds both workers at an IPC barrier after their temporal matrices
+finish and clean up. Only then do the locale/interaction cases overlap one serial browser-control
+worker; no positive latency window competes with those controls. All three workers must succeed.
+Focused and serial invocations keep their existing order. A tight flow-stroke screenshot sequence under real polling verifies
 paint movement outside the latency sampling; a ninth canary freezes painted dash movement while
 its CSS animation clock continues. All eight shared temporal canaries must also fail for their intended
 assertions in WebKit. Linux headless WebKit is Safari-engine regression coverage; it does not prove

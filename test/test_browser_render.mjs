@@ -20,6 +20,49 @@ if (mutation && ![
 ].includes(mutation))
   throw new Error(`unknown browser selftest mutation: ${mutation}`);
 
+async function waitForHistoryContinuation(viewport) {
+  const encoded = process.env.DAIKIN_BROWSER_HISTORY_BARRIER;
+  if (encoded === undefined) return;
+  const barrier = JSON.parse(encoded);
+  assert.ok(barrier && typeof barrier === "object" && !Array.isArray(barrier) &&
+    Object.keys(barrier).sort().join(",") === "nonce,viewport" &&
+    barrier.viewport === viewport && typeof barrier.nonce === "string" && /^[a-f0-9]{32}$/.test(barrier.nonce) &&
+    typeof process.send === "function" && process.connected,
+  "history continuation requires its own live per-viewport IPC channel");
+  try {
+    await new Promise((resolve, reject) => {
+      let done = false;
+      const finish = error => {
+        if (done) return;
+        done = true;
+        process.off("message", receive);
+        process.off("disconnect", disconnected);
+        if (error) reject(error); else resolve();
+      };
+      const disconnected = () => finish(new Error("history continuation parent disconnected"));
+      const receive = message => {
+        if (!message || typeof message !== "object" || Array.isArray(message) ||
+            Object.keys(message).sort().join(",") !== "nonce,type,viewport" ||
+            message.type !== "history-motion-continue" || message.viewport !== viewport ||
+            message.nonce !== barrier.nonce) {
+          finish(new Error("invalid history continuation release"));
+          return;
+        }
+        finish();
+      };
+      process.on("message", receive);
+      process.once("disconnect", disconnected);
+      try {
+        process.send({ type: "history-motion-ready", viewport, nonce: barrier.nonce }, error => {
+          if (error) finish(error);
+        });
+      } catch (error) { finish(error); }
+    });
+  } finally {
+    if (process.connected) process.disconnect();
+  }
+}
+
 const layoutAudit = `(() => {
   const shown = (el) => {
     const style = getComputedStyle(el);
@@ -2429,6 +2472,9 @@ try {
     if (!mutation) {
       await page.viewport(viewport.width, viewport.height);
       await assertHistoryMotion(page, server, `${viewport.name}/history-motion`);
+      // assertHistoryMotion's finally has restored the fixture and stopped its witnesses. A fast
+      // viewport must now pause until its sibling is also outside temporal observation.
+      await waitForHistoryContinuation(viewport.name);
     }
     // The mutation seeds one complete locale's route budget, then exercises this same assertion on
     // the first extra route. It proves the boundary without running a deliberately flooded modal
