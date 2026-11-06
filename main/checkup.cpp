@@ -8,6 +8,7 @@
 #include "logic/checkup_persist.hpp"  // WHEN a persisted window may be believed
 #include "logic/crashinfo.hpp"        // crash_reason_slug — one reset vocabulary
 #include "logic/history.hpp"     // history_parse_tenths — the ONE parse of a cached value
+#include "logic/stop_context_input.hpp"
 #include "safe_mode.hpp"         // safe_mode_active — nothing ages the window there
 #include "mqtt_ha.hpp"           // independent circulation-pump electrical witness
 #include "config.hpp"            // allocation-free circulation identity snapshot
@@ -90,6 +91,11 @@ __NOINIT_ATTR PersistStore s_store;
 inline PersistedCheckup& P() { return s_store.v; }
 logic::CheckupState s_state;
 logic::DhwLossState s_dhw_state;
+logic::StopContextState     s_stop_context;
+logic::StopContextInputPlan s_stop_inputs;
+uint32_t                    s_stop_generation    = 0;
+bool                        s_stop_allow_restore = true;
+int64_t                     s_stop_read_fence_us = -1;
 // Copy a read-only reset template without constructing the expanded state on a caller's stack.
 constexpr logic::DhwLossState  kFreshDhwLossState{};
 constexpr logic::DhwLossBucket kEmptyDhwLossBucket{};
@@ -289,6 +295,7 @@ bool apply_reset_locked() {
     s_dhw_reset_requested.store(false);
     s_state = logic::CheckupState{};
     s_dhw_state = kFreshDhwLossState;
+    s_stop_context = {};
     s_cov = logic::CheckupCoverage{};
     s_fault_now = daik::FaultClass::Unknown;
     persist_wipe(); // clears both rings and the checkpoint to withdraw the previous scope
@@ -398,6 +405,10 @@ void checkup_reboot_save() {
     // here rather than handing the old source's candidate to the next boot.
     apply_reset_locked();
     apply_dhw_reset_locked();
+    const int64_t stop_now   = esp_timer_get_time();
+    const auto    stop_event = logic::stop_context_seal(s_stop_context);
+    if (stop_event.valid) stop_observation_record(stop_now, false, stop_event);
+    stop_observation_seal();
     seal_open_hour_locked();
 
     PersistedDhwHandoff& h = P().dhw_handoff;
@@ -437,6 +448,12 @@ void checkup_start(bool diagnostics_enabled, uint32_t diagnostics_generation) {
         if (!s_mtx) diag_printf("checkup: mutex alloc failed — observation disabled this boot\n");
     }
     s_last_commit_us = kNoCommitUs;
+    s_stop_context       = {};
+    s_stop_inputs        = {};
+    s_stop_generation    = 0;
+    s_stop_allow_restore = true;
+    s_stop_read_fence_us = -1;
+    stop_observation_start(diagnostics_enabled, diagnostics_generation);
     s_live_commit_count = 0;
     s_dhw_source_fp     = circulation_identity();
     s_requested_dhw_source_fp.store(s_dhw_source_fp);
@@ -486,6 +503,12 @@ void checkup_set_diagnostics(bool enabled, uint32_t generation) {
     s_diagnostics_epoch.fetch_add(1, std::memory_order_acq_rel);
     s_diagnostics_enabled.store(enabled, std::memory_order_release);
     s_diagnostics_generation = generation;
+    s_stop_context           = {};
+    s_stop_allow_restore     = false;
+    stop_observation_set_diagnostics(enabled, generation);
+    if (s_source_confirmed)
+        stop_observation_bind(s_source_fp, s_model_fp, s_stop_inputs.schema_fp, s_stop_generation,
+                              false);
     s_boot_handoff_valid     = false;
     s_reset_requested.store(false);
     s_dhw_reset_requested.store(false);
@@ -513,6 +536,10 @@ void checkup_reset() {
     if (!lk.acquired()) return;
     s_boot_handoff_valid = false;
     // An explicit /detect or automatic-profile rewiring withdraws the old confirmation immediately.
+    s_stop_context       = {};
+    s_stop_inputs        = {};
+    s_stop_allow_restore = false;
+    stop_observation_reset();
     // Consuming the reset on an unidentified cycle must not let the journal re-admit the old link.
     s_source_confirmed = false;
     s_source_fp        = 0;
@@ -526,7 +553,9 @@ void checkup_reset() {
 // Startup cached identity is only an expectation for a separately sealed handoff. Explicit resets
 // retire pending journal adoption for this boot, even if selection names the same profile/link.
 void checkup_reset_on_detect(const char* profile_id, uint32_t source_fp) {
-    const uint32_t fp = logic::checkup_model_fingerprint(profile_id, def::lookup_view(profile_id));
+    const auto     view        = def::lookup_view(profile_id);
+    const uint32_t fp          = logic::checkup_model_fingerprint(profile_id, view);
+    const auto     stop_inputs = logic::stop_context_input_plan(profile_id, view);
     if (!s_mtx) return;
     Lock lk(s_mtx);
     if (!lk.acquired()) return;
@@ -534,6 +563,15 @@ void checkup_reset_on_detect(const char* profile_id, uint32_t source_fp) {
     s_source_confirmed = source_fp != 0 && fp != 0;
     s_model_fp         = fp;
     s_source_fp        = source_fp;
+    s_stop_context     = {};
+    s_stop_inputs      = stop_inputs;
+    s_stop_generation  = hp_poll_generation();
+    if (!first) {
+        s_stop_allow_restore = false;
+        stop_observation_reset();
+    }
+    stop_observation_bind(source_fp, fp, stop_inputs.schema_fp, s_stop_generation,
+                          s_stop_allow_restore);
     if (first) {
         // The stored startup scope was only an expectation. This call confirms the current source.
         if (s_source_confirmed && s_boot_handoff_valid && !s_reset_requested.load() &&
@@ -665,6 +703,22 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
     // the whole sample after clearing state; otherwise the tail of old poll A would seed the window
     // that new-link poll B continues. Dropping at most the first new sample is the conservative side.
     if (apply_reset_locked()) return;
+    if (s_source_confirmed && s_stop_inputs.schema_fp && now >= s_stop_read_fence_us) {
+        // Bind a newly admitted live generation before consuming any of its inputs. No event from
+        // the preceding source is admitted into the replacement lifecycle.
+        if (source_generation != s_stop_generation) {
+            s_stop_context       = {};
+            s_stop_generation    = source_generation;
+            s_stop_allow_restore = false;
+            stop_observation_bind(s_source_fp, s_model_fp, s_stop_inputs.schema_fp,
+                                  source_generation, false);
+        }
+        const auto stop_sample =
+            logic::stop_context_collect(s_stop_inputs, v, n, rps_known, rps_running);
+        const auto stop_event =
+            logic::stop_context_step(s_stop_context, stop_sample, now, source_generation);
+        stop_observation_record(now, stop_sample.rps_known, stop_event);
+    }
     const bool discard_dhw_sample = apply_dhw_reset_locked() ||
                                     dhw_generation != s_dhw_identity_generation.load() ||
                                     circulation_generation != circulation_source_generation();
@@ -728,6 +782,45 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
     }
     s_state.bucket      = bucket;
     s_state.have_bucket = true;
+}
+
+void checkup_stop_context_expire(int64_t) {
+    if (!s_mtx) return;
+    Lock lk(s_mtx);
+    if (!lk || !s_diagnostics_enabled.load(std::memory_order_acquire) || s_reset_requested.load() ||
+        s_seal_bucket != INT64_MIN)
+        return;
+    // A history tick may have waited behind a newer poll. Read time after admission so a stale
+    // caller timestamp cannot masquerade as a regressed monotonic clock.
+    const int64_t now_us = esp_timer_get_time();
+    const auto    event  = logic::stop_context_expire(s_stop_context, now_us);
+    if (event.valid) {
+        stop_observation_record(now_us, false, event);
+        s_stop_read_fence_us = now_us;
+    }
+}
+
+CheckupStopContextReport checkup_stop_context_report() {
+    if (!s_mtx) return {};
+    Lock lk(s_mtx);
+    if (!lk) return {};
+    if (!s_diagnostics_enabled.load(std::memory_order_acquire) || s_reset_requested.load()) {
+        CheckupStopContextReport r;
+        r.observation           = stop_observation_report();
+        r.observation.confirmed = false;
+        return r; // preserve the reset barrier's pending durability without admitting old evidence
+    }
+    const int64_t now   = esp_timer_get_time();
+    const auto    event = logic::stop_context_expire(s_stop_context, now);
+    if (event.valid) {
+        stop_observation_record(now, false, event);
+        s_stop_read_fence_us = now;
+    }
+    CheckupStopContextReport r;
+    r.observation     = stop_observation_report();
+    r.capability_mask = logic::stop_context_capabilities(s_stop_inputs);
+    r.pending         = s_stop_context.pending.valid;
+    return r;
 }
 
 void expire_restored_locked() {

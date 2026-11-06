@@ -1,4 +1,4 @@
-// translation-source: b5d29da273c417b207489763facc3fda04530140b4b0389affcd7643d701cd08
+// translation-source: 3e8092cf0e419496e78d337338f27af53fbda73918ad45f0bbe0970b83ebeddc
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -223,6 +223,16 @@ I18N.es = localeValues([
   /* check.cycling_cooling */ (n) => `refrigeración: ${n === 1 ? "se excluyó 1" : `se excluyeron ${n}`}`,
   /* check.cycling_censored */ (n) => `${n} sin clasificar`,
   /* check.cycling_causes */ "transición|reinicio/registro|inicio no observado",
+  /* check.stop.title */ "Contexto de parada",
+  /* check.stop.population */ (n) => `${n} paradas observadas tras calefacción reciente`,
+  /* check.stop.coverage */ (d, h) => `Tiempo de compresor legible ${d} · ${h} bloques horarios`,
+  /* check.stop.categories */ "baja velocidad + diferencia con consigna principal|retirada de solicitud de unidad interior|desescarche activo|cambio hacia/desde agua caliente|cambio de circuito/modo",
+  /* check.stop.counts */ "positivas / evaluables / completas",
+  /* check.stop.other */ "sin clasificar|desconocidas|parciales|interrumpidas|consigna cambiada|desbordamiento temporal",
+  /* check.stop.loss */ (n) => `Avisos de pérdida de almacenamiento ${n}`,
+  /* check.stop.states */ "Fuente sin confirmar|Observación fechada|Observación sin fecha|Cobertura de 24 horas incompleta|Restauración de horas guardadas pendiente de confirmar reloj/fuente|Observaciones completas pendientes de guardar|Una parada espera muestras posteriores|Contadores saturados: límites inferiores|no compatible|Aún no hay población de paradas con datos legibles.",
+  /* check.stop.rule */ "Ventana provisional del proyecto: ±30 s inclusive, sin huecos de muestreo >15 s. Durante calefacción confirmada: 0 < velocidad del compresor ≤22 rps, temperatura de impulsión R1T comunicada antes del calentador de apoyo ≥consigna comunicada de zona principal +2 K, consigna estable durante 30 s.",
+  /* check.stop.limits */ "Las categorías y los calificadores se solapan en las mismas paradas retenidas. Evaluable significa positivo o ventana muestreada completa; solo completa permite un resultado negativo en las muestras. El sondeo no excluye señales entre muestras. R1T es la temperatura de impulsión comunicada antes del apoyo eléctrico. Su diferencia con la consigna comunicada de zona principal es una diferencia observada, no un sobreimpulso regulado medido. No demuestra la causa de parada, la modulación mínima ni una solicitud de termostato externo.",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} mín. ${min} °C · media ${mean} °C`,
   /* check.min */ (m) => `${m} min`,

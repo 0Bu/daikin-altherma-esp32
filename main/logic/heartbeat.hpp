@@ -11,16 +11,181 @@
 #include "json.hpp"        // json_append_escaped
 #include "json_integer.hpp"
 #include "checkup.hpp"
+#include "stop_context.hpp"
 #include "ou_stale.hpp" // OuFreshness — bus_ou_held_over's three answers
 
 namespace daik {
+
+// Compact stop observations shared by HTTP and MQTT; never copy the full eight-row report onto
+// the MQTT task's stack. Availability describes inputs, not whether a positive was observed.
+struct StopContextPayloadFields {
+    logic::StopContextCounters counters;
+    uint32_t                   readable_s          = 0;
+    uint16_t                   observed_hours      = 0;
+    uint16_t                   dropped             = 0;
+    uint8_t                    capability_mask     = 0;
+    bool                       confirmed           = false;
+    bool                       has_readable        = false;
+    bool                       dated               = false;
+    bool                       coverage_partial    = true;
+    bool                       restore_pending     = true;
+    bool                       persistence_pending = false;
+    bool                       pending             = false;
+};
+static_assert(sizeof(StopContextPayloadFields) <= 80, "stop-context output snapshot grew");
+
+template <typename Report>
+inline StopContextPayloadFields stop_context_payload_fields(const Report& r) {
+    StopContextPayloadFields f;
+    f.counters            = r.observation.counters;
+    f.readable_s          = static_cast<uint32_t>(r.observation.readable_us / 1000000);
+    f.observed_hours      = r.observation.observed_hours;
+    f.dropped             = r.observation.dropped;
+    f.capability_mask     = r.capability_mask;
+    f.confirmed           = r.observation.confirmed;
+    f.has_readable        = r.observation.readable_us > 0;
+    f.dated               = r.observation.dated;
+    f.coverage_partial    = r.observation.partial;
+    f.restore_pending     = r.observation.restore_pending;
+    f.persistence_pending = r.observation.persistence_pending;
+    f.pending             = r.pending;
+    return f;
+}
+
+inline constexpr const char* STOP_CONTEXT_CATEGORY_IDS[] = {
+    "low_rps_above_main_target", "request_withdrawal", "defrost", "dhw_transition",
+    "route_mode_transition"};
+static_assert(sizeof(STOP_CONTEXT_CATEGORY_IDS) / sizeof(*STOP_CONTEXT_CATEGORY_IDS) ==
+              logic::STOP_CONTEXT_CATEGORIES);
+
+// Sequential appends work with the bounded HTTP sink and the MQTT string alike. No temporary
+// owning strings or fabricated timestamps. MQTT metadata is numeric for metrics consumers.
+template <typename JsonOut>
+__attribute__((noinline)) inline void
+append_stop_context_json(JsonOut& j, const StopContextPayloadFields& f, bool flat = false) {
+    bool first = true;
+    auto key   = [&j, flat, &first](const char* name, const char* category = nullptr) {
+        if (flat || !first) j += ",";
+        first = false;
+        j += "\"";
+        if (flat) j += "stop_context_";
+        if (category) {
+            j += category;
+            j += "_";
+        }
+        j += name;
+        j += "\":";
+    };
+    auto number = [&j](uint64_t value, bool known = true) {
+        if (!known) {
+            j += "null";
+            return;
+        }
+        char       digits[20];
+        const auto result = std::to_chars(digits, digits + sizeof(digits), value);
+        j += std::string_view(digits, static_cast<size_t>(result.ptr - digits));
+    };
+    auto flag = [&j, flat](bool value, bool known = true) {
+        j += !known ? "null" : flat ? (value ? "1" : "0") : (value ? "true" : "false");
+    };
+    if (!flat) j += "{";
+    key("confirmed");
+    flag(f.confirmed);
+    key("capability_mask");
+    number(f.capability_mask, f.confirmed);
+    key("readable_s");
+    number(f.readable_s, f.confirmed);
+    key("observed_hours");
+    number(f.observed_hours, f.confirmed);
+    key("dated");
+    flag(f.dated);
+    key("coverage_partial");
+    flag(f.coverage_partial);
+    key("restore_pending");
+    flag(f.restore_pending);
+    key("persistence_pending");
+    flag(f.persistence_pending);
+    key("pending");
+    flag(f.pending);
+    key("dropped");
+    number(f.dropped, f.confirmed);
+    key("window_s");
+    number(logic::STOP_CONTEXT_WINDOW_US / 1000000);
+    key("max_gap_s");
+    number(logic::STOP_CONTEXT_MAX_GAP_US / 1000000);
+    key("low_rps");
+    number(logic::STOP_CONTEXT_LOW_RPS_TENTHS / 10);
+    key("above_main_target_k");
+    number(logic::STOP_CONTEXT_ABOVE_TARGET_TENTHS / 10);
+    if (!flat) {
+        key("denominator");
+        j += "\"witnessed_stops_recent_heating\"";
+    }
+    // A readable population with zero stops is real evidence. Before any readable interval all
+    // counts remain null; unsupported categories cannot become false observations through zero.
+    const bool  known = f.confirmed && f.has_readable;
+    const auto& c     = f.counters;
+    key("witnessed_stops_recent_heating");
+    number(c.witnessed_stops_recent_heating, known);
+    key("unclassified_stops");
+    number(c.unclassified, known);
+    key("unknown_stops");
+    number(c.unknown, known);
+    key("partial_stops");
+    number(c.partial, known);
+    key("censored_stops");
+    number(c.censored, known);
+    key("target_changed");
+    number(c.target_changed, known);
+    key("time_overflow");
+    number(c.time_overflow, known);
+    key("saturated");
+    flag(c.saturated, known);
+    if (!flat) {
+        key("categories");
+        j += "{";
+    }
+    for (size_t k = 0; k < logic::STOP_CONTEXT_CATEGORIES; ++k) {
+        const char* name      = STOP_CONTEXT_CATEGORY_IDS[k];
+        const bool  supported = (f.capability_mask & (1u << k)) != 0;
+        if (!flat) {
+            if (k) j += ",";
+            j += "\"";
+            j += name;
+            j += "\":{";
+        }
+        if (flat)
+            key("supported", name);
+        else
+            j += "\"supported\":";
+        flag(supported, f.confirmed);
+        if (flat)
+            key("positive", name);
+        else
+            j += ",\"positive\":";
+        number(c.positive[k], known && supported);
+        if (flat)
+            key("evaluable", name);
+        else
+            j += ",\"evaluable\":";
+        number(c.evaluable[k], known && supported);
+        if (flat)
+            key("complete", name);
+        else
+            j += ",\"complete\":";
+        number(c.complete[k], known && supported);
+        if (!flat) j += "}";
+    }
+    if (!flat) j += "}}";
+}
 
 // Snapshot of everything the heartbeat payload reports. Gathered on the device from wifi_info(),
 // wifi_reconnect_count(), hp_stats(), the mqtt task's own publish counters, and the IDF heap/timer
 // APIs; nothing here touches hardware.
 struct HeartbeatFields {
     logic::CheckupCyclingEvidence cycling;
-    std::string version;
+    StopContextPayloadFields      stop_context;
+    std::string                   version;
     std::string platform;
     uint64_t    uptime_ms     = 0;   // monotonic ms since boot; uptime_s + the "Ddd+HH:MM:SS.mmm"
                                       // display string are both derived from this in the JSON builder
@@ -299,6 +464,7 @@ inline std::string build_heartbeat_json(const HeartbeatFields& f) {
     json_append_integer_field(
         j, ",\"cycling_runtime_saturated\":", static_cast<unsigned>(c.cycling_runtime_saturated),
         c.cycling_censored_runtime_s >= 0);
+    append_stop_context_json(j, f.stop_context, true);
     // bus_*
     j += ",\"bus_connected\":"; j += f.bus_connected ? "1" : "0";
     j += ",\"bus_proto\":\""; j += f.bus_proto; j += "\"";

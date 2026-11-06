@@ -3,6 +3,7 @@
 // storage, one mutex, and the fold from the poll cycle's values into a bucket.
 #include "history.hpp"
 #include "checkup.hpp"                // fourth journal source: exact hourly diagnostic buckets
+#include "stop_observation_store.hpp" // independent logical hourly source, same physical envelope
 #include "config.hpp"
 #include "diag_log.hpp"
 #include "def/homehub.hpp"
@@ -32,6 +33,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <new>
 #include <string>
 #include <type_traits>
 
@@ -678,6 +680,8 @@ struct FlashJournalRecord {
 };
 static_assert(sizeof(FlashJournalRecord) == logic::HISTORY_JOURNAL_SLOT_BYTES,
               "one journal record is exactly one physical slot");
+static_assert(std::is_trivially_copyable<FlashJournalRecord>::value,
+              "sector scratch records must not retain resources or references");
 static_assert(logic::CHECKUP_JOURNAL_PAYLOAD_BYTES <= sizeof(FlashJournalRecord::payload),
               "one diagnostic hour must fit the shared journal slot");
 
@@ -691,6 +695,9 @@ bool s_flash_scan_ok = false;
 
 constexpr size_t kTotalRings = logic::HISTORY_FLASH_TOTAL_RINGS;
 constexpr size_t kJournalSources = logic::HISTORY_JOURNAL_SOURCE_COUNT;
+// Logical only: never put this value in the persisted source byte or trend-raster arrays.
+constexpr size_t kStopObservationSource = kJournalSources;
+constexpr size_t kJournalServiceSources = kJournalSources + 1;
 constexpr size_t kRestoreRingsPerTick = 4;
 
 size_t   s_flash_next_slot = 0;
@@ -752,7 +759,7 @@ bool s_flash_restore_ahead_logged[kJournalSources] = {};
 
 // Static scratch avoids adding a 4 KiB scan buffer or four 576-byte restore blocks to the poll
 // task's measured 8 KiB stack. All access is serialised on the poll task or s_flash_mtx.
-alignas(8) uint8_t s_flash_sector[logic::HISTORY_FLASH_ERASE_BYTES];
+alignas(FlashJournalRecord) uint8_t s_flash_sector[logic::HISTORY_FLASH_ERASE_BYTES];
 HistorySample s_flash_restore_blocks[kRestoreRingsPerTick][HISTORY_SAMPLES];
 static HistorySample s_splice_live[HISTORY_SAMPLES];
 static HistorySample s_splice_out[HISTORY_SAMPLES];
@@ -1924,6 +1931,9 @@ bool flash_record_valid(const FlashJournalRecord& r) {
     if (!flash_record_physically_valid(r)) return false;
     const auto& h = r.header;
     if (flash_is_manifest(h)) return false;
+    // Its physical envelope remains visible to older head discovery, but these bytes can never
+    // reach core Checkup restore/append handlers or share their cursor.
+    if (logic::observation_header_matches(h)) return false;
     if (h.source == static_cast<uint8_t>(logic::HistoryJournalSource::Checkup))
         return logic::history_journal_header_matches(
             h, logic::checkup_journal_fingerprint(),
@@ -1958,6 +1968,42 @@ esp_err_t flash_read_record(size_t slot, FlashJournalRecord& out) {
                               &out, sizeof(out));
 }
 
+bool flash_read_stop_observation(uint16_t slot, int64_t& bucket, uint64_t& sequence,
+                                 logic::ObservationHourlyPayload& payload) {
+    // Flash-owner only: this scratch has no live scan/restore view while an observation reader
+    // runs. Start the trivial object's lifetime explicitly; no 256-byte record is put on a small
+    // shutdown task's stack. Exact observation headers cannot be catalog manifests.
+    auto& record = *new (s_flash_sector) FlashJournalRecord;
+    if (flash_read_record(slot, record) != ESP_OK ||
+        !logic::observation_header_matches(record.header) ||
+        record.header.crc != logic::history_journal_crc_bytes(record.header, record.payload,
+                                                              logic::OBSERVATION_PAYLOAD_BYTES))
+        return false;
+    std::memcpy(&payload, record.payload, sizeof(payload));
+    bucket   = record.header.bucket;
+    sequence = record.header.sequence;
+    return logic::observation_payload_valid(payload, bucket);
+}
+
+void flash_index_stop_observation_record(const FlashJournalRecord& record, uint16_t slot) {
+    const auto& h = record.header;
+    if (h.magic != logic::HISTORY_JOURNAL_MAGIC || h.commit != logic::HISTORY_JOURNAL_COMMITTED ||
+        h.source != static_cast<uint8_t>(logic::HistoryJournalSource::Checkup) ||
+        h.catalog_fp != logic::observation_fingerprint())
+        return;
+    // A committed current-format record might have been a reset. Refusing its damaged bytes
+    // cannot establish that no reset occurred; keep completed restoration unavailable instead.
+    if (!logic::observation_header_matches(h) ||
+        h.crc !=
+            logic::history_journal_crc_bytes(h, record.payload, logic::OBSERVATION_PAYLOAD_BYTES)) {
+        stop_observation_flash_index_incomplete();
+        return;
+    }
+    logic::ObservationHourlyPayload payload;
+    std::memcpy(&payload, record.payload, sizeof(payload));
+    stop_observation_flash_index(h.bucket, h.sequence, slot, payload);
+}
+
 // Pass 1 finds the newest committed record and each source's latest bucket. Pass 2 walks backwards
 // from that physical head and remembers only slots inside the source's last 24-hour window; the
 // checkup source keeps up to CHECKUP_JOURNAL_INDEX_CAP candidate hours, because a revision
@@ -1972,6 +2018,7 @@ bool flash_journal_scan() {
     size_t valid_records = 0;
     size_t bad_records = 0;
     flash_manifest_cache_reset();
+    stop_observation_flash_index_reset();
     for (size_t src = 0; src < kJournalSources; src++) {
         s_flash_last_bucket[src] = INT64_MIN;
         s_flash_newest_bucket[src] = INT64_MIN;
@@ -1993,6 +2040,7 @@ bool flash_journal_scan() {
             const uint8_t* raw = s_flash_sector + local * logic::HISTORY_JOURNAL_SLOT_BYTES;
             FlashJournalRecord r;
             std::memcpy(&r, raw, sizeof(r));
+            flash_index_stop_observation_record(r, static_cast<uint16_t>(slot));
             if (!flash_record_physically_valid(r)) {
                 if (r.header.magic == logic::HISTORY_JOURNAL_MAGIC &&
                     r.header.commit == logic::HISTORY_JOURNAL_COMMITTED &&
@@ -2378,6 +2426,33 @@ bool flash_build_next_checkup_record(FlashJournalRecord& out, TickType_t wait_ti
     return true;
 }
 
+bool flash_build_next_stop_observation(FlashJournalRecord& out) {
+    logic::ObservationHourlyPayload payload;
+    int64_t                         bucket = INT64_MIN;
+    if (!stop_observation_flash_next(flash_read_stop_observation, bucket, payload)) return false;
+    std::memset(&out, 0xff, sizeof(out));
+    auto& h       = out.header;
+    h.magic       = logic::HISTORY_JOURNAL_MAGIC;
+    h.version     = logic::HISTORY_JOURNAL_VERSION;
+    h.source      = static_cast<uint8_t>(logic::HistoryJournalSource::Checkup);
+    h.flags       = 0;
+    h.catalog_fp  = logic::observation_fingerprint();
+    h.crc         = 0;
+    h.commit      = logic::HISTORY_JOURNAL_ERASED;
+    h.value_count = logic::OBSERVATION_WORDS;
+    h.slot_bytes  = logic::HISTORY_JOURNAL_SLOT_BYTES;
+    h.sequence    = s_flash_next_sequence;
+    h.bucket      = bucket;
+    h.dt_s        = logic::CHECKUP_DT_S;
+    h.rings[0]    = TREND_COUNT;
+    h.rings[1]    = HOMEHUB_HISTORY_COUNT;
+    h.rings[2]    = ENV3_HISTORY_COUNT;
+    h.reserved    = 0xffff;
+    logic::observation_encode(payload, out.payload);
+    h.crc = logic::history_journal_crc_bytes(h, out.payload, logic::OBSERVATION_PAYLOAD_BYTES);
+    return true;
+}
+
 // One attempt to append `r`. `slot` is the slot the attempt targeted, whatever its outcome, so the
 // caller can account for a failure against it.
 esp_err_t flash_append_record_at(FlashJournalRecord& r, size_t& slot) {
@@ -2393,7 +2468,9 @@ esp_err_t flash_append_record_at(FlashJournalRecord& r, size_t& slot) {
                                 offset + offsetof(logic::HistoryJournalHeader, commit),
                                 &commit, sizeof(commit));
     }
-    FlashJournalRecord verify;
+    // Slot preparation has finished using the sector scratch. No caller retains a view of it
+    // through this transaction; `r` is the service's separate record.
+    auto&           verify    = *new (s_flash_sector) FlashJournalRecord;
     const esp_err_t read_e = flash_read_record(slot, verify);
     const bool committed = read_e == ESP_OK && flash_record_physically_valid(verify) &&
                            verify.header.sequence == r.header.sequence &&
@@ -2406,6 +2483,11 @@ esp_err_t flash_append_record_at(FlashJournalRecord& r, size_t& slot) {
     const size_t src = r.header.source;
     if (flash_is_manifest(r.header)) {
         if (!flash_manifest_cache_add(verify)) return ESP_ERR_INVALID_RESPONSE;
+    } else if (logic::observation_header_matches(verify.header)) {
+        logic::ObservationHourlyPayload payload;
+        std::memcpy(&payload, verify.payload, sizeof(payload));
+        stop_observation_flash_appended(verify.header.bucket, verify.header.sequence,
+                                        static_cast<uint16_t>(slot), payload);
     } else {
         // A re-appended checkup hour moves the cursor back on purpose: the later live hours are
         // appended again after it, so their newest copies stay in non-decreasing order.
@@ -2501,8 +2583,10 @@ esp_err_t flash_append_record(FlashJournalRecord& r) {
         // The ONLY place an ahead-of-the-clock episode ends: the source appended data again. A
         // manifest says nothing about the cursor, and a "no longer ahead" observation must not
         // end it either (see s_flash_ahead_logged).
-        if (!flash_is_manifest(r.header)) s_flash_ahead_logged[r.header.source] = false;
+        if (!flash_is_manifest(r.header) && !logic::observation_header_matches(r.header))
+            s_flash_ahead_logged[r.header.source] = false;
     } else {
+        if (logic::observation_header_matches(r.header)) stop_observation_flash_failed();
         flash_note_append_failure(slot, e, r.header);
     }
     return e;
@@ -2541,6 +2625,7 @@ void flash_note_restore_ahead(size_t src_i, int64_t newest, int64_t wall_bucket)
 // The next record of source `src_i` for the journal service, or false. A cursor that is ahead of
 // the source's clock yields false and one report (flash_note_cursor_ahead) — no rewind, no walk.
 bool flash_build_for_service(size_t src_i, FlashJournalRecord& r, TickType_t wait_ticks) {
+    if (src_i == kStopObservationSource) return flash_build_next_stop_observation(r);
     FutureCursorNote note;
     const bool       built =
         src_i == static_cast<size_t>(logic::HistoryJournalSource::Checkup)
@@ -2607,11 +2692,14 @@ static void history_restore_checkup_flash() {
 // whose indexed window lies beyond the wall bucket is restored from nothing (the splice refuses it)
 // and reported once; it is never re-indexed or rewritten.
 void history_service_flash_restore() {
+    // Expiration belongs to the reducer owner and must precede flash -> observation locking.
+    checkup_stop_context_expire(esp_timer_get_time());
     if (!s_flash_mtx || !time_synced()) return;
     // Resets and factory forget mutate the same endpoints/index. Keep their snapshot, record
     // selection and final splice in one nonblocking flash transaction (flash -> history).
     Lock flash_lk(s_flash_mtx, 0);
     if (!flash_lk.acquired() || s_flash_forgotten.load() || !s_flash_scan_ok) return;
+    stop_observation_flash_service(flash_read_stop_observation);
     history_restore_checkup_flash();
     if (s_flash_restore_done) return;
     if (s_flash_restore_ring >= kTotalRings) { s_flash_restore_done = true; return; }
@@ -2721,6 +2809,9 @@ static size_t history_flash_service_journal(size_t max_records, TickType_t wait_
     if (!flash_lk.acquired()) return 0;
     // Read all mutable restore state under its owner lock, including a concurrent factory forget.
     if (s_flash_forgotten.load() || !s_flash_scan_ok || !s_flash_restore_done) return 0;
+    // The shutdown drain can be the first flash service after source confirmation/seal. Settle
+    // this independent archive before asking its producer for a record, too.
+    stop_observation_flash_service(flash_read_stop_observation);
     // A failure episode that spent its abandon budget pauses the whole journal (the cursor is one
     // shared position): one attempt per HISTORY_JOURNAL_PAUSED_RETRY_S, none in between.
     if (!logic::history_journal_retry_due(s_flash_fail_paused, esp_timer_get_time(),
@@ -2730,8 +2821,8 @@ static size_t history_flash_service_journal(size_t max_records, TickType_t wait_
     size_t written = 0;
     while (written < max_records) {
         bool appended = false;
-        for (size_t try_src = 0; try_src < kJournalSources; try_src++) {
-            const size_t src_i = (s_flash_service_source + try_src) % kJournalSources;
+        for (size_t try_src = 0; try_src < kJournalServiceSources; try_src++) {
+            const size_t src_i = (s_flash_service_source + try_src) % kJournalServiceSources;
             // Profile detection can legitimately take minutes while X10A is unavailable. Keep the
             // independent trend sources durable during that wait, but never append a diagnostic
             // record ahead of its one-shot restore or it could become the apparent journal head.
@@ -2764,9 +2855,13 @@ static size_t history_flash_service_journal(size_t max_records, TickType_t wait_
                 break;
             }
             if (flash_append_record(r) != ESP_OK) return written;
+            // Rebuild after the append/readback frames have returned. Nesting flash reads inside
+            // the append transaction would spend the small shutdown tasks' stack reserve twice.
+            if (src_i == kStopObservationSource)
+                stop_observation_flash_service(flash_read_stop_observation);
             written++;
             appended = true;
-            s_flash_service_source = (src_i + 1) % kJournalSources;
+            s_flash_service_source = (src_i + 1) % kJournalServiceSources;
             break;
         }
         if (!appended) break;
@@ -2801,6 +2896,7 @@ void history_flash_save() {
 // Erasing all 4 MiB costs one cycle per sector and is deliberately reserved for this explicit action.
 bool history_flash_forget() {
     s_flash_forgotten.store(true);
+    stop_observation_forget();
     // Readers are suppressed immediately, even if the subsequent physical erase fails. Retire
     // browser leases at that privacy boundary rather than letting them display the forgotten data.
     bump_history_epoch();

@@ -12,7 +12,7 @@ const temporary=fs.mkdtempSync(path.join(os.tmpdir(),"daikin-http-stream-runtime
 const commands=[];
 const paths={ common:"main/http_common.cpp",status:"main/http_status.cpp",dwell:"main/state_dwell.cpp",
   chunks:"main/logic/chunk_sink.hpp",json:"main/logic/json.hpp",identity:"main/logic/values_identity.hpp",
-  dwellLogic:"main/logic/state_dwell.hpp" };
+  dwellLogic:"main/logic/state_dwell.hpp",heartbeat:"main/logic/heartbeat.hpp" };
 const sources=Object.fromEntries(Object.entries(paths).map(([key,file])=>[key,fs.readFileSync(path.join(root,file),"utf8")]));
 const frozen=JSON.parse(fs.readFileSync(path.join(fixture,"legacy_handlers.json"),"utf8"));
 assert.equal(frozen.base_commit,"e99da78f38901cfc1421cec7f74e44dbbb632486");
@@ -141,12 +141,23 @@ const mutations=[
   {name:"inverted-config-unreadable",file:"status",scenario:"config_unreadable_status",
     before:'if (config_stored_blob_unreadable()) j += ",\\\"config_unreadable\\\":true";',
     after:'if (!config_stored_blob_unreadable()) j += ",\\\"config_unreadable\\\":true";'},
+  {name:"fabricated-unreadable-stop-counts",file:"heartbeat",scenario:"stop_context_absent",
+    before:/const bool\s+known = f\.confirmed && f\.has_readable;/,
+    after:"const bool known = true;"},
+  {name:"lost-covered-zero-stop-population",file:"heartbeat",scenario:"stop_context_covered_zero",
+    before:/const bool\s+known = f\.confirmed && f\.has_readable;/,
+    after:"const bool known = f.confirmed && f.has_readable && f.counters.witnessed_stops_recent_heating > 0;"},
+  {name:"omitted-stop-context",file:"status",scenario:"stop_context_populated",
+    before:/append_stop_context_json\(\s*j, stop_context_payload_fields\(checkup_stop_context_report\(\)\)\);/,
+    after:'j += "null";'},
+  {name:"unsupported-stop-count-leak",file:"heartbeat",scenario:"stop_context_populated",
+    before:"number(c.positive[k], known && supported);",after:"number(c.positive[k], known);"},
 ];
 try {
   const compiler=execute(cxx,["--version"]).stdout.trim();
   const baseline=execute(compile("production"),[]);
   const caseCount=Number(baseline.stdout.match(/^PASS total=(\d+)$/m)?.[1]);
-  assert.equal(caseCount,19);
+  assert.equal(caseCount,22);
   assert.equal(caseCount,[...baseline.stdout.matchAll(/^PASS (?!total=)\S+$/gm)].length);
   const wires=[]; const decoder=new TextDecoder("utf-8",{fatal:true});
   const configCases=new Map([
@@ -164,6 +175,12 @@ try {
     "room-status-absent",
   ]);
   const roomName='Example sensor Café "quote"\\line\n';
+  const stopWires=new Set(["stop-unconfirmed","stop-unreadable","stop-covered-zero",
+    "stop-populated","stop-populated-redacted"]);
+  const stopIds=["low_rps_above_main_target","request_withdrawal","defrost",
+    "dhw_transition","route_mode_transition"];
+  const stopCountKeys=["witnessed_stops_recent_heating","unclassified_stops","unknown_stops",
+    "partial_stops","censored_stops","target_changed","time_overflow","saturated"];
   for(const line of baseline.stdout.trim().split("\n")) {
     if(!line.startsWith("WIRE ")) {console.log(line);continue;}
     const [,name,type,hex]=line.match(/^WIRE (\S+) (json|text) ([0-9a-f]*)$/)||[];
@@ -175,6 +192,58 @@ try {
       assert.equal(doc.wifi.ssid,'Café "quoted"\\line\n'); assert.equal(doc.wifi.rssi,-42);
       assert.equal(doc.sys.stack_min_free_bytes.httpd,null);
       assert.equal(Object.hasOwn(doc.sys,"config_unreadable"),false);
+    }
+    if(stopWires.has(name)) {
+      const cycling=doc.health.checks.find(check=>check.id==="cycling");
+      assert.ok(cycling,`${name}: retain the existing cycling row`);
+      assert.equal(doc.health.checks.length,8,`${name}: no ninth check row`);
+      assert.equal(cycling.verdict,"unavailable");
+      for(const key of ["starts","mean_run_s","space_runs","space_mean_run_s"])
+        assert.equal(cycling[key],null,`${name}: stop observations cannot fabricate ${key}`);
+      const s=cycling.stop_context;
+      assert.equal(s.denominator,"witnessed_stops_recent_heating");
+      assert.equal(s.window_s,30);assert.equal(s.max_gap_s,15);
+      assert.equal(s.low_rps,22);assert.equal(s.above_main_target_k,2);
+      assert.deepEqual(Object.keys(s.categories),stopIds);
+      assert.ok(Buffer.byteLength(JSON.stringify(s))<=2048,`${name}: stop object must stay bounded`);
+      assert.ok(text.includes('"stop_context":'+JSON.stringify(s)),`${name}: stop JSON must be compact`);
+      if(name==="stop-unconfirmed"||name==="stop-unreadable") {
+        const confirmed=name==="stop-unreadable";
+        assert.equal(s.confirmed,confirmed);
+        assert.equal(s.capability_mask,confirmed?31:null);
+        assert.equal(s.readable_s,confirmed?0:null);
+        assert.equal(s.observed_hours,confirmed?0:null);
+        assert.equal(s.dropped,confirmed?0:null);
+        for(const key of stopCountKeys) assert.equal(s[key],null,`${name}/${key}`);
+        for(const category of Object.values(s.categories))
+          assert.deepEqual(category,{supported:confirmed?true:null,positive:null,evaluable:null,complete:null});
+        assert.equal(s.pending,false);assert.equal(s.dated,false);assert.equal(s.coverage_partial,true);
+        assert.equal(s.restore_pending,true);assert.equal(s.persistence_pending,false);
+      } else if(name==="stop-covered-zero") {
+        assert.equal(s.confirmed,true);assert.equal(s.capability_mask,31);
+        assert.equal(s.readable_s,37);assert.equal(s.observed_hours,1);assert.equal(s.dropped,0);
+        for(const key of stopCountKeys) assert.equal(s[key],key==="saturated"?false:0,`${name}/${key}`);
+        for(const category of Object.values(s.categories))
+          assert.deepEqual(category,{supported:true,positive:0,evaluable:0,complete:0});
+        assert.equal(s.pending,false);assert.equal(s.dated,true);assert.equal(s.coverage_partial,false);
+        assert.equal(s.restore_pending,false);assert.equal(s.persistence_pending,false);
+      } else {
+        assert.equal(s.confirmed,true);assert.equal(s.capability_mask,27);
+        assert.equal(s.readable_s,3600);assert.equal(s.observed_hours,2);assert.equal(s.dropped,9);
+        assert.deepEqual(stopCountKeys.map(key=>s[key]),[7,1,2,3,2,1,0,true]);
+        assert.deepEqual(s.categories,{
+          low_rps_above_main_target:{supported:true,positive:3,evaluable:6,complete:4},
+          request_withdrawal:{supported:true,positive:4,evaluable:7,complete:5},
+          defrost:{supported:false,positive:null,evaluable:null,complete:null},
+          dhw_transition:{supported:true,positive:2,evaluable:5,complete:3},
+          route_mode_transition:{supported:true,positive:3,evaluable:6,complete:4},
+        });
+        assert.ok(Object.values(s.categories).reduce((n,c)=>n+(c.positive??0),0)>
+          s.witnessed_stops_recent_heating,"positive observations overlap without normalization");
+        assert.equal(s.pending,true);assert.equal(s.dated,false);assert.equal(s.coverage_partial,true);
+        assert.equal(s.restore_pending,false);assert.equal(s.persistence_pending,true);
+      }
+      stopWires.delete(name);
     }
     if(configCases.has(name)) {
       const expected=configCases.get(name);
@@ -255,6 +324,7 @@ try {
   }
   assert.equal(configCases.size,0,"all plain/redacted stored and absent configuration cases must run");
   assert.equal(roomWires.size,0,"all room-history and room-label wire oracles must run");
+  assert.equal(stopWires.size,0,"all unknown, covered-zero and populated stop-context wire oracles must run");
   const controls=[];
   if(!process.argv.includes("--no-mutations")) for(const mutation of mutations) {
     const result=execute(compile(mutation.name,mutation),[mutation.scenario],false);

@@ -1,4 +1,5 @@
 set(UI_LOCALE_CODES de es fr it pl cs uk zh ja nb sv fi)
+set(UI_LOCALE_BUNDLE_GZIP "${CMAKE_CURRENT_BINARY_DIR}/locale-bundle.js.gz")
 set(UI_LOCALE_GZIP_FILES "")
 foreach(locale IN LISTS UI_LOCALE_CODES)
     list(APPEND UI_LOCALE_GZIP_FILES "${CMAKE_CURRENT_BINARY_DIR}/locale-${locale}.js.gz")
@@ -20,6 +21,7 @@ idf_component_register(
         "env3.cpp"
         "history.cpp"
         "checkup.cpp"
+        "stop_observation_store.cpp"
         "state_dwell.cpp"
         "http_server.cpp"
         "http_common.cpp"
@@ -49,7 +51,7 @@ idf_component_register(
         "${CMAKE_CURRENT_BINARY_DIR}/index.html.gz"
         "${CMAKE_CURRENT_BINARY_DIR}/setup.html.gz"
         "${CMAKE_CURRENT_BINARY_DIR}/mcp.html.gz"
-        ${UI_LOCALE_GZIP_FILES}
+        "${UI_LOCALE_BUNDLE_GZIP}"
         "${CMAKE_CURRENT_BINARY_DIR}/favicon.ico.gz"
         "${CMAKE_CURRENT_SOURCE_DIR}/www/heat_pump_icon.png"
     REQUIRES
@@ -248,14 +250,15 @@ add_custom_command(
 add_custom_target(gen_index_gz DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/index.html.gz")
 add_dependencies(${COMPONENT_LIB} gen_index_gz)
 
-# Non-English dashboard catalogs are device-local, separately compressed assets. Keeping them out
-# of index.html preserves the UI_GZIP_MAX_BYTES single-response contract while /locale.js selects one
-# asset by its query parameter. Each file is still linked into the signed application image; no
-# network service participates in localization. A separate tight cap prevents a catalog from
-# quietly becoming another large response even though it is served straight from flash.
-# Reuse the dashboard's pinned, lossless encoder to retain signed-image headroom in the fixed slots.
+# Keep every individual source producer and its tight quality cap. Only the joint offline bundle
+# is embedded: it registers the same catalogs synchronously through the existing /locale.js lease.
+# The startup HTML and its delivery budget stay independent; no external service supplies code.
 set(UI_LOCALE_GZIP_MAX_BYTES 32768)
+set(UI_LOCALE_BUNDLE_MAX_BYTES 289792)
+set(UI_LOCALE_BUNDLE_PRODUCER "${UI_ZOPFLI_ROOT}/build_locale_bundle.py")
+set(UI_LOCALE_DECODER_ROOT "${UI_ZOPFLI_ROOT}/vendor/lzma-js")
 set(UI_LOCALE_OUTPUTS "")
+set(UI_LOCALE_SOURCES "")
 foreach(locale IN LISTS UI_LOCALE_CODES)
     set(locale_src "${CMAKE_CURRENT_SOURCE_DIR}/www/locales/${locale}.js")
     set(locale_gz "${CMAKE_CURRENT_BINARY_DIR}/locale-${locale}.js.gz")
@@ -274,8 +277,28 @@ foreach(locale IN LISTS UI_LOCALE_CODES)
         COMMENT "Minifying and gzipping ${locale} UI locale"
         VERBATIM)
     list(APPEND UI_LOCALE_OUTPUTS "${locale_gz}")
+    list(APPEND UI_LOCALE_SOURCES "${locale_src}")
 endforeach()
-add_custom_target(gen_locale_gz DEPENDS ${UI_LOCALE_OUTPUTS})
+add_custom_command(
+    OUTPUT "${UI_LOCALE_BUNDLE_GZIP}"
+    COMMAND ${PYTHON} "${UI_LOCALE_BUNDLE_PRODUCER}"
+            --locale-dir "${CMAKE_CURRENT_SOURCE_DIR}/www/locales"
+            --locales ${UI_LOCALE_CODES}
+            --output "${UI_LOCALE_BUNDLE_GZIP}"
+            --source-max-gzip-bytes ${UI_LOCALE_GZIP_MAX_BYTES}
+            --max-gzip-bytes ${UI_LOCALE_BUNDLE_MAX_BYTES}
+    DEPENDS ${UI_LOCALE_OUTPUTS} ${UI_LOCALE_SOURCES} "${UI_LOCALE_BUNDLE_PRODUCER}"
+            "${UI_MINIFIER}" ${UI_MINIFIER_VENDOR}
+            "${UI_LOCALE_DECODER_ROOT}/UPSTREAM.json"
+            "${UI_LOCALE_DECODER_ROOT}/LICENSE"
+            "${UI_LOCALE_DECODER_ROOT}/lzma-d.js"
+            "${UI_LOCALE_DECODER_ROOT}/lzma-d-min.js"
+            "${UI_ZOPFLI_ROOT}/zopfli_gzip.py"
+            "${UI_ZOPFLI_ROOT}/zopfli_gzip.c"
+            "${UI_ZOPFLI_ROOT}/vendor/zopfli/UPSTREAM.json" ${UI_ZOPFLI_SOURCES}
+    COMMENT "Packing offline UI locales (limit: ${UI_LOCALE_BUNDLE_MAX_BYTES} bytes)"
+    VERBATIM)
+add_custom_target(gen_locale_gz DEPENDS ${UI_LOCALE_OUTPUTS} "${UI_LOCALE_BUNDLE_GZIP}")
 add_dependencies(${COMPONENT_LIB} gen_locale_gz)
 
 # Minify the captive portal with the same offline, syntax-preserving dashboard tool.

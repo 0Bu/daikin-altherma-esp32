@@ -1,4 +1,4 @@
-// translation-source: b5d29da273c417b207489763facc3fda04530140b4b0389affcd7643d701cd08
+// translation-source: 3e8092cf0e419496e78d337338f27af53fbda73918ad45f0bbe0970b83ebeddc
 I18N.it = localeValues([
   /* sys.nodata */ "Nessun dato",
   /* sys.unreachable */ "Non raggiungibile",
@@ -223,6 +223,16 @@ I18N.it = localeValues([
   /* check.cycling_cooling */ (n) => `raffrescamento: ${n} ${n === 1 ? "escluso" : "esclusi"}`,
   /* check.cycling_censored */ (n) => `${n} ${n === 1 ? "non classificato" : "non classificati"}`,
   /* check.cycling_causes */ "transizione|riavvio/registro|avvio non osservato",
+  /* check.stop.title */ "Contesto degli arresti",
+  /* check.stop.population */ (n) => `${n} arresti osservati dopo riscaldamento recente`,
+  /* check.stop.coverage */ (d, h) => `Tempo compressore leggibile ${d} · ${h} blocchi orari`,
+  /* check.stop.categories */ "bassa velocità + scarto dal target principale|ritiro richiesta unità interna|sbrinamento attivo|transizione acqua calda|cambio circuito/modalità",
+  /* check.stop.counts */ "positivi / valutabili / completi",
+  /* check.stop.other */ "non classificati|sconosciuti|parziali|interrotti|target cambiato|overflow temporale",
+  /* check.stop.loss */ (n) => `Avvisi di perdita di archiviazione ${n}`,
+  /* check.stop.states */ "Fonte non confermata|Osservazione datata|Osservazione senza data|Copertura di 24 ore incompleta|Ripristino ore salvate in attesa di conferma orologio/fonte|Osservazioni concluse in attesa di salvataggio|Un arresto attende campioni successivi|Contatori saturi: limiti inferiori|non supportato|Nessuna popolazione di arresti con dati leggibili finora.",
+  /* check.stop.rule */ "Finestra provvisoria del progetto: ±30 s inclusi, nessun intervallo di campionamento >15 s. Durante il riscaldamento confermato: 0 < velocità del compressore ≤22 giri/s, temperatura di mandata R1T riportata prima del riscaldatore di supporto ≥target riportato della zona principale +2 K, target stabile per 30 s.",
+  /* check.stop.limits */ "Categorie e qualificatori si sovrappongono sugli stessi arresti conservati. Valutabile significa positivo o finestra campionata completa; solo completa consente un risultato negativo nei campioni. Il polling non esclude segnali tra campioni. R1T è la temperatura di mandata riportata prima del riscaldatore elettrico ausiliario. Lo scarto dal target riportato della zona principale è una differenza osservata, non una sovraelongazione regolata misurata. Non stabilisce la causa di arresto, la modulazione minima o una richiesta del termostato esterno.",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min ${min} °C · media ${mean} °C`,
   /* check.min */ (m) => `${m} min`,

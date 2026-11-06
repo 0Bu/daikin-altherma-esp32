@@ -118,6 +118,17 @@ open(p, 'w').write(s)
 PY
 run_case "model entry without de is caught" 1 "MODEL_DESCRIPTIONS.zorblatt"
 
+echo "== 4c. external German copy must be reachable through the shipped selector =="
+reset
+python3 - "$WORK/main/www/js/descriptions.js" <<'PY'
+import sys
+p = sys.argv[1]; s = open(p).read()
+old = 'return LANG === "en" ? null : MODEL_DESCRIPTION_I18N[LANG]?.[id] || null;'
+assert s.count(old) == 1
+open(p, 'w').write(s.replace(old, 'return null;', 1))
+PY
+run_case "unreachable external German model copy is caught" 1 "D004" "MODEL_DESCRIPTIONS.health_fault"
+
 echo "== 5. a ledger line that no longer suppresses anything =="
 reset
 printf 'D002 /no such pattern ever/i\n' >> "$WORK/exc.txt"

@@ -17,6 +17,8 @@ using SemaphoreHandle_t = HostMutex*;
 namespace sdk {
 inline int64_t   now_us = 1000000;
 inline HostMutex mutex;
+inline HostMutex additional_mutexes[3];
+inline unsigned  mutex_count = 0;
 inline unsigned  takes = 0, gives = 0;
 inline void (*before_take)() = nullptr;
 inline void (*shutdown)()    = nullptr;
@@ -29,8 +31,14 @@ inline esp_err_t   esp_register_shutdown_handler(void (*fn)()) {
     return ESP_OK;
 }
 inline SemaphoreHandle_t xSemaphoreCreateMutex() {
-    sdk::mutex = {};
-    return &sdk::mutex;
+    if (sdk::mutex_count++ == 0) {
+        sdk::mutex = {};
+        return &sdk::mutex;
+    }
+    if (sdk::mutex_count > 4) throw std::runtime_error("modeled mutex pool exhausted");
+    auto& mutex = sdk::additional_mutexes[sdk::mutex_count - 2];
+    mutex       = {};
+    return &mutex;
 }
 inline BaseType_t xSemaphoreTake(SemaphoreHandle_t s, TickType_t wait) {
     if (sdk::before_take) {

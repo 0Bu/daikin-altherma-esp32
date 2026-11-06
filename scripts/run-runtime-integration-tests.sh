@@ -95,6 +95,7 @@ node test/test_src_runtime.mjs
 python3 test/poll_runtime/run.py
 # The complete diagnosis adapter rejects samples crossing a consent transition.
 python3 test/checkup_runtime/run.py
+python3 test/stop_observation_runtime/run.py
 python3 test/startup_runtime/run.py
 # The bounded retirement journal executes its production NVS adapter and failure controls.
 python3 test/mqtt_retirement_store/run.py

@@ -41,4 +41,5 @@ trusted LAN ([security model](docs/SECURITY.md)).
 
 [MIT](LICENSE). Protocol and value definitions derived from
 [ESPAltherma](https://github.com/raomin/ESPAltherma) (MIT); see [third-party notices](THIRD_PARTY_NOTICES.md).
+Device-local language loading uses the MIT-licensed [LZMA-JS](https://github.com/LZMA-JS/LZMA-JS) decoder.
 No warranty; not affiliated with Daikin.

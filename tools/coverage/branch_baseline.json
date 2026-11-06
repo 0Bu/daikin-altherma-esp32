@@ -1270,6 +1270,364 @@
         "gcc-15-github-linux-ubuntu26": "9e496f0978bf32ce1ca965df3c94b8ca315d381e55e04910bb71899e02c0f4b2"
       },
       "validation_boundary": "All four compiler runs pass the pure C++ suite and executable-line floor. Clang completes the canonical entrypoint; GCC corrections use retained raw reports. AMD64 uses the exact compiler/gcov commands and the host checker because Python installation crashes under emulation. Containers do not establish authoritative hosted CI or device behavior."
+    },
+    {
+      "runner": "scripts/run-mock-tests.sh --coverage; unchanged checker with committed baseline references",
+      "base_commit": "086f5b2cc6def4fcf90b25c013764e18f2146415",
+      "scope": "Independent stop-context reducer, consumer schema, hourly journal helpers and heartbeat projection. Reachable validation, absence, clock, saturation and index guards are exercised; existing branch ratios and the 95-percent executable-line floor are preserved.",
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2)",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+        "gcc-15-github-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+      },
+      "architectures": {
+        "clang-17-darwin": "arm64",
+        "gcc-13-linux-ubuntu24": "aarch64",
+        "gcc-15-linux-ubuntu26": "aarch64",
+        "gcc-15-github-linux-ubuntu26": "x86_64"
+      },
+      "container_images": {
+        "gcc-13-linux-ubuntu24": "sha256:81893c71bb5e570088901f21def8684c25cd2a9020281bd01b843a7655edb18c",
+        "gcc-15-github-linux-ubuntu26": "sha256:9b56853ffad97b6c81d3707524a96205df27582fe0e0ec8dbd1fe189b28fdf14",
+        "gcc-15-linux-ubuntu26": "sha256:4acd0a343f2aca0bc022a78657ffd0dfa8379cd4810b88fad6442ecc638b5e27"
+      },
+      "sources": {
+        "main/logic/checkup.hpp": "40baa837d984c3d26502842c8bc58909cb1fb66fccef0ce1939f7a0260f0b6b5",
+        "main/logic/config_store.hpp": "844852f83e874d3817cfed5139989c8b38a17b891cec84d416bb8b1c69cbc224",
+        "main/logic/heartbeat.hpp": "9fd8e31d933e7bd19afd19316a148d7ea9cf29418b4ad443b0a69d3d8b109645",
+        "main/logic/history.hpp": "47d0de0d7ca531cdb8eb23a12e2f18d7f356abaef8c4198c5285e095d3110d27",
+        "main/logic/mqtt_retirement_store.hpp": "6d3cf00039f51a51d7fcf4449def9506417955ceade53d641cd729267b983814",
+        "main/logic/observation_hourly.hpp": "4157dea27310ca321fb38b3b486304bf2a20689b9a5e7494db12ca7e9e4fc40b",
+        "main/logic/stop_context.hpp": "fff136d9e135bf838fa2140dbba5e91d132d6bb70784be7de46bd0e98c51ceef",
+        "main/logic/stop_context_input.hpp": "976868eb2e8aa87c1fde6ee1a7317043c6365b17d8d766fc3335cc69407f7222"
+      },
+      "test_source_sha256": "1e64e659cc26a0819050c067beba9aa4b5573ff741d9ece383f265eb4a3942d5",
+      "measured_branch_counts": {
+        "clang-17-darwin": {
+          "main/logic/stop_context.hpp": {
+            "taken": 220,
+            "outcomes": 234
+          },
+          "main/logic/stop_context_input.hpp": {
+            "taken": 83,
+            "outcomes": 84
+          },
+          "main/logic/config_store.hpp": {
+            "taken": 317,
+            "outcomes": 490
+          },
+          "main/logic/checkup.hpp": {
+            "taken": 980,
+            "outcomes": 1063
+          },
+          "main/logic/history.hpp": {
+            "taken": 179,
+            "outcomes": 184
+          },
+          "main/logic/heartbeat.hpp": {
+            "taken": 260,
+            "outcomes": 434
+          },
+          "main/logic/observation_hourly.hpp": {
+            "taken": 109,
+            "outcomes": 110
+          },
+          "main/logic/mqtt_retirement_store.hpp": {
+            "taken": 62,
+            "outcomes": 62
+          }
+        },
+        "gcc-13-linux-ubuntu24": {
+          "main/logic/stop_context_input.hpp": {
+            "taken": 110,
+            "outcomes": 118
+          },
+          "main/logic/heartbeat.hpp": {
+            "taken": 313,
+            "outcomes": 512
+          },
+          "main/logic/stop_context.hpp": {
+            "taken": 235,
+            "outcomes": 238
+          },
+          "main/logic/observation_hourly.hpp": {
+            "taken": 119,
+            "outcomes": 120
+          },
+          "main/logic/history.hpp": {
+            "taken": 228,
+            "outcomes": 232
+          }
+        },
+        "gcc-15-github-linux-ubuntu26": {
+          "main/logic/stop_context_input.hpp": {
+            "taken": 110,
+            "outcomes": 118
+          },
+          "main/logic/heartbeat.hpp": {
+            "taken": 272,
+            "outcomes": 448
+          },
+          "main/logic/stop_context.hpp": {
+            "taken": 235,
+            "outcomes": 238
+          },
+          "main/logic/observation_hourly.hpp": {
+            "taken": 119,
+            "outcomes": 120
+          },
+          "main/logic/history.hpp": {
+            "taken": 226,
+            "outcomes": 230
+          }
+        },
+        "gcc-15-linux-ubuntu26": {
+          "main/logic/stop_context_input.hpp": {
+            "taken": 110,
+            "outcomes": 118
+          },
+          "main/logic/heartbeat.hpp": {
+            "taken": 313,
+            "outcomes": 512
+          },
+          "main/logic/stop_context.hpp": {
+            "taken": 235,
+            "outcomes": 238
+          },
+          "main/logic/observation_hourly.hpp": {
+            "taken": 119,
+            "outcomes": 120
+          },
+          "main/logic/history.hpp": {
+            "taken": 226,
+            "outcomes": 230
+          }
+        }
+      },
+      "measured_line_counts": {
+        "clang-17-darwin": {
+          "covered": 10805,
+          "executable": 10979
+        },
+        "gcc-13-linux-ubuntu24": {
+          "covered": 10294,
+          "executable": 10578
+        },
+        "gcc-15-github-linux-ubuntu26": {
+          "covered": 10286,
+          "executable": 10580
+        },
+        "gcc-15-linux-ubuntu26": {
+          "covered": 10290,
+          "executable": 10580
+        }
+      },
+      "raw_report_sha256": {
+        "clang-17-darwin": "f1f996352d89fed433d333f432ffc88de037a6afec5ceb7173e6cce014f3cef9",
+        "gcc-13-linux-ubuntu24": "5f777ccfd2e3e60aff69fc3392b23be0b4ca1c6a3749f82eae4c6c07ac09e23f",
+        "gcc-15-github-linux-ubuntu26": "50865c26e116339c53865c5448d09979ede9b613e85008c38dce3e71ef2a4707",
+        "gcc-15-linux-ubuntu26": "be0d8323270d6ffb192422a4b6e95224acaeef41a0d63fb936ec8fb5884c3bce"
+      },
+      "inventory_review": "Apple CRC call normal/unwind pairs disappear at config_store.hpp:317/424 and mqtt_retirement_store.hpp:54/67, with unchanged source and improved ratios. New collector calls emit all 12 checkup_operating_mode outcomes. Added numeric rejection cases cover history_parse_tenths upper-bound refusal. Raw committed-base versus current inventories were compared.",
+      "uncovered_outcomes": "Fixed fingerprint-zero fallbacks and compiler unwind edges remain untaken. Reducer guards also retain unreachable invalid-state alternatives: an unarmed known-off endpoint, a changed known route with neither endpoint DHW, and a missing stable-target timestamp after readable admission.",
+      "validation_boundary": "All four profiles are measured locally from identical immutable pure-source/test snapshots. GCC 13 uses the CI-pinned ESP-IDF v6.1 image; GCC 15 uses separate Ubuntu 26.04 ARM64 and AMD64 containers. AMD64 explicitly selects the hosted-candidate profile; it is not hosted CI proof. Authoritative GitHub CI must confirm before merge. No device behavior is established."
+    },
+    {
+      "runner": "scripts/run-mock-tests.sh --coverage; unchanged checker against fresh HEAD and HEAD^1 baseline exports",
+      "base_commit": "47619c0c5244d9228e3c821753dce18b372774ae",
+      "scope": "Clock-fence index helpers: explicit compact fence tags, identity-keyed highest sequence, pressure and incomplete-index guards. Only observation_hourly.hpp inventories change. All added measured outcomes are taken; the sole untaken fixed fingerprint fallback is unchanged. Existing branch ratios and the 95-percent executable-line floor are preserved.",
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2)",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+        "gcc-15-github-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+      },
+      "architectures": {
+        "clang-17-darwin": "arm64-apple-darwin27.2.0",
+        "gcc-13-linux-ubuntu24": "aarch64-linux-gnu",
+        "gcc-15-github-linux-ubuntu26": "x86_64-linux-gnu",
+        "gcc-15-linux-ubuntu26": "aarch64-linux-gnu"
+      },
+      "container_images": {
+        "gcc-13-linux-ubuntu24": "sha256:81893c71bb5e570088901f21def8684c25cd2a9020281bd01b843a7655edb18c",
+        "gcc-15-github-linux-ubuntu26": "sha256:9b56853ffad97b6c81d3707524a96205df27582fe0e0ec8dbd1fe189b28fdf14",
+        "gcc-15-linux-ubuntu26": "sha256:4acd0a343f2aca0bc022a78657ffd0dfa8379cd4810b88fad6442ecc638b5e27"
+      },
+      "sources": {
+        "main/logic/observation_hourly.hpp": "d199a6a1daac1d02d043a684c2813819c48bee636e2a659f29b5577c60b755bd"
+      },
+      "test_source_sha256": "a6c5033e4d27c37694faa1ae4bf99b5cd0b62c075621e4d222a6758f9151854e",
+      "measured_branch_counts": {
+        "clang-17-darwin": {
+          "main/logic/observation_hourly.hpp": {
+            "taken": 135,
+            "outcomes": 136
+          }
+        },
+        "gcc-13-linux-ubuntu24": {
+          "main/logic/observation_hourly.hpp": {
+            "taken": 153,
+            "outcomes": 154
+          }
+        },
+        "gcc-15-github-linux-ubuntu26": {
+          "main/logic/observation_hourly.hpp": {
+            "taken": 153,
+            "outcomes": 154
+          }
+        },
+        "gcc-15-linux-ubuntu26": {
+          "main/logic/observation_hourly.hpp": {
+            "taken": 153,
+            "outcomes": 154
+          }
+        }
+      },
+      "measured_line_counts": {
+        "clang-17-darwin": {
+          "covered": 10842,
+          "executable": 11016
+        },
+        "gcc-13-linux-ubuntu24": {
+          "covered": 10331,
+          "executable": 10615
+        },
+        "gcc-15-github-linux-ubuntu26": {
+          "covered": 10323,
+          "executable": 10617
+        },
+        "gcc-15-linux-ubuntu26": {
+          "covered": 10327,
+          "executable": 10617
+        }
+      },
+      "raw_report_sha256": {
+        "clang-17-darwin": "3b80e1a15bb019b1a063ad56210fa8bb04f820ab5ba351d57a33796e476c3e10",
+        "gcc-13-linux-ubuntu24": "f55e02b8fbec70298337dfc60ebb520b77a59b8caae88698580d0e20aa7b6710",
+        "gcc-15-github-linux-ubuntu26": "3803cddb3f5e49a07d782af0256fc7664e113df8219c387f454169cbee0659a2",
+        "gcc-15-linux-ubuntu26": "258ba24c9b220952e3143e55ebbaa0e37840749a8ca55eedb6ad2a56c57b6eb5"
+      },
+      "baseline_references": {
+        "HEAD": {
+          "commit": "47619c0c5244d9228e3c821753dce18b372774ae",
+          "sha256": "9b11e199dae9443074a81825c28da6e9a24a4096f4e209752a0299326f59f520",
+          "query": [
+            "git",
+            "show",
+            "HEAD:tools/coverage/branch_baseline.json"
+          ]
+        },
+        "HEAD^1": {
+          "commit": "acd674874230b44548ab70c9c027d38f29f73563",
+          "sha256": "9b11e199dae9443074a81825c28da6e9a24a4096f4e209752a0299326f59f520",
+          "query": [
+            "git",
+            "show",
+            "HEAD^1:tools/coverage/branch_baseline.json"
+          ]
+        }
+      },
+      "hosted_confirmation": "GCC 15 linux/amd64 is local Docker hosted-candidate evidence with the exact hosted profile selected. No GitHub Actions execution is claimed; authoritative CI confirmation remains required.",
+      "validation_boundary": "Four independent current-byte snapshots measured the same frozen pure headers/profiles/test translation unit. Exact-argument snapshot adapters return the freshly exported committed baseline bytes only. The unchanged checker and 95-percent floor are retained. Store/runtime integration, target build, actual repository final invocation and device behavior are separate evidence."
+    },
+    {
+      "runner": "scripts/run-mock-tests.sh --coverage; unchanged checker against fresh HEAD and HEAD^1 baseline exports",
+      "base_commit": "4e2f79b496cec1d3f834a36ba92d0ac570db3692",
+      "scope": "Stop-input consumer method 2: exact canonical 0/1 flag tokens and fully consumed finite numeric tokens with sentinel/int16 bounds. New malformed fraction, prefix, embedded-NUL, NaN and bound checks; a direct legacy history upper-bound assertion preserves its prior ratchet after collector parser isolation. Only stop_context_input.hpp branch inventories change. All new functional outcomes are taken; existing fixed fingerprint and GCC caller exception edges remain visible. No exception, floor or prior ratio is weakened.",
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2)",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+        "gcc-15-github-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+      },
+      "architectures": {
+        "clang-17-darwin": "arm64-apple-darwin27.2.0",
+        "gcc-13-linux-ubuntu24": "aarch64-linux-gnu",
+        "gcc-15-github-linux-ubuntu26": "x86_64-linux-gnu",
+        "gcc-15-linux-ubuntu26": "aarch64-linux-gnu"
+      },
+      "container_images": {
+        "gcc-13-linux-ubuntu24": "sha256:81893c71bb5e570088901f21def8684c25cd2a9020281bd01b843a7655edb18c",
+        "gcc-15-github-linux-ubuntu26": "sha256:9b56853ffad97b6c81d3707524a96205df27582fe0e0ec8dbd1fe189b28fdf14",
+        "gcc-15-linux-ubuntu26": "sha256:4acd0a343f2aca0bc022a78657ffd0dfa8379cd4810b88fad6442ecc638b5e27"
+      },
+      "sources": {
+        "main/logic/stop_context_input.hpp": "9d286bb9402f5b4901da7415bcf5c554a8480b01e4c8255f472a52aa429fda61"
+      },
+      "test_source_sha256": "bb9e9f5ecac19b67e670f8b44010c2a48c3fb0a374177b0afa79daf4e52e5048",
+      "measured_branch_counts": {
+        "clang-17-darwin": {
+          "main/logic/stop_context_input.hpp": {
+            "taken": 97,
+            "outcomes": 98
+          }
+        },
+        "gcc-13-linux-ubuntu24": {
+          "main/logic/stop_context_input.hpp": {
+            "taken": 123,
+            "outcomes": 130
+          }
+        },
+        "gcc-15-github-linux-ubuntu26": {
+          "main/logic/stop_context_input.hpp": {
+            "taken": 123,
+            "outcomes": 130
+          }
+        },
+        "gcc-15-linux-ubuntu26": {
+          "main/logic/stop_context_input.hpp": {
+            "taken": 123,
+            "outcomes": 130
+          }
+        }
+      },
+      "measured_line_counts": {
+        "clang-17-darwin": {
+          "covered": 10854,
+          "executable": 11028
+        },
+        "gcc-13-linux-ubuntu24": {
+          "covered": 10342,
+          "executable": 10626
+        },
+        "gcc-15-github-linux-ubuntu26": {
+          "covered": 10334,
+          "executable": 10628
+        },
+        "gcc-15-linux-ubuntu26": {
+          "covered": 10338,
+          "executable": 10628
+        }
+      },
+      "raw_report_sha256": {
+        "clang-17-darwin": "097ce422215520f8ff1df67f420d3e3ef8b7785cc8b7bba09a261be40908a1ab",
+        "gcc-13-linux-ubuntu24": "403c019f8e9c6f8565fe4944a9136e09bd7b1f4dc5f7e1f6cb42655d67b38be4",
+        "gcc-15-github-linux-ubuntu26": "8fb21150da28014c79b4a5abb8acfb1368b70b5f4ae03bb58b7cf41b98816b56",
+        "gcc-15-linux-ubuntu26": "532d9cf10cfaaf2f01a0264f365f6234618dac0ae502117b3bb6eefee6c94026"
+      },
+      "baseline_references": {
+        "HEAD": {
+          "commit": "4e2f79b496cec1d3f834a36ba92d0ac570db3692",
+          "sha256": "13635c0e8ad65f9189290ac81f161e3125607ef1397d5bf4279afefdce9f6dcf",
+          "query": [
+            "git",
+            "show",
+            "HEAD:tools/coverage/branch_baseline.json"
+          ]
+        },
+        "HEAD^1": {
+          "commit": "f6bfaf9b60508500d7f15ec119d1542f4e4bd992",
+          "sha256": "13635c0e8ad65f9189290ac81f161e3125607ef1397d5bf4279afefdce9f6dcf",
+          "query": [
+            "git",
+            "show",
+            "HEAD^1:tools/coverage/branch_baseline.json"
+          ]
+        }
+      },
+      "hosted_confirmation": "GCC 15 linux/amd64 is local Docker hosted-candidate evidence with the exact hosted profile selected. No GitHub Actions execution is claimed; authoritative CI confirmation remains required.",
+      "validation_boundary": "Four independent current-byte snapshots measured the same frozen 168 pure headers/profiles/test inputs. Exact-argument snapshot adapters return freshly exported committed baseline bytes only. The unchanged checker and 95-percent floor are retained. Store/runtime integration, target build, actual repository final invocation and device behavior are separate evidence."
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
@@ -1308,8 +1666,8 @@
         "taken": 6
       },
       "main/logic/checkup.hpp": {
-        "taken": 968,
-        "outcomes": 1051
+        "taken": 980,
+        "outcomes": 1063
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 331,
@@ -1328,8 +1686,8 @@
         "taken": 261
       },
       "main/logic/config_store.hpp": {
-        "outcomes": 494,
-        "taken": 319
+        "taken": 317,
+        "outcomes": 490
       },
       "main/logic/config_transaction.hpp": {
         "outcomes": 114,
@@ -1408,8 +1766,8 @@
         "taken": 22
       },
       "main/logic/heartbeat.hpp": {
-        "taken": 211,
-        "outcomes": 384
+        "taken": 260,
+        "outcomes": 434
       },
       "main/logic/heating_curve_diagnosis.hpp": {
         "outcomes": 91,
@@ -1424,8 +1782,8 @@
         "taken": 14
       },
       "main/logic/history.hpp": {
-        "outcomes": 184,
-        "taken": 178
+        "taken": 179,
+        "outcomes": 184
       },
       "main/logic/history_persist.hpp": {
         "outcomes": 523,
@@ -1536,8 +1894,8 @@
         "outcomes": 40
       },
       "main/logic/mqtt_retirement_store.hpp": {
-        "taken": 64,
-        "outcomes": 66
+        "taken": 62,
+        "outcomes": 62
       },
       "main/logic/mqtt_uri.hpp": {
         "outcomes": 54,
@@ -1698,6 +2056,18 @@
       "main/logic/ota_upload.hpp": {
         "taken": 7,
         "outcomes": 8
+      },
+      "main/logic/stop_context.hpp": {
+        "taken": 220,
+        "outcomes": 234
+      },
+      "main/logic/stop_context_input.hpp": {
+        "taken": 97,
+        "outcomes": 98
+      },
+      "main/logic/observation_hourly.hpp": {
+        "taken": 135,
+        "outcomes": 136
       }
     },
     "gcc-13-linux-ubuntu24": {
@@ -1834,8 +2204,8 @@
         "taken": 24
       },
       "main/logic/heartbeat.hpp": {
-        "taken": 184,
-        "outcomes": 312
+        "taken": 313,
+        "outcomes": 512
       },
       "main/logic/heating_curve_diagnosis.hpp": {
         "outcomes": 109,
@@ -1850,8 +2220,8 @@
         "taken": 16
       },
       "main/logic/history.hpp": {
-        "outcomes": 232,
-        "taken": 227
+        "taken": 228,
+        "outcomes": 232
       },
       "main/logic/history_persist.hpp": {
         "outcomes": 612,
@@ -2124,6 +2494,18 @@
       "main/logic/ota_upload.hpp": {
         "taken": 8,
         "outcomes": 8
+      },
+      "main/logic/stop_context_input.hpp": {
+        "taken": 123,
+        "outcomes": 130
+      },
+      "main/logic/stop_context.hpp": {
+        "taken": 235,
+        "outcomes": 238
+      },
+      "main/logic/observation_hourly.hpp": {
+        "taken": 153,
+        "outcomes": 154
       }
     },
     "gcc-15-github-linux-ubuntu26": {
@@ -2260,8 +2642,8 @@
         "taken": 24
       },
       "main/logic/heartbeat.hpp": {
-        "taken": 143,
-        "outcomes": 248
+        "taken": 272,
+        "outcomes": 448
       },
       "main/logic/heating_curve_diagnosis.hpp": {
         "outcomes": 109,
@@ -2276,8 +2658,8 @@
         "taken": 16
       },
       "main/logic/history.hpp": {
-        "outcomes": 230,
-        "taken": 225
+        "taken": 226,
+        "outcomes": 230
       },
       "main/logic/history_persist.hpp": {
         "outcomes": 610,
@@ -2550,6 +2932,18 @@
       "main/logic/ota_upload.hpp": {
         "taken": 8,
         "outcomes": 8
+      },
+      "main/logic/stop_context_input.hpp": {
+        "taken": 123,
+        "outcomes": 130
+      },
+      "main/logic/stop_context.hpp": {
+        "taken": 235,
+        "outcomes": 238
+      },
+      "main/logic/observation_hourly.hpp": {
+        "taken": 153,
+        "outcomes": 154
       }
     },
     "gcc-15-linux-ubuntu26": {
@@ -2686,8 +3080,8 @@
         "taken": 24
       },
       "main/logic/heartbeat.hpp": {
-        "taken": 184,
-        "outcomes": 312
+        "taken": 313,
+        "outcomes": 512
       },
       "main/logic/heating_curve_diagnosis.hpp": {
         "outcomes": 109,
@@ -2702,8 +3096,8 @@
         "taken": 16
       },
       "main/logic/history.hpp": {
-        "outcomes": 230,
-        "taken": 225
+        "taken": 226,
+        "outcomes": 230
       },
       "main/logic/history_persist.hpp": {
         "outcomes": 610,
@@ -2976,6 +3370,18 @@
       "main/logic/ota_upload.hpp": {
         "taken": 8,
         "outcomes": 8
+      },
+      "main/logic/stop_context_input.hpp": {
+        "taken": 123,
+        "outcomes": 130
+      },
+      "main/logic/stop_context.hpp": {
+        "taken": 235,
+        "outcomes": 238
+      },
+      "main/logic/observation_hourly.hpp": {
+        "taken": 153,
+        "outcomes": 154
       }
     }
   },

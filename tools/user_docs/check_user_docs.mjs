@@ -18,7 +18,8 @@ import fs from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
 import { readAppSource } from "../ui/read_app_source.mjs";
-import { auditEvidenceContract } from "../diagnostic_evidence/evidence_contract.mjs";
+import { germanModelCopy } from "../ui/model_copy.mjs";
+import { auditEvidenceContract, STOP_CONTEXT_SOURCE_FILES } from "../diagnostic_evidence/evidence_contract.mjs";
 import { auditEnglishDocumentation } from "./english_docs.mjs";
 
 let root = process.cwd();
@@ -72,6 +73,9 @@ catch (error) { die(2, `cannot assemble ${appArg}: ${error.message}`); }
 const model = loadObject(source, "const MODEL_DESCRIPTIONS = {", "MODEL_DESCRIPTIONS");
 const rowMap = loadObject(source, "const CHECKUP_ROW = {", "CHECKUP_ROW");
 if (!model || typeof model !== "object" || Array.isArray(model)) die(2, "MODEL_DESCRIPTIONS is not an object");
+try {
+  for (const [id, copy] of Object.entries(germanModelCopy(source, app, model))) model[id].de = copy;
+} catch (error) { die(2, `German model copy does not evaluate: ${error.message}`); }
 if (!rowMap || typeof rowMap !== "object" || Array.isArray(rowMap)) die(2, "CHECKUP_ROW is not an object");
 const rowIds = Object.keys(rowMap);
 if (rowIds.length === 0) die(2, "CHECKUP_ROW is empty — refusing to pass vacuously");
@@ -153,7 +157,7 @@ for (const finding of auditEvidenceContract(evidence, rowIds, evidenceArg)) {
 for (const finding of auditEnglishDocumentation(root)) findings.push(finding);
 
 const fingerprint = crypto.createHash("sha256");
-for (const relative of ["main/logic/checkup.hpp", "main/checkup.cpp"]) {
+for (const relative of ["main/logic/checkup.hpp", "main/checkup.cpp", ...STOP_CONTEXT_SOURCE_FILES]) {
   fingerprint.update(`${relative}\0`);
   fingerprint.update(read(path.join(root, relative), relative));
   fingerprint.update("\0");

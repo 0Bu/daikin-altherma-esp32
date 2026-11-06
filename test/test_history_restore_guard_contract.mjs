@@ -287,7 +287,21 @@ assert.match(explicitReset, /s_source_fp = 0;/);
 assert.match(explicitReset, /s_model_fp = 0;/);
 const detect = body(checkup, "void checkup_reset_on_detect(");
 assert.match(detect, /s_source_confirmed = source_fp != 0 && fp != 0;/);
-assert.match(detect, /checkup_model_fingerprint\(profile_id, def::lookup_view\(profile_id\)\)/);
+// One immutable structural catalog view binds both the core identity and the independent stop
+// input plan. Inlining a second lookup here would no longer prove that both consume that view.
+const detectView = detect.match(/const auto ([A-Za-z_]\w*) = def::lookup_view\(profile_id\);/);
+assert.ok(detectView, "detection must resolve an immutable structural view for the selected profile");
+assert.equal(count(detect, /def::lookup_view\(/g), 1,
+  "core identity and stop-input planning must share exactly one catalog lookup");
+const coreFingerprint = `logic::checkup_model_fingerprint(profile_id, ${detectView[1]})`;
+const stopInputPlan = `logic::stop_context_input_plan(profile_id, ${detectView[1]})`;
+assert.ok(detect.indexOf(`const uint32_t fp = ${coreFingerprint};`) > detectView.index &&
+  detect.indexOf(`const auto stop_inputs = ${stopInputPlan};`) > detectView.index,
+  "both core fingerprint and stop-input plan must consume the same resolved structural view");
+assert.match(detect, /s_model_fp = fp;/,
+  "the core identity derived from the shared view must become the active model fingerprint");
+assert.match(detect, /s_stop_inputs = stop_inputs;/,
+  "the source-bound plan derived from the shared view must become the active stop-input plan");
 assert.match(detect, /if \(s_source_confirmed && s_boot_handoff_valid/);
 assert.match(detect, /s_boot_handoff\.source_fp == source_fp/);
 assert.match(detect, /s_boot_handoff\.dhw_source_fp == s_dhw_source_fp/,

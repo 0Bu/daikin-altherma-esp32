@@ -31,7 +31,6 @@ struct DeadlineTimerState {
     StaticSemaphore_t   owner_mutex_storage{};
     SemaphoreHandle_t   owner_mutex = nullptr;
     StaticTask_t        watchdog_task_storage{};
-    StackType_t         watchdog_stack[kWatchdogStackBytes]{};
     TaskHandle_t        watchdog_task = nullptr;
     std::atomic<int>    socket{-1};
     std::atomic<bool>   fired{false};
@@ -43,6 +42,9 @@ struct DeadlineTimerState {
 };
 
 DeadlineTimerState s_deadline;
+// Keep the zero-initialized static stack out of the state containing socket{-1}; otherwise the
+// complete stack occupies initialized flash data as well as its unchanged internal RAM budget.
+StackType_t s_watchdog_stack[kWatchdogStackBytes]{};
 static_assert(std::atomic<int>::is_always_lock_free,
               "socket publication from the timer callback must remain lock-free");
 static_assert(std::atomic<bool>::is_always_lock_free,
@@ -117,7 +119,7 @@ bool http_deadline_init() noexcept {
 
     s_deadline.watchdog_task = xTaskCreateStatic(
         socket_deadline_watchdog_task, "http_abs_dl", kWatchdogStackBytes, nullptr,
-        TASK_PRIO_HTTP_DEADLINE, s_deadline.watchdog_stack, &s_deadline.watchdog_task_storage);
+        TASK_PRIO_HTTP_DEADLINE, s_watchdog_stack, &s_deadline.watchdog_task_storage);
     if (!s_deadline.watchdog_task ||
         xSemaphoreTake(s_deadline.init_completion, kWatchdogInitWait) != pdTRUE ||
         !s_deadline.lwip_primed.load(std::memory_order_acquire)) {
