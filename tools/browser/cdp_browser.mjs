@@ -175,6 +175,24 @@ class CdpPage {
   clearDiagnostics() {
     this.diagnostics.length = 0;
   }
+
+  async nativeClick(x, y) {
+    for (const type of ["mousePressed", "mouseReleased"])
+      await this.send("Input.dispatchMouseEvent", { type, button: "left", clickCount: 1, x, y });
+  }
+
+  async nativeKey(type, key, code, keyCode) {
+    await this.send("Input.dispatchKeyEvent", { type, key, code,
+      windowsVirtualKeyCode: keyCode, nativeVirtualKeyCode: keyCode });
+  }
+
+  async bringToFront() {
+    await this.send("Page.bringToFront");
+  }
+
+  async focusEmulation(enabled) {
+    await this.send("Emulation.setFocusEmulationEnabled", { enabled });
+  }
 }
 
 async function connectSocket(url, signal) {

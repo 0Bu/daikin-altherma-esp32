@@ -1,0 +1,8 @@
+{
+  "name": "daikin-altherma-esp32-browser-tests",
+  "version": "0.0.0",
+  "private": true,
+  "dependencies": {
+    "playwright": "1.65.0"
+  }
+}

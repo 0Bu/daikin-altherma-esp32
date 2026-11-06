@@ -1794,6 +1794,35 @@ function replaceHistoryHtml(host, html) {
       .filter(node => !node.parentElement?.closest(".vhist"));
     const prior = roots(host), template = document.createElement("template");
     template.innerHTML = html;
+    // Retaining a chart's identity is insufficient in WebKit: moving it through a detached
+    // template still invalidates its painting ancestors. Scalar polls can update text in place.
+    // Preflight the complete tree before applying anything; structural changes keep the fallback.
+    const text = [];
+    // Card navigation owns group visibility after rendering; it is not source markup drift.
+    const attrs = node => [...node.attributes].filter(attr =>
+      attr.name !== "hidden" || !node.matches(".vgroup[data-dashboard-card]"));
+    const same = (a, b) => {
+      if (a.nodeType !== b.nodeType || a.nodeName !== b.nodeName) return false;
+      if (a.nodeType === 3) {
+        if (a.nodeValue !== b.nodeValue) text.push([a, b.nodeValue]);
+        return true;
+      }
+      if (a.nodeType !== 1) return a.isEqualNode(b);
+      if (a.classList.contains("vhist"))
+        return a._histMarkup === JSON.stringify([owner(b), b.outerHTML]);
+      const nextAttrs = attrs(b);
+      if (attrs(a).length !== nextAttrs.length ||
+          nextAttrs.some(attr => a.getAttribute(attr.name) !== attr.value)) return false;
+      return a.childNodes.length === b.childNodes.length &&
+        [...a.childNodes].every((node, index) => same(node, b.childNodes[index]));
+    };
+    const textOnly = host.childNodes && template.content.childNodes &&
+      host.childNodes.length === template.content.childNodes.length &&
+      [...host.childNodes].every((node, index) => same(node, template.content.childNodes[index]));
+    if (textOnly) {
+      for (const [node, value] of text) node.nodeValue = value;
+      return;
+    }
     const rebuilding = S.trendRebuilding;
     S.trendRebuilding = true;
     try {
