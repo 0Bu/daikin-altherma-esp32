@@ -1,4 +1,4 @@
-// translation-source: b2455d5250483500ac15ac7ba4513f04f45a9eb9fdb467b86046b0d4a22a3b85
+// translation-source: 0286e8b2aac2675f7d5984fc17943725eea029e8c7f6204a5644d06f4b79a8aa
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -1098,7 +1098,7 @@ DESCRIPTION_I18N.cs = descriptionValues([
   ["R4T je společná vratka do PHE; R1T−R4T je ΔT PHE, ne přímo otopných těles."], // 33
   ["Rychlost oběhu vody ve společném okruhu vytápění/chlazení a TUV."], // 34
   ["Tlak vody; rozsah závisí na modelu, při ≤1,0 bar použijte přesný návod."], // 35
-  ["Povel rychlosti oběhového čerpadla s obrácenou stupnicí: 0 = plná rychlost, 100 = stojí."], // 36
+  ["Obrácený povel X10A oběhovému čerpadlu: nezpracovaná 0 požaduje maximální výkon, 100 zastavení. Neměří otáčky (RPM) ani nepotvrzuje otáčení či průtok vody. Hlášený stav ON/OFF a měřený průtok posuzujte zvlášť, i při zastaveném kompresoru."], // 36
   ["Běh oběhového čerpadla nedokazuje přenos tepla; potvrďte jej průtokem."], // 37
   ["Stav čerpadla nakonfigurovaného solárního termického okruhu."], // 38
   ["Hlášená rychlost čerpadla pojmenovaného profilem."], // 39

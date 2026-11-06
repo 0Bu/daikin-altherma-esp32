@@ -25,7 +25,7 @@ function harness(source = production) {
     localStorage: { getItem: () => "en" }, document: { getElementById: node, documentElement: { lang: "en" } },
     esc: (s) => String(s ?? ""), displayUnit: (r) => r?.unit || "", displayValue: (r) => r?.value,
     displayReadingLabel: (s) => s, displayHomeHubLabel: (r) => r?.label || "" });
-  vm.runInContext(source + "\nthis.api = { liveData, DERIVED, INSPECT, inspFieldText, renderLive, setLang: (lang) => LANG = lang };", context);
+  vm.runInContext(source + "\nthis.api = { liveData, DERIVED, INSPECT, inspFieldText, renderLive, descFor, descriptionCopy, descBodyHtml, setLang: (lang) => LANG = lang };", context);
   // The production render path still executes; the unrelated sensor pill and open inspector have
   // their own lifecycle suites and need no DOM in this pump-specific class/pipe witness.
   vm.runInContext("renderEnv3Pill = () => {}; renderInspect = () => {};", context);
@@ -78,6 +78,23 @@ function motionContract(h) {
       `measured flow ${flow} controls the water trace independently`);
   }
 }
+function rawDescriptionContract(h, lang = "en") {
+  h.setLang(lang);
+  const raw = h.descFor("Water pump signal (0:max-100:stop)", { reg: 0x62, conv: 152 });
+  assert.ok(raw, `${lang}: the raw telemetry row needs its own explainer`);
+  assert.notEqual(raw, h.descFor("Water pump operation", { reg: 0x60 }),
+    "the raw command and reported operation are separate descriptions");
+  const html = h.descBodyHtml(raw, 100, h.descriptionCopy(raw));
+  assert.match(html, /0[\s\S]*100/, `${lang}: preserve the raw inverted endpoints`);
+  assert.match(html, /RPM/, `${lang}: explain the limit of the command as a speed measurement`);
+  assert.equal((html.match(/class="vdesc-p"/g) || []).length, 1,
+    `${lang}: no universal fast-pump or stopped-at-idle normal rule`);
+  if (lang === "en") {
+    assert.match(html, /raw 0 requests maximum effort and raw 100 requests stop/);
+    assert.match(html, /does not measure RPM or prove rotation or water flow/);
+    assert.match(html, /reported ON\/OFF and measured flow separately/);
+  }
+}
 const h = harness();
 stateContract(h);
 commandContract(h);
@@ -90,6 +107,7 @@ const unknownWords = { en: /unknown/, de: /unbekannt/, es: /desconocido/, fr: /i
   nb: /ukjent/, sv: /okänd/, fi: /tuntematon/ };
 for (const lang of ["en", ...locales]) {
   h.setLang(lang);
+  rawDescriptionContract(h, lang);
   for (const [signal, state, flow] of [[100, null, 0], [25.5, 1, 0], [100, 0, 12], [0, 1, 12],
     [null, null, null], [null, null, 12], [101, 1, null]]) {
     const d = live(h, signal, state, flow);
@@ -121,4 +139,8 @@ const falseRotation = production.replace('sc.classList.toggle("pump-on", d.pumpO
   'sc.classList.toggle("pump-on", pumping === true)');
 assert.notEqual(falseRotation, production, "rotor mutation must reach the production class update");
 assert.throws(() => motionContract(harness(falseRotation)), { code: "ERR_ASSERTION" });
-console.log("pump command: production live/history, independent state/flow and 13 locales passed");
+const falseRawState = production.replace("raw 0 requests maximum effort and raw 100 requests stop",
+  "0 means full speed and 100 means stopped");
+assert.notEqual(falseRawState, production, "raw-description mutation must reach the shipped explainer");
+assert.throws(() => rawDescriptionContract(harness(falseRawState)), { code: "ERR_ASSERTION" });
+console.log("pump command: production live/history, independent state/flow, raw explainer and 13 locales passed");

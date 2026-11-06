@@ -1,4 +1,4 @@
-// translation-source: b2455d5250483500ac15ac7ba4513f04f45a9eb9fdb467b86046b0d4a22a3b85
+// translation-source: 0286e8b2aac2675f7d5984fc17943725eea029e8c7f6204a5644d06f4b79a8aa
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -1144,7 +1144,7 @@ DESCRIPTION_I18N.sv = descriptionValues([
   ["R4T-retur till PHE; bedöm ΔT med flöde, kompressor och läge, inte en universell 5 K-regel."], // 33
   ["Vattenflöde i gemensam krets; minimum beror på modell/läge och lågt värde kan utlösa 7H."], // 34
   ["Hydraultryck: många handböcker kräver >1 bar; vid ≤1,0 bar gäller handboken för exakt modell."], // 35
-  ["Inverterat pumpkommando: 0 är maxhastighet och 100 är stopp."], // 36
+  ["Inverterat X10A-kommando till cirkulationspumpen: råvärde 0 begär maximal styrning och 100 stopp. Det mäter inte varvtal (RPM) och bevisar varken rotation eller vattenflöde. Läs rapporterad ON/OFF-status och uppmätt flöde var för sig, även när kompressorn står stilla."], // 36
   ["Pumpstatus; bevisar inte nyttig värme och kan vara aktiv utan kompressor. Jämför flödet."], // 37
   ["Status för pumpen i en konfigurerad solvärmekrets."], // 38
   ["Angiven hastighet för pumpen som profilen namnger."], // 39

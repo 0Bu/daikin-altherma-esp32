@@ -1,4 +1,4 @@
-// translation-source: b2455d5250483500ac15ac7ba4513f04f45a9eb9fdb467b86046b0d4a22a3b85
+// translation-source: 0286e8b2aac2675f7d5984fc17943725eea029e8c7f6204a5644d06f4b79a8aa
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -1143,7 +1143,7 @@ DESCRIPTION_I18N.es = descriptionValues([
   ["Retorno R4T al PHE; evalúa el ΔT con caudal, compresor y modo, no con 5 K universales."], // 33
   ["Caudal del circuito común; el mínimo depende de modelo y modo, y un valor bajo puede causar 7H."], // 34
   ["Presión hidráulica: muchos manuales exigen >1 bar, pero a ≤1,0 bar consulta el manual del modelo exacto."], // 35
-  ["Orden de bomba invertida: 0 es velocidad máxima y 100 es parada."], // 36
+  ["Orden X10A invertida a la bomba de circulación: el valor bruto 0 solicita el máximo esfuerzo y 100 la parada. No mide RPM ni demuestra giro o caudal de agua. Lea por separado el estado ON/OFF informado y el caudal medido, también con el compresor parado."], // 36
   ["Estado de bomba; no prueba calor útil y puede actuar sin compresor: compáralo con caudal."], // 37
   ["Estado de la bomba de un circuito solar térmico configurado."], // 38
   ["Velocidad indicada de la bomba nombrada por este perfil."], // 39

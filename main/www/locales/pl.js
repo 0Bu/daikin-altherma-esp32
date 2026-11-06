@@ -1,4 +1,4 @@
-// translation-source: b2455d5250483500ac15ac7ba4513f04f45a9eb9fdb467b86046b0d4a22a3b85
+// translation-source: 0286e8b2aac2675f7d5984fc17943725eea029e8c7f6204a5644d06f4b79a8aa
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -1137,7 +1137,7 @@ DESCRIPTION_I18N.pl = descriptionValues([
   ["R4T jest wspólnym powrotem do PHE; R1T−R4T to ΔT PHE, nie odbiorników."], // 33
   ["Szybkość obiegu wody we wspólnym układzie ogrzewania/chłodzenia i CWU."], // 34
   ["Ciśnienie wody; zakres zależy od modelu, przy ≤1,0 bar sprawdź jego instrukcję."], // 35
-  ["Odwrócone polecenie pompy: 0 = pełna prędkość, 100 = postój."], // 36
+  ["Odwrócone polecenie X10A pompy obiegowej: surowe 0 żąda maksymalnego wysterowania, a 100 zatrzymania. Nie mierzy obrotów (RPM) ani nie dowodzi obrotu lub przepływu wody. Zgłoszony stan ON/OFF i zmierzony przepływ należy odczytywać osobno, także przy zatrzymanej sprężarce."], // 36
   ["Praca pompy obiegowej nie dowodzi przekazywania ciepła; potwierdź przepływem."], // 37
   ["Stan pompy solarnej, niezależnej od pompy obiegowej układu pompy ciepła."], // 38
   ["Zgłoszona prędkość pompy wskazanej przez profil."], // 39

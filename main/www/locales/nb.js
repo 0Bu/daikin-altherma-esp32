@@ -1,4 +1,4 @@
-// translation-source: b2455d5250483500ac15ac7ba4513f04f45a9eb9fdb467b86046b0d4a22a3b85
+// translation-source: 0286e8b2aac2675f7d5984fc17943725eea029e8c7f6204a5644d06f4b79a8aa
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -1144,7 +1144,7 @@ DESCRIPTION_I18N.nb = descriptionValues([
   ["R4T-retur til PHE; vurder ΔT med vannmengde, kompressor og modus, ikke en universell 5 K-regel."], // 33
   ["Vannmengde i felleskretsen; minimum avhenger av modell/modus, og lav verdi kan utløse 7H."], // 34
   ["Hydraulikktrykk: mange håndbøker krever >1 bar; ved ≤1,0 bar, bruk håndboken for nøyaktig modell."], // 35
-  ["Invertert pumpekommando: 0 er maksimal hastighet, 100 er stopp."], // 36
+  ["Invertert X10A-kommando til sirkulasjonspumpen: råverdi 0 ber om maksimal styring og 100 om stopp. Den måler ikke turtall (RPM) og beviser verken rotasjon eller vannstrøm. Les rapportert ON/OFF-status og målt vannstrøm hver for seg, også når kompressoren står."], // 36
   ["Pumpestatus; beviser ikke nyttig varme og kan være aktiv uten kompressor. Sammenlign vannmengde."], // 37
   ["Status for pumpen i en konfigurert solvarmekrets."], // 38
   ["Oppgitt hastighet for pumpen som profilen navngir."], // 39

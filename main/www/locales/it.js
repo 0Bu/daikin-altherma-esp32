@@ -1,4 +1,4 @@
-// translation-source: b2455d5250483500ac15ac7ba4513f04f45a9eb9fdb467b86046b0d4a22a3b85
+// translation-source: 0286e8b2aac2675f7d5984fc17943725eea029e8c7f6204a5644d06f4b79a8aa
 I18N.it = localeValues([
   /* sys.nodata */ "Nessun dato",
   /* sys.unreachable */ "Non raggiungibile",
@@ -1127,7 +1127,7 @@ DESCRIPTION_I18N.it = descriptionValues([
   ["Temperatura R4T in ingresso PHE sul ritorno comune; il ΔT va valutato col modo, non con 5 K universali."], // 33
   ["Portata nel circuito idronico comune; il minimo dipende da modello e modo e una portata bassa può causare 7H."], // 34
   ["Pressione del circuito idronico; molti manuali richiedono >1 bar, ma a ≤1,0 bar va consultato il modello esatto."], // 35
-  ["Comando velocità pompa invertito: 0 significa piena velocità e 100 arresto."], // 36
+  ["Comando X10A invertito alla pompa di circolazione: il valore grezzo 0 richiede il massimo comando e 100 l’arresto. Non misura i giri (RPM) né prova rotazione o flusso d’acqua. Leggere separatamente lo stato ON/OFF segnalato e la portata misurata, anche a compressore fermo."], // 36
   ["Stato della pompa idronica; il funzionamento non prova da solo uno scambio termico utile."], // 37
   ["Stato della pompa di un circuito solare termico, distinta dalla pompa idronica della pompa di calore."], // 38
   ["Velocità indicata della pompa nominata dal profilo; scala e circuito dipendono dal modello."], // 39
