@@ -2231,6 +2231,10 @@ function toggleDesc(btn) {
   btn.setAttribute("aria-expanded", open ? "true" : "false");
   if (open) S.descOpen.add(key);
   else { S.descOpen.delete(key); S.histPin.delete(trend); }
+  // This native toggle changes DOM outside setHtml. A cached open/close between polls must not
+  // let the saved closed markup suppress the next render and retain its hidden history SVG.
+  const owner = btn.closest("#valueGroups, #settingsCards");
+  if (owner) delete _html[owner.id];
   // Opening a schematic history also fills the cache used by value rows. Do not build and parse
   // another SVG in every collapsed row on every two-second poll. Mount it only on disclosure,
   // including a cache hit (ensureHistPair then returns without triggering a repaint).

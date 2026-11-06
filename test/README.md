@@ -287,8 +287,9 @@ poses remain separate evidence.
 Native open/pin actions, viewport positioning and one programmatic focus settle before the polling
 baseline. Each disclosure toggle confirms its own state, mounted revision and finished expansion
 before the next native target is measured. Each first opening renews its existing source caches
-through real history requests and
-waits for the matching mounted revision. A separate natural-poll case covers the regular 60-second
+through real history requests and waits for the matching mounted revision. A cached open/close
+between polls must remove the closed chart without invalidating other containers. A separate
+natural-poll case covers the regular 60-second
 cache expiry, generation change and permitted plot replacement before checking unchanged continuity.
 The plot must be visible; schematic witnesses share its vertical viewport whenever they
 fit, with actual geometry recorded separately from animation clocks. Focus setup is also recorded
