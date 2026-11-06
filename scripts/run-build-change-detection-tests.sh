@@ -27,6 +27,7 @@ chmod +x "$T/bin/node"
 export PATH="$T/bin:$PATH"
 export BROWSER_FIXTURE_LOG="$T/node.log"
 export CI=true
+export DAIKIN_BROWSER_CONTAINER=1
 export DAIKIN_BROWSER_PARALLEL=1
 unset BEFORE GITHUB_EVENT_BEFORE EVENT_BASE_SHA BASE_SHA GITHUB_EVENT_NAME
 cd "$T/work"
@@ -56,10 +57,12 @@ check_scope() {
     [[ "$output" != *'no UI/browser-relevant changes in diff'* ]]
     [[ "$output" = *'complete browser rendering and accessibility gate passed'* ]]
     [ "$(grep -c '^tools/browser/find_browser.mjs$' "$BROWSER_FIXTURE_LOG")" -eq 1 ]
-    [ "$(grep -c '^tools/browser/run_render.mjs$' "$BROWSER_FIXTURE_LOG")" -eq 1 ]
-    [ "$(grep -c '^tools/browser/assemble_page.mjs ' "$BROWSER_FIXTURE_LOG")" -eq 1 ]
+    [ "$(grep -c '^tools/browser/run_render.mjs$' "$BROWSER_FIXTURE_LOG")" -eq 2 ]
+    [ "$(grep -c '^tools/browser/assemble_page.mjs ' "$BROWSER_FIXTURE_LOG")" -eq 2 ]
     [ "$(grep -c '^test/test_browser_render.mjs --viewport ' "$BROWSER_FIXTURE_LOG")" -eq 2 ]
     [ "$(grep -c '^tools/browser/selftest.mjs$' "$BROWSER_FIXTURE_LOG")" -eq 1 ]
+    [ "$(grep -c '^test/test_browser_webkit.mjs --viewport ' "$BROWSER_FIXTURE_LOG")" -eq 2 ]
+    [ "$(grep -c '^tools/browser/webkit_selftest.mjs$' "$BROWSER_FIXTURE_LOG")" -eq 1 ]
   fi
   if [ -n "$reason" ]; then [[ "$output" = *"$reason"* ]]; fi
   checks=$((checks + 1))
@@ -73,6 +76,9 @@ mkdir -p tools/ui_localization
 printf '%s\n' locale > tools/ui_localization/fixture.txt
 commit_fixture 'fixture: localization input'
 check_scope 'localization tooling invokes every browser stage' run 'UI changes detected'
+printf '%s\n' fixture > scripts/run-browser-tests-linux.sh
+commit_fixture 'fixture: container entry point'
+check_scope 'container entry point invokes both browser engines' run 'UI changes detected'
 multi_before="$(git rev-parse HEAD)"
 printf '%s\n' ui >> main/www/fixture.css
 commit_fixture 'fixture: earlier UI change'

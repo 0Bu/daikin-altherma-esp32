@@ -5,6 +5,13 @@ import path from "node:path";
 
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const args = process.argv.slice(2);
+const engine = process.env.DAIKIN_BROWSER_ENGINE || "chromium";
+if (!["chromium", "webkit"].includes(engine)) {
+  console.error("browser render gate: unknown engine " + engine);
+  process.exit(2);
+}
+const worker = engine === "webkit" ? "test/test_browser_webkit.mjs" : "test/test_browser_render.mjs";
+const viewports = engine === "webkit" ? ["ipad-portrait", "ipad-landscape"] : ["phone", "desktop"];
 const timeout = process.env.DAIKIN_BROWSER_TIMEOUT_MS || "600000";
 if (!/^[1-9][0-9]*$/.test(timeout) || Number(timeout) > 3600000) {
   console.error("browser render gate: invalid DAIKIN_BROWSER_TIMEOUT_MS (1..3600000)");
@@ -123,14 +130,24 @@ if (!/^[1-9][0-9]*$/.test(timeout) || Number(timeout) > 3600000) {
     if (status !== 0 && !cancellation) status = 2; // Assembly failed before rendering could begin.
     await stopAll();
     if (status === 0) {
-      const batch = process.env.DAIKIN_BROWSER_PARALLEL !== "0"
-        ? [start("test/test_browser_render.mjs", ["--viewport", "phone", ...args]),
-           start("test/test_browser_render.mjs", ["--viewport", "desktop", ...args])]
-        : [start("test/test_browser_render.mjs", args)];
-      status = cancellation?.status ?? await complete(batch);
+      // WebKit has no CDP focus emulation: give each iPad viewport its own foreground interval.
+      // Keep the same responsiveness assertions; competing browser windows are not one iPad user.
+      if (engine === "webkit") {
+        for (const viewport of viewports) {
+          status = cancellation?.status ?? await complete([start(worker, ["--viewport", viewport, ...args])]);
+          await stopAll();
+          if (status !== 0) break;
+        }
+      } else {
+        const batch = process.env.DAIKIN_BROWSER_PARALLEL !== "0"
+          ? viewports.map((viewport) => start(worker, ["--viewport", viewport, ...args]))
+          : [start(worker, args)];
+        status = cancellation?.status ?? await complete(batch);
+      }
       if (status === 0) {
         await stopAll();
-        status = cancellation?.status ?? await complete([start("tools/browser/selftest.mjs")]);
+        status = cancellation?.status ?? await complete([start(engine === "webkit"
+          ? "tools/browser/webkit_selftest.mjs" : "tools/browser/selftest.mjs")]);
       }
     }
   } catch (error) {
@@ -148,6 +165,7 @@ if (!/^[1-9][0-9]*$/.test(timeout) || Number(timeout) > 3600000) {
     process.off("SIGINT", onInt);
     process.off("SIGTERM", onTerm);
   }
-  if (status === 0) console.log("complete browser rendering and accessibility gate passed");
+  if (status === 0) console.log(engine === "webkit" ? "complete WebKit iPad history gate passed"
+    : "complete browser rendering and accessibility gate passed");
   process.exitCode = status;
 }

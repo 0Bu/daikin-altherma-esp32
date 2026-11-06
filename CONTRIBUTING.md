@@ -25,8 +25,9 @@ and documentation are authoritative; open a new public issue when a present prob
    behavior and validation, including anything that needs target or hardware evidence.
 
 The host loop needs a C++17 compiler and CMake when available, Node ≥18 and Python ≥3.11.
-Coverage also needs the compiler's gcov-compatible tool. Browser rendering needs Chrome/Chromium;
-full source formatting needs exact clang-format 18.1.8. Individual runner requirements, commands,
+Coverage also needs the compiler's gcov-compatible tool. Browser rendering needs Docker for the pinned
+headless Chromium/WebKit test image; full source formatting needs exact clang-format 18.1.8.
+Individual runner requirements, commands,
 selftests and evidence limits are documented once in [test/README.md](test/README.md).
 
 Agent tools use `scripts/agent-python.sh` to select installed Python ≥3.11 with `tomllib`.

@@ -351,10 +351,13 @@ jobs:
         run: ./scripts/run-ui-use-case-tests.sh
 
       # Source contracts cannot see layout, native accessibility or real keyboard focus. Assemble
-      # the production page and run it in system Chrome/Chromium. DOM/layout/names/colour, native AX
+      # the production page and run it in the pinned headless Linux Chromium/WebKit container.
+      # Chromium DOM/layout/names/colour, native AX
       # and keyboard navigation/dialog focus/Tab/Escape cover Dashboard, Settings and all routed
       # modals at 320/1200 px in all 13 locales. Reduced motion covers Dashboard, Settings, WiFi,
       # progress and disclosure motion at the same locale/viewport matrix; console errors are fatal.
+      # A separately bounded WebKit phase covers iPad portrait/landscape, native touch, full histories,
+      # continuous polling and actual flow paint, with nine targeted regression controls.
       - name: Run rendered browser and accessibility gate
         env:
           BEFORE: ${{ github.event.before }}
@@ -493,7 +496,7 @@ jobs:
       # The README's dashboard recording (docs/media/dashboard.gif): the one artefact here that rots
       # INVISIBLY. A recording renders perfectly forever, whatever the UI has since become, so every
       # other gate on this page stays green while the first thing a new reader sees is last month's
-      # drawing. CI has no browser, so this is a STAMP comparison rather than a re-render: it
+      # drawing. GIF recording remains local; this gate compares the STAMP instead of re-rendering. It
       # fingerprints the sources the recording was made from — the schematic markup, the CSS that
       # draws and animates it, the painting code, the strings, the scenes and the recorder's own
       # framing — and fails when the GIF no longer belongs to them. node only, seconds long.

@@ -40,11 +40,17 @@ list; adding a modal without a lifecycle case must fail.
 ```bash
 scripts/run-ui-use-case-tests.sh
 scripts/run-ui-localization-audit.sh
-# When Chrome/Chromium is installed (or DAIKIN_BROWSER_BIN is set), also run:
 scripts/run-browser-render-tests.sh
 ```
 
-Require exit 0. The command executes all `test/test_ui_*.mjs` contracts plus HomeHub discovery, the
+Require exit 0. The browser command runs headless Chromium and WebKit in the pinned Linux Docker
+image on both macOS and CI. Never start the installed macOS Chrome/Chromium `.app`, even with
+`--headless`: a failing native process still produces crash dialogs. Direct browser helpers also
+refuse native macOS launches. Docker is required; do not substitute a host browser after a failure.
+See [test/README.md](../../../test/README.md#ui-interaction-rendering-and-recording) for the engine
+and evidence boundaries.
+
+The UI use-case command executes all `test/test_ui_*.mjs` contracts plus HomeHub discovery, the
 MCP page and `tools/ui/selftest.sh`. The behavioral matrix executes the production one-time wiring
 and verifies:
 
@@ -86,10 +92,12 @@ as its static locale matrix. Derive the entry inventory from production: every s
 must either exercise its history or have an explicit no-history classification. Include catalog,
 Modbus-only, board-memory and circulation disclosures, derived/categorical graphs, ENV III and the
 independent room source. Use full 288-sample rings, source-specific gaps and changing live values
-through the real two-second polling/render loop at phone and desktop widths.
+through the real two-second polling/render loop at phone and desktop widths in Chromium and both
+iPad orientations in headless WebKit. WebKit must use trusted native touch events and verify actual
+painted flow movement as well as animation clocks; its frozen-paint control must fail for that reason.
 
 Observe at least three real updates per case. Require unchanged plots and prose to retain their
-nodes, no chart construction in collapsed rows, persistent advancing flow/rotor `CSSAnimation`
+nodes and stay connected through scalar updates, no chart construction in collapsed rows, persistent advancing flow/rotor `CSSAnimation`
 objects, and the fixed frame/input responsiveness budgets in the browser test. Finite
 `CSSTransition`s may finish normally; distinguish them from stopped continuous animations. Exercise
 open/close and cached reopen, and require no console errors. Legitimate categorical/history changes

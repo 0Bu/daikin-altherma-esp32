@@ -148,7 +148,9 @@ main { flex: 1; }
    above it and no chip row beside it (DESIGN.md §5.3 item 1). The figure is only the semantic
    wrapper: the white face ends with the picture, leaving the inspector free to emerge below it. */
 .schem-card { margin: 0 0 12px; }
-.schem-face { position: relative; z-index: 1; padding: 14px 12px 8px; }
+/* Keep the continuously animated drawing on its own composited surface during polling/history
+   repaints. WebKit can otherwise delay frames even when the poll's JavaScript finishes promptly. */
+.schem-face { position: relative; z-index: 1; padding: 14px 12px 8px; transform: translateZ(0); }
 .schem-scroll { overflow-x: auto; }
 .schem-scroll svg { display: block; min-width: 640px; width: 100%; height: auto; }
 svg .sc-box { fill: var(--card); stroke: var(--line); stroke-width: 1.5; }

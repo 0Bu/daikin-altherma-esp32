@@ -44,7 +44,9 @@ A holistic pass before a PR merges. Not a linter — it checks the things that r
 8. **UI runtime, when affected.** Trace recurring polling/render work, history construction and DOM
    ownership. Require the [live-polling review](../ui-use-case-review/SKILL.md#3b-review-continuity-under-live-polling)
    for UI/history changes: static snapshots, posed GIF frames and mocked renderers cannot establish
-   responsiveness. Uncovered history entry paths, recurring hidden-chart work or failed continuity
+   responsiveness. Require the pinned headless-container path, including WebKit iPad touch/paint
+   evidence; a Chromium pass alone cannot cover WebKit. Uncovered history entry paths, recurring
+   hidden-chart work or failed continuity
    and responsiveness assertions block a clean review.
 
 Report findings grouped by the above; contradictions, unjustified duplication, unreadable guidance
