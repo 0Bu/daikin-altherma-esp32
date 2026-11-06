@@ -168,4 +168,86 @@ assert.deepEqual(calls, [
     "changing readings must preserve the focused legend button across a normal poll");
 }
 
+// A cached disclosure can open and close before any poll renders its open state. Exercise the real
+// toggle/setHtml cache decision with a small DOM writer adapter; browser tests own native input,
+// transition timing and actual SVG identity, while the focus test above keeps the real replacer.
+function assertCachedDisclosureClose(historySource, ownerId) {
+  const stateSource = readAppFragments(["app_state.js"]);
+  const writer = stateSource.slice(stateSource.indexOf("const _html = {}"), stateSource.indexOf("function renderHeader()"));
+  const writes = [], attrs = new Map(), classes = new Set();
+  let bodyHtml = "<p>History help</p>", chart = null, renders = 0;
+  const body = {
+    get innerHTML() { return bodyHtml; },
+    set innerHTML(html) {
+      bodyHtml = html;
+      chart = html.includes("data-hist=") ? chart || { id: "fixture-trend" } : null;
+    },
+  };
+  const containers = Object.fromEntries(["settingsCards", "valueGroups", "connTile"].map(id => [id, {
+    id,
+    set innerHTML(html) {
+      writes.push({ id, html });
+      if (id === ownerId) body.innerHTML = "<p>History help</p>";
+    },
+  }]));
+  const item = {
+    classList: {
+      contains: name => classes.has(name),
+      toggle: (name, enabled) => enabled ? classes.add(name) : classes.delete(name),
+    },
+    querySelector: selector => selector === ".vhist" ? chart : selector === ".vdesc-body" ? body : null,
+  };
+  const button = {
+    dataset: { desc: "fixture:trend", trend: "fixture-trend", unit: "°C" },
+    closest: selector => selector === ".vitem" ? item
+      : selector === "#valueGroups, #settingsCards" ? containers[ownerId] : null,
+    setAttribute: (name, value) => attrs.set(name, value),
+    querySelector: () => ({ textContent: "Fixture trend" }),
+  };
+  const state = { clickHold: false, descOpen: new Set(), histPin: new Map() };
+  const ctx = vm.createContext({ S: state, $: id => containers[id], renderApp: () => renders++ });
+  vm.runInContext(historySource + "\n" + writer + `
+    histHtml = () => '<div class="vhist"><svg data-hist="fixture-trend"></svg></div>';
+    ensureHistPair = () => {};
+    replaceHistoryHtml = (host, html) => { host.innerHTML = html; };
+    this.toggle = toggleDesc; this.repaint = setHtml; this.cached = id => _html[id];
+  `, ctx);
+  const closed = Object.fromEntries(Object.keys(containers).map(id => [id, `<section>${id}: closed</section>`]));
+  for (const [id, html] of Object.entries(closed)) ctx.repaint(id, html);
+  const before = writes.length;
+  ctx.toggle(button);
+  const openedChart = chart;
+  assert.ok(openedChart && state.descOpen.has(button.dataset.desc) && classes.has("open"),
+    ownerId + ": production toggle path must mount its cached history");
+  assert.equal(attrs.get("aria-expanded"), "true");
+  ctx.toggle(button);
+  assert.equal(state.descOpen.has(button.dataset.desc) || classes.has("open"), false);
+  assert.equal(attrs.get("aria-expanded"), "false");
+  assert.equal(chart, openedChart, ownerId + ": close must preserve its chart during the CSS transition");
+  assert.equal(writes.length, before, ownerId + ": toggles must not immediately rebuild any container");
+  assert.equal(renders, 0, ownerId + ": toggles must wait for the normal poll renderer");
+  for (const id of Object.keys(containers).filter(id => id !== ownerId))
+    assert.equal(ctx.cached(id), closed[id], ownerId + ": other container caches must remain valid: " + id);
+  state.clickHold = true;
+  ctx.repaint(ownerId, closed[ownerId]);
+  assert.equal(chart, openedChart, ownerId + ": an in-flight click must still defer the poll write");
+  state.clickHold = false;
+  ctx.repaint(ownerId, closed[ownerId]);
+  assert.equal(chart, null, ownerId + ": identical closed poll must remove its own cached-open chart");
+  assert.equal(writes.length, before + 1, ownerId + ": the next poll must rebuild only the dirty owner");
+  assert.equal(ctx.cached(ownerId), closed[ownerId], ownerId + ": completed poll must restore the owner cache");
+  for (const id of Object.keys(containers).filter(id => id !== ownerId)) ctx.repaint(id, closed[id]);
+  assert.equal(writes.length, before + 1, ownerId + ": unchanged other containers must still skip writes");
+}
+
+const disclosureSource = readAppFragments(["history.js"]);
+for (const owner of ["settingsCards", "valueGroups"]) assertCachedDisclosureClose(disclosureSource, owner);
+const invalidation = "  if (owner) delete _html[owner.id];";
+assert.ok(disclosureSource.includes(invalidation), "disclosure cache negative-control target must exist");
+for (const owner of ["settingsCards", "valueGroups"])
+  assert.throws(() => assertCachedDisclosureClose(disclosureSource.replace(invalidation, "  void owner;"), owner),
+    error => error.code === "ERR_ASSERTION" && error.actual?.id === "fixture-trend" && error.expected === null &&
+      error.message.startsWith(owner + ": identical closed poll must remove its own cached-open chart"),
+    owner + ": previous cache behavior must fail at the retained hidden-chart assertion");
+
 console.log("UI trend touch and keyboard pin/rebuild/poll focus tests passed");
