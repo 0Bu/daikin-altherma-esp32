@@ -285,7 +285,10 @@ not guarantee a frame rate on every device. Negative controls reintroduce hidden
 animation replacement and a blocking poll. Static locale snapshots, reduced-motion cases and GIF
 poses remain separate evidence.
 Native open/pin actions, viewport positioning and one programmatic focus settle before the polling
-baseline. The plot must be visible; schematic witnesses share its vertical viewport whenever they
+baseline. Each first opening renews its existing source caches through real history requests and
+waits for the matching mounted revision. A separate natural-poll case covers the regular 60-second
+cache expiry, generation change and permitted plot replacement before checking unchanged continuity.
+The plot must be visible; schematic witnesses share its vertical viewport whenever they
 fit, with actual geometry recorded separately from animation clocks. Focus setup is also recorded
 separately. No frame from the first or subsequent measured poll is discarded.
 
