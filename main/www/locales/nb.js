@@ -1,4 +1,4 @@
-// translation-source: b5d29da273c417b207489763facc3fda04530140b4b0389affcd7643d701cd08
+// translation-source: 3e8092cf0e419496e78d337338f27af53fbda73918ad45f0bbe0970b83ebeddc
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -223,6 +223,16 @@ I18N.nb = localeValues([
   /* check.cycling_cooling */ (n) => `Kjøling ${n} utelatt`,
   /* check.cycling_censored */ (n) => `${n} uten klasse`,
   /* check.cycling_causes */ "overgang|omstart/journal|start ikke observert",
+  /* check.stop.title */ "Kontekst ved stopp",
+  /* check.stop.population */ (n) => `${n} observerte stopp etter nylig oppvarming`,
+  /* check.stop.coverage */ (d, h) => `Lesbar kompressortid ${d} · ${h} timeblokker`,
+  /* check.stop.categories */ "lav hastighet + avstand til hovedmål|innendørsenhetens forespørsel trukket tilbake|aktiv avriming|varmtvannsovergang|endret krets/modus",
+  /* check.stop.counts */ "positive / vurderbare / fullstendige",
+  /* check.stop.other */ "uklassifiserte|ukjente|delvise|avbrutte|mål endret|tidsoverløp",
+  /* check.stop.loss */ (n) => `Varsler om lagringstap ${n}`,
+  /* check.stop.states */ "Kilde ikke bekreftet|Datert observasjon|Udatert observasjon|Ufullstendig dekning av 24 timer|Gjenoppretting av lagrede timer venter på klokke-/kildebekreftelse|Fullførte observasjoner venter på lagring|Ett stopp venter på prøver etter stoppet|Tellere mettet: nedre grenser|ikke støttet|Ingen lesbar stopppopulasjon ennå.",
+  /* check.stop.rule */ "Foreløpig prosjektvindu: inklusive ±30 s, ingen prøvegap >15 s. Ved bekreftet oppvarming: 0 < kompressorturtall ≤22 omdr./s, rapportert turtemperatur R1T før tilleggsvarmeren ≥rapportert hovedsonemål +2 K, mål stabilt i 30 s.",
+  /* check.stop.limits */ "Stoppkategorier og tilleggsopplysninger overlapper for de samme beholdte stoppene. Vurderbar betyr positiv eller et fullstendig prøvetatt vindu; bare fullstendig tillater et negativt resultat i prøvene. Polling utelukker ikke signaler mellom prøver. R1T er rapportert utgående vanntemperatur før den elektriske tilleggsvarmeren. Avstanden til rapportert hovedsonemål er en observert forskjell, ikke målt regulert oversving. Dette fastslår verken stoppårsak, minste modulering eller en forespørsel fra ekstern termostat.",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · snitt ${mean} °C`,
   /* check.min */ (m) => `${m} min`,

@@ -21,6 +21,10 @@ reset() {
     cp main/logic/checkup_persist.hpp "$WORK/main/logic/checkup_persist.hpp"
     cp main/logic/fault_state.hpp "$WORK/main/logic/fault_state.hpp"
     cp main/checkup.cpp "$WORK/main/checkup.cpp"
+    cp main/logic/stop_context.hpp main/logic/stop_context_input.hpp \
+       main/logic/observation_hourly.hpp main/logic/instrument.hpp main/logic/heartbeat.hpp \
+       "$WORK/main/logic/"
+    cp main/stop_observation_store.hpp main/stop_observation_store.cpp main/history.cpp "$WORK/main/"
     cp main/hp_poll.cpp "$WORK/main/hp_poll.cpp"
     cp main/http_status.cpp "$WORK/main/http_status.cpp"
     cp main/def/overlay.hpp "$WORK/main/def/overlay.hpp"

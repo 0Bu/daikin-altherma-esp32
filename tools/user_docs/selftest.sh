@@ -19,6 +19,10 @@ reset() {
     cp -R main/www "$WORK/main/www"
     cp main/logic/checkup.hpp "$WORK/main/logic/checkup.hpp"
     cp main/checkup.cpp "$WORK/main/checkup.cpp"
+    cp main/logic/stop_context.hpp main/logic/stop_context_input.hpp \
+       main/logic/observation_hourly.hpp main/logic/instrument.hpp main/logic/heartbeat.hpp \
+       "$WORK/main/logic/"
+    cp main/stop_observation_store.hpp main/stop_observation_store.cpp main/history.cpp "$WORK/main/"
     cp docs/DIAGNOSTICS.md "$WORK/docs/DIAGNOSTICS.md"
     cp docs/DIAGNOSTIC_EVIDENCE.md "$WORK/docs/DIAGNOSTIC_EVIDENCE.md"
 }
@@ -82,15 +86,12 @@ run_case "recommendation in the guide is caught" 1 "U008 health_flow"
 
 echo "== 4. whole-plant reassurance from one bounded check =="
 reset
-patch_file "$WORK/main/www/js/history.js" <<'PY'
+patch_file "$WORK/main/www/locales/de.js" <<'PY'
 import sys
 p = sys.argv[1]; s = open(p).read()
-a = s.index('  health_fault: {'); b = s.index('  health_dhw_loss: {', a)
-block = s[a:b]
-start = block.index('          normal: "')
-end = block.index('" } },', start)
-block = block[:end] + ' Die Anlage ist in Ordnung.' + block[end:]
-open(p, 'w').write(s[:a] + block + s[b:])
+old = 'Keine gemeldete Störung. Eine Meldung belegt keine Ursache; ihr Verschwinden belegt keine Behebung.'
+assert s.count(old) == 1
+open(p, 'w').write(s.replace(old, old + ' Die Anlage ist in Ordnung.', 1))
 PY
 run_case "false whole-plant reassurance is caught" 1 "U006 German whole-plant all-clear"
 

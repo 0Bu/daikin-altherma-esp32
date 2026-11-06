@@ -118,6 +118,7 @@ double                         room_history_temperature = 0.0;
 std::string                    x10a_payload;
 daik::WeatherForecastStatus weather;
 daik::logic::CheckupCyclingEvidence                                cycling;
+daik::CheckupStopContextReport                                     stop_context;
 daik::CrashInfo             boot, live_crash;
 daik::EthInfo               ethernet;
 daik::NetLink               link            = daik::NetLink::None;
@@ -249,6 +250,7 @@ void                  history_record_room(bool valid, double temperature, uint32
 }
 void                  checkup_dhw_reset() {}
 logic::CheckupCyclingEvidence checkup_cycling_evidence() { return adapter::cycling; }
+CheckupStopContextReport      checkup_stop_context_report() { return adapter::stop_context; }
 CrashInfo             diag_crash_info() { return adapter::boot; }
 CrashInfo             diag_crash_info_live() { return adapter::live_crash; }
 WifiInfo              wifi_info() { return adapter::wifi; }
@@ -1530,6 +1532,19 @@ void outgoing_heartbeat() {
         require(
             cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(root.get(), "cycling_runtime_saturated")),
             "CYCLING_ABSENT_SATURATION_NULL");
+        require(cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(
+                    root.get(), "stop_context_witnessed_stops_recent_heating")),
+                "STOP_CONTEXT_ABSENT_POPULATION_NULL");
+    }
+    adapter::stop_context.observation.confirmed   = true;
+    adapter::stop_context.observation.readable_us = 60000000;
+    adapter::stop_context.capability_mask         = daik::logic::STOP_CONTEXT_ALL;
+    {
+        daik::JsonGuard root(cJSON_Parse(daik::build_heartbeat_payload().c_str()));
+        wire_number(root.get(), "stop_context_witnessed_stops_recent_heating", 0,
+                    "STOP_CONTEXT_READABLE_ZERO_POPULATION");
+        wire_number(root.get(), "stop_context_readable_s", 60,
+                    "STOP_CONTEXT_INDEPENDENT_READABLE_CLOCK");
     }
     adapter::cycling.cycling_censored_transition_runs = 1;
     adapter::cycling.cycling_censored_handover_runs   = 2;

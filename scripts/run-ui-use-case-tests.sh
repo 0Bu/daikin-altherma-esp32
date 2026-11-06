@@ -9,6 +9,7 @@ cd "$proj"
 for test_file in test/test_ui_*.mjs; do
   node "$test_file"
 done
+node test/test_locale_bundle.mjs
 node test/test_homehub_discovery_contract.mjs
 node test/test_mcp_dashboard.mjs
 tools/ui/selftest.sh

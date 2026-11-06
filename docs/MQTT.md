@@ -33,6 +33,13 @@ and `runtime_saturated` (numeric 0/1). These are rolling completed-run observati
 cumulative counters or plant-health verdicts. Unestablished/disabled evidence is null; no new HA
 entities are created. [API.md](API.md#history-and-24-hour-checks) owns the field meanings and saturation boundary.
 
+The heartbeat additionally publishes numeric `stop_context_*` fields, with five category prefixes
+such as `stop_context_request_withdrawal_positive`. These share the HTTP
+[`cycling.stop_context` contract](API.md) and independent population, including null counts before
+readable coverage and for unsupported categories. Metadata flags are `0`/`1`; existing fields and
+HA entities are unchanged. The HTTP-only `denominator` string is represented by the numeric field
+`stop_context_witnessed_stops_recent_heating` on MQTT.
+
 An initial transport-start rejection retains the initialized client and retries with bounded
 backoff. Failed event registration prevents transport start and reports an explicit error.
 

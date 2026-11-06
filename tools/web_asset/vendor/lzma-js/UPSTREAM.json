@@ -1,0 +1,17 @@
+{
+  "repository": "https://github.com/LZMA-JS/LZMA-JS",
+  "commit": "8f98fe85a1ef78ab6e9d26ab85ce338f50095a23",
+  "version": "2.3.2",
+  "license": "MIT",
+  "modified": false,
+  "upstream_paths": {
+    "LICENSE": "LICENSE",
+    "lzma-d.js": "src/lzma-d.js",
+    "lzma-d-min.js": "src/lzma-d-min.js"
+  },
+  "files": {
+    "LICENSE": "2a85a87a012b6f2099902bc20e94f4292c222a80f66072ecf5151d1377377385",
+    "lzma-d.js": "5995a52fee48eb099976d754de8dda1d5d2b8f0400c2393faefacc4bbf7e6f7b",
+    "lzma-d-min.js": "850305b783d09b71731f6f293d1f1ed58180892ff0e68c73475873b510f753a3"
+  }
+}

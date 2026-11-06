@@ -2121,65 +2121,42 @@ const MODEL_DESCRIPTIONS = {
   // the wrong conclusion from a correct number.
   health_fault: {
     what: "Current and remembered fault messages reported by the heat pump.",
-    normal: "No reported fault message. A message does not identify its cause; disappearance does not prove resolution.",
-    de: { what: "Aktuelle und gespeicherte Störungsmeldungen der Wärmepumpe.",
-          normal: "Keine gemeldete Störung. Eine Meldung belegt keine Ursache; ihr Verschwinden belegt keine Behebung." } },
+    normal: "No reported fault message. A message does not identify its cause; disappearance does not prove resolution." },
   health_dhw_loss: {
     what: "Largest accepted hourly temperature drop at tank sensor R5T.",
-    normal: "Project hint ≥0.8 K/h without pump/draw-like markers. R5T is one point in a stratified tank, not measured tank energy. Missing markers do not prove no draw; zero net cooling does not exclude heat loss. Circulation overlap is correlation, not cause.",
-    de: { what: "Stärkste erfasste Abkühlung pro Stunde am Speichersensor R5T.",
-          normal: "Interner Hinweis ≥0,8 K/h ohne Pumpen-/Zapfmerkmale. R5T misst einen Punkt, keine Energie oder den ganzen Speicher. Fehlende Merkmale belegen keine Zapffreiheit; null Nettoabkühlung schließt Wärmeverlust nicht aus. Zirkulationsüberschneidung belegt keine Ursache." } },
+    normal: "Project hint ≥0.8 K/h without pump/draw-like markers. R5T is one point in a stratified tank, not measured tank energy. Missing markers do not prove no draw; zero net cooling does not exclude heat loss. Circulation overlap is correlation, not cause." },
   health_cycling: {
     what: "Starts and completed classified heating runs.",
-    normal: "Project hint: ≥12 heating runs averaging <10 min; ≥90% of all completed runs classified (proven handovers excluded) and ≥90% heating/uncertain runtime coverage. No Daikin limit.",
-    de: { what: "Verdichterstarts von OFF zu ON und zugeordnete abgeschlossene Heizläufe.",
-          normal: "Interne Regel: ≥12 Heizläufe im Mittel <10 min; ≥90 % aller abgeschlossenen Läufe zugeordnet (sichere Übergaben ausgenommen) und ≥90 % Heiz-/ungeklärte Laufzeit abgedeckt. Kein Daikin-Grenzwert." } },
+    normal: "Project hint: ≥12 heating runs averaging <10 min; ≥90% of all completed runs classified (proven handovers excluded) and ≥90% heating/uncertain runtime coverage. No Daikin limit." },
   health_defrost: {
     what: "Defrost starts and their share of compressor runtime with readable compressor and defrost states.",
-    normal: "Project hint: ≥3 paired events and >15%. Humidity and whole-coil temperature are unavailable; no Daikin fault limit.",
-    de: { what: "Abtaustarts und ihr Anteil an der Verdichterlaufzeit bei lesbarem Verdichter- und Abtaustatus.",
-          normal: "Interne Regel: ≥3 zugeordnete Vorgänge und >15 %. Luftfeuchte und Temperatur der gesamten Wärmetauscherfläche fehlen; kein Daikin-Störungsgrenzwert." } },
+    normal: "Project hint: ≥3 paired events and >15%. Humidity and whole-coil temperature are unavailable; no Daikin fault limit." },
   health_pressure: {
     what: "Lowest recorded water pressure.",
-    normal: "Project rule: ≤1.0 bar gives NOTE; 60 continuously observed seconds gives WARNING. This common threshold is not verified for every model; its exact manual applies.",
-    de: { what: "Niedrigster erfasster Wasserdruck.",
-          normal: "Interne Regel: ≤1,0 bar ergibt HINWEIS, 60 durchgehend beobachtete Sekunden WARNUNG. Diese verbreitete Grenze ist nicht für jedes Modell bestätigt; maßgeblich ist dessen genaue Anleitung." } },
+    normal: "Project rule: ≤1.0 bar gives NOTE; 60 continuously observed seconds gives WARNING. This common threshold is not verified for every model; its exact manual applies." },
   health_flow: {
     what: "Lowest flow after 60 continuously observed seconds of internal pump operation.",
-    normal: "No universal normal value. Not nominal flow or proof of part load. Manual limits need the same model, mode and conditions; the value alone cannot establish insufficient flow.",
-    de: { what: "Niedrigster Durchfluss nach 60 durchgehend beobachteten Sekunden mit laufender interner Pumpe.",
-          normal: "Kein allgemeiner Normalwert. Kein Nenndurchfluss oder Teillastnachweis. Anleitungsgrenzen benötigen dasselbe Modell, dieselbe Betriebsart und Bedingungen; der Wert allein belegt keine Unterversorgung." } },
+    normal: "No universal normal value. Not nominal flow or proof of part load. Manual limits need the same model, mode and conditions; the value alone cannot establish insufficient flow." },
   health_heater: {
     what: "Observed ON time of the circuit heater (BUH) and tank heater (BSH).",
-    normal: "There is no fixed normal runtime; it depends on heating and hot-water demand. Runtime is not energy consumption and cannot establish unnecessary heating.",
-    de: { what: "Beobachtete ON-Zeit des Zusatzheizers (BUH) und Speicherheizstabs (BSH).",
-          normal: "Es gibt keine feste normale Laufzeit; sie hängt vom Heiz- und Warmwasserbedarf ab. Laufzeit ist kein Energieverbrauch und belegt kein unnötiges Heizen." } },
+    normal: "There is no fixed normal runtime; it depends on heating and hot-water demand. Runtime is not energy consumption and cannot establish unnecessary heating." },
   health_retries: {
     what: "Comparable rises in five experimental counters, including while stopped or at a compressor-state boundary.",
-    normal: "No verified normal range for these experimental counters. Gaps, resets and non-rises do not count. Stable counters cannot rule out limiting or identify a cause.",
-    de: { what: "Vergleichbare Anstiege in fünf experimentellen Zählern, auch im Stillstand oder an Verdichter-Zustandsgrenzen.",
-          normal: "Für diese experimentellen Zähler ist kein Normalbereich belegt. Lücken, Rücksetzungen und fehlende Anstiege zählen nicht. Stabile Zähler schließen Begrenzung nicht aus und belegen keine Ursache." } },
+    normal: "No verified normal range for these experimental counters. Gaps, resets and non-rises do not count. Stable counters cannot rule out limiting or identify a cause." },
   // The two board-memory rows on the ESP32 card. The copy has one job beyond naming the number: to
   // say what the SHAPE of the curve means, because that is the whole reason these rows exist rather
   // than living on /status alone.
   free_heap: {
     what: "RAM that is currently unused by the firmware. Short changes are normal because WiFi, MQTT and web requests allocate temporary memory; the 24-hour trend is more useful than one reading.",
-    normal: "a stable line with dips that recover; a lasting decline may mean memory is not being released. A compatible restart with power retained can preserve the RAM trend. When RAM cannot be reused, only compatible dated five-minute buckets saved in the flash journal can return after clock sync. The five-minute grid can hide short interruptions; longer ones can leave gaps. The open bucket and recent unsaved buckets may be missing; without the journal, flash recovery is unavailable.",
-    de: { what: "Arbeitsspeicher, den die Firmware gerade nicht verwendet. Kurze Schwankungen sind normal, weil WLAN, MQTT und Web-Anfragen vorübergehend Speicher belegen; der 24-Stunden-Verlauf ist aussagekräftiger als ein Einzelwert.",
-          normal: "eine stabile Linie mit Einbrüchen, die sich erholen; dauerhafter Rückgang kann auf nicht freigegebenen Speicher hinweisen. Ein kompatibler Neustart bei erhaltener Spannung kann den RAM-Verlauf bewahren. Wenn der RAM nicht übernommen werden kann, kommen nur passende, datierte 5-Minuten-Intervalle aus dem Flash-Journal nach dem Zeitabgleich zurück. Das 5-Minuten-Raster kann kurze Unterbrechungen verbergen; längere können Lücken hinterlassen. Offene und jüngste ungespeicherte Intervalle können fehlen; ohne Journal gibt es keine Flash-Wiederherstellung." } },
+    normal: "a stable line with dips that recover; a lasting decline may mean memory is not being released. A compatible restart with power retained can preserve the RAM trend. When RAM cannot be reused, only compatible dated five-minute buckets saved in the flash journal can return after clock sync. The five-minute grid can hide short interruptions; longer ones can leave gaps. The open bucket and recent unsaved buckets may be missing; without the journal, flash recovery is unavailable." },
   max_alloc: {
     what: "The largest contiguous block of free RAM. Some operations, including TLS setup and OTA work, need one sufficiently large block even when the total free RAM is higher.",
-    normal: "it is always at or below total free RAM. If total free RAM stays stable while this value keeps falling, the heap is becoming fragmented; that can make a large allocation fail before all RAM is used.",
-    de: { what: "Der größte zusammenhängende freie RAM-Block. Manche Vorgänge, darunter TLS-Aufbau und OTA-Arbeiten, benötigen einen ausreichend großen Block, auch wenn insgesamt noch mehr RAM frei ist.",
-          normal: "der Wert liegt nie über dem gesamten freien RAM. Bleibt der freie RAM stabil, während dieser Wert dauerhaft sinkt, wird der Speicher fragmentiert; dann kann eine große Reservierung scheitern, obwohl noch RAM frei ist." } },
+    normal: "it is always at or below total free RAM. If total free RAM stays stable while this value keeps falling, the heap is becoming fragmented; that can make a large allocation fail before all RAM is used." },
   capacity: {
-    what: "The outdoor unit's rated capacity, read from its own identification page. It is a size class of the hardware — what the unit is built for, not what it is producing right now.",
-    de: { what: "Die Nennleistung der Außeneinheit, aus ihrer eigenen Kennungsseite gelesen. Eine Größenklasse der Hardware — wofür das Gerät gebaut ist, nicht was es gerade liefert." } },
+    what: "The outdoor unit's rated capacity, read from its own identification page. It is a size class of the hardware — what the unit is built for, not what it is producing right now." },
   capacity_iu: {
     what: "The INDOOR unit's rated capacity. It is shown because the outdoor unit's identification page contains no separate capacity. The label states exactly which unit supplied the value.",
-    normal: "indoor and outdoor units can have different capacity classes. Do not read this as the outdoor unit's or the complete system's rated capacity.",
-    de: { what: "Die Nennleistung der INNENEINHEIT. Sie wird angezeigt, weil die Kennungsseite dieser Außeneinheit keine eigene Leistung enthält. Die Firmware benennt damit ausdrücklich die Einheit, aus der der Wert stammt.",
-          normal: "Innen- und Außeneinheit können unterschiedliche Leistungsklassen haben. Deshalb darf dieser Wert nicht als Nennleistung der Außeneinheit oder des Gesamtsystems gelesen werden." } },
+    normal: "indoor and outdoor units can have different capacity classes. Do not read this as the outdoor unit's or the complete system's rated capacity." },
   // TWO variants, and which one is true depends on whether the outdoor unit reported its capacity.
   // logic/detect.hpp is explicit: candidates that share a page mask AND a kW class are
   // register-identical, so the pick cannot change a reading — but when the O/U capacity is unknown
@@ -2189,19 +2166,13 @@ const MODEL_DESCRIPTIONS = {
   // short 0x00 descriptor), which is the legacy-35–legacy-39 shape in copy rather than in a converter.
   candidates: {
     what: "Several Daikin model families expose the same registers and values on the service interface, so the exact marketing name cannot be distinguished there. The heading deliberately stays \"Daikin Altherma\" instead of guessing a model.",
-    normal: "the readings are unaffected: the outdoor unit reported its rated capacity, and all remaining candidates use the same capacity class and register layout. To identify the exact model, compare the outdoor-unit ID below with the nameplate.",
-    de: { what: "Mehrere Daikin-Modellfamilien liefern auf der Serviceschnittstelle dieselben Register und Werte. Deshalb lässt sich der genaue Handelsname dort nicht unterscheiden. Die Überschrift bleibt bewusst „Daikin Altherma“, statt ein Modell zu raten.",
-          normal: "die Messwerte sind davon nicht betroffen: Die Außeneinheit hat ihre Nennleistung gemeldet, und alle verbliebenen Kandidaten verwenden dieselbe Leistungsklasse und Registerauslegung. Für den genauen Modellnamen vergleiche die Außengeräte-Kennung unten mit dem Typenschild." } },
+    normal: "the readings are unaffected: the outdoor unit reported its rated capacity, and all remaining candidates use the same capacity class and register layout. To identify the exact model, compare the outdoor-unit ID below with the nameplate." },
   candidates_nocap: {
     what: "Several Daikin model families expose the same registers on the service interface, so the exact marketing name cannot be distinguished there. The heading deliberately stays \"Daikin Altherma\" instead of guessing a model.",
-    normal: "this outdoor unit does not report its own rated capacity, so the candidates can belong to different capacity classes. The firmware decodes the values with the variant that best matches the indoor unit, but not with full certainty. Compare the outdoor-unit ID below with the nameplate.",
-    de: { what: "Mehrere Daikin-Modellfamilien liefern auf der Serviceschnittstelle dieselben Register. Deshalb lässt sich der genaue Handelsname dort nicht unterscheiden. Die Überschrift bleibt bewusst „Daikin Altherma“, statt ein Modell zu raten.",
-          normal: "diese Außeneinheit meldet ihre eigene Nennleistung nicht; die Kandidaten können deshalb verschiedenen Leistungsklassen angehören. Die Firmware dekodiert die Werte mit der anhand der Inneneinheit am besten passenden Variante, aber nicht mit voller Gewissheit. Vergleiche die Außengeräte-Kennung unten mit dem Typenschild." } },
+    normal: "this outdoor unit does not report its own rated capacity, so the candidates can belong to different capacity classes. The firmware decodes the values with the variant that best matches the indoor unit, but not with full certainty. Compare the outdoor-unit ID below with the nameplate." },
   oueeprom: {
     what: "The outdoor unit's identification bytes, shown unchanged from the service interface. No public mapping to marketing names is known, so the firmware displays the ID instead of guessing a model.",
-    normal: "for an ambiguous detection, compare it character by character with the outdoor unit's nameplate.",
-    de: { what: "Die Kennungsbytes der Außeneinheit, unverändert von der Serviceschnittstelle angezeigt. Da keine öffentliche Zuordnung zu Handelsnamen bekannt ist, zeigt die Firmware die Kennung, statt daraus einen Modellnamen zu raten.",
-          normal: "bei einer mehrdeutigen Erkennung Zeichen für Zeichen mit dem Typenschild der Außeneinheit vergleichen." } },
+    normal: "for an ambiguous detection, compare it character by character with the outdoor unit's nameplate." },
 };
 
 // A Model-card row: the same accordion as a value row when copy exists for it, else the plain row

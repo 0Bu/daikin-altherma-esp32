@@ -66,7 +66,7 @@ export async function startFixtureServer({ pageFile, projectRoot }) {
   const icon = fs.readFileSync(path.join(projectRoot, "main/www/heat_pump_icon.png"));
   const favicon = gzipSync(fs.readFileSync(path.join(projectRoot, "main/www/favicon.ico")), { level: 9 });
   const setupWork = fs.mkdtempSync(path.join(os.tmpdir(), "daikin-setup-render-"));
-  let setup;
+  let setup, localeBundle;
   try {
     const output = path.join(setupWork, "setup.html.gz");
     const built = spawnSync("python3", [path.join(projectRoot, "tools/web_asset/minify_and_gzip.py"),
@@ -74,6 +74,15 @@ export async function startFixtureServer({ pageFile, projectRoot }) {
       "--max-gzip-bytes", "4096"], { cwd: projectRoot, encoding: "utf8" });
     if (built.status !== 0) throw new Error(built.stderr || built.stdout || "setup asset build failed");
     setup = fs.readFileSync(output);
+    const cmake = fs.readFileSync(path.join(projectRoot, "main/CMakeLists.txt"), "utf8");
+    const codes = cmake.match(/set\(UI_LOCALE_CODES ([a-z ]+)\)/)?.[1].trim().split(/\s+/);
+    if (!codes?.length) throw new Error("locale build inventory unavailable");
+    const bundleOutput = path.join(setupWork, "locale-bundle.js.gz");
+    const bundle = spawnSync("python3", [path.join(projectRoot, "tools/web_asset/build_locale_bundle.py"),
+      "--locale-dir", localeDir, "--locales", ...codes, "--output", bundleOutput],
+    { cwd: projectRoot, encoding: "utf8" });
+    if (bundle.status !== 0) throw new Error(bundle.stderr || bundle.stdout || "locale bundle build failed");
+    localeBundle = fs.readFileSync(bundleOutput);
   } finally { fs.rmSync(setupWork, { recursive: true, force: true }); }
   const setupRequests = [];
   let setupReply = { status: 200, body: { ok: true, reboot: true } };
@@ -111,7 +120,9 @@ export async function startFixtureServer({ pageFile, projectRoot }) {
       const file = path.join(localeDir, `${lang}.js`);
       if (!fs.statSync(file, { throwIfNoEntry: false })?.isFile())
         return send(response, 404, "text/plain", "unknown locale");
-      return send(response, 200, "text/javascript; charset=utf-8", fs.readFileSync(file));
+      response.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8",
+        "Content-Encoding": "gzip", "Cache-Control": "no-store" });
+      return response.end(localeBundle);
     }
     if (url.pathname === "/status") {
       response.writeHead(200, JSON_HEADERS);

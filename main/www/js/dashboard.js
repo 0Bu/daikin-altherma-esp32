@@ -1368,6 +1368,46 @@ function checkupCyclingRuntime(c) {
   return `${t("check.detail.channel_coverage", t("mode.heat"), `${coverage}%`)}.`;
 }
 
+// Independent observations around witnessed stops. Never use a legacy cycling verdict/split as
+// their availability gate, and never turn missing inputs or zero evaluable stops into negatives.
+function checkupStopContextHtml(c) {
+  const s = c.stop_context;
+  if (!s || typeof s !== "object") return "";
+  const tr = key => t(`check.stop.${key}`);
+  const state = tr("states").split("|");
+  const count = (n) => Number.isFinite(n) && n >= 0
+    ? `${s.saturated === true ? "≥" : ""}${n.toLocaleString(LANG)}` : t("sys.nodata");
+  const population = Number.isFinite(s.witnessed_stops_recent_heating)
+    ? t("check.stop.population", count(s.witnessed_stops_recent_heating)) : state[9];
+  const categories = ["low_rps_above_main_target", "request_withdrawal", "defrost",
+    "dhw_transition", "route_mode_transition"];
+  const labels = tr("categories").split("|");
+  const rows = categories.map((id, k) => {
+    const v = s.categories?.[id];
+    const value = !v || v.supported == null ? t("sys.nodata") : v.supported === false
+      ? state[8] : [v.positive, v.evaluable, v.complete].map(count).join(" / ");
+    return `${labels[k]}: ${value}`;
+  });
+  const other = ["unclassified_stops", "unknown_stops", "partial_stops", "censored_stops",
+    "target_changed", "time_overflow"]
+    .map(key => count(s[key])).join(" / ");
+  // This watermark counts reported storage-loss incidents across retained boot-local counters.
+  // It is a lower bound, independent of stop population saturation and of all stop qualifiers.
+  const loss = Number.isFinite(s.dropped) && s.dropped >= 0
+    ? `≥${s.dropped.toLocaleString(LANG)}` : t("sys.nodata");
+  const states = ["coverage_partial", "restore_pending", "persistence_pending", "pending", "saturated"]
+    .map((key, k) => s[key] === true ? state[k + 3] : "");
+  if (s.confirmed === false) states.push(state[0]);
+  states.push(s.dated == null ? t("sys.nodata") : state[s.dated ? 1 : 2]);
+  const coverage = Number.isFinite(s.readable_s) && Number.isFinite(s.observed_hours)
+    ? t("check.stop.coverage", checkupDuration(s.readable_s), s.observed_hours) : "";
+  return descParaHtml(`<span class="vdesc-n">${esc(tr("title"))}</span> — ${esc(population)}`) +
+    [[coverage, ...states].filter(Boolean).join(" · "), tr("counts"), ...rows,
+      `${tr("other").split("|").join(" / ")}: ${other}`, t("check.stop.loss", loss),
+      tr("rule"), tr("limits")]
+      .map(row => descParaHtml(esc(row))).join("");
+}
+
 function checkupStatusKey(c) {
   const verdict = typeof c === "string" ? c : c?.verdict;
   // Older firmware reported this completed, unsuccessful day as collecting. Keep its
@@ -1479,7 +1519,10 @@ function checkupDetailHtml(c, fullSpan = c.full_span === true, report = {}) {
         : t("check.detail.collecting_unknown");
     }
   } else if (!detail) {
-    detail = t(checkupDetailKey(c, statusKey));
+    const stopEvidence = c.id === "cycling" &&
+      Number.isFinite(c.stop_context?.witnessed_stops_recent_heating);
+    detail = t(statusKey === "unavailable" && stopEvidence
+      ? "check.detail.observation" : checkupDetailKey(c, statusKey));
   }
   // The reason is selected by firmware, not inferred from missing numbers in the browser.
   const reasonKey = {
@@ -1544,7 +1587,7 @@ function checkupDetailHtml(c, fullSpan = c.full_span === true, report = {}) {
   }
   return descParaHtml(`<span class="vdesc-n">${esc(value)}</span>` +
            (time.length ? ` · ${esc(time.join(" · "))}` : "") + ` — ${esc(what)}`) +
-         descParaHtml(esc(detail)) +
+         descParaHtml(esc(detail) + (c.id === "cycling" ? checkupStopContextHtml(c) : "")) +
          descNoteHtml(t("normal.label"), normal);
 }
 

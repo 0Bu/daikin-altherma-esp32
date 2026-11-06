@@ -1,4 +1,4 @@
-// translation-source: b5d29da273c417b207489763facc3fda04530140b4b0389affcd7643d701cd08
+// translation-source: 3e8092cf0e419496e78d337338f27af53fbda73918ad45f0bbe0970b83ebeddc
 I18N.de = localeValues([
   /* sys.nodata */ "Keine Daten",
   /* sys.unreachable */ "Nicht erreichbar",
@@ -223,6 +223,16 @@ I18N.de = localeValues([
   /* check.cycling_cooling */ (n) => `Kühlen ${n} ausgeschlossen`,
   /* check.cycling_censored */ (n) => `${n} ohne Zuordnung`,
   /* check.cycling_causes */ "Umschaltung|Neustart/Journal|Start unbeobachtet",
+  /* check.stop.title */ "Kontext beim Stopp",
+  /* check.stop.population */ (n) => `${n} beobachtete Stopps nach kürzlichem Heizbetrieb`,
+  /* check.stop.coverage */ (d, h) => `Lesbare Verdichterzeit ${d} · ${h} Stundenblöcke`,
+  /* check.stop.categories */ "niedrige Drehzahl + Abstand zum Hauptsollwert|Rücknahme der Innengeräteanforderung|Abtauen aktiv|Warmwasserübergang|Wechsel von Strömungsweg/Betriebsart",
+  /* check.stop.counts */ "positiv / auswertbar / vollständig",
+  /* check.stop.other */ "nicht zugeordnet|unbekannt|teilweise|abgebrochen|Sollwert geändert|Zeitüberlauf",
+  /* check.stop.loss */ (n) => `Speicherverlustmeldungen ${n}`,
+  /* check.stop.states */ "Quelle nicht bestätigt|Datierte Beobachtung|Undatierte Beobachtung|24-Stunden-Abdeckung unvollständig|Wiederherstellung gespeicherter Stunden wartet auf Uhr-/Quellenbestätigung|Abgeschlossene Beobachtungen warten auf Speicherung|Ein Stopp wartet auf Messpunkte nach dem Stopp|Zähler gesättigt: Untergrenzen|nicht unterstützt|Noch keine lesbare Stopp-Grundgesamtheit.",
+  /* check.stop.rule */ "Vorläufiges Projektfenster: einschließlich ±30 s, keine Messlücke >15 s. Während bestätigten Heizbetriebs: 0 < Verdichterdrehzahl ≤22 rps, gemeldeter Vorlauf R1T vor dem Zusatzheizer ≥gemeldeter Hauptzonen-Sollwert +2 K, Sollwert seit 30 s stabil.",
+  /* check.stop.limits */ "Stoppkategorien und Zusatzangaben überlappen für dieselben gespeicherten Stopps. Auswertbar bedeutet positiv oder vollständiges abgetastetes Fenster; nur vollständig erlaubt ein negatives Ergebnis für die Messpunkte. Signale zwischen Messpunkten bleiben möglich. R1T ist die gemeldete Vorlauftemperatur vor dem elektrischen Zusatzheizer. Ihr Abstand zum gemeldeten Hauptzonen-Sollwert ist eine beobachtete Differenz, kein gemessenes geregeltes Überschwingen. Das belegt weder Stoppursache noch Mindestmodulation oder eine Anforderung eines externen Thermostats.",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · Mittel ${mean} °C`,
   /* check.min */ (m) => `${m} min`,
@@ -937,4 +947,23 @@ I18N.de = localeValues([
   /* lang.fi */ "Suomi",
   /* lang.saved */ "Sprache gespeichert",
   /* hist.cop_none */ "Kein COP-Verlauf bei einem Stromwert von CT-Klemmen. Welche Lasten sie erfassen, hängt von der Verdrahtung ab; die Wärmeseite endet vor BUH und erfasst keine direkte BSH-Wärme. Die Bilanzgrenzen können daher abweichen.",
+]);
+
+// Unchanged German specialist copy, loaded with the existing German locale asset.
+MODEL_DESCRIPTION_I18N.de = modelDescriptionValues([
+  /* health_fault */ ["Aktuelle und gespeicherte Störungsmeldungen der Wärmepumpe.","Keine gemeldete Störung. Eine Meldung belegt keine Ursache; ihr Verschwinden belegt keine Behebung."],
+  /* health_dhw_loss */ ["Stärkste erfasste Abkühlung pro Stunde am Speichersensor R5T.","Interner Hinweis ≥0,8 K/h ohne Pumpen-/Zapfmerkmale. R5T misst einen Punkt, keine Energie oder den ganzen Speicher. Fehlende Merkmale belegen keine Zapffreiheit; null Nettoabkühlung schließt Wärmeverlust nicht aus. Zirkulationsüberschneidung belegt keine Ursache."],
+  /* health_cycling */ ["Verdichterstarts von OFF zu ON und zugeordnete abgeschlossene Heizläufe.","Interne Regel: ≥12 Heizläufe im Mittel <10 min; ≥90 % aller abgeschlossenen Läufe zugeordnet (sichere Übergaben ausgenommen) und ≥90 % Heiz-/ungeklärte Laufzeit abgedeckt. Kein Daikin-Grenzwert."],
+  /* health_defrost */ ["Abtaustarts und ihr Anteil an der Verdichterlaufzeit bei lesbarem Verdichter- und Abtaustatus.","Interne Regel: ≥3 zugeordnete Vorgänge und >15 %. Luftfeuchte und Temperatur der gesamten Wärmetauscherfläche fehlen; kein Daikin-Störungsgrenzwert."],
+  /* health_pressure */ ["Niedrigster erfasster Wasserdruck.","Interne Regel: ≤1,0 bar ergibt HINWEIS, 60 durchgehend beobachtete Sekunden WARNUNG. Diese verbreitete Grenze ist nicht für jedes Modell bestätigt; maßgeblich ist dessen genaue Anleitung."],
+  /* health_flow */ ["Niedrigster Durchfluss nach 60 durchgehend beobachteten Sekunden mit laufender interner Pumpe.","Kein allgemeiner Normalwert. Kein Nenndurchfluss oder Teillastnachweis. Anleitungsgrenzen benötigen dasselbe Modell, dieselbe Betriebsart und Bedingungen; der Wert allein belegt keine Unterversorgung."],
+  /* health_heater */ ["Beobachtete ON-Zeit des Zusatzheizers (BUH) und Speicherheizstabs (BSH).","Es gibt keine feste normale Laufzeit; sie hängt vom Heiz- und Warmwasserbedarf ab. Laufzeit ist kein Energieverbrauch und belegt kein unnötiges Heizen."],
+  /* health_retries */ ["Vergleichbare Anstiege in fünf experimentellen Zählern, auch im Stillstand oder an Verdichter-Zustandsgrenzen.","Für diese experimentellen Zähler ist kein Normalbereich belegt. Lücken, Rücksetzungen und fehlende Anstiege zählen nicht. Stabile Zähler schließen Begrenzung nicht aus und belegen keine Ursache."],
+  /* free_heap */ ["Arbeitsspeicher, den die Firmware gerade nicht verwendet. Kurze Schwankungen sind normal, weil WLAN, MQTT und Web-Anfragen vorübergehend Speicher belegen; der 24-Stunden-Verlauf ist aussagekräftiger als ein Einzelwert.","eine stabile Linie mit Einbrüchen, die sich erholen; dauerhafter Rückgang kann auf nicht freigegebenen Speicher hinweisen. Ein kompatibler Neustart bei erhaltener Spannung kann den RAM-Verlauf bewahren. Wenn der RAM nicht übernommen werden kann, kommen nur passende, datierte 5-Minuten-Intervalle aus dem Flash-Journal nach dem Zeitabgleich zurück. Das 5-Minuten-Raster kann kurze Unterbrechungen verbergen; längere können Lücken hinterlassen. Offene und jüngste ungespeicherte Intervalle können fehlen; ohne Journal gibt es keine Flash-Wiederherstellung."],
+  /* max_alloc */ ["Der größte zusammenhängende freie RAM-Block. Manche Vorgänge, darunter TLS-Aufbau und OTA-Arbeiten, benötigen einen ausreichend großen Block, auch wenn insgesamt noch mehr RAM frei ist.","der Wert liegt nie über dem gesamten freien RAM. Bleibt der freie RAM stabil, während dieser Wert dauerhaft sinkt, wird der Speicher fragmentiert; dann kann eine große Reservierung scheitern, obwohl noch RAM frei ist."],
+  /* capacity */ ["Die Nennleistung der Außeneinheit, aus ihrer eigenen Kennungsseite gelesen. Eine Größenklasse der Hardware — wofür das Gerät gebaut ist, nicht was es gerade liefert."],
+  /* capacity_iu */ ["Die Nennleistung der INNENEINHEIT. Sie wird angezeigt, weil die Kennungsseite dieser Außeneinheit keine eigene Leistung enthält. Die Firmware benennt damit ausdrücklich die Einheit, aus der der Wert stammt.","Innen- und Außeneinheit können unterschiedliche Leistungsklassen haben. Deshalb darf dieser Wert nicht als Nennleistung der Außeneinheit oder des Gesamtsystems gelesen werden."],
+  /* candidates */ ["Mehrere Daikin-Modellfamilien liefern auf der Serviceschnittstelle dieselben Register und Werte. Deshalb lässt sich der genaue Handelsname dort nicht unterscheiden. Die Überschrift bleibt bewusst „Daikin Altherma“, statt ein Modell zu raten.","die Messwerte sind davon nicht betroffen: Die Außeneinheit hat ihre Nennleistung gemeldet, und alle verbliebenen Kandidaten verwenden dieselbe Leistungsklasse und Registerauslegung. Für den genauen Modellnamen vergleiche die Außengeräte-Kennung unten mit dem Typenschild."],
+  /* candidates_nocap */ ["Mehrere Daikin-Modellfamilien liefern auf der Serviceschnittstelle dieselben Register. Deshalb lässt sich der genaue Handelsname dort nicht unterscheiden. Die Überschrift bleibt bewusst „Daikin Altherma“, statt ein Modell zu raten.","diese Außeneinheit meldet ihre eigene Nennleistung nicht; die Kandidaten können deshalb verschiedenen Leistungsklassen angehören. Die Firmware dekodiert die Werte mit der anhand der Inneneinheit am besten passenden Variante, aber nicht mit voller Gewissheit. Vergleiche die Außengeräte-Kennung unten mit dem Typenschild."],
+  /* oueeprom */ ["Die Kennungsbytes der Außeneinheit, unverändert von der Serviceschnittstelle angezeigt. Da keine öffentliche Zuordnung zu Handelsnamen bekannt ist, zeigt die Firmware die Kennung, statt daraus einen Modellnamen zu raten.","bei einer mehrdeutigen Erkennung Zeichen für Zeichen mit dem Typenschild der Außeneinheit vergleichen."],
 ]);

@@ -1142,7 +1142,8 @@ async function assertDashboardCardNavigation(page, context, viewport) {
 
 async function captureNativeEvidence(page, context, target = "valueGroups", ancestor = null) {
   const directory = process.env.DAIKIN_BROWSER_EVIDENCE_DIR;
-  if (!directory || !/^(desktop\/en|phone\/de)(\/|$)/.test(context)) return;
+  if (!directory || (!/^(desktop\/en|phone\/de)(\/|$)/.test(context) &&
+      !context.endsWith("/diagnosis/cycling"))) return;
   assert.ok(path.isAbsolute(directory), "browser evidence directory must be absolute");
   fs.mkdirSync(directory, { recursive: true });
   const elementQuery = ancestor
@@ -1195,7 +1196,21 @@ async function assertPlantDiagnosis(page, context) {
           best_aborted_s: 2400 },
         { id: "cycling", verdict: "ok", evidence: "observation", reason: "class_unavailable",
           starts: 17, mean_run_s: null, space_runs: null, censored_runs: 3,
-          observed_s: 77760, required_s: 77760 },
+          observed_s: 77760, required_s: 77760,
+          stop_context: {
+            confirmed: true, readable_s: 3600, observed_hours: 2, dated: false,
+            coverage_partial: true, restore_pending: true, persistence_pending: true,
+            pending: true, dropped: 1, witnessed_stops_recent_heating: 4,
+            unclassified_stops: 1, unknown_stops: 2, partial_stops: 3, censored_stops: 1,
+            target_changed: 2, time_overflow: 0, saturated: false,
+            categories: {
+              low_rps_above_main_target: { supported: true, positive: 3, evaluable: 4, complete: 2 },
+              request_withdrawal: { supported: true, positive: 3, evaluable: 4, complete: 2 },
+              defrost: { supported: false, positive: null, evaluable: null, complete: null },
+              dhw_transition: { supported: true, positive: 0, evaluable: 0, complete: 0 },
+              route_mode_transition: { supported: true, positive: 1, evaluable: 4, complete: 4 }
+            }
+          } },
         { id: "defrost", verdict: "ok", evidence: "observation",
           reason: "defrost_events_insufficient", count: 0, paired_count: 0,
           share_pct: null, defrost_s: 0, run_s: 7200 },
@@ -1248,6 +1263,42 @@ async function assertPlantDiagnosis(page, context) {
       assert.equal(block.normal, normalLabel, `${context}/${block.id}: Normal last`);
       assert.ok(block.text.every(text => text.trim()), `${context}/${block.id}: no empty block`);
     }
+    const stopText = () => page.evaluate(`document.querySelector("[data-desc='model:health_cycling']")
+      .closest('.vitem').innerText`);
+    for (const [key, args] of [["population", ["4"]], ["counts", []], ["rule", []], ["limits", []],
+      ["loss", ["≥1"]]]) {
+      const expected = await page.evaluate(`t(${JSON.stringify("check.stop." + key)},
+        ...${JSON.stringify(args)})`);
+      assert.ok((await stopText()).includes(expected), `${context}: stop context retains ${key}`);
+    }
+    for (const text of ["3 / 4 / 2", "0 / 0 / 0"])
+      assert.ok((await stopText()).includes(text), `${context}: retain explicit category counts ${text}`);
+    const lossIsSeparate = await page.evaluate(`(() => {
+      const row = document.querySelector("[data-desc='model:health_cycling']").closest('.vitem');
+      const text = t('check.stop.loss', '≥1');
+      return Array.from(row.querySelectorAll('.vdesc-p')).some(p => p.innerText === text);
+    })()`);
+    assert.equal(lossIsSeparate, true,
+      `${context}: storage-loss watermark has its own paragraph outside the six stop qualifiers`);
+    const states = await page.evaluate("t('check.stop.states').split('|')");
+    for (const index of [2, 3, 4, 5, 6, 8])
+      assert.ok((await stopText()).includes(states[index]), `${context}: retain stop state ${index}`);
+    // A missing legacy cycling population must leave the independent stop context accessible
+    // through the same real disclosure, retaining the firmware's unavailable verdict.
+    await page.evaluate(`(() => {
+      Object.assign(S.status.health.checks[2], { starts: null, verdict: 'unavailable', split: false });
+      renderApp(); return true;
+    })()`);
+    await page.frame();
+    assertLayout(await page.evaluate(layoutAudit), `${context}/stop-context-without-legacy`);
+    assert.equal(await page.evaluate(`document.querySelector("[data-desc='model:health_cycling'] .vrow-val").innerText`),
+      await page.evaluate("t('check.status.unavailable')"), `${context}: preserve core cycling verdict`);
+    assert.ok((await stopText()).includes(await page.evaluate("t('check.stop.population', '4')")),
+      `${context}: independent stop observations survive unavailable legacy evidence`);
+    assert.ok((await stopText()).includes(await page.evaluate("t('check.detail.observation')")),
+      `${context}: unavailable legacy classification remains an observation without a new verdict`);
+    assert.ok(!(await stopText()).includes(await page.evaluate("t('check.detail.unavailable')")),
+      `${context}: legacy unavailability cannot deny all readable profile evidence`);
     const discardedContext = await page.evaluate(`(() => {
       const fixture = S.status.health.checks.find(check => check.id === 'dhw_loss');
       return t('check.detail.dhw_aborted', fixture.aborts,

@@ -5,7 +5,7 @@ script with the English fallback catalog.
 [`../app.sources`](../app.sources) is the single source of ordering for the firmware build, tests,
 audits and the GIF recorder. The fragments intentionally share one lexical scope; they are not
 separate browser modules and do not create additional HTTP requests themselves. Selecting a
-non-English language loads one separately compressed catalog as described below.
+non-English language loads the shared offline locale bundle described below.
 
 | Source | Responsibility |
 |---|---|
@@ -27,13 +27,9 @@ the exact concatenation that the device receives. The semantic UI tests and audi
 concatenation through `tools/ui/read_app_source.mjs`.
 
 Non-English catalogs live under [`../locales`](../locales) and deliberately do not appear in
-`app.sources`. CMake minifies and compresses each one independently; `/locale.js?lang=…` serves the
-selected signed-image asset from the device. Alongside the compact UI catalog, the eleven newer locale
-modules contain their schematic inspector, HomeHub labels and value/model explanations; German keeps
-that established specialist copy inline in the common source tables. The five latest packs also
-carry their fault-code meanings and the two cross-source difference explanations, so those languages
-do not enlarge the already bounded startup response.
-`test/test_ui_locale_catalogs.mjs` enforces key,
-type, function-arity, selector and size parity. The same asset also registers concise copy for all
-40 schematic inspector targets and stable offset-keyed names for the 32 HomeHub rows visible in the
-UI; X10A transport labels remain unchanged English register identities.
+`app.sources`. CMake retains per-file size checks and packs all twelve catalogs into one signed-image
+resource served at `/locale.js?lang=…`; the first request registers every non-English locale. German
+model explanations live in `locales/de.js`; its other established specialist tables remain inline.
+The [architecture](../../../docs/ARCHITECTURE.md#http-and-browser-transport) owns the bundle format and resource costs.
+`test/test_ui_locale_catalogs.mjs` enforces key, type, function-arity, selector and size parity,
+including specialist tables. X10A transport labels remain unchanged English register identities.

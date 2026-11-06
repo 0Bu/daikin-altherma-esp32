@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 65298ab532478496386f0f0ae94d34dba59f93ad1a335dcf1ac45cd4f484c2e7 -->
+<!-- diagnostic-evidence-contract: 878179bf552ba4a2afa0dd4d28d8c5ff808a0cb62f1600177e0df8da635d1d49 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -271,6 +271,34 @@ manufacturer sequencing evidence. The anonymized synthetic equivalent is retaine
 The unchanged R1 publication and report were reopened on 28 October 2026; they do not establish
 these transition or population rules.
 
+**Independent stop context:** [`stop_context.hpp`](../main/logic/stop_context.hpp) observes a
+witnessed running-to-stopped edge only after an observed OFF-to-running segment with recent
+confirmed space-heating context. Cooling-only and DHW-only segments do not enter its denominator;
+mixed transitions remain separate from pure completed heating runs. Five overlapping categories
+record positive low-speed/temperature-gap, indoor request withdrawal, defrost, DHW transition and
+route/mode transition evidence. An unclassified stop has no established positive category; it is
+not a proven negative. Missing optional inputs affect their categories only. Complete means
+readable sampled endpoints over the inclusive ±30-second window, never proof against between-poll
+pulses. Gaps beyond 15 seconds, restart, shutdown and source changes censor incomplete windows.
+A new run ends an overlapping pending window. Target changes withdraw the temperature category;
+it needs 30 seconds of stable reported target. During confirmed space heating, the provisional
+positive rule is speed >0 and
+≤22 rps with reported pre-BUH R1T at least 2 K above the reported main leaving-water target.
+This is that telemetry-pair difference, not controlled-loop overshoot. The request bit is the indoor
+unit's compressor request, including DHW; it does not identify an external thermostat.
+
+Daikin's Altherma 3 R W guide **4P629085-1E, 2024.04**, §10.6.5 ([German p.199][stop-guide-de];
+[English p.188][stop-guide-en]), permits a heating-only `[4.B]/[9-04]` overshoot allowance of
+**1–4 K** above desired leaving-water temperature. Its indoor diagram (§16.2, English p.266)
+distinguishes the heat-exchanger outlet R1T from the backup-heater outlet R2T. These model-family
+facts do not identify the controller's X10A operands, installed setting or sensor calibration.
+The setting remains unknown unless independently read; +2 K alone establishes no abnormality.
+The manuals and R1 Summary (PDF p.3) were reopened on 5 November 2026. None validates 22 rps,
++2 K or the temporal windows as manufacturer thresholds. No category proves minimum modulation,
+closed valves, oversizing, an incorrect curve or a stop cause. Source/consent-bound hourly
+restoration and pre-commit reset limits are described in
+[ARCHITECTURE.md](ARCHITECTURE.md#history-and-diagnosis-persistence).
+
 **Not established:** The note identifies neither oversizing nor incorrect hydraulic balancing.
 The observed run population and its outdoor context do not establish building load, delivered heat
 or continuous weather coverage. Defrost behaviour has not yet been observed by this project; if the
@@ -497,3 +525,5 @@ prove that a source is technically applicable; that remains the human part of th
 [R1-web]: https://www.gov.uk/government/publications/heat-pump-performance-effects-of-cycling
 [R1-pdf]: https://assets.publishing.service.gov.uk/media/5a78e0d9e5274a2acd18a7c6/7389-effects-cycling-heat-pump-performance.pdf
 [R2-doi]: https://doi.org/10.1016/j.applthermaleng.2009.01.003
+[stop-guide-de]: https://www.daikin.de/content/dam/document-library/Installer-reference-guide/heat/air-to-water-heat-pump-low-temperature/erga-ev7/EHBH-E%286V.9W%29.EHBX-E%286V.9W%29.ERGA04-08EVA.ERGA-EV%287.H.H7%29_Installer%20reference%20guide_4PDE629085-1E_German.pdf
+[stop-guide-en]: https://www.daikin.eu/content/dam/document-library/Installer-reference-guide/heat/air-to-water-heat-pump-low-temperature/erga-ev7/EHBH-E%286V.9W%29.EHBX-E%286V.9W%29.ERGA04-08EVA.ERGA-EV%287.H.H7%29_Installer%20reference%20guide_4PEN629085-1E_English.pdf

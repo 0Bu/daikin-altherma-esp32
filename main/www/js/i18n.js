@@ -28,9 +28,8 @@ const uiLangSupported = (lang) => UI_LANGS.includes(lang);
 // HomeHub source rows and tap-to-expand value/model explanations need longer, domain-specific wording
 // that would make the already tight startup page too large if all languages were inlined. Locale
 // modules register those tables alongside I18N after the same device-local /locale.js request.
-// English/German retain their established in-bundle source tables; the eleven newer locales supply
-// concise specialist prose without changing the manufacturer's transport labels or using prose as
-// an identifier.
+// English retains the in-bundle fallback; German model explanations and the newer locales use
+// the same lazy catalog without changing manufacturer transport labels or using prose as an id.
 const INSPECT_I18N = Object.create(null);
 const HOMEHUB_LABEL_I18N = Object.create(null);
 const DESCRIPTION_I18N = Object.create(null);
@@ -126,14 +125,16 @@ const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* private
 // cache of the last effective language so the FIRST paint doesn't flash the browser default before
 // the async /status lands, then reconciled with the device on every poll (setLangFromStatus).
 let LANG = (() => { const c = lsGet("uiLang"); return uiLangSupported(c) ? c : autoLang(); })();
-// English stays in the startup page as the guaranteed fallback. Every other catalog is a separate,
-// pre-compressed asset served by this same ESP32: no CDN, no internet dependency, and no attempt to
-// squeeze twelve more catalogs into a dashboard already at its delivery limit. One Promise per
+// English stays in the startup page as the guaranteed fallback. The other catalogs share one
+// lossless pre-compressed asset served by this ESP32. Its first load registers all languages;
+// the startup page stays independent of that request and the internet. One Promise per
 // language coalesces boot/status races and a failed asset is remembered for this page lifetime.
 const LOCALE_LOADS = new Map();
 function localeReady(lang) {
   if (!I18N[lang]) return false;
-  if (lang === "en" || lang === "de") return true;
+  if (lang === "en") return true;
+  if (lang === "de") return !!MODEL_DESCRIPTION_I18N.de &&
+    MODEL_DESCRIPTION_LOCALE_KEYS.every(key => !!MODEL_DESCRIPTION_I18N.de[key]);
   const inspect = INSPECT_I18N[lang], homehub = HOMEHUB_LABEL_I18N[lang];
   const descriptions = DESCRIPTION_I18N[lang], models = MODEL_DESCRIPTION_I18N[lang];
   const faultCodes = FAULT_CODE_I18N[lang], mbDeltas = MB_DELTA_I18N[lang];
@@ -364,6 +365,16 @@ const I18N = {
     "check.cycling_cooling": (n) => `cooling ${n} excluded`,
     "check.cycling_censored": (n) => `${n} unclassified`,
     "check.cycling_causes": "transition|restart/journal|start not witnessed",
+    "check.stop.title": "Stop context",
+    "check.stop.population": (n) => `${n} witnessed stops after recent heating`,
+    "check.stop.coverage": (d, h) => `Readable ${d} · ${h} hourly buckets`,
+    "check.stop.categories": "low speed + main-target gap|indoor-unit request withdrawal|defrost active|hot-water transition|route/mode change",
+    "check.stop.counts": "positive / evaluable / complete",
+    "check.stop.other": "unclassified|unknown|partial|censored|target changed|time overflow",
+    "check.stop.loss": (n) => `Storage loss notices ${n}`,
+    "check.stop.states": "Unconfirmed source|Dated|Undated|Partial 24 h|Restore pending: clock/source|Storage pending|Post-window pending|Saturated: lower bounds|Unsupported|No readable stop population",
+    "check.stop.rule": "Provisional project observations: inclusive ±30 s; gaps ≤15 s. During confirmed heating, 0 < compressor speed ≤22 rps; reported pre-backup-heater leaving-water R1T ≥reported main-zone target +2 K, target stable 30 s.",
+    "check.stop.limits": "Stop categories and qualifiers overlap across the same retained stops. Evaluable = positive or complete sampled window; only complete permits sampled negatives. Between-sample signals remain unknown. Observed temperature gap, not measured controlled overshoot, minimum modulation, external thermostat request or stop cause.",
     "check.outdoor_one": (source, mean) => `${source} ${mean} °C`,
     "check.outdoor_range": (source, min, mean) => `${source} min ${min} °C · mean ${mean} °C`,
     "check.min": (m) => `${m} min`,

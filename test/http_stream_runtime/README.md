@@ -19,6 +19,15 @@ also closes without a replacement response. The Dwell race matrix exercises the 
 before its cache commit, checking source generation, profile, fingerprint, revision and state code;
 a subsequent fold during transfer cannot replace prepared values or ages.
 
+The stop-context accessor returns the real typed report POD through a controlled adapter. Actual
+status serialization distinguishes unconfirmed and unreadable null counts, supported covered-zero
+counts, and populated overlapping observations with unsupported categories remaining null. Plain
+and redacted populated responses keep the eight existing check rows and their original verdicts.
+Their bounded chunks and allocation count are checked; both responses also enter the complete
+allocation/chunk failure sweeps. Four compiling controls reject fabricated unknown counts,
+missing covered-zero evidence, an omitted object and leaked unsupported counts. These are wire
+and stream-boundary checks, not producer or journal restoration evidence.
+
 Scan evidence includes an empty result, valid Unicode/escaping and 20 SSIDs containing 32 invalid
 bytes each, with independent row/RSSI expectations. The maximum response spans five bounded chunks;
 its production C++ allocation stays below 2 KiB and no allocation follows the first emission. Scan

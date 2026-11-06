@@ -18,8 +18,8 @@ tag `zopfli-1.0.3`, commit `bd64b2f0553d4f1ef4e6627647c5d9fc8c71ffc0`.
 `UPSTREAM.json` records the source archive and individual file hashes. PNG code, the upstream CLI,
 the zlib container and the unused library dispatcher are omitted. No generated binaries are vendored.
 
-The firmware build selects Zopfli with five iterations for `index.html.gz` and all twelve locale
-catalogs. The Python adapter compiles its
+The firmware build selects Zopfli with five iterations for `index.html.gz`, the locale bundle and
+the twelve per-catalog quality-check artifacts. The Python adapter compiles its
 small stdin/stdout helper using native `cc` (`HOST_CC` can name another native compiler), with no
 package installation or network access. It caches the executable in a private temporary directory
 keyed by source/adapter hashes, compiler identity, options and platform. `WEB_ASSET_CACHE_DIR` can
@@ -27,3 +27,11 @@ select another private, user-owned cache directory. Concurrent compilation publi
 The emitted gzip has zero timestamp, no filename, OS byte 255 and a verified exact decode. Setup
 and MCP retain zlib. The standalone locale helper also defaults to zlib and needs no native compiler
 unless `--gzip-encoder zopfli` is selected.
+
+## Browser locale decoder
+
+`lzma-js/` contains the unmodified decompressor and its complete MIT license, with exact upstream
+commit and file hashes in `UPSTREAM.json`. `build_locale_bundle.py` uses Python's standard-library
+LZMA encoder and embeds this decoder in the locale resource. The
+[architecture reference](../../../docs/ARCHITECTURE.md#http-and-browser-transport) owns the delivery
+and resource bounds.

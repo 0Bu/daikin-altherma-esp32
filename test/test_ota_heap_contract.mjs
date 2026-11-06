@@ -556,8 +556,20 @@ assert.match(httpDeadline,
 assert.match(httpDeadline,
   /static_assert\(std::atomic<int>::is_always_lock_free[\s\S]{0,220}?static_assert\(std::atomic<bool>::is_always_lock_free/,
   "timer-task socket and verdict publication must never hide allocator-backed atomic locks");
-assert.match(httpDeadline, /StackType_t\s+watchdog_stack\[kWatchdogStackBytes\]/,
-  "the deadline watchdog stack must be static rather than another failure-time heap allocation");
+// The zero-initialized stack is separate from the state with socket{-1}, preserving static RAM
+// while avoiding an initialized-data flash copy. Bind that exact array to the static task call.
+const watchdogStack = httpDeadline.match(
+  /DeadlineTimerState s_deadline;\s*StackType_t\s+([A-Za-z_]\w*)\[kWatchdogStackBytes\]\{\};/);
+assert.ok(watchdogStack,
+  "the deadline watchdog stack must be separately zero-initialized namespace storage");
+assert.match(httpDeadline, /constexpr uint32_t\s+kWatchdogStackBytes\s*=\s*3072;/,
+  "moving the static watchdog stack must preserve its 3072-byte budget");
+const staticWatchdogCreate = httpDeadline.match(/xTaskCreateStatic\(([\s\S]*?)\);/);
+assert.ok(staticWatchdogCreate, "the deadline watchdog must retain static task creation");
+assert.equal(staticWatchdogCreate[1].replace(/\s+/g, " ").trim(),
+  `socket_deadline_watchdog_task, "http_abs_dl", kWatchdogStackBytes, nullptr, ` +
+  `TASK_PRIO_HTTP_DEADLINE, ${watchdogStack[1]}, &s_deadline.watchdog_task_storage`,
+  "the static task must receive the same zero-initialized stack and its unchanged size");
 assert.doesNotMatch(httpDeadline, /\bxTaskCreate\s*\(|esp_http_client_cancel_request/,
   "the deadline must not dynamically create a task or mutate esp_http_client from another task");
 const watchdogTaskStart = httpDeadline.indexOf("void socket_deadline_watchdog_task(");

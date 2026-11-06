@@ -38,22 +38,24 @@ inline std::vector<daik::CachedValue> rows, modbus_rows;
 inline daik::HpValuesIdentity         identity{"generic", 0x1234, 7, 11};
 inline bool                           ota = false, weather = false, modbus_live = false;
 // Weather's TLS phase is `weather`; readers counts admitted /values snapshots in that exclusion.
-inline int                 values_readers = 0, values_readers_peak = 0;
-inline bool                config_unreadable         = false;
-inline bool                change_history_epoch      = false;
-inline uint32_t            epoch                     = 42;
-inline uint32_t            room_identity             = 0;
-inline bool                room_snapshot_unavailable = false;
-inline unsigned            room_snapshot_calls       = 0;
-inline int                 failure = 0, stage_race = 0;
-inline unsigned            stack_samples = 0;
-inline unsigned            wifi_calls    = 0;
-inline daik::WifiScanEntry scan_rows[20]{};
-inline int                 scan_count = 0, scan_failure = 0;
-inline unsigned            scan_calls             = 0;
-inline size_t              scan_first_allocations = 0;
-inline std::string         log;
-[[noreturn]] void          fail(const char* message) {
+inline int                            values_readers = 0, values_readers_peak = 0;
+inline bool                           config_unreadable         = false;
+inline bool                           change_history_epoch      = false;
+inline uint32_t                       epoch                     = 42;
+inline uint32_t                       room_identity             = 0;
+inline bool                           room_snapshot_unavailable = false;
+inline unsigned                       room_snapshot_calls       = 0;
+inline int                            failure = 0, stage_race = 0;
+inline unsigned                       stack_samples = 0;
+inline unsigned                       wifi_calls    = 0;
+inline daik::WifiScanEntry            scan_rows[20]{};
+inline int                            scan_count = 0, scan_failure = 0;
+inline unsigned                       scan_calls             = 0;
+inline size_t                         scan_first_allocations = 0;
+inline daik::CheckupStopContextReport stop_report{};
+inline unsigned                       stop_report_calls = 0;
+inline std::string                    log;
+[[noreturn]] void                     fail(const char* message) {
     std::fprintf(stderr, "FAIL %s: %s\n", oracle.c_str(), message);
     std::exit(1);
 }
@@ -86,6 +88,8 @@ void reset() {
     scan_count = scan_failure = 0;
     scan_calls                = 0;
     scan_first_allocations    = 0;
+    stop_report               = {};
+    stop_report_calls         = 0;
     std::memset(scan_rows, 0, sizeof(scan_rows));
     sdk::now        = 10000000;
     sdk::clock_step = 0;
@@ -96,13 +100,13 @@ void reset() {
     modbus_rows.clear();
     for (size_t i = 0; i < 129; ++i) {
         daik::CachedValue row;
-        row.label = i == 0 ? "Flag" : "Temp Café \"quote\"\\unit\n";
-        row.value = i == 0 ? "0" : "12.34567890123456789";
-        row.unit  = i == 0 ? "" : "°C";
-        row.reg   = i == 0 ? 0x60 : 0x61;
-        row.off   = i == 0 ? 12 : static_cast<uint8_t>(i);
-        row.conv  = i == 0 ? 300 : 217;
-        row.held  = i == 1;
+        row.label        = i == 0 ? "Flag" : "Temp Café \"quote\"\\unit\n";
+        row.value        = i == 0 ? "0" : "12.34567890123456789";
+        row.unit         = i == 0 ? "" : "°C";
+        row.reg          = i == 0 ? 0x60 : 0x61;
+        row.off          = i == 0 ? 12 : static_cast<uint8_t>(i);
+        row.conv         = i == 0 ? 300 : 217;
+        row.held         = i == 1;
         row.held_unknown = i == 2;
         rows.push_back(std::move(row));
     }
@@ -165,6 +169,34 @@ void configure_room() {
     current.ref_temp_generation = 17;
     room_identity               = daik::logic::history_room_identity(current);
     check(room_identity != 0, "configured room must have its own history identity");
+}
+void configure_stop_context() {
+    stop_report                 = {};
+    stop_report.capability_mask = 27; // defrost unsupported; other inputs supported
+    stop_report.pending         = true;
+    auto& report                = stop_report.observation;
+    report.confirmed            = true;
+    report.readable_us          = 3600123456;
+    report.observed_hours       = 2;
+    report.dropped              = 9; // independent loss watermark, not a disjoint stop population
+    report.restore_pending      = false;
+    report.persistence_pending  = true;
+    auto& c                     = report.counters;
+    c.witnessed_stops_recent_heating = 7;
+    const uint16_t positive[]        = {3, 4, 5, 2, 3};
+    const uint16_t evaluable[]       = {6, 7, 7, 5, 6};
+    const uint16_t complete[]        = {4, 5, 6, 3, 4};
+    for (size_t k = 0; k < daik::logic::STOP_CONTEXT_CATEGORIES; ++k) {
+        c.positive[k]  = positive[k];
+        c.evaluable[k] = evaluable[k];
+        c.complete[k]  = complete[k];
+    }
+    c.unclassified   = 1;
+    c.unknown        = 2;
+    c.partial        = 3;
+    c.censored       = 2;
+    c.target_changed = 1;
+    c.saturated      = true;
 }
 void allocation_sweep(const char* uri, esp_err_t (*handler)(httpd_req_t*)) {
     auto baseline = request();
@@ -370,9 +402,13 @@ void time_now(int64_t& seconds, int32_t& ms) {
     seconds = 2000000000;
     ms      = 0;
 }
-const char*          checkup_persist_state() { return "no_record"; }
-logic::CheckupReport checkup_report() { return {}; }
-size_t               diag_dump(char* out, size_t cap) {
+const char*              checkup_persist_state() { return "no_record"; }
+logic::CheckupReport     checkup_report() { return {}; }
+CheckupStopContextReport checkup_stop_context_report() {
+    ++fixture::stop_report_calls;
+    return fixture::stop_report;
+}
+size_t diag_dump(char* out, size_t cap) {
     const size_t n = std::min(cap, fixture::log.size());
     std::memcpy(out, fixture::log.data(), n);
     return n;
@@ -439,6 +475,73 @@ int main(int argc, char** argv) {
             emit(req, redact ? "config-absent-redacted" : "config-absent-plain");
         }
     });
+    run("stop_context_absent", [] {
+        for (const bool confirmed : {false, true}) {
+            stop_report.observation.confirmed = confirmed;
+            stop_report.capability_mask       = confirmed ? 31 : 0;
+            auto           req                = request();
+            const unsigned calls              = stop_report_calls;
+            check(invoke(req, "/status", daik::h_status) == ESP_OK, "absent stop status failed");
+            successful(req);
+            check(stop_report_calls == calls + 1,
+                  "status must take exactly one typed stop snapshot");
+            check(req.response.find("\"witnessed_stops_recent_heating\":null") !=
+                          std::string::npos &&
+                      req.response.find("\"positive\":null") != std::string::npos,
+                  "unreadable stop context fabricated numeric observations");
+            emit(req, confirmed ? "stop-unreadable" : "stop-unconfirmed");
+        }
+    });
+    run("stop_context_covered_zero", [] {
+        stop_report.observation.confirmed       = true;
+        stop_report.observation.readable_us     = 37000001;
+        stop_report.observation.observed_hours  = 1;
+        stop_report.observation.dated           = true;
+        stop_report.observation.partial         = false;
+        stop_report.observation.restore_pending = false;
+        stop_report.capability_mask             = 31;
+        auto req                                = request();
+        check(invoke(req, "/status", daik::h_status) == ESP_OK, "zero-population status failed");
+        successful(req);
+        check(stop_report_calls == 1, "zero population must use one typed stop snapshot");
+        check(req.response.find("\"witnessed_stops_recent_heating\":0") != std::string::npos &&
+                  req.response.find("\"positive\":0,\"evaluable\":0,\"complete\":0") !=
+                      std::string::npos,
+              "readable zero-stop evidence became null or fabricated counts");
+        emit(req, "stop-covered-zero");
+    });
+    run("stop_context_populated", [] {
+        auto empty = request();
+        check(invoke(empty, "/status", daik::h_status) == ESP_OK,
+              "stop allocation baseline failed");
+        const size_t baseline_allocations = sdk::allocations;
+        configure_stop_context();
+        for (const bool redact : {false, true}) {
+            auto           req   = request();
+            const unsigned calls = stop_report_calls;
+            check(invoke(req, redact ? "/status?redact=1" : "/status", daik::h_status) == ESP_OK,
+                  "populated stop status failed");
+            successful(req);
+            check(stop_report_calls == calls + 1,
+                  "populated status copied stop snapshot repeatedly");
+            check(sdk::allocations <= baseline_allocations,
+                  "compact stop append added allocations over the null-context status");
+            check(req.response.find("\"stop_context\":{") != std::string::npos &&
+                      req.response.find("\"witnessed_stops_recent_heating\":7") !=
+                          std::string::npos,
+                  "populated stop context was omitted or changed population");
+            check(req.response.find("\"low_rps_above_main_target\":{\"supported\":true,"
+                                    "\"positive\":3,\"evaluable\":6,\"complete\":4}") !=
+                          std::string::npos &&
+                      req.response.find("\"request_withdrawal\":{\"supported\":true,\"positive\":4,"
+                                        "\"evaluable\":7,\"complete\":5}") != std::string::npos,
+                  "overlapping stop observations were normalized or changed");
+            check(req.response.find("\"defrost\":{\"supported\":false,\"positive\":null,"
+                                    "\"evaluable\":null,\"complete\":null}") != std::string::npos,
+                  "unsupported defrost leaked stored counts or fabricated zero");
+            emit(req, redact ? "stop-populated-redacted" : "stop-populated");
+        }
+    });
     run("allocation_failures", [] {
         allocation_sweep("/status", daik::h_status);
         config_unreadable = true;
@@ -447,6 +550,9 @@ int main(int argc, char** argv) {
         allocation_sweep("/values", daik::h_values);
         allocation_sweep("/history?row=leaving_water", daik::h_history);
         allocation_sweep("/diag?redact=1", daik::h_diag);
+        configure_stop_context();
+        allocation_sweep("/status", daik::h_status);
+        allocation_sweep("/status?redact=1", daik::h_status);
     });
     run("chunk_failures", [] {
         chunk_sweep("/status", daik::h_status);
@@ -457,6 +563,9 @@ int main(int argc, char** argv) {
         chunk_sweep("/history?row=leaving_water", daik::h_history);
         chunk_sweep("/diag", daik::h_diag);
         chunk_sweep("/diag?redact=1", daik::h_diag);
+        configure_stop_context();
+        chunk_sweep("/status", daik::h_status);
+        chunk_sweep("/status?redact=1", daik::h_status);
     });
     run("dwell_state_and_identity", [] {
         for (int race = 0; race <= 5; ++race) {

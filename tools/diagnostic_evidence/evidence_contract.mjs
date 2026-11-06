@@ -8,6 +8,13 @@ const HEADING = /^###\s+\d+\.\s+.+\(`([a-z0-9_]+)`\)\s*$/gm;
 const SOURCE_ANCHOR = /<a id="source-((?:d|e|r)\d+)"><\/a>/g;
 const SOURCE_ID = /\[((?:D|E|R)\d+)\]/g;
 
+// Both prose review fingerprints cover the independent observation's real production path.
+export const STOP_CONTEXT_SOURCE_FILES = Object.freeze([
+  "main/logic/stop_context.hpp", "main/logic/stop_context_input.hpp",
+  "main/logic/observation_hourly.hpp", "main/logic/instrument.hpp", "main/logic/heartbeat.hpp",
+  "main/stop_observation_store.hpp", "main/stop_observation_store.cpp", "main/history.cpp",
+]);
+
 function occurrences(text, needle) {
   return text.split(needle).length - 1;
 }

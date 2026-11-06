@@ -18,6 +18,7 @@
 #include "hp_poll.hpp"          // CachedValue
 #include "logic/checkup.hpp"
 #include "logic/checkup_persist.hpp"
+#include "stop_observation_store.hpp"
 
 #include <cstddef>
 
@@ -89,6 +90,15 @@ logic::CheckupReport checkup_report();
 // Compact completed-run evidence for MQTT. Shares the evaluator's pure projection, without
 // constructing the full eight-check report on the MQTT task's stack. No allocation under its lock.
 logic::CheckupCyclingEvidence checkup_cycling_evidence();
+
+struct CheckupStopContextReport {
+    StopObservationReport observation;
+    uint8_t               capability_mask = 0;
+    bool                  pending         = false;
+};
+
+// Independent, bounded observation population; never changes the completed-run verdict.
+CheckupStopContextReport checkup_stop_context_report();
 
 // Copy the next completed hourly pair after `after_bucket` into a journal payload. `now_unix_s`
 // supplies the wall-clock anchor; no record is produced before time is synced or before one hour

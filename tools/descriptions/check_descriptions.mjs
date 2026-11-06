@@ -32,6 +32,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
 import { readAppSource } from '../ui/read_app_source.mjs';
+import { germanModelCopy } from '../ui/model_copy.mjs';
 
 // ── arguments ────────────────────────────────────────────────────────────────────────────────────
 let APP = 'main/www/app.sources';
@@ -145,6 +146,9 @@ function loadDescriptions(file) {
   const i18n = loadTable(src, file, I18N_OPEN, I18N_CLOSE, '{}', 'I18N', true);
   if (!i18n || typeof i18n.en !== 'object' || !i18n.en || Array.isArray(i18n.en) ||
       Object.keys(i18n.en).length === 0) die(2, 'I18N has no nonempty English catalog');
+  let germanModel;
+  try { germanModel = germanModelCopy(src, file, model); }
+  catch (e) { die(2, `German model descriptions do not evaluate: ${e.message}`); }
   const translate = loadFunction(src, file, TRANSLATE_OPEN, DISPLAY_LABEL_CLOSE, 't',
     'const LANG = "en"; const I18N = dictionary;', { dictionary: i18n });
   let keys = [], missing = [];
@@ -166,7 +170,7 @@ function loadDescriptions(file) {
   // Derive required native help reachability from the shipped dictionary, not a second offset/key
   // map. This catches a removed mapping even when the same label still has generic base copy.
   const nativeHelpKeys = Object.keys(i18n.en).filter((key) => /^a4\..*_help$/.test(key));
-  return { table, model, displayLabel, resolve, nativeHelpKeys, english: i18n.en };
+  return { table, model, germanModel, displayLabel, resolve, nativeHelpKeys, english: i18n.en };
 }
 
 // ── 2. the catalog labels the UI will actually be asked to render ────────────────────────────────
@@ -288,7 +292,7 @@ function loadExceptions(file) {
   return out;
 }
 
-const { table, model, displayLabel, resolve, nativeHelpKeys, english } = loadDescriptions(APP);
+const { table, model, germanModel, displayLabel, resolve, nativeHelpKeys, english } = loadDescriptions(APP);
 const cat = loadLabels(DEF);
 const exceptions = loadExceptions(EXC);
 const usedExceptions = new Set();
@@ -414,7 +418,7 @@ for (const [i, d] of table.entries()) {
   checkShape(d, isRegExp(d.re) ? String(d.re) : `#${i}`, `entry #${i} ${d.re}`);
 }
 for (const [id, d] of Object.entries(model || {})) {
-  checkShape(d, `MODEL_DESCRIPTIONS.${id}`, `MODEL_DESCRIPTIONS.${id}`);
+  checkShape({ ...d, de: germanModel[id] || d.de }, `MODEL_DESCRIPTIONS.${id}`, `MODEL_DESCRIPTIONS.${id}`);
 }
 
 // D005 — a ledger entry that suppressed nothing this run. The condition it adjudicated is gone, so

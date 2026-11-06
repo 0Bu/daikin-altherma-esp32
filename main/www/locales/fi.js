@@ -1,4 +1,4 @@
-// translation-source: b5d29da273c417b207489763facc3fda04530140b4b0389affcd7643d701cd08
+// translation-source: 3e8092cf0e419496e78d337338f27af53fbda73918ad45f0bbe0970b83ebeddc
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -223,6 +223,16 @@ I18N.fi = localeValues([
   /* check.cycling_cooling */ (n) => `${n} ${n === 1 ? "jäähdytysjakso" : "jäähdytysjaksoa"} jätetty pois`,
   /* check.cycling_censored */ (n) => `${n} ${n === 1 ? "luokittelematon" : "luokittelematonta"}`,
   /* check.cycling_causes */ "siirtymä|uudelleenkäynnistys/loki|alkua ei havaittu",
+  /* check.stop.title */ "Pysähdysten yhteys",
+  /* check.stop.population */ (n) => `${n} havaittua pysähdystä äskettäisen lämmityksen jälkeen`,
+  /* check.stop.coverage */ (d, h) => `Luettava kompressoriaika ${d} · ${h} tuntilohkoa`,
+  /* check.stop.categories */ "pieni nopeus + ero päätavoitteeseen|sisäyksikön pyynnön poisto|sulatus aktiivinen|käyttövesisiirtymä|piirin/tilan muutos",
+  /* check.stop.counts */ "positiivista / arvioitavaa / täydellistä",
+  /* check.stop.other */ "luokittelematon|tuntematon|osittainen|katkaistu|tavoite muuttunut|ajan ylivuoto",
+  /* check.stop.loss */ (n) => `Tallennushäviöilmoituksia ${n}`,
+  /* check.stop.states */ "Lähdettä ei vahvistettu|Päivätty havainto|Päiväämätön havainto|24 tunnin kattavuus puutteellinen|Tallennettujen tuntien palautus odottaa kellon/lähteen vahvistusta|Valmiit havainnot odottavat tallennusta|Yksi pysähdys odottaa myöhempiä näytteitä|Laskurit täynnä: alarajat|ei tuettu|Luettavaa pysähdysten joukkoa ei vielä ole.",
+  /* check.stop.rule */ "Alustava projekti-ikkuna: ±30 s rajat mukaan lukien, ei näyteväliä >15 s. Vahvistetun lämmityksen aikana: 0 < kompressorin nopeus ≤22 kierrosta/s, ilmoitettu menoveden lämpötila R1T ennen lisälämmitintä ≥ilmoitettu päävyöhykkeen tavoite +2 K, tavoite vakaa 30 s.",
+  /* check.stop.limits */ "Pysähdysluokat ja lisätiedot menevät päällekkäin samoissa säilytetyissä pysähdyksissä. Arvioitava tarkoittaa positiivista tai täydellistä näyteikkunaa; vain täydellinen sallii negatiivisen tuloksen näytteissä. Kysely ei sulje pois näytteiden välisiä signaaleja. R1T on ilmoitettu menoveden lämpötila ennen sähköistä lisälämmitintä. Sen ero ilmoitettuun päävyöhykkeen tavoitteeseen on havaittu ero, ei mitattu säädön ylitys. Tämä ei osoita pysähdyksen syytä, vähimmäismodulaatiota tai ulkoisen termostaatin pyyntöä.",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min ${min} °C · keskiarvo ${mean} °C`,
   /* check.min */ (m) => `${m} min`,

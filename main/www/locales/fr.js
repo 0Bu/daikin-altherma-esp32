@@ -1,4 +1,4 @@
-// translation-source: b5d29da273c417b207489763facc3fda04530140b4b0389affcd7643d701cd08
+// translation-source: 3e8092cf0e419496e78d337338f27af53fbda73918ad45f0bbe0970b83ebeddc
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -223,6 +223,16 @@ I18N.fr = localeValues([
   /* check.cycling_cooling */ (n) => `rafraîchissement : ${n} ${n === 1 ? "exclu" : "exclus"}`,
   /* check.cycling_censored */ (n) => `${n} ${n === 1 ? "non classé" : "non classés"}`,
   /* check.cycling_causes */ "transition|redémarrage/journal|départ non observé",
+  /* check.stop.title */ "Contexte des arrêts",
+  /* check.stop.population */ (n) => `${n} arrêts observés après chauffage récent`,
+  /* check.stop.coverage */ (d, h) => `Durée compresseur lisible ${d} · ${h} blocs horaires`,
+  /* check.stop.categories */ "faible vitesse + écart à la consigne principale|retrait de demande de l’unité intérieure|dégivrage actif|transition eau chaude|changement de circuit/mode",
+  /* check.stop.counts */ "positifs / évaluables / complets",
+  /* check.stop.other */ "non classés|inconnus|partiels|interrompus|consigne modifiée|dépassement temporel",
+  /* check.stop.loss */ (n) => `Avis de perte de stockage ${n}`,
+  /* check.stop.states */ "Source non confirmée|Observation datée|Observation non datée|Couverture de 24 heures incomplète|Restauration des heures enregistrées en attente de confirmation horloge/source|Observations terminées en attente d’enregistrement|Un arrêt attend les échantillons suivants|Compteurs saturés : bornes inférieures|non pris en charge|Aucune population d’arrêts avec données lisibles pour le moment.",
+  /* check.stop.rule */ "Fenêtre provisoire du projet : ±30 s incluses, aucun intervalle de mesure >15 s. En chauffage confirmé : 0 < vitesse du compresseur ≤22 tr/s, température de départ R1T signalée avant l’appoint électrique ≥consigne signalée de zone principale +2 K, consigne stable depuis 30 s.",
+  /* check.stop.limits */ "Les catégories et qualificatifs se recouvrent pour les mêmes arrêts conservés. Évaluable signifie positif ou fenêtre échantillonnée complète ; seule une fenêtre complète permet un résultat négatif sur les échantillons. Le sondage ne peut exclure des signaux entre mesures. R1T est la température de départ signalée avant l’appoint électrique. Son écart à la consigne signalée de zone principale est une différence observée, pas un dépassement régulé mesuré. Cela n’établit ni cause d’arrêt, ni modulation minimale, ni demande d’un thermostat externe.",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · moyenne ${mean} °C`,
   /* check.min */ (m) => `${m} min`,

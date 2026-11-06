@@ -8,6 +8,7 @@ cd "$proj"
 # tests through its test_ui_*.mjs glob; keeping this entry point explicit makes translation drift a
 # named CI failure instead of burying it among modal/use-case output.
 node test/test_ui_locale_catalogs.mjs
+node test/test_locale_bundle.mjs
 node test/test_ui_error_codes.mjs
 node test/test_ui_homehub_copy.mjs
 node test/test_ui_live_i18n.mjs
