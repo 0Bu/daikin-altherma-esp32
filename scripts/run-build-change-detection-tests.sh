@@ -22,6 +22,31 @@ set -euo pipefail
 printf '%s\n' "$*" >> "$BROWSER_FIXTURE_LOG"
 if [ "$1" = tools/browser/run_render.mjs ]; then exec "$BROWSER_FIXTURE_NODE" "$@"; fi
 if [ "$1" = tools/browser/find_browser.mjs ]; then printf '%s\n' /fixture/browser; fi
+if [ "$1" = test/test_browser_render.mjs ] && [ -n "${DAIKIN_BROWSER_HISTORY_BARRIER:-}" ]; then
+  exec "$BROWSER_FIXTURE_NODE" --input-type=module - "$@" <<'WORKER'
+import assert from "node:assert/strict";
+import fs from "node:fs";
+const { viewport, nonce } = JSON.parse(process.env.DAIKIN_BROWSER_HISTORY_BARRIER);
+assert.ok(["phone", "desktop"].includes(viewport));
+assert.match(nonce, /^[a-f0-9]{32}$/);
+assert.deepEqual(process.argv.slice(2), ["test/test_browser_render.mjs", "--viewport", viewport]);
+assert.equal(typeof process.send, "function");
+const mark = phase => fs.appendFileSync(process.env.BROWSER_FIXTURE_LOG,
+  `fixture history-${phase} ${viewport}\n`);
+let released = false;
+const deadline = setTimeout(() => { throw new Error("fixture history continuation timed out"); }, 5000);
+process.once("disconnect", () => assert.ok(released, "fixture disconnected before continuation"));
+process.once("message", message => {
+  assert.deepEqual(message, { type: "history-motion-continue", viewport, nonce });
+  released = true;
+  clearTimeout(deadline);
+  mark("continue");
+  process.disconnect();
+});
+mark("ready");
+process.send({ type: "history-motion-ready", viewport, nonce }, error => { if (error) throw error; });
+WORKER
+fi
 NODE
 chmod +x "$T/bin/node"
 export PATH="$T/bin:$PATH"
@@ -60,7 +85,13 @@ check_scope() {
     [ "$(grep -c '^tools/browser/run_render.mjs$' "$BROWSER_FIXTURE_LOG")" -eq 2 ]
     [ "$(grep -c '^tools/browser/assemble_page.mjs ' "$BROWSER_FIXTURE_LOG")" -eq 2 ]
     [ "$(grep -c '^test/test_browser_render.mjs --viewport ' "$BROWSER_FIXTURE_LOG")" -eq 2 ]
-    [ "$(grep -c '^tools/browser/selftest.mjs$' "$BROWSER_FIXTURE_LOG")" -eq 1 ]
+    [ "$(grep -c '^tools/browser/selftest.mjs' "$BROWSER_FIXTURE_LOG")" -eq 2 ]
+    [ "$(grep -c '^tools/browser/selftest.mjs --infrastructure-only$' "$BROWSER_FIXTURE_LOG")" -eq 1 ]
+    [ "$(grep -c '^tools/browser/selftest.mjs --browser-controls-only$' "$BROWSER_FIXTURE_LOG")" -eq 1 ]
+    for viewport in phone desktop; do
+      [ "$(grep -c "^fixture history-ready $viewport$" "$BROWSER_FIXTURE_LOG")" -eq 1 ]
+      [ "$(grep -c "^fixture history-continue $viewport$" "$BROWSER_FIXTURE_LOG")" -eq 1 ]
+    done
     [ "$(grep -c '^test/test_browser_webkit.mjs --viewport ' "$BROWSER_FIXTURE_LOG")" -eq 2 ]
     [ "$(grep -c '^tools/browser/webkit_selftest.mjs$' "$BROWSER_FIXTURE_LOG")" -eq 1 ]
   fi
