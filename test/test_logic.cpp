@@ -20768,6 +20768,79 @@ static void test_refrigerant_service() {
           one_sensor.high_pressure.max_tenths == 200 &&
           one_sensor.high_pressure.mean_tenths() == 200);
 
+    // Published per-input counts must describe the actual accumulated population: the missing
+    // high-pressure page above contributes no zero and does not borrow the other transducer.
+    const auto partial_population = refrigerant_service_snapshot(one_sensor, 304000000, c);
+    CHECK(partial_population.samples == 4 && partial_population.high_pressure.samples == 3);
+    CHECK(partial_population.low_pressure.samples == 4 && partial_population.rps.samples == 4);
+    CHECK(partial_population.discharge.samples == 4 && partial_population.eev_command.samples == 4);
+    CHECK(partial_population.high_pressure.mean_tenths == 200);
+    CHECK(partial_population.source_generation == 11);
+    CHECK(partial_population.sources.rps.selected && partial_population.sources.rps.reg == 0x30 &&
+          partial_population.sources.rps.off == 0 && partial_population.sources.rps.conv == 152);
+    CHECK(partial_population.sources.discharge.selected &&
+          partial_population.sources.discharge.reg == 0x20 &&
+          partial_population.sources.discharge.off == 4 &&
+          partial_population.sources.discharge.conv == 105);
+    CHECK(partial_population.sources.eev_command.selected &&
+          partial_population.sources.eev_command.reg == 0x30 &&
+          partial_population.sources.eev_command.off == 3 &&
+          partial_population.sources.eev_command.conv == 151);
+    CHECK(partial_population.sources.high_pressure.selected &&
+          partial_population.sources.high_pressure.reg == 0x62 &&
+          partial_population.sources.high_pressure.off == 15 &&
+          partial_population.sources.high_pressure.conv == 105);
+    CHECK(partial_population.sources.low_pressure.selected &&
+          partial_population.sources.low_pressure.reg == 0x20 &&
+          partial_population.sources.low_pressure.off == 14 &&
+          partial_population.sources.low_pressure.conv == 105);
+
+    RefrigerantServiceTracker no_high_reading, zero_high_reading;
+    refrigerant_service_record(no_high_reading, c, lost_page, 400000000, 13, service_gap_us);
+    const auto absent_population = refrigerant_service_snapshot(no_high_reading, 401000000, c);
+    CHECK(!absent_population.high_pressure.available &&
+          absent_population.high_pressure.samples == 0);
+    CHECK(absent_population.sources.high_pressure.selected &&
+          absent_population.low_pressure.samples == 1);
+    auto measured_zero                 = hydronic;
+    measured_zero.high_pressure_tenths = 0;
+    refrigerant_service_record(zero_high_reading, c, measured_zero, 400000000, 13, service_gap_us);
+    const auto zero_population = refrigerant_service_snapshot(zero_high_reading, 401000000, c);
+    CHECK(zero_population.high_pressure.available && zero_population.high_pressure.samples == 1 &&
+          zero_population.high_pressure.min_tenths == 0 &&
+          zero_population.high_pressure.mean_tenths == 0);
+
+    const auto expired_population = refrigerant_service_snapshot(one_sensor, 309000001, c);
+    CHECK(expired_population.samples == 0 && expired_population.high_pressure.samples == 0 &&
+          expired_population.low_pressure.samples == 0 &&
+          !expired_population.high_pressure.available);
+    CHECK(expired_population.sources.high_pressure.selected &&
+          expired_population.source_generation == 11);
+    CHECK(one_sensor.high_pressure.samples == 3); // a read-only stale view does not alter retention
+
+    auto changed_coverage               = c;
+    changed_coverage.hydronic_pressure  = false;
+    auto changed_sensor                 = hydronic;
+    changed_sensor.high_pressure_tenths = 99;
+    refrigerant_service_record(one_sensor, changed_coverage, changed_sensor, 305000000, 12,
+                               service_gap_us);
+    const auto changed_population =
+        refrigerant_service_snapshot(one_sensor, 306000000, changed_coverage);
+    CHECK(changed_population.source_generation == 12 && changed_population.samples == 1 &&
+          changed_population.high_pressure.samples == 1 &&
+          changed_population.high_pressure.mean_tenths == 99);
+    CHECK(changed_population.sources.high_pressure.selected &&
+          changed_population.sources.high_pressure.reg == 0x20 &&
+          changed_population.sources.high_pressure.off == 12);
+    RefrigerantServiceCoverage unassigned_pressure;
+    refrigerant_service_cover_row(unassigned_pressure, 0x20, 14, 105, "Low Pressure", true);
+    const auto unassigned_sources = refrigerant_service_sources(unassigned_pressure);
+    CHECK(!unassigned_sources.high_pressure.selected && !unassigned_sources.low_pressure.selected);
+    const auto no_sources = refrigerant_service_sources({});
+    CHECK(!no_sources.rps.selected && !no_sources.discharge.selected &&
+          !no_sources.eev_command.selected && !no_sources.high_pressure.selected &&
+          !no_sources.low_pressure.selected);
+
     RefrigerantServiceSample unknown_valve = s;
     unknown_valve.valve_known              = false;
     CHECK(!refrigerant_service_decide(c, unknown_valve).eligible);

@@ -1,4 +1,4 @@
-// translation-source: 3e8092cf0e419496e78d337338f27af53fbda73918ad45f0bbe0970b83ebeddc
+// translation-source: 1a1907a18145fc6e4c33c4c443648db9fb4a40cfbee9cff33fd9610d3c45042e
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -253,6 +253,10 @@ I18N.fr = localeValues([
   /* service.metric.hp */ "Haute pression",
   /* service.metric.lp */ "Basse pression",
   /* service.metric.range */ (a, b, c, d) => `min. ${a} · moyenne ${b} · max. ${c} ${d}`,
+  /* service.metric.samples */ n => `${n} ${n === 1 ? "mesure retenue" : "mesures retenues"}`,
+  /* service.metric.input */ "Entrée X10A sélectionnée par le profil",
+  /* service.metric.input_none */ "Aucune entrée sélectionnée",
+  /* service.metric.meta_limit */ "Les nombres comptent les mesures retenues par entrée, pas la couverture temporelle. L’entrée sélectionnée ne prouve pas une mesure actuelle.",
   /* service.limit.special_phases_unavailable */ "Phases du régulateur",
   /* service.limit.temperature_context_incomplete */ "Contexte de température",
   /* service.limit.pressure_sides_incomplete */ "Côté(s) de pression",

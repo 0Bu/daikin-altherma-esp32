@@ -1,4 +1,4 @@
-// translation-source: 3e8092cf0e419496e78d337338f27af53fbda73918ad45f0bbe0970b83ebeddc
+// translation-source: 1a1907a18145fc6e4c33c4c443648db9fb4a40cfbee9cff33fd9610d3c45042e
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -253,6 +253,10 @@ I18N.sv = localeValues([
   /* service.metric.hp */ "Högtryck",
   /* service.metric.lp */ "Lågtryck",
   /* service.metric.range */ (a, b, c, d) => `min. ${a} · medel ${b} · max. ${c} ${d}`,
+  /* service.metric.samples */ n => `${n} ${n === 1 ? "inkluderad avläsning" : "inkluderade avläsningar"}`,
+  /* service.metric.input */ "X10A-ingång vald av profilen",
+  /* service.metric.input_none */ "Ingen vald ingång",
+  /* service.metric.meta_limit */ "Antalen avser inkluderade avläsningar per ingång, inte tidstäckning. En vald ingång bevisar inte en aktuell avläsning.",
   /* service.limit.special_phases_unavailable */ "Reglerfaser",
   /* service.limit.temperature_context_incomplete */ "Temperaturkontext",
   /* service.limit.pressure_sides_incomplete */ "Trycksida/or",

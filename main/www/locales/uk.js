@@ -1,4 +1,4 @@
-// translation-source: 3e8092cf0e419496e78d337338f27af53fbda73918ad45f0bbe0970b83ebeddc
+// translation-source: 1a1907a18145fc6e4c33c4c443648db9fb4a40cfbee9cff33fd9610d3c45042e
 I18N.uk = localeValues([
   /* sys.nodata */ "Немає даних",
   /* sys.unreachable */ "Недоступно",
@@ -253,6 +253,10 @@ I18N.uk = localeValues([
   /* service.metric.hp */ "Високий тиск",
   /* service.metric.lp */ "Низький тиск",
   /* service.metric.range */ (a, b, c, d) => `мін. ${a} · середнє ${b} · макс. ${c} ${d}`,
+  /* service.metric.samples */ n => `Кількість прийнятих показів: ${n}`,
+  /* service.metric.input */ "Вхід X10A, вибраний профілем",
+  /* service.metric.input_none */ "Вхід не вибрано",
+  /* service.metric.meta_limit */ "Кількість означає прийняті покази кожного входу, а не охоплення часу. Вибраний вхід не доводить наявності поточного показу.",
   /* service.limit.special_phases_unavailable */ "Фази контролера",
   /* service.limit.temperature_context_incomplete */ "Температурний контекст",
   /* service.limit.pressure_sides_incomplete */ "Сторона(и) тиску",

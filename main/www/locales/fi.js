@@ -1,4 +1,4 @@
-// translation-source: 3e8092cf0e419496e78d337338f27af53fbda73918ad45f0bbe0970b83ebeddc
+// translation-source: 1a1907a18145fc6e4c33c4c443648db9fb4a40cfbee9cff33fd9610d3c45042e
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -253,6 +253,10 @@ I18N.fi = localeValues([
   /* service.metric.hp */ "Korkeapaine",
   /* service.metric.lp */ "Matalapaine",
   /* service.metric.range */ (a, b, c, d) => `min. ${a} · keskiarvo ${b} · maks. ${c} ${d}`,
+  /* service.metric.samples */ n => `Hyväksyttyjä lukemia: ${n}`,
+  /* service.metric.input */ "Profiilin valitsema X10A-tulo",
+  /* service.metric.input_none */ "Ei valittua tuloa",
+  /* service.metric.meta_limit */ "Määrät tarkoittavat kunkin tulon hyväksyttyjä lukemia, eivät ajallista kattavuutta. Valittu tulo ei todista nykyistä lukemaa.",
   /* service.limit.special_phases_unavailable */ "Ohjausvaiheet",
   /* service.limit.temperature_context_incomplete */ "Lämpötilatausta",
   /* service.limit.pressure_sides_incomplete */ "Painepuoli/puolet",

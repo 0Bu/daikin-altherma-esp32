@@ -1,4 +1,4 @@
-// translation-source: 3e8092cf0e419496e78d337338f27af53fbda73918ad45f0bbe0970b83ebeddc
+// translation-source: 1a1907a18145fc6e4c33c4c443648db9fb4a40cfbee9cff33fd9610d3c45042e
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -258,6 +258,10 @@ I18N.pl = localeValues([
   /* service.metric.hp */ "Wysokie ciśnienie",
   /* service.metric.lp */ "Niskie ciśnienie",
   /* service.metric.range */ (a, b, c, d) => `min. ${a} · średnia ${b} · maks. ${c} ${d}`,
+  /* service.metric.samples */ n => `Liczba przyjętych odczytów: ${n}`,
+  /* service.metric.input */ "Wejście X10A wybrane w profilu",
+  /* service.metric.input_none */ "Brak wybranego wejścia",
+  /* service.metric.meta_limit */ "Liczby oznaczają przyjęte odczyty dla każdego wejścia, a nie pokrycie czasu. Wybrane wejście nie potwierdza bieżącego odczytu.",
   /* service.limit.special_phases_unavailable */ "Fazy sterownika",
   /* service.limit.temperature_context_incomplete */ "Kontekst temperatur",
   /* service.limit.pressure_sides_incomplete */ "Strona/y ciśnienia",

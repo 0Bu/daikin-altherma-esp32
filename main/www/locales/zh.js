@@ -1,4 +1,4 @@
-// translation-source: 3e8092cf0e419496e78d337338f27af53fbda73918ad45f0bbe0970b83ebeddc
+// translation-source: 1a1907a18145fc6e4c33c4c443648db9fb4a40cfbee9cff33fd9610d3c45042e
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
@@ -253,6 +253,10 @@ I18N.zh = localeValues([
   /* service.metric.hp */ "高压",
   /* service.metric.lp */ "低压",
   /* service.metric.range */ (a, b, c, d) => `最小 ${a} · 平均 ${b} · 最大 ${c} ${d}`,
+  /* service.metric.samples */ n => `已纳入读数：${n}`,
+  /* service.metric.input */ "型号配置选定的 X10A 输入",
+  /* service.metric.input_none */ "未选定输入",
+  /* service.metric.meta_limit */ "计数表示每个输入已纳入的读数，并非时间覆盖率。选定输入不代表当前存在有效读数。",
   /* service.limit.special_phases_unavailable */ "控制阶段",
   /* service.limit.temperature_context_incomplete */ "温度背景",
   /* service.limit.pressure_sides_incomplete */ "压力侧",

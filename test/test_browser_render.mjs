@@ -1177,11 +1177,21 @@ async function assertPlantDiagnosis(page, context) {
     window.__browserDiagnosisOriginal = { status: S.status, open: new Set(S.descOpen), card: S.dashboardCard };
     S.status = structuredClone(S.status);
     S.status.refrigerant_service = {
-      state: 'limited', continuous_s: 75, samples: 4, blocker: null,
+      kind: 'observation', mode: 'heating', state: 'limited', continuous_s: 75,
+      samples: 4, source_generation: 71, blocker: null,
       special_phases_known: false, limitations: ['pressure_sides_incomplete'],
       metrics: { compressor_rps: { min: 20, mean: 27.5, max: 40 },
         discharge_c: { min: 46.5, mean: 60.5, max: 81.4 },
-        eev_command_pls: { min: 200, mean: 230.5, max: 250 } }
+        eev_command_pls: { min: 200, mean: 230.5, max: 250 },
+        high_pressure_bar: { min: 7.3, mean: 14.6, max: 21.9 },
+        low_pressure_bar: { min: 3.2, mean: 4.1, max: 5 } },
+      metric_meta: {
+        compressor_rps: { samples: 4, source: { kind: 'x10a', reg: 48, offset: 0, conv: 152 } },
+        discharge_c: { samples: 4, source: { kind: 'x10a', reg: 32, offset: 4, conv: 105 } },
+        eev_command_pls: { samples: 4, source: { kind: 'x10a', reg: 48, offset: 3, conv: 151 } },
+        high_pressure_bar: { samples: 2, source: { kind: 'x10a', reg: 98, offset: 15, conv: 105 } },
+        low_pressure_bar: { samples: 4, source: { kind: 'x10a', reg: 32, offset: 14, conv: 105 } }
+      }
     };
     S.status.health = {
       status: "info", full_span: true, span_s: 86400, source_fresh: true, source_age_s: 1,
@@ -1263,6 +1273,16 @@ async function assertPlantDiagnosis(page, context) {
       assert.equal(block.normal, normalLabel, `${context}/${block.id}: Normal last`);
       assert.ok(block.text.every(text => text.trim()), `${context}/${block.id}: no empty block`);
     }
+    const refrigerantText = () => page.evaluate(`document.querySelector("[data-desc='service:refrigerant']")
+      .closest('.vitem').innerText`);
+    for (const [key, args] of [["samples", [2]], ["samples", [4]], ["input", []], ["meta_limit", []]]) {
+      const expected = await page.evaluate(`t(${JSON.stringify("service.metric." + key)},
+        ...${JSON.stringify(args)})`);
+      assert.ok((await refrigerantText()).includes(expected),
+        `${context}: actual expanded service retains localized metadata ${key}/${args.join()}`);
+    }
+    assert.doesNotMatch(await refrigerantText(), /0x62|0x20|source_generation|"conv"/,
+      `${context}: raw source coordinates stay outside the owner-facing explanation`);
     const stopText = () => page.evaluate(`document.querySelector("[data-desc='model:health_cycling']")
       .closest('.vitem').innerText`);
     for (const [key, args] of [["population", ["4"]], ["counts", []], ["rule", []], ["limits", []],
@@ -1354,6 +1374,50 @@ async function assertPlantDiagnosis(page, context) {
     await captureNativeEvidence(page, `${context}/dhw-no-window`,
       "[data-desc='model:health_dhw_loss']", ".vitem");
     await captureNativeEvidence(page, `${context}/refrigerant`,
+      "[data-desc='service:refrigerant']", ".vitem");
+    // An optional input may contribute no readings while the other pressure side admits the
+    // window. Its selected source is retained, but zero accepted samples cannot create a range.
+    await page.evaluate(`(() => {
+      const service = S.status.refrigerant_service;
+      service.source_generation = 72;
+      service.metrics.high_pressure_bar = null;
+      service.metric_meta.high_pressure_bar.samples = 0;
+      renderApp(); return true;
+    })()`);
+    await page.frame();
+    assertLayout(await page.evaluate(layoutAudit), `${context}/refrigerant-zero`);
+    await assertAccessibility(page, `${context}/refrigerant-zero`, { nativeTree: true });
+    for (const [key, args] of [["samples", [0]], ["input", []], ["meta_limit", []]]) {
+      const expected = await page.evaluate(`t(${JSON.stringify("service.metric." + key)},
+        ...${JSON.stringify(args)})`);
+      assert.ok((await refrigerantText()).includes(expected),
+        `${context}: zero-count service retains localized metadata ${key}`);
+    }
+    const unavailableInputCount = await page.evaluate(`(() => {
+      const text = document.querySelector("[data-desc='service:refrigerant']").closest('.vitem').innerText;
+      return text.split(t('sys.nodata')).length - 1;
+    })()`);
+    assert.ok(unavailableInputCount >= 1,
+      `${context}: the selected zero-count pressure input stays unavailable rather than displaying measured zero`);
+    await captureNativeEvidence(page, `${context}/refrigerant-zero`,
+      "[data-desc='service:refrigerant']", ".vitem");
+    // A different profile has a selected high side and no assigned low side. This is distinct
+    // from the selected-but-unread input above, without inventing a low-side measurement.
+    await page.evaluate(`(() => {
+      const service = S.status.refrigerant_service;
+      service.source_generation = 73;
+      service.metrics.high_pressure_bar = { min: 7.3, mean: 14.6, max: 21.9 };
+      service.metric_meta.high_pressure_bar = { samples: 4,
+        source: { kind: 'x10a', reg: 32, offset: 12, conv: 105 } };
+      service.metrics.low_pressure_bar = null;
+      service.metric_meta.low_pressure_bar = { samples: 0, source: null };
+      renderApp(); return true;
+    })()`);
+    await page.frame();
+    assertLayout(await page.evaluate(layoutAudit), `${context}/refrigerant-unselected`);
+    assert.ok((await refrigerantText()).includes(await page.evaluate("t('service.metric.input_none')")),
+      `${context}: an unselected low side is explicitly distinguished from a selected unread input`);
+    await captureNativeEvidence(page, `${context}/refrigerant-unselected`,
       "[data-desc='service:refrigerant']", ".vitem");
     await page.evaluate(`(() => {
       const h = S.status.health;

@@ -1,4 +1,4 @@
-// translation-source: 3e8092cf0e419496e78d337338f27af53fbda73918ad45f0bbe0970b83ebeddc
+// translation-source: 1a1907a18145fc6e4c33c4c443648db9fb4a40cfbee9cff33fd9610d3c45042e
 I18N.ja = localeValues([
   /* sys.nodata */ "データなし",
   /* sys.unreachable */ "接続不可",
@@ -253,6 +253,10 @@ I18N.ja = localeValues([
   /* service.metric.hp */ "高圧",
   /* service.metric.lp */ "低圧",
   /* service.metric.range */ (a, b, c, d) => `最小 ${a} · 平均 ${b} · 最大 ${c} ${d}`,
+  /* service.metric.samples */ n => `採用した測定値 ${n} 件`,
+  /* service.metric.input */ "プロファイルが選択した X10A 入力",
+  /* service.metric.input_none */ "選択された入力なし",
+  /* service.metric.meta_limit */ "件数は入力ごとに採用した測定値であり、時間の網羅率ではありません。入力が選択されていても、現在の測定値があることは証明しません。",
   /* service.limit.special_phases_unavailable */ "制御段階",
   /* service.limit.temperature_context_incomplete */ "温度の参考情報",
   /* service.limit.pressure_sides_incomplete */ "圧力側",

@@ -333,15 +333,26 @@ Complete rules, coverage and experimental boundaries are in
 
 `refrigerant_service` is omitted until this boot detects a profile and evaluates its signal coverage.
 It contains `kind:"observation"`, `state`, `continuous_s`, `samples`, `mode`, `blocker`,
-`special_phases_known`, `load_proven:false`, `eev_feedback:false`, `limitations` and `metrics`.
+`special_phases_known`, `load_proven:false`, `eev_feedback:false`, `limitations`, `metrics`,
+`source_generation` and `metric_meta`.
 States: `unsupported`, `waiting`, `observing`, `limited`, `interrupted`; modes: `unknown`, `heating`,
 `cooling`, `other`. Blockers include `unsupported_profile`, `compressor_not_running`,
 `unsupported_or_unknown_mode`, `dhw_path`, `defrost`, `unit_fault`, `special_controller_phase`,
 `missing_fresh_signal`, `poll_gap`, or null. Limitation ids are `special_phases_unavailable`,
 `temperature_context_incomplete`, `pressure_sides_incomplete`, `outdoor_context_incomplete`.
 Metrics `compressor_rps`, `discharge_c`, `eev_command_pls`, `high_pressure_bar`, `low_pressure_bar`
-are null or `{min,mean,max}` in their named units. This is neither a controlled service test nor
-proof of refrigerant charge or valve position.
+are null or `{min,mean,max}` in their named units; these existing metric objects are unchanged.
+`metric_meta` uses those same five keys, each with `{samples,source}`. `samples` counts accepted
+readings for that particular metric in the exposed window, capped at 4294967295; it can be lower
+than the overall window count when an optional pressure input is unreadable. Zero means no
+accepted reading, not a measured zero. `source` is null when no input is selected, otherwise
+`{kind:"x10a",reg,offset,conv}` describes the profile-selected input. Selection is independent of
+reading availability; it supplies neither a source timestamp nor proof of a current reading.
+`source_generation` is the boot-local poll scope, not a persistent physical instrument identity.
+Source changes and interruptions clear the exposed counts alongside the existing window. The
+[source table](DIAGNOSTIC_EVIDENCE.md#refrigerant-service-observation) states the fixed pressure
+selection and withheld pairings. This is neither a controlled service test nor proof of refrigerant
+charge or valve position.
 
 ## GET /values
 

@@ -1,4 +1,4 @@
-// translation-source: 3e8092cf0e419496e78d337338f27af53fbda73918ad45f0bbe0970b83ebeddc
+// translation-source: 1a1907a18145fc6e4c33c4c443648db9fb4a40cfbee9cff33fd9610d3c45042e
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -253,6 +253,10 @@ I18N.nb = localeValues([
   /* service.metric.hp */ "Høytrykk",
   /* service.metric.lp */ "Lavtrykk",
   /* service.metric.range */ (a, b, c, d) => `min. ${a} · snitt ${b} · maks. ${c} ${d}`,
+  /* service.metric.samples */ n => `${n} ${n === 1 ? "inkludert måling" : "inkluderte målinger"}`,
+  /* service.metric.input */ "X10A-inngang valgt av profilen",
+  /* service.metric.input_none */ "Ingen valgt inngang",
+  /* service.metric.meta_limit */ "Antall viser inkluderte målinger per inngang, ikke tidsdekning. En valgt inngang beviser ikke en aktuell måling.",
   /* service.limit.special_phases_unavailable */ "Regulatorfaser",
   /* service.limit.temperature_context_incomplete */ "Temperaturkontekst",
   /* service.limit.pressure_sides_incomplete */ "Trykkside(r)",

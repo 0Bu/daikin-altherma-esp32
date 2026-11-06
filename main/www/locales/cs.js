@@ -1,4 +1,4 @@
-// translation-source: 3e8092cf0e419496e78d337338f27af53fbda73918ad45f0bbe0970b83ebeddc
+// translation-source: 1a1907a18145fc6e4c33c4c443648db9fb4a40cfbee9cff33fd9610d3c45042e
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -253,6 +253,10 @@ I18N.cs = localeValues([
   /* service.metric.hp */ "Vysoký tlak",
   /* service.metric.lp */ "Nízký tlak",
   /* service.metric.range */ (a, b, c, d) => `min. ${a} · průměr ${b} · max. ${c} ${d}`,
+  /* service.metric.samples */ n => `Počet přijatých odečtů: ${n}`,
+  /* service.metric.input */ "Vstup X10A zvolený profilem",
+  /* service.metric.input_none */ "Žádný zvolený vstup",
+  /* service.metric.meta_limit */ "Počty vyjadřují přijaté odečty pro každý vstup, nikoli časové pokrytí. Zvolený vstup nedokazuje aktuální odečet.",
   /* service.limit.special_phases_unavailable */ "Fáze regulace",
   /* service.limit.temperature_context_incomplete */ "Teplotní kontext",
   /* service.limit.pressure_sides_incomplete */ "Tlaková strana/y",

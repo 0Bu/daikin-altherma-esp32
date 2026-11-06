@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 878179bf552ba4a2afa0dd4d28d8c5ff808a0cb62f1600177e0df8da635d1d49 -->
+<!-- diagnostic-evidence-contract: 244f40a565ececd449835c7a7a062346ba0e9735b1a84740082dae0371987805 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -112,7 +112,28 @@ pair: a 0x20/14 refrigerant pressure beside a structural 0x20/12 pressure. An un
 is the profile's only outdoor refrigerant-pressure row, and its label is no evidence of a side. The
 observation reads it as neither side, so a profile without another structural pressure is
 `unsupported_profile`.
-`/values`, MQTT and Home Assistant publish that row under its catalog label, apart from the one
+
+The existing five metrics publish accepted-reading counts separately from their unchanged
+min/mean/max objects. These are per-input samples in the exposed uninterrupted window, not
+elapsed-time coverage or independent calibration. The API's selected-source metadata is drawn
+from the same committed profile coverage as the tracker, under the poll mutex; it is not a fresh
+cache read. A declared input can remain selected with zero accepted readings. A missing selected
+pressure page never changes that identity to the other pressure transducer.
+
+| Existing metric | Profile-selected X10A input | Selection boundary |
+|---|---|---|
+| Compressor speed | `0x30/0`, converter 152 | Requires the profile's publishable speed row. |
+| Discharge temperature | `0x20/4`, converter 105 | Requires the profile's publishable temperature row. |
+| Expansion-valve command | `0x30/3`, converter 151 | Command only; no position feedback. |
+| High pressure | `0x62/15`, converter 105; otherwise `0x20/12`, converter 105 | The hydronic coordinate wins only when structurally classified as refrigerant pressure; otherwise the structural outdoor high side is selected once per profile. |
+| Low pressure | `0x20/14`, converter 105 | Selected only with the structural outdoor `0x20/12` pressure partner; an unpaired or ambiguous row stays unselected. |
+
+This is a catalog-input table, not a model-qualified thermodynamic pairing table. Saturation-to-
+water, saturation-minus-liquid, suction-superheat and discharge-minus-saturation metrics remain
+unimplemented and unavailable. In particular, neither the outdoor liquid coordinate nor the
+pressure-side classifier establishes the required physical temperature/pressure pairing.
+
+`/values`, MQTT and Home Assistant publish an unpaired 0x20/14 row under its catalog label, apart from the one
 relabel described under [register 0x20](REGISTERS.md#register-0x20); the register picker always
 lists the catalog label. The pair is a fact of the generated tables, not of
 measured hardware: as for 0x20/12 alone, whether real units of the paired profiles

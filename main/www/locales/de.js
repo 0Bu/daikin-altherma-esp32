@@ -1,4 +1,4 @@
-// translation-source: 3e8092cf0e419496e78d337338f27af53fbda73918ad45f0bbe0970b83ebeddc
+// translation-source: 1a1907a18145fc6e4c33c4c443648db9fb4a40cfbee9cff33fd9610d3c45042e
 I18N.de = localeValues([
   /* sys.nodata */ "Keine Daten",
   /* sys.unreachable */ "Nicht erreichbar",
@@ -253,6 +253,10 @@ I18N.de = localeValues([
   /* service.metric.hp */ "Hochdruck",
   /* service.metric.lp */ "Niederdruck",
   /* service.metric.range */ (a, b, c, d) => `min. ${a} · Mittel ${b} · max. ${c} ${d}`,
+  /* service.metric.samples */ n => `${n} ${n === 1 ? "berücksichtigter Messwert" : "berücksichtigte Messwerte"}`,
+  /* service.metric.input */ "Im Profil gewählter X10A-Eingang",
+  /* service.metric.input_none */ "Kein gewählter Eingang",
+  /* service.metric.meta_limit */ "Die Zahlen zählen berücksichtigte Messwerte je Eingang, nicht die zeitliche Abdeckung. Ein gewählter Eingang belegt keinen aktuellen Messwert.",
   /* service.limit.special_phases_unavailable */ "Regelungsphasen",
   /* service.limit.temperature_context_incomplete */ "Temperaturkontext",
   /* service.limit.pressure_sides_incomplete */ "Druckseite(n)",

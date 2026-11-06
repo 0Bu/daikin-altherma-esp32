@@ -1,4 +1,4 @@
-// translation-source: 3e8092cf0e419496e78d337338f27af53fbda73918ad45f0bbe0970b83ebeddc
+// translation-source: 1a1907a18145fc6e4c33c4c443648db9fb4a40cfbee9cff33fd9610d3c45042e
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -253,6 +253,10 @@ I18N.es = localeValues([
   /* service.metric.hp */ "Alta presión",
   /* service.metric.lp */ "Baja presión",
   /* service.metric.range */ (a, b, c, d) => `mín. ${a} · media ${b} · máx. ${c} ${d}`,
+  /* service.metric.samples */ n => `${n} ${n === 1 ? "lectura admitida" : "lecturas admitidas"}`,
+  /* service.metric.input */ "Entrada X10A seleccionada por el perfil",
+  /* service.metric.input_none */ "Ninguna entrada seleccionada",
+  /* service.metric.meta_limit */ "Los recuentos son lecturas admitidas por entrada, no cobertura temporal. La entrada seleccionada no demuestra una lectura actual.",
   /* service.limit.special_phases_unavailable */ "Fases del control",
   /* service.limit.temperature_context_incomplete */ "Temperaturas de contexto",
   /* service.limit.pressure_sides_incomplete */ "Lado(s) de presión",

@@ -28,6 +28,14 @@ allocation/chunk failure sweeps. Four compiling controls reject fabricated unkno
 missing covered-zero evidence, an omitted object and leaked unsupported counts. These are wire
 and stream-boundary checks, not producer or journal restoration evidence.
 
+Refrigerant service snapshots exercise all five unchanged min/mean/max objects and their separate
+sample counts and profile-selected X10A coordinates. Native JSON parsing checks populated and
+redacted responses, sparse pressure counts, selected-but-unread inputs, absent sources, gap/source
+resets and omission before profile/coverage admission. Populated metadata also enters the existing
+allocation/send failure sweeps. Three compiling controls replace input counts with the overall
+count, swap source coordinates, and confuse selection with reading availability. These typed
+snapshot adapters do not establish poll eligibility, physical sensor pairing or on-target behavior.
+
 Scan evidence includes an empty result, valid Unicode/escaping and 20 SSIDs containing 32 invalid
 bytes each, with independent row/RSSI expectations. The maximum response spans five bounded chunks;
 its production C++ allocation stays below 2 KiB and no allocation follows the first emission. Scan
