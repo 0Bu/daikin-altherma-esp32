@@ -327,6 +327,10 @@ pre-reset future hour eligible after the fence ages. Power loss before that
 append can still restore older same-scope hours. Source changes and consent transitions withdraw
 live evidence immediately. Whole-hour aging also runs without further polls; missing records never
 borrow the core clock. New hourly observations must preserve these independent-source boundaries.
+History forgetting latches Stop suppression even before its mutex exists. Stop collection, pending
+reports, restoration and append offers remain disabled for the rest of that boot; startup, source
+binding and consent changes cannot clear the latch. This RAM boundary does not establish successful
+physical erasure or persistence across a reboot.
 The observation owner also rechecks wall/monotonic agreement on reports and flash service. An offset
 change beyond two seconds withdraws the dated view, fences the old archive and pauses this
 collection lifecycle; a fresh lifecycle or boot establishes a new anchor.

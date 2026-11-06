@@ -1,6 +1,9 @@
 // Real production store TU, logic and CRC. Only SDK clocks/mutexes and flash transport are ports.
 #include "sdk.hpp"
-#include "stop_observation_store.cpp"
+#ifndef STOP_OBSERVATION_PRODUCTION_SOURCE
+#define STOP_OBSERVATION_PRODUCTION_SOURCE "stop_observation_store.cpp"
+#endif
+#include STOP_OBSERVATION_PRODUCTION_SOURCE
 #include "logic/checkup_persist.hpp"
 #include <array>
 #include <iostream>
@@ -109,12 +112,12 @@ bool append(bool busy_receipt = false) {
     if (!stop_observation_flash_next(reader, bucket, p)) return false;
     require(next_slot < flash.size(), "fixture flash capacity");
     flash[next_slot] = make_slot(bucket, p, next_sequence);
-    if (busy_receipt) s_mutex->owned = true;
+    if (busy_receipt) s_mutex.load(std::memory_order_acquire)->owned = true;
     stop_observation_flash_appended(bucket, next_sequence++, next_slot, p);
     next_slot = (next_slot + 1) % flash.size();
     if (busy_receipt) {
         stop_observation_flash_service(reader); // must be zero-wait and preserve the transaction
-        s_mutex->owned = false;
+        s_mutex.load(std::memory_order_acquire)->owned = false;
     }
     stop_observation_flash_service(reader);
     return true;
@@ -190,9 +193,9 @@ void busy_and_failure() {
     int64_t                  bucket;
     ObservationHourlyPayload p;
     require(stop_observation_flash_next(reader, bucket, p), "claim correction");
-    s_mutex->owned = true;
+    s_mutex.load(std::memory_order_acquire)->owned = true;
     stop_observation_flash_failed();
-    s_mutex->owned = false;
+    s_mutex.load(std::memory_order_acquire)->owned = false;
     stop_observation_flash_service(reader);
     require(append(), "failed write releases pending correction for retry");
     require(stop_observation_report().counters.witnessed_stops_recent_heating == 2,
@@ -838,13 +841,256 @@ void finite_index_rebuild() {
     require(stop_observation_report().counters.witnessed_stops_recent_heating == 46,
             "expiry alone rebuilds the remaining23 completed hours without a new append");
 }
+void early_forget() {
+    require(sdk::created == 0, "early forget precedes store mutex creation");
+    stop_observation_forget();
+    require(sdk::created == 0, "early forget performs no allocation");
+    stop_observation_start(true, 11);
+    stop_observation_bind(101, 202, 303, 7);
+    tick(1, true, event(1));
+    tick(11, true);
+    const auto r = stop_observation_report();
+    require(!r.confirmed && !r.dated && r.readable_us == 0 &&
+                r.counters.witnessed_stops_recent_heating == 0,
+            "early forget suppresses same-boot late start and new evidence");
+}
+void require_suppressed() {
+    const unsigned creates = sdk::create_calls, reads = sdk::reads;
+    const auto     r = stop_observation_report();
+    require(stop_observation_suppressed() && !r.confirmed && !r.dated && !r.restore_pending &&
+                !r.persistence_pending && r.readable_us == 0 &&
+                r.counters.witnessed_stops_recent_heating == 0,
+            "forgotten store has no visible population");
+    require(sdk::create_calls == creates && sdk::reads == reads,
+            "suppressed getter neither allocates nor reads flash");
+}
+void forget_lifecycle() {
+    early_forget();
+    const auto creates = sdk::create_calls;
+    stop_observation_set_diagnostics(false, 12);
+    stop_observation_set_diagnostics(true, 13);
+    stop_observation_reset();
+    stop_observation_start(true, 13);
+    stop_observation_bind(101, 202, 303, 8, false);
+    tick(21, true, event(20, 8));
+    stop_observation_seal();
+    stop_observation_flash_index_reset();
+    stop_observation_flash_index_incomplete();
+    const int64_t bucket = observation_bucket(sdk::origin_us + sdk::now_us);
+    auto          p      = payload(bucket);
+    stop_observation_flash_index(bucket, 1, 0, p);
+    stop_observation_flash_service(reader);
+    int64_t next = INT64_MIN;
+    require(!stop_observation_flash_next(reader, next, p),
+            "forgotten flash cannot claim data or fence");
+    stop_observation_flash_appended(bucket, 1, 0, p);
+    stop_observation_flash_failed();
+    require_suppressed();
+    require(sdk::create_calls == creates && s_index.count == 0 && !s_receipt.pending,
+            "late lifecycle and flash callbacks cannot recreate forgotten evidence");
+}
+void forget_allocation_failure() {
+    const auto r = stop_observation_report();
+    require(!r.confirmed && sdk::created == 0 && sdk::create_calls == 0,
+            "prestart getter does not allocate");
+    sdk::fail_create = true;
+    stop_observation_start(true, 11);
+    require(s_mutex.load(std::memory_order_acquire) == nullptr && sdk::created == 0,
+            "failed allocation leaves mutex unpublished");
+    stop_observation_forget();
+    sdk::fail_create = false;
+    stop_observation_start(true, 11);
+    stop_observation_bind(101, 202, 303, 7);
+    require_suppressed();
+    require(sdk::create_calls == 1 && sdk::created == 0,
+            "forget after allocation failure prevents all later allocation");
+}
+void first_mutex_publication() {
+    sdk::before_take = [] {
+        require(s_mutex.load(std::memory_order_acquire) == nullptr,
+                "first mutex stays unpublished until protected state initialized");
+        const auto r = stop_observation_report();
+        require(!r.confirmed && sdk::created == 1 && sdk::create_calls == 1,
+                "getter during first initialization remains allocation free and empty");
+    };
+    stop_observation_start(true, 11);
+    require(s_mutex.load(std::memory_order_acquire) != nullptr && sdk::created == 1,
+            "successful initialization publishes the sole mutex");
+    stop_observation_bind(101, 202, 303, 7);
+    tick(1, true, event(1));
+    require(stop_observation_report().counters.witnessed_stops_recent_heating == 1,
+            "published initialized store remains usable");
+}
+void first_mutex_take_failure() {
+    sdk::fail_take_once = true;
+    stop_observation_start(true, 11);
+    const auto candidate = s_start_mutex;
+    require(candidate && !candidate->owned && s_mutex.load(std::memory_order_acquire) == nullptr,
+            "failed first lock retains a private unowned mutex candidate");
+    require(!stop_observation_report().confirmed && sdk::created == 1,
+            "getter cannot see failed first initialization");
+    stop_observation_start(true, 11);
+    require(s_mutex.load(std::memory_order_acquire) == candidate && sdk::create_calls == 1,
+            "retry reuses failed-first-lock candidate without a leak");
+    stop_observation_bind(101, 202, 303, 7);
+    tick(1, true, event(1));
+    require(stop_observation_report().counters.witnessed_stops_recent_heating == 1,
+            "retry initializes before admitting evidence");
+}
+void forget_during_start(const std::string& name) {
+    if (name == "forget_before_create")
+        sdk::before_create = stop_observation_forget;
+    else if (name == "forget_after_create")
+        sdk::after_create = stop_observation_forget;
+    else
+        sdk::before_take = stop_observation_forget;
+    stop_observation_start(true, 11);
+    require(s_mutex.load(std::memory_order_acquire) == nullptr,
+            "forget during unpublished initialization prevents publication");
+    stop_observation_bind(101, 202, 303, 7);
+    tick(1, true, event(1));
+    require_suppressed();
+    require(sdk::created == 1 && !sdk::mutexes[0].owned,
+            "interleaved forget neither allocates again nor strands candidate lock");
+}
+void forget_busy_store() {
+    boot();
+    tick(1, true, event(1));
+    const auto mutex = s_mutex.load(std::memory_order_acquire);
+    mutex->owned     = true; // another task owns the Store; forget must publish without waiting
+    stop_observation_forget();
+    require_suppressed();
+    require(mutex->owned, "forget does not release another task's mutex");
+    mutex->owned = false;
+    stop_observation_start(true, 99);
+    stop_observation_set_diagnostics(true, 99);
+    stop_observation_reset();
+    stop_observation_bind(101, 202, 303, 8);
+    tick(11, true, event(10, 8));
+    require_suppressed();
+}
+void forget_waiting_getter() {
+    boot();
+    tick(1, true, event(1));
+    sdk::before_take = [] {
+        const auto mutex = s_mutex.load(std::memory_order_acquire);
+        mutex->owned     = true;
+        stop_observation_forget();
+        mutex->owned = false;
+    };
+    const auto r = stop_observation_report();
+    require(!r.confirmed && r.counters.witnessed_stops_recent_heating == 0,
+            "getter waiting across forget cannot return staged old evidence");
+    require_suppressed();
+}
+void forget_getter_recheck(bool invalid_clock) {
+    boot();
+    tick(1, true, event(1));
+    sdk::synced       = !invalid_clock;
+    sdk::before_clock = stop_observation_forget; // Store is held: latch succeeds, try-lock fails
+    const auto r      = stop_observation_report();
+    require(!r.confirmed && !r.dated && !r.restore_pending && !r.persistence_pending &&
+                r.counters.witnessed_stops_recent_heating == 0,
+            "getter final recheck returns suppressed flags even across clock failure");
+    require_suppressed();
+}
+void forget_staged_restore() {
+    boot();
+    const int64_t current = observation_bucket(sdk::origin_us + sdk::now_us);
+    put(current - 2, payload(current - 2, 3));
+    put(current - 1, payload(current - 1, 8));
+    const auto reads = sdk::reads;
+    before_read      = stop_observation_forget;
+    stop_observation_flash_service(reader);
+    require(sdk::reads == reads + 1,
+            "forget during staged restore prevents subsequent physical reads");
+    require_suppressed();
+    require(s_completed.counters.witnessed_stops_recent_heating == 0,
+            "forgotten staged restore cannot publish its old aggregate");
+}
+void forget_claimed_receipt() {
+    boot();
+    tick(3590, true, event(3580));
+    tick(3605);
+    int64_t                  bucket = INT64_MIN;
+    ObservationHourlyPayload p;
+    require(stop_observation_flash_next(reader, bucket, p), "fixture has real claimed data");
+    const auto index_count = s_index.count;
+    const auto mutex       = s_mutex.load(std::memory_order_acquire);
+    mutex->owned           = true;
+    stop_observation_forget();
+    mutex->owned = false;
+    stop_observation_flash_appended(bucket, 1, 0, p);
+    stop_observation_flash_failed();
+    stop_observation_flash_service(reader);
+    require(s_index.count == index_count && !s_receipt.pending,
+            "late claimed receipts cannot index or re-enable forgotten data");
+    require(!stop_observation_flash_next(reader, bucket, p), "forgotten claimed data cannot retry");
+    require_suppressed();
+}
+void forget_claim_merge() {
+    boot();
+    const int64_t current = observation_bucket(sdk::origin_us + sdk::now_us);
+    put(current, payload(current, 5));
+    tick(3590, true, event(3580));
+    tick(3605);
+    before_read                     = stop_observation_forget;
+    int64_t                  bucket = INT64_MIN;
+    ObservationHourlyPayload p;
+    require(!stop_observation_flash_next(reader, bucket, p),
+            "forget during staged claim returns no payload");
+    require_suppressed();
+}
+void forget_cold_boot() {
+    early_forget();
+    require_suppressed();
+    // Model genuine cold-boot static initialization ONLY in this fixture. Production has no
+    // clear-latch API; lifecycle calls in forget_lifecycle prove same-boot suppression persists.
+    s_forgotten.store(false, std::memory_order_relaxed);
+    s_mutex.store(nullptr, std::memory_order_relaxed);
+    s_start_mutex = nullptr;
+    sdk::created = sdk::create_calls = 0;
+    for (auto& mutex : sdk::mutexes) mutex = {};
+    boot();
+    tick(1, true, event(1));
+    require(!stop_observation_suppressed() &&
+                stop_observation_report().counters.witnessed_stops_recent_heating == 1,
+            "only cold boot can restore observation after forget");
+}
 } // namespace
 
 int main(int argc, char** argv) {
     try {
         if (argc != 2) throw std::runtime_error("one case required");
         const std::string name = argv[1];
-        if (name == "aged_clock_fence")
+        if (name == "early_forget")
+            early_forget();
+        else if (name == "forget_lifecycle")
+            forget_lifecycle();
+        else if (name == "forget_allocation_failure")
+            forget_allocation_failure();
+        else if (name == "first_mutex_publication")
+            first_mutex_publication();
+        else if (name == "first_mutex_take_failure")
+            first_mutex_take_failure();
+        else if (name == "forget_before_create" || name == "forget_after_create" ||
+                 name == "forget_first_take")
+            forget_during_start(name);
+        else if (name == "forget_busy_store")
+            forget_busy_store();
+        else if (name == "forget_waiting_getter")
+            forget_waiting_getter();
+        else if (name == "forget_getter_final" || name == "forget_getter_invalid_clock")
+            forget_getter_recheck(name == "forget_getter_invalid_clock");
+        else if (name == "forget_staged_restore")
+            forget_staged_restore();
+        else if (name == "forget_claimed_receipt")
+            forget_claimed_receipt();
+        else if (name == "forget_claim_merge")
+            forget_claim_merge();
+        else if (name == "forget_cold_boot")
+            forget_cold_boot();
+        else if (name == "aged_clock_fence")
             aged_clock_fence();
         else if (name == "future_clock_fence")
             future_clock_fence();
@@ -906,6 +1152,9 @@ int main(int argc, char** argv) {
             clock_lock_interleaves();
         else
             throw std::runtime_error("unknown case");
+        require(sdk::takes == sdk::gives, "every successful observation lock is released");
+        for (const auto& mutex : sdk::mutexes)
+            require(!mutex.owned, "no observation mutex remains owned");
         std::cout << name << ": " << assertions << " assertions passed\n";
         return 0;
     } catch (const std::exception& e) {

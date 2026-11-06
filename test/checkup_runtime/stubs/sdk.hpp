@@ -20,6 +20,8 @@ inline HostMutex mutex;
 inline HostMutex additional_mutexes[3];
 inline unsigned  mutex_count = 0;
 inline unsigned  takes = 0, gives = 0;
+inline bool      fail_take_once = false;
+inline bool      fail_create_once = false;
 inline void (*before_take)() = nullptr;
 inline void (*shutdown)()    = nullptr;
 } // namespace sdk
@@ -31,6 +33,10 @@ inline esp_err_t   esp_register_shutdown_handler(void (*fn)()) {
     return ESP_OK;
 }
 inline SemaphoreHandle_t xSemaphoreCreateMutex() {
+    if (sdk::fail_create_once) {
+        sdk::fail_create_once = false;
+        return nullptr;
+    }
     if (sdk::mutex_count++ == 0) {
         sdk::mutex = {};
         return &sdk::mutex;
@@ -47,6 +53,10 @@ inline BaseType_t xSemaphoreTake(SemaphoreHandle_t s, TickType_t wait) {
         f();
     }
     if (!s) return pdFALSE;
+    if (sdk::fail_take_once) {
+        sdk::fail_take_once = false;
+        return pdFALSE;
+    }
     if (s->owned) {
         if (!wait) return pdFALSE;
         throw std::runtime_error("modeled recursive lock");

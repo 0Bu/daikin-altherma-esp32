@@ -46,5 +46,8 @@ void stop_observation_flash_appended(int64_t bucket, uint64_t sequence, uint16_t
 void stop_observation_flash_failed();
 void stop_observation_flash_service(StopObservationReader reader);
 void stop_observation_forget();
+// Per-boot recovery privacy barrier, safe before startup and without allocation or locking.
+// Only a genuine new boot can permit this store to observe again.
+bool stop_observation_suppressed();
 
 } // namespace daik

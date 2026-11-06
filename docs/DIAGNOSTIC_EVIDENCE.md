@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 878179bf552ba4a2afa0dd4d28d8c5ff808a0cb62f1600177e0df8da635d1d49 -->
+<!-- diagnostic-evidence-contract: bf7e886f5d54fe18542cc1b680a407c58e75f52eeb3bcc9c8bfcbb3ff731b365 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -295,8 +295,9 @@ facts do not identify the controller's X10A operands, installed setting or senso
 The setting remains unknown unless independently read; +2 K alone establishes no abnormality.
 The manuals and R1 Summary (PDF p.3) were reopened on 5 November 2026. None validates 22 rps,
 +2 K or the temporal windows as manufacturer thresholds. No category proves minimum modulation,
-closed valves, oversizing, an incorrect curve or a stop cause. Source/consent-bound hourly
-restoration and pre-commit reset limits are described in
+closed valves, oversizing, an incorrect curve or a stop cause. Recovery forgetting also withdraws
+pending Stop context for the remainder of that boot. Source/consent-bound hourly restoration,
+forgetting and pre-commit reset limits are described in
 [ARCHITECTURE.md](ARCHITECTURE.md#history-and-diagnosis-persistence).
 
 **Not established:** The note identifies neither oversizing nor incorrect hydraulic balancing.

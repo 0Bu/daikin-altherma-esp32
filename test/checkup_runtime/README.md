@@ -28,10 +28,19 @@ leave the new interval empty until a genuinely new sample arrives: its first end
 observed seconds, and the next endpoint adds ten. Repeated-generation cases establish the live
 admission epoch's independence, not durable-record safety for arbitrary generation reuse.
 
-The default run compiles exactly two additional production mutations: omit the live epoch guard,
-and ignore the caller's token by capturing it again at record entry. Each must compile and fail its
-specified internal or caller-boundary consent oracle;
+The default run compiles nine production mutations: two consent-boundary regressions, a stale
+expiry clock, missing Stop forget guards in the producer, initial/final report and expiry, and
+incorrect absent-mutex/failed-lock report defaults.
+Each must compile and fail its specified oracle;
 compiler errors and unrelated failures do not count. Unknown test-case names are also refused.
+
+Forget cases exercise the real Store and Checkup together before startup, with a pending window,
+and during producer/report lock acquisition. Subsequent source/consent changes cannot re-enable
+Stop collection in that boot. Private reducer state is inspected only after public operations,
+never seeded; this distinguishes suppressed collection from merely hidden output. No recovery
+button, NVS erasure or physical history wipe is executed.
+The shutdown case checks suppression through the real shutdown handler; ordinary sealing already
+retires its reducer, so omitting only the extra shutdown guard is not a discriminating control.
 
 This proves component behavior at modeled interleavings, not FreeRTOS scheduling, raw X10A decode,
 all-model physical sensor truth, target heap/stack budgets, or hardware persistence across resets.

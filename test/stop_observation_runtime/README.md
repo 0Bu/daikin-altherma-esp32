@@ -27,6 +27,14 @@ the journal. Power loss before that commit can restore the old compatible record
 boot. The test must retain this boundary instead of claiming that a RAM-only reset is durable.
 No ongoing stop candidate or readable endpoint clock is restored across a reboot.
 
+Forget cases cover recovery before startup, allocation/first-lock failures, unpublished mutex
+initialization, busy-store and staged-reader interleavings, late claims/receipts and attempted
+same-boot re-enablement. Suppressed reports have no pending restoration or persistence. Only a
+fixture-modeled cold boot clears the latch. Three compiling controls remove the latch, clear it
+from startup or publish the mutex early; each must fail its exact semantic assertion. The runner
+retains these outputs and a source-hashed receipt. These are deterministic interleavings, not a
+test of the FreeRTOS scheduler or simultaneous execution on two cores.
+
 The actual journal reader verifies the real envelope and CRC. It does not prove the ESP-IDF flash
 driver, target ABI, stack budget, heap minima, partition binding or physical device behavior.
 Those remain separate integration/review evidence.
