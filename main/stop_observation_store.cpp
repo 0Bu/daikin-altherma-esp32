@@ -297,9 +297,9 @@ void stop_observation_set_diagnostics(bool enabled, uint32_t consent_generation)
 }
 
 void stop_observation_reset() {
-    if (stop_observation_suppressed()) return;
+    if (s_forgotten.load(std::memory_order_acquire)) return;
     SemGuard lk(s_mutex.load(std::memory_order_acquire));
-    if (!lk || stop_observation_suppressed()) return;
+    if (!lk || s_forgotten.load(std::memory_order_acquire)) return;
     clear_live();
     s_offset_us       = INT64_MIN;
     s_clock_bad       = false;
@@ -391,22 +391,30 @@ void stop_observation_seal() {
 
 StopObservationReport stop_observation_report() {
     StopObservationReport r;
-    if (stop_observation_suppressed()) return kSuppressedReport;
+    if (stop_observation_suppressed()) {
+        r = kSuppressedReport;
+        return r;
+    }
     SemGuard lk(s_mutex.load(std::memory_order_acquire));
-    if (stop_observation_suppressed()) return kSuppressedReport;
+    if (stop_observation_suppressed()) {
+        r = kSuppressedReport;
+        return r;
+    }
     if (!lk) return r;
     const int64_t now_wall = wall_now();
     if (!s_enabled || !s_confirmed) {
         r.restore_pending     = s_restore_pending;
         r.persistence_pending = s_barrier_pending;
-        return stop_observation_suppressed() ? kSuppressedReport : r;
+        if (stop_observation_suppressed()) r = kSuppressedReport;
+        return r;
     }
     if (!date_clock(esp_timer_get_time(), now_wall)) {
         r.confirmed = true; // source identity is known even when its dated projection is refused
         r.restore_pending     = s_restore_pending;
         r.persistence_pending = s_barrier_pending;
         r.dropped             = s_dropped;
-        return stop_observation_suppressed() ? kSuppressedReport : r;
+        if (stop_observation_suppressed()) r = kSuppressedReport;
+        return r;
     }
     expire_live(now_wall);
     r                     = s_completed;
@@ -429,7 +437,8 @@ StopObservationReport stop_observation_report() {
         // completed-hour count plus a currently open hour, not a count of queue entries.
     }
     r.partial |= r.readable_us < static_cast<uint64_t>(OBSERVATION_DAY_US);
-    return stop_observation_suppressed() ? kSuppressedReport : r;
+    if (stop_observation_suppressed()) r = kSuppressedReport;
+    return r;
 }
 
 void stop_observation_flash_index_reset() {
@@ -440,7 +449,7 @@ void stop_observation_flash_index_reset() {
 }
 void stop_observation_flash_index(int64_t bucket, uint64_t sequence, uint16_t slot,
                                   const logic::ObservationHourlyPayload& payload) {
-    if (stop_observation_suppressed()) return;
+    if (s_forgotten.load(std::memory_order_acquire)) return;
     if (!observation_payload_valid(payload, bucket)) {
         stop_observation_flash_index_incomplete();
         return;

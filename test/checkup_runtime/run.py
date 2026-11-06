@@ -162,29 +162,30 @@ mutations.append(("use_stale_history_tick_clock",
 report_start = source_text.index("CheckupStopContextReport checkup_stop_context_report() {")
 report_end = source_text.index("\nvoid expire_restored_locked()", report_start)
 report_body = source_text[report_start:report_end]
-for name, guard, case, oracle in [
+for name, condition, case, oracle in [
     ("omit_stop_forget_absent_mutex_default",
-     "    if (!s_mtx) return stop_context_unavailable_report();\n",
+     "!s_mtx",
      "stop_forget_before_checkup_start", "stop_forget_no_mutex_reports_no_restore"),
     ("omit_stop_forget_failed_lock_default",
-     "    if (!lk) return stop_context_unavailable_report();\n",
+     "!lk",
      "stop_forget_report_lock_failure", "stop_forget_hides_pending_producer_state"),
 ]:
+    default = "        r.observation.restore_pending = !stop_observation_suppressed();\n"
+    guard = "    if (" + condition + ") {\n" + default + "        return r;\n    }\n"
     if report_body.count(guard) != 1:
         raise RuntimeError("Expected one Stop report unavailable return: " + name)
-    changed_body = report_body.replace(guard, guard.split(" return ")[0] + " return {};\n")
+    changed_body = report_body.replace(guard, guard.replace(default, ""))
     mutations.append((name, source_text[:report_start] + changed_body + source_text[report_end:],
                       case, oracle))
 report_guard = (
     "    if (stop_context_suppressed_locked()) {\n"
-    "        CheckupStopContextReport r;\n"
     "        r.observation.restore_pending = false;\n"
     "        return r;\n"
     "    }\n"
 )
 report_final_guard = (
     "    if (stop_context_suppressed_locked()) {\n"
-    "        r                             = {};\n"
+    "        r                             = kEmptyStopReport;\n"
     "        r.observation.restore_pending = false;\n"
     "    }\n"
 )

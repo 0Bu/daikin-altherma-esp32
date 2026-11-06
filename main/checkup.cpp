@@ -96,7 +96,8 @@ logic::StopContextInputPlan s_stop_inputs;
 uint32_t                    s_stop_generation    = 0;
 bool                        s_stop_allow_restore = true;
 int64_t                     s_stop_read_fence_us = -1;
-constexpr logic::StopContextState kEmptyStopContext{};
+constexpr logic::StopContextState  kEmptyStopContext{};
+constexpr CheckupStopContextReport kEmptyStopReport{};
 
 // Called only with the Checkup lock. Recovery latches independently, before Store startup or
 // while an owner is busy; retire the producer too so pending windows cannot outlive that intent.
@@ -106,11 +107,6 @@ bool stop_context_suppressed_locked() {
     return true;
 }
 
-CheckupStopContextReport stop_context_unavailable_report() {
-    CheckupStopContextReport r;
-    r.observation.restore_pending = !stop_observation_suppressed();
-    return r;
-}
 // Copy a read-only reset template without constructing the expanded state on a caller's stack.
 constexpr logic::DhwLossState  kFreshDhwLossState{};
 constexpr logic::DhwLossBucket kEmptyDhwLossBucket{};
@@ -820,16 +816,21 @@ void checkup_stop_context_expire(int64_t) {
 }
 
 CheckupStopContextReport checkup_stop_context_report() {
-    if (!s_mtx) return stop_context_unavailable_report();
+    CheckupStopContextReport r;
+    if (!s_mtx) {
+        r.observation.restore_pending = !stop_observation_suppressed();
+        return r;
+    }
     Lock lk(s_mtx);
-    if (!lk) return stop_context_unavailable_report();
+    if (!lk) {
+        r.observation.restore_pending = !stop_observation_suppressed();
+        return r;
+    }
     if (stop_context_suppressed_locked()) {
-        CheckupStopContextReport r;
         r.observation.restore_pending = false;
         return r;
     }
     if (!s_diagnostics_enabled.load(std::memory_order_acquire) || s_reset_requested.load()) {
-        CheckupStopContextReport r;
         r.observation           = stop_observation_report();
         r.observation.confirmed = false;
         return r; // preserve the reset barrier's pending durability without admitting old evidence
@@ -840,12 +841,11 @@ CheckupStopContextReport checkup_stop_context_report() {
         stop_observation_record(now, false, event);
         s_stop_read_fence_us = now;
     }
-    CheckupStopContextReport r;
     r.observation     = stop_observation_report();
     r.capability_mask = logic::stop_context_capabilities(s_stop_inputs);
     r.pending         = s_stop_context.pending.valid;
     if (stop_context_suppressed_locked()) {
-        r                             = {};
+        r                             = kEmptyStopReport;
         r.observation.restore_pending = false;
     }
     return r;
