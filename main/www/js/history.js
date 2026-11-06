@@ -1791,7 +1791,10 @@ function scrubEnd(plot) {
 function replaceHistoryHtml(host, html) {
   const active = globalThis.document?.activeElement;
   const { histId, histSeries, hist, source = "" } = active?.dataset || {};
-  const owner = node => node?.closest?.(".vitem")?.querySelector("[data-desc]")?.dataset.desc;
+  const owner = node => {
+    const item = node?.closest?.(".vitem") || host?.closest?.(".vitem");
+    return item?.querySelector("[data-desc]")?.dataset.desc;
+  };
   const focusedOwner = owner(active);
   const focused = host.contains?.(active);
   if (!html.includes('class="vhist')) host.innerHTML = html;
