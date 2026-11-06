@@ -309,6 +309,9 @@ fence set, completed restoration stays limited until a complete physical reindex
 Recognizable committed current-format records with invalid headers, CRCs or payloads also make
 the reset index incomplete: damaged flags cannot prove that no reset occurred. This is not a
 redundant archive capable of reconstructing erased or unrecognizable reset records.
+Append dispatch uses the builder's source and format identity before a commit exists. Failed
+requests release their reservation for the shared journal's bounded retry policy; only verified
+commit readback acknowledges the saved delta or reset fence. Dispatch never admits flash evidence.
 The history owner rebuilds the sum at restoration, after each of its hourly records
 is committed to the journal, after a replay, and when its oldest hour expires, even if the producer
 stops. It reuses one 96-byte flash-owner payload scratch and the history sector scratch, then

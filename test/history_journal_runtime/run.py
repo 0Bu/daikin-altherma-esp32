@@ -7,17 +7,21 @@ import json
 from pathlib import Path
 import shlex
 import subprocess
+import tempfile
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 SOURCE = ROOT / "main/history.cpp"
 parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument("--out", type=Path, required=True)
+parser.add_argument("--out", type=Path)
 parser.add_argument("--sanitizer", choices=["none", "undefined"], default="undefined")
 parser.add_argument("--expect-red", action="store_true")
 args = parser.parse_args()
-OUT = args.out.resolve()
-OUT.mkdir(parents=True, mode=0o700, exist_ok=False)
+if args.out:
+    OUT = args.out.resolve()
+    OUT.mkdir(parents=True, mode=0o700, exist_ok=False)
+else:
+    OUT = Path(tempfile.mkdtemp(prefix="daikin-history-journal-runtime-"))
 compiler = ["c++"]
 flags = ["-std=c++17", "-O0", "-g", "-fno-omit-frame-pointer", "-Wall", "-Wextra",
          "-I", str(HERE / "stubs"), "-I", str(ROOT / "main")]

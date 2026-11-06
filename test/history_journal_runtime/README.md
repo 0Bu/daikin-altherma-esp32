@@ -11,7 +11,8 @@ Run from the repository root:
 python3 test/history_journal_runtime/run.py --sanitizer undefined --out /private/tmp/stop-journal-run
 ```
 
-The output directory must be new. It retains compiler commands/version, each translation unit's
+An explicit output directory must be new; otherwise a private temporary directory is created.
+It retains compiler commands/version, each translation unit's
 MMD dependencies, dependency hashes, production snapshots, binaries, per-case stdout/stderr and
 a JSON receipt. Each case is a fresh executable process. `--expect-red` retains the original
 commit-rejection witness and requires the named retry oracle to fail, rather than accepting a

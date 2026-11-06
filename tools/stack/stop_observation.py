@@ -15,6 +15,7 @@ EXTRA_SOURCES = tuple(HEADERS)
 INLINED_INDEX_HELPERS = (
     'observation_identity_word', 'observation_index_note_loss', 'observation_index_incomplete',
     'flash_index_stop_observation_record', 'flash_journal_scan',
+    'observation_append_owned',
 )
 TOKEN = re.compile(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|/\*.*?\*/|//[^\n]*', re.S)
 DEFINITION = re.compile(r'\b([A-Za-z_]\w*)\s*\([^;{}]*?\)\s*(?:const\s*)?(?:noexcept\s*)?\{')
