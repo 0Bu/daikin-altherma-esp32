@@ -1,4 +1,4 @@
-// translation-source: 3e8092cf0e419496e78d337338f27af53fbda73918ad45f0bbe0970b83ebeddc
+// translation-source: 0286e8b2aac2675f7d5984fc17943725eea029e8c7f6204a5644d06f4b79a8aa
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -258,6 +258,10 @@ I18N.pl = localeValues([
   /* service.metric.hp */ "Wysokie ciśnienie",
   /* service.metric.lp */ "Niskie ciśnienie",
   /* service.metric.range */ (a, b, c, d) => `min. ${a} · średnia ${b} · maks. ${c} ${d}`,
+  /* service.metric.samples */ n => `Liczba przyjętych odczytów: ${n}`,
+  /* service.metric.input */ "Wejście X10A wybrane w profilu",
+  /* service.metric.input_none */ "Brak wybranego wejścia",
+  /* service.metric.meta_limit */ "Liczby oznaczają przyjęte odczyty dla każdego wejścia, a nie pokrycie czasu. Wybrane wejście nie potwierdza bieżącego odczytu.",
   /* service.limit.special_phases_unavailable */ "Fazy sterownika",
   /* service.limit.temperature_context_incomplete */ "Kontekst temperatur",
   /* service.limit.pressure_sides_incomplete */ "Strona/y ciśnienia",
@@ -1038,13 +1042,7 @@ INSPECT_I18N.pl = inspectValues(
       : "Pompa i przepływ nie potwierdzają cyrkulacji przez obieg domu."], // heat
     ["Praca ogrzewania/chłodzenia domu", "Praca ogrzewania lub chłodzenia domu", "Stan zwykłej pracy obiegu domu. Nie jest żądaniem termostatu i sam nie potwierdza pracy sprężarki."], // spaceh
     ["Temperatura w pomieszczeniu", 0, "Temperatura strefy odniesienia; porównuj ją z nastawą i trybem."], // room
-    ["Pompa obiegowa", "Prędkość pompy obiegowej", "Tłoczy wodę przez wspólny obieg i drogę wybraną przez 3WV. Może pracować przy stojącej sprężarce dla wybiegu, ochrony lub wyrównania temperatury; prędkość sama nie dowodzi przepływu.", (d) => d.pump == null && d.flow == null && d.pumpOn == null ? null
-      : pumpFlowConflict(d) ? `Pompa zgłasza postój, ale czujnik pokazuje ${fmt1(d.flow)} l/min. Możliwy jest obieg zewnętrzny, wybieg albo sprzeczne/stare sygnały; sprawdź oba odczyty.`
-      : d.pump != null && d.pump > 0 ? d.flow != null ? `Sygnał prędkości: ${fmt0(d.pump)} %; zmierzony przepływ: ${fmt1(d.flow)} l/min.` : `Sygnał prędkości: ${fmt0(d.pump)} %, ale brak pomiaru przepływu; cyrkulacja nie jest potwierdzona.`
-      : waterMoving(d) ? `Czujnik pokazuje ${fmt1(d.flow)} l/min mimo braku użytecznej wartości prędkości pompy.`
-      : d.pumpOn === true ? d.flow != null ? `Stan pompy WŁ., ale przepływ to tylko ${fmt1(d.flow)} l/min; cyrkulacja nie jest potwierdzona.` : "Stan pompy WŁ., ale brak pomiaru przepływu; cyrkulacja nie jest potwierdzona."
-      : d.pumpOn === false || d.pump === 0 ? d.flow != null ? `Pompa zgłasza postój; czujnik pokazuje ${fmt1(d.flow)} l/min. Te wartości nie potwierdzają cyrkulacji.` : "Pompa zgłasza postój i brak pomiaru przepływu."
-      : `Brak wiarygodnego stanu pompy; ${fmt1(d.flow)} l/min nie potwierdza cyrkulacji.`], // pump
+    ["Pompa obiegowa", "Polecenie pompy obiegowej", "Tłoczy wodę we wspólnym obiegu i gałęzi wybranej zaworem 3-drogowym. Procent to odwrócone polecenie X10A: 0 % żąda zatrzymania, a 100 % maksymalnego wysterowania. Nie jest pomiarem prędkości ani dowodem obrotów lub przepływu. Status ON/OFF i zmierzony przepływ należy czytać osobno; obieg może trwać przy wyłączonej sprężarce.", (d) => pumpNowText(d, [(n) => `Polecenie pompy ${n} %.`, "Status pompy to ON.", "Pompa zgłasza zatrzymanie (OFF).", "Zgłoszony stan pompy jest nieznany.", (n) => `Zmierzony przepływ ${n} l/min.`, "Brak pomiaru przepływu.", "OFF jest sprzeczne z dodatnim przepływem; możliwy jest obieg zewnętrzny, wybieg lub sprzeczne/nieaktualne sygnały.", "Obieg wody nie jest potwierdzony."])], // pump
     [(d) => pelMeasured(d) ? "Pobór elektryczny (HomeHub)" : "Pobór elektryczny (szacunek)", "Pobór elektryczny", (d) => pelMeasured(d)
       ? "Wartość poboru z rejestru wejściowego HomeHub 51. Dokumentacja nie potwierdza kalibracji, dokładnego punktu pomiaru ani objęcia wszystkich grzałek; to nie jest certyfikowany licznik całej instalacji."
       : "Szacunek dla COP/EER: suma wszystkich zadeklarowanych faz CT × założone 230 V. Rzeczywiste napięcie i współczynnik mocy są nieznane; prąd falownika obejmuje tylko sprężarkę, a zakres CT zależy od okablowania.", (d) => d.pelHeld ? "Sprężarka stoi, więc prąd falownika jest wartością z poprzedniego cyklu, nie bieżącym pomiarem; nie można podać poboru ani sprawności."
@@ -1139,7 +1137,7 @@ DESCRIPTION_I18N.pl = descriptionValues([
   ["R4T jest wspólnym powrotem do PHE; R1T−R4T to ΔT PHE, nie odbiorników."], // 33
   ["Szybkość obiegu wody we wspólnym układzie ogrzewania/chłodzenia i CWU."], // 34
   ["Ciśnienie wody; zakres zależy od modelu, przy ≤1,0 bar sprawdź jego instrukcję."], // 35
-  ["Odwrócone polecenie pompy: 0 = pełna prędkość, 100 = postój."], // 36
+  ["Odwrócone polecenie X10A pompy obiegowej: surowe 0 żąda maksymalnego wysterowania, a 100 zatrzymania. Nie mierzy obrotów (RPM) ani nie dowodzi obrotu lub przepływu wody. Zgłoszony stan ON/OFF i zmierzony przepływ należy odczytywać osobno, także przy zatrzymanej sprężarce."], // 36
   ["Praca pompy obiegowej nie dowodzi przekazywania ciepła; potwierdź przepływem."], // 37
   ["Stan pompy solarnej, niezależnej od pompy obiegowej układu pompy ciepła."], // 38
   ["Zgłoszona prędkość pompy wskazanej przez profil."], // 39

@@ -279,10 +279,37 @@ struct RefrigerantServiceTracker {
 
 struct RefrigerantServiceMetricSnapshot {
     bool available = false;
+    uint32_t samples     = 0;
     int min_tenths = 0;
     int mean_tenths = 0;
     int max_tenths = 0;
 };
+
+// A profile-selected input, independent of whether that input contributed to this window. These
+// are the same fixed coordinates read by the sampler; no timestamp or current-value claim follows.
+struct RefrigerantServiceSource {
+    bool     selected = false;
+    uint8_t  reg      = 0;
+    uint8_t  off      = 0;
+    uint16_t conv     = 0;
+};
+
+struct RefrigerantServiceSources {
+    RefrigerantServiceSource rps;
+    RefrigerantServiceSource discharge;
+    RefrigerantServiceSource eev_command;
+    RefrigerantServiceSource high_pressure;
+    RefrigerantServiceSource low_pressure;
+};
+
+inline RefrigerantServiceSources refrigerant_service_sources(const RefrigerantServiceCoverage& c) {
+    const auto high = refrigerant_service_high_pressure_row(c);
+    return {{c.rps, 0x30, 0, 152},
+            {c.discharge, 0x20, 4, 105},
+            {c.eev_command, 0x30, 3, 151},
+            {high.available, high.reg, high.off, 105},
+            {c.low_pressure, 0x20, 14, 105}};
+}
 
 struct RefrigerantServiceSnapshot {
     RefrigerantServiceState state = RefrigerantServiceState::Unsupported;
@@ -290,6 +317,7 @@ struct RefrigerantServiceSnapshot {
     RefrigerantServiceMode mode = RefrigerantServiceMode::Unknown;
     uint32_t continuous_s = 0;
     uint32_t samples = 0;
+    uint32_t                         source_generation    = 0;
     bool coverage_evaluated = false;
     bool special_phases_known = false;
     uint8_t limitation_mask = RefrigerantServiceNoLimitation;
@@ -298,21 +326,26 @@ struct RefrigerantServiceSnapshot {
     RefrigerantServiceMetricSnapshot eev_command;
     RefrigerantServiceMetricSnapshot high_pressure;
     RefrigerantServiceMetricSnapshot low_pressure;
+    RefrigerantServiceSources        sources;
 };
 
 inline RefrigerantServiceMetricSnapshot refrigerant_service_metric_snapshot(
     const RefrigerantServiceMetric& m) {
     RefrigerantServiceMetricSnapshot out;
     out.available = m.samples > 0;
+    out.samples     = m.samples;
     out.min_tenths = m.min_tenths;
     out.mean_tenths = m.mean_tenths();
     out.max_tenths = m.max_tenths;
     return out;
 }
 
-inline RefrigerantServiceSnapshot refrigerant_service_snapshot(const RefrigerantServiceTracker& t,
-                                                                int64_t now_us) {
+inline RefrigerantServiceSnapshot
+refrigerant_service_snapshot(const RefrigerantServiceTracker& t, int64_t now_us,
+                             const RefrigerantServiceCoverage& c = {}) {
     RefrigerantServiceSnapshot out;
+    out.source_generation = t.generation;
+    out.sources           = refrigerant_service_sources(c);
     if (t.active && t.max_gap_us > 0 &&
         (now_us <= t.last_us || now_us - t.last_us > t.max_gap_us)) {
         out.state = RefrigerantServiceState::Interrupted;

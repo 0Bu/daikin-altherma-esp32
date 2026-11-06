@@ -23,7 +23,12 @@ import fs from "node:fs";
 import vm from "node:vm";
 import { readAppFragments } from "../tools/ui/read_app_source.mjs";
 
-const SOURCE = readAppFragments(["descriptions.js", "schematic.js"]);
+// Keep the source-arbitration test's history boundary stubs: loading the entire history fragment
+// would replace hasRoomHist/roomHistName. Execute only its shared pure pump-command dependency.
+const commandSource = readAppFragments(["history.js"])
+  .match(/function pumpCommandPercent\(signal\) \{[\s\S]*?\n\}/)?.[0];
+assert.ok(commandSource, "the production pump-command rule must be present");
+const SOURCE = commandSource + readAppFragments(["descriptions.js", "schematic.js"]);
 const index = fs.readFileSync(new URL("../main/www/index.html", import.meta.url), "utf8");
 const style = fs.readFileSync(new URL("../main/www/style.css", import.meta.url), "utf8");
 const demo = fs.readFileSync(new URL("../tools/uigif/scenes.js", import.meta.url), "utf8");
@@ -478,15 +483,15 @@ const X_2WV = (on) => ({ label: "2way valve(On:Heat_Off:Cool)", value: on ? "1" 
   assert.equal(c.waterMoving({ pumpOn: true, flow: null }), null,
     "pump ON without a flow reading must remain unknown, not measured circulation");
   assert.match(c.INSPECT.pump.now({ pump: 0, pumpOn: false, flow: 5 }).en,
-    /pump reports stopped, but the flow sensor reports/i);
+    /pump reports stopped[\s\S]*Measured flow 5[\s\S]*OFF conflicts with positive flow/i);
   const pumpOnNoFlow = c.INSPECT.pump.now({ pump: null, pumpOn: true, flow: null }).en;
   assert.match(pumpOnNoFlow, /pump status is ON.*no flow measurement/i);
   assert.doesNotMatch(pumpOnNoFlow, /pump reports stopped|measured flow is/i);
   const pumpUnknown = c.INSPECT.pump.now({ pump: null, pumpOn: null, flow: 0 }).en;
-  assert.match(pumpUnknown, /No reliable pump state/i);
+  assert.match(pumpUnknown, /reported pump state is unknown/i);
   assert.doesNotMatch(pumpUnknown, /pump reports stopped/i);
   assert.match(c.INSPECT.pump.now({ pump: 45, pumpOn: true, flow: null }).en,
-    /no flow measurement is available; circulation is not confirmed/i);
+    /no flow measurement is available[\s\S]*circulation is not established/i);
   assert.doesNotMatch(c.INSPECT.wtank.now({ valveDhw: true, pumpOn: false, flow: 0,
                                             lwt: 40, tank: 35 }).en, /Charging the tank/i,
     "a selected valve route alone must not be called an active tank charge");

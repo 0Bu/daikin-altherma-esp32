@@ -20,6 +20,7 @@ const normalizedStatus = statusSource.replaceAll("\\\"", "\"");
 for (const key of [
   "refrigerant_service", "kind", "state", "continuous_s", "samples", "mode", "blocker",
   "special_phases_known", "load_proven", "eev_feedback", "limitations", "metrics",
+  "source_generation", "metric_meta", "source", "reg", "offset", "conv",
   "compressor_rps", "discharge_c", "eev_command_pls", "high_pressure_bar", "low_pressure_bar",
 ]) assert.match(normalizedStatus, new RegExp(`"${key}"`), `missing service status key ${key}`);
 assert.match(normalizedStatus, /"load_proven":false,"eev_feedback":false/,
@@ -100,6 +101,56 @@ assert.match(html, /class="vrow vrow-desc"[^>]*data-desc="service:refrigerant"/)
 assert.equal((html.match(/<div class="card">/g) || []).length, 1);
 assert.doesNotMatch(html, /data-action=|<form|<input|>OK</);
 
+// New metadata is separate from legacy ranges. Counts belong to each actual accepted population,
+// and an identified input does not turn a missing reading into a zero-valued measurement.
+const counted = {
+  ...observed, source_generation: 777,
+  metrics: { ...observed.metrics, low_pressure_bar: null },
+  metric_meta: {
+    compressor_rps: { samples: 4, source: { kind: "x10a", reg: 0x30, offset: 0, conv: 152 } },
+    discharge_c: { samples: 4, source: { kind: "x10a", reg: 0x20, offset: 4, conv: 105 } },
+    eev_command_pls: { samples: 4, source: { kind: "x10a", reg: 0x30, offset: 3, conv: 151 } },
+    high_pressure_bar: { samples: 3, source: { kind: "x10a", reg: 0x62, offset: 15, conv: 105 } },
+    low_pressure_bar: { samples: 0, source: null },
+  },
+};
+ui.set(counted);
+html = ui.card();
+assert.match(html, /High pressure: min 18 · mean 20 · max 22 bar · 3 accepted readings/);
+assert.match(html, /Low pressure: No data · 0 accepted readings · No selected input/);
+assert.equal((html.match(/Profile-selected X10A input/g) || []).length, 0,
+             "populated ranges do not repeat the same generic source phrase");
+assert.match(html, /<br>Discharge temperature:/,
+             "each metric remains readable as its own line inside the existing explanation block");
+assert.match(html, /not time coverage/);
+assert.match(html, /does not prove a current reading/);
+assert.doesNotMatch(html, /777|0x62|converter|Low pressure: min 0/,
+                    "wire-level identity belongs in the API, not the owner-facing row");
+ui.set({ ...counted, metric_meta: { low_pressure_bar: { samples: 0,
+  source: { kind: "x10a", reg: 0x20, offset: 14, conv: 105 } } } });
+html = ui.card();
+assert.match(html, /Low pressure: No data · 0 accepted readings · Profile-selected X10A input/);
+assert.doesNotMatch(html, /Low pressure: min 0/);
+ui.set({ ...counted, state: "waiting", samples: 0, continuous_s: 0,
+  blocker: "compressor_not_running", metrics: {},
+  metric_meta: Object.fromEntries(Object.entries(counted.metric_meta)
+    .map(([key, meta]) => [key, { ...meta, samples: 0 }])) });
+html = ui.card();
+assert.match(html, /The compressor is not running/);
+assert.doesNotMatch(html, /accepted readings|Profile-selected X10A input|No selected input|not time coverage/,
+                    "an empty waiting window needs its blocker, not five empty metric lines");
+
+// Absent/malformed metadata is not an accepted zero count or a selected input. Old firmware's
+// legitimate measured zero and its original five ranges continue to render without metadata.
+ui.set({ ...observed, metric_meta: {
+  compressor_rps: { samples: null, source: null },
+  high_pressure_bar: { samples: -1, source: null },
+  low_pressure_bar: { samples: "0", source: null },
+} });
+html = ui.card();
+assert.match(html, /Compressor: min 0 · mean 27.5 · max 40 rps/);
+assert.doesNotMatch(html, /accepted readings|selected input|not time coverage/);
+
 // Unknown/null/incomplete metric data cannot become a zero or partially plausible range.
 ui.set({ ...observed, metrics: {
   compressor_rps: null, discharge_c: { min: 0, mean: null, max: 81 },
@@ -149,6 +200,14 @@ for (const locale of localeNames) {
   for (const unit of ["rps", "°C", "pls", "bar"]) assert.ok(html.includes(unit), `${locale} ${unit}`);
   assert.doesNotMatch(html, />OK</);
   assert.equal((html.match(/class="vdesc-p"/g) || []).length, 3, `${locale}: exactly three blocks`);
+
+  ui.set(counted);
+  const metadata = ui.card();
+  assert.doesNotMatch(metadata, /service\.(?:metric|limit|common)|undefined|NaN|0x62|777/, locale);
+  if (locale !== "en") {
+    assert.doesNotMatch(metadata, /accepted readings|Profile-selected X10A input|No selected input|not time coverage/,
+                       `${locale}: metadata and its limit must be localized`);
+  }
 }
 ui.lang("de");
 ui.set({ ...observed, state: "limited", special_phases_known: false,

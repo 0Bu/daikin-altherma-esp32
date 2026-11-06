@@ -215,6 +215,11 @@ inspector. Estimated power readings retain `≈` even when the inspector is clos
 
 **Derived working points**
 
+Pump percentage is the inverted X10A controller command (0 % stop request, 100 % maximum effort),
+not measured speed. Only finite decoded inputs from 0 to 100 are inverted; invalid inputs stay
+blank in the live pill and history. Command, reported ON/OFF state and measured flow remain
+independent: a stop request does not establish reported OFF or absence of water motion.
+
 ΔT is R1T−R4T and needs moving water. Capacity also needs a running compressor, known mode and
 useful transfer direction: positive ΔT for heating/DHW, negative for cooling, displayed as positive
 cooling capacity. COP/EER additionally requires compatible thermal/electrical boundaries. Missing
@@ -236,8 +241,10 @@ The 3-way valve selects the animated hydraulic branch. Water flow has mode-aware
 pump-only circulation is neutral. Cooling/defrost reverse refrigerant motion. Active BUH uses the
 warning tint; active BSH turns the tank's perimeter dashes a fixed orange, distinct from the
 red/blue hydronic charge.
-Rotors stay centred on their hubs, rotate clockwise only when running, and carry no rotating
-flow-direction arrow. Direction belongs to pipe dashes.
+Rotors stay centred on their hubs, turn clockwise and carry no rotating flow-direction arrow.
+The pump rotor requires reported ON; its animation conveys neither measured RPM nor proof of
+mechanical rotation. Measured flow drives water-pipe motion independently. Direction belongs to
+pipe dashes.
 
 Quiet/Defrost pills remain grey while inactive/unknown and blue while active. E-heater stays grey
 or orange; its accessible name and inspector state ON/OFF/unknown. Native Altherma 4 holding 9

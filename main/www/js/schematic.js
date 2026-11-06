@@ -179,6 +179,18 @@ const waterMoving = (d) => {
   return d.pumpOn === false ? false : null;
 };
 const pumpFlowConflict = (d) => !!d && d.pumpOn === false && d.flow != null && d.flow > 0.5;
+// Each sentence names a separate observation: a STOP command never supplies an OFF report.
+// Locale tables supply copy only; all thirteen languages use the same state/flow rule.
+// words: command, ON, OFF, unknown, measured flow, missing flow, conflict, unconfirmed circulation.
+function pumpNowText(d, words) {
+  if (d.pump == null && d.flow == null && d.pumpOn == null) return null;
+  const parts = d.pump == null ? [] : [words[0](fmt1(d.pump))];
+  parts.push(d.pumpOn === true ? words[1] : d.pumpOn === false ? words[2] : words[3]);
+  parts.push(d.flow == null ? words[5] : words[4](fmt1(d.flow)));
+  if (pumpFlowConflict(d)) parts.push(words[6]);
+  else if (!(d.flow > 0.5)) parts.push(words[7]);
+  return parts.join(" ");
+}
 
 // The colour is a claim about THERMAL transfer, not merely hydraulic motion. Modbus-only DHW has
 // enough independent evidence for heating (compressor + DHW valve + pump); Modbus-only space Auto
@@ -335,8 +347,8 @@ function liveData() {
   // Otherwise the I/U mode decides which direction across the PHE is useful output.
   d.thermalMode = d.defrost === true ? "defrost"
                 : d.valveDhw === true ? "heat" : d.spaceMode;
-  // Pump % — the wire value is inverted ("Water pump signal (0:max-100:stop)").
-  d.pump = d.pumpSig == null ? null : Math.min(100, Math.max(0, 100 - d.pumpSig));
+  // Pump command % — independent of the reported operation state and measured flow.
+  d.pump = pumpCommandPercent(d.pumpSig);
   // The outdoor unit refreshes its OWN register pages (0x20 sensors, 0x21 inverter) only while it
   // RUNS — stopped, it answers with the LAST RUN's values (logic/ou_stale.hpp, host-tested against
   // the whole catalog). Measured on a live unit: outdoor air held exactly 19.0 °C for five hours,
@@ -725,7 +737,9 @@ function renderLive() {
   const sc = $("schem");
   const compressorOn = compressorRunning(d);
   sc.classList.toggle("fan-on", compressorOn && d.defrost !== true);
-  sc.classList.toggle("pump-on", pumping === true);
+  // The rotor represents reported pump activity, never command magnitude or external flow/RPM.
+  // Measured water motion still drives the pipe animations independently below.
+  sc.classList.toggle("pump-on", d.pumpOn === true);
   sc.classList.toggle("buh-on", !!(d.buh1 || d.buh2));
   const bshActive = d.bsh === true;
   sc.classList.toggle("bsh-on", bshActive);
@@ -1284,42 +1298,13 @@ const INSPECT = {
   },
   pump: {
     t: { en: "Circulation pump", de: "Umwälzpumpe" },
-    aria: { en: "Circulation-pump speed", de: "Drehzahl der Umwälzpumpe" },
+    aria: { en: "Circulation-pump command", de: "Ansteuerung der Umwälzpumpe" },
     trend: "pump_speed",
-    what: {
-      en: "Circulates water through the common hydronic loop and the branch selected by the 3-way valve. In the split-system layout shown, it is on the supply side after the plate heat exchanger and backup heater. The controller adjusts its speed according to operating mode, target ΔT and minimum-flow requirements; it may also run with the compressor stopped for overrun, protection or temperature equalisation.",
-      de: "Fördert Wasser durch den gemeinsamen Hydraulikkreis und den vom 3-Wege-Ventil gewählten Zweig. Im gezeigten Split-System-Aufbau sitzt sie im Vorlauf hinter Plattenwärmetauscher und Zusatzheizer. Der Regler passt ihre Drehzahl an Betriebsart, Ziel-ΔT und Mindestdurchfluss an; für Nachlauf, Schutz oder Temperaturausgleich kann sie auch bei stehendem Verdichter laufen.",
-    },
+    what: { en: "Circulates water through the common hydronic loop and the branch selected by the 3-way valve. The percentage is the inverted X10A controller command: 0 % requests stop and 100 % requests maximum effort. It is not measured speed or proof of rotation or flow. Read the reported ON/OFF state and measured flow separately; circulation can continue with the compressor stopped.",
+      de: "Fördert Wasser durch den gemeinsamen Hydraulikkreis und den vom 3-Wege-Ventil gewählten Zweig. Der Prozentwert ist der invertierte X10A-Reglerbefehl: 0 % fordert Stopp, 100 % maximale Ansteuerung. Er misst weder Drehzahl noch Rotation oder Durchfluss. Gemeldeten ON/OFF-Status und gemessenen Durchfluss getrennt lesen; Zirkulation ist auch bei stehendem Verdichter möglich." },
     re: /water pump operation/i, sample: "Water pump operation",
-    // 0 % is a stopped pump, not a pump "running at 0 %" — the old wording asserted circulation on
-    // an idle plant, next to a flow pill reading 0.0 l/min.
-    now: (d) => d.pump == null && d.flow == null && d.pumpOn == null ? null
-      : pumpFlowConflict(d)
-        ? { en: `The internal pump reports stopped, but the flow sensor reports ${fmt1(d.flow)} l/min. External circulation, coast-down or conflicting/stale signals can cause this; the two readings must be checked together.`,
-            de: `Die interne Pumpe meldet Stillstand, der Durchflusssensor jedoch ${fmt1(d.flow)} l/min. Externe Umwälzung, Nachlauf oder widersprüchliche beziehungsweise veraltete Signale kommen infrage; beide Werte müssen gemeinsam geprüft werden.` }
-      : d.pump != null && d.pump > 0
-        ? d.flow != null
-          ? { en: `The speed signal reports ${fmt0(d.pump)} %; measured flow is ${fmt1(d.flow)} l/min.`,
-              de: `Das Drehzahlsignal meldet ${fmt0(d.pump)} %; der gemessene Volumenstrom beträgt ${fmt1(d.flow)} l/min.` }
-          : { en: `The speed signal reports ${fmt0(d.pump)} %, but no flow measurement is available; circulation is not confirmed.`,
-              de: `Das Drehzahlsignal meldet ${fmt0(d.pump)} %, ein Durchflussmesswert fehlt jedoch; Zirkulation ist damit nicht bestätigt.` }
-      : waterMoving(d)
-        ? { en: `The flow sensor reports ${fmt1(d.flow)} l/min even though no usable pump-speed value is available.`,
-            de: `Der Durchflusssensor meldet ${fmt1(d.flow)} l/min, obwohl kein nutzbarer Pumpendrehzahlwert vorliegt.` }
-      : d.pumpOn === true
-        ? d.flow != null
-          ? { en: `The pump status is ON, but the flow sensor reports only ${fmt1(d.flow)} l/min; water circulation is not established.`,
-              de: `Der Pumpenstatus ist ON, der Durchflusssensor meldet jedoch nur ${fmt1(d.flow)} l/min; Wasserzirkulation ist damit nicht belegt.` }
-          : { en: "The pump status is ON, but no flow measurement is available; water circulation is not confirmed.",
-              de: "Der Pumpenstatus ist ON, ein Durchflussmesswert fehlt jedoch; Wasserzirkulation ist damit nicht bestätigt." }
-      : d.pumpOn === false || d.pump === 0
-        ? d.flow != null
-          ? { en: `The pump reports stopped; the flow sensor reports ${fmt1(d.flow)} l/min. These readings do not establish water circulation.`,
-              de: `Die Pumpe meldet Stillstand; der Durchflusssensor meldet ${fmt1(d.flow)} l/min. Diese Werte belegen keine Wasserzirkulation.` }
-          : { en: "The pump reports stopped and no flow measurement is available.",
-              de: "Die Pumpe meldet Stillstand; ein Durchflussmesswert ist nicht verfügbar." }
-        : { en: `No reliable pump state is available; the flow sensor reports ${fmt1(d.flow)} l/min and does not establish circulation.`,
-            de: `Kein verlässlicher Pumpenstatus ist verfügbar; der Durchflusssensor meldet ${fmt1(d.flow)} l/min und belegt keine Zirkulation.` },
+    now: (d) => ({ en: pumpNowText(d, [(n) => `Pump command ${n} %.`, "The pump status is ON.", "The pump reports stopped (OFF).", "The reported pump state is unknown.", (n) => `Measured flow ${n} l/min.`, "No flow measurement is available.", "Reported OFF conflicts with positive flow; external circulation, coast-down or conflicting/stale signals are possible.", "Water circulation is not established."]),
+      de: pumpNowText(d, [(n) => `Pumpenansteuerung ${n} %.`, "Der Pumpenstatus ist ON.", "Die Pumpe meldet Stillstand (OFF).", "Der gemeldete Pumpenstatus ist unbekannt.", (n) => `Gemessener Durchfluss ${n} l/min.`, "Ein Durchflussmesswert fehlt.", "Gemeldetes OFF widerspricht positivem Durchfluss; externe Umwälzung, Nachlauf oder widersprüchliche/veraltete Signale sind möglich.", "Wasserzirkulation ist damit nicht belegt."]) }),
     rows: [/water pump signal/i, /flow sensor/i, /^water pressure$/i],
   },
   pel: PEL_INSPECT,

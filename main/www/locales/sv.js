@@ -1,4 +1,4 @@
-// translation-source: 3e8092cf0e419496e78d337338f27af53fbda73918ad45f0bbe0970b83ebeddc
+// translation-source: 0286e8b2aac2675f7d5984fc17943725eea029e8c7f6204a5644d06f4b79a8aa
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -253,6 +253,10 @@ I18N.sv = localeValues([
   /* service.metric.hp */ "Högtryck",
   /* service.metric.lp */ "Lågtryck",
   /* service.metric.range */ (a, b, c, d) => `min. ${a} · medel ${b} · max. ${c} ${d}`,
+  /* service.metric.samples */ n => `${n} ${n === 1 ? "inkluderad avläsning" : "inkluderade avläsningar"}`,
+  /* service.metric.input */ "X10A-ingång vald av profilen",
+  /* service.metric.input_none */ "Ingen vald ingång",
+  /* service.metric.meta_limit */ "Antalen avser inkluderade avläsningar per ingång, inte tidstäckning. En vald ingång bevisar inte en aktuell avläsning.",
   /* service.limit.special_phases_unavailable */ "Reglerfaser",
   /* service.limit.temperature_context_incomplete */ "Temperaturkontext",
   /* service.limit.pressure_sides_incomplete */ "Trycksida/or",
@@ -1042,13 +1046,7 @@ INSPECT_I18N.sv = inspectValues(
       : "Pump/flöde bevisar inte cirkulation i rumsgrenen."], // heat
     ["Rumsdrift", "Rumsuppvärmning eller -kylning", "Normal rumsdriftssignal; inte termostatbegäran eller bevis på kompressordrift."], // spaceh
     ["Rumstemperatur", 0, "Referenszonens temperatur och mål; betydelsen beror på givarplaceringen."], // room
-    ["Cirkulationspump", "Cirkulationspumpens hastighet", "Driver gemensam krets/vald 3WV-gren och kan gå efter kompressorstopp; tolka med flödet.", (d) => d.pump == null && d.flow == null && d.pumpOn == null ? null
-      : pumpFlowConflict(d) ? `Pumpen rapporterar stopp men ${fmt1(d.flow)} l/min mäts; extern pump, eftergång eller signalmotsägelse är möjlig.`
-      : d.pump != null && d.pump > 0 ? d.flow != null ? `${fmt0(d.pump)} %; ${fmt1(d.flow)} l/min.` : `${fmt0(d.pump)} %; flödesmätning saknas och cirkulation är inte bekräftad.`
-      : waterMoving(d) ? `Inget pumpvarvtal; ${fmt1(d.flow)} l/min mäts.`
-      : d.pumpOn === true ? d.flow != null ? `Pump aktiv, men bara ${fmt1(d.flow)} l/min; cirkulation ej bekräftad.` : "Pump aktiv; flödesmätning saknas."
-      : d.pumpOn === false || d.pump === 0 ? d.flow != null ? `Pump stoppad; ${fmt1(d.flow)} l/min visas, cirkulation ej bekräftad.` : "Pump stoppad; flödesmätning saknas."
-      : `Pumpstatus osäker; ${fmt1(d.flow)} l/min bevisar inte cirkulation.`], // pump
+    ["Cirkulationspump", "Cirkulationspumpens kommando", "Flyttar vatten genom den gemensamma kretsen och grenen som 3-vägsventilen väljer. Procenten är det inverterade X10A-kommandot: 0 % begär stopp och 100 % maximal styrning. Det är inte uppmätt varvtal eller bevis för rotation eller flöde. Läs rapporterad ON/OFF-status och uppmätt flöde separat; cirkulation kan fortsätta när kompressorn står still.", (d) => pumpNowText(d, [(n) => `Pumpkommando ${n} %.`, "Pumpstatus är ON.", "Pumpen rapporterar stopp (OFF).", "Rapporterad pumpstatus är okänd.", (n) => `Uppmätt flöde ${n} l/min.`, "Ingen flödesmätning finns tillgänglig.", "OFF motsäger positivt flöde; extern cirkulation, eftergång eller motstridiga/inaktuella signaler är möjliga.", "Vattencirkulation är inte bekräftad."])], // pump
     [(d) => pelMeasured(d) ? "Eleffekt · HomeHub" : "Uppskattad eleffekt", "Eleffekt", (d) => pelMeasured(d)
       ? "HomeHub-ingång 51; kalibrering, mätpunkt och inkluderade värmare är inte offentligt belagda."
       : "COP/EER-underlag: CT antar 230 V/fas utan känd spänning/effektfaktor; växelriktarström avser kompressorn.", (d) => d.pelHeld ? "Växelriktarströmmen är gammal efter stopp; el/verkningsgrad döljs."
@@ -1146,7 +1144,7 @@ DESCRIPTION_I18N.sv = descriptionValues([
   ["R4T-retur till PHE; bedöm ΔT med flöde, kompressor och läge, inte en universell 5 K-regel."], // 33
   ["Vattenflöde i gemensam krets; minimum beror på modell/läge och lågt värde kan utlösa 7H."], // 34
   ["Hydraultryck: många handböcker kräver >1 bar; vid ≤1,0 bar gäller handboken för exakt modell."], // 35
-  ["Inverterat pumpkommando: 0 är maxhastighet och 100 är stopp."], // 36
+  ["Inverterat X10A-kommando till cirkulationspumpen: råvärde 0 begär maximal styrning och 100 stopp. Det mäter inte varvtal (RPM) och bevisar varken rotation eller vattenflöde. Läs rapporterad ON/OFF-status och uppmätt flöde var för sig, även när kompressorn står stilla."], // 36
   ["Pumpstatus; bevisar inte nyttig värme och kan vara aktiv utan kompressor. Jämför flödet."], // 37
   ["Status för pumpen i en konfigurerad solvärmekrets."], // 38
   ["Angiven hastighet för pumpen som profilen namnger."], // 39

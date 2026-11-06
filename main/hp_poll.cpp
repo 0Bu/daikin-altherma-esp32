@@ -1176,7 +1176,8 @@ HpStats hp_stats() {
 logic::RefrigerantServiceSnapshot refrigerant_service_status() {
     if (!s_mtx) return {};
     Lock lk(s_mtx);
-    return logic::refrigerant_service_snapshot(s_refrigerant_service, esp_timer_get_time());
+    return logic::refrigerant_service_snapshot(s_refrigerant_service, esp_timer_get_time(),
+                                               s_refrigerant_service_coverage);
 }
 
 bool hp_link_connected() {

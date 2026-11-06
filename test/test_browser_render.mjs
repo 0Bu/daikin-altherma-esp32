@@ -251,6 +251,98 @@ async function assertFlowSwitchWords(page, context) {
     `${context}: flow-switch word ${JSON.stringify(fit.text)} needs 4 px padding (${fit.left}/${fit.right})`);
 }
 
+async function assertPumpCommandTruth(page, context, locale) {
+  // Command, reported operation and flow deliberately disagree in these source frames. The real
+  // inspector and CSS must retain those distinctions, including after an in-place values repaint.
+  const unknownWords = { en: /unknown/, de: /unbekannt/, es: /desconocido/, fr: /inconnu/,
+    it: /sconosciuto/, pl: /nieznany/, cs: /neznámý/, uk: /невідомий/, zh: /未知/, ja: /不明/,
+    nb: /ukjent/, sv: /okänd/, fi: /tuntematon/ };
+  await page.waitFor("!S.clickHold");
+  await page.evaluate(`(() => {
+    window.__browserPumpOriginal = { ...S };
+    S.status = structuredClone(S.status);
+    S.status.hp.connected = true;
+    S.status.modbus = { ...S.status.modbus, enabled: false, connected: false };
+    S.status.history = { rows: [], modbus_rows: [], env3_rows: [] };
+    S._modbus = [];
+    S.insp = null; S.inspSig = null; S.inspHistSig = null;
+    S.hist = new Map(); S.histPin = new Map(); S.histBusy = new Set(); S.histRequests = new Map();
+    S.scrub = null;
+    return true;
+  })()`);
+  try {
+    const cases = [
+      { name: "unknown-stop-command", signal: 100, state: null, flow: 0, command: 0, rotor: false, pipe: false },
+      { name: "off-with-flow", signal: 100, state: 0, flow: 12, command: 0, rotor: false, pipe: true },
+      { name: "on-without-flow", signal: 0, state: 1, flow: 0, command: 100, rotor: true, pipe: false },
+      { name: "fractional-command", signal: 25.5, state: 1, flow: 12, command: 74.5, rotor: true, pipe: true },
+      { name: "invalid-command", signal: 101, state: null, flow: 0, command: null, rotor: false, pipe: false },
+      { name: "all-missing", signal: null, state: null, flow: null, command: null, rotor: false, pipe: false },
+    ];
+    for (const [index, sample] of cases.entries()) {
+      const label = `${context}/${sample.name}`;
+      await page.waitFor("!S.clickHold");
+      await page.evaluate(`(() => {
+        const sample = ${JSON.stringify(sample)};
+        S._values = [
+          { label: "Water pump signal (0:max-100:stop)",
+            value: sample.signal == null ? null : String(sample.signal), reg: 0x62, off: 12, conv: 152 },
+          { label: "Water pump operation", value: sample.state == null ? null : String(sample.state),
+            reg: 0x60, binary: true },
+          { label: "Flow sensor (l/min)", value: sample.flow == null ? null : String(sample.flow),
+            reg: 0x62, unit: "l/min" },
+        ];
+        renderApp(); return true;
+      })()`);
+      if (index === 0) await clickElement(page, '#schem [data-insp="pump"]');
+      await page.waitFor(`S.insp === "pump" && document.getElementById("inspect").classList.contains("open")`);
+      await page.frame();
+      const actual = await page.evaluate(`(() => {
+        const now = inspNowText(INSPECT.pump, S.live);
+        const paragraphs = document.querySelectorAll("#inspBody .vdesc-p");
+        return { command: S.live.pump, state: S.live.pumpOn, flow: S.live.flow,
+          historyCommand: DERIVED.pump_speed.fn({ pump_signal: ${JSON.stringify(sample.signal)} }),
+          rotor: document.getElementById("schem").classList.contains("pump-on"),
+          rotorAnimation: getComputedStyle(document.getElementById("scPump")).animationName,
+          pipe: document.getElementById("fPhe").classList.contains("on"),
+          now, renderedNow: now == null ? null : paragraphs[paragraphs.length - 1]?.textContent,
+          paragraphs: paragraphs.length, body: document.getElementById("inspBody").innerText,
+          accessibleName: document.querySelector('#schem [data-insp="pump"]').getAttribute("aria-label"),
+          expectedName: inspFieldText(INSPECT.pump, "aria", null) };
+      })()`);
+      assert.equal(actual.command, sample.command, `${label}: invalid commands stay unavailable; fractions survive`);
+      assert.equal(actual.historyCommand, sample.command, `${label}: the production trend uses the same command validity`);
+      assert.equal(actual.state, sample.state == null ? null : sample.state === 1,
+        `${label}: command cannot supply a reported operation state`);
+      assert.equal(actual.flow, sample.flow, `${label}: measured flow remains independent`);
+      assert.equal(actual.rotor, sample.rotor, `${label}: only reported ON animates the pump`);
+      assert.equal(actual.rotorAnimation, sample.rotor ? "pump-spin" : "none", `${label}: actual CSS follows reported activity`);
+      assert.equal(actual.pipe, sample.pipe, `${label}: flow animates water independently of the rotor`);
+      assert.equal(actual.renderedNow, actual.now, `${label}: the localized live sentence reaches the rendered inspector`);
+      assert.equal(actual.accessibleName, actual.expectedName, `${label}: the real hit target names the command`);
+      assert.doesNotMatch(actual.body, /undefined|NaN|\bnull\b/, `${label}: missing evidence cannot leak as a value`);
+      if (sample.name === "all-missing") {
+        assert.equal(actual.now, null, `${label}: absent observations provide no state sentence`);
+        assert.equal(actual.paragraphs, 1, `${label}: only the timeless explainer remains`);
+      } else if (sample.state == null) {
+        assert.match(actual.now, unknownWords[locale], `${label}: the reported operation remains explicitly unknown`);
+      }
+      assertLayout(await page.evaluate(layoutAudit), label);
+      await assertAccessibility(page, label, { nativeTree: index === 0 });
+      await captureNativeEvidence(page, label, "inspect");
+    }
+  } finally {
+    await page.waitFor("!S.clickHold");
+    await page.evaluate(`(() => {
+      Object.assign(S, window.__browserPumpOriginal);
+      S.inspSig = null; S.inspHistSig = null;
+      delete window.__browserPumpOriginal;
+      renderApp(); window.scrollTo(0, 0); return true;
+    })()`);
+    await page.frame();
+  }
+}
+
 async function assertModalKeyboard(page, modalId, context, { route = true } = {}) {
   assert.deepEqual(await page.evaluate(`(() => {
     const modal = document.getElementById(${JSON.stringify(modalId)});
@@ -1177,11 +1269,21 @@ async function assertPlantDiagnosis(page, context) {
     window.__browserDiagnosisOriginal = { status: S.status, open: new Set(S.descOpen), card: S.dashboardCard };
     S.status = structuredClone(S.status);
     S.status.refrigerant_service = {
-      state: 'limited', continuous_s: 75, samples: 4, blocker: null,
+      kind: 'observation', mode: 'heating', state: 'limited', continuous_s: 75,
+      samples: 4, source_generation: 71, blocker: null,
       special_phases_known: false, limitations: ['pressure_sides_incomplete'],
       metrics: { compressor_rps: { min: 20, mean: 27.5, max: 40 },
         discharge_c: { min: 46.5, mean: 60.5, max: 81.4 },
-        eev_command_pls: { min: 200, mean: 230.5, max: 250 } }
+        eev_command_pls: { min: 200, mean: 230.5, max: 250 },
+        high_pressure_bar: { min: 7.3, mean: 14.6, max: 21.9 },
+        low_pressure_bar: { min: 3.2, mean: 4.1, max: 5 } },
+      metric_meta: {
+        compressor_rps: { samples: 4, source: { kind: 'x10a', reg: 48, offset: 0, conv: 152 } },
+        discharge_c: { samples: 4, source: { kind: 'x10a', reg: 32, offset: 4, conv: 105 } },
+        eev_command_pls: { samples: 4, source: { kind: 'x10a', reg: 48, offset: 3, conv: 151 } },
+        high_pressure_bar: { samples: 2, source: { kind: 'x10a', reg: 98, offset: 15, conv: 105 } },
+        low_pressure_bar: { samples: 4, source: { kind: 'x10a', reg: 32, offset: 14, conv: 105 } }
+      }
     };
     S.status.health = {
       status: "info", full_span: true, span_s: 86400, source_fresh: true, source_age_s: 1,
@@ -1263,6 +1365,18 @@ async function assertPlantDiagnosis(page, context) {
       assert.equal(block.normal, normalLabel, `${context}/${block.id}: Normal last`);
       assert.ok(block.text.every(text => text.trim()), `${context}/${block.id}: no empty block`);
     }
+    const refrigerantText = () => page.evaluate(`document.querySelector("[data-desc='service:refrigerant']")
+      .closest('.vitem').innerText`);
+    for (const [key, args] of [["samples", [2]], ["samples", [4]], ["meta_limit", []]]) {
+      const expected = await page.evaluate(`t(${JSON.stringify("service.metric." + key)},
+        ...${JSON.stringify(args)})`);
+      assert.ok((await refrigerantText()).includes(expected),
+        `${context}: actual expanded service retains localized metadata ${key}/${args.join()}`);
+    }
+    assert.doesNotMatch(await refrigerantText(), /0x62|0x20|source_generation|"conv"/,
+      `${context}: raw source coordinates stay outside the owner-facing explanation`);
+    assert.ok(!(await refrigerantText()).includes(await page.evaluate("t('service.metric.input')")),
+      `${context}: populated metrics do not repeat a generic source sentence for every input`);
     const stopText = () => page.evaluate(`document.querySelector("[data-desc='model:health_cycling']")
       .closest('.vitem').innerText`);
     for (const [key, args] of [["population", ["4"]], ["counts", []], ["rule", []], ["limits", []],
@@ -1354,6 +1468,50 @@ async function assertPlantDiagnosis(page, context) {
     await captureNativeEvidence(page, `${context}/dhw-no-window`,
       "[data-desc='model:health_dhw_loss']", ".vitem");
     await captureNativeEvidence(page, `${context}/refrigerant`,
+      "[data-desc='service:refrigerant']", ".vitem");
+    // An optional input may contribute no readings while the other pressure side admits the
+    // window. Its selected source is retained, but zero accepted samples cannot create a range.
+    await page.evaluate(`(() => {
+      const service = S.status.refrigerant_service;
+      service.source_generation = 72;
+      service.metrics.high_pressure_bar = null;
+      service.metric_meta.high_pressure_bar.samples = 0;
+      renderApp(); return true;
+    })()`);
+    await page.frame();
+    assertLayout(await page.evaluate(layoutAudit), `${context}/refrigerant-zero`);
+    await assertAccessibility(page, `${context}/refrigerant-zero`, { nativeTree: true });
+    for (const [key, args] of [["samples", [0]], ["input", []], ["meta_limit", []]]) {
+      const expected = await page.evaluate(`t(${JSON.stringify("service.metric." + key)},
+        ...${JSON.stringify(args)})`);
+      assert.ok((await refrigerantText()).includes(expected),
+        `${context}: zero-count service retains localized metadata ${key}`);
+    }
+    const unavailableInputCount = await page.evaluate(`(() => {
+      const text = document.querySelector("[data-desc='service:refrigerant']").closest('.vitem').innerText;
+      return text.split(t('sys.nodata')).length - 1;
+    })()`);
+    assert.ok(unavailableInputCount >= 1,
+      `${context}: the selected zero-count pressure input stays unavailable rather than displaying measured zero`);
+    await captureNativeEvidence(page, `${context}/refrigerant-zero`,
+      "[data-desc='service:refrigerant']", ".vitem");
+    // A different profile has a selected high side and no assigned low side. This is distinct
+    // from the selected-but-unread input above, without inventing a low-side measurement.
+    await page.evaluate(`(() => {
+      const service = S.status.refrigerant_service;
+      service.source_generation = 73;
+      service.metrics.high_pressure_bar = { min: 7.3, mean: 14.6, max: 21.9 };
+      service.metric_meta.high_pressure_bar = { samples: 4,
+        source: { kind: 'x10a', reg: 32, offset: 12, conv: 105 } };
+      service.metrics.low_pressure_bar = null;
+      service.metric_meta.low_pressure_bar = { samples: 0, source: null };
+      renderApp(); return true;
+    })()`);
+    await page.frame();
+    assertLayout(await page.evaluate(layoutAudit), `${context}/refrigerant-unselected`);
+    assert.ok((await refrigerantText()).includes(await page.evaluate("t('service.metric.input_none')")),
+      `${context}: an unselected low side is explicitly distinguished from a selected unread input`);
+    await captureNativeEvidence(page, `${context}/refrigerant-unselected`,
       "[data-desc='service:refrigerant']", ".vitem");
     await page.evaluate(`(() => {
       const h = S.status.health;
@@ -2397,6 +2555,18 @@ try {
     console.log(`focused card prototype rendering passed: 2 locales; 2 themes; ${focusedViewports.map(viewport => viewport.width).join("/")} px`);
   } else if (process.argv.includes("--setup-only")) {
     for (const viewport of viewports) await assertSetup(page, server, viewport);
+  } else if (process.argv.includes("--pump-only")) {
+    for (const viewport of viewports) {
+      await page.viewport(viewport.width, viewport.height);
+      for (const locale of browserLocales) {
+        await activateLocale(page, locale);
+        await page.evaluate("showStage('dashboard'); window.scrollTo(0, 0); true");
+        await assertPumpCommandTruth(page, `${viewport.name}/${locale}/pump-command`, locale);
+        console.log(`pump command render checked: ${viewport.name}/${locale}`);
+      }
+    }
+    assert.deepEqual(page.diagnostics, [], "pump source frames must emit no browser errors");
+    console.log(`focused pump rendering passed: ${browserLocales.length} locales; ${viewports.length} viewports`);
   } else if (process.argv.includes("--diagnosis-only")) {
     // A focused rendering pass for diagnosis-copy iterations. The default full matrix below and
     // the supervisor's independent mutation controls remain unchanged.
@@ -2643,6 +2813,26 @@ try {
   }
   assert.equal(unknownActivityChecks, viewports.length * browserLocales.length,
     "unknown and missing outdoor inputs require every locale and viewport");
+
+  // These inspector replacements have no history inputs and start in their own document, so a
+  // prior native source fixture cannot leave requests or callbacks that overwrite the pump frames.
+  let pumpCommandChecks = 0;
+  for (const viewport of viewports) {
+    await page.viewport(viewport.width, viewport.height);
+    await page.navigate(server.url);
+    await page.send("Page.bringToFront");
+    await page.waitFor("typeof S !== 'undefined' && S.status && Array.isArray(S._values)");
+    await page.evaluate("pollStop(); pollSchedule = () => {}; true");
+    for (const locale of browserLocales) {
+      await activateLocale(page, locale);
+      await page.evaluate("showStage('dashboard'); window.scrollTo(0, 0); true");
+      await assertPumpCommandTruth(page, `${viewport.name}/${locale}/pump-command`, locale);
+      pumpCommandChecks++;
+      console.log(`browser pump command checked: ${viewport.name}/${locale}`);
+    }
+  }
+  assert.equal(pumpCommandChecks, viewports.length * browserLocales.length,
+    "pump command, reported activity and measured flow require every locale and viewport");
 
   assert.equal(routedKeyboardOpens, routedKeyboardBudget,
     "every routed modal requires one real browser History roundtrip per viewport");

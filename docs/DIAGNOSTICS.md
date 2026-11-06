@@ -256,6 +256,12 @@ Duration and min/mean/max describe **one uninterrupted window**. The permitted p
 profile pages and transport timeout; there is no universal three-second/twenty-minute service rule.
 Source-generation changes also reset continuity.
 
+Within a recorded window, each input also shows how many readings contributed to its range. A
+missing pressure input can have fewer readings than the complete window; these counts do not
+measure time coverage. Zero
+accepted readings leaves the value unavailable. The profile-selected X10A input identifies the
+source choice, not a current reading or an independently validated physical sensor.
+
 **Important limit:** It assigns no normal range, refrigerant-charge verdict, full-load state or
 settling claim. EEV pulses are a controller command, not proof of mechanical valve movement.
 A controlled refrigerant test still requires the exact model's service procedure and suitable

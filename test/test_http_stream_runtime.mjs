@@ -76,6 +76,17 @@ function compile(tag,mutation) {
       assert.notEqual(before,after,"scan boundary mutation must bind production handler");
       assert.doesNotMatch(after,/finish_bounded_stream/);
       effective.status=effective.status.replace(before,after);
+    } else if(mutation.special==="refrigerant-total-count") {
+      const capture=/auto append_service_meta\s*=\s*\[&j\]/g;
+      assert.equal([...effective.status.matchAll(capture)].length,1,
+        "refrigerant count control must bind the metadata lambda");
+      effective.status=effective.status.replace(capture,
+        "auto append_service_meta =\n                [&j, &refrigerant_service]");
+      const before="j += std::to_string(metric.samples);";
+      assert.equal(effective.status.split(before).length-1,1,
+        "refrigerant count control must bind the per-metric counter");
+      effective.status=effective.status.replace(before,
+        "j += std::to_string(refrigerant_service.samples);");
     } else {
     const before=mutation.before;
     const count=typeof before==="string"?effective[mutation.file].split(before).length-1:
@@ -152,12 +163,17 @@ const mutations=[
     after:'j += "null";'},
   {name:"unsupported-stop-count-leak",file:"heartbeat",scenario:"stop_context_populated",
     before:"number(c.positive[k], known && supported);",after:"number(c.positive[k], known);"},
+  {name:"refrigerant-total-as-input-count",special:"refrigerant-total-count",scenario:"refrigerant_metadata"},
+  {name:"refrigerant-coordinate-swap",file:"status",scenario:"refrigerant_metadata",
+    before:"j += std::to_string(source.reg);",after:"j += std::to_string(source.off);"},
+  {name:"refrigerant-selection-from-availability",file:"status",scenario:"refrigerant_missing",
+    before:"if (source.selected) {",after:"if (source.selected && metric.available) {"},
 ];
 try {
   const compiler=execute(cxx,["--version"]).stdout.trim();
   const baseline=execute(compile("production"),[]);
   const caseCount=Number(baseline.stdout.match(/^PASS total=(\d+)$/m)?.[1]);
-  assert.equal(caseCount,22);
+  assert.equal(caseCount,26);
   assert.equal(caseCount,[...baseline.stdout.matchAll(/^PASS (?!total=)\S+$/gm)].length);
   const wires=[]; const decoder=new TextDecoder("utf-8",{fatal:true});
   const configCases=new Map([
@@ -181,6 +197,23 @@ try {
     "dhw_transition","route_mode_transition"];
   const stopCountKeys=["witnessed_stops_recent_heating","unclassified_stops","unknown_stops",
     "partial_stops","censored_stops","target_changed","time_overflow","saturated"];
+  const refrigerantWires=new Set(["refrigerant-populated","refrigerant-populated-redacted",
+    "refrigerant-missing","refrigerant-gap","refrigerant-new-source",
+    "refrigerant-unevaluated","refrigerant-undetected"]);
+  const refrigerantMetrics={
+    compressor_rps:{min:20,mean:25,max:30},
+    discharge_c:{min:60.1,mean:65.2,max:70.3},
+    eev_command_pls:{min:100,mean:120,max:140},
+    high_pressure_bar:{min:12.1,mean:14.2,max:16.3},
+    low_pressure_bar:{min:1.1,mean:2.2,max:3.3},
+  };
+  const refrigerantSources={
+    compressor_rps:{kind:"x10a",reg:48,offset:0,conv:152},
+    discharge_c:{kind:"x10a",reg:32,offset:4,conv:105},
+    eev_command_pls:{kind:"x10a",reg:48,offset:3,conv:151},
+    high_pressure_bar:{kind:"x10a",reg:98,offset:15,conv:105},
+    low_pressure_bar:{kind:"x10a",reg:32,offset:14,conv:105},
+  };
   for(const line of baseline.stdout.trim().split("\n")) {
     if(!line.startsWith("WIRE ")) {console.log(line);continue;}
     const [,name,type,hex]=line.match(/^WIRE (\S+) (json|text) ([0-9a-f]*)$/)||[];
@@ -192,6 +225,41 @@ try {
       assert.equal(doc.wifi.ssid,'Café "quoted"\\line\n'); assert.equal(doc.wifi.rssi,-42);
       assert.equal(doc.sys.stack_min_free_bytes.httpd,null);
       assert.equal(Object.hasOwn(doc.sys,"config_unreadable"),false);
+      assert.equal(Object.hasOwn(doc,"refrigerant_service"),false);
+    }
+    if(refrigerantWires.has(name)) {
+      assert.equal(doc.health.checks.length,8,`${name}: service remains outside the eight checks`);
+      if(name==="refrigerant-unevaluated"||name==="refrigerant-undetected") {
+        assert.equal(Object.hasOwn(doc,"refrigerant_service"),false,
+          `${name}: no fabricated observation before detection and coverage`);
+      } else {
+        const missing=name==="refrigerant-missing";
+        const reset=name==="refrigerant-gap"||name==="refrigerant-new-source";
+        const metrics=structuredClone(refrigerantMetrics);
+        const sources=structuredClone(refrigerantSources);
+        if(name==="refrigerant-new-source")
+          sources.high_pressure_bar={kind:"x10a",reg:32,offset:12,conv:105};
+        if(missing) sources.low_pressure_bar=null;
+        const counts={compressor_rps:7,discharge_c:7,eev_command_pls:7,
+          high_pressure_bar:2,low_pressure_bar:1};
+        for(const key of Object.keys(metrics)) {
+          if(reset||(missing&&(key==="high_pressure_bar"||key==="low_pressure_bar"))) {
+            counts[key]=0; metrics[key]=null;
+          }
+        }
+        const meta=Object.fromEntries(Object.keys(metrics).map(key=>[key,{samples:counts[key],source:sources[key]}]));
+        assert.deepEqual(doc.refrigerant_service,{
+          kind:"observation",state:name==="refrigerant-gap"?"interrupted":
+            name==="refrigerant-new-source"?"waiting":missing?"limited":"observing",
+          continuous_s:reset?0:36,samples:reset?0:7,
+          source_generation:name==="refrigerant-new-source"?32:31,mode:"heating",
+          blocker:name==="refrigerant-gap"?"poll_gap":
+            name==="refrigerant-new-source"?"missing_fresh_signal":null,
+          special_phases_known:true,load_proven:false,eev_feedback:false,
+          limitations:missing?["pressure_sides_incomplete"]:[],metrics,metric_meta:meta,
+        },`${name}: complete independent legacy-value and metadata wire oracle`);
+      }
+      refrigerantWires.delete(name);
     }
     if(stopWires.has(name)) {
       const cycling=doc.health.checks.find(check=>check.id==="cycling");
@@ -325,6 +393,7 @@ try {
   assert.equal(configCases.size,0,"all plain/redacted stored and absent configuration cases must run");
   assert.equal(roomWires.size,0,"all room-history and room-label wire oracles must run");
   assert.equal(stopWires.size,0,"all unknown, covered-zero and populated stop-context wire oracles must run");
+  assert.equal(refrigerantWires.size,0,"all populated, missing, reset and omitted refrigerant wire oracles must run");
   const controls=[];
   if(!process.argv.includes("--no-mutations")) for(const mutation of mutations) {
     const result=execute(compile(mutation.name,mutation),[mutation.scenario],false);
@@ -365,6 +434,7 @@ try {
     limits:["Complete unextracted http_common.cpp/http_status.cpp/state_dwell.cpp execute. Unrelated handlers are link-discarded.",
       "Snapshots and SDK transports use shaped adapters; every observed C++ new position and stream chunk/final failure is injected independently. Adapter transport allocations are excluded.",
       "Dwell producer and batch-reader execute; UART poll/cache provider is a controlled immutable-snapshot adapter.",
+      "Refrigerant metadata uses controlled typed snapshots, with independent full JSON field oracles. Producer eligibility, source selection and resets are tested separately; these wires do not prove them or physical sensor pairing.",
       "Source/header hashes bind local evidence. Hardware scheduling, target heap/stack and source truth are separate."]};
   if(process.env.HTTP_STREAM_RECORD) fs.writeFileSync(process.env.HTTP_STREAM_RECORD,JSON.stringify(record,null,2)+"\n");
   console.log(`production HTTP stream runtime: ${caseCount} cases, ${controls.length} compiling negative controls`);

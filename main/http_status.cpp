@@ -1551,6 +1551,8 @@ static void append_status_json(JsonOut& j, bool redact) {
             j += std::to_string(refrigerant_service.continuous_s);
             j += ",\"samples\":";
             j += std::to_string(refrigerant_service.samples);
+            j += ",\"source_generation\":";
+            j += std::to_string(refrigerant_service.source_generation);
             j += ",\"mode\":";
             json_append_quoted(j, logic::refrigerant_service_mode_name(refrigerant_service.mode));
             j += ",\"blocker\":";
@@ -1615,6 +1617,41 @@ static void append_status_json(JsonOut& j, bool redact) {
             append_service_metric("high_pressure_bar", refrigerant_service.high_pressure);
             j += ",";
             append_service_metric("low_pressure_bar", refrigerant_service.low_pressure);
+            j += "},\"metric_meta\":{";
+            auto append_service_meta = [&j](const char*                                    key,
+                                            const logic::RefrigerantServiceMetricSnapshot& metric,
+                                            const logic::RefrigerantServiceSource&         source) {
+                j += "\"";
+                j += key;
+                j += "\":{\"samples\":";
+                j += std::to_string(metric.samples);
+                j += ",\"source\":";
+                if (source.selected) {
+                    j += "{\"kind\":\"x10a\",\"reg\":";
+                    j += std::to_string(source.reg);
+                    j += ",\"offset\":";
+                    j += std::to_string(source.off);
+                    j += ",\"conv\":";
+                    j += std::to_string(source.conv);
+                    j += "}";
+                } else {
+                    j += "null";
+                }
+                j += "}";
+            };
+            const auto& sources = refrigerant_service.sources;
+            append_service_meta("compressor_rps", refrigerant_service.rps, sources.rps);
+            j += ",";
+            append_service_meta("discharge_c", refrigerant_service.discharge, sources.discharge);
+            j += ",";
+            append_service_meta("eev_command_pls", refrigerant_service.eev_command,
+                                sources.eev_command);
+            j += ",";
+            append_service_meta("high_pressure_bar", refrigerant_service.high_pressure,
+                                sources.high_pressure);
+            j += ",";
+            append_service_meta("low_pressure_bar", refrigerant_service.low_pressure,
+                                sources.low_pressure);
             j += "}},";
         }
     }

@@ -202,10 +202,151 @@ async function mountFixture(page, server, fixture) {
     S.histIdentity = null; S.histUptime = null; S.descOpen = new Set();
     S.scrub = null; S.clickHold = false; S.insp = null;
     S.inspSig = null; S.inspHistSig = null; showStage("dashboard");
+    window.__motionCacheMountedAt = Date.now();
     window.__motionMountPoll = window.__motionAllPolls;
     pollSchedule = window.__browserPollSchedule; pollNow(); return true;
   });
   await page.waitFor("!_pollBusy && window.__motionAllPolls > window.__motionMountPoll && S.status?.boot_id === 'history-motion-fixture' && S.live?.rps > 5");
+}
+
+async function historyCacheState(page) {
+  return evaluate(page, () => {
+    const now = Date.now();
+    return { epoch: S.histEpoch, boot: S.status.boot_id, identity: S.histIdentity,
+      mountedAt: window.__motionCacheMountedAt,
+      entries: [...S.hist].map(([key, h]) => ({ key, gen: h.gen, at: h.at,
+        ageMs: now - h.at, error: !!h.err })).sort((a, b) => a.key.localeCompare(b.key)) };
+  });
+}
+
+function assertFreshHistory(cache, context, detail = cache) {
+  assert.ok(cache.entries.length && cache.entries.every(h => !h.error &&
+    h.at >= cache.mountedAt && h.ageMs >= 0 && h.ageMs < 60000),
+  context + ": every dependency must have a fresh accepted reply from this mount; " + JSON.stringify(detail));
+}
+
+function assertCacheReuse(page, context, before, after, requests, expiredAux = false) {
+  const detail = { before, after, requests }, diagnostics = "; cache=" + JSON.stringify(detail);
+  if (page.historyMotionEvidence?.length)
+    page.historyMotionEvidence.at(-1).cacheReuse = { context, expiredAux, ...detail };
+  assert.deepEqual(requests, expiredAux ? ["x10a:bsh_state"] : [],
+    context + (expiredAux ? ": reopen must refresh only the expired BSH auxiliary"
+                         : ": fresh cached reopen must not refetch history") + diagnostics);
+  assert.deepEqual([after.epoch, after.boot, after.identity],
+    [before.epoch, before.boot, before.identity],
+    context + ": cache expiry is not source invalidation" + diagnostics);
+  assert.deepEqual(after.entries.map(h => h.key), before.entries.map(h => h.key),
+    context + ": reopening must retain the complete dependency set" + diagnostics);
+  assertFreshHistory(after, context + "/after", detail);
+  for (const previous of before.entries) {
+    const current = after.entries.find(h => h.key === previous.key);
+    if (expiredAux && previous.key === "bsh_state") {
+      assert.ok(previous.ageMs >= 60000, context + ": BSH must actually expire before reopen" + diagnostics);
+      assert.equal(current.gen, previous.gen + 1,
+        context + ": the real BSH reply must advance its generation once" + diagnostics);
+      assert.ok(current.at > previous.at, context + ": BSH must receive a new timestamp" + diagnostics);
+    } else {
+      assert.ok(previous.at >= before.mountedAt && previous.ageMs < 60000,
+        context + ": all unchanged dependencies must remain fresh" + diagnostics);
+      assert.deepEqual([current.gen, current.at], [previous.gen, previous.at],
+        context + ": an unchanged dependency must retain generation and reply time: " + previous.key + diagnostics);
+    }
+  }
+}
+
+async function captureCachedOpening(page, selector) {
+  await evaluate(page, ({ selector }) => {
+    const container = document.querySelector(selector)?.closest("#valueGroups");
+    if (!container) throw new Error("cached opening container missing");
+    const listener = () => {
+      const item = document.querySelector(selector)?.closest(".vitem");
+      const plot = item?.querySelector("[data-hist]"), chart = plot?.closest(".vhist");
+      if (!item.classList.contains("open") || !plot) throw new Error("cached opening plot missing");
+      const ancestors = new Set();
+      for (let node = plot; node; node = node.parentNode) ancestors.add(node);
+      const detached = [], record = records => {
+        for (const entry of records) for (const node of entry.removedNodes)
+          if (ancestors.has(node)) detached.push(node.nodeName + (node.id ? "#" + node.id : ""));
+      };
+      const observer = new MutationObserver(record);
+      observer.observe(document, { childList: true, subtree: true });
+      window.__motionCachedOpen = { selector, plot, observer, record, detached,
+        owner: item.querySelector("[data-desc]").dataset.desc,
+        storedOwner: chart._histMarkup ? JSON.parse(chart._histMarkup)[0] : null,
+        revision: plot.dataset.rev, polls: window.__motionAllPolls };
+      plot.focus({ preventScroll: true });
+      delete window.__motionCachedOpenCapture;
+    };
+    // Registered after the production delegated handler: capture the synchronous cache-hit mount
+    // in that same native-click task, before any first live poll or fetch-finally paint can run.
+    container.addEventListener("click", listener, { once: true });
+    window.__motionCachedOpenCapture = { container, listener };
+    return true;
+  }, { selector });
+}
+
+async function cachedOpeningState(page, finish = false) {
+  return evaluate(page, ({ finish }) => {
+    const opened = window.__motionCachedOpen;
+    if (!opened) throw new Error("native cached opening was not captured");
+    opened.record(opened.observer.takeRecords());
+    const plot = document.querySelector(opened.selector)?.closest(".vitem")?.querySelector("[data-hist]");
+    const state = { owner: opened.owner, storedOwner: opened.storedOwner,
+      samePlot: plot === opened.plot, sameFocus: document.activeElement === opened.plot,
+      revisionAtOpen: opened.revision, revision: plot?.dataset.rev,
+      detachedAncestors: opened.detached.slice(), polls: window.__motionAllPolls - opened.polls };
+    if (finish) { opened.observer.disconnect(); delete window.__motionCachedOpen; }
+    return state;
+  }, { finish });
+}
+
+function assertCachedOpening(state, context, completed = false) {
+  const detail = "; native cached opening=" + JSON.stringify(state);
+  assert.equal(state.storedOwner, state.owner, context + ": actual opening must stamp its row owner" + detail);
+  assert.equal(state.samePlot && state.sameFocus, true,
+    context + ": preserve the plot and focus captured at the native opening" + detail);
+  assert.deepEqual(state.detachedAncestors, [], context + ": opening ancestors must stay connected" + detail);
+  assert.equal(state.revision, state.revisionAtOpen, context + ": unchanged opening revision must survive" + detail);
+  if (completed) assert.ok(state.polls >= 3, context + ": opening witness must span three live polls" + detail);
+}
+
+async function assertHistoryOwnerBoundaries(page, context) {
+  const result = await evaluate(page, () => {
+    const sandbox = document.createElement("div");
+    sandbox.style.cssText = "position:fixed;left:-10000px;top:0;width:500px";
+    sandbox.inert = true;
+    document.body.appendChild(sandbox);
+    try {
+      const html = histHtml("dhw_tank", "°C", "DHW tank");
+      const item = document.createElement("div");
+      item.className = "vitem";
+      item.innerHTML = '<button data-desc="host-owner"></button><div class="vdesc-body"></div>';
+      sandbox.appendChild(item);
+      const host = item.querySelector(".vdesc-body");
+      const plot = node => node.querySelector("[data-hist]");
+      const owner = node => JSON.parse(node.querySelector(".vhist")._histMarkup)[0];
+      replaceHistoryHtml(host, html);
+      const first = plot(host), hostOwner = owner(host);
+      replaceHistoryHtml(host, html);
+      const sameOwnerReused = first === plot(host);
+      replaceHistoryHtml(host, '<div class="vitem"><button data-desc="fragment-owner"></button>' + html + '</div>');
+      const fragment = plot(host), fragmentOwner = owner(host);
+      replaceHistoryHtml(host, '<div class="vitem">' + html + '</div>');
+      const unkeyedOwner = owner(host), unkeyedReused = fragment === plot(host);
+      const group = document.createElement("div");
+      sandbox.appendChild(group);
+      const row = key => '<div class="vitem"><button data-desc="' + key + '"></button>' + html + '</div>';
+      replaceHistoryHtml(group, row("row-a"));
+      const rowA = plot(group);
+      replaceHistoryHtml(group, row("row-b"));
+      return { hostOwner, sameOwnerReused, fragmentOwner, unkeyedOwner, unkeyedReused,
+        differentOwnerReused: rowA === plot(group), differentOwner: owner(group), oldPlotDetached: !rowA.isConnected };
+    } finally { sandbox.remove(); }
+  });
+  assert.deepEqual(result, { hostOwner: "host-owner", sameOwnerReused: true,
+    fragmentOwner: "fragment-owner", unkeyedOwner: null, unkeyedReused: false,
+    differentOwnerReused: false, differentOwner: "row-b", oldPlotDetached: true },
+  context + ": real DOM ownership must distinguish host, fragment and different-row contexts; " + JSON.stringify(result));
 }
 
 async function openInspector(page, key, id, context) {
@@ -292,7 +433,7 @@ async function prepareObservationViewport(page, selector, animationIds) {
 
 async function observe(page, server, context, selectors, { inspector = false, status = false,
   fixture = null, animationIds = ["fSup1", "rfHot", "scFan", "scPump"],
-  inactiveAnimationIds = [] } = {}) {
+  inactiveAnimationIds = [], touchReadout = true } = {}) {
   await page.bringToFront();
   await page.waitFor("document.visibilityState === 'visible' && !document.hidden");
   // Opening/disclosure transitions may legitimately finish. Persistent flow CSSAnimation objects
@@ -300,7 +441,7 @@ async function observe(page, server, context, selectors, { inspector = false, st
   await page.waitFor("!S.clickHold && !S.histBusy.size && !_pollBusy");
   await settleHistoryOpening(page, selectors);
   await page.evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))");
-  await assertTouchReadout(page, selectors[0], context);
+  if (touchReadout) await assertTouchReadout(page, selectors[0], context);
   const observationViewport = await prepareObservationViewport(page, selectors[0], animationIds);
   const focusStarted = performance.now();
   const focusWasAlready = await evaluate(page, ({ selector }) => {
@@ -593,7 +734,11 @@ async function assertNewGeneration(page, server, fixture, context, hosts) {
   await page.evaluate("delete window.__motionFlat; true");
 }
 
-async function disclosure(page, server, fixture, context, selectors, ids, settings = false, animation = {}) {
+async function disclosure(page, server, fixture, context, selectors, ids, settings = false,
+  { expiredTankAux = false, ...animation } = {}) {
+  // Inspector cases may have populated some auxiliary rings almost a minute earlier. A cache-hit
+  // claim needs fresh replies for every dependency, not just a current revision on the main plot.
+  await mountFixture(page, server, fixture);
   await page.evaluate(settings ? "showStage('settings'); true" : "showStage('dashboard'); true");
   if (!settings) {
     const card = await evaluate(page, ({ selector }) =>
@@ -602,7 +747,25 @@ async function disclosure(page, server, fixture, context, selectors, ids, settin
     assert.ok(card, context + ": disclosure card must exist");
     await click(page, '#cardNav [data-card="' + card + '"]');
   }
+  let primedRequests, primedCache;
+  if (expiredTankAux) {
+    const beforePrime = server.historyRequests.length;
+    await evaluate(page, async () => { await ensureHistPair("dhw_tank"); return true; });
+    primedCache = await historyCacheState(page);
+    assertFreshHistory(primedCache, context + "/primed");
+    assert.deepEqual(server.historyRequests.slice(beforePrime).sort(), [
+      "x10a:dhw_tank", "modbus:dhw_tank", "x10a:smart_grid_mode", "modbus:smart_grid_mode",
+      "x10a:bsh_state", "modbus:bsh_state",
+    ].sort(), context + ": prime all six independent dependencies with actual GETs; " + JSON.stringify(primedCache));
+    primedRequests = server.historyRequests.length;
+  }
+  if (expiredTankAux) await captureCachedOpening(page, selectors[0]);
   for (const selector of selectors) await click(page, selector);
+  const openingWitness = expiredTankAux ? await cachedOpeningState(page) : null;
+  if (openingWitness) {
+    assertCachedOpening(openingWitness, context + "/opened");
+    await assertHistoryOwnerBoundaries(page, context);
+  }
   await page.waitFor("!S.histBusy.size");
   await page.waitFor(JSON.stringify(selectors) +
     ".every(selector => !!document.querySelector(selector)?.closest('.vitem')?.querySelector('[data-hist]'))");
@@ -624,13 +787,50 @@ async function disclosure(page, server, fixture, context, selectors, ids, settin
     return container + " .vitem:has([data-desc=" +
       CSS.escape(document.querySelector(selector).dataset.desc) + "]) .vhist-plot";
   }), { selectors, ids });
-  await observe(page, server, context, hosts, { status: settings, fixture, ...animation });
+  let openedCache = await historyCacheState(page);
+  assertFreshHistory(openedCache, context + "/opened");
+  if (expiredTankAux) {
+    assert.deepEqual(server.historyRequests.slice(primedRequests), [],
+      context + ": opening must reuse all six primed replies; " + JSON.stringify({ primedCache, openedCache }));
+    // Age only this accepted reply once the disclosure is actually open. Navigation/first paint
+    // cannot consume the two-second setup margin. Other times remain actual fresh GET receipts;
+    // no cache timestamp is forged forward. The unchanged three-poll window crosses this TTL.
+    await evaluate(page, () => { S.hist.get("bsh_state").at = Date.now() - 58000; return true; });
+    openedCache = await historyCacheState(page);
+    const bsh = openedCache.entries.find(h => h.key === "bsh_state");
+    assert.ok(bsh.ageMs >= 58000 && bsh.ageMs < 60000,
+      context + ": aged BSH must still be within its TTL in the open fixture; " + JSON.stringify(openedCache));
+  }
+  const observationRequests = server.historyRequests.length;
+  try {
+    // Pin/unpin intentionally changes chart markup. Keep the native-opening identity witness
+    // through the three unchanged polls first, then run the same trusted-touch coverage below.
+    await observe(page, server, context, hosts,
+      { status: settings, fixture, ...animation, touchReadout: !expiredTankAux });
+  } catch (error) {
+    error.message += "; disclosure cache=" + JSON.stringify({ openedCache,
+      failedCache: await historyCacheState(page), requests: server.historyRequests.slice(observationRequests),
+      opening: expiredTankAux ? await cachedOpeningState(page, true) : null });
+    throw error;
+  }
+  if (expiredTankAux) {
+    const completedOpening = await cachedOpeningState(page, true);
+    if (page.historyMotionEvidence?.length)
+      page.historyMotionEvidence.at(-1).cachedOpening = { before: openingWitness, after: completedOpening };
+    assertCachedOpening(completedOpening, context + "/observed", true);
+    await assertTouchReadout(page, hosts[0], context + "/cached-touch");
+  }
   if (ids.includes("free_heap")) await assertNewGeneration(page, server, fixture, context, hosts);
+  const beforeCache = await historyCacheState(page);
+  if (expiredTankAux) assert.deepEqual(server.historyRequests.slice(observationRequests), [],
+    context + ": polling must not refresh the open disclosure; " + JSON.stringify({ openedCache, beforeCache }));
   const before = server.historyRequests.length;
   for (const selector of selectors) await click(page, selector);
   for (const selector of selectors) await click(page, selector);
   await page.waitFor("!S.histBusy.size");
-  assert.equal(server.historyRequests.length, before, context + ": cached reopen must not refetch history");
+  assertCacheReuse(page, context, beforeCache, await historyCacheState(page),
+    server.historyRequests.slice(before), expiredTankAux);
+  if (expiredTankAux) console.log("history cache expiry checked: " + context + "; only x10a:bsh_state refreshed");
   for (const selector of selectors) await click(page, selector);
   await page.waitFor("!document.querySelector('#valueGroups .vitem:not(.open) .vhist, #settingsCards .vitem:not(.open) .vhist')",
     { timeoutMs: 4000 });
@@ -674,7 +874,11 @@ export async function assertHistoryMotion(page, server, context) {
       : ["tank", ...Object.keys(INSPECTOR_TRENDS).filter(key => key !== "tank")];
     for (const key of cases) {
       const id = INSPECTOR_TRENDS[key], label = context + "/" + key;
+      // Each inspector's cache-reuse assertion starts from real fresh replies for its complete
+      // dependency graph, including shared derived inputs and the DHW auxiliary rings.
+      await mountFixture(page, server, fixture);
       const chart = await openInspector(page, key, id, label);
+      assertFreshHistory(await historyCacheState(page), label + "/opened");
       if (key === "tank" && page.assertFlowPaint) await page.assertFlowPaint(label);
       const expected = key === "env3" ? ["env3_temperature", "env3_humidity", "env3_pressure"]
         : [ "x10a", ...(key !== "bsh" && MODBUS_HISTORY_ROWS.some(row => row.id === id) ? ["modbus"] : []),
@@ -688,18 +892,22 @@ export async function assertHistoryMotion(page, server, context) {
         await observe(page, server, label + "/changed-cap-stable",
           ["#inspHist .vhist-plot"], { inspector: true });
       }
-      const requests = server.historyRequests.length;
+      const requests = server.historyRequests.length, beforeCache = await historyCacheState(page);
       await closeInspector(page);
       await openInspector(page, key, id, label + "/cached");
-      assert.equal(server.historyRequests.length, requests, label + ": cached reopen must not refetch history");
+      assertCacheReuse(page, label, beforeCache, await historyCacheState(page),
+        server.historyRequests.slice(requests));
       await closeInspector(page);
       if (restoreValues) fixture.values = restoreValues;
     }
     if (mutation && !disclosureMutation) return;
 
-    if ((!only || only === "x10a-row") && !disclosureMutation)
+    if ((!only || only === "x10a-row") && !disclosureMutation) {
       await disclosure(page, server, fixture, context + "/x10a-row",
         ['#valueGroups [data-trend="dhw_tank"]'], ["dhw_tank"]);
+      await disclosure(page, server, fixture, context + "/x10a-row-expired-bsh",
+        ['#valueGroups [data-trend="dhw_tank"]'], ["dhw_tank"], false, { expiredTankAux: true });
+    }
     if (!only || only === "board" || disclosureMutation)
       await disclosure(page, server, fixture, context + "/board",
         ['#settingsCards [data-desc="board:free_heap"]', '#settingsCards [data-desc="board:max_alloc"]'],
@@ -739,9 +947,13 @@ export async function assertHistoryMotion(page, server, context) {
       await mountFixture(page, server, frame);
       const label = context + "/" + variant;
       if (variant === "modbus-numeric") {
+        // The controller still reports the pump ON. A missing X10A flow measurement stops the
+        // water trace, but cannot retire that independent reported-operation animation.
+        assert.equal(await page.evaluate("S.live?.pumpOn"), true,
+          label + ": retain the independent reported pump-ON witness");
         await disclosure(page, server, frame, label,
           ['#valueGroups [data-dashboard-card="modbus"] [data-trend="flow"]'], ["flow"], false,
-          { animationIds: ["rfHot", "scFan"], inactiveAnimationIds: ["fSup1", "scPump"] });
+          { animationIds: ["rfHot", "scFan", "scPump"], inactiveAnimationIds: ["fSup1"] });
       } else {
         const key = variant === "env3-no-forecast" ? "env3" : "room";
         const chart = await openInspector(page, key, INSPECTOR_TRENDS[key], label);
@@ -764,6 +976,9 @@ export async function assertHistoryMotion(page, server, context) {
         window.__motionRecordDetachments(window.__motionDetachObserver.takeRecords());
         window.__motionDetachObserver.disconnect();
       }
+      window.__motionCachedOpen?.observer.disconnect();
+      const capture = window.__motionCachedOpenCapture;
+      if (capture) capture.container.removeEventListener("click", capture.listener);
       pollStop(); pollSchedule = () => {}; return true;
     });
     await page.waitFor("!_pollBusy && !S.histBusy.size");
