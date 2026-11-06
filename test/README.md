@@ -301,12 +301,15 @@ physical iPad Safari, iPadOS or GPU performance.
 The original Chromium deadline is unchanged; WebKit runs as a separate phase in the same CI job.
 Chromium launch shares one absolute deadline across endpoint headers/body, socket and initialization;
 worker/browser process groups are joined before the temporary page is removed.
-The container has no external network or host browser profile; only its own temporary storage is
-writable. Its snapshot includes the allowlisted current browser inputs and excludes ignored files,
-Git metadata, builds, symlinks and credential/artifact filenames before reading them. Container-start
+The container runs as fixed unprivileged UID/GID 1000, with no external network or host browser
+profile; only its own temporary storage is writable. Its snapshot includes the allowlisted current
+browser inputs and excludes ignored files, Git metadata, builds, symlinks and credential/artifact
+filenames before reading them. Container-start
 and runner selftests verify fail-closed setup, status propagation, interruption and refusal of native
-macOS browser discovery. If container removal cannot be verified, the gate fails and retains its
-ownership record and source snapshot rather than discarding evidence of a surviving process.
+macOS browser discovery. A random name and independent ownership label are reserved before launch;
+cleanup verifies both before removing a container whose CID reply was lost. If removal cannot be
+verified, including a possibly in-flight creation without a CID, the gate fails and retains its
+ownership record and source snapshot.
 The snapshot is sent through the image-build context; runtime needs no host-directory mounts,
 including on Colima installations that do not share macOS temporary directories.
 Docker's local image/build cache retains that allowlisted source snapshot until normal cache cleanup.
