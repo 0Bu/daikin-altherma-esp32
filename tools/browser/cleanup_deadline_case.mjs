@@ -1,11 +1,11 @@
 // Isolate test-clock and body-reader observation from the concurrently imported infrastructure
 // suites. Network traffic, AbortController, child ownership and cleanup remain real.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { launchBrowser } from "./cdp_browser.mjs";
+import { inspectProcess as processState } from "./process_state.mjs";
 
 const flags = process.argv.slice(2);
 assert.ok(flags.length <= 1 && flags.every(flag =>
@@ -18,17 +18,6 @@ const realSetTimeout = globalThis.setTimeout, realClearTimeout = globalThis.clea
 const realFetch = globalThis.fetch, realRemove = fs.rmSync;
 const pause = ms => new Promise(resolve => realSetTimeout(resolve, ms));
 const readRecord = () => fs.existsSync(marker) ? JSON.parse(fs.readFileSync(marker, "utf8")) : null;
-const processState = pid => {
-  const result = spawnSync("ps", ["-p", String(pid), "-o", "ppid=,stat="], { encoding: "utf8" });
-  assert.ok(!result.error && !result.signal, "process inspection must complete normally");
-  assert.equal(result.stderr, "", "process inspection must not report an error");
-  if (result.status === 1 && !result.stdout.trim()) return { present: false };
-  assert.equal(result.status, 0, "process inspection must return a process or explicit empty absence");
-  const [parent, state] = result.stdout.trim().split(/\s+/);
-  assert.ok(/^[1-9][0-9]*$/.test(parent) && state && result.stdout.trim().split(/\s+/).length === 2,
-    "process inspection must return one valid parent/state row");
-  return { present: true, parent: Number(parent) };
-};
 const deadlines = [], bodies = new Set(), actualBodies = new Set(), removals = [];
 let completion, pending, error, cleanupVerified = false, deadlineRejected = false, armed = false;
 let firedAt;

@@ -312,9 +312,11 @@ physical iPad Safari, iPadOS or GPU performance.
 The original Chromium deadline is unchanged; WebKit runs as a separate phase in the same CI job.
 Chromium launch shares one absolute deadline across endpoint headers/body, socket and initialization;
 worker/browser process groups are joined before the temporary page is removed.
-Positive cleanup fixtures first observe the real owned child's requested stall, including actual JSON-body
-consumption, then fire its captured launch timer in an isolated test worker. Delayed-start and missing
-witness controls keep setup readiness separate from the unchanged deadline and cleanup bounds.
+Positive cleanup fixtures first observe the owned child's requested stall and actual JSON-body
+consumption, then fire its captured 600 ms launch callback in an isolated worker. A 3 s readiness
+watchdog is separate from the 2.5 s post-expiry cleanup bound; this tests abort/cleanup, not natural
+wall-clock timer expiry. Delayed-start and missing-witness controls reject incorrect arming.
+Fixture reports require closed output streams, and process-inspection errors never prove exit.
 The container runs as fixed unprivileged UID/GID 1000, with no external network or host browser
 profile; only its own temporary storage is writable. Its snapshot includes the allowlisted current
 browser inputs and excludes ignored files, Git metadata, builds, symlinks and credential/artifact
