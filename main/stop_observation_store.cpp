@@ -459,7 +459,7 @@ void stop_observation_flash_index(int64_t bucket, uint64_t sequence, uint16_t sl
     s_rebuild = true;
 }
 void stop_observation_flash_index_incomplete() {
-    if (stop_observation_suppressed()) return;
+    if (s_forgotten.load(std::memory_order_acquire)) return;
     observation_index_incomplete(s_index);
     s_rebuild = true;
 }
