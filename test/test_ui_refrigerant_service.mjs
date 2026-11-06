@@ -118,7 +118,10 @@ ui.set(counted);
 html = ui.card();
 assert.match(html, /High pressure: min 18 · mean 20 · max 22 bar · 3 accepted readings/);
 assert.match(html, /Low pressure: No data · 0 accepted readings · No selected input/);
-assert.equal((html.match(/Profile-selected X10A input/g) || []).length, 4);
+assert.equal((html.match(/Profile-selected X10A input/g) || []).length, 0,
+             "populated ranges do not repeat the same generic source phrase");
+assert.match(html, /<br>Discharge temperature:/,
+             "each metric remains readable as its own line inside the existing explanation block");
 assert.match(html, /not time coverage/);
 assert.match(html, /does not prove a current reading/);
 assert.doesNotMatch(html, /777|0x62|converter|Low pressure: min 0/,

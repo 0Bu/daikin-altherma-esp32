@@ -1790,7 +1790,7 @@ function refrigerantServiceRowHtml() {
       text += ` · ${t("service.metric.samples", meta.samples)}`;
       const source = meta.source;
       if (source === null) text += ` · ${t("service.metric.input_none")}`;
-      else if (source?.kind === "x10a" &&
+      else if (!readable && source?.kind === "x10a" &&
           [source.reg, source.offset].every(n => Number.isInteger(n) && n >= 0 && n <= 255) &&
           Number.isInteger(source.conv) && source.conv > 0 && source.conv <= 65535)
         text += ` · ${t("service.metric.input")}`;
@@ -1816,7 +1816,9 @@ function refrigerantServiceRowHtml() {
   const body = descParaHtml(`<span class="vdesc-n">${esc(status)}</span>` +
                  (time.length ? ` · ${esc(time.join(" · "))}` : "") +
                  ` — ${esc(t(helpKey || "service.title"))}`) +
-               descParaHtml(esc(detail.length ? detail.join(" · ") : t("sys.nodata"))) +
+               descParaHtml(detail.length
+                 ? hasMetricMeta ? detail.map(esc).join("<br>") : esc(detail.join(" · "))
+                 : esc(t("sys.nodata"))) +
                descNoteHtml(t("normal.label"), t("service.common"));
   return descAccordion("service:refrigerant", t("service.title"), esc(status),
                        `checkup-val${tones[state] ? ` ${tones[state]}` : ""}`, body);

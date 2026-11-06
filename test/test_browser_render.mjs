@@ -1275,7 +1275,7 @@ async function assertPlantDiagnosis(page, context) {
     }
     const refrigerantText = () => page.evaluate(`document.querySelector("[data-desc='service:refrigerant']")
       .closest('.vitem').innerText`);
-    for (const [key, args] of [["samples", [2]], ["samples", [4]], ["input", []], ["meta_limit", []]]) {
+    for (const [key, args] of [["samples", [2]], ["samples", [4]], ["meta_limit", []]]) {
       const expected = await page.evaluate(`t(${JSON.stringify("service.metric." + key)},
         ...${JSON.stringify(args)})`);
       assert.ok((await refrigerantText()).includes(expected),
@@ -1283,6 +1283,8 @@ async function assertPlantDiagnosis(page, context) {
     }
     assert.doesNotMatch(await refrigerantText(), /0x62|0x20|source_generation|"conv"/,
       `${context}: raw source coordinates stay outside the owner-facing explanation`);
+    assert.ok(!(await refrigerantText()).includes(await page.evaluate("t('service.metric.input')")),
+      `${context}: populated metrics do not repeat a generic source sentence for every input`);
     const stopText = () => page.evaluate(`document.querySelector("[data-desc='model:health_cycling']")
       .closest('.vitem').innerText`);
     for (const [key, args] of [["population", ["4"]], ["counts", []], ["rule", []], ["limits", []],
