@@ -45,7 +45,8 @@ CMake/CTest when available and otherwise directly compiles the test translation 
 `gcov` for GCC or `llvm-cov gcov` for Clang, using `xcrun` on macOS. The browser runner additionally
 needs Docker. It builds the digest-pinned Playwright image and exact locked API package under
 `tools/browser/`, includes a source snapshot in the image, then runs headless Chromium and WebKit
-offline with a read-only filesystem. It never
+offline with a read-only filesystem. The image includes GCC 13 for the vendored locale compressor.
+It never
 starts the installed macOS Chrome/Chromium app, even through `DAIKIN_BROWSER_BIN`. Full formatting needs exact clang-format 18.1.8 through
 `CLANG_FORMAT`. Agent tools select Python through `scripts/agent-python.sh`; `AGENT_PYTHON` is a
 checked installed-interpreter override.
