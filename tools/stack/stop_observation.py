@@ -16,6 +16,17 @@ INLINED_INDEX_HELPERS = (
     'observation_identity_word', 'observation_index_note_loss', 'observation_index_incomplete',
     'flash_index_stop_observation_record', 'flash_journal_scan',
 )
+INLINED_SUPPRESSION_HELPERS = ('stop_context_unavailable_report',)
+INDEX_POST_VALIDATION_FENCE = (
+    '    if (s_forgotten.load(std::memory_order_acquire)) return;\n'
+    '    observation_index_add('
+)
+INDEX_FENCE_MUTATIONS = (
+    (INDEX_POST_VALIDATION_FENCE, '    observation_index_add('),
+    (INDEX_POST_VALIDATION_FENCE,
+     '    if (s_forgotten.load(std::memory_order_relaxed)) return;\n'
+     '    observation_index_add('),
+)
 TOKEN = re.compile(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|/\*.*?\*/|//[^\n]*', re.S)
 DEFINITION = re.compile(r'\b([A-Za-z_]\w*)\s*\([^;{}]*?\)\s*(?:const\s*)?(?:noexcept\s*)?\{')
 KEYWORDS = {'if', 'for', 'while', 'switch', 'catch', 'sizeof', 'alignof', 'decltype', 'static_assert'}
@@ -117,6 +128,109 @@ def shutdown_specs():
             for name, (owner, rule) in PATHS.items() if '_shutdown' in name}
 
 
+def validate_suppression(sources, error):
+    store = sources['main/stop_observation_store.cpp']
+    checkup = sources['main/checkup.cpp']
+    compact = normalized(store)
+    get = lambda name: normalized(body(store, name, error))
+    interface = normalized(sources['main/stop_observation_store.hpp'])
+    if (interface.count('boolstop_observation_suppressed();') != 1
+            or 'std::atomic<SemaphoreHandle_t>s_mutex{nullptr};' not in compact
+            or 'SemaphoreHandle_ts_start_mutex=nullptr;' not in compact
+            or 'std::atomic<bool>s_forgotten{false};' not in compact
+            or 'static_assert(std::atomic<SemaphoreHandle_t>::is_always_lock_free&&'
+               'std::atomic<bool>::is_always_lock_free,' not in compact
+            or get('stop_observation_suppressed') !=
+               'returns_forgotten.load(std::memory_order_acquire);'):
+        raise error('stop observation suppression: lock-free nullable publication/load changed')
+    forget_prefix = ('s_forgotten.store(true,std::memory_order_release);'
+                     'SemGuardlk(s_mutex.load(std::memory_order_acquire),0);if(!lk)return;')
+    forget = get('stop_observation_forget')
+    if (not forget.startswith(forget_prefix)
+            or compact.count('s_forgotten.store(') != 1
+            or re.search(r'\bs_forgotten\s*=(?!=)', masked(store))
+            or not forget.endswith('s_enabled=false;s_confirmed=false;s_barrier_pending=false;'
+                                   's_restore_blocked=true;s_restore_pending=false;')):
+        raise error('stop observation suppression: permanent forget latch/zero-wait ordering changed')
+    start = get('stop_observation_start')
+    start_prefix = ('if(stop_observation_suppressed())return;'
+                    'automutex=s_mutex.load(std::memory_order_acquire);if(!mutex){'
+                    'if(!s_start_mutex)s_start_mutex=xSemaphoreCreateMutex();mutex=s_start_mutex;}'
+                    'SemGuardlk(mutex);if(!lk||stop_observation_suppressed())return;clear_live();')
+    if (not start.startswith(start_prefix)
+            or not start.endswith('s_dropped=0;s_mutex.store(mutex,std::memory_order_release);')
+            or compact.count('s_mutex.store(') != 1
+            or compact.count('xSemaphoreCreateMutex(') != 1):
+        raise error('stop observation suppression: sole creator/protected initialization/publication changed')
+    fenced = (
+        'stop_observation_bind', 'stop_observation_set_diagnostics',
+        'stop_observation_record', 'stop_observation_seal', 'stop_observation_flash_index_reset',
+        'stop_observation_flash_service', 'stop_observation_flash_appended',
+        'stop_observation_flash_failed', 'apply_receipt',
+    )
+    if any(not get(name).startswith('if(stop_observation_suppressed())return;') for name in fenced):
+        raise error('stop observation suppression: missing public/receipt entry fence')
+    index = get('stop_observation_flash_index')
+    if not index.startswith(
+            'if(s_forgotten.load(std::memory_order_acquire))return;'
+            'if(!observation_payload_valid(payload,bucket)){'
+            'stop_observation_flash_index_incomplete();return;}'
+            'if(s_forgotten.load(std::memory_order_acquire))return;observation_index_add('):
+        raise error('stop observation suppression: post-validation index fence changed')
+    if (not get('stop_observation_reset').startswith(
+            'if(s_forgotten.load(std::memory_order_acquire))return;'
+            'SemGuardlk(s_mutex.load(std::memory_order_acquire));'
+            'if(!lk||s_forgotten.load(std::memory_order_acquire))return;')
+            or get('stop_observation_reset').count('s_forgotten.load(std::memory_order_acquire)') != 2
+            or index.count('s_forgotten.load(std::memory_order_acquire)') != 2
+            or compact.count('s_forgotten.load(std::memory_order_acquire)') != 6
+            or get('stop_observation_flash_index_incomplete') !=
+            'if(s_forgotten.load(std::memory_order_acquire))return;'
+            'observation_index_incomplete(s_index);s_rebuild=true;'):
+        raise error('stop observation suppression: direct atomic reset/index fences changed')
+    if (not get('stop_observation_flash_next').startswith('if(stop_observation_suppressed())returnfalse;')
+            or get('stop_observation_flash_next').count('return!stop_observation_suppressed();') != 2
+            or get('read_entry').count('!stop_observation_suppressed()') != 2
+            or 'if(!lk||stop_observation_suppressed()||epoch!=s_epoch||' not in
+               get('stop_observation_flash_service')):
+        raise error('stop observation suppression: staged read/claim/publication fence changed')
+    report = get('stop_observation_report')
+    if ('constexprStopObservationReportkSuppressedReport=[]{StopObservationReportr;'
+        'r.restore_pending=false;returnr;}();' not in compact
+            or not report.startswith('StopObservationReportr;if(stop_observation_suppressed()){'
+                                     'r=kSuppressedReport;returnr;}SemGuardlk('
+                                     's_mutex.load(std::memory_order_acquire));'
+                                     'if(stop_observation_suppressed()){r=kSuppressedReport;returnr;}'
+                                     'if(!lk)returnr;')
+            or report.count('r=kSuppressedReport;') != 5
+            or report.count('returnr;') != 6
+            or len(re.findall(r'\breturn\b', masked(body(store, 'stop_observation_report', error)))) != 6):
+        raise error('stop observation suppression: empty pending flags/getter rechecks changed')
+    helper = normalized(body(checkup, 'stop_context_suppressed_locked', error))
+    if ('constexprlogic::StopContextStatekEmptyStopContext{};' not in normalized(checkup)
+            or 'constexprCheckupStopContextReportkEmptyStopReport{};' not in normalized(checkup)
+            or helper != 'if(!stop_observation_suppressed())returnfalse;'
+                         's_stop_context=kEmptyStopContext;returntrue;'
+            or any(span[3] == 'stop_context_unavailable_report' for span in definitions(checkup))):
+        raise error('stop observation suppression: immutable producer reset/unavailable report changed')
+    reducer = normalized(body(checkup, 'checkup_record', error))
+    expiry = normalized(body(checkup, 'checkup_stop_context_expire', error))
+    getter = normalized(body(checkup, 'checkup_stop_context_report', error))
+    shutdown = normalized(body(checkup, 'checkup_reboot_save', error))
+    if ('if(!stop_context_suppressed_locked()&&s_source_confirmed&&s_stop_inputs.schema_fp&&' not in reducer
+            or 'if(stop_context_suppressed_locked())return;' not in expiry
+            or getter.count('stop_context_suppressed_locked()') != 2
+            or not getter.startswith('CheckupStopContextReportr;if(!s_mtx){'
+                                     'r.observation.restore_pending=!stop_observation_suppressed();returnr;}'
+                                     'Locklk(s_mtx);if(!lk){r.observation.restore_pending='
+                                     '!stop_observation_suppressed();returnr;}')
+            or 'r=kEmptyStopReport;r.observation.restore_pending=false;' not in getter
+            or getter.count('returnr;') != 5
+            or len(re.findall(r'\breturn\b', masked(body(checkup, 'checkup_stop_context_report', error)))) != 5
+            or 'if(!stop_context_suppressed_locked()){' not in shutdown):
+        raise error('stop observation suppression: producer/expiry/report/shutdown admission changed')
+
+
 def validate_sources(budgets, sources, error):
     validate_paths(budgets, error)
     missing = (set(HEADERS) | set(BODIES)) - set(sources)
@@ -133,6 +247,7 @@ def validate_sources(budgets, sources, error):
     code = {path: re.sub(r'\s+', ' ', masked(text)) for path, text in sources.items()}
     history = sources['main/history.cpp']
     store = sources['main/stop_observation_store.cpp']
+    validate_suppression(sources, error)
     if (not re.search(r'(?m)^ObservationHourlyPayload\s+s_flash_payload;', masked(store))
             or 'alignas(FlashJournalRecord)uint8_ts_flash_sector[logic::HISTORY_FLASH_ERASE_BYTES];'
             not in normalized(history)):
@@ -140,7 +255,9 @@ def validate_sources(budgets, sources, error):
     record = normalized(body(store, 'stop_observation_record', error))
     forget = normalized(body(store, 'stop_observation_forget', error))
     history_forget = normalized(body(history, 'history_flash_forget', error))
-    if (not record.startswith('SemGuardlk(s_mutex);if(!lk||!s_enabled||!s_confirmed||s_sealed)return;')
+    if (not record.startswith('if(stop_observation_suppressed())return;'
+                              'SemGuardlk(s_mutex.load(std::memory_order_acquire));'
+                              'if(!lk||stop_observation_suppressed()||!s_enabled||!s_confirmed||s_sealed)return;')
             or 's_enabled=false;' not in forget or 's_confirmed=false;' not in forget
             or not history_forget.startswith('s_flash_forgotten.store(true);stop_observation_forget();')):
         raise error('stop observation button shortcut: forget/disabled admission changed')
@@ -170,7 +287,8 @@ def validate_sources(budgets, sources, error):
             or 'observation_index_fence_sequence(s_index,payload.identity)' not in next_record
             or 'if(s_index.clipped_until_bucket==INT64_MAX)returnfalse;' not in next_record
             or 'stop_observation_flash_index_incomplete();' not in admission
-            or incomplete != 'observation_index_incomplete(s_index);s_rebuild=true;'):
+            or incomplete != 'if(s_forgotten.load(std::memory_order_acquire))return;'
+                             'observation_index_incomplete(s_index);s_rebuild=true;'):
         raise error('stop observation fence: exact snapshot/admission/unknown-write guard changed')
     collector = normalized(body(sources['main/logic/stop_context_input.hpp'], 'stop_context_collect', error))
     if (collector.count('std::strtod(text,&end)') != 1
@@ -199,7 +317,7 @@ def validate_inlining(disassembly, error):
             raise error('stop observation inlining: newly outlined append_at requires frame/path review')
         if any(re.search(r'\b' + helper + r'\(', name) or
                re.match(r'^_Z.*' + str(len(helper)) + helper, name)
-               for helper in INLINED_INDEX_HELPERS):
+               for helper in INLINED_INDEX_HELPERS + INLINED_SUPPRESSION_HELPERS):
             raise error('stop observation inlining: newly outlined index/scan helper needs frame/path review')
         if (re.match(r'^daik::logic::ObservationIndexEntry::(?:bucket|sequence|slot)\(', name)
                 or re.match(r'^_ZNK4daik5logic21ObservationIndexEntry(?:6bucket|8sequence|4slot)E', name)):
@@ -207,6 +325,19 @@ def validate_inlining(disassembly, error):
         if ((name.startswith('daik::logic::observation_index_') or
              re.match(r'^_Z.*\d+observation_index_', name)) and name not in exact):
             raise error('stop observation inlining: unreviewed outlined index function/clone')
+        if (any(helper + '(' in name or
+                re.match(r'^_Z.*' + str(len(helper)) + helper, name)
+                for helper in ('stop_observation_suppressed', 'stop_context_suppressed_locked'))
+                and name not in exact):
+            raise error('stop observation suppression: unreviewed outlined bool/helper clone')
+    headers = list(re.finditer(r'^\s*[0-9a-fA-F]+\s+<(.+)>:\s*$', disassembly, re.M))
+    for i, match in enumerate(headers):
+        if match[1] != 'daik::stop_observation_suppressed()':
+            continue
+        end = headers[i + 1].start() if i + 1 < len(headers) else len(disassembly)
+        leaf = disassembly[match.end():end]
+        if re.search(r'\b(?:callx?[048]|j|jx)\s', leaf):
+            raise error('stop observation suppression: bool load gained a call/tail-call or hidden lock')
 
 
 def self_test(budgets, sources, error):
@@ -249,7 +380,8 @@ def self_test(budgets, sources, error):
          'stop_observation_flash_next(other_reader, bucket, payload)'),
         ('main/history.cpp', 'logic::OBSERVATION_PAYLOAD_BYTES)', 'sizeof(record.payload))'),
         ('main/stop_observation_store.cpp', 's_enabled         = false;', 's_enabled = true;'),
-        ('main/stop_observation_store.cpp', '!lk || !s_enabled || !s_confirmed || s_sealed', '!lk || s_sealed'),
+        ('main/stop_observation_store.cpp',
+         '!lk || stop_observation_suppressed() || !s_enabled || !s_confirmed || s_sealed', '!lk || s_sealed'),
         ('main/checkup.cpp', 'logic::stop_context_collect(s_stop_inputs, v, n, rps_known, rps_running)',
          'logic::stop_context_collect(s_stop_inputs, other_rows, n, rps_known, rps_running)'),
         ('main/checkup.cpp', 'if (event.valid)', 'if (false)'),
@@ -275,7 +407,29 @@ def self_test(budgets, sources, error):
         ('main/logic/stop_context_input.hpp', 'end != text + row->value.size()', 'false'),
         ('main/logic/stop_context_input.hpp', 'end != text + row->value.size()',
          'end != text + std::strlen(text)'),
+        ('main/stop_observation_store.cpp', 's_forgotten.store(true, std::memory_order_release);', ''),
+        ('main/stop_observation_store.cpp', 'void stop_observation_start(bool enabled, uint32_t consent_generation) {',
+         'void stop_observation_start(bool enabled, uint32_t consent_generation) {'
+         's_forgotten.store(false, std::memory_order_release);'),
+        ('main/stop_observation_store.cpp', '    SemGuard lk(mutex);',
+         '    s_mutex.store(mutex, std::memory_order_release);\n    SemGuard lk(mutex);'),
+        ('main/stop_observation_store.cpp', 's_forgotten.load(std::memory_order_acquire)',
+         's_forgotten.load(std::memory_order_relaxed)'),
+        ('main/stop_observation_store.cpp',
+         'SemGuard lk(s_mutex.load(std::memory_order_acquire), 0);',
+         'SemGuard lk(s_mutex.load(std::memory_order_acquire));'),
+        ('main/stop_observation_store.cpp', 'r.restore_pending = false;', 'r.restore_pending = true;'),
+        ('main/stop_observation_store.hpp', 'bool stop_observation_suppressed();', ''),
+        ('main/checkup.cpp', 'kEmptyStopContext{};', 'kEmptyStopContext{1};'),
+        ('main/checkup.cpp', 'kEmptyStopReport{};', 'kEmptyStopReport{1};'),
+        ('main/checkup.cpp', 'if (!stop_context_suppressed_locked()', 'if (true'),
+        ('main/checkup.cpp', 'if (stop_context_suppressed_locked()) return;', ''),
+        ('main/checkup.cpp', 'r.observation.restore_pending = !stop_observation_suppressed();',
+         'r.observation.restore_pending = true;'),
+        ('main/new_task.cpp', '', 'void new_caller() { (void)stop_observation_suppressed(); }'),
     ]
+    mutations.extend(('main/stop_observation_store.cpp', before, after)
+                     for before, after in INDEX_FENCE_MUTATIONS)
     for path, before, after in mutations:
         altered = dict(sources)
         if before:
@@ -294,7 +448,7 @@ def self_test(budgets, sources, error):
         else:
             raise AssertionError('accepted newly outlined append_at')
     for name in [
-            candidate for helper in INLINED_INDEX_HELPERS
+            candidate for helper in INLINED_INDEX_HELPERS + INLINED_SUPPRESSION_HELPERS
             for candidate in ('daik::logic::' + helper + '(x)', '_Z' + str(len(helper)) + helper + 'Eclone')
     ] + [
             'daik::logic::ObservationIndexEntry::' + method + '() const'
@@ -310,4 +464,20 @@ def self_test(budgets, sources, error):
             count += 1
         else:
             raise AssertionError('accepted unmeasured outlined index/scan helper ' + name)
+    for instruction in ('call8 200 <hidden_allocation>', 'callx8 a8', 'j 200 <hidden_lock>'):
+        try:
+            validate_inlining('100 <daik::stop_observation_suppressed()>:\n'
+                              '100: 004136 entry a1, 32\n103: 000000 ' + instruction + '\n', error)
+        except error:
+            count += 1
+        else:
+            raise AssertionError('accepted suppression load with a hidden call/tail-call')
+    for name in ('daik::stop_observation_suppressed() [clone .constprop.1]',
+                 'daik::(anonymous namespace)::stop_context_suppressed_locked() [clone .isra.1]'):
+        try:
+            validate_inlining('100 <' + name + '>:\n100: 004136 entry a1, 32\n', error)
+        except error:
+            count += 1
+        else:
+            raise AssertionError('accepted unmeasured suppression helper clone')
     return count
