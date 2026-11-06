@@ -29326,12 +29326,22 @@ static void test_observation_hourly() {
     h.rings[1]    = HOMEHUB_HISTORY_COUNT;
     h.rings[2]    = ENV3_HISTORY_COUNT;
     CHECK(observation_header_matches(h));
+    CHECK(observation_append_owned(h));
+    h.commit = HISTORY_JOURNAL_ERASED;
+    CHECK(!observation_header_matches(h));
+    CHECK(observation_append_owned(h));
+    h.commit = 0;
+    CHECK(!observation_header_matches(h));
+    CHECK(observation_append_owned(h));
+    h.commit = HISTORY_JOURNAL_COMMITTED;
     CHECK(history_journal_checkup_header_structural_matches(h, 3600));
     h.catalog_fp ^= 1;
     CHECK(!observation_header_matches(h));
+    CHECK(!observation_append_owned(h));
     h.catalog_fp = observation_fingerprint();
     h.source     = static_cast<uint8_t>(HistoryJournalSource::X10a);
     CHECK(!observation_header_matches(h));
+    CHECK(!observation_append_owned(h));
     {
         const ObservationIdentity identity{1, 2, 3, 4};
         uint32_t ObservationIdentity::*identity_fields[] = {

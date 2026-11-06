@@ -2576,17 +2576,18 @@ void flash_note_append_success(size_t slot) {
 }
 
 esp_err_t flash_append_record(FlashJournalRecord& r) {
-    size_t          slot = 0;
-    const esp_err_t e    = flash_append_record_at(r, slot);
+    const bool      stop_owned = logic::observation_append_owned(r.header);
+    size_t          slot       = 0;
+    const esp_err_t e          = flash_append_record_at(r, slot);
     if (e == ESP_OK) {
         flash_note_append_success(slot);
         // The ONLY place an ahead-of-the-clock episode ends: the source appended data again. A
         // manifest says nothing about the cursor, and a "no longer ahead" observation must not
         // end it either (see s_flash_ahead_logged).
-        if (!flash_is_manifest(r.header) && !logic::observation_header_matches(r.header))
+        if (!flash_is_manifest(r.header) && !stop_owned)
             s_flash_ahead_logged[r.header.source] = false;
     } else {
-        if (logic::observation_header_matches(r.header)) stop_observation_flash_failed();
+        if (stop_owned) stop_observation_flash_failed();
         flash_note_append_failure(slot, e, r.header);
     }
     return e;
