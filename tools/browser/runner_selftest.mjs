@@ -29,8 +29,8 @@ if (script.endsWith("find_browser.mjs")) {
   process.on("SIGINT", () => supervisor.kill("SIGINT"));
   supervisor.once("exit", (code, signal) => process.exit(code ?? (signal === "SIGINT" ? 130 : 143)));
 } else if (script.endsWith("selftest.mjs")) {
-  fs.writeFileSync(path.join(dir, "selftest-reached"), "yes");
-} else if (script.endsWith("test_browser_render.mjs")) {
+  fs.writeFileSync(path.join(dir, process.env.DAIKIN_BROWSER_ENGINE + "-selftest-reached"), "yes");
+} else if (script.endsWith("test_browser_render.mjs") || script.endsWith("test_browser_webkit.mjs")) {
   const viewport = args[args.indexOf("--viewport") + 1] || "combined";
   const page = process.env.DAIKIN_BROWSER_PAGE;
   const descendantSource = [
@@ -48,6 +48,7 @@ if (script.endsWith("find_browser.mjs")) {
     if (mode === "phone-fails" && viewport === "phone") process.exit(1);
     if (mode === "desktop-fails" && viewport === "desktop") process.exit(2);
     if (mode === "both-fail") process.exit(1);
+    if (mode === "webkit-fails") process.exit(viewport.startsWith("ipad-") ? 1 : 0);
   };
   setTimeout(end, 40);
   setInterval(() => {}, 1000);
@@ -60,7 +61,7 @@ if (script.endsWith("find_browser.mjs")) {
 try {
   for (const [mode, expected] of [["success", 0], ["phone-fails", 1], ["desktop-fails", 2],
     ["both-fail", 1], ["interrupt", 143], ["deadline", 2], ["invalid-deadline", 2],
-    ["assembler-fails", 2], ["forged-directory", 0]]) {
+    ["assembler-fails", 2], ["forged-directory", 0], ["webkit-fails", 1]]) {
     const fixture = path.join(work, mode);
     fs.mkdirSync(path.join(fixture, "scripts"), { recursive: true });
     fs.mkdirSync(path.join(fixture, "tools/browser"), { recursive: true });
@@ -80,6 +81,7 @@ try {
         TMPDIR: path.join(fixture, "tmp"), RUNNER_FIXTURE: fixture,
         RUNNER_MODE: mode === "forged-directory" ? "success" : mode,
         DAIKIN_BROWSER_PAGE: path.join(sentinel, "index.html"),
+        DAIKIN_BROWSER_CONTAINER: "1", DAIKIN_BROWSER_ENGINE: "chromium",
         DAIKIN_BROWSER_TIMEOUT_MS: mode === "invalid-deadline" ? "invalid" : mode === "deadline" ? "400" : "5000" },
     });
     let output = "";
@@ -99,10 +101,14 @@ try {
       }
       const result = await completion;
       assert.equal(result.code, expected, `${mode}: preserve the appropriate exit status\n${output}`);
-      for (const viewport of ["phone", "desktop"]) {
+      for (const viewport of ["phone", "desktop", "ipad-portrait", "ipad-landscape"]) {
         const marker = path.join(fixture, `${viewport}.json`);
         if (!fs.existsSync(marker)) {
-          assert.ok(["invalid-deadline", "assembler-fails"].includes(mode), `${mode}: both viewport workers must start`);
+          // A failed portrait worker must stop the phase before landscape starts.
+          assert.ok(["invalid-deadline", "assembler-fails"].includes(mode) ||
+            (mode === "webkit-fails" && viewport === "ipad-landscape") ||
+            (viewport.startsWith("ipad-") && !["success", "forged-directory", "webkit-fails"].includes(mode)),
+          `${mode}: every required viewport worker must start`);
           continue;
         }
         const recorded = JSON.parse(fs.readFileSync(marker, "utf8"));
@@ -114,15 +120,18 @@ try {
       assert.equal(fs.existsSync(path.join(fixture, "page-removed-while-live")), false,
         `${mode}: shared page must stay available until all descendants end`);
       assert.deepEqual(fs.readdirSync(path.join(fixture, "tmp")), [], `${mode}: no temporary tree may remain`);
-      assert.equal(fs.existsSync(path.join(fixture, "selftest-reached")), ["success", "forged-directory"].includes(mode),
+      assert.equal(fs.existsSync(path.join(fixture, "chromium-selftest-reached")),
+        ["success", "forged-directory", "webkit-fails"].includes(mode),
         `${mode}: selftests run only after both viewport workers succeed`);
+      assert.equal(fs.existsSync(path.join(fixture, "webkit-selftest-reached")), ["success", "forged-directory"].includes(mode),
+        `${mode}: WebKit selftests run only after both iPad workers succeed`);
       assert.equal(fs.readFileSync(path.join(sentinel, "index.html"), "utf8"), "preserve this user-owned sentinel",
         `${mode}: CLI arguments and a forged page environment cannot transfer cleanup ownership`);
       console.log(`browser runner selftest: ${mode} status, both process trees and cleanup order observed`);
     } finally {
       clearTimeout(watchdog);
       runner.kill("SIGKILL");
-      for (const viewport of ["phone", "desktop"]) {
+      for (const viewport of ["phone", "desktop", "ipad-portrait", "ipad-landscape"]) {
         const marker = path.join(fixture, `${viewport}.json`);
         if (!fs.existsSync(marker)) continue;
         const recorded = JSON.parse(fs.readFileSync(marker, "utf8"));

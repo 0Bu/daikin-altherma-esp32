@@ -5,7 +5,7 @@ import { INSPECTOR_TRENDS, NO_HISTORY_INSPECTORS, makeHistoryMotionFixture,
 const BUDGET_MS = 250;
 export const HISTORY_MOTION_MUTATIONS = Object.freeze([
   "history-eager", "history-stall", "history-replace", "history-restart", "history-unknown",
-  "history-disclosure-replace",
+  "history-disclosure-replace", "history-detach", "history-text-stale",
 ]);
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const evaluate = (page, fn, args = {}) =>
@@ -41,10 +41,40 @@ async function click(page, selector, inspector = "") {
         ({ ...point, hit: document.elementFromPoint(point.x, point.y)?.closest("[data-insp]")?.dataset.insp }))));
     return point;
   }, { selector, inspector });
-  await page.send("Input.dispatchMouseEvent", { type: "mousePressed", button: "left",
-    clickCount: 1, ...point });
-  await page.send("Input.dispatchMouseEvent", { type: "mouseReleased", button: "left",
-    clickCount: 1, ...point });
+  await page.nativeClick(point.x, point.y);
+}
+
+async function assertTouchReadout(page, selector, context) {
+  if (page.inputMode !== "touch") return;
+  const scroll = await page.evaluate("({x:scrollX,y:scrollY})");
+  const id = await evaluate(page, ({ selector }) => document.querySelector(selector)?.dataset.hist,
+    { selector });
+  assert.ok(id, context + ": touch history must exist");
+  await click(page, selector);
+  await page.waitFor("S.histPin.has(" + JSON.stringify(id) + ") && !S.scrub");
+  const selected = await evaluate(page, ({ selector }) => {
+    const graph = document.querySelector(selector)?.closest(".vhist");
+    const visible = node => {
+      if (!node || node.closest("[hidden]") || !node.textContent.trim()) return false;
+      const rect = node.getBoundingClientRect();
+      for (let current = node; current; current = current.parentElement) {
+        const style = getComputedStyle(current);
+        if (style.display === "none" || ["hidden", "collapse"].includes(style.visibility) ||
+            Number(style.opacity) === 0) return false;
+      }
+      return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.right > 0 &&
+        rect.top < innerHeight && rect.left < innerWidth;
+    };
+    return { tip: visible(graph?.querySelector(".vhist-tip.vhist-pinned")),
+      time: visible(graph?.querySelector(".vhist-time.vhist-pinned")) };
+  }, { selector });
+  assert.ok(selected.tip && selected.time, context + ": trusted touch must pin a visible value and time readout");
+  await click(page, selector);
+  await page.waitFor("!S.histPin.has(" + JSON.stringify(id) + ") && !S.scrub && !S.clickHold");
+  await evaluate(page, ({ scroll }) => { window.scrollTo(scroll.x, scroll.y); return true; }, { scroll });
+  await page.evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))");
+  const restored = await page.evaluate("({x:scrollX,y:scrollY})");
+  assert.deepEqual(restored, scroll, context + ": touch readout must restore the pre-touch observation viewport");
 }
 
 async function installHooks(page, mutation) {
@@ -53,11 +83,21 @@ async function installHooks(page, mutation) {
       circulationSettingsCardHtml, refreshValues, refreshStatus, replaceHistoryHtml };
     const original = window.__motionHooks;
     window.__motionAllPolls = 0;
-    let eager;
+    let eager, detach, staleText;
     if (mutation === "history-eager") {
       const code = original.descAccordion.toString();
       if (!code.includes("open && trendId")) throw new Error("history mutation target missing");
       eager = window.eval("(" + code.replace("open && trendId", "trendId") + ")");
+    }
+    if (mutation === "history-detach") {
+      const code = original.replaceHistoryHtml.toString();
+      if (!code.includes("if (textOnly) {")) throw new Error("history detach mutation target missing");
+      detach = window.eval("(" + code.replace("if (textOnly) {", "if (false && textOnly) {") + ")");
+    }
+    if (mutation === "history-text-stale") {
+      const code = original.replaceHistoryHtml.toString();
+      if (!code.includes("node.nodeValue = value;")) throw new Error("history text mutation target missing");
+      staleText = window.eval("(" + code.replace("node.nodeValue = value;", "void value;") + ")");
     }
     descAccordion = (...args) => {
       const previous = window.__motionClosed;
@@ -83,20 +123,30 @@ async function installHooks(page, mutation) {
       return original.env3HistHtml(...args);
     };
     refreshValues = async (...args) => {
+      const started = performance.now();
       const ok = await original.refreshValues(...args);
       if (ok) window.__motionAllPolls++;
-      if (ok && window.__motionObserve) window.__motionPolls++;
+      if (ok && window.__motionObserve) {
+        window.__motionPolls++;
+        window.__motionRefreshes.push({ type: "values", started, duration: performance.now() - started });
+      }
       return ok;
     };
     refreshStatus = async (...args) => {
+      const started = performance.now();
       const ok = await original.refreshStatus(...args);
-      if (ok && window.__motionObserve) window.__motionStatusPolls++;
+      if (ok && window.__motionObserve) {
+        window.__motionStatusPolls++;
+        window.__motionRefreshes.push({ type: "status", started, duration: performance.now() - started });
+      }
       return ok;
     };
     renderApp = (...args) => {
+      const started = performance.now();
       if (window.__motionObserve && (S.scrub || S.clickHold)) window.__motionHolds++;
       const result = original.renderApp(...args);
       if (!window.__motionObserve) return result;
+      window.__motionRenders.push({ started, duration: performance.now() - started });
       if (window.__motionInactive?.some(({ node }) =>
         node.getAnimations().some(animation => animation instanceof CSSAnimation)))
         window.__motionUnexpectedMotion++;
@@ -119,10 +169,14 @@ async function installHooks(page, mutation) {
     };
     replaceHistoryHtml = (host, html) => {
       if (mutation === "history-disclosure-replace" && window.__motionObserve) host.innerHTML = html;
-      else return original.replaceHistoryHtml(host, html);
+      else return (window.__motionObserve ? detach || staleText || original.replaceHistoryHtml
+        : original.replaceHistoryHtml)(host, html);
     };
     window.__motionKey = event => {
-      if (window.__motionObserve && event.code === "ShiftLeft") window.__motionInputs++;
+      if (window.__motionObserve && event.code === "ShiftLeft") {
+        window.__motionInputs++;
+        window.__motionInputTimes.push({ type: event.type, at: performance.now(), trusted: event.isTrusted });
+      }
     };
     window.__motionMarkup = plot => {
       const copy = plot.closest(".vhist").cloneNode(true);
@@ -170,24 +224,110 @@ async function openInspector(page, key, id, context) {
   return chart;
 }
 
+async function boardHeapReading(page) {
+  return evaluate(page, () => {
+    const node = document.querySelector('#settingsCards [data-desc="board:free_heap"] .vrow-val');
+    return { text: node?.innerText.trim(), expected: fmtKiB(S.status.sys.free_heap),
+      visible: !!node && node.getClientRects().length > 0 && getComputedStyle(node).visibility !== "hidden" };
+  });
+}
+
+async function settleHistoryOpening(page, selectors) {
+  await page.waitFor("(" + ((selectors) => selectors.every(selector => {
+    const plot = document.querySelector(selector);
+    if (!plot) return false;
+    const host = plot.closest(".inspect, .vdesc") || plot;
+    return host.getAnimations({ subtree: true }).every(animation =>
+      !Number.isFinite(animation.effect?.getTiming().iterations) ||
+      (animation.playState !== "running" && !animation.pending));
+  })).toString() + ")(" + JSON.stringify(selectors) + ")");
+}
+
+async function prepareObservationViewport(page, selector, animationIds) {
+  await settleHistoryOpening(page, [selector]);
+  const unionFits = await evaluate(page, ({ selector, animationIds }) => {
+    const plot = document.querySelector(selector), rect = plot.getBoundingClientRect();
+    const header = document.getElementById(S.stage === "dashboard" ? "hdrDash" : "hdrBack");
+    const inset = Math.max(0, header.getBoundingClientRect().bottom);
+    if (!(rect.width > 0 && rect.height > 0 && rect.height + 8 <= innerHeight - inset))
+      throw new Error("history observation requires a viewport-sized visible plot: " + selector);
+    const top = rect.top + scrollY, bottom = rect.bottom + scrollY;
+    let lower = Math.max(0, bottom + 4 - innerHeight), upper = top - inset - 4;
+    // Keep the graph and moving schematic in view together whenever they fit. Restoring the
+    // pre-touch scroll can leave the focused graph offscreen, which is not a visible-history test.
+    const witnesses = S.stage === "dashboard" ? animationIds.map(id =>
+      document.getElementById(id).getBoundingClientRect()) : [];
+    const unionTop = Math.min(top, ...witnesses.map(box => box.top + scrollY));
+    const unionBottom = Math.max(bottom, ...witnesses.map(box => box.bottom + scrollY));
+    const unionLower = Math.max(0, unionBottom + 4 - innerHeight), unionUpper = unionTop - inset - 4;
+    if (unionLower <= unionUpper) { lower = unionLower; upper = unionUpper; }
+    window.scrollTo({ left: scrollX, top: Math.max(lower, Math.min(scrollY, upper)), behavior: "instant" });
+    return unionLower <= unionUpper;
+  }, { selector, animationIds });
+  await page.evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))");
+  const viewport = await evaluate(page, ({ selector, animationIds }) => {
+    const plot = document.querySelector(selector), box = plot.getBoundingClientRect();
+    const header = document.getElementById(S.stage === "dashboard" ? "hdrDash" : "hdrBack");
+    const inset = Math.max(0, header.getBoundingClientRect().bottom);
+    let visible = true;
+    for (let node = plot; node; node = node.parentElement) {
+      const style = getComputedStyle(node);
+      if (style.display === "none" || ["hidden", "collapse"].includes(style.visibility) ||
+          Number(style.opacity) === 0) visible = false;
+    }
+    const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+    return { headerInset: inset, plotVisible: visible && box.top >= inset && box.bottom <= innerHeight &&
+      box.left >= 0 && box.right <= innerWidth && (hit === plot || plot.contains(hit)),
+    witnesses: (S.stage === "dashboard" ? animationIds : []).map(id => {
+      const rect = document.getElementById(id).getBoundingClientRect();
+      return { id, verticallyInside: rect.top >= inset && rect.bottom <= innerHeight,
+        x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+    }) };
+  }, { selector, animationIds });
+  assert.equal(viewport.plotVisible, true, "history plot must be visible inside the observation viewport: " + selector);
+  if (unionFits) assert.ok(viewport.witnesses.every(row => row.verticallyInside),
+    "schematic witnesses must share the planned vertical observation viewport");
+  return { ...viewport, unionFits };
+}
+
 async function observe(page, server, context, selectors, { inspector = false, status = false,
   fixture = null, animationIds = ["fSup1", "rfHot", "scFan", "scPump"],
   inactiveAnimationIds = [] } = {}) {
-  await page.send("Page.bringToFront");
+  await page.bringToFront();
   await page.waitFor("document.visibilityState === 'visible' && !document.hidden");
   // Opening/disclosure transitions may legitimately finish. Persistent flow CSSAnimation objects
   // are the continuity witness; finite CSSTransition completion is not a stopped pipe animation.
   await page.waitFor("!S.clickHold && !S.histBusy.size && !_pollBusy");
+  await settleHistoryOpening(page, selectors);
   await page.evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))");
+  await assertTouchReadout(page, selectors[0], context);
+  const observationViewport = await prepareObservationViewport(page, selectors[0], animationIds);
+  const focusStarted = performance.now();
+  const focusWasAlready = await evaluate(page, ({ selector }) => {
+    const node = document.querySelector(selector), already = document.activeElement === node;
+    node.focus({ preventScroll: true }); return already;
+  }, { selector: selectors[0] });
+  // Programmatic focus belongs to setup. Wait for its real paint before the first measured poll;
+  // every subsequent frame, including that poll's first frame, remains under the fixed budget.
+  await page.evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))");
+  await page.waitFor("!S.clickHold && !S.histBusy.size && !_pollBusy");
+  const focusSetupMs = performance.now() - focusStarted;
   const requests = server.valuesRequests;
-  if (status) fixture.status.sys.free_heap -= 1024;
+  let boardBefore;
+  if (status) {
+    boardBefore = await boardHeapReading(page);
+    assert.equal(boardBefore.visible, true, context + ": initial board reading must be rendered");
+    assert.equal(boardBefore.text, boardBefore.expected, context + ": initial board reading must match actual status");
+    fixture.status.sys.free_heap -= 1024;
+  }
   await evaluate(page, ({ selectors, animationIds, inactiveAnimationIds }) => {
     window.__motionPlots = selectors.map(selector => {
       const node = document.querySelector(selector);
       if (!node) throw new Error("history observation plot missing: " + selector);
       return { selector, node };
     });
-    window.__motionPlots[0].node.focus({ preventScroll: true });
+    if (document.activeElement !== window.__motionPlots[0].node || document.hidden)
+      throw new Error("history focus and visibility must settle before polling observation");
     window.__motionFocused = document.activeElement;
     const body = document.getElementById("inspBody");
     window.__motionBody = { node: body.firstChild, html: body.innerHTML };
@@ -209,10 +349,39 @@ async function observe(page, server, context, selectors, { inspector = false, st
     window.__motionPolls = 0; window.__motionStatusPolls = 0;
     window.__motionHolds = 0;
     window.__motionBuilds = 0; window.__motionClosedBuilds = 0; window.__motionInputs = 0;
-    window.__motionFrames = { started: performance.now(), last: performance.now(), count: 0, maxGap: 0 };
+    window.__motionRenders = []; window.__motionRefreshes = []; window.__motionInputTimes = [];
+    const geometry = selector => {
+      const rect = document.querySelector(selector)?.getBoundingClientRect();
+      return rect ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height } : null;
+    };
+    window.__motionViewport = { x: scrollX, y: scrollY, width: innerWidth, height: innerHeight,
+      visible: document.visibilityState, focused: document.hasFocus(),
+      flow: geometry("#fSup1"), plot: geometry(selectors[0]) };
+    const ancestors = new Map(), detached = [];
+    for (const { selector, node: plot } of window.__motionPlots)
+      for (let node = plot; node; node = node.parentNode) {
+        if (!node.isConnected) throw new Error("history observation ancestor is initially detached: " + selector);
+        if (!ancestors.has(node)) ancestors.set(node, new Set());
+        ancestors.get(node).add(selector);
+      }
+    // Mutation records preserve removal identity even after the same subtree is reattached before
+    // delivery. Checking isConnected or final plot identity alone misses that rendering disruption.
+    const recordDetachments = records => {
+      for (const record of records) for (const node of record.removedNodes)
+        if (ancestors.has(node)) detached.push({ selectors: [...ancestors.get(node)],
+          node: node.nodeName + (node.id ? "#" + node.id : ""),
+          connectedAtDelivery: node.isConnected, at: performance.now() });
+    };
+    window.__motionDetachedAncestors = detached;
+    window.__motionRecordDetachments = recordDetachments;
+    window.__motionDetachObserver = new MutationObserver(recordDetachments);
+    window.__motionDetachObserver.observe(document, { childList: true, subtree: true });
+    window.__motionFrames = { started: performance.now(), last: performance.now(), count: 0, maxGap: 0, gaps: [] };
     const sample = now => {
       const state = window.__motionFrames;
-      state.maxGap = Math.max(state.maxGap, now - state.last); state.last = now; state.count++;
+      const gap = now - state.last;
+      state.maxGap = Math.max(state.maxGap, gap); state.gaps.push({ at: now, gap });
+      state.last = now; state.count++;
       state.request = requestAnimationFrame(sample);
     };
     window.__motionFrames.request = requestAnimationFrame(sample);
@@ -231,8 +400,7 @@ async function observe(page, server, context, selectors, { inspector = false, st
     // Page.getLayoutMetrics flush; adding two events and that diagnostic layout is not input latency.
     for (const type of ["rawKeyDown", "keyUp"]) {
       const started = performance.now();
-      await page.send("Input.dispatchKeyEvent", { type, key: "Shift", code: "ShiftLeft",
-        windowsVirtualKeyCode: 16, nativeVirtualKeyCode: 16 });
+      await page.nativeKey(type, "Shift", "ShiftLeft", 16);
       inputMax = Math.max(inputMax, performance.now() - started);
     }
     inputProbes++;
@@ -248,14 +416,17 @@ async function observe(page, server, context, selectors, { inspector = false, st
   const motion = await evaluate(page, () => {
     window.__motionObserve = false;
     cancelAnimationFrame(window.__motionFrames.request);
+    window.__motionRecordDetachments(window.__motionDetachObserver.takeRecords());
+    window.__motionDetachObserver.disconnect();
     const body = document.getElementById("inspBody");
-    return {
+    const snapshot = {
       polls: window.__motionPolls, statusPolls: window.__motionStatusPolls,
       holds: window.__motionHolds,
       builds: window.__motionBuilds, closedBuilds: window.__motionClosedBuilds,
       hiddenCharts: document.querySelectorAll("#valueGroups .vitem:not(.open) .vhist, #settingsCards .vitem:not(.open) .vhist").length,
       plots: window.__motionPlots.map(({ selector, node }) =>
         ({ selector, same: document.querySelector(selector) === node })),
+      detachedAncestors: window.__motionDetachedAncestors,
       bodyUnchanged: body.innerHTML === window.__motionBody.html,
       sameBody: body.firstChild === window.__motionBody.node,
       animations: window.__motionAnimations.map(({ id, node, animation, time, initial }) => ({
@@ -272,8 +443,21 @@ async function observe(page, server, context, selectors, { inspector = false, st
       sameFocus: document.activeElement === window.__motionFocused,
       inputs: window.__motionInputs, frames: window.__motionFrames.count,
       duration: performance.now() - window.__motionFrames.started, maxFrameGap: window.__motionFrames.maxGap,
+      frameStarted: window.__motionFrames.started, frameGaps: window.__motionFrames.gaps,
+      renders: window.__motionRenders, refreshes: window.__motionRefreshes,
+      inputTimes: window.__motionInputTimes, viewportBefore: window.__motionViewport,
+      viewportAfter: { x: scrollX, y: scrollY, width: innerWidth, height: innerHeight,
+        visible: document.visibilityState, focused: document.hasFocus() },
     };
+    // Keep only the plain-data snapshot between cases. Test witnesses must not retain a closed
+    // graph or its observer closure until the following case's measured polling window.
+    for (const name of ["__motionPlots", "__motionBody", "__motionFocused", "__motionAnimations",
+      "__motionInactive", "__motionDetachObserver", "__motionRecordDetachments"])
+      delete window[name];
+    return snapshot;
   });
+  page.historyMotionEvidence?.push({ context, ...motion, maxNativeInputMs: inputMax, focusSetupMs,
+    focusWasAlready, observationViewport });
   assert.ok(server.valuesRequests >= requests + 3 && motion.polls >= 3,
     context + ": at least three real values polls");
   assert.ok(motion.duration >= 4000, context + ": three real updates must span two full polling intervals");
@@ -281,6 +465,10 @@ async function observe(page, server, context, selectors, { inspector = false, st
   assert.equal(motion.closedBuilds, 0, context + ": polls must not rebuild cached charts in closed rows");
   assert.equal(motion.hiddenCharts, 0, context + ": closed rows must not retain duplicate history SVGs");
   if (inspector) assert.equal(motion.builds, 0, context + ": unchanged inspector must not rebuild history");
+  const retainedPlots = new Set(motion.plots.filter(plot => plot.same).map(plot => plot.selector));
+  const detachedRetained = motion.detachedAncestors.filter(row =>
+    row.selectors.some(selector => retainedPlots.has(selector)));
+  assert.deepEqual(detachedRetained, [], context + ": unchanged history ancestors must remain connected");
   for (const plot of motion.plots)
     assert.equal(plot.same, true, context + ": unchanged plot must remain mounted: " + plot.selector);
   assert.equal(motion.sameFocus, true, context + ": focused history control must survive polling");
@@ -301,7 +489,9 @@ async function observe(page, server, context, selectors, { inspector = false, st
   assert.ok(motion.frames >= Math.floor(motion.duration / BUDGET_MS),
     context + ": enough real frames throughout polling");
   assert.ok(motion.maxFrameGap < BUDGET_MS,
-    context + ": history frame responsiveness budget exceeded: " + Math.round(motion.maxFrameGap) + " ms");
+    context + ": history frame responsiveness budget exceeded: " + Math.round(motion.maxFrameGap) +
+      " ms; native input " + Math.round(inputMax) + " ms; frames " + motion.frames +
+      "; duration " + Math.round(motion.duration) + " ms; polls " + motion.polls);
   assert.ok(inputProbes >= 3 && motion.inputs === inputProbes * 2,
     context + ": native keyboard events must reach the document throughout polling");
   assert.ok(inputMax < BUDGET_MS,
@@ -309,7 +499,14 @@ async function observe(page, server, context, selectors, { inspector = false, st
   if (status) {
     assert.ok(motion.statusPolls >= 1, context + ": real status refresh must land during observation");
     assert.equal(await page.evaluate("S.status.sys.free_heap"), fixture.status.sys.free_heap,
-      context + ": changed board telemetry must reach the UI");
+      context + ": changed board telemetry must reach browser state");
+    const boardAfter = await boardHeapReading(page);
+    assert.equal(boardAfter.visible, true,
+      context + ": changed board telemetry must update the visible reading");
+    assert.notEqual(boardAfter.text, boardBefore.text,
+      context + ": changed board telemetry must update the visible reading");
+    assert.equal(boardAfter.text, boardAfter.expected,
+      context + ": changed board telemetry must update the visible reading");
   }
   assert.deepEqual(page.diagnostics, [], context + ": live history path must emit no browser errors");
   console.log("history motion checked: " + context + "; 3 live polls; max frame " +
@@ -352,6 +549,7 @@ async function assertSgTransition(page, server, fixture, context) {
   assert.equal(changed.focused, true, context + ": categorical repaint must restore keyboard focus on the new plot");
   assert.equal(server.historyRequests.length, requests,
     context + ": live-cap update must not refetch unchanged historical rings");
+  await page.evaluate("delete window.__motionSg; true");
   return previousValues;
 }
 
@@ -392,6 +590,7 @@ async function assertNewGeneration(page, server, fixture, context, hosts) {
     context + ": new generation must replace identical flat-curve markup");
   assert.equal(changed.neighbor && changed.focused, true,
     context + ": changing one history must preserve its unchanged focused neighbor");
+  await page.evaluate("delete window.__motionFlat; true");
 }
 
 async function disclosure(page, server, fixture, context, selectors, ids, settings = false, animation = {}) {
@@ -440,14 +639,15 @@ async function disclosure(page, server, fixture, context, selectors, ids, settin
 export async function assertHistoryMotion(page, server, context) {
   const started = performance.now();
   const mutation = process.env.DAIKIN_BROWSER_MUTATION || "";
+  const disclosureMutation = ["history-disclosure-replace", "history-detach", "history-text-stale"].includes(mutation);
   const index = process.argv.indexOf("--history-motion-case");
   const only = index >= 0 ? process.argv[index + 1] : "";
   const originalStatus = await page.evaluate("JSON.parse(JSON.stringify(S.status))");
   const lang = await page.evaluate("LANG");
   const fixture = makeHistoryMotionFixture(originalStatus, lang);
-  // Separate owned Chrome workers may lose OS focus on macOS. Native focus emulation keeps each
-  // foreground-user fixture visible; it does not mock document.hidden, polling or animation time.
-  await page.send("Emulation.setFocusEmulationEnabled", { enabled: true });
+  // Parallel headless workers keep a real visible foreground page; neither adapter mocks
+  // document.hidden, polling or animation time.
+  await page.focusEmulation(true);
   await page.evaluate("window.__motionOriginal = { ...S }; true");
   await installHooks(page, mutation);
   try {
@@ -469,12 +669,13 @@ export async function assertHistoryMotion(page, server, context) {
         context + "/" + key + ": intentionally untrended inspector must not invent a chart");
       await closeInspector(page);
     }
-    const cases = mutation ? mutation === "history-disclosure-replace" ? [] : ["tank"]
+    const cases = mutation ? disclosureMutation ? [] : ["tank"]
       : only ? Object.keys(INSPECTOR_TRENDS).filter(key => key === only)
       : ["tank", ...Object.keys(INSPECTOR_TRENDS).filter(key => key !== "tank")];
     for (const key of cases) {
       const id = INSPECTOR_TRENDS[key], label = context + "/" + key;
       const chart = await openInspector(page, key, id, label);
+      if (key === "tank" && page.assertFlowPaint) await page.assertFlowPaint(label);
       const expected = key === "env3" ? ["env3_temperature", "env3_humidity", "env3_pressure"]
         : [ "x10a", ...(key !== "bsh" && MODBUS_HISTORY_ROWS.some(row => row.id === id) ? ["modbus"] : []),
           ...(key === "room" ? ["room"] : []) ];
@@ -494,16 +695,16 @@ export async function assertHistoryMotion(page, server, context) {
       await closeInspector(page);
       if (restoreValues) fixture.values = restoreValues;
     }
-    if (mutation && mutation !== "history-disclosure-replace") return;
+    if (mutation && !disclosureMutation) return;
 
-    if ((!only || only === "x10a-row") && mutation !== "history-disclosure-replace")
+    if ((!only || only === "x10a-row") && !disclosureMutation)
       await disclosure(page, server, fixture, context + "/x10a-row",
         ['#valueGroups [data-trend="dhw_tank"]'], ["dhw_tank"]);
-    if (!only || only === "board" || mutation === "history-disclosure-replace")
+    if (!only || only === "board" || disclosureMutation)
       await disclosure(page, server, fixture, context + "/board",
         ['#settingsCards [data-desc="board:free_heap"]', '#settingsCards [data-desc="board:max_alloc"]'],
         ["free_heap", "max_alloc"], true);
-    if (mutation === "history-disclosure-replace") return;
+    if (disclosureMutation) return;
     if (!only || only === "circulation")
       await disclosure(page, server, fixture, context + "/circulation",
         ['#settingsCards [data-desc="diagnostics:circulation"]'], ["circulation_state"], true);
@@ -557,7 +758,14 @@ export async function assertHistoryMotion(page, server, context) {
       (only ? "focused " + only : "28 history inspectors; 12 no-history routes; 5 disclosure paths; 3 conditional source variants") +
       "; " + Math.round((performance.now() - started) / 1000) + " s");
   } finally {
-    await page.evaluate("window.__motionObserve = false; pollStop(); pollSchedule = () => {}; true");
+    await evaluate(page, () => {
+      window.__motionObserve = false;
+      if (window.__motionDetachObserver) {
+        window.__motionRecordDetachments(window.__motionDetachObserver.takeRecords());
+        window.__motionDetachObserver.disconnect();
+      }
+      pollStop(); pollSchedule = () => {}; return true;
+    });
     await page.waitFor("!_pollBusy && !S.histBusy.size");
     server.setTelemetry();
     await evaluate(page, () => {
@@ -577,6 +785,6 @@ export async function assertHistoryMotion(page, server, context) {
     });
     try {
       await page.waitFor("document.getElementById('inspect').getAnimations({subtree:true}).every(animation => !Number.isFinite(animation.effect?.getTiming().iterations) || animation.playState !== 'running')");
-    } finally { await page.send("Emulation.setFocusEmulationEnabled", { enabled: false }); }
+    } finally { await page.focusEmulation(false); }
   }
 }

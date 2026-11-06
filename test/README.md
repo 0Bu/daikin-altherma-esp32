@@ -43,15 +43,16 @@ Requirements: a C++17 compiler (`g++`/`clang++`), Node ≥18 and Python ≥3.11;
 production-unit fixtures additionally use C++20. The mock runner uses
 CMake/CTest when available and otherwise directly compiles the test translation unit. Coverage needs
 `gcov` for GCC or `llvm-cov gcov` for Clang, using `xcrun` on macOS. The browser runner additionally
-needs a Node runtime accepting `--experimental-websocket` with the native WebSocket API, plus
-Chrome/Chromium; ordinary Node ≥18 alone is insufficient for this layer. `DAIKIN_BROWSER_BIN`
-selects the browser executable. Full formatting needs exact clang-format 18.1.8 through
+needs Docker. It builds the digest-pinned Playwright image and exact locked API package under
+`tools/browser/`, includes a source snapshot in the image, then runs headless Chromium and WebKit
+offline with a read-only filesystem. It never
+starts the installed macOS Chrome/Chromium app, even through `DAIKIN_BROWSER_BIN`. Full formatting needs exact clang-format 18.1.8 through
 `CLANG_FORMAT`. Agent tools select Python through `scripts/agent-python.sh`; `AGENT_PYTHON` is a
 checked installed-interpreter override.
 
 A missing required tool is an unverified layer. The format runner may omit the pinned formatter
-locally when no executable is selected; CI requires it. The browser runner offers an explicit local
-skip when no browser is available, but CI cannot use that skip. Report either limitation rather
+locally when no executable is selected; CI requires it. A missing Docker daemon or browser image is
+a browser setup failure, not permission to start a native macOS browser. Report either limitation rather
 than treating the skipped layer as tested.
 
 CI keeps fast checks as steps of one `mechanical_gates` job in
@@ -255,7 +256,7 @@ OTA reload adoption and stable narrow-row interaction.
 |---|---|
 | `run-ui-localization-audit.sh` | All shipped locale keys, types, function arities, specialist tables, language selection and asset budgets; canonical-copy changes invalidate stale translations |
 | `run-schematic-audit.sh` | Real SVG IDs/targets/translations, geometry, pill attribution, rotors, text fit, branch/tap boundaries and source bindings |
-| `run-browser-render-tests.sh` | Assembled production page in real Chrome at 320/1200 px; static locale/accessibility/interaction matrix plus full-history live-polling continuity and responsiveness |
+| `run-browser-render-tests.sh` | Pinned headless Linux container: Chromium at 320/1200 px for static locale/accessibility/interaction and temporal checks; WebKit in both iPad orientations for full-history touch, polling and painted-motion checks |
 | `run-ui-gif-audit.sh` | Recording fingerprint, frame/timing and GIF/stamp currency; stale or unverifiable footage blocks merge |
 
 Localization binds the complete key catalog across thirteen languages, each locale's 32 KiB gzip cap and
@@ -276,15 +277,39 @@ review skills cover visual truth and complete interaction.
 
 The temporal matrix inventories every production inspector and the four disclosure families. It
 uses full 288-sample source rings and three real two-second updates per case, checking unchanged
-plot/prose nodes, continuous CSS animations, collapsed-chart work and native input delivery. The
+plot/prose nodes, continuous chart ancestry during scalar updates, CSS animations, collapsed-chart
+work and native input delivery. The
 fixed maximum frame gap and individual native key-event roundtrip are 250 ms; these fixture budgets catch recurring stalls,
 not guarantee a frame rate on every device. Negative controls reintroduce hidden-chart work, plot or
 animation replacement and a blocking poll. Static locale snapshots, reduced-motion cases and GIF
-poses remain separate evidence; Chromium fixtures do not prove physical iPad Safari performance.
+poses remain separate evidence.
+Native open/pin actions, viewport positioning and one programmatic focus settle before the polling
+baseline. The plot must be visible; schematic witnesses share its vertical viewport whenever they
+fit, with actual geometry recorded separately from animation clocks. Focus setup is also recorded
+separately. No frame from the first or subsequent measured poll is discarded.
 
-`DAIKIN_BROWSER_TIMEOUT_MS` bounds the entire runner (default 600000 ms, maximum 3600000 ms).
-Browser launch shares one absolute deadline across endpoint headers/body, socket and initialization;
+The WebKit phase reuses this complete temporal matrix at 834×1194 and 1194×834 CSS pixels with the
+pinned iPad Pro 11 device descriptor, touch/mobile behavior and trusted native taps, including plot
+pin/unpin and cached reopen. Its orientations run consecutively, each with a foreground browser;
+Chromium retains parallel viewport workers with native focus emulation. A tight flow-stroke screenshot sequence under real polling verifies
+paint movement outside the latency sampling; a ninth canary freezes painted dash movement while
+its CSS animation clock continues. All eight shared temporal canaries must also fail for their intended
+assertions in WebKit. Linux headless WebKit is Safari-engine regression coverage; it does not prove
+physical iPad Safari, iPadOS or GPU performance.
+
+`DAIKIN_BROWSER_TIMEOUT_MS` bounds each engine phase separately (default 600000 ms, maximum 3600000 ms).
+The original Chromium deadline is unchanged; WebKit runs as a separate phase in the same CI job.
+Chromium launch shares one absolute deadline across endpoint headers/body, socket and initialization;
 worker/browser process groups are joined before the temporary page is removed.
+The container has no external network or host browser profile; only its own temporary storage is
+writable. Its snapshot includes the allowlisted current browser inputs and excludes ignored files,
+Git metadata, builds, symlinks and credential/artifact filenames before reading them. Container-start
+and runner selftests verify fail-closed setup, status propagation, interruption and refusal of native
+macOS browser discovery. If container removal cannot be verified, the gate fails and retains its
+ownership record and source snapshot rather than discarding evidence of a surviving process.
+The snapshot is sent through the image-build context; runtime needs no host-directory mounts,
+including on Colima installations that do not share macOS temporary directories.
+Docker's local image/build cache retains that allowlisted source snapshot until normal cache cleanup.
 
 The source-absence matrix is part of the contract and UI globs. It independently removes the broker,
 room source, circulation witness, HomeHub, ENV III, weather and X10A, and includes safe mode. A missing

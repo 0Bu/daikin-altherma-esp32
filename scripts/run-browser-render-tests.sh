@@ -8,7 +8,7 @@ export NODE_OPTIONS="${NODE_OPTIONS:-} --experimental-websocket"
 
 if [[ "${1:-}" == "--if-ui-changed" ]]; then
   shift
-  ui_pattern='^(main/www/|main/def/|main/http_|main/logic/(history|homehub_map)[.]hpp$|test/test_browser|test/test_ui|tools/browser/|tools/ui/|tools/schematic/|tools/web_asset/|tools/presenter/|tools/ui_localization/|tools/localization/|scripts/run-browser-render-tests[.]sh|[.]github/workflows/build[.]yml$)'
+  ui_pattern='^(main/www/|main/def/|main/http_|main/logic/(history|homehub_map)[.]hpp$|test/test_browser|test/test_ui|tools/browser/|tools/ui/|tools/schematic/|tools/web_asset/|tools/presenter/|tools/ui_localization/|tools/localization/|scripts/run-browser-(render-tests|tests-linux)[.]sh|[.]github/workflows/build[.]yml$)'
 
   range=""
   before_candidate="${BEFORE:-${GITHUB_EVENT_BEFORE:-}}"
@@ -50,6 +50,10 @@ if [[ "${1:-}" == "--if-ui-changed" ]]; then
   fi
 fi
 
+if [[ "${DAIKIN_BROWSER_CONTAINER:-0}" != "1" ]]; then
+  exec "$root/scripts/run-browser-tests-linux.sh" "$@"
+fi
+
 if ! browser_bin="$(node tools/browser/find_browser.mjs)"; then
   if [[ -z "${CI:-}" && "${DAIKIN_BROWSER_ALLOW_LOCAL_SKIP:-0}" == "1" ]]; then
     echo "browser render gate explicitly skipped outside CI: Chrome/Chromium is unavailable"
@@ -68,4 +72,27 @@ fi
 
 # The supervisor creates and owns its temporary page. It cancels and joins every owned process
 # group before removing it, including siblings and Chrome descendants after a failure.
-exec node tools/browser/run_render.mjs "$@"
+browser_pid=""
+interrupt_browser() {
+  local signal="$1" status="$2"
+  trap - INT TERM
+  if [[ -n "$browser_pid" ]]; then
+    kill -s "$signal" "$browser_pid" 2>/dev/null || true
+    wait "$browser_pid" 2>/dev/null || true
+  fi
+  exit "$status"
+}
+trap 'interrupt_browser INT 130' INT
+trap 'interrupt_browser TERM 143' TERM
+run_phase() {
+  local engine="$1" status
+  shift
+  DAIKIN_BROWSER_ENGINE="$engine" node tools/browser/run_render.mjs "$@" &
+  browser_pid=$!
+  if wait "$browser_pid"; then status=0; else status=$?; fi
+  browser_pid=""
+  return "$status"
+}
+run_phase chromium "$@"
+# Keep the original Chromium deadline; WebKit owns a separate bounded phase.
+run_phase webkit "$@"

@@ -6,8 +6,14 @@ import { fileURLToPath } from "node:url";
 import { removeBrowserProfile, stopBrowser } from "./cdp_browser.mjs";
 import "./cleanup_selftest.mjs";
 import "./runner_selftest.mjs";
+import "./container_selftest.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const staging = spawnSync("python3", [path.join(root, "tools/browser/stage_source_selftest.py")], {
+  encoding: "utf8", timeout: 30000,
+});
+assert.equal(staging.status, 0, "public source snapshot selftest must pass\n" + staging.stdout + staging.stderr);
+console.log(staging.stdout.trim());
 assert.ok(process.env.DAIKIN_BROWSER_PAGE, "browser selftest requires DAIKIN_BROWSER_PAGE from the runner");
 assert.ok(process.env.DAIKIN_BROWSER_BIN, "browser selftest requires DAIKIN_BROWSER_BIN from the runner");
 
@@ -118,6 +124,8 @@ for (const [mutation, assertion, extra] of [
   ["history-restart", /preserve running CSSAnimation instance/],
   ["history-unknown", /history inspector inventory must classify every production entry/],
   ["history-disclosure-replace", /unchanged plot must remain mounted/, ["--history-motion-case", "board"]],
+  ["history-detach", /unchanged history ancestors must remain connected/, ["--history-motion-case", "board"]],
+  ["history-text-stale", /changed board telemetry must update the visible reading/, ["--history-motion-case", "board"]],
 ]) {
   const result = spawnSync(process.execPath,
     [path.join(root, "test/test_browser_render.mjs"), "--viewport", "phone", ...(extra || [])], {
