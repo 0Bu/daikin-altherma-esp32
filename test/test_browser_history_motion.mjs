@@ -739,9 +739,13 @@ export async function assertHistoryMotion(page, server, context) {
       await mountFixture(page, server, frame);
       const label = context + "/" + variant;
       if (variant === "modbus-numeric") {
+        // The controller still reports the pump ON. A missing X10A flow measurement stops the
+        // water trace, but cannot retire that independent reported-operation animation.
+        assert.equal(await page.evaluate("S.live?.pumpOn"), true,
+          label + ": retain the independent reported pump-ON witness");
         await disclosure(page, server, frame, label,
           ['#valueGroups [data-dashboard-card="modbus"] [data-trend="flow"]'], ["flow"], false,
-          { animationIds: ["rfHot", "scFan"], inactiveAnimationIds: ["fSup1", "scPump"] });
+          { animationIds: ["rfHot", "scFan", "scPump"], inactiveAnimationIds: ["fSup1"] });
       } else {
         const key = variant === "env3-no-forecast" ? "env3" : "room";
         const chart = await openInspector(page, key, INSPECTOR_TRENDS[key], label);
