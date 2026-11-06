@@ -42,6 +42,7 @@ async function click(page, selector, inspector = "") {
     return point;
   }, { selector, inspector });
   await page.nativeClick(point.x, point.y);
+  return point;
 }
 
 async function assertTouchReadout(page, selector, context) {
@@ -299,6 +300,63 @@ async function settleHistoryOpening(page, selectors) {
       !Number.isFinite(animation.effect?.getTiming().iterations) ||
       (animation.playState !== "running" && !animation.pending));
   })).toString() + ")(" + JSON.stringify(selectors) + ")");
+}
+
+async function toggleDisclosure(page, selector, id, open, context) {
+  await evaluate(page, () => {
+    window.__motionDisclosureHit = null;
+    window.__motionDisclosureClick = event => {
+      const target = event.target.closest?.("[data-desc]");
+      window.__motionDisclosureHit = { trusted: event.isTrusted, desc: target?.dataset.desc,
+        node: event.target.nodeName, x: event.clientX, y: event.clientY };
+    };
+    document.addEventListener("click", window.__motionDisclosureClick, true);
+    return true;
+  });
+  let point;
+  try {
+    // Each native toggle finishes before measuring the next row's point. A cold history reply or
+    // a finite grid expansion can otherwise move that row between measurement and dispatch.
+    point = await click(page, selector);
+    await page.waitFor("(" + (({ disclosureToggle: { selector, id, open } }) => {
+      const button = document.querySelector(selector), item = button?.closest(".vitem");
+      if (!item || S.descOpen.has(button.dataset.desc) !== open ||
+          button.getAttribute("aria-expanded") !== String(open) ||
+          item.classList.contains("open") !== open || S.histBusy.size || S.clickHold || _pollBusy)
+        return false;
+      const plots = [...item.querySelectorAll("[data-hist]")];
+      if (open) {
+        if (plots.length !== 1 || plots[0].dataset.hist !== id) return false;
+        const plot = plots[0], view = historyView(id, plot.dataset.source || "");
+        if (!view || plot.dataset.rev !== [S.histEpoch, view.gen, view.t0].join("/")) return false;
+      } else if (plots.length) return false;
+      return item.getAnimations({ subtree: true }).every(animation =>
+        !Number.isFinite(animation.effect?.getTiming().iterations) ||
+        (animation.playState !== "running" && !animation.pending));
+    }).toString() + ")(" + JSON.stringify({ disclosureToggle: { selector, id, open } }) + ")");
+  } catch (error) {
+    const state = await evaluate(page, ({ selector, point }) => {
+      const button = document.querySelector(selector), item = button?.closest(".vitem");
+      const rect = button?.getBoundingClientRect();
+      const hit = point && document.elementFromPoint(point.x, point.y);
+      return { desc: button?.dataset.desc, rememberedOpen: S.descOpen.has(button?.dataset.desc),
+        expanded: button?.getAttribute("aria-expanded"), open: item?.classList.contains("open"),
+        plots: [...(item?.querySelectorAll("[data-hist]") || [])].map(window.__motionRevision),
+        busy: [...S.histBusy], clickHold: S.clickHold, pollBusy: _pollBusy,
+        animations: (item?.getAnimations({ subtree: true }) || []).filter(animation =>
+          Number.isFinite(animation.effect?.getTiming().iterations)).map(animation =>
+          ({ state: animation.playState, pending: animation.pending })),
+        rect: rect && { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+        point, actualClick: window.__motionDisclosureHit,
+        currentHit: hit && { node: hit.nodeName, desc: hit.closest("[data-desc]")?.dataset.desc } };
+    }, { selector, point });
+    throw new Error(context + ": native disclosure toggle did not settle; selector=" + selector +
+      "; expectedOpen=" + open + "; expectedHistory=" + id + "; " + error.message +
+      "; state=" + JSON.stringify(state), { cause: error });
+  } finally {
+    await page.evaluate("document.removeEventListener('click', window.__motionDisclosureClick, true);" +
+      "delete window.__motionDisclosureClick; delete window.__motionDisclosureHit; true");
+  }
 }
 
 async function prepareObservationViewport(page, selector, animationIds) {
@@ -755,11 +813,8 @@ async function disclosure(page, server, fixture, context, selectors, ids, settin
     await click(page, '#cardNav [data-card="' + card + '"]');
   }
   for (const id of ids) await expireOpeningHistory(page, id);
-  for (const selector of selectors) await click(page, selector);
-  await page.waitFor("!S.histBusy.size");
-  await page.waitFor(JSON.stringify(selectors) +
-    ".every(selector => !!document.querySelector(selector)?.closest('.vitem')?.querySelector('[data-hist]'))");
-  await settleHistoryRevision(page, selectors);
+  for (const [index, selector] of selectors.entries())
+    await toggleDisclosure(page, selector, ids[index], true, context + "/open");
   const hosts = await evaluate(page, ({ selectors, ids }) => selectors.map((selector, index) => {
     const item = document.querySelector(selector)?.closest(".vitem");
     const plot = item?.querySelector("[data-hist]");
@@ -774,11 +829,13 @@ async function disclosure(page, server, fixture, context, selectors, ids, settin
   await observe(page, server, context, hosts, { status: settings, fixture, ...animation });
   if (ids.includes("free_heap")) await assertNewGeneration(page, server, fixture, context, hosts);
   const before = server.historyRequests.length;
-  for (const selector of selectors) await click(page, selector);
-  for (const selector of selectors) await click(page, selector);
-  await page.waitFor("!S.histBusy.size");
+  for (const [index, selector] of selectors.entries())
+    await toggleDisclosure(page, selector, ids[index], false, context + "/close");
+  for (const [index, selector] of selectors.entries())
+    await toggleDisclosure(page, selector, ids[index], true, context + "/cached-reopen");
   assert.equal(server.historyRequests.length, before, context + ": cached reopen must not refetch history");
-  for (const selector of selectors) await click(page, selector);
+  for (const [index, selector] of selectors.entries())
+    await toggleDisclosure(page, selector, ids[index], false, context + "/cleanup");
   await page.waitFor("!document.querySelector('#valueGroups .vitem:not(.open) .vhist, #settingsCards .vitem:not(.open) .vhist')",
     { timeoutMs: 4000 });
 }
