@@ -454,6 +454,8 @@ void stop_observation_flash_index(int64_t bucket, uint64_t sequence, uint16_t sl
         stop_observation_flash_index_incomplete();
         return;
     }
+    // Recovery may forget this boot during pure validation; fence index admission again.
+    if (s_forgotten.load(std::memory_order_acquire)) return;
     observation_index_add(s_index, bucket, sequence, slot,
                           (payload.flags & OBSERVATION_BARRIER) ? &payload.identity : nullptr);
     s_rebuild = true;
