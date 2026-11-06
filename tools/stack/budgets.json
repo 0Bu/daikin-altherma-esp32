@@ -8896,6 +8896,685 @@
       "multipliers": {},
       "base_bytes": 1536,
       "max_bytes": 3072
+    },
+    "poll_stop_append_owner": {
+      "symbols": [
+        "poll_task",
+        "history_board",
+        "history_journal",
+        "history_append",
+        "stop_observation_fingerprint",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_stop_append_failure_take": {
+      "symbols": [
+        "poll_task",
+        "history_board",
+        "history_journal",
+        "history_append",
+        "stop_stop_observation_flash_failed",
+        "sdk_queue_sem_take"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_stop_append_failure_receipt": {
+      "symbols": [
+        "poll_task",
+        "history_board",
+        "history_journal",
+        "history_append",
+        "stop_stop_observation_flash_failed",
+        "stop_apply_receipt"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_stop_append_failure_release": {
+      "symbols": [
+        "poll_task",
+        "history_board",
+        "history_journal",
+        "history_append",
+        "stop_stop_observation_flash_failed",
+        "sem_guard_release",
+        "sdk_queue_send"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "httpd_shutdown_wifi_journal_stop_append_owner": {
+      "symbols": [
+        "config_wifi",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_observation_fingerprint",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_wifi_journal_stop_append_failure_take": {
+      "symbols": [
+        "config_wifi",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_stop_observation_flash_failed",
+        "sdk_queue_sem_take"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_wifi_journal_stop_append_failure_receipt": {
+      "symbols": [
+        "config_wifi",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_stop_observation_flash_failed",
+        "stop_apply_receipt"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_wifi_journal_stop_append_failure_release": {
+      "symbols": [
+        "config_wifi",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_stop_observation_flash_failed",
+        "sem_guard_release",
+        "sdk_queue_send"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_mqtt_journal_stop_append_owner": {
+      "symbols": [
+        "config_mqtt",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_observation_fingerprint",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_mqtt_journal_stop_append_failure_take": {
+      "symbols": [
+        "config_mqtt",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_stop_observation_flash_failed",
+        "sdk_queue_sem_take"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_mqtt_journal_stop_append_failure_receipt": {
+      "symbols": [
+        "config_mqtt",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_stop_observation_flash_failed",
+        "stop_apply_receipt"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_mqtt_journal_stop_append_failure_release": {
+      "symbols": [
+        "config_mqtt",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_stop_observation_flash_failed",
+        "sem_guard_release",
+        "sdk_queue_send"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_syslog_journal_stop_append_owner": {
+      "symbols": [
+        "config_syslog",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_observation_fingerprint",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_syslog_journal_stop_append_failure_take": {
+      "symbols": [
+        "config_syslog",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_stop_observation_flash_failed",
+        "sdk_queue_sem_take"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_syslog_journal_stop_append_failure_receipt": {
+      "symbols": [
+        "config_syslog",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_stop_observation_flash_failed",
+        "stop_apply_receipt"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_syslog_journal_stop_append_failure_release": {
+      "symbols": [
+        "config_syslog",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_stop_observation_flash_failed",
+        "sem_guard_release",
+        "sdk_queue_send"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_ntp_journal_stop_append_owner": {
+      "symbols": [
+        "config_ntp",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_observation_fingerprint",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_ntp_journal_stop_append_failure_take": {
+      "symbols": [
+        "config_ntp",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_stop_observation_flash_failed",
+        "sdk_queue_sem_take"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_ntp_journal_stop_append_failure_receipt": {
+      "symbols": [
+        "config_ntp",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_stop_observation_flash_failed",
+        "stop_apply_receipt"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_ntp_journal_stop_append_failure_release": {
+      "symbols": [
+        "config_ntp",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_stop_observation_flash_failed",
+        "sem_guard_release",
+        "sdk_queue_send"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_board_journal_stop_append_owner": {
+      "symbols": [
+        "config_board",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_observation_fingerprint",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_board_journal_stop_append_failure_take": {
+      "symbols": [
+        "config_board",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_stop_observation_flash_failed",
+        "sdk_queue_sem_take"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_board_journal_stop_append_failure_receipt": {
+      "symbols": [
+        "config_board",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_stop_observation_flash_failed",
+        "stop_apply_receipt"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_board_journal_stop_append_failure_release": {
+      "symbols": [
+        "config_board",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_stop_observation_flash_failed",
+        "sem_guard_release",
+        "sdk_queue_send"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_env3_journal_stop_append_owner": {
+      "symbols": [
+        "config_env3",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_observation_fingerprint",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_env3_journal_stop_append_failure_take": {
+      "symbols": [
+        "config_env3",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_stop_observation_flash_failed",
+        "sdk_queue_sem_take"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_env3_journal_stop_append_failure_receipt": {
+      "symbols": [
+        "config_env3",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_stop_observation_flash_failed",
+        "stop_apply_receipt"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_env3_journal_stop_append_failure_release": {
+      "symbols": [
+        "config_env3",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_stop_observation_flash_failed",
+        "sem_guard_release",
+        "sdk_queue_send"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "poll_shutdown_journal_stop_append_owner": {
+      "symbols": [
+        "poll_task",
+        "heap_guard",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_observation_fingerprint",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_shutdown_journal_stop_append_failure_take": {
+      "symbols": [
+        "poll_task",
+        "heap_guard",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_stop_observation_flash_failed",
+        "sdk_queue_sem_take"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_shutdown_journal_stop_append_failure_receipt": {
+      "symbols": [
+        "poll_task",
+        "heap_guard",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_stop_observation_flash_failed",
+        "stop_apply_receipt"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_shutdown_journal_stop_append_failure_release": {
+      "symbols": [
+        "poll_task",
+        "heap_guard",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_stop_observation_flash_failed",
+        "sem_guard_release",
+        "sdk_queue_send"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "eth_shutdown_journal_stop_append_owner": {
+      "symbols": [
+        "eth_task",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_observation_fingerprint",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "eth_shutdown_journal_stop_append_failure_take": {
+      "symbols": [
+        "eth_task",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_stop_observation_flash_failed",
+        "sdk_queue_sem_take"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "eth_shutdown_journal_stop_append_failure_receipt": {
+      "symbols": [
+        "eth_task",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_stop_observation_flash_failed",
+        "stop_apply_receipt"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "eth_shutdown_journal_stop_append_failure_release": {
+      "symbols": [
+        "eth_task",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_stop_observation_flash_failed",
+        "sem_guard_release",
+        "sdk_queue_send"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "ota_shutdown_journal_stop_append_owner": {
+      "symbols": [
+        "ota_task",
+        "ota_activate",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_observation_fingerprint",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "ota_shutdown_journal_stop_append_failure_take": {
+      "symbols": [
+        "ota_task",
+        "ota_activate",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_stop_observation_flash_failed",
+        "sdk_queue_sem_take"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "ota_shutdown_journal_stop_append_failure_receipt": {
+      "symbols": [
+        "ota_task",
+        "ota_activate",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_stop_observation_flash_failed",
+        "stop_apply_receipt"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "ota_shutdown_journal_stop_append_failure_release": {
+      "symbols": [
+        "ota_task",
+        "ota_activate",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_stop_observation_flash_failed",
+        "sem_guard_release",
+        "sdk_queue_send"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "ota_health_shutdown_journal_stop_append_owner": {
+      "symbols": [
+        "ota_health_task",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_observation_fingerprint",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "ota_health_shutdown_journal_stop_append_failure_take": {
+      "symbols": [
+        "ota_health_task",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_stop_observation_flash_failed",
+        "sdk_queue_sem_take"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "ota_health_shutdown_journal_stop_append_failure_receipt": {
+      "symbols": [
+        "ota_health_task",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_stop_observation_flash_failed",
+        "stop_apply_receipt"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "ota_health_shutdown_journal_stop_append_failure_release": {
+      "symbols": [
+        "ota_health_task",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "stop_stop_observation_flash_failed",
+        "sem_guard_release",
+        "sdk_queue_send"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
     }
   },
   "tasks": {
@@ -9003,7 +9682,31 @@
         "httpd_shutdown_env3_journal_stop_fence",
         "httpd_shutdown_env3_journal_stop_next_fence",
         "httpd_shutdown_env3_journal_stop_index",
-        "httpd_shutdown_env3_journal_stop_index_invalid"
+        "httpd_shutdown_env3_journal_stop_index_invalid",
+        "httpd_shutdown_wifi_journal_stop_append_owner",
+        "httpd_shutdown_wifi_journal_stop_append_failure_take",
+        "httpd_shutdown_wifi_journal_stop_append_failure_receipt",
+        "httpd_shutdown_wifi_journal_stop_append_failure_release",
+        "httpd_shutdown_mqtt_journal_stop_append_owner",
+        "httpd_shutdown_mqtt_journal_stop_append_failure_take",
+        "httpd_shutdown_mqtt_journal_stop_append_failure_receipt",
+        "httpd_shutdown_mqtt_journal_stop_append_failure_release",
+        "httpd_shutdown_syslog_journal_stop_append_owner",
+        "httpd_shutdown_syslog_journal_stop_append_failure_take",
+        "httpd_shutdown_syslog_journal_stop_append_failure_receipt",
+        "httpd_shutdown_syslog_journal_stop_append_failure_release",
+        "httpd_shutdown_ntp_journal_stop_append_owner",
+        "httpd_shutdown_ntp_journal_stop_append_failure_take",
+        "httpd_shutdown_ntp_journal_stop_append_failure_receipt",
+        "httpd_shutdown_ntp_journal_stop_append_failure_release",
+        "httpd_shutdown_board_journal_stop_append_owner",
+        "httpd_shutdown_board_journal_stop_append_failure_take",
+        "httpd_shutdown_board_journal_stop_append_failure_receipt",
+        "httpd_shutdown_board_journal_stop_append_failure_release",
+        "httpd_shutdown_env3_journal_stop_append_owner",
+        "httpd_shutdown_env3_journal_stop_append_failure_take",
+        "httpd_shutdown_env3_journal_stop_append_failure_receipt",
+        "httpd_shutdown_env3_journal_stop_append_failure_release"
       ]
     },
     "main": {
@@ -9147,7 +9850,15 @@
         "poll_shutdown_journal_stop_fence",
         "poll_shutdown_journal_stop_next_fence",
         "poll_shutdown_journal_stop_index",
-        "poll_shutdown_journal_stop_index_invalid"
+        "poll_shutdown_journal_stop_index_invalid",
+        "poll_stop_append_owner",
+        "poll_stop_append_failure_take",
+        "poll_stop_append_failure_receipt",
+        "poll_stop_append_failure_release",
+        "poll_shutdown_journal_stop_append_owner",
+        "poll_shutdown_journal_stop_append_failure_take",
+        "poll_shutdown_journal_stop_append_failure_receipt",
+        "poll_shutdown_journal_stop_append_failure_release"
       ]
     },
     "modbus": {
@@ -9259,7 +9970,11 @@
         "eth_shutdown_journal_stop_fence",
         "eth_shutdown_journal_stop_next_fence",
         "eth_shutdown_journal_stop_index",
-        "eth_shutdown_journal_stop_index_invalid"
+        "eth_shutdown_journal_stop_index_invalid",
+        "eth_shutdown_journal_stop_append_owner",
+        "eth_shutdown_journal_stop_append_failure_take",
+        "eth_shutdown_journal_stop_append_failure_receipt",
+        "eth_shutdown_journal_stop_append_failure_release"
       ]
     },
     "dns": {
@@ -9306,7 +10021,11 @@
         "ota_shutdown_journal_stop_fence",
         "ota_shutdown_journal_stop_next_fence",
         "ota_shutdown_journal_stop_index",
-        "ota_shutdown_journal_stop_index_invalid"
+        "ota_shutdown_journal_stop_index_invalid",
+        "ota_shutdown_journal_stop_append_owner",
+        "ota_shutdown_journal_stop_append_failure_take",
+        "ota_shutdown_journal_stop_append_failure_receipt",
+        "ota_shutdown_journal_stop_append_failure_release"
       ]
     },
     "ota_health": {
@@ -9323,7 +10042,11 @@
         "ota_health_shutdown_journal_stop_fence",
         "ota_health_shutdown_journal_stop_next_fence",
         "ota_health_shutdown_journal_stop_index",
-        "ota_health_shutdown_journal_stop_index_invalid"
+        "ota_health_shutdown_journal_stop_index_invalid",
+        "ota_health_shutdown_journal_stop_append_owner",
+        "ota_health_shutdown_journal_stop_append_failure_take",
+        "ota_health_shutdown_journal_stop_append_failure_receipt",
+        "ota_health_shutdown_journal_stop_append_failure_release"
       ]
     },
     "deadline": {
