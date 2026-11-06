@@ -183,6 +183,12 @@ async function installHooks(page, mutation) {
       for (const node of copy.querySelectorAll("[data-rev]")) node.removeAttribute("data-rev");
       return copy.outerHTML;
     };
+    window.__motionRevision = plot => {
+      const id = plot?.dataset.hist, source = plot?.dataset.source || "";
+      const view = id && historyView(id, source);
+      return { id, source, dom: plot?.dataset.rev,
+        model: [S.histEpoch, view?.gen, view?.t0].join("/") };
+    };
     document.addEventListener("keydown", window.__motionKey, true);
     document.addEventListener("keyup", window.__motionKey, true);
     if (mutation === "history-unknown") INSPECT.__motionUnclassified = { t: { en: "Unclassified" } };
@@ -208,10 +214,62 @@ async function mountFixture(page, server, fixture) {
   await page.waitFor("!_pollBusy && window.__motionAllPolls > window.__motionMountPoll && S.status?.boot_id === 'history-motion-fixture' && S.live?.rps > 5");
 }
 
-async function openInspector(page, key, id, context) {
+async function expireOpeningHistory(page, id, inspector = "") {
+  // Only prepare this opening's dependencies. Earlier cards can have populated them nearly a
+  // minute ago; let the native open fetch fresh rings before measuring an unchanged generation.
+  await evaluate(page, ({ id, inspector }) => {
+    if (window.__motionObserve) throw new Error("history cache setup must finish before observation");
+    const entry = inspector && INSPECT[inspector], keys = new Set();
+    const add = (id, source) => {
+      const offered = source === "x10a" ? hasHist(id) : source === "modbus" ? hasModbusHist(id)
+        : source === "env3" ? hasEnv3Hist(id) : hasRoomHist(id);
+      if (!offered) return;
+      const key = histCacheKey(id, source);
+      if (keys.has(key)) return;
+      keys.add(key);
+      if (source === "x10a" && DERIVED[id])
+        for (const input of DERIVED[id].ins) add(input, "x10a");
+    };
+    if (entry?.env3 || id === ENV3_COMBINED_ID)
+      for (const series of ENV3_COMBINED_SERIES) add(series.id, "env3");
+    else {
+      const source = (typeof entry?.trendSource === "function"
+        ? entry.trendSource(S.live) : entry?.trendSource) || "";
+      for (const instrument of source ? [source] : ["x10a", "modbus", "env3", "room"])
+        add(id, instrument);
+      // Tank overlays are fetched by ensureHistPair/renderInspectHist independently of the curve.
+      if (id === "dhw_tank") for (const auxiliary of ["smart_grid_mode", "bsh_state"])
+        for (const instrument of ["x10a", "modbus"]) add(auxiliary, instrument);
+    }
+    const expiredAt = Date.now() - 60001;
+    for (const key of keys) {
+      const cached = S.hist.get(key);
+      if (cached) cached.at = expiredAt;
+    }
+    return true;
+  }, { id, inspector });
+}
+
+async function settleHistoryRevision(page, selectors) {
+  // A cached curve can remain visible while the opening's real GET completes under clickHold.
+  // Wait for the actual DOM revision after input/focus setup, never suppress a measured refetch.
+  await page.waitFor("(" + (selectors => !S.histBusy.size && !S.clickHold && !_pollBusy &&
+    selectors.every(selector => {
+      const target = document.querySelector(selector);
+      const plot = target?.matches("[data-hist]") ? target
+        : target?.closest(".vitem")?.querySelector("[data-hist]");
+      if (!plot) return false;
+      const view = historyView(plot.dataset.hist, plot.dataset.source || "");
+      return !!view && plot.dataset.rev === [S.histEpoch, view.gen, view.t0].join("/");
+    })).toString() + ")(" + JSON.stringify(selectors) + ")");
+}
+
+async function openInspector(page, key, id, context, { freshOpening = true } = {}) {
   await page.evaluate("showStage('dashboard'); true");
+  if (freshOpening) await expireOpeningHistory(page, id, key);
   await click(page, '#schem [data-insp="' + key + '"]', key);
   await page.waitFor("S.insp === " + JSON.stringify(key) + " && !S.histBusy.size");
+  await settleHistoryRevision(page, ["#inspHist .vhist-plot"]);
   const chart = await evaluate(page, () => {
     const plot = document.querySelector("#inspHist [data-hist]");
     const view = plot && historyView(plot.dataset.hist, plot.dataset.source || "");
@@ -310,7 +368,7 @@ async function observe(page, server, context, selectors, { inspector = false, st
   // Programmatic focus belongs to setup. Wait for its real paint before the first measured poll;
   // every subsequent frame, including that poll's first frame, remains under the fixed budget.
   await page.evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))");
-  await page.waitFor("!S.clickHold && !S.histBusy.size && !_pollBusy");
+  await settleHistoryRevision(page, selectors);
   const focusSetupMs = performance.now() - focusStarted;
   const requests = server.valuesRequests;
   let boardBefore;
@@ -324,7 +382,7 @@ async function observe(page, server, context, selectors, { inspector = false, st
     window.__motionPlots = selectors.map(selector => {
       const node = document.querySelector(selector);
       if (!node) throw new Error("history observation plot missing: " + selector);
-      return { selector, node };
+      return { selector, node, revision: window.__motionRevision(node) };
     });
     if (document.activeElement !== window.__motionPlots[0].node || document.hidden)
       throw new Error("history focus and visibility must settle before polling observation");
@@ -426,6 +484,8 @@ async function observe(page, server, context, selectors, { inspector = false, st
       hiddenCharts: document.querySelectorAll("#valueGroups .vitem:not(.open) .vhist, #settingsCards .vitem:not(.open) .vhist").length,
       plots: window.__motionPlots.map(({ selector, node }) =>
         ({ selector, same: document.querySelector(selector) === node })),
+      revisions: window.__motionPlots.map(({ selector, revision }) => ({ selector,
+        before: revision, after: window.__motionRevision(document.querySelector(selector)) })),
       detachedAncestors: window.__motionDetachedAncestors,
       bodyUnchanged: body.innerHTML === window.__motionBody.html,
       sameBody: body.firstChild === window.__motionBody.node,
@@ -464,7 +524,8 @@ async function observe(page, server, context, selectors, { inspector = false, st
   assert.equal(motion.holds, 0, context + ": polling must not be hidden behind interaction holds");
   assert.equal(motion.closedBuilds, 0, context + ": polls must not rebuild cached charts in closed rows");
   assert.equal(motion.hiddenCharts, 0, context + ": closed rows must not retain duplicate history SVGs");
-  if (inspector) assert.equal(motion.builds, 0, context + ": unchanged inspector must not rebuild history");
+  if (inspector) assert.equal(motion.builds, 0, context +
+    ": unchanged inspector must not rebuild history; revisions=" + JSON.stringify(motion.revisions));
   const retainedPlots = new Set(motion.plots.filter(plot => plot.same).map(plot => plot.selector));
   const detachedRetained = motion.detachedAncestors.filter(row =>
     row.selectors.some(selector => retainedPlots.has(selector)));
@@ -518,6 +579,97 @@ async function closeInspector(page) {
   await page.waitFor("document.getElementById('inspect').getAnimations({subtree:true}).every(animation => !Number.isFinite(animation.effect?.getTiming().iterations) || animation.playState !== 'running')");
   await click(page, "#inspClose");
   await page.waitFor("S.insp === null");
+}
+
+async function prepareInheritedFlow(page) {
+  await page.waitFor("!S.histBusy.size && !_pollBusy");
+  return evaluate(page, async () => {
+    // Derived pth/cop cards normally preload this ring; a focused flow run must exercise the same
+    // inherited-cache path. Populate it through the real GET if those cards have not run.
+    if (!S.hist.get("flow")) await ensureHist("flow");
+    const cached = S.hist.get("flow");
+    if (!cached?.gen || cached.v.length < 288) throw new Error("flow inherited cache requires a real full ring");
+    cached.at = Date.now() - 55000;
+    return cached.gen;
+  });
+}
+
+async function assertFlowTtlTransition(page, server, context) {
+  const selector = "#inspHist .vhist-plot";
+  await page.bringToFront();
+  await page.waitFor("document.visibilityState === 'visible' && !document.hidden");
+  await settleHistoryOpening(page, [selector]);
+  await prepareObservationViewport(page, selector, ["fSup1", "rfHot", "scFan", "scPump"]);
+  await evaluate(page, ({ selector }) => {
+    document.querySelector(selector).focus({ preventScroll: true }); return true;
+  }, { selector });
+  await page.evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))");
+  await settleHistoryRevision(page, [selector]);
+  const requests = server.historyRequests.length;
+  const before = await evaluate(page, ({ selector }) => {
+    const plot = document.querySelector(selector), flow = S.hist.get("flow");
+    const modbus = S.hist.get(histCacheKey("flow", "modbus"));
+    if (!flow?.gen || !modbus?.gen || document.activeElement !== plot)
+      throw new Error("flow TTL transition requires fresh independent rings and focused plot");
+    const revision = window.__motionRevision(plot), now = performance.now();
+    const state = window.__motionTtl = { plot, gen: flow.gen, modbusGen: modbus.gen,
+      revision, started: now, last: now, frames: 0, maxGap: 0,
+      animations: ["fSup1", "rfHot", "scFan", "scPump"].map(id => {
+        const node = document.getElementById(id);
+        const animation = node.getAnimations().find(item => item instanceof CSSAnimation);
+        return { id, node, animation, time: animation?.currentTime,
+          initialRunning: animation?.playState === "running" };
+      }) };
+    const sample = now => {
+      state.maxGap = Math.max(state.maxGap, now - state.last);
+      state.last = now; state.frames++; state.request = requestAnimationFrame(sample);
+    };
+    state.request = requestAnimationFrame(sample);
+    // Cross the real one-minute boundary on the unchanged two-second production poll loop.
+    // Keep Modbus fresh and do not call ensureHist, renderApp or pollNow for this transition.
+    flow.at = Date.now() - 59000;
+    return { gen: state.gen, modbusGen: state.modbusGen, revision };
+  }, { selector });
+  let changed;
+  try {
+    await page.waitFor("!S.histBusy.size && !_pollBusy && S.hist.get('flow')?.gen > window.__motionTtl.gen",
+      { timeoutMs: 12000 });
+    await settleHistoryRevision(page, [selector]);
+    await page.evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))");
+    changed = await evaluate(page, ({ selector }) => {
+      const state = window.__motionTtl, plot = document.querySelector(selector);
+      return { gen: S.hist.get("flow")?.gen,
+        modbusGen: S.hist.get(histCacheKey("flow", "modbus"))?.gen,
+        replaced: plot !== state.plot, focused: document.activeElement === plot,
+        revision: window.__motionRevision(plot), duration: performance.now() - state.started,
+        frames: state.frames, maxGap: state.maxGap,
+        animations: state.animations.map(({ id, node, animation, time, initialRunning }) => ({ id,
+          same: node.getAnimations().includes(animation), initialRunning,
+          running: animation?.playState === "running", elapsed: animation?.currentTime - time })) };
+    }, { selector });
+  } finally {
+    await page.evaluate("if(window.__motionTtl)cancelAnimationFrame(window.__motionTtl.request); delete window.__motionTtl; true");
+  }
+  assert.deepEqual(server.historyRequests.slice(requests), ["x10a:flow"],
+    context + ": natural TTL transition must make exactly one real X10A flow GET");
+  assert.equal(changed.gen, before.gen + 1, context + ": TTL reply must advance X10A flow by exactly one generation");
+  assert.equal(changed.modbusGen, before.modbusGen, context + ": independent fresh Modbus generation must stay stable");
+  assert.equal(changed.replaced && changed.focused, true,
+    context + ": TTL generation must replace its plot and retain keyboard focus");
+  assert.notEqual(changed.revision.model, before.revision.model, context + ": TTL model revision must advance");
+  assert.equal(changed.revision.dom, changed.revision.model,
+    context + ": TTL plot must carry the accepted model revision; " + JSON.stringify({ before, changed }));
+  for (const animation of changed.animations) {
+    assert.equal(animation.initialRunning && animation.same && animation.running, true,
+      context + "/" + animation.id + ": TTL refresh must preserve the running CSSAnimation instance");
+    assert.ok(animation.elapsed >= changed.duration - BUDGET_MS,
+      context + "/" + animation.id + ": animation must advance throughout TTL refresh");
+  }
+  assert.ok(changed.frames >= Math.floor(changed.duration / BUDGET_MS) && changed.maxGap < BUDGET_MS,
+    context + ": TTL frame responsiveness budget exceeded: " + Math.round(changed.maxGap) + " ms");
+  console.log("history TTL transition evidence: " + JSON.stringify({ context, before, ...changed }));
+  console.log("history TTL transition checked: " + context + "; one real flow GET; max frame " +
+    Math.round(changed.maxGap) + " ms");
 }
 
 async function assertSgTransition(page, server, fixture, context) {
@@ -602,17 +754,12 @@ async function disclosure(page, server, fixture, context, selectors, ids, settin
     assert.ok(card, context + ": disclosure card must exist");
     await click(page, '#cardNav [data-card="' + card + '"]');
   }
+  for (const id of ids) await expireOpeningHistory(page, id);
   for (const selector of selectors) await click(page, selector);
   await page.waitFor("!S.histBusy.size");
   await page.waitFor(JSON.stringify(selectors) +
     ".every(selector => !!document.querySelector(selector)?.closest('.vitem')?.querySelector('[data-hist]'))");
-  // A cached curve may be visible while an expired ring's real GET finishes under clickHold.
-  // Observe the fresh revision once the next normal paint applies it, rather than treating that
-  // legitimate new generation as an unchanged-chart regression.
-  await page.waitFor(JSON.stringify(selectors) + ".every(selector => {" +
-    "const plot=document.querySelector(selector)?.closest('.vitem')?.querySelector('[data-hist]');" +
-    "if(!plot)return false;const view=historyView(plot.dataset.hist,plot.dataset.source||'');" +
-    "return plot.dataset.rev===[S.histEpoch,view?.gen,view?.t0].join('/');})");
+  await settleHistoryRevision(page, selectors);
   const hosts = await evaluate(page, ({ selectors, ids }) => selectors.map((selector, index) => {
     const item = document.querySelector(selector)?.closest(".vitem");
     const plot = item?.querySelector("[data-hist]");
@@ -674,13 +821,22 @@ export async function assertHistoryMotion(page, server, context) {
       : ["tank", ...Object.keys(INSPECTOR_TRENDS).filter(key => key !== "tank")];
     for (const key of cases) {
       const id = INSPECTOR_TRENDS[key], label = context + "/" + key;
+      const inheritedFlow = key === "flow" ? await prepareInheritedFlow(page) : null;
+      const flowRequests = server.historyRequests.filter(key => key === "x10a:flow").length;
       const chart = await openInspector(page, key, id, label);
+      if (key === "flow") {
+        assert.equal(await page.evaluate("S.hist.get('flow')?.gen"), inheritedFlow + 1,
+          label + ": first native open must refresh the inherited flow cache generation");
+        assert.equal(server.historyRequests.filter(key => key === "x10a:flow").length, flowRequests + 1,
+          label + ": first native open must make one real GET for its inherited flow cache");
+      }
       if (key === "tank" && page.assertFlowPaint) await page.assertFlowPaint(label);
       const expected = key === "env3" ? ["env3_temperature", "env3_humidity", "env3_pressure"]
         : [ "x10a", ...(key !== "bsh" && MODBUS_HISTORY_ROWS.some(row => row.id === id) ? ["modbus"] : []),
           ...(key === "room" ? ["room"] : []) ];
       assert.deepEqual(chart.sources, expected, label + ": preserve independent history sources");
       if (key === "env3") assert.equal(chart.forecast, true, label + ": forecast must accompany real ENV III history");
+      if (key === "flow") await assertFlowTtlTransition(page, server, label);
       await observe(page, server, label, ["#inspHist .vhist-plot"], { inspector: true });
       let restoreValues;
       if (key === "sgrequest") {
@@ -690,7 +846,7 @@ export async function assertHistoryMotion(page, server, context) {
       }
       const requests = server.historyRequests.length;
       await closeInspector(page);
-      await openInspector(page, key, id, label + "/cached");
+      await openInspector(page, key, id, label + "/cached", { freshOpening: false });
       assert.equal(server.historyRequests.length, requests, label + ": cached reopen must not refetch history");
       await closeInspector(page);
       if (restoreValues) fixture.values = restoreValues;

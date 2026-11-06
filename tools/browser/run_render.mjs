@@ -2,6 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { randomBytes } from "node:crypto";
 
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const args = process.argv.slice(2);
@@ -12,6 +13,8 @@ if (!["chromium", "webkit"].includes(engine)) {
 }
 const worker = engine === "webkit" ? "test/test_browser_webkit.mjs" : "test/test_browser_render.mjs";
 const viewports = engine === "webkit" ? ["ipad-portrait", "ipad-landscape"] : ["phone", "desktop"];
+const overlapControls = engine === "chromium" && process.env.DAIKIN_BROWSER_PARALLEL !== "0" &&
+  args.length === 0 && !process.env.DAIKIN_BROWSER_MUTATION;
 const timeout = process.env.DAIKIN_BROWSER_TIMEOUT_MS || "600000";
 if (!/^[1-9][0-9]*$/.test(timeout) || Number(timeout) > 3600000) {
   console.error("browser render gate: invalid DAIKIN_BROWSER_TIMEOUT_MS (1..3600000)");
@@ -33,16 +36,39 @@ if (!/^[1-9][0-9]*$/.test(timeout) || Number(timeout) > 3600000) {
   process.on("SIGTERM", onTerm);
   const timer = setTimeout(() => cancel({ status: 2, reason: "overall deadline exceeded" }), Number(timeout));
 
-  function start(script, extra = []) {
+  function start(script, extra = [], barrierViewport) {
     // Each worker owns a distinct POSIX process group. Its ordinary Chrome subprocesses and
     // their descendants remain in that group, so a terminated Node cannot orphan the browser.
-    const child = spawn("node", [script, ...extra], { stdio: "inherit", detached: true });
-    const job = { child, done: false, status: null, retired: false };
+    const env = { ...process.env };
+    delete env.DAIKIN_BROWSER_HISTORY_BARRIER;
+    const nonce = barrierViewport ? randomBytes(16).toString("hex") : null;
+    if (barrierViewport)
+      env.DAIKIN_BROWSER_HISTORY_BARRIER = JSON.stringify({ viewport: barrierViewport, nonce });
+    const child = spawn("node", [script, ...extra], { env,
+      stdio: barrierViewport ? ["inherit", "inherit", "inherit", "ipc"] : "inherit", detached: true });
+    const job = { child, done: false, status: null, retired: false, barrierViewport, nonce,
+      historyReady: false, historyReleased: false };
+    if (barrierViewport) {
+      job.ready = new Promise(resolve => { job.resolveReady = resolve; });
+      child.on("message", receipt => {
+        if (!receipt || typeof receipt !== "object" || Array.isArray(receipt) ||
+            Object.keys(receipt).sort().join(",") !== "nonce,type,viewport" ||
+            receipt.type !== "history-motion-ready" || receipt.viewport !== barrierViewport ||
+            receipt.nonce !== nonce || job.historyReady) {
+          cancel({ status: 2, reason: "invalid or duplicate history receipt from " + barrierViewport });
+          return;
+        }
+        job.historyReady = true;
+        job.resolveReady();
+      });
+    }
     job.result = new Promise((resolve) => {
       const finish = (status) => {
         if (job.done) return;
         job.done = true;
         job.status = status;
+        if (barrierViewport && !job.historyReleased)
+          cancel({ status: status || 2, reason: barrierViewport + " exited before history continuation release" });
         resolve({ job, status });
       };
       child.once("error", (error) => {
@@ -53,6 +79,16 @@ if (!/^[1-9][0-9]*$/.test(timeout) || Number(timeout) > 3600000) {
     });
     jobs.push(job);
     return job;
+  }
+
+  function releaseHistory(job) {
+    return new Promise((resolve, reject) => {
+      job.historyReleased = true;
+      try {
+        job.child.send({ type: "history-motion-continue", viewport: job.barrierViewport,
+          nonce: job.nonce }, error => { if (error) reject(error); else resolve(); });
+      } catch (error) { reject(error); }
+    });
   }
 
   function signalGroup(job, signal) {
@@ -138,13 +174,34 @@ if (!/^[1-9][0-9]*$/.test(timeout) || Number(timeout) > 3600000) {
           await stopAll();
           if (status !== 0) break;
         }
+      } else if (overlapControls) {
+        status = cancellation?.status ?? await complete([
+          start("tools/browser/selftest.mjs", ["--infrastructure-only"]),
+        ]);
+        await stopAll();
+        if (status === 0) {
+          const positives = viewports.map(viewport => start(worker, ["--viewport", viewport], viewport));
+          const barrier = await Promise.race([
+            Promise.all(positives.map(job => job.ready)).then(() => ({ ready: true })),
+            complete(positives).then(status => ({ status })),
+          ]);
+          if (barrier.ready && !cancellation) {
+            await Promise.race([Promise.all(positives.map(releaseHistory)), cancelled]);
+            if (!cancellation) {
+              // Every temporal witness has settled. Keep both positive workers alive and overlap
+              // only static locale work with the serial browser controls under this same deadline.
+              const controls = start("tools/browser/selftest.mjs", ["--browser-controls-only"]);
+              status = await complete([...positives, controls]);
+            } else status = cancellation.status;
+          } else status = cancellation?.status ?? barrier.status;
+        }
       } else {
         const batch = process.env.DAIKIN_BROWSER_PARALLEL !== "0"
           ? viewports.map((viewport) => start(worker, ["--viewport", viewport, ...args]))
           : [start(worker, args)];
         status = cancellation?.status ?? await complete(batch);
       }
-      if (status === 0) {
+      if (status === 0 && !overlapControls) {
         await stopAll();
         status = cancellation?.status ?? await complete([start(engine === "webkit"
           ? "tools/browser/webkit_selftest.mjs" : "tools/browser/selftest.mjs")]);
@@ -152,7 +209,7 @@ if (!/^[1-9][0-9]*$/.test(timeout) || Number(timeout) > 3600000) {
     }
   } catch (error) {
     console.error(`browser render gate: ${error.message}`);
-    status = 2;
+    status = cancellation?.status ?? 2;
   } finally {
     clearTimeout(timer);
     try {

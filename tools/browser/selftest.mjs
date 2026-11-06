@@ -3,137 +3,150 @@ import { spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { removeBrowserProfile, stopBrowser } from "./cdp_browser.mjs";
-import "./cleanup_selftest.mjs";
-import "./runner_selftest.mjs";
-import "./container_selftest.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const staging = spawnSync("python3", [path.join(root, "tools/browser/stage_source_selftest.py")], {
-  encoding: "utf8", timeout: 30000,
-});
-assert.equal(staging.status, 0, "public source snapshot selftest must pass\n" + staging.stdout + staging.stderr);
-console.log(staging.stdout.trim());
-assert.ok(process.env.DAIKIN_BROWSER_PAGE, "browser selftest requires DAIKIN_BROWSER_PAGE from the runner");
-assert.ok(process.env.DAIKIN_BROWSER_BIN, "browser selftest requires DAIKIN_BROWSER_BIN from the runner");
+const flags = process.argv.slice(2);
+assert.ok(flags.length <= 1 && flags.every(flag =>
+  ["--infrastructure-only", "--browser-controls-only"].includes(flag)), "unknown browser selftest phase");
+if (!flags.includes("--browser-controls-only")) {
+  // These fixtures own nested detached groups. Join every import before propagating a failure;
+  // none may still run when positive browser observations or the shared page's cleanup start.
+  const infrastructure = await Promise.allSettled([
+    import("./cleanup_selftest.mjs"), import("./runner_selftest.mjs"),
+    import("./container_selftest.mjs"), import("./cdp_browser.mjs"),
+  ]);
+  const failed = infrastructure.filter(result => result.status === "rejected");
+  if (failed.length) throw new AggregateError(failed.map(result => result.reason), "browser infrastructure selftests failed");
+  const { removeBrowserProfile, stopBrowser } = infrastructure[3].value;
+  const staging = spawnSync("python3", [path.join(root, "tools/browser/stage_source_selftest.py")], {
+    encoding: "utf8", timeout: 30000,
+  });
+  assert.equal(staging.status, 0, "public source snapshot selftest must pass\n" + staging.stdout + staging.stderr);
+  console.log(staging.stdout.trim());
 
-let removeAttempts = 0;
-const retryPauses = [];
-await removeBrowserProfile("/tmp/browser-profile-selftest", {
-  remove() {
-    removeAttempts++;
-    if (removeAttempts < 3) {
-      const error = new Error("profile is still busy");
-      error.code = "ENOTEMPTY";
-      throw error;
+  let removeAttempts = 0;
+  const retryPauses = [];
+  await removeBrowserProfile("/tmp/browser-profile-selftest", {
+    remove() {
+      removeAttempts++;
+      if (removeAttempts < 3) {
+        const error = new Error("profile is still busy");
+        error.code = "ENOTEMPTY";
+        throw error;
+      }
+    },
+    pause: async (ms) => retryPauses.push(ms),
+    maxRetries: 4,
+    retryDelayMs: 7,
+  });
+  assert.equal(removeAttempts, 3, "profile cleanup must retry a transient ENOTEMPTY failure");
+  assert.deepEqual(retryPauses, [7, 7], "profile cleanup retries must stay bounded and delayed");
+
+  class DelayedExitChild extends EventEmitter {
+    pid = 1;
+    exitCode = null;
+    signalCode = null;
+    signals = [];
+
+    kill(signal) {
+      this.signals.push(signal);
+      if (signal === "SIGKILL") {
+        setTimeout(() => {
+          this.signalCode = signal;
+          this.emit("exit", null, signal);
+        }, 5);
+      }
+      return true;
     }
-  },
-  pause: async (ms) => retryPauses.push(ms),
-  maxRetries: 4,
-  retryDelayMs: 7,
-});
-assert.equal(removeAttempts, 3, "profile cleanup must retry a transient ENOTEMPTY failure");
-assert.deepEqual(retryPauses, [7, 7], "profile cleanup retries must stay bounded and delayed");
-
-class DelayedExitChild extends EventEmitter {
-  pid = 1;
-  exitCode = null;
-  signalCode = null;
-  signals = [];
-
-  kill(signal) {
-    this.signals.push(signal);
-    if (signal === "SIGKILL") {
-      setTimeout(() => {
-        this.signalCode = signal;
-        this.emit("exit", null, signal);
-      }, 5);
-    }
-    return true;
   }
+
+  const delayedChild = new DelayedExitChild();
+  await stopBrowser(delayedChild, { termTimeoutMs: 1, killTimeoutMs: 100 });
+  assert.deepEqual(delayedChild.signals, ["SIGTERM", "SIGKILL"],
+    "browser cleanup must escalate only after the graceful-exit deadline");
+  assert.equal(delayedChild.signalCode, "SIGKILL",
+    "browser cleanup must wait for the delayed SIGKILL exit before removing the profile");
 }
 
-const delayedChild = new DelayedExitChild();
-await stopBrowser(delayedChild, { termTimeoutMs: 1, killTimeoutMs: 100 });
-assert.deepEqual(delayedChild.signals, ["SIGTERM", "SIGKILL"],
-  "browser cleanup must escalate only after the graceful-exit deadline");
-assert.equal(delayedChild.signalCode, "SIGKILL",
-  "browser cleanup must wait for the delayed SIGKILL exit before removing the profile");
+if (!flags.includes("--infrastructure-only")) {
+  assert.ok(process.env.DAIKIN_BROWSER_PAGE, "browser selftest requires DAIKIN_BROWSER_PAGE from the runner");
+  assert.ok(process.env.DAIKIN_BROWSER_BIN, "browser selftest requires DAIKIN_BROWSER_BIN from the runner");
 
-const result = spawnSync(process.execPath, [path.join(root, "test/test_browser_render.mjs")], {
-  cwd: root,
-  encoding: "utf8",
-  env: { ...process.env, DAIKIN_BROWSER_MUTATION: "root-overflow" },
-});
-const output = `${result.stdout || ""}\n${result.stderr || ""}`;
-assert.notEqual(result.status, 0, "layout mutation must make the browser gate fail");
-assert.match(output, /selftest\/root-overflow: horizontal viewport overflow/,
-  "selftest must fail for the deliberately introduced root overflow, not for an unrelated reason");
+  const result = spawnSync(process.execPath, [path.join(root, "test/test_browser_render.mjs")], {
+    cwd: root,
+    encoding: "utf8",
+    env: { ...process.env, DAIKIN_BROWSER_MUTATION: "root-overflow" },
+  });
+  const output = `${result.stdout || ""}\n${result.stderr || ""}`;
+  assert.notEqual(result.status, 0, "layout mutation must make the browser gate fail");
+  assert.match(output, /selftest\/root-overflow: horizontal viewport overflow/,
+    "selftest must fail for the deliberately introduced root overflow, not for an unrelated reason");
 
-const delayedFocus = spawnSync(process.execPath, [path.join(root, "test/test_browser_render.mjs")], {
-  cwd: root,
-  encoding: "utf8",
-  env: { ...process.env, DAIKIN_BROWSER_MUTATION: "modal-focus-delay" },
-});
-const delayedFocusOutput = `${delayedFocus.stdout || ""}\n${delayedFocus.stderr || ""}`;
-assert.equal(delayedFocus.status, 0,
-  `modal-focus delay selftest must pass after awaiting the complete open state\n${delayedFocusOutput}`);
-assert.match(delayedFocusOutput, /browser modal-focus selftest passed/,
-  "modal-focus delay selftest must execute the delayed dialog-focus path");
+  const delayedFocus = spawnSync(process.execPath, [path.join(root, "test/test_browser_render.mjs")], {
+    cwd: root,
+    encoding: "utf8",
+    env: { ...process.env, DAIKIN_BROWSER_MUTATION: "modal-focus-delay" },
+  });
+  const delayedFocusOutput = `${delayedFocus.stdout || ""}\n${delayedFocus.stderr || ""}`;
+  assert.equal(delayedFocus.status, 0,
+    `modal-focus delay selftest must pass after awaiting the complete open state\n${delayedFocusOutput}`);
+  assert.match(delayedFocusOutput, /browser modal-focus selftest passed/,
+    "modal-focus delay selftest must execute the delayed dialog-focus path");
 
-const historyFlood = spawnSync(process.execPath, [path.join(root, "test/test_browser_render.mjs")], {
-  cwd: root,
-  encoding: "utf8",
-  env: { ...process.env, DAIKIN_BROWSER_MUTATION: "history-flood" },
-});
-const historyFloodOutput = `${historyFlood.stdout || ""}\n${historyFlood.stderr || ""}`;
-assert.notEqual(historyFlood.status, 0,
-  "routing every translated modal matrix through browser History must make the gate fail");
-assert.match(historyFloodOutput, /real browser History transitions must stay bounded/,
-  "history-flood selftest must fail at the explicit real-route budget");
+  const historyFlood = spawnSync(process.execPath, [path.join(root, "test/test_browser_render.mjs")], {
+    cwd: root,
+    encoding: "utf8",
+    env: { ...process.env, DAIKIN_BROWSER_MUTATION: "history-flood" },
+  });
+  const historyFloodOutput = `${historyFlood.stdout || ""}\n${historyFlood.stderr || ""}`;
+  assert.notEqual(historyFlood.status, 0,
+    "routing every translated modal matrix through browser History must make the gate fail");
+  assert.match(historyFloodOutput, /real browser History transitions must stay bounded/,
+    "history-flood selftest must fail at the explicit real-route budget");
 
-const manualRoute = spawnSync(process.execPath, [path.join(root, "test/test_browser_render.mjs")], {
-  cwd: root,
-  encoding: "utf8",
-  env: { ...process.env, DAIKIN_BROWSER_MUTATION: "route-hashchange-manual" },
-});
-const manualRouteOutput = `${manualRoute.stdout || ""}\n${manualRoute.stderr || ""}`;
-assert.equal(manualRoute.status, 0,
-  `route-event selftest must await both navigation events\n${manualRouteOutput}`);
-assert.match(manualRouteOutput, /browser route-event selftest passed/,
-  "route-event selftest must execute the manually released hashchange path");
+  const manualRoute = spawnSync(process.execPath, [path.join(root, "test/test_browser_render.mjs")], {
+    cwd: root,
+    encoding: "utf8",
+    env: { ...process.env, DAIKIN_BROWSER_MUTATION: "route-hashchange-manual" },
+  });
+  const manualRouteOutput = `${manualRoute.stdout || ""}\n${manualRoute.stderr || ""}`;
+  assert.equal(manualRoute.status, 0,
+    `route-event selftest must await both navigation events\n${manualRouteOutput}`);
+  assert.match(manualRouteOutput, /browser route-event selftest passed/,
+    "route-event selftest must execute the manually released hashchange path");
 
-const isolationBypass = spawnSync(process.execPath, [path.join(root, "test/test_browser_render.mjs")], {
-  cwd: root,
-  encoding: "utf8",
-  env: { ...process.env, DAIKIN_BROWSER_MUTATION: "route-isolation-bypass" },
-});
-const isolationBypassOutput = `${isolationBypass.stdout || ""}\n${isolationBypass.stderr || ""}`;
-assert.notEqual(isolationBypass.status, 0,
-  "bypassing the translated keyboard route isolation must make the gate fail");
-assert.match(isolationBypassOutput, /route-isolated keyboard open must keep the Settings hash/,
-  "route-isolation selftest must fail at the observed hash boundary");
-console.log("browser render selftest passed: overflow was rejected, delayed modal focus and route " +
-  "completion were awaited, duplicate real History transitions were bounded, and route isolation " +
-  "was observed");
+  const isolationBypass = spawnSync(process.execPath, [path.join(root, "test/test_browser_render.mjs")], {
+    cwd: root,
+    encoding: "utf8",
+    env: { ...process.env, DAIKIN_BROWSER_MUTATION: "route-isolation-bypass" },
+  });
+  const isolationBypassOutput = `${isolationBypass.stdout || ""}\n${isolationBypass.stderr || ""}`;
+  assert.notEqual(isolationBypass.status, 0,
+    "bypassing the translated keyboard route isolation must make the gate fail");
+  assert.match(isolationBypassOutput, /route-isolated keyboard open must keep the Settings hash/,
+    "route-isolation selftest must fail at the observed hash boundary");
+  console.log("browser render selftest passed: overflow was rejected, delayed modal focus and route " +
+    "completion were awaited, duplicate real History transitions were bounded, and route isolation " +
+    "was observed");
 
-for (const [mutation, assertion, extra] of [
-  ["history-eager", /polls must not rebuild cached charts in closed rows/],
-  ["history-stall", /history frame responsiveness budget exceeded/],
-  ["history-replace", /unchanged plot must remain mounted/],
-  ["history-restart", /preserve running CSSAnimation instance/],
-  ["history-unknown", /history inspector inventory must classify every production entry/],
-  ["history-disclosure-replace", /unchanged plot must remain mounted/, ["--history-motion-case", "board"]],
-  ["history-detach", /unchanged history ancestors must remain connected/, ["--history-motion-case", "board"]],
-  ["history-text-stale", /changed board telemetry must update the visible reading/, ["--history-motion-case", "board"]],
-]) {
-  const result = spawnSync(process.execPath,
-    [path.join(root, "test/test_browser_render.mjs"), "--viewport", "phone", ...(extra || [])], {
-      cwd: root, encoding: "utf8", env: { ...process.env, DAIKIN_BROWSER_MUTATION: mutation },
-    });
-  const output = (result.stdout || "") + "\n" + (result.stderr || "");
-  assert.notEqual(result.status, 0, mutation + ": the seeded temporal defect must fail");
-  assert.match(output, assertion,
-    mutation + ": must fail on its own motion assertion, not a fixture or browser setup error");
-  console.log("browser history selftest passed: " + mutation + " rejected by its temporal assertion");
+  for (const [mutation, assertion, extra] of [
+    ["history-eager", /polls must not rebuild cached charts in closed rows/],
+    ["history-stall", /history frame responsiveness budget exceeded/],
+    ["history-replace", /unchanged plot must remain mounted/],
+    ["history-restart", /preserve running CSSAnimation instance/],
+    ["history-unknown", /history inspector inventory must classify every production entry/],
+    ["history-disclosure-replace", /unchanged plot must remain mounted/, ["--history-motion-case", "board"]],
+    ["history-detach", /unchanged history ancestors must remain connected/, ["--history-motion-case", "board"]],
+    ["history-text-stale", /changed board telemetry must update the visible reading/, ["--history-motion-case", "board"]],
+  ]) {
+    const result = spawnSync(process.execPath,
+      [path.join(root, "test/test_browser_render.mjs"), "--viewport", "phone", ...(extra || [])], {
+        cwd: root, encoding: "utf8", env: { ...process.env, DAIKIN_BROWSER_MUTATION: mutation },
+      });
+    const output = (result.stdout || "") + "\n" + (result.stderr || "");
+    assert.notEqual(result.status, 0, mutation + ": the seeded temporal defect must fail");
+    assert.match(output, assertion,
+      mutation + ": must fail on its own motion assertion, not a fixture or browser setup error");
+    console.log("browser history selftest passed: " + mutation + " rejected by its temporal assertion");
+  }
 }
