@@ -334,14 +334,14 @@ pre-reset future hour eligible after the fence ages. Power loss before that
 append can still restore older same-scope hours. Source changes and consent transitions withdraw
 live evidence immediately. Whole-hour aging also runs without further polls; missing records never
 borrow the core clock. New hourly observations must preserve these independent-source boundaries.
-History forgetting latches Stop suppression even before its mutex exists. It withdraws Stop
-collection, reports, restoration and new append offers for the rest of that boot; startup, source
-binding and consent changes cannot clear the latch. The Store attempts cleanup without waiting for
-its lock. The History journal flash lock serializes append and erase; an already admitted append
-can finish before erasure takes that lock. History requires a compatible partition, both locks and
-the initial scan to return before attempting erasure. A scan read failure disables persistence
-but still permits erasure of the confirmed partition. The recovery button checks these
-prerequisites before erasing any data; a later erase can still fail. Logical suppression alone
+History forgetting latches Stop suppression even before its mutex exists. It stops collection,
+restoration and new append offers and removes Stop evidence from reports for the rest of that
+boot. Startup, source binding and consent changes cannot clear the latch. The Store attempts
+cleanup without waiting for its lock. The History journal flash lock serializes append and erase;
+an already admitted append can finish before erasure takes that lock. History requires a compatible
+partition, both locks and the initial scan to return before attempting erasure. A scan read failure
+disables persistence but still permits erasure of the confirmed partition. The recovery button
+checks these prerequisites before erasing any data; a later erase can still fail. Logical suppression alone
 does not establish erasure or persistence across a reboot.
 The observation owner also rechecks wall/monotonic agreement on reports and flash service. An offset
 change beyond two seconds withdraws the dated view, fences the old archive and pauses this

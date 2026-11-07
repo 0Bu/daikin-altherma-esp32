@@ -130,7 +130,8 @@ serialized settings, legacy and WiFi-driver credentials, history/trend/state-age
 flash journal), the raw coredump and the MQTT retirement record. The board tries to keep its stated
 hardware (preset, indicator, button) so the button still works afterwards.
 A hold counts only after three consecutive pressed samples, and a button held at boot stays
-inactive until it reads released three times. If `/diag` says the reset did not start because
+inactive until it reads released three times. Read reset messages in `/diag` on the LAN during the
+current boot, or on the serial console if the LAN is unavailable. If the reset did not start because
 History is not ready, that attempt erased nothing. Let startup finish before releasing and holding again.
 If it still cannot start, check the History startup messages and the
 [supported journal layout](ARCHITECTURE.md#history-and-diagnosis-persistence).
