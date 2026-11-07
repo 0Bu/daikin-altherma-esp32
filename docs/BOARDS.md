@@ -135,9 +135,10 @@ History is not ready, that attempt erased nothing. Let startup finish before rel
 If it still cannot start, check the History startup messages and the
 [supported journal layout](ARCHITECTURE.md#history-and-diagnosis-persistence).
 An erase failure after reset starts can leave a partial wipe. The board stays on the current boot,
-reports the incomplete step in `/diag`, and returns the indicator to normal. It enters setup only
-after every erase succeeds. Release while arming to abort. Preserve needed configuration and
-crash evidence before using it.
+reports the incomplete step in `/diag`, and returns the indicator to normal. It restarts only
+after every required erase succeeds. A successful reset can reconnect over Ethernet without opening
+the setup portal. Release while arming to abort. Preserve needed configuration and crash evidence
+before using it.
 
 ## Feature availability by board
 

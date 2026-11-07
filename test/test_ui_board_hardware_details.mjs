@@ -9,15 +9,18 @@ import { readAppFragments, readHistoryLifecycle, readUiLocale } from "../tools/u
 const html = fs.readFileSync(new URL("../main/www/index.html", import.meta.url), "utf8");
 const style = fs.readFileSync(new URL("../main/www/style.css", import.meta.url), "utf8");
 const ledPatternSource = fs.readFileSync(new URL("../main/logic/led_pattern.hpp", import.meta.url), "utf8");
-const i18nSource = readAppFragments(["i18n.js"]) + readUiLocale("de");
+const i18nSource = readAppFragments(["i18n.js"]);
 
 const i18nSandbox = vm.createContext({
   navigator: { language: "en-GB" },
   localStorage: { getItem() { return null; }, setItem() {} },
 });
-vm.runInContext(`${i18nSource}\nthis.__I18N = I18N;`, i18nSandbox,
+vm.runInContext(`${i18nSource}\nthis.__I18N = I18N; this.__UI_LANGS = UI_LANGS;`, i18nSandbox,
   { filename: "main/www/js/i18n.js" });
 const I18N = i18nSandbox.__I18N;
+for (const locale of i18nSandbox.__UI_LANGS) {
+  if (locale !== "en") vm.runInContext(readUiLocale(locale), i18nSandbox);
+}
 
 const firmwarePattern = (phase) => {
   const match = ledPatternSource.match(new RegExp(`case LedPhase::${phase}:[\\s\\S]{0,100}?return \\{([^}]+)\\};`));
@@ -77,26 +80,42 @@ for (const [phase, expectedPattern, suffix, rgbEnglish, rgbGerman, gpioEnglish, 
 }
 const englishResetHint = I18N.en["board.hint"];
 for (const expected of [
-  /Permanently erases Wi-Fi\/all settings/,
-  /\(only the board, status LED and reset button choice is kept\)/,
-  /recorded history\/trends/,
+  /history journal is not ready, nothing is erased/,
+  /hold for 5 seconds/,
+  /clears Wi-Fi and other settings/,
+  /recorded history/,
   /state durations/,
-  /raw core dump/,
-  /portal opens only after the full wipe succeeds/,
-  /release and hold again for 5 seconds/,
+  /raw crash dump/,
+  /MQTT cleanup record/,
+  /Board, LED and button settings are kept if possible/,
+  /failed erase can leave a partial wipe/,
+  /restarts only after all erases succeed/,
+  /See \/diag if the reset does not start or finish/,
 ]) assert.match(englishResetHint, expected,
   `English factory-reset help must disclose: ${expected}`);
 const germanResetHint = I18N.de["board.hint"];
 for (const expected of [
-  /Löscht dauerhaft WLAN\/alle Einstellungen/,
-  /\(nur die Wahl von Board, Status-LED und Reset-Taster bleibt erhalten\)/,
-  /Historie\/Trends/,
+  /WLAN/,
+  /Verlaufsjournal nicht bereit, wird nichts gelöscht/,
+  /aufgezeichneten Verlauf/,
   /Zustandsdauern/,
-  /Roh-Core-Dump/,
-  /nur nach vollständig erfolgreichem Löschen/,
-  /loslassen und erneut 5 s halten/,
+  /Absturz-Dump/,
+  /MQTT/,
+  /wenn möglich|nach Möglichkeit/,
+  /Löschfehler.*nur ein Teil der Daten gelöscht/,
+  /[Nn]eustart|startet neu/,
+  /\/diag/,
 ]) assert.match(germanResetHint, expected,
   `German factory-reset help must disclose: ${expected}`);
+assert.doesNotMatch(englishResetHint, /setup portal|release and hold again/i,
+  "absence of a portal must not be presented as a failed reset or a reason to retry");
+const resetHints = Array.from(i18nSandbox.__UI_LANGS, locale => {
+  const hint = I18N[locale]?.["board.hint"];
+  assert.match(hint, /\/diag/, `${locale} reset help must direct the owner to the diagnostic log`);
+  return hint;
+});
+assert.equal(new Set(resetHints).size, resetHints.length,
+  "reset guidance must come from each active locale, not English fallback");
 assert.doesNotMatch(style, /led-(?:single-blink|double-flash)|\.led-swatch[^}]*animation/,
   "infobox status points must stay static; the adjacent wording describes the blink pattern");
 assert.doesNotMatch(html, /id="bdLedLegend|data-i18n="board\.hint"|data-i18n="env\.pins_hint"/,

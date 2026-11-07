@@ -1,4 +1,4 @@
-// translation-source: 3e8092cf0e419496e78d337338f27af53fbda73918ad45f0bbe0970b83ebeddc
+// translation-source: fa1129dce36de7da23d04178f67c6ff1b7f7a1ba9974648b6bae1e479a441c15
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -800,7 +800,7 @@ I18N.fi = localeValues([
   /* board.led_gpio_wiping */ "Jatkuva nopean vilkun jälkeen — tehdasasetusten palautus/tietojen poisto; älä katkaise virtaa.",
   /* board.ledinv */ "Aktiivinen LOW (LED palaa nastan ollessa LOW)",
   /* board.btninv */ "Aktiivinen LOW (painike kytkee nastan GND:hen)",
-  /* board.hint */ "Tehdasasetusten palautus: pidä 5 s. Poistaa pysyvästi Wi-Fi/kaikki asetukset (vain kortin, tila-LEDin ja nollauspainikkeen valinta säilyy), historian/trendit, tilojen kestoajat ja raakaydindumpin. Wi-Fi-määritysportaali avautuu vain, jos kaikki tiedot saadaan poistettua kokonaan ja onnistuneesti. Muuten vapauta ja pidä uudelleen 5 s. Valitse Ei mitään ilman painiketta.",
+  /* board.hint */ "Palauta tehdasasetukset pitämällä painiketta painettuna 5 s. Jos historialoki ei ole valmis, palautus ei poista mitään. Se poistaa Wi-Fi-asetukset ja muut asetukset, tallennetun historian, tilojen kestot, kaatumisen raa’an muistivedoksen ja tallennetun MQTT-siivoustietueen. Kortin, LEDin ja painikkeen asetukset säilytetään, jos mahdollista. Jos poisto epäonnistuu, osa tiedoista on voitu jo poistaa. Laite käynnistyy uudelleen vain, jos kaikki poistot onnistuvat. Jos palautus ei ala tai jää kesken, tarkista /diag. Jos painiketta ei ole kytketty, valitse ”Ei mitään”.",
   /* card.hardware */ "Laitteisto",
   /* card.hw_off */ "Ei mitään",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,
