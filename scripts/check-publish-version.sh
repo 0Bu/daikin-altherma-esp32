@@ -171,16 +171,30 @@ if ! git fetch --no-tags --depth=1 "$remote" gh-pages >/dev/null 2>&1; then
     exit 2
 fi
 
-if ! published_json="$(git show "FETCH_HEAD:$manifest" 2>/dev/null)"; then
+# A partial clone may have the tree but need a separate fetch for its blobs. Establish
+# presence from tree entries so a failed blob read can never admit a first publication.
+if ! manifest_entry="$(git ls-tree --full-tree FETCH_HEAD -- "$manifest")"; then
+    echo "publish gate: cannot inspect the published manifest path gh-pages:$manifest" >&2
+    exit 2
+fi
+if [ -z "$manifest_entry" ]; then
     prefix="${manifest%manifest.json}"
-    for name in artifacts.json changelog.json daikin-altherma-esp32.bin; do
-        if git cat-file -e "FETCH_HEAD:$prefix$name" 2>/dev/null; then
-            echo "publish gate: gh-pages has $prefix$name but no $manifest — incomplete feed" >&2
-            exit 2
-        fi
-    done
+    if ! feed_entries="$(git ls-tree --full-tree FETCH_HEAD -- \
+        "${prefix}artifacts.json" "${prefix}changelog.json" "${prefix}daikin-altherma-esp32.bin")"; then
+        echo "publish gate: cannot inspect the published feed tree" >&2
+        exit 2
+    fi
+    if [ -n "$feed_entries" ]; then
+        echo "publish gate: gh-pages has feed artifacts but no $manifest — incomplete feed" >&2
+        exit 2
+    fi
     echo "publish gate: gh-pages has no $manifest yet — first publish of this feed, nothing to compare"
     exit 0
+fi
+if ! [[ "$manifest_entry" == '100644 blob '* ]] || \
+   ! published_json="$(git cat-file blob "FETCH_HEAD:$manifest")"; then
+    echo "publish gate: cannot read the published manifest gh-pages:$manifest as a regular blob" >&2
+    exit 2
 fi
 
 # Read the one field, and fail rather than guess: an unreadable manifest means the reference is

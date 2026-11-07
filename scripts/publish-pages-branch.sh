@@ -6,8 +6,8 @@
 #
 # The first gh-pages commit is intentionally out of scope: migration bootstraps one local,
 # GPG-signed orphan commit containing both root and dev/. Every later publish comes through here.
-# Root owns everything except dev/; --dev owns only dev/. expectedHeadOid plus a bounded retry keeps
-# concurrent release/dev publishers from overwriting one another.
+# Root owns everything except dev/; --dev owns dev/. Both maintain the shared empty root .nojekyll
+# control. expectedHeadOid plus a bounded retry keeps publishers from overwriting one another.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -63,10 +63,12 @@ remote_head() {
 attempt=1
 while [ "$attempt" -le "$PUSH_ATTEMPTS" ]; do
     # Fetch just this branch: current blob ids let the payload omit unchanged multi-megabyte files.
-    git fetch --quiet --no-tags --force origin \
+    git fetch --quiet --no-tags --filter=blob:none --force origin \
         refs/heads/gh-pages:refs/remotes/origin/gh-pages
     expected="$(git rev-parse refs/remotes/origin/gh-pages)"
-    git ls-tree -r "$expected" > "$tmp/current-tree"
+    # Include tree entries so even an empty directory at .nojekyll is visible. NUL
+    # delimiters preserve literal paths without Git quoting.
+    git ls-tree -r -t -z "$expected" > "$tmp/current-tree"
 
     stats="$(node scripts/pages-commit-payload.mjs prepare \
         "$owner" _site "$tmp/current-tree" "$expected" "$GITHUB_REPOSITORY" "$msg" \

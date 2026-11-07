@@ -46,6 +46,35 @@ signed build/publication. It has no board inventory, self-hosted hardware job or
 contacts no device. Review/CI, published binary/signature, device injection, probation, API and rendered
 UI evidence remain distinct.
 
+### CI checkout and publication cost
+
+The dev critical path is `mechanical_gates → trusted_build → publish`. Local development checks
+do not replace any of these independent CI gates. CI/release contracts own the provenance, signing,
+stack-budget, reproducibility, readback and OTA selftests; the build-contract step adds only its
+distinct configuration-default and size-report tests. Actual ELF and signed-artifact checks still
+run against each build. The publisher verifies signatures, then its candidate gate validates the
+source-bound manifest, complete binary inventory, installer plan and changelog once before mutation.
+
+All four source checkouts retain complete commit history and tags. Only `trusted_build` and
+`publish` filter historical blobs with `blob:none`; the current source tree remains complete.
+`prepare-ci-history.py` reads the HTTP runtime test's historical-source pin and hydrates that blob
+on the writable host before the build container. A missing blob or an unrecognized pin declaration
+or read expression blocks the build. PR and mechanical checkouts remain unfiltered: they remove
+persisted credentials and must support historical runtime/coverage reads without relying on a later
+authenticated lazy fetch.
+The publisher's `gh-pages` fetch filters blobs too. Version admission and changelog generation
+establish path presence from the tree and block when a listed feed blob cannot be read. Exact tree
+and public-byte verification still materialize every needed current file.
+
+Both feed publishers maintain one empty regular `.nojekyll` at branch root to bypass Jekyll
+regeneration. An unsafe root marker or a local `dev/.nojekyll` blocks the affected publish before
+the API call. GitHub Pages has started branch deployments after the signed GraphQL commits from
+this workflow. Dev readback requires the exact manifest before downloading all feed files and
+checking their bytes and signature. Attempts, delays and timeouts are unchanged. Pages deployment
+and CDN propagation overlap this wait; do not add Pages job durations to the main critical path.
+Measure checkout, queue/startup, downloads, compilation, tests, signing, deployment and public
+readback separately. Claim CI acceleration only after a comparable run of the published change.
+
 ### First Pages publication
 
 1. Bootstrap `gh-pages` as a reviewed signed orphan commit. The publisher refuses to invent a missing

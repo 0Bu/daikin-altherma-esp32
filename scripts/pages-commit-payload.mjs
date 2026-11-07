@@ -4,6 +4,9 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
+const nojekyll = ".nojekyll";
+const emptyBlobOid = blobOid(Buffer.alloc(0));
+
 function fail(message, code = 1) {
   console.error(message);
   process.exit(code);
@@ -31,18 +34,26 @@ function walkFiles(root) {
 
 function parseCurrentTree(treePath) {
   const result = new Map();
-  const text = fs.readFileSync(treePath, "utf8");
-  for (const line of text.split("\n")) {
-    if (!line) continue;
-    const tab = line.indexOf("\t");
-    if (tab < 0) fail(`pages payload: malformed ls-tree line: ${line}`);
-    const fields = line.slice(0, tab).split(" ");
-    if (fields.length !== 3 || fields[1] !== "blob") {
-      fail(`pages payload: only regular blobs are publishable: ${line}`);
+  const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+  const text = decoder.decode(fs.readFileSync(treePath));
+  for (const record of text.split("\0")) {
+    if (!record) continue;
+    const tab = record.indexOf("\t");
+    if (tab < 0) fail(`pages payload: malformed ls-tree entry: ${record}`);
+    const fields = record.slice(0, tab).split(" ");
+    if (fields.length !== 3) fail(`pages payload: malformed ls-tree entry: ${record}`);
+    const [mode, type, oid] = fields;
+    const repositoryPath = record.slice(tab + 1);
+    if (repositoryPath === nojekyll && type === "tree") {
+      fail("pages payload: root .nojekyll must not be a directory");
     }
-    const repositoryPath = line.slice(tab + 1);
+    if (type === "tree") continue;
+    if (type !== "blob") fail(`pages payload: only blobs are publishable: ${record}`);
+    if (repositoryPath === nojekyll && (mode !== "100644" || oid !== emptyBlobOid)) {
+      fail("pages payload: root .nojekyll must be an empty regular file");
+    }
     if (result.has(repositoryPath)) fail(`pages payload: duplicate path: ${repositoryPath}`);
-    result.set(repositoryPath, fields[2]);
+    result.set(repositoryPath, oid);
   }
   return result;
 }
@@ -57,12 +68,26 @@ function prepare(args) {
   if (!/^[^/]+\/[^/]+$/.test(repository)) fail("pages payload: GITHUB_REPOSITORY must be owner/repo");
 
   const current = parseCurrentTree(treePath);
+  try {
+    const stat = fs.lstatSync(path.join(siteRoot, nojekyll));
+    if (!stat.isFile() || stat.size !== 0 || stat.nlink !== 1) fail("pages payload: unsafe local .nojekyll");
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+  if (mode === "dev") {
+    const nestedMarker = fs.lstatSync(path.join(siteRoot, "dev", nojekyll), { throwIfNoEntry: false });
+    if (nestedMarker) fail("pages payload: dev/.nojekyll is reserved for the branch root");
+  }
   const additions = [];
-  const desired = new Set();
+  // Both publishers own this one shared deployment control. It does not belong to either feed,
+  // and a dev-only publish must also disable Jekyll for the already assembled branch root.
+  const desired = new Set([nojekyll]);
+  if (!current.has(nojekyll)) additions.push({ path: nojekyll, contents: "" });
   let decodedBytes = 0;
 
   for (const absolute of walkFiles(siteRoot)) {
     const relative = path.relative(siteRoot, absolute).split(path.sep).join("/");
+    if (relative === nojekyll) continue;
     const isDev = relative === "dev" || relative.startsWith("dev/");
     if ((mode === "dev") !== isDev) continue;
     const contents = fs.readFileSync(absolute);

@@ -116,6 +116,10 @@ printf '1. 2.3\n' > "$T/version/version.txt"
 check_rc "whitespace is not normalized into SemVer" 1 "$T/version/scripts/next-version.sh"
 
 echo "== 4. workflow trust and release ordering =="
+check_rc "filtered checkout and offline historical evidence pass" 0 \
+    python3 tools/release/test_ci_checkout.py
+check_rc "publication efficiency retains complete verification" 0 \
+    python3 tools/release/test_publication_efficiency.py
 check_rc "release tag lookup refuses unknown remote identity" 0 \
     node test/test_release_tag_guard_contract.mjs
 check_rc "manifest provenance validator self-test passes" 0 \
@@ -457,8 +461,10 @@ require("needs: [trusted_build]" in publish and
 require("contents: write" in publish and "actions: read" in publish,
         "publisher permissions are incomplete")
 require("OTA_SIGNING_KEY" not in publish, "write-capable publisher can see signing key")
-require("check-manifest-provenance.py" in publish,
-        "publisher does not verify signed artifact provenance")
+candidate_gate = (workflow_dir.parents[1] / "scripts/check-publish-version.sh").read_text(encoding="utf-8")
+for validator in ("check-manifest-provenance.py", "check-web-installer-plan.py", "generate-ota-changelog.py"):
+    require(validator in candidate_gate,
+            f"publisher candidate admission omits {validator}")
 require("check-signing-key-continuity.py" in publish,
         "publisher does not reverify signing-key continuity")
 publication_guard = ('check-publish-version.sh --candidate-dir dist --source-sha '
@@ -474,15 +480,15 @@ for name, block in (("trusted build", trusted), ("publisher", publish)):
     require('RUN_ATTEMPT: ${{ github.run_attempt }}' in block and
             dev_resume_guard.search(block) is not None,
             f"{name} does not keep first-attempt dev publishes strictly forward-only")
-require("generate-ota-changelog.py --validate dist/changelog.json" in publish,
-        "publisher does not validate the handed-off OTA changelog")
+require('--candidate-dir dist' in publish,
+        "publisher does not validate the handed-off OTA changelog and inventory")
 require(publish.count("dist/artifacts.json") >= 2,
         "publisher does not validate and publish artifacts.json")
 require("target_commitish: ${{ github.sha }}" in publish,
         "new release tag is not explicitly bound to github.sha")
 for notice in ("_site/LICENSE.txt", "_site/THIRD_PARTY_NOTICES.md", "_site/Apache-2.0.txt"):
     require(notice in publish, f"GitHub Release omits {notice}")
-provenance_check = publish.find("check-manifest-provenance.py")
+provenance_check = publish.find("check-signing-key-continuity.py")
 source_recheck = publish.find(publication_guard)
 root_publish = publish.find("Publish site to gh-pages (root)")
 release_create = publish.find("Create or resume release")

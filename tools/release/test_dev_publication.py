@@ -735,7 +735,15 @@ class SchedulingTests(unittest.TestCase):
         self.assertIn('ARTIFACT_NAME: daikin-altherma-esp32-${{ needs.trusted_build.outputs.version }}', publisher)
         self.assertIn('gh run download "$GITHUB_RUN_ID"', publisher)
         self.assertIn('SOURCE_SHA: ${{ github.sha }}', publisher)
-        self.assertIn('./scripts/check-manifest-provenance.py dist/manifest.json', publisher)
+        # Handoff validation is owned by the candidate gate, including full-rerun admission.
+        # Requiring a second direct provenance call would reintroduce redundant validation.
+        candidate = './scripts/check-publish-version.sh --candidate-dir dist --source-sha "$SOURCE_SHA"'
+        self.assertIn(candidate, publisher)
+        signature = './scripts/check-signing-key-continuity.py dist/daikin-altherma-esp32.bin'
+        self.assertLess(publisher.index(signature), publisher.index(candidate))
+        self.assertLess(publisher.index(candidate), publisher.index('Assemble dev-channel site'))
+        gate = (PROJECT / 'scripts/check-publish-version.sh').read_text()
+        self.assertIn('./scripts/check-manifest-provenance.py "$candidate_dir/manifest.json"', gate)
 
     def test_release_queue_and_whole_chain_lock(self):
         text = (PROJECT / '.github/workflows/build.yml').read_text()

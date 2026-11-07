@@ -12,7 +12,9 @@ layout and accessibility evidence. None of these contacts a heat pump or proves 
 ## Run
 
 For an ordinary PR, run this complete local gate set. During development, start with the affected
-surface; the table below explains what each result means.
+surface; the table below explains what each result means. Freeze code and documentation before the
+complete acceptance run. A relevant change or new finding invalidates only the affected evidence;
+do not repeat the complete suite without a reason. Local results never replace publication CI.
 
 ```bash
 scripts/run-mock-tests.sh --coverage
@@ -384,6 +386,14 @@ scripts/run-publish-version-tests.sh
 scripts/run-ci-release-contract-tests.sh
 scripts/run-build-change-detection-tests.sh
 ```
+
+`run-ci-release-contract-tests.sh` includes real offline partial-clone fixtures in
+`tools/release/test_ci_checkout.py`: full current source/history/tags, unchanged version derivation,
+selective historical-source hydration, an omitted historical binary and fail-closed missing inputs.
+Set `DAIKIN_CI_CHECKOUT_DOCKER_IMAGE=espressif/idf:v6.1` to add a read-only, network-disabled Linux
+read of the hydrated witness. `test_publication_efficiency.py` binds single CI selftest ownership,
+trust boundaries and manifest-first waiting to complete file/signature checks. Pages fixtures cover
+the shared empty root `.nojekyll`, legacy dev-only adoption, races and unsafe-marker rejection.
 
 These use temporary fixtures for concurrent Pages publishers, NVS-safe erase ranges, path validation,
 version ordering and signing/publishing trust. A local bare feed proves equal-version publication
