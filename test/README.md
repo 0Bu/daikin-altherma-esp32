@@ -279,8 +279,10 @@ review skills cover visual truth and complete interaction.
 The temporal matrix inventories every production inspector and the four disclosure families. It
 uses full 288-sample source rings and three real two-second updates per case, checking unchanged
 plot/prose nodes, continuous chart ancestry during scalar updates, CSS animations, collapsed-chart
-work and native input delivery. The
-fixed maximum frame gap and individual native key-event roundtrip are 250 ms; these fixture budgets catch recurring stalls,
+work, closed value-grid children, inspector member descendants and native input delivery. Inspector
+rows must retain their nodes while showing the latest generated readings; empty member lists stay
+empty. The fixed maximum frame gap and individual native key-event roundtrip are 250 ms; these
+fixture budgets catch recurring stalls,
 not guarantee a frame rate on every device. Negative controls reintroduce hidden-chart work, plot or
 animation replacement and a blocking poll. Static locale snapshots, reduced-motion cases and GIF
 poses remain separate evidence.
@@ -291,6 +293,10 @@ through real history requests and waits for the matching mounted revision. A cac
 between polls must remove the closed chart without invalidating other containers. A separate
 natural-poll case covers the regular 60-second
 cache expiry, generation change and permitted plot replacement before checking unchanged continuity.
+It also requires the unrelated closed value grid and inspector member rows to stay mounted during
+that refresh and records the transition evidence before its assertions, so a failed timing check
+retains the measurement.
+Steady-poll timing failures retain frame, render, refresh and input timestamps for diagnosis.
 The plot must be visible; schematic witnesses share its vertical viewport whenever they
 fit, with actual geometry recorded separately from animation clocks. Focus setup is also recorded
 separately. No frame from the first or subsequent measured poll is discarded.
@@ -305,13 +311,21 @@ worker; no positive latency window competes with those controls. All three worke
 Focused and serial invocations keep their existing order. A tight flow-stroke screenshot sequence under real polling verifies
 paint movement outside the latency sampling; a ninth canary freezes painted dash movement while
 its CSS animation clock continues. All eight shared temporal canaries must also fail for their intended
-assertions in WebKit. Linux headless WebKit is Safari-engine regression coverage; it does not prove
+assertions in WebKit. Flow capture runs in the positive orientations and the frozen-paint control;
+the other canaries retain their own polling assertions without repeating that capture.
+Linux headless WebKit is Safari-engine regression coverage; it does not prove
 physical iPad Safari, iPadOS or GPU performance.
 
 `DAIKIN_BROWSER_TIMEOUT_MS` bounds each engine phase separately (default 600000 ms, maximum 3600000 ms).
 The original Chromium deadline is unchanged; WebKit runs as a separate phase in the same CI job.
 Chromium launch shares one absolute deadline across endpoint headers/body, socket and initialization;
 worker/browser process groups are joined before the temporary page is removed.
+Positive cleanup fixtures first observe the owned child's requested stall; body-stall cases also
+require actual JSON-body consumption. Each then fires the captured 600 ms launch callback in an
+isolated worker. A 3 s readiness
+watchdog is separate from the 2.5 s post-expiry cleanup bound; this tests abort/cleanup, not natural
+wall-clock timer expiry. Delayed-start and missing-witness controls reject incorrect arming.
+Fixture reports require closed output streams, and process-inspection errors never prove exit.
 The container runs as fixed unprivileged UID/GID 1000, with no external network or host browser
 profile; only its own temporary storage is writable. Its snapshot includes the allowlisted current
 browser inputs and excludes ignored files, Git metadata, builds, symlinks and credential/artifact

@@ -6,24 +6,18 @@ const S = {
   stage: "dashboard",
   status: null,
   busy: false,
-  // Labels of value rows whose description accordion is currently expanded. Kept in app state (not
-  // the DOM) because #valueGroups is rebuilt on every poll (renderCards) — a purely-DOM open state
-  // would collapse on each 2 s values-poll render. valueGroupsHtml re-emits the `open` class from
-  // this set, so an expanded row survives the rebuild; the click handler only toggles the live
-  // element (so the CSS slide
-  // animates) and updates this set for the next rebuild to honour.
+  // Expanded description labels survive markup regeneration and structural DOM replacement.
+  // valueGroupsHtml emits `open` from this set. The click handler toggles the live element for
+  // its CSS transition and records the choice for subsequent renders.
   descOpen: new Set(),
   // Local presentation choice, retained across polling, language changes and Settings visits.
   dashboardCard: "diagnosis",
-  // Set while a click is in flight in #valueGroups; suspends the per-poll rebuild so it cannot
-  // detach the node the pointer went down on (renderCards explains why that loses the click
-  // outright). Released only by a timer, so it can never latch.
+  // Defer guarded poll updates during a click so a structural replacement cannot detach the
+  // pointer's target. Released by a timer so it cannot latch.
   clickHold: false,
   // 24-hour trend per historied concept: id -> {at, dt, unit, b0, v[]} for X10A, `modbus:<id>`
-  // for HomeHub, and `env3:<id>` for the independent outdoor sensor (or {err:true}). Cached in app
-  // state for the same reason descOpen is — #valueGroups is rebuilt on every poll, and re-fetching
-  // (or re-deriving) the sparkline on every values-poll render would both hammer the device and
-  // restart the panel's slide.
+  // for HomeHub, and `env3:<id>` for the independent outdoor sensor (or {err:true}). This cache
+  // keeps markup regeneration independent of device fetches and history derivation.
   // A missing entry means "not fetched yet", which is what makes the panel show its loading line.
   // Reboot/OTA continuity comes from the device's full-resolution flash journal; browser state is
   // never a second authority for measurements.
@@ -34,20 +28,16 @@ const S = {
   histIdentity: null,
   histUptime: null,
   // A PINNED trend readout per concept: id -> {t} (the pinned sample's unix instant) or {i, gen} when
-  // the device has no wall clock to anchor to. In app state, not the DOM, for the same reason
-  // descOpen is: the panel is re-emitted on every poll, and a crosshair written imperatively would
-  // vanish on each values-poll render. Anchored to the INSTANT so the ring rolling under it
-  // re-resolves to the same measurement instead of to whatever now occupies that slot
+  // the device has no wall clock to anchor to. App state preserves the pin across structural
+  // replacements and history updates. Anchoring to the instant re-resolves the same measurement
+  // as the ring rolls, rather than selecting whatever now occupies that slot
   // (logic/history.hpp's history_pin_index).
   histPin: new Map(),
-  // Browser-only legend choices survive poll rebuilds and are shared by both views of a chart.
+  // Browser-only legend choices survive renders and are shared by both views of a chart.
   histHidden: new Map(),
   // The label of the row whose trend is being scrubbed right now (mouse hover or finger down), or
-  // null. It FREEZES the #valueGroups rebuild — see renderCards. Without that the innerHTML is
-  // replaced on each values-poll render under the pointer: the captured element dies mid-drag and
-  // the readout flickers.
-  // Same trade the OTA readout takes with the Settings rebuild (S.otaShown), and for the same
-  // reason: a live-updating grid must not fight an interaction the user is in the middle of.
+  // null. Freeze trend-host updates during a scrub: a structural or history change could otherwise
+  // replace the captured plot and interrupt the gesture. scrubEnd resumes the affected hosts.
   scrub: null,
   // Schematic inspector: which hit target (INSPECT key) is selected, and the last liveData() the
   // poll produced. The panel re-renders from S.live on every poll, so an open explainer keeps
@@ -412,22 +402,10 @@ function hydrateRoutedPopup() {
 }
 
 function initNavigation() { applyRouteFromLocation(); }
-// The ONE innerHTML write path for every per-poll container, guarded twice against the same failure:
-// a poll lands every 2 s, and a rebuild landing between mousedown and mouseup destroys the element
-// under the finger, so the browser fires NO click at all — the tap is lost with nothing logged.
-//
-//   1. Markup unchanged → don't write. Enough on its own for #connTile, whose rows are stable
-//      between polls. NOT enough for #settingsCards any more: the ESP32 card carries the two
-//      board-memory rows again, and free heap moves on each `/status` refresh, so this check degrades
-//      to a plain write there exactly as it does for the value grid — which is why guard 2 below is
-//      armed on every repainted container, including the card navigation.
-//   2. A click is in flight → don't write. Needed because #valueGroups carries LIVE readings: its
-//      markup differs on almost every `/values` poll, so check 1 degrades to a plain write there and
-//      cannot help. Without this the value rows lost 3–60 % of taps depending on how long the button
-//      was held (DESIGN.md §6 carries the measurements).
-//
-// The cache is deliberately NOT updated when a write is skipped for reason 2 — recording markup that
-// was never written would make the next identical render skip a write the DOM still needs.
+// Shared cached write path for per-poll containers. Identical markup bypasses the reconciler;
+// hold=true also defers writes during a click. Compatible read-only trees can update text in place,
+// while structural replacements can detach a pointer target and lose its click (DESIGN.md §5.3).
+// Do not cache markup skipped by clickHold: the next render must still apply the deferred update.
 const _html = {};
 function setHtml(id, html, hold = true) {
   if ((hold && S.clickHold) || _html[id] === html) return;
@@ -806,7 +784,7 @@ function renderRollbackBanner() {
 // Shown when /status.last_crash is set — a fault reset (panic / watchdog / brown-out) or a core dump
 // still waiting in flash. Offers the raw dump download (symbolized offline against the matching .elf
 // — scripts/decode-coredump.sh) and a copy-paste diagnostics bundle for a bug report. Lives outside
-// #valueGroups (rebuilt every poll), so its state survives re-renders.
+// the value-grid renderer, so grid updates cannot replace the banner or its state.
 //
 // "Delete report" is a DEVICE action (POST /crash/dismiss), not a per-page hide: the banner used to
 // be suppressed in page state alone, so a reload — the first thing anyone does — brought the same

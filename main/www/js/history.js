@@ -1148,9 +1148,7 @@ function histHtml(id, unit, name, source = "") {
   // — never by re-rendering this HTML, which would fight the pointer.
   // `data-hist` is what the delegated pointer handlers match on, and it carries the sample count so
   // the geometry the handler needs comes from the same render that drew the path.
-  // A PINNED readout is emitted as part of the markup, not written onto the DOM afterwards — that is
-  // the whole reason it survives each values-poll rebuild that made the old hold-to-read behaviour
-  // necessary.
+  // Emit a pinned readout in the markup so structural replacements can restore it.
   // Its instant is re-resolved here on every render, so the pin follows its measurement as the ring
   // rolls and disappears once that measurement has left the day.
   const pi = histPinIndex(id, view);
@@ -1777,18 +1775,21 @@ function scrubEnd(plot) {
     plot.parentElement.querySelector(".vhist-tip.vhist-live").hidden = true;
     plot.parentElement.querySelector(".vhist-time.vhist-live").hidden = true;
   }
-  if (S.scrub) { S.scrub = null; renderTrendHosts(); }   // resume the frozen per-poll rebuild
+  if (S.scrub) { S.scrub = null; renderTrendHosts(); }   // resume the frozen trend hosts
 }
 
-// Polls replace whole card containers, while the inspector can replace only its history. Preserve
-// an active control in either path so keyboard users can continue exploring the same series.
+// Structural poll updates may replace card containers or an inspector's history. Preserve the
+// active control in either path so keyboard users can continue exploring the same series.
 function replaceHistoryHtml(host, html) {
   const active = globalThis.document?.activeElement;
   const { histId, histSeries, hist, source = "" } = active?.dataset || {};
   const owner = node => node?.closest?.(".vitem")?.querySelector("[data-desc]")?.dataset.desc;
   const focusedOwner = owner(active);
   const focused = host.contains?.(active);
-  if (!html.includes('class="vhist')) host.innerHTML = html;
+  // Also reconcile plain read-only rows. Other hosts without charts keep full writes:
+  // a control's live value is not represented by its attributes.
+  if (!html.includes('class="vhist') && host.id !== "valueGroups" && host.id !== "inspRows")
+    host.innerHTML = html;
   else {
     const roots = root => [...root.querySelectorAll(".vhist")]
       .filter(node => !node.parentElement?.closest(".vhist"));
@@ -2034,7 +2035,7 @@ function displayHomeHubLabel(row) {
 
 // The expandable row itself — a <button> header plus the collapsible panel beneath it. Shared by
 // the value list (vDescRow) and the Model card (modelDescRow) so the two cannot drift into two
-// slightly different accordions; `key` is what S.descOpen remembers across the per-poll rebuild, and
+// slightly different accordions; `key` is what S.descOpen remembers across renders, and
 // `valHtml` is pre-built markup (it carries the unit <span>), so it is NOT escaped here.
 // `trendId` is the series the panel carries, if any: the toggle fetches and un-pins by it, so the
 // id is derived ONCE (here, where the body was built) instead of again from the key — which for a
@@ -2218,8 +2219,8 @@ function modelDescRow(id, label, value, opt = {}) {
 }
 
 // Toggle a value row's description accordion. Only the LIVE element is flipped here (so the CSS
-// height transition actually runs); S.descOpen carries the state into the next per-poll rebuild,
-// which re-emits the row already-open (no re-animation). A <button> header means Enter/Space work
+// height transition actually runs); S.descOpen keeps subsequent markup consistent with that choice.
+// A <button> header means Enter/Space work
 // for free — no extra key handling needed.
 function toggleDesc(btn) {
   const item = btn.closest(".vitem");

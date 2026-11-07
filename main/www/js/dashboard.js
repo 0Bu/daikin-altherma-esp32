@@ -130,16 +130,10 @@ async function refreshValues(paint = true) {
 // the live diagram. The board (ESP32) card and the
 // WiFi/MQTT/Syslog/NTP rows are NOT here: both moved behind the gear onto Settings (renderSettings).
 function renderCards() {
-  // Frozen while a trend is being scrubbed (S.scrub): rebuilding innerHTML under an active pointer
-  // drops pointer capture and restarts the accordion, so the gesture would break on each values-poll
-  // render. The rows
-  // stop updating for the few seconds the finger is down and catch up on release — the same
-  // deliberate stall renderSettings takes for the OTA readout.
+  // Freeze trend hosts during a scrub so structural updates cannot replace the captured plot.
+  // Rows catch up when scrubEnd resumes rendering.
   if (S.scrub) return;
-  // Through setHtml like the other two per-poll containers, rather than writing innerHTML directly:
-  // that is where the click-in-flight and unchanged-markup guards live, and this grid was the one
-  // container bypassing both. The unchanged-markup half earns its keep here too — an idle plant or a
-  // dropped X10A link produces identical markup, so those polls stop writing at all.
+  // setHtml applies unchanged-markup and click-in-flight guards before reconciling the grid.
   // The opt-in controls the entire diagnosis card and its navigation entry. Its 24-hour rows also
   // require a live X10A link; passive refrigerant observations keep their independent collection.
   const checkup = S.status?.diagnostics?.enabled === true
@@ -238,23 +232,10 @@ function dashboardCardIcon(key) {
     `stroke-linejoin="round" aria-hidden="true" focusable="false">${paths}</svg>`;
 }
 
-// Hold the rebuild for the duration of one click, and make it IMPOSSIBLE to leave held — the same
-// obligation the scrub freeze carries (DESIGN.md §6): a pointerdown whose click never arrives would
-// otherwise stop every value row from updating, which reads as a dead device with no error anywhere.
-// A pointerdown that ends outside the row, a cancelled gesture and a browser that swallows the
-// sequence entirely are all covered — the last one by the watchdog alone.
-// The hold is released ONLY by its timer, never by an event. Two reasons, and the second is why an
-// event-based release would have been wrong rather than merely redundant:
-//
-//   * Nothing can leave it held. Every path ends in a timeout that always fires — there is no
-//     "pointerup that never came" to strand it (the failure mode the scrub guard needed two
-//     mechanisms to cover).
-//   * The window that must be covered extends PAST the click. Opening a trended row starts a fetch
-//     whose completion calls renderApp(), which landed ~80 ms after the click and replaced the panel
-//     mid-slide — the 220 ms open animation was cut a third of the way through, so even a click that
-//     DID register looked like one that had not. Releasing on `click` would leave that uncovered.
-//
-// Deliberately not a rebuild-on-release either: the next values-poll render redraws anyway.
+// Defer guarded writes while a pointer sequence and its following fetch/slide settle (DESIGN.md
+// §5.3). Only the timer releases this hold, so a cancelled or missing click cannot strand it and an
+// event cannot end it before the post-click work finishes. The next poll applies deferred markup;
+// timer release itself does not render.
 const CLICK_HOLD_DOWN_MS = 1200;   // press → covers a long press, the click, and the fetch behind it
 const CLICK_HOLD_UP_MS   = 600;    // release → covers the click, the slide and that same fetch
 let clickHoldTimer = 0;
@@ -1161,9 +1142,8 @@ function fmtUptime(s) {
 const uptimeRow = (s) => vrow(t("card.uptime"), fmtUptime(s), { cls: "mono num" });
 
 // Bytes as whole KiB — the same unit the firmware's own trend stores (logic/history.hpp), so the row
-// and the chart under it cannot disagree about what the number is. Whole KiB rather than a decimal:
-// the row is rebuilt on every poll, and a tenth of a KiB ticking on each `/status` refresh is noise,
-// not news.
+// and the chart under it cannot disagree about what the number is. Whole KiB avoids fractional
+// noise on each `/status` refresh.
 const fmtKiB = (b) => (b == null ? "—" : `${Math.round(b / 1024)} KiB`);
 
 // The board's own memory: free heap and the largest CONTIGUOUS free block. These two are back on the
@@ -1999,27 +1979,10 @@ function renderSettings() {
   snapshot.hidden = S.transportUnavailable !== "status";
   if (!snapshot.hidden) snapshot.textContent = `${t("ota.snapshot_label")}: ${t("ota.snapshot_value")} · ` +
     t(S.transportBusy ? "toast.busy_retry" : "toast.unreachable");
-  // Both containers are rebuilt on every poll (link state, pins and the OTA row all change). The
-  // Protocol card's RX/TX pin dropdown is interactive, so skip the rebuild while it is focused/open — otherwise the
-  // poll would collapse it mid-pick. It resumes once focus leaves (onPinPick blurs it after
-  // applying). setHtml keeps the rest from thrashing rows the user is tapping.
-  //
-  // The OTA readout in the Firmware row is the second reason to hold still, and it is not a
-  // cosmetic one: that readout is painted straight into the DOM by otaInline (it is not built from
-  // S, so a rebuild does not re-emit it), and a download reports for tens of seconds. Rebuilt on
-  // each 2 s values-poll render, the percentage would blink out and the checking spinner would
-  // restart its animation from zero on every frame — the header's own #otaStat is exempt from
-  // re-render for exactly this reason, and this slot needs the same protection by a different means.
-  // So the card freezes while
-  // the readout has anything to say — S.otaShown covers the terminal messages too, which are
-  // written after the flow released and would otherwise be wiped a fraction of a second into their
-  // linger. What freezes is a card of static facts, for the seconds an
-  // update takes; the one state that can meaningfully change under it (a new version) arrives with
-  // the page reload the install ends in. It freezes that card ALONE — the Connections tile carries
-  // no part of the readout, and a WiFi or broker link going down during a download is exactly the
-  // thing a user would want to see move.
-  // …and the third reason, since the ESP32 card carries charts again: a rebuild under an active
-  // pointer drops its capture and kills the scrub mid-drag (renderCards has the same guard).
+  // Changed status regenerates card markup. Defer writes while an interactive control has focus
+  // so replacement cannot close it mid-selection. A scrub also holds its plot's host.
+  // otaInline paints progress directly into the DOM. S.otaShown preserves that readout and its
+  // terminal messages against card replacement while Connections can still show link changes.
   if (S.scrub) return;
   const a = document.activeElement;
   const picking = !!(a && a.classList && (a.classList.contains("pin-sel") ||
@@ -2030,7 +1993,7 @@ function renderSettings() {
     setHtml("connTile", connectionsHtml());
   }
   // otaShown normally freezes an ALREADY-RENDERED card so direct progress DOM writes survive the
-  // 2 s values-poll rebuild. A reload reverses that order: resumeOta learns about the download first
+  // normal poll updates. A reload reverses that order: resumeOta learns about the download first
   // and can set otaShown before /status has ever produced the full cards. Permit exactly that first
   // status-backed render, then repaint the retained OTA view into the newly-created #otaStatSet.
   const firstStatusRender = !S.settingsHydrated;

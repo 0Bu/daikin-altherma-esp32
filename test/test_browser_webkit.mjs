@@ -35,7 +35,8 @@ for (const name of selected) {
     await page.navigate(server.url);
     await page.waitFor("typeof S !== 'undefined' && S.status && Array.isArray(S._values) && document.querySelector('#settingsCards .vgroup')");
     await page.evaluate("pollStop(); window.__browserPollSchedule=pollSchedule; pollSchedule=()=>{}; true");
-    page.assertFlowPaint = context => assertWebKitFlowPaint(page, context);
+    if (!mutation || mutation === "history-paint-freeze")
+      page.assertFlowPaint = context => assertWebKitFlowPaint(page, context);
     await assertHistoryMotion(page, server, "webkit/" + name + "/history-motion");
     const touch = await page.touchWitness();
     assert.ok(touch.touchstart >= 2 && touch.touchend === touch.touchstart &&

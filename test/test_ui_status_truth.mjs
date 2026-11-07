@@ -39,6 +39,7 @@ class Element {
   getAttribute(n) { return this.attributes[n] ?? null; }
   removeAttribute(n) { delete this.attributes[n]; }
   appendChild(c) { this.children.push(c); return c; }
+  replaceChildren(fragment) { this.innerHTML = fragment.innerHTML; this.children = []; }
   remove() {} matches() { return false; } closest() { return null; } contains() { return false; }
   setPointerCapture() {} releasePointerCapture() {} scrollIntoView() {}
   getBoundingClientRect() { return { top: 0, left: 0, width: 100, height: 20, bottom: 20, right: 100 }; }
@@ -52,7 +53,12 @@ class Document {
     if (!this.elements.has(id)) this.elements.set(id, new Element(id, this));
     return this.elements.get(id);
   }
-  createElement(tag) { return new Element(`tag:${tag}`, this); }
+  createElement(tag) {
+    const element = new Element(`tag:${tag}`, this);
+    // This status/copy fixture stores serialized markup; trend tests and browsers cover DOM reuse.
+    if (tag === "template") element.content = element;
+    return element;
+  }
   querySelector() { return null; }
   querySelectorAll() { return []; }
   addEventListener() {} removeEventListener() {}

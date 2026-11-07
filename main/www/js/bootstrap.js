@@ -27,7 +27,7 @@ function wire() {
   });
 
   // The firmware version in the header is static DOM (renderHeaderMeta only rewrites its text), so
-  // it takes a direct handler rather than the delegation the rebuilt cards need.
+  // it takes a direct handler; replaceable card controls use delegation.
   const vl = $("verLink");
   vl.setAttribute("aria-label", t("aria.ota"));
   vl.onclick = checkFirmwareUpdate;
@@ -61,9 +61,8 @@ function wire() {
     }
   });
 
-  // The dashboard card panel (#valueGroups) is rebuilt on every poll, so its row controls
-  // are wired by delegation: tapping a value row (that has a description) expands/collapses its
-  // explainer accordion.
+  // Delegate value-row controls so they also work after structural grid replacement.
+  // Tapping a row with a description toggles its explainer accordion.
   $("valueGroups").addEventListener("click", (e) => {
     // A scrub that ended on the plot must not fall through to the accordion header and collapse the
     // very panel the user was reading. On touch screens the gesture may start on the tooltip strip
@@ -72,24 +71,20 @@ function wire() {
     const desc = e.target.closest("[data-desc]");
     if (desc) toggleDesc(desc);
   });
-  // Trend scrubbing, delegated for the same reason (the grid is rebuilt every poll). Hover reads
-  // out without claiming anything; a press claims the pointer so the readout survives leaving the
-  // plot mid-drag, and freezes the rebuild until release.
+  // Delegate trend scrubbing across structural replacements. Hover reads without capture; a press
+  // captures the pointer and freezes trend-host updates until release.
   //
-  // Wired on BOTH containers that can hold a plot — the value grid and the schematic inspector —
-  // from one function, so the two can never drift into two slightly different scrub behaviours.
+  // All plot containers use the same wiring function so their scrub behavior stays consistent.
   // Every lookup inside is scoped to the plot the event came from (`closest`, then the plot's own
   // children), never a document-wide id: the same row's chart can be on screen twice at once, and a
   // global lookup would move the cursor on whichever copy happened to be first in the DOM.
   //
-  // EVERY pointerdown in a per-poll container holds the rebuild until its click resolves — see
+  // Every pointerdown in a guarded poll container arms the timed click hold — see
   // renderCards. Registered before the plot handlers and deliberately unfiltered: the row headers
   // are the rows people actually tap, and they are not plots.
   // Arm the click-in-flight hold from EVERY per-poll container that setHtml guards, not just the
-  // value grid: #settingsCards and #connTile rely on the unchanged-markup check alone, which
-  // protects them only while their markup is stable — a real state change landing on the exact tap
-  // that opens a config modal would still be lost. The card navigation uses the same protection
-  // when the available card list changes.
+  // value grid. Unchanged-markup caching alone cannot protect a tap when a real state change needs
+  // DOM replacement. The card navigation uses the same guard when its available entries change.
   for (const id of ["cardNav", "valueGroups", "settingsCards", "connTile"]) {
     const el = $(id);
     el.addEventListener("pointerdown", () => clickHold(CLICK_HOLD_DOWN_MS));
@@ -215,8 +210,8 @@ function wireTrendScrub(gv) {
 // The remaining delegated wiring, split out only so the scrub handlers above can be a function of
 // their container — same one-time setup, same order as before.
 function wireRestOfApp() {
-  // The ESP32/Protocol/Firmware/dynamic group (#settingsCards) is rebuilt every poll too, so its controls are
-  // delegated as well: Hardware's left action expands its explanation, its right action opens the
+  // Delegate Settings card controls across possible replacements. Hardware's left action expands
+  // its explanation, its right action opens the
   // board modal, the Firmware row runs the OTA check, and the Protocol card's RX/TX dropdowns re-run
   // pin auto-detection on change. The check stays on this screen — it
   // reports into the Firmware row's own slot (otaInline paints both slots), so nothing has to
@@ -257,8 +252,8 @@ function wireRestOfApp() {
     e.preventDefault();
     runHpProbe();
   });
-  // The Connections tile (#connTile) is rebuilt every poll too — each row's pencil opens its own
-  // edit modal (WiFi/MQTT/Syslog/NTP), delegated the same way.
+  // Delegate Connections actions across changed-status replacements; each pencil opens its own
+  // WiFi/MQTT/Syslog/NTP edit modal.
   $("connTile").addEventListener("click", (e) => {
     const edit = e.target.closest("[data-edit]");
     if (!edit) return;
