@@ -76,7 +76,7 @@ struct Trend {
 // the property being bought.
 struct PersistedHistory {
     // Checked before a single sample is believed — see logic/history_persist.hpp for what each of
-    // them rules out. `crc` covers the SEALED fields only (persist_crc below).
+    // them rules out. `crc` covers the SEALED fields only (history_persist_crc below).
     uint32_t magic;
     uint16_t version;
     // Boots that adopted this region and have not committed a bucket since: incremented and

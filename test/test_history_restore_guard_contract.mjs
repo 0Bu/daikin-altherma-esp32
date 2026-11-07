@@ -112,7 +112,7 @@ assert.ok(adopt.indexOf("P().residual_us[i] = booking.residual_us;") < sealAfter
   "the remainder is stored before the seal that covers it");
 assert.match(history, /int32_t residual_us\[logic::HISTORY_LIVENESS_RASTERS\];/,
   "one remainder per raster, in the sealed region");
-assert.match(body(history, "inline uint32_t persist_crc()"), /P\(\)\.residual_us/,
+assert.match(body(history, "inline uint32_t history_persist_crc()"), /P\(\)\.residual_us/,
   "the remainder is inside the seal, so a flipped bit is a bad_crc and not a forgiven drift");
 assert.match(body(history, "inline void persist_wipe("), /for \(auto& r : P\(\)\.residual_us\) r = 0;/,
   "a refusal and a wipe start the diffusion over");
@@ -176,7 +176,7 @@ const dhwBlind = Number(raw("main/logic/checkup.hpp").match(/DHW_LOSS_REBOOT_BLI
 assert.equal(dwellBlind, dhwBlind, "one restart allowance across the state ages, the DHW handoff and this");
 
 // The counter and the ENV III flag are inside the seal.
-const crcBody = body(history, "inline uint32_t persist_crc()");
+const crcBody = body(history, "inline uint32_t history_persist_crc()");
 assert.match(crcBody, /&P\(\)\.boots_since_commit/);
 assert.match(crcBody, /&P\(\)\.env3_live/);
 
