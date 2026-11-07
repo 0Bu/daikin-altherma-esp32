@@ -103,6 +103,13 @@ inline bool observation_header_matches(const HistoryJournalHeader& h) {
     return h.source == static_cast<uint8_t>(HistoryJournalSource::Checkup) &&
            history_journal_header_matches(h, observation_fingerprint(), OBSERVATION_WORDS, 3600);
 }
+// Dispatch only: the private builder's append request still carries ERASED, even after the
+// separate commit write succeeds. Ownership selects cleanup/log bookkeeping, never admission
+// of flash evidence; reads must retain observation_header_matches and their CRC checks.
+inline bool observation_append_owned(const HistoryJournalHeader& h) {
+    return h.source == static_cast<uint8_t>(HistoryJournalSource::Checkup) &&
+           h.catalog_fp == observation_fingerprint();
+}
 inline int64_t observation_bucket(int64_t unix_us) {
     return unix_us >= 0 ? unix_us / OBSERVATION_HOUR_US : INT64_MIN;
 }

@@ -15,6 +15,8 @@ EXTRA_SOURCES = tuple(HEADERS)
 INLINED_INDEX_HELPERS = (
     'observation_identity_word', 'observation_index_note_loss', 'observation_index_incomplete',
     'flash_index_stop_observation_record', 'flash_journal_scan',
+    'observation_append_owned',
+    'history_journal_reserve_sequence',
 )
 TOKEN = re.compile(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|/\*.*?\*/|//[^\n]*', re.S)
 DEFINITION = re.compile(r'\b([A-Za-z_]\w*)\s*\([^;{}]*?\)\s*(?:const\s*)?(?:noexcept\s*)?\{')
@@ -200,7 +202,7 @@ def validate_inlining(disassembly, error):
         if any(re.search(r'\b' + helper + r'\(', name) or
                re.match(r'^_Z.*' + str(len(helper)) + helper, name)
                for helper in INLINED_INDEX_HELPERS):
-            raise error('stop observation inlining: newly outlined index/scan helper needs frame/path review')
+            raise error('stop observation inlining: newly outlined journal/index/scan helper needs frame/path review')
         if (re.match(r'^daik::logic::ObservationIndexEntry::(?:bucket|sequence|slot)\(', name)
                 or re.match(r'^_ZNK4daik5logic21ObservationIndexEntry(?:6bucket|8sequence|4slot)E', name)):
             raise error('stop observation inlining: newly outlined index accessor needs frame/path review')
@@ -264,6 +266,19 @@ def self_test(budgets, sources, error):
          'inline auto new_header_callback = &flash_read_stop_observation;'),
         ('main/http_handlers.hpp', '',
          'inline void new_header_alias() { auto fn = &stop_observation_record; }'),
+        ('main/http_handlers.hpp', '',
+         'inline bool new_sequence_caller(uint64_t& next) { return daik::logic::history_journal_reserve_sequence(next, next); }'),
+        ('main/http_handlers.hpp', '',
+         'inline auto new_sequence_callback = &daik::logic::history_journal_reserve_sequence;'),
+        ('main/history.cpp',
+         'logic::history_journal_reserve_sequence(s_flash_next_sequence, r.header.sequence)', 'true'),
+        ('main/history.cpp',
+         'if (!logic::history_journal_reserve_sequence(s_flash_next_sequence, r.header.sequence))\n'
+         '        return ESP_ERR_INVALID_ARG;\n    esp_err_t e = flash_prepare_next_slot(slot);',
+         'esp_err_t e = flash_prepare_next_slot(slot);\n'
+         '    if (!logic::history_journal_reserve_sequence(s_flash_next_sequence, r.header.sequence))\n'
+         '        return ESP_ERR_INVALID_ARG;'),
+        ('main/logic/history_persist.hpp', 'next = next == UINT64_MAX ? 0 : next + 1;', 'next++;'),
         ('main/stop_observation_store.cpp', 'observation_index_fence_sequence(s_index, identity)', '0'),
         ('main/stop_observation_store.cpp', 'observation_index_fence_sequence(s_index, payload.identity)', '0'),
         ('main/stop_observation_store.cpp', 's_index.clipped_until_bucket == INT64_MAX', 'false'),
@@ -309,5 +324,5 @@ def self_test(budgets, sources, error):
         except error:
             count += 1
         else:
-            raise AssertionError('accepted unmeasured outlined index/scan helper ' + name)
+            raise AssertionError('accepted unmeasured outlined journal/index/scan helper ' + name)
     return count

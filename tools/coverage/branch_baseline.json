@@ -1628,6 +1628,132 @@
       },
       "hosted_confirmation": "GCC 15 linux/amd64 is local Docker hosted-candidate evidence with the exact hosted profile selected. No GitHub Actions execution is claimed; authoritative CI confirmation remains required.",
       "validation_boundary": "Four independent current-byte snapshots measured the same frozen 168 pure headers/profiles/test inputs. Exact-argument snapshot adapters return freshly exported committed baseline bytes only. The unchanged checker and 95-percent floor are retained. Store/runtime integration, target build, actual repository final invocation and device behavior are separate evidence."
+    },
+    {
+      "runner": "scripts/run-mock-tests.sh --coverage; raw compiler gcov inventories checked with unchanged repository parser",
+      "base_commit": "fed6e8fd68b83b957e2e210e4c7e70121976acf0",
+      "scope": "Builder-owned Stop append dispatch is independent of committed read admission. Every added measured outcome is taken; the sole existing untaken fixed-fingerprint fallback and all other header inventories are unchanged. Historical ratios and the 95-percent line floor are retained.",
+      "sources": {
+        "main/logic/observation_hourly.hpp": "d5cdc43ee251955b1fcf9a30868d8c9bfb8c057e2cb3ec5983cfc8900c77a813"
+      },
+      "test_source_sha256": "d7d2f543b73ab3d08bd12861f127b48e9404d5d4d22badf04bd9e799ccdf52e9",
+      "measured_branch_counts": {
+        "clang-17-darwin": {
+          "main/logic/observation_hourly.hpp": {
+            "taken": 137,
+            "outcomes": 138
+          }
+        },
+        "gcc-13-linux-ubuntu24": {
+          "main/logic/observation_hourly.hpp": {
+            "taken": 157,
+            "outcomes": 158
+          }
+        },
+        "gcc-15-linux-ubuntu26": {
+          "main/logic/observation_hourly.hpp": {
+            "taken": 157,
+            "outcomes": 158
+          }
+        },
+        "gcc-15-github-linux-ubuntu26": {
+          "main/logic/observation_hourly.hpp": {
+            "taken": 157,
+            "outcomes": 158
+          }
+        }
+      },
+      "measured_line_counts": {
+        "clang-17-darwin": {
+          "covered": 10857,
+          "executable": 11031
+        },
+        "gcc-13-linux-ubuntu24": {
+          "covered": 10341,
+          "executable": 10625
+        },
+        "gcc-15-linux-ubuntu26": {
+          "covered": 10337,
+          "executable": 10627
+        },
+        "gcc-15-github-linux-ubuntu26": {
+          "covered": 10333,
+          "executable": 10627
+        }
+      },
+      "compilers": {
+        "clang-17-darwin": "Apple clang 17.0.0 clang-1700.6.4.2",
+        "gcc-13-linux-ubuntu24": "g++ Ubuntu 13.3.0-6ubuntu2~24.04.1",
+        "gcc-15-linux-ubuntu26": "g++ Ubuntu 15.2.0-16ubuntu1",
+        "gcc-15-github-linux-ubuntu26": "g++ Ubuntu 15.2.0-16ubuntu1"
+      },
+      "measurement_limits": [
+        "Docker amd64 GCC completed the logic binary and gcov inventory, but the complete local runner stopped because Python package configuration failed under emulation. Its raw report was parsed on the host; this is not a successful complete hosted CI run.",
+        "Authoritative GitHub checks remain required for the exact PR head."
+      ]
+    },
+    {
+      "runner": "scripts/run-mock-tests.sh --coverage; raw compiler gcov reports verified with the unchanged repository parser",
+      "base_commit": "ee9da557d3d47c6b4bafdb56dd3aaff2c45dc4c5",
+      "scope": "Reserve one distinct sequence per attempted journal append before storage I/O. Zero, stale/future requests, ordinary advancement, maximum and exhausted sequences take all six new outcomes. Existing untaken outcomes, every other header inventory, historical ratios and the 95-percent executable-line floor are unchanged.",
+      "sources": {
+        "main/logic/history_persist.hpp": "bbddf03b0ebd97ac0859229ddff1267d6891fe61c9ccf8b7c8af4e1d1ea7353b"
+      },
+      "test_source_sha256": "ea22d8e1958a44b0be6c43180a558648acf4dbd6508c0777a0e6e5b49b54d47e",
+      "measured_branch_counts": {
+        "clang-17-darwin": {
+          "main/logic/history_persist.hpp": {
+            "taken": 474,
+            "outcomes": 529
+          }
+        },
+        "gcc-13-linux-ubuntu24": {
+          "main/logic/history_persist.hpp": {
+            "taken": 557,
+            "outcomes": 618
+          }
+        },
+        "gcc-15-github-linux-ubuntu26": {
+          "main/logic/history_persist.hpp": {
+            "taken": 555,
+            "outcomes": 616
+          }
+        },
+        "gcc-15-linux-ubuntu26": {
+          "main/logic/history_persist.hpp": {
+            "taken": 555,
+            "outcomes": 616
+          }
+        }
+      },
+      "measured_line_counts": {
+        "clang-17-darwin": {
+          "covered": 10862,
+          "executable": 11036
+        },
+        "gcc-13-linux-ubuntu24": {
+          "covered": 10349,
+          "executable": 10633
+        },
+        "gcc-15-github-linux-ubuntu26": {
+          "covered": 10341,
+          "executable": 10635
+        },
+        "gcc-15-linux-ubuntu26": {
+          "covered": 10345,
+          "executable": 10635
+        }
+      },
+      "compilers": {
+        "clang-17-darwin": "Apple clang 17.0.0 clang-1700.6.4.2",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+        "gcc-15-github-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+      },
+      "measurement_limits": [
+        "All measured Docker logic suites completed; their canonical runner rejected only the previous exact history_persist.hpp inventory before this measured update. The unchanged parser then verifies the retained reports on the host.",
+        "The local amd64 Docker run is not an authoritative GitHub-hosted run. Exact PR-head GitHub checks remain required before merge."
+      ]
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
@@ -1786,8 +1912,8 @@
         "outcomes": 184
       },
       "main/logic/history_persist.hpp": {
-        "outcomes": 523,
-        "taken": 468
+        "taken": 474,
+        "outcomes": 529
       },
       "main/logic/homehub_map.hpp": {
         "outcomes": 70,
@@ -2066,8 +2192,8 @@
         "outcomes": 98
       },
       "main/logic/observation_hourly.hpp": {
-        "taken": 135,
-        "outcomes": 136
+        "taken": 137,
+        "outcomes": 138
       }
     },
     "gcc-13-linux-ubuntu24": {
@@ -2224,8 +2350,8 @@
         "outcomes": 232
       },
       "main/logic/history_persist.hpp": {
-        "outcomes": 612,
-        "taken": 551
+        "taken": 557,
+        "outcomes": 618
       },
       "main/logic/homehub_map.hpp": {
         "outcomes": 78,
@@ -2504,8 +2630,8 @@
         "outcomes": 238
       },
       "main/logic/observation_hourly.hpp": {
-        "taken": 153,
-        "outcomes": 154
+        "taken": 157,
+        "outcomes": 158
       }
     },
     "gcc-15-github-linux-ubuntu26": {
@@ -2662,8 +2788,8 @@
         "outcomes": 230
       },
       "main/logic/history_persist.hpp": {
-        "outcomes": 610,
-        "taken": 549
+        "taken": 555,
+        "outcomes": 616
       },
       "main/logic/homehub_map.hpp": {
         "outcomes": 78,
@@ -2942,8 +3068,8 @@
         "outcomes": 238
       },
       "main/logic/observation_hourly.hpp": {
-        "taken": 153,
-        "outcomes": 154
+        "taken": 157,
+        "outcomes": 158
       }
     },
     "gcc-15-linux-ubuntu26": {
@@ -3100,8 +3226,8 @@
         "outcomes": 230
       },
       "main/logic/history_persist.hpp": {
-        "outcomes": 610,
-        "taken": 549
+        "taken": 555,
+        "outcomes": 616
       },
       "main/logic/homehub_map.hpp": {
         "outcomes": 78,
@@ -3380,8 +3506,8 @@
         "outcomes": 238
       },
       "main/logic/observation_hourly.hpp": {
-        "taken": 153,
-        "outcomes": 154
+        "taken": 157,
+        "outcomes": 158
       }
     }
   },

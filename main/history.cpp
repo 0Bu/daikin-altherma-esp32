@@ -2453,15 +2453,17 @@ bool flash_build_next_stop_observation(FlashJournalRecord& out) {
     return true;
 }
 
-// One attempt to append `r`. `slot` is the slot the attempt targeted, whatever its outcome, so the
-// caller can account for a failure against it.
+// One attempt to append `r`. After sequence admission, `slot` identifies the targeted slot even
+// on failure, so the caller can account for it. Invalid or exhausted sequences perform no I/O.
 esp_err_t flash_append_record_at(FlashJournalRecord& r, size_t& slot) {
-    slot        = 0;
+    slot = 0;
+    if (!logic::history_journal_reserve_sequence(s_flash_next_sequence, r.header.sequence))
+        return ESP_ERR_INVALID_ARG;
     esp_err_t e = flash_prepare_next_slot(slot);
     if (e != ESP_OK) return e;
-    const size_t offset = logic::history_journal_slot_offset(slot);
+    const size_t offset     = logic::history_journal_slot_offset(slot);
     const size_t body_bytes = sizeof(r.header) + logic::history_journal_payload_bytes(r.header);
-    e = esp_partition_write(s_flash_part, offset, &r, body_bytes);
+    e                       = esp_partition_write(s_flash_part, offset, &r, body_bytes);
     if (e == ESP_OK) {
         const uint32_t commit = logic::HISTORY_JOURNAL_COMMITTED;
         e = esp_partition_write(s_flash_part,
@@ -2475,9 +2477,8 @@ esp_err_t flash_append_record_at(FlashJournalRecord& r, size_t& slot) {
     const bool committed = read_e == ESP_OK && flash_record_physically_valid(verify) &&
                            verify.header.sequence == r.header.sequence &&
                            verify.header.bucket == r.header.bucket;
-    // A low-level program call may report an error after the chip accepted the bytes. The readback
-    // is the authority: treating a valid committed record as failed would retry the same sequence in
-    // another slot and make head selection ambiguous on the next boot.
+    // A low-level program call may report an error after the chip accepted the bytes. Valid
+    // committed readback remains the authority for acknowledgment, independent of that error.
     if (!committed) return e != ESP_OK ? e : (read_e != ESP_OK ? read_e : ESP_ERR_INVALID_RESPONSE);
 
     const size_t src = r.header.source;
@@ -2497,7 +2498,6 @@ esp_err_t flash_append_record_at(FlashJournalRecord& r, size_t& slot) {
             checkup_flash_appended(r.header.bucket);
     }
     s_flash_next_slot = (slot + 1) % logic::HISTORY_JOURNAL_SLOT_COUNT;
-    s_flash_next_sequence++;
     return ESP_OK;
 }
 
@@ -2576,17 +2576,18 @@ void flash_note_append_success(size_t slot) {
 }
 
 esp_err_t flash_append_record(FlashJournalRecord& r) {
-    size_t          slot = 0;
-    const esp_err_t e    = flash_append_record_at(r, slot);
+    const bool      stop_owned = logic::observation_append_owned(r.header);
+    size_t          slot       = 0;
+    const esp_err_t e          = flash_append_record_at(r, slot);
     if (e == ESP_OK) {
         flash_note_append_success(slot);
         // The ONLY place an ahead-of-the-clock episode ends: the source appended data again. A
         // manifest says nothing about the cursor, and a "no longer ahead" observation must not
         // end it either (see s_flash_ahead_logged).
-        if (!flash_is_manifest(r.header) && !logic::observation_header_matches(r.header))
+        if (!flash_is_manifest(r.header) && !stop_owned)
             s_flash_ahead_logged[r.header.source] = false;
     } else {
-        if (logic::observation_header_matches(r.header)) stop_observation_flash_failed();
+        if (stop_owned) stop_observation_flash_failed();
         flash_note_append_failure(slot, e, r.header);
     }
     return e;
