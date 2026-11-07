@@ -1,4 +1,4 @@
-// translation-source: 3e8092cf0e419496e78d337338f27af53fbda73918ad45f0bbe0970b83ebeddc
+// translation-source: fa1129dce36de7da23d04178f67c6ff1b7f7a1ba9974648b6bae1e479a441c15
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -800,7 +800,7 @@ I18N.es = localeValues([
   /* board.led_gpio_wiping */ "Fijo tras parpadeo muy rápido — restablecimiento/borrado en curso; no desconectes la alimentación.",
   /* board.ledinv */ "Activo en nivel bajo (el LED se enciende cuando el pin está en LOW)",
   /* board.btninv */ "Activo en nivel bajo (el botón conecta el pin a GND)",
-  /* board.hint */ "Restablecimiento de fábrica: mantén pulsado 5 s. Borra permanentemente Wi-Fi/todos los ajustes (solo se conserva la elección de placa, LED de estado y botón de reinicio), historial/tendencias, duraciones de estado y volcado de memoria sin procesar. El portal de configuración (Wi-Fi) solo se abre tras un borrado completo y correcto. Si no, suelta y mantén otros 5 s. Elige «Ninguno» sin botón.",
+  /* board.hint */ "Para restablecer los valores de fábrica, mantén pulsado el botón 5 s. Si el registro del historial no está listo, el restablecimiento no borra nada. Borra los ajustes de Wi-Fi y los demás ajustes, el historial guardado, la duración de los estados, el volcado bruto de memoria tras un fallo y el registro guardado para la limpieza de MQTT. Si es posible, se conservan los ajustes de la placa, el LED y el botón. Si falla un borrado, puede que solo se borre una parte de los datos. El dispositivo solo se reinicia si se completan todos los borrados. Si el restablecimiento no se inicia o no termina, consulta /diag. Si no hay ningún botón conectado, elige «Ninguno».",
   /* card.hardware */ "Hardware",
   /* card.hw_off */ "Ninguno",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,

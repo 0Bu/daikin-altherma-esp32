@@ -1,4 +1,4 @@
-// translation-source: 3e8092cf0e419496e78d337338f27af53fbda73918ad45f0bbe0970b83ebeddc
+// translation-source: fa1129dce36de7da23d04178f67c6ff1b7f7a1ba9974648b6bae1e479a441c15
 I18N.de = localeValues([
   /* sys.nodata */ "Keine Daten",
   /* sys.unreachable */ "Nicht erreichbar",
@@ -800,7 +800,7 @@ I18N.de = localeValues([
   /* board.led_gpio_wiping */ "Dauerlicht nach sehr schnellem Blinken — Werksreset/Datenlöschung läuft; Strom nicht trennen.",
   /* board.ledinv */ "Aktiv bei LOW — LED leuchtet bei niedrigem Pin-Pegel",
   /* board.btninv */ "Aktiv bei LOW — Taster zieht den Pin auf GND",
-  /* board.hint */ "Werksreset: Taster 5 s halten. Löscht dauerhaft WLAN/alle Einstellungen (nur die Wahl von Board, Status-LED und Reset-Taster bleibt erhalten), Historie/Trends, Zustandsdauern und Roh-Core-Dump. Das Einrichtungs-WLAN (Setup-Portal) öffnet sich nur nach vollständig erfolgreichem Löschen. Sonst loslassen und erneut 5 s halten. Ohne Taster „Keine“ wählen.",
+  /* board.hint */ "Werksreset: Taster 5 s halten. Ist das Verlaufsjournal nicht bereit, wird nichts gelöscht. Löscht WLAN- und andere Einstellungen, den aufgezeichneten Verlauf, Zustandsdauern, den unbearbeiteten Absturz-Dump und den gespeicherten Datensatz zur MQTT-Bereinigung. Board-, LED- und Tastereinstellungen bleiben erhalten, wenn möglich. Bei einem Löschfehler kann es sein, dass nur ein Teil der Daten gelöscht wurde. Neustart erst, wenn alle Löschschritte erfolgreich waren. Wenn der Reset nicht startet oder abbricht, /diag prüfen. Ohne angeschlossenen Taster „Keine“ wählen.",
   /* card.hardware */ "Hardware",
   /* card.hw_off */ "Keine",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,

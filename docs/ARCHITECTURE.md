@@ -111,9 +111,10 @@ Every boot starts with model `auto`; model identity is RAM-only. The physical li
 CRC-protected atomic `link` blob (RX, TX, protocol and observation identity). Its loaded pins are
 validated against chip reservations; an unusable pair falls back to the build default. The link is
 the primary function: an indicator, button or ENV III mapping on the final pair is disabled for the
-boot. Saves and a factory reset in that boot keep the stored indicator and button pins until a save
-states a real pin for the part or gives that pin to another board part; an ENV III mapping disabled
-this way is stored disabled by the next service save. Detection uses narrow,
+boot. Normal saves keep the stored indicator and button pins until a save states a real pin for the
+part or gives that pin to another board part. The next service save records an affected ENV III
+mapping as disabled. A [recovery-button reset](BOARDS.md#recovery-button) tries to keep the stored
+board settings. Detection uses narrow,
 revision-checked setters, never a whole configuration snapshot that could revert a concurrent save.
 
 The poll task performs detection while the profile is `auto`:
@@ -317,7 +318,7 @@ unreadable verification cannot prove that a commit was not programmed. Sequence 
 reusing an uncertain sequence could make a later acknowledged correction lose to the earlier copy.
 The history owner rebuilds the sum at restoration, after each of its hourly records
 is committed to the journal, after a replay, and when its oldest hour expires, even if the producer
-stops. It reuses one 96-byte flash-owner payload scratch and the history sector scratch, then
+stops. It reuses a 96-byte flash-owner payload buffer separate from the History sector buffer, then
 swaps the result in under a zero-wait take of the observation's lock; report and record paths never
 read the journal. A missing record leaves its hour unobserved; it is never inferred from the core
 bucket. The journal capacity assertion in `history_persist.hpp` must count the new records; static
@@ -326,13 +327,22 @@ memory and stack paths are measured on the target ELF.
 Stop records use the existing physical Checkup envelope with a distinct format fingerprint and
 width. Older firmware can discover their physical sequence/head without interpreting their payload
 as core diagnosis. The core bucket, its fingerprint and the five wire source IDs are unchanged.
-Finalized stop contexts revise the original stop hour; pending candidates never restore. Explicit
-resets require a committed barrier before reset durability is established. Fence ordering uses
+Finalized stop contexts revise the original stop hour; pending candidates never restore. Ordinary
+scoped resets require a committed barrier before reset durability is established. Fence ordering uses
 sequence and exact scope, independently of wall time; a backward clock correction cannot make a
 pre-reset future hour eligible after the fence ages. Power loss before that
 append can still restore older same-scope hours. Source changes and consent transitions withdraw
 live evidence immediately. Whole-hour aging also runs without further polls; missing records never
 borrow the core clock. New hourly observations must preserve these independent-source boundaries.
+History forgetting latches Stop suppression even before its mutex exists. It stops collection,
+restoration and new append offers and removes Stop evidence from reports for the rest of that
+boot. Startup, source binding and consent changes cannot clear the latch. The Store attempts
+cleanup without waiting for its lock. The History journal flash lock serializes append and erase;
+an already admitted append can finish before erasure takes that lock. History requires a compatible
+partition, both locks and the initial scan to return before attempting erasure. A scan read failure
+disables persistence but still permits erasure of the confirmed partition. The recovery button
+checks these prerequisites before erasing any data; a later erase can still fail. Logical suppression alone
+does not establish erasure or persistence across a reboot.
 The observation owner also rechecks wall/monotonic agreement on reports and flash service. An offset
 change beyond two seconds withdraws the dated view, fences the old archive and pauses this
 collection lifecycle; a fresh lifecycle or boot establishes a new anchor.

@@ -19,6 +19,7 @@ inline int64_t   now_us = 1000000;
 inline HostMutex mutex;
 inline HostMutex additional_mutexes[3];
 inline unsigned  mutex_count = 0;
+inline unsigned  fail_mutex_create = 0;
 inline unsigned  takes = 0, gives = 0;
 inline void (*before_take)() = nullptr;
 inline void (*shutdown)()    = nullptr;
@@ -31,7 +32,9 @@ inline esp_err_t   esp_register_shutdown_handler(void (*fn)()) {
     return ESP_OK;
 }
 inline SemaphoreHandle_t xSemaphoreCreateMutex() {
-    if (sdk::mutex_count++ == 0) {
+    ++sdk::mutex_count;
+    if (sdk::mutex_count == sdk::fail_mutex_create) return nullptr;
+    if (sdk::mutex_count == 1) {
         sdk::mutex = {};
         return &sdk::mutex;
     }
@@ -85,6 +88,9 @@ inline bool                                   synced           = true;
 inline unsigned                               core_appended = 0, core_restore = 0, stop_expiry = 0;
 inline bool                                   core_pending = false;
 inline int64_t                                core_bucket  = INT64_MIN;
+
+inline void (*during_find)() = nullptr;
+inline void (*during_read)() = nullptr;
 } // namespace journal_sdk
 const esp_partition_t* esp_partition_find_first(int, int, const char*);
 esp_err_t              esp_partition_read(const esp_partition_t*, size_t, void*, size_t);

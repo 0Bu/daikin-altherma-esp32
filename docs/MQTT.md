@@ -35,9 +35,9 @@ entities are created. [API.md](API.md#history-and-24-hour-checks) owns the field
 
 The heartbeat additionally publishes numeric `stop_context_*` fields, with five category prefixes
 such as `stop_context_request_withdrawal_positive`. These share the HTTP
-[`cycling.stop_context` contract](API.md) and independent population, including null counts before
-readable coverage and for unsupported categories. Metadata flags are `0`/`1`; existing fields and
-HA entities are unchanged. The HTTP-only `denominator` string is represented by the numeric field
+[`cycling.stop_context` contract](API.md#history-and-24-hour-checks) and independent population,
+including its nullable counts and flags. Known flags use `0` or `1`; existing fields and HA entities
+are unchanged. The HTTP-only `denominator` string is represented by the numeric field
 `stop_context_witnessed_stops_recent_heating` on MQTT.
 
 An initial transport-start rejection retains the initialized client and retries with bounded
@@ -352,8 +352,8 @@ and profile, never credentials or active configuration. A known predecessor is r
 replacement is saved, and the replacement is saved before discovery. Reload after a real reboot
 therefore resumes known-profile cleanup. A missing first-upgrade record cannot recover an unknown
 older profile; a corrupt/incompatible record blocks new X10A discovery rather than guessing.
-The recovery-button factory reset erases this record and refuses new saves until it reboots, so a
-profile announced before the reset needs the owner migration below.
+A completed [recovery-button factory reset](BOARDS.md#recovery-button) erases this record.
+A profile announced before that reset needs the owner migration below.
 An abandoned broker/base or replacement board is an owner migration boundary: the new connection
 does not authenticate to the old broker or blindly delete another installation's topics.
 

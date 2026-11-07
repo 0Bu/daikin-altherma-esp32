@@ -1,4 +1,4 @@
-// translation-source: 3e8092cf0e419496e78d337338f27af53fbda73918ad45f0bbe0970b83ebeddc
+// translation-source: fa1129dce36de7da23d04178f67c6ff1b7f7a1ba9974648b6bae1e479a441c15
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -805,7 +805,7 @@ I18N.pl = localeValues([
   /* board.led_gpio_wiping */ "Świeci stale po szybkim miganiu — reset/kasowanie danych; nie odłączaj zasilania.",
   /* board.ledinv */ "Aktywny stan niski (dioda świeci, gdy pin jest ustawiony na LOW)",
   /* board.btninv */ "Aktywny stan niski (przycisk zwiera pin do GND)",
-  /* board.hint */ "Reset fabryczny: przytrzymaj 5 s. Trwale kasuje Wi-Fi/wszystkie ustawienia (zostaje tylko wybór płytki, diody stanu i przycisku reset), historię/trendy, czasy stanów i surowy zrzut po awarii. Portal konfiguracyjny (Wi-Fi) otworzy się tylko po całkowitym i pomyślnym skasowaniu danych. Jeśli nie, zwolnij i przytrzymaj ponownie 5 s. Bez przycisku wybierz „Brak”.",
+  /* board.hint */ "Reset fabryczny: przytrzymaj przycisk przez 5 s. Jeśli dziennik historii nie jest gotowy, żadne dane nie zostaną usunięte. Usuwa ustawienia Wi-Fi i inne ustawienia, zapisaną historię, czasy trwania stanów, surowy zrzut pamięci po awarii i zapisany rekord do czyszczenia MQTT. Ustawienia płytki, diody LED i przycisku pozostają, jeśli to możliwe. Błąd podczas kasowania może sprawić, że tylko część danych zostanie usunięta. Urządzenie uruchomi się ponownie tylko po pomyślnym wykonaniu wszystkich kroków kasowania. Jeśli reset się nie rozpocznie lub nie zakończy, sprawdź /diag. Bez podłączonego przycisku wybierz „Brak”.",
   /* card.hardware */ "Sprzęt",
   /* card.hw_off */ "Brak",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,

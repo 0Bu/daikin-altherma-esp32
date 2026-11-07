@@ -236,6 +236,15 @@ const order = ["config_factory_seed_blob", ...ERASE_STEPS].map(firstCall);
 assert.ok(order.every((at, i) => i === 0 || order[i - 1] < at),
   "factory reset must build the board seed first, then erase every persisted user-data domain " +
   "in the fail-closed order, the MQTT retirement record after the coredump");
+const readiness = ifStatements(reset, resetOpen, resetEnd)[0];
+assert.ok(readiness && readiness.cond.replace(/\s+/g, "") === "!history_flash_forget_ready()" &&
+          reset.slice(resetOpen + 1, readiness.at).trim() === "",
+  "factory reset must check History erase readiness before the wiping LED, seed, delays or erases");
+assert.match(reset.slice(readiness.bodyAt, readiness.bodyEnd),
+  /^\{\s*diag_printf\s*\(\s*(?:"\s*"\s*)+\)\s*;\s*status_led_signal\s*\(\s*LedSignal::None\s*\)\s*;\s*return\s*;\s*\}$/,
+  "an unready factory reset may only report refusal, restore the indicator and return");
+assert.match(recoverySource.text.slice(readiness.bodyAt, readiness.bodyEnd),
+  /factory reset NOT STARTED/, "the refusal must distinguish an untouched reset from a partial erase");
 // Each step's result variable, so the branch conditions can be checked by name.
 const resultOf = (name) => {
   const at = firstCall(name);

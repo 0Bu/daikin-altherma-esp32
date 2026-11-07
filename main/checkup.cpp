@@ -96,6 +96,17 @@ logic::StopContextInputPlan s_stop_inputs;
 uint32_t                    s_stop_generation    = 0;
 bool                        s_stop_allow_restore = true;
 int64_t                     s_stop_read_fence_us = -1;
+constexpr logic::StopContextState  kEmptyStopContext{};
+constexpr CheckupStopContextReport kEmptyStopReport{};
+
+// Called only with the Checkup lock. Recovery latches independently, before Store startup or
+// while an owner is busy; retire the producer too so pending windows cannot outlive that intent.
+bool stop_context_suppressed_locked() {
+    if (!stop_observation_suppressed()) return false;
+    s_stop_context = kEmptyStopContext;
+    return true;
+}
+
 // Copy a read-only reset template without constructing the expanded state on a caller's stack.
 constexpr logic::DhwLossState  kFreshDhwLossState{};
 constexpr logic::DhwLossBucket kEmptyDhwLossBucket{};
@@ -405,10 +416,12 @@ void checkup_reboot_save() {
     // here rather than handing the old source's candidate to the next boot.
     apply_reset_locked();
     apply_dhw_reset_locked();
-    const int64_t stop_now   = esp_timer_get_time();
-    const auto    stop_event = logic::stop_context_seal(s_stop_context);
-    if (stop_event.valid) stop_observation_record(stop_now, false, stop_event);
-    stop_observation_seal();
+    if (!stop_context_suppressed_locked()) {
+        const int64_t stop_now   = esp_timer_get_time();
+        const auto    stop_event = logic::stop_context_seal(s_stop_context);
+        if (stop_event.valid) stop_observation_record(stop_now, false, stop_event);
+        stop_observation_seal();
+    }
     seal_open_hour_locked();
 
     PersistedDhwHandoff& h = P().dhw_handoff;
@@ -703,7 +716,8 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
     // the whole sample after clearing state; otherwise the tail of old poll A would seed the window
     // that new-link poll B continues. Dropping at most the first new sample is the conservative side.
     if (apply_reset_locked()) return;
-    if (s_source_confirmed && s_stop_inputs.schema_fp && now >= s_stop_read_fence_us) {
+    if (!stop_context_suppressed_locked() && s_source_confirmed && s_stop_inputs.schema_fp &&
+        now >= s_stop_read_fence_us) {
         // Bind a newly admitted live generation before consuming any of its inputs. No event from
         // the preceding source is admitted into the replacement lifecycle.
         if (source_generation != s_stop_generation) {
@@ -790,6 +804,7 @@ void checkup_stop_context_expire(int64_t) {
     if (!lk || !s_diagnostics_enabled.load(std::memory_order_acquire) || s_reset_requested.load() ||
         s_seal_bucket != INT64_MIN)
         return;
+    if (stop_context_suppressed_locked()) return;
     // A history tick may have waited behind a newer poll. Read time after admission so a stale
     // caller timestamp cannot masquerade as a regressed monotonic clock.
     const int64_t now_us = esp_timer_get_time();
@@ -801,11 +816,21 @@ void checkup_stop_context_expire(int64_t) {
 }
 
 CheckupStopContextReport checkup_stop_context_report() {
-    if (!s_mtx) return {};
+    CheckupStopContextReport r;
+    if (!s_mtx) {
+        r.observation.restore_pending = !stop_observation_suppressed();
+        return r;
+    }
     Lock lk(s_mtx);
-    if (!lk) return {};
+    if (!lk) {
+        r.observation.restore_pending = !stop_observation_suppressed();
+        return r;
+    }
+    if (stop_context_suppressed_locked()) {
+        r.observation.restore_pending = false;
+        return r;
+    }
     if (!s_diagnostics_enabled.load(std::memory_order_acquire) || s_reset_requested.load()) {
-        CheckupStopContextReport r;
         r.observation           = stop_observation_report();
         r.observation.confirmed = false;
         return r; // preserve the reset barrier's pending durability without admitting old evidence
@@ -816,10 +841,13 @@ CheckupStopContextReport checkup_stop_context_report() {
         stop_observation_record(now, false, event);
         s_stop_read_fence_us = now;
     }
-    CheckupStopContextReport r;
     r.observation     = stop_observation_report();
     r.capability_mask = logic::stop_context_capabilities(s_stop_inputs);
     r.pending         = s_stop_context.pending.valid;
+    if (stop_context_suppressed_locked()) {
+        r                             = kEmptyStopReport;
+        r.observation.restore_pending = false;
+    }
     return r;
 }
 

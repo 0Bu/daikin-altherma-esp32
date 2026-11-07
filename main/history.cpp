@@ -76,7 +76,7 @@ struct Trend {
 // the property being bought.
 struct PersistedHistory {
     // Checked before a single sample is believed — see logic/history_persist.hpp for what each of
-    // them rules out. `crc` covers the SEALED fields only (persist_crc below).
+    // them rules out. `crc` covers the SEALED fields only (history_persist_crc below).
     uint32_t magic;
     uint16_t version;
     // Boots that adopted this region and have not committed a bucket since: incremented and
@@ -286,7 +286,9 @@ inline bool copy_field(char* dst, size_t max, const char* src) {
 
 // ── Sealing the region, and adopting it again ───────────────────────────────────────────────────
 bool                  s_persist_dirty = false;
-logic::HistoryRestore s_persist_verdict = logic::HistoryRestore::NoRecord;
+// Status reads this standalone verdict without the History lock while Forget can replace it.
+std::atomic<logic::HistoryRestore> s_persist_verdict{logic::HistoryRestore::NoRecord};
+static_assert(decltype(s_persist_verdict)::is_always_lock_free);
 
 // Armed only when this boot ADOPTED its rings, spent by the first detection — see
 // history_reset_on_detect() for why detection alone is not evidence that the unit changed.
@@ -310,7 +312,7 @@ inline uint32_t persist_crc_ring(uint32_t crc, const logic::TrendRing& r) {
     return crc;
 }
 
-inline uint32_t persist_crc() {
+inline uint32_t history_persist_crc() {
     uint32_t crc = CONFIG_CRC32_INIT;
     crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(&P().x10a_target_fp),
                               sizeof(P().x10a_target_fp));
@@ -366,7 +368,7 @@ inline void room_wipe_locked(uint32_t identity) {
 // than five times a second.
 inline void persist_seal_locked() {
     if (!s_persist_dirty) return;
-    P().crc = persist_crc();
+    P().crc         = history_persist_crc();
     s_persist_dirty = false;
 }
 
@@ -692,6 +694,8 @@ std::atomic<bool> s_flash_forgotten{false};     // factory reset crosses button/
 bool s_flash_restore_done = false;
 bool s_flash_checkup_restore_done = false;
 bool s_flash_scan_ok = false;
+// Release-publish the partition and both locks after the scan.
+std::atomic<bool> s_flash_forget_ready{false};
 
 constexpr size_t kTotalRings = logic::HISTORY_FLASH_TOTAL_RINGS;
 constexpr size_t kJournalSources = logic::HISTORY_JOURNAL_SOURCE_COUNT;
@@ -855,9 +859,10 @@ void history_start() {
         mb_keep && rings_have_samples(P().mb_ring, HOMEHUB_HISTORY_COUNT),
         env3_keep && rings_have_samples(P().env3_ring, ENV3_HISTORY_COUNT)};
     const logic::HistoryRasterPlan plan = logic::history_raster_plan(s_liveness, weighed);
-    s_persist_verdict                   = logic::history_restore_verdict(
-        reason, P().magic, P().version, P().catalog_fp, want_fp, P().crc, persist_crc(), safe,
-        P().boots_since_commit, plan.region_bookable);
+    const auto                     persist_verdict = logic::history_restore_verdict(
+        reason, P().magic, P().version, P().catalog_fp, want_fp, P().crc, history_persist_crc(),
+        safe, P().boots_since_commit, plan.region_bookable);
+    s_persist_verdict.store(persist_verdict, std::memory_order_relaxed);
     // The numbers behind a refusal or a retirement, while the previous boot's record is still
     // unread: that the record itself did not verify, or that it holds no usable commit for the
     // raster, is the whole diagnosis (a raster that merely stalled is booked, not refused).
@@ -872,10 +877,10 @@ void history_start() {
                     static_cast<long long>(s_liveness.commit_us[1]),
                     static_cast<long long>(s_liveness.commit_us[2]));
     };
-    if (s_persist_verdict == logic::HistoryRestore::StaleCommit)
+    if (persist_verdict == logic::HistoryRestore::StaleCommit)
         log_unmeasured("X10A", plan.state[static_cast<size_t>(logic::HistoryJournalSource::X10a)]);
     const int64_t start_us = esp_timer_get_time();
-    if (s_persist_verdict == logic::HistoryRestore::Accept) {
+    if (persist_verdict == logic::HistoryRestore::Accept) {
         if (P().x10a_target_fp != boot_config.x10a_identity_fp) {
             for (size_t t = 0; t < TREND_COUNT; ++t) {
                 if (independent_trend(logic::TRENDS[t])) continue;
@@ -988,7 +993,8 @@ void history_start() {
         // Not noise: "wrong_catalog" after an update explains a chart that emptied itself for a
         // reason nobody would otherwise be able to reconstruct, and "bad_crc" on a board that was
         // never power-cycled is a memory fault worth seeing.
-        diag_printf("history: rings start empty (%s)\n", logic::history_restore_slug(s_persist_verdict));
+        diag_printf("history: rings start empty (%s)\n",
+                    logic::history_restore_slug(persist_verdict));
     }
     room_start_locked(safe ? 0 : logic::history_room_identity(boot_config), reason, safe, start_us);
     history_flash_start();
@@ -1001,10 +1007,17 @@ void history_start() {
 }
 
 bool history_checkup_flash_pending() {
-    return s_flash_part && s_flash_scan_ok && !s_flash_checkup_restore_done;
+    // Main calls after history_start and before producers, but the recovery button can
+    // already be forgetting the journal. Snapshot both flags under their owner lock.
+    if (s_flash_forgotten.load()) return false;
+    Lock flash_lk(s_flash_mtx, 0);
+    return flash_lk.acquired() && !s_flash_forgotten.load() && s_flash_scan_ok &&
+           !s_flash_checkup_restore_done;
 }
 
-const char* history_persist_state() { return logic::history_restore_slug(s_persist_verdict); }
+const char* history_persist_state() {
+    return logic::history_restore_slug(s_persist_verdict.load(std::memory_order_relaxed));
+}
 
 // The poll task's sign of life, every cycle — including the cycles that skip all work (a network
 // hold-off) and the ones spent detecting. Cheap by construction: a try-lock, a store and a CRC over
@@ -2893,6 +2906,8 @@ void history_flash_save() {
                     static_cast<unsigned>(written));
 }
 
+bool history_flash_forget_ready() { return s_flash_forget_ready.load(std::memory_order_acquire); }
+
 // The factory reset deletes the user's configuration; the plant history it recorded is theirs too.
 // Erasing all 4 MiB costs one cycle per sector and is deliberately reserved for this explicit action.
 bool history_flash_forget() {
@@ -2901,7 +2916,12 @@ bool history_flash_forget() {
     // Readers are suppressed immediately, even if the subsequent physical erase fails. Retire
     // browser leases at that privacy boundary rather than letting them display the forgotten data.
     bump_history_epoch();
-    const auto wipe_ram_and_index = []() {
+    // The recovery button can run during startup. Until the scan has returned and the handles
+    // are published, an unresolved or unusable partition is not evidence of an empty journal.
+    if (!s_flash_forget_ready.load(std::memory_order_acquire)) return false;
+
+    // Keep the RAM/index cleanup frame separate from the flash-erase path.
+    const auto wipe_ram_and_index = []() __attribute__((noinline)) {
         if (!s_mtx) return false;
         Lock history_lk(s_mtx);
         if (!history_lk.acquired()) return false;
@@ -2925,7 +2945,7 @@ bool history_flash_forget() {
         s_mb_reset_requested.store(false);
         s_circulation_reset_requested.store(false);
         s_adopt_detect_grace = false;
-        s_persist_verdict = logic::HistoryRestore::NoRecord;
+        s_persist_verdict.store(logic::HistoryRestore::NoRecord, std::memory_order_relaxed);
 
         // The index describes the bytes just erased. Clear it too so a request in the short
         // interval before reboot cannot splice an old slot back into the now-empty RAM rings.
@@ -2943,8 +2963,6 @@ bool history_flash_forget() {
         return true;
     };
 
-    if (!s_flash_part) return wipe_ram_and_index(); // no compatible journal exists to erase
-    if (!s_flash_mtx) return false;
     // Flash service takes flash -> history in that order while building a record. Keep the same
     // order here: once this lock is ours no stale record can be appended after the erase, and once
     // the history lock is ours no producer can refill the RAM region after it is wiped.
@@ -2982,10 +3000,10 @@ static void history_flash_start() {
         return;
     }
     s_flash_scan_ok = flash_journal_scan();
-    if (!s_flash_scan_ok) {
-        diag_printf("history: journal disabled this boot (scan incomplete)\n");
-        return;
-    }
+    if (!s_flash_scan_ok) diag_printf("history: journal disabled this boot (scan incomplete)\n");
+    // A read failure disables persistence, but a known compatible partition can still be erased.
+    // Publish last so Forget cannot overlap the scan or its final state checks.
+    if (s_mtx) s_flash_forget_ready.store(true, std::memory_order_release);
 }
 
 } // namespace daik

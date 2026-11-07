@@ -1,4 +1,4 @@
-# Shared journal append runtime fixture
+# Shared journal runtime fixture
 
 This fixture compiles the complete production `main/history.cpp` translation unit and separately
 compiles the real `main/stop_observation_store.cpp`. The local ports provide only SDK mutexes,
@@ -14,13 +14,16 @@ python3 test/history_journal_runtime/run.py --sanitizer undefined --out /private
 An explicit output directory must be new; otherwise a private temporary directory is created.
 It retains compiler commands/version, each translation unit's
 MMD dependencies, dependency hashes, production snapshots, binaries, per-case stdout/stderr and
-a JSON receipt. Each case is a fresh executable process. `--expect-red` requires the original
+a JSON receipt. Each actual compile's dependency paths must match the preflight set for its
+translation unit. A compiling control replaces only the History source path with its generated
+mutation. The runner checks the input hashes across compilation, linking and the final receipt.
+Each case is a fresh executable process. `--expect-red` requires the original
 claim-release oracle to fail. `--expect-red --expect-red-case late-correction` instead runs the
 paired seed/restore witness and requires the named acknowledged-correction oracle to fail in the
 fresh process. A compiler, setup or sanitizer failure never counts as an expected RED. Historical
 RED receipts retain the source and fixture hashes from the respective pre-fix execution.
 
-The 24 baseline process cases cover:
+The 36 baseline process cases cover:
 
 - Regular public Start/bind/record/seal calls creating one Stop population. Consent changes create
   reset barriers; the fixture never seeds private Store observations, claims or latches.
@@ -46,15 +49,29 @@ The 24 baseline process cases cover:
   contract and exactly one Core acknowledgment. Zero, out-of-order and already consumed requests
   must be rejected before all flash I/O. Exhaustion arithmetic is covered by the separate pure
   logic tests; this fixture does not modify private counters to manufacture an exhausted runtime.
+- Forget immediately suppresses both owners and invalidates the History reader lease. Calls before
+  startup, from partition lookup or a scan read, with unresolved/incompatible geometry, or after
+  either mutex allocation failure must refuse without changing synthetic NOR. Both startup
+  interleavings then retry in the same boot. A finished scan, including one that returned a read
+  failure, permits exactly one full erase of the compatible journal. Three sentinels and the
+  complete simulated partition distinguish successful erasure from a successful return alone.
+- The startup Checkup query uses the real Core record from the paired synthetic NOR seed. A
+  healthy scan reports pending, a contended flash mutex makes the query return immediately, and
+  real restore clears pending. A Forget interleaved before the query acquires the mutex suppresses
+  pending even when all erase attempts fail and both scan flags still describe pending recovery.
 
-Five independently compiled History mutations remove the failure callback, restore the erroneous
+The append mutations remove the failure callback, restore the erroneous
 read-header classifier, clear the Core ahead episode after Stop success, or trust a commit error
-over valid readback. The fifth restores success-only sequence consumption: data/barrier/Core
+over valid readback. Another restores success-only sequence consumption: data/barrier/Core
 reservation oracles must fail, and a passing paired seed followed by a fresh process must lose the
-acknowledged late correction at its precise oracle. Eleven named semantic failures are required.
+acknowledged late correction at its precise oracle. The Forget mutations restore null-partition
+success, publish readiness before the scan or without the History mutex, and report success
+without erasing. The pending-query mutations restore the unlocked flags read or drop either
+Forget check. The twelve independently compiled mutations must fail 23 named semantic oracles.
 Five unknown-case probes must fail explicitly. Compilation errors never count as negative proof.
 
-This is deterministic host evidence for the History/Stop append contract. The Core producer and
-hardware flash driver are external ports; this fixture does not establish Checkup evaluation,
-hardware programming, physical reboot restoration, all wrap/power-loss outcomes, target resource
-fit, HTTP/UI behavior or feature acceptance.
+This is deterministic host evidence for the History/Stop append and Forget contracts. The lookup
+and scan ports exercise specific interleavings in one thread. The Core producer and hardware flash
+driver are external ports. Thread scheduling, Checkup evaluation, hardware programming, physical
+reboot restoration, all wrap/power-loss outcomes, target resource fit, HTTP/UI behavior and feature
+acceptance require separate evidence.

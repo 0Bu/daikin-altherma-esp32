@@ -1,4 +1,4 @@
-// translation-source: 3e8092cf0e419496e78d337338f27af53fbda73918ad45f0bbe0970b83ebeddc
+// translation-source: fa1129dce36de7da23d04178f67c6ff1b7f7a1ba9974648b6bae1e479a441c15
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -800,7 +800,7 @@ I18N.nb = localeValues([
   /* board.led_gpio_wiping */ "Fast lys etter rask blinking — fabrikktilbakestilling/datasletting; ikke koble fra strømmen.",
   /* board.ledinv */ "Aktiv ved LOW — LED lyser ved lavt pinnenivå",
   /* board.btninv */ "Aktiv ved LOW — knappen trekker pinnen til GND",
-  /* board.hint */ "Fabrikktilbakestilling: hold 5 s. Sletter Wi-Fi/alle innstillinger (bare valget av kort, status-LED og tilbakestillingsknapp beholdes), historikk/trender, tilstandsvarighet og rå kjernedump permanent. Oppsettportalen (Wi-Fi) åpnes bare etter fullført og vellykket sletting. Ellers slipp og hold igjen i 5 s. Velg «Ingen» uten knapp.",
+  /* board.hint */ "Hold knappen inne i 5 sekunder for å tilbakestille til fabrikkinnstillingene. Hvis historikkjournalen ikke er klar, slettes ingenting. Tilbakestillingen sletter Wi-Fi og andre innstillinger, registrert historikk, tilstandsvarigheter, den rå krasjdumpen og den lagrede oppføringen for MQTT-opprydding. Innstillingene for kort, LED og knapp beholdes hvis mulig. Hvis en sletting mislykkes, kan deler av dataene allerede være slettet. Enheten starter på nytt bare hvis all sletting lykkes. Sjekk /diag hvis tilbakestillingen ikke starter eller fullføres. Velg «Ingen» hvis ingen knapp er koblet til.",
   /* card.hardware */ "Maskinvare",
   /* card.hw_off */ "Ingen",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,

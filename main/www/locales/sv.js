@@ -1,4 +1,4 @@
-// translation-source: 3e8092cf0e419496e78d337338f27af53fbda73918ad45f0bbe0970b83ebeddc
+// translation-source: fa1129dce36de7da23d04178f67c6ff1b7f7a1ba9974648b6bae1e479a441c15
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -800,7 +800,7 @@ I18N.sv = localeValues([
   /* board.led_gpio_wiping */ "Fast sken efter snabb blinkning — fabriksåterställning/dataradering; koppla inte från strömmen.",
   /* board.ledinv */ "Aktiv vid LOW — LED lyser vid låg stiftnivå",
   /* board.btninv */ "Aktiv vid LOW — knappen drar stiftet till GND",
-  /* board.hint */ "Fabriksåterställning: håll 5 s. Raderar permanent Wi-Fi/alla inställningar (bara valet av kort, status-LED och återställningsknapp behålls), historik/trender, tillståndstider och rå kärndump. Konfigurationsportalen (Wi-Fi) öppnas bara efter fullständig och lyckad radering. Annars släpp och håll igen i 5 s. Välj «Ingen» utan knapp.",
+  /* board.hint */ "Håll knappen intryckt i 5 sekunder för att återställa fabriksinställningarna. Om historikjournalen inte är redo raderas ingenting. Återställningen raderar Wi-Fi-inställningar och övriga inställningar, sparad historik, tillståndstider, den råa kraschdumpen och den sparade posten för MQTT-rensning. Inställningarna för kort, LED och knapp behålls om möjligt. Om raderingen misslyckas kan en del data redan ha raderats. Enheten startar om först när all radering har lyckats. Kontrollera /diag om återställningen inte startar eller slutförs. Välj «Ingen» om ingen knapp är ansluten.",
   /* card.hardware */ "Maskinvara",
   /* card.hw_off */ "Ingen",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,

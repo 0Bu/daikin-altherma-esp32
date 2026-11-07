@@ -1,4 +1,4 @@
-// translation-source: 3e8092cf0e419496e78d337338f27af53fbda73918ad45f0bbe0970b83ebeddc
+// translation-source: fa1129dce36de7da23d04178f67c6ff1b7f7a1ba9974648b6bae1e479a441c15
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
@@ -800,7 +800,7 @@ I18N.zh = localeValues([
   /* board.led_gpio_wiping */ "极速闪烁后常亮 — 正在恢复出厂设置/清除数据；请勿断电。",
   /* board.ledinv */ "低电平有效（引脚为 LOW 时 LED 点亮）",
   /* board.btninv */ "低电平有效（按钮将引脚接到 GND）",
-  /* board.hint */ "恢复出厂设置：按住 5 秒，永久清除 Wi-Fi/全部设置（仅保留开发板、状态 LED 和复位按钮的选择）、历史/趋势、状态持续时间和原始核心转储。全部清除成功后才打开配置门户；否则松开后再按 5 秒重试。未接按钮请选择“无”。",
+  /* board.hint */ "要恢复出厂设置，请按住按钮 5 秒。如果历史日志尚未就绪，则不会清除任何数据。重置会清除 Wi-Fi 等设置、已记录的历史数据、状态持续时间、原始崩溃转储和已保存的 MQTT 清理记录。开发板、LED 和按钮的设置会尽可能保留。清除失败时，可能已有部分数据被清除。只有所有清除操作都成功，设备才会重启。如果重置未开始或未完成，请查看 /diag。未连接按钮时，请选择“无”。",
   /* card.hardware */ "硬件",
   /* card.hw_off */ "无",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,

@@ -279,8 +279,9 @@ exclusive causes. `categories` contains `low_rps_above_main_target`, `request_wi
 `dhw_transition` and `route_mode_transition`, each with `supported`, `positive`, `evaluable` and
 `complete`. Evaluable means a positive was established or the complete sampled window was readable;
 complete alone permits a sampled-window negative. Readable endpoints do not exclude pulses between
-polls. Unsupported categories have null counts; all counts are null before confirmed readable
-coverage. A covered population with no stops is zero.
+polls. Unsupported categories have null counts. Stop-population counts are null before confirmed
+readable coverage and zero for a covered population with no stops. Source metadata such as
+`observed_hours` and `dropped` can be numeric as soon as the source is confirmed.
 Numeric source values must be consumed completely; binary witnesses require the converter's exact
 `0` or `1` token. Malformed values leave the affected observation unknown.
 
@@ -309,14 +310,20 @@ coverage duration. `confirmed`, `dated`, `coverage_partial`, `restore_pending`,
 `persistence_pending` and `pending` separate source, clock, coverage, storage and unfinished-window
 state. Owner reads validate clock agreement even without new producer samples. A wall/monotonic
 offset change beyond two seconds withdraws the dated view and queues a durable fence; source
-confirmation remains independent. Collection resumes in a fresh lifecycle or boot. Power loss
-before fence commit can still restore earlier compatible records. An incomplete reset-fence index
-withholds completed restoration and keeps coverage partial; waiting one day alone cannot establish
-that a lost reset is harmless. There is no inferred source
+confirmation remains independent. After this clock fault, collection resumes in a fresh lifecycle
+or boot. Power loss before fence commit can still restore earlier compatible records. An incomplete
+reset-fence index withholds completed restoration and keeps coverage partial; waiting one day alone
+cannot establish that a lost reset is harmless. There is no inferred source
 timestamp. The parameters `window_s:30` (each side),
 `max_gap_s:15`, `low_rps:22` and `above_main_target_k:2` are project observation rules, not Daikin
 limits. [DIAGNOSTIC_EVIDENCE.md](DIAGNOSTIC_EVIDENCE.md#diagnosis-cycling) owns their interpretation;
 [ARCHITECTURE.md](ARCHITECTURE.md#history-and-diagnosis-persistence) owns restoration and reset limits.
+
+A report taken after History forgetting withdraws Stop evidence for the rest of that boot.
+If the Stop object is emitted, counts are null and `confirmed`, `pending`, `restore_pending`
+and `persistence_pending` are false. Those flags describe withdrawn work; they do not establish
+successful restoration or erasure. `saturated` is null without a confirmed readable population,
+and each category's `supported` flag is null without source confirmation.
 
 `min_unix_s` is the pressure minimum's earliest dated occurrence in the retained window, null without
 a synchronized clock; equal minima keep the earliest known time, not an inferred pressure dip.
@@ -467,10 +474,10 @@ byte/version layouts.
 A failed route-owned save returns `500 {ok:false,error:"config write failed"}` with no reboot/live
 apply. Unrelated link-cache maintenance failure is logged without rejecting an already committed
 service blob; an X10A save requires its atomic link write. Never move/resize `nvs@0x9000`.
-The [recovery-button factory reset](BOARDS.md#recovery-button) leaves only the stated board
-hardware, rewritten as a fresh `cfg` blob, best effort. Any erase failure reports an incomplete
-reset rather than pretending success; while the reset holds the NVS latch, saves fail and every
-other restart is refused.
+A completed [recovery-button factory reset](BOARDS.md#recovery-button) leaves only the stated
+board hardware, rewritten as a fresh `cfg` blob on a best effort basis. A failure after erasure
+starts can leave a partial wipe. While the reset holds the NVS latch, saves fail and other
+restart paths are refused.
 
 ### Network settings
 

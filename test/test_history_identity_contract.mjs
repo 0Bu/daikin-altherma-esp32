@@ -264,7 +264,7 @@ const mqttHa = read("main/mqtt_ha.cpp");
 assert.match(persistHeader, /HISTORY_PERSIST_VERSION\s*=\s*(?:[3-9]|\d{2,})\s*;/,
   "the .noinit layout gained a sealed field: the persist version must move off 2");
 assert.match(history, /uint32_t circulation_fp;/, "the sealed region names the circulation identity");
-assert.match(functionBody("inline uint32_t persist_crc()", "// Called at the end of every record cycle"),
+assert.match(functionBody("inline uint32_t history_persist_crc()", "// Called at the end of every record cycle"),
   /&P\(\)\.circulation_fp/, "the seal must cover the circulation identity it is compared with");
 assert.match(functionBody("inline void persist_wipe(", "uint32_t current_mb_target_fp()"),
   /P\(\)\.circulation_fp\s*=\s*circulation_fp/);

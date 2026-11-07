@@ -125,15 +125,21 @@ wired; a floating input can trigger an unintended reset.
 
 ## Recovery button
 
-Holding a configured button for five seconds erases serialized settings, legacy and WiFi-driver
-credentials, history/trend/state-age data (RAM and flash journal), the raw coredump and the MQTT
-retirement record; the stated board hardware (preset, indicator, button) is kept, best effort, so
-the button still works afterwards.
+Holding a configured button for five seconds starts a reset if History is ready. The reset erases
+serialized settings, legacy and WiFi-driver credentials, history/trend/state-age data (RAM and
+flash journal), the raw coredump and the MQTT retirement record. The board tries to keep its stated
+hardware (preset, indicator, button) so the button still works afterwards.
 A hold counts only after three consecutive pressed samples, and a button held at boot stays
-inactive until it reads released three times. It reboots into setup only after every erase
-succeeds; an incomplete wipe remains on the current boot, is reported in `/diag`, and the indicator
-returns to its normal pattern. Release while arming to abort. Preserve needed configuration and
-crash evidence before using it.
+inactive until it reads released three times. Read reset messages in `/diag` on the LAN during the
+current boot, or on the serial console if the LAN is unavailable. If the reset did not start because
+History is not ready, that attempt erased nothing. Let startup finish before releasing and holding again.
+If it still cannot start, check the History startup messages and the
+[supported journal layout](ARCHITECTURE.md#history-and-diagnosis-persistence).
+An erase failure after reset starts can leave a partial wipe. The board stays on the current boot,
+reports the incomplete step in `/diag`, and returns the indicator to normal. It restarts only
+after every required erase succeeds. A successful reset can reconnect over Ethernet without opening
+the setup portal. Release while arming to abort. Preserve needed configuration and crash evidence
+before using it.
 
 ## Feature availability by board
 

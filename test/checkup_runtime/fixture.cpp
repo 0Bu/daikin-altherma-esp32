@@ -16,6 +16,7 @@ daik::CirculationPumpSample circulation{true, true, false};
 bool                        journal_pending     = true;
 unsigned                    circulation_samples = 0;
 void (*on_circulation)()                        = nullptr;
+void (*on_time)()                               = nullptr;
 int64_t unix_origin                             = 1700000000;
 } // namespace adapter
 namespace daik {
@@ -29,6 +30,11 @@ bool history_checkup_flash_pending() { return adapter::journal_pending; }
 bool safe_mode_active() { return false; }
 bool time_synced() { return true; }
 void time_now(int64_t& s, int32_t& ms) {
+    if (adapter::on_time) {
+        const auto f     = adapter::on_time;
+        adapter::on_time = nullptr;
+        f();
+    }
     s  = adapter::unix_origin + sdk::now_us / 1000000;
     ms = 0;
 }
@@ -510,10 +516,37 @@ std::vector<CachedValue> stop_rows(bool running, bool request = true, bool targe
 }
 
 void stop_context_case(const std::string& name) {
+    if (name == "stop_unstarted_report_pending") {
+        require(checkup_stop_context_report().observation.restore_pending,
+                "stop_unstarted_still_reports_restore_pending");
+        require(sdk::mutex_count == 0 && sdk::takes == 0,
+                "stop_early_read_does_not_allocate_or_lock");
+        return;
+    }
+    if (name == "stop_forget_before_checkup_start" || name == "stop_forget_checkup_alloc_failure") {
+        stop_observation_forget();
+        if (name == "stop_forget_checkup_alloc_failure") {
+            sdk::fail_create_once = true;
+            boot();
+            require(s_mtx == nullptr, "stop_checkup_allocation_failure_exercised");
+        }
+        const auto r = checkup_stop_context_report();
+        require(!r.observation.restore_pending && !r.observation.persistence_pending &&
+                    !r.pending && !r.observation.confirmed && !r.capability_mask,
+                "stop_forget_no_mutex_reports_no_restore");
+        require(sdk::mutex_count == 0 && sdk::takes == 0,
+                "stop_early_read_does_not_allocate_or_lock");
+        return;
+    }
     require(name == "stop_overlap" || name == "stop_optional" || name == "stop_route" ||
                 name == "stop_idle_expiry" || name == "stop_reset" || name == "stop_consent" ||
-                name == "stop_shutdown" || name == "stop_tick_wait",
+                name == "stop_shutdown" || name == "stop_tick_wait" ||
+                name == "stop_forget_before_start" || name == "stop_forget_pending" ||
+                name == "stop_forget_report_lock" || name == "stop_forget_record_lock" ||
+                name == "stop_forget_expiry" || name == "stop_forget_shutdown" ||
+                name == "stop_forget_during_report" || name == "stop_forget_report_lock_failure",
             "unknown_case");
+    if (name == "stop_forget_before_start") stop_observation_forget();
     boot();
     const auto cov    = coverage();
     const bool target = name != "stop_optional";
@@ -532,11 +565,71 @@ void stop_context_case(const std::string& name) {
         stopped[5].value = "DHW";
     }
     sample(41, stopped, cov, true, false);
+    if (name == "stop_forget_before_start") {
+        require(s_stop_context.last_sample_us == -1, "stop_forget_skips_private_producer");
+        const auto r = checkup_stop_context_report();
+        require(!r.pending && r.capability_mask == 0 && !r.observation.confirmed &&
+                    !r.observation.restore_pending && !r.observation.persistence_pending &&
+                    r.observation.readable_us == 0 &&
+                    r.observation.counters.witnessed_stops_recent_heating == 0,
+                "stop_early_forget_blocks_late_checkup_start");
+        return;
+    }
     const auto pending = checkup_stop_context_report();
     require(pending.pending && pending.capability_mask == STOP_CONTEXT_ALL,
             "stop_source_bound_pending");
     require(pending.observation.counters.witnessed_stops_recent_heating == 0,
             "stop_pending_not_a_final_count");
+    if (name.rfind("stop_forget_", 0) == 0) {
+        if (name == "stop_forget_report_lock")
+            sdk::before_take = [] { stop_observation_forget(); };
+        else if (name == "stop_forget_report_lock_failure") {
+            sdk::before_take = [] {
+                stop_observation_forget();
+                sdk::fail_take_once = true;
+            };
+        } else if (name == "stop_forget_during_report")
+            adapter::on_time = [] { stop_observation_forget(); };
+        else if (name == "stop_forget_record_lock") {
+            sdk::before_take = [] { stop_observation_forget(); };
+            sample(42, stopped, cov, true, false);
+        } else {
+            stop_observation_forget();
+        }
+        if (name == "stop_forget_expiry") {
+            // Before ordinary gap/window expiry: time alone must not clear this witness.
+            sdk::now_us = 42000000;
+            checkup_stop_context_expire(sdk::now_us);
+        } else if (name == "stop_forget_shutdown") {
+            require(sdk::shutdown != nullptr, "stop_shutdown_hook_registered");
+            sdk::shutdown();
+        }
+        if (name == "stop_forget_record_lock" || name == "stop_forget_expiry" ||
+            name == "stop_forget_shutdown")
+            require(!s_stop_context.pending.valid && s_stop_context.last_sample_us == -1,
+                    "stop_forget_retires_private_producer");
+        const auto r = checkup_stop_context_report();
+        require(!r.pending && r.capability_mask == 0 && !r.observation.confirmed &&
+                    !r.observation.restore_pending && !r.observation.persistence_pending &&
+                    r.observation.readable_us == 0 &&
+                    r.observation.counters.witnessed_stops_recent_heating == 0,
+                "stop_forget_hides_pending_producer_state");
+        if (name != "stop_forget_expiry" && name != "stop_forget_shutdown") {
+            checkup_set_diagnostics(false, 24);
+            checkup_set_diagnostics(true, 25);
+            checkup_reset_on_detect("altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw", 0x12345678);
+            for (int t = 42; t <= 80; ++t) sample(t, stop_rows(true, true), cov, true, true);
+            sample(81, stopped, cov, true, false);
+            require(s_stop_context.last_sample_us == -1, "stop_forget_skips_private_producer");
+        }
+        const auto after = checkup_stop_context_report();
+        require(!after.pending && after.capability_mask == 0 && !after.observation.confirmed &&
+                    !after.observation.restore_pending && !after.observation.persistence_pending &&
+                    after.observation.readable_us == 0 &&
+                    after.observation.counters.witnessed_stops_recent_heating == 0,
+                "stop_forget_survives_later_lifecycle_calls");
+        return;
+    }
     if (name == "stop_reset") {
         checkup_reset();
         const auto r = checkup_stop_context_report();
