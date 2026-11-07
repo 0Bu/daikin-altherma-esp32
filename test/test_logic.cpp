@@ -15957,17 +15957,17 @@ static void test_checkup() {
     {
         CHECK(checkup_cycling_hours(CheckupRing{}, true).count == 0);
         CheckupRing ring{};
-        ring.count                  = 2;
-        ring.head                   = 2;
-        ring.buf[0].starts          = 3;
-        ring.buf[0].run_s           = 1200;
-        ring.buf[0].rps_observed_s  = 3600;
-        ring.buf[1].starts          = 1;
-        ring.buf[1].run_s           = 600;
-        ring.buf[1].rps_observed_s  = 3500;
-        ring.pending.starts         = 2;
-        ring.pending.run_s          = 300;
-        ring.pending.rps_observed_s = 900;
+        ring.count                      = 2;
+        ring.head                       = 2;
+        ring.buf[0].starts              = 3;
+        ring.buf[0].run_s               = 1200;
+        ring.buf[0].rps_observed_s      = 3600;
+        ring.buf[1].starts              = 1;
+        ring.buf[1].run_s               = 600;
+        ring.buf[1].rps_observed_s      = 3500;
+        ring.pending.starts             = 2;
+        ring.pending.run_s              = 300;
+        ring.pending.rps_observed_s     = 900;
         const CheckupCyclingHours hours = checkup_cycling_hours(ring, true);
         CHECK(hours.count == 3);
         CHECK(hours.hours[0].starts == 3 && hours.hours[0].run_s == 1200 &&

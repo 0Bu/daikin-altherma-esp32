@@ -1983,12 +1983,12 @@ inline CheckupCyclingHours checkup_cycling_hours(const CheckupRing& r, bool rps_
     if (!total_observed) return out;
     for (size_t i = 0; i < r.count; i++) {
         const auto& b          = r.buf[(oldest + i) % CHECKUP_COMPLETED_BUCKETS];
-        out.hours[out.count++] = CheckupCyclingHour{
-            static_cast<uint16_t>(b.rps_observed_s), static_cast<uint16_t>(b.run_s), b.starts};
+        out.hours[out.count++] = CheckupCyclingHour{static_cast<uint16_t>(b.rps_observed_s),
+                                                    static_cast<uint16_t>(b.run_s), b.starts};
     }
-    out.hours[out.count++] = CheckupCyclingHour{
-        static_cast<uint16_t>(r.pending.rps_observed_s), static_cast<uint16_t>(r.pending.run_s),
-        r.pending.starts};
+    out.hours[out.count++] =
+        CheckupCyclingHour{static_cast<uint16_t>(r.pending.rps_observed_s),
+                           static_cast<uint16_t>(r.pending.run_s), r.pending.starts};
     return out;
 }
 
