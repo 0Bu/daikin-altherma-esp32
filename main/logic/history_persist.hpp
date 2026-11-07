@@ -496,6 +496,15 @@ inline constexpr size_t history_journal_slot_offset(size_t slot) {
     return slot * HISTORY_JOURNAL_SLOT_BYTES;
 }
 
+// A failed readback cannot establish that programming failed. Reserve every append attempt's
+// sequence before transport work, so a retry cannot leave two different records with one order.
+// Gaps are harmless; zero marks exhaustion and must never wrap into a reused sequence.
+inline bool history_journal_reserve_sequence(uint64_t& next, uint64_t requested) {
+    if (!next || requested != next) return false;
+    next = next == UINT64_MAX ? 0 : next + 1;
+    return true;
+}
+
 inline constexpr size_t history_journal_sector_first_slot(size_t slot) {
     return (slot / HISTORY_JOURNAL_SLOTS_PER_SECTOR) * HISTORY_JOURNAL_SLOTS_PER_SECTOR;
 }

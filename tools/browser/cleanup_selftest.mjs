@@ -4,15 +4,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { launchBrowser } from "./cdp_browser.mjs";
+import { inspectProcess } from "./process_state.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const work = fs.mkdtempSync(path.join(os.tmpdir(), "daikin-browser-cleanup-selftest-"));
-const originalBrowser = process.env.DAIKIN_BROWSER_BIN;
 const active = (pid) => {
-  const result = spawnSync("ps", ["-p", String(pid), "-o", "stat="], { encoding: "utf8" });
-  return result.status === 0 && result.stdout.trim() && !result.stdout.trim().startsWith("Z");
+  const result = inspectProcess(pid);
+  return result.present && !result.state.startsWith("Z");
 };
 async function until(check, label, timeout = 3000) {
   const end = Date.now() + timeout;
@@ -27,8 +26,9 @@ function stopped(child, timeout = 8000) {
       child.kill("SIGKILL");
       reject(new Error("fixture runner did not exit before its watchdog"));
     }, timeout);
-    child.once("error", reject);
-    child.once("exit", (code, signal) => { clearTimeout(timer); resolve({ code, signal }); });
+    child.once("error", error => { clearTimeout(timer); reject(error); });
+    // exit does not imply complete output: inherited pipes may still deliver the final report.
+    child.once("close", (code, signal) => { clearTimeout(timer); resolve({ code, signal }); });
   });
 }
 const shellQuote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
@@ -39,22 +39,148 @@ const browserShim = path.join(work, "fake-chrome");
 fs.writeFileSync(browserShim,
   `#!/bin/sh\nset -eu\nexec ${shellQuote(process.execPath)} ${shellQuote(path.join(root, "tools/browser/stalled_browser_fixture.mjs"))} "$@"\n`, { mode: 0o755 });
 try {
-  for (const mode of ["list-headers", "list-body", "socket", "version-headers", "version-body"]) {
-    const marker = path.join(work, `${mode}.json`);
-    process.env.DAIKIN_BROWSER_BIN = browserShim;
-    process.env.DAIKIN_BROWSER_STALL_MODE = mode;
-    process.env.DAIKIN_BROWSER_STALL_MARKER = marker;
-    const before = Date.now();
-    await assert.rejects(launchBrowser({ timeoutMs: 600 }), /Chrome launch deadline exceeded/,
-      `${mode}: stalled endpoint must fail at the single launch deadline`);
-    assert.ok(Date.now() - before < 2500, `${mode}: headers and body must have bounded completion`);
-    const recorded = JSON.parse(fs.readFileSync(marker, "utf8"));
-    assert.equal(Boolean(active(recorded.pid)), false, `${mode}: browser child must be joined`);
-    assert.equal(fs.existsSync(recorded.profile), false, `${mode}: profile must be removed after join`);
-    if (mode === "version-headers" || mode === "version-body") {
-      assert.ok(recorded.versionReached, `${mode}: fixture must reach /json/version after CDP enable`);
+  const observedProcess = changes => inspectProcess(1234, { observe(command, args, options) {
+    assert.equal(command, "ps");
+    assert.deepEqual(args, ["-p", "1234", "-o", "ppid=,stat="]);
+    assert.equal(options.encoding, "utf8");
+    return { status: 1, stdout: "", stderr: "", ...changes };
+  } });
+  assert.deepEqual(observedProcess({}), { present: false });
+  for (const state of ["S", "Z"])
+    assert.deepEqual(observedProcess({ status: 0, stdout: `7 ${state}\n` }), { present: true, parent: 7, state });
+  for (const observation of [
+    { status: 2 }, { status: 0, stdout: "invalid\n" }, { stdout: "7 S\n" },
+    { stderr: "inspection failed\n" }, { signal: "SIGTERM" }, { error: new Error("fixture failure") },
+  ]) assert.throws(() => observedProcess(observation), /process inspection/,
+    "an invalid process observation must never prove PID absence");
+  console.log("browser cleanup selftest: valid process presence and fail-closed observation errors verified");
+
+  for (const [name, mode, delay = 0, control, expected] of [
+    ...["list-headers", "list-body", "socket", "version-headers", "version-body"].map(mode => [mode, mode]),
+    ["delayed-version", "version-headers", 750],
+    ["early-before-version", "version-headers", 0, "--expire-before-endpoint", /endpoint stall before arming deadline/],
+    ["missing-body-witness", "version-body", 0, "--suppress-body-witness", /body-reader stall before arming deadline/],
+    ["missing-stall-witness", "socket", 0, "--suppress-stall-witness", /endpoint stall before arming deadline/],
+  ]) {
+    const marker = path.join(work, `${name}.json`);
+    const runner = spawn(process.execPath, [path.join(root, "tools/browser/cleanup_deadline_case.mjs"),
+      ...(control ? [control] : [])], {
+      env: { ...process.env, DAIKIN_BROWSER_BIN: browserShim, DAIKIN_BROWSER_STALL_MODE: mode,
+        DAIKIN_BROWSER_STALL_MARKER: marker, DAIKIN_BROWSER_STALL_STARTUP_DELAY_MS: String(delay),
+        DAIKIN_BROWSER_STALL_HOLD_ENDPOINT: control === "--expire-before-endpoint" ? "1" : "0" },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let output = "";
+    runner.stdout.on("data", chunk => { output += chunk; });
+    runner.stderr.on("data", chunk => { output += chunk; });
+    try {
+      const completion = await stopped(runner);
+      const line = output.split("\n").find(line => line.startsWith("DEADLINE_CASE:"));
+      assert.ok(line, `${name}: isolated deadline fixture must report its observation\n${output}`);
+      const result = JSON.parse(line.slice("DEADLINE_CASE:".length));
+      assert.equal(result.cleanupVerified, true, `${name}: actual child/profile cleanup must pass\n${output}`);
+      assert.equal(result.deadlineRejected, true, `${name}: actual launch deadline must reject\n${output}`);
+      assert.equal(result.timers, 1, `${name}: one absolute timer must be registered`);
+      assert.equal(result.delay, 600, `${name}: the launch timer must remain 600 ms`);
+      assert.equal(result.deadlineFired, true, `${name}: the captured production deadline must fire`);
+      assert.equal(result.cancelledBeforeFiring, false, `${name}: the deadline must not be reset or cancelled early`);
+      if (control === "--expire-before-endpoint") {
+        assert.equal(result.endpointReady, true, "early control must own its actual held endpoint");
+        assert.equal(result.actualStall, null, "early expiry must precede the intended version stall");
+        assert.deepEqual(result.enabled, [], "early expiry must precede CDP enable");
+      } else {
+        assert.equal(result.actualStall, mode, `${name}: raw observation must reach its own stall`);
+        if (mode.endsWith("-body"))
+          assert.ok(result.bodyRead.includes(mode === "list-body" ? "/json/list" : "/json/version"),
+            `${name}: raw observation must enter the actual JSON body reader`);
+        if (mode.startsWith("version-"))
+          assert.ok(["Page.enable", "Runtime.enable", "Log.enable", "Accessibility.enable"].every(method =>
+            result.enabled.includes(method)), `${name}: all actual CDP domains must be enabled`);
+      }
+      assert.equal(completion.code, expected ? 1 : 0, `${name}: unexpected fixture result\n${output}`);
+      assert.equal(result.armed, !expected, `${name}: only the requested stall may arm the deadline`);
+      if (expected) assert.match(output, expected, `${name}: control must fail for its intended setup witness`);
+      console.log(`browser cleanup selftest: ${name} stall arming, deadline and cleanup observed`);
+    } finally {
+      const recorded = fs.existsSync(marker) ? JSON.parse(fs.readFileSync(marker, "utf8")) : {};
+      if (recorded.pid) assert.equal(recorded.parentPid, runner.pid, "repair must retain original child ownership");
+      for (const pid of [runner.pid, recorded.pid].filter(Number.isInteger)) {
+        const observed = inspectProcess(pid);
+        if (observed.present) {
+          assert.ok(observed.parent === (pid === runner.pid ? process.pid : runner.pid) ||
+            (pid === recorded.pid && observed.parent === 1), "repair must only kill the owned fixture tree");
+          try { process.kill(pid, "SIGKILL"); } catch (error) { if (error.code !== "ESRCH") throw error; }
+        }
+        await until(() => !inspectProcess(pid).present, `${name}: owned fixture PID ${pid} must be reaped`);
+      }
+      if (recorded.profile) {
+        assert.equal(path.dirname(recorded.profile), os.tmpdir());
+        assert.match(path.basename(recorded.profile), /^daikin-browser-gate-[A-Za-z0-9]+$/);
+        fs.rmSync(recorded.profile, { recursive: true, force: true });
+      }
     }
-    console.log(`browser cleanup selftest: ${mode} launch deadline and cleanup observed`);
+  }
+
+  // Deliberately hold an inherited output pipe after the worker exits. Releasing it only after
+  // exit makes an exit-based waiter fail deterministically, without a short scheduling window.
+  const outputMarker = path.join(work, "late-output.json"), release = outputMarker + ".release";
+  const payload = "DEFERRED_REPORT:" + "x".repeat(65536) + "\n";
+  const writerSource = `
+    const fs = require('node:fs');
+    fs.writeFileSync(${JSON.stringify(outputMarker + ".ready")}, 'ready');
+    const wait = () => {
+      if (fs.existsSync(${JSON.stringify(release)}))
+        process.stdout.write(${JSON.stringify(payload)}, () => process.exit(0));
+      else setTimeout(wait, 10);
+    };
+    wait();
+  `;
+  const deferred = spawn(process.execPath, ["-e", `
+    const fs = require('node:fs'), { spawn } = require('node:child_process');
+    const writer = spawn(process.execPath, ['-e', ${JSON.stringify(writerSource)}],
+      { stdio: ['ignore', 1, 2] });
+    fs.writeFileSync(${JSON.stringify(outputMarker)}, JSON.stringify({ writer: writer.pid, parentPid: process.pid }));
+    const wait = () => {
+      if (fs.existsSync(${JSON.stringify(outputMarker + ".ready")})) process.exit(0);
+      else setTimeout(wait, 10);
+    };
+    wait();
+  `], { stdio: ["ignore", "pipe", "pipe"] });
+  let deferredOutput = "", deferredError = "", deferredDone = false;
+  deferred.stdout.on("data", chunk => { deferredOutput += chunk; });
+  deferred.stderr.on("data", chunk => { deferredError += chunk; });
+  const mainExited = new Promise((resolve, reject) => {
+    deferred.once("exit", resolve);
+    deferred.once("error", reject);
+  });
+  const fullyClosed = stopped(deferred).then(value => { deferredDone = true; return { value }; },
+    error => { deferredDone = true; return { error }; });
+  try {
+    await mainExited;
+    await new Promise(resolve => setImmediate(resolve));
+    assert.ok(fs.existsSync(outputMarker + ".ready"), "deferred writer must be ready before worker exit");
+    assert.equal(deferredDone, false, "worker exit must not complete the fixture before inherited output closes");
+    assert.equal(deferredOutput, "", "deferred report must arrive strictly after worker exit");
+    fs.writeFileSync(release, "release");
+    const completion = await fullyClosed;
+    assert.ok(!completion.error, completion.error?.message);
+    assert.deepEqual(completion.value, { code: 0, signal: null });
+    assert.equal(deferredOutput, payload, "close must include the complete multi-chunk report");
+    assert.equal(deferredError, "");
+    console.log("browser cleanup selftest: complete inherited output follows worker exit");
+  } finally {
+    fs.writeFileSync(release, "release");
+    const recorded = fs.existsSync(outputMarker) ? JSON.parse(fs.readFileSync(outputMarker, "utf8")) : {};
+    if (recorded.writer) assert.equal(recorded.parentPid, deferred.pid, "deferred writer must retain original ownership");
+    for (const pid of [deferred.pid, recorded.writer].filter(Number.isInteger)) {
+      const observed = inspectProcess(pid);
+      if (observed.present) {
+        assert.ok(observed.parent === (pid === deferred.pid ? process.pid : deferred.pid) ||
+          (pid === recorded.writer && observed.parent === 1), "deferred repair must only kill its owned process tree");
+        try { process.kill(pid, "SIGKILL"); } catch (error) { if (error.code !== "ESRCH") throw error; }
+      }
+      await until(() => !inspectProcess(pid).present, "owned deferred-output fixture must be reaped");
+    }
   }
 
   const signalMarker = path.join(work, "signal.json");
@@ -201,9 +327,5 @@ try {
   assert.match(setup.stderr, /browser render setup: Chrome exited before DevTools/);
   console.log("browser cleanup selftest: signal cleanup and actual render setup exit 2 observed");
 } finally {
-  if (originalBrowser === undefined) delete process.env.DAIKIN_BROWSER_BIN;
-  else process.env.DAIKIN_BROWSER_BIN = originalBrowser;
-  delete process.env.DAIKIN_BROWSER_STALL_MODE;
-  delete process.env.DAIKIN_BROWSER_STALL_MARKER;
   fs.rmSync(work, { recursive: true, force: true });
 }

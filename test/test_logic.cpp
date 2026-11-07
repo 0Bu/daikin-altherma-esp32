@@ -29228,6 +29228,18 @@ static void test_observation_hourly() {
     CHECK(!observation_identity_valid({}));
     CHECK(observation_fingerprint() != 0);
     CHECK(observation_fingerprint() != checkup_journal_fingerprint());
+    uint64_t next_sequence = 1;
+    CHECK(!history_journal_reserve_sequence(next_sequence, 0) && next_sequence == 1);
+    CHECK(!history_journal_reserve_sequence(next_sequence, 2) && next_sequence == 1);
+    CHECK(history_journal_reserve_sequence(next_sequence, 1) && next_sequence == 2);
+    CHECK(!history_journal_reserve_sequence(next_sequence, 1) && next_sequence == 2);
+    CHECK(history_journal_reserve_sequence(next_sequence, 2) && next_sequence == 3);
+    next_sequence = UINT64_MAX - 1;
+    CHECK(history_journal_reserve_sequence(next_sequence, UINT64_MAX - 1) &&
+          next_sequence == UINT64_MAX);
+    CHECK(history_journal_reserve_sequence(next_sequence, UINT64_MAX) && next_sequence == 0);
+    CHECK(!history_journal_reserve_sequence(next_sequence, UINT64_MAX) && next_sequence == 0);
+    CHECK(!history_journal_reserve_sequence(next_sequence, 0) && next_sequence == 0);
     CHECK(observation_bucket(-1) == INT64_MIN);
     CHECK(observation_bucket(OBSERVATION_HOUR_US) == 1);
     CHECK(observation_in_window(100, 123 * OBSERVATION_HOUR_US));
@@ -29326,12 +29338,22 @@ static void test_observation_hourly() {
     h.rings[1]    = HOMEHUB_HISTORY_COUNT;
     h.rings[2]    = ENV3_HISTORY_COUNT;
     CHECK(observation_header_matches(h));
+    CHECK(observation_append_owned(h));
+    h.commit = HISTORY_JOURNAL_ERASED;
+    CHECK(!observation_header_matches(h));
+    CHECK(observation_append_owned(h));
+    h.commit = 0;
+    CHECK(!observation_header_matches(h));
+    CHECK(observation_append_owned(h));
+    h.commit = HISTORY_JOURNAL_COMMITTED;
     CHECK(history_journal_checkup_header_structural_matches(h, 3600));
     h.catalog_fp ^= 1;
     CHECK(!observation_header_matches(h));
+    CHECK(!observation_append_owned(h));
     h.catalog_fp = observation_fingerprint();
     h.source     = static_cast<uint8_t>(HistoryJournalSource::X10a);
     CHECK(!observation_header_matches(h));
+    CHECK(!observation_append_owned(h));
     {
         const ObservationIdentity identity{1, 2, 3, 4};
         uint32_t ObservationIdentity::*identity_fields[] = {

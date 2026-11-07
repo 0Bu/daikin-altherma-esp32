@@ -133,6 +133,7 @@ The same runner also executes complete production units through SDK/service adap
 | `node test/test_src_runtime.mjs` | Complete ENV III/Weather units and source mutations cover probe identity/CRC, partial I2C allocation/cleanup, OOM, sensor freshness/recovery, forecast conversion/units, HTTP bounds/cleanup, rejected-response retention, A→B→A and zero Config-copy/request-buffer retention at network release and task waits. Default cJSON is an AST adapter; no real sensor, TLS, scheduler or JSON lexer runs. |
 | `python3 test/poll_runtime/run.py` | Complete polling/converter units: OOM/RAII, detection corroboration and generation, saturation freshness, late probe ownership including ticket wrap, and successful raw-capture budget. Named compiling source mutations bind each invariant; UART, clocks and RTOS are adapters. [Limits](poll_runtime/README.md). |
 | `python3 test/checkup_runtime/run.py` | Complete diagnosis adapter: independent heater clocks, fault completeness, source freshness, consent/source/circulation barriers and producerless expiry. Compiling consent mutants reject a lost or late epoch; clocks, SDK and service ports are modeled, not physical flash or scheduling. [Limits](checkup_runtime/README.md). |
+| `python3 test/history_journal_runtime/run.py` | Complete History owner and actual Stop store: data/reset-barrier append failures, real service retry, unique attempt sequences, fresh-process correction restore, strict read admission and independent Core-ahead bookkeeping. SDK/flash ports are modeled; [limits](history_journal_runtime/README.md). |
 | `python3 test/startup_runtime/run.py` | Complete LED/button units and the production stack sampler: startup/loop failures, null and byte semantics, independent owner slots, boot minima across recreation, the released-at-boot gate and factory-reset completion, seed and incomplete paths; GPIO/RMT and scheduling are adapters. |
 | `python3 test/mqtt_retirement_store/run.py` | Complete retirement NVS adapter: fixed wire/CRC record, bounded reload, unchanged output on failure, checked saves and write-through commit failures, factory-reset forget and saves refused behind the reset latch. Synthetic NVS does not prove real reboot or power-loss restoration. |
 | `node test/test_uart_runtime.mjs` | Complete `hp_comm.cpp`: 22 cases and 14 named mutations distinguish local SDK errors from device silence, retain partial bytes, detection/probe mappings and legacy results, and preserve I/S framing, deadlines and single-request behavior. SDK/clock adapters do not prove electrical behavior or explain historical NoReply events. |
@@ -279,15 +280,24 @@ review skills cover visual truth and complete interaction.
 The temporal matrix inventories every production inspector and the four disclosure families. It
 uses full 288-sample source rings and three real two-second updates per case, checking unchanged
 plot/prose nodes, continuous chart ancestry during scalar updates, CSS animations, collapsed-chart
-work and native input delivery. The
-fixed maximum frame gap and individual native key-event roundtrip are 250 ms; these fixture budgets catch recurring stalls,
+work, closed value-grid children, inspector member descendants and native input delivery. Inspector
+rows must retain their nodes while showing the latest generated readings; empty member lists stay
+empty. The fixed maximum frame gap and individual native key-event roundtrip are 250 ms; these
+fixture budgets catch recurring stalls,
 not guarantee a frame rate on every device. Negative controls reintroduce hidden-chart work, plot or
 animation replacement and a blocking poll. Static locale snapshots, reduced-motion cases and GIF
 poses remain separate evidence.
 Native open/pin actions, viewport positioning and one programmatic focus settle before the polling
-baseline. Each first opening renews its existing source caches through real history requests and
-waits for the matching mounted revision. A separate natural-poll case covers the regular 60-second
+baseline. Each disclosure toggle confirms its own state, mounted revision and finished expansion
+before the next native target is measured. Each first opening renews its existing source caches
+through real history requests and waits for the matching mounted revision. A cached open/close
+between polls must remove the closed chart without invalidating other containers. A separate
+natural-poll case covers the regular 60-second
 cache expiry, generation change and permitted plot replacement before checking unchanged continuity.
+It also requires the unrelated closed value grid and inspector member rows to stay mounted during
+that refresh and records the transition evidence before its assertions, so a failed timing check
+retains the measurement.
+Steady-poll timing failures retain frame, render, refresh and input timestamps for diagnosis.
 The plot must be visible; schematic witnesses share its vertical viewport whenever they
 fit, with actual geometry recorded separately from animation clocks. Focus setup is also recorded
 separately. No frame from the first or subsequent measured poll is discarded.
@@ -302,13 +312,21 @@ worker; no positive latency window competes with those controls. All three worke
 Focused and serial invocations keep their existing order. A tight flow-stroke screenshot sequence under real polling verifies
 paint movement outside the latency sampling; a ninth canary freezes painted dash movement while
 its CSS animation clock continues. All eight shared temporal canaries must also fail for their intended
-assertions in WebKit. Linux headless WebKit is Safari-engine regression coverage; it does not prove
+assertions in WebKit. Flow capture runs in the positive orientations and the frozen-paint control;
+the other canaries retain their own polling assertions without repeating that capture.
+Linux headless WebKit is Safari-engine regression coverage; it does not prove
 physical iPad Safari, iPadOS or GPU performance.
 
 `DAIKIN_BROWSER_TIMEOUT_MS` bounds each engine phase separately (default 600000 ms, maximum 3600000 ms).
 The original Chromium deadline is unchanged; WebKit runs as a separate phase in the same CI job.
 Chromium launch shares one absolute deadline across endpoint headers/body, socket and initialization;
 worker/browser process groups are joined before the temporary page is removed.
+Positive cleanup fixtures first observe the owned child's requested stall; body-stall cases also
+require actual JSON-body consumption. Each then fires the captured 600 ms launch callback in an
+isolated worker. A 3 s readiness
+watchdog is separate from the 2.5 s post-expiry cleanup bound; this tests abort/cleanup, not natural
+wall-clock timer expiry. Delayed-start and missing-witness controls reject incorrect arming.
+Fixture reports require closed output streams, and process-inspection errors never prove exit.
 The container runs as fixed unprivileged UID/GID 1000, with no external network or host browser
 profile; only its own temporary storage is writable. Its snapshot includes the allowlisted current
 browser inputs and excludes ignored files, Git metadata, builds, symlinks and credential/artifact
