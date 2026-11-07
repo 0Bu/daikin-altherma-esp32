@@ -256,6 +256,9 @@ for (const owner of ["settingsCards", "valueGroups"])
 function scalarGridHarness(historySource) {
   const document = { activeElement: null }, templates = new Map();
   const text = value => ({ nodeType: 3, nodeName: "#text", nodeValue: value,
+    ownerDocument: document,
+    get parentNode() { return this.parentElement || null; },
+    get isConnected() { return this.parentElement?.isConnected || false; },
     get outerHTML() { return this.nodeValue; } });
   function adopt(parent, children) {
     const focused = parent.contains(document.activeElement);
@@ -385,7 +388,8 @@ function assertScalarGridPolling(historySource) {
 }
 
 assertScalarGridPolling(disclosureSource);
-const scalarBranch = `if (!html.includes('class="vhist') && host.id !== "valueGroups") host.innerHTML = html;`;
+const scalarBranch = `if (!html.includes('class="vhist') && host.id !== "valueGroups" && host.id !== "inspRows")
+    host.innerHTML = html;`;
 assert.equal(disclosureSource.split(scalarBranch).length, 2, "scalar-grid negative control must target one production branch");
 assert.throws(() => assertScalarGridPolling(disclosureSource.replace(scalarBranch,
   `if (!html.includes('class="vhist')) host.innerHTML = html;`)),
@@ -397,10 +401,85 @@ error => error.code === "ERR_ASSERTION" && error.message.startsWith("Settings no
 "extending scalar retention to Settings must fail its live-select reset assertion");
 console.log("UI scalar-grid reconciliation and both branch negative controls passed");
 
-function scalarWitnessFixture(makeWitness) {
+function assertInspectorScalarPolling(historySource) {
+  const h = scalarGridHarness(historySource), { element: el, text } = h;
+  const members = node => (node.childNodes || []).flatMap(child => [child, ...members(child)]);
+  const inspector = (reading, { rowClass = "inspect-row mb-row", state = "fresh",
+    comparison = null, modbus = true } = {}) => () => [
+    el("div", { class: "inspect-row", "data-member": "x10a" }, [
+      el("span", {}, [text("Tank temperature")]), el("span", { "data-reading": "" }, [text(reading)]),
+    ]),
+    ...(modbus ? [el("div", { class: rowClass, "data-member": "modbus", "data-state": state }, [
+      el("span", {}, [text("Tank temperature "), el("span", { class: "mb-tag" }, [text("Modbus")])]),
+      el("span", {}, [text(reading)]),
+    ])] : []),
+    ...(modbus && comparison != null ? [el("div", { class: "mb-delta" }, [text(comparison)])] : []),
+  ];
+  const host = h.mount("inspRows", inspector("40 °C")), original = members(host);
+  const readingNode = host.querySelector("[data-reading]").childNodes[0];
+  h.repaint(host, inspector("41 °C"));
+  assert.ok(members(host).length === original.length && members(host).every((node, index) => node === original[index]),
+    "inspector scalar poll must retain every original member and text node");
+  assert.equal(readingNode.nodeValue, "41 °C", "retained inspector text must show the fresh reading");
+  assert.equal(host.childNodes[1].childNodes[1].childNodes[0].nodeValue, "41 °C",
+    "the retained independent Modbus member must show its fresh reading");
+  assert.equal(host.writes, 0, "scalar inspector text must update without replacing rows");
+  let options = {}, nextReading = 42;
+  for (const [change, patch] of [
+    ["class change", { rowClass: "inspect-row mb-row held" }],
+    ["attribute change", { state: "held" }],
+    ["late comparison insertion", { comparison: "0.5 K difference" }],
+    ["late comparison removal", { comparison: null }],
+  ]) {
+    const first = host.childNodes[0], oldText = host.querySelector("[data-reading]").childNodes[0];
+    const previous = oldText.nodeValue, reading = `${nextReading++} °C`;
+    options = { ...options, ...patch };
+    h.repaint(host, inspector(reading, options));
+    assert.notEqual(host.childNodes[0], first, "inspector " + change + " must use the structural fallback");
+    assert.equal(oldText.nodeValue, previous, "inspector " + change + " must not partially change old text");
+    assert.equal(host.querySelector("[data-reading]").childNodes[0].nodeValue, reading,
+      "inspector " + change + " must render fresh text in its replacement");
+    assert.equal(host.childNodes[1].getAttribute("class"), options.rowClass);
+    assert.equal(host.childNodes[1].getAttribute("data-state"), options.state || "fresh");
+    assert.equal(host.childNodes.length, options.comparison == null ? 2 : 3);
+  }
+  h.repaint(host, inspector("46 °C", { comparison: "0.5 K difference" }));
+  const missingSource = host.childNodes[1], comparison = host.querySelector(".mb-delta");
+  h.repaint(host, inspector("47 °C", { modbus: false }));
+  assert.equal(host.childNodes.length, 1, "source removal must remove the missing source and its comparison");
+  assert.equal(host.childNodes[0].getAttribute("data-member"), "x10a");
+  assert.equal(missingSource.isConnected || comparison.isConnected, false,
+    "source removal must disconnect both the source member and its comparison");
+  const remaining = host.childNodes[0];
+  h.repaint(host, () => []);
+  assert.equal(host.childNodes.length, 0, "complete source absence must clear the inspector rows");
+  assert.equal(remaining.isConnected, false, "clearing an inspector must disconnect its obsolete member");
+  h.repaint(host, inspector("40 °C"));
+  assert.equal(host.childNodes.length, 2, "A-to-empty-to-A must restore both source members");
+  assert.equal(host.querySelector("[data-reading]").childNodes[0].nodeValue, "40 °C");
+  assert.notEqual(host.childNodes[0], original[0], "source restoration must create current members");
+  const restored = members(host);
+  h.repaint(host, inspector("47 °C"));
+  assert.ok(members(host).length === restored.length && members(host).every((node, index) => node === restored[index]),
+    "restored inspector members must resume scalar retention");
+  assert.equal(host.querySelector("[data-reading]").childNodes[0].nodeValue, "47 °C");
+  assert.equal(h.state.trendRebuilding, false, "inspector fallback must restore the rebuild guard");
+}
+
+assertInspectorScalarPolling(disclosureSource);
+assert.throws(() => assertInspectorScalarPolling(disclosureSource.replace(scalarBranch,
+  scalarBranch.replace(' && host.id !== "inspRows"', ""))),
+error => error.code === "ERR_ASSERTION" && error.actual === false && error.expected === true &&
+  error.message.startsWith("inspector scalar poll must retain every original member and text node"),
+"removing only the inspector exclusion must fail its own member-retention assertion");
+console.log("UI inspector scalar retention, structural transitions and scoped negative control passed");
+
+function scalarWitnessFixture(makeWitness, trackDescendants) {
   const h = scalarGridHarness(disclosureSource), { element: el } = h;
   const cards = ["first", "later", "hidden"].map(name =>
-    el("section", { class: "vgroup", "data-dashboard-card": name }));
+    el("section", { class: "vgroup", "data-dashboard-card": name }, [
+      el("span", {}, [h.text(name)]),
+    ]));
   cards[2].hidden = true;
   const root = el("div", { id: "valueGroups" }, cards), body = el("body", {}, [root]);
   const html = el("html", {}, [body]);
@@ -425,7 +504,8 @@ function scalarWitnessFixture(makeWitness) {
     queue(node) { this.pending.push({ removedNodes: [node] }); }
     deliver() { this.callback(this.takeRecords()); }
   }
-  const witness = makeWitness(root, Observer);
+  const witness = trackDescendants === undefined ? makeWitness(root, Observer)
+    : makeWitness(root, Observer, trackDescendants);
   assert.equal(observer.observations, 1, "continuity witness must arm its document observer once");
   return { h, root, body, html, cards, witness, observer,
     detachAndReattach(node) {
@@ -506,5 +586,39 @@ for (const [label, anchor, replacement] of [
     label + ": a final first-child check must not substitute for continuous removal observation");
 }
 console.log("UI scalar-grid continuity witness and both temporal negative controls passed");
+
+function assertNestedScalarWitness(makeWitness) {
+  for (const scope of [undefined, false]) {
+    const fixture = scalarWitnessFixture(makeWitness, scope), nested = fixture.cards[1].childNodes[0];
+    fixture.detachAndReattach(nested); fixture.detachAndReattach(nested.childNodes[0]);
+    const result = fixture.witness.finish();
+    assert.equal(result.retained, true, "default witness must preserve the same direct-child contract");
+    assert.equal(result.removed, 0, "descendant removal tracking must remain opt-in");
+    assert.equal(fixture.observer.pending.length, 0);
+    assert.equal(fixture.observer.closes, 1);
+  }
+  for (const kind of ["element", "text"]) {
+    const fixture = scalarWitnessFixture(makeWitness, true), direct = fixture.cards[1];
+    const nested = direct.childNodes[0], target = kind === "text" ? nested.childNodes[0] : nested;
+    assert.equal(target.nodeType, kind === "text" ? 3 : 1, "recursive fixture must reach the intended node type");
+    fixture.detachAndReattach(target);
+    const result = fixture.witness.finish();
+    assert.equal(fixture.root.childNodes[1], direct, "temporary nested removal must leave the direct child unchanged");
+    assert.equal(result.retained && target.isConnected, true, "nested removal fixture must end fully reattached");
+    assert.equal(result.removed, 1, "recursive scalar witness must record temporary nested removal: " + kind);
+    assert.equal(fixture.observer.pending.length, 0);
+    assert.equal(fixture.observer.closes, 1);
+  }
+}
+
+assertNestedScalarWitness(createScalarGridWitness);
+const recursiveBranch = "if (trackDescendants) {";
+assert.equal(witnessSource.split(recursiveBranch).length, 2, "recursive witness control must target one exact helper branch");
+const nonRecursiveWitness = vm.runInNewContext("(" + witnessSource.replace(recursiveBranch, "if (false) {") + ")");
+assert.throws(() => assertNestedScalarWitness(nonRecursiveWitness),
+error => error.code === "ERR_ASSERTION" && error.actual === 0 && error.expected === 1 &&
+  error.message.startsWith("recursive scalar witness must record temporary nested removal"),
+"disabling recursive tracking must fail the nested-removal assertion");
+console.log("UI recursive scalar witness covers nested elements/text and rejects disabled tracking");
 
 console.log("UI trend touch and keyboard pin/rebuild/poll focus tests passed");

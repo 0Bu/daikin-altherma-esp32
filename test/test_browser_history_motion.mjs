@@ -11,11 +11,18 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const evaluate = (page, fn, args = {}) =>
   page.evaluate("(" + fn.toString() + ")(" + JSON.stringify(args) + ")");
 
-export function createScalarGridWitness(root, Observer) {
+export function createScalarGridWitness(root, Observer, trackDescendants = false) {
   const children = [...root.childNodes];
   const cards = [...root.querySelectorAll(".vgroup[data-dashboard-card]")]
     .map(node => ({ node, hidden: node.hidden }));
   const tracked = new Set(children);
+  if (trackDescendants) {
+    const track = node => {
+      tracked.add(node);
+      for (const child of node.childNodes || []) track(child);
+    };
+    for (const child of children) track(child);
+  }
   for (let node = root; node; node = node.parentNode) tracked.add(node);
   let removed = 0, closed = false, finished;
   const record = records => {
@@ -469,7 +476,7 @@ async function observe(page, server, context, selectors, { inspector = false, st
     assert.equal(boardBefore.text, boardBefore.expected, context + ": initial board reading must match actual status");
     fixture.status.sys.free_heap -= 1024;
   }
-  await evaluate(page, ({ selectors, animationIds, inactiveAnimationIds }) => {
+  await evaluate(page, ({ selectors, animationIds, inactiveAnimationIds, inspector }) => {
     window.__motionPlots = selectors.map(selector => {
       const node = document.querySelector(selector);
       if (!node) throw new Error("history observation plot missing: " + selector);
@@ -509,6 +516,9 @@ async function observe(page, server, context, selectors, { inspector = false, st
     const grid = document.getElementById("valueGroups");
     window.__motionScalarGrid = S.stage === "dashboard" && grid.firstElementChild &&
       !grid.querySelector(".vhist") ? window.__motionWatchScalarGrid(grid, MutationObserver) : null;
+    const rows = document.getElementById("inspRows");
+    window.__motionInspectorRows = inspector
+      ? window.__motionWatchScalarGrid(rows, MutationObserver, true) : null;
     const ancestors = new Map(), detached = [];
     for (const { selector, node: plot } of window.__motionPlots)
       for (let node = plot; node; node = node.parentNode) {
@@ -543,7 +553,7 @@ async function observe(page, server, context, selectors, { inspector = false, st
     // two-second timer. Three complete updates therefore span at least two full polling intervals.
     pollNow();
     return true;
-  }, { selectors, animationIds, inactiveAnimationIds });
+  }, { selectors, animationIds, inactiveAnimationIds, inspector });
   let done = false, inputProbes = 0, inputMax = 0, pollError;
   const polling = page.waitFor("!_pollBusy && window.__motionPolls >= 3", { timeoutMs: 12000 })
     .catch(error => { pollError = error; })
@@ -569,9 +579,12 @@ async function observe(page, server, context, selectors, { inspector = false, st
   const motion = await evaluate(page, () => {
     window.__motionObserve = false;
     cancelAnimationFrame(window.__motionFrames.request);
+    const stopped = performance.now();
     window.__motionRecordDetachments(window.__motionDetachObserver.takeRecords());
     window.__motionDetachObserver.disconnect();
     const body = document.getElementById("inspBody");
+    const rows = document.getElementById("inspRows"), expectedRows = document.createElement("template");
+    expectedRows.innerHTML = _html.inspRows || "";
     const snapshot = {
       polls: window.__motionPolls, statusPolls: window.__motionStatusPolls,
       holds: window.__motionHolds,
@@ -583,6 +596,10 @@ async function observe(page, server, context, selectors, { inspector = false, st
         before: revision, after: window.__motionRevision(document.querySelector(selector)) })),
       detachedAncestors: window.__motionDetachedAncestors,
       scalarGrid: window.__motionScalarGrid?.finish() || null,
+      inspectorRows: window.__motionInspectorRows ? {
+        ...window.__motionInspectorRows.finish(), children: rows.childNodes.length,
+        freshText: rows.textContent === expectedRows.content.textContent,
+      } : null,
       bodyUnchanged: body.innerHTML === window.__motionBody.html,
       sameBody: body.firstChild === window.__motionBody.node,
       animations: window.__motionAnimations.map(({ id, node, animation, time, initial }) => ({
@@ -598,7 +615,7 @@ async function observe(page, server, context, selectors, { inspector = false, st
       expectedAnimations: window.__motionExpectedAnimations,
       sameFocus: document.activeElement === window.__motionFocused,
       inputs: window.__motionInputs, frames: window.__motionFrames.count,
-      duration: performance.now() - window.__motionFrames.started, maxFrameGap: window.__motionFrames.maxGap,
+      duration: stopped - window.__motionFrames.started, maxFrameGap: window.__motionFrames.maxGap,
       frameStarted: window.__motionFrames.started, frameGaps: window.__motionFrames.gaps,
       renders: window.__motionRenders, refreshes: window.__motionRefreshes,
       inputTimes: window.__motionInputTimes, viewportBefore: window.__motionViewport,
@@ -608,12 +625,16 @@ async function observe(page, server, context, selectors, { inspector = false, st
     // Keep only the plain-data snapshot between cases. Test witnesses must not retain a closed
     // graph or its observer closure until the following case's measured polling window.
     for (const name of ["__motionPlots", "__motionBody", "__motionFocused", "__motionAnimations",
-      "__motionInactive", "__motionDetachObserver", "__motionRecordDetachments", "__motionScalarGrid"])
+      "__motionInactive", "__motionDetachObserver", "__motionRecordDetachments", "__motionScalarGrid",
+      "__motionInspectorRows"])
       delete window[name];
     return snapshot;
   });
   page.historyMotionEvidence?.push({ context, ...motion, maxNativeInputMs: inputMax, focusSetupMs,
     focusWasAlready, observationViewport });
+  if (motion.maxFrameGap >= BUDGET_MS || inputMax >= BUDGET_MS)
+    console.error("history responsiveness failure evidence: " + JSON.stringify({ context,
+      maxNativeInputMs: inputMax, ...motion }));
   assert.ok(server.valuesRequests >= requests + 3 && motion.polls >= 3,
     context + ": at least three real values polls");
   assert.ok(motion.duration >= 4000, context + ": three real updates must span two full polling intervals");
@@ -633,6 +654,14 @@ async function observe(page, server, context, selectors, { inspector = false, st
     assert.equal(motion.scalarGrid.retained && motion.scalarGrid.visibilityStable, true,
       context + ": scalar polls must retain closed value rows and card visibility");
     assert.equal(motion.scalarGrid.removed, 0, context + ": scalar value-grid children must remain connected");
+  }
+  if (motion.inspectorRows) {
+    assert.equal(motion.inspectorRows.retained && motion.inspectorRows.visibilityStable, true,
+      context + ": scalar polls must retain inspector member rows or preserve their absence");
+    assert.equal(motion.inspectorRows.removed, 0,
+      context + ": inspector member descendants and ancestors must remain connected");
+    assert.equal(motion.inspectorRows.freshText, true,
+      context + ": retained inspector rows must show the latest generated readings");
   }
   if (inspector && motion.bodyUnchanged)
     assert.equal(motion.sameBody, true, context + ": unchanged inspector prose must remain mounted");
@@ -716,6 +745,7 @@ async function assertFlowTtlTransition(page, server, context) {
     const grid = document.getElementById("valueGroups");
     const state = window.__motionTtl = { plot, gen: flow.gen, modbusGen: modbus.gen,
       gridWitness: window.__motionWatchScalarGrid(grid, MutationObserver),
+      rowsWitness: window.__motionWatchScalarGrid(document.getElementById("inspRows"), MutationObserver, true),
       revision, started: now, last: now, frames: 0, maxGap: 0,
       animations: ["fSup1", "rfHot", "scFan", "scPump"].map(id => {
         const node = document.getElementById(id);
@@ -741,18 +771,21 @@ async function assertFlowTtlTransition(page, server, context) {
     await page.evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))");
     changed = await evaluate(page, ({ selector }) => {
       const state = window.__motionTtl, plot = document.querySelector(selector);
+      cancelAnimationFrame(state.request);
+      const stopped = performance.now();
       return { gen: S.hist.get("flow")?.gen,
         modbusGen: S.hist.get(histCacheKey("flow", "modbus"))?.gen,
         replaced: plot !== state.plot, focused: document.activeElement === plot,
         scalarGrid: state.gridWitness.finish(),
-        revision: window.__motionRevision(plot), duration: performance.now() - state.started,
+        inspectorRows: state.rowsWitness.finish(),
+        revision: window.__motionRevision(plot), duration: stopped - state.started,
         frames: state.frames, maxGap: state.maxGap,
         animations: state.animations.map(({ id, node, animation, time, initialRunning }) => ({ id,
           same: node.getAnimations().includes(animation), initialRunning,
           running: animation?.playState === "running", elapsed: animation?.currentTime - time })) };
     }, { selector });
   } finally {
-    await page.evaluate("if(window.__motionTtl){cancelAnimationFrame(window.__motionTtl.request);window.__motionTtl.gridWitness.close();} delete window.__motionTtl; true");
+    await page.evaluate("if(window.__motionTtl){cancelAnimationFrame(window.__motionTtl.request);window.__motionTtl.gridWitness.close();window.__motionTtl.rowsWitness.close();} delete window.__motionTtl; true");
   }
   console.log("history TTL transition evidence: " + JSON.stringify({ context, before, ...changed }));
   assert.deepEqual(server.historyRequests.slice(requests), ["x10a:flow"],
@@ -768,6 +801,9 @@ async function assertFlowTtlTransition(page, server, context) {
     context + ": TTL refresh must retain the closed scalar value grid");
   assert.equal(changed.scalarGrid.removed, 0,
     context + ": TTL scalar value-grid children and ancestors must remain connected");
+  assert.equal(changed.inspectorRows.retained, true, context + ": TTL refresh must retain inspector member rows");
+  assert.equal(changed.inspectorRows.removed, 0,
+    context + ": TTL inspector member descendants and ancestors must remain connected");
   for (const animation of changed.animations) {
     assert.equal(animation.initialRunning && animation.same && animation.running, true,
       context + "/" + animation.id + ": TTL refresh must preserve the running CSSAnimation instance");
@@ -1028,7 +1064,9 @@ export async function assertHistoryMotion(page, server, context) {
         window.__motionDetachObserver.disconnect();
       }
       window.__motionScalarGrid?.close();
+      window.__motionInspectorRows?.close();
       window.__motionTtl?.gridWitness?.close();
+      window.__motionTtl?.rowsWitness?.close();
       pollStop(); pollSchedule = () => {}; return true;
     });
     await page.waitFor("!_pollBusy && !S.histBusy.size");
