@@ -3,7 +3,7 @@ import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const work = fs.mkdtempSync(path.join(os.tmpdir(), "daikin-browser-runner-selftest-"));
@@ -117,6 +117,90 @@ else if(script.endsWith('assemble_page.mjs')){
   setInterval(()=>{},1000);
 }else{console.error('unknown fake-node fixture script',script);process.exit(2);}
 `;
+
+async function assertWebKitPaintScope() {
+  const fixture = path.join(work, "webkit-paint-scope");
+  for (const directory of ["test", "tools/browser"])
+    fs.mkdirSync(path.join(fixture, directory), { recursive: true });
+  const source = fs.readFileSync(path.join(root, "test/test_browser_webkit.mjs"), "utf8");
+  const selection = 'if (!mutation || mutation === "history-paint-freeze")';
+  assert.equal(source.split(selection).length, 2, "paint scope control must mutate one actual worker selection");
+  const { HISTORY_MOTION_MUTATIONS: mutations } = await import(
+    pathToFileURL(path.join(root, "test/test_browser_history_motion.mjs")));
+  fs.writeFileSync(path.join(fixture, "record.mjs"), `import fs from "node:fs";
+    export const record=(type,context="")=>fs.appendFileSync(process.env.WEBKIT_SCOPE_RECORD,
+      JSON.stringify({type,context})+"\\n");`);
+  fs.writeFileSync(path.join(fixture, "tools/browser/fixture_server.mjs"), `
+    import {record} from "../../record.mjs";
+    export async function startFixtureServer(){record("server-open");
+      return {url:"http://fixture.invalid/",close:async()=>record("server-close")};}`);
+  fs.writeFileSync(path.join(fixture, "tools/browser/webkit_browser.mjs"), `
+    import {record} from "../../record.mjs";
+    export async function launchWebKit({viewport}){
+      const context=viewport.width===834?"ipad-portrait":"ipad-landscape";
+      record("browser-open",context);
+      const page={diagnostics:[],navigate:async()=>{},waitFor:async()=>{},evaluate:async()=>true,
+        touchWitness:async()=>({touchstart:2,touchend:2,pointerdown:2,pointerup:2}),
+        touchTimings:()=>[1,1]};
+      return {page,product:"synthetic",descriptor:"synthetic",close:async()=>record("browser-close",context)};
+    }`);
+  fs.writeFileSync(path.join(fixture, "test/test_browser_history_motion.mjs"), `
+    import {record} from "../record.mjs";
+    export const HISTORY_MOTION_MUTATIONS=${JSON.stringify(mutations)};
+    export async function assertHistoryMotion(page,server,context){
+      record("motion",context);await page.assertFlowPaint?.(context);
+      if(process.env.DAIKIN_BROWSER_MUTATION)throw new Error("seeded motion rejection: "+process.env.DAIKIN_BROWSER_MUTATION);
+      page.historyMotionEvidence.push({maxFrameGap:1,maxNativeInputMs:1,focusSetupMs:1,focusWasAlready:true});
+    }`);
+  fs.writeFileSync(path.join(fixture, "test/test_browser_webkit_paint.mjs"), `
+    import {record} from "../record.mjs";
+    export async function assertWebKitFlowPaint(page,context){record("paint",context);
+      if(process.env.DAIKIN_BROWSER_MUTATION==="history-paint-freeze")
+        throw new Error("WebKit painted flow must change across native screenshots");}`);
+  const page = path.join(fixture, "index.html");
+  fs.writeFileSync(page, "<!doctype html><title>synthetic paint scope</title>");
+  function check(label, workerSource, mutation, expectedPaint) {
+    const worker = path.join(fixture, "test", label + ".mjs"), record = path.join(fixture, label + ".jsonl");
+    fs.writeFileSync(worker, workerSource);
+    const result = spawnSync(process.execPath, [worker], { encoding: "utf8", timeout: 5000,
+      env: { ...process.env, DAIKIN_BROWSER_PAGE: page, DAIKIN_BROWSER_MUTATION: mutation,
+        DAIKIN_WEBKIT_DIAGNOSTICS: "0", WEBKIT_SCOPE_RECORD: record } });
+    const output = (result.stdout || "") + "\n" + (result.stderr || "");
+    assert.equal(result.error, undefined, label + ": actual worker must terminate normally\n" + output);
+    assert.equal(result.status, mutation ? 1 : 0, label + ": actual worker must reach its fixture outcome\n" + output);
+    const events = fs.readFileSync(record, "utf8").trim().split("\n").map(line => JSON.parse(line));
+    const orientations = mutation ? ["ipad-portrait"] : ["ipad-portrait", "ipad-landscape"];
+    assert.deepEqual(events.filter(event => event.type === "browser-open").map(event => event.context), orientations,
+      label + ": actual worker must select each expected orientation");
+    assert.deepEqual(events.filter(event => event.type === "paint").map(event => event.context), expectedPaint,
+      label + ": expected paint captures");
+    const lifecycle = orientations.flatMap(orientation => {
+      const context = "webkit/" + orientation + "/history-motion";
+      return ["server-open", "browser-open", "motion", ...(expectedPaint.includes(context) ? ["paint"] : []),
+        "browser-close", "server-close"];
+    });
+    assert.deepEqual(events.map(event => event.type), lifecycle, label + ": finally must close browser then server");
+    if (mutation) assert.ok(output.includes(mutation === "history-paint-freeze"
+      ? "WebKit painted flow must change across native screenshots" : "seeded motion rejection: " + mutation),
+    label + ": the intended fixture rejection must remain reachable\n" + output);
+  }
+  const positivePaint = ["ipad-portrait", "ipad-landscape"].map(name => "webkit/" + name + "/history-motion");
+  const frozenPaint = [positivePaint[0]];
+  check("positive", source, "", positivePaint);
+  check("frozen", source, "history-paint-freeze", frozenPaint);
+  for (const mutation of mutations) check(mutation, source, mutation, []);
+  for (const [label, changed, mutation, expected] of [
+    ["always-off-positive", source.replace(selection, "if (false)"), "", positivePaint],
+    ["always-off-frozen", source.replace(selection, "if (false)"), "history-paint-freeze", frozenPaint],
+    ["always-on-unrelated", source.replace(selection, "if (true)"), mutations[0], []],
+  ]) {
+    assert.throws(() => check(label, changed, mutation, expected), /expected paint captures/,
+      label + ": selection mutation must fail the scope assertion");
+    console.log("browser runner selftest: actual WebKit paint scope rejects " + label);
+  }
+  console.log("browser runner selftest: actual WebKit paint scope covers both orientations, frozen paint and " +
+    mutations.length + " unrelated controls with finally cleanup");
+}
 
 try {
   const cases = [["success", 0], ["slow-temporal", 0], ["phone-fails", 1], ["desktop-fails", 2],
@@ -335,6 +419,7 @@ try {
     assert.equal(fs.existsSync(path.join(directory, "control-active")), false, "controls must stay serial and finish");
     console.log("browser runner selftest: actual selftest phase " + phase);
   }
+  await assertWebKitPaintScope();
 } finally {
   fs.rmSync(work, { recursive: true, force: true });
 }

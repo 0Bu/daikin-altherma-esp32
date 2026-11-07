@@ -305,7 +305,9 @@ worker; no positive latency window competes with those controls. All three worke
 Focused and serial invocations keep their existing order. A tight flow-stroke screenshot sequence under real polling verifies
 paint movement outside the latency sampling; a ninth canary freezes painted dash movement while
 its CSS animation clock continues. All eight shared temporal canaries must also fail for their intended
-assertions in WebKit. Linux headless WebKit is Safari-engine regression coverage; it does not prove
+assertions in WebKit. Flow capture runs in the positive orientations and the frozen-paint control;
+the other canaries retain their own polling assertions without repeating that capture.
+Linux headless WebKit is Safari-engine regression coverage; it does not prove
 physical iPad Safari, iPadOS or GPU performance.
 
 `DAIKIN_BROWSER_TIMEOUT_MS` bounds each engine phase separately (default 600000 ms, maximum 3600000 ms).
