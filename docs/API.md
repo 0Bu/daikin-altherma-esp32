@@ -474,10 +474,10 @@ byte/version layouts.
 A failed route-owned save returns `500 {ok:false,error:"config write failed"}` with no reboot/live
 apply. Unrelated link-cache maintenance failure is logged without rejecting an already committed
 service blob; an X10A save requires its atomic link write. Never move/resize `nvs@0x9000`.
-The [recovery-button factory reset](BOARDS.md#recovery-button) leaves only the stated board
-hardware, rewritten as a fresh `cfg` blob, best effort. Any erase failure reports an incomplete
-reset rather than pretending success; while the reset holds the NVS latch, saves fail and every
-other restart is refused.
+A completed [recovery-button factory reset](BOARDS.md#recovery-button) leaves only the stated
+board hardware, rewritten as a fresh `cfg` blob on a best effort basis. A failure after erasure
+starts can leave a partial wipe. While the reset holds the NVS latch, saves fail and other
+restart paths are refused.
 
 ### Network settings
 

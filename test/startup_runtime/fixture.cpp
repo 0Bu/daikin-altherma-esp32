@@ -5,6 +5,7 @@
 #include "recovery_button.hpp"
 #include "mqtt_ha.hpp"
 #include "hp_poll.hpp"
+#include "history.hpp"
 #include "logic/button.hpp"
 #include "task_config.hpp"
 #include "stack_watch.hpp"
@@ -23,12 +24,13 @@ const char*  scenario = nullptr;
 // Hold scenarios: what each reset step returns, and the order the production reset called them.
 esp_err_t   erase_result = ESP_FAIL, wifi_result = ESP_FAIL, seed_write_result = ESP_OK;
 bool        history_result = false, crash_result = false, retire_result = false;
-bool        seed_result = true;
+bool        seed_result = true, history_ready = true;
 std::string order;
 unsigned    erase_calls = 0, seed_calls = 0, seed_writes = 0;
+unsigned    readiness_checks = 0, retry_at = 0;
 // /diag lines by kind — the format string is what identifies them; the adapter never formats.
 unsigned diag_lines = 0, armed_lines = 0, fired_lines = 0, failed_lines = 0;
-unsigned incomplete_lines = 0, not_kept_lines = 0, alloc_lines = 0;
+unsigned incomplete_lines = 0, not_started_lines = 0, not_kept_lines = 0, alloc_lines = 0;
 // The input script of a hold scenario: consecutive (samples, pressed) runs.
 struct Run {
     unsigned samples;
@@ -70,6 +72,7 @@ void diag_printf(const char* fmt, ...) {
     if (line.find("FACTORY RESET") != std::string::npos) ++adapter::fired_lines;
     if (line.find("factory reset FAILED") != std::string::npos) ++adapter::failed_lines;
     if (line.find("factory reset INCOMPLETE") != std::string::npos) ++adapter::incomplete_lines;
+    if (line.find("factory reset NOT STARTED") != std::string::npos) ++adapter::not_started_lines;
     if (line.find("board hardware not kept") != std::string::npos) ++adapter::not_kept_lines;
     if (line.find("task alloc failed") != std::string::npos) ++adapter::alloc_lines;
 }
@@ -103,10 +106,14 @@ esp_err_t wifi_forget_persisted_config() {
     adapter::step("wifi");
     return adapter::wifi_result;
 }
+bool history_flash_forget_ready() {
+    ++adapter::readiness_checks;
+    return adapter::history_ready;
+}
 bool history_flash_forget() {
     ++sdk::destructive_calls;
     adapter::step("history");
-    return adapter::history_result;
+    return adapter::history_ready && adapter::history_result;
 }
 void dwell_forget() {
     ++sdk::destructive_calls;
@@ -269,6 +276,7 @@ static void hold_scenario_end() {
         oracle(adapter::fired_lines == 1, "held_button_fires_once_after_incomplete_reset");
         finish_hold("unerased retirement record kept the board up");
     }
+    oracle(s != "button_reset_history_unready_retry", "ready_history_retry_completes_once");
     oracle(false, "hold_scenario_reaches_restart_or_end");
 }
 static void hold_delay(TickType_t) {
@@ -280,6 +288,16 @@ static void hold_delay(TickType_t) {
                    adapter::erase_calls == 0,
                "boot_gate_holds_through_one_and_two_sample_bounces");
     }
+    if (adapter::retry_at && sdk::gpio_reads == adapter::retry_at) {
+        oracle(sdk::destructive_calls == 0 && adapter::order.empty() && sdk::restarts == 0,
+               "unready_history_refuses_before_destructive_calls");
+        oracle(adapter::readiness_checks == 1 && adapter::not_started_lines == 1 &&
+                   adapter::armed_lines == 1 && adapter::fired_lines == 0 &&
+                   sdk::delays == sdk::gpio_reads,
+               "unready_history_reports_once_without_reset_delay");
+        adapter::retry_at      = 0;
+        adapter::history_ready = true;
+    }
     if (sdk::gpio_reads >= adapter::script_total) hold_scenario_end();
 }
 static void hold_restart() {
@@ -288,13 +306,22 @@ static void hold_restart() {
     oracle(s != "button_boot_gate", "failed_erase_stops_before_any_later_step_or_restart");
     oracle(s != "button_reset_retire_fail",
            "retirement_erase_failure_is_incomplete_without_seed_or_restart");
-    oracle(adapter::fired_lines == 1 && adapter::armed_lines == 1, "complete_hold_arms_then_fires");
-    if (s == "button_reset_complete") {
+    const bool retry = s == "button_reset_history_unready_retry";
+    if (retry) {
+        oracle(adapter::retry_at == 0, "unready_history_refuses_before_destructive_calls");
+        oracle(adapter::readiness_checks == 2 && adapter::not_started_lines == 1 &&
+                   adapter::erase_calls == 1 && sdk::restarts == 1,
+               "ready_history_retry_completes_once");
+    }
+    oracle(adapter::fired_lines == 1 && adapter::armed_lines == (retry ? 2U : 1U),
+           "complete_hold_arms_then_fires");
+    if (s == "button_reset_complete" || retry) {
         oracle(adapter::order == "seed,erase,wifi,history,dwell,crash,retire,seed_write",
                "reset_order_is_seed_then_every_erase_then_seed_write");
         oracle(adapter::not_kept_lines == 0 && adapter::incomplete_lines == 0,
                "complete_reset_keeps_board_hardware");
-        finish_hold("every erase, then the seed write, then the one restart");
+        finish_hold(retry ? "unready hold untouched; release and ready hold completed once"
+                          : "every erase, then the seed write, then the one restart");
     }
     if (s == "button_reset_seed_fail") {
         oracle(adapter::order == "seed,erase,wifi,history,dwell,crash,retire,seed_write" &&
@@ -324,8 +351,15 @@ static bool start_hold_scenario(const std::string& s) {
                     {5, false}});
         adapter::phase_end = 20 + 1 + 20 + 2 + 300;
     } else if (s == "button_reset_complete" || s == "button_reset_seed_fail" ||
-               s == "button_reset_no_seed" || s == "button_reset_retire_fail") {
-        use_script({{3, false}, {300, true}, {5, false}});
+               s == "button_reset_no_seed" || s == "button_reset_retire_fail" ||
+               s == "button_reset_history_unready_retry") {
+        if (s == "button_reset_history_unready_retry") {
+            use_script({{3, false}, {300, true}, {3, false}, {300, true}, {5, false}});
+            adapter::history_ready = false;
+            adapter::retry_at      = 3 + 300; // Change readiness only after the entire first hold.
+        } else {
+            use_script({{3, false}, {300, true}, {5, false}});
+        }
         adapter::erase_result      = ESP_OK;
         adapter::wifi_result       = ESP_OK;
         adapter::history_result    = true;
