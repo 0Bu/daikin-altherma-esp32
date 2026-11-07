@@ -62,8 +62,8 @@ name: build
 #     Keyed on the TOOLCHAIN + sdkconfig + dependency lock, never on this file's hash: editing the
 #     workflow (a comment included) must not throw away a cache nothing in it invalidated
 #   • NO per-PR preview installer. Publishing one per PR commit meant a gh-pages push per commit,
-#     and every gh-pages push starts GitHub's own three-job "pages build and deployment" run on
-#     top of this one. The DEV CHANNEL covers the same need — flash what is on main from a
+#     and every preview could start a separate GitHub Pages deployment. The DEV CHANNEL
+#     covers the same need — flash what is on main from a
 #     browser — at one publish per merge
 #   • `timeout-minutes` on every job — a wedged runner must not be able to spend six hours of the
 #     monthly allowance before anyone notices

@@ -185,6 +185,44 @@ check "and it says the reference is unknown" \
       "$(grep -c 'reference is UNKNOWN' "$T/out.log")" "1"
 ( cd "$T/work" && git remote set-url origin "$T/origin.git" ) >/dev/null 2>&1
 
+echo "== 8. a promised but unreadable manifest is not an empty feed =="
+publish 1.0.13 1.0.14-dev.2
+git -C "$T/origin.git" config uploadpack.allowFilter true
+git clone -q --filter=blob:none --no-checkout --single-branch --branch main \
+  "file://$T/origin.git" "$T/partial" || exit 2
+cp -R "$T/work/scripts" "$T/work/tools" "$T/work/main" "$T/partial/" || exit 2
+run_partial() {
+  ( cd "$T/partial" && ./scripts/check-publish-version.sh "$@" ) >"$T/out.log" 2>&1
+}
+GIT_NO_LAZY_FETCH=1 run_partial dev 1.0.0-dev.1
+check "failed lazy fetch of an existing dev manifest refuses publication" "$?" "2"
+check "unreadable manifest is identified" \
+      "$(grep -c 'cannot read the published manifest' "$T/out.log")" "1"
+GIT_NO_LAZY_FETCH=1 run_partial release 1.0.0
+check "failed lazy fetch of an existing release manifest refuses publication" "$?" "2"
+source="$(git -C "$T/partial" rev-parse HEAD)"
+(
+  cd "$T/partial" && GIT_NO_LAZY_FETCH=1 python3 "$REPO/scripts/generate-ota-changelog.py" \
+    --channel dev --version 1.0.14-dev.3 --source-sha "$source" --output "$T/changelog.json"
+) >"$T/out.log" 2>&1
+check "the changelog cannot substitute first-publication history for an unreadable manifest" "$?" "1"
+check "no changelog was written for the unreadable reference" "$([ -e "$T/changelog.json" ] && echo yes || echo no)" "no"
+run_partial dev 1.0.0-dev.1
+check "when readable, the same dev manifest prevents a version regression" "$?" "1"
+
+publish 1.0.13 ""
+GIT_NO_LAZY_FETCH=1 run_partial dev 1.0.0-dev.1
+check "the tree can prove a genuinely absent dev feed without reading blobs" "$?" "0"
+(
+  cd "$T/pages" || exit 2
+  printf '{}\n' > dev/changelog.json
+  git add dev/changelog.json && git commit -qm 'fixture: incomplete dev feed' &&
+    git push -q origin gh-pages
+) || exit 2
+GIT_NO_LAZY_FETCH=1 run_partial dev 1.0.0-dev.1
+check "a listed feed artifact with no manifest fails closed without reading blobs" "$?" "2"
+check "the incomplete feed is identified" "$(grep -c 'incomplete feed' "$T/out.log")" "1"
+
 echo
 if [ "$fail" -eq 0 ]; then
     echo "publish version gate: all $pass checks passed"

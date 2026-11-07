@@ -62,8 +62,9 @@ on the writable host before the build container. A missing blob or an unrecogniz
 or read expression blocks the build. PR and mechanical checkouts remain unfiltered: they remove
 persisted credentials and must support historical runtime/coverage reads without relying on a later
 authenticated lazy fetch.
-The publisher's `gh-pages` fetch filters blobs too; exact tree and public-byte verification still
-materialize every needed current file.
+The publisher's `gh-pages` fetch filters blobs too. Version admission and changelog generation
+establish path presence from the tree and block when a listed feed blob cannot be read. Exact tree
+and public-byte verification still materialize every needed current file.
 
 Both feed publishers maintain one empty regular `.nojekyll` at branch root to bypass Jekyll
 regeneration. An unsafe root marker or a local `dev/.nojekyll` blocks the affected publish before
