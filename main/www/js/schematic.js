@@ -1709,10 +1709,8 @@ function inspectSig(e) {
 // HomeHub ring, and may therefore keep a petrol curve when X10A has no current row. Computed pills
 // still chart only their own derived series — never one of their inputs.
 //
-// Written on its OWN signature, not the inspector's: the card re-renders whenever a live value
-// changes on each values-poll render, and re-emitting the plot that often would tear down a crosshair
-// mid-read and restart the CSS transition. Only a new series (`gen`), a changed categorical live cap
-// or a moved pin actually changes the markup.
+// Chart state has its own signature, independent of changing inspector readings. A new series
+// (`gen`), categorical live cap or pin updates its markup; ordinary scalar polls keep it mounted.
 function renderInspectHist(e, row) {
   if (e && e.env3) {
     const offered = ENV3_COMBINED_SERIES.filter((s) => hasEnv3Hist(s.id));
@@ -1798,18 +1796,16 @@ function renderInspectHist(e, row) {
 
 function renderInspect() {
   const e = S.insp ? INSPECT[S.insp] : null;
-  // Frozen while a trend is being scrubbed, for the reason renderCards is: a rebuild under an active
-  // pointer drops the capture and kills the gesture. The inspector's chart is one of the two places
-  // a scrub can start, so the freeze has to cover this card too — scrubEnd resumes both.
+  // Freeze with the other trend hosts during a scrub so structural updates cannot replace the
+  // captured plot. scrubEnd resumes every affected host.
   if (S.scrub) return;
   // The chart is decided ahead of the early return below, because its own state moves independently
   // of the card's: the series arrives from an async fetch that changes no live value.
   // inspCurRow refuses a retained X10A row. renderInspectHist may still resolve this target's paired
   // Modbus ring, so a petrol headline gets petrol history without reviving stale X10A samples.
   renderInspectHist(e, S.live && e ? inspCurRow(e) : null);
-  // This runs on EVERY poll so an open explainer tracks the live values — but writing innerHTML each
-  // second would collapse a text selection the user is mid-read of. Diff the rendered result first
-  // and touch the DOM only when something actually changed.
+  // Compare the inspector signature before rendering changed live readings; unchanged polls need
+  // no DOM writes and preserve the reader's text selection.
   const sig = inspectSig(e);
   if (sig === S.inspSig) return;
   S.inspSig = sig;
