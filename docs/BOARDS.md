@@ -132,8 +132,10 @@ the button still works afterwards.
 A hold counts only after three consecutive pressed samples, and a button held at boot stays
 inactive until it reads released three times. It reboots into setup only after every erase
 succeeds; an incomplete wipe remains on the current boot, is reported in `/diag`, and the indicator
-returns to its normal pattern. Release while arming to abort. Preserve needed configuration and
-crash evidence before using it.
+returns to its normal pattern. If History is still pending during startup, wait for startup to
+finish before releasing and holding again. If History remains pending, check the
+[supported journal layout](ARCHITECTURE.md#history-and-diagnosis-persistence) before trying again.
+Release while arming to abort. Preserve needed configuration and crash evidence before using it.
 
 ## Feature availability by board
 

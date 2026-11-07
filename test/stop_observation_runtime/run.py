@@ -15,8 +15,14 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--out", type=Path)
 parser.add_argument("--sanitizer", choices=["none", "undefined"], default="none")
 args = parser.parse_args()
-out = args.out or Path(tempfile.mkdtemp(prefix="daikin-stop-observation-runtime-"))
-out.mkdir(parents=True, exist_ok=True, mode=0o700)
+if args.out is None:
+    out = Path(tempfile.mkdtemp(prefix="daikin-stop-observation-runtime-")).resolve()
+else:
+    out = args.out.resolve()
+    try:
+        out.mkdir(parents=True, mode=0o700)
+    except FileExistsError:
+        raise SystemExit("Stop runtime evidence directory must not already exist") from None
 history_path = ROOT / "main/history.cpp"
 source = ROOT / "main/stop_observation_store.cpp"
 source_sha_before = hashlib.sha256(source.read_bytes()).hexdigest()
@@ -43,13 +49,10 @@ translation_unit = ["-DSTOP_OBSERVATION_PRODUCTION_SOURCE=" + json.dumps(str(sou
 
 
 def dependency_inputs(depfile):
-    inputs = {Path(__file__).resolve(), history_path, source}
-    for value in shlex.split(depfile.read_text().replace("\\\n", " ").partition(":")[2]):
-        path = Path(value)
-        path = (path if path.is_absolute() else ROOT / path).resolve()
-        if path not in {out.resolve() / "history_record.hpp", out.resolve() / "history_reader.hpp"}:
-            inputs.add(path)
-    return inputs
+    _, delimiter, dependencies = depfile.read_text().replace("\\\n", " ").partition(":")
+    if not delimiter or not dependencies.strip():
+        raise SystemExit("Missing compiler dependency inventory: " + depfile.name)
+    return {(ROOT / value).resolve() for value in shlex.split(dependencies)}
 
 
 preflight = out / "preflight.d"
@@ -58,7 +61,11 @@ result = subprocess.run(preflight_command, cwd=ROOT, text=True, capture_output=T
 (out / "preflight.txt").write_text(shlex.join(preflight_command) + "\n" + result.stdout + result.stderr)
 if result.returncode:
     raise SystemExit(result.stderr)
-inputs = dependency_inputs(preflight)
+baseline_deps = dependency_inputs(preflight)
+extracted_inputs = {out / name for name in extracted_hashes}
+if not {source, HERE / "fixture.cpp", *extracted_inputs} <= baseline_deps:
+    raise SystemExit("Preflight omitted the fixture, production source or extracted History input")
+inputs = (baseline_deps - extracted_inputs) | {Path(__file__).resolve(), history_path}
 hashes = {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
           for path in sorted(inputs)}
 if (hashes[str(history_path.relative_to(ROOT))] != history_sha_before or
@@ -70,7 +77,7 @@ compile_result = subprocess.run(command, cwd=ROOT, text=True, capture_output=Tru
 (out / "compile.txt").write_text(shlex.join(command) + "\n" + compile_result.stdout + compile_result.stderr)
 if compile_result.returncode:
     raise SystemExit(compile_result.stderr)
-if dependency_inputs(dependencies) != inputs:
+if dependency_inputs(dependencies) != baseline_deps:
     raise SystemExit("Compiler dependency inventory changed between preflight and build")
 (out / "compiler.txt").write_text(subprocess.run([*compiler, "--version"], text=True,
                                                capture_output=True, timeout=30).stdout)
@@ -95,6 +102,7 @@ for case in cases:
     print(result.stdout + result.stderr, end="")
 (out / "results.json").write_text(json.dumps(results, indent=2) + "\n")
 negative_controls = []
+mutation_hashes = {}
 if not any(result["returncode"] for result in results):
     production = source.read_text()
     latch = "    s_forgotten.store(true, std::memory_order_release);\n"
@@ -116,14 +124,21 @@ if not any(result["returncode"] for result in results):
     for name, text, case, oracle in mutations:
         mutant = out / (name + ".cpp")
         mutant.write_text(text)
+        mutant_sha = hashlib.sha256(mutant.read_bytes()).hexdigest()
+        mutation_hashes[mutant] = mutant_sha
         executable = out / name
-        argv = [*compiler, *flags,
+        mutant_dependencies = out / (name + ".d")
+        argv = [*compiler, *flags, "-MMD", "-MF", str(mutant_dependencies),
                 "-DSTOP_OBSERVATION_PRODUCTION_SOURCE=" + json.dumps(str(mutant)),
                 str(HERE / "fixture.cpp"), "-o", str(executable)]
         build = subprocess.run(argv, cwd=ROOT, text=True, capture_output=True, timeout=120)
         (out / (name + "-compile.txt")).write_text(shlex.join(argv) + "\n" + build.stdout + build.stderr)
         if build.returncode:
             raise RuntimeError("Negative control did not compile: " + name + "\n" + build.stderr)
+        if dependency_inputs(mutant_dependencies) != ((baseline_deps - {source}) | {mutant}):
+            raise SystemExit("Negative control compiler dependency inventory changed: " + name)
+        if hashlib.sha256(mutant.read_bytes()).hexdigest() != mutant_sha:
+            raise SystemExit("Negative control source changed during compilation: " + name)
         result = subprocess.run([str(executable), case], cwd=ROOT, text=True,
                                 capture_output=True, timeout=30)
         (out / (name + ".txt")).write_text(result.stdout + result.stderr)
@@ -133,7 +148,8 @@ if not any(result["returncode"] for result in results):
         negative_controls.append({"name": name, "case": case, "oracle": oracle,
                                   "returncode": result.returncode, "stdout": result.stdout,
                                   "stderr": result.stderr,
-                                  "mutant_sha256": hashlib.sha256(mutant.read_bytes()).hexdigest()})
+                                  "mutant_sha256": mutant_sha,
+                                  "compiler_dependencies_bound": True})
         print("DETECTED " + name + " " + result.stderr.strip())
 if any(hashlib.sha256((ROOT / name).read_bytes()).hexdigest() != digest
        for name, digest in hashes.items()):
@@ -143,6 +159,9 @@ if hashlib.sha256(source.read_bytes()).hexdigest() != source_sha_before:
 if any(hashlib.sha256((out / name).read_bytes()).hexdigest() != digest
        for name, digest in extracted_hashes.items()):
     raise SystemExit("Extracted History inputs changed during compilation or execution")
+if any(hashlib.sha256(path.read_bytes()).hexdigest() != digest
+       for path, digest in mutation_hashes.items()):
+    raise SystemExit("Negative control source changed during execution")
 receipt = {"outcome": "passed" if not any(result["returncode"] for result in results) else "failed",
            "sanitizer": args.sanitizer, "standard": "c++17", "production_body_rewrite": False,
            "source_sha256": source_sha_before, "inputs_unchanged": True,
@@ -150,7 +169,8 @@ receipt = {"outcome": "passed" if not any(result["returncode"] for result in res
            "history_extract_sha256": extracted_hashes,
            "input_sha256": hashes, "cases": results, "negative_controls": negative_controls,
            "limits": ["Deterministic SDK/flash transport ports model task interleavings; no kernel race or hardware proof.",
-                      "Preflight and build dependency sets agree; the tracked input hashes match before and after execution.",
+                      "Baseline and control build dependencies match preflight with only the named mutant substitution.",
+                      "Production, extracted and mutant input hashes match before and after execution.",
                       "Fresh host process observes production static initialization; no physical cold boot or latch clear API."]}
 (out / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
 print("Evidence:", out)

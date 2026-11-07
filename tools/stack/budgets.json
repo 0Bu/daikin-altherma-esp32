@@ -2801,7 +2801,7 @@
       "pattern": "^std::atomic<bool>::load\\(std::memory_order\\)\\ const$",
       "max_bytes": 32
     },
-    "stop_pending_guard": {
+    "stop_try_lock_guard": {
       "pattern": "^daik::SemGuard::SemGuard\\(QueueDefinition\\*,\\ unsigned\\ long\\)$",
       "max_bytes": 32
     },
@@ -11141,7 +11141,7 @@
         "boot_sequence",
         "stop_checkup_start",
         "stop_pending",
-        "stop_pending_guard",
+        "stop_try_lock_guard",
         "sdk_queue_sem_take",
         "sdk_queue_remove_event",
         "sdk_queue_yield_required",
@@ -11220,7 +11220,7 @@
         "button_task",
         "history_forget",
         "stop_stop_observation_forget",
-        "mqtt_input_lock",
+        "stop_try_lock_guard",
         "sdk_queue_sem_take",
         "sdk_queue_remove_event",
         "sdk_queue_yield_required",

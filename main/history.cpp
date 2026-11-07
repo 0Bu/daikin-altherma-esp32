@@ -286,7 +286,9 @@ inline bool copy_field(char* dst, size_t max, const char* src) {
 
 // ── Sealing the region, and adopting it again ───────────────────────────────────────────────────
 bool                  s_persist_dirty = false;
-logic::HistoryRestore s_persist_verdict = logic::HistoryRestore::NoRecord;
+// Status reads this standalone verdict without the History lock while Forget can replace it.
+std::atomic<logic::HistoryRestore> s_persist_verdict{logic::HistoryRestore::NoRecord};
+static_assert(decltype(s_persist_verdict)::is_always_lock_free);
 
 // Armed only when this boot ADOPTED its rings, spent by the first detection — see
 // history_reset_on_detect() for why detection alone is not evidence that the unit changed.
@@ -857,9 +859,10 @@ void history_start() {
         mb_keep && rings_have_samples(P().mb_ring, HOMEHUB_HISTORY_COUNT),
         env3_keep && rings_have_samples(P().env3_ring, ENV3_HISTORY_COUNT)};
     const logic::HistoryRasterPlan plan = logic::history_raster_plan(s_liveness, weighed);
-    s_persist_verdict                   = logic::history_restore_verdict(
+    const auto                     persist_verdict = logic::history_restore_verdict(
         reason, P().magic, P().version, P().catalog_fp, want_fp, P().crc, history_persist_crc(),
         safe, P().boots_since_commit, plan.region_bookable);
+    s_persist_verdict.store(persist_verdict, std::memory_order_relaxed);
     // The numbers behind a refusal or a retirement, while the previous boot's record is still
     // unread: that the record itself did not verify, or that it holds no usable commit for the
     // raster, is the whole diagnosis (a raster that merely stalled is booked, not refused).
@@ -874,10 +877,10 @@ void history_start() {
                     static_cast<long long>(s_liveness.commit_us[1]),
                     static_cast<long long>(s_liveness.commit_us[2]));
     };
-    if (s_persist_verdict == logic::HistoryRestore::StaleCommit)
+    if (persist_verdict == logic::HistoryRestore::StaleCommit)
         log_unmeasured("X10A", plan.state[static_cast<size_t>(logic::HistoryJournalSource::X10a)]);
     const int64_t start_us = esp_timer_get_time();
-    if (s_persist_verdict == logic::HistoryRestore::Accept) {
+    if (persist_verdict == logic::HistoryRestore::Accept) {
         if (P().x10a_target_fp != boot_config.x10a_identity_fp) {
             for (size_t t = 0; t < TREND_COUNT; ++t) {
                 if (independent_trend(logic::TRENDS[t])) continue;
@@ -990,7 +993,8 @@ void history_start() {
         // Not noise: "wrong_catalog" after an update explains a chart that emptied itself for a
         // reason nobody would otherwise be able to reconstruct, and "bad_crc" on a board that was
         // never power-cycled is a memory fault worth seeing.
-        diag_printf("history: rings start empty (%s)\n", logic::history_restore_slug(s_persist_verdict));
+        diag_printf("history: rings start empty (%s)\n",
+                    logic::history_restore_slug(persist_verdict));
     }
     room_start_locked(safe ? 0 : logic::history_room_identity(boot_config), reason, safe, start_us);
     history_flash_start();
@@ -1011,7 +1015,9 @@ bool history_checkup_flash_pending() {
            !s_flash_checkup_restore_done;
 }
 
-const char* history_persist_state() { return logic::history_restore_slug(s_persist_verdict); }
+const char* history_persist_state() {
+    return logic::history_restore_slug(s_persist_verdict.load(std::memory_order_relaxed));
+}
 
 // The poll task's sign of life, every cycle — including the cycles that skip all work (a network
 // hold-off) and the ones spent detecting. Cheap by construction: a try-lock, a store and a CRC over
@@ -2937,7 +2943,7 @@ bool history_flash_forget() {
         s_mb_reset_requested.store(false);
         s_circulation_reset_requested.store(false);
         s_adopt_detect_grace = false;
-        s_persist_verdict = logic::HistoryRestore::NoRecord;
+        s_persist_verdict.store(logic::HistoryRestore::NoRecord, std::memory_order_relaxed);
 
         // The index describes the bytes just erased. Clear it too so a request in the short
         // interval before reboot cannot splice an old slot back into the now-empty RAM rings.

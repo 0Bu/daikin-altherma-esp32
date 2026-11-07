@@ -42,12 +42,17 @@ const count = (text, re) => (text.match(re) || []).length;
 const start = body(history, "void history_start()");
 assert.match(start, /const bool safe = safe_mode_active\(\);/,
   "history_start must read the latched safe mode");
-const verdictCall = start.slice(start.indexOf("s_persist_verdict = logic::history_restore_verdict("));
+const verdictCall = start.slice(start.indexOf("const auto persist_verdict = logic::history_restore_verdict("));
 const verdictArgs = verdictCall.slice(0, verdictCall.indexOf(");"));
 assert.match(verdictArgs, /\bsafe\b/, "the verdict must be given safe mode");
 assert.match(verdictArgs, /P\(\)\.boots_since_commit/, "the verdict must be given the sealed counter");
 assert.match(verdictArgs, /plan\.region_bookable/,
   "the verdict must be given whether the liveness record can measure the X10A raster");
+assert.match(start, /s_persist_verdict\.store\(persist_verdict, std::memory_order_relaxed\);/,
+  "publish the standalone boot verdict for concurrent status readers");
+assert.match(body(history, "const char* history_persist_state()"),
+  /s_persist_verdict\.load\(std::memory_order_relaxed\)/,
+  "status must load the verdict without racing the recovery button or taking the History lock");
 const planAt = start.indexOf("logic::history_raster_plan(s_liveness, weighed)");
 const liveBegin = start.indexOf("logic::history_liveness_begin(s_liveness");
 assert.ok(planAt >= 0 && liveBegin > planAt,
@@ -74,7 +79,7 @@ assert.doesNotMatch(raw("main/logic/history_persist.hpp") + raw("main/history.cp
   "a measurable stall is booked, never refused for staleness");
 // And the plan is what decides the retirements: a stale optional raster resets its own rings, in
 // the accepting branch only, and never touches the verdict.
-const adoptAt = start.indexOf("if (s_persist_verdict == logic::HistoryRestore::Accept) {");
+const adoptAt = start.indexOf("if (persist_verdict == logic::HistoryRestore::Accept) {");
 const adopt = start.slice(adoptAt, start.indexOf("} else {", adoptAt));
 assert.match(adopt, /if \(plan\.retire_modbus\) \{ for \(auto& r : P\(\)\.mb_ring\) r\.reset\(\);/,
   "a stale HomeHub raster retires its own rings");

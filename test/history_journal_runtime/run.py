@@ -50,18 +50,39 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+dependency_target = "history-journal-runtime"
+
+
+def dependency_paths(path):
+    line = path.read_text().replace("\\\n", " ")
+    target, separator, names = line.partition(":")
+    if target != dependency_target or not separator or not names.strip():
+        raise RuntimeError("Invalid or empty compiler dependency file: " + str(path))
+    return {(ROOT / name).resolve(strict=True) for name in shlex.split(names)}
+
+
+def verify_hashes(expected, label):
+    for path, sha in expected.items():
+        if digest(path) != sha:
+            raise RuntimeError(f"Compiler input changed during {label}: {path}")
+
+
 version = checked([*compiler, "--version"])
 sources = [HERE / "fixture.cpp", ROOT / "main/stop_observation_store.cpp"]
-inputs = {Path(__file__).resolve(), SOURCE}
-inputs.add(HERE / "README.md")
+preflight_dependencies = []
 for index, source in enumerate(sources):
     dependency = OUT / f"preflight-{index}.d"
-    checked([*compiler, *flags, "-MM", "-MF", str(dependency),
+    checked([*compiler, *flags, "-MM", "-MF", str(dependency), "-MT", dependency_target,
              "-DHISTORY_PRODUCTION_SOURCE=" + json.dumps(str(SOURCE)), str(source)])
-    words = shlex.split(dependency.read_text().replace("\\\n", " ").partition(":")[2])
-    inputs.update((Path(value) if Path(value).is_absolute() else ROOT / value).resolve()
-                  for value in words)
-hashes = {str(path.relative_to(ROOT)): digest(path) for path in sorted(inputs)}
+    paths = dependency_paths(dependency)
+    if source not in paths:
+        raise RuntimeError("Compiler preflight omitted its translation unit: " + str(source))
+    preflight_dependencies.append(paths)
+if SOURCE not in preflight_dependencies[0] or SOURCE in preflight_dependencies[1]:
+    raise RuntimeError("Compiler preflight did not bind History only through the fixture")
+inputs = {Path(__file__).resolve(), HERE / "README.md"}.union(*preflight_dependencies)
+input_hashes = {path: digest(path) for path in sorted(inputs)}
+hashes = {str(path.relative_to(ROOT)): sha for path, sha in input_hashes.items()}
 (OUT / "inputs.json").write_text(json.dumps(hashes, indent=2) + "\n")
 (OUT / "history-production-baseline.cpp").write_bytes(SOURCE.read_bytes())
 (OUT / "stop-store-production-baseline.cpp").write_bytes(sources[1].read_bytes())
@@ -71,22 +92,48 @@ hashes = {str(path.relative_to(ROOT)): digest(path) for path in sorted(inputs)}
     (ROOT / "main/logic/history_persist.hpp").read_bytes())
 results = []
 mutants = []
+dependency_checks = {}
+mutation_hashes = {}
 
 
 def build(source, name):
+    expected_deps = [
+        {source if path == SOURCE else path for path in paths} for paths in preflight_dependencies
+    ]
+    if source != SOURCE:
+        mutation_hashes[source] = digest(source)
+    expected_hashes = {path: input_hashes[path] for path in inputs if path != SOURCE or source == SOURCE}
+    if source != SOURCE:
+        expected_hashes[source] = mutation_hashes[source]
+    verify_hashes(expected_hashes, name + " pre-compile")
     objects = []
-    for index, translation_unit in enumerate(sources):
+    compiled_deps = []
+    for index, (translation_unit, expected) in enumerate(zip(sources, expected_deps)):
         obj = OUT / f"{name}-{index}.o"
-        result = run([*compiler, *flags, "-MMD", "-MF", str(OUT / f"{name}-{index}.d"),
+        dependency = OUT / f"{name}-{index}.d"
+        result = run([*compiler, *flags, "-MMD", "-MF", str(dependency), "-MT", dependency_target,
                       "-DHISTORY_PRODUCTION_SOURCE=" + json.dumps(str(source)), "-c",
                       str(translation_unit), "-o", str(obj)], timeout=120)
         (OUT / f"{name}-{index}.compile.txt").write_text(
             commands[-1] + "\n" + result.stdout + result.stderr)
         if result.returncode:
             raise RuntimeError("Compilation failed: " + name + "\n" + result.stdout + result.stderr)
+        actual = dependency_paths(dependency)
+        if actual != expected:
+            missing = sorted(str(path) for path in expected - actual)
+            unexpected = sorted(str(path) for path in actual - expected)
+            raise RuntimeError(f"Compiler dependency mismatch for {name}-{index}: "
+                               f"missing={missing}, unexpected={unexpected}")
+        verify_hashes(expected_hashes, f"{name}-{index} compile")
+        compiled_deps.append({"mmd": dependency.name, "sha256": digest(dependency),
+                              "paths": sorted(str(path) for path in actual)})
         objects.append(obj)
     binary = OUT / name
     checked([*compiler, *flags, *(str(path) for path in objects), "-o", str(binary)])
+    verify_hashes(expected_hashes, name + " link")
+    dependency_checks[name] = {"history_source": str(source),
+                               "history_source_sha256": expected_hashes[source],
+                               "translation_units": compiled_deps}
     return binary
 
 
@@ -272,13 +319,17 @@ if not args.expect_red:
         raise RuntimeError("Sequence mutation escaped fresh-process acknowledged-population oracle")
     print("PASS compiling control=" + name + " case=" + case, flush=True)
 
-unchanged = all(digest(ROOT / name) == value for name, value in hashes.items())
+unchanged = all(digest(path) == value
+                for path, value in (input_hashes | mutation_hashes).items())
 receipt = {"utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
            "compiler": version, "sanitizer": args.sanitizer,
            "whole_history_translation_unit": True, "real_stop_store": True,
            "baseline_production_body_rewrite": False, "expected_red": args.expect_red,
            "expected_red_case": args.expect_red_case if args.expect_red else None,
            "source_hashes": hashes, "baseline_binary_sha256": digest(baseline),
+           "preflight_dependencies": [sorted(str(path) for path in paths)
+                                      for paths in preflight_dependencies],
+           "compile_dependency_checks": dependency_checks,
            "cases": results, "compiling_controls": mutants, "unknown_guards": unknowns,
            "transport_evidence": transport_evidence,
            "inputs_unchanged": unchanged,

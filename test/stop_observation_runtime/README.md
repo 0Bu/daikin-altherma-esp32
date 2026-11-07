@@ -1,7 +1,8 @@
 # Independent hourly observation runtime
 
 Run `python3 test/stop_observation_runtime/run.py --sanitizer undefined`. `--out` retains the
-compiler command, diagnostics, individual case output and JSON results in a chosen directory.
+compiler command, diagnostics, individual case output and JSON results in a new directory.
+Existing output directories are refused so stale receipts and headers cannot affect a run.
 The harness compiles the production `stop_observation_store.cpp`, the exact record geometry and
 reader extracted from `history.cpp`, and their real logic/CRC headers as C++17. Only the FreeRTOS
 mutex, monotonic/wall clocks and physical journal transport are host adapters.
@@ -35,8 +36,10 @@ same-boot re-enablement. Suppressed reports have no pending restoration or persi
 fresh host process demonstrates that production static initialization permits collection again.
 The unmodified fixture never clears the production latch. Three compiling controls remove the
 latch, clear it from startup or publish the mutex early; each must fail its exact semantic assertion.
-The runner retains these outputs and a source-hashed receipt. These deterministic interleavings
-do not exercise the FreeRTOS scheduler or simultaneous execution on two cores.
+The runner binds the actual compiler dependencies to preflight for the production build and all
+three controls, permitting only the named source substitution. The receipt binds the source,
+extracted History fragments and mutant bytes. These deterministic interleavings do not exercise
+the FreeRTOS scheduler or simultaneous execution on two cores.
 
 The actual journal reader verifies the real envelope and CRC. It does not prove the ESP-IDF flash
 driver, target ABI, stack budget, heap minima, partition binding or physical device behavior.

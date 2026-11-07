@@ -14,7 +14,10 @@ python3 test/history_journal_runtime/run.py --sanitizer undefined --out /private
 An explicit output directory must be new; otherwise a private temporary directory is created.
 It retains compiler commands/version, each translation unit's
 MMD dependencies, dependency hashes, production snapshots, binaries, per-case stdout/stderr and
-a JSON receipt. Each case is a fresh executable process. `--expect-red` requires the original
+a JSON receipt. Each actual compile's dependency paths must match the preflight set for its
+translation unit. A compiling control replaces only the History source path with its generated
+mutation. The runner checks the input hashes across compilation, linking and the final receipt.
+Each case is a fresh executable process. `--expect-red` requires the original
 claim-release oracle to fail. `--expect-red --expect-red-case late-correction` instead runs the
 paired seed/restore witness and requires the named acknowledged-correction oracle to fail in the
 fresh process. A compiler, setup or sanitizer failure never counts as an expected RED. Historical

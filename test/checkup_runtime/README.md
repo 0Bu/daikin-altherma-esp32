@@ -13,7 +13,11 @@ python3 test/checkup_runtime/run.py --sanitizer undefined
 Each invocation creates a unique temporary output directory. `--out DIR` retains results in a new
 chosen directory; `--root DIR` selects another repository source tree. Intended uncommitted changes
 are tested as they stand. The receipt records HEAD separately from actual source/dependency hashes,
-compiler, commands and per-case results; it verifies inputs did not change during execution.
+compiler, commands and per-case results. Before linking each baseline or control, the runner
+compares the compiler's non-system dependency files for Checkup and the Store separately against
+their preflight paths. Each control must substitute only its generated Checkup source, whose
+planned bytes are checked before and after compilation. All bound input hashes are checked again
+after the runtime cases.
 
 The cases exercise independent heater clocks and unknown inputs, fault severity and missing sibling
 rows, exact read-time freshness, stale findings, poll/circulation epoch barriers, consent and source
