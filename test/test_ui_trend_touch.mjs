@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 import { readAppFragments } from "../tools/ui/read_app_source.mjs";
+import { createScalarGridWitness } from "./test_browser_history_motion.mjs";
 
 const style = fs.readFileSync(new URL("../main/www/style.css", import.meta.url), "utf8");
 assert.match(style,
@@ -268,6 +269,8 @@ function scalarGridHarness(historySource) {
     const node = {
       nodeType: tag === "#fragment" ? 11 : 1, nodeName: tag.toUpperCase(),
       id: attrs.id || "", childNodes: [], writes: 0, value: attrs.value,
+      ownerDocument: document,
+      get parentNode() { return this.parentElement || null; },
       dataset: Object.fromEntries(Object.entries(attrs).filter(([name]) => name.startsWith("data-"))
         .map(([name, value]) => [name.slice(5).replace(/-([a-z])/g, (_, char) => char.toUpperCase()), value])),
       get attributes() { return [...attributes].map(([name, value]) => ({ name, value })); },
@@ -393,5 +396,115 @@ assert.throws(() => assertScalarGridPolling(disclosureSource.replace(scalarBranc
 error => error.code === "ERR_ASSERTION" && error.message.startsWith("Settings no-chart poll must reset live select state"),
 "extending scalar retention to Settings must fail its live-select reset assertion");
 console.log("UI scalar-grid reconciliation and both branch negative controls passed");
+
+function scalarWitnessFixture(makeWitness) {
+  const h = scalarGridHarness(disclosureSource), { element: el } = h;
+  const cards = ["first", "later", "hidden"].map(name =>
+    el("section", { class: "vgroup", "data-dashboard-card": name }));
+  cards[2].hidden = true;
+  const root = el("div", { id: "valueGroups" }, cards), body = el("body", {}, [root]);
+  const html = el("html", {}, [body]);
+  html.mounted = true;
+  h.document.nodeType = 9;
+  h.document.parentNode = null;
+  h.document.documentElement = html;
+  Object.defineProperty(html, "parentNode", { get: () => h.document });
+  let observer;
+  class Observer {
+    constructor(callback) {
+      observer = this; this.callback = callback; this.pending = [];
+      this.takes = 0; this.closes = 0; this.observations = 0;
+    }
+    observe(target, options) {
+      this.observations++;
+      assert.equal(target, h.document, "continuity witness must observe removals at document scope");
+      assert.equal(options.childList && options.subtree, true, "continuity witness must include ancestor child-list removals");
+    }
+    takeRecords() { this.takes++; return this.pending.splice(0); }
+    disconnect() { this.closes++; this.pending = []; }
+    queue(node) { this.pending.push({ removedNodes: [node] }); }
+    deliver() { this.callback(this.takeRecords()); }
+  }
+  const witness = makeWitness(root, Observer);
+  assert.equal(observer.observations, 1, "continuity witness must arm its document observer once");
+  return { h, root, body, html, cards, witness, observer,
+    detachAndReattach(node) {
+      const parent = node.parentNode, index = parent.childNodes.indexOf(node);
+      parent.childNodes.splice(index, 1); node.parentElement = null;
+      observer.queue(node);
+      parent.childNodes.splice(index, 0, node); node.parentElement = parent;
+    },
+  };
+}
+
+function assertScalarWitnessContinuity(makeWitness) {
+  function finish(fixture) {
+    const result = fixture.witness.finish();
+    assert.equal(fixture.observer.pending.length, 0, "finish must drain pending removal records");
+    assert.ok(fixture.observer.takes > 0, "finish must obtain the observer's queued records");
+    fixture.witness.close(); fixture.witness.close();
+    assert.equal(fixture.observer.closes, 1, "finish and explicit close must disconnect only once");
+    return result;
+  }
+  const unchanged = scalarWitnessFixture(makeWitness), clean = finish(unchanged);
+  assert.deepEqual({ ...clean }, { retained: true, removed: 0, visibilityStable: true },
+    "an unchanged scalar grid must pass its continuity witness");
+  const takes = unchanged.observer.takes;
+  unchanged.cards[2].hidden = false;
+  assert.equal(unchanged.witness.finish(), clean, "repeated finish must return its cached observation");
+  assert.equal(unchanged.observer.takes, takes, "repeated finish must not drain a closed observer again");
+
+  const later = scalarWitnessFixture(makeWitness);
+  later.detachAndReattach(later.cards[1]);
+  const reattached = finish(later);
+  assert.equal(reattached.retained, true, "later card must have returned to its original final position");
+  assert.equal(reattached.removed, 1, "queued later-card removal must be observed even after reattachment");
+  for (const target of ["root", "body"]) {
+    const fixture = scalarWitnessFixture(makeWitness);
+    fixture.detachAndReattach(fixture[target]);
+    const result = finish(fixture);
+    assert.equal(result.retained, true, target + ": temporary removal must leave the same final grid");
+    assert.equal(result.removed, 1, target + ": removal of the grid or its ancestor must be recorded");
+  }
+  const delivered = scalarWitnessFixture(makeWitness);
+  delivered.detachAndReattach(delivered.cards[1]); delivered.observer.deliver();
+  assert.equal(finish(delivered).removed, 1, "observer callbacks must record removals before finish");
+
+  const replaced = scalarWitnessFixture(makeWitness), obsolete = replaced.cards[1];
+  const replacement = replaced.h.element("section", { class: "vgroup", "data-dashboard-card": "later" });
+  replaced.root.childNodes[1] = replacement; replacement.parentElement = replaced.root; obsolete.parentElement = null;
+  replaced.observer.queue(obsolete);
+  assert.equal(finish(replaced).retained, false, "replacing a later child must fail grid identity retention");
+  const reordered = scalarWitnessFixture(makeWitness);
+  [reordered.root.childNodes[1], reordered.root.childNodes[2]] = [reordered.cards[2], reordered.cards[1]];
+  assert.equal(finish(reordered).retained, false, "every original card must retain its own child position");
+  const extended = scalarWitnessFixture(makeWitness), added = extended.h.element("section");
+  extended.root.childNodes.push(added); added.parentElement = extended.root;
+  assert.equal(finish(extended).retained, false, "scalar grid must retain its complete child count");
+  const disconnected = scalarWitnessFixture(makeWitness);
+  disconnected.body.childNodes = []; disconnected.root.parentElement = null;
+  assert.equal(finish(disconnected).retained, false, "original grid children must remain connected");
+  const visibility = scalarWitnessFixture(makeWitness);
+  visibility.cards[2].hidden = false;
+  assert.equal(finish(visibility).visibilityStable, false, "changed card-owned hidden state must fail visibility stability");
+  const closed = scalarWitnessFixture(makeWitness);
+  closed.witness.close(); closed.witness.close();
+  assert.equal(closed.observer.closes, 1, "explicit close must be idempotent without finish");
+}
+
+assertScalarWitnessContinuity(createScalarGridWitness);
+const witnessSource = createScalarGridWitness.toString();
+for (const [label, anchor, replacement] of [
+  ["first child only", "const tracked = new Set(children);", "const tracked = new Set(children.slice(0, 1));"],
+  ["ignored removals", "if (tracked.has(node)) removed++;", "if (false) removed++;"],
+]) {
+  assert.equal(witnessSource.split(anchor).length, 2, label + ": witness control must mutate one exact helper seam");
+  const mutant = vm.runInNewContext("(" + witnessSource.replace(anchor, replacement) + ")");
+  assert.throws(() => assertScalarWitnessContinuity(mutant),
+    error => error.code === "ERR_ASSERTION" && error.actual === 0 && error.expected === 1 &&
+      error.message.startsWith("queued later-card removal must be observed even after reattachment"),
+    label + ": a final first-child check must not substitute for continuous removal observation");
+}
+console.log("UI scalar-grid continuity witness and both temporal negative controls passed");
 
 console.log("UI trend touch and keyboard pin/rebuild/poll focus tests passed");

@@ -11,6 +11,38 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const evaluate = (page, fn, args = {}) =>
   page.evaluate("(" + fn.toString() + ")(" + JSON.stringify(args) + ")");
 
+export function createScalarGridWitness(root, Observer) {
+  const children = [...root.childNodes];
+  const cards = [...root.querySelectorAll(".vgroup[data-dashboard-card]")]
+    .map(node => ({ node, hidden: node.hidden }));
+  const tracked = new Set(children);
+  for (let node = root; node; node = node.parentNode) tracked.add(node);
+  let removed = 0, closed = false, finished;
+  const record = records => {
+    for (const item of records) for (const node of item.removedNodes)
+      if (tracked.has(node)) removed++;
+  };
+  const observer = new Observer(record);
+  observer.observe(root.ownerDocument, { childList: true, subtree: true });
+  const close = () => {
+    if (!closed) { closed = true; observer.disconnect(); }
+  };
+  return {
+    close,
+    finish() {
+      if (finished) return finished;
+      record(observer.takeRecords());
+      close();
+      return finished = {
+        retained: children.length === root.childNodes.length && children.every((node, index) =>
+          node.isConnected && root.childNodes[index] === node),
+        removed,
+        visibilityStable: cards.every(({ node, hidden }) => node.hidden === hidden),
+      };
+    },
+  };
+}
+
 // Native input goes through hit testing and the delegated production handler. A synthetic .click()
 // would miss overlapping SVG targets and would not witness input dispatch on a blocked main thread.
 async function click(page, selector, inspector = "") {
@@ -79,6 +111,7 @@ async function assertTouchReadout(page, selector, context) {
 }
 
 async function installHooks(page, mutation) {
+  await page.evaluate("window.__motionWatchScalarGrid = (" + createScalarGridWitness.toString() + "); true");
   await evaluate(page, ({ mutation }) => {
     window.__motionHooks = { renderApp, histHtml, env3HistHtml, descAccordion,
       circulationSettingsCardHtml, refreshValues, refreshStatus, replaceHistoryHtml };
@@ -475,8 +508,7 @@ async function observe(page, server, context, selectors, { inspector = false, st
       flow: geometry("#fSup1"), plot: geometry(selectors[0]) };
     const grid = document.getElementById("valueGroups");
     window.__motionScalarGrid = S.stage === "dashboard" && grid.firstElementChild &&
-      !grid.querySelector(".vhist") ? { root: grid, children: [...grid.childNodes], removed: 0,
-        cards: [...grid.querySelectorAll(".vgroup[data-dashboard-card]")].map(node => ({ node, hidden: node.hidden })) } : null;
+      !grid.querySelector(".vhist") ? window.__motionWatchScalarGrid(grid, MutationObserver) : null;
     const ancestors = new Map(), detached = [];
     for (const { selector, node: plot } of window.__motionPlots)
       for (let node = plot; node; node = node.parentNode) {
@@ -488,8 +520,6 @@ async function observe(page, server, context, selectors, { inspector = false, st
     // delivery. Checking isConnected or final plot identity alone misses that rendering disruption.
     const recordDetachments = records => {
       for (const record of records) for (const node of record.removedNodes) {
-        const scalar = window.__motionScalarGrid;
-        if (scalar && record.target === scalar.root && scalar.children.includes(node)) scalar.removed++;
         if (ancestors.has(node)) detached.push({ selectors: [...ancestors.get(node)],
           node: node.nodeName + (node.id ? "#" + node.id : ""),
           connectedAtDelivery: node.isConnected, at: performance.now() });
@@ -552,12 +582,7 @@ async function observe(page, server, context, selectors, { inspector = false, st
       revisions: window.__motionPlots.map(({ selector, revision }) => ({ selector,
         before: revision, after: window.__motionRevision(document.querySelector(selector)) })),
       detachedAncestors: window.__motionDetachedAncestors,
-      scalarGrid: window.__motionScalarGrid ? {
-        retained: window.__motionScalarGrid.children.every(node => node.isConnected &&
-          node.parentNode === window.__motionScalarGrid.root),
-        removed: window.__motionScalarGrid.removed,
-        visibilityStable: window.__motionScalarGrid.cards.every(({ node, hidden }) => node.hidden === hidden),
-      } : null,
+      scalarGrid: window.__motionScalarGrid?.finish() || null,
       bodyUnchanged: body.innerHTML === window.__motionBody.html,
       sameBody: body.firstChild === window.__motionBody.node,
       animations: window.__motionAnimations.map(({ id, node, animation, time, initial }) => ({
@@ -690,7 +715,7 @@ async function assertFlowTtlTransition(page, server, context) {
     const revision = window.__motionRevision(plot), now = performance.now();
     const grid = document.getElementById("valueGroups");
     const state = window.__motionTtl = { plot, gen: flow.gen, modbusGen: modbus.gen,
-      grid, gridFirst: grid.firstElementChild,
+      gridWitness: window.__motionWatchScalarGrid(grid, MutationObserver),
       revision, started: now, last: now, frames: 0, maxGap: 0,
       animations: ["fSup1", "rfHot", "scFan", "scPump"].map(id => {
         const node = document.getElementById(id);
@@ -719,8 +744,7 @@ async function assertFlowTtlTransition(page, server, context) {
       return { gen: S.hist.get("flow")?.gen,
         modbusGen: S.hist.get(histCacheKey("flow", "modbus"))?.gen,
         replaced: plot !== state.plot, focused: document.activeElement === plot,
-        scalarGridRetained: !!state.gridFirst && state.gridFirst.isConnected &&
-          state.grid.firstElementChild === state.gridFirst,
+        scalarGrid: state.gridWitness.finish(),
         revision: window.__motionRevision(plot), duration: performance.now() - state.started,
         frames: state.frames, maxGap: state.maxGap,
         animations: state.animations.map(({ id, node, animation, time, initialRunning }) => ({ id,
@@ -728,7 +752,7 @@ async function assertFlowTtlTransition(page, server, context) {
           running: animation?.playState === "running", elapsed: animation?.currentTime - time })) };
     }, { selector });
   } finally {
-    await page.evaluate("if(window.__motionTtl)cancelAnimationFrame(window.__motionTtl.request); delete window.__motionTtl; true");
+    await page.evaluate("if(window.__motionTtl){cancelAnimationFrame(window.__motionTtl.request);window.__motionTtl.gridWitness.close();} delete window.__motionTtl; true");
   }
   console.log("history TTL transition evidence: " + JSON.stringify({ context, before, ...changed }));
   assert.deepEqual(server.historyRequests.slice(requests), ["x10a:flow"],
@@ -740,8 +764,10 @@ async function assertFlowTtlTransition(page, server, context) {
   assert.notEqual(changed.revision.model, before.revision.model, context + ": TTL model revision must advance");
   assert.equal(changed.revision.dom, changed.revision.model,
     context + ": TTL plot must carry the accepted model revision; " + JSON.stringify({ before, changed }));
-  assert.equal(changed.scalarGridRetained, true,
+  assert.equal(changed.scalarGrid.retained && changed.scalarGrid.visibilityStable, true,
     context + ": TTL refresh must retain the closed scalar value grid");
+  assert.equal(changed.scalarGrid.removed, 0,
+    context + ": TTL scalar value-grid children and ancestors must remain connected");
   for (const animation of changed.animations) {
     assert.equal(animation.initialRunning && animation.same && animation.running, true,
       context + "/" + animation.id + ": TTL refresh must preserve the running CSSAnimation instance");
@@ -1001,6 +1027,8 @@ export async function assertHistoryMotion(page, server, context) {
         window.__motionRecordDetachments(window.__motionDetachObserver.takeRecords());
         window.__motionDetachObserver.disconnect();
       }
+      window.__motionScalarGrid?.close();
+      window.__motionTtl?.gridWitness?.close();
       pollStop(); pollSchedule = () => {}; return true;
     });
     await page.waitFor("!_pollBusy && !S.histBusy.size");
