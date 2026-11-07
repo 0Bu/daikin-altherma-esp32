@@ -310,7 +310,7 @@ inline uint32_t persist_crc_ring(uint32_t crc, const logic::TrendRing& r) {
     return crc;
 }
 
-inline uint32_t persist_crc() {
+inline uint32_t history_persist_crc() {
     uint32_t crc = CONFIG_CRC32_INIT;
     crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(&P().x10a_target_fp),
                               sizeof(P().x10a_target_fp));
@@ -366,7 +366,7 @@ inline void room_wipe_locked(uint32_t identity) {
 // than five times a second.
 inline void persist_seal_locked() {
     if (!s_persist_dirty) return;
-    P().crc = persist_crc();
+    P().crc         = history_persist_crc();
     s_persist_dirty = false;
 }
 
@@ -858,8 +858,8 @@ void history_start() {
         env3_keep && rings_have_samples(P().env3_ring, ENV3_HISTORY_COUNT)};
     const logic::HistoryRasterPlan plan = logic::history_raster_plan(s_liveness, weighed);
     s_persist_verdict                   = logic::history_restore_verdict(
-        reason, P().magic, P().version, P().catalog_fp, want_fp, P().crc, persist_crc(), safe,
-        P().boots_since_commit, plan.region_bookable);
+        reason, P().magic, P().version, P().catalog_fp, want_fp, P().crc, history_persist_crc(),
+        safe, P().boots_since_commit, plan.region_bookable);
     // The numbers behind a refusal or a retirement, while the previous boot's record is still
     // unread: that the record itself did not verify, or that it holds no usable commit for the
     // raster, is the whole diagnosis (a raster that merely stalled is booked, not refused).
@@ -1003,7 +1003,12 @@ void history_start() {
 }
 
 bool history_checkup_flash_pending() {
-    return s_flash_part && s_flash_scan_ok && !s_flash_checkup_restore_done;
+    // Main calls after history_start and before producers, but the recovery button can
+    // already be forgetting the journal. Snapshot both flags under their owner lock.
+    if (s_flash_forgotten.load()) return false;
+    Lock flash_lk(s_flash_mtx, 0);
+    return flash_lk.acquired() && !s_flash_forgotten.load() && s_flash_scan_ok &&
+           !s_flash_checkup_restore_done;
 }
 
 const char* history_persist_state() { return logic::history_restore_slug(s_persist_verdict); }

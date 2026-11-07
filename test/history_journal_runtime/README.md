@@ -20,7 +20,7 @@ paired seed/restore witness and requires the named acknowledged-correction oracl
 fresh process. A compiler, setup or sanitizer failure never counts as an expected RED. Historical
 RED receipts retain the source and fixture hashes from the respective pre-fix execution.
 
-The 34 baseline process cases cover:
+The 36 baseline process cases cover:
 
 - Regular public Start/bind/record/seal calls creating one Stop population. Consent changes create
   reset barriers; the fixture never seeds private Store observations, claims or latches.
@@ -52,6 +52,10 @@ The 34 baseline process cases cover:
   interleavings then retry in the same boot. A finished scan, including one that returned a read
   failure, permits exactly one full erase of the compatible journal. Three sentinels and the
   complete simulated partition distinguish successful erasure from a successful return alone.
+- The startup Checkup query uses the real Core record from the paired synthetic NOR seed. A
+  healthy scan reports pending, a contended flash mutex makes the query return immediately, and
+  real restore clears pending. A Forget interleaved before the query acquires the mutex suppresses
+  pending even when all erase attempts fail and both scan flags still describe pending recovery.
 
 The append mutations remove the failure callback, restore the erroneous
 read-header classifier, clear the Core ahead episode after Stop success, or trust a commit error
@@ -59,7 +63,8 @@ over valid readback. Another restores success-only sequence consumption: data/ba
 reservation oracles must fail, and a passing paired seed followed by a fresh process must lose the
 acknowledged late correction at its precise oracle. The Forget mutations restore null-partition
 success, publish readiness before the scan or without the History mutex, and report success
-without erasing. The nine independently compiled mutations must fail 20 named semantic oracles.
+without erasing. The pending-query mutations restore the unlocked flags read or drop either
+Forget check. The twelve independently compiled mutations must fail 23 named semantic oracles.
 Five unknown-case probes must fail explicitly. Compilation errors never count as negative proof.
 
 This is deterministic host evidence for the History/Stop append and Forget contracts. The lookup

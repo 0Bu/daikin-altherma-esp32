@@ -2792,6 +2792,78 @@
     "stop_http_detect": {
       "pattern": "^daik::do_detect\\(httpd_req\\*\\)$",
       "max_bytes": 32
+    },
+    "stop_pending": {
+      "pattern": "^daik::history_checkup_flash_pending\\(\\)$",
+      "max_bytes": 48
+    },
+    "stop_atomic_bool_load": {
+      "pattern": "^std::atomic<bool>::load\\(std::memory_order\\)\\ const$",
+      "max_bytes": 32
+    },
+    "stop_pending_guard": {
+      "pattern": "^daik::SemGuard::SemGuard\\(QueueDefinition\\*,\\ unsigned\\ long\\)$",
+      "max_bytes": 32
+    },
+    "stop_queue_set_notify": {
+      "pattern": "^prvNotifyQueueSetContainer$",
+      "max_bytes": 48
+    },
+    "stop_forget_wipe": {
+      "pattern": "^_ZZN4daik20history_flash_forgetEvENKUlvE_clEv\\$isra\\$0$",
+      "max_bytes": 48
+    },
+    "stop_forget_persist_wipe": {
+      "pattern": "^daik::\\(anonymous\\ namespace\\)::persist_wipe\\(unsigned\\ long,\\ unsigned\\ long,\\ unsigned\\ long,\\ unsigned\\ long,\\ bool\\)$",
+      "max_bytes": 32
+    },
+    "stop_forget_persist_seal": {
+      "pattern": "^daik::\\(anonymous\\ namespace\\)::persist_seal_locked\\(\\)$",
+      "max_bytes": 32
+    },
+    "stop_forget_persist_crc": {
+      "pattern": "^daik::\\(anonymous\\ namespace\\)::history_persist_crc\\(\\)$",
+      "max_bytes": 32
+    },
+    "stop_forget_room_wipe": {
+      "pattern": "^daik::\\(anonymous\\ namespace\\)::room_wipe_locked\\(unsigned\\ long\\)$",
+      "max_bytes": 32
+    },
+    "stop_forget_room_seal": {
+      "pattern": "^daik::\\(anonymous\\ namespace\\)::room_seal_locked\\(\\)$",
+      "max_bytes": 32
+    },
+    "stop_forget_room_crc": {
+      "pattern": "^daik::\\(anonymous\\ namespace\\)::room_crc\\(\\)$",
+      "max_bytes": 32
+    },
+    "stop_forget_liveness_begin": {
+      "pattern": "^daik::logic::history_liveness_begin\\(daik::logic::HistoryLiveness\\&,\\ long\\ long\\)$",
+      "max_bytes": 32
+    },
+    "stop_forget_catalog_fingerprint": {
+      "pattern": "^daik::logic::history_catalog_fingerprint\\(\\)$",
+      "max_bytes": 32
+    },
+    "stop_forget_series_id": {
+      "pattern": "^daik::logic::history_series_id\\(daik::logic::HistoryJournalSource,\\ unsigned\\ int\\)$",
+      "max_bytes": 32
+    },
+    "stop_forget_series_id_begin": {
+      "pattern": "^daik::logic::history_series_id_begin\\(daik::logic::HistoryJournalSource\\)$",
+      "max_bytes": 32
+    },
+    "stop_forget_fp_u32": {
+      "pattern": "^daik::logic::history_fp_u32\\(unsigned\\ long,\\ unsigned\\ long\\)$",
+      "max_bytes": 48
+    },
+    "stop_forget_manifest_cache_reset": {
+      "pattern": "^daik::\\(anonymous\\ namespace\\)::flash_manifest_cache_reset\\(\\)$",
+      "max_bytes": 32
+    },
+    "stop_forget_adopt_floor": {
+      "pattern": "^_ZN4daik12_GLOBAL__N_1L18forget_adopt_floorEj\\$part\\$0$",
+      "max_bytes": 32
     }
   },
   "paths": {
@@ -11050,6 +11122,278 @@
       "multipliers": {},
       "base_bytes": 192,
       "max_bytes": 2048
+    },
+    "main_stop_pending_latch": {
+      "symbols": [
+        "main_task",
+        "boot_sequence",
+        "stop_checkup_start",
+        "stop_pending",
+        "stop_atomic_bool_load"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "main_stop_pending_take": {
+      "symbols": [
+        "main_task",
+        "boot_sequence",
+        "stop_checkup_start",
+        "stop_pending",
+        "stop_pending_guard",
+        "sdk_queue_sem_take",
+        "sdk_queue_remove_event",
+        "sdk_queue_yield_required",
+        "sdk_queue_yield_other",
+        "sdk_queue_crosscore_yield",
+        "sdk_queue_crosscore_send",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "main_stop_pending_release": {
+      "symbols": [
+        "main_task",
+        "boot_sequence",
+        "stop_checkup_start",
+        "stop_pending",
+        "sem_guard_release",
+        "sdk_queue_send",
+        "stop_queue_set_notify",
+        "sdk_queue_remove_event",
+        "sdk_queue_yield_required",
+        "sdk_queue_yield_other",
+        "sdk_queue_crosscore_yield",
+        "sdk_queue_crosscore_send",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "button_stop_forget_flash_take": {
+      "symbols": [
+        "button_task",
+        "history_forget",
+        "mqtt_input_lock",
+        "sdk_queue_sem_take",
+        "sdk_queue_remove_event",
+        "sdk_queue_yield_required",
+        "sdk_queue_yield_other",
+        "sdk_queue_crosscore_yield",
+        "sdk_queue_crosscore_send",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "button_stop_forget_flash_release": {
+      "symbols": [
+        "button_task",
+        "history_forget",
+        "sem_guard_release",
+        "sdk_queue_send",
+        "stop_queue_set_notify",
+        "sdk_queue_remove_event",
+        "sdk_queue_yield_required",
+        "sdk_queue_yield_other",
+        "sdk_queue_crosscore_yield",
+        "sdk_queue_crosscore_send",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "button_stop_forget_stop_take": {
+      "symbols": [
+        "button_task",
+        "history_forget",
+        "stop_stop_observation_forget",
+        "mqtt_input_lock",
+        "sdk_queue_sem_take",
+        "sdk_queue_remove_event",
+        "sdk_queue_yield_required",
+        "sdk_queue_yield_other",
+        "sdk_queue_crosscore_yield",
+        "sdk_queue_crosscore_send",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "button_stop_forget_stop_release": {
+      "symbols": [
+        "button_task",
+        "history_forget",
+        "stop_stop_observation_forget",
+        "sem_guard_release",
+        "sdk_queue_send",
+        "stop_queue_set_notify",
+        "sdk_queue_remove_event",
+        "sdk_queue_yield_required",
+        "sdk_queue_yield_other",
+        "sdk_queue_crosscore_yield",
+        "sdk_queue_crosscore_send",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "button_stop_forget_wipe_take": {
+      "symbols": [
+        "button_task",
+        "history_forget",
+        "stop_forget_wipe",
+        "mqtt_input_lock",
+        "sdk_queue_sem_take",
+        "sdk_queue_remove_event",
+        "sdk_queue_yield_required",
+        "sdk_queue_yield_other",
+        "sdk_queue_crosscore_yield",
+        "sdk_queue_crosscore_send",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "button_stop_forget_wipe_release": {
+      "symbols": [
+        "button_task",
+        "history_forget",
+        "stop_forget_wipe",
+        "sem_guard_release",
+        "sdk_queue_send",
+        "stop_queue_set_notify",
+        "sdk_queue_remove_event",
+        "sdk_queue_yield_required",
+        "sdk_queue_yield_other",
+        "sdk_queue_crosscore_yield",
+        "sdk_queue_crosscore_send",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "button_stop_forget_latch": {
+      "symbols": [
+        "button_task",
+        "history_forget",
+        "stop_atomic_bool_load",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "button_stop_forget_persist_crc": {
+      "symbols": [
+        "button_task",
+        "history_forget",
+        "stop_forget_wipe",
+        "stop_forget_persist_wipe",
+        "stop_forget_persist_seal",
+        "stop_forget_persist_crc",
+        "history_crc_ring",
+        "history_config_crc",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "button_stop_forget_room_crc": {
+      "symbols": [
+        "button_task",
+        "history_forget",
+        "stop_forget_wipe",
+        "stop_forget_room_wipe",
+        "stop_forget_room_seal",
+        "stop_forget_room_crc",
+        "history_crc_ring",
+        "history_config_crc",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "button_stop_forget_liveness_crc": {
+      "symbols": [
+        "button_task",
+        "history_forget",
+        "stop_forget_wipe",
+        "stop_forget_liveness_begin",
+        "room_liveness_seal",
+        "room_liveness_crc",
+        "history_config_crc",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "button_stop_forget_catalog_crc": {
+      "symbols": [
+        "button_task",
+        "history_forget",
+        "stop_forget_wipe",
+        "stop_forget_catalog_fingerprint",
+        "stop_forget_series_id",
+        "stop_forget_series_id_begin",
+        "stop_forget_fp_u32",
+        "history_config_crc",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "button_stop_forget_manifest_reset": {
+      "symbols": [
+        "button_task",
+        "history_forget",
+        "stop_forget_wipe",
+        "stop_forget_manifest_cache_reset",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
+    },
+    "button_stop_forget_floor_reset": {
+      "symbols": [
+        "button_task",
+        "history_forget",
+        "stop_forget_wipe",
+        "stop_forget_adopt_floor",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
     }
   },
   "tasks": {
@@ -11253,7 +11597,10 @@
         "main_stop_scan",
         "main_stop_index",
         "main_stop_start_suppression",
-        "main_stop_index_reset_suppression"
+        "main_stop_index_reset_suppression",
+        "main_stop_pending_latch",
+        "main_stop_pending_take",
+        "main_stop_pending_release"
       ]
     },
     "mqtt": {
@@ -11494,7 +11841,20 @@
         "button_shutdown_checkup_stop_disabled",
         "button_shutdown_checkup_stop_seal",
         "button_stop_forget",
-        "button_shutdown_checkup_stop_suppression"
+        "button_shutdown_checkup_stop_suppression",
+        "button_stop_forget_flash_take",
+        "button_stop_forget_flash_release",
+        "button_stop_forget_stop_take",
+        "button_stop_forget_stop_release",
+        "button_stop_forget_wipe_take",
+        "button_stop_forget_wipe_release",
+        "button_stop_forget_latch",
+        "button_stop_forget_persist_crc",
+        "button_stop_forget_room_crc",
+        "button_stop_forget_liveness_crc",
+        "button_stop_forget_catalog_crc",
+        "button_stop_forget_manifest_reset",
+        "button_stop_forget_floor_reset"
       ]
     },
     "wifi": {

@@ -321,7 +321,8 @@ limits. [DIAGNOSTIC_EVIDENCE.md](DIAGNOSTIC_EVIDENCE.md#diagnosis-cycling) owns 
 A report taken after History forgetting withdraws Stop evidence for the rest of that boot.
 If the Stop object is emitted, counts are null and `confirmed`, `pending`, `restore_pending`
 and `persistence_pending` are false. Those flags describe withdrawn work; they do not establish
-successful restoration or erasure.
+successful restoration or erasure. `saturated` is null without a confirmed readable population,
+and each category's `supported` flag is null without source confirmation.
 
 `min_unix_s` is the pressure minimum's earliest dated occurrence in the retained window, null without
 a synchronized clock; equal minima keep the earliest known time, not an inferred pressure dip.

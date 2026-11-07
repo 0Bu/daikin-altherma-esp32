@@ -20,13 +20,17 @@ out.mkdir(parents=True, exist_ok=True, mode=0o700)
 history_path = ROOT / "main/history.cpp"
 source = ROOT / "main/stop_observation_store.cpp"
 source_sha_before = hashlib.sha256(source.read_bytes()).hexdigest()
-history = history_path.read_text()
+history_bytes = history_path.read_bytes()
+history_sha_before = hashlib.sha256(history_bytes).hexdigest()
+history = history_bytes.decode("utf-8")
 record_start = history.index("struct FlashJournalRecord {")
 record_end = history.index("\nconst esp_partition_t* s_flash_part", record_start)
 (out / "history_record.hpp").write_text(history[record_start:record_end])
 reader_start = history.index("bool flash_read_stop_observation(")
 reader_end = history.index("\n// Pass 1", reader_start)
 (out / "history_reader.hpp").write_text(history[reader_start:reader_end])
+extracted_hashes = {name: hashlib.sha256((out / name).read_bytes()).hexdigest()
+                    for name in ("history_record.hpp", "history_reader.hpp")}
 flags = ["-std=c++17", "-O0", "-g", "-Wall", "-Wextra", "-Werror", "-I", str(out), "-I", str(HERE / "stubs"),
          "-I", str(ROOT / "main")]
 if args.sanitizer == "undefined":
@@ -34,23 +38,40 @@ if args.sanitizer == "undefined":
 binary = out / "runtime"
 compiler = shlex.split(os.environ.get("CXX", "c++"))
 dependencies = out / "runtime.d"
-command = [*compiler, *flags, "-MMD", "-MF", str(dependencies),
-           "-DSTOP_OBSERVATION_PRODUCTION_SOURCE=" + json.dumps(str(source)), str(HERE / "fixture.cpp"),
-           "-o", str(binary)]
+translation_unit = ["-DSTOP_OBSERVATION_PRODUCTION_SOURCE=" + json.dumps(str(source)),
+                    str(HERE / "fixture.cpp")]
+
+
+def dependency_inputs(depfile):
+    inputs = {Path(__file__).resolve(), history_path, source}
+    for value in shlex.split(depfile.read_text().replace("\\\n", " ").partition(":")[2]):
+        path = Path(value)
+        path = (path if path.is_absolute() else ROOT / path).resolve()
+        if path not in {out.resolve() / "history_record.hpp", out.resolve() / "history_reader.hpp"}:
+            inputs.add(path)
+    return inputs
+
+
+preflight = out / "preflight.d"
+preflight_command = [*compiler, *flags, "-MM", "-MF", str(preflight), *translation_unit]
+result = subprocess.run(preflight_command, cwd=ROOT, text=True, capture_output=True, timeout=120)
+(out / "preflight.txt").write_text(shlex.join(preflight_command) + "\n" + result.stdout + result.stderr)
+if result.returncode:
+    raise SystemExit(result.stderr)
+inputs = dependency_inputs(preflight)
+hashes = {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
+          for path in sorted(inputs)}
+if (hashes[str(history_path.relative_to(ROOT))] != history_sha_before or
+        hashes[str(source.relative_to(ROOT))] != source_sha_before):
+    raise SystemExit("Production sources changed before compilation")
+(out / "inputs.json").write_text(json.dumps(hashes, indent=2) + "\n")
+command = [*compiler, *flags, "-MMD", "-MF", str(dependencies), *translation_unit, "-o", str(binary)]
 compile_result = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, timeout=120)
 (out / "compile.txt").write_text(shlex.join(command) + "\n" + compile_result.stdout + compile_result.stderr)
 if compile_result.returncode:
     raise SystemExit(compile_result.stderr)
-inputs = {Path(__file__).resolve(), history_path}
-for value in shlex.split(dependencies.read_text().replace("\\\n", " ").partition(":")[2]):
-    path = Path(value)
-    path = (path if path.is_absolute() else ROOT / path).resolve()
-    if path in {out.resolve() / "history_record.hpp", out.resolve() / "history_reader.hpp"}:
-        continue # their complete production source is bound above
-    inputs.add(path)
-hashes = {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
-          for path in sorted(inputs)}
-(out / "inputs.json").write_text(json.dumps(hashes, indent=2) + "\n")
+if dependency_inputs(dependencies) != inputs:
+    raise SystemExit("Compiler dependency inventory changed between preflight and build")
 (out / "compiler.txt").write_text(subprocess.run([*compiler, "--version"], text=True,
                                                capture_output=True, timeout=30).stdout)
 cases = ["late_replay", "independent_clock", "busy_and_failure", "reset_and_consent", "restore_guards",
@@ -119,11 +140,17 @@ if any(hashlib.sha256((ROOT / name).read_bytes()).hexdigest() != digest
     raise SystemExit("Source changed while the runtime fixture was running")
 if hashlib.sha256(source.read_bytes()).hexdigest() != source_sha_before:
     raise SystemExit("Production changed during compilation or execution")
+if any(hashlib.sha256((out / name).read_bytes()).hexdigest() != digest
+       for name, digest in extracted_hashes.items()):
+    raise SystemExit("Extracted History inputs changed during compilation or execution")
 receipt = {"outcome": "passed" if not any(result["returncode"] for result in results) else "failed",
            "sanitizer": args.sanitizer, "standard": "c++17", "production_body_rewrite": False,
            "source_sha256": source_sha_before, "inputs_unchanged": True,
+           "history_extraction_sha256": history_sha_before,
+           "history_extract_sha256": extracted_hashes,
            "input_sha256": hashes, "cases": results, "negative_controls": negative_controls,
            "limits": ["Deterministic SDK/flash transport ports model task interleavings; no kernel race or hardware proof.",
+                      "Preflight and build dependency sets agree; the tracked input hashes match before and after execution.",
                       "Fresh host process observes production static initialization; no physical cold boot or latch clear API."]}
 (out / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
 print("Evidence:", out)

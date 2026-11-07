@@ -13,9 +13,10 @@
 #include HISTORY_PRODUCTION_SOURCE
 
 namespace {
-const esp_partition_t partition{daik::logic::HISTORY_FLASH_PARTITION_OFFSET,
+const esp_partition_t  partition{daik::logic::HISTORY_FLASH_PARTITION_OFFSET,
                                 daik::logic::HISTORY_FLASH_PARTITION_BYTES};
 const esp_partition_t* lookup_partition = &partition;
+bool                   refuse_erases    = false;
 }
 const esp_partition_t* esp_partition_find_first(int, int, const char* label) {
     if (auto hook = std::exchange(journal_sdk::during_find, nullptr)) hook();
@@ -50,7 +51,7 @@ esp_err_t esp_partition_write(const esp_partition_t* part, size_t offset, const 
 esp_err_t esp_partition_erase_range(const esp_partition_t* part, size_t offset, size_t bytes) {
     ++journal_sdk::erases;
     journal_sdk::erased_ranges.emplace_back(offset, bytes);
-    if (journal_sdk::fail_erase == journal_sdk::erases) return ESP_FAIL;
+    if (refuse_erases || journal_sdk::fail_erase == journal_sdk::erases) return ESP_FAIL;
     if (part != &partition || offset % daik::logic::HISTORY_FLASH_ERASE_BYTES ||
         bytes % daik::logic::HISTORY_FLASH_ERASE_BYTES || offset > journal_sdk::flash.size() ||
         bytes > journal_sdk::flash.size() - offset)
@@ -525,13 +526,16 @@ void seed_late_correction(const char* transport_path) {
                     static_cast<std::streamsize>(journal_sdk::flash.size()));
     require(static_cast<bool>(transport), "save_only_synthetic_nor_transport_bytes");
 }
-void restore_late_correction(const char* transport_path) {
+void load_synthetic_nor(const char* transport_path) {
     journal_sdk::flash.resize(HISTORY_FLASH_PARTITION_BYTES);
     std::ifstream transport(transport_path, std::ios::binary);
     transport.read(reinterpret_cast<char*>(journal_sdk::flash.data()),
                    static_cast<std::streamsize>(journal_sdk::flash.size()));
     require(static_cast<bool>(transport) && transport.peek() == std::char_traits<char>::eof(),
             "cold_process_loads_exact_synthetic_partition_bytes");
+}
+void restore_late_correction(const char* transport_path) {
+    load_synthetic_nor(transport_path);
     sdk::now_us = 3620000000LL;
     boot(false); // real cold statics, real History scan and real Store reconstruction
     const auto report = stop_observation_report();
@@ -544,6 +548,45 @@ void restore_late_correction(const char* transport_path) {
                 journal_sdk::writes == 0 && journal_sdk::erases == 0,
             "cold_restore_preserves_exact_dated_population_without_writes");
 }
+void checkup_pending(const char* transport_path, bool forget_interleave) {
+    load_synthetic_nor(transport_path);
+    const auto before = journal_sdk::flash;
+    sdk::now_us       = 3620000000LL;
+    history_start();
+    stop_observation_start(true, 11);
+    require(history_checkup_flash_pending(), "healthy_scan_exposes_pending_core");
+
+    if (forget_interleave) {
+        // Let Forget latch suppression after the query's first load but before it acquires the
+        // mutex. All erase attempts fail, so a query that only reads the scan flags sees pending.
+        refuse_erases    = true;
+        sdk::before_take = observe_forget;
+        require(!history_checkup_flash_pending(), "pending_rechecks_forget_under_lock");
+        require(forget_called && !forget_result && journal_sdk::erases == 3,
+                "real_forget_interleaves_and_fails_erase");
+        require(s_flash_scan_ok && !s_flash_checkup_restore_done && journal_sdk::flash == before &&
+                    journal_sdk::writes == 0,
+                "failed_erase_preserves_pending_flags_and_nor");
+        const auto takes = sdk::takes;
+        require(!history_checkup_flash_pending() && sdk::takes == takes,
+                "already_forgotten_pending_skips_lock");
+        history_service_flash_restore();
+        require(journal_sdk::core_restore == 0, "forgotten_core_never_restores");
+        return;
+    }
+
+    {
+        Lock held(s_flash_mtx, 0);
+        require(held.acquired(), "modeled_competing_flash_owner");
+        require(!history_checkup_flash_pending(), "contended_pending_query_is_nonblocking");
+    }
+    require(history_checkup_flash_pending(), "contention_does_not_retire_pending_core");
+    history_service_flash_restore();
+    require(journal_sdk::core_restore == 1 && !history_checkup_flash_pending(),
+            "real_restore_consumes_pending_core");
+    require(journal_sdk::erases == 0 && journal_sdk::writes == 0 && journal_sdk::flash == before,
+            "pending_queries_and_restore_preserve_nor");
+}
 } // namespace
 int main(int argc, char** argv) {
     const std::string name = argc >= 2 ? argv[1] : "unknown_case";
@@ -552,6 +595,9 @@ int main(int argc, char** argv) {
             seed_late_correction(argv[2]);
         else if (name == "restore_late_correction" && argc == 3)
             restore_late_correction(argv[2]);
+        else if ((name == "checkup_pending_healthy" || name == "checkup_pending_forget") &&
+                 argc == 3)
+            checkup_pending(argv[2], name == "checkup_pending_forget");
         else if (argc != 2)
             throw std::runtime_error("unknown_case");
         else if (name == "commit_rejected")

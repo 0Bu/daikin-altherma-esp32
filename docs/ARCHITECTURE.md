@@ -336,10 +336,11 @@ borrow the core clock. New hourly observations must preserve these independent-s
 History forgetting latches Stop suppression even before its mutex exists. It withdraws Stop
 collection, reports, restoration and new append offers for the rest of that boot; startup, source
 binding and consent changes cannot clear the latch. The Store attempts cleanup without waiting for
-its lock. An append already admitted under the History lock can finish before the separate erase
-takes that lock. History only attempts erasure after it has resolved the compatible partition,
-created its locks and finished the initial scan; missing prerequisites leave the reset incomplete.
-Logical suppression alone does not establish physical erasure or persistence across a reboot.
+its lock. The History journal flash lock serializes append and erase; an already admitted append
+can finish before erasure takes that lock. History requires a compatible partition, both locks and
+the initial scan to return before attempting erasure. A scan read failure disables persistence
+but still permits erasure of the confirmed partition. Missing prerequisites leave the reset
+incomplete. Logical suppression alone does not establish erasure or persistence across a reboot.
 The observation owner also rechecks wall/monotonic agreement on reports and flash service. An offset
 change beyond two seconds withdraws the dated view, fences the old archive and pauses this
 collection lifecycle; a fresh lifecycle or boot establishes a new anchor.

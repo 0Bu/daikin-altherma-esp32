@@ -125,9 +125,11 @@ for case in cases:
         (OUT / "failure.json").write_text(json.dumps(results[-1], indent=2) + "\n")
         raise RuntimeError("Unexpected semantic outcome: " + case)
 transport_evidence = []
+pending_cases = ["checkup_pending_healthy", "checkup_pending_forget"]
 if not args.expect_red or args.expect_red_case == "late-correction":
     transport = OUT / "late-correction.synthetic-nor.bin"
-    for case in ["seed_late_correction", "restore_late_correction"]:
+    paired_cases = ["seed_late_correction", "restore_late_correction"]
+    for case in paired_cases + ([] if args.expect_red else pending_cases):
         result = execute(baseline, case, case, [transport])
         expected_failure = args.expect_red and case == "restore_late_correction"
         expected = oracle_failed(result, case, "fresh_restore_retains_acknowledged_late_correction") \
@@ -165,6 +167,16 @@ if not args.expect_red:
         "    if (!s_flash_mtx) return false;\n" + erase_lock)
     readiness_publication = "    if (s_mtx) s_flash_forget_ready.store(true, std::memory_order_release);"
     startup_scan = "    s_flash_scan_ok = flash_journal_scan();"
+    pending_start = text.index("bool history_checkup_flash_pending()")
+    pending_end = text.index("\n\n", pending_start)
+    pending_body = text[pending_start:pending_end]
+    old_pending = ("bool history_checkup_flash_pending() {\n"
+                   "    return s_flash_part && s_flash_scan_ok && !s_flash_checkup_restore_done;\n"
+                   "}")
+    pre_lock = "    if (s_flash_forgotten.load()) return false;\n"
+    under_lock = "flash_lk.acquired() && !s_flash_forgotten.load() && s_flash_scan_ok"
+    if pending_body.count(pre_lock) != 1 or pending_body.count(under_lock) != 1:
+        raise RuntimeError("Expected both pending query Forget checks")
     mutations = [
         ("omit_failure_callback", "        if (stop_owned) stop_observation_flash_failed();",
          "        (void)stop_owned;", ["data_commit", "barrier_commit"],
@@ -192,6 +204,13 @@ if not args.expect_red:
         ("report_forget_without_erase", "e = esp_partition_erase_range(s_flash_part, 0, s_flash_part->size);",
          "e = ESP_OK;", ["forget_ready", "forget_incomplete_scan"],
          "successful_forget_erases_entire_journal"),
+        ("query_pending_without_lock", pending_body, old_pending, ["checkup_pending_healthy"],
+         "contended_pending_query_is_nonblocking"),
+        ("query_pending_without_forget_recheck", pending_body,
+         pending_body.replace(under_lock, "flash_lk.acquired() && s_flash_scan_ok"),
+         ["checkup_pending_forget"], "pending_rechecks_forget_under_lock"),
+        ("query_pending_without_forget_fast_path", pending_body, pending_body.replace(pre_lock, ""),
+         ["checkup_pending_forget"], "already_forgotten_pending_skips_lock"),
     ]
     for name, before, after, controls, oracle in mutations:
         if text.count(before) != 1:
@@ -200,7 +219,8 @@ if not args.expect_red:
         source.write_text(text.replace(before, after, 1))
         binary = build(source, name)
         for case in controls:
-            result = execute(binary, case, name + "-" + case)
+            result = execute(binary, case, name + "-" + case,
+                             [transport] if case in pending_cases else [])
             ok = oracle_failed(result, case, oracle)
             mutants.append({"mutation": name, "case": case, "compiled": True,
                             "oracle": oracle, "stdout": result.stdout,
