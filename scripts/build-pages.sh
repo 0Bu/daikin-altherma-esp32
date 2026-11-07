@@ -55,4 +55,8 @@ cp dist/manifest.json "$OUT/manifest.json"
 cp dist/artifacts.json "$OUT/artifacts.json"
 cp dist/changelog.json "$OUT/changelog.json"
 
+# This site is already assembled; branch-backed Pages must serve it without another Jekyll build.
+# Dev publication injects the same shared root control through pages-commit-payload.mjs.
+if [ "$ARG" = "" ]; then : > "$OUT/.nojekyll"; fi
+
 echo "built $OUT (installer + manifest + $(ls dist/*.bin | wc -l | tr -d ' ') images)"
