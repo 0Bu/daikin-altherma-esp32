@@ -1,4 +1,4 @@
-// translation-source: 3e8092cf0e419496e78d337338f27af53fbda73918ad45f0bbe0970b83ebeddc
+// translation-source: fa1129dce36de7da23d04178f67c6ff1b7f7a1ba9974648b6bae1e479a441c15
 I18N.it = localeValues([
   /* sys.nodata */ "Nessun dato",
   /* sys.unreachable */ "Non raggiungibile",
@@ -800,7 +800,7 @@ I18N.it = localeValues([
   /* board.led_gpio_wiping */ "Fisso dopo un lampeggio rapido — ripristino/cancellazione in corso; non scollegare l'alimentazione.",
   /* board.ledinv */ "Attivo basso (il LED si accende quando il pin è portato a LOW)",
   /* board.btninv */ "Attivo basso (il pulsante collega il pin a GND)",
-  /* board.hint */ "Ripristino di fabbrica: tenere premuto 5 s. Cancella definitivamente Wi-Fi/tutte le impostazioni (si conserva solo la scelta di scheda, LED di stato e pulsante di reset), cronologia/tendenze, durate degli stati e core dump non elaborato. Il portale di configurazione (Wi-Fi) si apre solo dopo una cancellazione completa e riuscita. Altrimenti rilasciare e premere altri 5 s. Scegliere “Nessuno” senza pulsante.",
+  /* board.hint */ "Per ripristinare le impostazioni di fabbrica, tenere premuto il pulsante per 5 s. Se il registro della cronologia non è pronto, il ripristino non cancella nulla. Cancella le impostazioni Wi-Fi e le altre impostazioni, la cronologia registrata, le durate degli stati, il dump grezzo di memoria dopo un arresto anomalo e il registro salvato per la pulizia MQTT. Le impostazioni di scheda, LED e pulsante vengono conservate se possibile. Se una cancellazione non riesce, una parte dei dati potrebbe essere già stata cancellata. Il dispositivo si riavvia solo se tutte le cancellazioni riescono. Se il ripristino non si avvia o non termina, consultare /diag. Se non è collegato alcun pulsante, scegliere “Nessuno”.",
   /* card.hardware */ "Hardware",
   /* card.hw_off */ "Nessuno",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,

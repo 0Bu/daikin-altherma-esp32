@@ -13,7 +13,11 @@ python3 test/checkup_runtime/run.py --sanitizer undefined
 Each invocation creates a unique temporary output directory. `--out DIR` retains results in a new
 chosen directory; `--root DIR` selects another repository source tree. Intended uncommitted changes
 are tested as they stand. The receipt records HEAD separately from actual source/dependency hashes,
-compiler, commands and per-case results; it verifies inputs did not change during execution.
+compiler, commands and per-case results. Before linking each baseline or control, the runner
+compares the compiler's non-system dependency files for Checkup and the Store separately against
+their preflight paths. Each control must substitute only its generated Checkup source, whose
+planned bytes are checked before and after compilation. All bound input hashes are checked again
+after the runtime cases.
 
 The cases exercise independent heater clocks and unknown inputs, fault severity and missing sibling
 rows, exact read-time freshness, stale findings, poll/circulation epoch barriers, consent and source
@@ -28,10 +32,19 @@ leave the new interval empty until a genuinely new sample arrives: its first end
 observed seconds, and the next endpoint adds ten. Repeated-generation cases establish the live
 admission epoch's independence, not durable-record safety for arbitrary generation reuse.
 
-The default run compiles exactly two additional production mutations: omit the live epoch guard,
-and ignore the caller's token by capturing it again at record entry. Each must compile and fail its
-specified internal or caller-boundary consent oracle;
+The default run compiles nine production mutations: two consent-boundary regressions, a stale
+expiry clock, missing Stop forget guards in the producer, initial/final report and expiry, and
+incorrect absent-mutex/failed-lock report defaults.
+Each must compile and fail its specified oracle;
 compiler errors and unrelated failures do not count. Unknown test-case names are also refused.
+
+Forget cases exercise the real Store and Checkup together before startup, with a pending window,
+and during producer/report lock acquisition. Subsequent source/consent changes cannot re-enable
+Stop collection in that boot. Private reducer state is inspected only after public operations,
+never seeded; this distinguishes suppressed collection from merely hidden output. No recovery
+button, NVS erasure or physical history wipe is executed.
+The shutdown case checks suppression through the real shutdown handler; ordinary sealing already
+retires its reducer, so omitting only the extra shutdown guard is not a discriminating control.
 
 This proves component behavior at modeled interleavings, not FreeRTOS scheduling, raw X10A decode,
 all-model physical sensor truth, target heap/stack budgets, or hardware persistence across resets.

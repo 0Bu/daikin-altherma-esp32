@@ -4,11 +4,19 @@
 #include "esp_timer.h"
 #include <climits>
 #include <cstring>
+#include <atomic>
 
 namespace daik {
 namespace {
 using namespace logic;
-SemaphoreHandle_t        s_mutex = nullptr;
+// Start is the sole creator. Publish only fully initialized protected state; an early recovery
+// forget must remain effective even when there is no mutex to acquire yet.
+std::atomic<SemaphoreHandle_t> s_mutex{nullptr};
+SemaphoreHandle_t s_start_mutex = nullptr; // startup owner only, unpublished on failure
+std::atomic<bool> s_forgotten{false};      // per boot, never cleared by any public lifecycle
+static_assert(std::atomic<SemaphoreHandle_t>::is_always_lock_free &&
+                  std::atomic<bool>::is_always_lock_free,
+              "early recovery suppression must not allocate or acquire hidden locks");
 ObservationIdentity      s_identity;
 uint32_t                 s_source_generation = 0;
 uint32_t                 s_epoch             = 0;
@@ -36,15 +44,20 @@ struct Queued {
 constexpr ObservationHourlyPayload kEmptyPayload{};
 constexpr Queued                   kEmptyQueued{};
 constexpr StopObservationReport    kEmptyReport{};
-Queued                             s_queue[OBSERVATION_QUEUE_CAP];
-uint32_t                           s_token         = 0;
-uint32_t                           s_claim_token   = 0;
-bool                               s_claim_barrier = false;
-StopObservationReport              s_completed;
-int64_t                            s_completed_expiry        = INT64_MIN;
-int64_t                            s_completed_newest_bucket = INT64_MIN;
-uint16_t                           s_dropped                 = 0;
-bool                               s_drop_saturated          = false;
+constexpr StopObservationReport    kSuppressedReport = [] {
+    StopObservationReport r;
+    r.restore_pending = false; // a forgotten boot will never attempt another restoration
+    return r;
+}();
+Queued                s_queue[OBSERVATION_QUEUE_CAP];
+uint32_t              s_token         = 0;
+uint32_t              s_claim_token   = 0;
+bool                  s_claim_barrier = false;
+StopObservationReport s_completed;
+int64_t               s_completed_expiry        = INT64_MIN;
+int64_t               s_completed_newest_bucket = INT64_MIN;
+uint16_t              s_dropped                 = 0;
+bool                  s_drop_saturated          = false;
 // Flash-owner state only. No producer/report ever traverses this index or invokes its reader.
 ObservationIndex s_index;
 // The exclusive flash owner consumes each read before starting another. One reusable record
@@ -180,10 +193,12 @@ bool read_entry(StopObservationReader reader, const ObservationIndexEntry& e,
                 ObservationHourlyPayload& p) {
     int64_t  bucket   = INT64_MIN;
     uint64_t sequence = 0;
-    return reader && reader(e.slot(), bucket, sequence, p) && bucket == e.bucket() &&
-           sequence == e.sequence() && observation_payload_valid(p, bucket);
+    return !stop_observation_suppressed() && reader && reader(e.slot(), bucket, sequence, p) &&
+           !stop_observation_suppressed() && bucket == e.bucket() && sequence == e.sequence() &&
+           observation_payload_valid(p, bucket);
 }
 void apply_receipt() {
+    if (stop_observation_suppressed()) return;
     if (!s_receipt.pending) return;
     if (s_receipt.epoch == s_epoch) {
         if (s_receipt.barrier) {
@@ -210,10 +225,19 @@ void apply_receipt() {
 }
 } // namespace
 
+bool stop_observation_suppressed() { return s_forgotten.load(std::memory_order_acquire); }
+
 void stop_observation_start(bool enabled, uint32_t consent_generation) {
-    if (!s_mutex) s_mutex = xSemaphoreCreateMutex();
-    SemGuard lk(s_mutex);
-    if (!lk) return;
+    if (stop_observation_suppressed()) return;
+    // Only this startup path allocates. Retain a failed first-acquire candidate privately so a
+    // repeated start neither leaks it nor exposes state which has not been initialized.
+    auto mutex = s_mutex.load(std::memory_order_acquire);
+    if (!mutex) {
+        if (!s_start_mutex) s_start_mutex = xSemaphoreCreateMutex();
+        mutex = s_start_mutex;
+    }
+    SemGuard lk(mutex);
+    if (!lk || stop_observation_suppressed()) return;
     clear_live();
     s_identity                    = {};
     s_identity.consent_generation = consent_generation;
@@ -226,12 +250,14 @@ void stop_observation_start(bool enabled, uint32_t consent_generation) {
     s_clock_bad                   = false;
     s_clock_last_us               = -1;
     s_dropped                     = 0;
+    s_mutex.store(mutex, std::memory_order_release);
 }
 
 void stop_observation_bind(uint32_t source_fp, uint32_t model_fp, uint32_t schema_fp,
                            uint32_t source_generation, bool allow_restore) {
-    SemGuard lk(s_mutex);
-    if (!lk) return;
+    if (stop_observation_suppressed()) return;
+    SemGuard lk(s_mutex.load(std::memory_order_acquire));
+    if (!lk || stop_observation_suppressed()) return;
     const ObservationIdentity next{source_fp, model_fp, schema_fp, s_identity.consent_generation};
     const bool changed = s_confirmed && (!observation_identity_equal(s_identity, next) ||
                                          s_source_generation != source_generation);
@@ -254,8 +280,9 @@ void stop_observation_bind(uint32_t source_fp, uint32_t model_fp, uint32_t schem
 }
 
 void stop_observation_set_diagnostics(bool enabled, uint32_t consent_generation) {
-    SemGuard lk(s_mutex);
-    if (!lk) return;
+    if (stop_observation_suppressed()) return;
+    SemGuard lk(s_mutex.load(std::memory_order_acquire));
+    if (!lk || stop_observation_suppressed()) return;
     clear_live();
     s_enabled                     = enabled;
     s_identity.consent_generation = consent_generation;
@@ -270,8 +297,9 @@ void stop_observation_set_diagnostics(bool enabled, uint32_t consent_generation)
 }
 
 void stop_observation_reset() {
-    SemGuard lk(s_mutex);
-    if (!lk) return;
+    if (s_forgotten.load(std::memory_order_acquire)) return;
+    SemGuard lk(s_mutex.load(std::memory_order_acquire));
+    if (!lk || s_forgotten.load(std::memory_order_acquire)) return;
     clear_live();
     s_offset_us       = INT64_MIN;
     s_clock_bad       = false;
@@ -284,8 +312,9 @@ void stop_observation_reset() {
 
 void stop_observation_record(int64_t sample_us, bool rps_readable,
                              const logic::StopContextEvent& finalized) {
-    SemGuard lk(s_mutex);
-    if (!lk || !s_enabled || !s_confirmed || s_sealed) return;
+    if (stop_observation_suppressed()) return;
+    SemGuard lk(s_mutex.load(std::memory_order_acquire));
+    if (!lk || stop_observation_suppressed() || !s_enabled || !s_confirmed || s_sealed) return;
     const int64_t now_us = esp_timer_get_time();
     const int64_t wall   = wall_now();
     if (!date_clock(now_us, wall)) {
@@ -353,20 +382,30 @@ void stop_observation_record(int64_t sample_us, bool rps_readable,
 }
 
 void stop_observation_seal() {
-    SemGuard lk(s_mutex);
-    if (!lk) return;
+    if (stop_observation_suppressed()) return;
+    SemGuard lk(s_mutex.load(std::memory_order_acquire));
+    if (!lk || stop_observation_suppressed()) return;
     close_open();
     s_sealed = true;
 }
 
 StopObservationReport stop_observation_report() {
-    SemGuard              lk(s_mutex);
     StopObservationReport r;
+    if (stop_observation_suppressed()) {
+        r = kSuppressedReport;
+        return r;
+    }
+    SemGuard lk(s_mutex.load(std::memory_order_acquire));
+    if (stop_observation_suppressed()) {
+        r = kSuppressedReport;
+        return r;
+    }
     if (!lk) return r;
     const int64_t now_wall = wall_now();
     if (!s_enabled || !s_confirmed) {
         r.restore_pending     = s_restore_pending;
         r.persistence_pending = s_barrier_pending;
+        if (stop_observation_suppressed()) r = kSuppressedReport;
         return r;
     }
     if (!date_clock(esp_timer_get_time(), now_wall)) {
@@ -374,6 +413,7 @@ StopObservationReport stop_observation_report() {
         r.restore_pending     = s_restore_pending;
         r.persistence_pending = s_barrier_pending;
         r.dropped             = s_dropped;
+        if (stop_observation_suppressed()) r = kSuppressedReport;
         return r;
     }
     expire_live(now_wall);
@@ -397,37 +437,44 @@ StopObservationReport stop_observation_report() {
         // completed-hour count plus a currently open hour, not a count of queue entries.
     }
     r.partial |= r.readable_us < static_cast<uint64_t>(OBSERVATION_DAY_US);
+    if (stop_observation_suppressed()) r = kSuppressedReport;
     return r;
 }
 
 void stop_observation_flash_index_reset() {
+    if (stop_observation_suppressed()) return;
     s_index   = {};
     s_rebuild = true;
     s_receipt = {};
 }
 void stop_observation_flash_index(int64_t bucket, uint64_t sequence, uint16_t slot,
                                   const logic::ObservationHourlyPayload& payload) {
+    if (s_forgotten.load(std::memory_order_acquire)) return;
     if (!observation_payload_valid(payload, bucket)) {
         stop_observation_flash_index_incomplete();
         return;
     }
+    // Recovery may forget this boot during pure validation; fence index admission again.
+    if (s_forgotten.load(std::memory_order_acquire)) return;
     observation_index_add(s_index, bucket, sequence, slot,
                           (payload.flags & OBSERVATION_BARRIER) ? &payload.identity : nullptr);
     s_rebuild = true;
 }
 void stop_observation_flash_index_incomplete() {
+    if (s_forgotten.load(std::memory_order_acquire)) return;
     observation_index_incomplete(s_index);
     s_rebuild = true;
 }
 
 void stop_observation_flash_service(StopObservationReader reader) {
+    if (stop_observation_suppressed()) return;
     int64_t             now_wall = -1;
     ObservationIdentity identity;
     uint32_t            epoch;
     bool                blocked;
     {
-        SemGuard lk(s_mutex, 0);
-        if (!lk || !s_enabled || !s_confirmed) return;
+        SemGuard lk(s_mutex.load(std::memory_order_acquire), 0);
+        if (!lk || stop_observation_suppressed() || !s_enabled || !s_confirmed) return;
         now_wall = wall_now();
         if (!date_clock(esp_timer_get_time(), now_wall)) return;
         if (s_index.clipped && observation_bucket(now_wall) >= s_index.clipped_until_bucket) {
@@ -472,8 +519,10 @@ void stop_observation_flash_service(StopObservationReader reader) {
         if (expiry == INT64_MIN || end < expiry) expiry = end;
     }
     rebuilt.partial |= read_failed;
-    SemGuard lk(s_mutex, 0);
-    if (!lk || epoch != s_epoch || !observation_identity_equal(identity, s_identity)) return;
+    SemGuard lk(s_mutex.load(std::memory_order_acquire), 0);
+    if (!lk || stop_observation_suppressed() || epoch != s_epoch ||
+        !observation_identity_equal(identity, s_identity))
+        return;
     const int64_t publish_wall = wall_now();
     if (!date_clock(esp_timer_get_time(), publish_wall) || publish_wall < now_wall ||
         (expiry != INT64_MIN && publish_wall >= expiry)) {
@@ -496,10 +545,11 @@ void stop_observation_flash_service(StopObservationReader reader) {
 
 bool stop_observation_flash_next(StopObservationReader reader, int64_t& bucket,
                                  logic::ObservationHourlyPayload& payload) {
+    if (stop_observation_suppressed()) return false;
     int64_t now_wall = -1;
     {
-        SemGuard lk(s_mutex, 0);
-        if (!lk) return false;
+        SemGuard lk(s_mutex.load(std::memory_order_acquire), 0);
+        if (!lk || stop_observation_suppressed()) return false;
         now_wall = wall_now();
         apply_receipt();
         if (!s_enabled || !s_confirmed || s_claim_token || s_claim_barrier || now_wall < 0)
@@ -514,7 +564,7 @@ bool stop_observation_flash_next(StopObservationReader reader, int64_t& bucket,
             bucket          = observation_bucket(now_wall);
             s_claim_barrier = true;
             s_transaction   = {0, s_epoch, true, false, false};
-            return true;
+            return !stop_observation_suppressed();
         }
         if (!clock_valid) return false;
         if (s_index.clipped_until_bucket == INT64_MAX) return false;
@@ -558,27 +608,33 @@ bool stop_observation_flash_next(StopObservationReader reader, int64_t& bucket,
         }
         break;
     }
-    return true;
+    return !stop_observation_suppressed();
 }
 
 void stop_observation_flash_appended(int64_t bucket, uint64_t sequence, uint16_t slot,
                                      const logic::ObservationHourlyPayload& payload) {
+    if (stop_observation_suppressed()) return;
     stop_observation_flash_index(bucket, sequence, slot, payload);
+    if (stop_observation_suppressed()) return;
     s_receipt         = s_transaction;
     s_receipt.success = true;
     s_receipt.pending = true;
-    SemGuard lk(s_mutex, 0);
+    SemGuard lk(s_mutex.load(std::memory_order_acquire), 0);
     if (lk) apply_receipt();
 }
 void stop_observation_flash_failed() {
+    if (stop_observation_suppressed()) return;
     s_receipt         = s_transaction;
     s_receipt.success = false;
     s_receipt.pending = true;
-    SemGuard lk(s_mutex, 0);
+    SemGuard lk(s_mutex.load(std::memory_order_acquire), 0);
     if (lk) apply_receipt();
 }
 void stop_observation_forget() {
-    SemGuard lk(s_mutex);
+    // Publish the privacy barrier before touching a nullable/contended mutex. No lifecycle call
+    // may clear this per-boot fact, including a delayed start after an incomplete factory reset.
+    s_forgotten.store(true, std::memory_order_release);
+    SemGuard lk(s_mutex.load(std::memory_order_acquire), 0);
     if (!lk) return;
     clear_live();
     s_enabled         = false;

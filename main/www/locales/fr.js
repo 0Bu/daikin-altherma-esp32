@@ -1,4 +1,4 @@
-// translation-source: 3e8092cf0e419496e78d337338f27af53fbda73918ad45f0bbe0970b83ebeddc
+// translation-source: fa1129dce36de7da23d04178f67c6ff1b7f7a1ba9974648b6bae1e479a441c15
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -800,7 +800,7 @@ I18N.fr = localeValues([
   /* board.led_gpio_wiping */ "Fixe après clignotement très rapide — réinitialisation/effacement en cours ; ne coupez pas l’alimentation.",
   /* board.ledinv */ "Actif au niveau bas (la LED s’allume lorsque la broche est commandée LOW)",
   /* board.btninv */ "Actif au niveau bas (le bouton relie la broche à GND)",
-  /* board.hint */ "Réinitialisation d’usine : maintenez 5 s. Efface définitivement le Wi-Fi/tous les paramètres (seul le choix de carte, de LED d’état et de bouton de réinitialisation est conservé), l’historique/les tendances, les durées d’état et le vidage mémoire brut. Le portail de configuration (Wi-Fi) ne s’ouvre qu’après un effacement complet et réussi. Sinon, relâchez puis maintenez encore 5 s. Choisissez « Aucun » sans bouton.",
+  /* board.hint */ "Pour rétablir les réglages d’usine, maintenez le bouton enfoncé 5 s. La réinitialisation n’efface rien si le journal d’historique n’est pas prêt. Elle efface les réglages Wi-Fi et les autres paramètres, l’historique enregistré, les durées d’état, le vidage mémoire brut après un plantage et le registre sauvegardé pour le nettoyage MQTT. Les réglages de la carte, de la LED et du bouton sont conservés si possible. En cas d’échec d’un effacement, une partie des données peut déjà avoir été effacée. L’appareil ne redémarre que si tous les effacements réussissent. Si la réinitialisation ne démarre pas ou ne se termine pas, consultez /diag. Si aucun bouton n’est raccordé, choisissez « Aucun ».",
   /* card.hardware */ "Matériel",
   /* card.hw_off */ "Aucun",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,

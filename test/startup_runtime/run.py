@@ -58,7 +58,8 @@ scenarios = ['led_gpio_high', 'led_gpio_low', 'led_ws2812', 'led_mqtt_oom', 'led
              'button_low', 'button_high', 'led_disabled', 'button_disabled',
              'led_init_fail', 'button_init_fail', 'stack_minima',
              'button_task_alloc_fail', 'button_boot_gate', 'button_reset_complete',
-             'button_reset_seed_fail', 'button_reset_no_seed', 'button_reset_retire_fail']
+             'button_reset_seed_fail', 'button_reset_no_seed', 'button_reset_retire_fail',
+             'button_reset_history_unready_retry']
 passes = []
 for scenario in scenarios:
     r = command([str(baseline), scenario])
@@ -105,6 +106,8 @@ for target, anchor_before, anchor_after, scenario, oracle in [
     ('button', 'if (button_boot_gate_open(gate, pressed)) {',
      'if ((static_cast<void>(gate), true)) {', 'button_boot_gate',
      'boot_gate_holds_through_one_and_two_sample_bounces'),
+    ('button', 'if (!history_flash_forget_ready()) {', 'if (false) {',
+     'button_reset_history_unready_retry', 'unready_history_refuses_before_destructive_calls'),
     # The retirement-record erase is a required step, not a best-effort one.
     ('button', 'const bool retire_erased = crash_erased && mqtt_retirement_forget();',
      'const bool retire_erased = crash_erased;', 'button_reset_complete',
@@ -123,9 +126,9 @@ for target, anchor_before, anchor_after, scenario, oracle in [
     pattern = re.compile(r'\s+'.join(re.escape(part) for part in re.split(r'\s+', anchor_before.strip())))
     if len(pattern.findall(contents)) != 1:
         raise RuntimeError('Unique stack mutation anchor required: ' + target + '/' + oracle)
-    mutated = OUT / (target+'-'+oracle+'.cpp')
+    object_name = f'{target}-{len(controls)}-{oracle}'
+    mutated = OUT / (object_name + '.cpp')
     mutated.write_text(pattern.sub(lambda match: anchor_after, contents))
-    object_name = target+'-'+oracle
     compile_object(mutated, object_name)
     binary = link(object_name if target == 'led' else 'led',
                   object_name if target == 'button' else 'button', object_name+'-mutant',
@@ -134,9 +137,10 @@ for target, anchor_before, anchor_after, scenario, oracle in [
     commands.append(shlex.join(mutation_args))
     result = subprocess.run(mutation_args, cwd=HERE, capture_output=True, text=True, timeout=10)
     output = result.stdout+result.stderr
-    if result.returncode != 1 or 'FAIL oracle='+oracle not in output:
-        raise RuntimeError('Stack mutation must fail its exact owner/minimum oracle: '+output)
-    controls.append({'source': target, 'expected_oracle': oracle, 'exit_code': result.returncode,
+    if result.returncode != 1 or f'FAIL oracle={oracle} scenario={scenario}' not in result.stderr.splitlines():
+        raise RuntimeError('Mutation must fail its exact scenario and oracle: '+output)
+    controls.append({'source': target, 'scenario': scenario, 'artifact_stem': object_name,
+                     'expected_oracle': oracle, 'exit_code': result.returncode,
                      'output': output, 'mutant_sha256': hashlib.sha256(mutated.read_bytes()).hexdigest()})
     print('NEGATIVE CONTROL '+target+': '+output.strip())
 manifest = hashes(dependency_inputs([OUT / (name + '.d') for name in sources]))

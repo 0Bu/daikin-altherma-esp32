@@ -1,4 +1,4 @@
-// translation-source: 3e8092cf0e419496e78d337338f27af53fbda73918ad45f0bbe0970b83ebeddc
+// translation-source: fa1129dce36de7da23d04178f67c6ff1b7f7a1ba9974648b6bae1e479a441c15
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -800,7 +800,7 @@ I18N.cs = localeValues([
   /* board.led_gpio_wiping */ "Po rychlém blikání svítí — reset/mazání dat; neodpojujte napájení.",
   /* board.ledinv */ "Aktivní v nízké úrovni (LED svítí, když je pin buzen na LOW)",
   /* board.btninv */ "Aktivní v nízké úrovni (tlačítko spojí pin s GND)",
-  /* board.hint */ "Tovární reset: podržte 5 s. Trvale smaže Wi-Fi/všechna nastavení (zachová se jen volba desky, stavové LED a tlačítka reset), historii/trendy, délky stavů a nezpracovaný výpis po pádu. Konfigurační portál (Wi-Fi) se otevře jen po úplném a úspěšném smazání. Jinak uvolněte a znovu podržte 5 s. Bez tlačítka vyberte „Žádná“.",
+  /* board.hint */ "Tovární reset: podržte tlačítko 5 s. Pokud deník historie není připravený, nic se nesmaže. Smaže nastavení Wi-Fi i další nastavení, zaznamenanou historii, doby trvání stavů, nezpracovaný výpis paměti po pádu a uložený záznam pro úklid MQTT. Nastavení desky, LED a tlačítka se zachovají, pokud to bude možné. Při chybě mazání může být smazána jen část dat. Zařízení se restartuje jen po úspěšném dokončení všech kroků mazání. Pokud reset nezačne nebo se nedokončí, zkontrolujte /diag. Bez připojeného tlačítka vyberte „Žádná“.",
   /* card.hardware */ "Vybavení",
   /* card.hw_off */ "Žádné",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,

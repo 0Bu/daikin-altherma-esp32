@@ -1,7 +1,8 @@
 # Independent hourly observation runtime
 
 Run `python3 test/stop_observation_runtime/run.py --sanitizer undefined`. `--out` retains the
-compiler command, diagnostics, individual case output and JSON results in a chosen directory.
+compiler command, diagnostics, individual case output and JSON results in a new directory.
+Existing output directories are refused so stale receipts and headers cannot affect a run.
 The harness compiles the production `stop_observation_store.cpp`, the exact record geometry and
 reader extracted from `history.cpp`, and their real logic/CRC headers as C++17. Only the FreeRTOS
 mutex, monotonic/wall clocks and physical journal transport are host adapters.
@@ -16,8 +17,10 @@ revisions; whole-hour expiry without either producer or flash service; bounded r
 pressure; and the unchanged physical Checkup envelope interpreted by the old structural reader.
 Reset cases keep sequence ordering independent of wall time, future/aged timestamps and physical
 slot reuse. Missing reset-index completeness stays limited until a complete physical reindex.
-Restored loss notices survive their original hour's expiry and another reboot. Reader cases verify
-scratch reuse, independently owned output, CRC/commit/manifest refusal and failed physical reads.
+Restored loss notices survive their original hour's expiry and another modeled restart. The
+`boot(false)` cases reinitialize the Store in the same process with the flash-port bytes retained.
+Reader cases verify scratch reuse, independently owned output, CRC/commit/manifest refusal and
+failed physical reads.
 The compatibility case prints actual host POD/index/queue sizes and verifies the existing core
 80-byte bucket and 128-byte journal payload.
 
@@ -26,6 +29,17 @@ empty in RAM and reports `persistence_pending`, but it is durable only after its
 the journal. Power loss before that commit can restore the old compatible records on the next
 boot. The test must retain this boundary instead of claiming that a RAM-only reset is durable.
 No ongoing stop candidate or readable endpoint clock is restored across a reboot.
+
+Forget cases cover recovery before startup, allocation/first-lock failures, unpublished mutex
+initialization, busy-store and staged-reader interleavings, late claims/receipts and attempted
+same-boot re-enablement. Suppressed reports have no pending restoration or persistence. Only a
+fresh host process demonstrates that production static initialization permits collection again.
+The unmodified fixture never clears the production latch. Three compiling controls remove the
+latch, clear it from startup or publish the mutex early; each must fail its exact semantic assertion.
+The runner binds the actual compiler dependencies to preflight for the production build and all
+three controls, permitting only the named source substitution. The receipt binds the source,
+extracted History fragments and mutant bytes. These deterministic interleavings do not exercise
+the FreeRTOS scheduler or simultaneous execution on two cores.
 
 The actual journal reader verifies the real envelope and CRC. It does not prove the ESP-IDF flash
 driver, target ABI, stack budget, heap minima, partition binding or physical device behavior.

@@ -1,24 +1,30 @@
 // Compile the complete production History TU; physical flash and external services are host ports.
 #include "sdk.hpp"
+#include <algorithm>
 #include <cstring>
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #ifndef HISTORY_PRODUCTION_SOURCE
 #error "Bind complete production main/history.cpp"
 #endif
 #include HISTORY_PRODUCTION_SOURCE
 
 namespace {
-const esp_partition_t partition{daik::logic::HISTORY_FLASH_PARTITION_OFFSET,
+const esp_partition_t  partition{daik::logic::HISTORY_FLASH_PARTITION_OFFSET,
                                 daik::logic::HISTORY_FLASH_PARTITION_BYTES};
+const esp_partition_t* lookup_partition = &partition;
+bool                   refuse_erases    = false;
 }
 const esp_partition_t* esp_partition_find_first(int, int, const char* label) {
-    return std::strcmp(label, "history") == 0 ? &partition : nullptr;
+    if (auto hook = std::exchange(journal_sdk::during_find, nullptr)) hook();
+    return std::strcmp(label, "history") == 0 ? lookup_partition : nullptr;
 }
 esp_err_t esp_partition_read(const esp_partition_t* part, size_t offset, void* out, size_t bytes) {
     ++journal_sdk::reads;
+    if (auto hook = std::exchange(journal_sdk::during_read, nullptr)) hook();
     if (journal_sdk::fail_read == journal_sdk::reads) return ESP_FAIL;
     if (part != &partition || offset > journal_sdk::flash.size() ||
         bytes > journal_sdk::flash.size() - offset)
@@ -45,7 +51,7 @@ esp_err_t esp_partition_write(const esp_partition_t* part, size_t offset, const 
 esp_err_t esp_partition_erase_range(const esp_partition_t* part, size_t offset, size_t bytes) {
     ++journal_sdk::erases;
     journal_sdk::erased_ranges.emplace_back(offset, bytes);
-    if (journal_sdk::fail_erase == journal_sdk::erases) return ESP_FAIL;
+    if (refuse_erases || journal_sdk::fail_erase == journal_sdk::erases) return ESP_FAIL;
     if (part != &partition || offset % daik::logic::HISTORY_FLASH_ERASE_BYTES ||
         bytes % daik::logic::HISTORY_FLASH_ERASE_BYTES || offset > journal_sdk::flash.size() ||
         bytes > journal_sdk::flash.size() - offset)
@@ -325,6 +331,101 @@ void nor_contract() {
                 journal_sdk::flash[7] == 0xff,
             "nor_erases_exact_aligned_sector");
 }
+
+enum class ForgetPoint {
+    BeforeStart,
+    DuringLookup,
+    DuringScan,
+    MissingPartition,
+    WrongAddress,
+    WrongSize,
+    MissingHistoryMutex,
+    MissingFlashMutex,
+    Ready,
+    AfterIncompleteScan,
+};
+
+bool forget_called = false;
+bool forget_result = false;
+void observe_forget() {
+    const uint32_t epoch = history_epoch();
+    forget_result        = history_flash_forget();
+    forget_called        = true;
+    require(s_flash_forgotten.load() && stop_observation_suppressed(),
+            "forget_immediately_suppresses_both_owners");
+    require(history_epoch() != epoch, "forget_invalidates_history_reader_lease");
+}
+
+void forget_case(ForgetPoint point) {
+    journal_sdk::flash.assign(HISTORY_FLASH_PARTITION_BYTES, 0xff);
+    journal_sdk::flash.front()                            = 0x25;
+    journal_sdk::flash[HISTORY_FLASH_PARTITION_BYTES / 2] = 0x4a;
+    journal_sdk::flash.back()                             = 0x12;
+    const auto      before                                = journal_sdk::flash;
+    esp_partition_t incompatible                          = partition;
+    switch (point) {
+    case ForgetPoint::DuringLookup:
+        journal_sdk::during_find = observe_forget;
+        break;
+    case ForgetPoint::DuringScan:
+        journal_sdk::during_read = observe_forget;
+        break;
+    case ForgetPoint::MissingPartition:
+        lookup_partition = nullptr;
+        break;
+    case ForgetPoint::WrongAddress:
+        incompatible.address += HISTORY_FLASH_ERASE_BYTES;
+        lookup_partition = &incompatible;
+        break;
+    case ForgetPoint::WrongSize:
+        incompatible.size -= HISTORY_FLASH_ERASE_BYTES;
+        lookup_partition = &incompatible;
+        break;
+    case ForgetPoint::MissingHistoryMutex:
+        sdk::fail_mutex_create = 1;
+        break;
+    case ForgetPoint::MissingFlashMutex:
+        sdk::fail_mutex_create = 2;
+        break;
+    case ForgetPoint::AfterIncompleteScan:
+        journal_sdk::fail_read = 1;
+        break;
+    default:
+        break;
+    }
+    if (point != ForgetPoint::BeforeStart) {
+        // Match firmware startup order. The lookup/read ports can interleave one Forget before
+        // History startup returns, without seeding production handles or the privacy latches.
+        history_start();
+        stop_observation_start(true, 11);
+    }
+    if (point == ForgetPoint::AfterIncompleteScan)
+        require(journal_sdk::reads == 1 && !s_flash_scan_ok,
+                "incomplete_scan_reaches_read_failure");
+    const bool injected = point == ForgetPoint::DuringLookup || point == ForgetPoint::DuringScan;
+    if (!injected) observe_forget();
+    require(forget_called, "forget_interleaving_reached_real_entry");
+
+    const bool ready = point == ForgetPoint::Ready || point == ForgetPoint::AfterIncompleteScan;
+    if (!ready) {
+        require(!forget_result, "unready_forget_refuses");
+        require(journal_sdk::erases == 0 && journal_sdk::writes == 0 &&
+                    journal_sdk::flash == before,
+                "unready_forget_preserves_nor");
+        if (!injected) return;
+        // After the scan completes, the same boot can retry the physical part while suppressed.
+        observe_forget();
+    }
+
+    require(forget_result, "ready_forget_succeeds");
+    require(journal_sdk::erased_ranges ==
+                    std::vector<std::pair<size_t, size_t>>{{0, HISTORY_FLASH_PARTITION_BYTES}} &&
+                journal_sdk::writes == 0 &&
+                std::all_of(journal_sdk::flash.begin(), journal_sdk::flash.end(),
+                            [](uint8_t value) { return value == 0xff; }),
+            "successful_forget_erases_entire_journal");
+}
+
 void read_admission() {
     boot();
     population();
@@ -425,13 +526,16 @@ void seed_late_correction(const char* transport_path) {
                     static_cast<std::streamsize>(journal_sdk::flash.size()));
     require(static_cast<bool>(transport), "save_only_synthetic_nor_transport_bytes");
 }
-void restore_late_correction(const char* transport_path) {
+void load_synthetic_nor(const char* transport_path) {
     journal_sdk::flash.resize(HISTORY_FLASH_PARTITION_BYTES);
     std::ifstream transport(transport_path, std::ios::binary);
     transport.read(reinterpret_cast<char*>(journal_sdk::flash.data()),
                    static_cast<std::streamsize>(journal_sdk::flash.size()));
     require(static_cast<bool>(transport) && transport.peek() == std::char_traits<char>::eof(),
             "cold_process_loads_exact_synthetic_partition_bytes");
+}
+void restore_late_correction(const char* transport_path) {
+    load_synthetic_nor(transport_path);
     sdk::now_us = 3620000000LL;
     boot(false); // real cold statics, real History scan and real Store reconstruction
     const auto report = stop_observation_report();
@@ -444,6 +548,45 @@ void restore_late_correction(const char* transport_path) {
                 journal_sdk::writes == 0 && journal_sdk::erases == 0,
             "cold_restore_preserves_exact_dated_population_without_writes");
 }
+void checkup_pending(const char* transport_path, bool forget_interleave) {
+    load_synthetic_nor(transport_path);
+    const auto before = journal_sdk::flash;
+    sdk::now_us       = 3620000000LL;
+    history_start();
+    stop_observation_start(true, 11);
+    require(history_checkup_flash_pending(), "healthy_scan_exposes_pending_core");
+
+    if (forget_interleave) {
+        // Let Forget latch suppression after the query's first load but before it acquires the
+        // mutex. All erase attempts fail, so a query that only reads the scan flags sees pending.
+        refuse_erases    = true;
+        sdk::before_take = observe_forget;
+        require(!history_checkup_flash_pending(), "pending_rechecks_forget_under_lock");
+        require(forget_called && !forget_result && journal_sdk::erases == 3,
+                "real_forget_interleaves_and_fails_erase");
+        require(s_flash_scan_ok && !s_flash_checkup_restore_done && journal_sdk::flash == before &&
+                    journal_sdk::writes == 0,
+                "failed_erase_preserves_pending_flags_and_nor");
+        const auto takes = sdk::takes;
+        require(!history_checkup_flash_pending() && sdk::takes == takes,
+                "already_forgotten_pending_skips_lock");
+        history_service_flash_restore();
+        require(journal_sdk::core_restore == 0, "forgotten_core_never_restores");
+        return;
+    }
+
+    {
+        Lock held(s_flash_mtx, 0);
+        require(held.acquired(), "modeled_competing_flash_owner");
+        require(!history_checkup_flash_pending(), "contended_pending_query_is_nonblocking");
+    }
+    require(history_checkup_flash_pending(), "contention_does_not_retire_pending_core");
+    history_service_flash_restore();
+    require(journal_sdk::core_restore == 1 && !history_checkup_flash_pending(),
+            "real_restore_consumes_pending_core");
+    require(journal_sdk::erases == 0 && journal_sdk::writes == 0 && journal_sdk::flash == before,
+            "pending_queries_and_restore_preserve_nor");
+}
 } // namespace
 int main(int argc, char** argv) {
     const std::string name = argc >= 2 ? argv[1] : "unknown_case";
@@ -452,6 +595,9 @@ int main(int argc, char** argv) {
             seed_late_correction(argv[2]);
         else if (name == "restore_late_correction" && argc == 3)
             restore_late_correction(argv[2]);
+        else if ((name == "checkup_pending_healthy" || name == "checkup_pending_forget") &&
+                 argc == 3)
+            checkup_pending(argv[2], name == "checkup_pending_forget");
         else if (argc != 2)
             throw std::runtime_error("unknown_case");
         else if (name == "commit_rejected")
@@ -460,6 +606,26 @@ int main(int argc, char** argv) {
             core_ahead();
         else if (name == "nor_contract")
             nor_contract();
+        else if (name == "forget_before_start")
+            forget_case(ForgetPoint::BeforeStart);
+        else if (name == "forget_during_lookup")
+            forget_case(ForgetPoint::DuringLookup);
+        else if (name == "forget_during_scan")
+            forget_case(ForgetPoint::DuringScan);
+        else if (name == "forget_missing_partition")
+            forget_case(ForgetPoint::MissingPartition);
+        else if (name == "forget_wrong_address")
+            forget_case(ForgetPoint::WrongAddress);
+        else if (name == "forget_wrong_size")
+            forget_case(ForgetPoint::WrongSize);
+        else if (name == "forget_missing_history_mutex")
+            forget_case(ForgetPoint::MissingHistoryMutex);
+        else if (name == "forget_missing_flash_mutex")
+            forget_case(ForgetPoint::MissingFlashMutex);
+        else if (name == "forget_ready")
+            forget_case(ForgetPoint::Ready);
+        else if (name == "forget_incomplete_scan")
+            forget_case(ForgetPoint::AfterIncompleteScan);
         else if (name == "read_admission")
             read_admission();
         else if (name == "sequence_rejections")

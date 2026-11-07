@@ -37,13 +37,20 @@ constexpr int WIPE_LEAD_MS   = 250;    // > sleep_slices' 25 ms slice, so the in
 constexpr int WIPE_TOTAL_MS  = 1500;
 
 void factory_reset() {
+    // Reject a known-impossible reset before deleting settings or any other user data.
+    if (!history_flash_forget_ready()) {
+        diag_printf(
+            "button: factory reset NOT STARTED — history journal not ready; nothing erased\n");
+        status_led_signal(LedSignal::None);
+        return;
+    }
     status_led_signal(LedSignal::Wiping);
-    // Erases the stored config (daik_cfg), history, coredump and MQTT retirement record; the board
-    // hardware statement is kept (the seed below).
-    diag_printf("button: held %lus — FACTORY RESET, erasing all but the board hardware\n",
+    // Erases the stored config, history, coredump and MQTT retirement record. The board settings
+    // can be restored later if the seed is available and can be saved.
+    diag_printf("button: held %lus — FACTORY RESET, erasing settings and recorded data\n",
                 static_cast<unsigned long>(BUTTON_FIRE_MS / 1000));
     const int64_t t0 = esp_timer_get_time();
-    // The board-hardware statement (preset, indicator, this button) survives the reset: without it
+    // Try to keep the board-hardware statement (preset, indicator, this button): without it
     // the next boot would come up with the build's default indicator and no button, and the
     // recovery path the user just used would be gone from the board until someone restates it
     // in the Board hardware dialog. It is built from the RAM config (with any pin this boot's X10A
@@ -116,14 +123,14 @@ void factory_reset() {
     // the one write the latch still allows, and never ahead of an erase that could still fail. Best
     // effort: without it the reset is still complete and private; the next boot merely starts with
     // the build's default indicator and no button, which the user can restate in the Board hardware
-    // dialog once the device is back on WiFi (the setup portal accepts WiFi credentials only).
+    // dialog once the device is back on the network.
     const esp_err_t seed_e =
         have_seed ? nvs_set_blob_after_factory_reset(CONFIG_KEY_SERVICE, seed.data(), seed.size())
                   : ESP_FAIL;
     if (seed_e != ESP_OK)
         diag_printf("button: board hardware not kept (%s) — set it again under Board hardware\n",
                     have_seed ? esp_err_to_name(seed_e) : "seed unavailable");
-    diag_printf("button: factory reset complete — rebooting into the setup portal\n");
+    diag_printf("button: factory reset complete — restarting\n");
     stack_watch_sample(StackWatch::Button);
     esp_restart();
 }
@@ -184,8 +191,8 @@ void button_task(void*) {
                     status_led_signal(LedSignal::None);
                     break;
                 case ButtonEvent::Fired:
-                    // Reboots on success. If it returns, the reset FAILED or is INCOMPLETE, it has
-                    // already handed the indicator back (LedSignal::None) — and the state is left
+                    // Reboots on success. On return it has handed the indicator back
+                    // (LedSignal::None) — and the state is left
                     // alone deliberately: `st.fired` stays set, so the still-held button cannot
                     // re-fire every five seconds and bury the one diag line that explains why in a
                     // repeating loop of identical attempts, and `st.armed` stays set with it, so
