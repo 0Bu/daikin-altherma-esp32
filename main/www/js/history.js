@@ -1788,7 +1788,9 @@ function replaceHistoryHtml(host, html) {
   const owner = node => node?.closest?.(".vitem")?.querySelector("[data-desc]")?.dataset.desc;
   const focusedOwner = owner(active);
   const focused = host.contains?.(active);
-  if (!html.includes('class="vhist')) host.innerHTML = html;
+  // The read-only value grid changes on every poll even with all its charts closed. Editable
+  // hosts keep their full-write path: a control's live value is not represented by its attributes.
+  if (!html.includes('class="vhist') && host.id !== "valueGroups") host.innerHTML = html;
   else {
     const roots = root => [...root.querySelectorAll(".vhist")]
       .filter(node => !node.parentElement?.closest(".vhist"));

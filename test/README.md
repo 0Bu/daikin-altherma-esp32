@@ -279,7 +279,7 @@ review skills cover visual truth and complete interaction.
 The temporal matrix inventories every production inspector and the four disclosure families. It
 uses full 288-sample source rings and three real two-second updates per case, checking unchanged
 plot/prose nodes, continuous chart ancestry during scalar updates, CSS animations, collapsed-chart
-work and native input delivery. The
+work, closed value-grid children and native input delivery. The
 fixed maximum frame gap and individual native key-event roundtrip are 250 ms; these fixture budgets catch recurring stalls,
 not guarantee a frame rate on every device. Negative controls reintroduce hidden-chart work, plot or
 animation replacement and a blocking poll. Static locale snapshots, reduced-motion cases and GIF
@@ -291,6 +291,8 @@ through real history requests and waits for the matching mounted revision. A cac
 between polls must remove the closed chart without invalidating other containers. A separate
 natural-poll case covers the regular 60-second
 cache expiry, generation change and permitted plot replacement before checking unchanged continuity.
+It also requires the unrelated closed value grid to stay mounted during that refresh and records
+the transition evidence before its assertions, so a failed timing check retains the measurement.
 The plot must be visible; schematic witnesses share its vertical viewport whenever they
 fit, with actual geometry recorded separately from animation clocks. Focus setup is also recorded
 separately. No frame from the first or subsequent measured poll is discarded.

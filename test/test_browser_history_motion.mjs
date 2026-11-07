@@ -473,6 +473,10 @@ async function observe(page, server, context, selectors, { inspector = false, st
     window.__motionViewport = { x: scrollX, y: scrollY, width: innerWidth, height: innerHeight,
       visible: document.visibilityState, focused: document.hasFocus(),
       flow: geometry("#fSup1"), plot: geometry(selectors[0]) };
+    const grid = document.getElementById("valueGroups");
+    window.__motionScalarGrid = S.stage === "dashboard" && grid.firstElementChild &&
+      !grid.querySelector(".vhist") ? { root: grid, children: [...grid.childNodes], removed: 0,
+        cards: [...grid.querySelectorAll(".vgroup[data-dashboard-card]")].map(node => ({ node, hidden: node.hidden })) } : null;
     const ancestors = new Map(), detached = [];
     for (const { selector, node: plot } of window.__motionPlots)
       for (let node = plot; node; node = node.parentNode) {
@@ -483,10 +487,13 @@ async function observe(page, server, context, selectors, { inspector = false, st
     // Mutation records preserve removal identity even after the same subtree is reattached before
     // delivery. Checking isConnected or final plot identity alone misses that rendering disruption.
     const recordDetachments = records => {
-      for (const record of records) for (const node of record.removedNodes)
+      for (const record of records) for (const node of record.removedNodes) {
+        const scalar = window.__motionScalarGrid;
+        if (scalar && record.target === scalar.root && scalar.children.includes(node)) scalar.removed++;
         if (ancestors.has(node)) detached.push({ selectors: [...ancestors.get(node)],
           node: node.nodeName + (node.id ? "#" + node.id : ""),
           connectedAtDelivery: node.isConnected, at: performance.now() });
+      }
     };
     window.__motionDetachedAncestors = detached;
     window.__motionRecordDetachments = recordDetachments;
@@ -545,6 +552,12 @@ async function observe(page, server, context, selectors, { inspector = false, st
       revisions: window.__motionPlots.map(({ selector, revision }) => ({ selector,
         before: revision, after: window.__motionRevision(document.querySelector(selector)) })),
       detachedAncestors: window.__motionDetachedAncestors,
+      scalarGrid: window.__motionScalarGrid ? {
+        retained: window.__motionScalarGrid.children.every(node => node.isConnected &&
+          node.parentNode === window.__motionScalarGrid.root),
+        removed: window.__motionScalarGrid.removed,
+        visibilityStable: window.__motionScalarGrid.cards.every(({ node, hidden }) => node.hidden === hidden),
+      } : null,
       bodyUnchanged: body.innerHTML === window.__motionBody.html,
       sameBody: body.firstChild === window.__motionBody.node,
       animations: window.__motionAnimations.map(({ id, node, animation, time, initial }) => ({
@@ -570,7 +583,7 @@ async function observe(page, server, context, selectors, { inspector = false, st
     // Keep only the plain-data snapshot between cases. Test witnesses must not retain a closed
     // graph or its observer closure until the following case's measured polling window.
     for (const name of ["__motionPlots", "__motionBody", "__motionFocused", "__motionAnimations",
-      "__motionInactive", "__motionDetachObserver", "__motionRecordDetachments"])
+      "__motionInactive", "__motionDetachObserver", "__motionRecordDetachments", "__motionScalarGrid"])
       delete window[name];
     return snapshot;
   });
@@ -591,6 +604,11 @@ async function observe(page, server, context, selectors, { inspector = false, st
   for (const plot of motion.plots)
     assert.equal(plot.same, true, context + ": unchanged plot must remain mounted: " + plot.selector);
   assert.equal(motion.sameFocus, true, context + ": focused history control must survive polling");
+  if (motion.scalarGrid) {
+    assert.equal(motion.scalarGrid.retained && motion.scalarGrid.visibilityStable, true,
+      context + ": scalar polls must retain closed value rows and card visibility");
+    assert.equal(motion.scalarGrid.removed, 0, context + ": scalar value-grid children must remain connected");
+  }
   if (inspector && motion.bodyUnchanged)
     assert.equal(motion.sameBody, true, context + ": unchanged inspector prose must remain mounted");
   assert.equal(motion.animations.length, motion.expectedAnimations,
@@ -670,7 +688,9 @@ async function assertFlowTtlTransition(page, server, context) {
     if (!flow?.gen || !modbus?.gen || document.activeElement !== plot)
       throw new Error("flow TTL transition requires fresh independent rings and focused plot");
     const revision = window.__motionRevision(plot), now = performance.now();
+    const grid = document.getElementById("valueGroups");
     const state = window.__motionTtl = { plot, gen: flow.gen, modbusGen: modbus.gen,
+      grid, gridFirst: grid.firstElementChild,
       revision, started: now, last: now, frames: 0, maxGap: 0,
       animations: ["fSup1", "rfHot", "scFan", "scPump"].map(id => {
         const node = document.getElementById(id);
@@ -699,6 +719,8 @@ async function assertFlowTtlTransition(page, server, context) {
       return { gen: S.hist.get("flow")?.gen,
         modbusGen: S.hist.get(histCacheKey("flow", "modbus"))?.gen,
         replaced: plot !== state.plot, focused: document.activeElement === plot,
+        scalarGridRetained: !!state.gridFirst && state.gridFirst.isConnected &&
+          state.grid.firstElementChild === state.gridFirst,
         revision: window.__motionRevision(plot), duration: performance.now() - state.started,
         frames: state.frames, maxGap: state.maxGap,
         animations: state.animations.map(({ id, node, animation, time, initialRunning }) => ({ id,
@@ -708,6 +730,7 @@ async function assertFlowTtlTransition(page, server, context) {
   } finally {
     await page.evaluate("if(window.__motionTtl)cancelAnimationFrame(window.__motionTtl.request); delete window.__motionTtl; true");
   }
+  console.log("history TTL transition evidence: " + JSON.stringify({ context, before, ...changed }));
   assert.deepEqual(server.historyRequests.slice(requests), ["x10a:flow"],
     context + ": natural TTL transition must make exactly one real X10A flow GET");
   assert.equal(changed.gen, before.gen + 1, context + ": TTL reply must advance X10A flow by exactly one generation");
@@ -717,6 +740,8 @@ async function assertFlowTtlTransition(page, server, context) {
   assert.notEqual(changed.revision.model, before.revision.model, context + ": TTL model revision must advance");
   assert.equal(changed.revision.dom, changed.revision.model,
     context + ": TTL plot must carry the accepted model revision; " + JSON.stringify({ before, changed }));
+  assert.equal(changed.scalarGridRetained, true,
+    context + ": TTL refresh must retain the closed scalar value grid");
   for (const animation of changed.animations) {
     assert.equal(animation.initialRunning && animation.same && animation.running, true,
       context + "/" + animation.id + ": TTL refresh must preserve the running CSSAnimation instance");
@@ -725,7 +750,6 @@ async function assertFlowTtlTransition(page, server, context) {
   }
   assert.ok(changed.frames >= Math.floor(changed.duration / BUDGET_MS) && changed.maxGap < BUDGET_MS,
     context + ": TTL frame responsiveness budget exceeded: " + Math.round(changed.maxGap) + " ms");
-  console.log("history TTL transition evidence: " + JSON.stringify({ context, before, ...changed }));
   console.log("history TTL transition checked: " + context + "; one real flow GET; max frame " +
     Math.round(changed.maxGap) + " ms");
 }
