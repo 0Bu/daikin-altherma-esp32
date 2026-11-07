@@ -888,6 +888,15 @@ logic::CheckupCyclingEvidence checkup_cycling_evidence() {
                                                        window.class_observed_s > 0);
 }
 
+logic::CheckupCyclingHours checkup_cycling_hours() {
+    if (!s_diagnostics_enabled.load(std::memory_order_acquire) || !s_mtx)
+        return logic::CheckupCyclingHours{};
+    Lock lk(s_mtx);
+    if (!lk.acquired() || s_reset_requested.load()) return logic::CheckupCyclingHours{};
+    expire_restored_locked();
+    return logic::checkup_cycling_hours(P().ring, s_cov.rps);
+}
+
 logic::CheckupReport checkup_report() {
     if (!s_diagnostics_enabled.load(std::memory_order_acquire)) return logic::CheckupReport{};
     if (!s_mtx) return logic::CheckupReport{};

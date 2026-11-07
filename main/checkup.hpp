@@ -91,6 +91,9 @@ logic::CheckupReport checkup_report();
 // constructing the full eight-check report on the MQTT task's stack. No allocation under its lock.
 logic::CheckupCyclingEvidence checkup_cycling_evidence();
 
+// Chronological 24-hour compressor start and runtime buckets for /status.health.checks[cycling].
+logic::CheckupCyclingHours checkup_cycling_hours();
+
 struct CheckupStopContextReport {
     StopObservationReport observation;
     uint8_t               capability_mask = 0;

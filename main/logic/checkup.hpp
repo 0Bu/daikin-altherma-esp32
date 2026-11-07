@@ -1962,6 +1962,36 @@ inline CheckupCyclingEvidence checkup_cycling_evidence(const CheckupWindow& w,
     return e;
 }
 
+struct CheckupCyclingHour {
+    uint16_t observed_s = 0;
+    uint16_t run_s      = 0;
+    uint8_t  starts     = 0;
+};
+
+struct CheckupCyclingHours {
+    CheckupCyclingHour hours[CHECKUP_BUCKETS] = {};
+    uint8_t            count                  = 0;
+};
+
+inline CheckupCyclingHours checkup_cycling_hours(const CheckupRing& r, bool rps_supported = true) {
+    CheckupCyclingHours out;
+    if (!rps_supported) return out;
+    uint32_t     total_observed = r.pending.rps_observed_s;
+    const size_t oldest         = (r.count < CHECKUP_COMPLETED_BUCKETS) ? 0 : r.head;
+    for (size_t i = 0; i < r.count; i++)
+        total_observed += r.buf[(oldest + i) % CHECKUP_COMPLETED_BUCKETS].rps_observed_s;
+    if (!total_observed) return out;
+    for (size_t i = 0; i < r.count; i++) {
+        const auto& b          = r.buf[(oldest + i) % CHECKUP_COMPLETED_BUCKETS];
+        out.hours[out.count++] = CheckupCyclingHour{
+            static_cast<uint16_t>(b.rps_observed_s), static_cast<uint16_t>(b.run_s), b.starts};
+    }
+    out.hours[out.count++] = CheckupCyclingHour{
+        static_cast<uint16_t>(r.pending.rps_observed_s), static_cast<uint16_t>(r.pending.run_s),
+        r.pending.starts};
+    return out;
+}
+
 struct CheckupReport : CheckupCyclingEvidence {
     uint32_t          covered_s = 0;
     uint32_t          source_age_s        = UINT32_MAX; // unknown is null on the wire
