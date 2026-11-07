@@ -3,8 +3,8 @@
 // Everything here reads /values through label patterns — the same technique pickValue() already
 // uses — so the section degrades per model: a value the profile doesn't carry renders "—", and a
 // missing tank/room sensor hides that schematic part entirely (.no-dhw/.no-room). The DOM is
-// static (index.html) and updated in place: an innerHTML rebuild like #valueGroups' would restart
-// the CSS flow animations on every poll.
+// static (index.html) and updated in place. Replacing its animated nodes during polling would
+// restart the CSS flow animations.
 //
 // A pattern names ONE row. A row without a value this sweep reads as absent; the reader never falls
 // through to the next match, because that row is another instrument under a label the reader takes

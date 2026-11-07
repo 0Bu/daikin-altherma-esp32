@@ -1780,8 +1780,8 @@ function scrubEnd(plot) {
   if (S.scrub) { S.scrub = null; renderTrendHosts(); }   // resume the frozen per-poll rebuild
 }
 
-// Polls replace whole card containers, while the inspector can replace only its history. Preserve
-// an active control in either path so keyboard users can continue exploring the same series.
+// Structural poll updates may replace card containers or an inspector's history. Preserve the
+// active control in either path so keyboard users can continue exploring the same series.
 function replaceHistoryHtml(host, html) {
   const active = globalThis.document?.activeElement;
   const { histId, histSeries, hist, source = "" } = active?.dataset || {};

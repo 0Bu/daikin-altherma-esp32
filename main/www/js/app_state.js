@@ -6,18 +6,14 @@ const S = {
   stage: "dashboard",
   status: null,
   busy: false,
-  // Labels of value rows whose description accordion is currently expanded. Kept in app state (not
-  // the DOM) because #valueGroups is rebuilt on every poll (renderCards) — a purely-DOM open state
-  // would collapse on each 2 s values-poll render. valueGroupsHtml re-emits the `open` class from
-  // this set, so an expanded row survives the rebuild; the click handler only toggles the live
-  // element (so the CSS slide
-  // animates) and updates this set for the next rebuild to honour.
+  // Expanded description labels survive markup regeneration and structural DOM replacement.
+  // valueGroupsHtml emits `open` from this set. The click handler toggles the live element for
+  // its CSS transition and records the choice for subsequent renders.
   descOpen: new Set(),
   // Local presentation choice, retained across polling, language changes and Settings visits.
   dashboardCard: "diagnosis",
-  // Set while a click is in flight in #valueGroups; suspends the per-poll rebuild so it cannot
-  // detach the node the pointer went down on (renderCards explains why that loses the click
-  // outright). Released only by a timer, so it can never latch.
+  // Defer guarded poll updates during a click so a structural replacement cannot detach the
+  // pointer's target. Released by a timer so it cannot latch.
   clickHold: false,
   // 24-hour trend per historied concept: id -> {at, dt, unit, b0, v[]} for X10A, `modbus:<id>`
   // for HomeHub, and `env3:<id>` for the independent outdoor sensor (or {err:true}). Cached in app
@@ -412,22 +408,10 @@ function hydrateRoutedPopup() {
 }
 
 function initNavigation() { applyRouteFromLocation(); }
-// The ONE innerHTML write path for every per-poll container, guarded twice against the same failure:
-// a poll lands every 2 s, and a rebuild landing between mousedown and mouseup destroys the element
-// under the finger, so the browser fires NO click at all — the tap is lost with nothing logged.
-//
-//   1. Markup unchanged → don't write. Enough on its own for #connTile, whose rows are stable
-//      between polls. NOT enough for #settingsCards any more: the ESP32 card carries the two
-//      board-memory rows again, and free heap moves on each `/status` refresh, so this check degrades
-//      to a plain write there exactly as it does for the value grid — which is why guard 2 below is
-//      armed on every repainted container, including the card navigation.
-//   2. A click is in flight → don't write. Needed because #valueGroups carries LIVE readings: its
-//      markup differs on almost every `/values` poll, so check 1 degrades to a plain write there and
-//      cannot help. Without this the value rows lost 3–60 % of taps depending on how long the button
-//      was held (DESIGN.md §6 carries the measurements).
-//
-// The cache is deliberately NOT updated when a write is skipped for reason 2 — recording markup that
-// was never written would make the next identical render skip a write the DOM still needs.
+// Shared cached write path for per-poll containers. Identical markup bypasses the reconciler;
+// hold=true also defers writes during a click. Compatible read-only trees can update text in place,
+// while structural replacements can detach a pointer target and lose its click (DESIGN.md §6).
+// Do not cache markup skipped by clickHold: the next render must still apply the deferred update.
 const _html = {};
 function setHtml(id, html, hold = true) {
   if ((hold && S.clickHold) || _html[id] === html) return;
