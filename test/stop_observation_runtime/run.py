@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shlex
 import subprocess
 import tempfile
@@ -49,10 +50,13 @@ translation_unit = ["-DSTOP_OBSERVATION_PRODUCTION_SOURCE=" + json.dumps(str(sou
 
 
 def dependency_inputs(depfile):
-    _, delimiter, dependencies = depfile.read_text().replace("\\\n", " ").partition(":")
-    if not delimiter or not dependencies.strip():
+    _, delimiter, dependencies = depfile.read_text().replace("\\\n", " ").strip().partition(":")
+    if not delimiter or not dependencies or "\n" in dependencies:
         raise SystemExit("Missing compiler dependency inventory: " + depfile.name)
-    return {(ROOT / value).resolve() for value in shlex.split(dependencies)}
+    # Make escapes spaces and hashes, while apostrophes are literal path characters.
+    words = re.findall(r"(?:\\[ \t#\\]|[^\s])+", dependencies)
+    return {(ROOT / re.sub(r"\\([ \t#\\])", r"\1", word).replace("$$", "$")).resolve(strict=True)
+            for word in words}
 
 
 preflight = out / "preflight.d"

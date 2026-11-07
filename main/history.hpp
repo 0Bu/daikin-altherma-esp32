@@ -214,6 +214,10 @@ const char* history_persist_state();
 // normal persistence happens after every bucket and an old-table board has no compatible fallback.
 void history_flash_save();
 
+// Lock-free preflight for the reset button before it erases any settings. Readiness means the
+// journal and its locks are initialized; a later flash erase can still fail.
+bool history_flash_forget_ready();
+
 // Drop the stored journal AND suppress the shutdown-handler write that the same reboot would
 // otherwise perform. The factory reset's counterpart for the plant history: the configuration being
 // erased is the user's, and so is the day of readings recorded beside it.

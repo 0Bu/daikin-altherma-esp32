@@ -2864,6 +2864,10 @@
     "stop_forget_adopt_floor": {
       "pattern": "^_ZN4daik12_GLOBAL__N_1L18forget_adopt_floorEj\\$part\\$0$",
       "max_bytes": 32
+    },
+    "stop_forget_ready": {
+      "pattern": "^daik::history_flash_forget_ready\\(\\)$",
+      "max_bytes": 32
     }
   },
   "paths": {
@@ -11394,6 +11398,17 @@
       "multipliers": {},
       "base_bytes": 192,
       "max_bytes": 2048
+    },
+    "button_stop_forget_preflight": {
+      "symbols": [
+        "button_task",
+        "stop_forget_ready",
+        "stop_atomic_bool_load",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 192,
+      "max_bytes": 2048
     }
   },
   "tasks": {
@@ -11854,7 +11869,8 @@
         "button_stop_forget_liveness_crc",
         "button_stop_forget_catalog_crc",
         "button_stop_forget_manifest_reset",
-        "button_stop_forget_floor_reset"
+        "button_stop_forget_floor_reset",
+        "button_stop_forget_preflight"
       ]
     },
     "wifi": {

@@ -5,6 +5,7 @@ import datetime
 import hashlib
 import json
 from pathlib import Path
+import re
 import shlex
 import subprocess
 import tempfile
@@ -54,11 +55,14 @@ dependency_target = "history-journal-runtime"
 
 
 def dependency_paths(path):
-    line = path.read_text().replace("\\\n", " ")
+    line = path.read_text().replace("\\\n", " ").strip()
     target, separator, names = line.partition(":")
-    if target != dependency_target or not separator or not names.strip():
+    if target != dependency_target or not separator or not names or "\n" in names:
         raise RuntimeError("Invalid or empty compiler dependency file: " + str(path))
-    return {(ROOT / name).resolve(strict=True) for name in shlex.split(names)}
+    # Make escapes spaces and hashes, while apostrophes are literal path characters.
+    words = re.findall(r"(?:\\[ \t#\\]|[^\s])+", names)
+    return {(ROOT / re.sub(r"\\([ \t#\\])", r"\1", word).replace("$$", "$")).resolve(strict=True)
+            for word in words}
 
 
 def verify_hashes(expected, label):

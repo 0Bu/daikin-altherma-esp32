@@ -339,8 +339,9 @@ binding and consent changes cannot clear the latch. The Store attempts cleanup w
 its lock. The History journal flash lock serializes append and erase; an already admitted append
 can finish before erasure takes that lock. History requires a compatible partition, both locks and
 the initial scan to return before attempting erasure. A scan read failure disables persistence
-but still permits erasure of the confirmed partition. Missing prerequisites leave the reset
-incomplete. Logical suppression alone does not establish erasure or persistence across a reboot.
+but still permits erasure of the confirmed partition. The recovery button checks these
+prerequisites before erasing any data; a later erase can still fail. Logical suppression alone
+does not establish erasure or persistence across a reboot.
 The observation owner also rechecks wall/monotonic agreement on reports and flash service. An offset
 change beyond two seconds withdraws the dated view, fences the old archive and pauses this
 collection lifecycle; a fresh lifecycle or boot establishes a new anchor.

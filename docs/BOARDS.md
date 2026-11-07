@@ -130,12 +130,14 @@ credentials, history/trend/state-age data (RAM and flash journal), the raw cored
 retirement record; the stated board hardware (preset, indicator, button) is kept, best effort, so
 the button still works afterwards.
 A hold counts only after three consecutive pressed samples, and a button held at boot stays
-inactive until it reads released three times. It reboots into setup only after every erase
-succeeds; an incomplete wipe remains on the current boot, is reported in `/diag`, and the indicator
-returns to its normal pattern. If History is still pending during startup, wait for startup to
-finish before releasing and holding again. If History remains pending, check the
-[supported journal layout](ARCHITECTURE.md#history-and-diagnosis-persistence) before trying again.
-Release while arming to abort. Preserve needed configuration and crash evidence before using it.
+inactive until it reads released three times. If `/diag` says the reset did not start because
+History is not ready, that attempt erased nothing. Let startup finish before releasing and holding again.
+If it still cannot start, check the History startup messages and the
+[supported journal layout](ARCHITECTURE.md#history-and-diagnosis-persistence).
+An erase failure after reset starts can leave a partial wipe. The board stays on the current boot,
+reports the incomplete step in `/diag`, and returns the indicator to normal. It enters setup only
+after every erase succeeds. Release while arming to abort. Preserve needed configuration and
+crash evidence before using it.
 
 ## Feature availability by board
 

@@ -279,8 +279,9 @@ exclusive causes. `categories` contains `low_rps_above_main_target`, `request_wi
 `dhw_transition` and `route_mode_transition`, each with `supported`, `positive`, `evaluable` and
 `complete`. Evaluable means a positive was established or the complete sampled window was readable;
 complete alone permits a sampled-window negative. Readable endpoints do not exclude pulses between
-polls. Unsupported categories have null counts; all counts are null before confirmed readable
-coverage. A covered population with no stops is zero.
+polls. Unsupported categories have null counts. Stop-population counts are null before confirmed
+readable coverage and zero for a covered population with no stops. Source metadata such as
+`observed_hours` and `dropped` can be numeric as soon as the source is confirmed.
 Numeric source values must be consumed completely; binary witnesses require the converter's exact
 `0` or `1` token. Malformed values leave the affected observation unknown.
 

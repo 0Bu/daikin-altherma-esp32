@@ -2906,6 +2906,8 @@ void history_flash_save() {
                     static_cast<unsigned>(written));
 }
 
+bool history_flash_forget_ready() { return s_flash_forget_ready.load(std::memory_order_acquire); }
+
 // The factory reset deletes the user's configuration; the plant history it recorded is theirs too.
 // Erasing all 4 MiB costs one cycle per sector and is deliberately reserved for this explicit action.
 bool history_flash_forget() {

@@ -37,6 +37,13 @@ constexpr int WIPE_LEAD_MS   = 250;    // > sleep_slices' 25 ms slice, so the in
 constexpr int WIPE_TOTAL_MS  = 1500;
 
 void factory_reset() {
+    // Reject a known-impossible reset before deleting settings or any other user data.
+    if (!history_flash_forget_ready()) {
+        diag_printf(
+            "button: factory reset NOT STARTED — history journal not ready; nothing erased\n");
+        status_led_signal(LedSignal::None);
+        return;
+    }
     status_led_signal(LedSignal::Wiping);
     // Erases the stored config (daik_cfg), history, coredump and MQTT retirement record; the board
     // hardware statement is kept (the seed below).
@@ -184,8 +191,8 @@ void button_task(void*) {
                     status_led_signal(LedSignal::None);
                     break;
                 case ButtonEvent::Fired:
-                    // Reboots on success. If it returns, the reset FAILED or is INCOMPLETE, it has
-                    // already handed the indicator back (LedSignal::None) — and the state is left
+                    // Reboots on success. On return it has handed the indicator back
+                    // (LedSignal::None) — and the state is left
                     // alone deliberately: `st.fired` stays set, so the still-held button cannot
                     // re-fire every five seconds and bury the one diag line that explains why in a
                     // repeating loop of identical attempts, and `st.armed` stays set with it, so
