@@ -75,13 +75,16 @@ def git(*args: str, check: bool = True) -> str:
 
 
 def read_json_at(ref: str, path: str) -> dict[str, Any] | None:
-    present = subprocess.run(
-        ["git", "cat-file", "-e", f"{ref}:{path}"], check=False,
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-    )
-    if present.returncode != 0:
+    # Partial clones can list an existing path even when its promised blob cannot be read.
+    entry = git("ls-tree", "--full-tree", ref, "--", path)
+    if not entry:
         return None
-    raw = git("show", f"{ref}:{path}")
+    if not entry.startswith("100644 blob "):
+        raise ChangelogError(f"published {path} is not a regular blob")
+    try:
+        raw = git("cat-file", "blob", f"{ref}:{path}")
+    except ChangelogError as exc:
+        raise ChangelogError(f"cannot read published {path}: {exc}") from exc
     try:
         value = json.loads(raw)
     except json.JSONDecodeError as exc:
@@ -259,11 +262,7 @@ def release_baseline_for_new_dev_core(published_ref: str, prior_dev_version: str
     return release_source
 
 
-def previous_source(channel: str, source_sha: str, published_ref: str) -> str | None:
-    prior, _ = published_feed_identity(channel, published_ref)
-    if prior:
-        return prior
-
+def first_publication_base(source_sha: str) -> str | None:
     # First publication of a feed: use the last release tag before this source when possible.  With
     # no tag, one parent keeps the first document useful without pretending to reconstruct history
     # the checkout does not contain.
@@ -280,7 +279,7 @@ def build(channel: str, version: str, source_sha: str, published_ref: str) -> di
         raise ChangelogError(f"source SHA resolves to {resolved}, expected {source_sha}")
 
     published_source, published_version = published_feed_identity(channel, published_ref)
-    prior = previous_source(channel, source_sha, published_ref)
+    prior = published_source or first_publication_base(source_sha)
     changelog_path = "dev/changelog.json" if channel == "dev" else "changelog.json"
     if prior == source_sha:
         existing = read_json_at(published_ref, changelog_path)
