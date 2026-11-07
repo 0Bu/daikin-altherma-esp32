@@ -548,12 +548,8 @@ jobs:
         run: |
           python3 scripts/check-sdkconfig-defaults.py --self-test
           python3 scripts/report-firmware-size.py --self-test
-          python3 scripts/check-manifest-provenance.py --self-test
-          python3 scripts/check-signing-key-continuity.py --self-test
-          python3 scripts/check-stack-budget.py --self-test
-          python3 scripts/check-reproducible-build.py --self-test
-          python3 scripts/verify-published-artifacts.py --self-test
-          python3 scripts/production-ota-gate.py --self-test
+          # The CI/release contract suite above owns provenance, signing, stack, reproducibility,
+          # public readback and OTA selftests. Keep their single independent CI execution there.
 
       # The canonical instruction contract owns the always-loaded budget and the deterministic
       # skill, reviewer, hook and safety-invariant checks.
@@ -630,7 +626,7 @@ jobs:
           # vendor/LICENSE into both feeds. A change there must therefore rebuild and republish.
           # production-ota-gate.py also binds local HEAD to manifest.source_sha; publishing its
           # changes without a new artifact would make the corrected gate impossible to execute.
-          relevant='^(LICENSE$|THIRD_PARTY_NOTICES[.]md$|main/|CMakeLists[.]txt$|sdkconfig[.]defaults$|dependencies[.]lock$|partitions[.]csv$|version[.]txt$|docs/(index[.]html|serial-port-release[.]mjs|web-installer[.]mjs|vendor/esptool-js-[0-9][0-9.]*[.](bundle[.]js|LICENSE))$|[.]github/workflows/build[.]yml$|scripts/(ci-build-all|build-pages|next-version|publish-pages-branch|require-signed|check-publish-version|idf-version|check-nonflashable-artifacts|check-dev-manifest-source)[.]sh$|scripts/pages-commit-payload[.]mjs$|scripts/(generate-ota-changelog|check-sdkconfig-defaults|report-firmware-size|check-web-installer-plan|check-manifest-provenance|check-signing-key-continuity|check-stack-budget|check-reproducible-build|verify-published-artifacts|production-ota-gate)[.]py$|tools/(version|web_asset|release|stack)/)'
+          relevant='^(LICENSE$|THIRD_PARTY_NOTICES[.]md$|main/|CMakeLists[.]txt$|sdkconfig[.]defaults$|dependencies[.]lock$|partitions[.]csv$|version[.]txt$|docs/(index[.]html|serial-port-release[.]mjs|web-installer[.]mjs|vendor/esptool-js-[0-9][0-9.]*[.](bundle[.]js|LICENSE))$|[.]github/workflows/build[.]yml$|scripts/(ci-build-all|build-pages|next-version|publish-pages-branch|require-signed|check-publish-version|idf-version|check-nonflashable-artifacts|check-dev-manifest-source)[.]sh$|scripts/pages-commit-payload[.]mjs$|scripts/(prepare-ci-history|generate-ota-changelog|check-sdkconfig-defaults|report-firmware-size|check-web-installer-plan|check-manifest-provenance|check-signing-key-continuity|check-stack-budget|check-reproducible-build|verify-published-artifacts|production-ota-gate)[.]py$|tools/(version|web_asset|release|stack)/)'
           case "${{ github.event_name }}" in
             pull_request)
               # HEAD is the PR's merge ref, so HEAD^1 is the base tip: the diff is exactly what
@@ -852,6 +848,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0   # full history + tags for versioning / change detection
+          filter: blob:none  # current source, without historical binary payloads
+
+      - name: Hydrate historical runtime evidence before the container
+        run: python3 scripts/prepare-ci-history.py
 
       # Bind dispatch admission before versioning, signing-key provisioning or publication.
       # main can move between acceptance and workflow_dispatch resolving its ref.
@@ -1119,6 +1119,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
+          filter: blob:none  # historical reads run on this writable host
 
       - name: Download signed build handoff
         env:
@@ -1137,11 +1138,9 @@ jobs:
           test -f dist/artifacts.json
           test -f dist/changelog.json
           test -f dist/daikin-altherma-esp32.bin
-          ./scripts/check-manifest-provenance.py dist/manifest.json \
-            dist/daikin-altherma-esp32.bin "$SOURCE_SHA" "$(./scripts/idf-version.sh)" dependencies.lock
           ./scripts/check-signing-key-continuity.py dist/daikin-altherma-esp32.bin
-          ./scripts/check-web-installer-plan.py dist/manifest.json partitions.csv
-          ./scripts/generate-ota-changelog.py --validate dist/changelog.json --version "$VERSION"
+          # The candidate gate below owns provenance, the complete artifact inventory, installer
+          # plan and version-bound changelog validation, once, before either publication path.
           check_mode="$MODE"
           if [ "$MODE" = release ]; then
             check_mode=release-resume

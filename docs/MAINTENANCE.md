@@ -46,6 +46,32 @@ signed build/publication. It has no board inventory, self-hosted hardware job or
 contacts no device. Review/CI, published binary/signature, device injection, probation, API and rendered
 UI evidence remain distinct.
 
+### CI checkout and publication cost
+
+The dev critical path is `mechanical_gates → trusted_build → publish`. Local development checks
+do not replace any of these independent CI gates. CI/release contracts own the provenance, signing,
+stack-budget, reproducibility, readback and OTA selftests; the build-contract step adds only its
+distinct configuration-default and size-report tests. Actual ELF and signed-artifact checks still
+run against each build. The publisher verifies signatures, then its candidate gate validates the
+source-bound manifest, complete binary inventory, installer plan and changelog once before mutation.
+
+All four source checkouts retain complete commit history and tags. Only `trusted_build` and
+`publish` filter historical blobs with `blob:none`; the current source tree remains complete.
+`prepare-ci-history.py` reads the HTTP runtime test's existing historical-source pin and hydrates
+that blob on the writable host before the build container. Missing evidence or a changed consumer
+fails closed. PR and mechanical checkouts remain unfiltered: they remove persisted credentials and
+must support historical runtime/coverage reads without relying on a later authenticated lazy fetch.
+The publisher's `gh-pages` fetch filters blobs too; exact tree and public-byte verification still
+materialize every needed current file.
+
+Both feed publishers maintain one empty regular `.nojekyll` at branch root. Pages serves the
+assembled site without Jekyll regeneration; an unsafe existing marker blocks publication. Dev
+readback waits on the exact manifest before downloading all feed files and checking their bytes
+and signature. Attempts, delays and timeouts are unchanged. Pages deployment/CDN propagation still
+takes external time and overlaps this wait; do not add Pages job durations to the main critical
+path. Measure checkout, queue/startup, downloads, compilation, tests, signing, deployment and public
+readback separately. Claim CI acceleration only after a comparable run of the published change.
+
 ### First Pages publication
 
 1. Bootstrap `gh-pages` as a reviewed signed orphan commit. The publisher refuses to invent a missing

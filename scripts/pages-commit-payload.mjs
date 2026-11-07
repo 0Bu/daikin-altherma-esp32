@@ -4,6 +4,9 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
+const nojekyll = ".nojekyll";
+const emptyBlobOid = blobOid(Buffer.alloc(0));
+
 function fail(message, code = 1) {
   console.error(message);
   process.exit(code);
@@ -41,6 +44,12 @@ function parseCurrentTree(treePath) {
       fail(`pages payload: only regular blobs are publishable: ${line}`);
     }
     const repositoryPath = line.slice(tab + 1);
+    if (repositoryPath.startsWith(`${nojekyll}/`)) {
+      fail("pages payload: root .nojekyll must not be a directory");
+    }
+    if (repositoryPath === nojekyll && (fields[0] !== "100644" || fields[2] !== emptyBlobOid)) {
+      fail("pages payload: root .nojekyll must be an empty regular file");
+    }
     if (result.has(repositoryPath)) fail(`pages payload: duplicate path: ${repositoryPath}`);
     result.set(repositoryPath, fields[2]);
   }
@@ -57,12 +66,22 @@ function prepare(args) {
   if (!/^[^/]+\/[^/]+$/.test(repository)) fail("pages payload: GITHUB_REPOSITORY must be owner/repo");
 
   const current = parseCurrentTree(treePath);
+  try {
+    const stat = fs.lstatSync(path.join(siteRoot, nojekyll));
+    if (!stat.isFile() || stat.size !== 0 || stat.nlink !== 1) fail("pages payload: unsafe local .nojekyll");
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
   const additions = [];
-  const desired = new Set();
+  // Both publishers own this one shared deployment control. It does not belong to either feed,
+  // and a dev-only publish must also disable Jekyll for the already assembled branch root.
+  const desired = new Set([nojekyll]);
+  if (!current.has(nojekyll)) additions.push({ path: nojekyll, contents: "" });
   let decodedBytes = 0;
 
   for (const absolute of walkFiles(siteRoot)) {
     const relative = path.relative(siteRoot, absolute).split(path.sep).join("/");
+    if (relative === nojekyll) continue;
     const isDev = relative === "dev" || relative.startsWith("dev/");
     if ((mode === "dev") !== isDev) continue;
     const contents = fs.readFileSync(absolute);

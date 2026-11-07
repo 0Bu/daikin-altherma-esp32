@@ -150,10 +150,12 @@ def expected_site(directory: Path) -> tuple[dict[str, Any], dict[str, bytes]]:
         raise ReadbackError(f"expected site is missing or unsafe: {directory}")
     payloads: dict[str, bytes] = {}
     for path in sorted(directory.iterdir(), key=lambda item: item.name):
-        if path.is_symlink() or not path.is_file() or not SITE_NAME_RE.fullmatch(path.name):
+        control = path.name == ".nojekyll"
+        if path.is_symlink() or not path.is_file() or (not control and not SITE_NAME_RE.fullmatch(path.name)):
             raise ReadbackError(f"site contains an unsafe entry: {path}")
         data = path.read_bytes()
-        if not data or len(data) > MAX_SITE_FILE:
+        if (control and (data or path.stat().st_nlink != 1)) or \
+           (not control and (not data or len(data) > MAX_SITE_FILE)):
             raise ReadbackError(f"site file has an invalid size: {path.name}")
         payloads[path.name] = data
     missing = REQUIRED_SITE_FILES - set(payloads)
@@ -234,7 +236,8 @@ def pages_tree_slice(repository: Path, commit: str, prefix: str) -> dict[str, by
         if not owned:
             continue
         name = path[len(prefix):]
-        if mode != "100644" or kind != "blob" or not SITE_NAME_RE.fullmatch(name):
+        control = name == ".nojekyll" and not prefix
+        if mode != "100644" or kind != "blob" or (not control and not SITE_NAME_RE.fullmatch(name)):
             raise ReadbackError(f"gh-pages {prefix or 'root'} slice has unsafe entry {path!r}")
         if name in payloads or not re.fullmatch(r"[0-9a-f]{40}", object_id):
             raise ReadbackError(f"gh-pages slice has a repeated or invalid entry {path!r}")
@@ -245,7 +248,8 @@ def pages_tree_slice(repository: Path, commit: str, prefix: str) -> dict[str, by
             raise ReadbackError(f"gh-pages blob size is invalid for {path!r}")
         size = int(raw_size)
         limit = MAX_BINARY if name.endswith(".bin") else MAX_SITE_FILE
-        if not 0 < size <= limit or total_size + size > MAX_SITE_TOTAL:
+        if (control and size != 0) or (not control and not 0 < size <= limit) or \
+           total_size + size > MAX_SITE_TOTAL:
             raise ReadbackError(f"gh-pages blob size exceeds the slice budget for {path!r}")
         payload = git_bytes(repository, "cat-file", "blob", object_id)
         if len(payload) != size:
@@ -298,10 +302,17 @@ def verify_once(
     cache_buster: str,
 ) -> tuple[str, dict[str, str]]:
     expected_document, expected_payloads = expected_site(site_directory)
-    remote_payloads = {
+    # An old manifest cannot attest this candidate. Wait on the small identity document before
+    # downloading the complete inventory; matching identity still requires every byte/signature.
+    manifest = fetch(urllib.parse.urljoin(base_url, "manifest.json"),
+                     len(expected_payloads["manifest.json"]), cache_buster)
+    if manifest != expected_payloads["manifest.json"]:
+        raise ReadbackError("manifest mismatch: public feed still serves another candidate")
+    remote_payloads = {"manifest.json": manifest, **{
         name: fetch(urllib.parse.urljoin(base_url, name), len(expected), cache_buster)
         for name, expected in expected_payloads.items()
-    }
+        if name != "manifest.json"
+    }}
     verify_payloads(
         remote_payloads, expected_document, expected_payloads,
     )

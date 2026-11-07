@@ -75,6 +75,9 @@ echo "== 2. root publish is atomic and removes stale root-owned files =="
 run A; rc=$?
 check "root publish succeeds" "$rc" 0
 check "root landed" "$(remote_file index.html)" root-v1
+check "root disables Jekyll with an empty regular marker" \
+  "$(git -C "$T/origin.git" ls-tree gh-pages .nojekyll | awk '{print $1,$3}')" \
+  '100644 e69de29bb2d1d6434b8b29ae775ad8c2e48c5391'
 check "bootstrap placeholder swept" "$(remote_has bootstrap.txt)" no
 check "publisher reports Verified" "$(grep -c 'verified ' "$T/out.log")" 1
 
@@ -86,6 +89,7 @@ run B --dev; rc=$?
 check "dev publish succeeds" "$rc" 0
 check "dev landed" "$(remote_file dev/index.html)" dev-d1
 check "root survived dev" "$(remote_file index.html)" root-v1
+check "dev preserves the shared marker" "$(remote_has .nojekyll)" yes
 git -C "$T/origin.git" show gh-pages:dev/app.bin > "$T/remote-app.bin"
 check "binary bytes are exact" "$(cmp -s "$T/B/_site/dev/app.bin" "$T/remote-app.bin" && echo yes || echo no)" yes
 
@@ -164,6 +168,57 @@ run A --dev extra; rc_extra=$?
 check "retired --pr rejected" "$([ "$rc_pr" -ne 0 ] && echo yes || echo no)" yes
 check "retired --rm rejected" "$([ "$rc_rm" -ne 0 ] && echo yes || echo no)" yes
 check "extra --dev value rejected" "$([ "$rc_extra" -ne 0 ] && echo yes || echo no)" yes
+
+echo "== 9. both publishers own exactly one safe root deployment control =="
+# Removing the old marker models upgrading a branch bootstrapped without it. A dev-only update
+# must add it without replacing any release payload.
+(
+  cd "$T/seed" && git fetch -q origin gh-pages && git checkout -q -B gh-pages origin/gh-pages
+  git rm -q .nojekyll && git commit -qm 'fixture: legacy branch' && git push -q origin gh-pages
+)
+site_dev B d4; run B --dev; rc=$?
+check "dev bootstraps the marker" "$rc" 0
+check "dev marker is at branch root" "$(remote_has .nojekyll)" yes
+check "dev has no nested marker" "$(remote_has dev/.nojekyll)" no
+check "dev keeps the complete release payload" "$(remote_file index.html)" root-v3
+
+for unsafe in nonempty directory symlink hardlink; do
+  marker="$T/A/_site/.nojekyll"
+  rm -rf "$marker"
+  case "$unsafe" in
+    nonempty) echo unsafe > "$marker" ;;
+    directory) mkdir "$marker" ;;
+    symlink) ln -s index.html "$marker" ;;
+    hardlink) : > "$T/linked-empty"; ln "$T/linked-empty" "$marker" ;;
+  esac
+  before="$(git -C "$T/origin.git" rev-parse gh-pages)"
+  run A; rc=$?
+  check "local $unsafe marker fails closed" "$([ "$rc" -ne 0 ] && echo yes || echo no)" yes
+  check "unsafe $unsafe marker cannot move branch" "$(git -C "$T/origin.git" rev-parse gh-pages)" "$before"
+done
+rm -f "$T/A/_site/.nojekyll"
+(
+  cd "$T/seed" && git fetch -q origin gh-pages && git checkout -q -B gh-pages origin/gh-pages
+  echo unsafe > .nojekyll && git add .nojekyll && git commit -qm 'fixture: invalid marker'
+  git push -q origin gh-pages
+)
+run B --dev; rc=$?
+check "unsafe remote marker is rejected" "$([ "$rc" -ne 0 ] && echo yes || echo no)" yes
+(
+  cd "$T/seed" && git fetch -q origin gh-pages && git checkout -q -B gh-pages origin/gh-pages
+  git rm -q .nojekyll && mkdir .nojekyll && echo keep > .nojekyll/child
+  git add .nojekyll/child && git commit -qm 'fixture: invalid marker directory'
+  git push -q origin gh-pages
+)
+for mode in root dev; do
+  before="$(git -C "$T/origin.git" rev-parse gh-pages)"
+  if [ "$mode" = root ]; then run A; else run B --dev; fi
+  rc=$?
+  check "$mode rejects a remote marker directory" "$([ "$rc" -ne 0 ] && echo yes || echo no)" yes
+  check "$mode retains the remote marker directory" "$(remote_file .nojekyll/child)" keep
+  check "$mode leaves the branch unchanged on unsafe directory" \
+    "$(git -C "$T/origin.git" rev-parse gh-pages)" "$before"
+done
 
 echo
 if [ "$fail" -eq 0 ]; then
