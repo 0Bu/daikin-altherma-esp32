@@ -263,6 +263,15 @@ def validate_sources(budgets, sources, error):
             or 's_enabled=false;' not in forget or 's_confirmed=false;' not in forget
             or not history_forget.startswith('s_flash_forgotten.store(true);stop_observation_forget();')):
         raise error('stop observation button shortcut: forget/disabled admission changed')
+    flash_start = normalized(body(history, 'history_flash_start', error))
+    ready_publish = 'if(s_mtx)s_flash_forget_ready.store(true,std::memory_order_release);'
+    if ('std::atomic<bool>s_flash_forget_ready{false};' not in normalized(history)
+            or not history_forget.startswith('s_flash_forgotten.store(true);'
+                                             'stop_observation_forget();bump_history_epoch();'
+                                             'if(!s_flash_forget_ready.load(std::memory_order_acquire))returnfalse;')
+            or 's_flash_scan_ok=flash_journal_scan();' not in flash_start
+            or not flash_start.endswith(ready_publish)):
+        raise error('stop observation history forget readiness: publish after scan and acquire before pointer access')
     reader = normalized(body(history, 'flash_read_stop_observation', error))
     if (not reader.startswith('auto&record=*new(s_flash_sector)FlashJournalRecord;')
             or '!logic::observation_header_matches(record.header)' not in reader
@@ -389,6 +398,12 @@ def self_test(budgets, sources, error):
         ('main/checkup.cpp', 'if (event.valid)', 'if (false)'),
         ('main/recovery_button.cpp', '? history_flash_forget() : false', '? true : false'),
         ('main/history.cpp', 'stop_observation_forget();', ''),
+        ('main/history.cpp', 's_flash_forget_ready.load(std::memory_order_acquire)',
+         's_flash_forget_ready.load(std::memory_order_relaxed)'),
+        ('main/history.cpp', 's_flash_forget_ready.store(true, std::memory_order_release);',
+         's_flash_forget_ready.store(true, std::memory_order_relaxed);'),
+        ('main/history.cpp', 's_flash_scan_ok = flash_journal_scan();',
+         's_flash_scan_ok = true;'),
         ('main/new_alias.cpp', '', 'void fake() __attribute__((alias("_Z_stop_observation_record")));'),
         ('main/new_alias.cpp', '', 'void escape() { auto fn = &stop_observation_record; }'),
         ('main/new_alias.cpp', '', 'void escape() { auto p = &s_flash_payload; }'),

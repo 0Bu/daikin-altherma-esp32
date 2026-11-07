@@ -16,8 +16,10 @@ revisions; whole-hour expiry without either producer or flash service; bounded r
 pressure; and the unchanged physical Checkup envelope interpreted by the old structural reader.
 Reset cases keep sequence ordering independent of wall time, future/aged timestamps and physical
 slot reuse. Missing reset-index completeness stays limited until a complete physical reindex.
-Restored loss notices survive their original hour's expiry and another reboot. Reader cases verify
-scratch reuse, independently owned output, CRC/commit/manifest refusal and failed physical reads.
+Restored loss notices survive their original hour's expiry and another modeled restart. The
+`boot(false)` cases reinitialize the Store in the same process with the flash-port bytes retained.
+Reader cases verify scratch reuse, independently owned output, CRC/commit/manifest refusal and
+failed physical reads.
 The compatibility case prints actual host POD/index/queue sizes and verifies the existing core
 80-byte bucket and 128-byte journal payload.
 
@@ -30,11 +32,11 @@ No ongoing stop candidate or readable endpoint clock is restored across a reboot
 Forget cases cover recovery before startup, allocation/first-lock failures, unpublished mutex
 initialization, busy-store and staged-reader interleavings, late claims/receipts and attempted
 same-boot re-enablement. Suppressed reports have no pending restoration or persistence. Only a
-fresh process permits collection again; no test clears production-private state. Three compiling
-controls remove the latch, clear it
-from startup or publish the mutex early; each must fail its exact semantic assertion. The runner
-retains these outputs and a source-hashed receipt. These are deterministic interleavings, not a
-test of the FreeRTOS scheduler or simultaneous execution on two cores.
+fresh host process demonstrates that production static initialization permits collection again.
+The unmodified fixture never clears the production latch. Three compiling controls remove the
+latch, clear it from startup or publish the mutex early; each must fail its exact semantic assertion.
+The runner retains these outputs and a source-hashed receipt. These deterministic interleavings
+do not exercise the FreeRTOS scheduler or simultaneous execution on two cores.
 
 The actual journal reader verifies the real envelope and CRC. It does not prove the ESP-IDF flash
 driver, target ABI, stack budget, heap minima, partition binding or physical device behavior.

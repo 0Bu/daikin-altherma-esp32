@@ -317,7 +317,7 @@ unreadable verification cannot prove that a commit was not programmed. Sequence 
 reusing an uncertain sequence could make a later acknowledged correction lose to the earlier copy.
 The history owner rebuilds the sum at restoration, after each of its hourly records
 is committed to the journal, after a replay, and when its oldest hour expires, even if the producer
-stops. It reuses one 96-byte flash-owner payload scratch and the history sector scratch, then
+stops. It reuses a 96-byte flash-owner payload buffer separate from the History sector buffer, then
 swaps the result in under a zero-wait take of the observation's lock; report and record paths never
 read the journal. A missing record leaves its hour unobserved; it is never inferred from the core
 bucket. The journal capacity assertion in `history_persist.hpp` must count the new records; static
@@ -326,17 +326,20 @@ memory and stack paths are measured on the target ELF.
 Stop records use the existing physical Checkup envelope with a distinct format fingerprint and
 width. Older firmware can discover their physical sequence/head without interpreting their payload
 as core diagnosis. The core bucket, its fingerprint and the five wire source IDs are unchanged.
-Finalized stop contexts revise the original stop hour; pending candidates never restore. Explicit
-resets require a committed barrier before reset durability is established. Fence ordering uses
+Finalized stop contexts revise the original stop hour; pending candidates never restore. Ordinary
+scoped resets require a committed barrier before reset durability is established. Fence ordering uses
 sequence and exact scope, independently of wall time; a backward clock correction cannot make a
 pre-reset future hour eligible after the fence ages. Power loss before that
 append can still restore older same-scope hours. Source changes and consent transitions withdraw
 live evidence immediately. Whole-hour aging also runs without further polls; missing records never
 borrow the core clock. New hourly observations must preserve these independent-source boundaries.
-History forgetting latches Stop suppression even before its mutex exists. Stop collection, pending
-reports, restoration and append offers remain disabled for the rest of that boot; startup, source
-binding and consent changes cannot clear the latch. This RAM boundary does not establish successful
-physical erasure or persistence across a reboot.
+History forgetting latches Stop suppression even before its mutex exists. It withdraws Stop
+collection, reports, restoration and new append offers for the rest of that boot; startup, source
+binding and consent changes cannot clear the latch. The Store attempts cleanup without waiting for
+its lock. An append already admitted under the History lock can finish before the separate erase
+takes that lock. History only attempts erasure after it has resolved the compatible partition,
+created its locks and finished the initial scan; missing prerequisites leave the reset incomplete.
+Logical suppression alone does not establish physical erasure or persistence across a reboot.
 The observation owner also rechecks wall/monotonic agreement on reports and flash service. An offset
 change beyond two seconds withdraws the dated view, fences the old archive and pauses this
 collection lifecycle; a fresh lifecycle or boot establishes a new anchor.

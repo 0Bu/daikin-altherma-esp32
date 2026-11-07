@@ -1,4 +1,4 @@
-# Shared journal append runtime fixture
+# Shared journal runtime fixture
 
 This fixture compiles the complete production `main/history.cpp` translation unit and separately
 compiles the real `main/stop_observation_store.cpp`. The local ports provide only SDK mutexes,
@@ -20,7 +20,7 @@ paired seed/restore witness and requires the named acknowledged-correction oracl
 fresh process. A compiler, setup or sanitizer failure never counts as an expected RED. Historical
 RED receipts retain the source and fixture hashes from the respective pre-fix execution.
 
-The 24 baseline process cases cover:
+The 34 baseline process cases cover:
 
 - Regular public Start/bind/record/seal calls creating one Stop population. Consent changes create
   reset barriers; the fixture never seeds private Store observations, claims or latches.
@@ -46,15 +46,24 @@ The 24 baseline process cases cover:
   contract and exactly one Core acknowledgment. Zero, out-of-order and already consumed requests
   must be rejected before all flash I/O. Exhaustion arithmetic is covered by the separate pure
   logic tests; this fixture does not modify private counters to manufacture an exhausted runtime.
+- Forget immediately suppresses both owners and invalidates the History reader lease. Calls before
+  startup, from partition lookup or a scan read, with unresolved/incompatible geometry, or after
+  either mutex allocation failure must refuse without changing synthetic NOR. Both startup
+  interleavings then retry in the same boot. A finished scan, including one that returned a read
+  failure, permits exactly one full erase of the compatible journal. Three sentinels and the
+  complete simulated partition distinguish successful erasure from a successful return alone.
 
-Five independently compiled History mutations remove the failure callback, restore the erroneous
+The append mutations remove the failure callback, restore the erroneous
 read-header classifier, clear the Core ahead episode after Stop success, or trust a commit error
-over valid readback. The fifth restores success-only sequence consumption: data/barrier/Core
+over valid readback. Another restores success-only sequence consumption: data/barrier/Core
 reservation oracles must fail, and a passing paired seed followed by a fresh process must lose the
-acknowledged late correction at its precise oracle. Eleven named semantic failures are required.
+acknowledged late correction at its precise oracle. The Forget mutations restore null-partition
+success, publish readiness before the scan or without the History mutex, and report success
+without erasing. The nine independently compiled mutations must fail 20 named semantic oracles.
 Five unknown-case probes must fail explicitly. Compilation errors never count as negative proof.
 
-This is deterministic host evidence for the History/Stop append contract. The Core producer and
-hardware flash driver are external ports; this fixture does not establish Checkup evaluation,
-hardware programming, physical reboot restoration, all wrap/power-loss outcomes, target resource
-fit, HTTP/UI behavior or feature acceptance.
+This is deterministic host evidence for the History/Stop append and Forget contracts. The lookup
+and scan ports exercise specific interleavings in one thread. The Core producer and hardware flash
+driver are external ports. Thread scheduling, Checkup evaluation, hardware programming, physical
+reboot restoration, all wrap/power-loss outcomes, target resource fit, HTTP/UI behavior and feature
+acceptance require separate evidence.

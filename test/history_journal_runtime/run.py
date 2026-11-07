@@ -106,7 +106,11 @@ baseline = build(SOURCE, "baseline")
 phases = ["prepare_read", "prepare_erase", "body", "commit", "readback",
           "commit_accepted_error", "success"]
 cases = ["commit_rejected", "core_ahead", "nor_contract", "read_admission", "sequence_rejections",
-         "core_sequence_prepare", "core_sequence_readback", "core_sequence_commit_error"] + [
+         "core_sequence_prepare", "core_sequence_readback", "core_sequence_commit_error",
+         "forget_before_start", "forget_during_lookup", "forget_during_scan",
+         "forget_missing_partition", "forget_wrong_address", "forget_wrong_size",
+         "forget_missing_history_mutex", "forget_missing_flash_mutex", "forget_ready",
+         "forget_incomplete_scan"] + [
     kind + "_" + phase for kind in ["data", "barrier"] for phase in phases]
 if args.expect_red:
     cases = ["commit_rejected"] if args.expect_red_case == "claim" else []
@@ -149,6 +153,18 @@ for case in ["unknown_case", "data_unknown", "barrier_unknown",
 
 if not args.expect_red:
     text = SOURCE.read_text()
+    forget_start = text.index("bool history_flash_forget()")
+    forget_end = text.index("\nstatic void history_flash_start()", forget_start)
+    forget_body = text[forget_start:forget_end]
+    ready_check = "    if (!s_flash_forget_ready.load(std::memory_order_acquire)) return false;\n"
+    erase_lock = "    Lock flash_lk(s_flash_mtx);\n"
+    if forget_body.count(ready_check) != 1 or forget_body.count(erase_lock) != 1:
+        raise RuntimeError("Expected one Forget readiness check and flash lock")
+    old_forget = forget_body.replace(ready_check, "").replace(
+        erase_lock, "    if (!s_flash_part) return wipe_ram_and_index();\n"
+        "    if (!s_flash_mtx) return false;\n" + erase_lock)
+    readiness_publication = "    if (s_mtx) s_flash_forget_ready.store(true, std::memory_order_release);"
+    startup_scan = "    s_flash_scan_ok = flash_journal_scan();"
     mutations = [
         ("omit_failure_callback", "        if (stop_owned) stop_observation_flash_failed();",
          "        (void)stop_owned;", ["data_commit", "barrier_commit"],
@@ -164,6 +180,18 @@ if not args.expect_red:
          "const bool committed = e == ESP_OK && read_e == ESP_OK && flash_record_physically_valid(verify) &&",
          ["data_commit_accepted_error", "barrier_commit_accepted_error"],
          "verified_readback_is_commit_authority"),
+        ("treat_null_partition_as_erased", forget_body, old_forget,
+         ["forget_during_lookup", "forget_missing_partition", "forget_wrong_address",
+          "forget_wrong_size", "forget_missing_flash_mutex"], "unready_forget_refuses"),
+        ("publish_erase_ready_before_scan", startup_scan,
+         readiness_publication + "\n" + startup_scan, ["forget_during_scan"],
+         "unready_forget_refuses"),
+        ("publish_erase_ready_without_history_mutex", readiness_publication,
+         "    s_flash_forget_ready.store(true, std::memory_order_release);",
+         ["forget_missing_history_mutex"], "unready_forget_preserves_nor"),
+        ("report_forget_without_erase", "e = esp_partition_erase_range(s_flash_part, 0, s_flash_part->size);",
+         "e = ESP_OK;", ["forget_ready", "forget_incomplete_scan"],
+         "successful_forget_erases_entire_journal"),
     ]
     for name, before, after, controls, oracle in mutations:
         if text.count(before) != 1:

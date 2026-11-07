@@ -309,14 +309,19 @@ coverage duration. `confirmed`, `dated`, `coverage_partial`, `restore_pending`,
 `persistence_pending` and `pending` separate source, clock, coverage, storage and unfinished-window
 state. Owner reads validate clock agreement even without new producer samples. A wall/monotonic
 offset change beyond two seconds withdraws the dated view and queues a durable fence; source
-confirmation remains independent. Collection resumes in a fresh lifecycle or boot. Power loss
-before fence commit can still restore earlier compatible records. An incomplete reset-fence index
-withholds completed restoration and keeps coverage partial; waiting one day alone cannot establish
-that a lost reset is harmless. There is no inferred source
+confirmation remains independent. After this clock fault, collection resumes in a fresh lifecycle
+or boot. Power loss before fence commit can still restore earlier compatible records. An incomplete
+reset-fence index withholds completed restoration and keeps coverage partial; waiting one day alone
+cannot establish that a lost reset is harmless. There is no inferred source
 timestamp. The parameters `window_s:30` (each side),
 `max_gap_s:15`, `low_rps:22` and `above_main_target_k:2` are project observation rules, not Daikin
 limits. [DIAGNOSTIC_EVIDENCE.md](DIAGNOSTIC_EVIDENCE.md#diagnosis-cycling) owns their interpretation;
 [ARCHITECTURE.md](ARCHITECTURE.md#history-and-diagnosis-persistence) owns restoration and reset limits.
+
+A report taken after History forgetting withdraws Stop evidence for the rest of that boot.
+If the Stop object is emitted, counts are null and `confirmed`, `pending`, `restore_pending`
+and `persistence_pending` are false. Those flags describe withdrawn work; they do not establish
+successful restoration or erasure.
 
 `min_unix_s` is the pressure minimum's earliest dated occurrence in the retained window, null without
 a synchronized clock; equal minima keep the earliest known time, not an inferred pressure dip.

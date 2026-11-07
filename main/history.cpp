@@ -692,6 +692,8 @@ std::atomic<bool> s_flash_forgotten{false};     // factory reset crosses button/
 bool s_flash_restore_done = false;
 bool s_flash_checkup_restore_done = false;
 bool s_flash_scan_ok = false;
+// Release-publish the partition and both locks after the scan.
+std::atomic<bool> s_flash_forget_ready{false};
 
 constexpr size_t kTotalRings = logic::HISTORY_FLASH_TOTAL_RINGS;
 constexpr size_t kJournalSources = logic::HISTORY_JOURNAL_SOURCE_COUNT;
@@ -2901,7 +2903,12 @@ bool history_flash_forget() {
     // Readers are suppressed immediately, even if the subsequent physical erase fails. Retire
     // browser leases at that privacy boundary rather than letting them display the forgotten data.
     bump_history_epoch();
-    const auto wipe_ram_and_index = []() {
+    // The recovery button can run during startup. Until the scan has returned and the handles
+    // are published, an unresolved or unusable partition is not evidence of an empty journal.
+    if (!s_flash_forget_ready.load(std::memory_order_acquire)) return false;
+
+    // Keep the RAM/index cleanup frame separate from the flash-erase path.
+    const auto wipe_ram_and_index = []() __attribute__((noinline)) {
         if (!s_mtx) return false;
         Lock history_lk(s_mtx);
         if (!history_lk.acquired()) return false;
@@ -2943,8 +2950,6 @@ bool history_flash_forget() {
         return true;
     };
 
-    if (!s_flash_part) return wipe_ram_and_index(); // no compatible journal exists to erase
-    if (!s_flash_mtx) return false;
     // Flash service takes flash -> history in that order while building a record. Keep the same
     // order here: once this lock is ours no stale record can be appended after the erase, and once
     // the history lock is ours no producer can refill the RAM region after it is wiped.
@@ -2982,10 +2987,10 @@ static void history_flash_start() {
         return;
     }
     s_flash_scan_ok = flash_journal_scan();
-    if (!s_flash_scan_ok) {
-        diag_printf("history: journal disabled this boot (scan incomplete)\n");
-        return;
-    }
+    if (!s_flash_scan_ok) diag_printf("history: journal disabled this boot (scan incomplete)\n");
+    // A read failure disables persistence, but a known compatible partition can still be erased.
+    // Publish last so Forget cannot overlap the scan or its final state checks.
+    if (s_mtx) s_flash_forget_ready.store(true, std::memory_order_release);
 }
 
 } // namespace daik

@@ -124,7 +124,7 @@ receipt = {"outcome": "passed" if not any(result["returncode"] for result in res
            "source_sha256": source_sha_before, "inputs_unchanged": True,
            "input_sha256": hashes, "cases": results, "negative_controls": negative_controls,
            "limits": ["Deterministic SDK/flash transport ports model task interleavings; no kernel race or hardware proof.",
-                      "Cold-boot reset of the latch exists only in the fixture; production has no clear API."]}
+                      "Fresh host process observes production static initialization; no physical cold boot or latch clear API."]}
 (out / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
 print("Evidence:", out)
 raise SystemExit(any(result["returncode"] for result in results))

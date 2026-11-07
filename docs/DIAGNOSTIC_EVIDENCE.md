@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 9a06f8438f0268758b3750ad0ea8db93ceb864e40c84868e135ca7a344726cff -->
+<!-- diagnostic-evidence-contract: 40bf507dfc172b88cd75fe86d698b3972f1491c05a8881e03ba684df75ae6642 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -296,8 +296,8 @@ The setting remains unknown unless independently read; +2 K alone establishes no
 The manuals and R1 Summary (PDF p.3) were reopened on 5 November 2026. None validates 22 rps,
 +2 K or the temporal windows as manufacturer thresholds. No category proves minimum modulation,
 closed valves, oversizing, an incorrect curve or a stop cause. Recovery forgetting also withdraws
-pending Stop context for the remainder of that boot. Source/consent-bound hourly restoration,
-forgetting and pre-commit reset limits are described in
+accumulated and pending Stop context for the remainder of that boot. Source/consent-bound hourly
+restoration, forgetting and pre-commit reset limits are described in
 [ARCHITECTURE.md](ARCHITECTURE.md#history-and-diagnosis-persistence).
 
 **Not established:** The note identifies neither oversizing nor incorrect hydraulic balancing.
