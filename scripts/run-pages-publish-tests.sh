@@ -197,6 +197,17 @@ for unsafe in nonempty directory symlink hardlink; do
   check "unsafe $unsafe marker cannot move branch" "$(git -C "$T/origin.git" rev-parse gh-pages)" "$before"
 done
 rm -f "$T/A/_site/.nojekyll"
+before="$(git -C "$T/origin.git" rev-parse gh-pages)"
+for nested in file directory; do
+  marker="$T/B/_site/dev/.nojekyll"
+  if [ "$nested" = file ]; then : > "$marker"; else mkdir "$marker"; fi
+  run B --dev; rc=$?
+  check "dev rejects a nested marker $nested before mutation" \
+    "$([ "$rc" -ne 0 ] && grep -q 'dev/.nojekyll is reserved' "$T/out.log" && echo yes || echo no)" yes
+  check "nested marker $nested cannot move the branch" \
+    "$(git -C "$T/origin.git" rev-parse gh-pages)" "$before"
+  rm -rf "$marker"
+done
 (
   cd "$T/seed" && git fetch -q origin gh-pages && git checkout -q -B gh-pages origin/gh-pages
   echo unsafe > .nojekyll && git add .nojekyll && git commit -qm 'fixture: invalid marker'
@@ -219,6 +230,21 @@ for mode in root dev; do
   check "$mode leaves the branch unchanged on unsafe directory" \
     "$(git -C "$T/origin.git" rev-parse gh-pages)" "$before"
 done
+
+(
+  cd "$T/seed" && git fetch -q origin gh-pages && git checkout -q -B gh-pages origin/gh-pages
+  git rm -qr .nojekyll
+  empty_tree="$(git mktree </dev/null)"
+  tree="$( { git ls-tree "$(git write-tree)"; printf '040000 tree %s\t.nojekyll\n' "$empty_tree"; } | git mktree)"
+  commit="$(git commit-tree "$tree" -p HEAD -m 'fixture: empty marker tree')"
+  git push -q origin "$commit:refs/heads/gh-pages"
+) || exit 1
+before="$(git -C "$T/origin.git" rev-parse gh-pages)"
+run B --dev; rc=$?
+check "dev rejects an empty Git tree at the root marker path" \
+  "$([ "$rc" -ne 0 ] && grep -q 'root .nojekyll must not be a directory' "$T/out.log" && echo yes || echo no)" yes
+check "empty Git marker tree cannot move the branch" \
+  "$(git -C "$T/origin.git" rev-parse gh-pages)" "$before"
 
 echo
 if [ "$fail" -eq 0 ]; then

@@ -66,7 +66,9 @@ while [ "$attempt" -le "$PUSH_ATTEMPTS" ]; do
     git fetch --quiet --no-tags --filter=blob:none --force origin \
         refs/heads/gh-pages:refs/remotes/origin/gh-pages
     expected="$(git rev-parse refs/remotes/origin/gh-pages)"
-    git ls-tree -r "$expected" > "$tmp/current-tree"
+    # Include tree entries so even an empty directory at .nojekyll is visible. NUL
+    # delimiters preserve literal paths without Git quoting.
+    git ls-tree -r -t -z "$expected" > "$tmp/current-tree"
 
     stats="$(node scripts/pages-commit-payload.mjs prepare \
         "$owner" _site "$tmp/current-tree" "$expected" "$GITHUB_REPOSITORY" "$msg" \

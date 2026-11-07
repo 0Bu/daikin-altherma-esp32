@@ -34,24 +34,26 @@ function walkFiles(root) {
 
 function parseCurrentTree(treePath) {
   const result = new Map();
-  const text = fs.readFileSync(treePath, "utf8");
-  for (const line of text.split("\n")) {
-    if (!line) continue;
-    const tab = line.indexOf("\t");
-    if (tab < 0) fail(`pages payload: malformed ls-tree line: ${line}`);
-    const fields = line.slice(0, tab).split(" ");
-    if (fields.length !== 3 || fields[1] !== "blob") {
-      fail(`pages payload: only regular blobs are publishable: ${line}`);
-    }
-    const repositoryPath = line.slice(tab + 1);
-    if (repositoryPath.startsWith(`${nojekyll}/`)) {
+  const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+  const text = decoder.decode(fs.readFileSync(treePath));
+  for (const record of text.split("\0")) {
+    if (!record) continue;
+    const tab = record.indexOf("\t");
+    if (tab < 0) fail(`pages payload: malformed ls-tree entry: ${record}`);
+    const fields = record.slice(0, tab).split(" ");
+    if (fields.length !== 3) fail(`pages payload: malformed ls-tree entry: ${record}`);
+    const [mode, type, oid] = fields;
+    const repositoryPath = record.slice(tab + 1);
+    if (repositoryPath === nojekyll && type === "tree") {
       fail("pages payload: root .nojekyll must not be a directory");
     }
-    if (repositoryPath === nojekyll && (fields[0] !== "100644" || fields[2] !== emptyBlobOid)) {
+    if (type === "tree") continue;
+    if (type !== "blob") fail(`pages payload: only blobs are publishable: ${record}`);
+    if (repositoryPath === nojekyll && (mode !== "100644" || oid !== emptyBlobOid)) {
       fail("pages payload: root .nojekyll must be an empty regular file");
     }
     if (result.has(repositoryPath)) fail(`pages payload: duplicate path: ${repositoryPath}`);
-    result.set(repositoryPath, fields[2]);
+    result.set(repositoryPath, oid);
   }
   return result;
 }
@@ -71,6 +73,10 @@ function prepare(args) {
     if (!stat.isFile() || stat.size !== 0 || stat.nlink !== 1) fail("pages payload: unsafe local .nojekyll");
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
+  }
+  if (mode === "dev") {
+    const nestedMarker = fs.lstatSync(path.join(siteRoot, "dev", nojekyll), { throwIfNoEntry: false });
+    if (nestedMarker) fail("pages payload: dev/.nojekyll is reserved for the branch root");
   }
   const additions = [];
   // Both publishers own this one shared deployment control. It does not belong to either feed,
