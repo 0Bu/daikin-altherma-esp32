@@ -49,7 +49,7 @@ if args.out:
     OUT = args.out.resolve()
     OUT.mkdir(parents=True, mode=0o700, exist_ok=False)
 else:
-    OUT = Path(tempfile.mkdtemp(prefix="daikin-checkup-runtime-"))
+    OUT = Path(tempfile.mkdtemp(prefix="daikin-checkup-runtime-")).resolve()
     OUT.chmod(0o700)
 
 commands = []

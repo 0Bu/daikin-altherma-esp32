@@ -125,10 +125,10 @@ wired; a floating input can trigger an unintended reset.
 
 ## Recovery button
 
-Holding a configured button for five seconds erases serialized settings, legacy and WiFi-driver
-credentials, history/trend/state-age data (RAM and flash journal), the raw coredump and the MQTT
-retirement record; the stated board hardware (preset, indicator, button) is kept, best effort, so
-the button still works afterwards.
+Holding a configured button for five seconds starts a reset if History is ready. The reset erases
+serialized settings, legacy and WiFi-driver credentials, history/trend/state-age data (RAM and
+flash journal), the raw coredump and the MQTT retirement record. The board tries to keep its stated
+hardware (preset, indicator, button) so the button still works afterwards.
 A hold counts only after three consecutive pressed samples, and a button held at boot stays
 inactive until it reads released three times. If `/diag` says the reset did not start because
 History is not ready, that attempt erased nothing. Let startup finish before releasing and holding again.

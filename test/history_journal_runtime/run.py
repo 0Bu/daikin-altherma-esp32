@@ -25,7 +25,7 @@ if args.out:
     OUT = args.out.resolve()
     OUT.mkdir(parents=True, mode=0o700, exist_ok=False)
 else:
-    OUT = Path(tempfile.mkdtemp(prefix="daikin-history-journal-runtime-"))
+    OUT = Path(tempfile.mkdtemp(prefix="daikin-history-journal-runtime-")).resolve()
 compiler = ["c++"]
 flags = ["-std=c++17", "-O0", "-g", "-fno-omit-frame-pointer", "-Wall", "-Wextra",
          "-I", str(HERE / "stubs"), "-I", str(ROOT / "main")]
