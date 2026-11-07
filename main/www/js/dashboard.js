@@ -1381,11 +1381,65 @@ function checkupStopContextHtml(c) {
   states.push(s.dated == null ? t("sys.nodata") : state[s.dated ? 1 : 2]);
   const coverage = Number.isFinite(s.readable_s) && Number.isFinite(s.observed_hours)
     ? t("check.stop.coverage", checkupDuration(s.readable_s), s.observed_hours) : "";
-  return descParaHtml(`<span class="vdesc-n">${esc(tr("title"))}</span> — ${esc(population)}`) +
+  return `<div class="vhist checkup-stop-box">` +
+    descParaHtml(`<span class="vdesc-n">${esc(tr("title"))}</span> — ${esc(population)}`) +
     [[coverage, ...states].filter(Boolean).join(" · "), tr("counts"), ...rows,
       `${tr("other").split("|").join(" / ")}: ${other}`, t("check.stop.loss", loss),
       tr("rule"), tr("limits")]
-      .map(row => descParaHtml(esc(row))).join("");
+      .map(row => descParaHtml(esc(row))).join("") + `</div>`;
+}
+
+function cyclingSummaryItems(c) {
+  if (c.space_runs == null) return [checkupOutdoorContext(c)].filter(Boolean);
+  const run = (k, n, m) => n == null ? "" : m == null
+    ? t(k, n, "").split(" · ")[0] : t(k, n, checkupRunDuration(m));
+  const l = t("check.cycling_causes").split("|");
+  const causes = cyclingCauseValues(["transition", "handover", "unreadable", "restart", "start"]
+    .map((k) => c[`censored_${k}_runs`]),
+    [l[0], `${t("mode.heat")} ↔ ${t("mode.dhw")}`, t("sys.nodata"), l[1], l[2]]);
+  const cens = c.censored_runs > 0 ? t("check.cycling_censored", c.censored_runs) : "";
+  return [
+    run("check.cycling_space", c.space_runs, c.space_mean_run_s),
+    run("check.cycling_dhw", c.dhw_runs, c.dhw_mean_run_s),
+    c.cooling_runs > 0 ? t("check.cycling_cooling", c.cooling_runs) : "",
+    [cens, causes].filter(Boolean).join(" · "),
+    checkupOutdoorContext(c),
+  ].filter(Boolean);
+}
+
+function checkupCyclingSummaryHtml(c) {
+  const items = c.id === "cycling" && c.starts != null ? cyclingSummaryItems(c) : [];
+  return items.length ? `<div class="inspect-rows checkup-cycling-grid">` +
+    items.map((s) => {
+      const i = s.indexOf(" · ");
+      return `<div class="inspect-row"><span>${esc(i > 0 ? s.slice(0, i) : s)}</span><span>${esc(i > 0 ? s.slice(i + 3) : "—")}</span></div>`;
+    }).join("") + `</div>` : "";
+}
+
+function checkupCyclingChartHtml(c) {
+  const hrs = c.id === "cycling" && Array.isArray(c.hours) ? c.hours.slice(-24) : [];
+  if (!hrs.length) return "";
+  const pad = 24 - hrs.length;
+  let maxS = 4, sumS = 0, sumR = 0, cols = "";
+  for (const h of hrs) {
+    maxS = Math.max(maxS, +h?.starts || 0);
+    sumS += Math.max(0, +h?.starts || 0);
+    sumR += Math.min(3600, Math.max(0, +h?.run_s || 0));
+  }
+  for (let i = 0; i < 24; i++) {
+    const h = hrs[i - pad], obs = h?.observed_s > 0;
+    const s = obs && h.starts > 0 ? Math.round(h.starts) : 0;
+    const r = obs && h.run_s > 0 ? Math.min(3600, Math.round(h.run_s)) : 0;
+    const tip = `-${24 - i} h: ` + (obs ? `${t("check.starts", s)} · ${checkupDuration(r)}` : t("sys.nodata"));
+    cols += `<div class="checkup-chart-col${obs ? "" : " unobserved"}" title="${esc(tip)}">` +
+      `<b>${s || ""}</b><i><u${s >= 3 ? ' class="warn"' : ""} style="height:${s ? Math.max(22, Math.round(s * 100 / maxS)) : 0}%"></u>` +
+      `<s style="height:${Math.round(r / 36)}%"></s></i></div>`;
+  }
+  const meta = `${t("check.starts", c.starts ?? sumS)} · ${checkupDuration(sumR)}`;
+  return `<div class="vhist checkup-cycling-chart" role="img" aria-label="${esc(`${t("check.cycling")} · 24 h: ${meta}`)}">` +
+    `<div class="vhist-head"><span class="vhist-t">24 h</span><span class="vhist-range">${esc(meta)}</span></div>` +
+    `<div class="checkup-chart-cols">${cols}</div>` +
+    `<div class="vhist-axis">${[-24, -18, -12, -6, 0].map(x => `<span>${x} h</span>`).join("")}</div></div>`;
 }
 
 function checkupStatusKey(c) {
@@ -1449,6 +1503,7 @@ function checkupDhwReasons(c) {
              .join(", ");
 }
 
+const checkupFmt1 = (n) => n.toLocaleString(LANG, { maximumFractionDigits: 1 });
 function checkupDetailHtml(c, fullSpan = c.full_span === true, report = {}) {
   const statusKey = checkupStatusKey(c);
   const metric = checkupMetricValue(c);
@@ -1513,7 +1568,7 @@ function checkupDetailHtml(c, fullSpan = c.full_span === true, report = {}) {
     source_stale: "source_stale", no_paired_runtime: "no_paired_runtime",
   }[c.reason];
   if (reasonKey) detail += ` ${t(`check.detail.${reasonKey}`)}`;
-  if (compactMetric && parts.length) detail += ` ${parts.join(" · ")}.`;
+  if (compactMetric && parts.length && c.id !== "cycling") detail += ` ${parts.join(" · ")}.`;
   const cyclingRuntime = c.id === "cycling" ? checkupCyclingRuntime(c) : "";
   if (cyclingRuntime) detail += ` ${cyclingRuntime}`;
   if (c.id === "dhw_loss" && statusKey !== "collecting" && !c.blocked && Number(c.aborts) > 0)
@@ -1532,15 +1587,14 @@ function checkupDetailHtml(c, fullSpan = c.full_span === true, report = {}) {
       ? new Date(c.min_unix_s * 1000).toLocaleString(LANG,
           { dateStyle: "short", timeStyle: "short" }) : t("sys.nodata");
     time.push(`${t("check.detail.minimum_time_label")} ${when}`);
-    const current = typeof c.current_bar === "number" && Number.isFinite(c.current_bar)
-      ? `${c.current_bar.toLocaleString(LANG, { maximumFractionDigits: 1 })} bar` : t("sys.nodata");
+    const current = Number.isFinite(c.current_bar) ? `${checkupFmt1(c.current_bar)} bar` : t("sys.nodata");
     detail += ` ${t("check.detail.current_label")} ${current}.`;
   }
   if ((report.source_fresh === false || c.reason === "source_stale") && Number.isFinite(report.source_age_s))
     detail += ` ${t("check.detail.age_label")} ${dwellDuration(report.source_age_s)}.`;
   if (c.id === "heater") {
     const channelCoverage = [["BUH", c.buh_observed_s], ["BSH", c.bsh_observed_s]]
-      .filter(([, duration]) => typeof duration === "number" && Number.isFinite(duration))
+      .filter(([, duration]) => Number.isFinite(duration))
       .map(([label, duration]) => t("check.detail.channel_coverage", label, checkupDuration(duration)));
     if (channelCoverage.length) detail += ` ${channelCoverage.join(" · ")}.`;
   }
@@ -1565,9 +1619,11 @@ function checkupDetailHtml(c, fullSpan = c.full_span === true, report = {}) {
     const energy = checkupDhwEnergy(c);
     if (energy) detail += ` ${energy}`;
   }
+  const cyclingExtra = c.id === "cycling"
+    ? checkupCyclingSummaryHtml(c) + checkupCyclingChartHtml(c) + checkupStopContextHtml(c) : "";
   return descParaHtml(`<span class="vdesc-n">${esc(value)}</span>` +
            (time.length ? ` · ${esc(time.join(" · "))}` : "") + ` — ${esc(what)}`) +
-         descParaHtml(esc(detail) + (c.id === "cycling" ? checkupStopContextHtml(c) : "")) +
+         descParaHtml(esc(detail) + cyclingExtra) +
          descNoteHtml(t("normal.label"), normal);
 }
 
@@ -1593,8 +1649,7 @@ function checkupHeaterRuntime(seconds, minutes) {
 
 function checkupOutdoorContext(c) {
   if (typeof c.outdoor_source !== "string" ||
-      typeof c.outdoor_min_c !== "number" || !Number.isFinite(c.outdoor_min_c) ||
-      typeof c.outdoor_mean_c !== "number" || !Number.isFinite(c.outdoor_mean_c) ||
+      !Number.isFinite(c.outdoor_min_c) || !Number.isFinite(c.outdoor_mean_c) ||
       !(Number(c.outdoor_samples) > 0)) return "";
   const fmt = (n) => n.toLocaleString(LANG,
     { minimumFractionDigits: 1, maximumFractionDigits: 1 });
@@ -1632,32 +1687,12 @@ function checkupMetricValue(c) {
       if (c.blocked === true) return "";
       if (!checkupDhwHasRate(c)) return Number.isFinite(c.windows) && c.windows > 0
         ? t("check.loss_windows", c.windows) : "";
-      const rate = c.max_k_h.toLocaleString(LANG,
-        { maximumFractionDigits: 1 });
       const high = c.high_windows == null ? "" : t("check.loss_high", c.high_windows, c.windows || 0);
       // Circulation counts aggregate several hours; they cannot qualify the maximum hour.
-      return [t("check.loss_max", rate), high || t("check.loss_windows", c.windows || 0)].filter(Boolean).join(" · ");
+      return [t("check.loss_max", checkupFmt1(c.max_k_h)), high || t("check.loss_windows", c.windows || 0)].filter(Boolean).join(" · ");
     }
-    case "cycling": {
-      if (c.starts == null) return "";
-      const starts = t("check.starts", c.starts);
-      if (c.space_runs == null) return checkupWithOutdoor(c, starts);
-      const cls = (key, n, mean) => n == null ? "" : mean == null
-        ? t(key, n, "").split(" · ")[0] : t(key, n, checkupRunDuration(mean));
-      const parts = [starts];
-      parts.push(cls("check.cycling_space", c.space_runs, c.space_mean_run_s));
-      parts.push(cls("check.cycling_dhw", c.dhw_runs, c.dhw_mean_run_s));
-      if (c.cooling_runs > 0) parts.push(t("check.cycling_cooling", c.cooling_runs));
-      // Runs that happened and could not be classified. Shown only when there are any: a reader who
-      // sees "space 0" needs to know whether nothing ran or nothing could be judged.
-      if (c.censored_runs > 0) parts.push(t("check.cycling_censored", c.censored_runs));
-      const labels = t("check.cycling_causes").split("|");
-      const causes = cyclingCauseValues(["transition", "handover", "unreadable", "restart", "start"]
-        .map((cause) => c[`censored_${cause}_runs`]),
-        [labels[0], `${t("mode.heat")} ↔ ${t("mode.dhw")}`, t("sys.nodata"), labels[1], labels[2]]);
-      if (causes) parts.push(causes);
-      return checkupWithOutdoor(c, parts.filter(Boolean).join(" · "));
-    }
+    case "cycling":
+      return c.starts == null ? "" : [t("check.starts", c.starts), ...cyclingSummaryItems(c)].join(" · ");
     case "defrost": {
       if (c.count == null) return "";
       const n = t("check.cycles", c.count);
@@ -1666,14 +1701,10 @@ function checkupMetricValue(c) {
       const paired = c.paired_count == null ? "" : t("check.paired_cycles", c.paired_count);
       return checkupWithOutdoor(c, [n, paired, share].filter(Boolean).join(" · "));
     }
-    case "pressure": {
-      return typeof c.min_bar !== "number" || !Number.isFinite(c.min_bar) ? ""
-        : `${c.min_bar.toLocaleString(LANG, { maximumFractionDigits: 1 })} bar`;
-    }
-    case "flow": {
-      return typeof c.min_l_min !== "number" || !Number.isFinite(c.min_l_min) ? ""
-        : `${c.min_l_min.toLocaleString(LANG, { maximumFractionDigits: 1 })} l/min`;
-    }
+    case "pressure":
+      return !Number.isFinite(c.min_bar) ? "" : `${checkupFmt1(c.min_bar)} bar`;
+    case "flow":
+      return !Number.isFinite(c.min_l_min) ? "" : `${checkupFmt1(c.min_l_min)} l/min`;
     case "heater": {
       const parts = [];
       const buh = checkupHeaterRuntime(c.buh_s, c.buh_min);
@@ -1688,7 +1719,17 @@ function checkupMetricValue(c) {
 }
 
 function checkupValue(c) {
-  return checkupStatusText(c);
+  const st = checkupStatusText(c);
+  if (!c || c.verdict === "unavailable" || (c.id === "dhw_loss" && c.blocked === true)) return st;
+  if (c.id === "dhw_loss")
+    return checkupDhwHasRate(c) ? `${checkupFmt1(c.max_k_h)} K/h` : st;
+  if (c.id === "cycling")
+    return Number.isFinite(c.starts) && c.starts >= 0 ? c.starts.toLocaleString(LANG) : st;
+  if (c.id === "defrost") {
+    const share = c.verdict !== "collecting" && checkupDefrostShare(c);
+    return share || (Number.isFinite(c.count) && c.count >= 0 ? t("check.cycles", c.count) : st);
+  }
+  return (c.id === "fault" && c.verdict === "collecting") ? st : (checkupMetricValue(c) || st);
 }
 
 function checkupCardHtml(includeHealth = true) {
