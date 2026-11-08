@@ -202,7 +202,7 @@ vm.createContext(context);
 const lifecycleSource = appState.slice(appState.indexOf("// ── History source lifecycle"),
   appState.indexOf("// ── Navigation (dashboard ⇄ Settings)"));
 vm.runInContext(lifecycleSource + readAppFragments(["history.js"]) +
-  "\nthis.__api = { hasHist, hasModbusHist, hasRoomHist, histCacheKey, historyView, histHtml, scrubText," +
+  "\nthis.__api = { hasHist, hasModbusHist, hasRoomHist, histCacheKey, historyView, histHtml, scrubText, histReadout, histVisibleSeries," +
   " histTipsHtml, scrubMove, histSeriesToggle, ensureHist, ensureHistPair, ensureDerived, DERIVED, syncHistSources, invalidateHistSources };", context,
   { filename: "main/www/js/history.js" });
 const h = context.__api;
@@ -221,11 +221,35 @@ let view = h.historyView("dhw_tank");
 assert.equal(view.series.length, 2);
 assert.deepEqual(Array.from(view.series[0].v), [452, null, 454]);
 assert.deepEqual(Array.from(view.series[1].v), [453, 455, 456]);
+
+// Modbus is initially deactivated; only X10A is shown, so label is omitted and only value is rendered
+assert.equal(h.histVisibleSeries(view).length, 1);
+assert.equal(h.histVisibleSeries(view)[0].source, "x10a");
+assert.equal(h.scrubText(view, 1, false), "nicht gemessen",
+  "a single visible curve omits its source label in tooltip readout");
+assert.equal(h.histReadout(view, 1), "nicht gemessen");
+
+const initialHtml = h.histHtml("dhw_tank", "°C", "Tank");
+assert.doesNotMatch(initialHtml, /class="vhist-line mb"/,
+  "Modbus curve is initially hidden");
+assert.match(initialHtml, /data-hist-series="modbus" aria-pressed="false"/,
+  "Modbus legend button is initially inactive");
+assert.match(initialHtml, /data-hist-series="x10a" aria-pressed="true" disabled/,
+  "the only visible source cannot be disabled");
+
+// Tapping Modbus activates it: both curves shown, tabular tooltip with labels and values
+h.histSeriesToggle("dhw_tank", "modbus");
+assert.equal(h.histVisibleSeries(view).length, 2);
 assert.match(h.scrubText(view, 1), /X10A nicht gemessen/);
 assert.match(h.scrubText(view, 1), /Modbus 45,5 °C/,
   "the same cursor instant reads both instruments and preserves the X10A gap");
 assert.equal(h.scrubText(view, 1, false), "X10A nicht gemessen\nModbus 45,5 °C",
   "visible bubbles list one source per row and leave selected time to the axis");
+assert.match(h.histReadout(view, 1), /class="vhist-tip-rows"/,
+  "multiple visible series render tabular grid rows in tooltip");
+assert.match(h.histReadout(view, 1), /<span class="vhist-tip-label">X10A<\/span><span class="vhist-tip-val">nicht gemessen<\/span>/);
+assert.match(h.histReadout(view, 1), /<span class="vhist-tip-label mb">Modbus<\/span><span class="vhist-tip-val">45,5 °C<\/span>/);
+
 {
   h.histSeriesToggle("dhw_tank", "modbus");
   const hidden = h.histHtml("dhw_tank", "°C", "Tank");
@@ -260,6 +284,43 @@ assert.match(html, /vhist-line mb/);
 assert.match(html, /45,2 – 45,6 °C/,
   "both sources share one vertical scale, including the Modbus-only maximum");
 
+{
+  // When X10A is down (not connected), Modbus is displayed by default and X10A is deactivated
+  S.histHidden.delete("dhw_tank");
+  S.status.hp = { connected: false };
+  const downView = h.historyView("dhw_tank");
+  assert.equal(h.histVisibleSeries(downView).length, 1);
+  assert.equal(h.histVisibleSeries(downView)[0].source, "modbus");
+  assert.equal(h.scrubText(downView, 1, false), "45,5 °C",
+    "when X10A is down, Modbus is shown and omits its label");
+  const downHtml = h.histHtml("dhw_tank", "°C", "Tank");
+  assert.match(downHtml, /class="vhist-line mb"/,
+    "Modbus curve is displayed when X10A is down");
+  assert.match(downHtml, /data-hist-series="modbus" aria-pressed="true" disabled/,
+    "Modbus is active and cannot be disabled when X10A is down");
+  assert.match(downHtml, /data-hist-series="x10a" aria-pressed="false"/,
+    "X10A is inactive when down");
+
+  // When X10A has no data points (all null), Modbus is also displayed by default
+  delete S.status.hp;
+  const origV = x10a.v;
+  x10a.v = [null, null, null];
+  const noDataView = h.historyView("dhw_tank");
+  assert.equal(h.histVisibleSeries(noDataView).length, 1);
+  assert.equal(h.histVisibleSeries(noDataView)[0].source, "modbus");
+  assert.equal(h.scrubText(noDataView, 1, false), "45,5 °C",
+    "when X10A has no data, Modbus is shown and omits its label");
+  const noDataHtml = h.histHtml("dhw_tank", "°C", "Tank");
+  assert.match(noDataHtml, /class="vhist-line mb"/,
+    "Modbus curve is displayed when X10A has no data");
+  assert.match(noDataHtml, /data-hist-series="modbus" aria-pressed="true" disabled/);
+  assert.match(noDataHtml, /data-hist-series="x10a" aria-pressed="false"/);
+
+  // Restore
+  x10a.v = origV;
+  S.histHidden.delete("dhw_tank");
+}
+
 // Every numeric chart uses the same light-area/dark-upper-edge grammar. A single series keeps the
 // reference opacity; paired instruments retain both areas and both lines under a transparent wrapper.
 S.hist.set("pump_signal", { at: 1, gen: 1, dt: 300, unit: "%", t0: null, b0: 100,
@@ -273,6 +334,7 @@ S.hist.set("leaving_water", { at: 1, gen: 1, dt: 300, unit: "°C", t0: null, b0:
   held: [], v: [400, 410, 420] });
 S.hist.set("modbus:leaving_water", { at: 1, gen: 1, dt: 300, unit: "°C", t0: null, b0: 100,
   held: [], v: [401, 411, 421] });
+h.histSeriesToggle("leaving_water", "modbus");
 const pairedAreaHtml = h.histHtml("leaving_water", "°C", "Vorlauftemperatur");
 assert.match(pairedAreaHtml, /^<div class="vhist vhist-multi">/,
   "overlaid numeric trends must opt into the reduced-opacity paint contract");
@@ -329,7 +391,8 @@ const roomOnlyHtml = h.histHtml("room_temp", "°C", "Raumtemperatur");
 assert.match(roomOnlyHtml, /data-source="room"/);
 assert.match(roomOnlyHtml, /vhist-source room/,
   "an MQTT-only history must still name its physical source");
-assert.match(h.scrubText(h.historyView("room_temp"), 2), /Meross .* · MQTT 23,6 °C/);
+assert.match(h.scrubText(h.historyView("room_temp"), 2), /23,6 °C$/);
+assert.doesNotMatch(h.scrubText(h.historyView("room_temp"), 2), /Meross/);
 S.histPin.set("room_temp", { i: 2, gen: h.historyView("room_temp").gen });
 assert.match(h.histHtml("room_temp", "°C", "Raumtemperatur"), /vhist-mark vhist-pinned room/);
 S.histPin.delete("room_temp");
@@ -424,6 +487,7 @@ S.hist.set("outdoor_air", { at: 1, gen: 1, dt: 300, unit: "°C", t0: 1768720000,
   held: [[1, 3]], v: [205, null, null, null] });
 S.hist.set("modbus:outdoor_air", { at: 1, gen: 1, dt: 300, unit: "°C", t0: 1768720000, b0: 200,
   held: [], v: [205, 205, 205, 295] });
+h.histSeriesToggle("outdoor_air", "modbus");
 const outdoorView = h.historyView("outdoor_air");
 const outdoorHtml = h.histHtml("outdoor_air", "°C", "Außentemperatur");
 assert.doesNotMatch(outdoorHtml.slice(outdoorHtml.indexOf('<div class="vhist-axis">')), /Messalter unbekannt/,
@@ -867,8 +931,19 @@ assert.match(dhwHtml, /5 min/, "DHW legend must include BSH duration");
 
 // Verify tooltips include active phases
 assert.doesNotMatch(h.scrubText(view, 0), /Boost|Heizstab/, "Sample 0 without active phases");
-assert.match(h.scrubText(view, 1), /· Boost aktiv$/, "Sample 1 with active Boost");
-assert.match(h.scrubText(view, 2), /· Boost aktiv \+ Heizstab aktiv$/, "Sample 2 with both active");
+assert.match(h.scrubText(view, 1), /(?:· |\n)Boost aktiv$/, "Sample 1 with active Boost");
+assert.match(h.scrubText(view, 2), /(?:· |\n)Boost aktiv \+ Heizstab aktiv$/, "Sample 2 with both active");
+assert.equal(h.histReadout(view, 1), "46,0 °C · Boost aktiv",
+  "a single visible curve appends active phase to value readout");
+{
+  S.hist.set("modbus:dhw_tank", { dt: 300, unit: "°C", b0: 100, v: [450, 460, 470, 480], held: [] });
+  h.histSeriesToggle("dhw_tank", "modbus");
+  const pairedView = h.historyView("dhw_tank");
+  assert.match(h.histReadout(pairedView, 1), /<span class="vhist-tip-note">Boost aktiv<\/span>/,
+    "active auxiliary phase renders as note row below tabular values when multiple series are shown");
+  S.hist.delete("modbus:dhw_tank");
+  S.histHidden.delete("dhw_tank");
+}
 assert.doesNotMatch(h.scrubText(view, 3), /Boost|Heizstab/, "Sample 3 without active phases");
 
 // ensureHistPair("dhw_tank") fetches auxiliary series
