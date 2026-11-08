@@ -1240,6 +1240,10 @@ async function assertPlantDiagnosis(page, context) {
         { id: "cycling", verdict: "ok", evidence: "observation", reason: "class_unavailable",
           starts: 17, mean_run_s: null, space_runs: null, censored_runs: 3,
           observed_s: 77760, required_s: 77760,
+          hours: [
+            { starts: 2, run_s: 1800, observed_s: 3600 },
+            { starts: 1, run_s: 900, observed_s: 3600 }
+          ],
           stop_context: {
             confirmed: true, readable_s: 3600, observed_hours: 2, dated: false,
             coverage_partial: true, restore_pending: true, persistence_pending: true,
@@ -1371,8 +1375,8 @@ async function assertPlantDiagnosis(page, context) {
     await page.frame();
     assertLayout(await page.evaluate(layoutAudit), `${context}/dhw-net-cooling`);
     assert.equal(await page.evaluate(`document.querySelector("[data-desc='model:health_dhw_loss'] .vrow-val").innerText`),
-      await page.evaluate("t('check.status.observation')"),
-      `${context}: marked rapid cooling stays measured`);
+      "6 K/h",
+      `${context}: marked rapid cooling shows its measured rate`);
     assert.ok((await page.evaluate(`document.querySelector("[data-desc='model:health_dhw_loss']").closest('.vitem').innerText`))
       .includes('kWh'), `${context}: measured cooling has the energy illustration`);
     assert.ok((await dhwText()).includes(discardedContext),

@@ -48,7 +48,7 @@ for (const key of [
   "space_runs", "space_mean_run_s", "dhw_runs", "dhw_mean_run_s", "cooling_runs",
   "censored_runs", "censored_transition_runs", "censored_handover_runs",
   "censored_unreadable_runs", "censored_restart_runs", "censored_start_runs",
-  "classified_runtime_s", "censored_runtime_s", "runtime_saturated", "split",
+  "classified_runtime_s", "censored_runtime_s", "runtime_saturated", "split", "hours",
   "outdoor_source", "outdoor_min_c", "outdoor_mean_c", "outdoor_samples",
   "min_bar", "current_bar", "min_unix_s", "confirmed_low", "min_l_min",
   "buh_min", "bsh_min", "buh_s", "bsh_s", "buh_observed_s", "bsh_observed_s", "active", "seen",
@@ -223,7 +223,8 @@ assert.match(ui.detail(dhw), /Not measured energy/);
 assert.doesNotMatch(ui.detail(dhw), /24 h:|per day|1.68|6.70/);
 assert.match(ui.detail({ ...dhw, windows: 24 }), /0.28 kWh heat/,
   "energy illustration must not multiply the maximum by a window count");
-assert.equal(ui.value({ ...dhw, verdict: "ok", evidence: "observation" }), "MEASURED");
+assert.equal(ui.value({ ...dhw, verdict: "ok", evidence: "observation" }), "1.2 K/h");
+assert.equal(ui.value({ ...dhw, verdict: "ok", evidence: "observation", max_k_h: null }), "MEASURED");
 assert.match(ui.detail({ ...dhw, verdict: "ok", evidence: "observation" }), /Observation only; no universal OK\/WARNING limit/);
 // Zero remains a real observation; missing, non-finite and unsupported evidence cannot
 // manufacture a cooling rate or energy. A high marked rate remains visible as MEASURED.
@@ -240,7 +241,7 @@ for (const invalid of [0, null, undefined, NaN, Infinity])
 assert.doesNotMatch(ui.detail({ ...dhw, verdict: "unavailable" }), /200 l|kWh/);
 const markedDhw = { ...dhw, verdict: "ok", evidence: "observation", max_k_h: 2.4,
   quiet_high_windows: 0 };
-assert.equal(ui.value(markedDhw), "MEASURED");
+assert.equal(ui.value(markedDhw), "2.4 K/h");
 assert.match(ui.detail(markedDhw), /maximum 2.4 K\/h/);
 assert.match(ui.detail(markedDhw), /Observation only; no universal OK\/WARNING limit/);
 const waiting = {
@@ -414,9 +415,18 @@ detail = ui.detail({ ...cycling, verdict: "ok", evidence: "observation", split: 
                      reason: "class_population_incomplete" });
 assert.match(detail, /Incomplete classification/);
 assert.doesNotMatch(detail, /Assessed on all runs together|all runs are assessed together/);
-assert.equal(ui.value({ ...cycling, verdict: "ok", evidence: "observation" }), "MEASURED");
+assert.equal(ui.value({ ...cycling, verdict: "ok", evidence: "observation" }), "13");
+assert.equal(ui.value({ ...cycling, verdict: "ok", evidence: "observation", starts: null }), "MEASURED");
 assert.match(ui.detail({ ...cycling, verdict: "ok", evidence: "observation",
                         reason: "heating_runs_insufficient" }), /&lt;12 eligible completed heating runs/);
+const cyclingWithHours = { ...cycling, hours: [
+  { starts: 3, run_s: 1800, observed_s: 3600 },
+  { starts: 0, run_s: 0, observed_s: 3600 },
+  { starts: 1, run_s: 600, observed_s: 1200 },
+] };
+assert.match(ui.detail(cyclingWithHours), /\bcheckup-cycling-chart\b/);
+assert.match(ui.detail(cyclingWithHours), /\bcheckup-cycling-grid\b/);
+assert.equal((ui.detail(cyclingWithHours).match(/class="checkup-chart-col\b/g) || []).length, 24);
 
 // Causes are exclusive subcounts of the retained total, never inferred from missing fields.
 // Runtime coverage uses heating and unsafe unclassified time; hot-water duration cannot dilute it.
@@ -488,7 +498,10 @@ assert.match(ui.detail({ ...defrost, verdict: "ok", evidence: "observation",
                         reason: "defrost_events_insufficient" }), /Fewer than three paired defrosts/);
 assert.match(ui.detail({ id: "defrost", verdict: "ok", evidence: "observation",
                          reason: "no_paired_runtime", count: 3 }), /event count only/);
-assert.equal(ui.value({ id: "retries", verdict: "ok", evidence: "experimental", seen: 0 }), "TENTATIVE");
+assert.equal(ui.value({ id: "retries", verdict: "ok", evidence: "experimental", seen: 0 }), "No increase seen");
+assert.equal(ui.value({ id: "retries", verdict: "ok", evidence: "experimental" }), "TENTATIVE");
+assert.equal(ui.value({ id: "fault", verdict: "ok", active: 0 }), "None active");
+assert.equal(ui.value({ id: "defrost", verdict: "ok", evidence: "observation", count: 3, defrost_s: 200, run_s: 1000 }), "20 %");
 assert.equal(ui.value({ id: "flow", verdict: "ok", evidence: "observation" }), "MEASURED");
 assert.equal(ui.value({ id: "heater", verdict: "ok", evidence: "observation" }), "MEASURED");
 
@@ -593,6 +606,9 @@ assert.match(ui.detail({ id: "fault", verdict: "info", active: 0 }), /weder Ursa
 assert.equal(ui.metric(pressure), "0 bar");
 assert.match(ui.detail(pressure), /Aktueller Wasserdruck: 1,5 bar/);
 assert.equal(ui.metric({ id: "flow", verdict: "ok", min_l_min: 6.5 }), "6,5 l/min");
+assert.equal(ui.value({ id: "fault", verdict: "ok", active: 0 }), "keine");
+assert.equal(ui.value({ ...dhw, max_k_h: 4.8 }), "4,8 K/h");
+assert.equal(ui.value({ ...cycling, starts: 19 }), "19");
 
 // Copy regression pins for corrected diagnosis claims (U3). The DHW loss peak is a highest
 // observed rate, not a bound: no shipped locale may lead it with an "at most" adverb.

@@ -242,7 +242,7 @@ I18N.de = localeValues([
   /* check.fault_err */ "Störung aktiv",
   /* check.fault_warn */ "Warnung aktiv",
   /* check.fault_past */ "In den letzten 24 h aufgetreten · jetzt nicht mehr aktiv",
-  /* check.fault_none */ "Aktuell keine",
+  /* check.fault_none */ "keine",
   /* check.fault_unknown */ "Aktueller Zustand unbekannt",
   /* check.fault_past_unknown */ "In den letzten 24 h aufgetreten · aktueller Zustand unbekannt",
   /* check.retry_seen */ "Zähleranstieg beobachtet",
