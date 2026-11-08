@@ -2192,6 +2192,10 @@ async function assertHistoryReadouts(page, context) {
           const pathClass={modbus:"mb",env3_humidity:"env-humidity",env3_pressure:"env-pressure"};
           const rings=JSON.stringify(Array.from(S.hist));
           const button=source=>host.querySelector('[data-hist-series="' + source + '"]');
+          const initialInactive=id === "dhw_tank"
+            ? (button("modbus").getAttribute("aria-pressed") === "false" && button("x10a").disabled)
+            : true;
+          if (id === "dhw_tank") { button("modbus").click(); window.__browserHistoryRender(); }
           const changed=[];
           for (const source of sources.slice(1)) {
             const name=historyView(id).series.find(s=>s.source === source).name;
@@ -2213,13 +2217,13 @@ async function assertHistoryReadouts(page, context) {
           beforePoll.focus(); S.clickHold=false;
           setHtml(host.id,host.innerHTML + "<!-- changed poll -->");
           const pollFocus=button(sources[1]) !== beforePoll && document.activeElement === button(sources[1]);
-          return {hidden:changed.every(Boolean),protectedLast,unchanged,
+          return {initialInactive,hidden:changed.every(Boolean),protectedLast,unchanged,
             pollFocus,
             restored:sources.every(source=>button(source).getAttribute("aria-pressed") === "true" && !button(source).disabled) &&
               sources.slice(1).every(source=>!!host.querySelector(".vhist-line." + pathClass[source])),
             ringsUnchanged:JSON.stringify(Array.from(S.hist)) === rings};
         })()`);
-        assert.deepEqual(legend,{hidden:true,protectedLast:true,unchanged:true,pollFocus:true,restored:true,ringsUnchanged:true},
+        assert.deepEqual(legend,{initialInactive:true,hidden:true,protectedLast:true,unchanged:true,pollFocus:true,restored:true,ringsUnchanged:true},
           `${context}/${id}: legend clicks hide and restore independent series while retaining the final curve and source history`);
       }
     }

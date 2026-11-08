@@ -203,9 +203,26 @@ const histCacheKey = (id, source) => {
 };
 const histSourceClass = (source) => source === "modbus" ? " mb" : source === "room" ? " room" : "";
 
+function histX10aAvailable(h) {
+  if (typeof x10aDown === "function" ? x10aDown() : !!(S.status?.hp && S.status.hp.connected === false)) return false;
+  const x10a = h.series?.find((s) => s.source === "x10a");
+  return !!x10a && x10a.v.some((v) => v != null);
+}
+
+function histHiddenSet(h) {
+  if (S.histHidden?.has(h.id)) return S.histHidden.get(h.id);
+  if (!h.series || h.series.length <= 1 || !h.series.some((s) => s.source === "modbus")) {
+    return new Set();
+  }
+  return h.series.some((s) => s.source === "x10a")
+    ? (histX10aAvailable(h) ? new Set(["modbus"]) : new Set(["x10a"]))
+    : new Set();
+}
+
 function histVisibleSeries(h) {
   if (h.series.length === 1) return h.series;
-  const visible = h.series.filter((s) => !S.histHidden?.get(h.id)?.has(s.source));
+  const hidden = histHiddenSet(h);
+  const visible = h.series.filter((s) => !hidden.has(s.source));
   if (visible.some((s) => s.v.some((v) => v != null))) return visible;
   // A source can disappear or roll into an all-gap ring after a legend choice. Keep an available
   // curve visible without discarding either source's history or the user's saved browser choice.
@@ -220,7 +237,8 @@ function histRevision(view) {
 
 function histLegendHtml(h, s, cls) {
   const visible = histVisibleSeries(h).some((q) => q.source === s.source);
-  const last = visible && histVisibleSeries(h).filter((q) => q.v.some((v) => v != null)).length <= 1;
+  const dataSeries = histVisibleSeries(h).filter((q) => q.v.some((v) => v != null));
+  const last = visible && (dataSeries.length <= 1 ? (s.v.some((v) => v != null) || histVisibleSeries(h).length <= 1) : false);
   return `<button type="button" class="vhist-source${cls}" data-hist-id="${esc(h.id)}" ` +
     `data-hist-series="${esc(s.source)}" aria-pressed="${visible}"${last ? " disabled" : ""}>` +
     `<i></i>${esc(s.name)}</button>`;
@@ -228,10 +246,12 @@ function histLegendHtml(h, s, cls) {
 
 function histSeriesToggle(id, source) {
   const h = historyView(id);
-  if (!h || !h.series.some((s) => s.source === source)) return;
-  const visible = histVisibleSeries(h).some((s) => s.source === source);
-  if (visible && histVisibleSeries(h).filter((s) => s.v.some((v) => v != null)).length <= 1) return;
-  const hidden = new Set(S.histHidden.get(id));
+  const s = h?.series?.find((q) => q.source === source);
+  if (!s) return;
+  const visible = histVisibleSeries(h).some((q) => q.source === source);
+  const dataSeries = histVisibleSeries(h).filter((q) => q.v.some((v) => v != null));
+  if (visible && (dataSeries.length <= 1 ? (s.v.some((v) => v != null) || histVisibleSeries(h).length <= 1) : false)) return;
+  const hidden = new Set(histHiddenSet(h));
   if (visible) hidden.add(source); else hidden.delete(source);
   S.histHidden.set(id, hidden);
   S.scrub = null;
@@ -1623,25 +1643,22 @@ function scrubText(h, i, includeTime = true, aux = dhwAuxPhases(h)) {
   // visible as words rather than borrowing its neighbour's value. The HomeHub outdoor register has
   // no source timestamp, so its popup also states the complete observed plateau and the unknown
   // measurement age — a fresh TCP read must not be mislabeled as a fresh sensor observation.
-  const sourceText = (s) => {
-    let out = `${s.source === "modbus" ? "Modbus" : s.name} ${valueText(s)}`;
-    if (h.id === "outdoor_air" && s.source === "modbus" && s.v[i] != null) {
+  const sourceText = (s, withName = true) => {
+    let out = (withName ? `${s.source === "modbus" ? "Modbus" : s.name} ` : "") + valueText(s);
+    if (h.id === "outdoor_air" && s.source === "modbus" && s.v?.[i] != null) {
       const [from, count] = sampleRunAt(s.v, i);
       out += ` · ${t("hist.modbus_plateau", stateRunWhen(h, from, count), histDuration(count * h.dt))}`;
     }
     return out;
   };
-  const val = h.series && (h.series.length > 1 || ["modbus", "room"].includes(h.series[0].source))
-    ? (includeTime ? h.series : histVisibleSeries(h)).map(sourceText).join("\n")
-    : valueText(h.series ? h.series[0] : h);
+  const visible = histVisibleSeries(h);
+  const val = visible.length > 1
+    ? visible.map((s) => sourceText(s, true)).join("\n")
+    : sourceText(visible[0] || (h.series ? h.series[0] : h), false);
   let res = (includeTime ? scrubTime(h, i) + " · " : "") + val;
-  if (h.id === "dhw_tank") {
-    if (aux) {
-      const active = [];
-      if (aux.boost[i]) active.push(t("hist.boost_active"));
-      if (aux.bsh[i]) active.push(t("hist.heater_active"));
-      if (active.length) res += " · " + active.join(" + ");
-    }
+  if (h.id === "dhw_tank" && aux) {
+    const active = [aux.boost[i] && t("hist.boost_active"), aux.bsh[i] && t("hist.heater_active")].filter(Boolean);
+    if (active.length) res += (visible.length > 1 ? "\n" : " · ") + active.join(" + ");
   }
   return res;
 }
@@ -1653,16 +1670,31 @@ function scrubText(h, i, includeTime = true, aux = dhwAuxPhases(h)) {
 // markup, so switching the live bubble from textContent to innerHTML below does not create an HTML
 // injection path through translations, units or device data.
 function histReadout(h, i, aux) {
-  const text = scrubText(h, i, false, aux);
-  if (!text || h.id !== ENV3_COMBINED_ID) return esc(text);
-  const lines = text.split("\n");
-  // Forecast provenance precedes the coloured measurement rows; measured bubbles need no header.
-  const meta = i >= h.v.length ? lines.shift() : "";
-  return (meta ? `<span class="vhist-tip-meta">${esc(meta)}</span>` : "") +
-    `<span class="vhist-tip-rows">` + histVisibleSeries(h).map((s, index) =>
-      lines[index].split("  ").map(cell =>
-        `<span class="${env3SeriesClass(s.source)}">${esc(cell)}</span>`).join("")
-    ).join("") + `</span>`;
+  if (h.id === ENV3_COMBINED_ID) {
+    const text = scrubText(h, i, false, aux);
+    if (!text) return "";
+    const lines = text.split("\n");
+    // Forecast provenance precedes the coloured measurement rows; measured bubbles need no header.
+    const meta = i >= h.v.length ? lines.shift() : "";
+    return (meta ? `<span class="vhist-tip-meta">${esc(meta)}</span>` : "") +
+      `<span class="vhist-tip-rows">` + histVisibleSeries(h).map((s, index) =>
+        lines[index].split("  ").map(cell =>
+          `<span class="${env3SeriesClass(s.source)}">${esc(cell)}</span>`).join("")
+      ).join("") + `</span>`;
+  }
+  const cfg = STATE_HIST[h.id];
+  const visible = histVisibleSeries(h);
+  if (cfg || visible.length <= 1) return esc(scrubText(h, i, false, aux));
+  const lines = scrubText(h, i, false, aux).split("\n");
+  const note = lines.length > visible.length ? lines.pop() : "";
+  const rows = visible.map((s, idx) => {
+    const label = s.source === "modbus" ? "Modbus" : s.name;
+    const val = lines[idx] ? lines[idx].slice(label.length + 1) : "";
+    const cls = histSourceClass(s.source);
+    return `<span class="vhist-tip-label${cls}">${esc(label)}</span><span class="vhist-tip-val">${esc(val)}</span>`;
+  }).join("");
+  return `<span class="vhist-tip-rows">${rows}` +
+    (note ? `<span class="vhist-tip-note">${esc(note)}</span>` : "") + `</span>`;
 }
 
 function placeScrubReadout(graph, h, i, frac) {
