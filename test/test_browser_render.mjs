@@ -1312,6 +1312,22 @@ async function assertPlantDiagnosis(page, context) {
     }
     const stopText = () => page.evaluate(`document.querySelector("[data-desc='model:health_cycling']")
       .closest('.vitem').innerText`);
+    assert.equal(await page.evaluate(`document.querySelectorAll(".checkup-cycling-chart").length`), 1,
+      `${context}: cycling chart must render when starts exist`);
+    assert.equal(await page.evaluate(`document.querySelectorAll(".checkup-chart-col").length`), 24,
+      `${context}: cycling chart must render all 24 hour columns`);
+    assert.ok(!(await stopText()).includes(await page.evaluate("t('check.stop.population', '4')")),
+      `${context}: concise cycling view omits technical stop-context matrix`);
+    // A missing legacy cycling population must leave the independent stop context accessible
+    // through the same real disclosure, retaining the firmware's unavailable verdict.
+    await page.evaluate(`(() => {
+      Object.assign(S.status.health.checks[2], { starts: null, verdict: 'unavailable', split: false });
+      renderApp(); return true;
+    })()`);
+    await page.frame();
+    assertLayout(await page.evaluate(layoutAudit), `${context}/stop-context-without-legacy`);
+    assert.equal(await page.evaluate(`document.querySelector("[data-desc='model:health_cycling'] .vrow-val").innerText`),
+      await page.evaluate("t('check.status.unavailable')"), `${context}: preserve core cycling verdict`);
     for (const [key, args] of [["population", ["4"]], ["counts", []], ["rule", []], ["limits", []],
       ["loss", ["≥1"]]]) {
       const expected = await page.evaluate(`t(${JSON.stringify("check.stop." + key)},
@@ -1330,16 +1346,6 @@ async function assertPlantDiagnosis(page, context) {
     const states = await page.evaluate("t('check.stop.states').split('|')");
     for (const index of [2, 3, 4, 5, 6, 8])
       assert.ok((await stopText()).includes(states[index]), `${context}: retain stop state ${index}`);
-    // A missing legacy cycling population must leave the independent stop context accessible
-    // through the same real disclosure, retaining the firmware's unavailable verdict.
-    await page.evaluate(`(() => {
-      Object.assign(S.status.health.checks[2], { starts: null, verdict: 'unavailable', split: false });
-      renderApp(); return true;
-    })()`);
-    await page.frame();
-    assertLayout(await page.evaluate(layoutAudit), `${context}/stop-context-without-legacy`);
-    assert.equal(await page.evaluate(`document.querySelector("[data-desc='model:health_cycling'] .vrow-val").innerText`),
-      await page.evaluate("t('check.status.unavailable')"), `${context}: preserve core cycling verdict`);
     assert.ok((await stopText()).includes(await page.evaluate("t('check.stop.population', '4')")),
       `${context}: independent stop observations survive unavailable legacy evidence`);
     assert.ok((await stopText()).includes(await page.evaluate("t('check.detail.observation')")),

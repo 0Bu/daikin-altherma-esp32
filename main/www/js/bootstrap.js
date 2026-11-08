@@ -123,6 +123,20 @@ function trendPlotFromTarget(target) {
 }
 
 function wireTrendScrub(gv) {
+  const scrubC = (e) => {
+    const c = e.target.closest(".checkup-cycling-chart");
+    if (!c) return;
+    const col = e.type === "pointerout" ? null : e.target.closest(".checkup-chart-col");
+    const r = c.querySelector(".vhist-range"), t = c.querySelector(".vhist-time");
+    if (col) {
+      if (r) r.textContent = col.dataset.tip;
+      if (t) { t.textContent = col.dataset.time; t.style.left = `${col.offsetLeft + col.offsetWidth / 2}px`; t.hidden = false; }
+    } else if (!e.relatedTarget || !c.contains(e.relatedTarget)) {
+      if (r) r.textContent = c.dataset.tip;
+      if (t) t.hidden = true;
+    }
+  };
+  for (const ev of ["pointerover", "pointerout", "pointerdown"]) gv.addEventListener(ev, scrubC);
   gv.addEventListener("click", (e) => {
     const button = e.target.closest("[data-hist-series]");
     if (!button) return;
