@@ -402,9 +402,10 @@ void time_now(int64_t& seconds, int32_t& ms) {
     seconds = 2000000000;
     ms      = 0;
 }
-const char*              checkup_persist_state() { return "no_record"; }
-logic::CheckupReport     checkup_report() { return {}; }
-CheckupStopContextReport checkup_stop_context_report() {
+const char*                checkup_persist_state() { return "no_record"; }
+logic::CheckupReport       checkup_report() { return {}; }
+logic::CheckupCyclingHours checkup_cycling_hours() { return {}; }
+CheckupStopContextReport   checkup_stop_context_report() {
     ++fixture::stop_report_calls;
     return fixture::stop_report;
 }

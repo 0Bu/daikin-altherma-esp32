@@ -1487,6 +1487,21 @@ static void append_status_json(JsonOut& j, bool redact) {
                 j += ",\"split\":";
                 j += hr.cycling_split ? "true" : "false";
                 outdoor_context(hr.cycling_outdoor);
+                j += ",\"hours\":[";
+                {
+                    const auto hrs = checkup_cycling_hours();
+                    for (size_t hi = 0; hi < hrs.count; ++hi) {
+                        if (hi) j += ",";
+                        j += "{\"starts\":";
+                        append_json_uint(j, hrs.hours[hi].starts);
+                        j += ",\"run_s\":";
+                        append_json_uint(j, hrs.hours[hi].run_s);
+                        j += ",\"observed_s\":";
+                        append_json_uint(j, hrs.hours[hi].observed_s);
+                        j += "}";
+                    }
+                }
+                j += "]";
                 j += ",\"stop_context\":";
                 append_stop_context_json(
                     j, stop_context_payload_fields(checkup_stop_context_report()));

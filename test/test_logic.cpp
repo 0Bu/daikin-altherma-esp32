@@ -15953,6 +15953,42 @@ static void test_checkup() {
     CHECK(sizeof(CheckupJournalRecord) == 136);
     CHECK(CHECKUP_COMPLETED_BUCKETS * sizeof(CheckupJournalRecord) == 3128);
 
+    // --- 24h cycling timeline buckets + JSON streaming ------------------------------------------
+    {
+        CHECK(checkup_cycling_hours(CheckupRing{}, true).count == 0);
+        CheckupRing ring{};
+        ring.count                      = 2;
+        ring.head                       = 2;
+        ring.buf[0].starts              = 3;
+        ring.buf[0].run_s               = 1200;
+        ring.buf[0].rps_observed_s      = 3600;
+        ring.buf[1].starts              = 1;
+        ring.buf[1].run_s               = 600;
+        ring.buf[1].rps_observed_s      = 3500;
+        ring.pending.starts             = 2;
+        ring.pending.run_s              = 300;
+        ring.pending.rps_observed_s     = 900;
+        const CheckupCyclingHours hours = checkup_cycling_hours(ring, true);
+        CHECK(hours.count == 3);
+        CHECK(hours.hours[0].starts == 3 && hours.hours[0].run_s == 1200 &&
+              hours.hours[0].observed_s == 3600);
+        CHECK(hours.hours[1].starts == 1 && hours.hours[1].run_s == 600 &&
+              hours.hours[1].observed_s == 3500);
+        CHECK(hours.hours[2].starts == 2 && hours.hours[2].run_s == 300 &&
+              hours.hours[2].observed_s == 900);
+        CHECK(checkup_cycling_hours(ring, false).count == 0);
+
+        CheckupRing full{};
+        full.count                      = CHECKUP_COMPLETED_BUCKETS;
+        full.head                       = 3;
+        full.buf[3].starts              = 4;
+        full.buf[3].run_s               = 1500;
+        full.buf[3].rps_observed_s      = 3600;
+        const CheckupCyclingHours fullh = checkup_cycling_hours(full, true);
+        CHECK(fullh.count == CHECKUP_BUCKETS);
+        CHECK(fullh.hours[0].starts == 4 && fullh.hours[0].run_s == 1500);
+    }
+
     // --- saturation -----------------------------------------------------------------------------
     // A wrap would turn the worst imaginable cycling into a perfect score.
     CHECK(checkup_add_u8(250, 3) == 253);
