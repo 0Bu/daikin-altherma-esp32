@@ -873,18 +873,20 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .vdesc-n { color: var(--fg); font-weight: 600; }
 .checkup-cycling-grid .inspect-row { flex-wrap: wrap; row-gap: 2px; }
 .checkup-cycling-grid .inspect-row span:last-child { white-space: normal; margin-left: auto; text-align: right; }
-.checkup-chart-wrap { position: relative; }
-.checkup-chart-cols { display: grid; grid-template-columns: repeat(24, minmax(0, 1fr)); gap: 2px; height: 55px; }
-.checkup-chart-col { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 2px; height: 100%; min-width: 0; cursor: pointer; border-radius: 2px; }
-.checkup-chart-col:hover, .checkup-chart-col.active { background: color-mix(in srgb, var(--brand-sky) 14%, transparent); }
+.checkup-cycling-chart .vhist-range { flex: 1; font-size: 10.5px; letter-spacing: -.3px; white-space: normal; }
+.checkup-chart-wrap { position: relative; touch-action: pan-y; margin-bottom: 4px; }
+.checkup-chart-cols { display: grid; grid-template-columns: repeat(24, minmax(0, 1fr)); gap: 2px; height: 74px; }
+.checkup-chart-col { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 2px; height: 100%; min-width: 0; cursor: pointer; border-radius: 2px; -webkit-tap-highlight-color: transparent; }
+.checkup-chart-col:hover { background: color-mix(in srgb, var(--brand-sky) 14%, transparent); }
+.checkup-chart-col.active { background: color-mix(in srgb, var(--brand-sky) 26%, transparent); outline: 1.5px solid var(--brand); outline-offset: -1px; }
 .checkup-chart-col.unobserved { opacity: .35; }
 .checkup-chart-col b { font-size: 10px; line-height: 12px; height: 12px; color: var(--fg); font-weight: 600; text-align: center; }
 .checkup-chart-col b.warn { color: var(--warn); font-weight: 700; }
-.checkup-chart-col s { width: 100%; height: 40px; display: flex; flex-direction: column; justify-content: flex-end; background: color-mix(in srgb, var(--brand-sky) 20%, var(--soft)); border-radius: 2px; text-decoration: none; overflow: hidden; }
+.checkup-chart-col s { width: 100%; height: 58px; display: flex; flex-direction: column; justify-content: flex-end; background: color-mix(in srgb, var(--brand-sky) 20%, var(--soft)); border-radius: 2px; text-decoration: none; overflow: hidden; }
 .checkup-chart-col i { width: 100%; border-radius: 1px 1px 0 0; background: var(--flow-hot); }
 .checkup-chart-col i.dhw { background: var(--brand); }
-.checkup-chart-col i.combi { background: radial-gradient(circle at 0% 0%, #ff9e42 0, transparent 55%), radial-gradient(circle at 100% 100%, var(--brand-sky) 0, transparent 55%), linear-gradient(135deg, var(--flow-hot) 0%, var(--brand) 100%); }
-.checkup-chart-wrap .vhist-time { position: absolute; bottom: -20px; font-size: 11px; transform: translateX(-50%); pointer-events: none; background: var(--card); padding: 1px 4px; border-radius: 4px; box-shadow: 0 1px 3px #0002; z-index: 5; }
+.checkup-chart-col i.combi { background: radial-gradient(circle at 0 0, #ff9e42, transparent 60%), linear-gradient(135deg, var(--flow-hot), var(--brand)); }
+.checkup-chart-wrap .vhist-time { position: absolute; bottom: -22px; font-size: 11px; transform: translateX(-50%); pointer-events: none; background: var(--card); border: 1px solid var(--line); padding: 1px 4px; border-radius: 4px; z-index: 5; }
 
 /* HOW LONG THE ROW HAS READ WHAT IT READS needs no rule of its own. Its state word reuses .vdesc-n
    above — the panel's lead-in-in-stronger-ink token — and everything after it is plain .vdesc-body

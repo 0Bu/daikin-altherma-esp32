@@ -1965,6 +1965,8 @@ inline CheckupCyclingEvidence checkup_cycling_evidence(const CheckupWindow& w,
 struct CheckupCyclingHour {
     uint16_t observed_s = 0;
     uint16_t run_s      = 0;
+    uint16_t space_s    = 0;
+    uint16_t dhw_s      = 0;
     uint8_t  starts     = 0;
 };
 
@@ -1983,12 +1985,15 @@ inline CheckupCyclingHours checkup_cycling_hours(const CheckupRing& r, bool rps_
     if (!total_observed) return out;
     for (size_t i = 0; i < r.count; i++) {
         const auto& b          = r.buf[(oldest + i) % CHECKUP_COMPLETED_BUCKETS];
-        out.hours[out.count++] = CheckupCyclingHour{static_cast<uint16_t>(b.rps_observed_s),
-                                                    static_cast<uint16_t>(b.run_s), b.starts};
+        out.hours[out.count++] = CheckupCyclingHour{
+            static_cast<uint16_t>(b.rps_observed_s), static_cast<uint16_t>(b.run_s),
+            static_cast<uint16_t>(std::min<uint32_t>(b.space_run_s, 65535)),
+            static_cast<uint16_t>(std::min<uint32_t>(b.dhw_run_s, 65535)), b.starts};
     }
-    out.hours[out.count++] =
-        CheckupCyclingHour{static_cast<uint16_t>(r.pending.rps_observed_s),
-                           static_cast<uint16_t>(r.pending.run_s), r.pending.starts};
+    out.hours[out.count++] = CheckupCyclingHour{
+        static_cast<uint16_t>(r.pending.rps_observed_s), static_cast<uint16_t>(r.pending.run_s),
+        static_cast<uint16_t>(std::min<uint32_t>(r.pending.space_run_s, 65535)),
+        static_cast<uint16_t>(std::min<uint32_t>(r.pending.dhw_run_s, 65535)), r.pending.starts};
     return out;
 }
 

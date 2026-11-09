@@ -33,6 +33,8 @@ const S = {
   // as the ring rolls, rather than selecting whatever now occupies that slot
   // (logic/history.hpp's history_pin_index).
   histPin: new Map(),
+  cyclingPin: null,
+  cyclingHover: null,
   // Browser-only legend choices survive renders and are shared by both views of a chart.
   histHidden: new Map(),
   // The label of the row whose trend is being scrubbed right now (mouse hover or finger down), or

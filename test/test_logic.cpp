@@ -15961,20 +15961,29 @@ static void test_checkup() {
         ring.head                       = 2;
         ring.buf[0].starts              = 3;
         ring.buf[0].run_s               = 1200;
+        ring.buf[0].space_run_s         = 1000;
+        ring.buf[0].dhw_run_s           = 200;
         ring.buf[0].rps_observed_s      = 3600;
         ring.buf[1].starts              = 1;
         ring.buf[1].run_s               = 600;
+        ring.buf[1].space_run_s         = 600;
+        ring.buf[1].dhw_run_s           = 0;
         ring.buf[1].rps_observed_s      = 3500;
         ring.pending.starts             = 2;
         ring.pending.run_s              = 300;
+        ring.pending.space_run_s        = 0;
+        ring.pending.dhw_run_s          = 300;
         ring.pending.rps_observed_s     = 900;
         const CheckupCyclingHours hours = checkup_cycling_hours(ring, true);
         CHECK(hours.count == 3);
         CHECK(hours.hours[0].starts == 3 && hours.hours[0].run_s == 1200 &&
+              hours.hours[0].space_s == 1000 && hours.hours[0].dhw_s == 200 &&
               hours.hours[0].observed_s == 3600);
         CHECK(hours.hours[1].starts == 1 && hours.hours[1].run_s == 600 &&
+              hours.hours[1].space_s == 600 && hours.hours[1].dhw_s == 0 &&
               hours.hours[1].observed_s == 3500);
         CHECK(hours.hours[2].starts == 2 && hours.hours[2].run_s == 300 &&
+              hours.hours[2].space_s == 0 && hours.hours[2].dhw_s == 300 &&
               hours.hours[2].observed_s == 900);
         CHECK(checkup_cycling_hours(ring, false).count == 0);
 
