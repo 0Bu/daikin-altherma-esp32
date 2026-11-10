@@ -272,17 +272,18 @@ and blocks an assessment. Counter saturation or inconsistent cause totals also b
 legacy `mean_run_s` remains present as null. Transition/gap rules and limitations are in
 [DIAGNOSTIC_EVIDENCE.md](DIAGNOSTIC_EVIDENCE.md#diagnosis-cycling).
 
-`cycling.hours` contains up to 24 slots, oldest first. The signed `bucket` identifies each
-slot within `boot_id` and `cycling.hours_epoch`. Source resets and journal restoration can start
-a new epoch. `end_unix_s` gives the mapped or journaled end when known. The open slot alone
-has `elapsed_s`, the monotonic seconds since its start, from 0 to 3600. `restored:true`
-identifies a saved slot whose original elapsed duration is unknown. It may be a short record
-saved at restart. Other closed slots use a nominal 3600 seconds. Infer missing time from
-`observed_s` only when the elapsed duration is known.
+`cycling.hours` contains up to 24 slots, oldest first. The signed `bucket` identifies each slot
+within `boot_id` and `cycling.hours_epoch`. Source resets, journal restoration or re-anchoring
+after collection stops can start a new epoch. `end_unix_s` gives the mapped or journaled end
+when known. The journal may clamp the saved end into its assigned wall-clock hour. The open slot
+alone has `elapsed_s`, the monotonic seconds since its start, from 0 to 3600. `restored:true`
+identifies a saved slot whose original elapsed duration is unknown. It may be a short record saved
+at restart. Other closed slots use a nominal 3600 seconds. Infer missing time from `observed_s`
+only when the elapsed duration is known.
 
-`starts` counts starts established by the available readings. Within a continuous segment,
-known OFF followed by missing readings and a return to known ON establishes at least one start.
-That count is assigned to the recovering ON sample's slot. The start time is unknown. With no
+`starts` is a lower bound based on available readings. Within a continuous segment, known OFF
+followed by missing readings and a return to known ON establishes at least one start. The firmware
+adds it to the slot of the recovering ON sample. It may have happened in an earlier slot. With no
 counted start and no readable compressor time, the slot has no start evidence. `observed_s`
 reports readable compressor seconds. Without them, `run_s:0` establishes no runtime. When
 `run_s` is positive, `space_s` and `dhw_s` report positively witnessed heating and hot-water

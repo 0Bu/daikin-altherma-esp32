@@ -54,10 +54,15 @@ export function createScalarGridWitness(root, Observer, trackDescendants = false
 // Native input goes through hit testing and the delegated production handler. A synthetic .click()
 // would miss overlapping SVG targets and would not witness input dispatch on a blocked main thread.
 async function click(page, selector, inspector = "") {
-  const point = await evaluate(page, ({ selector, inspector }) => {
+  const point = await evaluate(page, async ({ selector, inspector }) => {
+    const target = document.querySelector(selector);
+    if (!target) throw new Error("history motion target missing: " + selector);
+    target.scrollIntoView({ block: "center", behavior: "instant" });
+    // WebKit can report a finished accordion transition before its final grid clip is laid out.
+    // Use the next painted geometry before hit testing. Native input timing starts at dispatch.
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const node = document.querySelector(selector);
-    if (!node) throw new Error("history motion target missing: " + selector);
-    node.scrollIntoView({ block: "center", behavior: "instant" });
+    if (!node) throw new Error("history motion target disappeared before hit testing: " + selector);
     const rect = node.getBoundingClientRect(), candidates = [];
     const paths = [...node.querySelectorAll(".sc-hitline, .sc-hitarea")];
     if (typeof node.getPointAtLength === "function") paths.unshift(node);

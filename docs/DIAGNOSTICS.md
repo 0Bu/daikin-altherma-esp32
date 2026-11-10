@@ -108,7 +108,9 @@ the start count above a runtime bar. Select a column for its measurements and co
 separates heating, hot water and remaining runtime. Hatching marks elapsed time without compressor
 readings when the elapsed duration is known. Restored hours show their readable time with unknown
 elapsed duration. The bars show hourly totals. The timing within each hour is unknown. Undated hours
-have relative labels. A start counted when readings return can have happened during the gap.
+have relative labels. The readout marks positive start counts as minimums (≥). After a gap, the
+board counts a detected start in the hour of the first running reading, even if the start happened
+earlier. A gap can hide additional starts.
 Unclassified run counts explain missing readings, transitions, handovers, journal boundaries and
 unwitnessed starts.
 

@@ -23007,6 +23007,7 @@ using namespace logic;
 struct CheckupRestoreCase {
     CheckupRing                       ring;
     DhwLossRing                       dhw;
+    CheckupJournalSlotTimes           times;
     CheckupJournalLiveSpan            live;
     std::vector<CheckupJournalRecord> stored;
     int64_t                           earliest = 0, latest = 0, now_unix_s = 0, now_us = 0;
@@ -23021,8 +23022,8 @@ struct CheckupRestoreOut {
     bool        dhw_retired                       = false;
 };
 
-// The former restore, verbatim in substance: copy this boot's completed hours into records, clear
-// both rings, then push the selected interval of every bucket oldest first.
+// Copy this boot's completed hours into records, clear both rings, then push the selected interval
+// of every bucket oldest first. Carry live deadlines by record position independently of rotation.
 CheckupRestoreOut checkup_restore_reference(const CheckupRestoreCase& c) {
     constexpr size_t                  kSlots = CHECKUP_COMPLETED_BUCKETS;
     std::vector<CheckupJournalRecord> live;
@@ -23062,11 +23063,14 @@ CheckupRestoreOut checkup_restore_reference(const CheckupRestoreCase& c) {
                 db = rec->payload.dhw;
             else
                 out.dhw_retired = true;
-            expiry = checkup_restore_expiry_us(rec->payload.end_unix_s, c.now_unix_s, c.now_us);
             if (from_flash) {
                 const int64_t end = rec->payload.end_unix_s;
+                expiry            = checkup_restore_expiry_us(end, c.now_unix_s, c.now_us);
                 out.times.restored_end_unix_s[out.ring.head] =
                     end > 0 && end < UINT32_MAX ? static_cast<uint32_t>(end) : UINT32_MAX;
+            } else {
+                const size_t i = static_cast<size_t>(rec - live.data());
+                expiry         = c.times.expiry_us[(oldest_i + i) % kSlots];
             }
         }
         out.times.expiry_us[out.ring.head] = expiry;
@@ -23078,9 +23082,9 @@ CheckupRestoreOut checkup_restore_reference(const CheckupRestoreCase& c) {
 
 CheckupRestoreOut checkup_restore_in_place(const CheckupRestoreCase& c) {
     CheckupRestoreOut out;
-    out.ring = c.ring;
-    out.dhw  = c.dhw;
-    for (auto& e : out.times.expiry_us) e = -7; // every slot must be assigned
+    out.ring  = c.ring;
+    out.dhw   = c.dhw;
+    out.times = c.times;
     for (auto& end : out.times.restored_end_unix_s) end = UINT32_MAX;
     out.dhw_retired = checkup_journal_rebuild(out.ring, out.dhw, out.times, c.live, c.stored.data(),
                                               c.stored.size(), c.earliest, c.latest, c.now_unix_s,
@@ -23199,6 +23203,7 @@ static void test_checkup_journal_rebuild_in_place() {
     for (const auto& bounds : {std::pair<int64_t, int64_t>{0, int64_t{kSlots}}, {5, 4}}) {
         CheckupRestoreCase c;
         c.ring.buf[3].starts = 9;
+        c.times.expiry_us[3] = -7;
         c.ring.count = c.dhw.count = 4;
         c.earliest                 = bounds.first;
         c.latest                   = bounds.second;
@@ -23206,6 +23211,35 @@ static void test_checkup_journal_rebuild_in_place() {
         const CheckupRestoreOut out = checkup_restore_in_place(c);
         CHECK(out.ring.count == 0 && out.dhw.count == 0 && out.ring.buf[3].starts == 0);
         CHECK(out.times.expiry_us[3] == 0 && !out.dhw_retired);
+    }
+
+    // Rotate two live slots around a restored one. A wall-hour clamp must neither move the
+    // live interval's deadline nor give a skipped interval a fabricated monotonic end.
+    {
+        CheckupRestoreCase c;
+        c.model      = model;
+        c.source     = source;
+        c.generation = generation;
+        c.now_unix_s = 501 * hour + 60;
+        c.now_us     = 12'000'000'000LL;
+        c.earliest   = 498;
+        c.latest     = 500;
+        c.live       = {2, kSlots - 1, 500, 501 * hour + 2};
+        c.ring.count = c.dhw.count = 2;
+        c.ring.head = c.dhw.head      = 1;
+        c.ring.buf[kSlots - 1].starts = 4;
+        const int64_t live_expiry = c.now_us + (CHECKUP_RECORD_MAX_AGE_S - hour - 58) * 1'000'000LL;
+        c.times.expiry_us[kSlots - 1] = live_expiry;
+        auto stored                   = dup;
+        stored.bucket                 = 498;
+        stored.payload.end_unix_s     = 498 * hour + 40;
+        c.stored.push_back(stored);
+
+        const auto out = checkup_restore_in_place(c);
+        CHECK(out.ring.count == 3 && out.ring.buf[1].starts == 4);
+        CHECK(out.times.restored_end_unix_s[0] == 498 * hour + 40);
+        CHECK(out.times.expiry_us[1] == live_expiry && out.times.restored_end_unix_s[1] == 0);
+        CHECK(out.times.expiry_us[2] == 0 && out.times.restored_end_unix_s[2] == 0);
     }
 
     // A valid stored interval can predate or exceed the positive uint32 timestamp representation.
@@ -23253,6 +23287,7 @@ static void test_checkup_journal_rebuild_in_place() {
             c.ring.buf[s].space_run_s = static_cast<uint32_t>(rng.below(4000));
             c.dhw.buf[s].observed_s   = static_cast<uint16_t>(s + 1);
             c.dhw.buf[s].windows      = static_cast<uint8_t>(rng.below(200));
+            if (s % 5 != 0) c.times.expiry_us[s] = c.now_us + static_cast<int64_t>(s) * 1000;
         }
         c.ring.pending.covered_s = static_cast<uint16_t>(rng.below(3600));
         c.dhw.pending.observed_s = static_cast<uint16_t>(rng.below(3600));

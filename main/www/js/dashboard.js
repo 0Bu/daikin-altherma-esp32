@@ -1431,11 +1431,12 @@ function checkupCyclingChartHtml(c) {
     minute: "2-digit", timeZoneName: "shortOffset" });
   const duration = s => s >= 60 && s % 60
     ? t("check.min", `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`) : dwellDuration(s);
+  const startsText = n => (n > 0 ? "≥" : "") + t("check.starts", n);
   const percent = s => (s / 36).toFixed(3) + "%";
   for (let i = 0; i < 24; i++) {
     const h = hrs[i - pad];
     if (!h) {
-      cols += `<span class="checkup-chart-col" aria-hidden="true" inert><s></s></span>`;
+      cols += `<span class="checkup-chart-col" aria-hidden="true" inert></span>`;
       continue;
     }
     const observed = Number.isInteger(h.observed_s) && h.observed_s >= 0 && h.observed_s <= 3600
@@ -1459,7 +1460,7 @@ function checkupCyclingChartHtml(c) {
     const space = valid ? h.space_s : 0, dhw = valid ? h.dhw_s : 0;
     const modes = [[space, "space", "mode.heat"], [dhw, "dhw", "mode.dhw"],
       [r - space - dhw, "other", "check.hour.other"]].filter(([seconds]) => seconds > 0);
-    const tip = [when, observed || s ? t("check.starts", s) : t("sys.nodata")];
+    const tip = [when, observed || s ? startsText(s) : t("sys.nodata")];
     if (observed) tip.push(duration(r));
     for (const [seconds, , label] of modes) tip.push(`${t(label)} ${duration(seconds)}`);
     tip.push(t("check.hour.coverage", duration(observed), possible == null ? "" : duration(possible)));
@@ -1470,7 +1471,7 @@ function checkupCyclingChartHtml(c) {
       modes.map(([seconds, mode]) => `<i class="${mode}" style="height:${percent(seconds)}"></i>`).join("") +
       gap + `</s></button>`;
   }
-  let meta = hasObservation || sumS ? t("check.starts", sumS) : t("sys.nodata");
+  let meta = hasObservation || sumS ? startsText(sumS) : t("sys.nodata");
   if (hasObservation) meta += ` · ${checkupDuration(sumR)}`;
   const gapKey = hasGap ? `<span class="checkup-gap-key"><i class="gap" aria-hidden="true"></i>${esc(t("check.hour.gap"))}</span>` : "";
   const html = `<div class="vhist checkup-cycling-chart" role="group" aria-label="${esc(t("hist.aria", t("check.cycling")))}"` +

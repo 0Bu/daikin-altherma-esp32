@@ -179,10 +179,12 @@ export async function assertCyclingChart(page, server, context) {
       "a fully observed open slot leaves the future portion empty");
     assert.doesNotMatch((await label(OPEN)).split(" · ")[0], /\d:\d{2}/,
       context + ": no absolute time is invented for the open hour");
-    assert.match(await label(ZERO), /\b0\b/, context + ": readout confirms an observed zero");
+    assert.ok((await label(ZERO)).includes(" · " + await page.evaluate("t('check.starts', 0)") + " · "),
+      context + ": readout reports zero observed starts without a lower-bound prefix");
     assert.ok((await label(MISSING)).includes(await page.evaluate("t('sys.nodata')")),
       context + ": an unread interval has no established start count");
-    assert.match(await label(EDGE), /\b1\b/, context + ": readout retains a witnessed edge without runtime");
+    assert.ok((await label(EDGE)).includes("≥" + await page.evaluate("t('check.starts', 1)")),
+      context + ": readout reports a witnessed edge without runtime as a lower bound");
 
     await tap(page, hour(PREVIOUS));
     assert.deepEqual(await pinned(), [PREVIOUS], context + ": native tap pins the hour column");
@@ -194,7 +196,8 @@ export async function assertCyclingChart(page, server, context) {
     assert.deepEqual(await pinned(), [LAST], context + ": Enter pins only the focused hour");
     if (mouse) await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 2, y: 2 });
     const chosen = await label(LAST);
-    assert.match(chosen, /\b3\b/, context + ": selected starts are accessible");
+    assert.ok(chosen.includes("≥" + await page.evaluate("t('check.starts', 3)")),
+      context + ": the selected hour makes the observed lower bound accessible");
     assert.match(chosen, /\b30 min\b/, context + ": selected runtime is accessible");
     assert.match(chosen, /\b55 min\b/, context + ": selected coverage is accessible");
     for (const duration of [5, 10, 15])
@@ -284,13 +287,13 @@ export async function assertCyclingChart(page, server, context) {
       node => Number(node.dataset.bucket)), COLS), [1],
     context + ": padding in a new observation is not keyboard-selectable");
     assert.equal(await evaluate(page, cols =>
-      document.querySelectorAll(cols + " > span[inert][aria-hidden='true'] > s:empty").length, COLS),
-    23, context + ": padding has no runtime or hatch segments");
+      document.querySelectorAll(cols + " > span[inert][aria-hidden='true']:empty").length, COLS),
+    23, context + ": blank padding has no tracks, runtime or hatch segments");
     assert.equal(await evaluate(page, chart => !!document.querySelector(chart + " .checkup-gap-key"), CHART),
       false, context + ": padding does not introduce a sampling-gap legend");
     await assertSegments(1, {}, "the new observation does not hatch its unelapsed hour");
-    assert.equal(await readout(), await page.evaluate("t('check.starts', 1)"),
-      context + ": the default readout reports the chart's witnessed start without invented runtime");
+    assert.equal(await readout(), "≥" + await page.evaluate("t('check.starts', 1)"),
+      context + ": the default readout reports a lower bound without invented runtime");
     assert.ok(updates >= 3, context + ": verify continuity across repeated production polling");
     console.log("cycling chart checked: " + context + "; " + updates + " live status polls");
   } finally {

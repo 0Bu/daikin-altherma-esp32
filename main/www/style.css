@@ -882,9 +882,9 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .checkup-chart-cols { display: grid; grid-template-columns: repeat(24, minmax(0, 1fr)); gap: 2px; height: 74px; touch-action: pan-y; }
 .checkup-chart-col { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 2px; min-width: 0; padding: 0; border: 0; border-radius: 2px; background: none; }
 button.checkup-chart-col { cursor: pointer; -webkit-tap-highlight-color: transparent; }
-.checkup-chart-col:hover, .checkup-chart-col:focus-visible { background: color-mix(in srgb, var(--brand-sky) 14%, transparent); }
+button.checkup-chart-col:hover, button.checkup-chart-col:focus-visible { background: color-mix(in srgb, var(--brand-sky) 14%, transparent); }
 .checkup-chart-col.active { background: color-mix(in srgb, var(--brand-sky) 26%, transparent); outline: 1.5px solid var(--brand); outline-offset: -1px; }
-.checkup-chart-col:focus-visible { outline: 2px solid var(--brand-strong); outline-offset: -1px; }
+button.checkup-chart-col:focus-visible { outline: 2px solid var(--brand-strong); outline-offset: -1px; }
 .checkup-chart-col b { font-size: 10px; line-height: 12px; height: 12px; color: var(--fg); font-weight: 600; text-align: center; }
 .checkup-chart-col b.warn { color: var(--warn); font-weight: 700; }
 .checkup-chart-col s { position: relative; width: 100%; height: 58px; display: flex; flex-direction: column; justify-content: flex-end; background: color-mix(in srgb, var(--brand-sky) 20%, var(--soft)); border-radius: 2px; text-decoration: none; overflow: hidden; }

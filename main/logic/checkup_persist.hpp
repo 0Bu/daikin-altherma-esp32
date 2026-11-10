@@ -906,8 +906,8 @@ inline bool checkup_journal_rebuild(CheckupRing& ring, DhwLossRing& dhw,
                 dhw.buf[p]  = DhwLossBucket{};
                 dhw_retired = true;
             }
-            expiry_us[p] = checkup_restore_expiry_us(checkup_journal_live_end(live, c.live),
-                                                     now_unix_s, now_us);
+            // Keep the boot-local deadline (zero for a skipped hour). The wall label used to
+            // select this slot may have clamped its end into a different hour.
         } else if (c.stored) {
             const bool keep_dhw = !dhw_reset_requested && checkup_journal_dhw_identity_matches(
                                                               c.stored->payload, dhw_source_fp);

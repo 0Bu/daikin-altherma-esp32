@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 1e6474ca9d918012d02570f0753c829f7a37f41875523afdf3db62c7764a9ec6 -->
+<!-- diagnostic-evidence-contract: 16afbe7fddda47611c568efa433dcbe433fa99c19b7467cea715132fee2478f9 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -264,13 +264,10 @@ The hourly chart counts compressor running intervals of at most 15 seconds separ
 runs. Both endpoints must show the compressor running in the same heating or DHW class to assign
 that interval. The DHW route identifies DHW. Space heating requires the room circuit and reported
 heating mode. Other runtime, including confirmed defrost, stays unassigned. The chart can include
-parts of runs that start or finish outside the slot. A return to known ON after known OFF and
-unreadable samples in one continuous segment establishes a lower bound of one start. The recovering
-ON sample determines its slot. The time of the transition remains unknown. The open hour has a
-monotonic elapsed duration. Restored slots can include a short record and do not establish an
-elapsed duration from their readable seconds. See the
-[hourly API evidence](API.md#history-and-24-hour-checks) and the
-[core journal upgrade rules](PLANT.md#reboot-and-persistence).
+parts of runs that start or finish outside the slot. The
+[hourly API contract](API.md#history-and-24-hour-checks) defines how starts are assigned and which
+slots establish elapsed duration. See the [core journal upgrade rules](PLANT.md#reboot-and-persistence)
+for restore compatibility.
 
 **Project boundary:** Twelve heating runs, ten minutes and the 90% evidence requirements are
 project heuristics, not limits copied from R1 or specified by Daikin. R1 studied different,

@@ -454,7 +454,9 @@ const qualifiedHours = ui.detail({ ...cyclingWithHours, starts: 5, hours: [
   { bucket: 3, starts: 0, run_s: 1200, observed_s: 1200, elapsed_s: 1200, space_s: null, dhw_s: 1200 },
 ] });
 const unassigned = hourMarkup(qualifiedHours, 0);
-assert.match(unassigned, /3 starts · 30 min/);
+assert.match(unassigned, /≥3 starts · 30 min/);
+assert.match(qualifiedHours, /data-tip="≥5 starts · 1 h 10 min"/,
+  "the chart readout reports the sum of witnessed starts as a lower bound");
 assert.match(unassigned, /<b class="warn">3<\/b>/);
 assert.doesNotMatch(unassigned, /Ø/, "hourly runtime and starts do not establish an average");
 assert.deepEqual(modeSegments(unassigned), ["other"]);
@@ -481,14 +483,14 @@ const startupHour = hourMarkup(startup, 0);
 assert.match(startupHour, /No data/, "zero elapsed time and no start witness establish no count");
 assert.doesNotMatch(startupHour, /<i class="gap"/, "the newly opened hour has no elapsed gap");
 assert.match(startup, /data-tip="No data"/, "no readable time or start witness establishes no chart total");
-assert.equal((startup.match(/<span class="checkup-chart-col" aria-hidden="true" inert><s><\/s><\/span>/g) || []).length,
-  23, "positions outside the retained ring are blank and inert");
+assert.equal((startup.match(/<span class="checkup-chart-col" aria-hidden="true" inert><\/span>/g) || []).length,
+  23, "positions outside the retained ring are blank and inert without tracks");
 assert.doesNotMatch(startup, /class="gap"|checkup-gap-key/,
   "padding does not imply elapsed time or a sampling gap");
 const edgeOnly = ui.detail({ ...cyclingWithHours, starts: 9,
   hours: [{ bucket: 0, starts: 1, run_s: 0, observed_s: 0, elapsed_s: 0 }] });
-assert.match(edgeOnly, /data-tip="1 start"/,
-  "the chart sums its slots and omits unobserved runtime even when the diagnosis count differs");
+assert.match(edgeOnly, /data-tip="≥1 start"/,
+  "the chart reports its witnessed starts as a lower bound and omits unobserved runtime");
 const observedZero = ui.detail({ ...cyclingWithHours,
   hours: [{ bucket: 0, starts: 0, run_s: 0, observed_s: 60, elapsed_s: 60 }] });
 assert.match(observedZero, /data-tip="0 starts · 0 min"/,
