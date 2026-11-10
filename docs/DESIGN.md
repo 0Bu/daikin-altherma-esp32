@@ -348,8 +348,10 @@ Rows cover fault, tank loss, starts, defrost, water pressure, steady flow, heate
 changes. Collapsed rows show the primary measured value when available (or checking, no window, measured, tentative and N/A).
 Expanders usually show the reading and its time, an interpretation, and expected conditions or
 assessment limits. The compressor-start expander gives the observed start count and completed runs
-by purpose, one short assessment for heating, and the 24-hour chart. Label elapsed time as the
-observation window and reserve event timestamps for recorded events.
+by purpose, one short assessment of average heating-run duration, and the 24-hour chart. Keep the
+observed start count available when classification inputs are unsupported. Distinguish unsupported
+inputs from temporarily insufficient readings. Label elapsed time as the observation window and
+reserve event timestamps for recorded events.
 Observation-only/experimental results cannot become OK or manufacture a health certificate.
 `available`, `assessable` and `evaluated` count different facts; only completed bounded judgments
 belong in the evaluated headline.

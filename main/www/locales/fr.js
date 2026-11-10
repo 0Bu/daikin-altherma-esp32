@@ -1,4 +1,4 @@
-// translation-source: 0b470978cad369ab40b1d667fab094bf6ef0be09a0378a8774c5e68b4a7b5bfe
+// translation-source: 30a685642c39ec9f0edd1f0ddc0d5291cb01f63975ff56ec14d64fb91db1fc31
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -223,10 +223,11 @@ I18N.fr = localeValues([
   /* check.cycling.unclear */ "Usage incertain",
   /* check.cycling.unclear_hint */ "Un cycle peut changer de mode ou n’avoir été observé qu’en partie.",
   /* check.cycling.assessment */ "Bilan",
-  /* check.cycling.short */ "Beaucoup de cycles de chauffage courts.",
-  /* check.cycling.normal */ "Pas de cycles inhabituels en chauffage.",
+  /* check.cycling.short */ "Les cycles de chauffage sont courts en moyenne.",
+  /* check.cycling.normal */ "Les cycles de chauffage durent assez longtemps en moyenne.",
   /* check.cycling.few */ "Trop peu de cycles de chauffage pour l’instant.",
   /* check.cycling.waiting */ "Données encore insuffisantes.",
+  /* check.cycling.class_unavailable */ "Cette installation fournit trop peu d’informations sur les cycles de chauffage.",
   /* check.cycling.unavailable */ "Aucune donnée du compresseur.",
   /* check.cycling.stale */ "Des mesures manquent actuellement.",
   /* check.cycling.history_empty */ "Pas encore d’historique.",
@@ -1224,7 +1225,7 @@ DESCRIPTION_I18N.fr = descriptionValues([
 MODEL_DESCRIPTION_I18N.fr = modelDescriptionValues([
   ["Messages de la pompe ", "ni cause ni résolution prouvées."], // health_fault
   ["R5T : un point du ballon stratifié, pas une énergie.", "Indice interne ≥0,8 K/h sans indice pompe/puisage. Sans indice, un puisage reste possible ; 0 K/h n’exclut pas les pertes. Circulation ne prouve pas la cause."], // health_dhw_loss
-  ["Affiche les démarrages observés et les cycles terminés.", "De nombreux cycles courts en chauffage peuvent indiquer des démarrages trop fréquents."], // health_cycling
+  ["Affiche les démarrages observés et les cycles terminés.", "Le bilan repose sur la durée moyenne des cycles de chauffage."], // health_cycling
   ["Dégivrage ", "≥3 associés, >15% du temps de marche du compresseur si états compresseur et dégivrage lisibles. Règle interne, pas Daikin; humidité et température de toute la batterie absentes."], // health_defrost
   ["Pression ", "règle interne commune ≤1,0 bar ; 60 s continues observées donnent ALERTE. Pas universelle ; manuel du modèle."], // health_pressure
   ["Débit après 60 s de pompe", "Seuil selon même modèle/mode/conditions ; pas nominal ni preuve de débit insuffisant."], // health_flow

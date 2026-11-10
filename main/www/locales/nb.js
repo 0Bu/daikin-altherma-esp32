@@ -1,4 +1,4 @@
-// translation-source: 0b470978cad369ab40b1d667fab094bf6ef0be09a0378a8774c5e68b4a7b5bfe
+// translation-source: 30a685642c39ec9f0edd1f0ddc0d5291cb01f63975ff56ec14d64fb91db1fc31
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -223,10 +223,11 @@ I18N.nb = localeValues([
   /* check.cycling.unclear */ "Uklart formål",
   /* check.cycling.unclear_hint */ "En kjøring kan skifte driftsmodus eller bare være delvis registrert.",
   /* check.cycling.assessment */ "Vurdering",
-  /* check.cycling.short */ "Mange korte varmekjøringer.",
-  /* check.cycling.normal */ "Ingen uvanlige sykluser ved oppvarming.",
+  /* check.cycling.short */ "Varmekjøringene er korte i snitt.",
+  /* check.cycling.normal */ "Varmekjøringene varer lenge nok i snitt.",
   /* check.cycling.few */ "For få varmekjøringer ennå.",
   /* check.cycling.waiting */ "Det trengs mer data.",
+  /* check.cycling.class_unavailable */ "Dette anlegget gir for lite informasjon om varmekjøringene.",
   /* check.cycling.unavailable */ "Ingen kompressordata.",
   /* check.cycling.stale */ "Målinger mangler akkurat nå.",
   /* check.cycling.history_empty */ "Ingen historikk ennå.",
@@ -1241,7 +1242,7 @@ DESCRIPTION_I18N.nb = descriptionValues([
 MODEL_DESCRIPTION_I18N.nb = modelDescriptionValues([
   ["Enhetens meldinger", "ingen årsaks- eller løsningsbevis."], // health_fault
   ["R5T: ett punkt i lagdelt tank, ikke energi.", "Prosjekthint ≥0,8 K/h uten pumpe-/tappemarkører. Tapping er mulig uten markører; 0 K/h utelukker ikke varmetap. Sirkulasjon beviser ikke årsak."], // health_dhw_loss
-  ["Viser observerte starter og fullførte kjøringer.", "Mange korte varmekjøringer kan tyde på at kompressoren starter for ofte."], // health_cycling
+  ["Viser observerte starter og fullførte kjøringer.", "Vurderingen bygger på gjennomsnittlig lengde på varmekjøringene."], // health_cycling
   ["Avriming", "≥3 parede, >15% av kompressorens driftstid der både kompressor- og avrimingsstatus er lesbar. Intern regel, ikke Daikin; fuktighet og hele varmevekslerens temperatur mangler."], // health_defrost
   ["Trykk", "felles intern regel ≤1,0 bar; 60 s kontinuerlig observert gir advarsel. Ikke universell; modellmanual gjelder."], // health_pressure
   ["Strømning etter 60 s pumpe", "Grense krever samme modell/modus/forhold; ikke nominell eller lavstrømningsbevis."], // health_flow

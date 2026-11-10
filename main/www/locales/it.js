@@ -1,4 +1,4 @@
-// translation-source: 0b470978cad369ab40b1d667fab094bf6ef0be09a0378a8774c5e68b4a7b5bfe
+// translation-source: 30a685642c39ec9f0edd1f0ddc0d5291cb01f63975ff56ec14d64fb91db1fc31
 I18N.it = localeValues([
   /* sys.nodata */ "Nessun dato",
   /* sys.unreachable */ "Non raggiungibile",
@@ -223,10 +223,11 @@ I18N.it = localeValues([
   /* check.cycling.unclear */ "Uso incerto",
   /* check.cycling.unclear_hint */ "Un ciclo può cambiare modalità o essere rilevato solo in parte.",
   /* check.cycling.assessment */ "Valutazione",
-  /* check.cycling.short */ "Molti cicli brevi di riscaldamento.",
-  /* check.cycling.normal */ "Nessun segno di cicli anomali in riscaldamento.",
+  /* check.cycling.short */ "I cicli di riscaldamento sono brevi in media.",
+  /* check.cycling.normal */ "In media i cicli di riscaldamento durano abbastanza.",
   /* check.cycling.few */ "Ancora troppo pochi cicli di riscaldamento.",
   /* check.cycling.waiting */ "Servono più dati.",
+  /* check.cycling.class_unavailable */ "L’impianto fornisce troppo pochi dati per valutare i cicli di riscaldamento.",
   /* check.cycling.unavailable */ "Nessun dato dal compressore.",
   /* check.cycling.stale */ "Al momento mancano misurazioni.",
   /* check.cycling.history_empty */ "Nessuno storico per ora.",
@@ -1224,7 +1225,7 @@ DESCRIPTION_I18N.it = descriptionValues([
 MODEL_DESCRIPTION_I18N.it = modelDescriptionValues([
   ["Messaggi della pompa", "non provano causa né risoluzione."], // health_fault
   ["R5T: un punto del serbatoio stratificato, non energia.", "Indizio interno ≥0,8 K/h senza segnali pompa/prelievo. Senza segnali, i prelievi restano possibili; 0 K/h non esclude perdite. Circolazione non prova la causa."], // health_dhw_loss
-  ["Mostra gli avvii osservati e i cicli completati.", "Molti cicli brevi di riscaldamento possono indicare avvii troppo frequenti."], // health_cycling
+  ["Mostra gli avvii osservati e i cicli completati.", "La valutazione si basa sulla durata media dei cicli di riscaldamento."], // health_cycling
   ["Sbrinamento", "≥3 associati, >15% del tempo di marcia del compressore con stati compressore e sbrinamento leggibili. Regola interna, non Daikin; mancano umidità e temperatura dell’intera batteria."], // health_defrost
   ["Pressione", "regola interna comune ≤1,0 bar; 60 s continui osservati danno AVVISO. Non universale; vale il manuale del modello."], // health_pressure
   ["Portata dopo 60 s di pompa", "Limite per stesso modello/modo/condizioni; non nominale né prova di portata insufficiente."], // health_flow

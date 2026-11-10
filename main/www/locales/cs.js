@@ -1,4 +1,4 @@
-// translation-source: 0b470978cad369ab40b1d667fab094bf6ef0be09a0378a8774c5e68b4a7b5bfe
+// translation-source: 30a685642c39ec9f0edd1f0ddc0d5291cb01f63975ff56ec14d64fb91db1fc31
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -223,10 +223,11 @@ I18N.cs = localeValues([
   /* check.cycling.unclear */ "Nejasný účel",
   /* check.cycling.unclear_hint */ "Během cyklu se může změnit režim nebo může část záznamu chybět.",
   /* check.cycling.assessment */ "Hodnocení",
-  /* check.cycling.short */ "Mnoho krátkých cyklů vytápění.",
-  /* check.cycling.normal */ "Při vytápění se neprojevuje nezvyklé cyklování.",
+  /* check.cycling.short */ "Cykly vytápění jsou v průměru krátké.",
+  /* check.cycling.normal */ "Cykly vytápění trvají v průměru dostatečně dlouho.",
   /* check.cycling.few */ "Zatím málo cyklů vytápění.",
   /* check.cycling.waiting */ "Zatím chybí údaje.",
+  /* check.cycling.class_unavailable */ "Tato soustava poskytuje příliš málo údajů o cyklech vytápění.",
   /* check.cycling.unavailable */ "Chybí údaje o kompresoru.",
   /* check.cycling.stale */ "Aktuálně chybí měření.",
   /* check.cycling.history_empty */ "Zatím bez historie.",
@@ -1195,7 +1196,7 @@ DESCRIPTION_I18N.cs = descriptionValues([
 MODEL_DESCRIPTION_I18N.cs = modelDescriptionValues([
   ["Hlášení čerpadla", "neprokazují příčinu ani opravu."], // health_fault
   ["R5T: bod vrstveného zásobníku, ne energie.", "Interní práh ≥0,8 K/h bez značek čerpadla/odběru. Odběr možný i bez značek; 0 K/h nevylučuje ztráty. Cirkulace neprokazuje příčinu."], // health_dhw_loss
-  ["Zobrazuje zaznamenané starty a dokončené cykly.", "Mnoho krátkých cyklů vytápění může znamenat příliš časté starty."], // health_cycling
+  ["Zobrazuje zaznamenané starty a dokončené cykly.", "Hodnocení vychází z průměrné délky cyklů vytápění."], // health_cycling
   ["Odmrazení", "≥3 spárovaná, >15% doby chodu kompresoru při čitelném stavu kompresoru i odmrazení. Interní pravidlo, ne Daikin; chybí vlhkost a teplota celého výměníku."], // health_defrost
   ["Tlak", "společné interní pravidlo ≤1,0 bar; 60 s souvislého pozorování dává varování. Ne univerzální; platí návod modelu."], // health_pressure
   ["Průtok po 60 s čerpadla", "Mez vyžaduje stejný model/režim/podmínky; ne jmenovitý ani důkaz malého průtoku."], // health_flow

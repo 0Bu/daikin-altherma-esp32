@@ -2206,7 +2206,7 @@ const MODEL_DESCRIPTIONS = {
     normal: "Project hint ≥0.8 K/h without pump/draw-like markers. R5T is one point in a stratified tank, not measured tank energy. Missing markers do not prove no draw; zero net cooling does not exclude heat loss. Circulation overlap is correlation, not cause." },
   health_cycling: {
     what: "Shows observed starts and completed runs.",
-    normal: "Many short heating runs can be a sign of cycling." },
+    normal: "The assessment uses the average length of heating runs." },
   health_defrost: {
     what: "Defrost starts and their share of compressor runtime with readable compressor and defrost states.",
     normal: "Project hint: ≥3 paired events and >15%. Humidity and whole-coil temperature are unavailable; no Daikin fault limit." },

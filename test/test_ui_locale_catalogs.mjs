@@ -61,7 +61,7 @@ const catalog = catalogContext.__catalog;
 const lazyDomainCodes = ["zh", "ja", "nb", "sv", "fi"];
 const englishKeys = Object.keys(catalog.en).sort();
 const englishKeyOrder = Object.keys(catalog.en);
-assert.equal(englishKeys.length, 948, "the test must track the complete current UI catalog");
+assert.equal(englishKeys.length, 949, "the test must track the complete current UI catalog");
 for (const [code, source] of localeSources) {
   const sections = [`INSPECT_I18N.${code}`, `MODEL_DESCRIPTION_I18N.${code}`]
     .map(marker => source.indexOf(marker)).filter(index => index >= 0);
@@ -104,7 +104,7 @@ for (const code of codes) {
   }
   const mean = dict["check.cycling.mean"]("16 min");
   assert.equal(mean.match(/16 min/g)?.length, 1, `${code} preserves the supplied mean duration`);
-  const assessments = ["short", "normal", "few", "waiting", "unavailable", "stale"]
+  const assessments = ["short", "normal", "few", "waiting", "class_unavailable", "unavailable", "stale"]
     .map(key => dict[`check.cycling.${key}`]);
   assert.equal(new Set(assessments).size, assessments.length, `${code} distinguishes assessment states`);
   for (const value of assessments) {
@@ -215,8 +215,10 @@ assert.equal(catalog.sv["check.cycling.runs"](1), "1 körning");
 assert.equal(catalog.sv["check.cycling.runs"](2), "2 körningar");
 assert.equal(catalog.de["check.cycling.runs"](12), "12 Läufe");
 assert.equal(catalog.de["check.cycling.mean"]("16 min"), "Ø 16 min");
-assert.equal(catalog.en["check.cycling.normal"], "No unusual cycling while heating.");
-assert.equal(catalog.de["check.cycling.normal"], "Keine auffällige Taktung beim Heizen.");
+assert.equal(catalog.en["check.cycling.short"], "Heating runs are short on average.");
+assert.equal(catalog.de["check.cycling.short"], "Die Heizläufe sind im Schnitt kurz.");
+assert.equal(catalog.en["check.cycling.normal"], "Heating runs are long enough on average.");
+assert.equal(catalog.de["check.cycling.normal"], "Die Heizläufe dauern im Schnitt lang genug.");
 
 // The specialist copy visible under the schematic remains lazy, but it is no longer allowed to
 // fall back to English for any added language. Every diagram target gets a native title and a

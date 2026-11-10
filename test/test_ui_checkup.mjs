@@ -347,7 +347,7 @@ assert.doesNotMatch(detail, /0 runs|830|project hint|90%|&lt;10 min|No universal
 assert.ok(detail.indexOf("18 starts") < detail.indexOf("checkup-cycling-grid"));
 assert.ok(detail.indexOf("checkup-cycling-grid") < detail.indexOf("checkup-cycling-assessment"));
 assert.ok(detail.indexOf("checkup-cycling-assessment") < detail.indexOf("data-checkup-hours"));
-assert.match(detail, /Many short heating runs\./);
+assert.match(detail, /Heating runs are short on average\./);
 
 const noRunCounts = { ...cycling, space_runs: null, space_mean_run_s: 600,
   dhw_runs: null, dhw_mean_run_s: 900, cooling_runs: null, censored_runs: null };
@@ -363,11 +363,23 @@ assert.ok(ui.detail({ ...cycling, space_mean_run_s: 59 })
 const normalCycling = { ...cycling, verdict: "ok", space_mean_run_s: 960 };
 const measuredCycling = { ...cycling, verdict: "ok", evidence: "observation",
   reason: "class_population_incomplete" };
+const noModeCycling = { id: "cycling", verdict: "ok", evidence: "observation",
+  reason: "class_unavailable", starts: 18, split: false,
+  space_runs: null, dhw_runs: null, cooling_runs: null, censored_runs: null };
+const partialModeCycling = { ...noModeCycling, reason: "class_coverage" };
 const fewHeatingRuns = { ...measuredCycling, space_runs: 3, reason: "heating_runs_insufficient" };
 const staleReport = { span_s: 3600, source_age_s: 900, source_fresh: false };
-assert.match(ui.detail(normalCycling), /No unusual cycling while heating\./);
-assert.doesNotMatch(ui.detail(measuredCycling), /No unusual cycling|Many short heating runs/);
+assert.match(ui.detail(normalCycling), /Heating runs are long enough on average\./);
+assert.doesNotMatch(ui.detail(measuredCycling), /Heating runs are (?:short|long enough) on average/);
 hasAssessment(ui.detail(measuredCycling), "en", "waiting");
+hasAssessment(ui.detail(partialModeCycling), "en", "waiting");
+const noModeDetail = ui.detail(noModeCycling);
+assert.equal(ui.value(noModeCycling), "18");
+assert.match(noModeDetail, /18 starts/);
+assert.match(noModeDetail, /This system provides too little information to assess heating runs\./);
+assert.doesNotMatch(noModeDetail, /checkup-cycling-grid/, "missing operating modes do not create run counts");
+assert.ok(!noModeDetail.includes(escapeText(ui.text("en", "check.cycling.waiting"))),
+  "a system without mode data cannot promise a later assessment");
 hasAssessment(ui.detail(fewHeatingRuns), "en", "few");
 hasAssessment(ui.detail(collecting, false, partialReport), "en", "waiting");
 hasAssessment(ui.detail(normalCycling, true, staleReport), "en", "stale");
@@ -375,7 +387,7 @@ hasAssessment(ui.detail(cycling, true, staleReport), "en", "short");
 hasAssessment(ui.detail({ ...normalCycling, reason: "source_stale" }), "en", "stale");
 assert.match(ui.detail(normalCycling, true, staleReport), /18 starts/,
   "stale inputs leave previous observations visible");
-assert.doesNotMatch(ui.detail(normalCycling, true, staleReport), /No unusual cycling/);
+assert.doesNotMatch(ui.detail(normalCycling, true, staleReport), /Heating runs are long enough/);
 assert.equal(ui.value(measuredCycling), "18");
 assert.equal(ui.value({ ...measuredCycling, starts: null }), "MEASURED");
 
@@ -584,7 +596,8 @@ for (const lang of locales) {
   ui.setLang(lang);
   for (const [payload, key, report] of [
     [cycling, "short"], [normalCycling, "normal"], [fewHeatingRuns, "few"],
-    [cyclingCensored, "waiting"], [stopOnlyCycling, "unavailable"],
+    [cyclingCensored, "waiting"], [partialModeCycling, "waiting"],
+    [noModeCycling, "class_unavailable"], [stopOnlyCycling, "unavailable"],
     [normalCycling, "stale", staleReport],
   ]) {
     assert.ok(Object.hasOwn(ui.copy[lang], "check.cycling." + key),
@@ -608,8 +621,7 @@ for (const lang of locales) {
     assert.ok(!ui.detail({ ...result, aborts: 0 }).includes(discarded),
       `${lang}/${verdict} must not invent discarded reading-gap evidence`);
   }
-  for (const c of [dhw, pressure, cycling, defrost, waiting,
-      { ...cycling, verdict: "ok", evidence: "observation", reason: "class_coverage" },
+  for (const c of [dhw, pressure, cycling, defrost, waiting, partialModeCycling,
       { id: "fault", verdict: "info", active: 0 },
       { id: "fault", verdict: "info", active: null, reason: "source_stale" }]) {
     assert.doesNotMatch(ui.detail(c, false, { span_s: 3600, source_age_s: 900, source_fresh: false }),
@@ -618,8 +630,8 @@ for (const lang of locales) {
 }
 ui.setLang("de");
 assert.match(ui.detail(cycling), /18 Starts/);
-assert.match(ui.detail(cycling), /Viele kurze Heizläufe\./);
-assert.match(ui.detail(normalCycling), /Keine auffällige Taktung beim Heizen\./);
+assert.match(ui.detail(cycling), /Die Heizläufe sind im Schnitt kurz\./);
+assert.match(ui.detail(normalCycling), /Die Heizläufe dauern im Schnitt lang genug\./);
 assert.ok(ui.detail(normalCycling).includes(runRow("de", "mode.heat", 12, "16 min")));
 assert.ok(ui.detail(normalCycling).includes(runRow("de", "mode.dhw", 2, "15 min")));
 assert.doesNotMatch(ui.detail(cycling), /Kontext beim Stopp|90 %|im Mittel unter 10 min/);

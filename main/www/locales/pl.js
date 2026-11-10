@@ -1,4 +1,4 @@
-// translation-source: 0b470978cad369ab40b1d667fab094bf6ef0be09a0378a8774c5e68b4a7b5bfe
+// translation-source: 30a685642c39ec9f0edd1f0ddc0d5291cb01f63975ff56ec14d64fb91db1fc31
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -228,10 +228,11 @@ I18N.pl = localeValues([
   /* check.cycling.unclear */ "Nieustalone",
   /* check.cycling.unclear_hint */ "W trakcie cyklu tryb może się zmienić lub może brakować części pomiarów.",
   /* check.cycling.assessment */ "Ocena",
-  /* check.cycling.short */ "Wiele krótkich cykli grzania.",
-  /* check.cycling.normal */ "Bez oznak nietypowego taktowania podczas ogrzewania.",
+  /* check.cycling.short */ "Cykle ogrzewania trwają średnio krótko.",
+  /* check.cycling.normal */ "Cykle ogrzewania trwają średnio wystarczająco długo.",
   /* check.cycling.few */ "Jeszcze za mało cykli ogrzewania.",
   /* check.cycling.waiting */ "Potrzeba więcej danych.",
+  /* check.cycling.class_unavailable */ "Ta instalacja podaje za mało informacji o cyklach ogrzewania.",
   /* check.cycling.unavailable */ "Brak danych ze sprężarki.",
   /* check.cycling.stale */ "Chwilowo brakuje odczytów.",
   /* check.cycling.history_empty */ "Nie ma jeszcze historii.",
@@ -1234,7 +1235,7 @@ DESCRIPTION_I18N.pl = descriptionValues([
 MODEL_DESCRIPTION_I18N.pl = modelDescriptionValues([
   ["Komunikaty pompy", "nie dowodzą przyczyny ani naprawy."], // health_fault
   ["R5T: punkt warstwowego zbiornika, nie energia.", "Próg projektu ≥0,8 K/h bez oznaczeń pompy/poboru. Pobór możliwy bez oznaczeń; 0 K/h nie wyklucza strat. Cyrkulacja nie dowodzi przyczyny."], // health_dhw_loss
-  ["Pokazuje zaobserwowane uruchomienia i zakończone cykle.", "Wiele krótkich cykli grzania może świadczyć o zbyt częstym uruchamianiu."], // health_cycling
+  ["Pokazuje zaobserwowane uruchomienia i zakończone cykle.", "Ocena opiera się na średnim czasie trwania cykli ogrzewania."], // health_cycling
   ["Odszranianie", "≥3 powiązane, >15% czasu pracy sprężarki przy czytelnych stanach sprężarki i odszraniania. Reguła projektu, nie Daikin; brak wilgotności i temperatury całego wymiennika."], // health_defrost
   ["Ciśnienie", "wspólna reguła projektu ≤1,0 bar; 60 s ciągłej obserwacji daje ostrzeżenie. Nie uniwersalna; obowiązuje instrukcja modelu."], // health_pressure
   ["Przepływ po 60 s pompy", "Limit wymaga tego samego modelu/trybu/warunków; nie nominalny ani dowód małego przepływu."], // health_flow

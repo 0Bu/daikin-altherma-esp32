@@ -1,4 +1,4 @@
-// translation-source: 0b470978cad369ab40b1d667fab094bf6ef0be09a0378a8774c5e68b4a7b5bfe
+// translation-source: 30a685642c39ec9f0edd1f0ddc0d5291cb01f63975ff56ec14d64fb91db1fc31
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -223,10 +223,11 @@ I18N.fi = localeValues([
   /* check.cycling.unclear */ "Tarkoitus epäselvä",
   /* check.cycling.unclear_hint */ "Käyntijakson aikana toimintatila voi vaihtua tai mittauksia voi puuttua.",
   /* check.cycling.assessment */ "Arvio",
-  /* check.cycling.short */ "Paljon lyhyitä lämmitysjaksoja.",
-  /* check.cycling.normal */ "Lämmityksessä ei näy poikkeavaa jaksotusta.",
+  /* check.cycling.short */ "Lämmitysjaksot ovat keskimäärin lyhyitä.",
+  /* check.cycling.normal */ "Lämmitysjaksot kestävät keskimäärin riittävän pitkään.",
   /* check.cycling.few */ "Lämmitysjaksoja on vielä liian vähän.",
   /* check.cycling.waiting */ "Tarvitaan lisää tietoa.",
+  /* check.cycling.class_unavailable */ "Tämä laite antaa liian vähän tietoa lämmitysjaksoista.",
   /* check.cycling.unavailable */ "Kompressorista ei ole tietoa.",
   /* check.cycling.stale */ "Mittauksia puuttuu tällä hetkellä.",
   /* check.cycling.history_empty */ "Ei vielä historiaa.",
@@ -1081,7 +1082,7 @@ DESCRIPTION_I18N.fi = descriptionValues([
 MODEL_DESCRIPTION_I18N.fi = modelDescriptionValues([
   ["Laitteen ilmoitukset", "eivät todista syytä tai ratkaisua."], // health_fault
   ["R5T: kerrostuneen varaajan piste, ei energia.", "Projektin vihje ≥0,8 K/h ilman pumppu-/vedenottomerkkejä. Vedenotto mahdollista ilman merkkejä; 0 K/h ei sulje pois lämpöhäviötä. Kierto ei osoita syytä."], // health_dhw_loss
-  ["Näyttää havaitut käynnistykset ja päättyneet käyntijaksot.", "Monet lyhyet lämmitysjaksot voivat kertoa liian tiheistä käynnistyksistä."], // health_cycling
+  ["Näyttää havaitut käynnistykset ja päättyneet käyntijaksot.", "Arvio perustuu lämmitysjaksojen keskimääräiseen kestoon."], // health_cycling
   ["Sulatus", "≥3 yhdistettyä, >15% kompressorin käyntiajasta, kun sekä kompressorin että sulatuksen tila on luettavissa. Sisäinen sääntö, ei Daikin; kosteus ja koko kennon lämpötila puuttuvat."], // health_defrost
   ["Paine", "yhteinen sisäinen raja ≤1,0 bar; 60 s jatkuvaa havaintoa antaa varoituksen. Ei yleispätevä; mallin ohje pätee."], // health_pressure
   ["Virtaus 60 s pumpun jälkeen", "Raja vaatii saman mallin/tilan/olosuhteet; ei nimellisarvo tai pienen virtauksen todiste."], // health_flow

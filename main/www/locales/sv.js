@@ -1,4 +1,4 @@
-// translation-source: 0b470978cad369ab40b1d667fab094bf6ef0be09a0378a8774c5e68b4a7b5bfe
+// translation-source: 30a685642c39ec9f0edd1f0ddc0d5291cb01f63975ff56ec14d64fb91db1fc31
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -223,10 +223,11 @@ I18N.sv = localeValues([
   /* check.cycling.unclear */ "Oklart syfte",
   /* check.cycling.unclear_hint */ "En körning kan byta driftläge eller bara ha registrerats delvis.",
   /* check.cycling.assessment */ "Bedömning",
-  /* check.cycling.short */ "Många korta värmekörningar.",
-  /* check.cycling.normal */ "Inga ovanliga driftcykler vid uppvärmning.",
+  /* check.cycling.short */ "Värmekörningarna är korta i genomsnitt.",
+  /* check.cycling.normal */ "Värmekörningarna är tillräckligt långa i genomsnitt.",
   /* check.cycling.few */ "För få värmekörningar än så länge.",
   /* check.cycling.waiting */ "Mer data behövs.",
+  /* check.cycling.class_unavailable */ "Anläggningen ger för lite information om värmekörningarna.",
   /* check.cycling.unavailable */ "Inga kompressordata.",
   /* check.cycling.stale */ "Mätvärden saknas just nu.",
   /* check.cycling.history_empty */ "Ingen historik ännu.",
@@ -1241,7 +1242,7 @@ DESCRIPTION_I18N.sv = descriptionValues([
 MODEL_DESCRIPTION_I18N.sv = modelDescriptionValues([
   ["Enhetens meddelanden", "inga bevis på orsak eller lösning."], // health_fault
   ["R5T: en punkt i skiktad tank, inte energi.", "Projekttips ≥0,8 K/h utan pump-/tappmarkörer. Tappning möjlig utan markörer; 0 K/h utesluter inte värmeförlust. Cirkulation bevisar inte orsak."], // health_dhw_loss
-  ["Visar observerade starter och avslutade körningar.", "Många korta värmekörningar kan tyda på att kompressorn startar för ofta."], // health_cycling
+  ["Visar observerade starter och avslutade körningar.", "Bedömningen utgår från värmekörningarnas genomsnittliga längd."], // health_cycling
   ["Avfrostning", "≥3 parade, >15% av kompressorns drifttid där både kompressor- och avfrostningsstatus kan läsas. Intern regel, inte Daikin; fuktighet och hela värmeväxlarens temperatur saknas."], // health_defrost
   ["Tryck", "gemensam intern regel ≤1,0 bar; 60 s kontinuerligt observerat ger varning. Inte universell; modellmanual gäller."], // health_pressure
   ["Flöde efter 60 s pump", "Gräns kräver samma modell/läge/förhållanden; inte nominellt eller bevis på för lågt flöde."], // health_flow

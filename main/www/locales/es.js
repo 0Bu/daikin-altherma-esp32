@@ -1,4 +1,4 @@
-// translation-source: 0b470978cad369ab40b1d667fab094bf6ef0be09a0378a8774c5e68b4a7b5bfe
+// translation-source: 30a685642c39ec9f0edd1f0ddc0d5291cb01f63975ff56ec14d64fb91db1fc31
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -223,10 +223,11 @@ I18N.es = localeValues([
   /* check.cycling.unclear */ "Uso incierto",
   /* check.cycling.unclear_hint */ "Un ciclo puede cambiar de modo o haberse registrado solo en parte.",
   /* check.cycling.assessment */ "Valoración",
-  /* check.cycling.short */ "Muchos ciclos cortos de calefacción.",
-  /* check.cycling.normal */ "Sin indicios de ciclos anómalos al calentar.",
+  /* check.cycling.short */ "Los ciclos de calefacción son cortos de media.",
+  /* check.cycling.normal */ "Los ciclos de calefacción duran lo suficiente de media.",
   /* check.cycling.few */ "Aún hay pocos ciclos de calefacción.",
   /* check.cycling.waiting */ "Aún faltan datos.",
+  /* check.cycling.class_unavailable */ "Este equipo da muy pocos datos para valorar los ciclos de calefacción.",
   /* check.cycling.unavailable */ "Sin datos del compresor.",
   /* check.cycling.stale */ "Ahora mismo faltan mediciones.",
   /* check.cycling.history_empty */ "Aún no hay historial.",
@@ -1240,7 +1241,7 @@ DESCRIPTION_I18N.es = descriptionValues([
 MODEL_DESCRIPTION_I18N.es = modelDescriptionValues([
   ["Mensajes de la bomba", "no prueban causa ni resolución."], // health_fault
   ["R5T: un punto del depósito estratificado, no energía.", "Indicio interno ≥0,8 K/h sin señales de bomba/consumo. Consumo posible sin señales; 0 K/h no excluye pérdidas. Circulación no prueba causa."], // health_dhw_loss
-  ["Muestra los arranques observados y los ciclos terminados.", "Muchos ciclos cortos de calefacción pueden indicar arranques demasiado frecuentes."], // health_cycling
+  ["Muestra los arranques observados y los ciclos terminados.", "La valoración se basa en la duración media de los ciclos de calefacción."], // health_cycling
   ["Desescarche", "≥3 asociados, >15% del tiempo de marcha del compresor con estados de compresor y desescarche legibles. Regla interna, no Daikin; faltan humedad y temperatura de toda la batería."], // health_defrost
   ["Presión", "regla interna común ≤1,0 bar; 60 s continuos observados dan AVISO. No universal; rige el manual del modelo."], // health_pressure
   ["Caudal tras 60 s de bomba", "El límite exige mismo modelo/modo/condiciones; no nominal ni prueba de flujo insuficiente."], // health_flow

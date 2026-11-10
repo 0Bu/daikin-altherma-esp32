@@ -1,4 +1,4 @@
-// translation-source: 0b470978cad369ab40b1d667fab094bf6ef0be09a0378a8774c5e68b4a7b5bfe
+// translation-source: 30a685642c39ec9f0edd1f0ddc0d5291cb01f63975ff56ec14d64fb91db1fc31
 I18N.ja = localeValues([
   /* sys.nodata */ "データなし",
   /* sys.unreachable */ "接続不可",
@@ -223,10 +223,11 @@ I18N.ja = localeValues([
   /* check.cycling.unclear */ "用途不明",
   /* check.cycling.unclear_hint */ "運転中にモードが変わったり、一部の記録が欠けたりすることがあります。",
   /* check.cycling.assessment */ "判定",
-  /* check.cycling.short */ "短い暖房運転が多く見られます。",
-  /* check.cycling.normal */ "暖房で異常な発停は見られません。",
+  /* check.cycling.short */ "暖房運転は平均すると短めです。",
+  /* check.cycling.normal */ "暖房運転の平均時間は十分です。",
   /* check.cycling.few */ "暖房運転の回数がまだ足りません。",
   /* check.cycling.waiting */ "まだデータが足りません。",
+  /* check.cycling.class_unavailable */ "この機器の情報だけでは暖房運転を評価できません。",
   /* check.cycling.unavailable */ "圧縮機のデータがありません。",
   /* check.cycling.stale */ "現在、測定値がありません。",
   /* check.cycling.history_empty */ "まだ履歴がありません。",
@@ -1081,7 +1082,7 @@ DESCRIPTION_I18N.ja = descriptionValues([
 MODEL_DESCRIPTION_I18N.ja = modelDescriptionValues([
   ["機器の通知", "原因や解決の証明ではありません。"], // health_fault
   ["R5T：成層タンク1点。", "エネルギー実測でない。内部基準≥0.8 K/hはポンプ・取湯に似た低下の印がない窓のみ。印なしでも取湯はあり得ます。0 K/hでも熱損失は否定できません。循環の重複は原因を証明しません。"], // health_dhw_loss
-  ["確認できた起動回数と、終了した運転の回数を表示します。", "短時間の暖房運転が多い場合、起動と停止を頻繁に繰り返している可能性があります。"], // health_cycling
+  ["確認できた起動回数と、終了した運転の回数を表示します。", "暖房運転の平均時間に基づいて評価します。"], // health_cycling
   ["除霜", "対応除霜≥3回、圧縮機と除霜の状態が両方読める圧縮機運転時間の>15%。内部基準、Daikin限界ではありません。湿度とコイル全体の温度なし。"], // health_defrost
   ["水圧", "共通内部基準1.0 bar以下、連続観測60秒で警告。全機種共通ではなく対象説明書が基準。"], // health_pressure
   ["ポンプ60秒後の流量", "限界は同機種・モード・条件が必要。設計値や不足の証明ではありません。"], // health_flow

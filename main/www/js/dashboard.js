@@ -1345,6 +1345,7 @@ function checkupCyclingDetailHtml(c, report) {
   else if (c.evidence === "heuristic" && c.verdict === "info") assessment = "short";
   else if (report.source_fresh === false || c.reason === "source_stale") assessment = "stale";
   else if (c.evidence === "heuristic" && c.verdict === "ok") assessment = "normal";
+  else if (c.reason === "class_unavailable") assessment = "class_unavailable";
   else if (c.reason === "heating_runs_insufficient" && starts) assessment = "few";
 
   return (starts ? `<div class="vdesc-p vdesc-n checkup-cycling-total">${esc(starts)}</div>` : "") +

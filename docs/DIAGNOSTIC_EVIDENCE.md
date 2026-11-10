@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 046bf259e2cdf7ac766ebb4c76e8002dcfaa2217e769a63740a521401c4bd52d -->
+<!-- diagnostic-evidence-contract: ce985a5385ff6d31ddadfc5d97f6464e6b6606b535ce77ad618a2b0cd65b64d5 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -247,14 +247,18 @@ retain the start alone. The project infers that a missed revision tends to remov
 this case requires a run to have crossed an hour boundary. Under
 the count population above a lost run is not detected; it withholds the assessment only by pushing
 either population gate (classified runs or runtime) below 90% or the completed heating runs below
-12, and can otherwise shift (most likely shorten) the mean and change the result. Only at least 12 completed
-space-heating runs with both population gates satisfied can support an assessment. A mean below ten minutes then
-produces **NOTE** immediately. An absence-of-short-run assessment additionally requires a full
-24-hour span and at least CHECKUP_REQUIRED_S of paired classification time.
+12, and can otherwise shift (most likely shorten) the mean and change the result. An assessment
+requires at least 12 completed space-heating runs and both population gates. A mean below ten
+minutes produces **NOTE** immediately. A mean of ten minutes or more additionally requires a full
+24-hour span and at least CHECKUP_REQUIRED_S of both paired classification and readable compressor
+time to produce **OK**.
 
-Missing classification, fewer than 12 heating runs or an inadequate classified population remains
-an observation. The status API carries the detailed reason and the disclosure gives a short
-assessment. Absent compressor evidence remains CHECKING.
+A profile without compressor speed gives **N/A**. When the valve or mode capability needed to
+identify heating runs is absent (`class_unavailable`), the assessment is unavailable and the start
+count remains available when observed. Temporary gaps in classification, too few heating runs or
+an inadequate classified population leave an observation when usable compressor readings exist.
+A supported compressor input without usable readings remains **CHECKING**. The status API carries
+the detailed reason and the disclosure gives a short assessment.
 There is no pooled starts/runtime fallback, and unfinished
 runs never enter the completed mean. Completed-run evidence ages with its start edge. See
 CHECKUP_CYCLING_MIN_STARTS, CHECKUP_CYCLING_SHORT_RUN_S and CHECKUP_CYCLING_CLASSIFIED_PCT in

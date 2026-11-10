@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: 80009c7e48cef70c51dfef6fe6260952c15c7e2440c8c99b3707b5e9b63dccb4 -->
+<!-- user-docs-contract: 64707723da191542b9249bb8bab043222d28d852e5323cec2b23860ff566f914 -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default. Enable **Plant diagnostics** under **Settings → Firmware** to start an evidence
@@ -104,8 +104,10 @@ software restart preserves the remaining settling time, but unseen charging can 
 purpose and the average length for heating and hot water when available. A change of purpose or
 missing readings can leave a run unclear.
 
-The assessment says whether short runs stand out during heating or whether more readings are needed.
-It applies to heating in the recorded window.
+The assessment says whether completed heating runs were short or long enough on average in the
+recorded window. It can wait for more readings or more heating runs. Some models lack the readings
+needed to identify heating runs, so the card can show starts without an assessment. Models without
+compressor readings have no start count.
 
 In the 24-hour chart, the number above each bar shows the starts counted for that hour. The colored
 segments show heating, hot water and other runtime. Hatching marks known gaps in the readings.
