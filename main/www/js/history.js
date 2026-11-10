@@ -1851,7 +1851,7 @@ function replaceHistoryHtml(host, html) {
       if (attrs(a).length !== nextAttrs.length ||
           nextAttrs.some(attr => a.getAttribute(attr.name) !== attr.value)) return false;
       // The live cycling chart owns its slot and updates independently of value rows.
-      if (a.hasAttribute("data-checkup-hours")) return true;
+      if (a.getAttribute("data-checkup-hours") !== null) return true;
       return a.childNodes.length === b.childNodes.length &&
         [...a.childNodes].every((node, index) => same(node, b.childNodes[index]));
     };

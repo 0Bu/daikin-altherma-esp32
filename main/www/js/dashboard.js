@@ -1360,7 +1360,8 @@ function checkupCyclingDetailHtml(c, report) {
 }
 
 function syncCheckupCyclingChart(card) {
-  if (S.stage !== "dashboard" || S.scrub || card?.dataset.dashboardCard !== "diagnosis") return;
+  if (S.stage !== "dashboard" || S.scrub || card?.dataset.dashboardCard !== "diagnosis" ||
+      !S.descOpen.has("model:health_cycling")) return;
   const slot = card.querySelector(".vitem.open [data-checkup-hours]");
   if (slot) renderCheckupCyclingChart(slot);
 }
