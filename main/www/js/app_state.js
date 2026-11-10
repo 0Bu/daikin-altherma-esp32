@@ -33,6 +33,7 @@ const S = {
   // as the ring rolls, rather than selecting whatever now occupies that slot
   // (logic/history.hpp's history_pin_index).
   histPin: new Map(),
+  cyclingScope: null,
   cyclingPin: null,
   cyclingHover: null,
   // Browser-only legend choices survive renders and are shared by both views of a chart.

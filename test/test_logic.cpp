@@ -15955,26 +15955,29 @@ static void test_checkup() {
 
     // --- 24h cycling timeline buckets + JSON streaming ------------------------------------------
     {
+        CHECK(sizeof(CheckupCyclingHours) == 348); // elapsed clock occupies the existing padding
         CHECK(checkup_cycling_hours(CheckupRing{}, true).count == 0);
         CheckupRing ring{};
         ring.count                      = 2;
         ring.head                       = 2;
         ring.buf[0].starts              = 3;
         ring.buf[0].run_s               = 1200;
+        ring.buf[0].set_space_hour_s(900);
         ring.buf[0].dhw_hour_s          = 200;
         ring.buf[0].rps_observed_s      = 3600;
         ring.buf[1].starts              = 1;
         ring.buf[1].run_s               = 600;
-        ring.buf[1].dhw_hour_s          = 0;
+        ring.buf[1].set_space_hour_s(600);
         ring.buf[1].rps_observed_s      = 3500;
         ring.pending.starts             = 2;
         ring.pending.run_s              = 500;
+        ring.pending.set_space_hour_s(300);
         ring.pending.dhw_hour_s         = 200;
         ring.pending.rps_observed_s     = 900;
-        const CheckupCyclingHours hours = checkup_cycling_hours(ring, true);
+        CheckupCyclingHours hours       = checkup_cycling_hours(ring, true);
         CHECK(hours.count == 3);
         CHECK(hours.hours[0].starts == 3 && hours.hours[0].run_s == 1200 &&
-              hours.hours[0].space_s == 1000 && hours.hours[0].dhw_s == 200 &&
+              hours.hours[0].space_s == 900 && hours.hours[0].dhw_s == 200 &&
               hours.hours[0].observed_s == 3600);
         CHECK(hours.hours[1].starts == 1 && hours.hours[1].run_s == 600 &&
               hours.hours[1].space_s == 600 && hours.hours[1].dhw_s == 0 &&
@@ -15983,43 +15986,108 @@ static void test_checkup() {
               hours.hours[2].space_s == 300 && hours.hours[2].dhw_s == 200 &&
               hours.hours[2].observed_s == 900);
         CHECK(checkup_cycling_hours(ring, false).count == 0);
+        CHECK(hours.bucket_at(0) == -2 && hours.bucket_at(2) == 0);
+        ring.commit(0);
+        hours               = checkup_cycling_hours(ring, true);
+        hours.newest_bucket = 1;
+        CHECK(hours.count == 4 && hours.bucket_at(0) == -2 && hours.bucket_at(2) == 0 &&
+              hours.bucket_at(3) == 1 && hours.hours[2].starts == 2);
+        CHECK(checkup_cycling_end_unix_s(3'600'000'000, 3'603'200'000, 100003, 700) == 100000);
+        CHECK(checkup_cycling_end_unix_s(3'600'000'000, 3'659'200'000, 100059, 700) == 100000);
+        CHECK(checkup_cycling_end_unix_s(3'600'000'000, 3'603'200'000, -1, 0) == 0);
+        CHECK(checkup_cycling_end_unix_s(3'600'000'000, 3'603'200'000, int64_t{UINT32_MAX} + 1,
+                                         0) == 0);
+        CHECK(checkup_cycling_end_unix_s(3'600'000'000, 3'599'200'000, 100003, 700) == 0);
+        CHECK(checkup_cycling_end_unix_s(-1, 3'603'200'000, 100003, 700) == 0);
+        CHECK(checkup_cycling_end_unix_s(0, 3'603'200'000, 1, 0) == 0);
 
-        const auto running = [](CheckupOperatingMode mode, bool dhw) {
-            CheckupSample s{};
-            s.rps_known = s.rps_running = s.valve_known = true;
-            s.operating_mode                            = mode;
-            s.valve_dhw                                 = dhw;
-            return s;
+        constexpr int64_t start_us = 3'600'000'000;
+        auto              elapsed  = [&](int64_t now_us) {
+            return checkup_cycling_elapsed_s(rt<int64_t>(start_us), rt<int64_t>(now_us));
         };
-        const auto heat          = running(CheckupOperatingMode::Heating, false);
-        const auto dhw           = running(CheckupOperatingMode::Other, true);
-        const auto cooling       = running(CheckupOperatingMode::Cooling, false);
-        const auto unknown       = running(CheckupOperatingMode::Unknown, false);
-        const auto observed_hour = [](const CheckupSample& before, const CheckupSample& after) {
-            CheckupState  state{};
-            CheckupBucket bucket{};
-            checkup_step(state, bucket, before, 0);
-            checkup_step(state, bucket, after, 10'000'000);
-            // A completed charge is attributed to its start hour independently of this clock.
-            bucket.dhw_run_s = 30;
-            return checkup_bucket_cycling_hour(bucket);
+        CHECK(elapsed(start_us - 1) == 0);
+        CHECK(elapsed(start_us) == 0);
+        CHECK(elapsed(start_us + 999'999) == 0);
+        CHECK(elapsed(start_us + 60'999'999) == 60);
+        CHECK(elapsed(start_us + 3'599'999'999) == 3599);
+        CHECK(elapsed(start_us + 3'600'000'000) == 3600);
+        CHECK(elapsed(INT64_MAX) == 3600);
+        CHECK(checkup_cycling_elapsed_s(rt<int64_t>(-1), rt<int64_t>(start_us)) == 0);
+
+        CheckupRing edge_only{};
+        edge_only.pending.starts = 1;
+        const auto edge          = checkup_cycling_hours(edge_only);
+        CHECK(edge.count == 1 && edge.hours[0].starts == 1 && edge.hours[0].observed_s == 0 &&
+              edge.pending_elapsed_s == 0 && edge.end_unix_s[0] == 0);
+
+        // Only matching, readable running endpoints assign a mode. Cooling, known defrost,
+        // missing witnesses and handover intervals remain in the total only.
+        CheckupState  step_st{};
+        CheckupBucket step_b{};
+        CheckupSample step_s{};
+        step_s.rps_known      = true;
+        step_s.rps_running    = true;
+        step_s.valve_known    = true;
+        step_s.operating_mode = CheckupOperatingMode::Heating;
+        auto sample           = [&](int64_t seconds) {
+            checkup_step(step_st, step_b, step_s, seconds * 1000000);
         };
-        const auto heating_hour = observed_hour(heat, heat);
-        CHECK(heating_hour.run_s == 10 && heating_hour.space_s == 10 && heating_hour.dhw_s == 0);
-        const auto dhw_hour = observed_hour(dhw, dhw);
-        CHECK(dhw_hour.run_s == 10 && dhw_hour.space_s == 0 && dhw_hour.dhw_s == 10);
-        for (const auto& endpoints :
-             {std::pair{cooling, cooling}, std::pair{unknown, unknown}, std::pair{heat, dhw},
-              std::pair{dhw, heat}, std::pair{unknown, dhw}}) {
-            const auto hour = observed_hour(endpoints.first, endpoints.second);
-            CHECK(hour.run_s == 10 && hour.observed_s == 10);
-            CHECK(hour.space_s == 0 && hour.dhw_s == 0);
-        }
-        CheckupBucket inconsistent{};
-        inconsistent.run_s      = 10;
-        inconsistent.dhw_hour_s = 20;
-        const auto incomplete   = checkup_bucket_cycling_hour(inconsistent);
-        CHECK(incomplete.run_s == 10 && incomplete.space_s == 0 && incomplete.dhw_s == 0);
+        sample(0);
+        sample(10);
+        step_s.valve_dhw = true;
+        sample(20);
+        sample(30);
+        step_s.valve_known = false;
+        sample(40);
+        sample(50);
+        step_s.valve_known = true;
+        sample(60);
+        step_s.valve_dhw      = false;
+        step_s.operating_mode = CheckupOperatingMode::Cooling;
+        sample(70);
+        sample(80);
+        step_s.operating_mode = CheckupOperatingMode::Heating;
+        step_s.defrost_known = step_s.defrost_on = true;
+        sample(90);
+        sample(100);
+        CHECK(step_b.run_s == 100 && step_b.space_hour_s() == 10 && step_b.dhw_hour_s == 10);
+
+        // The packed clock reaches 3600 without touching flags or neighbouring clocks. The split
+        // can consume only the portion actually admitted by the total runtime clock.
+        step_s.defrost_on = false;
+        sample(110);
+        step_b.run_s = 3595;
+        step_b.set_space_hour_s(3595);
+        step_b.dhw_hour_s = 0;
+        step_b.flags = CHECKUP_F_FAULT | CHECKUP_F_WARNING | CHECKUP_F_RETRY | CHECKUP_F_LOW_BAR;
+        sample(120);
+        CHECK(step_b.run_s == 3600 && step_b.space_hour_s() == 3600 && step_b.dhw_hour_s == 0);
+        CHECK(step_b.flags == 15 && step_b.rps_observed_s == 120 && step_b.dfr_observed_s == 30);
+
+        // A completed tank charge can be attributed to its start for the completed-run mean, but
+        // every per-hour duration stays where it was observed, even when the start was in heat.
+        CheckupRing   spill{};
+        CheckupState  crossing{};
+        CheckupSample mode{};
+        mode.rps_known = mode.valve_known = mode.rps_running = true;
+        mode.operating_mode                                  = CheckupOperatingMode::Heating;
+        checkup_step(crossing, spill.pending, mode, 0, &spill);
+        checkup_step(crossing, spill.pending, mode, 10'000'000, &spill);
+        mode.valve_dhw   = true;
+        mode.rps_running = false;
+        checkup_step(crossing, spill.pending, mode, 3'598'000'000, &spill);
+        mode.rps_running = true;
+        checkup_step(crossing, spill.pending, mode, 3'599'000'000, &spill);
+        spill.commit(0);
+        crossing.last_us = 3'600'000'000; // production drops the crossing interval
+        checkup_step(crossing, spill.pending, mode, 3'600'000'000, &spill);
+        checkup_step(crossing, spill.pending, mode, 3'610'000'000, &spill);
+        mode.rps_running = false;
+        checkup_step(crossing, spill.pending, mode, 3'611'000'000, &spill);
+        CHECK(spill.buf[0].dhw_runs == 1 && spill.buf[0].dhw_run_s > 0);
+        const auto across = checkup_cycling_hours(spill);
+        CHECK(across.hours[0].space_s == 10 && across.hours[0].dhw_s == 0);
+        CHECK(across.hours[1].space_s == 0 && across.hours[1].dhw_s == 10);
 
         CheckupRing full{};
         full.count                      = CHECKUP_COMPLETED_BUCKETS;
@@ -22418,6 +22486,7 @@ static void test_checkup_persist() {
     // something else by them. The fingerprint has to be STABLE across calls and SENSITIVE to that.
     CHECK(checkup_layout_fingerprint() == fp);
     CHECK(fp != 0);
+    CHECK(fp == 0x009061a7u); // Core journal layout changes leave the shared method stable.
 
     // The model identity is separate and is compared at detection. Different profile, different
     // window; the same profile re-detected on a fresh boot is the same unit and keeps its day.
@@ -22441,6 +22510,7 @@ static void test_checkup_persist() {
     dhw_handoff.pending.max_loss_tenths_k_h    = 7;
     const uint32_t model_fp                    = checkup_fixture_model("altherma3_r_erga");
     const uint32_t handoff_fp                  = checkup_dhw_handoff_layout_fingerprint();
+    CHECK(handoff_fp == 0x33a0a26eu); // Preserve the previous firmware's separate DHW handoff.
     const uint32_t handoff_crc                 = checkup_dhw_handoff_crc(model_fp, dhw_handoff);
     CHECK(checkup_dhw_handoff_valid(CHECKUP_DHW_HANDOFF_MAGIC, CHECKUP_DHW_HANDOFF_VERSION,
                                     handoff_fp, model_fp, model_fp, handoff_crc, dhw_handoff));
@@ -22947,7 +23017,7 @@ struct CheckupRestoreCase {
 struct CheckupRestoreOut {
     CheckupRing ring;
     DhwLossRing dhw;
-    int64_t     expiry[CHECKUP_COMPLETED_BUCKETS] = {};
+    CheckupJournalSlotTimes times;
     bool        dhw_retired                       = false;
 };
 
@@ -22993,8 +23063,11 @@ CheckupRestoreOut checkup_restore_reference(const CheckupRestoreCase& c) {
             else
                 out.dhw_retired = true;
             expiry = checkup_restore_expiry_us(rec->payload.end_unix_s, c.now_unix_s, c.now_us);
+            if (from_flash && rec->payload.end_unix_s <= UINT32_MAX)
+                out.times.restored_end_unix_s[out.ring.head] =
+                    static_cast<uint32_t>(rec->payload.end_unix_s);
         }
-        out.expiry[out.ring.head] = expiry;
+        out.times.expiry_us[out.ring.head] = expiry;
         out.ring.push(cb);
         out.dhw.push(db);
     }
@@ -23005,11 +23078,12 @@ CheckupRestoreOut checkup_restore_in_place(const CheckupRestoreCase& c) {
     CheckupRestoreOut out;
     out.ring = c.ring;
     out.dhw  = c.dhw;
-    for (auto& e : out.expiry) e = -7; // every slot must be assigned
-    out.dhw_retired = checkup_journal_rebuild(
-        out.ring, out.dhw, out.expiry, c.live, c.stored.data(), c.stored.size(), c.earliest,
-        c.latest, c.now_unix_s, c.now_us, c.confirmed, c.model, c.source, c.generation, c.reset,
-        c.dhw_fp, c.dhw_reset);
+    for (auto& e : out.times.expiry_us) e = -7; // every slot must be assigned
+    for (auto& end : out.times.restored_end_unix_s) end = UINT32_MAX;
+    out.dhw_retired = checkup_journal_rebuild(out.ring, out.dhw, out.times, c.live, c.stored.data(),
+                                              c.stored.size(), c.earliest, c.latest, c.now_unix_s,
+                                              c.now_us, c.confirmed, c.model, c.source,
+                                              c.generation, c.reset, c.dhw_fp, c.dhw_reset);
     return out;
 }
 
@@ -23031,7 +23105,8 @@ bool checkup_restore_same(const CheckupRestoreOut& ref, const CheckupRestoreOut&
     for (size_t s = 0; s < CHECKUP_COMPLETED_BUCKETS; s++)
         if (checkup_restore_marker(ref.ring.buf[s]) != checkup_restore_marker(got.ring.buf[s]) ||
             checkup_restore_marker(ref.dhw.buf[s]) != checkup_restore_marker(got.dhw.buf[s]) ||
-            ref.expiry[s] != got.expiry[s])
+            ref.times.expiry_us[s] != got.times.expiry_us[s] ||
+            ref.times.restored_end_unix_s[s] != got.times.restored_end_unix_s[s])
             return false;
     const CheckupWindow rw = checkup_aggregate(ref.ring), gw = checkup_aggregate(got.ring);
     const DhwLossWindow rd = dhw_loss_aggregate(ref.dhw), gd = dhw_loss_aggregate(got.dhw);
@@ -23128,7 +23203,30 @@ static void test_checkup_journal_rebuild_in_place() {
 
         const CheckupRestoreOut out = checkup_restore_in_place(c);
         CHECK(out.ring.count == 0 && out.dhw.count == 0 && out.ring.buf[3].starts == 0);
-        CHECK(out.expiry[3] == 0 && !out.dhw_retired);
+        CHECK(out.times.expiry_us[3] == 0 && !out.dhw_retired);
+    }
+
+    // A valid stored interval can predate or exceed the positive uint32 timestamp representation.
+    // Its evidence and expiry survive even when the chart's wall time must be omitted.
+    for (const int64_t end : {int64_t{0}, int64_t{UINT32_MAX}, int64_t{UINT32_MAX} + 1}) {
+        CheckupRestoreCase c;
+        c.model      = model;
+        c.source     = source;
+        c.generation = generation;
+        c.now_us     = 1;
+        c.now_unix_s = end + 1;
+        c.earliest = c.latest = checkup_journal_bucket(end);
+        CheckupJournalRecord rec{c.earliest, {}};
+        rec.payload.model_fp               = model;
+        rec.payload.source_fp              = source;
+        rec.payload.diagnostics_generation = generation;
+        rec.payload.end_unix_s             = end;
+        rec.payload.checkup.starts         = 3;
+        c.stored.push_back(rec);
+        const auto out = checkup_restore_in_place(c);
+        CHECK(out.ring.count == 1 && out.ring.buf[0].starts == 3 &&
+              out.times.expiry_us[0] > c.now_us);
+        CHECK(out.times.restored_end_unix_s[0] == (end == UINT32_MAX ? UINT32_MAX : 0u));
     }
 
     // Differential check against the former copy-clear-push restore over seeded random states.
@@ -23807,12 +23905,11 @@ static void test_history_persist() {
                                           CHECKUP_JOURNAL_WORDS, CHECKUP_DT_S));
     CHECK(!history_journal_header_matches(ch, checkup_journal_fingerprint(), CHECKUP_JOURNAL_WORDS,
                                           HISTORY_DT_S));
-    {
-        // Both sides of the 80-byte bucket layout change emitted this same catalog.
-        // A committed record with a valid CRC therefore cannot identify its field order.
-        constexpr uint32_t ambiguous_catalog = 0xcb5ff68bu;
-        auto               ambiguous         = ch;
-        ambiguous.catalog_fp                 = ambiguous_catalog;
+    // The two original layouts shared one catalog. Layout 2 has its own catalog and does not
+    // retain independent mode totals. Neither may pass the current catalog gate with a valid CRC.
+    for (const uint32_t legacy_catalog : {0xcb5ff68bu, 0x01ae0038u}) {
+        auto legacy       = ch;
+        legacy.catalog_fp = legacy_catalog;
         uint8_t words[CHECKUP_JOURNAL_PAYLOAD_BYTES];
         std::memcpy(words, checkup_words, sizeof(words));
         constexpr size_t bucket_offset = offsetof(CheckupJournalPayload, checkup);
@@ -23820,10 +23917,10 @@ static void test_history_persist() {
         words[bucket_offset + 51]      = 0x12; // high byte, read as flags by the new layout
         words[bucket_offset + 52]      = 6;    // old defrost count
         words[bucket_offset + 53]      = 4;    // old paired defrost count
-        ambiguous.crc                  = history_journal_crc_bytes(ambiguous, words, sizeof(words));
-        CHECK(history_journal_header_matches(ambiguous, ambiguous_catalog, CHECKUP_JOURNAL_WORDS,
+        legacy.crc                     = history_journal_crc_bytes(legacy, words, sizeof(words));
+        CHECK(history_journal_header_matches(legacy, legacy_catalog, CHECKUP_JOURNAL_WORDS,
                                              CHECKUP_DT_S));
-        CHECK(!history_journal_header_matches(ambiguous, checkup_journal_fingerprint(),
+        CHECK(!history_journal_header_matches(legacy, checkup_journal_fingerprint(),
                                               CHECKUP_JOURNAL_WORDS, CHECKUP_DT_S));
     }
     ch.rings[0] = 31;

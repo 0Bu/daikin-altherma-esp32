@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { launchBrowser } from "../tools/browser/cdp_browser.mjs";
 import { startFixtureServer } from "../tools/browser/fixture_server.mjs";
 import { assertHistoryMotion, HISTORY_MOTION_MUTATIONS } from "./test_browser_history_motion.mjs";
+import { assertCyclingChart } from "./test_browser_cycling.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const pageFile = process.env.DAIKIN_BROWSER_PAGE;
@@ -103,6 +104,8 @@ const layoutAudit = `(() => {
   for (const el of candidates) {
     if (!shown(el)) continue;
     const style = getComputedStyle(el);
+    if (el.matches('[data-dashboard-card="diagnosis"] .vrow-label') &&
+        style.textOverflow === "ellipsis" && el.title === el.textContent.trim()) continue;
     const clipsX = ["hidden", "clip"].includes(style.overflowX);
     const clipsY = ["hidden", "clip"].includes(style.overflowY);
     if ((clipsX && el.scrollWidth > el.clientWidth + 1) ||
@@ -1213,6 +1216,32 @@ async function captureNativeEvidence(page, context, target = "valueGroups", ance
     Buffer.from(capture.data, "base64"));
 }
 
+async function assertDiagnosisSummaryRows(page, context) {
+  const layout = await page.evaluate(`(() => {
+    const card = document.querySelector('[data-dashboard-card="diagnosis"]');
+    const rows = Array.from(card.querySelectorAll('button.vrow-desc'));
+    const invalid = rows.flatMap(row => {
+      const bounds = row.getBoundingClientRect();
+      const label = row.querySelector('.vrow-label').getBoundingClientRect();
+      const end = row.querySelector('.vrow-end').getBoundingClientRect();
+      const value = row.querySelector('.vrow-val');
+      const box = value.getBoundingClientRect();
+      const range = document.createRange();
+      range.selectNodeContents(value);
+      const fragments = Array.from(range.getClientRects()).filter(rect => rect.width && rect.height);
+      const wrapped = fragments.some(rect => Math.abs(rect.top - fragments[0].top) > 2);
+      const clipped = fragments.some(rect => rect.left < box.left - 1 || rect.right > box.right + 1);
+      const separateLine = label.bottom <= end.top || end.bottom <= label.top;
+      const overflow = end.right > bounds.right + 1 || label.left < bounds.left - 1;
+      return !fragments.length || wrapped || clipped || separateLine || overflow
+        ? [{ id: row.dataset.desc, value: value.innerText, wrapped, clipped, separateLine, overflow }] : [];
+    });
+    return { count: rows.length, invalid };
+  })()`);
+  assert.ok(layout.count > 0, `${context}: diagnosis summary must render`);
+  assert.deepEqual(layout.invalid, [], `${context}: complete diagnosis readings must fit beside their labels`);
+}
+
 async function assertPlantDiagnosis(page, context) {
   // Exercise the shipped renderer with independently scoped observations, including a real zero,
   // an absent heater channel and stale-source evidence. These fixtures do not certify a plant.
@@ -1230,7 +1259,7 @@ async function assertPlantDiagnosis(page, context) {
       status: "info", full_span: true, span_s: 86400, source_fresh: true, source_age_s: 1,
       available: 8, assessable: 2, evaluated: 2,
       checks: [
-        { id: "fault", verdict: "ok", evidence: "manufacturer", active: 0 },
+        { id: "fault", verdict: "info", evidence: "manufacturer", active: 0 },
         { id: "dhw_loss", verdict: "info", evidence: "heuristic", max_k_h: 1,
           windows: 4, high_windows: 1, high_with_pump: 1, high_pump_off: 0,
           quiet_high_windows: 1, draw_windows: 1, pump_windows: 2,
@@ -1239,10 +1268,12 @@ async function assertPlantDiagnosis(page, context) {
           best_aborted_s: 2400 },
         { id: "cycling", verdict: "ok", evidence: "observation", reason: "class_unavailable",
           starts: 17, mean_run_s: null, space_runs: null, censored_runs: 3,
-          observed_s: 77760, required_s: 77760,
+          observed_s: 77760, required_s: 77760, classified_runtime_s: 5400, censored_runtime_s: 600,
+          hours_epoch: 1,
           hours: [
-            { starts: 2, run_s: 1800, observed_s: 3600 },
-            { starts: 1, run_s: 900, observed_s: 3600, space_s: 900, dhw_s: 0 }
+            { bucket: 0, starts: 2, run_s: 1800, observed_s: 3600, space_s: 0, dhw_s: 0 },
+            { bucket: 1, starts: 1, run_s: 900, observed_s: 1800, elapsed_s: 1800,
+              space_s: 900, dhw_s: 0 }
           ],
           stop_context: {
             confirmed: true, readable_s: 3600, observed_hours: 2, dated: false,
@@ -1266,10 +1297,10 @@ async function assertPlantDiagnosis(page, context) {
           observed_s: 77760, required_s: 77760 },
         { id: "flow", verdict: "ok", evidence: "observation", min_l_min: 10.7,
           observed_s: 60, required_s: 0 },
-        { id: "heater", verdict: "ok", evidence: "observation", buh_s: 59,
-          bsh_s: null, buh_observed_s: 7200, bsh_observed_s: 0,
-          observed_s: 7200, required_s: 0 },
-        { id: "retries", verdict: "ok", evidence: "experimental", seen: 0,
+        { id: "heater", verdict: "ok", evidence: "observation", buh_s: 43200,
+          bsh_s: 64800, buh_observed_s: 72000, bsh_observed_s: 72000,
+          observed_s: 72000, required_s: 0 },
+        { id: "retries", verdict: "info", evidence: "experimental", seen: 1,
           observed_s: 7200, required_s: 0 }
       ]
     };
@@ -1282,8 +1313,24 @@ async function assertPlantDiagnosis(page, context) {
     assert.equal(await page.evaluate(`document.querySelectorAll(${JSON.stringify(selector)}).length`), 8,
       `${context}: all eight diagnosis rows must render`);
     await activateDashboardCardForSelector(page, "[data-desc='model:health_pressure']");
+    await assertDiagnosisSummaryRows(page, `${context}/compact-summary`);
     await captureNativeEvidence(page, `${context}/overview`,
       "[data-desc='model:health_pressure']", ".card");
+    await page.evaluate(`(() => {
+      window.__browserDiagnosisSummaryOriginal = S.status.health.checks;
+      S.status.health.checks = structuredClone(S.status.health.checks);
+      S.status.health.checks[0].active = null;
+      Object.assign(S.status.health.checks[6], { buh_s: 59, bsh_s: null, bsh_observed_s: 0 });
+      Object.assign(S.status.health.checks[7], { verdict: "ok", seen: 0 });
+      renderApp();
+      return true;
+    })()`);
+    try {
+      await assertDiagnosisSummaryRows(page, `${context}/compact-unconfirmed`);
+    } finally {
+      await page.evaluate(`S.status.health.checks = window.__browserDiagnosisSummaryOriginal;
+        delete window.__browserDiagnosisSummaryOriginal; renderApp(); true`);
+    }
     const selectors = await page.evaluate(`Array.from(document.querySelectorAll(${JSON.stringify(selector)}),
       el => '[data-desc="' + el.dataset.desc + '"]')`);
     selectors.push("[data-desc='service:refrigerant']");
@@ -1314,19 +1361,25 @@ async function assertPlantDiagnosis(page, context) {
       .closest('.vitem').innerText`);
     assert.equal(await page.evaluate(`document.querySelectorAll(".checkup-cycling-chart").length`), 1,
       `${context}: cycling chart must render when starts exist`);
-    assert.equal(await page.evaluate(`document.querySelectorAll(".checkup-chart-col").length`), 24,
-      `${context}: cycling chart must render all 24 hour columns`);
+    assert.equal(await page.evaluate(`document.querySelectorAll(".checkup-chart-cols > .checkup-chart-col").length`),
+      24, `${context}: one cycling column for each hour`);
     const [neutral, heating] = await page.evaluate(`Array.from(document.querySelectorAll(
-      ".checkup-chart-col:not(.unobserved)"), col => ({ tip: col.dataset.tip,
-        color: getComputedStyle(col.querySelector('i')).backgroundColor }))`);
-    assert.ok(!neutral.tip.includes("Ø") && !neutral.tip.endsWith(await page.evaluate("t('mode.heat')")),
-      `${context}: unclassified runtime displays without a guessed mode or run average`);
-    assert.ok(heating.tip.endsWith(await page.evaluate("t('mode.heat')")),
-      `${context}: matched heating runtime retains its mode`);
-    assert.notEqual(neutral.color, heating.color, `${context}: unclassified bar has a neutral color`);
-    const stopPopulation = await page.evaluate("t('check.stop.population', '4')");
-    assert.ok((await stopText()).includes(stopPopulation),
-      `${context}: measured starts and the timeline retain the independent stop context`);
+      ".checkup-chart-cols > button"), col => ({
+        parts: Array.from(col.querySelectorAll("s > i"), part => part.className),
+        color: getComputedStyle(col.querySelector("s > i")).backgroundColor,
+        label: col.getAttribute("aria-label")
+      }))`);
+    assert.deepEqual(neutral.parts, ["other"], `${context}: unassigned runtime has its own segment`);
+    assert.doesNotMatch(neutral.label, /Ø/, `${context}: hourly runtime carries no completed-run mean`);
+    assert.deepEqual(heating.parts, ["space"], `${context}: witnessed heating retains its mode`);
+    assert.notEqual(neutral.color, heating.color, `${context}: unassigned and heating runtime differ visually`);
+    assert.ok((await stopText()).includes(await page.evaluate("t('check.stop.population', '4')")),
+      `${context}: hourly chart must keep independent stop observations visible`);
+    assert.ok((await stopText()).includes(await page.evaluate("t('check.detail.class_missing')")),
+      `${context}: hourly chart must retain the classification reason`);
+    assert.ok((await stopText()).includes(
+      await page.evaluate("t('check.detail.channel_coverage', t('mode.heat'), '90%')")),
+      `${context}: hourly chart must retain readable runtime coverage`);
     await captureNativeEvidence(page, `${context}/cycling-with-starts`,
       "[data-desc='model:health_cycling']", ".vitem");
     // A missing legacy cycling population must leave the independent stop context accessible
@@ -1375,7 +1428,7 @@ async function assertPlantDiagnosis(page, context) {
       `${context}: a NOTE retains discarded reading-gap evidence`);
     assert.equal(await page.evaluate(`document.querySelector("[data-desc='model:health_pressure']")
       .closest('.card').querySelector('.section-badge')?.innerText || ''`),
-      await page.evaluate("t('check.summary.notes', 2)"),
+      await page.evaluate("t('check.summary.notes', 4)"),
       `${context}: badge counts findings rather than assessed fractions`);
     await captureNativeEvidence(page, `${context}/expanded`);
     for (const id of ["pressure", "dhw_loss", "cycling", "defrost"])
@@ -1410,6 +1463,7 @@ async function assertPlantDiagnosis(page, context) {
     })()`);
     await page.frame();
     assertLayout(await page.evaluate(layoutAudit), `${context}/dhw-no-window`);
+    await assertDiagnosisSummaryRows(page, `${context}/compact-blocked`);
     assert.equal(await page.evaluate(`document.querySelector("[data-desc='model:health_dhw_loss'] .vrow-val").innerText`),
       await page.evaluate("t('check.status.no_window')"),
       `${context}: a blocked day must not promise ongoing checking`);
@@ -1431,6 +1485,7 @@ async function assertPlantDiagnosis(page, context) {
     })()`);
     await page.frame();
     assertLayout(await page.evaluate(layoutAudit), `${context}/stale`);
+    await assertDiagnosisSummaryRows(page, `${context}/compact-stale`);
     assert.equal(await page.evaluate(`document.querySelector("[data-desc='model:health_fault'] .vrow-val").innerText`),
       await page.evaluate("t('check.status.collecting')"),
       `${context}: stale current fault state cannot render an all-clear`);
@@ -2470,6 +2525,8 @@ try {
     // the supervisor's independent mutation controls remain unchanged.
     for (const viewport of viewports) {
       await page.viewport(viewport.width, viewport.height);
+      await activateLocale(page, "en");
+      await assertCyclingChart(page, server, `${viewport.name}/diagnosis/cycling`);
       for (const locale of browserLocales) {
         await activateLocale(page, locale);
         await page.evaluate("showStage('dashboard'); window.scrollTo(0, 0); true");

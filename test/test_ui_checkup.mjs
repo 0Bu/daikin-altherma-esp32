@@ -49,6 +49,7 @@ for (const key of [
   "censored_runs", "censored_transition_runs", "censored_handover_runs",
   "censored_unreadable_runs", "censored_restart_runs", "censored_start_runs",
   "classified_runtime_s", "censored_runtime_s", "runtime_saturated", "split", "hours",
+  "hours_epoch", "bucket", "end_unix_s", "elapsed_s", "space_s", "dhw_s",
   "outdoor_source", "outdoor_min_c", "outdoor_mean_c", "outdoor_samples",
   "min_bar", "current_bar", "min_unix_s", "confirmed_low", "min_l_min",
   "buh_min", "bsh_min", "buh_s", "bsh_s", "buh_observed_s", "bsh_observed_s", "active", "seen",
@@ -62,8 +63,6 @@ for (const key of [
 }
 assert.match(statusSource, /if\s*\(v\s*<\s*0\)\s*\{\s*j\s*\+=\s*"null";\s*return;\s*\}/,
              "unestablished check numbers must serialize as null");
-assert.match(style, /\.vrow-val\.checkup-val\s*\{[^}]*white-space:\s*normal;[^}]*overflow-wrap:\s*anywhere;[^}]*text-align:\s*right;/s,
-             "checkup statuses must wrap inside narrow cards");
 assert.match(style, /\.vrow-val\.dim\s*\{[^}]*color:\s*var\(--muted\)/s,
              "CHECKING/observation-only rows need a distinct neutral visual state");
 assert.match(style, /\.mb-tag\s*\{[^}]*opacity:\s*\.5;/s,
@@ -419,29 +418,69 @@ assert.equal(ui.value({ ...cycling, verdict: "ok", evidence: "observation" }), "
 assert.equal(ui.value({ ...cycling, verdict: "ok", evidence: "observation", starts: null }), "MEASURED");
 assert.match(ui.detail({ ...cycling, verdict: "ok", evidence: "observation",
                         reason: "heating_runs_insufficient" }), /&lt;12 eligible completed heating runs/);
-const cyclingWithHours = { ...cycling, hours: [
-  { starts: 3, run_s: 1800, observed_s: 3600 },
-  { starts: 0, run_s: 0, observed_s: 3600 },
-  { starts: 1, run_s: 600, observed_s: 1200, space_s: 0, dhw_s: 600 },
-  { starts: 2, run_s: 1200, observed_s: 1600, space_s: 600, dhw_s: 600 },
-  { starts: 1, run_s: 600, observed_s: 1200, space_s: 600, dhw_s: 0 },
-  { starts: 0, run_s: 1200, observed_s: 1200, space_s: null, dhw_s: 1200 },
-] };
-assert.match(ui.detail(cyclingWithHours), /\bcheckup-cycling-chart\b/);
-assert.match(ui.detail(cyclingWithHours), /\bcheckup-cycling-grid\b/);
-assert.equal((ui.detail(cyclingWithHours).match(/class="checkup-chart-col\b/g) || []).length, 24);
-assert.match(ui.detail(cyclingWithHours), /3 starts · 30 min"><b class="warn">3<\/b><s><i class=""/);
-assert.match(ui.detail(cyclingWithHours), /1 start · 10 min · Hot water/);
-assert.match(ui.detail(cyclingWithHours), /2 starts · 20 min · Heating \+ hot water/);
-assert.match(ui.detail(cyclingWithHours), /1 start · 10 min · Heating/);
-assert.match(ui.detail(cyclingWithHours), /0 starts · 20 min"><b><\/b><s><i class=""/);
-assert.doesNotMatch(ui.detail(cyclingWithHours), /data-tip="[^"]*Ø/);
-for (const starts of [0, 13]) {
-  const mixed = ui.detail({ ...cyclingWithHours, starts, stop_context: stopContext });
-  assert.match(mixed, /\bcheckup-cycling-chart\b/);
-  assert.match(mixed, /4 witnessed stops after recent heating/);
-  assert.equal((mixed.match(/class="[^"]*\bcheckup-stop-box\b[^"]*"/g) || []).length, 1);
+const cyclingWithHours = { ...cycling, starts: 0, verdict: "ok", evidence: "observation",
+  reason: "class_population_incomplete", classified_runtime_s: 5400, censored_runtime_s: 600,
+  stop_context: stopContext, hours_epoch: 1, hours: [
+    { bucket: -1, starts: 0, run_s: 1800, observed_s: 3600, space_s: 600, dhw_s: 600 },
+    { bucket: 0, starts: 0, run_s: 0, observed_s: 3600 },
+    { bucket: 1, starts: 0, run_s: 600, observed_s: 1200, elapsed_s: 1800, space_s: 0, dhw_s: 0 },
+  ] };
+assert.doesNotMatch(ui.detail(cyclingWithHours), /\bcheckup-cycling-chart\b/,
+  "closed diagnosis must not build the chart");
+context.S.descOpen.add("model:health_cycling");
+detail = ui.detail(cyclingWithHours);
+assert.match(detail, /\bcheckup-cycling-chart\b/);
+assert.match(detail, /\bcheckup-cycling-grid\b/);
+assert.match(detail, /\bcheckup-chart-cols\b/);
+assert.equal((detail.match(/class="checkup-chart-col\b/g) || []).length, 24);
+assert.doesNotMatch(detail, /type="range"/, "hour buttons own selection");
+assert.match(detail, /data-bucket="-1"/, "restored logical bucket identifiers may be negative");
+const hourMarkup = (html, bucket) => html.match(
+  new RegExp(`<button[^>]*data-bucket="${bucket}"[^>]*>.*?</button>`))?.[0] || "";
+const modeSegments = (hour) => [...hour.matchAll(/<i class="(space|dhw|other)"/g)].map(match => match[1]);
+assert.deepEqual(modeSegments(hourMarkup(detail, -1)), ["space", "dhw", "other"],
+  "a mixed hour keeps each positively observed mode and its unassigned remainder");
+assert.deepEqual(modeSegments(hourMarkup(detail, 0)), [],
+  "an observed zero does not create a runtime segment");
+const openHour = hourMarkup(detail, 1);
+assert.match(openHour, /<i class="gap"/, "elapsed unread time appears as a separate gap");
+assert.doesNotMatch(openHour, /<i class="future"/, "unelapsed time leaves the bar unfilled");
+assert.match(detail, /Incomplete classification/);
+assert.match(detail, /Heating: 90% covered/);
+const qualifiedHours = ui.detail({ ...cyclingWithHours, starts: 5, hours: [
+  { bucket: 0, starts: 3, run_s: 1800, observed_s: 3600, space_s: 0, dhw_s: 0 },
+  { bucket: 1, starts: 1, run_s: 600, observed_s: 3600, space_s: 0, dhw_s: 600 },
+  { bucket: 2, starts: 1, run_s: 600, observed_s: 3600, space_s: 600, dhw_s: 0 },
+  { bucket: 3, starts: 0, run_s: 1200, observed_s: 1200, elapsed_s: 1200, space_s: null, dhw_s: 1200 },
+] });
+const unassigned = hourMarkup(qualifiedHours, 0);
+assert.match(unassigned, /3 starts · 30 min/);
+assert.match(unassigned, /<b class="warn">3<\/b>/);
+assert.doesNotMatch(unassigned, /Ø/, "hourly runtime and starts do not establish an average");
+assert.deepEqual(modeSegments(unassigned), ["other"]);
+assert.deepEqual(modeSegments(hourMarkup(qualifiedHours, 1)), ["dhw"]);
+assert.deepEqual(modeSegments(hourMarkup(qualifiedHours, 2)), ["space"]);
+assert.deepEqual(modeSegments(hourMarkup(qualifiedHours, 3)), ["other"],
+  "a malformed mode pair leaves observed runtime unassigned");
+for (const html of [detail, qualifiedHours]) {
+  assert.match(html, /4 witnessed stops after recent heating/,
+    "zero and positive start populations both retain independent stop observations");
+  assert.equal((html.match(/class="checkup-stop-box"/g) || []).length, 1);
 }
+const legacyOpen = hourMarkup(ui.detail({ ...cyclingWithHours, hours_epoch: undefined,
+  hours: [{ starts: 2, run_s: 600, observed_s: 1200, space_s: 600, end_unix_s: 1792887600 }] }), 23);
+assert.doesNotMatch(legacyOpen, /<i class="space"/,
+  "legacy mode fields cannot establish witnessed heating");
+assert.match(legacyOpen, /<i class="other"/, "retain observed legacy runtime without assigning it to heating");
+assert.doesNotMatch(legacyOpen, /<i class="gap"/, "legacy open hour cannot establish elapsed unread time");
+const startup = ui.detail({ ...cyclingWithHours, hours_epoch: 2,
+  hours: [{ bucket: 0, starts: 0, run_s: 0, observed_s: 0, elapsed_s: 0 }] });
+assert.equal((startup.match(/<button[^>]*data-bucket=/g) || []).length, 1,
+  "an incomplete ring leaves older positions unavailable to keyboard selection");
+const startupHour = hourMarkup(startup, 0);
+assert.match(startupHour, /No data/, "zero elapsed time and no start witness establish no count");
+assert.doesNotMatch(startupHour, /<i class="gap"/, "the newly opened hour has no elapsed gap");
+context.S.descOpen.delete("model:health_cycling");
 
 // Causes are exclusive subcounts of the retained total, never inferred from missing fields.
 // Runtime coverage uses heating and unsafe unclassified time; hot-water duration cannot dilute it.
@@ -513,12 +552,17 @@ assert.match(ui.detail({ ...defrost, verdict: "ok", evidence: "observation",
                         reason: "defrost_events_insufficient" }), /Fewer than three paired defrosts/);
 assert.match(ui.detail({ id: "defrost", verdict: "ok", evidence: "observation",
                          reason: "no_paired_runtime", count: 3 }), /event count only/);
-assert.equal(ui.value({ id: "retries", verdict: "ok", evidence: "experimental", seen: 0 }), "No increase seen");
+assert.equal(ui.value({ id: "retries", verdict: "ok", evidence: "experimental", seen: 0 }), "No increase");
+assert.equal(ui.value({ id: "retries", verdict: "info", evidence: "experimental", seen: 1 }), "Increase");
 assert.equal(ui.value({ id: "retries", verdict: "ok", evidence: "experimental" }), "TENTATIVE");
 assert.equal(ui.value({ id: "fault", verdict: "ok", active: 0 }), "None active");
 assert.equal(ui.value({ id: "defrost", verdict: "ok", evidence: "observation", count: 3, defrost_s: 200, run_s: 1000 }), "20 %");
 assert.equal(ui.value({ id: "flow", verdict: "ok", evidence: "observation" }), "MEASURED");
 assert.equal(ui.value({ id: "heater", verdict: "ok", evidence: "observation" }), "MEASURED");
+assert.equal(ui.value({ id: "heater", verdict: "ok", buh_s: 0, bsh_s: 59 }),
+  ui.text("en", "check.min", `${ui.text("en", "check.buh_short")} 0 · ${ui.text("en", "check.tank_short")} <1`));
+assert.equal(ui.value({ id: "heater", verdict: "ok", buh_s: null, bsh_s: 0 }),
+  ui.text("en", "check.min", `${ui.text("en", "check.tank_short")} 0`));
 
 // The badge counts the highest-severity serialized findings; unrelated metadata cannot turn it
 // into a health score. Pure observations never get a fake assessment denominator.

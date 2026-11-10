@@ -337,7 +337,7 @@ assert.match(cFlash, /logic::checkup_journal_choose\(/);
 assert.doesNotMatch(checkup, /s_restore_live/,
   "this boot's completed hours compete in place, never through a static copy");
 assert.match(cFlash,
-  /if \(logic::checkup_journal_rebuild\(P\(\)\.ring, P\(\)\.dhw, s_restored_expiry_us, live, records, count, earliest_bucket, latest_bucket, now_unix_s, now_us, s_source_confirmed, s_model_fp, s_source_fp, s_diagnostics_generation, reset_requested, s_dhw_source_fp, s_dhw_reset_requested\.load\(\)\)\) s_dhw_scope_us = now_us;/,
+  /if \(logic::checkup_journal_rebuild\( ?P\(\)\.ring, P\(\)\.dhw, s_slot_times, live, records, count, earliest_bucket, latest_bucket, now_unix_s, now_us, s_source_confirmed, s_model_fp, s_source_fp, s_diagnostics_generation, reset_requested, s_dhw_source_fp, s_dhw_reset_requested\.load\(\)\)\) s_dhw_scope_us = now_us;/,
   "a mismatched circulation mapping must retire DHW alone, while admitting dated X10A checks");
 assert.doesNotMatch(cFlash, /\.reset\(\);/, "the rebuild must not clear the live hours it keeps");
 const noMaterialized = cFlash.indexOf("if (!materialized)");
@@ -352,8 +352,14 @@ assert.match(persistRebuild,
   /const bool keep_dhw = !dhw_reset_requested && checkup_journal_dhw_identity_matches\( ?c\.stored->payload, dhw_source_fp\);/,
   "a stored hour keeps DHW evidence only under the current circulation identity");
 assert.match(persistRebuild,
-  /std::rotate\(ring\.buf, ring\.buf \+ start, ring\.buf \+ kSlots\); std::rotate\(dhw\.buf, dhw\.buf \+ start, dhw\.buf \+ kSlots\); std::rotate\(expiry_us, expiry_us \+ start, expiry_us \+ kSlots\); ring\.count = dhw\.count = static_cast<uint8_t>\(n\); ring\.head = dhw\.head = static_cast<uint8_t>\(n % kSlots\);/,
+  /std::rotate\(ring\.buf, ring\.buf \+ start, ring\.buf \+ kSlots\); std::rotate\(dhw\.buf, dhw\.buf \+ start, dhw\.buf \+ kSlots\); std::rotate\(expiry_us, expiry_us \+ start, expiry_us \+ kSlots\); std::rotate\(restored_end_unix_s, restored_end_unix_s \+ start, restored_end_unix_s \+ kSlots\); ring\.count = dhw\.count = static_cast<uint8_t>\(n\); ring\.head = dhw\.head = static_cast<uint8_t>\(n % kSlots\);/,
   "a ring that is not full keeps its oldest hour in slot 0, which both aggregates read first");
+assert.match(persistRebuild,
+  /const size_t p = \(start \+ j\) % kSlots; restored_end_unix_s\[p\] = 0;/,
+  "unrestored slots start without a stored wall time");
+assert.match(persistRebuild,
+  /restored_end_unix_s\[p\] = static_cast<uint32_t>\(c\.stored->payload\.end_unix_s\);/,
+  "a restored interval takes its own saved wall time");
 assert.match(cFlash, /s_persist_verdict = logic::CheckupRestore::Flash;/);
 assert.doesNotMatch(cFlash, /s_persist_verdict = logic::CheckupRestore::Accept/);
 assert.match(body(checkup, "logic::CheckupReport checkup_report()"), /expire_restored_locked\(\);/);
@@ -366,8 +372,13 @@ assert.match(cRecord, /if \(n\) s_source_last_us = now;/,
 assert.match(cRecord,
   /const int64_t completed_start_us = completed_end_us - static_cast<int64_t>\(logic::CHECKUP_DT_S\) \* 1000000LL;/,
   "completed-hour expiry must use the bucket start, matching ordinary ring replacement");
-assert.match(cRecord, /s_restored_expiry_us\[committed_i\] = logic::checkup_live_expiry_us\(completed_start_us\);/,
+assert.match(cRecord, /s_slot_times\.expiry_us\[committed_i\] = logic::checkup_live_expiry_us\(completed_start_us\);/,
   "a stalled producer cannot keep completed findings for an extra hour");
+assert.match(cRecord, /s_slot_times\.expiry_us\[slot\] = 0; s_slot_times\.restored_end_unix_s\[slot\] = 0;/,
+  "the same overwritten slot loses both its deadline and its stored time");
+assert.match(body(checkup, "void expire_restored_locked()"),
+  /s_slot_times\.expiry_us\[i\] = 0; s_slot_times\.restored_end_unix_s\[i\] = 0;/,
+  "an expired interval can no longer label a chart hour");
 const cReport = body(checkup, "logic::CheckupReport checkup_report()");
 assert.match(cReport, /source_fresh \? s_fault_now : FaultClass::Unknown/,
   "the last cycle's fault class must not masquerade as a current observation after a stall");

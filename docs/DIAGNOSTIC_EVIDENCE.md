@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 717141a74dab6204dac037af815c83268a1dd8edb14777fa5d154b55d5ca3c88 -->
+<!-- diagnostic-evidence-contract: 7b059c2ecc9f7c1a9332b687300940453b08a9ec80b1c052c5b1d6401497539c -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -231,12 +231,6 @@ Positively observed uninterrupted heating/DHW handovers remain censored with the
 their space phases never become heating runs. Other causes distinguish unaccepted transitions,
 unreadable class/RPS, journal/window boundaries and unwitnessed starts.
 
-The hourly chart integrates intervals of at most 15 seconds with running compressor readings at
-both endpoints. A split requires every counted interval to have the same eligible class at both
-ends. A known DHW valve route qualifies as DHW. Space heating needs a known room route and heating
-mode. An hourly start count and its runtime can cover different runs and do not form a completed-run
-mean.
-
 The count population is the larger of completed runs and starts minus one, less proven handovers.
 At least 90% must be classified. At least 90% of completed heating runtime plus unsafe censored
 elapsed runtime must also be completed pure heating runtime; DHW runtime cannot mask missing long
@@ -265,6 +259,18 @@ runs never enter the completed mean. Completed-run evidence ages with its start 
 CHECKUP_CYCLING_MIN_STARTS, CHECKUP_CYCLING_SHORT_RUN_S and CHECKUP_CYCLING_CLASSIFIED_PCT in
 [checkup.hpp](../main/logic/checkup.hpp). Fresh X10A outdoor minimum/mean accompanies only accepted
 completed heating runs, from samples whose predecessor was also running, and changes no threshold.
+
+The hourly chart counts compressor running intervals of at most 15 seconds separately from completed
+runs. Both endpoints must show the compressor running in the same heating or DHW class to assign
+that interval. The DHW route identifies DHW. Space heating requires the room circuit and reported
+heating mode. Other
+runtime, including confirmed defrost, stays unassigned. The chart can include parts of runs that
+start or finish outside the slot. Hatching covers only the elapsed time without readable compressor
+evidence. A positive count witnesses a start even before a readable interval accrues. A zero in a
+partly observed slot means no starts were observed during its readable portion.
+Older core journals cannot provide the packed independent mode totals. A fresh compatible hourly
+window starts filling after upgrade. The independent Stop journal and DHW restart handoff retain
+their own compatibility checks.
 
 **Project boundary:** Twelve heating runs, ten minutes and the 90% evidence requirements are
 project heuristics, not limits copied from R1 or specified by Daikin. R1 studied different,

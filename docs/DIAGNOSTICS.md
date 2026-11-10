@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: c7a9f635360330329f111029c8e80d715e43a14072dc1166fdf0590bba7fba9c -->
+<!-- user-docs-contract: 4efa603b7d7b65e5e3956d5b95a091b22bc7c315381e0ab7ab45b1572a21e969 -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default. Enable **Plant diagnostics** under **Settings → Firmware** to start an evidence
@@ -102,12 +102,14 @@ software restart preserves the remaining settling time, but unseen charging can 
 <!-- user-docs: health_cycling -->
 ### Compressor cycling
 
-**In plain language:** The board counts starts across all modes and plots hourly starts and
-compressor runtime across the 24-hour window. Gray bars show runtime without a heating or hot-water
-label when the mode split is incomplete. An hourly bar can include part of a run that started before
-that hour. The board classifies completed runs separately as space heating, domestic hot water
-(DHW), cooling or unclassified. Unclassified runs explain missing readings, transitions,
-heating/DHW handovers, journal boundaries and unwitnessed starts.
+**In plain language:** The board counts compressor starts and classifies completed runs as space
+heating, domestic hot water (DHW), cooling or unclassified. In the 24-hour chart, each column puts
+the start count above a runtime bar. Select a column for its measurements and coverage. The bar
+separates heating, hot water and remaining runtime. Hatching marks elapsed time without compressor
+readings. The bars show hourly totals. The timing within each hour is unknown. Undated hours have
+relative labels.
+Unclassified run counts explain missing readings, transitions, handovers, journal boundaries and
+unwitnessed starts.
 
 **Meaning:** At least **12 completed space-heating runs** can carry the assessment when both run
 count and runtime coverage reach **90%**. Positively observed heating/DHW handovers remain visible
@@ -118,12 +120,12 @@ and 90% readable classification time.
 Smaller or insufficiently classified populations are **MEASURED**, with the reason shown;
 no usable compressor observation remains **CHECKING**.
 
-**Important limit:** There is no pooled all-mode assessment, and an unfinished long run cannot dilute
-completed short runs. Twelve runs and ten minutes are project heuristics, not Daikin limits. These
-figures do not identify oversizing or hydraulic imbalance. Optional outdoor min/mean is context for
-accepted heating runs only. A missing class or compressor reading may bridge at most 15 seconds
-between matching known-running readings, measured from their actual timestamps even across an
-hour boundary. Unknown readings never become OFF. A pure DHW charge
+**Important limit:** The mean is based on completed heating runs. A bar can include runtime
+from a run started in another hour. Twelve runs and ten minutes are project heuristics, not
+Daikin limits. These figures do not identify oversizing or hydraulic imbalance. Optional outdoor
+min/mean is context for accepted heating runs only. A missing class or compressor reading may
+bridge at most 15 seconds between matching known-running readings, measured from their actual
+timestamps even across an hour boundary. Unknown readings never become OFF. A pure DHW charge
 may include a final valve return to the room circuit of at most 30 seconds before a known stop,
 including when the readable indoor mode still says DHW. A cooling mode or unreadable tail is not
 accepted. This project allowance is based on observed 6–22 second tails, not a Daikin specification.

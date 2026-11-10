@@ -1,4 +1,4 @@
-// translation-source: fa1129dce36de7da23d04178f67c6ff1b7f7a1ba9974648b6bae1e479a441c15
+// translation-source: 0a9b357c29bd7c842a11f7de464d548af9a92316c15c31e50a54b1facf17e59e
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -243,15 +243,23 @@ I18N.pl = localeValues([
   /* check.min */ (m) => `${m} min`,
   /* check.tank_runtime */ (d) => `zbiornik ${d}`,
   /* check.buh_runtime */ (d) => `dodatkowa ${d}`,
+  /* check.buh_short */ "Wsp.",
+  /* check.tank_short */ "Zas.",
+  /* check.hour.latest */ "Ostatni przedział",
+  /* check.hour.earlier */ (h) => `${h} godz. wcześniej`,
+  /* check.hour.other */ "Inne / nieznane",
+  /* check.hour.gap */ "Luka w pomiarach",
+  /* check.hour.coverage */ (observed, possible) => possible ? `Zaobserwowano ${observed} z ${possible}` : `Zaobserwowano ${observed} · nieznany czas od początku`,
+  /* check.hour.ending */ (time) => `Koniec przedziału ${time}`,
   /* check.loss_windows */ (n) => `${n} ${plNoun(n, "okno", "okna", "okien")}`,
   /* check.fault_err */ "Usterka aktywna",
   /* check.fault_warn */ "Ostrzeżenie aktywne",
-  /* check.fault_past */ "Wystąpiło w ciągu ostatnich 24 h · teraz nieaktywne",
+  /* check.fault_past */ "Wcześniej aktywna",
   /* check.fault_none */ "Brak aktywnych",
-  /* check.fault_unknown */ "Bieżący stan nieznany",
-  /* check.fault_past_unknown */ "Wystąpiło w ciągu ostatnich 24 h · bieżący stan nieznany",
-  /* check.retry_seen */ "Wykryto wzrost licznika",
-  /* check.retry_none */ "Nie wykryto wzrostu",
+  /* check.fault_unknown */ "Stan nieznany",
+  /* check.fault_past_unknown */ "Była · stan nieznany",
+  /* check.retry_seen */ "Wzrost",
+  /* check.retry_none */ "Bez wzrostu",
   /* service.metric.comp */ "Sprężarka",
   /* service.metric.disch */ "Temperatura tłoczenia",
   /* service.metric.eev */ "Polecenie zaworu rozprężnego",

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { INSPECTOR_TRENDS, NO_HISTORY_INSPECTORS, makeHistoryMotionFixture,
   MODBUS_HISTORY_ROWS } from "./test_browser_history_fixture.mjs";
+import { assertCyclingChart } from "./test_browser_cycling.mjs";
 
 const BUDGET_MS = 250;
 export const HISTORY_MOTION_MUTATIONS = Object.freeze([
@@ -932,6 +933,7 @@ export async function assertHistoryMotion(page, server, context) {
   const disclosureMutation = ["history-disclosure-replace", "history-detach", "history-text-stale"].includes(mutation);
   const index = process.argv.indexOf("--history-motion-case");
   const only = index >= 0 ? process.argv[index + 1] : "";
+  if (!only && !mutation) await assertCyclingChart(page, server, context + "/cycling");
   const originalStatus = await page.evaluate("JSON.parse(JSON.stringify(S.status))");
   const lang = await page.evaluate("LANG");
   const fixture = makeHistoryMotionFixture(originalStatus, lang);

@@ -272,11 +272,20 @@ and blocks an assessment. Counter saturation or inconsistent cause totals also b
 legacy `mean_run_s` remains present as null. Transition/gap rules and limitations are in
 [DIAGNOSTIC_EVIDENCE.md](DIAGNOSTIC_EVIDENCE.md#diagnosis-cycling).
 
-`hours` lists up to 24 chronological buckets with `starts`, `run_s` and `observed_s`, including the
-open hour. For positive runtime with complete [hourly mode attribution](DIAGNOSTIC_EVIDENCE.md#diagnosis-cycling),
-the optional fields satisfy `space_s + dhw_s = run_s`. A zero in that pair means zero
-attributed seconds for the corresponding mode. The hourly runtime can include parts of runs started
-outside the hour.
+`cycling.hours` contains up to 24 slots, oldest first. Each slot reports the observed
+`starts`, compressor `run_s` and readable compressor `observed_s`. The signed `bucket`
+identifies the slot within `boot_id` and `cycling.hours_epoch`. Source resets and
+journal restoration can start a new epoch. `end_unix_s` is the mapped or journaled end
+of a closed slot. Use relative order for undated or open slots. The open slot alone
+has `elapsed_s`, the monotonic seconds elapsed since its start, from 0 to 3600. For
+closed slots, the nominal duration is 3600 seconds. The difference between that
+duration or `elapsed_s` and `observed_s` is the unread time. The rest of an open hour
+has yet to elapse. `starts:0` with no readable time leaves the start count unknown,
+while a positive `starts` counts witnessed edges even without a readable duration.
+When `run_s` is positive, `space_s` and `dhw_s` report positively witnessed heating
+and hot-water runtime in the slot, including zero when no time could be assigned to
+that mode. The rest of `run_s` remains unassigned. Hourly runtime and starts measure
+different populations and cannot produce an average completed run.
 
 `cycling.stop_context` is an independent observation object; it changes no legacy cycling field or
 verdict. `denominator` names `witnessed_stops_recent_heating`, the separately counted witnessed

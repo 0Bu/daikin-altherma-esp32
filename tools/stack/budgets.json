@@ -293,6 +293,10 @@
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?checkup_report\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?14checkup_report[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
       "max_bytes": 784
     },
+    "checkup_cycling_hours": {
+      "pattern": "^daik::checkup_cycling_hours\\(\\)$",
+      "max_bytes": 512
+    },
     "history_flash_restore": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?history_service_flash_restore\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?29history_service_flash_restore[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
       "max_bytes": 416
@@ -303,7 +307,7 @@
     },
     "checkup_journal_rebuild": {
       "pattern": "^daik::logic::checkup_journal_rebuild\\(",
-      "max_bytes": 176
+      "max_bytes": 192
     },
     "checkup_journal_choose": {
       "pattern": "^daik::logic::checkup_journal_choose\\(",
@@ -2910,6 +2914,35 @@
         "http_send_status_json",
         "status_serializer",
         "checkup_report"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_cycling_hours": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "checkup_cycling_hours",
+        "cycling_expire",
+        "cycling_seal",
+        "cycling_crc",
+        "room_time_now"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_direct_cycling_hours": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "checkup_cycling_hours",
+        "cycling_expire",
+        "cycling_seal",
+        "cycling_crc",
+        "room_time_now"
       ],
       "multipliers": {},
       "base_bytes": 1536,
@@ -11420,6 +11453,8 @@
         "httpd_direct_status",
         "httpd_mcp_checkup",
         "httpd_direct_checkup",
+        "httpd_mcp_cycling_hours",
+        "httpd_direct_cycling_hours",
         "httpd_ota_status",
         "httpd_ota_check",
         "httpd_config_hp",

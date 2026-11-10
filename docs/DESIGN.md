@@ -583,10 +583,15 @@ succeeded. Long-running failure reasons wrap and remain available until acknowle
 
 The schematic and Settings cards remain a centred single column; dashboard details use §6's
 selectable panel. The page never scrolls horizontally; the mobile card selector and wide schematic/table
-content scroll within their own containers. Keep value plus unit together. When label and value no longer fit,
-stack the value below/right rather than squeeze labels to single-character columns. Inspector
-headings wrap by content; value labels keep their defined share. Split Settings actions own their
-padding and cannot overlap when stacked. Measure every shipped locale at 320 px.
+content scroll within their own containers. Keep value plus unit together. Stack ordinary rows
+when label and value no longer fit. Plant diagnosis headers keep the label and compact value
+on one line and put the full observation in the disclosure. Inspector headings wrap by content
+and value labels keep their defined share. Split Settings actions own their padding and cannot
+overlap when stacked. Measure every shipped locale at 320 px.
+
+The cycling disclosure uses one row of hourly columns with start counts above stacked runtime
+bars. The columns own pointer and keyboard selection and share one readout. Hatch only elapsed
+unread time. Leave the unelapsed part of the open hour unfilled.
 
 Use logical keyboard order, visible focus, Enter/Space activation, Escape at the innermost layer,
 modal focus return and scroll lock. Background controls are unavailable while a dialog is open.

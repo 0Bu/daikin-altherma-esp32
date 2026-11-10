@@ -1816,7 +1816,11 @@ function replaceHistoryHtml(host, html) {
   const active = globalThis.document?.activeElement;
   const { histId, histSeries, hist, source = "" } = active?.dataset || {};
   const owner = node => node?.closest?.(".vitem")?.querySelector("[data-desc]")?.dataset.desc;
+  // The cycling chart may be mounted inside its own slot before the surrounding row is rendered.
+  const signature = node => JSON.stringify([node.hasAttribute("data-cycling")
+    ? "model:health_cycling" : owner(node), node.outerHTML]);
   const focusedOwner = owner(active);
+  const cycling = active?.closest?.("[data-cycling]");
   const focused = host.contains?.(active);
   // Also reconcile plain read-only rows. Other hosts without charts keep full writes:
   // a control's live value is not represented by its attributes.
@@ -1842,7 +1846,7 @@ function replaceHistoryHtml(host, html) {
       }
       if (a.nodeType !== 1) return a.isEqualNode(b);
       if (a.classList.contains("vhist"))
-        return a._histMarkup === JSON.stringify([owner(b), b.outerHTML]);
+        return a._histMarkup === signature(b);
       const nextAttrs = attrs(b);
       if (attrs(a).length !== nextAttrs.length ||
           nextAttrs.some(attr => a.getAttribute(attr.name) !== attr.value)) return false;
@@ -1860,8 +1864,8 @@ function replaceHistoryHtml(host, html) {
     S.trendRebuilding = true;
     try {
       for (const node of roots(template.content)) {
-        if (!node.querySelector("[data-hist]")) continue;
-        const sig = JSON.stringify([owner(node), node.outerHTML]);
+        if (!node.hasAttribute("data-cycling") && !node.querySelector("[data-hist]")) continue;
+        const sig = signature(node);
         const index = prior.findIndex(old => old._histMarkup === sig);
         if (index < 0) node._histMarkup = sig;
         else node.replaceWith(prior.splice(index, 1)[0]);
@@ -1877,6 +1881,18 @@ function replaceHistoryHtml(host, html) {
   else if (focused && histSeries) for (const button of host.querySelectorAll("[data-hist-series]")) {
     if (button.dataset.histId === histId && button.dataset.histSeries === histSeries)
       button.focus({ preventScroll: true });
+  }
+  else if (focused && (cycling || active?.dataset?.desc)) {
+    const chart = cycling && host.querySelector("[data-cycling]");
+    const sameScope = chart && chart.dataset.cycling === cycling.dataset.cycling;
+    const next = sameScope && (chart.querySelector(`[data-bucket="${active.dataset.bucket}"]`) ||
+      chart.querySelector("[tabindex='0']"));
+    (next || [...host.querySelectorAll("[data-desc]")].find(button => button.dataset.desc === focusedOwner))
+      ?.focus({ preventScroll: true });
+  }
+  if (typeof paintCyclingChart === "function") {
+    const chart = host.querySelector("[data-cycling]");
+    if (chart) paintCyclingChart(chart);
   }
 }
 
@@ -2075,10 +2091,11 @@ function displayHomeHubLabel(row) {
 function descAccordion(key, label, valHtml, cls, bodyHtml, trendId, unit = "") {
   const open = S.descOpen.has(key);
   if (open && trendId) bodyHtml += histHtml(trendId, unit, label);
+  const diagnosisLabel = key.startsWith("model:health_") || key === "service:refrigerant";
   return `<div class="vitem${open ? " open" : ""}">` +
     `<button class="vrow vrow-desc" type="button" data-desc="${esc(key)}"` +
     (trendId ? ` data-trend="${esc(trendId)}" data-unit="${esc(unit)}"` : "") + ` aria-expanded="${open ? "true" : "false"}">` +
-    `<span class="vrow-label">${esc(label)}</span>` +
+    `<span class="vrow-label"${diagnosisLabel ? ` title="${esc(label)}"` : ""}>${esc(label)}</span>` +
     `<span class="vrow-end"><span class="vrow-val ${cls}">${valHtml}</span>${chevIcon}</span>` +
     `</button>` +
     `<div class="vdesc"><div class="vdesc-inner"><div class="vdesc-body">${bodyHtml}</div></div></div>` +
@@ -2268,6 +2285,11 @@ function toggleDesc(btn) {
   // let the saved closed markup suppress the next render and retain its hidden history SVG.
   const owner = btn.closest("#valueGroups, #settingsCards");
   if (owner) delete _html[owner.id];
+  if (key === "model:health_cycling") {
+    const chart = item.querySelector("[data-checkup-hours]");
+    const check = S.status?.health?.checks?.find(c => c.id === "cycling");
+    if (chart) replaceHistoryHtml(chart, open ? checkupCyclingChartHtml(check) : "");
+  }
   // Opening a schematic history also fills the cache used by value rows. Do not build and parse
   // another SVG in every collapsed row on every two-second poll. Mount it only on disclosure,
   // including a cache hit (ensureHistPair then returns without triggering a repaint).

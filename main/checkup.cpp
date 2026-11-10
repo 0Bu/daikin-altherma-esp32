@@ -122,7 +122,9 @@ uint32_t                     s_boot_handoff_model = 0;
 bool                         s_boot_handoff_valid = false;
 // Exact expiry for reconstructed completed slots, including selected live intervals.
 // Current-boot completions carry the same deadline: a stopped producer must still lose old hours.
-int64_t s_restored_expiry_us[logic::CHECKUP_COMPLETED_BUCKETS] = {};
+logic::CheckupJournalSlotTimes s_slot_times;
+uint32_t                       s_cycling_hours_epoch   = 0;
+int32_t                        s_cycling_newest_bucket = 0;
 // Capability of the CURRENT converter-adjudicated profile. hp_poll derives it from the profile rows,
 // not from successful reads, so a timeout reduces evidence without pretending the feature vanished.
 // Replacing instead of OR-latching it is important when model detection changes at runtime.
@@ -285,7 +287,10 @@ void checkup_persist_seal() {
 void persist_wipe(bool keep_handoff = false) {
     P().ring.reset();
     P().dhw.reset();
-    for (auto& expiry : s_restored_expiry_us) expiry = 0;
+    for (auto& expiry : s_slot_times.expiry_us) expiry = 0;
+    for (auto& end : s_slot_times.restored_end_unix_s) end = 0;
+    ++s_cycling_hours_epoch;
+    s_cycling_newest_bucket = 0;
     if (!keep_handoff) P().dhw_handoff.magic = 0;
     P().boots_since_commit = 0; // reserved integrity counter; no completed RAM hours are adopted
     s_last_commit_us = kNoCommitUs;
@@ -758,8 +763,11 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
         const uint32_t skipped = logic::checkup_skipped(s_state.bucket, bucket);
         // Every overwritten slot loses its old flash expiry, including explicit skipped gaps.
         const size_t overwritten = 1u + std::min<size_t>(skipped, logic::CHECKUP_COMPLETED_BUCKETS);
-        for (size_t i = 0; i < overwritten; ++i)
-            s_restored_expiry_us[(P().ring.head + i) % logic::CHECKUP_COMPLETED_BUCKETS] = 0;
+        for (size_t i = 0; i < overwritten; ++i) {
+            const size_t slot            = (P().ring.head + i) % logic::CHECKUP_COMPLETED_BUCKETS;
+            s_slot_times.expiry_us[slot] = 0;
+            s_slot_times.restored_end_unix_s[slot] = 0;
+        }
         P().ring.commit(skipped);
         P().dhw.commit(skipped);
         // Expire at the same start+24 h boundary that a progressing 23-slot ring would overwrite.
@@ -772,7 +780,7 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
             (static_cast<size_t>(P().ring.head) + logic::CHECKUP_COMPLETED_BUCKETS - overwritten) %
             logic::CHECKUP_COMPLETED_BUCKETS;
         if (skipped < logic::CHECKUP_COMPLETED_BUCKETS)
-            s_restored_expiry_us[committed_i] = logic::checkup_live_expiry_us(completed_start_us);
+            s_slot_times.expiry_us[committed_i] = logic::checkup_live_expiry_us(completed_start_us);
         s_last_commit_us = static_cast<int64_t>(bucket) * logic::CHECKUP_DT_S * 1000000LL;
         const uint32_t committed_now =
             1u + (skipped < logic::CHECKUP_COMPLETED_BUCKETS ? skipped
@@ -794,6 +802,12 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
         if (!discard_dhw_sample)
             logic::dhw_loss_step(s_dhw_state, P().dhw.pending, s, now);
     }
+    // Re-anchoring after a stopped producer starts a new selection identity when it changes the
+    // relative position of restored hours. Ordinary commits advance their ID by one per bucket.
+    if (!s_state.have_bucket && P().ring.count &&
+        s_cycling_newest_bucket != static_cast<int32_t>(bucket))
+        ++s_cycling_hours_epoch;
+    s_cycling_newest_bucket = static_cast<int32_t>(bucket);
     s_state.bucket      = bucket;
     s_state.have_bucket = true;
 }
@@ -855,10 +869,11 @@ void expire_restored_locked() {
     const int64_t now_us  = esp_timer_get_time();
     bool          changed = false;
     for (size_t i = 0; i < logic::CHECKUP_COMPLETED_BUCKETS; ++i) {
-        if (!logic::checkup_restored_expired(s_restored_expiry_us[i], now_us)) continue;
+        if (!logic::checkup_restored_expired(s_slot_times.expiry_us[i], now_us)) continue;
         P().ring.buf[i]         = logic::CheckupBucket{};
         P().dhw.buf[i]          = kEmptyDhwLossBucket;
-        s_restored_expiry_us[i] = 0;
+        s_slot_times.expiry_us[i]           = 0;
+        s_slot_times.restored_end_unix_s[i] = 0;
         changed                 = true;
     }
     // A stopped producer must not extend the pending hour's lifetime to last-sample+24 h.
@@ -894,7 +909,34 @@ logic::CheckupCyclingHours checkup_cycling_hours() {
     Lock lk(s_mtx);
     if (!lk.acquired() || s_reset_requested.load()) return logic::CheckupCyclingHours{};
     expire_restored_locked();
-    return logic::checkup_cycling_hours(P().ring, s_cov.rps);
+    auto hours = logic::checkup_cycling_hours(P().ring, s_cov.rps);
+    if (!hours.count) return hours;
+    hours.epoch              = s_cycling_hours_epoch;
+    hours.newest_bucket      = s_cycling_newest_bucket;
+    const auto&   ring       = P().ring;
+    const size_t  oldest     = ring.count < logic::CHECKUP_COMPLETED_BUCKETS ? 0 : ring.head;
+    const size_t  first_live = ring.count - std::min<size_t>(ring.count, s_live_commit_count);
+    const int64_t now_us     = esp_timer_get_time();
+    const int64_t pending_start_us =
+        static_cast<int64_t>(hours.newest_bucket) * logic::CHECKUP_DT_S * 1000000LL;
+    hours.pending_elapsed_s = logic::checkup_cycling_elapsed_s(pending_start_us, now_us);
+    int64_t unix_s          = -1;
+    int32_t ms              = 0;
+    time_now(unix_s, ms);
+    // Flash hours retain the stored journal end, which can be clamped to its journal label.
+    // Live hours have monotonic boundaries that can be mapped when the clock is synchronized.
+    // The open hour and gaps without an observed end have no wall timestamp.
+    for (size_t i = 0; i < ring.count; ++i) {
+        const size_t slot = (oldest + i) % logic::CHECKUP_COMPLETED_BUCKETS;
+        if (s_slot_times.restored_end_unix_s[slot]) {
+            hours.end_unix_s[i] = s_slot_times.restored_end_unix_s[slot];
+        } else if (i >= first_live && s_slot_times.expiry_us[slot]) {
+            const int64_t end_us =
+                (static_cast<int64_t>(hours.bucket_at(i)) + 1) * logic::CHECKUP_DT_S * 1000000LL;
+            hours.end_unix_s[i] = logic::checkup_cycling_end_unix_s(end_us, now_us, unix_s, ms);
+        }
+    }
+    return hours;
 }
 
 logic::CheckupReport checkup_report() {
@@ -1109,8 +1151,8 @@ CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* record
             ? latest_sample_us - first_sample_us : 0;
     // In place, without copying the live hours; the pending hour and lifecycle stay. A circulation
     // reconfiguration retires only DHW evidence; dated X10A findings keep their expiry.
-    if (logic::checkup_journal_rebuild(P().ring, P().dhw, s_restored_expiry_us, live, records,
-                                       count, earliest_bucket, latest_bucket, now_unix_s, now_us,
+    if (logic::checkup_journal_rebuild(P().ring, P().dhw, s_slot_times, live, records, count,
+                                       earliest_bucket, latest_bucket, now_unix_s, now_us,
                                        s_source_confirmed, s_model_fp, s_source_fp,
                                        s_diagnostics_generation, reset_requested, s_dhw_source_fp,
                                        s_dhw_reset_requested.load()))
@@ -1128,6 +1170,9 @@ CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* record
     // selected live intervals keep absolute-age deadlines; only selected stored intervals establish
     // this slug.
     s_persist_verdict = logic::CheckupRestore::Flash;
+    if (!s_state.have_bucket)
+        s_cycling_newest_bucket = static_cast<int32_t>(logic::checkup_bucket(now_us));
+    ++s_cycling_hours_epoch; // restored chronology may include hours from an earlier boot
     checkup_persist_seal();
     diag_printf("checkup: restored %u hourly bucket(s) from flash (RAM copy refused: %s)\n",
                 static_cast<unsigned>(materialized), logic::checkup_restore_slug(refused));

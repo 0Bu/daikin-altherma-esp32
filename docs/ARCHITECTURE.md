@@ -265,9 +265,9 @@ and pressure plausibility, including base-table saturation twins. Cosmetic label
 reordering preserve it; competing selectors refuse confirmation. Unknown profile names cannot
 borrow the generic fallback's identity. Bump `CHECKUP_EVIDENCE_METHOD_VERSION` when a shared change
 to conversion, plausibility or counting alters retained evidence in ways row metadata cannot express.
-For a change confined to the saved hourly records, bump `CHECKUP_JOURNAL_LAYOUT_VERSION`. This also
-fences field moves that preserve byte count. The cycling layout change left two byte layouts under
-one fingerprint, so those saved hours cannot establish the current layout or its paired mode split.
+For a change confined to the saved hourly records, bump `CHECKUP_JOURNAL_LAYOUT_VERSION`.
+The current core layout stores independent mode totals. Earlier core layouts cannot supply them,
+including the two byte layouts that shared one fingerprint.
 The separate Stop journal, DHW restart handoff and trend history retain their own compatibility rules.
 Circulation broker/mapping/interpretation
 identity gates only DHW buckets; changed circulation must not retire independent X10A evidence.

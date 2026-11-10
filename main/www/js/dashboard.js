@@ -1311,9 +1311,7 @@ const CHECKUP_ROW = {
   heater:   "check.heater",
   retries:  "check.retries",
 };
-// Verdict → row-status colour and card-dot colour. The collapsed row deliberately carries only this
-// status; its reading and assessment live together in the explainer so the card remains scannable.
-// Colour only makes the states faster to scan and never carries meaning on its own.
+// Verdict → colour for the compact readings. The expanded row carries the full assessment.
 const CHECKUP_TONE = { warn: "err", info: "warn", ok: "ok", collecting: "dim",
                        observation: "dim", experimental: "dim", unavailable: "dim" };
 
@@ -1381,7 +1379,7 @@ function checkupStopContextHtml(c) {
   states.push(s.dated == null ? t("sys.nodata") : state[s.dated ? 1 : 2]);
   const coverage = Number.isFinite(s.readable_s) && Number.isFinite(s.observed_hours)
     ? t("check.stop.coverage", checkupDuration(s.readable_s), s.observed_hours) : "";
-  return `<div class="vhist checkup-stop-box">` +
+  return `<div class="checkup-stop-box">` +
     descParaHtml(`<span class="vdesc-n">${esc(tr("title"))}</span> — ${esc(population)}`) +
     [[coverage, ...states].filter(Boolean).join(" · "), tr("counts"), ...rows,
       `${tr("other").split("|").join(" / ")}: ${other}`, t("check.stop.loss", loss),
@@ -1416,50 +1414,71 @@ function checkupCyclingSummaryHtml(c) {
     }).join("") + `</div>` : "";
 }
 
+let cyclingMarkup = [];
 function checkupCyclingChartHtml(c) {
-  const hrs = c.id === "cycling" && Array.isArray(c.hours) ? c.hours.slice(-24) : [];
+  const hrs = Array.isArray(c?.hours) ? c.hours.slice(-24) : [];
   if (!hrs.length) return "";
+  const identified = Number.isSafeInteger(c.hours_epoch) && hrs.every(h => Number.isSafeInteger(h?.bucket));
+  // Only firmware bucket identities outlive a changing frame. Legacy snapshots can be explored,
+  // but a pin must not jump to different evidence when that snapshot or its hour changes.
+  const scope = JSON.stringify([S.status?.boot_id, identified ? c.hours_epoch :
+    [Math.floor((S.status?.uptime_s || 0) / 3600), hrs]]);
+  const key = JSON.stringify([LANG, scope, hrs, c.starts]);
+  if (cyclingMarkup[0] === key) return cyclingMarkup[1];
   const pad = 24 - hrs.length;
-  let sumS = 0, sumR = 0, cols = "", activeTip = "", activeIdx = -1, activeTime = "";
-  let hoverTip = "", hoverIdx = -1, hoverTime = "";
-  const now = S.status?.ntp?.time ? Date.parse(S.status.ntp.time) : Date.now();
+  let sumS = 0, sumR = 0, cols = "", hasGap = false;
+  const stamp = new Intl.DateTimeFormat(LANG, { month: "short", day: "numeric", hour: "2-digit",
+    minute: "2-digit", timeZoneName: "shortOffset" });
+  const duration = s => s >= 60 && s % 60
+    ? t("check.min", `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`) : dwellDuration(s);
+  const percent = s => (s / 36).toFixed(3) + "%";
   for (let i = 0; i < 24; i++) {
-    const h = hrs[i - pad], obs = h?.observed_s > 0;
-    const s = obs && h.starts > 0 ? Math.round(h.starts) : 0;
-    const r = obs && h.run_s > 0 ? Math.min(3600, Math.round(h.run_s)) : 0;
-    if (obs) { sumS += s; sumR += r; }
-    const tm = new Date(now - (23 - i) * 3600 * 1000).toLocaleTimeString(LANG, { hour: "2-digit", minute: "2-digit" });
-    const sp = h?.space_s, dh = h?.dhw_s;
-    let mode = "", modeLabel = "";
-    if (r > 0 && Number.isInteger(sp) && Number.isInteger(dh) && sp >= 0 && dh >= 0 && sp + dh === r) {
-      mode = sp === 0 ? "dhw" : dh === 0 ? "heat" : "heat_dhw";
-      modeLabel = " · " + t(`mode.${mode}`);
+    const h = hrs[i - pad];
+    if (!h) {
+      cols += `<span class="checkup-chart-col" aria-hidden="true"><s><i class="gap"></i></s></span>`;
+      hasGap = true;
+      continue;
     }
-    const tip = obs ? `${tm} · ${t("check.starts", s)} · ${checkupDuration(r)}${modeLabel}` : `${tm} · ${t("sys.nodata")}`;
-    const pct = Math.round(r * 100 / 3600);
-    const active = S.cyclingPin === tm;
-    if (active) {
-      activeTip = tip;
-      activeIdx = i;
-      activeTime = tm;
-    }
-    if (S.cyclingHover === tm) {
-      hoverTip = tip;
-      hoverIdx = i;
-      hoverTime = tm;
-    }
-    cols += `<div class="checkup-chart-col${obs ? "" : " unobserved"}${active ? " active" : ""}" data-time="${tm}" data-tip="${esc(tip)}"><b${s > 2 ? ' class="warn"' : ""}>${s || ""}</b>` +
-      `<s><i class="${mode}" style="height:${pct}%"></i></s></div>`;
+    const observed = Number.isInteger(h.observed_s) && h.observed_s >= 0 && h.observed_s <= 3600
+      ? h.observed_s : 0;
+    const s = h.starts > 0 ? Math.round(h.starts) : 0;
+    const r = observed && h.run_s > 0 ? Math.min(observed, Math.round(h.run_s)) : 0;
+    sumS += s;
+    sumR += r;
+    const n = 23 - i, dated = identified && Number.isSafeInteger(h.end_unix_s) &&
+      h.end_unix_s > 0 && h.end_unix_s <= 8.64e12;
+    const when = dated ? t("check.hour.ending", stamp.format(h.end_unix_s * 1000))
+      : n ? t("check.hour.earlier", n) : t("check.hour.latest");
+    // Closed slots span an hour. Only the device can bound elapsed time in the open slot.
+    const possible = n ? 3600 : Number.isInteger(h.elapsed_s) && h.elapsed_s >= observed &&
+      h.elapsed_s <= 3600 ? h.elapsed_s : null;
+    const missing = possible == null ? 0 : possible - observed;
+    hasGap ||= missing > 0;
+    const valid = identified && [h.space_s, h.dhw_s].every(v => Number.isInteger(v) && v >= 0) &&
+      h.space_s + h.dhw_s <= r;
+    const space = valid ? h.space_s : 0, dhw = valid ? h.dhw_s : 0;
+    const modes = [[space, "space", "mode.heat"], [dhw, "dhw", "mode.dhw"],
+      [r - space - dhw, "other", "check.hour.other"]].filter(([seconds]) => seconds > 0);
+    const tip = [when, observed || s ? t("check.starts", s) : t("sys.nodata")];
+    if (observed) tip.push(duration(r));
+    for (const [seconds, , label] of modes) tip.push(`${t(label)} ${duration(seconds)}`);
+    tip.push(t("check.hour.coverage", duration(observed), possible == null ? "" : duration(possible)));
+    const gap = missing ? `<i class="gap" style="top:${percent(3600 - possible)};height:${percent(missing)}"></i>` : "";
+    cols += `<button type="button" class="checkup-chart-col"` +
+      ` data-bucket="${identified ? h.bucket : i}" tabindex="${n ? -1 : 0}" aria-pressed="false"` +
+      ` aria-label="${esc(tip.join(" · "))}"><b${s > 2 ? ' class="warn"' : ""}>${s || ""}</b><s>` +
+      modes.map(([seconds, mode]) => `<i class="${mode}" style="height:${percent(seconds)}"></i>`).join("") +
+      gap + `</s></button>`;
   }
   const meta = `${t("check.starts", c.starts ?? sumS)} · ${checkupDuration(sumR)}`;
-  const displayTip = hoverTip || activeTip || meta;
-  const showIdx = hoverIdx >= 0 ? hoverIdx : activeIdx;
-  const showTime = hoverTime || activeTime;
-  const timeHtml = `<span class="vhist-time mono num"${showIdx >= 0 ? ` style="left:${((showIdx + .5) * 4.167).toFixed(1)}%"` : " hidden"}>${esc(showTime)}</span>`;
-  return `<div class="vhist checkup-cycling-chart" role="img" aria-label="${esc(`${t("check.cycling")} · 24 h: ${meta}`)}" data-tip="${esc(meta)}">` +
-    `<div class="vhist-head"><span class="vhist-range mono num">${esc(displayTip)}</span></div>` +
-    `<div class="checkup-chart-wrap"><div class="checkup-chart-cols">${cols}</div>${timeHtml}</div>` +
-    `<div class="vhist-axis"><span>${esc(t("hist.ago", 24))}</span><span>${esc(t("hist.now"))}</span></div></div>`;
+  const gapKey = hasGap ? `<span class="checkup-gap-key"><i class="gap" aria-hidden="true"></i>${esc(t("check.hour.gap"))}</span>` : "";
+  const html = `<div class="vhist checkup-cycling-chart" role="group" aria-label="${esc(t("hist.aria", t("check.cycling")))}"` +
+    ` data-cycling="${esc(scope)}" data-tip="${esc(meta)}">` +
+    `<div class="checkup-chart-cols">${cols}</div>` +
+    `<div class="vhist-axis"><span>${esc(t("check.hour.earlier", 23))}</span>${gapKey}<span>${esc(t("check.hour.latest"))}</span></div>` +
+    `<div class="vhist-range mono num">${esc(meta)}</div></div>`;
+  cyclingMarkup = [key, html];
+  return html;
 }
 
 function checkupStatusKey(c) {
@@ -1587,9 +1606,9 @@ function checkupDetailHtml(c, fullSpan = c.full_span === true, report = {}) {
     defrost_events_insufficient: "defrost_events_insufficient",
     source_stale: "source_stale", no_paired_runtime: "no_paired_runtime",
   }[c.reason];
-  if (reasonKey && (c.id !== "cycling" || !c.hours?.length)) detail += ` ${t(`check.detail.${reasonKey}`)}`;
+  if (reasonKey) detail += ` ${t(`check.detail.${reasonKey}`)}`;
   if (compactMetric && parts.length && c.id !== "cycling") detail += ` ${parts.join(" · ")}.`;
-  const cyclingRuntime = c.id === "cycling" && !c.hours?.length ? checkupCyclingRuntime(c) : "";
+  const cyclingRuntime = c.id === "cycling" ? checkupCyclingRuntime(c) : "";
   if (cyclingRuntime) detail += ` ${cyclingRuntime}`;
   if (c.id === "dhw_loss" && statusKey !== "collecting" && !c.blocked && Number(c.aborts) > 0)
     detail += t("check.detail.dhw_aborted", Number(c.aborts), checkupDhwReasons(c),
@@ -1640,8 +1659,9 @@ function checkupDetailHtml(c, fullSpan = c.full_span === true, report = {}) {
     const energy = checkupDhwEnergy(c);
     if (energy) detail += ` ${energy}`;
   }
-  const cyclingExtra = c.id === "cycling"
-    ? checkupCyclingSummaryHtml(c) + checkupCyclingChartHtml(c) + checkupStopContextHtml(c) : "";
+  const cyclingExtra = c.id === "cycling" ? checkupCyclingSummaryHtml(c) +
+    `<div data-checkup-hours>${S.descOpen.has("model:health_cycling") ? checkupCyclingChartHtml(c) : ""}</div>` +
+    checkupStopContextHtml(c) : "";
   return descParaHtml(`<span class="vdesc-n">${esc(value)}</span>` +
            (time.length ? ` · ${esc(time.join(" · "))}` : "") + ` — ${esc(what)}`) +
          descParaHtml(esc(detail) + cyclingExtra) +
@@ -1666,6 +1686,21 @@ function checkupDefrostShare(c) {
 function checkupHeaterRuntime(seconds, minutes) {
   if (seconds != null) return checkupDuration(seconds);
   return minutes == null ? "" : t("check.min", minutes); // older firmware
+}
+
+function checkupHeaterValue(c) {
+  const parts = [];
+  for (const [label, seconds, legacyMinutes] of [
+    ["check.buh_short", c.buh_s, c.buh_min], ["check.tank_short", c.bsh_s, c.bsh_min],
+  ]) {
+    if (seconds != null && !Number.isFinite(seconds)) continue;
+    const minutes = seconds == null ? legacyMinutes : seconds / 60;
+    if (!Number.isFinite(minutes) || minutes < 0) continue;
+    const value = minutes > 0 && minutes < 1 ? "<1"
+      : Math.floor(minutes).toLocaleString(LANG, { useGrouping: false });
+    parts.push(`${t(label)} ${value}`);
+  }
+  return parts.length ? t("check.min", parts.join(" · ")) : "";
 }
 
 function checkupOutdoorContext(c) {
@@ -1750,6 +1785,7 @@ function checkupValue(c) {
     const share = c.verdict !== "collecting" && checkupDefrostShare(c);
     return share || (Number.isFinite(c.count) && c.count >= 0 ? t("check.cycles", c.count) : st);
   }
+  if (c.id === "heater") return checkupHeaterValue(c) || st;
   return (c.id === "fault" && c.verdict === "collecting") ? st : (checkupMetricValue(c) || st);
 }
 

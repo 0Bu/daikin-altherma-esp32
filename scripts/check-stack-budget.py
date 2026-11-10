@@ -869,7 +869,10 @@ def validate_http_stack(budgets: dict[str, Any], source: str) -> None:
 
 
 def validate_status_diagnosis_paths(budgets: dict[str, Any], sources: dict[str, str]) -> None:
-    """Keep the report frame on its real HTTP callers, separate from decimal-format branches."""
+    """Keep diagnosis frames on their actual HTTP callers."""
+    # Expiry/sealing and wall-clock lookup are separate calls. Charge both to bound the snapshot.
+    cycling_hours = ["http_send_status_json", "status_serializer", "checkup_cycling_hours",
+                     "cycling_expire", "cycling_seal", "cycling_crc", "room_time_now"]
     expected = {
         "httpd_mcp_status": ["mcp_post", "http_send_status_json", "status_serializer",
                              "double_string", "dynamic_double_string"],
@@ -878,6 +881,8 @@ def validate_status_diagnosis_paths(budgets: dict[str, Any], sources: dict[str, 
         "httpd_mcp_checkup": ["mcp_post", "http_send_status_json", "status_serializer",
                               "checkup_report"],
         "httpd_direct_checkup": ["http_send_status_json", "status_serializer", "checkup_report"],
+        "httpd_mcp_cycling_hours": ["mcp_post", *cycling_hours],
+        "httpd_direct_cycling_hours": cycling_hours,
         "httpd_mcp_health_number": ["mcp_post", "http_send_status_json", "status_serializer",
                                     "status_health_number", "status_unsigned_number"],
         "httpd_direct_health_number": ["http_send_status_json", "status_serializer",
@@ -892,17 +897,24 @@ def validate_status_diagnosis_paths(budgets: dict[str, Any], sources: dict[str, 
                     if "checkup_report" in rule["symbols"]}
     if report_paths != {"httpd_mcp_checkup", "httpd_direct_checkup"}:
         raise BudgetError("diagnosis status paths: checkup_report belongs to HTTP, not polling")
+    hour_paths = {name for name, rule in budgets["paths"].items()
+                  if "checkup_cycling_hours" in rule["symbols"]}
+    if hour_paths != {"httpd_mcp_cycling_hours", "httpd_direct_cycling_hours"}:
+        raise BudgetError("diagnosis status paths: cycling hour snapshot belongs to HTTP, not polling")
     code = {name: re.sub(r"/\*.*?\*/|//[^\n]*", "", sources[name], flags=re.S)
             for name in ("main/http_status.cpp", "main/mcp_server.cpp", "main/hp_poll.cpp")}
     status = code["main/http_status.cpp"]
     if (len(re.findall(r"\bcheckup_report\s*\(", status)) != 1
             or not re.search(r"const logic::CheckupReport hr\s*=\s*checkup_report\(\);", status)
+            or len(re.findall(r"\bcheckup_cycling_hours\s*\(", status)) != 1
+            or not re.search(r"const auto hrs\s*=\s*checkup_cycling_hours\(\);", status)
             or len(re.findall(r"\bappend_status_json\(out, redact\)", status)) != 1
             or not re.search(r"return http_send_status_json\(req, \{\}, \{\}, redact\);", status)
             or len(re.findall(r"\bhttp_send_status_json\s*\(", code["main/mcp_server.cpp"])) != 1
             or not re.search(r"return http_send_status_json\(req, response, suffix, false\);",
                              code["main/mcp_server.cpp"])
-            or re.search(r"\b(?:checkup_report|http_send_status_json)\s*\(", code["main/hp_poll.cpp"])):
+            or re.search(r"\b(?:checkup_report|checkup_cycling_hours|http_send_status_json)\s*\(",
+                         code["main/hp_poll.cpp"])):
         raise BudgetError("diagnosis status source: direct/MCP-only serializer caller contract changed")
     if (len(re.findall(r"\bnum\s*\(", status)) != 37
             or not re.search(r"auto num = \[&j\]\(const char\* name, int v\) "
@@ -2696,6 +2708,7 @@ def self_test() -> None:
      'daik::hp_format(daik::ValueDef const&, unsigned char const*, int, int, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >&, daik::ValueDef const*, unsigned int, daik::SaturationWitness)': 64,
      'daik::history_record(daik::CachedValue const*, unsigned int, unsigned long)': 64,
      'daik::checkup_report()': 64,
+     'daik::checkup_cycling_hours()': 256,
      'daik::checkup_reset_on_detect(char const*, unsigned long)': 64,
      'daik::logic::checkup_model_fingerprint(char const*, daik::logic::ProfileView const&)': 64,
      'daik::logic::checkup_schema_row_fingerprint(daik::logic::ProfileView const&, daik::ValueDef const&)': 32,
@@ -3557,6 +3570,8 @@ def self_test() -> None:
     diagnosis_controls = 0
     for name, member in (("httpd_direct_checkup", "checkup_report"),
                          ("httpd_mcp_checkup", "checkup_report"),
+                         ("httpd_direct_cycling_hours", "checkup_cycling_hours"),
+                         ("httpd_mcp_cycling_hours", "room_time_now"),
                          ("httpd_mcp_checkup", "http_send_status_json"),
                          ("httpd_mcp_status", "http_send_status_json"),
                          ("httpd_mcp_health_number", "status_health_number"),

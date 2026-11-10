@@ -478,6 +478,28 @@ int main(int argc, char** argv) {
             emit(req, redact ? "config-absent-redacted" : "config-absent-plain");
         }
     });
+    run("cycling_hours_wire", [] {
+        current.diagnostics_enabled = true;
+        cycling_hours.epoch         = 17;
+        cycling_hours.count         = 2;
+        cycling_hours.end_unix_s[0] = 1'999'998'000;
+        // An older restored hour has a negative bucket ID. Only parts of its observed runtime
+        // are attributable to the two positively witnessed modes.
+        cycling_hours.hours[0] = {2700, 1200, 600, 300, 2};
+        for (const bool partial : {true, false}) {
+            cycling_hours.pending_elapsed_s = partial ? 450 : 0;
+            cycling_hours.hours[1] = partial ? daik::logic::CheckupCyclingHour{420, 180, 0, 60, 1}
+                                             : daik::logic::CheckupCyclingHour{0, 0, 0, 0, 1};
+            auto req               = request();
+            check(invoke(req, "/status", daik::h_status) == ESP_OK, "cycling status failed");
+            successful(req);
+            const auto elapsed = req.response.find("\"elapsed_s\":");
+            check(elapsed != std::string::npos &&
+                      req.response.find("\"elapsed_s\":", elapsed + 1) == std::string::npos,
+                  "elapsed time must be serialized once for the open hour only");
+            emit(req, partial ? "cycling-partial" : "cycling-edge");
+        }
+    });
     run("stop_context_absent", [] {
         for (const bool confirmed : {false, true}) {
             stop_report.observation.confirmed = confirmed;
@@ -515,6 +537,7 @@ int main(int argc, char** argv) {
     });
     run("stop_context_populated", [] {
         cycling_hours.count    = 2;
+        cycling_hours.pending_elapsed_s = 3600;
         cycling_hours.hours[0] = {3600, 1800, 900, 900, 2};
         cycling_hours.hours[1] = {3600, 600, 0, 0, 1};
         auto empty = request();
