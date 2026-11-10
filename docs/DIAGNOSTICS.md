@@ -43,8 +43,9 @@ beginning leaves the rolling day, even if polling stops. Changed X10A identity o
 diagnosis format or measurement definition starts fresh collection; changing the independent
 circulation witness clears only
 tank-cooling evidence.
-The current format cannot reuse older diagnosis intervals or restart handoffs; trend history has
-a separate compatibility contract. See [PLANT.md](PLANT.md#reboot-and-persistence).
+The current format starts collecting hours again after an update from an incompatible format.
+Trend history and the separate Stop context have their own compatibility rules.
+See [PLANT.md](PLANT.md#reboot-and-persistence).
 
 These are passive ordinary-operation observations. Five-minute trends cannot reconstruct complete
 compressor runs or quiet tank hours, and a day of observations is not a controlled commissioning test.

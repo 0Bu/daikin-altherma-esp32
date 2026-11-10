@@ -1640,7 +1640,7 @@ function checkupDetailHtml(c, fullSpan = c.full_span === true, report = {}) {
     if (energy) detail += ` ${energy}`;
   }
   const cyclingExtra = c.id === "cycling"
-    ? checkupCyclingSummaryHtml(c) + checkupCyclingChartHtml(c) + (c.starts == null ? checkupStopContextHtml(c) : "") : "";
+    ? checkupCyclingSummaryHtml(c) + checkupCyclingChartHtml(c) + checkupStopContextHtml(c) : "";
   return descParaHtml(`<span class="vdesc-n">${esc(value)}</span>` +
            (time.length ? ` · ${esc(time.join(" · "))}` : "") + ` — ${esc(what)}`) +
          descParaHtml(esc(detail) + cyclingExtra) +

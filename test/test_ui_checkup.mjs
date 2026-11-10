@@ -427,6 +427,12 @@ const cyclingWithHours = { ...cycling, hours: [
 assert.match(ui.detail(cyclingWithHours), /\bcheckup-cycling-chart\b/);
 assert.match(ui.detail(cyclingWithHours), /\bcheckup-cycling-grid\b/);
 assert.equal((ui.detail(cyclingWithHours).match(/class="checkup-chart-col\b/g) || []).length, 24);
+for (const starts of [0, 13]) {
+  const mixed = ui.detail({ ...cyclingWithHours, starts, stop_context: stopContext });
+  assert.match(mixed, /\bcheckup-cycling-chart\b/);
+  assert.match(mixed, /4 witnessed stops after recent heating/);
+  assert.equal((mixed.match(/class="[^"]*\bcheckup-stop-box\b[^"]*"/g) || []).length, 1);
+}
 
 // Causes are exclusive subcounts of the retained total, never inferred from missing fields.
 // Runtime coverage uses heating and unsafe unclassified time; hot-water duration cannot dilute it.

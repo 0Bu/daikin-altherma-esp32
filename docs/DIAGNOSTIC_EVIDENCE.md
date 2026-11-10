@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 3da65a47167928b711dc6536354c0d4d0df7ef1b8112b02139895cf49d49fcb5 -->
+<!-- diagnostic-evidence-contract: 45cafa028c26e572aa644f3614035534eda42b53d831f584a564bc96c5a876c3 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -21,12 +21,12 @@ refrigerant test. No manufacturer settling duration can therefore be inferred fr
 X10A evidence is scoped to the configured target generation. Changed wiring, profile or detected
 source discards an in-flight old-source sample and retires pending restoration for that boot.
 A manual profile selection establishes a decoding contract, not a physical reply.
-Retained checkup counters additionally require the same resolved consumer schema and evidence
-method. A changed measurement definition cannot borrow an old counter merely because its profile
-name is unchanged; [ARCHITECTURE.md](ARCHITECTURE.md#history-and-diagnosis-persistence) owns the
-identity and method-version maintenance contract. This does not admit an archive as a golden
-fixture: historical firmware/decoder/schema/method provenance and qualification must be established
-for each case. The existing population fixture is synthetic, not a reconstructed field event.
+Retained checkup counters additionally require a compatible stored layout and the same resolved
+consumer schema and evidence method. A changed measurement definition cannot borrow an old counter
+merely because its profile name is unchanged. See the
+[persistence contract](ARCHITECTURE.md#history-and-diagnosis-persistence). Historical firmware,
+decoder, schema and method provenance and qualification must be established for each archive used
+as a golden fixture. The existing population fixture is synthetic, not a reconstructed field event.
 
 At read time the diagnosis publishes elapsed span separately from usable signal coverage and the
 age of the last nonempty X10A sample. A source older than the 15-second project bound cannot support

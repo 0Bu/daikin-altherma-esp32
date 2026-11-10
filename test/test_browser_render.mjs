@@ -1316,8 +1316,9 @@ async function assertPlantDiagnosis(page, context) {
       `${context}: cycling chart must render when starts exist`);
     assert.equal(await page.evaluate(`document.querySelectorAll(".checkup-chart-col").length`), 24,
       `${context}: cycling chart must render all 24 hour columns`);
-    assert.ok(!(await stopText()).includes(await page.evaluate("t('check.stop.population', '4')")),
-      `${context}: concise cycling view omits technical stop-context matrix`);
+    const stopPopulation = await page.evaluate("t('check.stop.population', '4')");
+    assert.ok((await stopText()).includes(stopPopulation),
+      `${context}: measured starts and the timeline retain the independent stop context`);
     // A missing legacy cycling population must leave the independent stop context accessible
     // through the same real disclosure, retaining the firmware's unavailable verdict.
     await page.evaluate(`(() => {

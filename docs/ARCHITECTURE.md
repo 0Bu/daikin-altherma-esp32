@@ -267,6 +267,9 @@ borrow the generic fallback's identity. The named `CHECKUP_EVIDENCE_METHOD_VERSI
 requires a bump for changes to converter arithmetic, formatting/plausibility or counting that
 metadata cannot express. This is a maintenance contract, not automatic recognition of every code
 change. The separate trend identity and its old-scale retention rule above are unchanged.
+The core journal layout version also fences field moves that preserve the byte count. The cycling
+layout change left two prior byte layouts under one fingerprint, so those saved hours are ineligible
+for restoration. The separate Stop journal and DHW restart handoff retain their own identities.
 Circulation broker/mapping/interpretation
 identity gates only DHW buckets; changed circulation must not retire independent X10A evidence.
 A narrowly scoped one-shot DHW handoff may preserve an unfinished candidate; it cannot lend coverage

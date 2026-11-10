@@ -23796,6 +23796,25 @@ static void test_history_persist() {
                                           CHECKUP_JOURNAL_WORDS, CHECKUP_DT_S));
     CHECK(!history_journal_header_matches(ch, checkup_journal_fingerprint(), CHECKUP_JOURNAL_WORDS,
                                           HISTORY_DT_S));
+    {
+        // Both sides of the 80-byte bucket layout change emitted this same catalog.
+        // A committed record with a valid CRC therefore cannot identify its field order.
+        constexpr uint32_t ambiguous_catalog = 0xcb5ff68bu;
+        auto               ambiguous         = ch;
+        ambiguous.catalog_fp                 = ambiguous_catalog;
+        uint8_t words[CHECKUP_JOURNAL_PAYLOAD_BYTES];
+        std::memcpy(words, checkup_words, sizeof(words));
+        constexpr size_t bucket_offset = offsetof(CheckupJournalPayload, checkup);
+        words[bucket_offset + 50]      = 0x34; // low byte of old censored runtime
+        words[bucket_offset + 51]      = 0x12; // high byte, read as flags by the new layout
+        words[bucket_offset + 52]      = 6;    // old defrost count
+        words[bucket_offset + 53]      = 4;    // old paired defrost count
+        ambiguous.crc                  = history_journal_crc_bytes(ambiguous, words, sizeof(words));
+        CHECK(history_journal_header_matches(ambiguous, ambiguous_catalog, CHECKUP_JOURNAL_WORDS,
+                                             CHECKUP_DT_S));
+        CHECK(!history_journal_header_matches(ambiguous, checkup_journal_fingerprint(),
+                                              CHECKUP_JOURNAL_WORDS, CHECKUP_DT_S));
+    }
     ch.rings[0] = 31;
     ch.rings[1] = 12;
     ch.rings[2] = 3;
