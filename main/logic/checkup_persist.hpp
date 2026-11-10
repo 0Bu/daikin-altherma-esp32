@@ -854,7 +854,7 @@ checkup_journal_choose(int64_t wanted, const CheckupJournalLiveSpan& live,
 }
 
 struct CheckupJournalSlotTimes {
-    int64_t  expiry_us[CHECKUP_COMPLETED_BUCKETS]           = {};
+    int64_t expiry_us[CHECKUP_COMPLETED_BUCKETS] = {};
     // Zero denotes a live hour or gap. The largest value marks a stored hour whose date is
     // outside the HTTP timestamp range.
     uint32_t restored_end_unix_s[CHECKUP_COMPLETED_BUCKETS] = {};

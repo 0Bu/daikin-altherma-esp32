@@ -907,10 +907,10 @@ logic::CheckupCyclingEvidence checkup_cycling_evidence() {
 [[gnu::noinline]] static logic::CheckupCyclingHours checkup_cycling_hours_locked(int64_t now_us) {
     auto hours = logic::checkup_cycling_hours(P().ring, s_cov.rps);
     if (!hours.count) return hours;
-    hours.epoch              = s_cycling_hours_epoch;
-    hours.newest_bucket      = s_cycling_newest_bucket;
-    const auto&   ring       = P().ring;
-    const size_t  oldest     = ring.count < logic::CHECKUP_COMPLETED_BUCKETS ? 0 : ring.head;
+    hours.epoch          = s_cycling_hours_epoch;
+    hours.newest_bucket  = s_cycling_newest_bucket;
+    const auto&   ring   = P().ring;
+    const size_t  oldest = ring.count < logic::CHECKUP_COMPLETED_BUCKETS ? 0 : ring.head;
     const int64_t pending_start_us =
         static_cast<int64_t>(hours.newest_bucket) * logic::CHECKUP_DT_S * 1000000LL;
     hours.pending_elapsed_s = logic::checkup_cycling_elapsed_s(pending_start_us, now_us);
@@ -921,7 +921,7 @@ logic::CheckupCyclingEvidence checkup_cycling_evidence() {
     // Live hours have monotonic boundaries that can be mapped when the clock is synchronized.
     // The open hour and gaps without an observed end have no wall timestamp.
     for (size_t i = 0; i < ring.count; ++i) {
-        const size_t slot = (oldest + i) % logic::CHECKUP_COMPLETED_BUCKETS;
+        const size_t   slot      = (oldest + i) % logic::CHECKUP_COMPLETED_BUCKETS;
         const uint32_t saved_end = s_slot_times.restored_end_unix_s[slot];
         if (saved_end) {
             hours.hours[i].restored = true;
@@ -1165,8 +1165,8 @@ CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* record
     const int64_t first_sample_us = P().ring.first_sample_us;
     const int64_t live_span_us =
         first_sample_us >= 0 && now_us >= first_sample_us ? now_us - first_sample_us : 0;
-    const int64_t wall_span_us     = static_cast<int64_t>(wall_span_s) * 1000000LL;
-    P().ring.carried_span_us       = wall_span_us > live_span_us ? wall_span_us - live_span_us : 0;
+    const int64_t wall_span_us = static_cast<int64_t>(wall_span_s) * 1000000LL;
+    P().ring.carried_span_us   = wall_span_us > live_span_us ? wall_span_us - live_span_us : 0;
     // "flash" records actual selected journal provenance, independently of the startup
     // RAM-integrity verdict. Completed RAM hours are never adopted. Reconstructed stored and
     // selected live intervals keep absolute-age deadlines; only selected stored intervals establish
