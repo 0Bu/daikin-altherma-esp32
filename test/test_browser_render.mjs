@@ -2553,6 +2553,7 @@ try {
   for (const viewport of viewports) {
     if (!mutation) {
       await page.viewport(viewport.width, viewport.height);
+      await activateLocale(page, "en");
       await assertHistoryMotion(page, server, `${viewport.name}/history-motion`);
       // assertHistoryMotion's finally has restored the fixture and stopped its witnesses. A fast
       // viewport must now pause until its sibling is also outside temporal observation.

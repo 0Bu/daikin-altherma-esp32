@@ -219,10 +219,11 @@ blind time itself, so its verdict can be `accept` beside trend age refusals.
 `available`, `assessable`, `evaluated`, `status`, `checks`. Disabled diagnostics, and a reset that is
 still pending, keep the object with placeholder checks: each reads `unavailable`/`unsupported` and
 carries no accumulated evidence, so read `persist` and `diagnostics.enabled` rather than the reason.
-`span_s` combines time since this boot's first sample with any carried restore duration, capped at
-24 hours. Restore estimates the earlier span from one nominal hour before the earliest selected
-record's end. The estimate can include gaps and nominal time before a short restart record.
-`covered_s` reports observed bus context. Each check has its own `observed_s`/`required_s`,
+`span_s` combines time since the current diagnostics window's first accepted sampling callback
+with any carried restore duration, capped at 24 hours. A callback can start the clock without
+readable data. Restore estimates the earlier span from one nominal hour before the earliest
+selected record's end. The estimate can include gaps and nominal time before a short restart
+record. `covered_s` reports observed bus context. Each check has its own `observed_s`/`required_s`,
 so one signal cannot lend coverage to another. `source_age_s` is null before a nonempty X10A sample;
 empty pause/failure callbacks cannot renew it. `source_fresh` applies the 15-second observation-age
 bound at read time. A stale source
