@@ -1112,16 +1112,14 @@ const INSPECT = {
   // Its own pill next to the heat output, so its own entry — and the one derived figure with no
   // catalog row behind it at all, hence copy written here rather than pulled from DESCRIPTIONS.
   //
-  // The TITLE is live (see inspTitleText), because a COP is not one quantity. Which system the
-  // quotient describes follows the electrical source — the CT path may use a post-BUH numerator, the
-  // inverter current a HEAT-PUMP one — and the two are different numbers whenever the backup heater
-  // runs. They look identical on the pill, so naming which one this is has to happen here or
-  // nowhere. The rule and the matching numerator are logic/cop_scope.hpp, gated over the catalog.
+  // The title identifies the electrical source. The CT path prefers a usable post-BUH row, but
+  // permits pre-BUH heat when backup heating is known to be off. The inspector lists the post-BUH
+  // row only when used. See logic/cop_scope.hpp for the source rule.
   cop: {
     t: (d) => d && d.efficiencyKind === "eer"
       ? { en: "EER of the heat pump (estimated)", de: "Geschätzter EER der Wärmepumpe" }
       : (d && d.copScope === "plant"
-      ? { en: "COP with post-BUH boundary (estimated)", de: "Geschätzter COP mit Bilanz hinter BUH" }
+      ? { en: "COP based on current transformers (estimated)", de: "Geschätzter COP aus Stromwandlerwerten" }
       : { en: "COP of the heat pump (estimated)", de: "Geschätzter COP der Wärmepumpe" }),
     // The hit target's accessible name — stable, because it is applied once at startup (see
     // labelSchematicHits). Which COP it turns out to be is the panel's to say, not the label's.
@@ -1165,8 +1163,8 @@ const INSPECT = {
       ? { en: `${fmt1(d.cop)} kW of cooling per kW of electricity — ≈ ${fmt1(d.copPth)} kW removed for ≈ ${fmt1(d.pel)} kW in.`,
           de: `${fmt1(d.cop)} kW Kälteleistung je kW Strom — ≈ ${fmt1(d.copPth)} kW entzogen bei ≈ ${fmt1(d.pel)} kW Aufnahme.` }
       : d.copScope === "plant"
-      ? { en: `${fmt1(d.cop)} kW of post-BUH water-side heat per kW of CT-estimated electricity — ≈ ${fmt1(d.copPth)} kW out for ≈ ${fmt1(d.pel)} kW in. The CT installation determines which electrical loads are included.`,
-          de: `${fmt1(d.cop)} kW wasserseitige Wärme hinter dem BUH je kW aus Stromwandlern geschätzter Aufnahme — ≈ ${fmt1(d.copPth)} kW raus für ≈ ${fmt1(d.pel)} kW rein. Welche elektrischen Lasten enthalten sind, bestimmt der Einbau der Stromwandler.` }
+      ? { en: `${fmt1(d.cop)} kW of water-side heat per kW of CT-estimated electricity — ≈ ${fmt1(d.copPth)} kW out for ≈ ${fmt1(d.pel)} kW in. The CT installation determines which electrical loads are included.`,
+          de: `${fmt1(d.cop)} kW wasserseitige Wärme je kW aus Stromwandlern geschätzter Aufnahme — ≈ ${fmt1(d.copPth)} kW raus für ≈ ${fmt1(d.pel)} kW rein. Welche elektrischen Lasten enthalten sind, bestimmt der Einbau der Stromwandler.` }
       : { en: `${fmt1(d.cop)} kW of heat per kW of electricity for the heat-pump boundary — ≈ ${fmt1(d.copPth)} kW out for ≈ ${fmt1(d.pel)} kW in. The backup heater is outside both figures; whole-plant efficiency therefore cannot be derived from this value while the heater runs.`,
           de: `${fmt1(d.cop)} kW Wärme je kW Strom innerhalb der Wärmepumpen-Bilanz — ≈ ${fmt1(d.copPth)} kW raus für ≈ ${fmt1(d.pel)} kW rein. Der Zusatzheizer liegt außerhalb beider Bilanzgrößen; die Effizienz der Gesamtanlage lässt sich daraus während seines Betriebs nicht ableiten.` },
     // The numerator's own row, but ONLY while the plan actually uses it (d.copPostBuh) — listing it

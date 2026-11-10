@@ -1,4 +1,4 @@
-// translation-source: 321a6b74ebb0b066e4e779ea1c3c02f1f540cc3459bdd324a6d4fb6b39a7a98d
+// translation-source: eb63387c6b7eba5e1a6d45a66578266a23311ba316faeba9b0d8fa36edb8382c
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -1015,7 +1015,7 @@ INSPECT_I18N.pl = inspectValues(
       : d.pthKind === "cooling" ? `≈ ${fmt1(d.pth)} kW chłodzenia${d.cop != null ? `, EER ${fmt1(d.cop)}` : ""}.`
       : `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `, COP ${fmt1(d.cop)}` : ""}.`], // pth
     [(d) => d && d.efficiencyKind === "eer" ? "EER pompy ciepła (szacunek)"
-      : d && d.copScope === "plant" ? "COP za BUH (szacunek)" : "COP pompy ciepła (szacunek)", "Szacowana efektywność", (d) => d && d.efficiencyKind === "eer"
+      : d && d.copScope === "plant" ? "COP na podstawie prądu CT (szacunek)" : "COP pompy ciepła (szacunek)", "Szacowana efektywność", (d) => d && d.efficiencyKind === "eer"
       ? "Szacowana moc chłodnicza podzielona przez szacowany pobór. Wynik dziedziczy założenia o wodzie/glikolu, czujnikach, napięciu i współczynniku mocy; to chwilowy EER, nie efektywność sezonowa."
       : "Szacowana moc cieplna podzielona przez zgodny zakresowo pobór energii. Dla CT ciepło może być liczone za BUH, a dla prądu falownika dotyczy samej pompy; montaż CT decyduje o ujętych odbiornikach. To wskazanie chwilowe, nie licznik sezonowy.", (d) => d.copBlock === "tank_heater"
       ? "Brak COP — grzałka zbiornika jest włączona. Jej pobór może wejść do bilansu prądu, lecz ciepło trafia prosto do zbiornika i nie przechodzi przez czujniki wody; zakresy nie pasują."
@@ -1026,7 +1026,7 @@ INSPECT_I18N.pl = inspectValues(
         : "Brak COP — profil nie podaje poboru ani z CT, ani z prądu falownika."
       : d.cop == null ? null
       : d.efficiencyKind === "eer" ? `${fmt1(d.cop)} kW chłodzenia na 1 kW prądu — ≈ ${fmt1(d.copPth)} kW przy ≈ ${fmt1(d.pel)} kW poboru.`
-      : d.copScope === "plant" ? `${fmt1(d.cop)} kW ciepła za BUH na 1 kW poboru z CT — ≈ ${fmt1(d.copPth)} kW przy ≈ ${fmt1(d.pel)} kW. Zakres odbiorników zależy od montażu CT.`
+      : d.copScope === "plant" ? `${fmt1(d.cop)} kW ciepła po stronie wody na 1 kW poboru oszacowanego z CT — ≈ ${fmt1(d.copPth)} kW przy ≈ ${fmt1(d.pel)} kW. Zakres odbiorników zależy od montażu CT.`
       : `${fmt1(d.cop)} kW ciepła na 1 kW prądu w granicy pompy — ≈ ${fmt1(d.copPth)} kW przy ≈ ${fmt1(d.pel)} kW. BUH jest poza obiema wielkościami.`], // cop
     ["Grzałka dodatkowa (BUH)", "Grzałka dodatkowa BUH", "Elektryczna grzałka w obiegu wodnym, używana m.in. przy mrozie, odszranianiu lub awarii. Stopień opisuje załączoną moc, nie oddzielny pomiar kW.", (d) => d.buh1 == null && d.buh2 == null ? null : d.buh2 ? "Stopień 2 — pracują oba stopnie." : d.buh1 ? "Stopień 1 — pracuje jeden stopień." : "Wyłączona — żaden stopień BUH nie pracuje."], // buh
     ["Elektryczna grzałka zbiornika", 0, "Grzałka zanurzeniowa BSH ogrzewa zbiornik bez sprężarki i obiegu wody. X10A podaje tylko stan włączona/wyłączona, nie jej moc.", () => { const on = x10aDown() ? null : vOn(/^bsh$/i); return on == null ? null : on ? "Elektryczna grzałka zbiornika jest aktywna." : "Wyłączona — zbiornik nie używa grzałki zanurzeniowej."; }], // bsh

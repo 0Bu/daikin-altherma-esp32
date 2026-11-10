@@ -1,4 +1,4 @@
-// translation-source: 321a6b74ebb0b066e4e779ea1c3c02f1f540cc3459bdd324a6d4fb6b39a7a98d
+// translation-source: eb63387c6b7eba5e1a6d45a66578266a23311ba316faeba9b0d8fa36edb8382c
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -1011,7 +1011,7 @@ INSPECT_I18N.nb = inspectValues(
       : d.pthKind === "cooling" ? `≈ ${fmt1(d.pth)} kW kjøling${d.cop != null ? `; EER ${fmt1(d.cop)}` : ""}.`
       : `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `; COP ${fmt1(d.cop)}` : ""}.`], // pth
     [(d) => d && d.efficiencyKind === "eer" ? "Anslått EER for varmepumpen"
-      : d && d.copScope === "plant" ? "Anslått COP etter BUH" : "Anslått COP for varmepumpen", "Anslått virkningsgrad", (d) => d && d.efficiencyKind === "eer"
+      : d && d.copScope === "plant" ? "Anslått COP basert på CT-strøm" : "Anslått COP for varmepumpen", "Anslått virkningsgrad", (d) => d && d.efficiencyKind === "eer"
       ? "Anslått kjøleeffekt delt på anslått elektrisk effekt. Arver usikkerhet i væske, sensorer, spenning og effektfaktor. Øyeblikkelig EER, ikke sesongverdi."
       : "Anslått varme delt på anslått strøm med samsvarende grenser: etter BUH med CT og R2T, ellers bare varmepumpen med inverterstrøm. CT-kabling avgjør laster. Øyeblikksindikasjon, ikke sertifisert måler.", (d) => d.copBlock === "tank_heater"
       ? "Ingen COP: strøm kan omfatte BSH, men varmen går direkte i tanken og krysser ikke tursensorene; grensene er ulike."
@@ -1022,7 +1022,7 @@ INSPECT_I18N.nb = inspectValues(
         : "Ingen COP: profilen gir verken CT-effekt eller inverterstrøm."
       : d.cop == null ? null
       : d.efficiencyKind === "eer" ? `${fmt1(d.cop)} kW kjøling/kW strøm: ≈ ${fmt1(d.copPth)} kW ut med ≈ ${fmt1(d.pel)} kW inn.`
-      : d.copScope === "plant" ? `${fmt1(d.cop)} kW varme etter BUH/kW CT-strøm: ≈ ${fmt1(d.copPth)} / ≈ ${fmt1(d.pel)} kW. CT-kabling avgjør laster.`
+      : d.copScope === "plant" ? `${fmt1(d.cop)} kW varme på vannsiden per kW anslått CT-strøm: ≈ ${fmt1(d.copPth)} / ≈ ${fmt1(d.pel)} kW. CT-kabling avgjør laster.`
       : `${fmt1(d.cop)} kW varme/kW strøm innen varmepumpegrensen: ≈ ${fmt1(d.copPth)} / ≈ ${fmt1(d.pel)} kW. BUH er utenfor begge.`], // cop
     ["Tilleggsvarmer · BUH", "Tilleggsvarmer BUH", "Elektrisk vannkretsvarmer etter R1T. Trinnene kan øke turtemperatur og forbruk; ikke tankvarmeren BSH.", (d) => d.buh1 == null && d.buh2 == null ? null : d.buh2 ? "Trinn 2: begge trinn varmer." : d.buh1 ? "Trinn 1: ett trinn varmer." : "Inaktiv: ingen BUH-trinn aktive."], // buh
     ["Tankvarmer", "Elektrisk tankvarmer", "Elektrisk BSH-element i tanken. Kan varme med kompressor, pumpe og vannmengde på null; X10A-statusen viser ikke effekt.", () => {

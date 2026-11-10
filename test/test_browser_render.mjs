@@ -466,6 +466,50 @@ async function assertPumpCommandTruth(page, context, locale) {
       `${context}: heater coverage must remain unknown in the French copy`);
     assert.equal(cop.visible, cop.explanation, `${context}: render the COP explanation`);
     assertLayout(await page.evaluate(layoutAudit), `${context}/homehub-cop`);
+
+    // The CT ratio can use either outlet. A missing R2T may use R1T only with the heater known
+    // off; neither the title nor the live sentence should promise R2T for that reading.
+    for (const postBuh of [false, true]) {
+      const label = `${context}/ct-cop/${postBuh ? "r2t" : "r1t"}`;
+      await page.waitFor("!S.clickHold");
+      const reading = await page.evaluate(`(() => {
+        const postBuh = ${postBuh};
+        S.status.hp.connected = true;
+        S.status.modbus.enabled = S.status.modbus.connected = false;
+        S._modbus = [];
+        S._values = [
+          { label: "I/U operation mode", value: "Heating", reg: 0x60 },
+          { label: "3way valve(On:DHW_Off:Space)", value: "0", reg: 0x60, binary: true },
+          { label: "Leaving Water Temp. before BUH (R1T)", value: "36", unit: "°C", reg: 0x61 },
+          { label: "Inlet Water Temp. (R4T)", value: "30", unit: "°C", reg: 0x61 },
+          { label: "Flow sensor (l/min)", value: "12", unit: "l/min", reg: 0x62 },
+          { label: "INV frequency (rps)", value: "18", unit: "rps", reg: 0x30 },
+          { label: "BUH step 1", value: postBuh ? "1" : "0", reg: 0x60, binary: true },
+          { label: "BUH step 2", value: "0", reg: 0x60, binary: true },
+          { label: "BSH", value: "0", reg: 0x60, binary: true },
+          ...[1, 2, 3].map(i => ({ label: "Current measured by CT sensor of L" + i,
+            value: "2", unit: "A", reg: 0x63 })),
+        ];
+        if (postBuh) S._values.push({ label: "Leaving Water Temp. (R2T)",
+          value: "39", unit: "°C", reg: 0x61, off: 4 });
+        renderApp();
+        return { postBuh: S.live.copPostBuh, power: S.live.pelSrc, heat: S.live.copPth,
+          title: document.getElementById("inspTitle").textContent,
+          sentence: document.querySelector("#inspBody .vdesc-p:last-child")?.textContent,
+          expected: inspNowText(INSPECT.cop, S.live), heatText: fmt1(S.live.copPth),
+          pill: document.getElementById("svCop").textContent };
+      })()`);
+      assert.equal(reading.postBuh, postBuh, `${label}: select the available outlet`);
+      assert.equal(reading.power, "CT", `${label}: use current transformer estimate`);
+      assert.ok(Math.abs(reading.heat - (postBuh ? 7.5348 : 5.0232)) < 0.01,
+        `${label}: the displayed ratio uses the selected temperature`);
+      assert.notEqual(reading.pill, "—", `${label}: both qualified cases show a ratio`);
+      assert.equal(reading.sentence, reading.expected, `${label}: show the localized live sentence`);
+      assert.ok(reading.sentence.includes(reading.heatText), `${label}: show its actual heat estimate`);
+      assert.doesNotMatch(reading.title + reading.sentence, /BUH|Zusatzheizer/,
+        `${label}: the CT title and ratio do not promise one fixed water sensor`);
+      assertLayout(await page.evaluate(layoutAudit), label);
+    }
   } finally {
     await page.waitFor("!S.clickHold");
     await page.evaluate(`(() => {

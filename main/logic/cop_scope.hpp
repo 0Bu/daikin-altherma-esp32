@@ -75,8 +75,8 @@ inline int cop_post_buh_select(const char* const* labels, const unsigned* regs, 
 // the INV row is currently held over (ou_stale.hpp) — the browser decides that, not this header.
 enum class PelSource { None, Ct, Inv };
 
-// Which system the resulting quotient describes. This is what the inspector must NAME: the two are
-// different quantities, and a plant COP is the smaller of the two whenever the backup heater runs.
+// Which source rule formed the quotient. Plant denotes the CT path, whose electrical coverage
+// depends on the installation.
 enum class CopScope { None, HeatPump, Plant };
 
 // Why there is no COP to show. Each value is a DIFFERENT sentence in the UI — suppressing one wrong
@@ -102,9 +102,8 @@ struct CopPlan {
 // heaters are doing, and whether this profile carries a post-BUH row.
 //
 // Both `_known` flags are tri-state partners to their `_on`, exactly like ou_stale's rps_known: a
-// profile with no such row tells us nothing, and UNKNOWN must not be read as OFF. Off is the
-// permissive case here (it says the boundaries agree), so guessing it is what would ship the
-// collapsed quotient. Measured over the catalog the strictness costs nothing: 43 of the 44 profile
+// profile with no such row tells us nothing, and UNKNOWN must not be read as OFF. Known OFF
+// excludes that heater's contribution. Measured over the catalog, 43 of the 44 profile
 // tables carry BUH Step1/2, 43 carry BSH, all 44 carry a post-BUH row, and BOTH heater flags sit on
 // page 0x60, which stays live while the outdoor unit sleeps — so neither input can be a held-over
 // state from the last run.
@@ -112,14 +111,11 @@ struct CopPlan {
 // THE TWO HEATERS ARE NOT THE SAME PROBLEM, and that is the whole reason for two block codes:
 //
 //   BUH — the backup heater in the space-heating flow, between R1T and R2T. Its heat DOES cross the
-//         water circuit, so moving the numerator downstream of it (use_post_buh) re-pairs the
-//         boundaries and the COP survives.
+//         water circuit, so a usable downstream measurement can account for that heat.
 //   BSH — the immersion heater INSIDE the domestic-hot-water tank (logic added with the X10A tank
 //         heater flag). It heats tank water directly, downstream of the flow sensor and of BOTH
-//         leaving-water sensors. Its electrical load may be included in a CT estimate, but its heat crosses
-//         NEITHER R1T nor R2T, so there is no numerator anywhere in the profile that would re-pair
-//         them. Unlike the BUH case this is unfixable, not merely unfixed — hence a block rather
-//         than a different row, and its own code so the UI can say which of the two it is.
+//         leaving-water sensors. Its electrical load may be included in a CT estimate, but neither
+//         R1T nor R2T captures its heat. The rule withholds the ratio when that remains possible.
 //
 // The BSH matters precisely where this rule is aimed: all 21 profiles that carry CT clamps also
 // carry a BSH row, and the heater can run with compressor, pump and flow all at zero.
@@ -135,9 +131,8 @@ constexpr CopPlan cop_plan(PelSource pel, bool buh_known, bool buh_on,
     // it — deciding the row before the block would imply a pairing that does not exist.
     if (!(bsh_known && !bsh_on)) return {CopScope::Plant, CopBlock::TankHeater, false};
 
-    // Prefer the post-BUH numerator whenever the profile has one — that is the matching boundary
-    // regardless of what the backup heater is doing this second, so the figure does not change
-    // meaning as the heater cycles.
+    // Prefer a usable post-BUH numerator so the heat measurement can include backup heating
+    // without switching sensor locations as the heater cycles.
     if (has_post_buh) return {CopScope::Plant, CopBlock::None, true};
 
     // No post-BUH row. The pre-BUH outlet stands in for it only while the heater is provably off;

@@ -1,4 +1,4 @@
-// translation-source: 321a6b74ebb0b066e4e779ea1c3c02f1f540cc3459bdd324a6d4fb6b39a7a98d
+// translation-source: eb63387c6b7eba5e1a6d45a66578266a23311ba316faeba9b0d8fa36edb8382c
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -1006,7 +1006,7 @@ INSPECT_I18N.fr = inspectValues(
       : d.pth == null ? null
       : d.pthKind === "cooling" ? `≈ ${fmt1(d.pth)} kW de froid${d.cop != null ? ` ; EER ${fmt1(d.cop)}` : ""}.`
       : `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? ` ; COP ${fmt1(d.cop)}` : ""}.`], // pth
-    [(d) => d && d.efficiencyKind === "eer" ? "EER estimé de la pompe à chaleur" : d && d.copScope === "plant" ? "COP estimé après BUH" : "COP estimé de la pompe à chaleur", "Rendement estimé", (d) => d && d.efficiencyKind === "eer"
+    [(d) => d && d.efficiencyKind === "eer" ? "EER estimé de la pompe à chaleur" : d && d.copScope === "plant" ? "COP estimé à partir des pinces CT" : "COP estimé de la pompe à chaleur", "Rendement estimé", (d) => d && d.efficiencyKind === "eer"
       ? "Puissance froid estimée divisée par entrée électrique estimée. Hérite des incertitudes du fluide, des capteurs, de la tension et du facteur de puissance. EER instantané, non saisonnier ; l’énergie mesurée sur une saison est plus parlante."
       : "Puissance thermique estimée divisée par entrée électrique estimée, avec périmètres compatibles : après BUH avec CT et R2T, ou pompe à chaleur seule avec courant d’onduleur. Le câblage CT décide des charges incluses. Indication instantanée, pas compteur certifié.", (d) => d.copBlock === "tank_heater" ? "Aucun COP : la résistance du ballon peut être incluse dans l’électricité, mais sa chaleur va directement au ballon sans traverser les capteurs de départ ; les périmètres diffèrent."
       : d.copBlock === "buh_no_r2t" ? "Aucun COP : BUH actif sans capteur après lui. L’électricité peut inclure l’appoint alors que la chaleur est calculée avant."
@@ -1014,7 +1014,7 @@ INSPECT_I18N.fr = inspectValues(
       : d.copBlock === "no_pel" ? d.pelHeld ? "Aucun COP : compresseur arrêté, le courant d’onduleur vient du dernier cycle et n’est pas actuel." : "Aucun COP : ce profil ne fournit ni courant CT ni courant d’onduleur."
       : d.cop == null ? null
       : d.efficiencyKind === "eer" ? `${fmt1(d.cop)} kW de froid par kW électrique : ≈ ${fmt1(d.copPth)} kW retirés pour ≈ ${fmt1(d.pel)} kW absorbés.`
-      : d.copScope === "plant" ? `${fmt1(d.cop)} kW thermiques après BUH par kW électrique estimé par CT : ≈ ${fmt1(d.copPth)} / ≈ ${fmt1(d.pel)} kW. Le câblage CT fixe les charges incluses.`
+      : d.copScope === "plant" ? `${fmt1(d.cop)} kW thermiques côté eau par kW électrique estimé par CT : ≈ ${fmt1(d.copPth)} / ≈ ${fmt1(d.pel)} kW. Le câblage CT fixe les charges incluses.`
       : `${fmt1(d.cop)} kW thermiques par kW électrique dans le périmètre pompe à chaleur : ≈ ${fmt1(d.copPth)} / ≈ ${fmt1(d.pel)} kW. Le BUH est hors des deux valeurs.`], // cop
     ["Chauffage d’appoint · BUH", "Chauffage d’appoint BUH", "Appoint électrique du circuit d’eau placé après R1T. Ses étages peuvent relever le départ et la consommation ; ce n’est pas la résistance interne BSH du ballon.", (d) => d.buh1 == null && d.buh2 == null ? null : d.buh2 ? "Étage 2 : les deux étages chauffent." : d.buh1 ? "Étage 1 : un étage chauffe." : "Inactif : aucun étage BUH ne chauffe."], // buh
     ["Résistance du ballon", "Résistance électrique du ballon", "Résistance d’immersion BSH dans le ballon. Elle peut chauffer avec compresseur, pompe et débit à zéro ; son contact X10A ne mesure aucune puissance.", () => { const on = x10aDown() ? null : vOn(/^bsh$/i); return on == null ? null : on ? "Résistance du ballon active." : "Inactive : résistance du ballon arrêtée."; }], // bsh

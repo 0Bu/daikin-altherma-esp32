@@ -1,4 +1,4 @@
-// translation-source: 321a6b74ebb0b066e4e779ea1c3c02f1f540cc3459bdd324a6d4fb6b39a7a98d
+// translation-source: eb63387c6b7eba5e1a6d45a66578266a23311ba316faeba9b0d8fa36edb8382c
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -1010,7 +1010,7 @@ INSPECT_I18N.es = inspectValues(
       : d.pthKind === "cooling" ? `≈ ${fmt1(d.pth)} kW de frío${d.cop != null ? `; EER ${fmt1(d.cop)}` : ""}.`
       : `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `; COP ${fmt1(d.cop)}` : ""}.`], // pth
     [(d) => d && d.efficiencyKind === "eer" ? "EER estimado de la bomba de calor"
-      : d && d.copScope === "plant" ? "COP estimado tras BUH" : "COP estimado de la bomba de calor", "Eficiencia estimada", (d) => d && d.efficiencyKind === "eer"
+      : d && d.copScope === "plant" ? "COP estimado a partir de los CT" : "COP estimado de la bomba de calor", "Eficiencia estimada", (d) => d && d.efficiencyKind === "eer"
       ? "Potencia frigorífica estimada dividida por entrada eléctrica estimada. Hereda las incertidumbres del fluido, sensores, tensión y factor de potencia. Es un EER instantáneo, no estacional; la energía medida durante una temporada es más representativa."
       : "Potencia térmica estimada dividida por entrada eléctrica estimada, usando límites compatibles: tras BUH con CT cuando existe R2T, o solo la bomba de calor con corriente del inversor. El cableado CT decide qué cargas incluye. Es una indicación instantánea, no un contador certificado.", (d) => d.copBlock === "tank_heater"
       ? "Sin COP: la resistencia del depósito puede estar incluida en la electricidad, pero su calor va directo al depósito y no cruza los sensores de impulsión; los límites no coinciden."
@@ -1021,7 +1021,7 @@ INSPECT_I18N.es = inspectValues(
         : "Sin COP: este perfil no aporta entrada eléctrica mediante CT ni corriente del inversor."
       : d.cop == null ? null
       : d.efficiencyKind === "eer" ? `${fmt1(d.cop)} kW de frío por kW eléctrico: ≈ ${fmt1(d.copPth)} kW extraídos con ≈ ${fmt1(d.pel)} kW de entrada.`
-      : d.copScope === "plant" ? `${fmt1(d.cop)} kW térmicos tras BUH por kW eléctrico estimado con CT: ≈ ${fmt1(d.copPth)} kW / ≈ ${fmt1(d.pel)} kW. El cableado CT determina las cargas incluidas.`
+      : d.copScope === "plant" ? `${fmt1(d.cop)} kW térmicos en el circuito de agua por kW eléctrico estimado con CT: ≈ ${fmt1(d.copPth)} kW / ≈ ${fmt1(d.pel)} kW. El cableado CT determina las cargas incluidas.`
       : `${fmt1(d.cop)} kW térmicos por kW eléctrico dentro del límite de la bomba de calor: ≈ ${fmt1(d.copPth)} kW / ≈ ${fmt1(d.pel)} kW. BUH queda fuera de ambas cifras.`], // cop
     ["Calentador auxiliar · BUH", "Calentador auxiliar BUH", "Calentador eléctrico del circuito de agua situado después de R1T. Sus etapas pueden elevar la temperatura de impulsión y el consumo; no es la resistencia interna del depósito BSH.", (d) => d.buh1 == null && d.buh2 == null ? null : d.buh2 ? "Etapa 2: ambas etapas calientan." : d.buh1 ? "Etapa 1: una etapa calienta." : "Inactivo: ninguna etapa BUH está activa."], // buh
     ["Resistencia del depósito", "Resistencia eléctrica del depósito", "Resistencia eléctrica de inmersión BSH dentro del depósito. Puede calentar el agua con compresor, bomba y caudal a cero; su contacto X10A no mide potencia.", () => {

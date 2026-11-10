@@ -1,4 +1,4 @@
-// translation-source: 321a6b74ebb0b066e4e779ea1c3c02f1f540cc3459bdd324a6d4fb6b39a7a98d
+// translation-source: eb63387c6b7eba5e1a6d45a66578266a23311ba316faeba9b0d8fa36edb8382c
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -1011,7 +1011,7 @@ INSPECT_I18N.sv = inspectValues(
       : d.pthKind === "cooling" ? `≈ ${fmt1(d.pth)} kW kylning${d.cop != null ? `; EER ${fmt1(d.cop)}` : ""}.`
       : `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `; COP ${fmt1(d.cop)}` : ""}.`], // pth
     [(d) => d && d.efficiencyKind === "eer" ? "Uppskattad EER"
-      : d && d.copScope === "plant" ? "Uppskattad COP efter BUH" : "Uppskattad COP", "Uppskattad verkningsgrad", (d) => d && d.efficiencyKind === "eer"
+      : d && d.copScope === "plant" ? "Uppskattad COP baserad på CT-ström" : "Uppskattad COP", "Uppskattad verkningsgrad", (d) => d && d.efficiencyKind === "eer"
       ? "Kyleffekt ÷ eleffekt; momentan EER med osäkerhet i givare, vätska, spänning och effektfaktor."
       : "Gränsmatchad värme ÷ el: CT+R2T efter BUH, annars växelriktarström för värmepumpen.", (d) => d.copBlock === "tank_heater"
       ? "Ingen COP: el kan omfatta BSH, men tankvärmen passerar inte framledningsgivaren."
@@ -1022,7 +1022,7 @@ INSPECT_I18N.sv = inspectValues(
         : "Ingen COP: varken CT- eller växelriktarström finns."
       : d.cop == null ? null
       : d.efficiencyKind === "eer" ? `${fmt1(d.cop)} kW kylning/kW el: ${fmt1(d.copPth)} / ${fmt1(d.pel)} kW.`
-      : d.copScope === "plant" ? `${fmt1(d.cop)} kW värme/kW CT-el efter BUH: ${fmt1(d.copPth)} / ${fmt1(d.pel)} kW; lasten beror på inkopplingen.`
+      : d.copScope === "plant" ? `${fmt1(d.cop)} kW värme på vattensidan per kW uppskattad CT-el: ${fmt1(d.copPth)} / ${fmt1(d.pel)} kW; lasten beror på inkopplingen.`
       : `${fmt1(d.cop)} kW värme/kW el inom värmepumpens gräns: ${fmt1(d.copPth)} / ${fmt1(d.pel)} kW; BUH ingår inte.`], // cop
     ["Tillsatsvärmare · BUH", "Tillsatsvärmare BUH", "Elvärmare i vattenkretsen efter R1T, inte tankens BSH.", (d) => d.buh1 == null && d.buh2 == null ? null : d.buh2 ? "Steg 2: båda stegen värmer." : d.buh1 ? "Steg 1 värmer." : "Alla BUH-steg är av."], // buh
     ["Tankvärmare", "Tankvärmare BSH", "Tankens doppvärmare BSH kan värma självständigt; X10A mäter inte effekten.", () => {

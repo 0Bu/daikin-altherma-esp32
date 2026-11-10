@@ -1,4 +1,4 @@
-// translation-source: 321a6b74ebb0b066e4e779ea1c3c02f1f540cc3459bdd324a6d4fb6b39a7a98d
+// translation-source: eb63387c6b7eba5e1a6d45a66578266a23311ba316faeba9b0d8fa36edb8382c
 I18N.it = localeValues([
   /* sys.nodata */ "Nessun dato",
   /* sys.unreachable */ "Non raggiungibile",
@@ -1006,7 +1006,7 @@ INSPECT_I18N.it = inspectValues(
       : d.pth == null ? null
       : d.pthKind === "cooling" ? `≈ ${fmt1(d.pth)} kW frigoriferi${d.cop != null ? `; EER ${fmt1(d.cop)}` : ""}.`
       : `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `; COP ${fmt1(d.cop)}` : ""}.`], // pth
-    [(d) => d && d.efficiencyKind === "eer" ? "EER stimato della pompa di calore" : d && d.copScope === "plant" ? "COP stimato dopo BUH" : "COP stimato della pompa di calore", "Efficienza stimata", (d) => d && d.efficiencyKind === "eer"
+    [(d) => d && d.efficiencyKind === "eer" ? "EER stimato della pompa di calore" : d && d.copScope === "plant" ? "COP stimato a partire dai CT" : "COP stimato della pompa di calore", "Efficienza stimata", (d) => d && d.efficiencyKind === "eer"
       ? "Potenza frigorifera stimata divisa per assorbimento elettrico stimato. Eredita le incertezze di fluido, sensori, tensione e fattore di potenza. È un EER istantaneo, non stagionale; l’energia misurata su una stagione è più significativa."
       : "Potenza termica stimata divisa per assorbimento elettrico stimato con confini compatibili: dopo BUH con CT e R2T, oppure sola pompa di calore con corrente inverter. Il cablaggio CT decide i carichi inclusi. Indicazione istantanea, non contatore certificato.", (d) => d.copBlock === "tank_heater" ? "Nessun COP: la resistenza del serbatoio può essere inclusa nell’elettricità, ma il calore va direttamente al serbatoio senza attraversare i sensori di mandata; i confini non coincidono."
       : d.copBlock === "buh_no_r2t" ? "Nessun COP: BUH attivo senza sensore successivo. L’elettricità può includere il riscaldatore mentre il calore viene stimato prima di esso."
@@ -1014,7 +1014,7 @@ INSPECT_I18N.it = inspectValues(
       : d.copBlock === "no_pel" ? d.pelHeld ? "Nessun COP: compressore fermo, la corrente inverter è dell’ultimo ciclo e non è attuale." : "Nessun COP: il profilo non fornisce né correnti CT né corrente inverter."
       : d.cop == null ? null
       : d.efficiencyKind === "eer" ? `${fmt1(d.cop)} kW frigoriferi per kW elettrico: ≈ ${fmt1(d.copPth)} kW sottratti con ≈ ${fmt1(d.pel)} kW assorbiti.`
-      : d.copScope === "plant" ? `${fmt1(d.cop)} kW termici dopo BUH per kW elettrico stimato da CT: ≈ ${fmt1(d.copPth)} / ≈ ${fmt1(d.pel)} kW. Il cablaggio CT determina i carichi inclusi.`
+      : d.copScope === "plant" ? `${fmt1(d.cop)} kW termici lato acqua per kW elettrico stimato da CT: ≈ ${fmt1(d.copPth)} / ≈ ${fmt1(d.pel)} kW. Il cablaggio CT determina i carichi inclusi.`
       : `${fmt1(d.cop)} kW termici per kW elettrico nel confine pompa di calore: ≈ ${fmt1(d.copPth)} / ≈ ${fmt1(d.pel)} kW. BUH è fuori da entrambi i valori.`], // cop
     ["Riscaldatore ausiliario · BUH", "Riscaldatore ausiliario BUH", "Riscaldatore elettrico del circuito acqua posto dopo R1T. Gli stadi possono aumentare mandata e consumo; non è la resistenza interna BSH del serbatoio.", (d) => d.buh1 == null && d.buh2 == null ? null : d.buh2 ? "Stadio 2: entrambi gli stadi scaldano." : d.buh1 ? "Stadio 1: uno stadio scalda." : "Inattivo: nessuno stadio BUH riscalda."], // buh
     ["Resistenza serbatoio", "Resistenza elettrica del serbatoio", "Resistenza a immersione BSH nel serbatoio. Può scaldare con compressore, pompa e portata a zero; il contatto X10A non misura la potenza.", () => { const on = x10aDown() ? null : vOn(/^bsh$/i); return on == null ? null : on ? "Resistenza del serbatoio attiva." : "Inattiva: resistenza del serbatoio spenta."; }], // bsh

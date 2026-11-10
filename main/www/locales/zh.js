@@ -1,4 +1,4 @@
-// translation-source: 321a6b74ebb0b066e4e779ea1c3c02f1f540cc3459bdd324a6d4fb6b39a7a98d
+// translation-source: eb63387c6b7eba5e1a6d45a66578266a23311ba316faeba9b0d8fa36edb8382c
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
@@ -1006,7 +1006,7 @@ INSPECT_I18N.zh = inspectValues(
       : d.pth == null ? null
       : d.pthKind === "cooling" ? `≈ ${fmt1(d.pth)} kW 制冷${d.cop != null ? `；EER ${fmt1(d.cop)}` : ""}。`
       : `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `；COP ${fmt1(d.cop)}` : ""}。`], // pth
-    [(d) => d && d.efficiencyKind === "eer" ? "热泵 EER 估算" : d && d.copScope === "plant" ? "BUH 后 COP 估算" : "热泵 COP 估算", "效率估算", (d) => d && d.efficiencyKind === "eer"
+    [(d) => d && d.efficiencyKind === "eer" ? "热泵 EER 估算" : d && d.copScope === "plant" ? "基于电流互感器的 COP 估算" : "热泵 COP 估算", "效率估算", (d) => d && d.efficiencyKind === "eer"
       ? "制冷功率÷输入功率；继承介质、传感器、电压/功率因数误差，是瞬时 EER，非季节效率。"
       : "边界相容的热功率÷输入功率：有 R2T 时 CT 算 BUH 后，否则逆变器电流仅算热泵；瞬时值非认证计量。", (d) => d.copBlock === "tank_heater" ? "无 COP：电功率可能含 BSH，但其水箱热量不经过出水传感器，边界不一致。"
       : d.copBlock === "buh_no_r2t" ? "无 COP：BUH 启动却无下游传感器，电热边界不一致。"
@@ -1014,7 +1014,7 @@ INSPECT_I18N.zh = inspectValues(
       : d.copBlock === "no_pel" ? d.pelHeld ? "无 COP：停机后逆变器电流是旧值。" : "无 COP：无 CT 或逆变器电流。"
       : d.cop == null ? null
       : d.efficiencyKind === "eer" ? `每 1 kW 电约制冷 ${fmt1(d.cop)} kW：${fmt1(d.copPth)} / ${fmt1(d.pel)} kW。`
-      : d.copScope === "plant" ? `CT：每 1 kW 电在 BUH 后约供热 ${fmt1(d.cop)} kW（${fmt1(d.copPth)} / ${fmt1(d.pel)} kW）；负载取决于接线。`
+      : d.copScope === "plant" ? `CT：水侧每 1 kW 估算用电约供热 ${fmt1(d.cop)} kW（${fmt1(d.copPth)} / ${fmt1(d.pel)} kW）；负载取决于接线。`
       : `热泵边界：每 1 kW 电约供热 ${fmt1(d.cop)} kW（${fmt1(d.copPth)} / ${fmt1(d.pel)} kW），不含 BUH。`], // cop
     ["备用加热器 · BUH", "备用加热器 BUH", "R1T 下游水路电热，不是水箱 BSH。", (d) => d.buh1 == null && d.buh2 == null ? null : d.buh2 ? "2 级：两级加热。" : d.buh1 ? "1 级：一级加热。" : "BUH 各级关闭。"], // buh
     ["水箱电加热器", "水箱电加热器 BSH", "水箱浸入式 BSH；可独立加热，X10A 只报状态不测功率。", () => { const on = x10aDown() ? null : vOn(/^bsh$/i); return on == null ? null : on ? "BSH 已启动。" : "BSH 已关闭。"; }], // bsh
