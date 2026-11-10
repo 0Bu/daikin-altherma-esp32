@@ -261,13 +261,13 @@ struct CheckupBucket {
     uint8_t  censored_handover_runs   = 0;
     uint8_t  censored_unreadable_runs = 0;
     uint8_t  censored_restart_runs    = 0;
-    uint8_t  defrosts   = 0;   // defrost off -> on transitions (saturating)
+    uint8_t  defrosts                 = 0; // defrost off -> on transitions (saturating)
     uint8_t  paired_defrosts = 0; // same edge with readable compressor witnesses at both endpoints
-    uint8_t  flags      = 0;
+    uint8_t  flags           = 0;
     // Start-not-witnessed is the remainder of censored_runs after the four exclusive causes above.
     // A saturated runtime is a lower bound and permanently blocks this window's runtime gate.
     uint16_t censored_runtime_s = 0;
-    uint16_t dhw_hour_s         = 0; // compressor run seconds in DHW mode (valve_dhw active) in this hour
+    uint16_t dhw_hour_s = 0; // compressor run seconds in DHW mode (valve_dhw active) in this hour
     CheckupOutdoorStats cycling_outdoor; // samples from completed, pure space-heating runs only
     CheckupOutdoorStats defrost_outdoor; // samples paired with known defrost + running compressor
 };
@@ -1203,7 +1203,8 @@ inline bool checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample
             b.rps_observed_s = checkup_add_hour_s(b.rps_observed_s, dt);
             if (s.rps_running && st.prev_rps_running) {
                 b.run_s = checkup_add_hour_s(b.run_s, dt);
-                if (s.valve_known && s.valve_dhw) b.dhw_hour_s = checkup_add_hour_s(b.dhw_hour_s, dt);
+                if (s.valve_known && s.valve_dhw)
+                    b.dhw_hour_s = checkup_add_hour_s(b.dhw_hour_s, dt);
             }
         }
         // BOTH witnesses readable in THIS sample. The pairing is the same bias dfr_pair_observed_s
@@ -1984,9 +1985,8 @@ inline CheckupCyclingHour checkup_bucket_cycling_hour(const CheckupBucket& b) {
     if (!dhw_s && b.dhw_run_s > 0)
         dhw_s = static_cast<uint16_t>(std::min<uint32_t>(b.dhw_run_s, b.run_s));
     const auto space_s = static_cast<uint16_t>(b.run_s > dhw_s ? b.run_s - dhw_s : 0);
-    return CheckupCyclingHour{
-        static_cast<uint16_t>(b.rps_observed_s), static_cast<uint16_t>(b.run_s),
-        space_s, dhw_s, b.starts};
+    return CheckupCyclingHour{static_cast<uint16_t>(b.rps_observed_s),
+                              static_cast<uint16_t>(b.run_s), space_s, dhw_s, b.starts};
 }
 
 inline CheckupCyclingHours checkup_cycling_hours(const CheckupRing& r, bool rps_supported = true) {
@@ -1998,7 +1998,8 @@ inline CheckupCyclingHours checkup_cycling_hours(const CheckupRing& r, bool rps_
         total_observed += r.buf[(oldest + i) % CHECKUP_COMPLETED_BUCKETS].rps_observed_s;
     if (!total_observed) return out;
     for (size_t i = 0; i < r.count; i++)
-        out.hours[out.count++] = checkup_bucket_cycling_hour(r.buf[(oldest + i) % CHECKUP_COMPLETED_BUCKETS]);
+        out.hours[out.count++] =
+            checkup_bucket_cycling_hour(r.buf[(oldest + i) % CHECKUP_COMPLETED_BUCKETS]);
     out.hours[out.count++] = checkup_bucket_cycling_hour(r.pending);
     return out;
 }

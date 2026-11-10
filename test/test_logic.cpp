@@ -15985,13 +15985,13 @@ static void test_checkup() {
         CHECK(checkup_cycling_hours(ring, false).count == 0);
 
         CheckupRing legacy{};
-        legacy.count                  = 1;
-        legacy.buf[0].run_s           = 800;
-        legacy.buf[0].dhw_run_s       = 300;
-        legacy.buf[0].rps_observed_s  = 3600;
-        legacy.pending.run_s          = 400;
-        legacy.pending.dhw_run_s      = 500;
-        legacy.pending.rps_observed_s = 1800;
+        legacy.count                   = 1;
+        legacy.buf[0].run_s            = 800;
+        legacy.buf[0].dhw_run_s        = 300;
+        legacy.buf[0].rps_observed_s   = 3600;
+        legacy.pending.run_s           = 400;
+        legacy.pending.dhw_run_s       = 500;
+        legacy.pending.rps_observed_s  = 1800;
         const CheckupCyclingHours legh = checkup_cycling_hours(legacy, true);
         CHECK(legh.count == 2);
         CHECK(legh.hours[0].dhw_s == 300 && legh.hours[0].space_s == 500);
