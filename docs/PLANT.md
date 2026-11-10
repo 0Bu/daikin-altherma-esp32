@@ -122,9 +122,7 @@ Apart from the journaled open hour, a software restart can carry only the ongoin
 through a separately sealed **one-shot handoff**, adopted after the same full X10A and circulation
 scopes are confirmed with diagnostics enabled and no reset requested. It preserves the hourly cooling candidate/settling timer,
 never undated completed counters or transient compressor edges. Power loss, crash, changed source
-or an incompatible or absent handoff starts a fresh filter. Handoff v3 rejects v2. Saved hours use
-their own [journal compatibility rule](ARCHITECTURE.md#history-and-diagnosis-persistence), separate
-from trend history.
+or an incompatible or absent handoff starts a fresh filter. Handoff v3 rejects v2.
 
 Adoption books **five seconds plus all new-boot uptime through source confirmation as blind time**.
 Together with earlier gaps, exceeding either two minutes of continuous blindness or 10% of the

@@ -274,7 +274,7 @@ legacy `mean_run_s` remains present as null. Transition/gap rules and limitation
 
 `hours` lists up to 24 chronological buckets with `starts`, `run_s` and `observed_s`, including the
 open hour. For positive runtime with complete [hourly mode attribution](DIAGNOSTIC_EVIDENCE.md#diagnosis-cycling),
-the optional pair `space_s` and `dhw_s` splits the observed seconds. A zero in that pair means zero
+the optional fields satisfy `space_s + dhw_s = run_s`. A zero in that pair means zero
 attributed seconds for the corresponding mode. The hourly runtime can include parts of runs started
 outside the hour.
 

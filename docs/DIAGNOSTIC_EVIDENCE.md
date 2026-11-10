@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 608447da9c62a38070d762d437e8a5bc9d01296a61fb8b8929934982067a301e -->
+<!-- diagnostic-evidence-contract: 0f3d31d1ca897c203a7dd5449afa2f58edec9ce7290f841f8a49c0d2c9e567fb -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -204,9 +204,10 @@ this temperature. Zero net cooling does not mean zero heat transfer. No marker p
 isolation, and no accepted window excludes losses in discarded intervals. Unseen charging can
 still affect a later window. Missing replies or polling pauses establish no wiring defect.
 
-Changing circulation identity retires DHW evidence independently; changed evaluation/layout rejects
-older filtered records and candidates. [PLANT.md](PLANT.md#reboot-and-persistence) owns restart,
-source and journal admission rules; [API.md](API.md) owns the evidence fields.
+Changing circulation identity retires DHW evidence independently. Saved cooling hours use the core
+journal's layout and schema checks. An unfinished candidate has a separate handoff compatibility
+check. See the [restart and admission rules](PLANT.md#reboot-and-persistence) and
+[evidence fields](API.md).
 
 <a id="diagnosis-cycling"></a>
 ### 3. Compressor cycling (`cycling`)
