@@ -218,10 +218,13 @@ blind time itself, so its verdict can be `accept` beside trend age refusals.
 `health` fields: `covered_s`, `span_s`, `source_fresh`, `source_age_s`, `persist`, `full_span`,
 `available`, `assessable`, `evaluated`, `status`, `checks`. Disabled diagnostics, and a reset that is
 still pending, keep the object with placeholder checks: each reads `unavailable`/`unsupported` and
-carries no accumulated evidence, so read `persist` and `diagnostics.enabled` rather than the reason. `span_s` is elapsed lifecycle time capped at 24 hours (after a flash restore, each admitted stored hour counts as a whole hour); `covered_s` is observed
-bus context. Each check has its own `observed_s`/`required_s`, so one signal cannot lend coverage to
-another. `source_age_s` is null before a nonempty X10A sample; empty pause/failure callbacks cannot
-renew it. `source_fresh` applies the 15-second observation-age bound at read time. A stale source
+carries no accumulated evidence, so read `persist` and `diagnostics.enabled` rather than the reason.
+`span_s` is the elapsed horizon capped at 24 hours. Flash restore can extend it to one nominal
+hour before the earliest selected record's end. The horizon can include gaps and short restart
+records. `covered_s` reports observed bus context. Each check has its own `observed_s`/`required_s`,
+so one signal cannot lend coverage to another. `source_age_s` is null before a nonempty X10A sample;
+empty pause/failure callbacks cannot renew it. `source_fresh` applies the 15-second observation-age
+bound at read time. A stale source
 withholds current fault-clear/current pressure and reassuring assessments; dated findings remain.
 `health.persist:"flash_pending"` means recovery has not completed and proves no stored hours;
 `fresh` means none were selected; `flash` means admissible dated hourly reconstruction with live

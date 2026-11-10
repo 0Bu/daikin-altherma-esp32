@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: 28067e8b699169d8dfe4676a66b717522d36f75aeaa98e48a8a77f928da26c7d -->
+<!-- user-docs-contract: a39694d31b3bc81852600b304ef18aeacf678ed5fe0122334f3e748df532c484 -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default. Enable **Plant diagnostics** under **Settings → Firmware** to start an evidence
@@ -133,12 +133,11 @@ may include a final valve return to the room circuit of at most 30 seconds befor
 including when the readable indoor mode still says DHW. A cooling mode or unreadable tail is not
 accepted. This project allowance is based on observed 6–22 second tails, not a Daikin specification.
 No start allowance is assumed. Saturated or incomplete evidence keeps the row **MEASURED**.
-A run that crosses an hour boundary is stored again once it stops, so a restart keeps it. A restart
-before that save, which needs synchronized time and a working history store, can still lose the
-run. A lost run goes unnoticed and tends to be a long one, so cycling can look shorter than it was;
-the row stays **MEASURED** only while lost runs are a large enough share of all runs or of their
-runtime, or leave too few completed runs. If the compressor stops during a defrost, one heating run
-counts as several; whether it does has not been checked yet.
+If a run ends in a later hour, the board tries to save the completion with its start hour while
+that hour is still in the window. Both survive a restart only if the saved hour contains them
+and can be restored. An earlier saved copy can retain the start alone. Losing a completion tends
+to shorten the apparent mean or leave too few eligible runs. If the compressor stops during a
+defrost, one heating run counts as several. Whether it does has not been checked yet.
 
 The row also shows **stop context**, a separate count of witnessed stops with recent heating
 context. Overlapping observations describe low speed with a reported temperature/target gap,

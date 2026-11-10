@@ -78,6 +78,10 @@ requires independent heating and hot-water runtime. It rejects earlier core reco
 including their completed tank-cooling results. Raw trends, the independent Stop journal and the
 one-shot handoff of an unfinished tank-cooling window keep their own compatibility rules.
 
+A late restore can add only hours whose saved labels precede this boot's completed hours. If the
+wall clock cannot date those live hours within the window, recovery keeps the live history and
+skips the saved hours.
+
 **A software restart (any `esp_restart()`) tries to save the open hour.**
 Software restarts include:
 - an OTA installation or rollback;
@@ -99,9 +103,10 @@ The bounded shutdown drain appends it after every completed hour. It is skipped 
 not newer than the newest completed or already journaled hour, because a second record could only
 replace that hour. A drain that reaches its record budget or cannot take its locks loses it as well.
 
-A run still open at the restart keeps its witnessed start, and its completion is never invented.
-Once the remainder stops, the next boot books it as a censored run whose start it did not witness,
-without adding a start.
+A counted start survives a restart only if its own hour was saved and restored from a compatible
+record. For a run crossing an hour boundary, that is the earlier hour, separate from the open hour
+the restart tries to save. If the compressor is already running when observations resume, the
+new boot counts no start for that run. When it stops, the observed remainder is a censored run.
 
 A power loss, a crash or a task or interrupt watchdog panic still loses the open hour. Completed
 hours not yet saved stay missing.

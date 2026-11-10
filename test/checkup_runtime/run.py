@@ -22,6 +22,7 @@ CASES = [
     "source_freshness", "stale_finding", "backwards_clock", "generation_mismatch",
     "inflight_generation", "reset_read_barrier", "reset_during_lock", "consent_reset",
     "circulation_reset", "circulation_inflight", "pending_expiry", "restored_expiry",
+    "late_restore_prefix", "late_restore_clock_behind",
     "consent_lock_new_generation", "consent_sampling_new_generation",
     "consent_lock_same_generation", "consent_sampling_same_generation",
     "consent_caller_new_generation", "consent_caller_same_generation",
@@ -225,6 +226,19 @@ if source_text.count(restore_marker) != 1:
 mutations.append(("omit_restored_cycling_slot_marker",
                   source_text.replace(restore_marker, "hours.hours[i].restored = false;"),
                   "restored_expiry", "restored_chart_keeps_its_timestamp_and_readable_time"))
+tail_admission = "        if (records[i].bucket >= first_live) continue;\n"
+if source_text.count(tail_admission) != 1:
+    raise RuntimeError("Expected one saved-hour prefix admission guard")
+mutations.append(("allow_saved_hour_after_live_tail", source_text.replace(tail_admission, ""),
+                  "late_restore_prefix", "late_restore_admits_only_older_prefix"))
+tail_clock = "        if (!logic::checkup_journal_in_window(logic::checkup_journal_live_end(live, 0),"
+if source_text.count(tail_clock) != 1:
+    raise RuntimeError("Expected one live-tail clock admission guard")
+tail_clock_start = source_text.index(tail_clock)
+tail_clock_end = source_text.index("        span_to(first_live);", tail_clock_start)
+mutations.append(("ignore_live_tail_clock_conflict",
+                  source_text[:tail_clock_start] + source_text[tail_clock_end:],
+                  "late_restore_clock_behind", "late_restore_keeps_live_when_clock_cannot_date_tail"))
 expire_start = source_text.index("void checkup_stop_context_expire(int64_t) {")
 expire_end = source_text.index("\nCheckupStopContextReport checkup_stop_context_report()", expire_start)
 expire_body = source_text[expire_start:expire_end]

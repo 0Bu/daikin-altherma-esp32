@@ -10,6 +10,7 @@ const ZERO = 20;
 const MISSING = 19;
 const EDGE = 18;
 const RESTORED = 17;
+const SHORT_GAP = 16;
 const hour = bucket => `${COLS} button[data-bucket="${bucket}"]`;
 const evaluate = (page, fn, arg) => page.evaluate(`(${fn})(${JSON.stringify(arg)})`);
 
@@ -50,6 +51,7 @@ export async function assertCyclingChart(page, server, context) {
     bucket, starts: 0, run_s: 0, observed_s: 3600,
     ...(bucket === OPEN ? {} : { end_unix_s: boundary - (LAST - bucket) * 3600 }),
   }));
+  Object.assign(hours[SHORT_GAP], { observed_s: 3598, run_s: 3598, space_s: 3598, dhw_s: 0 });
   Object.assign(hours[RESTORED], { restored: true, observed_s: 180, run_s: 180, space_s: 180, dhw_s: 0 });
   Object.assign(hours[EDGE], { starts: 1, observed_s: 0 });
   Object.assign(hours[MISSING], { observed_s: 0 });
@@ -168,6 +170,14 @@ export async function assertCyclingChart(page, server, context) {
       context + ": printed counts appear in their own columns above the bars");
     await assertSegments(ZERO, {}, "observed zero runtime has no missing or running segment");
     await assertSegments(MISSING, { gap: 3600 }, "an unread closed slot is entirely hatched");
+    await assertSegments(SHORT_GAP, { space: 3598, gap: 2 },
+      "a two-second sampling gap does not cover witnessed runtime");
+    const { segments: short } = await cells(SHORT_GAP);
+    assert.ok(short.gap.bottom - short.space.top <= 0.05,
+      context + ": a subpixel sampling gap stays within its own interval");
+    assert.ok((await label(SHORT_GAP)).includes(await page.evaluate(
+      "t('check.hour.coverage', t('check.min', '59:58'), dwellDuration(3600))")),
+      context + ": the short-gap readout retains second-level precision");
     await assertSegments(RESTORED, { space: 180 }, "a short restored slot does not infer a sampling gap");
     assert.ok((await label(RESTORED)).includes(
       await page.evaluate("t('check.hour.coverage', dwellDuration(180), '')")),

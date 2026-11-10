@@ -1069,7 +1069,12 @@ CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* record
     // An earlier call already rebuilt the window; never mix the same evidence in twice.
     if (s_persist_verdict == logic::CheckupRestore::Flash)
         return CheckupFlashRestoreResult::Ignored;
-    const logic::CheckupRestore refused = s_persist_verdict;
+    const logic::CheckupRestore refused          = s_persist_verdict;
+    const auto                  fresh_if_pending = [] {
+        if (s_persist_verdict == logic::CheckupRestore::FlashPending)
+            s_persist_verdict = logic::CheckupRestore::Fresh;
+        return CheckupFlashRestoreResult::Ignored;
+    };
 
     const int64_t now_us          = esp_timer_get_time();
     const bool    reset_requested = s_reset_requested.load();
@@ -1091,13 +1096,28 @@ CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* record
     }
 
     int64_t earliest_bucket = INT64_MAX;
-    int64_t latest_bucket = INT64_MIN;
-    size_t accepted = 0;
+    int64_t latest_bucket   = INT64_MIN;
+    size_t  accepted        = 0;
     auto    span_to         = [&](int64_t bucket) {
         if (bucket < earliest_bucket) earliest_bucket = bucket;
         if (bucket > latest_bucket) latest_bucket = bucket;
     };
+    const int64_t first_live = live.count ? logic::checkup_journal_live_label(live, 0) : INT64_MAX;
+    if (live.count) {
+        // Completed hours from this boot must stay a contiguous tail. Both run completion and
+        // journal replay locate them by their monotonic distance from the pending hour. If the
+        // wall clock cannot date the entire tail, keep the live ring without rebuilding it.
+        if (!logic::checkup_journal_in_window(logic::checkup_journal_live_end(live, 0),
+                                              now_unix_s) ||
+            !logic::checkup_journal_in_window(logic::checkup_journal_live_end(live, live.count - 1),
+                                              now_unix_s))
+            return fresh_if_pending();
+        span_to(first_live);
+        span_to(live.newest_label);
+    }
     for (size_t i = 0; i < count; i++) {
+        // A saved label inside or beyond this boot's live tail cannot establish earlier evidence.
+        if (records[i].bucket >= first_live) continue;
         if (!logic::checkup_journal_restore_admits(
                 records[i].payload, records[i].bucket, now_unix_s, s_source_confirmed, s_model_fp,
                 s_source_fp, s_diagnostics_generation, reset_requested))
@@ -1105,17 +1125,7 @@ CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* record
         span_to(records[i].bucket);
         accepted++;
     }
-    for (size_t k = 0; k < live.count; k++) {
-        const int64_t label = logic::checkup_journal_live_label(live, k);
-        if (logic::checkup_journal_live_index(live, label, now_unix_s, s_source_confirmed,
-                                              s_model_fp, s_source_fp, reset_requested) == k)
-            span_to(label);
-    }
-    if (!accepted) {
-        if (s_persist_verdict == logic::CheckupRestore::FlashPending)
-            s_persist_verdict = logic::CheckupRestore::Fresh;
-        return CheckupFlashRestoreResult::Ignored;
-    }
+    if (!accepted) return fresh_if_pending();
 
     // If this boot has not completed an hour yet, explicit empty buckets represent wall time during
     // which the board was off. They age older evidence without inventing observed seconds.
@@ -1141,11 +1151,7 @@ CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* record
     }
     // Valid records can still fall outside capacity or lose to live evidence. Neither is a
     // restoration: retain the current pending/live window and report no flash provenance.
-    if (!materialized) {
-        if (s_persist_verdict == logic::CheckupRestore::FlashPending)
-            s_persist_verdict = logic::CheckupRestore::Fresh;
-        return CheckupFlashRestoreResult::Ignored;
-    }
+    if (!materialized) return fresh_if_pending();
 
     const int64_t first_sample_us = P().ring.first_sample_us;
     const int64_t latest_sample_us = P().ring.latest_sample_us;

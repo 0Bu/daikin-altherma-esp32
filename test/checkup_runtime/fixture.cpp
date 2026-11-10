@@ -444,6 +444,57 @@ void restored_expiry() {
                 after[CheckupCheck::Fault].verdict != CheckupVerdict::Info,
             "restored_expires_without_producer");
 }
+void late_restore(bool clock_behind) {
+    // Cross a wall-hour boundary during the new monotonic hour. A saved wall label can then
+    // appear after the last live completed label without being in the future of the wall clock.
+    const int64_t hour   = CHECKUP_DT_S;
+    adapter::unix_origin = adapter::unix_origin / hour * hour + hour - 10;
+    boot();
+    const auto                     cov = coverage();
+    const std::vector<CachedValue> rows{row(CHECKUP_LOC_VALVE, "1")};
+    sample(3591, rows, cov);
+    sample(3596, rows, cov, true, true);
+    sample(3601, rows, cov, true, true);
+    int64_t               live_bucket = INT64_MIN;
+    CheckupJournalPayload live;
+    require(checkup_flash_next(adapter::unix_origin + 3601, INT64_MIN, live_bucket, live) &&
+                live.checkup.starts == 1 && live.checkup.dhw_runs == 0,
+            "fixture_run_crosses_monotonic_hour");
+
+    if (clock_behind) adapter::unix_origin -= hour;
+    const int64_t last_sample = clock_behind ? 3606 : 3621;
+    for (int64_t t = 3606; t <= last_sample; t += 5) sample(t, rows, cov, true, true);
+    const int64_t now       = adapter::unix_origin + last_sample;
+    const int64_t older_end = (clock_behind ? checkup_journal_bucket(now) : live_bucket) * hour - 1;
+    CheckupFlashRecord saved[]{{checkup_journal_bucket(older_end), live}, {live_bucket + 1, live}};
+    saved[0].payload.end_unix_s             = older_end;
+    saved[0].payload.checkup.starts         = 2;
+    saved[0].payload.checkup.rps_observed_s = 30;
+    saved[1].payload.end_unix_s             = (live_bucket + 1) * hour + 1;
+    saved[1].payload.checkup.starts         = 7;
+    saved[1].payload.checkup.rps_observed_s = 30;
+    const auto          restored            = checkup_flash_restore(saved, std::size(saved), now);
+    CheckupCyclingHours hours;
+    checkup_report(&hours);
+    if (clock_behind) {
+        require(restored == CheckupFlashRestoreResult::Ignored && hours.count == 2 &&
+                    !hours.hours[0].restored && hours.hours[0].starts == 1,
+                "late_restore_keeps_live_when_clock_cannot_date_tail");
+        return;
+    }
+    require(restored == CheckupFlashRestoreResult::Restored && hours.count == 3 &&
+                hours.hours[0].restored && hours.hours[0].starts == 2 && !hours.hours[1].restored &&
+                hours.hours[1].starts == 1,
+            "late_restore_admits_only_older_prefix");
+
+    sample(3626, rows, cov);
+    int64_t               revised = INT64_MIN;
+    CheckupJournalPayload replay;
+    require(checkup_flash_next(adapter::unix_origin + 3626, live_bucket, revised, replay) &&
+                revised == live_bucket && replay.checkup.starts == 1 &&
+                replay.checkup.dhw_runs == 1,
+            "late_restore_replays_completion_in_live_start_hour");
+}
 CheckupReport consent_reenabled_report;
 uint32_t      consent_restore_generation = 25;
 void          consent_off_on() {
@@ -742,6 +793,8 @@ int main(int argc, char** argv) {
             pending_expiry();
         else if (name == "restored_expiry")
             restored_expiry();
+        else if (name == "late_restore_prefix" || name == "late_restore_clock_behind")
+            late_restore(name == "late_restore_clock_behind");
         else if (name.rfind("consent_lock_", 0) == 0 || name.rfind("consent_sampling_", 0) == 0 ||
                  name.rfind("consent_caller_", 0) == 0)
             consent_staged_sample(name);

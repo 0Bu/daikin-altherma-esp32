@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 16afbe7fddda47611c568efa433dcbe433fa99c19b7467cea715132fee2478f9 -->
+<!-- diagnostic-evidence-contract: ba6dff969b185e4311beb543adb6f0e9a3181a6597aecc8a239788c82da23a24 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -237,14 +237,14 @@ elapsed runtime must also be completed pure heating runtime; DHW runtime cannot 
 heating runs. Censored elapsed time includes blind intervals and excludes only proven handovers.
 Unwitnessed starts and journal/window boundaries have unknown full durations and always block
 assessment; their runtime is only an observed lower bound. Saturated runtime/counters or inconsistent
-cause counts also block the assessment. A run still open at a software restart keeps its witnessed
-start in the journaled open hour; the next boot books only its remainder, as a censored `start` run,
-and adds no start ([PLANT.md](PLANT.md#reboot-and-persistence)). A run completing after its start
-hour was journaled is journaled again with that hour
-([persistence](ARCHITECTURE.md#history-and-diagnosis-persistence)).
-A restart between its stop and that append, which needs synchronized time and a writable journal,
-can still lose it. Project inference, not measured: the append normally follows within seconds, and
-only runs still open at an hour boundary are exposed, so a loss tends to remove a long run. Under
+cause counts also block the assessment. A counted start survives a restart only when the saved
+hour containing that count restores. The new boot can observe the tail of a still-running compressor
+as a censored `start` run without adding a start ([PLANT.md](PLANT.md#reboot-and-persistence)).
+When a run completes into its retained start hour after that hour was journaled, the firmware
+requests a revised append ([persistence](ARCHITECTURE.md#history-and-diagnosis-persistence)).
+The completed run survives only if the revision is saved and restored. An earlier saved copy can
+retain the start alone. The project infers that a missed revision tends to remove a long run because
+this case requires a run to have crossed an hour boundary. Under
 the count population above a lost run is not detected; it withholds the assessment only by pushing
 either population gate (classified runs or runtime) below 90% or the completed heating runs below
 12, and can otherwise shift (most likely shorten) the mean and change the result. Only at least 12 completed

@@ -892,7 +892,7 @@ button.checkup-chart-col:focus-visible { outline: 2px solid var(--brand-strong);
 .checkup-chart-col i.space { background: var(--flow-hot); }
 .checkup-chart-col i.dhw { background: var(--brand); }
 .checkup-cycling-chart i.gap { background: repeating-linear-gradient(135deg, var(--muted) 0 1px, var(--soft) 1px 4px); }
-.checkup-chart-col i.gap { position: absolute; inset: 0; min-height: 1px; }
+.checkup-chart-col i.gap { position: absolute; inset: 0; }
 .checkup-gap-key { display: inline-flex; align-items: center; gap: 4px; }
 .checkup-gap-key i { width: 9px; height: 9px; border-radius: 2px; flex: none; }
 

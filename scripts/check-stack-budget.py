@@ -871,34 +871,45 @@ def validate_http_stack(budgets: dict[str, Any], source: str) -> None:
 def validate_status_diagnosis_paths(budgets: dict[str, Any], sources: dict[str, str]) -> None:
     """Keep diagnosis frames on their actual HTTP callers."""
     report = ["http_send_status_json", "status_serializer", "checkup_report"]
-    # The report frame remains active in either descendant. Expiry and the dated snapshot run
-    # sequentially, so their frames do not overlap.
-    expiry = [*report, "cycling_expire", "cycling_seal", "cycling_crc"]
-    cycling_hours = [*report, "checkup_cycling_hours_locked", "room_time_now"]
+    # Report descendants run sequentially. The pure chart builder and clock are also siblings
+    # within the same locked snapshot, while the evaluator keeps its summarizer and evidence
+    # classifier nested. Reuse the same aggregate and fold frames that the MQTT evidence uses.
+    report_tails = {
+        "checkup": ["cycling_expire", "cycling_seal", "cycling_crc"],
+        "checkup_aggregate": ["cycling_aggregate", "cycling_fold"],
+        "checkup_evaluate": ["checkup_evaluate", "checkup_summarize", "checkup_evidence_name"],
+        "checkup_dhw_progress": ["checkup_dhw_progress", "checkup_dhw_age"],
+        "cycling_hours": ["checkup_cycling_hours_locked", "room_time_now"],
+        "cycling_hours_builder": ["checkup_cycling_hours_locked", "checkup_cycling_hours_build"],
+    }
+    report_paths = {
+        f"httpd_{transport}_{name}": [*prefix, *report, *tail]
+        for name, tail in report_tails.items()
+        for transport, prefix in (("direct", []), ("mcp", ["mcp_post"]))
+    }
     expected = {
         "httpd_mcp_status": ["mcp_post", "http_send_status_json", "status_serializer",
                              "double_string", "dynamic_double_string"],
         "httpd_direct_status": ["http_send_status_json", "status_serializer",
                                 "double_string", "dynamic_double_string"],
-        "httpd_mcp_checkup": ["mcp_post", *expiry],
-        "httpd_direct_checkup": expiry,
-        "httpd_mcp_cycling_hours": ["mcp_post", *cycling_hours],
-        "httpd_direct_cycling_hours": cycling_hours,
+        **report_paths,
         "httpd_mcp_health_number": ["mcp_post", "http_send_status_json", "status_serializer",
                                     "status_health_number", "status_unsigned_number"],
         "httpd_direct_health_number": ["http_send_status_json", "status_serializer",
                                        "status_health_number", "status_unsigned_number"],
     }
+    http_paths = set(budgets["tasks"]["httpd"]["paths"])
     for name, members in expected.items():
         rule = budgets["paths"].get(name, {})
-        if (rule.get("symbols") != members or rule.get("multipliers") != {}
+        if (name not in http_paths or rule.get("symbols") != members or rule.get("multipliers") != {}
                 or rule.get("base_bytes") != 1536 or rule.get("max_bytes") != 8192):
             raise BudgetError(f"diagnosis status path {name}: HTTP caller/report accounting changed")
-    report_paths = {name for name, rule in budgets["paths"].items()
-                    if "checkup_report" in rule["symbols"]}
-    hour_names = {"httpd_mcp_cycling_hours", "httpd_direct_cycling_hours"}
-    if report_paths != {"httpd_mcp_checkup", "httpd_direct_checkup"} | hour_names:
+    actual_report_paths = {name for name, rule in budgets["paths"].items()
+                           if "checkup_report" in rule["symbols"]}
+    if actual_report_paths != report_paths.keys():
         raise BudgetError("diagnosis status paths: checkup_report belongs to HTTP, not polling")
+    hour_names = {name for name, members in report_paths.items()
+                  if "checkup_cycling_hours_locked" in members}
     hour_paths = {name for name, rule in budgets["paths"].items()
                   if "checkup_cycling_hours_locked" in rule["symbols"]}
     if hour_paths != hour_names:
@@ -936,6 +947,27 @@ def validate_status_diagnosis_paths(budgets: dict[str, Any], sources: dict[str, 
             or len(re.findall(r"\btime_now\s*\(", hours_body)) != 1
             or re.search(r"\bexpire_restored_locked\s*\(", hours_body)):
         raise BudgetError("diagnosis status source: nested snapshot and separate expiry path changed")
+    checkup_logic = stack_source_code(sources["main/logic/checkup.hpp"])
+    # The body scanner expects a brace-free signature. Ignore only this default argument.
+    evaluate_source = re.sub(r"(const DhwLossWindow& dhw)\s*=\s*\{\s*\}", r"\1", checkup_logic)
+    aggregate_body = stack_function_body(checkup_logic, "checkup_aggregate")
+    evaluate_body = stack_function_body(evaluate_source, "checkup_evaluate")
+    summarize_body = stack_function_body(checkup_logic, "checkup_summarize")
+    progress_body = stack_function_body(checkup_logic, "dhw_loss_progress")
+    for caller, callee in (
+        (report_body, "logic::checkup_aggregate"),
+        (report_body, "logic::checkup_evaluate"),
+        (report_body, "logic::dhw_loss_progress"),
+        (hours_body, "logic::checkup_cycling_hours"),
+        (evaluate_body, "checkup_summarize"),
+        (summarize_body, "checkup_result_evidence_name"),
+        (progress_body, "dhw_loss_age_s"),
+    ):
+        if len(re.findall(r"\b" + re.escape(callee) + r"\s*\(", caller)) != 1:
+            raise BudgetError(f"diagnosis status source: {callee} stack path changed")
+    if (not re.search(r"auto fold = \[&w\]\(const CheckupBucket& b\)", aggregate_body)
+            or len(re.findall(r"\bfold\s*\(", aggregate_body)) != 2):
+        raise BudgetError("diagnosis status source: aggregate fold stack path changed")
     if (len(re.findall(r"\bnum\s*\(", status)) != 37
             or not re.search(r"auto num = \[&j\]\(const char\* name, int v\) "
                              r"__attribute__\(\(noinline\)\)\s*\{", status)
@@ -2729,6 +2761,12 @@ def self_test() -> None:
      'daik::history_record(daik::CachedValue const*, unsigned int, unsigned long)': 64,
      'daik::checkup_report(daik::logic::CheckupCyclingHours*)': 64,
      'daik::checkup_cycling_hours_locked(long long)': 256,
+     'daik::logic::checkup_cycling_hours(daik::logic::CheckupRing const&, bool)': 32,
+     'daik::logic::checkup_evaluate(daik::logic::CheckupWindow const&, daik::logic::CheckupCoverage const&, daik::FaultClass, daik::logic::DhwLossWindow const&)': 80,
+     'daik::logic::checkup_summarize(daik::logic::CheckupReport&)': 32,
+     'daik::logic::checkup_result_evidence_name(daik::logic::CheckupCheck, daik::logic::CheckupCheckResult const&)': 32,
+     'daik::logic::dhw_loss_progress(daik::logic::DhwLossState const&, long long)': 48,
+     'daik::logic::dhw_loss_age_s(long long, long long, unsigned long)': 32,
      'daik::checkup_reset_on_detect(char const*, unsigned long)': 64,
      'daik::logic::checkup_model_fingerprint(char const*, daik::logic::ProfileView const&)': 64,
      'daik::logic::checkup_schema_row_fingerprint(daik::logic::ProfileView const&, daik::ValueDef const&)': 32,
@@ -3409,6 +3447,14 @@ def self_test() -> None:
     assert selected["path:httpd_direct_checkup"] == 6688
     assert selected["path:httpd_mcp_cycling_hours"] == 8112
     assert selected["path:httpd_direct_cycling_hours"] == 6880
+    assert selected["path:httpd_mcp_checkup_aggregate"] == 7904
+    assert selected["path:httpd_direct_checkup_aggregate"] == 6672
+    assert selected["path:httpd_mcp_checkup_evaluate"] == 7952
+    assert selected["path:httpd_direct_checkup_evaluate"] == 6720
+    assert selected["path:httpd_mcp_checkup_dhw_progress"] == 7888
+    assert selected["path:httpd_direct_checkup_dhw_progress"] == 6656
+    assert selected["path:httpd_mcp_cycling_hours_builder"] == 8096
+    assert selected["path:httpd_direct_cycling_hours_builder"] == 6864
     assert selected["path:httpd_mcp_health_number"] == 7840
     assert selected["path:httpd_direct_health_number"] == 6608
     assert selected["ota_task"] == 2608
@@ -3588,7 +3634,7 @@ def self_test() -> None:
 
     status_sources = {path: (REPO / path).read_text(encoding="utf-8")
                       for path in ("main/http_status.cpp", "main/mcp_server.cpp", "main/hp_poll.cpp",
-                                   "main/checkup.cpp")}
+                                   "main/checkup.cpp", "main/logic/checkup.hpp")}
     validate_status_diagnosis_paths(budgets, status_sources)
     diagnosis_controls = 0
     for name, member in (("httpd_direct_checkup", "checkup_report"),
@@ -3599,6 +3645,15 @@ def self_test() -> None:
                          ("httpd_mcp_cycling_hours", "checkup_report"),
                          ("httpd_direct_cycling_hours", "checkup_cycling_hours_locked"),
                          ("httpd_mcp_cycling_hours", "room_time_now"),
+                         ("httpd_direct_checkup_aggregate", "cycling_aggregate"),
+                         ("httpd_mcp_checkup_aggregate", "cycling_fold"),
+                         ("httpd_direct_checkup_evaluate", "checkup_evaluate"),
+                         ("httpd_mcp_checkup_evaluate", "checkup_summarize"),
+                         ("httpd_mcp_checkup_evaluate", "checkup_evidence_name"),
+                         ("httpd_mcp_checkup_dhw_progress", "checkup_dhw_progress"),
+                         ("httpd_direct_checkup_dhw_progress", "checkup_dhw_age"),
+                         ("httpd_direct_cycling_hours_builder", "checkup_cycling_hours_build"),
+                         ("httpd_mcp_cycling_hours_builder", "checkup_cycling_hours_locked"),
                          ("httpd_mcp_checkup", "http_send_status_json"),
                          ("httpd_mcp_status", "http_send_status_json"),
                          ("httpd_mcp_health_number", "status_health_number"),
@@ -3614,6 +3669,31 @@ def self_test() -> None:
         else:
             raise AssertionError(f"self-test accepted omitted {member} from {name}")
         diagnosis_controls += 1
+    changed = json.loads(json.dumps(budgets))
+    changed["tasks"]["httpd"]["paths"].remove("httpd_mcp_checkup_evaluate")
+    try:
+        validate_status_diagnosis_paths(changed, status_sources)
+    except BudgetError as exc:
+        assert "diagnosis status path" in str(exc)
+    else:
+        raise AssertionError("self-test accepted an evaluator path detached from the HTTP task")
+    diagnosis_controls += 1
+    for member in ("cycling_aggregate", "cycling_fold", "checkup_evaluate", "checkup_summarize",
+                   "checkup_evidence_name", "checkup_dhw_progress", "checkup_dhw_age",
+                   "checkup_cycling_hours_build"):
+        rule = budgets["symbols"][member]
+        pattern = re.compile(rule["pattern"])
+        for grown in (False, True):
+            changed_frames = {name: (rule["max_bytes"] + 16 if pattern.search(name) else value)
+                              for name, value in frames.items() if grown or not pattern.search(name)}
+            assert changed_frames != frames
+            try:
+                evaluate(changed_frames, budgets)
+            except BudgetError as exc:
+                assert f"symbol {member}:" in str(exc)
+            else:
+                raise AssertionError(f"self-test accepted a missing or grown diagnosis frame {member}")
+            diagnosis_controls += 1
     changed = json.loads(json.dumps(budgets))
     changed["paths"]["poll_history"]["symbols"].append("checkup_report")
     try:
@@ -3633,6 +3713,15 @@ def self_test() -> None:
          "static logic::CheckupCyclingHours"),
         ("main/checkup.cpp", "if (hours) *hours = checkup_cycling_hours_locked(now_us);",
          "if (hours) *hours = {};"),
+        ("main/checkup.cpp", "logic::checkup_aggregate(P().ring)", "other_aggregate(P().ring)"),
+        ("main/checkup.cpp", "logic::checkup_evaluate(", "other_evaluate("),
+        ("main/checkup.cpp", "logic::dhw_loss_progress(", "other_progress("),
+        ("main/checkup.cpp", "logic::checkup_cycling_hours(P().ring, s_cov.rps)", "other_hours()"),
+        ("main/logic/checkup.hpp", "fold(r.pending);", "other_fold(r.pending);"),
+        ("main/logic/checkup.hpp", "checkup_summarize(r);", "other_summarize(r);"),
+        ("main/logic/checkup.hpp", "checkup_result_evidence_name(id, c)", "other_evidence_name(id, c)"),
+        ("main/logic/checkup.hpp", "dhw_loss_age_s(now_us, st.segment_start_us,",
+         "other_age(now_us, st.segment_start_us,"),
     ):
         changed = dict(status_sources)
         changed[name] = changed[name].replace(before, after)
