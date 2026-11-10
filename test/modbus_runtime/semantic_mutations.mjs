@@ -32,6 +32,11 @@ export const semanticMutations = [
     after: "for (size_t i = 0; i < n; i++) { out[i] = s_cache[i]; out[i].modbus_definition = 0; }",
   },
   {
+    name: "snapshot-drops-flow-qualification", scenario: "probe_homehub_rows",
+    before: "if (row.off == 49) row.modbus_flow_scale_unverified = true;",
+    after: "if (row.off == 49) row.modbus_flow_scale_unverified = false;",
+  },
+  {
     name: "base-zero-borrows-native-none", scenario: "homehub_definition_rows",
     before: "r.kind == def::HomeHubValueKind::Altherma4CurrentOperationMode",
     after: "true",

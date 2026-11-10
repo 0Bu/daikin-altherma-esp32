@@ -1,4 +1,4 @@
-// translation-source: 00f8393aee827b21e658965c9ff792c99c563d60de18775bb092ec7c42167e1f
+// translation-source: dd8fe0b22001137ff5c3634c7565d15d42e3037e0174e8798c26335078719fa1
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -334,7 +334,7 @@ I18N.fr = localeValues([
   /* a4.operation_help */ "Indique Arrêt, Chauffage du ballon, Chauffage des locaux, Rafraîchissement des locaux ou Fonctionnement de l’actionneur. Il s’agit d’un état signalé, pas d’une preuve de transfert thermique utile.",
   /* a4.heating_offset_help */ "Décale la courbe de chauffe selon la météo de la zone principale, en kelvins. Ce décalage n’est ni une température mesurée ni la consigne complète de température de l’eau.",
   /* a4.pre_phe_outdoor_help */ "Température de l’eau avant l’échangeur à plaques extérieur. Ce capteur mesure le côté eau, pas la température de l’air extérieur ni du réfrigérant.",
-  /* a4.flow_help */ "La conversion du débit Altherma 4 n'est pas vérifiée. La valeur en L/min utilise la conversion existante ; comparez-la à la mesure de l'unité avant d'évaluer les performances.",
+  /* mb.flow_scale_help */ "La conversion du débit de cette source Modbus n'est pas vérifiée. Comparez la valeur avec celle affichée par l'unité.",
   /* a4.pump_help */ "Le guide Altherma 4 nomme la vitesse de pompe mais indique L/min. L'unité % affichée est une hypothèse non vérifiée ; comparez avec la mesure de l'unité.",
   /* a4.pressure_help */ "La conversion de pression Altherma 4 n'est pas vérifiée. La valeur en bar utilise la conversion existante ; comparez-la à la mesure de l'unité avant d'évaluer la pression.",
   /* a4.demand_response */ "Mode de réponse à la demande",
@@ -1028,13 +1028,7 @@ INSPECT_I18N.fr = inspectValues(
       : "Pompe et débit actuels ne prouvent aucune circulation dans la branche locaux."], // heat
     ["Fonctionnement des locaux", "Fonctionnement chauffage ou froid des locaux", "Signal de fonctionnement normal chauffage/froid des locaux. Ce n’est pas la demande du thermostat et il ne prouve pas à lui seul le fonctionnement du compresseur."], // spaceh
     ["Température ambiante", 0, "Température et consigne de la zone de référence ; elles dépendent du placement du capteur."], // room
-    ["Circulateur", "Vitesse du circulateur", "Fait circuler l’eau dans la boucle commune et la branche choisie par la 3WV. Il peut rester actif compresseur arrêté pour post-circulation, protection ou égalisation ; vitesse et débit se lisent ensemble.", (d) => d.pump == null && d.flow == null && d.pumpOn == null ? null
-      : pumpFlowConflict(d) ? `La pompe interne se dit arrêtée, mais le capteur mesure ${fmt1(d.flow)} l/min. Circulation externe, post-circulation ou signaux divergents sont possibles ; vérifier les deux.`
-      : d.pump != null && d.pump > 0 ? d.flow != null ? `Vitesse ${fmt0(d.pump)} % ; débit mesuré ${fmt1(d.flow)} l/min.` : `Vitesse ${fmt0(d.pump)} %, mais aucun débit ; circulation non confirmée.`
-      : waterMoving(d) ? `Le capteur mesure ${fmt1(d.flow)} l/min sans vitesse de pompe exploitable.`
-      : d.pumpOn === true ? d.flow != null ? `Pompe active, mais seulement ${fmt1(d.flow)} l/min ; circulation non établie.` : "Pompe active, mais débit absent ; circulation non confirmée."
-      : d.pumpOn === false || d.pump === 0 ? d.flow != null ? `Pompe arrêtée ; capteur à ${fmt1(d.flow)} l/min. Ces signaux ne prouvent aucune circulation.` : "Pompe arrêtée et aucun débit disponible."
-      : `État pompe non fiable ; ${fmt1(d.flow)} l/min ne suffit pas à prouver la circulation.`], // pump
+    ["Circulateur", "Commande du circulateur", "Fait circuler l’eau dans la boucle commune et la branche choisie par la vanne 3 voies. Le pourcentage est la commande X10A inversée : 0 % demande l’arrêt et 100 % l’effort maximal. Ce n’est ni une vitesse mesurée ni une preuve de rotation ou de débit. Lire séparément l’état ON/OFF et le débit mesuré ; la circulation peut continuer compresseur arrêté.", (d) => pumpNowText(d, [(n) => `Commande de pompe ${n} %.`, "L’état de la pompe est ON.", "La pompe signale l’arrêt (OFF).", "L’état signalé de la pompe est inconnu.", (n) => `Débit mesuré ${n} l/min.`, "Aucune mesure de débit disponible.", "OFF contredit le débit positif ; circulation externe, inertie ou signaux divergents/périmés sont possibles.", "La circulation d’eau n’est pas établie."])], // pump
     [(d) => pelMeasured(d) ? "Puissance électrique · HomeHub" : "Puissance électrique estimée", "Puissance électrique", (d) => pelMeasured(d)
       ? "Consommation annoncée par l’entrée HomeHub 51. L’UI ne la calcule pas, mais le guide public ne prouve ni étalonnage, ni point de mesure, ni appoints inclus ; ce n’est pas un compteur certifié de l’installation."
       : "Estimation pour COP/EER. Avec CT, toutes les phases déclarées sont sommées puis multipliées par 230 V supposés ; tension et facteur de puissance réels sont inconnus. Le courant d’onduleur ne couvre que le compresseur.", (d) => d.pelHeld ? "Compresseur arrêté : le courant d’onduleur vient du dernier cycle et n’est pas actuel ; puissance et rendement ne peuvent être indiqués."
@@ -1132,7 +1126,7 @@ DESCRIPTION_I18N.fr = descriptionValues([
   ["Retour R4T au PHE ; évaluer le ΔT avec débit, compresseur et mode, jamais avec 5 K universels."], // 33
   ["Débit du circuit commun ; le minimum dépend du modèle et du mode, et une valeur basse peut causer 7H."], // 34
   ["Pression hydraulique : beaucoup de manuels exigent >1 bar ; à ≤1,0 bar consulter la notice du modèle exact."], // 35
-  ["Commande de pompe inversée : 0 est la vitesse maximale et 100 l’arrêt."], // 36
+  ["Commande X10A inversée de la pompe de circulation : la valeur brute 0 demande la commande maximale et 100 l’arrêt. Elle ne mesure pas les RPM et ne prouve ni rotation ni débit d’eau. Lire séparément l’état ON/OFF signalé et le débit mesuré, même compresseur arrêté."], // 36
   ["État pompe ; ne prouve pas la chaleur utile et peut agir sans compresseur : comparer au débit."], // 37
   ["État du circulateur d’un circuit solaire thermique configuré."], // 38
   ["Vitesse indiquée de la pompe nommée par ce profil."], // 39

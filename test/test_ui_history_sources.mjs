@@ -779,13 +779,13 @@ assert.match(h.scrubText(buhView, 5), /^\d{2}:\d{2}–\d{2}:\d{2} · nicht gemes
 for (const i of [0, 1, 2, 5])
   assert.doesNotMatch(h.scrubText(buhView, i), /X10A|Modbus|Zusatzheizer|ca\.|min/);
 
-// The schematic shows intuitive pump speed, while the X10A row is inverted (0=max, 100=stop).
-// Its inspector curve must transform the source ring instead of making a stopped pump look maximal.
+// The schematic shows the inverted pump command, not measured speed. The source ring is fixed-point
+// tenths: retain fractions and reject unsupported values instead of clamping them to plausible %.
 S.hist.set("pump_signal", { at: Date.now(), gen: 1, dt: 300, unit: "", t0: 1768720000, b0: 200,
-  held: [], v: [1000, 700, 0] });
+  held: [], v: [1000, 255, 0, -10, 1010, 2550, null] });
 await h.ensureDerived("pump_speed");
-assert.deepEqual(Array.from(S.hist.get("pump_speed").v), [0, 300, 1000]);
-assert.match(h.histHtml("pump_speed", "", "Drehzahl der Umwälzpumpe"), /0,0 – 100,0 %/);
+assert.deepEqual(Array.from(S.hist.get("pump_speed").v), [0, 745, 1000, null, null, null, null]);
+assert.match(h.histHtml("pump_speed", "", "Ansteuerung der Umwälzpumpe"), /0,0 – 100,0 %/);
 
 // The diverter is categorical too. Both selected branches are named, its two witnesses keep their
 // independent lanes, and no numeric 0/1 curve is drawn.

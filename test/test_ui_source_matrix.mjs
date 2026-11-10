@@ -23,7 +23,12 @@ import fs from "node:fs";
 import vm from "node:vm";
 import { readAppFragments } from "../tools/ui/read_app_source.mjs";
 
-const SOURCE = readAppFragments(["descriptions.js", "schematic.js"]);
+// Keep the source-arbitration test's history boundary stubs: loading the entire history fragment
+// would replace hasRoomHist/roomHistName. Execute only its shared pure pump-command dependency.
+const commandSource = readAppFragments(["history.js"])
+  .match(/function pumpCommandPercent\(signal\) \{[\s\S]*?\n\}/)?.[0];
+assert.ok(commandSource, "the production pump-command rule must be present");
+const SOURCE = commandSource + readAppFragments(["descriptions.js", "schematic.js"]);
 const index = fs.readFileSync(new URL("../main/www/index.html", import.meta.url), "utf8");
 const style = fs.readFileSync(new URL("../main/www/style.css", import.meta.url), "utf8");
 const demo = fs.readFileSync(new URL("../tools/uigif/scenes.js", import.meta.url), "utf8");
@@ -95,7 +100,7 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [], elements 
     " SMART_GRID_MODE_VALUE, x10aSmartGridModeFrom, x10aSmartGridMode, x10aSmartGridRow," +
     " sgModeText, mbNoteHtml, mbDeltaHtml, descFor, inspCurRow, inspMember," +
     " inspMembers, inspValues, inspComparisonHtml, inspHeld, liveData, compressorRunning," +
-    " waterMoving, pumpFlowConflict, waterThermalKind, activeSpaceKind, ouReadingText, updateSchematicStateA11y, INSPECT," +
+    " waterMoving, waterThermalKind, activeSpaceKind, ouReadingText, updateSchematicStateA11y, INSPECT," +
     " pelMeasured, pelApproxText, PEL_INSPECT, vRow, vNum, highSideRow, inspHeldHtml, inspUnknownAge," +
     " inspNowText, heldUnknownText, OUTDOOR_HX_RE };",
     context, { filename: "main/www/app.sources" });
@@ -478,15 +483,15 @@ const X_2WV = (on) => ({ label: "2way valve(On:Heat_Off:Cool)", value: on ? "1" 
   assert.equal(c.waterMoving({ pumpOn: true, flow: null }), null,
     "pump ON without a flow reading must remain unknown, not measured circulation");
   assert.match(c.INSPECT.pump.now({ pump: 0, pumpOn: false, flow: 5 }).en,
-    /pump reports stopped, but the flow sensor reports/i);
+    /pump reports stopped[\s\S]*Measured flow 5[\s\S]*OFF conflicts with flow/i);
   const pumpOnNoFlow = c.INSPECT.pump.now({ pump: null, pumpOn: true, flow: null }).en;
   assert.match(pumpOnNoFlow, /pump status is ON.*no flow measurement/i);
   assert.doesNotMatch(pumpOnNoFlow, /pump reports stopped|measured flow is/i);
   const pumpUnknown = c.INSPECT.pump.now({ pump: null, pumpOn: null, flow: 0 }).en;
-  assert.match(pumpUnknown, /No reliable pump state/i);
+  assert.match(pumpUnknown, /reported pump state is unknown/i);
   assert.doesNotMatch(pumpUnknown, /pump reports stopped/i);
   assert.match(c.INSPECT.pump.now({ pump: 45, pumpOn: true, flow: null }).en,
-    /no flow measurement is available; circulation is not confirmed/i);
+    /no flow measurement is available[\s\S]*circulation is not established/i);
   assert.doesNotMatch(c.INSPECT.wtank.now({ valveDhw: true, pumpOn: false, flow: 0,
                                             lwt: 40, tank: 35 }).en, /Charging the tank/i,
     "a selected valve route alone must not be called an active tank charge");
@@ -918,6 +923,29 @@ const SG_INSP = (c, d) => c.INSPECT.sgrequest;
   assert.equal(d.pthKind, "heating");
   assert.ok(Math.abs(d.pth - 7.87) < 0.01,
     "the witnessed PHE transfer is flow×(R1T−R4T), using the screenshot operating point");
+
+  const native = ctx({ x10a: false, mbEnabled: true, mbConnected: true, values: [],
+                       modbus: dhwModbus.map(row => ({ ...row, profile: "altherma4" })) });
+  const provisional = native.liveData();
+  assert.equal(provisional.provisionalFlow, 24, "retain the native scaled reading");
+  assert.equal(provisional.flow, null, "native input 49 is unavailable as qualified flow");
+  assert.equal(native.waterMoving(provisional), null, "pump ON cannot certify water motion");
+  assert.equal(provisional.pthRaw, null, "unverified flow cannot enter thermal arithmetic");
+  assert.equal(provisional.pth, null, "native flow cannot establish active thermal output");
+
+  const probing = ctx({ x10a: false, mbEnabled: true, mbConnected: true, values: [],
+                        modbus: dhwModbus.map(row => row.off === 49
+                          ? { ...row, flow_scale_unverified: true } : row) });
+  const unverified = probing.liveData();
+  assert.equal(unverified.provisionalFlow, 24, "keep the reading while the Modbus scale is unverified");
+  assert.equal(unverified.flow, null, "the baseline catalog does not prove the scale");
+  assert.equal(probing.waterMoving(unverified), null);
+  assert.equal(unverified.pthRaw, null);
+  assert.equal(unverified.pth, null);
+  const provisionalPump = probing.INSPECT.pump.now(unverified).en;
+  assert.match(provisionalPump, /circulation is not established/i);
+  assert.doesNotMatch(provisionalPump, /no flow measurement/i,
+    "a visible provisional reading is different from an absent measurement");
 
   const stopped = ctx({ x10a: false, mbEnabled: true, mbConnected: true, values: [],
                         modbus: dhwModbus.map((r) => r.off === 31 ? { ...r, value: 0 } : r) });

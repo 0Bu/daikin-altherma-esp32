@@ -1,4 +1,4 @@
-// translation-source: 00f8393aee827b21e658965c9ff792c99c563d60de18775bb092ec7c42167e1f
+// translation-source: dd8fe0b22001137ff5c3634c7565d15d42e3037e0174e8798c26335078719fa1
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -334,7 +334,7 @@ I18N.fi = localeValues([
   /* a4.operation_help */ "Ilmoittaa Pysäytetty, Säiliön lämmitys, Tilalämmitys, Tilajäähdytys tai Toimilaitteen käyttö. Tämä on ilmoitettu tila, ei todiste hyödyllisestä lämmönsiirrosta.",
   /* a4.heating_offset_help */ "Siirtää pääalueen sääriippuvaista lämmityskäyrää kelvineinä. Tämä on siirtymä, ei mitattu lämpötila eikä veden koko tavoitelämpötila.",
   /* a4.pre_phe_outdoor_help */ "Veden lämpötila ennen ulkona olevaa levylämmönvaihdinta. Anturi mittaa vesipuolta, ei ulkoilman tai kylmäaineen lämpötilaa.",
-  /* a4.flow_help */ "Altherma 4:n virtaaman skaalausta ei ole varmistettu. L/min-arvo käyttää aiempaa muunnosta; vertaa laitteen omaan lukemaan ennen suorituskyvyn arviointia.",
+  /* mb.flow_scale_help */ "Tämän Modbus-lähteen virtaaman skaalausta ei ole varmistettu. Vertaa arvoa laitteen omaan näyttöön.",
   /* a4.pump_help */ "Altherma 4:n opas nimeää pumpun nopeuden mutta ilmoittaa yksiköksi L/min. Tässä näkyvä % on varmistamaton oletus; vertaa laitteen omaan lukemaan.",
   /* a4.pressure_help */ "Altherma 4:n paineen skaalausta ei ole varmistettu. Bar-arvo käyttää aiempaa muunnosta; vertaa laitteen omaan lukemaan ennen paineen arviointia.",
   /* a4.demand_response */ "Kysyntäjoustotila",
@@ -989,7 +989,7 @@ DESCRIPTION_I18N.fi = descriptionValues([
   ["R4T yhteisessä PHE-paluussa; R1T−R4T on PHE:n ΔT, ei lämmönluovuttajien eikä yleinen 5 K sääntö."], // 33
   ["Yhteisen vesipiirin virtaus; vähimmäinen riippuu mallista ja tilasta, ja pieni virtaus voi aiheuttaa 7H:n."], // 34
   ["Suljetun vesipiirin paine; sallittu alue on mallikohtainen, ja arvolla ≤1,0 bar tarkista kyseisen mallin ohje."], // 35
-  ["Pumpun nopeuskomento käyttää käänteistä asteikkoa: 0 = täysi nopeus, 100 = pysäytys."], // 36
+  ["Käänteinen X10A-komento kiertovesipumpulle: raaka-arvo 0 pyytää suurinta ohjausta ja 100 pysäytystä. Se ei mittaa kierroslukua (RPM) eikä todista pyörimistä tai veden virtausta. Lue ilmoitettu ON/OFF-tila ja mitattu virtaus erikseen myös kompressorin ollessa pysähtynyt."], // 36
   ["Vesikiertopumpun tila; käynti ei yksin todista hyödyllistä lämmönsiirtoa, joten vertaa virtaukseen."], // 37
   ["Määritetyn aurinkolämpöpiirin pumppu, eri kuin lämpöpumpun vesikiertopumppu."], // 38
   ["Profiilin nimeämän pumpun nopeus; asteikko ja piiri ovat mallikohtaisia, todellinen virtaus on eri arvo."], // 39
@@ -1224,13 +1224,7 @@ INSPECT_I18N.fi = inspectValues(
       : waterMoving(d) ? d.thermalMode === "cool" && !compressorRunning(d, 5) && d.pthRaw != null && d.pthRaw > 0 ? `Jälkilämmin vesi kiertää tiloihin. R1T ${degC(d.lwt)}; luovuttimien jälkeen ei ole anturia. Tämä ei ole aktiivista jäähdytystä.` : `Vesi menee ${activeSpaceKind(d) === "cool" ? "jäähdytys" : activeSpaceKind(d) === "heat" ? "lämmitys" : "tila"}piiriin. R1T ${degC(d.lwt)}; luovuttimien jälkeen ei ole anturia.` : "Pumppu ja virtaama eivät vahvista tilapiirin kiertoa."], // heat
     ["Tilalämmitys/-jäähdytys", "Tilalämmityksen tai -jäähdytyksen toiminta", "Tilapiirin normaalin lämmityksen/jäähdytyksen tila. Ei termostaattipyyntö eikä yksin vahvista kompressoria."], // spaceh
     ["Huonelämpötila", "Huonelämpötila", "Vertailuvyöhykkeen lämpötila; tarkastele tavoitteen ja tilan kanssa."], // room
-    ["Kiertovesipumppu", "Kiertovesipumpun nopeus", "Siirtää vettä yhteisessä piirissä ja 3WV:n valitsemalla reitillä. Voi käydä kompressorin seistessä jälkikierron tai suojauksen vuoksi; nopeus ei yksin vahvista virtaamaa.", (d) => d.pump == null && d.flow == null && d.pumpOn == null ? null
-      : pumpFlowConflict(d) ? `Pumppu ilmoittaa pysähtyneensä, mutta anturi näyttää ${fmt1(d.flow)} l/min. Syynä voi olla ulkoinen kierto, jälkikäynti tai ristiriitainen/vanha signaali; tarkista molemmat.`
-      : d.pump != null && d.pump > 0 ? d.flow != null ? `Nopeus ${fmt0(d.pump)} %; virtaama ${fmt1(d.flow)} l/min.` : `Nopeus ${fmt0(d.pump)} %, mutta virtaamamittausta ei ole; kiertoa ei vahvistettu.`
-      : waterMoving(d) ? `Virtaama ${fmt1(d.flow)} l/min ilman käyttökelpoista pumppunopeutta.`
-      : d.pumpOn === true ? d.flow != null ? `Pumppu PÄÄLLÄ, mutta virtaama vain ${fmt1(d.flow)} l/min; kiertoa ei vahvistettu.` : "Pumppu PÄÄLLÄ, mutta virtaamamittausta ei ole; kiertoa ei vahvistettu."
-      : d.pumpOn === false || d.pump === 0 ? d.flow != null ? `Pumppu pysähtynyt; anturi näyttää ${fmt1(d.flow)} l/min. Arvot eivät vahvista kiertoa.` : "Pumppu pysähtynyt, virtaamamittausta ei ole."
-      : `Luotettavaa pumpputilaa ei ole; ${fmt1(d.flow)} l/min ei vahvista kiertoa.`], // pump
+    ["Kiertovesipumppu", "Kiertovesipumpun ohjaus", "Siirtää vettä yhteisessä piirissä ja 3-tieventtiilin valitsemassa haarassa. Prosentti on käännetty X10A-ohjaus: 0 % pyytää pysäytystä ja 100 % enimmäisohjausta. Se ei ole mitattu kierrosluku eikä todiste pyörimisestä tai virtauksesta. Lue ilmoitettu ON/OFF-tila ja mitattu virtaus erikseen; kierto voi jatkua kompressorin ollessa pysähtynyt.", (d) => pumpNowText(d, [(n) => `Pumpun ohjaus ${n} %.`, "Pumpun tila on ON.", "Pumppu ilmoittaa pysähdyksen (OFF).", "Ilmoitettu pumpun tila on tuntematon.", (n) => `Mitattu virtaus ${n} l/min.`, "Virtausmittausta ei ole saatavilla.", "OFF on ristiriidassa positiivisen virtauksen kanssa; syynä voi olla ulkoinen kierto, jälkikäynti tai ristiriitaiset/vanhentuneet signaalit.", "Veden kiertoa ei ole vahvistettu."])], // pump
     [(d) => pelMeasured(d) ? "Sähköteho · HomeHub" : "Sähköteho (arvio)", "Sähköteho", (d) => pelMeasured(d) ? "HomeHub-rekisterin 51 sähköteho. Dokumentaatio ei vahvista kalibrointia, mittauskohtaa tai kaikkien lämmittimien sisältymistä; tämä ei ole sertifioitu järjestelmämittari." : "COP/EER-arvio: CT-vaiheiden summa × oletettu 230 V. Jännite ja tehokerroin ovat tuntemattomia; invertterivirta kattaa vain kompressorin ja CT-raja riippuu kytkennästä.", (d) => d.pelHeld ? "Kompressori on pysähtynyt, joten invertterivirta on edelliseltä käynniltä; sähkötehoa ja hyötysuhdetta ei voi ilmoittaa."
       : d.pel == null ? "Profiilissa ei ole nykyistä virtamittausta, joten COP/EER ei ole laskettavissa."
       : d.pelSrc === "MB" ? "Arvo HomeHub-rekisteristä 51; tarkkaa mittausrajaa ei ole dokumentoitu."

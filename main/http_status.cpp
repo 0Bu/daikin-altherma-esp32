@@ -2182,6 +2182,8 @@ static void append_modbus_values_array(JsonOut& j, const std::vector<CachedValue
         if (reg && def::homehub_is_binary(*reg)) j += ",\"binary\":true";
         if (reg && def::homehub_definition_is_altherma4(v[i].modbus_definition))
             j += ",\"profile\":\"altherma4\"";
+        if (reg && reg->offset == 49 && v[i].modbus_flow_scale_unverified)
+            j += ",\"flow_scale_unverified\":true";
         // Keep the value raw and transport-friendly. The semantic id is metadata for the browser's
         // last-mile rendering, so profile-specific state names never become transport values.
         if (reg)

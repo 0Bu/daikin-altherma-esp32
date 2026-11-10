@@ -403,6 +403,10 @@ Modbus rows contain `label`, `value`, `unit`, `off`, with applicable `binary`, `
 `history`. Numeric, flag and enum `value` fields are JSON numbers or null; text values are strings or
 null. `off` belongs to the selected catalog; native rows include `profile:"altherma4"` and do not
 borrow HomeHub enum meanings. Native quiet-policy selection proves no active quiet state/history.
+Modbus input 49 carries `flow_scale_unverified:true` during unresolved Auto, fallback or native
+Altherma 4 operation. The numeric reading keeps its catalog conversion. The qualification belongs
+to the copied row, so a later profile decision cannot silently change the meaning of an older
+snapshot.
 The full-cache limit is 537 seconds and individual reply-age limit seven seconds; these transport
 bounds cannot prove simultaneity. Native promotion first exposes only its pressure probe until a
 full sweep. History additionally requires matching space/offset/codec/scale/unit provenance.

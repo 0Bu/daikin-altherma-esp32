@@ -98,7 +98,7 @@ for (const lang of ["en", "de", "es", "fr", "it", "pl", "cs", "uk", "zh", "ja", 
     assert.equal(ui.displayHomeHubLabel({off, label: "obsolete label", profile: "altherma4"}),
       ui.labels[`a4.${key}`], `${lang}/${off}: native label uses its reviewed translation`);
   }
-  for (const [off, key] of [[9, "quiet_help"], [38, "current_help"], [49, "flow_help"],
+  for (const [off, key] of [[9, "quiet_help"], [38, "current_help"],
     [54, "heating_offset_help"], [58, "limit_help"], [65, "demand_help"], [68, "pump_help"],
     [74, "pre_phe_outdoor_help"], [79, "pressure_help"], [83, "operation_help"]]) {
     assert.equal(ui.descFor("obsolete base label", {off, profile: "altherma4"}).what,
@@ -107,12 +107,12 @@ for (const lang of ["en", "de", "es", "fr", "it", "pl", "cs", "uk", "zh", "ja", 
   for (const [semantic, value] of nativeModes)
     assert.doesNotMatch(ui.displayValue({value, enum: semantic}), /^(?:enum\.|a4\.)/);
   for (const [off, label, unit, concept, key] of [
-    [49, "Flow rate", "L/min", "flow", "flow_help"],
-    [79, "Water pressure", "bar", "water_pressure", "pressure_help"],
+    [49, "Flow rate", "L/min", "flow", "mb.flow_scale_help"],
+    [79, "Water pressure", "bar", "water_pressure", "a4.pressure_help"],
   ]) {
     const x = { label: off === 49 ? "Flow sensor" : "Water Pressure", value: "2.5", unit, concept };
     const native = { off, label, value: 2, unit, concept, profile: "altherma4" };
-    const escaped = ui.labels[`a4.${key}`].replace(/[&<>"]/g,
+    const escaped = ui.labels[key].replace(/[&<>"]/g,
       (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
     const comparison = ui.mbNoteHtml(x, native);
     assert.ok(comparison.includes(escaped), `${lang}/${off}: paired reading exposes its native limit`);
@@ -141,6 +141,23 @@ for (const lang of ["en", "de", "es", "fr", "it", "pl", "cs", "uk", "zh", "ja", 
     ui.renderInspect();
     assert.ok(!ui.element("inspBody").innerHTML.includes(escaped),
       `${lang}/${off}: the base inspector must not inherit native limits`);
+    if (off === 49) {
+      ui.state._modbus[0].flow_scale_unverified = true;
+      const provisional = ui.mbNoteHtml(x, ui.state._modbus[0]);
+      assert.ok(provisional.includes(escaped) && !provisional.includes('class="mb-delta"'));
+      const provisionalFallback = ui.vDescRow(x);
+      assert.ok(provisionalFallback.includes(escaped) && !provisionalFallback.includes('class="mb-delta"'),
+        `${lang}: retained X10A value row shows the replacement's scale limit`);
+      ui.renderInspect();
+      assert.ok(ui.element("inspBody").innerHTML.includes(escaped),
+        `${lang}: qualification alone must update an open base flow inspector`);
+      delete ui.state._modbus[0].flow_scale_unverified;
+      assert.ok(!ui.vDescRow(x).includes(escaped),
+        `${lang}: the qualified table reading keeps its ordinary explanation`);
+      ui.renderInspect();
+      assert.ok(!ui.element("inspBody").innerHTML.includes(escaped),
+        `${lang}: affirmative HomeHub removes the caveat while the number stays the same`);
+    }
   }
 }
 const precedenceMutation = renderer("es", true);
@@ -152,14 +169,14 @@ precedenceMutation.state.live = {flow: 2, wp: null, ouHeldOver: false};
 precedenceMutation.state.insp = "flow";
 precedenceMutation.renderInspect();
 assert.ok(!precedenceMutation.element("inspBody").innerHTML.includes(
-  precedenceMutation.labels["a4.flow_help"]),
+  precedenceMutation.labels["mb.flow_scale_help"]),
 "the production mutation reproduces the missing native warning in the localized inspector");
 assert.equal(en.displayHomeHubLabel({off: 58, label: "Power consumption"}), "Power consumption",
   "the independent base profile keeps its actual power-consumption label");
-for (const [off, label, key] of [[49, "Flow rate", "flow_help"],
-  [68, "Circulation pump speed", "pump_help"], [79, "Water pressure", "pressure_help"]]) {
+for (const [off, label, key] of [[49, "Flow rate", "mb.flow_scale_help"],
+  [68, "Circulation pump speed", "a4.pump_help"], [79, "Water pressure", "a4.pressure_help"]]) {
   for (const profile of [undefined, "homehub"])
-    assert.notEqual(en.descFor(label, {off, profile}).what, en.labels[`a4.${key}`],
+    assert.notEqual(en.descFor(label, {off, profile}).what, en.labels[key],
       `${off}/${profile}: native interpretation limits cannot replace another source's explanation`);
 }
 assert.equal(en.displayValue({ value: "Recommended on" }), "Recommended on",

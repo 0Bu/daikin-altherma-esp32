@@ -67,8 +67,16 @@ function completeCtCurrent(s, has) {
     ? null : keys.reduce((a, k) => a + s[k], 0);
 }
 
+// Decoded X10A command, not measured shaft speed: 0 = maximum, 100 = stop.
+// Invalid inputs stay absent in both the live pill and the derived history; clamping would turn
+// unsupported bytes into plausible commands. Keep fractional decoded values intact.
+function pumpCommandPercent(signal) {
+  return typeof signal === "number" && Number.isFinite(signal) && signal >= 0 && signal <= 100
+    ? 100 - signal : null;
+}
+
 // ── Derived trends: computed pills and combined component states ───────────────────────────────
-// Pump speed, ΔT, heat output, electrical input and COP have no directly matching register value, so
+// Pump command, ΔT, heat output, electrical input and COP have no directly matching register value, so
 // the device has nothing to buffer for the displayed figure itself. BUH likewise has two physical
 // stage bits but one component-level inspector. Their 24-hour curves/timeline are assembled
 // HERE, out of the rings of what each is computed FROM,
@@ -99,14 +107,12 @@ const DERIVED = {
     fn: (s) => s.buh_step1 == null || s.buh_step2 == null ? null
       : s.buh_step2 > 0 ? 2 : s.buh_step1 > 0 ? 1 : 0,
   },
-  // The X10A row is an inverted control signal: 0 = maximum and 100 = stop. The schematic instead
-  // shows the intuitive speed percentage, so its chart must transform every sample by the exact same
-  // clamped expression as liveData(). Drawing the raw row would make an idle pump look maximal.
+  // Retain the legacy internal trend id. The displayed percentage is the inverted controller
+  // command, not measured speed; liveData() uses this same validation and inversion.
   pump_speed: {
     unit: "%", ins: ["pump_signal"],
     ready: (h) => h.pump_signal,
-    fn: (s) => s.pump_signal == null ? null
-      : Math.min(100, Math.max(0, 100 - s.pump_signal)),
+    fn: (s) => pumpCommandPercent(s.pump_signal),
   },
   dt: {
     unit: "K", ins: ["leaving_water", "return_water"],
@@ -2145,10 +2151,9 @@ function vDescRow(v) {
   // current row while the pill above it, the inspector, the chart and MQTT all refuse it.
   const notCurrent = x10aDown() || rowNotMeasuring(v);
   const src = fb || v;
-  // A native stand-in needs its own interpretation limits, rather than the unavailable X10A
-  // instrument's explanation. Baseline HomeHub and ordinary X10A copy retain their established path.
-  const nativeFallback = fb?.profile === "altherma4";
-  const d = descFor(nativeFallback ? fb.label : label, nativeFallback ? fb : v);
+  // A native or provisional stand-in needs its own interpretation limits.
+  const useMbDesc = fb?.profile === "altherma4" || mbFlowScaleUnverified(fb);
+  const d = descFor(useMbDesc ? fb.label : label, useMbDesc ? fb : v);
   if (fb) cls = (cls ? cls + " " : "") + "src-val-mb";
   const unit = displayUnit(src);
   const val = (notCurrent && !fb)

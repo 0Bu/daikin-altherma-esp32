@@ -20,6 +20,10 @@ const rowNum = (r) => { if (!r) return null; const n = parseFloat(r.value); retu
 const vNum = (re) => rowNum(vRow(re));
 // Bit-flag values arrive as numeric 1/0 (logic/convert.hpp conv 300-307). null = row absent.
 const vOn = (re) => { const r = vRow(re); return r ? String(r.value).trim() === "1" : null; };
+const pumpX10a = () => {
+  const row = x10aDown() ? null : vRow(/water pump operation/i);
+  return binaryValue(row) == null ? null : row;
+};
 
 // Page 0x20 / offset 2 across the supported model catalog. The sensor's physical role is stable
 // while Daikin's labels are not: ordinary air-source units call it the outdoor heat exchanger,
@@ -178,7 +182,20 @@ const waterMoving = (d) => {
   if (d.flow != null) return d.flow > 0.5;
   return d.pumpOn === false ? false : null;
 };
-const pumpFlowConflict = (d) => !!d && d.pumpOn === false && d.flow != null && d.flow > 0.5;
+// Each sentence names a separate observation: a STOP command never supplies an OFF report.
+// Locale tables supply copy only; all thirteen languages use the same state/flow rule.
+// words: command, ON, OFF, unknown, measured flow, missing flow, conflict, unconfirmed circulation.
+function pumpNowText(d, words) {
+  if (d.pump == null && d.flow == null && d.pumpOn == null && d.provisionalFlow == null) return null;
+  const flow = d.flow;
+  const parts = d.pump == null ? [] : [words[0](fmt1(d.pump))];
+  parts.push(d.pumpOn === true ? words[1] : d.pumpOn === false ? words[2] : words[3]);
+  if (flow != null) parts.push(words[4](fmt1(flow)));
+  else if (d.provisionalFlow == null) parts.push(words[5]);
+  if (flow > 0.5 && d.pumpOn === false) parts.push(words[6]);
+  if (!(flow > 0.5)) parts.push(words[7]);
+  return parts.join(" ");
+}
 
 // The colour is a claim about THERMAL transfer, not merely hydraulic motion. Modbus-only DHW has
 // enough independent evidence for heating (compressor + DHW valve + pump); Modbus-only space Auto
@@ -270,7 +287,7 @@ function liveData() {
     room: vNum(ROOM_TEMP_RE),
     roomSet: vNum(/^rt setpoint/i),
     pumpSig: vNum(/water pump signal/i),
-    pumpOn: stateOf(/water pump operation/i, 30),
+    pumpOn: binaryValue(pumpX10a()) ?? mbBool(30),
     // Through stateOf, like every other plant state: X10A while its link is live, else a live
     // gateway, else nothing. Keyed on the EKRHH OFFSET, not a label — those offsets are the
     // documented data model (§9.2.2) and are the one thing about a HomeHub row that cannot be
@@ -335,8 +352,8 @@ function liveData() {
   // Otherwise the I/U mode decides which direction across the PHE is useful output.
   d.thermalMode = d.defrost === true ? "defrost"
                 : d.valveDhw === true ? "heat" : d.spaceMode;
-  // Pump % — the wire value is inverted ("Water pump signal (0:max-100:stop)").
-  d.pump = d.pumpSig == null ? null : Math.min(100, Math.max(0, 100 - d.pumpSig));
+  // Pump command % — independent of the reported operation state and measured flow.
+  d.pump = pumpCommandPercent(d.pumpSig);
   // The outdoor unit refreshes its OWN register pages (0x20 sensors, 0x21 inverter) only while it
   // RUNS — stopped, it answers with the LAST RUN's values (logic/ou_stale.hpp, host-tested against
   // the whole catalog). Measured on a live unit: outdoor air held exactly 19.0 °C for five hours,
@@ -364,7 +381,10 @@ function liveData() {
     const r = mbByConcept(cid);
     if (!r) return;
     const n = parseFloat(r.value);
-    if (Number.isFinite(n)) { d[key] = n; d.mbFields.add(key); }
+    if (!Number.isFinite(n)) return;
+    if (key === "flow" && mbFlowScaleUnverified(r)) d.provisionalFlow = n;
+    else d[key] = n;
+    d.mbFields.add(key);
   };
   if (d.ouHeldOver || d.ouUnknown) takeMb("out", "outdoor_air");
   // Circuit refrigerant pressure for the schematic's high-side badge: the row the chart and the
@@ -701,8 +721,8 @@ function renderLive() {
   setTxt("svFlowSwitch", d.flowSwitch == null ? "—" : t(d.flowSwitch ? "state.on" : "state.off"));
   // ΔT only means something with water moving (d.dtStale, decided in liveData so the explainer
   // gates on the very same fact). Same reasoning as the derived kW/COP, which already gate.
-  setTxt("svDt", d.dtStale ? "—" : fmt1(d.dt)); setTxt("svFlow", fmt1(d.flow));
-  setTxt("svWp", fmt1(d.wp)); setTxt("svPump", fmt0(d.pump));
+  setTxt("svDt", d.dtStale ? "—" : fmt1(d.dt)); setTxt("svFlow", fmt1(d.flow ?? d.provisionalFlow));
+  setTxt("svWp", fmt1(d.wp)); setTxt("svPump", fmt1(d.pump));
   setTxt("svTank", fmt1(d.tank)); setTxt("svTankSet", fmt1(d.tankSet));
   setTxt("svRoom", fmt1(d.room)); setTxt("svRoomSet", fmt1(d.roomSet));
   // Blanks with the ΔT it is computed from (d.dtStale) — the pill two places to its left already
@@ -725,7 +745,9 @@ function renderLive() {
   const sc = $("schem");
   const compressorOn = compressorRunning(d);
   sc.classList.toggle("fan-on", compressorOn && d.defrost !== true);
-  sc.classList.toggle("pump-on", pumping === true);
+  // The rotor represents reported pump activity, never command magnitude or external flow/RPM.
+  // Measured water motion still drives the pipe animations independently below.
+  sc.classList.toggle("pump-on", d.pumpOn === true);
   sc.classList.toggle("buh-on", !!(d.buh1 || d.buh2));
   const bshActive = d.bsh === true;
   sc.classList.toggle("bsh-on", bshActive);
@@ -1284,43 +1306,14 @@ const INSPECT = {
   },
   pump: {
     t: { en: "Circulation pump", de: "Umwälzpumpe" },
-    aria: { en: "Circulation-pump speed", de: "Drehzahl der Umwälzpumpe" },
+    aria: { en: "Circulation-pump command", de: "Ansteuerung der Umwälzpumpe" },
     trend: "pump_speed",
-    what: {
-      en: "Circulates water through the common hydronic loop and the branch selected by the 3-way valve. In the split-system layout shown, it is on the supply side after the plate heat exchanger and backup heater. The controller adjusts its speed according to operating mode, target ΔT and minimum-flow requirements; it may also run with the compressor stopped for overrun, protection or temperature equalisation.",
-      de: "Fördert Wasser durch den gemeinsamen Hydraulikkreis und den vom 3-Wege-Ventil gewählten Zweig. Im gezeigten Split-System-Aufbau sitzt sie im Vorlauf hinter Plattenwärmetauscher und Zusatzheizer. Der Regler passt ihre Drehzahl an Betriebsart, Ziel-ΔT und Mindestdurchfluss an; für Nachlauf, Schutz oder Temperaturausgleich kann sie auch bei stehendem Verdichter laufen.",
-    },
-    re: /water pump operation/i, sample: "Water pump operation",
-    // 0 % is a stopped pump, not a pump "running at 0 %" — the old wording asserted circulation on
-    // an idle plant, next to a flow pill reading 0.0 l/min.
-    now: (d) => d.pump == null && d.flow == null && d.pumpOn == null ? null
-      : pumpFlowConflict(d)
-        ? { en: `The internal pump reports stopped, but the flow sensor reports ${fmt1(d.flow)} l/min. External circulation, coast-down or conflicting/stale signals can cause this; the two readings must be checked together.`,
-            de: `Die interne Pumpe meldet Stillstand, der Durchflusssensor jedoch ${fmt1(d.flow)} l/min. Externe Umwälzung, Nachlauf oder widersprüchliche beziehungsweise veraltete Signale kommen infrage; beide Werte müssen gemeinsam geprüft werden.` }
-      : d.pump != null && d.pump > 0
-        ? d.flow != null
-          ? { en: `The speed signal reports ${fmt0(d.pump)} %; measured flow is ${fmt1(d.flow)} l/min.`,
-              de: `Das Drehzahlsignal meldet ${fmt0(d.pump)} %; der gemessene Volumenstrom beträgt ${fmt1(d.flow)} l/min.` }
-          : { en: `The speed signal reports ${fmt0(d.pump)} %, but no flow measurement is available; circulation is not confirmed.`,
-              de: `Das Drehzahlsignal meldet ${fmt0(d.pump)} %, ein Durchflussmesswert fehlt jedoch; Zirkulation ist damit nicht bestätigt.` }
-      : waterMoving(d)
-        ? { en: `The flow sensor reports ${fmt1(d.flow)} l/min even though no usable pump-speed value is available.`,
-            de: `Der Durchflusssensor meldet ${fmt1(d.flow)} l/min, obwohl kein nutzbarer Pumpendrehzahlwert vorliegt.` }
-      : d.pumpOn === true
-        ? d.flow != null
-          ? { en: `The pump status is ON, but the flow sensor reports only ${fmt1(d.flow)} l/min; water circulation is not established.`,
-              de: `Der Pumpenstatus ist ON, der Durchflusssensor meldet jedoch nur ${fmt1(d.flow)} l/min; Wasserzirkulation ist damit nicht belegt.` }
-          : { en: "The pump status is ON, but no flow measurement is available; water circulation is not confirmed.",
-              de: "Der Pumpenstatus ist ON, ein Durchflussmesswert fehlt jedoch; Wasserzirkulation ist damit nicht bestätigt." }
-      : d.pumpOn === false || d.pump === 0
-        ? d.flow != null
-          ? { en: `The pump reports stopped; the flow sensor reports ${fmt1(d.flow)} l/min. These readings do not establish water circulation.`,
-              de: `Die Pumpe meldet Stillstand; der Durchflusssensor meldet ${fmt1(d.flow)} l/min. Diese Werte belegen keine Wasserzirkulation.` }
-          : { en: "The pump reports stopped and no flow measurement is available.",
-              de: "Die Pumpe meldet Stillstand; ein Durchflussmesswert ist nicht verfügbar." }
-        : { en: `No reliable pump state is available; the flow sensor reports ${fmt1(d.flow)} l/min and does not establish circulation.`,
-            de: `Kein verlässlicher Pumpenstatus ist verfügbar; der Durchflusssensor meldet ${fmt1(d.flow)} l/min und belegt keine Zirkulation.` },
-    rows: [/water pump signal/i, /flow sensor/i, /^water pressure$/i],
+    what: { en: "The displayed command is 100 − raw X10A: 0 % requests stop and 100 % maximum effort. The raw signal has the opposite endpoints. Read reported ON/OFF and measured flow separately. The command measures neither speed nor flow. Water can circulate while the compressor is off.",
+      de: "Die angezeigte Ansteuerung ist 100 − X10A-Rohwert: 0 % fordert Stopp und 100 % Maximum an. Das Rohsignal hat die umgekehrten Endpunkte. Status und Durchfluss getrennt ablesen. Die Ansteuerung misst weder Drehzahl noch Durchfluss. Wasser kann bei stehendem Verdichter zirkulieren." },
+    pick: () => pumpX10a(), sample: "Water pump operation",
+    now: (d) => ({ en: pumpNowText(d, [(n) => `Pump command ${n} %.`, "The pump status is ON.", "The pump reports stopped (OFF).", "The reported pump state is unknown.", (n) => `Measured flow ${n} l/min.`, "No flow measurement is available.", "Reported OFF conflicts with flow. Possible causes include external circulation, coast-down or stale readings.", "Water circulation is not established."]),
+      de: pumpNowText(d, [(n) => `Pumpenansteuerung ${n} %.`, "Der Pumpenstatus ist ON.", "Die Pumpe meldet Stillstand (OFF).", "Der gemeldete Pumpenstatus ist unbekannt.", (n) => `Gemessener Durchfluss ${n} l/min.`, "Ein Durchflussmesswert fehlt.", "Gemeldetes OFF und Durchfluss widersprechen sich. Mögliche Ursachen sind externe Umwälzung, Nachlauf oder alte Werte.", "Wasserzirkulation ist damit nicht belegt."]) }),
+    rows: [/water pump signal/i, { sel: /flow sensor/i, cid: "flow" }, /^water pressure$/i],
   },
   pel: PEL_INSPECT,
   defrost: {
@@ -1530,7 +1523,7 @@ function inspMember(sel) {
   // the same quantity (mbFallbackFor — the helper whose whole job is that substitution) and the
   // member simply disappears where it does not, rather than printing a stale number under its label.
   // With no X10A row at all, the explicit concept (cid) is what still finds the gateway's twin.
-  if (x10aDown()) return { x10a: null, mb: r ? mbFallbackFor(r.concept) : (cid ? mbFallbackFor(cid) : null) };
+  if (x10aDown()) return { x10a: null, mb: mbFallbackFor(r?.concept || cid) };
   return { x10a: r, mb: mbTwin(r) };
 }
 
@@ -1577,7 +1570,7 @@ function inspComparisonHtml(m, d) {
   return comparison && comparison.value != null && !rowHeldOver(comparison, d)
       && m.mb && m.mb.value != null
     ? mbDeltaHtml(comparison, m.mb)
-    : "";
+    : modbusScaleHtml(m.mb);
 }
 
 // The reading of a /values row as one string ("42.8 °C"); "—" for an absent row — and "—" for a row
@@ -1662,7 +1655,8 @@ const inspTitleText = (e, d) => inspFieldText(e, "t", d);
 // covers the selection, the headline, the live sentence and every member reading, so a value moving
 // still repaints while an idle second does not.
 const inspectModbusSignature = (row) => row
-  ? JSON.stringify([row.value, row.label, row.unit, row.off, row.profile, row.enum, row.binary]) : "";
+  ? JSON.stringify([row.value, row.label, row.unit, row.off, row.profile, row.enum, row.binary,
+                    row.flow_scale_unverified]) : "";
 function inspectSourceStyle(mb = false, room = false) {
   for (const id of ["inspSrc", "inspNow"]) {
     $(id).classList.toggle("src-val-mb", mb);
