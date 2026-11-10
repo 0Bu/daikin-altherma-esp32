@@ -263,14 +263,12 @@ configuration, source identity and diagnostics generation. The checkup model ide
 resolved, adjudicated consumer rows: locator/converter, byte size, datatype, effective availability
 and pressure plausibility, including base-table saturation twins. Cosmetic labels and unique-row
 reordering preserve it; competing selectors refuse confirmation. Unknown profile names cannot
-borrow the generic fallback's identity. The named `CHECKUP_EVIDENCE_METHOD_VERSION` additionally
-requires a bump for changes to converter arithmetic, formatting/plausibility or counting that
-metadata cannot express. This is a maintenance contract, not automatic recognition of every code
-change. The separate trend identity and its old-scale retention rule above are unchanged.
-The core journal layout version also fences field moves that preserve the byte count. The cycling
-layout change left two prior byte layouts under one fingerprint. Those saved hours cannot
-establish the current layout or its paired mode split. The separate Stop journal and DHW restart
-handoff retain their own identities.
+borrow the generic fallback's identity. Bump `CHECKUP_EVIDENCE_METHOD_VERSION` when a shared change
+to conversion, plausibility or counting alters retained evidence in ways row metadata cannot express.
+For a change confined to the saved hourly records, bump `CHECKUP_JOURNAL_LAYOUT_VERSION`. This also
+fences field moves that preserve byte count. The cycling layout change left two byte layouts under
+one fingerprint, so those saved hours cannot establish the current layout or its paired mode split.
+The separate Stop journal, DHW restart handoff and trend history retain their own compatibility rules.
 Circulation broker/mapping/interpretation
 identity gates only DHW buckets; changed circulation must not retire independent X10A evidence.
 A narrowly scoped one-shot DHW handoff may preserve an unfinished candidate; it cannot lend coverage

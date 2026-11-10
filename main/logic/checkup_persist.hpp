@@ -146,9 +146,9 @@ inline uint32_t checkup_fp_loc(uint32_t crc, const CheckupLocator& l) {
 // or a ring that changed length cannot be read at all), then the row locators (which sensor a
 // counter was read from), then the constants that decide what gets counted — a DHW window length or
 // a high-loss threshold moving makes yesterday's `high_windows` a different statistic under the
-// same name, which is exactly the substitution a CRC cannot see. Bump when converter arithmetic,
-// formatting/plausibility or counting changes the meaning of retained evidence without changing its
-// row metadata. Row-schema changes are bound separately.
+// same name, which is exactly the substitution a CRC cannot see. Bump for shared evidence changes
+// that row metadata cannot express. Core-only counting or byte layout changes use
+// CHECKUP_JOURNAL_LAYOUT_VERSION. Row-schema changes are bound separately.
 inline constexpr uint32_t CHECKUP_EVIDENCE_METHOD_VERSION = 7;
 
 inline uint32_t checkup_layout_fingerprint() {
