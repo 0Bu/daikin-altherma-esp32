@@ -263,10 +263,12 @@ configuration, source identity and diagnostics generation. The checkup model ide
 resolved, adjudicated consumer rows: locator/converter, byte size, datatype, effective availability
 and pressure plausibility, including base-table saturation twins. Cosmetic labels and unique-row
 reordering preserve it; competing selectors refuse confirmation. Unknown profile names cannot
-borrow the generic fallback's identity. The named `CHECKUP_EVIDENCE_METHOD_VERSION` additionally
-requires a bump for changes to converter arithmetic, formatting/plausibility or counting that
-metadata cannot express. This is a maintenance contract, not automatic recognition of every code
-change. The separate trend identity and its old-scale retention rule above are unchanged.
+borrow the generic fallback's identity. Bump `CHECKUP_EVIDENCE_METHOD_VERSION` when a shared change
+to conversion, plausibility or counting alters retained evidence in ways row metadata cannot express.
+For a change confined to the saved hourly records, bump `CHECKUP_JOURNAL_LAYOUT_VERSION`. This also
+fences field moves that preserve byte count. The cycling layout change left two byte layouts under
+one fingerprint, so those saved hours cannot establish the current layout or its paired mode split.
+The separate Stop journal, DHW restart handoff and trend history retain their own compatibility rules.
 Circulation broker/mapping/interpretation
 identity gates only DHW buckets; changed circulation must not retire independent X10A evidence.
 A narrowly scoped one-shot DHW handoff may preserve an unfinished candidate; it cannot lend coverage
@@ -285,9 +287,7 @@ While a backward clock step leaves the cursor ahead of the newest live hour, thi
 an ordinary append.
 Current source confirmation requires this boot's full profile/link evidence, not cached startup
 identity. Whole live and restored hours expire when their beginning leaves the rolling day,
-independently of producer progress; abandoned open evidence expires too. The current 80-byte
-diagnosis bucket changes its journal fingerprint and starts fresh after a format update; ordinary
-trend records are unaffected.
+independently of producer progress; abandoned open evidence expires too.
 The software-restart DHW handoff is consumed once; downtime/startup remains blind and can
 invalidate it without incrementing ordinary abort counters.
 Every `esp_restart()` runs the checkup shutdown handler before the history drain, because ESP-IDF
@@ -326,7 +326,7 @@ memory and stack paths are measured on the target ELF.
 
 Stop records use the existing physical Checkup envelope with a distinct format fingerprint and
 width. Older firmware can discover their physical sequence/head without interpreting their payload
-as core diagnosis. The core bucket, its fingerprint and the five wire source IDs are unchanged.
+as core diagnosis. Stop and core hours have independent fingerprints within that envelope.
 Finalized stop contexts revise the original stop hour; pending candidates never restore. Ordinary
 scoped resets require a committed barrier before reset durability is established. Fence ordering uses
 sequence and exact scope, independently of wall time; a backward clock correction cannot make a

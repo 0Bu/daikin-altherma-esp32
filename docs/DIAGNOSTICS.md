@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: 2c99d0755fb6f6d192e5f01d92d46455b64d6d1a44068a15e2833c4f33861bc7 -->
+<!-- user-docs-contract: c7a9f635360330329f111029c8e80d715e43a14072dc1166fdf0590bba7fba9c -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default. Enable **Plant diagnostics** under **Settings → Firmware** to start an evidence
@@ -39,12 +39,12 @@ Completed hours can return after a restart only from compatible dated flash reco
 source confirmation. A software restart, such as an update or a settings save that restarts the
 board, also tries to save the open hour. It cannot when that hour shares its clock hour with the
 previous saved hour. Other open and unsaved hours may be lost. Whole hourly records expire when their
-beginning leaves the rolling day, even if polling stops. Changed X10A identity or incompatible
-diagnosis format or measurement definition starts fresh collection; changing the independent
-circulation witness clears only
-tank-cooling evidence.
-The current format cannot reuse older diagnosis intervals or restart handoffs; trend history has
-a separate compatibility contract. See [PLANT.md](PLANT.md#reboot-and-persistence).
+beginning leaves the rolling day, even if polling stops. Changed X10A identity, an incompatible
+saved-hour format or a changed measurement definition starts fresh hourly collection, including
+tank-cooling results. Changing the independent circulation witness clears only tank-cooling
+evidence. Trend history, Stop context and the handoff for an unfinished tank-cooling window each
+have their own compatibility rules.
+See [PLANT.md](PLANT.md#reboot-and-persistence).
 
 These are passive ordinary-operation observations. Five-minute trends cannot reconstruct complete
 compressor runs or quiet tank hours, and a day of observations is not a controlled commissioning test.
@@ -102,10 +102,12 @@ software restart preserves the remaining settling time, but unseen charging can 
 <!-- user-docs: health_cycling -->
 ### Compressor cycling
 
-**In plain language:** The board counts starts and completed compressor runs as space heating,
-domestic hot water (DHW), cooling or unclassified, and plots hourly starts and compressor runtime
-across the 24-hour window. Unclassified counts explain missing readings,
-transitions, heating/DHW handovers, journal boundaries and unwitnessed starts.
+**In plain language:** The board counts starts across all modes and plots hourly starts and
+compressor runtime across the 24-hour window. Gray bars show runtime without a heating or hot-water
+label when the mode split is incomplete. An hourly bar can include part of a run that started before
+that hour. The board classifies completed runs separately as space heating, domestic hot water
+(DHW), cooling or unclassified. Unclassified runs explain missing readings, transitions,
+heating/DHW handovers, journal boundaries and unwitnessed starts.
 
 **Meaning:** At least **12 completed space-heating runs** can carry the assessment when both run
 count and runtime coverage reach **90%**. Positively observed heating/DHW handovers remain visible

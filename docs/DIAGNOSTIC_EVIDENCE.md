@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 3da65a47167928b711dc6536354c0d4d0df7ef1b8112b02139895cf49d49fcb5 -->
+<!-- diagnostic-evidence-contract: 717141a74dab6204dac037af815c83268a1dd8edb14777fa5d154b55d5ca3c88 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -21,12 +21,12 @@ refrigerant test. No manufacturer settling duration can therefore be inferred fr
 X10A evidence is scoped to the configured target generation. Changed wiring, profile or detected
 source discards an in-flight old-source sample and retires pending restoration for that boot.
 A manual profile selection establishes a decoding contract, not a physical reply.
-Retained checkup counters additionally require the same resolved consumer schema and evidence
-method. A changed measurement definition cannot borrow an old counter merely because its profile
-name is unchanged; [ARCHITECTURE.md](ARCHITECTURE.md#history-and-diagnosis-persistence) owns the
-identity and method-version maintenance contract. This does not admit an archive as a golden
-fixture: historical firmware/decoder/schema/method provenance and qualification must be established
-for each case. The existing population fixture is synthetic, not a reconstructed field event.
+Retained checkup counters additionally require a compatible stored layout and the same resolved
+consumer schema and evidence method. A changed measurement definition cannot borrow an old counter
+merely because its profile name is unchanged. See the
+[persistence contract](ARCHITECTURE.md#history-and-diagnosis-persistence). Historical firmware,
+decoder, schema and method provenance and qualification must be established for each archive used
+as a golden fixture. The existing population fixture is synthetic, not a reconstructed field event.
 
 At read time the diagnosis publishes elapsed span separately from usable signal coverage and the
 age of the last nonempty X10A sample. A source older than the 15-second project bound cannot support
@@ -204,9 +204,10 @@ this temperature. Zero net cooling does not mean zero heat transfer. No marker p
 isolation, and no accepted window excludes losses in discarded intervals. Unseen charging can
 still affect a later window. Missing replies or polling pauses establish no wiring defect.
 
-Changing circulation identity retires DHW evidence independently; changed evaluation/layout rejects
-older filtered records and candidates. [PLANT.md](PLANT.md#reboot-and-persistence) owns restart,
-source and journal admission rules; [API.md](API.md) owns the evidence fields.
+Changing circulation identity retires DHW evidence independently. Saved cooling hours use the core
+journal's layout and schema checks. An unfinished candidate has a separate handoff compatibility
+check. See the [restart and admission rules](PLANT.md#reboot-and-persistence) and
+[evidence fields](API.md).
 
 <a id="diagnosis-cycling"></a>
 ### 3. Compressor cycling (`cycling`)
@@ -229,6 +230,12 @@ heating mode is an unaccepted transition, never a proven handover. There is no s
 Positively observed uninterrupted heating/DHW handovers remain censored with their own cause;
 their space phases never become heating runs. Other causes distinguish unaccepted transitions,
 unreadable class/RPS, journal/window boundaries and unwitnessed starts.
+
+The hourly chart integrates intervals of at most 15 seconds with running compressor readings at
+both endpoints. A split requires every counted interval to have the same eligible class at both
+ends. A known DHW valve route qualifies as DHW. Space heating needs a known room route and heating
+mode. An hourly start count and its runtime can cover different runs and do not form a completed-run
+mean.
 
 The count population is the larger of completed runs and starts minus one, less proven handovers.
 At least 90% must be classified. At least 90% of completed heating runtime plus unsafe censored

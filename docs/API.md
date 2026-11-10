@@ -272,6 +272,12 @@ and blocks an assessment. Counter saturation or inconsistent cause totals also b
 legacy `mean_run_s` remains present as null. Transition/gap rules and limitations are in
 [DIAGNOSTIC_EVIDENCE.md](DIAGNOSTIC_EVIDENCE.md#diagnosis-cycling).
 
+`hours` lists up to 24 chronological buckets with `starts`, `run_s` and `observed_s`, including the
+open hour. For positive runtime with complete [hourly mode attribution](DIAGNOSTIC_EVIDENCE.md#diagnosis-cycling),
+the optional fields satisfy `space_s + dhw_s = run_s`. A zero in that pair means zero
+attributed seconds for the corresponding mode. The hourly runtime can include parts of runs started
+outside the hour.
+
 `cycling.stop_context` is an independent observation object; it changes no legacy cycling field or
 verdict. `denominator` names `witnessed_stops_recent_heating`, the separately counted witnessed
 compressor stops with recent confirmed heating context. Counts overlap and must not be summed as

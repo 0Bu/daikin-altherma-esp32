@@ -883,9 +883,10 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .checkup-chart-col b { font-size: 10px; line-height: 12px; height: 12px; color: var(--fg); font-weight: 600; text-align: center; }
 .checkup-chart-col b.warn { color: var(--warn); font-weight: 700; }
 .checkup-chart-col s { width: 100%; height: 58px; display: flex; flex-direction: column; justify-content: flex-end; background: color-mix(in srgb, var(--brand-sky) 20%, var(--soft)); border-radius: 2px; text-decoration: none; overflow: hidden; }
-.checkup-chart-col i { width: 100%; border-radius: 1px 1px 0 0; background: var(--flow-hot); }
+.checkup-chart-col i { width: 100%; border-radius: 1px 1px 0 0; background: var(--muted); }
+.checkup-chart-col i.heat { background: var(--flow-hot); }
 .checkup-chart-col i.dhw { background: var(--brand); }
-.checkup-chart-col i.combi { background: radial-gradient(circle at 0 0, #ff9e42, transparent 60%), linear-gradient(135deg, var(--flow-hot), var(--brand)); }
+.checkup-chart-col i.heat_dhw { background: radial-gradient(circle at 0 0, #ff9e42, transparent 60%), linear-gradient(135deg, var(--flow-hot), var(--brand)); }
 .checkup-chart-wrap .vhist-time { position: absolute; bottom: -22px; font-size: 11px; transform: translateX(-50%); pointer-events: none; background: var(--card); border: 1px solid var(--line); padding: 1px 4px; border-radius: 4px; z-index: 5; }
 
 /* HOW LONG THE ROW HAS READ WHAT IT READS needs no rule of its own. Its state word reuses .vdesc-n

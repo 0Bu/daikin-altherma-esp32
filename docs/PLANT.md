@@ -73,9 +73,9 @@ can restore only from compatible, dated history-journal records after clock sync
 diagnostics-consent generation, consumer-schema/method fingerprint and CRC
 ([identity contract](ARCHITECTURE.md#history-and-diagnosis-persistence)). DHW additionally binds the
 circulation configuration; a mismatch empties only its bucket, preserving independent X10A evidence.
-Old unscoped formats are rejected; a cached model guess cannot admit records. Introducing the
-consumer-schema identity rejects earlier diagnosis records and ongoing-filter handoffs once;
-new compatible records can restore normally. Raw trends keep their separate compatibility rule.
+Old unscoped formats are rejected. A cached model guess cannot admit records. The core journal
+layout version also gates saved hours. Raw trends and the one-shot tank-cooling handoff have their
+own compatibility rules.
 
 **A software restart (any `esp_restart()`) tries to save the open hour.**
 Software restarts include:
@@ -122,9 +122,7 @@ Apart from the journaled open hour, a software restart can carry only the ongoin
 through a separately sealed **one-shot handoff**, adopted after the same full X10A and circulation
 scopes are confirmed with diagnostics enabled and no reset requested. It preserves the hourly cooling candidate/settling timer,
 never undated completed counters or transient compressor edges. Power loss, crash, changed source
-or incompatible/absent format starts a fresh filter. The current bucket geometry changes the diagnosis journal fingerprint,
-so previous-format hourly records are rejected; handoff v3 also rejects v2. Trend-journal sources
-remain independently compatible.
+or an incompatible or absent handoff starts a fresh filter. Handoff v3 rejects v2.
 
 Adoption books **five seconds plus all new-boot uptime through source confirmation as blind time**.
 Together with earlier gaps, exceeding either two minutes of continuous blindness or 10% of the
