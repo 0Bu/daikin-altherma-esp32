@@ -1069,8 +1069,7 @@ CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* record
     // An earlier call already rebuilt the window; never mix the same evidence in twice.
     if (s_persist_verdict == logic::CheckupRestore::Flash)
         return CheckupFlashRestoreResult::Ignored;
-    const logic::CheckupRestore refused          = s_persist_verdict;
-    const auto                  fresh_if_pending = [] {
+    const auto fresh_if_pending = [] {
         if (s_persist_verdict == logic::CheckupRestore::FlashPending)
             s_persist_verdict = logic::CheckupRestore::Fresh;
         return CheckupFlashRestoreResult::Ignored;
@@ -1097,35 +1096,30 @@ CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* record
 
     int64_t earliest_bucket = INT64_MAX;
     int64_t latest_bucket   = INT64_MIN;
-    size_t  accepted        = 0;
     auto    span_to         = [&](int64_t bucket) {
         if (bucket < earliest_bucket) earliest_bucket = bucket;
         if (bucket > latest_bucket) latest_bucket = bucket;
     };
-    const int64_t first_live = live.count ? logic::checkup_journal_live_label(live, 0) : INT64_MAX;
-    if (live.count) {
-        // Completed hours from this boot must stay a contiguous tail. Both run completion and
-        // journal replay locate them by their monotonic distance from the pending hour. If the
-        // wall clock cannot date the entire tail, keep the live ring without rebuilding it.
-        if (!logic::checkup_journal_in_window(logic::checkup_journal_live_end(live, 0),
-                                              now_unix_s) ||
-            !logic::checkup_journal_in_window(logic::checkup_journal_live_end(live, live.count - 1),
-                                              now_unix_s))
-            return fresh_if_pending();
-        span_to(first_live);
-        span_to(live.newest_label);
-    }
     for (size_t i = 0; i < count; i++) {
-        // A saved label inside or beyond this boot's live tail cannot establish earlier evidence.
-        if (records[i].bucket >= first_live) continue;
+        // Saved labels cannot extend the live tail. Duplicates inside it lose to live evidence.
+        if (live.count && records[i].bucket > live.newest_label) continue;
         if (!logic::checkup_journal_restore_admits(
                 records[i].payload, records[i].bucket, now_unix_s, s_source_confirmed, s_model_fp,
                 s_source_fp, s_diagnostics_generation, reset_requested))
             continue;
         span_to(records[i].bucket);
-        accepted++;
     }
-    if (!accepted) return fresh_if_pending();
+    if (earliest_bucket == INT64_MAX) return fresh_if_pending();
+
+    // Completed hours from this boot must stay a contiguous tail. Both run completion and
+    // journal replay locate them by their monotonic distance from the pending hour.
+    for (size_t k = 0; k < live.count; k++) {
+        const int64_t label = logic::checkup_journal_live_label(live, k);
+        if (logic::checkup_journal_live_index(live, label, now_unix_s, s_source_confirmed,
+                                              s_model_fp, s_source_fp, reset_requested) != k)
+            return fresh_if_pending();
+        span_to(label);
+    }
 
     // If this boot has not completed an hour yet, explicit empty buckets represent wall time during
     // which the board was off. They age older evidence without inventing observed seconds.
@@ -1152,12 +1146,10 @@ CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* record
     // Valid records can still fall outside capacity or lose to live evidence. Neither is a
     // restoration: retain the current pending/live window and report no flash provenance.
     if (!materialized) return fresh_if_pending();
+    // Selected ends are within the last 23 hours. Include the oldest interval's nominal hour.
+    const auto wall_span_s =
+        static_cast<uint32_t>(now_unix_s - earliest_stored_end) + logic::CHECKUP_DT_S;
 
-    const int64_t first_sample_us = P().ring.first_sample_us;
-    const int64_t latest_sample_us = P().ring.latest_sample_us;
-    const int64_t live_span_us =
-        first_sample_us >= 0 && latest_sample_us >= first_sample_us
-            ? latest_sample_us - first_sample_us : 0;
     // In place, without copying the live hours; the pending hour and lifecycle stay. A circulation
     // reconfiguration retires only DHW evidence; dated X10A findings keep their expiry.
     if (logic::checkup_journal_rebuild(P().ring, P().dhw, s_slot_times, live, records, count,
@@ -1169,16 +1161,19 @@ CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* record
     P().ring.age_buckets = static_cast<uint8_t>(
         P().ring.count < logic::CHECKUP_BUCKETS ? P().ring.count : logic::CHECKUP_BUCKETS);
 
-    const int64_t stored_start = earliest_stored_end - logic::CHECKUP_DT_S;
-    int64_t wall_span_us = now_unix_s > stored_start
-        ? (now_unix_s - stored_start) * 1000000 : 0;
-    if (wall_span_us > logic::CHECKUP_WINDOW_US) wall_span_us = logic::CHECKUP_WINDOW_US;
-    P().ring.carried_span_us = wall_span_us > live_span_us ? wall_span_us - live_span_us : 0;
+    const int64_t first_sample_us  = P().ring.first_sample_us;
+    const int64_t latest_sample_us = P().ring.latest_sample_us;
+    const int64_t live_span_us     = first_sample_us >= 0 && latest_sample_us >= first_sample_us
+                                         ? latest_sample_us - first_sample_us
+                                         : 0;
+    const int64_t wall_span_us     = static_cast<int64_t>(wall_span_s) * 1000000LL;
+    P().ring.carried_span_us       = wall_span_us > live_span_us ? wall_span_us - live_span_us : 0;
     // "flash" records actual selected journal provenance, independently of the startup
     // RAM-integrity verdict. Completed RAM hours are never adopted. Reconstructed stored and
     // selected live intervals keep absolute-age deadlines; only selected stored intervals establish
     // this slug.
-    s_persist_verdict = logic::CheckupRestore::Flash;
+    const logic::CheckupRestore refused = s_persist_verdict;
+    s_persist_verdict                   = logic::CheckupRestore::Flash;
     if (!s_state.have_bucket)
         s_cycling_newest_bucket = static_cast<int32_t>(logic::checkup_bucket(now_us));
     ++s_cycling_hours_epoch; // restored chronology may include hours from an earlier boot

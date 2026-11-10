@@ -278,13 +278,13 @@ under the checkup mutex. A transition rejects the old sample even if the saved g
 X10A and circulation epochs remain independent. Same-boot journal creation is not proof of reboot
 restoration. `DIAGNOSTICS.md` explains
 results; `PLANT.md` owns lifecycle.
-A run is booked into the hour in which it started, but only when it stops. When that hour was
-already journaled, it and every later live hour are appended again; the boot index keeps each
-hour's newest copy, including the older-sequence tail of a replay cut by a restart
+A run completion is booked to its retained start hour. If the journal cursor has reached that
+hour, the writer schedules a replay from it through later live hours. The boot index keeps each
+hour's newest saved copy, including the older-sequence tail of a replay cut by a restart
 (`checkup_persist.hpp`). Each boot latches one wall-clock label per monotonic hour and moves it only
 for a clock step of more than one hour, so whole-second clock reads cannot relabel a replayed hour.
-While a backward clock step leaves the cursor ahead of the newest live hour, this replay waits like
-an ordinary append.
+A cursor still ahead of the newest live hour after a backward clock step waits for live hours to
+catch up before appending or replaying.
 Current source confirmation requires this boot's full profile/link evidence, not cached startup
 identity. Whole live and restored hours expire when their beginning leaves the rolling day,
 independently of producer progress; abandoned open evidence expires too.
