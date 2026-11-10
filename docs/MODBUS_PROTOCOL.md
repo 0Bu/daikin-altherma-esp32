@@ -29,7 +29,8 @@ The source path is read-only. This firmware never writes the hub.
 
 ## Wire facts
 
-Source: *EKRHH Daikin HomeHub — Installer reference guide 4P744838-1E*, §2.5, §9, §13.
+Source: [EKRHH Daikin HomeHub — Installer reference guide 4P744838-1E](https://www.daikin.eu/content/dam/document-library/Installer-reference-guide/heat/accessories/ekrhh/EKRHH_Installer%20reference%20guide_4PEN744838-1E_English.pdf),
+§2.5, §9, §13.
 
 | | |
 |---|---|
@@ -413,8 +414,9 @@ green/yellow/red state colours as WiFi, MQTT, Syslog and NTP:
 * **Both up** — the row shows the X10A value, unmarked. Tapping it opens the explainer, and the
   gateway's reading appears at the **end** of the body, after the "Normal:" note: a full row carrying
   the *Modbus register's own label*, the badge and the value, then the **difference** between the two
-  when the conversion is established. Native Altherma 4 flow and pressure show the unverified
-  conversion limit instead of a numeric comparison.
+  when the conversion is established. Flow marked `flow_scale_unverified` and native Altherma 4
+  pressure show the conversion limit instead of a numeric comparison. The flow limit covers
+  unresolved Auto, fallback and native Altherma 4 profiles.
   It sits last, not first, because a reader opens an explainer to find out what the quantity *is* —
   the row's own value is already stated an inch above, in the header they just tapped. The label is
   the gateway's rather than the X10A row's on purpose: this line is what someone verifying a pairing
@@ -434,17 +436,10 @@ green/yellow/red state colours as WiFi, MQTT, Syslog and NTP:
   positive ΔT. The fallback leaves the space heating or cooling direction unresolved, so heat
   output is unavailable on that route. An unverified flow reading stays visible with its
   limitation while both derived figures are withheld. The schematic also withholds COP on Modbus
-  alone.
-  The gateway measures the *whole unit's* electrical input, backup and immersion heater included, while
-  the heat figure is across the plate exchanger alone — precisely the boundary mismatch
-  [`cop_scope.hpp`](../main/logic/cop_scope.hpp) refuses, and one that collapses exactly when a
-  heater fires, reading as a failing heat pump while nothing is wrong. The gateway now carries the
-  compressor and tank-heater states, but not the BUH stage state and all source-boundary evidence the
-  quotient needs, so the answer remains: publish nothing, and name the reason
-  (`feature_gate.hpp` — disable, never degrade).
-  The electrical input itself *is* better here, since the HomeHub measures what X10A only estimates
-  from CT clamps at an assumed 230 V — read from input register **51** by its offset, never by its
-  unit, because the map carries three `kW` rows and the other two are the power *limit* setpoints.
+  alone. The EKRHH guide (4P744838-1E, §9.2.2, p. 43) identifies input **51** as heat pump power
+  consumption. Its measurement boundary and heater coverage have not been established for matching
+  that reading to heat across the plate exchanger. The schematic shows the reported power by
+  register offset; the other `kW` rows are power limits.
 * **No HomeHub** — nothing Modbus appears anywhere: no row, no group, no comparison, no banner.
 
 Registers with no X10A counterpart get their own group at the very end of the value list, after

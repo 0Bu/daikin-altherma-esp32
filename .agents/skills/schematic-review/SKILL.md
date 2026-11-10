@@ -78,7 +78,9 @@ it, and this is where the review earns its keep.
    paired HomeHub measurement in petrol. Its inspector must then name that Modbus row rather than
    restore the stale X10A one or claim there is no current reading. Its trend may overlay the blue
    X10A gap with the independent petrol HomeHub ring, but must label both sources and align the same
-   5-minute bucket — never splice them into one repaired line. ΔT blanks with the pump stopped.
+   5-minute bucket — never splice them into one repaired line. ΔT needs both water temperatures
+   and qualified measured flow above 0.5 L/min. A stop command or reported OFF alone does not
+   blank it when that flow is present; provisional Modbus flow does not qualify.
    The HomeHub's compressor flag settles a row of unknown age (`held_unknown`) where it answers.
    Otherwise the row keeps its number with the inspector's note, takes the same HomeHub stand-in,
    and feeds no estimate.

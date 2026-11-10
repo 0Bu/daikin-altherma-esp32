@@ -286,11 +286,11 @@ twin with its comparison; grouped components keep their full member list.
 Explain what the quantity is, its bounded normal context, then current state or absence. Held data
 cannot reappear in a headline, members or state sentence. A fallback pressure row must own headline,
 source line and history together. Only rerender changed content so polling does not destroy a text
-selection. The same quantity uses the same underlying description as the value table. Native Altherma 4
-flow/pressure have unverified conversion limits and must not show numeric agreement/difference.
-Source-qualified native help takes precedence over generic compact inspector copy in every locale,
-including a stand-in under an X10A row. Definition-metadata changes invalidate the comparison even
-when its numeric values do not change.
+selection. The same quantity uses the same underlying description as the value table. Modbus flow
+marked `flow_scale_unverified` and native Altherma 4 pressure show their conversion limits in place
+of numeric comparisons. Source-qualified help takes precedence over generic inspector copy in every
+locale, including a stand-in under an X10A row. Definition-metadata changes invalidate the comparison
+even when its numeric values do not change.
 
 **History**
 

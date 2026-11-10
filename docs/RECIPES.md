@@ -192,7 +192,9 @@ A plausible ratio is insufficient validation: the wrong water sensor can still y
 account for gaps. If the ratio collapses specifically when the backup heater runs, check the
 measurement boundary before diagnosing the plant.
 
-The read-only HomeHub source can supply its own flow and leaving/return temperatures, but keep its
-cadence, units and provenance separate from X10A. Its available map depends on model, MMI firmware
-and Modbus commissioning; see [MODBUS_PROTOCOL.md](MODBUS_PROTOCOL.md). This project does not
-integrate energy on the device or substitute cloud estimates for a physical electricity meter.
+Keep HomeHub flow and water temperatures separate from X10A by source, cadence and units. Exclude
+flow marked `flow_scale_unverified` in [`/values`](API.md#get-values) from heat and COP estimates.
+MQTT and History carry the converted number without the flag; independently verify the scale of
+those samples before using them. Use an electrical measurement with a matching boundary for COP.
+See the [Modbus map](MODBUS_PROTOCOL.md) for model and profile limits. The device does not integrate
+energy or substitute cloud estimates for a physical electricity meter.
