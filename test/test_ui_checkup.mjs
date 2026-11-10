@@ -480,6 +480,30 @@ assert.equal((startup.match(/<button[^>]*data-bucket=/g) || []).length, 1,
 const startupHour = hourMarkup(startup, 0);
 assert.match(startupHour, /No data/, "zero elapsed time and no start witness establish no count");
 assert.doesNotMatch(startupHour, /<i class="gap"/, "the newly opened hour has no elapsed gap");
+assert.match(startup, /data-tip="No data"/, "no readable time or start witness establishes no chart total");
+assert.equal((startup.match(/<span class="checkup-chart-col" aria-hidden="true" inert><s><\/s><\/span>/g) || []).length,
+  23, "positions outside the retained ring are blank and inert");
+assert.doesNotMatch(startup, /class="gap"|checkup-gap-key/,
+  "padding does not imply elapsed time or a sampling gap");
+const edgeOnly = ui.detail({ ...cyclingWithHours, starts: 9,
+  hours: [{ bucket: 0, starts: 1, run_s: 0, observed_s: 0, elapsed_s: 0 }] });
+assert.match(edgeOnly, /data-tip="1 start"/,
+  "the chart sums its slots and omits unobserved runtime even when the diagnosis count differs");
+const observedZero = ui.detail({ ...cyclingWithHours,
+  hours: [{ bucket: 0, starts: 0, run_s: 0, observed_s: 60, elapsed_s: 60 }] });
+assert.match(observedZero, /data-tip="0 starts · 0 min"/,
+  "readable time without a running sample establishes zero observed runtime");
+const restored = ui.detail({ ...cyclingWithHours, hours: [
+  { bucket: -1, starts: 0, run_s: 180, observed_s: 180, space_s: 180, dhw_s: 0,
+    restored: true, end_unix_s: 1792887600 },
+  { bucket: 0, starts: 0, run_s: 0, observed_s: 0, elapsed_s: 0 },
+] });
+const restoredHour = hourMarkup(restored, -1);
+assert.match(restoredHour, /Interval end.*3 min observed · elapsed time unknown/,
+  "a dated restore establishes the interval end and readable duration but no elapsed duration");
+assert.deepEqual(modeSegments(restoredHour), ["space"], "restoration retains positively attributed runtime");
+assert.doesNotMatch(restored, /class="gap"|checkup-gap-key/,
+  "a short restored record does not imply missing time before its end");
 context.S.descOpen.delete("model:health_cycling");
 
 // Causes are exclusive subcounts of the retained total, never inferred from missing fields.

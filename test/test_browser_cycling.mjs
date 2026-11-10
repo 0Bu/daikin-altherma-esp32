@@ -9,6 +9,7 @@ const PREVIOUS = 21;
 const ZERO = 20;
 const MISSING = 19;
 const EDGE = 18;
+const RESTORED = 17;
 const hour = bucket => `${COLS} button[data-bucket="${bucket}"]`;
 const evaluate = (page, fn, arg) => page.evaluate(`(${fn})(${JSON.stringify(arg)})`);
 
@@ -49,6 +50,7 @@ export async function assertCyclingChart(page, server, context) {
     bucket, starts: 0, run_s: 0, observed_s: 3600,
     ...(bucket === OPEN ? {} : { end_unix_s: boundary - (LAST - bucket) * 3600 }),
   }));
+  Object.assign(hours[RESTORED], { restored: true, observed_s: 180, run_s: 180, space_s: 180, dhw_s: 0 });
   Object.assign(hours[EDGE], { starts: 1, observed_s: 0 });
   Object.assign(hours[MISSING], { observed_s: 0 });
   Object.assign(hours[PREVIOUS], { starts: 1, run_s: 600, space_s: 0, dhw_s: 0 });
@@ -166,6 +168,10 @@ export async function assertCyclingChart(page, server, context) {
       context + ": printed counts appear in their own columns above the bars");
     await assertSegments(ZERO, {}, "observed zero runtime has no missing or running segment");
     await assertSegments(MISSING, { gap: 3600 }, "an unread closed slot is entirely hatched");
+    await assertSegments(RESTORED, { space: 180 }, "a short restored slot does not infer a sampling gap");
+    assert.ok((await label(RESTORED)).includes(
+      await page.evaluate("t('check.hour.coverage', dwellDuration(180), '')")),
+    context + ": the restored slot retains readable time and reports unknown elapsed time");
     await assertSegments(PREVIOUS, { other: 600 }, "unassigned runtime keeps a neutral colour");
     await assertSegments(LAST, { space: 600, dhw: 300, other: 900, gap: 300 },
       "only evidenced mode durations colour a partly observed slot");
@@ -271,14 +277,20 @@ export async function assertCyclingChart(page, server, context) {
     assert.deepEqual(await pinned(), [], context + ": a source reset does not retarget an existing pin");
     status.health.checks[0].hours_epoch++;
     Object.assign(status.health.checks[0], { starts: 0, space_runs: null, space_mean_run_s: null, hours: [
-      { bucket: 0, starts: 0, run_s: 0, observed_s: 3600, end_unix_s: boundary + 3600 },
-      { bucket: 1, starts: 0, run_s: 0, observed_s: 0, elapsed_s: 0 },
+      { bucket: 1, starts: 1, run_s: 0, observed_s: 0, elapsed_s: 0 },
     ] });
     await poll("2026-10-25T02:22:00Z");
     assert.deepEqual(await evaluate(page, cols => Array.from(document.querySelectorAll(cols + " > button"),
-      node => Number(node.dataset.bucket)), COLS), [0, 1],
+      node => Number(node.dataset.bucket)), COLS), [1],
     context + ": padding in a new observation is not keyboard-selectable");
+    assert.equal(await evaluate(page, cols =>
+      document.querySelectorAll(cols + " > span[inert][aria-hidden='true'] > s:empty").length, COLS),
+    23, context + ": padding has no runtime or hatch segments");
+    assert.equal(await evaluate(page, chart => !!document.querySelector(chart + " .checkup-gap-key"), CHART),
+      false, context + ": padding does not introduce a sampling-gap legend");
     await assertSegments(1, {}, "the new observation does not hatch its unelapsed hour");
+    assert.equal(await readout(), await page.evaluate("t('check.starts', 1)"),
+      context + ": the default readout reports the chart's witnessed start without invented runtime");
     assert.ok(updates >= 3, context + ": verify continuity across repeated production polling");
     console.log("cycling chart checked: " + context + "; " + updates + " live status polls");
   } finally {

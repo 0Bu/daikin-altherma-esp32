@@ -395,7 +395,8 @@ void pending_expiry() {
 }
 void restored_expiry() {
     boot();
-    auto                     cov = coverage();
+    auto cov = coverage();
+    cov.rps  = true;
     std::vector<CachedValue> rows{fault(0, 0), fault(1, 0), row(CHECKUP_LOC_PRESSURE, "1.5")};
     sample(100, rows, cov);
     CheckupFlashRecord record{};
@@ -417,18 +418,28 @@ void restored_expiry() {
     p.checkup.bar_observed_s = 3600;
     p.checkup.min_bar        = 9;
     p.checkup.flags          = CHECKUP_F_FAULT;
+    p.checkup.rps_observed_s = 1200;
+    p.checkup.starts         = 1;
     require(checkup_flash_restore(&record, 1, now) == CheckupFlashRestoreResult::Restored,
             "synthetic_record_admitted_by_real_restore");
     require(std::strcmp(checkup_persist_state(), "flash") == 0, "real_restore_provenance_slug");
     adapter::unix_origin -= 30LL * 86400; // later wall-clock correction cannot rejuvenate the slot
     const int64_t deadline = 100000000LL + 3600LL * 1000000;
     sdk::now_us            = deadline - 1;
-    auto before            = checkup_report();
+    CheckupCyclingHours hours;
+    const auto          takes_before = sdk::takes;
+    auto                before       = checkup_report(&hours);
+    require(sdk::takes == takes_before + 1, "report_and_restored_chart_use_one_lock");
+    require(hours.count > 1 && hours.hours[0].restored && hours.hours[0].observed_s == 1200 &&
+                hours.end_unix_s[0] == static_cast<uint32_t>(p.end_unix_s) &&
+                !hours.hours[hours.count - 1].restored,
+            "restored_chart_keeps_its_timestamp_and_readable_time");
     require(before[CheckupCheck::Pressure].a == 9 &&
                 before[CheckupCheck::Fault].verdict == CheckupVerdict::Info,
             "restored_finding_before_exact_deadline");
     sdk::now_us = deadline;
-    auto after  = checkup_report();
+    auto after  = checkup_report(&hours);
+    require(hours.count == 0, "expired_restored_hour_not_in_chart");
     require(after[CheckupCheck::Pressure].a == 15 &&
                 after[CheckupCheck::Fault].verdict != CheckupVerdict::Info,
             "restored_expires_without_producer");

@@ -1423,10 +1423,10 @@ function checkupCyclingChartHtml(c) {
   // but a pin must not jump to different evidence when that snapshot or its hour changes.
   const scope = JSON.stringify([S.status?.boot_id, identified ? c.hours_epoch :
     [Math.floor((S.status?.uptime_s || 0) / 3600), hrs]]);
-  const key = JSON.stringify([LANG, scope, hrs, c.starts]);
+  const key = JSON.stringify([LANG, scope, hrs]);
   if (cyclingMarkup[0] === key) return cyclingMarkup[1];
   const pad = 24 - hrs.length;
-  let sumS = 0, sumR = 0, cols = "", hasGap = false;
+  let sumS = 0, sumR = 0, cols = "", hasObservation = false, hasGap = false;
   const stamp = new Intl.DateTimeFormat(LANG, { month: "short", day: "numeric", hour: "2-digit",
     minute: "2-digit", timeZoneName: "shortOffset" });
   const duration = s => s >= 60 && s % 60
@@ -1435,8 +1435,7 @@ function checkupCyclingChartHtml(c) {
   for (let i = 0; i < 24; i++) {
     const h = hrs[i - pad];
     if (!h) {
-      cols += `<span class="checkup-chart-col" aria-hidden="true"><s><i class="gap"></i></s></span>`;
-      hasGap = true;
+      cols += `<span class="checkup-chart-col" aria-hidden="true" inert><s></s></span>`;
       continue;
     }
     const observed = Number.isInteger(h.observed_s) && h.observed_s >= 0 && h.observed_s <= 3600
@@ -1445,13 +1444,14 @@ function checkupCyclingChartHtml(c) {
     const r = observed && h.run_s > 0 ? Math.min(observed, Math.round(h.run_s)) : 0;
     sumS += s;
     sumR += r;
+    hasObservation ||= observed > 0;
     const n = 23 - i, dated = identified && Number.isSafeInteger(h.end_unix_s) &&
       h.end_unix_s > 0 && h.end_unix_s <= 8.64e12;
     const when = dated ? t("check.hour.ending", stamp.format(h.end_unix_s * 1000))
       : n ? t("check.hour.earlier", n) : t("check.hour.latest");
-    // Closed slots span an hour. Only the device can bound elapsed time in the open slot.
-    const possible = n ? 3600 : Number.isInteger(h.elapsed_s) && h.elapsed_s >= observed &&
-      h.elapsed_s <= 3600 ? h.elapsed_s : null;
+    // A restored record may have been sealed early on restart, so its elapsed time is unknown.
+    const possible = n ? (h.restored === true ? null : 3600) :
+      Number.isInteger(h.elapsed_s) && h.elapsed_s >= observed && h.elapsed_s <= 3600 ? h.elapsed_s : null;
     const missing = possible == null ? 0 : possible - observed;
     hasGap ||= missing > 0;
     const valid = identified && [h.space_s, h.dhw_s].every(v => Number.isInteger(v) && v >= 0) &&
@@ -1470,7 +1470,8 @@ function checkupCyclingChartHtml(c) {
       modes.map(([seconds, mode]) => `<i class="${mode}" style="height:${percent(seconds)}"></i>`).join("") +
       gap + `</s></button>`;
   }
-  const meta = `${t("check.starts", c.starts ?? sumS)} · ${checkupDuration(sumR)}`;
+  let meta = hasObservation || sumS ? t("check.starts", sumS) : t("sys.nodata");
+  if (hasObservation) meta += ` · ${checkupDuration(sumR)}`;
   const gapKey = hasGap ? `<span class="checkup-gap-key"><i class="gap" aria-hidden="true"></i>${esc(t("check.hour.gap"))}</span>` : "";
   const html = `<div class="vhist checkup-cycling-chart" role="group" aria-label="${esc(t("hist.aria", t("check.cycling")))}"` +
     ` data-cycling="${esc(scope)}" data-tip="${esc(meta)}">` +

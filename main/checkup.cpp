@@ -903,20 +903,14 @@ logic::CheckupCyclingEvidence checkup_cycling_evidence() {
                                                        window.class_observed_s > 0);
 }
 
-logic::CheckupCyclingHours checkup_cycling_hours() {
-    if (!s_diagnostics_enabled.load(std::memory_order_acquire) || !s_mtx)
-        return logic::CheckupCyclingHours{};
-    Lock lk(s_mtx);
-    if (!lk.acquired() || s_reset_requested.load()) return logic::CheckupCyclingHours{};
-    expire_restored_locked();
+// The caller owns the checkup mutex and has expired the same window used by the report.
+[[gnu::noinline]] static logic::CheckupCyclingHours checkup_cycling_hours_locked(int64_t now_us) {
     auto hours = logic::checkup_cycling_hours(P().ring, s_cov.rps);
     if (!hours.count) return hours;
     hours.epoch              = s_cycling_hours_epoch;
     hours.newest_bucket      = s_cycling_newest_bucket;
     const auto&   ring       = P().ring;
     const size_t  oldest     = ring.count < logic::CHECKUP_COMPLETED_BUCKETS ? 0 : ring.head;
-    const size_t  first_live = ring.count - std::min<size_t>(ring.count, s_live_commit_count);
-    const int64_t now_us     = esp_timer_get_time();
     const int64_t pending_start_us =
         static_cast<int64_t>(hours.newest_bucket) * logic::CHECKUP_DT_S * 1000000LL;
     hours.pending_elapsed_s = logic::checkup_cycling_elapsed_s(pending_start_us, now_us);
@@ -928,18 +922,26 @@ logic::CheckupCyclingHours checkup_cycling_hours() {
     // The open hour and gaps without an observed end have no wall timestamp.
     for (size_t i = 0; i < ring.count; ++i) {
         const size_t slot = (oldest + i) % logic::CHECKUP_COMPLETED_BUCKETS;
-        if (s_slot_times.restored_end_unix_s[slot]) {
-            hours.end_unix_s[i] = s_slot_times.restored_end_unix_s[slot];
-        } else if (i >= first_live && s_slot_times.expiry_us[slot]) {
+        const uint32_t saved_end = s_slot_times.restored_end_unix_s[slot];
+        if (saved_end) {
+            hours.hours[i].restored = true;
+            if (saved_end != UINT32_MAX) hours.end_unix_s[i] = saved_end;
+        } else if (s_slot_times.expiry_us[slot]) {
+            // The per-slot deadline follows its actual hour through journal reconstruction.
             const int64_t end_us =
-                (static_cast<int64_t>(hours.bucket_at(i)) + 1) * logic::CHECKUP_DT_S * 1000000LL;
+                s_slot_times.expiry_us[slot] -
+                static_cast<int64_t>(logic::CHECKUP_RECORD_MAX_AGE_S) * 1000000LL;
             hours.end_unix_s[i] = logic::checkup_cycling_end_unix_s(end_us, now_us, unix_s, ms);
         }
     }
     return hours;
 }
 
-logic::CheckupReport checkup_report() {
+logic::CheckupReport checkup_report(logic::CheckupCyclingHours* hours) {
+    if (hours) {
+        hours->count = 0;
+        hours->epoch = 0;
+    }
     if (!s_diagnostics_enabled.load(std::memory_order_acquire)) return logic::CheckupReport{};
     if (!s_mtx) return logic::CheckupReport{};
     Lock lk(s_mtx);
@@ -949,6 +951,7 @@ logic::CheckupReport checkup_report() {
     if (s_reset_requested.load()) return logic::CheckupReport{};
     expire_restored_locked();
     const int64_t  now_us        = esp_timer_get_time();
+    if (hours) *hours = checkup_cycling_hours_locked(now_us);
     const bool     have_source   = s_source_last_us >= 0 && now_us >= s_source_last_us;
     const int64_t  source_gap_us = have_source ? now_us - s_source_last_us : 0;
     const uint32_t source_age_s =

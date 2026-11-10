@@ -219,6 +219,12 @@ mutations = [
      source_text.replace(entry, entry + "    consent_epoch = checkup_consent_epoch();\n"),
      "consent_caller_same_generation", "consent_epoch_discards_already_collected_sample"),
 ]
+restore_marker = "hours.hours[i].restored = true;"
+if source_text.count(restore_marker) != 1:
+    raise RuntimeError("Expected one restored cycling slot marker")
+mutations.append(("omit_restored_cycling_slot_marker",
+                  source_text.replace(restore_marker, "hours.hours[i].restored = false;"),
+                  "restored_expiry", "restored_chart_keeps_its_timestamp_and_readable_time"))
 expire_start = source_text.index("void checkup_stop_context_expire(int64_t) {")
 expire_end = source_text.index("\nCheckupStopContextReport checkup_stop_context_report()", expire_start)
 expire_body = source_text[expire_start:expire_end]

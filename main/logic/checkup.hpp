@@ -1998,6 +1998,7 @@ struct CheckupCyclingHour {
     uint16_t space_s    = 0;
     uint16_t dhw_s      = 0;
     uint8_t  starts     = 0;
+    bool     restored   = false;
 };
 
 struct CheckupCyclingHours {

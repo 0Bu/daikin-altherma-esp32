@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: 4efa603b7d7b65e5e3956d5b95a091b22bc7c315381e0ab7ab45b1572a21e969 -->
+<!-- user-docs-contract: 28067e8b699169d8dfe4676a66b717522d36f75aeaa98e48a8a77f928da26c7d -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default. Enable **Plant diagnostics** under **Settings → Firmware** to start an evidence
@@ -106,8 +106,9 @@ software restart preserves the remaining settling time, but unseen charging can 
 heating, domestic hot water (DHW), cooling or unclassified. In the 24-hour chart, each column puts
 the start count above a runtime bar. Select a column for its measurements and coverage. The bar
 separates heating, hot water and remaining runtime. Hatching marks elapsed time without compressor
-readings. The bars show hourly totals. The timing within each hour is unknown. Undated hours have
-relative labels.
+readings when the elapsed duration is known. Restored hours show their readable time with unknown
+elapsed duration. The bars show hourly totals. The timing within each hour is unknown. Undated hours
+have relative labels. A start counted when readings return can have happened during the gap.
 Unclassified run counts explain missing readings, transitions, handovers, journal boundaries and
 unwitnessed starts.
 

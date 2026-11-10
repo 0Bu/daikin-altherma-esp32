@@ -23063,9 +23063,11 @@ CheckupRestoreOut checkup_restore_reference(const CheckupRestoreCase& c) {
             else
                 out.dhw_retired = true;
             expiry = checkup_restore_expiry_us(rec->payload.end_unix_s, c.now_unix_s, c.now_us);
-            if (from_flash && rec->payload.end_unix_s <= UINT32_MAX)
+            if (from_flash) {
+                const int64_t end = rec->payload.end_unix_s;
                 out.times.restored_end_unix_s[out.ring.head] =
-                    static_cast<uint32_t>(rec->payload.end_unix_s);
+                    end > 0 && end < UINT32_MAX ? static_cast<uint32_t>(end) : UINT32_MAX;
+            }
         }
         out.times.expiry_us[out.ring.head] = expiry;
         out.ring.push(cb);
@@ -23226,7 +23228,7 @@ static void test_checkup_journal_rebuild_in_place() {
         const auto out = checkup_restore_in_place(c);
         CHECK(out.ring.count == 1 && out.ring.buf[0].starts == 3 &&
               out.times.expiry_us[0] > c.now_us);
-        CHECK(out.times.restored_end_unix_s[0] == (end == UINT32_MAX ? UINT32_MAX : 0u));
+        CHECK(out.times.restored_end_unix_s[0] == UINT32_MAX);
     }
 
     // Differential check against the former copy-clear-push restore over seeded random states.

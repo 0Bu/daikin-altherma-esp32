@@ -203,7 +203,7 @@ try {
       const cycling=doc.health.checks.find(check=>check.id==="cycling");
       assert.equal(cycling?.hours_epoch,17,name);
       assert.deepEqual(cycling.hours,[
-        {bucket:-1,end_unix_s:1999998000,starts:2,run_s:1200,observed_s:2700,space_s:600,dhw_s:300},
+        {bucket:-1,end_unix_s:1999998000,restored:true,starts:2,run_s:1200,observed_s:2700,space_s:600,dhw_s:300},
         cyclingWires.get(name),
       ],name);
       cyclingWires.delete(name);

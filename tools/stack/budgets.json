@@ -293,8 +293,8 @@
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?checkup_report\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?14checkup_report[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
       "max_bytes": 784
     },
-    "checkup_cycling_hours": {
-      "pattern": "^daik::checkup_cycling_hours\\(\\)$",
+    "checkup_cycling_hours_locked": {
+      "pattern": "^(?:daik::checkup_cycling_hours_locked\\(long long\\)(?: \\[clone .+\\])?|_ZN4daikL28checkup_cycling_hours_locked[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+)$",
       "max_bytes": 512
     },
     "history_flash_restore": {
@@ -2903,7 +2903,10 @@
         "mcp_post",
         "http_send_status_json",
         "status_serializer",
-        "checkup_report"
+        "checkup_report",
+        "cycling_expire",
+        "cycling_seal",
+        "cycling_crc"
       ],
       "multipliers": {},
       "base_bytes": 1536,
@@ -2913,7 +2916,10 @@
       "symbols": [
         "http_send_status_json",
         "status_serializer",
-        "checkup_report"
+        "checkup_report",
+        "cycling_expire",
+        "cycling_seal",
+        "cycling_crc"
       ],
       "multipliers": {},
       "base_bytes": 1536,
@@ -2924,10 +2930,8 @@
         "mcp_post",
         "http_send_status_json",
         "status_serializer",
-        "checkup_cycling_hours",
-        "cycling_expire",
-        "cycling_seal",
-        "cycling_crc",
+        "checkup_report",
+        "checkup_cycling_hours_locked",
         "room_time_now"
       ],
       "multipliers": {},
@@ -2938,10 +2942,8 @@
       "symbols": [
         "http_send_status_json",
         "status_serializer",
-        "checkup_cycling_hours",
-        "cycling_expire",
-        "cycling_seal",
-        "cycling_crc",
+        "checkup_report",
+        "checkup_cycling_hours_locked",
         "room_time_now"
       ],
       "multipliers": {},

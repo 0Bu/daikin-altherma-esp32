@@ -855,6 +855,8 @@ checkup_journal_choose(int64_t wanted, const CheckupJournalLiveSpan& live,
 
 struct CheckupJournalSlotTimes {
     int64_t  expiry_us[CHECKUP_COMPLETED_BUCKETS]           = {};
+    // Zero denotes a live hour or gap. The largest value marks a stored hour whose date is
+    // outside the HTTP timestamp range.
     uint32_t restored_end_unix_s[CHECKUP_COMPLETED_BUCKETS] = {};
 };
 
@@ -914,8 +916,9 @@ inline bool checkup_journal_rebuild(CheckupRing& ring, DhwLossRing& dhw,
             dhw_retired = dhw_retired || !keep_dhw;
             expiry_us[p] =
                 checkup_restore_expiry_us(c.stored->payload.end_unix_s, now_unix_s, now_us);
-            if (c.stored->payload.end_unix_s > 0 && c.stored->payload.end_unix_s <= UINT32_MAX)
-                restored_end_unix_s[p] = static_cast<uint32_t>(c.stored->payload.end_unix_s);
+            const int64_t end = c.stored->payload.end_unix_s;
+            restored_end_unix_s[p] =
+                end > 0 && end < UINT32_MAX ? static_cast<uint32_t>(end) : UINT32_MAX;
         } else {
             ring.buf[p]  = CheckupBucket{};
             dhw.buf[p]   = DhwLossBucket{};

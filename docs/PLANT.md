@@ -73,9 +73,10 @@ can restore only from compatible, dated history-journal records after clock sync
 diagnostics-consent generation, consumer-schema/method fingerprint and CRC
 ([identity contract](ARCHITECTURE.md#history-and-diagnosis-persistence)). DHW additionally binds the
 circulation configuration; a mismatch empties only its bucket, preserving independent X10A evidence.
-Old unscoped formats are rejected. A cached model guess cannot admit records. The core journal
-layout version also gates saved hours. Raw trends and the one-shot tank-cooling handoff have their
-own compatibility rules.
+Old unscoped formats are rejected. A cached model guess cannot admit records. Core journal layout 3
+requires independent heating and hot-water runtime. It rejects earlier core records in full,
+including their completed tank-cooling results. Raw trends, the independent Stop journal and the
+one-shot handoff of an unfinished tank-cooling window keep their own compatibility rules.
 
 **A software restart (any `esp_restart()`) tries to save the open hour.**
 Software restarts include:

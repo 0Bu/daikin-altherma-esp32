@@ -590,8 +590,11 @@ and value labels keep their defined share. Split Settings actions own their padd
 overlap when stacked. Measure every shipped locale at 320 px.
 
 The cycling disclosure uses one row of hourly columns with start counts above stacked runtime
-bars. The columns own pointer and keyboard selection and share one readout. Hatch only elapsed
-unread time. Leave the unelapsed part of the open hour unfilled.
+bars. The columns own pointer and keyboard selection and share one readout. Leave leading padding
+blank. Hatch elapsed time without compressor readings only where the elapsed duration is known.
+Restored slots show readable time with unknown elapsed duration. Leave the unelapsed part of the
+open hour unfilled. The default readout uses one hourly snapshot and omits runtime without
+readable compressor seconds.
 
 Use logical keyboard order, visible focus, Enter/Space activation, Escape at the innermost layer,
 modal focus return and scroll lock. Background controls are unavailable while a dialog is open.

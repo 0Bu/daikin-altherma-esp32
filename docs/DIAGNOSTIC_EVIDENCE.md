@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 7b059c2ecc9f7c1a9332b687300940453b08a9ec80b1c052c5b1d6401497539c -->
+<!-- diagnostic-evidence-contract: 1e6474ca9d918012d02570f0753c829f7a37f41875523afdf3db62c7764a9ec6 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -263,14 +263,14 @@ completed heating runs, from samples whose predecessor was also running, and cha
 The hourly chart counts compressor running intervals of at most 15 seconds separately from completed
 runs. Both endpoints must show the compressor running in the same heating or DHW class to assign
 that interval. The DHW route identifies DHW. Space heating requires the room circuit and reported
-heating mode. Other
-runtime, including confirmed defrost, stays unassigned. The chart can include parts of runs that
-start or finish outside the slot. Hatching covers only the elapsed time without readable compressor
-evidence. A positive count witnesses a start even before a readable interval accrues. A zero in a
-partly observed slot means no starts were observed during its readable portion.
-Older core journals cannot provide the packed independent mode totals. A fresh compatible hourly
-window starts filling after upgrade. The independent Stop journal and DHW restart handoff retain
-their own compatibility checks.
+heating mode. Other runtime, including confirmed defrost, stays unassigned. The chart can include
+parts of runs that start or finish outside the slot. A return to known ON after known OFF and
+unreadable samples in one continuous segment establishes a lower bound of one start. The recovering
+ON sample determines its slot. The time of the transition remains unknown. The open hour has a
+monotonic elapsed duration. Restored slots can include a short record and do not establish an
+elapsed duration from their readable seconds. See the
+[hourly API evidence](API.md#history-and-24-hour-checks) and the
+[core journal upgrade rules](PLANT.md#reboot-and-persistence).
 
 **Project boundary:** Twelve heating runs, ten minutes and the 90% evidence requirements are
 project heuristics, not limits copied from R1 or specified by Daikin. R1 studied different,

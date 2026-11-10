@@ -1860,6 +1860,49 @@
         "main/logic/checkup_persist.hpp": "cc66bd8e92d9613361594b19beb82dfa8e819109e2f2e60cc6648cd4c25abf37",
         "test/test_logic.cpp": "6e3d183762fee1e97e42acf0e3f608cc2bee6284b9f79d194d7a41e130da5fed"
       }
+    },
+    {
+      "runner": "scripts/run-mock-tests.sh --coverage compiler and gcov invocation on frozen source",
+      "base_commit": "04182812db596e7e8f4b7ad3f6b9eb47bba8b1c8",
+      "scope": "Integrated cycling logic and restore tests after separating stored-hour provenance from the presence of a usable wall timestamp.",
+      "sources": {
+        "main/logic/checkup.hpp": "dc70163faa1c8801831c6874341cf183f1d71338174e1c38c4cda574a2dfedd9",
+        "main/logic/checkup_persist.hpp": "743ddf96ddf18fc1f95d3813d17bf1e4fa063baa6522a0657c05168c09ea7736"
+      },
+      "test_source_sha256": "2dfad85da30ca00f9c4f610672ab8cfd621f5ef5c6b90da5edb2ed57e7e9ba63",
+      "measured_line_counts": {
+        "clang-17-darwin": {
+          "covered": 10933,
+          "executable": 11106
+        },
+        "gcc-13-linux-ubuntu24": {
+          "covered": 10407,
+          "executable": 10690
+        },
+        "gcc-15-github-linux-ubuntu26": {
+          "covered": 10399,
+          "executable": 10692
+        },
+        "gcc-15-linux-ubuntu26": {
+          "covered": 10403,
+          "executable": 10692
+        }
+      },
+      "raw_report_sha256": {
+        "clang-17-darwin": "e04904220ead2bbd8260742d59ff3517f618ec11777ffd8612434f27c37016e2",
+        "gcc-13-linux-ubuntu24": "b5583a74003e8da35c9af1487dbfa608ddb487c159ed5d36ccba68aba35d9993",
+        "gcc-15-github-linux-ubuntu26": "b745f00d228e86f6bf3d9821eef7678b19f8b08cbb9c394153bb2120e8286904",
+        "gcc-15-linux-ubuntu26": "c58aff9b6cb381bebb8c9e7a62aad74c3526dc085a4d3508a823ee95b572a227"
+      },
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2)",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+        "gcc-15-github-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+      },
+      "measurement_limits": [
+        "The local x86_64 Ubuntu 26.04 GCC image measures the hosted profile candidate. Authoritative GitHub confirmation remains separate."
+      ]
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",

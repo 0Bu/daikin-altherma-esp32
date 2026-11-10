@@ -405,9 +405,11 @@ void time_now(int64_t& seconds, int32_t& ms) {
     ms      = 0;
 }
 const char*                checkup_persist_state() { return "no_record"; }
-logic::CheckupReport       checkup_report() { return {}; }
-logic::CheckupCyclingHours checkup_cycling_hours() { return fixture::cycling_hours; }
-CheckupStopContextReport   checkup_stop_context_report() {
+logic::CheckupReport       checkup_report(logic::CheckupCyclingHours* hours) {
+    if (hours) *hours = fixture::cycling_hours;
+    return {};
+}
+CheckupStopContextReport checkup_stop_context_report() {
     ++fixture::stop_report_calls;
     return fixture::stop_report;
 }
@@ -485,7 +487,7 @@ int main(int argc, char** argv) {
         cycling_hours.end_unix_s[0] = 1'999'998'000;
         // An older restored hour has a negative bucket ID. Only parts of its observed runtime
         // are attributable to the two positively witnessed modes.
-        cycling_hours.hours[0] = {2700, 1200, 600, 300, 2};
+        cycling_hours.hours[0] = {2700, 1200, 600, 300, 2, true};
         for (const bool partial : {true, false}) {
             cycling_hours.pending_elapsed_s = partial ? 450 : 0;
             cycling_hours.hours[1] = partial ? daik::logic::CheckupCyclingHour{420, 180, 0, 60, 1}

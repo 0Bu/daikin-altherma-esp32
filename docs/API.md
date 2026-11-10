@@ -272,20 +272,23 @@ and blocks an assessment. Counter saturation or inconsistent cause totals also b
 legacy `mean_run_s` remains present as null. Transition/gap rules and limitations are in
 [DIAGNOSTIC_EVIDENCE.md](DIAGNOSTIC_EVIDENCE.md#diagnosis-cycling).
 
-`cycling.hours` contains up to 24 slots, oldest first. Each slot reports the observed
-`starts`, compressor `run_s` and readable compressor `observed_s`. The signed `bucket`
-identifies the slot within `boot_id` and `cycling.hours_epoch`. Source resets and
-journal restoration can start a new epoch. `end_unix_s` is the mapped or journaled end
-of a closed slot. Use relative order for undated or open slots. The open slot alone
-has `elapsed_s`, the monotonic seconds elapsed since its start, from 0 to 3600. For
-closed slots, the nominal duration is 3600 seconds. The difference between that
-duration or `elapsed_s` and `observed_s` is the unread time. The rest of an open hour
-has yet to elapse. `starts:0` with no readable time leaves the start count unknown,
-while a positive `starts` counts witnessed edges even without a readable duration.
-When `run_s` is positive, `space_s` and `dhw_s` report positively witnessed heating
-and hot-water runtime in the slot, including zero when no time could be assigned to
-that mode. The rest of `run_s` remains unassigned. Hourly runtime and starts measure
-different populations and cannot produce an average completed run.
+`cycling.hours` contains up to 24 slots, oldest first. The signed `bucket` identifies each
+slot within `boot_id` and `cycling.hours_epoch`. Source resets and journal restoration can start
+a new epoch. `end_unix_s` gives the mapped or journaled end when known. The open slot alone
+has `elapsed_s`, the monotonic seconds since its start, from 0 to 3600. `restored:true`
+identifies a saved slot whose original elapsed duration is unknown. It may be a short record
+saved at restart. Other closed slots use a nominal 3600 seconds. Infer missing time from
+`observed_s` only when the elapsed duration is known.
+
+`starts` counts starts established by the available readings. Within a continuous segment,
+known OFF followed by missing readings and a return to known ON establishes at least one start.
+That count is assigned to the recovering ON sample's slot. The start time is unknown. With no
+counted start and no readable compressor time, the slot has no start evidence. `observed_s`
+reports readable compressor seconds. Without them, `run_s:0` establishes no runtime. When
+`run_s` is positive, `space_s` and `dhw_s` report positively witnessed heating and hot-water
+runtime, including zero when no time could be assigned to that mode. The rest of `run_s` remains
+unassigned. Hourly runtime and starts measure different populations and cannot produce an
+average completed run.
 
 `cycling.stop_context` is an independent observation object; it changes no legacy cycling field or
 verdict. `denominator` names `witnessed_stops_recent_heating`, the separately counted witnessed

@@ -358,11 +358,11 @@ assert.match(persistRebuild,
   /const size_t p = \(start \+ j\) % kSlots; restored_end_unix_s\[p\] = 0;/,
   "unrestored slots start without a stored wall time");
 assert.match(persistRebuild,
-  /restored_end_unix_s\[p\] = static_cast<uint32_t>\(c\.stored->payload\.end_unix_s\);/,
+  /const int64_t end = c\.stored->payload\.end_unix_s; restored_end_unix_s\[p\] = end > 0 && end < UINT32_MAX \? static_cast<uint32_t>\(end\) : UINT32_MAX;/,
   "a restored interval takes its own saved wall time");
 assert.match(cFlash, /s_persist_verdict = logic::CheckupRestore::Flash;/);
 assert.doesNotMatch(cFlash, /s_persist_verdict = logic::CheckupRestore::Accept/);
-assert.match(body(checkup, "logic::CheckupReport checkup_report()"), /expire_restored_locked\(\);/);
+assert.match(body(checkup, "logic::CheckupReport checkup_report("), /expire_restored_locked\(\);/);
 assert.match(body(checkup, "void expire_restored_locked()"), /checkup_restored_expired/);
 const cRecord = body(checkup, "void checkup_record(");
 assert.match(cRecord, /if \(profile_confirmed\) s_cov = coverage;/,
@@ -379,7 +379,9 @@ assert.match(cRecord, /s_slot_times\.expiry_us\[slot\] = 0; s_slot_times\.restor
 assert.match(body(checkup, "void expire_restored_locked()"),
   /s_slot_times\.expiry_us\[i\] = 0; s_slot_times\.restored_end_unix_s\[i\] = 0;/,
   "an expired interval can no longer label a chart hour");
-const cReport = body(checkup, "logic::CheckupReport checkup_report()");
+const cReport = body(checkup, "logic::CheckupReport checkup_report(");
+assert.match(cReport, /Lock lk\(s_mtx\);.*expire_restored_locked\(\);.*if \(hours\) \*hours = checkup_cycling_hours_locked\(now_us\);/,
+  "cycling hours and the judged diagnosis share the same admitted snapshot");
 assert.match(cReport, /source_fresh \? s_fault_now : FaultClass::Unknown/,
   "the last cycle's fault class must not masquerade as a current observation after a stall");
 assert.match(cReport, /logic::checkup_apply_freshness\(report, source_fresh, source_age_s, span_s\);/,

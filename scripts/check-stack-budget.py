@@ -870,17 +870,18 @@ def validate_http_stack(budgets: dict[str, Any], source: str) -> None:
 
 def validate_status_diagnosis_paths(budgets: dict[str, Any], sources: dict[str, str]) -> None:
     """Keep diagnosis frames on their actual HTTP callers."""
-    # Expiry/sealing and wall-clock lookup are separate calls. Charge both to bound the snapshot.
-    cycling_hours = ["http_send_status_json", "status_serializer", "checkup_cycling_hours",
-                     "cycling_expire", "cycling_seal", "cycling_crc", "room_time_now"]
+    report = ["http_send_status_json", "status_serializer", "checkup_report"]
+    # The report frame remains active in either descendant. Expiry and the dated snapshot run
+    # sequentially, so their frames do not overlap.
+    expiry = [*report, "cycling_expire", "cycling_seal", "cycling_crc"]
+    cycling_hours = [*report, "checkup_cycling_hours_locked", "room_time_now"]
     expected = {
         "httpd_mcp_status": ["mcp_post", "http_send_status_json", "status_serializer",
                              "double_string", "dynamic_double_string"],
         "httpd_direct_status": ["http_send_status_json", "status_serializer",
                                 "double_string", "dynamic_double_string"],
-        "httpd_mcp_checkup": ["mcp_post", "http_send_status_json", "status_serializer",
-                              "checkup_report"],
-        "httpd_direct_checkup": ["http_send_status_json", "status_serializer", "checkup_report"],
+        "httpd_mcp_checkup": ["mcp_post", *expiry],
+        "httpd_direct_checkup": expiry,
         "httpd_mcp_cycling_hours": ["mcp_post", *cycling_hours],
         "httpd_direct_cycling_hours": cycling_hours,
         "httpd_mcp_health_number": ["mcp_post", "http_send_status_json", "status_serializer",
@@ -895,27 +896,46 @@ def validate_status_diagnosis_paths(budgets: dict[str, Any], sources: dict[str, 
             raise BudgetError(f"diagnosis status path {name}: HTTP caller/report accounting changed")
     report_paths = {name for name, rule in budgets["paths"].items()
                     if "checkup_report" in rule["symbols"]}
-    if report_paths != {"httpd_mcp_checkup", "httpd_direct_checkup"}:
+    hour_names = {"httpd_mcp_cycling_hours", "httpd_direct_cycling_hours"}
+    if report_paths != {"httpd_mcp_checkup", "httpd_direct_checkup"} | hour_names:
         raise BudgetError("diagnosis status paths: checkup_report belongs to HTTP, not polling")
     hour_paths = {name for name, rule in budgets["paths"].items()
-                  if "checkup_cycling_hours" in rule["symbols"]}
-    if hour_paths != {"httpd_mcp_cycling_hours", "httpd_direct_cycling_hours"}:
+                  if "checkup_cycling_hours_locked" in rule["symbols"]}
+    if hour_paths != hour_names:
         raise BudgetError("diagnosis status paths: cycling hour snapshot belongs to HTTP, not polling")
     code = {name: re.sub(r"/\*.*?\*/|//[^\n]*", "", sources[name], flags=re.S)
             for name in ("main/http_status.cpp", "main/mcp_server.cpp", "main/hp_poll.cpp")}
     status = code["main/http_status.cpp"]
     if (len(re.findall(r"\bcheckup_report\s*\(", status)) != 1
-            or not re.search(r"const logic::CheckupReport hr\s*=\s*checkup_report\(\);", status)
-            or len(re.findall(r"\bcheckup_cycling_hours\s*\(", status)) != 1
-            or not re.search(r"const auto hrs\s*=\s*checkup_cycling_hours\(\);", status)
+            or not re.search(r"logic::CheckupCyclingHours\s+hrs\{\};\s*"
+                             r"const logic::CheckupReport hr\s*=\s*checkup_report\(&hrs\);", status)
+            or re.search(r"\bcheckup_cycling_hours(?:_locked)?\s*\(", status)
             or len(re.findall(r"\bappend_status_json\(out, redact\)", status)) != 1
             or not re.search(r"return http_send_status_json\(req, \{\}, \{\}, redact\);", status)
             or len(re.findall(r"\bhttp_send_status_json\s*\(", code["main/mcp_server.cpp"])) != 1
             or not re.search(r"return http_send_status_json\(req, response, suffix, false\);",
                              code["main/mcp_server.cpp"])
-            or re.search(r"\b(?:checkup_report|checkup_cycling_hours|http_send_status_json)\s*\(",
-                         code["main/hp_poll.cpp"])):
+            or re.search(r"\bhttp_send_status_json\s*\(", code["main/hp_poll.cpp"])
+            or any(re.search(r"\b(?:checkup_report|checkup_cycling_hours(?:_locked)?)\s*\(",
+                             stack_source_code(text))
+                   for path, text in sources.items()
+                   if path.endswith(".cpp") and path not in {"main/checkup.cpp", "main/http_status.cpp"})):
         raise BudgetError("diagnosis status source: direct/MCP-only serializer caller contract changed")
+    checkup = stack_source_code(sources["main/checkup.cpp"])
+    report_body = stack_function_body(checkup, "checkup_report")
+    hours_body = stack_function_body(checkup, "checkup_cycling_hours_locked")
+    if (len(re.findall(r"\bcheckup_report\s*\(", checkup)) != 1
+            or len(re.findall(r"\bcheckup_cycling_hours_locked\s*\(", checkup)) != 2
+            or not re.search(r"\[\[gnu::noinline\]\]\s+static logic::CheckupCyclingHours "
+                             r"checkup_cycling_hours_locked\(int64_t now_us\)", checkup)
+            or not re.search(r"\bLock\s+lk\(s_mtx\);[\s\S]*?\bexpire_restored_locked\(\);\s*"
+                             r"const int64_t\s+now_us\s*=\s*esp_timer_get_time\(\);\s*"
+                             r"if \(hours\)\s+\*hours\s*=\s*checkup_cycling_hours_locked\(now_us\);",
+                             report_body)
+            or len(re.findall(r"\bexpire_restored_locked\s*\(", report_body)) != 1
+            or len(re.findall(r"\btime_now\s*\(", hours_body)) != 1
+            or re.search(r"\bexpire_restored_locked\s*\(", hours_body)):
+        raise BudgetError("diagnosis status source: nested snapshot and separate expiry path changed")
     if (len(re.findall(r"\bnum\s*\(", status)) != 37
             or not re.search(r"auto num = \[&j\]\(const char\* name, int v\) "
                              r"__attribute__\(\(noinline\)\)\s*\{", status)
@@ -2707,8 +2727,8 @@ def self_test() -> None:
      'daik::hp_query_detailed(unsigned char, daik::Protocol, unsigned char*, unsigned int, daik::HpQueryLogPolicy)': 64,
      'daik::hp_format(daik::ValueDef const&, unsigned char const*, int, int, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >&, daik::ValueDef const*, unsigned int, daik::SaturationWitness)': 64,
      'daik::history_record(daik::CachedValue const*, unsigned int, unsigned long)': 64,
-     'daik::checkup_report()': 64,
-     'daik::checkup_cycling_hours()': 256,
+     'daik::checkup_report(daik::logic::CheckupCyclingHours*)': 64,
+     'daik::checkup_cycling_hours_locked(long long)': 256,
      'daik::checkup_reset_on_detect(char const*, unsigned long)': 64,
      'daik::logic::checkup_model_fingerprint(char const*, daik::logic::ProfileView const&)': 64,
      'daik::logic::checkup_schema_row_fingerprint(daik::logic::ProfileView const&, daik::ValueDef const&)': 32,
@@ -3385,8 +3405,10 @@ def self_test() -> None:
     assert selected["status_serializer"] == 4848
     assert selected["path:httpd_mcp_status"] == 8192
     assert selected["path:httpd_direct_status"] == 6960
-    assert selected["path:httpd_mcp_checkup"] == 7808
-    assert selected["path:httpd_direct_checkup"] == 6576
+    assert selected["path:httpd_mcp_checkup"] == 7920
+    assert selected["path:httpd_direct_checkup"] == 6688
+    assert selected["path:httpd_mcp_cycling_hours"] == 8112
+    assert selected["path:httpd_direct_cycling_hours"] == 6880
     assert selected["path:httpd_mcp_health_number"] == 7840
     assert selected["path:httpd_direct_health_number"] == 6608
     assert selected["ota_task"] == 2608
@@ -3565,12 +3587,17 @@ def self_test() -> None:
         retirement_controls += 1
 
     status_sources = {path: (REPO / path).read_text(encoding="utf-8")
-                      for path in ("main/http_status.cpp", "main/mcp_server.cpp", "main/hp_poll.cpp")}
+                      for path in ("main/http_status.cpp", "main/mcp_server.cpp", "main/hp_poll.cpp",
+                                   "main/checkup.cpp")}
     validate_status_diagnosis_paths(budgets, status_sources)
     diagnosis_controls = 0
     for name, member in (("httpd_direct_checkup", "checkup_report"),
                          ("httpd_mcp_checkup", "checkup_report"),
-                         ("httpd_direct_cycling_hours", "checkup_cycling_hours"),
+                         ("httpd_mcp_checkup", "cycling_expire"),
+                         ("httpd_direct_checkup", "cycling_crc"),
+                         ("httpd_direct_cycling_hours", "checkup_report"),
+                         ("httpd_mcp_cycling_hours", "checkup_report"),
+                         ("httpd_direct_cycling_hours", "checkup_cycling_hours_locked"),
                          ("httpd_mcp_cycling_hours", "room_time_now"),
                          ("httpd_mcp_checkup", "http_send_status_json"),
                          ("httpd_mcp_status", "http_send_status_json"),
@@ -3598,9 +3625,14 @@ def self_test() -> None:
     diagnosis_controls += 1
     for name, before, after in (
         ("main/http_status.cpp", "return http_send_status_json(req, {}, {}, redact);", "return ESP_FAIL;"),
+        ("main/http_status.cpp", "checkup_report(&hrs)", "checkup_report(nullptr)"),
         ("main/mcp_server.cpp", "return http_send_status_json(req, response, suffix, false);", "return ESP_FAIL;"),
         ("main/hp_poll.cpp", "static void poll_task(void*) {",
          "static void poll_task(void*) { checkup_report();"),
+        ("main/checkup.cpp", "[[gnu::noinline]] static logic::CheckupCyclingHours",
+         "static logic::CheckupCyclingHours"),
+        ("main/checkup.cpp", "if (hours) *hours = checkup_cycling_hours_locked(now_us);",
+         "if (hours) *hours = {};"),
     ):
         changed = dict(status_sources)
         changed[name] = changed[name].replace(before, after)
