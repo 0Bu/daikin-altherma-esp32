@@ -395,7 +395,8 @@ void pending_expiry() {
 }
 void restored_expiry() {
     boot();
-    auto                     cov = coverage();
+    auto cov = coverage();
+    cov.rps  = true;
     std::vector<CachedValue> rows{fault(0, 0), fault(1, 0), row(CHECKUP_LOC_PRESSURE, "1.5")};
     sample(100, rows, cov);
     CheckupFlashRecord record{};
@@ -410,28 +411,118 @@ void restored_expiry() {
         adapter::cfg.circulation_power_path.c_str(), adapter::cfg.circulation_time_path.c_str(),
         adapter::cfg.circulation_max_age_s, adapter::cfg.circulation_on_tenths_w,
         adapter::cfg.circulation_off_tenths_w, adapter::cfg.circulation_confirm_s);
-    const int64_t now        = adapter::unix_origin + 100;
-    p.end_unix_s             = now - 22 * 3600;
+    // Restore between polls with an admitted interval five seconds inside the horizon.
+    sdk::now_us              = 120'000'000;
+    const int64_t now        = adapter::unix_origin + 120;
+    p.end_unix_s             = now - (CHECKUP_RECORD_MAX_AGE_S - 5);
     record.bucket            = checkup_journal_bucket(p.end_unix_s);
-    p.checkup.covered_s      = 3600;
-    p.checkup.bar_observed_s = 3600;
+    p.checkup.covered_s      = 1200;
+    p.checkup.bar_observed_s = 1200;
     p.checkup.min_bar        = 9;
     p.checkup.flags          = CHECKUP_F_FAULT;
+    p.checkup.rps_observed_s = 1200;
+    p.checkup.starts         = 1;
     require(checkup_flash_restore(&record, 1, now) == CheckupFlashRestoreResult::Restored,
             "synthetic_record_admitted_by_real_restore");
     require(std::strcmp(checkup_persist_state(), "flash") == 0, "real_restore_provenance_slug");
+    const auto restored = checkup_report();
+    require(restored.span_s == CHECKUP_WINDOW_S - 5 && !restored.full_span,
+            "restore_span_excludes_duplicate_elapsed_gap");
+    sample(121, rows, cov, true, false);
+    sample(122, rows, cov, true, true);
+    sample(123, rows, cov, true, true);
     adapter::unix_origin -= 30LL * 86400; // later wall-clock correction cannot rejuvenate the slot
-    const int64_t deadline = 100000000LL + 3600LL * 1000000;
+    const int64_t deadline = 125'000'000;
     sdk::now_us            = deadline - 1;
-    auto before            = checkup_report();
+    CheckupCyclingHours hours;
+    const auto          takes_before = sdk::takes;
+    auto                before       = checkup_report(&hours);
+    require(sdk::takes == takes_before + 1, "report_and_restored_chart_use_one_lock");
+    require(hours.count > 2 && hours.hours[0].provenance == CheckupCyclingSlot::Restored &&
+                hours.hours[0].observed_s == 1200 &&
+                hours.end_unix_s[0] == static_cast<uint32_t>(p.end_unix_s) &&
+                hours.hours[hours.count - 1].provenance == CheckupCyclingSlot::Ordinary,
+            "restored_chart_keeps_its_timestamp_and_readable_time");
+    const auto old_id = hours.bucket_at(0);
     require(before[CheckupCheck::Pressure].a == 9 &&
                 before[CheckupCheck::Fault].verdict == CheckupVerdict::Info,
             "restored_finding_before_exact_deadline");
     sdk::now_us = deadline;
-    auto after  = checkup_report();
+    auto after  = checkup_report(&hours);
+    require(hours.count > 2 && hours.bucket_at(0) == old_id &&
+                hours.hours[0].provenance == CheckupCyclingSlot::Expired &&
+                hours.end_unix_s[0] == 0 && hours.hours[0].observed_s == 0 &&
+                hours.hours[0].run_s == 0 && hours.hours[0].starts == 0,
+            "expired_restored_slot_is_blank_beside_newer_evidence");
+    require(hours.hours[1].provenance == CheckupCyclingSlot::Ordinary &&
+                hours.hours[1].observed_s == 0 && hours.end_unix_s[1] == 0 &&
+                hours.hours[hours.count - 1].observed_s == 2,
+            "expiry_preserves_ordinary_gap_and_newer_observation");
     require(after[CheckupCheck::Pressure].a == 15 &&
                 after[CheckupCheck::Fault].verdict != CheckupVerdict::Info,
             "restored_expires_without_producer");
+    sample(CHECKUP_DT_S, rows, cov, true, true);
+    checkup_report(&hours);
+    require(hours.count > 1 && hours.bucket_at(0) > old_id &&
+                hours.hours[hours.count - 2].observed_s == 2,
+            "slot_overwrite_advances_the_window");
+    for (size_t i = 0; i < hours.count; ++i)
+        require(hours.hours[i].provenance == CheckupCyclingSlot::Ordinary,
+                "slot_overwrite_retires_expiry_marker");
+}
+void late_restore(bool clock_behind) {
+    // Cross a wall-hour boundary during the new monotonic hour. A saved wall label can then
+    // appear after the last live completed label without being in the future of the wall clock.
+    const int64_t hour   = CHECKUP_DT_S;
+    adapter::unix_origin = adapter::unix_origin / hour * hour + hour - 10;
+    boot();
+    const auto                     cov = coverage();
+    const std::vector<CachedValue> rows{row(CHECKUP_LOC_VALVE, "1")};
+    sample(3591, rows, cov);
+    sample(3596, rows, cov, true, true);
+    sample(3601, rows, cov, true, true);
+    int64_t               live_bucket = INT64_MIN;
+    CheckupJournalPayload live;
+    require(checkup_flash_next(adapter::unix_origin + 3601, INT64_MIN, live_bucket, live) &&
+                live.checkup.starts == 1 && live.checkup.dhw_runs == 0,
+            "fixture_run_crosses_monotonic_hour");
+
+    if (clock_behind) adapter::unix_origin -= hour;
+    const int64_t last_sample = clock_behind ? 3606 : 3621;
+    for (int64_t t = 3606; t <= last_sample; t += 5) sample(t, rows, cov, true, true);
+    const int64_t now       = adapter::unix_origin + last_sample;
+    const int64_t older_end = (clock_behind ? checkup_journal_bucket(now) : live_bucket) * hour - 1;
+    CheckupFlashRecord saved[]{{checkup_journal_bucket(older_end), live}, {live_bucket + 1, live}};
+    saved[0].payload.end_unix_s             = older_end;
+    saved[0].payload.checkup.starts         = 2;
+    saved[0].payload.checkup.rps_observed_s = 30;
+    saved[1].payload.end_unix_s             = (live_bucket + 1) * hour + 1;
+    saved[1].payload.checkup.starts         = 7;
+    saved[1].payload.checkup.rps_observed_s = 30;
+    const auto          restored            = checkup_flash_restore(saved, std::size(saved), now);
+    CheckupCyclingHours hours;
+    checkup_report(&hours);
+    if (clock_behind) {
+        require(restored == CheckupFlashRestoreResult::Ignored && hours.count == 2 &&
+                    hours.hours[0].provenance == CheckupCyclingSlot::Ordinary &&
+                    hours.hours[0].starts == 1,
+                "late_restore_keeps_live_when_clock_cannot_date_tail");
+        return;
+    }
+    require(restored == CheckupFlashRestoreResult::Restored && hours.count == 3 &&
+                hours.hours[0].provenance == CheckupCyclingSlot::Restored &&
+                hours.hours[0].starts == 2 &&
+                hours.hours[1].provenance == CheckupCyclingSlot::Ordinary &&
+                hours.hours[1].starts == 1,
+            "late_restore_admits_only_older_prefix");
+
+    sample(3626, rows, cov);
+    int64_t               revised = INT64_MIN;
+    CheckupJournalPayload replay;
+    require(checkup_flash_next(adapter::unix_origin + 3626, live_bucket, revised, replay) &&
+                revised == live_bucket && replay.checkup.starts == 1 &&
+                replay.checkup.dhw_runs == 1,
+            "late_restore_replays_completion_in_live_start_hour");
 }
 CheckupReport consent_reenabled_report;
 uint32_t      consent_restore_generation = 25;
@@ -731,6 +822,8 @@ int main(int argc, char** argv) {
             pending_expiry();
         else if (name == "restored_expiry")
             restored_expiry();
+        else if (name == "late_restore_prefix" || name == "late_restore_clock_behind")
+            late_restore(name == "late_restore_clock_behind");
         else if (name.rfind("consent_lock_", 0) == 0 || name.rfind("consent_sampling_", 0) == 0 ||
                  name.rfind("consent_caller_", 0) == 0)
             consent_staged_sample(name);

@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { launchBrowser } from "../tools/browser/cdp_browser.mjs";
 import { startFixtureServer } from "../tools/browser/fixture_server.mjs";
 import { assertHistoryMotion, HISTORY_MOTION_MUTATIONS } from "./test_browser_history_motion.mjs";
+import { assertCyclingChart } from "./test_browser_cycling.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const pageFile = process.env.DAIKIN_BROWSER_PAGE;
@@ -103,6 +104,8 @@ const layoutAudit = `(() => {
   for (const el of candidates) {
     if (!shown(el)) continue;
     const style = getComputedStyle(el);
+    if (el.matches('[data-dashboard-card="diagnosis"] .vrow-label') &&
+        style.textOverflow === "ellipsis" && el.title === el.textContent.trim()) continue;
     const clipsX = ["hidden", "clip"].includes(style.overflowX);
     const clipsY = ["hidden", "clip"].includes(style.overflowY);
     if ((clipsX && el.scrollWidth > el.clientWidth + 1) ||
@@ -1213,6 +1216,32 @@ async function captureNativeEvidence(page, context, target = "valueGroups", ance
     Buffer.from(capture.data, "base64"));
 }
 
+async function assertDiagnosisSummaryRows(page, context) {
+  const layout = await page.evaluate(`(() => {
+    const card = document.querySelector('[data-dashboard-card="diagnosis"]');
+    const rows = Array.from(card.querySelectorAll('button.vrow-desc'));
+    const invalid = rows.flatMap(row => {
+      const bounds = row.getBoundingClientRect();
+      const label = row.querySelector('.vrow-label').getBoundingClientRect();
+      const end = row.querySelector('.vrow-end').getBoundingClientRect();
+      const value = row.querySelector('.vrow-val');
+      const box = value.getBoundingClientRect();
+      const range = document.createRange();
+      range.selectNodeContents(value);
+      const fragments = Array.from(range.getClientRects()).filter(rect => rect.width && rect.height);
+      const wrapped = fragments.some(rect => Math.abs(rect.top - fragments[0].top) > 2);
+      const clipped = fragments.some(rect => rect.left < box.left - 1 || rect.right > box.right + 1);
+      const separateLine = label.bottom <= end.top || end.bottom <= label.top;
+      const overflow = end.right > bounds.right + 1 || label.left < bounds.left - 1;
+      return !fragments.length || wrapped || clipped || separateLine || overflow
+        ? [{ id: row.dataset.desc, value: value.innerText, wrapped, clipped, separateLine, overflow }] : [];
+    });
+    return { count: rows.length, invalid };
+  })()`);
+  assert.ok(layout.count > 0, `${context}: diagnosis summary must render`);
+  assert.deepEqual(layout.invalid, [], `${context}: complete diagnosis readings must fit beside their labels`);
+}
+
 async function assertPlantDiagnosis(page, context) {
   // Exercise the shipped renderer with independently scoped observations, including a real zero,
   // an absent heater channel and stale-source evidence. These fixtures do not certify a plant.
@@ -1230,19 +1259,22 @@ async function assertPlantDiagnosis(page, context) {
       status: "info", full_span: true, span_s: 86400, source_fresh: true, source_age_s: 1,
       available: 8, assessable: 2, evaluated: 2,
       checks: [
-        { id: "fault", verdict: "ok", evidence: "manufacturer", active: 0 },
+        { id: "fault", verdict: "info", evidence: "manufacturer", active: 0 },
         { id: "dhw_loss", verdict: "info", evidence: "heuristic", max_k_h: 1,
           windows: 4, high_windows: 1, high_with_pump: 1, high_pump_off: 0,
           quiet_high_windows: 1, draw_windows: 1, pump_windows: 2,
           observed_s: 14285, required_s: 3600, circulation_known_s: 14285,
           circulation_on_s: 3600, aborts: 3, abort_reasons: ["charge", "blind"],
           best_aborted_s: 2400 },
-        { id: "cycling", verdict: "ok", evidence: "observation", reason: "class_unavailable",
-          starts: 17, mean_run_s: null, space_runs: null, censored_runs: 3,
-          observed_s: 77760, required_s: 77760,
+        { id: "cycling", verdict: "ok", evidence: "observation", reason: "class_population_incomplete",
+          starts: 17, mean_run_s: null, space_runs: 12, space_mean_run_s: 960,
+          dhw_runs: 2, dhw_mean_run_s: 900, censored_runs: 3,
+          observed_s: 77760, required_s: 77760, classified_runtime_s: 5400, censored_runtime_s: 600,
+          hours_epoch: 1,
           hours: [
-            { starts: 2, run_s: 1800, observed_s: 3600 },
-            { starts: 1, run_s: 900, observed_s: 3600, space_s: 900, dhw_s: 0 }
+            { bucket: 0, starts: 2, run_s: 1800, observed_s: 3600, space_s: 0, dhw_s: 0 },
+            { bucket: 1, starts: 1, run_s: 900, observed_s: 1800, elapsed_s: 1800,
+              space_s: 900, dhw_s: 0 }
           ],
           stop_context: {
             confirmed: true, readable_s: 3600, observed_hours: 2, dated: false,
@@ -1266,10 +1298,10 @@ async function assertPlantDiagnosis(page, context) {
           observed_s: 77760, required_s: 77760 },
         { id: "flow", verdict: "ok", evidence: "observation", min_l_min: 10.7,
           observed_s: 60, required_s: 0 },
-        { id: "heater", verdict: "ok", evidence: "observation", buh_s: 59,
-          bsh_s: null, buh_observed_s: 7200, bsh_observed_s: 0,
-          observed_s: 7200, required_s: 0 },
-        { id: "retries", verdict: "ok", evidence: "experimental", seen: 0,
+        { id: "heater", verdict: "ok", evidence: "observation", buh_s: 43200,
+          bsh_s: 64800, buh_observed_s: 72000, bsh_observed_s: 72000,
+          observed_s: 72000, required_s: 0 },
+        { id: "retries", verdict: "info", evidence: "experimental", seen: 1,
           observed_s: 7200, required_s: 0 }
       ]
     };
@@ -1282,8 +1314,24 @@ async function assertPlantDiagnosis(page, context) {
     assert.equal(await page.evaluate(`document.querySelectorAll(${JSON.stringify(selector)}).length`), 8,
       `${context}: all eight diagnosis rows must render`);
     await activateDashboardCardForSelector(page, "[data-desc='model:health_pressure']");
+    await assertDiagnosisSummaryRows(page, `${context}/compact-summary`);
     await captureNativeEvidence(page, `${context}/overview`,
       "[data-desc='model:health_pressure']", ".card");
+    await page.evaluate(`(() => {
+      window.__browserDiagnosisSummaryOriginal = S.status.health.checks;
+      S.status.health.checks = structuredClone(S.status.health.checks);
+      S.status.health.checks[0].active = null;
+      Object.assign(S.status.health.checks[6], { buh_s: 59, bsh_s: null, bsh_observed_s: 0 });
+      Object.assign(S.status.health.checks[7], { verdict: "ok", seen: 0 });
+      renderApp();
+      return true;
+    })()`);
+    try {
+      await assertDiagnosisSummaryRows(page, `${context}/compact-unconfirmed`);
+    } finally {
+      await page.evaluate(`S.status.health.checks = window.__browserDiagnosisSummaryOriginal;
+        delete window.__browserDiagnosisSummaryOriginal; renderApp(); true`);
+    }
     const selectors = await page.evaluate(`Array.from(document.querySelectorAll(${JSON.stringify(selector)}),
       el => '[data-desc="' + el.dataset.desc + '"]')`);
     selectors.push("[data-desc='service:refrigerant']");
@@ -1305,64 +1353,71 @@ async function assertPlantDiagnosis(page, context) {
     assert.equal(blocks.length, 9, `${context}: include the independent refrigerant observation`);
     const normalLabel = await page.evaluate("t('normal.label')");
     for (const block of blocks) {
+      if (block.id === "model:health_cycling") continue;
       assert.equal(block.count, 3, `${context}/${block.id}: exactly three blocks`);
       assert.equal(block.firstValue, 'vdesc-n', `${context}/${block.id}: value first`);
       assert.equal(block.normal, normalLabel, `${context}/${block.id}: Normal last`);
       assert.ok(block.text.every(text => text.trim()), `${context}/${block.id}: no empty block`);
     }
-    const stopText = () => page.evaluate(`document.querySelector("[data-desc='model:health_cycling']")
-      .closest('.vitem').innerText`);
+    const cyclingDetail = () => page.evaluate(`(() => {
+      const row = document.querySelector("[data-desc='model:health_cycling']").closest(".vitem");
+      const body = row.querySelector(".vdesc-body");
+      return {
+        total: body.querySelector(".checkup-cycling-total")?.textContent,
+        assessment: body.querySelector(".checkup-cycling-assessment")?.textContent,
+        rows: Array.from(body.querySelectorAll(".checkup-cycling-grid .inspect-row"),
+          run => Array.from(run.children, cell => cell.textContent)),
+        historyText: body.querySelector("[data-checkup-hours]")?.innerText,
+        oldStopBox: !!body.querySelector(".checkup-stop-box"),
+      };
+    })()`);
     assert.equal(await page.evaluate(`document.querySelectorAll(".checkup-cycling-chart").length`), 1,
       `${context}: cycling chart must render when starts exist`);
-    assert.equal(await page.evaluate(`document.querySelectorAll(".checkup-chart-col").length`), 24,
-      `${context}: cycling chart must render all 24 hour columns`);
+    assert.equal(await page.evaluate(`document.querySelectorAll(".checkup-chart-cols > .checkup-chart-col").length`),
+      24, `${context}: one cycling column for each hour`);
     const [neutral, heating] = await page.evaluate(`Array.from(document.querySelectorAll(
-      ".checkup-chart-col:not(.unobserved)"), col => ({ tip: col.dataset.tip,
-        color: getComputedStyle(col.querySelector('i')).backgroundColor }))`);
-    assert.ok(!neutral.tip.includes("Ø") && !neutral.tip.endsWith(await page.evaluate("t('mode.heat')")),
-      `${context}: unclassified runtime displays without a guessed mode or run average`);
-    assert.ok(heating.tip.endsWith(await page.evaluate("t('mode.heat')")),
-      `${context}: matched heating runtime retains its mode`);
-    assert.notEqual(neutral.color, heating.color, `${context}: unclassified bar has a neutral color`);
-    const stopPopulation = await page.evaluate("t('check.stop.population', '4')");
-    assert.ok((await stopText()).includes(stopPopulation),
-      `${context}: measured starts and the timeline retain the independent stop context`);
+      ".checkup-chart-cols > button"), col => ({
+        parts: Array.from(col.querySelectorAll("s > i"), part => part.className),
+        color: getComputedStyle(col.querySelector("s > i")).backgroundColor,
+        label: col.getAttribute("aria-label")
+      }))`);
+    assert.deepEqual(neutral.parts, ["other"], `${context}: unassigned runtime has its own segment`);
+    assert.doesNotMatch(neutral.label, /Ø/, `${context}: hourly runtime carries no completed-run mean`);
+    assert.deepEqual(heating.parts, ["space"], `${context}: witnessed heating retains its mode`);
+    assert.notEqual(neutral.color, heating.color, `${context}: unassigned and heating runtime differ visually`);
+    const cycling = await cyclingDetail();
+    assert.equal(cycling.total, "≥" + await page.evaluate("t('check.starts', 17)"),
+      `${context}: the total is separate from completed runs`);
+    const cyclingCopy = await page.evaluate(`[
+      [t("mode.heat"), t("check.cycling.runs", 12) + " · " + t("check.cycling.mean", "16 min")],
+      [t("mode.dhw"), t("check.cycling.runs", 2) + " · " + t("check.cycling.mean", "15 min")],
+      [t("check.cycling.unclear"), t("check.cycling.runs", 3)],
+      t("check.cycling.assessment") + " · " + t("check.cycling.waiting")
+    ]`);
+    assert.deepEqual(cycling.rows, cyclingCopy.slice(0, 3), `${context}: separate purpose rows`);
+    assert.equal(cycling.assessment, cyclingCopy[3], `${context}: one plain-language assessment`);
+    assert.equal(cycling.oldStopBox, false, `${context}: cycling detail omits the technical stop table`);
     await captureNativeEvidence(page, `${context}/cycling-with-starts`,
       "[data-desc='model:health_cycling']", ".vitem");
-    // A missing legacy cycling population must leave the independent stop context accessible
-    // through the same real disclosure, retaining the firmware's unavailable verdict.
+    // The same disclosure separates unavailable cycling data from a genuine observed zero.
     await page.evaluate(`(() => {
-      Object.assign(S.status.health.checks[2], { starts: null, verdict: 'unavailable', split: false });
+      Object.assign(S.status.health.checks[2], { starts: null, verdict: 'unavailable', split: false,
+        space_runs: null, dhw_runs: null, censored_runs: null, hours: [] });
       renderApp(); return true;
     })()`);
     await page.frame();
-    assertLayout(await page.evaluate(layoutAudit), `${context}/stop-context-without-legacy`);
+    assertLayout(await page.evaluate(layoutAudit), `${context}/cycling-unavailable`);
     assert.equal(await page.evaluate(`document.querySelector("[data-desc='model:health_cycling'] .vrow-val").innerText`),
       await page.evaluate("t('check.status.unavailable')"), `${context}: preserve core cycling verdict`);
-    for (const [key, args] of [["population", ["4"]], ["counts", []], ["rule", []], ["limits", []],
-      ["loss", ["≥1"]]]) {
-      const expected = await page.evaluate(`t(${JSON.stringify("check.stop." + key)},
-        ...${JSON.stringify(args)})`);
-      assert.ok((await stopText()).includes(expected), `${context}: stop context retains ${key}`);
-    }
-    for (const text of ["3 / 4 / 2", "0 / 0 / 0"])
-      assert.ok((await stopText()).includes(text), `${context}: retain explicit category counts ${text}`);
-    const lossIsSeparate = await page.evaluate(`(() => {
-      const row = document.querySelector("[data-desc='model:health_cycling']").closest('.vitem');
-      const text = t('check.stop.loss', '≥1');
-      return Array.from(row.querySelectorAll('.vdesc-p')).some(p => p.innerText === text);
-    })()`);
-    assert.equal(lossIsSeparate, true,
-      `${context}: storage-loss watermark has its own paragraph outside the six stop qualifiers`);
-    const states = await page.evaluate("t('check.stop.states').split('|')");
-    for (const index of [2, 3, 4, 5, 6, 8])
-      assert.ok((await stopText()).includes(states[index]), `${context}: retain stop state ${index}`);
-    assert.ok((await stopText()).includes(await page.evaluate("t('check.stop.population', '4')")),
-      `${context}: independent stop observations survive unavailable legacy evidence`);
-    assert.ok((await stopText()).includes(await page.evaluate("t('check.detail.observation')")),
-      `${context}: unavailable legacy classification remains an observation without a new verdict`);
-    assert.ok(!(await stopText()).includes(await page.evaluate("t('check.detail.unavailable')")),
-      `${context}: legacy unavailability cannot deny all readable profile evidence`);
+    const unavailable = await cyclingDetail();
+    assert.equal(unavailable.total, undefined, `${context}: no invented start count`);
+    assert.deepEqual(unavailable.rows, [], `${context}: no invented completed runs`);
+    assert.equal(unavailable.assessment,
+      await page.evaluate("t('check.cycling.assessment') + ' · ' + t('check.cycling.unavailable')"),
+      `${context}: unavailable evidence has its own short assessment`);
+    assert.equal(unavailable.historyText, await page.evaluate("t('check.cycling.history_empty')"),
+      `${context}: no history is distinct from zero starts`);
+    assert.equal(unavailable.oldStopBox, false);
     const discardedContext = await page.evaluate(`(() => {
       const fixture = S.status.health.checks.find(check => check.id === 'dhw_loss');
       return t('check.detail.dhw_aborted', fixture.aborts,
@@ -1375,7 +1430,7 @@ async function assertPlantDiagnosis(page, context) {
       `${context}: a NOTE retains discarded reading-gap evidence`);
     assert.equal(await page.evaluate(`document.querySelector("[data-desc='model:health_pressure']")
       .closest('.card').querySelector('.section-badge')?.innerText || ''`),
-      await page.evaluate("t('check.summary.notes', 2)"),
+      await page.evaluate("t('check.summary.notes', 4)"),
       `${context}: badge counts findings rather than assessed fractions`);
     await captureNativeEvidence(page, `${context}/expanded`);
     for (const id of ["pressure", "dhw_loss", "cycling", "defrost"])
@@ -1410,6 +1465,7 @@ async function assertPlantDiagnosis(page, context) {
     })()`);
     await page.frame();
     assertLayout(await page.evaluate(layoutAudit), `${context}/dhw-no-window`);
+    await assertDiagnosisSummaryRows(page, `${context}/compact-blocked`);
     assert.equal(await page.evaluate(`document.querySelector("[data-desc='model:health_dhw_loss'] .vrow-val").innerText`),
       await page.evaluate("t('check.status.no_window')"),
       `${context}: a blocked day must not promise ongoing checking`);
@@ -1431,6 +1487,7 @@ async function assertPlantDiagnosis(page, context) {
     })()`);
     await page.frame();
     assertLayout(await page.evaluate(layoutAudit), `${context}/stale`);
+    await assertDiagnosisSummaryRows(page, `${context}/compact-stale`);
     assert.equal(await page.evaluate(`document.querySelector("[data-desc='model:health_fault'] .vrow-val").innerText`),
       await page.evaluate("t('check.status.collecting')"),
       `${context}: stale current fault state cannot render an all-clear`);
@@ -2470,6 +2527,8 @@ try {
     // the supervisor's independent mutation controls remain unchanged.
     for (const viewport of viewports) {
       await page.viewport(viewport.width, viewport.height);
+      await activateLocale(page, "en");
+      await assertCyclingChart(page, server, `${viewport.name}/diagnosis/cycling`);
       for (const locale of browserLocales) {
         await activateLocale(page, locale);
         await page.evaluate("showStage('dashboard'); window.scrollTo(0, 0); true");
@@ -2496,6 +2555,7 @@ try {
   for (const viewport of viewports) {
     if (!mutation) {
       await page.viewport(viewport.width, viewport.height);
+      await activateLocale(page, "en");
       await assertHistoryMotion(page, server, `${viewport.name}/history-motion`);
       // assertHistoryMotion's finally has restored the fixture and stopped its witnesses. A fast
       // viewport must now pause until its sibling is also outside temporal observation.

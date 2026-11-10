@@ -22,6 +22,7 @@ CASES = [
     "source_freshness", "stale_finding", "backwards_clock", "generation_mismatch",
     "inflight_generation", "reset_read_barrier", "reset_during_lock", "consent_reset",
     "circulation_reset", "circulation_inflight", "pending_expiry", "restored_expiry",
+    "late_restore_prefix", "late_restore_clock_behind",
     "consent_lock_new_generation", "consent_sampling_new_generation",
     "consent_lock_same_generation", "consent_sampling_same_generation",
     "consent_caller_new_generation", "consent_caller_same_generation",
@@ -219,6 +220,38 @@ mutations = [
      source_text.replace(entry, entry + "    consent_epoch = checkup_consent_epoch();\n"),
      "consent_caller_same_generation", "consent_epoch_discards_already_collected_sample"),
 ]
+restore_marker = "hours.hours[i].provenance = logic::CheckupCyclingSlot::Restored;"
+if source_text.count(restore_marker) != 1:
+    raise RuntimeError("Expected one restored cycling slot marker")
+mutations.append(("omit_restored_cycling_slot_marker",
+                  source_text.replace(restore_marker, "hours.hours[i].provenance = logic::CheckupCyclingSlot::Ordinary;"),
+                  "restored_expiry", "restored_chart_keeps_its_timestamp_and_readable_time"))
+expired_markers = re.findall(r"s_slot_times\.expiry_us\[i\]\s*=\s*logic::CHECKUP_EXPIRED_SLOT_US;", source_text)
+if len(expired_markers) != 1:
+    raise RuntimeError("Expected one expired cycling slot marker")
+expired_marker = expired_markers[0]
+mutations.append(("expired_cycling_slot_becomes_gap",
+                  source_text.replace(expired_marker, expired_marker.replace("logic::CHECKUP_EXPIRED_SLOT_US", "0")),
+                  "restored_expiry", "expired_restored_slot_is_blank_beside_newer_evidence"))
+tail_admission = "        if (live.count && records[i].bucket > live.newest_label) continue;\n"
+if source_text.count(tail_admission) != 1:
+    raise RuntimeError("Expected one saved-hour prefix admission guard")
+mutations.append(("allow_saved_hour_after_live_tail", source_text.replace(tail_admission, ""),
+                  "late_restore_prefix", "late_restore_admits_only_older_prefix"))
+tail_clock = "reset_requested) != k)\n            return fresh_if_pending();"
+if source_text.count(tail_clock) != 1:
+    raise RuntimeError("Expected one live-tail clock admission guard")
+mutations.append(("ignore_live_tail_clock_conflict",
+                  source_text.replace(tail_clock, tail_clock.replace("return fresh_if_pending();", "continue;")),
+                  "late_restore_clock_behind", "late_restore_keeps_live_when_clock_cannot_date_tail"))
+span_start = source_text.index("    // Subtract elapsed time through this restore,")
+span_end = source_text.index("    const int64_t wall_span_us", span_start)
+span = source_text[span_start:span_end]
+if span.count("now_us") != 2:
+    raise RuntimeError("Expected both operands of the restore-time horizon baseline")
+mutations.append(("use_latest_sample_as_restore_span_baseline",
+                  source_text[:span_start] + span.replace("now_us", "P().ring.latest_sample_us") +
+                  source_text[span_end:], "restored_expiry", "restore_span_excludes_duplicate_elapsed_gap"))
 expire_start = source_text.index("void checkup_stop_context_expire(int64_t) {")
 expire_end = source_text.index("\nCheckupStopContextReport checkup_stop_context_report()", expire_start)
 expire_body = source_text[expire_start:expire_end]

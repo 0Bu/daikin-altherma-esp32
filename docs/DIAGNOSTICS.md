@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: c7a9f635360330329f111029c8e80d715e43a14072dc1166fdf0590bba7fba9c -->
+<!-- user-docs-contract: 809d0372d0eaf6202ed5fd69352f1dfc5c462c057f1071a7680d9390a9831d24 -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default. Enable **Plant diagnostics** under **Settings → Firmware** to start an evidence
@@ -9,10 +9,8 @@ It also hides the Diagnostics name and card; Model becomes the default card when
 Re-enabling starts fresh; an unfinished diagnosis update is not carried across the change.
 
 Select **Diagnostics** below the schematic to show the **Plant diagnostics · 24 h** card.
-Open a row for three blocks:
-the reading and its time scope, an explanation of the current result, and **Normal:** with expected
-conditions or assessment limits. The time scope does not say how long a status has been active.
-A rolling day does not imply that every signal was readable throughout it.
+Open a row to see what was measured and what the result means. The observation window describes
+the readings and can include gaps.
 The summary shows the highest finding severity and the number of affected rows. Without a finding,
 it distinguishes ongoing collection, measurements and completed assessments. It is not a score for
 the installation's health.
@@ -24,7 +22,7 @@ the installation's health.
 | **OK** | The supported assessment found no notable pattern with the required evidence. It does not certify the installation. |
 | **NOTE** | A notable accepted observation or unit-reported warning; it does not identify a defect or cause. |
 | **WARNING** | A current unit-reported fault, or pressure confirmed continuously at or below the project's boundary during the window. |
-| **CHECKING** | A required day, signal coverage or eligible observation is missing. The detail names what is missing. |
+| **CHECKING** | A required day, signal coverage or eligible observation is missing. |
 | **NO WINDOW** | A full day of tank-cooling evidence produced no completed hour; the detail names the exclusions. |
 | **MEASURED** | A measurement or event population without enough evidence for a good/bad assessment. |
 | **TENTATIVE** | An experimental counter comparison whose complete manufacturer semantics are unknown. |
@@ -38,12 +36,13 @@ timeouts reduce evidence without pretending that the profile no longer has the s
 Completed hours can return after a restart only from compatible dated flash records and current
 source confirmation. A software restart, such as an update or a settings save that restarts the
 board, also tries to save the open hour. It cannot when that hour shares its clock hour with the
-previous saved hour. Other open and unsaved hours may be lost. Whole hourly records expire when their
-beginning leaves the rolling day, even if polling stops. Changed X10A identity, an incompatible
-saved-hour format or a changed measurement definition starts fresh hourly collection, including
+previous saved hour. Other open and unsaved hours may be lost. Hourly evidence ages out even when
+polling stops. See the [retention rules](ARCHITECTURE.md#history-and-diagnosis-persistence).
+Changed X10A identity, an incompatible saved-hour format or a changed measurement definition
+starts fresh hourly collection, including
 tank-cooling results. Changing the independent circulation witness clears only tank-cooling
-evidence. Trend history, Stop context and the handoff for an unfinished tank-cooling window each
-have their own compatibility rules.
+evidence. Trend history and the handoff for an unfinished tank-cooling window have their own
+compatibility rules.
 See [PLANT.md](PLANT.md#reboot-and-persistence).
 
 These are passive ordinary-operation observations. Five-minute trends cannot reconstruct complete
@@ -102,55 +101,18 @@ software restart preserves the remaining settling time, but unseen charging can 
 <!-- user-docs: health_cycling -->
 ### Compressor cycling
 
-**In plain language:** The board counts starts across all modes and plots hourly starts and
-compressor runtime across the 24-hour window. Gray bars show runtime without a heating or hot-water
-label when the mode split is incomplete. An hourly bar can include part of a run that started before
-that hour. The board classifies completed runs separately as space heating, domestic hot water
-(DHW), cooling or unclassified. Unclassified runs explain missing readings, transitions,
-heating/DHW handovers, journal boundaries and unwitnessed starts.
+**In plain language:** The total counts observed starts. Separate rows show completed runs by
+purpose and the average length for heating and hot water when available. A change of purpose or
+missing readings can leave a run unclear.
 
-**Meaning:** At least **12 completed space-heating runs** can carry the assessment when both run
-count and runtime coverage reach **90%**. Positively observed heating/DHW handovers remain visible
-but do not enter the pure-run count or heating mean. Uncertain runtime is compared against completed
-heating runtime to reduce bias from observed but unclassified runs. An average below
-**10 minutes** produces **NOTE** once this population exists. **OK** additionally needs a full day
-and 90% readable classification time.
-Smaller or insufficiently classified populations are **MEASURED**, with the reason shown;
-no usable compressor observation remains **CHECKING**.
+The assessment says whether completed heating runs were short or long enough on average in the
+recorded window. It can wait for more readings or more heating runs. If the system cannot identify
+heating runs, the card can show starts without a heating assessment. A start count needs compressor
+readings.
 
-**Important limit:** There is no pooled all-mode assessment, and an unfinished long run cannot dilute
-completed short runs. Twelve runs and ten minutes are project heuristics, not Daikin limits. These
-figures do not identify oversizing or hydraulic imbalance. Optional outdoor min/mean is context for
-accepted heating runs only. A missing class or compressor reading may bridge at most 15 seconds
-between matching known-running readings, measured from their actual timestamps even across an
-hour boundary. Unknown readings never become OFF. A pure DHW charge
-may include a final valve return to the room circuit of at most 30 seconds before a known stop,
-including when the readable indoor mode still says DHW. A cooling mode or unreadable tail is not
-accepted. This project allowance is based on observed 6–22 second tails, not a Daikin specification.
-No start allowance is assumed. Saturated or incomplete evidence keeps the row **MEASURED**.
-A run that crosses an hour boundary is stored again once it stops, so a restart keeps it. A restart
-before that save, which needs synchronized time and a working history store, can still lose the
-run. A lost run goes unnoticed and tends to be a long one, so cycling can look shorter than it was;
-the row stays **MEASURED** only while lost runs are a large enough share of all runs or of their
-runtime, or leave too few completed runs. If the compressor stops during a defrost, one heating run
-counts as several; whether it does has not been checked yet.
-
-The row also shows **stop context**, a separate count of witnessed stops with recent heating
-context. Overlapping observations describe low speed with a reported temperature/target gap,
-indoor request withdrawal, defrost or a route/mode transition. The positive/usable/complete
-counts describe different evidence; they are not shares of proven causes. A witnessed positive
-remains usable even when its sampled window is incomplete. Missing inputs leave
-only the affected observation unknown. A pending stop needs further readings; incomplete coverage,
-an unusable clock alignment or a pending save remains visible. Storage-loss notices are separate
-from stop counts and give only a lower bound; they do not count lost stops or hours.
-
-The provisional window is 30 seconds before and after the stop, with at most 15 seconds between
-readable endpoints. During confirmed space heating, the temperature category needs positive speed
-at most 22 rps and reported
-pre-backup-heater R1T at least 2 K above the reported main-zone target, stable for 30 seconds.
-That difference is not a measured controller overshoot or the configured stop setting. The request
-bit belongs to the indoor unit and does not identify an external thermostat. These counts change
-no cycling assessment and prove neither oversizing, closed valves nor an incorrect heating curve.
+In the 24-hour chart, the number above each bar shows the starts counted for that hour. The colored
+segments show heating, hot water and other runtime. Hatching marks known gaps in the readings.
+Select an hour for its time and durations. The `≥` sign means at least that many starts.
 
 **Evidence and limits:** [Compressor cycling](DIAGNOSTIC_EVIDENCE.md#diagnosis-cycling)
 

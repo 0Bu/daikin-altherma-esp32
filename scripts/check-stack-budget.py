@@ -798,6 +798,10 @@ def parse_frames(disassembly: str, budgets: dict[str, Any] | None = None) -> dic
                     raise BudgetError(f"symbol {current}: newly outlined MQTT continuation needs budget review")
             if any(re.match(pattern, current) for pattern in INLINED_DISCOVERY_HELPERS):
                 raise BudgetError(f"symbol {current}: newly outlined discovery continuation needs budget review")
+            if "{lambda" not in current and current.startswith((
+                    "daik::logic::dhw_loss_aggregate(", "_ZN4daik5logic18dhw_loss_aggregate",
+                    "daik::logic::checkup_apply_freshness(", "_ZN4daik5logic23checkup_apply_freshness")):
+                raise BudgetError(f"symbol {current}: newly outlined diagnosis continuation needs budget review")
             if re.match(r"^parse_(?:array|object)(?:[.$]|$)", current):
                 raise BudgetError(f"symbol {current}: out-of-line cJSON container needs budget review")
             if re.match(r"^(?:parse_value|parse_string|cJSON_Delete|cJSON_ParseWithLengthOpts)[.$]", current):
@@ -869,41 +873,153 @@ def validate_http_stack(budgets: dict[str, Any], source: str) -> None:
 
 
 def validate_status_diagnosis_paths(budgets: dict[str, Any], sources: dict[str, str]) -> None:
-    """Keep the report frame on its real HTTP callers, separate from decimal-format branches."""
+    """Keep diagnosis frames on their actual HTTP and MQTT callers."""
+    report = ["http_send_status_json", "status_serializer", "checkup_report"]
+    # Sealing calls the layout fingerprint and stored-record CRC sequentially. Both call
+    # config_crc32_update, with a separate encoded-word frame only under the fingerprint.
+    expire = ["cycling_expire", "cycling_seal"]
+    expire_crc = [*expire, "cycling_crc", "history_config_crc"]
+    expire_fingerprint = [*expire, "cycling_layout_fingerprint", "checkup_schema_crc",
+                          "history_config_crc"]
+    # Report descendants run sequentially. The pure chart builder and clock are also siblings
+    # within the same locked snapshot, while the evaluator keeps its summarizer and evidence
+    # classifier nested. Reuse the same aggregate and fold frames that the MQTT evidence uses.
+    report_tails = {
+        "checkup": expire_crc,
+        "checkup_expire_fingerprint": expire_fingerprint,
+        "checkup_aggregate": ["cycling_aggregate", "cycling_fold"],
+        "checkup_evaluate": ["checkup_evaluate", "checkup_summarize", "checkup_evidence_name"],
+        "checkup_dhw_progress": ["checkup_dhw_progress", "checkup_dhw_age"],
+        # These two wrappers are inlined into the report. Only their outlined descendants add
+        # stack below that frame.
+        "checkup_dhw_fold": ["checkup_dhw_fold"],
+        "checkup_freshness": ["checkup_summarize", "checkup_evidence_name"],
+        "cycling_hours": ["checkup_cycling_hours_locked", "room_time_now"],
+        "cycling_hours_builder": ["checkup_cycling_hours_locked", "checkup_cycling_hours_build"],
+    }
+    report_paths = {
+        f"httpd_{transport}_{name}": [*prefix, *report, *tail]
+        for name, tail in report_tails.items()
+        for transport, prefix in (("direct", []), ("mcp", ["mcp_post"]))
+    }
     expected = {
         "httpd_mcp_status": ["mcp_post", "http_send_status_json", "status_serializer",
                              "double_string", "dynamic_double_string"],
         "httpd_direct_status": ["http_send_status_json", "status_serializer",
                                 "double_string", "dynamic_double_string"],
-        "httpd_mcp_checkup": ["mcp_post", "http_send_status_json", "status_serializer",
-                              "checkup_report"],
-        "httpd_direct_checkup": ["http_send_status_json", "status_serializer", "checkup_report"],
+        **report_paths,
         "httpd_mcp_health_number": ["mcp_post", "http_send_status_json", "status_serializer",
                                     "status_health_number", "status_unsigned_number"],
         "httpd_direct_health_number": ["http_send_status_json", "status_serializer",
                                        "status_health_number", "status_unsigned_number"],
     }
+    http_paths = set(budgets["tasks"]["httpd"]["paths"])
     for name, members in expected.items():
         rule = budgets["paths"].get(name, {})
-        if (rule.get("symbols") != members or rule.get("multipliers") != {}
+        if (name not in http_paths or rule.get("symbols") != members or rule.get("multipliers") != {}
                 or rule.get("base_bytes") != 1536 or rule.get("max_bytes") != 8192):
             raise BudgetError(f"diagnosis status path {name}: HTTP caller/report accounting changed")
-    report_paths = {name for name, rule in budgets["paths"].items()
-                    if "checkup_report" in rule["symbols"]}
-    if report_paths != {"httpd_mcp_checkup", "httpd_direct_checkup"}:
+    heartbeat = ["mqtt_task", "mqtt_heartbeat", "mqtt_heartbeat_builder", "cycling_evidence"]
+    mqtt_paths = set(budgets["tasks"]["mqtt"]["paths"])
+    for name, tail in (
+        ("mqtt_cycling_evidence", ["cycling_aggregate", "cycling_fold"]),
+        ("mqtt_cycling_expire", expire_crc),
+        ("mqtt_cycling_expire_fingerprint", expire_fingerprint),
+    ):
+        rule = {"symbols": heartbeat + tail, "multipliers": {}, "base_bytes": 1536, "max_bytes": 5120}
+        if name not in mqtt_paths or budgets["paths"].get(name) != rule:
+            raise BudgetError(f"diagnosis status path {name}: MQTT heartbeat accounting changed")
+    actual_report_paths = {name for name, rule in budgets["paths"].items()
+                           if "checkup_report" in rule["symbols"]}
+    if actual_report_paths != report_paths.keys():
         raise BudgetError("diagnosis status paths: checkup_report belongs to HTTP, not polling")
+    hour_names = {name for name, members in report_paths.items()
+                  if "checkup_cycling_hours_locked" in members}
+    hour_paths = {name for name, rule in budgets["paths"].items()
+                  if "checkup_cycling_hours_locked" in rule["symbols"]}
+    if hour_paths != hour_names:
+        raise BudgetError("diagnosis status paths: cycling hour snapshot belongs to HTTP, not polling")
     code = {name: re.sub(r"/\*.*?\*/|//[^\n]*", "", sources[name], flags=re.S)
             for name in ("main/http_status.cpp", "main/mcp_server.cpp", "main/hp_poll.cpp")}
     status = code["main/http_status.cpp"]
     if (len(re.findall(r"\bcheckup_report\s*\(", status)) != 1
-            or not re.search(r"const logic::CheckupReport hr\s*=\s*checkup_report\(\);", status)
+            or not re.search(r"logic::CheckupCyclingHours\s+hrs\{\};\s*"
+                             r"const logic::CheckupReport hr\s*=\s*checkup_report\(&hrs\);", status)
+            or re.search(r"\bcheckup_cycling_hours(?:_locked)?\s*\(", status)
             or len(re.findall(r"\bappend_status_json\(out, redact\)", status)) != 1
             or not re.search(r"return http_send_status_json\(req, \{\}, \{\}, redact\);", status)
             or len(re.findall(r"\bhttp_send_status_json\s*\(", code["main/mcp_server.cpp"])) != 1
             or not re.search(r"return http_send_status_json\(req, response, suffix, false\);",
                              code["main/mcp_server.cpp"])
-            or re.search(r"\b(?:checkup_report|http_send_status_json)\s*\(", code["main/hp_poll.cpp"])):
+            or re.search(r"\bhttp_send_status_json\s*\(", code["main/hp_poll.cpp"])
+            or any(re.search(r"\b(?:checkup_report|checkup_cycling_hours(?:_locked)?)\s*\(",
+                             stack_source_code(text))
+                   for path, text in sources.items()
+                   if path.endswith(".cpp") and path not in {"main/checkup.cpp", "main/http_status.cpp"})):
         raise BudgetError("diagnosis status source: direct/MCP-only serializer caller contract changed")
+    checkup = stack_source_code(sources["main/checkup.cpp"])
+    mqtt = stack_source_code(sources["main/mqtt_ha.cpp"])
+    persist = stack_source_code(sources["main/logic/checkup_persist.hpp"])
+    for caller, callee in (
+        (stack_function_body(mqtt, "mqtt_task"), "publish_heartbeat"),
+        (stack_function_body(mqtt, "publish_heartbeat"), "build_heartbeat_payload"),
+        (stack_function_body(mqtt, "build_heartbeat_payload"), "checkup_cycling_evidence"),
+        (stack_function_body(checkup, "checkup_cycling_evidence"), "expire_restored_locked"),
+        (stack_function_body(checkup, "checkup_cycling_evidence"), "logic::checkup_aggregate"),
+        (stack_function_body(checkup, "expire_restored_locked"), "checkup_persist_seal"),
+        (stack_function_body(checkup, "checkup_persist_seal"), "logic::checkup_layout_fingerprint"),
+        (stack_function_body(checkup, "checkup_persist_seal"), "checkup_persist_crc"),
+        (stack_function_body(persist, "checkup_fp_u32"), "config_crc32_update"),
+    ):
+        if len(re.findall(r"\b" + re.escape(callee) + r"\s*\(", caller)) != 1:
+            raise BudgetError(f"diagnosis status source: {callee} cycling stack path changed")
+    for source, caller, callee in (
+        (checkup, "checkup_persist_crc", "config_crc32_update"),
+        (persist, "checkup_layout_fingerprint", "checkup_fp_u32"),
+    ):
+        if not re.search(r"\b" + callee + r"\s*\(", stack_function_body(source, caller)):
+            raise BudgetError(f"diagnosis status source: {caller} cycling stack path changed")
+    report_body = stack_function_body(checkup, "checkup_report")
+    hours_body = stack_function_body(checkup, "checkup_cycling_hours_locked")
+    if (len(re.findall(r"\bcheckup_report\s*\(", checkup)) != 1
+            or len(re.findall(r"\bcheckup_cycling_hours_locked\s*\(", checkup)) != 2
+            or not re.search(r"\[\[gnu::noinline\]\]\s+static logic::CheckupCyclingHours "
+                             r"checkup_cycling_hours_locked\(int64_t now_us\)", checkup)
+            or not re.search(r"\bLock\s+lk\(s_mtx\);[\s\S]*?\bexpire_restored_locked\(\);\s*"
+                             r"const int64_t\s+now_us\s*=\s*esp_timer_get_time\(\);\s*"
+                             r"if \(hours\)\s+\*hours\s*=\s*checkup_cycling_hours_locked\(now_us\);",
+                             report_body)
+            or len(re.findall(r"\bexpire_restored_locked\s*\(", report_body)) != 1
+            or len(re.findall(r"\btime_now\s*\(", hours_body)) != 1
+            or re.search(r"\bexpire_restored_locked\s*\(", hours_body)):
+        raise BudgetError("diagnosis status source: nested snapshot and separate expiry path changed")
+    checkup_logic = stack_source_code(sources["main/logic/checkup.hpp"])
+    # The body scanner expects a brace-free signature. Ignore only this default argument.
+    evaluate_source = re.sub(r"(const DhwLossWindow& dhw)\s*=\s*\{\s*\}", r"\1", checkup_logic)
+    aggregate_body = stack_function_body(checkup_logic, "checkup_aggregate")
+    dhw_aggregate_body = stack_function_body(checkup_logic, "dhw_loss_aggregate")
+    evaluate_body = stack_function_body(evaluate_source, "checkup_evaluate")
+    freshness_body = stack_function_body(checkup_logic, "checkup_apply_freshness")
+    summarize_body = stack_function_body(checkup_logic, "checkup_summarize")
+    progress_body = stack_function_body(checkup_logic, "dhw_loss_progress")
+    for caller, callee in (
+        (report_body, "logic::checkup_aggregate"),
+        (report_body, "logic::dhw_loss_aggregate"),
+        (report_body, "logic::checkup_evaluate"),
+        (report_body, "logic::dhw_loss_progress"),
+        (report_body, "logic::checkup_apply_freshness"),
+        (hours_body, "logic::checkup_cycling_hours"),
+        (evaluate_body, "checkup_summarize"),
+        (freshness_body, "checkup_summarize"),
+        (summarize_body, "checkup_result_evidence_name"),
+        (progress_body, "dhw_loss_age_s"),
+    ):
+        if len(re.findall(r"\b" + re.escape(callee) + r"\s*\(", caller)) != 1:
+            raise BudgetError(f"diagnosis status source: {callee} stack path changed")
+    for caller, bucket in ((aggregate_body, "CheckupBucket"), (dhw_aggregate_body, "DhwLossBucket")):
+        if (not re.search(r"auto fold = \[&w\]\(const " + bucket + r"& b\)", caller)
+                or len(re.findall(r"\bfold\s*\(", caller)) != 2):
+            raise BudgetError(f"diagnosis status source: {bucket} aggregate fold stack path changed")
     if (len(re.findall(r"\bnum\s*\(", status)) != 37
             or not re.search(r"auto num = \[&j\]\(const char\* name, int v\) "
                              r"__attribute__\(\(noinline\)\)\s*\{", status)
@@ -2695,7 +2811,15 @@ def self_test() -> None:
      'daik::hp_query_detailed(unsigned char, daik::Protocol, unsigned char*, unsigned int, daik::HpQueryLogPolicy)': 64,
      'daik::hp_format(daik::ValueDef const&, unsigned char const*, int, int, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >&, daik::ValueDef const*, unsigned int, daik::SaturationWitness)': 64,
      'daik::history_record(daik::CachedValue const*, unsigned int, unsigned long)': 64,
-     'daik::checkup_report()': 64,
+     'daik::checkup_report(daik::logic::CheckupCyclingHours*)': 64,
+     'daik::checkup_cycling_hours_locked(long long)': 256,
+     'daik::logic::checkup_cycling_hours(daik::logic::CheckupRing const&, bool)': 32,
+     'daik::logic::checkup_evaluate(daik::logic::CheckupWindow const&, daik::logic::CheckupCoverage const&, daik::FaultClass, daik::logic::DhwLossWindow const&)': 80,
+     'daik::logic::checkup_summarize(daik::logic::CheckupReport&)': 32,
+     'daik::logic::checkup_result_evidence_name(daik::logic::CheckupCheck, daik::logic::CheckupCheckResult const&)': 32,
+     'daik::logic::dhw_loss_progress(daik::logic::DhwLossState const&, long long)': 48,
+     'daik::logic::dhw_loss_age_s(long long, long long, unsigned long)': 32,
+     '_ZZN4daik5logic18dhw_loss_aggregateERKNS0_11DhwLossRingEENKUlRKNS0_13DhwLossBucketEE_clES6_$isra$0': 32,
      'daik::checkup_reset_on_detect(char const*, unsigned long)': 64,
      'daik::logic::checkup_model_fingerprint(char const*, daik::logic::ProfileView const&)': 64,
      'daik::logic::checkup_schema_row_fingerprint(daik::logic::ProfileView const&, daik::ValueDef const&)': 32,
@@ -2719,6 +2843,7 @@ def self_test() -> None:
      'daik::logic::checkup_journal_in_window(long long, long long)': 32,
      'daik::(anonymous namespace)::checkup_persist_seal()': 32,
      'daik::(anonymous namespace)::checkup_persist_crc()': 32,
+     'daik::logic::checkup_layout_fingerprint()': 32,
      'daik::logic::checkup_aggregate(daik::logic::CheckupRing const&)': 32,
      '_ZZN4daik5logic17checkup_aggregateERKNS0_11CheckupRingEENKUlRKNS0_13CheckupBucketEE_clES6_$isra$0': 64,
      STATUS_HEALTH_NUMBER_SYMBOL: 32,
@@ -3372,8 +3497,27 @@ def self_test() -> None:
     assert selected["status_serializer"] == 4848
     assert selected["path:httpd_mcp_status"] == 8192
     assert selected["path:httpd_direct_status"] == 6960
-    assert selected["path:httpd_mcp_checkup"] == 7808
-    assert selected["path:httpd_direct_checkup"] == 6576
+    assert selected["path:httpd_mcp_checkup"] == 7952
+    assert selected["path:httpd_direct_checkup"] == 6720
+    assert selected["path:httpd_mcp_checkup_expire_fingerprint"] == 7984
+    assert selected["path:httpd_direct_checkup_expire_fingerprint"] == 6752
+    assert selected["path:mqtt_cycling_evidence"] == 2944
+    assert selected["path:mqtt_cycling_expire"] == 2992
+    assert selected["path:mqtt_cycling_expire_fingerprint"] == 3024
+    assert selected["path:httpd_mcp_cycling_hours"] == 8112
+    assert selected["path:httpd_direct_cycling_hours"] == 6880
+    assert selected["path:httpd_mcp_checkup_aggregate"] == 7904
+    assert selected["path:httpd_direct_checkup_aggregate"] == 6672
+    assert selected["path:httpd_mcp_checkup_evaluate"] == 7952
+    assert selected["path:httpd_direct_checkup_evaluate"] == 6720
+    assert selected["path:httpd_mcp_checkup_dhw_progress"] == 7888
+    assert selected["path:httpd_direct_checkup_dhw_progress"] == 6656
+    assert selected["path:httpd_mcp_checkup_dhw_fold"] == 7840
+    assert selected["path:httpd_direct_checkup_dhw_fold"] == 6608
+    assert selected["path:httpd_mcp_checkup_freshness"] == 7872
+    assert selected["path:httpd_direct_checkup_freshness"] == 6640
+    assert selected["path:httpd_mcp_cycling_hours_builder"] == 8096
+    assert selected["path:httpd_direct_cycling_hours_builder"] == 6864
     assert selected["path:httpd_mcp_health_number"] == 7840
     assert selected["path:httpd_direct_health_number"] == 6608
     assert selected["ota_task"] == 2608
@@ -3552,11 +3696,35 @@ def self_test() -> None:
         retirement_controls += 1
 
     status_sources = {path: (REPO / path).read_text(encoding="utf-8")
-                      for path in ("main/http_status.cpp", "main/mcp_server.cpp", "main/hp_poll.cpp")}
+                      for path in ("main/http_status.cpp", "main/mcp_server.cpp", "main/hp_poll.cpp",
+                                   "main/checkup.cpp", "main/logic/checkup.hpp", "main/mqtt_ha.cpp",
+                                   "main/logic/checkup_persist.hpp")}
     validate_status_diagnosis_paths(budgets, status_sources)
     diagnosis_controls = 0
     for name, member in (("httpd_direct_checkup", "checkup_report"),
                          ("httpd_mcp_checkup", "checkup_report"),
+                         ("httpd_mcp_checkup", "cycling_expire"),
+                         ("httpd_direct_checkup", "cycling_crc"),
+                         ("httpd_direct_checkup_expire_fingerprint", "cycling_layout_fingerprint"),
+                         ("httpd_mcp_checkup_expire_fingerprint", "checkup_schema_crc"),
+                         ("mqtt_cycling_evidence", "mqtt_heartbeat"),
+                         ("mqtt_cycling_expire", "mqtt_heartbeat"),
+                         ("mqtt_cycling_expire_fingerprint", "history_config_crc"),
+                         ("httpd_direct_cycling_hours", "checkup_report"),
+                         ("httpd_mcp_cycling_hours", "checkup_report"),
+                         ("httpd_direct_cycling_hours", "checkup_cycling_hours_locked"),
+                         ("httpd_mcp_cycling_hours", "room_time_now"),
+                         ("httpd_direct_checkup_aggregate", "cycling_aggregate"),
+                         ("httpd_mcp_checkup_aggregate", "cycling_fold"),
+                         ("httpd_direct_checkup_evaluate", "checkup_evaluate"),
+                         ("httpd_mcp_checkup_evaluate", "checkup_summarize"),
+                         ("httpd_mcp_checkup_evaluate", "checkup_evidence_name"),
+                         ("httpd_mcp_checkup_dhw_progress", "checkup_dhw_progress"),
+                         ("httpd_direct_checkup_dhw_progress", "checkup_dhw_age"),
+                         ("httpd_mcp_checkup_dhw_fold", "checkup_dhw_fold"),
+                         ("httpd_direct_checkup_freshness", "checkup_summarize"),
+                         ("httpd_direct_cycling_hours_builder", "checkup_cycling_hours_build"),
+                         ("httpd_mcp_cycling_hours_builder", "checkup_cycling_hours_locked"),
                          ("httpd_mcp_checkup", "http_send_status_json"),
                          ("httpd_mcp_status", "http_send_status_json"),
                          ("httpd_mcp_health_number", "status_health_number"),
@@ -3573,6 +3741,31 @@ def self_test() -> None:
             raise AssertionError(f"self-test accepted omitted {member} from {name}")
         diagnosis_controls += 1
     changed = json.loads(json.dumps(budgets))
+    changed["tasks"]["httpd"]["paths"].remove("httpd_mcp_checkup_evaluate")
+    try:
+        validate_status_diagnosis_paths(changed, status_sources)
+    except BudgetError as exc:
+        assert "diagnosis status path" in str(exc)
+    else:
+        raise AssertionError("self-test accepted an evaluator path detached from the HTTP task")
+    diagnosis_controls += 1
+    for member in ("cycling_aggregate", "cycling_fold", "checkup_evaluate", "checkup_summarize",
+                   "checkup_evidence_name", "checkup_dhw_progress", "checkup_dhw_age",
+                   "checkup_dhw_fold", "checkup_cycling_hours_build", "cycling_layout_fingerprint"):
+        rule = budgets["symbols"][member]
+        pattern = re.compile(rule["pattern"])
+        for grown in (False, True):
+            changed_frames = {name: (rule["max_bytes"] + 16 if pattern.search(name) else value)
+                              for name, value in frames.items() if grown or not pattern.search(name)}
+            assert changed_frames != frames
+            try:
+                evaluate(changed_frames, budgets)
+            except BudgetError as exc:
+                assert f"symbol {member}:" in str(exc)
+            else:
+                raise AssertionError(f"self-test accepted a missing or grown diagnosis frame {member}")
+            diagnosis_controls += 1
+    changed = json.loads(json.dumps(budgets))
     changed["paths"]["poll_history"]["symbols"].append("checkup_report")
     try:
         validate_status_diagnosis_paths(changed, status_sources)
@@ -3583,9 +3776,32 @@ def self_test() -> None:
     diagnosis_controls += 1
     for name, before, after in (
         ("main/http_status.cpp", "return http_send_status_json(req, {}, {}, redact);", "return ESP_FAIL;"),
+        ("main/http_status.cpp", "checkup_report(&hrs)", "checkup_report(nullptr)"),
         ("main/mcp_server.cpp", "return http_send_status_json(req, response, suffix, false);", "return ESP_FAIL;"),
+        ("main/mqtt_ha.cpp", "publish_heartbeat();", "other_heartbeat();"),
+        ("main/checkup.cpp", "P().layout_fp = logic::checkup_layout_fingerprint();",
+         "P().layout_fp = 0;"),
+        ("main/checkup.cpp", "P().crc                    = checkup_persist_crc();",
+         "P().crc                    = 0;"),
+        ("main/logic/checkup_persist.hpp", "return config_crc32_update(crc, b, sizeof(b));",
+         "return crc;"),
         ("main/hp_poll.cpp", "static void poll_task(void*) {",
          "static void poll_task(void*) { checkup_report();"),
+        ("main/checkup.cpp", "[[gnu::noinline]] static logic::CheckupCyclingHours",
+         "static logic::CheckupCyclingHours"),
+        ("main/checkup.cpp", "if (hours) *hours = checkup_cycling_hours_locked(now_us);",
+         "if (hours) *hours = {};"),
+        ("main/checkup.cpp", "logic::checkup_aggregate(P().ring)", "other_aggregate(P().ring)"),
+        ("main/checkup.cpp", "logic::dhw_loss_aggregate(P().dhw)", "other_aggregate(P().dhw)"),
+        ("main/checkup.cpp", "logic::checkup_evaluate(", "other_evaluate("),
+        ("main/checkup.cpp", "logic::dhw_loss_progress(", "other_progress("),
+        ("main/checkup.cpp", "logic::checkup_apply_freshness(", "other_freshness("),
+        ("main/checkup.cpp", "logic::checkup_cycling_hours(P().ring, s_cov.rps)", "other_hours()"),
+        ("main/logic/checkup.hpp", "fold(r.pending);", "other_fold(r.pending);"),
+        ("main/logic/checkup.hpp", "checkup_summarize(r);", "other_summarize(r);"),
+        ("main/logic/checkup.hpp", "checkup_result_evidence_name(id, c)", "other_evidence_name(id, c)"),
+        ("main/logic/checkup.hpp", "dhw_loss_age_s(now_us, st.segment_start_us,",
+         "other_age(now_us, st.segment_start_us,"),
     ):
         changed = dict(status_sources)
         changed[name] = changed[name].replace(before, after)
@@ -3782,6 +3998,17 @@ def self_test() -> None:
         assert altered != fixture
         reject_disassembly("changed nullable-number caller", altered, "diagnosis numeric calls")
         numeric_disassembly_controls += 1
+
+    for name in (
+        'daik::logic::dhw_loss_aggregate(daik::logic::DhwLossRing const&)',
+        '_ZN4daik5logic18dhw_loss_aggregateERKNS0_11DhwLossRingE$isra$0',
+        'daik::logic::checkup_apply_freshness(daik::logic::CheckupReport&, bool, unsigned long, unsigned long)',
+        '_ZN4daik5logic23checkup_apply_freshnessERNS0_13CheckupReportEbmm$constprop$0',
+    ):
+        reject_disassembly("outlined diagnosis continuation " + name, fixture +
+                           f"\n00003000 <{name}>:\n3000: 004136 entry a1, 32\n",
+                           "newly outlined diagnosis continuation")
+        diagnosis_controls += 1
 
     poll_inlining_controls = 0
     for name in (

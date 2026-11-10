@@ -361,6 +361,8 @@ jobs:
       - name: Run rendered browser and accessibility gate
         env:
           BEFORE: ${{ github.event.before }}
+          # Give the sequential iPad runs and their failure controls time to finish on hosted runners.
+          DAIKIN_BROWSER_TIMEOUT_MS: '900000'
         run: ./scripts/run-browser-render-tests.sh --if-ui-changed
 
       # The source-boundary contracts: assertions about main/*.cpp that the host suite cannot make,

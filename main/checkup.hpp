@@ -82,17 +82,13 @@ void checkup_reset();
 // thresholds change. Other X10A-backed findings keep their already-collected 24-hour evidence.
 void checkup_dhw_reset();
 
-// The judged 24-hour window. Read by GET /status (httpd task) and by the WebSocket status broadcast
-// (poll task), so it copies out under the lock — the report is a plain POD, so nothing allocates
-// inside the critical section (AGENTS.md → Memory, concurrency, and HTTP safety).
-logic::CheckupReport checkup_report();
+// Copy the judged window and optional chart hours together under the same lock. GET /status and
+// MCP use this snapshot. The POD report and chart storage do not allocate under the lock.
+logic::CheckupReport checkup_report(logic::CheckupCyclingHours* hours = nullptr);
 
 // Compact completed-run evidence for MQTT. Shares the evaluator's pure projection, without
 // constructing the full eight-check report on the MQTT task's stack. No allocation under its lock.
 logic::CheckupCyclingEvidence checkup_cycling_evidence();
-
-// Chronological 24-hour compressor start and runtime buckets for /status.health.checks[cycling].
-logic::CheckupCyclingHours checkup_cycling_hours();
 
 struct CheckupStopContextReport {
     StopObservationReport observation;

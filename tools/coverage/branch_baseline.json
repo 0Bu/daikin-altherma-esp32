@@ -1768,6 +1768,183 @@
       "source": "main/logic/checkup.hpp",
       "source_sha256": "ad44853951d4f101e6cf4444c9142b6af4c74f91406d08170aaa0dcfc39ed42e",
       "test_source_sha256": "c72939d860fdc83aee4fe16b76b8fed3b5d874f205a8149435f94143afedd894"
+    },
+    {
+      "runner": "scripts/run-mock-tests.sh --coverage on Apple Clang; same host translation unit and gcov arguments in Linux Docker for the GCC profiles",
+      "base_commit": "4e4a10c53102622ba18e0c185e87db335bebf7c9",
+      "scope": "Hourly cycling uses paired mode evidence, stable bucket identities and an elapsed-time denominator for the open hour. The ambiguous prior Checkup journal fingerprint is refused. Tests cover transitions, no class evidence, cooling, defrost, rollover, saturation, open-hour elapsed bounds and stored timestamp alignment.",
+      "sources": {
+        "main/logic/checkup.hpp": "14c282ad1115c2005cdda9e45ef427f1f74e7ae99ff4af1bc0b0532ab18c1752",
+        "main/logic/checkup_persist.hpp": "2251424324b6755c9e050cf3c175dc5f179a7d6774e384faf6ee3f30dcd2762c"
+      },
+      "test_source_sha256": "41650035f69ec71412cac77436f79978dcaf2558d3044ffa2b3feae438adc8cc",
+      "measured_line_counts": {
+        "clang-17-darwin": {
+          "covered": 10933,
+          "executable": 11106
+        },
+        "gcc-13-linux-ubuntu24": {
+          "covered": 10406,
+          "executable": 10689
+        },
+        "gcc-15-github-linux-ubuntu26": {
+          "covered": 10398,
+          "executable": 10691
+        },
+        "gcc-15-linux-ubuntu26": {
+          "covered": 10402,
+          "executable": 10691
+        }
+      },
+      "raw_report_sha256": {
+        "clang-17-darwin": "fe0d97be378993d1bcf5ebed07cc5696158a796dea0057fd7a32c98035c4f5c6",
+        "gcc-13-linux-ubuntu24": "9696fd163dd963f2f27db388d54667c17992af6d759d1b3e58c29bf470484c21",
+        "gcc-15-github-linux-ubuntu26": "bd64818bd5573f02c17b51c356ac97007ce3b694150f4865b17a400a9738c07c",
+        "gcc-15-linux-ubuntu26": "9b2b19b1ffd5bcf7f2a05e8e34a252ccc59d26f201ada45a553f4cbd01836d15"
+      },
+      "compilers": {
+        "clang-17-darwin": "Apple clang 17.0.0 clang-1700.6.4.2",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+        "gcc-15-github-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+      },
+      "measurement_limits": [
+        "The local amd64 Docker run measures the hosted profile candidate. Authoritative GitHub confirmation remains separate.",
+        "Two test comments were reworded after measurement without changing the checks."
+      ]
+    },
+    {
+      "runner": "scripts/run-mock-tests.sh --coverage compiler and gcov invocation on frozen source",
+      "base_commit": "04182812db596e7e8f4b7ad3f6b9eb47bba8b1c8",
+      "scope": "Packed, independently witnessed hourly heating and hot-water duration. A core journal layout fence preserves the independent handoff while rejecting prior layouts. Coverage was measured with the integrated logic and restore tests.",
+      "sources": {
+        "main/logic/checkup.hpp": "14c282ad1115c2005cdda9e45ef427f1f74e7ae99ff4af1bc0b0532ab18c1752",
+        "main/logic/checkup_persist.hpp": "5d893eaea49867a041c666d300fafbb5efb0a866c28214048d3d0da108035a6c"
+      },
+      "test_source_sha256": "ac501fd0b468de193a1992914f30404d9b82610068acc070a24f36dd0c090114",
+      "measured_line_counts": {
+        "clang-17-darwin": {
+          "covered": 10933,
+          "executable": 11106
+        },
+        "gcc-13-linux-ubuntu24": {
+          "covered": 10406,
+          "executable": 10689
+        },
+        "gcc-15-github-linux-ubuntu26": {
+          "covered": 10398,
+          "executable": 10691
+        },
+        "gcc-15-linux-ubuntu26": {
+          "covered": 10402,
+          "executable": 10691
+        }
+      },
+      "raw_report_sha256": {
+        "clang-17-darwin": "51d1f2432d50b83fd11add769f5f24490497f547e56fb4ab0488a17435a6225e",
+        "gcc-13-linux-ubuntu24": "fb346eaac32840b5e9befcdf1065bc9f2c7a115955e38dd964d65fa7bc30c4e5",
+        "gcc-15-github-linux-ubuntu26": "ad3650e59806b2c95aeb9c0207c4f3a2f840af1f6d9a3ff37ea440808bc6f410",
+        "gcc-15-linux-ubuntu26": "ad80b39bcd8ee3c796e2f87379a6d6e54905bd4431e318bfcbcc461c677a1455"
+      },
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2)",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+        "gcc-15-github-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+      },
+      "measurement_limits": [
+        "The local x86_64 Ubuntu 26.04 GCC image measures the hosted profile candidate. Authoritative GitHub confirmation remains separate.",
+        "Pinned clang-format aligned whitespace after measurement. The affected files retain identical per-line non-whitespace tokens and line counts."
+      ],
+      "measured_sources_before_whitespace_alignment": {
+        "main/logic/checkup_persist.hpp": "cc66bd8e92d9613361594b19beb82dfa8e819109e2f2e60cc6648cd4c25abf37",
+        "test/test_logic.cpp": "6e3d183762fee1e97e42acf0e3f608cc2bee6284b9f79d194d7a41e130da5fed"
+      }
+    },
+    {
+      "runner": "scripts/run-mock-tests.sh --coverage compiler and gcov invocation on frozen source",
+      "base_commit": "04182812db596e7e8f4b7ad3f6b9eb47bba8b1c8",
+      "scope": "Integrated cycling logic and restore tests after separating stored-hour provenance from the presence of a usable wall timestamp.",
+      "sources": {
+        "main/logic/checkup.hpp": "dc70163faa1c8801831c6874341cf183f1d71338174e1c38c4cda574a2dfedd9",
+        "main/logic/checkup_persist.hpp": "743ddf96ddf18fc1f95d3813d17bf1e4fa063baa6522a0657c05168c09ea7736"
+      },
+      "test_source_sha256": "2dfad85da30ca00f9c4f610672ab8cfd621f5ef5c6b90da5edb2ed57e7e9ba63",
+      "measured_line_counts": {
+        "clang-17-darwin": {
+          "covered": 10933,
+          "executable": 11106
+        },
+        "gcc-13-linux-ubuntu24": {
+          "covered": 10407,
+          "executable": 10690
+        },
+        "gcc-15-github-linux-ubuntu26": {
+          "covered": 10399,
+          "executable": 10692
+        },
+        "gcc-15-linux-ubuntu26": {
+          "covered": 10403,
+          "executable": 10692
+        }
+      },
+      "raw_report_sha256": {
+        "clang-17-darwin": "e04904220ead2bbd8260742d59ff3517f618ec11777ffd8612434f27c37016e2",
+        "gcc-13-linux-ubuntu24": "b5583a74003e8da35c9af1487dbfa608ddb487c159ed5d36ccba68aba35d9993",
+        "gcc-15-github-linux-ubuntu26": "b745f00d228e86f6bf3d9821eef7678b19f8b08cbb9c394153bb2120e8286904",
+        "gcc-15-linux-ubuntu26": "c58aff9b6cb381bebb8c9e7a62aad74c3526dc085a4d3508a823ee95b572a227"
+      },
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2)",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+        "gcc-15-github-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+      },
+      "measurement_limits": [
+        "The local x86_64 Ubuntu 26.04 GCC image measures the hosted profile candidate. Authoritative GitHub confirmation remains separate."
+      ]
+    },
+    {
+      "runner": "scripts/run-mock-tests.sh --coverage compiler and gcov invocation on frozen source",
+      "base_commit": "a4107bab35ac5a3b1575f136992b11448a0d2b86",
+      "scope": "Publish positive compressor start evidence even before readable runtime accrues. Tests cover the OFF-to-ON witness across an unreadable sample and joining a running compressor without an earlier OFF.",
+      "sources": {
+        "main/logic/checkup.hpp": "03afafebf683c3605d6eba19c0d1dc52fa4b485f04c3f737fc2056217b8ed7ce"
+      },
+      "test_source_sha256": "141eb537afee545a8c80e68d083841fefd688e3492d7e269a40f6ca1879a74fc",
+      "measured_line_counts": {
+        "clang-17-darwin": {
+          "covered": 10933,
+          "executable": 11106
+        },
+        "gcc-13-linux-ubuntu24": {
+          "covered": 10406,
+          "executable": 10689
+        },
+        "gcc-15-github-linux-ubuntu26": {
+          "covered": 10398,
+          "executable": 10691
+        },
+        "gcc-15-linux-ubuntu26": {
+          "covered": 10402,
+          "executable": 10691
+        }
+      },
+      "raw_report_sha256": {
+        "clang-17-darwin": "b221803b99f0548a5de93ef59015507ed5b05eeb906783a025f3c1f7dcb5af20",
+        "gcc-13-linux-ubuntu24": "970e4ec8da32ad09b99e8730fdba3981dc16131aef8ebb12103c4dabe4be05fc",
+        "gcc-15-github-linux-ubuntu26": "4ac23162fcd12d53e2fe0eae3cecb4e2ecb9f49892cb5d23f50dd682ee74b254",
+        "gcc-15-linux-ubuntu26": "0eef700d08a72af42b793aa63e602ca70ca2188e5a6498f5c27c8ec6f46b366b"
+      },
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2)",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+        "gcc-15-github-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+      },
+      "measurement_limits": [
+        "The local x86_64 Ubuntu 26.04 GCC image measures the hosted profile candidate. Authoritative GitHub confirmation remains separate."
+      ]
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
@@ -1806,8 +1983,8 @@
         "taken": 6
       },
       "main/logic/checkup.hpp": {
-        "taken": 1005,
-        "outcomes": 1087
+        "taken": 1021,
+        "outcomes": 1103
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 331,
@@ -2244,12 +2421,12 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "taken": 1143,
-        "outcomes": 1237
+        "taken": 1162,
+        "outcomes": 1257
       },
       "main/logic/checkup_persist.hpp": {
-        "outcomes": 387,
-        "taken": 387
+        "outcomes": 391,
+        "taken": 391
       },
       "main/logic/chunk_sink.hpp": {
         "outcomes": 308,
@@ -2682,12 +2859,12 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "taken": 1143,
-        "outcomes": 1237
+        "taken": 1162,
+        "outcomes": 1257
       },
       "main/logic/checkup_persist.hpp": {
-        "outcomes": 387,
-        "taken": 387
+        "outcomes": 391,
+        "taken": 391
       },
       "main/logic/chunk_sink.hpp": {
         "outcomes": 308,
@@ -3120,12 +3297,12 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "taken": 1143,
-        "outcomes": 1237
+        "taken": 1162,
+        "outcomes": 1257
       },
       "main/logic/checkup_persist.hpp": {
-        "outcomes": 387,
-        "taken": 387
+        "outcomes": 391,
+        "taken": 391
       },
       "main/logic/chunk_sink.hpp": {
         "outcomes": 308,

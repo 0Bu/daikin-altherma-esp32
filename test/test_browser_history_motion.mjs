@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { INSPECTOR_TRENDS, NO_HISTORY_INSPECTORS, makeHistoryMotionFixture,
   MODBUS_HISTORY_ROWS } from "./test_browser_history_fixture.mjs";
+import { assertCyclingChart } from "./test_browser_cycling.mjs";
 
 const BUDGET_MS = 250;
 export const HISTORY_MOTION_MUTATIONS = Object.freeze([
@@ -53,10 +54,15 @@ export function createScalarGridWitness(root, Observer, trackDescendants = false
 // Native input goes through hit testing and the delegated production handler. A synthetic .click()
 // would miss overlapping SVG targets and would not witness input dispatch on a blocked main thread.
 async function click(page, selector, inspector = "") {
-  const point = await evaluate(page, ({ selector, inspector }) => {
+  const point = await evaluate(page, async ({ selector, inspector }) => {
+    const target = document.querySelector(selector);
+    if (!target) throw new Error("history motion target missing: " + selector);
+    target.scrollIntoView({ block: "center", behavior: "instant" });
+    // WebKit can report a finished accordion transition before its final grid clip is laid out.
+    // Use the next painted geometry before hit testing. Native input timing starts at dispatch.
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const node = document.querySelector(selector);
-    if (!node) throw new Error("history motion target missing: " + selector);
-    node.scrollIntoView({ block: "center", behavior: "instant" });
+    if (!node) throw new Error("history motion target disappeared before hit testing: " + selector);
     const rect = node.getBoundingClientRect(), candidates = [];
     const paths = [...node.querySelectorAll(".sc-hitline, .sc-hitarea")];
     if (typeof node.getPointAtLength === "function") paths.unshift(node);
@@ -932,6 +938,7 @@ export async function assertHistoryMotion(page, server, context) {
   const disclosureMutation = ["history-disclosure-replace", "history-detach", "history-text-stale"].includes(mutation);
   const index = process.argv.indexOf("--history-motion-case");
   const only = index >= 0 ? process.argv[index + 1] : "";
+  if (!only && !mutation) await assertCyclingChart(page, server, context + "/cycling");
   const originalStatus = await page.evaluate("JSON.parse(JSON.stringify(S.status))");
   const lang = await page.evaluate("LANG");
   const fixture = makeHistoryMotionFixture(originalStatus, lang);

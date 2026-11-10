@@ -73,9 +73,14 @@ can restore only from compatible, dated history-journal records after clock sync
 diagnostics-consent generation, consumer-schema/method fingerprint and CRC
 ([identity contract](ARCHITECTURE.md#history-and-diagnosis-persistence)). DHW additionally binds the
 circulation configuration; a mismatch empties only its bucket, preserving independent X10A evidence.
-Old unscoped formats are rejected. A cached model guess cannot admit records. The core journal
-layout version also gates saved hours. Raw trends and the one-shot tank-cooling handoff have their
-own compatibility rules.
+Old unscoped formats are rejected. A cached model guess cannot admit records. Core journal layout 3
+requires independent heating and hot-water runtime. It rejects earlier core records in full,
+including their completed tank-cooling results. Raw trends, the independent Stop journal and the
+one-shot handoff of an unfinished tank-cooling window keep their own compatibility rules.
+
+A late restore can add only hours whose saved labels precede this boot's completed hours. If the
+wall clock cannot date those live hours within the window, recovery keeps the live history and
+skips the saved hours.
 
 **A software restart (any `esp_restart()`) tries to save the open hour.**
 Software restarts include:
@@ -98,18 +103,18 @@ The bounded shutdown drain appends it after every completed hour. It is skipped 
 not newer than the newest completed or already journaled hour, because a second record could only
 replace that hour. A drain that reaches its record budget or cannot take its locks loses it as well.
 
-A run still open at the restart keeps its witnessed start, and its completion is never invented.
-Once the remainder stops, the next boot books it as a censored run whose start it did not witness,
-without adding a start.
+A counted start survives a restart only if its own hour was saved and restored from a compatible
+record. For a run crossing an hour boundary, that is the earlier hour, separate from the open hour
+the restart tries to save. If the compressor is already running when observations resume, the
+new boot counts no start for that run. When it stops, the observed remainder is a censored run.
 
 A power loss, a crash or a task or interrupt watchdog panic still loses the open hour. Completed
 hours not yet saved stay missing.
 
-Current observations take precedence. A whole completed or open hour expires when its beginning
-leaves the rolling day, even if polling stops. A completed record therefore lasts at most 23 hours
-after its endpoint, matching ordinary ring replacement. This is hourly event bookkeeping, not exact
-event reconstruction: a completed tank-cooling window can use an initial temperature from the
-preceding bucket. Later clock corrections do not renew an already assigned monotonic deadline;
+Current observations take precedence. The
+[retention rules](ARCHITECTURE.md#history-and-diagnosis-persistence) distinguish live and restored
+hours. A completed tank-cooling window can use an initial temperature
+from the preceding bucket. Later clock corrections do not renew an assigned monotonic deadline;
 read-time span cannot fabricate observation coverage. `/status.health.persist` names
 `flash_pending` while confirmation is awaited (not proof that saved hours exist), `flash` after
 reconstruction, or `fresh` when no stored intervals were selected, including precedence/capacity

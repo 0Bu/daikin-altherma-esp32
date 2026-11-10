@@ -61,7 +61,7 @@ const catalog = catalogContext.__catalog;
 const lazyDomainCodes = ["zh", "ja", "nb", "sv", "fi"];
 const englishKeys = Object.keys(catalog.en).sort();
 const englishKeyOrder = Object.keys(catalog.en);
-assert.equal(englishKeys.length, 947, "the test must track the complete current UI catalog");
+assert.equal(englishKeys.length, 950, "the test must track the complete current UI catalog");
 for (const [code, source] of localeSources) {
   const sections = [`INSPECT_I18N.${code}`, `MODEL_DESCRIPTION_I18N.${code}`]
     .map(marker => source.indexOf(marker)).filter(index => index >= 0);
@@ -89,53 +89,33 @@ for (const code of codes) {
     }
   }
   assert.equal(dict[`lang.${code}`], nativeNames[code], `${code} must name itself in its own tongue`);
+  const savedTime = dict["check.hour.saved"]("12:34");
+  assert.equal(savedTime.match(/12:34/g)?.length, 1, `${code} preserves the supplied saved time`);
+  assert.notEqual(savedTime, dict["check.hour.ending"]("12:34"),
+    `${code} distinguishes saved times from interval ends`);
   if (code !== "en") {
     assert.ok(translatedStrings > stringCount * 0.65,
       `${code} translates too little of the catalog (${translatedStrings}/${stringCount})`);
   }
 }
-// Stop classifications require a positive compressor witness and confirmed Heating. A numerical
-// upper bound alone also accepts OFF and must not replace that eligibility in any shipped locale.
-// Storage-loss notices are a separate boot-local counter watermark, outside the six overlapping
-// qualifiers of the retained-stop denominator. Keep all three boundaries visible in native copy.
-const stopEligibility = {
-  en: /During confirmed heating/, de: /Während bestätigten Heizbetriebs/,
-  es: /Durante calefacción confirmada/, fr: /En chauffage confirmé/,
-  it: /Durante il riscaldamento confermato/, pl: /Podczas potwierdzonego ogrzewania/,
-  cs: /Při potvrzeném vytápění/, uk: /Під час підтвердженого опалення/,
-  zh: /已确认供暖时/, ja: /暖房が確認されたとき/, nb: /Ved bekreftet oppvarming/,
-  sv: /Under bekräftad uppvärmning/, fi: /Vahvistetun lämmityksen aikana/,
-};
-const stopPreHeater = {
-  en: /pre-backup-heater/, de: /vor dem Zusatzheizer/, es: /antes del calentador de apoyo/,
-  fr: /avant l’appoint électrique/, it: /prima del riscaldatore di supporto/,
-  pl: /przed grzałką wspomagającą/, cs: /před přídavným ohřívačem/,
-  uk: /перед додатковим нагрівачем/, zh: /电辅助加热器前/, ja: /電気補助ヒーター前/,
-  nb: /før tilleggsvarmeren/, sv: /före tillsatsvärmaren/, fi: /ennen lisälämmitintä/,
-};
-const stopLossLabels = {
-  en: "Storage loss notices", de: "Speicherverlustmeldungen",
-  es: "Avisos de pérdida de almacenamiento", fr: "Avis de perte de stockage",
-  it: "Avvisi di perdita di archiviazione", pl: "Zgłoszenia utraty danych w pamięci",
-  cs: "Hlášení ztrát v úložišti", uk: "Повідомлення про втрати у сховищі",
-  zh: "存储丢失通知", ja: "保存データ欠落通知", nb: "Varsler om lagringstap",
-  sv: "Meddelanden om lagringsförlust", fi: "Tallennushäviöilmoituksia",
-};
+// Keep the completed-run count and its optional average independently readable in each locale.
 for (const code of codes) {
   const dict = catalog[code];
-  assert.equal(dict["check.stop.other"].split("|").length, 6,
-    `${code}: loss notices must not become a seventh retained-stop qualifier`);
-  assert.match(dict["check.stop.rule"], stopEligibility[code],
-    `${code}: stop temperature context must require confirmed Heating`);
-  assert.match(dict["check.stop.rule"], /0 < [^;，、,]+≤22/,
-    `${code}: stop temperature context must exclude a zero-speed compressor`);
-  assert.match(dict["check.stop.rule"], stopPreHeater[code],
-    `${code}: reported LWT must name the sensor before the backup heater`);
-  const loss = dict["check.stop.loss"]("≥123");
-  assert.equal((loss.match(/≥123/g) || []).length, 1,
-    `${code}: loss watermark must preserve one explicit lower bound`);
-  assert.equal(loss, `${stopLossLabels[code]} ≥123`,
-    `${code}: the separate storage-loss notice must stay plain and retain its lower bound`);
+  const runs = dict["check.cycling.runs"];
+  for (const n of [0, 1, 12]) {
+    assert.deepEqual(runs(n).match(/\d+/g), [String(n)], `${code} keeps one run count`);
+    assert.notEqual(runs(n), dict["check.starts"](n), `${code} distinguishes runs from starts`);
+  }
+  const mean = dict["check.cycling.mean"]("16 min");
+  assert.equal(mean.match(/16 min/g)?.length, 1, `${code} preserves the supplied mean duration`);
+  const assessments = ["short", "normal", "few", "waiting", "class_unavailable", "unavailable", "stale"]
+    .map(key => dict[`check.cycling.${key}`]);
+  assert.equal(new Set(assessments).size, assessments.length, `${code} distinguishes assessment states`);
+  for (const value of assessments) {
+    assert.ok(value.trim(), `${code} assessment is empty`);
+    if (code !== "en") assert.ok(!Object.values(catalog.en).includes(value),
+      `${code} assessment falls back to English`);
+  }
 }
 // Completed DHW windows are counts. The current candidate and settling remainder are durations;
 // there is no six-hour assessment target and no second unit may be added to a duration.
@@ -182,7 +162,7 @@ for (const [count, cycle, start, gap] of [
 }
 
 // Count-bearing diagnosis copy must not silently keep a plural adjective/verb for a real singular
-// observation. Pin the surfaces that render abort, paired, cooling and unclassified populations.
+// observation. Pin the surfaces that render abort, paired and completed-run populations.
 assert.match(catalog.de["check.detail.dhw_blocked_link"](1, 20), /Abgebrochene Fenster: 1,/);
 assert.match(catalog.de["check.detail.dhw_blocked_link"](2, 20), /Abgebrochene Fenster: 2,/);
 // Structural markers only, not meaning: every locale's blind list item carries no parentheses (it
@@ -222,20 +202,27 @@ assert.equal(catalog.de["check.paired_cycles"](1), "1 zugeordnet");
 assert.match(catalog.es["check.detail.dhw_blocked"](1, "x", 20), /Ventanas descartadas: 1 \(x\)/);
 assert.match(catalog.es["check.detail.dhw_blocked"](2, "x", 20), /Ventanas descartadas: 2 \(x\)/);
 assert.equal(catalog.es["check.paired_cycles"](1), "1 emparejado");
-assert.equal(catalog.es["check.cycling_cooling"](1), "refrigeración: se excluyó 1");
+assert.equal(catalog.es["check.cycling.runs"](1), "1 ciclo");
 assert.match(catalog.fr["check.detail.dhw_blocked_link"](1, 20), /Fenêtres interrompues : 1,/);
 assert.equal(catalog.fr["check.paired_cycles"](1), "1 apparié");
-assert.equal(catalog.fr["check.cycling_censored"](1), "1 non classé");
+assert.equal(catalog.fr["check.cycling.runs"](1), "1 cycle");
 assert.equal(catalog.it["check.paired_cycles"](1), "1 abbinato");
-assert.equal(catalog.it["check.cycling_cooling"](1), "raffrescamento: 1 escluso");
-assert.equal(catalog.it["check.cycling_censored"](1), "1 non classificato");
-assert.equal(catalog.cs["check.cycling_censored"](1), "1 nezařazený");
+assert.equal(catalog.it["check.cycling.runs"](1), "1 ciclo");
+assert.deepEqual([1, 2, 12].map(catalog.cs["check.cycling.runs"]), ["1 cyklus", "2 cykly", "12 cyklů"]);
+assert.deepEqual([1, 2, 12].map(catalog.pl["check.cycling.runs"]), ["1 cykl", "2 cykle", "12 cykli"]);
+assert.deepEqual([1, 2, 12].map(catalog.uk["check.cycling.runs"]), ["1 цикл", "2 цикли", "12 циклів"]);
 assert.equal(catalog.sv["check.summary.warnings"](1), "1 varning");
 assert.equal(catalog.sv["check.summary.warnings"](2), "2 varningar");
 assert.match(catalog.sv["check.detail.dhw_aborted"](1, "x", 20), /1 kandidat blev förkastad/);
 assert.match(catalog.sv["check.detail.dhw_aborted"](2, "x", 20), /2 kandidater blev förkastade/);
-assert.equal(catalog.sv["check.cycling_cooling"](1), "Kylning 1 utelämnad");
-assert.equal(catalog.sv["check.cycling_cooling"](2), "Kylning 2 utelämnade");
+assert.equal(catalog.sv["check.cycling.runs"](1), "1 körning");
+assert.equal(catalog.sv["check.cycling.runs"](2), "2 körningar");
+assert.equal(catalog.de["check.cycling.runs"](12), "12 Läufe");
+assert.equal(catalog.de["check.cycling.mean"]("16 min"), "Ø 16 min");
+assert.equal(catalog.en["check.cycling.short"], "Heating runs are short on average.");
+assert.equal(catalog.de["check.cycling.short"], "Die Heizläufe sind im Schnitt kurz.");
+assert.equal(catalog.en["check.cycling.normal"], "Heating runs are long enough on average.");
+assert.equal(catalog.de["check.cycling.normal"], "Die Heizläufe dauern im Schnitt lang genug.");
 
 // The specialist copy visible under the schematic remains lazy, but it is no longer allowed to
 // fall back to English for any added language. Every diagram target gets a native title and a
@@ -284,21 +271,19 @@ assert.deepEqual(Object.keys(modelSchema), ["health_fault", "health_dhw_loss", "
   "oueeprom"], "model-description locale order drifted");
 const faultCodes = Array.from(faultSchema, (entry) => entry.code);
 assert.equal(faultCodes.length, 63, "fault-code locale order must track every canonical code");
-// Pin the denominators independently of their numeric thresholds. Classification uses completed
-// runs with proven handovers excluded, plus heating/uncertain runtime coverage. Defrost share uses
-// only compressor runtime with both input states readable.
-const checkupDenominators = {
-  es: [/todos los ciclos completos/, /estados de compresor y desescarche legibles/, /tiempo de marcha del compresor/],
-  fr: [/tous les cycles complets/, /états compresseur et dégivrage lisibles/, /temps de marche du compresseur/],
-  it: [/tutti i cicli completati/, /stati compressore e sbrinamento leggibili/, /tempo di marcia del compressore/],
-  pl: [/wszystkich zakończonych cykli/, /czytelnych stanach sprężarki i odszraniania/, /czasu pracy sprężarki/],
-  cs: [/všech dokončených běhů/, /čitelném stavu kompresoru i odmrazení/, /doby chodu kompresoru/],
-  uk: [/усіх завершених циклів/, /читабельними станами компресора й розморожування/, /часу роботи компресора/],
-  zh: [/所有完整运行/, /压缩机及除霜状态均可读/, /压缩机运行时间/],
-  ja: [/全完了運転/, /圧縮機と除霜の状態が両方読める/, /圧縮機運転時間/],
-  nb: [/alle fullførte kjøringer/, /både kompressor- og avrimingsstatus er lesbar/, /kompressorens driftstid/],
-  sv: [/alla avslutade körningar/, /både kompressor- och avfrostningsstatus kan läsas/, /kompressorns drifttid/],
-  fi: [/kaikista päättyneistä jaksoista/, /sekä kompressorin että sulatuksen tila on luettavissa/, /kompressorin käyntiajasta/],
+// Defrost share uses only compressor runtime with both input states readable.
+const defrostDenominators = {
+  es: [/estados de compresor y desescarche legibles/, /tiempo de marcha del compresor/],
+  fr: [/états compresseur et dégivrage lisibles/, /temps de marche du compresseur/],
+  it: [/stati compressore e sbrinamento leggibili/, /tempo di marcia del compressore/],
+  pl: [/czytelnych stanach sprężarki i odszraniania/, /czasu pracy sprężarki/],
+  cs: [/čitelném stavu kompresoru i odmrazení/, /doby chodu kompresoru/],
+  uk: [/читабельними станами компресора й розморожування/, /часу роботи компресора/],
+  zh: [/压缩机及除霜状态均可读/, /压缩机运行时间/],
+  ja: [/圧縮機と除霜の状態が両方読める/, /圧縮機運転時間/],
+  nb: [/både kompressor- og avrimingsstatus er lesbar/, /kompressorens driftstid/],
+  sv: [/både kompressor- och avfrostningsstatus kan läsas/, /kompressorns drifttid/],
+  fi: [/sekä kompressorin että sulatuksen tila on luettavissa/, /kompressorin käyntiajasta/],
 };
 for (const code of lazyDomainCodes) {
   const source = localeSources.get(code);
@@ -402,17 +387,13 @@ for (const code of codes.slice(2)) {
   assert.match(joined("health_dhw_loss"), /0[,.]8/, `${code} loses the 0.8 K/h project threshold`);
   assert.doesNotMatch(joined("health_dhw_loss"), /1[,.]85/,
     `${code} must not revive the removed upper cooling detection limit`);
-  assert.match(joined("health_cycling"), /\b10\b/, `${code} loses the 10 min cycling threshold`);
-  assert.match(joined("health_cycling"), /\b12\b/, `${code} loses the 12-run population`);
-  assert.match(joined("health_cycling"), checkupDenominators[code][0],
-    `${code} classification must use all completed runs`);
-  assert.equal((joined("health_cycling").match(/90\s*%/g) || []).length, 2,
-    `${code} must retain both count and runtime coverage requirements`);
+  assert.doesNotMatch(joined("health_cycling"), /\d|X10A|Daikin|rps/,
+    `${code} cycling model copy must stay in plain language`);
   assert.match(joined("health_defrost"), /15\s*%/, `${code} loses the 15% defrost heuristic`);
   assert.match(joined("health_defrost"), /\b3\b/, `${code} loses the three-defrost minimum`);
-  assert.match(joined("health_defrost"), checkupDenominators[code][1],
+  assert.match(joined("health_defrost"), defrostDenominators[code][0],
     `${code} defrost runtime must require both readable states`);
-  assert.match(joined("health_defrost"), checkupDenominators[code][2],
+  assert.match(joined("health_defrost"), defrostDenominators[code][1],
     `${code} defrost share must name compressor runtime`);
   assert.match(joined("health_pressure"), /1[,.]0|1\s*bar/i,
     `${code} loses the 1.0 bar pressure threshold`);
