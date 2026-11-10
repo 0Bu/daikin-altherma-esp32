@@ -1754,6 +1754,20 @@
         "All measured Docker logic suites completed; their canonical runner rejected only the previous exact history_persist.hpp inventory before this measured update. The unchanged parser then verifies the retained reports on the host.",
         "The local amd64 Docker run is not an authoritative GitHub-hosted run. Exact PR-head GitHub checks remain required before merge."
       ]
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple Clang 17, arm64",
+        "gcc-13-linux-ubuntu24": "GCC 13.3.0, pinned ESP-IDF 6.1 Docker, aarch64",
+        "gcc-15-github-linux-ubuntu26": "GCC 15.2.0, Ubuntu 26.04 Docker, x86_64",
+        "gcc-15-linux-ubuntu26": "GCC 15.2.0, Ubuntu 26.04 Docker, aarch64"
+      },
+      "hosted_confirmation": "The hosted profile uses the measured x86_64 Ubuntu 26.04 container as its candidate. GitHub CI must confirm it before merge.",
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "scope": "Hourly runtime split requires matching running endpoints. Cases cover heating, DHW, cooling, unavailable mode, transitions and an inconsistent split counter. The measured checkup.hpp inventories are clang-17-darwin 1000/1083 to 1005/1087, gcc-13-linux-ubuntu24 1138/1233 to 1143/1237, gcc-15-github-linux-ubuntu26 1138/1233 to 1143/1237, gcc-15-linux-ubuntu26 1138/1233 to 1143/1237. The 95-percent line floor and all historical ratios are retained.",
+      "source": "main/logic/checkup.hpp",
+      "source_sha256": "ad44853951d4f101e6cf4444c9142b6af4c74f91406d08170aaa0dcfc39ed42e",
+      "test_source_sha256": "c72939d860fdc83aee4fe16b76b8fed3b5d874f205a8149435f94143afedd894"
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
@@ -1792,8 +1806,8 @@
         "taken": 6
       },
       "main/logic/checkup.hpp": {
-        "taken": 1000,
-        "outcomes": 1083
+        "taken": 1005,
+        "outcomes": 1087
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 331,
@@ -2230,8 +2244,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "taken": 1138,
-        "outcomes": 1233
+        "taken": 1143,
+        "outcomes": 1237
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 387,
@@ -2668,8 +2682,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "taken": 1138,
-        "outcomes": 1233
+        "taken": 1143,
+        "outcomes": 1237
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 387,
@@ -3106,8 +3120,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "taken": 1138,
-        "outcomes": 1233
+        "taken": 1143,
+        "outcomes": 1237
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 387,

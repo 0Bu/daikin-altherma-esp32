@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 45cafa028c26e572aa644f3614035534eda42b53d831f584a564bc96c5a876c3 -->
+<!-- diagnostic-evidence-contract: 124398bb7631767e6988954cf1cda405952867163cb7b0efda71e0b6a0ab90b1 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -221,6 +221,10 @@ supports the relevance of very short runs but does not provide a universal Daiki
 pure space heating, DHW or cooling. Missing class or RPS readings may bridge at most 15 seconds
 between matching known-running endpoints, using their monotonic timestamps independently of hourly
 duration booking; that bridge does not add readable coverage.
+A separate hourly chart integrates intervals with running compressor readings at both endpoints.
+It attaches a heating/DHW split only when each counted interval has matching heating or DHW
+readings at both ends. An hourly start count and hourly runtime can cover different runs and do
+not form a completed-run mean.
 A changed recovered class, unknown stop edge or longer gap censors the run. A pure DHW run may
 hold one final valve return to the room circuit for at most 30 seconds, accepted only at a known OFF
 edge. The indoor mode must remain readable and may still say DHW; cooling, a return to the DHW

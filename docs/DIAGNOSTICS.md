@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: 2c99d0755fb6f6d192e5f01d92d46455b64d6d1a44068a15e2833c4f33861bc7 -->
+<!-- user-docs-contract: c7a9f635360330329f111029c8e80d715e43a14072dc1166fdf0590bba7fba9c -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default. Enable **Plant diagnostics** under **Settings → Firmware** to start an evidence
@@ -104,8 +104,10 @@ software restart preserves the remaining settling time, but unseen charging can 
 
 **In plain language:** The board counts starts and completed compressor runs as space heating,
 domestic hot water (DHW), cooling or unclassified, and plots hourly starts and compressor runtime
-across the 24-hour window. Unclassified counts explain missing readings,
-transitions, heating/DHW handovers, journal boundaries and unwitnessed starts.
+across the 24-hour window. Gray bars show runtime without a heating or hot-water label when the
+mode split is incomplete. An hourly bar can include part of a run that started before that hour.
+Unclassified runs explain missing readings, transitions, heating/DHW handovers, journal boundaries
+and unwitnessed starts.
 
 **Meaning:** At least **12 completed space-heating runs** can carry the assessment when both run
 count and runtime coverage reach **90%**. Positively observed heating/DHW handovers remain visible

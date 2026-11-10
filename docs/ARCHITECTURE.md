@@ -268,8 +268,9 @@ requires a bump for changes to converter arithmetic, formatting/plausibility or 
 metadata cannot express. This is a maintenance contract, not automatic recognition of every code
 change. The separate trend identity and its old-scale retention rule above are unchanged.
 The core journal layout version also fences field moves that preserve the byte count. The cycling
-layout change left two prior byte layouts under one fingerprint, so those saved hours are ineligible
-for restoration. The separate Stop journal and DHW restart handoff retain their own identities.
+layout change left two prior byte layouts under one fingerprint. Those saved hours cannot
+establish the current layout or its paired mode split. The separate Stop journal and DHW restart
+handoff retain their own identities.
 Circulation broker/mapping/interpretation
 identity gates only DHW buckets; changed circulation must not retire independent X10A evidence.
 A narrowly scoped one-shot DHW handoff may preserve an unfinished candidate; it cannot lend coverage
@@ -288,9 +289,7 @@ While a backward clock step leaves the cursor ahead of the newest live hour, thi
 an ordinary append.
 Current source confirmation requires this boot's full profile/link evidence, not cached startup
 identity. Whole live and restored hours expire when their beginning leaves the rolling day,
-independently of producer progress; abandoned open evidence expires too. The current 80-byte
-diagnosis bucket changes its journal fingerprint and starts fresh after a format update; ordinary
-trend records are unaffected.
+independently of producer progress; abandoned open evidence expires too.
 The software-restart DHW handoff is consumed once; downtime/startup remains blind and can
 invalidate it without incrementing ordinary abort counters.
 Every `esp_restart()` runs the checkup shutdown handler before the history drain, because ESP-IDF

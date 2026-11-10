@@ -1242,7 +1242,7 @@ async function assertPlantDiagnosis(page, context) {
           observed_s: 77760, required_s: 77760,
           hours: [
             { starts: 2, run_s: 1800, observed_s: 3600 },
-            { starts: 1, run_s: 900, observed_s: 3600 }
+            { starts: 1, run_s: 900, observed_s: 3600, space_s: 900, dhw_s: 0 }
           ],
           stop_context: {
             confirmed: true, readable_s: 3600, observed_hours: 2, dated: false,
@@ -1316,6 +1316,14 @@ async function assertPlantDiagnosis(page, context) {
       `${context}: cycling chart must render when starts exist`);
     assert.equal(await page.evaluate(`document.querySelectorAll(".checkup-chart-col").length`), 24,
       `${context}: cycling chart must render all 24 hour columns`);
+    const [neutral, heating] = await page.evaluate(`Array.from(document.querySelectorAll(
+      ".checkup-chart-col:not(.unobserved)"), col => ({ tip: col.dataset.tip,
+        color: getComputedStyle(col.querySelector('i')).backgroundColor }))`);
+    assert.ok(!neutral.tip.includes("Ø") && !neutral.tip.endsWith(await page.evaluate("t('mode.heat')")),
+      `${context}: unclassified runtime displays without a guessed mode or run average`);
+    assert.ok(heating.tip.endsWith(await page.evaluate("t('mode.heat')")),
+      `${context}: matched heating runtime retains its mode`);
+    assert.notEqual(neutral.color, heating.color, `${context}: unclassified bar has a neutral color`);
     const stopPopulation = await page.evaluate("t('check.stop.population', '4')");
     assert.ok((await stopText()).includes(stopPopulation),
       `${context}: measured starts and the timeline retain the independent stop context`);

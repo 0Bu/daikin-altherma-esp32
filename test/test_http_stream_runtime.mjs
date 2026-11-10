@@ -228,6 +228,10 @@ try {
         assert.equal(s.pending,false);assert.equal(s.dated,true);assert.equal(s.coverage_partial,false);
         assert.equal(s.restore_pending,false);assert.equal(s.persistence_pending,false);
       } else {
+        assert.deepEqual(cycling.hours,[
+          {starts:2,run_s:1800,observed_s:3600,space_s:900,dhw_s:900},
+          {starts:1,run_s:600,observed_s:3600},
+        ],`${name}: totals and optional split survive alongside stop context`);
         assert.equal(s.confirmed,true);assert.equal(s.capability_mask,27);
         assert.equal(s.readable_s,3600);assert.equal(s.observed_hours,2);assert.equal(s.dropped,9);
         assert.deepEqual(stopCountKeys.map(key=>s[key]),[7,1,2,3,2,1,0,true]);

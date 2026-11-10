@@ -15984,31 +15984,42 @@ static void test_checkup() {
               hours.hours[2].observed_s == 900);
         CHECK(checkup_cycling_hours(ring, false).count == 0);
 
-        CheckupRing legacy{};
-        legacy.count                   = 1;
-        legacy.buf[0].run_s            = 800;
-        legacy.buf[0].dhw_run_s        = 300;
-        legacy.buf[0].rps_observed_s   = 3600;
-        legacy.pending.run_s           = 400;
-        legacy.pending.dhw_run_s       = 500;
-        legacy.pending.rps_observed_s  = 1800;
-        const CheckupCyclingHours legh = checkup_cycling_hours(legacy, true);
-        CHECK(legh.count == 2);
-        CHECK(legh.hours[0].dhw_s == 300 && legh.hours[0].space_s == 500);
-        CHECK(legh.hours[1].dhw_s == 400 && legh.hours[1].space_s == 0);
-
-        // Exercise checkup_step accumulation of dhw_hour_s
-        CheckupState  step_st{};
-        CheckupBucket step_b{};
-        CheckupSample step_s{};
-        step_s.rps_known   = true;
-        step_s.rps_running = true;
-        step_s.valve_known = true;
-        step_s.valve_dhw   = true;
-        checkup_step(step_st, step_b, step_s, 0);
-        checkup_step(step_st, step_b, step_s, 10'000'000);
-        CHECK(step_b.run_s == 10);
-        CHECK(step_b.dhw_hour_s == 10);
+        const auto running = [](CheckupOperatingMode mode, bool dhw) {
+            CheckupSample s{};
+            s.rps_known = s.rps_running = s.valve_known = true;
+            s.operating_mode                            = mode;
+            s.valve_dhw                                 = dhw;
+            return s;
+        };
+        const auto heat          = running(CheckupOperatingMode::Heating, false);
+        const auto dhw           = running(CheckupOperatingMode::Other, true);
+        const auto cooling       = running(CheckupOperatingMode::Cooling, false);
+        const auto unknown       = running(CheckupOperatingMode::Unknown, false);
+        const auto observed_hour = [](const CheckupSample& before, const CheckupSample& after) {
+            CheckupState  state{};
+            CheckupBucket bucket{};
+            checkup_step(state, bucket, before, 0);
+            checkup_step(state, bucket, after, 10'000'000);
+            // A completed charge is attributed to its start hour independently of this clock.
+            bucket.dhw_run_s = 30;
+            return checkup_bucket_cycling_hour(bucket);
+        };
+        const auto heating_hour = observed_hour(heat, heat);
+        CHECK(heating_hour.run_s == 10 && heating_hour.space_s == 10 && heating_hour.dhw_s == 0);
+        const auto dhw_hour = observed_hour(dhw, dhw);
+        CHECK(dhw_hour.run_s == 10 && dhw_hour.space_s == 0 && dhw_hour.dhw_s == 10);
+        for (const auto& endpoints :
+             {std::pair{cooling, cooling}, std::pair{unknown, unknown}, std::pair{heat, dhw},
+              std::pair{dhw, heat}, std::pair{unknown, dhw}}) {
+            const auto hour = observed_hour(endpoints.first, endpoints.second);
+            CHECK(hour.run_s == 10 && hour.observed_s == 10);
+            CHECK(hour.space_s == 0 && hour.dhw_s == 0);
+        }
+        CheckupBucket inconsistent{};
+        inconsistent.run_s      = 10;
+        inconsistent.dhw_hour_s = 20;
+        const auto incomplete   = checkup_bucket_cycling_hour(inconsistent);
+        CHECK(incomplete.run_s == 10 && incomplete.space_s == 0 && incomplete.dhw_s == 0);
 
         CheckupRing full{};
         full.count                      = CHECKUP_COMPLETED_BUCKETS;

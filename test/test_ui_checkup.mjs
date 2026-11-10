@@ -422,11 +422,20 @@ assert.match(ui.detail({ ...cycling, verdict: "ok", evidence: "observation",
 const cyclingWithHours = { ...cycling, hours: [
   { starts: 3, run_s: 1800, observed_s: 3600 },
   { starts: 0, run_s: 0, observed_s: 3600 },
-  { starts: 1, run_s: 600, observed_s: 1200 },
+  { starts: 1, run_s: 600, observed_s: 1200, space_s: 0, dhw_s: 600 },
+  { starts: 2, run_s: 1200, observed_s: 1600, space_s: 600, dhw_s: 600 },
+  { starts: 1, run_s: 600, observed_s: 1200, space_s: 600, dhw_s: 0 },
+  { starts: 0, run_s: 1200, observed_s: 1200, space_s: null, dhw_s: 1200 },
 ] };
 assert.match(ui.detail(cyclingWithHours), /\bcheckup-cycling-chart\b/);
 assert.match(ui.detail(cyclingWithHours), /\bcheckup-cycling-grid\b/);
 assert.equal((ui.detail(cyclingWithHours).match(/class="checkup-chart-col\b/g) || []).length, 24);
+assert.match(ui.detail(cyclingWithHours), /3 starts · 30 min"><b class="warn">3<\/b><s><i class=""/);
+assert.match(ui.detail(cyclingWithHours), /1 start · 10 min · Hot water/);
+assert.match(ui.detail(cyclingWithHours), /2 starts · 20 min · Heating \+ hot water/);
+assert.match(ui.detail(cyclingWithHours), /1 start · 10 min · Heating/);
+assert.match(ui.detail(cyclingWithHours), /0 starts · 20 min"><b><\/b><s><i class=""/);
+assert.doesNotMatch(ui.detail(cyclingWithHours), /data-tip="[^"]*Ø/);
 for (const starts of [0, 13]) {
   const mixed = ui.detail({ ...cyclingWithHours, starts, stop_context: stopContext });
   assert.match(mixed, /\bcheckup-cycling-chart\b/);
