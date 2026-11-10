@@ -308,9 +308,10 @@ function scalarGridHarness(historySource) {
       focus() { if (this.isConnected) document.activeElement = this; },
       get outerHTML() {
         return `<${tag}${[...attributes].map(([name, value]) => ` ${name}="${value}"`).join("")}>` +
-          this.childNodes.map(child => child.outerHTML).join("") + `</${tag}>`;
+          this.innerHTML + `</${tag}>`;
       },
       isEqualNode(other) { return this.outerHTML === other.outerHTML; },
+      get innerHTML() { return this.childNodes.map(child => child.outerHTML).join(""); },
       set innerHTML(html) { this.writes++; adopt(this, templates.get(html)()); },
       replaceChildren(fragment) { this.writes++; adopt(this, fragment.childNodes); },
     };
@@ -327,7 +328,11 @@ function scalarGridHarness(historySource) {
   return { document, state, element, text,
     mount(id, factory) { const host = element("div", { id }, factory()); host.mounted = true; return host; },
     repaint(host, factory) {
-      const html = factory().map(node => node.outerHTML).join("");
+      const nodes = factory();
+      const html = nodes.map(node => node.outerHTML).join("");
+      nodes.forEach((node, index) => {
+        if (node.nodeType === 1) templates.set(node.innerHTML, () => factory()[index].childNodes);
+      });
       templates.set(html, factory);
       ctx.replace(host, html);
     },
@@ -388,7 +393,7 @@ function assertScalarGridPolling(historySource) {
 }
 
 assertScalarGridPolling(disclosureSource);
-const scalarBranch = `if (!html.includes('class="vhist') && host.id !== "valueGroups" && host.id !== "inspRows")
+const scalarBranch = `if (!html.includes('class="vhist') && host.id !== "valueGroups" && host.id !== "inspRows" && !diagnosisCard)
     host.innerHTML = html;`;
 assert.equal(disclosureSource.split(scalarBranch).length, 2, "scalar-grid negative control must target one production branch");
 assert.throws(() => assertScalarGridPolling(disclosureSource.replace(scalarBranch,
@@ -400,6 +405,49 @@ assert.throws(() => assertScalarGridPolling(disclosureSource.replace(scalarBranc
 error => error.code === "ERR_ASSERTION" && error.message.startsWith("Settings no-chart poll must reset live select state"),
 "extending scalar retention to Settings must fail its live-select reset assertion");
 console.log("UI scalar-grid reconciliation and both branch negative controls passed");
+
+function assertDiagnosisCardPolling(historySource) {
+  const h = scalarGridHarness(historySource), { element: el, text } = h;
+  const grid = (reading, { diagnosis = true, completed = false, state = "ready" } = {}) => () => [
+    ...(diagnosis ? [el("section", { class: "vgroup", "data-dashboard-card": "diagnosis" }, [
+      el("span", {}, [text(completed ? "Measured" : "Collecting")]),
+      ...(completed ? [el("div", { "data-completed": "" }, [text("1 run")])] : []),
+    ])] : []),
+    el("section", { class: "vgroup", "data-dashboard-card": "readings", "data-state": state }, [
+      el("div", { class: "vitem" }, [el("button", { "data-desc": "temperature" }, [text(reading)])]),
+    ]),
+  ];
+  const host = h.mount("valueGroups", grid("20 °C"));
+  const [diagnosis, sibling] = host.childNodes;
+  diagnosis.hidden = true;
+  const button = sibling.querySelector("[data-desc]");
+  button.focus();
+  h.repaint(host, grid("21 °C", { completed: true }));
+  assert.equal(host.childNodes[1], sibling, "a diagnosis refresh must not detach an unrelated card");
+  assert.equal(host.writes, 0);
+  assert.equal(host.childNodes[0], diagnosis);
+  assert.equal(diagnosis.hidden, true);
+  assert.equal(diagnosis.querySelector("[data-completed]").innerHTML, "1 run");
+  assert.equal(h.document.activeElement, button);
+  assert.equal(button.innerHTML, "21 °C");
+
+  h.repaint(host, grid("22 °C", { state: "changed" }));
+  assert.equal(host.writes, 1, "an unrelated structural change must still use the grid fallback");
+  assert.ok(diagnosis.querySelector("[data-completed]"), "failed outer preflight must leave the old diagnosis intact");
+  h.repaint(host, grid("22 °C", { diagnosis: false }));
+  assert.equal(host.childNodes.length, 1, "removing the diagnosis must still update the grid");
+  h.repaint(host, grid("22 °C"));
+  assert.equal(host.childNodes[0].getAttribute("data-dashboard-card"), "diagnosis");
+}
+
+assertDiagnosisCardPolling(disclosureSource);
+const diagnosisBranch = `if (host.id !== "valueGroups" || a.parentNode !== host ||
+          a.getAttribute("data-dashboard-card") !== "diagnosis") return false;`;
+assert.equal(disclosureSource.split(diagnosisBranch).length, 2);
+assert.throws(() => assertDiagnosisCardPolling(disclosureSource.replace(diagnosisBranch, "return false;")),
+  error => error.code === "ERR_ASSERTION" && error.message.startsWith("a diagnosis refresh must not detach"),
+  "the old whole-grid fallback must fail the diagnosis-continuity assertion");
+console.log("UI diagnosis-card reconciliation and its whole-grid fallback negative control passed");
 
 function assertInspectorScalarPolling(historySource) {
   const h = scalarGridHarness(historySource), { element: el, text } = h;

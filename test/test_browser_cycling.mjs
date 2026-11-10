@@ -181,7 +181,7 @@ export async function assertCyclingChart(page, server, context) {
     assert.equal(rendered.tabStops, 1, context + ": native hour buttons share one keyboard entry");
     assert.equal(rendered.slider, false, context + ": the chart itself is the hour selector");
     assert.equal(rendered.fits, true, context + ": the complete chart fits inside the viewport");
-    assert.equal(rendered.total, "5 starts", context + ": the start total has its own line");
+    assert.equal(rendered.total, "≥5 starts", context + ": the start total has its own line");
     const copy = await page.evaluate(`[
       [t("mode.heat"), t("check.cycling.runs", 3) + " · " + t("check.cycling.mean", "8 min")],
       [t("mode.dhw"), t("check.cycling.runs", 2) + " · " + t("check.cycling.mean", "15 min")],
@@ -339,11 +339,16 @@ export async function assertCyclingChart(page, server, context) {
     await assertSegments(1, {}, "the new observation does not hatch its unelapsed hour");
     assert.equal(await readout(), "≥" + await page.evaluate("t('check.starts', 1)"),
       context + ": the default readout reports a lower bound without invented runtime");
-    assert.deepEqual(await evaluate(page, row => {
+    const totals = () => evaluate(page, row => {
       const button = document.querySelector(row);
       return [button.querySelector(".vrow-val").textContent,
-        button.closest(".vitem").querySelector(".checkup-cycling-total").textContent];
-    }, ROW), ["≥1", "≥1 start"], context + ": both totals mark a positive count with no paired time");
+        button.closest(".vitem").querySelector(".checkup-cycling-total")?.textContent || null];
+    }, ROW);
+    assert.deepEqual(await totals(), ["≥1", "≥1 start"], context + ": both totals mark a positive count with no paired time");
+    status.health.checks[0].starts = null;
+    edgeOnlyHour.starts = 0;
+    await poll("2026-10-25T02:22:01Z");
+    assert.equal((await totals())[1], null, context + ": an empty report leaves the start total absent");
 
     // The diagnosis remains expanded when the user switches cards. Even an ancestor that is
     // reattached before the poll finishes can briefly interrupt the visible plot's painting.
@@ -368,6 +373,12 @@ export async function assertCyclingChart(page, server, context) {
     }, { plot: SIBLING_PLOT, chart: CHART });
     for (const minutes of [23, 24, 25]) {
       edgeOnlyHour.elapsed_s += 60;
+      if (minutes === 23) status.health.checks[0].starts = edgeOnlyHour.starts = 1;
+      if (minutes === 24) {
+        Object.assign(edgeOnlyHour, { observed_s: 60, run_s: 60, space_s: 60, dhw_s: 0 });
+        Object.assign(status.health.checks[0], { verdict: "ok", reason: "heating_runs_insufficient",
+          observed_s: 60, space_runs: 1, space_mean_run_s: 60, dhw_runs: 0 });
+      }
       await poll(`2026-10-25T02:${minutes}:00Z`, { force: minutes !== 23 });
       const sibling = await evaluate(page, ({ plot, chart }) => {
         const watch = window.__cyclingSibling;
@@ -381,11 +392,18 @@ export async function assertCyclingChart(page, server, context) {
         };
       }, { plot: SIBLING_PLOT, chart: CHART });
       assert.deepEqual(sibling, { removals: 0, retained: true, visible: true, focused: true,
-        hiddenDiagnosis: true }, context + ": changing hidden cycling hours cannot detach the visible sibling plot");
+        hiddenDiagnosis: true }, context + ": changing hidden cycling hours and rows cannot detach the visible sibling plot");
       assert.equal(await label(1), priorLabel, context + ": hidden cycling readout waits until shown");
+      assert.deepEqual(await totals(), ["≥1", "≥1 start"],
+        context + ": the first start stays a lower bound when paired time begins");
     }
     await tap(page, '#cardNav [data-card="diagnosis"]');
-    await assertSegments(1, { gap: 180 }, "reopening the diagnosis card catches up the still-expanded chart");
+    await assertSegments(1, { space: 60, gap: 120 }, "reopening the diagnosis card catches up the still-expanded chart");
+    assert.deepEqual(await evaluate(page, row => Array.from(document.querySelector(row).closest(".vitem")
+      .querySelectorAll(".checkup-cycling-grid .inspect-row"), item => Array.from(item.children, cell => cell.textContent)), ROW),
+    await page.evaluate(`[[t("mode.heat"), t("check.cycling.runs", 1) + " · " + t("check.cycling.mean", "1 min")],
+      [t("mode.dhw"), t("check.cycling.runs", 0)]]`),
+    context + ": reopening the diagnosis shows completed-run rows that arrived while hidden");
     assert.notEqual(await label(1), priorLabel, context + ": the resumed chart reads the newest elapsed time");
     assert.equal(await page.evaluate("window.__cyclingSibling.removals"), 0,
       context + ": updating the visible cycling chart leaves the sibling plot mounted");

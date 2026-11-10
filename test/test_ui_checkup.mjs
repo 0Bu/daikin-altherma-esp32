@@ -337,15 +337,15 @@ const hasAssessment = (html, lang, key) => {
   assert.ok(assessment?.[0].includes(message), lang + "/" + key + ": expected a short assessment");
 };
 
-assert.equal(ui.metric(cycling), "18 starts");
+assert.equal(ui.metric(cycling), "≥18 starts");
 detail = ui.detail(cycling);
-assert.match(detail, /18 starts/);
+assert.match(detail, /≥18 starts/);
 for (const [label, count, mean] of [
   ["mode.heat", 12, "5 min"], ["mode.dhw", 2, "15 min"], ["check.cycling.unclear", 4, null],
 ]) assert.ok(detail.includes(runRow("en", label, count, mean)), label);
 assert.ok(detail.includes(escapeText(ui.text("en", "check.cycling.unclear_hint"))));
 assert.doesNotMatch(detail, /0 runs|830|project hint|90%|&lt;10 min|No universal/i);
-assert.ok(detail.indexOf("18 starts") < detail.indexOf("checkup-cycling-grid"));
+assert.ok(detail.indexOf("≥18 starts") < detail.indexOf("checkup-cycling-grid"));
 assert.ok(detail.indexOf("checkup-cycling-grid") < detail.indexOf("checkup-cycling-assessment"));
 assert.ok(detail.indexOf("checkup-cycling-assessment") < detail.indexOf("data-checkup-hours"));
 assert.match(detail, /Heating runs are short on average\./);
@@ -375,24 +375,24 @@ assert.doesNotMatch(ui.detail(measuredCycling), /Heating runs are (?:short|long 
 hasAssessment(ui.detail(measuredCycling), "en", "waiting");
 hasAssessment(ui.detail(partialModeCycling), "en", "waiting");
 const noModeDetail = ui.detail(noModeCycling);
-assert.equal(ui.value(noModeCycling), "18");
-assert.match(noModeDetail, /18 starts/);
+assert.equal(ui.value(noModeCycling), "≥18");
+assert.match(noModeDetail, /≥18 starts/);
 assert.match(noModeDetail, /This system provides too little information to assess heating runs\./);
 assert.doesNotMatch(noModeDetail, /checkup-cycling-grid/, "missing operating modes do not create run counts");
 assert.ok(!noModeDetail.includes(escapeText(ui.text("en", "check.cycling.waiting"))),
   "a system without mode data cannot promise a later assessment");
 const staleNoModeDetail = ui.detail(noModeCycling, true, staleReport);
 hasAssessment(staleNoModeDetail, "en", "class_unavailable");
-assert.match(staleNoModeDetail, /18 starts/);
+assert.match(staleNoModeDetail, /≥18 starts/);
 hasAssessment(ui.detail(fewHeatingRuns), "en", "few");
 hasAssessment(ui.detail(collecting, false, partialReport), "en", "waiting");
 hasAssessment(ui.detail(normalCycling, true, staleReport), "en", "stale");
 hasAssessment(ui.detail(cycling, true, staleReport), "en", "short");
 hasAssessment(ui.detail({ ...normalCycling, reason: "source_stale" }), "en", "stale");
-assert.match(ui.detail(normalCycling, true, staleReport), /18 starts/,
+assert.match(ui.detail(normalCycling, true, staleReport), /≥18 starts/,
   "stale inputs leave previous observations visible");
 assert.doesNotMatch(ui.detail(normalCycling, true, staleReport), /Heating runs are long enough/);
-assert.equal(ui.value(measuredCycling), "18");
+assert.equal(ui.value(measuredCycling), "≥18");
 assert.equal(ui.value({ ...measuredCycling, starts: null }), "MEASURED");
 
 // The firmware can provide overlapping stop observations without any cycling counts.
@@ -489,9 +489,10 @@ assert.match(ui.chart(edgeOnly), /data-tip="≥1 start"/,
   "the chart reports its witnessed starts as a lower bound and omits unobserved runtime");
 assert.equal(ui.value(edgeOnly), "≥1");
 assert.match(ui.detail(edgeOnly), /≥1 start/);
-assert.equal(ui.value({ ...edgeOnly, observed_s: 60 }), "1");
-assert.equal(ui.metric({ ...edgeOnly, observed_s: 60 }), "1 start");
-assert.equal(ui.metric({ ...edgeOnly, observed_s: undefined }), "1 start");
+assert.equal(ui.value({ ...edgeOnly, observed_s: 60 }), "≥1");
+assert.equal(ui.metric({ ...edgeOnly, observed_s: 60 }), "≥1 start");
+assert.equal(ui.metric({ ...edgeOnly, observed_s: undefined }), "≥1 start");
+assert.equal(ui.value({ ...edgeOnly, starts: 0 }), "0");
 assert.equal(ui.metric({ ...edgeOnly, starts: 0 }), "0 starts");
 const observedZero = ui.chart({ ...cyclingWithHours,
   hours: [{ bucket: 0, starts: 0, run_s: 0, observed_s: 60, elapsed_s: 60 }] });
@@ -516,7 +517,7 @@ const cyclingCensored = { ...measuredCycling, censored_runs: 15,
   censored_transition_runs: 1, censored_handover_runs: 2, censored_unreadable_runs: 3,
   censored_restart_runs: 4, censored_start_runs: 5,
   classified_runtime_s: 5400, censored_runtime_s: 600, runtime_saturated: true };
-assert.equal(ui.metric(cyclingCensored), "18 starts");
+assert.equal(ui.metric(cyclingCensored), "≥18 starts");
 detail = ui.detail(cyclingCensored);
 assert.ok(detail.includes(runRow("en", "check.cycling.unclear", 15, null)));
 assert.ok(detail.includes(escapeText(ui.text("en", "check.cycling.unclear_hint"))));
@@ -642,7 +643,7 @@ for (const lang of locales) {
   }
 }
 ui.setLang("de");
-assert.match(ui.detail(cycling), /18 Starts/);
+assert.match(ui.detail(cycling), /≥18 Starts/);
 assert.match(ui.detail(cycling), /Die Heizläufe sind im Schnitt kurz\./);
 assert.match(ui.detail(normalCycling), /Die Heizläufe dauern im Schnitt lang genug\./);
 assert.ok(ui.detail(normalCycling).includes(runRow("de", "mode.heat", 12, "16 min")));
@@ -658,7 +659,7 @@ assert.match(ui.detail(pressure), /Aktueller Wasserdruck: 1,5 bar/);
 assert.equal(ui.metric({ id: "flow", verdict: "ok", min_l_min: 6.5 }), "6,5 l/min");
 assert.equal(ui.value({ id: "fault", verdict: "ok", active: 0 }), "keine");
 assert.equal(ui.value({ ...dhw, max_k_h: 4.8 }), "4,8 K/h");
-assert.equal(ui.value({ ...cycling, starts: 19 }), "19");
+assert.equal(ui.value({ ...cycling, starts: 19 }), "≥19");
 
 // Copy regression pins for corrected diagnosis claims (U3). The DHW loss peak is a highest
 // observed rate, not a bound: no shipped locale may lead it with an "at most" adverb.

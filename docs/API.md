@@ -261,9 +261,9 @@ Unestablished numeric evidence is null. `reason` is empty when no qualification 
 `class_coverage`, `heating_runs_insufficient`, `class_population_incomplete`, `observation_only`,
 `no_paired_runtime`, `defrost_events_insufficient` or `source_stale`.
 
-`cycling.starts` keeps a positive witnessed count even before readable compressor duration accrues.
-With `observed_s:0`, a positive count is a lower bound and the diagnosis remains `collecting`.
-With no counted start or readable duration, `cycling.starts` is null.
+Positive `cycling.starts` reports a counted lower bound, including before readable compressor
+duration accrues. A count alone leaves the diagnosis `collecting`. With no counted start or
+readable duration, `cycling.starts` is null.
 
 Cycling class counts describe completed runs. `censored_runs` includes five mutually exclusive
 causes: `transition` (an unaccepted class transition), `handover` (a positively observed continuous

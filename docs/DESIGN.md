@@ -587,8 +587,8 @@ overlap when stacked. Measure every shipped locale at 320 px.
 
 The cycling disclosure uses one row of hourly columns with start counts above stacked runtime
 bars. The columns own pointer and keyboard selection and share one readout. Keep leading padding
-empty. Show each positive start count as a lower bound in the readout. Hatch elapsed time without
-compressor readings only where the elapsed duration is known. Restored slots show readable time
+empty. Show positive start counts as lower bounds in the summary and readout. Hatch elapsed time
+without compressor readings only where the elapsed duration is known. Restored slots show readable time
 with unknown elapsed duration. Label their timestamp as saved time. Leave the unelapsed part of
 the open hour unfilled. The default readout uses one hourly snapshot and omits runtime without
 readable compressor seconds. Update the chart in its own slot and defer it while its card is hidden.

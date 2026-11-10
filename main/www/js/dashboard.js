@@ -1391,7 +1391,7 @@ function checkupCyclingChartHtml(c) {
     minute: "2-digit", timeZoneName: "shortOffset" });
   const duration = s => s >= 60 && s % 60
     ? t("check.min", `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`) : dwellDuration(s);
-  const startsText = n => (n > 0 ? "≥" : "") + t("check.starts", n);
+  const startsText = n => checkupCyclingCountPrefix(n) + t("check.starts", n);
   const percent = s => (s / 36).toFixed(3) + "%";
   for (let i = 0; i < 24; i++) {
     const h = hrs[i - pad];
@@ -1674,8 +1674,8 @@ function checkupWithOutdoor(c, value) {
   return [value, checkupOutdoorContext(c)].filter(Boolean).join(" · ");
 }
 
-function checkupCyclingCountPrefix(c) {
-  return c.starts > 0 && c.observed_s === 0 ? "≥" : "";
+function checkupCyclingCountPrefix(n) {
+  return n > 0 ? "≥" : "";
 }
 
 // One row's value text. Every branch that has no number says so with a dash — a check that could not
@@ -1708,7 +1708,7 @@ function checkupMetricValue(c) {
     }
     case "cycling":
       return Number.isInteger(c.starts) && c.starts >= 0
-        ? checkupCyclingCountPrefix(c) + t("check.starts", c.starts) : "";
+        ? checkupCyclingCountPrefix(c.starts) + t("check.starts", c.starts) : "";
     case "defrost": {
       if (c.count == null) return "";
       const n = t("check.cycles", c.count);
@@ -1741,7 +1741,7 @@ function checkupValue(c) {
     return checkupDhwHasRate(c) ? `${checkupFmt1(c.max_k_h)} K/h` : st;
   if (c.id === "cycling")
     return Number.isFinite(c.starts) && c.starts >= 0
-      ? checkupCyclingCountPrefix(c) + c.starts.toLocaleString(LANG) : st;
+      ? checkupCyclingCountPrefix(c.starts) + c.starts.toLocaleString(LANG) : st;
   if (c.id === "defrost") {
     const share = c.verdict !== "collecting" && checkupDefrostShare(c);
     return share || (Number.isFinite(c.count) && c.count >= 0 ? t("check.cycles", c.count) : st);

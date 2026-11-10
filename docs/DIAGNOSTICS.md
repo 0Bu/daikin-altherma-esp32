@@ -36,9 +36,10 @@ timeouts reduce evidence without pretending that the profile no longer has the s
 Completed hours can return after a restart only from compatible dated flash records and current
 source confirmation. A software restart, such as an update or a settings save that restarts the
 board, also tries to save the open hour. It cannot when that hour shares its clock hour with the
-previous saved hour. Other open and unsaved hours may be lost. Whole hourly records expire when their
-beginning leaves the rolling day, even if polling stops. Changed X10A identity, an incompatible
-saved-hour format or a changed measurement definition starts fresh hourly collection, including
+previous saved hour. Other open and unsaved hours may be lost. Hourly evidence ages out even when
+polling stops. See the [retention rules](ARCHITECTURE.md#history-and-diagnosis-persistence).
+Changed X10A identity, an incompatible saved-hour format or a changed measurement definition
+starts fresh hourly collection, including
 tank-cooling results. Changing the independent circulation witness clears only tank-cooling
 evidence. Trend history and the handoff for an unfinished tank-cooling window have their own
 compatibility rules.

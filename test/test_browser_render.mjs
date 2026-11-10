@@ -1386,7 +1386,7 @@ async function assertPlantDiagnosis(page, context) {
     assert.deepEqual(heating.parts, ["space"], `${context}: witnessed heating retains its mode`);
     assert.notEqual(neutral.color, heating.color, `${context}: unassigned and heating runtime differ visually`);
     const cycling = await cyclingDetail();
-    assert.equal(cycling.total, await page.evaluate("t('check.starts', 17)"),
+    assert.equal(cycling.total, "≥" + await page.evaluate("t('check.starts', 17)"),
       `${context}: the total is separate from completed runs`);
     const cyclingCopy = await page.evaluate(`[
       [t("mode.heat"), t("check.cycling.runs", 12) + " · " + t("check.cycling.mean", "16 min")],

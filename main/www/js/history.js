@@ -1822,9 +1822,10 @@ function replaceHistoryHtml(host, html) {
   const focusedOwner = owner(active);
   const cycling = active?.closest?.("[data-cycling]");
   const focused = host.contains?.(active);
+  const diagnosisCard = host.getAttribute?.("data-dashboard-card") === "diagnosis";
   // Also reconcile plain read-only rows. Other hosts without charts keep full writes:
   // a control's live value is not represented by its attributes.
-  if (!html.includes('class="vhist') && host.id !== "valueGroups" && host.id !== "inspRows")
+  if (!html.includes('class="vhist') && host.id !== "valueGroups" && host.id !== "inspRows" && !diagnosisCard)
     host.innerHTML = html;
   else {
     const roots = root => [...root.querySelectorAll(".vhist")]
@@ -1835,6 +1836,7 @@ function replaceHistoryHtml(host, html) {
     // template still invalidates its painting ancestors. Scalar polls can update text in place.
     // Preflight the complete tree before applying anything; structural changes keep the fallback.
     const text = [];
+    let diagnosisUpdate;
     // Card navigation owns group visibility after rendering; it is not source markup drift.
     const attrs = node => [...node.attributes].filter(attr =>
       attr.name !== "hidden" || !node.matches(".vgroup[data-dashboard-card]"));
@@ -1852,14 +1854,23 @@ function replaceHistoryHtml(host, html) {
           nextAttrs.some(attr => a.getAttribute(attr.name) !== attr.value)) return false;
       // The live cycling chart owns its slot and updates independently of value rows.
       if (a.getAttribute("data-checkup-hours") !== null) return true;
-      return a.childNodes.length === b.childNodes.length &&
-        [...a.childNodes].every((node, index) => same(node, b.childNodes[index]));
+      const before = text.length;
+      if (a.childNodes.length === b.childNodes.length &&
+          [...a.childNodes].every((node, index) => same(node, b.childNodes[index]))) return true;
+      // A diagnosis may gain a badge or completed-run rows while another card is visible.
+      // Refresh its contents alone if the surrounding value grid is otherwise compatible.
+      if (host.id !== "valueGroups" || a.parentNode !== host ||
+          a.getAttribute("data-dashboard-card") !== "diagnosis") return false;
+      text.length = before;
+      diagnosisUpdate = [a, b.innerHTML];
+      return true;
     };
     const textOnly = host.childNodes && template.content.childNodes &&
       host.childNodes.length === template.content.childNodes.length &&
       [...host.childNodes].every((node, index) => same(node, template.content.childNodes[index]));
     if (textOnly) {
       for (const [node, value] of text) node.nodeValue = value;
+      if (diagnosisUpdate) replaceHistoryHtml(...diagnosisUpdate);
       return;
     }
     const rebuilding = S.trendRebuilding;
@@ -1872,7 +1883,7 @@ function replaceHistoryHtml(host, html) {
         if (index < 0) node._histMarkup = sig;
         else node.replaceWith(prior.splice(index, 1)[0]);
       }
-      const slot = host.id === "valueGroups" && host.querySelector("[data-checkup-hours]");
+      const slot = (host.id === "valueGroups" || diagnosisCard) && host.querySelector("[data-checkup-hours]");
       if (slot) template.content.querySelector("[data-checkup-hours]")?.replaceWith(slot);
       host.replaceChildren(template.content);
     } finally { S.trendRebuilding = rebuilding; }

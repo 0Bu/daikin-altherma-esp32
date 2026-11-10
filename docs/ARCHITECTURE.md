@@ -286,8 +286,10 @@ for a clock step of more than one hour, so whole-second clock reads cannot relab
 A cursor still ahead of the newest live hour after a backward clock step waits for live hours to
 catch up before appending or replaying.
 Current source confirmation requires this boot's full profile/link evidence, not cached startup
-identity. Whole live and restored hours expire when their beginning leaves the rolling day,
-independently of producer progress; abandoned open evidence expires too.
+identity. Live hours expire 24 hours after their monotonic start. For a restored hour, the firmware
+projects 23 hours after its saved end onto this boot's monotonic clock. The saved time can be
+clamped to the assigned hour. Both deadlines advance independently of producer progress, and
+abandoned open evidence expires too.
 The software-restart DHW handoff is consumed once; downtime/startup remains blind and can
 invalidate it without incrementing ordinary abort counters.
 Every `esp_restart()` runs the checkup shutdown handler before the history drain, because ESP-IDF
