@@ -1992,13 +1992,15 @@ inline CheckupCyclingEvidence checkup_cycling_evidence(const CheckupWindow& w,
     return e;
 }
 
+enum class CheckupCyclingSlot : uint8_t { Ordinary, Restored, Expired };
+
 struct CheckupCyclingHour {
     uint16_t observed_s = 0;
     uint16_t run_s      = 0;
     uint16_t space_s    = 0;
     uint16_t dhw_s      = 0;
     uint8_t  starts     = 0;
-    bool     restored   = false;
+    CheckupCyclingSlot provenance = CheckupCyclingSlot::Ordinary;
 };
 
 struct CheckupCyclingHours {

@@ -290,6 +290,7 @@ identifies a saved slot whose original elapsed duration is unknown. It may be a 
 at restart. Other closed slots with current-format identities use a nominal 3600 seconds. Legacy
 slots lack enough information to establish elapsed duration. Infer missing time from `observed_s`
 only when the elapsed duration is known.
+`expired:true` marks an empty positional placeholder retained after its evidence ages out.
 
 `starts` is a lower bound based on available readings. Within a continuous segment, known OFF
 followed by missing readings and a return to known ON establishes at least one start. The firmware

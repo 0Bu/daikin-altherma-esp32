@@ -220,12 +220,19 @@ mutations = [
      source_text.replace(entry, entry + "    consent_epoch = checkup_consent_epoch();\n"),
      "consent_caller_same_generation", "consent_epoch_discards_already_collected_sample"),
 ]
-restore_marker = "hours.hours[i].restored = true;"
+restore_marker = "hours.hours[i].provenance = logic::CheckupCyclingSlot::Restored;"
 if source_text.count(restore_marker) != 1:
     raise RuntimeError("Expected one restored cycling slot marker")
 mutations.append(("omit_restored_cycling_slot_marker",
-                  source_text.replace(restore_marker, "hours.hours[i].restored = false;"),
+                  source_text.replace(restore_marker, "hours.hours[i].provenance = logic::CheckupCyclingSlot::Ordinary;"),
                   "restored_expiry", "restored_chart_keeps_its_timestamp_and_readable_time"))
+expired_markers = re.findall(r"s_slot_times\.expiry_us\[i\]\s*=\s*logic::CHECKUP_EXPIRED_SLOT_US;", source_text)
+if len(expired_markers) != 1:
+    raise RuntimeError("Expected one expired cycling slot marker")
+expired_marker = expired_markers[0]
+mutations.append(("expired_cycling_slot_becomes_gap",
+                  source_text.replace(expired_marker, expired_marker.replace("logic::CHECKUP_EXPIRED_SLOT_US", "0")),
+                  "restored_expiry", "expired_restored_slot_is_blank_beside_newer_evidence"))
 tail_admission = "        if (live.count && records[i].bucket > live.newest_label) continue;\n"
 if source_text.count(tail_admission) != 1:
     raise RuntimeError("Expected one saved-hour prefix admission guard")

@@ -1395,7 +1395,7 @@ function checkupCyclingChartHtml(c) {
   const percent = s => (s / 36).toFixed(3) + "%";
   for (let i = 0; i < 24; i++) {
     const h = hrs[i - pad];
-    if (!h) {
+    if (!h || h.expired === true) {
       cols += `<span class="checkup-chart-col" aria-hidden="true" inert></span>`;
       continue;
     }

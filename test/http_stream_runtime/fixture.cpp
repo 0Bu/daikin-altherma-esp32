@@ -481,13 +481,14 @@ int main(int argc, char** argv) {
         }
     });
     run("cycling_hours_wire", [] {
+        using Slot                  = daik::logic::CheckupCyclingSlot;
         current.diagnostics_enabled = true;
         cycling_hours.epoch         = 17;
         cycling_hours.count         = 2;
         cycling_hours.end_unix_s[0] = 1'999'998'000;
         // An older restored hour has a negative bucket ID. Only parts of its observed runtime
         // are attributable to the two positively witnessed modes.
-        cycling_hours.hours[0] = {2700, 1200, 600, 300, 2, true};
+        cycling_hours.hours[0] = {2700, 1200, 600, 300, 2, Slot::Restored};
         for (const bool partial : {true, false}) {
             cycling_hours.pending_elapsed_s = partial ? 450 : 0;
             cycling_hours.hours[1] = partial ? daik::logic::CheckupCyclingHour{420, 180, 0, 60, 1}
@@ -501,6 +502,13 @@ int main(int argc, char** argv) {
                   "elapsed time must be serialized once for the open hour only");
             emit(req, partial ? "cycling-partial" : "cycling-edge");
         }
+        cycling_hours.hours[0]            = {};
+        cycling_hours.hours[0].provenance = Slot::Expired;
+        cycling_hours.end_unix_s[0]       = 0;
+        auto req                          = request();
+        check(invoke(req, "/status", daik::h_status) == ESP_OK, "expired cycling status failed");
+        successful(req);
+        emit(req, "cycling-expired");
     });
     run("stop_context_absent", [] {
         for (const bool confirmed : {false, true}) {

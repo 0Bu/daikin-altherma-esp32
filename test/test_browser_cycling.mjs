@@ -312,6 +312,16 @@ export async function assertCyclingChart(page, server, context) {
       context + ": selected interval follows its bucket ID when the window advances");
     assert.equal(await focusBucket(), LAST, context + ": hour rollover retains focus by bucket");
     await assertSegments(OPEN + 1, {}, "an hour with zero elapsed time has no hatch");
+    const expiredIndex = hours.findIndex(h => h.bucket === LAST);
+    hours[expiredIndex] = { bucket: LAST, expired: true, starts: 0, run_s: 0, observed_s: 0 };
+    await poll("2026-10-25T02:20:01Z");
+    assert.equal(await evaluate(page, ({ cols, index }) => {
+      const slot = document.querySelector(cols)?.children[index];
+      return !!slot?.matches("span.checkup-chart-col[inert][aria-hidden='true']:empty");
+    }, { cols: COLS, index: expiredIndex }), true, context + ": an expired bucket leaves a blank inert position");
+    assert.deepEqual(await pinned(), [], context + ": an expired bucket clears its pin");
+    assert.equal(await focusBucket(), OPEN + 1, context + ": expiry moves focus to the current hour");
+    await assertSegments(OPEN, { dhw: 120, gap: 3360 }, "a newer hour retains observed runtime and its real gap");
     await key(page, "Home", 36);
     assert.equal(await focusBucket(), 1, context + ": Home focuses the earliest remaining hour");
     await key(page, "End", 35);

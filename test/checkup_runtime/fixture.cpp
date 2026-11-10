@@ -416,8 +416,8 @@ void restored_expiry() {
     const int64_t now        = adapter::unix_origin + 120;
     p.end_unix_s             = now - (CHECKUP_RECORD_MAX_AGE_S - 5);
     record.bucket            = checkup_journal_bucket(p.end_unix_s);
-    p.checkup.covered_s      = 3600;
-    p.checkup.bar_observed_s = 3600;
+    p.checkup.covered_s      = 1200;
+    p.checkup.bar_observed_s = 1200;
     p.checkup.min_bar        = 9;
     p.checkup.flags          = CHECKUP_F_FAULT;
     p.checkup.rps_observed_s = 1200;
@@ -428,6 +428,9 @@ void restored_expiry() {
     const auto restored = checkup_report();
     require(restored.span_s == CHECKUP_WINDOW_S - 5 && !restored.full_span,
             "restore_span_excludes_duplicate_elapsed_gap");
+    sample(121, rows, cov, true, false);
+    sample(122, rows, cov, true, true);
+    sample(123, rows, cov, true, true);
     adapter::unix_origin -= 30LL * 86400; // later wall-clock correction cannot rejuvenate the slot
     const int64_t deadline = 125'000'000;
     sdk::now_us            = deadline - 1;
@@ -435,19 +438,37 @@ void restored_expiry() {
     const auto          takes_before = sdk::takes;
     auto                before       = checkup_report(&hours);
     require(sdk::takes == takes_before + 1, "report_and_restored_chart_use_one_lock");
-    require(hours.count > 1 && hours.hours[0].restored && hours.hours[0].observed_s == 1200 &&
+    require(hours.count > 2 && hours.hours[0].provenance == CheckupCyclingSlot::Restored &&
+                hours.hours[0].observed_s == 1200 &&
                 hours.end_unix_s[0] == static_cast<uint32_t>(p.end_unix_s) &&
-                !hours.hours[hours.count - 1].restored,
+                hours.hours[hours.count - 1].provenance == CheckupCyclingSlot::Ordinary,
             "restored_chart_keeps_its_timestamp_and_readable_time");
+    const auto old_id = hours.bucket_at(0);
     require(before[CheckupCheck::Pressure].a == 9 &&
                 before[CheckupCheck::Fault].verdict == CheckupVerdict::Info,
             "restored_finding_before_exact_deadline");
     sdk::now_us = deadline;
     auto after  = checkup_report(&hours);
-    require(hours.count == 0, "expired_restored_hour_not_in_chart");
+    require(hours.count > 2 && hours.bucket_at(0) == old_id &&
+                hours.hours[0].provenance == CheckupCyclingSlot::Expired &&
+                hours.end_unix_s[0] == 0 && hours.hours[0].observed_s == 0 &&
+                hours.hours[0].run_s == 0 && hours.hours[0].starts == 0,
+            "expired_restored_slot_is_blank_beside_newer_evidence");
+    require(hours.hours[1].provenance == CheckupCyclingSlot::Ordinary &&
+                hours.hours[1].observed_s == 0 && hours.end_unix_s[1] == 0 &&
+                hours.hours[hours.count - 1].observed_s == 2,
+            "expiry_preserves_ordinary_gap_and_newer_observation");
     require(after[CheckupCheck::Pressure].a == 15 &&
                 after[CheckupCheck::Fault].verdict != CheckupVerdict::Info,
             "restored_expires_without_producer");
+    sample(CHECKUP_DT_S, rows, cov, true, true);
+    checkup_report(&hours);
+    require(hours.count > 1 && hours.bucket_at(0) > old_id &&
+                hours.hours[hours.count - 2].observed_s == 2,
+            "slot_overwrite_advances_the_window");
+    for (size_t i = 0; i < hours.count; ++i)
+        require(hours.hours[i].provenance == CheckupCyclingSlot::Ordinary,
+                "slot_overwrite_retires_expiry_marker");
 }
 void late_restore(bool clock_behind) {
     // Cross a wall-hour boundary during the new monotonic hour. A saved wall label can then
@@ -483,12 +504,15 @@ void late_restore(bool clock_behind) {
     checkup_report(&hours);
     if (clock_behind) {
         require(restored == CheckupFlashRestoreResult::Ignored && hours.count == 2 &&
-                    !hours.hours[0].restored && hours.hours[0].starts == 1,
+                    hours.hours[0].provenance == CheckupCyclingSlot::Ordinary &&
+                    hours.hours[0].starts == 1,
                 "late_restore_keeps_live_when_clock_cannot_date_tail");
         return;
     }
     require(restored == CheckupFlashRestoreResult::Restored && hours.count == 3 &&
-                hours.hours[0].restored && hours.hours[0].starts == 2 && !hours.hours[1].restored &&
+                hours.hours[0].provenance == CheckupCyclingSlot::Restored &&
+                hours.hours[0].starts == 2 &&
+                hours.hours[1].provenance == CheckupCyclingSlot::Ordinary &&
                 hours.hours[1].starts == 1,
             "late_restore_admits_only_older_prefix");
 

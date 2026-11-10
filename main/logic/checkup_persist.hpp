@@ -771,8 +771,10 @@ checkup_journal_select_slot(int64_t wanted, const CheckupJournalRecord* live, si
     return nullptr;
 }
 
-// Every completed slot has a monotonic deadline independent of producer liveness, the next
-// boot-raster boundary and later SNTP corrections. Zero marks gaps. Equality expires.
+// Positive deadlines are monotonic and independent of the next raster boundary and later SNTP
+// corrections. Zero marks gaps. An expired slot keeps its position but has lost its evidence.
+inline constexpr int64_t CHECKUP_EXPIRED_SLOT_US = -1;
+
 inline constexpr bool checkup_restored_expired(int64_t expiry_us, int64_t now_us) {
     return expiry_us > 0 && now_us >= expiry_us;
 }
@@ -855,8 +857,8 @@ checkup_journal_choose(int64_t wanted, const CheckupJournalLiveSpan& live,
 
 struct CheckupJournalSlotTimes {
     int64_t expiry_us[CHECKUP_COMPLETED_BUCKETS] = {};
-    // Zero denotes a live hour or gap. The largest value marks a stored hour whose date is
-    // outside the HTTP timestamp range.
+    // Zero denotes a slot without stored provenance. The largest value marks a stored hour whose
+    // date is outside the HTTP timestamp range.
     uint32_t restored_end_unix_s[CHECKUP_COMPLETED_BUCKETS] = {};
 };
 
@@ -906,7 +908,7 @@ inline bool checkup_journal_rebuild(CheckupRing& ring, DhwLossRing& dhw,
                 dhw.buf[p]  = DhwLossBucket{};
                 dhw_retired = true;
             }
-            // Keep the boot-local deadline (zero for a skipped hour). The wall label used to
+            // Keep the boot-local deadline or its gap/expired marker. The wall label used to
             // select this slot may have clamped its end into a different hour.
         } else if (c.stored) {
             const bool keep_dhw = !dhw_reset_requested && checkup_journal_dhw_identity_matches(

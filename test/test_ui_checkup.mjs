@@ -492,6 +492,16 @@ assert.equal((startup.match(/<span class="checkup-chart-col" aria-hidden="true" 
   23, "positions outside the retained ring are blank and inert without tracks");
 assert.doesNotMatch(startup, /class="gap"|checkup-gap-key/,
   "padding does not imply elapsed time or a sampling gap");
+const expiredHour = ui.chart({ ...cyclingWithHours, hours: [
+  { bucket: 0, expired: true, starts: 9, run_s: 1200, observed_s: 1800, space_s: 1200, dhw_s: 0 },
+  { bucket: 1, starts: 1, run_s: 120, observed_s: 300, elapsed_s: 300, space_s: 120, dhw_s: 0 },
+] });
+assert.equal(hourMarkup(expiredHour, 0), "", "expired slots cannot be selected");
+assert.equal((expiredHour.match(/<span class="checkup-chart-col" aria-hidden="true" inert><\/span>/g) || []).length,
+  23, "expired evidence leaves its chart position blank like unused positions");
+assert.match(hourMarkup(expiredHour, 1), /tabindex="0"/, "the open hour remains the keyboard entry");
+assert.match(expiredHour, /data-tip="≥1 start · 2 min"/, "only unexpired evidence contributes to the chart total");
+assert.doesNotMatch(expiredHour, /class="gap"|checkup-gap-key/, "expired evidence does not establish a sampling gap");
 const edgeOnly = { id: "cycling", verdict: "collecting", starts: 1, observed_s: 0, hours_epoch: 2,
   hours: [{ bucket: 0, starts: 1, run_s: 0, observed_s: 0, elapsed_s: 0 }] };
 assert.match(ui.chart(edgeOnly), /data-tip="≥1 start"/,

@@ -1503,7 +1503,10 @@ static void append_status_json(JsonOut& j, bool redact) {
                             j += ",\"end_unix_s\":";
                             append_json_uint(j, hrs.end_unix_s[hi]);
                         }
-                        if (hour.restored) j += ",\"restored\":true";
+                        if (hour.provenance == logic::CheckupCyclingSlot::Restored)
+                            j += ",\"restored\":true";
+                        else if (hour.provenance == logic::CheckupCyclingSlot::Expired)
+                            j += ",\"expired\":true";
                         if (hi + 1 == hrs.count) {
                             j += ",\"elapsed_s\":";
                             append_json_uint(j, hrs.pending_elapsed_s);

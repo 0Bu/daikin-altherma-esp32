@@ -872,7 +872,7 @@ void expire_restored_locked() {
         if (!logic::checkup_restored_expired(s_slot_times.expiry_us[i], now_us)) continue;
         P().ring.buf[i]         = logic::CheckupBucket{};
         P().dhw.buf[i]          = kEmptyDhwLossBucket;
-        s_slot_times.expiry_us[i]           = 0;
+        s_slot_times.expiry_us[i]           = logic::CHECKUP_EXPIRED_SLOT_US;
         s_slot_times.restored_end_unix_s[i] = 0;
         changed                 = true;
     }
@@ -922,15 +922,17 @@ logic::CheckupCyclingEvidence checkup_cycling_evidence() {
     // The open hour and gaps without an observed end have no wall timestamp.
     for (size_t i = 0; i < ring.count; ++i) {
         const size_t   slot      = (oldest + i) % logic::CHECKUP_COMPLETED_BUCKETS;
+        const int64_t  expiry_us = s_slot_times.expiry_us[slot];
         const uint32_t saved_end = s_slot_times.restored_end_unix_s[slot];
-        if (saved_end) {
-            hours.hours[i].restored = true;
+        if (expiry_us == logic::CHECKUP_EXPIRED_SLOT_US) {
+            hours.hours[i].provenance = logic::CheckupCyclingSlot::Expired;
+        } else if (saved_end) {
+            hours.hours[i].provenance = logic::CheckupCyclingSlot::Restored;
             if (saved_end != UINT32_MAX) hours.end_unix_s[i] = saved_end;
-        } else if (s_slot_times.expiry_us[slot]) {
+        } else if (expiry_us > 0) {
             // The per-slot deadline follows its actual hour through journal reconstruction.
             const int64_t end_us =
-                s_slot_times.expiry_us[slot] -
-                static_cast<int64_t>(logic::CHECKUP_RECORD_MAX_AGE_S) * 1000000LL;
+                expiry_us - static_cast<int64_t>(logic::CHECKUP_RECORD_MAX_AGE_S) * 1000000LL;
             hours.end_unix_s[i] = logic::checkup_cycling_end_unix_s(end_us, now_us, unix_s, ms);
         }
     }

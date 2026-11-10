@@ -182,6 +182,7 @@ try {
   const cyclingWires=new Map([
     ["cycling-partial",{bucket:0,elapsed_s:450,starts:1,run_s:180,observed_s:420,space_s:0,dhw_s:60}],
     ["cycling-edge",{bucket:0,elapsed_s:0,starts:1,run_s:0,observed_s:0}],
+    ["cycling-expired",{bucket:0,elapsed_s:0,starts:1,run_s:0,observed_s:0}],
   ]);
   const stopIds=["low_rps_above_main_target","request_withdrawal","defrost",
     "dhw_transition","route_mode_transition"];
@@ -202,10 +203,10 @@ try {
     if(cyclingWires.has(name)) {
       const cycling=doc.health.checks.find(check=>check.id==="cycling");
       assert.equal(cycling?.hours_epoch,17,name);
-      assert.deepEqual(cycling.hours,[
-        {bucket:-1,end_unix_s:1999998000,restored:true,starts:2,run_s:1200,observed_s:2700,space_s:600,dhw_s:300},
-        cyclingWires.get(name),
-      ],name);
+      const closed=name==="cycling-expired"
+        ? {bucket:-1,expired:true,starts:0,run_s:0,observed_s:0}
+        : {bucket:-1,end_unix_s:1999998000,restored:true,starts:2,run_s:1200,observed_s:2700,space_s:600,dhw_s:300};
+      assert.deepEqual(cycling.hours,[closed,cyclingWires.get(name)],name);
       cyclingWires.delete(name);
     }
     if(stopWires.has(name)) {

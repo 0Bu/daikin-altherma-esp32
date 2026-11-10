@@ -23236,7 +23236,7 @@ static void test_checkup_journal_rebuild_in_place() {
     for (const auto& bounds : {std::pair<int64_t, int64_t>{0, int64_t{kSlots}}, {5, 4}}) {
         CheckupRestoreCase c;
         c.ring.buf[3].starts = 9;
-        c.times.expiry_us[3] = -7;
+        c.times.expiry_us[3] = CHECKUP_EXPIRED_SLOT_US;
         c.ring.count = c.dhw.count = 4;
         c.earliest                 = bounds.first;
         c.latest                   = bounds.second;
@@ -23273,6 +23273,13 @@ static void test_checkup_journal_rebuild_in_place() {
         CHECK(out.times.restored_end_unix_s[0] == 498 * hour + 40);
         CHECK(out.times.expiry_us[1] == live_expiry && out.times.restored_end_unix_s[1] == 0);
         CHECK(out.times.expiry_us[2] == 0 && out.times.restored_end_unix_s[2] == 0);
+
+        c.ring.buf[kSlots - 1]        = {};
+        c.times.expiry_us[kSlots - 1] = CHECKUP_EXPIRED_SLOT_US;
+        const auto with_expired       = checkup_restore_in_place(c);
+        CHECK(with_expired.times.expiry_us[1] == CHECKUP_EXPIRED_SLOT_US &&
+              with_expired.times.restored_end_unix_s[1] == 0 &&
+              with_expired.times.expiry_us[2] == 0 && with_expired.ring.buf[1].starts == 0);
     }
 
     // A valid stored interval can predate or exceed the positive uint32 timestamp representation.
@@ -28887,6 +28894,7 @@ static void test_checkup_scoped_flash_age() {
         CHECK(checkup_restored_expired(expiry, mono + 60'000'000));
     }
     CHECK(!checkup_restored_expired(0, expiry + 1)); // live slot/gap
+    CHECK(!checkup_restored_expired(CHECKUP_EXPIRED_SLOT_US, expiry + 1));
     CHECK(checkup_restore_expiry_us(stored.end_unix_s, stored.end_unix_s - 1, mono) == 0);
     CHECK(checkup_restore_expiry_us(stored.end_unix_s, stored.end_unix_s + CHECKUP_RECORD_MAX_AGE_S,
                                     mono) == 0);

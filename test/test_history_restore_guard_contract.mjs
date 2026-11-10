@@ -376,9 +376,15 @@ assert.match(cRecord, /s_slot_times\.expiry_us\[committed_i\] = logic::checkup_l
   "a stalled producer cannot keep completed findings for an extra hour");
 assert.match(cRecord, /s_slot_times\.expiry_us\[slot\] = 0; s_slot_times\.restored_end_unix_s\[slot\] = 0;/,
   "the same overwritten slot loses both its deadline and its stored time");
+assert.match(body(checkup, "void persist_wipe("),
+  /for \(auto& expiry : s_slot_times\.expiry_us\) expiry = 0;/,
+  "a new checkup lifecycle clears all expiry markers");
 assert.match(body(checkup, "void expire_restored_locked()"),
-  /s_slot_times\.expiry_us\[i\] = 0; s_slot_times\.restored_end_unix_s\[i\] = 0;/,
-  "an expired interval can no longer label a chart hour");
+  /s_slot_times\.expiry_us\[i\] = logic::CHECKUP_EXPIRED_SLOT_US; s_slot_times\.restored_end_unix_s\[i\] = 0;/,
+  "an expired interval drops its wall time but retains its blank slot");
+assert.match(body(checkup, "static logic::CheckupCyclingHours checkup_cycling_hours_locked("),
+  /if \(expiry_us == logic::CHECKUP_EXPIRED_SLOT_US\) \{ hours\.hours\[i\]\.provenance = logic::CheckupCyclingSlot::Expired;/,
+  "the chart keeps expiration distinct from ordinary gaps and restored hours");
 const cReport = body(checkup, "logic::CheckupReport checkup_report(");
 assert.match(cReport, /Lock lk\(s_mtx\);.*expire_restored_locked\(\);.*if \(hours\) \*hours = checkup_cycling_hours_locked\(now_us\);/,
   "cycling hours and the judged diagnosis share the same admitted snapshot");
