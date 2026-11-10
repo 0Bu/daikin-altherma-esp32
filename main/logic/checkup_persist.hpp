@@ -363,15 +363,18 @@ inline constexpr size_t CHECKUP_JOURNAL_PAYLOAD_BYTES =
 // The common journal version cannot name a change inside this source: its first three source ids
 // must remain compatible with already-written trend records.  Fold the diagnostic wire shape into
 // this source's identity instead, beside every threshold/locator already covered above.
-// The cycling bucket moved fields without changing its size, so either old layout can have the
-// previous fingerprint. Completed RAM hours already retire at boot, independently of this fence.
-inline constexpr uint32_t CHECKUP_JOURNAL_LAYOUT_VERSION = 2;
+// The two original layouts shared one fingerprint. Layout 2 cannot supply independently
+// witnessed mode totals. Completed RAM hours retire at boot, and the DHW handoff stays compatible.
+inline constexpr uint32_t CHECKUP_JOURNAL_LAYOUT_VERSION = 3;
 
 inline uint32_t checkup_journal_fingerprint() {
     uint32_t crc = CONFIG_CRC32_INIT;
     crc          = checkup_fp_u32(crc, checkup_layout_fingerprint());
     crc          = checkup_fp_u32(crc, CHECKUP_JOURNAL_LAYOUT_VERSION);
     crc          = checkup_fp_u32(crc, static_cast<uint32_t>(sizeof(CheckupJournalPayload)));
+    crc          = checkup_fp_u32(crc, static_cast<uint32_t>(offsetof(CheckupBucket, defrosts)));
+    crc = checkup_fp_u32(crc, static_cast<uint32_t>(offsetof(CheckupBucket, censored_runtime_s)));
+    crc = checkup_fp_u32(crc, static_cast<uint32_t>(offsetof(CheckupBucket, dhw_hour_s)));
     crc = checkup_fp_u32(crc, static_cast<uint32_t>(offsetof(CheckupJournalPayload, model_fp)));
     crc = checkup_fp_u32(crc, static_cast<uint32_t>(offsetof(CheckupJournalPayload, source_fp)));
     crc =
@@ -768,8 +771,10 @@ checkup_journal_select_slot(int64_t wanted, const CheckupJournalRecord* live, si
     return nullptr;
 }
 
-// Every completed slot has a monotonic deadline independent of producer liveness, the next
-// boot-raster boundary and later SNTP corrections. Zero marks gaps. Equality expires.
+// Positive deadlines are monotonic and independent of the next raster boundary and later SNTP
+// corrections. Zero marks gaps. An expired slot keeps its position but has lost its evidence.
+inline constexpr int64_t CHECKUP_EXPIRED_SLOT_US = -1;
+
 inline constexpr bool checkup_restored_expired(int64_t expiry_us, int64_t now_us) {
     return expiry_us > 0 && now_us >= expiry_us;
 }
@@ -850,17 +855,24 @@ checkup_journal_choose(int64_t wanted, const CheckupJournalLiveSpan& live,
     return c;
 }
 
+struct CheckupJournalSlotTimes {
+    int64_t expiry_us[CHECKUP_COMPLETED_BUCKETS] = {};
+    // Zero denotes a slot without stored provenance. The largest value marks a stored hour whose
+    // date is outside the HTTP timestamp range.
+    uint32_t restored_end_unix_s[CHECKUP_COMPLETED_BUCKETS] = {};
+};
+
 // Rebuild both completed-hour rings over [earliest, latest] IN PLACE. Selected live hours already
 // hold their buckets, so the window is first laid out where each of them keeps its slot and only
 // the other slots receive a stored hour or a gap; clearing the ring first would need every live
-// hour copied beforehand. Every slot gets its restore deadline (zero for a gap or outside the
-// window). The three arrays are then rotated together so the window's oldest hour sits in slot 0
+// hour copied beforehand. Every slot gets its restore deadline and any restored wall-clock end.
+// The arrays are then rotated together so the window's oldest hour sits in slot 0
 // and `head` follows its newest: the layout of a cleared ring refilled in order, which
 // checkup_aggregate and dhw_loss_aggregate assume while a ring is not full. A reversed or
 // wider-than-ring window leaves both rings empty and every deadline zero. A circulation
 // reconfiguration retires the DHW bucket alone; true tells the caller to restart the DHW scope.
 inline bool checkup_journal_rebuild(CheckupRing& ring, DhwLossRing& dhw,
-                                    int64_t (&expiry_us)[CHECKUP_COMPLETED_BUCKETS],
+                                    CheckupJournalSlotTimes&      times,
                                     const CheckupJournalLiveSpan& live,
                                     const CheckupJournalRecord* stored, size_t stored_count,
                                     int64_t earliest, int64_t latest, int64_t now_unix_s,
@@ -868,6 +880,8 @@ inline bool checkup_journal_rebuild(CheckupRing& ring, DhwLossRing& dhw,
                                     uint32_t source_fp, uint32_t generation, bool reset_requested,
                                     uint32_t dhw_source_fp, bool dhw_reset_requested) {
     constexpr size_t kSlots = CHECKUP_COMPLETED_BUCKETS;
+    auto&            expiry_us           = times.expiry_us;
+    auto&            restored_end_unix_s = times.restored_end_unix_s;
     const size_t     n      = latest >= earliest && latest - earliest < static_cast<int64_t>(kSlots)
                                   ? static_cast<size_t>(latest - earliest) + 1
                                   : 0;
@@ -883,6 +897,7 @@ inline bool checkup_journal_rebuild(CheckupRing& ring, DhwLossRing& dhw,
     bool dhw_retired = false;
     for (size_t j = 0; j < kSlots; ++j) {
         const size_t               p = (start + j) % kSlots;
+        restored_end_unix_s[p]       = 0;
         const CheckupJournalChoice c =
             j < n ? checkup_journal_choose(earliest + static_cast<int64_t>(j), live, stored,
                                            stored_count, now_unix_s, confirmed, model_fp, source_fp,
@@ -893,8 +908,8 @@ inline bool checkup_journal_rebuild(CheckupRing& ring, DhwLossRing& dhw,
                 dhw.buf[p]  = DhwLossBucket{};
                 dhw_retired = true;
             }
-            expiry_us[p] = checkup_restore_expiry_us(checkup_journal_live_end(live, c.live),
-                                                     now_unix_s, now_us);
+            // Keep the boot-local deadline or its gap/expired marker. The wall label used to
+            // select this slot may have clamped its end into a different hour.
         } else if (c.stored) {
             const bool keep_dhw = !dhw_reset_requested && checkup_journal_dhw_identity_matches(
                                                               c.stored->payload, dhw_source_fp);
@@ -903,6 +918,9 @@ inline bool checkup_journal_rebuild(CheckupRing& ring, DhwLossRing& dhw,
             dhw_retired = dhw_retired || !keep_dhw;
             expiry_us[p] =
                 checkup_restore_expiry_us(c.stored->payload.end_unix_s, now_unix_s, now_us);
+            const int64_t end = c.stored->payload.end_unix_s;
+            restored_end_unix_s[p] =
+                end > 0 && end < UINT32_MAX ? static_cast<uint32_t>(end) : UINT32_MAX;
         } else {
             ring.buf[p]  = CheckupBucket{};
             dhw.buf[p]   = DhwLossBucket{};
@@ -912,6 +930,7 @@ inline bool checkup_journal_rebuild(CheckupRing& ring, DhwLossRing& dhw,
     std::rotate(ring.buf, ring.buf + start, ring.buf + kSlots);
     std::rotate(dhw.buf, dhw.buf + start, dhw.buf + kSlots);
     std::rotate(expiry_us, expiry_us + start, expiry_us + kSlots);
+    std::rotate(restored_end_unix_s, restored_end_unix_s + start, restored_end_unix_s + kSlots);
     ring.count = dhw.count = static_cast<uint8_t>(n);
     ring.head = dhw.head = static_cast<uint8_t>(n % kSlots);
     return dhw_retired;

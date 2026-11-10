@@ -35,6 +35,12 @@ for (const name of selected) {
     await page.navigate(server.url);
     await page.waitFor("typeof S !== 'undefined' && S.status && Array.isArray(S._values) && document.querySelector('#settingsCards .vgroup')");
     await page.evaluate("pollStop(); window.__browserPollSchedule=pollSchedule; pollSchedule=()=>{}; true");
+    if (process.argv.includes("--diagnosis-only")) {
+      const { assertCyclingChart } = await import("./test_browser_cycling.mjs");
+      await assertCyclingChart(page, server, "webkit/" + name + "/diagnosis/cycling");
+      assert.deepEqual(page.diagnostics, [], "WebKit cycling diagnosis must emit no browser errors");
+      continue;
+    }
     if (!mutation || mutation === "history-paint-freeze")
       page.assertFlowPaint = context => assertWebKitFlowPaint(page, context);
     await assertHistoryMotion(page, server, "webkit/" + name + "/history-motion");

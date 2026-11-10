@@ -346,22 +346,18 @@ The optional 24-hour Plant diagnostics rows appear only after Firmware opt-in an
 live. Firmware supplies verdict, evidence class, coverage and limits; the browser adds no thresholds.
 Rows cover fault, tank loss, starts, defrost, water pressure, steady flow, heater runtime and retry
 changes. Collapsed rows show the primary measured value when available (or checking, no window, measured, tentative and N/A).
-Every expander has three blocks. The reading gives its window or recorded time and a brief
-description. The interpretation explains relevant gaps. For compressor starts it also contains
-the hourly chart and the independent Stop context when available. The **Normal** block gives expected
-conditions or assessment limits. The observation window is not a status-since timestamp.
+Expanders usually show the reading and its time, an interpretation, and expected conditions or
+assessment limits. The compressor-start expander gives the observed start count and completed runs
+by purpose, one short assessment of average heating-run duration, and the 24-hour chart. Keep the
+observed start count available when classification inputs are unsupported. Distinguish unsupported
+inputs from temporarily insufficient readings. Label elapsed time as the observation window and
+reserve event timestamps for recorded events.
 Observation-only/experimental results cannot become OK or manufacture a health certificate.
 `available`, `assessable` and `evaluated` count different facts; only completed bounded judgments
 belong in the evaluated headline.
 
-Evidence clocks are per signal, not inferred from board uptime. Completed hours restore only from
-compatible dated flash records after clock sync and current-boot X10A confirmation; RAM completed
-hours are retired. A software restart tries to journal the open hour; other open/unsaved hours
-may be lost. `flash_pending`, `fresh` and `flash` distinguish
-waiting, new collection and reconstruction. `full_span` uses observed lifecycle and admitted dated
-intervals. Consent, layout, profile, protocol and RX/TX bind the scope; legacy unscoped records cannot
-restore. Besides dated journal records, only a separately sealed scoped ongoing DHW filter may cross
-a software restart.
+Evidence clocks are per signal. The elapsed horizon can include gaps in readable coverage.
+See [plant persistence](PLANT.md#reboot-and-persistence) for restore admission and status.
 Enabling or X10A re-detection/profile/pin changes starts fresh; HomeHub-only changes do not.
 A pending identity reset hides
 old evidence and discards an in-flight sample. Missing capabilities stay unknown/unavailable.
@@ -583,10 +579,20 @@ succeeded. Long-running failure reasons wrap and remain available until acknowle
 
 The schematic and Settings cards remain a centred single column; dashboard details use §6's
 selectable panel. The page never scrolls horizontally; the mobile card selector and wide schematic/table
-content scroll within their own containers. Keep value plus unit together. When label and value no longer fit,
-stack the value below/right rather than squeeze labels to single-character columns. Inspector
-headings wrap by content; value labels keep their defined share. Split Settings actions own their
-padding and cannot overlap when stacked. Measure every shipped locale at 320 px.
+content scroll within their own containers. Keep value plus unit together. Stack ordinary rows
+when label and value no longer fit. Plant diagnosis headers keep the label and compact value
+on one line and put the full observation in the disclosure. Inspector headings wrap by content
+and value labels keep their defined share. Split Settings actions own their padding and cannot
+overlap when stacked. Measure every shipped locale at 320 px.
+
+The cycling disclosure uses one row of hourly columns with start counts above stacked runtime
+bars. The columns own pointer and keyboard selection and share one readout. Keep leading padding
+and expired slots empty. Show positive start counts as lower bounds in the summary and readout.
+Hatch elapsed time without compressor readings only where the elapsed duration is known. Restored
+and legacy slots show readable time with unknown elapsed duration. Label a restored timestamp as
+saved time. Leave the unelapsed part of the open hour unfilled. The default readout uses one hourly
+snapshot and omits runtime without readable compressor seconds. Update the chart in its own slot
+and defer it while its card is hidden.
 
 Use logical keyboard order, visible focus, Enter/Space activation, Escape at the innermost layer,
 modal focus return and scroll lock. Background controls are unavailable while a dialog is open.

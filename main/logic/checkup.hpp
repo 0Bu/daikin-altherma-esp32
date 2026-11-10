@@ -205,6 +205,7 @@ static_assert(sizeof(CheckupOutdoorStats) == 12, "outdoor context cost changed")
 struct CheckupBucket {
     // Each clock belongs to one hour and is clamped at 3600 s before assignment. Five 12-bit
     // clocks share each 64-bit allocation unit: the fifteen clocks use 24 bytes instead of 30.
+    // The two named 4-bit fields use spare bits in the first and second words.
     // covered=any signal; rps/run=readable compressor/known running; class=paired RPS+valve+mode.
     // dfr_pair/dfr_run/defrost require paired compressor+defrost witnesses; buh/bsh are heater
     // witnesses and active time; bar is valid pressure, flow is valid flow after pump run-up;
@@ -214,11 +215,13 @@ struct CheckupBucket {
     uint64_t run_s : 12;
     uint64_t class_observed_s : 12;
     uint64_t dfr_observed_s : 12;
+    uint64_t space_hour_low : 4;
     uint64_t dfr_pair_observed_s : 12;
     uint64_t dfr_run_s : 12;
     uint64_t defrost_s : 12;
     uint64_t buh_observed_s : 12;
     uint64_t buh_s : 12;
+    uint64_t flags : 4;
     uint64_t bsh_observed_s : 12;
     uint64_t bsh_s : 12;
     uint64_t bar_observed_s : 12;
@@ -226,8 +229,9 @@ struct CheckupBucket {
     uint64_t retry_observed_s : 12;
     constexpr CheckupBucket()
         : covered_s(0), rps_observed_s(0), run_s(0), class_observed_s(0), dfr_observed_s(0),
-          dfr_pair_observed_s(0), dfr_run_s(0), defrost_s(0), buh_observed_s(0), buh_s(0),
-          bsh_observed_s(0), bsh_s(0), bar_observed_s(0), flow_observed_s(0), retry_observed_s(0) {}
+          space_hour_low(0), dfr_pair_observed_s(0), dfr_run_s(0), defrost_s(0), buh_observed_s(0),
+          buh_s(0), flags(0), bsh_observed_s(0), bsh_s(0), bar_observed_s(0), flow_observed_s(0),
+          retry_observed_s(0) {}
     // WHICH LOAD a compressor RUN served. RPS lives on 0x30; the 3-way valve and I/U mode live on
     // 0x60, so either page can time out alone. `class_observed_s` is the paired class clock: RPS
     // and valve must be readable together, plus I/U mode whenever the valve points at the room
@@ -263,13 +267,22 @@ struct CheckupBucket {
     uint8_t  censored_restart_runs    = 0;
     uint8_t  defrosts                 = 0; // defrost off -> on transitions (saturating)
     uint8_t  paired_defrosts = 0; // same edge with readable compressor witnesses at both endpoints
-    uint8_t  flags           = 0;
+    uint8_t  space_hour_high = 0;
     // Start-not-witnessed is the remainder of censored_runs after the four exclusive causes above.
     // A saturated runtime is a lower bound and permanently blocks this window's runtime gate.
     uint16_t censored_runtime_s = 0;
-    uint16_t            dhw_hour_s = 0; // running seconds paired with a DHW route at both endpoints
+    uint16_t            dhw_hour_s = 0;  // positively witnessed DHW compressor seconds in this hour
     CheckupOutdoorStats cycling_outdoor; // samples from completed, pure space-heating runs only
     CheckupOutdoorStats defrost_outdoor; // samples paired with known defrost + running compressor
+
+    uint16_t space_hour_s() const {
+        return static_cast<uint16_t>((static_cast<unsigned>(space_hour_high) << 4) |
+                                     space_hour_low);
+    }
+    void set_space_hour_s(uint16_t seconds) {
+        space_hour_high = static_cast<uint8_t>(seconds >> 4);
+        space_hour_low  = seconds & 0x0f;
+    }
 };
 
 // Bucket flags — facts that happened at least once in the hour and have no useful magnitude.
@@ -277,7 +290,6 @@ constexpr uint8_t CHECKUP_F_FAULT   = 1u << 0;   // conv 203 read class Error
 constexpr uint8_t CHECKUP_F_WARNING = 1u << 1;   // conv 203 read class Warning/Caution
 constexpr uint8_t CHECKUP_F_RETRY   = 1u << 2;   // a protection-retry counter strictly INCREASED
 constexpr uint8_t CHECKUP_F_LOW_BAR = 1u << 3;   // <=1.0 bar persisted for the confirmation period
-constexpr uint8_t CHECKUP_F_UNATTRIBUTED_RUNTIME = 1u << 4;
 
 // 80 bytes per hour: wider completed-run/context counts and a dated pressure minimum add
 // 384 bytes to the 24-slot ring. No sampling allocation or partition change is involved.
@@ -498,7 +510,7 @@ struct CheckupState {
     bool     prev_bar_valid = false, prev_bar_low = false;
     bool     prev_flow_valid       = false;
     bool     prev_class_known      = false;
-    CheckupRunClass prev_sample_class     = CheckupRunClass::Unknown;
+    CheckupRunClass prev_hour_class       = CheckupRunClass::Unknown;
     bool     prev_any_known        = false;
     // The last KNOWN compressor state of this continuous segment (a real gap clears it), and the
     // unreadable-RPS seconds in the open run since its last known-running sample (each such sample,
@@ -1193,7 +1205,9 @@ inline bool checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample
     const bool flow_valid = s.flow_ok && s.flow_tenths >= 0;
     const bool class_state_known =
         s.valve_known && (s.valve_dhw || s.operating_mode != CheckupOperatingMode::Unknown);
-    const auto sample_class = checkup_run_class(s);
+    const auto current_class = checkup_run_class(s);
+    const auto hour_class =
+        s.defrost_known && s.defrost_on ? CheckupRunClass::Unknown : current_class;
     const bool any_known = s.rps_known || s.defrost_known || s.buh_known || s.bsh_known ||
                            s.pump_known || bar_valid || flow_valid ||
                            s.fault != FaultClass::Unknown || s.retry_known_mask;
@@ -1204,14 +1218,18 @@ inline bool checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample
         if (any_known && st.prev_any_known) b.covered_s = checkup_add_hour_s(b.covered_s, dt);
         if (s.rps_known && st.prev_rps_known) {
             b.rps_observed_s = checkup_add_hour_s(b.rps_observed_s, dt);
-            if (dt != 0 && s.rps_running && st.prev_rps_running) {
-                b.run_s = checkup_add_hour_s(b.run_s, dt);
-                if (sample_class != st.prev_sample_class ||
-                    (sample_class != CheckupRunClass::Dhw &&
-                     sample_class != CheckupRunClass::SpaceHeating))
-                    b.flags |= CHECKUP_F_UNATTRIBUTED_RUNTIME;
-                else if (sample_class == CheckupRunClass::Dhw)
-                    b.dhw_hour_s = checkup_add_hour_s(b.dhw_hour_s, dt);
+            if (s.rps_running && st.prev_rps_running) {
+                const uint16_t runtime  = checkup_add_hour_s(b.run_s, dt);
+                const unsigned accepted = runtime - b.run_s;
+                b.run_s                 = runtime;
+                // A class change cannot identify when the interval changed route. Cooling,
+                // known defrost and missing witnesses remain in total runtime only.
+                if (hour_class == st.prev_hour_class) {
+                    if (hour_class == CheckupRunClass::SpaceHeating)
+                        b.set_space_hour_s(checkup_add_hour_s(b.space_hour_s(), accepted));
+                    else if (hour_class == CheckupRunClass::Dhw)
+                        b.dhw_hour_s = checkup_add_hour_s(b.dhw_hour_s, accepted);
+                }
             }
         }
         // BOTH witnesses readable in THIS sample. The pairing is the same bias dfr_pair_observed_s
@@ -1318,7 +1336,7 @@ inline bool checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample
             // hydronic mode so Cooling can never be relabelled as space heating.
             st.run_open       = true;
             st.run_s          = 0;
-            st.run_class        = sample_class;
+            st.run_class        = current_class;
             st.run_class_pure   = st.prev_rps_known && st.run_class != CheckupRunClass::Unknown;
             st.run_start_bucket = current_bucket;
             st.run_outdoor = CheckupOutdoorStats{};
@@ -1337,7 +1355,6 @@ inline bool checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample
         // class/RPS coverage. A changed class across a gap cannot certify a handover.
         if (st.run_open) {
             const bool was_running   = st.prev_rps_known && st.prev_rps_running;
-            const auto current_class = sample_class;
             // dt is intentionally zero at a continuous hourly rollover. Bridge admission must
             // instead bind the complete monotonic interval between the readable endpoints.
             // Every open run initializes run_rps_seen_us; this continuous segment is monotonic.
@@ -1470,7 +1487,7 @@ inline bool checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample
     if (!st.run_open && s.rps_known && s.rps_running) {
         st.run_open       = true;
         st.run_class_pure = false;
-        st.run_class = st.run_last_class = sample_class;
+        st.run_class = st.run_last_class = current_class;
         st.run_start_bucket              = current_bucket;
         st.run_started_us = st.run_rps_seen_us = now_us;
         st.run_class_seen_us = st.run_class == CheckupRunClass::Unknown ? -1 : now_us;
@@ -1515,7 +1532,7 @@ inline bool checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample
     st.prev_bar_low          = bar_valid && s.bar_tenths <= CHECKUP_BAR_WARN_TENTHS;
     st.prev_flow_valid       = flow_valid;
     st.prev_class_known      = class_state_known;
-    st.prev_sample_class     = sample_class;
+    st.prev_hour_class       = hour_class;
     st.prev_any_known        = any_known;
     st.prev_retry_known_mask = s.retry_known_mask;
     for (size_t i = 0; i < CHECKUP_RETRY_COUNT; i++) st.prev_retry_value[i] = s.retry_value[i];
@@ -1975,38 +1992,57 @@ inline CheckupCyclingEvidence checkup_cycling_evidence(const CheckupWindow& w,
     return e;
 }
 
+enum class CheckupCyclingSlot : uint8_t { Ordinary, Restored, Expired };
+
 struct CheckupCyclingHour {
     uint16_t observed_s = 0;
     uint16_t run_s      = 0;
     uint16_t space_s    = 0;
     uint16_t dhw_s      = 0;
     uint8_t  starts     = 0;
+    CheckupCyclingSlot provenance = CheckupCyclingSlot::Ordinary;
 };
 
 struct CheckupCyclingHours {
     CheckupCyclingHour hours[CHECKUP_BUCKETS] = {};
+    uint32_t           end_unix_s[CHECKUP_BUCKETS] = {};
+    uint32_t           epoch                       = 0;
+    int32_t            newest_bucket               = 0;
+    uint16_t           pending_elapsed_s           = 0;
     uint8_t            count                  = 0;
+
+    int32_t bucket_at(size_t index) const {
+        return newest_bucket - (static_cast<int32_t>(count) - 1 - static_cast<int32_t>(index));
+    }
 };
 
+inline constexpr uint16_t checkup_cycling_elapsed_s(int64_t start_us, int64_t now_us) {
+    if (start_us < 0 || now_us <= start_us) return 0;
+    return static_cast<uint16_t>(std::min<int64_t>((now_us - start_us) / 1000000, CHECKUP_DT_S));
+}
+
 inline CheckupCyclingHour checkup_bucket_cycling_hour(const CheckupBucket& b) {
-    // Completed-run totals belong to the start hour and cannot fill a gap in this split.
-    uint16_t space_s = 0, dhw_s = 0;
-    if (!(b.flags & CHECKUP_F_UNATTRIBUTED_RUNTIME) && b.dhw_hour_s <= b.run_s) {
-        dhw_s   = b.dhw_hour_s;
-        space_s = static_cast<uint16_t>(b.run_s - dhw_s);
-    }
     return CheckupCyclingHour{static_cast<uint16_t>(b.rps_observed_s),
-                              static_cast<uint16_t>(b.run_s), space_s, dhw_s, b.starts};
+                              static_cast<uint16_t>(b.run_s), b.space_hour_s(), b.dhw_hour_s,
+                              b.starts};
+}
+
+inline uint32_t checkup_cycling_end_unix_s(int64_t end_us, int64_t now_us, int64_t unix_s,
+                                           int32_t unix_ms) {
+    if (unix_s <= 0 || unix_s > UINT32_MAX || end_us < 0 || end_us > now_us) return 0;
+    const int64_t end_ms = unix_s * 1000 + unix_ms - (now_us - end_us) / 1000;
+    return end_ms >= 1000 ? static_cast<uint32_t>(end_ms / 1000) : 0;
 }
 
 inline CheckupCyclingHours checkup_cycling_hours(const CheckupRing& r, bool rps_supported = true) {
     CheckupCyclingHours out;
     if (!rps_supported) return out;
-    uint32_t     total_observed = r.pending.rps_observed_s;
-    const size_t oldest         = (r.count < CHECKUP_COMPLETED_BUCKETS) ? 0 : r.head;
+    bool         has_evidence = r.pending.rps_observed_s || r.pending.starts;
+    const size_t oldest       = (r.count < CHECKUP_COMPLETED_BUCKETS) ? 0 : r.head;
     for (size_t i = 0; i < r.count; i++)
-        total_observed += r.buf[(oldest + i) % CHECKUP_COMPLETED_BUCKETS].rps_observed_s;
-    if (!total_observed) return out;
+        has_evidence |= r.buf[(oldest + i) % CHECKUP_COMPLETED_BUCKETS].rps_observed_s ||
+                        r.buf[(oldest + i) % CHECKUP_COMPLETED_BUCKETS].starts;
+    if (!has_evidence) return out;
     for (size_t i = 0; i < r.count; i++)
         out.hours[out.count++] =
             checkup_bucket_cycling_hour(r.buf[(oldest + i) % CHECKUP_COMPLETED_BUCKETS]);
@@ -2235,10 +2271,12 @@ inline CheckupReport checkup_evaluate(const CheckupWindow& w, const CheckupCover
             verdict = CheckupVerdict::Collecting;
         else if (!heating_population && !w.rps_observed_s)
             verdict = CheckupVerdict::Collecting;
+        // A known OFF followed by known ON across unreadable samples establishes at least one
+        // start before there is any paired runtime. Preserve that count without changing verdict.
         set(CheckupCheck::Cycling, verdict,
             heating_population ? w.class_observed_s : w.rps_observed_s,
             heating_population ? CHECKUP_REQUIRED_S : 0,
-            w.rps_observed_s ? static_cast<int>(w.starts) : -1, -1,
+            (w.rps_observed_s || w.starts) ? static_cast<int>(w.starts) : -1, -1,
             class_witnessed ? static_cast<int>(w.space_runs) : -1,
             class_witnessed ? space_mean : -1, class_witnessed ? static_cast<int>(w.dhw_runs) : -1,
             class_witnessed ? dhw_mean : -1,

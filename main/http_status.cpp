@@ -1313,7 +1313,8 @@ static void append_status_json(JsonOut& j, bool redact) {
     // `a + b + c` chain): the httpd stack is the budget that killed v1.0.12, and every intermediate
     // of a chain is live in this frame at once.
     {
-        const logic::CheckupReport hr = checkup_report();
+        logic::CheckupCyclingHours hrs{};
+        const logic::CheckupReport hr = checkup_report(&hrs);
         j += "\"health\":{\"covered_s\":";
         append_json_uint(j, hr.covered_s);
         j += ",\"span_s\":";
@@ -1487,22 +1488,40 @@ static void append_status_json(JsonOut& j, bool redact) {
                 j += ",\"split\":";
                 j += hr.cycling_split ? "true" : "false";
                 outdoor_context(hr.cycling_outdoor);
-                j += ",\"hours\":[";
                 {
-                    const auto hrs = checkup_cycling_hours();
+                    j += ",\"hours_epoch\":";
+                    append_json_uint(j, hrs.epoch);
+                    j += ",\"hours\":[";
                     for (size_t hi = 0; hi < hrs.count; ++hi) {
                         if (hi) j += ",";
-                        j += "{\"starts\":";
-                        append_json_uint(j, hrs.hours[hi].starts);
+                        const auto&   hour   = hrs.hours[hi];
+                        const int64_t bucket = hrs.bucket_at(hi);
+                        j += "{\"bucket\":";
+                        if (bucket < 0) j += "-";
+                        append_json_uint(j, static_cast<uint64_t>(bucket < 0 ? -bucket : bucket));
+                        if (hrs.end_unix_s[hi]) {
+                            j += ",\"end_unix_s\":";
+                            append_json_uint(j, hrs.end_unix_s[hi]);
+                        }
+                        if (hour.provenance == logic::CheckupCyclingSlot::Restored)
+                            j += ",\"restored\":true";
+                        else if (hour.provenance == logic::CheckupCyclingSlot::Expired)
+                            j += ",\"expired\":true";
+                        if (hi + 1 == hrs.count) {
+                            j += ",\"elapsed_s\":";
+                            append_json_uint(j, hrs.pending_elapsed_s);
+                        }
+                        j += ",\"starts\":";
+                        append_json_uint(j, hour.starts);
                         j += ",\"run_s\":";
-                        append_json_uint(j, hrs.hours[hi].run_s);
+                        append_json_uint(j, hour.run_s);
                         j += ",\"observed_s\":";
-                        append_json_uint(j, hrs.hours[hi].observed_s);
-                        if (hrs.hours[hi].space_s || hrs.hours[hi].dhw_s) {
+                        append_json_uint(j, hour.observed_s);
+                        if (hour.run_s) {
                             j += ",\"space_s\":";
-                            append_json_uint(j, hrs.hours[hi].space_s);
+                            append_json_uint(j, hour.space_s);
                             j += ",\"dhw_s\":";
-                            append_json_uint(j, hrs.hours[hi].dhw_s);
+                            append_json_uint(j, hour.dhw_s);
                         }
                         j += "}";
                     }

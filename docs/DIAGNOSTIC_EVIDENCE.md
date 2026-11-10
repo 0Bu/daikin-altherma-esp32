@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 717141a74dab6204dac037af815c83268a1dd8edb14777fa5d154b55d5ca3c88 -->
+<!-- diagnostic-evidence-contract: 756593b5a33017ef64a079101b3428b952c19055620cc3b7aa3a8b1946b3284c -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -218,10 +218,11 @@ than about six minutes reduced efficiency in the tested systems, while heat emis
 control, and outside temperature also affected the result ([R1], summary and sections 1–2). This
 supports the relevance of very short runs but does not provide a universal Daikin limit.
 
-**Firmware rule:** Starts and completed runs are retained separately. Valve/mode inputs classify
-pure space heating, DHW or cooling. Missing class or RPS readings may bridge at most 15 seconds
-between matching known-running endpoints, using their monotonic timestamps independently of hourly
-duration booking; that bridge does not add readable coverage.
+**Firmware rule:** Starts and completed runs are retained separately. A witnessed OFF-to-ON
+transition across missing readings establishes at least one start before readable duration accrues.
+Valve/mode inputs classify pure space heating, DHW or cooling. Missing class or RPS readings may
+bridge at most 15 seconds between matching known-running endpoints, using their monotonic
+timestamps independently of hourly duration booking. That bridge adds no readable coverage.
 A changed recovered class, unknown stop edge or longer gap censors the run. A pure DHW run may
 hold one final valve return to the room circuit for at most 30 seconds, accepted only at a known OFF
 edge. The indoor mode must remain readable and may still say DHW; cooling, a return to the DHW
@@ -231,40 +232,48 @@ Positively observed uninterrupted heating/DHW handovers remain censored with the
 their space phases never become heating runs. Other causes distinguish unaccepted transitions,
 unreadable class/RPS, journal/window boundaries and unwitnessed starts.
 
-The hourly chart integrates intervals of at most 15 seconds with running compressor readings at
-both endpoints. A split requires every counted interval to have the same eligible class at both
-ends. A known DHW valve route qualifies as DHW. Space heating needs a known room route and heating
-mode. An hourly start count and its runtime can cover different runs and do not form a completed-run
-mean.
-
 The count population is the larger of completed runs and starts minus one, less proven handovers.
 At least 90% must be classified. At least 90% of completed heating runtime plus unsafe censored
 elapsed runtime must also be completed pure heating runtime; DHW runtime cannot mask missing long
 heating runs. Censored elapsed time includes blind intervals and excludes only proven handovers.
 Unwitnessed starts and journal/window boundaries have unknown full durations and always block
 assessment; their runtime is only an observed lower bound. Saturated runtime/counters or inconsistent
-cause counts also block the assessment. A run still open at a software restart keeps its witnessed
-start in the journaled open hour; the next boot books only its remainder, as a censored `start` run,
-and adds no start ([PLANT.md](PLANT.md#reboot-and-persistence)). A run completing after its start
-hour was journaled is journaled again with that hour
-([persistence](ARCHITECTURE.md#history-and-diagnosis-persistence)).
-A restart between its stop and that append, which needs synchronized time and a writable journal,
-can still lose it. Project inference, not measured: the append normally follows within seconds, and
-only runs still open at an hour boundary are exposed, so a loss tends to remove a long run. Under
+cause counts also block the assessment. A counted start survives a restart only when the saved
+hour containing that count restores. The new boot can observe the tail of a still-running compressor
+as a censored `start` run without adding a start ([PLANT.md](PLANT.md#reboot-and-persistence)).
+When a run completes into its retained start hour after that hour was journaled, the firmware
+requests a revised append ([persistence](ARCHITECTURE.md#history-and-diagnosis-persistence)).
+The completed run survives only if the revision is saved and restored. An earlier saved copy can
+retain the start alone. The project infers that a missed revision tends to remove a long run because
+this case requires a run to have crossed an hour boundary. Under
 the count population above a lost run is not detected; it withholds the assessment only by pushing
 either population gate (classified runs or runtime) below 90% or the completed heating runs below
-12, and can otherwise shift (most likely shorten) the mean and change the result. Only at least 12 completed
-space-heating runs with both population gates satisfied can support an assessment. A mean below ten minutes then
-produces **NOTE** immediately. An absence-of-short-run assessment additionally requires a full
-24-hour span and at least CHECKUP_REQUIRED_S of paired classification time.
+12, and can otherwise shift (most likely shorten) the mean and change the result. An assessment
+requires at least 12 completed space-heating runs and both population gates. A mean below ten
+minutes produces **NOTE** immediately. A mean of ten minutes or more additionally requires a full
+24-hour span and at least CHECKUP_REQUIRED_S of both paired classification and readable compressor
+time to produce **OK**.
 
-Missing classification, fewer than 12 heating runs or an inadequate classified population remains
-an observation with an explicit reason; absent compressor evidence remains CHECKING.
+A profile without compressor speed gives **N/A**. When the valve or mode capability needed to
+identify heating runs is absent (`class_unavailable`), the assessment is unavailable and the start
+count remains available when observed. Temporary gaps in classification, too few heating runs or
+an inadequate classified population leave an observation when usable compressor readings exist.
+A supported compressor input without usable readings remains **CHECKING**. The status API carries
+the detailed reason and the disclosure gives a short assessment.
 There is no pooled starts/runtime fallback, and unfinished
 runs never enter the completed mean. Completed-run evidence ages with its start edge. See
 CHECKUP_CYCLING_MIN_STARTS, CHECKUP_CYCLING_SHORT_RUN_S and CHECKUP_CYCLING_CLASSIFIED_PCT in
 [checkup.hpp](../main/logic/checkup.hpp). Fresh X10A outdoor minimum/mean accompanies only accepted
 completed heating runs, from samples whose predecessor was also running, and changes no threshold.
+
+The hourly chart counts compressor running intervals of at most 15 seconds separately from completed
+runs. Both endpoints must show the compressor running in the same heating or DHW class to assign
+that interval. The DHW route identifies DHW. Space heating requires the room circuit and reported
+heating mode. Other runtime, including confirmed defrost, stays unassigned. The chart can include
+parts of runs that start or finish outside the slot. The
+[hourly API contract](API.md#history-and-24-hour-checks) defines how starts are assigned and which
+slots establish elapsed duration. See the [core journal upgrade rules](PLANT.md#reboot-and-persistence)
+for restore compatibility.
 
 **Project boundary:** Twelve heating runs, ten minutes and the 90% evidence requirements are
 project heuristics, not limits copied from R1 or specified by Daikin. R1 studied different,
@@ -278,7 +287,8 @@ manufacturer sequencing evidence. The anonymized synthetic equivalent is retaine
 The unchanged R1 publication and report were reopened on 28 October 2026; they do not establish
 these transition or population rules.
 
-**Independent stop context:** [`stop_context.hpp`](../main/logic/stop_context.hpp) observes a
+**Independent stop context:** The [status API](API.md#history-and-24-hour-checks) exposes the
+separate `stop_context` observation. [`stop_context.hpp`](../main/logic/stop_context.hpp) observes a
 witnessed running-to-stopped edge only after an observed OFF-to-running segment with recent
 confirmed space-heating context. Cooling-only and DHW-only segments do not enter its denominator;
 mixed transitions remain separate from pure completed heating runs. Five overlapping categories

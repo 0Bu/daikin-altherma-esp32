@@ -218,10 +218,15 @@ blind time itself, so its verdict can be `accept` beside trend age refusals.
 `health` fields: `covered_s`, `span_s`, `source_fresh`, `source_age_s`, `persist`, `full_span`,
 `available`, `assessable`, `evaluated`, `status`, `checks`. Disabled diagnostics, and a reset that is
 still pending, keep the object with placeholder checks: each reads `unavailable`/`unsupported` and
-carries no accumulated evidence, so read `persist` and `diagnostics.enabled` rather than the reason. `span_s` is elapsed lifecycle time capped at 24 hours (after a flash restore, each admitted stored hour counts as a whole hour); `covered_s` is observed
-bus context. Each check has its own `observed_s`/`required_s`, so one signal cannot lend coverage to
-another. `source_age_s` is null before a nonempty X10A sample; empty pause/failure callbacks cannot
-renew it. `source_fresh` applies the 15-second observation-age bound at read time. A stale source
+carries no accumulated evidence, so read `persist` and `diagnostics.enabled` rather than the reason.
+`span_s` combines time since the current diagnostics window's first accepted sampling callback
+with any carried restore duration, capped at 24 hours. A callback can start the clock without
+readable data. Restore estimates the earlier span from one nominal hour before the earliest
+selected record's end. The estimate can include gaps and nominal time before a short restart
+record. `covered_s` reports observed bus context. Each check has its own `observed_s`/`required_s`,
+so one signal cannot lend coverage to another. `source_age_s` is null before a nonempty X10A sample;
+empty pause/failure callbacks cannot renew it. `source_fresh` applies the 15-second observation-age
+bound at read time. A stale source
 withholds current fault-clear/current pressure and reassuring assessments; dated findings remain.
 `health.persist:"flash_pending"` means recovery has not completed and proves no stored hours;
 `fresh` means none were selected; `flash` means admissible dated hourly reconstruction with live
@@ -256,6 +261,10 @@ Unestablished numeric evidence is null. `reason` is empty when no qualification 
 `class_coverage`, `heating_runs_insufficient`, `class_population_incomplete`, `observation_only`,
 `no_paired_runtime`, `defrost_events_insufficient` or `source_stale`.
 
+Positive `cycling.starts` reports a counted lower bound, including before readable compressor
+duration accrues. A count alone leaves the diagnosis `collecting`. With no counted start or
+readable duration, `cycling.starts` is null.
+
 Cycling class counts describe completed runs. `censored_runs` includes five mutually exclusive
 causes: `transition` (an unaccepted class transition), `handover` (a positively observed continuous
 heating/DHW handover), `unreadable` (class/RPS uncertainty), `restart` (a journal/window boundary),
@@ -272,11 +281,26 @@ and blocks an assessment. Counter saturation or inconsistent cause totals also b
 legacy `mean_run_s` remains present as null. Transition/gap rules and limitations are in
 [DIAGNOSTIC_EVIDENCE.md](DIAGNOSTIC_EVIDENCE.md#diagnosis-cycling).
 
-`hours` lists up to 24 chronological buckets with `starts`, `run_s` and `observed_s`, including the
-open hour. For positive runtime with complete [hourly mode attribution](DIAGNOSTIC_EVIDENCE.md#diagnosis-cycling),
-the optional fields satisfy `space_s + dhw_s = run_s`. A zero in that pair means zero
-attributed seconds for the corresponding mode. The hourly runtime can include parts of runs started
-outside the hour.
+`cycling.hours` contains up to 24 slots, oldest first. The signed `bucket` identifies each slot
+within `boot_id` and `cycling.hours_epoch`. Source resets, journal restoration or re-anchoring
+after collection stops can start a new epoch. `end_unix_s` gives the mapped or journaled end
+when known. The journal may clamp the saved end into its assigned wall-clock hour. The open slot
+alone has `elapsed_s`, the monotonic seconds since its start, from 0 to 3600. `restored:true`
+identifies a saved slot whose original elapsed duration is unknown. It may be a short record saved
+at restart. `expired:true` keeps only the slot's position after its evidence ages out. Its duration
+and gap estimate are unknown. Only closed slots with a current-format identity and neither flag
+use a nominal 3600 seconds. Legacy slots also have unknown elapsed duration. Infer missing time
+from `observed_s` only when the elapsed duration is known.
+
+`starts` is a lower bound based on available readings. Within a continuous segment, known OFF
+followed by missing readings and a return to known ON establishes at least one start. The firmware
+adds it to the slot of the recovering ON sample. It may have happened in an earlier slot. With no
+counted start and no readable compressor time, the slot has no start evidence. `observed_s`
+reports readable compressor seconds. Without them, `run_s:0` establishes no runtime. When
+`run_s` is positive, `space_s` and `dhw_s` report positively witnessed heating and hot-water
+runtime, including zero when no time could be assigned to that mode. The rest of `run_s` remains
+unassigned. Hourly runtime and starts measure different populations and cannot produce an
+average completed run.
 
 `cycling.stop_context` is an independent observation object; it changes no legacy cycling field or
 verdict. `denominator` names `witnessed_stops_recent_heating`, the separately counted witnessed

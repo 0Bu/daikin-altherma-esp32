@@ -293,6 +293,38 @@
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?checkup_report\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?14checkup_report[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
       "max_bytes": 784
     },
+    "checkup_cycling_hours_locked": {
+      "pattern": "^(?:daik::checkup_cycling_hours_locked\\(long long\\)(?: \\[clone .+\\])?|_ZN4daikL28checkup_cycling_hours_locked[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+)$",
+      "max_bytes": 512
+    },
+    "checkup_evaluate": {
+      "pattern": "^daik::logic::checkup_evaluate\\(daik::logic::CheckupWindow const&, daik::logic::CheckupCoverage const&, daik::FaultClass, daik::logic::DhwLossWindow const&\\)$",
+      "max_bytes": 80
+    },
+    "checkup_summarize": {
+      "pattern": "^daik::logic::checkup_summarize\\(daik::logic::CheckupReport&\\)$",
+      "max_bytes": 32
+    },
+    "checkup_evidence_name": {
+      "pattern": "^daik::logic::checkup_result_evidence_name\\(daik::logic::CheckupCheck, daik::logic::CheckupCheckResult const&\\)$",
+      "max_bytes": 32
+    },
+    "checkup_dhw_progress": {
+      "pattern": "^daik::logic::dhw_loss_progress\\(daik::logic::DhwLossState const&, long long\\)$",
+      "max_bytes": 48
+    },
+    "checkup_dhw_age": {
+      "pattern": "^daik::logic::dhw_loss_age_s\\(long long, long long, unsigned long\\)$",
+      "max_bytes": 32
+    },
+    "checkup_dhw_fold": {
+      "pattern": "^_ZZN4daik5logic18dhw_loss_aggregate.*_cl.*",
+      "max_bytes": 32
+    },
+    "checkup_cycling_hours_build": {
+      "pattern": "^daik::logic::checkup_cycling_hours\\(daik::logic::CheckupRing const&, bool\\)$",
+      "max_bytes": 32
+    },
     "history_flash_restore": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?history_service_flash_restore\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?29history_service_flash_restore[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
       "max_bytes": 416
@@ -303,7 +335,7 @@
     },
     "checkup_journal_rebuild": {
       "pattern": "^daik::logic::checkup_journal_rebuild\\(",
-      "max_bytes": 176
+      "max_bytes": 192
     },
     "checkup_journal_choose": {
       "pattern": "^daik::logic::checkup_journal_choose\\(",
@@ -2249,6 +2281,10 @@
       "pattern": "^daik::\\(anonymous namespace\\)::checkup_persist_crc\\(",
       "max_bytes": 32
     },
+    "cycling_layout_fingerprint": {
+      "pattern": "^daik::logic::checkup_layout_fingerprint\\(\\)$",
+      "max_bytes": 32
+    },
     "mqtt_room_history": {
       "pattern": "^daik::record_room_history\\(daik::Config\\ const\\&,\\ unsigned\\ long\\)$",
       "max_bytes": 256
@@ -2899,7 +2935,11 @@
         "mcp_post",
         "http_send_status_json",
         "status_serializer",
-        "checkup_report"
+        "checkup_report",
+        "cycling_expire",
+        "cycling_seal",
+        "cycling_crc",
+        "history_config_crc"
       ],
       "multipliers": {},
       "base_bytes": 1536,
@@ -2909,7 +2949,217 @@
       "symbols": [
         "http_send_status_json",
         "status_serializer",
-        "checkup_report"
+        "checkup_report",
+        "cycling_expire",
+        "cycling_seal",
+        "cycling_crc",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_checkup_expire_fingerprint": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "checkup_report",
+        "cycling_expire",
+        "cycling_seal",
+        "cycling_layout_fingerprint",
+        "checkup_schema_crc",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_direct_checkup_expire_fingerprint": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "checkup_report",
+        "cycling_expire",
+        "cycling_seal",
+        "cycling_layout_fingerprint",
+        "checkup_schema_crc",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_cycling_hours": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "checkup_report",
+        "checkup_cycling_hours_locked",
+        "room_time_now"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_direct_cycling_hours": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "checkup_report",
+        "checkup_cycling_hours_locked",
+        "room_time_now"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_checkup_aggregate": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "checkup_report",
+        "cycling_aggregate",
+        "cycling_fold"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_direct_checkup_aggregate": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "checkup_report",
+        "cycling_aggregate",
+        "cycling_fold"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_checkup_evaluate": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "checkup_report",
+        "checkup_evaluate",
+        "checkup_summarize",
+        "checkup_evidence_name"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_direct_checkup_evaluate": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "checkup_report",
+        "checkup_evaluate",
+        "checkup_summarize",
+        "checkup_evidence_name"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_checkup_dhw_progress": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "checkup_report",
+        "checkup_dhw_progress",
+        "checkup_dhw_age"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_direct_checkup_dhw_progress": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "checkup_report",
+        "checkup_dhw_progress",
+        "checkup_dhw_age"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_cycling_hours_builder": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "checkup_report",
+        "checkup_cycling_hours_locked",
+        "checkup_cycling_hours_build"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_direct_cycling_hours_builder": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "checkup_report",
+        "checkup_cycling_hours_locked",
+        "checkup_cycling_hours_build"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_checkup_dhw_fold": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "checkup_report",
+        "checkup_dhw_fold"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_direct_checkup_dhw_fold": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "checkup_report",
+        "checkup_dhw_fold"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_checkup_freshness": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "checkup_report",
+        "checkup_summarize",
+        "checkup_evidence_name"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_direct_checkup_freshness": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "checkup_report",
+        "checkup_summarize",
+        "checkup_evidence_name"
       ],
       "multipliers": {},
       "base_bytes": 1536,
@@ -6502,6 +6752,7 @@
     "mqtt_cycling_evidence": {
       "symbols": [
         "mqtt_task",
+        "mqtt_heartbeat",
         "mqtt_heartbeat_builder",
         "cycling_evidence",
         "cycling_aggregate",
@@ -6514,11 +6765,29 @@
     "mqtt_cycling_expire": {
       "symbols": [
         "mqtt_task",
+        "mqtt_heartbeat",
         "mqtt_heartbeat_builder",
         "cycling_evidence",
         "cycling_expire",
         "cycling_seal",
-        "cycling_crc"
+        "cycling_crc",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_cycling_expire_fingerprint": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_heartbeat",
+        "mqtt_heartbeat_builder",
+        "cycling_evidence",
+        "cycling_expire",
+        "cycling_seal",
+        "cycling_layout_fingerprint",
+        "checkup_schema_crc",
+        "history_config_crc"
       ],
       "multipliers": {},
       "base_bytes": 1536,
@@ -11420,6 +11689,22 @@
         "httpd_direct_status",
         "httpd_mcp_checkup",
         "httpd_direct_checkup",
+        "httpd_mcp_checkup_expire_fingerprint",
+        "httpd_direct_checkup_expire_fingerprint",
+        "httpd_mcp_cycling_hours",
+        "httpd_direct_cycling_hours",
+        "httpd_mcp_checkup_aggregate",
+        "httpd_direct_checkup_aggregate",
+        "httpd_mcp_checkup_evaluate",
+        "httpd_direct_checkup_evaluate",
+        "httpd_mcp_checkup_dhw_progress",
+        "httpd_direct_checkup_dhw_progress",
+        "httpd_mcp_cycling_hours_builder",
+        "httpd_direct_cycling_hours_builder",
+        "httpd_mcp_checkup_dhw_fold",
+        "httpd_direct_checkup_dhw_fold",
+        "httpd_mcp_checkup_freshness",
+        "httpd_direct_checkup_freshness",
         "httpd_ota_status",
         "httpd_ota_check",
         "httpd_config_hp",
@@ -11699,6 +11984,7 @@
         "mqtt_discovery_owner_subscribe_callback",
         "mqtt_cycling_evidence",
         "mqtt_cycling_expire",
+        "mqtt_cycling_expire_fingerprint",
         "mqtt_room_history_validate",
         "mqtt_room_history_commit",
         "mqtt_stop_report",

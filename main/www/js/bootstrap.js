@@ -12,12 +12,6 @@ function wire() {
   document.addEventListener("input", keepRouteDraft);
   document.addEventListener("pointerdown", keepRouteDraft);
   document.addEventListener("keydown", keepRouteDraft);
-  document.addEventListener("click", (e) => {
-    if (S.cyclingPin && !e.target.closest(".checkup-cycling-chart")) {
-      S.cyclingPin = null;
-      document.querySelectorAll(".checkup-cycling-chart").forEach(c => applyCyclingPin(c, null));
-    }
-  });
 
   // Navigation: the gear opens Settings, the back chevron returns to the dashboard.
   $("btnSettings").onclick = () => go("settings");
@@ -99,6 +93,7 @@ function wire() {
     for (const ev of ["pointerup", "pointercancel"]) el.addEventListener(ev, () => clickHold(CLICK_HOLD_UP_MS));
   }
   for (const host of ["valueGroups", "inspCard", "settingsCards"]) wireTrendScrub($(host));
+  wireCyclingChart($("valueGroups"));
 
   // Schematic inspector: the SVG hit targets are <g> elements, so Enter/Space need handling by hand
   // (a <g role="button"> gets no native activation). Delegated, because the SVG is static DOM.
@@ -128,37 +123,152 @@ function trendPlotFromTarget(target) {
     target.closest(".vhist-graph")?.querySelector("[data-hist]") || null;
 }
 
-function resolveCyclingCol(c, x, y) {
-  const w = c.querySelector(".checkup-chart-cols"), cols = w?.children;
-  if (!cols?.length) return null;
-  const r = w.getBoundingClientRect();
-  if (x < r.left || x > r.right) return null;
-  if (y != null && (y < r.top - 20 || y > r.bottom + 20)) return null;
-  const f = Math.max(0, Math.min(0.999, (x - r.left) / (r.width || 1)));
-  return cols[Math.floor(f * cols.length)];
+// The hour readout changes without touching the chart markup used by the poll reconciler.
+function paintCyclingChart(chart, focus = document.activeElement) {
+  if (S.cyclingScope !== chart.dataset.cycling) {
+    S.cyclingScope = chart.dataset.cycling;
+    S.cyclingPin = S.cyclingHover = null;
+  }
+  let pin, hover, selected;
+  const focusInside = focus?.matches?.("[data-bucket]") && chart.contains(focus);
+  for (const button of chart.querySelectorAll("[data-bucket]")) {
+    const pressed = button.dataset.bucket === S.cyclingPin;
+    if (pressed) pin = button;
+    if (button.dataset.bucket === S.cyclingHover) hover = button;
+    if (focusInside) {
+      const tab = button === focus ? 0 : -1;
+      if (button.tabIndex !== tab) button.tabIndex = tab;
+      if (!tab) selected = button;
+    }
+    if (button.getAttribute("aria-pressed") !== String(pressed)) {
+      button.classList.toggle("active", pressed);
+      button.setAttribute("aria-pressed", String(pressed));
+    }
+  }
+  if (!pin) S.cyclingPin = null;
+  if (!hover) S.cyclingHover = null;
+  const range = chart.querySelector(".vhist-range");
+  const tip = (hover || selected || pin)?.getAttribute("aria-label") || chart.dataset.tip;
+  if (range.textContent !== tip) range.textContent = tip;
 }
 
-function updateCyclingTooltip(c, col) {
-  const r = c.querySelector(".vhist-range"), t = c.querySelector(".vhist-time");
-  const pinCol = S.cyclingPin ? c.querySelector(`.checkup-chart-col[data-time="${S.cyclingPin}"]`) : null;
-  const targetCol = col || pinCol;
-  if (r) r.textContent = targetCol?.dataset.tip || c.dataset.tip;
-  if (t) {
-    t.hidden = !targetCol;
-    t.textContent = targetCol?.dataset.time || "";
-    if (targetCol) t.style.left = `${targetCol.offsetLeft + targetCol.offsetWidth / 2}px`;
-  }
-}
+function wireCyclingChart(host) {
+  const chartFrom = target => target.closest?.(".checkup-cycling-chart");
+  const toggle = (chart, button) => {
+    S.cyclingHover = null;
+    S.cyclingPin = S.cyclingPin === button.dataset.bucket ? null : button.dataset.bucket;
+    paintCyclingChart(chart);
+  };
+  let drag, watchdog;
+  const finish = (e) => {
+    if (!drag || (e && e.pointerId !== drag.id)) return;
+    const { chart, button, id, x, y, moved } = drag;
+    drag = null;
+    clearTimeout(watchdog);
+    const active = S.scrub === "checkup-cycling";
+    if (active) S.scrub = null;
+    try { chart.releasePointerCapture(id); } catch {}
+    S.cyclingHover = null;
+    if (chart.isConnected) {
+      if (active && e?.type === "pointerup" && !moved &&
+          Math.hypot(e.clientX - x, e.clientY - y) <= 4 &&
+          document.elementFromPoint(e.clientX, e.clientY)?.closest("[data-bucket]") === button)
+        toggle(chart, button);
+      else paintCyclingChart(chart);
+    }
+  };
+  const arm = () => {
+    clearTimeout(watchdog);
+    watchdog = setTimeout(finish, SCRUB_MAX_MS);
+  };
 
-function applyCyclingPin(c, tm) {
-  for (const el of c.querySelectorAll(".checkup-chart-col")) {
-    el.classList.toggle("active", el.dataset.time === tm);
-  }
-  updateCyclingTooltip(c, null);
+  host.addEventListener("pointerdown", (e) => {
+    const chart = chartFrom(e.target), button = e.target.closest("[data-bucket]");
+    if (!chart || !button || drag || S.scrub || e.button !== 0) return;
+    e.preventDefault();
+    drag = { chart, button, id: e.pointerId, x: e.clientX, y: e.clientY, moved: false };
+    S.scrub = "checkup-cycling";
+    S.cyclingHover = button.dataset.bucket;
+    try { chart.setPointerCapture(e.pointerId); } catch {}
+    paintCyclingChart(chart);
+    arm();
+  });
+  host.addEventListener("pointermove", (e) => {
+    let chart, button;
+    if (drag) {
+      if (e.pointerId !== drag.id) return;
+      if (S.scrub !== "checkup-cycling") return finish(e);
+      chart = drag.chart;
+      drag.moved ||= Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > 4;
+      const grid = chart.querySelector(".checkup-chart-cols"), r = grid.getBoundingClientRect();
+      if (r.width && e.clientX >= r.left && e.clientX <= r.right)
+        button = grid.children[Math.min(23, Math.floor((e.clientX - r.left) * 24 / r.width))];
+      arm();
+    } else {
+      if (e.pointerType !== "mouse") return;
+      chart = chartFrom(e.target);
+      button = e.target.closest("[data-bucket]");
+    }
+    const key = button?.dataset.bucket || null;
+    if (chart && key !== S.cyclingHover) {
+      S.cyclingHover = key;
+      paintCyclingChart(chart);
+    }
+  });
+  host.addEventListener("pointerout", (e) => {
+    const chart = chartFrom(e.target);
+    if (!drag && !S.trendRebuilding && chart && !chart.contains(e.relatedTarget) && S.cyclingHover != null) {
+      S.cyclingHover = null;
+      paintCyclingChart(chart);
+    }
+  });
+  // Also observe releases outside the card if the browser declined pointer capture.
+  for (const event of ["pointerup", "pointercancel", "lostpointercapture"])
+    document.addEventListener(event, finish);
+  document.addEventListener("click", (e) => {
+    const chart = chartFrom(e.target), button = chart && e.target.closest("[data-bucket]");
+    if (chart && button && e.detail === 0) toggle(chart, button);
+    if (!chart && S.cyclingPin != null) {
+      S.cyclingPin = S.cyclingHover = null;
+      const current = host.querySelector("[data-cycling]");
+      if (current) paintCyclingChart(current);
+    }
+  });
+  host.addEventListener("keydown", (e) => {
+    const chart = chartFrom(e.target);
+    if (!chart || !e.target.matches("[data-bucket]")) return;
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      S.cyclingPin = S.cyclingHover = null;
+      return paintCyclingChart(chart);
+    }
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      if (!e.repeat) toggle(chart, e.target);
+      return;
+    }
+    const buttons = [...chart.querySelectorAll("[data-bucket]")], i = buttons.indexOf(e.target);
+    const next = { ArrowLeft: i - 1, ArrowRight: i + 1, Home: 0, End: buttons.length - 1 }[e.key];
+    if (!Number.isInteger(next)) return;
+    e.preventDefault();
+    buttons[Math.max(0, Math.min(buttons.length - 1, next))]?.focus({ preventScroll: true });
+  });
+  host.addEventListener("focusin", (e) => {
+    const chart = chartFrom(e.target);
+    if (chart) {
+      S.cyclingHover = null;
+      paintCyclingChart(chart, e.target);
+    }
+  });
+  host.addEventListener("focusout", (e) => {
+    const chart = chartFrom(e.target);
+    if (chart && !S.trendRebuilding && !chart.contains(e.relatedTarget))
+      paintCyclingChart(chart, e.relatedTarget);
+  });
 }
 
 function wireTrendScrub(gv) {
-  let dragC = null;
   gv.addEventListener("click", (e) => {
     const button = e.target.closest("[data-hist-series]");
     if (!button) return;
@@ -166,21 +276,6 @@ function wireTrendScrub(gv) {
     histSeriesToggle(button.dataset.histId, button.dataset.histSeries);
   });
   gv.addEventListener("pointermove", (e) => {
-    if (dragC) {
-      if (Math.hypot(e.clientX - dragC.x, e.clientY - dragC.y) > 4) dragC.m = true;
-      const col = resolveCyclingCol(dragC.c, e.clientX);
-      if (col && col.dataset.time !== S.cyclingHover) {
-        S.cyclingHover = col.dataset.time;
-        updateCyclingTooltip(dragC.c, col);
-      }
-      return;
-    }
-    const c = e.pointerType === "mouse" && e.target.closest(".checkup-cycling-chart");
-    if (c) {
-      const col = resolveCyclingCol(c, e.clientX, e.clientY);
-      S.cyclingHover = col?.dataset.time || null;
-      return updateCyclingTooltip(c, col);
-    }
     const plot = trendPlotFromTarget(e.target);
     if (!plot) return;
     if (S.scrub && S.scrub !== plot.dataset.hist) return;
@@ -188,17 +283,6 @@ function wireTrendScrub(gv) {
     scrubMove(plot, scrubIndex(plot, e.clientX));
   });
   gv.addEventListener("pointerdown", (e) => {
-    const c = e.target.closest(".checkup-cycling-chart");
-    if (c) {
-      const col = resolveCyclingCol(c, e.clientX);
-      if (col) {
-        try { c.setPointerCapture(e.pointerId); } catch {}
-        dragC = { c, x: e.clientX, y: e.clientY, m: false, tm: col.dataset.time };
-        S.cyclingHover = col.dataset.time;
-        updateCyclingTooltip(c, col);
-      }
-      return;
-    }
     const plot = trendPlotFromTarget(e.target);
     if (!plot) return;
     S.scrub = plot.dataset.hist;
@@ -209,12 +293,6 @@ function wireTrendScrub(gv) {
   // The authoritative end of a captured drag: fires on pointerup, on pointercancel AND when the
   // element is removed from the DOM — the one exit the explicit handlers below cannot see.
   gv.addEventListener("lostpointercapture", (e) => {
-    if (dragC) {
-      const c = dragC.c;
-      dragC = null;
-      S.cyclingHover = null;
-      return applyCyclingPin(c, S.cyclingPin);
-    }
     const plot = trendPlotFromTarget(e.target);
     if (plot) scrubEnd(plot);
   });
@@ -223,14 +301,6 @@ function wireTrendScrub(gv) {
   // delegate, so the related-target check does that job here). Moving between the overlaid tooltip
   // and plot is still INSIDE the same graph and must not collapse the readout into a hover loop.
   gv.addEventListener("pointerout", (e) => {
-    const c = e.target.closest(".checkup-cycling-chart");
-    if (c) {
-      if (!dragC && (!e.relatedTarget || !c.contains(e.relatedTarget))) {
-        S.cyclingHover = null;
-        applyCyclingPin(c, S.cyclingPin);
-      }
-      return;
-    }
     const graph = e.target.closest(".vhist-graph");
     const plot = trendPlotFromTarget(e.target);
     if (!plot || S.scrub) return;
@@ -239,17 +309,6 @@ function wireTrendScrub(gv) {
   });
   for (const ev of ["pointerup", "pointercancel"]) {
     gv.addEventListener(ev, (e) => {
-      if (dragC) {
-        const { c, tm, m } = dragC;
-        dragC = null;
-        try { c.releasePointerCapture(e.pointerId); } catch {}
-        S.cyclingHover = null;
-        if (ev !== "pointercancel" && !m) {
-          const up = resolveCyclingCol(c, e.clientX)?.dataset.time || tm;
-          S.cyclingPin = (S.cyclingPin === up) ? null : up;
-        }
-        return applyCyclingPin(c, S.cyclingPin);
-      }
       const plot = trendPlotFromTarget(e.target);
       if (!plot) return;
       // A release ON the plot PINS the sample under it (pointercancel does not — a gesture the

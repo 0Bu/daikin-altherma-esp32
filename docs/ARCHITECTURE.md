@@ -265,9 +265,9 @@ and pressure plausibility, including base-table saturation twins. Cosmetic label
 reordering preserve it; competing selectors refuse confirmation. Unknown profile names cannot
 borrow the generic fallback's identity. Bump `CHECKUP_EVIDENCE_METHOD_VERSION` when a shared change
 to conversion, plausibility or counting alters retained evidence in ways row metadata cannot express.
-For a change confined to the saved hourly records, bump `CHECKUP_JOURNAL_LAYOUT_VERSION`. This also
-fences field moves that preserve byte count. The cycling layout change left two byte layouts under
-one fingerprint, so those saved hours cannot establish the current layout or its paired mode split.
+For a change confined to the saved hourly records, bump `CHECKUP_JOURNAL_LAYOUT_VERSION`.
+The current core layout stores independent mode totals. Earlier core layouts cannot supply them,
+including the two byte layouts that shared one fingerprint.
 The separate Stop journal, DHW restart handoff and trend history retain their own compatibility rules.
 Circulation broker/mapping/interpretation
 identity gates only DHW buckets; changed circulation must not retire independent X10A evidence.
@@ -278,16 +278,18 @@ under the checkup mutex. A transition rejects the old sample even if the saved g
 X10A and circulation epochs remain independent. Same-boot journal creation is not proof of reboot
 restoration. `DIAGNOSTICS.md` explains
 results; `PLANT.md` owns lifecycle.
-A run is booked into the hour in which it started, but only when it stops. When that hour was
-already journaled, it and every later live hour are appended again; the boot index keeps each
-hour's newest copy, including the older-sequence tail of a replay cut by a restart
+A run completion is booked to its retained start hour. If the journal cursor has reached that
+hour, the writer schedules a replay from it through later live hours. The boot index keeps each
+hour's newest saved copy, including the older-sequence tail of a replay cut by a restart
 (`checkup_persist.hpp`). Each boot latches one wall-clock label per monotonic hour and moves it only
 for a clock step of more than one hour, so whole-second clock reads cannot relabel a replayed hour.
-While a backward clock step leaves the cursor ahead of the newest live hour, this replay waits like
-an ordinary append.
+A cursor still ahead of the newest live hour after a backward clock step waits for live hours to
+catch up before appending or replaying.
 Current source confirmation requires this boot's full profile/link evidence, not cached startup
-identity. Whole live and restored hours expire when their beginning leaves the rolling day,
-independently of producer progress; abandoned open evidence expires too.
+identity. Live hours expire 24 hours after their monotonic start. For a restored hour, the firmware
+projects 23 hours after its saved end onto this boot's monotonic clock. The saved time can be
+clamped to the assigned hour. Both deadlines advance independently of producer progress, and
+abandoned open evidence expires too.
 The software-restart DHW handoff is consumed once; downtime/startup remains blind and can
 invalidate it without incrementing ordinary abort counters.
 Every `esp_restart()` runs the checkup shutdown handler before the history drain, because ESP-IDF

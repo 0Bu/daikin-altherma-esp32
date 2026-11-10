@@ -140,7 +140,8 @@ function renderCards() {
     ? checkupCardHtml(S.status?.hp?.connected) : "";
   setHtml("valueGroups", checkup + statusCardsHtml() +
     valueGroupsHtml(S._values || [], S.status?.hp?.connected));
-  syncDashboardCards();
+  const selected = syncDashboardCards();
+  if (!S.clickHold) syncCheckupCyclingChart(selected);
 }
 
 // Read the installed frame: setHtml may have held a newer one while a row was being tapped.
@@ -176,6 +177,7 @@ function syncDashboardCards() {
     (buttons.find(button => button.dataset.card === focused) ||
       buttons.find(button => button.dataset.card === S.dashboardCard))?.focus({ preventScroll: true });
   }
+  return selected;
 }
 
 function selectDashboardCard(key) {
@@ -183,7 +185,7 @@ function selectDashboardCard(key) {
   if (!Array.from(cards).some(card => card.dataset.dashboardCard === key)) return;
   S.dashboardCard = key;
   // Selection is immediate even while the pointer hold is protecting a pending values repaint.
-  syncDashboardCards();
+  syncCheckupCyclingChart(syncDashboardCards());
 }
 
 /*!
@@ -1311,9 +1313,7 @@ const CHECKUP_ROW = {
   heater:   "check.heater",
   retries:  "check.retries",
 };
-// Verdict → row-status colour and card-dot colour. The collapsed row deliberately carries only this
-// status; its reading and assessment live together in the explainer so the card remains scannable.
-// Colour only makes the states faster to scan and never carries meaning on its own.
+// Verdict → colour for the compact readings. The expanded row carries the full assessment.
 const CHECKUP_TONE = { warn: "err", info: "warn", ok: "ok", collecting: "dim",
                        observation: "dim", experimental: "dim", unavailable: "dim" };
 
@@ -1327,139 +1327,129 @@ function checkupDuration(s) {
   return remainder ? `${hours} h ${remainder} min` : `${hours} h`;
 }
 
-// A mean near the ten-minute project rule needs more precision than an elapsed-hour label.
-function checkupRunDuration(s) {
-  const seconds = Math.round(Number(s));
-  if (!Number.isFinite(seconds) || seconds < 0) return "";
-  if (seconds < 600) return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")} min`;
-  return checkupDuration(Math.round(seconds / 60) * 60);
+function checkupCyclingDetailHtml(c, report) {
+  const starts = checkupMetricValue(c);
+  const count = n => Number.isInteger(n) && n >= 0;
+  const runs = [
+    ["mode.heat", c.space_runs, c.space_mean_run_s],
+    ["mode.dhw", c.dhw_runs, c.dhw_mean_run_s],
+    ["mode.cool", c.cooling_runs > 0 ? c.cooling_runs : null],
+    ["check.cycling.unclear", c.censored_runs > 0 ? c.censored_runs : null],
+  ];
+  const rows = c.verdict === "unavailable" ? "" : runs.filter(([, n]) => count(n))
+    .map(([label, n, mean]) => {
+      const value = t("check.cycling.runs", n) + (n > 0 && Number.isFinite(mean) && mean >= 0
+        ? ` · ${t("check.cycling.mean", checkupDuration(mean))}` : "");
+      return `<div class="inspect-row"><span>${esc(t(label))}</span><span>${esc(value)}</span></div>`;
+    }).join("");
+  let assessment = "waiting";
+  if (c.verdict === "unavailable") assessment = "unavailable";
+  else if (c.evidence === "heuristic" && c.verdict === "info") assessment = "short";
+  else if (c.reason === "class_unavailable") assessment = "class_unavailable";
+  else if (report.source_fresh === false || c.reason === "source_stale") assessment = "stale";
+  else if (c.evidence === "heuristic" && c.verdict === "ok") assessment = "normal";
+  else if (c.reason === "heating_runs_insufficient" && starts) assessment = "few";
+
+  return (starts ? `<div class="vdesc-p vdesc-n checkup-cycling-total">${esc(starts)}</div>` : "") +
+    (rows ? `<div class="vdesc-p">${esc(t("check.cycling.completed"))}</div>` +
+      `<div class="inspect-rows checkup-cycling-grid">${rows}</div>` +
+      (c.censored_runs > 0 ? descParaHtml(esc(t("check.cycling.unclear_hint"))) : "") : "") +
+    `<div class="vdesc-p checkup-cycling-assessment"><span class="vdesc-n">` +
+    `${esc(t("check.cycling.assessment"))}</span> · ${esc(t(`check.cycling.${assessment}`))}</div>` +
+    `<div data-checkup-hours></div>`;
 }
 
-function checkupCyclingRuntime(c) {
-  const known = c.classified_runtime_s, unknown = c.censored_runtime_s;
-  if (!Number.isFinite(known) || known < 0 || !Number.isFinite(unknown) || unknown < 0) return "";
-  // An unwitnessed start or lost journal boundary has no bounded full duration either.
-  if (c.runtime_saturated === true || c.censored_start_runs > 0 || c.censored_restart_runs > 0)
-    return `${t("check.cycling_censored", c.censored_runs)}: ≥${checkupDuration(unknown)}.`;
-  if (known + unknown <= 0) return "";
-  // Do not round an ineligible 89.99% population up to the 90% evidence threshold.
-  const coverage = (Math.floor(1000 * known / (known + unknown)) / 10).toLocaleString(LANG,
-    { maximumFractionDigits: 1 });
-  return `${t("check.detail.channel_coverage", t("mode.heat"), `${coverage}%`)}.`;
+function syncCheckupCyclingChart(card) {
+  if (S.stage !== "dashboard" || S.scrub || card?.dataset.dashboardCard !== "diagnosis" ||
+      !S.descOpen.has("model:health_cycling")) return;
+  const slot = card.querySelector(".vitem.open [data-checkup-hours]");
+  if (slot) renderCheckupCyclingChart(slot);
 }
 
-// Independent observations around witnessed stops. Never use a legacy cycling verdict/split as
-// their availability gate, and never turn missing inputs or zero evaluable stops into negatives.
-function checkupStopContextHtml(c) {
-  const s = c.stop_context;
-  if (!s || typeof s !== "object") return "";
-  const tr = key => t(`check.stop.${key}`);
-  const state = tr("states").split("|");
-  const count = (n) => Number.isFinite(n) && n >= 0
-    ? `${s.saturated === true ? "≥" : ""}${n.toLocaleString(LANG)}` : t("sys.nodata");
-  const population = Number.isFinite(s.witnessed_stops_recent_heating)
-    ? t("check.stop.population", count(s.witnessed_stops_recent_heating)) : state[9];
-  const categories = ["low_rps_above_main_target", "request_withdrawal", "defrost",
-    "dhw_transition", "route_mode_transition"];
-  const labels = tr("categories").split("|");
-  const rows = categories.map((id, k) => {
-    const v = s.categories?.[id];
-    const value = !v || v.supported == null ? t("sys.nodata") : v.supported === false
-      ? state[8] : [v.positive, v.evaluable, v.complete].map(count).join(" / ");
-    return `${labels[k]}: ${value}`;
-  });
-  const other = ["unclassified_stops", "unknown_stops", "partial_stops", "censored_stops",
-    "target_changed", "time_overflow"]
-    .map(key => count(s[key])).join(" / ");
-  // This watermark counts reported storage-loss incidents across retained boot-local counters.
-  // It is a lower bound, independent of stop population saturation and of all stop qualifiers.
-  const loss = Number.isFinite(s.dropped) && s.dropped >= 0
-    ? `≥${s.dropped.toLocaleString(LANG)}` : t("sys.nodata");
-  const states = ["coverage_partial", "restore_pending", "persistence_pending", "pending", "saturated"]
-    .map((key, k) => s[key] === true ? state[k + 3] : "");
-  if (s.confirmed === false) states.push(state[0]);
-  states.push(s.dated == null ? t("sys.nodata") : state[s.dated ? 1 : 2]);
-  const coverage = Number.isFinite(s.readable_s) && Number.isFinite(s.observed_hours)
-    ? t("check.stop.coverage", checkupDuration(s.readable_s), s.observed_hours) : "";
-  return `<div class="vhist checkup-stop-box">` +
-    descParaHtml(`<span class="vdesc-n">${esc(tr("title"))}</span> — ${esc(population)}`) +
-    [[coverage, ...states].filter(Boolean).join(" · "), tr("counts"), ...rows,
-      `${tr("other").split("|").join(" / ")}: ${other}`, t("check.stop.loss", loss),
-      tr("rule"), tr("limits")]
-      .map(row => descParaHtml(esc(row))).join("") + `</div>`;
+function renderCheckupCyclingChart(slot, open = true) {
+  const check = open && S.status?.health?.checks?.find(c => c.id === "cycling");
+  const html = open ? checkupCyclingChartHtml(check) : "";
+  if (slot._checkupMarkup === html) return;
+  replaceHistoryHtml(slot, html);
+  slot._checkupMarkup = html;
 }
 
-function cyclingSummaryItems(c) {
-  if (c.space_runs == null) return [checkupOutdoorContext(c)].filter(Boolean);
-  const run = (k, n, m) => n == null ? "" : m == null
-    ? t(k, n, "").split(" · ")[0] : t(k, n, checkupRunDuration(m));
-  const l = t("check.cycling_causes").split("|");
-  const causes = cyclingCauseValues(["transition", "handover", "unreadable", "restart", "start"]
-    .map((k) => c[`censored_${k}_runs`]),
-    [l[0], `${t("mode.heat")} ↔ ${t("mode.dhw")}`, t("sys.nodata"), l[1], l[2]]);
-  const cens = c.censored_runs > 0 ? t("check.cycling_censored", c.censored_runs) : "";
-  return [
-    run("check.cycling_space", c.space_runs, c.space_mean_run_s),
-    run("check.cycling_dhw", c.dhw_runs, c.dhw_mean_run_s),
-    c.cooling_runs > 0 ? t("check.cycling_cooling", c.cooling_runs) : "",
-    [cens, causes].filter(Boolean).join(" · "),
-    checkupOutdoorContext(c),
-  ].filter(Boolean);
-}
-
-function checkupCyclingSummaryHtml(c) {
-  const items = c.id === "cycling" && c.starts != null ? cyclingSummaryItems(c) : [];
-  return items.length ? `<div class="inspect-rows checkup-cycling-grid">` +
-    items.map((s) => {
-      const i = s.indexOf(" · ");
-      return `<div class="inspect-row"><span>${esc(i > 0 ? s.slice(0, i) : s)}</span><span>${esc(i > 0 ? s.slice(i + 3) : "—")}</span></div>`;
-    }).join("") + `</div>` : "";
-}
-
+let cyclingMarkup = [];
 function checkupCyclingChartHtml(c) {
-  const hrs = c.id === "cycling" && Array.isArray(c.hours) ? c.hours.slice(-24) : [];
-  if (!hrs.length) return "";
+  const hrs = Array.isArray(c?.hours) ? c.hours.slice(-24) : [];
+  if (!hrs.length) return descParaHtml(esc(t("check.cycling.history_empty")));
+  const identified = Number.isSafeInteger(c.hours_epoch) && hrs.every(h => Number.isSafeInteger(h?.bucket));
+  // Only firmware bucket identities outlive a changing frame. Legacy snapshots can be explored,
+  // but a pin must not jump to different evidence when that snapshot or its hour changes.
+  const scope = JSON.stringify([S.status?.boot_id, identified ? c.hours_epoch :
+    [Math.floor((S.status?.uptime_s || 0) / 3600), hrs]]);
+  const key = JSON.stringify([LANG, scope, hrs]);
+  if (cyclingMarkup[0] === key) return cyclingMarkup[1];
   const pad = 24 - hrs.length;
-  let sumS = 0, sumR = 0, cols = "", activeTip = "", activeIdx = -1, activeTime = "";
-  let hoverTip = "", hoverIdx = -1, hoverTime = "";
-  const now = S.status?.ntp?.time ? Date.parse(S.status.ntp.time) : Date.now();
+  let sumS = 0, sumR = 0, cols = "", hasObservation = false, hasGap = false;
+  const stamp = new Intl.DateTimeFormat(LANG, { month: "short", day: "numeric", hour: "2-digit",
+    minute: "2-digit", timeZoneName: "shortOffset" });
+  const duration = s => s >= 60 && s % 60
+    ? t("check.min", `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`) : dwellDuration(s);
+  const startsText = n => checkupCyclingCountPrefix(n) + t("check.starts", n);
+  const percent = s => (s / 36).toFixed(3) + "%";
   for (let i = 0; i < 24; i++) {
-    const h = hrs[i - pad], obs = h?.observed_s > 0;
-    const s = obs && h.starts > 0 ? Math.round(h.starts) : 0;
-    const r = obs && h.run_s > 0 ? Math.min(3600, Math.round(h.run_s)) : 0;
-    if (obs) { sumS += s; sumR += r; }
-    const tm = new Date(now - (23 - i) * 3600 * 1000).toLocaleTimeString(LANG, { hour: "2-digit", minute: "2-digit" });
-    const sp = h?.space_s, dh = h?.dhw_s;
-    let mode = "", modeLabel = "";
-    if (r > 0 && Number.isInteger(sp) && Number.isInteger(dh) && sp >= 0 && dh >= 0 && sp + dh === r) {
-      mode = sp === 0 ? "dhw" : dh === 0 ? "heat" : "heat_dhw";
-      modeLabel = " · " + t(`mode.${mode}`);
+    const h = hrs[i - pad];
+    if (!h || h.expired === true) {
+      cols += `<span class="checkup-chart-col" aria-hidden="true" inert></span>`;
+      continue;
     }
-    const tip = obs ? `${tm} · ${t("check.starts", s)} · ${checkupDuration(r)}${modeLabel}` : `${tm} · ${t("sys.nodata")}`;
-    const pct = Math.round(r * 100 / 3600);
-    const active = S.cyclingPin === tm;
-    if (active) {
-      activeTip = tip;
-      activeIdx = i;
-      activeTime = tm;
+    const observed = Number.isInteger(h.observed_s) && h.observed_s >= 0 && h.observed_s <= 3600
+      ? h.observed_s : 0;
+    const s = h.starts > 0 ? Math.round(h.starts) : 0;
+    const r = observed && h.run_s > 0 ? Math.min(observed, Math.round(h.run_s)) : 0;
+    sumS += s;
+    sumR += r;
+    hasObservation ||= observed > 0;
+    const n = 23 - i, dated = identified && Number.isSafeInteger(h.end_unix_s) &&
+      h.end_unix_s > 0 && h.end_unix_s <= 8.64e12;
+    const when = dated ? t(h.restored === true ? "check.hour.saved" : "check.hour.ending",
+      stamp.format(h.end_unix_s * 1000))
+      : n ? t("check.hour.earlier", n) : t("check.hour.latest");
+    // Restored records may be short. Legacy slots cannot identify whether a record was restored.
+    let possible = null;
+    if (identified && h.restored !== true) {
+      if (n) possible = 3600;
+      else if (Number.isInteger(h.elapsed_s) && h.elapsed_s >= observed && h.elapsed_s <= 3600)
+        possible = h.elapsed_s;
     }
-    if (S.cyclingHover === tm) {
-      hoverTip = tip;
-      hoverIdx = i;
-      hoverTime = tm;
-    }
-    cols += `<div class="checkup-chart-col${obs ? "" : " unobserved"}${active ? " active" : ""}" data-time="${tm}" data-tip="${esc(tip)}"><b${s > 2 ? ' class="warn"' : ""}>${s || ""}</b>` +
-      `<s><i class="${mode}" style="height:${pct}%"></i></s></div>`;
+    const missing = possible == null ? 0 : possible - observed;
+    hasGap ||= missing > 0;
+    const valid = identified && [h.space_s, h.dhw_s].every(v => Number.isInteger(v) && v >= 0) &&
+      h.space_s + h.dhw_s <= r;
+    const space = valid ? h.space_s : 0, dhw = valid ? h.dhw_s : 0;
+    const modes = [[space, "space", "mode.heat"], [dhw, "dhw", "mode.dhw"],
+      [r - space - dhw, "other", "check.hour.other"]].filter(([seconds]) => seconds > 0);
+    const tip = [when, observed || s ? startsText(s) : t("sys.nodata")];
+    if (observed) tip.push(duration(r));
+    for (const [seconds, , label] of modes) tip.push(`${t(label)} ${duration(seconds)}`);
+    tip.push(t("check.hour.coverage", duration(observed), possible == null ? "" : duration(possible)));
+    const gap = missing ? `<i class="gap" style="top:${percent(3600 - possible)};height:${percent(missing)}"></i>` : "";
+    cols += `<button type="button" class="checkup-chart-col"` +
+      ` data-bucket="${identified ? h.bucket : i}" tabindex="${n ? -1 : 0}" aria-pressed="false"` +
+      ` aria-label="${esc(tip.join(" · "))}"><b${s > 2 ? ' class="warn"' : ""}>${s || ""}</b><s>` +
+      modes.map(([seconds, mode]) => `<i class="${mode}" style="height:${percent(seconds)}"></i>`).join("") +
+      gap + `</s></button>`;
   }
-  const meta = `${t("check.starts", c.starts ?? sumS)} · ${checkupDuration(sumR)}`;
-  const displayTip = hoverTip || activeTip || meta;
-  const showIdx = hoverIdx >= 0 ? hoverIdx : activeIdx;
-  const showTime = hoverTime || activeTime;
-  const timeHtml = `<span class="vhist-time mono num"${showIdx >= 0 ? ` style="left:${((showIdx + .5) * 4.167).toFixed(1)}%"` : " hidden"}>${esc(showTime)}</span>`;
-  return `<div class="vhist checkup-cycling-chart" role="img" aria-label="${esc(`${t("check.cycling")} · 24 h: ${meta}`)}" data-tip="${esc(meta)}">` +
-    `<div class="vhist-head"><span class="vhist-range mono num">${esc(displayTip)}</span></div>` +
-    `<div class="checkup-chart-wrap"><div class="checkup-chart-cols">${cols}</div>${timeHtml}</div>` +
-    `<div class="vhist-axis"><span>${esc(t("hist.ago", 24))}</span><span>${esc(t("hist.now"))}</span></div></div>`;
+  let meta = hasObservation || sumS ? startsText(sumS) : t("sys.nodata");
+  if (hasObservation) meta += ` · ${checkupDuration(sumR)}`;
+  const gapKey = hasGap ? `<span class="checkup-chart-key checkup-gap-key"><i class="gap" aria-hidden="true"></i>${esc(t("check.hour.gap"))}</span>` : "";
+  const legend = [["space", "mode.heat"], ["dhw", "mode.dhw"], ["other", "check.hour.other"]]
+    .map(([mode, label]) => `<span class="checkup-chart-key"><i class="${mode}" aria-hidden="true"></i>${esc(t(label))}</span>`)
+    .join("");
+  const html = `<div class="vhist checkup-cycling-chart" role="group" aria-label="${esc(t("hist.aria", t("check.cycling")))}"` +
+    ` data-cycling="${esc(scope)}" data-tip="${esc(meta)}">` +
+    `<div class="checkup-chart-cols">${cols}</div>` +
+    `<div class="vhist-axis"><span>${esc(t("check.hour.earlier", 23))}</span>${gapKey}<span>${esc(t("check.hour.latest"))}</span></div>` +
+    `<div class="checkup-chart-legend">${legend}</div>` +
+    `<div class="vhist-range mono num">${esc(meta)}</div></div>`;
+  cyclingMarkup = [key, html];
+  return html;
 }
 
 function checkupStatusKey(c) {
@@ -1525,10 +1515,11 @@ function checkupDhwReasons(c) {
 
 const checkupFmt1 = (n) => n.toLocaleString(LANG, { maximumFractionDigits: 1 });
 function checkupDetailHtml(c, fullSpan = c.full_span === true, report = {}) {
+  if (c.id === "cycling") return checkupCyclingDetailHtml(c, report);
   const statusKey = checkupStatusKey(c);
   const metric = checkupMetricValue(c);
   const parts = metric.split(" · ");
-  const compactMetric = ["dhw_loss", "cycling", "defrost"].includes(c.id);
+  const compactMetric = ["dhw_loss", "defrost"].includes(c.id);
   const value = (compactMetric ? parts.shift() : metric) || checkupStatusText(c);
   const description = MODEL_DESCRIPTIONS[`health_${c.id}`];
   const copy = modelDescriptionCopy(`health_${c.id}`);
@@ -1574,30 +1565,20 @@ function checkupDetailHtml(c, fullSpan = c.full_span === true, report = {}) {
         : t("check.detail.collecting_unknown");
     }
   } else if (!detail) {
-    const stopEvidence = c.id === "cycling" &&
-      Number.isFinite(c.stop_context?.witnessed_stops_recent_heating);
-    detail = t(statusKey === "unavailable" && stopEvidence
-      ? "check.detail.observation" : checkupDetailKey(c, statusKey));
+    detail = t(checkupDetailKey(c, statusKey));
   }
   // The reason is selected by firmware, not inferred from missing numbers in the browser.
   const reasonKey = {
-    class_unavailable: "class_missing", class_coverage: "class_missing",
-    class_population_incomplete: "class_missing",
-    heating_runs_insufficient: "heating_runs_insufficient",
     defrost_events_insufficient: "defrost_events_insufficient",
     source_stale: "source_stale", no_paired_runtime: "no_paired_runtime",
   }[c.reason];
-  if (reasonKey && (c.id !== "cycling" || !c.hours?.length)) detail += ` ${t(`check.detail.${reasonKey}`)}`;
-  if (compactMetric && parts.length && c.id !== "cycling") detail += ` ${parts.join(" · ")}.`;
-  const cyclingRuntime = c.id === "cycling" && !c.hours?.length ? checkupCyclingRuntime(c) : "";
-  if (cyclingRuntime) detail += ` ${cyclingRuntime}`;
+  if (reasonKey) detail += ` ${t(`check.detail.${reasonKey}`)}`;
+  if (compactMetric && parts.length) detail += ` ${parts.join(" · ")}.`;
   if (c.id === "dhw_loss" && statusKey !== "collecting" && !c.blocked && Number(c.aborts) > 0)
     detail += t("check.detail.dhw_aborted", Number(c.aborts), checkupDhwReasons(c),
                 checkupDuration(c.best_aborted_s));
   if (c.id === "defrost" && checkupOutdoorContext(c))
     detail += t("check.detail.outdoor_defrost");
-  else if (c.id === "cycling" && c.starts == null && checkupOutdoorContext(c))
-    detail += t("check.detail.outdoor_cycling");
   // Three paragraphs: observation with its real time scope, current interpretation, then normal
   // context. A report window is never a verdict's "since" timestamp.
   const time = [];
@@ -1625,7 +1606,7 @@ function checkupDetailHtml(c, fullSpan = c.full_span === true, report = {}) {
     detail += ` ${t("check.detail.coverage_missing",
                     Math.ceil(c.required_s - c.observed_s).toLocaleString(LANG))}`;
   // Only the bounded daily assessments need a complete day; flow waits for eligible pump time.
-  if (["pressure", "cycling", "defrost"].includes(c.id) && statusKey === "collecting" &&
+  if (["pressure", "defrost"].includes(c.id) && statusKey === "collecting" &&
       fullSpan === false && Number.isFinite(report.span_s) &&
       ["day_incomplete", "input_coverage"].includes(c.reason))
     detail += ` ${t("check.detail.horizon_wait",
@@ -1640,11 +1621,9 @@ function checkupDetailHtml(c, fullSpan = c.full_span === true, report = {}) {
     const energy = checkupDhwEnergy(c);
     if (energy) detail += ` ${energy}`;
   }
-  const cyclingExtra = c.id === "cycling"
-    ? checkupCyclingSummaryHtml(c) + checkupCyclingChartHtml(c) + checkupStopContextHtml(c) : "";
   return descParaHtml(`<span class="vdesc-n">${esc(value)}</span>` +
            (time.length ? ` · ${esc(time.join(" · "))}` : "") + ` — ${esc(what)}`) +
-         descParaHtml(esc(detail) + cyclingExtra) +
+         descParaHtml(esc(detail)) +
          descNoteHtml(t("normal.label"), normal);
 }
 
@@ -1668,6 +1647,21 @@ function checkupHeaterRuntime(seconds, minutes) {
   return minutes == null ? "" : t("check.min", minutes); // older firmware
 }
 
+function checkupHeaterValue(c) {
+  const parts = [];
+  for (const [label, seconds, legacyMinutes] of [
+    ["check.buh_short", c.buh_s, c.buh_min], ["check.tank_short", c.bsh_s, c.bsh_min],
+  ]) {
+    if (seconds != null && !Number.isFinite(seconds)) continue;
+    const minutes = seconds == null ? legacyMinutes : seconds / 60;
+    if (!Number.isFinite(minutes) || minutes < 0) continue;
+    const value = minutes > 0 && minutes < 1 ? "<1"
+      : Math.floor(minutes).toLocaleString(LANG, { useGrouping: false });
+    parts.push(`${t(label)} ${value}`);
+  }
+  return parts.length ? t("check.min", parts.join(" · ")) : "";
+}
+
 function checkupOutdoorContext(c) {
   if (typeof c.outdoor_source !== "string" ||
       !Number.isFinite(c.outdoor_min_c) || !Number.isFinite(c.outdoor_mean_c) ||
@@ -1682,6 +1676,10 @@ function checkupOutdoorContext(c) {
 
 function checkupWithOutdoor(c, value) {
   return [value, checkupOutdoorContext(c)].filter(Boolean).join(" · ");
+}
+
+function checkupCyclingCountPrefix(n) {
+  return n > 0 ? "≥" : "";
 }
 
 // One row's value text. Every branch that has no number says so with a dash — a check that could not
@@ -1713,7 +1711,8 @@ function checkupMetricValue(c) {
       return [t("check.loss_max", checkupFmt1(c.max_k_h)), high || t("check.loss_windows", c.windows || 0)].filter(Boolean).join(" · ");
     }
     case "cycling":
-      return c.starts == null ? "" : [t("check.starts", c.starts), ...cyclingSummaryItems(c)].join(" · ");
+      return Number.isInteger(c.starts) && c.starts >= 0
+        ? checkupCyclingCountPrefix(c.starts) + t("check.starts", c.starts) : "";
     case "defrost": {
       if (c.count == null) return "";
       const n = t("check.cycles", c.count);
@@ -1745,11 +1744,13 @@ function checkupValue(c) {
   if (c.id === "dhw_loss")
     return checkupDhwHasRate(c) ? `${checkupFmt1(c.max_k_h)} K/h` : st;
   if (c.id === "cycling")
-    return Number.isFinite(c.starts) && c.starts >= 0 ? c.starts.toLocaleString(LANG) : st;
+    return Number.isFinite(c.starts) && c.starts >= 0
+      ? checkupCyclingCountPrefix(c.starts) + c.starts.toLocaleString(LANG) : st;
   if (c.id === "defrost") {
     const share = c.verdict !== "collecting" && checkupDefrostShare(c);
     return share || (Number.isFinite(c.count) && c.count >= 0 ? t("check.cycles", c.count) : st);
   }
+  if (c.id === "heater") return checkupHeaterValue(c) || st;
   return (c.id === "fault" && c.verdict === "collecting") ? st : (checkupMetricValue(c) || st);
 }
 

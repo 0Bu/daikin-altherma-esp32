@@ -1816,11 +1816,16 @@ function replaceHistoryHtml(host, html) {
   const active = globalThis.document?.activeElement;
   const { histId, histSeries, hist, source = "" } = active?.dataset || {};
   const owner = node => node?.closest?.(".vitem")?.querySelector("[data-desc]")?.dataset.desc;
+  // The cycling chart may be mounted inside its own slot before the surrounding row is rendered.
+  const signature = node => JSON.stringify([node.hasAttribute("data-cycling")
+    ? "model:health_cycling" : owner(node), node.outerHTML]);
   const focusedOwner = owner(active);
+  const cycling = active?.closest?.("[data-cycling]");
   const focused = host.contains?.(active);
+  const diagnosisCard = host.getAttribute?.("data-dashboard-card") === "diagnosis";
   // Also reconcile plain read-only rows. Other hosts without charts keep full writes:
   // a control's live value is not represented by its attributes.
-  if (!html.includes('class="vhist') && host.id !== "valueGroups" && host.id !== "inspRows")
+  if (!html.includes('class="vhist') && host.id !== "valueGroups" && host.id !== "inspRows" && !diagnosisCard)
     host.innerHTML = html;
   else {
     const roots = root => [...root.querySelectorAll(".vhist")]
@@ -1831,6 +1836,7 @@ function replaceHistoryHtml(host, html) {
     // template still invalidates its painting ancestors. Scalar polls can update text in place.
     // Preflight the complete tree before applying anything; structural changes keep the fallback.
     const text = [];
+    let diagnosisUpdate;
     // Card navigation owns group visibility after rendering; it is not source markup drift.
     const attrs = node => [...node.attributes].filter(attr =>
       attr.name !== "hidden" || !node.matches(".vgroup[data-dashboard-card]"));
@@ -1842,30 +1848,43 @@ function replaceHistoryHtml(host, html) {
       }
       if (a.nodeType !== 1) return a.isEqualNode(b);
       if (a.classList.contains("vhist"))
-        return a._histMarkup === JSON.stringify([owner(b), b.outerHTML]);
+        return a._histMarkup === signature(b);
       const nextAttrs = attrs(b);
       if (attrs(a).length !== nextAttrs.length ||
           nextAttrs.some(attr => a.getAttribute(attr.name) !== attr.value)) return false;
-      return a.childNodes.length === b.childNodes.length &&
-        [...a.childNodes].every((node, index) => same(node, b.childNodes[index]));
+      // The live cycling chart owns its slot and updates independently of value rows.
+      if (a.getAttribute("data-checkup-hours") !== null) return true;
+      const before = text.length;
+      if (a.childNodes.length === b.childNodes.length &&
+          [...a.childNodes].every((node, index) => same(node, b.childNodes[index]))) return true;
+      // A diagnosis may gain a badge or completed-run rows while another card is visible.
+      // Refresh its contents alone if the surrounding value grid is otherwise compatible.
+      if (host.id !== "valueGroups" || a.parentNode !== host ||
+          a.getAttribute("data-dashboard-card") !== "diagnosis") return false;
+      text.length = before;
+      diagnosisUpdate = [a, b.innerHTML];
+      return true;
     };
     const textOnly = host.childNodes && template.content.childNodes &&
       host.childNodes.length === template.content.childNodes.length &&
       [...host.childNodes].every((node, index) => same(node, template.content.childNodes[index]));
     if (textOnly) {
       for (const [node, value] of text) node.nodeValue = value;
+      if (diagnosisUpdate) replaceHistoryHtml(...diagnosisUpdate);
       return;
     }
     const rebuilding = S.trendRebuilding;
     S.trendRebuilding = true;
     try {
       for (const node of roots(template.content)) {
-        if (!node.querySelector("[data-hist]")) continue;
-        const sig = JSON.stringify([owner(node), node.outerHTML]);
+        if (!node.hasAttribute("data-cycling") && !node.querySelector("[data-hist]")) continue;
+        const sig = signature(node);
         const index = prior.findIndex(old => old._histMarkup === sig);
         if (index < 0) node._histMarkup = sig;
         else node.replaceWith(prior.splice(index, 1)[0]);
       }
+      const slot = (host.id === "valueGroups" || diagnosisCard) && host.querySelector("[data-checkup-hours]");
+      if (slot) template.content.querySelector("[data-checkup-hours]")?.replaceWith(slot);
       host.replaceChildren(template.content);
     } finally { S.trendRebuilding = rebuilding; }
   }
@@ -1877,6 +1896,19 @@ function replaceHistoryHtml(host, html) {
   else if (focused && histSeries) for (const button of host.querySelectorAll("[data-hist-series]")) {
     if (button.dataset.histId === histId && button.dataset.histSeries === histSeries)
       button.focus({ preventScroll: true });
+  }
+  else if (focused && (cycling || active?.dataset?.desc)) {
+    const chart = cycling && host.querySelector("[data-cycling]");
+    const sameScope = chart && chart.dataset.cycling === cycling.dataset.cycling;
+    const next = sameScope && (chart.querySelector(`[data-bucket="${active.dataset.bucket}"]`) ||
+      chart.querySelector("[tabindex='0']"));
+    (next || [...host.querySelectorAll("[data-desc]")].find(button => button.dataset.desc === focusedOwner) ||
+      host.closest?.(".vitem")?.querySelector("[data-desc]"))
+      ?.focus({ preventScroll: true });
+  }
+  if (host.hasAttribute?.("data-checkup-hours") && typeof paintCyclingChart === "function") {
+    const chart = host.querySelector("[data-cycling]");
+    if (chart) paintCyclingChart(chart);
   }
 }
 
@@ -2075,10 +2107,11 @@ function displayHomeHubLabel(row) {
 function descAccordion(key, label, valHtml, cls, bodyHtml, trendId, unit = "") {
   const open = S.descOpen.has(key);
   if (open && trendId) bodyHtml += histHtml(trendId, unit, label);
+  const diagnosisLabel = key.startsWith("model:health_") || key === "service:refrigerant";
   return `<div class="vitem${open ? " open" : ""}">` +
     `<button class="vrow vrow-desc" type="button" data-desc="${esc(key)}"` +
     (trendId ? ` data-trend="${esc(trendId)}" data-unit="${esc(unit)}"` : "") + ` aria-expanded="${open ? "true" : "false"}">` +
-    `<span class="vrow-label">${esc(label)}</span>` +
+    `<span class="vrow-label"${diagnosisLabel ? ` title="${esc(label)}"` : ""}>${esc(label)}</span>` +
     `<span class="vrow-end"><span class="vrow-val ${cls}">${valHtml}</span>${chevIcon}</span>` +
     `</button>` +
     `<div class="vdesc"><div class="vdesc-inner"><div class="vdesc-body">${bodyHtml}</div></div></div>` +
@@ -2188,8 +2221,8 @@ const MODEL_DESCRIPTIONS = {
     what: "Largest accepted hourly temperature drop at tank sensor R5T.",
     normal: "Project hint ≥0.8 K/h without pump/draw-like markers. R5T is one point in a stratified tank, not measured tank energy. Missing markers do not prove no draw; zero net cooling does not exclude heat loss. Circulation overlap is correlation, not cause." },
   health_cycling: {
-    what: "Starts and completed classified heating runs.",
-    normal: "Project hint: ≥12 heating runs averaging <10 min; ≥90% of all completed runs classified (proven handovers excluded) and ≥90% heating/uncertain runtime coverage. No Daikin limit." },
+    what: "Shows observed starts and completed runs.",
+    normal: "The assessment uses the average length of heating runs." },
   health_defrost: {
     what: "Defrost starts and their share of compressor runtime with readable compressor and defrost states.",
     normal: "Project hint: ≥3 paired events and >15%. Humidity and whole-coil temperature are unavailable; no Daikin fault limit." },
@@ -2268,6 +2301,11 @@ function toggleDesc(btn) {
   // let the saved closed markup suppress the next render and retain its hidden history SVG.
   const owner = btn.closest("#valueGroups, #settingsCards");
   if (owner) delete _html[owner.id];
+  if (key === "model:health_cycling") {
+    const slot = item.querySelector("[data-checkup-hours]");
+    if (slot && (!open || (S.stage === "dashboard" && !item.closest("[hidden]"))))
+      renderCheckupCyclingChart(slot, open);
+  }
   // Opening a schematic history also fills the cache used by value rows. Do not build and parse
   // another SVG in every collapsed row on every two-second poll. Mount it only on disclosure,
   // including a cache hit (ensureHistPair then returns without triggering a repaint).

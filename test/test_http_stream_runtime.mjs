@@ -152,12 +152,14 @@ const mutations=[
     after:'j += "null";'},
   {name:"unsupported-stop-count-leak",file:"heartbeat",scenario:"stop_context_populated",
     before:"number(c.positive[k], known && supported);",after:"number(c.positive[k], known);"},
+  {name:"elapsed-on-closed-hour",file:"status",scenario:"cycling_hours_wire",
+    before:"if (hi + 1 == hrs.count) {",after:"if (hrs.count) {"},
 ];
 try {
   const compiler=execute(cxx,["--version"]).stdout.trim();
   const baseline=execute(compile("production"),[]);
   const caseCount=Number(baseline.stdout.match(/^PASS total=(\d+)$/m)?.[1]);
-  assert.equal(caseCount,22);
+  assert.equal(caseCount,23);
   assert.equal(caseCount,[...baseline.stdout.matchAll(/^PASS (?!total=)\S+$/gm)].length);
   const wires=[]; const decoder=new TextDecoder("utf-8",{fatal:true});
   const configCases=new Map([
@@ -177,6 +179,11 @@ try {
   const roomName='Example sensor Café "quote"\\line\n';
   const stopWires=new Set(["stop-unconfirmed","stop-unreadable","stop-covered-zero",
     "stop-populated","stop-populated-redacted"]);
+  const cyclingWires=new Map([
+    ["cycling-partial",{bucket:0,elapsed_s:450,starts:1,run_s:180,observed_s:420,space_s:0,dhw_s:60}],
+    ["cycling-edge",{bucket:0,elapsed_s:0,starts:1,run_s:0,observed_s:0}],
+    ["cycling-expired",{bucket:0,elapsed_s:0,starts:1,run_s:0,observed_s:0}],
+  ]);
   const stopIds=["low_rps_above_main_target","request_withdrawal","defrost",
     "dhw_transition","route_mode_transition"];
   const stopCountKeys=["witnessed_stops_recent_heating","unclassified_stops","unknown_stops",
@@ -192,6 +199,15 @@ try {
       assert.equal(doc.wifi.ssid,'Café "quoted"\\line\n'); assert.equal(doc.wifi.rssi,-42);
       assert.equal(doc.sys.stack_min_free_bytes.httpd,null);
       assert.equal(Object.hasOwn(doc.sys,"config_unreadable"),false);
+    }
+    if(cyclingWires.has(name)) {
+      const cycling=doc.health.checks.find(check=>check.id==="cycling");
+      assert.equal(cycling?.hours_epoch,17,name);
+      const closed=name==="cycling-expired"
+        ? {bucket:-1,expired:true,starts:0,run_s:0,observed_s:0}
+        : {bucket:-1,end_unix_s:1999998000,restored:true,starts:2,run_s:1200,observed_s:2700,space_s:600,dhw_s:300};
+      assert.deepEqual(cycling.hours,[closed,cyclingWires.get(name)],name);
+      cyclingWires.delete(name);
     }
     if(stopWires.has(name)) {
       const cycling=doc.health.checks.find(check=>check.id==="cycling");
@@ -229,9 +245,9 @@ try {
         assert.equal(s.restore_pending,false);assert.equal(s.persistence_pending,false);
       } else {
         assert.deepEqual(cycling.hours,[
-          {starts:2,run_s:1800,observed_s:3600,space_s:900,dhw_s:900},
-          {starts:1,run_s:600,observed_s:3600},
-        ],`${name}: totals and optional split survive alongside stop context`);
+          {bucket:-1,starts:2,run_s:1800,observed_s:3600,space_s:900,dhw_s:900},
+          {bucket:0,elapsed_s:3600,starts:1,run_s:600,observed_s:3600,space_s:0,dhw_s:0},
+        ],`${name}: witnessed and unassigned runtime survive alongside stop context`);
         assert.equal(s.confirmed,true);assert.equal(s.capability_mask,27);
         assert.equal(s.readable_s,3600);assert.equal(s.observed_hours,2);assert.equal(s.dropped,9);
         assert.deepEqual(stopCountKeys.map(key=>s[key]),[7,1,2,3,2,1,0,true]);
@@ -329,6 +345,7 @@ try {
   assert.equal(configCases.size,0,"all plain/redacted stored and absent configuration cases must run");
   assert.equal(roomWires.size,0,"all room-history and room-label wire oracles must run");
   assert.equal(stopWires.size,0,"all unknown, covered-zero and populated stop-context wire oracles must run");
+  assert.equal(cyclingWires.size,0,"both partially elapsed and start-edge cycling frames must run");
   const controls=[];
   if(!process.argv.includes("--no-mutations")) for(const mutation of mutations) {
     const result=execute(compile(mutation.name,mutation),[mutation.scenario],false);
