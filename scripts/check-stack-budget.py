@@ -798,6 +798,10 @@ def parse_frames(disassembly: str, budgets: dict[str, Any] | None = None) -> dic
                     raise BudgetError(f"symbol {current}: newly outlined MQTT continuation needs budget review")
             if any(re.match(pattern, current) for pattern in INLINED_DISCOVERY_HELPERS):
                 raise BudgetError(f"symbol {current}: newly outlined discovery continuation needs budget review")
+            if "{lambda" not in current and current.startswith((
+                    "daik::logic::dhw_loss_aggregate(", "_ZN4daik5logic18dhw_loss_aggregate",
+                    "daik::logic::checkup_apply_freshness(", "_ZN4daik5logic23checkup_apply_freshness")):
+                raise BudgetError(f"symbol {current}: newly outlined diagnosis continuation needs budget review")
             if re.match(r"^parse_(?:array|object)(?:[.$]|$)", current):
                 raise BudgetError(f"symbol {current}: out-of-line cJSON container needs budget review")
             if re.match(r"^(?:parse_value|parse_string|cJSON_Delete|cJSON_ParseWithLengthOpts)[.$]", current):
@@ -879,6 +883,10 @@ def validate_status_diagnosis_paths(budgets: dict[str, Any], sources: dict[str, 
         "checkup_aggregate": ["cycling_aggregate", "cycling_fold"],
         "checkup_evaluate": ["checkup_evaluate", "checkup_summarize", "checkup_evidence_name"],
         "checkup_dhw_progress": ["checkup_dhw_progress", "checkup_dhw_age"],
+        # These two wrappers are inlined into the report. Only their outlined descendants add
+        # stack below that frame.
+        "checkup_dhw_fold": ["checkup_dhw_fold"],
+        "checkup_freshness": ["checkup_summarize", "checkup_evidence_name"],
         "cycling_hours": ["checkup_cycling_hours_locked", "room_time_now"],
         "cycling_hours_builder": ["checkup_cycling_hours_locked", "checkup_cycling_hours_build"],
     }
@@ -951,23 +959,29 @@ def validate_status_diagnosis_paths(budgets: dict[str, Any], sources: dict[str, 
     # The body scanner expects a brace-free signature. Ignore only this default argument.
     evaluate_source = re.sub(r"(const DhwLossWindow& dhw)\s*=\s*\{\s*\}", r"\1", checkup_logic)
     aggregate_body = stack_function_body(checkup_logic, "checkup_aggregate")
+    dhw_aggregate_body = stack_function_body(checkup_logic, "dhw_loss_aggregate")
     evaluate_body = stack_function_body(evaluate_source, "checkup_evaluate")
+    freshness_body = stack_function_body(checkup_logic, "checkup_apply_freshness")
     summarize_body = stack_function_body(checkup_logic, "checkup_summarize")
     progress_body = stack_function_body(checkup_logic, "dhw_loss_progress")
     for caller, callee in (
         (report_body, "logic::checkup_aggregate"),
+        (report_body, "logic::dhw_loss_aggregate"),
         (report_body, "logic::checkup_evaluate"),
         (report_body, "logic::dhw_loss_progress"),
+        (report_body, "logic::checkup_apply_freshness"),
         (hours_body, "logic::checkup_cycling_hours"),
         (evaluate_body, "checkup_summarize"),
+        (freshness_body, "checkup_summarize"),
         (summarize_body, "checkup_result_evidence_name"),
         (progress_body, "dhw_loss_age_s"),
     ):
         if len(re.findall(r"\b" + re.escape(callee) + r"\s*\(", caller)) != 1:
             raise BudgetError(f"diagnosis status source: {callee} stack path changed")
-    if (not re.search(r"auto fold = \[&w\]\(const CheckupBucket& b\)", aggregate_body)
-            or len(re.findall(r"\bfold\s*\(", aggregate_body)) != 2):
-        raise BudgetError("diagnosis status source: aggregate fold stack path changed")
+    for caller, bucket in ((aggregate_body, "CheckupBucket"), (dhw_aggregate_body, "DhwLossBucket")):
+        if (not re.search(r"auto fold = \[&w\]\(const " + bucket + r"& b\)", caller)
+                or len(re.findall(r"\bfold\s*\(", caller)) != 2):
+            raise BudgetError(f"diagnosis status source: {bucket} aggregate fold stack path changed")
     if (len(re.findall(r"\bnum\s*\(", status)) != 37
             or not re.search(r"auto num = \[&j\]\(const char\* name, int v\) "
                              r"__attribute__\(\(noinline\)\)\s*\{", status)
@@ -2767,6 +2781,7 @@ def self_test() -> None:
      'daik::logic::checkup_result_evidence_name(daik::logic::CheckupCheck, daik::logic::CheckupCheckResult const&)': 32,
      'daik::logic::dhw_loss_progress(daik::logic::DhwLossState const&, long long)': 48,
      'daik::logic::dhw_loss_age_s(long long, long long, unsigned long)': 32,
+     '_ZZN4daik5logic18dhw_loss_aggregateERKNS0_11DhwLossRingEENKUlRKNS0_13DhwLossBucketEE_clES6_$isra$0': 32,
      'daik::checkup_reset_on_detect(char const*, unsigned long)': 64,
      'daik::logic::checkup_model_fingerprint(char const*, daik::logic::ProfileView const&)': 64,
      'daik::logic::checkup_schema_row_fingerprint(daik::logic::ProfileView const&, daik::ValueDef const&)': 32,
@@ -3453,6 +3468,10 @@ def self_test() -> None:
     assert selected["path:httpd_direct_checkup_evaluate"] == 6720
     assert selected["path:httpd_mcp_checkup_dhw_progress"] == 7888
     assert selected["path:httpd_direct_checkup_dhw_progress"] == 6656
+    assert selected["path:httpd_mcp_checkup_dhw_fold"] == 7840
+    assert selected["path:httpd_direct_checkup_dhw_fold"] == 6608
+    assert selected["path:httpd_mcp_checkup_freshness"] == 7872
+    assert selected["path:httpd_direct_checkup_freshness"] == 6640
     assert selected["path:httpd_mcp_cycling_hours_builder"] == 8096
     assert selected["path:httpd_direct_cycling_hours_builder"] == 6864
     assert selected["path:httpd_mcp_health_number"] == 7840
@@ -3652,6 +3671,8 @@ def self_test() -> None:
                          ("httpd_mcp_checkup_evaluate", "checkup_evidence_name"),
                          ("httpd_mcp_checkup_dhw_progress", "checkup_dhw_progress"),
                          ("httpd_direct_checkup_dhw_progress", "checkup_dhw_age"),
+                         ("httpd_mcp_checkup_dhw_fold", "checkup_dhw_fold"),
+                         ("httpd_direct_checkup_freshness", "checkup_summarize"),
                          ("httpd_direct_cycling_hours_builder", "checkup_cycling_hours_build"),
                          ("httpd_mcp_cycling_hours_builder", "checkup_cycling_hours_locked"),
                          ("httpd_mcp_checkup", "http_send_status_json"),
@@ -3680,7 +3701,7 @@ def self_test() -> None:
     diagnosis_controls += 1
     for member in ("cycling_aggregate", "cycling_fold", "checkup_evaluate", "checkup_summarize",
                    "checkup_evidence_name", "checkup_dhw_progress", "checkup_dhw_age",
-                   "checkup_cycling_hours_build"):
+                   "checkup_dhw_fold", "checkup_cycling_hours_build"):
         rule = budgets["symbols"][member]
         pattern = re.compile(rule["pattern"])
         for grown in (False, True):
@@ -3714,8 +3735,10 @@ def self_test() -> None:
         ("main/checkup.cpp", "if (hours) *hours = checkup_cycling_hours_locked(now_us);",
          "if (hours) *hours = {};"),
         ("main/checkup.cpp", "logic::checkup_aggregate(P().ring)", "other_aggregate(P().ring)"),
+        ("main/checkup.cpp", "logic::dhw_loss_aggregate(P().dhw)", "other_aggregate(P().dhw)"),
         ("main/checkup.cpp", "logic::checkup_evaluate(", "other_evaluate("),
         ("main/checkup.cpp", "logic::dhw_loss_progress(", "other_progress("),
+        ("main/checkup.cpp", "logic::checkup_apply_freshness(", "other_freshness("),
         ("main/checkup.cpp", "logic::checkup_cycling_hours(P().ring, s_cov.rps)", "other_hours()"),
         ("main/logic/checkup.hpp", "fold(r.pending);", "other_fold(r.pending);"),
         ("main/logic/checkup.hpp", "checkup_summarize(r);", "other_summarize(r);"),
@@ -3918,6 +3941,17 @@ def self_test() -> None:
         assert altered != fixture
         reject_disassembly("changed nullable-number caller", altered, "diagnosis numeric calls")
         numeric_disassembly_controls += 1
+
+    for name in (
+        'daik::logic::dhw_loss_aggregate(daik::logic::DhwLossRing const&)',
+        '_ZN4daik5logic18dhw_loss_aggregateERKNS0_11DhwLossRingE$isra$0',
+        'daik::logic::checkup_apply_freshness(daik::logic::CheckupReport&, bool, unsigned long, unsigned long)',
+        '_ZN4daik5logic23checkup_apply_freshnessERNS0_13CheckupReportEbmm$constprop$0',
+    ):
+        reject_disassembly("outlined diagnosis continuation " + name, fixture +
+                           f"\n00003000 <{name}>:\n3000: 004136 entry a1, 32\n",
+                           "newly outlined diagnosis continuation")
+        diagnosis_controls += 1
 
     poll_inlining_controls = 0
     for name in (

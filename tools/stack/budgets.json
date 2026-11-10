@@ -317,6 +317,10 @@
       "pattern": "^daik::logic::dhw_loss_age_s\\(long long, long long, unsigned long\\)$",
       "max_bytes": 32
     },
+    "checkup_dhw_fold": {
+      "pattern": "^_ZZN4daik5logic18dhw_loss_aggregate.*_cl.*",
+      "max_bytes": 32
+    },
     "checkup_cycling_hours_build": {
       "pattern": "^daik::logic::checkup_cycling_hours\\(daik::logic::CheckupRing const&, bool\\)$",
       "max_bytes": 32
@@ -3071,6 +3075,54 @@
         "checkup_report",
         "checkup_cycling_hours_locked",
         "checkup_cycling_hours_build"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_checkup_dhw_fold": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "checkup_report",
+        "checkup_dhw_fold"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_direct_checkup_dhw_fold": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "checkup_report",
+        "checkup_dhw_fold"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_checkup_freshness": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "checkup_report",
+        "checkup_summarize",
+        "checkup_evidence_name"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_direct_checkup_freshness": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "checkup_report",
+        "checkup_summarize",
+        "checkup_evidence_name"
       ],
       "multipliers": {},
       "base_bytes": 1536,
@@ -11591,6 +11643,10 @@
         "httpd_direct_checkup_dhw_progress",
         "httpd_mcp_cycling_hours_builder",
         "httpd_direct_cycling_hours_builder",
+        "httpd_mcp_checkup_dhw_fold",
+        "httpd_direct_checkup_dhw_fold",
+        "httpd_mcp_checkup_freshness",
+        "httpd_direct_checkup_freshness",
         "httpd_ota_status",
         "httpd_ota_check",
         "httpd_config_hp",

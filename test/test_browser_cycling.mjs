@@ -59,6 +59,7 @@ export async function assertCyclingChart(page, server, context) {
   Object.assign(hours[LAST], { starts: 3, run_s: 1800, observed_s: 3300, space_s: 600, dhw_s: 300 });
   Object.assign(hours[OPEN], { elapsed_s: 239, observed_s: 239, run_s: 120, space_s: 0, dhw_s: 120 });
   const status = { ...original.status, boot_id: "cycling-browser-fixture",
+    ui: { ...original.status.ui, lang: "en" },
     diagnostics: { ...original.status.diagnostics, enabled: true },
     health: { status: "info", full_span: true, span_s: 86400, source_fresh: true, source_age_s: 0,
       checks: [
