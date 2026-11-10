@@ -1,4 +1,4 @@
-// translation-source: eb63387c6b7eba5e1a6d45a66578266a23311ba316faeba9b0d8fa36edb8382c
+// translation-source: 320445530cf86efdf9387196a723bb766c3bfeda1c35a1ffd5e768a16fc6b70a
 I18N.ja = localeValues([
   /* sys.nodata */ "データなし",
   /* sys.unreachable */ "接続不可",
@@ -1208,7 +1208,7 @@ INSPECT_I18N.ja = inspectValues(
       : `${fmt1(d.dt)} K。正値は水への熱移動を示します。`], // dt
     [(d) => d && d.pthKind === "cooling" ? "冷却出力（推定）" : "熱出力（推定）", "PHE熱出力推定", (d) => d && d.pthKind === "cooling" ? "水から除いた熱の推定: 流量 × (R4T−R1T) × 4.186（水を仮定）。センサーとグリコールが精度を制限し、確認済み冷房時だけ表示します。" : "水へ渡した熱の推定: 流量 × (R1T−R4T) × 4.186（水を仮定）。センサーとグリコールが精度を制限し、R1T後のBUHは含みません。", (d) => d.dtStale ? d.bsh === true ? "通水未確認のためPHE熱移動を計算できません。BSHはタンクを加熱できても、その熱はPHEセンサーを通らず、バスは出力を報告しません。" : "PHE通水未確認のため出力を計算できません。運転点がないのであり、0 kWではありません。"
       : d.pth == null ? null : d.pthKind === "cooling" ? `≈ ${fmt1(d.pth)} kW冷却${d.cop != null ? `、EER ${fmt1(d.cop)}` : ""}。` : `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `、COP ${fmt1(d.cop)}` : ""}。`], // pth
-    [(d) => d && d.efficiencyKind === "eer" ? "ヒートポンプEER（推定）" : d && d.copScope === "plant" ? "CT電流に基づくCOP（推定）" : "ヒートポンプCOP（推定）", "効率推定", (d) => d && d.efficiencyKind === "eer" ? "推定冷却出力÷推定電力。流体、センサー、電圧、力率の仮定を含む瞬時EERで、季節効率ではありません。" : "同じ収支境界の推定熱出力÷電力。CTではBUH後、インバータ電流ではヒートポンプのみになり得て、CT配線が含む負荷を決めます。流体、センサー、電圧、力率の仮定を含む瞬時値で季節効率ではありません。", (d) => d.copBlock === "tank_heater" ? "COPなし — タンクヒーター作動中。電力収支に含まれても、熱は水側センサーを通らず直接タンクへ入ります。"
+    [(d) => d && d.efficiencyKind === "eer" ? "ヒートポンプEER（推定）" : d && d.copScope === "plant" ? "CT電流に基づくCOP（推定）" : "ヒートポンプCOP（推定）", "効率推定", (d) => d && d.efficiencyKind === "eer" ? "推定冷却出力÷推定電力。流体、センサー、電圧、力率の仮定を含む瞬時EERで、季節効率ではありません。" : "同じ収支境界の推定熱出力÷電力。CTによる推定では補助ヒーター後の有効なR2Tの測定値を優先します。測定値がない場合、ヒーターの停止が確認できるときだけ、手前のR1Tを使います。対象となる負荷はCTの配線で決まります。インバータ電流はヒートポンプ側の推定に使います。流体、センサー、電圧、力率の仮定を含む瞬時値で季節効率ではありません。", (d) => d.copBlock === "tank_heater" ? "COPなし — タンクヒーター作動中。電力収支に含まれても、熱は水側センサーを通らず直接タンクへ入ります。"
       : d.copBlock === "buh_no_r2t" ? "COPなし — BUH作動中ですが後段センサーがなく、電気と熱の境界が一致しません。"
       : d.copBlock === "mb_scope" ? "現在はCOPを表示できません。利用できるデータでは、HomeHubの電力をプレート熱交換器で推定した熱出力と対応づけられません。電気ヒーターなど、どの負荷が電力値に含まれるかは不明です。"
       : d.copBlock === "no_pel" ? d.pelHeld ? "COPなし — 圧縮機停止中のインバータ電流は前回運転値です。" : "COPなし — CT電流もインバータ電流もありません。"

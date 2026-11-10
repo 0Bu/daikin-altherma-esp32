@@ -1,4 +1,4 @@
-// translation-source: eb63387c6b7eba5e1a6d45a66578266a23311ba316faeba9b0d8fa36edb8382c
+// translation-source: 320445530cf86efdf9387196a723bb766c3bfeda1c35a1ffd5e768a16fc6b70a
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -1017,7 +1017,7 @@ INSPECT_I18N.pl = inspectValues(
     [(d) => d && d.efficiencyKind === "eer" ? "EER pompy ciepła (szacunek)"
       : d && d.copScope === "plant" ? "COP na podstawie prądu CT (szacunek)" : "COP pompy ciepła (szacunek)", "Szacowana efektywność", (d) => d && d.efficiencyKind === "eer"
       ? "Szacowana moc chłodnicza podzielona przez szacowany pobór. Wynik dziedziczy założenia o wodzie/glikolu, czujnikach, napięciu i współczynniku mocy; to chwilowy EER, nie efektywność sezonowa."
-      : "Szacowana moc cieplna podzielona przez zgodny zakresowo pobór energii. Dla CT ciepło może być liczone za BUH, a dla prądu falownika dotyczy samej pompy; montaż CT decyduje o ujętych odbiornikach. To wskazanie chwilowe, nie licznik sezonowy.", (d) => d.copBlock === "tank_heater"
+      : "Szacowana moc cieplna podzielona przez zgodny zakresowo pobór energii. Przy szacunku z CT pierwszeństwo ma prawidłowy odczyt R2T za grzałką wspomagającą. Bez niego można użyć R1T przed grzałką tylko wtedy, gdy wiadomo, że jest wyłączona. Montaż CT określa, które odbiorniki są uwzględnione. Prąd falownika służy do szacowania poboru samej pompy ciepła. To wskazanie chwilowe, nie licznik sezonowy.", (d) => d.copBlock === "tank_heater"
       ? "Brak COP — grzałka zbiornika jest włączona. Jej pobór może wejść do bilansu prądu, lecz ciepło trafia prosto do zbiornika i nie przechodzi przez czujniki wody; zakresy nie pasują."
       : d.copBlock === "buh_no_r2t" ? "Brak COP — BUH grzeje, ale profil nie ma czujnika wody za nim. Pobór może obejmować grzałkę, a moc cieplna kończy się przed nią."
       : d.copBlock === "mb_scope" ? "Brak COP. Dostępne dane nie pozwalają powiązać mocy elektrycznej z HomeHubu z mocą cieplną oszacowaną na płytowym wymienniku ciepła. Nie wiadomo, które odbiorniki, w tym grzałki elektryczne, obejmuje odczyt mocy."

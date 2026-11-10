@@ -1,4 +1,4 @@
-// translation-source: eb63387c6b7eba5e1a6d45a66578266a23311ba316faeba9b0d8fa36edb8382c
+// translation-source: 320445530cf86efdf9387196a723bb766c3bfeda1c35a1ffd5e768a16fc6b70a
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -1013,7 +1013,7 @@ INSPECT_I18N.sv = inspectValues(
     [(d) => d && d.efficiencyKind === "eer" ? "Uppskattad EER"
       : d && d.copScope === "plant" ? "Uppskattad COP baserad på CT-ström" : "Uppskattad COP", "Uppskattad verkningsgrad", (d) => d && d.efficiencyKind === "eer"
       ? "Kyleffekt ÷ eleffekt; momentan EER med osäkerhet i givare, vätska, spänning och effektfaktor."
-      : "Gränsmatchad värme ÷ el: CT+R2T efter BUH, annars växelriktarström för värmepumpen.", (d) => d.copBlock === "tank_heater"
+      : "Uppskattad värmeeffekt delad med uppskattad eleffekt inom motsvarande gränser. Med CT används i första hand ett giltigt värde från R2T efter tillsatsvärmaren. Om värdet saknas används R1T före värmaren bara när värmaren är bekräftat avstängd. CT-inkopplingen avgör vilka laster som ingår. Växelriktarström används för uppskattningen på värmepumpens sida.", (d) => d.copBlock === "tank_heater"
       ? "Ingen COP: el kan omfatta BSH, men tankvärmen passerar inte framledningsgivaren."
       : d.copBlock === "buh_no_r2t" ? "Ingen COP: BUH är aktiv utan efterföljande givare; el- och värmegränsen skiljer sig."
       : d.copBlock === "mb_scope" ? "Ingen COP. Tillgängliga data kan inte koppla HomeHubs eleffekt till den uppskattade värmeeffekten över plattvärmeväxlaren. Det är oklart vilka elektriska laster, till exempel elvärmare, som effektvärdet omfattar."

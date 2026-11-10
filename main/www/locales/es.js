@@ -1,4 +1,4 @@
-// translation-source: eb63387c6b7eba5e1a6d45a66578266a23311ba316faeba9b0d8fa36edb8382c
+// translation-source: 320445530cf86efdf9387196a723bb766c3bfeda1c35a1ffd5e768a16fc6b70a
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -1012,7 +1012,7 @@ INSPECT_I18N.es = inspectValues(
     [(d) => d && d.efficiencyKind === "eer" ? "EER estimado de la bomba de calor"
       : d && d.copScope === "plant" ? "COP estimado a partir de los CT" : "COP estimado de la bomba de calor", "Eficiencia estimada", (d) => d && d.efficiencyKind === "eer"
       ? "Potencia frigorífica estimada dividida por entrada eléctrica estimada. Hereda las incertidumbres del fluido, sensores, tensión y factor de potencia. Es un EER instantáneo, no estacional; la energía medida durante una temporada es más representativa."
-      : "Potencia térmica estimada dividida por entrada eléctrica estimada, usando límites compatibles: tras BUH con CT cuando existe R2T, o solo la bomba de calor con corriente del inversor. El cableado CT decide qué cargas incluye. Es una indicación instantánea, no un contador certificado.", (d) => d.copBlock === "tank_heater"
+      : "Potencia térmica estimada dividida por entrada eléctrica estimada, con límites compatibles. Con CT se prefiere una lectura válida de R2T, después del calefactor de apoyo. Sin ella, se usa R1T antes del calefactor solo si se sabe que está apagado. El cableado de los CT determina las cargas incluidas. La corriente del inversor corresponde a la bomba de calor. Es una indicación instantánea, no un contador certificado.", (d) => d.copBlock === "tank_heater"
       ? "Sin COP: la resistencia del depósito puede estar incluida en la electricidad, pero su calor va directo al depósito y no cruza los sensores de impulsión; los límites no coinciden."
       : d.copBlock === "buh_no_r2t" ? "Sin COP: BUH está activo, pero falta un sensor posterior. La electricidad puede incluir el calentador mientras el calor se calcula antes de él."
       : d.copBlock === "mb_scope" ? "Sin COP. Los datos disponibles no permiten relacionar la potencia eléctrica de HomeHub con la potencia térmica estimada en el intercambiador de placas. Se desconoce qué cargas eléctricas, como los calentadores, están incluidas."

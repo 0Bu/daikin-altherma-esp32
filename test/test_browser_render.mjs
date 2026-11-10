@@ -495,6 +495,7 @@ async function assertPumpCommandTruth(page, context, locale) {
         renderApp();
         return { postBuh: S.live.copPostBuh, power: S.live.pelSrc, heat: S.live.copPth,
           title: document.getElementById("inspTitle").textContent,
+          general: document.querySelector("#inspBody .vdesc-p")?.textContent,
           sentence: document.querySelector("#inspBody .vdesc-p:last-child")?.textContent,
           expected: inspNowText(INSPECT.cop, S.live), heatText: fmt1(S.live.copPth),
           pill: document.getElementById("svCop").textContent };
@@ -506,6 +507,8 @@ async function assertPumpCommandTruth(page, context, locale) {
       assert.notEqual(reading.pill, "—", `${label}: both qualified cases show a ratio`);
       assert.equal(reading.sentence, reading.expected, `${label}: show the localized live sentence`);
       assert.ok(reading.sentence.includes(reading.heatText), `${label}: show its actual heat estimate`);
+      for (const sensor of ["R1T", "R2T"])
+        assert.ok(reading.general?.includes(sensor), `${label}: the rendered explanation covers ${sensor}`);
       assert.doesNotMatch(reading.title + reading.sentence, /BUH|Zusatzheizer/,
         `${label}: the CT title and ratio do not promise one fixed water sensor`);
       assertLayout(await page.evaluate(layoutAudit), label);
