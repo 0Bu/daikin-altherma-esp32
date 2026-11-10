@@ -105,9 +105,9 @@ purpose and the average length for heating and hot water when available. A chang
 missing readings can leave a run unclear.
 
 The assessment says whether completed heating runs were short or long enough on average in the
-recorded window. It can wait for more readings or more heating runs. Some models lack the readings
-needed to identify heating runs, so the card can show starts without an assessment. Models without
-compressor readings have no start count.
+recorded window. It can wait for more readings or more heating runs. If the system cannot identify
+heating runs, the card can show starts without a heating assessment. A start count needs compressor
+readings.
 
 In the 24-hour chart, the number above each bar shows the starts counted for that hour. The colored
 segments show heating, hot water and other runtime. Hatching marks known gaps in the readings.

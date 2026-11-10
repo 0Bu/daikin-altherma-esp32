@@ -380,6 +380,9 @@ assert.match(noModeDetail, /This system provides too little information to asses
 assert.doesNotMatch(noModeDetail, /checkup-cycling-grid/, "missing operating modes do not create run counts");
 assert.ok(!noModeDetail.includes(escapeText(ui.text("en", "check.cycling.waiting"))),
   "a system without mode data cannot promise a later assessment");
+const staleNoModeDetail = ui.detail(noModeCycling, true, staleReport);
+hasAssessment(staleNoModeDetail, "en", "class_unavailable");
+assert.match(staleNoModeDetail, /18 starts/);
 hasAssessment(ui.detail(fewHeatingRuns), "en", "few");
 hasAssessment(ui.detail(collecting, false, partialReport), "en", "waiting");
 hasAssessment(ui.detail(normalCycling, true, staleReport), "en", "stale");
