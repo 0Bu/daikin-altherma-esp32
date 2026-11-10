@@ -1498,6 +1498,12 @@ static void append_status_json(JsonOut& j, bool redact) {
                         append_json_uint(j, hrs.hours[hi].run_s);
                         j += ",\"observed_s\":";
                         append_json_uint(j, hrs.hours[hi].observed_s);
+                        if (hrs.hours[hi].space_s || hrs.hours[hi].dhw_s) {
+                            j += ",\"space_s\":";
+                            append_json_uint(j, hrs.hours[hi].space_s);
+                            j += ",\"dhw_s\":";
+                            append_json_uint(j, hrs.hours[hi].dhw_s);
+                        }
                         j += "}";
                     }
                 }

@@ -15961,22 +15961,54 @@ static void test_checkup() {
         ring.head                       = 2;
         ring.buf[0].starts              = 3;
         ring.buf[0].run_s               = 1200;
+        ring.buf[0].dhw_hour_s          = 200;
         ring.buf[0].rps_observed_s      = 3600;
         ring.buf[1].starts              = 1;
         ring.buf[1].run_s               = 600;
+        ring.buf[1].dhw_hour_s          = 0;
         ring.buf[1].rps_observed_s      = 3500;
         ring.pending.starts             = 2;
-        ring.pending.run_s              = 300;
+        ring.pending.run_s              = 500;
+        ring.pending.dhw_hour_s         = 200;
         ring.pending.rps_observed_s     = 900;
         const CheckupCyclingHours hours = checkup_cycling_hours(ring, true);
         CHECK(hours.count == 3);
         CHECK(hours.hours[0].starts == 3 && hours.hours[0].run_s == 1200 &&
+              hours.hours[0].space_s == 1000 && hours.hours[0].dhw_s == 200 &&
               hours.hours[0].observed_s == 3600);
         CHECK(hours.hours[1].starts == 1 && hours.hours[1].run_s == 600 &&
+              hours.hours[1].space_s == 600 && hours.hours[1].dhw_s == 0 &&
               hours.hours[1].observed_s == 3500);
-        CHECK(hours.hours[2].starts == 2 && hours.hours[2].run_s == 300 &&
+        CHECK(hours.hours[2].starts == 2 && hours.hours[2].run_s == 500 &&
+              hours.hours[2].space_s == 300 && hours.hours[2].dhw_s == 200 &&
               hours.hours[2].observed_s == 900);
         CHECK(checkup_cycling_hours(ring, false).count == 0);
+
+        CheckupRing legacy{};
+        legacy.count                   = 1;
+        legacy.buf[0].run_s            = 800;
+        legacy.buf[0].dhw_run_s        = 300;
+        legacy.buf[0].rps_observed_s   = 3600;
+        legacy.pending.run_s           = 400;
+        legacy.pending.dhw_run_s       = 500;
+        legacy.pending.rps_observed_s  = 1800;
+        const CheckupCyclingHours legh = checkup_cycling_hours(legacy, true);
+        CHECK(legh.count == 2);
+        CHECK(legh.hours[0].dhw_s == 300 && legh.hours[0].space_s == 500);
+        CHECK(legh.hours[1].dhw_s == 400 && legh.hours[1].space_s == 0);
+
+        // Exercise checkup_step accumulation of dhw_hour_s
+        CheckupState  step_st{};
+        CheckupBucket step_b{};
+        CheckupSample step_s{};
+        step_s.rps_known   = true;
+        step_s.rps_running = true;
+        step_s.valve_known = true;
+        step_s.valve_dhw   = true;
+        checkup_step(step_st, step_b, step_s, 0);
+        checkup_step(step_st, step_b, step_s, 10'000'000);
+        CHECK(step_b.run_s == 10);
+        CHECK(step_b.dhw_hour_s == 10);
 
         CheckupRing full{};
         full.count                      = CHECKUP_COMPLETED_BUCKETS;

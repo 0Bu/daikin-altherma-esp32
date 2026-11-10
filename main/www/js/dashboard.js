@@ -1420,34 +1420,44 @@ function checkupCyclingChartHtml(c) {
   const hrs = c.id === "cycling" && Array.isArray(c.hours) ? c.hours.slice(-24) : [];
   if (!hrs.length) return "";
   const pad = 24 - hrs.length;
-  let sumS = 0, sumR = 0, cols = "";
-  for (const h of hrs) {
-    sumS += Math.max(0, +h?.starts || 0);
-    sumR += Math.min(3600, Math.max(0, +h?.run_s || 0));
-  }
+  let sumS = 0, sumR = 0, cols = "", activeTip = "", activeIdx = -1, activeTime = "";
+  let hoverTip = "", hoverIdx = -1, hoverTime = "";
   const now = S.status?.ntp?.time ? Date.parse(S.status.ntp.time) : Date.now();
   for (let i = 0; i < 24; i++) {
     const h = hrs[i - pad], obs = h?.observed_s > 0;
     const s = obs && h.starts > 0 ? Math.round(h.starts) : 0;
     const r = obs && h.run_s > 0 ? Math.min(3600, Math.round(h.run_s)) : 0;
+    if (obs) { sumS += s; sumR += r; }
     const tm = new Date(now - (23 - i) * 3600 * 1000).toLocaleTimeString(LANG, { hour: "2-digit", minute: "2-digit" });
-    const sp = obs && (h.space_s || h.space_run_s || 0);
-    const dh = obs && (h.dhw_s || h.dhw_run_s || 0);
+    const sp = obs && h.space_s, dh = obs && h.dhw_s;
     const mode = h?.mode || (sp > 0 && dh > 0 ? "combi" : (dh > 0 ? "dhw" : (r > 0 ? "space" : "")));
-    const modeLabel = r > 0 ? (mode === "combi" ? (LANG === "de" ? "Heizen und Warmwasser" : "Heating and hot water") : (mode === "dhw" ? t("mode.dhw") : t("mode.heat"))) : "";
-    const tip = obs
-      ? `${tm} · ${t("check.starts", s)} · ${checkupDuration(r)}${modeLabel ? ` · ${modeLabel}` : ""}`
-      : `${tm} · ${t("sys.nodata")}`;
+    const modeLabel = r > 0 ? " · " + (mode === "combi" ? (LANG === "de" ? "Heizen und Warmwasser" : t("mode.heat_dhw")) : (mode === "dhw" ? t("mode.dhw") : t("mode.heat"))) : "";
+    const dur = checkupDuration(r);
+    const durTxt = s > 1 && r > 0 ? `Ø ${checkupDuration(Math.round(r / s))} (${dur})` : dur;
+    const tip = obs ? `${tm} · ${t("check.starts", s)} · ${durTxt}${modeLabel}` : `${tm} · ${t("sys.nodata")}`;
     const pct = Math.round(r * 100 / 3600);
-    const sTxt = s > 0 ? s : "";
-    const sCls = s > 2 ? ' class="warn"' : "";
-    cols += `<div class="checkup-chart-col${obs ? "" : " unobserved"}" data-time="${tm}" data-tip="${esc(tip)}"><b${sCls}>${sTxt}</b>` +
-      `<s><i${mode ? ` class="${mode}"` : ""} style="height:${pct}%"></i></s></div>`;
+    const active = S.cyclingPin === tm;
+    if (active) {
+      activeTip = tip;
+      activeIdx = i;
+      activeTime = tm;
+    }
+    if (S.cyclingHover === tm) {
+      hoverTip = tip;
+      hoverIdx = i;
+      hoverTime = tm;
+    }
+    cols += `<div class="checkup-chart-col${obs ? "" : " unobserved"}${active ? " active" : ""}" data-time="${tm}" data-tip="${esc(tip)}"><b${s > 2 ? ' class="warn"' : ""}>${s || ""}</b>` +
+      `<s><i class="${mode}" style="height:${pct}%"></i></s></div>`;
   }
   const meta = `${t("check.starts", c.starts ?? sumS)} · ${checkupDuration(sumR)}`;
+  const displayTip = hoverTip || activeTip || meta;
+  const showIdx = hoverIdx >= 0 ? hoverIdx : activeIdx;
+  const showTime = hoverTime || activeTime;
+  const timeHtml = `<span class="vhist-time mono num"${showIdx >= 0 ? ` style="left:${((showIdx + .5) * 4.167).toFixed(1)}%"` : " hidden"}>${esc(showTime)}</span>`;
   return `<div class="vhist checkup-cycling-chart" role="img" aria-label="${esc(`${t("check.cycling")} · 24 h: ${meta}`)}" data-tip="${esc(meta)}">` +
-    `<div class="vhist-head"><span class="vhist-t">24 h</span><span class="vhist-range mono num">${esc(meta)}</span></div>` +
-    `<div class="checkup-chart-wrap"><div class="checkup-chart-cols">${cols}</div><span class="vhist-time mono num" hidden></span></div>` +
+    `<div class="vhist-head"><span class="vhist-range mono num">${esc(displayTip)}</span></div>` +
+    `<div class="checkup-chart-wrap"><div class="checkup-chart-cols">${cols}</div>${timeHtml}</div>` +
     `<div class="vhist-axis"><span>${esc(t("hist.ago", 24))}</span><span>${esc(t("hist.now"))}</span></div></div>`;
 }
 
@@ -1565,18 +1575,8 @@ function checkupDetailHtml(c, fullSpan = c.full_span === true, report = {}) {
   } else if (!detail) {
     const stopEvidence = c.id === "cycling" &&
       Number.isFinite(c.stop_context?.witnessed_stops_recent_heating);
-    if (c.id === "cycling" && c.starts != null) {
-      detail = statusKey === "info"
-        ? t("check.detail.cycling.info")
-        : (c.space_runs > 0 && c.space_mean_run_s >= 600
-            ? (LANG === "de" ? "Stabiles Taktverhalten mit ausreichenden Verdichterlaufzeiten."
-                            : "Stable cycling behavior with sufficient compressor runtimes.")
-            : (LANG === "de" ? "Erfasst Verdichterstarts und Laufzeiten zur Beurteilung des Taktverhaltens."
-                            : "Observes compressor starts and runtimes to evaluate cycling behavior."));
-    } else {
-      detail = t(statusKey === "unavailable" && stopEvidence
-        ? "check.detail.observation" : checkupDetailKey(c, statusKey));
-    }
+    detail = t(statusKey === "unavailable" && stopEvidence
+      ? "check.detail.observation" : checkupDetailKey(c, statusKey));
   }
   // The reason is selected by firmware, not inferred from missing numbers in the browser.
   const reasonKey = {
