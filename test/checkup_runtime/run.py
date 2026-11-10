@@ -237,6 +237,14 @@ if source_text.count(tail_clock) != 1:
 mutations.append(("ignore_live_tail_clock_conflict",
                   source_text.replace(tail_clock, tail_clock.replace("return fresh_if_pending();", "continue;")),
                   "late_restore_clock_behind", "late_restore_keeps_live_when_clock_cannot_date_tail"))
+span_start = source_text.index("    // Subtract elapsed time through this restore,")
+span_end = source_text.index("    const int64_t wall_span_us", span_start)
+span = source_text[span_start:span_end]
+if span.count("now_us") != 2:
+    raise RuntimeError("Expected both operands of the restore-time horizon baseline")
+mutations.append(("use_latest_sample_as_restore_span_baseline",
+                  source_text[:span_start] + span.replace("now_us", "P().ring.latest_sample_us") +
+                  source_text[span_end:], "restored_expiry", "restore_span_excludes_duplicate_elapsed_gap"))
 expire_start = source_text.index("void checkup_stop_context_expire(int64_t) {")
 expire_end = source_text.index("\nCheckupStopContextReport checkup_stop_context_report()", expire_start)
 expire_body = source_text[expire_start:expire_end]

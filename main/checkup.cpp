@@ -1161,11 +1161,10 @@ CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* record
     P().ring.age_buckets = static_cast<uint8_t>(
         P().ring.count < logic::CHECKUP_BUCKETS ? P().ring.count : logic::CHECKUP_BUCKETS);
 
-    const int64_t first_sample_us  = P().ring.first_sample_us;
-    const int64_t latest_sample_us = P().ring.latest_sample_us;
-    const int64_t live_span_us     = first_sample_us >= 0 && latest_sample_us >= first_sample_us
-                                         ? latest_sample_us - first_sample_us
-                                         : 0;
+    // Subtract elapsed time through this restore, matching the read-time span baseline.
+    const int64_t first_sample_us = P().ring.first_sample_us;
+    const int64_t live_span_us =
+        first_sample_us >= 0 && now_us >= first_sample_us ? now_us - first_sample_us : 0;
     const int64_t wall_span_us     = static_cast<int64_t>(wall_span_s) * 1000000LL;
     P().ring.carried_span_us       = wall_span_us > live_span_us ? wall_span_us - live_span_us : 0;
     // "flash" records actual selected journal provenance, independently of the startup

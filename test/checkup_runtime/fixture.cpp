@@ -411,8 +411,10 @@ void restored_expiry() {
         adapter::cfg.circulation_power_path.c_str(), adapter::cfg.circulation_time_path.c_str(),
         adapter::cfg.circulation_max_age_s, adapter::cfg.circulation_on_tenths_w,
         adapter::cfg.circulation_off_tenths_w, adapter::cfg.circulation_confirm_s);
-    const int64_t now        = adapter::unix_origin + 100;
-    p.end_unix_s             = now - 22 * 3600;
+    // Restore between polls with an admitted interval five seconds inside the horizon.
+    sdk::now_us              = 120'000'000;
+    const int64_t now        = adapter::unix_origin + 120;
+    p.end_unix_s             = now - (CHECKUP_RECORD_MAX_AGE_S - 5);
     record.bucket            = checkup_journal_bucket(p.end_unix_s);
     p.checkup.covered_s      = 3600;
     p.checkup.bar_observed_s = 3600;
@@ -423,8 +425,11 @@ void restored_expiry() {
     require(checkup_flash_restore(&record, 1, now) == CheckupFlashRestoreResult::Restored,
             "synthetic_record_admitted_by_real_restore");
     require(std::strcmp(checkup_persist_state(), "flash") == 0, "real_restore_provenance_slug");
+    const auto restored = checkup_report();
+    require(restored.span_s == CHECKUP_WINDOW_S - 5 && !restored.full_span,
+            "restore_span_excludes_duplicate_elapsed_gap");
     adapter::unix_origin -= 30LL * 86400; // later wall-clock correction cannot rejuvenate the slot
-    const int64_t deadline = 100000000LL + 3600LL * 1000000;
+    const int64_t deadline = 125'000'000;
     sdk::now_us            = deadline - 1;
     CheckupCyclingHours hours;
     const auto          takes_before = sdk::takes;
