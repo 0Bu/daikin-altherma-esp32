@@ -320,7 +320,8 @@ Linux headless WebKit is Safari-engine regression coverage; it does not prove
 physical iPad Safari, iPadOS or GPU performance.
 
 `DAIKIN_BROWSER_TIMEOUT_MS` bounds each engine phase separately (default 600000 ms, maximum 3600000 ms).
-The original Chromium deadline is unchanged; WebKit runs as a separate phase in the same CI job.
+The hosted CI step sets 900000 ms per phase for the full matrices and failure controls. Individual
+interaction and frame checks still enforce 250 ms.
 Chromium launch shares one absolute deadline across endpoint headers/body, socket and initialization;
 worker/browser process groups are joined before the temporary page is removed.
 Positive cleanup fixtures first observe the owned child's requested stall; body-stall cases also

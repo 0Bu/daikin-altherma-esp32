@@ -111,11 +111,10 @@ new boot counts no start for that run. When it stops, the observed remainder is 
 A power loss, a crash or a task or interrupt watchdog panic still loses the open hour. Completed
 hours not yet saved stay missing.
 
-Current observations take precedence. A whole completed or open hour expires when its beginning
-leaves the rolling day, even if polling stops. A completed record therefore lasts at most 23 hours
-after its endpoint, matching ordinary ring replacement. This is hourly event bookkeeping, not exact
-event reconstruction: a completed tank-cooling window can use an initial temperature from the
-preceding bucket. Later clock corrections do not renew an already assigned monotonic deadline;
+Current observations take precedence. The
+[retention rules](ARCHITECTURE.md#history-and-diagnosis-persistence) distinguish live and restored
+hours. A completed tank-cooling window can use an initial temperature
+from the preceding bucket. Later clock corrections do not renew an assigned monotonic deadline;
 read-time span cannot fabricate observation coverage. `/status.health.persist` names
 `flash_pending` while confirmation is awaited (not proof that saved hours exist), `flash` after
 reconstruction, or `fresh` when no stored intervals were selected, including precedence/capacity

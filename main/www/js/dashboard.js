@@ -1411,9 +1411,13 @@ function checkupCyclingChartHtml(c) {
     const when = dated ? t(h.restored === true ? "check.hour.saved" : "check.hour.ending",
       stamp.format(h.end_unix_s * 1000))
       : n ? t("check.hour.earlier", n) : t("check.hour.latest");
-    // A restored record may have been sealed early on restart, so its elapsed time is unknown.
-    const possible = n ? (h.restored === true ? null : 3600) :
-      Number.isInteger(h.elapsed_s) && h.elapsed_s >= observed && h.elapsed_s <= 3600 ? h.elapsed_s : null;
+    // Restored records may be short. Legacy slots cannot identify whether a record was restored.
+    let possible = null;
+    if (identified && h.restored !== true) {
+      if (n) possible = 3600;
+      else if (Number.isInteger(h.elapsed_s) && h.elapsed_s >= observed && h.elapsed_s <= 3600)
+        possible = h.elapsed_s;
+    }
     const missing = possible == null ? 0 : possible - observed;
     hasGap ||= missing > 0;
     const valid = identified && [h.space_s, h.dhw_s].every(v => Number.isInteger(v) && v >= 0) &&

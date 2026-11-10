@@ -471,6 +471,15 @@ assert.doesNotMatch(legacyOpen, /<i class="space"/,
   "legacy mode fields cannot establish witnessed heating");
 assert.match(legacyOpen, /<i class="other"/, "retain observed legacy runtime without assigning it to heating");
 assert.doesNotMatch(legacyOpen, /<i class="gap"/, "legacy open hour cannot establish elapsed unread time");
+const legacyHours = ui.chart({ ...cyclingWithHours, hours_epoch: undefined, hours: [
+  { starts: 1, run_s: 120, observed_s: 120 },
+  { starts: 0, run_s: 0, observed_s: 0 },
+] });
+const legacyClosed = hourMarkup(legacyHours, 22);
+assert.match(legacyClosed, /2 min observed · elapsed time unknown/);
+assert.deepEqual(modeSegments(legacyClosed), ["other"],
+  "a legacy closed record shows its witnessed runtime without an inferred gap");
+assert.doesNotMatch(legacyHours, /checkup-gap-key/);
 const startup = ui.chart({ ...cyclingWithHours, hours_epoch: 2,
   hours: [{ bucket: 0, starts: 0, run_s: 0, observed_s: 0, elapsed_s: 0 }] });
 assert.equal((startup.match(/<button[^>]*data-bucket=/g) || []).length, 1,

@@ -94,5 +94,5 @@ run_phase() {
   return "$status"
 }
 run_phase chromium "$@"
-# Keep the original Chromium deadline; WebKit owns a separate bounded phase.
+# WebKit gets its own supervisor deadline after Chromium finishes.
 run_phase webkit "$@"
