@@ -394,14 +394,9 @@ function liveData() {
   const hsRow = highSideRow();
   const hsBar = rowNum(hsRow);
   d.circP = hsBar > 0 && !rowHeldOver(hsRow, d) ? hsBar : null;
-  // ΔT is a WORKING POINT across the exchanger — it needs water moving to mean anything. With the
-  // pump off, R1T and R4T are two stagnant sensors cooling at different rates, and their difference
-  // (measured: 14.6 K on a plant idle for an hour) is not a small ΔT, it is no ΔT at all. Decided
-  // HERE rather than in renderLive so the drawing and the explainer cannot disagree about it — the
-  // pill blanked while the inspector went on quoting the number was the same split that let a
-  // held-over outdoor temperature survive in the explainer after the pill stopped showing it.
-  // A working ΔT needs measured water movement. Pump ON alone is not enough; a missing flow value
-  // therefore blanks the working-point claim just like a measured zero does.
+  // A working ΔT needs qualified measured flow. Without that evidence R1T and R4T can cool at
+  // different rates in stagnant water. Neither a pump command nor an ON/OFF report supplies the
+  // flow witness. The drawing and inspector share this decision.
   d.dtStale = waterMoving(d) !== true;
   // Derived figures, marked "est." in the UI — the bus has no energy registers. Thermal output from
   // flow/60 × ΔT × ρ·cp (water ≈ 4.186 kJ/l·K); electrical from the CT phase currents at an assumed 230 V,
@@ -470,7 +465,7 @@ function liveData() {
     ? d.copPth / d.pel : null;
 
   // ── X10A down: let the SECOND stack carry what it can ────────────────────────────────────────
-  // Only the quantities the HomeHub actually measures, resolved through the concept the firmware
+  // Only the quantities the HomeHub reports, resolved through the concept the firmware
   // paired them on — never a guess, and never a stale X10A number left standing. Everything else
   // stays null and blanks, which is the honest shape of this state: the HomeHub knows about a dozen
   // registers where X10A knows a hundred, so the drawing becomes visibly sparse. `mbFields` records
@@ -500,16 +495,8 @@ function liveData() {
     d.ouHeldOver = false;         // nothing to hold over: the whole bus is silent, not one unit
     d.ouUnknown = false;
     MB_PAIRS.forEach((p) => takeMb(p.fld, p.cid));
-    // The HomeHub MEASURES the electrical input; X10A has no such row and the dashboard estimates it
-    // from CT clamps at an assumed 230 V. So on this path the figure is better than usual, and it is
-    // marked as measured rather than estimated.
-    //
-    // Addressed by its EKRHH OFFSET, never by its unit. THREE rows in the map carry "kW" — the
-    // measured consumption at input 51 and the two power-LIMIT setpoints at holding 57/58 — so a
-    // first-match on the unit promoted a configured ceiling to the plant's measured draw the moment
-    // 51 was unavailable or answered a sentinel. A limit is a number the installer typed; drawing it
-    // as a measurement is the legacy-35–legacy-39 shape wearing a plausible value, and the Modbus card would go
-    // on labelling it correctly one card below.
+    // Use the gateway-reported power from input 51. The dashboard does not calculate it from X10A
+    // current. Select it by offset because holding power limits share the kW unit.
     const pw = mbPower();
     if (pw) { const n = parseFloat(pw.value);
               if (Number.isFinite(n)) { d.pel = n; d.pelSrc = "MB"; d.mbFields.add("pel"); } }
@@ -788,8 +775,8 @@ function renderLive() {
   // COP beside the heat output it is computed from, and the electrical input on the outdoor unit
   // where the power actually goes in.
   // What is NOT drawn: their longer annotations. The ΔT's target and the electrical figure's source
-  // are in the inspector. The compact "≈" still matters in the closed drawing, but only for X10A's
-  // current×230 V estimate; the HomeHub register is a measurement and pelApproxText removes it.
+  // are in the inspector. The compact "≈" marks the local X10A current×230 V estimate. It is omitted
+  // for the value reported by HomeHub; the inspector explains that value's limits.
   setTxt("svCopLabel", d.efficiencyKind === "eer" ? "EER" : "COP");
   setTxt("svCop", fmt1(d.cop));
   setTxt("pelApprox", pelApproxText(d));
@@ -833,8 +820,8 @@ const PEL_INSPECT = {
   trend: "pel",
   what: (d) => pelMeasured(d) ? PEL_MEASURED_WHAT : PEL_ESTIMATED_WHAT,
   head: (d) => (d.pel == null ? "—" : pelApproxText(d) + fmt1(d.pel) + " kW"),
-  // Four cases: the measured gateway row, either X10A current source, a held-over inverter row, or
-  // no usable electrical source. Keeping this source-aware prevents a HomeHub measurement from
+  // Four cases: the reported gateway row, either X10A current source, a held-over inverter row, or
+  // no usable electrical source. Keeping this source-aware prevents a HomeHub reading from
   // being explained as compressor current merely because it is not a CT estimate. An inverter row of
   // unknown age is a fifth, which inspNowText answers before this runs.
   now: (d) => d.pelHeld
@@ -1033,9 +1020,8 @@ const INSPECT = {
       en: "The plate heat exchanger transfers energy between refrigerant and the water circuit without mixing the two fluids. In heating/DHW it transfers heat into the water; in cooling it removes heat from it. The displayed mode-aware capacity is estimated from water flow and R1T/R4T across the exchanger. Those sensors belong to the hydraulic unit; their exact physical installation depends on the model.",
       de: "Der Plattenwärmetauscher überträgt Energie zwischen Kältemittel und Wasserkreis, ohne dass sich beide Medien vermischen. Beim Heizen beziehungsweise bei Warmwasser geht Wärme ins Wasser, beim Kühlen wird sie ihm entzogen. Die angezeigte betriebsartabhängige Leistung wird aus Wasserdurchfluss sowie R1T/R4T über dem Wärmetauscher geschätzt. Diese Fühler gehören zur Hydraulikeinheit; ihre genaue Einbauposition hängt vom Modell ab.",
     },
-    // With the pump stopped the ΔT is not a small working point, it is none at all (d.dtStale) — so
-    // this says nothing is crossing, rather than quoting the two stagnant sensors' difference as if
-    // it were driving a heat flow.
+    // With no qualified flow, the difference between the two temperature readings does not
+    // establish an operating point. Use the same decision as the ΔT pill.
     now: (d) => !compressorRunning(d, 5)
       ? { en: "No active refrigerant-side transfer — the compressor is stopped. Pump-only circulation can redistribute residual heat, but it is neither heating nor cooling capacity.",
           de: "Kein aktiver Kältemittel-Wärmeübergang — der Verdichter steht. Reiner Pumpenumlauf kann Restwärme verteilen, ist aber weder Heiz- noch Kälteleistung." }

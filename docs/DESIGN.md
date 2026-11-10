@@ -231,12 +231,11 @@ support the calculation. A reported Cooling mode with hot residual circulation u
 and Space circuit wording.
 
 Thermal power uses flow/60 × ΔT × ρ·cp, approximately 4.186 kJ/(l·K) for water with
-ρ≈1 kg/l; glycol mixtures have different density and heat capacity. Electrical power is estimated
-from current and assumed 230 V. CT clamps describe whole-unit input, while inverter current describes the compressor-side
-boundary and is withheld when held at rest. A current profile lacking an input and an existing input
-held from the previous run get different explanations. Live COP scope accounts for heater
-boundaries; the inspector names the scope and any refusal. No label implies measured live power or
-seasonal efficiency.
+ρ≈1 kg/l; glycol mixtures have different density and heat capacity. X10A electrical estimates use
+current and assumed 230 V. CT coverage depends on wiring; inverter current describes the compressor
+and is withheld when held at rest. The inspector distinguishes held readings from absent inputs.
+HomeHub reports input 51 without verified measurement scope or heater coverage. The inspector names
+the available electrical source and explains any refusal to calculate COP/EER.
 
 **State and motion**
 

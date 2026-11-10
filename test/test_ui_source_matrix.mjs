@@ -1201,15 +1201,15 @@ assert.match(style, /\.inspect-rows\s*>\s*\.mb-delta/,
 {
   const P = (off, label, value) => ({ label, value, unit: "kW", off, concept: null });
   const both = ctx({ x10a: false, mbEnabled: true, mbConnected: true, values: [],
-                     modbus: [P(51, "Heat pump power consumption", "1.42"),
+                     modbus: [P(51, "Heat pump power consumption", "1.4"),
                               P(57, "Power limit during Recommended on / buffering", "5.00"),
                               P(58, "General power limit", "7.00")] });
   assert.equal(both.MB_OFF_POWER, 51, "the reported power is EKRHH input register 51");
-  assert.equal(both.mbPower()?.value, "1.42", "the reported consumption value is what is read");
+  assert.equal(both.mbPower()?.value, "1.4", "the reported consumption value is what is read");
   assert.equal(both.mbForInspect("pel")?.label, "Heat pump power consumption",
     "the measured schematic headline remains traceable to its Modbus register");
 
-  const reported = { pel: 1.42, pelSrc: "MB", pelHeld: false };
+  const reported = { pel: 1.4, pelSrc: "MB", pelHeld: false };
   assert.equal(both.pelApproxText(reported), "", "a gateway-reported value has no UI estimate mark");
   assert.equal(both.PEL_INSPECT.t(reported).en, "Electrical input (HomeHub)");
   assert.equal(both.PEL_INSPECT.head(reported), "1.4 kW");
@@ -1234,7 +1234,7 @@ assert.match(style, /\.inspect-rows\s*>\s*\.mb-delta/,
                               P(58, "General power limit", "7.00")] });
   assert.equal(gone.mbPower(), null,
     "no reported power: the answer is nothing, never a power LIMIT that happens to share the unit");
-  for (const [fixture, power] of [[both, 1.42], [gone, null]]) {
+  for (const [fixture, power] of [[both, 1.4], [gone, null]]) {
     fixture.S._modbus.push(M_FLAG(31, "Compressor running", true),
       M_FLAG(32, "Booster heater run", true), M_VALVE(true),
       M(40, "Leaving water temperature PHE", 36, "leaving_water"),

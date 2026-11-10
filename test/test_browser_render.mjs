@@ -445,7 +445,7 @@ async function assertPumpCommandTruth(page, context, locale) {
         { off: 42, label: 'Return water temperature', value: 30,
           unit: '°C', concept: 'return_water' },
         { off: 49, label: 'Flow rate', value: 12, unit: 'L/min', concept: 'flow' },
-        { off: 51, label: 'Heat pump power consumption', value: 1.42, unit: 'kW' },
+        { off: 51, label: 'Heat pump power consumption', value: 1.4, unit: 'kW' },
       ];
       renderApp(); return true;
     })()`);
@@ -458,10 +458,12 @@ async function assertPumpCommandTruth(page, context, locale) {
       explanation: inspNowText(INSPECT.cop, S.live),
       visible: document.querySelector('#inspBody .vdesc-p:last-child')?.textContent
     })`);
-    assert.ok(cop.heat > 0 && cop.power === 1.42, `${context}: both heat and power are available`);
+    assert.ok(cop.heat > 0 && cop.power === 1.4, `${context}: both heat and power are available`);
     assert.equal(cop.reason, "mb_scope", `${context}: HomeHub does not establish the COP boundary`);
     assert.equal(cop.pill, "—", `${context}: the COP reading remains withheld`);
     assert.match(cop.explanation, /HomeHub/, `${context}: explain the actual power source`);
+    if (locale === "fr") assert.match(cop.explanation, /ni si elle inclut les appoints électriques/,
+      `${context}: heater coverage must remain unknown in the French copy`);
     assert.equal(cop.visible, cop.explanation, `${context}: render the COP explanation`);
     assertLayout(await page.evaluate(layoutAudit), `${context}/homehub-cop`);
   } finally {
