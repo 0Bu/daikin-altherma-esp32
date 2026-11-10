@@ -53,6 +53,7 @@ inline int                            scan_count = 0, scan_failure = 0;
 inline unsigned                       scan_calls             = 0;
 inline size_t                         scan_first_allocations = 0;
 inline daik::CheckupStopContextReport stop_report{};
+inline daik::logic::CheckupCyclingHours cycling_hours{};
 inline unsigned                       stop_report_calls = 0;
 inline std::string                    log;
 [[noreturn]] void                     fail(const char* message) {
@@ -89,6 +90,7 @@ void reset() {
     scan_calls                = 0;
     scan_first_allocations    = 0;
     stop_report               = {};
+    cycling_hours             = {};
     stop_report_calls         = 0;
     std::memset(scan_rows, 0, sizeof(scan_rows));
     sdk::now        = 10000000;
@@ -404,7 +406,7 @@ void time_now(int64_t& seconds, int32_t& ms) {
 }
 const char*                checkup_persist_state() { return "no_record"; }
 logic::CheckupReport       checkup_report() { return {}; }
-logic::CheckupCyclingHours checkup_cycling_hours() { return {}; }
+logic::CheckupCyclingHours checkup_cycling_hours() { return fixture::cycling_hours; }
 CheckupStopContextReport   checkup_stop_context_report() {
     ++fixture::stop_report_calls;
     return fixture::stop_report;
@@ -512,6 +514,9 @@ int main(int argc, char** argv) {
         emit(req, "stop-covered-zero");
     });
     run("stop_context_populated", [] {
+        cycling_hours.count    = 2;
+        cycling_hours.hours[0] = {3600, 1800, 900, 900, 2};
+        cycling_hours.hours[1] = {3600, 600, 0, 0, 1};
         auto empty = request();
         check(invoke(empty, "/status", daik::h_status) == ESP_OK,
               "stop allocation baseline failed");

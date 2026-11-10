@@ -346,9 +346,10 @@ The optional 24-hour Plant diagnostics rows appear only after Firmware opt-in an
 live. Firmware supplies verdict, evidence class, coverage and limits; the browser adds no thresholds.
 Rows cover fault, tank loss, starts, defrost, water pressure, steady flow, heater runtime and retry
 changes. Collapsed rows show the primary measured value when available (or checking, no window, measured, tentative and N/A).
-Every expander in this card has three paragraphs: the reading with its observation window or recorded
-timestamp and a brief description; the current interpretation with relevant data gaps (plus the 24-hour hourly start/runtime chart on compressor starts); then **Normal:**
-with expected conditions or assessment limits. The observation window is not a status-since timestamp.
+Every expander has three blocks. The reading gives its window or recorded time and a brief
+description. The interpretation explains relevant gaps. For compressor starts it also contains
+the hourly chart and the independent Stop context when available. The **Normal** block gives expected
+conditions or assessment limits. The observation window is not a status-since timestamp.
 Observation-only/experimental results cannot become OK or manufacture a health certificate.
 `available`, `assessable` and `evaluated` count different facts; only completed bounded judgments
 belong in the evaluated headline.

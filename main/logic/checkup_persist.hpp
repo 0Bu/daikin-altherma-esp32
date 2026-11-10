@@ -146,9 +146,9 @@ inline uint32_t checkup_fp_loc(uint32_t crc, const CheckupLocator& l) {
 // or a ring that changed length cannot be read at all), then the row locators (which sensor a
 // counter was read from), then the constants that decide what gets counted — a DHW window length or
 // a high-loss threshold moving makes yesterday's `high_windows` a different statistic under the
-// same name, which is exactly the substitution a CRC cannot see. Bump when converter arithmetic,
-// formatting/plausibility or counting changes the meaning of retained evidence without changing its
-// row metadata. Row-schema changes are bound separately.
+// same name, which is exactly the substitution a CRC cannot see. Bump for shared evidence changes
+// that row metadata cannot express. Core-only counting or byte layout changes use
+// CHECKUP_JOURNAL_LAYOUT_VERSION. Row-schema changes are bound separately.
 inline constexpr uint32_t CHECKUP_EVIDENCE_METHOD_VERSION = 7;
 
 inline uint32_t checkup_layout_fingerprint() {
@@ -363,10 +363,15 @@ inline constexpr size_t CHECKUP_JOURNAL_PAYLOAD_BYTES =
 // The common journal version cannot name a change inside this source: its first three source ids
 // must remain compatible with already-written trend records.  Fold the diagnostic wire shape into
 // this source's identity instead, beside every threshold/locator already covered above.
+// The cycling bucket moved fields without changing its size, so either old layout can have the
+// previous fingerprint. Completed RAM hours already retire at boot, independently of this fence.
+inline constexpr uint32_t CHECKUP_JOURNAL_LAYOUT_VERSION = 2;
+
 inline uint32_t checkup_journal_fingerprint() {
     uint32_t crc = CONFIG_CRC32_INIT;
-    crc = checkup_fp_u32(crc, checkup_layout_fingerprint());
-    crc = checkup_fp_u32(crc, static_cast<uint32_t>(sizeof(CheckupJournalPayload)));
+    crc          = checkup_fp_u32(crc, checkup_layout_fingerprint());
+    crc          = checkup_fp_u32(crc, CHECKUP_JOURNAL_LAYOUT_VERSION);
+    crc          = checkup_fp_u32(crc, static_cast<uint32_t>(sizeof(CheckupJournalPayload)));
     crc = checkup_fp_u32(crc, static_cast<uint32_t>(offsetof(CheckupJournalPayload, model_fp)));
     crc = checkup_fp_u32(crc, static_cast<uint32_t>(offsetof(CheckupJournalPayload, source_fp)));
     crc =

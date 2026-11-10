@@ -1429,12 +1429,13 @@ function checkupCyclingChartHtml(c) {
     const r = obs && h.run_s > 0 ? Math.min(3600, Math.round(h.run_s)) : 0;
     if (obs) { sumS += s; sumR += r; }
     const tm = new Date(now - (23 - i) * 3600 * 1000).toLocaleTimeString(LANG, { hour: "2-digit", minute: "2-digit" });
-    const sp = obs && h.space_s, dh = obs && h.dhw_s;
-    const mode = h?.mode || (sp > 0 && dh > 0 ? "combi" : (dh > 0 ? "dhw" : (r > 0 ? "space" : "")));
-    const modeLabel = r > 0 ? " · " + (mode === "combi" ? (LANG === "de" ? "Heizen und Warmwasser" : t("mode.heat_dhw")) : (mode === "dhw" ? t("mode.dhw") : t("mode.heat"))) : "";
-    const dur = checkupDuration(r);
-    const durTxt = s > 1 && r > 0 ? `Ø ${checkupDuration(Math.round(r / s))} (${dur})` : dur;
-    const tip = obs ? `${tm} · ${t("check.starts", s)} · ${durTxt}${modeLabel}` : `${tm} · ${t("sys.nodata")}`;
+    const sp = h?.space_s, dh = h?.dhw_s;
+    let mode = "", modeLabel = "";
+    if (r > 0 && Number.isInteger(sp) && Number.isInteger(dh) && sp >= 0 && dh >= 0 && sp + dh === r) {
+      mode = sp === 0 ? "dhw" : dh === 0 ? "heat" : "heat_dhw";
+      modeLabel = " · " + t(`mode.${mode}`);
+    }
+    const tip = obs ? `${tm} · ${t("check.starts", s)} · ${checkupDuration(r)}${modeLabel}` : `${tm} · ${t("sys.nodata")}`;
     const pct = Math.round(r * 100 / 3600);
     const active = S.cyclingPin === tm;
     if (active) {
@@ -1640,7 +1641,7 @@ function checkupDetailHtml(c, fullSpan = c.full_span === true, report = {}) {
     if (energy) detail += ` ${energy}`;
   }
   const cyclingExtra = c.id === "cycling"
-    ? checkupCyclingSummaryHtml(c) + checkupCyclingChartHtml(c) + (c.starts == null ? checkupStopContextHtml(c) : "") : "";
+    ? checkupCyclingSummaryHtml(c) + checkupCyclingChartHtml(c) + checkupStopContextHtml(c) : "";
   return descParaHtml(`<span class="vdesc-n">${esc(value)}</span>` +
            (time.length ? ` · ${esc(time.join(" · "))}` : "") + ` — ${esc(what)}`) +
          descParaHtml(esc(detail) + cyclingExtra) +
