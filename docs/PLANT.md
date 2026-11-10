@@ -73,9 +73,9 @@ can restore only from compatible, dated history-journal records after clock sync
 diagnostics-consent generation, consumer-schema/method fingerprint and CRC
 ([identity contract](ARCHITECTURE.md#history-and-diagnosis-persistence)). DHW additionally binds the
 circulation configuration; a mismatch empties only its bucket, preserving independent X10A evidence.
-Old unscoped formats are rejected; a cached model guess cannot admit records. Introducing the
-consumer-schema identity rejects earlier diagnosis records and ongoing-filter handoffs once;
-new compatible records can restore normally. Raw trends keep their separate compatibility rule.
+Old unscoped formats are rejected. A cached model guess cannot admit records. The core journal
+layout version also gates saved hours. Raw trends and the one-shot tank-cooling handoff have their
+own compatibility rules.
 
 **A software restart (any `esp_restart()`) tries to save the open hour.**
 Software restarts include:

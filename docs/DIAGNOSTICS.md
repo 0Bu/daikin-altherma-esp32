@@ -102,12 +102,12 @@ software restart preserves the remaining settling time, but unseen charging can 
 <!-- user-docs: health_cycling -->
 ### Compressor cycling
 
-**In plain language:** The board counts starts and completed compressor runs as space heating,
-domestic hot water (DHW), cooling or unclassified, and plots hourly starts and compressor runtime
-across the 24-hour window. Gray bars show runtime without a heating or hot-water label when the
-mode split is incomplete. An hourly bar can include part of a run that started before that hour.
-Unclassified runs explain missing readings, transitions, heating/DHW handovers, journal boundaries
-and unwitnessed starts.
+**In plain language:** The board counts starts across all modes and plots hourly starts and
+compressor runtime across the 24-hour window. Gray bars show runtime without a heating or hot-water
+label when the mode split is incomplete. An hourly bar can include part of a run that started before
+that hour. The board classifies completed runs separately as space heating, domestic hot water
+(DHW), cooling or unclassified. Unclassified runs explain missing readings, transitions,
+heating/DHW handovers, journal boundaries and unwitnessed starts.
 
 **Meaning:** At least **12 completed space-heating runs** can carry the assessment when both run
 count and runtime coverage reach **90%**. Positively observed heating/DHW handovers remain visible

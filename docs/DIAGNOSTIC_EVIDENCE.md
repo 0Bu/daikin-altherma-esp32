@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 124398bb7631767e6988954cf1cda405952867163cb7b0efda71e0b6a0ab90b1 -->
+<!-- diagnostic-evidence-contract: 608447da9c62a38070d762d437e8a5bc9d01296a61fb8b8929934982067a301e -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -221,10 +221,6 @@ supports the relevance of very short runs but does not provide a universal Daiki
 pure space heating, DHW or cooling. Missing class or RPS readings may bridge at most 15 seconds
 between matching known-running endpoints, using their monotonic timestamps independently of hourly
 duration booking; that bridge does not add readable coverage.
-A separate hourly chart integrates intervals with running compressor readings at both endpoints.
-It attaches a heating/DHW split only when each counted interval has matching heating or DHW
-readings at both ends. An hourly start count and hourly runtime can cover different runs and do
-not form a completed-run mean.
 A changed recovered class, unknown stop edge or longer gap censors the run. A pure DHW run may
 hold one final valve return to the room circuit for at most 30 seconds, accepted only at a known OFF
 edge. The indoor mode must remain readable and may still say DHW; cooling, a return to the DHW
@@ -233,6 +229,12 @@ heating mode is an unaccepted transition, never a proven handover. There is no s
 Positively observed uninterrupted heating/DHW handovers remain censored with their own cause;
 their space phases never become heating runs. Other causes distinguish unaccepted transitions,
 unreadable class/RPS, journal/window boundaries and unwitnessed starts.
+
+The hourly chart integrates intervals of at most 15 seconds with running compressor readings at
+both endpoints. A split requires every counted interval to have the same eligible class at both
+ends. A known DHW valve route qualifies as DHW. Space heating needs a known room route and heating
+mode. An hourly start count and its runtime can cover different runs and do not form a completed-run
+mean.
 
 The count population is the larger of completed runs and starts minus one, less proven handovers.
 At least 90% must be classified. At least 90% of completed heating runtime plus unsafe censored
