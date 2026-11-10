@@ -374,9 +374,8 @@ outdoor air, liquid refrigerant, flow and room temperature. Trended states are b
 (input `32`), 3-way-valve position (input `37`) and EKRHH Quiet activity (holding `9`).
 The pump running report (input `30`) and space heating/cooling operation (input `53`) pair
 live. Native Altherma 4 also pairs water pressure (input `79`), while its holding `9` reports
-Quiet selection. The real power measurement has
-no X10A equivalent at all (X10A estimates it from CT clamps at an assumed 230 V, so pairing a
-measurement with an estimate would hide which is which); other setpoints, modes and faults are not readings.
+Quiet selection. HomeHub's reported power consumption stays separate from the X10A current-based
+estimate. Other setpoints, modes and faults are not paired measurements.
 Disinfection input `33` is likewise deliberately unpaired: X10A `0x62/8` converter `303` is named
 **Tank preheat**, a preparatory state rather than proof that disinfection is active. Both receive
 their own event timeline, so their timing can be compared without merging their meaning.

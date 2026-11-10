@@ -6,29 +6,11 @@
 // a quotient of two correct numbers taken across two different boundaries is not a worse COP, it is
 // a different quantity wearing the same name.
 //
-// The two electrical sources the browser chooses between sit on opposite boundaries:
-//   • the CT clamps (0x63) see the WHOLE unit — compressor, backup heater, pump, controls;
-//   • "INV primary current" (0x21) sees the OUTDOOR inverter only — compressor and fan.
-// (docs/DESIGN.md §"derived figures", www/js/schematic.js's pel explainer.)
-//
-// The heat side has the same split and the browser already picks the PRE-BUH outlet for it
-// (lwt_select.hpp — R1T, never a setpoint, never R2T), i.e. heat from the heat pump's own exchanger,
-// with the resistive backup heater deliberately NOT credited to it. So:
-//
-//   pth(R1T) / pel(INV)  → heat-pump heat over heat-pump electricity. Boundaries agree. A HEAT-PUMP
-//                          COP, valid whatever the backup heater is doing — it is simply outside
-//                          both sides of the fraction.
-//   pth(R1T) / pel(CT)   → heat-pump heat over WHOLE-UNIT electricity. Boundaries agree only while
-//                          the backup heater is OFF (it then draws nothing, so "whole unit" and
-//                          "heat pump" differ by the pump and the controls). The moment BUH fires,
-//                          kilowatts enter the denominator whose heat never enters the numerator and
-//                          the quotient collapses — a number that reads as a broken heat pump while
-//                          nothing is wrong.
-//
-// The fix is not to pick a different denominator, it is to move the NUMERATOR to the same boundary:
-// with a whole-unit denominator the honest numerator is the POST-BUH outlet (R2T), which carries the
-// backup heater's heat too. That is exactly what docs/HOME_ASSISTANT.md's heat-meter recipe already
-// does for an external electricity meter, and for the same reason.
+// The inverter estimate is treated as compressor-side and uses pre-BUH heat. CT coverage follows
+// the installed circuits and may include heater loads. The CT path prefers the post-BUH outlet
+// (R2T) so its heat estimate can account for backup heating. It withholds the ratio when the
+// tank heater may be active, since neither water sensor includes that heat. This source rule
+// cannot establish which loads the installed current transformers monitor.
 //
 // Where no such pairing exists, the answer is to publish NOTHING — logic/feature_gate.hpp's rule
 // (DISABLE, NEVER DEGRADE), which lwt_select and ou_stale already apply: blank the reading rather
@@ -102,8 +84,8 @@ enum class CopScope { None, HeatPump, Plant };
 enum class CopBlock {
     None,           // a COP is formable
     NoPelSource,    // no current row, or the only one is frozen with the outdoor unit
-    BuhNoPostBuh,   // whole-unit denominator, backup heater firing, and no post-BUH row to match it
-    TankHeater,     // whole-unit denominator, the tank's immersion heater firing — unpairable at all
+    BuhNoPostBuh,   // CT estimate, backup heater active or unknown, no usable post-BUH row
+    TankHeater,     // CT estimate, tank heater active or unknown; neither water sensor includes it
 };
 
 struct CopPlan {
@@ -134,7 +116,7 @@ struct CopPlan {
 //         boundaries and the COP survives.
 //   BSH — the immersion heater INSIDE the domestic-hot-water tank (logic added with the X10A tank
 //         heater flag). It heats tank water directly, downstream of the flow sensor and of BOTH
-//         leaving-water sensors. Its kilowatts land in a whole-unit divisor while its heat crosses
+//         leaving-water sensors. Its electrical load may be included in a CT estimate, but its heat crosses
 //         NEITHER R1T nor R2T, so there is no numerator anywhere in the profile that would re-pair
 //         them. Unlike the BUH case this is unfixable, not merely unfixed — hence a block rather
 //         than a different row, and its own code so the UI can say which of the two it is.
@@ -149,7 +131,7 @@ constexpr CopPlan cop_plan(PelSource pel, bool buh_known, bool buh_on,
     // unbalance them. The pre-BUH numerator is already the matching one.
     if (pel == PelSource::Inv) return {CopScope::HeatPump, CopBlock::None, false};
 
-    // Whole-unit current. The tank heater is checked FIRST because no choice of numerator answers
+    // CT-based estimate. The tank heater is checked FIRST because no choice of numerator answers
     // it — deciding the row before the block would imply a pairing that does not exist.
     if (!(bsh_known && !bsh_on)) return {CopScope::Plant, CopBlock::TankHeater, false};
 

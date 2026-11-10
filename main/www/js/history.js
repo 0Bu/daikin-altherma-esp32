@@ -156,13 +156,10 @@ const DERIVED = {
   // The quotient, and it is deliberately drawn on FEWER samples than its two inputs. Two gates:
   //   running — the live pill's own (rps > 5, ΔT > 0.5); a COP of a stopped plant is not a small
   //             COP, it is not one at all.
-  //   scope   — cop_scope.hpp: the CT clamps see the whole unit INCLUDING both resistive heaters
-  //             while this historical quotient deliberately retains the pre-BUH boundary. R2T now
-  //             has its own curve, but tank-heater heat crosses neither water sensor and the five-
-  //             minute rings keep last readings/events rather than one synchronised plant sample.
-  //             A CT-sourced sample therefore still draws NOTHING instead of splicing together a
-  //             plausible whole-plant quotient. An INV-sourced sample has the heaters outside both
-  //             sides and needs no such evidence, which is why it survives.
+  //   scope   — CT coverage depends on wiring and can include heater loads. This quotient uses
+  //             pre-BUH temperatures, and the five-minute rings are not a synchronized plant
+  //             sample. Leave CT-sourced samples blank; the inverter path uses the compressor-side
+  //             estimate and excludes the heater output.
   cop: {
     unit: "", ins: ["flow", "leaving_water", "return_water", "comp_rps", "inv_current",
                     "ct_l1", "ct_l2", "ct_l3"],
@@ -170,7 +167,7 @@ const DERIVED = {
     ready: (h) => h.flow && h.leaving_water && h.return_water && h.comp_rps && h.inv_current,
     fn: (s, has) => {
       const ct = completeCtCurrent(s, has);
-      if (ct != null && ct > 0) return null;           // whole-unit divisor — see the note above
+      if (ct != null && ct > 0) return null;           // the recorded CT scope is not established
       if (s.inv_current == null || s.flow == null) return null;
       if (s.leaving_water == null || s.return_water == null || s.comp_rps == null) return null;
       const dt = s.leaving_water - s.return_water;

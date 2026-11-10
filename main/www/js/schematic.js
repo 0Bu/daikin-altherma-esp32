@@ -113,8 +113,8 @@ const vRwt = () => {
   const n = parseFloat(r.value);
   return Number.isFinite(n) ? n : null;
 };
-// The POST-BUH (R2T) leaving-water measurement — the COP numerator when the electrical figure is a
-// WHOLE-UNIT one. Host-tested twin: main/logic/cop_scope.hpp cop_is_post_buh / cop_post_buh_select
+// The POST-BUH (R2T) leaving-water measurement — the preferred numerator for a CT-based COP.
+// Host-tested twin: main/logic/cop_scope.hpp cop_is_post_buh / cop_post_buh_select
 // (test/test_logic.cpp test_cop_scope), gated against the whole catalog; keep the tokens below
 // byte-for-byte in sync with it and with lwtWater/lwtReject above.
 // The PAGE is half the address, not defensive style: "(R2T)" also names the compressor's discharge
@@ -435,15 +435,12 @@ function liveData() {
   // Transcribed from logic/cop_scope.hpp's cop_plan() — same branches, same order, so a change
   // there is visibly a change here (test_cop_scope gates the rule against the whole catalog).
   //
-  // The two electrical sources sit on different SYSTEM BOUNDARIES: the CT clamps see the whole unit
-  // including both resistive heaters, "INV primary current" only the compressor. The heat side above
-  // is the PRE-BUH outlet (lwtRow) — heat from the heat pump's own exchanger, with the heaters
-  // deliberately not credited to it. Divide a whole-unit denominator into that numerator and a
-  // heater's kilowatts land in the divisor while its heat never reaches the dividend: the quotient
-  // collapses, and reads as a failing heat pump while nothing at all is wrong.
+  // The inverter estimate is compressor-side. CT coverage follows the wiring and may include
+  // heater loads. Pre-BUH heat does not include either heater, so the CT path accounts for that
+  // possibility before presenting a ratio.
   //
   // The two heaters are NOT the same problem. The BUH sits in the space-heating flow between R1T and
-  // R2T, so moving the NUMERATOR downstream of it re-pairs the boundaries. The BSH is the immersion
+  // R2T, so the post-BUH numerator can include its heat. The BSH is the immersion
   // heater inside the DHW tank: it heats tank water directly, downstream of the flow sensor and of
   // both leaving-water sensors, so no row in the profile would re-pair them and the only honest
   // answer is to state nothing. d.pth remains on the PHE boundary and is separately qualified by
@@ -500,9 +497,8 @@ function liveData() {
     const pw = mbPower();
     if (pw) { const n = parseFloat(pw.value);
               if (Number.isFinite(n)) { d.pel = n; d.pelSrc = "MB"; d.mbFields.add("pel"); } }
-    // ΔT survives because both temperatures come from the gateway's own hydronic readings. Thermal
-    // output survives only with its independent input-31 compressor witness: without that current
-    // flag, the snapshot still cannot distinguish active PHE transfer from pump-only redistribution.
+    // Working ΔT requires both gateway temperatures and qualified measured flow above 0.5 L/min.
+    // Heat output also needs a current input-31 compressor report and the applicable route and sign.
     d.dt = (d.lwt != null && d.ret != null) ? d.lwt - d.ret : null;
     d.dtStale = waterMoving(d) !== true;
     d.spaceMode = null;
@@ -1089,11 +1085,8 @@ const INSPECT = {
       : { en: "An ESTIMATE of heat transferred into the water: flow/60 × (R1T−R4T) × ρ·cp (≈ 4.186 kJ/(l·K)), assuming water. Accuracy depends on the flow sensor, both temperature sensors and the actual fluid; glycol mixtures need different density and heat capacity. It is shown only with a running compressor and the heating-direction temperature difference. The backup heater sits after R1T and is outside this figure.",
           de: "Eine SCHÄTZUNG der ins Wasser übertragenen Wärme: Durchfluss/60 × (R1T−R4T) × ρ·cp (≈ 4,186 kJ/(l·K)) unter Annahme von Wasser. Die Genauigkeit hängt vom Durchflusssensor, beiden Temperaturfühlern und dem tatsächlichen Medium ab; Glykolgemische benötigen andere Dichte und Wärmekapazität. Sie erscheint nur bei laufendem Verdichter und Temperaturdifferenz in Heizrichtung. Der Zusatzheizer sitzt hinter R1T und ist in diesem Wert nicht enthalten." },
     head: (d) => (d.dtStale || d.pth == null ? "—" : "≈ " + fmt1(d.pth) + " kW"),
-    // The COP is quoted here only while it is built on THIS figure. With a whole-unit electrical
-    // input the quotient moves to the post-BUH outlet (logic/cop_scope.hpp), so it is no longer
-    // this pill's number divided by anything — printing it beside this one would attach a plant
-    // ratio to a heat-pump-only heat output and invite exactly the boundary mix-up the split
-    // exists to prevent. The COP pill states it, with its own scope named.
+    // Quote COP here only when it uses this heat estimate. A CT-based ratio may use the post-BUH
+    // outlet instead; the COP pill names that scope.
     //
     // Blanks with the pill (d.dtStale), and — like the pel entry's three cases — says WHICH silence
     // this is. A stopped pump alone is one sentence; a stopped pump while the tank heater fires is
@@ -1120,7 +1113,7 @@ const INSPECT = {
   // catalog row behind it at all, hence copy written here rather than pulled from DESCRIPTIONS.
   //
   // The TITLE is live (see inspTitleText), because a COP is not one quantity. Which system the
-  // quotient describes follows the electrical source — whole-unit CT clamps give a PLANT COP, the
+  // quotient describes follows the electrical source — the CT path may use a post-BUH numerator, the
   // inverter current a HEAT-PUMP one — and the two are different numbers whenever the backup heater
   // runs. They look identical on the pill, so naming which one this is has to happen here or
   // nowhere. The rule and the matching numerator are logic/cop_scope.hpp, gated over the catalog.
@@ -1144,7 +1137,7 @@ const INSPECT = {
     head: (d) => fmt1(d.cop),
     // Every block reason gets its OWN sentence. A suppressed wrong claim must not be replaced by
     // another one, so "the heater is firing and this profile has no post-BUH sensor", "the gateway
-    // measures a different system" and "there is no current reading at all" cannot share a sentence
+    // power boundary is unverified" and "there is no current reading at all" cannot share a sentence
     // — they are different facts about the hardware, and two of them named a code that reached no
     // sentence at all, leaving the generic explainer beside a blank pill whose title still claimed
     // a heat-pump boundary.
