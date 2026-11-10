@@ -1,4 +1,4 @@
-// translation-source: dd8fe0b22001137ff5c3634c7565d15d42e3037e0174e8798c26335078719fa1
+// translation-source: 257951e4e4fba68333bf1d8ab27e1e1b251ebe4d38dc8bf99518b4a420905c5c
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -1015,7 +1015,7 @@ INSPECT_I18N.es = inspectValues(
       : "Potencia térmica estimada dividida por entrada eléctrica estimada, usando límites compatibles: tras BUH con CT cuando existe R2T, o solo la bomba de calor con corriente del inversor. El cableado CT decide qué cargas incluye. Es una indicación instantánea, no un contador certificado.", (d) => d.copBlock === "tank_heater"
       ? "Sin COP: la resistencia del depósito puede estar incluida en la electricidad, pero su calor va directo al depósito y no cruza los sensores de impulsión; los límites no coinciden."
       : d.copBlock === "buh_no_r2t" ? "Sin COP: BUH está activo, pero falta un sensor posterior. La electricidad puede incluir el calentador mientras el calor se calcula antes de él."
-      : d.copBlock === "mb_scope" ? "Sin COP: HomeHub mide electricidad de toda la unidad, pero el calor solo del PHE y no aporta estados de calentadores ni sensor posterior para igualar los límites."
+      : d.copBlock === "mb_scope" ? "Sin COP. Los datos disponibles no permiten relacionar la potencia eléctrica de HomeHub con la potencia térmica estimada en el intercambiador de placas. Se desconoce qué cargas eléctricas, como los calentadores, están incluidas."
       : d.copBlock === "no_pel"
       ? d.pelHeld ? "Sin COP: el compresor está parado y la corriente del inversor es del último ciclo, no actual."
         : "Sin COP: este perfil no aporta entrada eléctrica mediante CT ni corriente del inversor."

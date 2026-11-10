@@ -128,8 +128,8 @@ Read today (UC3 Daikin Altherma):
 * **Faults** (input): unit error active `21`, error code `22` (`Text16`), sub-code `23`
 * **Temperatures** (input, `Temp16`): leaving water PHE `40` / BUH `41`, return `42`, DHW tank `43`,
   outdoor air `44`, liquid refrigerant `45`, room `50`
-* **Flow + electrical input** (input): flow `49` (`Int16`, L/min ×100), whole-system electrical
-  input `51` (`Pow16`, kW). Offset `51` is not dedicated booster-heater power.
+* **Flow + electrical input** (input): flow `49` (`Int16`, L/min ×100) and reported heat pump power
+  consumption `51` (`Pow16`, kW). Offset `51` is not dedicated booster-heater power.
 * **Disinfection state** (input): current disinfection operation `33` (`Int16`, binary). The
   HomeHub map does not expose the configured weekday, start time or disinfection temperature.
 * **Setpoints and modes** (holding, read back): LWT main heating `1` / cooling `2`,
@@ -415,8 +415,7 @@ green/yellow/red state colours as WiFi, MQTT, Syslog and NTP:
   gateway's reading appears at the **end** of the body, after the "Normal:" note: a full row carrying
   the *Modbus register's own label*, the badge and the value, then the **difference** between the two
   when the conversion is established. Flow marked `flow_scale_unverified` and native Altherma 4
-  pressure show the conversion limit instead of a numeric comparison. The flow limit covers
-  unresolved Auto, fallback and native Altherma 4 profiles.
+  pressure show the [conversion limit](#deferred-physical-acceptance) in place of a numeric comparison.
   It sits last, not first, because a reader opens an explainer to find out what the quantity *is* —
   the row's own value is already stated an inch above, in the header they just tapped. The label is
   the gateway's rather than the X10A row's on purpose: this line is what someone verifying a pairing

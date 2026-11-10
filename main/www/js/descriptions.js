@@ -1010,7 +1010,7 @@ const mbBool = (off) => mbBinaryValue(mbRow(off));
 const mbUnitAbnormality = () => modbusEnumNumber(mbRow(21), "unit_abnormality", 2);
 // The same register as raw TEXT — the error code is a Text16, not a flag.
 const mbVal = (off) => { const r = mbRow(off); return r ? String(r.value) : null; };
-// The MEASURED power consumption (EKRHH input register 51, def/homehub.hpp). Named because the map
+// Reported power consumption (EKRHH input register 51, def/homehub.hpp). Named because the map
 // carries three "kW" rows and the other two are the power-LIMIT setpoints (holding 57/58): anything
 // selecting this reading by its UNIT will sooner or later select an installer's ceiling instead.
 const MB_OFF_POWER = 51;

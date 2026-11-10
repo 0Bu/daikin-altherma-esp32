@@ -24,7 +24,8 @@ this recipe only when those rows are readable and their physical sensors are fit
 
 Use measured total active power and accumulated kWh, including the indoor/outdoor unit and backup
 heater if their heat is included in the numerator. A compressor-current estimate omits equipment
-and depends on voltage/power factor. HomeHub's internal power figure is an estimate too.
+and depends on voltage/power factor. HomeHub reports heat pump power consumption; verify its
+measurement boundary and heater coverage before using it in this ratio.
 A temperature measured before the backup heater, or a profile without R2T, is usable for this ratio
 only while **BUH is known off** and the other required water readings are available; otherwise its
 electricity is counted without its heat.
@@ -195,6 +196,6 @@ measurement boundary before diagnosing the plant.
 Keep HomeHub flow and water temperatures separate from X10A by source, cadence and units. Exclude
 flow marked `flow_scale_unverified` in [`/values`](API.md#get-values) from heat and COP estimates.
 MQTT and History carry the converted number without the flag; independently verify the scale of
-those samples before using them. Use an electrical measurement with a matching boundary for COP.
+those samples before using them.
 See the [Modbus map](MODBUS_PROTOCOL.md) for model and profile limits. The device does not integrate
 energy or substitute cloud estimates for a physical electricity meter.

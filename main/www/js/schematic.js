@@ -521,15 +521,9 @@ function liveData() {
     d.spaceMode = null;
     d.thermalMode = d.valveDhw === true ? "heat" : null;
     applyThermalPlan(d);
-    // THE COP DOES NOT. It looks like the same arithmetic and is not: the gateway's power is the
-    // WHOLE UNIT's, backup heater and immersion heater included, while d.pth is heat across the
-    // plate exchanger alone. That is precisely the boundary mismatch logic/cop_scope.hpp exists to
-    // refuse — a quotient of two correct numbers describing two different systems, which collapses
-    // exactly when a heater fires and reads as a failing heat pump while nothing is wrong. On the
-    // X10A path cop_scope decides it from the BUH/BSH states and the post-BUH row; the gateway map
-    // carries neither, so there is nothing to decide it WITH, and the honest answer is the one this
-    // firmware gives everywhere else: publish nothing (feature_gate.hpp — disable, never degrade).
-    // A circulation-only quotient would be the other half of the same problem.
+    // The available gateway readings cannot establish a matching COP boundary. Input 51 can
+    // report electrical power, but its load coverage (including heaters) is unverified. Input 32
+    // (booster state) and input 41 (post-BUH temperature) do not establish which loads 51 covers.
     d.cop = null;
     d.copScope = null;
     d.copBlock = "mb_scope";      // named, so the explainer says WHY rather than showing a bare "—"
@@ -1174,13 +1168,9 @@ const INSPECT = {
       : d.copBlock === "buh_no_r2t"
       ? { en: "No COP right now — the backup heater is firing, but this profile has no leaving-water sensor after it. The electrical estimate can include heater load while the heat estimate stops before the heater, so the two boundaries do not match.",
           de: "Derzeit kein COP — der Zusatzheizer heizt, aber dieses Profil hat keinen Vorlauffühler hinter ihm. Die Stromschätzung kann die Heizlast enthalten, während die Wärmeschätzung vor dem Heizer endet; beide Bilanzgrenzen passen daher nicht zusammen." }
-      // The X10A bus is silent and the HomeHub is carrying the drawing. Its power register measures
-      // the WHOLE unit including both heaters, while the heat figure is the plate exchanger alone —
-      // and the gateway map carries neither heater state nor a post-BUH row, so unlike the X10A path
-      // there is nothing here to decide the pairing WITH.
       : d.copBlock === "mb_scope"
-      ? { en: "No COP right now — the X10A bus is silent, so these readings come from the HomeHub. Its power figure covers the whole unit including both electric heaters, while the heat figure covers the heat exchanger alone, and this source reports neither heater state nor a post-heater sensor to match the two boundaries. A quotient of the two would describe two different systems.",
-          de: "Derzeit kein COP — der X10A-Bus schweigt, daher stammen diese Messwerte vom HomeHub. Dessen Leistungswert erfasst das gesamte Gerät einschließlich beider Elektroheizer, der Wärmewert dagegen nur den Wärmetauscher; zudem meldet diese Quelle weder den Heizerzustand noch einen Fühler hinter dem Heizer, um beide Bilanzgrenzen anzugleichen. Ein Quotient aus beiden beschriebe zwei verschiedene Systeme." }
+      ? { en: "No COP right now. The available data cannot match HomeHub power to the estimated heat across the plate heat exchanger. Which electrical loads the power reading covers, including heaters, is unknown.",
+          de: "Derzeit kein COP. Die verfügbaren Daten erlauben keinen Vergleich der vom HomeHub gemeldeten elektrischen Leistung mit der geschätzten Wärmeleistung am Plattenwärmetauscher. Welche Verbraucher die Leistung umfasst, etwa Elektroheizer, ist unklar." }
       // No usable electrical input at all. Which of the two reasons it is matters — the pill's own
       // explainer draws the same distinction, and saying "this profile has no row" about a profile
       // that has one would substitute a second wrong claim for the suppressed one. The third reason,

@@ -429,6 +429,41 @@ async function assertPumpCommandTruth(page, context, locale) {
       await assertAccessibility(page, label, { nativeTree: index === 0 });
       await captureNativeEvidence(page, label, "inspect");
     }
+    await page.waitFor("!S.clickHold");
+    await page.evaluate(`(() => {
+      S.status.hp.connected = false;
+      S.status.modbus.enabled = S.status.modbus.connected = true;
+      S._values = [];
+      S._modbus = [
+        { off: 31, label: 'Compressor running', value: 1, binary: true },
+        { off: 32, label: 'Booster heater run', value: 1, binary: true },
+        { off: 37, label: '3-way valve', value: 1, enum: 'three_way_valve' },
+        { off: 40, label: 'Leaving water temperature PHE', value: 36,
+          unit: '°C', concept: 'leaving_water' },
+        { off: 41, label: 'Leaving water temperature BUH', value: 38.5,
+          unit: '°C', concept: 'leaving_water_post_buh' },
+        { off: 42, label: 'Return water temperature', value: 30,
+          unit: '°C', concept: 'return_water' },
+        { off: 49, label: 'Flow rate', value: 12, unit: 'L/min', concept: 'flow' },
+        { off: 51, label: 'Heat pump power consumption', value: 1.42, unit: 'kW' },
+      ];
+      renderApp(); return true;
+    })()`);
+    await clickElement(page, '#schem [data-insp="cop"]');
+    await page.waitFor(`S.insp === "cop" && document.getElementById("inspect").classList.contains("open")`);
+    await page.frame();
+    const cop = await page.evaluate(`({
+      reason: S.live.copBlock, heat: S.live.pth, power: S.live.pel,
+      pill: document.getElementById('svCop').textContent,
+      explanation: inspNowText(INSPECT.cop, S.live),
+      visible: document.querySelector('#inspBody .vdesc-p:last-child')?.textContent
+    })`);
+    assert.ok(cop.heat > 0 && cop.power === 1.42, `${context}: both heat and power are available`);
+    assert.equal(cop.reason, "mb_scope", `${context}: HomeHub does not establish the COP boundary`);
+    assert.equal(cop.pill, "—", `${context}: the COP reading remains withheld`);
+    assert.match(cop.explanation, /HomeHub/, `${context}: explain the actual power source`);
+    assert.equal(cop.visible, cop.explanation, `${context}: render the COP explanation`);
+    assertLayout(await page.evaluate(layoutAudit), `${context}/homehub-cop`);
   } finally {
     await page.waitFor("!S.clickHold");
     await page.evaluate(`(() => {

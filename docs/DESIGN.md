@@ -222,12 +222,13 @@ independent: a stop request does not establish reported OFF or absence of water 
 Modbus flow with [unverified scaling](API.md#get-values) remains visible with its conversion limit
 in the inspector. Only qualified flow drives water animation and thermal calculations.
 
-ΔT is R1T−R4T and needs moving water. Capacity also needs a running compressor, known mode and
-useful transfer direction: positive ΔT for heating/DHW, negative for cooling, displayed as positive
-cooling capacity. COP/EER additionally requires compatible thermal/electrical boundaries. Missing
-inputs, opposite-sign transfer and pump-only residual-temperature equalization leave these supported
-pills visible as `—`. A reported Cooling mode with hot residual circulation uses neutral pipes and
-Space circuit wording rather than claiming cooling output.
+ΔT is R1T−R4T. It remains visible with both temperatures and qualified measured flow above
+0.5 L/min, even when the reported pump state is OFF. Capacity also needs a running compressor,
+known mode and useful transfer direction: positive ΔT for heating/DHW, negative for cooling,
+displayed as positive cooling capacity. COP/EER requires compatible thermal and electrical
+boundaries. Capacity and COP/EER show `—` during pump-only circulation or when their inputs do not
+support the calculation. A reported Cooling mode with hot residual circulation uses neutral pipes
+and Space circuit wording.
 
 Thermal power uses flow/60 × ΔT × ρ·cp, approximately 4.186 kJ/(l·K) for water with
 ρ≈1 kg/l; glycol mixtures have different density and heat capacity. Electrical power is estimated

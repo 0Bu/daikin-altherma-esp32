@@ -1,4 +1,4 @@
-// translation-source: dd8fe0b22001137ff5c3634c7565d15d42e3037e0174e8798c26335078719fa1
+// translation-source: 257951e4e4fba68333bf1d8ab27e1e1b251ebe4d38dc8bf99518b4a420905c5c
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -1016,7 +1016,7 @@ INSPECT_I18N.nb = inspectValues(
       : "Anslått varme delt på anslått strøm med samsvarende grenser: etter BUH med CT og R2T, ellers bare varmepumpen med inverterstrøm. CT-kabling avgjør laster. Øyeblikksindikasjon, ikke sertifisert måler.", (d) => d.copBlock === "tank_heater"
       ? "Ingen COP: strøm kan omfatte BSH, men varmen går direkte i tanken og krysser ikke tursensorene; grensene er ulike."
       : d.copBlock === "buh_no_r2t" ? "Ingen COP: BUH er aktiv, men sensor etter den mangler; strøm kan omfatte varme beregnet før BUH."
-      : d.copBlock === "mb_scope" ? "Ingen COP: HomeHub måler hele enhetens strøm, men varme bare ved PHE og mangler varmerstatus/sensor etter BUH for like grenser."
+      : d.copBlock === "mb_scope" ? "Ingen COP. Tilgjengelige data kan ikke knytte HomeHubs elektriske effekt til den estimerte varmeeffekten over platevarmeveksleren. Det er uklart hvilke elektriske laster, som varmeelementer, effektverdien omfatter."
       : d.copBlock === "no_pel"
       ? d.pelHeld ? "Ingen COP: kompressoren står, og inverterstrømmen er fra siste syklus."
         : "Ingen COP: profilen gir verken CT-effekt eller inverterstrøm."

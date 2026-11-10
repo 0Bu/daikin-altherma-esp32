@@ -1,4 +1,4 @@
-// translation-source: dd8fe0b22001137ff5c3634c7565d15d42e3037e0174e8798c26335078719fa1
+// translation-source: 257951e4e4fba68333bf1d8ab27e1e1b251ebe4d38dc8bf99518b4a420905c5c
 I18N.it = localeValues([
   /* sys.nodata */ "Nessun dato",
   /* sys.unreachable */ "Non raggiungibile",
@@ -1010,7 +1010,7 @@ INSPECT_I18N.it = inspectValues(
       ? "Potenza frigorifera stimata divisa per assorbimento elettrico stimato. Eredita le incertezze di fluido, sensori, tensione e fattore di potenza. È un EER istantaneo, non stagionale; l’energia misurata su una stagione è più significativa."
       : "Potenza termica stimata divisa per assorbimento elettrico stimato con confini compatibili: dopo BUH con CT e R2T, oppure sola pompa di calore con corrente inverter. Il cablaggio CT decide i carichi inclusi. Indicazione istantanea, non contatore certificato.", (d) => d.copBlock === "tank_heater" ? "Nessun COP: la resistenza del serbatoio può essere inclusa nell’elettricità, ma il calore va direttamente al serbatoio senza attraversare i sensori di mandata; i confini non coincidono."
       : d.copBlock === "buh_no_r2t" ? "Nessun COP: BUH attivo senza sensore successivo. L’elettricità può includere il riscaldatore mentre il calore viene stimato prima di esso."
-      : d.copBlock === "mb_scope" ? "Nessun COP: HomeHub misura l’elettricità dell’intera unità, ma il calore del solo PHE e non fornisce né stati dei riscaldatori né sensore a valle per allineare i confini."
+      : d.copBlock === "mb_scope" ? "COP non disponibile. I dati disponibili non permettono di associare la potenza elettrica di HomeHub alla potenza termica stimata allo scambiatore a piastre. Non è chiaro quali carichi elettrici, come le resistenze, siano inclusi."
       : d.copBlock === "no_pel" ? d.pelHeld ? "Nessun COP: compressore fermo, la corrente inverter è dell’ultimo ciclo e non è attuale." : "Nessun COP: il profilo non fornisce né correnti CT né corrente inverter."
       : d.cop == null ? null
       : d.efficiencyKind === "eer" ? `${fmt1(d.cop)} kW frigoriferi per kW elettrico: ≈ ${fmt1(d.copPth)} kW sottratti con ≈ ${fmt1(d.pel)} kW assorbiti.`

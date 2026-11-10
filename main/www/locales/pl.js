@@ -1,4 +1,4 @@
-// translation-source: dd8fe0b22001137ff5c3634c7565d15d42e3037e0174e8798c26335078719fa1
+// translation-source: 257951e4e4fba68333bf1d8ab27e1e1b251ebe4d38dc8bf99518b4a420905c5c
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -1020,7 +1020,7 @@ INSPECT_I18N.pl = inspectValues(
       : "Szacowana moc cieplna podzielona przez zgodny zakresowo pobór energii. Dla CT ciepło może być liczone za BUH, a dla prądu falownika dotyczy samej pompy; montaż CT decyduje o ujętych odbiornikach. To wskazanie chwilowe, nie licznik sezonowy.", (d) => d.copBlock === "tank_heater"
       ? "Brak COP — grzałka zbiornika jest włączona. Jej pobór może wejść do bilansu prądu, lecz ciepło trafia prosto do zbiornika i nie przechodzi przez czujniki wody; zakresy nie pasują."
       : d.copBlock === "buh_no_r2t" ? "Brak COP — BUH grzeje, ale profil nie ma czujnika wody za nim. Pobór może obejmować grzałkę, a moc cieplna kończy się przed nią."
-      : d.copBlock === "mb_scope" ? "Brak COP — X10A milczy, a HomeHub podaje pobór całej jednostki z grzałkami, podczas gdy moc cieplna dotyczy tylko PHE. Bez stanu grzałek i czujnika za nimi zakresów nie można uzgodnić."
+      : d.copBlock === "mb_scope" ? "Brak COP. Dostępne dane nie pozwalają powiązać mocy elektrycznej z HomeHubu z mocą cieplną oszacowaną na płytowym wymienniku ciepła. Nie wiadomo, które odbiorniki, w tym grzałki elektryczne, obejmuje odczyt mocy."
       : d.copBlock === "no_pel"
       ? d.pelHeld ? "Brak COP — przy stojącej sprężarce prąd falownika jest pozostałością z poprzedniego cyklu, a nie bieżącym pomiarem."
         : "Brak COP — profil nie podaje poboru ani z CT, ani z prądu falownika."

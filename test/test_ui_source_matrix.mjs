@@ -1234,6 +1234,33 @@ assert.match(style, /\.inspect-rows\s*>\s*\.mb-delta/,
                               P(58, "General power limit", "7.00")] });
   assert.equal(gone.mbPower(), null,
     "no reported power: the answer is nothing, never a power LIMIT that happens to share the unit");
+  for (const [fixture, power] of [[both, 1.42], [gone, null]]) {
+    fixture.S._modbus.push(M_FLAG(31, "Compressor running", true),
+      M_FLAG(32, "Booster heater run", true), M_VALVE(true),
+      M(40, "Leaving water temperature PHE", 36, "leaving_water"),
+      M(41, "Leaving water temperature BUH", 38.5, "leaving_water_post_buh"),
+      M(42, "Return water temperature", 30, "return_water"),
+      M(49, "Flow rate", 12, "flow", { unit: "L/min" }));
+    const live = fixture.liveData();
+    assert.equal(live.bsh, true, "HomeHub can report the tank heater state");
+    assert.equal(live.r2t, 38.5, "HomeHub can report the post-heater temperature");
+    assert.ok(live.pth > 0, "the fallback can estimate exchanger heat independently");
+    assert.equal(live.pel, power);
+    assert.equal(live.cop, null, "heater state and temperature cannot establish a matched power boundary");
+    assert.equal(live.copBlock, "mb_scope");
+    for (const [lang, boundary, unknownLoads, unsupportedClaims] of [
+      ["en", /cannot match HomeHub power to the estimated heat across the plate heat exchanger/i,
+        /loads .*including heaters.* unknown/i, /whole unit|reports neither|heaters included/i],
+      ["de", /keinen Vergleich .*HomeHub .*geschätzten Wärmeleistung am Plattenwärmetauscher/i,
+        /Verbraucher .*etwa Elektroheizer.* unklar/i, /gesamte Gerät|meldet .*weder|einschließlich beider/i],
+    ]) {
+      fixture.setTxLang(lang);
+      const explanation = fixture.inspNowText(fixture.INSPECT.cop, live);
+      assert.match(explanation, boundary);
+      assert.match(explanation, unknownLoads);
+      assert.doesNotMatch(explanation, unsupportedClaims);
+    }
+  }
   // Prove the trap is really set — a unit-keyed lookup over this very fixture picks a limit.
   const byUnit = [P(51, "Heat pump power consumption", null),
                   P(57, "Power limit during Recommended on / buffering", "5.00")]

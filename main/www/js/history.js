@@ -2381,11 +2381,8 @@ function valueGroupsHtml(vals, connected) {
   return html;
 }
 
-// The HomeHub registers with NO X10A counterpart — the real power measurement, the Smart-Grid mode,
-// the setpoint limits. They have no row to sit inside, so they get a group of their own, LAST: visible
-// (the power reading in particular is worth having — X10A has no equivalent and the dashboard has to
-// estimate it from CT clamps at an assumed 230 V) but after everything X10A carries, because X10A
-// stays the prominent source. Empty and therefore absent on a device with no HomeHub.
+// HomeHub registers without an X10A counterpart (reported power, Smart Grid mode and setpoint
+// limits) stay in their own group after the X10A entries. An absent HomeHub has no group.
 function modbusOnlyGroupHtml(all) {
   // `all` = X10A carried no rows at all, so the paired ones have no row to sit inside and belong here
   // too — otherwise they are simply not on screen while being actively measured.

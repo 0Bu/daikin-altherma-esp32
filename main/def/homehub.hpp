@@ -86,9 +86,8 @@ inline constexpr HomeHubReg HOMEHUB_REGS[] = {
      HomeHubValueKind::Binary},
     {31, MbFunc::ReadInput, MbType::Int16, 1, "", "Compressor running", HomeHubValueKind::Binary},
     // EKRHH §9.2.2 calls this "Booster heater run": the DHW tank immersion heater, paired with
-    // X10A's exact BSH bit. It is an ON/OFF fact only; offset 51 is whole-system electrical input
-    // and
-    // must not be relabelled as this heater's own power.
+    // X10A's exact BSH bit. It is an ON/OFF fact only. Offset 51 reports heat pump power with
+    // unverified load coverage and must not be relabelled as this heater's own power.
     {32, MbFunc::ReadInput, MbType::Int16, 1, "", "Booster heater run", HomeHubValueKind::Binary},
     // EKRHH exposes the controller's actual disinfection phase directly. This is deliberately not
     // paired with X10A "Tank preheat": preheating may precede a scheduled demand, but it does not

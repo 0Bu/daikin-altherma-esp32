@@ -1,4 +1,4 @@
-// translation-source: dd8fe0b22001137ff5c3634c7565d15d42e3037e0174e8798c26335078719fa1
+// translation-source: 257951e4e4fba68333bf1d8ab27e1e1b251ebe4d38dc8bf99518b4a420905c5c
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -1210,7 +1210,7 @@ INSPECT_I18N.fi = inspectValues(
       : d.pth == null ? null : d.pthKind === "cooling" ? `≈ ${fmt1(d.pth)} kW jäähdytystä${d.cop != null ? `, EER ${fmt1(d.cop)}` : ""}.` : `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `, COP ${fmt1(d.cop)}` : ""}.`], // pth
     [(d) => d && d.efficiencyKind === "eer" ? "Lämpöpumpun EER (arvio)" : d && d.copScope === "plant" ? "COP BUH:n jälkeen (arvio)" : "Lämpöpumpun COP (arvio)", "Arvioitu hyötysuhde", (d) => d && d.efficiencyKind === "eer" ? "Arvioitu jäähdytysteho jaettuna arvioidulla sähköteholla. Tulos perii nesteen, anturien, jännitteen ja tehokertoimen oletukset; hetkellinen, ei kausittainen EER." : "Arvioitu lämpöteho jaettuna saman taserajan sähköteholla. CT:llä lämpö voidaan laskea BUH:n jälkeen, invertterivirralla vain lämpöpumpulle; CT-kytkentä määrää mukana olevat kuormat. Tulos perii neste-, anturi-, jännite- ja tehokerroinoletukset ja on hetkellinen, ei kausittainen.", (d) => d.copBlock === "tank_heater" ? "COP ei saatavilla — säiliövastus käy. Sen sähkö voi sisältyä taseeseen, mutta lämpö menee suoraan säiliöön vesipuolen anturien ohi."
       : d.copBlock === "buh_no_r2t" ? "COP ei saatavilla — BUH lämmittää, mutta profiilissa ei ole jälkianturia; sähkö- ja lämpöraja eivät täsmää."
-      : d.copBlock === "mb_scope" ? "COP ei saatavilla — HomeHub ilmoittaa koko yksikön sähkön lämmittimineen, lämpö koskee vain PHE:tä. Ilman lämmitintiloja ja jälkianturia rajoja ei voi sovittaa."
+      : d.copBlock === "mb_scope" ? "COP ei ole saatavilla. Käytettävissä olevilla tiedoilla HomeHubin sähkötehoa ei voi kohdistaa levylämmönvaihtimen arvioituun lämpötehoon. Ei tiedetä, mitkä sähkökuormat, kuten sähkölämmittimet, lukema kattaa."
       : d.copBlock === "no_pel" ? d.pelHeld ? "COP ei saatavilla — pysähtyneen kompressorin invertterivirta on edelliseltä käynniltä." : "COP ei saatavilla — profiili ei ilmoita CT- eikä invertterivirtaa."
       : d.cop == null ? null : d.efficiencyKind === "eer" ? `${fmt1(d.cop)} kW jäähdytystä / 1 kW sähköä — ≈ ${fmt1(d.copPth)} kW teholla ≈ ${fmt1(d.pel)} kW.`
       : d.copScope === "plant" ? `${fmt1(d.cop)} kW lämpöä BUH:n jälkeen / 1 kW CT-sähköä — ≈ ${fmt1(d.copPth)} kW teholla ≈ ${fmt1(d.pel)} kW. CT-kytkentä määrää rajan.`
