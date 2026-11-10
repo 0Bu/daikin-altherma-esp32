@@ -378,6 +378,7 @@ const I18N = {
     "check.hour.gap": "Sampling gap",
     "check.hour.coverage": (observed, possible) => possible ? `${observed} of ${possible} observed` : `${observed} observed · elapsed time unknown`,
     "check.hour.ending": (time) => `Interval end ${time}`,
+    "check.hour.saved": (time) => `Saved time ${time}`,
     "check.loss_windows": (n) => `${n} ${n === 1 ? "window" : "windows"}`,
     "check.fault_err": "Fault active", "check.fault_warn": "Warning active",
     "check.fault_past": "Previously active", "check.fault_none": "None active",

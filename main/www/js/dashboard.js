@@ -140,7 +140,8 @@ function renderCards() {
     ? checkupCardHtml(S.status?.hp?.connected) : "";
   setHtml("valueGroups", checkup + statusCardsHtml() +
     valueGroupsHtml(S._values || [], S.status?.hp?.connected));
-  syncDashboardCards();
+  const selected = syncDashboardCards();
+  if (!S.clickHold) syncCheckupCyclingChart(selected);
 }
 
 // Read the installed frame: setHtml may have held a newer one while a row was being tapped.
@@ -176,6 +177,7 @@ function syncDashboardCards() {
     (buttons.find(button => button.dataset.card === focused) ||
       buttons.find(button => button.dataset.card === S.dashboardCard))?.focus({ preventScroll: true });
   }
+  return selected;
 }
 
 function selectDashboardCard(key) {
@@ -183,7 +185,7 @@ function selectDashboardCard(key) {
   if (!Array.from(cards).some(card => card.dataset.dashboardCard === key)) return;
   S.dashboardCard = key;
   // Selection is immediate even while the pointer hold is protecting a pending values repaint.
-  syncDashboardCards();
+  syncCheckupCyclingChart(syncDashboardCards());
 }
 
 /*!
@@ -1354,7 +1356,21 @@ function checkupCyclingDetailHtml(c, report) {
       (c.censored_runs > 0 ? descParaHtml(esc(t("check.cycling.unclear_hint"))) : "") : "") +
     `<div class="vdesc-p checkup-cycling-assessment"><span class="vdesc-n">` +
     `${esc(t("check.cycling.assessment"))}</span> · ${esc(t(`check.cycling.${assessment}`))}</div>` +
-    `<div data-checkup-hours>${S.descOpen.has("model:health_cycling") ? checkupCyclingChartHtml(c) : ""}</div>`;
+    `<div data-checkup-hours></div>`;
+}
+
+function syncCheckupCyclingChart(card) {
+  if (S.stage !== "dashboard" || S.scrub || card?.dataset.dashboardCard !== "diagnosis") return;
+  const slot = card.querySelector(".vitem.open [data-checkup-hours]");
+  if (slot) renderCheckupCyclingChart(slot);
+}
+
+function renderCheckupCyclingChart(slot, open = true) {
+  const check = open && S.status?.health?.checks?.find(c => c.id === "cycling");
+  const html = open ? checkupCyclingChartHtml(check) : "";
+  if (slot._checkupMarkup === html) return;
+  replaceHistoryHtml(slot, html);
+  slot._checkupMarkup = html;
 }
 
 let cyclingMarkup = [];
@@ -1391,7 +1407,8 @@ function checkupCyclingChartHtml(c) {
     hasObservation ||= observed > 0;
     const n = 23 - i, dated = identified && Number.isSafeInteger(h.end_unix_s) &&
       h.end_unix_s > 0 && h.end_unix_s <= 8.64e12;
-    const when = dated ? t("check.hour.ending", stamp.format(h.end_unix_s * 1000))
+    const when = dated ? t(h.restored === true ? "check.hour.saved" : "check.hour.ending",
+      stamp.format(h.end_unix_s * 1000))
       : n ? t("check.hour.earlier", n) : t("check.hour.latest");
     // A restored record may have been sealed early on restart, so its elapsed time is unknown.
     const possible = n ? (h.restored === true ? null : 3600) :
@@ -1656,6 +1673,10 @@ function checkupWithOutdoor(c, value) {
   return [value, checkupOutdoorContext(c)].filter(Boolean).join(" · ");
 }
 
+function checkupCyclingCountPrefix(c) {
+  return c.starts > 0 && c.observed_s === 0 ? "≥" : "";
+}
+
 // One row's value text. Every branch that has no number says so with a dash — a check that could not
 // be evaluated must never print a plausible zero (DESIGN.md's "an idle plant with no readings, not a
 // stale one", applied to a count).
@@ -1685,7 +1706,8 @@ function checkupMetricValue(c) {
       return [t("check.loss_max", checkupFmt1(c.max_k_h)), high || t("check.loss_windows", c.windows || 0)].filter(Boolean).join(" · ");
     }
     case "cycling":
-      return Number.isInteger(c.starts) && c.starts >= 0 ? t("check.starts", c.starts) : "";
+      return Number.isInteger(c.starts) && c.starts >= 0
+        ? checkupCyclingCountPrefix(c) + t("check.starts", c.starts) : "";
     case "defrost": {
       if (c.count == null) return "";
       const n = t("check.cycles", c.count);
@@ -1717,7 +1739,8 @@ function checkupValue(c) {
   if (c.id === "dhw_loss")
     return checkupDhwHasRate(c) ? `${checkupFmt1(c.max_k_h)} K/h` : st;
   if (c.id === "cycling")
-    return Number.isFinite(c.starts) && c.starts >= 0 ? c.starts.toLocaleString(LANG) : st;
+    return Number.isFinite(c.starts) && c.starts >= 0
+      ? checkupCyclingCountPrefix(c) + c.starts.toLocaleString(LANG) : st;
   if (c.id === "defrost") {
     const share = c.verdict !== "collecting" && checkupDefrostShare(c);
     return share || (Number.isFinite(c.count) && c.count >= 0 ? t("check.cycles", c.count) : st);

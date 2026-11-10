@@ -1,4 +1,4 @@
-// translation-source: 30a685642c39ec9f0edd1f0ddc0d5291cb01f63975ff56ec14d64fb91db1fc31
+// translation-source: 00f8393aee827b21e658965c9ff792c99c563d60de18775bb092ec7c42167e1f
 I18N.de = localeValues([
   /* sys.nodata */ "Keine Daten",
   /* sys.unreachable */ "Nicht erreichbar",
@@ -244,6 +244,7 @@ I18N.de = localeValues([
   /* check.hour.gap */ "Messlücke",
   /* check.hour.coverage */ (observed, possible) => possible ? `${observed} von ${possible} beobachtet` : `${observed} beobachtet · verstrichene Zeit unbekannt`,
   /* check.hour.ending */ (time) => `Intervallende ${time}`,
+  /* check.hour.saved */ (time) => `Gespeicherte Zeit ${time}`,
   /* check.loss_windows */ (n) => `${n} ${n === 1 ? "Fenster" : "Fenster"}`,
   /* check.fault_err */ "Störung aktiv",
   /* check.fault_warn */ "Warnung aktiv",

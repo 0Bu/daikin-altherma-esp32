@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { makeHistoryMotionFixture } from "./test_browser_history_fixture.mjs";
 
 const ROW = "button[data-desc='model:health_cycling']";
 const CHART = ".checkup-cycling-chart";
@@ -12,6 +13,9 @@ const EDGE = 18;
 const RESTORED = 17;
 const SHORT_GAP = 16;
 const hour = bucket => `${COLS} button[data-bucket="${bucket}"]`;
+const SIBLING_CARD = '[data-dashboard-card="group:Domestic hot water"]';
+const SIBLING_ROW = `${SIBLING_CARD} [data-trend="dhw_tank"]`;
+const SIBLING_PLOT = `${SIBLING_CARD} .vhist-plot[data-hist="dhw_tank"]`;
 const evaluate = (page, fn, arg) => page.evaluate(`(${fn})(${JSON.stringify(arg)})`);
 
 async function point(page, selector, fraction = 0.5) {
@@ -44,9 +48,14 @@ async function key(page, name, code) {
 export async function assertCyclingChart(page, server, context) {
   const original = await page.evaluate(`(() => {
     window.__cyclingOriginal = { ...S };
-    return { status: S.status, values: { values: S._values, modbus: S._modbus } };
+    return S.status;
   })()`);
   const boundary = Date.parse("2026-10-25T01:20:00Z") / 1000;
+  const fixture = makeHistoryMotionFixture(original);
+  const tank = fixture.values().values.find(row => row.concept === "dhw_tank");
+  const histories = { "x10a:dhw_tank": { ...fixture.histories["x10a:dhw_tank"],
+    boot_id: "cycling-browser-fixture", t0: boundary - 287 * 300 } };
+  const values = { values: [tank] };
   const hours = Array.from({ length: 24 }, (_, bucket) => ({
     bucket, starts: 0, run_s: 0, observed_s: 3600,
     ...(bucket === OPEN ? {} : { end_unix_s: boundary - (LAST - bucket) * 3600 }),
@@ -58,9 +67,11 @@ export async function assertCyclingChart(page, server, context) {
   Object.assign(hours[PREVIOUS], { starts: 1, run_s: 600, space_s: 0, dhw_s: 0 });
   Object.assign(hours[LAST], { starts: 3, run_s: 1800, observed_s: 3300, space_s: 600, dhw_s: 300 });
   Object.assign(hours[OPEN], { elapsed_s: 239, observed_s: 239, run_s: 120, space_s: 0, dhw_s: 120 });
-  const status = { ...original.status, boot_id: "cycling-browser-fixture",
-    ui: { ...original.status.ui, lang: "en" },
-    diagnostics: { ...original.status.diagnostics, enabled: true },
+  const status = { ...original, boot_id: "cycling-browser-fixture",
+    ui: { ...original.ui, lang: "en" },
+    hp: { ...original.hp, connected: true },
+    history: { epoch: fixture.status.history.epoch, rows: [{ id: "dhw_tank", label: tank.label }] },
+    diagnostics: { ...original.diagnostics, enabled: true },
     health: { status: "info", full_span: true, span_s: 86400, source_fresh: true, source_age_s: 0,
       checks: [
         { id: "cycling", verdict: "ok", evidence: "observation", reason: "class_coverage",
@@ -75,7 +86,7 @@ export async function assertCyclingChart(page, server, context) {
   const poll = async (time, { force = true } = {}) => {
     status.ntp = { ...status.ntp, synced: true, time };
     const requests = server.valuesRequests;
-    server.setTelemetry({ status, values: original.values, histories: {} });
+    server.setTelemetry({ status, values, histories });
     if (force) await page.evaluate("pollNow(); true");
     await page.waitFor(`S.status?.boot_id === 'cycling-browser-fixture' &&
       S.status.ntp.time === ${JSON.stringify(time)} && !_pollBusy`, { timeoutMs: 18000 });
@@ -201,6 +212,10 @@ export async function assertCyclingChart(page, server, context) {
     assert.ok((await label(RESTORED)).includes(
       await page.evaluate("t('check.hour.coverage', dwellDuration(180), '')")),
     context + ": the restored slot retains readable time and reports unknown elapsed time");
+    const saved = await label(RESTORED);
+    assert.match(saved, /^Saved time .+ · /, context + ": dated restoration labels its saved timestamp");
+    await tap(page, hour(RESTORED));
+    assert.equal(await readout(), saved, context + ": the visible readout gives the same saved timestamp");
     await assertSegments(PREVIOUS, { other: 600 }, "unassigned runtime keeps a neutral colour");
     await assertSegments(LAST, { space: 600, dhw: 300, other: 900, gap: 300 },
       "only evidenced mode durations colour a partly observed slot");
@@ -309,9 +324,9 @@ export async function assertCyclingChart(page, server, context) {
     await poll("2026-10-25T02:21:00Z");
     assert.deepEqual(await pinned(), [], context + ": a source reset does not retarget an existing pin");
     status.health.checks[0].hours_epoch++;
-    Object.assign(status.health.checks[0], { starts: 0, space_runs: null, space_mean_run_s: null, hours: [
-      { bucket: 1, starts: 1, run_s: 0, observed_s: 0, elapsed_s: 0 },
-    ] });
+    const edgeOnlyHour = { bucket: 1, starts: 1, run_s: 0, observed_s: 0, elapsed_s: 0 };
+    Object.assign(status.health.checks[0], { verdict: "collecting", starts: 1, observed_s: 0,
+      space_runs: null, space_mean_run_s: null, dhw_runs: null, dhw_mean_run_s: null, hours: [edgeOnlyHour] });
     await poll("2026-10-25T02:22:00Z");
     assert.deepEqual(await evaluate(page, cols => Array.from(document.querySelectorAll(cols + " > button"),
       node => Number(node.dataset.bucket)), COLS), [1],
@@ -324,6 +339,56 @@ export async function assertCyclingChart(page, server, context) {
     await assertSegments(1, {}, "the new observation does not hatch its unelapsed hour");
     assert.equal(await readout(), "≥" + await page.evaluate("t('check.starts', 1)"),
       context + ": the default readout reports a lower bound without invented runtime");
+    assert.deepEqual(await evaluate(page, row => {
+      const button = document.querySelector(row);
+      return [button.querySelector(".vrow-val").textContent,
+        button.closest(".vitem").querySelector(".checkup-cycling-total").textContent];
+    }, ROW), ["≥1", "≥1 start"], context + ": both totals mark a positive count with no paired time");
+
+    // The diagnosis remains expanded when the user switches cards. Even an ancestor that is
+    // reattached before the poll finishes can briefly interrupt the visible plot's painting.
+    await tap(page, '#cardNav [data-card="group:Domestic hot water"]');
+    await tap(page, SIBLING_ROW);
+    await page.waitFor(`document.querySelector(${JSON.stringify(SIBLING_PLOT)}) && !S.clickHold`);
+    const priorLabel = await label(1);
+    await evaluate(page, ({ plot, chart }) => {
+      const node = document.querySelector(plot);
+      if (historyView(node.dataset.hist, node.dataset.source || "").v.length !== 288)
+        throw new Error("the visible sibling plot needs the full history ring");
+      node.focus({ preventScroll: true });
+      const ancestors = new Set();
+      for (let ancestor = node; ancestor; ancestor = ancestor.parentNode) ancestors.add(ancestor);
+      const watch = { node, chart: document.querySelector(chart), removals: 0 };
+      watch.observer = new MutationObserver(records => {
+        for (const record of records) for (const removed of record.removedNodes)
+          if (ancestors.has(removed)) watch.removals++;
+      });
+      watch.observer.observe(document, { childList: true, subtree: true });
+      window.__cyclingSibling = watch;
+    }, { plot: SIBLING_PLOT, chart: CHART });
+    for (const minutes of [23, 24, 25]) {
+      edgeOnlyHour.elapsed_s += 60;
+      await poll(`2026-10-25T02:${minutes}:00Z`, { force: minutes !== 23 });
+      const sibling = await evaluate(page, ({ plot, chart }) => {
+        const watch = window.__cyclingSibling;
+        return {
+          removals: watch.removals,
+          retained: watch.node.isConnected && watch.node === document.querySelector(plot),
+          visible: !!watch.node.getBoundingClientRect().width && !watch.node.closest("[hidden]"),
+          focused: document.activeElement === watch.node,
+          hiddenDiagnosis: watch.chart === document.querySelector(chart) &&
+            !!watch.chart.closest("[hidden]") && !!watch.chart.closest(".vitem.open"),
+        };
+      }, { plot: SIBLING_PLOT, chart: CHART });
+      assert.deepEqual(sibling, { removals: 0, retained: true, visible: true, focused: true,
+        hiddenDiagnosis: true }, context + ": changing hidden cycling hours cannot detach the visible sibling plot");
+      assert.equal(await label(1), priorLabel, context + ": hidden cycling readout waits until shown");
+    }
+    await tap(page, '#cardNav [data-card="diagnosis"]');
+    await assertSegments(1, { gap: 180 }, "reopening the diagnosis card catches up the still-expanded chart");
+    assert.notEqual(await label(1), priorLabel, context + ": the resumed chart reads the newest elapsed time");
+    assert.equal(await page.evaluate("window.__cyclingSibling.removals"), 0,
+      context + ": updating the visible cycling chart leaves the sibling plot mounted");
     assert.ok(updates >= 3, context + ": verify continuity across repeated production polling");
     console.log("cycling chart checked: " + context + "; " + updates + " live status polls");
   } finally {
@@ -331,6 +396,7 @@ export async function assertCyclingChart(page, server, context) {
     await page.waitFor("!_pollBusy");
     server.setTelemetry();
     await page.evaluate(`Object.assign(S, window.__cyclingOriginal);
+      window.__cyclingSibling?.observer.disconnect(); delete window.__cyclingSibling;
       delete window.__cyclingOriginal; delete window.__cyclingChart; delete window.__cyclingFocused;
       renderApp(); true`);
     if (mouse) await page.send("Emulation.setTimezoneOverride", { timezoneId: "" });

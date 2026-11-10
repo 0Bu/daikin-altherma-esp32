@@ -1,4 +1,4 @@
-// translation-source: 30a685642c39ec9f0edd1f0ddc0d5291cb01f63975ff56ec14d64fb91db1fc31
+// translation-source: 00f8393aee827b21e658965c9ff792c99c563d60de18775bb092ec7c42167e1f
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -244,6 +244,7 @@ I18N.fi = localeValues([
   /* check.hour.gap */ "Mittauskatko",
   /* check.hour.coverage */ (observed, possible) => possible ? `Havaittu ${observed} ajasta ${possible}` : `Havaittu ${observed} · kulunut aika tuntematon`,
   /* check.hour.ending */ (time) => `Jakson loppu ${time}`,
+  /* check.hour.saved */ (time) => `Tallennettu aika ${time}`,
   /* check.loss_windows */ (n) => `${n} ikkuna${n === 1 ? "" : "a"}`,
   /* check.fault_err */ "Vika aktiivinen",
   /* check.fault_warn */ "Varoitus aktiivinen",

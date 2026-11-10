@@ -111,6 +111,7 @@ vm.runInContext(
      metric: checkupMetricValue,
      status: checkupStatusText,
      detail: checkupDetailHtml,
+     chart: checkupCyclingChartHtml,
      card: checkupCardHtml,
      copy: I18N,
      text: (lang, key, ...args) => { LANG = lang; return t(key, ...args); },
@@ -421,10 +422,13 @@ const cyclingWithHours = { ...cycling, starts: 0, verdict: "ok", evidence: "obse
 assert.doesNotMatch(ui.detail(cyclingWithHours), /\bcheckup-cycling-chart\b/,
   "closed diagnosis must not build the chart");
 context.S.descOpen.add("model:health_cycling");
-assert.match(ui.detail(stopOnlyCycling), /No history yet\./);
-detail = ui.detail(cyclingWithHours);
+assert.match(ui.detail(cyclingWithHours), /data-checkup-hours><\/div>/,
+  "the open diagnosis template leaves the chart to its dedicated slot renderer");
+context.S.descOpen.delete("model:health_cycling");
+assert.match(ui.chart(stopOnlyCycling), /No history yet\./);
+detail = ui.chart(cyclingWithHours);
 assert.match(detail, /\bcheckup-cycling-chart\b/);
-assert.match(detail, /\bcheckup-cycling-grid\b/);
+assert.match(ui.detail(cyclingWithHours), /\bcheckup-cycling-grid\b/);
 assert.match(detail, /\bcheckup-chart-cols\b/);
 assert.equal((detail.match(/class="checkup-chart-col\b/g) || []).length, 24);
 assert.doesNotMatch(detail, /type="range"/, "hour buttons own selection");
@@ -439,9 +443,9 @@ assert.deepEqual(modeSegments(hourMarkup(detail, 0)), [],
 const openHour = hourMarkup(detail, 1);
 assert.match(openHour, /<i class="gap"/, "elapsed unread time appears as a separate gap");
 assert.doesNotMatch(openHour, /<i class="future"/, "unelapsed time leaves the bar unfilled");
-hasAssessment(detail, "en", "waiting");
+hasAssessment(ui.detail(cyclingWithHours), "en", "waiting");
 assert.doesNotMatch(detail, /Incomplete classification|90% covered/);
-const qualifiedHours = ui.detail({ ...cyclingWithHours, starts: 5, hours: [
+const qualifiedHours = ui.chart({ ...cyclingWithHours, starts: 5, hours: [
   { bucket: 0, starts: 3, run_s: 1800, observed_s: 3600, space_s: 0, dhw_s: 0 },
   { bucket: 1, starts: 1, run_s: 600, observed_s: 3600, space_s: 0, dhw_s: 600 },
   { bucket: 2, starts: 1, run_s: 600, observed_s: 3600, space_s: 600, dhw_s: 0 },
@@ -461,13 +465,13 @@ assert.deepEqual(modeSegments(hourMarkup(qualifiedHours, 3)), ["other"],
 for (const html of [detail, qualifiedHours])
   assert.doesNotMatch(html, /checkup-stop-box|witnessed stops|Stop context/,
     "stop telemetry does not expand the cycling card");
-const legacyOpen = hourMarkup(ui.detail({ ...cyclingWithHours, hours_epoch: undefined,
+const legacyOpen = hourMarkup(ui.chart({ ...cyclingWithHours, hours_epoch: undefined,
   hours: [{ starts: 2, run_s: 600, observed_s: 1200, space_s: 600, end_unix_s: 1792887600 }] }), 23);
 assert.doesNotMatch(legacyOpen, /<i class="space"/,
   "legacy mode fields cannot establish witnessed heating");
 assert.match(legacyOpen, /<i class="other"/, "retain observed legacy runtime without assigning it to heating");
 assert.doesNotMatch(legacyOpen, /<i class="gap"/, "legacy open hour cannot establish elapsed unread time");
-const startup = ui.detail({ ...cyclingWithHours, hours_epoch: 2,
+const startup = ui.chart({ ...cyclingWithHours, hours_epoch: 2,
   hours: [{ bucket: 0, starts: 0, run_s: 0, observed_s: 0, elapsed_s: 0 }] });
 assert.equal((startup.match(/<button[^>]*data-bucket=/g) || []).length, 1,
   "an incomplete ring leaves older positions unavailable to keyboard selection");
@@ -479,26 +483,32 @@ assert.equal((startup.match(/<span class="checkup-chart-col" aria-hidden="true" 
   23, "positions outside the retained ring are blank and inert without tracks");
 assert.doesNotMatch(startup, /class="gap"|checkup-gap-key/,
   "padding does not imply elapsed time or a sampling gap");
-const edgeOnly = ui.detail({ ...cyclingWithHours, starts: 9,
-  hours: [{ bucket: 0, starts: 1, run_s: 0, observed_s: 0, elapsed_s: 0 }] });
-assert.match(edgeOnly, /data-tip="≥1 start"/,
+const edgeOnly = { id: "cycling", verdict: "collecting", starts: 1, observed_s: 0, hours_epoch: 2,
+  hours: [{ bucket: 0, starts: 1, run_s: 0, observed_s: 0, elapsed_s: 0 }] };
+assert.match(ui.chart(edgeOnly), /data-tip="≥1 start"/,
   "the chart reports its witnessed starts as a lower bound and omits unobserved runtime");
-const observedZero = ui.detail({ ...cyclingWithHours,
+assert.equal(ui.value(edgeOnly), "≥1");
+assert.match(ui.detail(edgeOnly), /≥1 start/);
+assert.equal(ui.value({ ...edgeOnly, observed_s: 60 }), "1");
+assert.equal(ui.metric({ ...edgeOnly, observed_s: 60 }), "1 start");
+assert.equal(ui.metric({ ...edgeOnly, observed_s: undefined }), "1 start");
+assert.equal(ui.metric({ ...edgeOnly, starts: 0 }), "0 starts");
+const observedZero = ui.chart({ ...cyclingWithHours,
   hours: [{ bucket: 0, starts: 0, run_s: 0, observed_s: 60, elapsed_s: 60 }] });
 assert.match(observedZero, /data-tip="0 starts · 0 min"/,
   "readable time without a running sample establishes zero observed runtime");
-const restored = ui.detail({ ...cyclingWithHours, hours: [
+const restored = ui.chart({ ...cyclingWithHours, hours: [
   { bucket: -1, starts: 0, run_s: 180, observed_s: 180, space_s: 180, dhw_s: 0,
     restored: true, end_unix_s: 1792887600 },
   { bucket: 0, starts: 0, run_s: 0, observed_s: 0, elapsed_s: 0 },
 ] });
 const restoredHour = hourMarkup(restored, -1);
-assert.match(restoredHour, /Interval end.*3 min observed · elapsed time unknown/,
-  "a dated restore establishes the interval end and readable duration but no elapsed duration");
+assert.match(restoredHour, /Saved time.*3 min observed · elapsed time unknown/,
+  "a dated restore gives the saved time and readable duration but no elapsed duration");
+assert.doesNotMatch(restoredHour, /Interval end/);
 assert.deepEqual(modeSegments(restoredHour), ["space"], "restoration retains positively attributed runtime");
 assert.doesNotMatch(restored, /class="gap"|checkup-gap-key/,
   "a short restored record does not imply missing time before its end");
-context.S.descOpen.delete("model:health_cycling");
 
 // Low-level evidence remains readable by API consumers. The card shows only the completed
 // run count, one explanation for unclear purpose, and a brief assessment.

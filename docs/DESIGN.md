@@ -589,8 +589,9 @@ The cycling disclosure uses one row of hourly columns with start counts above st
 bars. The columns own pointer and keyboard selection and share one readout. Keep leading padding
 empty. Show each positive start count as a lower bound in the readout. Hatch elapsed time without
 compressor readings only where the elapsed duration is known. Restored slots show readable time
-with unknown elapsed duration. Leave the unelapsed part of the open hour unfilled. The default
-readout uses one hourly snapshot and omits runtime without readable compressor seconds.
+with unknown elapsed duration. Label their timestamp as saved time. Leave the unelapsed part of
+the open hour unfilled. The default readout uses one hourly snapshot and omits runtime without
+readable compressor seconds. Update the chart in its own slot and defer it while its card is hidden.
 
 Use logical keyboard order, visible focus, Enter/Space activation, Escape at the innermost layer,
 modal focus return and scroll lock. Background controls are unavailable while a dialog is open.

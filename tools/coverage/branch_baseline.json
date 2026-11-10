@@ -1903,6 +1903,48 @@
       "measurement_limits": [
         "The local x86_64 Ubuntu 26.04 GCC image measures the hosted profile candidate. Authoritative GitHub confirmation remains separate."
       ]
+    },
+    {
+      "runner": "scripts/run-mock-tests.sh --coverage compiler and gcov invocation on frozen source",
+      "base_commit": "a4107bab35ac5a3b1575f136992b11448a0d2b86",
+      "scope": "Publish positive compressor start evidence even before readable runtime accrues. Tests cover the OFF-to-ON witness across an unreadable sample and joining a running compressor without an earlier OFF.",
+      "sources": {
+        "main/logic/checkup.hpp": "03afafebf683c3605d6eba19c0d1dc52fa4b485f04c3f737fc2056217b8ed7ce"
+      },
+      "test_source_sha256": "141eb537afee545a8c80e68d083841fefd688e3492d7e269a40f6ca1879a74fc",
+      "measured_line_counts": {
+        "clang-17-darwin": {
+          "covered": 10933,
+          "executable": 11106
+        },
+        "gcc-13-linux-ubuntu24": {
+          "covered": 10406,
+          "executable": 10689
+        },
+        "gcc-15-github-linux-ubuntu26": {
+          "covered": 10398,
+          "executable": 10691
+        },
+        "gcc-15-linux-ubuntu26": {
+          "covered": 10402,
+          "executable": 10691
+        }
+      },
+      "raw_report_sha256": {
+        "clang-17-darwin": "b221803b99f0548a5de93ef59015507ed5b05eeb906783a025f3c1f7dcb5af20",
+        "gcc-13-linux-ubuntu24": "970e4ec8da32ad09b99e8730fdba3981dc16131aef8ebb12103c4dabe4be05fc",
+        "gcc-15-github-linux-ubuntu26": "4ac23162fcd12d53e2fe0eae3cecb4e2ecb9f49892cb5d23f50dd682ee74b254",
+        "gcc-15-linux-ubuntu26": "0eef700d08a72af42b793aa63e602ca70ca2188e5a6498f5c27c8ec6f46b366b"
+      },
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2)",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+        "gcc-15-github-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+      },
+      "measurement_limits": [
+        "The local x86_64 Ubuntu 26.04 GCC image measures the hosted profile candidate. Authoritative GitHub confirmation remains separate."
+      ]
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
@@ -1941,8 +1983,8 @@
         "taken": 6
       },
       "main/logic/checkup.hpp": {
-        "taken": 1019,
-        "outcomes": 1101
+        "taken": 1021,
+        "outcomes": 1103
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 331,
@@ -2379,8 +2421,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "taken": 1160,
-        "outcomes": 1255
+        "taken": 1162,
+        "outcomes": 1257
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 391,
@@ -2817,8 +2859,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "taken": 1160,
-        "outcomes": 1255
+        "taken": 1162,
+        "outcomes": 1257
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 391,
@@ -3255,8 +3297,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "taken": 1160,
-        "outcomes": 1255
+        "taken": 1162,
+        "outcomes": 1257
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 391,

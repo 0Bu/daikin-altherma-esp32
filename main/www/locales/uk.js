@@ -1,4 +1,4 @@
-// translation-source: 30a685642c39ec9f0edd1f0ddc0d5291cb01f63975ff56ec14d64fb91db1fc31
+// translation-source: 00f8393aee827b21e658965c9ff792c99c563d60de18775bb092ec7c42167e1f
 I18N.uk = localeValues([
   /* sys.nodata */ "Немає даних",
   /* sys.unreachable */ "Недоступно",
@@ -244,6 +244,7 @@ I18N.uk = localeValues([
   /* check.hour.gap */ "Прогалина у вимірюванні",
   /* check.hour.coverage */ (observed, possible) => possible ? `Зафіксовано ${observed} з ${possible}` : `Зафіксовано ${observed} · минулий час невідомий`,
   /* check.hour.ending */ (time) => `Кінець інтервалу ${time}`,
+  /* check.hour.saved */ (time) => `Збережений час ${time}`,
   /* check.loss_windows */ (n) => `${n} ${n % 10 === 1 && n % 100 !== 11 ? "вікно" : n % 10 >= 2 && n % 10 <= 4 && !(n % 100 >= 12 && n % 100 <= 14) ? "вікна" : "вікон"}`,
   /* check.fault_err */ "Несправність активна",
   /* check.fault_warn */ "Попередження активне",

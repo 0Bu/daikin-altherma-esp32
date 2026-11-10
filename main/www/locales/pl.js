@@ -1,4 +1,4 @@
-// translation-source: 30a685642c39ec9f0edd1f0ddc0d5291cb01f63975ff56ec14d64fb91db1fc31
+// translation-source: 00f8393aee827b21e658965c9ff792c99c563d60de18775bb092ec7c42167e1f
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -249,6 +249,7 @@ I18N.pl = localeValues([
   /* check.hour.gap */ "Luka w pomiarach",
   /* check.hour.coverage */ (observed, possible) => possible ? `Zaobserwowano ${observed} z ${possible}` : `Zaobserwowano ${observed} · nieznany czas od początku`,
   /* check.hour.ending */ (time) => `Koniec przedziału ${time}`,
+  /* check.hour.saved */ (time) => `Zapisana godzina ${time}`,
   /* check.loss_windows */ (n) => `${n} ${plNoun(n, "okno", "okna", "okien")}`,
   /* check.fault_err */ "Usterka aktywna",
   /* check.fault_warn */ "Ostrzeżenie aktywne",

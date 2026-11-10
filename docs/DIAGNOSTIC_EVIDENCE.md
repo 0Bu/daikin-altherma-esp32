@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: ce985a5385ff6d31ddadfc5d97f6464e6b6606b535ce77ad618a2b0cd65b64d5 -->
+<!-- diagnostic-evidence-contract: 6f1cf5bfe04809213b561b309c72a5475a5191adf45708d94218e966c8cffa44 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -218,10 +218,11 @@ than about six minutes reduced efficiency in the tested systems, while heat emis
 control, and outside temperature also affected the result ([R1], summary and sections 1–2). This
 supports the relevance of very short runs but does not provide a universal Daikin limit.
 
-**Firmware rule:** Starts and completed runs are retained separately. Valve/mode inputs classify
-pure space heating, DHW or cooling. Missing class or RPS readings may bridge at most 15 seconds
-between matching known-running endpoints, using their monotonic timestamps independently of hourly
-duration booking; that bridge does not add readable coverage.
+**Firmware rule:** Starts and completed runs are retained separately. A witnessed OFF-to-ON
+transition across missing readings establishes at least one start before readable duration accrues.
+Valve/mode inputs classify pure space heating, DHW or cooling. Missing class or RPS readings may
+bridge at most 15 seconds between matching known-running endpoints, using their monotonic
+timestamps independently of hourly duration booking. That bridge adds no readable coverage.
 A changed recovered class, unknown stop edge or longer gap censors the run. A pure DHW run may
 hold one final valve return to the room circuit for at most 30 seconds, accepted only at a known OFF
 edge. The indoor mode must remain readable and may still say DHW; cooling, a return to the DHW

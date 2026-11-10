@@ -1,4 +1,4 @@
-// translation-source: 30a685642c39ec9f0edd1f0ddc0d5291cb01f63975ff56ec14d64fb91db1fc31
+// translation-source: 00f8393aee827b21e658965c9ff792c99c563d60de18775bb092ec7c42167e1f
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -244,6 +244,7 @@ I18N.cs = localeValues([
   /* check.hour.gap */ "Mezera v měření",
   /* check.hour.coverage */ (observed, possible) => possible ? `Pozorováno ${observed} z ${possible}` : `Pozorováno ${observed} · uplynulá doba neznámá`,
   /* check.hour.ending */ (time) => `Konec intervalu ${time}`,
+  /* check.hour.saved */ (time) => `Uložený čas ${time}`,
   /* check.loss_windows */ (n) => `${n} ${n === 1 ? "okno" : n >= 2 && n <= 4 ? "okna" : "oken"}`,
   /* check.fault_err */ "Aktivní porucha",
   /* check.fault_warn */ "Aktivní varování",

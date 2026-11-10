@@ -1,4 +1,4 @@
-// translation-source: 30a685642c39ec9f0edd1f0ddc0d5291cb01f63975ff56ec14d64fb91db1fc31
+// translation-source: 00f8393aee827b21e658965c9ff792c99c563d60de18775bb092ec7c42167e1f
 I18N.ja = localeValues([
   /* sys.nodata */ "データなし",
   /* sys.unreachable */ "接続不可",
@@ -244,6 +244,7 @@ I18N.ja = localeValues([
   /* check.hour.gap */ "測定の欠落",
   /* check.hour.coverage */ (observed, possible) => possible ? `${possible} のうち ${observed} を観測` : `${observed} を観測・経過時間不明`,
   /* check.hour.ending */ (time) => `区間終了 ${time}`,
+  /* check.hour.saved */ (time) => `保存時刻 ${time}`,
   /* check.loss_windows */ (n) => `${n}窓`,
   /* check.fault_err */ "異常作動中",
   /* check.fault_warn */ "警告作動中",

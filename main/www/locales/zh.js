@@ -1,4 +1,4 @@
-// translation-source: 30a685642c39ec9f0edd1f0ddc0d5291cb01f63975ff56ec14d64fb91db1fc31
+// translation-source: 00f8393aee827b21e658965c9ff792c99c563d60de18775bb092ec7c42167e1f
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
@@ -244,6 +244,7 @@ I18N.zh = localeValues([
   /* check.hour.gap */ "测量缺口",
   /* check.hour.coverage */ (observed, possible) => possible ? `已观测 ${observed}，可观测 ${possible}` : `已观测 ${observed} · 已过时长未知`,
   /* check.hour.ending */ (time) => `时段结束 ${time}`,
+  /* check.hour.saved */ (time) => `保存的时间 ${time}`,
   /* check.loss_windows */ (n) => `${n} 个时段`,
   /* check.fault_err */ "当前故障",
   /* check.fault_warn */ "当前警告",

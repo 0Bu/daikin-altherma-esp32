@@ -61,7 +61,7 @@ const catalog = catalogContext.__catalog;
 const lazyDomainCodes = ["zh", "ja", "nb", "sv", "fi"];
 const englishKeys = Object.keys(catalog.en).sort();
 const englishKeyOrder = Object.keys(catalog.en);
-assert.equal(englishKeys.length, 949, "the test must track the complete current UI catalog");
+assert.equal(englishKeys.length, 950, "the test must track the complete current UI catalog");
 for (const [code, source] of localeSources) {
   const sections = [`INSPECT_I18N.${code}`, `MODEL_DESCRIPTION_I18N.${code}`]
     .map(marker => source.indexOf(marker)).filter(index => index >= 0);
@@ -89,6 +89,10 @@ for (const code of codes) {
     }
   }
   assert.equal(dict[`lang.${code}`], nativeNames[code], `${code} must name itself in its own tongue`);
+  const savedTime = dict["check.hour.saved"]("12:34");
+  assert.equal(savedTime.match(/12:34/g)?.length, 1, `${code} preserves the supplied saved time`);
+  assert.notEqual(savedTime, dict["check.hour.ending"]("12:34"),
+    `${code} distinguishes saved times from interval ends`);
   if (code !== "en") {
     assert.ok(translatedStrings > stringCount * 0.65,
       `${code} translates too little of the catalog (${translatedStrings}/${stringCount})`);

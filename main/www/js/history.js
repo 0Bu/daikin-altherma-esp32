@@ -1850,6 +1850,8 @@ function replaceHistoryHtml(host, html) {
       const nextAttrs = attrs(b);
       if (attrs(a).length !== nextAttrs.length ||
           nextAttrs.some(attr => a.getAttribute(attr.name) !== attr.value)) return false;
+      // The live cycling chart owns its slot and updates independently of value rows.
+      if (a.hasAttribute("data-checkup-hours")) return true;
       return a.childNodes.length === b.childNodes.length &&
         [...a.childNodes].every((node, index) => same(node, b.childNodes[index]));
     };
@@ -1870,6 +1872,8 @@ function replaceHistoryHtml(host, html) {
         if (index < 0) node._histMarkup = sig;
         else node.replaceWith(prior.splice(index, 1)[0]);
       }
+      const slot = host.id === "valueGroups" && host.querySelector("[data-checkup-hours]");
+      if (slot) template.content.querySelector("[data-checkup-hours]")?.replaceWith(slot);
       host.replaceChildren(template.content);
     } finally { S.trendRebuilding = rebuilding; }
   }
@@ -1887,10 +1891,11 @@ function replaceHistoryHtml(host, html) {
     const sameScope = chart && chart.dataset.cycling === cycling.dataset.cycling;
     const next = sameScope && (chart.querySelector(`[data-bucket="${active.dataset.bucket}"]`) ||
       chart.querySelector("[tabindex='0']"));
-    (next || [...host.querySelectorAll("[data-desc]")].find(button => button.dataset.desc === focusedOwner))
+    (next || [...host.querySelectorAll("[data-desc]")].find(button => button.dataset.desc === focusedOwner) ||
+      host.closest?.(".vitem")?.querySelector("[data-desc]"))
       ?.focus({ preventScroll: true });
   }
-  if (typeof paintCyclingChart === "function") {
+  if (host.hasAttribute?.("data-checkup-hours") && typeof paintCyclingChart === "function") {
     const chart = host.querySelector("[data-cycling]");
     if (chart) paintCyclingChart(chart);
   }
@@ -2286,9 +2291,9 @@ function toggleDesc(btn) {
   const owner = btn.closest("#valueGroups, #settingsCards");
   if (owner) delete _html[owner.id];
   if (key === "model:health_cycling") {
-    const chart = item.querySelector("[data-checkup-hours]");
-    const check = S.status?.health?.checks?.find(c => c.id === "cycling");
-    if (chart) replaceHistoryHtml(chart, open ? checkupCyclingChartHtml(check) : "");
+    const slot = item.querySelector("[data-checkup-hours]");
+    if (slot && (!open || (S.stage === "dashboard" && !item.closest("[hidden]"))))
+      renderCheckupCyclingChart(slot, open);
   }
   // Opening a schematic history also fills the cache used by value rows. Do not build and parse
   // another SVG in every collapsed row on every two-second poll. Mount it only on disclosure,

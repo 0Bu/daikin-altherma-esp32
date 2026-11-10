@@ -2269,10 +2269,12 @@ inline CheckupReport checkup_evaluate(const CheckupWindow& w, const CheckupCover
             verdict = CheckupVerdict::Collecting;
         else if (!heating_population && !w.rps_observed_s)
             verdict = CheckupVerdict::Collecting;
+        // A known OFF followed by known ON across unreadable samples establishes at least one
+        // start before there is any paired runtime. Preserve that count without changing verdict.
         set(CheckupCheck::Cycling, verdict,
             heating_population ? w.class_observed_s : w.rps_observed_s,
             heating_population ? CHECKUP_REQUIRED_S : 0,
-            w.rps_observed_s ? static_cast<int>(w.starts) : -1, -1,
+            (w.rps_observed_s || w.starts) ? static_cast<int>(w.starts) : -1, -1,
             class_witnessed ? static_cast<int>(w.space_runs) : -1,
             class_witnessed ? space_mean : -1, class_witnessed ? static_cast<int>(w.dhw_runs) : -1,
             class_witnessed ? dhw_mean : -1,

@@ -18211,6 +18211,39 @@ static void test_checkup() {
     }
 
     {
+        // OFF -> unreadable -> ON proves a lower bound before any two readable endpoints pair.
+        CheckupRing   ring{};
+        CheckupState  state{};
+        CheckupSample off{};
+        off.rps_known    = true;
+        CheckupSample on = off;
+        on.rps_running   = true;
+        checkup_step(state, ring.pending, off, 0, &ring);
+        checkup_step(state, ring.pending, CheckupSample{}, 1'000'000, &ring);
+        checkup_step(state, ring.pending, on, 2'000'000, &ring);
+        const auto window = checkup_aggregate(ring);
+        CHECK(window.starts == 1 && window.rps_observed_s == 0);
+        const auto  witness = checkup_evaluate(window, full, FaultClass::Normal);
+        const auto& cycling = witness[CheckupCheck::Cycling];
+        CHECK(cycling.a == 1 && cycling.observed_s == 0 && cycling.b == -1);
+        CHECK(cycling.verdict == CheckupVerdict::Collecting && cycling.observation_only);
+
+        // Joining a running compressor without an earlier readable OFF establishes no start.
+        CheckupRing  joined{};
+        CheckupState joining{};
+        checkup_step(joining, joined.pending, CheckupSample{}, 1'000'000, &joined);
+        checkup_step(joining, joined.pending, on, 2'000'000, &joined);
+        const auto joined_window = checkup_aggregate(joined);
+        CHECK(joined_window.starts == 0 && joined_window.rps_observed_s == 0);
+        const auto no_witness = checkup_evaluate(joined_window, full, FaultClass::Normal);
+        CHECK(no_witness[CheckupCheck::Cycling].a == -1);
+        CHECK(no_witness[CheckupCheck::Cycling].verdict == cycling.verdict);
+        CHECK(no_witness.available == witness.available &&
+              no_witness.assessable == witness.assessable &&
+              no_witness.evaluated == witness.evaluated);
+    }
+
+    {
         // A pooled start/runtime ratio cannot establish complete heating-run duration.
         CheckupWindow w = day();
         w.starts        = 24;

@@ -1,4 +1,4 @@
-// translation-source: 30a685642c39ec9f0edd1f0ddc0d5291cb01f63975ff56ec14d64fb91db1fc31
+// translation-source: 00f8393aee827b21e658965c9ff792c99c563d60de18775bb092ec7c42167e1f
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -244,6 +244,7 @@ I18N.nb = localeValues([
   /* check.hour.gap */ "Målehull",
   /* check.hour.coverage */ (observed, possible) => possible ? `${observed} av ${possible} observert` : `${observed} observert · forløpt tid ukjent`,
   /* check.hour.ending */ (time) => `Intervallslutt ${time}`,
+  /* check.hour.saved */ (time) => `Lagret tidspunkt ${time}`,
   /* check.loss_windows */ (n) => `${n} ${n === 1 ? "vindu" : "vinduer"}`,
   /* check.fault_err */ "Feil aktiv",
   /* check.fault_warn */ "Advarsel aktiv",

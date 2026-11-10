@@ -1,4 +1,4 @@
-// translation-source: 30a685642c39ec9f0edd1f0ddc0d5291cb01f63975ff56ec14d64fb91db1fc31
+// translation-source: 00f8393aee827b21e658965c9ff792c99c563d60de18775bb092ec7c42167e1f
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -244,6 +244,7 @@ I18N.sv = localeValues([
   /* check.hour.gap */ "Mätlucka",
   /* check.hour.coverage */ (observed, possible) => possible ? `${observed} av ${possible} observerat` : `${observed} observerat · förfluten tid okänd`,
   /* check.hour.ending */ (time) => `Intervallslut ${time}`,
+  /* check.hour.saved */ (time) => `Sparad tid ${time}`,
   /* check.loss_windows */ (n) => `${n} ${n === 1 ? "fönster" : "fönster"}`,
   /* check.fault_err */ "Fel aktivt",
   /* check.fault_warn */ "Varning aktiv",
