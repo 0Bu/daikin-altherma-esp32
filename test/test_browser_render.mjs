@@ -1319,6 +1319,8 @@ async function assertPlantDiagnosis(page, context) {
     const stopPopulation = await page.evaluate("t('check.stop.population', '4')");
     assert.ok((await stopText()).includes(stopPopulation),
       `${context}: measured starts and the timeline retain the independent stop context`);
+    await captureNativeEvidence(page, `${context}/cycling-with-starts`,
+      "[data-desc='model:health_cycling']", ".vitem");
     // A missing legacy cycling population must leave the independent stop context accessible
     // through the same real disclosure, retaining the firmware's unavailable verdict.
     await page.evaluate(`(() => {

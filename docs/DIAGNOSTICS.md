@@ -39,12 +39,11 @@ Completed hours can return after a restart only from compatible dated flash reco
 source confirmation. A software restart, such as an update or a settings save that restarts the
 board, also tries to save the open hour. It cannot when that hour shares its clock hour with the
 previous saved hour. Other open and unsaved hours may be lost. Whole hourly records expire when their
-beginning leaves the rolling day, even if polling stops. Changed X10A identity or incompatible
-diagnosis format or measurement definition starts fresh collection; changing the independent
-circulation witness clears only
-tank-cooling evidence.
-The current format starts collecting hours again after an update from an incompatible format.
-Trend history and the separate Stop context have their own compatibility rules.
+beginning leaves the rolling day, even if polling stops. Changed X10A identity, an incompatible
+saved-hour format or a changed measurement definition starts fresh hourly collection, including
+tank-cooling results. Changing the independent circulation witness clears only tank-cooling
+evidence. Trend history, Stop context and the handoff for an unfinished tank-cooling window each
+have their own compatibility rules.
 See [PLANT.md](PLANT.md#reboot-and-persistence).
 
 These are passive ordinary-operation observations. Five-minute trends cannot reconstruct complete

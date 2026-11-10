@@ -329,7 +329,7 @@ memory and stack paths are measured on the target ELF.
 
 Stop records use the existing physical Checkup envelope with a distinct format fingerprint and
 width. Older firmware can discover their physical sequence/head without interpreting their payload
-as core diagnosis. The core bucket, its fingerprint and the five wire source IDs are unchanged.
+as core diagnosis. Stop and core hours have independent fingerprints within that envelope.
 Finalized stop contexts revise the original stop hour; pending candidates never restore. Ordinary
 scoped resets require a committed barrier before reset durability is established. Fence ordering uses
 sequence and exact scope, independently of wall time; a backward clock correction cannot make a
