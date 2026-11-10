@@ -1,4 +1,4 @@
-// translation-source: 0a9b357c29bd7c842a11f7de464d548af9a92316c15c31e50a54b1facf17e59e
+// translation-source: 0b470978cad369ab40b1d667fab094bf6ef0be09a0378a8774c5e68b4a7b5bfe
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -198,7 +198,6 @@ I18N.fi = localeValues([
   /* check.detail.fault.past */ "Nyt ei ole aktiivista ilmoitusta; jaksolla kirjattiin ilmoitus. Poistuminen ei todista syytä eikä ratkaisua.",
   /* check.detail.fault.past_unknown */ "Ilmoitus kirjattiin; nykyistä vikatilaa ei voi lukea.",
   /* check.detail.collecting */ (a, b) => `Luettavat signaalit: ${a}, vaaditaan ${b}.`,
-  /* check.detail.outdoor_cycling */ " X10A-ulkoluvut sisältävät vain valmiiden, johdonmukaisesti tilalämmitykseksi luokiteltujen jaksojen tuoreet näytteet. Ne ovat taustatietoa eivätkä muuta rajaa tai arviota.",
   /* check.detail.outdoor_defrost */ " X10A-ulkoluvut sisältävät vain tuoreet näytteet, kun sulatus- ja kompressoritila olivat luettavissa ja kompressori kävi. Ne ovat taustatietoa eivätkä muuta rajaa tai arviota.",
   /* check.detail.dhw_candidate */ (a, b, c, d) => `Hyväksytyt tunti-ikkunat: ${a}; nykyinen ehdokas: ${c}/${d}.`,
   /* check.detail.dhw_settling */ (a, b, c) => `Hyväksytyt tunti-ikkunat: ${a}; varaajan lataus tai vastus havaittu. Vakiintumista jäljellä: ${c}.`,
@@ -218,21 +217,19 @@ I18N.fi = localeValues([
   /* check.starts */ (n) => `${n} käynnistys${n === 1 ? "" : "tä"}`,
   /* check.cycles */ (n) => `${n} jakso${n === 1 ? "" : "a"}`,
   /* check.paired_cycles */ (n) => `${n} ${n === 1 ? "paritettu" : "paritettua"}`,
-  /* check.cycling_space */ (a, b) => `lämmitys ${a} · keskiarvo ${b}`,
-  /* check.cycling_dhw */ (a, b) => `käyttövesi ${a} · keskiarvo ${b}`,
-  /* check.cycling_cooling */ (n) => `${n} ${n === 1 ? "jäähdytysjakso" : "jäähdytysjaksoa"} jätetty pois`,
-  /* check.cycling_censored */ (n) => `${n} ${n === 1 ? "luokittelematon" : "luokittelematonta"}`,
-  /* check.cycling_causes */ "siirtymä|uudelleenkäynnistys/loki|alkua ei havaittu",
-  /* check.stop.title */ "Pysähdysten yhteys",
-  /* check.stop.population */ (n) => `${n} havaittua pysähdystä äskettäisen lämmityksen jälkeen`,
-  /* check.stop.coverage */ (d, h) => `Luettava kompressoriaika ${d} · ${h} tuntilohkoa`,
-  /* check.stop.categories */ "pieni nopeus + ero päätavoitteeseen|sisäyksikön pyynnön poisto|sulatus aktiivinen|käyttövesisiirtymä|piirin/tilan muutos",
-  /* check.stop.counts */ "positiivista / arvioitavaa / täydellistä",
-  /* check.stop.other */ "luokittelematon|tuntematon|osittainen|katkaistu|tavoite muuttunut|ajan ylivuoto",
-  /* check.stop.loss */ (n) => `Tallennushäviöilmoituksia ${n}`,
-  /* check.stop.states */ "Lähdettä ei vahvistettu|Päivätty havainto|Päiväämätön havainto|24 tunnin kattavuus puutteellinen|Tallennettujen tuntien palautus odottaa kellon/lähteen vahvistusta|Valmiit havainnot odottavat tallennusta|Yksi pysähdys odottaa myöhempiä näytteitä|Laskurit täynnä: alarajat|ei tuettu|Luettavaa pysähdysten joukkoa ei vielä ole.",
-  /* check.stop.rule */ "Alustava projekti-ikkuna: ±30 s rajat mukaan lukien, ei näyteväliä >15 s. Vahvistetun lämmityksen aikana: 0 < kompressorin nopeus ≤22 kierrosta/s, ilmoitettu menoveden lämpötila R1T ennen lisälämmitintä ≥ilmoitettu päävyöhykkeen tavoite +2 K, tavoite vakaa 30 s.",
-  /* check.stop.limits */ "Pysähdysluokat ja lisätiedot menevät päällekkäin samoissa säilytetyissä pysähdyksissä. Arvioitava tarkoittaa positiivista tai täydellistä näyteikkunaa; vain täydellinen sallii negatiivisen tuloksen näytteissä. Kysely ei sulje pois näytteiden välisiä signaaleja. R1T on ilmoitettu menoveden lämpötila ennen sähköistä lisälämmitintä. Sen ero ilmoitettuun päävyöhykkeen tavoitteeseen on havaittu ero, ei mitattu säädön ylitys. Tämä ei osoita pysähdyksen syytä, vähimmäismodulaatiota tai ulkoisen termostaatin pyyntöä.",
+  /* check.cycling.runs */ (n) => `${n} ${n === 1 ? "käyntijakso" : "käyntijaksoa"}`,
+  /* check.cycling.mean */ (d) => `Keskim. ${d}`,
+  /* check.cycling.completed */ "Päättyneet käyntijaksot",
+  /* check.cycling.unclear */ "Tarkoitus epäselvä",
+  /* check.cycling.unclear_hint */ "Käyntijakson aikana toimintatila voi vaihtua tai mittauksia voi puuttua.",
+  /* check.cycling.assessment */ "Arvio",
+  /* check.cycling.short */ "Paljon lyhyitä lämmitysjaksoja.",
+  /* check.cycling.normal */ "Lämmityksessä ei näy poikkeavaa jaksotusta.",
+  /* check.cycling.few */ "Lämmitysjaksoja on vielä liian vähän.",
+  /* check.cycling.waiting */ "Tarvitaan lisää tietoa.",
+  /* check.cycling.unavailable */ "Kompressorista ei ole tietoa.",
+  /* check.cycling.stale */ "Mittauksia puuttuu tällä hetkellä.",
+  /* check.cycling.history_empty */ "Ei vielä historiaa.",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min ${min} °C · keskiarvo ${mean} °C`,
   /* check.min */ (m) => `${m} min`,
@@ -273,15 +270,11 @@ I18N.fi = localeValues([
   /* check.detail.age_label */ "Viimeisen mittauksen ikä:",
   /* check.detail.horizon_wait */ (a) => `Täysi 24 tunnin ikkuna puuttuu vielä: jäljellä ${a}.`,
   /* check.detail.fault.ok */ "Ei nykyistä tai tallennettua ilmoitusta luettavissa vikasignaaleissa.",
-  /* check.detail.cycling.info */ "Lämmityksen keskiarvo <10 min: projektin vihje.",
-  /* check.detail.cycling.ok */ "Ei lyhyiden päättyneiden lämmitysjaksojen vihjettä.",
   /* check.detail.defrost.info */ "≥3 yhdistettyä sulatusta ylittää 15% luettavasta kompressoriajasta: projektin vihje.",
   /* check.detail.defrost.ok */ "Ei sulatusosuusvihjettä; sää ja aukot arvioimatta.",
   /* check.detail.pressure.info */ "Tallennettu minimi ≤1,0 bar; yhtenäinen 60 s vahvistamatta. Fyysinen oikeellisuus ja syy tuntemattomat.",
   /* check.detail.pressure.warn */ "Tallennettu yhtenäinen ≥60 s ≤1,0 bar; ei nykyistä painetta.",
   /* check.detail.pressure.ok */ "Ei hyväksyttyä painetta ≤projektin 1,0 bar kynnys.",
-  /* check.detail.class_missing */ "Puutteellinen luokittelu; ei yhteistä käyntijaksoarviota.",
-  /* check.detail.heating_runs_insufficient */ "<12 kelvollista päättynyttä lämmitysjaksoa; ei arviota.",
   /* check.detail.defrost_events_insufficient */ "Alle kolme yhdistettyä sulatusta; ei osuusarviota.",
   /* check.detail.source_stale */ "Ei tuoretta X10A-näytettä; nykytila tuntematon. Historia säilyy.",
   /* check.detail.no_paired_runtime */ "Ei yhdistettyä luettavaa aikaa; vain määrä.",
@@ -1088,7 +1081,7 @@ DESCRIPTION_I18N.fi = descriptionValues([
 MODEL_DESCRIPTION_I18N.fi = modelDescriptionValues([
   ["Laitteen ilmoitukset", "eivät todista syytä tai ratkaisua."], // health_fault
   ["R5T: kerrostuneen varaajan piste, ei energia.", "Projektin vihje ≥0,8 K/h ilman pumppu-/vedenottomerkkejä. Vedenotto mahdollista ilman merkkejä; 0 K/h ei sulje pois lämpöhäviötä. Kierto ei osoita syytä."], // health_dhw_loss
-  ["Kompressorin startit", "Sisäinen sääntö: ≥12 lämmitysjaksoa, keskiarvo <10 min; ≥90% kaikista päättyneistä jaksoista luokiteltu ilman varmennettuja siirtymiä ja ≥90% lämmitys/epävarman ajan kattavuus. Ei Daikin-raja."], // health_cycling
+  ["Näyttää havaitut käynnistykset ja päättyneet käyntijaksot.", "Monet lyhyet lämmitysjaksot voivat kertoa liian tiheistä käynnistyksistä."], // health_cycling
   ["Sulatus", "≥3 yhdistettyä, >15% kompressorin käyntiajasta, kun sekä kompressorin että sulatuksen tila on luettavissa. Sisäinen sääntö, ei Daikin; kosteus ja koko kennon lämpötila puuttuvat."], // health_defrost
   ["Paine", "yhteinen sisäinen raja ≤1,0 bar; 60 s jatkuvaa havaintoa antaa varoituksen. Ei yleispätevä; mallin ohje pätee."], // health_pressure
   ["Virtaus 60 s pumpun jälkeen", "Raja vaatii saman mallin/tilan/olosuhteet; ei nimellisarvo tai pienen virtauksen todiste."], // health_flow

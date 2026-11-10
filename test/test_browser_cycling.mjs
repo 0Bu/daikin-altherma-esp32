@@ -64,7 +64,8 @@ export async function assertCyclingChart(page, server, context) {
     health: { status: "info", full_span: true, span_s: 86400, source_fresh: true, source_age_s: 0,
       checks: [
         { id: "cycling", verdict: "ok", evidence: "observation", reason: "class_coverage",
-          starts: 5, space_runs: 3, space_mean_run_s: 480, hours_epoch: 1, hours },
+          starts: 5, space_runs: 3, space_mean_run_s: 480, dhw_runs: 2, dhw_mean_run_s: 900,
+          hours_epoch: 1, hours },
         { id: "pressure", verdict: "ok", evidence: "heuristic",
           min_bar: 1.4, current_bar: 1.5, observed_s: 86400, required_s: 77760 },
       ],
@@ -147,7 +148,8 @@ export async function assertCyclingChart(page, server, context) {
     const rendered = await evaluate(page, ({ chart, cols }) => {
       const node = document.querySelector(chart);
       const bounds = node.getBoundingClientRect();
-      const mean = node.closest(".vitem").querySelector(".checkup-cycling-grid .inspect-row span:last-child");
+      const detail = node.closest(".vitem").querySelector(".vdesc-body");
+      const mean = detail.querySelector(".checkup-cycling-grid .inspect-row span:last-child");
       const text = document.createRange();
       if (mean) text.selectNodeContents(mean);
       const meanVisible = mean && getComputedStyle(mean).visibility === "visible" &&
@@ -156,13 +158,29 @@ export async function assertCyclingChart(page, server, context) {
         tabStops: document.querySelectorAll(cols + ' > button[tabindex="0"]').length,
         slider: !!node.querySelector('input[type="range"]'),
         fits: bounds.left >= -1 && bounds.right <= innerWidth + 1 && node.scrollWidth <= node.clientWidth + 1,
-        mean: mean?.textContent, meanVisible };
+        total: detail.querySelector(".checkup-cycling-total")?.textContent,
+        purposeRows: Array.from(detail.querySelectorAll(".checkup-cycling-grid .inspect-row"),
+          row => Array.from(row.children, cell => cell.textContent)),
+        assessment: detail.querySelector(".checkup-cycling-assessment")?.textContent,
+        legend: Array.from(node.querySelectorAll(".checkup-chart-legend .checkup-chart-key"),
+          key => key.textContent),
+        meanVisible };
     }, { chart: CHART, cols: COLS });
     assert.equal(rendered.columns, 24, context + ": one column per hour of the rolling window");
     assert.equal(rendered.tabStops, 1, context + ": native hour buttons share one keyboard entry");
     assert.equal(rendered.slider, false, context + ": the chart itself is the hour selector");
     assert.equal(rendered.fits, true, context + ": the complete chart fits inside the viewport");
-    assert.match(rendered.mean, /8:00 min/, context + ": completed-run mean is separate from hourly runtime");
+    assert.equal(rendered.total, "5 starts", context + ": the start total has its own line");
+    const copy = await page.evaluate(`[
+      [t("mode.heat"), t("check.cycling.runs", 3) + " · " + t("check.cycling.mean", "8 min")],
+      [t("mode.dhw"), t("check.cycling.runs", 2) + " · " + t("check.cycling.mean", "15 min")],
+      t("check.cycling.assessment") + " · " + t("check.cycling.waiting"),
+      [t("mode.heat"), t("mode.dhw"), t("check.hour.other")]
+    ]`);
+    assert.deepEqual(rendered.purposeRows, copy.slice(0, 2),
+      context + ": completed runs and their means have separate heating and hot-water rows");
+    assert.equal(rendered.assessment, copy[2], context + ": incomplete evidence gets a short assessment");
+    assert.deepEqual(rendered.legend, copy[3], context + ": the chart labels its colored segments");
     assert.equal(rendered.meanVisible, true, context + ": the completed-run mean has a visible text box");
     const edge = await cells(EDGE), last = await cells(LAST);
     assert.equal(edge.text, "1", context + ": a witnessed start remains visible without paired runtime");
@@ -214,7 +232,8 @@ export async function assertCyclingChart(page, server, context) {
     for (const duration of [5, 10, 15])
       assert.match(chosen, new RegExp(`\\b${duration} min\\b`),
         context + ": selected runtime identifies each evidenced or unassigned duration");
-    assert.doesNotMatch(chosen, /Ø|8:00 min/, context + ": hourly label excludes a completed-run mean");
+    assert.ok(!chosen.includes(await page.evaluate('t("check.cycling.mean", "8 min")')),
+      context + ": hourly label excludes the completed-run mean");
     const previous = await label(PREVIOUS);
     if (mouse) {
       assert.match(previous, /2:20/);

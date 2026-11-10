@@ -1,4 +1,4 @@
-// translation-source: 0a9b357c29bd7c842a11f7de464d548af9a92316c15c31e50a54b1facf17e59e
+// translation-source: 0b470978cad369ab40b1d667fab094bf6ef0be09a0378a8774c5e68b4a7b5bfe
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -198,7 +198,6 @@ I18N.nb = localeValues([
   /* check.detail.fault.past */ "Ingen melding er aktiv nå; en ble registrert i perioden. At den forsvant, beviser verken årsak eller løsning.",
   /* check.detail.fault.past_unknown */ "En melding ble registrert; gjeldende feiltilstand kan ikke leses.",
   /* check.detail.collecting */ (a, b) => `Lesbare signaler: ${a} av påkrevde ${b}.`,
-  /* check.detail.outdoor_cycling */ " X10A-utedata er bare ferske målinger fra fullførte kjøringer som hele tiden var romoppvarming. De er kontekst og endrer ikke grensen eller vurderingen.",
   /* check.detail.outdoor_defrost */ " X10A-utedata er bare ferske målinger mens avriming og kompressorstatus var lesbare og kompressoren gikk. De er kontekst og endrer ikke grensen eller vurderingen.",
   /* check.detail.dhw_candidate */ (a, b, c, d) => `Godtatte timesvinduer: ${a}; aktuell kandidat: ${c} av ${d}.`,
   /* check.detail.dhw_settling */ (a, b, c) => `Godtatte timesvinduer: ${a}; tanklading eller tankvarmer oppdaget. Gjenværende stabilisering: ${c}.`,
@@ -218,21 +217,19 @@ I18N.nb = localeValues([
   /* check.starts */ (n) => `${n} ${n === 1 ? "start" : "starter"}`,
   /* check.cycles */ (n) => `${n} ${n === 1 ? "syklus" : "sykluser"}`,
   /* check.paired_cycles */ (n) => `${n} klassifisert`,
-  /* check.cycling_space */ (a, b) => `varme ${a} · snitt ${b}`,
-  /* check.cycling_dhw */ (a, b) => `varmtvann ${a} · snitt ${b}`,
-  /* check.cycling_cooling */ (n) => `Kjøling ${n} utelatt`,
-  /* check.cycling_censored */ (n) => `${n} uten klasse`,
-  /* check.cycling_causes */ "overgang|omstart/journal|start ikke observert",
-  /* check.stop.title */ "Kontekst ved stopp",
-  /* check.stop.population */ (n) => `${n} observerte stopp etter nylig oppvarming`,
-  /* check.stop.coverage */ (d, h) => `Lesbar kompressortid ${d} · ${h} timeblokker`,
-  /* check.stop.categories */ "lav hastighet + avstand til hovedmål|innendørsenhetens forespørsel trukket tilbake|aktiv avriming|varmtvannsovergang|endret krets/modus",
-  /* check.stop.counts */ "positive / vurderbare / fullstendige",
-  /* check.stop.other */ "uklassifiserte|ukjente|delvise|avbrutte|mål endret|tidsoverløp",
-  /* check.stop.loss */ (n) => `Varsler om lagringstap ${n}`,
-  /* check.stop.states */ "Kilde ikke bekreftet|Datert observasjon|Udatert observasjon|Ufullstendig dekning av 24 timer|Gjenoppretting av lagrede timer venter på klokke-/kildebekreftelse|Fullførte observasjoner venter på lagring|Ett stopp venter på prøver etter stoppet|Tellere mettet: nedre grenser|ikke støttet|Ingen lesbar stopppopulasjon ennå.",
-  /* check.stop.rule */ "Foreløpig prosjektvindu: inklusive ±30 s, ingen prøvegap >15 s. Ved bekreftet oppvarming: 0 < kompressorturtall ≤22 omdr./s, rapportert turtemperatur R1T før tilleggsvarmeren ≥rapportert hovedsonemål +2 K, mål stabilt i 30 s.",
-  /* check.stop.limits */ "Stoppkategorier og tilleggsopplysninger overlapper for de samme beholdte stoppene. Vurderbar betyr positiv eller et fullstendig prøvetatt vindu; bare fullstendig tillater et negativt resultat i prøvene. Polling utelukker ikke signaler mellom prøver. R1T er rapportert utgående vanntemperatur før den elektriske tilleggsvarmeren. Avstanden til rapportert hovedsonemål er en observert forskjell, ikke målt regulert oversving. Dette fastslår verken stoppårsak, minste modulering eller en forespørsel fra ekstern termostat.",
+  /* check.cycling.runs */ (n) => `${n} ${n === 1 ? "kjøring" : "kjøringer"}`,
+  /* check.cycling.mean */ (d) => `Snitt ${d}`,
+  /* check.cycling.completed */ "Fullførte kjøringer",
+  /* check.cycling.unclear */ "Uklart formål",
+  /* check.cycling.unclear_hint */ "En kjøring kan skifte driftsmodus eller bare være delvis registrert.",
+  /* check.cycling.assessment */ "Vurdering",
+  /* check.cycling.short */ "Mange korte varmekjøringer.",
+  /* check.cycling.normal */ "Ingen uvanlige sykluser ved oppvarming.",
+  /* check.cycling.few */ "For få varmekjøringer ennå.",
+  /* check.cycling.waiting */ "Det trengs mer data.",
+  /* check.cycling.unavailable */ "Ingen kompressordata.",
+  /* check.cycling.stale */ "Målinger mangler akkurat nå.",
+  /* check.cycling.history_empty */ "Ingen historikk ennå.",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · snitt ${mean} °C`,
   /* check.min */ (m) => `${m} min`,
@@ -273,15 +270,11 @@ I18N.nb = localeValues([
   /* check.detail.age_label */ "Alder på siste måling:",
   /* check.detail.horizon_wait */ (a) => `Et helt 24-timersvindu mangler fortsatt: ${a} gjenstår.`,
   /* check.detail.fault.ok */ "Ingen aktuell eller lagret melding i lesbare feilsignaler.",
-  /* check.detail.cycling.info */ "Varmesnitt <10 min: prosjekthint.",
-  /* check.detail.cycling.ok */ "Ingen kortkjøringshint i fullførte varmekjøringer.",
   /* check.detail.defrost.info */ "≥3 parede avriminger overstiger 15% av lesbar kompressortid: prosjekthint.",
   /* check.detail.defrost.ok */ "Ingen avrimingsandelshint; vær og hull ikke vurdert.",
   /* check.detail.pressure.info */ "Lagret minimum ≤1,0 bar; sammenhengende 60 s ubekreftet. Fysisk gyldighet og årsak ukjent.",
   /* check.detail.pressure.warn */ "Registrert sammenhengende ≥60 s ≤1,0 bar; ikke nåtrykket.",
   /* check.detail.pressure.ok */ "Ingen godtatt verdi ≤1,0 bar, prosjektterskelen.",
-  /* check.detail.class_missing */ "Ufullstendig klassifisering; ingen samlet syklingsdom.",
-  /* check.detail.heating_runs_insufficient */ "<12 egnede fullførte varmekjøringer; ingen vurdering.",
   /* check.detail.defrost_events_insufficient */ "Færre enn tre parede avriminger; ingen andelsdom.",
   /* check.detail.source_stale */ "Ingen fersk X10A-prøve; aktuell tilstand ukjent. Historikk beholdt.",
   /* check.detail.no_paired_runtime */ "Ingen paret lesbar kjøretid; bare antall.",
@@ -1248,7 +1241,7 @@ DESCRIPTION_I18N.nb = descriptionValues([
 MODEL_DESCRIPTION_I18N.nb = modelDescriptionValues([
   ["Enhetens meldinger", "ingen årsaks- eller løsningsbevis."], // health_fault
   ["R5T: ett punkt i lagdelt tank, ikke energi.", "Prosjekthint ≥0,8 K/h uten pumpe-/tappemarkører. Tapping er mulig uten markører; 0 K/h utelukker ikke varmetap. Sirkulasjon beviser ikke årsak."], // health_dhw_loss
-  ["Kompressorstarter", "Intern regel: ≥12 varmekjøringer, snitt <10 min; ≥90% av alle fullførte kjøringer klassifisert uten bekreftede overføringer og ≥90% varme/usikker tidsdekning. Ingen Daikin-grense."], // health_cycling
+  ["Viser observerte starter og fullførte kjøringer.", "Mange korte varmekjøringer kan tyde på at kompressoren starter for ofte."], // health_cycling
   ["Avriming", "≥3 parede, >15% av kompressorens driftstid der både kompressor- og avrimingsstatus er lesbar. Intern regel, ikke Daikin; fuktighet og hele varmevekslerens temperatur mangler."], // health_defrost
   ["Trykk", "felles intern regel ≤1,0 bar; 60 s kontinuerlig observert gir advarsel. Ikke universell; modellmanual gjelder."], // health_pressure
   ["Strømning etter 60 s pumpe", "Grense krever samme modell/modus/forhold; ikke nominell eller lavstrømningsbevis."], // health_flow

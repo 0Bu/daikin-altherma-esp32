@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 94bccaafb69db36dd8ae9ac8d4eb7d7d02560fcb3889e882450521c29e02ba88 -->
+<!-- diagnostic-evidence-contract: 046bf259e2cdf7ac766ebb4c76e8002dcfaa2217e769a63740a521401c4bd52d -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -253,7 +253,8 @@ produces **NOTE** immediately. An absence-of-short-run assessment additionally r
 24-hour span and at least CHECKUP_REQUIRED_S of paired classification time.
 
 Missing classification, fewer than 12 heating runs or an inadequate classified population remains
-an observation with an explicit reason; absent compressor evidence remains CHECKING.
+an observation. The status API carries the detailed reason and the disclosure gives a short
+assessment. Absent compressor evidence remains CHECKING.
 There is no pooled starts/runtime fallback, and unfinished
 runs never enter the completed mean. Completed-run evidence ages with its start edge. See
 CHECKUP_CYCLING_MIN_STARTS, CHECKUP_CYCLING_SHORT_RUN_S and CHECKUP_CYCLING_CLASSIFIED_PCT in
@@ -281,7 +282,8 @@ manufacturer sequencing evidence. The anonymized synthetic equivalent is retaine
 The unchanged R1 publication and report were reopened on 28 October 2026; they do not establish
 these transition or population rules.
 
-**Independent stop context:** [`stop_context.hpp`](../main/logic/stop_context.hpp) observes a
+**Independent stop context:** The [status API](API.md#history-and-24-hour-checks) exposes the
+separate `stop_context` observation. [`stop_context.hpp`](../main/logic/stop_context.hpp) observes a
 witnessed running-to-stopped edge only after an observed OFF-to-running segment with recent
 confirmed space-heating context. Cooling-only and DHW-only segments do not enter its denominator;
 mixed transitions remain separate from pure completed heating runs. Five overlapping categories

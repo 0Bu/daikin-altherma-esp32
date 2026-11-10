@@ -1,4 +1,4 @@
-// translation-source: 0a9b357c29bd7c842a11f7de464d548af9a92316c15c31e50a54b1facf17e59e
+// translation-source: 0b470978cad369ab40b1d667fab094bf6ef0be09a0378a8774c5e68b4a7b5bfe
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -198,7 +198,6 @@ I18N.fr = localeValues([
   /* check.detail.fault.past */ "Aucun message actif ; un message a été enregistré. Sa disparition ne prouve ni sa cause ni sa résolution.",
   /* check.detail.fault.past_unknown */ "Un message a été enregistré ; l’état actuel du défaut est illisible.",
   /* check.detail.collecting */ (a, b) => `Signaux lisibles : ${a} sur ${b} requis.`,
-  /* check.detail.outdoor_cycling */ " Les valeurs extérieures X10A ne comprennent que des mesures récentes issues de cycles de chauffage des locaux terminés et classés de manière cohérente. Elles fournissent du contexte et ne modifient ni le seuil de cyclage ni le verdict.",
   /* check.detail.outdoor_defrost */ " Les valeurs extérieures X10A ne comprennent que des mesures récentes lorsque les états du dégivrage et du compresseur étaient tous deux lisibles et que le compresseur fonctionnait. Elles fournissent du contexte et ne modifient ni le seuil de dégivrage ni le verdict.",
   /* check.detail.dhw_candidate */ (a, b, c, d) => `Fenêtres horaires admises : ${a} ; candidate actuelle : ${c} sur ${d}.`,
   /* check.detail.dhw_settling */ (a, b, c) => `Fenêtres horaires admises : ${a} ; charge ou résistance du ballon détectée. Stabilisation restante : ${c}.`,
@@ -218,21 +217,19 @@ I18N.fr = localeValues([
   /* check.starts */ (n) => `${n} ${n === 1 ? "démarrage" : "démarrages"}`,
   /* check.cycles */ (n) => `${n} ${n === 1 ? "cycle" : "cycles"}`,
   /* check.paired_cycles */ (n) => `${n} ${n === 1 ? "apparié" : "appariés"}`,
-  /* check.cycling_space */ (a, b) => `chauffage ${a} · moyenne ${b}`,
-  /* check.cycling_dhw */ (a, b) => `ECS ${a} · moyenne ${b}`,
-  /* check.cycling_cooling */ (n) => `rafraîchissement : ${n} ${n === 1 ? "exclu" : "exclus"}`,
-  /* check.cycling_censored */ (n) => `${n} ${n === 1 ? "non classé" : "non classés"}`,
-  /* check.cycling_causes */ "transition|redémarrage/journal|départ non observé",
-  /* check.stop.title */ "Contexte des arrêts",
-  /* check.stop.population */ (n) => `${n} arrêts observés après chauffage récent`,
-  /* check.stop.coverage */ (d, h) => `Durée compresseur lisible ${d} · ${h} blocs horaires`,
-  /* check.stop.categories */ "faible vitesse + écart à la consigne principale|retrait de demande de l’unité intérieure|dégivrage actif|transition eau chaude|changement de circuit/mode",
-  /* check.stop.counts */ "positifs / évaluables / complets",
-  /* check.stop.other */ "non classés|inconnus|partiels|interrompus|consigne modifiée|dépassement temporel",
-  /* check.stop.loss */ (n) => `Avis de perte de stockage ${n}`,
-  /* check.stop.states */ "Source non confirmée|Observation datée|Observation non datée|Couverture de 24 heures incomplète|Restauration des heures enregistrées en attente de confirmation horloge/source|Observations terminées en attente d’enregistrement|Un arrêt attend les échantillons suivants|Compteurs saturés : bornes inférieures|non pris en charge|Aucune population d’arrêts avec données lisibles pour le moment.",
-  /* check.stop.rule */ "Fenêtre provisoire du projet : ±30 s incluses, aucun intervalle de mesure >15 s. En chauffage confirmé : 0 < vitesse du compresseur ≤22 tr/s, température de départ R1T signalée avant l’appoint électrique ≥consigne signalée de zone principale +2 K, consigne stable depuis 30 s.",
-  /* check.stop.limits */ "Les catégories et qualificatifs se recouvrent pour les mêmes arrêts conservés. Évaluable signifie positif ou fenêtre échantillonnée complète ; seule une fenêtre complète permet un résultat négatif sur les échantillons. Le sondage ne peut exclure des signaux entre mesures. R1T est la température de départ signalée avant l’appoint électrique. Son écart à la consigne signalée de zone principale est une différence observée, pas un dépassement régulé mesuré. Cela n’établit ni cause d’arrêt, ni modulation minimale, ni demande d’un thermostat externe.",
+  /* check.cycling.runs */ (n) => `${n} ${n === 1 ? "cycle" : "cycles"}`,
+  /* check.cycling.mean */ (d) => `Moy. ${d}`,
+  /* check.cycling.completed */ "Cycles terminés",
+  /* check.cycling.unclear */ "Usage incertain",
+  /* check.cycling.unclear_hint */ "Un cycle peut changer de mode ou n’avoir été observé qu’en partie.",
+  /* check.cycling.assessment */ "Bilan",
+  /* check.cycling.short */ "Beaucoup de cycles de chauffage courts.",
+  /* check.cycling.normal */ "Pas de cycles inhabituels en chauffage.",
+  /* check.cycling.few */ "Trop peu de cycles de chauffage pour l’instant.",
+  /* check.cycling.waiting */ "Données encore insuffisantes.",
+  /* check.cycling.unavailable */ "Aucune donnée du compresseur.",
+  /* check.cycling.stale */ "Des mesures manquent actuellement.",
+  /* check.cycling.history_empty */ "Pas encore d’historique.",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · moyenne ${mean} °C`,
   /* check.min */ (m) => `${m} min`,
@@ -273,15 +270,11 @@ I18N.fr = localeValues([
   /* check.detail.age_label */ "Âge de la dernière mesure :",
   /* check.detail.horizon_wait */ (a) => `La fenêtre complète de 24 heures manque encore : ${a} restantes.`,
   /* check.detail.fault.ok */ "Aucun message actuel ou mémorisé dans les signaux de défaut lisibles.",
-  /* check.detail.cycling.info */ "Chauffage moyen <10 min : indice du projet.",
-  /* check.detail.cycling.ok */ "Aucun indice de cycles courts dans les chauffages terminés.",
   /* check.detail.defrost.info */ "≥3 dégivrages associés dépassent 15 % du temps lisible du compresseur : indice du projet.",
   /* check.detail.defrost.ok */ "Aucun indice de part ; météo et lacunes non évaluées.",
   /* check.detail.pressure.info */ "Minimum mémorisé ≤1,0 bar ; 60 s continues non confirmées. Validité physique et cause inconnues.",
   /* check.detail.pressure.warn */ "≥60 s continues ≤1,0 bar enregistrées ; pas la pression actuelle.",
   /* check.detail.pressure.ok */ "Aucune pression admise ≤1,0 bar, seuil du projet.",
-  /* check.detail.class_missing */ "Classification incomplète ; aucun verdict global de cyclage.",
-  /* check.detail.heating_runs_insufficient */ "<12 chauffages complets admissibles ; aucun verdict.",
   /* check.detail.defrost_events_insufficient */ "Moins de trois dégivrages associés ; aucun verdict de part.",
   /* check.detail.source_stale */ "Pas de mesure X10A récente ; état actuel inconnu. Historique conservé.",
   /* check.detail.no_paired_runtime */ "Pas de durée lisible associée ; nombre seulement.",
@@ -1231,7 +1224,7 @@ DESCRIPTION_I18N.fr = descriptionValues([
 MODEL_DESCRIPTION_I18N.fr = modelDescriptionValues([
   ["Messages de la pompe ", "ni cause ni résolution prouvées."], // health_fault
   ["R5T : un point du ballon stratifié, pas une énergie.", "Indice interne ≥0,8 K/h sans indice pompe/puisage. Sans indice, un puisage reste possible ; 0 K/h n’exclut pas les pertes. Circulation ne prouve pas la cause."], // health_dhw_loss
-  ["Démarrages compresseur", "Règle interne : ≥12 chauffages, moyenne <10 min ; ≥90% de tous les cycles complets classés, hors transferts confirmés, et ≥90% de couverture chauffage/durée incertaine. Pas une limite Daikin."], // health_cycling
+  ["Affiche les démarrages observés et les cycles terminés.", "De nombreux cycles courts en chauffage peuvent indiquer des démarrages trop fréquents."], // health_cycling
   ["Dégivrage ", "≥3 associés, >15% du temps de marche du compresseur si états compresseur et dégivrage lisibles. Règle interne, pas Daikin; humidité et température de toute la batterie absentes."], // health_defrost
   ["Pression ", "règle interne commune ≤1,0 bar ; 60 s continues observées donnent ALERTE. Pas universelle ; manuel du modèle."], // health_pressure
   ["Débit après 60 s de pompe", "Seuil selon même modèle/mode/conditions ; pas nominal ni preuve de débit insuffisant."], // health_flow

@@ -47,11 +47,6 @@ function localeValues(values) {
   keys.forEach((key, index) => { catalog[key] = values[index]; });
   return catalog;
 }
-// Cause names are translated together; formatting and missing-value handling have one owner.
-function cyclingCauseValues(counts, labels) {
-  return counts.map((n, i) => Number.isFinite(n) && n > 0 ? `${labels[i]} ${n}` : "")
-    .filter(Boolean).join(" · ");
-}
 const INSPECT_LOCALE_KEYS = ("status env3 sgrequest ou comp out ouhx hp disch lp eev r3t phe lwt " +
   "r2t rwt dt pth cop buh bsh valve valve2 tank heat spaceh room pump pel defrost quiet rhot " +
   "rcold wsup wtank wheat wret flow flow_switch wp").split(" ");
@@ -326,7 +321,6 @@ const I18N = {
     "check.detail.fault.past": "No message is active now; a message was recorded in this window. Its disappearance establishes neither cause nor resolution.",
     "check.detail.fault.past_unknown": "A message was recorded in this window; the current fault state is unreadable.",
     "check.detail.collecting": (a, b) => `Readable signals: ${a} of ${b} required.`,
-    "check.detail.outdoor_cycling": " The X10A outdoor figures include only fresh samples from completed, consistently classified space-heating runs. They are context and do not change the cycling threshold or verdict.",
     "check.detail.outdoor_defrost": " The X10A outdoor figures include only fresh samples while both defrost and compressor state were readable and the compressor was running. They are context and do not change the defrost threshold or verdict.",
     "check.detail.dhw_candidate": (a, b, c, d) => `Accepted hourly windows: ${a}; current candidate: ${c} of ${d}.`,
     "check.detail.dhw_settling": (a, b, c) => `Accepted hourly windows: ${a}; tank charging or the tank heater was detected. Settling time remaining: ${c}.`,
@@ -358,23 +352,19 @@ const I18N = {
     "check.starts": (n) => `${n} ${n === 1 ? "start" : "starts"}`,
     "check.cycles": (n) => `${n} ${n === 1 ? "cycle" : "cycles"}`,
     "check.paired_cycles": (n) => `${n} paired`,
-    // The operating class the 3-way valve says a run served. `d` is empty while no mean has been
-    // established, so the count still reads as the observation it is.
-    "check.cycling_space": (a, b) => `heating ${a} · mean ${b}`,
-    "check.cycling_dhw": (a, b) => `hot water ${a} · mean ${b}`,
-    "check.cycling_cooling": (n) => `cooling ${n} excluded`,
-    "check.cycling_censored": (n) => `${n} unclassified`,
-    "check.cycling_causes": "transition|restart/journal|start not witnessed",
-    "check.stop.title": "Stop context",
-    "check.stop.population": (n) => `${n} witnessed stops after recent heating`,
-    "check.stop.coverage": (d, h) => `Readable ${d} · ${h} hourly buckets`,
-    "check.stop.categories": "low speed + main-target gap|indoor-unit request withdrawal|defrost active|hot-water transition|route/mode change",
-    "check.stop.counts": "positive / evaluable / complete",
-    "check.stop.other": "unclassified|unknown|partial|censored|target changed|time overflow",
-    "check.stop.loss": (n) => `Storage loss notices ${n}`,
-    "check.stop.states": "Unconfirmed source|Dated|Undated|Partial 24 h|Restore pending: clock/source|Storage pending|Post-window pending|Saturated: lower bounds|Unsupported|No readable stop population",
-    "check.stop.rule": "Provisional project observations: inclusive ±30 s; gaps ≤15 s. During confirmed heating, 0 < compressor speed ≤22 rps; reported pre-backup-heater leaving-water R1T ≥reported main-zone target +2 K, target stable 30 s.",
-    "check.stop.limits": "Stop categories and qualifiers overlap across the same retained stops. Evaluable = positive or complete sampled window; only complete permits sampled negatives. Between-sample signals remain unknown. Observed temperature gap, not measured controlled overshoot, minimum modulation, external thermostat request or stop cause.",
+    "check.cycling.runs": (n) => `${n} ${n === 1 ? "run" : "runs"}`,
+    "check.cycling.mean": (d) => `avg. ${d}`,
+    "check.cycling.completed": "Completed runs",
+    "check.cycling.unclear": "Unclear purpose",
+    "check.cycling.unclear_hint": "Runs can change mode or be recorded only in part.",
+    "check.cycling.assessment": "Assessment",
+    "check.cycling.short": "Many short heating runs.",
+    "check.cycling.normal": "No unusual cycling while heating.",
+    "check.cycling.few": "Too few heating runs yet.",
+    "check.cycling.waiting": "More data needed.",
+    "check.cycling.unavailable": "No compressor data.",
+    "check.cycling.stale": "Measurements are currently missing.",
+    "check.cycling.history_empty": "No history yet.",
     "check.outdoor_one": (source, mean) => `${source} ${mean} °C`,
     "check.outdoor_range": (source, min, mean) => `${source} min ${min} °C · mean ${mean} °C`,
     "check.min": (m) => `${m} min`,
@@ -411,15 +401,11 @@ const I18N = {
     "check.detail.age_label": "Last sample age:",
     "check.detail.horizon_wait": (a) => `A full 24-hour window is still missing: ${a} remaining.`,
     "check.detail.fault.ok": "No current or retained message in readable fault signals.",
-    "check.detail.cycling.info": "Mean heating run <10 min: project hint.",
-    "check.detail.cycling.ok": "No project short-run hint in completed heating runs.",
     "check.detail.defrost.info": "≥3 paired defrosts exceed 15% of readable compressor runtime: project hint.",
     "check.detail.defrost.ok": "No project defrost-share hint; weather and gaps remain unassessed.",
     "check.detail.pressure.info": "Retained minimum ≤1.0 bar; continuous 60 s unconfirmed. Physical validity and cause unknown.",
     "check.detail.pressure.warn": "Recorded continuous ≥60 s at ≤1.0 bar; not a current-pressure statement.",
     "check.detail.pressure.ok": "No accepted pressure at or below the project 1.0 bar threshold.",
-    "check.detail.class_missing": "Incomplete classification; no pooled cycling verdict.",
-    "check.detail.heating_runs_insufficient": "<12 eligible completed heating runs; no verdict.",
     "check.detail.defrost_events_insufficient": "Fewer than three paired defrosts; no share verdict.",
     "check.detail.source_stale": "No fresh X10A sample; current state unknown. History retained.",
     "check.detail.no_paired_runtime": "No paired readable runtime; event count only.",

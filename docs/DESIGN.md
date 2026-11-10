@@ -346,10 +346,10 @@ The optional 24-hour Plant diagnostics rows appear only after Firmware opt-in an
 live. Firmware supplies verdict, evidence class, coverage and limits; the browser adds no thresholds.
 Rows cover fault, tank loss, starts, defrost, water pressure, steady flow, heater runtime and retry
 changes. Collapsed rows show the primary measured value when available (or checking, no window, measured, tentative and N/A).
-Every expander has three blocks. The reading gives its window or recorded time and a brief
-description. The interpretation explains relevant gaps. For compressor starts it also contains
-the hourly chart and the independent Stop context when available. The **Normal** block gives expected
-conditions or assessment limits. The observation window is not a status-since timestamp.
+Expanders usually show the reading and its time, an interpretation, and expected conditions or
+assessment limits. The compressor-start expander gives the observed start count and completed runs
+by purpose, one short assessment for heating, and the 24-hour chart. Label elapsed time as the
+observation window and reserve event timestamps for recorded events.
 Observation-only/experimental results cannot become OK or manufacture a health certificate.
 `available`, `assessable` and `evaluated` count different facts; only completed bounded judgments
 belong in the evaluated headline.

@@ -2205,8 +2205,8 @@ const MODEL_DESCRIPTIONS = {
     what: "Largest accepted hourly temperature drop at tank sensor R5T.",
     normal: "Project hint ≥0.8 K/h without pump/draw-like markers. R5T is one point in a stratified tank, not measured tank energy. Missing markers do not prove no draw; zero net cooling does not exclude heat loss. Circulation overlap is correlation, not cause." },
   health_cycling: {
-    what: "Starts and completed classified heating runs.",
-    normal: "Project hint: ≥12 heating runs averaging <10 min; ≥90% of all completed runs classified (proven handovers excluded) and ≥90% heating/uncertain runtime coverage. No Daikin limit." },
+    what: "Shows observed starts and completed runs.",
+    normal: "Many short heating runs can be a sign of cycling." },
   health_defrost: {
     what: "Defrost starts and their share of compressor runtime with readable compressor and defrost states.",
     normal: "Project hint: ≥3 paired events and >15%. Humidity and whole-coil temperature are unavailable; no Daikin fault limit." },

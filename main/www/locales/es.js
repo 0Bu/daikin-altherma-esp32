@@ -1,4 +1,4 @@
-// translation-source: 0a9b357c29bd7c842a11f7de464d548af9a92316c15c31e50a54b1facf17e59e
+// translation-source: 0b470978cad369ab40b1d667fab094bf6ef0be09a0378a8774c5e68b4a7b5bfe
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -198,7 +198,6 @@ I18N.es = localeValues([
   /* check.detail.fault.past */ "Ahora no hay mensaje activo; se registró uno en este periodo. Su desaparición no demuestra la causa ni la resolución.",
   /* check.detail.fault.past_unknown */ "Se registró un mensaje; el estado actual no se puede leer.",
   /* check.detail.collecting */ (a, b) => `Señales legibles: ${a} de ${b} requeridas.`,
-  /* check.detail.outdoor_cycling */ " Las cifras exteriores de X10A solo incluyen muestras recientes de ciclos de calefacción de espacios completos y clasificados de forma coherente. Sirven de contexto y no cambian el umbral de ciclos ni el veredicto.",
   /* check.detail.outdoor_defrost */ " Las cifras exteriores de X10A solo incluyen muestras recientes cuando tanto el estado de desescarche como el del compresor eran legibles y el compresor estaba funcionando. Sirven de contexto y no cambian el umbral de desescarche ni el veredicto.",
   /* check.detail.dhw_candidate */ (a, b, c, d) => `Ventanas horarias aceptadas: ${a}; candidata actual: ${c} de ${d}.`,
   /* check.detail.dhw_settling */ (a, b, c) => `Ventanas horarias aceptadas: ${a}; carga o calentador del depósito detectados. Estabilización restante: ${c}.`,
@@ -218,21 +217,19 @@ I18N.es = localeValues([
   /* check.starts */ (n) => `${n} ${n === 1 ? "arranque" : "arranques"}`,
   /* check.cycles */ (n) => `${n} ${n === 1 ? "ciclo" : "ciclos"}`,
   /* check.paired_cycles */ (n) => `${n} ${n === 1 ? "emparejado" : "emparejados"}`,
-  /* check.cycling_space */ (a, b) => `calefacción ${a} · media ${b}`,
-  /* check.cycling_dhw */ (a, b) => `ACS ${a} · media ${b}`,
-  /* check.cycling_cooling */ (n) => `refrigeración: ${n === 1 ? "se excluyó 1" : `se excluyeron ${n}`}`,
-  /* check.cycling_censored */ (n) => `${n} sin clasificar`,
-  /* check.cycling_causes */ "transición|reinicio/registro|inicio no observado",
-  /* check.stop.title */ "Contexto de parada",
-  /* check.stop.population */ (n) => `${n} paradas observadas tras calefacción reciente`,
-  /* check.stop.coverage */ (d, h) => `Tiempo de compresor legible ${d} · ${h} bloques horarios`,
-  /* check.stop.categories */ "baja velocidad + diferencia con consigna principal|retirada de solicitud de unidad interior|desescarche activo|cambio hacia/desde agua caliente|cambio de circuito/modo",
-  /* check.stop.counts */ "positivas / evaluables / completas",
-  /* check.stop.other */ "sin clasificar|desconocidas|parciales|interrumpidas|consigna cambiada|desbordamiento temporal",
-  /* check.stop.loss */ (n) => `Avisos de pérdida de almacenamiento ${n}`,
-  /* check.stop.states */ "Fuente sin confirmar|Observación fechada|Observación sin fecha|Cobertura de 24 horas incompleta|Restauración de horas guardadas pendiente de confirmar reloj/fuente|Observaciones completas pendientes de guardar|Una parada espera muestras posteriores|Contadores saturados: límites inferiores|no compatible|Aún no hay población de paradas con datos legibles.",
-  /* check.stop.rule */ "Ventana provisional del proyecto: ±30 s inclusive, sin huecos de muestreo >15 s. Durante calefacción confirmada: 0 < velocidad del compresor ≤22 rps, temperatura de impulsión R1T comunicada antes del calentador de apoyo ≥consigna comunicada de zona principal +2 K, consigna estable durante 30 s.",
-  /* check.stop.limits */ "Las categorías y los calificadores se solapan en las mismas paradas retenidas. Evaluable significa positivo o ventana muestreada completa; solo completa permite un resultado negativo en las muestras. El sondeo no excluye señales entre muestras. R1T es la temperatura de impulsión comunicada antes del apoyo eléctrico. Su diferencia con la consigna comunicada de zona principal es una diferencia observada, no un sobreimpulso regulado medido. No demuestra la causa de parada, la modulación mínima ni una solicitud de termostato externo.",
+  /* check.cycling.runs */ (n) => `${n} ${n === 1 ? "ciclo" : "ciclos"}`,
+  /* check.cycling.mean */ (d) => `Media ${d}`,
+  /* check.cycling.completed */ "Ciclos terminados",
+  /* check.cycling.unclear */ "Uso incierto",
+  /* check.cycling.unclear_hint */ "Un ciclo puede cambiar de modo o haberse registrado solo en parte.",
+  /* check.cycling.assessment */ "Valoración",
+  /* check.cycling.short */ "Muchos ciclos cortos de calefacción.",
+  /* check.cycling.normal */ "Sin indicios de ciclos anómalos al calentar.",
+  /* check.cycling.few */ "Aún hay pocos ciclos de calefacción.",
+  /* check.cycling.waiting */ "Aún faltan datos.",
+  /* check.cycling.unavailable */ "Sin datos del compresor.",
+  /* check.cycling.stale */ "Ahora mismo faltan mediciones.",
+  /* check.cycling.history_empty */ "Aún no hay historial.",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} mín. ${min} °C · media ${mean} °C`,
   /* check.min */ (m) => `${m} min`,
@@ -273,15 +270,11 @@ I18N.es = localeValues([
   /* check.detail.age_label */ "Edad de la última lectura:",
   /* check.detail.horizon_wait */ (a) => `Falta completar la ventana de 24 horas: quedan ${a}.`,
   /* check.detail.fault.ok */ "Sin mensaje actual ni guardado en señales de fallo legibles.",
-  /* check.detail.cycling.info */ "Media de calefacción <10 min: indicio del proyecto.",
-  /* check.detail.cycling.ok */ "Sin indicio del proyecto de ciclos cortos en calefacción completada.",
   /* check.detail.defrost.info */ "≥3 desescarches asociados superan 15% del tiempo legible del compresor: indicio del proyecto.",
   /* check.detail.defrost.ok */ "Sin indicio de porcentaje; clima y huecos no evaluados.",
   /* check.detail.pressure.info */ "Mínimo guardado ≤1,0 bar; 60 s continuos sin confirmar. Validez física y causa desconocidas.",
   /* check.detail.pressure.warn */ "Registrados ≥60 s continuos ≤1,0 bar; no indica presión actual.",
   /* check.detail.pressure.ok */ "Sin presión aceptada ≤1,0 bar, umbral del proyecto.",
-  /* check.detail.class_missing */ "Clasificación incompleta; sin evaluación conjunta de ciclos.",
-  /* check.detail.heating_runs_insufficient */ "<12 ciclos completos válidos de calefacción; sin evaluación.",
   /* check.detail.defrost_events_insufficient */ "Menos de tres desescarches asociados; sin evaluación de porcentaje.",
   /* check.detail.source_stale */ "Sin lectura X10A reciente; estado actual desconocido. Historial conservado.",
   /* check.detail.no_paired_runtime */ "Sin tiempo legible asociado; solo recuento.",
@@ -1247,7 +1240,7 @@ DESCRIPTION_I18N.es = descriptionValues([
 MODEL_DESCRIPTION_I18N.es = modelDescriptionValues([
   ["Mensajes de la bomba", "no prueban causa ni resolución."], // health_fault
   ["R5T: un punto del depósito estratificado, no energía.", "Indicio interno ≥0,8 K/h sin señales de bomba/consumo. Consumo posible sin señales; 0 K/h no excluye pérdidas. Circulación no prueba causa."], // health_dhw_loss
-  ["Arranques compresor", "Regla interna: ≥12 ciclos de calefacción, media <10 min; ≥90% de todos los ciclos completos clasificados, salvo transferencias confirmadas, y ≥90% de cobertura calefacción/tiempo incierto. No es límite Daikin."], // health_cycling
+  ["Muestra los arranques observados y los ciclos terminados.", "Muchos ciclos cortos de calefacción pueden indicar arranques demasiado frecuentes."], // health_cycling
   ["Desescarche", "≥3 asociados, >15% del tiempo de marcha del compresor con estados de compresor y desescarche legibles. Regla interna, no Daikin; faltan humedad y temperatura de toda la batería."], // health_defrost
   ["Presión", "regla interna común ≤1,0 bar; 60 s continuos observados dan AVISO. No universal; rige el manual del modelo."], // health_pressure
   ["Caudal tras 60 s de bomba", "El límite exige mismo modelo/modo/condiciones; no nominal ni prueba de flujo insuficiente."], // health_flow

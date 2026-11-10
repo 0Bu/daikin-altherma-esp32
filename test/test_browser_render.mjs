@@ -1266,8 +1266,9 @@ async function assertPlantDiagnosis(page, context) {
           observed_s: 14285, required_s: 3600, circulation_known_s: 14285,
           circulation_on_s: 3600, aborts: 3, abort_reasons: ["charge", "blind"],
           best_aborted_s: 2400 },
-        { id: "cycling", verdict: "ok", evidence: "observation", reason: "class_unavailable",
-          starts: 17, mean_run_s: null, space_runs: null, censored_runs: 3,
+        { id: "cycling", verdict: "ok", evidence: "observation", reason: "class_population_incomplete",
+          starts: 17, mean_run_s: null, space_runs: 12, space_mean_run_s: 960,
+          dhw_runs: 2, dhw_mean_run_s: 900, censored_runs: 3,
           observed_s: 77760, required_s: 77760, classified_runtime_s: 5400, censored_runtime_s: 600,
           hours_epoch: 1,
           hours: [
@@ -1352,13 +1353,24 @@ async function assertPlantDiagnosis(page, context) {
     assert.equal(blocks.length, 9, `${context}: include the independent refrigerant observation`);
     const normalLabel = await page.evaluate("t('normal.label')");
     for (const block of blocks) {
+      if (block.id === "model:health_cycling") continue;
       assert.equal(block.count, 3, `${context}/${block.id}: exactly three blocks`);
       assert.equal(block.firstValue, 'vdesc-n', `${context}/${block.id}: value first`);
       assert.equal(block.normal, normalLabel, `${context}/${block.id}: Normal last`);
       assert.ok(block.text.every(text => text.trim()), `${context}/${block.id}: no empty block`);
     }
-    const stopText = () => page.evaluate(`document.querySelector("[data-desc='model:health_cycling']")
-      .closest('.vitem').innerText`);
+    const cyclingDetail = () => page.evaluate(`(() => {
+      const row = document.querySelector("[data-desc='model:health_cycling']").closest(".vitem");
+      const body = row.querySelector(".vdesc-body");
+      return {
+        total: body.querySelector(".checkup-cycling-total")?.textContent,
+        assessment: body.querySelector(".checkup-cycling-assessment")?.textContent,
+        rows: Array.from(body.querySelectorAll(".checkup-cycling-grid .inspect-row"),
+          run => Array.from(run.children, cell => cell.textContent)),
+        historyText: body.querySelector("[data-checkup-hours]")?.innerText,
+        oldStopBox: !!body.querySelector(".checkup-stop-box"),
+      };
+    })()`);
     assert.equal(await page.evaluate(`document.querySelectorAll(".checkup-cycling-chart").length`), 1,
       `${context}: cycling chart must render when starts exist`);
     assert.equal(await page.evaluate(`document.querySelectorAll(".checkup-chart-cols > .checkup-chart-col").length`),
@@ -1373,49 +1385,39 @@ async function assertPlantDiagnosis(page, context) {
     assert.doesNotMatch(neutral.label, /Ø/, `${context}: hourly runtime carries no completed-run mean`);
     assert.deepEqual(heating.parts, ["space"], `${context}: witnessed heating retains its mode`);
     assert.notEqual(neutral.color, heating.color, `${context}: unassigned and heating runtime differ visually`);
-    assert.ok((await stopText()).includes(await page.evaluate("t('check.stop.population', '4')")),
-      `${context}: hourly chart must keep independent stop observations visible`);
-    assert.ok((await stopText()).includes(await page.evaluate("t('check.detail.class_missing')")),
-      `${context}: hourly chart must retain the classification reason`);
-    assert.ok((await stopText()).includes(
-      await page.evaluate("t('check.detail.channel_coverage', t('mode.heat'), '90%')")),
-      `${context}: hourly chart must retain readable runtime coverage`);
+    const cycling = await cyclingDetail();
+    assert.equal(cycling.total, await page.evaluate("t('check.starts', 17)"),
+      `${context}: the total is separate from completed runs`);
+    const cyclingCopy = await page.evaluate(`[
+      [t("mode.heat"), t("check.cycling.runs", 12) + " · " + t("check.cycling.mean", "16 min")],
+      [t("mode.dhw"), t("check.cycling.runs", 2) + " · " + t("check.cycling.mean", "15 min")],
+      [t("check.cycling.unclear"), t("check.cycling.runs", 3)],
+      t("check.cycling.assessment") + " · " + t("check.cycling.waiting")
+    ]`);
+    assert.deepEqual(cycling.rows, cyclingCopy.slice(0, 3), `${context}: separate purpose rows`);
+    assert.equal(cycling.assessment, cyclingCopy[3], `${context}: one plain-language assessment`);
+    assert.equal(cycling.oldStopBox, false, `${context}: cycling detail omits the technical stop table`);
     await captureNativeEvidence(page, `${context}/cycling-with-starts`,
       "[data-desc='model:health_cycling']", ".vitem");
-    // A missing legacy cycling population must leave the independent stop context accessible
-    // through the same real disclosure, retaining the firmware's unavailable verdict.
+    // The same disclosure separates unavailable cycling data from a genuine observed zero.
     await page.evaluate(`(() => {
-      Object.assign(S.status.health.checks[2], { starts: null, verdict: 'unavailable', split: false });
+      Object.assign(S.status.health.checks[2], { starts: null, verdict: 'unavailable', split: false,
+        space_runs: null, dhw_runs: null, censored_runs: null, hours: [] });
       renderApp(); return true;
     })()`);
     await page.frame();
-    assertLayout(await page.evaluate(layoutAudit), `${context}/stop-context-without-legacy`);
+    assertLayout(await page.evaluate(layoutAudit), `${context}/cycling-unavailable`);
     assert.equal(await page.evaluate(`document.querySelector("[data-desc='model:health_cycling'] .vrow-val").innerText`),
       await page.evaluate("t('check.status.unavailable')"), `${context}: preserve core cycling verdict`);
-    for (const [key, args] of [["population", ["4"]], ["counts", []], ["rule", []], ["limits", []],
-      ["loss", ["≥1"]]]) {
-      const expected = await page.evaluate(`t(${JSON.stringify("check.stop." + key)},
-        ...${JSON.stringify(args)})`);
-      assert.ok((await stopText()).includes(expected), `${context}: stop context retains ${key}`);
-    }
-    for (const text of ["3 / 4 / 2", "0 / 0 / 0"])
-      assert.ok((await stopText()).includes(text), `${context}: retain explicit category counts ${text}`);
-    const lossIsSeparate = await page.evaluate(`(() => {
-      const row = document.querySelector("[data-desc='model:health_cycling']").closest('.vitem');
-      const text = t('check.stop.loss', '≥1');
-      return Array.from(row.querySelectorAll('.vdesc-p')).some(p => p.innerText === text);
-    })()`);
-    assert.equal(lossIsSeparate, true,
-      `${context}: storage-loss watermark has its own paragraph outside the six stop qualifiers`);
-    const states = await page.evaluate("t('check.stop.states').split('|')");
-    for (const index of [2, 3, 4, 5, 6, 8])
-      assert.ok((await stopText()).includes(states[index]), `${context}: retain stop state ${index}`);
-    assert.ok((await stopText()).includes(await page.evaluate("t('check.stop.population', '4')")),
-      `${context}: independent stop observations survive unavailable legacy evidence`);
-    assert.ok((await stopText()).includes(await page.evaluate("t('check.detail.observation')")),
-      `${context}: unavailable legacy classification remains an observation without a new verdict`);
-    assert.ok(!(await stopText()).includes(await page.evaluate("t('check.detail.unavailable')")),
-      `${context}: legacy unavailability cannot deny all readable profile evidence`);
+    const unavailable = await cyclingDetail();
+    assert.equal(unavailable.total, undefined, `${context}: no invented start count`);
+    assert.deepEqual(unavailable.rows, [], `${context}: no invented completed runs`);
+    assert.equal(unavailable.assessment,
+      await page.evaluate("t('check.cycling.assessment') + ' · ' + t('check.cycling.unavailable')"),
+      `${context}: unavailable evidence has its own short assessment`);
+    assert.equal(unavailable.historyText, await page.evaluate("t('check.cycling.history_empty')"),
+      `${context}: no history is distinct from zero starts`);
+    assert.equal(unavailable.oldStopBox, false);
     const discardedContext = await page.evaluate(`(() => {
       const fixture = S.status.health.checks.find(check => check.id === 'dhw_loss');
       return t('check.detail.dhw_aborted', fixture.aborts,

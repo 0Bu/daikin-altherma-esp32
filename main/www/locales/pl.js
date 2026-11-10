@@ -1,4 +1,4 @@
-// translation-source: 0a9b357c29bd7c842a11f7de464d548af9a92316c15c31e50a54b1facf17e59e
+// translation-source: 0b470978cad369ab40b1d667fab094bf6ef0be09a0378a8774c5e68b4a7b5bfe
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -203,7 +203,6 @@ I18N.pl = localeValues([
   /* check.detail.fault.past */ "Obecnie brak komunikatu; w tym okresie zapisano komunikat. Zniknięcie nie potwierdza przyczyny ani usunięcia problemu.",
   /* check.detail.fault.past_unknown */ "Zapisano komunikat; bieżący stan usterki jest nieczytelny.",
   /* check.detail.collecting */ (a, b) => `Czytelne sygnały: ${a} z wymaganych ${b}.`,
-  /* check.detail.outdoor_cycling */ " Dane zewnętrzne X10A obejmują tylko świeże próbki z zakończonych, konsekwentnie sklasyfikowanych cykli ogrzewania pomieszczeń. Stanowią kontekst i nie zmieniają progu ani oceny taktowania.",
   /* check.detail.outdoor_defrost */ " Dane zewnętrzne X10A obejmują tylko świeże próbki, gdy stan odszraniania i sprężarki był czytelny, a sprężarka pracowała. Stanowią kontekst i nie zmieniają progu ani oceny odszraniania.",
   /* check.detail.dhw_candidate */ (a, b, c, d) => `Przyjęte okna godzinowe: ${a}; bieżący kandydat: ${c} z ${d}.`,
   /* check.detail.dhw_settling */ (a, b, c) => `Przyjęte okna godzinowe: ${a}; wykryto ładowanie lub grzałkę zasobnika. Pozostały czas stabilizacji: ${c}.`,
@@ -223,21 +222,19 @@ I18N.pl = localeValues([
   /* check.starts */ (n) => `${n} ${plNoun(n, "uruchomienie", "uruchomienia", "uruchomień")}`,
   /* check.cycles */ (n) => `${n} ${plNoun(n, "cykl", "cykle", "cykli")}`,
   /* check.paired_cycles */ (n) => `${n} ${plNoun(n, "sparowany", "sparowane", "sparowanych")}`,
-  /* check.cycling_space */ (a, b) => `ogrzewanie ${a} · średnia ${b}`,
-  /* check.cycling_dhw */ (a, b) => `CWU ${a} · średnia ${b}`,
-  /* check.cycling_cooling */ (n) => `chłodzenie: wykluczono ${n}`,
-  /* check.cycling_censored */ (n) => `${n} ${plNoun(n, "niesklasyfikowany", "niesklasyfikowane", "niesklasyfikowanych")}`,
-  /* check.cycling_causes */ "przejście|restart/dziennik|nieobserwowany start",
-  /* check.stop.title */ "Kontekst zatrzymań",
-  /* check.stop.population */ (n) => `${n} zaobserwowanych zatrzymań po niedawnym grzaniu`,
-  /* check.stop.coverage */ (d, h) => `Czytelny czas sprężarki ${d} · ${h} przedziałów godzinowych`,
-  /* check.stop.categories */ "niska prędkość + różnica względem celu głównego|wycofanie żądania jednostki wewnętrznej|aktywne odszranianie|przejście ciepłej wody|zmiana obiegu/trybu",
-  /* check.stop.counts */ "dodatnich / ocenialnych / kompletnych",
-  /* check.stop.other */ "niesklasyfikowane|nieznane|częściowe|przerwane|zmiana celu|przepełnienie czasu",
-  /* check.stop.loss */ (n) => `Zgłoszenia utraty danych w pamięci ${n}`,
-  /* check.stop.states */ "Źródło niepotwierdzone|Obserwacja z datą|Obserwacja bez daty|Niepełne pokrycie 24 godzin|Przywracanie zapisanych godzin czeka na potwierdzenie zegara/źródła|Zakończone obserwacje czekają na zapis|Jedno zatrzymanie czeka na późniejsze próbki|Liczniki nasycone: dolne granice|nieobsługiwane|Brak czytelnej populacji zatrzymań.",
-  /* check.stop.rule */ "Tymczasowe okno projektu: ±30 s włącznie, bez odstępu próbek >15 s. Podczas potwierdzonego ogrzewania: 0 < prędkość sprężarki ≤22 obr./s, raportowana temperatura zasilania R1T przed grzałką wspomagającą ≥raportowany cel strefy głównej +2 K, cel stabilny przez 30 s.",
-  /* check.stop.limits */ "Kategorie i kwalifikatory nakładają się dla tych samych zachowanych zatrzymań. Ocenialne oznacza wynik dodatni lub kompletne próbkowane okno; tylko kompletne pozwala na wynik ujemny w próbkach. Odczyty nie wykluczają sygnałów między próbkami. R1T to raportowana temperatura zasilania przed elektryczną grzałką pomocniczą. Różnica względem raportowanego celu strefy głównej jest zaobserwowaną różnicą, a nie zmierzonym przeregulowaniem regulacji. Nie dowodzi przyczyny zatrzymania, minimalnej modulacji ani żądania zewnętrznego termostatu.",
+  /* check.cycling.runs */ (n) => `${n} ${plNoun(n, "cykl", "cykle", "cykli")}`,
+  /* check.cycling.mean */ (d) => `Śr. ${d}`,
+  /* check.cycling.completed */ "Zakończone cykle",
+  /* check.cycling.unclear */ "Nieustalone",
+  /* check.cycling.unclear_hint */ "W trakcie cyklu tryb może się zmienić lub może brakować części pomiarów.",
+  /* check.cycling.assessment */ "Ocena",
+  /* check.cycling.short */ "Wiele krótkich cykli grzania.",
+  /* check.cycling.normal */ "Bez oznak nietypowego taktowania podczas ogrzewania.",
+  /* check.cycling.few */ "Jeszcze za mało cykli ogrzewania.",
+  /* check.cycling.waiting */ "Potrzeba więcej danych.",
+  /* check.cycling.unavailable */ "Brak danych ze sprężarki.",
+  /* check.cycling.stale */ "Chwilowo brakuje odczytów.",
+  /* check.cycling.history_empty */ "Nie ma jeszcze historii.",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · średnia ${mean} °C`,
   /* check.min */ (m) => `${m} min`,
@@ -278,15 +275,11 @@ I18N.pl = localeValues([
   /* check.detail.age_label */ "Wiek ostatniego pomiaru:",
   /* check.detail.horizon_wait */ (a) => `Brakuje pełnego okna 24 godzin: pozostało ${a}.`,
   /* check.detail.fault.ok */ "Brak bieżącego lub zapisanego komunikatu w czytelnych sygnałach usterek.",
-  /* check.detail.cycling.info */ "Średni cykl ogrzewania <10 min: wskazówka projektu.",
-  /* check.detail.cycling.ok */ "Bez wskazówki krótkich zakończonych cykli ogrzewania.",
   /* check.detail.defrost.info */ "≥3 powiązane odszraniania przekraczają 15% czytelnego czasu sprężarki: wskazówka projektu.",
   /* check.detail.defrost.ok */ "Bez wskazówki udziału; pogoda i luki nieocenione.",
   /* check.detail.pressure.info */ "Zapisane minimum ≤1,0 bar; ciągłe 60 s niepotwierdzone. Fizyczna poprawność i przyczyna nieznane.",
   /* check.detail.pressure.warn */ "Zapisano ciągłe ≥60 s ≤1,0 bar; nie określa obecnego ciśnienia.",
   /* check.detail.pressure.ok */ "Brak przyjętego ciśnienia ≤1,0 bar, progu projektu.",
-  /* check.detail.class_missing */ "Niepełna klasyfikacja; bez wspólnej oceny taktowania.",
-  /* check.detail.heating_runs_insufficient */ "<12 pełnych cykli ogrzewania do oceny.",
   /* check.detail.defrost_events_insufficient */ "Mniej niż trzy powiązane odszraniania; bez oceny udziału.",
   /* check.detail.source_stale */ "Brak świeżego odczytu X10A; bieżący stan nieznany. Historia zachowana.",
   /* check.detail.no_paired_runtime */ "Brak powiązanego czytelnego czasu; tylko liczba.",
@@ -1241,7 +1234,7 @@ DESCRIPTION_I18N.pl = descriptionValues([
 MODEL_DESCRIPTION_I18N.pl = modelDescriptionValues([
   ["Komunikaty pompy", "nie dowodzą przyczyny ani naprawy."], // health_fault
   ["R5T: punkt warstwowego zbiornika, nie energia.", "Próg projektu ≥0,8 K/h bez oznaczeń pompy/poboru. Pobór możliwy bez oznaczeń; 0 K/h nie wyklucza strat. Cyrkulacja nie dowodzi przyczyny."], // health_dhw_loss
-  ["Starty sprężarki", "Reguła projektu: ≥12 cykli ogrzewania, średnia <10 min; ≥90% wszystkich zakończonych cykli sklasyfikowanych bez potwierdzonych przełączeń i ≥90% pokrycia czasu ogrzewania/niepewnego. To nie limit Daikin."], // health_cycling
+  ["Pokazuje zaobserwowane uruchomienia i zakończone cykle.", "Wiele krótkich cykli grzania może świadczyć o zbyt częstym uruchamianiu."], // health_cycling
   ["Odszranianie", "≥3 powiązane, >15% czasu pracy sprężarki przy czytelnych stanach sprężarki i odszraniania. Reguła projektu, nie Daikin; brak wilgotności i temperatury całego wymiennika."], // health_defrost
   ["Ciśnienie", "wspólna reguła projektu ≤1,0 bar; 60 s ciągłej obserwacji daje ostrzeżenie. Nie uniwersalna; obowiązuje instrukcja modelu."], // health_pressure
   ["Przepływ po 60 s pompy", "Limit wymaga tego samego modelu/trybu/warunków; nie nominalny ani dowód małego przepływu."], // health_flow
