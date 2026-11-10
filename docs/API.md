@@ -287,10 +287,10 @@ after collection stops can start a new epoch. `end_unix_s` gives the mapped or j
 when known. The journal may clamp the saved end into its assigned wall-clock hour. The open slot
 alone has `elapsed_s`, the monotonic seconds since its start, from 0 to 3600. `restored:true`
 identifies a saved slot whose original elapsed duration is unknown. It may be a short record saved
-at restart. Other closed slots with current-format identities use a nominal 3600 seconds. Legacy
-slots lack enough information to establish elapsed duration. Infer missing time from `observed_s`
-only when the elapsed duration is known.
-`expired:true` marks an empty positional placeholder retained after its evidence ages out.
+at restart. `expired:true` keeps only the slot's position after its evidence ages out. Its duration
+and gap estimate are unknown. Only closed slots with a current-format identity and neither flag
+use a nominal 3600 seconds. Legacy slots also have unknown elapsed duration. Infer missing time
+from `observed_s` only when the elapsed duration is known.
 
 `starts` is a lower bound based on available readings. Within a continuous segment, known OFF
 followed by missing readings and a return to known ON establishes at least one start. The firmware

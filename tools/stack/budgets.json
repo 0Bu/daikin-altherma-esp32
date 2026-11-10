@@ -2281,6 +2281,10 @@
       "pattern": "^daik::\\(anonymous namespace\\)::checkup_persist_crc\\(",
       "max_bytes": 32
     },
+    "cycling_layout_fingerprint": {
+      "pattern": "^daik::logic::checkup_layout_fingerprint\\(\\)$",
+      "max_bytes": 32
+    },
     "mqtt_room_history": {
       "pattern": "^daik::record_room_history\\(daik::Config\\ const\\&,\\ unsigned\\ long\\)$",
       "max_bytes": 256
@@ -2934,7 +2938,8 @@
         "checkup_report",
         "cycling_expire",
         "cycling_seal",
-        "cycling_crc"
+        "cycling_crc",
+        "history_config_crc"
       ],
       "multipliers": {},
       "base_bytes": 1536,
@@ -2947,7 +2952,39 @@
         "checkup_report",
         "cycling_expire",
         "cycling_seal",
-        "cycling_crc"
+        "cycling_crc",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_checkup_expire_fingerprint": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "checkup_report",
+        "cycling_expire",
+        "cycling_seal",
+        "cycling_layout_fingerprint",
+        "checkup_schema_crc",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_direct_checkup_expire_fingerprint": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "checkup_report",
+        "cycling_expire",
+        "cycling_seal",
+        "cycling_layout_fingerprint",
+        "checkup_schema_crc",
+        "history_config_crc"
       ],
       "multipliers": {},
       "base_bytes": 1536,
@@ -6715,6 +6752,7 @@
     "mqtt_cycling_evidence": {
       "symbols": [
         "mqtt_task",
+        "mqtt_heartbeat",
         "mqtt_heartbeat_builder",
         "cycling_evidence",
         "cycling_aggregate",
@@ -6727,11 +6765,29 @@
     "mqtt_cycling_expire": {
       "symbols": [
         "mqtt_task",
+        "mqtt_heartbeat",
         "mqtt_heartbeat_builder",
         "cycling_evidence",
         "cycling_expire",
         "cycling_seal",
-        "cycling_crc"
+        "cycling_crc",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_cycling_expire_fingerprint": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_heartbeat",
+        "mqtt_heartbeat_builder",
+        "cycling_evidence",
+        "cycling_expire",
+        "cycling_seal",
+        "cycling_layout_fingerprint",
+        "checkup_schema_crc",
+        "history_config_crc"
       ],
       "multipliers": {},
       "base_bytes": 1536,
@@ -11633,6 +11689,8 @@
         "httpd_direct_status",
         "httpd_mcp_checkup",
         "httpd_direct_checkup",
+        "httpd_mcp_checkup_expire_fingerprint",
+        "httpd_direct_checkup_expire_fingerprint",
         "httpd_mcp_cycling_hours",
         "httpd_direct_cycling_hours",
         "httpd_mcp_checkup_aggregate",
@@ -11926,6 +11984,7 @@
         "mqtt_discovery_owner_subscribe_callback",
         "mqtt_cycling_evidence",
         "mqtt_cycling_expire",
+        "mqtt_cycling_expire_fingerprint",
         "mqtt_room_history_validate",
         "mqtt_room_history_commit",
         "mqtt_stop_report",

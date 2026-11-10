@@ -873,13 +873,20 @@ def validate_http_stack(budgets: dict[str, Any], source: str) -> None:
 
 
 def validate_status_diagnosis_paths(budgets: dict[str, Any], sources: dict[str, str]) -> None:
-    """Keep diagnosis frames on their actual HTTP callers."""
+    """Keep diagnosis frames on their actual HTTP and MQTT callers."""
     report = ["http_send_status_json", "status_serializer", "checkup_report"]
+    # Sealing calls the layout fingerprint and stored-record CRC sequentially. Both call
+    # config_crc32_update, with a separate encoded-word frame only under the fingerprint.
+    expire = ["cycling_expire", "cycling_seal"]
+    expire_crc = [*expire, "cycling_crc", "history_config_crc"]
+    expire_fingerprint = [*expire, "cycling_layout_fingerprint", "checkup_schema_crc",
+                          "history_config_crc"]
     # Report descendants run sequentially. The pure chart builder and clock are also siblings
     # within the same locked snapshot, while the evaluator keeps its summarizer and evidence
     # classifier nested. Reuse the same aggregate and fold frames that the MQTT evidence uses.
     report_tails = {
-        "checkup": ["cycling_expire", "cycling_seal", "cycling_crc"],
+        "checkup": expire_crc,
+        "checkup_expire_fingerprint": expire_fingerprint,
         "checkup_aggregate": ["cycling_aggregate", "cycling_fold"],
         "checkup_evaluate": ["checkup_evaluate", "checkup_summarize", "checkup_evidence_name"],
         "checkup_dhw_progress": ["checkup_dhw_progress", "checkup_dhw_age"],
@@ -912,6 +919,16 @@ def validate_status_diagnosis_paths(budgets: dict[str, Any], sources: dict[str, 
         if (name not in http_paths or rule.get("symbols") != members or rule.get("multipliers") != {}
                 or rule.get("base_bytes") != 1536 or rule.get("max_bytes") != 8192):
             raise BudgetError(f"diagnosis status path {name}: HTTP caller/report accounting changed")
+    heartbeat = ["mqtt_task", "mqtt_heartbeat", "mqtt_heartbeat_builder", "cycling_evidence"]
+    mqtt_paths = set(budgets["tasks"]["mqtt"]["paths"])
+    for name, tail in (
+        ("mqtt_cycling_evidence", ["cycling_aggregate", "cycling_fold"]),
+        ("mqtt_cycling_expire", expire_crc),
+        ("mqtt_cycling_expire_fingerprint", expire_fingerprint),
+    ):
+        rule = {"symbols": heartbeat + tail, "multipliers": {}, "base_bytes": 1536, "max_bytes": 5120}
+        if name not in mqtt_paths or budgets["paths"].get(name) != rule:
+            raise BudgetError(f"diagnosis status path {name}: MQTT heartbeat accounting changed")
     actual_report_paths = {name for name, rule in budgets["paths"].items()
                            if "checkup_report" in rule["symbols"]}
     if actual_report_paths != report_paths.keys():
@@ -941,6 +958,27 @@ def validate_status_diagnosis_paths(budgets: dict[str, Any], sources: dict[str, 
                    if path.endswith(".cpp") and path not in {"main/checkup.cpp", "main/http_status.cpp"})):
         raise BudgetError("diagnosis status source: direct/MCP-only serializer caller contract changed")
     checkup = stack_source_code(sources["main/checkup.cpp"])
+    mqtt = stack_source_code(sources["main/mqtt_ha.cpp"])
+    persist = stack_source_code(sources["main/logic/checkup_persist.hpp"])
+    for caller, callee in (
+        (stack_function_body(mqtt, "mqtt_task"), "publish_heartbeat"),
+        (stack_function_body(mqtt, "publish_heartbeat"), "build_heartbeat_payload"),
+        (stack_function_body(mqtt, "build_heartbeat_payload"), "checkup_cycling_evidence"),
+        (stack_function_body(checkup, "checkup_cycling_evidence"), "expire_restored_locked"),
+        (stack_function_body(checkup, "checkup_cycling_evidence"), "logic::checkup_aggregate"),
+        (stack_function_body(checkup, "expire_restored_locked"), "checkup_persist_seal"),
+        (stack_function_body(checkup, "checkup_persist_seal"), "logic::checkup_layout_fingerprint"),
+        (stack_function_body(checkup, "checkup_persist_seal"), "checkup_persist_crc"),
+        (stack_function_body(persist, "checkup_fp_u32"), "config_crc32_update"),
+    ):
+        if len(re.findall(r"\b" + re.escape(callee) + r"\s*\(", caller)) != 1:
+            raise BudgetError(f"diagnosis status source: {callee} cycling stack path changed")
+    for source, caller, callee in (
+        (checkup, "checkup_persist_crc", "config_crc32_update"),
+        (persist, "checkup_layout_fingerprint", "checkup_fp_u32"),
+    ):
+        if not re.search(r"\b" + callee + r"\s*\(", stack_function_body(source, caller)):
+            raise BudgetError(f"diagnosis status source: {caller} cycling stack path changed")
     report_body = stack_function_body(checkup, "checkup_report")
     hours_body = stack_function_body(checkup, "checkup_cycling_hours_locked")
     if (len(re.findall(r"\bcheckup_report\s*\(", checkup)) != 1
@@ -2805,6 +2843,7 @@ def self_test() -> None:
      'daik::logic::checkup_journal_in_window(long long, long long)': 32,
      'daik::(anonymous namespace)::checkup_persist_seal()': 32,
      'daik::(anonymous namespace)::checkup_persist_crc()': 32,
+     'daik::logic::checkup_layout_fingerprint()': 32,
      'daik::logic::checkup_aggregate(daik::logic::CheckupRing const&)': 32,
      '_ZZN4daik5logic17checkup_aggregateERKNS0_11CheckupRingEENKUlRKNS0_13CheckupBucketEE_clES6_$isra$0': 64,
      STATUS_HEALTH_NUMBER_SYMBOL: 32,
@@ -3458,8 +3497,13 @@ def self_test() -> None:
     assert selected["status_serializer"] == 4848
     assert selected["path:httpd_mcp_status"] == 8192
     assert selected["path:httpd_direct_status"] == 6960
-    assert selected["path:httpd_mcp_checkup"] == 7920
-    assert selected["path:httpd_direct_checkup"] == 6688
+    assert selected["path:httpd_mcp_checkup"] == 7952
+    assert selected["path:httpd_direct_checkup"] == 6720
+    assert selected["path:httpd_mcp_checkup_expire_fingerprint"] == 7984
+    assert selected["path:httpd_direct_checkup_expire_fingerprint"] == 6752
+    assert selected["path:mqtt_cycling_evidence"] == 2944
+    assert selected["path:mqtt_cycling_expire"] == 2992
+    assert selected["path:mqtt_cycling_expire_fingerprint"] == 3024
     assert selected["path:httpd_mcp_cycling_hours"] == 8112
     assert selected["path:httpd_direct_cycling_hours"] == 6880
     assert selected["path:httpd_mcp_checkup_aggregate"] == 7904
@@ -3653,13 +3697,19 @@ def self_test() -> None:
 
     status_sources = {path: (REPO / path).read_text(encoding="utf-8")
                       for path in ("main/http_status.cpp", "main/mcp_server.cpp", "main/hp_poll.cpp",
-                                   "main/checkup.cpp", "main/logic/checkup.hpp")}
+                                   "main/checkup.cpp", "main/logic/checkup.hpp", "main/mqtt_ha.cpp",
+                                   "main/logic/checkup_persist.hpp")}
     validate_status_diagnosis_paths(budgets, status_sources)
     diagnosis_controls = 0
     for name, member in (("httpd_direct_checkup", "checkup_report"),
                          ("httpd_mcp_checkup", "checkup_report"),
                          ("httpd_mcp_checkup", "cycling_expire"),
                          ("httpd_direct_checkup", "cycling_crc"),
+                         ("httpd_direct_checkup_expire_fingerprint", "cycling_layout_fingerprint"),
+                         ("httpd_mcp_checkup_expire_fingerprint", "checkup_schema_crc"),
+                         ("mqtt_cycling_evidence", "mqtt_heartbeat"),
+                         ("mqtt_cycling_expire", "mqtt_heartbeat"),
+                         ("mqtt_cycling_expire_fingerprint", "history_config_crc"),
                          ("httpd_direct_cycling_hours", "checkup_report"),
                          ("httpd_mcp_cycling_hours", "checkup_report"),
                          ("httpd_direct_cycling_hours", "checkup_cycling_hours_locked"),
@@ -3701,7 +3751,7 @@ def self_test() -> None:
     diagnosis_controls += 1
     for member in ("cycling_aggregate", "cycling_fold", "checkup_evaluate", "checkup_summarize",
                    "checkup_evidence_name", "checkup_dhw_progress", "checkup_dhw_age",
-                   "checkup_dhw_fold", "checkup_cycling_hours_build"):
+                   "checkup_dhw_fold", "checkup_cycling_hours_build", "cycling_layout_fingerprint"):
         rule = budgets["symbols"][member]
         pattern = re.compile(rule["pattern"])
         for grown in (False, True):
@@ -3728,6 +3778,13 @@ def self_test() -> None:
         ("main/http_status.cpp", "return http_send_status_json(req, {}, {}, redact);", "return ESP_FAIL;"),
         ("main/http_status.cpp", "checkup_report(&hrs)", "checkup_report(nullptr)"),
         ("main/mcp_server.cpp", "return http_send_status_json(req, response, suffix, false);", "return ESP_FAIL;"),
+        ("main/mqtt_ha.cpp", "publish_heartbeat();", "other_heartbeat();"),
+        ("main/checkup.cpp", "P().layout_fp = logic::checkup_layout_fingerprint();",
+         "P().layout_fp = 0;"),
+        ("main/checkup.cpp", "P().crc                    = checkup_persist_crc();",
+         "P().crc                    = 0;"),
+        ("main/logic/checkup_persist.hpp", "return config_crc32_update(crc, b, sizeof(b));",
+         "return crc;"),
         ("main/hp_poll.cpp", "static void poll_task(void*) {",
          "static void poll_task(void*) { checkup_report();"),
         ("main/checkup.cpp", "[[gnu::noinline]] static logic::CheckupCyclingHours",
