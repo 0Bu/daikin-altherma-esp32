@@ -712,15 +712,12 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .vrow-val { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--fg); white-space: nowrap; }
 .vrow-val.ok { color: var(--ok); } .vrow-val.warn { color: var(--warn); } .vrow-val.err { color: var(--err); }
 .vrow-val.dim { color: var(--muted); }
-/* Diagnosis headers use compact readings. Keep their value and chevron on the label's line. */
+/* Keep each diagnosis reading and chevron together beside the label at the shared row font sizes. */
 [data-dashboard-card="diagnosis"] .vrow-desc {
   display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 8px;
 }
 [data-dashboard-card="diagnosis"] .vrow-desc > .vrow-label {
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: clamp(13px, 4vw, 14.5px);
-}
-.vrow-val.checkup-val {
-  font-size: clamp(13px, 4vw, 15px); line-height: 1.35;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 /* A Settings summary may combine a source name, reading and freshness. Keep ordinary scalar rows
    compact, but let these summaries and conditional errors wrap instead of widening the card. */

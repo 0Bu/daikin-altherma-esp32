@@ -1,6 +1,6 @@
 ---
 name: ui-use-case-review
-description: Exercise the complete daikin-altherma-esp32 device UI before merge, including navigation, every modal lifecycle, valid and invalid submissions, server rejection, conditional board/sensor states, language and rendering contracts. Use after any change under main/www, UI tests, UI audit tooling, or UI-facing HTTP configuration behavior, and before merging a PR that can affect what users see or click.
+description: Exercise the complete daikin-altherma-esp32 device UI before merge, including navigation, modal lifecycles, submissions, server rejection, conditional states, localization, rendering and design consistency. Use after any change under main/www, UI tests, UI audit tooling, or UI-facing HTTP configuration behavior, and before merging a PR that can affect what users see or click.
 ---
 
 # UI use-case review
@@ -81,6 +81,14 @@ markup. Check:
 - every shipped locale in `UI_LANGS` fits; every changed translation preserves the source meaning
   and claim limits, including copy in `main/www/locales/`;
 - browser console errors remain empty throughout the path.
+
+Compare typography, spacing, and alignment on rendered peer cards at each affected breakpoint,
+using the [shared layout rules](../../../docs/DESIGN.md#3-layout-tokens). Compare computed font sizes
+by role, such as diagnosis labels and values against their counterparts in Operation. Headings,
+labels, values, and units retain their distinct roles. Flag card-specific overrides that depart
+from the shared design. Solve space constraints with layout or compact summary content and verify
+that the full reading remains visible. Extend the existing browser assertions for a design
+regression and verify that the old styling fails the new check.
 
 Use deterministic fixtures for visual states. Do not write device configuration during a pre-merge
 review unless the user explicitly requested a live-device test.

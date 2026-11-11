@@ -1219,7 +1219,15 @@ async function captureNativeEvidence(page, context, target = "valueGroups", ance
 async function assertDiagnosisSummaryRows(page, context) {
   const layout = await page.evaluate(`(() => {
     const card = document.querySelector('[data-dashboard-card="diagnosis"]');
+    const reference = document.querySelector('[data-dashboard-card="group:Operation"]');
+    const labelSize = getComputedStyle(reference.querySelector('.vrow-label')).fontSize;
+    const valueSize = getComputedStyle(reference.querySelector('.vrow-val')).fontSize;
     const rows = Array.from(card.querySelectorAll('button.vrow-desc'));
+    const mismatchedFonts = rows.flatMap(row => {
+      const label = getComputedStyle(row.querySelector('.vrow-label')).fontSize;
+      const value = getComputedStyle(row.querySelector('.vrow-val')).fontSize;
+      return label === labelSize && value === valueSize ? [] : [{ id: row.dataset.desc, label, value }];
+    });
     const invalid = rows.flatMap(row => {
       const bounds = row.getBoundingClientRect();
       const label = row.querySelector('.vrow-label').getBoundingClientRect();
@@ -1236,9 +1244,11 @@ async function assertDiagnosisSummaryRows(page, context) {
       return !fragments.length || wrapped || clipped || separateLine || overflow
         ? [{ id: row.dataset.desc, value: value.innerText, wrapped, clipped, separateLine, overflow }] : [];
     });
-    return { count: rows.length, invalid };
+    return { count: rows.length, labelSize, valueSize, mismatchedFonts, invalid };
   })()`);
   assert.ok(layout.count > 0, `${context}: diagnosis summary must render`);
+  assert.deepEqual(layout.mismatchedFonts, [],
+    `${context}: diagnosis must use the same label (${layout.labelSize}) and value (${layout.valueSize}) sizes as Operation`);
   assert.deepEqual(layout.invalid, [], `${context}: complete diagnosis readings must fit beside their labels`);
 }
 
