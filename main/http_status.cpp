@@ -2156,11 +2156,11 @@ static void append_values_array(JsonOut& j, const std::vector<CachedValue>& v,
     j += "]";
 }
 
-// The HomeHub rows, from the OTHER stack's cache (hp_modbus.cpp). A separate array rather than mixed
-// into the one above, because they are a separate source with its own liveness: merging them would
-// make "is this reading current?" a per-row question the consumer cannot answer. Each row carries the
-// concept it pairs on, or none when the HomeHub has no X10A counterpart for it (reported power,
-// Smart Grid mode) — those are simply Modbus-only readings.
+// The HomeHub rows, from the OTHER stack's cache (hp_modbus.cpp). A separate array rather than
+// mixed into the one above, because they are a separate source with its own liveness: merging them
+// would make "is this reading current?" a per-row question the consumer cannot answer. Each row
+// carries the concept it pairs on, or none when the HomeHub has no X10A counterpart for it
+// (reported power, Smart Grid mode) — those are simply Modbus-only readings.
 template <typename JsonOut>
 static void append_modbus_values_array(JsonOut& j, const std::vector<CachedValue>& v) {
     j += "[";

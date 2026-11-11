@@ -16,9 +16,9 @@
 // (DISABLE, NEVER DEGRADE), which lwt_select and ou_stale already apply: blank the reading rather
 // than offer a second, dimmer register of half-valid numbers.
 //
-// Host-testable twin of www/js/schematic.js, like lwt_select.hpp and ou_stale.hpp: there is no firmware
-// caller. It lives here so the CI logic-test gates the rule against the WHOLE generated catalog
-// rather than against whichever profile the author happened to be looking at.
+// Host-testable twin of www/js/schematic.js, like lwt_select.hpp and ou_stale.hpp: there is no
+// firmware caller. It lives here so the CI logic-test gates the rule against the WHOLE generated
+// catalog rather than against whichever profile the author happened to be looking at.
 #include <cstddef>
 
 #include "lwt_select.hpp"   // lwt_ci_contains / lwt_is_water — same matching discipline, one copy
@@ -82,10 +82,10 @@ enum class CopScope { None, HeatPump, Plant };
 // Why there is no COP to show. Each value is a DIFFERENT sentence in the UI — suppressing one wrong
 // claim must not substitute another, the rule ou_stale.hpp already states for the pel explainer.
 enum class CopBlock {
-    None,           // a COP is formable
-    NoPelSource,    // no current row, or the only one is frozen with the outdoor unit
-    BuhNoPostBuh,   // CT estimate, backup heater active or unknown, no usable post-BUH row
-    TankHeater,     // CT estimate, tank heater active or unknown; neither water sensor includes it
+    None,         // a COP is formable
+    NoPelSource,  // no current row, or the only one is frozen with the outdoor unit
+    BuhNoPostBuh, // CT estimate, backup heater active or unknown, no usable post-BUH row
+    TankHeater,   // CT estimate, tank heater active or unknown; neither water sensor includes it
 };
 
 struct CopPlan {
