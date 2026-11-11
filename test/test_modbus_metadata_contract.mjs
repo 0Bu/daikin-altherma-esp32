@@ -163,6 +163,14 @@ const oracles = {
       absent(row, "binary", "enum", "profile", "concept", "history");
     }
   },
+  "http-flow-scale": (rows) => {
+    assert.deepEqual(rows.map(row => row.value), [12, 12, 1.85]);
+    absent(rows[0], "flow_scale_unverified", "profile");
+    assert.equal(rows[1].flow_scale_unverified, true);
+    absent(rows[1], "profile");
+    absent(rows[2], "flow_scale_unverified");
+    assert.equal(rows[2].profile, "altherma4");
+  },
   "http-owned-snapshot": (rows) => {
     assert.equal(rows.length, 7);
     assert.equal(rows[0].enum, "altherma4_quiet_selection");
@@ -236,6 +244,9 @@ try {
     { name: "http-current-profile", consumer: "http", oracle: "http-owned-snapshot",
       before: "def::homehub_definition_is_altherma4(v[i].modbus_definition)",
       after: "(mb_active_profile() == ModbusProfile::Altherma4)" },
+    { name: "http-flow-qualification-offset", consumer: "http", oracle: "http-flow-scale",
+      before: "reg && reg->offset == 49 && v[i].modbus_flow_scale_unverified",
+      after: "reg && v[i].modbus_flow_scale_unverified" },
     { name: "mqtt-current-profile", consumer: "mqtt", oracle: "mqtt-owned-snapshot",
       before: "def::homehub_definition(cache[i].modbus_definition)",
       after: "(mb_active_profile() == ModbusProfile::Altherma4 ? def::altherma4_find(cache[i].off) : def::homehub_find(cache[i].off))" },

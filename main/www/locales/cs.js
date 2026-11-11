@@ -1,4 +1,4 @@
-// translation-source: 00f8393aee827b21e658965c9ff792c99c563d60de18775bb092ec7c42167e1f
+// translation-source: 320445530cf86efdf9387196a723bb766c3bfeda1c35a1ffd5e768a16fc6b70a
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -334,7 +334,7 @@ I18N.cs = localeValues([
   /* a4.operation_help */ "Hlásí Zastaveno, Ohřev zásobníku, Vytápění prostoru, Chlazení prostoru nebo Provoz pohonu. Jde o hlášený stav, nikoli důkaz užitečného přenosu tepla.",
   /* a4.heating_offset_help */ "Posouvá ekvitermní topnou křivku hlavní zóny v kelvinech. Jde o posun, nikoli naměřenou teplotu ani úplnou požadovanou teplotu vody.",
   /* a4.pre_phe_outdoor_help */ "Teplota vody před venkovním deskovým výměníkem tepla. Jde o snímač na straně vody, nikoli teplotu venkovního vzduchu nebo chladiva.",
-  /* a4.flow_help */ "Přepočet průtoku Altherma 4 není ověřen. Hodnota v L/min používá dosavadní přepočet; před hodnocením výkonu ji porovnejte s údajem jednotky.",
+  /* mb.flow_scale_help */ "Přepočet průtoku pro tento zdroj Modbus není ověřen. Porovnejte hodnotu s údajem na displeji jednotky.",
   /* a4.pump_help */ "Příručka Altherma 4 uvádí otáčky čerpadla, ale jednotku L/min. Zobrazená jednotka % je neověřený předpoklad; porovnejte s údajem jednotky.",
   /* a4.pressure_help */ "Přepočet tlaku Altherma 4 není ověřen. Hodnota v bar používá dosavadní přepočet; před hodnocením tlaku ji porovnejte s údajem jednotky.",
   /* a4.demand_response */ "Režim odezvy na poptávku",
@@ -990,12 +990,12 @@ INSPECT_I18N.cs = inspectValues(
       : `${fmt1(d.dt)} K. Kladná hodnota znamená předávání tepla vodě.`], // dt
     [(d) => d && d.pthKind === "cooling" ? "Chladicí výkon (odhad)" : "Tepelný výkon (odhad)", "Odhadovaný tepelný výkon na PHE", (d) => d && d.pthKind === "cooling" ? "Odhad tepla odebraného vodě: průtok × (R4T−R1T) × 4,186 při předpokladu vody. Snímače a glykol omezují přesnost; hodnota se ukáže jen při potvrzeném chlazení." : "Odhad tepla předaného vodě: průtok × (R1T−R4T) × 4,186 při předpokladu vody. Snímače a glykol omezují přesnost; BUH za R1T není zahrnut.", (d) => d.dtStale ? d.bsh === true ? "Přenos na PHE nelze spočítat bez potvrzeného oběhu. Těleso může dál ohřívat zásobník, ale jeho teplo míjí snímače PHE a sběrnice neudává jeho výkon." : "Výkon nelze spočítat bez potvrzeného pohybu vody přes PHE. Jde o chybějící pracovní bod, ne nulový výkon."
       : d.pth == null ? null : d.pthKind === "cooling" ? `≈ ${fmt1(d.pth)} kW chlazení${d.cop != null ? `, EER ${fmt1(d.cop)}` : ""}.` : `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `, COP ${fmt1(d.cop)}` : ""}.`], // pth
-    [(d) => d && d.efficiencyKind === "eer" ? "EER tepelného čerpadla (odhad)" : d && d.copScope === "plant" ? "COP za BUH (odhad)" : "COP tepelného čerpadla (odhad)", "Odhadovaná účinnost", (d) => d && d.efficiencyKind === "eer" ? "Odhadovaný chladicí výkon dělený odhadovaným příkonem. Výsledek přebírá předpoklady o kapalině, snímačích, napětí a účiníku; je okamžitý, ne sezonní." : "Odhadovaný tepelný výkon dělený příkonem se stejnou bilanční hranicí. U CT může být teplo za BUH, u proudu měniče jen tepelné čerpadlo; zapojení CT určuje zahrnuté spotřebiče. Výsledek přebírá předpoklady o kapalině, snímačích, napětí a účiníku a je okamžitý, nikoli sezonní.", (d) => d.copBlock === "tank_heater" ? "COP není dostupný — těleso zásobníku je zapnuté. Jeho příkon může být v elektrické bilanci, ale teplo jde přímo do zásobníku a míjí vodní snímače."
+    [(d) => d && d.efficiencyKind === "eer" ? "EER tepelného čerpadla (odhad)" : d && d.copScope === "plant" ? "COP podle proudu CT (odhad)" : "COP tepelného čerpadla (odhad)", "Odhadovaná účinnost", (d) => d && d.efficiencyKind === "eer" ? "Odhadovaný chladicí výkon dělený odhadovaným příkonem. Výsledek přebírá předpoklady o kapalině, snímačích, napětí a účiníku; je okamžitý, ne sezonní." : "Odhadovaný tepelný výkon dělený příkonem se stejnou bilanční hranicí. Při odhadu z CT se použije platný údaj R2T za záložním ohřívačem. Pokud chybí, lze použít R1T před ohřívačem jen při potvrzeném vypnutí ohřívače. Zapojení CT určuje zahrnuté spotřebiče. Proud měniče slouží k odhadu pro samotné tepelné čerpadlo. Výsledek přebírá předpoklady o kapalině, snímačích, napětí a účiníku a je okamžitý, nikoli sezonní.", (d) => d.copBlock === "tank_heater" ? "COP není dostupný — těleso zásobníku je zapnuté. Jeho příkon může být v elektrické bilanci, ale teplo jde přímo do zásobníku a míjí vodní snímače."
       : d.copBlock === "buh_no_r2t" ? "COP není dostupný — BUH topí, ale profil nemá snímač za ním; elektrická a tepelná hranice si neodpovídají."
-      : d.copBlock === "mb_scope" ? "COP není dostupný — HomeHub udává příkon celé jednotky včetně těles, ale tepelný výkon jen PHE. Bez stavu těles a snímače za nimi nelze hranice sladit."
+      : d.copBlock === "mb_scope" ? "COP není dostupný. Z dostupných údajů nelze přiřadit příkon z HomeHubu k odhadovanému tepelnému výkonu na deskovém výměníku. Není jasné, které spotřebiče včetně elektrických ohřívačů příkon zahrnuje."
       : d.copBlock === "no_pel" ? d.pelHeld ? "COP není dostupný — proud měniče je při stojícím kompresoru z minulého běhu." : "COP není dostupný — profil neudává CT ani proud měniče."
       : d.cop == null ? null : d.efficiencyKind === "eer" ? `${fmt1(d.cop)} kW chlazení na 1 kW elektřiny — ≈ ${fmt1(d.copPth)} kW při ≈ ${fmt1(d.pel)} kW příkonu.`
-      : d.copScope === "plant" ? `${fmt1(d.cop)} kW tepla za BUH na 1 kW příkonu CT — ≈ ${fmt1(d.copPth)} kW při ≈ ${fmt1(d.pel)} kW. Rozsah určuje zapojení CT.`
+      : d.copScope === "plant" ? `${fmt1(d.cop)} kW tepla na straně vody na 1 kW příkonu odhadnutého z CT — ≈ ${fmt1(d.copPth)} kW při ≈ ${fmt1(d.pel)} kW. Rozsah určuje zapojení CT.`
       : `${fmt1(d.cop)} kW tepla na 1 kW elektřiny v hranici čerpadla — ≈ ${fmt1(d.copPth)} kW při ≈ ${fmt1(d.pel)} kW. BUH je mimo obě veličiny.`], // cop
     ["Záložní topné těleso (BUH)", "Záložní topné těleso BUH", "Elektrické těleso ve vodním okruhu pro mráz, odmrazování nebo nouzový provoz. Stupeň není samostatné měření kW.", (d) => d.buh1 == null && d.buh2 == null ? null : d.buh2 ? "Stupeň 2 — pracují oba stupně." : d.buh1 ? "Stupeň 1 — pracuje jeden stupeň." : "Vypnuto — žádný stupeň BUH není aktivní."], // buh
     ["Elektrické těleso zásobníku", 0, "Ponorné těleso BSH ohřívá zásobník bez kompresoru a oběhu vody. X10A udává jen stav, ne výkon.", () => { const on = x10aDown() ? null : vOn(/^bsh$/i); return on == null ? null : on ? "Elektrické těleso zásobníku je aktivní." : "Vypnuto — zásobník těleso nepoužívá."; }], // bsh
@@ -1006,13 +1006,7 @@ INSPECT_I18N.cs = inspectValues(
       : waterMoving(d) ? d.thermalMode === "cool" && !compressorRunning(d, 5) && d.pthRaw != null && d.pthRaw > 0 ? `Zbytkově teplá voda proudí do domu. R1T ${degC(d.lwt)}; za spotřebiči není snímač. Nejde o aktivní chlazení.` : `Voda proudí do ${activeSpaceKind(d) === "cool" ? "chladicího" : activeSpaceKind(d) === "heat" ? "topného" : "domovního"} okruhu. R1T ${degC(d.lwt)}; za spotřebiči není snímač.` : "Čerpadlo a průtok nepotvrzují oběh domem."], // heat
     ["Provoz vytápění/chlazení domu", "Provoz vytápění nebo chlazení domu", "Stav běžného provozu domu. Není to požadavek termostatu a sám nepotvrzuje kompresor."], // spaceh
     ["Teplota místnosti", 0, "Teplota referenční zóny; porovnejte ji s nastavením a režimem."], // room
-    ["Oběhové čerpadlo", "Otáčky oběhového čerpadla", "Pohání vodu společným okruhem a cestou zvolenou 3WV. Může běžet při stojícím kompresoru kvůli doběhu nebo ochraně; otáčky samy nepotvrzují průtok.", (d) => d.pump == null && d.flow == null && d.pumpOn == null ? null
-      : pumpFlowConflict(d) ? `Čerpadlo hlásí stání, ale snímač ${fmt1(d.flow)} l/min. Možný je vnější oběh, doběh nebo rozporný/starý signál; ověřte oba údaje.`
-      : d.pump != null && d.pump > 0 ? d.flow != null ? `Otáčky ${fmt0(d.pump)} %; průtok ${fmt1(d.flow)} l/min.` : `Otáčky ${fmt0(d.pump)} %, ale průtok chybí; oběh není potvrzen.`
-      : waterMoving(d) ? `Průtok ${fmt1(d.flow)} l/min při chybějící použitelné hodnotě otáček.`
-      : d.pumpOn === true ? d.flow != null ? `Čerpadlo ZAP, ale průtok jen ${fmt1(d.flow)} l/min; oběh není potvrzen.` : "Čerpadlo ZAP, ale průtok chybí; oběh není potvrzen."
-      : d.pumpOn === false || d.pump === 0 ? d.flow != null ? `Čerpadlo stojí; snímač ${fmt1(d.flow)} l/min. Hodnoty oběh nepotvrzují.` : "Čerpadlo stojí a průtok chybí."
-      : `Spolehlivý stav čerpadla chybí; ${fmt1(d.flow)} l/min nepotvrzuje oběh.`], // pump
+    ["Oběhové čerpadlo", "Povel oběhového čerpadla", "Pohybuje vodou ve společném okruhu a větvi zvolené 3cestným ventilem. Procento je obrácený povel X10A: 0 % žádá zastavení a 100 % maximální výkon řízení. Nejde o měření otáček ani důkaz rotace nebo průtoku. Stav ON/OFF a měřený průtok čtěte odděleně; oběh může pokračovat při stojícím kompresoru.", (d) => pumpNowText(d, [(n) => `Povel čerpadla ${n} %.`, "Stav čerpadla je ON.", "Čerpadlo hlásí zastavení (OFF).", "Hlášený stav čerpadla je neznámý.", (n) => `Měřený průtok ${n} l/min.`, "Měření průtoku není dostupné.", "OFF odporuje kladnému průtoku; možný je externí oběh, doběh nebo rozporné/zastaralé signály.", "Oběh vody není prokázán."])], // pump
     [(d) => pelMeasured(d) ? "Elektrický příkon (HomeHub)" : "Elektrický příkon (odhad)", "Elektrický příkon", (d) => pelMeasured(d) ? "Příkon z registru HomeHub 51. Dokumentace nepotvrzuje kalibraci, bod měření ani zahrnutí všech těles; nejde o certifikovaný elektroměr soustavy." : "Odhad pro COP/EER: součet fází CT × předpokládaných 230 V. Napětí a účiník nejsou známy; proud měniče zahrnuje jen kompresor a rozsah CT určuje zapojení.", (d) => d.pelHeld ? "Kompresor stojí, takže proud měniče je z minulého běhu, ne aktuální; příkon ani účinnost nelze uvést."
       : d.pel == null ? "Profil nemá aktuální proud, proto nelze odvodit COP/EER."
       : d.pelSrc === "MB" ? "Hodnota z registru HomeHub 51; přesná hranice měření není zdokumentována."
@@ -1103,7 +1097,7 @@ DESCRIPTION_I18N.cs = descriptionValues([
   ["R4T je společná vratka do PHE; R1T−R4T je ΔT PHE, ne přímo otopných těles."], // 33
   ["Rychlost oběhu vody ve společném okruhu vytápění/chlazení a TUV."], // 34
   ["Tlak vody; rozsah závisí na modelu, při ≤1,0 bar použijte přesný návod."], // 35
-  ["Povel rychlosti oběhového čerpadla s obrácenou stupnicí: 0 = plná rychlost, 100 = stojí."], // 36
+  ["Obrácený povel X10A oběhovému čerpadlu: nezpracovaná 0 požaduje maximální výkon, 100 zastavení. Neměří otáčky (RPM) ani nepotvrzuje otáčení či průtok vody. Hlášený stav ON/OFF a měřený průtok posuzujte zvlášť, i při zastaveném kompresoru."], // 36
   ["Běh oběhového čerpadla nedokazuje přenos tepla; potvrďte jej průtokem."], // 37
   ["Stav čerpadla nakonfigurovaného solárního termického okruhu."], // 38
   ["Hlášená rychlost čerpadla pojmenovaného profilem."], // 39

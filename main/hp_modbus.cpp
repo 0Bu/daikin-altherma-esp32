@@ -1289,6 +1289,13 @@ static void mb_poll_once() {
         return;
     }
 
+    // Bind input 49 to the profile evidence for this sweep, including a probe that just completed.
+    // The baseline catalog is provisional until HomeHub resolves affirmatively. Native flow
+    // scaling is still unverified. A separate status read could describe a different sweep.
+    if (s_probe_tracker.affirmative_profile != ModbusProfile::HomeHub)
+        for (auto& row : fresh)
+            if (row.off == 49) row.modbus_flow_scale_unverified = true;
+
     // Re-check immediately before committing the two externally visible stores. If /set_hp landed
     // after the session check, its generation/history-identity changes make both commits refuse the
     // old target rather than presenting A as the first sample of B.

@@ -393,10 +393,8 @@ const DESCRIPTIONS = [
     de: { what: "Wasserdruck im geschlossenen Hydraulikkreis.",
           normal: "Viele aktuelle Altherma-Handbücher verlangen am Pumpeneintritt mehr als 1 bar. Zulässiger Betriebs- und Fülldruck hängen jedoch von Modell, Anlagenhöhe und Ausdehnungsgefäß ab. Bei 1,0 bar oder weniger die Anleitung des genauen Geräts prüfen, statt einen allgemeinen Nachfüllwert anzunehmen." } },
   { re: /water pump signal/i,
-    what: "The speed command sent to the circulation pump. Note it is inverted — 0 means full speed, 100 means stopped (per the label).",
-    normal: "a low number (fast pump) while heating, cooling or making DHW; 100 (stopped) when idle.",
-    de: { what: "Der Drehzahlbefehl an die Umwälzpumpe ist umgekehrt skaliert: 0 bedeutet volle Drehzahl, 100 bedeutet Stillstand.",
-          normal: "eine niedrige Zahl und damit schnelle Pumpendrehzahl beim Heizen, Kühlen oder Warmwasserbereiten; 100 im Leerlauf." } },
+    what: "Inverted X10A command to the circulation pump: raw 0 requests maximum effort and raw 100 requests stop. It does not measure RPM or prove rotation or water flow. Read reported ON/OFF and measured flow separately, including when the compressor is stopped.",
+    de: { what: "Invertierter X10A-Befehl an die Umwälzpumpe: Rohwert 0 fordert maximale Ansteuerung, Rohwert 100 Stopp. Er misst keine Drehzahl (RPM) und belegt weder Rotation noch Wasserdurchfluss. Gemeldeten ON/OFF-Status und gemessenen Durchfluss getrennt lesen, auch bei stehendem Verdichter." } },
   { exact: true, re: /^(?:water pump operation|circulation pump (?:operation|running))$/i,
     what: "Status of the hydronic circulation pump. It moves water through the branch selected by the hydraulic controls; pump operation alone does not prove useful heat transfer.",
     normal: "ON means the controller reports pump operation; OFF means it reports the pump stopped. It can run for heating, cooling, DHW, defrost, air purge, frost protection, a test run or pump overrun. Compare the state with measured flow; the compressor may legitimately be stopped.",
@@ -961,6 +959,7 @@ const mbForInspect = (key) => {
   // a named source, including while X10A is live as the second opinion. The BSH inspector is
   // intentionally X10A-only and therefore has no equivalent exception here.
   if (key === "quiet") return mbByConcept("quiet_state");
+  if (key === "pump") return S.live?.pumpOn == null ? null : mbRow(30);
   const p = MB_PAIRS.find((q) => q.insp === key);
   // Normally only a silent X10A link makes the gateway lead. `mbFields` is the per-reading exception:
   // liveData marks outdoor air there while X10A is connected but its sleeping outdoor-unit row is
@@ -1011,7 +1010,7 @@ const mbBool = (off) => mbBinaryValue(mbRow(off));
 const mbUnitAbnormality = () => modbusEnumNumber(mbRow(21), "unit_abnormality", 2);
 // The same register as raw TEXT — the error code is a Text16, not a flag.
 const mbVal = (off) => { const r = mbRow(off); return r ? String(r.value) : null; };
-// The MEASURED power consumption (EKRHH input register 51, def/homehub.hpp). Named because the map
+// Reported power consumption (EKRHH input register 51, def/homehub.hpp). Named because the map
 // carries three "kW" rows and the other two are the power-LIMIT setpoints (holding 57/58): anything
 // selecting this reading by its UNIT will sooner or later select an installer's ceiling instead.
 const MB_OFF_POWER = 51;
@@ -1106,12 +1105,15 @@ const stateOf = (re, mbOffset) => {
   return mbBool(mbOffset);
 };
 
+const mbFlowScaleUnverified = row => row?.off === 49 &&
+  (row.flow_scale_unverified === true || row.profile === "altherma4");
+
 // First matching description for a value label and source, or null (→ a plain, non-expandable row).
-// HomeHub rows carry an offset, X10A rows a register. Source-qualified entries prevent labels that
-// happen to be identical in both protocols from inheriting the other protocol's meaning.
+// Source-qualified entries keep identical labels from inheriting the other source's meaning.
 function descFor(label, row = null) {
+  if (mbFlowScaleUnverified(row)) return { what: t("mb.flow_scale_help"), sourceQualified: true };
   if (row?.profile === "altherma4") {
-    const key = ({9: "a4.quiet_help", 38: "a4.current_help", 49: "a4.flow_help",
+    const key = ({9: "a4.quiet_help", 38: "a4.current_help",
       54: "a4.heating_offset_help",
       58: "a4.limit_help", 65: "a4.demand_help", 68: "a4.pump_help",
       74: "a4.pre_phe_outdoor_help", 79: "a4.pressure_help", 83: "a4.operation_help"})[row.off];
@@ -1213,13 +1215,15 @@ const MB_DELTA_WHY = {
 // points in the circuit, so a gap is information. What it must never do is stay silent — a reader
 // comparing two numbers wants to know whether they agree, and "1.7 K apart, and here is why" is a
 // different statement from two numbers left side by side to be squinted at.
+function modbusScaleHtml(row) {
+  if (!mbFlowScaleUnverified(row) && (row?.profile !== "altherma4" || ![68, 79].includes(row.off))) return "";
+  const limit = descFor(row.label, row)?.what;
+  return limit ? descParaHtml(esc(limit)) : "";
+}
 function mbDeltaHtml(row, mb) {
-  // A numeric difference would assume verified common units. Keep the native conversion limit
-  // visible beside the second source instead, even when X10A supplies the primary reading.
-  if (mb?.profile === "altherma4" && [49, 68, 79].includes(mb.off)) {
-    const limit = descFor(mb.label, mb)?.what;
-    if (limit) return descParaHtml(esc(limit));
-  }
+  // A numeric difference would assume verified common units.
+  const limit = modbusScaleHtml(mb);
+  if (limit) return limit;
   const why = MB_DELTA_I18N[LANG]?.[row.concept] ||
     (MB_DELTA_WHY[row.concept] ? tx(MB_DELTA_WHY[row.concept]) : "");
   // A bit flag has no difference to state. Agreement on a flag is unremarkable and says nothing;

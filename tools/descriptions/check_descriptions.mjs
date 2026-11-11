@@ -75,6 +75,7 @@ const I18N_OPEN = 'const I18N = {';
 const I18N_CLOSE = '\n};';
 const TRANSLATE_OPEN = 'function t(k, ...a) {';
 const DESCRIPTION_OPEN = 'function descFor(label, row = null) {';
+const FLOW_SCALE_DECL = 'const mbFlowScaleUnverified = ';
 
 // Slice a table literal out by exact markers and evaluate it. `braces` is the literal's own
 // delimiter pair, so the same routine reads the array and the object table.
@@ -114,6 +115,15 @@ function loadFunction(src, file, open, close, what, preamble = '', bindings = Ob
   return fn;
 }
 
+function loadDeclaration(src, file, marker) {
+  const count = src.split(marker).length - 1;
+  if (count !== 1) die(2, `'${marker}' must appear exactly once in ${file} (found ${count})`);
+  const from = src.indexOf(marker);
+  const to = src.indexOf(';', from);
+  if (to === -1) die(2, `no closing semicolon for '${marker}' in ${file}`);
+  return src.slice(from, to + 1);
+}
+
 function loadDescriptions(file) {
   let src;
   try { src = readAppSource(file); }
@@ -130,16 +140,8 @@ function loadDescriptions(file) {
   // displayReadingLabel deliberately shares this exact allow-list with displayUnit. Include the
   // declaration when evaluating the helper in isolation, so the audit executes the production
   // dependency rather than a looser second copy of it.
-  const unitDeclCount = src.split(DISPLAY_UNIT_DECL).length - 1;
-  if (unitDeclCount !== 1) {
-    die(2, `'${DISPLAY_UNIT_DECL}' must appear exactly once in ${file} (found ${unitDeclCount})`);
-  }
-  const unitDeclFrom = src.indexOf(DISPLAY_UNIT_DECL);
-  const unitDeclTo = src.indexOf(';', unitDeclFrom);
-  if (unitDeclTo === -1) die(2, `no closing semicolon for LABEL_UNIT_SUFFIX in ${file}`);
-  const unitPreamble = src.slice(unitDeclFrom, unitDeclTo + 1);
   const displayLabel = loadFunction(src, file, DISPLAY_LABEL_OPEN, DISPLAY_LABEL_CLOSE,
-                                    'displayReadingLabel', unitPreamble);
+    'displayReadingLabel', loadDeclaration(src, file, DISPLAY_UNIT_DECL));
 
   // Execute the production source-qualified path with its real English dictionary and t(). The
   // wrapper records dictionary access; it never supplies invented translations or repairs a key.
@@ -158,8 +160,8 @@ function loadDescriptions(file) {
       missing.push(key);
     return translate(key, ...args);
   };
-  const describe = loadFunction(src, file, DESCRIPTION_OPEN, DISPLAY_LABEL_CLOSE, 'descFor', '',
-    { DESCRIPTIONS: table, t: trackedTranslate });
+  const describe = loadFunction(src, file, DESCRIPTION_OPEN, DISPLAY_LABEL_CLOSE, 'descFor',
+    loadDeclaration(src, file, FLOW_SCALE_DECL), { DESCRIPTIONS: table, t: trackedTranslate });
   const resolve = (label, row) => {
     keys = []; missing = [];
     let description;

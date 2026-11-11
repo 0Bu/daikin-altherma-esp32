@@ -2156,11 +2156,11 @@ static void append_values_array(JsonOut& j, const std::vector<CachedValue>& v,
     j += "]";
 }
 
-// The HomeHub rows, from the OTHER stack's cache (hp_modbus.cpp). A separate array rather than mixed
-// into the one above, because they are a separate source with its own liveness: merging them would
-// make "is this reading current?" a per-row question the consumer cannot answer. Each row carries the
-// concept it pairs on, or none when the HomeHub has no X10A counterpart for it (the real power
-// measurement, the Smart-Grid mode) — those are simply Modbus-only readings.
+// The HomeHub rows, from the OTHER stack's cache (hp_modbus.cpp). A separate array rather than
+// mixed into the one above, because they are a separate source with its own liveness: merging them
+// would make "is this reading current?" a per-row question the consumer cannot answer. Each row
+// carries the concept it pairs on, or none when the HomeHub has no X10A counterpart for it
+// (reported power, Smart Grid mode) — those are simply Modbus-only readings.
 template <typename JsonOut>
 static void append_modbus_values_array(JsonOut& j, const std::vector<CachedValue>& v) {
     j += "[";
@@ -2182,6 +2182,8 @@ static void append_modbus_values_array(JsonOut& j, const std::vector<CachedValue
         if (reg && def::homehub_is_binary(*reg)) j += ",\"binary\":true";
         if (reg && def::homehub_definition_is_altherma4(v[i].modbus_definition))
             j += ",\"profile\":\"altherma4\"";
+        if (reg && reg->offset == 49 && v[i].modbus_flow_scale_unverified)
+            j += ",\"flow_scale_unverified\":true";
         // Keep the value raw and transport-friendly. The semantic id is metadata for the browser's
         // last-mile rendering, so profile-specific state names never become transport values.
         if (reg)

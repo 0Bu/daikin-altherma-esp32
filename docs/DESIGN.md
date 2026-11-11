@@ -215,20 +215,27 @@ inspector. Estimated power readings retain `≈` even when the inspector is clos
 
 **Derived working points**
 
-ΔT is R1T−R4T and needs moving water. Capacity also needs a running compressor, known mode and
-useful transfer direction: positive ΔT for heating/DHW, negative for cooling, displayed as positive
-cooling capacity. COP/EER additionally requires compatible thermal/electrical boundaries. Missing
-inputs, opposite-sign transfer and pump-only residual-temperature equalization leave these supported
-pills visible as `—`. A reported Cooling mode with hot residual circulation uses neutral pipes and
-Space circuit wording rather than claiming cooling output.
+Pump percentage is the inverted X10A controller command (0 % stop request, 100 % maximum effort),
+not measured speed. Only finite decoded inputs from 0 to 100 are inverted; invalid inputs stay
+blank in the live pill and history. Command, reported ON/OFF state and measured flow remain
+independent: a stop request does not establish reported OFF or absence of water motion.
+Modbus flow with [unverified scaling](API.md#get-values) remains visible with its conversion limit
+in the inspector. Only qualified flow drives water animation and thermal calculations.
+
+ΔT is R1T−R4T. It remains visible with both temperatures and qualified measured flow above
+0.5 L/min, even when the reported pump state is OFF. Capacity also needs a running compressor,
+known mode and useful transfer direction: positive ΔT for heating/DHW, negative for cooling,
+displayed as positive cooling capacity. COP/EER requires compatible thermal and electrical
+boundaries. Capacity and COP/EER show `—` during pump-only circulation or when their inputs do not
+support the calculation. A reported Cooling mode with hot residual circulation uses neutral pipes
+and Space circuit wording.
 
 Thermal power uses flow/60 × ΔT × ρ·cp, approximately 4.186 kJ/(l·K) for water with
-ρ≈1 kg/l; glycol mixtures have different density and heat capacity. Electrical power is estimated
-from current and assumed 230 V. CT clamps describe whole-unit input, while inverter current describes the compressor-side
-boundary and is withheld when held at rest. A current profile lacking an input and an existing input
-held from the previous run get different explanations. Live COP scope accounts for heater
-boundaries; the inspector names the scope and any refusal. No label implies measured live power or
-seasonal efficiency.
+ρ≈1 kg/l; glycol mixtures have different density and heat capacity. X10A electrical estimates use
+current and assumed 230 V. CT coverage depends on wiring; inverter current describes the compressor
+and is withheld when held at rest. The inspector distinguishes held readings from absent inputs.
+HomeHub reports input 51 without verified measurement scope or heater coverage. The inspector names
+the available electrical source and explains any refusal to calculate COP/EER.
 
 **State and motion**
 
@@ -236,8 +243,10 @@ The 3-way valve selects the animated hydraulic branch. Water flow has mode-aware
 pump-only circulation is neutral. Cooling/defrost reverse refrigerant motion. Active BUH uses the
 warning tint; active BSH turns the tank's perimeter dashes a fixed orange, distinct from the
 red/blue hydronic charge.
-Rotors stay centred on their hubs, rotate clockwise only when running, and carry no rotating
-flow-direction arrow. Direction belongs to pipe dashes.
+Rotors stay centred on their hubs, turn clockwise and carry no rotating flow-direction arrow.
+The pump rotor requires reported ON; its animation conveys neither measured RPM nor proof of
+mechanical rotation. Measured flow drives water-pipe motion independently. Direction belongs to
+pipe dashes.
 
 Quiet/Defrost pills remain grey while inactive/unknown and blue while active. E-heater stays grey
 or orange; its accessible name and inspector state ON/OFF/unknown. Native Altherma 4 holding 9
@@ -277,11 +286,11 @@ twin with its comparison; grouped components keep their full member list.
 Explain what the quantity is, its bounded normal context, then current state or absence. Held data
 cannot reappear in a headline, members or state sentence. A fallback pressure row must own headline,
 source line and history together. Only rerender changed content so polling does not destroy a text
-selection. The same quantity uses the same underlying description as the value table. Native Altherma 4
-flow/pressure have unverified conversion limits and must not show numeric agreement/difference.
-Source-qualified native help takes precedence over generic compact inspector copy in every locale,
-including a stand-in under an X10A row. Definition-metadata changes invalidate the comparison even
-when its numeric values do not change.
+selection. The same quantity uses the same underlying description as the value table. Modbus flow
+marked `flow_scale_unverified` and native Altherma 4 pressure show their conversion limits in place
+of numeric comparisons. Source-qualified help takes precedence over generic inspector copy in every
+locale, including a stand-in under an X10A row. Definition-metadata changes invalidate the comparison
+even when its numeric values do not change.
 
 **History**
 

@@ -23,7 +23,12 @@ import fs from "node:fs";
 import vm from "node:vm";
 import { readAppFragments } from "../tools/ui/read_app_source.mjs";
 
-const SOURCE = readAppFragments(["descriptions.js", "schematic.js"]);
+// Keep the source-arbitration test's history boundary stubs: loading the entire history fragment
+// would replace hasRoomHist/roomHistName. Execute only its shared pure pump-command dependency.
+const commandSource = readAppFragments(["history.js"])
+  .match(/function pumpCommandPercent\(signal\) \{[\s\S]*?\n\}/)?.[0];
+assert.ok(commandSource, "the production pump-command rule must be present");
+const SOURCE = commandSource + readAppFragments(["descriptions.js", "schematic.js"]);
 const index = fs.readFileSync(new URL("../main/www/index.html", import.meta.url), "utf8");
 const style = fs.readFileSync(new URL("../main/www/style.css", import.meta.url), "utf8");
 const demo = fs.readFileSync(new URL("../tools/uigif/scenes.js", import.meta.url), "utf8");
@@ -95,7 +100,7 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [], elements 
     " SMART_GRID_MODE_VALUE, x10aSmartGridModeFrom, x10aSmartGridMode, x10aSmartGridRow," +
     " sgModeText, mbNoteHtml, mbDeltaHtml, descFor, inspCurRow, inspMember," +
     " inspMembers, inspValues, inspComparisonHtml, inspHeld, liveData, compressorRunning," +
-    " waterMoving, pumpFlowConflict, waterThermalKind, activeSpaceKind, ouReadingText, updateSchematicStateA11y, INSPECT," +
+    " waterMoving, waterThermalKind, activeSpaceKind, ouReadingText, updateSchematicStateA11y, INSPECT," +
     " pelMeasured, pelApproxText, PEL_INSPECT, vRow, vNum, highSideRow, inspHeldHtml, inspUnknownAge," +
     " inspNowText, heldUnknownText, OUTDOOR_HX_RE };",
     context, { filename: "main/www/app.sources" });
@@ -478,15 +483,15 @@ const X_2WV = (on) => ({ label: "2way valve(On:Heat_Off:Cool)", value: on ? "1" 
   assert.equal(c.waterMoving({ pumpOn: true, flow: null }), null,
     "pump ON without a flow reading must remain unknown, not measured circulation");
   assert.match(c.INSPECT.pump.now({ pump: 0, pumpOn: false, flow: 5 }).en,
-    /pump reports stopped, but the flow sensor reports/i);
+    /pump reports stopped[\s\S]*Measured flow 5[\s\S]*OFF conflicts with flow/i);
   const pumpOnNoFlow = c.INSPECT.pump.now({ pump: null, pumpOn: true, flow: null }).en;
   assert.match(pumpOnNoFlow, /pump status is ON.*no flow measurement/i);
   assert.doesNotMatch(pumpOnNoFlow, /pump reports stopped|measured flow is/i);
   const pumpUnknown = c.INSPECT.pump.now({ pump: null, pumpOn: null, flow: 0 }).en;
-  assert.match(pumpUnknown, /No reliable pump state/i);
+  assert.match(pumpUnknown, /reported pump state is unknown/i);
   assert.doesNotMatch(pumpUnknown, /pump reports stopped/i);
   assert.match(c.INSPECT.pump.now({ pump: 45, pumpOn: true, flow: null }).en,
-    /no flow measurement is available; circulation is not confirmed/i);
+    /no flow measurement is available[\s\S]*circulation is not established/i);
   assert.doesNotMatch(c.INSPECT.wtank.now({ valveDhw: true, pumpOn: false, flow: 0,
                                             lwt: 40, tank: 35 }).en, /Charging the tank/i,
     "a selected valve route alone must not be called an active tank charge");
@@ -919,6 +924,29 @@ const SG_INSP = (c, d) => c.INSPECT.sgrequest;
   assert.ok(Math.abs(d.pth - 7.87) < 0.01,
     "the witnessed PHE transfer is flow×(R1T−R4T), using the screenshot operating point");
 
+  const native = ctx({ x10a: false, mbEnabled: true, mbConnected: true, values: [],
+                       modbus: dhwModbus.map(row => ({ ...row, profile: "altherma4" })) });
+  const provisional = native.liveData();
+  assert.equal(provisional.provisionalFlow, 24, "retain the native scaled reading");
+  assert.equal(provisional.flow, null, "native input 49 is unavailable as qualified flow");
+  assert.equal(native.waterMoving(provisional), null, "pump ON cannot certify water motion");
+  assert.equal(provisional.pthRaw, null, "unverified flow cannot enter thermal arithmetic");
+  assert.equal(provisional.pth, null, "native flow cannot establish active thermal output");
+
+  const probing = ctx({ x10a: false, mbEnabled: true, mbConnected: true, values: [],
+                        modbus: dhwModbus.map(row => row.off === 49
+                          ? { ...row, flow_scale_unverified: true } : row) });
+  const unverified = probing.liveData();
+  assert.equal(unverified.provisionalFlow, 24, "keep the reading while the Modbus scale is unverified");
+  assert.equal(unverified.flow, null, "the baseline catalog does not prove the scale");
+  assert.equal(probing.waterMoving(unverified), null);
+  assert.equal(unverified.pthRaw, null);
+  assert.equal(unverified.pth, null);
+  const provisionalPump = probing.INSPECT.pump.now(unverified).en;
+  assert.match(provisionalPump, /circulation is not established/i);
+  assert.doesNotMatch(provisionalPump, /no flow measurement/i,
+    "a visible provisional reading is different from an absent measurement");
+
   const stopped = ctx({ x10a: false, mbEnabled: true, mbConnected: true, values: [],
                         modbus: dhwModbus.map((r) => r.off === 31 ? { ...r, value: 0 } : r) });
   const idle = stopped.liveData();
@@ -1173,15 +1201,15 @@ assert.match(style, /\.inspect-rows\s*>\s*\.mb-delta/,
 {
   const P = (off, label, value) => ({ label, value, unit: "kW", off, concept: null });
   const both = ctx({ x10a: false, mbEnabled: true, mbConnected: true, values: [],
-                     modbus: [P(51, "Heat pump power consumption", "1.42"),
+                     modbus: [P(51, "Heat pump power consumption", "1.4"),
                               P(57, "Power limit during Recommended on / buffering", "5.00"),
                               P(58, "General power limit", "7.00")] });
   assert.equal(both.MB_OFF_POWER, 51, "the reported power is EKRHH input register 51");
-  assert.equal(both.mbPower()?.value, "1.42", "the reported consumption value is what is read");
+  assert.equal(both.mbPower()?.value, "1.4", "the reported consumption value is what is read");
   assert.equal(both.mbForInspect("pel")?.label, "Heat pump power consumption",
     "the measured schematic headline remains traceable to its Modbus register");
 
-  const reported = { pel: 1.42, pelSrc: "MB", pelHeld: false };
+  const reported = { pel: 1.4, pelSrc: "MB", pelHeld: false };
   assert.equal(both.pelApproxText(reported), "", "a gateway-reported value has no UI estimate mark");
   assert.equal(both.PEL_INSPECT.t(reported).en, "Electrical input (HomeHub)");
   assert.equal(both.PEL_INSPECT.head(reported), "1.4 kW");
@@ -1206,6 +1234,33 @@ assert.match(style, /\.inspect-rows\s*>\s*\.mb-delta/,
                               P(58, "General power limit", "7.00")] });
   assert.equal(gone.mbPower(), null,
     "no reported power: the answer is nothing, never a power LIMIT that happens to share the unit");
+  for (const [fixture, power] of [[both, 1.4], [gone, null]]) {
+    fixture.S._modbus.push(M_FLAG(31, "Compressor running", true),
+      M_FLAG(32, "Booster heater run", true), M_VALVE(true),
+      M(40, "Leaving water temperature PHE", 36, "leaving_water"),
+      M(41, "Leaving water temperature BUH", 38.5, "leaving_water_post_buh"),
+      M(42, "Return water temperature", 30, "return_water"),
+      M(49, "Flow rate", 12, "flow", { unit: "L/min" }));
+    const live = fixture.liveData();
+    assert.equal(live.bsh, true, "HomeHub can report the tank heater state");
+    assert.equal(live.r2t, 38.5, "HomeHub can report the post-heater temperature");
+    assert.ok(live.pth > 0, "the fallback can estimate exchanger heat independently");
+    assert.equal(live.pel, power);
+    assert.equal(live.cop, null, "heater state and temperature cannot establish a matched power boundary");
+    assert.equal(live.copBlock, "mb_scope");
+    for (const [lang, boundary, unknownLoads, unsupportedClaims] of [
+      ["en", /cannot match HomeHub power to the estimated heat across the plate heat exchanger/i,
+        /loads .*including heaters.* unknown/i, /whole unit|reports neither|heaters included/i],
+      ["de", /keinen Vergleich .*HomeHub .*geschätzten Wärmeleistung am Plattenwärmetauscher/i,
+        /Verbraucher .*etwa Elektroheizer.* unklar/i, /gesamte Gerät|meldet .*weder|einschließlich beider/i],
+    ]) {
+      fixture.setTxLang(lang);
+      const explanation = fixture.inspNowText(fixture.INSPECT.cop, live);
+      assert.match(explanation, boundary);
+      assert.match(explanation, unknownLoads);
+      assert.doesNotMatch(explanation, unsupportedClaims);
+    }
+  }
   // Prove the trap is really set — a unit-keyed lookup over this very fixture picks a limit.
   const byUnit = [P(51, "Heat pump power consumption", null),
                   P(57, "Power limit during Recommended on / buffering", "5.00")]

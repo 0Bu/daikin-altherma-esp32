@@ -1,4 +1,4 @@
-// translation-source: 00f8393aee827b21e658965c9ff792c99c563d60de18775bb092ec7c42167e1f
+// translation-source: 320445530cf86efdf9387196a723bb766c3bfeda1c35a1ffd5e768a16fc6b70a
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -334,7 +334,7 @@ I18N.nb = localeValues([
   /* a4.operation_help */ "Rapporterer Stopp, Tankoppvarming, Romoppvarming, Romkjøling eller Aktuatordrift. Dette er en rapportert tilstand, ikke bevis på nyttig varmeoverføring.",
   /* a4.heating_offset_help */ "Forskyver den væravhengige varmekurven for hovedsonen i kelvin. Dette er en forskyvning, ikke en målt temperatur eller hele måltemperaturen for vannet.",
   /* a4.pre_phe_outdoor_help */ "Vanntemperatur før den utendørs platevarmeveksleren. Dette er en sensor på vannsiden, ikke uteluft- eller kjølemedietemperatur.",
-  /* a4.flow_help */ "Skaleringen av vannmengde for Altherma 4 er ikke bekreftet. Verdien i L/min bruker eksisterende omregning; sammenlign med enhetens egen avlesning før ytelsen vurderes.",
+  /* mb.flow_scale_help */ "Skaleringen av vannmengde for denne Modbus-kilden er ikke bekreftet. Sammenlign verdien med det enheten viser.",
   /* a4.pump_help */ "Altherma 4-veiledningen oppgir pumpehastighet, men bruker L/min. Enheten % som vises her er en ubekreftet antakelse; sammenlign med enhetens egen avlesning.",
   /* a4.pressure_help */ "Trykkskaleringen for Altherma 4 er ikke bekreftet. Verdien i bar bruker eksisterende omregning; sammenlign med enhetens egen avlesning før trykket vurderes.",
   /* a4.demand_response */ "Modus for lastrespons",
@@ -1011,18 +1011,18 @@ INSPECT_I18N.nb = inspectValues(
       : d.pthKind === "cooling" ? `≈ ${fmt1(d.pth)} kW kjøling${d.cop != null ? `; EER ${fmt1(d.cop)}` : ""}.`
       : `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `; COP ${fmt1(d.cop)}` : ""}.`], // pth
     [(d) => d && d.efficiencyKind === "eer" ? "Anslått EER for varmepumpen"
-      : d && d.copScope === "plant" ? "Anslått COP etter BUH" : "Anslått COP for varmepumpen", "Anslått virkningsgrad", (d) => d && d.efficiencyKind === "eer"
+      : d && d.copScope === "plant" ? "Anslått COP basert på CT-strøm" : "Anslått COP for varmepumpen", "Anslått virkningsgrad", (d) => d && d.efficiencyKind === "eer"
       ? "Anslått kjøleeffekt delt på anslått elektrisk effekt. Arver usikkerhet i væske, sensorer, spenning og effektfaktor. Øyeblikkelig EER, ikke sesongverdi."
-      : "Anslått varme delt på anslått strøm med samsvarende grenser: etter BUH med CT og R2T, ellers bare varmepumpen med inverterstrøm. CT-kabling avgjør laster. Øyeblikksindikasjon, ikke sertifisert måler.", (d) => d.copBlock === "tank_heater"
+      : "Anslått varmeeffekt delt på anslått elektrisk effekt med samsvarende grenser. Ved bruk av CT foretrekkes en gyldig R2T-måling etter tilleggsvarmeren. Uten den brukes R1T før varmeren bare når varmeren er bekreftet av. CT-koblingen avgjør hvilke laster som er med. Vekselretterstrømmen brukes til å anslå varmepumpens effektopptak. Øyeblikksindikasjon, ikke sertifisert måler.", (d) => d.copBlock === "tank_heater"
       ? "Ingen COP: strøm kan omfatte BSH, men varmen går direkte i tanken og krysser ikke tursensorene; grensene er ulike."
       : d.copBlock === "buh_no_r2t" ? "Ingen COP: BUH er aktiv, men sensor etter den mangler; strøm kan omfatte varme beregnet før BUH."
-      : d.copBlock === "mb_scope" ? "Ingen COP: HomeHub måler hele enhetens strøm, men varme bare ved PHE og mangler varmerstatus/sensor etter BUH for like grenser."
+      : d.copBlock === "mb_scope" ? "Ingen COP. Tilgjengelige data kan ikke knytte HomeHubs elektriske effekt til den estimerte varmeeffekten over platevarmeveksleren. Det er uklart hvilke elektriske laster, som varmeelementer, effektverdien omfatter."
       : d.copBlock === "no_pel"
       ? d.pelHeld ? "Ingen COP: kompressoren står, og inverterstrømmen er fra siste syklus."
         : "Ingen COP: profilen gir verken CT-effekt eller inverterstrøm."
       : d.cop == null ? null
       : d.efficiencyKind === "eer" ? `${fmt1(d.cop)} kW kjøling/kW strøm: ≈ ${fmt1(d.copPth)} kW ut med ≈ ${fmt1(d.pel)} kW inn.`
-      : d.copScope === "plant" ? `${fmt1(d.cop)} kW varme etter BUH/kW CT-strøm: ≈ ${fmt1(d.copPth)} / ≈ ${fmt1(d.pel)} kW. CT-kabling avgjør laster.`
+      : d.copScope === "plant" ? `${fmt1(d.cop)} kW varme på vannsiden per kW elektrisk effekt anslått fra CT: ≈ ${fmt1(d.copPth)} / ≈ ${fmt1(d.pel)} kW. CT-kabling avgjør laster.`
       : `${fmt1(d.cop)} kW varme/kW strøm innen varmepumpegrensen: ≈ ${fmt1(d.copPth)} / ≈ ${fmt1(d.pel)} kW. BUH er utenfor begge.`], // cop
     ["Tilleggsvarmer · BUH", "Tilleggsvarmer BUH", "Elektrisk vannkretsvarmer etter R1T. Trinnene kan øke turtemperatur og forbruk; ikke tankvarmeren BSH.", (d) => d.buh1 == null && d.buh2 == null ? null : d.buh2 ? "Trinn 2: begge trinn varmer." : d.buh1 ? "Trinn 1: ett trinn varmer." : "Inaktiv: ingen BUH-trinn aktive."], // buh
     ["Tankvarmer", "Elektrisk tankvarmer", "Elektrisk BSH-element i tanken. Kan varme med kompressor, pumpe og vannmengde på null; X10A-statusen viser ikke effekt.", () => {
@@ -1045,13 +1045,7 @@ INSPECT_I18N.nb = inspectValues(
       : "Pumpe og vannmengde bekrefter ikke sirkulasjon i romgrenen."], // heat
     ["Romdrift aktiv", "Romoppvarming/-kjøling", "Signal for normal romdrift. Ikke termostatbehov og bekrefter ikke alene kompressor."], // spaceh
     ["Romtemperatur", 0, "Temperatur og mål for referansesonen; avhenger av sensorplassering."], // room
-    ["Sirkulasjonspumpe", "Hastighet på sirkulasjonspumpe", "Flytter vann i felleskretsen og grenen valgt av 3WV. Kan gå etter kompressorstopp for etterløp, vern eller utjevning; tolk hastighet og vannmengde sammen.", (d) => d.pump == null && d.flow == null && d.pumpOn == null ? null
-      : pumpFlowConflict(d) ? `Intern pumpe melder stopp, men sensoren måler ${fmt1(d.flow)} l/min. Ekstern sirkulasjon, etterløp eller motstridende signaler er mulig.`
-      : d.pump != null && d.pump > 0 ? d.flow != null ? `Hastighet ${fmt0(d.pump)} %; målt ${fmt1(d.flow)} l/min.` : `Hastighet ${fmt0(d.pump)} %, men vannmengde mangler; sirkulasjon er ikke bekreftet.`
-      : waterMoving(d) ? `Sensoren måler ${fmt1(d.flow)} l/min uten brukbar pumpehastighet.`
-      : d.pumpOn === true ? d.flow != null ? `Pumpe aktiv, men bare ${fmt1(d.flow)} l/min; sirkulasjon er ikke bekreftet.` : "Pumpe aktiv, men vannmengde mangler; sirkulasjon er ikke bekreftet."
-      : d.pumpOn === false || d.pump === 0 ? d.flow != null ? `Pumpe stoppet; sensoren viser ${fmt1(d.flow)} l/min. Signalene bekrefter ikke sirkulasjon.` : "Pumpe stoppet uten vannmengdemåling."
-      : `Ingen pålitelig pumpestatus; ${fmt1(d.flow)} l/min alene bekrefter ikke sirkulasjon.`], // pump
+    ["Sirkulasjonspumpe", "Kommando til sirkulasjonspumpen", "Flytter vann gjennom felleskretsen og grenen valgt av 3-veisventilen. Prosenten er den inverterte X10A-kommandoen: 0 % ber om stopp og 100 % om maksimal styring. Den er ikke målt turtall eller bevis på rotasjon eller vannføring. Les rapportert ON/OFF og målt vannføring hver for seg; sirkulasjon kan fortsette med kompressoren stoppet.", (d) => pumpNowText(d, [(n) => `Pumpekommando ${n} %.`, "Pumpestatus er ON.", "Pumpen rapporterer stopp (OFF).", "Rapportert pumpestatus er ukjent.", (n) => `Målt vannføring ${n} l/min.`, "Ingen måling av vannføring er tilgjengelig.", "OFF strider mot positiv vannføring; ekstern sirkulasjon, etterløp eller motstridende/utdaterte signaler er mulig.", "Vannsirkulasjon er ikke bekreftet."])], // pump
     [(d) => pelMeasured(d) ? "Strømforbruk · HomeHub" : "Anslått strømforbruk", "Strømforbruk", (d) => pelMeasured(d)
       ? "Forbruk fra HomeHub-inngang 51. UI beregner det ikke, men offentlig dokumentasjon beviser ikke kalibrering, målepunkt eller hvilke varmere som inngår; ikke en sertifisert anleggsmåler."
       : "Anslag for COP/EER. CT summerer oppgitte faser med antatt strøm × 230 V; virkelig spenning og effektfaktor er ukjent. Inverterstrøm dekker bare kompressoren.", (d) => d.pelHeld ? "Kompressoren står; inverterstrømmen er fra siste syklus, så forbruk/virkningsgrad kan ikke vises."
@@ -1149,7 +1143,7 @@ DESCRIPTION_I18N.nb = descriptionValues([
   ["R4T-retur til PHE; vurder ΔT med vannmengde, kompressor og modus, ikke en universell 5 K-regel."], // 33
   ["Vannmengde i felleskretsen; minimum avhenger av modell/modus, og lav verdi kan utløse 7H."], // 34
   ["Hydraulikktrykk: mange håndbøker krever >1 bar; ved ≤1,0 bar, bruk håndboken for nøyaktig modell."], // 35
-  ["Invertert pumpekommando: 0 er maksimal hastighet, 100 er stopp."], // 36
+  ["Invertert X10A-kommando til sirkulasjonspumpen: råverdi 0 ber om maksimal styring og 100 om stopp. Den måler ikke turtall (RPM) og beviser verken rotasjon eller vannstrøm. Les rapportert ON/OFF-status og målt vannstrøm hver for seg, også når kompressoren står."], // 36
   ["Pumpestatus; beviser ikke nyttig varme og kan være aktiv uten kompressor. Sammenlign vannmengde."], // 37
   ["Status for pumpen i en konfigurert solvarmekrets."], // 38
   ["Oppgitt hastighet for pumpen som profilen navngir."], // 39

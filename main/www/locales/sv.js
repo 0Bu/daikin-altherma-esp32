@@ -1,4 +1,4 @@
-// translation-source: 00f8393aee827b21e658965c9ff792c99c563d60de18775bb092ec7c42167e1f
+// translation-source: 320445530cf86efdf9387196a723bb766c3bfeda1c35a1ffd5e768a16fc6b70a
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -334,7 +334,7 @@ I18N.sv = localeValues([
   /* a4.operation_help */ "Rapporterar Stopp, Tankuppvärmning, Rumsuppvärmning, Rumskylning eller Ställdonsdrift. Detta är ett rapporterat tillstånd, inte bevis på nyttig värmeöverföring.",
   /* a4.heating_offset_help */ "Förskjuter huvudzonens väderberoende värmekurva i kelvin. Detta är en förskjutning, inte en uppmätt temperatur eller hela börvärdet för vattentemperaturen.",
   /* a4.pre_phe_outdoor_help */ "Vattentemperatur före den utomhusplacerade plattvärmeväxlaren. Detta är en sensor på vattensidan, inte uteluftens eller köldmediets temperatur.",
-  /* a4.flow_help */ "Flödesskalningen för Altherma 4 är inte verifierad. Värdet i L/min använder befintlig omräkning; jämför med enhetens egen avläsning innan prestandan bedöms.",
+  /* mb.flow_scale_help */ "Flödesskalningen för denna Modbus-källa är inte verifierad. Jämför värdet med vad enheten visar.",
   /* a4.pump_help */ "Altherma 4-guiden anger pumphastighet men listar L/min. Enheten % som visas här är ett overifierat antagande; jämför med enhetens egen avläsning.",
   /* a4.pressure_help */ "Tryckskalningen för Altherma 4 är inte verifierad. Värdet i bar använder befintlig omräkning; jämför med enhetens egen avläsning innan trycket bedöms.",
   /* a4.demand_response */ "Läge för efterfrågerespons",
@@ -1011,18 +1011,18 @@ INSPECT_I18N.sv = inspectValues(
       : d.pthKind === "cooling" ? `≈ ${fmt1(d.pth)} kW kylning${d.cop != null ? `; EER ${fmt1(d.cop)}` : ""}.`
       : `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `; COP ${fmt1(d.cop)}` : ""}.`], // pth
     [(d) => d && d.efficiencyKind === "eer" ? "Uppskattad EER"
-      : d && d.copScope === "plant" ? "Uppskattad COP efter BUH" : "Uppskattad COP", "Uppskattad verkningsgrad", (d) => d && d.efficiencyKind === "eer"
+      : d && d.copScope === "plant" ? "Uppskattad COP baserad på CT-ström" : "Uppskattad COP", "Uppskattad verkningsgrad", (d) => d && d.efficiencyKind === "eer"
       ? "Kyleffekt ÷ eleffekt; momentan EER med osäkerhet i givare, vätska, spänning och effektfaktor."
-      : "Gränsmatchad värme ÷ el: CT+R2T efter BUH, annars växelriktarström för värmepumpen.", (d) => d.copBlock === "tank_heater"
+      : "Uppskattad värmeeffekt delad med uppskattad eleffekt inom motsvarande gränser. Med CT används i första hand ett giltigt värde från R2T efter tillsatsvärmaren. Om värdet saknas används R1T före värmaren bara när värmaren är bekräftat avstängd. CT-inkopplingen avgör vilka laster som ingår. Växelriktarström används för uppskattningen på värmepumpens sida.", (d) => d.copBlock === "tank_heater"
       ? "Ingen COP: el kan omfatta BSH, men tankvärmen passerar inte framledningsgivaren."
       : d.copBlock === "buh_no_r2t" ? "Ingen COP: BUH är aktiv utan efterföljande givare; el- och värmegränsen skiljer sig."
-      : d.copBlock === "mb_scope" ? "Ingen COP: HomeHub mäter enhetens el men värmen bara PHE."
+      : d.copBlock === "mb_scope" ? "Ingen COP. Tillgängliga data kan inte koppla HomeHubs eleffekt till den uppskattade värmeeffekten över plattvärmeväxlaren. Det är oklart vilka elektriska laster, till exempel elvärmare, som effektvärdet omfattar."
       : d.copBlock === "no_pel"
       ? d.pelHeld ? "Ingen COP: växelriktarströmmen är ett gammalt värde efter stopp."
         : "Ingen COP: varken CT- eller växelriktarström finns."
       : d.cop == null ? null
       : d.efficiencyKind === "eer" ? `${fmt1(d.cop)} kW kylning/kW el: ${fmt1(d.copPth)} / ${fmt1(d.pel)} kW.`
-      : d.copScope === "plant" ? `${fmt1(d.cop)} kW värme/kW CT-el efter BUH: ${fmt1(d.copPth)} / ${fmt1(d.pel)} kW; lasten beror på inkopplingen.`
+      : d.copScope === "plant" ? `${fmt1(d.cop)} kW värme på vattensidan per kW uppskattad CT-el: ${fmt1(d.copPth)} / ${fmt1(d.pel)} kW; lasten beror på inkopplingen.`
       : `${fmt1(d.cop)} kW värme/kW el inom värmepumpens gräns: ${fmt1(d.copPth)} / ${fmt1(d.pel)} kW; BUH ingår inte.`], // cop
     ["Tillsatsvärmare · BUH", "Tillsatsvärmare BUH", "Elvärmare i vattenkretsen efter R1T, inte tankens BSH.", (d) => d.buh1 == null && d.buh2 == null ? null : d.buh2 ? "Steg 2: båda stegen värmer." : d.buh1 ? "Steg 1 värmer." : "Alla BUH-steg är av."], // buh
     ["Tankvärmare", "Tankvärmare BSH", "Tankens doppvärmare BSH kan värma självständigt; X10A mäter inte effekten.", () => {
@@ -1045,13 +1045,7 @@ INSPECT_I18N.sv = inspectValues(
       : "Pump/flöde bevisar inte cirkulation i rumsgrenen."], // heat
     ["Rumsdrift", "Rumsuppvärmning eller -kylning", "Normal rumsdriftssignal; inte termostatbegäran eller bevis på kompressordrift."], // spaceh
     ["Rumstemperatur", 0, "Referenszonens temperatur och mål; betydelsen beror på givarplaceringen."], // room
-    ["Cirkulationspump", "Cirkulationspumpens hastighet", "Driver gemensam krets/vald 3WV-gren och kan gå efter kompressorstopp; tolka med flödet.", (d) => d.pump == null && d.flow == null && d.pumpOn == null ? null
-      : pumpFlowConflict(d) ? `Pumpen rapporterar stopp men ${fmt1(d.flow)} l/min mäts; extern pump, eftergång eller signalmotsägelse är möjlig.`
-      : d.pump != null && d.pump > 0 ? d.flow != null ? `${fmt0(d.pump)} %; ${fmt1(d.flow)} l/min.` : `${fmt0(d.pump)} %; flödesmätning saknas och cirkulation är inte bekräftad.`
-      : waterMoving(d) ? `Inget pumpvarvtal; ${fmt1(d.flow)} l/min mäts.`
-      : d.pumpOn === true ? d.flow != null ? `Pump aktiv, men bara ${fmt1(d.flow)} l/min; cirkulation ej bekräftad.` : "Pump aktiv; flödesmätning saknas."
-      : d.pumpOn === false || d.pump === 0 ? d.flow != null ? `Pump stoppad; ${fmt1(d.flow)} l/min visas, cirkulation ej bekräftad.` : "Pump stoppad; flödesmätning saknas."
-      : `Pumpstatus osäker; ${fmt1(d.flow)} l/min bevisar inte cirkulation.`], // pump
+    ["Cirkulationspump", "Cirkulationspumpens kommando", "Flyttar vatten genom den gemensamma kretsen och grenen som 3-vägsventilen väljer. Procenten är det inverterade X10A-kommandot: 0 % begär stopp och 100 % maximal styrning. Det är inte uppmätt varvtal eller bevis för rotation eller flöde. Läs rapporterad ON/OFF-status och uppmätt flöde separat; cirkulation kan fortsätta när kompressorn står still.", (d) => pumpNowText(d, [(n) => `Pumpkommando ${n} %.`, "Pumpstatus är ON.", "Pumpen rapporterar stopp (OFF).", "Rapporterad pumpstatus är okänd.", (n) => `Uppmätt flöde ${n} l/min.`, "Ingen flödesmätning finns tillgänglig.", "OFF motsäger positivt flöde; extern cirkulation, eftergång eller motstridiga/inaktuella signaler är möjliga.", "Vattencirkulation är inte bekräftad."])], // pump
     [(d) => pelMeasured(d) ? "Eleffekt · HomeHub" : "Uppskattad eleffekt", "Eleffekt", (d) => pelMeasured(d)
       ? "HomeHub-ingång 51; kalibrering, mätpunkt och inkluderade värmare är inte offentligt belagda."
       : "COP/EER-underlag: CT antar 230 V/fas utan känd spänning/effektfaktor; växelriktarström avser kompressorn.", (d) => d.pelHeld ? "Växelriktarströmmen är gammal efter stopp; el/verkningsgrad döljs."
@@ -1149,7 +1143,7 @@ DESCRIPTION_I18N.sv = descriptionValues([
   ["R4T-retur till PHE; bedöm ΔT med flöde, kompressor och läge, inte en universell 5 K-regel."], // 33
   ["Vattenflöde i gemensam krets; minimum beror på modell/läge och lågt värde kan utlösa 7H."], // 34
   ["Hydraultryck: många handböcker kräver >1 bar; vid ≤1,0 bar gäller handboken för exakt modell."], // 35
-  ["Inverterat pumpkommando: 0 är maxhastighet och 100 är stopp."], // 36
+  ["Inverterat X10A-kommando till cirkulationspumpen: råvärde 0 begär maximal styrning och 100 stopp. Det mäter inte varvtal (RPM) och bevisar varken rotation eller vattenflöde. Läs rapporterad ON/OFF-status och uppmätt flöde var för sig, även när kompressorn står stilla."], // 36
   ["Pumpstatus; bevisar inte nyttig värme och kan vara aktiv utan kompressor. Jämför flödet."], // 37
   ["Status för pumpen i en konfigurerad solvärmekrets."], // 38
   ["Angiven hastighet för pumpen som profilen namnger."], // 39

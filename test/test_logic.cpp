@@ -8822,12 +8822,24 @@ static void test_modbus_profile() {
         CHECK(d.is_affirmative);
         CHECK(tracker.active_profile == ModbusProfile::Altherma4);
 
-        // Exception with failure_detail <= 0 confirms HomeHub
+        // The legacy negative detail is non-wire. An actual exception code zero stays provisional.
         CHECK(tracker.on_socket_open("192.0.2.54", 502, 1) == ModbusProfile::Auto);
         d = tracker.evaluate_probe(MbFailureType::Exception, -1, 79, 0);
         CHECK(d.is_definitive);
         CHECK(d.is_affirmative);
         CHECK(d.next_profile == ModbusProfile::HomeHub);
+
+        CHECK(tracker.on_socket_open("192.0.2.56", 502, 1) == ModbusProfile::Auto);
+        d = tracker.evaluate_probe(MbFailureType::Exception, 0, 79);
+        CHECK(!d.is_definitive);
+        CHECK(!d.is_affirmative);
+        CHECK(tracker.profile_basis == ModbusProfileBasis::Probing);
+        for (int i = 1; i < MODBUS_PROBE_MAX_RETRIES; ++i)
+            d = tracker.evaluate_probe(MbFailureType::Exception, 0, 79);
+        CHECK(d.is_definitive);
+        CHECK(!d.is_affirmative);
+        CHECK(tracker.profile_basis == ModbusProfileBasis::Fallback);
+        CHECK(tracker.affirmative_profile == ModbusProfile::Auto);
 
         // Transient exception (06 Server Busy) increments failures but stays Auto
         CHECK(tracker.on_socket_open("192.0.2.55", 502, 1) == ModbusProfile::Auto);

@@ -67,8 +67,16 @@ function completeCtCurrent(s, has) {
     ? null : keys.reduce((a, k) => a + s[k], 0);
 }
 
+// Decoded X10A command, not measured shaft speed: 0 = maximum, 100 = stop.
+// Invalid inputs stay absent in both the live pill and the derived history; clamping would turn
+// unsupported bytes into plausible commands. Keep fractional decoded values intact.
+function pumpCommandPercent(signal) {
+  return typeof signal === "number" && Number.isFinite(signal) && signal >= 0 && signal <= 100
+    ? 100 - signal : null;
+}
+
 // ── Derived trends: computed pills and combined component states ───────────────────────────────
-// Pump speed, ΔT, heat output, electrical input and COP have no directly matching register value, so
+// Pump command, ΔT, heat output, electrical input and COP have no directly matching register value, so
 // the device has nothing to buffer for the displayed figure itself. BUH likewise has two physical
 // stage bits but one component-level inspector. Their 24-hour curves/timeline are assembled
 // HERE, out of the rings of what each is computed FROM,
@@ -99,14 +107,12 @@ const DERIVED = {
     fn: (s) => s.buh_step1 == null || s.buh_step2 == null ? null
       : s.buh_step2 > 0 ? 2 : s.buh_step1 > 0 ? 1 : 0,
   },
-  // The X10A row is an inverted control signal: 0 = maximum and 100 = stop. The schematic instead
-  // shows the intuitive speed percentage, so its chart must transform every sample by the exact same
-  // clamped expression as liveData(). Drawing the raw row would make an idle pump look maximal.
+  // Retain the legacy internal trend id. The displayed percentage is the inverted controller
+  // command, not measured speed; liveData() uses this same validation and inversion.
   pump_speed: {
     unit: "%", ins: ["pump_signal"],
     ready: (h) => h.pump_signal,
-    fn: (s) => s.pump_signal == null ? null
-      : Math.min(100, Math.max(0, 100 - s.pump_signal)),
+    fn: (s) => pumpCommandPercent(s.pump_signal),
   },
   dt: {
     unit: "K", ins: ["leaving_water", "return_water"],
@@ -150,13 +156,10 @@ const DERIVED = {
   // The quotient, and it is deliberately drawn on FEWER samples than its two inputs. Two gates:
   //   running — the live pill's own (rps > 5, ΔT > 0.5); a COP of a stopped plant is not a small
   //             COP, it is not one at all.
-  //   scope   — cop_scope.hpp: the CT clamps see the whole unit INCLUDING both resistive heaters
-  //             while this historical quotient deliberately retains the pre-BUH boundary. R2T now
-  //             has its own curve, but tank-heater heat crosses neither water sensor and the five-
-  //             minute rings keep last readings/events rather than one synchronised plant sample.
-  //             A CT-sourced sample therefore still draws NOTHING instead of splicing together a
-  //             plausible whole-plant quotient. An INV-sourced sample has the heaters outside both
-  //             sides and needs no such evidence, which is why it survives.
+  //   scope   — CT coverage depends on wiring and can include heater loads. This quotient uses
+  //             pre-BUH temperatures, and the five-minute rings are not a synchronized plant
+  //             sample. Leave CT-sourced samples blank; the inverter path uses the compressor-side
+  //             estimate and excludes the heater output.
   cop: {
     unit: "", ins: ["flow", "leaving_water", "return_water", "comp_rps", "inv_current",
                     "ct_l1", "ct_l2", "ct_l3"],
@@ -164,7 +167,7 @@ const DERIVED = {
     ready: (h) => h.flow && h.leaving_water && h.return_water && h.comp_rps && h.inv_current,
     fn: (s, has) => {
       const ct = completeCtCurrent(s, has);
-      if (ct != null && ct > 0) return null;           // whole-unit divisor — see the note above
+      if (ct != null && ct > 0) return null;           // the recorded CT scope is not established
       if (s.inv_current == null || s.flow == null) return null;
       if (s.leaving_water == null || s.return_water == null || s.comp_rps == null) return null;
       const dt = s.leaving_water - s.return_water;
@@ -2145,10 +2148,9 @@ function vDescRow(v) {
   // current row while the pill above it, the inspector, the chart and MQTT all refuse it.
   const notCurrent = x10aDown() || rowNotMeasuring(v);
   const src = fb || v;
-  // A native stand-in needs its own interpretation limits, rather than the unavailable X10A
-  // instrument's explanation. Baseline HomeHub and ordinary X10A copy retain their established path.
-  const nativeFallback = fb?.profile === "altherma4";
-  const d = descFor(nativeFallback ? fb.label : label, nativeFallback ? fb : v);
+  // A native or provisional stand-in needs its own interpretation limits.
+  const useMbDesc = fb?.profile === "altherma4" || mbFlowScaleUnverified(fb);
+  const d = descFor(useMbDesc ? fb.label : label, useMbDesc ? fb : v);
   if (fb) cls = (cls ? cls + " " : "") + "src-val-mb";
   const unit = displayUnit(src);
   const val = (notCurrent && !fb)
@@ -2376,11 +2378,8 @@ function valueGroupsHtml(vals, connected) {
   return html;
 }
 
-// The HomeHub registers with NO X10A counterpart — the real power measurement, the Smart-Grid mode,
-// the setpoint limits. They have no row to sit inside, so they get a group of their own, LAST: visible
-// (the power reading in particular is worth having — X10A has no equivalent and the dashboard has to
-// estimate it from CT clamps at an assumed 230 V) but after everything X10A carries, because X10A
-// stays the prominent source. Empty and therefore absent on a device with no HomeHub.
+// HomeHub registers without an X10A counterpart (reported power, Smart Grid mode and setpoint
+// limits) stay in their own group after the X10A entries. An absent HomeHub has no group.
 function modbusOnlyGroupHtml(all) {
   // `all` = X10A carried no rows at all, so the paired ones have no row to sit inside and belong here
   // too — otherwise they are simply not on screen while being actively measured.

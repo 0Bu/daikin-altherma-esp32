@@ -193,7 +193,20 @@ async function installHooks(page, mutation) {
       if (window.__motionObserve && (S.scrub || S.clickHold)) window.__motionHolds++;
       const result = original.renderApp(...args);
       if (!window.__motionObserve) return result;
-      window.__motionRenders.push({ started, duration: performance.now() - started });
+      let command = null;
+      if (S.insp === "pump") {
+        const pill = document.getElementById("svPump");
+        const sentence = document.querySelector("#inspBody .vdesc-p:last-child");
+        const visible = el => {
+          if (!el?.getClientRects().length || getComputedStyle(el).visibility !== "visible") return false;
+          for (let node = el; node; node = node.parentElement)
+            if (Number(getComputedStyle(node).opacity) === 0) return false;
+          return true;
+        };
+        command = { value: S.live?.pump, lang: LANG, pill: pill.textContent,
+          inspector: sentence?.textContent, visible: visible(pill) && visible(sentence) };
+      }
+      window.__motionRenders.push({ started, duration: performance.now() - started, command });
       if (window.__motionInactive?.some(({ node }) =>
         node.getAnimations().some(animation => animation instanceof CSSAnimation)))
         window.__motionUnexpectedMotion++;
@@ -454,7 +467,7 @@ async function prepareObservationViewport(page, selector, animationIds) {
 
 async function observe(page, server, context, selectors, { inspector = false, status = false,
   fixture = null, animationIds = ["fSup1", "rfHot", "scFan", "scPump"],
-  inactiveAnimationIds = [] } = {}) {
+  inactiveAnimationIds = [], changingPump = false } = {}) {
   await page.bringToFront();
   await page.waitFor("document.visibilityState === 'visible' && !document.hidden");
   // Opening/disclosure transitions may legitimately finish. Persistent flow CSSAnimation objects
@@ -644,6 +657,18 @@ async function observe(page, server, context, selectors, { inspector = false, st
   assert.ok(server.valuesRequests >= requests + 3 && motion.polls >= 3,
     context + ": at least three real values polls");
   assert.ok(motion.duration >= 4000, context + ": three real updates must span two full polling intervals");
+  if (changingPump) {
+    const readings = motion.renders.map(row => row.command);
+    assert.ok(new Set(readings.map(row => row?.value)).size >= 3,
+      context + ": three distinct pump commands must reach the open inspector during live polling");
+    for (const row of readings) {
+      assert.ok(Number.isFinite(row?.value), context + ": each pump command must be readable");
+      assert.equal(row.visible, true, context + ": the pill and the live inspector sentence must be visible");
+      const text = row.value.toLocaleString(row.lang, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+      assert.equal(row.pill, text, context + ": the pill must show each new command");
+      assert.ok(row.inspector.includes(text), context + ": the open inspector must show each new command");
+    }
+  }
   assert.equal(motion.holds, 0, context + ": polling must not be hidden behind interaction holds");
   assert.equal(motion.closedBuilds, 0, context + ": polls must not rebuild cached charts in closed rows");
   assert.equal(motion.hiddenCharts, 0, context + ": closed rows must not retain duplicate history SVGs");
@@ -987,8 +1012,18 @@ export async function assertHistoryMotion(page, server, context) {
       assert.deepEqual(chart.sources, expected, label + ": preserve independent history sources");
       if (key === "env3") assert.equal(chart.forecast, true, label + ": forecast must accompany real ENV III history");
       if (key === "flow") await assertFlowTtlTransition(page, server, label);
-      await observe(page, server, label, ["#inspHist .vhist-plot"], { inspector: true });
       let restoreValues;
+      if (key === "pump") {
+        restoreValues = fixture.values;
+        fixture.values = tick => {
+          const frame = restoreValues(tick);
+          frame.values.find(row => row.concept === "pump_signal").value = String(20 + tick % 10);
+          return frame;
+        };
+      }
+      await observe(page, server, label, ["#inspHist .vhist-plot"], {
+        inspector: true, changingPump: key === "pump",
+      });
       if (key === "sgrequest") {
         restoreValues = await assertSgTransition(page, server, fixture, label);
         await observe(page, server, label + "/changed-cap-stable",
@@ -1045,9 +1080,13 @@ export async function assertHistoryMotion(page, server, context) {
       await mountFixture(page, server, frame);
       const label = context + "/" + variant;
       if (variant === "modbus-numeric") {
+        // The controller still reports the pump ON. A missing X10A flow measurement stops the
+        // water trace, but cannot retire that independent reported-operation animation.
+        assert.equal(await page.evaluate("S.live?.pumpOn"), true,
+          label + ": retain the independent reported pump-ON witness");
         await disclosure(page, server, frame, label,
           ['#valueGroups [data-dashboard-card="modbus"] [data-trend="flow"]'], ["flow"], false,
-          { animationIds: ["rfHot", "scFan"], inactiveAnimationIds: ["fSup1", "scPump"] });
+          { animationIds: ["rfHot", "scFan", "scPump"], inactiveAnimationIds: ["fSup1"] });
       } else {
         const key = variant === "env3-no-forecast" ? "env3" : "room";
         const chart = await openInspector(page, key, INSPECTOR_TRENDS[key], label);

@@ -29,7 +29,7 @@ const values = (lwt = "35.0") => {
     row("Return water temp before PHE (R4T)", "30.0", 0x61, "°C"),
     row("Leaving water temp. after BUH (R2T)", lwt, 0x61, "°C"),
     row("Flow sensor", "10.0", 0x61, "l/min"), row("INV frequency", "40", 0x21, "rps"),
-    row("INV primary current", "5", 0x21, "A"), row("Water pump operation", "1"),
+    row("INV primary current", "5", 0x21, "A"), { ...row("Water pump operation", "1"), binary: true },
     row("Water pump signal", "50"), row("3way valve", "0"), row("BUH Step1", "0"),
     row("BUH Step2", "0"), row("BSH", "0"), row("Space heating operation", "1"),
     row("Defrost operation", "0")],

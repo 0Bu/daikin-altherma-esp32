@@ -29,7 +29,8 @@ The source path is read-only. This firmware never writes the hub.
 
 ## Wire facts
 
-Source: *EKRHH Daikin HomeHub — Installer reference guide 4P744838-1E*, §2.5, §9, §13.
+Source: [EKRHH Daikin HomeHub — Installer reference guide 4P744838-1E](https://www.daikin.eu/content/dam/document-library/Installer-reference-guide/heat/accessories/ekrhh/EKRHH_Installer%20reference%20guide_4PEN744838-1E_English.pdf),
+§2.5, §9, §13.
 
 | | |
 |---|---|
@@ -127,8 +128,8 @@ Read today (UC3 Daikin Altherma):
 * **Faults** (input): unit error active `21`, error code `22` (`Text16`), sub-code `23`
 * **Temperatures** (input, `Temp16`): leaving water PHE `40` / BUH `41`, return `42`, DHW tank `43`,
   outdoor air `44`, liquid refrigerant `45`, room `50`
-* **Flow + electrical input** (input): flow `49` (`Int16`, L/min ×100), whole-system electrical
-  input `51` (`Pow16`, kW). Offset `51` is not dedicated booster-heater power.
+* **Flow + electrical input** (input): flow `49` (`Int16`, L/min ×100) and reported heat pump power
+  consumption `51` (`Pow16`, kW). Offset `51` is not dedicated booster-heater power.
 * **Disinfection state** (input): current disinfection operation `33` (`Int16`, binary). The
   HomeHub map does not expose the configured weekday, start time or disinfection temperature.
 * **Setpoints and modes** (holding, read back): LWT main heating `1` / cooling `2`,
@@ -320,8 +321,11 @@ flow scale, prints L/min for pump speed and gives an ambiguous 10–600 bar pres
 outputs, pressure pairing and pressure-based profile selection must not be treated as confirmed
 physical measurements or verified model identification. The native value explainers also state the
 unverified flow/pump/pressure interpretations in every shipped language.
-The limits also appear beside paired X10A comparisons and under native replacement readings. No
-numeric agreement or difference is asserted for native flow/pressure while their scaling is unverified.
+The limits also appear beside paired X10A comparisons and under replacement readings. No numeric
+agreement or difference is asserted for unverified flow or native pressure. Input 49 from the
+baseline map has the same flow limit while the profile is unresolved or using a fallback. An
+affirmative EKRHH capability reply allows its existing live schematic use. History retains the
+catalog-converted samples and is not physical scale acceptance.
 The sentinel filter remains a conservative project rule; the guide explicitly documents unavailable
 32766 for input 23 but does not establish the complete EKRHH sentinel vocabulary for every native row.
 
@@ -361,22 +365,17 @@ leaving-water sensor. A label match would be incomplete and wrong, which is the 
 below, where the Modbus value stands alone under the X10A row's name with nothing beside it to look
 implausible against.
 
-The vocabulary is therefore **`logic/history.hpp`'s trend ids**, reused rather than reinvented: a
-trend is already "one physical quantity, addressed structurally by (register page, byte offset,
-unit, plus converter where a byte contains several bits)", and the catalog test already proves each
-locator resolves to exactly one row per profile. A
-`static_assert` pins every pairing to a real trend id, so a renamed trend is a build error rather than
-a pairing that silently stops happening.
+Trended pairs reuse the IDs and structural locators in [`logic/history.hpp`](../main/logic/history.hpp).
+Live-only state pairs use the X10A page, offset and converter together. The catalog tests verify
+the locators against the shipped profiles.
 
-Eight measurements plus three state pairs, and — measured across the catalog — **all eleven resolve on all
-39 detectable profiles**: pre- and post-BUH leaving water, return water, DHW tank, outdoor air,
-liquid refrigerant, flow, room temperature,
-booster-heater run (HomeHub input `32` ↔ X10A BSH converter `305`) and 3-way-valve position (input
-`37` ↔ converter `306`), and EKRHH Quiet mode (holding `9` ↔ X10A `0x60/2`, converter `301`).
-Native Altherma 4 holding 9 reports selection and is excluded from this activity pairing. The rest carry no pairing on
-purpose, each for a stated reason: the real power measurement has
-no X10A equivalent at all (X10A estimates it from CT clamps at an assumed 230 V, so pairing a
-measurement with an estimate would hide which is which); other setpoints, modes and faults are not readings.
+The trended measurements cover pre- and post-BUH leaving water, return water, DHW tank,
+outdoor air, liquid refrigerant, flow and room temperature. Trended states are booster-heater run
+(input `32`), 3-way-valve position (input `37`) and EKRHH Quiet activity (holding `9`).
+The pump running report (input `30`) and space heating/cooling operation (input `53`) pair
+live. Native Altherma 4 also pairs water pressure (input `79`), while its holding `9` reports
+Quiet selection. HomeHub's reported power consumption stays separate from the X10A current-based
+estimate. Other setpoints, modes and faults are not paired measurements.
 Disinfection input `33` is likewise deliberately unpaired: X10A `0x62/8` converter `303` is named
 **Tank preheat**, a preparatory state rather than proof that disinfection is active. Both receive
 their own event timeline, so their timing can be compared without merging their meaning.
@@ -414,8 +413,8 @@ green/yellow/red state colours as WiFi, MQTT, Syslog and NTP:
 * **Both up** — the row shows the X10A value, unmarked. Tapping it opens the explainer, and the
   gateway's reading appears at the **end** of the body, after the "Normal:" note: a full row carrying
   the *Modbus register's own label*, the badge and the value, then the **difference** between the two
-  when the conversion is established. Native Altherma 4 flow and pressure show the unverified
-  conversion limit instead of a numeric comparison.
+  when the conversion is established. Flow marked `flow_scale_unverified` and native Altherma 4
+  pressure show the [conversion limit](#deferred-physical-acceptance) in place of a numeric comparison.
   It sits last, not first, because a reader opens an explainer to find out what the quantity *is* —
   the row's own value is already stated an inch above, in the header they just tapped. The label is
   the gateway's rather than the X10A row's on purpose: this line is what someone verifying a pairing
@@ -429,18 +428,16 @@ green/yellow/red state colours as WiFi, MQTT, Syslog and NTP:
   opinion presupposes a first one, and the only X10A number still in memory is one the bus stopped
   refreshing, so a "difference" against it would be a statement about two *instants* wearing the
   shape of a statement about two *instruments*.
-  ΔT and heat output survive, because both sides of each come from the one source and nothing is
-  mixed across boundaries. **The COP does not.** It looks like the same arithmetic and is not: the
-  gateway measures the *whole unit's* electrical input, backup and immersion heater included, while
-  the heat figure is across the plate exchanger alone — precisely the boundary mismatch
-  [`cop_scope.hpp`](../main/logic/cop_scope.hpp) refuses, and one that collapses exactly when a
-  heater fires, reading as a failing heat pump while nothing is wrong. The gateway now carries the
-  compressor and tank-heater states, but not the BUH stage state and all source-boundary evidence the
-  quotient needs, so the answer remains: publish nothing, and name the reason
-  (`feature_gate.hpp` — disable, never degrade).
-  The electrical input itself *is* better here, since the HomeHub measures what X10A only estimates
-  from CT clamps at an assumed 230 V — read from input register **51** by its offset, never by its
-  unit, because the map carries three `kW` rows and the other two are the power *limit* setpoints.
+  The working ΔT is the plate heat exchanger outlet before the backup heater (input `40`) minus
+  return water (input `42`). It is shown with qualified flow (input `49`) above 0.5 L/min.
+  Heat output also requires a running compressor (input `31`), the DHW route (input `37`) and a
+  positive ΔT. The fallback leaves the space heating or cooling direction unresolved, so heat
+  output is unavailable on that route. An unverified flow reading stays visible with its
+  limitation while both derived figures are withheld. The schematic also withholds COP on Modbus
+  alone. The EKRHH guide (4P744838-1E, §9.2.2, p. 43) identifies input **51** as heat pump power
+  consumption. Its measurement boundary and heater coverage have not been established for matching
+  that reading to heat across the plate exchanger. The schematic shows the reported power by
+  register offset; the other `kW` rows are power limits.
 * **No HomeHub** — nothing Modbus appears anywhere: no row, no group, no comparison, no banner.
 
 Registers with no X10A counterpart get their own group at the very end of the value list, after

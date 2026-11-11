@@ -1,4 +1,4 @@
-// translation-source: 00f8393aee827b21e658965c9ff792c99c563d60de18775bb092ec7c42167e1f
+// translation-source: 320445530cf86efdf9387196a723bb766c3bfeda1c35a1ffd5e768a16fc6b70a
 I18N.it = localeValues([
   /* sys.nodata */ "Nessun dato",
   /* sys.unreachable */ "Non raggiungibile",
@@ -334,7 +334,7 @@ I18N.it = localeValues([
   /* a4.operation_help */ "Indica Arresto, Riscaldamento del serbatoio, Riscaldamento ambienti, Raffrescamento ambienti o Funzionamento dell’attuatore. È uno stato segnalato, non una prova di trasferimento termico utile.",
   /* a4.heating_offset_help */ "Sposta la curva di riscaldamento climatica della zona principale in kelvin. È una correzione, non una temperatura misurata né il valore completo della temperatura obiettivo dell’acqua.",
   /* a4.pre_phe_outdoor_help */ "Temperatura dell’acqua prima dello scambiatore a piastre esterno. Il sensore è sul lato acqua: non misura l’aria esterna né il refrigerante.",
-  /* a4.flow_help */ "La scala della portata Altherma 4 non è verificata. Il valore in L/min usa la conversione esistente; confrontarlo con la lettura dell'unità prima di valutare le prestazioni.",
+  /* mb.flow_scale_help */ "La scala della portata di questa sorgente Modbus non è verificata. Confrontare il valore con quello mostrato dall'unità.",
   /* a4.pump_help */ "La guida Altherma 4 indica la velocità della pompa, ma riporta L/min. L'unità % visualizzata è un'ipotesi non verificata; confrontarla con la lettura dell'unità.",
   /* a4.pressure_help */ "La scala della pressione Altherma 4 non è verificata. Il valore in bar usa la conversione esistente; confrontarlo con la lettura dell'unità prima di valutare la pressione.",
   /* a4.demand_response */ "Modalità di risposta alla domanda",
@@ -1006,15 +1006,15 @@ INSPECT_I18N.it = inspectValues(
       : d.pth == null ? null
       : d.pthKind === "cooling" ? `≈ ${fmt1(d.pth)} kW frigoriferi${d.cop != null ? `; EER ${fmt1(d.cop)}` : ""}.`
       : `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `; COP ${fmt1(d.cop)}` : ""}.`], // pth
-    [(d) => d && d.efficiencyKind === "eer" ? "EER stimato della pompa di calore" : d && d.copScope === "plant" ? "COP stimato dopo BUH" : "COP stimato della pompa di calore", "Efficienza stimata", (d) => d && d.efficiencyKind === "eer"
+    [(d) => d && d.efficiencyKind === "eer" ? "EER stimato della pompa di calore" : d && d.copScope === "plant" ? "COP stimato a partire dai CT" : "COP stimato della pompa di calore", "Efficienza stimata", (d) => d && d.efficiencyKind === "eer"
       ? "Potenza frigorifera stimata divisa per assorbimento elettrico stimato. Eredita le incertezze di fluido, sensori, tensione e fattore di potenza. È un EER istantaneo, non stagionale; l’energia misurata su una stagione è più significativa."
-      : "Potenza termica stimata divisa per assorbimento elettrico stimato con confini compatibili: dopo BUH con CT e R2T, oppure sola pompa di calore con corrente inverter. Il cablaggio CT decide i carichi inclusi. Indicazione istantanea, non contatore certificato.", (d) => d.copBlock === "tank_heater" ? "Nessun COP: la resistenza del serbatoio può essere inclusa nell’elettricità, ma il calore va direttamente al serbatoio senza attraversare i sensori di mandata; i confini non coincidono."
+      : "Potenza termica stimata divisa per assorbimento elettrico stimato con confini compatibili. Con i CT si preferisce una lettura valida di R2T dopo il riscaldatore ausiliario. Se manca, si usa R1T prima del riscaldatore solo se questo risulta spento. Il cablaggio dei CT determina i carichi inclusi. La corrente dell’inverter riguarda la pompa di calore. Indicazione istantanea, non contatore certificato.", (d) => d.copBlock === "tank_heater" ? "Nessun COP: la resistenza del serbatoio può essere inclusa nell’elettricità, ma il calore va direttamente al serbatoio senza attraversare i sensori di mandata; i confini non coincidono."
       : d.copBlock === "buh_no_r2t" ? "Nessun COP: BUH attivo senza sensore successivo. L’elettricità può includere il riscaldatore mentre il calore viene stimato prima di esso."
-      : d.copBlock === "mb_scope" ? "Nessun COP: HomeHub misura l’elettricità dell’intera unità, ma il calore del solo PHE e non fornisce né stati dei riscaldatori né sensore a valle per allineare i confini."
+      : d.copBlock === "mb_scope" ? "COP non disponibile. I dati disponibili non permettono di associare la potenza elettrica di HomeHub alla potenza termica stimata allo scambiatore a piastre. Non è chiaro quali carichi elettrici, come le resistenze, siano inclusi."
       : d.copBlock === "no_pel" ? d.pelHeld ? "Nessun COP: compressore fermo, la corrente inverter è dell’ultimo ciclo e non è attuale." : "Nessun COP: il profilo non fornisce né correnti CT né corrente inverter."
       : d.cop == null ? null
       : d.efficiencyKind === "eer" ? `${fmt1(d.cop)} kW frigoriferi per kW elettrico: ≈ ${fmt1(d.copPth)} kW sottratti con ≈ ${fmt1(d.pel)} kW assorbiti.`
-      : d.copScope === "plant" ? `${fmt1(d.cop)} kW termici dopo BUH per kW elettrico stimato da CT: ≈ ${fmt1(d.copPth)} / ≈ ${fmt1(d.pel)} kW. Il cablaggio CT determina i carichi inclusi.`
+      : d.copScope === "plant" ? `${fmt1(d.cop)} kW termici lato acqua per kW elettrico stimato da CT: ≈ ${fmt1(d.copPth)} / ≈ ${fmt1(d.pel)} kW. Il cablaggio CT determina i carichi inclusi.`
       : `${fmt1(d.cop)} kW termici per kW elettrico nel confine pompa di calore: ≈ ${fmt1(d.copPth)} / ≈ ${fmt1(d.pel)} kW. BUH è fuori da entrambi i valori.`], // cop
     ["Riscaldatore ausiliario · BUH", "Riscaldatore ausiliario BUH", "Riscaldatore elettrico del circuito acqua posto dopo R1T. Gli stadi possono aumentare mandata e consumo; non è la resistenza interna BSH del serbatoio.", (d) => d.buh1 == null && d.buh2 == null ? null : d.buh2 ? "Stadio 2: entrambi gli stadi scaldano." : d.buh1 ? "Stadio 1: uno stadio scalda." : "Inattivo: nessuno stadio BUH riscalda."], // buh
     ["Resistenza serbatoio", "Resistenza elettrica del serbatoio", "Resistenza a immersione BSH nel serbatoio. Può scaldare con compressore, pompa e portata a zero; il contatto X10A non misura la potenza.", () => { const on = x10aDown() ? null : vOn(/^bsh$/i); return on == null ? null : on ? "Resistenza del serbatoio attiva." : "Inattiva: resistenza del serbatoio spenta."; }], // bsh
@@ -1028,13 +1028,7 @@ INSPECT_I18N.it = inspectValues(
       : "Pompa e portata attuali non dimostrano circolazione nel ramo ambienti."], // heat
     ["Funzionamento ambienti", "Funzionamento caldo o freddo degli ambienti", "Segnale di normale funzionamento caldo/freddo degli ambienti. Non è la richiesta del termostato e non dimostra da solo che il compressore sia attivo."], // spaceh
     ["Temperatura ambiente", 0, "Temperatura e obiettivo della zona di riferimento; dipendono dalla posizione del sensore."], // room
-    ["Pompa di circolazione", "Velocità pompa di circolazione", "Muove l’acqua nell’anello comune e nel ramo scelto dalla 3WV. Può restare attiva con compressore fermo per post-circolazione, protezione o equalizzazione; velocità e portata vanno lette insieme.", (d) => d.pump == null && d.flow == null && d.pumpOn == null ? null
-      : pumpFlowConflict(d) ? `La pompa interna risulta ferma, ma il sensore misura ${fmt1(d.flow)} l/min. Sono possibili circolazione esterna, post-circolazione o segnali discordanti; verificare entrambi.`
-      : d.pump != null && d.pump > 0 ? d.flow != null ? `Velocità ${fmt0(d.pump)} %; portata misurata ${fmt1(d.flow)} l/min.` : `Velocità ${fmt0(d.pump)} %, ma manca la portata; circolazione non confermata.`
-      : waterMoving(d) ? `Il sensore misura ${fmt1(d.flow)} l/min senza una velocità pompa utilizzabile.`
-      : d.pumpOn === true ? d.flow != null ? `Pompa attiva, ma solo ${fmt1(d.flow)} l/min; circolazione non dimostrata.` : "Pompa attiva, ma manca la portata; circolazione non confermata."
-      : d.pumpOn === false || d.pump === 0 ? d.flow != null ? `Pompa ferma; il sensore indica ${fmt1(d.flow)} l/min. I segnali non dimostrano circolazione.` : "Pompa ferma e nessuna misura di portata."
-      : `Stato pompa non affidabile; ${fmt1(d.flow)} l/min non basta a dimostrare circolazione.`], // pump
+    ["Pompa di circolazione", "Comando della pompa di circolazione", "Muove acqua nel circuito comune e nel ramo scelto dalla valvola a 3 vie. La percentuale è il comando X10A invertito: 0 % richiede arresto e 100 % impegno massimo. Non misura velocità né prova rotazione o portata. Leggere separatamente stato ON/OFF e portata misurata; la circolazione può continuare a compressore fermo.", (d) => pumpNowText(d, [(n) => `Comando pompa ${n} %.`, "Lo stato della pompa è ON.", "La pompa segnala arresto (OFF).", "Lo stato segnalato della pompa è sconosciuto.", (n) => `Portata misurata ${n} l/min.`, "Nessuna misura di portata disponibile.", "OFF contrasta con la portata positiva; sono possibili circolazione esterna, inerzia o segnali discordanti/non aggiornati.", "La circolazione dell’acqua non è confermata."])], // pump
     [(d) => pelMeasured(d) ? "Assorbimento elettrico · HomeHub" : "Assorbimento elettrico stimato", "Assorbimento elettrico", (d) => pelMeasured(d)
       ? "Consumo comunicato dall’ingresso HomeHub 51. La UI non lo calcola, ma la guida pubblica non prova calibrazione, punto di misura o riscaldatori inclusi; non è un contatore certificato dell’impianto."
       : "Stima per COP/EER. Con CT somma tutte le fasi dichiarate e usa corrente × 230 V presunti; tensione e fattore di potenza reali sono ignoti. La corrente inverter copre solo il compressore.", (d) => d.pelHeld ? "Compressore fermo: la corrente inverter è dell’ultimo ciclo e non è attuale; assorbimento ed efficienza non possono essere indicati."
@@ -1132,7 +1126,7 @@ DESCRIPTION_I18N.it = descriptionValues([
   ["Temperatura R4T in ingresso PHE sul ritorno comune; il ΔT va valutato col modo, non con 5 K universali."], // 33
   ["Portata nel circuito idronico comune; il minimo dipende da modello e modo e una portata bassa può causare 7H."], // 34
   ["Pressione del circuito idronico; molti manuali richiedono >1 bar, ma a ≤1,0 bar va consultato il modello esatto."], // 35
-  ["Comando velocità pompa invertito: 0 significa piena velocità e 100 arresto."], // 36
+  ["Comando X10A invertito alla pompa di circolazione: il valore grezzo 0 richiede il massimo comando e 100 l’arresto. Non misura i giri (RPM) né prova rotazione o flusso d’acqua. Leggere separatamente lo stato ON/OFF segnalato e la portata misurata, anche a compressore fermo."], // 36
   ["Stato della pompa idronica; il funzionamento non prova da solo uno scambio termico utile."], // 37
   ["Stato della pompa di un circuito solare termico, distinta dalla pompa idronica della pompa di calore."], // 38
   ["Velocità indicata della pompa nominata dal profilo; scala e circuito dipendono dal modello."], // 39

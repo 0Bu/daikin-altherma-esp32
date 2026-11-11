@@ -1,4 +1,4 @@
-// translation-source: 00f8393aee827b21e658965c9ff792c99c563d60de18775bb092ec7c42167e1f
+// translation-source: 320445530cf86efdf9387196a723bb766c3bfeda1c35a1ffd5e768a16fc6b70a
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -334,7 +334,7 @@ I18N.fr = localeValues([
   /* a4.operation_help */ "Indique Arrêt, Chauffage du ballon, Chauffage des locaux, Rafraîchissement des locaux ou Fonctionnement de l’actionneur. Il s’agit d’un état signalé, pas d’une preuve de transfert thermique utile.",
   /* a4.heating_offset_help */ "Décale la courbe de chauffe selon la météo de la zone principale, en kelvins. Ce décalage n’est ni une température mesurée ni la consigne complète de température de l’eau.",
   /* a4.pre_phe_outdoor_help */ "Température de l’eau avant l’échangeur à plaques extérieur. Ce capteur mesure le côté eau, pas la température de l’air extérieur ni du réfrigérant.",
-  /* a4.flow_help */ "La conversion du débit Altherma 4 n'est pas vérifiée. La valeur en L/min utilise la conversion existante ; comparez-la à la mesure de l'unité avant d'évaluer les performances.",
+  /* mb.flow_scale_help */ "La conversion du débit de cette source Modbus n'est pas vérifiée. Comparez la valeur avec celle affichée par l'unité.",
   /* a4.pump_help */ "Le guide Altherma 4 nomme la vitesse de pompe mais indique L/min. L'unité % affichée est une hypothèse non vérifiée ; comparez avec la mesure de l'unité.",
   /* a4.pressure_help */ "La conversion de pression Altherma 4 n'est pas vérifiée. La valeur en bar utilise la conversion existante ; comparez-la à la mesure de l'unité avant d'évaluer la pression.",
   /* a4.demand_response */ "Mode de réponse à la demande",
@@ -1006,15 +1006,15 @@ INSPECT_I18N.fr = inspectValues(
       : d.pth == null ? null
       : d.pthKind === "cooling" ? `≈ ${fmt1(d.pth)} kW de froid${d.cop != null ? ` ; EER ${fmt1(d.cop)}` : ""}.`
       : `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? ` ; COP ${fmt1(d.cop)}` : ""}.`], // pth
-    [(d) => d && d.efficiencyKind === "eer" ? "EER estimé de la pompe à chaleur" : d && d.copScope === "plant" ? "COP estimé après BUH" : "COP estimé de la pompe à chaleur", "Rendement estimé", (d) => d && d.efficiencyKind === "eer"
+    [(d) => d && d.efficiencyKind === "eer" ? "EER estimé de la pompe à chaleur" : d && d.copScope === "plant" ? "COP estimé à partir des pinces CT" : "COP estimé de la pompe à chaleur", "Rendement estimé", (d) => d && d.efficiencyKind === "eer"
       ? "Puissance froid estimée divisée par entrée électrique estimée. Hérite des incertitudes du fluide, des capteurs, de la tension et du facteur de puissance. EER instantané, non saisonnier ; l’énergie mesurée sur une saison est plus parlante."
-      : "Puissance thermique estimée divisée par entrée électrique estimée, avec périmètres compatibles : après BUH avec CT et R2T, ou pompe à chaleur seule avec courant d’onduleur. Le câblage CT décide des charges incluses. Indication instantanée, pas compteur certifié.", (d) => d.copBlock === "tank_heater" ? "Aucun COP : la résistance du ballon peut être incluse dans l’électricité, mais sa chaleur va directement au ballon sans traverser les capteurs de départ ; les périmètres diffèrent."
+      : "Puissance thermique estimée divisée par entrée électrique estimée, sur des périmètres compatibles. Avec les pinces CT, la mesure valide de R2T après l’appoint est prioritaire. Sans elle, R1T avant l’appoint est utilisé seulement si l’appoint est confirmé à l’arrêt. Le câblage des pinces CT détermine les charges incluses. Le courant d’onduleur sert à l’estimation côté pompe à chaleur. Indication instantanée, pas compteur certifié.", (d) => d.copBlock === "tank_heater" ? "Aucun COP : la résistance du ballon peut être incluse dans l’électricité, mais sa chaleur va directement au ballon sans traverser les capteurs de départ ; les périmètres diffèrent."
       : d.copBlock === "buh_no_r2t" ? "Aucun COP : BUH actif sans capteur après lui. L’électricité peut inclure l’appoint alors que la chaleur est calculée avant."
-      : d.copBlock === "mb_scope" ? "Aucun COP : HomeHub mesure l’électricité de toute l’unité, mais la chaleur du seul PHE et ne fournit ni états des appoints ni capteur aval pour accorder les périmètres."
+      : d.copBlock === "mb_scope" ? "Aucun COP. Les données disponibles ne permettent pas de faire correspondre la puissance électrique signalée par HomeHub à la puissance thermique estimée au niveau de l’échangeur à plaques. On ne sait pas quelles charges cette valeur couvre ni si elle inclut les appoints électriques."
       : d.copBlock === "no_pel" ? d.pelHeld ? "Aucun COP : compresseur arrêté, le courant d’onduleur vient du dernier cycle et n’est pas actuel." : "Aucun COP : ce profil ne fournit ni courant CT ni courant d’onduleur."
       : d.cop == null ? null
       : d.efficiencyKind === "eer" ? `${fmt1(d.cop)} kW de froid par kW électrique : ≈ ${fmt1(d.copPth)} kW retirés pour ≈ ${fmt1(d.pel)} kW absorbés.`
-      : d.copScope === "plant" ? `${fmt1(d.cop)} kW thermiques après BUH par kW électrique estimé par CT : ≈ ${fmt1(d.copPth)} / ≈ ${fmt1(d.pel)} kW. Le câblage CT fixe les charges incluses.`
+      : d.copScope === "plant" ? `${fmt1(d.cop)} kW thermiques côté eau par kW électrique estimé par CT : ≈ ${fmt1(d.copPth)} / ≈ ${fmt1(d.pel)} kW. Le câblage CT fixe les charges incluses.`
       : `${fmt1(d.cop)} kW thermiques par kW électrique dans le périmètre pompe à chaleur : ≈ ${fmt1(d.copPth)} / ≈ ${fmt1(d.pel)} kW. Le BUH est hors des deux valeurs.`], // cop
     ["Chauffage d’appoint · BUH", "Chauffage d’appoint BUH", "Appoint électrique du circuit d’eau placé après R1T. Ses étages peuvent relever le départ et la consommation ; ce n’est pas la résistance interne BSH du ballon.", (d) => d.buh1 == null && d.buh2 == null ? null : d.buh2 ? "Étage 2 : les deux étages chauffent." : d.buh1 ? "Étage 1 : un étage chauffe." : "Inactif : aucun étage BUH ne chauffe."], // buh
     ["Résistance du ballon", "Résistance électrique du ballon", "Résistance d’immersion BSH dans le ballon. Elle peut chauffer avec compresseur, pompe et débit à zéro ; son contact X10A ne mesure aucune puissance.", () => { const on = x10aDown() ? null : vOn(/^bsh$/i); return on == null ? null : on ? "Résistance du ballon active." : "Inactive : résistance du ballon arrêtée."; }], // bsh
@@ -1028,13 +1028,7 @@ INSPECT_I18N.fr = inspectValues(
       : "Pompe et débit actuels ne prouvent aucune circulation dans la branche locaux."], // heat
     ["Fonctionnement des locaux", "Fonctionnement chauffage ou froid des locaux", "Signal de fonctionnement normal chauffage/froid des locaux. Ce n’est pas la demande du thermostat et il ne prouve pas à lui seul le fonctionnement du compresseur."], // spaceh
     ["Température ambiante", 0, "Température et consigne de la zone de référence ; elles dépendent du placement du capteur."], // room
-    ["Circulateur", "Vitesse du circulateur", "Fait circuler l’eau dans la boucle commune et la branche choisie par la 3WV. Il peut rester actif compresseur arrêté pour post-circulation, protection ou égalisation ; vitesse et débit se lisent ensemble.", (d) => d.pump == null && d.flow == null && d.pumpOn == null ? null
-      : pumpFlowConflict(d) ? `La pompe interne se dit arrêtée, mais le capteur mesure ${fmt1(d.flow)} l/min. Circulation externe, post-circulation ou signaux divergents sont possibles ; vérifier les deux.`
-      : d.pump != null && d.pump > 0 ? d.flow != null ? `Vitesse ${fmt0(d.pump)} % ; débit mesuré ${fmt1(d.flow)} l/min.` : `Vitesse ${fmt0(d.pump)} %, mais aucun débit ; circulation non confirmée.`
-      : waterMoving(d) ? `Le capteur mesure ${fmt1(d.flow)} l/min sans vitesse de pompe exploitable.`
-      : d.pumpOn === true ? d.flow != null ? `Pompe active, mais seulement ${fmt1(d.flow)} l/min ; circulation non établie.` : "Pompe active, mais débit absent ; circulation non confirmée."
-      : d.pumpOn === false || d.pump === 0 ? d.flow != null ? `Pompe arrêtée ; capteur à ${fmt1(d.flow)} l/min. Ces signaux ne prouvent aucune circulation.` : "Pompe arrêtée et aucun débit disponible."
-      : `État pompe non fiable ; ${fmt1(d.flow)} l/min ne suffit pas à prouver la circulation.`], // pump
+    ["Circulateur", "Commande du circulateur", "Fait circuler l’eau dans la boucle commune et la branche choisie par la vanne 3 voies. Le pourcentage est la commande X10A inversée : 0 % demande l’arrêt et 100 % l’effort maximal. Ce n’est ni une vitesse mesurée ni une preuve de rotation ou de débit. Lire séparément l’état ON/OFF et le débit mesuré ; la circulation peut continuer compresseur arrêté.", (d) => pumpNowText(d, [(n) => `Commande de pompe ${n} %.`, "L’état de la pompe est ON.", "La pompe signale l’arrêt (OFF).", "L’état signalé de la pompe est inconnu.", (n) => `Débit mesuré ${n} l/min.`, "Aucune mesure de débit disponible.", "OFF contredit le débit positif ; circulation externe, inertie ou signaux divergents/périmés sont possibles.", "La circulation d’eau n’est pas établie."])], // pump
     [(d) => pelMeasured(d) ? "Puissance électrique · HomeHub" : "Puissance électrique estimée", "Puissance électrique", (d) => pelMeasured(d)
       ? "Consommation annoncée par l’entrée HomeHub 51. L’UI ne la calcule pas, mais le guide public ne prouve ni étalonnage, ni point de mesure, ni appoints inclus ; ce n’est pas un compteur certifié de l’installation."
       : "Estimation pour COP/EER. Avec CT, toutes les phases déclarées sont sommées puis multipliées par 230 V supposés ; tension et facteur de puissance réels sont inconnus. Le courant d’onduleur ne couvre que le compresseur.", (d) => d.pelHeld ? "Compresseur arrêté : le courant d’onduleur vient du dernier cycle et n’est pas actuel ; puissance et rendement ne peuvent être indiqués."
@@ -1132,7 +1126,7 @@ DESCRIPTION_I18N.fr = descriptionValues([
   ["Retour R4T au PHE ; évaluer le ΔT avec débit, compresseur et mode, jamais avec 5 K universels."], // 33
   ["Débit du circuit commun ; le minimum dépend du modèle et du mode, et une valeur basse peut causer 7H."], // 34
   ["Pression hydraulique : beaucoup de manuels exigent >1 bar ; à ≤1,0 bar consulter la notice du modèle exact."], // 35
-  ["Commande de pompe inversée : 0 est la vitesse maximale et 100 l’arrêt."], // 36
+  ["Commande X10A inversée de la pompe de circulation : la valeur brute 0 demande la commande maximale et 100 l’arrêt. Elle ne mesure pas les RPM et ne prouve ni rotation ni débit d’eau. Lire séparément l’état ON/OFF signalé et le débit mesuré, même compresseur arrêté."], // 36
   ["État pompe ; ne prouve pas la chaleur utile et peut agir sans compresseur : comparer au débit."], // 37
   ["État du circulateur d’un circuit solaire thermique configuré."], // 38
   ["Vitesse indiquée de la pompe nommée par ce profil."], // 39

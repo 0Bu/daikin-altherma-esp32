@@ -586,7 +586,7 @@ struct Peer {
     std::atomic<uint16_t> outdoor{1200};
     std::atomic<bool>     break_link{false};
     std::atomic<bool>     batch_exception{false};
-    std::atomic<bool>         probe_exception{false};
+    std::atomic<int>          probe_exception{-1};
     std::atomic<bool>         space_route_exception{false};
     std::mutex                response_mutex;
     std::vector<RegisterWord> words;
@@ -639,10 +639,20 @@ struct Peer {
                     wire_requests.push_back({space, static_cast<uint16_t>(addr + 1), qty});
                 }
                 std::vector<uint8_t> r;
+                const int            probe_code =
+                    req[7] == 4 && addr == 78 && qty == 1 ? probe_exception.load() : -1;
                 if ((batch_exception && qty > 1) ||
                     (space_route_exception && req[7] == 4 && addr == 36 && qty == 1) ||
-                    (probe_exception && req[7] == 4 && addr == 78 && qty == 1))
-                    r = {req[0], req[1], 0, 0, 0, 3, req[6], uint8_t(req[7] | 0x80), 2};
+                    probe_code >= 0)
+                    r = {req[0],
+                         req[1],
+                         0,
+                         0,
+                         0,
+                         3,
+                         req[6],
+                         uint8_t(req[7] | 0x80),
+                         static_cast<uint8_t>(probe_code >= 0 ? probe_code : 2)};
                 else {
                     std::vector<uint16_t> response_words;
                     for (uint16_t i = 0; i < qty; ++i) {
@@ -782,6 +792,7 @@ void require_catalog_rows(const std::vector<CachedValue>& rows, bool native) {
         const auto* resolved   = def::homehub_definition(row.modbus_definition);
         REQUIRE(resolved == &definition);
         REQUIRE(def::homehub_definition_is_altherma4(row.modbus_definition) == native);
+        if (native) REQUIRE(row.modbus_flow_scale_unverified == (row.off == 49));
         REQUIRE(row.reg == def::HOMEHUB_GROUP_REG && !row.held);
         REQUIRE(row.label == definition.label && row.unit == definition.unit);
         REQUIRE(row.conv == (definition.type == MbType::Text16                  ? 204
@@ -963,9 +974,11 @@ void probe_homehub_rows() {
         auto words = wire_words(false);
         words.push_back({MbFunc::ReadInput, 79, MB_UNSUPPORTED});
         Peer peer(false, ModbusProfile::Auto, words);
-        peer.probe_exception = exception;
+        peer.probe_exception = exception ? 2 : -1;
         mb_poll_once();
-        require_catalog_rows(snapshot_rows(), false);
+        const auto rows = snapshot_rows();
+        require_catalog_rows(rows, false);
+        REQUIRE(!cached_row(rows, 49).modbus_flow_scale_unverified);
         REQUIRE(mb_status().profile == ModbusProfile::HomeHub);
         REQUIRE(mb_status().profile_basis == ModbusProfileBasis::Affirmative);
         REQUIRE(peer.requests == MB_PLAN.count + 1);
@@ -977,11 +990,39 @@ void probe_homehub_rows() {
         words.push_back({MbFunc::ReadInput, 79, raw});
         Peer peer(false, ModbusProfile::Auto, words);
         mb_poll_once();
-        require_catalog_rows(snapshot_rows(), false);
+        const auto rows = snapshot_rows();
+        require_catalog_rows(rows, false);
+        REQUIRE(cached_row(rows, 49).modbus_flow_scale_unverified);
         REQUIRE(mb_status().profile == ModbusProfile::Auto);
         REQUIRE(mb_status().profile_basis == ModbusProfileBasis::Probing);
         REQUIRE(peer.requests == MB_PLAN.count + 1);
     }
+
+    // Exception code zero is not affirmative capability evidence. The same baseline reading
+    // remains provisional through retries and fallback, then qualifies in the affirmative sweep.
+    reset();
+    auto words = wire_words(false);
+    words.push_back({MbFunc::ReadInput, 79, MB_WAIT});
+    Peer peer(false, ModbusProfile::Auto, words);
+    peer.probe_exception = 0;
+    for (int attempt = 0; attempt < logic::MODBUS_PROBE_MAX_RETRIES; ++attempt) {
+        s_cycle_tick = 0;
+        mb_poll_once();
+        REQUIRE(cached_row(snapshot_rows(), 49).modbus_flow_scale_unverified);
+    }
+    REQUIRE(mb_status().profile == ModbusProfile::HomeHub);
+    REQUIRE(mb_status().profile_basis == ModbusProfileBasis::Fallback);
+    const auto fallback  = snapshot_rows();
+    peer.probe_exception = -1;
+    peer.set_word(MbFunc::ReadInput, 79, MB_UNSUPPORTED);
+    sdk::clock_us = uint64_t{s_probe_tracker.next_reprobe_time_s} * 1000000;
+    s_cycle_tick  = 0;
+    mb_poll_once();
+    REQUIRE(mb_status().profile_basis == ModbusProfileBasis::Affirmative);
+    const auto affirmative = snapshot_rows();
+    REQUIRE(!cached_row(affirmative, 49).modbus_flow_scale_unverified);
+    REQUIRE(cached_row(fallback, 49).modbus_flow_scale_unverified);
+    REQUIRE(cached_row(fallback, 49).value == cached_row(affirmative, 49).value);
 }
 void definition_snapshot_cutover() {
     for (const auto profile : {ModbusProfile::HomeHub, ModbusProfile::Altherma4}) {

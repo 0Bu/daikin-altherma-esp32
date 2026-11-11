@@ -1,4 +1,4 @@
-// translation-source: 00f8393aee827b21e658965c9ff792c99c563d60de18775bb092ec7c42167e1f
+// translation-source: 320445530cf86efdf9387196a723bb766c3bfeda1c35a1ffd5e768a16fc6b70a
 I18N.de = localeValues([
   /* sys.nodata */ "Keine Daten",
   /* sys.unreachable */ "Nicht erreichbar",
@@ -334,7 +334,7 @@ I18N.de = localeValues([
   /* a4.operation_help */ "Meldet Stopp, Speicheraufheizung, Raumheizung, Raumkühlung oder Stellantriebsbetrieb. Dies ist ein gemeldeter Zustand, kein Nachweis nutzbarer Wärmeübertragung.",
   /* a4.heating_offset_help */ "Verschiebt die wetterabhängige Heizkurve der Hauptzone in Kelvin. Dies ist ein Offset, keine gemessene Temperatur und nicht der vollständige Wassertemperatur-Sollwert.",
   /* a4.pre_phe_outdoor_help */ "Wassertemperatur vor dem Plattenwärmetauscher der Außeneinheit. Dies ist ein wasserseitiger Sensor, keine Außenluft- oder Kältemitteltemperatur.",
-  /* a4.flow_help */ "Die Durchflussskalierung ist für Altherma 4 nicht bestätigt. Der angezeigte L/min-Wert nutzt die bisherige Umrechnung; vor einer Leistungsbewertung mit der Anzeige der Anlage vergleichen.",
+  /* mb.flow_scale_help */ "Die Durchflussskalierung dieser Modbus-Quelle ist unbestätigt. Vergleichen Sie den Wert mit der Anzeige der Anlage.",
   /* a4.pump_help */ "Die Altherma-4-Anleitung nennt Pumpendrehzahl, gibt aber L/min als Einheit an. Die hier gezeigte Einheit % ist eine unbestätigte Annahme; mit der Anzeige der Anlage vergleichen.",
   /* a4.pressure_help */ "Die Druckskalierung ist für Altherma 4 nicht bestätigt. Der angezeigte bar-Wert nutzt die bisherige Umrechnung; vor einer Druckbewertung mit der Anzeige der Anlage vergleichen.",
   /* a4.demand_response */ "Laststeuerungsmodus",

@@ -1,4 +1,4 @@
-// translation-source: 00f8393aee827b21e658965c9ff792c99c563d60de18775bb092ec7c42167e1f
+// translation-source: 320445530cf86efdf9387196a723bb766c3bfeda1c35a1ffd5e768a16fc6b70a
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
@@ -334,7 +334,7 @@ I18N.zh = localeValues([
   /* a4.operation_help */ "报告停止、水箱加热、空间供暖、空间制冷或执行器运行。这是报告的状态，不能证明发生了有效热传递。",
   /* a4.heating_offset_help */ "以开尔文为单位调整主区域的气候补偿供暖曲线。这是偏移量，不是实测温度，也不是完整的目标水温。",
   /* a4.pre_phe_outdoor_help */ "室外板式换热器之前的水温。这是水侧传感器，不是室外空气温度或制冷剂温度。",
-  /* a4.flow_help */ "Altherma 4 的流量换算尚未验证。显示的 L/min 数值沿用现有换算；评估性能前，请与机组自身的读数比较。",
+  /* mb.flow_scale_help */ "此 Modbus 来源的流量换算尚未验证。请将该数值与机组自身显示的读数进行比较。",
   /* a4.pump_help */ "Altherma 4 手册将此项称为泵速，却标注 L/min。这里显示的 % 单位是尚未验证的假设；请与机组自身的读数比较。",
   /* a4.pressure_help */ "Altherma 4 的压力换算尚未验证。显示的 bar 数值沿用现有换算；判断压力前，请与机组自身的读数比较。",
   /* a4.demand_response */ "需求响应模式",
@@ -1006,15 +1006,15 @@ INSPECT_I18N.zh = inspectValues(
       : d.pth == null ? null
       : d.pthKind === "cooling" ? `≈ ${fmt1(d.pth)} kW 制冷${d.cop != null ? `；EER ${fmt1(d.cop)}` : ""}。`
       : `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `；COP ${fmt1(d.cop)}` : ""}。`], // pth
-    [(d) => d && d.efficiencyKind === "eer" ? "热泵 EER 估算" : d && d.copScope === "plant" ? "BUH 后 COP 估算" : "热泵 COP 估算", "效率估算", (d) => d && d.efficiencyKind === "eer"
+    [(d) => d && d.efficiencyKind === "eer" ? "热泵 EER 估算" : d && d.copScope === "plant" ? "基于电流互感器的 COP 估算" : "热泵 COP 估算", "效率估算", (d) => d && d.efficiencyKind === "eer"
       ? "制冷功率÷输入功率；继承介质、传感器、电压/功率因数误差，是瞬时 EER，非季节效率。"
-      : "边界相容的热功率÷输入功率：有 R2T 时 CT 算 BUH 后，否则逆变器电流仅算热泵；瞬时值非认证计量。", (d) => d.copBlock === "tank_heater" ? "无 COP：电功率可能含 BSH，但其水箱热量不经过出水传感器，边界不一致。"
+      : "用边界相容的估算热功率除以估算输入功率。使用电流互感器时优先采用备用加热器后的有效 R2T 读数；没有该读数时，只有确认加热器关闭才使用加热器前的 R1T。互感器接线决定包含哪些负载。逆变器电流用于估算热泵侧的输入功率。这是瞬时估算值，不是认证计量。", (d) => d.copBlock === "tank_heater" ? "无 COP：电功率可能含 BSH，但其水箱热量不经过出水传感器，边界不一致。"
       : d.copBlock === "buh_no_r2t" ? "无 COP：BUH 启动却无下游传感器，电热边界不一致。"
-      : d.copBlock === "mb_scope" ? "无 COP：HomeHub 测整机电功率，而热量只算 PHE，边界不一致。"
+      : d.copBlock === "mb_scope" ? "暂不显示 COP。现有数据无法将 HomeHub 的电功率与板式换热器的估算热功率对应起来。该电功率读数涵盖哪些负载（例如电加热器）尚不明确。"
       : d.copBlock === "no_pel" ? d.pelHeld ? "无 COP：停机后逆变器电流是旧值。" : "无 COP：无 CT 或逆变器电流。"
       : d.cop == null ? null
       : d.efficiencyKind === "eer" ? `每 1 kW 电约制冷 ${fmt1(d.cop)} kW：${fmt1(d.copPth)} / ${fmt1(d.pel)} kW。`
-      : d.copScope === "plant" ? `CT：每 1 kW 电在 BUH 后约供热 ${fmt1(d.cop)} kW（${fmt1(d.copPth)} / ${fmt1(d.pel)} kW）；负载取决于接线。`
+      : d.copScope === "plant" ? `CT：水侧每 1 kW 估算用电约供热 ${fmt1(d.cop)} kW（${fmt1(d.copPth)} / ${fmt1(d.pel)} kW）；负载取决于接线。`
       : `热泵边界：每 1 kW 电约供热 ${fmt1(d.cop)} kW（${fmt1(d.copPth)} / ${fmt1(d.pel)} kW），不含 BUH。`], // cop
     ["备用加热器 · BUH", "备用加热器 BUH", "R1T 下游水路电热，不是水箱 BSH。", (d) => d.buh1 == null && d.buh2 == null ? null : d.buh2 ? "2 级：两级加热。" : d.buh1 ? "1 级：一级加热。" : "BUH 各级关闭。"], // buh
     ["水箱电加热器", "水箱电加热器 BSH", "水箱浸入式 BSH；可独立加热，X10A 只报状态不测功率。", () => { const on = x10aDown() ? null : vOn(/^bsh$/i); return on == null ? null : on ? "BSH 已启动。" : "BSH 已关闭。"; }], // bsh
@@ -1028,13 +1028,7 @@ INSPECT_I18N.zh = inspectValues(
       : "泵/流量未证明空间支路循环。"], // heat
     ["空间运行", "空间供暖或制冷运行", "空间冷暖运行信号；不是温控需求或压缩机证明。"], // spaceh
     ["室温", "室温", "参考区域温度与目标；含义取决于位置。"], // room
-    ["循环泵", "循环泵速度", "驱动公共回路及 3WV 支路；停机后也可延时/保护运行，须结合流量。", (d) => d.pump == null && d.flow == null && d.pumpOn == null ? null
-      : pumpFlowConflict(d) ? `水泵报停但测得 ${fmt1(d.flow)} l/min；可能为外泵、延时或信号冲突。`
-      : d.pump != null && d.pump > 0 ? d.flow != null ? `${fmt0(d.pump)}%；${fmt1(d.flow)} l/min。` : `${fmt0(d.pump)}%，无流量；循环未确认。`
-      : waterMoving(d) ? `无泵速；测得 ${fmt1(d.flow)} l/min。`
-      : d.pumpOn === true ? d.flow != null ? `泵启动但仅 ${fmt1(d.flow)} l/min；循环未确认。` : "泵启动但无流量。"
-      : d.pumpOn === false || d.pump === 0 ? d.flow != null ? `泵停止；显示 ${fmt1(d.flow)} l/min，未证明循环。` : "泵停止，无流量。"
-      : `泵状态不可靠；${fmt1(d.flow)} l/min 未证明循环。`], // pump
+    ["循环泵", "循环泵指令", "使水流经公共水路及三通阀所选支路。百分比是反向换算的 X10A 控制指令：0 % 请求停止，100 % 请求最大驱动。它不是实测转速，也不能证明转动或流量。请分别查看 ON/OFF 状态与实测流量；压缩机停止时仍可能循环。", (d) => pumpNowText(d, [(n) => `水泵指令 ${n} %.`, "水泵状态为 ON。", "水泵报告停止（OFF）。", "水泵报告状态未知。", (n) => `实测流量 ${n} l/min.`, "无可用流量测量值。", "OFF 与正流量冲突；可能存在外部循环、惯性续流或矛盾/过时的信号。", "尚不能确认水循环。"])], // pump
     [(d) => pelMeasured(d) ? "电功率 · HomeHub" : "电功率估算", "电功率", (d) => pelMeasured(d)
       ? "HomeHub 输入 51 的耗电；校准、测点和所含加热器未公开，不是认证总表。"
       : "COP/EER 输入估算：CT 按声明相与 230 V，未知真实电压/功率因数；逆变器电流仅含压缩机。", (d) => d.pelHeld ? "停机后逆变器电流是旧值，不能显示耗电/效率。"
@@ -1132,7 +1126,7 @@ DESCRIPTION_I18N.zh = descriptionValues([
   ["PHE 回水 R4T；须结合流量/压缩机/模式，无统一 5 K。"], // 33
   ["公共水流量；最低值随型号/模式，过低可触发 7H。"], // 34
   ["水压；许多手册要求 >1 bar，≤1.0 bar 时查确切型号手册。"], // 35
-  ["反向水泵速度命令：0 表示最高转速，100 表示停止。"], // 36
+  ["循环泵的反向X10A指令：原始值0请求最大驱动，100请求停止。它不测量转速（RPM），也不能证明旋转或水流。即使压缩机停止，也应分别查看报告的ON/OFF状态和测得的流量。"], // 36
   ["泵状态；须结合流量，运行不证明换热。"], // 37
   ["太阳能回路泵状态；不同于热泵水路泵。"], // 38
   ["配置所命名泵速；刻度/回路随型号。"], // 39

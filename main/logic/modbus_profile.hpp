@@ -96,7 +96,7 @@ inline ModbusProfileDecision evaluate_probe_result(ModbusProfile current_profile
         if (is_extended_register(reg)) {
             // Modbus Exception 02 (Illegal Data Address) affirmatively confirms this unit
             // does not have extended registers -> fall back definitively to HomeHub without error.
-            if (failure_detail == 0x02 || failure_detail <= 0) {
+            if (failure_detail == 0x02 || failure_detail < 0) {
                 return {ModbusProfile::HomeHub, true, false, true, true};
             }
             // Transient exception (e.g. 06 Server Busy): stay in Auto to retry on next cycle.
@@ -197,7 +197,7 @@ struct ModbusProbeTracker {
                    !is_valid_altherma4_probe_value(reg, raw_value)) {
             bool is_affirmative_homehub = false;
             if (failure_type == MbFailureType::Exception &&
-                (failure_detail == 0x02 || failure_detail <= 0)) {
+                (failure_detail == 0x02 || failure_detail < 0)) {
                 is_affirmative_homehub = true;
             } else if (failure_type == MbFailureType::None && raw_value == MB_UNSUPPORTED) {
                 is_affirmative_homehub = true;
