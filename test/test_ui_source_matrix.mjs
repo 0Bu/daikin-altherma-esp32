@@ -2128,9 +2128,10 @@ assert.doesNotMatch(SOURCE, /chip\.demand_(?:on|off)|schem\.to_heat/);
   }
   const INV_DROPPED = { ...INV_U, value: null };
   for (const flag of [COMP_OFF, COMP_ON]) {
-    const reader = ctx({ x10a: true, mbEnabled: true, mbConnected: true,
+    const reader = ctx({ x10a: true, mbEnabled: true, mbConnected: true, mbCompressor: flag === COMP_ON,
                          values: [INV_DROPPED], modbus: [flag] });
     const live = reader.liveData();
+    assert.equal(live.mbCompressorOn, flag === COMP_ON, "the case carries a current HomeHub reply");
     assert.equal(live.pelHeld, false, "a HomeHub report cannot mark the missing inverter input as held");
     assert.equal(live.pelUnknown, false,
       "a missing inverter value must not be reported as an age-qualified reading");

@@ -98,8 +98,8 @@ static int64_t s_plant_gate_ms          = -1;    // guarded by s_mtx; successful
 static int64_t s_space_route_ms         = -1;    // guarded by s_mtx; successful input37 reply time
 static int64_t s_heating_mode_ms        = -1;    // guarded by s_mtx; successful input38 reply time
 static int64_t s_plant_outdoor_ms       = -1;    // guarded by s_mtx; successful input44 reply time
-static int64_t s_compressor_ms            = -1; // guarded by s_mtx; successful input31 reply time
-static ModbusCompressor s_compressor      = ModbusCompressor::Unknown;
+static int64_t s_compressor_ms          = -1;    // guarded by s_mtx; successful input31 reply time
+static ModbusCompressor s_compressor    = ModbusCompressor::Unknown;
 
 // ── Poll-task-owned socket state (no lock — single owner, exactly like hp_comm.cpp's s_rx/s_tx)
 // ─────
@@ -1050,17 +1050,17 @@ static void mb_poll_once() {
     // One capture in take_row instead of nine independent references. Keeping these small facts
     // together avoids growing the poll frame each time an admission operand is added.
     struct PlantGates {
-        bool    plant_gate_known    = false;
-        bool    plant_gate_active   = false;
-        bool    space_route_known   = false;
-        bool    space_route_active  = false;
-        bool    heating_mode_known  = false;
-        bool    heating_mode_active = false;
-        bool    received_data       = false;
+        bool             plant_gate_known    = false;
+        bool             plant_gate_active   = false;
+        bool             space_route_known   = false;
+        bool             space_route_active  = false;
+        bool             heating_mode_known  = false;
+        bool             heating_mode_active = false;
+        bool             received_data       = false;
         ModbusCompressor compressor          = ModbusCompressor::Unknown;
-        int64_t plant_gate_ms       = -1;
-        int64_t space_route_ms      = -1;
-        int64_t heating_mode_ms     = -1;
+        int64_t          plant_gate_ms       = -1;
+        int64_t          space_route_ms      = -1;
+        int64_t          heating_mode_ms     = -1;
         int64_t          compressor_ms       = -1;
     } gates;
     bool    outdoor_row_answered  = false;
@@ -1814,9 +1814,9 @@ size_t mb_values_snapshot(CachedValue* out, size_t max, bool& live, uint32_t* hi
     // and session N+1 commits between the copy and this status read, connected may already be true
     // again, but the generations differ and the caller still omits these old rows.
     {
-        Lock           lk(s_mtx);
-        target_generation                = s_target_generation.load(std::memory_order_acquire);
-        const uint32_t reply_age_s       = mb_reply_age_locked();
+        Lock lk(s_mtx);
+        target_generation          = s_target_generation.load(std::memory_order_acquire);
+        const uint32_t reply_age_s = mb_reply_age_locked();
         live = logic::modbus_cache_is_live(s_status.connected && s_poll_observed, s_link_generation,
                                            cache_generation, target_generation,
                                            cache_target_generation, cache_age_s, MB_CACHE_MAX_AGE_S,

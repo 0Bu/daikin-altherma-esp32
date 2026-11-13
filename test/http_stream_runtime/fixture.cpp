@@ -858,7 +858,7 @@ int main(int argc, char** argv) {
         emit(req, "modbus-values");
         ++modbus_history_generation;
         modbus_compressor = daik::ModbusCompressor::Off;
-        req = request();
+        req               = request();
         check(invoke(req, "/values", daik::h_values) == ESP_OK,
               "a retired chart binding must not suppress copied live values");
         successful(req);

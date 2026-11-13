@@ -1860,7 +1860,7 @@ void lifecycle() {
     adapter::ota_active     = true;
     mb_retry_start();
     REQUIRE(sdk::create_calls == 0 && mb_task_pending() && mb_network_quiesced());
-    adapter::ota_active   = false;
+    adapter::ota_active    = false;
     adapter::largest_block = 6144 + HEAP_RECOVERY_BYTES - 1;
     mb_retry_start();
     REQUIRE(sdk::create_calls == 0 && !s_task && mb_task_pending());
