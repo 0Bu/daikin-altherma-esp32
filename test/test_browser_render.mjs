@@ -2970,7 +2970,7 @@ async function assertHistoryReadouts(page, context) {
             const host=document.getElementById("browserHistoryFixture"),plot=host.querySelector("[data-hist]");
             const r=plot.getBoundingClientRect(),time=host.querySelector(".vhist-time.vhist-live");
             const i=scrubIndex(plot,r.left + plot.clientWidth * ${fraction});
-            return {id:plot.dataset.hist,scrub:S.scrub,actual:time.textContent,hidden:time.hidden,
+            return {id:plot.dataset.hist,scrub:S.scrub?.dataset?.hist,actual:time.textContent,hidden:time.hidden,
               expected:scrubTime(historyView(plot.dataset.hist),i),sample:i,
               plot:{left:r.left,top:r.top,width:r.width,height:r.height},events:window.__browserHistoryEvents};
           })()`);
@@ -3000,7 +3000,8 @@ async function assertHistoryReadouts(page, context) {
       let finger = await point(0.9);
       await touch("touchStart", finger);
       await waitForTime(0.9,"start");
-      assert.equal(await page.evaluate("S.scrub"),id,`${context}/${id}: touchstart owns the active scrub`);
+      assert.equal(await page.evaluate(`S.scrub === document.querySelector("#browserHistoryFixture [data-hist]")`),
+        true, `${context}/${id}: touchstart owns the active plot`);
       const overlaps = {tip:false,time:false};
       for (const fraction of [0.35,0.25,0.2,0.8,1,0]) {
         const destination = await point(fraction);
