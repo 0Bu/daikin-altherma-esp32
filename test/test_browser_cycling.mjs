@@ -88,7 +88,7 @@ export async function assertCyclingChart(page, server, context) {
     const requests = server.valuesRequests;
     server.setTelemetry({ status, values, histories });
     if (force) await page.evaluate("pollNow(); true");
-    await page.waitFor(`S.status?.boot_id === 'cycling-browser-fixture' &&
+    await page.waitFor(`S.status?.boot_id === ${JSON.stringify(status.boot_id)} &&
       S.status.ntp.time === ${JSON.stringify(time)} && !_pollBusy`, { timeoutMs: 18000 });
     assert.ok(server.valuesRequests > requests, context + ": real status poll must fetch values");
     updates++;
@@ -548,7 +548,27 @@ export async function assertCyclingChart(page, server, context) {
       await tap(page, hour(23));
       assert.match((await readAxis()).label, /02:30 GMT\+2–02:30 GMT\+1/,
         context + ": the repeated wall-clock hour has distinct offsets");
+    } else {
+      await tap(page, hour(23));
     }
+    await page.waitFor("!S.clickHold");
+    assert.deepEqual(await pinned(), [23], context + ": the hour is selected before reboot");
+    status.boot_id = "cycling-browser-reboot";
+    status.uptime_s = 60;
+    const cycling = status.health.checks[0];
+    delete cycling.timeline;
+    cycling.starts = 22;
+    cycling.hours = [{ ...hours[RESTORED], starts: 22 }];
+    await poll("2026-11-13T15:15:00Z");
+    assert.deepEqual(await page.evaluate(`(() => {
+      const chart = document.querySelector(".checkup-cycling-chart");
+      return {
+        timeline: chart?.classList.contains("checkup-cycling-timeline"),
+        counts: [...(chart?.querySelectorAll("button b") ?? [])].map(n => n.textContent).filter(Boolean),
+        selected: !!chart?.querySelector('[aria-pressed="true"]'),
+      };
+    })()`), { timeline: false, counts: ["22"], selected: false },
+    context + ": a reboot discards the previous trace and selection and shows saved hourly starts");
     assert.ok(updates >= 3, context + ": verify continuity across repeated production polling");
     console.log("cycling chart checked: " + context + "; " + updates + " live status polls");
   } finally {

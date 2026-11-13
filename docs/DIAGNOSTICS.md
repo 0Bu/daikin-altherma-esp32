@@ -109,14 +109,17 @@ There is no fixed normal number of starts. With enough data, the check considers
 runs averaging at least 10 minutes long enough. The average uses heating runs only.
 The card can still show starts while it waits for more readings or more identifiable heating runs.
 
-Each step in the rolling 24-hour chart marks a start with a recorded time. The chart counts these
-starts individually. The diagnosis total uses hourly counts and can include starts with no known
+Each step in the rolling 24-hour chart marks when the compressor was first seen running after it
+was seen off. The diagnosis total uses hourly counts and can include starts with no known
 time. When the total includes saved hourly counts from before a restart, the explanation shows
 how many came from those hours.
 
 In the rolling chart, each number counts the starts with a recorded time in that hour. A blank
 marks an hour with unavailable data and no timed start. Colors mark the modes seen in the hour.
-Hatching marks time without trace data, including times when the latest trace is unavailable.
+Hatching marks hours with gaps, including older readings that have dropped off the chart. It
+does not measure how long a gap lasted. If a status update arrives without new chart data, the
+open chart can keep the readings from the current diagnosis session and hatch the new gap.
+If the status update itself fails, the chart stays at the last successful update.
 Select a block to show its current range on the axis. The `≥` sign means at least that many starts.
 
 After a restart, the rolling chart fills with new readings. Until a timed trace is available,

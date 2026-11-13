@@ -1302,20 +1302,13 @@ static void append_status_json(JsonOut& j, bool redact) {
     j += "]},";
 
     // ── The rolling on-board plant diagnosis (logic/checkup.hpp) ────────────────────────────────
-    // Counted EVENTS and window MINIMA — the questions no single reading can answer and the trend
-    // rings structurally cannot either (a compressor cycle shorter than one 5-minute trend bucket
-    // leaves no trace in it). Named `health` and not `diag`: GET /diag is the log ring the bug-report
-    // button pulls, and two unrelated things under one word is how a reader ends up looking in the
-    // wrong place.
+    // `health` summarizes events and extrema that can be lost in the five-minute trend buckets.
     //
-    // `covered_s` is card-level bus context. Each check additionally exposes its OWN evidence clock:
-    // a mostly-readable pressure row cannot lend 24 hours to an RPS row seen for two seconds.
+    // `covered_s` describes bus coverage for the card. Each check tracks its own observations.
     //
-    // A field a check has not established is emitted as `null`, never omitted — an absent key is
-    // indistinguishable from an older build that never had it, the same rule logic/redact.hpp
-    // states for the bug-report payload. Successive `+=` with bare literals throughout (never one
-    // `a + b + c` chain): the httpd stack is the budget that killed v1.0.12, and every intermediate
-    // of a chain is live in this frame at once.
+    // Unknown scalar evidence uses null where the field is required. Optional evidence objects,
+    // including the compressor timeline, may be absent. Append literals separately to limit the
+    // number of temporaries live at once on the httpd stack.
     {
         logic::CheckupCyclingHours hrs{};
         // The optional chart must not need exception storage under heap pressure.

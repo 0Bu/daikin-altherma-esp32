@@ -479,10 +479,10 @@ rollback conditions.
 OTA and Weather announce network ownership before TLS. MQTT stops its complete transport and
 acknowledges; X10A, HomeHub and Syslog stand aside before allocation-rich work. An in-flight Weather
 request gets a bounded unwind window; OTA wins future admission. A 1.1-second lead lets an existing
-publisher cycle finish. Weather then raises its TLS phase and drains admitted `/values` snapshots
-and optional compressor traces from `/status` and MCP `get_status`. A trace releases its reader
-after serialization, or immediately when unavailable. Weather waits up to five seconds
-(else `http_busy`) before sampling heap. See the [trace omission rule](API.md#history-and-24-hour-checks).
+publisher cycle finish. Weather then raises its TLS phase and drains admitted value snapshots
+(`/values`, MCP `get_hp_values`) and optional compressor traces (`/status`, MCP `get_status`).
+A trace releases its reader after serialization, or immediately when unavailable. Weather waits up
+to five seconds (else `http_busy`) before sampling heap. See the [trace omission rule](API.md#history-and-24-hour-checks).
 Stale quiesce flags have a bounded ten-minute cap, longer than valid OTA
 transfer and host observation budgets. MQTT restarts after stable headroom with exponential backoff
 on client-start failure. No model-sized HTTP/MQTT buffer remains allocated for the boot.
