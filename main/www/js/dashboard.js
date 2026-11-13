@@ -123,6 +123,8 @@ async function refreshValues(paint = true) {
   // merging would make "is this reading current?" unanswerable per row.
   const modbus = Array.isArray(r.modbus) ? r.modbus : null;
   S._modbus = modbus || [];
+  S.modbusCompressorRunning = modbus && typeof r.modbus_compressor_running === "boolean"
+    ? r.modbus_compressor_running : null;
   // A values-only poll can lose or replace the source before the next status poll. Once the
   // binding protocol is known, an absent binding must withhold the previous peer's chart.
   const hasLease = Object.prototype.hasOwnProperty.call(r, "modbus_history_epoch") ||

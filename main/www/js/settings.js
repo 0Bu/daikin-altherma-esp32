@@ -1026,6 +1026,7 @@ async function otaCacheRestore(otaStatus) {
   syncHistSources();
   S._values = cached.values;
   S._modbus = cached.modbus;
+  S.modbusCompressorRunning = null;
   S.otaCached = true;
   S.transportUnavailable = null;
   S.transportBusy = false;

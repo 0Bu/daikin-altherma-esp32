@@ -104,6 +104,8 @@ ssize_t timed_recv(int fd, void* b, size_t n, int flags) {
 namespace adapter {
 daik::Config cfg;
 std::mutex   config_mutex;
+size_t       largest_block = 32 * 1024;
+size_t       free_bytes    = 64 * 1024;
 bool         config_throws = false, net_up = true, ota_active = false, weather_active = false;
 int config_reads = 0, config_saves = 0, history_calls = 0, history_gaps = 0, stack_samples = 0;
 
@@ -119,7 +121,11 @@ char                           pressure_log[512]{};
 unsigned                       pressure_log_count = 0;
 std::vector<daik::CachedValue> history_rows;
 } // namespace adapter
+std::size_t heap_caps_get_free_size(unsigned) { return adapter::free_bytes; }
+
 namespace daik {
+size_t heap_largest_internal_block() { return adapter::largest_block; }
+
 Config config() {
     ++adapter::config_reads;
     if (adapter::config_throws) throw std::bad_alloc();
@@ -233,6 +239,8 @@ void reset(bool fail_dynamic_mutex_create = false) {
     s_heating_mode_ms      = -1;
     s_space_route_ms       = -1;
     s_plant_outdoor_ms     = -1;
+    s_compressor_ms        = -1;
+    s_compressor           = ModbusCompressor::Unknown;
     s_req_host.clear();
     s_req_port                        = 0;
     s_unit                            = 0;
@@ -282,6 +290,8 @@ void reset(bool fail_dynamic_mutex_create = false) {
     sdk::lock_depth                = 0;
     adapter::cfg                   = Config{};
     adapter::config_throws         = false;
+    adapter::largest_block         = 32 * 1024;
+    adapter::free_bytes            = 64 * 1024;
     adapter::ota_active            = false;
     adapter::weather_active        = false;
     adapter::net_up                = true;
@@ -604,7 +614,7 @@ void seed_cache() {
     s_cache.push_back(cv);
 }
 void snapshot_generation() {
-    REQUIRE(MB_CACHE_MAX_AGE_S == 537); // Derived from the current native full/fallback read plan.
+    REQUIRE(MB_CACHE_MAX_AGE_S == 627); // Derived from the current native full/fallback read plan.
     reset();
     seed_cache();
     CachedValue out[1];
@@ -709,6 +719,7 @@ struct Peer {
     std::atomic<int>          probe_exception{-1};
     std::atomic<bool>         all_exceptions{false};
     std::atomic<bool>         space_route_exception{false};
+    std::atomic<bool>         compressor_exception{false};
     std::mutex                response_mutex;
     std::vector<RegisterWord> words;
     std::vector<WireRequest>  wire_requests;
@@ -773,6 +784,7 @@ struct Peer {
                     req[7] == 4 && addr == 78 && qty == 1 ? probe_exception.load() : -1;
                 if (all_exceptions || (batch_exception && qty > 1) ||
                     (space_route_exception && req[7] == 4 && addr == 36 && qty == 1) ||
+                    (compressor_exception && req[7] == 4 && addr == 30 && qty == 1) ||
                     probe_code >= 0)
                     r = {req[0],
                          req[1],
@@ -1181,6 +1193,13 @@ void native_gateway_baseline() {
         REQUIRE(mb_status().profile != ModbusProfile::Altherma4);
     }
 }
+ModbusCompressor current_compressor() {
+    bool             live   = false;
+    ModbusCompressor result = ModbusCompressor::Unknown;
+    mb_values_snapshot(nullptr, 0, live, nullptr, &result);
+    return result;
+}
+
 void probe_resolved_peer_reconnect() {
     reset();
     const TcpListener first, replacement;
@@ -1197,12 +1216,14 @@ void probe_resolved_peer_reconnect() {
         REQUIRE(mb_ensure_connected(adapter::cfg.mb_host, adapter::cfg.mb_port, 1, generation,
                                             history_modbus_generation()));
         REQUIRE(mb_status().host == "reconnect-harness.local" && !mb_values_live());
+        REQUIRE(current_compressor() == ModbusCompressor::Unknown);
         return listener.accept_peer();
     };
     const auto disconnect = [&](Peer& peer) {
         peer.break_link = true;
         mb_poll_once();
         REQUIRE(s_sock < 0 && !mb_values_live());
+        REQUIRE(current_compressor() == ModbusCompressor::Unknown);
     };
 
     uint32_t first_history_generation = 0;
@@ -1210,6 +1231,7 @@ void probe_resolved_peer_reconnect() {
         Peer peer(open(first_ipv4, first),
                   {{MbFunc::ReadInput, 49, 1234}, {MbFunc::ReadInput, 79, MB_UNSUPPORTED}});
         mb_poll_once();
+        REQUIRE(current_compressor() == ModbusCompressor::On);
         REQUIRE(cached_row(snapshot_rows(), 49).modbus_flow_scale_unverified);
         REQUIRE(mb_status().profile_basis == ModbusProfileBasis::Affirmative);
         REQUIRE(peer.requests == MB_PLAN.count + 1);
@@ -1235,6 +1257,7 @@ void probe_resolved_peer_reconnect() {
         const auto attempts  = adapter::history_bind_attempts;
         mb_poll_once();
         REQUIRE(adapter::history_bind_attempts == attempts);
+        REQUIRE(current_compressor() == ModbusCompressor::Unknown);
         REQUIRE(adapter::history_generation == first_history_generation);
         disconnect(peer);
     }
@@ -1253,12 +1276,14 @@ void probe_resolved_peer_reconnect() {
         close_sock();
     }
     {
-        Peer peer(open(replacement_ipv4, replacement),
-                  {{MbFunc::ReadInput, 49, 1570}, {MbFunc::ReadInput, 79, MB_WAIT}});
+        Peer peer(open(replacement_ipv4, replacement), {{MbFunc::ReadInput, 31, 0},
+                                                        {MbFunc::ReadInput, 49, 1570},
+                                                        {MbFunc::ReadInput, 79, MB_WAIT}});
         REQUIRE(adapter::history_generation == first_history_generation);
         adapter::history_bind_busy = true;
         const auto calls           = adapter::history_calls;
         mb_poll_once();
+        REQUIRE(current_compressor() == ModbusCompressor::Off);
         uint32_t   cache_history_generation = UINT32_MAX;
         const auto rows                     = snapshot_rows(true, &cache_history_generation);
         REQUIRE(cache_history_generation == 0 && adapter::history_calls == calls);
@@ -1414,6 +1439,73 @@ void partial_sweep_allocation_pressure() {
     REQUIRE(adapter::logs.size() == logs + 1 &&
             adapter::logs.back() == "modbus: communication recovered\n");
 }
+void compressor_witness() {
+    for (const auto profile : {ModbusProfile::HomeHub, ModbusProfile::Altherma4}) {
+        reset();
+        Peer peer(false, profile, {{MbFunc::ReadInput, 31, 1}});
+        REQUIRE(current_compressor() == ModbusCompressor::Unknown);
+        mb_poll_once();
+        REQUIRE(current_compressor() == ModbusCompressor::On);
+        const auto revision = mb_cache_generation();
+        peer.set_word(MbFunc::ReadInput, 31, 0);
+        sdk::clock_us.fetch_add(1000000);
+        mb_poll_once();
+        REQUIRE(current_compressor() == ModbusCompressor::Off);
+        REQUIRE(mb_cache_generation() == revision);
+        REQUIRE(cached_row(snapshot_rows(), 31).value == "1");
+
+        for (const uint16_t invalid : {uint16_t{2}, MB_WAIT, MB_UNAVAILABLE, MB_UNSUPPORTED}) {
+            s_cycle_tick = 1;
+            peer.set_word(MbFunc::ReadInput, 31, invalid);
+            mb_poll_once();
+            REQUIRE(current_compressor() == ModbusCompressor::Unknown);
+            REQUIRE(mb_values_live());
+        }
+
+        peer.set_word(MbFunc::ReadInput, 31, 1);
+        s_cycle_tick = 1;
+        mb_poll_once();
+        REQUIRE(current_compressor() == ModbusCompressor::On);
+        const int64_t expiry_us = (s_compressor_ms + MB_REPLY_MAX_AGE_S * 1000LL) * 1000;
+        sdk::clock_us           = expiry_us;
+        s_last_reply_ms         = expiry_us / 1000;
+        REQUIRE(current_compressor() == ModbusCompressor::On);
+        sdk::clock_us.fetch_add(1000);
+        REQUIRE(mb_values_live());
+        REQUIRE(current_compressor() == ModbusCompressor::Unknown);
+
+        s_cycle_tick = 1;
+        mb_poll_once();
+        REQUIRE(current_compressor() == ModbusCompressor::On);
+        peer.batch_exception      = true;
+        peer.compressor_exception = true;
+        s_cycle_tick              = 1;
+        mb_poll_once();
+        REQUIRE(current_compressor() == ModbusCompressor::Unknown);
+        REQUIRE(mb_values_live());
+        REQUIRE(mb_status().last_error_register == 31);
+
+        peer.compressor_exception = false;
+        s_cycle_tick              = 1;
+        mb_poll_once();
+        REQUIRE(current_compressor() == ModbusCompressor::On);
+        REQUIRE(status_socket_open(s_req_host, 502, 1, 1, s_target_generation));
+        REQUIRE(current_compressor() == ModbusCompressor::Unknown);
+        peer.set_word(MbFunc::ReadInput, 31, 0);
+        mb_poll_once();
+        REQUIRE(current_compressor() == ModbusCompressor::Off);
+        unsigned released  = 0;
+        sdk::on_mutex_give = [&] {
+            // Overlap the second lock's completed snapshot, before its generation recheck.
+            if (++released == 2) mb_reconfigure(false);
+        };
+        REQUIRE(current_compressor() == ModbusCompressor::Unknown);
+        sdk::on_mutex_give = {};
+        REQUIRE(released >= 2);
+        REQUIRE(current_compressor() == ModbusCompressor::Unknown);
+    }
+}
+
 void space_route_values() {
     // Independent wire expectations: 0 is the space circuit, 1 is DHW, and neither an unknown enum
     // nor a protocol sentinel proves either route. Both profiles and both commit paths use the
@@ -1769,6 +1861,18 @@ void lifecycle() {
     mb_retry_start();
     REQUIRE(sdk::create_calls == 0 && mb_task_pending() && mb_network_quiesced());
     adapter::ota_active   = false;
+    adapter::largest_block = 6144 + HEAP_RECOVERY_BYTES - 1;
+    mb_retry_start();
+    REQUIRE(sdk::create_calls == 0 && !s_task && mb_task_pending());
+    adapter::largest_block++;
+    mb_retry_start();
+    REQUIRE(sdk::create_calls == 0 && mb_task_pending());
+    sdk::clock_us += 5000000;
+    adapter::free_bytes = 6144 + sizeof(StaticTask_t) + 4096 + HEAP_RECOVERY_BYTES - 1;
+    mb_retry_start();
+    REQUIRE(sdk::create_calls == 0 && mb_task_pending());
+    adapter::free_bytes++;
+    sdk::clock_us += 5000000;
     sdk::fail_task_create = true;
     mb_retry_start();
     REQUIRE(sdk::create_calls == 1 && !s_task && !mb_status().enabled);
@@ -1811,14 +1915,9 @@ void retiring_reenable() {
         mb_reconfigure(true);
         cleanup_pending = s_task == old && sdk::create_calls == 1 && mb_task_pending();
     };
-    adapter::weather_active = true;
     bool saw_running        = false;
     sdk::on_delay           = [&] {
         if (sdk::delays == 1) {
-            adapter::weather_active = false;
-            return;
-        }
-        if (sdk::delays == 2) {
             REQUIRE(!mb_task_pending());
             mb_reconfigure(false);
             return;
@@ -1926,10 +2025,15 @@ void task_oom_and_quiesce() {
     sdk::on_delay       = [&] {
         REQUIRE(hp_modbus_ota_quiesced() && mb_network_quiesced());
         REQUIRE(adapter::config_reads == 1);
-        mb_reconfigure(false);
+        if (sdk::delays == 1) {
+            mb_reconfigure(false);
+        } else {
+            REQUIRE(sdk::delays == 2 && s_task == ota_task && !mb_target_enabled());
+            adapter::ota_active = false;
+        }
     };
     ota_task->fn(ota_task->arg);
-    REQUIRE(!s_task && sdk::delete_calls == 1);
+    REQUIRE(sdk::delays == 2 && !s_task && sdk::delete_calls == 1);
 }
 } // namespace test
 int main(int argc, char** argv) {
@@ -1959,6 +2063,7 @@ int main(int argc, char** argv) {
                     {"poll_full_fast_break", test::poll_full_fast_break},
                     {"poll_batch_fallback", test::poll_batch_fallback},
                     {"partial_sweep_allocation_pressure", test::partial_sweep_allocation_pressure},
+                    {"compressor_witness", test::compressor_witness},
                     {"space_route_values", test::space_route_values},
                     {"space_route_missing", test::space_route_missing},
                     {"space_route_age", test::space_route_age},

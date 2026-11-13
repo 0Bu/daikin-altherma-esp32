@@ -1,4 +1,4 @@
-// translation-source: 4210cc75eee11ce1dfcf29461013a0737a5806a303d44d1929bf671225a996b8
+// translation-source: 10ccafeac4c747a3f0d71717d33ce43eb311f20490a4822f4352625cc3df17c1
 I18N.de = localeValues([
   /* sys.nodata */ "Keine Daten",
   /* sys.unreachable */ "Nicht erreichbar",
@@ -531,7 +531,7 @@ I18N.de = localeValues([
   /* schem.transfer_sign */ "Positiv: Wärme geht ins Wasser. Negativ: Wärme wird dem Wasser entzogen.",
   /* schem.efficiency_no_capacity */ (metric) => `${metric} ist nicht verfügbar. Für diese Bilanzgrenze fehlt eine verwendbare Leistungsschätzung.`,
   /* schem.efficiency_ct_pair */ (outlet) => `Verwendet: Strom aus CT-Klemmen und die Temperaturen ${outlet} und R4T.`,
-  /* schem.efficiency_inv_pair */ "Verwendet: Inverterstrom und die Temperaturen R1T und R4T.",
+  /* schem.efficiency_inv_pair */ "R1T vor dem Zusatzheizer und R4T. Die Stromaufnahme wird aus dem Inverterstrom bei angenommenen 230 V geschätzt. Welche Lasten erfasst sind, auch bei den Heizern, ist nicht belegt.",
   /* schem.r2t */ "R2T",
   /* schem.r3t */ "R3T",
   /* schem.flow_switch */ "Strömung",

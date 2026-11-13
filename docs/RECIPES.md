@@ -23,17 +23,21 @@ Protocol **S lacks the required water flow and leaving/return measurements**. On
 this recipe only when those rows are readable and their physical sensors are fitted.
 
 Use measured total active power and accumulated kWh, including the indoor/outdoor unit and backup
-heater if their heat is included in the numerator. A compressor-current estimate omits equipment
-and depends on voltage/power factor. HomeHub reports heat pump power consumption; verify its
-measurement boundary and heater coverage before using it in this ratio.
+heater if their heat is included in the numerator. Verify the measurement boundary and heater
+coverage of the power reported by HomeHub before using it in this ratio.
 A temperature measured before the backup heater, or a profile without R2T, is usable for this ratio
 only while **BUH is known off** and the other required water readings are available; otherwise its
 electricity is counted without its heat.
 
 The tank booster **BSH lies outside both water-temperature measurement points**. If its electricity
 is included, a whole-installation live COP requires BSH to be **known off**; unknown means an
-unproven boundary. The firmware suppresses that COP in both cases. The example below therefore
-requires a readable BSH binary sensor reporting `off`. Replace its example id with your own.
+unproven boundary. The example below requires a readable BSH binary sensor reporting `off`.
+Replace its example id with your own.
+
+The dashboard's inverter-current-based COP/EER estimate uses R1T before BUH and R4T, with
+electrical input estimated at an assumed 230 V. The actual electrical measurement boundary and
+heater coverage are unverified. The dashboard permits the CT-based ratio only when both BUH
+stages and BSH are confirmed off. The external meter in this recipe has its own measured scope.
 
 ## 1. Instantaneous thermal power
 

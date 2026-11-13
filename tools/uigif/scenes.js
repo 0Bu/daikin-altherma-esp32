@@ -141,7 +141,7 @@ const DEMO = (() => {
     R("Low Pressure", o.lp, "bar", 0x20),
     R("Expansion valve 1 (pls)", o.eev, "", 0x21),
     R("INV primary current (A)", o.inv, "A", 0x21),
-    R("Fan 1 (step)", o.fan, "", 0x21),
+    R("Fan 1 (step)", o.fan, "", 0x30),
 
     // Hydronic side — pages 0x60 / 0x61 / 0x62 / 0x63 (always live)
     R("Leaving water temp. before BUH (R1T)", o.lwt, "°C", 0x61),

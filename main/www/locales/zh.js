@@ -1,4 +1,4 @@
-// translation-source: 4210cc75eee11ce1dfcf29461013a0737a5806a303d44d1929bf671225a996b8
+// translation-source: 10ccafeac4c747a3f0d71717d33ce43eb311f20490a4822f4352625cc3df17c1
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
@@ -531,7 +531,7 @@ I18N.zh = localeValues([
   /* schem.transfer_sign */ "正值：水吸收热量。负值：水释放热量。",
   /* schem.efficiency_no_capacity */ (metric) => `${metric} 不可用。此计算边界内没有可用的热功率估算。`,
   /* schem.efficiency_ct_pair */ (outlet) => `计算使用电流互感器测得的电流及 ${outlet} 和 R4T 温度。`,
-  /* schem.efficiency_inv_pair */ "计算使用逆变器电流及 R1T 和 R4T 温度。",
+  /* schem.efficiency_inv_pair */ "计算使用辅助加热器前的 R1T 和 R4T。输入功率按假定的 230 V 由逆变器电流估算。涵盖哪些电气负载（包括加热器）尚未核实。",
   /* schem.r2t */ "R2T",
   /* schem.r3t */ "R3T",
   /* schem.flow_switch */ "流量开关",
@@ -1021,18 +1021,19 @@ INSPECT_I18N.zh = inspectValues(
       : d.pth == null ? null
       : d.pthKind === "cooling" ? `≈ ${fmt1(d.pth)} kW 制冷${d.cop != null && !d.copPostBuh ? `；EER ${fmt1(d.cop)}` : ""}。`
       : `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `；COP ${fmt1(d.cop)}` : ""}。`], // pth
-    [(d) => d && d.efficiencyKind === "eer" ? eerScopeText(d, "基于电流互感器的 EER 估算", "热泵 EER 估算", "EER 估算") : d && d.copScope === "plant" ? "基于电流互感器的 COP 估算" : "热泵 COP 估算", "效率估算", (d) => d && d.efficiencyKind === "eer"
+    [(d) => d && d.efficiencyKind === "eer" ? eerScopeText(d, "基于电流互感器的 EER 估算", "基于逆变器电流的 EER 估算", "EER 估算")
+      : eerScopeText(d || {}, "基于电流互感器的 COP 估算", "基于逆变器电流的 COP 估算", "COP 估算"), "效率估算", (d) => d && d.efficiencyKind === "eer"
       ? "制冷功率÷输入功率；继承介质、传感器、电压/功率因数误差，是瞬时 EER，非季节效率。" +
-        eerScopeText(d, post => `采用${post ? "辅助加热器后的 R2T" : "辅助加热器前的 R1T"}、R4T 和电流互感器测得的电流。互感器的接线决定涵盖哪些负载。`, "采用辅助加热器前的 R1T、R4T 和逆变器电流。")
-      : "用估算热功率除以估算电功率。仅在确认两个加热器均关闭时使用电流互感器测得的电流。其他情况下需能根据逆变器电流得到可用的功率估算。互感器的接线决定涵盖哪些负载。" + heatingEfficiencyBoundary(d), (d) => d.copBlock === "tank_heater" ? `${d.bsh === true ? `无 ${efficiencyMetric(d)}。水箱电加热器报告开启。` : `无 ${efficiencyMetric(d)}。水箱电加热器状态未知。`}其热量不经过两个出水温度传感器。`
+        eerScopeText(d, post => `采用${post ? "辅助加热器后的 R2T" : "辅助加热器前的 R1T"}、R4T 和电流互感器测得的电流。互感器的接线决定涵盖哪些负载。 使用互感器计算时，必须确认 BUH 的两个加热级及 BSH 均已关闭。`, " " + t("schem.efficiency_inv_pair"))
+      : "用估算热功率除以估算电功率。 使用互感器计算时，必须确认 BUH 的两个加热级及 BSH 均已关闭。" + heatingEfficiencyBoundary(d), (d) => d.copBlock === "tank_heater" ? `${d.bsh === true ? `无 ${efficiencyMetric(d)}。水箱电加热器报告开启。` : `无 ${efficiencyMetric(d)}。水箱电加热器状态未知。`}其热量不经过两个出水温度传感器。`
       : d.copBlock === "backup_heater" ? `${d.buh1 === true || d.buh2 === true ? `无 ${efficiencyMetric(d)}。备用加热器报告开启。` : `无 ${efficiencyMetric(d)}。备用加热器状态未知。`}无法从电功率估算确认是否包含加热器负载。`
       : d.copBlock === "mb_scope" ? `暂不显示 ${efficiencyMetric(d)}。现有数据无法将 HomeHub 的电功率与板式换热器的估算热功率对应起来。该电功率读数涵盖哪些负载（例如电加热器）尚不明确。`
       : d.copBlock === "no_pel" ? d.pelHeld ? `无 ${efficiencyMetric(d)}：停机后逆变器电流是旧值。` : t("schem.no_usable_power", efficiencyMetric(d))
       : d.cop == null ? efficiencyUnavailable(d)
       : d.efficiencyKind === "eer" ? `每 1 kW 电约制冷 ${fmt1(d.cop)} kW：${fmt1(d.copPth)} / ${fmt1(d.copPel)} kW。`
       : d.copScope === "plant" ? `CT：水侧每 1 kW 估算用电约供热 ${fmt1(d.cop)} kW（${fmt1(d.copPth)} / ${fmt1(d.copPel)} kW）；负载取决于接线。`
-      : `热泵边界：每 1 kW 电约供热 ${fmt1(d.cop)} kW（${fmt1(d.copPth)} / ${fmt1(d.copPel)} kW），不含 BUH。`], // cop
-    ["备用加热器 · BUH", "备用加热器 BUH", "R1T 下游水路电热，不是水箱 BSH。", (d) => d.buh1 == null && d.buh2 == null ? null : d.buh2 ? "2 级：两级加热。" : d.buh1 ? "1 级：一级加热。" : "BUH 各级关闭。"], // buh
+      : `每千瓦估算输入功率对应 ${fmt1(d.cop)} kW 水侧热功率。估算输入 ${fmt1(d.copPel)} kW，约向水供热 ${fmt1(d.copPth)} kW。`], // cop
+    ["备用加热器 · BUH", "备用加热器 BUH", "R1T 下游水路电热，不是水箱 BSH。", (d) => d.buh2 === true ? "第 2 级报告为开启。" : d.buh1 === true ? "第 1 级报告为开启。" : d.buh1 === false && d.buh2 === false ? "两级均报告为关闭。" : null], // buh
     ["水箱电加热器", "水箱电加热器 BSH", "水箱浸入式 BSH；可独立加热，X10A 只报状态不测功率。", (d) => d.bsh == null ? null : d.bsh ? "BSH 已启动。" : "BSH 已关闭。"], // bsh
     ["三通阀", "三通阀 3WV", "逻辑输出选择水箱/空间；不反馈机械位置或流量。", (d) => d.valveDhw == null ? null : d.valveDhw ? "指示水箱路径；不证明位置、流量或加热。" : "指示空间路径；不证明位置或循环。"], // valve
     ["二通阀输出", "二通阀输出 2WV", "空间 2WV 的 X10A 输出；不反馈位置或冷暖模式。", (d) => d.valve2On == null ? null : d.valve2On ? "2WV 输出启动；不证明供暖或位置。" : "2WV 输出关闭；不表示制冷，也不否定待机供暖模式。"], // valve2
@@ -1047,11 +1048,11 @@ INSPECT_I18N.zh = inspectValues(
     ["循环泵", "循环泵指令", "使水流经公共水路及三通阀所选支路。百分比是反向换算的 X10A 控制指令：0 % 请求停止，100 % 请求最大驱动。它不是实测转速，也不能证明转动或流量。请分别查看 ON/OFF 状态与实测流量；压缩机停止时仍可能循环。", (d) => pumpNowText(d, [(n) => `水泵指令 ${n} %.`, "水泵状态为 ON。", "水泵报告停止（OFF）。", "水泵报告状态未知。", (n) => `实测流量 ${n} l/min.`, "无可用流量测量值。", "OFF 与正流量冲突；可能存在外部循环、惯性续流或矛盾/过时的信号。", "尚不能确认水循环。"])], // pump
     [(d) => pelMeasured(d) ? "电功率 · HomeHub" : "电功率估算", "电功率", (d) => pelMeasured(d)
       ? "HomeHub 输入 51 的耗电；校准、测点和所含加热器未公开，不是认证总表。"
-      : "COP/EER 输入估算：CT 按声明相与 230 V，未知真实电压/功率因数；逆变器电流仅含压缩机。", (d) => d.pelHeld ? "停机后逆变器电流是旧值，不能显示耗电/效率。"
+      : "按假定的 230 V，用逆变器电流或所有已声明的互感器相电流之和估算功率。实际电压和功率因数未知。逆变器电流涵盖的负载尚未核实。互感器的覆盖范围取决于接线。", (d) => d.pelHeld ? "停机后逆变器电流是旧值，不能显示耗电/效率。"
       : d.pel == null ? t("schem.no_usable_power")
       : d.pelSrc === "MB" ? "HomeHub 输入 51；测量边界未公开。"
       : d.pelSrc === "CT" ? "CT 估算；负载取决于接线。"
-      : "逆变器电流估算，仅含压缩机。"], // pel
+      : "根据逆变器电流估算。"], // pel
     ["除霜", "除霜", "反转制冷剂回路融冰；寒湿时正常，会短暂从水路取热。", (d) => d.defrost == null ? null : d.defrost ? "X10A 报告正在除霜。" : "X10A 报告未在除霜。"], // defrost
     ["静音模式", "静音模式", "降噪且常限制转速/功率；信号不含级别或热量影响。", (d) => d.quiet == null ? null : d.quiet ? "静音已启用。" : "静音已关闭。"], // quiet
     ["气管", "制冷剂气管", "分体机气管：供暖时热气流向 PHE，制冷反向；一体机无现场管。", (d) => compressorRunning(d) ? d.rps != null ? `${fmt1(d.circP)} bar，${fmt0(d.disch)} °C。` : "HomeHub 报告压缩机开启。压力和排气温度需要 X10A。" : "压缩机已停，无主动循环。"], // rhot

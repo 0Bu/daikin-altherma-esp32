@@ -323,16 +323,22 @@ try {
     if(name==="/diag?redact=1") assert.doesNotMatch(text,/Fixture home network|192\.0\.2\.10/);
     if(name==="stable-values") {assert.equal(doc.values.at(-1).value,"0");assert.equal(doc.values.at(-1).dwell_s,5);}
     if(name==="modbus-values") {
-      assert.equal(doc.values.length,129);assert.deepEqual(doc.modbus.map(row=>row.value),["U4",12.3,1,null]);
-      assert.equal(doc.modbus[2].binary,true);assert.deepEqual(doc.modbus.map(row=>row.off),[22,40,4,40]);
+      assert.equal(doc.values.length,129);
+      assert.deepEqual(doc.modbus.map(row=>row.value),["U4",12.3,1,0,null]);
+      assert.equal(doc.modbus[2].binary,true);assert.deepEqual(doc.modbus.map(row=>row.off),[22,40,4,31,40]);
+      assert.equal(doc.modbus_compressor_running,true);
       assert.match(doc.modbus_history_boot_id,/^[0-9a-f]{16}$/);
       assert.ok(Number.isInteger(doc.modbus_history_epoch) && doc.modbus_history_epoch > 0);
     }
     if(name==="modbus-values-history-retired") {
       assert.equal(doc.modbus_history_epoch,0);
       assert.equal(doc.modbus[1].value,12.3);
+      assert.equal(doc.modbus_compressor_running,false);
     }
-    if(name==="framed-values") {assert.equal(doc.result.values.length,129);assert.equal(doc.result.values[0].dwell_s,5);}
+    if(name==="framed-values") {
+      assert.equal(doc.result.values.length,129);assert.equal(doc.result.values[0].dwell_s,5);
+      assert.equal(doc.result.modbus_compressor_running,null);
+    }
     if(name==="framed-status-redacted") {
       assert.deepEqual(Object.keys(doc),["result"]);
       assert.equal(doc.result.sys.config_unreadable,true);

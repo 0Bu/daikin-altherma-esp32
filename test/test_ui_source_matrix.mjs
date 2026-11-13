@@ -24,11 +24,14 @@ import vm from "node:vm";
 import { readAppFragments } from "../tools/ui/read_app_source.mjs";
 
 // Keep the source-arbitration test's history boundary stubs: loading the entire history fragment
-// would replace hasRoomHist/roomHistName. Execute only its shared pure pump-command dependency.
-const commandSource = readAppFragments(["history.js"])
-  .match(/function pumpCommandPercent\(signal\) \{[\s\S]*?\n\}/)?.[0];
-assert.ok(commandSource, "the production pump-command rule must be present");
-const SOURCE = commandSource + readAppFragments(["descriptions.js", "schematic.js"]);
+// would replace hasRoomHist/roomHistName. Execute only its shared pure hydronic rules.
+const historySource = readAppFragments(["history.js"]);
+const hydronicSource = ["pumpCommandPercent", "usableWaterFlow"].map(name => {
+  const match = historySource.match(new RegExp("function " + name + "\\([^)]*\\) \\{[\\s\\S]*?\\n\\}"));
+  assert.ok(match, "the production rule must be present: " + name);
+  return match[0];
+}).join("\n");
+const SOURCE = hydronicSource + readAppFragments(["descriptions.js", "schematic.js"]);
 const index = fs.readFileSync(new URL("../main/www/index.html", import.meta.url), "utf8");
 const style = fs.readFileSync(new URL("../main/www/style.css", import.meta.url), "utf8");
 const demo = fs.readFileSync(new URL("../tools/uigif/scenes.js", import.meta.url), "utf8");
@@ -48,7 +51,7 @@ const M_FLAG = (off, label, on, concept = null) => ({
   label, value: on ? 1 : 0, unit: "", off, binary: true, concept,
 });
 
-function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [], elements = {} }) {
+function ctx({ x10a, mbEnabled, mbConnected, mbCompressor = null, values = [], modbus = [], elements = {} }) {
   const context = {
     INSPECT_I18N: Object.create(null),
     MB_DELTA_I18N: Object.create(null),
@@ -63,6 +66,7 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [], elements 
                           host: mbEnabled ? "192.0.2.30" : "" } },
       _values: values,
       _modbus: modbus,
+      modbusCompressorRunning: mbCompressor,
     },
     // History/i18n live in separate production fragments and are outside this arbitration test;
     // provide only their presentation boundary while executing the complete descriptions and
@@ -492,7 +496,8 @@ const X_2WV = (on) => ({ label: "2way valve(On:Heat_Off:Cool)", value: on ? "1" 
   for (const [raw, decoded, invalid] of [
     ["-1.0", null, true], ["Infinity", null, true], ["1.5error", null, true],
     ["NaN", null, true], [null, null, false], ["", null, false], ["   ", null, false],
-    ["0.0", 0, false], ["12.0", 12, false],
+    ["0.0", 0, false], ["12.0", 12, false], ["100.0", 100, false],
+    ["100.1", null, true], ["3276.7", null, true],
   ]) {
     const rawRow = X("Flow sensor", raw, "flow", { unit: "l/min" });
     c.S._values = [rawRow, { label: "Water pump operation", value: "1", binary: true }];
@@ -744,7 +749,7 @@ const X_2WV = (on) => ({ label: "2way valve(On:Heat_Off:Cool)", value: on ? "1" 
 {
   const zero = M(44, "Outdoor air temperature", 0, "outdoor_air");
   for (const [x10a, report] of [[true, null], [false, false], [false, null], [true, true]]) {
-    const c = ctx({ x10a, mbEnabled: true, mbConnected: true,
+    const c = ctx({ x10a, mbEnabled: true, mbConnected: true, mbCompressor: report,
       values: [OUT_X, RPS_STOP], modbus: report == null ? [zero] : [zero, M_FLAG(31, "Compressor running", report)] });
     const d = c.liveData();
     assert.equal(d.out, 0);
@@ -798,7 +803,7 @@ const X_2WV = (on) => ({ label: "2way valve(On:Heat_Off:Cool)", value: on ? "1" 
   assert.equal(c.INSPECT.sgrequest.trendSource, undefined,
     "a HomeHub-sourced request must compare its X10A and Modbus history witnesses");
   assert.equal(c.sgModeText(2), "sg.mode2");
-  assert.match(SOURCE, /classList\.toggle\("sg-boost-on", d\.sgMode === 2\)/,
+  assert.match(SOURCE, /classList\.toggle\("sg-boost-on", active && d\.sgMode === 2\)/,
     "only mode 2 may apply the active Boost colour");
   assert.doesNotMatch(SOURCE, /sg-request-on/,
     "the former all-nonzero request visibility rule must stay removed");
@@ -853,7 +858,7 @@ const SG_INSP = (c, d) => c.INSPECT.sgrequest;
       "a contact-sourced boost must not credit a gateway this plant does not have");
   assert.match(DE(SG_INSP(boost, bd).t(bd)), /X10A/,
     "the German title names the contacts too");
-  assert.match(SOURCE, /classList\.toggle\("sg-boost-on", d\.sgMode === 2\)/,
+  assert.match(SOURCE, /classList\.toggle\("sg-boost-on", active && d\.sgMode === 2\)/,
     "the Boost colour keys on the mode alone, so it fires on either source");
 }
 
@@ -932,6 +937,13 @@ const SG_INSP = (c, d) => c.INSPECT.sgrequest;
   assert.equal(down.INSPECT.bsh.now(d), null,
     "the inspector prose must not leak the HomeHub-only state either");
   assert.equal(down.INSPECT.buh.trend, "buh_state");
+  const buhNow = (buh1, buh2) => down.INSPECT.buh.now({ buh1, buh2 })?.en;
+  for (const buh1 of [null, false, true])
+    assert.equal(buhNow(buh1, true), "Step 2 reports ON.");
+  assert.equal(buhNow(true, null), "Step 1 reports ON.");
+  assert.equal(buhNow(false, false), "Both stages report OFF.");
+  assert.equal(buhNow(null, false), undefined);
+  assert.equal(buhNow(false, null), undefined);
   assert.doesNotMatch(down.descFor("BSH").what, /HomeHub|Modbus/,
     "the X10A BSH explanation contains no second-source copy");
 
@@ -1007,7 +1019,7 @@ const SG_INSP = (c, d) => c.INSPECT.sgrequest;
   ];
   for (const metadata of [{}, { flow_scale_unverified: false }, { flow_scale_unverified: true },
     { profile: "altherma4" }]) {
-    const c = ctx({ x10a: false, mbEnabled: true, mbConnected: true, values: [],
+    const c = ctx({ x10a: false, mbEnabled: true, mbConnected: true, mbCompressor: true, values: [],
       modbus: dhwModbus.map(row => row.off === 49 ? { ...row, ...metadata } : row) });
     const d = c.liveData();
     assert.equal(d.rps, null, "Modbus does not invent compressor speed");
@@ -1030,14 +1042,14 @@ const SG_INSP = (c, d) => c.INSPECT.sgrequest;
     assert.doesNotMatch(provisionalPump, /no flow measurement/i);
   }
 
-  const stopped = ctx({ x10a: false, mbEnabled: true, mbConnected: true, values: [],
+  const stopped = ctx({ x10a: false, mbEnabled: true, mbConnected: true, mbCompressor: false, values: [],
                         modbus: dhwModbus.map((r) => r.off === 31 ? { ...r, value: 0 } : r) });
   const idle = stopped.liveData();
   assert.equal(idle.pth, null, "compressor OFF keeps the same arithmetic from becoming heat output");
   assert.equal(stopped.waterThermalKind(idle, true), "neutral",
     "pump-only DHW remains explicitly neutral");
 
-  const space = ctx({ x10a: false, mbEnabled: true, mbConnected: true, values: [],
+  const space = ctx({ x10a: false, mbEnabled: true, mbConnected: true, mbCompressor: true, values: [],
                       modbus: dhwModbus.map((r) => r.off === 37 ? M_VALVE(false) : r) });
   const autoSpace = space.liveData();
   assert.equal(autoSpace.thermalMode, null,
@@ -1333,7 +1345,7 @@ assert.match(style, /\.inspect-rows\s*>\s*\.mb-delta/,
   assert.equal(both.pelApproxText(estimated), "≈ ", "an X10A current-derived value stays approximate");
   assert.equal(both.PEL_INSPECT.t(estimated).en, "Electrical input (estimated)");
   assert.equal(both.PEL_INSPECT.head(estimated), "≈ 1.4 kW");
-  assert.match(both.PEL_INSPECT.what(estimated).en, /ESTIMATE/);
+  assert.match(both.PEL_INSPECT.what(estimated).en, /assumed 230 V.*Inverter load coverage is unverified/);
   // The actual SVG and renderer must consume the same source-aware prefix helper the assertions
   // above exercise; otherwise a correct inspector could still leave the closed pill lying.
   assert.match(index, /id="pelApprox"/);
@@ -1517,7 +1529,7 @@ assert.match(style, /\.inspect-rows\s*>\s*\.mb-delta/,
   assert.equal(defrostContext.waterMoving(defrost), true);
   assert.equal(defrostContext.waterThermalKind(defrost, true), "neutral",
     "defrost shows hydraulic circulation without assigning a heating colour to signed transfer");
-  const gatewayContext = ctx({ x10a: true, mbEnabled: true, mbConnected: true,
+  const gatewayContext = ctx({ x10a: true, mbEnabled: true, mbConnected: true, mbCompressor: true,
     values: [...defrostValues.filter(row => row.reg !== 0x30), X_DEFROST("1")],
     modbus: [M_FLAG(31, "Compressor running", true)] });
   const gateway = gatewayContext.liveData();
@@ -1613,7 +1625,7 @@ assert.match(style, /\.inspect-rows\s*>\s*\.mb-delta/,
       [{ ...speed, held: true }, null], [{ ...speed, held_unknown: true }, null],
       [{ ...speed, value: "0" }, 0], [{ ...speed, value: "3" }, 3],
       [{ ...speed, value: "5" }, 5], [speed, 6]]) {
-      const c = ctx({ x10a: true, mbEnabled: true, mbConnected: true,
+      const c = ctx({ x10a: true, mbEnabled: true, mbConnected: true, mbCompressor: true,
         values: row ? [...values, row] : values,
         modbus: [M_FLAG(31, "Compressor running", true)] });
       const d = c.liveData();
@@ -1637,10 +1649,11 @@ assert.match(style, /\.inspect-rows\s*>\s*\.mb-delta/,
             assert.match(sentence, /sources disagree.*X10A 0 rps.*HomeHub state\.on/);
           }
           assert.equal(c.inspNowText(c.INSPECT.cop, d), "schem.no_usable_power");
-          c.S._modbus[0].value = 0;
+          c.S.modbusCompressorRunning = false;
           const agreed = c.liveData();
           assert.equal(agreed.rps, 0);
           assert.equal(agreed.mbCompressorOn, false);
+          assert.equal(c.S._modbus[0].value, 1, "the full-sweep row is still available as raw data");
           assert.match(c.inspNowText(c.INSPECT.ou, agreed), /compressor is stopped/);
           assert.equal(c.inspNowText(c.INSPECT.comp, agreed), null);
         } else if (rps == null) {
@@ -1679,9 +1692,10 @@ assert.match(style, /\.inspect-rows\s*>\s*\.mb-delta/,
   assert.ok(Math.abs(d.pth - 2.302) < 0.01, "cooling capacity is flow×(R4T-R1T)");
   assert.ok(d.cop > 4.5 && d.cop < 4.6, "active cooling quotient is a positive EER");
   assert.equal(cool.INSPECT.pth.t(d).en, "Cooling capacity (estimated)");
-  assert.equal(cool.INSPECT.cop.t(d).en, "EER of the heat pump (estimated)");
+  assert.equal(cool.INSPECT.cop.t(null).en, "Estimated COP");
+  assert.equal(cool.INSPECT.cop.t(d).en, "Inverter-current-based EER estimate");
   assert.match(cool.INSPECT.cop.what(d).en, /cooling capacity divided/i);
-  assert.match(cool.INSPECT.cop.what(d).en, /R1T before.*R4T with inverter current/);
+  assert.match(cool.INSPECT.cop.what(d).en, /schem\.efficiency_inv_pair/);
   const ctRows = [1, 2, 3].map(phase => X(`Current measured by CT sensor of L${phase}`,
     "2", null, { reg: 0x63, unit: "A" }));
   const r2t = X("Leaving Water Temp. after BUH (R2T)", "14.3", "leaving_water_post_buh", { off: 4 });
@@ -1714,8 +1728,8 @@ assert.match(style, /\.inspect-rows\s*>\s*\.mb-delta/,
         "use the power source paired with this thermal boundary");
       assert.ok(Math.abs(live.cop - expected / ratioPower) < 0.01);
       assert.match(inspector.t(live).en, heater === "1"
-        ? /EER of the heat pump/ : /EER based on current transformers/);
-      assert.match(inspector.what(live).en, heater === "1" ? /R1T before.*R4T with inverter current/
+        ? /Inverter-current-based EER estimate/ : /EER based on current transformers/);
+      assert.match(inspector.what(live).en, heater === "1" ? /schem\.efficiency_inv_pair/
         : postBuh ? /R2T after.*R4T with current transformers/ : /R1T before.*R4T with current transformers/);
       if (postBuh) assert.doesNotMatch(fixture.INSPECT.pth.now(live).en, /EER/,
         "the PHE's R1T value cannot carry the separate R2T-based EER");
@@ -1975,7 +1989,7 @@ assert.doesNotMatch(SOURCE, /chip\.demand_(?:on|off)|schem\.to_heat/);
     assert.equal(rest.S.live.circP, null, `a held high side reading ${value} leaves the pill blank`);
     assert.equal(rest.inspHeld(rest.INSPECT.hp, rest.S.live), true, "and the panel says why");
     const row = { ...HP, value, held_unknown: true };
-    const flagOff = ctx({ x10a: true, mbEnabled: true, mbConnected: true, values: [row],
+    const flagOff = ctx({ x10a: true, mbEnabled: true, mbConnected: true, mbCompressor: false, values: [row],
                           modbus: [M(31, "Compressor run", "0", null, { binary: true })] });
     flagOff.S.status.history = trend(HP.label);
     flagOff.S.live = flagOff.liveData();
@@ -2044,7 +2058,8 @@ assert.doesNotMatch(SOURCE, /chip\.demand_(?:on|off)|schem\.to_heat/);
 
   const COMP_ON = M(31, "Compressor run", "1", null, { binary: true });
   const COMP_OFF = M(31, "Compressor run", "0", null, { binary: true });
-  const running = ctx({ x10a: true, mbEnabled: true, mbConnected: true, values: [INV_U], modbus: [COMP_ON] });
+  const running = ctx({ x10a: true, mbEnabled: true, mbConnected: true, mbCompressor: true,
+    values: [INV_U], modbus: [COMP_ON] });
   d = running.liveData();
   assert.equal(d.pelSrc, null, "HomeHub ON cannot refresh unknown-age X10A current");
   assert.equal(d.ouUnknown, true);
@@ -2068,7 +2083,8 @@ assert.doesNotMatch(SOURCE, /chip\.demand_(?:on|off)|schem\.to_heat/);
     assert.equal(live.cop, null);
     assert.doesNotMatch(currentSpeed.inspNowText(currentSpeed.INSPECT.pel, live), /compressor is off/i);
   }
-  const stopped = ctx({ x10a: true, mbEnabled: true, mbConnected: true, values: [INV_U], modbus: [COMP_OFF] });
+  const stopped = ctx({ x10a: true, mbEnabled: true, mbConnected: true, mbCompressor: false,
+    values: [INV_U], modbus: [COMP_OFF] });
   d = stopped.liveData();
   assert.equal(d.compressorOn, false, "HomeHub OFF remains an activity report");
   assert.equal(d.pel, null);
@@ -2085,7 +2101,8 @@ assert.doesNotMatch(SOURCE, /chip\.demand_(?:on|off)|schem\.to_heat/);
     ]) {
       const values = [{ ...INV_U, held_unknown: false, ...metadata }];
       if (rps != null) values.push({ label: "INV frequency (rps)", value: String(rps), reg: 0x30 });
-      const c = ctx({ x10a: true, mbEnabled: true, mbConnected: true, values, modbus: [flag] });
+      const c = ctx({ x10a: true, mbEnabled: true, mbConnected: true, mbCompressor: flag === COMP_ON,
+        values, modbus: [flag] });
       const live = c.liveData();
       assert.equal(live.pelHeld, held, "an independent flag cannot replace X10A held evidence");
       assert.equal(live.pelUnknown, unknown);

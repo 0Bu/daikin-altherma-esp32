@@ -30,6 +30,7 @@ const S = {
   // Null means this page has never seen the Modbus history binding protocol. A known protocol
   // stays known when a values response has no usable binding, including across a same-image reboot.
   modbusHistoryLease: null,
+  modbusCompressorRunning: null,
   // A PINNED trend readout per concept: id -> {t} (the pinned sample's unix instant) or {i, gen} when
   // the device has no wall clock to anchor to. App state preserves the pin across structural
   // replacements and history updates. Anchoring to the instant re-resolves the same measurement
@@ -471,6 +472,7 @@ function invalidateLiveReadings(reason, busy = false) {
   S.valuesRequest = (S.valuesRequest || 0) + 1;
   if (S.otaCached) return;
   S._values = []; S._modbus = []; S.live = null;
+  S.modbusCompressorRunning = null;
   S.transportUnavailable = reason;
   S.transportBusy = busy;
   renderApp();
@@ -689,11 +691,8 @@ function plantState(d) {
   return d.flow === 0 && heatersOff(d) ? PLANT_STANDBY : PLANT_UNKNOWN;
 }
 
-// A live HomeHub knows more than the fallback headline's DHW/space flags: input 31 witnesses the
-// compressor, input 30 the circulation pump, input 32 the tank heater, and input 49 the flow. Use
-// those facts for the same activity line and dot tone as X10A. Treating any known Modbus mode as
-// green made an idle plant read as active even while every one of those witnesses said it was off.
-// Keep source provenance appended to the activity words; the headline remains the operating mode.
+// A current HomeHub input 31 can supply compressor activity. Cached pump, heater and provisional
+// flow rows do not establish activity. The headline keeps the reported operating mode.
 function modbusStatusView(mode, live) {
   const p = plantState(live);
   if (!mode && (p === PLANT_UNKNOWN || p === PLANT_STANDBY))

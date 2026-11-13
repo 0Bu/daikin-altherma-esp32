@@ -1,4 +1,4 @@
-// translation-source: 4210cc75eee11ce1dfcf29461013a0737a5806a303d44d1929bf671225a996b8
+// translation-source: 10ccafeac4c747a3f0d71717d33ce43eb311f20490a4822f4352625cc3df17c1
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -531,7 +531,7 @@ I18N.nb = localeValues([
   /* schem.transfer_sign */ "Positiv: vannet tar opp varme. Negativ: vannet avgir varme.",
   /* schem.efficiency_no_capacity */ (metric) => `${metric} er ikke tilgjengelig. Det mangler et brukbart effektanslag for denne avgrensningen.`,
   /* schem.efficiency_ct_pair */ (outlet) => `Beregningen bruker strøm fra CT og temperaturene ${outlet} og R4T.`,
-  /* schem.efficiency_inv_pair */ "Beregningen bruker inverterstrøm og temperaturene R1T og R4T.",
+  /* schem.efficiency_inv_pair */ "Beregningen bruker R1T før tilleggsvarmeren og R4T. Elektrisk effekt anslås fra inverterstrømmen med antatt 230 V. Hvilke laster som dekkes, inkludert varmeelementer, er ikke verifisert.",
   /* schem.r2t */ "R2T",
   /* schem.r3t */ "R3T",
   /* schem.flow_switch */ "STRØMNING",
@@ -1025,11 +1025,11 @@ INSPECT_I18N.nb = inspectValues(
       : d.pth == null ? null
       : d.pthKind === "cooling" ? `≈ ${fmt1(d.pth)} kW kjøling${d.cop != null && !d.copPostBuh ? `; EER ${fmt1(d.cop)}` : ""}.`
       : `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `; COP ${fmt1(d.cop)}` : ""}.`], // pth
-    [(d) => d && d.efficiencyKind === "eer" ? eerScopeText(d, "Anslått EER basert på CT-strøm", "Anslått EER for varmepumpen", "Anslått EER")
-      : d && d.copScope === "plant" ? "Anslått COP basert på CT-strøm" : "Anslått COP for varmepumpen", "Anslått virkningsgrad", (d) => d && d.efficiencyKind === "eer"
+    [(d) => d && d.efficiencyKind === "eer" ? eerScopeText(d, "Anslått EER basert på CT-strøm", "EER-anslag fra inverterstrøm", "Anslått EER")
+      : eerScopeText(d || {}, "Anslått COP basert på CT-strøm", "COP-anslag fra inverterstrøm", "Anslått COP"), "Anslått virkningsgrad", (d) => d && d.efficiencyKind === "eer"
       ? "Anslått kjøleeffekt delt på anslått elektrisk effekt. Arver usikkerhet i væske, sensorer, spenning og effektfaktor. Øyeblikkelig EER, ikke sesongverdi." +
-        eerScopeText(d, post => ` Beregningen bruker R4T og ${post ? "R2T etter" : "R1T før"} tilleggsvarmeren samt strøm fra CT. CT-koblingen avgjør hvilke laster som inngår.`, " Beregningen bruker R1T før tilleggsvarmeren og R4T samt inverterstrøm.")
-      : "Anslått varmeeffekt delt på anslått elektrisk effekt. Strøm fra CT brukes bare når begge varmerne er bekreftet avslått. Ellers kreves et brukbart anslag fra inverterstrømmen. CT-koblingen avgjør hvilke laster som inngår." + heatingEfficiencyBoundary(d), (d) => d.copBlock === "tank_heater"
+        eerScopeText(d, post => ` Beregningen bruker R4T og ${post ? "R2T etter" : "R1T før"} tilleggsvarmeren samt strøm fra CT. CT-koblingen avgjør hvilke laster som inngår. CT-beregningen krever at begge BUH-trinn og BSH er bekreftet avslått.`, " " + t("schem.efficiency_inv_pair"))
+      : "Anslått varmeeffekt delt på anslått elektrisk effekt. CT-beregningen krever at begge BUH-trinn og BSH er bekreftet avslått." + heatingEfficiencyBoundary(d), (d) => d.copBlock === "tank_heater"
       ? `${d.bsh === true ? `Ingen ${efficiencyMetric(d)}. Tankvarmeren melder at den er på.` : `Ingen ${efficiencyMetric(d)}. Statusen til tankvarmeren er ukjent.`} Varmen passerer ingen av turtemperaturfølerne.`
       : d.copBlock === "backup_heater" ? `${d.buh1 === true || d.buh2 === true ? `Ingen ${efficiencyMetric(d)}. Tilleggsvarmeren melder at den er på.` : `Ingen ${efficiencyMetric(d)}. Statusen til tilleggsvarmeren er ukjent.`} Effektanslaget viser ikke om varmerens elektriske last inngår.`
       : d.copBlock === "mb_scope" ? `Ingen ${efficiencyMetric(d)}. Tilgjengelige data kan ikke knytte HomeHubs elektriske effekt til den estimerte varmeeffekten over platevarmeveksleren. Det er uklart hvilke elektriske laster, som varmeelementer, effektverdien omfatter.`
@@ -1039,8 +1039,8 @@ INSPECT_I18N.nb = inspectValues(
       : d.cop == null ? efficiencyUnavailable(d)
       : d.efficiencyKind === "eer" ? `${fmt1(d.cop)} kW kjøling/kW strøm: ≈ ${fmt1(d.copPth)} kW ut med ≈ ${fmt1(d.copPel)} kW inn.`
       : d.copScope === "plant" ? `${fmt1(d.cop)} kW varme på vannsiden per kW elektrisk effekt anslått fra CT: ≈ ${fmt1(d.copPth)} / ≈ ${fmt1(d.copPel)} kW. CT-kabling avgjør laster.`
-      : `${fmt1(d.cop)} kW varme/kW strøm innen varmepumpegrensen: ≈ ${fmt1(d.copPth)} / ≈ ${fmt1(d.copPel)} kW. BUH er utenfor begge.`], // cop
-    ["Tilleggsvarmer · BUH", "Tilleggsvarmer BUH", "Elektrisk vannkretsvarmer etter R1T. Trinnene kan øke turtemperatur og forbruk; ikke tankvarmeren BSH.", (d) => d.buh1 == null && d.buh2 == null ? null : d.buh2 ? "Trinn 2: begge trinn varmer." : d.buh1 ? "Trinn 1: ett trinn varmer." : "Inaktiv: ingen BUH-trinn aktive."], // buh
+      : `${fmt1(d.cop)} kW varme per kW anslått elektrisk effekt. Omtrent ${fmt1(d.copPth)} kW varme ved anslått ${fmt1(d.copPel)} kW inn.`], // cop
+    ["Tilleggsvarmer · BUH", "Tilleggsvarmer BUH", "Elektrisk vannkretsvarmer etter R1T. Trinnene kan øke turtemperatur og forbruk; ikke tankvarmeren BSH.", (d) => d.buh2 === true ? "Trinn 2 rapporteres på." : d.buh1 === true ? "Trinn 1 rapporteres på." : d.buh1 === false && d.buh2 === false ? "Begge trinn rapporteres av." : null], // buh
     ["Tankvarmer", "Elektrisk tankvarmer", "Elektrisk BSH-element i tanken. Kan varme med kompressor, pumpe og vannmengde på null; X10A-statusen viser ikke effekt.", (d) => d.bsh == null ? null : d.bsh
       ? "Tankvarmer aktiv." : "Inaktiv: tankvarmeren er av."], // bsh
     ["3-veisventil", 0, "Den logiske utgangen velger tank- eller romkrets. Den bekrefter ikke mekanisk posisjon eller vannmengde.", (d) => d.valveDhw == null ? null : d.valveDhw
@@ -1062,11 +1062,11 @@ INSPECT_I18N.nb = inspectValues(
     ["Sirkulasjonspumpe", "Kommando til sirkulasjonspumpen", "Flytter vann gjennom felleskretsen og grenen valgt av 3-veisventilen. Prosenten er den inverterte X10A-kommandoen: 0 % ber om stopp og 100 % om maksimal styring. Den er ikke målt turtall eller bevis på rotasjon eller vannføring. Les rapportert ON/OFF og målt vannføring hver for seg; sirkulasjon kan fortsette med kompressoren stoppet.", (d) => pumpNowText(d, [(n) => `Pumpekommando ${n} %.`, "Pumpestatus er ON.", "Pumpen rapporterer stopp (OFF).", "Rapportert pumpestatus er ukjent.", (n) => `Målt vannføring ${n} l/min.`, "Ingen måling av vannføring er tilgjengelig.", "OFF strider mot positiv vannføring; ekstern sirkulasjon, etterløp eller motstridende/utdaterte signaler er mulig.", "Vannsirkulasjon er ikke bekreftet."])], // pump
     [(d) => pelMeasured(d) ? "Strømforbruk · HomeHub" : "Anslått strømforbruk", "Strømforbruk", (d) => pelMeasured(d)
       ? "Forbruk fra HomeHub-inngang 51. UI beregner det ikke, men offentlig dokumentasjon beviser ikke kalibrering, målepunkt eller hvilke varmere som inngår; ikke en sertifisert anleggsmåler."
-      : "Anslag for COP/EER. CT summerer oppgitte faser med antatt strøm × 230 V; virkelig spenning og effektfaktor er ukjent. Inverterstrøm dekker bare kompressoren.", (d) => d.pelHeld ? "Kompressoren står; inverterstrømmen er fra siste syklus, så forbruk/virkningsgrad kan ikke vises."
+      : "Elektrisk effekt anslås fra inverterstrømmen eller summen av alle oppgitte CT-faser med antatt 230 V. Faktisk spenning og effektfaktor er ukjent. Inverterens lastdekning er ikke verifisert. CT-dekningen avhenger av koblingen.", (d) => d.pelHeld ? "Kompressoren står; inverterstrømmen er fra siste syklus, så forbruk/virkningsgrad kan ikke vises."
       : d.pel == null ? t("schem.no_usable_power")
       : d.pelSrc === "MB" ? "Meldt av HomeHub-inngang 51; nøyaktig målegrense er ikke dokumentert."
       : d.pelSrc === "CT" ? "Anslått med CT-klemmer; kablingen avgjør inkluderte laster."
-      : "Beregnet fra inverterstrøm, bare for kompressoren."], // pel
+      : "Anslått fra inverterstrøm."], // pel
     ["Avriming", 0, "Reverserer kretsen midlertidig for å fjerne is fra uteveksleren. Normalt i kaldt/fuktig vær og tar kortvarig varme fra vannet.", (d) => d.defrost == null ? null : d.defrost ? "X10A melder at avriming er aktiv." : "X10A melder at avriming er av."], // defrost
     ["Stillemodus", 0, "Begrenser støy og vanligvis utedelens hastighet/effekt. Signalet viser modus, ikke nivå eller termisk virkning.", (d) => d.quiet == null ? null : d.quiet ? "Stillemodus aktiv." : "Inaktiv: stillemodus er av."], // quiet
     ["Gassrør", "Kjølemediets gassrør", "Kjølemedierør mellom enhetene i split-anlegg. Ved varme fører det varm høytrykksgass til PHE; ved kjøling reverseres strømmen. Monoblokk har ikke dette feltrøret.", (d) => compressorRunning(d) ? d.rps != null ? `Sirkulerer: ${fmt1(d.circP)} bar ved ${fmt0(d.disch)} °C.` : "HomeHub melder at kompressoren er på. Trykk og utblåsningstemperatur krever X10A." : "Ingen aktiv kjølemediestrøm: kompressoren står. Trykkutjevning avhenger av krets og hviletid."], // rhot

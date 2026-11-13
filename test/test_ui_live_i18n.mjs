@@ -7,7 +7,10 @@ import vm from "node:vm";
 import { readAppFragments, readUiLocale } from "../tools/ui/read_app_source.mjs";
 
 const appStateSource = readAppFragments(["app_state.js"]);
-const schematicSource = readAppFragments(["schematic.js"]);
+const historySource = readAppFragments(["history.js"]);
+const flowRule = historySource.match(/function usableWaterFlow\(value\) \{[\s\S]*?\n\}/)?.[0];
+assert.ok(flowRule, "load the production flow rule used by the schematic");
+const schematicSource = flowRule + readAppFragments(["schematic.js"]);
 
 function productionApi(source, exports, context) {
   const sandbox = vm.createContext(context);
@@ -19,7 +22,7 @@ function productionApi(source, exports, context) {
   return { sandbox, api: sandbox.__productionApi };
 }
 
-const historyWriter = productionApi(readAppFragments(["history.js"]), ["replaceHistoryHtml"], {}).api.replaceHistoryHtml;
+const historyWriter = productionApi(historySource, ["replaceHistoryHtml"], {}).api.replaceHistoryHtml;
 
 function element() {
   return {

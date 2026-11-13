@@ -215,6 +215,20 @@ if not args.expect_red:
     transport_evidence.append({"path": str(transport), "sha256": digest(transport),
                                "bytes": transport.stat().st_size,
                                "only_cross_process_state": "synthetic NOR partition bytes"})
+    transport = OUT / "modbus-delayed.synthetic-nor.bin"
+    for case in ("seed_modbus_delayed", "restore_modbus_delayed"):
+        case_inputs[case] = [transport]
+        result = execute(baseline, case, case, [transport])
+        expected = result.returncode == 0 and "PASS case=" + case + " " in result.stdout
+        results.append({"case": case, "exit_code": result.returncode, "stdout": result.stdout,
+                        "stderr": result.stderr, "pass": expected})
+        print(result.stdout, end="", flush=True)
+        if not expected:
+            (OUT / "failure.json").write_text(json.dumps(results[-1], indent=2) + "\n")
+            raise RuntimeError("Unexpected delayed Modbus history outcome: " + case)
+    transport_evidence.append({"path": str(transport), "sha256": digest(transport),
+                               "bytes": transport.stat().st_size,
+                               "only_cross_process_state": "synthetic NOR partition bytes"})
     modbus_transports = [
         ("cold", ["restore_modbus_cold_same", "restore_modbus_cold_different"],
          "synthetic NOR partition bytes"),
@@ -380,6 +394,13 @@ if not args.expect_red:
          "            config_crc32_update(crc, reinterpret_cast<const uint8_t*>(&s_liveness.modbus_config_fp),",
          ["restore_modbus_warm_collision_corrupt_config"],
          "warm_start_exercises_real_crc_and_liveness_adoption"),
+        ("anchor_modbus_history_to_delayed_poll",
+         "\n        s_mb_last_commit_us     = logic::history_raster_boundary_us(now_us);\n"
+         "        s_mb_last_commit_bucket =",
+         "\n        s_mb_last_commit_us = now_us;\n"
+         "        s_mb_last_commit_bucket =",
+         ["restore_modbus_delayed"],
+         "restored_delayed_modbus_has_one_sample_per_closing_boundary"),
     ]
     for name, before, after, controls, oracle in mutations:
         if text.count(before) != 1:
@@ -395,6 +416,12 @@ if not args.expect_red:
             seed = execute(binary, "seed_modbus_warm_collision", name + "-seed", [mutation_transport])
             if seed.returncode != 0 or "PASS case=seed_modbus_warm_collision " not in seed.stdout:
                 raise RuntimeError("Mutation could not seed a valid warm region: " + name)
+        if name == "anchor_modbus_history_to_delayed_poll":
+            # The old writer produces valid NOR bytes; only the restored curve exposes the shift.
+            mutation_transport = OUT / (name + ".synthetic-nor.bin")
+            seed = execute(binary, "seed_modbus_delayed", name + "-seed", [mutation_transport])
+            if seed.returncode != 0 or "PASS case=seed_modbus_delayed " not in seed.stdout:
+                raise RuntimeError("Mutation could not seed delayed Modbus data: " + name)
         for case in controls:
             transport = [mutation_transport] if mutation_transport else case_inputs.get(case, ())
             result = execute(binary, case, name + "-" + case, transport)

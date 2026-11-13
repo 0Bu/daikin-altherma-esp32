@@ -558,6 +558,7 @@ void load_synthetic_nor(const char* transport_path) {
 constexpr uint32_t peer_a            = 0xc0000232;
 constexpr uint32_t peer_b            = 0xc0000233;
 constexpr int64_t  history_bucket_us = HISTORY_DT_S * 1000000LL;
+constexpr int64_t  delayed_boot_s    = 1700006400 + 12 * 3600 + 4 * 60 + 50;
 constexpr auto     flow_index        = static_cast<size_t>(homehub_history_index("flow"));
 constexpr auto     quiet_index       = static_cast<size_t>(homehub_history_index("quiet_state"));
 
@@ -966,6 +967,65 @@ void seed_trend_read_fault(const char* transport_path) {
     require(static_cast<bool>(transport), "save_trend_restore_fault_transport");
 }
 
+void seed_modbus_delayed(const char* transport_path) {
+    const auto configured    = configure_homehub();
+    journal_sdk::unix_origin = delayed_boot_s;
+    boot();
+    const auto  generation = bind_homehub(configured, peer_a);
+    CachedValue row;
+    row.off               = 49;
+    row.modbus_definition = def::homehub_definition_id(*def::homehub_find(49));
+    row.value             = "12.3";
+    sdk::now_us           = 305 * 1000000LL;
+    history_record_modbus(&row, 1, generation);
+    row.value   = "24.6";
+    sdk::now_us = 615 * 1000000LL;
+    history_record_modbus(&row, 1, generation);
+    require(history_flash_service_journal(8, 0) > 0, "first_delayed_sweep_reaches_journal");
+
+    row.value   = "36.9";
+    sdk::now_us = 905 * 1000000LL;
+    history_record_modbus(&row, 1, generation);
+    // Exercise the scheduled drain even when a wrong anchor claims the already-written slot.
+    history_flash_service_journal(8, 0);
+    sdk::now_us = 1515 * 1000000LL;
+    history_record_modbus(nullptr, 0, generation); // bucket 4 never received a cycle
+    const auto live = flow_snapshot();
+    require(live ==
+                std::vector<HistorySample>{HISTORY_NO_READING, 123, 246, 369, HISTORY_NO_READING},
+            "delayed_live_raster_keeps_measurements_and_real_gap");
+    require(history_flash_service_journal(8, 0) > 0, "later_delayed_sweep_reaches_journal");
+    std::ofstream transport(transport_path, std::ios::binary);
+    transport.write(reinterpret_cast<const char*>(journal_sdk::flash.data()),
+                    static_cast<std::streamsize>(journal_sdk::flash.size()));
+    require(static_cast<bool>(transport), "save_delayed_modbus_nor");
+}
+
+void restore_modbus_delayed(const char* transport_path) {
+    const auto configured = configure_homehub();
+    load_synthetic_nor(transport_path);
+    journal_sdk::unix_origin = delayed_boot_s + 1515;
+    history_start();
+    require(s_flash_scan_ok && !s_flash_restore_done, "scan_delayed_modbus_nor");
+    const auto generation = bind_homehub(configured, peer_a);
+    for (unsigned i = 0; i < 20; ++i) history_service_flash_restore();
+    require(s_flash_restore_done, "finish_delayed_modbus_restore");
+    const auto restored = flow_snapshot();
+    const auto first    = history_bucket_from_unix(delayed_boot_s + 600);
+    require(s_flash_oldest_bucket[static_cast<size_t>(HistoryJournalSource::Modbus)] == first &&
+                restored == std::vector<HistorySample>{123, 246, 369, HISTORY_NO_READING,
+                                                       HISTORY_NO_READING},
+            "restored_delayed_modbus_has_one_sample_per_closing_boundary");
+
+    // A new boot's first real measurement appends after the restored gaps.
+    record_flow("49.2", generation);
+    auto expected = restored;
+    expected.push_back(492);
+    require(flow_snapshot() == expected, "resumed_modbus_preserves_restored_sequence");
+    require(journal_sdk::writes == 0 && journal_sdk::erases == 0,
+            "delayed_modbus_restore_is_read_only");
+}
+
 void restore_trend_read_fault(const char* transport_path, bool persistent) {
     const auto configured = configure_homehub();
     load_synthetic_nor(transport_path);
@@ -1063,6 +1123,10 @@ int main(int argc, char** argv) {
             restore_late_correction(argv[2]);
         else if (name == "seed_trend_read_fault" && argc == 3)
             seed_trend_read_fault(argv[2]);
+        else if (name == "seed_modbus_delayed" && argc == 3)
+            seed_modbus_delayed(argv[2]);
+        else if (name == "restore_modbus_delayed" && argc == 3)
+            restore_modbus_delayed(argv[2]);
         else if ((name == "restore_trend_read_transient" ||
                   name == "restore_trend_read_persistent") &&
                  argc == 3)

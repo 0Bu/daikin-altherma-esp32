@@ -1,4 +1,4 @@
-// translation-source: 4210cc75eee11ce1dfcf29461013a0737a5806a303d44d1929bf671225a996b8
+// translation-source: 10ccafeac4c747a3f0d71717d33ce43eb311f20490a4822f4352625cc3df17c1
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -531,7 +531,7 @@ I18N.es = localeValues([
   /* schem.transfer_sign */ "Positivo: el agua gana calor. Negativo: pierde calor.",
   /* schem.efficiency_no_capacity */ (metric) => `${metric} no disponible. No hay una estimación utilizable de potencia térmica para este límite de cálculo.`,
   /* schem.efficiency_ct_pair */ (outlet) => `Se usan la corriente de los CT y las temperaturas de ${outlet} y R4T.`,
-  /* schem.efficiency_inv_pair */ "Se usan la corriente del inversor y las temperaturas de R1T y R4T.",
+  /* schem.efficiency_inv_pair */ "Se usan R1T antes del calentador auxiliar y R4T. La potencia eléctrica se estima con la corriente del inversor a 230 V supuestos. No se ha verificado qué cargas incluye, ni si incluye los calentadores.",
   /* schem.r2t */ "R2T",
   /* schem.r3t */ "R3T",
   /* schem.flow_switch */ "FLUJOSTATO",
@@ -1024,11 +1024,11 @@ INSPECT_I18N.es = inspectValues(
       : d.pth == null ? null
       : d.pthKind === "cooling" ? `≈ ${fmt1(d.pth)} kW de frío${d.cop != null && !d.copPostBuh ? `; EER ${fmt1(d.cop)}` : ""}.`
       : `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `; COP ${fmt1(d.cop)}` : ""}.`], // pth
-    [(d) => d && d.efficiencyKind === "eer" ? eerScopeText(d, "EER estimado a partir de los CT", "EER estimado de la bomba de calor", "EER estimado")
-      : d && d.copScope === "plant" ? "COP estimado a partir de los CT" : "COP estimado de la bomba de calor", "Eficiencia estimada", (d) => d && d.efficiencyKind === "eer"
+    [(d) => d && d.efficiencyKind === "eer" ? eerScopeText(d, "EER estimado a partir de los CT", "EER estimado con corriente del inversor", "EER estimado")
+      : eerScopeText(d || {}, "COP estimado a partir de los CT", "COP estimado con corriente del inversor", "COP estimado"), "Eficiencia estimada", (d) => d && d.efficiencyKind === "eer"
       ? "Potencia frigorífica estimada dividida por entrada eléctrica estimada. Hereda las incertidumbres del fluido, sensores, tensión y factor de potencia. Es un EER instantáneo, no estacional; la energía medida durante una temporada es más representativa." +
-        eerScopeText(d, post => ` Se usan R4T y ${post ? "R2T después" : "R1T antes"} del calentador de apoyo, con la corriente de los CT. El cableado de los CT determina las cargas incluidas.`, " Se usan R1T antes del calentador de apoyo y R4T con la corriente del inversor.")
-      : "Potencia térmica estimada dividida por potencia eléctrica estimada. Los CT se usan solo si consta que ambos calentadores están apagados. En los demás casos se necesitan una estimación utilizable basada en la corriente del inversor. El cableado de los CT determina las cargas incluidas." + heatingEfficiencyBoundary(d), (d) => d.copBlock === "tank_heater"
+        eerScopeText(d, post => ` Se usan R4T y ${post ? "R2T después" : "R1T antes"} del calentador de apoyo, con la corriente de los CT. El cableado de los CT determina las cargas incluidas. Para el cálculo con CT, las dos etapas BUH y el BSH deben estar confirmados como apagados.`, " " + t("schem.efficiency_inv_pair"))
+      : "Potencia térmica estimada dividida por potencia eléctrica estimada. Para el cálculo con CT, las dos etapas BUH y el BSH deben estar confirmados como apagados." + heatingEfficiencyBoundary(d), (d) => d.copBlock === "tank_heater"
       ? `${d.bsh === true ? `Sin ${efficiencyMetric(d)}. La resistencia del depósito indica que está encendida.` : `Sin ${efficiencyMetric(d)}. Se desconoce el estado de la resistencia del depósito.`} Su calor no pasa por ninguno de los sensores de salida de agua.`
       : d.copBlock === "backup_heater" ? `${d.buh1 === true || d.buh2 === true ? `Sin ${efficiencyMetric(d)}. El calefactor de apoyo indica que está encendido.` : `Sin ${efficiencyMetric(d)}. Se desconoce el estado del calefactor de apoyo.`} La estimación eléctrica no permite saber si incluye la carga del calentador.`
       : d.copBlock === "mb_scope" ? `Sin ${efficiencyMetric(d)}. Los datos disponibles no permiten relacionar la potencia eléctrica de HomeHub con la potencia térmica estimada en el intercambiador de placas. Se desconoce qué cargas eléctricas, como los calentadores, están incluidas.`
@@ -1038,8 +1038,8 @@ INSPECT_I18N.es = inspectValues(
       : d.cop == null ? efficiencyUnavailable(d)
       : d.efficiencyKind === "eer" ? `${fmt1(d.cop)} kW de frío por kW eléctrico: ≈ ${fmt1(d.copPth)} kW extraídos con ≈ ${fmt1(d.copPel)} kW de entrada.`
       : d.copScope === "plant" ? `${fmt1(d.cop)} kW térmicos en el circuito de agua por kW eléctrico estimado con CT: ≈ ${fmt1(d.copPth)} kW / ≈ ${fmt1(d.copPel)} kW. El cableado CT determina las cargas incluidas.`
-      : `${fmt1(d.cop)} kW térmicos por kW eléctrico dentro del límite de la bomba de calor: ≈ ${fmt1(d.copPth)} kW / ≈ ${fmt1(d.copPel)} kW. BUH queda fuera de ambas cifras.`], // cop
-    ["Calentador auxiliar · BUH", "Calentador auxiliar BUH", "Calentador eléctrico del circuito de agua situado después de R1T. Sus etapas pueden elevar la temperatura de impulsión y el consumo; no es la resistencia interna del depósito BSH.", (d) => d.buh1 == null && d.buh2 == null ? null : d.buh2 ? "Etapa 2: ambas etapas calientan." : d.buh1 ? "Etapa 1: una etapa calienta." : "Inactivo: ninguna etapa BUH está activa."], // buh
+      : `${fmt1(d.cop)} kW térmicos por kW eléctrico estimado. Unos ${fmt1(d.copPth)} kW térmicos con ${fmt1(d.copPel)} kW de entrada estimada.`], // cop
+    ["Calentador auxiliar · BUH", "Calentador auxiliar BUH", "Calentador eléctrico del circuito de agua situado después de R1T. Sus etapas pueden elevar la temperatura de impulsión y el consumo; no es la resistencia interna del depósito BSH.", (d) => d.buh2 === true ? "La etapa 2 indica que está encendida." : d.buh1 === true ? "La etapa 1 indica que está encendida." : d.buh1 === false && d.buh2 === false ? "Ambas etapas indican que están apagadas." : null], // buh
     ["Resistencia del depósito", "Resistencia eléctrica del depósito", "Resistencia eléctrica de inmersión BSH dentro del depósito. Puede calentar el agua con compresor, bomba y caudal a cero; su contacto X10A no mide potencia.", (d) => d.bsh == null ? null : d.bsh
       ? "Resistencia del depósito activa." : "Inactiva: la resistencia del depósito está apagada."], // bsh
     ["Válvula de 3 vías", 0, "La salida lógica selecciona el camino del depósito o de climatización. No es una confirmación mecánica de posición ni demuestra caudal.", (d) => d.valveDhw == null ? null : d.valveDhw
@@ -1061,11 +1061,11 @@ INSPECT_I18N.es = inspectValues(
     ["Bomba de circulación", "Orden de la bomba de circulación", "Mueve agua por el circuito común y la rama seleccionada por la válvula de 3 vías. El porcentaje es la orden X10A invertida: 0 % solicita parada y 100 % esfuerzo máximo. No mide velocidad ni prueba giro o caudal. Leer por separado el estado ON/OFF y el caudal medido; puede haber circulación con el compresor parado.", (d) => pumpNowText(d, [(n) => `Orden de bomba ${n} %.`, "El estado de la bomba es ON.", "La bomba informa parada (OFF).", "El estado informado de la bomba es desconocido.", (n) => `Caudal medido ${n} l/min.`, "No hay medida de caudal.", "OFF contradice el caudal positivo; puede haber circulación externa, inercia o señales contradictorias/desactualizadas.", "La circulación de agua no está confirmada."])], // pump
     [(d) => pelMeasured(d) ? "Consumo eléctrico · HomeHub" : "Consumo eléctrico estimado", "Consumo eléctrico", (d) => pelMeasured(d)
       ? "Valor de consumo comunicado por HomeHub entrada 51. La UI no lo calcula, pero la guía pública no demuestra calibración, punto de medida ni qué calentadores incluye; no es un contador certificado de toda la instalación."
-      : "Estimación para COP/EER. Con CT suma todas las fases declaradas y usa corriente × 230 V supuestos; tensión y factor de potencia reales son desconocidos. La corriente del inversor cubre solo el compresor.", (d) => d.pelHeld ? "El compresor está parado; la corriente del inversor pertenece al último ciclo y no es actual, por lo que no puede indicarse consumo ni eficiencia."
+      : "Potencia estimada con la corriente del inversor o la suma de todas las fases CT declaradas, a 230 V supuestos. Se desconocen la tensión y el factor de potencia reales. Las cargas del inversor no están verificadas. Las de CT dependen del cableado.", (d) => d.pelHeld ? "El compresor está parado; la corriente del inversor pertenece al último ciclo y no es actual, por lo que no puede indicarse consumo ni eficiencia."
       : d.pel == null ? t("schem.no_usable_power")
       : d.pelSrc === "MB" ? "Comunicado por HomeHub entrada 51; el límite exacto de medición no está documentado."
       : d.pelSrc === "CT" ? "Estimado con pinzas CT; las cargas incluidas dependen del cableado."
-      : "Calculado con la corriente del inversor, solo para el compresor."], // pel
+      : "Estimado con la corriente del inversor."], // pel
     ["Desescarche", 0, "Invierte temporalmente el circuito para eliminar hielo del intercambiador exterior. Es normal con tiempo frío y húmedo y toma brevemente calor del agua.", (d) => d.defrost == null ? null : d.defrost ? "X10A indica que el desescarche está activo." : "X10A indica que el desescarche está desactivado."], // defrost
     ["Modo silencioso", 0, "Modo que limita ruido y normalmente velocidad o potencia de la unidad exterior. La señal indica el estado del modo, no el nivel exacto ni su efecto térmico.", (d) => d.quiet == null ? null : d.quiet ? "Modo silencioso activo." : "Inactivo: el modo silencioso está desactivado."], // quiet
     ["Línea de gas", "Línea de gas refrigerante", "Línea frigorífica entre unidades en el esquema split. En calefacción lleva gas caliente a alta presión al PHE; en refrigeración el flujo se invierte. Un monobloc no tiene esta línea frigorífica de campo.", (d) => compressorRunning(d) ? d.rps != null ? `En circulación: ${fmt1(d.circP)} bar a ${fmt0(d.disch)} °C.` : "HomeHub indica que el compresor está activo. La presión y la temperatura de descarga requieren X10A." : "Sin circulación frigorífica activa: compresor parado. La igualación de presión depende del circuito y del tiempo de reposo."], // rhot

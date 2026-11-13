@@ -101,13 +101,13 @@ delays therefore have a 17-second SDK timeout budget, excluding scheduling and l
 This is a project responsiveness bound, not a manufacturer discovery guarantee.
 
 The user may instead enter an IP, `.local` name or ordinary DNS name verbatim. Saving `mb_host` is an
-explicit decision: non-empty starts polling that address; empty disables HomeHub completely and
+explicit decision: a non-empty address requests polling; empty disables HomeHub completely and
 persists the latch. Empty-after-searched therefore means no task, no socket, no HomeHub request, no
 HomeHub-dependent heating-curve diagnosis and no future automatic search. If several `homehub-*`
 responders answer, the first resolved IPv4 is used/offered and the count is logged to `/diag` rather
 than silently guessed at.
 
-Every active failure is exposed as complete English `error` text plus structured `error_code`,
+Connection and polling failures use complete English `error` text plus structured `error_code`,
 `error_detail` and (for reads) `error_register` fields. The UI localises the structured cause as a
 quiet red line below the address. The same transition is written through `diag_printf`, which means
 it reaches both `/diag` and configured Syslog; repeated one-second retries do not spam the log, and a
@@ -220,22 +220,22 @@ whatever the first cycle read.
 * **Batching.** The 32 EKRHH offsets fall into **ten contiguous runs** across the two function
   spaces, so a full cycle is ten requests. The per-request cap is 16 registers, far below the
   protocol's 125: a batch is the unit of *loss* as much as of saving, and the longest run here is six.
-* **Two cadences.** A **full** cycle every fifth poll tick; the four between it read three fast
+* **Two cadences.** A **full** cycle every fifth poll tick; the four between it read four fast
   batches. Two carry the diagnosis gates — inputs 53 (normal space operation), 37 (space rather than
   DHW routing) and 38 (heating rather than cooling). The third carries input 44, optional plant outdoor context which
   legacy-441 requires from the same current cycle. It is explicitly **not** a gate. The extra 40–45 batch
   is one deliberate bundled request; borrowing the five-second cache would not establish event-time
-  freshness. Neighbouring registers ride these batches because leaving them out saves no request.
+  freshness. The fourth batch, 30–33, supplies input 31's current compressor report for the
+  schematic. Neighbouring registers ride these batches because leaving them out saves no request.
 * **Five poll ticks.** Chosen from the *dashboard*, not from how fast the values move: the
   browser polls `/values` every two seconds, and a HomeHub reading up to ten seconds old beside a
   one-second X10A reading of the same quantity invites exactly the "which of these is current?"
   question the two-array `/values` shape exists to make answerable. This is nominal cadence with
   short replies; bounded network waits add time and are included in the separate cache-age bound.
-* **A fast cycle commits no value cache.** Its thirteen gate/context-batch registers are not a cache and its
-  position on the raster is not a sample, so `/values` and the trend rings stay with the last full
-  cycle rather than publishing thirteen rows and 18 apparent read failures. Network waits add to
-  the intervening poll delays. `connected` reports this cycle's transport state; reply age detects
-  stalled progress independently of the larger full-cache allowance.
+* **A fast cycle publishes current observations.** Its seventeen gate and context registers leave
+  the raw `/values` rows and trend rings on the last full cycle. Network waits add to the
+  intervening poll delays. `connected` reports this cycle's transport state, and reply age
+  detects stalled progress independently of the larger full-cache allowance.
 * **An exception splits its batch.** A Modbus exception is a valid reply about **one** register, and
   a batched request cannot say which — so a batch that excepts is re-read register by register, and
   stays split for the session (the usual cause, a register this hub does not implement, does not go
@@ -247,15 +247,15 @@ whatever the first cycle read.
   otherwise `/status`, `/diag` and Syslog would oscillate between failure and recovery every five
   seconds without evidence that the row recovered.
 
-Gate 53, space route 37, heating mode 38 and outdoor 44 each retain the response's monotonic
-observation time and expire individually after seven seconds. The
+Inputs 31, 37, 38, 44 and 53 each retain the response's monotonic observation time and expire
+individually after seven seconds. The
 [`/values` contract](API.md#get-values) describes the separate full-cache limit. When it expires,
 `/status.modbus.values` stops counting the cached rows even if fast replies continue.
 A target change immediately resets the public profile to Auto/Probing, before name resolution;
 only work for that target generation can publish a new classification.
 
-**32 → 4.4 requests/poll-second, ~380 000 a day.** The plan is resolved at compile time and lives in flash;
-`hp_modbus.cpp` `static_assert`s that batching still collapses the map, so a future register added
+**32 → 5.2 requests/poll-second, ~449 000 a day.** The plan is resolved at compile time and lives in
+flash. `hp_modbus.cpp` checks the batch count at compile time, so a future register added
 into a gap re-prices the link visibly instead of quietly restoring the per-register sweep.
 
 ## Daikin Altherma 4 Modbus TCP support
@@ -478,7 +478,9 @@ the flag without copying the configuration again. A non-empty address requests p
 require creating a task.
 `modbus_start_pending: true` means the settings were saved and polling is still waiting for its
 worker or resources. See [the API contract](API.md#x10a-homehub-and-board-hardware) for startup and recovery.
-Clearing the address retires the sole socket owner. `POST /discover_homehub` runs the bounded manual
+Task-admission failures can appear in `/diag` before the worker is active.
+Clearing the address withdraws the source immediately. Its worker closes the socket once OTA or
+Weather has released network heap. `POST /discover_homehub` runs the bounded manual
 search and returns `{ok:true,host:"<IPv4>"}` without saving or reconfiguring anything.
 
 **Web UI:** the HomeHub appears as its own row in Settings → Connections — never folded into a

@@ -52,7 +52,8 @@ try {
   const binary = compile(sourcePath, "production");
   const baseline = execute(binary, [], 20000);
   assert.equal(baseline.status, 0, `production runtime cases\n${baseline.stdout}${baseline.stderr}`);
-  assert.match(baseline.stdout, /PASS total=39\b/);
+  const baselineCount = 40;
+  assert.match(baseline.stdout, new RegExp(`PASS total=${baselineCount}\\b`));
   console.log(baseline.stdout.trim());
 
   // A successfully compiled mutation must fail its particular behavioral oracle. A crash,
@@ -78,6 +79,21 @@ try {
       name: "retiring-drops-reenable", scenario: "retiring_reenable",
       before: /if \(!s_target_enabled\.load\(std::memory_order_acquire\)\) \{\s*s_mb_task_running\.store\(false, std::memory_order_release\);/,
       after: "if (true) { s_mb_task_running.store(false, std::memory_order_release);",
+    },
+    {
+      name: "worker-closes-during-tls-ownership", scenario: "task_oom_and_quiesce",
+      before: /wait_for_tls\s*=\s*ota_active \|\| weather_fetch_active\(\);/,
+      after: "wait_for_tls = false;",
+    },
+    {
+      name: "worker-ignores-http-heap-reserve", scenario: "lifecycle",
+      before: "heap_largest_internal_block() < stack_bytes + HEAP_RECOVERY_BYTES ||",
+      after: "false ||",
+    },
+    {
+      name: "worker-ignores-total-heap-reserve", scenario: "lifecycle",
+      before: "free_bytes < stack_bytes + worker_setup_reserve + HEAP_RECOVERY_BYTES",
+      after: "(static_cast<void>(free_bytes), static_cast<void>(worker_setup_reserve), false)",
     },
     {
       name: "worker-ignores-watchdog-add-failure", scenario: "worker_admission_pressure",
@@ -110,6 +126,16 @@ try {
       name: "transaction-echo", scenario: "transaction",
       before: "mb_parse_response(io.adu, got, txn, unit, space, qty, out)",
       after: "mb_parse_response(io.adu, got, static_cast<uint16_t>((io.adu[0] << 8) | io.adu[1]), unit, space, qty, out)",
+    },
+    {
+      name: "refresh-compressor-with-unrelated-reply", scenario: "compressor_witness",
+      before: "logic::modbus_observation_age_s(s_compressor_ms, esp_timer_get_time() / 1000)",
+      after: "logic::modbus_observation_age_s(s_last_reply_ms, esp_timer_get_time() / 1000)",
+    },
+    {
+      name: "keep-copied-compressor-across-target-cutover", scenario: "compressor_witness",
+      before: /if \(target_generation != s_target_generation\.load\(std::memory_order_acquire\)\) \{\s*live = false;\s*if \(compressor\) \*compressor = ModbusCompressor::Unknown;/,
+      after: "if (target_generation != s_target_generation.load(std::memory_order_acquire)) { live = false;",
     },
     {
       name: "session-generation", scenario: "snapshot_generation",
@@ -260,7 +286,7 @@ try {
       `${mutation.name}: only its specific assertion failure counts`);
     console.log(`negative control ${mutation.name}: rejected by ${mutation.scenario}`);
   }
-  console.log(`production Modbus runtime: 39 cases, ${mutations.length} negative controls; source sha256=${sourceHash}`);
+  console.log(`production Modbus runtime: ${baselineCount} cases, ${mutations.length} negative controls; source sha256=${sourceHash}`);
 } finally {
   fs.rmSync(dir, { recursive: true, force: true });
 }

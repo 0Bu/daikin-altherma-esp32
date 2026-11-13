@@ -196,10 +196,15 @@ for (const [signature, source] of [
 ]) {
   const fn = body(history, signature);
   // A seed of an empty raster is not a commit of what was adopted: the counter is zeroed only on
-  // the bucket-crossing branch, which is the one that also assigns the commit instant of `now`.
+  // the bucket-crossing branch. Modbus may poll late, so it uses the completed raster boundary.
   assert.equal(count(fn, /boots_since_commit = 0;/g), 1, signature + " zeroes the sealed counter once");
-  assert.match(fn, /boots_since_commit = 0; (?:logic::)?history_liveness_commit\(s_liveness, logic::HistoryJournalSource::(X10a|Modbus|Env3), now_us\);/,
+  const instant = source === "Modbus" ? "s_mb_last_commit_us" : "now_us";
+  assert.match(fn, new RegExp(`boots_since_commit = 0; (?:logic::)?history_liveness_commit\\(s_liveness, logic::HistoryJournalSource::${source}, ${instant}\\);`),
     signature + " zeroes the counter and notes the commit together");
+  if (source === "Modbus") {
+    assert.equal(count(fn, /s_mb_last_commit_us = logic::history_raster_boundary_us\(now_us\);/g), 2,
+      "the Modbus seed and commit both use the raster boundary");
+  }
   assert.equal(count(fn, new RegExp("history_liveness_commit\\(s_liveness, logic::HistoryJournalSource::" + source, "g")), 2,
     signature + " notes both its seed and its commit in the liveness record");
 }

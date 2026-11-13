@@ -1980,6 +1980,7 @@ struct ValuesSnapshot {
     std::unique_ptr<logic::DwellReading[]> x10a_dwell;
     std::vector<CachedValue> modbus;
     bool modbus_live = false;
+    ModbusCompressor                       modbus_compressor    = ModbusCompressor::Unknown;
     uint32_t                               modbus_history_epoch = 0;
 };
 
@@ -2030,7 +2031,7 @@ __attribute__((noinline)) static ValuesSnapshot take_values_snapshot() {
         bool live = false;
         uint32_t       history_generation = 0;
         const size_t   n = mb_values_snapshot(snapshot.modbus.data(), snapshot.modbus.size(), live,
-                                              &history_generation);
+                                              &history_generation, &snapshot.modbus_compressor);
         const uint32_t epoch = history_epoch();
         if (live && history_generation != 0 && history_generation == history_modbus_generation())
             snapshot.modbus_history_epoch = epoch;
@@ -2228,22 +2229,21 @@ static void append_modbus_values_array(JsonOut& j, const std::vector<CachedValue
 }
 
 // The two sources ride ONE response but stay two arrays, mirroring the two stacks behind them:
-// `values` is X10A, `modbus` is the HomeHub. `modbus` is emitted only for a snapshot proven live, so
-// a device without one sees exactly the payload it saw before this feature existed. The one shared
-// serializer keeps GET /values and MCP structuredContent byte-for-byte equivalent.
+// `values` is X10A, `modbus` is the HomeHub. `modbus` is emitted only for a snapshot proven live,
+// so a device without one omits that array. The shared serializer keeps GET /values and MCP
+// structuredContent byte-for-byte equivalent.
 template <typename JsonOut>
 static void append_values_json(JsonOut& j, const ValuesSnapshot& snapshot) {
     j += "{\"values\":";
     append_values_array(j, snapshot.x10a, snapshot.x10a_label_ambiguous, snapshot.x10a_dwell);
-    // Emitted only while the link is CONNECTED, not merely enabled. That is a payload invariant
-    // worth having: if the `modbus` array is present, every row in it was read this cycle. Gating on
-    // `enabled` alone served the last good cache after the link dropped, and a consumer has no way
-    // to tell — the rows look identical. The browser is not the only consumer, so the guarantee
-    // belongs here rather than in a check each client has to remember to make.
-    //
-    // mb_values_snapshot() tied the cache copy and the link generations into `modbus_live` before
-    // transfer started. Not live → the key is not written at all: an ABSENT array and an empty one
-    // are different claims, and only absence says "no current reading".
+    j += ",\"modbus_compressor_running\":";
+    if (snapshot.modbus_compressor == ModbusCompressor::Unknown)
+        j += "null";
+    else
+        j += snapshot.modbus_compressor == ModbusCompressor::On ? "true" : "false";
+    // mb_values_snapshot() ties the last full sweep to the current session before transfer.
+    // A fast input-31 observation can change independently of those rows. Omit the array
+    // when the full-cache snapshot is unavailable.
     if (snapshot.modbus_live) {
         char boot_id[17];
         write_boot_id(boot_id);

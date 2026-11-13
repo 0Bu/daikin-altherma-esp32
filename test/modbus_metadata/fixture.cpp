@@ -5,6 +5,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include "hp_modbus.hpp"
 #include "hp_poll.hpp"
 #include "def/homehub.hpp"
 #include "logic/config_model.hpp"
@@ -29,12 +30,13 @@ ModbusProfile mb_active_profile() {
 
 size_t mb_values_capacity() { return fixture_rows.size(); }
 
-size_t mb_values_snapshot(CachedValue* out, size_t max, bool& live,
-                          uint32_t* history_generation = nullptr) {
+size_t mb_values_snapshot(CachedValue* out, size_t max, bool& live, uint32_t* history_generation,
+                          ModbusCompressor* compressor) {
     const size_t n = std::min(max, fixture_rows.size());
     for (size_t i = 0; i < n; ++i) out[i] = fixture_rows[i];
     live = fixture_live;
     if (history_generation) *history_generation = 0;
+    if (compressor) *compressor = ModbusCompressor::Unknown;
     if (replace_after_copy) {
         // The caller already owns the copied rows. Advance the independently mutable target and
         // current profile before current_modbus_values() uses any row metadata.

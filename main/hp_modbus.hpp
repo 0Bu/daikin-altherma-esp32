@@ -103,6 +103,8 @@ bool mb_discover_homehub(std::string& found);
 // Thread-safe snapshot of the link state.
 ModbusStatus mb_status();
 
+enum class ModbusCompressor : uint8_t { Unknown, Off, On };
+
 // Thread-safe snapshot copy of the HomeHub value cache. Returns the count written. Rows carry the
 // same CachedValue shape as the X10A cache, so /values and the browser need no second row type;
 // `reg` is the synthetic def::HOMEHUB_GROUP_REG and `off` the EKRHH offset, which is what
@@ -117,8 +119,10 @@ ModbusStatus mb_status();
 // because that separate call is exactly the race — the cache and link state are behind two mutexes,
 // so only the accessor can tie them into one generation-checked answer.
 // The optional history generation belongs to the copied full-cache rows. Zero means unavailable.
+// The optional compressor state comes from its own recent input 31 reply in the current session.
 size_t mb_values_snapshot(CachedValue* out, size_t max, bool& live,
-                          uint32_t* history_generation = nullptr);
+                          uint32_t*         history_generation = nullptr,
+                          ModbusCompressor* compressor         = nullptr);
 
 // Allocation-free check of the exact snapshot liveness rule, for periodic expiry publication.
 bool mb_values_live();

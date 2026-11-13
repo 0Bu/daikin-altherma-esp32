@@ -1,4 +1,4 @@
-// translation-source: 4210cc75eee11ce1dfcf29461013a0737a5806a303d44d1929bf671225a996b8
+// translation-source: 10ccafeac4c747a3f0d71717d33ce43eb311f20490a4822f4352625cc3df17c1
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -536,7 +536,7 @@ I18N.pl = localeValues([
   /* schem.transfer_sign */ "Wartość dodatnia: woda pobiera ciepło. Ujemna: oddaje ciepło.",
   /* schem.efficiency_no_capacity */ (metric) => `${metric} niedostępny. Brak użytecznego oszacowania mocy dla tego zakresu.`,
   /* schem.efficiency_ct_pair */ (outlet) => `Obliczenie wykorzystuje prąd z CT oraz temperatury ${outlet} i R4T.`,
-  /* schem.efficiency_inv_pair */ "Obliczenie wykorzystuje prąd falownika oraz temperatury R1T i R4T.",
+  /* schem.efficiency_inv_pair */ "Obliczenie wykorzystuje R1T przed grzałką wspomagającą i R4T. Pobór szacuje się z prądu falownika przy założeniu 230 V. Nie zweryfikowano, które odbiorniki, w tym grzałki, obejmuje szacunek.",
   /* schem.r2t */ "R2T",
   /* schem.r3t */ "R3T",
   /* schem.flow_switch */ "STYK PRZ.",
@@ -1029,11 +1029,11 @@ INSPECT_I18N.pl = inspectValues(
       : d.pth == null ? null
       : d.pthKind === "cooling" ? `≈ ${fmt1(d.pth)} kW chłodzenia${d.cop != null && !d.copPostBuh ? `, EER ${fmt1(d.cop)}` : ""}.`
       : `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `, COP ${fmt1(d.cop)}` : ""}.`], // pth
-    [(d) => d && d.efficiencyKind === "eer" ? eerScopeText(d, "EER na podstawie prądu CT (szacunek)", "EER pompy ciepła (szacunek)", "Szacowany EER")
-      : d && d.copScope === "plant" ? "COP na podstawie prądu CT (szacunek)" : "COP pompy ciepła (szacunek)", "Szacowana efektywność", (d) => d && d.efficiencyKind === "eer"
+    [(d) => d && d.efficiencyKind === "eer" ? eerScopeText(d, "EER na podstawie prądu CT (szacunek)", "Szacowany EER z prądu falownika", "Szacowany EER")
+      : eerScopeText(d || {}, "COP na podstawie prądu CT (szacunek)", "Szacowany COP z prądu falownika", "Szacowany COP"), "Szacowana efektywność", (d) => d && d.efficiencyKind === "eer"
       ? "Szacowana moc chłodnicza podzielona przez szacowany pobór. Wynik dziedziczy założenia o wodzie/glikolu, czujnikach, napięciu i współczynniku mocy; to chwilowy EER, nie efektywność sezonowa." +
-        eerScopeText(d, post => ` Obliczenie wykorzystuje R4T i ${post ? "R2T za" : "R1T przed"} grzałką wspomagającą oraz prąd z CT. Okablowanie CT decyduje, które odbiorniki uwzględniono.`, " Obliczenie wykorzystuje R1T przed grzałką wspomagającą, R4T i prąd falownika.")
-      : "Szacowana moc cieplna podzielona przez szacowaną moc elektryczną. Prąd z CT stosuje się tylko po potwierdzeniu wyłączenia obu grzałek. W pozostałych przypadkach potrzebne jest użyteczne oszacowanie na podstawie prądu falownika. Okablowanie CT decyduje, które odbiorniki uwzględniono." + heatingEfficiencyBoundary(d), (d) => d.copBlock === "tank_heater"
+        eerScopeText(d, post => ` Obliczenie wykorzystuje R4T i ${post ? "R2T za" : "R1T przed"} grzałką wspomagającą oraz prąd z CT. Okablowanie CT decyduje, które odbiorniki uwzględniono. Obliczenie z CT wymaga potwierdzenia wyłączenia obu stopni BUH i grzałki BSH.`, " " + t("schem.efficiency_inv_pair"))
+      : "Szacowana moc cieplna podzielona przez szacowaną moc elektryczną. Obliczenie z CT wymaga potwierdzenia wyłączenia obu stopni BUH i grzałki BSH." + heatingEfficiencyBoundary(d), (d) => d.copBlock === "tank_heater"
       ? `${d.bsh === true ? `Brak ${efficiencyMetric(d)}. Grzałka zasobnika zgłasza włączenie.` : `Brak ${efficiencyMetric(d)}. Stan grzałki zasobnika jest nieznany.`} Jej ciepło omija oba czujniki temperatury zasilania.`
       : d.copBlock === "backup_heater" ? `${d.buh1 === true || d.buh2 === true ? `Brak ${efficiencyMetric(d)}. Grzałka wspomagająca zgłasza włączenie.` : `Brak ${efficiencyMetric(d)}. Stan grzałki wspomagającej jest nieznany.`} Szacunek mocy elektrycznej nie pozwala ustalić, czy obejmuje obciążenie grzałki.`
       : d.copBlock === "mb_scope" ? `Brak ${efficiencyMetric(d)}. Dostępne dane nie pozwalają powiązać mocy elektrycznej z HomeHubu z mocą cieplną oszacowaną na płytowym wymienniku ciepła. Nie wiadomo, które odbiorniki, w tym grzałki elektryczne, obejmuje odczyt mocy.`
@@ -1043,8 +1043,8 @@ INSPECT_I18N.pl = inspectValues(
       : d.cop == null ? efficiencyUnavailable(d)
       : d.efficiencyKind === "eer" ? `${fmt1(d.cop)} kW chłodzenia na 1 kW prądu — ≈ ${fmt1(d.copPth)} kW przy ≈ ${fmt1(d.copPel)} kW poboru.`
       : d.copScope === "plant" ? `${fmt1(d.cop)} kW ciepła po stronie wody na 1 kW poboru oszacowanego z CT — ≈ ${fmt1(d.copPth)} kW przy ≈ ${fmt1(d.copPel)} kW. Zakres odbiorników zależy od montażu CT.`
-      : `${fmt1(d.cop)} kW ciepła na 1 kW prądu w granicy pompy — ≈ ${fmt1(d.copPth)} kW przy ≈ ${fmt1(d.copPel)} kW. BUH jest poza obiema wielkościami.`], // cop
-    ["Grzałka dodatkowa (BUH)", "Grzałka dodatkowa BUH", "Elektryczna grzałka w obiegu wodnym, używana m.in. przy mrozie, odszranianiu lub awarii. Stopień opisuje załączoną moc, nie oddzielny pomiar kW.", (d) => d.buh1 == null && d.buh2 == null ? null : d.buh2 ? "Stopień 2 — pracują oba stopnie." : d.buh1 ? "Stopień 1 — pracuje jeden stopień." : "Wyłączona — żaden stopień BUH nie pracuje."], // buh
+      : `${fmt1(d.cop)} kW ciepła na kW szacowanego poboru. Około ${fmt1(d.copPth)} kW ciepła przy szacowanym poborze ${fmt1(d.copPel)} kW.`], // cop
+    ["Grzałka dodatkowa (BUH)", "Grzałka dodatkowa BUH", "Elektryczna grzałka w obiegu wodnym, używana m.in. przy mrozie, odszranianiu lub awarii. Stopień opisuje załączoną moc, nie oddzielny pomiar kW.", (d) => d.buh2 === true ? "Stopień 2 sygnalizuje włączenie." : d.buh1 === true ? "Stopień 1 sygnalizuje włączenie." : d.buh1 === false && d.buh2 === false ? "Oba stopnie sygnalizują wyłączenie." : null], // buh
     ["Elektryczna grzałka zbiornika", 0, "Grzałka zanurzeniowa BSH ogrzewa zbiornik bez sprężarki i obiegu wody. X10A podaje tylko stan włączona/wyłączona, nie jej moc.", (d) => d.bsh == null ? null : d.bsh ? "Elektryczna grzałka zbiornika jest aktywna." : "Wyłączona — zbiornik nie używa grzałki zanurzeniowej."], // bsh
     ["Zawór 3-drogowy", 0, "Sterownik wybiera nim drogę do zbiornika albo obiegu domu. Jest to zgłoszone polecenie, nie mechaniczne potwierdzenie położenia ani przepływu.", (d) => d.valveDhw == null ? null : d.valveDhw ? "Sterownik wybrał drogę do zbiornika; samo zgłoszenie nie potwierdza przepływu ani ładowania." : "Sterownik wybrał drogę do obiegu domu; samo zgłoszenie nie potwierdza cyrkulacji."], // valve
     ["Wyjście zaworu 2-drogowego", 0, "Binarny sygnał wyjściowy X10A dla zaworu 2-drogowego. Nie jest mechanicznym potwierdzeniem położenia ani samodzielnym dowodem ogrzewania lub chłodzenia.", (d) => d.valve2On == null ? null : d.valve2On ? "X10A zgłasza wyjście 2WV WŁ.; osobno sprawdź tryb i pracę obiegu." : "X10A zgłasza wyjście 2WV WYŁ.; samo to nie oznacza chłodzenia ani nie przeczy ustawionemu ogrzewaniu podczas postoju obiegu."], // valve2
@@ -1060,11 +1060,11 @@ INSPECT_I18N.pl = inspectValues(
     ["Pompa obiegowa", "Polecenie pompy obiegowej", "Tłoczy wodę we wspólnym obiegu i gałęzi wybranej zaworem 3-drogowym. Procent to odwrócone polecenie X10A: 0 % żąda zatrzymania, a 100 % maksymalnego wysterowania. Nie jest pomiarem prędkości ani dowodem obrotów lub przepływu. Status ON/OFF i zmierzony przepływ należy czytać osobno; obieg może trwać przy wyłączonej sprężarce.", (d) => pumpNowText(d, [(n) => `Polecenie pompy ${n} %.`, "Status pompy to ON.", "Pompa zgłasza zatrzymanie (OFF).", "Zgłoszony stan pompy jest nieznany.", (n) => `Zmierzony przepływ ${n} l/min.`, "Brak pomiaru przepływu.", "OFF jest sprzeczne z dodatnim przepływem; możliwy jest obieg zewnętrzny, wybieg lub sprzeczne/nieaktualne sygnały.", "Obieg wody nie jest potwierdzony."])], // pump
     [(d) => pelMeasured(d) ? "Pobór elektryczny (HomeHub)" : "Pobór elektryczny (szacunek)", "Pobór elektryczny", (d) => pelMeasured(d)
       ? "Wartość poboru z rejestru wejściowego HomeHub 51. Dokumentacja nie potwierdza kalibracji, dokładnego punktu pomiaru ani objęcia wszystkich grzałek; to nie jest certyfikowany licznik całej instalacji."
-      : "Szacunek dla COP/EER: suma wszystkich zadeklarowanych faz CT × założone 230 V. Rzeczywiste napięcie i współczynnik mocy są nieznane; prąd falownika obejmuje tylko sprężarkę, a zakres CT zależy od okablowania.", (d) => d.pelHeld ? "Sprężarka stoi, więc prąd falownika jest wartością z poprzedniego cyklu, nie bieżącym pomiarem; nie można podać poboru ani sprawności."
+      : "Pobór szacuje się z prądu falownika lub sumy wszystkich zadeklarowanych faz CT przy założeniu 230 V. Rzeczywiste napięcie i współczynnik mocy są nieznane. Zakres pomiaru falownika nie jest zweryfikowany. Zakres CT zależy od okablowania.", (d) => d.pelHeld ? "Sprężarka stoi, więc prąd falownika jest wartością z poprzedniego cyklu, nie bieżącym pomiarem; nie można podać poboru ani sprawności."
       : d.pel == null ? t("schem.no_usable_power")
       : d.pelSrc === "MB" ? "Wartość z rejestru wejściowego HomeHub 51; dokładna granica pomiaru nie jest tu udokumentowana."
       : d.pelSrc === "CT" ? "Szacunek z przekładników CT; ujęte odbiorniki zależą od ich podłączenia."
-      : "Z prądu falownika — tylko sprężarka."], // pel
+      : "Szacunek z prądu falownika."], // pel
     ["Odszranianie", 0, "Odwrócony cykl topi lód na wymienniku zewnętrznym; ogrzewanie jest wtedy chwilowo przerwane.", (d) => d.defrost == null ? null : d.defrost ? "X10A zgłasza aktywne odszranianie." : "X10A zgłasza, że odszranianie jest wyłączone."], // defrost
     ["Tryb cichy", 0, "Ogranicza hałas, zwykle przez ograniczenie wentylatora lub sprężarki. Może przez to zmniejszyć dostępną moc.", (d) => d.quiet == null ? null : d.quiet ? "Tryb cichy jest aktywny." : "Wyłączony — tryb cichy nie jest aktywny."], // quiet
     ["Przewód gazowy (gorący gaz w ogrzewaniu)", "Przewód gazowy", "Przewód czynnika między jednostkami układu split. W ogrzewaniu gorący gaz pod wysokim ciśnieniem płynie do PHE; w chłodzeniu kierunek się odwraca. Monoblok nie ma tego przewodu polowego.", (d) => compressorRunning(d) ? d.rps != null ? `Przepływ — ${fmt1(d.circP)} bar przy ${fmt0(d.disch)} °C.` : "HomeHub zgłasza, że sprężarka jest włączona. Ciśnienie i temperatura tłoczenia wymagają X10A." : "Brak aktywnego obiegu czynnika — sprężarka stoi; wyrównanie ciśnień zależy od układu i czasu postoju."], // rhot

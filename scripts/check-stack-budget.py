@@ -341,7 +341,7 @@ TASK_ALLOCATIONS = {
     "mqtt": ("main/mqtt_ha.cpp", r'xTaskCreate\s*\(\s*mqtt_task,\s*"mqtt_pub",\s*([0-9]+)\s*,'),
     "sdk_mqtt": ("main/mqtt_ha.cpp", r"\bcfg\.task\.stack_size\s*=\s*([0-9]+)\s*;"),
     "poll": ("main/hp_poll.cpp", r'xTaskCreate\s*\(\s*poll_task,\s*"hp_poll",\s*([0-9]+)\s*,'),
-    "modbus": ("main/hp_modbus.cpp", r'xTaskCreate\s*\(\s*mb_task,\s*"hp_modbus",\s*([0-9]+)\s*,'),
+    "modbus": ("main/hp_modbus.cpp", r'xTaskCreate\s*\(\s*mb_task,\s*"hp_modbus",\s*(stack_bytes)\s*,'),
     "syslog": ("main/syslog.cpp", r'"syslog_task",\s*([0-9]+)\s*,'),
     "env3": ("main/env3.cpp", r'xTaskCreate\s*\(\s*task,\s*"env3",\s*([0-9]+)\s*,'),
     "led": ("main/status_led.cpp", r'xTaskCreate\s*\(\s*status_led_task,\s*"status_led",\s*([0-9]+)\s*,'),

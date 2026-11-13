@@ -606,7 +606,7 @@ const I18N = {
     "schem.transfer_sign": "Positive: heat enters the water. Negative: heat leaves it.",
     "schem.efficiency_no_capacity": (metric) => `${metric} unavailable. No usable capacity estimate for this boundary.`,
     "schem.efficiency_ct_pair": (outlet) => `Uses current transformers with ${outlet} and R4T.`,
-    "schem.efficiency_inv_pair": "Uses inverter current with R1T and R4T.",
+    "schem.efficiency_inv_pair": "Uses R1T before the backup heater and R4T. Input is estimated from inverter current at an assumed 230 V. Heater and other load coverage is unverified.",
     "schem.r2t": "R2T", "schem.r3t": "R3T",
     "schem.flow_switch": "Flow switch", "schem.valve2": "2WV",
     "wifi.title": "WiFi configuration", "wifi.ssid": "WiFi network (SSID)", "wifi.pass": "WiFi password",

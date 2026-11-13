@@ -71,6 +71,12 @@ function pumpCommandPercent(signal) {
     ? 100 - signal : null;
 }
 
+// Project display guard with margin above the documented hydronic operating ranges.
+// Raw rows and raw history retain the decoded number for inspection.
+function usableWaterFlow(value) {
+  return Number.isFinite(value) && value >= 0 && value <= 100;
+}
+
 // ── Derived trends: computed pills and combined component states ───────────────────────────────
 // Pump command, ΔT and heat output have no directly matching register value.
 // BUH likewise has two physical stage bits but one component-level inspector. Their curves use
@@ -118,7 +124,7 @@ const DERIVED = {
     unit: "kW", ins: ["flow", "leaving_water", "return_water", "comp_rps"],
     ready: (h) => h.flow && h.leaving_water && h.return_water && h.comp_rps,
     fn: (s) => {
-      if (!Number.isFinite(s.flow) || s.flow < 0) return null;
+      if (!usableWaterFlow(s.flow)) return null;
       if (s.flow <= 0.5) return 0;
       if (s.leaving_water == null || s.return_water == null || s.comp_rps == null) return null;
       if (!(s.comp_rps > 5)) return null;
@@ -749,10 +755,10 @@ const currentBinaryTenths = (row) => {
 };
 
 function stateHistoryCurrent(id, source) {
+  if (S.otaCached) return { present: false, value: null };
   if (source === "modbus") {
-    // The valve row comes from the full sweep. A later fast sweep can change the route or
-    // report it unavailable without replacing that row, so leave the current cap unknown.
-    if (id === "valve_dhw") return { present: true, value: null };
+    // These rows come from the last full sweep. Unrelated replies do not renew either reading.
+    if (id === "valve_dhw" || id === "bsh_state") return { present: true, value: null };
     if (!Array.isArray(S._modbus)) return { present: false, value: null };
     if (id === "smart_grid_mode") {
       const row = S._modbus.find((r) => r && r.off === 56 && r.enum === "smart_grid_mode");
@@ -819,6 +825,16 @@ function stateRuns(series, wanted, classify) {
     out.push([from, i - from + 1]);
   }
   return out;
+}
+
+function stateTrackSpans(s, cfg, style) {
+  const levels = cfg.levels || [{ match: cfg.classify, cls: "" }];
+  const on = levels.flatMap((level) => stateRuns(s, true, level.match).map(([from, count]) =>
+    `<span class="vhist-state-on${level.cls ? " " + level.cls : ""}" style="${style(from, count)}"></span>`
+  )).join("");
+  const missing = stateRuns(s, null, cfg.classify).map(([from, count]) =>
+    `<span class="vhist-state-gap" style="${style(from, count)}"></span>`).join("");
+  return on + missing;
 }
 
 // `bound` renders a LOWER BOUND rather than a measurement, and the difference is not cosmetic.
@@ -934,17 +950,11 @@ function stateHistHtml(id, name, view, wrap, cfg) {
   // repaint, fill in or conceal the other's status. Missing intervals stay hatched in their own
   // lane, and disagreements are visible as different colours at the same point in time.
   const tracks = view.series.map((s) => {
-    const levels = cfg.levels || [{ match: cfg.classify, cls: "" }];
-    const on = levels.flatMap((level) => stateRuns(s, true, level.match).map(([from, count]) =>
-      `<span class="vhist-state-on${level.cls ? " " + level.cls : ""}" ` +
-      `style="left:${pct(from)}%;width:${pct(count)}%"></span>`
-    )).join("");
-    const missing = stateRuns(s, null, cfg.classify).map(([from, count]) =>
-      `<span class="vhist-state-gap" style="left:${pct(from)}%;width:${pct(count)}%"></span>`).join("");
+    const spans = stateTrackSpans(s, cfg, (from, count) => `left:${pct(from)}%;width:${pct(count)}%`);
     const sourceLabel = s.source === "modbus" ? "Modbus" : s.name;
     return `<div class="vhist-state-lane">` +
       `<span class="vhist-state-lane-label${s.source === "modbus" ? " mb" : ""}">${sourceLabel}</span>` +
-      `<div class="vhist-state-track ${s.source}" aria-hidden="true">${on}${missing}${current}</div>` +
+      `<div class="vhist-state-track ${s.source}" aria-hidden="true">${spans}${current}</div>` +
     `</div>`;
   }).join("");
   const gaps = stateRuns(recordedPrimary, null, cfg.classify).length;
@@ -983,47 +993,43 @@ function stateHistHtml(id, name, view, wrap, cfg) {
   , "vhist-state");
 }
 
-function alignAuxSample(view, h, i) {
-  if (!h || !Array.isArray(h.v) || !h.v.length) return null;
-  let idx = -1;
-  if (Number.isInteger(view.b0) && Number.isInteger(h.b0)) {
-    idx = (view.b0 + i) - h.b0;
-  } else if (typeof view.t0 === "number" && typeof h.t0 === "number") {
-    const dt = h.dt || view.dt || 300;
-    idx = Math.round(((view.t0 + i * (view.dt || 300)) - h.t0) / dt);
-  } else {
-    idx = h.v.length - view.v.length + i;
+function dhwAuxPhases(view) {
+  if (view?.id !== "dhw_tank") return null;
+  const tracks = [];
+  for (const [id, name] of [["smart_grid_mode", "Smart Grid"], ["bsh_state", "BSH"]]) {
+    for (const source of ["x10a", "modbus"]) {
+      if (!(source === "x10a" ? hasDeviceHist(id) : hasModbusHist(id))) continue;
+      const h = S.hist.get(histCacheKey(id, source));
+      if (!h?.v?.length || h.err) continue;
+      // Different replies can have different ends. Anchor each instrument to the temperature
+      // raster; two unanchored legacy responses cannot prove the same sample instant.
+      const offset = Number.isInteger(view.b0) && Number.isInteger(h.b0) ? view.b0 - h.b0
+        : Number.isFinite(view.t0) && Number.isFinite(h.t0) ? Math.round((view.t0 - h.t0) / view.dt)
+        : NaN;
+      const v = view.v.map((_, i) => h.dt === view.dt ? h.v[i + offset] ?? null : null);
+      tracks.push({ cfg: STATE_HIST[id], source, v,
+        label: `${source === "x10a" ? "X10A" : "Modbus"} · ${name}` });
+    }
   }
-  return (idx >= 0 && idx < h.v.length) ? h.v[idx] : null;
+  return tracks.length ? tracks : null;
 }
 
-function dhwAuxPhases(view) {
-  if (!view || view.id !== "dhw_tank" || !Array.isArray(view.v)) return null;
-  const modbus = modbusHistoryMatches();
-  const sgM = modbus ? S.hist?.get?.(histCacheKey("smart_grid_mode", "modbus")) : null;
-  const sgX = S.hist?.get?.("smart_grid_mode");
-  const bshX = S.hist?.get?.("bsh_state");
-  const bshM = modbus ? S.hist?.get?.(histCacheKey("bsh_state", "modbus")) : null;
-  if (!sgM && !sgX && !bshX && !bshM) return null;
-
-  const n = view.v.length;
-  const boost = Array(n).fill(false);
-  const bsh = Array(n).fill(false);
-  let boostCount = 0, bshCount = 0;
-
-  for (let i = 0; i < n; i++) {
-    const vSg = alignAuxSample(view, sgM, i) ?? alignAuxSample(view, sgX, i);
-    if (vSg != null && vSg === 20) {
-      boost[i] = true;
-      boostCount++;
-    }
-    const vBsh = alignAuxSample(view, bshX, i) ?? alignAuxSample(view, bshM, i);
-    if (vBsh != null && vBsh === 10) {
-      bsh[i] = true;
-      bshCount++;
-    }
-  }
-  return { boost, bsh, boostCount, bshCount, dt: view.dt || 300 };
+function dhwPhaseTracks(view, tracks) {
+  if (!tracks) return "";
+  // Match the numeric plot's point positions. A band spans half a slot on each side.
+  const edge = (i) => view.v.length === 1 ? (i < 0 ? 0 : 100)
+    : Math.max(0, Math.min(100, 100 * i / (view.v.length - 1)));
+  const style = (from, count) => {
+    const left = edge(from - .5), width = edge(from + count - .5) - left;
+    return `left:${left.toFixed(3)}%;width:${width.toFixed(3)}%`;
+  };
+  return `<div class="vhist-dhw-phases">` + tracks.map((s) => {
+    const count = s.v.filter((v) => s.cfg.classify(v) === true).length;
+    const total = count ? ` · ${t(s.cfg.active)} (${histDuration(count * view.dt)})` : "";
+    return `<div class="vhist-state-lane"><span class="vhist-state-lane-label${histSourceClass(s.source)}">` +
+      `${esc(s.label + total)}</span><div class="vhist-state-track ${s.source}" aria-hidden="true">` +
+      stateTrackSpans(s, s.cfg, style) + `</div></div>`;
+  }).join("") + `</div>`;
 }
 
 // One historied row's trend, as the markup appended under its explainer text. Every state is a
@@ -1139,50 +1145,11 @@ function histHtml(id, unit, name, source = "") {
       : `<span class="vhist-mark vhist-pinned${histSourceClass(s.source)}"` +
         ` style="left:${px}%;top:${((Y(s.v[pi] / 10) / HIST_H) * 100).toFixed(2)}%"></span>`).join("");
   }
-  const aux = id === "dhw_tank" ? dhwAuxPhases(view) : null;
-  let phaseBands = "";
+  const aux = dhwAuxPhases(view);
   const legendSeries = view.legendSeries || view.series;
   const legendItems = (legendSeries.length > 1 || ["modbus", "room"].includes(legendSeries[0].source))
     ? legendSeries.map((s) => histLegendHtml(view, s, histSourceClass(s.source)))
     : [];
-  if (aux) {
-    const toRuns = (flags) => {
-      const out = [];
-      for (let i = 0; i < flags.length; i++) {
-        if (!flags[i]) continue;
-        const from = i;
-        while (i + 1 < flags.length && flags[i + 1]) i++;
-        out.push([from, i - from + 1]);
-      }
-      return out;
-    };
-    const step = n > 1 ? HIST_W / (n - 1) : HIST_W;
-    const renderRuns = (runs, cls) => {
-      let s = "";
-      for (const [from, count] of runs) {
-        const x0 = n > 1 ? Math.max(0, X(from) - step / 2) : 0;
-        const x1 = n > 1 ? Math.min(HIST_W, X(from + count - 1) + step / 2) : HIST_W;
-        const w = Math.max(1, x1 - x0);
-        s += `<rect class="vhist-phase ${cls}" x="${x0.toFixed(1)}" y="0" width="${w.toFixed(1)}" height="${HIST_H}"/>`;
-      }
-      return s;
-    };
-    phaseBands += renderRuns(toRuns(aux.boost), "vhist-phase-boost");
-    phaseBands += renderRuns(toRuns(aux.bsh), "vhist-phase-bsh");
-
-    if (aux.boostCount > 0) {
-      legendItems.push(
-        `<span class="vhist-source vhist-legend-boost"><i></i>${esc(t("hist.boost_active"))}` +
-        ` <small class="mono num">(${histDuration(aux.boostCount * aux.dt)})</small></span>`
-      );
-    }
-    if (aux.bshCount > 0) {
-      legendItems.push(
-        `<span class="vhist-source vhist-legend-bsh"><i></i>${esc(t("hist.heater_active"))}` +
-        ` <small class="mono num">(${histDuration(aux.bshCount * aux.dt)})</small></span>`
-      );
-    }
-  }
   const legend = legendItems.length
     ? `<div class="vhist-legend">${legendItems.join("")}</div>`
     : "";
@@ -1194,15 +1161,15 @@ function histHtml(id, unit, name, source = "") {
   return wrap(
     `<div class="vhist-head"><span class="vhist-t">${esc(full ? t("hist.title") : t("hist.recorded", spanH))}</span>` +
     `<span class="vhist-range mono num">${esc(rng)}</span></div>` + legend + noteHtml +
-    `<div class="vhist-graph">` +
-      histTipsHtml(view, pi, pi >= 0 ? scrubFrac(pi, n) : 0) +
+    `<div class="vhist-graph${aux ? " vhist-dhw-graph" : ""}">` +
+      histTipsHtml(view, pi, pi >= 0 ? scrubFrac(pi, n) : 0, aux) +
       `<div class="vhist-plot" data-hist="${esc(id)}"${sourceAttr}${histRevision(view)} data-n="${n}" tabindex="0" role="img"` +
-        ` aria-label="${esc(t(pi >= 0 ? "hist.aria_pinned" : "hist.aria", name || id, pi >= 0 ? scrubText(view, pi) : ""))}">` +
-        `<svg viewBox="0 0 ${HIST_W} ${HIST_H}" preserveAspectRatio="none" aria-hidden="true">${phaseBands}${area}${line}${dots}</svg>` +
+        ` aria-label="${esc(t(pi >= 0 ? "hist.aria_pinned" : "hist.aria", name || id, pi >= 0 ? scrubText(view, pi, true, aux) : ""))}">` +
+        `<svg viewBox="0 0 ${HIST_W} ${HIST_H}" preserveAspectRatio="none" aria-hidden="true">${area}${line}${dots}</svg>` +
         nowDots + pinCross + pinMarks +
         `<span class="vhist-cross vhist-live" hidden></span>` +
         view.series.map((s) => `<span class="vhist-mark vhist-live${histSourceClass(s.source)}" data-source="${s.source}" hidden></span>`).join("") +
-      `</div>` + histTimesHtml(view, pi, pi >= 0 ? scrubFrac(pi, n) : 0) +
+      `</div>` + dhwPhaseTracks(view, aux) + histTimesHtml(view, pi, pi >= 0 ? scrubFrac(pi, n) : 0) +
     `</div>` +
     `<div class="vhist-axis"><span>${esc(t("hist.ago", spanH))}</span>` +
       // Idle time is reported ahead of dropouts: on an outdoor-air trend it is normally the larger
@@ -1506,9 +1473,7 @@ function scrubTime(h, i) {
 // Measure every distinct readout shape in a hidden grid cell. Tabular digits have equal widths;
 // replacing them deduplicates samples without losing a possible wrapped line or phase label.
 // The reserved row stays present, so a comparison never moves the plot or its time labels.
-function histTipsHtml(h, pi, frac) {
-  // One auxiliary scan per rendered view, not one full-day scan for every sample's readout.
-  const aux = dhwAuxPhases(h);
+function histTipsHtml(h, pi, frac, aux = dhwAuxPhases(h)) {
   const shapes = new Set(Array.from({length:h.v.length + (forecastScrubView(h)?.points.length || 0)},
     (_, i) => histReadout(h, i, aux).replace(/\d/g, "8")));
   return `<div class="vhist-tips"><div class="vhist-tip vhist-reserve mono num" aria-hidden="true">` +
@@ -1618,10 +1583,12 @@ function scrubText(h, i, includeTime = true, aux = dhwAuxPhases(h)) {
     ? visible.map((s) => sourceText(s, true)).join("\n")
     : sourceText(visible[0] || (h.series ? h.series[0] : h), false);
   let res = (includeTime ? scrubTime(h, i) + " · " : "") + val;
-  if (h.id === "dhw_tank" && aux) {
-    const active = [aux.boost[i] && t("hist.boost_active"), aux.bsh[i] && t("hist.heater_active")].filter(Boolean);
-    if (active.length) res += (visible.length > 1 ? "\n" : " · ") + active.join(" + ");
-  }
+  if (aux) res += aux.map(({ cfg, label, v }) => {
+    const state = cfg.classify(v[i]);
+    const key = state == null ? "hist.nm" : cfg.compactValueLabel ? cfg.compactValueLabel(v[i])
+      : state ? cfg.active : cfg.inactive;
+    return `\n${label}: ${t(key)}`;
+  }).join("");
   if (h.id === "flow" && visible.some((s) => s.source === "modbus" && s.v[i] != null)) {
     res += "\n" + t("hist.modbus_flow_unverified");
   }
@@ -1651,7 +1618,7 @@ function histReadout(h, i, aux) {
   const visible = histVisibleSeries(h);
   if (cfg || visible.length <= 1) return esc(scrubText(h, i, false, aux));
   const lines = scrubText(h, i, false, aux).split("\n");
-  const note = lines.length > visible.length ? lines.pop() : "";
+  const note = lines.splice(visible.length).join("\n");
   const rows = visible.map((s, idx) => {
     const label = s.source === "modbus" ? "Modbus" : s.name;
     const val = lines[idx] ? lines[idx].slice(label.length + 1) : "";

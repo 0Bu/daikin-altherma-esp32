@@ -27,6 +27,7 @@ struct FakeTask {
     unsigned priority;
 };
 using TaskHandle_t = FakeTask*;
+using StaticTask_t = FakeTask;
 namespace sdk {
 extern std::atomic<int64_t>  clock_us;
 extern std::atomic<bool>     real_clock;

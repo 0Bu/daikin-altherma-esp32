@@ -702,11 +702,16 @@ assert.doesNotMatch(mbReconfigureBody, /\bconfig\s*\(/,
 const mbTaskStart = modbus.indexOf("static void mb_task(void*)");
 const mbTaskEnd = modbus.indexOf("static void mb_task_start_if_enabled()", mbTaskStart);
 const mbTask = modbus.slice(mbTaskStart, mbTaskEnd);
-const mbDisableIntent = mbTask.indexOf(
-  "if (mb_retire_if_disabled(ready)) break;");
-const mbTlsHold = mbTask.indexOf("if (ota_download_active() || weather_fetch_active())");
-assert.ok(mbDisableIntent >= 0 && mbTlsHold > mbDisableIntent,
-  "HomeHub disable must retire the task before TLS delay and any Config allocation");
+const mbDisableIntent = mbTask.indexOf("if (!s_target_enabled.load(std::memory_order_acquire))");
+const mbPoll = mbTask.indexOf("if (ota_quiesce_step(ota_quiesce, ota_active))");
+assert.ok(mbDisableIntent >= 0 && mbPoll > mbDisableIntent,
+  "HomeHub disable must be handled before the normal poll path");
+const mbRetirement = mbTask.slice(mbDisableIntent, mbPoll);
+assert.match(mbRetirement,
+  /wait_for_tls\s*=\s*ota_active \|\| weather_fetch_active\(\);\s*if \(wait_for_tls\) \{[^}]*\} else if \(mb_retire_if_disabled\(ready\)\)/,
+  "HomeHub must defer socket retirement while OTA or Weather owns TLS");
+assert.doesNotMatch(mbRetirement, /\bconfig\s*\(/,
+  "HomeHub retirement must not depend on a fallible Config copy");
 assert.doesNotMatch(mbTask, /config_modbus_host\(config\(\)\)\.empty\(\)/,
   "HomeHub disable must not loop forever when a Config snapshot cannot allocate");
 assert.match(setHp.slice(mbReconfigure, mbCleanupRequest + 80),

@@ -1215,8 +1215,8 @@ p = sys.argv[1]
 s = open(p).read()
 start = s.index('        if (!s_target_enabled.load(std::memory_order_acquire)) {',
                 s.index('static void mb_task(void*)'))
-end = s.index('        const bool ota_active', start)
-assert 'if (mb_retire_if_disabled(ready)) break;' in s[start:end], (
+end = s.index('\n        const bool ota_active', start)
+assert 'else if (mb_retire_if_disabled(ready))' in s[start:end], (
     "seed 66 did not apply — HomeHub disable admission moved")
 seed = s[:start] + s[end:]
 poll = '                        if (esp_timer_get_time() >= s_next_try_us) mb_poll_once();\n'

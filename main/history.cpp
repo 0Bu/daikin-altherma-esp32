@@ -206,8 +206,8 @@ bool              s_env3_have_bucket = false;
 // bucket between commits, which mislabelled every timestamp and let a PINNED readout round onto
 // the neighbouring sample. Monotonic because the commit may predate the first SNTP sync — its
 // wall-clock instant is then unknowable, but its age never is. A flash seed claims the monotonic
-// raster boundary of the open bucket (logic::history_raster_boundary_us), so the restored samples
-// sit on the same grid as every later commit. INT64_MIN means "none".
+// raster boundary of the open bucket (logic::history_raster_boundary_us). Modbus commits use
+// that same boundary even when the full sweep finished late. INT64_MIN means "none".
 constexpr int64_t kNoCommitUs = INT64_MIN;
 static_assert(kNoCommitUs == logic::HISTORY_NO_COMMIT_US,
               "the commit sentinel is one definition shared with logic::history_snapshot_meta");
@@ -1519,7 +1519,7 @@ void history_record_modbus(const CachedValue* v, size_t n, uint32_t identity_gen
         for (auto& ring : P().mb_ring) ring.reset_with_gaps(completed);
         s_persist_dirty = true;
         if (completed) {
-            s_mb_last_commit_us = static_cast<int64_t>(bucket) * logic::HISTORY_DT_S * 1000000;
+            s_mb_last_commit_us     = logic::history_raster_boundary_us(now_us);
             s_mb_last_commit_bucket = static_cast<int64_t>(bucket) - 1;
             logic::history_liveness_commit(s_liveness, logic::HistoryJournalSource::Modbus,
                                            s_mb_last_commit_us);
@@ -1528,10 +1528,13 @@ void history_record_modbus(const CachedValue* v, size_t n, uint32_t identity_gen
         const uint32_t skipped = logic::history_skipped(s_mb_bucket, bucket);
         for (auto& ring : P().mb_ring) ring.commit(skipped);
         s_persist_dirty = true;
-        s_mb_last_commit_us = now_us;
+        // A delayed full sweep may finish in the next wall bucket. Use the closing boundary of
+        // the newest committed slot, including any explicit gaps, to keep journal positions stable.
+        s_mb_last_commit_us     = logic::history_raster_boundary_us(now_us);
         s_mb_last_commit_bucket = static_cast<int64_t>(bucket) - 1;
         P().boots_since_commit  = 0;
-        logic::history_liveness_commit(s_liveness, logic::HistoryJournalSource::Modbus, now_us);
+        logic::history_liveness_commit(s_liveness, logic::HistoryJournalSource::Modbus,
+                                       s_mb_last_commit_us);
     }
     s_mb_bucket = bucket;
     s_mb_have_bucket = true;

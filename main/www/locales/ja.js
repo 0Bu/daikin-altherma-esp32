@@ -1,4 +1,4 @@
-// translation-source: 4210cc75eee11ce1dfcf29461013a0737a5806a303d44d1929bf671225a996b8
+// translation-source: 10ccafeac4c747a3f0d71717d33ce43eb311f20490a4822f4352625cc3df17c1
 I18N.ja = localeValues([
   /* sys.nodata */ "データなし",
   /* sys.unreachable */ "接続不可",
@@ -531,7 +531,7 @@ I18N.ja = localeValues([
   /* schem.transfer_sign */ "正の値は水が熱を受け取り、負の値は水が熱を放出することを示します。",
   /* schem.efficiency_no_capacity */ (metric) => `${metric} は表示できません。この評価範囲で使える出力推定値がありません。`,
   /* schem.efficiency_ct_pair */ (outlet) => `CT電流と ${outlet}・R4T の温度を使用しています。`,
-  /* schem.efficiency_inv_pair */ "インバーター電流と R1T・R4T の温度を使用しています。",
+  /* schem.efficiency_inv_pair */ "補助ヒーター前のR1TとR4Tを使用します。電力はインバーター電流から230 Vと仮定して推定します。ヒーターを含め、どの電気負荷を捉えているかは確認されていません。",
   /* schem.r2t */ "R2T",
   /* schem.r3t */ "R3T",
   /* schem.flow_switch */ "流量スイッチ",
@@ -1226,16 +1226,17 @@ INSPECT_I18N.ja = inspectValues(
     [(d) => d && d.pthKind === "cooling" ? "冷却出力（推定）" : "熱出力（推定）", "PHE熱出力推定", (d) => d && d.pthKind === "cooling" ? "水から除いた熱の推定: 流量 × (R4T−R1T) × 4.186（水を仮定）。センサーとグリコールが精度を制限し、確認済み冷房時だけ表示します。" : "水へ渡した熱の推定: 流量 × (R1T−R4T) × 4.186（水を仮定）。センサーとグリコールが精度を制限し、R1T後のBUHは含みません。", (d) => d.dtStale ? d.bsh === true ? "通水未確認のためPHE熱移動を計算できません。BSHはタンクを加熱できても、その熱はPHEセンサーを通らず、バスは出力を報告しません。" : "PHE通水未確認のため出力を計算できません。運転点がないのであり、0 kWではありません。"
       : needsCapacitySpeed(d) ? t("schem.capacity_low_speed")
       : d.pth == null ? null : d.pthKind === "cooling" ? `≈ ${fmt1(d.pth)} kW冷却${d.cop != null && !d.copPostBuh ? `、EER ${fmt1(d.cop)}` : ""}。` : `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `、COP ${fmt1(d.cop)}` : ""}。`], // pth
-    [(d) => d && d.efficiencyKind === "eer" ? eerScopeText(d, "CT電流に基づくEER（推定）", "ヒートポンプEER（推定）", "推定EER") : d && d.copScope === "plant" ? "CT電流に基づくCOP（推定）" : "ヒートポンプCOP（推定）", "効率推定", (d) => d && d.efficiencyKind === "eer"
+    [(d) => d && d.efficiencyKind === "eer" ? eerScopeText(d, "CT電流に基づくEER（推定）", "インバーター電流によるEER推定", "推定EER")
+      : eerScopeText(d || {}, "CT電流に基づくCOP（推定）", "インバーター電流によるCOP推定", "推定COP"), "効率推定", (d) => d && d.efficiencyKind === "eer"
       ? "推定冷却出力÷推定電力。流体、センサー、電圧、力率の仮定を含む瞬時EERで、季節効率ではありません。" +
-        eerScopeText(d, post => ` ${post ? "補助ヒーター後のR2T" : "補助ヒーター前のR1T"}とR4T、CT電流を使用します。どの負荷を含むかはCTの配線で決まります。`, " 補助ヒーター前のR1TとR4T、インバーター電流を使用します。") : "推定熱出力を推定消費電力で割った値です。CT電流を使うのは両方のヒーターの停止が確認できる場合だけです。それ以外はインバーター電流に基づく利用可能な推定値が必要です。対象となる負荷はCTの配線で決まります。" + heatingEfficiencyBoundary(d), (d) => d.copBlock === "tank_heater" ? `${d.bsh === true ? `${efficiencyMetric(d)} は表示できません。タンクヒーターは作動中と報告されています。` : `${efficiencyMetric(d)} は表示できません。タンクヒーターの状態は不明です。`}その熱はどちらの出水温度センサーも通りません。`
+        eerScopeText(d, post => ` ${post ? "補助ヒーター後のR2T" : "補助ヒーター前のR1T"}とR4T、CT電流を使用します。どの負荷を含むかはCTの配線で決まります。 CTでの計算にはBUHの両段とBSHの停止確認が必要です。`, " " + t("schem.efficiency_inv_pair")) : "推定熱出力を推定消費電力で割った値です。 CTでの計算にはBUHの両段とBSHの停止確認が必要です。" + heatingEfficiencyBoundary(d), (d) => d.copBlock === "tank_heater" ? `${d.bsh === true ? `${efficiencyMetric(d)} は表示できません。タンクヒーターは作動中と報告されています。` : `${efficiencyMetric(d)} は表示できません。タンクヒーターの状態は不明です。`}その熱はどちらの出水温度センサーも通りません。`
       : d.copBlock === "backup_heater" ? `${d.buh1 === true || d.buh2 === true ? `${efficiencyMetric(d)} は表示できません。補助ヒーターは作動中と報告されています。` : `${efficiencyMetric(d)} は表示できません。補助ヒーターの状態は不明です。`}推定消費電力にヒーターの負荷が含まれるかは確認できません。`
       : d.copBlock === "mb_scope" ? `現在は${efficiencyMetric(d)}を表示できません。利用できるデータでは、HomeHubの電力をプレート熱交換器で推定した熱出力と対応づけられません。電気ヒーターなど、どの負荷が電力値に含まれるかは不明です。`
       : d.copBlock === "no_pel" ? d.pelHeld ? `${efficiencyMetric(d)}なし — 圧縮機停止中のインバータ電流は前回運転値です。` : t("schem.no_usable_power", efficiencyMetric(d))
       : d.cop == null ? efficiencyUnavailable(d) : d.efficiencyKind === "eer" ? `電力1 kW当たり冷却 ${fmt1(d.cop)} kW — 約${fmt1(d.copPel)} kW入力で約${fmt1(d.copPth)} kW。`
       : d.copScope === "plant" ? `CT推定電力1 kW当たりの水側熱出力 ${fmt1(d.cop)} kW — 約${fmt1(d.copPel)} kW入力で約${fmt1(d.copPth)} kW。境界はCT配線次第です。`
-      : `ヒートポンプ境界で電力1 kW当たり熱 ${fmt1(d.cop)} kW — 約${fmt1(d.copPel)} kW入力で約${fmt1(d.copPth)} kW。BUHは両方に含みません。`], // cop
-    ["補助ヒーター · BUH", "補助ヒーター BUH", "凍結、霜取り、非常運転用の水回路電気ヒーターです。段数は個別のkW測定ではありません。", (d) => d.buh1 == null && d.buh2 == null ? null : d.buh2 ? "段2 — 両段作動。" : d.buh1 ? "段1 — 1段作動。" : "停止 — BUH作動なし。"], // buh
+      : `推定電力1 kW当たり水への熱 ${fmt1(d.cop)} kW。推定入力 ${fmt1(d.copPel)} kWに対し熱は約 ${fmt1(d.copPth)} kWです。`], // cop
+    ["補助ヒーター · BUH", "補助ヒーター BUH", "凍結、霜取り、非常運転用の水回路電気ヒーターです。段数は個別のkW測定ではありません。", (d) => d.buh2 === true ? "第2段はオンと報告されています。" : d.buh1 === true ? "第1段はオンと報告されています。" : d.buh1 === false && d.buh2 === false ? "両段ともオフと報告されています。" : null], // buh
     ["タンク電気ヒーター", "タンク電気ヒーター", "浸漬式BSHは圧縮機や水循環なしでもタンクを加熱します。X10Aは状態だけで出力は報告しません。", (d) => d.bsh == null ? null : d.bsh ? "タンク電気ヒーター作動中。" : "停止 — BSHは作動していません。"], // bsh
     ["3方弁", "3方弁", "タンクまたは室内への経路指令です。機械的位置や流量の確認信号ではありません。", (d) => d.valveDhw == null ? null : d.valveDhw ? "タンク経路を指令。これだけで流量や加熱を確認できません。" : "室内経路を指令。これだけで循環を確認できません。"], // valve
     ["2方弁出力", "2方弁出力", "X10Aの2値出力です。機械的位置や暖冷房の証明ではありません。", (d) => d.valve2On == null ? null : d.valve2On ? "X10Aは2WV出力 入。モードと室内回路運転は別に確認してください。" : "X10Aは2WV出力 切。これだけで冷房を意味せず、待機中の暖房設定とも矛盾しません。"], // valve2
@@ -1245,10 +1246,10 @@ INSPECT_I18N.ja = inspectValues(
     ["室内空調運転", "室内暖房または冷房運転", "室内回路の通常運転状態です。サーモスタット要求ではなく、単独で圧縮機運転を確認しません。"], // spaceh
     ["室温", "室温", "基準ゾーンの温度です。設定温度とモードと合わせて見ます。"], // room
     ["循環ポンプ", "循環ポンプ指令", "共通水回路と三方弁で選ばれた分岐に水を送ります。百分率は反転した X10A 制御指令で、0 % は停止要求、100 % は最大駆動要求です。実測回転数ではなく、回転や流量の証明にもなりません。ON/OFF 状態と実測流量を別々に確認してください。圧縮機停止中も循環する場合があります。", (d) => pumpNowText(d, [(n) => `ポンプ指令 ${n} %.`, "ポンプ状態は ON です。", "ポンプは停止（OFF）を報告しています。", "報告されたポンプ状態は不明です。", (n) => `実測流量 ${n} l/min.`, "流量測定値はありません。", "OFF と正の流量が矛盾しています。外部循環、惰性流れ、または矛盾した／古い信号の可能性があります。", "水の循環は確認できません。"])], // pump
-    [(d) => pelMeasured(d) ? "電力 · HomeHub" : "電力（推定）", "電力", (d) => pelMeasured(d) ? "HomeHubレジスタ51の電力です。資料では校正、測定点、全ヒーターを含むか確認できず、認証済み設備メーターではありません。" : "COP/EER用推定: CT各相の合計 × 仮定230 V。実電圧と力率は不明で、インバータ電流は圧縮機のみ、CT境界は配線次第です。", (d) => d.pelHeld ? "圧縮機停止中のインバータ電流は前回値です。電力と効率を示せません。"
+    [(d) => pelMeasured(d) ? "電力 · HomeHub" : "電力（推定）", "電力", (d) => pelMeasured(d) ? "HomeHubレジスタ51の電力です。資料では校正、測定点、全ヒーターを含むか確認できず、認証済み設備メーターではありません。" : "インバーター電流または申告されたすべてのCT相の合計に、仮定の230 Vを掛けた推定電力です。実電圧と力率は不明です。インバーター電流が捉える負荷は未確認で、CTの測定範囲は配線によります。", (d) => d.pelHeld ? "圧縮機停止中のインバータ電流は前回値です。電力と効率を示せません。"
       : d.pel == null ? t("schem.no_usable_power")
       : d.pelSrc === "MB" ? "HomeHubレジスタ51の値。正確な測定境界は未記載です。"
-      : d.pelSrc === "CT" ? "CT推定。含む負荷は配線次第です。" : "インバータ電流から算出 — 圧縮機のみ。"], // pel
+      : d.pelSrc === "CT" ? "CT推定。含む負荷は配線次第です。" : "インバーター電流による推定です。"], // pel
     ["霜取り", "霜取り", "逆サイクルで室外熱交換器の氷を溶かし、暖房を短時間中断します。", (d) => d.defrost == null ? null : d.defrost ? "X10Aは霜取りが作動中と報告しています。" : "X10Aは霜取りが停止中と報告しています。"], // defrost
     ["静音モード", "静音モード", "通常はファンや圧縮機を制限して騒音を下げ、利用可能な出力も下がる場合があります。", (d) => d.quiet == null ? null : d.quiet ? "静音モード作動中。" : "停止 — 静音モードなし。"], // quiet
     ["ガス配管", "ガス側冷媒配管", "分離型の機器間冷媒配管です。暖房では高温高圧ガスがPHEへ流れ、冷房では逆向きです。モノブロックにはありません。", (d) => compressorRunning(d) ? d.rps != null ? `循環中 — ${fmt1(d.circP)} bar、${fmt0(d.disch)} °C。` : "HomeHubは圧縮機が「入」と報告しています。圧力と吐出温度にはX10Aが必要です。" : "冷媒循環なし — 圧縮機停止。圧力均一化は回路と停止時間次第です。"], // rhot

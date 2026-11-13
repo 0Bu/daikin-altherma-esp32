@@ -836,7 +836,7 @@ for branch, continuation in {
 # Stack and TCB allocation are sequential. The creation frame remains live across either
 # allocation, stack cleanup on failed TCB allocation, and independent setup/scheduling paths.
 SYMBOLS.update({
-    'modbus_create_start': {'pattern': r'^daik::mb_task_start_if_enabled\(\)$', 'max_bytes': 64},
+    'modbus_create_start': {'pattern': r'^daik::mb_task_start_if_enabled\(\)$', 'max_bytes': 80},
     'modbus_create_boot': {'pattern': r'^daik::mb_start\(\)$', 'max_bytes': 32},
     'modbus_create_retry': {'pattern': r'^daik::mb_retry_start\(\)$', 'max_bytes': 32},
     'modbus_create_reconfigure': {'pattern': r'^daik::mb_reconfigure\(bool\)$', 'max_bytes': 48},
@@ -848,6 +848,14 @@ SYMBOLS.update({
     'modbus_create_exit_critical': {'pattern': '^vPortExitCritical$', 'max_bytes': 32},
     'modbus_create_list_init': {'pattern': '^vListInitialise$', 'max_bytes': 32},
     'modbus_create_list_item': {'pattern': '^vListInitialiseItem$', 'max_bytes': 32},
+    'modbus_create_heap_sample': {'pattern': r'^daik::heap_largest_internal_block\(\)$', 'max_bytes': 32},
+    'modbus_create_heap_largest': {'pattern': '^heap_caps_get_largest_free_block$', 'max_bytes': 64},
+    'modbus_create_heap_info': {'pattern': '^heap_caps_get_info$', 'max_bytes': 64},
+    'modbus_create_pool_info': {'pattern': '^multi_heap_get_info$', 'max_bytes': 32},
+    'modbus_create_pool_walk': {'pattern': '^tlsf_walk_pool$', 'max_bytes': 32},
+    'modbus_create_pool_visit': {'pattern': '^multi_heap_get_info_tlsf$', 'max_bytes': 32},
+    'modbus_create_heap_free': {'pattern': '^heap_caps_get_free_size$', 'max_bytes': 32},
+    'modbus_create_pool_free': {'pattern': '^multi_heap_free_size$', 'max_bytes': 32},
 })
 _MODBUS_CREATE_WAKE = [
     'sdk_queue_yield_required', 'sdk_queue_yield_other', 'sdk_queue_crosscore_yield',
@@ -866,6 +874,13 @@ for caller, task, prefix, limit in (
                     'sdk_queue_remove_event', *_MODBUS_CREATE_WAKE],
         'allocate': ['modbus_create_sdk', 'sdk_port_malloc', 'sdk_malloc_caps',
                      *_MODBUS_WORKER_HEAP],
+        'heap_walk': ['modbus_create_heap_sample', 'modbus_create_heap_largest',
+                      'modbus_create_heap_info', 'modbus_create_pool_info', 'modbus_create_pool_walk',
+                      'modbus_create_pool_visit'],
+        'heap_lock': ['modbus_create_heap_sample', 'modbus_create_heap_largest',
+                      'modbus_create_heap_info', 'modbus_create_pool_info', 'sdk_multi_lock',
+                      'sdk_queue_critical', 'sdk_queue_compare_swap'],
+        'heap_free': ['modbus_create_heap_free', 'modbus_create_pool_free'],
         'free': ['modbus_create_sdk', 'modbus_create_port_free', 'modbus_worker_heap_free',
                  'modbus_worker_aligned_free', 'modbus_worker_tlsf_free',
                  'sdk_multi_lock', 'sdk_queue_critical', 'sdk_queue_compare_swap'],
@@ -883,7 +898,7 @@ for caller, task, prefix, limit in (
 BODIES['main/history.cpp'].update({'history_modbus_reset_scope_locked': 'cbb56d64ed09e01703e672a55798194aaff30da5e3f5c83a96c131860716fd9a',
  'history_modbus_reset': 'feace54ffc1e23ee4c620c183eef77f11ae491619d1c2f627fd58e3a32c4f031',
  'history_modbus_bind_peer': '6edae4ad40931acb7057dbc1f3086fb70423b9aade42ced222805c0bcd7a0a8d',
- 'history_record_modbus': 'd5ded1e1e6b0251226c4e5654156cd43d51d4573e20eec77b3eb1c702289617e',
+ 'history_record_modbus': '19b76d111baf2f9794538460e6cfbd6a2d88fa714f1d1956b6b362c2e73e8f12',
  'history_modbus_snapshot': 'a454d25c211f84de9c629f6a083aaee4048284ce5deb377c2b4858a297394cf7',
  'history_splice_snapshot': 'a63845e18ff6d4dfc71e09c6a8b17f821ae4722d029484de633c89c341cdd79e',
  'flash_trend_scope_matches': 'afb6a3e7dcb6b52bc36cb18dc8701bf231b7cfbcc3610dbbd0f9cbcf64222f71',
@@ -891,13 +906,13 @@ BODIES['main/history.cpp'].update({'history_modbus_reset_scope_locked': 'cbb56d6
  'flash_build_next_record': '0aad195a438a74f1c2b2a925c3749aec7abd9def84063bd0fcb8d5487507a66b'})
 BODIES['main/history_target.cpp'] = {'history_modbus_target': 'a768932c642ee9db5356c672b8ce1876a9ddc6c14385b290494c265f38a7f156'}
 BODIES['main/hp_modbus.cpp'] = {'mb_ensure_connected': 'a5c582ba87ac431068ba649a8b5e5ae4367035d3f476fd74ed5080b4b05899ec',
- 'mb_poll_once': '4dfeb2f540f424f60fceef93cb0cd33a10e52fad05c3c2291dae98274b5404ca',
+ 'mb_poll_once': '5de5a9377271234acceb68a91770e26c664c1530220b28acb0b65a510fd29bbe',
  'status_socket_open': '82d1102d32c61fc9c91f49ca2bcb42b771724c4966f2b408c673a4cded5dd9a0'}
 BODIES['main/hp_modbus.cpp'].update({
-    'mb_task': 'd6feefab3cd345749fd93979eeb9ab651cf247f249c2571fcc32b532533086c5',
+    'mb_task': '7b2108e0231e9b10413e44af7cad5f5f0361fd9dd3ad37fb7135bd8bf403652e',
     'mb_retire_if_disabled': '68c9c0f404f173f2734fc0b40f8196e91e5e565962d9cbde74c7f803f367702a',
     'mb_task_pending': '7280769fa87e4e8e4cbab4bcbc300132caeb105178b42697a8f86cffe9aebcca',
-    'mb_task_start_if_enabled': '61351ee5fc4d57c581a03136c110e13f650b6e08c315a5082e6e14fff65634c9',
+    'mb_task_start_if_enabled': '6dff6f4c13440715cf6a23aaa80af1cd1c0983074a99483ff4826399b1a32996',
     'mb_retry_start': '3c644ba9a4c7ff620e76335345808b7f335778e98ffe8f5876c97eddec29ed9c',
     'mb_start': '954ea9970f7921417de460b7f3ebc0298aba357ad5ac5c8bcdff7fbc87368af8',
     'mb_reconfigure': 'b4723dacb7e58c134d7731e8bfe12b29ddcbb415301c2d76b8d906c76cda9b84',
@@ -965,7 +980,7 @@ SYMBOLS.update({'modbus_cycle_report': {'pattern': '^daik::report_cycle_result\\
  'modbus_status_error': {'pattern': '^_ZN4daikL12status_errorEPKcS1_iibm\\$isra\\$0$',
                          'max_bytes': 256},
  'modbus_values_snapshot': {'pattern': '^daik::mb_values_snapshot\\(daik::CachedValue\\*,\\ unsigned\\ int,\\ '
-                                       'bool\\&,\\ unsigned\\ long\\*\\)$',
+                                       'bool\\&,\\ unsigned\\ long\\*,\\ daik::ModbusCompressor\\*\\)$',
                             'max_bytes': 80},
  'history_peer_generation': {'pattern': '^daik::history_modbus_generation\\(\\)$', 'max_bytes': 32},
  'history_peer_epoch_get': {'pattern': '^daik::history_epoch\\(\\)$', 'max_bytes': 32},
@@ -1091,10 +1106,10 @@ PATHS.update({'modbus_cycle_report_format': ['modbus',
                                       'base_bytes': 1536,
                                       'max_bytes': 8192}]})
 BODIES['main/history.cpp'].update({'ring_at': '03544a7025ca518babbd49d0f2076be1700a34184330a18890b1edf8fc881857'})
-BODIES['main/http_status.cpp'].update({'take_values_snapshot': '1beb097bc0e81bebe83264913d9eca051d75383f7d5ceff7518d0b5e43a6cbb9',
+BODIES['main/http_status.cpp'].update({'take_values_snapshot': 'be496f40388479986bdffe2ddfa5f9ecd3f0e20abc206768b9bdfdc527a34864',
  'http_send_values_json': 'd673cda9948cb8087fa9d411ced7b7fcf7656e9ae847826123056d55c7359835',
  'h_history': 'a25a154c27686e82e9a6bec230be0cf28422a6f4b5ff0f1f8346989c31cefe73'})
-BODIES['main/hp_modbus.cpp'].update({'mb_values_snapshot': '82698af43b73fa5afaa22cf5f10d1416c3fa3a9479a24113aa4b3d56da879171',
+BODIES['main/hp_modbus.cpp'].update({'mb_values_snapshot': '338b541f9a5ad9fdca1e730a321be0b29b0a60fcbf768f84d669749526a3bf2d',
  'report_cycle_result': 'da48cf9fba0e89e6793c8e6391b3fc67470503b98a2560c073b06df1f4d86138'})
 CALLERS.update({'history_modbus_generation': {'main/history.cpp:<definition>': 1,
                                'main/hp_modbus.cpp:mb_poll_once': 1,

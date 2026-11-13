@@ -17,7 +17,7 @@ const mqttSource = fs.readFileSync(mqttPath, "utf8");
 const flatSource = fs.readFileSync(path.join(root, "main/logic/mqtt_group.hpp"), "utf8");
 const productionInputs = new Map([
   httpPath, mqttPath,
-  ...["hp_poll.hpp", "def/homehub.hpp", "def/altherma4.hpp", "logic/modbus_catalog.hpp",
+  ...["hp_modbus.hpp", "hp_poll.hpp", "def/homehub.hpp", "def/altherma4.hpp", "logic/modbus_catalog.hpp",
     "logic/homehub_map.hpp", "logic/mqtt_group.hpp", "logic/json.hpp", "logic/discovery.hpp",
     "logic/ha_device.hpp", "logic/modbus.hpp", "logic/config_model.hpp"]
     .map((name) => path.join(root, "main", name)),

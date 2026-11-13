@@ -19,10 +19,8 @@ assert.doesNotMatch(task, /discover_homehub\s*\(|mdns_query_(?:ptr|a)\s*\(|confi
   "the steady-state poll task must never perform HomeHub discovery");
 // Clearing the address retires the task outright. There is no restore step any more: the write path
 // was removed with dynamic LWT actuation (legacy-294), so the stack owns nothing on the hub to put back.
-const disabledIntent = task.indexOf("if (mb_retire_if_disabled(ready)) break;");
-const tlsDelay = task.indexOf("if (ota_download_active() || weather_fetch_active())");
-assert.ok(disabledIntent >= 0 && tlsDelay > disabledIntent,
-  "clearing the address must retire the task before TLS delays or allocating Config snapshots");
+assert.match(task, /if \(!s_target_enabled\.load\(std::memory_order_acquire\)\) \{[\s\S]*?MbNetworkActivity network_activity;[\s\S]*?wait_for_tls\s*=\s*ota_active \|\| weather_fetch_active\(\);[\s\S]*?else if \(mb_retire_if_disabled\(ready\)\)/,
+  "the disabled task must claim network activity and check TLS ownership before closing its socket");
 assert.doesNotMatch(task, /config_modbus_host\(config\(\)\)\.empty\(\)/,
   "HomeHub disable must not depend on a fallible Config copy");
 assert.doesNotMatch(task, /request_restore\(|mb_process_actuator\(/,

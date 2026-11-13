@@ -29,9 +29,10 @@ const values = (lwt = "35.0") => {
     row("Return water temp before PHE (R4T)", "30.0", 0x61, "°C"),
     row("Leaving water temp. after BUH (R2T)", lwt, 0x61, "°C"),
     row("Flow sensor", "10.0", 0x61, "l/min"), row("INV frequency", "40", 0x21, "rps"),
+    row("Fan 1 (step)", "4", 0x30),
     row("INV primary current", "5", 0x21, "A"), { ...row("Water pump operation", "1"), binary: true },
     row("Water pump signal", "50"), row("3way valve", "0"), row("BUH Step1", "0"),
-    row("BUH Step2", "0"), row("BSH", "0"), row("Space heating operation", "1"),
+    row("BUH Step2", "0"), { ...row("BSH", "0"), binary: true }, row("Space heating operation", "1"),
     { ...row("Defrost operation", "0", 0x10), binary: true }],
   modbus: [{ label: "Tank temperature", value: 42, off: 7, unit: "°C" }] };
 };
@@ -44,7 +45,9 @@ function harness(cached, transform = (text) => text) {
   let clock = Date.now(), nextTimer = 0, reloads = 0, paints = 0;
   class Clock extends Date { static now() { return clock; } }
   if (cached) storage.set(cacheKey, JSON.stringify(cached));
-  const flows = ["fPhe", "fSup1", "fSup2", "fSup3", "fRet", "fHeat", "fHeatRet", "rfHot", "rfPhe", "rfCold"];
+  const flows = ["fPhe", "fSup1", "fSup2", "fSup3", "fRet", "fHeat", "fHeatRet",
+    "fTank", "fTankRet", "fTankEdgeL", "fTankEdgeR", "fSpaceEdgeL", "fSpaceEdgeR",
+    "rfHot", "rfPhe", "rfCold"];
   const controls = [{ disabled: false, dataset: {} }];
   const element = (id) => {
     if (elements.has(id)) return elements.get(id);
@@ -92,12 +95,13 @@ function harness(cached, transform = (text) => text) {
     const actualRenderApp = renderApp;
     renderApp = () => { onPaint(); return actualRenderApp(); };
     this.ui = { S, resumeOta, refreshStatus, refreshValues, renderApp, renderLive, otaCacheRestore,
-      hasDeviceHist, hasModbusHist, ensureHist, histCacheKey, language: () => LANG };
+      hasDeviceHist, hasModbusHist, ensureHist, histCacheKey, stateHistoryCurrent, inspNowText,
+      INSPECT, language: () => LANG };
   `, context);
   const statusReply = deferred(), compactReply = deferred();
   routes.set("/status", () => statusReply.promise);
   routes.set("/ota/status", () => compactReply.promise);
-  return { ...context.ui, context, storage, routes, statusReply, compactReply, controls, element,
+  return { ...context.ui, context, storage, routes, statusReply, compactReply, controls, element, flows,
     get reloads() { return reloads; }, get paints() { return paints; }, advance: (ms) => { clock += ms; },
     timerCount: (ms) => [...timers.values()].filter((timer) => timer.ms === ms).length,
     async tick(ms = 1000) {
@@ -112,6 +116,11 @@ const observe = (h) => ({ lwt: h.element("svLwt").textContent, pth: h.element("s
   fan: h.element("schem").classList.contains("fan-on"),
   pump: h.element("schem").classList.contains("pump-on"),
   headline: h.element("svMode").textContent, detail: h.element("svStatus").textContent });
+const motion = h => ({
+  classes: ["fan-on", "pump-on", "buh-on", "bsh-on", "defrost-on", "quiet-on", "sg-boost-on"]
+    .filter(name => h.element("schem").classList.contains(name)),
+  pipes: h.flows.filter(id => ["on", "rev"].some(name => h.element(id).classList.contains(name))),
+});
 
 async function startup(h, order) {
   const resume = h.resumeOta(), initial = h.refreshStatus(false);
@@ -331,7 +340,10 @@ for (const order of ["status-first", "cache-first"]) {
   assert.equal(h.S.transportUnavailable, null);
   assert.equal(h.S.transportBusy, false);
   assert.notEqual(observe(h).pth, "—");
-  assert.equal(observe(h).fan, true); assert.equal(observe(h).pump, true);
+  assert.deepEqual(motion(h), { classes: [], pipes: [] });
+  assert.equal(h.element("schem").classList.contains("water-neutral"), true);
+  assert.equal(h.inspNowText(h.INSPECT.pump, h.S.live), "Snapshot");
+  assert.equal(h.stateHistoryCurrent("pump_running", "x10a").present, false);
   assert.equal(observe(h).headline, "Firmware update");
   assert.match(observe(h).detail, /78%.*last received state/, "restored readings must be explicitly cached");
   assert.equal(h.controls[0].disabled, true);
@@ -347,14 +359,45 @@ for (const order of ["status-first", "cache-first"]) {
   assert.equal(h.S.otaCached, true);
   assert.equal(observe(h).lwt, "35.0");
   assert.match(observe(h).detail, /last received state/, "status alone cannot mark cached values current");
+  assert.deepEqual(motion(h), { classes: [], pipes: [] });
   h.routes.set("/values", async () => response(values("38.0")));
   await h.refreshValues();
   assert.equal(h.S.otaCached, false); assert.equal(observe(h).lwt, "38.0");
+  assert.equal(observe(h).fan, true); assert.equal(observe(h).pump, true);
+  assert.equal(h.element("rfHot").classList.contains("on"), true);
+  assert.equal(h.element("fPhe").classList.contains("on"), true);
+  assert.notEqual(h.inspNowText(h.INSPECT.pump, h.S.live), "Snapshot");
   assert.doesNotMatch(observe(h).detail, /last received state/);
   h.routes.set("/values", async () => { throw new Error("offline"); });
   await h.refreshValues();
   assert.equal(h.S.otaCached, false); assert.equal(observe(h).lwt, "—");
   assert.equal(observe(h).fan, false); assert.equal(observe(h).pump, false);
+}
+
+// A stale tank heater used to light and animate the perimeter independently of pipe classes.
+{
+  const active = cache();
+  const live = { values: active.values.map(row => row.label === "BSH" ? { ...row, value: "1" } : row),
+    modbus: active.modbus };
+  active.values = live.values;
+  const h = harness(active);
+  await startup(h, "cache-first");
+  assert.equal(h.S.live.bsh, true, "the heater reading is still retained in the captured frame");
+  assert.deepEqual(motion(h), { classes: [], pipes: [] });
+  h.routes.set("/status", async () => response(status()));
+  h.routes.set("/values", async () => response(live));
+  await h.refreshStatus();
+  await h.refreshValues();
+  assert.equal(h.element("schem").classList.contains("bsh-on"), true);
+
+  const seed = "  const active = !S.otaCached;";
+  const original = harness(active, source => {
+    assert.ok(source.includes(seed));
+    return source.replace(seed, "  const active = true;");
+  });
+  await startup(original, "status-first");
+  assert.ok(motion(original).classes.includes("bsh-on"));
+  assert.ok(motion(original).pipes.includes("fPhe"));
 }
 
 for (const order of ["status-first", "cache-first"]) {
@@ -586,7 +629,7 @@ for (const defect of ["cached-image", "cached-source"]) {
     h.routes.set("/values", async () => { throw new Error("new source unavailable"); });
     await h.refreshValues(); h.renderApp();
     assert.equal(h.S.status.profile.id, "profile-b"); assert.equal(h.S.otaCached, true);
-    assert.equal(observe(h).lwt, "35.0"); assert.equal(observe(h).fan, true); assert.equal(observe(h).pump, true);
+    assert.equal(observe(h).lwt, "35.0"); assert.deepEqual(motion(h), { classes: [], pipes: [] });
   }
 }
 

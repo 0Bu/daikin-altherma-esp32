@@ -7850,8 +7850,8 @@ static void test_modbus_plan() {
         // BOTH gates must be reachable on a fast cycle. If a future map moved 38 or 53 so that one
         // of them fell into a full-only batch, the diagnosis would silently evaluate a gate that
         // is refreshed once per full cycle instead of once per second.
-        CHECK(fast_batches == 3);
-        CHECK(fast_regs == 13);
+        CHECK(fast_batches == 4);
+        CHECK(fast_regs == 17);
         // Every gate offset really is inside some fast batch — the assertion above counts batches,
         // this one proves the coverage it is standing in for.
         for (size_t g = 0; g < MB_GATE_OFFSET_COUNT; g++) {
@@ -7877,11 +7877,13 @@ static void test_modbus_plan() {
             if (outdoor_in_fast_batch) break;
         }
         CHECK(outdoor_in_fast_batch);
+        CHECK(mb_offset_is_fast_context(MbFunc::ReadInput, 31));
+        CHECK(!mb_offset_is_fast_context(MbFunc::ReadHolding, 31));
         // What the cycle actually costs, stated as the arithmetic rather than as a remembered
         // number.
         const double per_s = (fast_batches * (MB_FULL_CYCLE_TICKS - 1) + nb) /
                              static_cast<double>(MB_FULL_CYCLE_TICKS);
-        CHECK(approx(per_s, 4.4));
+        CHECK(approx(per_s, 5.2));
         CHECK(per_s < N / 5.0); // at least a five-fold reduction against one request per register
     }
 }

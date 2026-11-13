@@ -510,6 +510,12 @@ for (const code of codes.slice(2)) {
     const ctPost = { pelSrc: "CT", copScope: "plant", copPostBuh: true };
     const ctPre = { pelSrc: "CT", copScope: "plant", copPostBuh: false };
     const inverter = { pelSrc: "CT", copScope: "hp", copPostBuh: false };
+    const inverterPair = api.t("schem.efficiency_inv_pair");
+    assert.match(inverterPair, /R1T.*R4T.*230 [VВ]/, `${code}: the inverter estimate identifies the thermal pair and assumed voltage`);
+    assert.ok(copy("what", inverter).includes(inverterPair));
+    assert.ok(copy("what", { ...inverter, efficiencyKind: "cop" }).includes(inverterPair));
+    assert.match(copy("what", ctPost), /BUH.*BSH/, `${code}: the CT estimate requires both BUH stages and BSH off`);
+    assert.match(copy("what", { ...ctPost, efficiencyKind: "cop" }), /BUH.*BSH/);
     assert.match(copy("what", ctPost), /R2T/);
     assert.doesNotMatch(copy("what", ctPost), /R1T/);
     for (const plan of [ctPre, inverter]) {
@@ -532,6 +538,11 @@ for (const code of codes.slice(2)) {
       if (copBlock === "no_pel")
         assert.equal(copy("now", blocked), api.t("schem.no_usable_power", "EER"));
     }
+    const buhNow = (buh1, buh2) => api.inspNowText(api.INSPECT.buh, { buh1, buh2 }) ?? "";
+    assert.match(buhNow(null, true), /2/);
+    assert.equal(buhNow(null, true), buhNow(false, true));
+    assert.equal(buhNow(false, null), "");
+    assert.ok(buhNow(false, false));
     const speedRequirement = api.t("schem.capacity_low_speed");
     assert.match(speedRequirement, /X10A/);
     assert.match(speedRequirement, /5/);

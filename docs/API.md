@@ -414,8 +414,12 @@ row availability. After learning the protocol, the dashboard withdraws Modbus ch
 when a current `/values` request fails, the array is missing, or the binding is invalid. A matching
 boot ID and epoch in a fresh response can reopen the charts.
 The latest valid reply of the current session must be at most seven seconds old. The last
-full-cache commit must be at most 537 seconds old. A fast poll can refresh the reply clock while
+full-cache commit must be at most 627 seconds old. A fast poll can refresh the reply clock while
 the full-cache rows retain their earlier values. These clocks describe the session and cache.
+The top-level `modbus_compressor_running` is `true` or `false` from HomeHub input 31's own valid
+reply in the current TCP session, at most seven seconds old. It is `null` when unavailable and can
+change between full-cache commits. The corresponding raw Modbus row still shows the full-cache
+reading. The field reports binary compressor activity.
 Diagnostic gate inputs have separate per-register freshness checks. Native promotion first
 exposes only its pressure probe until a full sweep. History additionally requires matching
 space/offset/codec/scale/unit provenance.
@@ -436,6 +440,8 @@ and carries no scale marker in history. Its reported L/min remains unverified.
 `dt` is the raster cadence. `b0` anchors
 monotonic five-minute buckets, `t0` is sample-zero wall time derived from the captured newest-sample
 age and omitted before clock sync. `epoch` is captured with the samples; `boot_id` matches `/status`.
+Modbus assigns completed samples and gaps to their monotonic closing boundaries. Delays in a full
+poll do not shift those slots when the flash journal projects them onto the wall clock.
 An available series may have `v:[]` and no time anchors while awaiting measurements or peer
 confirmation. An unavailable history snapshot or an epoch changed before emission returns 503.
 Clients must reject responses superseded by a newer status/source generation.
@@ -563,6 +569,8 @@ commit; live socket ownership remains with its task. X10A remains independent.
 When HomeHub settings are saved and polling is still pending, the response is
 `{"ok":true,"modbus_start_pending":true}`. This can occur during task startup, cleanup or
 resource pressure. A worker retries temporary allocation failures at its normal poll cadence.
+Task creation leaves the heap watchdog's recovery headroom for core services and retries after
+five seconds when there is insufficient contiguous memory.
 This includes failure to allocate or retain the task-local network semaphore.
 After core services have started, the X10A task retries worker creation even while its bus is
 unavailable. OTA and Weather network activity defer creation. If the X10A task itself could not

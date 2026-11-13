@@ -177,7 +177,7 @@ export function makeHistoryMotionFixture(originalStatus, lang = "en") {
       ...HISTORY_MOTION_ROWS.filter(row => !row.kind).map(row => reading(row, tick)),
       { label: "High Pressure", value: "32", unit: "bar", reg: 0x20 },
       { label: "Low Pressure", value: "5", unit: "bar", reg: 0x20 },
-      { label: "Fan 1 (step)", value: "5", unit: "", reg: 0x21 },
+      { label: "Fan 1 (step)", value: "5", unit: "", reg: 0x30 },
       { label: "DHW setpoint", value: "48", unit: "°C", reg: 0x60 },
       { label: "LW setpoint (main)", value: "45", unit: "°C", reg: 0x60 },
       { label: "RT setpoint", value: "21", unit: "°C", reg: 0x60 },

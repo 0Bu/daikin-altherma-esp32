@@ -612,7 +612,7 @@ assert.equal(h.DERIVED.pth.fn({
 assert.equal(h.DERIVED.pth.fn({
   flow: 0, leaving_water: null, return_water: null, comp_rps: null,
 }), 0, "measured no flow proves zero transfer without temperature or compressor samples");
-for (const flow of [-1, null, NaN, Infinity]) {
+for (const flow of [-1, null, NaN, Infinity, 100.1, 3276.7]) {
   assert.equal(h.DERIVED.pth.fn({ flow, leaving_water: 35, return_water: 30, comp_rps: 45 }), null,
     "negative or invalid flow must leave a gap rather than imply zero transfer");
 }
@@ -1012,11 +1012,14 @@ S._modbus = [
 S.status.modbus = { enabled: true, connected: true };
 S.hist.set("water_flow_switch", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000,
   b0: 200, held: [], v: [0, 0, 10, 0] });
+S.hist.set("modbus:bsh_state", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000,
+  b0: 200, held: [], v: [0, 10, 0, 10] });
 const liveStateCases = [
   ["defrost_state", "x10a", 10],
   ["quiet_state", "x10a", 10],
   ["smart_grid_mode", "modbus", 20],
   ["bsh_state", "x10a", 10],
+  ["bsh_state", "modbus", null],
   ["tank_preheat_state", "x10a", 10],
   ["disinfection_state", "modbus", 10],
   ["buh_state", "x10a", 20],
@@ -1085,11 +1088,12 @@ await h.ensureHist("dhw_tank", "modbus");
 assert.equal(fetched, "/history?row=dhw_tank&source=modbus");
 assert.deepEqual(Array.from(S.hist.get("modbus:dhw_tank").v), [457]);
 
-// DHW tank (R5T) single integrated chart: Smart-Grid Boost and Heizstab (BSH) phases
-// are drawn directly into the temperature chart and displayed in the tooltip and legend.
+// The temperature chart must not fuse the physical Smart Grid contacts with the Modbus
+// request, or let one source's reported BSH state fill the other's missing samples.
 S.status.history.rows = [
   { id: "dhw_tank", label: "Domestic Hot Water temperature" },
   { id: "smart_grid_mode", label: "Smart Grid operation mode" },
+  { id: "bsh_state", label: "BSH" },
 ];
 S.status.history.modbus_rows = [
   { id: "dhw_tank", label: "Domestic Hot Water temperature" },
@@ -1097,35 +1101,62 @@ S.status.history.modbus_rows = [
   { id: "bsh_state", label: "Booster heater run" },
 ];
 S.hist.set("dhw_tank", { dt: 300, unit: "°C", b0: 100, v: [450, 460, 470, 480], held: [] });
-S.hist.set("modbus:smart_grid_mode", { dt: 300, b0: 100, v: [0, 20, 20, 0] }); // Mode 2 = Boost (2 buckets = 10 min)
-S.hist.set("modbus:bsh_state", { dt: 300, b0: 100, v: [0, 0, 10, 0] });        // BSH active (1 bucket = 5 min)
+S.hist.set("smart_grid_mode", { dt: 300, b0: 100, v: [20, null, 30, 20] });
+S.hist.set("modbus:smart_grid_mode", { dt: 300, b0: 100, v: [0, 20, 20, null] });
+S.hist.set("bsh_state", { dt: 300, b0: 100, v: [10, null, 0, 0] });
+S.hist.set("modbus:bsh_state", { dt: 300, b0: 101, v: [0, 10, 10] });
 
 view = h.historyView("dhw_tank");
 const dhwHtml = h.histHtml("dhw_tank", "°C", "Warmwasserspeicher");
-assert.match(dhwHtml, /class="vhist-phase vhist-phase-boost"/, "DHW chart must render Boost phase bands");
-assert.match(dhwHtml, /class="vhist-phase vhist-phase-bsh"/, "DHW chart must render BSH phase bands");
-assert.doesNotMatch(dhwHtml, /class="vhist-phase-bar/, "DHW chart must not render top phase bar");
-assert.match(dhwHtml, /vhist-legend-boost/, "DHW legend must display Boost indicator");
-assert.match(dhwHtml, /vhist-legend-bsh/, "DHW legend must display BSH indicator");
-assert.match(dhwHtml, /10 min/, "DHW legend must include Boost duration");
-assert.match(dhwHtml, /5 min/, "DHW legend must include BSH duration");
-
-// Verify tooltips include active phases
-assert.doesNotMatch(h.scrubText(view, 0), /Boost|Heizstab/, "Sample 0 without active phases");
-assert.match(h.scrubText(view, 1), /(?:· |\n)Boost aktiv$/, "Sample 1 with active Boost");
-assert.match(h.scrubText(view, 2), /(?:· |\n)Boost aktiv \+ Heizstab aktiv$/, "Sample 2 with both active");
-assert.equal(h.histReadout(view, 1), "46,0 °C · Boost aktiv",
-  "a single visible curve appends active phase to value readout");
+assert.equal((dhwHtml.match(/class="vhist-state-track /g) || []).length, 4,
+  "each instrument and auxiliary signal gets a separate aligned track");
+assert.match(dhwHtml, /X10A · Smart Grid · Boost aktiv \(10 min\)/);
+assert.match(dhwHtml, /Modbus · Smart Grid · Boost aktiv \(10 min\)/);
+assert.match(dhwHtml, /X10A · BSH · Heizstab aktiv \(5 min\)/);
+assert.match(dhwHtml, /Modbus · BSH · Heizstab aktiv \(10 min\)/);
+assert.match(dhwHtml, /sg-forced-on/, "Smart Grid modes besides Boost must remain distinct");
+assert.match(dhwHtml, /vhist-state-gap/, "a gap is visible separately from a known off state");
+assert.match(h.scrubText(view, 0), /X10A · Smart Grid: Empfehlung ein\nModbus · Smart Grid: Freier Betrieb/);
+assert.match(h.scrubText(view, 0), /X10A · BSH: Heizstab aktiv\nModbus · BSH: nicht gemessen/);
+assert.match(h.scrubText(view, 2), /X10A · BSH: Heizstab aus\nModbus · BSH: Heizstab aktiv/);
+assert.equal(h.histReadout(view, 1), "46,0 °C\nX10A · Smart Grid: nicht gemessen\n" +
+  "Modbus · Smart Grid: Empfehlung ein\nX10A · BSH: nicht gemessen\nModbus · BSH: Heizstab aus");
 {
   S.hist.set("modbus:dhw_tank", { dt: 300, unit: "°C", b0: 100, v: [450, 460, 470, 480], held: [] });
   h.histSeriesToggle("dhw_tank", "modbus");
   const pairedView = h.historyView("dhw_tank");
-  assert.match(h.histReadout(pairedView, 1), /<span class="vhist-tip-note">Boost aktiv<\/span>/,
-    "active auxiliary phase renders as note row below tabular values when multiple series are shown");
+  assert.match(h.histReadout(pairedView, 1),
+    /<span class="vhist-tip-note">X10A · Smart Grid: nicht gemessen[\s\S]*Modbus · BSH: Heizstab aus<\/span>/,
+    "both visible temperature curves retain every source-specific auxiliary readout");
   S.hist.delete("modbus:dhw_tank");
   S.histHidden.delete("dhw_tank");
 }
-assert.doesNotMatch(h.scrubText(view, 3), /Boost|Heizstab/, "Sample 3 without active phases");
+assert.match(h.scrubText(view, 3), /X10A · Smart Grid: Empfehlung ein\nModbus · Smart Grid: nicht gemessen/);
+{
+  const saved = S.status.history, lease = S.modbusHistoryLease, boot = S.status.boot_id;
+  const ring = S.hist.get("dhw_tank"), sg = S.hist.get("smart_grid_mode");
+  S.status.history = { ...saved, modbus_binding: true, epoch: 8 };
+  S.status.boot_id = "dhw-source";
+  S.modbusHistoryLease = { boot: "dhw-source", epoch: 7 };
+  assert.doesNotMatch(h.scrubText(view, 1), /Modbus ·/, "a mismatched peer lease withdraws both auxiliary tracks");
+  S.modbusHistoryLease.epoch = 8;
+  assert.match(h.scrubText(view, 1), /Modbus · Smart Grid: Empfehlung ein/);
+  S.status.history.rows = saved.rows.filter(row => row.id !== "bsh_state");
+  assert.doesNotMatch(h.scrubText(view, 1), /X10A · BSH/, "a withdrawn capability cannot revive its cache");
+  S.status.history = saved;
+  S.status.boot_id = boot;
+  S.modbusHistoryLease = lease;
+  S.hist.set("dhw_tank", { ...ring, b0: null, t0: 1000 });
+  S.hist.set("smart_grid_mode", { ...sg, b0: null, t0: 1300 });
+  const legacy = h.historyView("dhw_tank");
+  assert.match(h.scrubText(legacy, 1), /X10A · Smart Grid: Empfehlung ein/,
+    "legacy wall-time anchors preserve alignment when monotonic buckets are unavailable");
+  S.hist.set("smart_grid_mode", { ...sg, b0: null });
+  assert.match(h.scrubText(legacy, 1), /X10A · Smart Grid: nicht gemessen/,
+    "an unanchored legacy history cannot infer timing from array length");
+  S.hist.set("dhw_tank", ring);
+  S.hist.set("smart_grid_mode", sg);
+}
 
 // ensureHistPair("dhw_tank") fetches auxiliary series
 fetchedUrls = [];
@@ -1326,12 +1357,12 @@ try {
   const view = h.historyView("dhw_tank");
   const first = h.histTipsHtml(view, -1, 0);
   assert.equal(context.auxScans, 1, "288 tooltip readouts must share one auxiliary scan");
-  assert.match(first, /Boost aktiv/);
+  assert.match(first, /Smart Grid: Empfehlung ein/);
   assert.match(first, /Heizstab aktiv/);
   S.hist.set("smart_grid_mode", fullRing(0));
   const second = h.histTipsHtml(view, -1, 0);
   assert.equal(context.auxScans, 2, "the next rendered view must refresh its auxiliary snapshot");
-  assert.doesNotMatch(second, /Boost aktiv/);
+  assert.match(second, /Smart Grid: Freier Betrieb/);
   assert.match(second, /Heizstab aktiv/);
   // Re-seed the previous per-readout work: the same measured operation budget must reject it.
   vm.runInContext("this.originalReadout = histReadout; auxScans = 0; " +

@@ -20,17 +20,20 @@
 #include "def/homehub.hpp"
 #include "diag_log.hpp"
 #include "history.hpp"
+#include "heap_guard.hpp"
 #include "net.hpp"
 #include "ota_update.hpp"
 #include "stack_watch.hpp"
 #include "weather_forecast.hpp"
 #include "logic/detect_backoff.hpp" // the SAME backoff the X10A sweep uses on a silent bus
 #include "logic/homehub_map.hpp"    // the concept a register pairs on
+#include "logic/heap_watchdog.hpp"
 #include "logic/modbus_plan.hpp"    // WHICH requests a cycle issues — batching + the gate cadence
 #include "logic/modbus_profile.hpp" // auto-detection state machine and extended registers
 #include "logic/modbus_snapshot.hpp" // a cache is live only for the TCP session that committed it
 
 #include "esp_netif.h"
+#include "esp_heap_caps.h"
 #include "esp_netif_ip_addr.h"
 #include "esp_task_wdt.h"
 #include "esp_timer.h"
@@ -95,6 +98,8 @@ static int64_t s_plant_gate_ms          = -1;    // guarded by s_mtx; successful
 static int64_t s_space_route_ms         = -1;    // guarded by s_mtx; successful input37 reply time
 static int64_t s_heating_mode_ms        = -1;    // guarded by s_mtx; successful input38 reply time
 static int64_t s_plant_outdoor_ms       = -1;    // guarded by s_mtx; successful input44 reply time
+static int64_t s_compressor_ms            = -1; // guarded by s_mtx; successful input31 reply time
+static ModbusCompressor s_compressor      = ModbusCompressor::Unknown;
 
 // ── Poll-task-owned socket state (no lock — single owner, exactly like hp_comm.cpp's s_rx/s_tx)
 // ─────
@@ -203,6 +208,8 @@ static void reset_observation_times_locked() {
     s_space_route_ms       = -1;
     s_heating_mode_ms      = -1;
     s_plant_outdoor_ms     = -1;
+    s_compressor_ms        = -1;
+    s_compressor           = ModbusCompressor::Unknown;
 }
 
 // ── Status writers. Strings are built BY THE CALLER and swapped in (noexcept) so nothing allocates
@@ -918,6 +925,11 @@ constexpr auto MB_PLAN_ALTHERMA4 = mb_plan_make_from<def::ALTHERMA4_REG_COUNT>(d
 static_assert(MB_PLAN_ALTHERMA4.ok, "Altherma 4 register table does not yield a usable read plan");
 static_assert(MB_PLAN_ALTHERMA4.count == 15,
               "Altherma 4 request budget changed — re-check the documented native map");
+static_assert(def::homehub_find(31)->space == MbFunc::ReadInput &&
+                  def::homehub_find(31)->kind == def::HomeHubValueKind::Binary &&
+                  def::altherma4_find(31)->space == MbFunc::ReadInput &&
+                  def::altherma4_find(31)->kind == def::HomeHubValueKind::Binary,
+              "The compressor reply must have the same meaning across profile detection");
 static constexpr uint32_t MB_CACHE_MAX_AGE_S = logic::modbus_cache_max_age_s(
     logic::MB_FULL_CYCLE_TICKS, POLL_INTERVAL_S * 1000, MB_REQUEST_BUDGET_MS,
     logic::mb_plan_max_requests(MB_PLAN_ALTHERMA4.batch, MB_PLAN_ALTHERMA4.count, true),
@@ -1028,8 +1040,8 @@ static void mb_poll_once() {
         cycle_generation = s_link_generation;
     }
 
-    // A FULL cycle rebuilds the cache; a fast cycle refreshes the gating facts plus input 44's
-    // optional event context, and deliberately commits no partial value cache.
+    // A FULL cycle rebuilds the cache. A fast cycle refreshes the gates and named context without
+    // replacing the full value cache.
     const bool full = logic::mb_cycle_is_full(s_cycle_tick);
 
     std::vector<CachedValue> fresh;
@@ -1045,9 +1057,11 @@ static void mb_poll_once() {
         bool    heating_mode_known  = false;
         bool    heating_mode_active = false;
         bool    received_data       = false;
+        ModbusCompressor compressor          = ModbusCompressor::Unknown;
         int64_t plant_gate_ms       = -1;
         int64_t space_route_ms      = -1;
         int64_t heating_mode_ms     = -1;
+        int64_t          compressor_ms       = -1;
     } gates;
     bool    outdoor_row_answered  = false;
     double  outdoor_temperature_c = 0.0;
@@ -1066,6 +1080,10 @@ static void mb_poll_once() {
     // read from the SAME word the row is built from — they are not a second read and cannot
     // disagree with it.
     const auto take_row = [&](const def::HomeHubReg& r, uint16_t raw, int64_t observed_ms) {
+        if (r.space == MbFunc::ReadInput && r.offset == 31 && raw <= 1) {
+            gates.compressor    = raw == 1 ? ModbusCompressor::On : ModbusCompressor::Off;
+            gates.compressor_ms = observed_ms;
+        }
         // THE SPACE-OPERATION GATE — input register 53 explicitly covers heating AND cooling. It
         // does not exclude DHW routing: input 37 must independently report space, and input 38
         // distinguishes heating from cooling. A sentinel/out-of-range word leaves `known`
@@ -1332,10 +1350,9 @@ static void mb_poll_once() {
         s_target_generation.load(std::memory_order_acquire) == cycle_target_generation)
         s_req_history_generation = history_modbus_bind_peer(
             s_req_configured_target, s_req_peer_ipv4, s_req_history_expected_generation);
-    // A FAST CYCLE COMMITS NO VALUE CACHE. It read thirteen of the map's registers, so its
-    // `fresh` is not a cache and its raster position is not a sample: committing it would publish a
-    // /values array of thirteen rows and hand the trend rings a bucket in which 19 of the 32 rows
-    // look like a failure to read. The cache and the rings stay with the last FULL cycle. Its age
+    // A FAST CYCLE COMMITS NO VALUE CACHE. Publishing its subset would hand the trend rings a
+    // bucket in which every full-only row looks like a failure to read. The cache and the rings
+    // stay with the last FULL cycle. Its age
     // includes both poll delays and bounded requests — and `values`/`connected` below still report
     // this cycle's link, so a hub that went away is visible within a second rather than within a
     // cadence.
@@ -1372,6 +1389,8 @@ static void mb_poll_once() {
             s_space_route_ms   = final_current_session ? gates.space_route_ms : -1;
             s_heating_mode_ms  = final_current_session ? gates.heating_mode_ms : -1;
             s_plant_outdoor_ms = final_current_session ? plant_outdoor_ms : -1;
+            s_compressor    = final_current_session ? gates.compressor : ModbusCompressor::Unknown;
+            s_compressor_ms = final_current_session ? gates.compressor_ms : -1;
         }
         report_cycle_result(first_failure, full, final_current_session, cycle_target_generation);
         s_cycle_tick++;
@@ -1449,6 +1468,8 @@ static void mb_poll_once() {
         s_space_route_ms       = final_current_session ? gates.space_route_ms : -1;
         s_heating_mode_ms      = final_current_session ? gates.heating_mode_ms : -1;
         s_plant_outdoor_ms     = final_current_session ? plant_outdoor_ms : -1;
+        s_compressor    = final_current_session ? gates.compressor : ModbusCompressor::Unknown;
+        s_compressor_ms = final_current_session ? gates.compressor_ms : -1;
     }
     report_cycle_result(first_failure, full, final_current_session, cycle_target_generation);
     s_cycle_tick = profile_promoted ? 0 : s_cycle_tick + 1;
@@ -1537,11 +1558,25 @@ static void mb_task(void*) {
         // it now sits at the same loop boundary — above the `break` that retires this task, so the
         // last cycle before a HomeHub is disabled is recorded like every other.
         stack_watch_sample(StackWatch::Modbus);
-        // /set_hp installs this POD intent synchronously after its durable save. Check it before
-        // every TLS-owner delay and before any Config copy: disabling must close the old socket and
-        // retire this task even if the allocator is too fragmented to snapshot Config indefinitely.
+        // /set_hp withdraws the old observations before this worker closes its socket.
+        // TCP close can allocate a FIN segment. Use the same network claim as a poll and
+        // wait out a TLS owner without copying Config or reactivating the old source.
         if (!s_target_enabled.load(std::memory_order_acquire)) {
-            if (mb_retire_if_disabled(ready)) break;
+            bool wait_for_tls = false;
+            {
+                const MbNetworkActivity network_activity;
+                const bool              ota_active = ota_download_active();
+                wait_for_tls                       = ota_active || weather_fetch_active();
+                if (wait_for_tls) {
+                    s_ota_quiesced.store(ota_active, std::memory_order_release);
+                } else if (mb_retire_if_disabled(ready)) {
+                    break;
+                }
+            }
+            if (wait_for_tls) {
+                vTaskDelay(pdMS_TO_TICKS(POLL_INTERVAL_S * 1000));
+                continue;
+            }
             ota_quiesce        = {};
             ota_quiesce_logged = ota_quiesce_cap_logged = false;
             failures.succeeded();
@@ -1634,9 +1669,20 @@ static void mb_task_start_if_enabled() noexcept {
         const MbTaskCreation creation;
         // Announce before rereading the TLS owners. Their quiescence checks observe this claim.
         if (ota_download_active() || weather_fetch_active()) return;
+        // Reserve the stack's contiguous block plus recovery headroom. The other allocations
+        // include the TCB, lwIP semaphore, watchdog entry and the first value vector.
+        constexpr size_t stack_bytes          = 6144;
+        constexpr size_t worker_setup_reserve = sizeof(StaticTask_t) + 4096;
+        const size_t free_bytes = heap_caps_get_free_size(MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL);
+        if (heap_largest_internal_block() < stack_bytes + HEAP_RECOVERY_BYTES ||
+            free_bytes < stack_bytes + worker_setup_reserve + HEAP_RECOVERY_BYTES) {
+            s_task_retry_us = now_us + 5 * 1000000;
+            return;
+        }
         s_backoff.silent = 0;
         s_next_try_us    = 0;
-        if (xTaskCreate(mb_task, "hp_modbus", 6144, nullptr, TASK_PRIO_MODBUS, &s_task) != pdPASS) {
+        if (xTaskCreate(mb_task, "hp_modbus", stack_bytes, nullptr, TASK_PRIO_MODBUS, &s_task) !=
+            pdPASS) {
             s_task          = nullptr;
             s_task_retry_us = now_us + 5 * 1000000;
             alloc_failed    = true;
@@ -1735,15 +1781,18 @@ ModbusProfile mb_active_profile() {
     return s_status.profile;
 }
 
-size_t mb_values_snapshot(CachedValue* out, size_t max, bool& live, uint32_t* history_generation) {
+size_t mb_values_snapshot(CachedValue* out, size_t max, bool& live, uint32_t* history_generation,
+                          ModbusCompressor* compressor) {
     live = false;
     if (history_generation) *history_generation = 0;
+    if (compressor) *compressor = ModbusCompressor::Unknown;
     if (!s_cache_mtx) return 0;
     size_t   n                        = 0;
     uint32_t cache_generation         = 0;
     uint32_t cache_target_generation  = 0;
     uint32_t cache_history_generation = 0;
     uint32_t cache_age_s              = 0;
+    uint32_t target_generation        = 0;
     {
         Lock lk(s_cache_mtx);
         n = s_cache.size() < max ? s_cache.size() : max;
@@ -1766,17 +1815,24 @@ size_t mb_values_snapshot(CachedValue* out, size_t max, bool& live, uint32_t* hi
     // again, but the generations differ and the caller still omits these old rows.
     {
         Lock           lk(s_mtx);
-        const uint32_t target_generation = s_target_generation.load(std::memory_order_acquire);
+        target_generation                = s_target_generation.load(std::memory_order_acquire);
         const uint32_t reply_age_s       = mb_reply_age_locked();
         live = logic::modbus_cache_is_live(s_status.connected && s_poll_observed, s_link_generation,
                                            cache_generation, target_generation,
                                            cache_target_generation, cache_age_s, MB_CACHE_MAX_AGE_S,
                                            reply_age_s, MB_REPLY_MAX_AGE_S);
+        if (compressor && s_status.connected && s_poll_observed &&
+            reply_age_s <= MB_REPLY_MAX_AGE_S &&
+            logic::modbus_observation_age_s(s_compressor_ms, esp_timer_get_time() / 1000) <=
+                MB_REPLY_MAX_AGE_S)
+            *compressor = s_compressor;
     }
     // Seqlock-style retry boundary: a target change overlapping the two-lock snapshot is never
     // live.
-    if (live && cache_target_generation != s_target_generation.load(std::memory_order_acquire))
+    if (target_generation != s_target_generation.load(std::memory_order_acquire)) {
         live = false;
+        if (compressor) *compressor = ModbusCompressor::Unknown;
+    }
     if (history_generation && live && cache_history_generation == history_modbus_generation())
         *history_generation = cache_history_generation;
     return n;

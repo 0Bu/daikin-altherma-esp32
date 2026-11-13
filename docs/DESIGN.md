@@ -180,6 +180,16 @@ A missing X10A leaving-water row leaves that pill blank until the link-wide
 fallback applies. HomeHub readings carry no source timestamp, so the underlying measurement age
 remains unknown.
 
+The fan animation uses a positive current X10A fan reading. The compressor state can come from
+X10A speed or the separately refreshed HomeHub input 31.
+
+For circulation and estimated heat transfer, the UI accepts decoded X10A flow from 0 to
+100 l/min. This is a project plausibility guard with margin above the plotted hydronic
+ranges in the [Altherma 3 M guide, §16.3](https://my.daikin.eu/content/dam/document-library/Installer-reference-guide/heat/air-to-water-heat-pump-low-temperature/EBLA04-08EV3.EBLA04-08E3V3.EDLA04-08EV3.EDLA04-08E3V3_Installer%20reference%20guide_4PEN685228-1B_English.pdf)
+and [Altherma 3 H HT F guide, §16.7](https://www.daikin.eu/content/dam/document-library/Installer-reference-guide/heat/air-to-water-heat-pump-high-temperature/epra14-18dw7/EPRA014-018D%28V.W%29.EPRA14-18D%28V.W%297.ETVH16UE6V%287%29_Installer%20reference%20guide_4PEN644738-1D_English.pdf).
+Equipment limits depend on the model. A value outside the display guard remains in the raw
+telemetry and raw history, while the schematic and estimated heat history withhold it.
+
 **Schematic topology and sensor placement**
 
 The SVG is a simplified split-system hydraulic/refrigerant diagram, not a model-specific piping
@@ -349,6 +359,11 @@ four states. The Modbus valve track shows completed samples and leaves the live 
 The raw API row carries the last full-sweep report. Disinfection and X10A Tank preheat remain
 different facts. Totals are sampled raster time. Events between sweeps may be missed.
 
+The tank temperature chart keeps separate auxiliary tracks for the X10A Smart Grid contacts,
+HomeHub Smart Grid request, and each source's reported tank-heater state. The cursor reads
+their states at the selected temperature slot. Gaps remain source-specific. Auxiliary totals
+count only that source's aligned recorded slots.
+
 Rings share five-minute slots and an elapsed/rolling-day axis. A newly resolved row or changed source
 identity leaves earlier gaps. Compatible firmware records can restore after reboot/power loss;
 restoration waits for valid time and can be partial. Open buckets and incompatible records may be
@@ -466,7 +481,8 @@ Sequence guards prevent old result timers from clearing a newer operation.
 On page load or a busy full-status response, compact OTA status can adopt an in-flight download
 even if large status/values requests are refused. A same-tab snapshot up to 15 minutes old is usable
 when its version, boot ID and ELF identity match current OTA status. Label it Last received state
-and lock Settings writes.
+and lock Settings writes. Keep the captured readings visible, pause schematic activity and
+thermal colours, and omit the live segment at the end of state charts until fresh values arrive.
 The snapshot retains the Modbus history binding. Missing binding metadata in an older snapshot
 suppresses Modbus history when its cached status identifies a boot and history epoch. A later full
 pair supersedes the snapshot.

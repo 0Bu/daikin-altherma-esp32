@@ -157,8 +157,8 @@ assert.throws(() => commandContract(harness(historyClamp)), { code: "ERR_ASSERTI
 const falseOff = production.replace("d.pumpOn === false ? words[2]", "(d.pumpOn === false || d.pump === 0) ? words[2]");
 assert.notEqual(falseOff, production, "state mutation must reach the production rule");
 assert.throws(() => stateContract(harness(falseOff)), { code: "ERR_ASSERTION" });
-const falseRotation = production.replace('sc.classList.toggle("pump-on", d.pumpOn === true)',
-  'sc.classList.toggle("pump-on", pumping === true)');
+const falseRotation = production.replace('sc.classList.toggle("pump-on", active && d.pumpOn === true)',
+  'sc.classList.toggle("pump-on", active && pumping === true)');
 assert.notEqual(falseRotation, production, "rotor mutation must reach the production class update");
 assert.throws(() => motionContract(harness(falseRotation)), { code: "ERR_ASSERTION" });
 const staleGatewayRotor = production.replace("pumpOn: binaryValue(pumpX10a()),",

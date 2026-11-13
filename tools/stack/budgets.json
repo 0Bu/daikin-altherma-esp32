@@ -2962,7 +2962,7 @@
       "max_bytes": 256
     },
     "modbus_values_snapshot": {
-      "pattern": "^daik::mb_values_snapshot\\(daik::CachedValue\\*,\\ unsigned\\ int,\\ bool\\&,\\ unsigned\\ long\\*\\)$",
+      "pattern": "^daik::mb_values_snapshot\\(daik::CachedValue\\*,\\ unsigned\\ int,\\ bool\\&,\\ unsigned\\ long\\*,\\ daik::ModbusCompressor\\*\\)$",
       "max_bytes": 80
     },
     "history_peer_generation": {
@@ -3111,7 +3111,7 @@
     },
     "modbus_create_start": {
       "pattern": "^daik::mb_task_start_if_enabled\\(\\)$",
-      "max_bytes": 64
+      "max_bytes": 80
     },
     "modbus_create_boot": {
       "pattern": "^daik::mb_start\\(\\)$",
@@ -3155,6 +3155,38 @@
     },
     "modbus_create_list_item": {
       "pattern": "^vListInitialiseItem$",
+      "max_bytes": 32
+    },
+    "modbus_create_heap_sample": {
+      "pattern": "^daik::heap_largest_internal_block\\(\\)$",
+      "max_bytes": 32
+    },
+    "modbus_create_heap_largest": {
+      "pattern": "^heap_caps_get_largest_free_block$",
+      "max_bytes": 64
+    },
+    "modbus_create_heap_info": {
+      "pattern": "^heap_caps_get_info$",
+      "max_bytes": 64
+    },
+    "modbus_create_pool_info": {
+      "pattern": "^multi_heap_get_info$",
+      "max_bytes": 32
+    },
+    "modbus_create_pool_walk": {
+      "pattern": "^tlsf_walk_pool$",
+      "max_bytes": 32
+    },
+    "modbus_create_pool_visit": {
+      "pattern": "^multi_heap_get_info_tlsf$",
+      "max_bytes": 32
+    },
+    "modbus_create_heap_free": {
+      "pattern": "^heap_caps_get_free_size$",
+      "max_bytes": 32
+    },
+    "modbus_create_pool_free": {
+      "pattern": "^multi_heap_free_size$",
       "max_bytes": 32
     }
   },
@@ -14016,6 +14048,201 @@
       "multipliers": {},
       "base_bytes": 1536,
       "max_bytes": 8192
+    },
+    "main_modbus_create_boot_heap_walk": {
+      "symbols": [
+        "main_task",
+        "boot_sequence",
+        "modbus_create_boot",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "modbus_create_heap_sample",
+        "modbus_create_heap_largest",
+        "modbus_create_heap_info",
+        "modbus_create_pool_info",
+        "modbus_create_pool_walk",
+        "modbus_create_pool_visit"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "main_modbus_create_boot_heap_lock": {
+      "symbols": [
+        "main_task",
+        "boot_sequence",
+        "modbus_create_boot",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "modbus_create_heap_sample",
+        "modbus_create_heap_largest",
+        "modbus_create_heap_info",
+        "modbus_create_pool_info",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "poll_modbus_create_poll_heap_walk": {
+      "symbols": [
+        "runtime_task_entry",
+        "poll_task",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "modbus_create_heap_sample",
+        "modbus_create_heap_largest",
+        "modbus_create_heap_info",
+        "modbus_create_pool_info",
+        "modbus_create_pool_walk",
+        "modbus_create_pool_visit"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_modbus_create_poll_heap_lock": {
+      "symbols": [
+        "runtime_task_entry",
+        "poll_task",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "modbus_create_heap_sample",
+        "modbus_create_heap_largest",
+        "modbus_create_heap_info",
+        "modbus_create_pool_info",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "httpd_modbus_create_http_changed_heap_walk": {
+      "symbols": [
+        "config_hp",
+        "config_document",
+        "modbus_create_reconfigure",
+        "modbus_create_start",
+        "modbus_create_heap_sample",
+        "modbus_create_heap_largest",
+        "modbus_create_heap_info",
+        "modbus_create_pool_info",
+        "modbus_create_pool_walk",
+        "modbus_create_pool_visit"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_modbus_create_http_changed_heap_lock": {
+      "symbols": [
+        "config_hp",
+        "config_document",
+        "modbus_create_reconfigure",
+        "modbus_create_start",
+        "modbus_create_heap_sample",
+        "modbus_create_heap_largest",
+        "modbus_create_heap_info",
+        "modbus_create_pool_info",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_modbus_create_http_saved_heap_walk": {
+      "symbols": [
+        "config_hp",
+        "config_document",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "modbus_create_heap_sample",
+        "modbus_create_heap_largest",
+        "modbus_create_heap_info",
+        "modbus_create_pool_info",
+        "modbus_create_pool_walk",
+        "modbus_create_pool_visit"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_modbus_create_http_saved_heap_lock": {
+      "symbols": [
+        "config_hp",
+        "config_document",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "modbus_create_heap_sample",
+        "modbus_create_heap_largest",
+        "modbus_create_heap_info",
+        "modbus_create_pool_info",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "main_modbus_create_boot_heap_free": {
+      "symbols": [
+        "main_task",
+        "boot_sequence",
+        "modbus_create_boot",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "modbus_create_heap_free",
+        "modbus_create_pool_free"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "poll_modbus_create_poll_heap_free": {
+      "symbols": [
+        "runtime_task_entry",
+        "poll_task",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "modbus_create_heap_free",
+        "modbus_create_pool_free"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "httpd_modbus_create_http_changed_heap_free": {
+      "symbols": [
+        "config_hp",
+        "config_document",
+        "modbus_create_reconfigure",
+        "modbus_create_start",
+        "modbus_create_heap_free",
+        "modbus_create_pool_free"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_modbus_create_http_saved_heap_free": {
+      "symbols": [
+        "config_hp",
+        "config_document",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "modbus_create_heap_free",
+        "modbus_create_pool_free"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
     }
   },
   "tasks": {
@@ -14261,7 +14488,13 @@
         "httpd_modbus_create_http_saved_ready_list",
         "httpd_modbus_create_http_saved_ready_wake",
         "httpd_modbus_create_http_saved_ready_exit",
-        "httpd_modbus_create_http_saved_log"
+        "httpd_modbus_create_http_saved_log",
+        "httpd_modbus_create_http_changed_heap_walk",
+        "httpd_modbus_create_http_changed_heap_lock",
+        "httpd_modbus_create_http_saved_heap_walk",
+        "httpd_modbus_create_http_saved_heap_lock",
+        "httpd_modbus_create_http_changed_heap_free",
+        "httpd_modbus_create_http_saved_heap_free"
       ]
     },
     "main": {
@@ -14305,7 +14538,10 @@
         "main_modbus_create_boot_ready_list",
         "main_modbus_create_boot_ready_wake",
         "main_modbus_create_boot_ready_exit",
-        "main_modbus_create_boot_log"
+        "main_modbus_create_boot_log",
+        "main_modbus_create_boot_heap_walk",
+        "main_modbus_create_boot_heap_lock",
+        "main_modbus_create_boot_heap_free"
       ]
     },
     "mqtt": {
@@ -14482,7 +14718,10 @@
         "poll_modbus_create_poll_ready_list",
         "poll_modbus_create_poll_ready_wake",
         "poll_modbus_create_poll_ready_exit",
-        "poll_modbus_create_poll_log"
+        "poll_modbus_create_poll_log",
+        "poll_modbus_create_poll_heap_walk",
+        "poll_modbus_create_poll_heap_lock",
+        "poll_modbus_create_poll_heap_free"
       ]
     },
     "modbus": {
