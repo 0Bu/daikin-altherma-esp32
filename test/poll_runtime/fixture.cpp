@@ -42,6 +42,7 @@ bool                     available[256];
 uint8_t                  pages[256][40] = {};
 int                      page_lengths[256];
 unsigned                 link_commits = 0, model_commits = 0;
+unsigned                 heap_samples = 0, modbus_retries = 0;
 std::string              committed_profile;
 std::string              committed_eeprom;
 std::vector<std::string> raw_lines;
@@ -159,7 +160,8 @@ void diag_printf(const char* format, ...) {
     }
 }
 void stack_watch_sample(StackWatch) noexcept { ++sdk::stack_samples; }
-void heap_guard_sample() {}
+void heap_guard_sample() { ++adapter::heap_samples; }
+void mb_retry_start() noexcept { ++adapter::modbus_retries; }
 void history_liveness_touch() noexcept {}
 void history_record_board() {}
 void history_record(const CachedValue* values, size_t count, uint32_t) {
@@ -350,6 +352,29 @@ static void setup(const char* profile = "auto") {
     adapter::cfg.tx_pin           = 43;
     adapter::cfg.x10a_identity_fp = 0x13103;
     daik::hp_poll_start();
+}
+
+static void modbus_retry_delay(TickType_t) {
+    oracle(adapter::cfg.profile == "auto" && adapter::model_commits == 0 && sdk::queries == 0,
+           "modbus_retry_does_not_require_x10a_transport");
+    if (sdk::delay_count == 1) {
+        oracle(adapter::heap_samples == 0 && adapter::modbus_retries == 0,
+               "modbus_retry_skips_ota_quiesce_cycle");
+        sdk::ota_active = false;
+        return;
+    }
+    oracle(sdk::delay_count == 2 && adapter::heap_samples == 1 && adapter::modbus_retries == 1,
+           "modbus_retry_runs_before_x10a_identification");
+    throw sdk::Stop{};
+}
+
+static void run_modbus_retry() {
+    setup();
+    sdk::ota_active = true;
+    sdk::on_delay = modbus_retry_delay;
+    try {
+        sdk::task_fn(nullptr);
+    } catch (const sdk::Stop&) {}
 }
 
 static daik::DetectResult incomplete(const char* profile) {
@@ -1207,6 +1232,8 @@ int main(int argc, char** argv) {
     const char* name = argc > 1 ? argv[1] : "oom_raii";
     if (!std::strcmp(name, "oom_raii"))
         run_oom();
+    else if (!std::strcmp(name, "modbus_retry"))
+        run_modbus_retry();
     else if (!std::strncmp(name, "detect_", 7))
         run_detect(name);
     else if (!std::strncmp(name, "saturation_", 11))

@@ -55,7 +55,7 @@ const modes = [
   ["unit_abnormality", 0, "No error", "Kein Fehler"],
   ["unit_abnormality", 1, "Fault", "Fehler"],
   ["unit_abnormality", 2, "Warning", "Warnung"],
-  ["three_way_valve", 0, "Space heating", "Raumheizung"],
+  ["three_way_valve", 0, "Space circuit", "Raumkreis"],
   ["three_way_valve", 1, "DHW", "Brauchwarmwasser"],
   ["smart_grid_mode", 0, "Free running", "Freier Betrieb"],
   ["smart_grid_mode", 1, "Forced off", "Zwangsabschaltung"],
@@ -93,12 +93,23 @@ for (const [semantic, value, english, german] of nativeModes) {
 }
 for (const lang of ["en", "de", "es", "fr", "it", "pl", "cs", "uk", "zh", "ja", "nb", "sv", "fi"]) {
   const ui = renderer(lang);
+  for (const [value, key] of [[0, "hist.valve_space"], [1, "enum.dhw"]]) {
+    const expected = ui.labels[key];
+    assert.ok(expected, `${lang}: 3-way-valve route name is translated`);
+    assert.equal(ui.displayValue({ value, enum: "three_way_valve" }), expected);
+    assert.equal(ui.displayValue({ value: String(value), binary: true, binary_semantic: "valve_dhw" }),
+      expected);
+  }
+  assert.notEqual(ui.displayValue({ value: 0, enum: "three_way_valve" }),
+    ui.displayValue({ value: 2, enum: "altherma4_unit_operation_mode" }),
+    `${lang}: the reported space circuit is distinct from the Space heating operation mode`);
+  assert.equal(ui.displayValue({ value: 7, enum: "three_way_valve" }), ui.labels["enum.unknown"]("7"));
   for (const [off, key] of [[9, "quiet_selection"], [54, "heating_offset"], [58, "imposed_power_limit"],
     [65, "demand_response"], [74, "pre_phe_outdoor"], [80, "main_target"], [83, "unit_operation"]]) {
     assert.equal(ui.displayHomeHubLabel({off, label: "obsolete label", profile: "altherma4"}),
       ui.labels[`a4.${key}`], `${lang}/${off}: native label uses its reviewed translation`);
   }
-  for (const [off, key] of [[9, "quiet_help"], [38, "current_help"], [49, "flow_help"],
+  for (const [off, key] of [[9, "quiet_help"], [38, "current_help"],
     [54, "heating_offset_help"], [58, "limit_help"], [65, "demand_help"], [68, "pump_help"],
     [74, "pre_phe_outdoor_help"], [79, "pressure_help"], [83, "operation_help"]]) {
     assert.equal(ui.descFor("obsolete base label", {off, profile: "altherma4"}).what,
@@ -107,19 +118,21 @@ for (const lang of ["en", "de", "es", "fr", "it", "pl", "cs", "uk", "zh", "ja", 
   for (const [semantic, value] of nativeModes)
     assert.doesNotMatch(ui.displayValue({value, enum: semantic}), /^(?:enum\.|a4\.)/);
   for (const [off, label, unit, concept, key] of [
-    [49, "Flow rate", "L/min", "flow", "flow_help"],
-    [79, "Water pressure", "bar", "water_pressure", "pressure_help"],
+    [49, "Flow rate", "L/min", "flow", "mb.flow_scale_help"],
+    [79, "Water pressure", "bar", "water_pressure", "a4.pressure_help"],
   ]) {
     const x = { label: off === 49 ? "Flow sensor" : "Water Pressure", value: "2.5", unit, concept };
     const native = { off, label, value: 2, unit, concept, profile: "altherma4" };
-    const escaped = ui.labels[`a4.${key}`].replace(/[&<>"]/g,
+    const escaped = ui.labels[key].replace(/[&<>"]/g,
       (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-    const comparison = ui.mbNoteHtml(x, native);
-    assert.ok(comparison.includes(escaped), `${lang}/${off}: paired reading exposes its native limit`);
-    assert.ok(!comparison.includes('class="mb-delta"'),
-      `${lang}/${off}: unverified scaling cannot assert a physical difference or agreement`);
-    assert.ok(!ui.mbNoteHtml(x, {...native, profile: "homehub"}).includes(escaped),
-      `${lang}/${off}: the independent base comparison keeps its established meaning`);
+    const base = {...native, profile: "homehub"};
+    for (const [row, limited] of [[native, true], [base, off === 49]]) {
+      const comparison = ui.mbNoteHtml(x, row);
+      assert.equal(comparison.includes(escaped), limited,
+        `${lang}/${row.profile}/${off}: the comparison exposes the applicable scale limit`);
+      assert.equal(comparison.includes('class="mb-delta"'), !limited,
+        `${lang}/${row.profile}/${off}: only verified scaling can assert a physical difference`);
+    }
     ui.state._values = [x]; ui.state._modbus = [native]; ui.state.status.hp.connected = false;
     const fallback = ui.vDescRow(x);
     assert.ok(fallback.includes(escaped), `${lang}/${off}: native replacement exposes its own limit`);
@@ -139,8 +152,22 @@ for (const lang of ["en", "de", "es", "fr", "it", "pl", "cs", "uk", "zh", "ja", 
       `${lang}/${off}: actual replacement inspector retains its native interpretation limit`);
     ui.state._modbus[0].profile = "homehub";
     ui.renderInspect();
-    assert.ok(!ui.element("inspBody").innerHTML.includes(escaped),
-      `${lang}/${off}: the base inspector must not inherit native limits`);
+    assert.equal(ui.element("inspBody").innerHTML.includes(escaped), off === 49,
+      `${lang}/${off}: the base inspector shows only its applicable scale limit`);
+    if (off === 49) {
+      for (const legacyFrame of [base, {...base, flow_scale_unverified: false},
+        {...base, flow_scale_unverified: true}]) {
+        ui.state._modbus = [legacyFrame];
+        const provisional = ui.mbNoteHtml(x, legacyFrame);
+        assert.ok(provisional.includes(escaped) && !provisional.includes('class="mb-delta"'));
+        const provisionalFallback = ui.vDescRow(x);
+        assert.ok(provisionalFallback.includes(escaped) && !provisionalFallback.includes('class="mb-delta"'),
+          `${lang}: the fallback table shows the flow scale limit even in a legacy frame`);
+        ui.renderInspect();
+        assert.ok(ui.element("inspBody").innerHTML.includes(escaped),
+          `${lang}: the open inspector retains the flow scale limit as wire flags vary`);
+      }
+    }
   }
 }
 const precedenceMutation = renderer("es", true);
@@ -152,14 +179,17 @@ precedenceMutation.state.live = {flow: 2, wp: null, ouHeldOver: false};
 precedenceMutation.state.insp = "flow";
 precedenceMutation.renderInspect();
 assert.ok(!precedenceMutation.element("inspBody").innerHTML.includes(
-  precedenceMutation.labels["a4.flow_help"]),
+  precedenceMutation.labels["mb.flow_scale_help"]),
 "the production mutation reproduces the missing native warning in the localized inspector");
 assert.equal(en.displayHomeHubLabel({off: 58, label: "Power consumption"}), "Power consumption",
   "the independent base profile keeps its actual power-consumption label");
-for (const [off, label, key] of [[49, "Flow rate", "flow_help"],
-  [68, "Circulation pump speed", "pump_help"], [79, "Water pressure", "pressure_help"]]) {
+for (const profile of [undefined, "homehub"])
+  assert.equal(en.descFor("Flow rate", {off: 49, profile}).what, en.labels["mb.flow_scale_help"],
+    "base HomeHub flow shares the scale limit");
+for (const [off, label, key] of [
+  [68, "Circulation pump speed", "a4.pump_help"], [79, "Water pressure", "a4.pressure_help"]]) {
   for (const profile of [undefined, "homehub"])
-    assert.notEqual(en.descFor(label, {off, profile}).what, en.labels[`a4.${key}`],
+    assert.notEqual(en.descFor(label, {off, profile}).what, en.labels[key],
       `${off}/${profile}: native interpretation limits cannot replace another source's explanation`);
 }
 assert.equal(en.displayValue({ value: "Recommended on" }), "Recommended on",
@@ -175,7 +205,7 @@ assert.equal(de.sgBoostText(), "BOOST", "German boost marker is compact and sour
 assert.equal(en.displayValue({ value: "1", binary: true }), "ON", "a real binary 1 remains ON");
 assert.equal(de.displayValue({ value: "0", binary: true }), "OFF", "a real binary 0 remains OFF");
 const selectorStates = [
-  ["valve_dhw", "0", "Space heating", "Raumheizung"],
+  ["valve_dhw", "0", "Space circuit", "Raumkreis"],
   ["valve_dhw", "1", "DHW", "Brauchwarmwasser"],
   // `valve_heat` is the legacy stable id for an optional shut-off-valve OUTPUT. It is not the
   // independently configured/current heating-cooling mode and therefore stays electrical ON/OFF.
@@ -290,14 +320,13 @@ en.state._values = [OUTDOOR_MODE];
 assert.equal(en.schematicOperationMode(), null, "nor does a hydronic page missing from the sweep");
 en.state._values = [{ label: "Operation Mode", value: "Heating", reg: 0x55 }];
 assert.equal(en.schematicOperationMode(), "Heating", "Protocol S carries its one mode row on another page");
-// The value table states a number as the exact reference, so it carries the doubt about the row's age
-// for as long as liveData has not settled it.
+// The raw row carries its age qualifier. An independently reported activity flag cannot clear it.
 const UNKNOWN_AGE = { label: "Discharge pipe temp.", value: "58.0", unit: "°C", reg: 0x20, held_unknown: true };
 en.state.live = { ouUnknown: true };
 assert.match(en.vDescRow(UNKNOWN_AGE), /may be from the last run/, "a row of unknown age says so");
-en.state.live = { ouUnknown: false };
+en.state.live = { ouUnknown: false, ouHeldOver: true };
 assert.doesNotMatch(en.vDescRow(UNKNOWN_AGE), /may be from the last run/,
-  "and stops once the HomeHub's compressor flag has settled it");
+  "a withheld outdoor value has a held-reading explanation instead");
 en.state.live = null;
 en.state._values = [];
 const modelLabels = {

@@ -1,4 +1,4 @@
-// translation-source: 00f8393aee827b21e658965c9ff792c99c563d60de18775bb092ec7c42167e1f
+// translation-source: 4210cc75eee11ce1dfcf29461013a0737a5806a303d44d1929bf671225a996b8
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -9,6 +9,7 @@ I18N.pl = localeValues([
   /* sys.unreachable */ "Nieosiągalne",
   /* sys.x10a_down */ "X10A poza siecią",
   /* sys.mb_carrying */ "Nieznany tryb pracy — odczyty z Modbus",
+  /* sys.mode_unknown */ "Nieznany tryb pracy",
   /* sys.mb_only */ "X10A poza siecią — odczyty z Modbus",
   /* sys.mb_source */ "X10A poza siecią · Modbus",
   /* mode.stop */ "Zatrzymanie",
@@ -25,6 +26,7 @@ I18N.pl = localeValues([
   /* sys.standby */ "Czuwanie — bez pracy",
   /* sys.defrosting */ "Odszranianie",
   /* sys.circulating */ "Cyrkulacja — sprężarka wyłączona",
+  /* sys.pump_reported */ "Pompa zgłasza pracę — obieg niepotwierdzony",
   /* sys.cool_mode */ "Tryb chłodzenia",
   /* sys.residual_circulating */ "Cyrkulacja ciepła resztkowego — bez chłodzenia",
   /* sys.bsh_active */ "Elektryczna grzałka zbiornika aktywna",
@@ -339,7 +341,7 @@ I18N.pl = localeValues([
   /* a4.operation_help */ "Zgłasza Zatrzymanie, Podgrzewanie zbiornika, Ogrzewanie pomieszczeń, Chłodzenie pomieszczeń lub Pracę siłownika. To zgłoszony stan, a nie dowód użytecznego przekazywania ciepła.",
   /* a4.heating_offset_help */ "Przesuwa pogodową krzywą grzewczą strefy głównej w kelwinach. To przesunięcie, nie zmierzona temperatura ani pełna temperatura zadana wody.",
   /* a4.pre_phe_outdoor_help */ "Temperatura wody przed zewnętrznym płytowym wymiennikiem ciepła. To czujnik po stronie wody, nie temperatura powietrza zewnętrznego ani czynnika chłodniczego.",
-  /* a4.flow_help */ "Skalowanie przepływu Altherma 4 nie zostało potwierdzone. Wartość L/min używa dotychczasowego przeliczenia; przed oceną wydajności porównaj ją z odczytem urządzenia.",
+  /* mb.flow_scale_help */ "Skalowanie przepływu dla tego źródła Modbus nie jest potwierdzone. Porównaj wartość z odczytem na wyświetlaczu urządzenia.",
   /* a4.pump_help */ "Instrukcja Altherma 4 nazywa tę wartość prędkością pompy, ale podaje L/min. Wyświetlana jednostka % jest niepotwierdzonym założeniem; porównaj z odczytem urządzenia.",
   /* a4.pressure_help */ "Skalowanie ciśnienia Altherma 4 nie zostało potwierdzone. Wartość bar używa dotychczasowego przeliczenia; przed oceną ciśnienia porównaj ją z odczytem urządzenia.",
   /* a4.demand_response */ "Tryb reakcji na zapotrzebowanie",
@@ -385,6 +387,8 @@ I18N.pl = localeValues([
   /* val.since_min */ (d) => `\u2265 ${d}`,
   /* val.since_gap */ (d) => `brak obserwacji przez ${d}`,
   /* hist.modbus_plateau */ (when, d) => `rejestr bez zmian ${when} · około ${d} · wiek pomiaru nieznany`,
+  /* hist.modbus_flow_unverified */ "Skala zarejestrowanego przepływu z Modbus jest niezweryfikowana.",
+  /* hist.thermal_bucket_note */ "Szacunek na podstawie próbek z pięciominutowych przedziałów, które mogły być zebrane w różnych chwilach.",
   /* hist.boost_total */ (d) => `Wzmocnienie aktywne · ${d}`,
   /* hist.boost_none */ "Brak wzmocnienia w zarejestrowanym okresie.",
   /* hist.boost_ago_range */ (a, b) => `${a}–${b} h temu`,
@@ -425,7 +429,7 @@ I18N.pl = localeValues([
   /* hist.buh_aria */ (l, d) => `${l} — oś czasu grzałki dodatkowej. ${d}. Klawisze strzałek odczytują poszczególne próbki.`,
   /* hist.valve_dhw_total */ (d) => `CWU · ${d}`,
   /* hist.valve_space_total */ (d) => `Obieg pomieszczeń · ${d}`,
-  /* hist.valve_none */ "Brak pozycji CWU w zarejestrowanym okresie.",
+  /* hist.valve_none */ "W zapisanym okresie nie zgłoszono drogi do zasobnika CWU.",
   /* hist.valve_dhw */ "CWU",
   /* hist.valve_space */ "Obieg pomieszczeń",
   /* hist.valve_aria */ (l, d) => `${l} — oś czasu zaworu 3-drogowego. ${d}. Klawisze strzałek odczytują poszczególne próbki.`,
@@ -467,7 +471,7 @@ I18N.pl = localeValues([
   /* ota.check_failed */ "sprawdzenie nie powiodło się",
   /* ota.starting */ "uruchamianie…",
   /* ota.pct */ (p) => `${p}%`,
-  /* ota.rebooting */ "ponowne uruchamianie…",
+  /* ota.rebooting */ "Oczekiwanie na ponowne uruchomienie…",
   /* ota.failed */ "aktualizacja nie powiodła się",
   /* ota.timeout */ "upłynął limit czasu",
   /* ota.cancelled */ "anulowano",
@@ -481,7 +485,7 @@ I18N.pl = localeValues([
   /* ota.snapshot_label */ "Stan danych",
   /* ota.snapshot_value */ "Migawka",
   /* ota.snapshot_help */ "Ostatni stan odebrany przed ponownym załadowaniem. Dane na żywo mogą zostać wstrzymane podczas instalacji; ustawienia pozostają zablokowane do ponownego uruchomienia.",
-  /* ota.reload_hint */ "zainstalowano — załaduj stronę ponownie",
+  /* ota.reload_hint */ "Nie udało się potwierdzić ponownego uruchomienia",
   /* ota.dialog_title */ "Aktualizacja firmware",
   /* ota.switch_title */ "Zmień wersję firmware",
   /* ota.changes_title */ "Zmiany w tej aktualizacji",
@@ -518,6 +522,21 @@ I18N.pl = localeValues([
   /* schem.room */ "Pokój",
   /* schem.flow_rate */ "przepływ",
   /* schem.water_press */ "ciśnienie wody",
+  /* schem.capacity_low_speed */ "Oszacowanie mocy wymaga bieżącej prędkości sprężarki z X10A powyżej 5 obr./s.",
+  /* schem.no_usable_power */ (metric) => (metric ? `${metric} niedostępny. ` : "") + "Brak użytecznego oszacowania mocy elektrycznej.",
+  /* schem.backup_heater_active */ "Elektryczna grzałka wspomagająca zgłasza włączenie",
+  /* schem.compressor_off */ "Sprężarka nie pracuje. Brak oszacowania jej mocy.",
+  /* schem.outdoor_held */ "Zachowane odczyty jednostki zewnętrznej z X10A są ukryte.",
+  /* schem.outdoor_homehub */ "Temperatura zewnętrzna pochodzi z HomeHub Modbus. Rejestr nie podaje czasu pomiaru.",
+  /* schem.homehub_compressor_off */ "HomeHub zgłasza stan sprężarki WYŁ.",
+  /* schem.outdoor_independent */ "Pracę grzałek elektrycznych i obieg wody ocenia się osobno.",
+  /* schem.water_route_unknown */ "Nie wiadomo, którą drogę wybrał zawór trójdrogowy. Przepływ we wspólnym obiegu nie wskazuje, czy woda płynie do zasobnika, czy do obiegu pomieszczeń.",
+  /* schem.flow_invalid */ "Odczyt przepływu X10A jest nieprawidłowy.",
+  /* schem.defrost_transfer */ "Szacowany przepływ ciepła podczas odszraniania",
+  /* schem.transfer_sign */ "Wartość dodatnia: woda pobiera ciepło. Ujemna: oddaje ciepło.",
+  /* schem.efficiency_no_capacity */ (metric) => `${metric} niedostępny. Brak użytecznego oszacowania mocy dla tego zakresu.`,
+  /* schem.efficiency_ct_pair */ (outlet) => `Obliczenie wykorzystuje prąd z CT oraz temperatury ${outlet} i R4T.`,
+  /* schem.efficiency_inv_pair */ "Obliczenie wykorzystuje prąd falownika oraz temperatury R1T i R4T.",
   /* schem.r2t */ "R2T",
   /* schem.r3t */ "R3T",
   /* schem.flow_switch */ "STYK PRZ.",
@@ -774,6 +793,7 @@ I18N.pl = localeValues([
   /* hh.found */ (host) => `Znaleziono HomeHub: ${host}`,
   /* hh.not_found */ "Nie znaleziono HomeHub — wpisz adres ręcznie.",
   /* hh.saved */ "Zapisano ustawienia Modbus",
+  /* hh.start_pending */ "Ustawienia zapisane. Odczyt z HomeHub jeszcze się nie rozpoczął.",
   /* hh.err_port */ "Port musi mieścić się w zakresie od 1 do 65535",
   /* hh.err_unit */ "ID jednostki musi mieścić się w zakresie od 1 do 247",
   /* board.title */ "Sprzęt płytki",
@@ -954,10 +974,9 @@ I18N.pl = localeValues([
   /* lang.sv */ "Svenska",
   /* lang.fi */ "Suomi",
   /* lang.saved */ "Zapisano język",
-  /* hist.cop_none */ "Brak wykresu COP dla CT: okablowanie określa odbiorniki, a ciepło przed BUH pomija BSH.",
 ]);
 INSPECT_I18N.pl = inspectValues(
-  ["Brak bieżącego odczytu:", "sprężarka stoi, a jednostka zewnętrzna odświeża własne czujniki tylko podczas pracy. Wartość z poprzedniego cyklu jest ukryta, aby nie wyglądała na aktualny pomiar.", "Nie można odczytać prędkości sprężarki, więc wartości jednostki zewnętrznej mogą być z poprzedniego cyklu."],
+  ["Brak bieżącego odczytu:", "sprężarka stoi, a jednostka zewnętrzna odświeża własne czujniki tylko podczas pracy. Wartość z poprzedniego cyklu jest ukryta, aby nie wyglądała na aktualny pomiar.", "Wiek tych odczytów jednostki zewnętrznej z X10A jest nieznany. Mogą pochodzić z poprzedniego cyklu."],
   [
     ["Tryb pracy", 0, "Tryb jednostki wewnętrznej; nie potwierdza sam pracy sprężarki ani przepływu."], // status
     ["Warunki zewnętrzne", "Warunki zewnętrzne z ENV III", "Temperatura, wilgotność i ciśnienie z czujnika ENV III przy ESP32."], // env3
@@ -972,15 +991,11 @@ INSPECT_I18N.pl = inspectValues(
       : d.sgMode === 1 ? "Zewnętrzne zarządzanie energią zgłasza „wymuszone wyłączenie”."
       : d.sgMode === 3 ? "Zewnętrzne zarządzanie energią zgłasza „wymuszone włączenie”."
       : "Brak zewnętrznego żądania Smart Grid; urządzenie pracuje autonomicznie."], // sgrequest
-    ["Jednostka zewnętrzna", 0, "W powietrznej pompie ciepła wentylator prowadzi powietrze przez wymiennik, a sprężarka podnosi ciśnienie i temperaturę czynnika. To uproszczony schemat; monoblok, gruntowa pompa ciepła i hybryda mają inny układ.", (d) => d.defrost
-      ? "Odszranianie — obieg pracuje odwrotnie, aby stopić lód, i chwilowo odbiera ciepło z wody."
-      : compressorRunning(d)
+    ["Jednostka zewnętrzna", 0, "W powietrznej pompie ciepła wentylator prowadzi powietrze przez wymiennik, a sprężarka podnosi ciśnienie i temperaturę czynnika. To uproszczony schemat; monoblok, gruntowa pompa ciepła i hybryda mają inny układ.", (d) => compressorRunning(d)
       ? d.rps != null
-        ? `Praca — sprężarka ${fmt0(d.rps)} rps${d.quiet ? ", ograniczona trybem cichym" : ""}.`
-        : "Praca — HomeHub potwierdza włączenie sprężarki; prędkość i szczegóły jednostki wymagają X10A."
-      : d.ouHeldOver && d.mbFields && d.mbFields.has("out")
-      ? "Postój — brak aktywnego przekazywania ciepła. X10A nie odświeża wtedy czujników jednostki; temperatura zewnętrzna pochodzi z Modbus, lecz rejestr nie ma czasu źródłowego, a temperatura tłoczenia pozostaje „—”."
-      : "Postój — sprężarka stoi, więc nie ma aktywnego ogrzewania ani chłodzenia. Czujniki jednostki nie są odświeżane; zamiast starych wartości wyświetlane jest „—”."], // ou
+        ? `Praca — sprężarka ${fmt0(d.rps)} rps${d.quiet ? ". X10A zgłasza aktywny tryb cichy" : ""}.`
+        : "HomeHub zgłasza, że sprężarka jest włączona. Prędkość i szczegółowe odczyty jednostki zewnętrznej wymagają X10A."
+      : "Sprężarka jest zatrzymana."], // ou
     ["Sprężarka", 0, "Spręża czynnik chłodniczy. Prędkość w rps wskazuje jej pracę, ale sama nie jest mocą cieplną."], // comp
     ["Temperatura zewnętrzna", 0, "Temperatura przy czujniku jednostki zewnętrznej; wpływają na nią słońce i montaż."], // out
     ["Temperatura wymiennika zewnętrznego (R4T)", "Temperatura wymiennika zewnętrznego R4T", "Temperatura wymiennika powietrznego. Podczas ogrzewania może spaść poniżej 0 °C; dopiero razem ze stanem odszraniania opisuje oblodzenie i jego usuwanie."], // ouhx
@@ -989,8 +1004,7 @@ INSPECT_I18N.pl = inspectValues(
     ["Niskie ciśnienie", 0, "Ciśnienie czynnika po stronie niskiego ciśnienia sprężarki; w ogrzewaniu jest to strona parowania za rozprężeniem. Nie każdy profil udostępnia ten czujnik."], // lp
     ["Zawór rozprężny", 0, "Zadana pozycja elektronicznego zaworu w impulsach. Reguluje przepływ czynnika; liczba nie jest procentem otwarcia."], // eev
     ["Temperatura ciekłego czynnika (R3T)", "Temperatura ciekłego czynnika R3T", "Temperatura czynnika po ciekłej stronie wymiennika wewnętrznego; to nie temperatura powrotu wody."], // r3t
-    ["Płytowy wymiennik ciepła", 0, "PHE przekazuje energię między czynnikiem chłodniczym a wodą bez mieszania obu mediów. Moc jest szacowana z przepływu i R1T/R4T, których dokładne położenie zależy od modelu.", (d) => !compressorRunning(d, 5)
-      ? "Brak aktywnego przekazywania po stronie czynnika — sprężarka stoi. Sam obieg pompy może rozprowadzać ciepło resztkowe, ale nie jest mocą grzewczą ani chłodniczą."
+    ["Płytowy wymiennik ciepła", 0, "PHE przekazuje energię między czynnikiem chłodniczym a wodą bez mieszania obu mediów. Moc jest szacowana z przepływu i R1T/R4T, których dokładne położenie zależy od modelu.", (d) => needsCapacitySpeed(d) && !d.dtStale ? t("schem.capacity_low_speed") : compressorStopped(d) ? stoppedCapacityText(d)
       : d.dtStale ? "Nie można obliczyć przekazywania po stronie wody — pompa i przepływ nie potwierdzają ruchu wody przez PHE."
       : d.pth == null ? "Brak kierunkowego oszacowania — odczyty nie potwierdzają użytecznego przekazywania w wybranym trybie."
       : d.pthKind === "cooling"
@@ -1002,7 +1016,7 @@ INSPECT_I18N.pl = inspectValues(
     ["ΔT wody na PHE", "Różnica temperatury wody na PHE", "R1T na wyjściu PHE minus R4T na wejściu. Jest obliczane z dwóch czujników; wraz z przepływem opisuje wymianę, ale nie mierzy bezpośrednio temperatur przy odbiornikach w budynku.", (d) => d.dtStale
       ? "Brak roboczego ΔT — pompa i przepływ nie potwierdzają ruchu wody. Bez cyrkulacji różnica stygnących czujników nie jest punktem pracy."
       : d.dt == null ? null
-      : !compressorRunning(d, 5) ? `${fmt1(d.dt)} K przy pracy samej pompy — wyrównywanie ciepła resztkowego, nie moc ogrzewania ani chłodzenia.`
+      : needsCapacitySpeed(d) ? `${fmt1(d.dt)} K. ${t("schem.capacity_low_speed")}` : compressorStopped(d) ? `${fmt1(d.dt)} K. ${stoppedCapacityText(d)}`
       : d.thermalMode === "cool" ? `${fmt1(d.dt)} K. Przy aktywnym chłodzeniu R1T powinno być niższe od R4T, więc różnica jest ujemna.`
       : `${fmt1(d.dt)} K. Wartość dodatnia oznacza oddawanie ciepła do wody.`], // dt
     [(d) => d && d.pthKind === "cooling" ? "Moc chłodnicza (szacunek)" : "Moc cieplna (szacunek)", "Szacowana moc cieplna na PHE", (d) => d && d.pthKind === "cooling"
@@ -1011,58 +1025,54 @@ INSPECT_I18N.pl = inspectValues(
       ? d.bsh === true
         ? "Nie można obliczyć przekazywania na PHE, bo brak potwierdzonej cyrkulacji. Wewnętrzna grzałka może nadal ogrzewać zbiornik, lecz jej ciepło nie przechodzi przez czujniki PHE i magistrala nie podaje jej mocy."
         : "Nie można teraz obliczyć mocy, bo brak potwierdzonego ruchu wody przez PHE. To brak użytecznego punktu pracy, nie moc równa zero."
+      : needsCapacitySpeed(d) ? t("schem.capacity_low_speed")
       : d.pth == null ? null
-      : d.pthKind === "cooling" ? `≈ ${fmt1(d.pth)} kW chłodzenia${d.cop != null ? `, EER ${fmt1(d.cop)}` : ""}.`
+      : d.pthKind === "cooling" ? `≈ ${fmt1(d.pth)} kW chłodzenia${d.cop != null && !d.copPostBuh ? `, EER ${fmt1(d.cop)}` : ""}.`
       : `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `, COP ${fmt1(d.cop)}` : ""}.`], // pth
-    [(d) => d && d.efficiencyKind === "eer" ? "EER pompy ciepła (szacunek)"
-      : d && d.copScope === "plant" ? "COP za BUH (szacunek)" : "COP pompy ciepła (szacunek)", "Szacowana efektywność", (d) => d && d.efficiencyKind === "eer"
-      ? "Szacowana moc chłodnicza podzielona przez szacowany pobór. Wynik dziedziczy założenia o wodzie/glikolu, czujnikach, napięciu i współczynniku mocy; to chwilowy EER, nie efektywność sezonowa."
-      : "Szacowana moc cieplna podzielona przez zgodny zakresowo pobór energii. Dla CT ciepło może być liczone za BUH, a dla prądu falownika dotyczy samej pompy; montaż CT decyduje o ujętych odbiornikach. To wskazanie chwilowe, nie licznik sezonowy.", (d) => d.copBlock === "tank_heater"
-      ? "Brak COP — grzałka zbiornika jest włączona. Jej pobór może wejść do bilansu prądu, lecz ciepło trafia prosto do zbiornika i nie przechodzi przez czujniki wody; zakresy nie pasują."
-      : d.copBlock === "buh_no_r2t" ? "Brak COP — BUH grzeje, ale profil nie ma czujnika wody za nim. Pobór może obejmować grzałkę, a moc cieplna kończy się przed nią."
-      : d.copBlock === "mb_scope" ? "Brak COP — X10A milczy, a HomeHub podaje pobór całej jednostki z grzałkami, podczas gdy moc cieplna dotyczy tylko PHE. Bez stanu grzałek i czujnika za nimi zakresów nie można uzgodnić."
+    [(d) => d && d.efficiencyKind === "eer" ? eerScopeText(d, "EER na podstawie prądu CT (szacunek)", "EER pompy ciepła (szacunek)", "Szacowany EER")
+      : d && d.copScope === "plant" ? "COP na podstawie prądu CT (szacunek)" : "COP pompy ciepła (szacunek)", "Szacowana efektywność", (d) => d && d.efficiencyKind === "eer"
+      ? "Szacowana moc chłodnicza podzielona przez szacowany pobór. Wynik dziedziczy założenia o wodzie/glikolu, czujnikach, napięciu i współczynniku mocy; to chwilowy EER, nie efektywność sezonowa." +
+        eerScopeText(d, post => ` Obliczenie wykorzystuje R4T i ${post ? "R2T za" : "R1T przed"} grzałką wspomagającą oraz prąd z CT. Okablowanie CT decyduje, które odbiorniki uwzględniono.`, " Obliczenie wykorzystuje R1T przed grzałką wspomagającą, R4T i prąd falownika.")
+      : "Szacowana moc cieplna podzielona przez szacowaną moc elektryczną. Prąd z CT stosuje się tylko po potwierdzeniu wyłączenia obu grzałek. W pozostałych przypadkach potrzebne jest użyteczne oszacowanie na podstawie prądu falownika. Okablowanie CT decyduje, które odbiorniki uwzględniono." + heatingEfficiencyBoundary(d), (d) => d.copBlock === "tank_heater"
+      ? `${d.bsh === true ? `Brak ${efficiencyMetric(d)}. Grzałka zasobnika zgłasza włączenie.` : `Brak ${efficiencyMetric(d)}. Stan grzałki zasobnika jest nieznany.`} Jej ciepło omija oba czujniki temperatury zasilania.`
+      : d.copBlock === "backup_heater" ? `${d.buh1 === true || d.buh2 === true ? `Brak ${efficiencyMetric(d)}. Grzałka wspomagająca zgłasza włączenie.` : `Brak ${efficiencyMetric(d)}. Stan grzałki wspomagającej jest nieznany.`} Szacunek mocy elektrycznej nie pozwala ustalić, czy obejmuje obciążenie grzałki.`
+      : d.copBlock === "mb_scope" ? `Brak ${efficiencyMetric(d)}. Dostępne dane nie pozwalają powiązać mocy elektrycznej z HomeHubu z mocą cieplną oszacowaną na płytowym wymienniku ciepła. Nie wiadomo, które odbiorniki, w tym grzałki elektryczne, obejmuje odczyt mocy.`
       : d.copBlock === "no_pel"
-      ? d.pelHeld ? "Brak COP — przy stojącej sprężarce prąd falownika jest pozostałością z poprzedniego cyklu, a nie bieżącym pomiarem."
-        : "Brak COP — profil nie podaje poboru ani z CT, ani z prądu falownika."
-      : d.cop == null ? null
-      : d.efficiencyKind === "eer" ? `${fmt1(d.cop)} kW chłodzenia na 1 kW prądu — ≈ ${fmt1(d.copPth)} kW przy ≈ ${fmt1(d.pel)} kW poboru.`
-      : d.copScope === "plant" ? `${fmt1(d.cop)} kW ciepła za BUH na 1 kW poboru z CT — ≈ ${fmt1(d.copPth)} kW przy ≈ ${fmt1(d.pel)} kW. Zakres odbiorników zależy od montażu CT.`
-      : `${fmt1(d.cop)} kW ciepła na 1 kW prądu w granicy pompy — ≈ ${fmt1(d.copPth)} kW przy ≈ ${fmt1(d.pel)} kW. BUH jest poza obiema wielkościami.`], // cop
+      ? d.pelHeld ? `Brak ${efficiencyMetric(d)} — przy stojącej sprężarce prąd falownika jest pozostałością z poprzedniego cyklu, a nie bieżącym pomiarem.`
+        : t("schem.no_usable_power", efficiencyMetric(d))
+      : d.cop == null ? efficiencyUnavailable(d)
+      : d.efficiencyKind === "eer" ? `${fmt1(d.cop)} kW chłodzenia na 1 kW prądu — ≈ ${fmt1(d.copPth)} kW przy ≈ ${fmt1(d.copPel)} kW poboru.`
+      : d.copScope === "plant" ? `${fmt1(d.cop)} kW ciepła po stronie wody na 1 kW poboru oszacowanego z CT — ≈ ${fmt1(d.copPth)} kW przy ≈ ${fmt1(d.copPel)} kW. Zakres odbiorników zależy od montażu CT.`
+      : `${fmt1(d.cop)} kW ciepła na 1 kW prądu w granicy pompy — ≈ ${fmt1(d.copPth)} kW przy ≈ ${fmt1(d.copPel)} kW. BUH jest poza obiema wielkościami.`], // cop
     ["Grzałka dodatkowa (BUH)", "Grzałka dodatkowa BUH", "Elektryczna grzałka w obiegu wodnym, używana m.in. przy mrozie, odszranianiu lub awarii. Stopień opisuje załączoną moc, nie oddzielny pomiar kW.", (d) => d.buh1 == null && d.buh2 == null ? null : d.buh2 ? "Stopień 2 — pracują oba stopnie." : d.buh1 ? "Stopień 1 — pracuje jeden stopień." : "Wyłączona — żaden stopień BUH nie pracuje."], // buh
-    ["Elektryczna grzałka zbiornika", 0, "Grzałka zanurzeniowa BSH ogrzewa zbiornik bez sprężarki i obiegu wody. X10A podaje tylko stan włączona/wyłączona, nie jej moc.", () => { const on = x10aDown() ? null : vOn(/^bsh$/i); return on == null ? null : on ? "Elektryczna grzałka zbiornika jest aktywna." : "Wyłączona — zbiornik nie używa grzałki zanurzeniowej."; }], // bsh
+    ["Elektryczna grzałka zbiornika", 0, "Grzałka zanurzeniowa BSH ogrzewa zbiornik bez sprężarki i obiegu wody. X10A podaje tylko stan włączona/wyłączona, nie jej moc.", (d) => d.bsh == null ? null : d.bsh ? "Elektryczna grzałka zbiornika jest aktywna." : "Wyłączona — zbiornik nie używa grzałki zanurzeniowej."], // bsh
     ["Zawór 3-drogowy", 0, "Sterownik wybiera nim drogę do zbiornika albo obiegu domu. Jest to zgłoszone polecenie, nie mechaniczne potwierdzenie położenia ani przepływu.", (d) => d.valveDhw == null ? null : d.valveDhw ? "Sterownik wybrał drogę do zbiornika; samo zgłoszenie nie potwierdza przepływu ani ładowania." : "Sterownik wybrał drogę do obiegu domu; samo zgłoszenie nie potwierdza cyrkulacji."], // valve
     ["Wyjście zaworu 2-drogowego", 0, "Binarny sygnał wyjściowy X10A dla zaworu 2-drogowego. Nie jest mechanicznym potwierdzeniem położenia ani samodzielnym dowodem ogrzewania lub chłodzenia.", (d) => d.valve2On == null ? null : d.valve2On ? "X10A zgłasza wyjście 2WV WŁ.; osobno sprawdź tryb i pracę obiegu." : "X10A zgłasza wyjście 2WV WYŁ.; samo to nie oznacza chłodzenia ani nie przeczy ustawionemu ogrzewaniu podczas postoju obiegu."], // valve2
     ["Zbiornik CWU / bufor", "Zbiornik CWU lub bufor", "Zbiornik opisują R5T, nastawa i droga 3WV; sama temperatura nie dowodzi ładowania."], // tank
     [(d) => activeSpaceKind(d) === "cool" ? "Obieg chłodzenia" : activeSpaceKind(d) === "heat" ? "Obieg ogrzewania" : "Obieg domu", "Obieg domu", "Odbiorniki domu: grzejniki, podłogówka lub klimakonwektory. R1T/R4T są mierzone wewnątrz pompy i nie potwierdzają temperatury za instalacją polową.", (d) => d.valveDhw === true ? "Droga do obiegu domu nie jest wybrana; rzeczywisty przepływ do zbiornika pokazują osobno pompa i przepływ."
       : waterMoving(d)
-      ? d.thermalMode === "cool" && !compressorRunning(d, 5) && d.pthRaw != null && d.pthRaw > 0
+      ? d.thermalMode === "cool" && compressorStopped(d) && heatersOff(d) && d.pthRaw != null && d.pthRaw > 0
         ? `Ciepło resztkowe płynie do obiegu domu. Wewnętrzny R1T ma ${degC(d.lwt)}; brak czujnika za odbiornikami. To nie jest aktywne chłodzenie.`
         : `Woda płynie do obiegu ${activeSpaceKind(d) === "cool" ? "chłodzenia" : activeSpaceKind(d) === "heat" ? "ogrzewania" : "domu"}. Wewnętrzny R1T ma ${degC(d.lwt)}; brak czujnika za odbiornikami.`
       : "Pompa i przepływ nie potwierdzają cyrkulacji przez obieg domu."], // heat
     ["Praca ogrzewania/chłodzenia domu", "Praca ogrzewania lub chłodzenia domu", "Stan zwykłej pracy obiegu domu. Nie jest żądaniem termostatu i sam nie potwierdza pracy sprężarki."], // spaceh
     ["Temperatura w pomieszczeniu", 0, "Temperatura strefy odniesienia; porównuj ją z nastawą i trybem."], // room
-    ["Pompa obiegowa", "Prędkość pompy obiegowej", "Tłoczy wodę przez wspólny obieg i drogę wybraną przez 3WV. Może pracować przy stojącej sprężarce dla wybiegu, ochrony lub wyrównania temperatury; prędkość sama nie dowodzi przepływu.", (d) => d.pump == null && d.flow == null && d.pumpOn == null ? null
-      : pumpFlowConflict(d) ? `Pompa zgłasza postój, ale czujnik pokazuje ${fmt1(d.flow)} l/min. Możliwy jest obieg zewnętrzny, wybieg albo sprzeczne/stare sygnały; sprawdź oba odczyty.`
-      : d.pump != null && d.pump > 0 ? d.flow != null ? `Sygnał prędkości: ${fmt0(d.pump)} %; zmierzony przepływ: ${fmt1(d.flow)} l/min.` : `Sygnał prędkości: ${fmt0(d.pump)} %, ale brak pomiaru przepływu; cyrkulacja nie jest potwierdzona.`
-      : waterMoving(d) ? `Czujnik pokazuje ${fmt1(d.flow)} l/min mimo braku użytecznej wartości prędkości pompy.`
-      : d.pumpOn === true ? d.flow != null ? `Stan pompy WŁ., ale przepływ to tylko ${fmt1(d.flow)} l/min; cyrkulacja nie jest potwierdzona.` : "Stan pompy WŁ., ale brak pomiaru przepływu; cyrkulacja nie jest potwierdzona."
-      : d.pumpOn === false || d.pump === 0 ? d.flow != null ? `Pompa zgłasza postój; czujnik pokazuje ${fmt1(d.flow)} l/min. Te wartości nie potwierdzają cyrkulacji.` : "Pompa zgłasza postój i brak pomiaru przepływu."
-      : `Brak wiarygodnego stanu pompy; ${fmt1(d.flow)} l/min nie potwierdza cyrkulacji.`], // pump
+    ["Pompa obiegowa", "Polecenie pompy obiegowej", "Tłoczy wodę we wspólnym obiegu i gałęzi wybranej zaworem 3-drogowym. Procent to odwrócone polecenie X10A: 0 % żąda zatrzymania, a 100 % maksymalnego wysterowania. Nie jest pomiarem prędkości ani dowodem obrotów lub przepływu. Status ON/OFF i zmierzony przepływ należy czytać osobno; obieg może trwać przy wyłączonej sprężarce.", (d) => pumpNowText(d, [(n) => `Polecenie pompy ${n} %.`, "Status pompy to ON.", "Pompa zgłasza zatrzymanie (OFF).", "Zgłoszony stan pompy jest nieznany.", (n) => `Zmierzony przepływ ${n} l/min.`, "Brak pomiaru przepływu.", "OFF jest sprzeczne z dodatnim przepływem; możliwy jest obieg zewnętrzny, wybieg lub sprzeczne/nieaktualne sygnały.", "Obieg wody nie jest potwierdzony."])], // pump
     [(d) => pelMeasured(d) ? "Pobór elektryczny (HomeHub)" : "Pobór elektryczny (szacunek)", "Pobór elektryczny", (d) => pelMeasured(d)
       ? "Wartość poboru z rejestru wejściowego HomeHub 51. Dokumentacja nie potwierdza kalibracji, dokładnego punktu pomiaru ani objęcia wszystkich grzałek; to nie jest certyfikowany licznik całej instalacji."
       : "Szacunek dla COP/EER: suma wszystkich zadeklarowanych faz CT × założone 230 V. Rzeczywiste napięcie i współczynnik mocy są nieznane; prąd falownika obejmuje tylko sprężarkę, a zakres CT zależy od okablowania.", (d) => d.pelHeld ? "Sprężarka stoi, więc prąd falownika jest wartością z poprzedniego cyklu, nie bieżącym pomiarem; nie można podać poboru ani sprawności."
-      : d.pel == null ? "Profil nie ma bieżącego odczytu prądu, więc nie można też wyznaczyć COP/EER."
+      : d.pel == null ? t("schem.no_usable_power")
       : d.pelSrc === "MB" ? "Wartość z rejestru wejściowego HomeHub 51; dokładna granica pomiaru nie jest tu udokumentowana."
       : d.pelSrc === "CT" ? "Szacunek z przekładników CT; ujęte odbiorniki zależą od ich podłączenia."
       : "Z prądu falownika — tylko sprężarka."], // pel
-    ["Odszranianie", 0, "Odwrócony cykl topi lód na wymienniku zewnętrznym; ogrzewanie jest wtedy chwilowo przerwane.", (d) => d.defrost == null ? null : d.defrost ? "Odszranianie jest aktywne." : "Wyłączone — cykl odszraniania nie jest aktywny."], // defrost
+    ["Odszranianie", 0, "Odwrócony cykl topi lód na wymienniku zewnętrznym; ogrzewanie jest wtedy chwilowo przerwane.", (d) => d.defrost == null ? null : d.defrost ? "X10A zgłasza aktywne odszranianie." : "X10A zgłasza, że odszranianie jest wyłączone."], // defrost
     ["Tryb cichy", 0, "Ogranicza hałas, zwykle przez ograniczenie wentylatora lub sprężarki. Może przez to zmniejszyć dostępną moc.", (d) => d.quiet == null ? null : d.quiet ? "Tryb cichy jest aktywny." : "Wyłączony — tryb cichy nie jest aktywny."], // quiet
-    ["Przewód gazowy (gorący gaz w ogrzewaniu)", "Przewód gazowy", "Przewód czynnika między jednostkami układu split. W ogrzewaniu gorący gaz pod wysokim ciśnieniem płynie do PHE; w chłodzeniu kierunek się odwraca. Monoblok nie ma tego przewodu polowego.", (d) => compressorRunning(d) ? d.rps != null ? `Przepływ — ${fmt1(d.circP)} bar przy ${fmt0(d.disch)} °C.` : "Przepływ — HomeHub potwierdza sprężarkę; ciśnienie i temperatura tłoczenia wymagają X10A." : "Brak aktywnego obiegu czynnika — sprężarka stoi; wyrównanie ciśnień zależy od układu i czasu postoju."], // rhot
-    ["Przewód cieczowy", 0, "Przewód ciekłego czynnika między jednostkami split. W ogrzewaniu czynnik wraca nim do zaworu rozprężnego jednostki zewnętrznej; w chłodzeniu kierunek się odwraca. Monoblok nie ma tego przewodu polowego.", (d) => compressorRunning(d) ? d.rps != null ? `Przepływ — zawór rozprężny: ${fmt0(d.eev)} impulsów.` : "Przepływ — HomeHub potwierdza sprężarkę; pozycja zaworu wymaga X10A." : "Postój — sprężarka jest wyłączona."], // rcold
+    ["Przewód gazowy (gorący gaz w ogrzewaniu)", "Przewód gazowy", "Przewód czynnika między jednostkami układu split. W ogrzewaniu gorący gaz pod wysokim ciśnieniem płynie do PHE; w chłodzeniu kierunek się odwraca. Monoblok nie ma tego przewodu polowego.", (d) => compressorRunning(d) ? d.rps != null ? `Przepływ — ${fmt1(d.circP)} bar przy ${fmt0(d.disch)} °C.` : "HomeHub zgłasza, że sprężarka jest włączona. Ciśnienie i temperatura tłoczenia wymagają X10A." : "Brak aktywnego obiegu czynnika — sprężarka stoi; wyrównanie ciśnień zależy od układu i czasu postoju."], // rhot
+    ["Przewód cieczowy", 0, "Przewód ciekłego czynnika między jednostkami split. W ogrzewaniu czynnik wraca nim do zaworu rozprężnego jednostki zewnętrznej; w chłodzeniu kierunek się odwraca. Monoblok nie ma tego przewodu polowego.", (d) => compressorRunning(d) ? d.rps != null ? `Przepływ — zawór rozprężny: ${fmt0(d.eev)} impulsów.` : "HomeHub zgłasza, że sprężarka jest włączona. Położenie zaworu rozprężnego wymaga X10A." : "Sprężarka jest zatrzymana."], // rcold
     ["Przewód wyjściowy PHE", 0, "Woda z R1T opuszcza PHE, przechodzi przez BUH i pompę, a 3WV kieruje ją do domu lub zbiornika. W ogrzewaniu/CWU jest stroną ciepłą, w chłodzeniu — zimną; czujnik za BUH może obejmować ciepło elektryczne.", (d) => waterMoving(d) ? `R1T przed BUH: ${degC(d.lwt)} przy ${fmt1(d.flow)} l/min${d.buh1 || d.buh2 ? "; dalej aktywny jest stopień BUH" : ""}.` : "Pompa i przepływ nie potwierdzają cyrkulacji w tym przewodzie."], // wsup
     ["Obieg zbiornika", 0, "Gałąź hydrauliczna ładująca zbiornik CWU lub bufor. Dokładny wymiennik zależy od konstrukcji; schemat pokazuje funkcję, nie wnętrze konkretnego modelu.", (d) => d.valveDhw === true ? waterMoving(d) ? `Wybrano zbiornik, przepływ ${fmt1(d.flow)} l/min; wyjście PHE ${degC(d.lwt)}, zbiornik ${degC(d.tank)}.` : "Wybrano zbiornik, ale pompa i przepływ nie potwierdzają aktywnego ładowania." : "Droga do zbiornika nie jest wybrana; sterownik zgłasza obieg domu."], // wtank
     [(d) => activeSpaceKind(d) === "cool" ? "Gałąź chłodzenia" : activeSpaceKind(d) === "heat" ? "Gałąź ogrzewania" : "Gałąź domu", "Gałąź domu", "Gałąź do grzejników, podłogówki, klimakonwektorów lub innych odbiorników. R1T/R4T mierzą obieg wewnątrz pompy, nie temperaturę na tej gałęzi; ΔT zawiera też wpływ rur i rozdziału.", (d) => d.valveDhw === true ? "Gałąź domu nie jest wybrana; sterownik zgłasza drogę do zbiornika."
-      : waterMoving(d) ? d.thermalMode === "cool" && !compressorRunning(d, 5) && d.pthRaw != null && d.pthRaw > 0 ? `Obieg ciepła resztkowego do domu: ${fmt1(d.flow)} l/min; brak aktywnego chłodzenia. R1T ${degC(d.lwt)}, R4T ${degC(d.ret)}.` : `Cyrkulacja do domu: ${fmt1(d.flow)} l/min. Wewnętrzne R1T ${degC(d.lwt)}, R4T ${degC(d.ret)}.` : "Pompa i przepływ nie potwierdzają cyrkulacji przez gałąź domu."], // wheat
+      : waterMoving(d) ? d.thermalMode === "cool" && compressorStopped(d) && heatersOff(d) && d.pthRaw != null && d.pthRaw > 0 ? `Obieg ciepła resztkowego do domu: ${fmt1(d.flow)} l/min; brak aktywnego chłodzenia. R1T ${degC(d.lwt)}, R4T ${degC(d.ret)}.` : `Cyrkulacja do domu: ${fmt1(d.flow)} l/min. Wewnętrzne R1T ${degC(d.lwt)}, R4T ${degC(d.ret)}.` : "Pompa i przepływ nie potwierdzają cyrkulacji przez gałąź domu."], // wheat
     ["Przewód powrotny do PHE", 0, "Wspólny powrót do R4T po połączeniu gałęzi zbiornika i domu. W ogrzewaniu jest zwykle chłodniejszy od R1T, w aktywnym chłodzeniu cieplejszy; R4T nie jest czujnikiem przy odbiornikach.", (d) => waterMoving(d) ? `Powrót: ${degC(d.ret)}, ${fmt1(d.flow)} l/min, ${fmt1(d.wp)} bar.` : "Pompa i przepływ nie potwierdzają cyrkulacji w przewodzie powrotnym."], // wret
     ["Przepływ wody", 0, "Przepływ wspólnego obiegu; wymagane minimum zależy od modelu i trybu."], // flow
     ["Stan styku przepływu", 0, "Stan binarny X10A; nie mierzy l/min ani nie potwierdza minimum modelu.", (d) => d.flowSwitch == null ? null : d.flowSwitch ? `X10A WŁ.; porównaj z pompą i ${fmt1(d.flow)} l/min.` : `X10A WYŁ.; przy pracy pompy porównaj ${fmt1(d.flow)} l/min i błąd 7H/C0.`], // flow_switch
@@ -1086,7 +1096,7 @@ HOMEHUB_LABEL_I18N.pl = homeHubValues([
   "Sprężarka aktywna", // 31
   "Grzałka zbiornika aktywna", // 32
   "Dezynfekcja zbiornika aktywna", // 33
-  "Pozycja zaworu 3-drogowego", // 37
+  "Zawór trójdrogowy", // 37
   "Bieżący tryb ogrzewania/chłodzenia", // 38
   "Temperatura wyjścia PHE", // 40
   "Temperatura zasilania za BUH", // 41
@@ -1132,7 +1142,7 @@ DESCRIPTION_I18N.pl = descriptionValues([
   ["Dogrzewanie podnosi temperaturę zasobnika do nastawy po spadku poniżej progu."], // 23
   ["Storage comfort wybiera wyższą, a Storage eco niższą zaprogramowaną temperaturę."], // 24
   ["W układzie hybrydowym sterownik żąda od kotła przygotowania CWU."], // 25
-  ["Zawór przełączający kieruje wodę do zasobnika CWU albo obiegu domu."], // 26
+  ["Zgłoszona droga prowadzi do zasobnika CWU albo do obiegu pomieszczeń służącego do ogrzewania lub chłodzenia. Sam odczyt nie potwierdza położenia zaworu ani przepływu."], // 26
   ["Wyjście 2WV pozostaje WŁ./WYŁ.; WYŁ. nie dowodzi chłodzenia ani położenia zaworu."], // 27
   ["Stopień otwarcia zaworu mieszającego drugiej strefy."], // 28
   ["Docelowa temperatura zasilania dla wybranego ogrzewania lub chłodzenia."], // 29
@@ -1142,7 +1152,7 @@ DESCRIPTION_I18N.pl = descriptionValues([
   ["R4T jest wspólnym powrotem do PHE; R1T−R4T to ΔT PHE, nie odbiorników."], // 33
   ["Szybkość obiegu wody we wspólnym układzie ogrzewania/chłodzenia i CWU."], // 34
   ["Ciśnienie wody; zakres zależy od modelu, przy ≤1,0 bar sprawdź jego instrukcję."], // 35
-  ["Odwrócone polecenie pompy: 0 = pełna prędkość, 100 = postój."], // 36
+  ["Odwrócone polecenie X10A pompy obiegowej: surowe 0 żąda maksymalnego wysterowania, a 100 zatrzymania. Nie mierzy obrotów (RPM) ani nie dowodzi obrotu lub przepływu wody. Zgłoszony stan ON/OFF i zmierzony przepływ należy odczytywać osobno, także przy zatrzymanej sprężarce."], // 36
   ["Praca pompy obiegowej nie dowodzi przekazywania ciepła; potwierdź przepływem."], // 37
   ["Stan pompy solarnej, niezależnej od pompy obiegowej układu pompy ciepła."], // 38
   ["Zgłoszona prędkość pompy wskazanej przez profil."], // 39
@@ -1214,7 +1224,7 @@ DESCRIPTION_I18N.pl = descriptionValues([
   ["Bieżący stan diagnostyczny z HomeHub: brak błędu, usterka lub ostrzeżenie."], // 105
   ["Znaczenie aktualnie zgłoszonego kodu usterki."], // 106
   ["Numeryczny podkod zawężający sąsiedni kod diagnostyczny Daikin."], // 107
-  ["HomeHub zgłasza tylko pracę sprężarki, nie obroty ani moc; sens określa obieg i przepływ."], // 108
+  ["HomeHub podaje stan sprężarki, WŁ. lub WYŁ. Prędkość, moc i przekazywanie ciepła wymagają osobnych pomiarów."], // 108
   ["Praca CWU: praca = WŁ., oczekiwanie/buforowanie = WYŁ.; flaga nie podaje przyczyny."], // 109
   ["Praca domu: praca = WŁ., oczekiwanie/buforowanie = WYŁ.; tryb rozróżnia ogrzewanie/chłodzenie."], // 110
   ["Temperatura wody opuszczającej PHE przed elektrycznym BUH."], // 111
@@ -1239,7 +1249,7 @@ MODEL_DESCRIPTION_I18N.pl = modelDescriptionValues([
   ["Pokazuje zaobserwowane uruchomienia i zakończone cykle.", "Ocena opiera się na średnim czasie trwania cykli ogrzewania."], // health_cycling
   ["Odszranianie", "≥3 powiązane, >15% czasu pracy sprężarki przy czytelnych stanach sprężarki i odszraniania. Reguła projektu, nie Daikin; brak wilgotności i temperatury całego wymiennika."], // health_defrost
   ["Ciśnienie", "wspólna reguła projektu ≤1,0 bar; 60 s ciągłej obserwacji daje ostrzeżenie. Nie uniwersalna; obowiązuje instrukcja modelu."], // health_pressure
-  ["Przepływ po 60 s pompy", "Limit wymaga tego samego modelu/trybu/warunków; nie nominalny ani dowód małego przepływu."], // health_flow
+  ["Najniższy zaakceptowany przepływ X10A po co najmniej 60 s objętych kolejnymi wskazaniami włączonej pompy.", "Limit wymaga tego samego modelu/trybu/warunków; nie nominalny ani dowód małego przepływu."], // health_flow
   ["Czas ON BUH/BSH", "nie energia ani dowód zbędnego grzania."], // health_heater
   ["5 eksperymentalnych liczników", "porównywalne wzrosty; luki/reset pomijane. Stabilność nie wyklucza ograniczeń ani nie dowodzi przyczyny."], // health_retries
   ["RAM 24 h: stabilna lub spadki z odbiciem; stały spadek, możliwy wyciek; zgodny restart z zasilaniem: możliwy wykres RAM. Inaczej tylko zgodne datowane 5 min dziennika flash po synchronizacji czasu. Co 5 min krótka przerwa może pozostać niewidoczna; otwarty/ostatnie niezapisane mogą zniknąć."], // 8

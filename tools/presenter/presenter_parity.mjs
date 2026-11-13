@@ -129,14 +129,14 @@ for (const raw of lines) {
       break;
     }
     case "COP": {
-      const [, pel, b1, b2, bsh, pbOk, scope, block, postBuh] = f;
+      const [, pel, b1, b2, bsh, pbOk, inv, scope, block, postBuh] = f;
       // The heater states cross the boundary as the RAW tri-states, exactly as the row data supplies
       // them: -1 unknown (no such row on this profile) / 0 off / 1 on. Nothing is collapsed here —
       // the collapse is the rule's most dangerous step and belongs to the two copies being compared,
       // not to the thing comparing them.
       const tri = (v) => (v === "-1" ? null : v === "1");
-      const got = ui.copPlan(pel === "null" ? null : pel, tri(b1), tri(b2), tri(bsh), pbOk === "1");
-      const subject = `pel=${pel} buh=(${b1},${b2}) bsh=${bsh} postBuhRow=${pbOk}`;
+      const got = ui.copPlan(pel === "null" ? null : pel, tri(b1), tri(b2), tri(bsh), pbOk === "1", inv === "1");
+      const subject = `pel=${pel} buh=(${b1},${b2}) bsh=${bsh} postBuhRow=${pbOk} invPair=${inv}`;
       const gotScope = got.scope === null ? "null" : got.scope;
       const gotBlock = got.block === null ? "null" : got.block;
       if (gotScope !== scope) bad("COP", subject, "scope", scope, gotScope);
@@ -251,7 +251,7 @@ context.S._values = [];
 // A vector file that produced no comparisons passes every assertion above. Refuse it: "no vectors
 // found" must never read as "the two copies agree", which is the one thing a parity gate exists to
 // establish.
-if (counts.ROW === 0 || counts.PICK === 0 || counts.COP === 0 || profileRows.size < 30 || patterns.size < 25) {
+if (counts.ROW === 0 || counts.PICK === 0 || counts.COP !== 324 || profileRows.size < 30 || patterns.size < 25) {
   console.error(`presenter_parity: incomplete vector file (rows=${counts.ROW} picks=${counts.PICK} ` +
                 `cop=${counts.COP} profiles=${profileRows.size} patterns=${patterns.size}) — every family must be exercised`);
   process.exit(2);

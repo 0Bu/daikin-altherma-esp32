@@ -45,7 +45,7 @@ cp -R "$proj/tools/ui" "$tmp/tools/ui"
 # An unread compressor witness must not turn into a measured stop in the activity line.
 (cd "$tmp" && node test/test_ui_live_i18n.mjs >/dev/null 2>&1) || {
   echo "ui selftest: live-state fixture fails before mutation" >&2; exit 1; }
-sed 's/if (d.rps == null && d.compressorOn == null)/if (d.ouUnknown)/' \
+sed 's/if (!compressorStopped(d))/if (d.ouUnknown)/' \
   "$proj/main/www/js/app_state.js" > "$tmp/main/www/js/app_state.js"
 if (cd "$tmp" && node test/test_ui_live_i18n.mjs >"$tmp/unknown-activity.log" 2>&1); then
   echo "ui selftest: unknown compressor reported as stopped escaped the activity checks" >&2; exit 1
@@ -387,6 +387,8 @@ cp -R "$proj/main/def" "$matrix_tmp/main/def"
 cp -R "$proj/tools/ui" "$matrix_tmp/tools/ui"
 cp -R "$proj/tools/uigif" "$matrix_tmp/tools/uigif"
 cp "$proj/test/test_ui_source_matrix.mjs" "$matrix_tmp/test/"
+cp "$proj/test/test_ui_history_sources.mjs" "$matrix_tmp/test/"
+cp "$proj/main/history.cpp" "$proj/main/mqtt_ha.cpp" "$matrix_tmp/main/"
 
 # Sanity: the unmutated copy must PASS, or the two failures below prove nothing.
 (cd "$matrix_tmp" && node test/test_ui_source_matrix.mjs >/dev/null 2>&1) || {
@@ -395,17 +397,99 @@ cp "$proj/test/test_ui_source_matrix.mjs" "$matrix_tmp/test/"
 
 cp "$matrix_tmp/main/www/js/schematic.js" "$matrix_tmp/schematic.orig"
 
-# An independent HomeHub ON witness must not be replaced by an unknown-age explanation.
-sed 's/^  d.pelUnknown =.*$/  d.pelUnknown = d.pel == null \&\& !d.pelHeld \&\& speedUnread;/' \
+# An age warning requires an inverter reading. A missing reading needs its own explanation
+# even when the independent HomeHub reports the compressor ON.
+sed 's/^  d.pelUnknown =.*$/  d.pelUnknown = d.pel == null \&\& !invHeld \&\& !invCurrent \&\& (invValid || d.mbCompressorOn === true);/' \
   "$matrix_tmp/schematic.orig" > "$matrix_tmp/main/www/js/schematic.js"
 if (cd "$matrix_tmp" && node test/test_ui_source_matrix.mjs >"$matrix_tmp/known-compressor.log" 2>&1); then
   echo "ui selftest: known compressor reported as unknown escaped the source matrix" >&2; exit 1
 fi
-grep -q 'a known HomeHub compressor state cannot receive an unknown-age explanation' \
+grep -q 'a missing inverter value must not be reported as an age-qualified reading' \
   "$matrix_tmp/known-compressor.log" || {
   echo "ui selftest: known-compressor mutation failed outside its intended assertion" >&2; exit 1; }
 cp "$matrix_tmp/schematic.orig" "$matrix_tmp/main/www/js/schematic.js"
-echo "ui selftest: a known HomeHub compressor reported as unknown is detected"
+echo "ui selftest: missing inverter current reported as an unknown-age reading is detected"
+
+# The HomeHub OFF report cannot change the age classification of an X10A reading.
+sed 's/^  d.ouHeldOver = d.rps === 0;$/  d.ouHeldOver = d.rps === 0 || (d.rps == null \&\& markedUnknown \&\& d.mbCompressorOn === false);/' \
+  "$matrix_tmp/schematic.orig" > "$matrix_tmp/main/www/js/schematic.js"
+if (cd "$matrix_tmp" && node test/test_ui_source_matrix.mjs >"$matrix_tmp/independent-age.log" 2>&1); then
+  echo "ui selftest: HomeHub OFF changing X10A freshness escaped the source matrix" >&2; exit 1
+fi
+grep -q 'a HomeHub flag must not classify an X10A page as held' "$matrix_tmp/independent-age.log" || {
+  echo "ui selftest: HomeHub freshness mutation failed outside its intended assertion" >&2; exit 1; }
+cp "$matrix_tmp/schematic.orig" "$matrix_tmp/main/www/js/schematic.js"
+echo "ui selftest: HomeHub OFF changing X10A freshness is detected"
+
+# A combined cooling and tank mode cannot choose a direction without the valve route.
+sed 's/(coolingDhw \&\& route === false)/(coolingDhw \&\& route !== true)/' \
+  "$matrix_tmp/schematic.orig" > "$matrix_tmp/main/www/js/schematic.js"
+if (cd "$matrix_tmp" && node test/test_ui_source_matrix.mjs >"$matrix_tmp/ambiguous-direction.log" 2>&1); then
+  echo "ui selftest: Cooling + DHW direction without a route escaped the source matrix" >&2; exit 1
+fi
+grep -q 'Cooling + DHW without a route cannot select direction' "$matrix_tmp/ambiguous-direction.log" || {
+  echo "ui selftest: ambiguous-direction mutation failed outside its intended assertion" >&2; exit 1; }
+cp "$matrix_tmp/schematic.orig" "$matrix_tmp/main/www/js/schematic.js"
+echo "ui selftest: Cooling + DHW direction without a route is detected"
+
+# A missing defrost page cannot supply the OFF evidence needed for a normal direction.
+sed 's/else if (d.defrost === false) {/else {/' \
+  "$matrix_tmp/schematic.orig" > "$matrix_tmp/main/www/js/schematic.js"
+if (cd "$matrix_tmp" && node test/test_ui_source_matrix.mjs >"$matrix_tmp/unread-defrost.log" 2>&1); then
+  echo "ui selftest: missing defrost page escaped the source matrix" >&2; exit 1
+fi
+grep -q 'an unread defrost page cannot establish normal refrigerant direction' "$matrix_tmp/unread-defrost.log" || {
+  echo "ui selftest: unread-defrost mutation failed outside its intended assertion" >&2; exit 1; }
+cp "$matrix_tmp/schematic.orig" "$matrix_tmp/main/www/js/schematic.js"
+echo "ui selftest: missing defrost page allowing normal refrigerant direction is detected"
+
+# A valid but older HomeHub full-sweep route cannot determine a current thermal direction.
+sed 's/const route = d.valveDhw;/const route = d.valveDhw ?? mbBool(37);/' \
+  "$matrix_tmp/schematic.orig" > "$matrix_tmp/main/www/js/schematic.js"
+if (cd "$matrix_tmp" && node test/test_ui_source_matrix.mjs >"$matrix_tmp/cached-route.log" 2>&1); then
+  echo "ui selftest: cached HomeHub route changing direction escaped the source matrix" >&2; exit 1
+fi
+grep -q 'cached HomeHub route cannot select direction' "$matrix_tmp/cached-route.log" || {
+  echo "ui selftest: cached-route mutation failed outside its intended assertion" >&2; exit 1; }
+cp "$matrix_tmp/schematic.orig" "$matrix_tmp/main/www/js/schematic.js"
+echo "ui selftest: cached HomeHub route changing direction is detected"
+
+# A cached tank report must not veto a known Cooling mode.
+sed 's/(cooling \&\& route !== true)/(cooling \&\& (route ?? mbBool(37)) !== true)/' \
+  "$matrix_tmp/schematic.orig" > "$matrix_tmp/main/www/js/schematic.js"
+if (cd "$matrix_tmp" && node test/test_ui_source_matrix.mjs >"$matrix_tmp/cached-cooling-veto.log" 2>&1); then
+  echo "ui selftest: cached HomeHub route vetoing Cooling escaped the source matrix" >&2; exit 1
+fi
+grep -q '"Cooling", X10A valve null, HomeHub valve true, defrost false' "$matrix_tmp/cached-cooling-veto.log" || {
+  echo "ui selftest: cached Cooling veto mutation failed outside its intended assertion" >&2; exit 1; }
+cp "$matrix_tmp/schematic.orig" "$matrix_tmp/main/www/js/schematic.js"
+echo "ui selftest: cached HomeHub route vetoing Cooling is detected"
+
+sed 's/flow: flowValid ? flow : null,/flow: flow,/' \
+  "$matrix_tmp/schematic.orig" > "$matrix_tmp/main/www/js/schematic.js"
+if (cd "$matrix_tmp" && node test/test_ui_source_matrix.mjs >"$matrix_tmp/invalid-flow.log" 2>&1); then
+  echo "ui selftest: invalid X10A flow escaped the source matrix" >&2; exit 1
+fi
+grep -q 'reject invalid X10A flow before publishing it to the schematic' "$matrix_tmp/invalid-flow.log" || {
+  echo "ui selftest: invalid flow mutation failed outside its intended assertion" >&2; exit 1; }
+cp "$matrix_tmp/schematic.orig" "$matrix_tmp/main/www/js/schematic.js"
+echo "ui selftest: invalid X10A flow reaching the schematic is detected"
+
+cp "$matrix_tmp/main/www/js/history.js" "$matrix_tmp/history.orig"
+(cd "$matrix_tmp" && node test/test_ui_history_sources.mjs >/dev/null 2>&1) || {
+  echo "ui selftest: the history source contract must pass before mutation" >&2; exit 1; }
+sed '/^const DERIVED = {/a\
+  pel: { unit: "kW", ins: ["ct_l1", "ct_l2", "ct_l3"], ready: (h) => h.ct_l1,\
+    fn: (s) => (s.ct_l1 + s.ct_l2 + s.ct_l3) * 0.23 },\
+' \
+  "$matrix_tmp/history.orig" > "$matrix_tmp/main/www/js/history.js"
+if (cd "$matrix_tmp" && node test/test_ui_history_sources.mjs >"$matrix_tmp/ct-history.log" 2>&1); then
+  echo "ui selftest: reconstructing power from independent CT rings escaped its regression test" >&2; exit 1
+fi
+grep -q 'same-bucket CT readings cannot qualify a historical power estimate' "$matrix_tmp/ct-history.log" || {
+  echo "ui selftest: electrical history offer mutation failed outside its intended assertion" >&2; exit 1; }
+cp "$matrix_tmp/history.orig" "$matrix_tmp/main/www/js/history.js"
+echo "ui selftest: power reconstructed from independent CT rings is detected"
 
 sed 's/if (d.rps == null \&\& d.compressorOn == null \&\& COMPRESSOR_NOW/if (d.ouUnknown \&\& COMPRESSOR_NOW/' \
   "$matrix_tmp/schematic.orig" > "$matrix_tmp/main/www/js/schematic.js"

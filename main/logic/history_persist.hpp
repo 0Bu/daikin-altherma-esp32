@@ -113,8 +113,10 @@
 #include "logic/history.hpp"
 #include "logic/homehub_map.hpp"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 
 namespace daik::logic {
 
@@ -341,6 +343,59 @@ inline uint32_t history_journal_circulation_identity(const HistoryJournalHeader&
            (static_cast<uint32_t>(h.pad[10]) << 16) | (static_cast<uint32_t>(h.pad[11]) << 24);
 }
 
+// The configured target is the first 128 bits of SHA-256 over the domain, this prefix and
+// the exact hostname bytes. Keep the input canonical regardless of native integer byte order.
+using HistoryModbusTarget                                              = std::array<uint8_t, 16>;
+inline constexpr char                   HISTORY_MODBUS_TARGET_DOMAIN[] = "modbus-target-v2";
+inline constexpr std::array<uint8_t, 5> history_modbus_target_prefix(uint16_t host_length,
+                                                                     uint16_t port, uint8_t unit) {
+    return {static_cast<uint8_t>(host_length), static_cast<uint8_t>(host_length >> 8),
+            static_cast<uint8_t>(port), static_cast<uint8_t>(port >> 8), unit};
+}
+
+// Strongly scoped Modbus data keeps the v1 physical envelope. Exact IPv4 occupies the old scope
+// field, and the CRC covers a fixed digest suffix after the actual samples. Its count differs from
+// the old catalog/manifest widths so older readers can discover the append head without restoring
+// these data. The second marker also excludes readers that looked for pad[4] == 1.
+inline constexpr uint16_t HISTORY_MODBUS_SCOPE_TAG = 0x4d02;
+inline constexpr size_t   HISTORY_MODBUS_SCOPE_WORDS =
+    sizeof(HistoryModbusTarget) / sizeof(HistorySample);
+static_assert(sizeof(HistoryModbusTarget) % sizeof(HistorySample) == 0 &&
+                  (HOMEHUB_HISTORY_COUNT + HISTORY_MODBUS_SCOPE_WORDS) * sizeof(HistorySample) <=
+                      HISTORY_JOURNAL_PAYLOAD_BYTES,
+              "Modbus target digest must fit in the unchanged physical slot");
+
+inline size_t history_journal_modbus_scope_words(const HistoryJournalHeader& h) {
+    if (h.source != static_cast<uint8_t>(HistoryJournalSource::Modbus) ||
+        h.flags != HISTORY_JOURNAL_FLAG_TARGET_SCOPED || h.reserved != HISTORY_MODBUS_SCOPE_TAG ||
+        h.pad[4] != 2 || history_journal_scope(h) == 0 ||
+        h.value_count <= HISTORY_MODBUS_SCOPE_WORDS || h.value_count != h.rings[h.source] ||
+        h.value_count > HISTORY_JOURNAL_PAYLOAD_BYTES / sizeof(HistorySample))
+        return 0;
+    return HISTORY_MODBUS_SCOPE_WORDS;
+}
+
+inline void history_journal_set_modbus_scope(HistoryJournalHeader& h, uint8_t* payload,
+                                             uint32_t ipv4, const HistoryModbusTarget& target) {
+    std::memcpy(payload + h.value_count * sizeof(HistorySample), target.data(), target.size());
+    h.value_count += HISTORY_MODBUS_SCOPE_WORDS;
+    h.rings[static_cast<size_t>(HistoryJournalSource::Modbus)] = h.value_count;
+    h.reserved                                                 = HISTORY_MODBUS_SCOPE_TAG;
+    history_journal_set_scope(h, ipv4);
+    h.pad[4] = 2;
+}
+
+inline bool history_journal_modbus_config_matches(const HistoryJournalHeader& h,
+                                                  const uint8_t* payload, size_t payload_size,
+                                                  const HistoryModbusTarget& target) {
+    const size_t suffix = history_journal_modbus_scope_words(h);
+    if (!suffix || h.value_count * sizeof(HistorySample) > payload_size ||
+        target == HistoryModbusTarget{})
+        return false;
+    return std::memcmp(payload + (h.value_count - suffix) * sizeof(HistorySample), target.data(),
+                       target.size()) == 0;
+}
+
 // May the circulation column of a record stamped `record_identity` be restored? Only for an exact
 // match with the current non-zero identity, and never while a circulation reset is pending (the
 // ring still holds the retired witness's samples until the reset is consumed). A record without the
@@ -395,13 +450,12 @@ inline bool history_journal_trend_header_structural_matches(const HistoryJournal
     return h.value_count == h.rings[h.source];
 }
 
-inline bool history_journal_trend_layout_matches(const HistoryJournalHeader& h,
-                                                 uint32_t catalog_fp,
-                                                 uint16_t x10a_rings,
-                                                 uint16_t modbus_rings,
-                                                 uint16_t env3_rings) {
+inline bool history_journal_trend_layout_matches(const HistoryJournalHeader& h, uint32_t catalog_fp,
+                                                 uint16_t x10a_rings, uint16_t modbus_rings,
+                                                 uint16_t env3_rings,
+                                                 size_t   modbus_scope_words = 0) {
     if (!history_journal_trend_header_structural_matches(h) || h.catalog_fp != catalog_fp) return false;
-    const uint16_t rings[3] = {x10a_rings, modbus_rings, env3_rings};
+    const size_t rings[3] = {x10a_rings, modbus_rings + modbus_scope_words, env3_rings};
     for (size_t i = 0; i < 3; ++i)
         if (h.rings[i] != rings[i]) return false;
     return h.value_count == rings[h.source];
@@ -776,7 +830,7 @@ inline constexpr size_t   HISTORY_LIVENESS_RASTERS = 3; // X10a, Modbus, Env3 (H
 
 // Plain data on purpose: no member initialisers, so a definition in .noinit emits no initialiser
 // image (the reason history.cpp's PersistStore is a union) and the type stays trivially
-// constructible. Padding is not part of the CRC.
+// constructible. The last word names formerly unused tail padding without moving other stores.
 struct HistoryLiveness {
     uint32_t magic;
     uint16_t version;
@@ -784,12 +838,17 @@ struct HistoryLiveness {
     int64_t  sign_us;                             // last sign of life; INT64_MIN: none
     int64_t  commit_us[HISTORY_LIVENESS_RASTERS]; // last commit per raster; INT64_MIN: none
     uint32_t crc;
+    uint32_t modbus_config_fp; // shared trend-store seal; unused by the room and liveness seals
 };
+static_assert(sizeof(HistoryLiveness) == 48 && offsetof(HistoryLiveness, crc) == 40 &&
+                  offsetof(HistoryLiveness, modbus_config_fp) == 44,
+              "retained liveness layout and tail must stay at their original offsets");
 
 // The CRC covers the instants — the fields that change — serialised little-endian into one small
 // buffer and hashed in one call: this runs on the poll task every cycle and from the commit paths
 // of three other tasks, so it keeps its call chain flat. Magic and version are compared directly
-// by history_liveness_valid() and padding is not evidence, so none of them needs to be hashed.
+// by history_liveness_valid(). The Modbus tail belongs to the trend seal and survives clock
+// updates.
 inline uint32_t history_liveness_crc(const HistoryLiveness& r) {
     uint8_t        b[8 + 8 * HISTORY_LIVENESS_RASTERS];
     size_t         n    = 0;
@@ -1162,14 +1221,23 @@ inline bool history_manifest_adopt(HistoryManifestCurrent& cur, bool current_gen
     return true;
 }
 
-// The physical HomeHub observation identity. Flash and .noinit history must never cross this
-// boundary: a new host, port or unit id is a different plant even when the register catalog matches.
+// Configured HomeHub target, one part of the observation identity.
 inline uint32_t history_homehub_target_fingerprint(const char* host, uint32_t port, uint32_t unit) {
     uint32_t crc = CONFIG_CRC32_INIT;
     crc = history_fp_str(crc, host);
     crc = history_fp_u32(crc, port);
     crc = history_fp_u32(crc, unit);
     return config_crc32_final(crc);
+}
+
+// A different IPv4 endpoint cannot inherit samples merely because its DNS name is unchanged.
+// The IPv4 argument is in host byte order so the same endpoint has one persisted scope.
+inline uint32_t history_homehub_peer_fingerprint(uint32_t configured, uint32_t ipv4) {
+    uint32_t crc         = history_fp_str(CONFIG_CRC32_INIT, "modbus-peer");
+    crc                  = history_fp_u32(crc, configured);
+    crc                  = history_fp_u32(crc, ipv4);
+    const uint32_t scope = config_crc32_final(crc);
+    return scope == configured ? 0 : scope; // Do not alias this target's legacy scope.
 }
 
 // Scope X10A history to the committed decoding contract, not to a single sweep's optional witness.

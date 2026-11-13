@@ -213,13 +213,13 @@ const char* ota_runtime_image_state_name(OtaRuntimeImageState state) {
 // and direct uploads acquire this lease (logic/mqtt_publish_gate.hpp).
 struct OtaNetworkFlag {
     OtaNetworkFlag() {
-        s_network_active.store(true, std::memory_order_release);
+        s_network_active.store(true);
         mqtt_transport_withdraw_online_on_pause();
         mqtt_transport_pause_for_network_heap();
     }
     ~OtaNetworkFlag() {
         mqtt_transport_resume_after_network_heap();
-        s_network_active.store(false, std::memory_order_release);
+        s_network_active.store(false);
     }
 };
 
@@ -2023,7 +2023,7 @@ const char* ota_img_suffix() {
     return ""; // esp32s3 is the only target, no suffix needed
 }
 
-bool ota_download_active() { return s_network_active.load(std::memory_order_acquire); }
+bool ota_download_active() { return s_network_active.load(); }
 
 uint32_t ota_check_async(int64_t /*browser_epoch_ms*/, const OtaFeedUrls* hil_feed) {
     // browser_epoch_ms stays plumbed (the route parses ?ms=) but gates nothing: TLS certificate

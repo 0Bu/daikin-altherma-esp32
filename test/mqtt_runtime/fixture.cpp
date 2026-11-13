@@ -221,8 +221,10 @@ HpX10aJsonCopyResult hp_values_x10a_json_copy(std::string& out, size_t, uint64_t
 bool         mb_target_enabled() noexcept { return adapter::modbus_enabled; }
 ModbusStatus mb_status() { return adapter::modbus; }
 size_t       mb_values_capacity() { return adapter::modbus_values.size(); }
-size_t       mb_values_snapshot(CachedValue* out, size_t capacity, bool& live) {
+size_t       mb_values_snapshot(CachedValue* out, size_t capacity, bool& live,
+                                uint32_t* history_generation) {
     live               = adapter::modbus_live;
+    if (history_generation) *history_generation = 0;
     const size_t count = std::min(capacity, adapter::modbus_values.size());
     for (size_t i = 0; i < count; ++i) out[i] = adapter::modbus_values[i];
     return count;

@@ -1018,9 +1018,9 @@ static esp_err_t set_hp(httpd_req_t* req) {
         // OOM honestly. The post-save path below accepts only POD and is noexcept: a successful
         // durable write can therefore never become a false 503 or lose predecessor cleanup to a
         // Config copy.
-        const uint32_t modbus_target_fp = logic::history_homehub_target_fingerprint(
-            config_modbus_host(c).c_str(), static_cast<uint32_t>(c.mb_port),
-            static_cast<uint32_t>(c.mb_unit_id));
+        const auto modbus_target =
+            reset_mb_history ? history_modbus_target(config_modbus_host(c), c.mb_port, c.mb_unit_id)
+                             : logic::HistoryModbusTarget{};
         const bool modbus_enabled = config_modbus_enabled(c);
         // This route owns TWO independent durability domains. An explicit X10A statement requires
         // the atomic link-cache entry and a snapshot no detection commit has overtaken; a
@@ -1052,7 +1052,7 @@ static esp_err_t set_hp(httpd_req_t* req) {
             }
         }
         if (reset_mb_history) {
-            history_modbus_reset(modbus_target_fp);
+            history_modbus_reset(modbus_target);
             // The HomeHub stack is told separately, because it IS separate: this starts or stops
             // its task and re-resolves its address without touching the X10A poll engine above.
             mb_reconfigure(modbus_enabled);
@@ -1062,7 +1062,11 @@ static esp_err_t set_hp(httpd_req_t* req) {
             // identity. mqtt_task can then never consume this request and republish predecessor A
             // from the same cycle before the HomeHub owner notices B/disabled.
             if (modbus_was_enabled) mqtt_request_modbus_cleanup();
+        } else if (homehub_sent && modbus_enabled) {
+            mb_retry_start();
         }
+        if (homehub_sent && modbus_enabled && mb_task_pending())
+            return http_send_json(req, "{\"ok\":true,\"modbus_start_pending\":true}");
         return http_send_json(req, "{\"ok\":true}");
     }
 }

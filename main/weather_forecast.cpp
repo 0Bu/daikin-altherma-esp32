@@ -135,9 +135,7 @@ struct RefreshRequestAttempt {
 struct NetworkActivity {
     explicit NetworkActivity(uint32_t source_generation) {
         SourceAdmission expected = SourceAdmission::Idle;
-        if (!s_source_admission.compare_exchange_strong(expected, SourceAdmission::Network,
-                                                        std::memory_order_acq_rel,
-                                                        std::memory_order_acquire))
+        if (!s_source_admission.compare_exchange_strong(expected, SourceAdmission::Network))
             return;
         // A handler may advance the token just before losing the admission CAS above. In that
         // ordering it will wait for us, so release immediately without touching MQTT or the peer.
@@ -1072,7 +1070,7 @@ WeatherForecastStatus weather_forecast_status() {
 }
 
 bool weather_fetch_active() {
-    const SourceAdmission state = s_source_admission.load(std::memory_order_acquire);
+    const SourceAdmission state = s_source_admission.load();
     return state == SourceAdmission::Network || state == SourceAdmission::SourceChangePending;
 }
 

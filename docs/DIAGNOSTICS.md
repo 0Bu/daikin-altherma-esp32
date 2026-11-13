@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: 809d0372d0eaf6202ed5fd69352f1dfc5c462c057f1071a7680d9390a9831d24 -->
+<!-- user-docs-contract: c5759f3f4f97bfa21edfff01b8df912a2e59bbcbe9e440147bc29c89f07a7195 -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default. Enable **Plant diagnostics** under **Settings → Firmware** to start an evidence
@@ -153,14 +153,15 @@ normal value does not erase an earlier low reading.
 <!-- user-docs: health_flow -->
 ### Lowest water flow
 
-**In plain language:** The board reports the lowest accepted flow after the internal pump has run
-continuously for at least sixty seconds.
+**In plain language:** The board reports the lowest accepted X10A flow after at least 60 seconds
+covered by consecutive X10A pump-ON reports.
 
 **Meaning:** The result is **MEASURED**. It filters pump-off and initial run-up values; it does
 not establish part load or retain the operating mode of the minimum.
 
-**Important limit:** Required flow differs by model, heating, cooling, DHW and defrost conditions.
-The minimum is not a design-flow measurement or a diagnosis of restricted flow.
+**Important limit:** The ON reports do not independently verify physical pump rotation. Required
+flow differs by model and operating mode. The minimum is not a design-flow measurement or a
+diagnosis of restricted flow.
 
 **Evidence and limits:** [Lowest water flow](DIAGNOSTIC_EVIDENCE.md#diagnosis-flow)
 

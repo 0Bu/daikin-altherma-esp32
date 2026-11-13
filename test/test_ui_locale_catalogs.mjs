@@ -61,7 +61,7 @@ const catalog = catalogContext.__catalog;
 const lazyDomainCodes = ["zh", "ja", "nb", "sv", "fi"];
 const englishKeys = Object.keys(catalog.en).sort();
 const englishKeyOrder = Object.keys(catalog.en);
-assert.equal(englishKeys.length, 950, "the test must track the complete current UI catalog");
+assert.equal(englishKeys.length, 969, "the test must track the complete current UI catalog");
 for (const [code, source] of localeSources) {
   const sections = [`INSPECT_I18N.${code}`, `MODEL_DESCRIPTION_I18N.${code}`]
     .map(marker => source.indexOf(marker)).filter(index => index >= 0);
@@ -414,16 +414,136 @@ for (const code of codes.slice(2)) {
   const runtimeContext = vm.createContext({
     navigator: { language: "en" },
     localStorage: { getItem: () => null, setItem: () => {} },
-    document: { getElementById: () => null, documentElement: {}, querySelectorAll: () => [] },
-    labelSchematicHits: () => {},
+    document: { getElementById: id => id === "inspClose" ? { setAttribute() {} } : null,
+      documentElement: {}, querySelectorAll: () => [] },
+    S: { status: { hp: { connected: true } }, _values: [] },
   });
-  const runtimeSource = readAppFragments(["i18n.js", "descriptions.js", "history.js"]) +
+  const runtimeSource = readAppFragments(["i18n.js", "descriptions.js", "history.js", "schematic.js"]) +
     codes.slice(1).map((code) => readUiLocale(code)).join("");
   vm.runInContext(`${runtimeSource}; globalThis.__copyRuntime = { activateLang, esc, DESCRIPTIONS,
     MODEL_DESCRIPTIONS, descBodyHtml, descriptionCopy, modelDescriptionCopy, faultCodeDetailHtml,
-    DAIKIN_FAULT_CODES, FAULT_CODE_I18N, MB_DELTA_I18N, mbDeltaHtml };`, runtimeContext,
+    DAIKIN_FAULT_CODES, FAULT_CODE_I18N, MB_DELTA_I18N, mbDeltaHtml, INSPECT, inspFieldText, t,
+    inspNowText };`, runtimeContext,
     { filename: "localized-description-runtime.js" });
   const api = runtimeContext.__copyRuntime;
+  const separateWaterEvidence = {
+    en: /heater activity and water circulation.*separate/i,
+    de: /Heizereinsatz und Wasserumlauf.*separate/,
+    es: /calentadores eléctricos.*circulación del agua.*por separado/,
+    fr: /appoints électriques.*circulation de l’eau.*séparément/,
+    it: /resistenze elettriche.*circolazione dell’acqua.*separatamente/,
+    pl: /grzałek elektrycznych.*obieg wody.*osobno/,
+    cs: /elektrického ohřevu.*oběh vody.*samostatně/,
+    uk: /електронагрівачів.*циркуляцію води.*окремо/,
+    zh: /电加热器.*水是否循环.*分别/,
+    ja: /電気ヒーター.*水の循環.*別々/,
+    nb: /varmeelementer.*vannsirkulasjon.*separat/,
+    sv: /Elvärmarnas drift.*vattencirkulationen.*separat/,
+    fi: /Sähkölämmittimien toiminta.*veden kierto.*erikseen/,
+  };
+  const compressorFlag = api.DESCRIPTIONS.find(entry => entry.re.test("Compressor running"));
+  for (const code of codes) {
+    api.activateLang(code);
+    const flagCopy = api.descBodyHtml(compressorFlag, undefined, api.descriptionCopy(compressorFlag));
+    assert.match(flagCopy, /HomeHub/);
+    for (const state of ["state.on", "state.off"])
+      assert.ok(flagCopy.includes(api.t(state)), `${code}: the HomeHub flag names its binary state`);
+    const parked = { compressorOn: false, flow: 12, buh1: true, mbFields: new Set(["out"]) };
+    for (const x10a of [true, false]) {
+      runtimeContext.S.status.hp.connected = x10a;
+      const frame = { ...parked, rps: x10a ? 0 : null, ouHeldOver: x10a, mbCompressorOn: false };
+      const stopped = api.inspNowText(api.INSPECT.ou, { ...frame, out: 0 });
+      assert.match(stopped, separateWaterEvidence[code], `${code}: preserve heater and water-circuit evidence`);
+      assert.ok(stopped.includes(api.t(x10a ? "schem.outdoor_held" : "sys.x10a_down")));
+      assert.ok(stopped.includes(api.t("schem.outdoor_homehub")),
+        `${code}: credit HomeHub for the displayed outdoor reading even when X10A is offline`);
+      assert.equal(stopped.includes(api.t("schem.homehub_compressor_off")), !x10a,
+        `${code}: attribute the OFF report when X10A supplies no speed`);
+      assert.ok(!api.inspNowText(api.INSPECT.ou, { ...frame, out: null }).includes(api.t("schem.outdoor_homehub")),
+        `${code}: source metadata without an outdoor value cannot earn a source claim`);
+    }
+    runtimeContext.S.status.hp.connected = true;
+    const unknown = api.inspNowText(api.INSPECT.ou, { rps: null, compressorOn: null });
+    assert.equal(unknown, api.t("dyn.state_gate"), `${code}: no compressor witness cannot establish a stop`);
+    const conflict = api.inspNowText(api.INSPECT.ou, {
+      ...parked, rps: 0, mbCompressorOn: true, ouHeldOver: true, out: 5,
+    });
+    assert.ok(conflict.includes(`X10A 0 rps · HomeHub ${api.t("state.on")}`));
+    assert.ok(conflict.includes(api.t("schem.outdoor_homehub")));
+    for (const valveDhw of [true, false, null]) {
+      const d = { valveDhw, flow: 12.3, lwt: 34.7, ret: 31, tank: 42,
+        pthKind: "cooling", thermalMode: "cool", rps: 20 };
+      for (const [key, route] of [["wtank", true], ["wheat", false], ["heat", false]]) {
+        const text = api.inspNowText(api.INSPECT[key], d);
+        if (valveDhw == null) {
+          assert.equal(text, api.t("schem.water_route_unknown"), `${code}/${key}: common flow cannot pick a branch`);
+        } else {
+          assert.equal(text.includes((34.7).toLocaleString(code)), valveDhw === route,
+            `${code}/${key}: positive flow copy requires the matching reported route`);
+        }
+      }
+      if (valveDhw !== false) {
+        for (const key of ["heat", "wheat"])
+          assert.equal(api.inspFieldText(api.INSPECT[key], "t", d),
+            api.inspFieldText(api.INSPECT[key], "t", { ...d, pthKind: null }),
+            `${code}/${key}: a branch title needs the matching reported route`);
+      }
+    }
+    for (const key of ["ou", "rhot", "rcold"]) {
+      const gateway = api.inspNowText(api.INSPECT[key], { rps: null, compressorOn: true });
+      assert.match(gateway, /^HomeHub|^Der HomeHub/, `${code}/${key}: lead with the reported compressor state`);
+      assert.match(gateway, /X10A/, `${code}/${key}: distinguish detailed readings from the HomeHub flag`);
+    }
+    for (const pth of [-5, 0, 5]) {
+      const frame = { defrost: true, pthKind: "transfer", pth, rps: 18, dtStale: false };
+      const sign = api.t("schem.transfer_sign");
+      assert.equal(api.inspFieldText(api.INSPECT.pth, "t", frame), api.t("schem.defrost_transfer"));
+      assert.ok(api.inspFieldText(api.INSPECT.pth, "what", frame).includes(sign));
+      assert.match(api.inspFieldText(api.INSPECT.pth, "what", frame), /R1T−R4T/);
+      const reading = pth.toLocaleString(code, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+      assert.equal(api.inspNowText(api.INSPECT.pth, frame), `≈ ${reading} kW.`);
+      assert.equal(api.inspNowText(api.INSPECT.phe, frame), `≈ ${reading} kW. ${sign}`);
+    }
+    const base = { efficiencyKind: "eer", pthKind: "cooling", cop: 2.2, pth: 4.5, rps: 18,
+      copPth: 3.3, pel: 2.5, copPel: 1.5 };
+    const copy = (field, extra) => api.inspFieldText(api.INSPECT.cop, field, { ...base, ...extra });
+    const ctPost = { pelSrc: "CT", copScope: "plant", copPostBuh: true };
+    const ctPre = { pelSrc: "CT", copScope: "plant", copPostBuh: false };
+    const inverter = { pelSrc: "CT", copScope: "hp", copPostBuh: false };
+    assert.match(copy("what", ctPost), /R2T/);
+    assert.doesNotMatch(copy("what", ctPost), /R1T/);
+    for (const plan of [ctPre, inverter]) {
+      assert.match(copy("what", plan), /R1T/);
+      assert.doesNotMatch(copy("what", plan), /R2T/);
+    }
+    for (const plan of [ctPre, ctPost, inverter]) assert.match(copy("what", plan), /R4T/);
+    assert.notEqual(copy("t", ctPost), copy("t", inverter), `${code}: title distinguishes CT from inverter`);
+    assert.notEqual(copy("what", ctPre), copy("what", inverter), `${code}: CT and inverter evidence differ`);
+    assert.ok(copy("now", inverter).includes((1.5).toLocaleString(code)),
+      `${code}: the ratio shows its inverter denominator independently of the input pill`);
+    assert.doesNotMatch(api.inspNowText(api.INSPECT.pth, { ...base, ...ctPost }), /EER/,
+      `${code}: PHE estimate has no EER across a different outlet`);
+    for (const copBlock of ["tank_heater", "backup_heater", "no_pel"]) {
+      const blocked = { ...ctPre, copBlock, cop: null };
+      assert.match(copy("t", blocked), /EER/);
+      assert.doesNotMatch(copy("what", blocked), /R[12]T/);
+      assert.match(copy("now", blocked), /EER/);
+      assert.doesNotMatch(copy("now", blocked), /COP/);
+      if (copBlock === "no_pel")
+        assert.equal(copy("now", blocked), api.t("schem.no_usable_power", "EER"));
+    }
+    const speedRequirement = api.t("schem.capacity_low_speed");
+    assert.match(speedRequirement, /X10A/);
+    assert.match(speedRequirement, /5/);
+    for (const rps of [null, 5]) {
+      const unqualified = { rps, compressorOn: true, dt: -2, dtStale: false,
+        pth: null, cop: null, efficiencyKind: "eer" };
+      assert.equal(api.inspNowText(api.INSPECT.phe, unqualified), speedRequirement);
+      assert.equal(api.inspNowText(api.INSPECT.pth, unqualified), speedRequirement);
+      assert.ok(api.inspNowText(api.INSPECT.dt, unqualified).endsWith(speedRequirement));
+      assert.equal(copy("now", unqualified), api.t("schem.efficiency_no_capacity", "EER") + " " + speedRequirement);
+    }
+  }
   for (const code of codes.slice(2)) {
     api.activateLang(code);
     api.DESCRIPTIONS.forEach((entry, index) => {

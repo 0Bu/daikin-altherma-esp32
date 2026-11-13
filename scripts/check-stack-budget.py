@@ -26,6 +26,7 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "tools/stack"))
 import stop_observation as stop_stack
 from packed_config import CONFIG_PACKED_SYMBOLS, restore_packed_config, self_test as packed_config_self_test
+from stop_observation_rules import PEER_SHA_PACKED_FRAMES
 DEFAULT_BUDGETS = REPO / "tools/stack/budgets.json"
 FUNCTION_RE = re.compile(r"^\s*([0-9a-fA-F]+)\s+<(.+)>:\s*$")
 INSTRUCTION_RE = re.compile(r"^\s*([0-9a-fA-F]+):\s+([0-9a-fA-F]+)(?:\s+(.*))?$")
@@ -247,7 +248,9 @@ PACKED_ENTRY_SYMBOLS = frozenset({
     'psa_verify_hash',
     'psa_verify_hash_builtin',
     'pthread_setspecific',
+    'pthread_getspecific',
     'pvPortMalloc',
+    'pvTaskGetThreadLocalStoragePointer',
     'read',
     'ssl_check_ctr_renegotiate',
     'ssl_connect',
@@ -256,7 +259,11 @@ PACKED_ENTRY_SYMBOLS = frozenset({
     'sys_mbox_post',
     'sys_thread_sem_get',
     'sys_thread_sem_init',
+    'sys_thread_sem_free',
+    'daikin_lwip_thread_sem_get',
     'tcpip_send_msg_wait_sem',
+    'esp_task_wdt_add',
+    'add_entry',
     'tls_prf_generic',
     'tls_prf_sha256',
     'tls_prf_sha384',
@@ -268,7 +275,7 @@ PACKED_ENTRY_SYMBOLS = frozenset({
     'xQueueGenericCreate',
     'xTaskGetTickCountFromISR',
 })
-PACKED_ENTRY_SYMBOLS = PACKED_ENTRY_SYMBOLS | CONFIG_PACKED_SYMBOLS
+PACKED_ENTRY_SYMBOLS = PACKED_ENTRY_SYMBOLS | CONFIG_PACKED_SYMBOLS | frozenset(PEER_SHA_PACKED_FRAMES)
 SDK_TLS_LIMIT = 4608
 SDK_TLS_ROM = 192
 SDK_TRANSPORT_PREFIX_LIMIT = 880
@@ -411,14 +418,23 @@ SDK_PUBLIC_FILES = (
     "mbedtls/port/psa_driver/esp_sha/psa_crypto_driver_esp_sha.c",
     "mbedtls/port/psa_driver/esp_sha/core/psa_crypto_driver_esp_sha256.c",
     "mbedtls/port/psa_driver/esp_sha/core/psa_crypto_driver_esp_sha512.c",
+    "mbedtls/mbedtls/tf-psa-crypto/drivers/builtin/src/sha256.c",
+    "mbedtls/mbedtls/tf-psa-crypto/drivers/builtin/include/mbedtls/private/sha256.h",
+    "mbedtls/mbedtls/tf-psa-crypto/platform/platform_util.c",
     "mbedtls/port/sha/esp_sha.c", "mbedtls/port/sha/core/esp_sha_gdma_impl.c",
     "mbedtls/port/aes/dma/esp_aes_gdma_impl.c", "mbedtls/port/crypto_shared_gdma/esp_crypto_shared_gdma.c",
     "esp_libc/src/locks.c", "freertos/heap_idf.c",
     "freertos/FreeRTOS-Kernel/queue.c", "freertos/FreeRTOS-Kernel/tasks.c",
+    "freertos/FreeRTOS-Kernel/include/freertos/task.h",
+    "freertos/FreeRTOS-Kernel/include/freertos/portable.h",
+    "freertos/esp_additions/freertos_tasks_c_additions.h",
+    "freertos/FreeRTOS-Kernel/portable/xtensa/port.c",
+    "freertos/FreeRTOS-Kernel/list.c", "esp_system/crosscore_int.c",
     "esp_driver_dma/src/gdma.c",
     "mbedtls/port/net_sockets.c", "lwip/lwip/src/api/sockets.c",
     "lwip/lwip/src/api/api_lib.c", "lwip/lwip/src/api/tcpip.c",
     "lwip/port/freertos/sys_arch.c", "mbedtls/port/sha/core/sha.c",
+    "esp_system/task_wdt/task_wdt.c",
     "vfs/vfs.c", "vfs/vfs_calls.c", "lwip/port/esp32xx/vfs_lwip.c",
     "pthread/pthread.c", "pthread/pthread_local_storage.c",
     "esp_system/esp_system.c",
@@ -434,8 +450,11 @@ SDK_PUBLIC_FILES = (
     "spi_flash/spi_flash_os_func_app.c",
 )
 SDK_MQTT_FILES = ("mqtt_client.c", "lib/mqtt_outbox.c", "lib/mqtt_msg.c")
+SDK_MODBUS_LWIP_SOURCE = "daikin-sdk/sys_arch.c"
+SDK_MODBUS_LWIP_DIGEST = "8ebe8661225572efa7fd2ef9c4062ed67d91d15a43bd6c83f237ae64c9f4c167"
 SDK_PUBLIC_MACROS = (
     "CONFIG_ESP_MAIN_TASK_STACK_SIZE", "CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG",
+    "CONFIG_FREERTOS_SMP", "CONFIG_FREERTOS_UNICORE", "CONFIG_FREERTOS_TASK_FUNCTION_WRAPPER",
     "CONFIG_LOG_VERSION", "CONFIG_LOG_DEFAULT_LEVEL",
     "CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC", "CONFIG_MBEDTLS_CUSTOM_MEM_ALLOC",
     "CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC", "CONFIG_MBEDTLS_SSL_RENEGOTIATION",
@@ -537,6 +556,113 @@ def validate_sdk_contract(budgets: dict[str, Any], components: Path, header: Pat
             raise BudgetError(f"SDK public macro {name}: active build differs from reviewed configuration")
     if actual["CONFIG_ESP_MAIN_TASK_STACK_SIZE"] != budgets["tasks"]["main"]["stack_bytes"]:
         raise BudgetError("main task: active SDK stack allocation differs from source-bound budget")
+
+
+def validate_modbus_lwip_source(build: Path) -> None:
+    """Bind the generated Modbus accessor and leave the reviewed installed SDK check intact."""
+    try:
+        digest = hashlib.sha256((build / SDK_MODBUS_LWIP_SOURCE).read_bytes()).hexdigest()
+    except OSError as exc:
+        raise BudgetError(f"Modbus lwIP port: generated source unavailable ({exc})") from exc
+    if digest != SDK_MODBUS_LWIP_DIGEST:
+        raise BudgetError("Modbus lwIP port: generated source differs from the reviewed SDK extension")
+
+
+def validate_modbus_lwip_placement(link_map: str, linked: str) -> None:
+    placement = re.findall(r"(?m)^\s*\.text\.daikin_lwip_thread_sem_get\s+"
+                           r"(0x[0-9a-f]+)\s+(0x[0-9a-f]+)\s+"
+                           r"esp-idf/lwip/liblwip\.a\(sys_arch\.c\.obj\)\s*$", link_map)
+    if len(placement) != 1:
+        raise BudgetError("Modbus lwIP port: generated archive member is absent from the firmware link")
+    address, size = (int(value, 16) for value in placement[0])
+    matches = [line.split() for line in linked.splitlines()
+               if line.endswith(" daikin_lwip_thread_sem_get")]
+    if (len(matches) != 1 or len(matches[0]) != 4 or matches[0][2] != "T"
+            or not all(re.fullmatch(r"[0-9a-fA-F]+", value) for value in matches[0][:2])
+            or tuple(int(value, 16) for value in matches[0][:2]) != (address, size)):
+        raise BudgetError("Modbus lwIP port: ELF symbol disagrees with the generated archive member")
+
+
+def validate_modbus_lwip_artifact(elf: Path, objdump: str) -> None:
+    """Bind the measured accessor to the generated object retained in the firmware link."""
+    obj = elf.parent / "esp-idf/lwip/CMakeFiles/__idf_lwip.dir/__/__/daikin-sdk/sys_arch.c.obj"
+    try:
+        link_map = elf.with_suffix(".map").read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        raise BudgetError(f"Modbus lwIP port: firmware link map unavailable ({exc})") from exc
+    if not objdump.endswith("objdump"):
+        raise BudgetError("Modbus lwIP port: cannot bind nm to the supplied objdump")
+    nm = objdump[:-len("objdump")] + "nm"
+    linked = stack_tool_output([nm, "-n", "-S", "--defined-only", str(elf)])
+    validate_modbus_lwip_placement(link_map, linked)
+    compiled = stack_tool_output([objdump, "-dr", "--disassemble=daikin_lwip_thread_sem_get",
+                                  str(obj)])
+    validate_modbus_lwip_object(compiled)
+
+
+def validate_modbus_lwip_object(compiled: str) -> None:
+    name = "daikin_lwip_thread_sem_get"
+    if compiled.count(f"<{name}>:") != 1:
+        raise BudgetError("Modbus lwIP port: exactly one compiled accessor is required")
+    body = compiled.split(f"<{name}>:", 1)[1].split("Disassembly of section", 1)[0]
+    calls = re.findall(r"R_XTENSA_ASM_EXPAND\s+(\S+)", body)
+    if calls != ["sys_thread_sem_get", "pthread_getspecific", ".text.sys_thread_sem_free"]:
+        raise BudgetError("Modbus lwIP port: lazy lookup, nonallocating peek or orphan cleanup changed")
+    if len(re.findall(r"\bcallx8\s+a8\b", body)) != len(calls) or re.search(STACK_MOVSP_RE, body):
+        raise BudgetError("Modbus lwIP port: compiled accessor has an unmeasured call or frame")
+    decoded = [(int(m.group(1), 16), m.group(3).strip()) for line in body.splitlines()
+               if (m := INSTRUCTION_RE.match(line)) and m.group(3)]
+    instructions = [instruction.split(None, 1)[0] for _, instruction in decoded]
+    if instructions != ["entry", "l32r", "callx8", "mov.n", "beqz.n", "l32r", "l32i.n",
+                        "l32r", "callx8", "beq", "mov.n", "l32r", "callx8", "movi.n", "retw.n"]:
+        raise BudgetError("Modbus lwIP port: compiled retention control flow changed")
+    if (not re.match(r"beqz\.n\s+a10,\s+" + f"{decoded[13][0]:x} ", decoded[4][1])
+            or not re.match(r"beq\s+a10,\s*a2,\s+" + f"{decoded[14][0]:x} ", decoded[9][1])
+            or not re.fullmatch(r"movi\.n\s+a2,\s*0", decoded[13][1])):
+        raise BudgetError("Modbus lwIP port: null allocation and unretained semaphore must return null")
+
+
+def modbus_lwip_self_test() -> int:
+    obj = """00000000 <daikin_lwip_thread_sem_get>:
+  0: 004136 entry a1, 32
+  3: 000081 l32r a8, fffc0004
+     3: R_XTENSA_ASM_EXPAND sys_thread_sem_get
+  6: 0008e0 callx8 a8
+  9: 0a2d mov.n a2, a10
+  b: 4a9c beqz.n a10, 23 <daikin_lwip_thread_sem_get+0x23>
+  d: 000081 l32r a8, fffc0010
+  10: 08a8 l32i.n a10, a8, 0
+  12: 000081 l32r a8, fffc0014
+      12: R_XTENSA_ASM_EXPAND pthread_getspecific
+  15: 0008e0 callx8 a8
+  18: 091a27 beq a10, a2, 25 <daikin_lwip_thread_sem_get+0x25>
+  1b: 02ad mov.n a10, a2
+  1d: 000081 l32r a8, fffc0020
+      1d: R_XTENSA_ASM_EXPAND .text.sys_thread_sem_free
+  20: 0008e0 callx8 a8
+  23: 020c movi.n a2, 0
+  25: f01d retw.n
+"""
+    placement = (" .text.daikin_lwip_thread_sem_get\n"
+                 "    0x4208830c 0x23 esp-idf/lwip/liblwip.a(sys_arch.c.obj)\n")
+    linked = "4208830c 00000023 T daikin_lwip_thread_sem_get\n"
+    validate_modbus_lwip_object(obj)
+    validate_modbus_lwip_placement(placement, linked)
+    controls = [
+        (validate_modbus_lwip_object, (obj.replace("pthread_getspecific", "sys_thread_sem_get"),)),
+        (validate_modbus_lwip_object, (obj.replace(".text.sys_thread_sem_free", "sys_sem_free"),)),
+        (validate_modbus_lwip_object, (obj.replace("beq a10, a2, 25", "beq a10, a2, 23"),)),
+        (validate_modbus_lwip_object, (obj.replace("movi.n a2, 0", "movi.n a2, 1"),)),
+        (validate_modbus_lwip_placement, (placement.replace("sys_arch.c.obj", "other.c.obj"), linked)),
+        (validate_modbus_lwip_placement, (placement, linked.replace("00000023", "00000026"))),
+    ]
+    for validate, arguments in controls:
+        try:
+            validate(*arguments)
+        except BudgetError:
+            continue
+        raise AssertionError("self-test accepted changed Modbus lwIP retention evidence")
+    return len(controls)
 
 
 def function_instructions(disassembly: str) -> dict[str, list[str]]:
@@ -859,6 +985,8 @@ def parse_frames(disassembly: str, budgets: dict[str, Any] | None = None) -> dic
         raise BudgetError("; ".join(undecodable))
     validate_dynamic_stack(disassembly, frames, required)
     validate_integer_formatter(disassembly)
+    if "daik::mb_status()" in frames or stop_stack.MODBUS_ASSIGN_FRAME in frames:
+        frames[stop_stack.MODBUS_ASSIGN_FRAME] = stop_stack.modbus_assignment_frame(disassembly, BudgetError)
     return frames
 
 
@@ -2694,13 +2822,14 @@ def room_history_stack_self_test(budgets: dict[str, Any]) -> int:
 
 
 def self_test() -> None:
+    modbus_lwip_controls = modbus_lwip_self_test()
     fixture = """
 00000001 <daik::mcp_post(httpd_req*)>:
    1: 004136          entry a1, 1232
 00000002 <daik::http_send_status_json(httpd_req*, int)>:
    2: 004136          entry a1, 128
 00000003 <void daik::append_status_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, bool)>:
-   3: 004136          entry a1, 4848
+   3: 004136          entry a1, 2848
 00000004 <daik::mqtt_task(void*)>:
    4: 004136          entry a1, 1120
 00000005 <daik::(anonymous namespace)::ota_task(void*)>:
@@ -2860,7 +2989,7 @@ def self_test() -> None:
      'daik::set_ntp(httpd_req*)': 64,
      'daik::history_flash_service_journal(unsigned int, unsigned long)': 64,
      'daik::(anonymous namespace)::flash_append_record(daik::(anonymous namespace)::FlashJournalRecord&)': 64,
-     'daik::mb_task(void*)': 64,
+     'daik::mb_task(void*)': 80,
      'daik::mb_poll_once()': 64,
      'daik::history_record_modbus(daik::CachedValue const*, unsigned int, unsigned long)': 64,
      'daik::mb_read(daik::MbFunc, unsigned short, unsigned short, daik::MbRead&, daik::logic::MbFailure&, bool)': 64,
@@ -3153,6 +3282,10 @@ def self_test() -> None:
      'netconn_apimsg': 128,
      'sys_thread_sem_get': 32,
      'sys_thread_sem_init': 64,
+     'daikin_lwip_thread_sem_get': 32,
+     'pthread_getspecific': 32,
+     'pvTaskGetThreadLocalStoragePointer': 32,
+     'sys_thread_sem_free': 32,
      'pthread_setspecific': 32,
      'find_key': 32,
      'esp_sha_dma': 64,
@@ -3331,6 +3464,8 @@ def self_test() -> None:
     # stop frames and the complete caller sums are checked against the real ELF, not these bytes.
     for key, rule in stop_stack.SYMBOLS.items():
         name = exact_symbol_name(rule["pattern"])
+        if name == stop_stack.MODBUS_ASSIGN_FRAME:
+            continue  # The linked local clone is attributed by call target below.
         # These five newly outlined index helpers use their measured target ENTRY fixtures.
         extra_frames[name] = rule["max_bytes"] if key.startswith("stop_index_") else 32
 
@@ -3434,8 +3569,33 @@ def self_test() -> None:
 """
     number_calls = "".join(f"{0x3003 + offset:x}: fff7a5 call8 3000 <{STATUS_HEALTH_NUMBER_SYMBOL}>\n"
                            for offset in range(35))
-    fixture = fixture.replace("   3: 004136          entry a1, 4848\n",
-                              "   3: 004136          entry a1, 4848\n" + number_calls)
+    fixture = fixture.replace("   3: 004136          entry a1, 2848\n",
+                              "   3: 004136          entry a1, 2848\n" + number_calls)
+    owner = re.search(r'^([0-9a-f]+) <daik::mb_status\(\)>:\n[^\n]+\n', fixture, re.M)
+    replacement = re.search(r'^([0-9a-f]+) <' + re.escape(stop_stack.MODBUS_ASSIGN_REPLACE) +
+                            r'>:', fixture, re.M)
+    assert owner and replacement
+    clone = stop_stack.MODBUS_ASSIGN_CLONE
+    fixture = (fixture[:owner.end()]
+               + f"6024: fff7a5 call8 6000 <{clone}>\n6027: fff7a5 call8 6000 <{clone}>\n"
+               + fixture[owner.end():])
+    fixture += f"""
+00006000 <{clone}>:
+6000: 004136 entry a1, 32
+6003: 03ad mov.n a10, a3
+6005: 8cc781 l32r a8, 400 <literal> (40001248 <strlen>)
+6008: 0008e0 callx8 a8
+600b: 12c8 l32i.n a12, a2, 4
+600d: 0aed mov.n a14, a10
+600f: 03dd mov.n a13, a3
+6011: 0b0c movi.n a11, 0
+6013: 02ad mov.n a10, a2
+6015: 8f3581 l32r a8, 400 <literal> ({replacement[1]} <{stop_stack.MODBUS_ASSIGN_REPLACE}>)
+6018: 0008e0 callx8 a8
+601b: f01d retw.n
+00006030 <{clone}>:
+6030: 004136 entry a1, 32
+"""
     budgets = load_budgets(DEFAULT_BUDGETS)
     validate_packed_config_inventory(fixture)
     packed_inventory_controls = 0
@@ -3494,34 +3654,56 @@ def self_test() -> None:
     selected = evaluate(frames, budgets)
     validate_shutdown_inlining(fixture, budgets)
     validate_status_numeric_calls(fixture, budgets)
-    assert selected["status_serializer"] == 4848
-    assert selected["path:httpd_mcp_status"] == 8192
-    assert selected["path:httpd_direct_status"] == 6960
-    assert selected["path:httpd_mcp_checkup"] == 7952
-    assert selected["path:httpd_direct_checkup"] == 6720
-    assert selected["path:httpd_mcp_checkup_expire_fingerprint"] == 7984
-    assert selected["path:httpd_direct_checkup_expire_fingerprint"] == 6752
+    assert selected["status_serializer"] == 2848
+    assert selected["modbus_status_assign_cstr"] == 32
+    assert selected["path:httpd_mcp_status"] == 6192
+    assert selected["path:httpd_direct_status"] == 4960
+    assert selected["path:httpd_mcp_checkup"] == 5952
+    assert selected["path:httpd_direct_checkup"] == 4720
+    assert selected["path:httpd_mcp_checkup_expire_fingerprint"] == 5984
+    assert selected["path:httpd_direct_checkup_expire_fingerprint"] == 4752
     assert selected["path:mqtt_cycling_evidence"] == 2944
     assert selected["path:mqtt_cycling_expire"] == 2992
     assert selected["path:mqtt_cycling_expire_fingerprint"] == 3024
-    assert selected["path:httpd_mcp_cycling_hours"] == 8112
-    assert selected["path:httpd_direct_cycling_hours"] == 6880
-    assert selected["path:httpd_mcp_checkup_aggregate"] == 7904
-    assert selected["path:httpd_direct_checkup_aggregate"] == 6672
-    assert selected["path:httpd_mcp_checkup_evaluate"] == 7952
-    assert selected["path:httpd_direct_checkup_evaluate"] == 6720
-    assert selected["path:httpd_mcp_checkup_dhw_progress"] == 7888
-    assert selected["path:httpd_direct_checkup_dhw_progress"] == 6656
-    assert selected["path:httpd_mcp_checkup_dhw_fold"] == 7840
-    assert selected["path:httpd_direct_checkup_dhw_fold"] == 6608
-    assert selected["path:httpd_mcp_checkup_freshness"] == 7872
-    assert selected["path:httpd_direct_checkup_freshness"] == 6640
-    assert selected["path:httpd_mcp_cycling_hours_builder"] == 8096
-    assert selected["path:httpd_direct_cycling_hours_builder"] == 6864
-    assert selected["path:httpd_mcp_health_number"] == 7840
-    assert selected["path:httpd_direct_health_number"] == 6608
+    assert selected["path:httpd_mcp_cycling_hours"] == 6112
+    assert selected["path:httpd_direct_cycling_hours"] == 4880
+    assert selected["path:httpd_mcp_checkup_aggregate"] == 5904
+    assert selected["path:httpd_direct_checkup_aggregate"] == 4672
+    assert selected["path:httpd_mcp_checkup_evaluate"] == 5952
+    assert selected["path:httpd_direct_checkup_evaluate"] == 4720
+    assert selected["path:httpd_mcp_checkup_dhw_progress"] == 5888
+    assert selected["path:httpd_direct_checkup_dhw_progress"] == 4656
+    assert selected["path:httpd_mcp_checkup_dhw_fold"] == 5840
+    assert selected["path:httpd_direct_checkup_dhw_fold"] == 4608
+    assert selected["path:httpd_mcp_checkup_freshness"] == 5872
+    assert selected["path:httpd_direct_checkup_freshness"] == 4640
+    assert selected["path:httpd_mcp_cycling_hours_builder"] == 6096
+    assert selected["path:httpd_direct_cycling_hours_builder"] == 4864
+    assert selected["path:httpd_mcp_health_number"] == 5840
+    assert selected["path:httpd_direct_health_number"] == 4608
+    assert selected["path:httpd_mcp_status_modbus_status_allocation"] == 6320
+    assert selected["path:httpd_mcp_status_modbus_status_unwind"] == 6832
+    for changed, expected in (
+        (fixture.replace("6027: fff7a5 call8 6000", "6027: fff7a5 call8 6030"),
+         "two direct calls"),
+        (fixture.replace("6000: 004136 entry a1, 32", "6000: 004136 entry a1, 48"),
+         "modbus_status_assign_cstr"),
+        (fixture.replace("6018: 0008e0 callx8 a8", "6018: 0008e0 movsp a1, a8"),
+         "bounded strlen and measured replacement"),
+        (fixture.replace("   3: 004136          entry a1, 2848",
+                         "   3: 004136          entry a1, 4848"),
+         "httpd_mcp_status_modbus_status_unwind"),
+    ):
+        assert changed != fixture
+        try:
+            evaluate(parse_frames(changed, budgets), budgets)
+        except BudgetError as exc:
+            assert expected in str(exc), str(exc)
+        else:
+            raise AssertionError("self-test accepted changed Modbus status stack path")
     assert selected["ota_task"] == 2608
-    assert selected["path:httpd_ota_status"] == 6624
+    # The path reserve includes 128 bytes for running boot and ELF identity formatting.
+    assert selected["path:httpd_ota_status"] == 6752
     assert selected["path:ota_task_manifest_fetch"] == 4672
     assert selected["path:httpd_ota_check"] == 3376
     assert selected["path:http_deadline_watchdog"] == 1536
@@ -4893,7 +5075,7 @@ def self_test() -> None:
           f"{shutdown_optimizer_controls} shutdown-inlining, "
           f"{poll_inlining_controls} poll-inlining, "
           f"{i2c_dynamic_controls} I2C-dynamic, {i2c_source_controls} I2C-source, "
-          f"{sdk_controls} SDK-source/config controls)")
+          f"{sdk_controls} SDK-source/config controls, {modbus_lwip_controls} Modbus lwIP linkage controls)")
 
 
 def main(argv: list[str]) -> int:
@@ -4925,7 +5107,9 @@ def main(argv: list[str]) -> int:
     if components is None or header is None:
         raise BudgetError("source-bound SDK budgets need IDF_PATH/--sdk-components and an active --sdkconfig-header")
     validate_sdk_contract(budgets, components, header)
+    validate_modbus_lwip_source(args.elf.parent if args.elf is not None else header.parent.parent)
     if args.elf is not None:
+        validate_modbus_lwip_artifact(args.elf, args.objdump)
         text = disassemble(args.elf, args.objdump)
     else:
         try:

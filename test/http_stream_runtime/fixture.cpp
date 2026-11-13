@@ -35,6 +35,7 @@ namespace fixture {
 inline std::string                    oracle;
 inline daik::Config                   current;
 inline std::vector<daik::CachedValue> rows, modbus_rows;
+inline uint32_t                       modbus_history_generation = 7;
 inline daik::HpValuesIdentity         identity{"generic", 0x1234, 7, 11};
 inline bool                           ota = false, weather = false, modbus_live = false;
 // Weather's TLS phase is `weather`; readers counts admitted /values snapshots in that exclusion.
@@ -78,6 +79,7 @@ void reset() {
     current.wifi_ssid                       = "Café \"quoted\"\\line\n";
     current.mqtt_base                       = "daikin-altherma-esp32";
     ota = weather = modbus_live = change_history_epoch = false;
+    modbus_history_generation                          = 7;
     values_readers = values_readers_peak = 0;
     config_unreadable                    = false;
     epoch                                = 42;
@@ -314,8 +316,9 @@ ModbusStatus                      mb_status() {
 }
 ModbusProfile mb_active_profile() { return ModbusProfile::HomeHub; }
 size_t        mb_values_capacity() { return fixture::modbus_rows.size(); }
-size_t        mb_values_snapshot(CachedValue* out, size_t cap, bool& live) {
+size_t mb_values_snapshot(CachedValue* out, size_t cap, bool& live, uint32_t* history_generation) {
     live           = fixture::modbus_live;
+    if (history_generation) *history_generation = live ? 7 : 0;
     const size_t n = std::min(cap, fixture::modbus_rows.size());
     for (size_t i = 0; i < n; ++i) out[i] = fixture::modbus_rows[i];
     return n;
@@ -350,6 +353,7 @@ bool hp_poll_generation_matches(uint32_t generation) {
 }
 const char* history_persist_state() { return "no_record"; }
 uint32_t    history_epoch() noexcept { return fixture::epoch; }
+uint32_t    history_modbus_generation() { return fixture::modbus_history_generation; }
 size_t      history_label(size_t, char* out, size_t cap) {
     return std::snprintf(out, cap, "Supply Café \"quote\"\\line\n");
 }
@@ -847,6 +851,16 @@ int main(int argc, char** argv) {
               "independent Modbus response failed");
         successful(req);
         emit(req, "modbus-values");
+        ++modbus_history_generation;
+        req = request();
+        check(invoke(req, "/values", daik::h_values) == ESP_OK,
+              "a retired chart binding must not suppress copied live values");
+        successful(req);
+        emit(req, "modbus-values-history-retired");
+        req = request();
+        check(invoke(req, "/history?row=quiet_state&source=modbus", daik::h_history) == ESP_OK &&
+                  req.status == "404 Not Found",
+              "baseline Holding 9 must not offer a Quiet activity timeline");
         modbus_live = false;
         req         = request();
         check(invoke(req, "/values", daik::h_values) == ESP_OK &&

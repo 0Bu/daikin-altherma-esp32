@@ -222,7 +222,7 @@ const languageList = localeSource.match(/const UI_LANGS\s*=\s*Object\.freeze\(\[
 if (!languageList) die(2, "cannot establish shipped UI_LANGS for skill claims");
 const shippedLanguageCount = [...languageList[1].matchAll(/"[a-z]+"/g)].length;
 const elfSource = fs.readFileSync(path.join(repoRoot, "main/http_status.cpp"), "utf8");
-const elfBuffer = elfSource.match(/char\s+elf_sha\[([1-9][0-9]*)\][\s\S]{0,100}esp_app_get_elf_sha256\(elf_sha,\s*sizeof\(elf_sha\)\)/);
+const elfBuffer = elfSource.match(/void\s+http_running_image_identity\([^\n]+char\s*\(&elf_sha\)\[([1-9][0-9]*)\][^\n]*\{[^}]*esp_app_get_elf_sha256\(elf_sha,\s*sizeof\(elf_sha\)\)/);
 const configSource = fs.readFileSync(path.join(repoRoot, "sdkconfig.defaults"), "utf8");
 const elfSettings = configSource.split(/\r?\n/).filter(line => /^\s*CONFIG_APP_RETRIEVE_LEN_ELF_SHA\s*=/.test(line));
 if (elfSettings.length !== 1 || !/^CONFIG_APP_RETRIEVE_LEN_ELF_SHA=([0-9]+)$/.test(elfSettings[0])) {

@@ -52,13 +52,55 @@ try {
   const binary = compile(sourcePath, "production");
   const baseline = execute(binary, [], 20000);
   assert.equal(baseline.status, 0, `production runtime cases\n${baseline.stdout}${baseline.stderr}`);
-  assert.match(baseline.stdout, /PASS total=35\b/);
+  assert.match(baseline.stdout, /PASS total=39\b/);
   console.log(baseline.stdout.trim());
 
   // A successfully compiled mutation must fail its particular behavioral oracle. A crash,
   // compilation failure or another test failure cannot count as evidence that the oracle works.
   const mutations = [
     ...semanticMutations,
+    {
+      name: "dynamic-status-mutex", scenario: "lifecycle",
+      before: "xSemaphoreCreateMutexStatic(&s_mtx_storage)",
+      after: "((void)s_mtx_storage, xSemaphoreCreateMutex())",
+    },
+    {
+      name: "dynamic-cache-mutex", scenario: "lifecycle",
+      before: "xSemaphoreCreateMutexStatic(&s_cache_mtx_storage)",
+      after: "((void)s_cache_mtx_storage, xSemaphoreCreateMutex())",
+    },
+    {
+      name: "retiring-reports-active", scenario: "retiring_reenable",
+      before: "return !s_task || !s_status.enabled || s_task_retiring;",
+      after: "return !s_task || (!s_task_retiring && !s_status.enabled);",
+    },
+    {
+      name: "retiring-drops-reenable", scenario: "retiring_reenable",
+      before: /if \(!s_target_enabled\.load\(std::memory_order_acquire\)\) \{\s*s_mb_task_running\.store\(false, std::memory_order_release\);/,
+      after: "if (true) { s_mb_task_running.store(false, std::memory_order_release);",
+    },
+    {
+      name: "worker-ignores-watchdog-add-failure", scenario: "worker_admission_pressure",
+      before: "if (esp_task_wdt_add(nullptr) != ESP_OK)",
+      after: "if ((void)esp_task_wdt_add(nullptr), false)",
+    },
+    {
+      name: "worker-ignores-lwip-readiness", scenario: "worker_admission_pressure",
+      before: "if (daikin_lwip_thread_sem_get() == nullptr)",
+      after: "if ((void)daikin_lwip_thread_sem_get(), false)",
+    },
+    {
+      name: "worker-reallocates-after-watchdog-failure", scenario: "worker_admission_pressure",
+      before: "lwip_ready = true;",
+      after: "lwip_ready = false;",
+    },
+    {
+      name: "allocate-partial-sweep-diagnostic", scenario: "partial_sweep_allocation_pressure",
+      before: /failure_message\(failure, message\);\s*status_error\(failure_code\(failure\.type\), message,/,
+      after: "failure_message(failure, message);\n"
+        + "        const std::string allocated(message);\n"
+        + "        status_error(failure_code(failure.type), allocated.c_str(),",
+    },
     {
       name: "receive-deadline", scenario: "deadline",
       before: "if (esp_timer_get_time() >= deadline_us) {",
@@ -73,6 +115,42 @@ try {
       name: "session-generation", scenario: "snapshot_generation",
       before: "cache_generation, target_generation,",
       after: "((void)cache_generation, s_link_generation), target_generation,",
+    },
+    {
+      name: "profile-resolved-peer", scenario: "probe_resolved_peer_reconnect",
+      before: "on_socket_open(host, port, unit, peer_ipv4, now_s)",
+      after: "on_socket_open(host, port, unit, ((void)peer_ipv4, 0u), now_s)",
+    },
+    {
+      name: "history-resolved-peer", scenario: "probe_resolved_peer_reconnect",
+      before: /s_req_peer_ipv4\s*= ntohl\(addr\.sin_addr\.s_addr\);/,
+      after: "s_req_peer_ipv4 = ((void)addr.sin_addr.s_addr, 0u);",
+    },
+    {
+      name: "history-tcp-handshake-only", scenario: "probe_resolved_peer_reconnect",
+      before: /s_req_history_expected_generation = history_generation;\s*s_req_history_generation\s*= 0;/,
+      after: "s_req_history_expected_generation = history_generation;\n"
+        + "    s_req_history_generation = history_modbus_bind_peer(s_req_configured_target, s_req_peer_ipv4, history_generation);",
+    },
+    {
+      name: "history-exception-only", scenario: "probe_resolved_peer_reconnect",
+      before: /gates\.received_data &&\s*s_last_reply_ms >= 0/,
+      after: "s_last_reply_ms >= 0",
+    },
+    {
+      name: "history-cache-current-scope-instead-of-copied-scope", scenario: "probe_resolved_peer_reconnect",
+      before: /if \(history_generation && live && cache_history_generation == history_modbus_generation\(\)\)\s*\*history_generation = cache_history_generation;/,
+      after: "if (history_generation && live) *history_generation = ((void)cache_history_generation, history_modbus_generation());",
+    },
+    {
+      name: "qualify-unsupported-flow-scale", scenario: "native_gateway_baseline",
+      before: "cv.modbus_flow_scale_unverified = r.space == MbFunc::ReadInput && r.offset == 49;",
+      after: "cv.modbus_flow_scale_unverified = false;",
+    },
+    {
+      name: "publish-native-selection-as-quiet-activity", scenario: "native_gateway_baseline",
+      before: /if \(r\.space == MbFunc::ReadHolding && r\.offset == 9 &&\s*r\.kind != def::HomeHubValueKind::Altherma4QuietSelection\)\s*return;/,
+      after: "/* mutation: publish the unqualified activity row */",
     },
     {
       name: "target-profile", scenario: "profile_cutover",
@@ -182,7 +260,7 @@ try {
       `${mutation.name}: only its specific assertion failure counts`);
     console.log(`negative control ${mutation.name}: rejected by ${mutation.scenario}`);
   }
-  console.log(`production Modbus runtime: 35 cases, ${mutations.length} negative controls; source sha256=${sourceHash}`);
+  console.log(`production Modbus runtime: 39 cases, ${mutations.length} negative controls; source sha256=${sourceHash}`);
 } finally {
   fs.rmSync(dir, { recursive: true, force: true });
 }

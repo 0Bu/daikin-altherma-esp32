@@ -72,6 +72,10 @@ OtaStatus ota_status(OtaFeedUrls* feed) {
  std::strcpy(feed->firmware_base.data(),"https://private.invalid/person/firmware/");}
  OtaStatus s; s.state="idle"; s.current="1.2.3"; return s;
 }
+void http_running_image_identity(char (&boot_id)[17], char (&elf_sha)[65]) noexcept {
+ std::memcpy(boot_id, "0123456789abcdef", 17);
+ std::memcpy(elf_sha, "123456789", 10);
+}
 int http_send_json(httpd_req_t* r,const char* text) {r->response=text;return ESP_OK;}
 ` + statusWrapper + String.raw`
 std::string emitted_hvac(bool redact, bool has, const std::string& mode) {
@@ -112,6 +116,11 @@ int main() {
   for (const i of [0, 2, 6]) assert.match(rows[i].text, /https:\/\/private.invalid\/person\//); // operational API still works
   assert.equal(JSON.parse(rows[1].text).effective_manifest_url, "<redacted>");
   assert.equal(JSON.parse(rows[1].text).effective_firmware_base_url, "<redacted>");
+  for (const i of [0, 1]) {
+    const { boot_id, app_elf_sha256 } = JSON.parse(rows[i].text);
+    assert.equal(boot_id, "0123456789abcdef");
+    assert.equal(app_elf_sha256, "123456789");
+  }
   for (const i of [3, 4, 5, 7]) {
     assert.equal(rows[i].status, i === 7 ? 400 : 414);
     assert.equal(rows[i].snapshots, 0); // fail before accessing or serializing the private snapshot

@@ -22,8 +22,6 @@ const DEMO = (() => {
                                off: 44, concept: "outdoor_air" });
   const MB_BSH = (on) => ({ label: "Booster heater run", value: on ? 1 : 0, unit: "",
                             off: 32, binary: true, concept: "bsh_state" });
-  const MB_QUIET = (on) => ({ label: "Quiet mode operation", value: on ? 1 : 0, unit: "",
-                              off: 9, binary: true, concept: "quiet_state" });
   const MB_POWER = (value) => ({ label: "Heat pump power consumption", value: String(value),
                                  unit: "kW", off: 51 });
   const histRows = [
@@ -57,7 +55,6 @@ const DEMO = (() => {
     ["refrigerant_liquid", "Liquid refrigerant temperature"],
     ["flow", "Flow rate"],
     ["room_temp", "Room temperature"],
-    ["quiet_state", "Quiet mode operation"],
     ["bsh_state", "Booster heater run"],
     ["valve_dhw", "3-way valve"],
     ["smart_grid_mode", "Smart Grid operation mode"],
@@ -316,7 +313,7 @@ const DEMO = (() => {
               model: { name: "EHVH/EHVX 04-08 kW", family: "Altherma 3 R", marketing: "Altherma 3 R W" } },
   });
 
-  return { scenes, status, smartGrid: SG, outdoorAir: MB_OUT, tankHeater: MB_BSH, quietMode: MB_QUIET,
+  return { scenes, status, smartGrid: SG, outdoorAir: MB_OUT, tankHeater: MB_BSH,
            electricalInput: MB_POWER, history: hist };
 })();
 
@@ -350,8 +347,6 @@ try {
       values: DEMO.scenes[idx].v,
       modbus: [DEMO.smartGrid(DEMO.scenes[idx].sgMode || 0), DEMO.outdoorAir(DEMO.scenes[idx].mbOut),
                DEMO.tankHeater(!!DEMO.scenes[idx].mbBsh),
-               DEMO.quietMode(DEMO.scenes[idx].v.some((r) =>
-                 r.label === "Silent Mode" && String(r.value).trim() === "1")),
                DEMO.electricalInput(DEMO.scenes[idx].mbPower)],
     });
     if (u.startsWith("/history")) {

@@ -137,9 +137,8 @@
 #   101. restoring undated completed DHW counters from the handoff
 #   102. the dwell elapsed guard tightened from `>= 0` to `> 0`, so the adopted table's zero origin
 #        reads as "no previous observation" and the first fold books nothing again
-#   103. the HomeHub raster weighed from its raw ring instead of the ring this boot would adopt, so a
-#        HomeHub disabled at runtime (ring frozen, sealed target no longer the configured one) makes
-#        the whole RAM history stale and an unrelated source's absence costs every trend
+#   103. the HomeHub raster weighed from its raw ring even though warm adoption only admits the
+#        independently eligible sources; the HomeHub ring restores through the scoped journal
 #   104. a stale HomeHub or ENV III raster folded into the region verdict again, so one optional
 #        source that stopped refuses the X10A and board trends that did not
 #   105. adoption claiming the boot instant again, so the first live commit can land in the bucket the
@@ -1083,9 +1082,9 @@ python3 - "$TMP/main/history.cpp" <<'PY4'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-needle = "void history_modbus_reset(uint32_t target_fp) noexcept {\n"
+needle = "void history_modbus_reset(const logic::HistoryModbusTarget& target) noexcept {\n"
 assert needle in s, "seed 57 did not apply — staged HomeHub history boundary moved"
-seed = s.replace(needle, needle + "    target_fp = current_mb_target_fp();\n", 1)
+seed = s.replace(needle, needle + "    const auto extra = config();\n", 1)
 open(p, "w").write(seed)
 PY4
 expect_red "a post-save HomeHub history Config allocation" run_contract
@@ -1212,13 +1211,16 @@ python3 - "$TMP/main/hp_modbus.cpp" <<'PY4'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-atomic = '        if (!s_target_enabled.load(std::memory_order_acquire)) break;\n'
-assert atomic in s, "seed 66 did not apply — HomeHub disable admission moved"
-seed = s.replace(atomic, "", 1)
-poll = '            if (esp_timer_get_time() >= s_next_try_us) mb_poll_once();\n'
+start = s.index('        if (!s_target_enabled.load(std::memory_order_acquire)) {',
+                s.index('static void mb_task(void*)'))
+end = s.index('        const bool ota_active', start)
+assert 'if (mb_retire_if_disabled(ready)) break;' in s[start:end], (
+    "seed 66 did not apply — HomeHub disable admission moved")
+seed = s[:start] + s[end:]
+poll = '                        if (esp_timer_get_time() >= s_next_try_us) mb_poll_once();\n'
 assert poll in seed, "seed 66 did not apply — HomeHub poll point moved"
 seed = seed.replace(poll,
-                    '            if (config_modbus_host(config()).empty()) break;\n' + poll, 1)
+                    '                        if (config_modbus_host(config()).empty()) break;\n' + poll, 1)
 open(p, "w").write(seed)
 PY4
 expect_red "HomeHub disable blocked by Config OOM and TLS delay" run_contract
@@ -1784,16 +1786,15 @@ PY4
 expect_red "an adopted dwell table's zero origin treated as no previous observation" run_contract
 restore
 
-# 103. The HomeHub raster weighed from its raw ring. A HomeHub disabled at runtime (/set_hp, no reboot)
-#      keeps its ring but stops its raster, and its sealed target is no longer the configured one, so
-#      this boot retires the ring anyway - weighing it first lets a source that is gone make the whole
-#      RAM history stale, X10A and board trends included.
+# 103. The HomeHub raster weighed from its unscoped warm ring instead of being excluded from
+#      warm adoption. Only the journal can restore HomeHub samples after the current peer binds.
 python3 - "$TMP/main/history.cpp" <<'PY4'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-old = "mb_keep && rings_have_samples(P().mb_ring, HOMEHUB_HISTORY_COUNT),"
-seed = s.replace(old, "rings_have_samples(P().mb_ring, HOMEHUB_HISTORY_COUNT),", 1)
+old = "x10a_rings_have_samples(), false,"
+new = "x10a_rings_have_samples(), rings_have_samples(P().mb_ring, HOMEHUB_HISTORY_COUNT),"
+seed = s.replace(old, new, 1)
 assert seed != s, "seed 103 did not apply - the HomeHub weighing moved"
 open(p, "w").write(seed)
 PY4
@@ -1806,8 +1807,8 @@ python3 - "$TMP/main/history.cpp" <<'PY4'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-old = "P().boots_since_commit, plan.region_bookable);"
-new = "P().boots_since_commit,\n        plan.region_bookable && !plan.retire_modbus && !plan.retire_env3);"
+old = "plan.region_bookable);"
+new = "plan.region_bookable && !plan.retire_modbus && !plan.retire_env3);"
 seed = s.replace(old, new, 1)
 assert seed != s, "seed 104 did not apply - the verdict call moved"
 open(p, "w").write(seed)

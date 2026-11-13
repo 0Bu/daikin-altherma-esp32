@@ -269,6 +269,7 @@ function wireCyclingChart(host) {
 }
 
 function wireTrendScrub(gv) {
+  let pointerId;
   gv.addEventListener("click", (e) => {
     const button = e.target.closest("[data-hist-series]");
     if (!button) return;
@@ -278,14 +279,15 @@ function wireTrendScrub(gv) {
   gv.addEventListener("pointermove", (e) => {
     const plot = trendPlotFromTarget(e.target);
     if (!plot) return;
-    if (S.scrub && S.scrub !== plot.dataset.hist) return;
+    if (S.scrub && (S.scrub !== plot || pointerId !== e.pointerId)) return;
     if (S.scrub) scrubArm(plot);              // a live drag keeps re-arming the watchdog
     scrubMove(plot, scrubIndex(plot, e.clientX));
   });
   gv.addEventListener("pointerdown", (e) => {
     const plot = trendPlotFromTarget(e.target);
-    if (!plot) return;
-    S.scrub = plot.dataset.hist;
+    if (!plot || S.scrub || e.button !== 0) return;
+    S.scrub = plot;
+    pointerId = e.pointerId;
     scrubArm(plot);
     try { plot.setPointerCapture(e.pointerId); } catch { /* capture is an optimisation, not a requirement */ }
     scrubMove(plot, scrubIndex(plot, e.clientX));
@@ -294,7 +296,7 @@ function wireTrendScrub(gv) {
   // element is removed from the DOM — the one exit the explicit handlers below cannot see.
   gv.addEventListener("lostpointercapture", (e) => {
     const plot = trendPlotFromTarget(e.target);
-    if (plot) scrubEnd(plot);
+    if (plot === S.scrub && pointerId === e.pointerId) scrubEnd(plot);
   });
   // A mouse leaving clears the readout; a touch ends on pointerup/cancel. pointerout covers the
   // former without also firing for every child element (pointerleave doesn't bubble to this
@@ -310,17 +312,11 @@ function wireTrendScrub(gv) {
   for (const ev of ["pointerup", "pointercancel"]) {
     gv.addEventListener(ev, (e) => {
       const plot = trendPlotFromTarget(e.target);
-      if (!plot) return;
-      // A release ON the plot PINS the sample under it (pointercancel does not — a gesture the
-      // browser took away is not a choice the user made). The transient crosshair is torn down
-      // either way; the pin is re-emitted by the render that follows, so what the user let go of is
-      // exactly what stays on screen.
-      // Read the geometry BEFORE tearing anything down: scrubEnd may rebuild, and `plot` is then a
-      // detached node whose bounding box is all zeroes.
-      const label = plot.dataset.hist;
-      const i = e.type === "pointerup" ? scrubIndex(plot, e.clientX) : -1;
+      if (!plot || plot !== S.scrub || pointerId !== e.pointerId) return;
+      // Pin while the chosen plot still owns the gesture. Ending it may replace the chart.
+      if (e.type === "pointerup")
+        histPinToggle(plot.dataset.hist, scrubIndex(plot, e.clientX), plot.dataset.source || "");
       scrubEnd(plot);
-      if (i >= 0) histPinToggle(label, i, plot.dataset.source || "");
     });
   }
   // Keyboard: the plot is focusable, so arrow keys step through samples and the tooltip is the

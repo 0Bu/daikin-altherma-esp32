@@ -341,10 +341,8 @@ const DESCRIPTIONS = [
 
   // ── Valves ──
   { re: /3.?way valve/i,
-    what: "The diverter valve routes water either to the DHW tank or to the space circuit. Both sources are shown as the named positions DHW and Space heating; the underlying X10A bit remains 1 = DHW and 0 = space circuit.",
-    normal: "DHW is the tank route; Space heating is the space-circuit route. The position alone does not prove that either circuit is currently operating.",
-    de: { what: "Das Umschaltventil leitet Wasser entweder zum Warmwasserspeicher oder in den Heiz- oder Kühlkreis. Beide Quellen werden als Brauchwarmwasser oder Raumheizung angezeigt; das zugrunde liegende X10A-Bit bleibt 1 = Warmwasser und 0 = Raumkreis.",
-          normal: "Brauchwarmwasser ist der Speicherweg, Raumheizung der Weg zum Raumkreis. Die Ventilposition allein beweist nicht, dass der jeweilige Kreis gerade in Betrieb ist." } },
+    what: "The reported route is DHW (tank) or Space circuit (heating or cooling). The report alone does not confirm mechanical valve position or water flow.",
+    de: { what: "Der gemeldete Weg führt zum Brauchwarmwasserspeicher oder zum Raumkreis (Heizen oder Kühlen). Die Meldung allein bestätigt weder die mechanische Ventilstellung noch den Durchfluss." } },
   { re: /2.?way valve/i,
     what: "Logical X10A state of the controller output for an optional field-supplied 2-way valve. The historical X10A catalog labels the bit ON: Heat and OFF: Cool. However, the selected operating mode and whether space operation is active are separate controller states.",
     normal: "The UI therefore shows ON/OFF unchanged. OFF alone neither proves Cooling nor contradicts a configured Heating mode, especially while space operation is idle. The value also neither measures terminal voltage nor confirms the physical valve position.",
@@ -393,10 +391,8 @@ const DESCRIPTIONS = [
     de: { what: "Wasserdruck im geschlossenen Hydraulikkreis.",
           normal: "Viele aktuelle Altherma-Handbücher verlangen am Pumpeneintritt mehr als 1 bar. Zulässiger Betriebs- und Fülldruck hängen jedoch von Modell, Anlagenhöhe und Ausdehnungsgefäß ab. Bei 1,0 bar oder weniger die Anleitung des genauen Geräts prüfen, statt einen allgemeinen Nachfüllwert anzunehmen." } },
   { re: /water pump signal/i,
-    what: "The speed command sent to the circulation pump. Note it is inverted — 0 means full speed, 100 means stopped (per the label).",
-    normal: "a low number (fast pump) while heating, cooling or making DHW; 100 (stopped) when idle.",
-    de: { what: "Der Drehzahlbefehl an die Umwälzpumpe ist umgekehrt skaliert: 0 bedeutet volle Drehzahl, 100 bedeutet Stillstand.",
-          normal: "eine niedrige Zahl und damit schnelle Pumpendrehzahl beim Heizen, Kühlen oder Warmwasserbereiten; 100 im Leerlauf." } },
+    what: "Inverted X10A command to the circulation pump: raw 0 requests maximum effort and raw 100 requests stop. It does not measure RPM or prove rotation or water flow. Read reported ON/OFF and measured flow separately, including when the compressor is stopped.",
+    de: { what: "Invertierter X10A-Befehl an die Umwälzpumpe: Rohwert 0 fordert maximale Ansteuerung, Rohwert 100 Stopp. Er misst keine Drehzahl (RPM) und belegt weder Rotation noch Wasserdurchfluss. Gemeldeten ON/OFF-Status und gemessenen Durchfluss getrennt lesen, auch bei stehendem Verdichter." } },
   { exact: true, re: /^(?:water pump operation|circulation pump (?:operation|running))$/i,
     what: "Status of the hydronic circulation pump. It moves water through the branch selected by the hydraulic controls; pump operation alone does not prove useful heat transfer.",
     normal: "ON means the controller reports pump operation; OFF means it reports the pump stopped. It can run for heating, cooling, DHW, defrost, air purge, frost protection, a test run or pump overrun. Compare the state with measured flow; the compressor may legitimately be stopped.",
@@ -764,10 +760,10 @@ const DESCRIPTIONS = [
     de: { what: "Der numerische Subcode, der den benachbarten Daikin-Diagnosecode auf einen konkreten Fall eingrenzt.",
           normal: "Er ist eine Zusatzinformation und allein kein Status. Nur zusammen mit Anlagenstatus und Code auswerten; nicht verfügbare Werte werden bewusst nicht angezeigt." } },
   { exact: true, re: /^compressor running$/i,
-    what: "Whether the HomeHub currently reports the heat-pump compressor running. This is the activity witness the Modbus-only schematic uses to distinguish active heat transfer from pump-only circulation; it does not report compressor speed or capacity.",
-    normal: "ON while the compressor is running; OFF while it is stopped. Interpret it together with DHW/space operation, valve position, flow and water temperatures.",
-    de: { what: "Ob der HomeHub den Verdichter der Wärmepumpe aktuell als laufend meldet. Im reinen Modbus-Schema unterscheidet dieser Aktivitätsnachweis einen aktiven Wärmeübergang von reinem Pumpenumlauf; Verdichterdrehzahl oder -leistung enthält er nicht.",
-          normal: "ON bei laufendem Verdichter, OFF bei Stillstand. Gemeinsam mit Warmwasser-/Raumbetrieb, Ventilstellung, Durchfluss und Wassertemperaturen auswerten." } },
+    what: "HomeHub reports the compressor state as ON or OFF. Speed, capacity and heat transfer require separate evidence.",
+    normal: "Read the valve position, flow and water temperatures separately for the water circuit.",
+    de: { what: "Der HomeHub meldet den Verdichterzustand als ON oder OFF. Drehzahl, Leistung und Wärmeübertragung brauchen eigene Messwerte.",
+          normal: "Ventilstellung, Durchfluss und Wassertemperaturen geben separat Auskunft über den Wasserkreis." } },
   { exact: true, re: /^dhw normal operation$/i,
     what: "Whether normal domestic-hot-water operation is active. The UI renders the HomeHub states Operating and Idle/buffering as ON and OFF.",
     normal: "ON = Operating; OFF = Idle/buffering. This flag says that DHW operation is active, but not why it started.",
@@ -867,7 +863,7 @@ const DESCRIPTIONS = [
 // not gated at all, and the last good cache went on being drawn as the live second opinion, with a
 // computed difference against it.
 const mbByConcept = (cid) =>
-  cid && mbLive()
+  cid && cid !== "quiet_state" && mbLive()
     ? (S._modbus || []).find((m) => m && m.concept === cid && m.value != null) || null
     : null;
 
@@ -899,8 +895,7 @@ const rowNotMeasuring = (v) => !!v && (v.held === true || rowHeldOver(v, S.live)
 // follows: an independent sensor that IS still measuring may stand in, and nothing else may. The
 // schematic and the inspector have refused a held reading since legacy-209; this is what lets the value
 // tables refuse it the same way instead of printing it as an ordinary current row.
-// A row of unknown age is not refused, since it may be live, but a reading known to be current
-// outranks it. liveData decides whether its age is still unknown (d.ouUnknown).
+// A row of unknown age may stay visible, but the independent HomeHub reading takes precedence.
 const mbStandInFor = (v) =>
   v && (x10aDown() || rowNotMeasuring(v) || (v.held_unknown === true && S.live?.ouUnknown)) && mbLive()
     ? mbByConcept(v.concept) : null;
@@ -957,15 +952,11 @@ const mbForInspect = (key) => {
   // needs to prove that an external energy manager's request reached the HomeHub.
   if (key === "sgrequest") return mbRow(MB_OFF_SMART_GRID);
   if (!mbLive()) return null;
-  // Quiet is not a numeric pill in MB_PAIRS. Its inspector still needs the matching HomeHub row as
-  // a named source, including while X10A is live as the second opinion. The BSH inspector is
-  // intentionally X10A-only and therefore has no equivalent exception here.
-  if (key === "quiet") return mbByConcept("quiet_state");
   const p = MB_PAIRS.find((q) => q.insp === key);
   // Normally only a silent X10A link makes the gateway lead. `mbFields` is the per-reading exception:
-  // liveData marks outdoor air there while X10A is connected but its sleeping outdoor-unit row is
-  // retained from the last run. No marker means X10A still leads and Modbus remains a second opinion.
-  const leads = x10aDown() || !!(p && S.live && S.live.mbFields && S.live.mbFields.has(p.fld));
+  // liveData marks outdoor air there when the X10A reading is absent, held or of unknown age.
+  const selected = p && S.live?.mbFields?.has(p.fld);
+  const leads = key === "out" ? selected : x10aDown() || selected;
   if (!leads) return null;
   // Electrical input has no X10A concept twin. It still becomes the schematic pill's source when
   // X10A is down, so the inspector needs the real register row for its label and Modbus badge rather
@@ -992,9 +983,8 @@ const modbusEnumNumber = (r, semantic, max) => {
   const n = Number(raw);
   return Number.isSafeInteger(n) && n >= 0 && n <= max ? n : null;
 };
-// Most gateway states retain the firmware-wide numeric 1/0 contract. The 3-way valve is an enum,
-// but its PUBLIC value is now also the raw numeric Modbus constant. Its enum id preserves the
-// destination meaning while still giving the schematic a boolean direction to route on.
+// The HomeHub 3-way-valve enum keeps the raw Modbus constant. A known value represents a reported
+// route. The schematic uses its separate X10A route.
 const mbBinaryValue = (r) => {
   const binary = binaryValue(r);
   if (binary != null) return binary;
@@ -1005,13 +995,15 @@ const mbBinaryValue = (r) => {
 // A HomeHub STATE register by its EKRHH offset, as a tri-state boolean (null = the gateway did not
 // answer it either). State is not a reading: it carries no unit and no trend, so it rides the offset
 // rather than the concept vocabulary logic/homehub_map.hpp reserves for paired MEASUREMENTS.
-const mbBool = (off) => mbBinaryValue(mbRow(off));
+// Legacy frames can describe holding 9 as binary Quiet activity. Its map and meaning are
+// unverified, so it cannot supply a live state.
+const mbBool = (off) => off === 9 ? null : mbBinaryValue(mbRow(off));
 // EKRHH input 21 is a three-state enum, not a flag. Preserve the raw constant while ensuring the
 // status header never treats an unknown future value as a known Fault or Warning.
 const mbUnitAbnormality = () => modbusEnumNumber(mbRow(21), "unit_abnormality", 2);
 // The same register as raw TEXT — the error code is a Text16, not a flag.
 const mbVal = (off) => { const r = mbRow(off); return r ? String(r.value) : null; };
-// The MEASURED power consumption (EKRHH input register 51, def/homehub.hpp). Named because the map
+// Reported power consumption (EKRHH input register 51, def/homehub.hpp). Named because the map
 // carries three "kW" rows and the other two are the power-LIMIT setpoints (holding 57/58): anything
 // selecting this reading by its UNIT will sooner or later select an installer's ceiling instead.
 const MB_OFF_POWER = 51;
@@ -1087,17 +1079,8 @@ const sgInspectIsX10a = (d) => (d && d.sgSrc) ? d.sgSrc === "X10A" : !mbConfigur
 // One rule, one place. X10A leads while its link is LIVE and carries the row; otherwise a LIVE
 // gateway answers; otherwise nobody does and the caller blanks.
 //
-// This exists because the rule was written out three times — for the valve, the pump and the
-// space-operation state — and the three had already drifted into three different behaviours. The
-// valve read `X10A ?? Modbus` and was never cleared when the X10A link dropped, so the STALE X10A
-// position beat a live gateway one: measured, the header said "DHW · readings from Modbus" while
-// the drawing routed water through the radiators and left the tank branch idle. The pump and the
-// demand had the opposite bug — cleared on link loss and never restored from the gateway, so they
-// simply went blank next to readings that were arriving.
-//
-// The X10A cache is deliberately KEPT when its link drops (the trend rings need it), so "the row
-// exists" is not the same question as "the row is current". Every consumer has to ask the second
-// one, and asking it once is the only way they cannot disagree.
+// These paired status rows may use a compatible HomeHub value after an unavailable X10A report.
+// Link loss leaves the retained X10A cache available to the history lifecycle.
 const stateOf = (re, mbOffset) => {
   const x = x10aDown() ? null : vOn(re);
   if (x != null) return x;
@@ -1106,12 +1089,16 @@ const stateOf = (re, mbOffset) => {
   return mbBool(mbOffset);
 };
 
+// No supported Modbus map establishes the flow scale. X10A rows have a register page.
+const mbFlowScaleUnverified = row => row != null && row.reg == null &&
+  (row.off === 49 || row.concept === "flow");
+
 // First matching description for a value label and source, or null (→ a plain, non-expandable row).
-// HomeHub rows carry an offset, X10A rows a register. Source-qualified entries prevent labels that
-// happen to be identical in both protocols from inheriting the other protocol's meaning.
+// Source-qualified entries keep identical labels from inheriting the other source's meaning.
 function descFor(label, row = null) {
+  if (mbFlowScaleUnverified(row)) return { what: t("mb.flow_scale_help"), sourceQualified: true };
   if (row?.profile === "altherma4") {
-    const key = ({9: "a4.quiet_help", 38: "a4.current_help", 49: "a4.flow_help",
+    const key = ({9: "a4.quiet_help", 38: "a4.current_help",
       54: "a4.heating_offset_help",
       58: "a4.limit_help", 65: "a4.demand_help", 68: "a4.pump_help",
       74: "a4.pre_phe_outdoor_help", 79: "a4.pressure_help", 83: "a4.operation_help"})[row.off];
@@ -1213,13 +1200,15 @@ const MB_DELTA_WHY = {
 // points in the circuit, so a gap is information. What it must never do is stay silent — a reader
 // comparing two numbers wants to know whether they agree, and "1.7 K apart, and here is why" is a
 // different statement from two numbers left side by side to be squinted at.
+function modbusScaleHtml(row) {
+  if (!mbFlowScaleUnverified(row) && (row?.profile !== "altherma4" || ![68, 79].includes(row.off))) return "";
+  const limit = descFor(row.label, row)?.what;
+  return limit ? descParaHtml(esc(limit)) : "";
+}
 function mbDeltaHtml(row, mb) {
-  // A numeric difference would assume verified common units. Keep the native conversion limit
-  // visible beside the second source instead, even when X10A supplies the primary reading.
-  if (mb?.profile === "altherma4" && [49, 68, 79].includes(mb.off)) {
-    const limit = descFor(mb.label, mb)?.what;
-    if (limit) return descParaHtml(esc(limit));
-  }
+  // A numeric difference would assume verified common units.
+  const limit = modbusScaleHtml(mb);
+  if (limit) return limit;
   const why = MB_DELTA_I18N[LANG]?.[row.concept] ||
     (MB_DELTA_WHY[row.concept] ? tx(MB_DELTA_WHY[row.concept]) : "");
   // A bit flag has no difference to state. Agreement on a flag is unremarkable and says nothing;

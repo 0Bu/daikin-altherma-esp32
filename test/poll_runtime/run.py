@@ -12,7 +12,7 @@ import tempfile
 
 HERE = Path(__file__).resolve().parent
 CASES = [
-    'oom_raii', 'detect_adjacent', 'detect_silent', 'detect_no_match', 'detect_changed',
+    'oom_raii', 'modbus_retry', 'detect_adjacent', 'detect_silent', 'detect_no_match', 'detect_changed',
     'detect_generation', 'detect_throw', 'detect_no_match_silent', 'detect_staging_oom',
     'detect_model_arguments',
     'saturation_recent', 'saturation_quiesce', 'saturation_oom',
@@ -141,6 +141,8 @@ for case in selected_cases:
     print(('EXPECTED REGRESSION ' + case + ': ' if expected else '') + output, end='')
 source_text = SOURCE.read_text()
 mutations = {
+    'omit_modbus_retry': ('            mb_retry_start();\n', '',
+                         'modbus_retry_runs_before_x10a_identification', 'modbus_retry'),
     'replace_empty_gap_capability': (
         'static void checkup_record_poll_gap(uint32_t generation, bool profile_confirmed = false) {',
         'static void checkup_record_poll_gap(uint32_t generation, bool profile_confirmed = true) {',

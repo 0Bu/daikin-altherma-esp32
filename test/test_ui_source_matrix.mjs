@@ -23,7 +23,12 @@ import fs from "node:fs";
 import vm from "node:vm";
 import { readAppFragments } from "../tools/ui/read_app_source.mjs";
 
-const SOURCE = readAppFragments(["descriptions.js", "schematic.js"]);
+// Keep the source-arbitration test's history boundary stubs: loading the entire history fragment
+// would replace hasRoomHist/roomHistName. Execute only its shared pure pump-command dependency.
+const commandSource = readAppFragments(["history.js"])
+  .match(/function pumpCommandPercent\(signal\) \{[\s\S]*?\n\}/)?.[0];
+assert.ok(commandSource, "the production pump-command rule must be present");
+const SOURCE = commandSource + readAppFragments(["descriptions.js", "schematic.js"]);
 const index = fs.readFileSync(new URL("../main/www/index.html", import.meta.url), "utf8");
 const style = fs.readFileSync(new URL("../main/www/style.css", import.meta.url), "utf8");
 const demo = fs.readFileSync(new URL("../tools/uigif/scenes.js", import.meta.url), "utf8");
@@ -36,6 +41,7 @@ const M = (off, label, value, concept, extra = {}) => ({ label, value, unit: "°
 // The 3-way valve as each side reports it: X10A bit-flag row, HomeHub offset 37.
 const X_VALVE = (on) => ({ label: "3way valve(On:DHW_Off:Space)", value: on ? "1" : "0",
                            unit: "", reg: 0x60, binary: true, concept: "valve_dhw" });
+const X_DEFROST = (value) => ({ label: "Defrost Operation", value, reg: 0x10, binary: true });
 const M_VALVE = (on) => ({ label: "3-way valve", value: on ? 1 : 0,
                            unit: "", off: 37, enum: "three_way_valve", concept: "valve_dhw" });
 const M_FLAG = (off, label, on, concept = null) => ({
@@ -95,7 +101,7 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [], elements 
     " SMART_GRID_MODE_VALUE, x10aSmartGridModeFrom, x10aSmartGridMode, x10aSmartGridRow," +
     " sgModeText, mbNoteHtml, mbDeltaHtml, descFor, inspCurRow, inspMember," +
     " inspMembers, inspValues, inspComparisonHtml, inspHeld, liveData, compressorRunning," +
-    " waterMoving, pumpFlowConflict, waterThermalKind, activeSpaceKind, ouReadingText, updateSchematicStateA11y, INSPECT," +
+    " waterMoving, waterThermalKind, activeSpaceKind, ouReadingText, updateSchematicStateA11y, INSPECT," +
     " pelMeasured, pelApproxText, PEL_INSPECT, vRow, vNum, highSideRow, inspHeldHtml, inspUnknownAge," +
     " inspNowText, heldUnknownText, OUTDOOR_HX_RE };",
     context, { filename: "main/www/app.sources" });
@@ -456,7 +462,7 @@ const X_2WV = (on) => ({ label: "2way valve(On:Heat_Off:Cool)", value: on ? "1" 
   // active device language. A tx() stub fixed to English used to leave this visible path untested.
   const deltaPairs = [
     [X("R1T-Outdoor air temp.", "5.0", "outdoor_air"),
-     M(49, "Outdoor air temperature", "6.0", "outdoor_air")],
+     M(44, "Outdoor air temperature", "6.0", "outdoor_air")],
     [X("Indoor ambient temp. (R1T)", "20.0", "room_temp"),
      M(50, "Remote controller room temperature Main", "21.0", "room_temp")],
   ];
@@ -477,16 +483,42 @@ const X_2WV = (on) => ({ label: "2way valve(On:Heat_Off:Cool)", value: on ? "1" 
     "measured flow takes precedence over a contradictory internal-pump status");
   assert.equal(c.waterMoving({ pumpOn: true, flow: null }), null,
     "pump ON without a flow reading must remain unknown, not measured circulation");
+  for (const flow of [null, NaN, -1]) {
+    assert.equal(c.waterMoving({ pumpOn: false, flow, provisionalFlow: 12 }), null,
+      "pump OFF and a provisional reading cannot establish zero measured flow");
+  }
+  assert.equal(c.waterMoving({ pumpOn: false, flow: 0 }), false,
+    "a qualified measured zero remains distinct from missing or provisional flow");
+  for (const [raw, decoded, invalid] of [
+    ["-1.0", null, true], ["Infinity", null, true], ["1.5error", null, true],
+    ["NaN", null, true], [null, null, false], ["", null, false], ["   ", null, false],
+    ["0.0", 0, false], ["12.0", 12, false],
+  ]) {
+    const rawRow = X("Flow sensor", raw, "flow", { unit: "l/min" });
+    c.S._values = [rawRow, { label: "Water pump operation", value: "1", binary: true }];
+    const live = c.liveData();
+    assert.equal(live.flow, decoded, "reject invalid X10A flow before publishing it to the schematic");
+    assert.equal(live.flowInvalid, invalid);
+    assert.equal(rawRow.value, raw, "leave the source reading untouched");
+    const pumpText = c.INSPECT.pump.now(live).en;
+    assert.equal(pumpText.includes("schem.flow_invalid"), invalid);
+    assert.equal(pumpText.includes("Measured flow"), decoded != null);
+    if (decoded == null && !invalid) assert.match(pumpText, /No flow measurement is available/);
+    if (invalid) {
+      assert.equal(c.INSPECT.flow.head(live), "—");
+      assert.equal(c.inspNowText(c.INSPECT.flow, live), "schem.flow_invalid");
+    }
+  }
   assert.match(c.INSPECT.pump.now({ pump: 0, pumpOn: false, flow: 5 }).en,
-    /pump reports stopped, but the flow sensor reports/i);
+    /pump reports stopped[\s\S]*Measured flow 5[\s\S]*OFF conflicts with flow/i);
   const pumpOnNoFlow = c.INSPECT.pump.now({ pump: null, pumpOn: true, flow: null }).en;
   assert.match(pumpOnNoFlow, /pump status is ON.*no flow measurement/i);
   assert.doesNotMatch(pumpOnNoFlow, /pump reports stopped|measured flow is/i);
   const pumpUnknown = c.INSPECT.pump.now({ pump: null, pumpOn: null, flow: 0 }).en;
-  assert.match(pumpUnknown, /No reliable pump state/i);
+  assert.match(pumpUnknown, /reported pump state is unknown/i);
   assert.doesNotMatch(pumpUnknown, /pump reports stopped/i);
   assert.match(c.INSPECT.pump.now({ pump: 45, pumpOn: true, flow: null }).en,
-    /no flow measurement is available; circulation is not confirmed/i);
+    /no flow measurement is available[\s\S]*circulation is not established/i);
   assert.doesNotMatch(c.INSPECT.wtank.now({ valveDhw: true, pumpOn: false, flow: 0,
                                             lwt: 40, tank: 35 }).en, /Charging the tank/i,
     "a selected valve route alone must not be called an active tank charge");
@@ -534,19 +566,20 @@ const X_2WV = (on) => ({ label: "2way valve(On:Heat_Off:Cool)", value: on ? "1" 
       `the demo keeps ${concept}'s current state attached to its categorical history`);
 }
 
-// Quiet is the outdoor-unit state with an exact second source. X10A leads disagreements; HomeHub
-// input 9 keeps the pill and inspector current when the service bus is silent.
+// X10A independently reports Quiet activity. Legacy holding 9 cannot act as a second source.
 {
   const both = ctx({ x10a: true, mbEnabled: true, mbConnected: true,
                      values: [X_QUIET(false)], modbus: [M_QUIET(true)] });
-  assert.equal(both.liveData().quiet, false, "live X10A Quiet leads a contradictory HomeHub state");
-  assert.equal(both.mbForInspect("quiet"), both.S._modbus[0],
-    "the Quiet inspector keeps the exact HomeHub state as a second opinion");
+  assert.equal(both.liveData().quiet, false, "live X10A Quiet stays independent");
+  assert.equal(both.mbForInspect("quiet"), null);
+  assert.equal(both.mbTwin(X_QUIET(false)), null, "the legacy bit cannot appear as a twin");
 
   const down = ctx({ x10a: false, mbEnabled: true, mbConnected: true,
                      values: [X_QUIET(false)], modbus: [M_QUIET(true)] });
-  assert.equal(down.liveData().quiet, true,
-    "HomeHub input 9 keeps Quiet current when X10A is silent");
+  assert.equal(down.liveData().quiet, null, "holding 9 cannot assert Quiet activity");
+  assert.equal(down.mbBool(9), null);
+  assert.equal(down.mbFallbackFor("quiet_state"), null);
+  assert.equal(down.INSPECT.quiet.now(down.liveData()), null);
   assert.equal(down.INSPECT.quiet.trend, "quiet_state");
   assert.equal(down.INSPECT.defrost.trend, "defrost_state");
 
@@ -569,6 +602,10 @@ const X_2WV = (on) => ({ label: "2way valve(On:Heat_Off:Cool)", value: on ? "1" 
     "P2 Low noise control must not become validated Quiet when Silent Mode is unread");
   assert.equal(p2Only.INSPECT.quiet.re.test("Low noise control"), false,
     "the Quiet inspector must not attach quiet-state copy/history to the P2 bit");
+  const quietSpeed = both.INSPECT.ou.now({ quiet: true, rps: 18 });
+  assert.match(quietSpeed.en, /18 rps.*Quiet mode reports ON/);
+  assert.doesNotMatch(quietSpeed.en, /capped|limited/i);
+  assert.match(quietSpeed.de, /18 rps.*Leise-Modus meldet EIN/);
 }
 
 // The two X10A contact bits are not two user-facing modes. Pin the documented truth table and the
@@ -673,10 +710,10 @@ const X_2WV = (on) => ({ label: "2way valve(On:Heat_Off:Cool)", value: on ? "1" 
     "the outdoor inspector resolves the exact HomeHub row used by the pill");
   assert.equal(c.inspHeld(c.INSPECT.out, d), false,
     "a live Modbus headline must not be followed by a no-current-reading note");
-  assert.match(c.INSPECT.ou.now(d).de, /HomeHub-Modbus-Register/,
-    "the German outdoor-unit explanation names the standby substitution");
-  assert.match(c.INSPECT.ou.now(d).de, /Alter der zugrunde liegenden Messung.*unbekannt/,
-    "a successful Modbus poll must not claim source-measurement freshness");
+  const outdoor = c.inspNowText(c.INSPECT.ou, d);
+  assert.match(outdoor, /compressor is stopped.*schem\.outdoor_held.*schem\.outdoor_homehub/,
+    "the outdoor-unit explanation names the held X10A page and the independent substitution");
+  assert.doesNotMatch(outdoor, /sys\.x10a_down/);
 
   c.S.insp = "disch";
   assert.equal(c.mbForInspect("disch"), null, "unpaired discharge has no invented fallback");
@@ -706,11 +743,44 @@ const X_2WV = (on) => ({ label: "2way valve(On:Heat_Off:Cool)", value: on ? "1" 
 // Zero degrees is a valid outdoor measurement, not a missing-value sentinel.
 {
   const zero = M(44, "Outdoor air temperature", 0, "outdoor_air");
-  const c = ctx({ x10a: true, mbEnabled: true, mbConnected: true,
-                  values: [OUT_X, RPS_STOP], modbus: [zero] });
-  const d = c.liveData();
-  assert.equal(d.out, 0);
-  assert.equal(d.mbFields.has("out"), true);
+  for (const [x10a, report] of [[true, null], [false, false], [false, null], [true, true]]) {
+    const c = ctx({ x10a, mbEnabled: true, mbConnected: true,
+      values: [OUT_X, RPS_STOP], modbus: report == null ? [zero] : [zero, M_FLAG(31, "Compressor running", report)] });
+    const d = c.liveData();
+    assert.equal(d.out, 0);
+    assert.equal(d.mbFields.has("out"), true);
+    assert.equal(d.ouHeldOver, x10a, "only a live X10A link can have a held page");
+    assert.equal(c.ouReadingText(d, "out", d.out, n => n.toFixed(1)), "0.0");
+    const outdoor = c.inspNowText(c.INSPECT.ou, d);
+    const state = report === true ? /X10A 0 rps.*HomeHub state\.on/
+      : x10a ? /compressor is stopped/
+      : report == null ? /dyn\.state_gate/ : /schem\.homehub_compressor_off/;
+    assert.match(outdoor, state);
+    assert.ok(outdoor.includes(x10a ? "schem.outdoor_held" : "sys.x10a_down"));
+    assert.ok(outdoor.includes("schem.outdoor_homehub"));
+    assert.doesNotMatch(outdoor, /—/, "the actual outdoor number cannot be described as a dash");
+  }
+}
+
+// A missing or withheld outdoor row can switch just that pill and both outdoor inspectors
+// to HomeHub, even while the compressor reports a current X10A speed.
+{
+  const speed = X("INV frequency (rps)", "18", null, { reg: 0x30, unit: "rps" });
+  for (const row of [null, { ...OUT_X, value: null }, { ...OUT_X, value: "invalid" },
+    { ...OUT_X, held: true }, { ...OUT_X, held_unknown: true }, OUT_X]) {
+    const c = ctx({ x10a: true, mbEnabled: true, mbConnected: true,
+      values: row ? [speed, row] : [speed], modbus: [OUT_M] });
+    const live = c.S.live = c.liveData();
+    c.S.insp = "out";
+    const primary = row === OUT_X;
+    assert.equal(live.out, primary ? 19 : 28.5);
+    assert.equal(live.mbFields.has("out"), !primary);
+    assert.equal(c.inspCurRow(c.INSPECT.out), primary ? OUT_X : null);
+    assert.equal(c.mbForInspect("out"), primary ? null : OUT_M);
+    assert.equal(c.inspValues(c.INSPECT.ou, null, null)[0].mb, OUT_M);
+    assert.equal(c.inspValues(c.INSPECT.ou, null, null)[0].x10a, primary ? OUT_X : null);
+    assert.equal(c.inspNowText(c.INSPECT.ou, live).includes("schem.outdoor_homehub"), !primary);
+  }
 }
 
 // ── The HomeHub Smart-Grid request LEADS wherever it answers ───────────────────────────────────
@@ -829,8 +899,7 @@ const SG_INSP = (c, d) => c.INSPECT.sgrequest;
   assert.equal(invalid.mbSmartGridMode(), null, "unknown Smart-Grid enum must fail closed");
 }
 
-// BSH still uses the shared arbitration in the schematic, but its inspector intentionally presents
-// only the physical X10A contact and X10A timeline: no HomeHub value or whole-system power row.
+// The schematic and inspector use the same current native BSH report.
 {
   const both = ctx({ x10a: true, mbEnabled: true, mbConnected: true,
                      values: [X_BSH(false)], modbus: [M_BSH(true)] });
@@ -846,23 +915,53 @@ const SG_INSP = (c, d) => c.INSPECT.sgrequest;
     "the BSH inspector has no additional value/context rows");
   assert.equal(both.inspValues(both.INSPECT.bsh, both.inspCurRow(both.INSPECT.bsh), null).length, 0,
     "the generic leaf twin must not put the HomeHub BSH value back into the X10A-only panel");
-  assert.equal(both.INSPECT.bsh.head(live), "state.off");
+  assert.equal(both.inspCurRow(both.INSPECT.bsh).value, "0");
+  assert.match(both.inspNowText(both.INSPECT.bsh, live), /^Off/);
 
   const power = { label: "Heat pump power consumption", value: "2.40", unit: "kW", off: 51 };
   const down = ctx({ x10a: false, mbEnabled: true, mbConnected: true,
                      values: [X_BSH(false)], modbus: [M_BSH(true), power] });
   const d = down.liveData();
   down.S.live = d;
-  assert.equal(d.bsh, true, "HomeHub input 32 keeps the heater state live when X10A is silent");
+  assert.equal(d.bsh, null, "HomeHub input 32 cannot keep the heater state live when X10A is silent");
+  assert.equal(down.mbBool(32), true, "the independent HomeHub input remains readable");
   assert.equal(down.mbForInspect("bsh"), null,
     "the X10A-only heater inspector never promotes the HomeHub state into its headline");
-  assert.equal(down.INSPECT.bsh.head(d), "—",
+  assert.equal(down.inspCurRow(down.INSPECT.bsh), null,
     "a HomeHub-only state must not be rendered under the X10A BSH source label");
   assert.equal(down.INSPECT.bsh.now(d), null,
     "the inspector prose must not leak the HomeHub-only state either");
   assert.equal(down.INSPECT.buh.trend, "buh_state");
   assert.doesNotMatch(down.descFor("BSH").what, /HomeHub|Modbus/,
     "the X10A BSH explanation contains no second-source copy");
+
+  for (const [row, expected] of [
+    [null, null], [{ ...X_BSH(true), held: true }, null],
+    [{ ...X_BSH(true), held_unknown: true }, null],
+    [{ ...X_BSH(true), binary: false }, null], [{ ...X_BSH(true), value: "2" }, null],
+    [X_BSH(true), true], [X_BSH(false), false],
+  ]) {
+    const cachedHeater = M_BSH(true);
+    const fixture = ctx({ x10a: true, mbEnabled: true, mbConnected: true,
+      values: [X_DEFROST("1"), ...(row ? [row] : [])],
+      modbus: [cachedHeater, M_FLAG(31, "Compressor running", true), M_VALVE(false)] });
+    fixture.S.status.modbus.rx = 100;
+    for (const compressor of [0, 1]) {
+      // Fast replies keep the link up and update compressor/route; input 32 keeps its old value.
+      fixture.S.status.modbus.rx++;
+      fixture.S._modbus[1].value = compressor;
+      fixture.S._modbus[2].value = compressor;
+      fixture.S.live = fixture.liveData();
+      assert.equal(fixture.S.live.defrost, true);
+      assert.equal(fixture.S.live.bsh, expected, "only a current native BSH report supplies live state");
+      const panel = fixture.INSPECT.bsh;
+      assert.equal(fixture.inspCurRow(panel), expected == null ? null : row);
+      const sentence = fixture.inspNowText(panel, fixture.S.live);
+      if (expected == null) assert.ok(!sentence);
+      else assert.match(sentence, expected ? /heater active/ : /^Off/);
+      assert.equal(fixture.mbByConcept("bsh_state"), cachedHeater);
+    }
+  }
 }
 
 // ── 2. Both live, a discrete CONTRADICTION — X10A still leads, both remain readable ────────────
@@ -906,18 +1005,30 @@ const SG_INSP = (c, d) => c.INSPECT.sgrequest;
     M(43, "Domestic Hot Water temperature", 39.5, "dhw_tank"),
     M(49, "Flow rate", 24.0, "flow", { unit: "L/min" }),
   ];
-  const c = ctx({ x10a: false, mbEnabled: true, mbConnected: true,
-                  values: [], modbus: dhwModbus });
-  const d = c.liveData();
-  assert.equal(d.rps, null, "Modbus-only does not invent a compressor speed");
-  assert.equal(d.compressorOn, true, "HomeHub input 31 supplies the live compressor witness");
-  assert.equal(c.compressorRunning(d), true, "the schematic recognises the gateway witness");
-  assert.equal(d.thermalMode, "heat", "a DHW-routed hydronic loop is a heating task");
-  assert.equal(c.waterThermalKind(d, true), "heat",
-    "active Modbus-only DHW receives heating colours, never cooling or neutral colours");
-  assert.equal(d.pthKind, "heating");
-  assert.ok(Math.abs(d.pth - 7.87) < 0.01,
-    "the witnessed PHE transfer is flow×(R1T−R4T), using the screenshot operating point");
+  for (const metadata of [{}, { flow_scale_unverified: false }, { flow_scale_unverified: true },
+    { profile: "altherma4" }]) {
+    const c = ctx({ x10a: false, mbEnabled: true, mbConnected: true, values: [],
+      modbus: dhwModbus.map(row => row.off === 49 ? { ...row, ...metadata } : row) });
+    const d = c.liveData();
+    assert.equal(d.rps, null, "Modbus does not invent compressor speed");
+    assert.equal(d.compressorOn, true, "HomeHub input 31 independently reports the compressor");
+    assert.equal(c.compressorRunning(d), true);
+    assert.equal(d.valveDhw, null, "HomeHub-only telemetry cannot establish the current schematic route");
+    assert.equal(c.inspNowText(c.INSPECT.wtank, d), "schem.water_route_unknown");
+    assert.equal(d.thermalMode, null, "the gateway route alone cannot establish thermal mode");
+    assert.equal(d.provisionalFlow, 24, "the numeric flow remains visible with provisional scale");
+    assert.equal(d.flow, null, "no Modbus map qualifies input 49");
+    assert.equal(c.waterMoving(d), null, "pump ON cannot certify water motion");
+    assert.equal(d.dtStale, true, "the 4.7 K sensor difference is not a working ΔT");
+    assert.equal(d.pthRaw, null, "the unverified divisor cannot reach thermal arithmetic");
+    assert.equal(d.pth, null, "the previous 7.87 kW estimate must not appear");
+    assert.equal(d.pthKind, null);
+    assert.match(c.mbDeltaHtml({ concept: "flow", value: "12" }, c.mbByConcept("flow")),
+      /mb\.flow_scale_help/, "even an omitted or false flag must withhold numeric agreement");
+    const provisionalPump = c.INSPECT.pump.now(d).en;
+    assert.match(provisionalPump, /circulation is not established/i);
+    assert.doesNotMatch(provisionalPump, /no flow measurement/i);
+  }
 
   const stopped = ctx({ x10a: false, mbEnabled: true, mbConnected: true, values: [],
                         modbus: dhwModbus.map((r) => r.off === 31 ? { ...r, value: 0 } : r) });
@@ -980,6 +1091,36 @@ const SG_INSP = (c, d) => c.INSPECT.sgrequest;
                   modbus: [M_VALVE(true)] });
   assert.equal(c.stateOf(/3.?way valve/i, 37), true,
     "profile without the X10A row: the gateway answers even though the bus is healthy");
+}
+
+// A cached full-sweep HomeHub valve stays raw. Only a current X10A valve supplies the schematic.
+{
+  for (const route of [true, false]) {
+    const mb = M_VALVE(route);
+    const c = ctx({ x10a: true, mbEnabled: true, mbConnected: true,
+      values: [{ ...X_VALVE(!route), value: null }], modbus: [mb] });
+    c.S.insp = "valve";
+    c.S.live = c.liveData();
+    assert.equal(c.S.live.valveDhw, null, "cached HomeHub route cannot supply the schematic reading");
+    assert.equal(c.inspCurRow(c.INSPECT.valve), null);
+    assert.equal(c.mbForInspect("valve"), null);
+    assert.equal(c.mbByConcept("valve_dhw"), mb, "retain the independent gateway register");
+    assert.ok(!c.inspValues(c.INSPECT.wtank, null, null).some(member => member.mb === mb));
+    assert.equal(c.inspNowText(c.INSPECT.valve, c.S.live), "");
+    const x10a = X_VALVE(!route);
+    c.S._values = [x10a];
+    c.S.live = c.liveData();
+    assert.equal(c.S.live.valveDhw, !route);
+    assert.equal(c.inspCurRow(c.INSPECT.valve), x10a);
+    assert.equal(c.mbForInspect("valve"), null);
+    assert.match(c.INSPECT.valve.now(c.S.live).en, /reports the .* route selected.*does not by itself prove/i);
+    c.S._values = [];
+    c.S._modbus = [{ ...mb, value: 7 }];
+    c.S.live = c.liveData();
+    assert.equal(c.S.live.valveDhw, null);
+    assert.equal(c.mbForInspect("valve"), null);
+    assert.equal(c.inspNowText(c.INSPECT.wtank, c.S.live), "schem.water_route_unknown");
+  }
 }
 
 // ── 9. Enabled but never connected — the same as not live ──────────────────────────────────────
@@ -1173,15 +1314,15 @@ assert.match(style, /\.inspect-rows\s*>\s*\.mb-delta/,
 {
   const P = (off, label, value) => ({ label, value, unit: "kW", off, concept: null });
   const both = ctx({ x10a: false, mbEnabled: true, mbConnected: true, values: [],
-                     modbus: [P(51, "Heat pump power consumption", "1.42"),
+                     modbus: [P(51, "Heat pump power consumption", "1.4"),
                               P(57, "Power limit during Recommended on / buffering", "5.00"),
                               P(58, "General power limit", "7.00")] });
   assert.equal(both.MB_OFF_POWER, 51, "the reported power is EKRHH input register 51");
-  assert.equal(both.mbPower()?.value, "1.42", "the reported consumption value is what is read");
+  assert.equal(both.mbPower()?.value, "1.4", "the reported consumption value is what is read");
   assert.equal(both.mbForInspect("pel")?.label, "Heat pump power consumption",
     "the measured schematic headline remains traceable to its Modbus register");
 
-  const reported = { pel: 1.42, pelSrc: "MB", pelHeld: false };
+  const reported = { pel: 1.4, pelSrc: "MB", pelHeld: false };
   assert.equal(both.pelApproxText(reported), "", "a gateway-reported value has no UI estimate mark");
   assert.equal(both.PEL_INSPECT.t(reported).en, "Electrical input (HomeHub)");
   assert.equal(both.PEL_INSPECT.head(reported), "1.4 kW");
@@ -1206,6 +1347,34 @@ assert.match(style, /\.inspect-rows\s*>\s*\.mb-delta/,
                               P(58, "General power limit", "7.00")] });
   assert.equal(gone.mbPower(), null,
     "no reported power: the answer is nothing, never a power LIMIT that happens to share the unit");
+  for (const [fixture, power] of [[both, 1.4], [gone, null]]) {
+    fixture.S._modbus.push(M_FLAG(31, "Compressor running", true),
+      M_FLAG(32, "Booster heater run", true), M_VALVE(true),
+      M(40, "Leaving water temperature PHE", 36, "leaving_water"),
+      M(41, "Leaving water temperature BUH", 38.5, "leaving_water_post_buh"),
+      M(42, "Return water temperature", 30, "return_water"),
+      M(49, "Flow rate", 12, "flow", { unit: "L/min" }));
+    const live = fixture.liveData();
+    assert.equal(live.bsh, null, "the schematic lacks a current native heater report");
+    assert.equal(fixture.mbBool(32), true, "the independent HomeHub input remains readable");
+    assert.equal(live.r2t, 38.5, "HomeHub can report the post-heater temperature");
+    assert.equal(live.pth, null, "provisional Modbus flow cannot carry the exchanger estimate");
+    assert.equal(live.pel, power);
+    assert.equal(live.cop, null, "heater state and temperature cannot establish a matched power boundary");
+    assert.equal(live.copBlock, "mb_scope");
+    for (const [lang, boundary, unknownLoads, unsupportedClaims] of [
+      ["en", /cannot match HomeHub power to the estimated heat across the plate heat exchanger/i,
+        /loads .*including heaters.* unknown/i, /whole unit|reports neither|heaters included/i],
+      ["de", /keinen Vergleich .*HomeHub .*geschätzten Wärmeleistung am Plattenwärmetauscher/i,
+        /Verbraucher .*etwa Elektroheizer.* unklar/i, /gesamte Gerät|meldet .*weder|einschließlich beider/i],
+    ]) {
+      fixture.setTxLang(lang);
+      const explanation = fixture.inspNowText(fixture.INSPECT.cop, live);
+      assert.match(explanation, boundary);
+      assert.match(explanation, unknownLoads);
+      assert.doesNotMatch(explanation, unsupportedClaims);
+    }
+  }
   // Prove the trap is really set — a unit-keyed lookup over this very fixture picks a limit.
   const byUnit = [P(51, "Heat pump power consumption", null),
                   P(57, "Power limit during Recommended on / buffering", "5.00")]
@@ -1220,12 +1389,13 @@ assert.match(style, /\.inspect-rows\s*>\s*\.mb-delta/,
   const CT = (phase, value) => ({ label: `Current measured by CT sensor of L${phase}`, value,
                                   unit: "A", reg: 0x63 });
   const INV = { label: "INV primary current", value: "4.0", unit: "A", reg: 0x21 };
+  const speed = { label: "INV frequency (rps)", value: "18", unit: "rps", reg: 0x30 };
   const complete = ctx({ x10a: true, mbEnabled: false, mbConnected: false,
                          values: [CT(1, "2.0"), CT(2, "2.1"), CT(3, "2.2"), INV] });
   assert.equal(complete.liveData().pelSrc, "CT", "a complete declared CT set remains preferred");
 
   const partial = ctx({ x10a: true, mbEnabled: false, mbConnected: false,
-                        values: [CT(1, "2.0"), CT(2, "2.1"), CT(3, null), INV] });
+                        values: [CT(1, "2.0"), CT(2, "2.1"), CT(3, null), INV, speed] });
   assert.equal(partial.liveData().pelSrc, "INV",
     "L1/L2 plus fail-closed L3 must never become a partial CT estimate");
   assert.equal(partial.liveData().pel, 0.92, "live inverter current is the safe fallback");
@@ -1237,6 +1407,140 @@ assert.match(style, /\.inspect-rows\s*>\s*\.mb-delta/,
 }
 
 // ── 19. Cooling semantics: residual-hot circulation is not cooling capacity ────────────────────
+{
+  const candidates = [
+    ["Cooling + DHW", null, null, false, "cool", null],
+    ["Cooling + DHW", false, null, false, "cool", "cool"],
+    ["Cooling + DHW", true, null, false, "cool", "heat"],
+    ["Cooling + DHW", null, false, false, "cool", null],
+    ["Cooling + DHW", null, true, false, "cool", null],
+    ["Cooling + DHW", null, null, true, "cool", "defrost"],
+    ["Cooling", null, null, false, "cool", "cool"],
+    ["Cooling", false, null, false, "cool", "cool"],
+    ["Cooling", true, null, false, "cool", null],
+    ["Cooling", null, true, false, "cool", "cool"],
+    ["Cooling", true, false, false, "cool", null],
+    ["Heating", false, null, false, "heat", "heat"],
+    ["Heating + DHW", null, null, false, "heat", "heat"],
+    ["DHW", true, null, false, null, "heat"],
+    ["DHW", null, true, false, null, null],
+    ["DHW", false, null, false, null, null],
+    ["DHW", null, null, false, null, null],
+    ["Stop", true, null, false, null, null],
+    ["Stop", null, true, false, null, null],
+    [null, null, true, false, null, null],
+    ["", true, null, false, null, null],
+    ["Unrecognized", null, true, false, null, null],
+  ];
+  for (const [mode, x10aValve, gatewayValve, defrost, season, task] of candidates) {
+    const values = [
+      { label: "I/U operation mode", value: mode, reg: 0x60 },
+      { label: "INV frequency (rps)", value: "18", reg: 0x30 },
+      X_DEFROST(defrost ? "1" : "0"),
+      X("Flow sensor", "12", "flow_rate", { unit: "l/min" }),
+      X("Leaving Water Temp. before BUH (R1T)", task === "heat" ? "36" : "24", "leaving_water"),
+      X("Inlet Water Temp. (R4T)", "30", "return_water"),
+      { label: "INV primary current", value: "2.2", unit: "A", reg: 0x21 },
+    ];
+    if (x10aValve != null) values.push(X_VALVE(x10aValve));
+    const c = ctx({ x10a: true, mbEnabled: true, mbConnected: true, values,
+      modbus: gatewayValve == null ? [] : [M_VALVE(gatewayValve)] });
+    const live = c.liveData();
+    assert.equal(live.spaceMode, season, "the selected space season remains available");
+    const context = `${JSON.stringify(mode)}, X10A valve ${x10aValve}, HomeHub valve ${gatewayValve}, defrost ${defrost}`;
+    const routeOnlyFromHomeHub = x10aValve == null && gatewayValve != null;
+    if (routeOnlyFromHomeHub) {
+      assert.equal(live.valveDhw, null, "cached HomeHub route cannot supply the schematic reading");
+      assert.equal(c.activeSpaceKind(live), null, "cached HomeHub route cannot name an active branch");
+      for (const branch of ["heat", "wtank", "wheat"])
+        assert.equal(c.inspNowText(c.INSPECT[branch], live), "schem.water_route_unknown");
+    }
+    const directionFailure = mode === "Cooling + DHW" && task == null;
+    assert.equal(live.thermalMode, task, directionFailure
+      ? (routeOnlyFromHomeHub ? "cached HomeHub route cannot select direction"
+                             : "Cooling + DHW without a route cannot select direction")
+      : context);
+    assert.equal(live.dtStale, false, "common flow and the two temperatures still qualify ΔT");
+    if (task == null) {
+      assert.equal(live.pth, null, "an unknown direction withholds mode-specific capacity");
+      assert.equal(live.cop, null);
+      assert.equal(c.waterThermalKind(live, true), "neutral");
+    }
+  }
+}
+
+// The indoor mode can still report Heating while the outdoor defrost page is missing. These are
+// the decoded values for 0x60/2=0x10, 0x30 speed=0x12, flow=78 00 and R1T/R4T=68 01/2C 01.
+{
+  const operating = [
+    { label: "I/U operation mode", value: "Heating", reg: 0x60 },
+    { label: "INV frequency (rps)", value: "18", unit: "rps", reg: 0x30 },
+    X("Flow sensor", "12", "flow_rate", { unit: "l/min", reg: 0x62 }),
+    X("Leaving Water Temp. before BUH (R1T)", "36", "leaving_water"),
+    X("Inlet Water Temp. (R4T)", "30", "return_water"),
+    { label: "INV primary current", value: "2.2", unit: "A", reg: 0x21 },
+    { label: "Water pump operation", value: "1", reg: 0x60, binary: true },
+    X_VALVE(false),
+  ];
+  for (const row of [null, X_DEFROST(null), X_DEFROST("2"),
+    { ...X_DEFROST("0"), binary: false }, { ...X_DEFROST("0"), reg: 0x60 },
+    { ...X_DEFROST("0"), held: true }, { ...X_DEFROST("1"), held_unknown: true }]) {
+    const c = ctx({ x10a: true, values: row ? [...operating, row] : operating });
+    const d = c.liveData();
+    assert.equal(d.defrost, null, "an unusable page cannot establish either defrost state");
+    assert.equal(d.spaceMode, "heat", "the independently reported indoor mode remains visible");
+    assert.equal(d.thermalMode, null, "an unread defrost page cannot establish normal refrigerant direction");
+    assert.equal(d.pth, null, "the coincident positive water balance cannot establish heating capacity");
+    assert.equal(d.cop, null);
+    assert.equal(d.pumpOn, true);
+    assert.equal(c.waterMoving(d), true);
+    assert.equal(c.waterThermalKind(d, true), "neutral");
+    assert.equal(d.dtStale, false);
+    assert.equal(d.dt, 6);
+  }
+  const heatingContext = ctx({ x10a: true, values: [...operating, X_DEFROST("0")] });
+  const heating = heatingContext.liveData();
+  assert.equal(heating.defrost, false);
+  assert.equal(heating.thermalMode, "heat");
+  assert.equal(heating.pthKind, "heating");
+  assert.ok(Math.abs(heating.pth - 5.0232) < 0.001);
+  assert.equal(heatingContext.waterThermalKind(heating, heatingContext.waterMoving(heating)), "heat");
+  const defrostValues = operating.map(row => row.concept === "leaving_water"
+    ? { ...row, value: "24" } : row);
+  const defrostContext = ctx({ x10a: true, values: [...defrostValues, X_DEFROST("1")] });
+  const defrost = defrostContext.liveData();
+  assert.equal(defrost.defrost, true);
+  assert.equal(defrost.thermalMode, "defrost");
+  assert.equal(defrost.pthKind, "transfer");
+  assert.ok(Math.abs(defrost.pth + 5.0232) < 0.001);
+  assert.equal(defrost.cop, null);
+  assert.equal(defrostContext.waterMoving(defrost), true);
+  assert.equal(defrostContext.waterThermalKind(defrost, true), "neutral",
+    "defrost shows hydraulic circulation without assigning a heating colour to signed transfer");
+  const gatewayContext = ctx({ x10a: true, mbEnabled: true, mbConnected: true,
+    values: [...defrostValues.filter(row => row.reg !== 0x30), X_DEFROST("1")],
+    modbus: [M_FLAG(31, "Compressor running", true)] });
+  const gateway = gatewayContext.liveData();
+  assert.equal(gateway.rps, null);
+  assert.equal(gateway.compressorOn, true);
+  assert.equal(gateway.pth, null);
+  assert.equal(gatewayContext.waterMoving(gateway), true);
+  assert.equal(gatewayContext.waterThermalKind(gateway, true), "neutral",
+    "a HomeHub activity report cannot colour water during defrost");
+  const flagged = ctx({ x10a: true, values: [X_DEFROST("1")] });
+  const flagOnly = flagged.liveData();
+  assert.equal(flagOnly.defrost, true);
+  assert.equal(flagOnly.rps, null);
+  assert.equal(flagOnly.flow, null);
+  assert.equal(flagOnly.pth, null);
+  for (const key of ["ou", "defrost"]) {
+    assert.equal(flagged.inspNowText(flagged.INSPECT[key], flagOnly), "X10A reports defrost active.");
+    flagged.setTxLang("de");
+    assert.equal(flagged.inspNowText(flagged.INSPECT[key], flagOnly), "X10A meldet aktives Abtauen.");
+    flagged.setTxLang("en");
+  }
+}
+
 // This reproduces the live 57.8/57.5 °C screenshot: Cooling selected, space circulation active,
 // compressor stopped. The two temperatures are internal PHE readings after a DHW run. Arithmetic
 // flow×ΔT is non-zero, but there is no refrigerant-side transfer and therefore no capacity or EER.
@@ -1245,6 +1549,7 @@ assert.match(style, /\.inspect-rows\s*>\s*\.mb-delta/,
   const bin = (label, on, reg = 0x62) => ({ label, value: on ? "1" : "0", unit: "", reg, binary: true });
   const values = [
     mode("Cooling"),
+    X_DEFROST("0"),
     X("Leaving Water Temp. before BUH (R1T)", "57.8", "leaving_water"),
     X("Inlet Water Temp. (R4T)", "57.5", "return_water"),
     X("Flow sensor", "19.1", "flow_rate", { unit: "l/min" }),
@@ -1266,8 +1571,86 @@ assert.match(style, /\.inspect-rows\s*>\s*\.mb-delta/,
   assert.equal(c.activeSpaceKind(d), null, "pump-only residual circulation is not labelled as a cooling circuit");
   assert.equal(d.cop, null, "no active cooling capacity means no EER");
   assert.equal(d.efficiencyKind, "eer", "the efficiency label still follows Cooling mode");
-  assert.match(c.INSPECT.phe.now(d).en, /compressor is stopped/);
-  assert.match(c.INSPECT.dt.now(d).en, /residual-temperature equalisation/);
+  assert.equal(c.INSPECT.phe.now(d), "schem.compressor_off");
+  assert.match(c.INSPECT.dt.now(d), /0\.3 K.*schem\.compressor_off/);
+  for (const buh of [{ buh1: true }, { buh2: true }]) {
+    const heating = { ...d, ...buh };
+    assert.match(c.INSPECT.phe.now(heating), /schem\.backup_heater_active.*schem\.compressor_off/);
+    assert.match(c.INSPECT.dt.now(heating), /0\.3 K.*schem\.backup_heater_active/);
+    assert.equal(c.waterThermalKind(heating, c.waterMoving(heating)), "neutral",
+      "with the compressor stopped, a backup heater cannot earn cooling colours");
+    assert.doesNotMatch(c.INSPECT.heat.now(heating).en, /Residual/);
+    assert.doesNotMatch(c.INSPECT.wheat.now(heating).en, /Residual/);
+  }
+  for (const speed of [1, 5]) {
+    const running = ctx({ x10a: true, values: values.map(row => row === RPS_STOP
+      ? { ...row, value: String(speed) } : row) });
+    const low = running.liveData();
+    assert.equal(running.compressorRunning(low), true);
+    assert.equal(low.pth, null, "the existing capacity cutoff applies even when the compressor runs");
+    assert.equal(running.inspNowText(running.INSPECT.phe, low), "schem.capacity_low_speed");
+    assert.match(running.inspNowText(running.INSPECT.dt, low), /0\.3 K.*schem\.capacity_low_speed/);
+    for (const key of ["heat", "wheat"])
+      assert.doesNotMatch(running.inspNowText(running.INSPECT[key], low), /residual|pump-only/i);
+  }
+}
+
+// With live X10A flow, temperatures and INV current, input 31 still witnesses activity only.
+// Hold those inputs constant while varying the independent compressor speed.
+{
+  const speed = { label: "INV frequency (rps)", value: "6", unit: "rps", reg: 0x30 };
+  for (const cooling of [false, true]) {
+    const values = [
+      { label: "I/U operation mode", value: cooling ? "Cooling" : "Heating", reg: 0x60 },
+      X_DEFROST("0"),
+      X_VALVE(false),
+      X("Leaving Water Temp. before BUH (R1T)", cooling ? "25" : "35", "leaving_water"),
+      X("Inlet Water Temp. (R4T)", "30", "return_water"),
+      X("Flow sensor", "15", "flow_rate", { unit: "l/min" }),
+      { label: "INV primary current", value: "3", unit: "A", reg: 0x21 },
+    ];
+    for (const [row, rps] of [[null, null], [{ ...speed, value: null }, null],
+      [{ ...speed, held: true }, null], [{ ...speed, held_unknown: true }, null],
+      [{ ...speed, value: "0" }, 0], [{ ...speed, value: "3" }, 3],
+      [{ ...speed, value: "5" }, 5], [speed, 6]]) {
+      const c = ctx({ x10a: true, mbEnabled: true, mbConnected: true,
+        values: row ? [...values, row] : values,
+        modbus: [M_FLAG(31, "Compressor running", true)] });
+      const d = c.liveData();
+      const qualified = rps > 5;
+      assert.equal(d.rps, rps);
+      assert.equal(d.mbCompressorOn, true, "the independent activity report remains available");
+      assert.equal(d.compressorOn, rps !== 0);
+      assert.equal(c.compressorRunning(d), rps !== 0, "the activity report cannot replace measured zero speed");
+      assert.equal(d.dtStale, false);
+      assert.equal(d.pelSrc, rps > 0 ? "INV" : null, "inverter power needs current positive X10A speed");
+      assert.equal(d.efficiencyKind, cooling ? "eer" : "cop");
+      assert.equal(d.pth > 0, qualified);
+      assert.equal(d.cop > 0, qualified);
+      if (!qualified) {
+        assert.equal(d.pth, null);
+        assert.equal(d.cop, null);
+        assert.equal(c.inspNowText(c.INSPECT.pth, d), "schem.capacity_low_speed");
+        if (rps === 0) {
+          for (const key of ["ou", "comp", "rhot", "rcold"]) {
+            const sentence = c.inspNowText(c.INSPECT[key], d);
+            assert.match(sentence, /sources disagree.*X10A 0 rps.*HomeHub state\.on/);
+          }
+          assert.equal(c.inspNowText(c.INSPECT.cop, d), "schem.no_usable_power");
+          c.S._modbus[0].value = 0;
+          const agreed = c.liveData();
+          assert.equal(agreed.rps, 0);
+          assert.equal(agreed.mbCompressorOn, false);
+          assert.match(c.inspNowText(c.INSPECT.ou, agreed), /compressor is stopped/);
+          assert.equal(c.inspNowText(c.INSPECT.comp, agreed), null);
+        } else if (rps == null) {
+          assert.equal(c.inspNowText(c.INSPECT.cop, d), c.heldUnknownText());
+        } else {
+          assert.match(c.inspNowText(c.INSPECT.cop, d), /schem\.efficiency_no_capacity.*schem\.capacity_low_speed/);
+        }
+      }
+    }
+  }
 }
 
 // With the compressor running and R1T below R4T, the live 13.2/15.4 °C operating point becomes
@@ -1275,6 +1658,7 @@ assert.match(style, /\.inspect-rows\s*>\s*\.mb-delta/,
 {
   const common = [
     { label: "I/U operation mode", value: "Cooling", unit: "", reg: 0x60 },
+    X_DEFROST("0"),
     X("Flow sensor", "15.0", "flow_rate", { unit: "l/min" }),
     { label: "Water pump signal (0:max-100:stop)", value: "42", unit: "%", reg: 0x62 },
     { label: "Water pump operation", value: "1", unit: "", reg: 0x62, binary: true },
@@ -1297,6 +1681,46 @@ assert.match(style, /\.inspect-rows\s*>\s*\.mb-delta/,
   assert.equal(cool.INSPECT.pth.t(d).en, "Cooling capacity (estimated)");
   assert.equal(cool.INSPECT.cop.t(d).en, "EER of the heat pump (estimated)");
   assert.match(cool.INSPECT.cop.what(d).en, /cooling capacity divided/i);
+  assert.match(cool.INSPECT.cop.what(d).en, /R1T before.*R4T with inverter current/);
+  const ctRows = [1, 2, 3].map(phase => X(`Current measured by CT sensor of L${phase}`,
+    "2", null, { reg: 0x63, unit: "A" }));
+  const r2t = X("Leaving Water Temp. after BUH (R2T)", "14.3", "leaving_water_post_buh", { off: 4 });
+  for (const [hasR2T, heater, usableInv, expected, postBuh] of [
+    [false, "0", true, 2.3023, false], [true, "0", true, 1.15115, true],
+    [true, "1", false, null, false], [true, null, false, null, false],
+    [true, "1", true, 2.3023, false], [true, "1", "below_minimum", null, false],
+  ]) {
+    const values = cool.S._values.map(row => row.label === "BUH step 1"
+      ? { ...row, value: heater } : row.label === "INV primary current" && usableInv !== true
+        ? { ...row, value: usableInv === "below_minimum" ? "0.5" : null } : row)
+      .concat(ctRows, hasR2T ? [r2t] : []);
+    const fixture = ctx({ x10a: true, mbEnabled: false, mbConnected: false, values });
+    const live = fixture.liveData();
+    assert.equal(live.efficiencyKind, "eer");
+    assert.equal(live.pelSrc, "CT");
+    assert.equal(live.copPostBuh, postBuh);
+    const inspector = fixture.INSPECT.cop;
+    if (expected == null) {
+      assert.equal(live.copBlock, "backup_heater");
+      assert.equal(live.cop, null);
+      assert.equal(inspector.t(live).en, "Estimated EER");
+      assert.doesNotMatch(inspector.what(live).en, /R[12]T|with current transformers/);
+      assert.match(inspector.now(live).en, heater === "1"
+        ? /No EER.*reports ON.*load is included/ : /No EER.*status is unknown.*load is included/);
+    } else {
+      assert.ok(Math.abs(live.copPth - expected) < 0.01);
+      const ratioPower = heater === "1" ? 0.506 : 1.38;
+      assert.ok(Math.abs(live.copPel - ratioPower) < 0.001,
+        "use the power source paired with this thermal boundary");
+      assert.ok(Math.abs(live.cop - expected / ratioPower) < 0.01);
+      assert.match(inspector.t(live).en, heater === "1"
+        ? /EER of the heat pump/ : /EER based on current transformers/);
+      assert.match(inspector.what(live).en, heater === "1" ? /R1T before.*R4T with inverter current/
+        : postBuh ? /R2T after.*R4T with current transformers/ : /R1T before.*R4T with current transformers/);
+      if (postBuh) assert.doesNotMatch(fixture.INSPECT.pth.now(live).en, /EER/,
+        "the PHE's R1T value cannot carry the separate R2T-based EER");
+    }
+  }
 
   const wrongWay = ctx({ x10a: true, mbEnabled: false, mbConnected: false,
                          values: [...common,
@@ -1416,12 +1840,27 @@ assert.doesNotMatch(SOURCE, /chip\.demand_(?:on|off)|schem\.to_heat/);
 
   // Each block reason, in both languages, and each distinct from the others.
   const seen = new Map();
-  for (const block of ["tank_heater", "buh_no_r2t", "mb_scope", "no_pel"]) {
+  for (const block of ["tank_heater", "backup_heater", "mb_scope", "no_pel"]) {
     const d = { cop: null, copBlock: block, pelHeld: false };
     const s = sentence(d);
-    assert.ok(s && s.en && s.de, `copBlock "${block}" must reach a sentence in both languages`);
-    assert.ok(!seen.has(s.en), `copBlock "${block}" must not reuse another reason's sentence`);
-    seen.set(s.en, block);
+    assert.ok(s && (typeof s === "string" || (s.en && s.de)),
+      `copBlock "${block}" must reach a localized sentence`);
+    const en = s.en || s;
+    assert.ok(!seen.has(en), `copBlock "${block}" must not reuse another reason's sentence`);
+    seen.set(en, block);
+  }
+  const tankUnknown = sentence({ copBlock: "tank_heater", bsh: null });
+  const tankOn = sentence({ copBlock: "tank_heater", bsh: true });
+  assert.match(tankUnknown.en, /status is unknown/);
+  assert.match(tankOn.en, /reports ON/);
+  assert.match(tankUnknown.de, /Status .* ist unbekannt/);
+  assert.match(tankOn.de, /meldet EIN/);
+  for (const [buh1, buh2, expected] of [[false, null, /status is unknown/],
+                                        [true, null, /reports ON/], [null, true, /reports ON/]]) {
+    const backup = sentence({ copBlock: "backup_heater", buh1, buh2 });
+    assert.match(backup.en, expected);
+    assert.match(backup.en, /cannot establish whether the heater load is included/);
+    assert.doesNotMatch(backup.en, /no .*sensor/);
   }
   // no_pel splits: "held over from the last run" and "this profile has no current row" are different
   // facts about the hardware, and saying the wrong one substitutes a second false claim.
@@ -1429,7 +1868,7 @@ assert.doesNotMatch(SOURCE, /chip\.demand_(?:on|off)|schem\.to_heat/);
   const absent = sentence({ cop: null, copBlock: "no_pel", pelHeld: false });
   assert.notEqual(held.en, absent.en, "a held-over current must not read as an absent row");
   assert.match(held.de, /letzten Lauf/, "the held case names the previous run");
-  assert.match(absent.de, /keine elektrische Aufnahme/, "the absent case names the missing input");
+  assert.equal(absent, "schem.no_usable_power", "the absent case uses the usable-estimate explanation");
 
   // Every reason the production code can set must be one of the codes covered above.
   //
@@ -1448,8 +1887,6 @@ assert.doesNotMatch(SOURCE, /chip\.demand_(?:on|off)|schem\.to_heat/);
   // LOUDLY here rather than quietly reduce what is checked, which is the whole failure mode this
   // block keeps being bitten by.
   //
-  // [a-z0-9_] — `buh_no_r2t` carries a DIGIT, and a name pattern without one silently found three
-  // of four while the assertion still read as if it had checked them all.
   const covered = new Set(seen.values());
   const src = fs.readFileSync(new URL("../main/www/js/schematic.js", import.meta.url), "utf8");
 
@@ -1463,10 +1900,7 @@ assert.doesNotMatch(SOURCE, /chip\.demand_(?:on|off)|schem\.to_heat/);
   // stopped seeing it.
   const planBody = src.match(/const copPlan\s*=[\s\S]*?\n};/);
   assert.ok(planBody, "copPlan must remain an addressable named rule this scrape can read");
-  // Scoped to the `block:` VALUE EXPRESSION, not to a literal directly after the colon: the last
-  // arm is `block: heaterQuiet ? null : "buh_no_r2t"`, and a pattern demanding a bare string finds
-  // three of four — the same ternary trap the assignment scrape documents one paragraph up, which
-  // is why the `deepEqual` below names all four rather than merely checking each found one.
+  // Scope the scan to the `block:` value expression and pin all four independent reasons.
   const planned = new Set();
   for (const m of planBody[0].matchAll(/\bblock:\s*([^,}\n]*)/g))
     for (const q of m[1].matchAll(/"([a-z0-9_]+)"/g)) planned.add(q[1]);
@@ -1475,7 +1909,7 @@ assert.doesNotMatch(SOURCE, /chip\.demand_(?:on|off)|schem\.to_heat/);
   assert.ok(planned.size > 0, "the copPlan scrape must still find at least one block reason");
 
   const set = new Set([...assigned, ...planned]);
-  assert.deepEqual([...set].sort(), ["buh_no_r2t", "mb_scope", "no_pel", "tank_heater"],
+  assert.deepEqual([...set].sort(), ["backup_heater", "mb_scope", "no_pel", "tank_heater"],
     "the scrape must find exactly the four block reasons the production code can set");
   for (const block of set)
     assert.ok(covered.has(block),
@@ -1545,8 +1979,9 @@ assert.doesNotMatch(SOURCE, /chip\.demand_(?:on|off)|schem\.to_heat/);
                           modbus: [M(31, "Compressor run", "0", null, { binary: true })] });
     flagOff.S.status.history = trend(HP.label);
     flagOff.S.live = flagOff.liveData();
-    assert.equal(flagOff.inspHeld(flagOff.INSPECT.hp, flagOff.S.live), true,
-      "so does a stop only the HomeHub's flag reports");
+    assert.equal(flagOff.inspHeld(flagOff.INSPECT.hp, flagOff.S.live), false,
+      "a HomeHub flag must not classify an X10A page as held");
+    assert.equal(flagOff.S.live.ouUnknown, true);
     const unread = ctx({ x10a: true, values: [row] });
     unread.S.status.history = trend(HP.label);
     unread.S.live = unread.liveData();
@@ -1611,27 +2046,78 @@ assert.doesNotMatch(SOURCE, /chip\.demand_(?:on|off)|schem\.to_heat/);
   const COMP_OFF = M(31, "Compressor run", "0", null, { binary: true });
   const running = ctx({ x10a: true, mbEnabled: true, mbConnected: true, values: [INV_U], modbus: [COMP_ON] });
   d = running.liveData();
-  assert.equal(d.pelSrc, "INV", "the HomeHub's independent flag proves the page is being refreshed");
-  assert.equal(d.ouUnknown, false, "so the row's age is no longer in doubt");
-  assert.equal(d.pelUnknown, false, "so the estimate is stated");
-  assert.notEqual(running.inspNowText(running.INSPECT.ou, d), running.heldUnknownText(),
-    "and the panels state the run the HomeHub confirms");
+  assert.equal(d.pelSrc, null, "HomeHub ON cannot refresh unknown-age X10A current");
+  assert.equal(d.ouUnknown, true);
+  assert.equal(d.pelUnknown, true);
+  assert.equal(d.cop, null);
+  assert.match(running.inspNowText(running.INSPECT.ou, d), /HomeHub reports the compressor ON/);
+  for (const flag of ["held", "held_unknown"]) {
+    const speed = { label: "INV frequency (rps)", value: "18", reg: 0x30 };
+    const inv = { ...INV_U, held_unknown: false, [flag]: true };
+    const currentSpeed = ctx({ x10a: true, values: [
+      inv, speed, X_VALVE(false),
+      { label: "I/U operation mode", value: "Heating", reg: 0x60 },
+      X_DEFROST("0"),
+      X("Flow sensor", "12", "flow_rate", { unit: "l/min" }),
+      X("Leaving Water Temp. before BUH (R1T)", "36", "leaving_water"),
+      X("Inlet Water Temp. (R4T)", "30", "return_water"),
+    ] });
+    const live = currentSpeed.liveData();
+    assert.ok(live.pth > 0, "current speed and flow still permit the thermal estimate");
+    assert.equal(live.pel, null, `current speed cannot refresh an explicitly ${flag} row`);
+    assert.equal(live.cop, null);
+    assert.doesNotMatch(currentSpeed.inspNowText(currentSpeed.INSPECT.pel, live), /compressor is off/i);
+  }
   const stopped = ctx({ x10a: true, mbEnabled: true, mbConnected: true, values: [INV_U], modbus: [COMP_OFF] });
   d = stopped.liveData();
-  assert.equal(d.pel, null, "and its OFF proves the opposite");
-  assert.equal(d.pelHeld, true, "which is the ordinary held-over explanation");
-  assert.equal(d.pelUnknown, false, "not the unknown one");
-  assert.equal(d.ouHeldOver, true, "and the whole page is held over");
+  assert.equal(d.compressorOn, false, "HomeHub OFF remains an activity report");
+  assert.equal(d.pel, null);
+  assert.equal(d.pelHeld, false);
+  assert.equal(d.pelUnknown, true, "HomeHub OFF leaves the X10A current of unknown age");
+  assert.equal(d.ouHeldOver, false);
+  assert.match(stopped.inspNowText(stopped.INSPECT.ou, d), /schem\.homehub_compressor_off/);
+  for (const flag of [COMP_OFF, COMP_ON]) {
+    for (const [metadata, rps, held, unknown, power] of [
+      [{ held: true }, null, true, false, null],
+      [{ held_unknown: true }, null, false, true, null],
+      [{}, 18, false, false, 1.38],
+      [{}, 0, true, false, null],
+    ]) {
+      const values = [{ ...INV_U, held_unknown: false, ...metadata }];
+      if (rps != null) values.push({ label: "INV frequency (rps)", value: String(rps), reg: 0x30 });
+      const c = ctx({ x10a: true, mbEnabled: true, mbConnected: true, values, modbus: [flag] });
+      const live = c.liveData();
+      assert.equal(live.pelHeld, held, "an independent flag cannot replace X10A held evidence");
+      assert.equal(live.pelUnknown, unknown);
+      assert.equal(live.pel, power);
+    }
+  }
+  for (const [current, power] of [["-2", null], ["0", 0], ["2", 0.46]]) {
+    const c = ctx({ x10a: true, values: [
+      { ...INV_U, value: current, held_unknown: false },
+      { label: "INV frequency (rps)", value: "18", reg: 0x30 },
+      X_VALVE(false),
+      { label: "I/U operation mode", value: "Heating", reg: 0x60 },
+      X_DEFROST("0"),
+      X("Flow sensor", "12", "flow_rate", { unit: "l/min" }),
+      X("Leaving Water Temp. before BUH (R1T)", "36", "leaving_water"),
+      X("Inlet Water Temp. (R4T)", "30", "return_water"),
+    ] });
+    const live = c.liveData();
+    assert.ok(live.pth > 0);
+    assert.equal(live.pel, power, "reject signed negative current without substituting for zero");
+    assert.equal(live.cop > 0, Number(current) > 0);
+    assert.equal(live.pelUnknown, false, "a negative current is invalid rather than of unknown age");
+  }
   const INV_DROPPED = { ...INV_U, value: null };
   for (const flag of [COMP_OFF, COMP_ON]) {
     const reader = ctx({ x10a: true, mbEnabled: true, mbConnected: true,
                          values: [INV_DROPPED], modbus: [flag] });
     const live = reader.liveData();
-    assert.equal(live.pelHeld, flag === COMP_OFF,
-      "a dropped value is held only when the HomeHub confirms a stop");
+    assert.equal(live.pelHeld, false, "a HomeHub report cannot mark the missing inverter input as held");
     assert.equal(live.pelUnknown, false,
-      "a known HomeHub compressor state cannot receive an unknown-age explanation");
-    if (flag === COMP_ON) for (const key of ["pel", "cop"]) {
+      "a missing inverter value must not be reported as an age-qualified reading");
+    for (const key of ["pel", "cop"]) {
       assert.equal(live.pelUnread, "INV primary current",
         "a running compressor does not fabricate its missing inverter reading");
       const text = reader.inspNowText(reader.INSPECT[key], live);
@@ -1659,18 +2145,20 @@ assert.doesNotMatch(SOURCE, /chip\.demand_(?:on|off)|schem\.to_heat/);
   for (const key of ["ou", "phe", "rhot", "rcold", "dt"])
     assert.equal(noOutdoor.inspNowText(noOutdoor.INSPECT[key], noWitness), "dyn.state_gate",
       `absent outdoor pages cannot become a stopped compressor on the ${key} panel`);
-  assert.equal(stopped.ouReadingText(d, "disch", 58, (n) => n.toFixed(0)), "—",
-    "so the discharge pill blanks as the panel's idle sentence says");
+  assert.equal(stopped.ouReadingText(d, "disch", 58, (n) => n.toFixed(0)), "58",
+    "HomeHub OFF cannot withhold an independent X10A value");
 
   const runningPaired = ctx({ x10a: true, mbEnabled: true, mbConnected: true,
                               values: [OUT_U], modbus: [OUT_M, COMP_ON] });
   d = runningPaired.liveData();
   runningPaired.S.live = d;
   runningPaired.S.insp = "out";
-  assert.equal(d.out, 19.0, "a compressor the HomeHub reports running keeps the X10A reading on the pill");
-  assert.equal(runningPaired.mbStandInFor(OUT_U), null, "and in the value table");
-  assert.equal(runningPaired.inspCurRow(runningPaired.INSPECT.out)?.value, OUT_U.value, "and in the panel");
-  assert.equal(runningPaired.inspUnknownAge(runningPaired.INSPECT.out, d), false, "without doubting it");
+  assert.equal(d.out, 28.5, "HomeHub ON leaves the X10A air reading of unknown age");
+  assert.equal(runningPaired.mbStandInFor(OUT_U), OUT_M, "the independent air reading takes over");
+  assert.equal(runningPaired.inspCurRow(runningPaired.INSPECT.out), null);
+  assert.equal(runningPaired.mbForInspect("out"), OUT_M, "the inspector follows the displayed source");
+  assert.equal(runningPaired.inspUnknownAge(runningPaired.INSPECT.out, d), false,
+    "the age note does not apply to the HomeHub replacement");
 
   const paired = ctx({ x10a: true, mbEnabled: true, mbConnected: true, values: [OUT_U], modbus: [OUT_M] });
   d = paired.liveData();

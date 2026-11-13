@@ -306,10 +306,14 @@ try {
     if(name==="room-epoch-refusal") assert.deepEqual(doc,{ok:false,error:"history changed; retry"});
     if(name==="room-status-plain"||name==="room-status-redacted") {
       const label=name==="room-status-plain"?roomName:"<redacted>";
+      assert.equal(doc.history.modbus_binding,true);
       assert.deepEqual(doc.history.room_rows,[{id:"room_temp",label}]);
       assert.equal(doc.reference_temperature.name,label);
     }
-    if(name==="room-status-absent") assert.deepEqual(doc.history.room_rows,[]);
+    if(name==="room-status-absent") {
+      assert.equal(doc.history.modbus_binding,true);
+      assert.deepEqual(doc.history.room_rows,[]);
+    }
     roomWires.delete(name);
     if(name==="invalid-ssid") assert.equal(doc.wifi.ssid,"bad"+"�".repeat(5));
     if(name==="dwell-mismatch") assert.equal(Object.hasOwn(doc.values[0],"dwell_s"),false);
@@ -321,6 +325,12 @@ try {
     if(name==="modbus-values") {
       assert.equal(doc.values.length,129);assert.deepEqual(doc.modbus.map(row=>row.value),["U4",12.3,1,null]);
       assert.equal(doc.modbus[2].binary,true);assert.deepEqual(doc.modbus.map(row=>row.off),[22,40,4,40]);
+      assert.match(doc.modbus_history_boot_id,/^[0-9a-f]{16}$/);
+      assert.ok(Number.isInteger(doc.modbus_history_epoch) && doc.modbus_history_epoch > 0);
+    }
+    if(name==="modbus-values-history-retired") {
+      assert.equal(doc.modbus_history_epoch,0);
+      assert.equal(doc.modbus[1].value,12.3);
     }
     if(name==="framed-values") {assert.equal(doc.result.values.length,129);assert.equal(doc.result.values[0].dwell_s,5);}
     if(name==="framed-status-redacted") {

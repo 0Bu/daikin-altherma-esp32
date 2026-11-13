@@ -174,9 +174,15 @@ assert.match(hilFeed, /OTA_FEED_URL_CAPACITY\s*=\s*OTA_FEED_URL_MAX\s*\+\s*1/,
   "transient HIL feed URL storage must include one bounded terminator byte");
 assert.match(otaHeader, /OtaStatus ota_status\(OtaFeedUrls\* effective_feed\s*=\s*nullptr\)/,
   "the compact status API must copy its fixed effective-feed pair in the same snapshot");
-assert.match(httpOta,
-  /OtaFeedUrls\s+effective_feed\{\}[\s\S]{0,100}?ota_status\(&effective_feed\)[\s\S]{0,1800}?effective_feed\.manifest\.data\(\)[\s\S]{0,300}?effective_feed\.firmware_base\.data\(\)/,
-  "compact OTA JSON must use the fixed effective-feed snapshot without string allocation");
+const compactStatus = httpOta.slice(httpOta.indexOf("static esp_err_t ota_stat("),
+  httpOta.indexOf("\n}", httpOta.indexOf("static esp_err_t ota_stat(")));
+assert.match(compactStatus,
+  /OtaFeedUrls\s+effective_feed\{\}[\s\S]{0,100}?ota_status\(&effective_feed\)/,
+  "compact OTA JSON must capture the fixed effective-feed snapshot");
+for (const field of ["manifest", "firmware_base"]) {
+  assert.ok(compactStatus.includes(`json_append_quoted(j, redact_identifier_view(effective_feed.${field}.data(), redact));`),
+    `compact OTA JSON must serialize ${field} from the bounded effective-feed snapshot`);
+}
 assert.match(fixedText, /class\s+FixedBuffer[\s\S]{0,900}?overflowed_\s*=\s*true/,
   "the OTA JSON buffer must fail closed on overflow instead of reallocating or truncating");
 assert.match(httpOta,
@@ -1437,11 +1443,20 @@ assert.match(modbusTask.slice(modbusOtaHold, modbusPollCall),
 assert.match(modbusPoll, /(?:const Config& c = config\(\);|with_config\()[\s\S]*?std::vector/,
   "the allocation-rich HomeHub cycle must still own the Config snapshot and model-sized values");
 assert.match(modbus,
-  /struct\s+MbNetworkActivity[\s\S]{0,220}?s_network_quiesced\.store\(false,\s*std::memory_order_release\)[\s\S]{0,220}?s_network_quiesced\.store\(true,\s*std::memory_order_release\)/,
+  /struct\s+MbNetworkActivity[\s\S]{0,220}?s_network_quiesced\.store\(false\)[\s\S]{0,220}?s_network_quiesced\.store\(true\)/,
   "HomeHub cycle ownership must withdraw and restore its acknowledgement by RAII");
 assert.match(modbus,
-  /bool\s+mb_network_quiesced\(\)[\s\S]{0,120}?s_network_quiesced\.load\(std::memory_order_acquire\)/,
-  "HomeHub must expose an allocation-free cycle acknowledgement");
+  /bool\s+mb_network_quiesced\(\)[\s\S]{0,120}?!s_start_in_flight\.load\(\)\s*&&\s*s_network_quiesced\.load\(\)/,
+  "HomeHub quiescence must include both stack creation and the running cycle");
+assert.match(modbus,
+  /struct\s+MbTaskCreation[\s\S]{0,200}?s_start_in_flight\.store\(true\)[\s\S]{0,200}?s_start_in_flight\.store\(false\)/,
+  "HomeHub stack creation must own a separate sequentially consistent claim");
+assert.match(modbus.slice(modbusTaskEnd),
+  /MbTaskCreation creation;\s*if \(ota_download_active\(\) \|\| weather_fetch_active\(\)\) return;[\s\S]{0,350}?xTaskCreate\(mb_task/,
+  "HomeHub must recheck both TLS owners after claiming and before allocating");
+assert.match(ota, /bool ota_download_active\(\) \{ return s_network_active\.load\(\); \}/);
+assert.match(weather, /compare_exchange_strong\(expected, SourceAdmission::Network\)/);
+assert.match(weather, /bool weather_fetch_active\(\) \{\s*const SourceAdmission state = s_source_admission\.load\(\);/);
 
 const syslogLoopAnchor = syslog.indexOf("const TickType_t check_interval");
 const syslogLoopStart = syslog.indexOf("while (true)", syslogLoopAnchor);
@@ -1507,7 +1522,7 @@ assert.match(ota,
   /struct\s+OtaNetworkFlag[\s\S]{0,260}?mqtt_transport_pause_for_network_heap\(\)[\s\S]{0,260}?mqtt_transport_resume_after_network_heap\(\)[\s\S]{0,120}?s_network_active\.store\(false/,
   "the OTA network lease must pause esp-mqtt and request resume before releasing its own flag");
 assert.match(ota,
-  /struct\s+OtaNetworkFlag\s*\{\s*OtaNetworkFlag\(\)\s*\{\s*s_network_active\.store\(true,\s*std::memory_order_release\);\s*mqtt_transport_withdraw_online_on_pause\(\);\s*mqtt_transport_pause_for_network_heap\(\);/,
+  /struct\s+OtaNetworkFlag\s*\{\s*OtaNetworkFlag\(\)\s*\{\s*s_network_active\.store\(true\);\s*mqtt_transport_withdraw_online_on_pause\(\);\s*mqtt_transport_pause_for_network_heap\(\);/,
   "the OTA lease must raise the availability withdrawal immediately before its MQTT pause request");
 assert.equal(occurrences(ota, "mqtt_transport_withdraw_online_on_pause()"), 1,
   "the OTA lease is the only OTA owner of the availability withdrawal");

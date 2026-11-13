@@ -605,7 +605,9 @@ async function applyLive(patch, okMsg) {
     const r = await post("/set_hp", patch);
     if (!r.ok) { const e = await r.json().catch(() => ({})); toast(e.error || t("toast.rejected"), "err"); return false; }
     invalidateHistSources();
-    if (okMsg) toast(okMsg, "ok");
+    const result = await r.json().catch(() => null);
+    if (result?.modbus_start_pending === true) toast(t("hh.start_pending"), "err");
+    else if (okMsg) toast(okMsg, "ok");
     return true;
   } catch { toast(t("toast.unreachable"), "err"); return false; }
 }
@@ -967,6 +969,7 @@ function otaCacheStore() {
     status: S.status,
     values: Array.isArray(S._values) ? S._values : [],
     modbus: Array.isArray(S._modbus) ? S._modbus : [],
+    modbus_history_lease: S.modbusHistoryLease,
   };
   try {
     const storage = otaCacheStorage();
@@ -974,6 +977,22 @@ function otaCacheStore() {
     storage.setItem(OTA_RENDER_CACHE_KEY, JSON.stringify(payload));
     return true;
   } catch { return false; }                    // quota or serialization failure keeps safe fallback
+}
+
+function otaSameImage(s, cached) {
+  return s?.boot_id && s.boot_id === cached.boot_id &&
+    s.app_elf_sha256 && s.app_elf_sha256 === cached.app_elf_sha256;
+}
+
+// The OTA writer's identity belongs to the operation even when no display snapshot can be restored.
+function otaBootId(s) {
+  return typeof s?.boot_id === "string" ? s.boot_id : "";
+}
+
+function otaWriterChanged(s, before = S.otaWriter) {
+  const boot = otaBootId(s), previousBoot = otaBootId(before);
+  return (previousBoot && boot && boot !== previousBoot) ||
+    (before?.app_elf_sha256 && s?.app_elf_sha256 && s.app_elf_sha256 !== before.app_elf_sha256);
 }
 
 async function otaCacheRestore(otaStatus) {
@@ -989,12 +1008,20 @@ async function otaCacheRestore(otaStatus) {
   const age = Date.now() - cached?.saved_at_ms;
   const valid = cached && Number.isFinite(cached.saved_at_ms) && age >= -60000 &&
     age <= OTA_RENDER_CACHE_MAX_AGE_MS && cached.status &&
-    typeof cached.status.version === "string" && typeof otaStatus?.current === "string" &&
-    cached.status.version === otaStatus.current && Array.isArray(cached.values) &&
-    Array.isArray(cached.modbus);
+    typeof cached.status.version === "string" && cached.status.version === otaStatus?.current &&
+    otaSameImage(otaStatus, cached.status) && Array.isArray(cached.values) && Array.isArray(cached.modbus);
   if (!valid) { otaCacheClear(); return false; }
   if (!acceptImageLease(cached.status)) return false;
 
+  // The last /values and /status can refer to different Modbus lifetimes. An explicit null
+  // records a response without a lease. Older caches omitted it even when status had a binding.
+  const lease = cached.modbus_history_lease;
+  const statusBound = cached.status.history?.epoch != null;
+  S.modbusHistoryLease = null;
+  if (lease != null || (lease === undefined && statusBound)) {
+    S.modbusHistoryLease = Number.isInteger(lease?.epoch) && typeof lease.boot === "string"
+      ? lease : { epoch: 0, boot: "" };
+  }
   S.status = cached.status;
   syncHistSources();
   S._values = cached.values;
@@ -1033,8 +1060,11 @@ async function otaPoll(waitStates, tries, onTick, expectedGeneration = null, req
                        allowUpdateTransition = false) {
   for (let i = 0; i < tries; i++) {
     await new Promise((r) => setTimeout(r, 1000));
+    if (S.imageReloading) return null;
     let s;
     try { s = await j("/ota/status"); } catch { continue; }   // a dropped poll is not a failure
+    if (otaWriterChanged(s)) otaReloadImage();
+    if (S.imageReloading) return null;
     if (expectedGeneration !== null && s.generation !== expectedGeneration)
       return { state: "error", message: t("ota.replaced") };
     if (onTick) onTick(s);
@@ -1065,6 +1095,7 @@ const OTA_CHECK_POLL_TRIES = 150;
 // Terminal failure: clear the compact progress suffix, retain the exact reason in the alert card
 // until its close control is used, and release the flow.
 function otaFail(text) {
+  S.otaWriter = null;
   S.otaInstalling = false;
   S.otaBusy = false;
   const wasCached = S.otaCached;
@@ -1169,6 +1200,7 @@ async function checkFirmwareUpdate(returnFocus = document.activeElement, returnS
     }
 
     const s = await otaPoll(["checking"], OTA_CHECK_POLL_TRIES, null, checkGeneration, true);
+    if (S.imageReloading) return;
     if (!s)                  { otaFail(t("ota.timeout")); return; }
     if (s.state === "error") { otaFail(s.message || t("ota.check_failed")); return; }
     if (!s.available || !s.available_sha256 || !s.available_channel) {
@@ -1223,10 +1255,12 @@ async function checkFirmwareUpdate(returnFocus = document.activeElement, returnS
       otaFail(t("ota.replaced")); return;
     }
     S.otaInstalling = true;
+    S.otaWriter = s;
     otaCacheStore();
     syncOtaSettingsLock();
 
     const done = await otaWatch(expectedUpdateGeneration);
+    if (S.imageReloading) return;
     if (!done)                  { otaFail(t("ota.timeout")); return; }
     if (done.state === "error") { otaFail(done.message || t("ota.failed")); return; }
 
@@ -1236,6 +1270,7 @@ async function checkFirmwareUpdate(returnFocus = document.activeElement, returnS
     otaWaitReboot();
     handedOff = true;
   } finally {
+    if (!handedOff) S.otaWriter = null;
     if (!handedOff) S.busy = false;
     if (!handedOff && S.otaBusy) S.otaBusy = false;
   }
@@ -1267,7 +1302,7 @@ async function probeRunningOta() {
     let s;
     try { s = await j("/ota/status", { signal: typeof pollSignal === "function" ? pollSignal() : undefined }); }
     catch { return false; }
-    if (S.imageReloading) return false;
+    if (S.imageReloading || otaWriterChanged(s, S.status)) return false;
     if (!S.imageLease?.version && typeof s?.current === "string" && s.current)
       acceptImageLease({ version: s.current });
     if (otaActive(s)) { void resumeOta(s); return true; }
@@ -1283,6 +1318,7 @@ async function resumeOta(s = null) {
   if (!otaActive(s)) return;
   if (S.otaBusy) return;
   S.busy = true; S.otaBusy = true;
+  S.otaWriter = s;
   const generation = s.generation;
   let handedOff = false;
   try {
@@ -1293,6 +1329,7 @@ async function resumeOta(s = null) {
       // An observer can first see the update's busy lease with the preceding check state still
       // visible. Join its download before busy is released; the initiating check keeps its stricter rule.
       s = await otaPoll(["checking"], OTA_CHECK_POLL_TRIES, null, generation, true, true);
+      if (S.imageReloading) return;
       if (!s) { otaFail(t("ota.timeout")); return; }
       if (s.state === "error") { otaFail(s.message || t("ota.failed")); return; }
       if (s.state !== "updating" && s.state !== "done") {
@@ -1304,7 +1341,7 @@ async function resumeOta(s = null) {
     }
     S.otaInstalling = true;
     // Prefer the complete last frame saved by this tab. If it is absent, stale or belongs to another
-    // running version, /status is still the largest response the device builds and may legitimately
+    // running boot or build, /status is still the largest response the device builds and may
     // be unavailable while OTA TLS owns the scarce heap; retain the accurate OTA-only shell then.
     const restored = await otaCacheRestore(s);
     if (S.imageReloading) return;
@@ -1313,6 +1350,7 @@ async function resumeOta(s = null) {
     if (s.state === "updating") otaInline(t("ota.pct", s.progress ?? 0), { ring: true, pct: s.progress ?? 0 });
     if (restored || otaOnly) renderOtaDashboardStatus();
     const done = s.state === "done" ? s : await otaWatch(generation);
+    if (S.imageReloading) return;
     if (!done)                  { otaFail(t("ota.timeout")); return; }
     if (done.state === "error") { otaFail(done.message || t("ota.failed")); return; }
     otaInline(t("ota.rebooting"), { ring: true, pct: 100 });
@@ -1320,6 +1358,7 @@ async function resumeOta(s = null) {
     otaWaitReboot();
     handedOff = true;
   } finally {
+    if (!handedOff) S.otaWriter = null;
     if (!handedOff) S.busy = false;
     if (!handedOff && S.otaBusy) S.otaBusy = false;
     if (!handedOff) syncOtaSettingsLock();
@@ -1352,21 +1391,18 @@ function renderOtaResumeShell(s) {
 // re-renders from a fresh /status, which is right when only the DATA changed, and wrong here, where
 // the HTML, CSS and this very script are what the update replaced.
 //
-// Three independent "it rebooted" signals, because no single one is reliable:
-//   · version changed — the obvious one, but a same-version reinstall and a health-gate ROLLBACK
-//     both come back on the version we started from;
-//   · uptime went BACKWARDS — survives both of those, and is the only signal for them;
-//   · we saw it go down and come back — misses the case where the first probe lands after the board
-//     is already up again.
-// Any one of them is enough.
+// A new boot or image is sufficient even on a same-version install. Older devices may need
+// version or uptime evidence. Down/up alone is a fallback for devices without boot identity.
 const OTA_REBOOT_WAIT_MS = 120000;   // covers a slow boot AND a health-gate rollback cycle
 function otaWaitReboot() {
-  const preVer = S.status?.version || "";
-  const preUp = typeof S.status?.uptime_s === "number" ? S.status.uptime_s : null;
+  const prior = S.status || S.otaWriter;
+  const before = { ...prior, boot_id: otaBootId(S.otaWriter) || otaBootId(prior) };
+  const version = before.version || before.current;
   const started = Date.now();
-  let sawDown = false;
+  let sawDown = false, sawBoot = !!before.boot_id;
 
   const probe = async () => {
+    if (S.imageReloading) return;
     // Per-request abort: a socket to a rebooting board can hang for the browser's own (much longer)
     // timeout, which would stall the poll exactly while the interesting transition happens.
     const ctl = "AbortController" in window ? new AbortController() : null;
@@ -1383,17 +1419,17 @@ function otaWaitReboot() {
     }
 
     if (s) {
-      const rebooted = (preVer && s.version && s.version !== preVer) ||
-                       (preUp != null && typeof s.uptime_s === "number" && s.uptime_s < preUp) ||
-                       sawDown;
-      if (rebooted) { location.reload(); return; }
+      const boot = otaBootId(s);
+      sawBoot ||= !!boot;
+      const rebooted = otaWriterChanged(s, before) ||
+        (version && s.version && s.version !== version) || (!sawBoot && sawDown) ||
+        ((!boot || !before.boot_id) && Number.isFinite(s.uptime_s) && s.uptime_s < before.uptime_s);
+      if (rebooted) { otaReloadImage(); return; }
     }
     if (Date.now() - started <= OTA_REBOOT_WAIT_MS) { setTimeout(probe, 1000); return; }
 
-    // Out of patience. Answering but showing no sign of a reboot: reload anyway — it is harmless and
-    // settles the question either way. Never answered at all: a reload would replace the one status
-    // line the user has with a browser error page, so keep the message and let them choose when.
-    if (s) { location.reload(); return; }
+    // Legacy boards can refresh the assets once they answer, even without boot metadata.
+    if (s && !sawBoot) { otaReloadImage(); return; }
     S.busy = false;
     otaFail(t("ota.reload_hint"));
   };

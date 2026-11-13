@@ -363,7 +363,7 @@
     },
     "modbus_task": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?mb_task\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?7mb_task[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
-      "max_bytes": 64
+      "max_bytes": 80
     },
     "modbus_poll": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?mb_poll_once\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?12mb_poll_once[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
@@ -2850,7 +2850,7 @@
       "max_bytes": 48
     },
     "stop_forget_persist_wipe": {
-      "pattern": "^daik::\\(anonymous\\ namespace\\)::persist_wipe\\(unsigned\\ long,\\ unsigned\\ long,\\ unsigned\\ long,\\ unsigned\\ long,\\ bool\\)$",
+      "pattern": "^daik::\\(anonymous\\ namespace\\)::persist_wipe\\(unsigned\\ long,\\ unsigned\\ long,\\ unsigned\\ long,\\ bool\\)$",
       "max_bytes": 32
     },
     "stop_forget_persist_seal": {
@@ -2903,6 +2903,258 @@
     },
     "stop_forget_ready": {
       "pattern": "^daik::history_flash_forget_ready\\(\\)$",
+      "max_bytes": 32
+    },
+    "history_peer_record_valid": {
+      "pattern": "^daik::\\(anonymous\\ namespace\\)::flash_record_valid\\(daik::\\(anonymous\\ namespace\\)::FlashJournalRecord\\ const\\&,\\ bool\\)$",
+      "max_bytes": 48
+    },
+    "history_peer_physical_valid": {
+      "pattern": "^daik::\\(anonymous\\ namespace\\)::flash_record_physically_valid\\(daik::\\(anonymous\\ namespace\\)::FlashJournalRecord\\ const\\&\\)$",
+      "max_bytes": 128
+    },
+    "history_peer_room_header": {
+      "pattern": "^daik::logic::history_journal_room_header_structural_matches\\(daik::logic::HistoryJournalHeader\\ const\\&\\)$",
+      "max_bytes": 96
+    },
+    "history_peer_record_header": {
+      "pattern": "^daik::logic::history_journal_header_matches\\(daik::logic::HistoryJournalHeader\\ const\\&,\\ unsigned\\ long,\\ unsigned\\ short,\\ unsigned\\ long\\)$",
+      "max_bytes": 32
+    },
+    "history_peer_journal_crc": {
+      "pattern": "^daik::logic::history_journal_crc_bytes\\(daik::logic::HistoryJournalHeader,\\ void\\ const\\*,\\ unsigned\\ int\\)$",
+      "max_bytes": 32
+    },
+    "history_peer_journal_scope": {
+      "pattern": "^_ZN4daik5logic21history_journal_scopeERKNS0_20HistoryJournalHeaderE\\$isra\\$0$",
+      "max_bytes": 32
+    },
+    "history_peer_trend_layout": {
+      "pattern": "^daik::\\(anonymous\\ namespace\\)::flash_current_layout_matches\\(daik::logic::HistoryJournalHeader\\ const\\&,\\ unsigned\\ int\\)$",
+      "max_bytes": 48
+    },
+    "history_peer_trend_header": {
+      "pattern": "^daik::logic::history_journal_trend_header_structural_matches\\(daik::logic::HistoryJournalHeader\\ const\\&\\)$",
+      "max_bytes": 32
+    },
+    "history_peer_bind": {
+      "pattern": "^daik::history_modbus_bind_peer\\(std::array<unsigned\\ char,\\ 16u>\\ const\\&,\\ unsigned\\ long,\\ unsigned\\ long\\)$",
+      "max_bytes": 64
+    },
+    "history_peer_reset": {
+      "pattern": "^daik::history_modbus_reset\\(std::array<unsigned\\ char,\\ 16u>\\ const\\&\\)$",
+      "max_bytes": 48
+    },
+    "history_peer_reset_scope": {
+      "pattern": "^daik::history_modbus_reset_scope_locked\\(unsigned\\ long\\)$",
+      "max_bytes": 32
+    },
+    "history_peer_epoch": {
+      "pattern": "^daik::\\(anonymous\\ namespace\\)::bump_history_epoch\\(\\)$",
+      "max_bytes": 32
+    },
+    "modbus_cycle_report": {
+      "pattern": "^daik::report_cycle_result\\(daik::logic::MbFailure\\ const\\&,\\ bool,\\ bool,\\ unsigned\\ long\\)$",
+      "max_bytes": 288
+    },
+    "modbus_status_error": {
+      "pattern": "^_ZN4daikL12status_errorEPKcS1_iibm\\$isra\\$0$",
+      "max_bytes": 256
+    },
+    "modbus_values_snapshot": {
+      "pattern": "^daik::mb_values_snapshot\\(daik::CachedValue\\*,\\ unsigned\\ int,\\ bool\\&,\\ unsigned\\ long\\*\\)$",
+      "max_bytes": 80
+    },
+    "history_peer_generation": {
+      "pattern": "^daik::history_modbus_generation\\(\\)$",
+      "max_bytes": 32
+    },
+    "history_peer_epoch_get": {
+      "pattern": "^daik::history_epoch\\(\\)$",
+      "max_bytes": 32
+    },
+    "history_peer_chunk_append": {
+      "pattern": "^daik::BoundedChunkSink<daik::HttpChunkEmitter,\\ 1024u>::append\\(std::basic_string_view<char,\\ std::char_traits<char>\\ >\\)$",
+      "max_bytes": 48
+    },
+    "history_peer_chunk_flush": {
+      "pattern": "^daik::BoundedChunkSink<daik::HttpChunkEmitter,\\ 1024u>::flush\\(\\)$",
+      "max_bytes": 32
+    },
+    "modbus_connect_report": {
+      "pattern": "^daik::report_connect_error\\(int, unsigned long\\)$",
+      "max_bytes": 160
+    },
+    "modbus_status_snapshot": {
+      "pattern": "^daik::mb_status\\(\\)$",
+      "max_bytes": 176
+    },
+    "modbus_status_assign_cstr": {
+      "pattern": "^modbus_status_cstr_assignment$",
+      "max_bytes": 32
+    },
+    "modbus_status_string_replace": {
+      "pattern": "^std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::_M_replace\\(unsigned int, unsigned int, char const\\*, unsigned int\\)$",
+      "max_bytes": 48
+    },
+    "modbus_status_string_mutate": {
+      "pattern": "^std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::_M_mutate\\(unsigned int, unsigned int, char const\\*, unsigned int\\)$",
+      "max_bytes": 64
+    },
+    "modbus_strerror": {
+      "pattern": "^strerror$",
+      "max_bytes": 32
+    },
+    "modbus_strerror_r": {
+      "pattern": "^_strerror_r$",
+      "max_bytes": 32
+    },
+    "history_peer_scope_words": {
+      "pattern": "^daik::logic::history_journal_modbus_scope_words\\(daik::logic::HistoryJournalHeader\\ const\\&\\)$",
+      "max_bytes": 32
+    },
+    "history_peer_manifest": {
+      "pattern": "^daik::\\(anonymous\\ namespace\\)::flash_manifest_find\\(daik::logic::HistoryJournalHeader\\ const\\&,\\ unsigned\\ int\\)$",
+      "max_bytes": 32
+    },
+    "history_peer_target_compare": {
+      "pattern": "^bool\\ std::operator==<unsigned\\ char,\\ 16u>\\(std::array<unsigned\\ char,\\ 16u>\\ const\\&,\\ std::array<unsigned\\ char,\\ 16u>\\ const\\&\\)$",
+      "max_bytes": 32
+    },
+    "history_peer_target_hash": {
+      "pattern": "^daik::history_modbus_target\\(std::basic_string_view<char,\\ std::char_traits<char>\\ >,\\ int,\\ int\\)$",
+      "max_bytes": 224
+    },
+    "history_peer_mbedtls_sha256_init": {
+      "pattern": "^mbedtls_sha256_init$",
+      "max_bytes": 32
+    },
+    "history_peer_mbedtls_sha256_starts": {
+      "pattern": "^mbedtls_sha256_starts$",
+      "max_bytes": 32
+    },
+    "history_peer_mbedtls_sha256_update": {
+      "pattern": "^mbedtls_sha256_update$",
+      "max_bytes": 48
+    },
+    "history_peer_mbedtls_sha256_finish": {
+      "pattern": "^mbedtls_sha256_finish$",
+      "max_bytes": 32
+    },
+    "history_peer_mbedtls_sha256_free": {
+      "pattern": "^mbedtls_sha256_free$",
+      "max_bytes": 32
+    },
+    "history_peer_mbedtls_internal_sha256_process": {
+      "pattern": "^mbedtls_internal_sha256_process\\$isra\\$0$",
+      "max_bytes": 368
+    },
+    "history_peer_mbedtls_platform_zeroize": {
+      "pattern": "^mbedtls_platform_zeroize$",
+      "max_bytes": 32
+    },
+    "modbus_static_init": {
+      "pattern": "^daik::mb_init\\(\\)$",
+      "max_bytes": 32
+    },
+    "modbus_static_mutex": {
+      "pattern": "^xQueueCreateMutexStatic$",
+      "max_bytes": 32
+    },
+    "modbus_static_queue": {
+      "pattern": "^xQueueGenericCreateStatic$",
+      "max_bytes": 48
+    },
+    "modbus_static_queue_reset": {
+      "pattern": "^xQueueGenericReset$",
+      "max_bytes": 32
+    },
+    "modbus_worker_wdt_add": {
+      "pattern": "^esp_task_wdt_add$",
+      "max_bytes": 64
+    },
+    "modbus_worker_wdt_entry": {
+      "pattern": "^add_entry$",
+      "max_bytes": 48
+    },
+    "modbus_worker_lwip_sem_free": {
+      "pattern": "^sys_thread_sem_free$",
+      "max_bytes": 32
+    },
+    "modbus_worker_queue_delete": {
+      "pattern": "^vQueueDelete$",
+      "max_bytes": 32
+    },
+    "modbus_worker_heap_free": {
+      "pattern": "^heap_caps_free$",
+      "max_bytes": 32
+    },
+    "modbus_worker_aligned_free": {
+      "pattern": "^multi_heap_aligned_free$",
+      "max_bytes": 32
+    },
+    "modbus_worker_tlsf_free": {
+      "pattern": "^tlsf_free$",
+      "max_bytes": 32
+    },
+    "modbus_worker_lwip_get": {
+      "pattern": "^daikin_lwip_thread_sem_get$",
+      "max_bytes": 32
+    },
+    "modbus_worker_lwip_peek": {
+      "pattern": "^pthread_getspecific$",
+      "max_bytes": 32
+    },
+    "modbus_worker_task_tls": {
+      "pattern": "^pvTaskGetThreadLocalStoragePointer$",
+      "max_bytes": 32
+    },
+    "modbus_create_start": {
+      "pattern": "^daik::mb_task_start_if_enabled\\(\\)$",
+      "max_bytes": 64
+    },
+    "modbus_create_boot": {
+      "pattern": "^daik::mb_start\\(\\)$",
+      "max_bytes": 32
+    },
+    "modbus_create_retry": {
+      "pattern": "^daik::mb_retry_start\\(\\)$",
+      "max_bytes": 32
+    },
+    "modbus_create_reconfigure": {
+      "pattern": "^daik::mb_reconfigure\\(bool\\)$",
+      "max_bytes": 48
+    },
+    "modbus_create_sdk": {
+      "pattern": "^xTaskCreatePinnedToCore$",
+      "max_bytes": 64
+    },
+    "modbus_create_init": {
+      "pattern": "^prvInitialiseNewTask\\$constprop\\$0$",
+      "max_bytes": 48
+    },
+    "modbus_create_ready": {
+      "pattern": "^prvAddNewTaskToReadyList$",
+      "max_bytes": 48
+    },
+    "modbus_create_port_stack": {
+      "pattern": "^pxPortInitialiseStack$",
+      "max_bytes": 32
+    },
+    "modbus_create_port_free": {
+      "pattern": "^vPortFree$",
+      "max_bytes": 32
+    },
+    "modbus_create_exit_critical": {
+      "pattern": "^vPortExitCritical$",
+      "max_bytes": 32
+    },
+    "modbus_create_list_init": {
+      "pattern": "^vListInitialise$",
+      "max_bytes": 32
+    },
+    "modbus_create_list_item": {
+      "pattern": "^vListInitialiseItem$",
       "max_bytes": 32
     }
   },
@@ -3170,7 +3422,7 @@
         "ota_status_http"
       ],
       "multipliers": {},
-      "base_bytes": 1536,
+      "base_bytes": 1664,
       "max_bytes": 7168
     },
     "ota_task_manifest_fetch": {
@@ -11678,6 +11930,2092 @@
       "multipliers": {},
       "base_bytes": 192,
       "max_bytes": 2048
+    },
+    "main_history_peer_record_header": {
+      "symbols": [
+        "main_task",
+        "boot_sequence",
+        "history_start",
+        "history_peer_record_valid",
+        "history_peer_physical_valid",
+        "history_peer_room_header",
+        "history_peer_record_header"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "main_history_peer_record_crc": {
+      "symbols": [
+        "main_task",
+        "boot_sequence",
+        "history_start",
+        "history_peer_record_valid",
+        "history_peer_physical_valid",
+        "history_peer_journal_crc",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "main_history_peer_record_scope": {
+      "symbols": [
+        "main_task",
+        "boot_sequence",
+        "history_start",
+        "history_peer_record_valid",
+        "history_peer_scope_words",
+        "history_peer_journal_scope",
+        "history_peer_target_compare"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "main_history_peer_record_layout": {
+      "symbols": [
+        "main_task",
+        "boot_sequence",
+        "history_start",
+        "history_peer_record_valid",
+        "history_peer_trend_layout",
+        "history_peer_trend_header"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "poll_history_peer_record_header": {
+      "symbols": [
+        "poll_task",
+        "history_board",
+        "history_flash_restore",
+        "history_peer_record_valid",
+        "history_peer_physical_valid",
+        "history_peer_room_header",
+        "history_peer_record_header"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_history_peer_record_crc": {
+      "symbols": [
+        "poll_task",
+        "history_board",
+        "history_flash_restore",
+        "history_peer_record_valid",
+        "history_peer_physical_valid",
+        "history_peer_journal_crc",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_history_peer_record_scope": {
+      "symbols": [
+        "poll_task",
+        "history_board",
+        "history_flash_restore",
+        "history_peer_record_valid",
+        "history_peer_scope_words",
+        "history_peer_journal_scope",
+        "history_peer_target_compare"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_history_peer_record_layout": {
+      "symbols": [
+        "poll_task",
+        "history_board",
+        "history_flash_restore",
+        "history_peer_record_valid",
+        "history_peer_trend_layout",
+        "history_peer_trend_header"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "modbus_history_peer_bind_epoch": {
+      "symbols": [
+        "runtime_task_entry",
+        "modbus_task",
+        "modbus_poll",
+        "history_peer_bind",
+        "history_peer_epoch"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "modbus_history_peer_bind_forgotten": {
+      "symbols": [
+        "runtime_task_entry",
+        "modbus_task",
+        "modbus_poll",
+        "history_peer_bind",
+        "stop_atomic_bool_load"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "modbus_history_peer_scope_take": {
+      "symbols": [
+        "runtime_task_entry",
+        "modbus_task",
+        "modbus_poll",
+        "history_peer_bind",
+        "stop_try_lock_guard",
+        "sdk_queue_sem_take",
+        "sdk_queue_remove_event",
+        "sdk_queue_yield_required",
+        "sdk_queue_yield_other",
+        "sdk_queue_crosscore_yield",
+        "sdk_queue_crosscore_send",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "modbus_history_peer_scope_release": {
+      "symbols": [
+        "runtime_task_entry",
+        "modbus_task",
+        "modbus_poll",
+        "history_peer_bind",
+        "sem_guard_release",
+        "sdk_queue_send",
+        "stop_queue_set_notify",
+        "sdk_queue_remove_event",
+        "sdk_queue_yield_required",
+        "sdk_queue_yield_other",
+        "sdk_queue_crosscore_yield",
+        "sdk_queue_crosscore_send",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "modbus_history_peer_scope_floor": {
+      "symbols": [
+        "runtime_task_entry",
+        "modbus_task",
+        "modbus_poll",
+        "history_peer_bind",
+        "history_peer_reset_scope",
+        "stop_forget_adopt_floor"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "modbus_history_peer_scope_epoch": {
+      "symbols": [
+        "runtime_task_entry",
+        "modbus_task",
+        "modbus_poll",
+        "history_peer_bind",
+        "history_peer_reset_scope",
+        "history_peer_epoch"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "httpd_history_peer_scope_take": {
+      "symbols": [
+        "config_hp",
+        "config_document",
+        "history_peer_reset",
+        "mqtt_input_lock",
+        "sdk_queue_sem_take",
+        "sdk_queue_remove_event",
+        "sdk_queue_yield_required",
+        "sdk_queue_yield_other",
+        "sdk_queue_crosscore_yield",
+        "sdk_queue_crosscore_send",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_history_peer_scope_release": {
+      "symbols": [
+        "config_hp",
+        "config_document",
+        "history_peer_reset",
+        "sem_guard_release",
+        "sdk_queue_send",
+        "stop_queue_set_notify",
+        "sdk_queue_remove_event",
+        "sdk_queue_yield_required",
+        "sdk_queue_yield_other",
+        "sdk_queue_crosscore_yield",
+        "sdk_queue_crosscore_send",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_history_peer_scope_floor": {
+      "symbols": [
+        "config_hp",
+        "config_document",
+        "history_peer_reset",
+        "history_peer_reset_scope",
+        "stop_forget_adopt_floor"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_history_peer_scope_epoch": {
+      "symbols": [
+        "config_hp",
+        "config_document",
+        "history_peer_reset",
+        "history_peer_reset_scope",
+        "history_peer_epoch"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "modbus_cycle_report_format": {
+      "symbols": [
+        "modbus_task",
+        "modbus_poll",
+        "modbus_cycle_report",
+        "sdk_snprintf",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "modbus_cycle_report_diagnostic": {
+      "symbols": [
+        "modbus_task",
+        "modbus_poll",
+        "modbus_cycle_report",
+        "modbus_status_error",
+        "diag_log",
+        "diag_syslog",
+        "sdk_queue_send",
+        "sdk_queue_remove_event",
+        "sdk_queue_yield_required",
+        "sdk_queue_yield_other",
+        "sdk_queue_crosscore_yield",
+        "sdk_queue_crosscore_send",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "modbus_cycle_report_console": {
+      "symbols": [
+        "modbus_task",
+        "modbus_poll",
+        "modbus_cycle_report",
+        "modbus_status_error",
+        "diag_log",
+        "sdk_log",
+        "sdk_vprintf",
+        "sdk_vfprintf",
+        "sdk_bufio_put",
+        "sdk_bufio_allocate",
+        "sdk_malloc",
+        "sdk_malloc_default",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "httpd_direct_values_peer_generation": {
+      "symbols": [
+        "http_values",
+        "http_values_snapshot",
+        "modbus_values_snapshot",
+        "history_peer_generation"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_direct_values_history_epoch_snapshot": {
+      "symbols": [
+        "http_values",
+        "http_values_snapshot",
+        "history_peer_epoch_get"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_direct_values_history_epoch_stream": {
+      "symbols": [
+        "http_values",
+        "status_unsigned_number",
+        "history_peer_chunk_append",
+        "history_peer_chunk_flush"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_values_peer_generation": {
+      "symbols": [
+        "mcp_post",
+        "http_values",
+        "http_values_snapshot",
+        "modbus_values_snapshot",
+        "history_peer_generation"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_values_history_epoch_snapshot": {
+      "symbols": [
+        "mcp_post",
+        "http_values",
+        "http_values_snapshot",
+        "history_peer_epoch_get"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_values_history_epoch_stream": {
+      "symbols": [
+        "mcp_post",
+        "http_values",
+        "status_unsigned_number",
+        "history_peer_chunk_append",
+        "history_peer_chunk_flush"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_history_peer_epoch_guard": {
+      "symbols": [
+        "http_history",
+        "history_peer_epoch_get"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_history_peer_epoch_stream": {
+      "symbols": [
+        "http_history",
+        "status_unsigned_number",
+        "history_peer_chunk_append",
+        "history_peer_chunk_flush"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "modbus_cycle_report_errno": {
+      "symbols": [
+        "modbus_task",
+        "modbus_poll",
+        "modbus_cycle_report",
+        "modbus_strerror",
+        "modbus_strerror_r",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "modbus_connect_report_format": {
+      "symbols": [
+        "modbus_task",
+        "modbus_poll",
+        "modbus_connect_report",
+        "sdk_snprintf",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "modbus_connect_report_errno": {
+      "symbols": [
+        "modbus_task",
+        "modbus_poll",
+        "modbus_connect_report",
+        "modbus_strerror",
+        "modbus_strerror_r",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "modbus_connect_report_diagnostic": {
+      "symbols": [
+        "modbus_task",
+        "modbus_poll",
+        "modbus_connect_report",
+        "modbus_status_error",
+        "diag_log",
+        "diag_syslog",
+        "sdk_queue_send",
+        "sdk_queue_remove_event",
+        "sdk_queue_yield_required",
+        "sdk_queue_yield_other",
+        "sdk_queue_crosscore_yield",
+        "sdk_queue_crosscore_send",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "modbus_connect_report_console": {
+      "symbols": [
+        "modbus_task",
+        "modbus_poll",
+        "modbus_connect_report",
+        "modbus_status_error",
+        "diag_log",
+        "sdk_log",
+        "sdk_vprintf",
+        "sdk_vfprintf",
+        "sdk_bufio_put",
+        "sdk_bufio_allocate",
+        "sdk_malloc",
+        "sdk_malloc_default",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "httpd_direct_status_modbus_status_allocation": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "modbus_status_snapshot",
+        "modbus_status_assign_cstr",
+        "modbus_status_string_replace",
+        "modbus_status_string_mutate",
+        "cxx_string_create",
+        "cxx_string_allocate",
+        "cxx_new",
+        "sdk_malloc",
+        "sdk_malloc_default",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_direct_status_modbus_status_unwind": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "modbus_status_snapshot",
+        "modbus_status_assign_cstr",
+        "modbus_status_string_replace",
+        "modbus_status_string_mutate",
+        "cxx_string_create",
+        "cxx_string_allocate",
+        "cxx_new",
+        "cxx_throw",
+        "cxx_raise",
+        "cxx_raise_phase2",
+        "cxx_frame_state",
+        "cxx_find_fde",
+        "sdk_pthread_lock",
+        "sdk_pthread_lazy_init",
+        "sdk_pthread_init",
+        "sdk_mutex_create",
+        "sdk_queue_create",
+        "sdk_port_malloc",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_status_modbus_status_allocation": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "modbus_status_snapshot",
+        "modbus_status_assign_cstr",
+        "modbus_status_string_replace",
+        "modbus_status_string_mutate",
+        "cxx_string_create",
+        "cxx_string_allocate",
+        "cxx_new",
+        "sdk_malloc",
+        "sdk_malloc_default",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_status_modbus_status_unwind": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "modbus_status_snapshot",
+        "modbus_status_assign_cstr",
+        "modbus_status_string_replace",
+        "modbus_status_string_mutate",
+        "cxx_string_create",
+        "cxx_string_allocate",
+        "cxx_new",
+        "cxx_throw",
+        "cxx_raise",
+        "cxx_raise_phase2",
+        "cxx_frame_state",
+        "cxx_find_fde",
+        "sdk_pthread_lock",
+        "sdk_pthread_lazy_init",
+        "sdk_pthread_init",
+        "sdk_mutex_create",
+        "sdk_queue_create",
+        "sdk_port_malloc",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_direct_values_modbus_status_allocation": {
+      "symbols": [
+        "http_values",
+        "http_values_snapshot",
+        "modbus_status_snapshot",
+        "modbus_status_assign_cstr",
+        "modbus_status_string_replace",
+        "modbus_status_string_mutate",
+        "cxx_string_create",
+        "cxx_string_allocate",
+        "cxx_new",
+        "sdk_malloc",
+        "sdk_malloc_default",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_direct_values_modbus_status_unwind": {
+      "symbols": [
+        "http_values",
+        "http_values_snapshot",
+        "modbus_status_snapshot",
+        "modbus_status_assign_cstr",
+        "modbus_status_string_replace",
+        "modbus_status_string_mutate",
+        "cxx_string_create",
+        "cxx_string_allocate",
+        "cxx_new",
+        "cxx_throw",
+        "cxx_raise",
+        "cxx_raise_phase2",
+        "cxx_frame_state",
+        "cxx_find_fde",
+        "sdk_pthread_lock",
+        "sdk_pthread_lazy_init",
+        "sdk_pthread_init",
+        "sdk_mutex_create",
+        "sdk_queue_create",
+        "sdk_port_malloc",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_values_modbus_status_allocation": {
+      "symbols": [
+        "mcp_post",
+        "http_values",
+        "http_values_snapshot",
+        "modbus_status_snapshot",
+        "modbus_status_assign_cstr",
+        "modbus_status_string_replace",
+        "modbus_status_string_mutate",
+        "cxx_string_create",
+        "cxx_string_allocate",
+        "cxx_new",
+        "sdk_malloc",
+        "sdk_malloc_default",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_values_modbus_status_unwind": {
+      "symbols": [
+        "mcp_post",
+        "http_values",
+        "http_values_snapshot",
+        "modbus_status_snapshot",
+        "modbus_status_assign_cstr",
+        "modbus_status_string_replace",
+        "modbus_status_string_mutate",
+        "cxx_string_create",
+        "cxx_string_allocate",
+        "cxx_new",
+        "cxx_throw",
+        "cxx_raise",
+        "cxx_raise_phase2",
+        "cxx_frame_state",
+        "cxx_find_fde",
+        "sdk_pthread_lock",
+        "sdk_pthread_lazy_init",
+        "sdk_pthread_init",
+        "sdk_mutex_create",
+        "sdk_queue_create",
+        "sdk_port_malloc",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "mqtt_heartbeat_modbus_status_allocation": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_heartbeat",
+        "mqtt_heartbeat_builder",
+        "modbus_status_snapshot",
+        "modbus_status_assign_cstr",
+        "modbus_status_string_replace",
+        "modbus_status_string_mutate",
+        "cxx_string_create",
+        "cxx_string_allocate",
+        "cxx_new",
+        "sdk_malloc",
+        "sdk_malloc_default",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_heartbeat_modbus_status_unwind": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_heartbeat",
+        "mqtt_heartbeat_builder",
+        "modbus_status_snapshot",
+        "modbus_status_assign_cstr",
+        "modbus_status_string_replace",
+        "modbus_status_string_mutate",
+        "cxx_string_create",
+        "cxx_string_allocate",
+        "cxx_new",
+        "cxx_throw",
+        "cxx_raise",
+        "cxx_raise_phase2",
+        "cxx_frame_state",
+        "cxx_find_fde",
+        "sdk_pthread_lock",
+        "sdk_pthread_lazy_init",
+        "sdk_pthread_init",
+        "sdk_mutex_create",
+        "sdk_queue_create",
+        "sdk_port_malloc",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_curve_modbus_status_allocation": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_curve_evaluate",
+        "modbus_status_snapshot",
+        "modbus_status_assign_cstr",
+        "modbus_status_string_replace",
+        "modbus_status_string_mutate",
+        "cxx_string_create",
+        "cxx_string_allocate",
+        "cxx_new",
+        "sdk_malloc",
+        "sdk_malloc_default",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_curve_modbus_status_unwind": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_curve_evaluate",
+        "modbus_status_snapshot",
+        "modbus_status_assign_cstr",
+        "modbus_status_string_replace",
+        "modbus_status_string_mutate",
+        "cxx_string_create",
+        "cxx_string_allocate",
+        "cxx_new",
+        "cxx_throw",
+        "cxx_raise",
+        "cxx_raise_phase2",
+        "cxx_frame_state",
+        "cxx_find_fde",
+        "sdk_pthread_lock",
+        "sdk_pthread_lazy_init",
+        "sdk_pthread_init",
+        "sdk_mutex_create",
+        "sdk_queue_create",
+        "sdk_port_malloc",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "main_history_peer_sha_setup": {
+      "symbols": [
+        "main_task",
+        "boot_sequence",
+        "history_start",
+        "history_peer_target_hash",
+        "history_peer_mbedtls_sha256_init"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "main_history_peer_sha_update": {
+      "symbols": [
+        "main_task",
+        "boot_sequence",
+        "history_start",
+        "history_peer_target_hash",
+        "history_peer_mbedtls_sha256_update",
+        "history_peer_mbedtls_internal_sha256_process",
+        "history_peer_mbedtls_platform_zeroize"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "modbus_history_peer_sha_setup": {
+      "symbols": [
+        "runtime_task_entry",
+        "modbus_task",
+        "modbus_poll",
+        "history_peer_target_hash",
+        "history_peer_mbedtls_sha256_init"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "modbus_history_peer_sha_update": {
+      "symbols": [
+        "runtime_task_entry",
+        "modbus_task",
+        "modbus_poll",
+        "history_peer_target_hash",
+        "history_peer_mbedtls_sha256_update",
+        "history_peer_mbedtls_internal_sha256_process",
+        "history_peer_mbedtls_platform_zeroize"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "httpd_history_peer_sha_setup": {
+      "symbols": [
+        "config_hp",
+        "config_document",
+        "history_peer_target_hash",
+        "history_peer_mbedtls_sha256_init"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_history_peer_sha_update": {
+      "symbols": [
+        "config_hp",
+        "config_document",
+        "history_peer_target_hash",
+        "history_peer_mbedtls_sha256_update",
+        "history_peer_mbedtls_internal_sha256_process",
+        "history_peer_mbedtls_platform_zeroize"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "main_history_peer_manifest": {
+      "symbols": [
+        "main_task",
+        "boot_sequence",
+        "history_start",
+        "history_peer_record_valid",
+        "history_peer_manifest"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "poll_history_peer_manifest": {
+      "symbols": [
+        "poll_task",
+        "history_board",
+        "history_flash_restore",
+        "history_peer_record_valid",
+        "history_peer_manifest"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "modbus_history_peer_bind_target": {
+      "symbols": [
+        "runtime_task_entry",
+        "modbus_task",
+        "modbus_poll",
+        "history_peer_bind",
+        "history_peer_target_compare"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "main_history_peer_sha_start": {
+      "symbols": [
+        "main_task",
+        "boot_sequence",
+        "history_start",
+        "history_peer_target_hash",
+        "history_peer_mbedtls_sha256_starts"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "main_history_peer_sha_finish": {
+      "symbols": [
+        "main_task",
+        "boot_sequence",
+        "history_start",
+        "history_peer_target_hash",
+        "history_peer_mbedtls_sha256_finish",
+        "history_peer_mbedtls_internal_sha256_process",
+        "history_peer_mbedtls_platform_zeroize"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "main_history_peer_sha_cleanup": {
+      "symbols": [
+        "main_task",
+        "boot_sequence",
+        "history_start",
+        "history_peer_target_hash",
+        "history_peer_mbedtls_sha256_free",
+        "history_peer_mbedtls_platform_zeroize"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "modbus_history_peer_sha_start": {
+      "symbols": [
+        "runtime_task_entry",
+        "modbus_task",
+        "modbus_poll",
+        "history_peer_target_hash",
+        "history_peer_mbedtls_sha256_starts"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "modbus_history_peer_sha_finish": {
+      "symbols": [
+        "runtime_task_entry",
+        "modbus_task",
+        "modbus_poll",
+        "history_peer_target_hash",
+        "history_peer_mbedtls_sha256_finish",
+        "history_peer_mbedtls_internal_sha256_process",
+        "history_peer_mbedtls_platform_zeroize"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "modbus_history_peer_sha_cleanup": {
+      "symbols": [
+        "runtime_task_entry",
+        "modbus_task",
+        "modbus_poll",
+        "history_peer_target_hash",
+        "history_peer_mbedtls_sha256_free",
+        "history_peer_mbedtls_platform_zeroize"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "httpd_history_peer_sha_start": {
+      "symbols": [
+        "config_hp",
+        "config_document",
+        "history_peer_target_hash",
+        "history_peer_mbedtls_sha256_starts"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_history_peer_sha_finish": {
+      "symbols": [
+        "config_hp",
+        "config_document",
+        "history_peer_target_hash",
+        "history_peer_mbedtls_sha256_finish",
+        "history_peer_mbedtls_internal_sha256_process",
+        "history_peer_mbedtls_platform_zeroize"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_history_peer_sha_cleanup": {
+      "symbols": [
+        "config_hp",
+        "config_document",
+        "history_peer_target_hash",
+        "history_peer_mbedtls_sha256_free",
+        "history_peer_mbedtls_platform_zeroize"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "main_history_peer_static_mutex": {
+      "symbols": [
+        "main_task",
+        "boot_sequence",
+        "modbus_static_init",
+        "modbus_static_mutex",
+        "modbus_static_queue",
+        "modbus_static_queue_reset",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "main_history_peer_static_mutex_send": {
+      "symbols": [
+        "main_task",
+        "boot_sequence",
+        "modbus_static_init",
+        "modbus_static_mutex",
+        "sdk_queue_send",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "modbus_worker_start_lwip_allocate": {
+      "symbols": [
+        "modbus_task",
+        "modbus_worker_lwip_get",
+        "tls_sys_thread_sem_get",
+        "tls_sys_thread_sem_init",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "modbus_worker_start_lwip_queue": {
+      "symbols": [
+        "modbus_task",
+        "modbus_worker_lwip_get",
+        "tls_sys_thread_sem_get",
+        "tls_sys_thread_sem_init",
+        "modbus_static_queue",
+        "modbus_static_queue_reset",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "modbus_worker_start_lwip_retain": {
+      "symbols": [
+        "modbus_task",
+        "modbus_worker_lwip_get",
+        "tls_sys_thread_sem_get",
+        "tls_sys_thread_sem_init",
+        "tls_pthread_setspecific",
+        "tls_calloc",
+        "sdk_malloc_default",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "modbus_worker_start_lwip_log": {
+      "symbols": [
+        "modbus_task",
+        "modbus_worker_lwip_get",
+        "tls_sys_thread_sem_get",
+        "tls_sys_thread_sem_init",
+        "sdk_log",
+        "sdk_vprintf",
+        "sdk_vfprintf",
+        "sdk_bufio_put",
+        "sdk_bufio_allocate",
+        "sdk_malloc",
+        "sdk_malloc_default",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "modbus_worker_start_lwip_orphan_queue": {
+      "symbols": [
+        "modbus_task",
+        "modbus_worker_lwip_get",
+        "modbus_worker_lwip_sem_free",
+        "modbus_worker_queue_delete",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "modbus_worker_start_lwip_orphan_free": {
+      "symbols": [
+        "modbus_task",
+        "modbus_worker_lwip_get",
+        "modbus_worker_lwip_sem_free",
+        "modbus_worker_heap_free",
+        "modbus_worker_aligned_free",
+        "modbus_worker_tlsf_free",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "modbus_worker_start_wdt_allocate": {
+      "symbols": [
+        "modbus_task",
+        "modbus_worker_wdt_add",
+        "modbus_worker_wdt_entry",
+        "tls_calloc",
+        "sdk_malloc_default",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "modbus_worker_start_wdt_log": {
+      "symbols": [
+        "modbus_task",
+        "modbus_worker_wdt_add",
+        "sdk_log",
+        "sdk_vprintf",
+        "sdk_vfprintf",
+        "sdk_bufio_put",
+        "sdk_bufio_allocate",
+        "sdk_malloc",
+        "sdk_malloc_default",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "modbus_worker_start_log": {
+      "symbols": [
+        "modbus_task",
+        "diag_log",
+        "sdk_log",
+        "sdk_vprintf",
+        "sdk_vfprintf",
+        "sdk_bufio_put",
+        "sdk_bufio_allocate",
+        "sdk_malloc",
+        "sdk_malloc_default",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "modbus_worker_start_lwip_existing_peek": {
+      "symbols": [
+        "modbus_task",
+        "modbus_worker_lwip_get",
+        "tls_sys_thread_sem_get",
+        "modbus_worker_lwip_peek",
+        "modbus_worker_task_tls",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "modbus_worker_start_lwip_verify_peek": {
+      "symbols": [
+        "modbus_task",
+        "modbus_worker_lwip_get",
+        "modbus_worker_lwip_peek",
+        "modbus_worker_task_tls",
+        "runtime_task_entry"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "main_modbus_create_boot_take": {
+      "symbols": [
+        "main_task",
+        "boot_sequence",
+        "modbus_create_boot",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "mqtt_input_lock",
+        "sdk_queue_sem_take",
+        "sdk_queue_remove_event",
+        "sdk_queue_yield_required",
+        "sdk_queue_yield_other",
+        "sdk_queue_crosscore_yield",
+        "sdk_queue_crosscore_send",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "main_modbus_create_boot_release": {
+      "symbols": [
+        "main_task",
+        "boot_sequence",
+        "modbus_create_boot",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "sem_guard_release",
+        "sdk_queue_send",
+        "stop_queue_set_notify",
+        "sdk_queue_remove_event",
+        "sdk_queue_yield_required",
+        "sdk_queue_yield_other",
+        "sdk_queue_crosscore_yield",
+        "sdk_queue_crosscore_send",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "main_modbus_create_boot_allocate": {
+      "symbols": [
+        "main_task",
+        "boot_sequence",
+        "modbus_create_boot",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "modbus_create_sdk",
+        "sdk_port_malloc",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "main_modbus_create_boot_free": {
+      "symbols": [
+        "main_task",
+        "boot_sequence",
+        "modbus_create_boot",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "modbus_create_sdk",
+        "modbus_create_port_free",
+        "modbus_worker_heap_free",
+        "modbus_worker_aligned_free",
+        "modbus_worker_tlsf_free",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "main_modbus_create_boot_initialize": {
+      "symbols": [
+        "main_task",
+        "boot_sequence",
+        "modbus_create_boot",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "modbus_create_sdk",
+        "modbus_create_init",
+        "modbus_create_port_stack"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "main_modbus_create_boot_initialize_list": {
+      "symbols": [
+        "main_task",
+        "boot_sequence",
+        "modbus_create_boot",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "modbus_create_sdk",
+        "modbus_create_init",
+        "modbus_create_list_item"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "main_modbus_create_boot_ready_list": {
+      "symbols": [
+        "main_task",
+        "boot_sequence",
+        "modbus_create_boot",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "modbus_create_sdk",
+        "modbus_create_ready",
+        "modbus_create_list_init"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "main_modbus_create_boot_ready_wake": {
+      "symbols": [
+        "main_task",
+        "boot_sequence",
+        "modbus_create_boot",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "modbus_create_sdk",
+        "modbus_create_ready",
+        "sdk_queue_yield_required",
+        "sdk_queue_yield_other",
+        "sdk_queue_crosscore_yield",
+        "sdk_queue_crosscore_send",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "main_modbus_create_boot_ready_exit": {
+      "symbols": [
+        "main_task",
+        "boot_sequence",
+        "modbus_create_boot",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "modbus_create_sdk",
+        "modbus_create_ready",
+        "modbus_create_exit_critical"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "main_modbus_create_boot_log": {
+      "symbols": [
+        "main_task",
+        "boot_sequence",
+        "modbus_create_boot",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "diag_log",
+        "sdk_log",
+        "sdk_vprintf",
+        "sdk_vfprintf",
+        "sdk_bufio_put",
+        "sdk_bufio_allocate",
+        "sdk_malloc",
+        "sdk_malloc_default",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "poll_modbus_create_poll_take": {
+      "symbols": [
+        "runtime_task_entry",
+        "poll_task",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "mqtt_input_lock",
+        "sdk_queue_sem_take",
+        "sdk_queue_remove_event",
+        "sdk_queue_yield_required",
+        "sdk_queue_yield_other",
+        "sdk_queue_crosscore_yield",
+        "sdk_queue_crosscore_send",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_modbus_create_poll_release": {
+      "symbols": [
+        "runtime_task_entry",
+        "poll_task",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "sem_guard_release",
+        "sdk_queue_send",
+        "stop_queue_set_notify",
+        "sdk_queue_remove_event",
+        "sdk_queue_yield_required",
+        "sdk_queue_yield_other",
+        "sdk_queue_crosscore_yield",
+        "sdk_queue_crosscore_send",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_modbus_create_poll_allocate": {
+      "symbols": [
+        "runtime_task_entry",
+        "poll_task",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "modbus_create_sdk",
+        "sdk_port_malloc",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_modbus_create_poll_free": {
+      "symbols": [
+        "runtime_task_entry",
+        "poll_task",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "modbus_create_sdk",
+        "modbus_create_port_free",
+        "modbus_worker_heap_free",
+        "modbus_worker_aligned_free",
+        "modbus_worker_tlsf_free",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_modbus_create_poll_initialize": {
+      "symbols": [
+        "runtime_task_entry",
+        "poll_task",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "modbus_create_sdk",
+        "modbus_create_init",
+        "modbus_create_port_stack"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_modbus_create_poll_initialize_list": {
+      "symbols": [
+        "runtime_task_entry",
+        "poll_task",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "modbus_create_sdk",
+        "modbus_create_init",
+        "modbus_create_list_item"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_modbus_create_poll_ready_list": {
+      "symbols": [
+        "runtime_task_entry",
+        "poll_task",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "modbus_create_sdk",
+        "modbus_create_ready",
+        "modbus_create_list_init"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_modbus_create_poll_ready_wake": {
+      "symbols": [
+        "runtime_task_entry",
+        "poll_task",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "modbus_create_sdk",
+        "modbus_create_ready",
+        "sdk_queue_yield_required",
+        "sdk_queue_yield_other",
+        "sdk_queue_crosscore_yield",
+        "sdk_queue_crosscore_send",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_modbus_create_poll_ready_exit": {
+      "symbols": [
+        "runtime_task_entry",
+        "poll_task",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "modbus_create_sdk",
+        "modbus_create_ready",
+        "modbus_create_exit_critical"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_modbus_create_poll_log": {
+      "symbols": [
+        "runtime_task_entry",
+        "poll_task",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "diag_log",
+        "sdk_log",
+        "sdk_vprintf",
+        "sdk_vfprintf",
+        "sdk_bufio_put",
+        "sdk_bufio_allocate",
+        "sdk_malloc",
+        "sdk_malloc_default",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "httpd_modbus_create_http_changed_take": {
+      "symbols": [
+        "config_hp",
+        "config_document",
+        "modbus_create_reconfigure",
+        "modbus_create_start",
+        "mqtt_input_lock",
+        "sdk_queue_sem_take",
+        "sdk_queue_remove_event",
+        "sdk_queue_yield_required",
+        "sdk_queue_yield_other",
+        "sdk_queue_crosscore_yield",
+        "sdk_queue_crosscore_send",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_modbus_create_http_changed_release": {
+      "symbols": [
+        "config_hp",
+        "config_document",
+        "modbus_create_reconfigure",
+        "modbus_create_start",
+        "sem_guard_release",
+        "sdk_queue_send",
+        "stop_queue_set_notify",
+        "sdk_queue_remove_event",
+        "sdk_queue_yield_required",
+        "sdk_queue_yield_other",
+        "sdk_queue_crosscore_yield",
+        "sdk_queue_crosscore_send",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_modbus_create_http_changed_allocate": {
+      "symbols": [
+        "config_hp",
+        "config_document",
+        "modbus_create_reconfigure",
+        "modbus_create_start",
+        "modbus_create_sdk",
+        "sdk_port_malloc",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_modbus_create_http_changed_free": {
+      "symbols": [
+        "config_hp",
+        "config_document",
+        "modbus_create_reconfigure",
+        "modbus_create_start",
+        "modbus_create_sdk",
+        "modbus_create_port_free",
+        "modbus_worker_heap_free",
+        "modbus_worker_aligned_free",
+        "modbus_worker_tlsf_free",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_modbus_create_http_changed_initialize": {
+      "symbols": [
+        "config_hp",
+        "config_document",
+        "modbus_create_reconfigure",
+        "modbus_create_start",
+        "modbus_create_sdk",
+        "modbus_create_init",
+        "modbus_create_port_stack"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_modbus_create_http_changed_initialize_list": {
+      "symbols": [
+        "config_hp",
+        "config_document",
+        "modbus_create_reconfigure",
+        "modbus_create_start",
+        "modbus_create_sdk",
+        "modbus_create_init",
+        "modbus_create_list_item"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_modbus_create_http_changed_ready_list": {
+      "symbols": [
+        "config_hp",
+        "config_document",
+        "modbus_create_reconfigure",
+        "modbus_create_start",
+        "modbus_create_sdk",
+        "modbus_create_ready",
+        "modbus_create_list_init"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_modbus_create_http_changed_ready_wake": {
+      "symbols": [
+        "config_hp",
+        "config_document",
+        "modbus_create_reconfigure",
+        "modbus_create_start",
+        "modbus_create_sdk",
+        "modbus_create_ready",
+        "sdk_queue_yield_required",
+        "sdk_queue_yield_other",
+        "sdk_queue_crosscore_yield",
+        "sdk_queue_crosscore_send",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_modbus_create_http_changed_ready_exit": {
+      "symbols": [
+        "config_hp",
+        "config_document",
+        "modbus_create_reconfigure",
+        "modbus_create_start",
+        "modbus_create_sdk",
+        "modbus_create_ready",
+        "modbus_create_exit_critical"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_modbus_create_http_changed_log": {
+      "symbols": [
+        "config_hp",
+        "config_document",
+        "modbus_create_reconfigure",
+        "modbus_create_start",
+        "diag_log",
+        "sdk_log",
+        "sdk_vprintf",
+        "sdk_vfprintf",
+        "sdk_bufio_put",
+        "sdk_bufio_allocate",
+        "sdk_malloc",
+        "sdk_malloc_default",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_modbus_create_http_saved_take": {
+      "symbols": [
+        "config_hp",
+        "config_document",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "mqtt_input_lock",
+        "sdk_queue_sem_take",
+        "sdk_queue_remove_event",
+        "sdk_queue_yield_required",
+        "sdk_queue_yield_other",
+        "sdk_queue_crosscore_yield",
+        "sdk_queue_crosscore_send",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_modbus_create_http_saved_release": {
+      "symbols": [
+        "config_hp",
+        "config_document",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "sem_guard_release",
+        "sdk_queue_send",
+        "stop_queue_set_notify",
+        "sdk_queue_remove_event",
+        "sdk_queue_yield_required",
+        "sdk_queue_yield_other",
+        "sdk_queue_crosscore_yield",
+        "sdk_queue_crosscore_send",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_modbus_create_http_saved_allocate": {
+      "symbols": [
+        "config_hp",
+        "config_document",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "modbus_create_sdk",
+        "sdk_port_malloc",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_modbus_create_http_saved_free": {
+      "symbols": [
+        "config_hp",
+        "config_document",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "modbus_create_sdk",
+        "modbus_create_port_free",
+        "modbus_worker_heap_free",
+        "modbus_worker_aligned_free",
+        "modbus_worker_tlsf_free",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_modbus_create_http_saved_initialize": {
+      "symbols": [
+        "config_hp",
+        "config_document",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "modbus_create_sdk",
+        "modbus_create_init",
+        "modbus_create_port_stack"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_modbus_create_http_saved_initialize_list": {
+      "symbols": [
+        "config_hp",
+        "config_document",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "modbus_create_sdk",
+        "modbus_create_init",
+        "modbus_create_list_item"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_modbus_create_http_saved_ready_list": {
+      "symbols": [
+        "config_hp",
+        "config_document",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "modbus_create_sdk",
+        "modbus_create_ready",
+        "modbus_create_list_init"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_modbus_create_http_saved_ready_wake": {
+      "symbols": [
+        "config_hp",
+        "config_document",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "modbus_create_sdk",
+        "modbus_create_ready",
+        "sdk_queue_yield_required",
+        "sdk_queue_yield_other",
+        "sdk_queue_crosscore_yield",
+        "sdk_queue_crosscore_send",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_modbus_create_http_saved_ready_exit": {
+      "symbols": [
+        "config_hp",
+        "config_document",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "modbus_create_sdk",
+        "modbus_create_ready",
+        "modbus_create_exit_critical"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_modbus_create_http_saved_log": {
+      "symbols": [
+        "config_hp",
+        "config_document",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "diag_log",
+        "sdk_log",
+        "sdk_vprintf",
+        "sdk_vfprintf",
+        "sdk_bufio_put",
+        "sdk_bufio_allocate",
+        "sdk_malloc",
+        "sdk_malloc_default",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
     }
   },
   "tasks": {
@@ -11878,7 +14216,52 @@
         "httpd_shutdown_board_journal_stop_index_failed_suppression",
         "httpd_shutdown_env3_journal_stop_next_fence_receipt_suppression",
         "httpd_shutdown_env3_journal_stop_index_receipt_suppression",
-        "httpd_shutdown_env3_journal_stop_index_failed_suppression"
+        "httpd_shutdown_env3_journal_stop_index_failed_suppression",
+        "httpd_history_peer_scope_take",
+        "httpd_history_peer_scope_release",
+        "httpd_history_peer_scope_floor",
+        "httpd_history_peer_scope_epoch",
+        "httpd_direct_values_peer_generation",
+        "httpd_direct_values_history_epoch_snapshot",
+        "httpd_direct_values_history_epoch_stream",
+        "httpd_mcp_values_peer_generation",
+        "httpd_mcp_values_history_epoch_snapshot",
+        "httpd_mcp_values_history_epoch_stream",
+        "httpd_history_peer_epoch_guard",
+        "httpd_history_peer_epoch_stream",
+        "httpd_direct_status_modbus_status_allocation",
+        "httpd_direct_status_modbus_status_unwind",
+        "httpd_mcp_status_modbus_status_allocation",
+        "httpd_mcp_status_modbus_status_unwind",
+        "httpd_direct_values_modbus_status_allocation",
+        "httpd_direct_values_modbus_status_unwind",
+        "httpd_mcp_values_modbus_status_allocation",
+        "httpd_mcp_values_modbus_status_unwind",
+        "httpd_history_peer_sha_setup",
+        "httpd_history_peer_sha_update",
+        "httpd_history_peer_sha_start",
+        "httpd_history_peer_sha_finish",
+        "httpd_history_peer_sha_cleanup",
+        "httpd_modbus_create_http_changed_take",
+        "httpd_modbus_create_http_changed_release",
+        "httpd_modbus_create_http_changed_allocate",
+        "httpd_modbus_create_http_changed_free",
+        "httpd_modbus_create_http_changed_initialize",
+        "httpd_modbus_create_http_changed_initialize_list",
+        "httpd_modbus_create_http_changed_ready_list",
+        "httpd_modbus_create_http_changed_ready_wake",
+        "httpd_modbus_create_http_changed_ready_exit",
+        "httpd_modbus_create_http_changed_log",
+        "httpd_modbus_create_http_saved_take",
+        "httpd_modbus_create_http_saved_release",
+        "httpd_modbus_create_http_saved_allocate",
+        "httpd_modbus_create_http_saved_free",
+        "httpd_modbus_create_http_saved_initialize",
+        "httpd_modbus_create_http_saved_initialize_list",
+        "httpd_modbus_create_http_saved_ready_list",
+        "httpd_modbus_create_http_saved_ready_wake",
+        "httpd_modbus_create_http_saved_ready_exit",
+        "httpd_modbus_create_http_saved_log"
       ]
     },
     "main": {
@@ -11900,7 +14283,29 @@
         "main_stop_index_reset_suppression",
         "main_stop_pending_latch",
         "main_stop_pending_take",
-        "main_stop_pending_release"
+        "main_stop_pending_release",
+        "main_history_peer_record_header",
+        "main_history_peer_record_crc",
+        "main_history_peer_record_scope",
+        "main_history_peer_record_layout",
+        "main_history_peer_sha_setup",
+        "main_history_peer_sha_update",
+        "main_history_peer_manifest",
+        "main_history_peer_sha_start",
+        "main_history_peer_sha_finish",
+        "main_history_peer_sha_cleanup",
+        "main_history_peer_static_mutex",
+        "main_history_peer_static_mutex_send",
+        "main_modbus_create_boot_take",
+        "main_modbus_create_boot_release",
+        "main_modbus_create_boot_allocate",
+        "main_modbus_create_boot_free",
+        "main_modbus_create_boot_initialize",
+        "main_modbus_create_boot_initialize_list",
+        "main_modbus_create_boot_ready_list",
+        "main_modbus_create_boot_ready_wake",
+        "main_modbus_create_boot_ready_exit",
+        "main_modbus_create_boot_log"
       ]
     },
     "mqtt": {
@@ -11991,7 +14396,11 @@
         "mqtt_stop_json_mqtt",
         "mqtt_stop_suppression",
         "mqtt_stop_unavailable",
-        "mqtt_stop_store_suppression"
+        "mqtt_stop_store_suppression",
+        "mqtt_heartbeat_modbus_status_allocation",
+        "mqtt_heartbeat_modbus_status_unwind",
+        "mqtt_curve_modbus_status_allocation",
+        "mqtt_curve_modbus_status_unwind"
       ]
     },
     "poll": {
@@ -12058,7 +14467,22 @@
         "poll_stop_journal_index_receipt_suppression",
         "poll_shutdown_journal_stop_next_fence_receipt_suppression",
         "poll_shutdown_journal_stop_index_receipt_suppression",
-        "poll_shutdown_journal_stop_index_failed_suppression"
+        "poll_shutdown_journal_stop_index_failed_suppression",
+        "poll_history_peer_record_header",
+        "poll_history_peer_record_crc",
+        "poll_history_peer_record_scope",
+        "poll_history_peer_record_layout",
+        "poll_history_peer_manifest",
+        "poll_modbus_create_poll_take",
+        "poll_modbus_create_poll_release",
+        "poll_modbus_create_poll_allocate",
+        "poll_modbus_create_poll_free",
+        "poll_modbus_create_poll_initialize",
+        "poll_modbus_create_poll_initialize_list",
+        "poll_modbus_create_poll_ready_list",
+        "poll_modbus_create_poll_ready_wake",
+        "poll_modbus_create_poll_ready_exit",
+        "poll_modbus_create_poll_log"
       ]
     },
     "modbus": {
@@ -12066,7 +14490,38 @@
       "reserve_bytes": 1024,
       "paths": [
         "modbus_poll",
-        "modbus_history"
+        "modbus_history",
+        "modbus_history_peer_bind_epoch",
+        "modbus_history_peer_bind_forgotten",
+        "modbus_history_peer_scope_take",
+        "modbus_history_peer_scope_release",
+        "modbus_history_peer_scope_floor",
+        "modbus_history_peer_scope_epoch",
+        "modbus_cycle_report_format",
+        "modbus_cycle_report_diagnostic",
+        "modbus_cycle_report_console",
+        "modbus_cycle_report_errno",
+        "modbus_connect_report_format",
+        "modbus_connect_report_errno",
+        "modbus_connect_report_diagnostic",
+        "modbus_connect_report_console",
+        "modbus_history_peer_sha_setup",
+        "modbus_history_peer_sha_update",
+        "modbus_history_peer_bind_target",
+        "modbus_history_peer_sha_start",
+        "modbus_history_peer_sha_finish",
+        "modbus_history_peer_sha_cleanup",
+        "modbus_worker_start_lwip_allocate",
+        "modbus_worker_start_lwip_queue",
+        "modbus_worker_start_lwip_retain",
+        "modbus_worker_start_lwip_log",
+        "modbus_worker_start_lwip_orphan_queue",
+        "modbus_worker_start_lwip_orphan_free",
+        "modbus_worker_start_wdt_allocate",
+        "modbus_worker_start_wdt_log",
+        "modbus_worker_start_log",
+        "modbus_worker_start_lwip_existing_peek",
+        "modbus_worker_start_lwip_verify_peek"
       ]
     },
     "syslog": {
@@ -12412,7 +14867,17 @@
       "bootloader_support/src/esp_image_format.c": "49d4775bb094615290eb60bd982dc81f44eb34da506df19670c3ef12054de5b5",
       "bootloader_support/src/secure_boot_v2/secure_boot_signatures_app.c": "ac2329ae185c839bd098cbe0a88cb6a56f6f08ea9a712696d9f14e22cc0bc9eb",
       "bootloader_support/src/secure_boot_v2/secure_boot_rsa_signature.c": "cd2a75305b40d0233af2128e542f73bd5e896413ff8a3cd136ebbe9b67dd2069",
-      "esp_http_server/src/httpd_txrx.c": "622df880632b33057dd4c3f2f651baf81536a5b2b5cef872c1ba94d392387b62"
+      "esp_http_server/src/httpd_txrx.c": "622df880632b33057dd4c3f2f651baf81536a5b2b5cef872c1ba94d392387b62",
+      "mbedtls/mbedtls/tf-psa-crypto/drivers/builtin/src/sha256.c": "f1c3018055c8fe04722a99fdb18ff13bc871113ff5295e3ca5ee2eb3d652b5ad",
+      "mbedtls/mbedtls/tf-psa-crypto/drivers/builtin/include/mbedtls/private/sha256.h": "2857acabaca119dfbb24baf41013664af8ea8da8bbe5a7b94b01c12f9ed9a78d",
+      "mbedtls/mbedtls/tf-psa-crypto/platform/platform_util.c": "8b2abd057d159e2d924cc30d824baeb74411460f1d2a5b1b6256bb0c54bc7330",
+      "esp_system/task_wdt/task_wdt.c": "5a3756da705c4ebf003610d25de243a5fd0160e88d3ed28411869d7c19982405",
+      "freertos/FreeRTOS-Kernel/include/freertos/task.h": "34fa5db62cfcb5b0007d3a3b79eabd4217554f8f8201f7f43dac68592fe0fb04",
+      "freertos/FreeRTOS-Kernel/include/freertos/portable.h": "d68d9693f793c25ebbf5ed15e7a65e1d5e63a2b43cbffc6de7f9990beb6e8935",
+      "freertos/esp_additions/freertos_tasks_c_additions.h": "997998d8c7fdde60f67c0e750fdd00ff82c81141fc47778b4d38062c3ea80d0b",
+      "freertos/FreeRTOS-Kernel/portable/xtensa/port.c": "b6c91812b25d2f33ed2a54652e9293202f756cadcbfac986d132d74e463b7570",
+      "freertos/FreeRTOS-Kernel/list.c": "2d59faad741f562ec8a68eb29298bae5b05afff5796f8abf8e519f07d069a681",
+      "esp_system/crosscore_int.c": "92a7b95e3f30b46f7d77f270e1a4ed7ea6a08bb09264ad27e7dd2c8202b834aa"
     },
     "config_macros": {
       "CONFIG_ESP_MAIN_TASK_STACK_SIZE": 6144,
@@ -12501,7 +14966,10 @@
       "CONFIG_SPI_FLASH_YIELD_DURING_ERASE": 1,
       "CONFIG_ESPTOOLPY_FLASHMODE_DIO": 1,
       "CONFIG_ESPTOOLPY_FLASHMODE_OPI": null,
-      "CONFIG_ESPTOOLPY_FLASHMODE_QIO": null
+      "CONFIG_ESPTOOLPY_FLASHMODE_QIO": null,
+      "CONFIG_FREERTOS_SMP": null,
+      "CONFIG_FREERTOS_UNICORE": null,
+      "CONFIG_FREERTOS_TASK_FUNCTION_WRAPPER": 1
     },
     "tls_paths": {
       "certificate_ecdsa": {
