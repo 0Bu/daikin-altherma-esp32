@@ -361,8 +361,10 @@ python3 - "$TMP/main/hp_poll.cpp" <<'PY'
 import sys, re
 p = sys.argv[1]
 s = open(p).read()
-seed, count = re.subn(r'            heap_guard_sample\(\);\n            if \((?:config\(\)\.profile|config_profile\(\)) == "auto"\) \{',
-                      '            if (config_profile() == "auto") {\n                heap_guard_sample();', s, count=1)
+seed, count = re.subn(r'            heap_guard_sample\(\);\n'
+                      r'(            //[^\n]*\n            mb_retry_start\(\);\n)'
+                      r'(            if \((?:config\(\)\.profile|config_profile\(\)) == "auto"\) \{)',
+                      r'\1\2\n                heap_guard_sample();', s, count=1)
 assert count == 1, "seed 9 did not apply — the heap watchdog's call site moved"
 open(p, "w").write(seed)
 PY
