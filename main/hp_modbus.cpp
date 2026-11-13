@@ -98,7 +98,9 @@ static int64_t s_plant_gate_ms          = -1;    // guarded by s_mtx; successful
 static int64_t s_space_route_ms         = -1;    // guarded by s_mtx; successful input37 reply time
 static int64_t s_heating_mode_ms        = -1;    // guarded by s_mtx; successful input38 reply time
 static int64_t s_plant_outdoor_ms       = -1;    // guarded by s_mtx; successful input44 reply time
-static int64_t s_compressor_ms          = -1;    // guarded by s_mtx; successful input31 reply time
+
+// The input 31 observation and its timestamp are guarded by s_mtx.
+static int64_t          s_compressor_ms = -1;
 static ModbusCompressor s_compressor    = ModbusCompressor::Unknown;
 
 // ── Poll-task-owned socket state (no lock — single owner, exactly like hp_comm.cpp's s_rx/s_tx)
