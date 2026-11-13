@@ -1213,7 +1213,7 @@ python3 - "$TMP/main/hp_modbus.cpp" <<'PY4'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-start = s.index('        if (!s_target_enabled.load(std::memory_order_acquire)) {',
+start = s.index('        if (s_task_retiring || !s_target_enabled.load(std::memory_order_acquire)) {',
                 s.index('static void mb_task(void*)'))
 end = s.index('\n        const bool ota_active', start)
 assert 'else if (mb_retire_if_disabled(ready))' in s[start:end], (

@@ -702,7 +702,7 @@ assert.doesNotMatch(mbReconfigureBody, /\bconfig\s*\(/,
 const mbTaskStart = modbus.indexOf("static void mb_task(void*)");
 const mbTaskEnd = modbus.indexOf("static void mb_task_start_if_enabled()", mbTaskStart);
 const mbTask = modbus.slice(mbTaskStart, mbTaskEnd);
-const mbDisableIntent = mbTask.indexOf("if (!s_target_enabled.load(std::memory_order_acquire))");
+const mbDisableIntent = mbTask.indexOf("if (s_task_retiring || !s_target_enabled.load(std::memory_order_acquire))");
 const mbPoll = mbTask.indexOf("if (ota_quiesce_step(ota_quiesce, ota_active))");
 assert.ok(mbDisableIntent >= 0 && mbPoll > mbDisableIntent,
   "HomeHub disable must be handled before the normal poll path");
