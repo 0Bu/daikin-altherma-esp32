@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 756593b5a33017ef64a079101b3428b952c19055620cc3b7aa3a8b1946b3284c -->
+<!-- diagnostic-evidence-contract: 49dcf5a25476dca3831e93b1e6f980e328e86aec5dd0e8668b7dc18ff79fb282 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -383,16 +383,16 @@ the listed Altherma 3 R W units (sections 6.4.3, 9.4.1, and 12.4). An Altherma 3
 `25 l/min` or `22 l/min`, depending on the variant ([D2], section 8.1.3). One firmware-wide good/bad
 limit would therefore be incorrect.
 
-**Firmware rule:** The row reports the lowest accepted flow after the internal pump ran
-continuously for at least 60 seconds. It assigns no good/bad assessment. See CHECKUP_FLOW_RUNUP_S
-and the Flow branch in [checkup.hpp](../main/logic/checkup.hpp).
+**Firmware rule:** The row reports the lowest accepted X10A flow after at least 60 seconds covered
+by consecutive X10A pump-ON reports. Each interval needs ON reports at both ends and the shared
+continuity rule. See CHECKUP_FLOW_RUNUP_S and the Flow branch in [checkup.hpp](../main/logic/checkup.hpp).
 
 **Project boundary:** Sixty seconds is a pump run-up filter, not a manufacturer limit. The filter
 does not establish part load or exclude later valve movements.
 
-**Not established:** The minimum has no retained operating-mode context and is not a design-flow
-measurement. It cannot be compared generally with a model manual's commissioning minimum or
-identify a hydraulic restriction.
+**Not established:** The ON reports do not independently verify pump rotation. The minimum has no
+retained operating-mode context and is not a design-flow measurement. It cannot be compared
+generally with a model manual's commissioning minimum or identify a hydraulic restriction.
 
 <a id="diagnosis-heater"></a>
 ### 7. Electric backup and booster heaters (`heater`)

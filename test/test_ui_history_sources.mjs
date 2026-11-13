@@ -107,6 +107,8 @@ const labels = {
   "hist.loading": "Verlauf wird geladen…", "hist.err": "Verlauf nicht verfügbar.",
   "hist.none": "Noch keine Messwerte aufgezeichnet.", "hist.title": "Letzte 24 Stunden",
   "hist.now": "jetzt", "hist.nm": "nicht gemessen", "hist.held": "Außeneinheit ruht",
+  "hist.modbus_flow_unverified": "The scale of recorded Modbus flow is unverified.",
+  "hist.thermal_bucket_note": "The estimate combines samples that may have been taken at different times.",
 };
 const context = {
   S, LANG: "de", renderApp() {}, renderCards() {}, renderInspect() {}, renderSettings() {},
@@ -201,9 +203,20 @@ const context = {
 vm.createContext(context);
 const lifecycleSource = appState.slice(appState.indexOf("// ── History source lifecycle"),
   appState.indexOf("// ── Navigation (dashboard ⇄ Settings)"));
-vm.runInContext(lifecycleSource + readAppFragments(["history.js"]) +
+const bootstrap = readAppFragments(["bootstrap.js"]);
+const statusAdoption = appState.slice(appState.indexOf("async function refreshStatus("),
+  appState.indexOf("function markUnreachable("));
+const trendPlot = bootstrap.slice(bootstrap.indexOf("function trendPlotFromTarget("),
+  bootstrap.indexOf("// The hour readout"));
+const trendWiring = bootstrap.slice(bootstrap.indexOf("function wireTrendScrub("),
+  bootstrap.indexOf("// The remaining delegated wiring"));
+Object.assign(context, { acceptImageLease: () => true, j: async () => context.nextStatus,
+  pollSignal() {}, setLangFromStatus: async () => {}, hpProbeIsOpen: () => false, hydrateRoutedPopup() {} });
+vm.runInContext(lifecycleSource + statusAdoption + trendPlot + trendWiring +
+  readAppFragments(["descriptions.js", "history.js"]) +
   "\nthis.__api = { hasHist, hasModbusHist, hasRoomHist, histCacheKey, historyView, histHtml, scrubText, histReadout, histVisibleSeries," +
-  " histTipsHtml, scrubMove, histSeriesToggle, ensureHist, ensureHistPair, ensureDerived, DERIVED, syncHistSources, invalidateHistSources };", context,
+  " histTipsHtml, scrubMove, histSeriesToggle, ensureHist, ensureHistPair, ensureDerived, DERIVED, syncHistSources, invalidateHistSources," +
+  " refreshStatus, wireTrendScrub };", context,
   { filename: "main/www/js/history.js" });
 const h = context.__api;
 
@@ -321,6 +334,131 @@ assert.match(html, /45,2 – 45,6 °C/,
   S.histHidden.delete("dhw_tank");
 }
 
+// The Modbus flow scale is unverified. Its warning follows the displayed historical source and
+// appears in the readout only where that source contributes a sample.
+{
+  const note = labels["hist.modbus_flow_unverified"];
+  const chartNote = `<div class="vhist-note">${note}</div>`;
+  S.status.history.rows.push({ id: "flow", label: "Water flow" });
+  S.status.history.modbus_rows.push({ id: "flow", label: "Water flow rate" });
+  S.hist.set("flow", { ...x10a, unit: "l/min", v: [180, null, 200] });
+  S.hist.set("modbus:flow", { ...modbus, unit: "l/min", gen: 2, b0: 99, v: [10000, 190, 195, null] });
+
+  const flow = h.historyView("flow");
+  const flowHtml = (source) => h.histHtml("flow", "l/min", "Durchfluss", source);
+  const nativeHtml = flowHtml("x10a");
+  const hiddenHtml = flowHtml();
+  assert.ok(!hiddenHtml.includes(note), "a hidden Modbus trace has no warning");
+  assert.match(hiddenHtml, /data-hist-series="modbus" aria-pressed="false"/,
+    "the hidden source remains available in the legend");
+  assert.equal(hiddenHtml.match(/<svg[^>]*>[\s\S]*?<\/svg>/)?.[0],
+    nativeHtml.match(/<svg[^>]*>[\s\S]*?<\/svg>/)?.[0],
+    "a provisional outlier must not change the visible X10A flow geometry");
+  assert.match(hiddenHtml, /class="vhist-range mono num">18,0 – 20,0 l\/min</);
+  assert.equal(flow.b0, 100, "the hidden source must not prepend a cursor bucket");
+  assert.deepEqual(Array.from(flow.v), [180, null, 200]);
+  assert.equal(flow.gen, "x10a:1", "the hidden source must not invalidate an X10A plot or pin");
+  assert.equal(h.scrubText(flow, 0, false), "18,0 l/min");
+
+  const marker = { dataset: { source: "x10a" }, style: {} };
+  const cross = { style: {} };
+  const readouts = [{ style: { setProperty() {} } }, { style: { setProperty() {} } }];
+  const plot = { dataset: { hist: "flow", n: "3" }, clientWidth: 240,
+    querySelector: () => cross, querySelectorAll: () => [marker],
+    parentElement: {
+      querySelector: (selector) => readouts[selector.includes("vhist-time") ? 1 : 0],
+      querySelectorAll: () => [cross, marker, ...readouts],
+    } };
+  h.scrubMove(plot, 0);
+  const atFirst = { left: marker.style.left, top: marker.style.top, time: readouts[1].textContent };
+  h.scrubMove({ ...plot, dataset: { ...plot.dataset, source: "x10a" } }, 0);
+  assert.deepEqual({ left: marker.style.left, top: marker.style.top, time: readouts[1].textContent },
+    atFirst, "the cursor and time must use the same visible X10A flow geometry");
+  S.hist.set("modbus:flow", { ...S.hist.get("modbus:flow"), gen: 3, v: [20000, 190, 195, null] });
+  assert.equal(flowHtml(), hiddenHtml, "a hidden-only change must retain the open plot markup");
+
+  h.histSeriesToggle("flow", "modbus");
+  const comparison = h.historyView("flow");
+  assert.equal(comparison.b0, 99, "the explicitly selected source can extend the comparison span");
+  assert.ok(flowHtml().includes(chartNote), "the paired chart keeps the warning visible before scrubbing");
+  assert.equal(h.scrubText(comparison, 2, false), `X10A nicht gemessen\nModbus 19,5 l/min\n${note}`);
+  assert.match(h.histReadout(comparison, 2), /class="vhist-tip-val">19,5 l\/min<\/span>/);
+  assert.ok(h.histReadout(comparison, 2).includes(`style="white-space: normal">${note}</span>`),
+    "the paired tooltip renders the localized warning in a wrapping note row");
+  assert.ok(!h.histReadout(comparison, 3).includes(note), "a Modbus gap contributes no flow value to qualify");
+
+  const modbusFlow = h.historyView("flow", "modbus");
+  assert.ok(flowHtml("modbus").includes(chartNote), "the Modbus-only chart keeps the warning visible");
+  assert.equal(h.scrubText(modbusFlow, 1, false), `19,0 l/min\n${note}`);
+  assert.equal(h.histReadout(modbusFlow, 1), `19,0 l/min\n${note}`);
+  assert.ok(!flowHtml("x10a").includes(note), "the warning does not apply to X10A-only flow");
+  assert.ok(!h.histHtml("dhw_tank", "°C", "Tank", "modbus").includes(note),
+    "the warning does not apply to other Modbus measurements");
+
+  // The differently sized, shifted rings expose a cursor that uses the wrong chart extent.
+  S.histHidden.delete("flow");
+  S.hist.set("flow", { ...S.hist.get("flow"), t0: 30000 });
+  S.hist.set("modbus:flow", { ...S.hist.get("modbus:flow"), t0: 29700, v: [170, 190, 195, 210] });
+  const oldStatus = S.status;
+  const events = new Map();
+  h.wireTrendScrub({ addEventListener: (type, callback) => events.set(type, callback) });
+  const pointerPlot = (n, source) => ({
+    ...plot, dataset: { hist: "flow", n: String(n) },
+    getBoundingClientRect: () => ({ left: 0, width: 240 }),
+    closest(selector) { return selector === "[data-hist]" ? this : null; },
+    setPointerCapture() {},
+    querySelectorAll: () => [{ dataset: { source }, style: {} }],
+  });
+  const native = pointerPlot(3, "x10a"), peer = pointerPlot(4, "modbus");
+  const send = (type, target, pointerId, clientX = 120) =>
+    events.get(type)({ type, target, pointerId, clientX, button: 0 });
+  h.syncHistSources();
+  const epoch = S.histEpoch;
+  send("pointerdown", native, 1, 0);
+  assert.equal(readouts[0].innerHTML, "18,0 l/min");
+  send("pointerdown", peer, 2);
+  send("pointerup", native, 2);
+  assert.ok(S.scrub, "a second pointer cannot release the first drag");
+  assert.equal(S.histPin.has("flow"), false);
+  let firstPaint;
+  context.renderApp = () => { firstPaint = [S.scrub, h.historyView("flow").b0]; };
+  context.nextStatus = { ...oldStatus, hp: { ...oldStatus.hp, connected: false } };
+  S.clickHold = true;
+  assert.equal(await h.refreshStatus(false), true);
+  assert.equal(S.histEpoch, epoch, "a transient link loss keeps the stored source lifetime");
+  assert.equal(S.scrub, null, "switching the paired Flow extent releases the frozen renderer");
+  assert.deepEqual(firstPaint, [null, 99], "repaint the new extent before the deferred values poll");
+  assert.equal(S.clickHold, false);
+  assert.equal(cross.hidden, true);
+  assert.equal(readouts[0].hidden, true);
+  assert.equal(h.historyView("flow").b0, 99);
+  assert.equal(h.historyView("flow").v.length, 4);
+  send("pointerup", native, 1);
+  send("pointerup", peer, 1);
+  assert.equal(S.histPin.has("flow"), false, "release of the retired drag cannot pin either extent");
+
+  send("pointerdown", peer, 3);
+  send("lostpointercapture", native, 1);
+  assert.ok(S.scrub, "the earlier plot's capture loss cannot cancel its successor");
+  send("pointercancel", peer, 3);
+  assert.equal(S.scrub, null, "browser pan/cancel releases the new drag");
+  assert.equal(S.histPin.has("flow"), false);
+  send("pointerdown", peer, 4);
+  assert.ok(readouts[0].innerHTML.includes("19,5 l/min"));
+  send("pointerup", peer, 4);
+  assert.equal(S.histPin.get("flow")?.t, 30300, "the new drag pins the bucket shown in the Modbus extent");
+  S.histPin.delete("flow");
+  S.status = oldStatus;
+  context.renderApp = () => {};
+  h.syncHistSources();
+
+  S.histHidden.delete("flow");
+  S.hist.delete("flow");
+  S.hist.delete("modbus:flow");
+  S.status.history.rows.pop();
+  S.status.history.modbus_rows.pop();
+}
+
 // Every numeric chart uses the same light-area/dark-upper-edge grammar. A single series keeps the
 // reference opacity; paired instruments retain both areas and both lines under a transparent wrapper.
 S.hist.set("pump_signal", { at: 1, gen: 1, dt: 300, unit: "%", t0: null, b0: 100,
@@ -420,47 +558,51 @@ assert.equal(S.hist.get("dt").b0, 100);
 assert.deepEqual(Array.from(S.hist.get("dt").v), [null, 60, 60],
   "the earlier bucket remains a gap instead of being cut off with the shorter input");
 
-// The CT overlay at 0x63/16 can make CT-L3 unavailable for one bucket while L1/L2 still answer.
-// That is not a two-phase installation and must never become a plausible partial input sum. Both
-// derived consumers follow the live card: fall back to the INV ring until every CT phase declared
-// by this snapshot is present; only a complete positive CT set owns the whole-unit boundary.
-const threeCtPhases = { ct_l1: true, ct_l2: true, ct_l3: true, inv_current: true, comp_rps: true };
-assert.equal(h.DERIVED.pel.fn(
-  { ct_l1: 10, ct_l2: 10, ct_l3: null, inv_current: 5, comp_rps: 45 }, threeCtPhases), 1.15,
-  "a withheld CT-L3 bucket must use INV current instead of publishing the L1+L2 partial sum");
-assert.equal(h.DERIVED.pel.fn(
-  { ct_l1: 10, ct_l2: 10, ct_l3: null, inv_current: 5, comp_rps: null }, threeCtPhases), null,
-  "a sample without a speed reading is one the firmware could not withhold, ring or no ring");
-// Without a compressor-speed ring the firmware cannot store a held gap, so the inverter ring keeps
-// the last run's number at rest. A complete CT set is unaffected; the inverter input is refused.
-const noSpeedRing = { ct_l1: true, ct_l2: true, ct_l3: true, inv_current: true };
-assert.equal(h.DERIVED.pel.fn(
-  { ct_l1: 10, ct_l2: 10, ct_l3: null, inv_current: 5 }, noSpeedRing), null,
-  "an inverter ring without a speed ring must not be drawn as a live kilowatt");
-assert.equal(h.DERIVED.pel.fn(
-  { ct_l1: 10, ct_l2: 10, ct_l3: 10, inv_current: 5 }, noSpeedRing), 6.9,
-  "a complete CT set needs no speed ring");
-assert.equal(!!h.DERIVED.pel.ready({ inv_current: true }), false,
-  "a profile with only an inverter ring and no speed ring offers no electrical curve");
-assert.equal(!!h.DERIVED.pel.ready({ inv_current: true, comp_rps: true }), true,
-  "the inverter ring is offered beside a speed ring");
-assert.equal(h.DERIVED.pel.fn(
-  { ct_l1: 10, ct_l2: 10, ct_l3: 10, inv_current: 5, comp_rps: 45 }, threeCtPhases), 6.9,
-  "a complete positive CT set remains the preferred whole-unit electrical estimate");
-const partialCtCop = h.DERIVED.cop.fn({
-  flow: 20, leaving_water: 35, return_water: 30, comp_rps: 45, inv_current: 5,
-  ct_l1: 1, ct_l2: 1, ct_l3: null,
-}, threeCtPhases);
-assert.ok(partialCtCop > 0,
-  "an incomplete CT set must use the matching INV boundary instead of suppressing COP as CT-sourced");
-assert.equal(h.DERIVED.cop.fn({
-  flow: 20, leaving_water: 35, return_water: 30, comp_rps: 45, inv_current: 5,
-  ct_l1: 1, ct_l2: 1, ct_l3: 1,
-}, threeCtPhases), null,
-  "a complete positive CT set must still suppress the mismatched historical COP boundary");
+// A 5 A INV reading from a sweep without a speed witness and 18 rps from a later sweep can
+// occupy the same bucket. That raw current must stay visible without creating an estimate.
+{
+  const originalRows = S.status.history.rows;
+  const originalHistory = S.hist;
+  const originalResponse = historyResponse;
+  const originalUrls = fetchedUrls;
+  const rows = ["inv_current", "comp_rps", "flow", "leaving_water", "return_water"].map(id => ({ id }));
+  S.status.history.rows = rows;
+  const base = { at: Date.now(), gen: 1, dt: 300, b0: 100 };
+  S.hist = new Map([
+    ["inv_current", { ...base, unit: "A", v: [null, 50, 0, 50], held: [[0, 1]] }],
+    ["comp_rps", { ...base, v: [0, 180, 180, 0], held: [] }],
+  ]);
+  fetchedUrls = [];
+  assert.equal(h.hasHist("inv_current"), true, "raw inverter current remains available");
+  assert.deepEqual(Array.from(h.historyView("inv_current").v), [null, 50, 0, 50]);
+  assert.equal(!!h.hasHist("pel"), false, "raw inverter and speed rings alone cannot offer electrical history");
+  assert.equal(!!h.hasHist("cop"), false, "independent rings cannot offer a historical COP");
+  await h.ensureHistPair("pel");
+  await h.ensureHistPair("cop");
+  assert.deepEqual(fetchedUrls, []);
+  assert.equal(h.histHtml("pel", "", "Electrical input"), "");
+  assert.equal(h.histHtml("cop", "", "COP"), "");
 
-// Thermal output has the same compressor boundary as the live pill. Preserve a no-flow bucket as
-// zero, retain signed active/defrost transfer, and refuse pump-overrun redistribution.
+  // A later partial CT sweep can update L1/L2 and leave the preceding sweep's L3 in the same
+  // bucket. Preserve the raw readings and refuse the resulting apparent 11.5 kW.
+  S.status.history.rows = [...rows, { id: "ct_l1" }, { id: "ct_l2" }, { id: "ct_l3" }];
+  for (const [id, value] of [["ct_l1", 200], ["ct_l2", 200], ["ct_l3", 100]]) {
+    S.hist.set(id, { ...base, unit: "A", v: [100, value], held: [] });
+    assert.deepEqual(Array.from(h.historyView(id).v), [100, value]);
+  }
+  assert.equal(h.hasHist("pel"), false, "same-bucket CT readings cannot qualify a historical power estimate");
+  await h.ensureHistPair("pel");
+  assert.deepEqual(fetchedUrls, []);
+  assert.equal(h.histHtml("pel", "", "Electrical input"), "");
+  assert.equal(h.histHtml("cop", "", "COP"), "");
+  S.status.history.rows = originalRows;
+  S.hist = originalHistory;
+  historyFetchError = false;
+  historyResponse = originalResponse;
+  fetchedUrls = originalUrls;
+}
+
+// The signed historical estimate uses independently sampled values, including stored speed.
 assert.equal(h.DERIVED.pth.ready({
   flow: true, leaving_water: true, return_water: true, comp_rps: false,
 }), false, "thermal output is unavailable when the profile has no compressor witness");
@@ -470,15 +612,35 @@ assert.equal(h.DERIVED.pth.fn({
 assert.equal(h.DERIVED.pth.fn({
   flow: 0, leaving_water: null, return_water: null, comp_rps: null,
 }), 0, "measured no flow proves zero transfer without temperature or compressor samples");
+for (const flow of [-1, null, NaN, Infinity, 100.1, 3276.7]) {
+  assert.equal(h.DERIVED.pth.fn({ flow, leaving_water: 35, return_water: 30, comp_rps: 45 }), null,
+    "negative or invalid flow must leave a gap rather than imply zero transfer");
+}
+assert.equal(h.DERIVED.pth.fn({
+  flow: 0.5, leaving_water: 35, return_water: 30, comp_rps: 45,
+}), 0, "the measured low-flow threshold is included in the zero-transfer range");
+assert.ok(h.DERIVED.pth.fn({
+  flow: 0.6, leaving_water: 35, return_water: 30, comp_rps: 45,
+}) > 0, "a value above the low-flow threshold can qualify for transfer");
 assert.equal(h.DERIVED.pth.fn({
   flow: 20, leaving_water: 35, return_water: 30, comp_rps: 0,
-}), null, "pump overrun must not be drawn as heat-pump output");
+}), null, "a bucket whose speed sample is zero leaves a gap when water moves");
 assert.ok(h.DERIVED.pth.fn({
   flow: 20, leaving_water: 35, return_water: 30, comp_rps: 45,
-}) > 0, "a running compressor keeps the signed water-side transfer");
+}) > 0, "a positive speed sample allows the signed arithmetic estimate");
 assert.ok(h.DERIVED.pth.fn({
   flow: 20, leaving_water: 30, return_water: 35, comp_rps: 45,
 }) < 0, "defrost and cooling retain the signed reverse transfer");
+{
+  const old = S.hist.get("pth");
+  const oldRows = S.status.history.rows;
+  S.status.history.rows = ["flow", "leaving_water", "return_water", "comp_rps"].map(id => ({ id }));
+  S.hist.set("pth", { at: 1, gen: 1, dt: 300, b0: 100, unit: "kW", held: [], v: [50, 0] });
+  assert.ok(h.histHtml("pth", "kW", "Thermal estimate").includes(labels["hist.thermal_bucket_note"]),
+    "the thermal chart must qualify its independently timed samples");
+  S.status.history.rows = oldRows;
+  if (old) S.hist.set("pth", old); else S.hist.delete("pth");
+}
 
 // A successful HomeHub poll proves transport freshness, not when the controller last refreshed its
 // outdoor-temperature register. Keep that qualification in the graph popup: the chart must remain
@@ -716,8 +878,7 @@ assert.match(disinfectionHtml, /vhist-state-lane-label mb">Modbus/);
 assert.match(disinfectionHtml, /vhist-state-on disinfection-on/);
 assert.doesNotMatch(disinfectionHtml, />X10A<|Speichervorheizung aktiv/);
 
-// Both outdoor pills open categorical timelines. Defrost is event-folded; Quiet keeps its paired
-// witnesses in two independent lanes so gaps and disagreements remain directly visible.
+// Both outdoor pills open categorical X10A timelines. Legacy Modbus Quiet is not activity.
 S.hist.set("defrost_state", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000, b0: 200,
   held: [], v: [0, 10, 0, 10] });
 const defrostView = h.historyView("defrost_state");
@@ -736,21 +897,18 @@ S.hist.set("modbus:quiet_state", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720
   held: [], v: [10, null, 0, 10] });
 const quietView = h.historyView("quiet_state");
 const quietHtml = h.histHtml("quiet_state", "", "Leise-Modus");
-assert.equal(quietView.series.length, 2);
+assert.equal(h.hasModbusHist("quiet_state"), false, "legacy holding 9 cannot be charted as activity");
+assert.deepEqual(Array.from(quietView.series, s => s.source), ["x10a"]);
 assert.match(quietHtml, /vhist-state-track/);
-assert.doesNotMatch(quietHtml, /vhist-line/);
+assert.doesNotMatch(quietHtml, /vhist-line|Modbus/);
 assert.match(quietHtml, /Leise-Modus aktiv erfasst · 10 min im 5-Minuten-Raster/);
-assert.equal((quietHtml.match(/vhist-state-track/g) || []).length, 2);
-assert.match(quietHtml, /vhist-state-lane-label">X10A/);
-assert.match(quietHtml, /vhist-state-lane-label mb">Modbus/);
+assert.equal((quietHtml.match(/vhist-state-track/g) || []).length, 1);
 assert.match(quietHtml, /vhist-state-on state-off/);
 assert.match(quietHtml, /vhist-state-on quiet-on/);
-assert.match(quietHtml, /vhist-state-gap/,
-  "a missing Modbus sample stays hatched only in the Modbus lane");
 assert.doesNotMatch(quietHtml, /vhist-state-runs|· Phasen/);
-assert.match(h.scrubText(quietView, 0), /X10A\nLeise-Modus aktiv[\s\S]*Modbus\nLeise-Modus aktiv/);
-assert.match(h.scrubText(quietView, 1), /X10A\nLeise-Modus aktiv[\s\S]*Modbus\nnicht gemessen/);
-assert.match(h.scrubText(quietView, 3), /X10A\nLeise-Modus aus[\s\S]*Modbus\nLeise-Modus aktiv/);
+assert.match(h.scrubText(quietView, 0), /Leise-Modus aktiv/);
+assert.match(h.scrubText(quietView, 3), /Leise-Modus aus/);
+assert.doesNotMatch(h.scrubText(quietView, 3), /Modbus/);
 
 // BUH is one component with two event-folded stage bits. The browser combines both aligned rings
 // into an off/step-1/step-2 timeline; it must not graph either raw bit as a numeric 0/1 curve.
@@ -779,13 +937,13 @@ assert.match(h.scrubText(buhView, 5), /^\d{2}:\d{2}–\d{2}:\d{2} · nicht gemes
 for (const i of [0, 1, 2, 5])
   assert.doesNotMatch(h.scrubText(buhView, i), /X10A|Modbus|Zusatzheizer|ca\.|min/);
 
-// The schematic shows intuitive pump speed, while the X10A row is inverted (0=max, 100=stop).
-// Its inspector curve must transform the source ring instead of making a stopped pump look maximal.
+// The schematic shows the inverted pump command, not measured speed. The source ring is fixed-point
+// tenths: retain fractions and reject unsupported values instead of clamping them to plausible %.
 S.hist.set("pump_signal", { at: Date.now(), gen: 1, dt: 300, unit: "", t0: 1768720000, b0: 200,
-  held: [], v: [1000, 700, 0] });
+  held: [], v: [1000, 255, 0, -10, 1010, 2550, null] });
 await h.ensureDerived("pump_speed");
-assert.deepEqual(Array.from(S.hist.get("pump_speed").v), [0, 300, 1000]);
-assert.match(h.histHtml("pump_speed", "", "Drehzahl der Umwälzpumpe"), /0,0 – 100,0 %/);
+assert.deepEqual(Array.from(S.hist.get("pump_speed").v), [0, 745, 1000, null, null, null, null]);
+assert.match(h.histHtml("pump_speed", "", "Ansteuerung der Umwälzpumpe"), /0,0 – 100,0 %/);
 
 // The diverter is categorical too. Both selected branches are named, its two witnesses keep their
 // independent lanes, and no numeric 0/1 curve is drawn.
@@ -806,6 +964,8 @@ assert.match(valveHtml, /vhist-state-lane-label mb">Modbus/);
 assert.doesNotMatch(valveHtml, /vhist-state-runs|· Phasen/);
 assert.match(h.scrubText(valveView, 0), /X10A\nRaumkreis[\s\S]*Modbus\nRaumkreis/);
 assert.match(h.scrubText(valveView, 2), /X10A\nWarmwasser[\s\S]*Modbus\nWarmwasser/);
+assert.equal(valveView.series.find((s) => s.source === "modbus").v[valveView.liveIndex], null,
+  "the completed Modbus bucket stays separated from the current edge before live rows arrive");
 
 // The legacy history id `valve_heat` stores the optional 2-way/heating-cooling OUTPUT. It is not the
 // configured/current operating mode, so the timeline must retain ON/OFF and never turn idle periods
@@ -845,21 +1005,26 @@ S._values = [
 S._modbus = [
   { concept: "quiet_state", binary: true, value: 1 },
   { concept: "bsh_state", binary: true, value: 1 },
-  { concept: "valve_dhw", binary: true, value: 1 },
+  { off: 37, concept: "valve_dhw", enum: "three_way_valve", value: 0 },
   { off: 56, value: 2, enum: "smart_grid_mode" },
   { off: 33, history: "disinfection_state", binary: true, value: 1 },
 ];
+S.status.modbus = { enabled: true, connected: true };
 S.hist.set("water_flow_switch", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000,
   b0: 200, held: [], v: [0, 0, 10, 0] });
+S.hist.set("modbus:bsh_state", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000,
+  b0: 200, held: [], v: [0, 10, 0, 10] });
 const liveStateCases = [
   ["defrost_state", "x10a", 10],
   ["quiet_state", "x10a", 10],
   ["smart_grid_mode", "modbus", 20],
   ["bsh_state", "x10a", 10],
+  ["bsh_state", "modbus", null],
   ["tank_preheat_state", "x10a", 10],
   ["disinfection_state", "modbus", 10],
   ["buh_state", "x10a", 20],
   ["valve_dhw", "x10a", 10],
+  ["valve_dhw", "modbus", null],
   ["circulation_state", "x10a", 10],
   ["valve_heat", "x10a", 10],
   ["water_flow_switch", "x10a", 10],
@@ -874,6 +1039,30 @@ for (const [id, primarySource, expected] of liveStateCases) {
   assert.match(h.scrubText(stateView, stateView.liveIndex), /jetzt/,
     `${id} must expose the current state at the right edge tooltip`);
 }
+const modbusValve = S._modbus.find((row) => row.off === 37);
+const stageOne = S._values.findIndex((row) => row.concept === "buh_step1");
+const [stageOneRow] = S._values.splice(stageOne, 1);
+assert.equal(h.historyView("buh_state").series[0].v.at(-1), 20,
+  "a current stage 2 ON survives a missing stage 1 report");
+S._values.splice(stageOne, 0, stageOneRow);
+const valveLive = () => h.historyView("valve_dhw");
+const valveNow = (view) => view.series.find((s) => s.source === "modbus").v.at(-1);
+for (const value of [0, 1, null]) {
+  modbusValve.value = value;
+  const view = valveLive();
+  assert.equal(valveNow(view), null, "a full-sweep HomeHub row cannot prove the route at the live edge");
+  assert.match(h.scrubText(view, view.liveIndex), /X10A\njetzt · Warmwasser[\s\S]*Modbus\njetzt · nicht gemessen/);
+}
+modbusValve.value = 0;
+const modbusValveView = h.historyView("valve_dhw", "modbus");
+assert.deepEqual(Array.from(modbusValveView.series[0].v), [0, 0, 10, 10, 0, 10, null],
+  "the Modbus-only valve lane preserves completed buckets and has an explicit current gap");
+assert.match(h.histHtml("valve_dhw", "", "3-Wege-Ventil", "modbus"), /vhist-state-gap[^>]*left:85\.714%/);
+S.status.modbus.connected = false;
+const offlineValve = valveLive();
+assert.equal(valveNow(offlineValve), null, "a disconnected HomeHub cannot contribute its retained live route");
+assert.equal(offlineValve.series.find((s) => s.source === "x10a").v.at(-1), 10);
+delete S.status.modbus;
 assert.match(h.histHtml("bsh_state", "", "Heizstab"),
   /Heizstab aktiv erfasst · 10 min im 5-Minuten-Raster/,
   "the live BSH observation must not add a fabricated five-minute bucket to its total");
@@ -904,11 +1093,12 @@ await h.ensureHist("dhw_tank", "modbus");
 assert.equal(fetched, "/history?row=dhw_tank&source=modbus");
 assert.deepEqual(Array.from(S.hist.get("modbus:dhw_tank").v), [457]);
 
-// DHW tank (R5T) single integrated chart: Smart-Grid Boost and Heizstab (BSH) phases
-// are drawn directly into the temperature chart and displayed in the tooltip and legend.
+// The temperature chart must not fuse the physical Smart Grid contacts with the Modbus
+// request, or let one source's reported BSH state fill the other's missing samples.
 S.status.history.rows = [
   { id: "dhw_tank", label: "Domestic Hot Water temperature" },
   { id: "smart_grid_mode", label: "Smart Grid operation mode" },
+  { id: "bsh_state", label: "BSH" },
 ];
 S.status.history.modbus_rows = [
   { id: "dhw_tank", label: "Domestic Hot Water temperature" },
@@ -916,35 +1106,62 @@ S.status.history.modbus_rows = [
   { id: "bsh_state", label: "Booster heater run" },
 ];
 S.hist.set("dhw_tank", { dt: 300, unit: "°C", b0: 100, v: [450, 460, 470, 480], held: [] });
-S.hist.set("modbus:smart_grid_mode", { dt: 300, b0: 100, v: [0, 20, 20, 0] }); // Mode 2 = Boost (2 buckets = 10 min)
-S.hist.set("modbus:bsh_state", { dt: 300, b0: 100, v: [0, 0, 10, 0] });        // BSH active (1 bucket = 5 min)
+S.hist.set("smart_grid_mode", { dt: 300, b0: 100, v: [20, null, 30, 20] });
+S.hist.set("modbus:smart_grid_mode", { dt: 300, b0: 100, v: [0, 20, 20, null] });
+S.hist.set("bsh_state", { dt: 300, b0: 100, v: [10, null, 0, 0] });
+S.hist.set("modbus:bsh_state", { dt: 300, b0: 101, v: [0, 10, 10] });
 
 view = h.historyView("dhw_tank");
 const dhwHtml = h.histHtml("dhw_tank", "°C", "Warmwasserspeicher");
-assert.match(dhwHtml, /class="vhist-phase vhist-phase-boost"/, "DHW chart must render Boost phase bands");
-assert.match(dhwHtml, /class="vhist-phase vhist-phase-bsh"/, "DHW chart must render BSH phase bands");
-assert.doesNotMatch(dhwHtml, /class="vhist-phase-bar/, "DHW chart must not render top phase bar");
-assert.match(dhwHtml, /vhist-legend-boost/, "DHW legend must display Boost indicator");
-assert.match(dhwHtml, /vhist-legend-bsh/, "DHW legend must display BSH indicator");
-assert.match(dhwHtml, /10 min/, "DHW legend must include Boost duration");
-assert.match(dhwHtml, /5 min/, "DHW legend must include BSH duration");
-
-// Verify tooltips include active phases
-assert.doesNotMatch(h.scrubText(view, 0), /Boost|Heizstab/, "Sample 0 without active phases");
-assert.match(h.scrubText(view, 1), /(?:· |\n)Boost aktiv$/, "Sample 1 with active Boost");
-assert.match(h.scrubText(view, 2), /(?:· |\n)Boost aktiv \+ Heizstab aktiv$/, "Sample 2 with both active");
-assert.equal(h.histReadout(view, 1), "46,0 °C · Boost aktiv",
-  "a single visible curve appends active phase to value readout");
+assert.equal((dhwHtml.match(/class="vhist-state-track /g) || []).length, 4,
+  "each instrument and auxiliary signal gets a separate aligned track");
+assert.match(dhwHtml, /X10A · Smart Grid · Boost aktiv \(10 min\)/);
+assert.match(dhwHtml, /Modbus · Smart Grid · Boost aktiv \(10 min\)/);
+assert.match(dhwHtml, /X10A · BSH · Heizstab aktiv \(5 min\)/);
+assert.match(dhwHtml, /Modbus · BSH · Heizstab aktiv \(10 min\)/);
+assert.match(dhwHtml, /sg-forced-on/, "Smart Grid modes besides Boost must remain distinct");
+assert.match(dhwHtml, /vhist-state-gap/, "a gap is visible separately from a known off state");
+assert.match(h.scrubText(view, 0), /X10A · Smart Grid: Empfehlung ein\nModbus · Smart Grid: Freier Betrieb/);
+assert.match(h.scrubText(view, 0), /X10A · BSH: Heizstab aktiv\nModbus · BSH: nicht gemessen/);
+assert.match(h.scrubText(view, 2), /X10A · BSH: Heizstab aus\nModbus · BSH: Heizstab aktiv/);
+assert.equal(h.histReadout(view, 1), "46,0 °C\nX10A · Smart Grid: nicht gemessen\n" +
+  "Modbus · Smart Grid: Empfehlung ein\nX10A · BSH: nicht gemessen\nModbus · BSH: Heizstab aus");
 {
   S.hist.set("modbus:dhw_tank", { dt: 300, unit: "°C", b0: 100, v: [450, 460, 470, 480], held: [] });
   h.histSeriesToggle("dhw_tank", "modbus");
   const pairedView = h.historyView("dhw_tank");
-  assert.match(h.histReadout(pairedView, 1), /<span class="vhist-tip-note">Boost aktiv<\/span>/,
-    "active auxiliary phase renders as note row below tabular values when multiple series are shown");
+  assert.match(h.histReadout(pairedView, 1),
+    /<span class="vhist-tip-note">X10A · Smart Grid: nicht gemessen[\s\S]*Modbus · BSH: Heizstab aus<\/span>/,
+    "both visible temperature curves retain every source-specific auxiliary readout");
   S.hist.delete("modbus:dhw_tank");
   S.histHidden.delete("dhw_tank");
 }
-assert.doesNotMatch(h.scrubText(view, 3), /Boost|Heizstab/, "Sample 3 without active phases");
+assert.match(h.scrubText(view, 3), /X10A · Smart Grid: Empfehlung ein\nModbus · Smart Grid: nicht gemessen/);
+{
+  const saved = S.status.history, lease = S.modbusHistoryLease, boot = S.status.boot_id;
+  const ring = S.hist.get("dhw_tank"), sg = S.hist.get("smart_grid_mode");
+  S.status.history = { ...saved, modbus_binding: true, epoch: 8 };
+  S.status.boot_id = "dhw-source";
+  S.modbusHistoryLease = { boot: "dhw-source", epoch: 7 };
+  assert.doesNotMatch(h.scrubText(view, 1), /Modbus ·/, "a mismatched peer lease withdraws both auxiliary tracks");
+  S.modbusHistoryLease.epoch = 8;
+  assert.match(h.scrubText(view, 1), /Modbus · Smart Grid: Empfehlung ein/);
+  S.status.history.rows = saved.rows.filter(row => row.id !== "bsh_state");
+  assert.doesNotMatch(h.scrubText(view, 1), /X10A · BSH/, "a withdrawn capability cannot revive its cache");
+  S.status.history = saved;
+  S.status.boot_id = boot;
+  S.modbusHistoryLease = lease;
+  S.hist.set("dhw_tank", { ...ring, b0: null, t0: 1000 });
+  S.hist.set("smart_grid_mode", { ...sg, b0: null, t0: 1300 });
+  const legacy = h.historyView("dhw_tank");
+  assert.match(h.scrubText(legacy, 1), /X10A · Smart Grid: Empfehlung ein/,
+    "legacy wall-time anchors preserve alignment when monotonic buckets are unavailable");
+  S.hist.set("smart_grid_mode", { ...sg, b0: null });
+  assert.match(h.scrubText(legacy, 1), /X10A · Smart Grid: nicht gemessen/,
+    "an unanchored legacy history cannot infer timing from array length");
+  S.hist.set("dhw_tank", ring);
+  S.hist.set("smart_grid_mode", sg);
+}
 
 // ensureHistPair("dhw_tank") fetches auxiliary series
 fetchedUrls = [];
@@ -1145,12 +1362,12 @@ try {
   const view = h.historyView("dhw_tank");
   const first = h.histTipsHtml(view, -1, 0);
   assert.equal(context.auxScans, 1, "288 tooltip readouts must share one auxiliary scan");
-  assert.match(first, /Boost aktiv/);
+  assert.match(first, /Smart Grid: Empfehlung ein/);
   assert.match(first, /Heizstab aktiv/);
   S.hist.set("smart_grid_mode", fullRing(0));
   const second = h.histTipsHtml(view, -1, 0);
   assert.equal(context.auxScans, 2, "the next rendered view must refresh its auxiliary snapshot");
-  assert.doesNotMatch(second, /Boost aktiv/);
+  assert.match(second, /Smart Grid: Freier Betrieb/);
   assert.match(second, /Heizstab aktiv/);
   // Re-seed the previous per-readout work: the same measured operation budget must reject it.
   vm.runInContext("this.originalReadout = histReadout; auxScans = 0; " +

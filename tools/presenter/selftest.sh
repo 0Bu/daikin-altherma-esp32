@@ -107,7 +107,7 @@ expect_red "the outdoor heat exchanger picker drops its page" \
 
 # A pattern that matches no row anywhere, which reads as absent on every profile.
 expect_red "a label pattern matches no row on any profile" \
-  's/out: vNum(\/outdoor air\/i)/out: vNum(\/outdoor airX\/i)/'
+  's/const row = vRow(\/outdoor air\/i);/const row = vRow(\/outdoor airX\/i);/'
 
 # The picker going back to the first row that has a value.
 expect_red "vFind falls through to the next matching row with a value" \
@@ -116,27 +116,30 @@ expect_red "vFind falls through to the next matching row with a value" \
 # UNKNOWN treated as OFF for the tank heater. Off is the PERMISSIVE branch, so this is the exact
 # direction that ships the collapsed quotient — a plant COP that reads as a failing heat pump.
 expect_red "an unknown tank-heater state is treated as off" \
-  's/const tankQuiet   = bsh != null \&\& bsh !== true;/const tankQuiet   = bsh !== true;/'
+  's/const tankQuiet   = bsh === false;/const tankQuiet   = bsh !== true;/'
 
-# The same mistake on the backup heater, which reaches the answer by the other route: an unknown BUH
-# then reads as quiet and the pre-BUH numerator stands in for a post-BUH row that does not exist.
+# The same mistake on the backup heater would allow a CT quotient while one step is unknown.
 expect_red "an unknown backup-heater state is treated as off" \
-  's/const heaterQuiet = buh1 != null \&\& buh2 != null \&\& !(buh1 === true || buh2 === true);/const heaterQuiet = !(buh1 === true || buh2 === true);/'
+  's/const heaterQuiet = buh1 === false \&\& buh2 === false;/const heaterQuiet = buh1 !== true \&\& buh2 !== true;/'
 
 # The second BUH step dropped from the collapse: a unit firing step 2 alone reads as quiet.
 expect_red "the second backup-heater step drops out of the collapse" \
-  's/!(buh1 === true || buh2 === true)/!(buh1 === true)/'
+  's/const heaterQuiet = buh1 === false \&\& buh2 === false;/const heaterQuiet = buh1 === false;/'
 
-# The tank-heater block effectively moved AFTER the post-BUH branch, which is what letting pbOk win
-# amounts to. No numerator anywhere answers the BSH — its heat crosses neither leaving-water sensor —
-# so deciding the row first asserts a pairing that does not exist.
-expect_red "the tank-heater block no longer outranks the post-BUH numerator" \
-  's/if (!tankQuiet)        return/if (!tankQuiet \&\& !pbOk) return/'
+# A post-BUH water sensor does not measure either heater's electrical contribution.
+expect_red "a post-BUH reading bypasses the tank-heater block" \
+  's/if (!tankQuiet)   return/if (!tankQuiet \&\& !pbOk) return/'
+expect_red "a post-BUH reading bypasses the backup-heater block" \
+  's/if (!heaterQuiet) return/if (!heaterQuiet \&\& !pbOk) return/'
+
+# An independently qualified inverter pair can supply the ratio when CT scope is uncertain.
+expect_red "the qualified inverter fallback is lost" \
+  's/pelSrc === "INV" || (invPairUsable \&\& !(heaterQuiet \&\& tankQuiet))/pelSrc === "INV"/'
 
 # The compressor-only source paired with a plant scope: the two are different quantities under one
 # name, and the inspector titles them differently.
 expect_red "the compressor-only source claims a plant scope" \
-  's/if (pelSrc === "INV")  return { scope: "hp",/if (pelSrc === "INV")  return { scope: "plant",/'
+  's/return { scope: "hp", block: null, postBuh: false };/return { scope: "plant", block: null, postBuh: false };/'
 
 # ── The gate's own failure modes ──────────────────────────────────────────────────────────────
 # A renamed or inlined-away rule must exit 2 (unreachable), never pass by comparing nothing.

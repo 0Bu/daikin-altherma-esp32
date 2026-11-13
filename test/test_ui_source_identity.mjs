@@ -14,19 +14,23 @@ const pending = [];
 const context = {
   $, LANG: "en", pollSignal: () => undefined, hpProbeIsOpen: () => false,
   setLangFromStatus: async () => {}, displayUnit: (j) => j.unit,
-  j: async () => context.nextStatus,
+  j: async () => {
+    if (context.nextStatus instanceof Error) throw context.nextStatus;
+    return context.nextStatus;
+  },
   fetch: (url) => new Promise((resolve, reject) => pending.push({ url, resolve, reject })),
 };
 vm.createContext(context);
 const settings = read("settings");
-vm.runInContext(read("app_state") + "\n" + read("history") + "\n" +
+vm.runInContext(read("app_state") + "\n" + read("history") + "\n" + read("dashboard") + "\n" +
   settings.slice(settings.indexOf("const OTA_RENDER_CACHE_KEY"), settings.indexOf("function otaCacheStore()")) + "\n" +
   settings.slice(settings.indexOf("function fillRefTemp()"),
     settings.indexOf("// ── DHW circulation-pump")) + `
   renderApp = () => {};
   hydrateRoutedPopup = () => {};
+  markUnreachable = () => {};
   this.ui = { S, refreshStatus, fillRefTemp, refTempFormPayload, formatRefSource, parseRefSource,
-    ensureHist, ensureDerived, syncHistSources };
+    ensureHist, ensureDerived, syncHistSources, refreshValues, hasModbusHist, historyView, histCacheKey };
 `, context);
 const ui = context.ui;
 const plain = (value) => JSON.parse(JSON.stringify(value));
@@ -58,6 +62,7 @@ const reset = async () => {
   ui.S.histIdentity = null;
   ui.S.histUptime = null;
   ui.S.scrub = null;
+  ui.S.modbusHistoryLease = null;
   pending.length = 0;
   await status(fixture());
 };
@@ -274,4 +279,192 @@ for (const failOld of [false, true]) {
   assert.equal(ui.S.hist.get("dhw_tank").v[0], 444);
   assert.equal(ui.S.histBusy.has("dhw_tank"), false);
 }
-console.log("room mapping round trips, snapshot identity admission and shared history awaits pass");
+// The ordinary values poll can report B before the next status frame. Clear cached A and
+// release a pinned plot synchronously, while retaining B's live rows and the paired X10A value.
+for (const lease of [{ epoch: 0, boot: "boot-a" }, { epoch: 2, boot: "boot-a" },
+                     { epoch: 1, boot: "boot-b" }]) {
+  await reset();
+  const previous = ui.ensureHist("disinfection_state", "modbus", false);
+  const oldRequest = pending.shift();
+  ui.S.hist.set("modbus:dhw_tank", { v: [111], at: Date.now() });
+  ui.S.scrub = { key: "dhw_tank" };
+  ui.S.clickHold = true;
+  context.nextStatus = { values: [{ value: 15 }], modbus: [{ value: 22 }],
+    modbus_history_epoch: lease.epoch, modbus_history_boot_id: lease.boot };
+  assert.equal(await ui.refreshValues(false), true);
+  assert.equal(ui.S.status.history.epoch, 1, "the slow status frame still belongs to A");
+  assert.equal(ui.S._values[0].value, 15);
+  assert.equal(ui.S._modbus[0].value, 22);
+  assert.equal(ui.S.scrub, null);
+  assert.equal(ui.S.clickHold, false);
+  assert.equal(ui.S.hist.has("modbus:dhw_tank"), false);
+  assert.equal(ui.hasModbusHist("dhw_tank"), false);
+  await ui.ensureHist("dhw_tank", "modbus", false);
+  assert.equal(pending.length, 0, "an unbound or newer value frame cannot request an old chart");
+  reply(oldRequest, 333, 1);
+  await previous;
+  assert.equal(ui.S.hist.has("modbus:disinfection_state"), false);
+  if (lease.epoch > 0) {
+    const next = fixture();
+    next.history.epoch = lease.epoch;
+    next.boot_id = lease.boot;
+    await status(next);
+    assert.equal(ui.hasModbusHist("dhw_tank"), true);
+  }
+}
+// Once the wire has supplied a matching lease, a response without a usable lease is a gap in
+// that protocol. It cannot restore the legacy fallback or leave predecessor requests eligible.
+for (const frame of [
+  {},
+  { modbus: [{ value: 22 }] },
+  { modbus: null, modbus_history_epoch: 1, modbus_history_boot_id: "boot-a" },
+  { modbus: [], modbus_history_epoch: null, modbus_history_boot_id: null },
+  { modbus: [], modbus_history_epoch: 1 },
+]) {
+  await reset();
+  context.nextStatus = { values: [{ value: 15 }], modbus: [{ value: 21 }],
+    modbus_history_epoch: 1, modbus_history_boot_id: "boot-a" };
+  assert.equal(await ui.refreshValues(false), true);
+  assert.equal(ui.hasModbusHist("dhw_tank"), true);
+
+  const tankKey = ui.histCacheKey("dhw_tank", "modbus");
+  const disinfectionKey = ui.histCacheKey("disinfection_state", "modbus");
+  ui.S.hist.set(tankKey, { v: [111], at: Date.now() });
+  assert.deepEqual(plain(ui.historyView("dhw_tank").series.map(s => s.source)), ["modbus"]);
+  const old = ui.ensureHist("disinfection_state", "modbus", false);
+  const oldRequest = pending.shift();
+  assert.match(oldRequest.url, /source=modbus/);
+  ui.S.histPin.set("dhw_tank", { i: 0 });
+  ui.S.scrub = { key: "dhw_tank" };
+  ui.S.clickHold = true;
+
+  context.nextStatus = { values: [{ value: 16 }], ...frame };
+  assert.equal(await ui.refreshValues(false), true);
+  assert.equal(ui.S.status.boot_id, "boot-a", "the accepted status still describes the predecessor");
+  assert.deepEqual(plain(ui.S._values), [{ value: 16 }]);
+  assert.deepEqual(plain(ui.S._modbus), frame.modbus || []);
+  assert.equal(ui.S.hist.has(tankKey), false);
+  assert.equal(ui.S.histPin.has("dhw_tank"), false);
+  assert.equal(ui.S.scrub, null);
+  assert.equal(ui.S.clickHold, false);
+  assert.equal(ui.hasModbusHist("dhw_tank"), false);
+  await ui.ensureHist("dhw_tank", "modbus", false);
+  assert.equal(pending.length, 0);
+  reply(oldRequest, 333);
+  await old;
+  assert.equal(ui.S.hist.has(disinfectionKey), false);
+  assert.equal(ui.historyView("dhw_tank"), null);
+
+  // Repeated gaps keep Modbus closed without repeatedly retiring newly fetched X10A history.
+  const newX10a = ui.ensureHist("dhw_tank", "x10a", false);
+  reply(pending.shift(), 444);
+  await newX10a;
+  const epoch = ui.S.histEpoch;
+  assert.equal(await ui.refreshValues(false), true);
+  assert.equal(ui.S.histEpoch, epoch);
+  assert.deepEqual(plain(ui.historyView("dhw_tank").series.map(s => s.source)), ["x10a"]);
+
+  // A same-image reboot can reuse the epoch number. Only a matching boot in a new values
+  // frame reopens history, even if an obsolete values reply arrives after the new status.
+  let resolveValues;
+  context.nextStatus = new Promise(resolve => { resolveValues = resolve; });
+  const priorBootValues = ui.refreshValues(false);
+  await status({ ...fixture(), boot_id: "boot-b", uptime_s: 1 });
+  resolveValues({ values: [], modbus: [{ value: 21 }],
+    modbus_history_epoch: 1, modbus_history_boot_id: "boot-a" });
+  assert.equal(await priorBootValues, false);
+  assert.equal(ui.hasModbusHist("dhw_tank"), false);
+  context.nextStatus = { values: [{ value: 17 }] };
+  assert.equal(await ui.refreshValues(false), true);
+  assert.equal(ui.hasModbusHist("dhw_tank"), false);
+  context.nextStatus = { ...context.nextStatus, modbus: [{ value: 23 }],
+    modbus_history_epoch: 1, modbus_history_boot_id: "boot-a" };
+  assert.equal(await ui.refreshValues(false), true);
+  assert.equal(ui.hasModbusHist("dhw_tank"), false);
+  context.nextStatus.modbus_history_boot_id = "boot-b";
+  assert.equal(await ui.refreshValues(false), true);
+  const rebound = ui.ensureHist("dhw_tank", "modbus", false);
+  reply(pending.shift(), 555, 1, "boot-b");
+  await rebound;
+  assert.equal(ui.S.hist.get(tankKey).v[0], 555);
+}
+
+// Null-valued fields are still a protocol witness on the first frame. A genuinely old page
+// may continue to use status-advertised history when values never carried the new fields.
+for (const fields of [{}, { modbus_history_epoch: null, modbus_history_boot_id: null }]) {
+  await reset();
+  context.nextStatus = { values: [], modbus: [{ value: 22 }], ...fields };
+  assert.equal(await ui.refreshValues(false), true);
+  const expected = Object.keys(fields).length === 0;
+  assert.equal(ui.hasModbusHist("dhw_tank"), expected);
+  context.nextStatus = { values: [] };
+  assert.equal(await ui.refreshValues(false), true);
+  assert.equal(ui.hasModbusHist("dhw_tank"), expected);
+}
+console.log("room mapping, history request identity and Modbus source cutover/gap/rebind pass");
+
+// A status frame can advertise the binding before any HomeHub rows are returned.
+await reset();
+{
+  const modern = fixture();
+  modern.history.modbus_binding = true;
+  await status(modern);
+  assert.equal(ui.hasModbusHist("dhw_tank"), false);
+  context.nextStatus = { values: [] };
+  assert.equal(await ui.refreshValues(false), true);
+  assert.equal(ui.hasModbusHist("dhw_tank"), false);
+  context.nextStatus = { values: [], modbus: [{ value: 22 }],
+    modbus_history_epoch: 1, modbus_history_boot_id: "boot-a" };
+  assert.equal(await ui.refreshValues(false), true);
+  assert.equal(ui.hasModbusHist("dhw_tank"), true);
+}
+
+// The parser and shape failures both use the current request's invalidation path. Boot and
+// epoch A can still be present in status while a different peer has already replaced A.
+for (const failure of [new Error("503"), new SyntaxError("invalid JSON"), null, {}, { values: {} }]) {
+  await reset();
+  const lease = { modbus_history_epoch: 1, modbus_history_boot_id: "boot-a" };
+  const healthy = { values: [], modbus: [{ value: 33.3 }], ...lease };
+  context.nextStatus = healthy;
+  assert.equal(await ui.refreshValues(false), true);
+  const tankKey = ui.histCacheKey("dhw_tank", "modbus");
+  const disinfectionKey = ui.histCacheKey("disinfection_state", "modbus");
+  ui.S.hist.set(tankKey, { v: [333], at: Date.now() });
+  ui.S.histPin.set("dhw_tank", { i: 0 });
+  ui.S.clickHold = true;
+  const old = ui.ensureHist("disinfection_state", "modbus", false);
+  const oldRequest = pending.shift();
+
+  context.nextStatus = failure;
+  assert.equal(await ui.refreshValues(false), false, "failed or malformed values must return through poll backoff");
+  assert.equal(ui.S.transportBusy, failure?.message === "503");
+  assert.equal(ui.S.hist.has(tankKey), false, "the failed values frame must retire the prior Modbus ring");
+  assert.equal(ui.S.histPin.has("dhw_tank"), false);
+  assert.equal(ui.S.clickHold, false);
+  assert.equal(ui.hasModbusHist("dhw_tank"), false);
+  reply(oldRequest, 999);
+  await old;
+  assert.equal(ui.S.hist.has(disinfectionKey), false);
+
+  context.nextStatus = new Error("503");
+  assert.equal(await ui.refreshStatus(false), false);
+  await status(fixture());
+  context.nextStatus = healthy.values; // Compatibility with the old root-array response.
+  assert.equal(await ui.refreshValues(false), true);
+  assert.equal(ui.hasModbusHist("dhw_tank"), false, "status and unbound values cannot restore the prior lease");
+  await ui.ensureHist("dhw_tank", "modbus", false);
+  assert.equal(pending.length, 0);
+
+  context.nextStatus = { ...healthy, modbus_history_epoch: 2 };
+  assert.equal(await ui.refreshValues(false), true);
+  assert.equal(ui.hasModbusHist("dhw_tank"), false, "a different epoch still needs its status");
+  const next = fixture();
+  next.history.epoch = 2;
+  await status(next);
+  context.nextStatus = { ...healthy, modbus_history_epoch: 2 };
+  assert.equal(await ui.refreshValues(false), true);
+  const request = ui.ensureHist("dhw_tank", "modbus", false);
+  reply(pending.shift(), 444, 2);
+  await request;
+  assert.equal(ui.S.hist.get(tankKey).v[0], 444);
+}

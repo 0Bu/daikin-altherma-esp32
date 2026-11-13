@@ -247,6 +247,13 @@ static esp_err_t ota_stat(httpd_req_t* req) {
     json_append_quoted(j, std::string_view(s.available_channel));
     j += ",\"current\":";
     json_append_quoted(j, std::string_view(s.current));
+    char boot_id[17];
+    char elf_sha[65] = {0};
+    http_running_image_identity(boot_id, elf_sha);
+    j += ",\"boot_id\":";
+    json_append_quoted(j, boot_id);
+    j += ",\"app_elf_sha256\":";
+    json_append_quoted(j, elf_sha);
     j += ",\"effective_manifest_url\":";
     json_append_quoted(j, redact_identifier_view(effective_feed.manifest.data(), redact));
     j += ",\"effective_firmware_base_url\":";

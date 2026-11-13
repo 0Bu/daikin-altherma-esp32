@@ -297,6 +297,791 @@ async function assertFlowSwitchWords(page, context) {
     `${context}: flow-switch word ${JSON.stringify(fit.text)} needs 4 px padding (${fit.left}/${fit.right})`);
 }
 
+async function assertPumpCommandTruth(page, context, locale) {
+  // Command, reported operation and flow deliberately disagree in these source frames. The real
+  // inspector and CSS must retain those distinctions, including after an in-place values repaint.
+  const unknownWords = { en: /unknown/, de: /unbekannt/, es: /desconocido/, fr: /inconnu/,
+    it: /sconosciuto/, pl: /nieznany/, cs: /neznámý/, uk: /невідомий/, zh: /未知/, ja: /不明/,
+    nb: /ukjent/, sv: /okänd/, fi: /tuntematon/ };
+  await page.waitFor("!S.clickHold");
+  await page.evaluate(`(() => {
+    window.__browserPumpOriginal = { ...S };
+    S.status = structuredClone(S.status);
+    S.status.hp.connected = true;
+    S.status.modbus = { ...S.status.modbus, enabled: false, connected: false };
+    S.status.history = { rows: [], modbus_rows: [], env3_rows: [] };
+    S._modbus = [];
+    S.insp = null; S.inspSig = null; S.inspHistSig = null;
+    S.hist = new Map(); S.histPin = new Map(); S.histBusy = new Set(); S.histRequests = new Map();
+    S.scrub = null;
+    return true;
+  })()`);
+  try {
+    const cases = [
+      { name: "unknown-stop-command", signal: 100, state: null, flow: 0, command: 0, rotor: false, pipe: false },
+      { name: "off-with-flow", signal: 100, state: 0, flow: 12, command: 0, rotor: false, pipe: true },
+      { name: "off-without-flow", signal: 100, state: 0, flow: null, command: 0, rotor: false,
+        pipe: false, compressorOff: true, plantStatus: "dyn.state_gate" },
+      { name: "off-with-measured-zero", signal: 100, state: 0, flow: 0, command: 0, rotor: false,
+        pipe: false, compressorOff: true, tankHeaterOff: true, backupHeater: "off", plantStatus: "sys.standby" },
+      { name: "off-with-unknown-backup-heater", signal: 100, state: 0, flow: 0, command: 0, rotor: false,
+        pipe: false, compressorOff: true, tankHeaterOff: true, plantStatus: "dyn.state_gate" },
+      { name: "off-with-backup-heater-on", signal: 100, state: 0, flow: 0, command: 0, rotor: false,
+        pipe: false, compressorOff: true, tankHeaterOff: true, backupHeater: "on",
+        plantStatus: "schem.backup_heater_active" },
+      { name: "off-with-unknown-tank-heater", signal: 100, state: 0, flow: 0, command: 0, rotor: false,
+        pipe: false, compressorOff: true, plantStatus: "dyn.state_gate" },
+      { name: "on-without-flow", signal: 0, state: 1, flow: 0, command: 100, rotor: true, pipe: false },
+      { name: "negative-flow", signal: 0, state: 1, flow: null, rawFlow: "-1.0",
+        invalidFlow: true, command: 100, rotor: true, pipe: false },
+      { name: "nonfinite-flow", signal: 0, state: 1, flow: null, rawFlow: "Infinity",
+        invalidFlow: true, command: 100, rotor: true, pipe: false },
+      { name: "blank-flow", signal: 0, state: 1, flow: null, rawFlow: " ",
+        invalidFlow: false, command: 100, rotor: true, pipe: false },
+      { name: "fractional-command", signal: 25.5, state: 1, flow: 12, command: 74.5, rotor: true, pipe: true },
+      { name: "invalid-command", signal: 101, state: null, flow: 0, command: null, rotor: false, pipe: false },
+      { name: "homehub-with-held-x10a", signal: 18, state: 0, flow: null, command: null,
+        x10aDown: true, homehub: 1, rotor: false, pipe: false },
+      { name: "homehub-with-missing-x10a-state", signal: 18, state: null, flow: 12, command: 82,
+        homehub: 1, rotor: false, pipe: true },
+      { name: "homehub-with-held-pump-row", signal: 18, state: 1, flow: 12, command: 82,
+        homehub: 1, heldPump: true, rotor: false, pipe: true },
+      { name: "current-x10a-state-wins", signal: 18, state: 0, flow: 12, command: 82,
+        homehub: 1, rotor: false, pipe: true },
+      { name: "homehub-flow-without-x10a", signal: null, state: null, flow: null, command: null,
+        x10aDown: true, x10aEmpty: true, homehub: 1, gatewayFlow: 12, gatewayProvisional: true,
+        rotor: false, pipe: false, compressorOff: true,
+        mode: "sys.x10a_down", plantStatus: "sys.mb_carrying" },
+      { name: "legacy-flow-flag-omitted", signal: null, state: null, flow: null, command: null,
+        x10aDown: true, x10aEmpty: true, homehub: 1, gatewayFlow: 24, rotor: false, pipe: false,
+        checkDerived: true },
+      { name: "legacy-flow-flag-false", signal: null, state: null, flow: null, command: null,
+        x10aDown: true, x10aEmpty: true, homehub: 1, gatewayFlow: 24, gatewayProvisional: false,
+        rotor: false, pipe: false, checkDerived: true, gatewayTankRoute: false },
+      { name: "native-flow-unverified", signal: null, state: null, flow: null, command: null,
+        x10aDown: true, x10aEmpty: true, homehub: 0, gatewayFlow: 12, gatewayProfile: "altherma4",
+        rotor: false, pipe: false, compressorOff: true, gatewayModeKnown: true, plantStatus: "dyn.state_gate" },
+      { name: "native-flow-beside-x10a", signal: 18, state: 1, flow: 12, command: 82,
+        homehub: 0, gatewayFlow: 13, gatewayProfile: "altherma4", rotor: true, pipe: true },
+      { name: "probing-flow-unverified", signal: null, state: null, flow: null, command: null,
+        x10aDown: true, x10aEmpty: true, homehub: 1, gatewayFlow: 12, gatewayProvisional: true,
+        rotor: false, pipe: false },
+      { name: "probing-flow-beside-x10a", signal: 18, state: 1, flow: 12, command: 82,
+        homehub: 0, gatewayFlow: 13, gatewayProvisional: true, rotor: true, pipe: true },
+      { name: "empty-values-before-status", signal: null, state: null, flow: null, command: null,
+        x10aEmpty: true, homehub: 1, rotor: false, pipe: false },
+      { name: "all-missing", signal: null, state: null, flow: null, command: null, rotor: false, pipe: false },
+    ];
+    for (const [index, sample] of cases.entries()) {
+      const label = `${context}/${sample.name}`;
+      await page.waitFor("!S.clickHold");
+      await page.evaluate(`(() => {
+        const sample = ${JSON.stringify(sample)};
+        S.status.hp.connected = !sample.x10aDown;
+        S.status.modbus.enabled = S.status.modbus.connected = sample.homehub != null;
+        S.modbusCompressorRunning = sample.checkDerived ? true
+          : sample.x10aDown && sample.compressorOff ? false : null;
+        S._modbus = sample.homehub == null ? [] : [{ label: "Circulation pump running",
+          value: sample.homehub, off: 30, binary: true, profile: sample.gatewayProfile || "homehub" }];
+        if (sample.gatewayFlow) S._modbus.push({ label: "Flow rate",
+          value: sample.gatewayFlow, unit: "L/min", off: 49, concept: "flow",
+          profile: sample.gatewayProfile,
+          ...(sample.gatewayProvisional === undefined ? {} : { flow_scale_unverified: sample.gatewayProvisional }) });
+        if (sample.checkDerived) S._modbus.push(
+          { off: 31, label: "Compressor running", value: 1, binary: true },
+          { off: 37, label: "3-way valve", value: sample.gatewayTankRoute === false ? 0 : 1, enum: "three_way_valve" },
+          { off: 40, label: "Leaving water temperature PHE", value: 54.1, unit: "°C", concept: "leaving_water" },
+          { off: 42, label: "Return water temperature", value: 49.4, unit: "°C", concept: "return_water" },
+          { off: 9, label: "Quiet mode operation", value: 1, binary: true, concept: "quiet_state" });
+        if (sample.x10aDown && sample.compressorOff)
+          S._modbus.push({ label: "Compressor running", value: 0, off: 31, binary: true });
+        if (sample.gatewayModeKnown) S._modbus.push(
+          { label: "DHW normal operation", value: 0, off: 52, binary: true },
+          { label: "Space heating/cooling normal operation", value: 0, off: 53, binary: true });
+        S._values = sample.x10aEmpty ? [] : [
+          { label: "Water pump signal (0:max-100:stop)",
+            value: sample.signal == null ? null : String(sample.signal), reg: 0x62, off: 12, conv: 152 },
+          { label: "Water pump operation", value: sample.state == null ? null : String(sample.state),
+            reg: 0x60, binary: true, held: sample.heldPump },
+          { label: "Flow sensor (l/min)", value: sample.rawFlow ?? (sample.flow == null ? null : String(sample.flow)),
+            reg: 0x62, unit: "l/min", concept: "flow" },
+        ];
+        if (!sample.x10aDown && (sample.compressorOff ||
+            sample.name === "off-with-flow" || sample.name === "on-without-flow")) {
+          S._values.push({ label: "INV frequency (rps)", value: "0", unit: "rps", reg: 0x30 });
+        }
+        if (sample.tankHeaterOff)
+          S._values.push({ label: "BSH", value: "0", reg: 0x60, binary: true });
+        if (sample.backupHeater) S._values.push(
+          { label: "BUH step 1", value: sample.backupHeater === "on" ? "1" : "0", reg: 0x60, binary: true },
+          { label: "BUH step 2", value: "0", reg: 0x60, binary: true });
+        renderApp(); return true;
+      })()`);
+      if (index === 0) await clickElement(page, '#schem [data-insp="pump"]');
+      await page.waitFor(`S.insp === "pump" && document.getElementById("inspect").classList.contains("open")`);
+      await page.frame();
+      const actual = await page.evaluate(`(() => {
+        const now = inspNowText(INSPECT.pump, S.live);
+        const paragraphs = document.querySelectorAll("#inspBody .vdesc-p");
+        const legacyQuiet = S._modbus.find(row => row.off === 9);
+        return { command: S.live?.pump ?? null, state: S.live?.pumpOn ?? null, flow: S.live?.flow ?? null,
+          commandText: document.getElementById("svPump").textContent,
+          hasModbusBadge: !!document.querySelector("#inspSrc .mb-tag"),
+          rawPump: S._modbus.find(row => row.off === 30)?.value ?? null,
+          gatewayFlowRow: document.getElementById("inspRows").textContent,
+          gatewayFlowName: S._modbus.length > 1 ? displayHomeHubLabel(S._modbus[1]) : null,
+          flowScaleLimit: t("mb.flow_scale_help"),
+          flowText: document.getElementById("svFlow").textContent,
+          rawFlow: S._values.find(row => row.concept === "flow")?.value,
+          invalidFlow: t("schem.flow_invalid"),
+          dtText: document.getElementById("svDt").textContent,
+          powerText: document.getElementById("svPth").textContent,
+          compressor: S.live?.compressorOn, tankRoute: S.live?.valveDhw,
+          refrigerant: ["rfHot", "rfPhe", "rfCold"].map(id =>
+            getComputedStyle(document.getElementById(id)).animationName),
+          quiet: S.live?.quiet ?? null,
+          quietActive: document.getElementById("schem").classList.contains("quiet-on"),
+          legacyQuietShown: !!legacyQuiet && Array.from(document.querySelectorAll(
+            '[data-dashboard-card="modbus"] .vrow-label'))
+            .some(node => node.textContent === displayHomeHubLabel(legacyQuiet)),
+          historyCommand: DERIVED.pump_speed.fn({ pump_signal: ${JSON.stringify(sample.signal)} }),
+          rotor: document.getElementById("schem").classList.contains("pump-on"),
+          rotorAnimation: getComputedStyle(document.getElementById("scPump")).animationName,
+          pipe: document.getElementById("fPhe").classList.contains("on"),
+          headline: document.getElementById("svStatus").textContent,
+          headlineMode: document.getElementById("svMode").textContent,
+          expectedStatus: t(${JSON.stringify(sample.plantStatus || "sys.nodata")}),
+          expectedMode: t(${JSON.stringify(sample.mode || "sys.nodata")}),
+          circulating: t("sys.circulating"), reportedPump: t("sys.pump_reported"),
+          now, renderedNow: now == null ? null : paragraphs[paragraphs.length - 1]?.textContent,
+          paragraphs: paragraphs.length, body: document.getElementById("inspBody").innerText,
+          accessibleName: document.querySelector('#schem [data-insp="pump"]').getAttribute("aria-label"),
+          expectedName: inspFieldText(INSPECT.pump, "aria", null) };
+      })()`);
+      assert.equal(actual.command, sample.command, `${label}: invalid commands stay unavailable; fractions survive`);
+      assert.equal(actual.commandText, sample.command == null ? "—" : sample.command.toLocaleString(locale,
+        { minimumFractionDigits: 1, maximumFractionDigits: 1 }), `${label}: the pill keeps command precision`);
+      const historyCommand = sample.x10aDown && sample.signal != null ? 82 : sample.command;
+      assert.equal(actual.historyCommand, historyCommand, `${label}: retained command history keeps the same validity`);
+      assert.equal(actual.hasModbusBadge, false, `${label}: cached input 30 cannot stand in for X10A`);
+      assert.equal(actual.rawPump, sample.homehub ?? null, `${label}: input 30 remains in the raw values`);
+      if (sample.gatewayFlow) assert.ok(actual.gatewayFlowRow?.includes(actual.gatewayFlowName),
+        `${label}: the gateway's flow row is visible without an X10A cache`);
+      if (sample.gatewayFlow) {
+        assert.ok(actual.gatewayFlowRow.includes(actual.flowScaleLimit),
+          `${label}: the flow row carries its measurement limit`);
+        assert.equal(actual.flowText, (sample.flow ?? sample.gatewayFlow).toLocaleString(locale,
+          { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
+          `${label}: preserve the visible provisional reading and prioritize current X10A when available`);
+      }
+      if (sample.checkDerived) {
+        assert.equal(actual.dtText, "—", `${label}: 4.7 K is not a working ΔT without qualified flow`);
+        assert.equal(actual.powerText, "—", `${label}: the unverified 24 L/min cannot yield 7.87 kW`);
+        assert.equal(actual.quiet, null, `${label}: legacy Holding 9 cannot establish Quiet activity`);
+        assert.equal(actual.quietActive, false);
+        assert.equal(actual.legacyQuietShown, false, `${label}: do not render the legacy binary as an activity row`);
+        assert.equal(actual.compressor, true, `${label}: HomeHub compressor activity stays visible`);
+        assert.equal(actual.tankRoute, null, `${label}: the cached valve cannot supply a current route`);
+        assert.deepEqual(actual.refrigerant, ["none", "none", "none"],
+          `${label}: HomeHub cannot animate directional refrigerant flow`);
+      }
+      const pumpState = sample.x10aDown || sample.heldPump || sample.state == null
+        ? null : sample.state === 1;
+      assert.equal(actual.state, pumpState, `${label}: only a current X10A report supplies pump state`);
+      assert.equal(actual.flow, sample.flow, `${label}: measured flow remains independent`);
+      if (sample.invalidFlow) {
+        assert.equal(actual.rawFlow, sample.rawFlow, `${label}: keep the raw telemetry value`);
+        assert.equal(actual.flowText, "—", `${label}: the flow pill must withhold an invalid reading`);
+        assert.ok(actual.renderedNow.includes(actual.invalidFlow), `${label}: explain an invalid reading in the pump inspector`);
+        assert.ok(!actual.renderedNow.includes(sample.rawFlow), `${label}: do not call the raw value measured flow`);
+      }
+      if (sample.invalidFlow === false) {
+        assert.equal(actual.flowText, "—", `${label}: a blank reading is unavailable`);
+        assert.ok(!actual.renderedNow.includes(actual.invalidFlow), `${label}: a blank reading is not invalid data`);
+      }
+      assert.equal(actual.rotor, sample.rotor, `${label}: only reported ON animates the pump`);
+      assert.equal(actual.rotorAnimation, sample.rotor ? "pump-spin" : "none", `${label}: actual CSS follows reported activity`);
+      assert.equal(actual.pipe, sample.pipe, `${label}: flow animates water independently of the rotor`);
+      if (sample.plantStatus) assert.ok(actual.headline.includes(actual.expectedStatus),
+        `${label}: the headline reflects the qualified flow evidence`);
+      if (sample.mode) assert.equal(actual.headlineMode, actual.expectedMode,
+        `${label}: render independently known activity without claiming a mode`);
+      if (sample.name === "off-with-flow") {
+        assert.ok(actual.headline.includes(actual.circulating), `${label}: measured flow establishes circulation`);
+      }
+      if (sample.name === "on-without-flow") {
+        assert.ok(actual.headline.includes(actual.reportedPump), `${label}: the headline reports ON without claiming flow`);
+        assert.ok(!actual.headline.includes(actual.circulating), `${label}: pump state cannot establish circulation`);
+      }
+      assert.equal(actual.renderedNow, actual.now, `${label}: the localized live sentence reaches the rendered inspector`);
+      assert.equal(actual.accessibleName, actual.expectedName, `${label}: the real hit target names the command`);
+      assert.doesNotMatch(actual.body, /undefined|NaN|\bnull\b/, `${label}: missing evidence cannot leak as a value`);
+      if (sample.command == null && pumpState == null && sample.flow == null &&
+          !sample.invalidFlow && !sample.gatewayFlow) {
+        assert.equal(actual.now, null, `${label}: absent observations provide no state sentence`);
+        assert.equal(actual.paragraphs, 1, `${label}: only the timeless explainer remains`);
+      } else if (pumpState == null) {
+        assert.match(actual.now, unknownWords[locale], `${label}: the reported operation remains explicitly unknown`);
+      }
+      assertLayout(await page.evaluate(layoutAudit), label);
+      await assertAccessibility(page, label, { nativeTree: index === 0 });
+      await captureNativeEvidence(page, label, "inspect");
+    }
+    await page.waitFor("!S.clickHold");
+    await page.evaluate(`(() => {
+      S.status.hp.connected = false;
+      S.status.modbus.enabled = S.status.modbus.connected = true;
+      S.modbusCompressorRunning = true;
+      S._values = [];
+      S._modbus = [
+        { off: 31, label: 'Compressor running', value: 1, binary: true },
+        { off: 32, label: 'Booster heater run', value: 1, binary: true },
+        { off: 37, label: '3-way valve', value: 1, enum: 'three_way_valve' },
+        { off: 40, label: 'Leaving water temperature PHE', value: 36,
+          unit: '°C', concept: 'leaving_water' },
+        { off: 41, label: 'Leaving water temperature BUH', value: 38.5,
+          unit: '°C', concept: 'leaving_water_post_buh' },
+        { off: 42, label: 'Return water temperature', value: 30,
+          unit: '°C', concept: 'return_water' },
+        { off: 49, label: 'Flow rate', value: 12, unit: 'L/min', concept: 'flow', flow_scale_unverified: true },
+        { off: 51, label: 'Heat pump power consumption', value: 1.4, unit: 'kW' },
+      ];
+      renderApp(); return true;
+    })()`);
+    await clickElement(page, '#schem [data-insp="cop"]');
+    await page.waitFor(`S.insp === "cop" && document.getElementById("inspect").classList.contains("open")`);
+    await page.frame();
+    const cop = await page.evaluate(`({
+      reason: S.live.copBlock, heat: S.live.pth, power: S.live.pel,
+      pill: document.getElementById('svCop').textContent,
+      explanation: inspNowText(INSPECT.cop, S.live),
+      visible: document.querySelector('#inspBody .vdesc-p:last-child')?.textContent
+    })`);
+    assert.equal(cop.heat, null, `${context}: provisional Modbus flow withholds the heat estimate`);
+    assert.equal(cop.power, 1.4, `${context}: the separately reported electrical reading stays available`);
+    assert.equal(cop.reason, "mb_scope", `${context}: HomeHub does not establish the COP boundary`);
+    assert.equal(cop.pill, "—", `${context}: the COP reading remains withheld`);
+    assert.match(cop.explanation, /HomeHub/, `${context}: explain the actual power source`);
+    if (locale === "fr") assert.match(cop.explanation, /ni si elle inclut les appoints électriques/,
+      `${context}: heater coverage must remain unknown in the French copy`);
+    assert.equal(cop.visible, cop.explanation, `${context}: render the COP explanation`);
+    assertLayout(await page.evaluate(layoutAudit), `${context}/homehub-cop`);
+
+    // CT needs known-inactive heaters. A separate inverter estimate can pair with R1T.
+    for (const [metric, source, postBuh, heaterOn, expectedHeat, block = null] of [
+      ["COP", "CT", false, false, 5.0232], ["COP", "CT", true, false, 7.5348],
+      ["EER", "CT", false, false, 1.84184], ["EER", "CT", true, false, 0.92092],
+      ["EER", "INV", false, true, 1.84184],
+      ["EER", null, false, true, null, "backup_heater"],
+      ["EER", null, false, false, null, "no_pel"],
+    ]) {
+      const label = `${context}/${metric}/${source}/${expectedHeat == null ? "blocked" : postBuh ? "r2t" : "r1t"}`;
+      await page.waitFor("!S.clickHold");
+      const reading = await page.evaluate(`(() => {
+        const postBuh = ${postBuh}, cooling = ${metric === "EER"}, inverter = ${source === "INV"};
+        S.status.hp.connected = true;
+        S.status.modbus.enabled = S.status.modbus.connected = false;
+        S.modbusCompressorRunning = null;
+        S._modbus = [];
+        S._values = [
+          { label: "I/U operation mode", value: cooling ? "Cooling" : "Heating", reg: 0x60 },
+          { label: "Defrost Operation", value: "0", reg: 0x10, binary: true },
+          { label: "3way valve(On:DHW_Off:Space)", value: "0", reg: 0x60, binary: true },
+          { label: "Leaving Water Temp. before BUH (R1T)", value: cooling ? "13.2" : "36", unit: "°C", reg: 0x61 },
+          { label: "Inlet Water Temp. (R4T)", value: cooling ? "15.4" : "30", unit: "°C", reg: 0x61 },
+          { label: "Flow sensor (l/min)", value: "12", unit: "l/min", reg: 0x62 },
+          { label: "INV frequency (rps)", value: "18", unit: "rps", reg: 0x30 },
+          { label: "BUH step 1", value: ${heaterOn} ? "1" : "0", reg: 0x60, binary: true },
+          { label: "BUH step 2", value: "0", reg: 0x60, binary: true },
+          { label: "BSH", value: "0", reg: 0x60, binary: true },
+        ];
+        if (inverter) S._values.push({ label: "INV primary current", value: "2.2", unit: "A", reg: 0x21 });
+        for (const phase of [1, 2, 3]) S._values.push({
+          label: "Current measured by CT sensor of L" + phase,
+          value: phase === 3 && ${block === "no_pel"} ? null : "2", unit: "A", reg: 0x63 });
+        if (postBuh || ${heaterOn}) S._values.push({ label: "Leaving Water Temp. (R2T)",
+          value: cooling ? "14.3" : "39", unit: "°C", reg: 0x61, off: 4 });
+        renderApp();
+        return { postBuh: S.live.copPostBuh, ratioPower: S.live.copPel, inputPower: S.live.pel,
+          heat: S.live.copPth,
+          title: document.getElementById("inspTitle").textContent,
+          general: document.querySelector("#inspBody .vdesc-p")?.textContent,
+          sentence: document.querySelector("#inspBody .vdesc-p:last-child")?.textContent,
+          expected: inspNowText(INSPECT.cop, S.live), heatText: fmt1(S.live.copPth),
+          powerText: fmt1(S.live.copPel), noUsablePower: t("schem.no_usable_power", "EER"),
+          pill: document.getElementById("svCop").textContent,
+          metric: document.getElementById("svCopLabel").textContent, block: S.live.copBlock,
+          refrigerant: ["rfHot", "rfPhe", "rfCold"].map(id =>
+            getComputedStyle(document.getElementById(id)).animationName) };
+      })()`);
+      assert.equal(reading.postBuh, postBuh, `${label}: select the available outlet`);
+      if (source == null) assert.equal(reading.ratioPower, null);
+      else assert.ok(Math.abs(reading.ratioPower - (source === "INV" ? 0.506 : 1.38)) < 0.001,
+        `${label}: use the selected electrical estimate`);
+      if (source === "INV") assert.equal(reading.inputPower, 1.38,
+        `${label}: the independent electrical-input pill can still use CT`);
+      assert.equal(reading.metric, metric);
+      assert.deepEqual(reading.refrigerant, Array(3).fill(metric === "EER" ? "rdashrev" : "rdashfwd"),
+        `${label}: current X10A speed and direction animate the refrigerant circuit`);
+      assert.equal(reading.sentence, reading.expected, `${label}: show the localized live sentence`);
+      if (expectedHeat == null) {
+        assert.equal(reading.pill, "—", `${label}: blocked cooling withholds the EER`);
+        assert.equal(reading.block, block);
+        assert.match(reading.title, /EER/);
+        assert.match(reading.sentence, /EER/);
+        assert.doesNotMatch(reading.title + reading.sentence, /COP/);
+        assert.doesNotMatch(reading.general, /R[12]T/, `${label}: the blocked plan has no selected outlet`);
+        if (block === "no_pel") assert.equal(reading.sentence, reading.noUsablePower);
+      } else {
+        assert.ok(Math.abs(reading.heat - expectedHeat) < 0.01,
+          `${label}: the displayed ratio uses the selected temperature`);
+        assert.notEqual(reading.pill, "—", `${label}: qualified input shows a ratio`);
+        assert.ok(reading.sentence.includes(reading.heatText), `${label}: show its actual heat estimate`);
+        assert.ok(reading.sentence.includes(reading.powerText), `${label}: show its actual electrical estimate`);
+        assert.match(reading.general, postBuh ? /R2T/ : /R1T/);
+        assert.doesNotMatch(reading.general, postBuh ? /R1T/ : /R2T/);
+        assert.match(reading.general, /R4T/);
+      }
+      assertLayout(await page.evaluate(layoutAudit), label);
+    }
+    await page.evaluate(`(() => {
+      Object.assign(S.status.modbus, { enabled: true, connected: true, host: "192.0.2.30" });
+      S.modbusCompressorRunning = true;
+      S._modbus = [{ off: 31, label: "Compressor running", value: 1, binary: true }];
+      S._values = S._values.filter(row => !row.label.startsWith("Current measured by CT"));
+      S._values.push({ label: "INV primary current", value: "2.2", unit: "A", reg: 0x21 });
+      S._values.find(row => row.label.startsWith("Leaving Water Temp. before")).value = "14.6";
+      return true;
+    })()`);
+    for (const rps of [null, 0, 3, 6]) {
+      const speed = await page.evaluate(`(() => {
+        const rps = ${JSON.stringify(rps)};
+        S._values.find(row => row.label.startsWith("INV frequency")).value = rps == null ? null : String(rps);
+        renderApp();
+        return {
+          rps: S.live.rps, compressorOn: S.live.compressorOn, input: S.live.pelSrc,
+          homehubOn: S.live.mbCompressorOn,
+          speedPill: document.getElementById("svRps").textContent,
+          activity: document.getElementById("svStatus").textContent,
+          unknownActivity: t("dyn.state_gate"),
+          fan: document.getElementById("schem").classList.contains("fan-on"),
+          capacity: document.getElementById("svPth").textContent,
+          efficiency: document.getElementById("svCop").textContent,
+          delta: document.getElementById("svDt").textContent,
+          sentence: document.querySelector("#inspBody .vdesc-p:last-child")?.textContent,
+          expected: rps === 0 ? t("schem.no_usable_power", "EER")
+            : rps == null ? heldUnknownText()
+            : t("schem.efficiency_no_capacity", "EER") + " " + t("schem.capacity_low_speed"),
+        };
+      })()`);
+      assert.equal(speed.rps, rps);
+      assert.equal(speed.homehubOn, true);
+      assert.equal(speed.compressorOn, rps !== 0);
+      assert.equal(speed.fan, false, `${context}: compressor reports do not establish fan motion`);
+      assert.equal(speed.input, rps > 0 ? "INV" : null);
+      if (rps === 0) {
+        assert.equal(speed.speedPill, "0", `${context}: measured zero remains visible`);
+        assert.equal(speed.activity, speed.unknownActivity);
+      }
+      assert.notEqual(speed.delta, "—", `${context}: X10A flow still qualifies ΔT`);
+      if (rps > 5) {
+        assert.notEqual(speed.capacity, "—");
+        assert.notEqual(speed.efficiency, "—");
+      } else {
+        assert.equal(speed.capacity, "—");
+        assert.equal(speed.efficiency, "—");
+        assert.equal(speed.sentence, speed.expected, `${context}: blank EER explains the speed requirement`);
+      }
+    }
+    const inverter = await page.evaluate(`(() => {
+      const inv = S._values.find(row => row.label === "INV primary current");
+      const speed = S._values.find(row => row.label.startsWith("INV frequency"));
+      const electrical = ["-2", "0"].map(value => {
+        inv.value = value;
+        renderApp();
+        return {
+          value: S.live.pel,
+          painted: document.getElementById("svPel").textContent,
+          expected: value === "0" ? fmt1(0) : "—",
+          eer: document.getElementById("svCop").textContent,
+        };
+      });
+      inv.value = "2.2";
+      inv.held_unknown = true;
+      speed.value = null;
+      const uncertain = [false, true].map(running => {
+        S.modbusCompressorRunning = running;
+        renderApp();
+        return { activity: S.live.compressorOn, held: S.live.ouHeldOver, power: S.live.pel,
+          ageNote: document.getElementById("inspBody").textContent.includes(heldUnknownText()) };
+      });
+      S.modbusCompressorRunning = true;
+      speed.value = "6";
+      delete inv.held_unknown;
+      renderApp();
+      return { electrical, uncertain };
+    })()`);
+    assert.deepEqual(inverter.electrical.map(row => row.value), [null, 0],
+      `${context}: rejected inverter current cannot replace a measured zero`);
+    for (const row of inverter.electrical) {
+      assert.equal(row.painted, row.expected);
+      assert.equal(row.eer, "—");
+    }
+    assert.deepEqual(inverter.uncertain, [false, true].map(activity =>
+      ({ activity, held: false, power: null, ageNote: true })),
+      `${context}: both HomeHub states retain the independent X10A age note`);
+    const flagOnly = await page.evaluate(`(() => {
+      const values = S._values;
+      S._values = [{ label: "Defrost Operation", value: "1", reg: 0x10, binary: true }];
+      renderApp();
+      const result = {
+        outdoor: inspNowText(INSPECT.ou, S.live),
+        defrost: inspNowText(INSPECT.defrost, S.live),
+        heat: S.live.pth,
+        motion: getComputedStyle(document.getElementById("rfHot")).animationName,
+      };
+      S._values = values;
+      renderApp();
+      return result;
+    })()`);
+    assert.match(flagOnly.defrost, /X10A/);
+    assert.equal(flagOnly.outdoor, flagOnly.defrost,
+      `${context}: a flag-only defrost uses the same localized X10A report in both inspectors`);
+    assert.equal(flagOnly.heat, null);
+    assert.equal(flagOnly.motion, "none");
+    if (locale === "en" || locale === "de") {
+      await page.evaluate(`(() => {
+        S._values.find(row => row.label.startsWith("INV frequency")).value = "0";
+        renderApp(); return true;
+      })()`);
+      for (const [panel, target] of [["ou", '[data-insp="ou"] > text'],
+        ["comp", '[data-insp="comp"] > .sc-val']]) {
+        await page.waitFor("!S.clickHold");
+        await clickElement(page, target);
+        await page.waitFor(`S.insp === ${JSON.stringify(panel)}`);
+        await page.frame();
+        const reports = await page.evaluate(`({
+          sentence: document.querySelector("#inspBody .vdesc-p:last-child")?.textContent,
+          expected: t("src.disagree") + ". X10A 0 rps · HomeHub " + t("state.on"),
+          reading: document.getElementById("inspNow").textContent,
+        })`);
+        assert.ok(reports.sentence.startsWith(reports.expected),
+          `${context}/${panel}: show both reports by source`);
+        if (panel === "comp") assert.equal(reports.reading, "0 rps");
+        assertLayout(await page.evaluate(layoutAudit), `${context}/${panel}/compressor-conflict`);
+        const updated = await page.evaluate(`(() => {
+          S.modbusCompressorRunning = false;
+          renderApp();
+          return document.getElementById("inspBody").textContent;
+        })()`);
+        assert.ok(!updated.includes(reports.expected), `${context}/${panel}: clear conflict when HomeHub turns OFF`);
+        await page.evaluate("S.modbusCompressorRunning = true; renderApp(); true");
+      }
+      await page.waitFor("!S.clickHold");
+      await clickElement(page, '[data-insp="ou"] > text');
+      await page.waitFor('S.insp === "ou"');
+      for (const [connected, report] of [[false, 0], [true, 0], [false, null]]) {
+        const outdoor = await page.evaluate(`(() => {
+          const connected = ${connected}, report = ${JSON.stringify(report)};
+          S.status.hp.connected = connected;
+          const x10aAir = { label: "Outdoor Air Temp. (R1T)", value: "17", unit: "°C",
+            reg: 0x20, concept: "outdoor_air" };
+          S._values = S._values.filter(row => row.concept !== "outdoor_air").concat(x10aAir);
+          S._modbus = [{ off: 44, label: "Outside air temperature", value: 9.25,
+            unit: "°C", concept: "outdoor_air" }];
+          S.modbusCompressorRunning = report === 0 ? false : null;
+          if (report != null) S._modbus.push({ off: 31, label: "Compressor running", value: report, binary: true });
+          renderApp();
+          return {
+            sentence: document.querySelector("#inspBody .vdesc-p:last-child")?.textContent,
+            reading: document.getElementById("svOut").textContent,
+            expectedReading: fmt1(9.25),
+            held: t("schem.outdoor_held"), offline: t("sys.x10a_down"),
+            source: t("schem.outdoor_homehub"), unknown: t("dyn.state_gate"),
+            reportedOff: t("schem.homehub_compressor_off"),
+          };
+        })()`);
+        assert.equal(outdoor.reading, outdoor.expectedReading);
+        assert.ok(outdoor.sentence.includes(outdoor.source));
+        assert.equal(outdoor.sentence.includes(outdoor.held), connected);
+        assert.equal(outdoor.sentence.includes(outdoor.offline), !connected);
+        assert.equal(outdoor.sentence.includes(outdoor.unknown), report == null);
+        assert.equal(outdoor.sentence.includes(outdoor.reportedOff), !connected && report === 0);
+        assert.doesNotMatch(outdoor.sentence, /—/, `${context}: the displayed air reading has a value`);
+      }
+      await page.evaluate(`(() => {
+        S.status.hp.connected = true;
+        S._values = S._values.filter(row => row.concept !== "outdoor_air");
+        S.modbusCompressorRunning = true;
+        S._modbus = [{ off: 31, label: "Compressor running", value: 1, binary: true }];
+        renderApp(); return true;
+      })()`);
+    }
+    if (locale === "en") {
+      const unreadDefrost = await page.evaluate(`(() => {
+        const values = S._values;
+        S._values = values.filter(row => row.reg !== 0x10);
+        renderApp();
+        const observed = {
+          reported: S.live.defrost,
+          task: S.live.thermalMode,
+          capacity: document.getElementById("svPth").textContent,
+          delta: document.getElementById("svDt").textContent,
+          water: getComputedStyle(document.getElementById("fPhe")).animationName,
+          refrigerant: ["rfHot", "rfPhe", "rfCold"].map(id =>
+            getComputedStyle(document.getElementById(id)).animationName),
+        };
+        S._values = values;
+        renderApp();
+        return observed;
+      })()`);
+      assert.equal(unreadDefrost.reported, null);
+      assert.equal(unreadDefrost.task, null);
+      assert.equal(unreadDefrost.capacity, "—");
+      assert.notEqual(unreadDefrost.delta, "—");
+      assert.equal(unreadDefrost.water, "dashfwd");
+      assert.deepEqual(unreadDefrost.refrigerant, Array(3).fill("none"),
+        `${context}: missing native defrost page withholds directional refrigerant motion`);
+      await page.waitFor("!S.clickHold");
+      await clickElement(page, "#gBshState .sc-state");
+      await page.waitFor('S.insp === "bsh"');
+      const defrost = await page.evaluate(`(() => {
+        const speed = S._values.find(row => row.label.startsWith("INV frequency"));
+        const bit = S._values.find(row => row.reg === 0x10 && row.label === "Defrost Operation");
+        const valve = S._values.find(row => /^3.?way valve/i.test(row.label));
+        const values = S._values, modbus = S._modbus, rx = S.status.modbus.rx;
+        const bsh = values.find(row => row.label === "BSH");
+        const original = [speed.value, bit.value, valve.value];
+        const paint = (id) => {
+          const { animationName, stroke } = getComputedStyle(document.getElementById(id));
+          return [animationName, stroke];
+        };
+        const stops = (id) => [...document.querySelectorAll("#" + id + " stop")]
+          .map(stop => getComputedStyle(stop).stopColor);
+        const colourSample = document.createElement("span");
+        document.getElementById("schem").append(colourSample);
+        const [grey, orange] = ["--muted", "--warn"].map(token => {
+          colourSample.style.color = "var(" + token + ")";
+          return getComputedStyle(colourSample).color;
+        });
+        colourSample.remove();
+        bit.value = "1";
+        const space = ["6", null].map(value => {
+          speed.value = value;
+          renderApp();
+          return { reported: S.live.defrost, running: S.live.compressorOn,
+            refrigerant: ["rfHot", "rfPhe", "rfCold"].map(id => paint(id)[0]),
+            common: paint("fSup1"), pheStops: stops("pheWaterFlow"),
+            branch: paint("fHeat"), spaceStops: stops("spaceFlow"),
+            perimeter: paint("fSpaceEdgeL")[0] };
+        });
+        speed.value = "6";
+        valve.value = "1";
+        const cachedHeater = { off: 32, label: "Booster heater run", value: 1, binary: true,
+          concept: "bsh_state" };
+        S._modbus = [...modbus, cachedHeater];
+        const heaterRows = [null, { ...bsh, value: "1", held: true },
+          { ...bsh, value: "1", held_unknown: true }, { ...bsh, value: "0" }, { ...bsh, value: "1" }];
+        const tank = heaterRows.map((row, index) => {
+          S._values = values.filter(value => value !== bsh).concat(row ? [row] : []);
+          S.status.modbus.rx = (rx || 0) + index + 1;
+          renderApp();
+          return { branch: paint("fTank"), perimeter: paint("fTankEdgeL"),
+            pill: document.getElementById("gBshState").getAttribute("aria-label"),
+            headline: document.getElementById("inspNow").textContent,
+            source: document.getElementById("inspSrc").textContent,
+            copy: document.getElementById("inspBody").textContent,
+            gateway: mbBool(32) };
+        });
+        [speed.value, bit.value, valve.value] = original;
+        S._values = values;
+        S._modbus = modbus;
+        S.status.modbus.rx = rx;
+        renderApp();
+        return { space, tank, grey, orange };
+      })()`);
+      assert.notEqual(defrost.grey, defrost.orange);
+      const neutralFlow = ["dashfwd", defrost.grey];
+      const neutralStops = [defrost.grey, defrost.grey];
+      assert.deepEqual(defrost.space, ["rdashrev", "none"].map(animation => ({
+        reported: true, running: true, refrigerant: Array(3).fill(animation),
+        common: neutralFlow, pheStops: neutralStops, branch: neutralFlow,
+        spaceStops: neutralStops, perimeter: "dashfwd",
+      })), `${context}: defrost keeps water motion neutral while native speed gates reverse motion`);
+      for (const [index, value] of [null, null, null, "0", "1"].entries()) {
+        const tank = defrost.tank[index];
+        assert.deepEqual(tank.branch, neutralFlow);
+        assert.deepEqual(tank.perimeter, value === "1" ? ["dashfwd", defrost.orange] : neutralFlow,
+          `${context}: only the current native heater report makes the tank perimeter orange`);
+        const state = value == null ? "—" : value === "1" ? "ON" : "OFF";
+        assert.ok(tank.pill.endsWith(state));
+        assert.equal(tank.headline, state);
+        assert.equal(tank.source, "BSH");
+        assert.equal(tank.copy.includes("Electric tank heater active."), value === "1");
+        assert.equal(tank.copy.includes("the tank is not using its electric immersion heater."), value === "0");
+        assert.equal(tank.gateway, true, "the independent HomeHub input remains readable");
+      }
+      await page.evaluate(`(() => {
+        window.__defrostFixture = S._values;
+        S._values = S._values.filter(row => row.label !== "Defrost Operation" &&
+          !row.label.startsWith("Leaving Water Temp. before") && !row.label.startsWith("INV frequency"));
+        S._values.push(
+          { label: "Defrost Operation", value: "1", reg: 0x10, binary: true },
+          { label: "INV frequency (rps)", value: "18", reg: 0x30, unit: "rps" },
+          { label: "Leaving Water Temp. before BUH (R1T)", value: "9.4", reg: 0x61, unit: "°C" });
+        renderApp(); return true;
+      })()`);
+      for (const key of ["pth", "phe"]) {
+        await page.waitFor("!S.clickHold");
+        await clickElement(page, key === "pth" ? '#schem [data-insp="pth"]' : '#schem [data-insp="phe"] > text');
+        await page.waitFor(`S.insp === ${JSON.stringify(key)}`);
+        const transfer = await page.evaluate(`({
+          value: S.live.pth, rps: S.live.rps, flow: S.live.flow, dt: S.live.dt,
+          pill: document.getElementById("svPth").textContent,
+          title: document.getElementById("inspTitle").textContent,
+          text: document.getElementById("inspBody").textContent,
+          transferTitle: t("schem.defrost_transfer"), sign: t("schem.transfer_sign"),
+        })`);
+        assert.ok(transfer.value < 0 && transfer.pill.startsWith("-"),
+          `${context}/${key}: ${JSON.stringify(transfer)}`);
+        assert.ok(transfer.text.includes(transfer.sign), `${context}/${key}: explain both signs of defrost transfer`);
+        assert.doesNotMatch(transfer.text, /kW transferred into the water/);
+        if (key === "pth") assert.equal(transfer.title, transfer.transferTitle);
+      }
+      await page.evaluate(`S._values = window.__defrostFixture; delete window.__defrostFixture; renderApp(); true`);
+      await page.evaluate(`(() => {
+        const mode = S._values.find(row => row.label === "I/U operation mode");
+        window.__pairedRows = { values: S._values, modbus: S._modbus, mode, originalMode: mode.value };
+        mode.value = "Cooling + DHW";
+        S._values = S._values.filter(row => !/3.?way valve/i.test(row.label));
+        S._values.find(row => row.label.startsWith("INV frequency")).value = "6";
+        S._modbus = [...S._modbus,
+          { off: 44, label: "Outside air temperature", value: 9.25, unit: "°C", concept: "outdoor_air" },
+          { off: 37, label: "3-way valve", value: 1, enum: "three_way_valve", concept: "valve_dhw" },
+        ];
+        renderApp(); return true;
+      })()`);
+      await page.waitFor("!S.clickHold");
+      await clickElement(page, '#schem [data-insp="out"]');
+      await page.waitFor('S.insp === "out"');
+      assert.deepEqual(await page.evaluate(`({
+        rps: S.live.rps, air: document.getElementById("svOut").textContent,
+        inspector: document.getElementById("inspNow").textContent,
+        source: document.querySelector("#inspSrc .mb-tag")?.textContent,
+      })`), { rps: 6, air: "9.3", inspector: "9.25 °C", source: "modbus" });
+      await page.waitFor("!S.clickHold");
+      await clickElement(page, '#schem [data-insp="valve"] .sc-valve');
+      await page.waitFor('S.insp === "valve"');
+      const routeLabels = {
+        0: ["schem.to_space", "Space circuit"], 1: ["schem.to_dhw", "DHW"], 7: [null, "—"],
+      };
+      for (const [mode, homeHubRoute, nativeRoute, direction] of [
+        ["Cooling + DHW", 7, null, "none"], ["Cooling + DHW", 0, null, "none"],
+        ["Cooling + DHW", 1, null, "none"], ["Cooling + DHW", 1, 0, "rdashrev"],
+        ["Cooling + DHW", 0, 1, "rdashfwd"], ["Cooling", 1, null, "rdashrev"],
+        ["Cooling", 0, 1, "none"], ["Cooling", 7, null, "rdashrev"],
+        ["Stop", 1, null, "none"], [null, 1, null, "none"],
+        ["DHW", 0, null, "none"], ["DHW", 7, null, "none"], ["DHW", 1, null, "none"],
+        ["DHW", 0, 1, "rdashfwd"],
+      ]) {
+        const [label, headline] = routeLabels[nativeRoute ?? 7];
+        const valve = await page.evaluate(`(() => {
+          window.__pairedRows.mode.value = ${JSON.stringify(mode)};
+          const nativeRoute = ${nativeRoute};
+          S._modbus.find(row => row.off === 37).value = ${homeHubRoute};
+          S._values = S._values.filter(row => row.concept !== "valve_dhw");
+          if (nativeRoute != null) S._values.push({ label: "3way valve(On:DHW_Off:Space)",
+            value: String(nativeRoute), reg: 0x60, concept: "valve_dhw", binary: true,
+            binary_semantic: "valve_dhw" });
+          const lwt = S._values.find(row => row.label.startsWith("Leaving Water Temp. before"));
+          const originalLwt = lwt.value;
+          lwt.value = ${JSON.stringify(direction)} === "rdashfwd" ? "21.4" : "14.6";
+          renderApp();
+          lwt.value = originalLwt;
+          return {
+            drawing: document.getElementById("svValve").textContent,
+            expected: ${JSON.stringify(label)} ? t(${JSON.stringify(label)}) : "3WV",
+            headline: document.getElementById("inspNow").textContent,
+            modbus: !!document.querySelector("#inspSrc .mb-tag"),
+            rawModbus: S._modbus.find(row => row.off === 37)?.value,
+            sentence: document.querySelector("#inspBody .vdesc-p:last-child")?.textContent,
+            speed: S.live.rps,
+            capacity: document.getElementById("svPth").textContent,
+            delta: document.getElementById("svDt").textContent,
+            water: ["fPhe", "fHeat", "fTank"].map(id =>
+              getComputedStyle(document.getElementById(id)).animationName),
+            animations: ["rfHot", "rfPhe", "rfCold"].map(id =>
+              getComputedStyle(document.getElementById(id)).animationName),
+          };
+        })()`);
+        assert.equal(valve.drawing, valve.expected);
+        assert.equal(valve.headline, headline);
+        assert.equal(valve.modbus, false);
+        assert.equal(valve.rawModbus, homeHubRoute, "the independent gateway register is retained");
+        if (nativeRoute != null) assert.match(valve.sentence, /reports the .* route selected.*does not by itself prove/i);
+        assert.equal(valve.speed, 6);
+        assert.notEqual(valve.delta, "—", `${context}: common X10A flow still qualifies ΔT`);
+        assert.equal(valve.capacity !== "—", direction !== "none", `${context}: capacity follows qualified mode`);
+        assert.deepEqual(valve.water, ["dashfwd", nativeRoute === 0 ? "dashfwd" : "none",
+          nativeRoute === 1 ? "dashfwd" : "none"], `${context}: only the native valve can select water branch motion`);
+        assert.deepEqual(valve.animations, Array(3).fill(direction),
+          `${context}: refrigerant direction for ${JSON.stringify(mode)}, HomeHub ${homeHubRoute}, X10A ${nativeRoute}`);
+      }
+      await page.evaluate(`(() => {
+        S._values = window.__pairedRows.values;
+        S._modbus = window.__pairedRows.modbus;
+        window.__pairedRows.mode.value = window.__pairedRows.originalMode;
+        delete window.__pairedRows;
+        renderApp(); return true;
+      })()`);
+      await page.evaluate(`(() => {
+        S._values.find(row => row.label.startsWith("INV frequency")).value = null;
+        renderApp(); return true;
+      })()`);
+      for (const panel of ["phe", "dt", "pth"]) {
+        await page.waitFor("!S.clickHold");
+        await clickElement(page, panel === "phe" ? '[data-insp="phe"] > text' : `[data-insp="${panel}"]`);
+        await page.waitFor(`S.insp === ${JSON.stringify(panel)}`);
+        await page.frame();
+        const missingSpeed = await page.evaluate(`({
+          status: document.getElementById("svStatus").textContent,
+          operating: t("sys.operating"), capacity: document.getElementById("svPth").textContent,
+          limit: t("schem.capacity_low_speed"),
+          sentence: document.querySelector("#inspBody .vdesc-p:last-child")?.textContent,
+        })`);
+        assert.ok(missingSpeed.status.includes(missingSpeed.operating));
+        assert.equal(missingSpeed.capacity, "—");
+        assert.ok(missingSpeed.sentence.includes(missingSpeed.limit));
+        assert.doesNotMatch(missingSpeed.sentence, /stopped|residual/i);
+        if (panel === "dt") assert.match(missingSpeed.sentence, /-0\.8 K/);
+        assertLayout(await page.evaluate(layoutAudit), `${context}/missing-compressor-speed/${panel}`);
+      }
+      const backup = await page.evaluate(`(() => {
+        S._values.find(row => row.label.startsWith("INV frequency")).value = "0";
+        S._modbus[0].value = 0;
+        S._values.find(row => row.label === "BUH step 1").value = "1";
+        renderApp();
+        const diagram = document.getElementById("schem");
+        return { neutral: diagram.classList.contains("water-neutral"),
+          cooling: diagram.classList.contains("cooling-mode"),
+          heater: diagram.classList.contains("buh-on"),
+          circulating: document.getElementById("fPhe").classList.contains("on") };
+      })()`);
+      assert.deepEqual(backup, { neutral: true, cooling: false, heater: true, circulating: true },
+        `${context}: Cooling selected with the backup heater active shows neutral circulation`);
+    }
+  } finally {
+    await page.waitFor("!S.clickHold");
+    await page.evaluate(`(() => {
+      Object.assign(S, window.__browserPumpOriginal);
+      S.inspSig = null; S.inspHistSig = null;
+      delete window.__browserPumpOriginal;
+      renderApp(); window.scrollTo(0, 0); return true;
+    })()`);
+    await page.frame();
+  }
+}
+
 async function assertModalKeyboard(page, modalId, context, { route = true } = {}) {
   assert.deepEqual(await page.evaluate(`(() => {
     const modal = document.getElementById(${JSON.stringify(modalId)});
@@ -499,6 +1284,7 @@ async function assertUnknownCompressorActivity(page, context) {
         ...(S.status.history?.rows || []).filter(row => row.id !== "inv_current"),
         { id: "inv_current", label: "INV primary current(A)" } ] } };
     S._modbus = [];
+    S.modbusCompressorRunning = null;
     S._values = S._values.map((row) => ({ ...row,
       value: /inv frequency/i.test(row.label) ? null : row.value }));
     S._values.push(
@@ -548,6 +1334,7 @@ async function assertUnknownCompressorActivity(page, context) {
       S._values = window.__unknownActivityValues.map(row => ({ ...row,
         value: /inv primary current/i.test(row.label) ? null : row.value }));
       S.status.modbus = { ...S.status.modbus, host: "192.0.2.30", enabled: true, connected: true };
+      S.modbusCompressorRunning = true;
       S._modbus = [{ off: 31, label: "Compressor run", value: 1, binary: true, unit: "" }];
       S.clickHold = false; renderApp(); return true;
     })()`);
@@ -561,7 +1348,7 @@ async function assertUnknownCompressorActivity(page, context) {
           namesMissingInput: text.includes(lead + " INV primary current"),
           claimsUnknownAge: text.includes(heldUnknownText()) };
       })()`), { running: true, electrical: null, namesMissingInput: true, claimsUnknownAge: false },
-      `${context}/${key}: HomeHub-confirmed operation names the missing current without an age claim`);
+      `${context}/${key}: HomeHub activity stays visible while the missing current is named separately`);
       assertLayout(await page.evaluate(layoutAudit), `${context}/${key}`);
     }
   } finally {
@@ -580,7 +1367,7 @@ const nativeAltherma4Rows = Object.freeze([
     labelKey: "a4.quiet_selection", valueKey: "enum.automatic", helpKey: "a4.quiet_help" },
   { off: 38, label: "Current operation mode", value: 0, unit: "", enum: "altherma4_current_operation_mode",
     valueKey: "enum.none", helpKey: "a4.current_help" },
-  { off: 49, label: "Flow rate", value: 2.6, unit: "L/min", helpKey: "a4.flow_help" },
+  { off: 49, label: "Flow rate", value: 2.6, unit: "L/min", helpKey: "mb.flow_scale_help" },
   { off: 54, label: "Weather-dependent Main Heating offset", value: -3, unit: "K",
     labelKey: "a4.heating_offset", helpKey: "a4.heating_offset_help" },
   { off: 58, label: "Imposed power limit", value: 6, unit: "kW",
@@ -1667,7 +2454,7 @@ async function assertNativeAltherma4(page, context) {
         renderApp();
       })()`);
       for (const [off, label, key, nativeValue] of [
-        [49, "Flow sensor", "a4.flow_help", "2.6"],
+        [49, "Flow sensor", "mb.flow_scale_help", "2.6"],
         [79, "Water Pressure", "a4.pressure_help", "2"],
       ]) {
         const selector = `#valueGroups button[data-desc=${JSON.stringify(label)}]`;
@@ -1689,7 +2476,7 @@ async function assertNativeAltherma4(page, context) {
       assert.deepEqual(page.diagnostics, [], `${context}: paired limits must emit no browser errors`);
       await captureNativeEvidence(page, `${context}/${connected ? "paired" : "replacement"}`);
       for (const [target, key, nativeValue] of [
-        ["flow", "a4.flow_help", "2.6"], ["wp", "a4.pressure_help", "2"],
+        ["flow", "mb.flow_scale_help", "2.6"], ["wp", "a4.pressure_help", "2"],
       ]) {
         await page.waitFor("!S.clickHold");
         await page.evaluate("S.insp = null; renderInspect(); true");
@@ -2058,6 +2845,150 @@ async function assertHybridRoom(page, context, locale) {
   }
 }
 
+async function assertOtaHistorySnapshot(page, context) {
+  const result = await page.evaluate(`(async () => {
+    const original = { ...S }, oldCache = sessionStorage.getItem(OTA_RENDER_CACHE_KEY);
+    const row = { id: "dhw_tank", label: "DHW tank temperature" };
+    const status = { ...original.status, boot_id: "boot-a", app_elf_sha256: "image-a",
+      modbus: { enabled: true, connected: true, host: "hub-a", port: 502, unit_id: 1 },
+      history: { epoch: 7, rows: [row], modbus_rows: [row] } };
+    const host = document.createElement("div");
+    const ring = { at: Date.now(), gen: 1, dt: 300, b0: 100, unit: "°C", held: [], v: [420, 421] };
+    try {
+      const observations = [];
+      for (const lease of [{ epoch: 0, boot: "boot-a" }, { epoch: 8, boot: "boot-a" },
+        { epoch: 7, boot: "boot-b" }, undefined, { epoch: 7, boot: "boot-a" }, null]) {
+        S.status = status;
+        S._modbus = [{ off: 43, concept: row.id, label: row.label, value: "45", unit: "°C" }];
+        S.modbusHistoryLease = lease;
+        if (!otaCacheStore()) throw new Error("OTA render fixture did not store its snapshot");
+        S.status = null; S.modbusHistoryLease = null; S.histIdentity = null;
+        S.hist = new Map(); S.histPin = new Map(); S.histHidden = new Map();
+        S.insp = null; S.scrub = null;
+        const restored = await otaCacheRestore({ current: status.version, boot_id: status.boot_id,
+          app_elf_sha256: status.app_elf_sha256 });
+        S.hist.set(row.id, ring);
+        S.hist.set(histCacheKey(row.id, "modbus"), { ...ring, v: [610, 613] });
+        host.innerHTML = histHtml(row.id, "°C", row.label, "modbus");
+        const modbusChart = !!host.querySelector(".vhist-line.mb");
+        host.innerHTML = histHtml(row.id, "°C", row.label, "x10a");
+        observations.push({ restored, cached: S.otaCached, modbusChart,
+          x10aChart: !!host.querySelector(".vhist-line") });
+      }
+      return observations;
+    } finally {
+      if (oldCache === null) sessionStorage.removeItem(OTA_RENDER_CACHE_KEY);
+      else sessionStorage.setItem(OTA_RENDER_CACHE_KEY, oldCache);
+      Object.assign(S, original);
+      renderApp();
+    }
+  })()`);
+  assert.deepEqual(result, [false, false, false, false, true, true]
+    .map(modbusChart => ({ restored: true, cached: true, modbusChart, x10aChart: true })),
+    `${context}: cached history requires the restored peer and boot lease`);
+}
+
+async function assertOtaSnapshotMotion(page, context) {
+  const observed = await page.evaluate(`(async () => {
+    const original = { ...S }, oldCache = sessionStorage.getItem(OTA_RENDER_CACHE_KEY);
+    const fetch = window.fetch;
+    const status = { ...original.status, boot_id: "ota-motion", app_elf_sha256: "ota-image",
+      hp: { ...original.status.hp, connected: true }, history: { rows: [] } };
+    const row = (label, value, reg, binary = false) => ({ label, value, reg, binary });
+    const values = [row("I/U operation mode", "Heating", 0x60),
+      row("INV frequency (rps)", "18", 0x30), row("Defrost Operation", "0", 0x10, true),
+      row("Fan 1 (step)", "5", 0x30),
+      row("Water pump operation", "1", 0x60, true), row("Flow sensor (l/min)", "12", 0x62),
+      row("Leaving Water Temp. before BUH (R1T)", "35", 0x61),
+      row("Inlet Water Temp. (R4T)", "30", 0x61),
+      row("BUH step 1", "1", 0x60, true), row("BSH", "1", 0x60, true)];
+    const schem = document.getElementById("schem");
+    const ids = ["scFan", "scPump", "fPhe", "rfHot", "fTankEdgeL"];
+    const state = () => {
+      const tank = document.getElementById("fTankEdgeL"), colour = getComputedStyle(tank).stroke;
+      return {
+        cached: S.otaCached, value: document.getElementById("svLwt").textContent,
+        snapshot: document.getElementById("svStatus").textContent ===
+          t("ota.active_sub_cached", S.otaView?.text || t("ota.starting")),
+        bsh: schem.classList.contains("bsh-on"), buh: schem.classList.contains("buh-on"),
+        neutral: schem.classList.contains("water-neutral"),
+        tankWarm: !colour.startsWith("url("),
+        motion: ids.map(id => getComputedStyle(document.getElementById(id)).animationName),
+      };
+    };
+    try {
+      Object.assign(S, { status, imageLease: null, otaWriter: null, otaCached: false,
+        _values: values, _modbus: [], transportUnavailable: null, insp: null, scrub: null,
+        hist: new Map(), histPin: new Map(), histRequests: new Map(), histBusy: new Set(),
+        histAwait: new Map() });
+      if (!otaCacheStore()) throw new Error("could not store the motion snapshot");
+      S.status = null;
+      const restored = await otaCacheRestore({ current: status.version, boot_id: status.boot_id,
+        app_elf_sha256: status.app_elf_sha256 });
+      const cached = state();
+      window.fetch = (url, options) => url === "/status" || url === "/values"
+        ? Promise.resolve(new Response(JSON.stringify(url === "/status" ? status : { values })))
+        : fetch(url, options);
+      const acceptedStatus = await refreshStatus();
+      const statusOnly = state();
+      const acceptedValues = await refreshValues();
+      return { restored, acceptedStatus, acceptedValues, cached, statusOnly, live: state() };
+    } finally {
+      window.fetch = fetch;
+      if (oldCache === null) sessionStorage.removeItem(OTA_RENDER_CACHE_KEY);
+      else sessionStorage.setItem(OTA_RENDER_CACHE_KEY, oldCache);
+      Object.assign(S, original);
+      renderApp();
+    }
+  })()`);
+  assert.equal(observed.restored, true, `${context}: restore the same boot and image`);
+  assert.equal(observed.acceptedStatus, true);
+  assert.equal(observed.acceptedValues, true);
+  assert.deepEqual(observed.cached, {
+    cached: true, value: "35.0", snapshot: true, bsh: false, buh: false,
+    neutral: true, tankWarm: false, motion: ["none", "none", "none", "none", "none"],
+  }, `${context}: a cached active frame preserves readings without live motion or electric heat colours`);
+  assert.deepEqual(observed.statusOnly, observed.cached, `${context}: status alone leaves the snapshot paused`);
+  assert.deepEqual(observed.live, {
+    cached: false, value: "35.0", snapshot: false, bsh: true, buh: true,
+    neutral: false, tankWarm: true, motion: ["spin", "pump-spin", "dashfwd", "rdashfwd", "dashfwd"],
+  }, `${context}: a fresh same-image status and values pair resumes qualified activity`);
+}
+
+async function assertModbusCompressorWitness(page, context) {
+  const observed = await page.evaluate(`(async () => {
+    const original = { ...S }, fetch = window.fetch;
+    const values = [{ label: "INV frequency (rps)", value: null, reg: 0x30 }];
+    let payload;
+    try {
+      S.status = { ...S.status, hp: { ...S.status.hp, connected: true },
+        modbus: { ...S.status.modbus, enabled: true, connected: true } };
+      S.transportUnavailable = null;
+      S.otaCached = false;
+      S.insp = null;
+      S.otaInstalling = false;
+      S.modbusHistoryLease = null;
+      window.fetch = (url, options) => url === "/values"
+        ? Promise.resolve(new Response(JSON.stringify(payload))) : fetch(url, options);
+      const observations = [];
+      for (const [witness, raw] of [[true, 0], [false, 1], [undefined, 1], [null, 1], ["true", 1]]) {
+        payload = { values, modbus: [{ off: 31, label: "Compressor running", value: raw, binary: true }],
+          modbus_compressor_running: witness };
+        const accepted = await refreshValues();
+        observations.push({ accepted, running: S.live?.mbCompressorOn, raw: S._modbus[0]?.value });
+      }
+      return observations;
+    } finally {
+      window.fetch = fetch;
+      Object.assign(S, original);
+      renderApp();
+    }
+  })()`);
+  assert.deepEqual(observed, [[true, 0], [false, 1], [null, 1], [null, 1], [null, 1]]
+    .map(([running, raw]) => ({ accepted: true, running, raw })),
+    `${context}: only a typed current witness supplies compressor state and the raw row remains visible`);
+}
+
 async function assertHistoryReadouts(page, context) {
   // Use the shipped chart builders and delegated touch/keyboard wiring inside the same clipping
   // surface as an expanded value row. Synthetic rings keep this independent of device history.
@@ -2116,6 +3047,15 @@ async function assertHistoryReadouts(page, context) {
           S.hist.set(id,ring(values.map((v,i) => id === "dhw_tank" && i === 7 ? null : v),id === "dhw_tank" ? "°C" : ""));
           S.hist.set(histCacheKey(id,"modbus"),ring(values.map(v => id === "dhw_tank" ? v + 2 : v),
             id === "dhw_tank" ? "°C" : ""));
+          if (id === "dhw_tank") {
+            for (const [phase, local, remote] of [["smart_grid_mode", 20, 0], ["bsh_state", 0, 10]]) {
+              const spec = {id:phase,label:phase};
+              S.status.history.rows.push(spec);
+              S.status.history.modbus_rows.push(spec);
+              S.hist.set(phase,ring(values.map((_,i) => i === 7 ? null : local),""));
+              S.hist.set(histCacheKey(phase,"modbus"),ring(values.map(() => remote),""));
+            }
+          }
         }
         document.getElementById("browserHistoryFixture").dataset.hist = id;
         window.__browserHistoryRender();
@@ -2148,7 +3088,7 @@ async function assertHistoryReadouts(page, context) {
             const host=document.getElementById("browserHistoryFixture"),plot=host.querySelector("[data-hist]");
             const r=plot.getBoundingClientRect(),time=host.querySelector(".vhist-time.vhist-live");
             const i=scrubIndex(plot,r.left + plot.clientWidth * ${fraction});
-            return {id:plot.dataset.hist,scrub:S.scrub,actual:time.textContent,hidden:time.hidden,
+            return {id:plot.dataset.hist,scrub:S.scrub?.dataset?.hist,actual:time.textContent,hidden:time.hidden,
               expected:scrubTime(historyView(plot.dataset.hist),i),sample:i,
               plot:{left:r.left,top:r.top,width:r.width,height:r.height},events:window.__browserHistoryEvents};
           })()`);
@@ -2173,12 +3113,34 @@ async function assertHistoryReadouts(page, context) {
       if(["dhw_tank","env3_combined"].includes(id))
         assert.equal(baseline.tip.includes(baseline.time),false,
           `${context}/${id}: pinned measurement time belongs on the axis rather than in the bubble`);
+      if (id === "dhw_tank") {
+        const phases = await page.evaluate(`(() => {
+          const host = document.getElementById("browserHistoryFixture");
+          const plot = host.querySelector("[data-hist]").getBoundingClientRect();
+          const lanes = [...host.querySelectorAll(".vhist-dhw-phases .vhist-state-lane")];
+          return { labels:lanes.map(lane=>lane.firstElementChild.textContent),
+            aligned:lanes.every(lane=>{
+              const r=lane.lastElementChild.getBoundingClientRect();
+              return r.height>0 && r.top>=plot.bottom && Math.abs(r.left-plot.left)<1 &&
+                Math.abs(r.right-plot.right)<1;
+            }),
+            pin:host.querySelector(".vhist-tip.vhist-pinned").textContent,
+            expected:[t("sg.mode2"), t("sg.mode0"), t("hist.heater_inactive"), t("hist.heater_active")] };
+        })()`);
+        const labels = ["X10A · Smart Grid", "Modbus · Smart Grid", "X10A · BSH", "Modbus · BSH"];
+        assert.equal(phases.aligned,true,`${context}: auxiliary tracks align with temperature samples`);
+        assert.deepEqual(phases.labels.map((label,i)=>label.startsWith(labels[i])), [true,true,true,true]);
+        for (const [i,label] of labels.entries())
+          assert.ok(phases.pin.includes(label + ": " + phases.expected[i]),
+            `${context}: pin retains each disagreeing source at the same instant`);
+      }
       // Start far from the preceding tap so this is unambiguously a new drag rather than a second
       // tap. Its first destination also clears movement slop on narrow phone plots.
       let finger = await point(0.9);
       await touch("touchStart", finger);
       await waitForTime(0.9,"start");
-      assert.equal(await page.evaluate("S.scrub"),id,`${context}/${id}: touchstart owns the active scrub`);
+      assert.equal(await page.evaluate(`S.scrub === document.querySelector("#browserHistoryFixture [data-hist]")`),
+        true, `${context}/${id}: touchstart owns the active plot`);
       const overlaps = {tip:false,time:false};
       for (const fraction of [0.35,0.25,0.2,0.8,1,0]) {
         const destination = await point(fraction);
@@ -2214,6 +3176,7 @@ async function assertHistoryReadouts(page, context) {
             plotTop:p.top,plotHeight:p.height,pin:pin.textContent,pinTime:pinTime.textContent,
             axisTime:liveTime.textContent,expectedTime:scrubTime(view,i),
             selectedTimeInBubble:!STATE_HIST[plot.dataset.hist] && live.textContent.includes(scrubTime(view,i)),
+            dhwGap:plot.dataset.hist === "dhw_tank" && live.textContent.includes("X10A · Smart Grid: " + t("hist.nm")),
             axisBelow:c.top >= p.bottom + 4 && d.top >= p.bottom + 4, pinTimeTop:c.top,
             inside:[a,b,c,d].every(r=>r.left >= clip.left - 1 && r.right <= clip.right + 1 && r.bottom <= clip.bottom + 1),
             bounds:{pin:a,live:b,pinTime:c,liveTime:d,clip},
@@ -2236,6 +3199,8 @@ async function assertHistoryReadouts(page, context) {
         assert.equal(state.selectedTimeInBubble,false,`${label}: measurement tooltips contain values, with time on the axis`);
         if(id === "env3_combined")
           assert.equal(state.valuesAligned,true,`${label}: measured and forecast values share a left-aligned column`);
+        if(id === "dhw_tank" && fraction === 0.35)
+          assert.equal(state.dhwGap,true,`${label}: missing X10A remains missing while Modbus reports a state`);
         assert.equal(state.pin,baseline.tip,`${label}: movement must preserve the pinned reading`);
         assert.equal(state.pinTime,baseline.time,`${label}: movement must preserve its pinned instant`);
         assert.equal(state.cross,true,`${label}: the pinned crosshair remains visible`);
@@ -2286,10 +3251,12 @@ async function assertHistoryReadouts(page, context) {
             button(source).click(); window.__browserHistoryRender();
             const plot=host.querySelector("[data-hist]");
             scrubMove(plot,+plot.dataset.n - 1);
-            const cls=pathClass[source];
+            const cls=pathClass[source], pin=host.querySelector(".vhist-tip.vhist-pinned");
+            const hiddenReadout=source === "modbus" ? !pin.querySelector(".vhist-tip-label.mb") &&
+              pin.textContent.includes("Modbus · Smart Grid:") && pin.textContent.includes("Modbus · BSH:")
+              : !pin.textContent.includes(name);
             changed.push(button(source).getAttribute("aria-pressed") === "false" && !button(source).disabled &&
-              !host.querySelector(".vhist-line." + cls) && !host.querySelector(".vhist-area." + cls) &&
-              !host.querySelector(".vhist-tip.vhist-pinned").textContent.includes(source === "modbus" ? "Modbus" : name) &&
+              !host.querySelector(".vhist-line." + cls) && !host.querySelector(".vhist-area." + cls) && hiddenReadout &&
               Array.from(host.querySelectorAll('.vhist-mark.vhist-live[data-source="' + source + '"]')).every(mark=>mark.hidden));
           }
           const last=sources[0],hidden=JSON.stringify(Array.from(S.histHidden.get(id)));
@@ -2482,9 +3449,24 @@ try {
     await openModalWithKeyboard(page, "refTempModal", modalTriggers.refTempModal,
       "selftest/desktop/de/refTempModal", { route: false });
     throw new Error("route-isolation-bypass mutation unexpectedly survived the route gate");
+  } else if (process.argv.includes("--ota-snapshot-only")) {
+    for (const viewport of viewports) {
+      await page.viewport(viewport.width, viewport.height);
+      await activateLocale(page, "en");
+      await assertOtaHistorySnapshot(page, `${viewport.name}/ota-history`);
+      await assertOtaSnapshotMotion(page, `${viewport.name}/ota-motion`);
+      await assertModbusCompressorWitness(page, `${viewport.name}/modbus-compressor`);
+      await assertPumpCommandTruth(page, `${viewport.name}/en/pump-command`, "en");
+      await assertUnknownCompressorActivity(page, `${viewport.name}/en/unknown-activity`);
+    }
+    assert.deepEqual(page.diagnostics, [], "OTA snapshot and Modbus witness must emit no browser errors");
+    console.log(`focused OTA snapshot and Modbus witness rendering passed: ${viewports.length} viewports`);
   } else if (process.argv.includes("--history-only")) {
     for (const viewport of viewports) {
       await page.viewport(viewport.width, viewport.height);
+      await activateLocale(page, "en");
+      await assertOtaHistorySnapshot(page, `${viewport.name}/ota-history`);
+      await assertOtaSnapshotMotion(page, `${viewport.name}/ota-motion`);
       for (const locale of browserLocales) {
         await activateLocale(page, locale);
         await assertHistoryReadouts(page, `${viewport.name}/${locale}/history`);
@@ -2532,6 +3514,19 @@ try {
     console.log(`focused card prototype rendering passed: 2 locales; 2 themes; ${focusedViewports.map(viewport => viewport.width).join("/")} px`);
   } else if (process.argv.includes("--setup-only")) {
     for (const viewport of viewports) await assertSetup(page, server, viewport);
+  } else if (process.argv.includes("--pump-only")) {
+    for (const viewport of viewports) {
+      await page.viewport(viewport.width, viewport.height);
+      await assertModbusCompressorWitness(page, `${viewport.name}/modbus-compressor`);
+      for (const locale of browserLocales) {
+        await activateLocale(page, locale);
+        await page.evaluate("showStage('dashboard'); window.scrollTo(0, 0); true");
+        await assertPumpCommandTruth(page, `${viewport.name}/${locale}/pump-command`, locale);
+        console.log(`pump command render checked: ${viewport.name}/${locale}`);
+      }
+    }
+    assert.deepEqual(page.diagnostics, [], "pump source frames must emit no browser errors");
+    console.log(`focused pump rendering passed: ${browserLocales.length} locales; ${viewports.length} viewports`);
   } else if (process.argv.includes("--diagnosis-only")) {
     // A focused rendering pass for diagnosis-copy iterations. The default full matrix below and
     // the supervisor's independent mutation controls remain unchanged.
@@ -2570,6 +3565,9 @@ try {
       // assertHistoryMotion's finally has restored the fixture and stopped its witnesses. A fast
       // viewport must now pause until its sibling is also outside temporal observation.
       await waitForHistoryContinuation(viewport.name);
+      await assertOtaHistorySnapshot(page, `${viewport.name}/ota-history`);
+      await assertOtaSnapshotMotion(page, `${viewport.name}/ota-motion`);
+      await assertModbusCompressorWitness(page, `${viewport.name}/modbus-compressor`);
     }
     // The mutation seeds one complete locale's route budget, then exercises this same assertion on
     // the first extra route. It proves the boundary without running a deliberately flooded modal
@@ -2784,6 +3782,26 @@ try {
   }
   assert.equal(unknownActivityChecks, viewports.length * browserLocales.length,
     "unknown and missing outdoor inputs require every locale and viewport");
+
+  // These inspector replacements have no history inputs and start in their own document, so a
+  // prior native source fixture cannot leave requests or callbacks that overwrite the pump frames.
+  let pumpCommandChecks = 0;
+  for (const viewport of viewports) {
+    await page.viewport(viewport.width, viewport.height);
+    await page.navigate(server.url);
+    await page.send("Page.bringToFront");
+    await page.waitFor("typeof S !== 'undefined' && S.status && Array.isArray(S._values)");
+    await page.evaluate("pollStop(); pollSchedule = () => {}; true");
+    for (const locale of browserLocales) {
+      await activateLocale(page, locale);
+      await page.evaluate("showStage('dashboard'); window.scrollTo(0, 0); true");
+      await assertPumpCommandTruth(page, `${viewport.name}/${locale}/pump-command`, locale);
+      pumpCommandChecks++;
+      console.log(`browser pump command checked: ${viewport.name}/${locale}`);
+    }
+  }
+  assert.equal(pumpCommandChecks, viewports.length * browserLocales.length,
+    "pump command, reported activity and measured flow require every locale and viewport");
 
   assert.equal(routedKeyboardOpens, routedKeyboardBudget,
     "every routed modal requires one real browser History roundtrip per viewport");

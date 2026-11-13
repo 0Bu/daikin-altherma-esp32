@@ -1,9 +1,10 @@
-// translation-source: 00f8393aee827b21e658965c9ff792c99c563d60de18775bb092ec7c42167e1f
+// translation-source: ac1d249c2da76d0808ed38d66a25c64bb11e3306e999e5ee57e4de5114c6ad10
 I18N.it = localeValues([
   /* sys.nodata */ "Nessun dato",
   /* sys.unreachable */ "Non raggiungibile",
   /* sys.x10a_down */ "X10A non in linea",
   /* sys.mb_carrying */ "Modalità operativa sconosciuta — letture da Modbus",
+  /* sys.mode_unknown */ "Modalità operativa sconosciuta",
   /* sys.mb_only */ "X10A non in linea — letture da Modbus",
   /* sys.mb_source */ "X10A non in linea · Modbus",
   /* mode.stop */ "Arresto",
@@ -20,6 +21,7 @@ I18N.it = localeValues([
   /* sys.standby */ "Standby — non in funzione",
   /* sys.defrosting */ "Sbrinamento",
   /* sys.circulating */ "Circolazione — compressore spento",
+  /* sys.pump_reported */ "Pompa segnalata accesa — circolazione non confermata",
   /* sys.cool_mode */ "Modalità raffrescamento",
   /* sys.residual_circulating */ "Circolazione del calore residuo — nessuna resa frigorifera",
   /* sys.bsh_active */ "Riscaldatore elettrico del serbatoio attivo",
@@ -334,7 +336,7 @@ I18N.it = localeValues([
   /* a4.operation_help */ "Indica Arresto, Riscaldamento del serbatoio, Riscaldamento ambienti, Raffrescamento ambienti o Funzionamento dell’attuatore. È uno stato segnalato, non una prova di trasferimento termico utile.",
   /* a4.heating_offset_help */ "Sposta la curva di riscaldamento climatica della zona principale in kelvin. È una correzione, non una temperatura misurata né il valore completo della temperatura obiettivo dell’acqua.",
   /* a4.pre_phe_outdoor_help */ "Temperatura dell’acqua prima dello scambiatore a piastre esterno. Il sensore è sul lato acqua: non misura l’aria esterna né il refrigerante.",
-  /* a4.flow_help */ "La scala della portata Altherma 4 non è verificata. Il valore in L/min usa la conversione esistente; confrontarlo con la lettura dell'unità prima di valutare le prestazioni.",
+  /* mb.flow_scale_help */ "La scala della portata di questa sorgente Modbus non è verificata. Confrontare il valore con quello mostrato dall'unità.",
   /* a4.pump_help */ "La guida Altherma 4 indica la velocità della pompa, ma riporta L/min. L'unità % visualizzata è un'ipotesi non verificata; confrontarla con la lettura dell'unità.",
   /* a4.pressure_help */ "La scala della pressione Altherma 4 non è verificata. Il valore in bar usa la conversione esistente; confrontarlo con la lettura dell'unità prima di valutare la pressione.",
   /* a4.demand_response */ "Modalità di risposta alla domanda",
@@ -380,6 +382,8 @@ I18N.it = localeValues([
   /* val.since_min */ (d) => `\u2265 ${d}`,
   /* val.since_gap */ (d) => `${d} non osservati`,
   /* hist.modbus_plateau */ (when, d) => `registro invariato ${when} · circa ${d} · età della misura sconosciuta`,
+  /* hist.modbus_flow_unverified */ "La scala della portata Modbus registrata non è verificata.",
+  /* hist.thermal_bucket_note */ "Stima da campioni di cinque minuti che possono essere stati rilevati in momenti diversi.",
   /* hist.boost_total */ (d) => `Potenziamento · ${d}`,
   /* hist.boost_none */ "Nessun potenziamento nel periodo registrato.",
   /* hist.boost_ago_range */ (a, b) => `${a}–${b} h fa`,
@@ -419,10 +423,10 @@ I18N.it = localeValues([
   /* hist.buh_step2 */ "Stadio 2",
   /* hist.buh_aria */ (l, d) => `${l} — cronologia del riscaldatore ausiliario. ${d}. I tasti freccia leggono i singoli campioni.`,
   /* hist.valve_dhw_total */ (d) => `ACS · ${d}`,
-  /* hist.valve_space_total */ (d) => `Ambienti · ${d}`,
-  /* hist.valve_none */ "Nessuna posizione ACS nel periodo registrato.",
+  /* hist.valve_space_total */ (d) => `Circuito ambienti · ${d}`,
+  /* hist.valve_none */ "Nessun percorso ACS segnalato nel periodo registrato.",
   /* hist.valve_dhw */ "ACS",
-  /* hist.valve_space */ "Ambienti",
+  /* hist.valve_space */ "Circuito ambienti",
   /* hist.valve_aria */ (l, d) => `${l} — cronologia della valvola a 3 vie. ${d}. I tasti freccia leggono i singoli campioni.`,
   /* hist.circ_total */ (d) => `Pompa · ${d}`,
   /* hist.circ_none */ "Nessun funzionamento della pompa osservato nel periodo registrato.",
@@ -462,7 +466,7 @@ I18N.it = localeValues([
   /* ota.check_failed */ "verifica non riuscita",
   /* ota.starting */ "avvio…",
   /* ota.pct */ (p) => `${p}%`,
-  /* ota.rebooting */ "riavvio…",
+  /* ota.rebooting */ "In attesa del riavvio…",
   /* ota.failed */ "aggiornamento non riuscito",
   /* ota.timeout */ "tempo scaduto",
   /* ota.cancelled */ "annullato",
@@ -476,7 +480,7 @@ I18N.it = localeValues([
   /* ota.snapshot_label */ "Stato dei dati",
   /* ota.snapshot_value */ "Istantanea",
   /* ota.snapshot_help */ "Ultimo stato ricevuto prima di questo ricaricamento. I dati in tempo reale possono interrompersi durante l'installazione; le impostazioni restano bloccate fino al riavvio.",
-  /* ota.reload_hint */ "installato — ricaricare la pagina",
+  /* ota.reload_hint */ "Impossibile verificare il riavvio",
   /* ota.dialog_title */ "Aggiornamento firmware",
   /* ota.switch_title */ "Cambia versione firmware",
   /* ota.changes_title */ "Modifiche in questo aggiornamento",
@@ -513,6 +517,21 @@ I18N.it = localeValues([
   /* schem.room */ "Ambiente",
   /* schem.flow_rate */ "portata",
   /* schem.water_press */ "pressione",
+  /* schem.capacity_low_speed */ "La stima della potenza richiede una velocità attuale del compressore superiore a 5 giri/s misurata tramite X10A.",
+  /* schem.no_usable_power */ (metric) => (metric ? `${metric} non disponibile. ` : "") + "Nessuna stima utilizzabile della potenza elettrica.",
+  /* schem.backup_heater_active */ "Il riscaldatore elettrico ausiliario risulta acceso",
+  /* schem.compressor_off */ "Compressore fermo. Non è disponibile una stima della sua potenza.",
+  /* schem.outdoor_held */ "I valori esterni di X10A rimasti dal ciclo precedente non vengono mostrati.",
+  /* schem.outdoor_homehub */ "La temperatura esterna proviene da HomeHub Modbus. Il registro non indica l’ora della misura.",
+  /* schem.homehub_compressor_off */ "HomeHub indica che il compressore è SPENTO.",
+  /* schem.outdoor_independent */ "L’attività delle resistenze elettriche e la circolazione dell’acqua si osservano separatamente.",
+  /* schem.water_route_unknown */ "Il percorso selezionato dalla valvola a 3 vie è sconosciuto. La portata del circuito comune non identifica il ramo dell’accumulo o della climatizzazione.",
+  /* schem.flow_invalid */ "La lettura della portata X10A non è valida.",
+  /* schem.defrost_transfer */ "Scambio termico stimato durante lo sbrinamento",
+  /* schem.transfer_sign */ "Positivo: l’acqua riceve calore. Negativo: cede calore.",
+  /* schem.efficiency_no_capacity */ (metric) => `${metric} non disponibile. Nessuna stima utilizzabile della potenza per questo perimetro.`,
+  /* schem.efficiency_ct_pair */ (outlet) => `Il calcolo usa la corrente dei CT e le temperature ${outlet} e R4T.`,
+  /* schem.efficiency_inv_pair */ "Il calcolo usa R1T prima del riscaldatore ausiliario e R4T. La potenza elettrica è stimata dalla corrente dell’inverter assumendo 230 V. I carichi elettrici coperti, inclusi i riscaldatori, non sono verificati.",
   /* schem.r2t */ "R2T",
   /* schem.r3t */ "R3T",
   /* schem.flow_switch */ "FLUSSOST.",
@@ -769,6 +788,7 @@ I18N.it = localeValues([
   /* hh.found */ (host) => `HomeHub trovato: ${host}`,
   /* hh.not_found */ "Nessun HomeHub trovato — inserire manualmente l'indirizzo.",
   /* hh.saved */ "Impostazioni Modbus salvate",
+  /* hh.start_pending */ "Impostazioni salvate. La lettura da HomeHub è ancora in attesa.",
   /* hh.err_port */ "La porta deve essere compresa tra 1 e 65535",
   /* hh.err_unit */ "L'ID unità deve essere compreso tra 1 e 247",
   /* board.title */ "Hardware della scheda",
@@ -949,10 +969,9 @@ I18N.it = localeValues([
   /* lang.sv */ "Svenska",
   /* lang.fi */ "Suomi",
   /* lang.saved */ "Lingua salvata",
-  /* hist.cop_none */ "Nessuna curva COP quando la potenza elettrica proviene dalle pinze CT. I carichi inclusi dipendono dal cablaggio; la potenza termica registrata termina prima di BUH e non comprende il calore diretto di BSH, quindi non è garantito lo stesso confine di bilancio.",
 ]);
 INSPECT_I18N.it = inspectValues(
-  ["Nessuna lettura attuale:", "il compressore è fermo e l’unità esterna aggiorna i propri sensori solo durante il funzionamento. Il valore dell’ultimo ciclo viene nascosto per non mostrarlo come attuale.", "Velocità del compressore non leggibile: i valori dell’unità esterna possono essere dell’ultimo ciclo."],
+  ["Nessuna lettura attuale:", "il compressore è fermo e l’unità esterna aggiorna i propri sensori solo durante il funzionamento. Il valore dell’ultimo ciclo viene nascosto per non mostrarlo come attuale.", "L’età di queste letture esterne X10A è sconosciuta. Potrebbero risalire all’ultimo ciclo."],
   [
     ["Modalità di funzionamento", 0, "Modalità dell’unità interna. Da sola non conferma compressore né portata."], // status
     ["Clima esterno", "Clima esterno da ENV III", "Temperatura, umidità e pressione di ENV III; la posizione condiziona la misura esterna."], // env3
@@ -967,15 +986,11 @@ INSPECT_I18N.it = inspectValues(
       : d.sgMode === 1 ? "Il gestore energetico segnala «arresto forzato»."
       : d.sgMode === 3 ? "Il gestore energetico segnala «avvio forzato»."
       : "Nessuna richiesta Smart Grid esterna; l’unità funziona autonomamente."], // sgrequest
-    ["Unità esterna", 0, "Lato sorgente termica di un impianto aria-acqua. La ventola muove aria sullo scambiatore e il compressore aumenta pressione e temperatura del refrigerante. È uno schema funzionale semplificato; monoblocco, geotermiche e ibride hanno una disposizione diversa.", (d) => d.defrost
-      ? "Sbrinamento attivo: il circuito si inverte per sciogliere il ghiaccio sull’evaporatore e preleva brevemente calore dall’acqua."
-      : compressorRunning(d)
+    ["Unità esterna", 0, "Lato sorgente termica di un impianto aria-acqua. La ventola muove aria sullo scambiatore e il compressore aumenta pressione e temperatura del refrigerante. È uno schema funzionale semplificato; monoblocco, geotermiche e ibride hanno una disposizione diversa.", (d) => compressorRunning(d)
       ? d.rps != null
-        ? `In funzione: compressore a ${fmt0(d.rps)} rps${d.quiet ? ", limitato dalla modalità silenziosa" : ""}.`
-        : "In funzione: HomeHub conferma il compressore attivo; velocità e letture dettagliate richiedono X10A."
-      : d.ouHeldOver && d.mbFields && d.mbFields.has("out")
-      ? "In attesa: compressore fermo. X10A non aggiorna più i sensori esterni; l’aria esterna proviene da HomeHub, lo scarico resta «—» e l’età reale della lettura Modbus è sconosciuta."
-      : "In attesa: compressore fermo, senza trasferimento attivo. I sensori propri dell’unità esterna restano «—» per non ripetere i valori dell’ultimo ciclo."], // ou
+        ? `In funzione: compressore a ${fmt0(d.rps)} rps${d.quiet ? ". X10A segnala la modalità silenziosa attiva" : ""}.`
+        : "HomeHub segnala che il compressore è acceso. La velocità e le letture esterne dettagliate richiedono X10A."
+      : "Il compressore è fermo."], // ou
     ["Compressore", 0, "Comprime il refrigerante per aumentarne pressione e temperatura. La frequenza in rps indica la velocità, non da sola la potenza termica o elettrica."], // comp
     ["Aria esterna", 0, "Temperatura al sensore esterno. A riposo X10A può trattenerla; viene nascosta o HomeHub è identificato."], // out
     ["Scambiatore esterno · R4T", "Temperatura scambiatore esterno R4T", "Temperatura dello scambiatore esterno. In riscaldamento può scendere sotto zero e ghiacciare; va letta insieme allo stato di sbrinamento."], // ouhx
@@ -984,8 +999,7 @@ INSPECT_I18N.it = inspectValues(
     ["Bassa pressione", 0, "Pressione del refrigerante sul lato bassa del compressore, dopo l’espansione in riscaldamento. Alcuni profili non offrono un trasduttore valido; in tal caso appare «—»."], // lp
     ["Valvola di espansione", 0, "Dosa il refrigerante e ne riduce la pressione. La posizione è espressa in impulsi di comando, non in percentuale né come conferma meccanica dell’apertura."], // eev
     ["Refrigerante lato liquido · R3T", "Temperatura refrigerante lato liquido R3T", "Temperatura del refrigerante sul lato liquido dello scambiatore interno. Non è la temperatura di ritorno dell’acqua."], // r3t
-    ["Scambiatore a piastre", 0, "Trasferisce energia tra refrigerante e acqua senza mescolarli. La potenza mostrata è stimata con portata e R1T/R4T; la posizione fisica esatta dei sensori dipende dal modello.", (d) => !compressorRunning(d, 5)
-      ? "Nessun trasferimento frigorifero attivo: compressore fermo. La pompa può ridistribuire calore residuo, ma non è potenza di riscaldamento o raffrescamento."
+    ["Scambiatore a piastre", 0, "Trasferisce energia tra refrigerante e acqua senza mescolarli. La potenza mostrata è stimata con portata e R1T/R4T; la posizione fisica esatta dei sensori dipende dal modello.", (d) => needsCapacitySpeed(d) && !d.dtStale ? t("schem.capacity_low_speed") : compressorStopped(d) ? stoppedCapacityText(d)
       : d.dtStale ? "Trasferimento all’acqua non calcolabile: pompa e portata non dimostrano movimento nelle piastre."
       : d.pth == null ? "Le letture non permettono di stimare un trasferimento utile nella direzione della modalità selezionata."
       : d.pthKind === "cooling" ? `Circa ${fmt1(d.pth)} kW sottratti all’acqua: ${fmt1(d.flow)} l/min con ΔT ${fmt1(d.dt)} K.`
@@ -995,7 +1009,7 @@ INSPECT_I18N.it = inspectValues(
     ["Ingresso PHE · R4T", "Ingresso acqua PHE R4T", "Temperatura dell’acqua che ritorna al PHE. È un sensore interno del circuito idraulico, non un sensore dedicato sugli emettitori dell’edificio."], // rwt
     ["ΔT acqua sul PHE", "Delta T acqua sul PHE", "R1T all’uscita del PHE meno R4T all’ingresso. È calcolato da due sensori; insieme alla portata descrive il trasferimento, ma non misura direttamente mandata e ritorno sugli emettitori.", (d) => d.dtStale ? "Nessun ΔT di lavoro: pompa e portata non dimostrano circolazione. Senza movimento, la differenza tra sensori non è un punto operativo."
       : d.dt == null ? null
-      : !compressorRunning(d, 5) ? `${fmt1(d.dt)} K con sola pompa: equalizzazione del calore residuo, non potenza termica.`
+      : needsCapacitySpeed(d) ? `${fmt1(d.dt)} K. ${t("schem.capacity_low_speed")}` : compressorStopped(d) ? `${fmt1(d.dt)} K. ${stoppedCapacityText(d)}`
       : d.thermalMode === "cool" ? `${fmt1(d.dt)} K. Nel raffrescamento attivo R1T deve essere sotto R4T; la differenza con segno è quindi negativa.`
       : `${fmt1(d.dt)} K. Positivo significa che il PHE cede calore all’acqua.`], // dt
     [(d) => d && d.pthKind === "cooling" ? "Potenza frigorifera stimata" : "Potenza termica stimata", "Potenza termica stimata sul PHE", (d) => d && d.pthKind === "cooling"
@@ -1003,53 +1017,50 @@ INSPECT_I18N.it = inspectValues(
       : "Stima del calore ceduto: portata/60 × (R1T−R4T) × ρ·cp (≈ 4,186 kJ/(l·K)) assumendo acqua. Dipende da portata, sensori e fluido; il glicole cambia il calcolo. BUH è dopo R1T e resta fuori dal valore.", (d) => d.dtStale ? d.bsh === true
       ? "Nessun trasferimento calcolabile sul PHE perché la circolazione non è dimostrata. La resistenza interna può ancora scaldare il serbatoio, ma il suo calore non attraversa R1T/R4T e questo bus non può quantificarlo."
       : "Nessuna potenza calcolabile perché non è dimostrato movimento d’acqua sul PHE. Manca un punto operativo; non significa 0 kW."
+      : needsCapacitySpeed(d) ? t("schem.capacity_low_speed")
       : d.pth == null ? null
-      : d.pthKind === "cooling" ? `≈ ${fmt1(d.pth)} kW frigoriferi${d.cop != null ? `; EER ${fmt1(d.cop)}` : ""}.`
+      : d.pthKind === "cooling" ? `≈ ${fmt1(d.pth)} kW frigoriferi${d.cop != null && !d.copPostBuh ? `; EER ${fmt1(d.cop)}` : ""}.`
       : `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `; COP ${fmt1(d.cop)}` : ""}.`], // pth
-    [(d) => d && d.efficiencyKind === "eer" ? "EER stimato della pompa di calore" : d && d.copScope === "plant" ? "COP stimato dopo BUH" : "COP stimato della pompa di calore", "Efficienza stimata", (d) => d && d.efficiencyKind === "eer"
-      ? "Potenza frigorifera stimata divisa per assorbimento elettrico stimato. Eredita le incertezze di fluido, sensori, tensione e fattore di potenza. È un EER istantaneo, non stagionale; l’energia misurata su una stagione è più significativa."
-      : "Potenza termica stimata divisa per assorbimento elettrico stimato con confini compatibili: dopo BUH con CT e R2T, oppure sola pompa di calore con corrente inverter. Il cablaggio CT decide i carichi inclusi. Indicazione istantanea, non contatore certificato.", (d) => d.copBlock === "tank_heater" ? "Nessun COP: la resistenza del serbatoio può essere inclusa nell’elettricità, ma il calore va direttamente al serbatoio senza attraversare i sensori di mandata; i confini non coincidono."
-      : d.copBlock === "buh_no_r2t" ? "Nessun COP: BUH attivo senza sensore successivo. L’elettricità può includere il riscaldatore mentre il calore viene stimato prima di esso."
-      : d.copBlock === "mb_scope" ? "Nessun COP: HomeHub misura l’elettricità dell’intera unità, ma il calore del solo PHE e non fornisce né stati dei riscaldatori né sensore a valle per allineare i confini."
-      : d.copBlock === "no_pel" ? d.pelHeld ? "Nessun COP: compressore fermo, la corrente inverter è dell’ultimo ciclo e non è attuale." : "Nessun COP: il profilo non fornisce né correnti CT né corrente inverter."
-      : d.cop == null ? null
-      : d.efficiencyKind === "eer" ? `${fmt1(d.cop)} kW frigoriferi per kW elettrico: ≈ ${fmt1(d.copPth)} kW sottratti con ≈ ${fmt1(d.pel)} kW assorbiti.`
-      : d.copScope === "plant" ? `${fmt1(d.cop)} kW termici dopo BUH per kW elettrico stimato da CT: ≈ ${fmt1(d.copPth)} / ≈ ${fmt1(d.pel)} kW. Il cablaggio CT determina i carichi inclusi.`
-      : `${fmt1(d.cop)} kW termici per kW elettrico nel confine pompa di calore: ≈ ${fmt1(d.copPth)} / ≈ ${fmt1(d.pel)} kW. BUH è fuori da entrambi i valori.`], // cop
-    ["Riscaldatore ausiliario · BUH", "Riscaldatore ausiliario BUH", "Riscaldatore elettrico del circuito acqua posto dopo R1T. Gli stadi possono aumentare mandata e consumo; non è la resistenza interna BSH del serbatoio.", (d) => d.buh1 == null && d.buh2 == null ? null : d.buh2 ? "Stadio 2: entrambi gli stadi scaldano." : d.buh1 ? "Stadio 1: uno stadio scalda." : "Inattivo: nessuno stadio BUH riscalda."], // buh
-    ["Resistenza serbatoio", "Resistenza elettrica del serbatoio", "Resistenza a immersione BSH nel serbatoio. Può scaldare con compressore, pompa e portata a zero; il contatto X10A non misura la potenza.", () => { const on = x10aDown() ? null : vOn(/^bsh$/i); return on == null ? null : on ? "Resistenza del serbatoio attiva." : "Inattiva: resistenza del serbatoio spenta."; }], // bsh
+    [(d) => d && d.efficiencyKind === "eer" ? eerScopeText(d, "EER stimato a partire dai CT", "EER stimato dalla corrente dell’inverter", "EER stimato")
+      : eerScopeText(d || {}, "COP stimato a partire dai CT", "COP stimato dalla corrente dell’inverter", "COP stimato"), "Efficienza stimata", (d) => d && d.efficiencyKind === "eer"
+      ? "Potenza frigorifera stimata divisa per assorbimento elettrico stimato. Eredita le incertezze di fluido, sensori, tensione e fattore di potenza. È un EER istantaneo, non stagionale; l’energia misurata su una stagione è più significativa." +
+        eerScopeText(d, post => ` Il calcolo usa R4T e ${post ? "R2T a valle" : "R1T a monte"} del riscaldatore ausiliario, con la corrente rilevata dai CT. Il cablaggio dei CT determina i carichi inclusi. Per il calcolo con CT occorre confermare che entrambi gli stadi BUH e il BSH siano spenti.`, " " + t("schem.efficiency_inv_pair"))
+      : "Potenza termica stimata divisa per la potenza elettrica stimata. Per il calcolo con CT occorre confermare che entrambi gli stadi BUH e il BSH siano spenti." + heatingEfficiencyBoundary(d), (d) => d.copBlock === "tank_heater" ? `${d.bsh === true ? `Nessun ${efficiencyMetric(d)}. La resistenza del serbatoio risulta accesa.` : `Nessun ${efficiencyMetric(d)}. Lo stato della resistenza del serbatoio è sconosciuto.`} Il suo calore non attraversa nessuno dei due sensori di mandata.`
+      : d.copBlock === "backup_heater" ? `${d.buh1 === true || d.buh2 === true ? `Nessun ${efficiencyMetric(d)}. Il riscaldatore ausiliario risulta acceso.` : `Nessun ${efficiencyMetric(d)}. Lo stato del riscaldatore ausiliario è sconosciuto.`} La stima elettrica non permette di stabilire se include il carico del riscaldatore.`
+      : d.copBlock === "mb_scope" ? `${efficiencyMetric(d)} non disponibile. I dati disponibili non permettono di associare la potenza elettrica di HomeHub alla potenza termica stimata allo scambiatore a piastre. Non è chiaro quali carichi elettrici, come le resistenze, siano inclusi.`
+      : d.copBlock === "no_pel" ? d.pelHeld ? `Nessun ${efficiencyMetric(d)}: compressore fermo, la corrente inverter è dell’ultimo ciclo e non è attuale.` : t("schem.no_usable_power", efficiencyMetric(d))
+      : d.cop == null ? efficiencyUnavailable(d)
+      : d.efficiencyKind === "eer" ? `${fmt1(d.cop)} kW frigoriferi per kW elettrico: ≈ ${fmt1(d.copPth)} kW sottratti con ≈ ${fmt1(d.copPel)} kW assorbiti.`
+      : d.copScope === "plant" ? `${fmt1(d.cop)} kW termici lato acqua per kW elettrico stimato da CT: ≈ ${fmt1(d.copPth)} / ≈ ${fmt1(d.copPel)} kW. Il cablaggio CT determina i carichi inclusi.`
+      : `${fmt1(d.cop)} kW termici per kW elettrico stimato. Circa ${fmt1(d.copPth)} kW termici per un assorbimento stimato di ${fmt1(d.copPel)} kW.`], // cop
+    ["Riscaldatore ausiliario · BUH", "Riscaldatore ausiliario BUH", "Riscaldatore elettrico del circuito acqua posto dopo R1T. Gli stadi possono aumentare mandata e consumo; non è la resistenza interna BSH del serbatoio.", (d) => d.buh2 === true ? "Lo stadio 2 risulta attivo." : d.buh1 === true ? "Lo stadio 1 risulta attivo." : d.buh1 === false && d.buh2 === false ? "Entrambi gli stadi risultano spenti." : null], // buh
+    ["Resistenza serbatoio", "Resistenza elettrica del serbatoio", "Resistenza a immersione BSH nel serbatoio. Può scaldare con compressore, pompa e portata a zero; il contatto X10A non misura la potenza.", (d) => d.bsh == null ? null : d.bsh ? "Resistenza del serbatoio attiva." : "Inattiva: resistenza del serbatoio spenta."], // bsh
     ["Valvola a 3 vie", 0, "L’uscita logica seleziona il serbatoio o gli ambienti. Non è un ritorno meccanico di posizione né una prova di portata.", (d) => d.valveDhw == null ? null : d.valveDhw ? "Il controllo indica il percorso serbatoio. Non dimostra posizione meccanica, portata o carica attiva." : "Il controllo indica il percorso ambienti. Non dimostra posizione meccanica o circolazione."], // valve
     ["Uscita valvola a 2 vie", 0, "Uscita binaria X10A per una 2WV del circuito ambienti. Non indica la posizione meccanica e non equivale alla modalità caldo/freddo.", (d) => d.valve2On == null ? null : d.valve2On ? "X10A indica l’uscita 2WV attiva. Non dimostra riscaldamento attivo o posizione meccanica; verificare modalità e funzionamento ambienti." : "X10A indica l’uscita 2WV inattiva. Da sola non significa raffrescamento e non contraddice una modalità riscaldamento configurata, soprattutto a riposo."], // valve2
     ["Serbatoio ACS", "Serbatoio ACS o accumulo termico", "Serbatoio misurato da R5T. Carica, obiettivo e resistenza BSH sono mostrati separatamente."], // tank
     [(d) => activeSpaceKind(d) === "cool" ? "Circuito raffrescamento" : activeSpaceKind(d) === "heat" ? "Circuito riscaldamento" : "Circuito ambienti", "Circuito ambienti", "Emettitori dell’edificio: radiatori, pavimento o ventilconvettori. L’impianto decide se riscaldano, raffrescano o entrambi; R1T/R4T sono misurati nella pompa e non confermano la loro temperatura.", (d) => d.valveDhw === true ? "Il percorso ambienti non è selezionato; pompa e portata mostrano separatamente un’eventuale circolazione nel serbatoio."
-      : waterMoving(d) ? d.thermalMode === "cool" && !compressorRunning(d, 5) && d.pthRaw != null && d.pthRaw > 0
+      : waterMoving(d) ? d.thermalMode === "cool" && compressorStopped(d) && heatersOff(d) && d.pthRaw != null && d.pthRaw > 0
         ? `Acqua residua calda circola verso gli ambienti. R1T interno: ${degC(d.lwt)}; nessun sensore a valle conferma la temperatura degli emettitori. Non è raffrescamento attivo.`
         : `L’acqua va al circuito ${activeSpaceKind(d) === "cool" ? "raffrescamento" : activeSpaceKind(d) === "heat" ? "riscaldamento" : "ambienti"}. R1T interno: ${degC(d.lwt)}; nessun sensore sugli emettitori.`
       : "Pompa e portata attuali non dimostrano circolazione nel ramo ambienti."], // heat
     ["Funzionamento ambienti", "Funzionamento caldo o freddo degli ambienti", "Segnale di normale funzionamento caldo/freddo degli ambienti. Non è la richiesta del termostato e non dimostra da solo che il compressore sia attivo."], // spaceh
     ["Temperatura ambiente", 0, "Temperatura e obiettivo della zona di riferimento; dipendono dalla posizione del sensore."], // room
-    ["Pompa di circolazione", "Velocità pompa di circolazione", "Muove l’acqua nell’anello comune e nel ramo scelto dalla 3WV. Può restare attiva con compressore fermo per post-circolazione, protezione o equalizzazione; velocità e portata vanno lette insieme.", (d) => d.pump == null && d.flow == null && d.pumpOn == null ? null
-      : pumpFlowConflict(d) ? `La pompa interna risulta ferma, ma il sensore misura ${fmt1(d.flow)} l/min. Sono possibili circolazione esterna, post-circolazione o segnali discordanti; verificare entrambi.`
-      : d.pump != null && d.pump > 0 ? d.flow != null ? `Velocità ${fmt0(d.pump)} %; portata misurata ${fmt1(d.flow)} l/min.` : `Velocità ${fmt0(d.pump)} %, ma manca la portata; circolazione non confermata.`
-      : waterMoving(d) ? `Il sensore misura ${fmt1(d.flow)} l/min senza una velocità pompa utilizzabile.`
-      : d.pumpOn === true ? d.flow != null ? `Pompa attiva, ma solo ${fmt1(d.flow)} l/min; circolazione non dimostrata.` : "Pompa attiva, ma manca la portata; circolazione non confermata."
-      : d.pumpOn === false || d.pump === 0 ? d.flow != null ? `Pompa ferma; il sensore indica ${fmt1(d.flow)} l/min. I segnali non dimostrano circolazione.` : "Pompa ferma e nessuna misura di portata."
-      : `Stato pompa non affidabile; ${fmt1(d.flow)} l/min non basta a dimostrare circolazione.`], // pump
+    ["Pompa di circolazione", "Comando della pompa di circolazione", "Muove acqua nel circuito comune e nel ramo scelto dalla valvola a 3 vie. La percentuale è il comando X10A invertito: 0 % richiede arresto e 100 % impegno massimo. Non misura velocità né prova rotazione o portata. Leggere separatamente stato ON/OFF e portata misurata; la circolazione può continuare a compressore fermo.", (d) => pumpNowText(d, [(n) => `Comando pompa ${n} %.`, "Lo stato della pompa è ON.", "La pompa segnala arresto (OFF).", "Lo stato segnalato della pompa è sconosciuto.", (n) => `Portata misurata ${n} l/min.`, "Nessuna misura di portata disponibile.", "OFF contrasta con la portata positiva; sono possibili circolazione esterna, inerzia o segnali discordanti/non aggiornati.", "La circolazione dell’acqua non è confermata."])], // pump
     [(d) => pelMeasured(d) ? "Assorbimento elettrico · HomeHub" : "Assorbimento elettrico stimato", "Assorbimento elettrico", (d) => pelMeasured(d)
       ? "Consumo comunicato dall’ingresso HomeHub 51. La UI non lo calcola, ma la guida pubblica non prova calibrazione, punto di misura o riscaldatori inclusi; non è un contatore certificato dell’impianto."
-      : "Stima per COP/EER. Con CT somma tutte le fasi dichiarate e usa corrente × 230 V presunti; tensione e fattore di potenza reali sono ignoti. La corrente inverter copre solo il compressore.", (d) => d.pelHeld ? "Compressore fermo: la corrente inverter è dell’ultimo ciclo e non è attuale; assorbimento ed efficienza non possono essere indicati."
-      : d.pel == null ? "Questo profilo non offre una lettura elettrica attuale; COP/EER non può essere calcolato."
+      : "La potenza è stimata dalla corrente dell’inverter o dalla somma di tutte le fasi CT dichiarate, assumendo 230 V. Tensione e fattore di potenza reali sono ignoti. I carichi coperti dall’inverter non sono verificati. Quelli dei CT dipendono dal cablaggio.", (d) => d.pelHeld ? "Compressore fermo: la corrente inverter è dell’ultimo ciclo e non è attuale; assorbimento ed efficienza non possono essere indicati."
+      : d.pel == null ? t("schem.no_usable_power")
       : d.pelSrc === "MB" ? "Comunicato dall’ingresso HomeHub 51; il confine esatto di misura non è documentato."
       : d.pelSrc === "CT" ? "Stimato con pinze CT; i carichi inclusi dipendono dal cablaggio."
-      : "Calcolato dalla corrente inverter, solo compressore."], // pel
-    ["Sbrinamento", 0, "Inverte temporaneamente il circuito per rimuovere ghiaccio dallo scambiatore esterno. Normale con freddo umido, preleva brevemente calore dall’acqua.", (d) => d.defrost == null ? null : d.defrost ? "Sbrinamento attivo." : "Inattivo: nessuno sbrinamento in corso."], // defrost
+      : "Stimato dalla corrente dell’inverter."], // pel
+    ["Sbrinamento", 0, "Inverte temporaneamente il circuito per rimuovere ghiaccio dallo scambiatore esterno. Normale con freddo umido, preleva brevemente calore dall’acqua.", (d) => d.defrost == null ? null : d.defrost ? "X10A indica che lo sbrinamento è attivo." : "X10A indica che lo sbrinamento è inattivo."], // defrost
     ["Modalità silenziosa", 0, "Modalità che limita rumore e di solito velocità o potenza dell’unità esterna. Il segnale mostra lo stato, non il livello esatto né l’effetto termico.", (d) => d.quiet == null ? null : d.quiet ? "Modalità silenziosa attiva." : "Inattiva: modalità silenziosa spenta."], // quiet
-    ["Linea gas", "Linea gas refrigerante", "Linea frigorifera tra unità nello schema split. In riscaldamento porta gas caldo ad alta pressione al PHE; in raffrescamento il flusso si inverte. Un monoblocco non ha questa linea in campo.", (d) => compressorRunning(d) ? d.rps != null ? `In circolazione: ${fmt1(d.circP)} bar a ${fmt0(d.disch)} °C.` : "In circolazione: HomeHub conferma il compressore; pressione e scarico richiedono X10A." : "Nessuna circolazione frigorifera attiva: compressore fermo. L’equalizzazione dipende dal circuito e dal tempo di arresto."], // rhot
-    ["Linea liquido", "Linea liquido refrigerante", "Linea frigorifera tra unità nello schema split. In riscaldamento riporta refrigerante condensato ad alta pressione alla valvola esterna; in raffrescamento il flusso si inverte. Un monoblocco non ha questa linea.", (d) => compressorRunning(d) ? d.rps != null ? `In circolazione: valvola di espansione a ${fmt0(d.eev)} impulsi.` : "In circolazione: HomeHub conferma il compressore; la posizione della valvola richiede X10A." : "Ferma: compressore arrestato."], // rcold
+    ["Linea gas", "Linea gas refrigerante", "Linea frigorifera tra unità nello schema split. In riscaldamento porta gas caldo ad alta pressione al PHE; in raffrescamento il flusso si inverte. Un monoblocco non ha questa linea in campo.", (d) => compressorRunning(d) ? d.rps != null ? `In circolazione: ${fmt1(d.circP)} bar a ${fmt0(d.disch)} °C.` : "HomeHub segnala che il compressore è acceso. Pressione e temperatura di scarico richiedono X10A." : "Nessuna circolazione frigorifera attiva: compressore fermo. L’equalizzazione dipende dal circuito e dal tempo di arresto."], // rhot
+    ["Linea liquido", "Linea liquido refrigerante", "Linea frigorifera tra unità nello schema split. In riscaldamento riporta refrigerante condensato ad alta pressione alla valvola esterna; in raffrescamento il flusso si inverte. Un monoblocco non ha questa linea.", (d) => compressorRunning(d) ? d.rps != null ? `In circolazione: valvola di espansione a ${fmt0(d.eev)} impulsi.` : "HomeHub segnala che il compressore è acceso. La posizione della valvola di espansione richiede X10A." : "Il compressore è fermo."], // rcold
     ["Tubo uscita PHE", "Tubo di uscita PHE", "Acqua che esce dal PHE a R1T e passa per BUH, pompa e 3WV. In riscaldamento/ACS è il lato caldo, in raffrescamento attivo il lato freddo; R1T è prima di BUH e dei rami.", (d) => waterMoving(d) ? `R1T prima di BUH: ${degC(d.lwt)} a ${fmt1(d.flow)} l/min${d.buh1 || d.buh2 ? "; uno stadio BUH è attivo dopo" : ""}.` : "Pompa e portata non dimostrano circolazione in questo tubo."], // wsup
     ["Circuito serbatoio", "Circuito idraulico serbatoio", "Ramo idraulico che carica il serbatoio ACS o l’accumulo. Lo scambiatore interno dipende dal modello; il disegno mostra la funzione, non la costruzione esatta. In questo schema deviato la carica interrompe il flusso diretto agli ambienti.", (d) => d.valveDhw === true ? waterMoving(d) ? `Percorso serbatoio selezionato: ${fmt1(d.flow)} l/min, uscita PHE ${degC(d.lwt)}, serbatoio ${degC(d.tank)}.` : "Percorso serbatoio selezionato, ma pompa e portata non dimostrano una carica attiva." : "Percorso serbatoio non selezionato; il controllo indica gli ambienti."], // wtank
     [(d) => activeSpaceKind(d) === "cool" ? "Ramo raffrescamento" : activeSpaceKind(d) === "heat" ? "Ramo riscaldamento" : "Ramo ambienti", "Ramo idraulico ambienti", "Ramo verso radiatori, pavimento, ventilconvettori o altri emettitori. R1T/R4T sono misurati nell’unità idronica e non provano la temperatura del ramo o il carico dell’edificio.", (d) => d.valveDhw === true ? "Ramo ambienti non selezionato; il controllo indica il serbatoio."
-      : waterMoving(d) ? d.thermalMode === "cool" && !compressorRunning(d, 5) && d.pthRaw != null && d.pthRaw > 0
+      : waterMoving(d) ? d.thermalMode === "cool" && compressorStopped(d) && heatersOff(d) && d.pthRaw != null && d.pthRaw > 0
         ? `Circolazione di calore residuo verso gli ambienti a ${fmt1(d.flow)} l/min; nessun raffrescamento attivo. R1T ${degC(d.lwt)}, R4T ${degC(d.ret)}; lato campo non misurato.`
         : `Circolazione verso gli ambienti a ${fmt1(d.flow)} l/min. Sensori interni: R1T ${degC(d.lwt)}, R4T ${degC(d.ret)}.`
       : "Pompa e portata non dimostrano circolazione nel ramo ambienti."], // wheat
@@ -1076,7 +1087,7 @@ HOMEHUB_LABEL_I18N.it = homeHubValues([
   "Compressore attivo", // 31
   "Resistenza serbatoio attiva", // 32
   "Disinfezione serbatoio attiva", // 33
-  "Posizione valvola a 3 vie", // 37
+  "Valvola a 3 vie", // 37
   "Modalità attuale caldo o freddo", // 38
   "Mandata all’uscita PHE", // 40
   "Mandata dopo BUH", // 41
@@ -1122,7 +1133,7 @@ DESCRIPTION_I18N.it = descriptionValues([
   ["Il riscaldamento ripristina il serbatoio al proprio obiettivo dopo la discesa sotto la soglia di avvio."], // 23
   ["Profilo programmato: Comfort usa l’obiettivo alto ed Eco quello basso."], // 24
   ["In un sistema ibrido, richiesta ACS del controllo alla caldaia."], // 25
-  ["La valvola deviatrice invia acqua al serbatoio ACS o al circuito ambienti; la posizione non prova attività."], // 26
+  ["Il percorso segnalato porta al serbatoio ACS o al circuito ambienti per il riscaldamento o il raffrescamento. Il dato da solo non conferma la posizione della valvola né la portata."], // 26
   ["Stato X10A ON/OFF dell’uscita per una 2WV opzionale; non prova modalità, tensione o posizione meccanica."], // 27
   ["Apertura della valvola miscelatrice di una seconda zona."], // 28
   ["Obiettivo di mandata della modalità riscaldamento o raffrescamento selezionata."], // 29
@@ -1132,7 +1143,7 @@ DESCRIPTION_I18N.it = descriptionValues([
   ["Temperatura R4T in ingresso PHE sul ritorno comune; il ΔT va valutato col modo, non con 5 K universali."], // 33
   ["Portata nel circuito idronico comune; il minimo dipende da modello e modo e una portata bassa può causare 7H."], // 34
   ["Pressione del circuito idronico; molti manuali richiedono >1 bar, ma a ≤1,0 bar va consultato il modello esatto."], // 35
-  ["Comando velocità pompa invertito: 0 significa piena velocità e 100 arresto."], // 36
+  ["Comando X10A invertito alla pompa di circolazione: il valore grezzo 0 richiede il massimo comando e 100 l’arresto. Non misura i giri (RPM) né prova rotazione o flusso d’acqua. Leggere separatamente lo stato ON/OFF segnalato e la portata misurata, anche a compressore fermo."], // 36
   ["Stato della pompa idronica; il funzionamento non prova da solo uno scambio termico utile."], // 37
   ["Stato della pompa di un circuito solare termico, distinta dalla pompa idronica della pompa di calore."], // 38
   ["Velocità indicata della pompa nominata dal profilo; scala e circuito dipendono dal modello."], // 39
@@ -1204,7 +1215,7 @@ DESCRIPTION_I18N.it = descriptionValues([
   ["Stato diagnostico HomeHub: Nessun errore, Guasto o Avviso; lo stato solo non identifica la causa."], // 105
   ["Significato del codice guasto comunicato ora"], // 106
   ["Sottocodice numerico del codice Daikin vicino; va letto solo insieme allo stato e al codice principale."], // 107
-  ["Indica se HomeHub comunica il compressore attivo; non fornisce velocità o capacità."], // 108
+  ["HomeHub indica lo stato del compressore, ACCESO o SPENTO. Velocità, potenza e trasferimento termico richiedono misure distinte."], // 108
   ["Indica se il normale funzionamento ACS è attivo, non il motivo dell’avvio."], // 109
   ["Indica se il normale funzionamento caldo/freddo degli ambienti è attivo."], // 110
   ["Uscita PHE prima di BUH; confrontarla col ritorno solo con circolazione per ottenere il ΔT."], // 111
@@ -1229,7 +1240,7 @@ MODEL_DESCRIPTION_I18N.it = modelDescriptionValues([
   ["Mostra gli avvii osservati e i cicli completati.", "La valutazione si basa sulla durata media dei cicli di riscaldamento."], // health_cycling
   ["Sbrinamento", "≥3 associati, >15% del tempo di marcia del compressore con stati compressore e sbrinamento leggibili. Regola interna, non Daikin; mancano umidità e temperatura dell’intera batteria."], // health_defrost
   ["Pressione", "regola interna comune ≤1,0 bar; 60 s continui osservati danno AVVISO. Non universale; vale il manuale del modello."], // health_pressure
-  ["Portata dopo 60 s di pompa", "Limite per stesso modello/modo/condizioni; non nominale né prova di portata insufficiente."], // health_flow
+  ["Portata X10A minima accettata dopo almeno 60 s coperti da indicazioni consecutive di pompa accesa.", "Limite per stesso modello/modo/condizioni; non nominale né prova di portata insufficiente."], // health_flow
   ["Tempo ON BUH/BSH", "non energia né prova di calore inutile."], // health_heater
   ["5 contatori sperimentali", "aumenti comparabili; lacune/reset esclusi. Stabilità non esclude limitazione né prova causa."], // health_retries
   ["RAM 24 h: stabile o cali recuperati; calo continuo, possibile perdita; riavvio compatibile alimentato: curva RAM possibile; altrimenti solo 5 min datati compatibili del registro flash a ora sincronizzata. Passi di 5 min possono celare pause brevi; aperto/recenti non salvati possono mancare."], // free_heap

@@ -168,14 +168,27 @@ An active BSH may explain electrical tank heating while compressor/pump/flow are
 | Input state | Drawing, values and inspector |
 |---|---|
 | Current X10A | Use the qualified reading and its exact register identity |
-| X10A unavailable/held, structurally paired live HomeHub | Show the independent HomeHub reading in petrol; inspector names its Modbus row |
-| Neither instrument can supply a current valid reading | Show `—`; explain the specific reason without substituting zero |
+| X10A link down, structurally paired live HomeHub | Show the supported fallback readings in petrol. Inspectors name the Modbus row |
+| Neither instrument supplies a usable value | Show `—` and explain the reason |
 | Stopped outdoor unit | Withhold held X10A outdoor-page readings; independently polled HomeHub may continue |
-| Outdoor page, compressor speed unread (`held_unknown`) | The HomeHub's compressor flag settles it where it answers: ON is current, OFF is a stopped unit. Otherwise a structurally paired live HomeHub stands in; else keep the number, with the inspector and value table saying it may be old, and derive no electrical estimate from it. A value the firmware dropped shows `—` |
+| Outdoor page, X10A age uncertain (`held_unknown`) | An X10A number that remains visible carries an age warning. HomeHub compressor reports describe their own observation, and the inverter estimate requires current X10A inputs |
 | HTTP unreachable | Stop unsupported motion, identify lost device contact and keep retrying |
 
-A successful Modbus read proves transport freshness. With no source timestamp, the underlying
-measurement age remains unknown. It cannot repair the provenance of a held X10A sample.
+With both links up, fallback is specific to the reading. A valid HomeHub row can supply outdoor
+air when the X10A reading is unusable. The current valve pill requires a current X10A report.
+A missing X10A leaving-water row leaves that pill blank until the link-wide
+fallback applies. HomeHub readings carry no source timestamp, so the underlying measurement age
+remains unknown.
+
+The fan animation uses a positive current X10A fan reading. The compressor state can come from
+X10A speed or the separately refreshed HomeHub input 31.
+
+For circulation and estimated heat transfer, the UI accepts decoded X10A flow from 0 to
+100 l/min. This is a project plausibility guard with margin above the plotted hydronic
+ranges in the [Altherma 3 M guide, §16.3](https://my.daikin.eu/content/dam/document-library/Installer-reference-guide/heat/air-to-water-heat-pump-low-temperature/EBLA04-08EV3.EBLA04-08E3V3.EDLA04-08EV3.EDLA04-08E3V3_Installer%20reference%20guide_4PEN685228-1B_English.pdf)
+and [Altherma 3 H HT F guide, §16.7](https://www.daikin.eu/content/dam/document-library/Installer-reference-guide/heat/air-to-water-heat-pump-high-temperature/epra14-18dw7/EPRA014-018D%28V.W%29.EPRA14-18D%28V.W%297.ETVH16UE6V%287%29_Installer%20reference%20guide_4PEN644738-1D_English.pdf).
+Equipment limits depend on the model. A value outside the display guard remains in the raw
+telemetry and raw history, while the schematic and estimated heat history withhold it.
 
 **Schematic topology and sensor placement**
 
@@ -215,29 +228,57 @@ inspector. Estimated power readings retain `≈` even when the inspector is clos
 
 **Derived working points**
 
-ΔT is R1T−R4T and needs moving water. Capacity also needs a running compressor, known mode and
-useful transfer direction: positive ΔT for heating/DHW, negative for cooling, displayed as positive
-cooling capacity. COP/EER additionally requires compatible thermal/electrical boundaries. Missing
-inputs, opposite-sign transfer and pump-only residual-temperature equalization leave these supported
-pills visible as `—`. A reported Cooling mode with hot residual circulation uses neutral pipes and
-Space circuit wording rather than claiming cooling output.
+Pump percentage is the inverted X10A controller command (0 % stop request, 100 % maximum effort),
+not measured speed. Only finite decoded inputs from 0 to 100 are inverted; invalid inputs stay
+blank in the live pill and history. Command, reported ON/OFF state and measured flow remain
+independent: a stop request does not establish reported OFF or absence of water motion.
+Modbus flow with [unverified scaling](API.md#get-values) remains visible with its conversion limit
+in the inspector. Qualified X10A flow drives water animation and thermal calculations. A negative
+or otherwise invalid X10A reading remains in raw telemetry and is identified in the flow
+inspector. The standby headline requires a stopped compressor, measured zero flow and confirmed
+OFF states for the backup and tank heaters. A pump OFF report alone leaves activity unknown when
+flow is unavailable.
+
+ΔT is R1T−R4T. It remains visible with both temperatures and qualified measured flow above
+0.5 L/min, even when the reported pump state is OFF. Capacity also needs current X10A compressor
+speed above 5 rps. With a known mode and a current X10A defrost-OFF report, positive ΔT supplies the
+heating/DHW estimate, and negative ΔT supplies cooling capacity, displayed as positive. During
+reported defrost, the same speed and flow thresholds permit a signed water-side transfer estimate.
+A Modbus ON report
+can describe activity when X10A speed is unavailable. If HomeHub reports ON alongside a current
+X10A zero speed, the inspector shows both readings and the shared activity remains uncertain.
+COP/EER requires compatible thermal and electrical
+boundaries. Capacity and COP/EER show `—` while the compressor is stopped or when their inputs do
+not support the calculation. A reported Cooling mode with hot residual circulation uses neutral
+pipes and Space circuit wording. Heater activity is presented from its own report.
 
 Thermal power uses flow/60 × ΔT × ρ·cp, approximately 4.186 kJ/(l·K) for water with
-ρ≈1 kg/l; glycol mixtures have different density and heat capacity. Electrical power is estimated
-from current and assumed 230 V. CT clamps describe whole-unit input, while inverter current describes the compressor-side
-boundary and is withheld when held at rest. A current profile lacking an input and an existing input
-held from the previous run get different explanations. Live COP scope accounts for heater
-boundaries; the inspector names the scope and any refusal. No label implies measured live power or
-seasonal efficiency.
+ρ≈1 kg/l; glycol mixtures have different density and heat capacity. X10A electrical estimates use
+current and assumed 230 V. CT coverage depends on wiring. The live inverter estimate requires
+positive X10A speed and nonnegative inverter current in the current readings.
+The inspector distinguishes held readings from absent inputs.
+HomeHub reports input 51 without verified measurement scope or heater coverage. The ratio uses
+CT estimates only with the electric heaters known off. When a backup heater may be active,
+the ratio can use a qualified inverter estimate and temperatures before the backup heater.
+The inspector names the actual electrical source and temperature pair, or why the ratio is unavailable.
 
 **State and motion**
 
-The 3-way valve selects the animated hydraulic branch. Water flow has mode-aware warm/cold colours;
-pump-only circulation is neutral. Cooling/defrost reverse refrigerant motion. Active BUH uses the
-warning tint; active BSH turns the tank's perimeter dashes a fixed orange, distinct from the
-red/blue hydronic charge.
-Rotors stay centred on their hubs, rotate clockwise only when running, and carry no rotating
-flow-direction arrow. Direction belongs to pipe dashes.
+The animated hydraulic branch needs a current X10A 3-way valve report. Qualified flow can still
+animate the common circuit. Water flow has mode-aware warm/cold colours, with neutral colour for
+pump-only circulation and for water moving through either branch during reported defrost.
+Directional refrigerant animation requires current positive X10A compressor speed and a known
+thermal mode. Cooling and reported defrost reverse its direction. Outside defrost, Cooling + DHW
+needs the current X10A valve report to distinguish space cooling from tank heating. Missing mode,
+defrost status or a required route leaves directional animation and capacity unavailable. HomeHub can
+still show its compressor report and raw full-sweep valve row. Active BUH uses the warning tint.
+A current X10A BSH ON report turns the tank's perimeter dashes a fixed orange even during defrost.
+The HomeHub full-sweep heater row remains available in the HomeHub readings and history.
+Rotors stay centred on their hubs, turn clockwise and carry no rotating flow-direction arrow.
+The pump rotor requires a current X10A ON report. HomeHub input 30 remains in the Modbus value
+list with its full-sweep cadence. Measured flow drives water-pipe motion independently of the
+rotor. Direction belongs to
+pipe dashes.
 
 Quiet/Defrost pills remain grey while inactive/unknown and blue while active. E-heater stays grey
 or orange; its accessible name and inspector state ON/OFF/unknown. Native Altherma 4 holding 9
@@ -277,11 +318,11 @@ twin with its comparison; grouped components keep their full member list.
 Explain what the quantity is, its bounded normal context, then current state or absence. Held data
 cannot reappear in a headline, members or state sentence. A fallback pressure row must own headline,
 source line and history together. Only rerender changed content so polling does not destroy a text
-selection. The same quantity uses the same underlying description as the value table. Native Altherma 4
-flow/pressure have unverified conversion limits and must not show numeric agreement/difference.
-Source-qualified native help takes precedence over generic compact inspector copy in every locale,
-including a stand-in under an X10A row. Definition-metadata changes invalidate the comparison even
-when its numeric values do not change.
+selection. The same quantity uses the same underlying description as the value table.
+[Provisional Modbus flow and native pressure](MODBUS_PROTOCOL.md#deferred-physical-acceptance)
+show their conversion limits in place of numeric comparisons. Source-qualified help takes
+precedence over generic inspector copy in every locale, including a stand-in under an X10A row.
+Definition-metadata changes invalidate the comparison even when its numeric values do not change.
 
 **History**
 
@@ -292,22 +333,36 @@ source legends. Room temperature can add the configured MQTT source as a third, 
 series with its name and MQTT attribution, including when no device room sensor is available.
 The device sensor and MQTT source keep distinct current values and explanations. Source replacement
 never splices two instruments into one series.
+In the flow chart, the visible series determine the axes and cursor scale. A hidden provisional
+HomeHub trace cannot change the displayed X10A range.
 
 Computed readings chart their own units and expressions, not an input relabelled as output.
-Heat output retains signed balance across heating, cooling and defrost; the live pill also applies
-current mode and useful-direction gates. Measured no flow records zero. Moving water needs a running
-compressor witness; stopped-compressor pump overrun leaves a gap. A profile without compressor
-frequency offers no heat-output curve. Other missing required inputs make a gap; held-over applies
-only when every missing input was held. The historical
-COP uses the conservative inverter-sourced boundary and omits CT-sourced samples rather than
-pairing asynchronous heater/temperature bucket events. An intentionally refused empty series says
-so. Chart titles name the stable concept, not the live one-second scope.
+The historical ΔT uses both temperatures. The working live ΔT also requires qualified flow.
+Heat output retains signed balance across heating, cooling and defrost. Outside defrost the live
+pill also applies current mode and useful-direction gates. The historical balance uses zero at
+valid measured flow from zero through 0.5 L/min. Above that threshold it requires a bucket speed
+above 5 rps and both temperatures. The chart marks these independent samples as potentially taken
+at different times. Stored speed cannot exclude later pump overrun in the same bucket. Invalid or
+negative flow leaves a gap.
+Profiles without compressor frequency offer no heat-output curve. The live cooling-capacity
+inspector omits the signed heat-output chart. Raw current-transformer phases and inverter current
+retain their own histories. A five-minute bucket can contain phase currents, inverter current and
+compressor speed from different sweeps. The electrical-input and COP inspectors therefore omit
+derived history. Missing required inputs leave a gap. A gap is held-over only when every missing
+offered input was held. If none of a chart's inputs returns a nonempty series, it reports a history error.
+Chart titles name the stable concept.
 
 Categorical histories use source-labelled tracks, written states, distinct state colours and
 hatching only for missing samples. Valve and Quiet use latest sampled state; BSH, BUH stages and
 Defrost retain any observed activation in their open five-minute bucket. Smart Grid retains all
-four states. Disinfection and X10A Tank preheat remain different facts. Totals are sampled raster
-time; events between sweeps may be missed.
+four states. The Modbus valve track shows completed samples and leaves the live edge unavailable.
+The raw API row carries the last full-sweep report. Disinfection and X10A Tank preheat remain
+different facts. Totals are sampled raster time. Events between sweeps may be missed.
+
+The tank temperature chart keeps separate auxiliary tracks for the X10A Smart Grid contacts,
+HomeHub Smart Grid request, and each source's reported tank-heater state. The cursor reads
+their states at the selected temperature slot. Gaps remain source-specific. Auxiliary totals
+count only that source's aligned recorded slots.
 
 Rings share five-minute slots and an elapsed/rolling-day axis. A newly resolved row or changed source
 identity leaves earlier gaps. Compatible firmware records can restore after reboot/power loss;
@@ -416,14 +471,21 @@ The saved channel controls the next check, not the provenance of the running ima
 states that the installed version will be older; the one-operation downgrade permission relaxes
 ordering only, not signature/artifact checks.
 
-Reload detection accepts version change, decreasing uptime or observed down/up. Same-version install
-and rollback still require the new page. After the bounded wait, an answering device reloads; if it
-never answers, preserve the installed/reload instruction rather than replace it with a browser error.
+Reload on a changed boot ID, ELF or version. A legacy response without boot identity can use
+decreasing uptime. Down/up alone is a fallback only if no boot ID was seen during the wait.
+The same known boot after an HTTP outage keeps waiting. If the bounded wait expires without a
+verifiable restart, show the restart-verification message. A new boot also requires a reload
+after same-version installation or rollback.
 Sequence guards prevent old result timers from clearing a newer operation.
 
 On page load or a busy full-status response, compact OTA status can adopt an in-flight download
-even if large status/values requests are refused. A same-tab, at-most-15-minute snapshot is usable only when its version matches current
-OTA status. Label it Last received state and lock Settings writes. A later full pair supersedes it.
+even if large status/values requests are refused. A same-tab snapshot up to 15 minutes old is usable
+when its version, boot ID and ELF identity match current OTA status. Label it Last received state
+and lock Settings writes. Keep the captured readings visible, pause schematic activity and
+thermal colours, and omit the live segment at the end of state charts until fresh values arrive.
+The snapshot retains the Modbus history binding. Missing binding metadata in an older snapshot
+suppresses Modbus history when its cached status identifies a boot and history epoch. A later full
+pair supersedes the snapshot.
 Without a valid cache, show only current OTA/Firmware facts. Successful compact OTA status proves
 reachability and must not be overwritten by a generic unreachable message. Clear snapshots on idle
 startup/check completion or terminal failure. Idle after an observed download retains the snapshot

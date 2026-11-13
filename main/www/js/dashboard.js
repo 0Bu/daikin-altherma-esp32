@@ -103,10 +103,19 @@ async function refreshValues(paint = true) {
     (statusRequest == null || statusRequest === S.statusAcceptedRequest) &&
     epoch === S.histEpoch && !S.imageReloading;
   let r;
-  try { r = await j("/values", { signal: pollSignal() }); }
+  try {
+    r = await j("/values", { signal: pollSignal() });
+    if (!Array.isArray(r) && !Array.isArray(r?.values)) throw new Error("invalid values");
+  }
   catch (error) {
-    if (current()) invalidateLiveReadings(S.transportUnavailable === "status" ? "status" : "values",
-      String(error.message) === "503");
+    if (current() && !S.otaCached) {
+      if (S.otaInstalling && await otaCacheRestore(S.otaWriter, true)) return false;
+      if (!current()) return false;
+      const busy = String(error.message) === "503";
+      if (S.modbusHistoryLease) applyModbusHistoryLease({ epoch: 0, boot: "" });
+      invalidateLiveReadings(S.transportUnavailable === "status" ? "status" : "values", busy);
+      if (busy && typeof probeRunningOta === "function") void probeRunningOta();
+    }
     return false;
   }
   if (!current() || S.transportUnavailable === "status") return false;
@@ -115,16 +124,37 @@ async function refreshValues(paint = true) {
   // when that stack is off, which is exactly how a device without a HomeHub behaves — no Modbus row,
   // no comparison, no fallback. Never merged into S._values: the two have separate liveness, and
   // merging would make "is this reading current?" unanswerable per row.
-  S._modbus = Array.isArray(r.modbus) ? r.modbus : [];
+  const modbus = Array.isArray(r.modbus) ? r.modbus : null;
+  S._modbus = modbus || [];
+  S.modbusCompressorRunning = typeof r.modbus_compressor_running === "boolean"
+    ? r.modbus_compressor_running : null;
+  // A values-only poll can lose or replace the source before the next status poll. Once the
+  // binding protocol is known, an absent binding must withhold the previous peer's chart.
+  const hasLease = Object.prototype.hasOwnProperty.call(r, "modbus_history_epoch") ||
+    Object.prototype.hasOwnProperty.call(r, "modbus_history_boot_id");
+  if (hasLease || S.modbusHistoryLease) {
+    const epoch = r.modbus_history_epoch, boot = r.modbus_history_boot_id;
+    applyModbusHistoryLease(modbus && Number.isSafeInteger(epoch) && epoch >= 0 &&
+      typeof boot === "string" && boot ? { epoch, boot } : { epoch: 0, boot: "" });
+  }
   // A successful values response follows a successful status response in pollTick, so together
   // they supersede a restored OTA snapshot. While installation continues, keep this newer complete
   // frame as the next reload's bounded fallback.
   S.otaCached = false;
   S.transportUnavailable = null;
   S.transportBusy = false;
-  if (S.otaInstalling) otaCacheStore();
+  if (typeof otaCacheStore === "function") otaCacheStore(S.otaInstalling);
   if (paint) renderApp();
   return true;
+}
+
+function applyModbusHistoryLease(lease) {
+  const previous = S.modbusHistoryLease;
+  S.modbusHistoryLease = lease;
+  if ((lease.epoch !== previous?.epoch || lease.boot !== previous?.boot) && !modbusHistoryMatches()) {
+    invalidateHistSources();
+    S.clickHold = false;
+  }
 }
 // Dashboard cards: diagnostics, detected unit and value groups share one selectable panel below
 // the live diagram. The board (ESP32) card and the
@@ -899,7 +929,7 @@ function dynamicStateRow(d, room, weather, modbus, mqtt, sys) {
   if (d.reason === "room_unavailable")
     return { key: ROOM_BLOCK_LINES[room.reason] || "dyn.state_room", cls: "warn",
              help: "dyn.state_help_room" };
-  if (d.reason === "homehub_unavailable" && !modbus.enabled)
+  if (d.reason === "homehub_unavailable" && !modbus.host)
     return { key: "dyn.state_setup_homehub", cls: "dim", help: "dyn.state_help_setup_homehub" };
   const blocked = {
     x10a_unavailable:    "dyn.state_x10a",
@@ -1017,7 +1047,7 @@ function plantOutdoorAxisRow(d, modbus) {
     ? d.plant_outdoor_source : null;
   const sampleSource = typeof d.last_sample_plant_outdoor_source === "string"
     ? d.last_sample_plant_outdoor_source : null;
-  const source = liveSource || sampleSource || (modbus.enabled ? "homehub" : null);
+  const source = liveSource || sampleSource || (modbus.host ? "homehub" : null);
   const fmt = (n) => `${n.toLocaleString(LANG,
     { minimumFractionDigits: 1, maximumFractionDigits: 1 })} °C`;
 

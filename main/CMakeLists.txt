@@ -20,6 +20,7 @@ idf_component_register(
         "hp_poll.cpp"
         "env3.cpp"
         "history.cpp"
+        "history_target.cpp"
         "checkup.cpp"
         "stop_observation_store.cpp"
         "state_dwell.cpp"

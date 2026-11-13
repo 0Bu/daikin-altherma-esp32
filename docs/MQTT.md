@@ -145,6 +145,8 @@ state. Disconnection produces `{}`; disabling retracts the retained topic. Saved
 not a retiring task's lagging state, decides whether publication is allowed. Source reconfiguration
 first retracts old evidence; an enabled replacement may publish an empty pre-first-sample document
 on a later cycle. Read-only protocol/register rules: [MODBUS_PROTOCOL.md](MODBUS_PROTOCOL.md).
+Modbus input 49 publishes the catalog-converted flow as a number. The MQTT payload carries no scale
+marker. Independently verify the divisor before using it as a flow measurement.
 
 Native Altherma 4 holding register 58 publishes `imposed_power_limit`; register 54 publishes
 `weather_dependent_main_heating_offset`. Holding register 57 is unlisted and absent. The current
@@ -312,6 +314,7 @@ latest reset remain unknown. Preserve private memory evidence before dismissal; 
 | X10A bracket-subscript discovery templates | Current `.get(..., 'None')` templates make omitted keys/groups unknown. Expect gaps in numeric statistics and `numeric_state` conditions while inputs are unknown. Older numeric/binary templates could keep the last state; text could become empty or a missing group could log a template error. |
 | `<base>/state` | Use `<base>/x10a`; grouped keys unchanged. Union old/new topic labels for historical queries. |
 | `<base>/modbus/status` | Use heartbeat HomeHub link fields. |
+| `quiet_mode_operation` in `<base>/modbus` | The baseline HomeHub payload omits this key. Treat absence as unknown activity. Native `quiet_mode_selection` reports the selected policy. |
 | `<base>/weather_forecast` and four weather discovery configs | Use `<base>/weather/openmeteo/forecast`; no weather HA entities. |
 | 27 historical HomeHub discovery configs under `<node>_modbus` | Retired; data topic `<base>/modbus` remains. Delete-only passes run on connect and every five minutes outside the X10A gate. |
 | Flat `room_*` / `heating_curve_*` heartbeat fields | Move consumers to the grouped `heating_curve` paths above; heartbeat is non-retained, so no tombstone applies. |

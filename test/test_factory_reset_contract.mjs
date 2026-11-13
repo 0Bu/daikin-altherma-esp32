@@ -371,8 +371,8 @@ assert.match(httpConfig, /reset_checkup && c\.profile != "auto"[\s\S]*?history_x
 const modbus = code("main/hp_modbus.cpp");
 const mbPoll = modbus.slice(modbus.indexOf("static void mb_poll_once()"),
                             modbus.indexOf("void mb_start()"));
-assert.ok(mbPoll.indexOf("history_modbus_reset(logic::history_homehub_target_fingerprint(") <
-          mbPoll.indexOf("history_generation = history_modbus_generation()"),
-  "the first cycle for a corrected HomeHub target must capture the post-reset history generation");
+const historyGeneration = mbPoll.indexOf("history_generation = history_modbus_generation()");
+assert.ok(historyGeneration >= 0 && historyGeneration < mbPoll.indexOf("mb_ensure_connected("),
+  "the Modbus poll must capture history identity before DNS can overlap a configuration save");
 
 console.log("factory reset: RAM-only WiFi, serialized erase latch and generation-scoped X10A commits pinned");

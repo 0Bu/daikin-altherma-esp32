@@ -1,5 +1,6 @@
 // Compile the complete production History TU; physical flash and external services are host ports.
 #include "sdk.hpp"
+#include "../history_modbus_target_stub.hpp"
 #include <algorithm>
 #include <cstring>
 #include <fstream>
@@ -10,13 +11,28 @@
 #ifndef HISTORY_PRODUCTION_SOURCE
 #error "Bind complete production main/history.cpp"
 #endif
+namespace {
+int reset_reason = esp_reset_reason();
+int fixture_reset_reason() { return reset_reason; }
+} // namespace
+#define esp_reset_reason fixture_reset_reason
 #include HISTORY_PRODUCTION_SOURCE
+#undef esp_reset_reason
+
+namespace daik {
+logic::HistoryModbusTarget history_modbus_target(std::string_view host, int port,
+                                                 int unit) noexcept {
+    return fixture_port::history_modbus_target(host, port, unit);
+}
+} // namespace daik
 
 namespace {
 const esp_partition_t  partition{daik::logic::HISTORY_FLASH_PARTITION_OFFSET,
                                 daik::logic::HISTORY_FLASH_PARTITION_BYTES};
 const esp_partition_t* lookup_partition = &partition;
 bool                   refuse_erases    = false;
+size_t                 fail_restore_offset = SIZE_MAX;
+unsigned               fail_restore_reads  = 0;
 }
 const esp_partition_t* esp_partition_find_first(int, int, const char* label) {
     if (auto hook = std::exchange(journal_sdk::during_find, nullptr)) hook();
@@ -26,6 +42,10 @@ esp_err_t esp_partition_read(const esp_partition_t* part, size_t offset, void* o
     ++journal_sdk::reads;
     if (auto hook = std::exchange(journal_sdk::during_read, nullptr)) hook();
     if (journal_sdk::fail_read == journal_sdk::reads) return ESP_FAIL;
+    if (offset == fail_restore_offset && fail_restore_reads != 0) {
+        --fail_restore_reads;
+        return ESP_FAIL;
+    }
     if (part != &partition || offset > journal_sdk::flash.size() ||
         bytes > journal_sdk::flash.size() - offset)
         return ESP_ERR_INVALID_ARG;
@@ -534,6 +554,536 @@ void load_synthetic_nor(const char* transport_path) {
     require(static_cast<bool>(transport) && transport.peek() == std::char_traits<char>::eof(),
             "cold_process_loads_exact_synthetic_partition_bytes");
 }
+
+constexpr uint32_t peer_a            = 0xc0000232;
+constexpr uint32_t peer_b            = 0xc0000233;
+constexpr int64_t  history_bucket_us = HISTORY_DT_S * 1000000LL;
+constexpr int64_t  delayed_boot_s    = 1700006400 + 12 * 3600 + 4 * 60 + 50;
+constexpr auto     flow_index        = static_cast<size_t>(homehub_history_index("flow"));
+constexpr auto     quiet_index       = static_cast<size_t>(homehub_history_index("quiet_state"));
+
+logic::HistoryModbusTarget configure_homehub(const char* hostname = "synthetic-homehub.local",
+                                             int         unit     = 1) {
+    auto& cfg      = daik::detail::cfg;
+    cfg.mb_host    = hostname;
+    cfg.mb_port    = 502;
+    cfg.mb_unit_id = unit;
+    return history_modbus_target(cfg.mb_host, cfg.mb_port, cfg.mb_unit_id);
+}
+uint32_t bind_homehub(const logic::HistoryModbusTarget& configured, uint32_t ipv4) {
+    history_modbus_candidate(ipv4);
+    const auto generation = history_modbus_bind_peer(configured, ipv4, history_modbus_generation());
+    require(generation != 0, "confirmed_peer_binds");
+    return generation;
+}
+void record_flow(const char* value, uint32_t generation) {
+    CachedValue row;
+    row.off               = 49;
+    row.value             = value;
+    row.modbus_definition = def::homehub_definition_id(*def::homehub_find(49));
+    history_record_modbus(&row, 1, generation);
+    sdk::now_us += history_bucket_us;
+    history_record_modbus(nullptr, 0, generation);
+}
+std::vector<HistorySample> flow_snapshot() {
+    std::vector<HistorySample> samples(HISTORY_SAMPLES);
+    samples.resize(history_modbus_snapshot(flow_index, samples.data(), samples.size()));
+    return samples;
+}
+bool has_sample(const std::vector<HistorySample>& samples, HistorySample value) {
+    return std::find(samples.begin(), samples.end(), value) != samples.end();
+}
+void require_no_quiet_ring_sample(const char* oracle) {
+    HistorySample samples[HISTORY_SAMPLES];
+    const size_t  n = P().mb_ring[quiet_index].snapshot(samples, HISTORY_SAMPLES);
+    require(std::find(samples, samples + n, HistorySample{10}) == samples + n, oracle);
+}
+FlashJournalRecord written_flow(const logic::HistoryModbusTarget& configured, uint32_t ipv4,
+                                HistorySample sample) {
+    for (size_t slot = 0; slot < s_flash_next_slot; ++slot) {
+        FlashJournalRecord r;
+        require(flash_read_record(slot, r) == ESP_OK, "read_modbus_writer_record");
+        if (!flash_record_physically_valid(r) ||
+            r.header.source != static_cast<uint8_t>(HistoryJournalSource::Modbus) ||
+            r.header.flags == HISTORY_JOURNAL_FLAG_CATALOG_MANIFEST)
+            continue;
+        HistorySample stored;
+        std::memcpy(&stored, r.payload + flow_index * sizeof(stored), sizeof(stored));
+        if (stored != sample) continue;
+        require(history_journal_modbus_config_matches(r.header, r.payload, sizeof(r.payload),
+                                                      configured) &&
+                    history_journal_scope(r.header) == ipv4,
+                "writer_stamps_confirmed_peer_and_configured_target");
+        require(r.header.value_count == HOMEHUB_HISTORY_COUNT + HISTORY_MODBUS_SCOPE_WORDS &&
+                    !history_journal_trend_layout_matches(r.header, P().catalog_fp, TREND_COUNT,
+                                                          HOMEHUB_HISTORY_COUNT,
+                                                          ENV3_HISTORY_COUNT) &&
+                    !history_legacy_disinfection_layout_matches(r.header) &&
+                    !flash_manifest_find(r.header, 0) && r.header.pad[4] != 1,
+                "old_readers_find_head_without_admitting_scoped_record");
+        return r;
+    }
+    throw std::runtime_error("real_writer_commits_expected_flow");
+}
+void modbus_live_peer_change() {
+    const auto configured_fp = configure_homehub();
+    boot();
+    const auto a_generation = bind_homehub(configured_fp, peer_a);
+    record_flow("12.3", a_generation);
+    require(has_sample(flow_snapshot(), 123), "first_peer_records_real_flow");
+    require(history_flash_service_journal(8, 0) > 0, "first_peer_drains_real_journal");
+    (void)written_flow(configured_fp, peer_a, 123);
+    const auto first_bytes = journal_sdk::flash;
+    const auto first_end   = history_journal_slot_offset(s_flash_next_slot);
+    const auto first_epoch = history_epoch();
+    require(bind_homehub(configured_fp, peer_a) == a_generation && history_epoch() == first_epoch &&
+                has_sample(flow_snapshot(), 123),
+            "same_ipv4_preserves_history_and_generation");
+
+    const auto b_scope     = peer_b;
+    sdk::measure_busy_lock = true;
+    s_flash_mtx->owned     = true;
+    history_modbus_candidate(peer_b);
+    require(history_modbus_bind_peer(configured_fp, b_scope, a_generation) == 0 &&
+                sdk::blocking_busy_takes == 0 && s_flash_mtx->owned,
+            "peer_bind_does_not_wait_for_flash_owner");
+    s_flash_mtx->owned = false;
+    s_mtx->owned       = true;
+    require(history_modbus_bind_peer(configured_fp, b_scope, a_generation) == 0 &&
+                sdk::blocking_busy_takes == 0 && s_mtx->owned && !s_flash_mtx->owned,
+            "peer_bind_does_not_wait_for_history_owner");
+    s_mtx->owned           = false;
+    sdk::measure_busy_lock = false;
+    require(flow_snapshot().empty(), "candidate_hides_old_flow_while_journal_binding_is_busy");
+    history_modbus_candidate(peer_a);
+    require(history_modbus_bind_peer(configured_fp, 0, a_generation) == 0 &&
+                history_modbus_generation() == a_generation && history_epoch() == first_epoch &&
+                has_sample(flow_snapshot(), 123) && journal_sdk::flash == first_bytes,
+            "unbound_peer_attempts_preserve_previous_history");
+
+    const auto b_generation = bind_homehub(configured_fp, peer_b);
+    require(b_generation != a_generation && history_epoch() != first_epoch &&
+                !has_sample(flow_snapshot(), 123),
+            "replacement_ipv4_retires_old_ram_and_browser_epoch");
+    require(history_modbus_bind_peer(configured_fp, peer_a, a_generation) == 0,
+            "stale_generation_cannot_bind_retired_peer");
+    record_flow("87.6", a_generation);
+    sdk::now_us += 24 * 60 * 60 * 1000000LL;
+    history_record_modbus(nullptr, 0, b_generation);
+    history_flash_service_journal(8, 0);
+    require(s_flash_restore_slot_count[static_cast<size_t>(HistoryJournalSource::Modbus)] == 0 &&
+                s_flash_last_bucket[static_cast<size_t>(HistoryJournalSource::Modbus)] == INT64_MIN,
+            "replacement_gaps_alone_do_not_advance_modbus_cursor");
+    const auto first_replacement_slot = s_flash_next_slot;
+    record_flow("24.6", b_generation);
+    const auto replacement = flow_snapshot();
+    require(has_sample(replacement, 246) && !has_sample(replacement, 123) &&
+                !has_sample(replacement, 876),
+            "replacement_raster_contains_gaps_and_only_new_peer_samples");
+    require(std::count(replacement.begin(), replacement.end(), HISTORY_NO_READING) > 0,
+            "replacement_raster_preserves_explicit_predecessor_gaps");
+    require(history_flash_service_journal(8, 0) > 0, "replacement_drains_real_journal");
+    const auto first_replacement = written_flow(configured_fp, peer_b, 246);
+    for (size_t slot = first_replacement_slot; slot < s_flash_next_slot; ++slot) {
+        FlashJournalRecord record;
+        require(flash_read_record(slot, record) == ESP_OK,
+                "read_first_replacement_journal_records");
+        if (record.header.source == static_cast<uint8_t>(HistoryJournalSource::Modbus) &&
+            record.header.flags != HISTORY_JOURNAL_FLAG_CATALOG_MANIFEST)
+            require(record.header.sequence == first_replacement.header.sequence,
+                    "replacement_journal_begins_with_first_measured_bucket");
+    }
+    require(journal_sdk::erases == 0 &&
+                std::equal(first_bytes.begin(), first_bytes.begin() + first_end,
+                           journal_sdk::flash.begin()),
+            "peer_cutover_preserves_predecessor_flash_bytes");
+
+    auto& cfg             = daik::detail::cfg;
+    cfg.mb_host           = "different-configured-homehub.local";
+    const auto new_config = history_modbus_target(cfg.mb_host, cfg.mb_port, cfg.mb_unit_id);
+    history_modbus_reset(new_config);
+    require(history_modbus_bind_peer(configured_fp, peer_b, history_modbus_generation()) == 0,
+            "retired_config_cannot_bind_even_with_current_generation");
+    require(flow_snapshot().empty(), "configuration_cutover_hides_previous_peer");
+}
+void modbus_peer_forget() {
+    const auto configured_fp = configure_homehub();
+    boot();
+    const auto generation = bind_homehub(configured_fp, peer_a);
+    const auto b_scope    = peer_b;
+    const auto epoch      = history_epoch();
+    sdk::before_take      = [] { s_flash_forgotten.store(true); };
+    require(history_modbus_bind_peer(configured_fp, b_scope, generation) == 0 &&
+                history_epoch() == epoch && history_modbus_generation() == generation,
+            "peer_bind_rechecks_forget_after_locks");
+    const auto takes = sdk::takes;
+    require(history_modbus_bind_peer(configured_fp, b_scope, generation) == 0 &&
+                sdk::takes == takes,
+            "forgotten_peer_bind_skips_locks");
+}
+void modbus_quiet_unverified() {
+    const auto configured_fp = configure_homehub();
+    boot();
+    const auto  generation = bind_homehub(configured_fp, peer_a);
+    CachedValue quiet;
+    quiet.off               = 9;
+    quiet.value             = "1"; // A native Automatic word decoded through the EKRHH baseline.
+    quiet.modbus_definition = def::homehub_definition_id(*def::homehub_find(9));
+    history_record_modbus(&quiet, 1, generation);
+    sdk::now_us += history_bucket_us;
+    history_record_modbus(nullptr, 0, generation);
+    require_no_quiet_ring_sample("baseline_quiet_does_not_enter_production_ring");
+    HistorySample samples[HISTORY_SAMPLES];
+    require(history_modbus_snapshot(quiet_index, samples, HISTORY_SAMPLES) == 0,
+            "baseline_quiet_has_no_history_payload");
+}
+void modbus_missing_target_digest() {
+    boot();
+    const auto generation = history_modbus_generation();
+    const auto epoch      = history_epoch();
+    const auto takes      = sdk::takes;
+    require(history_modbus_bind_peer({}, peer_a, generation) == 0 && sdk::takes == takes &&
+                history_modbus_generation() == generation && history_epoch() == epoch &&
+                flow_snapshot().empty(),
+            "missing_target_digest_cannot_bind");
+}
+enum class ModbusTransport {
+    Cold,
+    Legacy,
+    LegacyTagged,
+    ColdCollision,
+    Warm,
+    WarmLegacy,
+    WarmCombined,
+    WarmCollision
+};
+constexpr const char* kLegacyModbusHost  = "old-4cc3.fixture.invalid";
+constexpr const char* kAliasedModbusHost = "new-11d6d.fixture.invalid";
+constexpr const char* kCollidingModbusA  = "hub-b7b9d420.local";
+constexpr const char* kCollidingModbusB  = "hub-9d5d410c.local";
+constexpr uint32_t    kCollidingIpv4     = 0xc0a80a0a;
+constexpr uint32_t    kCollidingScope    = 0xc86c6f8a;
+
+uint32_t configured_legacy_crc() {
+    const auto& cfg = daik::detail::cfg;
+    return history_homehub_target_fingerprint(cfg.mb_host.c_str(), cfg.mb_port, cfg.mb_unit_id);
+}
+
+bool modbus_transport_collision(ModbusTransport mode) {
+    return mode == ModbusTransport::WarmCollision || mode == ModbusTransport::ColdCollision ||
+           mode == ModbusTransport::LegacyTagged;
+}
+
+void seed_modbus_peer(const char* transport_path, ModbusTransport mode) {
+    const bool     warm_legacy    = mode == ModbusTransport::WarmLegacy;
+    const bool     warm_combined  = mode == ModbusTransport::WarmCombined;
+    const bool     warm_collision = mode == ModbusTransport::WarmCollision;
+    const bool     collision      = modbus_transport_collision(mode);
+    const auto     configured_fp  = warm_legacy ? configure_homehub(kLegacyModbusHost)
+                                    : collision ? configure_homehub(kCollidingModbusA)
+                                                : configure_homehub();
+    const uint32_t ipv4           = collision ? kCollidingIpv4 : peer_a;
+    const uint32_t legacy_crc     = configured_legacy_crc();
+    const uint32_t legacy_scope   = history_homehub_peer_fingerprint(legacy_crc, ipv4);
+    boot();
+    record_flow("12.3", bind_homehub(configured_fp, ipv4));
+    require(has_sample(flow_snapshot(), 123), "seed_uses_completed_real_flow");
+    std::ofstream transport(transport_path, std::ios::binary);
+    if (mode == ModbusTransport::Warm || warm_legacy || warm_combined || warm_collision) {
+        // Keep independent board history in the same shared region.
+        history_record_board();
+        sdk::now_us += history_bucket_us;
+        history_record_board();
+        if (warm_legacy || warm_combined) {
+            P().version = warm_legacy ? HISTORY_PERSIST_VERSION : kCombinedModbusPeerPersistVersion;
+            P().mb_target_fp            = warm_legacy ? legacy_crc : legacy_scope;
+            s_liveness.modbus_config_fp = 0xa5a5a5a5; // formerly unchecked padding
+            s_persist_dirty             = true;
+            persist_seal_locked();
+        }
+        if (warm_collision) {
+            // Restore sees the exact CRC bytes that would have named the predecessor in v6.
+            P().mb_target_fp            = legacy_scope;
+            s_liveness.modbus_config_fp = legacy_crc;
+            s_persist_dirty             = true;
+            persist_seal_locked();
+        }
+        history_liveness_touch();
+        transport.write(reinterpret_cast<const char*>(&P()), sizeof(P()));
+        transport.write(reinterpret_cast<const char*>(&s_liveness), sizeof(s_liveness));
+    } else {
+        require(history_flash_service_journal(8, 0) > 0, "seed_uses_real_flash_writer");
+        (void)written_flow(configured_fp, ipv4, 123);
+        // Introduce an old false Quiet activity column in the synthetic transport copy. Leave
+        // every other payload word and the real writer's sequence and absolute bucket intact.
+        auto image = journal_sdk::flash;
+        for (size_t slot = 0; slot < s_flash_next_slot; ++slot) {
+            FlashJournalRecord r;
+            require(flash_read_record(slot, r) == ESP_OK, "read_seed_writer_slot");
+            if (r.header.source != static_cast<uint8_t>(HistoryJournalSource::Modbus) ||
+                r.header.flags == HISTORY_JOURNAL_FLAG_CATALOG_MANIFEST)
+                continue;
+            const HistorySample old_quiet = 10;
+            std::memcpy(r.payload + quiet_index * sizeof(old_quiet), &old_quiet, sizeof(old_quiet));
+            const bool tagged     = mode == ModbusTransport::LegacyTagged;
+            const bool old_format = mode == ModbusTransport::Legacy || tagged;
+            if (old_format) {
+                r.header.value_count = HOMEHUB_HISTORY_COUNT;
+                r.header.rings[static_cast<size_t>(HistoryJournalSource::Modbus)] =
+                    HOMEHUB_HISTORY_COUNT;
+                r.header.reserved = 0xffff;
+                std::fill(r.header.pad + 4, r.header.pad + sizeof(r.header.pad), 0xff);
+                history_journal_set_scope(r.header, tagged ? legacy_scope : legacy_crc);
+                if (tagged) {
+                    r.header.pad[4] = 1;
+                    for (size_t i = 0; i < 4; ++i)
+                        r.header.pad[8 + i] = static_cast<uint8_t>(legacy_crc >> (8 * i));
+                }
+            }
+            r.header.crc = history_journal_crc_bytes(r.header, r.payload,
+                                                     history_journal_payload_bytes(r.header));
+            require(flash_record_physically_valid(r) &&
+                        history_journal_modbus_config_matches(
+                            r.header, r.payload, sizeof(r.payload), configured_fp) == !old_format,
+                    "synthetic_transport_keeps_valid_envelope_and_expected_peer_tag");
+            std::memcpy(image.data() + history_journal_slot_offset(slot), &r, sizeof(r));
+        }
+        transport.write(reinterpret_cast<const char*>(image.data()),
+                        static_cast<std::streamsize>(image.size()));
+    }
+    require(static_cast<bool>(transport), "save_exact_synthetic_modbus_transport");
+}
+void restore_modbus_peer(const char* transport_path, ModbusTransport mode, uint32_t ipv4,
+                         bool corrupt_version = false, bool replacement = false) {
+    const bool warm_legacy    = mode == ModbusTransport::WarmLegacy;
+    const bool warm_combined  = mode == ModbusTransport::WarmCombined;
+    const bool warm_collision = mode == ModbusTransport::WarmCollision;
+    const bool warm =
+        mode == ModbusTransport::Warm || warm_legacy || warm_combined || warm_collision;
+    const bool collision = modbus_transport_collision(mode);
+    const auto configured_fp =
+        warm_legacy ? configure_homehub(kAliasedModbusHost)
+        : collision ? configure_homehub(replacement ? kCollidingModbusB : kCollidingModbusA,
+                                        replacement ? 2 : 1)
+                    : configure_homehub();
+    const bool restore_expected = (mode == ModbusTransport::Cold && ipv4 == peer_a) ||
+                                  (mode == ModbusTransport::ColdCollision && !replacement);
+    if (collision) {
+        require(configured_legacy_crc() == 0xb078dfd9 &&
+                    history_homehub_peer_fingerprint(configured_legacy_crc(), ipv4) ==
+                        kCollidingScope &&
+                    history_modbus_target(kCollidingModbusA, 502, 1) !=
+                        history_modbus_target(kCollidingModbusB, 502, 2),
+                "two_configured_targets_share_both_legacy_crcs_but_not_new_digest");
+    }
+    if (warm) {
+        std::ifstream transport(transport_path, std::ios::binary);
+        transport.read(reinterpret_cast<char*>(&P()), sizeof(P()));
+        transport.read(reinterpret_cast<char*>(&s_liveness), sizeof(s_liveness));
+        require(static_cast<bool>(transport) && transport.peek() == std::char_traits<char>::eof(),
+                "warm_process_loads_only_production_retained_regions");
+        if (warm_legacy) {
+            require(P().version == HISTORY_PERSIST_VERSION &&
+                        P().mb_target_fp ==
+                            history_homehub_peer_fingerprint(configured_legacy_crc(), ipv4),
+                    "legacy_target_hash_really_aliases_current_peer");
+            if (corrupt_version) P().version = kCombinedModbusPeerPersistVersion;
+        }
+        if (warm_combined)
+            require(P().version == kCombinedModbusPeerPersistVersion &&
+                        P().mb_target_fp ==
+                            history_homehub_peer_fingerprint(configured_legacy_crc(), ipv4),
+                    "legacy_combined_scope_matches_before_new_format_rejects_it");
+        if (warm_collision) {
+            require(P().version == kModbusPeerPersistVersion &&
+                        P().mb_target_fp == kCollidingScope &&
+                        s_liveness.modbus_config_fp == configured_legacy_crc(),
+                    "warm_transport_reproduces_both_legacy_crcs_for_replacement");
+            if (corrupt_version) s_liveness.modbus_config_fp ^= 1;
+        }
+        reset_reason = static_cast<int>(CrashReason::SW);
+    } else {
+        load_synthetic_nor(transport_path);
+    }
+    journal_sdk::unix_origin += 2 * HISTORY_DT_S;
+    boot(warm);
+    if (warm)
+        require(std::strcmp(history_persist_state(), corrupt_version ? "bad_crc" : "accept") == 0,
+                "warm_start_exercises_real_crc_and_liveness_adoption");
+    if (warm) {
+        const auto board =
+            std::find_if(std::begin(TRENDS), std::end(TRENDS),
+                         [](const TrendDef& t) { return t.kind == TrendKind::FreeHeap; });
+        require(board != std::end(TRENDS), "independent_board_series_exists");
+        HistorySample samples[HISTORY_SAMPLES];
+        const size_t  n = history_snapshot(static_cast<size_t>(board - std::begin(TRENDS)), samples,
+                                           HISTORY_SAMPLES);
+        const bool    observed =
+            std::find(samples, samples + n, history_bytes_tenths_kib(100000)) != samples + n;
+        require(observed != corrupt_version, "valid_legacy_board_samples_survive_modbus_migration");
+        require(P().version == kModbusPeerPersistVersion && P().mb_target_fp == 0 &&
+                    s_liveness.modbus_config_fp == 0,
+                "warm_upgrade_reseals_without_modbus_identity");
+    }
+    const auto before = journal_sdk::flash;
+    if (!warm) require(s_flash_next_sequence > 1, "legacy_record_still_sets_physical_journal_head");
+    require(flow_snapshot().empty(), "boot_keeps_unbound_modbus_samples_invisible");
+    record_flow("87.6", history_modbus_generation());
+    require(flow_snapshot().empty(), "unbound_sample_does_not_publish_history");
+    if (!warm)
+        require(history_flash_service_journal(8, 0) == 0 && journal_sdk::flash == before,
+                "unbound_history_cannot_append");
+    const auto generation = bind_homehub(configured_fp, ipv4);
+    for (unsigned i = 0; i < 20; ++i) history_service_flash_restore();
+    const auto restored = flow_snapshot();
+    if (warm) require(!has_sample(restored, 123), "warm_ram_never_restores_modbus");
+    require(has_sample(restored, 123) == restore_expected,
+            "restore_requires_proven_matching_peer_and_bound_format");
+    require(!has_sample(restored, 876), "unbound_sample_does_not_pollute_restored_history");
+    require_no_quiet_ring_sample("old_false_quiet_column_is_not_restored");
+    record_flow("24.6", generation);
+    const auto resumed = flow_snapshot();
+    require(has_sample(resumed, 246) && has_sample(resumed, 123) == restore_expected,
+            "resumed_recorder_preserves_only_compatible_history");
+    require(journal_sdk::writes == 0 && journal_sdk::erases == 0 && journal_sdk::flash == before,
+            "restore_and_rebinding_preserve_raw_journal");
+}
+
+void seed_trend_read_fault(const char* transport_path) {
+    const auto configured = configure_homehub();
+    auto&      cfg        = daik::detail::cfg;
+    cfg.board_user_set    = true;
+    cfg.board_preset_id   = BoardPresetId::M5StackAtomS3Lite;
+    cfg.env3_enabled      = true;
+    boot();
+    const auto generation = bind_homehub(configured, peer_a);
+    record_flow("12.3", generation);
+    record_flow("23.4", generation);
+    history_record_env3(true, 25.6f, 60.0f, 1000.0f);
+    sdk::now_us += history_bucket_us;
+    history_record_env3(false, 0, 0, 0);
+    const auto env_src = static_cast<size_t>(HistoryJournalSource::Env3);
+    require(history_flash_service_journal(12, 0) >= 3 && s_flash_last_bucket[env_src] != INT64_MIN,
+            "seed_commits_two_independent_sources");
+    std::ofstream transport(transport_path, std::ios::binary);
+    transport.write(reinterpret_cast<const char*>(journal_sdk::flash.data()),
+                    static_cast<std::streamsize>(journal_sdk::flash.size()));
+    require(static_cast<bool>(transport), "save_trend_restore_fault_transport");
+}
+
+void seed_modbus_delayed(const char* transport_path) {
+    const auto configured    = configure_homehub();
+    journal_sdk::unix_origin = delayed_boot_s;
+    boot();
+    const auto  generation = bind_homehub(configured, peer_a);
+    CachedValue row;
+    row.off               = 49;
+    row.modbus_definition = def::homehub_definition_id(*def::homehub_find(49));
+    row.value             = "12.3";
+    sdk::now_us           = 305 * 1000000LL;
+    history_record_modbus(&row, 1, generation);
+    row.value   = "24.6";
+    sdk::now_us = 615 * 1000000LL;
+    history_record_modbus(&row, 1, generation);
+    require(history_flash_service_journal(8, 0) > 0, "first_delayed_sweep_reaches_journal");
+
+    row.value   = "36.9";
+    sdk::now_us = 905 * 1000000LL;
+    history_record_modbus(&row, 1, generation);
+    // Exercise the scheduled drain even when a wrong anchor claims the already-written slot.
+    history_flash_service_journal(8, 0);
+    sdk::now_us = 1515 * 1000000LL;
+    history_record_modbus(nullptr, 0, generation); // bucket 4 never received a cycle
+    const auto live = flow_snapshot();
+    require(live ==
+                std::vector<HistorySample>{HISTORY_NO_READING, 123, 246, 369, HISTORY_NO_READING},
+            "delayed_live_raster_keeps_measurements_and_real_gap");
+    require(history_flash_service_journal(8, 0) > 0, "later_delayed_sweep_reaches_journal");
+    std::ofstream transport(transport_path, std::ios::binary);
+    transport.write(reinterpret_cast<const char*>(journal_sdk::flash.data()),
+                    static_cast<std::streamsize>(journal_sdk::flash.size()));
+    require(static_cast<bool>(transport), "save_delayed_modbus_nor");
+}
+
+void modbus_reply_bucket() {
+    const auto configured = configure_homehub();
+    boot();
+    const auto  generation = bind_homehub(configured, peer_a);
+    CachedValue heater;
+    heater.off               = 32;
+    heater.modbus_definition = def::homehub_definition_id(*def::homehub_find(32));
+    heater.value             = "1";
+    sdk::now_us              = history_bucket_us + 200000;
+    history_record_modbus(&heater, 1, generation, history_bucket_us - 200000);
+    heater.value = "0";
+    history_record_modbus(&heater, 1, generation, sdk::now_us);
+    sdk::now_us += history_bucket_us;
+    history_record_modbus(nullptr, 0, generation);
+    HistorySample samples[2];
+    const auto    index = logic::homehub_history_index("bsh_state");
+    require(history_modbus_snapshot(index, samples, 2) == 2 && samples[0] == 10 && samples[1] == 0,
+            "heater_reply_is_recorded_in_its_own_bucket");
+}
+
+void restore_modbus_delayed(const char* transport_path) {
+    const auto configured = configure_homehub();
+    load_synthetic_nor(transport_path);
+    journal_sdk::unix_origin = delayed_boot_s + 1515;
+    history_start();
+    require(s_flash_scan_ok && !s_flash_restore_done, "scan_delayed_modbus_nor");
+    const auto generation = bind_homehub(configured, peer_a);
+    for (unsigned i = 0; i < 20; ++i) history_service_flash_restore();
+    require(s_flash_restore_done, "finish_delayed_modbus_restore");
+    const auto restored = flow_snapshot();
+    const auto first    = history_bucket_from_unix(delayed_boot_s + 600);
+    require(s_flash_oldest_bucket[static_cast<size_t>(HistoryJournalSource::Modbus)] == first &&
+                restored == std::vector<HistorySample>{123, 246, 369, HISTORY_NO_READING,
+                                                       HISTORY_NO_READING},
+            "restored_delayed_modbus_has_one_sample_per_closing_boundary");
+
+    // A new boot's first real measurement appends after the restored gaps.
+    record_flow("49.2", generation);
+    auto expected = restored;
+    expected.push_back(492);
+    require(flow_snapshot() == expected, "resumed_modbus_preserves_restored_sequence");
+    require(journal_sdk::writes == 0 && journal_sdk::erases == 0,
+            "delayed_modbus_restore_is_read_only");
+}
+
+void restore_trend_read_fault(const char* transport_path, bool persistent) {
+    const auto configured = configure_homehub();
+    load_synthetic_nor(transport_path);
+    journal_sdk::unix_origin += 4 * HISTORY_DT_S;
+    history_start();
+    require(s_flash_scan_ok && !s_flash_restore_done, "cold_scan_leaves_trend_restore_pending");
+    bind_homehub(configured, peer_a);
+    const auto src     = static_cast<size_t>(HistoryJournalSource::Modbus);
+    const auto env_src = static_cast<size_t>(HistoryJournalSource::Env3);
+    require(s_flash_restore_slot_count[src] == 2, "two_scoped_modbus_records_indexed");
+    require(s_flash_restore_slot_count[env_src] > 0, "later_independent_env3_record_indexed");
+    fail_restore_offset           = history_journal_slot_offset(s_flash_restore_slots[src][1]);
+    fail_restore_reads            = persistent ? 64 : 1;
+    constexpr size_t first_modbus = history_restore_next_source_ring(0);
+    for (size_t i = 0; s_flash_restore_ring < first_modbus && i < 64; ++i)
+        history_service_flash_restore();
+    require(s_flash_restore_ring == first_modbus, "restore_reaches_modbus_before_fault");
+
+    history_service_flash_restore();
+    require(!s_flash_restore_done && s_flash_restore_ring == first_modbus,
+            "failed_batch_waits_for_retry_without_retiring_later_sources");
+    for (size_t i = 0; !s_flash_restore_done && i < 64; ++i) history_service_flash_restore();
+    require(s_flash_restore_done, "retry_exhaustion_still_finishes_trend_restore");
+    const auto flow = flow_snapshot();
+    require(has_sample(flow, 234), "readable_neighbor_survives_failed_slot");
+    require(has_sample(flow, 123) == !persistent, "only_persistently_unreadable_bucket_is_lost");
+    HistorySample env[HISTORY_SAMPLES];
+    const size_t  count = history_env3_snapshot(0, env, HISTORY_SAMPLES);
+    require(std::find(env, env + count, 256) != env + count,
+            "later_independent_env3_source_restores");
+    require(journal_sdk::writes == 0 && journal_sdk::erases == 0,
+            "read_fault_recovery_preserves_raw_journal");
+}
+
 void restore_late_correction(const char* transport_path) {
     load_synthetic_nor(transport_path);
     sdk::now_us = 3620000000LL;
@@ -595,9 +1145,67 @@ int main(int argc, char** argv) {
             seed_late_correction(argv[2]);
         else if (name == "restore_late_correction" && argc == 3)
             restore_late_correction(argv[2]);
+        else if (name == "seed_trend_read_fault" && argc == 3)
+            seed_trend_read_fault(argv[2]);
+        else if (name == "seed_modbus_delayed" && argc == 3)
+            seed_modbus_delayed(argv[2]);
+        else if (name == "restore_modbus_delayed" && argc == 3)
+            restore_modbus_delayed(argv[2]);
+        else if ((name == "restore_trend_read_transient" ||
+                  name == "restore_trend_read_persistent") &&
+                 argc == 3)
+            restore_trend_read_fault(argv[2], name == "restore_trend_read_persistent");
         else if ((name == "checkup_pending_healthy" || name == "checkup_pending_forget") &&
                  argc == 3)
             checkup_pending(argv[2], name == "checkup_pending_forget");
+        else if (name == "seed_modbus_cold" && argc == 3)
+            seed_modbus_peer(argv[2], ModbusTransport::Cold);
+        else if (name == "seed_modbus_legacy" && argc == 3)
+            seed_modbus_peer(argv[2], ModbusTransport::Legacy);
+        else if (name == "seed_modbus_legacy_tagged" && argc == 3)
+            seed_modbus_peer(argv[2], ModbusTransport::LegacyTagged);
+        else if (name == "seed_modbus_cold_collision" && argc == 3)
+            seed_modbus_peer(argv[2], ModbusTransport::ColdCollision);
+        else if (name == "seed_modbus_warm" && argc == 3)
+            seed_modbus_peer(argv[2], ModbusTransport::Warm);
+        else if (name == "restore_modbus_cold_same" && argc == 3)
+            restore_modbus_peer(argv[2], ModbusTransport::Cold, peer_a);
+        else if (name == "restore_modbus_cold_different" && argc == 3)
+            restore_modbus_peer(argv[2], ModbusTransport::Cold, peer_b);
+        else if (name == "restore_modbus_legacy" && argc == 3)
+            restore_modbus_peer(argv[2], ModbusTransport::Legacy, peer_a);
+        else if (name == "restore_modbus_legacy_tagged" && argc == 3)
+            restore_modbus_peer(argv[2], ModbusTransport::LegacyTagged, kCollidingIpv4, false,
+                                true);
+        else if (name == "restore_modbus_cold_collision_same" && argc == 3)
+            restore_modbus_peer(argv[2], ModbusTransport::ColdCollision, kCollidingIpv4);
+        else if (name == "restore_modbus_cold_collision_replacement" && argc == 3)
+            restore_modbus_peer(argv[2], ModbusTransport::ColdCollision, kCollidingIpv4, false,
+                                true);
+        else if (name == "restore_modbus_warm_same" && argc == 3)
+            restore_modbus_peer(argv[2], ModbusTransport::Warm, peer_a);
+        else if (name == "restore_modbus_warm_different" && argc == 3)
+            restore_modbus_peer(argv[2], ModbusTransport::Warm, peer_b);
+        else if (name == "seed_modbus_warm_legacy" && argc == 3)
+            seed_modbus_peer(argv[2], ModbusTransport::WarmLegacy);
+        else if (name == "restore_modbus_warm_legacy_alias" && argc == 3)
+            restore_modbus_peer(argv[2], ModbusTransport::WarmLegacy, peer_b);
+        else if (name == "restore_modbus_warm_legacy_corrupt_marker" && argc == 3)
+            restore_modbus_peer(argv[2], ModbusTransport::WarmLegacy, peer_b, true);
+        else if (name == "seed_modbus_warm_combined" && argc == 3)
+            seed_modbus_peer(argv[2], ModbusTransport::WarmCombined);
+        else if (name == "restore_modbus_warm_combined" && argc == 3)
+            restore_modbus_peer(argv[2], ModbusTransport::WarmCombined, peer_a);
+        else if (name == "seed_modbus_warm_collision" && argc == 3)
+            seed_modbus_peer(argv[2], ModbusTransport::WarmCollision);
+        else if (name == "restore_modbus_warm_collision_same" && argc == 3)
+            restore_modbus_peer(argv[2], ModbusTransport::WarmCollision, kCollidingIpv4);
+        else if (name == "restore_modbus_warm_collision_replacement" && argc == 3)
+            restore_modbus_peer(argv[2], ModbusTransport::WarmCollision, kCollidingIpv4, false,
+                                true);
+        else if (name == "restore_modbus_warm_collision_corrupt_config" && argc == 3)
+            restore_modbus_peer(argv[2], ModbusTransport::WarmCollision, kCollidingIpv4, true,
+                                true);
         else if (argc != 2)
             throw std::runtime_error("unknown_case");
         else if (name == "commit_rejected")
@@ -630,6 +1238,16 @@ int main(int argc, char** argv) {
             read_admission();
         else if (name == "sequence_rejections")
             sequence_rejections();
+        else if (name == "modbus_live_peer_change")
+            modbus_live_peer_change();
+        else if (name == "modbus_reply_bucket")
+            modbus_reply_bucket();
+        else if (name == "modbus_peer_forget")
+            modbus_peer_forget();
+        else if (name == "modbus_missing_target_digest")
+            modbus_missing_target_digest();
+        else if (name == "modbus_quiet_unverified")
+            modbus_quiet_unverified();
         else if (name == "core_sequence_prepare")
             core_sequence("prepare");
         else if (name == "core_sequence_readback")

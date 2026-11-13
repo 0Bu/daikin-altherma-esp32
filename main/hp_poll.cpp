@@ -12,6 +12,7 @@
 #include "hp_convert.hpp"
 #include "heap_guard.hpp"
 #include "hp_detect.hpp"
+#include "hp_modbus.hpp"
 #include "history.hpp"
 #include "stack_watch.hpp"
 #include "logic/availability.hpp"
@@ -925,6 +926,8 @@ static void poll_task(void*) {
             // already unconditional, already 1 Hz and already reads the heap — and adding a resident
             // task to watch the largest contiguous block would spend the very resource it measures.
             heap_guard_sample();
+            // Service a pending HomeHub start even when X10A has no profile or transport.
+            mb_retry_start();
             if (config_profile() == "auto") {
                 retire_saturation_witness();
                 // Keep the CHECKUP's clock running while the bus is unidentified. Startup retires

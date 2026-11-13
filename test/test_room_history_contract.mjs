@@ -198,12 +198,16 @@ enum class CheckupFlashRestoreResult:uint8_t {Deferred,Ignored,Restored};
 using esp_err_t=int; constexpr int ESP_OK=0;
 constexpr size_t kTotalRings=HISTORY_FLASH_TOTAL_RINGS,kRestoreRingsPerTick=4;
 FlashOwned<bool> s_flash_scan_ok,s_flash_restore_done,s_flash_checkup_restore_done;
+FlashOwned<bool> s_flash_restore_retry;
 FlashOwned<size_t> s_flash_restore_ring,s_flash_restored_rings;
 FlashOwned<uint16_t> s_flash_restore_slots[HISTORY_JOURNAL_SOURCE_COUNT][HISTORY_SAMPLES];
 std::atomic<bool> s_reset_requested{false},s_mb_reset_requested{false},s_circulation_reset_requested{false};
 std::atomic<uint32_t> s_circulation_fp{0};
 bool s_persist_dirty=false;
-struct ExistingStore {uint32_t circulation_fp=0;} existing_store;
+std::atomic<uint32_t> s_mb_target_fp{0};
+uint32_t s_mb_config_fp=0;
+HistoryLiveness s_liveness{};
+struct ExistingStore {uint32_t circulation_fp=0,mb_target_fp=0;} existing_store;
 ExistingStore& P(){return existing_store;}
 alignas(8) unsigned char s_flash_sector[HISTORY_FLASH_ERASE_BYTES];
 HistorySample s_flash_restore_blocks[4][HISTORY_SAMPLES],s_splice_live[HISTORY_SAMPLES],s_splice_out[HISTORY_SAMPLES];
@@ -231,6 +235,7 @@ bool flash_record_valid(const FlashJournalRecord& r){
 }
 int flash_record_stored_index(const HistoryJournalHeader&,size_t index){return index==0?0:-1;}
 void flash_note_restore_ahead(size_t,int64_t,int64_t){need(flash_depth==1,"restore note without owner");}
+void flash_note_restore_read_failure(size_t){need(flash_depth==1,"restore read failure note without owner");}
 CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord*,size_t n,int64_t){
  need(flash_depth==1,"checkup restore lost caller flash owner");need(n==1,"checkup record selection");
  ++checkup_calls;return CheckupFlashRestoreResult::Restored;
@@ -254,7 +259,7 @@ void prepare_restore(){
  flash_contended=false;after_flash_release=nullptr;queue_reset=false;
  flash_reads=checkup_calls=stop_expirations=stop_services=0;
  Lock flash(s_flash_mtx);room_wipe_locked(101);s_room_identity.store(101);
- s_flash_scan_ok=true;s_flash_restore_done=false;s_flash_checkup_restore_done=false;
+ s_flash_scan_ok=true;s_flash_restore_done=false;s_flash_checkup_restore_done=false;s_flash_restore_retry=false;
  s_flash_restore_ring=kTotalRings-1;s_flash_restored_rings=0;
  for(size_t s=0;s<HISTORY_JOURNAL_SOURCE_COUNT;++s){
   s_flash_newest_bucket[s]=s_flash_oldest_bucket[s]=INT64_MIN;s_flash_restore_slot_count[s]=0;

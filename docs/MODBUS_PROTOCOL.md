@@ -29,7 +29,8 @@ The source path is read-only. This firmware never writes the hub.
 
 ## Wire facts
 
-Source: *EKRHH Daikin HomeHub — Installer reference guide 4P744838-1E*, §2.5, §9, §13.
+Source: [EKRHH Daikin HomeHub — Installer reference guide 4P744838-1E](https://www.daikin.eu/content/dam/document-library/Installer-reference-guide/heat/accessories/ekrhh/EKRHH_Installer%20reference%20guide_4PEN744838-1E_English.pdf),
+§2.5, §9, §13.
 
 | | |
 |---|---|
@@ -47,7 +48,7 @@ Source: *EKRHH Daikin HomeHub — Installer reference guide 4P744838-1E*, §2.5,
 |---|---|
 | `Temp16` | signed ÷100 → °C |
 | `Pow16` | signed ÷100 → kW |
-| `Int16` | signed, as-is (the flow register carries L/min ×100, so the profile applies a further ÷100) |
+| `Int16` | signed, with optional per-register scaling. See [physical acceptance](#deferred-physical-acceptance) for the provisional flow conversion. |
 | `Text16` | unsigned = 2 ASCII chars, hi/lo byte — e.g. `0x5538` → `"U8"` |
 
 **Special return values** (§9.2.3) — these are *not data* and are never published as a reading:
@@ -100,13 +101,13 @@ delays therefore have a 17-second SDK timeout budget, excluding scheduling and l
 This is a project responsiveness bound, not a manufacturer discovery guarantee.
 
 The user may instead enter an IP, `.local` name or ordinary DNS name verbatim. Saving `mb_host` is an
-explicit decision: non-empty starts polling that address; empty disables HomeHub completely and
+explicit decision: a non-empty address requests polling; empty disables HomeHub completely and
 persists the latch. Empty-after-searched therefore means no task, no socket, no HomeHub request, no
 HomeHub-dependent heating-curve diagnosis and no future automatic search. If several `homehub-*`
 responders answer, the first resolved IPv4 is used/offered and the count is logged to `/diag` rather
 than silently guessed at.
 
-Every active failure is exposed as complete English `error` text plus structured `error_code`,
+Connection and polling failures use complete English `error` text plus structured `error_code`,
 `error_detail` and (for reads) `error_register` fields. The UI localises the structured cause as a
 quiet red line below the address. The same transition is written through `diag_printf`, which means
 it reaches both `/diag` and configured Syslog; repeated one-second retries do not spam the log, and a
@@ -127,13 +128,14 @@ Read today (UC3 Daikin Altherma):
 * **Faults** (input): unit error active `21`, error code `22` (`Text16`), sub-code `23`
 * **Temperatures** (input, `Temp16`): leaving water PHE `40` / BUH `41`, return `42`, DHW tank `43`,
   outdoor air `44`, liquid refrigerant `45`, room `50`
-* **Flow + electrical input** (input): flow `49` (`Int16`, L/min ×100), whole-system electrical
-  input `51` (`Pow16`, kW). Offset `51` is not dedicated booster-heater power.
+* **Flow + electrical input** (input): for flow `49` (`Int16`), the firmware catalog provisionally
+  divides by 100 to present L/min. Input `51` (`Pow16`, kW) reports heat pump power consumption,
+  whose load coverage is unverified.
 * **Disinfection state** (input): current disinfection operation `33` (`Int16`, binary). The
   HomeHub map does not expose the configured weekday, start time or disinfection temperature.
 * **Setpoints and modes** (holding, read back): LWT main heating `1` / cooling `2`,
-  operation mode `3`, space heating ON/OFF `4`, room thermostat heating `6` / cooling `7`, quiet mode
-  `9`, DHW reheat setpoint `10`, LWT heating offset `54`, Smart-Grid mode `56`, power limits `57`/`58`
+  operation mode `3`, space heating ON/OFF `4`, room thermostat heating `6` / cooling `7`,
+  DHW reheat setpoint `10`, LWT heating offset `54`, Smart-Grid mode `56`, power limits `57`/`58`
   (`Pow16`). All of them are telemetry-only here; `54` is read back as the independent record of
   whatever the Onecta app or the MMI last set.
 
@@ -151,18 +153,18 @@ Modbus constants; the names below are applied only by the visual UI and come fro
 | input `31` | Compressor running | binary `0`/`1`, displayed `OFF`/`ON` |
 | input `32` | Booster heater running (DHW tank immersion heater) | binary `0`/`1`, displayed `OFF`/`ON` |
 | input `33` | Tank disinfection operation | binary `0`/`1`, displayed `OFF`/`ON` |
-| input `37` | 3-way valve | `0` / `1` → Space heating / DHW |
+| input `37` | 3-way valve route report | `0` / `1` → Space circuit (manufacturer: Space heating) / DHW |
 | input `38` | Current operation mode (API label disambiguates the guide's second "Operation mode") | `1` / `2` → Heating / Cooling |
 | input `52` / `53` | DHW / space operation | binary `0`/`1`, displayed `OFF`/`ON` |
 | holding `3` | Operation mode | `0` / `1` / `2` → Auto / Heating / Cooling |
-| holding `4` / `9` | Space heating/cooling / quiet mode | binary `0`/`1`, displayed `OFF`/`ON` |
+| holding `4` | Space heating/cooling | binary `0`/`1`, displayed `OFF`/`ON` |
 | holding `56` | Smart Grid operation mode | `0` / `1` / `2` / `3` → Free running / Forced off / Recommended on / Forced on |
 
 The named enums retain their raw integer in `homehub_format()`, `/values`, MCP and MQTT. `/values`
 carries a separate structural `enum` id so the browser can localise a known
 state; an undocumented number remains visible as `Unknown (N)` instead of being silently coerced.
 The flat MQTT payload therefore contains, for example,
-`"smart_grid_operation_mode":2`, never `"smart_grid_operation_mode":"Recommended on"`. The eight
+`"smart_grid_operation_mode":2`, never `"smart_grid_operation_mode":"Recommended on"`. The seven
 true flags retain the same numeric `0`/`1` contract plus the structural `binary:true` marker, and
 only the visual boundary prints `OFF`/`ON`.
 
@@ -198,7 +200,7 @@ What that buys, concretely:
 | Task | `hp_poll` (8192) | `hp_modbus` (6144, only when an address is saved) |
 | Cache | `hp_values_snapshot()` | `mb_values_snapshot()` |
 | State | `/status.hp` | `/status.modbus` |
-| Rows | ~100 | 32 |
+| Published rows | ~100 | Up to 31 for EKRHH, 42 for native Altherma 4 |
 | Fails on | cable · pin · framing | LAN · mDNS · hub |
 
 ## What one cycle asks for
@@ -218,22 +220,22 @@ whatever the first cycle read.
 * **Batching.** The 32 EKRHH offsets fall into **ten contiguous runs** across the two function
   spaces, so a full cycle is ten requests. The per-request cap is 16 registers, far below the
   protocol's 125: a batch is the unit of *loss* as much as of saving, and the longest run here is six.
-* **Two cadences.** A **full** cycle every fifth poll tick; the four between it read three fast
+* **Two cadences.** A **full** cycle every fifth poll tick; the four between it read four fast
   batches. Two carry the diagnosis gates — inputs 53 (normal space operation), 37 (space rather than
   DHW routing) and 38 (heating rather than cooling). The third carries input 44, optional plant outdoor context which
   legacy-441 requires from the same current cycle. It is explicitly **not** a gate. The extra 40–45 batch
   is one deliberate bundled request; borrowing the five-second cache would not establish event-time
-  freshness. Neighbouring registers ride these batches because leaving them out saves no request.
+  freshness. The fourth batch, 30–33, supplies input 31's current compressor report for the
+  schematic. Neighbouring registers ride these batches because leaving them out saves no request.
 * **Five poll ticks.** Chosen from the *dashboard*, not from how fast the values move: the
   browser polls `/values` every two seconds, and a HomeHub reading up to ten seconds old beside a
   one-second X10A reading of the same quantity invites exactly the "which of these is current?"
   question the two-array `/values` shape exists to make answerable. This is nominal cadence with
   short replies; bounded network waits add time and are included in the separate cache-age bound.
-* **A fast cycle commits no value cache.** Its thirteen gate/context-batch registers are not a cache and its
-  position on the raster is not a sample, so `/values` and the trend rings stay with the last full
-  cycle rather than publishing thirteen rows and 18 apparent read failures. Network waits add to
-  the intervening poll delays. `connected` reports this cycle's transport state; reply age detects
-  stalled progress independently of the larger full-cache allowance.
+* **A fast cycle publishes current observations.** Its seventeen gate and context registers leave
+  the raw `/values` rows and trend rings on the last full cycle. Network waits add to the
+  intervening poll delays. `connected` reports this cycle's transport state, and reply age
+  detects stalled progress independently of the larger full-cache allowance.
 * **An exception splits its batch.** A Modbus exception is a valid reply about **one** register, and
   a batched request cannot say which — so a batch that excepts is re-read register by register, and
   stays split for the session (the usual cause, a register this hub does not implement, does not go
@@ -245,16 +247,15 @@ whatever the first cycle read.
   otherwise `/status`, `/diag` and Syslog would oscillate between failure and recovery every five
   seconds without evidence that the row recovered.
 
-Transport progress does not renew an earlier measurement. Gate53, space-route37, heating-mode38 and outdoor44
-each retain the successful response's monotonic observation time and expire individually after the
-existing seven-second project bound. The full cache retains its separate 537-second bound, including
-bounded slow fallback requests; `/status.modbus.values` stops counting it when it expires, even if
-fast-cycle replies continue. These bounds are liveness filters, not proof of simultaneous measurements.
+Inputs 31, 37, 38, 44 and 53 each retain the response's monotonic observation time and expire
+individually after seven seconds. The
+[`/values` contract](API.md#get-values) describes the separate full-cache limit. When it expires,
+`/status.modbus.values` stops counting the cached rows even if fast replies continue.
 A target change immediately resets the public profile to Auto/Probing, before name resolution;
 only work for that target generation can publish a new classification.
 
-**32 → 4.4 requests/poll-second, ~380 000 a day.** The plan is resolved at compile time and lives in flash;
-`hp_modbus.cpp` `static_assert`s that batching still collapses the map, so a future register added
+**32 → 5.2 requests/poll-second, ~449 000 a day.** The plan is resolved at compile time and lives in
+flash. `hp_modbus.cpp` checks the batch count at compile time, so a future register added
 into a gap re-prices the link visibly instead of quietly restoring the per-register sweep.
 
 ## Daikin Altherma 4 Modbus TCP support
@@ -295,10 +296,11 @@ read plan; Auto still polls the EKRHH baseline before a successful native probe.
 | holding `54` | Weather-dependent heating offset for the main zone |
 | holding `58` | Imposed electrical power limit; protective operation can exceed it |
 
-The native quiet selection is not paired with X10A's quiet-active bit or recorded as a quiet-active
-history. The guide defines current activity separately as discrete input 12; this client currently
-issues only FC03/FC04. Automatic schedules and manually selected levels can be Off. Native
-`quiet_state` is consequently absent from the offered Modbus histories and returns 404 if requested.
+The native quiet selection is separate from X10A's quiet-active bit. The guide defines current
+activity as discrete input 12. This client issues only FC03/FC04. The EKRHH read plan still
+includes holding 9, and the baseline sweep withholds that row from published values because it may
+instead describe native selection. Modbus `quiet_state` is absent from the offered histories and
+returns 404 if requested.
 
 Every cached row carries the immutable definition that decoded it. API/MCP enum, binary and text
 metadata, as well as MQTT keys, use that snapshot-owned definition, never a later global profile or
@@ -320,8 +322,12 @@ flow scale, prints L/min for pump speed and gives an ambiguous 10–600 bar pres
 outputs, pressure pairing and pressure-based profile selection must not be treated as confirmed
 physical measurements or verified model identification. The native value explainers also state the
 unverified flow/pump/pressure interpretations in every shipped language.
-The limits also appear beside paired X10A comparisons and under native replacement readings. No
-numeric agreement or difference is asserted for native flow/pressure while their scaling is unverified.
+The limits also appear beside paired X10A comparisons and under replacement readings. No numeric
+agreement or difference is asserted for unverified flow or native pressure. A rejected pressure
+register selects the baseline map and gives no independent evidence for the flow divisor. Input 49
+keeps its catalog conversion in every map and stays unverified in readings and charts. The
+dashboard applies this limit to older responses that lack the scale marker as well. Only qualified
+X10A flow drives the water animation, working ΔT and capacity.
 The sentinel filter remains a conservative project rule; the guide explicitly documents unavailable
 32766 for input 23 but does not establish the complete EKRHH sentinel vocabulary for every native row.
 
@@ -336,16 +342,29 @@ establish these physical interpretations; they remain unverified pending such ev
 
 Detection is **100% automatic** at runtime without requiring any UI configuration:
 
-1. **Initial session state (`Auto`):** When connecting to a new target host, port, or unit ID (`status_socket_open`), the active profile begins in `Auto`.
+1. **Initial session state (`Auto`):** A new target host, port, unit ID or resolved IPv4 peer starts in `Auto`.
 2. **Safe baseline polling & probing:** In `Auto`, the firmware reads the safe 32-register base HomeHub map (`MB_PLAN`) and performs a single probe request on register 79 (water pressure, `MODBUS_PROBE_REGISTER`) at the end of each full cycle.
 3. **Promotion to `Altherma4`:** If probe register 79 successfully returns valid data in the plausible hydronic range (0 < pressure <= 6.0 bar), `s_probe_tracker` selects `ModbusProfile::Altherma4` using the existing heuristic. The baseline rows are discarded, only the probe row is published for that cycle, and the next poll performs a complete 42-register native sweep. This avoids publishing native quiet/mode values through baseline semantics. The protocol answer is not physical model verification.
 4. **Fallback behavior:**
-   - **Affirmative `HomeHub` answer:** When connected to an Altherma 3 / EKRHH unit, register 79 returns `32767` (`MB_UNSUPPORTED`, verified on EKRHH hardware) or Modbus Exception 02 (*Illegal Data Address*). The firmware evaluates this affirmative response via `logic::evaluate_probe_result()`, definitively setting `ModbusProfile::HomeHub` without incrementing `rx_fail` or dropping the link. The UI and `/status` remain green and healthy, reporting the 32 valid base registers.
+   - **Affirmative `HomeHub` answer:** Register 79 returns `32767` (`MB_UNSUPPORTED`,
+     verified on EKRHH hardware) or Modbus Exception 02 (*Illegal Data Address*). The firmware
+     selects the HomeHub map without counting the answer as a transport failure. The probe
+     establishes the profile. The poll separately reports which rows supplied usable readings.
    - **Transport failure branch:** If a probe request encounters a transport error (timeout, connection closed), the connection is dropped (`link_ok = false`, socket closed) without incrementing `rx_fail`. The profile stays in `Auto` across reconnects until `MODBUS_PROBE_MAX_RETRIES` (3) consecutive probe failures are reached, after which it falls back to `ModbusProfile::HomeHub` (`profile_basis: fallback`). During probe-cycle transport drops, `/values` remains unrefreshed for that cycle (`connected = false`).
    - **Invalid value branch:** If probe register 79 returns an implausible value (`0` or `> 6.0 bar`), the connection remains open, but after 3 consecutive invalid readings it exhausts the probe retry budget and falls back to `ModbusProfile::HomeHub` (`profile_basis: fallback`).
    - **Unavailable (`MB_UNAVAILABLE`):** Unavailable is not capability evidence; it follows the non-affirmative retry/fallback path.
    - **Hub syncing (`MB_WAIT`):** While register 79 returns `32765` (`MB_WAIT`, hub syncing/booting), the probe continues to run on every full cycle, but does not consume the retry budget and leaves the profile in `Auto` without counting as a failure.
-5. **Sticky profile across reconnects & periodic back-off:** While connected to the same target endpoint (`host:port:unit_id`), an affirmatively detected profile (`HomeHub` or `Altherma4`, `profile_basis: affirmative`) is remembered in RAM across TCP reconnects to avoid repetitive probe churn. Non-affirmative exhaustion fallback defaults to `HomeHub` for safety, then periodically re-probes with exponential backoff (starting at 10 minutes, doubling up to a 4-hour cap) to accommodate transient startup conditions such as circuit filling or temporary network drops. Changing the target host, port, or unit ID resets all tracker state immediately.
+5. **Profile reuse & periodic back-off:** An affirmative profile (`HomeHub` or `Altherma4`,
+   `profile_basis: affirmative`) is remembered in RAM across reconnects only for the same
+   configured host, port, unit ID and resolved IPv4 peer. When a hostname resolves to another
+   peer, that connection probes anew. Non-affirmative exhaustion defaults to the HomeHub
+   baseline and periodically re-probes with exponential backoff (10 minutes up to 4 hours).
+
+Modbus history uses the same target and IPv4 boundary. A different IPv4 address starts its own
+series, including a DHCP address change on the same unit. See the
+[restore and peer binding rules](ARCHITECTURE.md#history-and-diagnosis-persistence) for how the
+configured target and peer scope are checked. An IPv4 address cannot distinguish units that use
+the same endpoint.
 
 ## How the two sources meet
 
@@ -361,22 +380,18 @@ leaving-water sensor. A label match would be incomplete and wrong, which is the 
 below, where the Modbus value stands alone under the X10A row's name with nothing beside it to look
 implausible against.
 
-The vocabulary is therefore **`logic/history.hpp`'s trend ids**, reused rather than reinvented: a
-trend is already "one physical quantity, addressed structurally by (register page, byte offset,
-unit, plus converter where a byte contains several bits)", and the catalog test already proves each
-locator resolves to exactly one row per profile. A
-`static_assert` pins every pairing to a real trend id, so a renamed trend is a build error rather than
-a pairing that silently stops happening.
+Trended pairs reuse the IDs and structural locators in [`logic/history.hpp`](../main/logic/history.hpp).
+Live-only state pairs use the X10A page, offset and converter together. The catalog tests verify
+the locators against the shipped profiles.
 
-Eight measurements plus three state pairs, and — measured across the catalog — **all eleven resolve on all
-39 detectable profiles**: pre- and post-BUH leaving water, return water, DHW tank, outdoor air,
-liquid refrigerant, flow, room temperature,
-booster-heater run (HomeHub input `32` ↔ X10A BSH converter `305`) and 3-way-valve position (input
-`37` ↔ converter `306`), and EKRHH Quiet mode (holding `9` ↔ X10A `0x60/2`, converter `301`).
-Native Altherma 4 holding 9 reports selection and is excluded from this activity pairing. The rest carry no pairing on
-purpose, each for a stated reason: the real power measurement has
-no X10A equivalent at all (X10A estimates it from CT clamps at an assumed 230 V, so pairing a
-measurement with an estimate would hide which is which); other setpoints, modes and faults are not readings.
+The trended measurements cover pre- and post-BUH leaving water, return water, DHW tank,
+outdoor air, liquid refrigerant, flow and room temperature. Trended states include booster-heater
+run (input `32`) and reported 3-way-valve route (input `37`). A route report alone cannot
+confirm mechanical valve position or water flow.
+The pump running report (input `30`) and space heating/cooling operation (input `53`) pair
+live. Native Altherma 4 also pairs water pressure (input `79`), while its holding `9` reports
+Quiet selection. HomeHub's reported power consumption stays separate from the X10A current-based
+estimate. Other setpoints, modes and faults are not paired measurements.
 Disinfection input `33` is likewise deliberately unpaired: X10A `0x62/8` converter `303` is named
 **Tank preheat**, a preparatory state rather than proof that disinfection is active. Both receive
 their own event timeline, so their timing can be compared without merging their meaning.
@@ -389,21 +404,13 @@ current?" a per-row question no consumer could answer. Each row on both sides ca
 where one exists; a Modbus-only timeline additionally carries `history` without acquiring a false
 X10A pairing.
 
-The `modbus` array is emitted **only while the link is live at the moment the snapshot is taken** —
-not merely while the stack is configured, and not merely while it was connected when the request
-arrived. Its rows belong to that live session's latest **full** cycle, subject to the 537-second
-full-cache and seven-second reply-age bounds described above; bounded network reads add to the
-four intervening fast polls. At native promotion, the answered pressure probe alone is exposed
-until the following full native sweep. Fast cycles update link, diagnosis-gate state and the sealed
-input-44 event context without turning their thirteen rows into a partial cache. These are transport
-limits, not proof that every row was observed simultaneously. Liveness and the cache sit behind two
-different mutexes, so every successful TCP connect gets a generation and every cache commit records
-the generation that produced it. `mb_values_snapshot()` reports live only when the post-copy link
-state is connected **and** its generation matches the copied cache. That closes both directions of
-the race: a disconnect after the copy, and a reconnect that becomes live after an old cache was
-copied. When it is not live the **key is omitted entirely** rather than emitted empty: an absent
-array and an empty one are different claims, and only absence says "no current reading". A device
-without a HomeHub therefore sees exactly the payload it saw before this feature existed.
+The `modbus` array reflects the current session's latest full sweep. The
+[`/values` contract](API.md#get-values) defines omission, age limits and native promotion.
+Fast polls refresh the link, diagnosis gates and input-44 event context. The published array
+keeps the full-sweep rows. The link and cache have separate mutexes. Each TCP session receives a
+generation and each cache commit records it. After copying the cache, `mb_values_snapshot()`
+checks liveness and verifies that the session and configured target still match the copy. This
+handles disconnects and reconnects during the copy without holding both mutexes.
 
 In the **web UI** (see [`DESIGN.md`](DESIGN.md)), X10A stays the prominent source everywhere and
 Modbus readings are marked in their own colour — a petrol token (`--src-mb`) that is neither a state
@@ -411,36 +418,17 @@ colour (`--ok`/`--warn`/`--err`) nor a temperature one (`--flow-*`), because pro
 thing. The Settings connection row is link state rather than reading provenance, so it uses the same
 green/yellow/red state colours as WiFi, MQTT, Syslog and NTP:
 
-* **Both up** — the row shows the X10A value, unmarked. Tapping it opens the explainer, and the
-  gateway's reading appears at the **end** of the body, after the "Normal:" note: a full row carrying
-  the *Modbus register's own label*, the badge and the value, then the **difference** between the two
-  when the conversion is established. Native Altherma 4 flow and pressure show the unverified
-  conversion limit instead of a numeric comparison.
-  It sits last, not first, because a reader opens an explainer to find out what the quantity *is* —
-  the row's own value is already stated an inch above, in the header they just tapped. The label is
-  the gateway's rather than the X10A row's on purpose: this line is what someone verifying a pairing
-  on real hardware reads, and reusing the X10A label would show them their own assumption back.
-  A wide gap is left to speak for itself rather than coloured as an error — the two sensors
-  legitimately sit at different points in the circuit.
-* **X10A down, HomeHub up** — a banner says so, and each row it can supply shows the **Modbus** value
-  in petrol. A row it cannot shows `—`; a stale X10A number is never left standing. The schematic
-  follows the same rule, which makes it visibly sparse — about a dozen registers against a hundred —
-  and that is the honest shape of the state. **No comparison is shown here at all**: a *second*
-  opinion presupposes a first one, and the only X10A number still in memory is one the bus stopped
-  refreshing, so a "difference" against it would be a statement about two *instants* wearing the
-  shape of a statement about two *instruments*.
-  ΔT and heat output survive, because both sides of each come from the one source and nothing is
-  mixed across boundaries. **The COP does not.** It looks like the same arithmetic and is not: the
-  gateway measures the *whole unit's* electrical input, backup and immersion heater included, while
-  the heat figure is across the plate exchanger alone — precisely the boundary mismatch
-  [`cop_scope.hpp`](../main/logic/cop_scope.hpp) refuses, and one that collapses exactly when a
-  heater fires, reading as a failing heat pump while nothing is wrong. The gateway now carries the
-  compressor and tank-heater states, but not the BUH stage state and all source-boundary evidence the
-  quotient needs, so the answer remains: publish nothing, and name the reason
-  (`feature_gate.hpp` — disable, never degrade).
-  The electrical input itself *is* better here, since the HomeHub measures what X10A only estimates
-  from CT clamps at an assumed 230 V — read from input register **51** by its offset, never by its
-  unit, because the map carries three `kW` rows and the other two are the power *limit* setpoints.
+* **Both up** — a usable X10A row has precedence where the sources are paired. The outdoor-air
+  pill can use HomeHub while X10A outdoor data is held or unavailable. The [inspector layout](DESIGN.md)
+  gives the separate Modbus label and reading. Unverified flow and native pressure show the
+  [conversion limit](#deferred-physical-acceptance) in place of a numeric comparison.
+* **X10A down, HomeHub up** — the banner names the active source. Available Modbus rows appear
+  in petrol, and missing readings show `—`. The unverified flow remains visible with its limit.
+  Working ΔT, capacity and COP/EER are withheld. The EKRHH guide (4P744838-1E, §9.2.2, p. 43)
+  identifies input **51** as heat pump power
+  consumption. Its measurement boundary and heater coverage have not been established for matching
+  that reading to heat across the plate exchanger. The schematic shows the reported power by
+  register offset; the other `kW` rows are power limits.
 * **No HomeHub** — nothing Modbus appears anywhere: no row, no group, no comparison, no banner.
 
 Registers with no X10A counterpart get their own group at the very end of the value list, after
@@ -485,14 +473,16 @@ non-empty `mb_host`.
 > and switched a board onto a link it does not have, silently, on upgrade.
 
 **Applied live.** `POST /set_hp` accepts `mb_host`, marks discovery complete and stages the target
-fingerprint plus enabled bit before persistence. After the durable write it passes only that POD bit
-to allocation-free `mb_reconfigure(bool enabled) noexcept`; a post-save Config copy therefore cannot
-turn success into a false 503 or lose retained cleanup. A non-empty address starts/reconnects the
-task; clearing it flips the atomic task intent, which is checked before TLS delays and Config
-snapshots at the top of the next cycle, so even allocator pressure retires the sole socket owner.
-`POST /discover_homehub` is
-separate: it runs the bounded manual search and returns `{ok:true,host:"<IPv4>"}` without saving or
-reconfiguring anything.
+fingerprint and enable flag before persistence. After the durable write, `mb_reconfigure` applies
+the flag without copying the configuration again. A non-empty address requests polling, which can
+require creating a task.
+`modbus_start_pending: true` means the settings were saved and polling is still waiting for its
+worker or resources. See [the API contract](API.md#x10a-homehub-and-board-hardware) for startup and recovery.
+Task-admission failures can appear in `/diag` before the worker is active.
+Clearing the address withdraws the source immediately. Its worker closes the socket after OTA or
+Weather releases network heap. A replacement waits for the old worker to release its network claim
+and deregister from the watchdog. `POST /discover_homehub` runs the bounded manual
+search and returns `{ok:true,host:"<IPv4>"}` without saving or reconfiguring anything.
 
 **Web UI:** the HomeHub appears as its own row in Settings → Connections — never folded into a
 combined link state with X10A, since either can be down alone and one merged "connected" would hide

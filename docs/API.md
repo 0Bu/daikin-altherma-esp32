@@ -212,7 +212,8 @@ or configured MQTT room-source name. Unsupported rows
 are omitted. RAM adoption verdicts include `accept`, `power_cycle`, `wrong_catalog`, `bad_crc`,
 `wrong_version`, `no_record`, `safe_mode`, `not_committed`, `stale_commit`; they do not report flash
 restoration. `stale_commit` means unmeasurable age, not an ordinary stalled raster (booked as gaps).
-Individual Modbus/ENV III rings may be retired beside an X10A `accept`. Dwell v4 books restart
+Warm Modbus rings are retired independently. ENV III rings may also be retired beside an X10A
+`accept`. Dwell v4 books restart
 blind time itself, so its verdict can be `accept` beside trend age refusals.
 
 `health` fields: `covered_s`, `span_s`, `source_fresh`, `source_age_s`, `persist`, `full_span`,
@@ -402,10 +403,26 @@ is unknown rather than a duration borrowed from another reading.
 Modbus rows contain `label`, `value`, `unit`, `off`, with applicable `binary`, `enum`, `profile`, `concept`,
 `history`. Numeric, flag and enum `value` fields are JSON numbers or null; text values are strings or
 null. `off` belongs to the selected catalog; native rows include `profile:"altherma4"` and do not
-borrow HomeHub enum meanings. Native quiet-policy selection proves no active quiet state/history.
-The full-cache limit is 537 seconds and individual reply-age limit seven seconds; these transport
-bounds cannot prove simultaneity. Native promotion first exposes only its pressure probe until a
-full sweep. History additionally requires matching space/offset/codec/scale/unit provenance.
+borrow HomeHub enum meanings. Modbus holding 9 is published only as native quiet-policy selection.
+Modbus input 49 keeps its numeric catalog conversion and carries `flow_scale_unverified:true`.
+It does not feed calculations that require qualified flow.
+When `modbus` is present, `modbus_history_boot_id` and `modbus_history_epoch` bind those rows to
+the history lifetime in `/status`. An epoch of zero means the copied rows have no current history
+binding. Use a Modbus chart only with a nonzero epoch and matching boot ID and epoch.
+The status field `history.modbus_binding:true` advertises this protocol independently of Modbus
+row availability. After learning the protocol, the dashboard withdraws Modbus charts and pins
+when a current `/values` request fails, the array is missing, or the binding is invalid. A matching
+boot ID and epoch in a fresh response can reopen the charts.
+The latest valid reply of the current session must be at most seven seconds old. The last
+full-cache commit must be at most 627 seconds old. A fast poll can refresh the reply clock while
+the full-cache rows retain their earlier values. These clocks describe the session and cache.
+The top-level `modbus_compressor_running` is `true` or `false` from HomeHub input 31's own valid
+reply in the current TCP session, at most seven seconds old. It is `null` when unavailable and can
+change between full-cache commits. The corresponding raw Modbus row still shows the full-cache
+reading. The field reports binary compressor activity.
+Diagnostic gate inputs have separate per-register freshness checks. Native promotion first
+exposes only its pressure probe until a full sweep. History additionally requires matching
+space/offset/codec/scale/unit provenance.
 Source caches are staged before the first chunk;
 MCP `get_hp_values` uses the same serializer. There is no retained model-sized response buffer.
 
@@ -418,11 +435,17 @@ Unknown ids return 404. Available rows are listed in `/status.history`. The payl
 {id,source,label,epoch,boot_id,dt,unit[,t0][,b0],v:[number|null,…],held:[[from,count],…]}
 ```
 
-`v` is tenths of the row's actual unit; divide by ten. `dt` is the raster cadence. `b0` anchors
+`v` is in tenths of the reported unit. Divide by ten. Modbus input 49 uses the catalog conversion
+and carries no scale marker in history. Its reported L/min remains unverified.
+`dt` is the raster cadence. `b0` anchors
 monotonic five-minute buckets, `t0` is sample-zero wall time derived from the captured newest-sample
 age and omitted before clock sync. `epoch` is captured with the samples; `boot_id` matches `/status`.
-Unavailable age metadata or an epoch changed before emission returns 503. Clients must reject
-responses superseded by a newer status/source generation.
+Modbus assigns readings in a full poll to the bucket of their own reply. Completed samples and
+gaps use their monotonic closing boundaries when the flash journal projects them onto wall time.
+An available series may have `v:[]` and no time anchors while awaiting measurements or peer
+confirmation. An unavailable history snapshot or a change of epoch or connected peer before
+emission returns 503.
+Clients must reject responses superseded by a newer status/source generation.
 `held` marks eligible X10A outdoor nulls as held-over; all other source rasters leave it empty.
 `v` does not record an unknown compressor state. A sweep dropped after a stop cannot put a number into
 its bucket, but any other outdoor sample without a readable speed stays a number, so a number is not
@@ -544,6 +567,15 @@ fields so it cannot roll them back.
 HomeHub port is 1–65535, unit 1–247, host at most 512 bytes. Empty host durably disables
 polling, automatic discovery, sockets and dependent diagnosis. Replacement state is staged before
 commit; live socket ownership remains with its task. X10A remains independent.
+When HomeHub settings are saved and polling is still pending, the response is
+`{"ok":true,"modbus_start_pending":true}`. This can occur during task startup, cleanup or
+resource pressure. A failed heap check at task creation or before the first sweep defers the next
+start attempt by five seconds. A created worker retries task-local network semaphore and watchdog
+admission at its normal poll cadence.
+After core services have started, the X10A task retries worker creation even while its bus is
+unavailable. OTA and Weather network activity defer creation. If the X10A task itself could not
+start, saving the same enabled target can retry creation without retiring its history.
+Safe mode keeps optional sources suspended.
 
 `POST /set_board` accepts `preset_id`, `led_gpio`, `led_type`, `led_inverted`, `btn_gpio`,
 `btn_active_low`, `env3_enabled`, `env3_sda`, `env3_scl`. A stable known preset id is required when
@@ -658,11 +690,14 @@ verification. It is an outbound-HTTPS capability behind the LAN boundary.
 ```text
 state (idle|checking|updating|done|error), progress, message, update_available, downgrade,
 channel, busy, generation, available, available_sha256, available_channel, current,
+boot_id, app_elf_sha256,
 heap_min_free_bytes, heap_min_largest_block_bytes, ota_stack_min_free_bytes,
 effective_manifest_url, effective_firmware_base_url, image_state, rollback_pending
 ```
 
-Busy/generation/feed are one mutex snapshot. Heap minima are operation-local checkpoint samples;
+Busy/generation/feed are one mutex snapshot. The boot ID and ELF identity match `/status` on the
+running boot and let clients validate cached display data during an update.
+Heap minima are operation-local checkpoint samples;
 stack minimum is boot-local and null until sampled. Capture transfer evidence before reboot.
 `image_state` is boot-latched ESP-IDF evidence; `rollback_pending` is null when that state is unknown.
 Unknown is not proof that rollback is absent. Fixed text/buffer overflow fails closed.

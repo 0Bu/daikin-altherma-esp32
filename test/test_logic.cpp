@@ -7850,8 +7850,8 @@ static void test_modbus_plan() {
         // BOTH gates must be reachable on a fast cycle. If a future map moved 38 or 53 so that one
         // of them fell into a full-only batch, the diagnosis would silently evaluate a gate that
         // is refreshed once per full cycle instead of once per second.
-        CHECK(fast_batches == 3);
-        CHECK(fast_regs == 13);
+        CHECK(fast_batches == 4);
+        CHECK(fast_regs == 17);
         // Every gate offset really is inside some fast batch — the assertion above counts batches,
         // this one proves the coverage it is standing in for.
         for (size_t g = 0; g < MB_GATE_OFFSET_COUNT; g++) {
@@ -7877,11 +7877,13 @@ static void test_modbus_plan() {
             if (outdoor_in_fast_batch) break;
         }
         CHECK(outdoor_in_fast_batch);
+        CHECK(mb_offset_is_fast_context(MbFunc::ReadInput, 31));
+        CHECK(!mb_offset_is_fast_context(MbFunc::ReadHolding, 31));
         // What the cycle actually costs, stated as the arithmetic rather than as a remembered
         // number.
         const double per_s = (fast_batches * (MB_FULL_CYCLE_TICKS - 1) + nb) /
                              static_cast<double>(MB_FULL_CYCLE_TICKS);
-        CHECK(approx(per_s, 4.4));
+        CHECK(approx(per_s, 5.2));
         CHECK(per_s < N / 5.0); // at least a five-fold reduction against one request per register
     }
 }
@@ -8730,8 +8732,9 @@ static void test_modbus_profile() {
     // ── ModbusProbeTracker state tracker across reconnects ──
     {
         ModbusProbeTracker tracker;
+        constexpr uint32_t peer_ipv4 = 0xc0000232;
         // Session 1 to 192.0.2.50
-        CHECK(tracker.on_socket_open("192.0.2.50", 502, 1) == ModbusProfile::Auto);
+        CHECK(tracker.on_socket_open("192.0.2.50", 502, 1, peer_ipv4) == ModbusProfile::Auto);
         CHECK(tracker.consecutive_failures == 0);
 
         // MB_WAIT (32765) does not consume retry budget
@@ -8749,7 +8752,7 @@ static void test_modbus_profile() {
         CHECK(tracker.consecutive_failures == 1);
 
         // Reconnect to same target does NOT reset failure count (N14 fix)
-        CHECK(tracker.on_socket_open("192.0.2.50", 502, 1) == ModbusProfile::Auto);
+        CHECK(tracker.on_socket_open("192.0.2.50", 502, 1, peer_ipv4) == ModbusProfile::Auto);
         CHECK(tracker.consecutive_failures == 1);
 
         // Probe failure 2: Connection closed -> drops link, consecutive_failures = 2
@@ -8759,7 +8762,7 @@ static void test_modbus_profile() {
         CHECK(tracker.consecutive_failures == 2);
 
         // Reconnect again to same target
-        CHECK(tracker.on_socket_open("192.0.2.50", 502, 1) == ModbusProfile::Auto);
+        CHECK(tracker.on_socket_open("192.0.2.50", 502, 1, peer_ipv4) == ModbusProfile::Auto);
         CHECK(tracker.consecutive_failures == 2);
 
         // Probe failure 3: Timeout -> retries exhausted, concludes HomeHub fallback
@@ -8772,11 +8775,11 @@ static void test_modbus_profile() {
         CHECK(tracker.affirmative_profile == ModbusProfile::Auto); // fallback is not affirmative
 
         // Reconnect to same target: now opens in HomeHub profile, breaking infinite reconnect loop!
-        CHECK(tracker.on_socket_open("192.0.2.50", 502, 1) == ModbusProfile::HomeHub);
+        CHECK(tracker.on_socket_open("192.0.2.50", 502, 1, peer_ipv4) == ModbusProfile::HomeHub);
         CHECK(tracker.active_profile == ModbusProfile::HomeHub);
 
         // Target change resets tracker back to Auto
-        CHECK(tracker.on_socket_open("192.0.2.51", 502, 1) == ModbusProfile::Auto);
+        CHECK(tracker.on_socket_open("192.0.2.51", 502, 1, peer_ipv4) == ModbusProfile::Auto);
         CHECK(tracker.consecutive_failures == 0);
         CHECK(tracker.active_profile == ModbusProfile::Auto);
 
@@ -8786,10 +8789,10 @@ static void test_modbus_profile() {
         CHECK(d.is_affirmative);
         CHECK(d.next_profile == ModbusProfile::Altherma4);
         CHECK(tracker.affirmative_profile == ModbusProfile::Altherma4);
-        CHECK(tracker.on_socket_open("192.0.2.51", 502, 1) == ModbusProfile::Altherma4);
+        CHECK(tracker.on_socket_open("192.0.2.51", 502, 1, peer_ipv4) == ModbusProfile::Altherma4);
 
         // Switch to unit 2 on same IP resets target
-        CHECK(tracker.on_socket_open("192.0.2.51", 502, 2) == ModbusProfile::Auto);
+        CHECK(tracker.on_socket_open("192.0.2.51", 502, 2, peer_ipv4) == ModbusProfile::Auto);
         CHECK(tracker.consecutive_failures == 0);
 
         // Affirmative Exception 02 detection is sticky
@@ -8798,10 +8801,15 @@ static void test_modbus_profile() {
         CHECK(d.is_affirmative);
         CHECK(d.next_profile == ModbusProfile::HomeHub);
         CHECK(tracker.affirmative_profile == ModbusProfile::HomeHub);
-        CHECK(tracker.on_socket_open("192.0.2.51", 502, 2) == ModbusProfile::HomeHub);
+        CHECK(tracker.on_socket_open("192.0.2.51", 502, 2, peer_ipv4) == ModbusProfile::HomeHub);
+
+        // A changed resolution of the same configured target also requires new evidence.
+        CHECK(tracker.on_socket_open("192.0.2.51", 502, 2, peer_ipv4 + 1) == ModbusProfile::Auto);
+        CHECK(tracker.affirmative_profile == ModbusProfile::Auto);
+        CHECK(tracker.should_probe());
 
         // Port change resets target
-        CHECK(tracker.on_socket_open("192.0.2.51", 503, 2) == ModbusProfile::Auto);
+        CHECK(tracker.on_socket_open("192.0.2.51", 503, 2, peer_ipv4 + 1) == ModbusProfile::Auto);
 
         // Affirmative MB_UNSUPPORTED on tracker
         d = tracker.evaluate_probe(MbFailureType::None, 0, 79, MB_UNSUPPORTED);
@@ -8810,33 +8818,45 @@ static void test_modbus_profile() {
         CHECK(d.next_profile == ModbusProfile::HomeHub);
 
         // Unavailable never proves HomeHub; fallback remains eligible for a later valid probe.
-        CHECK(tracker.on_socket_open("192.0.2.53", 502, 1) == ModbusProfile::Auto);
+        CHECK(tracker.on_socket_open("192.0.2.53", 502, 1, peer_ipv4) == ModbusProfile::Auto);
         for (int i = 0; i < MODBUS_PROBE_MAX_RETRIES; ++i)
             d = tracker.evaluate_probe(MbFailureType::None, 0, 79, MB_UNAVAILABLE, 100);
         CHECK(!d.is_affirmative);
         CHECK(tracker.profile_basis == ModbusProfileBasis::Fallback);
         CHECK(tracker.affirmative_profile == ModbusProfile::Auto);
-        CHECK(tracker.on_socket_open("192.0.2.53", 502, 1, 700) == ModbusProfile::Auto);
+        CHECK(tracker.on_socket_open("192.0.2.53", 502, 1, peer_ipv4, 700) == ModbusProfile::Auto);
         CHECK(tracker.should_probe(700));
         d = tracker.evaluate_probe(MbFailureType::None, 0, 79, 150, 700);
         CHECK(d.is_affirmative);
         CHECK(tracker.active_profile == ModbusProfile::Altherma4);
 
-        // Exception with failure_detail <= 0 confirms HomeHub
-        CHECK(tracker.on_socket_open("192.0.2.54", 502, 1) == ModbusProfile::Auto);
+        // The legacy negative detail is non-wire. An actual exception code zero stays provisional.
+        CHECK(tracker.on_socket_open("192.0.2.54", 502, 1, peer_ipv4) == ModbusProfile::Auto);
         d = tracker.evaluate_probe(MbFailureType::Exception, -1, 79, 0);
         CHECK(d.is_definitive);
         CHECK(d.is_affirmative);
         CHECK(d.next_profile == ModbusProfile::HomeHub);
 
+        CHECK(tracker.on_socket_open("192.0.2.56", 502, 1, peer_ipv4) == ModbusProfile::Auto);
+        d = tracker.evaluate_probe(MbFailureType::Exception, 0, 79);
+        CHECK(!d.is_definitive);
+        CHECK(!d.is_affirmative);
+        CHECK(tracker.profile_basis == ModbusProfileBasis::Probing);
+        for (int i = 1; i < MODBUS_PROBE_MAX_RETRIES; ++i)
+            d = tracker.evaluate_probe(MbFailureType::Exception, 0, 79);
+        CHECK(d.is_definitive);
+        CHECK(!d.is_affirmative);
+        CHECK(tracker.profile_basis == ModbusProfileBasis::Fallback);
+        CHECK(tracker.affirmative_profile == ModbusProfile::Auto);
+
         // Transient exception (06 Server Busy) increments failures but stays Auto
-        CHECK(tracker.on_socket_open("192.0.2.55", 502, 1) == ModbusProfile::Auto);
+        CHECK(tracker.on_socket_open("192.0.2.55", 502, 1, peer_ipv4) == ModbusProfile::Auto);
         d = tracker.evaluate_probe(MbFailureType::Exception, 0x06, 79, 0);
         CHECK(!d.is_definitive);
         CHECK(tracker.consecutive_failures == 1);
 
         // 3 invalid values (e.g. 0 bar) exhaust to HomeHub fallback
-        CHECK(tracker.on_socket_open("192.0.2.52", 502, 1) == ModbusProfile::Auto);
+        CHECK(tracker.on_socket_open("192.0.2.52", 502, 1, peer_ipv4) == ModbusProfile::Auto);
         d = tracker.evaluate_probe(MbFailureType::None, 0, 79, 0); // try 1
         CHECK(!d.is_definitive);
         CHECK(d.link_ok);
@@ -8846,13 +8866,14 @@ static void test_modbus_profile() {
         CHECK(d.is_definitive);
         CHECK(!d.is_affirmative);
         CHECK(d.next_profile == ModbusProfile::HomeHub);
-        CHECK(tracker.on_socket_open("192.0.2.52", 502, 1) == ModbusProfile::HomeHub);
+        CHECK(tracker.on_socket_open("192.0.2.52", 502, 1, peer_ipv4) == ModbusProfile::HomeHub);
         CHECK(tracker.profile_basis == ModbusProfileBasis::Fallback);
 
         // ── N22: Exponential backoff & re-probing ──
         ModbusProbeTracker bo_tracker;
         uint32_t           t_now = 1000;
-        CHECK(bo_tracker.on_socket_open("192.0.2.60", 502, 1, t_now) == ModbusProfile::Auto);
+        CHECK(bo_tracker.on_socket_open("192.0.2.60", 502, 1, peer_ipv4, t_now) ==
+              ModbusProfile::Auto);
         CHECK(bo_tracker.profile_basis == ModbusProfileBasis::Probing);
         CHECK(bo_tracker.should_probe(t_now));
 
@@ -8868,14 +8889,15 @@ static void test_modbus_profile() {
 
         // During backoff (t=1000 + 300s):
         CHECK(!bo_tracker.should_probe(t_now + 300));
-        CHECK(bo_tracker.on_socket_open("192.0.2.60", 502, 1, t_now + 300) ==
+        CHECK(bo_tracker.on_socket_open("192.0.2.60", 502, 1, peer_ipv4, t_now + 300) ==
               ModbusProfile::HomeHub);
         CHECK(bo_tracker.profile_basis == ModbusProfileBasis::Fallback);
 
         // When backoff elapses (t=1000 + 600s):
         t_now += 600;
         CHECK(bo_tracker.should_probe(t_now));
-        CHECK(bo_tracker.on_socket_open("192.0.2.60", 502, 1, t_now) == ModbusProfile::Auto);
+        CHECK(bo_tracker.on_socket_open("192.0.2.60", 502, 1, peer_ipv4, t_now) ==
+              ModbusProfile::Auto);
         CHECK(bo_tracker.profile_basis == ModbusProfileBasis::Probing);
 
         // Exhaustion 2: backoff doubles to 1200s (20 min)
@@ -14430,68 +14452,43 @@ static void test_cop_scope() {
         CHECK(cop_post_buh_select(only_pipe, pipe_reg, 1) == -1); // blank beats wrong
     }
 
-    // --- the pairing rule -----------------------------------------------------------------------
-    // Shorthand: the tank heater known-off, which is the branch the BUH cases are about.
-    const bool BSH_OFF_K = true, BSH_OFF = false;
-
-    // No current at all (or the only row frozen with the outdoor unit): nothing to divide by.
-    CHECK(cop_plan(PelSource::None, true, false, BSH_OFF_K, BSH_OFF, true).block ==
+    // The ratio needs a usable electrical estimate.
+    CHECK(cop_plan(PelSource::None, true, false, true, false, true, false).block ==
           CopBlock::NoPelSource);
-    CHECK(!cop_plan(PelSource::None, true, false, BSH_OFF_K, BSH_OFF, true).showable());
+    CHECK(!cop_plan(PelSource::None, true, false, true, false, true, false).showable());
 
-    // Compressor-only current + pre-BUH heat = a HEAT-PUMP COP. BOTH resistive heaters sit outside
-    // both sides of the fraction, so neither can unbalance them — this holds with either firing.
-    for (bool buh : {false, true})
-        for (bool bsh : {false, true}) {
-            const auto p = cop_plan(PelSource::Inv, true, buh, true, bsh, true);
-            CHECK(p.scope == CopScope::HeatPump);
-            CHECK(p.showable());
-            CHECK(!p.use_post_buh); // the usual lwt_select numerator
-        }
-
-    // Whole-unit current: the numerator moves to the post-BUH row so the boundaries agree, and it
-    // does so regardless of the backup heater's state — otherwise the figure would silently change
-    // meaning every time the heater cycled.
-    for (bool on : {false, true}) {
-        const auto p = cop_plan(PelSource::Ct, true, on, BSH_OFF_K, BSH_OFF, /*has_post_buh=*/true);
-        CHECK(p.scope == CopScope::Plant);
-        CHECK(p.showable());
-        CHECK(p.use_post_buh);
-    }
-
-    // Whole-unit current with NO post-BUH row: the pre-BUH outlet stands in only while the heater
-    // is provably off. Firing -> blocked, and blocked with its OWN reason, since the UI answers
-    // each block with a different sentence.
-    CHECK(cop_plan(PelSource::Ct, true, false, BSH_OFF_K, BSH_OFF, false).showable());
-    CHECK(cop_plan(PelSource::Ct, true, false, BSH_OFF_K, BSH_OFF, false).scope == CopScope::Plant);
-    CHECK(cop_plan(PelSource::Ct, true, true, BSH_OFF_K, BSH_OFF, false).block ==
-          CopBlock::BuhNoPostBuh);
-    // UNKNOWN is not OFF. Off is the permissive branch here, so guessing it is exactly what would
-    // ship the collapsed quotient — the mirror of ou_stale's "unknown rps is not stopped".
-    CHECK(cop_plan(PelSource::Ct, /*buh_known=*/false, false, BSH_OFF_K, BSH_OFF, false).block ==
-          CopBlock::BuhNoPostBuh);
-    CHECK(cop_plan(PelSource::Ct, /*buh_known=*/false, false, BSH_OFF_K, BSH_OFF, true).showable());
-
-    // --- the TANK heater, which no numerator can answer -----------------------------------------
-    // BSH heats the DHW tank directly, downstream of the flow sensor and of both leaving-water
-    // sensors. Its kilowatts enter a whole-unit divisor while its heat crosses neither R1T nor R2T,
-    // so unlike the BUH case there is no row anywhere in the profile that would re-pair them.
-    // Blocked even WITH a post-BUH row — that is the whole distinction from BuhNoPostBuh.
+    // Inverter current and R1T exclude both heaters. CT requires explicit inactivity for both.
     for (bool post : {false, true}) {
-        const auto p =
-            cop_plan(PelSource::Ct, true, false, /*bsh_known=*/true, /*bsh_on=*/true, post);
-        CHECK(p.block == CopBlock::TankHeater);
-        CHECK(!p.showable());
-        CHECK(!p.use_post_buh); // no row is claimed — implying a pairing would be the lie
+        const auto quiet = cop_plan(PelSource::Ct, true, false, true, false, post, true);
+        CHECK(quiet.scope == CopScope::Plant);
+        CHECK(quiet.showable());
+        CHECK(quiet.use_post_buh == post);
+
+        for (bool heater_known : {false, true}) {
+            const bool heater_on = heater_known;
+            const auto backup =
+                cop_plan(PelSource::Ct, heater_known, heater_on, true, false, post, false);
+            CHECK(backup.block == CopBlock::BackupHeater);
+            CHECK(!backup.showable());
+            CHECK(!backup.use_post_buh);
+            const auto tank =
+                cop_plan(PelSource::Ct, true, false, heater_known, heater_on, post, false);
+            CHECK(tank.block == CopBlock::TankHeater);
+            CHECK(!tank.showable());
+            CHECK(!tank.use_post_buh);
+
+            for (const auto plan : {
+                     cop_plan(PelSource::Ct, heater_known, heater_on, true, false, post, true),
+                     cop_plan(PelSource::Ct, true, false, heater_known, heater_on, post, true),
+                     cop_plan(PelSource::Inv, heater_known, heater_on, heater_known, heater_on,
+                              post, false),
+                 }) {
+                CHECK(plan.scope == CopScope::HeatPump);
+                CHECK(plan.showable());
+                CHECK(!plan.use_post_buh);
+            }
+        }
     }
-    // Unknown tank-heater state is not "off" either, same reason as the BUH flag.
-    CHECK(cop_plan(PelSource::Ct, true, false, /*bsh_known=*/false, false, true).block ==
-          CopBlock::TankHeater);
-    // The compressor-only divisor is unaffected: BSH is outside it, so a DHW boost does not block.
-    CHECK(cop_plan(PelSource::Inv, true, false, true, /*bsh_on=*/true, true).showable());
-    // And the tank heater is checked BEFORE the numerator is picked — a plan that blocks must not
-    // also claim a row, or the UI would show a source line for a figure it refuses to state.
-    CHECK(!cop_plan(PelSource::Ct, false, true, true, true, true).use_post_buh);
 
     // --- catalog conformance --------------------------------------------------------------------
     // Every detectable profile resolves EXACTLY ONE post-BUH row, and the BUH state that gates the
@@ -15958,23 +15955,23 @@ static void test_checkup() {
         CHECK(sizeof(CheckupCyclingHours) == 348); // elapsed clock occupies the existing padding
         CHECK(checkup_cycling_hours(CheckupRing{}, true).count == 0);
         CheckupRing ring{};
-        ring.count                      = 2;
-        ring.head                       = 2;
-        ring.buf[0].starts              = 3;
-        ring.buf[0].run_s               = 1200;
+        ring.count         = 2;
+        ring.head          = 2;
+        ring.buf[0].starts = 3;
+        ring.buf[0].run_s  = 1200;
         ring.buf[0].set_space_hour_s(900);
-        ring.buf[0].dhw_hour_s          = 200;
-        ring.buf[0].rps_observed_s      = 3600;
-        ring.buf[1].starts              = 1;
-        ring.buf[1].run_s               = 600;
+        ring.buf[0].dhw_hour_s     = 200;
+        ring.buf[0].rps_observed_s = 3600;
+        ring.buf[1].starts         = 1;
+        ring.buf[1].run_s          = 600;
         ring.buf[1].set_space_hour_s(600);
-        ring.buf[1].rps_observed_s      = 3500;
-        ring.pending.starts             = 2;
-        ring.pending.run_s              = 500;
+        ring.buf[1].rps_observed_s = 3500;
+        ring.pending.starts        = 2;
+        ring.pending.run_s         = 500;
         ring.pending.set_space_hour_s(300);
-        ring.pending.dhw_hour_s         = 200;
-        ring.pending.rps_observed_s     = 900;
-        CheckupCyclingHours hours       = checkup_cycling_hours(ring, true);
+        ring.pending.dhw_hour_s     = 200;
+        ring.pending.rps_observed_s = 900;
+        CheckupCyclingHours hours   = checkup_cycling_hours(ring, true);
         CHECK(hours.count == 3);
         CHECK(hours.hours[0].starts == 3 && hours.hours[0].run_s == 1200 &&
               hours.hours[0].space_s == 900 && hours.hours[0].dhw_s == 200 &&
@@ -22544,7 +22541,7 @@ static void test_checkup_persist() {
     const uint32_t model_fp                    = checkup_fixture_model("altherma3_r_erga");
     const uint32_t handoff_fp                  = checkup_dhw_handoff_layout_fingerprint();
     CHECK(handoff_fp == 0x33a0a26eu); // Preserve the previous firmware's separate DHW handoff.
-    const uint32_t handoff_crc                 = checkup_dhw_handoff_crc(model_fp, dhw_handoff);
+    const uint32_t handoff_crc = checkup_dhw_handoff_crc(model_fp, dhw_handoff);
     CHECK(checkup_dhw_handoff_valid(CHECKUP_DHW_HANDOFF_MAGIC, CHECKUP_DHW_HANDOFF_VERSION,
                                     handoff_fp, model_fp, model_fp, handoff_crc, dhw_handoff));
     CHECK(!checkup_dhw_handoff_valid(CHECKUP_DHW_HANDOFF_MAGIC, CHECKUP_DHW_HANDOFF_VERSION,
@@ -23049,10 +23046,10 @@ struct CheckupRestoreCase {
 };
 
 struct CheckupRestoreOut {
-    CheckupRing ring;
-    DhwLossRing dhw;
+    CheckupRing             ring;
+    DhwLossRing             dhw;
     CheckupJournalSlotTimes times;
-    bool        dhw_retired                       = false;
+    bool                    dhw_retired = false;
 };
 
 // Copy this boot's completed hours into records, clear both rings, then push the selected interval
@@ -23814,6 +23811,13 @@ static void test_history_persist() {
     CHECK(hub_a != history_homehub_target_fingerprint("hub-b.local", 502, 1));
     CHECK(hub_a != history_homehub_target_fingerprint("hub-a.local", 1502, 1));
     CHECK(hub_a != history_homehub_target_fingerprint("hub-a.local", 502, 2));
+    const uint32_t peer_a = history_homehub_peer_fingerprint(hub_a, 0xc0000232);
+    CHECK(peer_a != 0 && peer_a != hub_a);
+    CHECK(peer_a != history_homehub_peer_fingerprint(hub_a, 0xc0000233));
+    CHECK(peer_a != history_homehub_peer_fingerprint(hub_a ^ 1u, 0xc0000232));
+    // These two CRC preimages hit the no-scope and legacy-scope sentinels.
+    CHECK(history_homehub_peer_fingerprint(0x2468ace0, 0x5d7d6ff9) == 0);
+    CHECK(history_homehub_peer_fingerprint(0x2468ace0, 0xe9f8297c) == 0);
     HistoryJournalHeader mh = jh;
     mh.source               = static_cast<uint8_t>(HistoryJournalSource::Modbus);
     mh.flags                = HISTORY_JOURNAL_FLAG_TARGET_SCOPED;
@@ -23830,6 +23834,59 @@ static void test_history_persist() {
     CHECK(!history_journal_header_matches(mh, fp));
     mh.flags = 0;
     CHECK(!history_journal_header_matches_scoped(mh, fp, hub_a));
+
+    CHECK(history_modbus_target_prefix(0x0102, 502, 247) ==
+          (std::array<uint8_t, 5>{2, 1, 246, 1, 247}));
+    const HistoryModbusTarget target{0x66, 0xd7, 0x16, 0xdc, 0xed, 0x09, 0x2b, 0xaa,
+                                     0xd8, 0x52, 0xd8, 0x40, 0x9c, 0xbd, 0x19, 0xa6};
+    uint8_t                   peer_payload[HISTORY_JOURNAL_PAYLOAD_BYTES] = {};
+    CHECK(!history_journal_modbus_config_matches(jh, peer_payload, sizeof(peer_payload), target));
+    mh.flags  = HISTORY_JOURNAL_FLAG_TARGET_SCOPED;
+    mh.pad[4] = 1;
+    CHECK(!history_journal_modbus_config_matches(mh, peer_payload, sizeof(peer_payload), target));
+    constexpr uint32_t peer = 0xc0a80a0a;
+    history_journal_set_modbus_scope(mh, peer_payload, peer, target);
+    CHECK(history_journal_scope(mh) == peer);
+    CHECK(history_journal_modbus_config_matches(mh, peer_payload, sizeof(peer_payload), target));
+    CHECK(!history_journal_modbus_config_matches(mh, peer_payload,
+                                                 history_journal_payload_bytes(mh) - 1, target));
+    CHECK(!history_journal_modbus_config_matches(mh, peer_payload, sizeof(peer_payload), {}));
+    auto other_target = target;
+    other_target.back() ^= 1;
+    CHECK(!history_journal_modbus_config_matches(mh, peer_payload, sizeof(peer_payload),
+                                                 other_target));
+    CHECK(history_journal_trend_header_structural_matches(mh));
+    CHECK(!history_journal_trend_layout_matches(mh, fp, TREND_COUNT, HOMEHUB_HISTORY_COUNT,
+                                                ENV3_HISTORY_COUNT));
+    CHECK(history_journal_trend_layout_matches(mh, fp, TREND_COUNT, HOMEHUB_HISTORY_COUNT,
+                                               ENV3_HISTORY_COUNT, HISTORY_MODBUS_SCOPE_WORDS));
+    CHECK(!history_legacy_disinfection_layout_matches(mh));
+    auto malformed  = mh;
+    malformed.flags = 0;
+    CHECK(!history_journal_modbus_config_matches(malformed, peer_payload, sizeof(peer_payload),
+                                                 target));
+    malformed        = mh;
+    malformed.pad[4] = 1;
+    CHECK(!history_journal_modbus_config_matches(malformed, peer_payload, sizeof(peer_payload),
+                                                 target));
+    malformed = mh;
+    history_journal_set_scope(malformed, 0);
+    CHECK(!history_journal_modbus_config_matches(malformed, peer_payload, sizeof(peer_payload),
+                                                 target));
+    malformed                         = mh;
+    malformed.value_count             = HISTORY_MODBUS_SCOPE_WORDS;
+    malformed.rings[malformed.source] = malformed.value_count;
+    CHECK(!history_journal_modbus_config_matches(malformed, peer_payload, sizeof(peer_payload),
+                                                 target));
+    malformed.value_count             = HISTORY_JOURNAL_PAYLOAD_BYTES / sizeof(HistorySample) + 1;
+    malformed.rings[malformed.source] = malformed.value_count;
+    CHECK(!history_journal_modbus_config_matches(malformed, peer_payload, sizeof(peer_payload),
+                                                 target));
+    --mh.rings[mh.source];
+    CHECK(!history_journal_modbus_config_matches(mh, peer_payload, sizeof(peer_payload), target));
+    ++mh.rings[mh.source];
+    mh.reserved = 0xffff;
+    CHECK(!history_journal_modbus_config_matches(mh, peer_payload, sizeof(peer_payload), target));
 
     const uint32_t unit_a = history_x10a_target_fingerprint("profile-a", 44, 43, 'I');
     CHECK(unit_a != 0);

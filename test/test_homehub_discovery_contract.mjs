@@ -19,25 +19,31 @@ assert.doesNotMatch(task, /discover_homehub\s*\(|mdns_query_(?:ptr|a)\s*\(|confi
   "the steady-state poll task must never perform HomeHub discovery");
 // Clearing the address retires the task outright. There is no restore step any more: the write path
 // was removed with dynamic LWT actuation (legacy-294), so the stack owns nothing on the hub to put back.
-const disabledIntent = task.indexOf("if (!s_target_enabled.load(std::memory_order_acquire)) break;");
-const tlsDelay = task.indexOf("if (ota_download_active() || weather_fetch_active())");
-assert.ok(disabledIntent >= 0 && tlsDelay > disabledIntent,
-  "clearing the address must retire the task before TLS delays or allocating Config snapshots");
+assert.match(task, /if \(s_task_retiring \|\| !s_target_enabled\.load\(std::memory_order_acquire\)\) \{[\s\S]*?MbNetworkActivity network_activity;[\s\S]*?wait_for_tls\s*=\s*ota_active \|\| weather_fetch_active\(\);[\s\S]*?else if \(mb_retire_if_disabled\(ready\)\)/,
+  "the disabled task must claim network activity and check TLS ownership before closing its socket");
 assert.doesNotMatch(task, /config_modbus_host\(config\(\)\)\.empty\(\)/,
   "HomeHub disable must not depend on a fallible Config copy");
 assert.doesNotMatch(task, /request_restore\(|mb_process_actuator\(/,
   "the retired actuator must leave no restore step in the task loop");
 
 const startStart = modbus.indexOf("static void mb_task_start_if_enabled()", taskEnd);
-const startEnd = modbus.indexOf("void mb_start()", startStart);
+const startEnd = modbus.indexOf("void mb_init()", startStart);
+const initEnd = modbus.indexOf("void mb_start()", startEnd);
+assert.ok(startStart >= 0 && startEnd > startStart && initEnd > startEnd);
 assert.match(modbus.slice(startStart, startEnd),
-  /if \(!s_target_enabled\.load\(std::memory_order_acquire\)\) return;/,
-  "after the one-shot decision, an empty address must create no HomeHub task");
+  /if \(!s_start_allowed\.load\(std::memory_order_acquire\)\s*\|\|\s*!s_target_enabled\.load\(std::memory_order_acquire\)\)\s*return;/,
+  "an early save or an empty address must create no HomeHub task");
 assert.doesNotMatch(modbus.slice(startStart, startEnd), /\bconfig\s*\(/,
   "post-save task admission must not copy the string-owning Config");
-assert.match(modbus.slice(startEnd),
-  /void mb_start\(\)[\s\S]*?const Config c = config\(\);[\s\S]*?s_target_enabled\.store\(config_modbus_enabled\(c\)/,
+const init = modbus.slice(startEnd, initEnd);
+assert.match(init,
+  /with_config\(\[\]\(const Config& c\) \{ return config_modbus_enabled\(c\); \}\);[\s\S]*?s_target_enabled\.store\(enabled,/,
   "boot must seed task admission from the post-discovery persisted config");
+assert.doesNotMatch(init, /mb_task_start_if_enabled\(|\bconfig\s*\(/,
+  "boot must initialize the mutexes and target without starting a task or copying Config");
+assert.match(modbus.slice(initEnd),
+  /^void mb_start\(\) \{\s*s_start_allowed\.store\(true, std::memory_order_release\);\s*mb_retry_start\(\);\s*\}/,
+  "late boot startup must preserve the current target after any early HTTP save");
 
 const autoStart = modbus.indexOf("void mb_autodiscover_initial()");
 const autoEnd = modbus.indexOf("// Non-blocking connect", autoStart);
@@ -52,9 +58,17 @@ assert.match(initial, /discover_homehub_bounded\(found, "initial"\)/,
 assert.match(initial, /c\.mb_discovery_done = true;[\s\S]*if \(ok\) c\.mb_host = found;[\s\S]*config_save\(c\)/,
   "found and not-found outcomes must persist the latch atomically with the address");
 const autoCall = main.indexOf("mb_autodiscover_initial()");
+const initCall = main.indexOf("mb_init()");
 const httpStart = main.indexOf("http_start()");
-assert.ok(autoCall >= 0 && httpStart > autoCall,
-  "initial discovery must finish before HTTP can race it with a user config save");
+assert.ok(autoCall >= 0 && initCall > autoCall && httpStart > initCall,
+  "initial discovery must finish and HomeHub state must be initialized before HTTP accepts saves");
+assert.match(main, /const bool normal_boot = !daik::safe_mode_active\(\);\s*if \(normal_boot\) daik::mb_init\(\);/,
+  "safe mode must leave HomeHub task admission inactive during HTTP recovery");
+const startCall = main.indexOf("if (normal_boot) daik::mb_start();");
+assert.ok(startCall > main.indexOf("daik::hp_poll_start()") &&
+          startCall > main.indexOf("daik::mqtt_ha_start()") &&
+          startCall > main.indexOf("daik::ota_health_gate_arm()"),
+  "the optional HomeHub stack must wait for core and recovery task reservations");
 
 const setHpStart = http.indexOf("static esp_err_t set_hp(");
 const setHpEnd = http.indexOf("static esp_err_t discover_homehub_now", setHpStart);

@@ -7,25 +7,21 @@ export const INSPECTOR_TRENDS = Object.freeze({
   env3: "env3_combined", sgrequest: "smart_grid_mode", comp: "comp_rps",
   out: "outdoor_air", ouhx: "outdoor_heat_exchanger", hp: "circuit_pressure",
   disch: "discharge", eev: "eev", r3t: "refrigerant_liquid", lwt: "leaving_water",
-  r2t: "leaving_water_post_buh", rwt: "return_water", dt: "dt", pth: "pth", cop: "cop",
+  r2t: "leaving_water_post_buh", rwt: "return_water", dt: "dt", pth: "pth",
   buh: "buh_state", bsh: "bsh_state", valve: "valve_dhw", valve2: "valve_heat",
-  tank: "dhw_tank", room: "room_temp", pump: "pump_speed", pel: "pel",
+  tank: "dhw_tank", room: "room_temp", pump: "pump_speed",
   defrost: "defrost_state", quiet: "quiet_state", flow: "flow",
   flow_switch: "water_flow_switch", wp: "water_pressure",
 });
 
 export const NO_HISTORY_INSPECTORS = Object.freeze([
   "status", "ou", "lp", "phe", "heat", "spaceh", "rhot", "rcold", "wsup", "wtank",
-  "wheat", "wret",
+  "wheat", "wret", "pel", "cop",
 ]);
 
-// These raw histories are deliberately absent from this operating profile, not forgotten coverage.
-// A positive CT source would intentionally refuse the INV-boundary COP witness. Tank preheat is
-// an auxiliary raw row outside the schematic; categorical disclosures use the Modbus-only case.
+// Tank preheat is an auxiliary raw row outside the schematic; categorical disclosures use the
+// Modbus-only case.
 export const OMITTED_HISTORY_MOTION_ROWS = Object.freeze({
-  ct_l1: "No CT source in the INV-scoped COP fixture",
-  ct_l2: "No CT source in the INV-scoped COP fixture",
-  ct_l3: "No CT source in the INV-scoped COP fixture",
   tank_preheat_state: "Auxiliary raw detail without its own schematic inspector",
 });
 
@@ -47,6 +43,9 @@ export const HISTORY_MOTION_ROWS = Object.freeze([
   { id: "room_temp", label: "Indoor ambient temp. (R1T)", unit: "°C", value: 21, reg: 0x61 },
   { id: "water_pressure", label: "Water pressure", unit: "bar", value: 1.5, reg: 0x62 },
   { id: "inv_current", label: "INV primary current (A)", unit: "A", value: 8.3, reg: 0x21 },
+  { id: "ct_l1", label: "Current measured by CT sensor of L1", unit: "A", value: 4.8, reg: 0x63 },
+  { id: "ct_l2", label: "Current measured by CT sensor of L2", unit: "A", value: 4.4, reg: 0x63 },
+  { id: "ct_l3", label: "Current measured by CT sensor of L3", unit: "A", value: 4.0, reg: 0x63 },
   { id: "pump_signal", label: "Water pump signal (0:max-100:stop)", unit: "%", value: 18, reg: 0x62 },
   { id: "defrost_state", label: "Defrost Operation", value: 0, reg: 0x10, binary: true },
   { id: "quiet_state", label: "Silent Mode", value: 0, reg: 0x60, binary: true },
@@ -73,10 +72,11 @@ export const MODBUS_HISTORY_ROWS = Object.freeze([
   { id: "dhw_tank", label: "Domestic Hot Water temperature", off: 43, value: 42.1, unit: "°C" },
   { id: "outdoor_air", label: "Outside air temperature", off: 44, value: 8.1, unit: "°C" },
   { id: "refrigerant_liquid", label: "Liquid refrigerant temperature", off: 45, value: 41.1, unit: "°C" },
-  { id: "flow", label: "Flow rate", off: 49, value: 24.6, unit: "L/min" },
+  { id: "flow", label: "Flow rate", off: 49, value: 24.6, unit: "L/min", flow_scale_unverified: true },
   { id: "room_temp", label: "Remote controller room temperature Main", off: 50, value: 21.1, unit: "°C" },
   { id: "bsh_state", label: "Booster heater run", off: 32, value: 0, binary: true },
-  { id: "valve_dhw", label: "3-way valve", off: 37, value: 1, enum: "three_way_valve" },
+  { id: "valve_dhw", label: "3-way valve", off: 37, value: 0, enum: "three_way_valve" },
+  // Stale API negative control. Current firmware retains the storage slot but does not serve it.
   { id: "quiet_state", label: "Quiet mode operation", off: 9, value: 0, binary: true },
   { id: "smart_grid_mode", label: "Smart-Grid operation mode", off: 56, value: 2, enum: "smart_grid_mode" },
   { id: "disinfection_state", label: "Disinfection operation", off: 33, value: 0, binary: true },
@@ -162,6 +162,10 @@ export function makeHistoryMotionFixture(originalStatus, lang = "en") {
   const histories = {};
   for (const row of HISTORY_MOTION_ROWS) histories[`x10a:${row.id}`] = ring(row, "x10a");
   for (const row of MODBUS_HISTORY_ROWS) histories[`modbus:${row.id}`] = ring(row, "modbus");
+  const provisionalFlow = histories["modbus:flow"];
+  provisionalFlow.b0--;
+  provisionalFlow.t0 -= provisionalFlow.dt;
+  provisionalFlow.v[0] = 10000;
   for (const row of ENV3_HISTORY_ROWS) histories[`env3:${row.id}`] = ring(row, "env3");
   histories["room:room_temp"] = ring({ id: "room_temp", label: "Example room",
     value: 21.3, unit: "°C" }, "room");
@@ -173,7 +177,7 @@ export function makeHistoryMotionFixture(originalStatus, lang = "en") {
       ...HISTORY_MOTION_ROWS.filter(row => !row.kind).map(row => reading(row, tick)),
       { label: "High Pressure", value: "32", unit: "bar", reg: 0x20 },
       { label: "Low Pressure", value: "5", unit: "bar", reg: 0x20 },
-      { label: "Fan 1 (step)", value: "5", unit: "", reg: 0x21 },
+      { label: "Fan 1 (step)", value: "5", unit: "", reg: 0x30 },
       { label: "DHW setpoint", value: "48", unit: "°C", reg: 0x60 },
       { label: "LW setpoint (main)", value: "45", unit: "°C", reg: 0x60 },
       { label: "RT setpoint", value: "21", unit: "°C", reg: 0x60 },
@@ -189,8 +193,7 @@ export function makeHistoryMotionFixture(originalStatus, lang = "en") {
     modbus: [
       ...MODBUS_HISTORY_ROWS.map(row => {
         const value = reading(row, tick);
-        return { ...value, value: Number(value.value), history: row.id,
-          reg: 0xee, profile: "homehub" };
+        return { ...value, value: Number(value.value), history: row.id, profile: "homehub" };
       }),
       { label: "Circulation pump running", value: 1, unit: "", off: 30, binary: true },
       { label: "Compressor running", value: 1, unit: "", off: 31, binary: true },

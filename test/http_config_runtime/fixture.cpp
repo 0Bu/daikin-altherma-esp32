@@ -2,6 +2,8 @@
 // SDK/network/runtime services are recording adapters; persistence uses the accepted production
 // config_save_transaction over atomic recording entries, never a private commit algorithm.
 #include "sdk.hpp"
+#include "history.hpp"
+#include "../history_modbus_target_stub.hpp"
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
@@ -18,6 +20,13 @@
 #define fcntl(...) config_fixture_fcntl(__VA_ARGS__)
 #define getaddrinfo(...) config_fixture_getaddrinfo(__VA_ARGS__)
 #define freeaddrinfo(...) config_fixture_freeaddrinfo(__VA_ARGS__)
+// The original comparison TU predates the strong target digest. Its reset only needs
+// the same recording adapter, independent of which target identity reaches it.
+namespace daik {
+[[maybe_unused]] inline void history_modbus_reset(uint32_t) noexcept {
+    history_modbus_reset(logic::HistoryModbusTarget{});
+}
+} // namespace daik
 #ifndef CONFIG_HTTP_PRODUCTION_SOURCE
 #error Bind the full production configuration translation unit
 #endif
@@ -63,8 +72,10 @@ void (*mqtt_callback)(void*, esp_event_base_t, int32_t, void*) = nullptr;
 void*                    mqtt_context                          = nullptr;
 int                      mqtt_token = 1, semaphore_token = 1;
 esp_mqtt_client_config_t mqtt_config;
-unsigned                 ota_calls     = 0;
-bool                     ota_downgrade = false;
+unsigned                 ota_calls      = 0;
+bool                     ota_downgrade  = false;
+bool                     modbus_pending = false;
+unsigned                 modbus_retries = 0;
 // esp_random() adapter: the value the next draw returns and how often the TU drew one, plus the
 // generation the handler handed to the live checkup producer.
 uint32_t random_value = 0x10203040U, runtime_generation = 0;
@@ -174,6 +185,8 @@ void reset() {
     mqtt_context                            = nullptr;
     ota_calls                               = 0;
     ota_downgrade                           = false;
+    modbus_pending                          = false;
+    modbus_retries                          = 0;
     random_value                            = 0x10203040U;
     random_calls = runtime_generation = runtime_generation_calls = 0;
     room_history_identity = daik::logic::history_room_identity(current);
@@ -388,9 +401,15 @@ void         history_reset_on_detect(uint32_t) { ++fixture::runtime_changes; }
 uint32_t     history_x10a_identity(const char* profile, int32_t rx, int32_t tx, char proto) {
     return logic::history_x10a_target_fingerprint(profile, rx, tx, proto);
 }
-void history_checkup_reset() { ++fixture::runtime_changes; }
-void history_circulation_reset() { ++fixture::runtime_changes; }
-void history_modbus_reset(uint32_t) noexcept { ++fixture::runtime_changes; }
+void                       history_checkup_reset() { ++fixture::runtime_changes; }
+void                       history_circulation_reset() { ++fixture::runtime_changes; }
+logic::HistoryModbusTarget history_modbus_target(std::string_view host, int port,
+                                                 int unit) noexcept {
+    return fixture_port::history_modbus_target(host, port, unit);
+}
+void history_modbus_reset(const logic::HistoryModbusTarget&) noexcept {
+    ++fixture::runtime_changes;
+}
 void history_room_reset(uint32_t identity) noexcept {
     if (fixture::room_history_identity != identity) {
         fixture::room_history_identity = identity;
@@ -399,6 +418,11 @@ void history_room_reset(uint32_t identity) noexcept {
 }
 void hp_poll_reconfigure() { ++fixture::runtime_changes; }
 void mb_reconfigure(bool) noexcept { ++fixture::runtime_changes; }
+void mb_retry_start() noexcept {
+    ++fixture::modbus_retries;
+    fixture::modbus_pending = false;
+}
+bool mb_task_pending() noexcept { return fixture::modbus_pending; }
 bool mb_discover_homehub(std::string& found) {
     found = "192.0.2.12";
     return true;
@@ -436,6 +460,10 @@ esp_err_t http_send_json(httpd_req_t* request, const char* body) {
     request->content_type = "application/json";
     request->response     = body;
     return ESP_OK;
+}
+void http_running_image_identity(char (&boot_id)[17], char (&elf_sha)[65]) noexcept {
+    std::memcpy(boot_id, "1234567890abcdef", 17);
+    std::memcpy(elf_sha, "abc123def", 10);
 }
 int http_read_body(httpd_req_t* request, char* buffer, size_t capacity) {
     ++fixture::body_reads;
@@ -1159,6 +1187,22 @@ void query_flags() {
     check(daik::ota_do(&missing) == ESP_OK && ota_calls == 1 && !ota_downgrade,
           "missing downgrade flag must not inherit previous request permission");
 }
+void modbus_start_retry() {
+    reset();
+    constexpr auto patch = R"({"mb_host":"retry-hub.local","mb_port":502,"mb_unit_id":1})";
+    modbus_pending       = true;
+    const auto first     = invoke(daik::set_hp, patch);
+    check(first.status == "200 OK" &&
+              first.response == R"({"ok":true,"modbus_start_pending":true})" &&
+              current.mb_host == "retry-hub.local" && service_writes == 1 && modbus_retries == 0,
+          "a failed task start must report the already saved settings");
+    const unsigned changes_after_save = runtime_changes;
+    durable_started                   = false;
+    const auto retry                  = invoke(daik::set_hp, patch);
+    check(retry.status == "200 OK" && retry.response == R"({"ok":true})" && modbus_retries == 1 &&
+              runtime_changes == changes_after_save,
+          "resaving an unchanged HomeHub target must retry without retiring history");
+}
 uint32_t persisted_generation() {
     daik::ConfigBlob blob;
     check(daik::config_blob_deserialize(service.data(), service.size(), blob),
@@ -1297,7 +1341,8 @@ int main(int argc, char** argv) {
                           {"local_pin_reconcile", test::local_pin_reconcile},
                           {"query_flags", test::query_flags},
                           {"diagnostics_generation", test::diagnostics_generation},
-                          {"room_history_lifetime", test::room_history_lifetime}};
+                          {"room_history_lifetime", test::room_history_lifetime},
+                          {"modbus_start_retry", test::modbus_start_retry}};
     unsigned   ran     = 0;
     for (const auto& candidate : cases) {
         if (argc > 1) {
@@ -1305,7 +1350,8 @@ int main(int argc, char** argv) {
                 if (std::strcmp(candidate.name, "factory_reset_reboot") == 0 ||
                     std::strcmp(candidate.name, "local_pin_reconcile") == 0 ||
                     std::strcmp(candidate.name, "diagnostics_generation") == 0 ||
-                    std::strcmp(candidate.name, "room_history_lifetime") == 0)
+                    std::strcmp(candidate.name, "room_history_lifetime") == 0 ||
+                    std::strcmp(candidate.name, "modbus_start_retry") == 0)
                     continue;
             } else if (std::strcmp(argv[1], candidate.name) != 0)
                 continue;

@@ -27,6 +27,10 @@ const S = {
   histEpoch: 0,
   histIdentity: null,
   histUptime: null,
+  // Null means this page has never seen the Modbus history binding protocol. A known protocol
+  // stays known when a values response has no usable binding, including across a same-image reboot.
+  modbusHistoryLease: null,
+  modbusCompressorRunning: null,
   // A PINNED trend readout per concept: id -> {t} (the pinned sample's unix instant) or {i, gen} when
   // the device has no wall clock to anchor to. App state preserves the pin across structural
   // replacements and history updates. Anchoring to the instant re-resolves the same measurement
@@ -452,16 +456,23 @@ function acceptImageLease(s) {
   const previous = S.imageLease;
   const changed = previous && ((previous.elf && s.app_elf_sha256 && previous.elf !== s.app_elf_sha256) ||
     (previous.version && s.version && previous.version !== s.version));
-  if (changed) { S.imageReloading = true; otaCacheClear(); location.reload(); return false; }
+  if (changed || (S.otaWriter && otaWriterChanged(s))) { otaReloadImage(); return false; }
   const lease = S.imageLease ||= { elf: "", version: "" };
   lease.elf ||= s.app_elf_sha256 || "";
   lease.version ||= s.version || "";
   return true;
 }
+function otaReloadImage() {
+  if (S.imageReloading) return;
+  S.imageReloading = true;
+  otaCacheClear();
+  location.reload();
+}
 function invalidateLiveReadings(reason, busy = false) {
   S.valuesRequest = (S.valuesRequest || 0) + 1;
   if (S.otaCached) return;
   S._values = []; S._modbus = []; S.live = null;
+  S.modbusCompressorRunning = null;
   S.transportUnavailable = reason;
   S.transportBusy = busy;
   renderApp();
@@ -478,6 +489,8 @@ async function readStatusFrame(paint = true, timeout, quiet = false) {
   catch (error) {
     if (!current()) return false;
     const busy = String(error.message) === "503";
+    if (S.otaInstalling && !S.otaCached && await otaCacheRestore(S.otaWriter, true)) return false;
+    if (!current()) return false;
     if (!S.otaCached) invalidateLiveReadings("status", busy);
     if (quiet) return false;
     const ota = busy && typeof probeRunningOta === "function"
@@ -489,8 +502,15 @@ async function readStatusFrame(paint = true, timeout, quiet = false) {
   if (!current() || !acceptImageLease(s)) return false;
   await setLangFromStatus(s, current);
   if (!current()) return false;
+  const plot = S.scrub;
+  const flowSourceChanged = plot?.dataset?.hist === "flow" && !plot.dataset.source &&
+    (S.status?.hp?.connected === false) !== (s.hp?.connected === false);
   S.status = s;
   S.statusAcceptedRequest = request;
+  if (flowSourceChanged) {
+    scrubEnd(plot, false);
+    S.clickHold = false;
+  }
   const epoch = S.histEpoch;
   syncHistSources();
   if (S.histEpoch !== epoch) {
@@ -503,7 +523,7 @@ async function readStatusFrame(paint = true, timeout, quiet = false) {
   if (hpProbeIsOpen() && profile !== S.hpProbeCatalogProfile && !S.hpProbeCatalogBusy)
     loadHpProbeCatalog(profile);
   hydrateRoutedPopup();
-  if (paint) renderApp();
+  if (paint || flowSourceChanged) renderApp();
   return request;
 }
 function markUnreachable() {
@@ -543,7 +563,8 @@ function renderApp() {
   // the HomeHub is live, the snapshot is still built — liveData() fills what the second source can
   // supply and blanks the rest (mbFallbackFor), so the drawing degrades to the handful of readings
   // that ARE being measured instead of going blank while data is arriving.
-  S.live = (hp.connected && (S._values || []).length > 0) || (x10aDown() && mbLive() && (S._modbus || []).length)
+  const modbusLive = mbLive() && (S.modbusCompressorRunning != null || S._modbus?.some(row => row?.value != null));
+  S.live = (hp.connected && (S._values || []).length > 0) || (x10aDown() && modbusLive)
     ? liveData() : null;
   if (S.transportUnavailable) S.live = null;
   if (S.otaCached) renderOtaDashboardStatus();
@@ -562,7 +583,7 @@ function renderApp() {
     // Deliberately NOT the gateway's "operation mode" register: that one is the heat/cool SEASON and
     // reads "heat" right through a DHW run, so a headline built from it would contradict the valve
     // drawn beside it.
-    if (mbLive()) {
+    if (modbusLive) {
       const mbMode = mode;
       // A FAULT OR WARNING THE GATEWAY IS REPORTING OUTRANKS THE MODE. The diagnostic state and its
       // code are EKRHH offsets 21/22. Withholding either state while the device reports it is the
@@ -641,41 +662,47 @@ const TONE_FILL = {
 const PLANT_RUNNING = { key: "sys.operating", tone: "" };
 const PLANT_DEFROST = { key: "sys.defrosting", tone: "" };
 const PLANT_CIRC = { key: "sys.circulating", tone: "" };
+const PLANT_PUMP_REPORTED = { key: "sys.pump_reported", tone: "warn" };
 const PLANT_COOL_RESIDUAL = { key: "sys.residual_circulating", tone: "idle" };
 const PLANT_BSH = { key: "sys.bsh_active", tone: "" };
+const PLANT_BUH = { key: "schem.backup_heater_active", tone: "" };
 const PLANT_STANDBY = { key: "sys.standby", tone: "idle" };
 const PLANT_UNKNOWN = { key: "dyn.state_gate", tone: "warn" };
 function plantState(d) {
-  if (!d) return PLANT_STANDBY;
+  if (!d) return PLANT_UNKNOWN;
   if (d.defrost === true) return PLANT_DEFROST;
   // The tank's electric immersion heater can run with compressor, water pump and flow all at zero.
   // It is still active plant operation — and expensive resistive heat — so the exact X10A BSH flag
   // takes precedence over the generic compressor/pump states below.
   if (d.bsh === true) return PLANT_BSH;
-  if (d.rps == null && d.compressorOn == null) return PLANT_UNKNOWN;
   if (compressorRunning(d)) return PLANT_RUNNING;
+  if (backupHeaterActive(d)) return PLANT_BUH;
+  if (!compressorStopped(d)) return PLANT_UNKNOWN;
   // Compressor off but water still moving: pump overrun, or the backup heater carrying the load on
   // its own. Something IS happening — it just isn't the heat pump, which is the point of saying so.
-  const moving = d.pumpOn ?? (d.flow != null && d.flow > 1);
+  const moving = waterMoving(d);
   // Positive R1T-R4T while Cooling is selected is the exact residual-hot circulation case: the
   // compressor is stopped, so it cannot be cooling, and the water is losing stored heat on its way
   // around the loop. This can be pump overrun/protection; it must not inherit the generic green
   // "Cooling / Operating" presentation.
-  if (moving && d.thermalMode === "cool" && d.pthRaw != null && d.pthRaw > 0)
+  if (moving && heatersOff(d) && d.thermalMode === "cool" && d.pthRaw > 0)
     return PLANT_COOL_RESIDUAL;
   if (moving) return PLANT_CIRC;
-  return PLANT_STANDBY;
+  if (d.pumpOn === true) return PLANT_PUMP_REPORTED;
+  // A heater can run independently of the compressor. Missing heater states cannot prove standby.
+  return d.flow === 0 && heatersOff(d) ? PLANT_STANDBY : PLANT_UNKNOWN;
 }
 
-// A live HomeHub knows more than the fallback headline's DHW/space flags: input 31 witnesses the
-// compressor, input 30 the circulation pump, input 32 the tank heater, and input 49 the flow. Use
-// those facts for the same activity line and dot tone as X10A. Treating any known Modbus mode as
-// green made an idle plant read as active even while every one of those witnesses said it was off.
-// Keep source provenance appended to the activity words; the headline remains the operating mode.
+// A current HomeHub input 31 can supply compressor activity. Cached pump, heater and provisional
+// flow rows do not establish activity. The headline keeps the reported operating mode.
 function modbusStatusView(mode, live) {
-  if (!mode) return { mode: t("sys.x10a_down"), status: t("sys.mb_carrying"), tone: "warn" };
   const p = plantState(live);
-  return { mode, status: `${t(p.key)} · ${t("sys.mb_source")}`, tone: p.tone };
+  if (!mode && p === PLANT_UNKNOWN && live && homehubOnlyCompressorOff(live))
+    return { mode: t("sys.x10a_down"), status: t("schem.homehub_compressor_off"), tone: "warn" };
+  if (!mode && (p === PLANT_UNKNOWN || p === PLANT_STANDBY))
+    return { mode: t("sys.x10a_down"), status: t("sys.mb_carrying"), tone: "warn" };
+  return { mode: mode || t("sys.mode_unknown"), status: `${t(p.key)} · ${t("sys.mb_source")}`,
+    tone: mode ? p.tone : "warn" };
 }
 
 function sysSet(mode, status, tone) {

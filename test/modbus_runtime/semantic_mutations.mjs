@@ -32,6 +32,11 @@ export const semanticMutations = [
     after: "for (size_t i = 0; i < n; i++) { out[i] = s_cache[i]; out[i].modbus_definition = 0; }",
   },
   {
+    name: "snapshot-drops-flow-qualification", scenario: "probe_homehub_rows",
+    before: "for (size_t i = 0; i < n; i++) out[i] = s_cache[i];",
+    after: "for (size_t i = 0; i < n; i++) { out[i] = s_cache[i]; out[i].modbus_flow_scale_unverified = false; }",
+  },
+  {
     name: "base-zero-borrows-native-none", scenario: "homehub_definition_rows",
     before: "r.kind == def::HomeHubValueKind::Altherma4CurrentOperationMode",
     after: "true",
@@ -63,7 +68,7 @@ export const semanticMutations = [
   },
   {
     name: "promotion-keeps-base-split-budget", scenario: "probe_native_promotion",
-    before: /fresh\.clear\(\);\n\s*for \(bool& split : s_batch_split\) split = false;/,
-    after: "fresh.clear(); /* mutation: carry base fallback splits into the native plan */",
+    before: /(history_split = 0;\n)\s*for \(bool& split : s_batch_split\) split = false;/,
+    after: "$1/* mutation: carry base fallback splits into the native plan */",
   },
 ];

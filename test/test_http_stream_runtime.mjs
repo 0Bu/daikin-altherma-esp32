@@ -113,7 +113,9 @@ const mutations=[
   {name:"leaked-values-reader",file:"status",scenario:"weather_and_ota_admission",
     before:"if (!weather_tls) weather_values_reader_leave();",after:"/* mutation: keep a refused reader counted */"},
   {name:"history-epoch-bypass",file:"status",scenario:"history_epoch_refusal",
-    before:"if (history_snapshot_epoch != history_epoch())",after:"if (false)"},
+    before:"if (history_snapshot_epoch != history_epoch() ||",after:"if (false ||"},
+  {name:"history-peer-bypass",file:"status",scenario:"modbus_independent_types",
+    before:"(modbus && modbus_peer != history_modbus_candidate())",after:"((void)modbus_peer, false)"},
   {name:"room-source-attribution",file:"status",scenario:"room_history_completed",
     before:': room_source ? "room"',after:': room_source ? "mqtt"'},
   {name:"room-config-admission",file:"status",scenario:"room_history_refusals",
@@ -306,23 +308,44 @@ try {
     if(name==="room-epoch-refusal") assert.deepEqual(doc,{ok:false,error:"history changed; retry"});
     if(name==="room-status-plain"||name==="room-status-redacted") {
       const label=name==="room-status-plain"?roomName:"<redacted>";
+      assert.equal(doc.history.modbus_binding,true);
       assert.deepEqual(doc.history.room_rows,[{id:"room_temp",label}]);
       assert.equal(doc.reference_temperature.name,label);
     }
-    if(name==="room-status-absent") assert.deepEqual(doc.history.room_rows,[]);
+    if(name==="room-status-absent") {
+      assert.equal(doc.history.modbus_binding,true);
+      assert.deepEqual(doc.history.room_rows,[]);
+    }
     roomWires.delete(name);
     if(name==="invalid-ssid") assert.equal(doc.wifi.ssid,"bad"+"�".repeat(5));
     if(name==="dwell-mismatch") assert.equal(Object.hasOwn(doc.values[0],"dwell_s"),false);
     if(name==="dwell-match") assert.equal(doc.values[0].dwell_s,5);
     if(name==="epoch-refusal") assert.deepEqual(doc,{ok:false,error:"history changed; retry"});
+    if(name==="modbus-peer-refusal") assert.deepEqual(doc,{ok:false,error:"history changed; retry"});
+    if(name==="modbus-compressor-only") {
+      assert.equal(doc.modbus_compressor_running,true);
+      assert.equal(Object.hasOwn(doc,"modbus"),false);
+    }
     if(name==="/diag") assert.match(text,/Fixture home network/);
     if(name==="/diag?redact=1") assert.doesNotMatch(text,/Fixture home network|192\.0\.2\.10/);
     if(name==="stable-values") {assert.equal(doc.values.at(-1).value,"0");assert.equal(doc.values.at(-1).dwell_s,5);}
     if(name==="modbus-values") {
-      assert.equal(doc.values.length,129);assert.deepEqual(doc.modbus.map(row=>row.value),["U4",12.3,1,null]);
-      assert.equal(doc.modbus[2].binary,true);assert.deepEqual(doc.modbus.map(row=>row.off),[22,40,4,40]);
+      assert.equal(doc.values.length,129);
+      assert.deepEqual(doc.modbus.map(row=>row.value),["U4",12.3,1,0,null]);
+      assert.equal(doc.modbus[2].binary,true);assert.deepEqual(doc.modbus.map(row=>row.off),[22,40,4,31,40]);
+      assert.equal(doc.modbus_compressor_running,true);
+      assert.match(doc.modbus_history_boot_id,/^[0-9a-f]{16}$/);
+      assert.ok(Number.isInteger(doc.modbus_history_epoch) && doc.modbus_history_epoch > 0);
     }
-    if(name==="framed-values") {assert.equal(doc.result.values.length,129);assert.equal(doc.result.values[0].dwell_s,5);}
+    if(name==="modbus-values-history-retired") {
+      assert.equal(doc.modbus_history_epoch,0);
+      assert.equal(doc.modbus[1].value,12.3);
+      assert.equal(doc.modbus_compressor_running,false);
+    }
+    if(name==="framed-values") {
+      assert.equal(doc.result.values.length,129);assert.equal(doc.result.values[0].dwell_s,5);
+      assert.equal(doc.result.modbus_compressor_running,null);
+    }
     if(name==="framed-status-redacted") {
       assert.deepEqual(Object.keys(doc),["result"]);
       assert.equal(doc.result.sys.config_unreadable,true);

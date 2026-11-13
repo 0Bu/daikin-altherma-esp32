@@ -71,18 +71,19 @@ struct ModbusStatus {
     logic::OutdoorEvidence plant_outdoor;
 };
 
-// Start the stack. Creates the status mutex always (so /status can report `enabled:false` before any
-// task exists) and the task only when the config enables it. Called once from app_main.
+// Initialize static source state before HTTP can save a target. Start polling separately.
+void mb_init();
 void mb_start();
 
 // Complete the fresh-device one-shot discovery before httpd/background config writers start. No-op
 // after any persisted result or explicit host save/delete, in safe mode, or without a LAN lease.
 void mb_autodiscover_initial();
 
-// Apply an already-staged enable decision after POST /set_hp. Starts the task if the HomeHub was
-// just enabled, stops it if just disabled, and drops a cached socket when the address changed. The
-// POD argument keeps the post-persistence cutover allocation-free and safe in the httpd task.
+// Apply the staged enable decision after POST /set_hp and retire the previous cache. The owner
+// closes its socket. Worker creation requires boot and network-heap admission and can stay pending.
 void mb_reconfigure(bool enabled) noexcept;
+void mb_retry_start() noexcept;
+bool mb_task_pending() noexcept;
 
 // Lock-free current durable target intent. Unlike ModbusStatus::enabled (worker lifetime), this
 // flips synchronously after a successful settings save and is therefore the MQTT publication
@@ -102,6 +103,8 @@ bool mb_discover_homehub(std::string& found);
 // Thread-safe snapshot of the link state.
 ModbusStatus mb_status();
 
+enum class ModbusCompressor : uint8_t { Unknown, Off, On };
+
 // Thread-safe snapshot copy of the HomeHub value cache. Returns the count written. Rows carry the
 // same CachedValue shape as the X10A cache, so /values and the browser need no second row type;
 // `reg` is the synthetic def::HOMEHUB_GROUP_REG and `off` the EKRHH offset, which is what
@@ -115,7 +118,11 @@ ModbusStatus mb_status();
 // the snapshot must not be served. It is an out-param rather than a separate mb_status() call
 // because that separate call is exactly the race — the cache and link state are behind two mutexes,
 // so only the accessor can tie them into one generation-checked answer.
-size_t mb_values_snapshot(CachedValue* out, size_t max, bool& live);
+// The optional history generation belongs to the copied full-cache rows. Zero means unavailable.
+// The optional compressor state comes from its own recent input 31 reply in the current session.
+size_t mb_values_snapshot(CachedValue* out, size_t max, bool& live,
+                          uint32_t*         history_generation = nullptr,
+                          ModbusCompressor* compressor         = nullptr);
 
 // Allocation-free check of the exact snapshot liveness rule, for periodic expiry publication.
 bool mb_values_live();

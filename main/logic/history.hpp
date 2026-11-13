@@ -201,20 +201,9 @@ inline constexpr TrendDef TRENDS[] = {
     {"outdoor_heat_exchanger", TrendKind::Row, 0x20, 2, "°C", ""}, // outdoor coil R4T
     {"discharge", TrendKind::Row, 0x20, 4, "°C", ""},  // Discharge pipe temp. — the hot side
     {"room_temp", TrendKind::Row, 0x61, 12, "°C", ""}, // Indoor ambient temp. (R1T)
-    // The ELECTRICAL inputs. They are here as INPUTS, not as charts of their own: the dashboard's
-    // "electrical input (est.)" pill is derived in the browser (amps x an assumed 230 V, CT clamps
-    // preferred over the inverter current, the fallback gated on the held-over rule), and the only
-    // way to draw a 24-hour curve of it without a second, looser copy of that rule somewhere is to
-    // buffer what it is computed FROM and run the same expression over the samples. The held-over
-    // marking the INV ring already carries IS the gate — 0x21 is a frozen page, so a sample the
-    // outdoor unit was not measuring is stored as HeldOver rather than as last run's amps, which is
-    // precisely the distinction the live pill makes.
+    // Preserve raw inverter current and its held-over gaps.
     {"inv_current", TrendKind::Row, 0x21, 0, "", ""}, // INV primary current (A) — 39/39
-    // The CT clamps are fitted on 20 of the 39 detection profiles and read a flat 0 A on an install
-    // without them (measured here over 30 days), which is exactly why the live rule prefers them
-    // only when their sum is non-zero. Three rings for one figure because the sum is the browser's
-    // to make: a "total current" trend would be a derived quantity computed in the firmware and
-    // then again in www/js/history.js, and the two would be free to disagree.
+    // Preserve each raw CT phase independently. A common bucket does not establish a common sweep.
     {"ct_l1", TrendKind::Row, 0x63, 14, "", ""},
     {"ct_l2", TrendKind::Row, 0x63, 15, "", ""},
     {"ct_l3", TrendKind::Row, 0x63, 16, "", ""},
