@@ -1938,15 +1938,14 @@ void retiring_reenable() {
     const auto deleting = s_task;
     sdk::on_delay       = [&] { mb_reconfigure(false); };
     sdk::on_wdt_delete  = [&] {
-        sdk::fail_task_create = true;
+        REQUIRE(mb_network_quiesced());
         mb_reconfigure(true);
-        REQUIRE(!s_task && sdk::create_calls == 2 && mb_task_pending());
+        REQUIRE(s_task == deleting && sdk::create_calls == 1 && mb_task_pending());
     };
     deleting->fn(deleting->arg);
-    sdk::fail_task_create = false;
-    sdk::clock_us += 5000000;
+    REQUIRE(!s_task && mb_target_enabled() && mb_network_quiesced());
     mb_retry_start();
-    REQUIRE(s_task && s_task != deleting && mb_task_pending() && sdk::create_calls == 3);
+    REQUIRE(s_task && s_task != deleting && mb_task_pending() && sdk::create_calls == 2);
 }
 void worker_admission_pressure() {
     reset();

@@ -479,8 +479,9 @@ require creating a task.
 `modbus_start_pending: true` means the settings were saved and polling is still waiting for its
 worker or resources. See [the API contract](API.md#x10a-homehub-and-board-hardware) for startup and recovery.
 Task-admission failures can appear in `/diag` before the worker is active.
-Clearing the address withdraws the source immediately. Its worker closes the socket once OTA or
-Weather has released network heap. `POST /discover_homehub` runs the bounded manual
+Clearing the address withdraws the source immediately. Its worker closes the socket after OTA or
+Weather releases network heap. A replacement waits for the old worker to release its network claim
+and deregister from the watchdog. `POST /discover_homehub` runs the bounded manual
 search and returns `{ok:true,host:"<IPv4>"}` without saving or reconfiguring anything.
 
 **Web UI:** the HomeHub appears as its own row in Settings → Connections — never folded into a

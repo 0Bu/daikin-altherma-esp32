@@ -77,8 +77,13 @@ try {
     },
     {
       name: "retiring-drops-reenable", scenario: "retiring_reenable",
-      before: /if \(!s_target_enabled\.load\(std::memory_order_acquire\)\) \{\s*s_mb_task_running\.store\(false, std::memory_order_release\);/,
-      after: "if (true) { s_mb_task_running.store(false, std::memory_order_release);",
+      before: "if (!s_target_enabled.load(std::memory_order_acquire)) return true;",
+      after: "return true;",
+    },
+    {
+      name: "retirement-releases-worker-before-cleanup", scenario: "retiring_reenable",
+      before: "if (!s_target_enabled.load(std::memory_order_acquire)) return true;",
+      after: "if (!s_target_enabled.load(std::memory_order_acquire)) { s_task = nullptr; return true; }",
     },
     {
       name: "worker-closes-during-tls-ownership", scenario: "task_oom_and_quiesce",

@@ -1506,17 +1506,13 @@ static bool mb_retire_if_disabled(bool ready) {
     }
     {
         Lock lk(s_mtx);
-        s_task_retiring = false;
         s_status.values = 0;
         s_last_reply_ms = -1;
         s_poll_observed = false;
         reset_observation_times_locked();
         s_ota_quiesced.store(false, std::memory_order_release);
-        if (!s_target_enabled.load(std::memory_order_acquire)) {
-            s_mb_task_running.store(false, std::memory_order_release);
-            s_task = nullptr;
-            return true;
-        }
+        if (!s_target_enabled.load(std::memory_order_acquire)) return true;
+        s_task_retiring  = false;
         s_status.enabled = ready;
     }
     return false;
@@ -1649,6 +1645,14 @@ static void mb_task(void*) {
         vTaskDelay(pdMS_TO_TICKS(POLL_INTERVAL_S * 1000));
     }
     if (ready) esp_task_wdt_delete(nullptr);
+    {
+        // The network claim has ended. Keep the old handle until this point so a new worker
+        // cannot claim the network before the old worker has published quiescence.
+        Lock lk(s_mtx);
+        s_mb_task_running.store(false, std::memory_order_release);
+        s_task_retiring = false;
+        s_task          = nullptr;
+    }
     vTaskDelete(nullptr);
 }
 

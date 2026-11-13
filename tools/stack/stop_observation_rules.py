@@ -909,8 +909,8 @@ BODIES['main/hp_modbus.cpp'] = {'mb_ensure_connected': 'a5c582ba87ac431068ba649a
  'mb_poll_once': '5de5a9377271234acceb68a91770e26c664c1530220b28acb0b65a510fd29bbe',
  'status_socket_open': '82d1102d32c61fc9c91f49ca2bcb42b771724c4966f2b408c673a4cded5dd9a0'}
 BODIES['main/hp_modbus.cpp'].update({
-    'mb_task': '7b2108e0231e9b10413e44af7cad5f5f0361fd9dd3ad37fb7135bd8bf403652e',
-    'mb_retire_if_disabled': '68c9c0f404f173f2734fc0b40f8196e91e5e565962d9cbde74c7f803f367702a',
+    'mb_task': '425021fb103ad77a648eab5d5ecc2e09e27d48ed0c5fdc29bd0d1622ff6bb3ea',
+    'mb_retire_if_disabled': 'e080340a4020e94a1cd1499e51e5a09c3a28440a457bbf634d7270bdda1c9451',
     'mb_task_pending': '7280769fa87e4e8e4cbab4bcbc300132caeb105178b42697a8f86cffe9aebcca',
     'mb_task_start_if_enabled': '6dff6f4c13440715cf6a23aaa80af1cd1c0983074a99483ff4826399b1a32996',
     'mb_retry_start': '3c644ba9a4c7ff620e76335345808b7f335778e98ffe8f5876c97eddec29ed9c',
