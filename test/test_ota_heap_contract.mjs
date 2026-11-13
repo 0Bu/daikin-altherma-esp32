@@ -1451,8 +1451,9 @@ assert.match(modbus,
 assert.match(modbus,
   /struct\s+MbTaskCreation[\s\S]{0,200}?s_start_in_flight\.store\(true\)[\s\S]{0,200}?s_start_in_flight\.store\(false\)/,
   "HomeHub stack creation must own a separate sequentially consistent claim");
-assert.match(modbus.slice(modbusTaskEnd),
-  /MbTaskCreation creation;\s*if \(ota_download_active\(\) \|\| weather_fetch_active\(\)\) return;[\s\S]{0,350}?xTaskCreate\(mb_task/,
+const modbusCreate = modbus.slice(modbusTaskEnd, modbus.indexOf("bool mb_network_quiesced()", modbusTaskEnd));
+assert.match(modbusCreate,
+  /MbTaskCreation creation;\s*if \(ota_download_active\(\) \|\| weather_fetch_active\(\)\) return;[\s\S]*?xTaskCreate\(mb_task/,
   "HomeHub must recheck both TLS owners after claiming and before allocating");
 assert.match(ota, /bool ota_download_active\(\) \{ return s_network_active\.load\(\); \}/);
 assert.match(weather, /compare_exchange_strong\(expected, SourceAdmission::Network\)/);
