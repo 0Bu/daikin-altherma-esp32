@@ -100,8 +100,8 @@ const DERIVED = {
   buh_state: {
     unit: "", ins: ["buh_step1", "buh_step2"],
     ready: (h) => h.buh_step1 && h.buh_step2,
-    fn: (s) => s.buh_step1 == null || s.buh_step2 == null ? null
-      : s.buh_step2 > 0 ? 2 : s.buh_step1 > 0 ? 1 : 0,
+    fn: (s) => s.buh_step2 === 1 ? 2 : s.buh_step1 === 1 ? 1
+      : s.buh_step1 === 0 && s.buh_step2 === 0 ? 0 : null,
   },
   // Retain the legacy internal trend id. The displayed percentage is the inverted controller
   // command, not measured speed; liveData() uses this same validation and inversion.
@@ -794,7 +794,7 @@ function stateHistoryCurrent(id, source) {
     const step = (concept) => currentBinaryTenths(
       S._values.find((r) => r && r.concept === concept));
     const step1 = step("buh_step1"), step2 = step("buh_step2");
-    const value = step1 == null || step2 == null ? null : step2 === 10 ? 20 : step1;
+    const value = step2 === 10 ? 20 : step1 === 10 ? 10 : step1 === 0 && step2 === 0 ? 0 : null;
     return { present: true, value };
   }
   const row = S._values.find((r) => r && r.concept === id);

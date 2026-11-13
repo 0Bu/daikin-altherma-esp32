@@ -440,10 +440,11 @@ and carries no scale marker in history. Its reported L/min remains unverified.
 `dt` is the raster cadence. `b0` anchors
 monotonic five-minute buckets, `t0` is sample-zero wall time derived from the captured newest-sample
 age and omitted before clock sync. `epoch` is captured with the samples; `boot_id` matches `/status`.
-Modbus assigns completed samples and gaps to their monotonic closing boundaries. Delays in a full
-poll do not shift those slots when the flash journal projects them onto the wall clock.
+Modbus assigns readings in a full poll to the bucket of their own reply. Completed samples and
+gaps use their monotonic closing boundaries when the flash journal projects them onto wall time.
 An available series may have `v:[]` and no time anchors while awaiting measurements or peer
-confirmation. An unavailable history snapshot or an epoch changed before emission returns 503.
+confirmation. An unavailable history snapshot or a change of epoch or connected peer before
+emission returns 503.
 Clients must reject responses superseded by a newer status/source generation.
 `held` marks eligible X10A outdoor nulls as held-over; all other source rasters leave it empty.
 `v` does not record an unknown compressor state. A sweep dropped after a stop cannot put a number into
@@ -568,10 +569,9 @@ polling, automatic discovery, sockets and dependent diagnosis. Replacement state
 commit; live socket ownership remains with its task. X10A remains independent.
 When HomeHub settings are saved and polling is still pending, the response is
 `{"ok":true,"modbus_start_pending":true}`. This can occur during task startup, cleanup or
-resource pressure. A worker retries temporary allocation failures at its normal poll cadence.
-Task creation leaves the heap watchdog's recovery headroom for core services and retries after
-five seconds when there is insufficient contiguous memory.
-This includes failure to allocate or retain the task-local network semaphore.
+resource pressure. A failed heap check at task creation or before the first sweep defers the next
+start attempt by five seconds. A created worker retries task-local network semaphore and watchdog
+admission at its normal poll cadence.
 After core services have started, the X10A task retries worker creation even while its bus is
 unavailable. OTA and Weather network activity defer creation. If the X10A task itself could not
 start, saving the same enabled target can retry creation without retiring its history.

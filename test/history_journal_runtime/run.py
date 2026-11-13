@@ -157,7 +157,7 @@ baseline = build(SOURCE, "baseline")
 phases = ["prepare_read", "prepare_erase", "body", "commit", "readback",
           "commit_accepted_error", "success"]
 cases = ["commit_rejected", "core_ahead", "nor_contract", "read_admission", "sequence_rejections",
-         "modbus_live_peer_change", "modbus_peer_forget", "modbus_quiet_unverified",
+         "modbus_live_peer_change", "modbus_reply_bucket", "modbus_peer_forget", "modbus_quiet_unverified",
          "modbus_missing_target_digest",
          "core_sequence_prepare", "core_sequence_readback", "core_sequence_commit_error",
          "forget_before_start", "forget_during_lookup", "forget_during_scan",
@@ -342,7 +342,8 @@ if not args.expect_red:
         ("query_pending_without_forget_fast_path", pending_body, pending_body.replace(pre_lock, ""),
          ["checkup_pending_forget"], "already_forgotten_pending_skips_lock"),
         ("publish_unbound_modbus_snapshot", modbus_snapshot,
-         modbus_snapshot.replace(" || !s_mb_peer_bound", ""),
+         modbus_snapshot.replace(" || !s_mb_peer_bound", "").replace(
+             " || s_mb_candidate_ipv4.load() != s_mb_ipv4", ""),
          ["restore_modbus_cold_same"],
          "boot_keeps_unbound_modbus_samples_invisible"),
         ("keep_modbus_history_on_peer_change", modbus_peer_change,
@@ -394,6 +395,14 @@ if not args.expect_red:
          "            config_crc32_update(crc, reinterpret_cast<const uint8_t*>(&s_liveness.modbus_config_fp),",
          ["restore_modbus_warm_collision_corrupt_config"],
          "warm_start_exercises_real_crc_and_liveness_adoption"),
+        ("modbus_predecessor_visible_before_binding",
+         "s_mb_reset_requested.load() || s_mb_candidate_ipv4.load() != s_mb_ipv4)",
+         "s_mb_reset_requested.load())", ["modbus_live_peer_change"],
+         "candidate_hides_old_flow_while_journal_binding_is_busy"),
+        ("modbus_heater_uses_poll_end",
+         "observed_us >= 0 ? observed_us : esp_timer_get_time()",
+         "((void)observed_us, esp_timer_get_time())", ["modbus_reply_bucket"],
+         "heater_reply_is_recorded_in_its_own_bucket"),
         ("anchor_modbus_history_to_delayed_poll",
          "\n        s_mb_last_commit_us     = logic::history_raster_boundary_us(now_us);\n"
          "        s_mb_last_commit_bucket =",

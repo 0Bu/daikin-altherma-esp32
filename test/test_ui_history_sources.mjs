@@ -1040,6 +1040,11 @@ for (const [id, primarySource, expected] of liveStateCases) {
     `${id} must expose the current state at the right edge tooltip`);
 }
 const modbusValve = S._modbus.find((row) => row.off === 37);
+const stageOne = S._values.findIndex((row) => row.concept === "buh_step1");
+const [stageOneRow] = S._values.splice(stageOne, 1);
+assert.equal(h.historyView("buh_state").series[0].v.at(-1), 20,
+  "a current stage 2 ON survives a missing stage 1 report");
+S._values.splice(stageOne, 0, stageOneRow);
 const valveLive = () => h.historyView("valve_dhw");
 const valveNow = (view) => view.series.find((s) => s.source === "modbus").v.at(-1);
 for (const value of [0, 1, null]) {

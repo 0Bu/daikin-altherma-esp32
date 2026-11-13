@@ -937,6 +937,9 @@ const SG_INSP = (c, d) => c.INSPECT.sgrequest;
   assert.equal(down.INSPECT.bsh.now(d), null,
     "the inspector prose must not leak the HomeHub-only state either");
   assert.equal(down.INSPECT.buh.trend, "buh_state");
+  for (const buh1 of [null, false, true])
+    assert.match(down.INSPECT.buh.head({ buh1, buh2: true }), /Step 2|hist\.buh_step2/);
+  assert.equal(down.INSPECT.buh.head({ buh1: false, buh2: null }), "—");
   const buhNow = (buh1, buh2) => down.INSPECT.buh.now({ buh1, buh2 })?.en;
   for (const buh1 of [null, false, true])
     assert.equal(buhNow(buh1, true), "Step 2 reports ON.");

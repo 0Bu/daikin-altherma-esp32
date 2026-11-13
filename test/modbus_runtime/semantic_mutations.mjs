@@ -68,7 +68,7 @@ export const semanticMutations = [
   },
   {
     name: "promotion-keeps-base-split-budget", scenario: "probe_native_promotion",
-    before: /fresh\.clear\(\);\n\s*for \(bool& split : s_batch_split\) split = false;/,
-    after: "fresh.clear(); /* mutation: carry base fallback splits into the native plan */",
+    before: /(history_split = 0;\n)\s*for \(bool& split : s_batch_split\) split = false;/,
+    after: "$1/* mutation: carry base fallback splits into the native plan */",
   },
 ];

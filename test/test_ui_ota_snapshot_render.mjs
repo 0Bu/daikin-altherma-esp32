@@ -219,6 +219,13 @@ async function startup(h, order) {
   await h.refreshStatus(false);
   await h.refreshValues();
   assert.equal(observe(h).detail, "Operating mode unknown — readings from Modbus");
+  for (const running of [true, false]) {
+    h.routes.set("/values", async () => response({ values: [], modbus_compressor_running: running }));
+    await h.refreshValues();
+    assert.equal(h.S.live.compressorOn, running, "a fresh compressor report is independent of the full cache");
+    assert.match(observe(h).detail, running ? /Operating.*Modbus/ : /compressor OFF/);
+    assert.equal(observe(h).lwt, "—", "activity does not resurrect stale readings");
+  }
   for (const unavailable of [{ ...values(), modbus: [{ value: null }],
     modbus_history_epoch: 1, modbus_history_boot_id: "boot-a" }, { values: [] }]) {
     h.routes.set("/values", async () => response(unavailable));
@@ -353,7 +360,7 @@ for (const order of ["status-first", "cache-first"]) {
   assert.match(observe(h).detail, /last received state/);
 
   // One fresh status alone cannot promote the cached readings to current. Its following values
-  // response supplies a complete frame; another failure then blanks that live frame normally.
+  // response supplies a complete frame; another failure then preserves it as a frozen snapshot.
   h.routes.set("/status", async () => response({ ...status(), uptime_s: 101 }));
   await h.refreshStatus();
   assert.equal(h.S.otaCached, true);
@@ -370,8 +377,25 @@ for (const order of ["status-first", "cache-first"]) {
   assert.doesNotMatch(observe(h).detail, /last received state/);
   h.routes.set("/values", async () => { throw new Error("offline"); });
   await h.refreshValues();
-  assert.equal(h.S.otaCached, false); assert.equal(observe(h).lwt, "—");
+  assert.equal(h.S.otaCached, true); assert.equal(observe(h).lwt, "38.0");
+  assert.match(observe(h).detail, /last received state/);
   assert.equal(observe(h).fan, false); assert.equal(observe(h).pump, false);
+}
+
+// A tab which already has a complete frame can adopt an external update from either refusal.
+for (const route of ["/status", "/values"]) {
+  const h = harness();
+  h.routes.set("/status", async () => response(status()));
+  h.routes.set("/values", async () => response(values("38.0")));
+  await h.refreshStatus(); await h.refreshValues();
+  assert.equal(h.S.otaCached, false);
+  h.routes.set("/ota/status", async () => response(compact));
+  h.routes.set(route, async () => response({}, 503));
+  await (route === "/status" ? h.refreshStatus() : h.refreshValues());
+  await settle();
+  assert.equal(h.S.otaCached, true, `${route} refusal restores the same-image frame`);
+  assert.equal(observe(h).lwt, "38.0");
+  assert.deepEqual(motion(h), { classes: [], pipes: [] });
 }
 
 // A stale tank heater used to light and animate the perimeter independently of pipe classes.

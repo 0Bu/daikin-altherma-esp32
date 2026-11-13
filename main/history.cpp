@@ -242,7 +242,8 @@ inline void forget_adopt_floor(size_t src) {
 std::atomic<bool> s_reset_requested{false};
 std::atomic<uint32_t> s_x10a_target_fp{0};
 std::atomic<bool> s_mb_reset_requested{false};
-std::atomic<uint32_t> s_mb_identity_generation{1};
+std::atomic<uint32_t>      s_mb_identity_generation{1};
+std::atomic<uint32_t>      s_mb_candidate_ipv4{0};
 uint32_t                   s_mb_ipv4 = 0; // history and flash owner locks after startup
 logic::HistoryModbusTarget s_mb_config_target{};
 bool                       s_mb_peer_bound = false; // history mutex
@@ -1162,6 +1163,10 @@ uint32_t history_modbus_bind_peer(const logic::HistoryModbusTarget& configured, 
 
 uint32_t history_modbus_generation() { return s_mb_identity_generation.load(); }
 
+void history_modbus_candidate(uint32_t ipv4) noexcept { s_mb_candidate_ipv4.store(ipv4); }
+
+uint32_t history_modbus_candidate() noexcept { return s_mb_candidate_ipv4.load(); }
+
 uint32_t history_room_generation() noexcept { return s_room_generation.load(); }
 
 bool history_room_matches(uint32_t expected_identity) noexcept {
@@ -1481,9 +1486,10 @@ void history_record(const CachedValue* v, size_t n, uint32_t source_generation) 
     persist_seal_locked();
 }
 
-void history_record_modbus(const CachedValue* v, size_t n, uint32_t identity_generation) {
+void history_record_modbus(const CachedValue* v, size_t n, uint32_t identity_generation,
+                           int64_t observed_us) {
     if (!s_mtx) return;
-    const int64_t now_us = esp_timer_get_time();
+    const int64_t  now_us = observed_us >= 0 ? observed_us : esp_timer_get_time();
     const uint32_t bucket = logic::history_bucket(now_us);
 
     // Parse before taking the history lock. strtod is locale-stable in this firmware and needs no
@@ -1514,6 +1520,7 @@ void history_record_modbus(const CachedValue* v, size_t n, uint32_t identity_gen
     if (!s_mb_peer_bound || identity_generation == 0 ||
         identity_generation != s_mb_identity_generation.load())
         return;
+    if (s_mb_have_bucket && bucket < s_mb_bucket) return;
     if (!s_mb_have_bucket) {
         const size_t completed = logic::history_completed_samples(bucket);
         for (auto& ring : P().mb_ring) ring.reset_with_gaps(completed);
@@ -1643,7 +1650,7 @@ size_t history_modbus_snapshot(size_t t, HistorySample* out, size_t max, uint32_
     Lock lk(s_mtx);
     if (lk.acquired() && epoch) *epoch = history_epoch();
     if (!lk.acquired() || s_flash_forgotten.load() || !s_mb_peer_bound ||
-        s_mb_reset_requested.load())
+        s_mb_reset_requested.load() || s_mb_candidate_ipv4.load() != s_mb_ipv4)
         return 0;
     const size_t n = P().mb_ring[t].snapshot(out, max);
     fill_snapshot_meta_locked(meta, s_mb_last_commit_us, s_mb_last_commit_bucket, n);

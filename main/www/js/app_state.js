@@ -489,6 +489,8 @@ async function readStatusFrame(paint = true, timeout, quiet = false) {
   catch (error) {
     if (!current()) return false;
     const busy = String(error.message) === "503";
+    if (S.otaInstalling && !S.otaCached && await otaCacheRestore(S.otaWriter, true)) return false;
+    if (!current()) return false;
     if (!S.otaCached) invalidateLiveReadings("status", busy);
     if (quiet) return false;
     const ota = busy && typeof probeRunningOta === "function"
@@ -561,8 +563,8 @@ function renderApp() {
   // the HomeHub is live, the snapshot is still built — liveData() fills what the second source can
   // supply and blanks the rest (mbFallbackFor), so the drawing degrades to the handful of readings
   // that ARE being measured instead of going blank while data is arriving.
-  const modbusRowsLive = mbLive() && S._modbus?.some(row => row?.value != null);
-  S.live = (hp.connected && (S._values || []).length > 0) || (x10aDown() && modbusRowsLive)
+  const modbusLive = mbLive() && (S.modbusCompressorRunning != null || S._modbus?.some(row => row?.value != null));
+  S.live = (hp.connected && (S._values || []).length > 0) || (x10aDown() && modbusLive)
     ? liveData() : null;
   if (S.transportUnavailable) S.live = null;
   if (S.otaCached) renderOtaDashboardStatus();
@@ -581,7 +583,7 @@ function renderApp() {
     // Deliberately NOT the gateway's "operation mode" register: that one is the heat/cool SEASON and
     // reads "heat" right through a DHW run, so a headline built from it would contradict the valve
     // drawn beside it.
-    if (modbusRowsLive) {
+    if (modbusLive) {
       const mbMode = mode;
       // A FAULT OR WARNING THE GATEWAY IS REPORTING OUTRANKS THE MODE. The diagnostic state and its
       // code are EKRHH offsets 21/22. Withholding either state while the device reports it is the
@@ -695,6 +697,8 @@ function plantState(d) {
 // flow rows do not establish activity. The headline keeps the reported operating mode.
 function modbusStatusView(mode, live) {
   const p = plantState(live);
+  if (!mode && p === PLANT_UNKNOWN && live && homehubOnlyCompressorOff(live))
+    return { mode: t("sys.x10a_down"), status: t("schem.homehub_compressor_off"), tone: "warn" };
   if (!mode && (p === PLANT_UNKNOWN || p === PLANT_STANDBY))
     return { mode: t("sys.x10a_down"), status: t("sys.mb_carrying"), tone: "warn" };
   return { mode: mode || t("sys.mode_unknown"), status: `${t(p.key)} · ${t("sys.mb_source")}`,

@@ -109,9 +109,12 @@ async function refreshValues(paint = true) {
   }
   catch (error) {
     if (current() && !S.otaCached) {
+      if (S.otaInstalling && await otaCacheRestore(S.otaWriter, true)) return false;
+      if (!current()) return false;
+      const busy = String(error.message) === "503";
       if (S.modbusHistoryLease) applyModbusHistoryLease({ epoch: 0, boot: "" });
-      invalidateLiveReadings(S.transportUnavailable === "status" ? "status" : "values",
-        String(error.message) === "503");
+      invalidateLiveReadings(S.transportUnavailable === "status" ? "status" : "values", busy);
+      if (busy && typeof probeRunningOta === "function") void probeRunningOta();
     }
     return false;
   }
@@ -123,7 +126,7 @@ async function refreshValues(paint = true) {
   // merging would make "is this reading current?" unanswerable per row.
   const modbus = Array.isArray(r.modbus) ? r.modbus : null;
   S._modbus = modbus || [];
-  S.modbusCompressorRunning = modbus && typeof r.modbus_compressor_running === "boolean"
+  S.modbusCompressorRunning = typeof r.modbus_compressor_running === "boolean"
     ? r.modbus_compressor_running : null;
   // A values-only poll can lose or replace the source before the next status poll. Once the
   // binding protocol is known, an absent binding must withhold the previous peer's chart.
@@ -140,7 +143,7 @@ async function refreshValues(paint = true) {
   S.otaCached = false;
   S.transportUnavailable = null;
   S.transportBusy = false;
-  if (S.otaInstalling) otaCacheStore();
+  if (typeof otaCacheStore === "function") otaCacheStore(S.otaInstalling);
   if (paint) renderApp();
   return true;
 }

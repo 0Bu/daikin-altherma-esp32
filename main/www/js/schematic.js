@@ -1184,7 +1184,9 @@ const INSPECT = {
   },
   buh: {
     t: { en: "Backup heater (BUH)", de: "Zusatzheizer · BUH" },
-    re: /buh step ?1/i, sample: "BUH step 1",
+    sample: "BUH step 1",
+    head: (d) => d.buh2 === true ? t("hist.buh_step2") : d.buh1 === true ? t("hist.buh_step1")
+      : d.buh1 === false && d.buh2 === false ? t("hist.state_off") : "—",
     trend: "buh_state",
     now: (d) => d.buh2 === true ? { en: "Step 2 reports ON.", de: "Stufe 2 meldet EIN." }
       : d.buh1 === true ? { en: "Step 1 reports ON.", de: "Stufe 1 meldet EIN." }

@@ -113,7 +113,9 @@ const mutations=[
   {name:"leaked-values-reader",file:"status",scenario:"weather_and_ota_admission",
     before:"if (!weather_tls) weather_values_reader_leave();",after:"/* mutation: keep a refused reader counted */"},
   {name:"history-epoch-bypass",file:"status",scenario:"history_epoch_refusal",
-    before:"if (history_snapshot_epoch != history_epoch())",after:"if (false)"},
+    before:"if (history_snapshot_epoch != history_epoch() ||",after:"if (false ||"},
+  {name:"history-peer-bypass",file:"status",scenario:"modbus_independent_types",
+    before:"(modbus && modbus_peer != history_modbus_candidate())",after:"((void)modbus_peer, false)"},
   {name:"room-source-attribution",file:"status",scenario:"room_history_completed",
     before:': room_source ? "room"',after:': room_source ? "mqtt"'},
   {name:"room-config-admission",file:"status",scenario:"room_history_refusals",
@@ -319,6 +321,11 @@ try {
     if(name==="dwell-mismatch") assert.equal(Object.hasOwn(doc.values[0],"dwell_s"),false);
     if(name==="dwell-match") assert.equal(doc.values[0].dwell_s,5);
     if(name==="epoch-refusal") assert.deepEqual(doc,{ok:false,error:"history changed; retry"});
+    if(name==="modbus-peer-refusal") assert.deepEqual(doc,{ok:false,error:"history changed; retry"});
+    if(name==="modbus-compressor-only") {
+      assert.equal(doc.modbus_compressor_running,true);
+      assert.equal(Object.hasOwn(doc,"modbus"),false);
+    }
     if(name==="/diag") assert.match(text,/Fixture home network/);
     if(name==="/diag?redact=1") assert.doesNotMatch(text,/Fixture home network|192\.0\.2\.10/);
     if(name==="stable-values") {assert.equal(doc.values.at(-1).value,"0");assert.equal(doc.values.at(-1).dwell_s,5);}

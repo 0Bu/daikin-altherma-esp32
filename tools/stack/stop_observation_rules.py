@@ -861,6 +861,19 @@ _MODBUS_CREATE_WAKE = [
     'sdk_queue_yield_required', 'sdk_queue_yield_other', 'sdk_queue_crosscore_yield',
     'sdk_queue_crosscore_send', 'sdk_queue_critical', 'sdk_queue_compare_swap',
 ]
+for branch, continuation in {
+    'heap_walk': ['modbus_create_heap_sample', 'modbus_create_heap_largest',
+                  'modbus_create_heap_info', 'modbus_create_pool_info', 'modbus_create_pool_walk',
+                  'modbus_create_pool_visit'],
+    'heap_lock': ['modbus_create_heap_sample', 'modbus_create_heap_largest',
+                  'modbus_create_heap_info', 'modbus_create_pool_info', 'sdk_multi_lock',
+                  'sdk_queue_critical', 'sdk_queue_compare_swap'],
+    'heap_free': ['modbus_create_heap_free', 'modbus_create_pool_free'],
+}.items():
+    PATHS[f'modbus_worker_first_sweep_{branch}'] = [
+        'modbus', {'symbols': ['runtime_task_entry', 'modbus_task', *continuation],
+                   'multipliers': {}, 'base_bytes': 1536, 'max_bytes': 5120},
+    ]
 for caller, task, prefix, limit in (
     ('boot', 'main', ['main_task', 'boot_sequence', 'modbus_create_boot', 'modbus_create_retry'], 5120),
     ('poll', 'poll', ['runtime_task_entry', 'poll_task', 'modbus_create_retry'], 7168),
@@ -898,21 +911,21 @@ for caller, task, prefix, limit in (
 BODIES['main/history.cpp'].update({'history_modbus_reset_scope_locked': 'cbb56d64ed09e01703e672a55798194aaff30da5e3f5c83a96c131860716fd9a',
  'history_modbus_reset': 'feace54ffc1e23ee4c620c183eef77f11ae491619d1c2f627fd58e3a32c4f031',
  'history_modbus_bind_peer': '6edae4ad40931acb7057dbc1f3086fb70423b9aade42ced222805c0bcd7a0a8d',
- 'history_record_modbus': '19b76d111baf2f9794538460e6cfbd6a2d88fa714f1d1956b6b362c2e73e8f12',
- 'history_modbus_snapshot': 'a454d25c211f84de9c629f6a083aaee4048284ce5deb377c2b4858a297394cf7',
+ 'history_record_modbus': '3ac352f6634252752969d20dc151dfe6e2acbe95d2d8377448160a3f0d209735',
+ 'history_modbus_snapshot': '321197fd5dae1871507ca376de37d70761227dd63f31c1f3f5fed5ba72c7e027',
  'history_splice_snapshot': 'a63845e18ff6d4dfc71e09c6a8b17f821ae4722d029484de633c89c341cdd79e',
  'flash_trend_scope_matches': 'afb6a3e7dcb6b52bc36cb18dc8701bf231b7cfbcc3610dbbd0f9cbcf64222f71',
  'flash_record_valid': 'f3049d9921b9456b50d94bcace8c49fe4b96ed602dd9165df7dfd3439a2fee6a',
  'flash_build_next_record': '0aad195a438a74f1c2b2a925c3749aec7abd9def84063bd0fcb8d5487507a66b'})
 BODIES['main/history_target.cpp'] = {'history_modbus_target': 'a768932c642ee9db5356c672b8ce1876a9ddc6c14385b290494c265f38a7f156'}
-BODIES['main/hp_modbus.cpp'] = {'mb_ensure_connected': 'a5c582ba87ac431068ba649a8b5e5ae4367035d3f476fd74ed5080b4b05899ec',
- 'mb_poll_once': '5de5a9377271234acceb68a91770e26c664c1530220b28acb0b65a510fd29bbe',
- 'status_socket_open': '82d1102d32c61fc9c91f49ca2bcb42b771724c4966f2b408c673a4cded5dd9a0'}
+BODIES['main/hp_modbus.cpp'] = {'mb_ensure_connected': '5fa7f3ba08c489eb357dccbfc77ac873aaf25619c3d5ee7f5ce45ba22f037ba8',
+ 'mb_poll_once': 'fefa1d9992a1859591aa47f4c9c9c387c6bd57042b3dfae9c2543627672e665a',
+ 'status_socket_open': '6acb79527aee70827e7a0a62457febca550aa66fb7c71d750fcb3a56133a62c5'}
 BODIES['main/hp_modbus.cpp'].update({
-    'mb_task': '425021fb103ad77a648eab5d5ecc2e09e27d48ed0c5fdc29bd0d1622ff6bb3ea',
-    'mb_retire_if_disabled': 'e080340a4020e94a1cd1499e51e5a09c3a28440a457bbf634d7270bdda1c9451',
+    'mb_task': '2557f2e14e1cf1b562b2241181eb8938349d26cab20f6a651ad07d4d0baeaf20',
+    'mb_retire_if_disabled': '6db3d72fc04329c6f21246e7f1b798bffc2aa2e8153385ab1a388efe7aa22db9',
     'mb_task_pending': '7280769fa87e4e8e4cbab4bcbc300132caeb105178b42697a8f86cffe9aebcca',
-    'mb_task_start_if_enabled': '6dff6f4c13440715cf6a23aaa80af1cd1c0983074a99483ff4826399b1a32996',
+    'mb_task_start_if_enabled': 'ce179ed53b66f02c70cfd37d45674fc16c4600b3d7d7d9f4f4f5179042400854',
     'mb_retry_start': '3c644ba9a4c7ff620e76335345808b7f335778e98ffe8f5876c97eddec29ed9c',
     'mb_start': '954ea9970f7921417de460b7f3ebc0298aba357ad5ac5c8bcdff7fbc87368af8',
     'mb_reconfigure': 'b4723dacb7e58c134d7731e8bfe12b29ddcbb415301c2d76b8d906c76cda9b84',
@@ -920,7 +933,7 @@ BODIES['main/hp_modbus.cpp'].update({
 })
 BODIES.setdefault('main/main.cpp', {})['boot_sequence'] = 'dbd24138cee2c0dc6738ac7aebcbad527be3c7d64f1d75b30817e178da997eb5'
 BODIES['main/hp_poll.cpp']['poll_task'] = 'd8c615499b948e0b026f4309ec51eaab153c999f9f6acdcdfb202ae88512cb8b'
-BODIES['main/hp_modbus.cpp']['mb_admit_worker'] = '809fe76ffb1cfd84bfb5cdd0923d08be61d1436d4d7188a39ad5581d4370fd98'
+BODIES['main/hp_modbus.cpp']['mb_admit_worker'] = '59ca8a364dc6238ce38e267ca3cdd789a8821dc38a6750881b4ce637d1ad5ed9'
 BODIES['main/http_status.cpp']['append_status_json'] = '615ecd282bf18504e6733efd5ffc0b6aba8a6b968fa1d38310cdc7e7fd579a5c'
 BODIES['main/hp_modbus.cpp']['mb_init'] = '84e35716eed5b32d90311bc4e6884ee8d9639fd13b66779f70dad617e338fa52'
 CALLERS.update({
@@ -1108,7 +1121,7 @@ PATHS.update({'modbus_cycle_report_format': ['modbus',
 BODIES['main/history.cpp'].update({'ring_at': '03544a7025ca518babbd49d0f2076be1700a34184330a18890b1edf8fc881857'})
 BODIES['main/http_status.cpp'].update({'take_values_snapshot': 'be496f40388479986bdffe2ddfa5f9ecd3f0e20abc206768b9bdfdc527a34864',
  'http_send_values_json': 'd673cda9948cb8087fa9d411ced7b7fcf7656e9ae847826123056d55c7359835',
- 'h_history': 'a25a154c27686e82e9a6bec230be0cf28422a6f4b5ff0f1f8346989c31cefe73'})
+ 'h_history': '192439fac4eba4f047c6428fed439f98a7178074359ff0e642cf1e91fe548a76'})
 BODIES['main/hp_modbus.cpp'].update({'mb_values_snapshot': '338b541f9a5ad9fdca1e730a321be0b29b0a60fcbf768f84d669749526a3bf2d',
  'report_cycle_result': 'da48cf9fba0e89e6793c8e6391b3fc67470503b98a2560c073b06df1f4d86138'})
 CALLERS.update({'history_modbus_generation': {'main/history.cpp:<definition>': 1,
@@ -1280,7 +1293,7 @@ CALLERS.update({'failure_message': {'main/hp_modbus.cpp:<definition>': 1, 'main/
  'report_connect_error': {'main/hp_modbus.cpp:<definition>': 1, 'main/hp_modbus.cpp:mb_ensure_connected': 1},
  'status_error': {'main/hp_modbus.cpp:<definition>': 1,
                   'main/hp_modbus.cpp:report_connect_error': 1,
-                  'main/hp_modbus.cpp:mb_ensure_connected': 2,
+                  'main/hp_modbus.cpp:mb_ensure_connected': 3,
                   'main/hp_modbus.cpp:report_cycle_result': 1},
  'clear_status_error_locked': {'main/hp_modbus.cpp:<definition>': 1,
                                'main/hp_modbus.cpp:status_recovered': 1,

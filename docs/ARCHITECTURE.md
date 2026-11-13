@@ -202,7 +202,9 @@ port. That entry point verifies thread-local ownership without a second allocati
 semaphore if ownership was never established. The worker retries a failed admission on its normal
 poll cadence.
 Worker creation waits for core boot and releases its own quiescence claim separately from the
-running task. OTA and Weather defer that allocation while they own the network heap.
+running task. OTA and Weather defer that allocation while they own the network heap. Creation and
+the first sweep check contiguous and total memory against the recovery reserve. A socket acquires
+both transport timeouts before it connects. The worker retains the descriptor until cleanup succeeds.
 
 ## History and diagnosis persistence
 
@@ -240,8 +242,9 @@ The Modbus journal binds each data record to the exact resolved IPv4 and a 128-b
 of the configured host, port and unit ID. The scan indexes the newest compatible peer for that
 configured target. A valid ordinary data reply can confirm the peer while its session is current.
 Binding takes the flash and history locks without waiting. Contention defers binding to a later
-poll. If the confirmed IPv4 differs from the indexed candidate, its series starts without restored
-samples in that boot.
+poll. A new TCP peer immediately withholds the previous series from the history endpoint. If the
+confirmed IPv4 differs from the indexed candidate, its series starts without restored samples in
+that boot.
 
 Warm RAM has no room for the full Modbus binding. Modbus rings start empty after reboot, and
 compatible independent RAM histories can still restore. Older CRC-scoped Modbus journal records
@@ -506,8 +509,9 @@ acknowledges; X10A, HomeHub and Syslog stand aside before allocation-rich work. 
 request gets a bounded unwind window; OTA wins future admission. A 1.1-second lead lets an existing
 publisher cycle finish. `/values` snapshots may run through that lead; Weather then raises its TLS
 phase, drains admitted snapshots for at most five seconds (else `http_busy`) and only then takes its
-admission sample. Stale quiesce flags have a bounded ten-minute cap, longer than valid OTA
-transfer and host observation budgets. MQTT restarts after stable headroom with exponential backoff
+admission sample. The ten-minute quiesce budget exceeds valid OTA transfer and host observation
+budgets. HomeHub keeps its network work paused while OTA owns the TLS admission flag, including
+after that budget. MQTT restarts after stable headroom with exponential backoff
 on client-start failure. No model-sized HTTP/MQTT buffer remains allocated for the boot.
 
 OTA TLS requires four stable internal-heap samples of 56 KiB free and a 24 KiB largest block.

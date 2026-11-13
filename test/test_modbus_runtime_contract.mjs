@@ -52,7 +52,7 @@ try {
   const binary = compile(sourcePath, "production");
   const baseline = execute(binary, [], 20000);
   assert.equal(baseline.status, 0, `production runtime cases\n${baseline.stdout}${baseline.stderr}`);
-  const baselineCount = 40;
+  const baselineCount = 43;
   assert.match(baseline.stdout, new RegExp(`PASS total=${baselineCount}\\b`));
   console.log(baseline.stdout.trim());
 
@@ -92,13 +92,28 @@ try {
     },
     {
       name: "worker-ignores-http-heap-reserve", scenario: "lifecycle",
-      before: "heap_largest_internal_block() < stack_bytes + HEAP_RECOVERY_BYTES ||",
+      before: "heap_largest_internal_block() < startup_reserve ||",
       after: "false ||",
     },
     {
       name: "worker-ignores-total-heap-reserve", scenario: "lifecycle",
-      before: "free_bytes < stack_bytes + worker_setup_reserve + HEAP_RECOVERY_BYTES",
-      after: "(static_cast<void>(free_bytes), static_cast<void>(worker_setup_reserve), false)",
+      before: "free_bytes < startup_reserve",
+      after: "(static_cast<void>(free_bytes), false)",
+    },
+    {
+      name: "worker-skips-first-sweep-heap-check", scenario: "first_sweep_heap_pressure",
+      before: /heap_largest_internal_block\(\) >= first_sweep_reserve &&\s*heap_caps_get_free_size\(MALLOC_CAP_8BIT \| MALLOC_CAP_INTERNAL\) >=\s*first_sweep_reserve/,
+      after: "(static_cast<void>(first_sweep_reserve), true)",
+    },
+    {
+      name: "admit-socket-without-timeouts", scenario: "socket_setup_and_retirement",
+      before: /setsockopt\(sock, SOL_SOCKET, SO_RCVTIMEO, &rt, sizeof\(rt\)\) != 0 \|\|\s*setsockopt\(sock, SOL_SOCKET, SO_SNDTIMEO, &rt, sizeof\(rt\)\) != 0/,
+      after: "(void)rt, false",
+    },
+    {
+      name: "discard-socket-on-failed-close", scenario: "socket_setup_and_retirement",
+      before: "if (s_sock >= 0 && close(s_sock) != 0 && errno != EBADF) return false;",
+      after: "if (s_sock >= 0) (void)close(s_sock);",
     },
     {
       name: "worker-ignores-watchdog-add-failure", scenario: "worker_admission_pressure",
@@ -156,6 +171,11 @@ try {
       name: "history-resolved-peer", scenario: "probe_resolved_peer_reconnect",
       before: /s_req_peer_ipv4\s*= ntohl\(addr\.sin_addr\.s_addr\);/,
       after: "s_req_peer_ipv4 = ((void)addr.sin_addr.s_addr, 0u);",
+    },
+    {
+      name: "history-buckets-from-poll-end", scenario: "poll_history_reply_boundary",
+      before: "first_history_bucket * bucket_us);",
+      after: "now_bucket * bucket_us);",
     },
     {
       name: "history-tcp-handshake-only", scenario: "probe_resolved_peer_reconnect",

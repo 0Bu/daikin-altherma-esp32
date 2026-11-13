@@ -2396,8 +2396,9 @@ static esp_err_t h_history(httpd_req_t* req) {
     // working request and quietly attach the wrong sensor's history to whatever asked.
     size_t t = 0;
     if (def_) { while (t < logic::TREND_COUNT && &logic::TRENDS[t] != def_) t++; }
-    const int mb_t = modbus ? logic::homehub_history_index(id) : -1;
-    const bool    native_modbus    = modbus && mb_active_profile() == ModbusProfile::Altherma4;
+    const int      mb_t             = modbus ? logic::homehub_history_index(id) : -1;
+    const uint32_t modbus_peer      = modbus ? history_modbus_candidate() : 0;
+    const bool     native_modbus    = modbus && mb_active_profile() == ModbusProfile::Altherma4;
     const int env_t = env3_source ? env3_history_index(id) : -1;
     bool          env3_configured  = false;
     uint32_t      room_identity    = 0;
@@ -2523,7 +2524,8 @@ static esp_err_t h_history(httpd_req_t* req) {
         httpd_resp_set_status(req, "503 Service Unavailable");
         return http_send_json(req, "{\"ok\":false,\"error\":\"history unavailable\"}");
     }
-    if (history_snapshot_epoch != history_epoch()) {
+    if (history_snapshot_epoch != history_epoch() ||
+        (modbus && modbus_peer != history_modbus_candidate())) {
         httpd_resp_set_status(req, "503 Service Unavailable");
         return http_send_json(req, "{\"ok\":false,\"error\":\"history changed; retry\"}");
     }

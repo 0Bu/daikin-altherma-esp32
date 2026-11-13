@@ -151,10 +151,11 @@ static int64_t  s_cache_commit_ms =
 // Task handle + the connect backoff. s_task is read/written under s_mtx so a /set_hp that lands
 // while the old task is retiring cannot race it into starting two tasks. Discovery is never part of
 // this loop; normal connect failures reuse the X10A sweep's host-tested policy.
-static TaskHandle_t  s_task          = nullptr;
-static bool          s_task_retiring = false; // guarded by s_mtx
-static int64_t       s_task_retry_us = 0;     // guarded by s_mtx
-static DetectBackoff s_backoff;
+static TaskHandle_t     s_task                 = nullptr;
+static bool             s_task_retiring        = false; // written by worker under s_mtx
+static int64_t          s_task_retry_us        = 0;     // guarded by s_mtx
+static constexpr size_t MB_FIRST_SWEEP_RESERVE = 3072;
+static DetectBackoff    s_backoff;
 // The HTTP task never mutates s_backoff: it bumps the target generation and sends an atomic
 // one-shot; the poll task alone consumes that request and resets its own backoff. This mirrors
 // hp_poll.cpp and removes the former plain-int data race. The generation also invalidates a
@@ -322,6 +323,7 @@ static bool status_socket_open(std::string host, int port, int unit, uint32_t pe
     s_status.profile       = prof;
     s_status.profile_basis = s_probe_tracker.profile_basis;
     if (++s_link_generation == 0) ++s_link_generation; // zero stays the "no session" sentinel
+    history_modbus_candidate(ntohl(peer_ipv4));
     return true;
 }
 
@@ -470,21 +472,37 @@ void mb_autodiscover_initial() {
             "modbus: initial search completed without a HomeHub — future search is manual\n");
 }
 
-// Non-blocking connect with a select() timeout (the tcp_port_probe idiom from http_config.cpp),
-// then return to blocking with a per-read SO_RCVTIMEO for mb_read's recv loop. Returns the socket
-// or -1; `out_err` preserves the error from the call that ACTUALLY failed (close() may change
-// errno).
+static bool close_sock() {
+    s_have_req = false;
+    // lwIP can fail before deleting the socket. Keep ownership until close succeeds.
+    if (s_sock >= 0 && close(s_sock) != 0 && errno != EBADF) return false;
+    s_sock = -1;
+    return true;
+}
+
+// Non-blocking connect with a select() timeout, then return to blocking with bounded
+// sends and reads. Keep a failed setup's descriptor owned if lwIP cannot close it yet.
 static int connect_socket(const sockaddr_in& addr, int timeout_ms, int& out_err) {
-    out_err  = 0;
-    int sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    out_err        = 0;
+    const int sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (sock < 0) {
         out_err = errno;
+        return -1;
+    }
+    s_sock = sock;
+    // Install both timeouts before connecting. A connected socket's FIN allocation
+    // retry uses the send timeout in lwIP. An unopened socket needs no FIN.
+    const timeval rt{MB_READ_TIMEOUT_MS / 1000, (MB_READ_TIMEOUT_MS % 1000) * 1000};
+    if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &rt, sizeof(rt)) != 0 ||
+        setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &rt, sizeof(rt)) != 0) {
+        out_err = errno;
+        close_sock();
         return -1;
     }
     const int flags = fcntl(sock, F_GETFL, 0);
     if (flags < 0 || fcntl(sock, F_SETFL, flags | O_NONBLOCK) < 0) {
         out_err = errno;
-        close(sock);
+        close_sock();
         return -1;
     }
     int r = connect(sock, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr));
@@ -518,19 +536,14 @@ static int connect_socket(const sockaddr_in& addr, int timeout_ms, int& out_err)
         r       = -1;
     }
     if (r != 0) {
-        close(sock);
+        close_sock();
         return -1;
     }
     if (fcntl(sock, F_SETFL, flags) < 0) { // back to blocking
         out_err = errno;
-        close(sock);
+        close_sock();
         return -1;
     }
-    // Per-CALL recv timeout. recv_adu additionally bounds the WHOLE reply with MB_READ_TIMEOUT_MS —
-    // this alone would not, since a peer trickling a byte per call keeps every call successful.
-    timeval rt{MB_READ_TIMEOUT_MS / 1000, (MB_READ_TIMEOUT_MS % 1000) * 1000};
-    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &rt, sizeof(rt));
-    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &rt, sizeof(rt));
     return sock;
 }
 
@@ -567,19 +580,6 @@ static const char* connect_error_code(int err) {
     status_error(connect_error_code(err), message, err, 0, true, generation);
 }
 
-static void close_sock() {
-    if (s_sock >= 0) {
-        close(s_sock);
-        s_sock = -1;
-    }
-    s_have_req = false;
-}
-
-static void mb_disconnect() {
-    close_sock();
-    status_target(std::string(), 0, 0, false);
-}
-
 static bool mb_ensure_connected(const std::string& host, int port, int unit_id,
                                 uint32_t expected_target_generation, uint32_t history_generation) {
     if (s_target_generation.load(std::memory_order_acquire) != expected_target_generation)
@@ -590,13 +590,17 @@ static bool mb_ensure_connected(const std::string& host, int port, int unit_id,
                      expected_target_generation);
         return false;
     }
-    // Reuse a healthy socket for the same target — a read failure will have close_sock()'d it, so
-    // s_sock >= 0 here means the last cycle's link is still good.
+    // Reuse only a healthy socket for the same target. A failed close leaves ownership
+    // with this task but clears the request binding.
     if (s_sock >= 0 && s_have_req && host == s_req_host && port == s_req_port &&
         unit_id == s_unit && s_req_target_generation == expected_target_generation &&
         s_target_generation.load(std::memory_order_acquire) == expected_target_generation)
         return true;
-    close_sock();
+    if (!close_sock()) {
+        status_error("close_pending", "waiting for HomeHub socket cleanup", errno, 0, true,
+                     expected_target_generation);
+        return false;
+    }
     // Announce the target before the blocking resolve, so /status shows what the device is
     // attempting rather than going silent for seconds.
     if (!status_clear_error(expected_target_generation) ||
@@ -621,10 +625,9 @@ static bool mb_ensure_connected(const std::string& host, int port, int unit_id,
         return false;
     }
     if (s_target_generation.load(std::memory_order_acquire) != expected_target_generation) {
-        close(sock);
+        close_sock();
         return false;
     }
-    s_sock     = sock;
     s_req_host = resolved;
     s_req_port = port;
     s_unit     = unit_id;
@@ -927,6 +930,11 @@ constexpr auto MB_PLAN_ALTHERMA4 = mb_plan_make_from<def::ALTHERMA4_REG_COUNT>(d
 static_assert(MB_PLAN_ALTHERMA4.ok, "Altherma 4 register table does not yield a usable read plan");
 static_assert(MB_PLAN_ALTHERMA4.count == 15,
               "Altherma 4 request budget changed — re-check the documented native map");
+static_assert((1 + logic::mb_plan_max_requests(MB_PLAN_ALTHERMA4.batch, MB_PLAN_ALTHERMA4.count,
+                                               true)) *
+                      MB_REQUEST_BUDGET_MS <
+                  logic::HISTORY_DT_S * 1000,
+              "A full sweep including a profile probe must fit inside one history interval");
 static_assert(def::homehub_find(31)->space == MbFunc::ReadInput &&
                   def::homehub_find(31)->kind == def::HomeHubValueKind::Binary &&
                   def::altherma4_find(31)->space == MbFunc::ReadInput &&
@@ -1047,6 +1055,8 @@ static void mb_poll_once() {
     const bool full = logic::mb_cycle_is_full(s_cycle_tick);
 
     std::vector<CachedValue> fresh;
+    uint32_t                 first_history_bucket = 0;
+    size_t                   history_split        = 0;
     if (full) fresh.reserve(def::ALTHERMA4_REG_COUNT);
     MbFailure first_failure;
     // One capture in take_row instead of nine independent references. Keeping these small facts
@@ -1148,6 +1158,9 @@ static void mb_poll_once() {
         cv.held = false; // no held-over concept on this link
         char buf[24];
         if (def::homehub_format(r, raw, buf, sizeof(buf))) cv.value = buf;
+        const uint32_t bucket = logic::history_bucket(observed_ms * 1000);
+        if (fresh.empty()) first_history_bucket = bucket;
+        if (bucket == first_history_bucket) history_split = fresh.size() + 1;
         fresh.push_back(std::move(cv));
     };
 
@@ -1284,6 +1297,7 @@ static void mb_poll_once() {
                                 // profile-sensitive enums/labels or quiet activity after learning
                                 // this target is native.
                                 fresh.clear();
+                                history_split = 0;
                                 for (bool& split : s_batch_split) split = false;
                             }
                             diag_printf(
@@ -1339,7 +1353,7 @@ static void mb_poll_once() {
         // The task owns the socket and generation, so this answer cannot change before the cache
         // commit below. Resolve it while `fresh` is still available to the history recorder.
         current_session =
-            s_sock >= 0 && s_link_generation == cycle_generation &&
+            s_have_req && s_link_generation == cycle_generation &&
             s_target_generation.load(std::memory_order_acquire) == cycle_target_generation;
         bind_history = current_session && s_req_history_generation == 0 && gates.received_data &&
                        s_last_reply_ms >= 0;
@@ -1363,7 +1377,7 @@ static void mb_poll_once() {
         {
             Lock lk(s_mtx);
             final_current_session =
-                s_sock >= 0 && s_link_generation == cycle_generation &&
+                s_have_req && s_link_generation == cycle_generation &&
                 s_target_generation.load(std::memory_order_acquire) == cycle_target_generation;
             // Not `committed`: nothing was. A LIVE session keeps the count of the last full cycle,
             // because the rows it counts are still the rows /values will serve. A session that
@@ -1404,9 +1418,21 @@ static void mb_poll_once() {
     // old target rather than presenting A as the first sample of B.
     if (s_target_generation.load(std::memory_order_acquire) != cycle_target_generation)
         current_session = false;
-    if (s_req_history_generation)
-        history_record_modbus(current_session ? fresh.data() : nullptr,
-                              current_session ? fresh.size() : 0, s_req_history_generation);
+    if (s_req_history_generation) {
+        constexpr int64_t bucket_us  = static_cast<int64_t>(logic::HISTORY_DT_S) * 1000000;
+        const uint32_t    now_bucket = logic::history_bucket(esp_timer_get_time());
+        // A bounded full sweep takes less than one raster period. If the task was delayed beyond
+        // that bound, keep the live cache and book a history gap instead of guessing reply slots.
+        if (current_session && history_split && now_bucket - first_history_bucket <= 1) {
+            history_record_modbus(fresh.data(), history_split, s_req_history_generation,
+                                  first_history_bucket * bucket_us);
+            if (now_bucket != first_history_bucket)
+                history_record_modbus(fresh.data() + history_split, fresh.size() - history_split,
+                                      s_req_history_generation, now_bucket * bucket_us);
+        } else {
+            history_record_modbus(nullptr, 0, s_req_history_generation);
+        }
+    }
 
     const int     committed       = static_cast<int>(fresh.size());
     const int64_t cache_commit_ms = esp_timer_get_time() / 1000;
@@ -1449,7 +1475,7 @@ static void mb_poll_once() {
         // framing/transport failure closes it in mb_read and keeps connected=false; Modbus
         // exception replies leave the socket open and commit the rows that really answered.
         final_current_session =
-            s_sock >= 0 && s_link_generation == cycle_generation &&
+            s_have_req && s_link_generation == cycle_generation &&
             s_target_generation.load(std::memory_order_acquire) == cycle_target_generation;
         s_status.values    = final_current_session ? committed : 0;
         s_status.connected = final_current_session;
@@ -1489,12 +1515,13 @@ static void mb_record_poll_gap() {
 static bool mb_retire_if_disabled(bool ready) {
     {
         Lock lk(s_mtx);
-        if (s_target_enabled.load(std::memory_order_acquire)) return false;
+        if (!s_task_retiring && s_target_enabled.load(std::memory_order_acquire)) return false;
         s_task_retiring  = true;
         s_status.enabled = false;
     }
-    diag_printf("modbus: HomeHub disabled by empty configuration — closing connection\n");
-    mb_disconnect();
+    if (!close_sock()) return false;
+    diag_printf("modbus: HomeHub disabled by empty configuration — connection closed\n");
+    status_target(std::string(), 0, 0, false);
     {
         Lock lk(s_cache_mtx);
         s_cache.clear();
@@ -1531,11 +1558,6 @@ static bool mb_admit_worker(bool& lwip_ready, TaskFailureEpisode& failures) noex
         if (failures.first_failure()) diag_printf("modbus: worker initialization pending\n");
         return false;
     }
-    s_mb_task_running.store(true, std::memory_order_release);
-    {
-        Lock lk(s_mtx);
-        s_status.enabled = true;
-    }
     failures.succeeded();
     return true;
 }
@@ -1559,7 +1581,7 @@ static void mb_task(void*) {
         // /set_hp withdraws the old observations before this worker closes its socket.
         // TCP close can allocate a FIN segment. Use the same network claim as a poll and
         // wait out a TLS owner without copying Config or reactivating the old source.
-        if (!s_target_enabled.load(std::memory_order_acquire)) {
+        if (s_task_retiring || !s_target_enabled.load(std::memory_order_acquire)) {
             bool wait_for_tls = false;
             {
                 const MbNetworkActivity network_activity;
@@ -1571,7 +1593,7 @@ static void mb_task(void*) {
                     break;
                 }
             }
-            if (wait_for_tls) {
+            if (wait_for_tls || s_task_retiring) {
                 vTaskDelay(pdMS_TO_TICKS(POLL_INTERVAL_S * 1000));
                 continue;
             }
@@ -1595,8 +1617,9 @@ static void mb_task(void*) {
         s_ota_quiesced.store(false, std::memory_order_release);
         if (ota_quiesce_exhausted(ota_quiesce, ota_active)) {
             if (!ota_quiesce_cap_logged) {
-                diag_printf("modbus: OTA hold-off budget spent after %u cycles, polling again\n",
-                            static_cast<unsigned>(OTA_QUIESCE_MAX_CYCLES));
+                diag_printf(
+                    "modbus: OTA hold-off budget spent after %u cycles, awaiting TLS release\n",
+                    static_cast<unsigned>(OTA_QUIESCE_MAX_CYCLES));
                 ota_quiesce_cap_logged = true;
             }
         } else {
@@ -1616,7 +1639,24 @@ static void mb_task(void*) {
                 // claimed network activity. Exit scope immediately so MbNetworkActivity
                 // destructor restores s_network_quiesced to true before the inter-cycle delay.
             } else if (ready || (ready = mb_admit_worker(lwip_ready, failures))) {
-                if (!was_ready) esp_task_wdt_reset();
+                if (!was_ready) {
+                    esp_task_wdt_reset();
+                    // The stack, semaphore and watchdog have already claimed their memory.
+                    // Recheck before the first socket and cache allocations.
+                    constexpr size_t first_sweep_reserve =
+                        HEAP_RECOVERY_BYTES + MB_FIRST_SWEEP_RESERVE;
+                    const bool enough_heap =
+                        heap_largest_internal_block() >= first_sweep_reserve &&
+                        heap_caps_get_free_size(MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL) >=
+                            first_sweep_reserve;
+                    Lock lk(s_mtx);
+                    if (!enough_heap) {
+                        s_task_retry_us = esp_timer_get_time() + 5 * 1000000;
+                        break;
+                    }
+                    s_mb_task_running.store(true, std::memory_order_release);
+                    s_status.enabled = true;
+                }
                 try {
                     if (s_reconfigure_reset.exchange(false, std::memory_order_acq_rel)) {
                         s_backoff.silent = 0;
@@ -1675,13 +1715,13 @@ static void mb_task_start_if_enabled() noexcept {
         const MbTaskCreation creation;
         // Announce before rereading the TLS owners. Their quiescence checks observe this claim.
         if (ota_download_active() || weather_fetch_active()) return;
-        // Reserve the stack's contiguous block plus recovery headroom. The other allocations
-        // include the TCB, lwIP semaphore, watchdog entry and the first value vector.
+        // All startup allocations may come from the same extent. Leave recovery headroom
+        // after the stack, TCB, semaphore, watchdog entry and initial sweep.
         constexpr size_t stack_bytes          = 6144;
         constexpr size_t worker_setup_reserve = sizeof(StaticTask_t) + 4096;
+        constexpr size_t startup_reserve = stack_bytes + worker_setup_reserve + HEAP_RECOVERY_BYTES;
         const size_t free_bytes = heap_caps_get_free_size(MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL);
-        if (heap_largest_internal_block() < stack_bytes + HEAP_RECOVERY_BYTES ||
-            free_bytes < stack_bytes + worker_setup_reserve + HEAP_RECOVERY_BYTES) {
+        if (heap_largest_internal_block() < startup_reserve || free_bytes < startup_reserve) {
             s_task_retry_us = now_us + 5 * 1000000;
             return;
         }

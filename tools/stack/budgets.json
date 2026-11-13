@@ -13097,6 +13097,48 @@
       "base_bytes": 1536,
       "max_bytes": 5120
     },
+    "modbus_worker_first_sweep_heap_walk": {
+      "symbols": [
+        "runtime_task_entry",
+        "modbus_task",
+        "modbus_create_heap_sample",
+        "modbus_create_heap_largest",
+        "modbus_create_heap_info",
+        "modbus_create_pool_info",
+        "modbus_create_pool_walk",
+        "modbus_create_pool_visit"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "modbus_worker_first_sweep_heap_lock": {
+      "symbols": [
+        "runtime_task_entry",
+        "modbus_task",
+        "modbus_create_heap_sample",
+        "modbus_create_heap_largest",
+        "modbus_create_heap_info",
+        "modbus_create_pool_info",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "modbus_worker_first_sweep_heap_free": {
+      "symbols": [
+        "runtime_task_entry",
+        "modbus_task",
+        "modbus_create_heap_free",
+        "modbus_create_pool_free"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
     "modbus_worker_start_lwip_allocate": {
       "symbols": [
         "modbus_task",
@@ -14750,6 +14792,9 @@
         "modbus_history_peer_sha_start",
         "modbus_history_peer_sha_finish",
         "modbus_history_peer_sha_cleanup",
+        "modbus_worker_first_sweep_heap_walk",
+        "modbus_worker_first_sweep_heap_lock",
+        "modbus_worker_first_sweep_heap_free",
         "modbus_worker_start_lwip_allocate",
         "modbus_worker_start_lwip_queue",
         "modbus_worker_start_lwip_retain",

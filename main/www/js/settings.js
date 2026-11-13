@@ -956,21 +956,25 @@ function otaCacheStorage() {
   catch { return null; }                       // Safari private mode / storage policy
 }
 function otaCacheClear() {
+  S.otaFrame = null;
   try { otaCacheStorage()?.removeItem(OTA_RENDER_CACHE_KEY); } catch { /* best effort */ }
   if (S.otaCached) {
     S.otaCached = false;
     invalidateLiveReadings("status");
   }
 }
-function otaCacheStore() {
-  if (!S.status || typeof S.status.version !== "string") return false;
+function otaCacheStore(persist = true) {
+  if (!S.status || typeof S.status.version !== "string" || S.transportUnavailable) return false;
   const payload = {
     saved_at_ms: Date.now(),
     status: S.status,
     values: Array.isArray(S._values) ? S._values : [],
     modbus: Array.isArray(S._modbus) ? S._modbus : [],
+    modbus_compressor_running: S.modbusCompressorRunning,
     modbus_history_lease: S.modbusHistoryLease,
   };
+  S.otaFrame = payload;
+  if (!persist) return true;
   try {
     const storage = otaCacheStorage();
     if (!storage) return false;
@@ -995,14 +999,12 @@ function otaWriterChanged(s, before = S.otaWriter) {
     (before?.app_elf_sha256 && s?.app_elf_sha256 && s.app_elf_sha256 !== before.app_elf_sha256);
 }
 
-async function otaCacheRestore(otaStatus) {
+async function otaCacheRestore(otaStatus, afterRefusal = false) {
   // The normal poll may beat the compact resume request on a healthy board. Never replace a frame
   // freshly obtained in this page with an older persisted one merely because the two requests raced.
-  if (S.status) return false;
-  const storage = otaCacheStorage();
-  if (!storage) return false;
-  let cached;
-  try { cached = JSON.parse(storage.getItem(OTA_RENDER_CACHE_KEY) || "null"); }
+  if (S.status && !afterRefusal && !S.transportUnavailable) return false;
+  let cached = S.otaFrame;
+  try { cached ||= JSON.parse(otaCacheStorage()?.getItem(OTA_RENDER_CACHE_KEY) || "null"); }
   catch { otaCacheClear(); return false; }
 
   const age = Date.now() - cached?.saved_at_ms;
@@ -1011,6 +1013,7 @@ async function otaCacheRestore(otaStatus) {
     typeof cached.status.version === "string" && cached.status.version === otaStatus?.current &&
     otaSameImage(otaStatus, cached.status) && Array.isArray(cached.values) && Array.isArray(cached.modbus);
   if (!valid) { otaCacheClear(); return false; }
+  if (S.status && !otaSameImage(S.status, cached.status)) return false;
   if (!acceptImageLease(cached.status)) return false;
 
   // The last /values and /status can refer to different Modbus lifetimes. An explicit null
@@ -1026,7 +1029,7 @@ async function otaCacheRestore(otaStatus) {
   syncHistSources();
   S._values = cached.values;
   S._modbus = cached.modbus;
-  S.modbusCompressorRunning = null;
+  S.modbusCompressorRunning = cached.modbus_compressor_running ?? null;
   S.otaCached = true;
   S.transportUnavailable = null;
   S.transportBusy = false;
@@ -1283,6 +1286,7 @@ async function checkFirmwareUpdate(returnFocus = document.activeElement, returnS
 function otaWatch(expectedGeneration = null) {
   return otaPoll(["checking", "updating"], 300, (st) => {
     if (st.state === "updating") {
+      S.otaWriter = st;
       otaInline(t("ota.pct", st.progress ?? 0), { ring: true, pct: st.progress ?? 0 });
       if (!S.status) renderOtaDashboardStatus();
     }

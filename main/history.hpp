@@ -116,7 +116,8 @@ size_t history_room_snapshot(logic::HistorySample* out, size_t max, uint32_t exp
 // disinfection timelines named in logic/homehub_map.hpp are buffered; other states and setpoints do
 // not acquire a chart. An empty cycle advances the source's time raster with gaps, so an outage does not
 // make the last Modbus point slide to "now".
-void history_record_modbus(const CachedValue* v, size_t n, uint32_t identity_generation);
+void history_record_modbus(const CachedValue* v, size_t n, uint32_t identity_generation,
+                           int64_t observed_us = -1);
 
 // Snapshot the current HomeHub history identity before starting a poll. A configuration change bumps
 // it from the HTTP task; a cycle that began against the previous target is then refused at commit.
@@ -162,6 +163,9 @@ void                       history_modbus_reset(const logic::HistoryModbusTarget
 // this socket, or zero if the scope changed, history was forgotten or either owner is busy.
 uint32_t history_modbus_bind_peer(const logic::HistoryModbusTarget& configured, uint32_t ipv4,
                                   uint32_t expected_generation) noexcept;
+// Publish the latest connected address before its first poll. Keep it across transport outages.
+void     history_modbus_candidate(uint32_t ipv4) noexcept;
+uint32_t history_modbus_candidate() noexcept;
 
 // Start a new identity for the external circulation witness without discarding the independent
 // X10A/HomeHub histories. The new identity (logic::history_circulation_identity: the mapping,

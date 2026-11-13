@@ -571,6 +571,7 @@ logic::HistoryModbusTarget configure_homehub(const char* hostname = "synthetic-h
     return history_modbus_target(cfg.mb_host, cfg.mb_port, cfg.mb_unit_id);
 }
 uint32_t bind_homehub(const logic::HistoryModbusTarget& configured, uint32_t ipv4) {
+    history_modbus_candidate(ipv4);
     const auto generation = history_modbus_bind_peer(configured, ipv4, history_modbus_generation());
     require(generation != 0, "confirmed_peer_binds");
     return generation;
@@ -642,6 +643,7 @@ void modbus_live_peer_change() {
     const auto b_scope     = peer_b;
     sdk::measure_busy_lock = true;
     s_flash_mtx->owned     = true;
+    history_modbus_candidate(peer_b);
     require(history_modbus_bind_peer(configured_fp, b_scope, a_generation) == 0 &&
                 sdk::blocking_busy_takes == 0 && s_flash_mtx->owned,
             "peer_bind_does_not_wait_for_flash_owner");
@@ -652,6 +654,8 @@ void modbus_live_peer_change() {
             "peer_bind_does_not_wait_for_history_owner");
     s_mtx->owned           = false;
     sdk::measure_busy_lock = false;
+    require(flow_snapshot().empty(), "candidate_hides_old_flow_while_journal_binding_is_busy");
+    history_modbus_candidate(peer_a);
     require(history_modbus_bind_peer(configured_fp, 0, a_generation) == 0 &&
                 history_modbus_generation() == a_generation && history_epoch() == first_epoch &&
                 has_sample(flow_snapshot(), 123) && journal_sdk::flash == first_bytes,
@@ -1001,6 +1005,26 @@ void seed_modbus_delayed(const char* transport_path) {
     require(static_cast<bool>(transport), "save_delayed_modbus_nor");
 }
 
+void modbus_reply_bucket() {
+    const auto configured = configure_homehub();
+    boot();
+    const auto  generation = bind_homehub(configured, peer_a);
+    CachedValue heater;
+    heater.off               = 32;
+    heater.modbus_definition = def::homehub_definition_id(*def::homehub_find(32));
+    heater.value             = "1";
+    sdk::now_us              = history_bucket_us + 200000;
+    history_record_modbus(&heater, 1, generation, history_bucket_us - 200000);
+    heater.value = "0";
+    history_record_modbus(&heater, 1, generation, sdk::now_us);
+    sdk::now_us += history_bucket_us;
+    history_record_modbus(nullptr, 0, generation);
+    HistorySample samples[2];
+    const auto    index = logic::homehub_history_index("bsh_state");
+    require(history_modbus_snapshot(index, samples, 2) == 2 && samples[0] == 10 && samples[1] == 0,
+            "heater_reply_is_recorded_in_its_own_bucket");
+}
+
 void restore_modbus_delayed(const char* transport_path) {
     const auto configured = configure_homehub();
     load_synthetic_nor(transport_path);
@@ -1216,6 +1240,8 @@ int main(int argc, char** argv) {
             sequence_rejections();
         else if (name == "modbus_live_peer_change")
             modbus_live_peer_change();
+        else if (name == "modbus_reply_bucket")
+            modbus_reply_bucket();
         else if (name == "modbus_peer_forget")
             modbus_peer_forget();
         else if (name == "modbus_missing_target_digest")
