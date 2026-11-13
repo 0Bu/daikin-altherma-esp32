@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: 809d0372d0eaf6202ed5fd69352f1dfc5c462c057f1071a7680d9390a9831d24 -->
+<!-- user-docs-contract: de3bfc233c3e8f3d9ddd7ba74ddf1f6ad11ec2be08a38245b5c4af4bb82a5ff0 -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default. Enable **Plant diagnostics** under **Settings → Firmware** to start an evidence
@@ -105,14 +105,23 @@ software restart preserves the remaining settling time, but unseen charging can 
 purpose and the average length for heating and hot water when available. A change of purpose or
 missing readings can leave a run unclear.
 
-The assessment says whether completed heating runs were short or long enough on average in the
-recorded window. It can wait for more readings or more heating runs. If the system cannot identify
-heating runs, the card can show starts without a heating assessment. A start count needs compressor
-readings.
+There is no fixed normal number of starts. With enough data, the check considers completed heating
+runs averaging at least 10 minutes long enough. The average uses heating runs only.
+The card can still show starts while it waits for more readings or more identifiable heating runs.
 
-In the 24-hour chart, the number above each bar shows the starts counted for that hour. The colored
-segments show heating, hot water and other runtime. Hatching marks known gaps in the readings.
-Select an hour for its time and durations. The `≥` sign means at least that many starts.
+Each step in the rolling 24-hour chart marks a start with a recorded time. The chart counts these
+starts individually. The diagnosis total uses hourly counts and can include starts with no known
+time. When the total includes saved hourly counts from before a restart, the explanation shows
+how many came from those hours.
+
+In the rolling chart, each number counts the starts with a recorded time in that hour. A blank
+marks an hour with unavailable data and no timed start. Colors mark the modes seen in the hour.
+Hatching marks time without trace data, including times when the latest trace is unavailable.
+Select a block to show its current range on the axis. The `≥` sign means at least that many starts.
+
+After a restart, the rolling chart fills with new readings. Until a timed trace is available,
+the hourly fallback can show saved counts and runtime. Tap a bar to see its available time and
+durations below the chart. Zero-start bars have no number above them.
 
 **Evidence and limits:** [Compressor cycling](DIAGNOSTIC_EVIDENCE.md#diagnosis-cycling)
 

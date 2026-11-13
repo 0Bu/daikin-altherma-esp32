@@ -259,6 +259,8 @@ source text is hidden without changing control evaluation.
 Unset strings remain empty, unset coordinates null; keys/types and configured-source evidence stay
 present. The dashboard uses ordinary unredacted status. `main/logic/redact.hpp` owns the ordered
 machine contract; the redaction audit compares it with this table and the serializer.
+Redacted status also omits the optional `health.checks[].timeline` for compressor cycling,
+which contains individual event timing.
 
 <!-- redacted-status-fields:start -->
 | Field | Why it goes |

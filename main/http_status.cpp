@@ -58,6 +58,7 @@
 #include "esp_log.h"
 #include "esp_app_desc.h"
 #include "esp_http_server.h"
+#include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "esp_system.h"
 #include "esp_random.h"
@@ -69,9 +70,11 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <memory>
+#include <new>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -106,8 +109,9 @@ struct ValuesTlsReader {
     ValuesTlsReader()                                  = default;
     ValuesTlsReader(const ValuesTlsReader&)            = delete;
     ValuesTlsReader& operator=(const ValuesTlsReader&) = delete;
-    ~ValuesTlsReader() {
-        if (admitted) weather_values_reader_leave();
+    ~ValuesTlsReader() { release(); }
+    void release() {
+        if (std::exchange(admitted, false)) weather_values_reader_leave();
     }
     bool admitted = false;
 };
@@ -1314,7 +1318,20 @@ static void append_status_json(JsonOut& j, bool redact) {
     // of a chain is live in this frame at once.
     {
         logic::CheckupCyclingHours hrs{};
-        const logic::CheckupReport hr = checkup_report(&hrs);
+        // The optional chart must not need exception storage under heap pressure.
+        ValuesTlsReader trace_reader;
+        trace_reader.admitted = !redact && c.diagnostics_enabled && weather_values_reader_enter();
+        using Trace           = logic::CheckupCyclingTrace;
+        void* trace_storage =
+            trace_reader.admitted ? heap_caps_malloc(sizeof(Trace), MALLOC_CAP_8BIT) : nullptr;
+        std::unique_ptr<Trace, decltype(&std::free)> trace(
+            trace_storage ? new (trace_storage) Trace : nullptr, std::free);
+        const logic::CheckupReport hr            = checkup_report(&hrs, trace.get());
+        const auto                 release_trace = [&] {
+            trace.reset();
+            trace_reader.release();
+        };
+        if (!trace || !trace->unix_s) release_trace();
         j += "\"health\":{\"covered_s\":";
         append_json_uint(j, hr.covered_s);
         j += ",\"span_s\":";
@@ -1527,6 +1544,21 @@ static void append_status_json(JsonOut& j, bool redact) {
                     }
                 }
                 j += "]";
+                if (trace && trace->unix_s) {
+                    j += ",\"timeline\":{\"unix_s\":";
+                    append_json_uint(j, trace->unix_s);
+                    j += ",\"window_end_s\":";
+                    append_json_uint(j, trace->window_end_s);
+                    j += ",\"observed_end_s\":";
+                    append_json_uint(j, trace->end_s);
+                    j += ",\"records\":[";
+                    for (size_t i = 0; i < trace->count; ++i) {
+                        if (i) j += ",";
+                        append_json_uint(j, trace->at(i));
+                    }
+                    j += "]}";
+                }
+                release_trace();
                 j += ",\"stop_context\":";
                 append_stop_context_json(
                     j, stop_context_payload_fields(checkup_stop_context_report()));

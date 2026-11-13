@@ -1,4 +1,4 @@
-// translation-source: 00f8393aee827b21e658965c9ff792c99c563d60de18775bb092ec7c42167e1f
+// translation-source: 34200897e3bb460a7f6fcd68bd6ff940649f8810c9b3709dc7616000e01aee90
 I18N.de = localeValues([
   /* sys.nodata */ "Keine Daten",
   /* sys.unreachable */ "Nicht erreichbar",
@@ -222,7 +222,6 @@ I18N.de = localeValues([
   /* check.cycling.completed */ "Abgeschlossene Läufe",
   /* check.cycling.unclear */ "Nicht eindeutig",
   /* check.cycling.unclear_hint */ "Läufe können die Betriebsart wechseln oder nur teilweise erfasst sein.",
-  /* check.cycling.assessment */ "Einschätzung",
   /* check.cycling.short */ "Die Heizläufe sind im Schnitt kurz.",
   /* check.cycling.normal */ "Die Heizläufe dauern im Schnitt lang genug.",
   /* check.cycling.few */ "Noch zu wenige Heizläufe.",
@@ -231,6 +230,8 @@ I18N.de = localeValues([
   /* check.cycling.unavailable */ "Keine Verdichterdaten.",
   /* check.cycling.stale */ "Aktuell fehlen Messwerte.",
   /* check.cycling.history_empty */ "Noch kein Verlauf.",
+  /* check.cycling.timed_starts */ (s) => `Mit Uhrzeit: ${s}`,
+  /* check.cycling.saved_starts */ (s) => `Davon stammen ${s} aus Stundenwerten vor dem Neustart. Für diese Starts fehlen die Uhrzeiten.`,
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · Mittel ${mean} °C`,
   /* check.min */ (m) => `${m} min`,
@@ -956,7 +957,7 @@ I18N.de = localeValues([
 MODEL_DESCRIPTION_I18N.de = modelDescriptionValues([
   /* health_fault */ ["Aktuelle und gespeicherte Störungsmeldungen der Wärmepumpe.","Keine gemeldete Störung. Eine Meldung belegt keine Ursache; ihr Verschwinden belegt keine Behebung."],
   /* health_dhw_loss */ ["Stärkste erfasste Abkühlung pro Stunde am Speichersensor R5T.","Interner Hinweis ≥0,8 K/h ohne Pumpen-/Zapfmerkmale. R5T misst einen Punkt, keine Energie oder den ganzen Speicher. Fehlende Merkmale belegen keine Zapffreiheit; null Nettoabkühlung schließt Wärmeverlust nicht aus. Zirkulationsüberschneidung belegt keine Ursache."],
-  /* health_cycling */ ["Zeigt beobachtete Starts und abgeschlossene Läufe.", "Für die Einschätzung zählt die mittlere Dauer der Heizläufe."],
+  /* health_cycling */ ["Bei Messlücken können Starts fehlen.", "Eine feste normale Startzahl gibt es nicht. Bei genügend Messdaten gelten Heizläufe hier als unauffällig, wenn die abgeschlossenen Läufe im Schnitt mindestens 10 Minuten dauern."],
   /* health_defrost */ ["Abtaustarts und ihr Anteil an der Verdichterlaufzeit bei lesbarem Verdichter- und Abtaustatus.","Interne Regel: ≥3 zugeordnete Vorgänge und >15 %. Luftfeuchte und Temperatur der gesamten Wärmetauscherfläche fehlen; kein Daikin-Störungsgrenzwert."],
   /* health_pressure */ ["Niedrigster erfasster Wasserdruck.","Interne Regel: ≤1,0 bar ergibt HINWEIS, 60 durchgehend beobachtete Sekunden WARNUNG. Diese verbreitete Grenze ist nicht für jedes Modell bestätigt; maßgeblich ist dessen genaue Anleitung."],
   /* health_flow */ ["Niedrigster Durchfluss nach 60 durchgehend beobachteten Sekunden mit laufender interner Pumpe.","Kein allgemeiner Normalwert. Kein Nenndurchfluss oder Teillastnachweis. Anleitungsgrenzen benötigen dasselbe Modell, dieselbe Betriebsart und Bedingungen; der Wert allein belegt keine Unterversorgung."],

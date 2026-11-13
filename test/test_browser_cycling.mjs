@@ -185,7 +185,7 @@ export async function assertCyclingChart(page, server, context) {
     const copy = await page.evaluate(`[
       [t("mode.heat"), t("check.cycling.runs", 3) + " · " + t("check.cycling.mean", "8 min")],
       [t("mode.dhw"), t("check.cycling.runs", 2) + " · " + t("check.cycling.mean", "15 min")],
-      t("check.cycling.assessment") + " · " + t("check.cycling.waiting"),
+      t("check.cycling.waiting") + " " + MODEL_DESCRIPTIONS.health_cycling.what,
       [t("mode.heat"), t("mode.dhw"), t("check.hour.other")]
     ]`);
     assert.deepEqual(rendered.purposeRows, copy.slice(0, 2),
@@ -358,7 +358,8 @@ export async function assertCyclingChart(page, server, context) {
     status.health.checks[0].starts = null;
     edgeOnlyHour.starts = 0;
     await poll("2026-10-25T02:22:01Z");
-    assert.equal((await totals())[1], null, context + ": an empty report leaves the start total absent");
+    const [compactStatus, detailStatus] = await totals();
+    assert.equal(detailStatus, compactStatus, context + ": an empty report leads with status instead of a count");
 
     // The diagnosis remains expanded when the user switches cards. Even an ancestor that is
     // reattached before the poll finishes can briefly interrupt the visible plot's painting.
@@ -417,6 +418,137 @@ export async function assertCyclingChart(page, server, context) {
     assert.notEqual(await label(1), priorLabel, context + ": the resumed chart reads the newest elapsed time");
     assert.equal(await page.evaluate("window.__cyclingSibling.removals"), 0,
       context + ": updating the visible cycling chart leaves the sibling plot mounted");
+    const timeline = {
+      unix_s: Date.parse("2026-11-13T15:11:00Z") / 1000, window_end_s: 86400, observed_end_s: 86400,
+      records: [[0, 1], [60, 5], [28800, 0], [36000, 1], [79260, 5], [79620, 3], [79620, 5],
+        [79980, 1], [80280, 4], [80280, 5], [80600, 0], [80700, 1], [81000, 3], [81000, 5], [84660, 1]]
+        .map(([at, kind]) => at * 8 + kind),
+    };
+    Object.assign(status.health.checks[0], {
+      starts: 27, hours: [{ starts: 22, restored: true }, { starts: 5 }],
+    });
+    status.health.checks[0].timeline = timeline;
+    await poll("2026-11-13T15:11:00Z");
+    await page.waitFor(`document.querySelector(".checkup-cycling-timeline") !== null`);
+    assert.equal((await totals())[1], "≥27 starts");
+    assert.match(await page.evaluate(`document.querySelector(".checkup-cycling-assessment").textContent`),
+      /Of these, 22 starts come from hourly totals saved before the restart/);
+    const timed = await page.evaluate(`(() => {
+      const chart = document.querySelector(".checkup-cycling-timeline");
+      return {
+        line: chart.querySelector("path").getAttribute("d"),
+        modes: [...chart.querySelectorAll('[data-bucket="22"] i:not(.gap)')].map(node => node.className),
+        counts: [22, 23].map(i => chart.querySelector('[data-bucket="' + i + '"] b').textContent),
+        gap: !!chart.querySelector('[data-bucket="8"] i.gap'),
+        mixedGapHeight: chart.querySelector('[data-bucket="22"] .mixed-gap i.gap').getBoundingClientRect().height,
+        span: chart.querySelector('[data-bucket="22"]').dataset.span,
+      };
+    })()`);
+    const jumps = [...timed.line.matchAll(/H ([\d.]+) V/g)].map(match => Number(match[1]));
+    assert.deepEqual(jumps, [1.67, 2201.67, 2211.67, 2230, 2250], context + ": jumps use individual event seconds");
+    assert.deepEqual(timed.modes.sort(), ["dhw", "space"]);
+    assert.deepEqual(timed.counts, ["4", "0"]);
+    assert.equal(timed.gap, true);
+    assert.ok(timed.mixedGapHeight > 0 && timed.mixedGapHeight < 10, context + ": hatching has its own visible band");
+    const layout = () => page.evaluate(`(() => {
+      const chart = document.querySelector(".checkup-cycling-timeline");
+      const graph = chart.querySelector(".checkup-chart-graph");
+      const axis = chart.querySelector(".checkup-chart-axis");
+      const box = node => {
+        const r = node.getBoundingClientRect();
+        return [r.x, r.y, r.width, r.height];
+      };
+      const style = node => {
+        const s = getComputedStyle(node);
+        return [s.color, s.fontSize, s.fontWeight, s.lineHeight];
+      };
+      const overlay = getComputedStyle(graph, "::before");
+      return { graph: box(graph), axis: box(axis),
+        legend: box(chart.querySelector(".checkup-chart-legend")),
+        tick: style(axis.querySelector(".checkup-chart-ticks span")),
+        span: style(axis.querySelector(".checkup-chart-span")),
+        overlay: [overlay.content, overlay.left, overlay.width, overlay.height] };
+    })()`);
+    const before = await layout();
+    await tap(page, hour(22));
+    const readAxis = () => page.evaluate(`(() => {
+      const chart = document.querySelector(".checkup-cycling-timeline");
+      const axis = chart.querySelector(".checkup-chart-axis");
+      return { label: axis.querySelector(".checkup-chart-span").textContent,
+        normalHidden: getComputedStyle(axis.querySelector(".checkup-chart-ticks")).visibility === "hidden",
+        extra: !!chart.querySelector(".vhist-range") };
+    })()`);
+    assert.deepEqual(await readAxis(), { label: timed.span, normalHidden: true, extra: false });
+    const selectedLayout = await layout();
+    assert.deepEqual(selectedLayout.tick, selectedLayout.span, context + ": selected label uses axis typography");
+    assert.equal(selectedLayout.overlay[0], '""', context + ": the hour has a dedicated highlight");
+    assert.ok(Math.abs(parseFloat(selectedLayout.overlay[1]) - selectedLayout.graph[2] * 22 / 24) < 1);
+    assert.ok(Math.abs(parseFloat(selectedLayout.overlay[2]) - selectedLayout.graph[2] / 24) < 1);
+    assert.ok(Math.abs(parseFloat(selectedLayout.overlay[3]) - selectedLayout.graph[3]) < 1,
+      context + ": the highlight spans both plot and hours");
+    assert.deepEqual([selectedLayout.graph[3], selectedLayout.axis[3], selectedLayout.legend[1] - selectedLayout.graph[1]],
+      [before.graph[3], before.axis[3], before.legend[1] - before.graph[1]],
+      context + ": selection does not shift chart layout");
+    await page.waitFor("!S.clickHold");
+    Object.assign(timeline, { window_end_s: 86520, observed_end_s: 86520, unix_s: timeline.unix_s + 120 });
+    timeline.records.push(85800 * 8 + 5);
+    await poll("2026-11-13T15:13:00Z");
+    const rolled = await page.evaluate(`(() => {
+      const button = document.querySelector(".checkup-cycling-timeline [aria-pressed='true']");
+      return { span: button.dataset.span, count: button.querySelector("b").textContent };
+    })()`);
+    assert.notEqual(rolled.span, timed.span, context + ": selected hour advances with the rolling axis");
+    assert.deepEqual(await readAxis(), { label: rolled.span, normalHidden: true, extra: false });
+    assert.equal(rolled.count, "3", context + ": a start moving into the previous hour leaves the selected count");
+    const refreshed = await page.evaluate(`document.querySelector(".checkup-cycling-timeline path").getAttribute("d")`);
+    assert.deepEqual([...refreshed.matchAll(/H ([\d.]+) V/g)].map(match => Number(match[1])),
+      [2198.33, 2208.33, 2226.67, 2246.67, 2380], context + ": the selected chart shows new starts and drops expired starts");
+    await evaluate(page, selector => document.querySelector(selector).focus(), hour(22));
+    delete status.health.checks[0].timeline;
+    status.health.checks[0].hours = [];
+    status.uptime_s = 86580;
+    await poll("2026-11-13T15:14:00Z");
+    assert.deepEqual(await pinned(), [22], context + ": empty hourly evidence and temporary omission keep the rolling selection");
+    assert.equal(await focusBucket(), 22, context + ": temporary omission keeps keyboard focus");
+    assert.equal(await page.evaluate(`!!document.querySelector('.checkup-cycling-timeline [data-bucket="23"] i.gap')`), true,
+      context + ": time after the last retained sample is marked as missing");
+    Object.assign(timeline, { window_end_s: 86580, observed_end_s: 86580, unix_s: timeline.unix_s + 60 });
+    status.health.checks[0].timeline = timeline;
+    await poll("2026-11-13T15:14:01Z");
+    const resumed = await page.evaluate(`document.querySelector('.checkup-cycling-timeline [aria-pressed="true"]').dataset.span`);
+    assert.equal((await readAxis()).label, resumed, context + ": a resumed trace keeps the selected readout");
+    if (mouse) {
+      const start = await point(page, hour(22)), end = await point(page, hour(21));
+      const preview = await page.evaluate(`document.querySelector('.checkup-cycling-timeline [data-bucket="21"]').dataset.span`);
+      await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", ...start });
+      await page.send("Input.dispatchMouseEvent", { type: "mousePressed", button: "left", buttons: 1, clickCount: 1, ...start });
+      try {
+        await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", button: "left", buttons: 1, ...end });
+        assert.equal((await readAxis()).label, preview, context + ": dragging previews the rolling hour");
+        await poll("2026-11-13T15:14:02Z");
+        assert.equal((await readAxis()).label, preview, context + ": polling retains the drag preview");
+      } finally {
+        await page.send("Input.dispatchMouseEvent", { type: "mouseReleased", button: "left", buttons: 0, clickCount: 1, ...end });
+      }
+      assert.equal((await readAxis()).label, resumed, context + ": release restores the selected hour");
+    }
+    await tap(page, hour(22));
+    assert.deepEqual(await readAxis(), { label: "", normalHidden: false, extra: false });
+    const dismissed = await layout();
+    assert.equal(dismissed.axis[3], before.axis[3], context + ": deselection keeps axis height");
+    await page.waitFor("!S.clickHold");
+    const zero = { ...timeline, records: timeline.records.filter(record => (record & 7) !== 5) };
+    status.health.checks[0].timeline = zero;
+    await poll("2026-11-13T15:14:03Z");
+    assert.equal(await page.evaluate(`document.querySelector(".checkup-chart-total").textContent`),
+      "Timed: 0 starts", context + ": a partial trace qualifies zero as a timed result");
+    if (mouse) {
+      zero.unix_s = Date.parse("2026-10-25T01:30:00Z") / 1000;
+      await poll("2026-10-25T01:30:00Z");
+      await tap(page, hour(23));
+      assert.match((await readAxis()).label, /02:30 GMT\+2–02:30 GMT\+1/,
+        context + ": the repeated wall-clock hour has distinct offsets");
+    }
     assert.ok(updates >= 3, context + ": verify continuity across repeated production polling");
     console.log("cycling chart checked: " + context + "; " + updates + " live status polls");
   } finally {

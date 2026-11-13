@@ -1,4 +1,4 @@
-// translation-source: 00f8393aee827b21e658965c9ff792c99c563d60de18775bb092ec7c42167e1f
+// translation-source: 34200897e3bb460a7f6fcd68bd6ff940649f8810c9b3709dc7616000e01aee90
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -222,7 +222,6 @@ I18N.fi = localeValues([
   /* check.cycling.completed */ "Päättyneet käyntijaksot",
   /* check.cycling.unclear */ "Tarkoitus epäselvä",
   /* check.cycling.unclear_hint */ "Käyntijakson aikana toimintatila voi vaihtua tai mittauksia voi puuttua.",
-  /* check.cycling.assessment */ "Arvio",
   /* check.cycling.short */ "Lämmitysjaksot ovat keskimäärin lyhyitä.",
   /* check.cycling.normal */ "Lämmitysjaksot kestävät keskimäärin riittävän pitkään.",
   /* check.cycling.few */ "Lämmitysjaksoja on vielä liian vähän.",
@@ -231,6 +230,8 @@ I18N.fi = localeValues([
   /* check.cycling.unavailable */ "Kompressorista ei ole tietoa.",
   /* check.cycling.stale */ "Mittauksia puuttuu tällä hetkellä.",
   /* check.cycling.history_empty */ "Ei vielä historiaa.",
+  /* check.cycling.timed_starts */ (s) => `Aikaleimalla: ${s}`,
+  /* check.cycling.saved_starts */ (s) => `Näistä ${s} on tallennettu tuntitietoihin ennen uudelleenkäynnistystä. Niiden kellonajat puuttuvat.`,
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min ${min} °C · keskiarvo ${mean} °C`,
   /* check.min */ (m) => `${m} min`,
@@ -1083,7 +1084,7 @@ DESCRIPTION_I18N.fi = descriptionValues([
 MODEL_DESCRIPTION_I18N.fi = modelDescriptionValues([
   ["Laitteen ilmoitukset", "eivät todista syytä tai ratkaisua."], // health_fault
   ["R5T: kerrostuneen varaajan piste, ei energia.", "Projektin vihje ≥0,8 K/h ilman pumppu-/vedenottomerkkejä. Vedenotto mahdollista ilman merkkejä; 0 K/h ei sulje pois lämpöhäviötä. Kierto ei osoita syytä."], // health_dhw_loss
-  ["Näyttää havaitut käynnistykset ja päättyneet käyntijaksot.", "Arvio perustuu lämmitysjaksojen keskimääräiseen kestoon."], // health_cycling
+  ["Mittauskatkojen vuoksi osa käynnistyksistä voi jäädä laskematta.", "Käynnistysten määrälle ei ole kiinteää normaaliarvoa. Kun tietoja on riittävästi, tämä tarkistus pitää päättyneiden lämmitysjaksojen vähintään 10 minuutin keskiarvoa riittävänä."], // health_cycling
   ["Sulatus", "≥3 yhdistettyä, >15% kompressorin käyntiajasta, kun sekä kompressorin että sulatuksen tila on luettavissa. Sisäinen sääntö, ei Daikin; kosteus ja koko kennon lämpötila puuttuvat."], // health_defrost
   ["Paine", "yhteinen sisäinen raja ≤1,0 bar; 60 s jatkuvaa havaintoa antaa varoituksen. Ei yleispätevä; mallin ohje pätee."], // health_pressure
   ["Virtaus 60 s pumpun jälkeen", "Raja vaatii saman mallin/tilan/olosuhteet; ei nimellisarvo tai pienen virtauksen todiste."], // health_flow

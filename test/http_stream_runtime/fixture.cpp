@@ -4,6 +4,7 @@
 #include <new>
 #include <stdexcept>
 #include "state_dwell.hpp"
+#include "esp_heap_caps.h"
 #ifdef HTTP_STREAM_LEGACY_DWELL
 namespace daik {
 logic::DwellReading dwell_reading(uint8_t, uint8_t, int);
@@ -26,6 +27,12 @@ void  operator delete(void* memory) noexcept { std::free(memory); }
 void  operator delete[](void* memory) noexcept { std::free(memory); }
 void  operator delete(void* memory, size_t) noexcept { std::free(memory); }
 void  operator delete[](void* memory, size_t) noexcept { std::free(memory); }
+
+static bool fail_trace_snapshot = false;
+
+void* heap_caps_malloc(size_t size, unsigned) {
+    return fail_trace_snapshot ? nullptr : std::malloc(size);
+}
 
 #include HTTP_COMMON_SOURCE
 #include HTTP_STATUS_SOURCE
@@ -54,6 +61,7 @@ inline unsigned                       scan_calls             = 0;
 inline size_t                         scan_first_allocations = 0;
 inline daik::CheckupStopContextReport stop_report{};
 inline daik::logic::CheckupCyclingHours cycling_hours{};
+inline daik::logic::CheckupCyclingTrace cycling_trace{};
 inline unsigned                       stop_report_calls = 0;
 inline std::string                    log;
 [[noreturn]] void                     fail(const char* message) {
@@ -405,8 +413,10 @@ void time_now(int64_t& seconds, int32_t& ms) {
     ms      = 0;
 }
 const char*                checkup_persist_state() { return "no_record"; }
-logic::CheckupReport       checkup_report(logic::CheckupCyclingHours* hours) {
+logic::CheckupReport       checkup_report(logic::CheckupCyclingHours* hours,
+                                          logic::CheckupCyclingTrace* trace) {
     if (hours) *hours = fixture::cycling_hours;
+    if (trace) *trace = fixture::cycling_trace;
     return {};
 }
 CheckupStopContextReport checkup_stop_context_report() {
@@ -489,6 +499,12 @@ int main(int argc, char** argv) {
         // An older restored hour has a negative bucket ID. Only parts of its observed runtime
         // are attributable to the two positively witnessed modes.
         cycling_hours.hours[0] = {2700, 1200, 600, 300, 2, Slot::Restored};
+        using Trace                = daik::logic::CheckupCyclingTrace;
+        cycling_trace.unix_s       = 2'000'000'000;
+        cycling_trace.window_end_s = 451;
+        cycling_trace.end_s        = 450;
+        cycling_trace.push(410, Trace::Heat);
+        cycling_trace.push(420, Trace::Start);
         for (const bool partial : {true, false}) {
             cycling_hours.pending_elapsed_s = partial ? 450 : 0;
             cycling_hours.hours[1] = partial ? daik::logic::CheckupCyclingHour{420, 180, 0, 60, 1}
@@ -502,6 +518,29 @@ int main(int argc, char** argv) {
                   "elapsed time must be serialized once for the open hour only");
             emit(req, partial ? "cycling-partial" : "cycling-edge");
         }
+        auto redacted = request();
+        check(invoke(redacted, "/status?redact=1", daik::h_status) == ESP_OK,
+              "redacted cycling status failed");
+        successful(redacted);
+        check(redacted.response.find("\"timeline\"") == std::string::npos,
+              "redacted status omits detailed cycling trace");
+        auto constrained    = request();
+        fail_trace_snapshot = true;
+        const auto result   = invoke(constrained, "/status", daik::h_status);
+        fail_trace_snapshot = false;
+        check(result == ESP_OK, "status must survive optional trace allocation failure");
+        successful(constrained);
+        emit(constrained, "cycling-trace-oom");
+        check(values_readers == 0, "trace allocation failure leaked a Weather reader");
+        auto weather_busy      = request();
+        weather                = true;
+        const auto busy_result = invoke(weather_busy, "/status", daik::h_status);
+        weather                = false;
+        check(busy_result == ESP_OK, "Weather must not block the hourly status");
+        successful(weather_busy);
+        check(values_readers == 0, "Weather refusal leaked a reader");
+        emit(weather_busy, "cycling-trace-weather");
+        cycling_trace                     = {};
         cycling_hours.hours[0]            = {};
         cycling_hours.hours[0].provenance = Slot::Expired;
         cycling_hours.end_unix_s[0]       = 0;

@@ -1,4 +1,4 @@
-// translation-source: 00f8393aee827b21e658965c9ff792c99c563d60de18775bb092ec7c42167e1f
+// translation-source: 34200897e3bb460a7f6fcd68bd6ff940649f8810c9b3709dc7616000e01aee90
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -222,7 +222,6 @@ I18N.nb = localeValues([
   /* check.cycling.completed */ "Fullførte kjøringer",
   /* check.cycling.unclear */ "Uklart formål",
   /* check.cycling.unclear_hint */ "En kjøring kan skifte driftsmodus eller bare være delvis registrert.",
-  /* check.cycling.assessment */ "Vurdering",
   /* check.cycling.short */ "Varmekjøringene er korte i snitt.",
   /* check.cycling.normal */ "Varmekjøringene varer lenge nok i snitt.",
   /* check.cycling.few */ "For få varmekjøringer ennå.",
@@ -231,6 +230,8 @@ I18N.nb = localeValues([
   /* check.cycling.unavailable */ "Ingen kompressordata.",
   /* check.cycling.stale */ "Målinger mangler akkurat nå.",
   /* check.cycling.history_empty */ "Ingen historikk ennå.",
+  /* check.cycling.timed_starts */ (s) => `Med tidspunkt: ${s}`,
+  /* check.cycling.saved_starts */ (s) => `Av disse kommer ${s} fra timetall før omstart. Klokkeslettene for disse startene mangler.`,
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · snitt ${mean} °C`,
   /* check.min */ (m) => `${m} min`,
@@ -1243,7 +1244,7 @@ DESCRIPTION_I18N.nb = descriptionValues([
 MODEL_DESCRIPTION_I18N.nb = modelDescriptionValues([
   ["Enhetens meldinger", "ingen årsaks- eller løsningsbevis."], // health_fault
   ["R5T: ett punkt i lagdelt tank, ikke energi.", "Prosjekthint ≥0,8 K/h uten pumpe-/tappemarkører. Tapping er mulig uten markører; 0 K/h utelukker ikke varmetap. Sirkulasjon beviser ikke årsak."], // health_dhw_loss
-  ["Viser observerte starter og fullførte kjøringer.", "Vurderingen bygger på gjennomsnittlig lengde på varmekjøringene."], // health_cycling
+  ["Ved hull i målingene kan enkelte starter mangle i tellingen.", "Det finnes ikke et fast normalt antall starter. Med nok data regner denne kontrollen fullførte varmekjøringer med et snitt på minst 10 minutter som lange nok."], // health_cycling
   ["Avriming", "≥3 parede, >15% av kompressorens driftstid der både kompressor- og avrimingsstatus er lesbar. Intern regel, ikke Daikin; fuktighet og hele varmevekslerens temperatur mangler."], // health_defrost
   ["Trykk", "felles intern regel ≤1,0 bar; 60 s kontinuerlig observert gir advarsel. Ikke universell; modellmanual gjelder."], // health_pressure
   ["Strømning etter 60 s pumpe", "Grense krever samme modell/modus/forhold; ikke nominell eller lavstrømningsbevis."], // health_flow

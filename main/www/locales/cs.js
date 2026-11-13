@@ -1,4 +1,4 @@
-// translation-source: 00f8393aee827b21e658965c9ff792c99c563d60de18775bb092ec7c42167e1f
+// translation-source: 34200897e3bb460a7f6fcd68bd6ff940649f8810c9b3709dc7616000e01aee90
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -222,7 +222,6 @@ I18N.cs = localeValues([
   /* check.cycling.completed */ "Dokončené cykly",
   /* check.cycling.unclear */ "Nejasný účel",
   /* check.cycling.unclear_hint */ "Během cyklu se může změnit režim nebo může část záznamu chybět.",
-  /* check.cycling.assessment */ "Hodnocení",
   /* check.cycling.short */ "Cykly vytápění jsou v průměru krátké.",
   /* check.cycling.normal */ "Cykly vytápění trvají v průměru dostatečně dlouho.",
   /* check.cycling.few */ "Zatím málo cyklů vytápění.",
@@ -231,6 +230,8 @@ I18N.cs = localeValues([
   /* check.cycling.unavailable */ "Chybí údaje o kompresoru.",
   /* check.cycling.stale */ "Aktuálně chybí měření.",
   /* check.cycling.history_empty */ "Zatím bez historie.",
+  /* check.cycling.timed_starts */ (s) => `S časem: ${s}`,
+  /* check.cycling.saved_starts */ (s) => `Z toho ${s} pochází z hodinových záznamů před restartem. Časy těchto startů nejsou k dispozici.`,
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · průměr ${mean} °C`,
   /* check.min */ (m) => `${m} min`,
@@ -1197,7 +1198,7 @@ DESCRIPTION_I18N.cs = descriptionValues([
 MODEL_DESCRIPTION_I18N.cs = modelDescriptionValues([
   ["Hlášení čerpadla", "neprokazují příčinu ani opravu."], // health_fault
   ["R5T: bod vrstveného zásobníku, ne energie.", "Interní práh ≥0,8 K/h bez značek čerpadla/odběru. Odběr možný i bez značek; 0 K/h nevylučuje ztráty. Cirkulace neprokazuje příčinu."], // health_dhw_loss
-  ["Zobrazuje zaznamenané starty a dokončené cykly.", "Hodnocení vychází z průměrné délky cyklů vytápění."], // health_cycling
+  ["Při výpadcích měření mohou některé starty chybět.", "Pevný běžný počet startů neexistuje. Při dostatku dat tato kontrola považuje průměrnou délku dokončených cyklů vytápění alespoň 10 minut za dostatečnou."], // health_cycling
   ["Odmrazení", "≥3 spárovaná, >15% doby chodu kompresoru při čitelném stavu kompresoru i odmrazení. Interní pravidlo, ne Daikin; chybí vlhkost a teplota celého výměníku."], // health_defrost
   ["Tlak", "společné interní pravidlo ≤1,0 bar; 60 s souvislého pozorování dává varování. Ne univerzální; platí návod modelu."], // health_pressure
   ["Průtok po 60 s čerpadla", "Mez vyžaduje stejný model/režim/podmínky; ne jmenovitý ani důkaz malého průtoku."], // health_flow

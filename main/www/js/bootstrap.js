@@ -147,6 +147,19 @@ function paintCyclingChart(chart, focus = document.activeElement) {
   }
   if (!pin) S.cyclingPin = null;
   if (!hover) S.cyclingHover = null;
+  const span = chart.querySelector(".checkup-chart-span");
+  if (span) {
+    const hour = (S.scrub === "checkup-cycling" && hover) || pin;
+    span.hidden = !hour;
+    const label = hour?.dataset.span || "";
+    if (span.textContent !== label) span.textContent = label;
+    chart.classList.toggle("has-selected-hour", !!hour);
+    if (hour) {
+      chart.style.setProperty("--checkup-hour", hour.dataset.bucket);
+      span.classList.toggle("wide", hour.hasAttribute("data-offset-change"));
+    }
+    return;
+  }
   const range = chart.querySelector(".vhist-range");
   const tip = (hover || selected || pin)?.getAttribute("aria-label") || chart.dataset.tip;
   if (range.textContent !== tip) range.textContent = tip;

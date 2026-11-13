@@ -123,6 +123,7 @@ bool                         s_boot_handoff_valid = false;
 // Exact expiry for reconstructed completed slots, including selected live intervals.
 // Current-boot completions carry the same deadline: a stopped producer must still lose old hours.
 logic::CheckupJournalSlotTimes s_slot_times;
+logic::CheckupCyclingTrace     s_cycling_trace;
 uint32_t                       s_cycling_hours_epoch   = 0;
 int32_t                        s_cycling_newest_bucket = 0;
 // Capability of the CURRENT converter-adjudicated profile. hp_poll derives it from the profile rows,
@@ -287,6 +288,7 @@ void checkup_persist_seal() {
 void persist_wipe(bool keep_handoff = false) {
     P().ring.reset();
     P().dhw.reset();
+    s_cycling_trace.reset();
     for (auto& expiry : s_slot_times.expiry_us) expiry = 0;
     for (auto& end : s_slot_times.restored_end_unix_s) end = 0;
     ++s_cycling_hours_epoch;
@@ -351,7 +353,8 @@ int64_t latched_newest_locked(int64_t latest_end_unix_s) {
 void fold_checkup_locked(const logic::CheckupSample& s, int64_t now) {
     const bool     run_open  = s_state.run_open;
     const uint32_t run_start = s_state.run_start_bucket;
-    if (!logic::checkup_step(s_state, P().ring.pending, s, now, &P().ring)) return;
+    if (!logic::checkup_step(s_state, P().ring.pending, s, now, &P().ring, &s_cycling_trace))
+        return;
     logic::checkup_journal_revision_arm(s_revision, run_open, run_start);
     checkup_persist_seal();
 }
@@ -906,8 +909,8 @@ logic::CheckupCyclingEvidence checkup_cycling_evidence() {
 // The caller owns the checkup mutex and has expired the same window used by the report.
 [[gnu::noinline]] static logic::CheckupCyclingHours checkup_cycling_hours_locked(int64_t now_us) {
     auto hours = logic::checkup_cycling_hours(P().ring, s_cov.rps);
+    hours.epoch = s_cycling_hours_epoch;
     if (!hours.count) return hours;
-    hours.epoch          = s_cycling_hours_epoch;
     hours.newest_bucket  = s_cycling_newest_bucket;
     const auto&   ring   = P().ring;
     const size_t  oldest = ring.count < logic::CHECKUP_COMPLETED_BUCKETS ? 0 : ring.head;
@@ -939,11 +942,13 @@ logic::CheckupCyclingEvidence checkup_cycling_evidence() {
     return hours;
 }
 
-logic::CheckupReport checkup_report(logic::CheckupCyclingHours* hours) {
+logic::CheckupReport checkup_report(logic::CheckupCyclingHours* hours,
+                                    logic::CheckupCyclingTrace* trace) {
     if (hours) {
         hours->count = 0;
         hours->epoch = 0;
     }
+    if (trace) trace->unix_s = 0;
     if (!s_diagnostics_enabled.load(std::memory_order_acquire)) return logic::CheckupReport{};
     if (!s_mtx) return logic::CheckupReport{};
     Lock lk(s_mtx);
@@ -954,6 +959,20 @@ logic::CheckupReport checkup_report(logic::CheckupCyclingHours* hours) {
     expire_restored_locked();
     const int64_t  now_us        = esp_timer_get_time();
     if (hours) *hours = checkup_cycling_hours_locked(now_us);
+    if (trace && s_cov.rps && s_cycling_trace.count &&
+        now_us / 1000000 <= logic::CheckupCyclingTrace::max_second) {
+        int64_t unix_s = -1;
+        int32_t ms     = 0;
+        time_now(unix_s, ms);
+        const uint32_t anchor =
+            logic::checkup_cycling_end_unix_s(now_us - now_us % 1000000, now_us, unix_s, ms);
+        if (anchor) {
+            *trace              = s_cycling_trace;
+            trace->window_end_s = static_cast<uint32_t>(now_us / 1000000);
+            trace->unix_s       = anchor;
+            trace->observe_window(trace->window_end_s);
+        }
+    }
     const bool     have_source   = s_source_last_us >= 0 && now_us >= s_source_last_us;
     const int64_t  source_gap_us = have_source ? now_us - s_source_last_us : 0;
     const uint32_t source_age_s =
