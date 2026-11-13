@@ -161,7 +161,7 @@ static void boot_sequence() {
                                  // same rule: judge .noinit before a producer task exists
     daik::dwell_start();     // and the per-row state ages, judged on the same terms
     const bool normal_boot = !daik::safe_mode_active();
-    if (normal_boot) daik::mb_init(); // early saves record intent without creating the worker
+    if (normal_boot) daik::mb_init();
     daik::http_start();                  // esp_http_server on :80 (web UI + config + OTA + MCP)
     if (normal_boot) {
         daik::env3_start();              // optional outdoor climate sensor (no-op unless configured)

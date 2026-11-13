@@ -135,8 +135,7 @@ struct RefreshRequestAttempt {
 struct NetworkActivity {
     explicit NetworkActivity(uint32_t source_generation) {
         SourceAdmission expected = SourceAdmission::Idle;
-        if (!s_source_admission.compare_exchange_strong(expected, SourceAdmission::Network))
-            return;
+        if (!s_source_admission.compare_exchange_strong(expected, SourceAdmission::Network)) return;
         // A handler may advance the token just before losing the admission CAS above. In that
         // ordering it will wait for us, so release immediately without touching MQTT or the peer.
         if (s_source_generation.load(std::memory_order_acquire) != source_generation) {

@@ -371,7 +371,7 @@ static void modbus_retry_delay(TickType_t) {
 static void run_modbus_retry() {
     setup();
     sdk::ota_active = true;
-    sdk::on_delay = modbus_retry_delay;
+    sdk::on_delay   = modbus_retry_delay;
     try {
         sdk::task_fn(nullptr);
     } catch (const sdk::Stop&) {}
