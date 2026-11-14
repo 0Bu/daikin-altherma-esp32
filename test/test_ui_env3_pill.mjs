@@ -256,6 +256,18 @@ pressureRing.v = pressureValues;
 sandbox.__api.toggle("env3_humidity");
 sandbox.__api.toggle("env3_temperature");
 
+{
+  const key = "env3:env3_temperature";
+  const initial = S.hist.get(key);
+  S.hist.set(key, { ...initial, refreshFailed: true, v: [initial.v[0], null, null] });
+  sandbox.__api.render();
+  assert.match(elements.inspHist.innerHTML, /vhist-retained env-temperature[^>]*left:0\.000%/,
+    "the retained measurement is placed at its real sample before the forecast divider");
+  assert.match(elements.inspHist.innerHTML, /vhist-axis-now/);
+  assert.match(elements.inspHist.innerHTML, /vhist-line env-forecast-temperature/);
+  S.hist.set(key, initial);
+}
+
 // Transport loss retires only the live status claims. The dated historical measurements remain
 // inspectable; a values-only error does not erase independent freshly obtained ENV III status.
 S.transportUnavailable = "status";

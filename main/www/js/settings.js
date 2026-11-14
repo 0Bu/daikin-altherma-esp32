@@ -501,7 +501,12 @@ function fillBoard() {
   // later LED/button customization; the request path validates those GPIOs separately.
   $("bdPreset").value = presets.some((p) => p.id === b.preset_id) ? b.preset_id : "custom";
 }
+function boardSettingsAvailable() {
+  return !!S.status?.board && S.transportUnavailable !== "status" &&
+    !S.otaCached && !S.otaBusy && !S.otaInstalling;
+}
 function openBoard() {
+  if (!boardSettingsAvailable()) return;
   fillBoard();
   fillEnv3();
   $("bdError").hidden = true;
@@ -1016,7 +1021,8 @@ async function otaCacheRestore(otaStatus) {
 // at the exact time their context is most useful. Guard the optional DOM methods so the browser-free
 // UI tests and the pre-status recovery shell share this exact production path.
 function syncOtaSettingsLock() {
-  const locked = !!(S.otaBusy || S.otaInstalling || S.otaCached);
+  const locked = !!(!S.status || S.transportUnavailable === "status" ||
+    S.otaBusy || S.otaInstalling || S.otaCached);
   for (const id of ["connTile", "settingsCards"]) {
     const controls = $(id)?.querySelectorAll?.("button, select, input") || [];
     for (const control of controls) {

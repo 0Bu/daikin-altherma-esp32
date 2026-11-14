@@ -1066,6 +1066,7 @@ button.vhist-source:focus-visible { outline: 2px solid var(--brand); outline-off
    somewhere else would need two taps. */
 .vhist-cross.vhist-pinned { opacity: 1; background: var(--brand-strong); }
 .vhist-mark.vhist-pinned { background: var(--brand-strong); }
+.vhist-mark.vhist-retained { background: var(--card); border: 1.5px solid var(--muted); box-shadow: none; }
 .vhist-tip.vhist-pinned { border-color: var(--brand); color: var(--fg); font-weight: 600; }
 /* Proportional anchoring keeps the full bubble inside the card even at either endpoint. */
 .vhist-tip { --tip-p: 0; grid-area: 1 / 1; position: relative; z-index: 3; align-self: end;

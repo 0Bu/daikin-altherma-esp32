@@ -214,6 +214,28 @@ const modbus = { at: 1, gen: 1, dt: 300, unit: "°C", t0: null, b0: 100,
 S.hist.set("dhw_tank", x10a);
 S.hist.set("modbus:dhw_tank", modbus);
 
+{
+  S.hist.set("dhw_tank", { ...x10a, at: 0, v: [] });
+  S.hist.set("modbus:dhw_tank", { ...modbus, v: [] });
+  assert.match(h.histHtml("dhw_tank", "", "Tank"), /Noch keine Messwerte aufgezeichnet/);
+  historyFetchError = true;
+  await h.ensureHist("dhw_tank");
+  assert.match(h.histHtml("dhw_tank", "", "Tank"), /Verlauf nicht verfügbar/,
+    "a successful empty peer cannot conceal a failed refresh of an earlier empty response");
+  S.hist.set("modbus:dhw_tank", modbus);
+  assert.match(h.histHtml("dhw_tank", "", "Tank"), /X10A · Verlauf nicht verfügbar/,
+    "a failed source is identified while its independent peer plots");
+  S.hist.set("dhw_tank", { ...x10a, at: 0, v: [452, null, null] });
+  await h.ensureHist("dhw_tank");
+  h.histSeriesToggle("dhw_tank", "modbus");
+  const retained = h.histHtml("dhw_tank", "", "Tank");
+  assert.match(retained, /vhist-retained[^>]*aria-label="X10A · hist\.retained"[^>]*left:0\.000%/,
+    "the last received marker points at the measurement before the trailing gaps");
+  historyFetchError = false;
+  S.histHidden.delete("dhw_tank");
+  S.hist.set("dhw_tank", x10a);
+}
+
 assert.equal(h.hasHist("dhw_tank"), true);
 assert.equal(h.hasModbusHist("dhw_tank"), true);
 assert.equal(h.histCacheKey("dhw_tank", "modbus"), "modbus:dhw_tank");
@@ -234,6 +256,22 @@ S.status.hp = previousHp;
 assert.equal(view.series.length, 2);
 assert.deepEqual(Array.from(view.series[0].v), [452, null, 454]);
 assert.deepEqual(Array.from(view.series[1].v), [453, 455, 456]);
+
+for (const dated of [false, true]) {
+  // A long-lived tab can keep a compatible instrument's last response for several days.
+  const day = 288;
+  const a = dated ? { b0: null, t0: 1768720000 } : { b0: 100, t0: null };
+  const far = dated ? { b0: null, t0: a.t0 + 1000 * 300 } : { b0: a.b0 + 1000, t0: null };
+  S.hist.set("dhw_tank", { ...x10a, ...a, refreshFailed: true });
+  S.hist.set("modbus:dhw_tank", { ...modbus, ...far, v: Array(day).fill(470) });
+  const bounded = h.historyView("dhw_tank");
+  assert.equal(bounded.v.length, day);
+  assert.equal(dated ? bounded.t0 : bounded.b0, dated ? far.t0 : far.b0);
+  assert.ok(bounded.series[0].v.every(v => v === null), "out-of-window data cannot be shifted into the newest day");
+  assert.equal(bounded.series[1].v[0], 470);
+}
+S.hist.set("dhw_tank", x10a);
+S.hist.set("modbus:dhw_tank", modbus);
 
 // Modbus is initially deactivated; only X10A is shown, so label is omitted and only value is rendered
 assert.equal(h.histVisibleSeries(view).length, 1);
@@ -661,6 +699,17 @@ assert.match(liveBoostHtml, /Boost aktiv · 10 min/,
   "one live observation must not be counted as an invented five minutes of Boost runtime");
 assert.equal(h.scrubText(liveBoostView, 7), "jetzt · Empfehlung ein",
   "the state shown at the right edge and its tooltip must agree");
+{
+  const key = "modbus:smart_grid_mode";
+  const old = S.hist.get(key);
+  S.hist.set(key, { ...old, refreshFailed: true });
+  const retained = h.histHtml("smart_grid_mode", "", "Smart-Grid-Anforderung", "modbus");
+  assert.match(retained, /vhist-retained[^>]*left:81\.250%/,
+    "the retained marker sits inside the last recorded bucket instead of the separate live cap");
+  assert.match(retained, /<span>jetzt<\/span><\/div><\/div>$/,
+    "the separately measured live observation retains its current-time label");
+  S.hist.set(key, old);
+}
 delete S._modbus;
 
 // The external circulation witness is a three-outcome history: confirmed running, confirmed

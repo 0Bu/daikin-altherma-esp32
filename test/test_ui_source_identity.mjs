@@ -20,7 +20,11 @@ const context = {
 };
 vm.createContext(context);
 const settings = read("settings");
+const schematic = read("schematic");
+const inspectorHistory = schematic.slice(schematic.indexOf("function renderInspectHist("),
+  schematic.indexOf("function renderInspect("));
 vm.runInContext(read("app_state") + "\n" + read("history") + "\n" +
+  inspectorHistory + "\n" +
   settings.slice(settings.indexOf("const OTA_RENDER_CACHE_KEY"), settings.indexOf("function otaCacheStore()")) + "\n" +
   settings.slice(settings.indexOf("function fillRefTemp()"),
     settings.indexOf("// ── DHW circulation-pump")) + `
@@ -29,7 +33,7 @@ vm.runInContext(read("app_state") + "\n" + read("history") + "\n" +
   this.ui = { S, refreshStatus, fillRefTemp, refTempFormPayload, formatRefSource, parseRefSource,
     ensureHist, ensureHistPair, ensureDerived, historyView, histPinIndex, histCacheKey, syncHistSources,
     yieldHistoryToPoll, pumpHistoryQueue, histPinToggle, histSeriesToggle,
-    histAxisEnd, scrubTime, histHtml };
+    histAxisEnd, scrubTime, histHtml, renderInspectHist };
 `, context);
 const ui = context.ui;
 const plain = (value) => JSON.parse(JSON.stringify(value));
@@ -346,6 +350,27 @@ assert.equal(ui.S.hist.get(ui.histCacheKey("dhw_tank", "modbus")).v[0], 445);
 
 context.fetch = (url) => new Promise((resolve, reject) => pending.push({ url, resolve, reject }));
 
+await reset();
+context.MB_PAIRS = [];
+context.replaceHistoryHtml = () => {};
+context.inspFieldText = () => "ΔT";
+ui.S.insp = "dt";
+context._pollBusy = true;
+assert.equal(ui.renderInspectHist({ trend: "dt", aria: "ΔT" }, null, "refresh"), undefined);
+assert.equal(ui.S.histBusy.size, 0, "a live poll blocks inspector background refresh");
+const openedDuringPoll = ui.renderInspectHist({ trend: "dt", aria: "ΔT" }, null, "open");
+assert.ok(openedDuringPoll, "the explicit inspector open is accepted during a poll");
+assert.equal(pending.length, 0, "the live poll still owns the transport");
+context._pollBusy = false;
+ui.pumpHistoryQueue();
+assert.match(pending[0].url, /leaving_water/);
+reply(pending.shift(), 450);
+await new Promise(resolve => setImmediate(resolve));
+reply(pending.shift(), 400);
+await openedDuringPoll;
+assert.equal(ui.S.hist.get("dt").v[0], 50);
+ui.S.insp = null;
+
 // Default fallback can change the plotted instrument while both undated ring generations stay
 // unchanged. The retired X10A pin must not silently select Modbus or reappear after failback.
 await reset();
@@ -388,7 +413,7 @@ reply(pending.shift(), 390);
 await failedDelta;
 assert.equal(ui.S.hist.get("dt").gen, oldDelta.gen);
 assert.equal(ui.histPinIndex("dt", ui.historyView("dt")), 0);
-assert.equal(ui.histAxisEnd(ui.historyView("dt")), "hist.retained");
+assert.equal(ui.histAxisEnd(ui.historyView("dt")), "", "a cached plot does not claim the edge is live");
 assert.equal(ui.scrubTime(ui.historyView("dt"), 0), "hist.retained");
 for (const id of ["leaving_water", "dt"]) ui.S.hist.get(id).at = 0;
 const nextDelta = ui.ensureDerived("dt");

@@ -430,17 +430,11 @@ green/yellow/red state colours as WiFi, MQTT, Syslog and NTP:
   refreshing, so a "difference" against it would be a statement about two *instants* wearing the
   shape of a statement about two *instruments*.
   ΔT and heat output survive, because both sides of each come from the one source and nothing is
-  mixed across boundaries. **The COP does not.** It looks like the same arithmetic and is not: the
-  gateway measures the *whole unit's* electrical input, backup and immersion heater included, while
-  the heat figure is across the plate exchanger alone — precisely the boundary mismatch
-  [`cop_scope.hpp`](../main/logic/cop_scope.hpp) refuses, and one that collapses exactly when a
-  heater fires, reading as a failing heat pump while nothing is wrong. The gateway now carries the
-  compressor and tank-heater states, but not the BUH stage state and all source-boundary evidence the
-  quotient needs, so the answer remains: publish nothing, and name the reason
-  (`feature_gate.hpp` — disable, never degrade).
-  The electrical input itself *is* better here, since the HomeHub measures what X10A only estimates
-  from CT clamps at an assumed 230 V — read from input register **51** by its offset, never by its
-  unit, because the map carries three `kW` rows and the other two are the power *limit* setpoints.
+  mixed across boundaries. HomeHub input register **51** reports heat-pump power consumption in
+  `kW`. The public register guide leaves its measurement point and heater inclusion unspecified.
+  The dashboard shows the reported input by register offset, since the other `kW` rows are power
+  limit setpoints. The COP gate requires evidence that this input and the plate heat exchanger's
+  output cover the same equipment and heater states.
 * **No HomeHub** — nothing Modbus appears anywhere: no row, no group, no comparison, no banner.
 
 Registers with no X10A counterpart get their own group at the very end of the value list, after

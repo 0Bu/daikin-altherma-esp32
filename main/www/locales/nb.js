@@ -1,4 +1,4 @@
-// translation-source: 63a21ee82689120ffd8fc53b1408385986ee8bc6afb789d41f77a9b4004139bf
+// translation-source: e48a108e482c83165efc2a0fb7f44e45ea2f5ff28879f55570a2a130a9aee1ef
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -357,8 +357,8 @@ I18N.nb = localeValues([
   /* hist.recorded */ (h) => `Registrert · ${h} t`,
   /* hist.now */ "nå",
   /* hist.ago */ (h) => `for ${h} t siden`,
-  /* hist.retained */ "Siste lagrede måling",
-  /* hist.before_retained */ (h) => `${h} t før siste lagrede måling`,
+  /* hist.retained */ "Siste mottatte måling",
+  /* hist.before_retained */ (h) => `${h} t før siste mottatte måling`,
   /* hist.loading */ "Laster historikk…",
   /* hist.none */ "Ingen målinger er registrert ennå.",
   /* hist.err */ "Historikken er utilgjengelig.",

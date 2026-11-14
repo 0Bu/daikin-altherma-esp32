@@ -390,6 +390,18 @@ assert.equal(document.getElementById("wfSSID").value, "ExampleNet",
   "an untouched reload popup must hydrate from the first status response");
 await document.getElementById("wfCancel").onclick();
 
+ui.S.status = null;
+fetchState.calls.length = 0;
+loadRoute(`#settings/${ui.POPUP_ROUTES.boardModal}`);
+assert.equal(document.getElementById("boardModal").hidden, true, "the hardware editor awaits device status");
+await document.getElementById("boardForm").fire("submit");
+assert.equal(fetchState.calls.some(call => call.url === "/set_board"), false,
+  "a forged pre-status submit cannot persist hardware defaults");
+ui.S.status = loadedStatus;
+ui.hydrateRoutedPopup();
+assert.equal(document.getElementById("boardModal").hidden, false, "the pending route opens with known hardware");
+await document.getElementById("bdCancel").onclick();
+
 // An in-app popup has a real Settings parent: Back closes it and Forward opens the same one again.
 ui.openWifi();
 assert.equal(location.hash, "#settings/wifi", "opening a popup must add its stable route");

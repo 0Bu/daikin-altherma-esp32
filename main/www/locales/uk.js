@@ -1,4 +1,4 @@
-// translation-source: 63a21ee82689120ffd8fc53b1408385986ee8bc6afb789d41f77a9b4004139bf
+// translation-source: e48a108e482c83165efc2a0fb7f44e45ea2f5ff28879f55570a2a130a9aee1ef
 I18N.uk = localeValues([
   /* sys.nodata */ "Немає даних",
   /* sys.unreachable */ "Недоступно",
@@ -357,8 +357,8 @@ I18N.uk = localeValues([
   /* hist.recorded */ (h) => `Записано · ${h} год`,
   /* hist.now */ "зараз",
   /* hist.ago */ (h) => `${h} год тому`,
-  /* hist.retained */ "Останній збережений вимір",
-  /* hist.before_retained */ (h) => `${h} год до останнього збереженого виміру`,
+  /* hist.retained */ "Останній отриманий вимір",
+  /* hist.before_retained */ (h) => `${h} год до останнього отриманого виміру`,
   /* hist.loading */ "Завантаження тенденції…",
   /* hist.none */ "Записаних показів ще немає.",
   /* hist.err */ "Тенденція недоступна.",

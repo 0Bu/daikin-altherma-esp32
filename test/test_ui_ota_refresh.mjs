@@ -250,6 +250,11 @@ function elementsFor(...ids) {
   assert.equal(elements.settingsCards.innerHTML, recoveryCard, "opening Settings retains the OTA-only card");
   assert.equal(elements.connTile.hidden, true, "the OTA shell still has no connection evidence");
   assert.equal(S.settingsHydrated, false, "compact OTA status cannot hydrate full Settings");
+  S.transportUnavailable = "status";
+  sandbox.__api.renderSettings();
+  assert.equal(elements.statusSnapshot.hidden, false);
+  assert.equal(elements.statusSnapshot.textContent, "sys.nodata",
+    "without a full frame, Settings report missing data without a snapshot or unreachable claim");
 
   // If /status later fits before the reboot, it must replace the recovery card ONCE despite
   // otaShown, and then repaint the retained percentage into the newly-created progress slot.
@@ -267,6 +272,7 @@ function elementsFor(...ids) {
     syslog: { configured: false },
     ntp: { synced: true, server: "pool.ntp.org" },
   };
+  S.transportUnavailable = null;
   sandbox.__api.renderSettings();
 
   assert.equal(S.settingsHydrated, true, "the first status-backed Settings render must complete");

@@ -1,4 +1,4 @@
-// translation-source: 63a21ee82689120ffd8fc53b1408385986ee8bc6afb789d41f77a9b4004139bf
+// translation-source: e48a108e482c83165efc2a0fb7f44e45ea2f5ff28879f55570a2a130a9aee1ef
 I18N.it = localeValues([
   /* sys.nodata */ "Nessun dato",
   /* sys.unreachable */ "Non raggiungibile",
@@ -357,8 +357,8 @@ I18N.it = localeValues([
   /* hist.recorded */ (h) => `Registrato · ${h} h`,
   /* hist.now */ "ora",
   /* hist.ago */ (h) => `${h} h fa`,
-  /* hist.retained */ "Ultimo campione registrato",
-  /* hist.before_retained */ (h) => `${h} h prima dell’ultimo campione registrato`,
+  /* hist.retained */ "Ultimo campione ricevuto",
+  /* hist.before_retained */ (h) => `${h} h prima dell’ultimo campione ricevuto`,
   /* hist.loading */ "Caricamento andamento…",
   /* hist.none */ "Nessuna lettura ancora registrata.",
   /* hist.err */ "Andamento non disponibile.",

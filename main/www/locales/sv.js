@@ -1,4 +1,4 @@
-// translation-source: 63a21ee82689120ffd8fc53b1408385986ee8bc6afb789d41f77a9b4004139bf
+// translation-source: e48a108e482c83165efc2a0fb7f44e45ea2f5ff28879f55570a2a130a9aee1ef
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -357,8 +357,8 @@ I18N.sv = localeValues([
   /* hist.recorded */ (h) => `Registrerad · ${h} t`,
   /* hist.now */ "nu",
   /* hist.ago */ (h) => `för ${h} t sedan`,
-  /* hist.retained */ "Senaste sparade mätvärdet",
-  /* hist.before_retained */ (h) => `${h} h före det senaste sparade mätvärdet`,
+  /* hist.retained */ "Senaste mottagna mätvärdet",
+  /* hist.before_retained */ (h) => `${h} h före det senaste mottagna mätvärdet`,
   /* hist.loading */ "Laddar historik…",
   /* hist.none */ "Inga mätningar är registrerade ännu.",
   /* hist.err */ "Historiken är otillgänglig.",

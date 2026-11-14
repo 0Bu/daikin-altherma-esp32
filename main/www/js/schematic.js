@@ -1711,7 +1711,8 @@ function inspectSig(e) {
 // Chart state has its own signature, independent of changing inspector readings. A new series
 // (`gen`), categorical live cap or pin updates its markup; ordinary scalar polls keep it mounted.
 function renderInspectHist(e, row, mode = "") {
-  const mayFetch = mode && (typeof _pollBusy === "undefined" || !_pollBusy);
+  const mayFetch = mode === "open" ||
+    (mode === "refresh" && (typeof _pollBusy === "undefined" || !_pollBusy));
   let started;
   const request = (id, source) => {
     if (!mayFetch || (mode === "refresh" && (started || S.histBusy.size))) return;

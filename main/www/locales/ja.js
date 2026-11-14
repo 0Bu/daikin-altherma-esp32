@@ -1,4 +1,4 @@
-// translation-source: 63a21ee82689120ffd8fc53b1408385986ee8bc6afb789d41f77a9b4004139bf
+// translation-source: e48a108e482c83165efc2a0fb7f44e45ea2f5ff28879f55570a2a130a9aee1ef
 I18N.ja = localeValues([
   /* sys.nodata */ "データなし",
   /* sys.unreachable */ "接続不可",
@@ -357,8 +357,8 @@ I18N.ja = localeValues([
   /* hist.recorded */ (h) => `記録 · ${h}時間`,
   /* hist.now */ "現在",
   /* hist.ago */ (h) => `${h}時間前`,
-  /* hist.retained */ "最後に保存した測定値",
-  /* hist.before_retained */ (h) => `最後に保存した測定値の ${h} 時間前`,
+  /* hist.retained */ "最後に受信した測定値",
+  /* hist.before_retained */ (h) => `最後に受信した測定値の ${h} 時間前`,
   /* hist.loading */ "推移を読込中…",
   /* hist.none */ "記録はまだありません。",
   /* hist.err */ "推移を表示できません。",

@@ -1,4 +1,4 @@
-// translation-source: 63a21ee82689120ffd8fc53b1408385986ee8bc6afb789d41f77a9b4004139bf
+// translation-source: e48a108e482c83165efc2a0fb7f44e45ea2f5ff28879f55570a2a130a9aee1ef
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -357,8 +357,8 @@ I18N.fr = localeValues([
   /* hist.recorded */ (h) => `Enregistré · ${h} h`,
   /* hist.now */ "maintenant",
   /* hist.ago */ (h) => `il y a ${h} h`,
-  /* hist.retained */ "Dernière mesure enregistrée",
-  /* hist.before_retained */ (h) => `${h} h avant la dernière mesure enregistrée`,
+  /* hist.retained */ "Dernière mesure reçue",
+  /* hist.before_retained */ (h) => `${h} h avant la dernière mesure reçue`,
   /* hist.loading */ "Chargement de la tendance…",
   /* hist.none */ "Aucun relevé enregistré pour le moment.",
   /* hist.err */ "Tendance indisponible.",

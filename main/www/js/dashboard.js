@@ -2233,10 +2233,14 @@ function settingsConnectionsDown() {
 // esp32CardHtml().
 function renderSettings() {
   const snapshot = $("statusSnapshot");
-  snapshot.hidden = S.transportUnavailable !== "status";
-  if (!snapshot.hidden) snapshot.textContent = `${t("ota.snapshot_label")}: ${t("ota.snapshot_value")} · ` +
-    t(S.transportBusy ? "toast.busy_retry" : "toast.unreachable");
-  if (S.otaInstalling && !S.status) {
+  const otaOnly = S.otaInstalling && !S.status;
+  snapshot.hidden = S.transportUnavailable !== "status" && !otaOnly;
+  if (!snapshot.hidden) {
+    const snapshotLabel = S.status ? `${t("ota.snapshot_label")}: ${t("ota.snapshot_value")}` : t("sys.nodata");
+    snapshot.textContent = S.otaInstalling ? snapshotLabel : `${snapshotLabel} · ` +
+      t(S.transportBusy ? "toast.busy_retry" : "toast.unreachable");
+  }
+  if (otaOnly) {
     syncOtaSettingsLock();
     return;
   }

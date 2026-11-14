@@ -988,6 +988,10 @@ function wireRestOfApp() {
     $(id).addEventListener("change", () => { $("bdError").hidden = true; });
   $("boardForm").addEventListener("submit", (e) => {
     e.preventDefault();
+    if (!boardSettingsAvailable()) {
+      toast(t("toast.unreachable"), "err");
+      return;
+    }
     const type = +$("bdLedType").value;
     // Belt-and-braces beside boardPinOptions' fallback: an empty select (a device that offered no
     // local pins at all) must read as "no indicator", never as GPIO0 — `+""` is 0, and 0 is a real
@@ -1116,17 +1120,20 @@ async function pollTick() {
     // doubles the wait for the timeout that decides the backoff.
     if (ok) ok = await refreshValues(!deferredPaint);
     if (deferredPaint) renderApp();
+  } catch (error) {
+    ok = false;
+    console.error("Live update failed", error);
   } finally {
     _pollBusy = false;
+    _pollFails = ok ? 0 : Math.min(_pollFails + 1, 4);
+    pollSchedule(_pollFails ? Math.min(POLL_VALUES_MS * 2 ** _pollFails, POLL_BACKOFF_MAX_MS)
+                            : POLL_VALUES_MS);
   }
 
   if (ok && typeof recoverOpenHistory === "function") recoverOpenHistory();
   // An already queued disclosure must also settle after a failed live poll. A history endpoint
   // can still answer when /values fails. Leave automatic refreshes behind the live-health gate.
   if (typeof pumpHistoryQueue === "function") pumpHistoryQueue();
-  _pollFails = ok ? 0 : Math.min(_pollFails + 1, 4);
-  pollSchedule(_pollFails ? Math.min(POLL_VALUES_MS * 2 ** _pollFails, POLL_BACKOFF_MAX_MS)
-                          : POLL_VALUES_MS);
 }
 
 // Poll right now, status included, and let the chain carry on from there. Used on the first tick

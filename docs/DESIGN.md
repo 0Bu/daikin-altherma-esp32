@@ -302,7 +302,8 @@ their own histories. A five-minute bucket can contain phase currents, inverter c
 compressor speed from different sweeps. The electrical-input and COP inspectors omit derived
 history. Missing input samples leave a gap. A gap is held-over only when every missing input was
 held. A successful empty series shows “No readings recorded yet.” An unavailable series reports
-an error. Chart titles name the stable concept.
+an error, with its source named if the other series can still draw. Chart titles name the stable
+concept.
 
 Categorical histories use source-labelled tracks, written states, distinct state colours and
 hatching only for missing samples. Valve and Quiet use latest sampled state; BSH, BUH stages and
@@ -325,7 +326,9 @@ visible Dashboard or Settings plots can refresh after the cache cooldown. They s
 automatic history request per poll. Opening a chart can queue independent reads in that tab.
 Closing a chart ends its gesture. Already queued reads can still fill the cache. A live poll can
 interrupt a first read. The next attempt gets one request timeout to finish before polling resumes.
-A failed refresh keeps the last compatible samples and marks the saved edge of the timeline.
+A failed refresh keeps compatible readings within the most recent day. A distinct marker identifies
+each retained series' last received sample. Categorical timelines keep their separate live cap,
+and weather charts keep the current-time divider and forecast.
 
 Hover previews a sample; tap pins it, a second tap on the same sample/Escape clears it. The two views
 of a row share a pin and freeze while either is scrubbed. A dated pin tracks its sample instant.
