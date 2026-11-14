@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: 155d5c9ae3a022beb48a244b75b2776b5f9c6121ea64c44f17e681713d4c8ea6 -->
+<!-- user-docs-contract: c49bccaf74db173ba1f0849b0feabdcb48a1e0760c67d6937a38b5e6086d7f64 -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default. Enable **Plant diagnostics** under **Settings → Firmware** to start an evidence
@@ -27,6 +27,7 @@ the installation's health.
 | **MEASURED** | A measurement or event population without enough evidence for a good/bad assessment. |
 | **TENTATIVE** | An experimental counter comparison whose complete manufacturer semantics are unknown. |
 | **N/A** | The active profile does not supply the required signals. |
+| **No data** | The current diagnosis snapshot could not be read. |
 
 A reassuring day-based result needs both the full 24-hour span and at least 90% usable coverage
 of its own signals. Current fault state is separate. Missing or stale X10A data cannot establish a

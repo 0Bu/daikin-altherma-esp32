@@ -217,8 +217,8 @@ blind time itself, so its verdict can be `accept` beside trend age refusals.
 
 `health` fields: `covered_s`, `span_s`, `source_fresh`, `source_age_s`, `persist`, `full_span`,
 `available`, `assessable`, `evaluated`, `status`, `checks`. Disabled diagnostics, a pending reset
-or an unreadable snapshot produce placeholder checks with no accumulated evidence. Use
-`persist` and `diagnostics.enabled` to interpret them.
+or an unreadable snapshot produce placeholder checks with no accumulated diagnosis or Cycling
+chart evidence. Use `persist` and `diagnostics.enabled` to interpret them.
 `span_s` combines time since the current diagnostics window's first accepted sampling callback
 with any carried restore duration, capped at 24 hours. A callback can start the clock without
 readable data. Restore estimates the earlier span from one nominal hour before the earliest
@@ -230,8 +230,9 @@ bound at read time. A stale source
 withholds current fault-clear/current pressure and reassuring assessments; dated findings remain.
 The serializer captures `health.persist`, the judged window and Cycling hours together.
 The independently collected Cycling Stop context can still report its own evidence.
-`health.persist:"flash_pending"` means recovery has not completed and proves no stored hours;
-`fresh` means none were selected; `flash` means admissible dated hourly reconstruction with live
+`health.persist:"flash_pending"` means recovery is awaiting clock or source confirmation.
+Whether there are compatible stored hours is still undetermined.
+`fresh` means none were selected. `flash` means admissible dated hourly reconstruction with live
 precedence. Completed RAM hours are never adopted. `unknown` means the snapshot was unreadable.
 `model_changed` covers a source or link reset. `diagnostics_disabled` and `diagnostics_changed`
 also reflect a live consent transition. Other refusal values describe startup integrity or safe mode.
