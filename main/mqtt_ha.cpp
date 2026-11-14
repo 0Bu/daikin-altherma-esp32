@@ -979,10 +979,6 @@ static void service_retained_cleanup_probe(const std::string& topic, std::atomic
 // session that is still connected. The register definition supplies the permanent JSON type. Only
 // Text16 is text; flags, enums and ordinary values retain their numeric Modbus constants.
 static std::vector<GroupedValue> current_modbus_values(bool& live) {
-    if (!mb_values_live()) {
-        live = false;
-        return {};
-    }
     const size_t cap = mb_values_capacity();
     std::vector<CachedValue> cache(cap ? cap : 1);
     const size_t n = mb_values_snapshot(cache.data(), cache.size(), live);
@@ -1456,7 +1452,8 @@ static bool publish_x10a_state(const Config& config, bool force) {
 static bool publish_modbus_state(bool& published_live) {
     const uint32_t                  revision = mb_cache_generation();
     bool                            live     = false;
-    const std::vector<GroupedValue> values   = current_modbus_values(live);
+    const std::vector<GroupedValue> values =
+        mb_values_live() ? current_modbus_values(live) : std::vector<GroupedValue>{};
     const std::string               js       = live ? build_flat_json(values) : std::string("{}");
     const ModbusPublicationClaim    publication(ModbusPublication::Mqtt, revision);
     if (!publication.acquired()) return false;
