@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 5bf2b5a1e7723c25cc294f3ff84d64f129daba8b34036fe6e6b6b604c2f737e6 -->
+<!-- diagnostic-evidence-contract: 1e9b96b4268bf2ecbeca50b9c790b9d4a98b3f0e6280d746e0eb7e62e4e0eafb -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -32,7 +32,9 @@ At read time the diagnosis publishes elapsed span separately from usable signal 
 age of the last nonempty X10A sample. A source older than the 15-second project bound cannot support
 a current fault all-clear or reassuring assessment. Temporary TLS/allocation pauses contribute no
 measurement coverage and do not withdraw profile capabilities. Historical findings remain within
-their admissible age; live, restored and open evidence expires even if the producer stops.
+their admissible age; live, restored and open evidence expires even if the producer stops. The
+[status contract](API.md#history-and-24-hour-checks) defines how the response binds restoration provenance
+to the judged window and its Cycling hours.
 DHW circulation identity is independent and binds broker, topic, value/time paths and interpretation
 parameters. A mismatch retires only tank-cooling evidence; an hour that completed before a
 circulation-only reset is stored without that identity. [PLANT.md](PLANT.md#reboot-and-persistence)
