@@ -1108,6 +1108,7 @@ jobs:
           # ci-build-all.sh reads the version back out of the built image and fails if the two ever
           # drift apart again.
           command: >-
+            env GITHUB_ACTIONS=true GITHUB_REF=refs/heads/main GITHUB_SHA="${{ github.sha }}"
             ./scripts/ci-build-all.sh --with-tested-cjson --source-sha "${{ github.sha }}" --changelog-file ota-changelog.json "${{ steps.stamp.outputs.disp }}"
 
       - name: Publish firmware size summary

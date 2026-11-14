@@ -51,6 +51,9 @@ class PushChecksTests(unittest.TestCase):
                     raise subprocess.CalledProcessError(1, command)
 
             with patch.object(push_checks.subprocess, "run", side_effect=run), \
+                    patch.object(push_checks, "run_phase",
+                                 side_effect=lambda _, command, cwd, env, **kwargs: run(
+                                     command, cwd=cwd, env=env, check=True, **kwargs)), \
                     patch.object(push_checks.local, "verify") as verify:
                 args = (host, {}, firmware, {}, "a" * 40, "b" * 40, "c" * 40)
                 if fail_phase:
@@ -72,6 +75,16 @@ class PushChecksTests(unittest.TestCase):
 
     def test_artifact_validation_failure_prevents_browser(self):
         self.assertEqual(self.run_candidate("artifacts")[-1], "artifacts")
+
+    def test_phase_deadline_terminates_subprocess_group(self):
+        with patch.object(push_checks.subprocess, "Popen") as popen, \
+                patch.object(push_checks.os, "killpg") as kill:
+            process = popen.return_value.__enter__.return_value
+            process.wait.side_effect = [subprocess.TimeoutExpired("worker", 1), 0]
+            with self.assertRaises(subprocess.TimeoutExpired):
+                push_checks.run_phase("test", ["worker"], Path("."), {}, timeout=1)
+        self.assertTrue(popen.call_args.kwargs["start_new_session"])
+        kill.assert_called_once_with(process.pid, push_checks.signal.SIGTERM)
 
 
 if __name__ == "__main__":

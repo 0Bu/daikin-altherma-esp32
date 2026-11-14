@@ -35,6 +35,20 @@ esac
 check scripts/run-pr-hygiene-audit.sh --base "$base" --head "$candidate" --event-file ''
 check tools/pr_hygiene/selftest.sh
 check tools/coverage/selftest.sh
+# Reuse the former GitHub coverage profile with Ubuntu's Linux x86-64 compiler.
+# The native mock run still supplies the host evidence consumed during OTA.
+coverage_recipe=tools/release/Coverage.Dockerfile
+coverage_image="daikin-altherma-esp32-release-coverage:$(git hash-object "$coverage_recipe")"
+if ! docker image inspect "$coverage_image" >/dev/null 2>&1; then
+    docker build --platform linux/amd64 --tag "$coverage_image" - < "$coverage_recipe"
+fi
+check docker run --rm --platform linux/amd64 --network none \
+    --user "$(id -u):$(id -g)" --volume "$PWD:/project" --workdir /project \
+    --env GIT_CONFIG_GLOBAL=/dev/null --env GIT_CONFIG_NOSYSTEM=1 --env GIT_NO_LAZY_FETCH=1 \
+    --env GITHUB_ACTIONS=true --env RUNNER_OS=Linux --env ImageOS=ubuntu26 \
+    "$coverage_image" bash -ec 'test "$(uname -m)" = x86_64
+        test "$(g++ -dumpversion)" = 15
+        exec scripts/run-mock-tests.sh --coverage'
 case "$(uname -s)" in
     Darwin)
         check scripts/idf-docker.sh --with-host-tests env CI=1 CXX=clang++-18 \

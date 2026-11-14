@@ -79,18 +79,16 @@ readback separately. Claim CI acceleration only after a comparable run of the pu
 
 The native `pre-push` hook runs the repository's full mechanical suite and unsigned ESP32-S3
 compile for maintainer pushes. It refreshes `origin/main` and checks the prospective merge tree
-in a private snapshot with main as the first parent. Checks include the pinned formatter,
-ASan/UBSan in Linux Docker on macOS, headless Linux Chromium and WebKit for browser-relevant changes,
-the pinned coredump decoder and the real-cJSON runtime suite. The host gates and ESP32-S3 compile
-run concurrently in separate snapshots of the same tree. Both finish before the browser phase
-starts, so the release run's own compile cannot affect the UI timing measurements. The log records
-elapsed time for each phase. A maintainer reviews fork code before
-running its checks in a disposable environment without maintainer credentials. The snapshot runs
-candidate scripts with the current user's permissions. Keep `origin` on the canonical repository
-and fetch the fork head separately.
+in private snapshots with main as the first parent. Host tests and the ESP32-S3 compile run
+concurrently in separate snapshots. Coverage includes the native test and the retained Ubuntu
+GCC 15 x86-64 branch profile in Docker. Headless Linux Chromium and WebKit run after both lanes
+finish, so the compile cannot affect this run's UI timing. See [host tooling and checks](../test/README.md).
 
-To run the gate before pushing, or against a checked-out fork head, run
-`python3 tools/release/push_checks.py "$(git rev-parse HEAD)"` in the clean checkout.
+To run the gate manually, use
+`scripts/agent-python.sh tools/release/push_checks.py "$(git rev-parse HEAD)"` in a clean checkout.
+Review fork code first and run it in a disposable environment without maintainer credentials.
+The scripts run with the current user's permissions. Keep `origin` on the canonical repository
+and fetch a fork head separately.
 Post the emitted `daikin-local-release-checks` line as a new PR comment from the maintainer
 account. It is a maintainer assertion of a completed local run. It has a 24-hour window through
 merge. Keep the original comment because signed publication verifies it against the merge time.

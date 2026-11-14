@@ -253,10 +253,9 @@ scripts/idf-docker.sh idf.py build
   override/adjudication layer and test stable identifiers and labels. `overlay.hpp` is the explicit
   hand-written overlay, while `homehub.hpp` and `altherma4.hpp` are curated Modbus definition sources,
   and `protocol_s.hpp` is the curated Protocol S table.
-- Do not add separate always-on CI jobs casually. Fast deterministic checks are steps of the shared
-  `mechanical_gates` job in `build.yml`; the required `gates` job lives in the deliberately separate
-  protected-base `pr-policy.yml` workflow. GitHub Actions bills per job. Preserve required-check
-  behavior when changing path filters.
+- Run [local release checks](docs/MAINTENANCE.md#local-release-checks) before push. The protected
+  `pr-policy.yml` supplies `gates`; `build.yml` supplies `build` and signed publication. Preserve
+  both required checks and avoid additional always-on CI jobs.
 - When waiting for GitHub Actions, use a bounded watcher such as
   `scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 run watch
   <run-id> --exit-status`; do not sleep-poll.

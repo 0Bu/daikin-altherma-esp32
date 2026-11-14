@@ -14,9 +14,8 @@ report analysis, changes, and verification separately.
 
 The riskiest parts of this firmware are pure computations (X10A CRC, value converters, config
 validation, HA-discovery JSON). They live in IDF-free headers under `main/logic/` so
-`scripts/run-mock-tests.sh` can run them on the host in seconds, and CI gates the firmware build
-on them (`mechanical_gates` runs the host-logic step, then the required `build` check consumes that
-result). Keep that discipline.
+`scripts/run-mock-tests.sh` can run them on the host in seconds. The
+[local release checks](../../../docs/MAINTENANCE.md#local-release-checks) include them before push.
 
 ## Steps
 

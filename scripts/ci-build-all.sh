@@ -130,6 +130,13 @@ APP_SIZE_LIMIT=$((0x1e8000))   # slot (0x1f0000) minus 32 KB headroom
     echo "ci-build-all: use --compile-only for an unsigned build that stages diagnostics only" >&2
     exit 1
 }
+if [ "$TEST_CJSON" = false ] &&
+    { [ "${GITHUB_ACTIONS:-}" != true ] || [ "${GITHUB_REF:-}" != refs/heads/main ] ||
+      [ "${GITHUB_SHA:-}" != "$SOURCE_SHA" ] ||
+      [ "$(git -c safe.directory="$PWD" rev-parse HEAD)" != "$SOURCE_SHA" ]; }; then
+    echo "ci-build-all: only the source-bound main publication workflow can reuse cJSON tests" >&2
+    exit 2
+fi
 [ "$MODE" = compile-only ] || [ -n "$CHANGELOG_FILE" ] || {
     echo "ci-build-all: publishing mode requires --changelog-file <json>" >&2
     exit 2

@@ -3,7 +3,9 @@
 
 from concurrent.futures import ThreadPoolExecutor
 import json
+import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -13,12 +15,25 @@ import local_checks as local
 from verify_push_proof import PREFIX, REPO
 
 
-def run_phase(label, command, checkout, env, *, log=None):
+def run_phase(label, command, checkout, env, *, timeout, log=None):
     started = time.monotonic()
     print(f"Local release phase started: {label}", flush=True)
     try:
-        subprocess.run(command, cwd=checkout, env=env, check=True, stdout=log,
-                       stderr=subprocess.STDOUT if log is not None else None)
+        with subprocess.Popen(command, cwd=checkout, env=env, start_new_session=True,
+                              stdout=log, stderr=subprocess.STDOUT if log is not None else None) as process:
+            try:
+                result = process.wait(timeout=timeout)
+            except BaseException:
+                try:
+                    os.killpg(process.pid, signal.SIGTERM)
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                raise
+            if result:
+                raise subprocess.CalledProcessError(result, command)
     finally:
         print(f"Local release phase ended: {label} ({time.monotonic() - started:.1f}s)", flush=True)
 
@@ -34,10 +49,11 @@ def check_candidate(checkout, offline, build_checkout, build_env, tested, base, 
         try:
             with ThreadPoolExecutor(max_workers=1) as workers:
                 firmware = workers.submit(run_phase, "ESP32-S3 and real cJSON", command,
-                                          build_checkout, build_env, log=build_log)
+                                          build_checkout, build_env, timeout=1800, log=build_log)
                 # The OTA gate reuses these two host results on the landed tree.
                 local.verify(checkout, expected_head=tested, require_receipt=True, fresh=True)
-                run_phase("host tests and audits", [*host_checks, "host", base, head], checkout, offline)
+                run_phase("host tests and audits", [*host_checks, "host", base, head],
+                          checkout, offline, timeout=1800)
                 firmware.result()
         finally:
             # The executor joins the build before reading the log, including on failure.
@@ -46,10 +62,11 @@ def check_candidate(checkout, offline, build_checkout, build_env, tested, base, 
             shutil.copyfileobj(build_log, sys.stdout.buffer)
             sys.stdout.buffer.flush()
     subprocess.run(["scripts/check-nonflashable-artifacts.sh", "dist"],
-                   cwd=build_checkout, env=build_env, check=True)
+                   cwd=build_checkout, env=build_env, timeout=60, check=True)
     # Frame and input budgets need an uncontended browser phase. No host gate
     # or firmware compiler from this invocation may still be running.
-    run_phase("headless Chromium and WebKit", [*host_checks, "browser", base, head], checkout, offline)
+    run_phase("headless Chromium and WebKit", [*host_checks, "browser", base, head],
+              checkout, offline, timeout=2100)
 
 
 def run(root, expected_head):

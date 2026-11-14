@@ -18,6 +18,9 @@ The [pre-push release gate](../docs/MAINTENANCE.md#local-release-checks) runs th
 suite and unsigned target compile before the branch is sent. Use the commands below for
 focused development runs and record completed reviews in the PR.
 
+The release checks require Docker with Linux x86-64 execution, Git with `merge-tree --write-tree`,
+the repository Python and Node.js tools, `clang-format-18` 18.1.8 and native C++ coverage tooling.
+
 ```bash
 scripts/run-mock-tests.sh --coverage
 scripts/run-sanitizer-fuzz-tests.sh
@@ -60,10 +63,9 @@ locally when no executable is selected; CI requires it. A missing Docker daemon 
 a browser setup failure, not permission to start a native macOS browser. Report either limitation rather
 than treating the skipped layer as tested.
 
-The [local release checks](../docs/MAINTENANCE.md#local-release-checks) supply evidence to the
-required GitHub checks. The protected-base `pr-policy.yml` verifies the receipt and review records.
-[build.yml](../.github/workflows/build.yml) retains the legacy tests and unsigned compile for the
-bootstrap PR, then uses the local evidence for later PRs and the trusted signing workflow.
+The protected-base `pr-policy.yml` verifies the local receipt and review records.
+[build.yml](../.github/workflows/build.yml) retains hosted tests and unsigned compilation for the
+bootstrap PR. After cutover it reports PR admission and verifies the receipt before signing.
 
 ## Logic, coverage and hostile inputs
 
