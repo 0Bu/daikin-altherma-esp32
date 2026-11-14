@@ -185,7 +185,7 @@ for (const order of ["status-first", "cache-first"]) {
     assert.equal(h.S.busy, false); assert.equal(h.S.otaBusy, false); assert.equal(h.S.otaInstalling, false);
     assert.equal(h.storage.has(cacheKey), false);
     assert.equal(h.S.otaAlert, reason); assert.equal(h.element("otaAlertDashMessage").textContent, reason);
-    assert.equal(h.controls[0].disabled, false);
+    assert.equal(h.controls[0].disabled, true, "discarding the snapshot still leaves no accepted status");
     h.renderApp(); h.renderLive();
     assert.equal(h.S.live, null); assert.equal(observe(h).lwt, "—");
     assert.equal(observe(h).fan, false); assert.equal(observe(h).pump, false);

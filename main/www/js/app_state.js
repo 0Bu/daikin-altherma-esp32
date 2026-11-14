@@ -398,8 +398,7 @@ function applyRouteFromLocation() {
     for (const id of TRANSIENT_MODALS)
       if (!$(id).hidden) closeOverlayForReplacement(id);
     if (route.popup && $(route.popup).hidden) openPopupForRoute(route.popup);
-    // On a reload the route is restored before the first /status arrives. Keep the popup visible,
-    // then refill it from that first response unless the user has already started editing.
+    // Reload may restore a route before /status. The first response can hydrate or open its editor.
     if (route.popup && !S.status) _routePopupNeedsHydration = route.popup;
     else if (route.popup && $(route.popup).hidden) unavailablePopup = true;
   } finally {
@@ -418,8 +417,7 @@ function hydrateRoutedPopup() {
   _applyingRoute = true;
   try { openPopupForRoute(id); }
   finally { _applyingRoute = false; }
-  // ENV III is the only board-gated popup. Once status proves the board cannot expose it, keep the
-  // URL truthful instead of leaving an address whose selected dialog cannot exist on this device.
+  // A route whose editor is unavailable returns to Settings.
   if ($(id).hidden) {
     writeRoute("settings", null, { replace: true, parent: null });
     applyRouteFromLocation();
