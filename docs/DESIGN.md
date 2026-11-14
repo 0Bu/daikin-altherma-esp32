@@ -209,7 +209,9 @@ plate heat exchanger are gas/liquid; the lower line is not a suction line.
 | PHE | Signed ΔT, estimated capacity and COP/EER are drawn on the plate |
 | Outdoor unit | Estimated electrical input is drawn where electrical power enters |
 
-The space-operation flag is not thermostat demand and may be ON in Cooling with compressor OFF.
+The space-operation flag can be ON in Cooling with the compressor OFF. It describes normal
+space operation independently of thermostat demand. When HomeHub supplies the flag, the
+schematic uses the timed input-53 reply and keeps the last full-sweep reading in the value table.
 R1T/R4T are internal exchanger sensors; they do not establish emitter temperatures or building load.
 BUH stage, BSH, Quiet, Defrost and BOOST stay on the component/subject they describe.
 
@@ -484,9 +486,10 @@ even if large status/values requests are refused. A same-tab snapshot up to 15 m
 when its version, boot ID and ELF identity match current OTA status. Label it Last received state
 and lock Settings writes. Keep the captured readings visible, pause schematic activity and
 thermal colours, and omit the live segment at the end of state charts until fresh values arrive.
-The snapshot retains the Modbus history binding. Missing binding metadata in an older snapshot
-suppresses Modbus history when its cached status identifies a boot and history epoch. A later full
-pair supersedes the snapshot.
+The snapshot retains Modbus history binding metadata. Only readings and status survive a
+same-tab reload. Charts need their own source-bound history responses to show past samples.
+An older snapshot without binding metadata withholds Modbus history if its status identifies a
+history epoch. A later full status and values pair supersedes the snapshot.
 Without a valid cache, show only current OTA/Firmware facts. Successful compact OTA status proves
 reachability and must not be overwritten by a generic unreachable message. Clear snapshots on idle
 startup/check completion or terminal failure. Idle after an observed download retains the snapshot
