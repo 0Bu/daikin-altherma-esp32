@@ -334,7 +334,8 @@ assert.equal(stackBudgets.symbols.cjson_parse_string.max_bytes, 48);
 assert.equal(stackBudgets.symbols.config_document.max_bytes, 48);
 assert.deepEqual(stackBudgets.paths.httpd_values.symbols, ["http_values", "http_values_snapshot"]);
 assert.equal(stackBudgets.symbols.http_values.max_bytes, 336);
-assert.equal(stackBudgets.symbols.http_values_snapshot.max_bytes, 208);
+assert.equal(stackBudgets.symbols.http_values_snapshot.max_bytes, 224,
+  "the linked snapshot frame includes the HomeHub observation and history binding");
 assert.deepEqual(stackBudgets.paths.mqtt_modbus_build.symbols,
   ["mqtt_task", "mqtt_modbus_values", "mqtt_modbus_payload", "mqtt_modbus_count", "mqtt_modbus_emit"]);
 assert.equal(stackBudgets.symbols.mqtt_modbus_payload.max_bytes, 64);
