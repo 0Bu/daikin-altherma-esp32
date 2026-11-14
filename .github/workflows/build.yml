@@ -906,9 +906,13 @@ jobs:
           filter: blob:none  # current source, without historical binary payloads
 
       - name: Verify local check evidence for the publication source
+        id: publish_proof
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 tools/release/verify_push_proof.py landed "$GITHUB_SHA"
+        run: |
+          set -euo pipefail
+          python3 tools/release/verify_push_proof.py landed "$GITHUB_SHA"
+          printf 'source=%s\n' "$GITHUB_SHA" >> "$GITHUB_OUTPUT"
 
       # Bind dispatch admission before versioning, signing-key provisioning or publication.
       # main can move between acceptance and workflow_dispatch resolving its ref.
@@ -1108,7 +1112,7 @@ jobs:
           # ci-build-all.sh reads the version back out of the built image and fails if the two ever
           # drift apart again.
           command: >-
-            env GITHUB_ACTIONS=true GITHUB_REF=refs/heads/main GITHUB_SHA="${{ github.sha }}"
+            env DAIKIN_VERIFIED_LANDED_SOURCE="${{ steps.publish_proof.outputs.source }}"
             ./scripts/ci-build-all.sh --with-tested-cjson --source-sha "${{ github.sha }}" --changelog-file ota-changelog.json "${{ steps.stamp.outputs.disp }}"
 
       - name: Publish firmware size summary

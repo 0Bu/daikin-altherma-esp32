@@ -122,7 +122,7 @@ fi
 
 VERSION="${1:-$(tr -d '[:space:]' < version.txt)}"
 TARGETS=(esp32s3)
-DIST=dist; rm -rf "$DIST"; mkdir -p "$DIST"
+DIST=dist
 SIGN_KEY="${OTA_SIGNING_KEY_FILE:-ota_signing_key.pem}"
 APP_SIZE_LIMIT=$((0x1e8000))   # slot (0x1f0000) minus 32 KB headroom
 [ "$MODE" = compile-only ] || [ -f "$SIGN_KEY" ] || {
@@ -131,10 +131,10 @@ APP_SIZE_LIMIT=$((0x1e8000))   # slot (0x1f0000) minus 32 KB headroom
     exit 1
 }
 if [ "$TEST_CJSON" = false ] &&
-    { [ "${GITHUB_ACTIONS:-}" != true ] || [ "${GITHUB_REF:-}" != refs/heads/main ] ||
-      [ "${GITHUB_SHA:-}" != "$SOURCE_SHA" ] ||
+    { [ "${DAIKIN_VERIFIED_LANDED_SOURCE:-}" != "$SOURCE_SHA" ] ||
+      [ -z "$SOURCE_SHA" ] ||
       [ "$(git -c safe.directory="$PWD" rev-parse HEAD)" != "$SOURCE_SHA" ]; }; then
-    echo "ci-build-all: only the source-bound main publication workflow can reuse cJSON tests" >&2
+    echo "ci-build-all: cJSON test reuse requires verified landed source evidence" >&2
     exit 2
 fi
 [ "$MODE" = compile-only ] || [ -n "$CHANGELOG_FILE" ] || {
@@ -151,6 +151,8 @@ fi
 }
 LOCK_HASH="$(sha256sum dependencies.lock | cut -d ' ' -f1)"
 IDF_VERSION="$(scripts/idf-version.sh)"
+rm -rf "$DIST"
+mkdir -p "$DIST"
 
 REPRO_STATE=""
 REPRO_CHECKER="scripts/check-reproducible-build.py"

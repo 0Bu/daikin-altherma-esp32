@@ -63,9 +63,17 @@ check_rc "cJSON reuse is refused for an untrusted compile-only build" 2 \
     "$T/pack/scripts/ci-build-all.sh" --compile-only --with-tested-cjson \
         --source-sha "$SOURCE_SHA" 1.0.0-dev.1
 touch "$T/pack/fixture-signing-key"
+mkdir -p "$T/pack/dist"
+touch "$T/pack/dist/existing-diagnostics"
 check_rc "standalone packaging cannot request cJSON evidence reuse" 2 \
-    env GITHUB_ACTIONS=false OTA_SIGNING_KEY_FILE="$T/pack/fixture-signing-key" \
+    env DAIKIN_VERIFIED_LANDED_SOURCE= OTA_SIGNING_KEY_FILE="$T/pack/fixture-signing-key" \
         "$T/pack/scripts/ci-build-all.sh" --with-tested-cjson --source-sha "$SOURCE_SHA" 1.0.0
+if grep -Fxq 'ci-build-all: cJSON test reuse requires verified landed source evidence' "$T/out.log" &&
+   [ -f "$T/pack/dist/existing-diagnostics" ]; then
+    ok "cJSON evidence rejection preserves previous build artifacts"
+else
+    bad "cJSON evidence guard did not reject the request without side effects"
+fi
 if [ ! -e "$T/pack/dist/manifest.json" ] && ! compgen -G "$T/pack/dist/*.bin" >/dev/null; then
     ok "missing-key failure leaves no flashable artifact"
 else

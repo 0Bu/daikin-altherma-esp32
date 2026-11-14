@@ -26,7 +26,7 @@ validation, HA-discovery JSON). They live in IDF-free headers under `main/logic/
 2. **Add a `CHECK` in `test/test_logic.cpp`.** Assert against a known-good reference — for
    converters, a known-good reference output for the same raw bytes; for CRC, a real captured frame.
 3. **Run it:** `scripts/run-mock-tests.sh --coverage` (cmake + g++/clang++, no ESP-IDF). Must pass
-   before handoff; run it explicitly and rely on CI as the authoritative repeat. The Stop hook only
+   before handoff. The pre-push checks repeat it on the proposed merge tree. The Stop hook only
    reminds about verification and does not run a build. When parsing wire buffers, URLs, or external
    inputs, also run `scripts/run-sanitizer-fuzz-tests.sh` to prove deterministic safety under ASan/UBSan.
 4. When adding a converter, copy the reference maths **verbatim**

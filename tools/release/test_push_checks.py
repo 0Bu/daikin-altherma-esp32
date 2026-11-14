@@ -84,7 +84,9 @@ class PushChecksTests(unittest.TestCase):
             with self.assertRaises(subprocess.TimeoutExpired):
                 push_checks.run_phase("test", ["worker"], Path("."), {}, timeout=1)
         self.assertTrue(popen.call_args.kwargs["start_new_session"])
-        kill.assert_called_once_with(process.pid, push_checks.signal.SIGTERM)
+        self.assertEqual([call.args for call in kill.call_args_list],
+                         [(process.pid, push_checks.signal.SIGTERM),
+                          (process.pid, push_checks.signal.SIGKILL)])
 
 
 if __name__ == "__main__":

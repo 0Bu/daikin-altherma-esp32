@@ -81,8 +81,9 @@ The native `pre-push` hook runs the repository's full mechanical suite and unsig
 compile for maintainer pushes. It refreshes `origin/main` and checks the prospective merge tree
 in private snapshots with main as the first parent. Host tests and the ESP32-S3 compile run
 concurrently in separate snapshots. Coverage includes the native test and the retained Ubuntu
-GCC 15 x86-64 branch profile in Docker. Headless Linux Chromium and WebKit run after both lanes
-finish, so the compile cannot affect this run's UI timing. See [host tooling and checks](../test/README.md).
+GCC 15 x86-64 branch profile in Docker. For UI-relevant changes, headless Linux Chromium and
+WebKit run after both check groups finish, so the compile cannot affect this run's UI timing.
+See [host tooling and checks](../test/README.md).
 
 To run the gate manually, use
 `scripts/agent-python.sh tools/release/push_checks.py "$(git rev-parse HEAD)"` in a clean checkout.

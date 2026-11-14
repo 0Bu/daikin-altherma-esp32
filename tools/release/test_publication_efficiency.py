@@ -173,6 +173,10 @@ class PublicationEfficiencyTests(unittest.TestCase):
         self.assertLess(trusted.index('verify_push_proof.py landed'), trusted.index('name: Build firmware'))
         self.assertNotIn('apt-get install', trusted)
         self.assertIn("--with-tested-cjson --source-sha", trusted)
+        self.assertIn('DAIKIN_VERIFIED_LANDED_SOURCE="${{ steps.publish_proof.outputs.source }}"',
+                      trusted)
+        self.assertLess(trusted.index('verify_push_proof.py landed "$GITHUB_SHA"'),
+                        trusted.index('printf \'source=%s\\n\' "$GITHUB_SHA" >> "$GITHUB_OUTPUT"'))
         package = (ROOT / 'scripts/ci-build-all.sh').read_text()
         stack_check = package.index('python3 scripts/check-stack-budget.py --elf')
         reuse_boundary = package.index('if [ "$TEST_CJSON" = true ]; then', stack_check)

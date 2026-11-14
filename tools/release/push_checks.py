@@ -26,8 +26,10 @@ def run_phase(label, command, checkout, env, *, timeout, log=None):
             except BaseException:
                 try:
                     os.killpg(process.pid, signal.SIGTERM)
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
+                    try:
+                        process.wait(timeout=15)
+                    except subprocess.TimeoutExpired:
+                        pass
                     os.killpg(process.pid, signal.SIGKILL)
                 except ProcessLookupError:
                     pass
@@ -126,7 +128,7 @@ def main():
         proof = run(local.ROOT, sys.argv[1])
         print("Local release checks passed. Post the following line as a new maintainer PR comment.")
         print(PREFIX + json.dumps(proof, sort_keys=True, separators=(",", ":")))
-    except (OSError, ValueError, subprocess.CalledProcessError) as error:
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
         sys.exit(f"Local release checks failed: {error}")
 
 
