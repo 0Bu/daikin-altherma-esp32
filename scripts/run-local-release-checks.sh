@@ -25,9 +25,10 @@ case "$phase" in
         unset DAIKIN_BROWSER_CONTAINER DAIKIN_BROWSER_ALLOW_LOCAL_SKIP DAIKIN_BROWSER_BIN
         unset DAIKIN_BROWSER_IMAGE DAIKIN_BROWSER_ENGINE
         unset DAIKIN_BROWSER_FLAGS DAIKIN_BROWSER_WORKERS
-        DAIKIN_BROWSER_PARALLEL=1 DAIKIN_BROWSER_TIMEOUT_MS=900000 BEFORE="$base" \
-            check scripts/run-browser-render-tests.sh --if-ui-changed
-        exit 0 ;;
+        printf '\nLocal release check: %s\n' 'scripts/run-browser-render-tests.sh --if-ui-changed'
+        # Keep the browser cleanup trap in the phase leader that the supervisor waits for.
+        exec env DAIKIN_BROWSER_PARALLEL=1 DAIKIN_BROWSER_TIMEOUT_MS=900000 BEFORE="$base" \
+            scripts/run-browser-render-tests.sh --if-ui-changed ;;
     host) export CLANG_FORMAT=clang-format-18 ;;
     *) echo "Unknown local release phase: $phase" >&2; exit 2 ;;
 esac
