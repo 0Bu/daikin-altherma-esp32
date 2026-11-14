@@ -1319,7 +1319,8 @@ static void append_status_json(JsonOut& j, bool redact) {
             trace_reader.admitted ? heap_caps_malloc(sizeof(Trace), MALLOC_CAP_8BIT) : nullptr;
         std::unique_ptr<Trace, decltype(&std::free)> trace(
             trace_storage ? new (trace_storage) Trace : nullptr, std::free);
-        const logic::CheckupReport hr            = checkup_report(&hrs, trace.get());
+        logic::CheckupRestore      persist;
+        const logic::CheckupReport hr            = checkup_report(&hrs, trace.get(), &persist);
         const auto                 release_trace = [&] {
             trace.reset();
             trace_reader.release();
@@ -1342,7 +1343,7 @@ static void append_status_json(JsonOut& j, bool redact) {
         // and "flash" means actual absolute-age journal reconstruction. Completed RAM hours never
         // cross a restart; other slugs retain the startup integrity/consent refusal for diagnosis.
         j += ",\"persist\":";
-        json_append_quoted(j, checkup_persist_state());
+        json_append_quoted(j, logic::checkup_restore_slug(persist));
         j += ",\"full_span\":";
         j += hr.full_span ? "true" : "false";
         j += ",\"available\":";

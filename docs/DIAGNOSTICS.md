@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: de3bfc233c3e8f3d9ddd7ba74ddf1f6ad11ec2be08a38245b5c4af4bb82a5ff0 -->
+<!-- user-docs-contract: 65f03325478509ac57bfc249f21fee5e491d5c65af95ad4a3711f087d954ea6a -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default. Enable **Plant diagnostics** under **Settings → Firmware** to start an evidence

@@ -290,8 +290,10 @@ void reset_read_barrier() {
     sample(1, rows, cov);
     sample(11, rows, cov);
     checkup_reset();
-    require(!checkup_report().source_fresh && checkup_report().available == 0,
-            "queued_reset_report_empty");
+    CheckupRestore persist;
+    const auto     pending = checkup_report(nullptr, nullptr, &persist);
+    require(!pending.source_fresh && pending.available == 0, "queued_reset_report_empty");
+    require(persist == CheckupRestore::ModelChanged, "queued_reset_report_provenance");
     sample(21, rows, cov);
     require(!checkup_report().source_fresh, "reset_consuming_sweep_discarded");
     sample(31, rows, cov);
@@ -315,11 +317,14 @@ void consent_reset() {
     auto rows = heater("1", "0", "1");
     sample(1, rows, cov);
     sample(11, rows, cov);
-    checkup_set_diagnostics(false, 24);
+    sdk::before_take = [] { checkup_set_diagnostics(false, 24); };
+    CheckupRestore persist;
+    const auto     disabled = checkup_report(nullptr, nullptr, &persist);
+    require(!disabled.source_fresh && disabled.available == 0, "disabled_no_observation");
+    require(persist == CheckupRestore::DiagnosticsDisabled, "disabled_report_provenance");
     const auto calls = adapter::circulation_samples;
     sample(21, rows, cov);
     require(adapter::circulation_samples == calls, "disabled_does_not_sample_sources");
-    require(checkup_report().available == 0, "disabled_no_observation");
     checkup_set_diagnostics(true, 25);
     sample(31, rows, cov);
     sample(41, rows, cov);
@@ -424,7 +429,6 @@ void restored_expiry() {
     p.checkup.starts         = 1;
     require(checkup_flash_restore(&record, 1, now) == CheckupFlashRestoreResult::Restored,
             "synthetic_record_admitted_by_real_restore");
-    require(std::strcmp(checkup_persist_state(), "flash") == 0, "real_restore_provenance_slug");
     const auto restored = checkup_report();
     require(restored.span_s == CHECKUP_WINDOW_S - 5 && !restored.full_span,
             "restore_span_excludes_duplicate_elapsed_gap");
@@ -435,9 +439,11 @@ void restored_expiry() {
     const int64_t deadline = 125'000'000;
     sdk::now_us            = deadline - 1;
     CheckupCyclingHours hours;
+    CheckupRestore      persist;
     const auto          takes_before = sdk::takes;
-    auto                before       = checkup_report(&hours);
+    auto                before       = checkup_report(&hours, nullptr, &persist);
     require(sdk::takes == takes_before + 1, "report_and_restored_chart_use_one_lock");
+    require(persist == CheckupRestore::Flash, "real_restore_snapshot_provenance");
     require(hours.count > 2 && hours.hours[0].provenance == CheckupCyclingSlot::Restored &&
                 hours.hours[0].observed_s == 1200 &&
                 hours.end_unix_s[0] == static_cast<uint32_t>(p.end_unix_s) &&

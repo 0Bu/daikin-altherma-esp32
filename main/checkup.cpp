@@ -542,12 +542,6 @@ void checkup_set_diagnostics(bool enabled, uint32_t generation) {
                                 : logic::CheckupRestore::DiagnosticsDisabled;
 }
 
-const char* checkup_persist_state() {
-    if (!s_mtx) return logic::checkup_restore_slug(s_persist_verdict);
-    Lock lk(s_mtx);
-    return logic::checkup_restore_slug(s_persist_verdict);
-}
-
 void checkup_reset() {
     // Arm under the same mutex as record consumption. The HTTP path bumps the source generation
     // first, then waits here; an old-link cycle can therefore never consume this new reset and seed
@@ -943,16 +937,23 @@ logic::CheckupCyclingEvidence checkup_cycling_evidence() {
 }
 
 logic::CheckupReport checkup_report(logic::CheckupCyclingHours* hours,
-                                    logic::CheckupCyclingTrace* trace) {
+                                    logic::CheckupCyclingTrace* trace,
+                                    logic::CheckupRestore*      persist) {
     if (hours) {
         hours->count = 0;
         hours->epoch = 0;
     }
     if (trace) trace->unix_s = 0;
-    if (!s_diagnostics_enabled.load(std::memory_order_acquire)) return logic::CheckupReport{};
-    if (!s_mtx) return logic::CheckupReport{};
+    if (persist) *persist = logic::CheckupRestore::NoRecord;
+    if (!s_mtx) {
+        // Without a mutex the producer stays disabled. Only the startup verdict is available.
+        if (persist) *persist = s_persist_verdict;
+        return logic::CheckupReport{};
+    }
     Lock lk(s_mtx);
     if (!lk.acquired()) return logic::CheckupReport{};
+    if (persist) *persist = s_persist_verdict;
+    if (!s_diagnostics_enabled.load(std::memory_order_acquire)) return logic::CheckupReport{};
     // Only the record path consumes a reset, because it can also discard the in-flight sample.
     // Until then expose an empty report, never stale identity A and never consume the guard early.
     if (s_reset_requested.load()) return logic::CheckupReport{};

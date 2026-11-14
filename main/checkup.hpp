@@ -58,14 +58,6 @@ void checkup_start(bool diagnostics_enabled, uint32_t diagnostics_generation);
 // identity, so neither the next poll cycle nor a reboot can carry the previous interval across it.
 void checkup_set_diagnostics(bool enabled, uint32_t generation);
 
-// How this boot's window came to be — logic/checkup_persist.hpp's CheckupRestore vocabulary, on
-// /status.health.persist reports the startup integrity refusal, flash_pending while journal
-// recovery awaits clock/source confirmation, fresh when no stored intervals were selected, and
-// flash after reconstruction. Pending does not prove saved hours exist; compatible records can
-// lose to live evidence or capacity clipping. Completed RAM hours are never adopted; the one-shot
-// scoped ongoing DHW filter is separate.
-const char* checkup_persist_state();
-
 // Confirm this boot's detected or explicitly selected profile/link scope. Startup's cached scope
 // cannot unlock flash restore. The first confirmation may resume a matching one-shot ongoing DHW
 // filter; later confirmation changes retire the old window through the reset barrier. Confirmation
@@ -82,10 +74,11 @@ void checkup_reset();
 // thresholds change. Other X10A-backed findings keep their already-collected 24-hour evidence.
 void checkup_dhw_reset();
 
-// Copy the judged window and optional chart hours together under the same lock. GET /status and
-// MCP use this snapshot. The POD report and chart storage do not allocate under the lock.
-logic::CheckupReport checkup_report(logic::CheckupCyclingHours* hours = nullptr,
-                                    logic::CheckupCyclingTrace* trace = nullptr);
+// Copy the judged window, optional chart hours and trace, and restore provenance under one lock.
+// GET /status and MCP use this snapshot. Its POD storage does not allocate under the lock.
+logic::CheckupReport checkup_report(logic::CheckupCyclingHours* hours   = nullptr,
+                                    logic::CheckupCyclingTrace* trace   = nullptr,
+                                    logic::CheckupRestore*      persist = nullptr);
 
 // Compact completed-run evidence for MQTT. Shares the evaluator's pure projection, without
 // constructing the full eight-check report on the MQTT task's stack. No allocation under its lock.
