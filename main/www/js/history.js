@@ -182,7 +182,7 @@ function histVisibleSeries(h) {
 
 // Include the lifetime and time anchor even when a new flat ring draws identical SVG geometry.
 const histViewRevision = view =>
-  [S.histEpoch, view.gen, view.t0, view.refreshFailed, view.forecast?.revision, tankAuxRevision(view.tankAux),
+  [S.histEpoch, view.gen, view.t0, view.refreshFailed || view.aged, view.forecast?.revision, tankAuxRevision(view.tankAux),
     histVisibleSeries(view).map(series => series.source).join(",")].join("/");
 function histRevision(view) {
   return ` data-rev="${esc(histViewRevision(view))}"`;
@@ -205,7 +205,7 @@ function histLegendLast(h, visible, s) {
 }
 
 function histSeriesLabel(series) {
-  return series.raw.refreshFailed && series.v.some(v => v != null)
+  return histRetained(series.raw) && series.v.some(v => v != null)
     ? `${series.name} · ${t("hist.retained")}` : series.name;
 }
 
@@ -565,6 +565,8 @@ function histScale(pts, sampleCount) {
 }
 
 const ENV3_COMBINED_ID = "env3_combined";
+const ENV3_FORECAST_ID = "env3_forecast";
+const env3ChartId = id => id === ENV3_COMBINED_ID || id === ENV3_FORECAST_ID;
 const ENV3_COMBINED_SERIES = Object.freeze([
   { id: "env3_temperature", label: "env.temperature" },
   { id: "env3_humidity", label: "env.humidity" },
@@ -586,7 +588,7 @@ const WEATHER_FORECAST_SERIES = Object.freeze([
 // the right of "now"; stale, incomplete or malformed responses disappear instead of being drawn as
 // plausible measurements. Device NTP time, not the browser clock, is the shared axis anchor.
 function weatherForecastView() {
-  if (S.transportUnavailable === "status") return null;
+  if (S.otaCached || S.transportUnavailable === "status") return null;
   const w = S.status?.weather_forecast;
   const nowMs = Date.parse(S.status?.ntp?.time || "");
   if (!w?.configured || !w.available || !w.fresh || !Array.isArray(w.hourly) ||
@@ -682,51 +684,66 @@ function alignedHistoryView(id, raw) {
   const withSamples = series.filter(s => s.v.some(v => v != null));
   const unavailable = supplied.filter(s => s.h?.err ||
     (s.h?.refreshFailed && !withSamples.some(available => available.source === s.source)));
+  const displayed = withSamples.length ? withSamples : series;
   return { id, dt, unit: sharedUnit, t0: typeof t0 === "number" ? t0 : null,
            b0: mode === "bucket" ? start : null,
            refreshFailed: withSamples.length > 0 && withSamples.every(s => s.raw.refreshFailed),
+           aged: displayed.every(s => histRetained(s.raw)),
            unavailable,
            gen: series.map((s) => `${s.source}:${s.raw.gen || 0}${s.raw.expired ? "/" + s.raw.expired : ""}`).join("/"),
            v: union, series };
 }
 
 function expiredHistSlots(h) {
-  if (!h?.refreshFailed || !h.v.length) return 0;
-  const uptime = S.status?.uptime_s;
-  const deviceTime = Date.parse(S.status?.ntp?.time || "") / 1000;
+  if (!h?.v.length) return 0;
   const elapsed = Math.max(0, Date.now() - (h.receivedAt ?? Date.now())) / 1000;
   const dt = h.dt || 300;
   let current = Math.floor(elapsed / dt) + h.v.length;
   let start = 0;
-  if (Number.isFinite(uptime) && Number.isInteger(h.b0)) {
-    current = Math.max(current + h.b0, Math.floor(uptime / dt));
+  if (Number.isInteger(h.b0)) {
     start = h.b0;
-  } else if (Number.isFinite(deviceTime) && h.t0 != null) {
-    current = Math.max(current + Math.floor(h.t0 / dt), Math.floor(deviceTime / dt));
+    const uptime = S.status?.uptime_s;
+    current = Math.max(current + start, Number.isFinite(uptime) ? Math.floor(uptime / dt) : start);
+  } else if (h.t0 != null) {
     start = Math.floor(h.t0 / dt);
+    const deviceTime = Date.parse(S.status?.ntp?.time || "") / 1000;
+    current = Math.max(current + start, Number.isFinite(deviceTime) ? Math.floor(deviceTime / dt) : start);
   }
   return Math.max(0, Math.min(h.v.length, current - HIST_MAX_SAMPLES - start));
 }
 
+const historyRingAged = (h, expired) => expired > 0 ||
+  (h.v.length > 0 && Number.isFinite(h.receivedAt) && Date.now() - h.receivedAt >= (h.dt || 300) * 1000);
+
 function expireHistSamples(h) {
+  if (!h?.v.length) return h;
   const expired = expiredHistSlots(h);
-  if (!expired) return h;
+  const aged = historyRingAged(h, expired);
+  if (!expired) return aged ? { ...h, aged } : h;
   // Preserve the existing time and index identity while dropping readings outside the window.
   const held = h.held?.flatMap(([from, count]) =>
     from + count > expired ? [[Math.max(expired, from), from + count - Math.max(expired, from)]] : []);
-  return { ...h, expired, held, v: h.v.map((v, i) => i < expired ? null : v) };
+  return { ...h, aged, expired, held, v: h.v.map((v, i) => i < expired ? null : v) };
+}
+
+const histRetained = h => h.refreshFailed || h.aged;
+function historyRingRevision(h) {
+  if (!h || h.err || !Array.isArray(h.v)) return h ? "error" : "";
+  const expired = expiredHistSlots(h);
+  return `${h.gen}:${h.refreshFailed ? "failed" : ""}:${historyRingAged(h, expired) ? "aged" : ""}:${expired}`;
 }
 
 function historyView(id, source = "", forecast) {
-  if (id === ENV3_COMBINED_ID) {
+  if (env3ChartId(id)) {
     const offered = ENV3_COMBINED_SERIES.filter(s => hasEnv3Hist(s.id)).map((s) => ({
       source: s.id, name: t(s.label), h: S.hist.get(histCacheKey(s.id, "env3")),
     }));
     if (!offered.length) return null;
-    const view = alignedHistoryView(id, offered);
+    const view = id === ENV3_COMBINED_ID ? alignedHistoryView(id, offered) : null;
     const weather = forecast === undefined ? weatherForecastView() : forecast;
     if (view?.v.some(v => v != null)) {
-      if (weather && Number.isFinite(view.t0)) {
+      if (weather) {
+        if (!Number.isFinite(view.t0)) return { ...view, separateForecast: weather };
         view.forecast = weather;
         view.series = ENV3_COMBINED_SERIES.map(s =>
           view.series.find(q => q.source === s.id) ||
@@ -752,13 +769,19 @@ function historyView(id, source = "", forecast) {
   if (view && id === "dhw_tank") view.tankAux = tankAuxHistories();
   if (!STATE_HIST[id]) return view;
   if (!view?.v.some(v => v != null)) {
-    const live = offered.filter(s =>
-      (s.source === "x10a" ? hasHist(id) : s.source === "modbus" && hasModbusHist(id)) &&
+    const live = offered.filter(s => (s.source === "x10a" ? hasHist(id) : hasModbusHist(id)) &&
       stateHistoryCurrent(id, s.source).value != null);
     if (!live.length) return null;
     view = { id, dt: 300, t0: null, gen: "live", v: [], series: live.map(s => ({
       source: s.source, name: s.name, v: [], raw: {},
     })), unavailable: [] };
+  } else {
+    for (const s of offered) {
+      const supported = s.source === "x10a" ? hasHist(id) : s.source === "modbus" && hasModbusHist(id);
+      if (supported && !view.series.some(series => series.source === s.source) &&
+          stateHistoryCurrent(id, s.source).value != null)
+        view.series.push({ source: s.source, name: s.name, v: Array(view.v.length).fill(null), raw: {} });
+    }
   }
   return stateHistoryLiveView(view);
 }
@@ -942,6 +965,7 @@ const currentBinaryTenths = (row) => {
 };
 
 function stateHistoryCurrent(id, source) {
+  if (S.otaCached) return { present: false, value: null };
   if (source === "modbus") {
     if (!Array.isArray(S._modbus)) return { present: false, value: null };
     if (id === "smart_grid_mode") {
@@ -1115,6 +1139,7 @@ function stateHistHtml(id, name, view, wrap, cfg) {
   // witnesses and must not silently pool their durations into one apparently exact number.
   const primary = view.series.find((s) => s.source === cfg.primary) || view.series[0];
   const recordedPrimary = { ...primary, v: primary.v.slice(0, recordedN) };
+  const primaryMeasured = recordedPrimary.v.some(v => cfg.classify(v) != null);
   const active = stateRuns(recordedPrimary, true, cfg.classify);
   const total = active.reduce((sum, r) => sum + r[1] * view.dt, 0);
   const inactive = stateRuns(recordedPrimary, false, cfg.classify);
@@ -1133,7 +1158,7 @@ function stateHistHtml(id, name, view, wrap, cfg) {
     )).join("");
     const missing = stateRuns(s, null, cfg.classify).map(([from, count]) =>
       `<span class="vhist-state-gap" style="left:${pct(from)}%;width:${pct(count)}%"></span>`).join("");
-    const last = s.raw.refreshFailed ? lastSample(s.v, recordedN) : -1;
+    const last = histRetained(s.raw) ? lastSample(s.v, recordedN) : -1;
     const stateSource = s.source === "modbus" ? "Modbus" : s.name;
     const sourceLabel = last >= 0 ? `${stateSource} · ${t("hist.retained")}` : stateSource;
     return `<div class="vhist-state-lane">` +
@@ -1160,7 +1185,7 @@ function stateHistHtml(id, name, view, wrap, cfg) {
     const px = (frac * 100).toFixed(3);
     pinCross = `<span class="vhist-cross vhist-pinned" style="left:${px}%"></span>`;
   }
-  const totalText = recordedN ? t(cfg.total, histDuration(total)) + (cfg.inactiveTotal
+  const totalText = primaryMeasured ? t(cfg.total, histDuration(total)) + (cfg.inactiveTotal
     ? ` · ${t(cfg.inactiveTotal, histDuration(inactiveSeconds))}` : "") : "";
   return wrap(
     `<div class="vhist-head"><span class="vhist-t">${esc(!recordedN ? t("hist.now") : full ? t("hist.title") : t("hist.recorded", spanH))}</span>` +
@@ -1223,7 +1248,8 @@ function dhwAuxPhases(view) {
 
 function histEmptyHtml(cached, wrap) {
   const status = cached.some(h => h?.err || h?.refreshFailed) ? "hist.err"
-    : cached.some(h => !h) ? "hist.loading" : "hist.none";
+    : cached.some(h => !h) ? "hist.loading"
+    : cached.some(h => expiredHistSlots(h) > 0) ? "hist.nm" : "hist.none";
   return wrap(`<div class="vhist-note">${esc(t(status))}</div>`, "vhist-flat");
 }
 
@@ -1306,7 +1332,7 @@ function histHtml(id, unit, name, source = "") {
   // scale exactly, and stays right whatever width the panel ends up at.
   const nowDots = view.series.map((s) => {
     if (!histVisibleSeries(view).includes(s)) return "";
-    if (s.raw.refreshFailed) {
+    if (s.raw.refreshFailed || s.raw.aged) {
       const last = lastSample(s.v);
       return last < 0 ? "" : histRetainedMarker(s, X(last) / HIST_W, histSourceClass(s.source),
         (Y(s.v[last] / 10) / HIST_H) * 100);
@@ -1341,7 +1367,7 @@ function histHtml(id, unit, name, source = "") {
   }
   const aux = id === "dhw_tank" ? dhwAuxPhases(view) : [];
   let phaseBands = "";
-  const legendItems = (view.series.length > 1 || view.refreshFailed || ["modbus", "room"].includes(view.series[0].source))
+  const legendItems = (view.series.length > 1 || histRetained(view) || ["modbus", "room"].includes(view.series[0].source))
     ? view.series.map((s) => histLegendHtml(view, s, histSourceClass(s.source)))
     : [];
   if (aux.length) {
@@ -1476,12 +1502,12 @@ function env3HistHtml(view = historyView(ENV3_COMBINED_ID)) {
       if (pts[i] == null) flush(); else run.push(i);
     }
     flush();
-    if (s.raw.refreshFailed) {
+    if (histRetained(s.raw)) {
       const last = lastSample(s.v);
       nowDots += histRetainedMarker(s, X(last) / HIST_W, " " + cls, (Y(pts[last]) / HIST_H) * 100);
     }
     const last = s.v[n - 1];
-    if (last != null && !s.raw.refreshFailed) {
+    if (last != null && !histRetained(s.raw)) {
       nowDots += `<span class="vhist-now ${cls}${timedForecast ? " timed" : ""}" ` +
         `style="${timedForecast ? `left:${(measuredEndFrac * 100).toFixed(3)}%;right:auto;` : ""}` +
         `top:${((Y(last / 10) / HIST_H) * 100).toFixed(2)}%"></span>`;
@@ -1524,7 +1550,7 @@ function env3HistHtml(view = historyView(ENV3_COMBINED_ID)) {
     histLegendHtml(view, s, " " + env3SeriesClass(s.source))
   ).join("")}</div>`;
 
-  const pi = histPinIndex(ENV3_COMBINED_ID, view);
+  const pi = histPinIndex(view.id, view);
   let pinFrac = 0;
   let pinCross = "", pinMarks = "";
   if (pi >= 0) {
@@ -1547,12 +1573,12 @@ function env3HistHtml(view = historyView(ENV3_COMBINED_ID)) {
         }).join("");
   }
 
-  return wrap(
+  const chart = wrap(
     `<div class="vhist-head"><span class="vhist-t">${esc(!n ? t("hist.forecast") : full ? t("hist.title") : t("hist.recorded", spanH))}</span>` +
       `<span class="vhist-range">${esc(t("env.history_scales"))}</span></div>` + legend +
     `<div class="vhist-graph">` +
       histTipsHtml(view, pi, pinFrac) +
-      `<div class="vhist-plot" data-hist="${ENV3_COMBINED_ID}"${histRevision(view)} data-n="${n}" ` +
+      `<div class="vhist-plot" data-hist="${view.id}"${histRevision(view)} data-n="${n}" ` +
         `data-measured-p="${(measuredEndFrac * 100).toFixed(3)}" tabindex="0" role="img" ` +
         `aria-label="${esc(t(pi >= 0 ? "hist.aria_pinned" : "hist.aria", t("env.history_title"),
           pi >= 0 ? scrubText(view, pi) : ""))}">` +
@@ -1579,6 +1605,7 @@ function env3HistHtml(view = historyView(ENV3_COMBINED_ID)) {
           `<span>${esc(histAxisEnd(view))}</span></div>`) + histUnavailableHtml(view),
     "vhist-multi"
   );
+  return view.separateForecast ? chart + env3HistHtml(historyView(ENV3_FORECAST_ID, "", view.separateForecast)) : chart;
 }
 
 // ── Scrubbing a trend (hover with a mouse, drag with a finger — one code path) ─────────────────
@@ -1602,7 +1629,7 @@ function forecastScrubView(h) {
 }
 
 function computeForecastScrubView(h) {
-  if (!h || h.id !== ENV3_COMBINED_ID || !Number.isFinite(h.t0)) return null;
+  if (!h || !env3ChartId(h.id) || !Number.isFinite(h.t0)) return null;
   const forecast = h.forecast;
   const futureEnd = forecast?.points.at(-1)?.time;
   if (!forecast || !Number.isFinite(futureEnd) || futureEnd <= forecast.now ||
@@ -1705,24 +1732,25 @@ function histPinToggle(id, i, source = "") {
 
 // Selected time belongs on the axis, including relative ages when the source has no wall clock.
 function histAxisStart(h, spanH) {
-  return h.refreshFailed ? t("hist.recorded", spanH) : t("hist.ago", spanH);
+  return h.refreshFailed || h.aged ? t("hist.recorded", spanH) : t("hist.ago", spanH);
 }
 
 function histAxisEnd(h) {
-  return h.refreshFailed ? "" : t("hist.now");
+  return h.refreshFailed || h.aged ? "" : t("hist.now");
 }
 
 function scrubTime(h, i) {
   if (h.liveIndex === i) return t("hist.now");
-  const point = h.id === ENV3_COMBINED_ID && i >= h.v.length
+  const point = env3ChartId(h.id) && i >= h.v.length
     ? forecastScrubView(h)?.points[i - h.v.length] : null;
   const stamp = point ? point.time : h.t0 != null ? h.t0 + i * h.dt : null;
   if (stamp != null) return new Date(stamp * 1000)
     .toLocaleTimeString(LANG, { hour: "2-digit", minute: "2-digit" });
-  const last = h.refreshFailed ? lastSample(h.v, h.recordedN)
+  const retained = h.refreshFailed || h.aged;
+  const last = retained ? lastSample(h.v, h.recordedN)
     : (h.recordedN ?? h.v.length) - 1;
   const ageH = ((last - i) * h.dt) / 3600;
-  if (h.refreshFailed) return i > last ? "" : i === last
+  if (retained) return i > last ? "" : i === last
     ? t("hist.retained") : t("hist.before_retained", histFmt1(ageH));
   return ageH < 0.05 ? t("hist.now") : t("hist.rel", histFmt1(ageH));
 }
@@ -1750,7 +1778,7 @@ function histTimesHtml(h, pi, frac) {
 // Accessibility keeps time and readings together. Visible numeric bubbles omit the selected time;
 // state phase intervals remain evidence about the whole phase, distinct from the selected instant.
 function scrubText(h, i, includeTime = true, aux) {
-  if (h.id === ENV3_COMBINED_ID && i >= h.v.length) {
+  if (env3ChartId(h.id) && i >= h.v.length) {
     const forecast = forecastScrubView(h);
     const point = forecast?.points[i - h.v.length];
     if (!point) return "";
@@ -1778,7 +1806,7 @@ function scrubText(h, i, includeTime = true, aux) {
     return v != null ? histFmt1(v / 10) + (s.unit ? " " + s.unit : "")
          : histHeld(s, i) ? t("hist.held") : cfg?.missing ? t(cfg.missing) : t("hist.nm");
   };
-  if (h.id === ENV3_COMBINED_ID) {
+  if (env3ChartId(h.id)) {
     const rows = (includeTime ? h.series : histVisibleSeries(h)).map((s) =>
       `${s.name}  ${s.v[i] == null ? t("hist.nm") : valueText(s)}`);
     return (includeTime ? [scrubTime(h, i), ...rows] : rows).join("\n");
@@ -1856,7 +1884,7 @@ function scrubText(h, i, includeTime = true, aux) {
 // markup, so switching the live bubble from textContent to innerHTML below does not create an HTML
 // injection path through translations, units or device data.
 function histReadout(h, i, aux) {
-  if (h.id === ENV3_COMBINED_ID) {
+  if (env3ChartId(h.id)) {
     const text = scrubText(h, i, false, aux);
     if (!text) return "";
     const lines = text.split("\n");
@@ -1936,7 +1964,7 @@ function scrubMove(plot, i) {
   cross.style.left = x.toFixed(1) + "px";
   // One marker per instrument. Both share the crosshair and scale; a gap hides only that source's
   // marker, never the other one.
-  const separateScales = h.id === ENV3_COMBINED_ID;
+  const separateScales = env3ChartId(h.id);
   const allPts = h.series.flatMap((s) => s.v.map((z) => z == null ? null : z / 10));
   const sharedY = separateScales ? null : histScale(allPts, n).Y;
   for (const mark of marks) {

@@ -1206,13 +1206,15 @@ const fmtKiB = (b) => (b == null ? "—" : `${Math.round(b / 1024)} KiB`);
 const boardHistoryMarkup = new WeakMap();
 function boardHistoryHtml(id, unit, label) {
   const ring = S.hist.get(id);
-  if (!ring || ring.refreshFailed) return histHtml(id, unit, label, "x10a");
+  if (!ring) return histHtml(id, unit, label, "x10a");
+  const revision = historyRingRevision(ring);
   const pin = S.histPin.get(id);
   const cached = boardHistoryMarkup.get(ring);
-  if (cached?.id === id && cached.epoch === S.histEpoch && cached.lang === LANG && cached.pin === pin)
+  if (cached?.id === id && cached.epoch === S.histEpoch && cached.lang === LANG &&
+      cached.pin === pin && cached.revision === revision)
     return cached.html;
   const html = histHtml(id, unit, label, "x10a");
-  boardHistoryMarkup.set(ring, { id, epoch: S.histEpoch, lang: LANG, pin, html });
+  boardHistoryMarkup.set(ring, { id, epoch: S.histEpoch, lang: LANG, pin, revision, html });
   return html;
 }
 

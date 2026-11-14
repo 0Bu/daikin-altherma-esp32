@@ -293,6 +293,21 @@ sandbox.__api.toggle("env3_temperature");
   S.hist.set(keys[2], rings[2]);
 }
 
+{
+  const rings = [...S.hist.entries()];
+  for (const [id, ring] of rings) S.hist.set(id, { ...ring, gen: 6, t0: null });
+  sandbox.__api.render();
+  assert.match(elements.inspHist.innerHTML, /data-hist="env3_combined"[\s\S]*vhist-line env-temperature/);
+  assert.match(elements.inspHist.innerHTML, /data-hist="env3_forecast"[\s\S]*vhist-line env-forecast-temperature/,
+    "an undated sensor ring and a fresh forecast have independent axes");
+  S.otaCached = true;
+  sandbox.__api.render();
+  assert.doesNotMatch(elements.inspHist.innerHTML, /env-forecast-temperature/,
+    "a cached OTA status cannot supply a current forecast");
+  delete S.otaCached;
+  for (const [id, ring] of rings) S.hist.set(id, ring);
+}
+
 // Transport loss retires only the live status claims. The dated historical measurements remain
 // inspectable; a values-only error does not erase independent freshly obtained ENV III status.
 S.transportUnavailable = "status";

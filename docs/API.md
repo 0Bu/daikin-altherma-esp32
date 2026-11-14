@@ -74,6 +74,7 @@ physical measurement. `?redact=1` applies the [report redaction contract](SECURI
 |---|---|---|
 | Root | `version`, `platform`, `uptime_s`, `boot_id`, `app_elf_sha256`, `pins_avail` | Running build, uptime, 16-hex-digit random per-boot token and X10A-eligible GPIOs. The configured nine-character ELF hash prefix helps correlate symbols; it is not full artifact/flash verification. |
 | `board` | `led_gpio`, `led_type`, `led_inverted`, `btn_gpio`, `btn_active_low`, `user_set`, `preset_id`, `preset_name`, `vendor`, `pins_local`, `presets` | Persisted hardware identity and local-I/O candidates, excluding current X10A claims. A preset fills fields; submission saves them. |
+| `board.config_revision` | Unsigned 32-bit integer | RAM-only configuration revision for draft validation. Pair with `boot_id`. |
 | `board.presets[]` | `id`, `name`, `vendor`, `led_gpio`, `led_type`, `led_inverted`, `btn_gpio`, `btn_active_low`, `i2c_pins` | Supported hardware presets. A selected identity remains listed even if its original factory pins are now unavailable; other presets whose pins are claimed (including detected Ethernet) are withheld. |
 | `wifi` | `ssid`, `ip`, `rssi`, `connected`, `bssid`, `mac`, `std`, `rolled_back` | BSSID/PHY standard are null offline. `rolled_back` is sticky until the next WiFi save. |
 | `net` | `kind`, `ip`, `eth` | Active transport (`none`, `wifi`, `eth`) and its address, independent of X10A/HomeHub. |
@@ -581,8 +582,8 @@ Pin claims must not
 collide with X10A, the other onboard part or ENV III. A board identity statement can save with no reboot; changing task-owned pins/accessory reboots.
 Switching away from M5Stack retires ENV III in the same atomic save.
 The dashboard sends `boot_id` and `board.config_revision` from its accepted `/status` as
-`boot_id` and `config_revision`. This optional pair rejects an older boot or configuration with
-409 before probing pins or saving. Clients that omit both retain their existing request semantics.
+`boot_id` and `config_revision`. A missing or invalid member of the optional pair returns 400.
+An outdated boot or configuration returns 409 before probing pins or saving. Clients can omit both.
 
 `POST /set_env3` is the compatibility route (`enabled`, `sda`, `scl`, all optional). Both board routes
 share the same preflight: enabling new pins probes SHT30/QMP6988 (422 if absent, 503 if busy), enabling

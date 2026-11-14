@@ -429,8 +429,9 @@ green/yellow/red state colours as WiFi, MQTT, Syslog and NTP:
   opinion presupposes a first one, and the only X10A number still in memory is one the bus stopped
   refreshing, so a "difference" against it would be a statement about two *instants* wearing the
   shape of a statement about two *instruments*.
-  ΔT and heat output survive, because both sides of each come from the one source and nothing is
-  mixed across boundaries. HomeHub input register **51** reports heat-pump power consumption in
+  ΔT uses the gateway's pair of water temperatures. The heat-output estimate also requires valid
+  flow, an active compressor and a supported mode and transfer direction. HomeHub input register
+  **51** reports heat-pump power consumption in
   `kW`. The [Daikin EKRHH guide, 4P744838-1E, §9.2.2, p. 43][homehub-ekrhh-guide] leaves its
   measurement point and heater inclusion unspecified.
   The dashboard shows the reported input by register offset, since the other `kW` rows are power

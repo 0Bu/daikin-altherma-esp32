@@ -250,6 +250,9 @@ S.hist.set("modbus:dhw_tank", modbus);
   S.hist.set("dhw_tank", legacy);
   assert.match(h.histHtml("dhw_tank", "", "Tank", "x10a"), /Verlauf nicht verfügbar/,
     "legacy history ages from receipt even when there is no clock or bucket");
+  S.hist.set("dhw_tank", { ...legacy, refreshFailed: false });
+  assert.match(h.histHtml("dhw_tank", "", "Tank", "x10a"), /nicht gemessen/,
+    "old successful replies still age out when automatic refresh stops before a fetch fails");
   historyFetchError = false;
   S.histHidden.delete("dhw_tank");
   S.hist.set("dhw_tank", x10a);
@@ -718,6 +721,10 @@ assert.match(liveBoostHtml, /Boost aktiv · 10 min/,
   "one live observation must not be counted as an invented five minutes of Boost runtime");
 assert.equal(h.scrubText(liveBoostView, 7), "jetzt · Empfehlung ein",
   "the state shown at the right edge and its tooltip must agree");
+S.otaCached = true;
+assert.equal(h.historyView("smart_grid_mode", "modbus").liveIndex, undefined,
+  "a retained OTA snapshot cannot create a live cap");
+delete S.otaCached;
 {
   const key = "modbus:smart_grid_mode";
   const old = S.hist.get(key);
@@ -733,6 +740,13 @@ assert.equal(h.scrubText(liveBoostView, 7), "jetzt · Empfehlung ein",
   assert.match(liveOnly, /vhist-state-on sg-recommended/);
   assert.match(liveOnly, /Verlauf nicht verfügbar/);
   assert.doesNotMatch(liveOnly, /Boost aktiv · 0/);
+  S.hist.set("smart_grid_mode", { ...old, gen: 7, v: [0, 20] });
+  const currentPair = h.historyView("smart_grid_mode");
+  assert.equal(currentPair.series.find(s => s.source === "modbus").v.at(-1), 20,
+    "a healthy peer's history cannot suppress independently available current evidence");
+  assert.doesNotMatch(h.histHtml("smart_grid_mode", "", "Smart Grid"), /Boost aktiv · 0/,
+    "a current-only primary source cannot present a zero recorded duration");
+  S.hist.delete("smart_grid_mode");
   S.hist.set(key, old);
 }
 delete S._modbus;

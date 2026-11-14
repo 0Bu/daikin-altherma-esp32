@@ -498,7 +498,9 @@ The Hardware modal records board identity independently of pins. Choosing a pres
 peripherals; disabling LED/reset does not change the preset. ENV III is editable only for a pending
 M5Stack selection and hidden/disabled for Custom/Seeed. Safe distinct SDA/SCL options reflect exposed
 pins. An enabled sensor must pass its live SHT30/QMP6988 probe before one atomic board/sensor save;
-rejection preserves the entire draft. The Hardware explanation lists saved configuration, complete
+probe rejection preserves the draft. If a fresh status frame shows a different boot or
+configuration before submit, the browser closes the editor and asks the owner to reopen it. The
+Hardware explanation lists saved configuration, complete
 indicator phases with static colour points and available ENV III live/history readings. Uptime uses
 at most two coarse units; per-task stack headroom remains diagnostic API evidence, not an invented
 chart.

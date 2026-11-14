@@ -915,6 +915,9 @@ const SG_INSP = (c, d) => c.INSPECT.sgrequest;
   assert.equal(d.thermalMode, "heat", "a DHW-routed hydronic loop is a heating task");
   assert.equal(c.waterThermalKind(d, true), "heat",
     "active Modbus-only DHW receives heating colours, never cooling or neutral colours");
+  assert.equal(c.waterThermalKind({ ...d, defrost: true, pth: -7.7 }, true), "cool");
+  assert.equal(c.waterThermalKind({ ...d, defrost: true, pth: null }, true), "neutral");
+  assert.equal(c.waterThermalKind({ ...d, defrost: true, pth: 7.7 }, true), "heat");
   assert.equal(d.pthKind, "heating");
   assert.ok(Math.abs(d.pth - 7.87) < 0.01,
     "the witnessed PHE transfer is flow×(R1T−R4T), using the screenshot operating point");

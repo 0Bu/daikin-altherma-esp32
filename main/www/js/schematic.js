@@ -185,6 +185,8 @@ const pumpFlowConflict = (d) => !!d && d.pumpOn === false && d.flow != null && d
 // still cannot distinguish heating from cooling and therefore remains neutral.
 const waterThermalKind = (d, pumping) => {
   if (!d || pumping !== true) return null;
+  if (d.defrost === true)
+    return !Number.isFinite(d.pth) || d.pth === 0 ? "neutral" : d.pth < 0 ? "cool" : "heat";
   if (d.thermalMode == null || (!compressorRunning(d) && !(d.buh1 || d.buh2))) return "neutral";
   return d.thermalMode === "cool" ? "cool" : "heat";
 };
@@ -480,22 +482,13 @@ function liveData() {
     d.ouHeldOver = false;         // nothing to hold over: the whole bus is silent, not one unit
     d.ouUnknown = false;
     MB_PAIRS.forEach((p) => takeMb(p.fld, p.cid));
-    // The HomeHub MEASURES the electrical input; X10A has no such row and the dashboard estimates it
-    // from CT clamps at an assumed 230 V. So on this path the figure is better than usual, and it is
-    // marked as measured rather than estimated.
-    //
-    // Addressed by its EKRHH OFFSET, never by its unit. THREE rows in the map carry "kW" — the
-    // measured consumption at input 51 and the two power-LIMIT setpoints at holding 57/58 — so a
-    // first-match on the unit promoted a configured ceiling to the plant's measured draw the moment
-    // 51 was unavailable or answered a sentinel. A limit is a number the installer typed; drawing it
-    // as a measurement is the legacy-35–legacy-39 shape wearing a plausible value, and the Modbus card would go
-    // on labelling it correctly one card below.
+    // EKRHH input 51 reports heat-pump power consumption. Holding registers 57 and 58 share its
+    // kW unit and represent configured limits. Select by register identity and preserve the source.
     const pw = mbPower();
     if (pw) { const n = parseFloat(pw.value);
               if (Number.isFinite(n)) { d.pel = n; d.pelSrc = "MB"; d.mbFields.add("pel"); } }
-    // ΔT survives because both temperatures come from the gateway's own hydronic readings. Thermal
-    // output survives only with its independent input-31 compressor witness: without that current
-    // flag, the snapshot still cannot distinguish active PHE transfer from pump-only redistribution.
+    // Both temperatures come from the gateway. The thermal plan also requires valid flow, a
+    // current input-31 compressor witness and a supported mode and transfer direction.
     d.dt = (d.lwt != null && d.ret != null) ? d.lwt - d.ret : null;
     d.dtStale = waterMoving(d) !== true;
     d.spaceMode = null;
@@ -1707,18 +1700,17 @@ function renderInspectHist(e, row, mode = "") {
     if (!mayFetch || (mode === "refresh" && (started || S.histBusy.size))) return;
     started = ensureHist(id, source, mode) || started;
   };
-  const historySig = h => !h ? "" : h.err ? "e"
-    : h.refreshFailed ? `${h.gen}:failed:${expiredHistSlots(h)}` : String(h.gen);
   if (e && e.env3) {
     const offered = ENV3_COMBINED_SERIES.filter((s) => hasEnv3Hist(s.id));
     for (const s of offered) request(s.id, "env3");
     const seriesSig = offered.map((s) => {
       const h = S.hist.get(histCacheKey(s.id, "env3"));
-      return `${s.id}:${historySig(h)}`;
+      return `${s.id}:${historyRingRevision(h)}`;
     });
     const pin = S.histPin.get(ENV3_COMBINED_ID);
+    const forecastPin = S.histPin.get(ENV3_FORECAST_ID);
     const forecast = weatherForecastView();
-    const sig = [LANG, ENV3_COMBINED_ID, ...seriesSig, forecast?.revision,
+    const sig = [LANG, ENV3_COMBINED_ID, ...seriesSig, forecast?.revision, forecastPin?.t,
                  pin ? (pin.t ?? `${pin.i}/${pin.gen}`) : ""].join("|");
     if (sig === S.inspHistSig) return started;
     S.inspHistSig = sig;
@@ -1764,7 +1756,7 @@ function renderInspectHist(e, row, mode = "") {
   const sourceDefault = h && mh && !S.histHidden?.has(id) ? histX10aDown() : "";
   // histHtml carries localised axis/readout copy. A language switch must therefore invalidate the
   // inspector chart even when the series generation and pinned sample are unchanged.
-  const sig = [LANG, id, trendSource, historySig(h), historySig(mh), historySig(rh),
+  const sig = [LANG, id, trendSource, historyRingRevision(h), historyRingRevision(mh), historyRingRevision(rh),
                id === "room_temp" ? roomHistName() : "",
                liveGen, auxGen, sourceDefault, pin ? (pin.t ?? `${pin.i}/${pin.gen}`) : ""].join("|");
   if (sig === S.inspHistSig) return started;
