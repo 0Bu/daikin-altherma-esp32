@@ -127,8 +127,8 @@ assert.ok(workerPrime >= 0 && workerRetained > workerPrime && workerPark > worke
 assert.match(worker,/thread_sem == nullptr \|\| sys_thread_sem_get\(\) != thread_sem/,
   "a missing or unretained semaphore must not publish readiness");
 assert.match(worker.slice(workerLoop),
-  /^for\s*\(;;\)[\s\S]{0,120}?ulTaskNotifyTake\(pdTRUE,\s*portMAX_DELAY\)/,
-  "the static OTA worker must remain resident and sleep between operation notifications");
+  /^for\s*\(;;\)\s*\{\s*(?:\/\/[^\n]*\n\s*)*if \(!ulTaskNotifyTake\(pdTRUE, pdMS_TO_TICKS\(1000\)\)\) \{\s*mb_retry_start\(\);\s*continue;\s*\}/,
+  "the resident OTA worker must sleep for notifications and retry HomeHub admission only on idle timeout");
 assert.doesNotMatch(ota, /xTaskCreate\(ota_task/,
   "an OTA operation must not allocate its own task stack from runtime heap");
 assert.match(ota,
@@ -1271,8 +1271,11 @@ const pauseStep = mqtt.slice(pauseStart, holdStart);
 const holdStep = mqtt.slice(holdStart, resumeStart);
 const resumeStep = mqtt.slice(resumeStart, resumeEnd);
 assert.match(pauseStep,
-  /s_transport_pause_requested\.load\(std::memory_order_acquire\)[\s\S]{0,220}?esp_mqtt_client_stop\(s_client\)[\s\S]{0,260}?s_client_running\.store\(false,\s*std::memory_order_release\)[\s\S]{0,260}?s_transport_paused\.store\(true,\s*std::memory_order_release\)/,
+  /s_transport_pause_requested\.load\(std::memory_order_acquire\)[\s\S]*?const esp_err_t stop_rc = esp_mqtt_client_stop\(s_client\);\s*if \(stop_rc == ESP_OK\) \{\s*source_cleanup_outbox_cleared_after_transport_stop\(\);\s*s_client_running\.store\(false,\s*std::memory_order_release\);\s*s_transport_connecting\.store\(false,\s*std::memory_order_release\);\s*mark_transport_paused\(\);/,
   "the MQTT owner must stop and acknowledge esp-mqtt before a competing TLS session starts");
+assert.match(mqtt,
+  /static void mark_transport_paused\(\) \{[^{}]*s_transport_paused\.store\(true,\s*std::memory_order_release\);/,
+  "the successful stop must publish its acknowledged pause");
 // The clean stop discards the transport LWT, and an OTA install restarts the board while the
 // client is stopped. The connected transport must therefore retain `offline` itself, on the same
 // stream and ahead of the DISCONNECT, and only for the OTA lease (logic/mqtt_publish_gate.hpp).
@@ -1371,9 +1374,13 @@ assert.ok(startCurrentStart >= 0 && startCurrentOkAt > startCurrentStartAt &&
   "start_current_client must reset the MQTT status before starting the client");
 assert.equal(statusCalls(startCurrent.slice(startCurrentStartAt, startCurrentOkEnd)).length, 0,
   "a successful client start must leave the connection state to MQTT_EVENT_CONNECTED");
-// mqtt_task leaves the connection state to the checked start/resume paths and SDK events.
-assert.equal(statusCalls(mqttTask).length, 0,
-  "mqtt_task must leave the connection state to the start paths and MQTT_EVENT_CONNECTED");
+// A missing SDK event can leave transport startup without an owner. The bounded sampler may
+// report its failure after clearing the transport state. Positive state still comes from SDK events.
+assert.deepEqual(statusCalls(mqttTask).map(call => call.line), ['set_status(false, "transport setup failed");'],
+  "mqtt_task must report only the sampled transport startup failure");
+assert.match(mqttTask,
+  /state == MQTT_CLIENT_STATE_DISCONNECTED \|\|\s*\(state == MQTT_CLIENT_STATE_CONNECTED && !s_connected\.load\(\) &&\s*esp_mqtt_client_stop\(s_client\) == ESP_OK\)\)[\s\S]*?mark_transport_paused\(\);\s*transport_resume\.wait_s = transport_resume\.backoff_s;\s*set_status\(false, "transport setup failed"\);/,
+  "a missing connection event must only publish failure after the SDK transport has stopped");
 assert.doesNotMatch(mqtt, /promote_client_to_publisher/,
   "X10A source proof must not replace the LWT transport or introduce a second status writer");
 assert.match(mqtt,
