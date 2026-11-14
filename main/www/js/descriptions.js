@@ -1230,8 +1230,8 @@ function mbDeltaHtml(row, mb) {
   if (x10aState != null || mbState != null) {
     // X10A serves binary flags as 1/0; the gateway's valve serves its named destination. Compare
     // their structural meanings, never their different wire spellings.
-    return x10aState != null && mbState != null && x10aState === mbState
-      ? "" : `<div class="mb-delta">${esc(t("src.disagree"))}</div>`;
+    return x10aState != null && mbState != null && x10aState !== mbState
+      ? `<div class="mb-delta">${esc(t("src.disagree"))}</div>` : "";
   }
   const a = parseFloat(row.value), b = parseFloat(mb.value);
   if (!Number.isFinite(a) || !Number.isFinite(b)) return why ? `<div class="mb-delta">${esc(why)}</div>` : "";

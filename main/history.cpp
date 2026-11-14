@@ -1512,6 +1512,16 @@ static void close_modbus_buckets_locked(uint32_t bucket) {
     P().boots_since_commit = 0;
 }
 
+static __attribute__((noinline)) HistorySample modbus_history_sample(const std::string&    value,
+                                                                     def::HomeHubValueKind kind) {
+    if (kind == def::HomeHubValueKind::ThreeWayValve) {
+        if (value.size() != 1 || (value[0] != '0' && value[0] != '1')) return HISTORY_NO_READING;
+        return static_cast<HistorySample>((value[0] - '0') * 10);
+    }
+    int tenths = 0;
+    return value_tenths(value, tenths) ? static_cast<HistorySample>(tenths) : HISTORY_NO_READING;
+}
+
 ModbusHistorySamples history_modbus_samples(const CachedValue* v, size_t n) {
     // Parse before taking the history lock. strtod is locale-stable in this firmware and needs no
     // shared state from the rings; keeping it outside makes the critical section plain fixed-size
@@ -1527,8 +1537,7 @@ ModbusHistorySamples history_modbus_samples(const CachedValue* v, size_t n) {
             if (!row || !logic::homehub_history_row_matches(logic::HOMEHUB_HISTORIES[t], *row,
                                                             def::homehub_has_quiet_activity(*row)))
                 continue;
-            int tenths = 0;
-            if (value_tenths(v[i].value, tenths)) sample[t] = static_cast<HistorySample>(tenths);
+            sample[t] = modbus_history_sample(v[i].value, row->kind);
             break;
         }
     }

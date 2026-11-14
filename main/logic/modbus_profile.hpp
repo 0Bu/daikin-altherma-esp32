@@ -38,12 +38,18 @@ inline constexpr bool is_extended_register(uint16_t offset) {
 // Single register used to probe extended capabilities (Water pressure, offset 79).
 inline constexpr uint16_t MODBUS_PROBE_REGISTER = 79;
 
+inline constexpr bool altherma4_water_pressure_word_valid(uint16_t raw) {
+    // The provisional centibar interpretation bounds the display to its documented range.
+    // Zero can describe a depressurized circuit, but is insufficient to identify the profile.
+    return raw <= 600;
+}
+
 inline bool is_valid_altherma4_probe_value(uint16_t reg, uint16_t raw) {
     if (mb_is_special(raw)) return false;
     if (reg == MODBUS_PROBE_REGISTER) {
         // Existing centibar heuristic, not a manufacturer-verified scale or model identity.
         // Physical Altherma 4 acceptance remains pending (docs/MODBUS_PROTOCOL.md).
-        return raw > 0 && raw <= 600;
+        return raw > 0 && altherma4_water_pressure_word_valid(raw);
     }
     return true;
 }

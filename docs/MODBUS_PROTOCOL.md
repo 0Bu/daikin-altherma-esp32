@@ -322,6 +322,10 @@ flow scale, prints L/min for pump speed and gives an ambiguous 10–600 bar pres
 outputs, pressure pairing and pressure-based profile selection must not be treated as confirmed
 physical measurements or verified model identification. The native value explainers also state the
 unverified flow/pump/pressure interpretations in every shipped language.
+The native pressure sweep admits unsigned words 0–600 under that provisional scale. Zero is a
+readable pressure word after native profile selection. A probe needs 1–600 to select that profile.
+Other words cannot populate current pressure. Invalid three-way-valve words remain visible in raw
+telemetry and do not replace a valid categorical sample in the same history bucket.
 The limits also appear beside paired X10A comparisons and under replacement readings. No numeric
 agreement or difference is asserted for unverified flow or native pressure. A rejected pressure
 register selects the baseline map and gives no independent evidence for the flow divisor. Input 49

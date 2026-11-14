@@ -1533,6 +1533,7 @@ def validate_mqtt_tls_client(source: str) -> None:
     source = re.sub(r"/\*.*?\*/|//[^\n]*", "", source, flags=re.S)
     expected = {"task.stack_size", "broker.address.uri", "broker.verification.crt_bundle_attach",
                 "credentials.client_id", "credentials.username", "credentials.authentication.password",
+                "network.disable_auto_reconnect",
                 "session.keepalive", "outbox.limit", "session.last_will.topic", "session.last_will.msg",
                 "session.last_will.msg_len", "session.last_will.qos", "session.last_will.retain"}
     fields = re.findall(r"\bcfg\.([a-z_0-9]+(?:\.[a-z_0-9]+)*)\s*=", source)

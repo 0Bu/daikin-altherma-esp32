@@ -158,7 +158,7 @@ phases = ["prepare_read", "prepare_erase", "body", "commit", "readback",
           "commit_accepted_error", "success"]
 cases = ["commit_rejected", "core_ahead", "nor_contract", "read_admission", "sequence_rejections",
          "modbus_live_peer_change", "modbus_reply_bucket", "x10a_dhw_reply_bucket",
-         "modbus_peer_forget", "modbus_quiet_unverified",
+         "modbus_peer_forget", "modbus_quiet_unverified", "modbus_invalid_valve",
          "modbus_missing_target_digest",
          "core_sequence_prepare", "core_sequence_readback", "core_sequence_commit_error",
          "forget_before_start", "forget_during_lookup", "forget_during_scan",

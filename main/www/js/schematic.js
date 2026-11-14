@@ -1497,6 +1497,11 @@ function inspMember(sel) {
     return { x10a: null, mb: mbForInspect("out") };
   const r = pickRow(selector);
   if (cid === "valve_dhw") return { x10a: r, mb: null };
+  if (cid === "space_op") {
+    const row = mbRow(53), current = mbBool(53);
+    const mb = row && current != null ? { ...row, value: current ? "1" : "0" } : null;
+    return { x10a: x10aDown() ? null : r, mb };
+  }
   // X10A down: the retained row is not a reading any more. The gateway stands in where it carries
   // the same quantity (mbFallbackFor — the helper whose whole job is that substitution) and the
   // member simply disappears where it does not, rather than printing a stale number under its label.

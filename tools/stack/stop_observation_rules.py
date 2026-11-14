@@ -381,7 +381,7 @@ BODIES = {
     'main/history.cpp': {'history_flash_forget_ready': '2e5cd836850c755bdb7e35e2e2f05a09eecacfcd7973af03266f548d08133a96', 'history_persist_state': 'd06271f4418ca5cc11c6f1c073a8d2b87eef13b13684c6903d17c85967aaa32e', 'history_checkup_flash_pending': 'f5c12808e894a7183bc10f7f74271282fab5558baa14cb1ee98c0630ece0f8d4', 'persist_wipe': '4394f5a5e61885e0e68722050143e33ff0c5b25e12225d73c64ff00dc47f2637', 'persist_seal_locked': '27f95c2faaf3b7d1711e76af89a7bb381277ae02092b63bc965226de272266df', 'history_persist_crc': 'd3f63226db9183fa4a624e615eeee660081843239ff24c8e6c5c002a077ac890', 'room_wipe_locked': '2c8ffda9b4bf50aff913225d2384a3f87bdc0b95f5da55e351d02df5bcc15ad8', 'room_seal_locked': 'd74305d77fc7cff40166fa05efee9ecda565c0534a0ba50e10ef71f95b63a88c', 'room_crc': '3100b765bf0e51aa216e883eaf2f1a9a6f572626ff07b55d712200b9c7eef6c4', 'flash_manifest_cache_reset': 'd741678b58fb33a6e086ba270d825d82512d86c12d1634086cd76c473555d786', 'forget_adopt_floor': 'b6cfa9296eaf5bf71f95ee18a4fffbb2b5fb2e5341f9669ecf53fcc800872b87', 'flash_read_stop_observation': '75cbf90d8d9f10327834e195f85009b608ecbb226898664b79b8cde7dc25e429', 'flash_journal_scan': '3eaa548ab583f426020f1fd920384b5d5efc6b3371af5eec4500550ac56533e8', 'flash_build_next_stop_observation': 'f6cab877495c59fa36f4327f839117ad58994dd5753688da0a4a628c2776936b', 'flash_append_record_at': '7859984c0ad9bad27dba5fe532b7fa053d6d6965257a8ec1d3148c228537ae63', 'flash_append_record': '02a900a92d952c38cf0cfe5838ac6a9d29d448f41bc712aa62428c702668ccd8', 'history_service_flash_restore': '55d18943f844d4e0750e802b0121c9f544b79da6f61d7f9d54c3b0209c5a6bd8', 'history_flash_service_journal': 'f0f03aaa95dbc8670372bfb48ad28d5f470ef16cc2183db7dabefa6a40120713', 'history_flash_save': '7fced14b0c7def9758cd22d2d986903556f23e9b80ab810feb84a18a5dc2d349', 'history_flash_forget': '38d6a01c5b5dab323cfc87298adac3cc2cb07f11120d20bd4dd5f0899d342d88', 'history_flash_start': 'd7956a1b227c03a14ff2e89aadd6dc4a6e0b81bfd26bc94b3399e25a64c85729', 'flash_region_erased': 'bd569d6c919373f96e471df99996084f7df6ab8a5841da5d644a14f707383712', 'history_restore_checkup_flash': 'c42ccceb872568a11e12ff78922b0ead952e4eca8e7c3023f4ea676954a634da', 'flash_build_for_service': '4434c5a6927b689b650f9fe38bf42c88c21cea9ddfc81154f9927180f4a35e3a', 'history_start': 'be03f6638671f5902f8c586be10743af54dd950346324321e7e9537326cf40db', 'history_record_board': '3e0fed45d656ff87f7369741316b87793f79cab29f042d79137e4656d126de66', 'flash_index_stop_observation_record': 'a4f77b892db7f0883e4fbec0ede6080e571ed2299c5aaabe159ca6e013eda1d8'},
     'main/logic/history_persist.hpp': {'history_journal_reserve_sequence': '08fe5a8a10a103d6aacb29bb2f1ebfacb898b1e5688326db4af5cb76bdeefedb'},
     'main/recovery_button.cpp': {'factory_reset': '2576aecad49c3d9a4515e6e0d8fef1697aebc5675c57a60b9ca4389936072d32', 'button_task': 'cbf986209f566a3f6eae80b8be629ef18911f8fa319084dd7959a4e76a7cf460'},
-    'main/mqtt_ha.cpp': {'publish_heartbeat': '2d659e33a6c5f8bb0f682c4e58bb4ea60b3ce259acef21a27ce6474bf452bacc', 'build_heartbeat_payload': '22ff09e1059552ba1fed412dc780465042c603c8b3f4bf62142cd8c66601b761', 'mqtt_task': '823ee23ead8cb50f0cf7b38470ea2c0a40aea61c7c39434fd4bc76a8784e6b53'},
+    'main/mqtt_ha.cpp': {'publish_heartbeat': '2d659e33a6c5f8bb0f682c4e58bb4ea60b3ce259acef21a27ce6474bf452bacc', 'build_heartbeat_payload': '22ff09e1059552ba1fed412dc780465042c603c8b3f4bf62142cd8c66601b761', 'mqtt_task': '12c46d632de8ef06455a4dd966ec4341a4f092b2eafda7306b35a74f3b270ee7'},
     'main/hp_poll.cpp': {'checkup_record_poll_gap': '5fb1fd43670b4b4daffd1b4a1cddd3864e7cae719cdcfc11f8d3dddeb9e4ef88', 'poll_task': '6b62392ac706f8b567314ec445351f53176d555843b62169a445ef072a2284e3', 'poll_once': '808c07edf23ecbe963fc0694abaf01c9841ef5dd5f66aeb355d24e67ed193152', 'poll_detect': 'ffcdce0117bf432880af0af2f443d531ed82371213f96620e0d5a05be7b56ab6'},
     'main/http_config.cpp': {'read_config_document': '9b8505b7d63f7b8fc63f184a6f5311c77c0e7f56616c4669cc0008069c05a9ca', 'set_wifi': '9fb0686e62526883f4d758e3c3e1b976ba7065c323ddfe1ea9dcff54fa98780a', 'parse_circulation_request': 'f62d40518fdda281234d009179430717ac4c0472c17f2678ac7d67088ec86092', 'set_weather': 'dac1f930149cd45d6495514ef8c5bf0ce42a8de449b6e49ae5a1695d10faf408', 'set_board': '6170a871f0b823113a09db5b8ac5fda2a3b88ba68abee4005dd34c8ec1db89c6', 'set_env3': '2dcb0874faa68175dbc2150d28b5676a3214515c0c66b15199ae9e1f37bd9c78', 'set_hp': '7f73a7684d73a79531d23f1aab5a2e0e4969b84b4aea4381ec6333fb12229508', 'set_diagnostics': 'a538c190e0a57f2a44db4ecafd14685d6d627f0771b0cad27d55d070f71f381b', 'do_detect': '22fd9b4a0da0665105a0dad61692cd77c29d2de6e42df36869d0c4e20ebe6b9c'},
     'main/http_status.cpp': {'append_status_json': '52c2b1b19950371f109c16f86846f1d4269cdfefc6caf929c5a339a092a2f56b', 'h_status': 'd06d3dc6e1be37c7bfa372a10f9e01f6b592ebe2fab4d0b9b74894d5c15c51b3', 'http_send_status_json': 'bd305a86cfd4ac55f17680e2c8e2c1fd0138ea46c58d726cc5a9815fe8d68b5c'},
@@ -793,6 +793,7 @@ PATHS['modbus_history_peer_bind_target'] = [
 SYMBOLS.update({
     'modbus_history_retain': {'pattern': r'^daik::mb_retain_history\(', 'max_bytes': 96},
     'modbus_history_collect': {'pattern': r'^daik::history_modbus_samples\(', 'max_bytes': 64},
+    'modbus_history_sample': {'pattern': r'^daik::modbus_history_sample\(', 'max_bytes': 48},
     'modbus_history_record': {'pattern': r'^daik::history_record_modbus\(', 'max_bytes': 64},
     'modbus_history_fold': {'pattern': r'^daik::history_record_modbus_samples\(', 'max_bytes': 64},
     'modbus_publication_claim': {
@@ -803,9 +804,9 @@ SYMBOLS.update({
     },
 })
 for branch, chain in {
-    'collect': ['modbus_history_record', 'modbus_history_collect'],
+    'collect': ['modbus_history_record', 'modbus_history_collect', 'modbus_history_sample'],
     'fold': ['modbus_history_record', 'modbus_history_fold'],
-    'retain': ['modbus_history_retain', 'modbus_history_collect'],
+    'retain': ['modbus_history_retain', 'modbus_history_collect', 'modbus_history_sample'],
     'replay': ['modbus_history_fold'],
 }.items():
     PATHS[f'modbus_measured_history_{branch}'] = [
@@ -964,6 +965,7 @@ for branch, continuation in {
 for caller, task, prefix, limit in (
     ('boot', 'main', ['main_task', 'boot_sequence', 'modbus_create_boot', 'modbus_create_retry'], 5120),
     ('poll', 'poll', ['runtime_task_entry', 'poll_task', 'modbus_create_retry'], 7168),
+    ('idle', 'ota', ['runtime_task_entry', 'ota_task', 'modbus_create_retry'], 10752),
     ('http_changed', 'httpd', ['config_hp', 'config_document', 'modbus_create_reconfigure'], 8192),
     ('http_saved', 'httpd', ['config_hp', 'config_document', 'modbus_create_retry'], 8192),
 ):
@@ -1006,7 +1008,7 @@ BODIES['main/history.cpp'].update({'history_modbus_reset_scope_locked': 'cbb56d6
  'flash_build_next_record': 'd6a33f73b0e9acb3b80aa66cf64c37f73aba25eac1ebfa5297da0ff3c627bd06'})
 BODIES['main/history_target.cpp'] = {'history_modbus_target': 'a768932c642ee9db5356c672b8ce1876a9ddc6c14385b290494c265f38a7f156'}
 BODIES['main/hp_modbus.cpp'] = {'mb_ensure_connected': 'a09adc44fb9ad2fea8e8f5c364e1a31a1d8eb44314c5f279d1e9d734ea5b4238',
- 'mb_poll_once': 'e06701710e482adb7830f1fe7fd01c961b598da46efa23d35dd0e905efeb28b7',
+ 'mb_poll_once': 'ed0cfe4c19c2708025469d747dacb38afdf1b0f77c5a544e3bafe59a4bdf6745',
  'status_socket_open': '6acb79527aee70827e7a0a62457febca550aa66fb7c71d750fcb3a56133a62c5'}
 BODIES['main/hp_modbus.cpp']['admit_answering_peer'] = (
     '54a513bfa442904529aefbfe90436744c8aa37efb6bd75ef5d622d9e5d3d4aa9')
@@ -1031,6 +1033,7 @@ BODIES['main/hp_modbus.cpp'].update({
     'mb_reconfigure': 'dc219722946933b9c84651634d4cc7872fcc017cde3efdb630db30ff7ae6d6e1',
     'mb_network_quiesced': '1be4f835658858fcf43554071c903544ebe5a95edd9ca09c73d5c9d633f3a5ff',
 })
+BODIES.setdefault('main/ota_update.cpp', {})['ota_task'] = 'de662e0bdc40a7b5ab40c543030d671b3e04f8f8e4dcf051b4fb85511226a12b'
 BODIES.setdefault('main/main.cpp', {})['boot_sequence'] = 'dbd24138cee2c0dc6738ac7aebcbad527be3c7d64f1d75b30817e178da997eb5'
 BODIES['main/hp_poll.cpp']['poll_task'] = 'd8c615499b948e0b026f4309ec51eaab153c999f9f6acdcdfb202ae88512cb8b'
 BODIES['main/hp_modbus.cpp']['mb_admit_worker'] = '59ca8a364dc6238ce38e267ca3cdd789a8821dc38a6750881b4ce637d1ad5ed9'
@@ -1046,6 +1049,7 @@ CALLERS.update({
                                  'main/hp_modbus.cpp:mb_reconfigure': 1},
     'mb_retry_start': {'main/http_config.cpp:set_hp': 1, 'main/hp_poll.cpp:poll_task': 1,
                         'main/hp_modbus.cpp:<definition>': 1, 'main/hp_modbus.cpp:mb_start': 1,
+                        'main/ota_update.cpp:ota_task': 1,
                         'main/hp_modbus.hpp:<declaration>': 1},
     'mb_start': {'main/hp_modbus.cpp:<definition>': 1, 'main/main.cpp:boot_sequence': 1,
                  'main/hp_modbus.hpp:<declaration>': 1},
@@ -1053,6 +1057,8 @@ CALLERS.update({
                         'main/hp_modbus.hpp:<declaration>': 1},
     'mb_network_quiesced': {'main/weather_forecast.cpp:weather_cycle': 2,
                             'main/ota_update.cpp:wait_for_modbus_quiesce': 3,
+                            'main/mqtt_ha.cpp:mqtt_transport_resume_step': 2,
+                            'main/mqtt_ha.cpp:mqtt_task': 1,
                             'main/hp_modbus.cpp:<definition>': 1,
                             'main/hp_modbus.hpp:<declaration>': 1},
     'mb_retire_if_disabled': {'main/hp_modbus.cpp:<definition>': 1,

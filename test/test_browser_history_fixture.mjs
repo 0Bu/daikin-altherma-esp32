@@ -132,6 +132,7 @@ export function makeHistoryMotionFixture(originalStatus, lang = "en") {
     ntp: { ...status.ntp, synced: true, time: new Date(END * 1000).toISOString() },
     history: {
       epoch: EPOCH,
+      modbus_binding: true,
       rows: HISTORY_MOTION_ROWS.map(({ id, label }) => ({ id, label })),
       modbus_rows: MODBUS_HISTORY_ROWS.map(({ id, label }) => ({ id, label })),
       env3_rows: ENV3_HISTORY_ROWS.map(({ id, label }) => ({ id, label })),
@@ -190,6 +191,8 @@ export function makeHistoryMotionFixture(originalStatus, lang = "en") {
       { label: "Smart Grid contact 2", value: "0", unit: "", reg: 0x60,
         binary: true, binary_semantic: "smart_grid_contact_2" },
     ],
+    modbus_history_epoch: EPOCH,
+    modbus_history_boot_id: BOOT_ID,
     modbus: [
       ...MODBUS_HISTORY_ROWS.map(row => {
         const value = reading(row, tick);

@@ -687,6 +687,13 @@ const X_2WV = (on) => ({ label: "2way valve(On:Heat_Off:Cool)", value: on ? "1" 
   assert.ok(spaceRow, "X10A absent + HomeHub live: the space-operation row must still appear from Modbus");
   assert.equal(spaceRow.x10a, null, "it stands in for the missing X10A row, not beside a present one");
   assert.equal(members.filter((m) => m.x10a).length, 0, "no X10A rows exist, so none are invented");
+  c.S._modbus = [{ ...M_SPACE_OP, value: 1 }];
+  c.S.modbusActivity = { space: false, dhw: null };
+  const current = c.inspMembers(c.INSPECT.heat, null, null).find((m) => m.mb?.concept === "space_op");
+  assert.equal(current.mb.value, "0", "the inspector uses the same current OFF as the schematic");
+  c.S.modbusActivity.space = null;
+  assert.ok(!c.inspMembers(c.INSPECT.heat, null, null).some((m) => m.mb?.concept === "space_op"),
+    "a stale full-sweep flag cannot override unavailable current HomeHub activity");
 }
 
 // ── Both links live, but the outdoor unit is resting ────────────────────────────────────────────
@@ -1216,6 +1223,8 @@ const SG_INSP = (c, d) => c.INSPECT.sgrequest;
                       values: [X_VALVE(true)], modbus: [M_VALVE(true)] });
   assert.ok(!agree.mbNoteHtml(X_VALVE(true), agree.mbTwin(X_VALVE(true))).includes("disagree"),
     "agreement on a flag is unremarkable and says nothing");
+  assert.equal(c.mbDeltaHtml(X_VALVE(true), { ...M_VALVE(true), value: 2 }), "",
+    "an unknown HomeHub valve word cannot contradict a known X10A route");
 }
 
 // ── 15. THE INSPECTOR: a retained row is not a current reading ─────────────────────────────────

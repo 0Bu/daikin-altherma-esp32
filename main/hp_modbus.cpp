@@ -1265,6 +1265,9 @@ static bool mb_poll_once(uint32_t cycle_target_generation, bool allow_reconnect)
             }
         }
         if (!full) return;
+        if (r.space == MbFunc::ReadInput && r.offset == logic::MODBUS_PROBE_REGISTER &&
+            !logic::altherma4_water_pressure_word_valid(raw))
+            return;
         // A provisional EKRHH decode cannot distinguish Quiet activity from native selection.
         if (r.space == MbFunc::ReadHolding && r.offset == 9 &&
             r.kind != def::HomeHubValueKind::Altherma4QuietSelection)

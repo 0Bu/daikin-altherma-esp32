@@ -41,12 +41,15 @@ are unchanged. The HTTP-only `denominator` string is represented by the numeric 
 `stop_context_witnessed_stops_recent_heating` on MQTT.
 
 An initial transport-start rejection retains the initialized client and retries with bounded
-backoff. Failed event registration prevents transport start and reports an explicit error.
+backoff. If the SDK stops before its connect callback, the publisher checks the stopped state
+and retries through the same admission path. Failed event registration prevents transport start
+and reports an explicit error.
 
 ## Outbound availability
 
-One client starts with the retained transport LWT immediately, without waiting for X10A. Bridge
-diagnostics, HomeHub, ENV III, forecast and inbound observers keep their independent lifecycles.
+One client starts with the retained transport LWT independently of X10A. Encrypted starts and
+reconnects wait for the HomeHub sweep to release the network and for the required internal heap.
+Bridge diagnostics, HomeHub, ENV III, forecast and inbound observers keep their independent lifecycles.
 X10A discovery uses `availability_mode: all`: both `<base>/status` and `<base>/x10a/status` must be
 online. Board discovery uses transport availability; accessory discovery also requires its own
 numeric reading, so missing accessory keys make that entity unavailable.

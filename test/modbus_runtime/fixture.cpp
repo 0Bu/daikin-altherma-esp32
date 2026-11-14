@@ -1285,6 +1285,23 @@ void native_gateway_baseline() {
                                  [](const auto& row) { return row.off == 9; }));
         REQUIRE(mb_status().profile != ModbusProfile::Altherma4);
     }
+    reset();
+    Peer native(false, ModbusProfile::Auto, wire_words(true));
+    native.set_word(MbFunc::ReadInput, 79, 240);
+    poll_once();
+    REQUIRE(mb_status().profile == ModbusProfile::Altherma4);
+    REQUIRE(cached_row(snapshot_rows(), 79).value == "2.40");
+    s_cycle_tick = 0;
+    native.set_word(MbFunc::ReadInput, 79, 0x7ffc);
+    poll_once();
+    const auto invalid = snapshot_rows();
+    const bool has_pressure =
+        std::any_of(invalid.begin(), invalid.end(), [](const auto& row) { return row.off == 79; });
+    REQUIRE(!has_pressure);
+    s_cycle_tick = 0;
+    native.set_word(MbFunc::ReadInput, 79, 0);
+    poll_once();
+    REQUIRE(cached_row(snapshot_rows(), 79).value == "0.00");
 }
 ModbusActivity current_activity() {
     bool           live = false;

@@ -3217,6 +3217,10 @@
       "pattern": "^daik::history_modbus_samples\\(",
       "max_bytes": 64
     },
+    "modbus_history_sample": {
+      "pattern": "^daik::modbus_history_sample\\(",
+      "max_bytes": 48
+    },
     "modbus_history_record": {
       "pattern": "^daik::history_record_modbus\\(",
       "max_bytes": 64
@@ -3251,6 +3255,237 @@
     }
   },
   "paths": {
+    "ota_modbus_create_idle_take": {
+      "symbols": [
+        "runtime_task_entry",
+        "ota_task",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "mqtt_input_lock",
+        "sdk_queue_sem_take",
+        "sdk_queue_remove_event",
+        "sdk_queue_yield_required",
+        "sdk_queue_yield_other",
+        "sdk_queue_crosscore_yield",
+        "sdk_queue_crosscore_send",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "ota_modbus_create_idle_release": {
+      "symbols": [
+        "runtime_task_entry",
+        "ota_task",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "sem_guard_release",
+        "sdk_queue_send",
+        "stop_queue_set_notify",
+        "sdk_queue_remove_event",
+        "sdk_queue_yield_required",
+        "sdk_queue_yield_other",
+        "sdk_queue_crosscore_yield",
+        "sdk_queue_crosscore_send",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "ota_modbus_create_idle_allocate": {
+      "symbols": [
+        "runtime_task_entry",
+        "ota_task",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "modbus_create_sdk",
+        "sdk_port_malloc",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "ota_modbus_create_idle_heap_walk": {
+      "symbols": [
+        "runtime_task_entry",
+        "ota_task",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "modbus_create_heap_sample",
+        "modbus_create_heap_largest",
+        "modbus_create_heap_info",
+        "modbus_create_pool_info",
+        "modbus_create_pool_walk",
+        "modbus_create_pool_visit"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "ota_modbus_create_idle_heap_lock": {
+      "symbols": [
+        "runtime_task_entry",
+        "ota_task",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "modbus_create_heap_sample",
+        "modbus_create_heap_largest",
+        "modbus_create_heap_info",
+        "modbus_create_pool_info",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "ota_modbus_create_idle_heap_free": {
+      "symbols": [
+        "runtime_task_entry",
+        "ota_task",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "modbus_create_heap_free",
+        "modbus_create_pool_free"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "ota_modbus_create_idle_free": {
+      "symbols": [
+        "runtime_task_entry",
+        "ota_task",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "modbus_create_sdk",
+        "modbus_create_port_free",
+        "modbus_worker_heap_free",
+        "modbus_worker_aligned_free",
+        "modbus_worker_tlsf_free",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "ota_modbus_create_idle_initialize": {
+      "symbols": [
+        "runtime_task_entry",
+        "ota_task",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "modbus_create_sdk",
+        "modbus_create_init",
+        "modbus_create_port_stack"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "ota_modbus_create_idle_initialize_list": {
+      "symbols": [
+        "runtime_task_entry",
+        "ota_task",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "modbus_create_sdk",
+        "modbus_create_init",
+        "modbus_create_list_item"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "ota_modbus_create_idle_ready_list": {
+      "symbols": [
+        "runtime_task_entry",
+        "ota_task",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "modbus_create_sdk",
+        "modbus_create_ready",
+        "modbus_create_list_init"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "ota_modbus_create_idle_ready_wake": {
+      "symbols": [
+        "runtime_task_entry",
+        "ota_task",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "modbus_create_sdk",
+        "modbus_create_ready",
+        "sdk_queue_yield_required",
+        "sdk_queue_yield_other",
+        "sdk_queue_crosscore_yield",
+        "sdk_queue_crosscore_send",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "ota_modbus_create_idle_ready_exit": {
+      "symbols": [
+        "runtime_task_entry",
+        "ota_task",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "modbus_create_sdk",
+        "modbus_create_ready",
+        "modbus_create_exit_critical"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "ota_modbus_create_idle_log": {
+      "symbols": [
+        "runtime_task_entry",
+        "ota_task",
+        "modbus_create_retry",
+        "modbus_create_start",
+        "diag_log",
+        "sdk_log",
+        "sdk_vprintf",
+        "sdk_vfprintf",
+        "sdk_bufio_put",
+        "sdk_bufio_allocate",
+        "sdk_malloc",
+        "sdk_malloc_default",
+        "sdk_malloc_caps",
+        "sdk_malloc_base",
+        "sdk_malloc_aligned",
+        "sdk_multi_aligned_offset",
+        "sdk_multi_aligned_impl",
+        "sdk_multi_lock",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
     "httpd_mcp_status": {
       "symbols": [
         "mcp_post",
@@ -14485,7 +14720,8 @@
         "modbus_task",
         "modbus_poll",
         "modbus_history_record",
-        "modbus_history_collect"
+        "modbus_history_collect",
+        "modbus_history_sample"
       ],
       "multipliers": {},
       "base_bytes": 2048,
@@ -14509,7 +14745,8 @@
         "modbus_task",
         "modbus_poll",
         "modbus_history_retain",
-        "modbus_history_collect"
+        "modbus_history_collect",
+        "modbus_history_sample"
       ],
       "multipliers": {},
       "base_bytes": 2048,
@@ -15355,6 +15592,19 @@
       "reserve_bytes": 1024,
       "paths": [
         "ota_task_manifest_fetch",
+        "ota_modbus_create_idle_take",
+        "ota_modbus_create_idle_release",
+        "ota_modbus_create_idle_allocate",
+        "ota_modbus_create_idle_heap_walk",
+        "ota_modbus_create_idle_heap_lock",
+        "ota_modbus_create_idle_heap_free",
+        "ota_modbus_create_idle_free",
+        "ota_modbus_create_idle_initialize",
+        "ota_modbus_create_idle_initialize_list",
+        "ota_modbus_create_idle_ready_list",
+        "ota_modbus_create_idle_ready_wake",
+        "ota_modbus_create_idle_ready_exit",
+        "ota_modbus_create_idle_log",
         "ota_shutdown_journal",
         "ota_shutdown_checkup",
         "ota_image_end_pss_adding",

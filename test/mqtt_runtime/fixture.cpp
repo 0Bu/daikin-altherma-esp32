@@ -140,6 +140,7 @@ bool                          write_through_failure = false, reject_new_after_sa
 bool                          save_before_retirement = false;
 } // namespace retirement_witness
 namespace daik {
+bool                    mb_network_quiesced() { return sdk::modbus_network_idle; }
 MqttRetirementStoreLoad mqtt_retirement_store_load(MqttRetirementRecord& out) noexcept {
     ++retirement_witness::load_calls;
     if (retirement_witness::result == MqttRetirementStoreLoad::Ready)
@@ -453,6 +454,63 @@ void event_registration_failure() {
             "REGISTRATION_FAILURE_RELEASES_INITIALIZED_CLIENT");
     require(daik::mqtt_status().error == "event registration failed",
             "REGISTRATION_FAILURE_REPORTS_ITS_ACTUAL_CAUSE");
+}
+
+void tls_setup_recovery_waits_for_homehub() {
+    adapter::cfg.mqtt_uri = "mqtts://host-witness";
+    daik::mqtt_ha_start();
+    require(sdk::task_fn != nullptr, "TLS_SETUP_FIXTURE_HAS_PUBLISHER");
+    sdk::modbus_network_idle      = false;
+    sdk::fail_sdk_transport_setup = true;
+    sdk::on_delay                 = [](TickType_t) {
+        if (sdk::delays == 5) {
+            require(sdk::start_calls == 0, "TLS_START_WAITS_FOR_HOMEHUB_NETWORK_RELEASE");
+            sdk::modbus_network_idle = true;
+        }
+        if (sdk::start_calls == 1)
+            require(daik::mqtt_tls_resume_pending(), "TLS_START_CLAIMS_HEAP_BEFORE_SDK_CONNECT");
+        if (sdk::start_calls == 2 && daik::s_connected.load()) {
+            require(sdk::delays > 25, "SDK_SETUP_FAILURE_USES_BOUNDED_RETRY");
+            throw StopTask{};
+        }
+        require(sdk::delays < 50, "SDK_SETUP_FAILURE_RECOVERS_WITHOUT_REBOOT");
+    };
+    try {
+        sdk::task_fn(nullptr);
+    } catch (const StopTask&) {}
+}
+
+void tls_reconnect_preserves_client_and_waits_for_homehub() {
+    adapter::cfg.mqtt_uri = "mqtts://host-witness";
+    daik::mqtt_ha_start();
+    require(sdk::task_fn && sdk::disable_auto_reconnect, "TLS_RECONNECT_USES_PUBLISHER_ADMISSION");
+    int      disconnected_at = 0;
+    uint32_t client_epoch    = 0;
+    sdk::on_delay            = [&](TickType_t) {
+        if (!disconnected_at && daik::s_connected.load()) {
+            disconnected_at          = sdk::delays;
+            client_epoch             = daik::s_connected_client_epoch.load();
+            sdk_mqtt_state           = MQTT_CLIENT_STATE_WAITING_RECONNECT;
+            sdk::modbus_network_idle = false;
+            sdk::client.handler(sdk::client.handler_arg, "mqtt", MQTT_EVENT_DISCONNECTED, nullptr);
+        }
+        if (disconnected_at && sdk::delays - disconnected_at == 12) {
+            require(sdk::reconnect_calls == 0, "TLS_RECONNECT_WAITS_FOR_HOMEHUB_NETWORK_RELEASE");
+            sdk::modbus_network_idle = true;
+        }
+        if (sdk::reconnect_calls > 0) {
+            require(sdk::modbus_network_idle, "TLS_RECONNECT_WAITS_FOR_HOMEHUB_NETWORK_RELEASE");
+            require(sdk::start_calls == 1 && sdk::stop_calls == 0 && sdk::reconnect_calls == 1 &&
+                                   daik::s_connected.load() &&
+                                   daik::s_connected_client_epoch.load() == client_epoch,
+                               "TLS_RECONNECT_PRESERVES_OUTBOX_AND_CLIENT_EPOCH");
+            throw StopTask{};
+        }
+        require(sdk::delays < 25, "TLS_RECONNECT_RECOVERS_WITHOUT_REBOOT");
+    };
+    try {
+        sdk::task_fn(nullptr);
+    } catch (const StopTask&) {}
 }
 
 void ref_oom_recovery() {
@@ -4050,6 +4108,25 @@ void retirement_early_ack() {
             "RETIREMENT_EVIDENCE_RECOVERY_STOPS_TRANSPORT_BEFORE_RETRY");
 }
 
+void source_cleanup_lost_sdk_ack() {
+    cleanup_fixture();
+    daik::s_source_cleanup.request(daik::MqttCleanupSource::Modbus);
+    daik::service_requested_topic_cleanup(adapter::cfg);
+    const int id = daik::s_source_cleanup.in_flight_id();
+    require(id >= 0 && sdk::publish_calls == 1, "SOURCE_ACK_FIXTURE_QUEUED_ONE_TOMBSTONE");
+    sdk::ticks += 59999;
+    require(!daik::mqtt_cleanup_evidence_recovery_step(1) && daik::s_source_cleanup.in_flight(),
+            "SOURCE_ACK_TIMEOUT_CANNOT_RESTART_EARLY");
+    ++sdk::ticks;
+    require(!daik::s_source_cleanup_evidence_lost, "SOURCE_ACK_FIXTURE_DROPS_SDK_EVENT_SILENTLY");
+    const bool recovered = daik::mqtt_cleanup_evidence_recovery_step(1);
+    require(recovered && !daik::s_source_cleanup.in_flight() && !daik::s_client_running,
+            "SOURCE_ACK_TIMEOUT_JOINS_TRANSPORT_BEFORE_RETRY");
+    require(daik::s_source_cleanup.suppress(daik::MqttCleanupSource::Modbus) &&
+                sdk::publish_calls == 1,
+            "SOURCE_ACK_TIMEOUT_DOES_NOT_ADVANCE_OR_ENQUEUE_DUPLICATE");
+}
+
 void retirement_after_gate_withdrawal() {
     cleanup_fixture();
     const std::string prior = "altherma3_r_erga";
@@ -4485,6 +4562,8 @@ int main(int argc, char** argv) {
             profile_retirement_scan_bounds();
         else if (std::strcmp(scenario, "retirement_early_ack") == 0)
             retirement_early_ack();
+        else if (std::strcmp(scenario, "source_cleanup_lost_sdk_ack") == 0)
+            source_cleanup_lost_sdk_ack();
         else if (std::strcmp(scenario, "retirement_after_gate_withdrawal") == 0)
             retirement_after_gate_withdrawal();
         else if (std::strcmp(scenario, "journal_reboot_mid_retirement") == 0)
@@ -4527,6 +4606,10 @@ int main(int argc, char** argv) {
             startup_failure_recovery();
         else if (std::strcmp(scenario, "event_registration_failure") == 0)
             event_registration_failure();
+        else if (std::strcmp(scenario, "tls_setup_recovery_waits_for_homehub") == 0)
+            tls_setup_recovery_waits_for_homehub();
+        else if (std::strcmp(scenario, "tls_reconnect_preserves_client_and_waits_for_homehub") == 0)
+            tls_reconnect_preserves_client_and_waits_for_homehub();
         else if (std::strcmp(scenario, "ref_oom_recovery") == 0)
             ref_oom_recovery();
         else if (std::strcmp(scenario, "circulation_oom_recovery") == 0)

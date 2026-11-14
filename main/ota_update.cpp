@@ -32,7 +32,6 @@
 #include "heap_guard.hpp"
 #include "hp_modbus.hpp"
 #include "hp_poll.hpp"
-#include "hp_modbus.hpp"
 #include "http_client_diag.hpp"
 #include "http_deadline.hpp"
 #include "mqtt_ha.hpp"
@@ -1861,7 +1860,12 @@ void ota_task(void*) {
     s_ota_lwip_ready.store(true, std::memory_order_release);
 
     for (;;) {
-        (void)ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        // This worker exists without X10A or MQTT. The idle tick lets a deferred optional
+        // HomeHub start recover without a network request or another resident task.
+        if (!ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000))) {
+            mb_retry_start();
+            continue;
+        }
 
         OtaTaskArgs request{};
         {

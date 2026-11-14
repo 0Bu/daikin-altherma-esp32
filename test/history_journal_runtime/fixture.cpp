@@ -762,6 +762,24 @@ void modbus_missing_target_digest() {
                 flow_snapshot().empty(),
             "missing_target_digest_cannot_bind");
 }
+
+void modbus_invalid_valve_does_not_replace_sample() {
+    const auto configured = configure_homehub();
+    boot();
+    const auto  generation = bind_homehub(configured, peer_a);
+    const auto  index      = static_cast<size_t>(homehub_history_index("valve_dhw"));
+    CachedValue valve;
+    valve.off               = 37;
+    valve.value             = "1";
+    valve.modbus_definition = def::homehub_definition_id(*def::homehub_find(37));
+    history_record_modbus(&valve, 1, generation);
+    valve.value = "2";
+    require(history_modbus_samples(&valve, 1)[index] == HISTORY_NO_READING,
+            "unknown_valve_word_is_not_a_categorical_sample");
+    history_record_modbus(&valve, 1, generation);
+    require(P().mb_ring[index].pending == 10,
+            "invalid_valve_word_preserves_the_last_known_state_in_bucket");
+}
 enum class ModbusTransport {
     Cold,
     Legacy,
@@ -1404,6 +1422,8 @@ int main(int argc, char** argv) {
             modbus_missing_target_digest();
         else if (name == "modbus_quiet_unverified")
             modbus_quiet_unverified();
+        else if (name == "modbus_invalid_valve")
+            modbus_invalid_valve_does_not_replace_sample();
         else if (name == "core_sequence_prepare")
             core_sequence("prepare");
         else if (name == "core_sequence_readback")
