@@ -106,8 +106,8 @@ build = Path(sys.argv[3]).read_text(encoding="utf-8")
 policy = Path(sys.argv[4]).read_text(encoding="utf-8")
 if "  pull_request:\n" not in build or "  pull_request_target:\n" in build:
     raise SystemExit("mechanical/build workflow must use only the ordinary pull_request event")
-if "types: [opened, synchronize, reopened, ready_for_review]" not in build:
-    raise SystemExit("ordinary pull_request workflow must only handle source lifecycle events")
+if "types: [opened, synchronize, reopened, edited, ready_for_review]" not in build:
+    raise SystemExit("ordinary pull_request workflow must audit bootstrap PR text on edits")
 if "  pull_request_target:\n" not in policy or re.search(r"^  pull_request:\s*$", policy, re.MULTILINE):
     raise SystemExit("trusted policy workflow must use only pull_request_target")
 mechanical_start = build.find("\n  mechanical_gates:\n")
