@@ -601,6 +601,8 @@ endpoint change, but opens the new socket only for the published target. It can 
 `close_pending` while retrying the previous close. Disabling the source retires its worker.
 If enabled again during retirement, the worker can continue after releasing the old socket.
 X10A remains independent.
+A fresh installation with its discovery decision pending can make one bounded automatic search
+once it has a LAN lease. When the decision is saved, future discovery is manual.
 The response adds `"modbus_start_pending":true` when an enabled target still needs worker admission
 or the worker is retiring. Read `/status.modbus.connected` for the live link and `/values.modbus` for
 its readings. Insufficient heap at task creation or during worker setup defers the next start by
@@ -610,9 +612,9 @@ normal poll cadence.
 If retained HomeHub state is being published, an endpoint change can return 409 for retry before
 settings are saved.
 After core services have started, the X10A task retries worker creation even while its bus is
-unavailable. OTA and Weather network activity defer creation. If the X10A task itself could not
-start, saving the same enabled target can retry creation without retiring its history.
-Safe mode keeps optional sources suspended.
+unavailable. The idle OTA worker also retries independently of X10A and MQTT. OTA and Weather
+network activity defer creation. Saving the same enabled target can retry creation while
+retaining its history. Safe mode keeps optional sources suspended.
 
 `POST /set_board` accepts `preset_id`, `led_gpio`, `led_type`, `led_inverted`, `btn_gpio`,
 `btn_active_low`, `env3_enabled`, `env3_sda`, `env3_scl`. A stable known preset id is required when

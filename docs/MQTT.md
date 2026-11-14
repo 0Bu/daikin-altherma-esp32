@@ -222,9 +222,10 @@ with a boot unless stated otherwise.
 Stack minima are null until sampled; WiFi RSSI/BSSID are null when offline. `max_alloc` is contiguous
 heap headroom. `heap_restarts` counts watchdog resets inherited by this boot, returns to zero on a
 clean boot ([classification](ARCHITECTURE.md#boot-loop-safe-mode-config-recovery)) and uses HA
-state class `measurement`. `mqtt_skipped` counts a publish
-cycle interrupted by an allocation failure or the flat Modbus payload exceeding its **4 KiB**
-bound; earlier topics in that cycle may already have published. `mqtt_quiesced` counts deliberate
+state class `measurement`. `mqtt_skipped` counts publish cycles interrupted by an allocation
+failure that reaches the task boundary. Earlier topics may already have published. A local
+HomeHub allocation failure or refusal at the **4 KiB** payload limit defers that source for five
+seconds and lets other publishers continue. `mqtt_quiesced` counts deliberate
 OTA/Weather TLS pauses; `poll_skipped` counts sweeps not performed. These use `total_increasing`.
 Field/entity definitions: [`heartbeat.hpp`](../main/logic/heartbeat.hpp).
 

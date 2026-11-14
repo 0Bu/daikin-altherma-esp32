@@ -189,11 +189,8 @@ mDNS or the hub. Coupling them lets either failure mask the other.
 What that buys, concretely:
 
 * Pull the service cable and the HomeHub keeps reporting. Lose the LAN and X10A keeps polling.
-* **A device with no configured HomeHub has no cost.** Empty configuration performs no discovery and
-  creates no task, socket or traffic — which is also why `hp_poll` could give
-  back the 4 KB an earlier revision had taken from it (its stack is 8192 again; the
-  `getaddrinfo`/mDNS/socket call chain now lives on the task that actually makes those calls).
-* Disabling it live retires the task: it checks the flag at the top of its cycle and deletes itself.
+* The Modbus polling task needs a configured HomeHub. Initial discovery, saving an empty host and
+  deferred socket retirement follow the [service configuration contract](API.md#x10a-homehub-and-board-hardware).
 
 | | X10A | Modbus (HomeHub) |
 |---|---|---|
@@ -392,8 +389,9 @@ The trended measurements cover pre- and post-BUH leaving water, return water, DH
 outdoor air, liquid refrigerant, flow and room temperature. Trended states include booster-heater
 run (input `32`) and reported 3-way-valve route (input `37`). A route report alone cannot
 confirm mechanical valve position or water flow.
-The pump running report (input `30`) and space heating/cooling operation (input `53`) pair
-live. Native Altherma 4 also pairs water pressure (input `79`), while its holding `9` reports
+Input `30` reports pump state in the full sweep. Space heating/cooling operation (input `53`)
+can use a fresh activity observation. Native Altherma 4 also pairs water pressure
+(input `79`), while its holding `9` reports
 Quiet selection. HomeHub's reported power consumption stays separate from the X10A current-based
 estimate. Other setpoints, modes and faults are not paired measurements.
 Disinfection input `33` is likewise deliberately unpaired: X10A `0x62/8` converter `303` is named
@@ -430,8 +428,7 @@ green/yellow/red state colours as WiFi, MQTT, Syslog and NTP:
   [conversion limit](#deferred-physical-acceptance) in place of a numeric comparison.
 * **X10A down, HomeHub up** — the banner names the active source. Available Modbus rows appear
   in petrol, and missing readings show `—`. The unverified flow remains visible with its limit.
-  The headline uses affirmative space and hot-water activity. Two inactive flags leave the mode
-  unknown unless the gateway independently reports a recognized operating mode.
+  The [schematic state rules](DESIGN.md#state-and-motion) describe the activity headline and rotor.
   Working ΔT, capacity and COP/EER are withheld. The EKRHH guide (4P744838-1E, §9.2.2, p. 43)
   identifies input **51** as heat pump power
   consumption. Its measurement boundary and heater coverage have not been established for matching

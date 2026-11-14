@@ -130,12 +130,9 @@ silently corrupt a heat integral.
 | An impossible value | Compare full labels, candidate-established model identity and an independent reference; collect a [device report](REPORTING.md). The selected register table is not proof of the exact unit model. |
 | Restart indicated | Read reset reason, crash fault and **Heap Watchdog Restarts**; preserve the report before dismissing it. |
 
-`mqtt_skipped` counts cycles interrupted by allocation failure or a flat Modbus payload exceeding
-4 KiB; some earlier topics may already have published. `mqtt_quiesced` counts deliberate TLS
-hold-offs, and `poll_skipped` sweeps not performed. These increasing counters distinguish interrupted
-work from normal update pauses. **Heap Watchdog Restarts** is instead a measurement of consecutive
-watchdog resets inherited by this boot, not a lifetime counter. Per-task stack minima are MQTT/API
-fields for maintainers; null means the task has not been sampled.
+The [MQTT counter definitions](MQTT.md#heartbeat) distinguish interrupted work from
+planned update pauses. **Heap Watchdog Restarts** measures consecutive watchdog resets inherited by
+this boot. Per-task stack minima are MQTT/API fields for maintainers. Null marks an unsampled task.
 
 WiFi MAC/BSSID diagnostic entities identify the board and access point. MQTT is operational telemetry,
 not the redacted bug-report format; consider that before sharing a broker export.

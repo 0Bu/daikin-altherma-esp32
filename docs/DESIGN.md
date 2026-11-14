@@ -265,6 +265,7 @@ CT estimates only with the electric heaters known off. When a backup heater may 
 the ratio can use a qualified inverter estimate and temperatures before the backup heater.
 The inspector names the actual electrical source and temperature pair, or why the ratio is unavailable.
 
+<a id="state-and-motion"></a>
 **State and motion**
 
 The animated hydraulic branch needs a current X10A 3-way valve report. Qualified flow can still
@@ -280,8 +281,8 @@ The HomeHub full-sweep heater row remains available in the HomeHub readings and 
 Rotors stay centred on their hubs, turn clockwise and carry no rotating flow-direction arrow.
 The pump rotor requires a current X10A ON report. HomeHub input 30 remains in the Modbus value
 list with its full-sweep cadence. Measured flow drives water-pipe motion independently of the
-rotor. Direction belongs to
-pipe dashes.
+rotor. Direction belongs to pipe dashes. With only HomeHub available, affirmative space and
+hot-water flags can name those activities. Two inactive flags leave the overall mode unknown.
 
 Quiet/Defrost pills remain grey while inactive/unknown and blue while active. E-heater stays grey
 or orange; its accessible name and inspector state ON/OFF/unknown. Native Altherma 4 holding 9
@@ -694,9 +695,9 @@ capability/evidence state rather than inventing it from labels or missing fields
 
 ## 11. Build / delivery
 
-Markup, CSS and ordered classic-script fragments from [app.sources](../main/www/app.sources) are
-assembled, minified and deterministically gzipped into the signed application. They share one
-lexical scope. Provisioning and non-English locales are separate embedded assets. No font, CDN,
-remote script or stylesheet is loaded by the device UI. Hash navigation stays client-side.
+The [firmware asset pipeline](ARCHITECTURE.md#http-and-browser-transport) embeds the page, including
+the packed classic script from [app.sources](../main/www/app.sources). Provisioning and non-English
+locales are separate embedded assets. The device UI loads all assets locally. Hash navigation
+stays client-side.
 See the [JavaScript ownership map](../main/www/js/README.md) and [test reference](../test/README.md)
 for build-input and verification contracts.

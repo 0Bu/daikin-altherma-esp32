@@ -33,7 +33,7 @@ try {
   // string(REPLACE), which copies asset bytes literally; String.prototype.replace(string, string)
   // expands $$, $&, $` and $' in its replacement and once dropped a dollar sign from
   // settings.js, so the render gate executed a room-source formatter the device never ships.
-  // The oracle is an independent literal splice; the render gate's assembler runs as the gate runs it.
+  // The oracle is an independent literal splice. The render gate also runs the production packer.
   const literalSplice = (page, marker, asset) => {
     const at = page.indexOf(marker);
     assert.ok(at >= 0 && page.indexOf(marker, at + marker.length) < 0, `marker ${marker.trim()} must appear once`);
@@ -56,12 +56,10 @@ try {
     { cwd: root, encoding: "utf8" });
   assert.equal(gateRun.status, 0, gateRun.stderr || gateRun.stdout);
   const gatePage = fs.readFileSync(gatePath, "utf8");
-  for (const [name, page] of [["render-gate assembler", gatePage], ["delivery-test assembly", assembled]]) {
-    assert.ok(page === firmwarePage,
-      `${name} must equal the literal firmware splice; ${firstDifference(page, firmwarePage)}`);
-    assert.equal(page.split(dollarSequence).length, app.split(dollarSequence).length,
-      `${name} must keep every ${dollarSequence} from settings.js`);
-  }
+  assert.ok(assembled === firmwarePage,
+    `the shared assembler must match the literal firmware splice; ${firstDifference(assembled, firmwarePage)}`);
+  assert.equal(assembled.split(dollarSequence).length, app.split(dollarSequence).length,
+    `the assembler must keep every ${dollarSequence} from settings.js`);
   const replacementPatterns = "a $$ b $& c $` d $' e $<name> f $1";
   assert.equal(spliceInlineAssets(
     "<style>\n/*@@INLINE:style.css@@*/\n</style><script>\n//@@INLINE:app.js@@\n</script>",
@@ -82,6 +80,9 @@ try {
 
   const first = run(gzipA, ["--html-output", minifiedPath]);
   assert.equal(first.status, 0, first.stderr || first.stdout);
+  const browserInput = zlib.gunzipSync(fs.readFileSync(gzipA)).toString("utf8");
+  assert.ok(gatePage === browserInput,
+    `the render gate must exercise the production page bytes; ${firstDifference(gatePage, browserInput)}`);
   const cache = path.join(work, "encoder-cache");
   const helperNames = fs.readdirSync(cache);
   assert.equal(helperNames.length, 1, "a completed build must publish one cache entry");
