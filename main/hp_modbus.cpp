@@ -1854,10 +1854,10 @@ ModbusProfile mb_active_profile() {
 }
 
 size_t mb_values_snapshot(CachedValue* out, size_t max, bool& live, uint32_t* history_generation,
-                          ModbusCompressor* compressor) {
+                          ModbusActivity* activity) {
     live = false;
     if (history_generation) *history_generation = 0;
-    if (compressor) *compressor = ModbusCompressor::Unknown;
+    if (activity) *activity = {};
     if (!s_cache_mtx) return 0;
     size_t   n                        = 0;
     uint32_t cache_generation         = 0;
@@ -1893,17 +1893,24 @@ size_t mb_values_snapshot(CachedValue* out, size_t max, bool& live, uint32_t* hi
                                            cache_generation, target_generation,
                                            cache_target_generation, cache_age_s, MB_CACHE_MAX_AGE_S,
                                            reply_age_s, MB_REPLY_MAX_AGE_S);
-        if (compressor && s_status.connected && s_poll_observed &&
-            reply_age_s <= MB_REPLY_MAX_AGE_S &&
-            logic::modbus_observation_age_s(s_compressor_ms, esp_timer_get_time() / 1000) <=
-                MB_REPLY_MAX_AGE_S)
-            *compressor = s_compressor;
+        if (activity && s_status.connected && s_poll_observed &&
+            reply_age_s <= MB_REPLY_MAX_AGE_S) {
+            const int64_t now_ms = esp_timer_get_time() / 1000;
+            if (logic::modbus_observation_age_s(s_compressor_ms, now_ms) <= MB_REPLY_MAX_AGE_S)
+                activity->compressor = s_compressor;
+            if (s_status.dhw_operation_known &&
+                logic::modbus_observation_age_s(s_dhw_operation_ms, now_ms) <= MB_REPLY_MAX_AGE_S)
+                activity->dhw = s_status.dhw_operation_active;
+            if (s_status.plant_gate_known &&
+                logic::modbus_observation_age_s(s_plant_gate_ms, now_ms) <= MB_REPLY_MAX_AGE_S)
+                activity->space = s_status.plant_gate_active;
+        }
     }
     // Seqlock-style retry boundary: a target change overlapping the two-lock snapshot is never
     // live.
     if (target_generation != s_target_generation.load(std::memory_order_acquire)) {
         live = false;
-        if (compressor) *compressor = ModbusCompressor::Unknown;
+        if (activity) *activity = {};
     }
     if (history_generation && live && cache_history_generation == history_modbus_generation())
         *history_generation = cache_history_generation;

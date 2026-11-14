@@ -128,6 +128,11 @@ async function refreshValues(paint = true) {
   S._modbus = modbus || [];
   S.modbusCompressorRunning = typeof r.modbus_compressor_running === "boolean"
     ? r.modbus_compressor_running : null;
+  S.modbusActivity = r.modbus_dhw_running === undefined && r.modbus_space_running === undefined
+    ? null : {
+      dhw: typeof r.modbus_dhw_running === "boolean" ? r.modbus_dhw_running : null,
+      space: typeof r.modbus_space_running === "boolean" ? r.modbus_space_running : null,
+    };
   // A values-only poll can lose or replace the source before the next status poll. Once the
   // binding protocol is known, an absent binding must withhold the previous peer's chart.
   const hasLease = Object.prototype.hasOwnProperty.call(r, "modbus_history_epoch") ||

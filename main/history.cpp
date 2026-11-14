@@ -1496,6 +1496,15 @@ void history_record(const CachedValue* v, size_t n, uint32_t source_generation,
     persist_seal_locked();
 }
 
+// The live recorder and flash restore share the source cursor and every committed ring boundary.
+static void close_modbus_buckets_locked(uint32_t bucket) {
+    const uint32_t skipped = logic::history_skipped(s_mb_bucket, bucket);
+    for (auto& ring : P().mb_ring) ring.commit(skipped);
+    s_mb_bucket            = bucket;
+    s_persist_dirty        = true;
+    P().boots_since_commit = 0;
+}
+
 void history_record_modbus(const CachedValue* v, size_t n, uint32_t identity_generation,
                            int64_t observed_us) {
     if (!s_mtx) return;
@@ -1552,14 +1561,11 @@ void history_record_modbus(const CachedValue* v, size_t n, uint32_t identity_gen
                                            s_mb_last_commit_us);
         }
     } else if (bucket != s_mb_bucket) {
-        const uint32_t skipped = logic::history_skipped(s_mb_bucket, bucket);
-        for (auto& ring : P().mb_ring) ring.commit(skipped);
-        s_persist_dirty = true;
+        close_modbus_buckets_locked(bucket);
         // A delayed full sweep may finish in the next wall bucket. Use the closing boundary of
         // the newest committed slot, including any explicit gaps, to keep journal positions stable.
         s_mb_last_commit_us     = logic::history_raster_boundary_us(now_us);
         s_mb_last_commit_bucket = static_cast<int64_t>(bucket) - 1;
-        P().boots_since_commit  = 0;
         logic::history_liveness_commit(s_liveness, logic::HistoryJournalSource::Modbus,
                                        s_mb_last_commit_us);
     }
@@ -1764,8 +1770,13 @@ bool seed_source_timeline_locked(HistorySource src, int64_t stored_anchor, int64
             if (!s_detect_seen) s_adopt_detect_grace = true;
             break;
         case HistorySource::Modbus:
-            if (!s_mb_have_bucket) { s_mb_have_bucket = true; s_mb_bucket = bucket; }
-            s_mb_last_commit_us = commit_us; s_mb_last_commit_bucket = mono_commit_bucket;
+            if (!s_mb_have_bucket) {
+                s_mb_have_bucket = true;
+                s_mb_bucket      = bucket;
+            } else if (bucket > s_mb_bucket)
+                close_modbus_buckets_locked(bucket);
+            s_mb_last_commit_us     = commit_us;
+            s_mb_last_commit_bucket = mono_commit_bucket;
             logic::history_liveness_commit(s_liveness, logic::HistoryJournalSource::Modbus,
                                            commit_us);
             break;

@@ -20,6 +20,7 @@
 // space operation, its independent valve route and heating rather than cooling.
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include "hp_poll.hpp"      // CachedValue — the shared row shape, so /values needs no second type
 #include "logic/config_model.hpp"
@@ -107,6 +108,12 @@ ModbusStatus mb_status();
 
 enum class ModbusCompressor : uint8_t { Unknown, Off, On };
 
+struct ModbusActivity {
+    ModbusCompressor    compressor = ModbusCompressor::Unknown;
+    std::optional<bool> dhw;
+    std::optional<bool> space;
+};
+
 // Thread-safe snapshot copy of the HomeHub value cache. Returns the count written. Rows carry the
 // same CachedValue shape as the X10A cache, so /values and the browser need no second row type;
 // `reg` is the synthetic def::HOMEHUB_GROUP_REG and `off` the EKRHH offset, which is what
@@ -121,10 +128,10 @@ enum class ModbusCompressor : uint8_t { Unknown, Off, On };
 // because that separate call is exactly the race — the cache and link state are behind two mutexes,
 // so only the accessor can tie them into one generation-checked answer.
 // The optional history generation belongs to the copied full-cache rows. Zero means unavailable.
-// The optional compressor state comes from its own recent input 31 reply in the current session.
+// Optional activity comes from recent input 31, 52 and 53 replies in the same current session.
 size_t mb_values_snapshot(CachedValue* out, size_t max, bool& live,
-                          uint32_t*         history_generation = nullptr,
-                          ModbusCompressor* compressor         = nullptr);
+                          uint32_t*       history_generation = nullptr,
+                          ModbusActivity* activity           = nullptr);
 
 // Allocation-free check of the exact snapshot liveness rule, for periodic expiry publication.
 bool mb_values_live();

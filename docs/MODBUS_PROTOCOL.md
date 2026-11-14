@@ -247,7 +247,7 @@ whatever the first cycle read.
   otherwise `/status`, `/diag` and Syslog would oscillate between failure and recovery every five
   seconds without evidence that the row recovered.
 
-Inputs 31, 37, 38, 44 and 53 each retain the response's monotonic observation time and expire
+Inputs 31, 37, 38, 44, 52 and 53 each retain the response's monotonic observation time and expire
 individually after seven seconds. The
 [`/values` contract](API.md#get-values) describes the separate full-cache limit. When it expires,
 `/status.modbus.values` stops counting the cached rows even if fast replies continue.
@@ -346,8 +346,8 @@ Detection is **100% automatic** at runtime without requiring any UI configuratio
 2. **Safe baseline polling & probing:** In `Auto`, the firmware reads the safe 32-register base HomeHub map (`MB_PLAN`) and performs a single probe request on register 79 (water pressure, `MODBUS_PROBE_REGISTER`) at the end of each full cycle.
 3. **Promotion to `Altherma4`:** If probe register 79 successfully returns valid data in the plausible hydronic range (0 < pressure <= 6.0 bar), `s_probe_tracker` selects `ModbusProfile::Altherma4` using the existing heuristic. The baseline rows are discarded, only the probe row is published for that cycle, and the next poll performs a complete 42-register native sweep. This avoids publishing native quiet/mode values through baseline semantics. The protocol answer is not physical model verification.
 4. **Fallback behavior:**
-   - **Affirmative `HomeHub` answer:** Register 79 returns `32767` (`MB_UNSUPPORTED`,
-     verified on EKRHH hardware) or Modbus Exception 02 (*Illegal Data Address*). The firmware
+   - **Affirmative `HomeHub` answer:** Register 79 returns `32767` (`MB_UNSUPPORTED`)
+     or Modbus Exception 02 (*Illegal Data Address*). The firmware
      selects the HomeHub map without counting the answer as a transport failure. The probe
      establishes the profile. The poll separately reports which rows supplied usable readings.
    - **Transport failure branch:** If a probe request encounters a transport error (timeout, connection closed), the connection is dropped (`link_ok = false`, socket closed) without incrementing `rx_fail`. The profile stays in `Auto` across reconnects until `MODBUS_PROBE_MAX_RETRIES` (3) consecutive probe failures are reached, after which it falls back to `ModbusProfile::HomeHub` (`profile_basis: fallback`). During probe-cycle transport drops, `/values` remains unrefreshed for that cycle (`connected = false`).
@@ -458,34 +458,17 @@ non-empty `mb_host`.
 
 Blob version 4 carries the UI language byte. The HomeHub block begins in version 5.
 
-**Applied live.** `POST /set_hp` accepts `mb_host`, marks discovery complete and stages the target
-fingerprint and enable flag before persistence. After the durable write, `mb_reconfigure` applies
-the flag without copying the configuration again. A non-empty address requests polling, which can
-require creating a task.
-`modbus_start_pending: true` means the settings were saved and polling is still waiting for its
-worker or resources. See [the API contract](API.md#x10a-homehub-and-board-hardware) for startup and recovery.
-Task-admission failures can appear in `/diag` before the worker is active.
-Clearing the address withdraws the source immediately. Its worker closes the socket after OTA or
-Weather releases network heap. A replacement waits for the old worker to release its network claim
-and deregister from the watchdog. `POST /discover_homehub` runs the bounded manual
-search and returns `{ok:true,host:"<IPv4>"}` without saving or reconfiguring anything.
+**Applied live.** See [the API contract](API.md#x10a-homehub-and-board-hardware) for endpoint
+changes, pending startup and manual discovery.
 
 **Web UI:** the HomeHub appears as its own row in Settings → Connections — never folded into a
 combined link state with X10A, since either can be down alone and one merged "connected" would hide
 exactly the case worth seeing. Its value is the active `host:port`, and its colour follows the shared
 connection-state vocabulary. Config and diagnostics only; there are no pump controls, by design.
 
-**API:** `/status.modbus` carries the link/config fields (including `searched` and detected `profile`:
-`auto` \| `homehub` \| `altherma4`), `task_stack_min_free_bytes` (this task's
-worst stack headroom in bytes, from the shared owner-task sampler
-— `main/stack_watch.hpp` — so this surface and the MQTT heartbeat's `modbus_stack_min_free_bytes`
-cannot answer the same question with two numbers; `null` until the Modbus task has been sampled
-during this boot, with recorded minima retained after disabling the source) and the
-plant-gate pair `plant_gate_known` / `plant_gate_active` (raw input 53).
+See the [status API](API.md#get-status) for link, profile, stack and per-input fields.
 [PLANT.md](PLANT.md#heating-curve-diagnosis) defines the diagnosis's combined route prerequisite
-and separate mode check. There is no actuator object: it was removed with the write path. `host`
-is the configured value and is redacted in bug reports. See
-[`../README.md`](../README.md).
+and separate mode check.
 
 ## Security
 

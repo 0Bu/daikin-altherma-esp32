@@ -159,12 +159,12 @@ try {
     },
     {
       name: "refresh-compressor-with-unrelated-reply", scenario: "compressor_witness",
-      before: "logic::modbus_observation_age_s(s_compressor_ms, esp_timer_get_time() / 1000)",
-      after: "logic::modbus_observation_age_s(s_last_reply_ms, esp_timer_get_time() / 1000)",
+      before: "logic::modbus_observation_age_s(s_compressor_ms, now_ms)",
+      after: "logic::modbus_observation_age_s(s_last_reply_ms, now_ms)",
     },
     {
       name: "keep-copied-compressor-across-target-cutover", scenario: "compressor_witness",
-      before: /if \(target_generation != s_target_generation\.load\(std::memory_order_acquire\)\) \{\s*live = false;\s*if \(compressor\) \*compressor = ModbusCompressor::Unknown;/,
+      before: /if \(target_generation != s_target_generation\.load\(std::memory_order_acquire\)\) \{\s*live = false;\s*if \(activity\) \*activity = \{\};/,
       after: "if (target_generation != s_target_generation.load(std::memory_order_acquire)) { live = false;",
     },
     {
@@ -250,8 +250,13 @@ try {
     },
     ...["s_plant_gate_ms", "s_heating_mode_ms", "s_plant_outdoor_ms"].map(timestamp => ({
       name: `observation-age-${timestamp}`, scenario: "gate_age",
-      before: `logic::modbus_observation_age_s(${timestamp}, now_ms)`,
-      after: "logic::modbus_observation_age_s(s_last_reply_ms, now_ms)",
+      before: `logic::modbus_observation_age_s(${timestamp}, now_ms) > MB_REPLY_MAX_AGE_S`,
+      after: "logic::modbus_observation_age_s(s_last_reply_ms, now_ms) > MB_REPLY_MAX_AGE_S",
+    })),
+    ...["s_dhw_operation_ms", "s_plant_gate_ms"].map(timestamp => ({
+      name: `values-activity-age-${timestamp}`, scenario: "compressor_witness",
+      before: `logic::modbus_observation_age_s(${timestamp}, now_ms) <= MB_REPLY_MAX_AGE_S`,
+      after: "logic::modbus_observation_age_s(s_last_reply_ms, now_ms) <= MB_REPLY_MAX_AGE_S",
     })),
     {
       name: "space-route-polarity", scenario: "space_route_values",

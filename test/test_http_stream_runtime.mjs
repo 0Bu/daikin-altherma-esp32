@@ -331,6 +331,8 @@ try {
     if(name==="modbus-peer-refusal") assert.deepEqual(doc,{ok:false,error:"history changed; retry"});
     if(name==="modbus-compressor-only") {
       assert.equal(doc.modbus_compressor_running,true);
+      assert.equal(doc.modbus_dhw_running,null);
+      assert.equal(doc.modbus_space_running,null);
       assert.equal(Object.hasOwn(doc,"modbus"),false);
     }
     if(name==="/diag") assert.match(text,/Fixture home network/);
@@ -341,6 +343,8 @@ try {
       assert.deepEqual(doc.modbus.map(row=>row.value),["U4",12.3,1,0,null]);
       assert.equal(doc.modbus[2].binary,true);assert.deepEqual(doc.modbus.map(row=>row.off),[22,40,4,31,40]);
       assert.equal(doc.modbus_compressor_running,true);
+      assert.equal(doc.modbus_dhw_running,false);
+      assert.equal(doc.modbus_space_running,true);
       assert.match(doc.modbus_history_boot_id,/^[0-9a-f]{16}$/);
       assert.ok(Number.isInteger(doc.modbus_history_epoch) && doc.modbus_history_epoch > 0);
     }

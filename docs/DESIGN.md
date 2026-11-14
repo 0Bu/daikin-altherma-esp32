@@ -187,8 +187,9 @@ For circulation and estimated heat transfer, the UI accepts decoded X10A flow fr
 100 l/min. This is a project plausibility guard with margin above the plotted hydronic
 ranges in the [Altherma 3 M guide, §16.3](https://my.daikin.eu/content/dam/document-library/Installer-reference-guide/heat/air-to-water-heat-pump-low-temperature/EBLA04-08EV3.EBLA04-08E3V3.EDLA04-08EV3.EDLA04-08E3V3_Installer%20reference%20guide_4PEN685228-1B_English.pdf)
 and [Altherma 3 H HT F guide, §16.7](https://www.daikin.eu/content/dam/document-library/Installer-reference-guide/heat/air-to-water-heat-pump-high-temperature/epra14-18dw7/EPRA014-018D%28V.W%29.EPRA14-18D%28V.W%297.ETVH16UE6V%287%29_Installer%20reference%20guide_4PEN644738-1D_English.pdf).
-Equipment limits depend on the model. A value outside the display guard remains in the raw
-telemetry and raw history, while the schematic and estimated heat history withhold it.
+Equipment limits depend on the model. The schematic and estimated heat history withhold values
+outside the display guard. Raw telemetry keeps them. Raw history stores the values its signed
+tenths format can represent and leaves gaps where decoded values collide with its absence markers.
 
 **Schematic topology and sensor placement**
 

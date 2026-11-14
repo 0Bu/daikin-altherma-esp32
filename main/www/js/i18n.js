@@ -972,9 +972,7 @@ function schematicOperationMode() {
     return operationModeText(row?.value);
   }
   if (!mbLive()) return null;
-  const mb = S.status.modbus;
-  const dhw = mb.dhw_operation_known === undefined ? mbBool(52)
-    : mb.dhw_operation_known ? mb.dhw_operation_active : null;
+  const dhw = mbBool(52);
   const space = mbBool(53);
   if (dhw === false && space === false && S.modbusCompressorRunning === true) return null;
   return operationModeFromFlags(dhw, space);

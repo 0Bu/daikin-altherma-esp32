@@ -932,7 +932,7 @@ for caller, task, prefix, limit in (
 BODIES['main/history.cpp'].update({'history_modbus_reset_scope_locked': 'cbb56d64ed09e01703e672a55798194aaff30da5e3f5c83a96c131860716fd9a',
  'history_modbus_reset': 'feace54ffc1e23ee4c620c183eef77f11ae491619d1c2f627fd58e3a32c4f031',
  'history_modbus_bind_peer': '6edae4ad40931acb7057dbc1f3086fb70423b9aade42ced222805c0bcd7a0a8d',
- 'history_record_modbus': '1e23049598408d0eb0658bc9f546dcf4798e48ad865d03851ac6020f18a6af96',
+ 'history_record_modbus': '66f9443e1e5df9e7def10f4070203f1858f1fde6f557b0b38dd1ac3ba0d8403a',
  'history_modbus_snapshot': '321197fd5dae1871507ca376de37d70761227dd63f31c1f3f5fed5ba72c7e027',
  'history_splice_snapshot': 'a63845e18ff6d4dfc71e09c6a8b17f821ae4722d029484de633c89c341cdd79e',
  'flash_trend_scope_matches': 'afb6a3e7dcb6b52bc36cb18dc8701bf231b7cfbcc3610dbbd0f9cbcf64222f71',
@@ -1014,7 +1014,7 @@ SYMBOLS.update({'modbus_cycle_report': {'pattern': '^daik::report_cycle_result\\
  'modbus_status_error': {'pattern': '^_ZN4daikL12status_errorEPKcS1_iibm\\$isra\\$0$',
                          'max_bytes': 256},
  'modbus_values_snapshot': {'pattern': '^daik::mb_values_snapshot\\(daik::CachedValue\\*,\\ unsigned\\ int,\\ '
-                                       'bool\\&,\\ unsigned\\ long\\*,\\ daik::ModbusCompressor\\*\\)$',
+                                       'bool\\&,\\ unsigned\\ long\\*,\\ daik::ModbusActivity\\*\\)$',
                             'max_bytes': 80},
  'history_peer_generation': {'pattern': '^daik::history_modbus_generation\\(\\)$', 'max_bytes': 32},
  'history_peer_epoch_get': {'pattern': '^daik::history_epoch\\(\\)$', 'max_bytes': 32},
@@ -1140,10 +1140,10 @@ PATHS.update({'modbus_cycle_report_format': ['modbus',
                                       'base_bytes': 1536,
                                       'max_bytes': 8192}]})
 BODIES['main/history.cpp'].update({'ring_at': '03544a7025ca518babbd49d0f2076be1700a34184330a18890b1edf8fc881857'})
-BODIES['main/http_status.cpp'].update({'take_values_snapshot': 'be496f40388479986bdffe2ddfa5f9ecd3f0e20abc206768b9bdfdc527a34864',
+BODIES['main/http_status.cpp'].update({'take_values_snapshot': 'a4093634b1cb1bc3cd9fc823b6d51d5603b307275e35611e7f082f26fae29655',
  'http_send_values_json': 'd673cda9948cb8087fa9d411ced7b7fcf7656e9ae847826123056d55c7359835',
  'h_history': '192439fac4eba4f047c6428fed439f98a7178074359ff0e642cf1e91fe548a76'})
-BODIES['main/hp_modbus.cpp'].update({'mb_values_snapshot': '338b541f9a5ad9fdca1e730a321be0b29b0a60fcbf768f84d669749526a3bf2d',
+BODIES['main/hp_modbus.cpp'].update({'mb_values_snapshot': '3230db0ea07f05887036049b4a064a399527ea0a2bf8354cc3e49d5f50cd1a29',
  'report_cycle_result': 'da48cf9fba0e89e6793c8e6391b3fc67470503b98a2560c073b06df1f4d86138'})
 CALLERS.update({'history_modbus_generation': {'main/history.cpp:<definition>': 1,
                                'main/hp_modbus.cpp:mb_poll_once': 1,

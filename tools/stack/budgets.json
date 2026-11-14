@@ -2962,7 +2962,7 @@
       "max_bytes": 256
     },
     "modbus_values_snapshot": {
-      "pattern": "^daik::mb_values_snapshot\\(daik::CachedValue\\*,\\ unsigned\\ int,\\ bool\\&,\\ unsigned\\ long\\*,\\ daik::ModbusCompressor\\*\\)$",
+      "pattern": "^daik::mb_values_snapshot\\(daik::CachedValue\\*,\\ unsigned\\ int,\\ bool\\&,\\ unsigned\\ long\\*,\\ daik::ModbusActivity\\*\\)$",
       "max_bytes": 80
     },
     "history_peer_generation": {

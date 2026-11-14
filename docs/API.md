@@ -432,15 +432,16 @@ binding. Use a Modbus chart only with a nonzero epoch and matching boot ID and e
 The status field `history.modbus_binding:true` advertises this protocol independently of Modbus
 row availability. After learning the protocol, the dashboard withdraws Modbus charts and pins
 when a current `/values` request fails, the array is missing, or the binding is invalid. During OTA
-a matching saved frame can retain its captured chart with live activity paused. A matching boot ID
-and epoch in a fresh response can reopen the live charts.
+a matching frame can show chart samples already held in memory with live activity paused. A reload
+restores the binding metadata and needs a separate history response for the samples. A matching
+boot ID and epoch in a fresh response can reopen the live charts.
 The latest valid reply of the current session must be at most seven seconds old. The last
 full-cache commit must be at most 627 seconds old. A fast poll can refresh the reply clock while
 the full-cache rows retain their earlier values. These clocks describe the session and cache.
-The top-level `modbus_compressor_running` is `true` or `false` from HomeHub input 31's own valid
-reply in the current TCP session, at most seven seconds old. It is `null` when unavailable and can
-change between full-cache commits. The corresponding raw Modbus row still shows the full-cache
-reading. The field reports binary compressor activity.
+The top-level `modbus_compressor_running`, `modbus_dhw_running` and `modbus_space_running` report
+HomeHub inputs 31, 52 and 53 from one current TCP session. Each field is Boolean only when its
+own valid reply is at most seven seconds old, and `null` when unavailable. They can change
+between full-cache commits. The raw Modbus rows show the last full-cache readings.
 Diagnostic gate inputs have separate per-register freshness checks. Native promotion first
 exposes only its pressure probe until a full sweep. History additionally requires matching
 space/offset/codec/scale/unit provenance.
@@ -591,7 +592,10 @@ fields so it cannot roll them back.
 HomeHub port is 1–65535, unit 1–247, host at most 512 bytes. Empty host durably disables
 polling, automatic discovery and dependent diagnosis. The save withdraws the old readings
 immediately. The owner retires its socket and cache after OTA or Weather releases the network
-and retries a failed close on a later cycle. X10A remains independent.
+and retries a failed close on a later cycle. An enabled endpoint change can reuse its worker
+and report `close_pending` while it retries the previous socket's close. Disabling the source
+retires its worker. If re-enabled during retirement, the replacement waits for the old worker
+to release the network and deregister from the watchdog. X10A remains independent.
 When HomeHub settings are saved and polling is still pending, the response is
 `{"ok":true,"modbus_start_pending":true}`. This can occur during task startup, cleanup or
 resource pressure. A failed heap check at task creation or before the first sweep defers the next

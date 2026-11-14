@@ -1000,8 +1000,12 @@ const mbBinaryValue = (r) => {
 const mbBool = (off) => {
   if (off === 9 || !mbLive()) return null;
   const mb = S.status.modbus;
-  // Use the timed reply for space operation when the server provides it. The raw row can
-  // still describe an older full sweep and remains available in the values table.
+  // Prefer the current values frame before older firmware's status or raw cache.
+  if (off === 52 || off === 53) {
+    if (S.modbusActivity) return off === 52 ? S.modbusActivity.dhw : S.modbusActivity.space;
+    if (off === 52 && typeof mb.dhw_operation_known === "boolean")
+      return mb.dhw_operation_known ? mb.dhw_operation_active : null;
+  }
   if (off === 53 && typeof mb.plant_gate_known === "boolean")
     return mb.plant_gate_known ? mb.plant_gate_active : null;
   return mbBinaryValue(mbRow(off));

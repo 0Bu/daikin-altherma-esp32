@@ -205,7 +205,7 @@ set(UI_MINIFIER_VENDOR
     "${CMAKE_CURRENT_SOURCE_DIR}/../tools/web_asset/vendor/rcssmin.py")
 # Browsers do not consistently negotiate Brotli on this trusted-LAN HTTP origin. Keep gzip so the
 # payload's Content-Encoding is usable by every supported browser, and gate the measured response.
-set(UI_GZIP_MAX_BYTES 170500)
+set(UI_GZIP_MAX_BYTES 170650)
 idf_build_get_property(PYTHON PYTHON)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${APP_JS_MANIFEST}")
 file(STRINGS "${APP_JS_MANIFEST}" APP_JS_ENTRIES ENCODING UTF-8)

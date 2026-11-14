@@ -1233,12 +1233,14 @@ void native_gateway_baseline() {
         REQUIRE(mb_status().profile != ModbusProfile::Altherma4);
     }
 }
-ModbusCompressor current_compressor() {
-    bool             live   = false;
-    ModbusCompressor result = ModbusCompressor::Unknown;
+ModbusActivity current_activity() {
+    bool           live = false;
+    ModbusActivity result;
     mb_values_snapshot(nullptr, 0, live, nullptr, &result);
     return result;
 }
+
+ModbusCompressor current_compressor() { return current_activity().compressor; }
 
 void probe_resolved_peer_reconnect() {
     reset();
@@ -1496,17 +1498,22 @@ void partial_sweep_allocation_pressure() {
 void compressor_witness() {
     for (const auto profile : {ModbusProfile::HomeHub, ModbusProfile::Altherma4}) {
         reset();
-        Peer peer(false, profile, {{MbFunc::ReadInput, 31, 1}, {MbFunc::ReadInput, 52, 0}});
+        Peer peer(
+            false, profile,
+            {{MbFunc::ReadInput, 31, 1}, {MbFunc::ReadInput, 52, 0}, {MbFunc::ReadInput, 53, 1}});
         REQUIRE(current_compressor() == ModbusCompressor::Unknown);
         mb_poll_once();
         REQUIRE(current_compressor() == ModbusCompressor::On);
+        REQUIRE(current_activity().dhw == false && current_activity().space == true);
         REQUIRE(mb_status().dhw_operation_known && !mb_status().dhw_operation_active);
         const auto revision = mb_cache_generation();
         peer.set_word(MbFunc::ReadInput, 31, 0);
         peer.set_word(MbFunc::ReadInput, 52, 1);
+        peer.set_word(MbFunc::ReadInput, 53, 0);
         sdk::clock_us.fetch_add(1000000);
         mb_poll_once();
         REQUIRE(current_compressor() == ModbusCompressor::Off);
+        REQUIRE(current_activity().dhw == true && current_activity().space == false);
         REQUIRE(mb_status().dhw_operation_known && mb_status().dhw_operation_active);
         REQUIRE(mb_cache_generation() == revision);
         REQUIRE(cached_row(snapshot_rows(), 31).value == "1");
@@ -1536,6 +1543,7 @@ void compressor_witness() {
         s_last_reply_ms          = sdk::clock_us / 1000;
         REQUIRE(mb_values_live());
         REQUIRE(!mb_status().dhw_operation_known && !mb_status().dhw_operation_active);
+        REQUIRE(!current_activity().dhw && !current_activity().space);
 
         s_cycle_tick = 1;
         mb_poll_once();
@@ -1553,7 +1561,9 @@ void compressor_witness() {
         mb_poll_once();
         REQUIRE(current_compressor() == ModbusCompressor::On);
         REQUIRE(status_socket_open(s_req_host, 502, 1, 1, s_target_generation));
-        REQUIRE(current_compressor() == ModbusCompressor::Unknown);
+        const auto disconnected = current_activity();
+        REQUIRE(disconnected.compressor == ModbusCompressor::Unknown && !disconnected.dhw &&
+                !disconnected.space);
         peer.set_word(MbFunc::ReadInput, 31, 0);
         mb_poll_once();
         REQUIRE(current_compressor() == ModbusCompressor::Off);

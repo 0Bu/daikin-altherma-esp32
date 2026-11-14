@@ -1140,6 +1140,33 @@ void restore_modbus_delayed(const char* transport_path) {
             "delayed_modbus_restore_is_read_only");
 }
 
+void restore_modbus_pending_at_boundary(const char* transport_path) {
+    const auto configured = configure_homehub();
+    load_synthetic_nor(transport_path);
+    journal_sdk::unix_origin = delayed_boot_s + 1515;
+    history_start();
+    const auto generation = bind_homehub(configured, peer_a);
+    sdk::now_us           = history_bucket_us - 200000;
+    CachedValue flow;
+    flow.off               = 49;
+    flow.modbus_definition = def::homehub_definition_id(*def::homehub_find(49));
+    flow.value             = "41.1";
+    history_record_modbus(&flow, 1, generation);
+    sdk::now_us = history_bucket_us + 200000;
+    for (unsigned i = 0; i < 20; ++i) history_service_flash_restore();
+    require(s_flash_restore_done && s_mb_last_commit_bucket == 0,
+            "restore_anchors_the_completed_live_bucket");
+    flow.value = "42.2";
+    history_record_modbus(&flow, 1, generation);
+    auto expected =
+        std::vector<HistorySample>{123, 246, 369, HISTORY_NO_READING, HISTORY_NO_READING, 411};
+    require(flow_snapshot() == expected, "restore_does_not_commit_the_pending_bucket_twice");
+    sdk::now_us += history_bucket_us;
+    history_record_modbus(nullptr, 0, generation);
+    expected.push_back(422);
+    require(flow_snapshot() == expected, "restore_preserves_next_live_bucket");
+}
+
 void restore_trend_read_fault(const char* transport_path, bool persistent) {
     const auto configured = configure_homehub();
     load_synthetic_nor(transport_path);
@@ -1245,6 +1272,8 @@ int main(int argc, char** argv) {
             restore_modbus_reply_overlap(argv[2], false);
         else if (name == "restore_modbus_reply_partial" && argc == 3)
             restore_modbus_reply_overlap(argv[2], true);
+        else if (name == "restore_modbus_pending_at_boundary" && argc == 3)
+            restore_modbus_pending_at_boundary(argv[2]);
         else if ((name == "restore_trend_read_transient" ||
                   name == "restore_trend_read_persistent") &&
                  argc == 3)

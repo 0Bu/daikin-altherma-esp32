@@ -331,10 +331,13 @@ ModbusStatus                      mb_status() {
 ModbusProfile mb_active_profile() { return ModbusProfile::HomeHub; }
 size_t        mb_values_capacity() { return fixture::modbus_rows.size(); }
 size_t mb_values_snapshot(CachedValue* out, size_t cap, bool& live, uint32_t* history_generation,
-                          ModbusCompressor* compressor) {
-    live           = fixture::modbus_live;
+                          ModbusActivity* activity) {
+    live = fixture::modbus_live;
     if (history_generation) *history_generation = live ? 7 : 0;
-    if (compressor) *compressor = fixture::modbus_compressor;
+    if (activity)
+        *activity = {fixture::modbus_compressor,
+                     fixture::modbus_live ? std::optional<bool>{false} : std::nullopt,
+                     fixture::modbus_live ? std::optional<bool>{true} : std::nullopt};
     const size_t n = std::min(cap, fixture::modbus_rows.size());
     for (size_t i = 0; i < n; ++i) out[i] = fixture::modbus_rows[i];
     return n;

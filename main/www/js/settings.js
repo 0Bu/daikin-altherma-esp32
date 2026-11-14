@@ -971,6 +971,7 @@ function otaCacheStore(persist = true) {
     values: Array.isArray(S._values) ? S._values : [],
     modbus: Array.isArray(S._modbus) ? S._modbus : [],
     modbus_compressor_running: S.modbusCompressorRunning,
+    modbus_activity: S.modbusActivity,
     modbus_history_lease: S.modbusHistoryLease,
   };
   S.otaFrame = payload;
@@ -1030,6 +1031,7 @@ async function otaCacheRestore(otaStatus, afterRefusal = false) {
   S._values = cached.values;
   S._modbus = cached.modbus;
   S.modbusCompressorRunning = cached.modbus_compressor_running ?? null;
+  S.modbusActivity = cached.modbus_activity ?? null;
   S.otaCached = true;
   S.transportUnavailable = null;
   S.transportBusy = false;

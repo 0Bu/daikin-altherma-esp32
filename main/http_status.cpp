@@ -2009,7 +2009,7 @@ struct ValuesSnapshot {
     std::unique_ptr<logic::DwellReading[]> x10a_dwell;
     std::vector<CachedValue> modbus;
     bool modbus_live = false;
-    ModbusCompressor                       modbus_compressor    = ModbusCompressor::Unknown;
+    ModbusActivity                         modbus_activity;
     uint32_t                               modbus_history_epoch = 0;
 };
 
@@ -2060,7 +2060,7 @@ __attribute__((noinline)) static ValuesSnapshot take_values_snapshot() {
         bool live = false;
         uint32_t       history_generation = 0;
         const size_t   n = mb_values_snapshot(snapshot.modbus.data(), snapshot.modbus.size(), live,
-                                              &history_generation, &snapshot.modbus_compressor);
+                                              &history_generation, &snapshot.modbus_activity);
         const uint32_t epoch = history_epoch();
         if (live && history_generation != 0 && history_generation == history_modbus_generation())
             snapshot.modbus_history_epoch = epoch;
@@ -2266,10 +2266,15 @@ static void append_values_json(JsonOut& j, const ValuesSnapshot& snapshot) {
     j += "{\"values\":";
     append_values_array(j, snapshot.x10a, snapshot.x10a_label_ambiguous, snapshot.x10a_dwell);
     j += ",\"modbus_compressor_running\":";
-    if (snapshot.modbus_compressor == ModbusCompressor::Unknown)
+    const auto& activity = snapshot.modbus_activity;
+    if (activity.compressor == ModbusCompressor::Unknown)
         j += "null";
     else
-        j += snapshot.modbus_compressor == ModbusCompressor::On ? "true" : "false";
+        j += activity.compressor == ModbusCompressor::On ? "true" : "false";
+    j += ",\"modbus_dhw_running\":";
+    j += !activity.dhw ? "null" : *activity.dhw ? "true" : "false";
+    j += ",\"modbus_space_running\":";
+    j += !activity.space ? "null" : *activity.space ? "true" : "false";
     // mb_values_snapshot() ties the last full sweep to the current session before transfer.
     // A fast input-31 observation can change independently of those rows. Omit the array
     // when the full-cache snapshot is unavailable.

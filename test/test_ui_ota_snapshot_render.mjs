@@ -213,6 +213,27 @@ async function startup(h, order) {
 // rows. With X10A down the real SVG headline must stop claiming a HomeHub reading.
 {
   const h = harness();
+  const frame = status();
+  const gateway = { ...frame.modbus, dhw_operation_known: true, dhw_operation_active: true,
+    plant_gate_known: true, plant_gate_active: false };
+  h.routes.set("/status", async () => response({ ...frame, hp: { connected: false }, modbus: gateway }));
+  h.routes.set("/values", async () => response({ values: [], modbus: values().modbus,
+    modbus_history_epoch: 2, modbus_history_boot_id: "boot-a",
+    modbus_compressor_running: true, modbus_dhw_running: false, modbus_space_running: true }));
+  await h.refreshStatus(false);
+  await h.refreshValues();
+  assert.equal(h.S.live.spaceOp, true, "the new peer's space flag owns the schematic pill");
+  assert.equal(observe(h).headline, "Space H/C", "the headline follows the same peer's operation");
+  h.routes.set("/values", async () => response({ values: [], modbus: values().modbus,
+    modbus_history_epoch: 2, modbus_history_boot_id: "boot-a",
+    modbus_compressor_running: true, modbus_dhw_running: null, modbus_space_running: null }));
+  await h.refreshValues();
+  assert.equal(h.S.live.spaceOp, null, "expired activity stays unknown despite the old status");
+  assert.equal(observe(h).headline, "Operating mode unknown");
+}
+
+{
+  const h = harness();
   h.routes.set("/status", async () => response({ ...status(), hp: { connected: false } }));
   h.routes.set("/values", async () => response({ values: [], modbus: values().modbus,
     modbus_history_epoch: 1, modbus_history_boot_id: "boot-a" }));

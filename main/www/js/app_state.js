@@ -31,6 +31,7 @@ const S = {
   // stays known when a values response has no usable binding, including across a same-image reboot.
   modbusHistoryLease: null,
   modbusCompressorRunning: null,
+  modbusActivity: null,
   // A PINNED trend readout per concept: id -> {t} (the pinned sample's unix instant) or {i, gen} when
   // the device has no wall clock to anchor to. App state preserves the pin across structural
   // replacements and history updates. Anchoring to the instant re-resolves the same measurement
@@ -473,6 +474,7 @@ function invalidateLiveReadings(reason, busy = false) {
   if (S.otaCached) return;
   S._values = []; S._modbus = []; S.live = null;
   S.modbusCompressorRunning = null;
+  S.modbusActivity = null;
   S.transportUnavailable = reason;
   S.transportBusy = busy;
   renderApp();
@@ -563,7 +565,9 @@ function renderApp() {
   // the HomeHub is live, the snapshot is still built — liveData() fills what the second source can
   // supply and blanks the rest (mbFallbackFor), so the drawing degrades to the handful of readings
   // that ARE being measured instead of going blank while data is arriving.
-  const modbusLive = mbLive() && (S.modbusCompressorRunning != null || S._modbus?.some(row => row?.value != null));
+  const modbusLive = mbLive() && (S.modbusCompressorRunning != null ||
+    S.modbusActivity?.dhw != null || S.modbusActivity?.space != null ||
+    S._modbus?.some(row => row?.value != null));
   S.live = (hp.connected && (S._values || []).length > 0) || (x10aDown() && modbusLive)
     ? liveData() : null;
   if (S.transportUnavailable) S.live = null;
