@@ -115,6 +115,10 @@ if [ "$push_mode" -eq 1 ]; then
         || { echo "BLOCKED: push audit requires a clean checkout of the transferred commit." >&2; exit 2; }
     "$canonical_root/scripts/run-agentic-setup-audit.sh" \
         || { echo "BLOCKED: agentic setup/skill audit failed before push." >&2; exit 2; }
+    if [ "$(printf '%s' "$origin_identity" | tr 'A-Z' 'a-z')" = "github.com 0bu/daikin-altherma-esp32" ]; then
+        "$canonical_root/scripts/agent-python.sh" "$canonical_root/tools/release/push_checks.py" "$push_sha" </dev/null \
+            || { echo "BLOCKED: local release checks did not pass before push." >&2; exit 2; }
+    fi
     tmp="$(mktemp -d)" || exit 2
     push_body="$tmp/body.md"; push_files="$tmp/files.txt"; pr_rc=0
     agent_gate_discover_pr "" "$canonical_root" "$push_body" "$push_files" "${push_ref#refs/heads/}" || pr_rc=$?
@@ -321,13 +325,14 @@ if [ -n "$failures" ]; then
     exit 2
 fi
 
-# Preserve the historical last-mile merge behavior without repeating PR discovery: only an actual
-# local merge action reruns the deterministic suites, and it does so after the aggregate evidence
-# check has proved the current head. The UI-GIF audit is unconditional for a merge: a human review
-# record must never override the mechanical fact that the recording is stale or unreadable. The
-# record itself is conditional above and is required only when the PR carries a new GIF or stamp.
-# Authoritative CI supplies its own inputs and has no action; the separate `mechanical_gates` job
-# already runs these deterministic checks exactly once.
+# The canonical merge path revalidates the exact pre-push evidence. The legacy path remains
+# available for pre-cutover checkouts and the standalone policy fixtures.
+if [ -n "$action" ] && [ -f "$root/tools/release/verify_push_proof.py" ]; then
+    "$root/scripts/agent-python.sh" "$root/tools/release/verify_push_proof.py" local-pr "$selector" "$head_sha" \
+        || { echo "BLOCKED: missing current local release check evidence." >&2; exit 2; }
+    action=""
+fi
+
 if [ -n "$action" ]; then
     ui_gif_audit_out="$(agent_gate_run_bounded "${AGENT_GATE_SUITE_TIMEOUT:-120}" \
         "$root/scripts/run-ui-gif-audit.sh" 2>&1)"

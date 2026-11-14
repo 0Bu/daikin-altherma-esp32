@@ -50,21 +50,31 @@ hook binds the gate and the wrapper to the session worktree, so run them there a
 
 ### 0. Precondition: the exact head passed `$deploy-test`
 
-A PR is firmware-relevant when a changed file matches the `relevant=` pattern of the `changes` step
-in `.github/workflows/build.yml`, because CI republishes the dev artifact for exactly those files.
-For such a PR, `$deploy-test` must have passed at the exact PR head, and its pinned SHA and result
-must be recorded in the PR body. If not, run `$deploy-test` now; the same applies to every fix head
-from Step 8. A PR without firmware-relevant files skips this step.
+Run `$deploy-test` whenever signed dev publication is possible. Compare the prospective merge
+tree with the last proven dev source using
+[`tools/release/build-inputs.ere`](../../../tools/release/build-inputs.ere), including earlier
+unpublished changes. An unproven dev source requires the bench test. Record the exact head, Git
+tree and result in the PR body. Before flashing, require the bench build's `HEAD^{tree}` to equal
+the prospective merge tree. If refreshed main changes that tree, update the branch and retest the
+new head. Repeat for every fix head from Step 8.
 
 ### 1. Deterministic gates and PR records
 
-Run the deterministic gates for the affected surface (the entry points are listed in `AGENTS.md`).
-For a firmware change, include `scripts/idf-docker.sh idf.py build`.
+Freeze the source and reserve the bench and production window before merging. The native pre-push
+hook runs the local release suite on the clean candidate against refreshed `origin/main`. Keep
+the hook's parallel host and firmware checks in their isolated checkouts. The headless Linux Docker
+Chromium and WebKit phase starts after both finish. Run local reviews against the same head and finish
+the separately required bench acceptance in Step 0 before pushing the release branch.
+
+Post the exact emitted receipt as a PR comment from the authenticated maintainer account. A new
+comment is required for a new head or base. Update the PR body to refresh the protected policy
+after the receipt is posted. See [local release checks](../../../docs/MAINTENANCE.md#local-release-checks).
 
 Derive the required PR records from `tools/agent-hooks/require-pr-gates.sh`; never copy a list.
 `$project-review`, `$domain-review` and `$pr-hygiene-review` apply to every ordinary merge. The
 `$heap-safety-review` record comes from the independent read-only `heap_safety_reviewer`, not from a
-skill. Stamp each record for the exact PR head (`git rev-parse --short=12 HEAD`). Then validate the
+skill. Tick and stamp only an already completed review for the exact PR head
+(`git rev-parse --short=12 HEAD`). A checkbox update runs PR policy. Then validate the
 body locally against the head and the changed files:
 
 ```bash
@@ -81,16 +91,24 @@ scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 p
 scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 pr checks <pr-number>
 ```
 
-Wait for pending checks with the bounded watcher from `AGENTS.md`, not with sleeps. Then merge with
-the literal 40-hex `headRefOid`:
+Wait for pending checks with the bounded watcher from `AGENTS.md`. If bench acceptance applies,
+verify that the locally tested bench tree matches the tree in the receipt. Then merge with the
+literal 40-hex `headRefOid`:
 
 ```bash
 scripts/gh-with-git-credentials.sh api --hostname github.com --method PUT repos/0Bu/daikin-altherma-esp32/pulls/<pr-number>/merge -f sha=<full-40-hex-pr-head-sha> -f merge_method=squash
 ```
 
 Record the merge commit SHA from the response.
+Record the merge time too. The ordinary delivery target is 30 minutes from merge through
+confirmed production acceptance. Record feed, bench and production timings as they finish.
 
 ### 3. Watch the CI dev build on main
+
+For ordinary merges, the publication workflow binds the local receipt to the landed tree and its
+first parent before the signed build. See the
+[Renovate runner-pin exception](../../../docs/MAINTENANCE.md#local-release-checks).
+The workflow checks the exact published artifact and public readback.
 
 Find the `build.yml` run for the merge commit and watch it:
 
@@ -99,19 +117,19 @@ scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 r
 scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 run watch <run-id> --exit-status
 ```
 
-Then read `https://0bu.github.io/daikin-altherma-esp32/dev/manifest.json`. GitHub Pages can lag, so
-retry for a bounded time. Continue only if the manifest's `source_sha` equals the merge commit, and
-note its version and application SHA-256. A PR without firmware-relevant files publishes no dev
-artifact, so the manifest keeps the previous source: report the merge and stop. If a
-firmware-relevant PR's manifest keeps the previous source after a green run and the bounded wait,
-treat it as **Case A**. A confirmed cumulative-changelog capacity failure uses Step 3a first.
+Use that exact merge run's build-relevance result. If it confirms publication was unnecessary
+and the run succeeds, report the merge and stop. Otherwise require successful publication and read
+`https://0bu.github.io/daikin-altherma-esp32/dev/manifest.json`. GitHub Pages can lag, so retry for
+a bounded time. Continue when the manifest's `source_sha` equals the merge commit. Note its version
+and application SHA-256. If publication fails or the manifest still names another source after the
+bounded wait, use **Case A**. A confirmed cumulative-changelog capacity failure uses Step 3a first.
 
 ### 3a. Automatic release baseline when the cumulative changelog is full
 
 This handoff is already authorized; do not ask for another release approval. Serialize it with
 other sessions' bench, merge and dev-feed gates before changing either published feed.
 
-1. Verify the exact current main head and its successful complete `mechanical_gates` result. The
+1. Verify the exact current main head and its accepted local check receipt. The
    only qualifying failure is `Generate public OTA changelog` reporting cumulative development
    history above the legacy text/document budget. Reproduce it with the production generator and
    the current published feed. Invalid history, provenance, ancestry, versions, transport, signing,
@@ -208,7 +226,9 @@ When both devices are verified healthy:
   saved-channel preference;
 - summarize device metrics (uptime, heap, MQTT status, X10A status);
 - confirm the rollout to both the bench and the production heat pump, and list every additional PR
-  the failure loop merged.
+  the failure loop merged;
+- report merge-to-feed, bench, promotion and total elapsed time, and explain any missed target.
+  Continue the gate's bounded verification after an accepted POST even if the target time passes.
 
 ### 7. Cleanup after a successful rollout
 
@@ -251,8 +271,10 @@ loop is part of the authorized chain.
    - Before the merge (Steps 0–2), commit the fix on the PR's own branch.
    - After the merge (Steps 3–4), create the fix branch in the session worktree from the current main:
      `git fetch origin`, then `git switch -c agent/fix-<topic> origin/main`.
-3. **Run `$deploy-test`** at the fix head: the identity-verified USB write of the signed local build,
-   health, and the behavior that failed. Repeat steps 2–3 until the bench is green.
+3. **Run `$deploy-test`** at the fix head. Before writing, verify the bench build's `HEAD^{tree}`
+   against the prospective merge tree as in Step 0. Then perform the identity-verified USB write
+   of the signed local build and verify health and the behavior that failed. Repeat steps 2–3
+   until the bench is green.
 4. **Publish the fix:**
    - Run `$skill-audit` and `$pr-hygiene-review` for the fix head. When the fix goes onto an open PR,
      put both stamps for the new head into its PR body **before** the push; the pre-push gate checks

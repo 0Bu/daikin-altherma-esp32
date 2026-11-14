@@ -110,14 +110,14 @@ fails closed on both missing and extra project skills.
   head mismatch reports the PR URL and attempts to close the affected PR; if cleanup fails, the
   error explicitly requires manual cleanup. The caller cannot request commit-fill, template,
   draft, editor, browser, implicit-head, fork, or push variants.
-- Every actual local merge reruns `scripts/run-ui-gif-audit.sh`. A stale or unverifiable recording is
-  a hard mechanical block that no checked review record can override. The SHA-stamped `$ui-gif`
-  review is additionally required only when the PR changes `docs/media/dashboard.gif` or
-  `tools/uigif/gif_stamp.txt`.
+- The pre-push suite runs `scripts/run-ui-gif-audit.sh`. A stale or unverifiable recording blocks
+  the receipt and merge. The SHA-stamped `$ui-gif` review applies when the PR changes
+  `docs/media/dashboard.gif` or `tools/uigif/gif_stamp.txt`.
 - PR checkbox parsing proves an exact, applicable record stamped for the current head; it does not
   authenticate the PR-body editor. Maintainer review and GitHub merge authorization remain the actor
-  trust boundary.
-- Authoritative CI has one record-free platform-automerge exception. It binds current PR metadata
+  trust boundary. The checkbox records an already completed review. The protected policy checks
+  current PR text and records on edits without restarting the source build.
+- The Renovate runner-pin exception uses only protected-base CI attestation. The policy binds current PR metadata
   to complete immutable GitHub commit-file pages for the exact one-commit head. The data-only
   protected-base `pr-policy.yml` workflow, which never loads PR code, accepts only a same-repository
   Renovate branch whose sole edit is the
@@ -336,9 +336,10 @@ The native Git push hook lives in `.githooks/pre-push` and dispatches to
 install a Git hook. The native hook receives Git's actual ref updates, binds them to the destination
 repository and branch, and checks review records against the commit being sent. Prepare the
 `$skill-audit` and `$pr-hygiene-review` stamps in an open PR's body before pushing that commit.
-The checked-out `HEAD` must be that commit and the worktree must be clean for its local audit.
-An unsuccessful PR lookup must block; it is not evidence that no PR exists. This local push check
-does not replace the protected-base merge policy or the required CI checks.
+The checked-out `HEAD` must be that commit and the worktree must be clean. The hook runs
+the [local release checks](MAINTENANCE.md#local-release-checks) even before the initial PR exists.
+An unsuccessful PR lookup blocks the push. The protected-base merge policy validates the receipt
+independently of local hook configuration.
 
 ## Phase 7 cutover and rollback
 

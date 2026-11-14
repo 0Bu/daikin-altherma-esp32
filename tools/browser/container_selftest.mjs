@@ -80,6 +80,8 @@ try {
   const pin = dockerfile.match(/^FROM mcr\.microsoft\.com\/playwright:v([\d.]+)-noble@sha256:([a-f0-9]{64})$/m);
   assert.ok(pin, "browser image must pin the official version and immutable digest");
   assert.equal(pin[1], manifest.dependencies.playwright, "browser image and API package must match");
+  assert.match(dockerfile, /^RUN chmod 0644 package\.json package-lock\.json \\$/m,
+    "package metadata must be readable by the unprivileged WebKit process with a private host umask");
   assert.equal(lock.packages["node_modules/playwright"].version, pin[1]);
   assert.equal(lock.packages["node_modules/playwright-core"].version, pin[1]);
   assert.match(lock.packages["node_modules/playwright"].integrity, /^sha512-/);

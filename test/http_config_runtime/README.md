@@ -7,7 +7,7 @@ compiles complete `main/http_config.cpp` and `main/http_ota.cpp` with the real c
 shared JSON ingress, pure validators and `config_save_transaction`. It invokes the actual setter
 handlers and `ota_do`, rather than extracting or rewriting their decisions.
 
-CI runs the complete matrix with its default GNU C/C++ pair and again with
+The pre-push target build runs the complete matrix with the default GNU C/C++ pair and again with
 `CC=clang-18 CXX=clang++-18 python3 test/http_config_runtime/run.py --sanitizer undefined`.
 GCC 13's UBSan rejects the inline constexpr
 profile-table assertions because of [GCC PR71962](https://gcc.gnu.org/pipermail/gcc-patches/2025-July/688469.html).

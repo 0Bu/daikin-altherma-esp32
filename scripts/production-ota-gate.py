@@ -159,6 +159,7 @@ class GateJournal:
     """Durable private milestones; the sole write cannot precede its attempted-write witness."""
 
     def __init__(self) -> None:
+        self.started_at = time.monotonic()
         self.directory = Path(tempfile.mkdtemp(prefix="daikin-ota-gate-"))
         self.directory.chmod(0o700)
         self.path = self.directory / "receipt.json"
@@ -167,6 +168,7 @@ class GateJournal:
             "production": {"role": PRODUCTION_ROLE, "executed": False},
         }
         self.phases: list[str] = []
+        self.phase_elapsed_ms: list[int] = []
         self.checkpoint("started")
         print(f"Private journal: {self.path}", file=sys.stderr)
 
@@ -179,8 +181,9 @@ class GateJournal:
             else:
                 self.receipt[key] = value
         self.phases.append(phase)
+        self.phase_elapsed_ms.append(int((time.monotonic() - self.started_at) * 1000))
         document = {"outcome": outcome, "phase": phase, "phases": self.phases,
-                    "receipt": self.receipt}
+                    "phase_elapsed_ms": self.phase_elapsed_ms, "receipt": self.receipt}
         if error is not None:
             document["private_error"] = error
         if error_context is not None:
@@ -2608,9 +2611,18 @@ def verify_retained_x10a(status: dict[str, Any]) -> dict[str, int | bool | str]:
     fail("timed out waiting for retained production X10A state")
 
 
-def run_local_gates() -> None:
-    run_checked([str(ROOT / "scripts/run-mock-tests.sh"), "--coverage"])
-    run_checked([str(ROOT / "scripts/run-contract-tests.sh")])
+def run_local_gates(expected_source_sha: str) -> None:
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "daikin_local_release_checks", ROOT / "tools/release/local_checks.py")
+    checks = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(checks)
+    try:
+        reused = checks.verify(ROOT, expected_head=expected_source_sha)
+    except (checks.CheckError, OSError) as error:
+        fail(f"local release checks failed: {error}")
+    journal_checkpoint("local_checks_verified", local_checks={"reused": reused})
 
 
 def ota_offer_ready(
@@ -6026,7 +6038,7 @@ def main() -> int:
     binary = request_bytes(cache_busted(app_url), timeout=30)
     elf = verify_image(binary, args.expected_version, args.expected_app_sha256)
     verify_http_range_support(app_url, binary)
-    run_local_gates()
+    run_local_gates(args.expected_source_sha)
     journal_checkpoint("artifact_verified", artifact={
         "version": args.expected_version, "source_sha": args.expected_source_sha,
         "app_sha256": args.expected_app_sha256, "elf": elf, "artifact_feed": artifact_feed,
