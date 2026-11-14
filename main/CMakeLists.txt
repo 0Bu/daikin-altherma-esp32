@@ -197,6 +197,14 @@ set(APP_JS_MANIFEST "${CMAKE_CURRENT_SOURCE_DIR}/www/app.sources")
 set(UI_MINIFIER "${CMAKE_CURRENT_SOURCE_DIR}/../tools/web_asset/minify_and_gzip.py")
 set(UI_LOCALE_MINIFIER "${CMAKE_CURRENT_SOURCE_DIR}/../tools/web_asset/minify_js_and_gzip.py")
 set(UI_ZOPFLI_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../tools/web_asset")
+set(UI_STARTUP_PACKER "${UI_ZOPFLI_ROOT}/pack_startup_script.py")
+set(UI_LOCALE_BUNDLE_PRODUCER "${UI_ZOPFLI_ROOT}/build_locale_bundle.py")
+set(UI_LOCALE_DECODER_ROOT "${UI_ZOPFLI_ROOT}/vendor/lzma-js")
+set(UI_LZMA_DECODER_FILES
+    "${UI_LOCALE_DECODER_ROOT}/UPSTREAM.json"
+    "${UI_LOCALE_DECODER_ROOT}/LICENSE"
+    "${UI_LOCALE_DECODER_ROOT}/lzma-d.js"
+    "${UI_LOCALE_DECODER_ROOT}/lzma-d-min.js")
 file(GLOB UI_ZOPFLI_SOURCES CONFIGURE_DEPENDS
     "${UI_ZOPFLI_ROOT}/vendor/zopfli/*.c"
     "${UI_ZOPFLI_ROOT}/vendor/zopfli/*.h")
@@ -205,7 +213,7 @@ set(UI_MINIFIER_VENDOR
     "${CMAKE_CURRENT_SOURCE_DIR}/../tools/web_asset/vendor/rcssmin.py")
 # Browsers do not consistently negotiate Brotli on this trusted-LAN HTTP origin. Keep gzip so the
 # payload's Content-Encoding is usable by every supported browser, and gate the measured response.
-set(UI_GZIP_MAX_BYTES 170650)
+set(UI_GZIP_MAX_BYTES 169400)
 idf_build_get_property(PYTHON PYTHON)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${APP_JS_MANIFEST}")
 file(STRINGS "${APP_JS_MANIFEST}" APP_JS_ENTRIES ENCODING UTF-8)
@@ -238,9 +246,11 @@ add_custom_command(
             --input "${CMAKE_CURRENT_BINARY_DIR}/index_inlined.html"
             --output "${CMAKE_CURRENT_BINARY_DIR}/index.html.gz"
             --gzip-encoder zopfli --zopfli-iterations 5
+            --pack-startup-script "${APP_JS_MANIFEST}"
             --max-gzip-bytes ${UI_GZIP_MAX_BYTES}
     DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/index_inlined.html"
-            "${UI_MINIFIER}"
+            "${UI_MINIFIER}" "${UI_STARTUP_PACKER}" "${UI_LOCALE_BUNDLE_PRODUCER}"
+            ${UI_LZMA_DECODER_FILES}
             ${UI_MINIFIER_VENDOR}
             "${UI_ZOPFLI_ROOT}/zopfli_gzip.py"
             "${UI_ZOPFLI_ROOT}/zopfli_gzip.c"
@@ -256,8 +266,6 @@ add_dependencies(${COMPONENT_LIB} gen_index_gz)
 # The startup HTML and its delivery budget stay independent; no external service supplies code.
 set(UI_LOCALE_GZIP_MAX_BYTES 32768)
 set(UI_LOCALE_BUNDLE_MAX_BYTES 289792)
-set(UI_LOCALE_BUNDLE_PRODUCER "${UI_ZOPFLI_ROOT}/build_locale_bundle.py")
-set(UI_LOCALE_DECODER_ROOT "${UI_ZOPFLI_ROOT}/vendor/lzma-js")
 set(UI_LOCALE_OUTPUTS "")
 set(UI_LOCALE_SOURCES "")
 foreach(locale IN LISTS UI_LOCALE_CODES)
@@ -290,10 +298,7 @@ add_custom_command(
             --max-gzip-bytes ${UI_LOCALE_BUNDLE_MAX_BYTES}
     DEPENDS ${UI_LOCALE_OUTPUTS} ${UI_LOCALE_SOURCES} "${UI_LOCALE_BUNDLE_PRODUCER}"
             "${UI_MINIFIER}" ${UI_MINIFIER_VENDOR}
-            "${UI_LOCALE_DECODER_ROOT}/UPSTREAM.json"
-            "${UI_LOCALE_DECODER_ROOT}/LICENSE"
-            "${UI_LOCALE_DECODER_ROOT}/lzma-d.js"
-            "${UI_LOCALE_DECODER_ROOT}/lzma-d-min.js"
+            ${UI_LZMA_DECODER_FILES}
             "${UI_ZOPFLI_ROOT}/zopfli_gzip.py"
             "${UI_ZOPFLI_ROOT}/zopfli_gzip.c"
             "${UI_ZOPFLI_ROOT}/vendor/zopfli/UPSTREAM.json" ${UI_ZOPFLI_SOURCES}

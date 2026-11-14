@@ -9,6 +9,7 @@ import path from "node:path";
 import vm from "node:vm";
 import zlib from "node:zlib";
 import { fileURLToPath } from "node:url";
+import { TextDecoder } from "node:util";
 import { spliceInlineAssets } from "../tools/ui/inline_page.mjs";
 import { readAppSource } from "../tools/ui/read_app_source.mjs";
 
@@ -18,7 +19,7 @@ const input = path.join(work, "index_inlined.html");
 const gzipA = path.join(work, "index-a.html.gz");
 const gzipB = path.join(work, "index-b.html.gz");
 const minifiedPath = path.join(work, "index.min.html");
-const budget = 170650;
+const budget = 169400;
 
 try {
   const html = fs.readFileSync(path.join(root, "main/www/index.html"), "utf8");
@@ -69,9 +70,11 @@ try {
   "the shared host splice must copy every String.prototype.replace pattern literally");
 
   const tool = path.join(root, "tools/web_asset/minify_and_gzip.py");
+  const manifest = path.join(root, "main/www/app.sources");
   const run = (output, extra = [], env = {}) => childProcess.spawnSync("python3", [
     tool, "--input", input, "--output", output,
     "--gzip-encoder", "zopfli", "--zopfli-iterations", "5",
+    "--pack-startup-script", manifest,
     "--max-gzip-bytes", String(budget), ...extra,
   ], { cwd: root, encoding: "utf8", env: {
     ...process.env, WEB_ASSET_CACHE_DIR: path.join(work, "encoder-cache"), ...env,
@@ -209,10 +212,32 @@ try {
   assert.ok(minified.length < assembled.length * 0.7,
     "CSS/JS syntax minification must remove meaningful source-only weight");
 
-  const script = minified.match(/<script>([\s\S]*?)<\/script>/);
-  assert.ok(script, "minified page must retain its one inline script");
-  assert.doesNotThrow(() => new vm.Script(script[1], { filename: "index.min.html" }),
-    "the JavaScript in the shipped minified page must parse");
+  const startup = minified.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+  assert.ok(startup, "packed page must retain its one inline startup script");
+  const unpack = wrapper => {
+    let script;
+    const slot = { isConnected: true, after: node => { script = node.textContent; } };
+    const document = { currentScript: slot, createElement: tag => {
+      assert.equal(tag, "script");
+      return { remove() {} };
+    } };
+    vm.runInNewContext(wrapper, { document, atob, TextDecoder, Uint8Array, setTimeout });
+    return script;
+  };
+  const script = unpack(startup);
+  assert.doesNotThrow(() => new vm.Script(script, { filename: "index.min.html" }),
+    "the decoded dashboard script must parse");
+  const plain = path.join(work, "index-unpacked.html");
+  const plainRun = childProcess.spawnSync("python3", [tool, "--input", input,
+    "--output", path.join(work, "index-unpacked.gz"), "--html-output", plain,
+    "--max-gzip-bytes", String(assembled.length)], { cwd: root, encoding: "utf8" });
+  assert.equal(plainRun.status, 0, plainRun.stderr || plainRun.stdout);
+  assert.equal(script, fs.readFileSync(plain, "utf8").match(/<script>([\s\S]*?)<\/script>/)?.[1],
+    "the shipped startup wrapper must restore the exact minified script");
+  const corrupt = startup.replace(/(checksum\^4294967295\)>>>0\)!==)(\d+)/,
+    (_, prefix, crc) => prefix + (Number(crc) + 1));
+  assert.notEqual(corrupt, startup, "the integrity control must change the shipped wrapper");
+  assert.throws(() => unpack(corrupt), /app payload integrity/);
 
   // Comment stripping must cover all THREE languages.  It covered only the two inline assets until
   // the markup shell was measured: index.html is spliced in raw, so its load-bearing drawing and
@@ -232,6 +257,7 @@ try {
     "CMake and the host contract must share the UI_GZIP_MAX_BYTES budget");
   assert.match(cmake, /minify_and_gzip\.py[\s\S]*--max-gzip-bytes \$\{UI_GZIP_MAX_BYTES\}/,
     "firmware build must execute the checked minifier and size gate");
+  assert.match(cmake, /--pack-startup-script "\$\{APP_JS_MANIFEST\}"/);
   const status = fs.readFileSync(path.join(root, "main/http_status.cpp"), "utf8");
   const common = fs.readFileSync(path.join(root, "main/http_common.cpp"), "utf8");
   assert.match(status,
@@ -371,7 +397,7 @@ try {
     return context;
   };
   const originalProduction = productionContext(app);
-  const shippedProduction = productionContext(script[1]);
+  const shippedProduction = productionContext(script);
   for (const [topic, field] of [["room/state", "temperature"], ["room$state", "t$C"],
     [" room\\state ", " .raw$key\\ "], ["$SYS/room", ""], ["", ""]]) {
     const before = originalProduction.__format.formatRefSource(topic, field);
