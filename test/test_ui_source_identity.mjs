@@ -274,12 +274,12 @@ Object.assign(context, {
     pending.push({ url, signal, resolve, reject });
   }),
 });
-const initialPair = ui.ensureHistPair("dhw_tank", true);
+const initialPair = ui.ensureHistPair("dhw_tank", "refresh");
 const [tankX10a] = pending.splice(0);
 assert.ok(tankX10a);
 assert.equal(timeout.size, 1, "background recovery starts one history transport at a time");
 for (let paint = 0; paint < 30; ++paint)
-  assert.equal(ui.ensureHistPair("dhw_tank", true), undefined, "polls do not wait on existing requests");
+  assert.equal(ui.ensureHistPair("dhw_tank", "refresh"), undefined, "polls do not wait on existing requests");
 assert.equal(pending.length, 0);
 const replacement = fixture();
 replacement.history.epoch = 2;
@@ -297,11 +297,11 @@ await stalled;
 assert.equal(stalledRequest.signal.aborted, true);
 assert.equal(timeout.size, 0);
 assert.equal(ui.S.histBusy.size, 0);
-assert.equal(ui.S.hist.get("dhw_tank").err, true, "a current timeout leaves a bounded error state");
+assert.equal(ui.S.hist.get("dhw_tank").v[0], 400, "a current timeout keeps the compatible ring");
 ui.S.hist.set(ui.histCacheKey("dhw_tank", "modbus"), { at: Date.now() });
-assert.equal(ui.ensureHistPair("dhw_tank", true), undefined, "the selected chart honors the error cooldown");
+assert.equal(ui.ensureHistPair("dhw_tank", "refresh"), undefined, "the selected chart honors the error cooldown");
 ui.S.hist.get("dhw_tank").at -= 60001;
-const recovering = ui.ensureHistPair("dhw_tank", true);
+const recovering = ui.ensureHistPair("dhw_tank", "refresh");
 assert.equal(pending.length, 1, "the selected chart retries its expired error without refetching its other ring");
 reply(pending.shift(), 450, 2);
 await recovering;

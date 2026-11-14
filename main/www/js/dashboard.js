@@ -153,10 +153,13 @@ function renderCards(hold = true) {
 function recoverOpenHistory() {
   if (S.scrub || S.clickHold || S.histBusy.size) return;
   const dashboard = S.stage === "dashboard";
+  const inspector = dashboard && S.insp && INSPECT[S.insp];
+  if (inspector && renderInspectHist(inspector, S.live ? inspCurRow(inspector) : null, "refresh"))
+    return;
   const host = globalThis.document?.getElementById(dashboard ? "valueGroups" : "settingsCards");
   const rows = dashboard ? ".vgroup:not([hidden]) .vitem.open [data-trend]" : ".vitem.open [data-trend]";
   for (const button of host?.querySelectorAll(rows) || [])
-    if (ensureHistPair(button.dataset.trend, true)) break;
+    if (ensureHistPair(button.dataset.trend, "refresh")) break;
 }
 
 // Reconcile navigation against the installed frame, including while a poll is deferred.

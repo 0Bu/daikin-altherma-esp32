@@ -231,7 +231,8 @@ function histVisibleSeries(h) {
 }
 
 // Include the lifetime and time anchor even when a new flat ring draws identical SVG geometry.
-const histViewRevision = view => [S.histEpoch, view.gen, view.t0].join("/");
+const histViewRevision = view =>
+  [S.histEpoch, view.gen, view.t0, view.forecast?.revision, tankAuxRevision(view.tankAux)].join("/");
 function histRevision(view) {
   return ` data-rev="${esc(histViewRevision(view))}"`;
 }
@@ -254,8 +255,8 @@ function histSeriesToggle(id, source) {
   if (visible && (dataSeries.length <= 1 ? (s.v.some((v) => v != null) || histVisibleSeries(h).length <= 1) : false)) return;
   const hidden = new Set(histHiddenSet(h));
   if (visible) hidden.add(source); else hidden.delete(source);
+  cancelHistoryGesture();
   S.histHidden.set(id, hidden);
-  S.scrub = null;
   S.clickHold = false;
   S.inspHistSig = null;
   renderTrendHosts();
@@ -270,7 +271,7 @@ const histAwaiting = (key, epoch) => {
   const waiting = S.histAwait?.get(key);
   return !!waiting && waiting.epoch === epoch && Date.now() - waiting.at < HIST_IDENTITY_WAIT_MS;
 };
-function ensureHist(id, source = "x10a", recoverOnly = false) {
+function ensureHist(id, source = "x10a", mode = "open") {
   const epoch = syncHistSources();
   const key = histCacheKey(id, source);
   const derived = source === "x10a" && DERIVED[id];
@@ -280,8 +281,18 @@ function ensureHist(id, source = "x10a", recoverOnly = false) {
   if (S.histBusy.has(key)) return S.histRequests.get(key)?.done;
   if (histAwaiting(key, epoch)) return;
   const c = S.hist.get(key);
-  if (c && ((recoverOnly && !c.err) || Date.now() - c.at < 60000)) return;
-  if (derived) return recoverOnly ? undefined : ensureDerived(id);
+  if (c && Date.now() - c.at < 60000) return;
+  if (derived) {
+    if (mode === "refresh") {
+      // Advance one raw input per poll. Assemble only when no input needs a transport.
+      for (const input of DERIVED[id].ins) {
+        if (!hasDeviceHist(input)) continue;
+        const started = ensureHist(input);
+        if (started) return started;
+      }
+    }
+    return ensureDerived(id);
+  }
   return fetchHistory(id, source, key, epoch, c);
 }
 
@@ -291,7 +302,10 @@ async function fetchHistory(id, source, key, epoch, previous) {
   const timer = controller ? setTimeout(() => controller.abort(), POLL_TIMEOUT_MS) : null;
   let finish;
   const request = { controller, done: new Promise((resolve) => { finish = resolve; }) };
-  const failed = () => ({ at: Date.now(), gen: previous?.gen || 0, source, sourceId, err: true, v: [] });
+  const failed = () => ({
+    ...(previous && !previous.err ? previous : { gen: previous?.gen || 0, source, sourceId, err: true, v: [] }),
+    at: Date.now(),
+  });
   (S.histRequests ||= new Map()).set(key, request);
   S.histBusy.add(key);
   try {
@@ -352,15 +366,15 @@ async function fetchHistory(id, source, key, epoch, previous) {
 
 // Direct schematic measurements may have two independent rings. Fetch both together only for a
 // chart the user actually opened; derived figures continue to fetch their X10A inputs alone.
-function ensureHistPair(id, recoverOnly = false) {
+function ensureHistPair(id, mode = "open") {
   // A repaint needs no result from a request that is already running. Derived charts can still
   // await their own inputs directly through ensureHist.
-  if (recoverOnly && S.histBusy.size) return;
+  if (mode !== "open" && S.histBusy.size) return;
   const requests = [];
   const request = (row, source, offered) => {
     const key = histCacheKey(row, source);
-    if (!offered || S.histBusy.has(key) || (recoverOnly && requests.length)) return;
-    const started = ensureHist(row, source, recoverOnly);
+    if (!offered || S.histBusy.has(key) || (mode !== "open" && requests.length)) return;
+    const started = ensureHist(row, source, mode);
     if (started) requests.push(started);
   };
   request(id, "x10a", hasHist(id));
@@ -396,7 +410,9 @@ async function ensureDerived(id) {
   if (S.histBusy.has(id)) return S.histRequests.get(id)?.done;
   if (histAwaiting(id, epoch)) return;
   const previousGen = S.hist.get(id)?.gen || 0;
-  const failed = () => ({ at: Date.now(), gen: previousGen, err: true, v: [] });
+  const previous = S.hist.get(id);
+  const failed = () => previous && !previous.err
+    ? { ...previous, at: Date.now() } : { at: Date.now(), gen: previousGen, err: true, v: [] };
   let finish;
   const request = { epoch, done: new Promise((resolve) => { finish = resolve; }) };
   (S.histRequests ||= new Map()).set(id, request);
@@ -547,7 +563,13 @@ function weatherForecastView() {
     if (points.length && time <= points[points.length - 1].time) return null;
     points.push({ time, temperature, humidity, pressure });
   }
-  return points.length >= 2 ? { now, points } : null;
+  if (points.length < 2) return null;
+  const anchor = Object.fromEntries(WEATHER_FORECAST_SERIES.map(spec => {
+    const env = S.status?.env3;
+    const current = env?.[spec.env];
+    return [spec.key, env?.fresh && Number.isFinite(current) ? current : null];
+  }));
+  return { now, points, anchor, revision: JSON.stringify([now, points, anchor]) };
 }
 
 // One timeline carrying one or more independent instruments. `b0` is the firmware's monotonic
@@ -614,11 +636,13 @@ function alignedHistoryView(id, raw) {
            v: union, series };
 }
 
-function historyView(id, source = "") {
+function historyView(id, source = "", forecast) {
   if (id === ENV3_COMBINED_ID) {
-    return alignedHistoryView(id, ENV3_COMBINED_SERIES.map((s) => ({
+    const view = alignedHistoryView(id, ENV3_COMBINED_SERIES.map((s) => ({
       source: s.id, name: t(s.label), h: S.hist.get(histCacheKey(s.id, "env3")),
     })));
+    if (Number.isFinite(view?.t0)) view.forecast = forecast === undefined ? weatherForecastView() : forecast;
+    return view;
   }
   const x10aName = id === "circulation_state" ? "MQTT" : "X10A";
   const view = alignedHistoryView(id, [
@@ -627,6 +651,7 @@ function historyView(id, source = "") {
     { source: "env3", name: "ENV III", h: hasEnv3Hist(id) ? S.hist.get(histCacheKey(id, "env3")) : null },
     { source: "room", name: roomHistName(), h: hasRoomHist(id) ? S.hist.get(histCacheKey(id, "room")) : null },
   ].filter((s) => !source || s.source === source));
+  if (view && id === "dhw_tank") view.tankAux = tankAuxHistories();
   return STATE_HIST[id] ? stateHistoryLiveView(view) : view;
 }
 
@@ -1054,12 +1079,19 @@ function alignAuxSample(view, h, i) {
   return (idx >= 0 && idx < h.v.length) ? h.v[idx] : null;
 }
 
+function tankAuxHistories() {
+  return [histCacheKey("smart_grid_mode", "modbus"), "smart_grid_mode", "bsh_state",
+    histCacheKey("bsh_state", "modbus")].map(key => {
+    const h = S.hist.get(key);
+    return h && !h.err && h.v?.length ? h : null;
+  });
+}
+
+const tankAuxRevision = histories => histories?.map(h => h ? h.gen : "").join(",");
+
 function dhwAuxPhases(view) {
-  if (!view || view.id !== "dhw_tank" || !Array.isArray(view.v)) return null;
-  const sgM = S.hist?.get?.(histCacheKey("smart_grid_mode", "modbus"));
-  const sgX = S.hist?.get?.("smart_grid_mode");
-  const bshX = S.hist?.get?.("bsh_state");
-  const bshM = S.hist?.get?.(histCacheKey("bsh_state", "modbus"));
+  if (!view?.tankAux) return null;
+  const [sgM, sgX, bshX, bshM] = view.tankAux;
   if (!sgM && !sgX && !bshX && !bshM) return null;
 
   const n = view.v.length;
@@ -1282,12 +1314,11 @@ function env3SeriesClass(source) {
 // temperature and humidity underneath pressure. One full-width chart therefore gives every line
 // its own honest local range while sharing the exact same time raster. The legend explicitly says
 // so, and the cursor reports each visible raw measurement at the selected instant.
-function env3HistHtml() {
+function env3HistHtml(view = historyView(ENV3_COMBINED_ID)) {
   const offered = ENV3_COMBINED_SERIES.filter((s) => hasEnv3Hist(s.id));
   if (!offered.length) return "";
   const cached = offered.map((s) => S.hist.get(histCacheKey(s.id, "env3")));
   const wrap = (body, cls = "") => `<div class="vhist vhist-env3${cls ? " " + cls : ""}">${body}</div>`;
-  const view = historyView(ENV3_COMBINED_ID);
   if (!view && cached.some((h) => !h))
     return wrap(`<div class="vhist-note">${esc(t("hist.loading"))}</div>`, "vhist-flat");
   if (!view && cached.filter(Boolean).every((h) => h.err))
@@ -1301,12 +1332,12 @@ function env3HistHtml() {
   const n = view.v.length;
   const spanH = Math.max(1, Math.round((n * view.dt) / 3600));
   const full = n * view.dt >= 23.5 * 3600;
-  const forecast = weatherForecastView();
+  const forecast = view.forecast;
   const futureEnd = forecast?.points.at(-1)?.time;
   const measuredStart = Number.isFinite(view.t0) ? view.t0 : null;
   const measuredEnd = measuredStart == null ? null : measuredStart + (n - 1) * view.dt;
-  const timedForecast = forecast && measuredStart != null && forecast.now >= measuredStart &&
-    Number.isFinite(futureEnd) && futureEnd > forecast.now;
+  const geometry = forecastScrubView(view);
+  const timedForecast = !!geometry;
   const domainEnd = timedForecast ? futureEnd : measuredEnd;
   const domainSpan = timedForecast ? domainEnd - measuredStart : 0;
   const timeX = (unix) => ((unix - measuredStart) / domainSpan) * HIST_W;
@@ -1316,18 +1347,15 @@ function env3HistHtml() {
     ? Math.max(0, Math.min(1, timeX(measuredEnd) / HIST_W)) : 1;
   const nowFrac = timedForecast
     ? Math.max(0, Math.min(1, timeX(forecast.now) / HIST_W)) : 1;
-  const forecastSpecForMeasured = (source) =>
-    WEATHER_FORECAST_SERIES.find((spec) => spec.measured === source);
-  const scalePoints = (s) => {
-    const measured = s.v.map((v) => v == null ? null : v / 10);
-    const spec = timedForecast ? forecastSpecForMeasured(s.source) : null;
-    return spec ? [...measured, ...forecast.points.map((p) => p[spec.key])] : measured;
+  const scaleY = (s) => {
+    const spec = WEATHER_FORECAST_SERIES.find((spec) => spec.measured === s.source);
+    return geometry && spec ? geometry.scales[spec.key] : histScale(s.v.map(v => v == null ? null : v / 10), n).Y;
   };
   let areas = "", lines = "", dots = "", nowDots = "";
   for (const s of plotted) {
     if (!histVisibleSeries(view).includes(s)) continue;
     const pts = s.v.map((v) => v == null ? null : v / 10);
-    const { Y } = histScale(scalePoints(s), n);
+    const Y = scaleY(s);
     const X = sampleX;
     const cls = env3SeriesClass(s.source);
     let run = [];
@@ -1365,18 +1393,13 @@ function env3HistHtml() {
   if (timedForecast) {
     for (const spec of WEATHER_FORECAST_SERIES) {
       if (!histVisibleSeries(view).some((s) => s.source === spec.measured)) continue;
-      const measured = plotted.find((s) => s.source === spec.measured);
-      const rawCurrent = S.status?.env3?.[spec.env];
-      const current = typeof rawCurrent === "number" ? rawCurrent : Number.NaN;
+      const current = forecast.anchor[spec.key];
       const points = [];
-      if (S.status?.env3?.fresh && Number.isFinite(current))
-        points.push({ time: forecast.now, value: current, anchor: true });
-      for (const p of forecast.points) {
-        if (p.time > forecast.now) points.push({ time: p.time, value: p[spec.key], anchor: false });
-      }
+      if (current != null)
+        points.push({ time: forecast.now, value: current });
+      for (const p of geometry.points) points.push({ time: p.time, value: p[spec.key] });
       if (points.length < 2) continue;
-      const past = measured ? measured.v.map((v) => v == null ? null : v / 10) : [];
-      const { Y } = histScale([...past, ...points.map((p) => p.value)], n);
+      const Y = geometry.scales[spec.key];
       const d = points.map((p, i) =>
         `${i ? "L" : "M"}${timeX(p.time).toFixed(1)} ${Y(p.value).toFixed(1)}`).join("");
       forecastAreas += `<path class="vhist-area ${spec.cls}" ` +
@@ -1415,7 +1438,7 @@ function env3HistHtml() {
         ).join("")
       : plotted.filter((s) => histVisibleSeries(view).includes(s)).map((s) => {
           if (s.v[pi] == null) return "";
-          const { Y } = histScale(scalePoints(s), n);
+          const Y = scaleY(s);
           return `<span class="vhist-mark vhist-pinned ${env3SeriesClass(s.source)}" ` +
             `style="left:${px}%;top:${((Y(s.v[pi] / 10) / HIST_H) * 100).toFixed(2)}%"></span>`;
         }).join("");
@@ -1470,8 +1493,14 @@ function scrubFrac(i, n) { return n <= 1 ? 1 : i / (n - 1); }
 // then provider-timestamped Open-Meteo hours. One geometry helper keeps pointer, touch, keyboard and
 // pinned tooltips on the same forecast point the SVG drew.
 function forecastScrubView(h) {
+  if (!h?.forecast) return null;
+  if (h.forecastGeometry === undefined) h.forecastGeometry = computeForecastScrubView(h);
+  return h.forecastGeometry;
+}
+
+function computeForecastScrubView(h) {
   if (!h || h.id !== ENV3_COMBINED_ID || !h.v.length || !Number.isFinite(h.t0)) return null;
-  const forecast = weatherForecastView();
+  const forecast = h.forecast;
   const futureEnd = forecast?.points.at(-1)?.time;
   if (!forecast || !Number.isFinite(futureEnd) || futureEnd <= forecast.now ||
       forecast.now < h.t0) return null;
@@ -1485,14 +1514,14 @@ function forecastScrubView(h) {
   for (const spec of WEATHER_FORECAST_SERIES) {
     const measured = h.series.find((s) => s.source === spec.measured);
     const scaleValues = measured ? measured.v.map((v) => v == null ? null : v / 10) : [];
-    const rawCurrent = S.status?.env3?.[spec.env];
-    const current = typeof rawCurrent === "number" ? rawCurrent : Number.NaN;
-    if (S.status?.env3?.fresh && Number.isFinite(current)) scaleValues.push(current);
+    const current = forecast.anchor[spec.key];
+    if (current != null) scaleValues.push(current);
     scaleValues.push(...points.map((p) => p[spec.key]));
     scales[spec.key] = histScale(scaleValues, h.v.length).Y;
   }
   return {
     points,
+    scales,
     measuredFrac: xFrac(measuredEnd),
     nowFrac: xFrac(forecast.now),
     xFrac,
@@ -1501,7 +1530,7 @@ function forecastScrubView(h) {
 }
 
 function scrubCount(plot) {
-  const h = historyView(plot.dataset.hist, plot.dataset.source || "");
+  const h = scrubView(plot);
   const forecast = forecastScrubView(h);
   return (h?.v.length || 0) + (forecast?.points.length || 0);
 }
@@ -1778,10 +1807,9 @@ function scrubMove(plot, i) {
     const s = h.series.find((q) => q.source === mark.dataset.source);
     const v = s ? s.v[i] : null;
     if (v == null || !histVisibleSeries(h).includes(s)) { mark.hidden = true; continue; }
-    const scaleValues = s.v.map((z) => z == null ? null : z / 10);
     const spec = forecast && WEATHER_FORECAST_SERIES.find((item) => item.measured === s.source);
-    if (spec) scaleValues.push(...weatherForecastView().points.map((point) => point[spec.key]));
-    const Y = separateScales ? histScale(scaleValues, n).Y : sharedY;
+    const Y = spec ? forecast.scales[spec.key] : separateScales
+      ? histScale(s.v.map(z => z == null ? null : z / 10), n).Y : sharedY;
     mark.hidden = false;
     mark.style.left = x.toFixed(1) + "px";
     mark.style.top = ((Y(v / 10) / HIST_H) * 100).toFixed(2) + "%";
@@ -1988,7 +2016,10 @@ function renderTrendHosts() {
     plot.dataset.hist === id && (plot.dataset.source || "") === source && historyRowOwner(plot) === activeOwner);
   if (!next) return;
   next.focus({ preventScroll: true });
-  if (cursor != null) { next.dataset.cur = cursor; scrubMove(next, +cursor); }
+  if (cursor != null && next.dataset.rev === active.dataset.rev) {
+    next.dataset.cur = cursor;
+    scrubMove(next, +cursor);
+  }
 }
 
 const chevIcon = `<svg class="vrow-chev" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>`;
@@ -2354,6 +2385,7 @@ function toggleDesc(btn) {
   const key = btn.dataset.desc || "";
   const trend = btn.dataset.trend || "";
   const open = !item.classList.contains("open");
+  if (!open && S.trendPointer && item.contains(S.trendPointer.plot)) cancelHistoryGesture();
   item.classList.toggle("open", open);
   btn.setAttribute("aria-expanded", open ? "true" : "false");
   if (open) S.descOpen.add(key);

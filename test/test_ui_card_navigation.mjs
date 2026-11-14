@@ -109,7 +109,7 @@ settings.querySelectorAll = selector => {
 };
 const attempts = [];
 context.ensureHistPair = (trend, recover) => {
-  assert.equal(recover, true);
+  assert.equal(recover, "refresh");
   attempts.push(trend);
   return Promise.resolve();
 };

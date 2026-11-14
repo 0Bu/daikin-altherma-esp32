@@ -585,6 +585,7 @@ function renderEnv3Pill() {
   if (!configured) {
     group.setAttribute("aria-hidden", "true");
     if (S.insp === "env3") {
+      cancelHistoryGesture();
       S.insp = null;
       // Null is an invalidation sentinel, not the closed inspector's real empty signature. Using
       // "" for both let renderInspect() take its unchanged-DOM early return and leave the tongue
@@ -1711,24 +1712,30 @@ function inspectSig(e) {
 //
 // Chart state has its own signature, independent of changing inspector readings. A new series
 // (`gen`), categorical live cap or pin updates its markup; ordinary scalar polls keep it mounted.
-function renderInspectHist(e, row) {
-  const mayFetch = typeof _pollBusy === "undefined" || !_pollBusy;
+function renderInspectHist(e, row, mode = "") {
+  const mayFetch = mode && (typeof _pollBusy === "undefined" || !_pollBusy);
+  let started;
+  const request = (id, source) => {
+    if (!mayFetch || (mode === "refresh" && (started || S.histBusy.size))) return;
+    started = ensureHist(id, source, mode) || started;
+  };
   if (e && e.env3) {
     const offered = ENV3_COMBINED_SERIES.filter((s) => hasEnv3Hist(s.id));
-    if (mayFetch) for (const s of offered) ensureHist(s.id, "env3");
+    for (const s of offered) request(s.id, "env3");
     const seriesSig = offered.map((s) => {
       const h = S.hist.get(histCacheKey(s.id, "env3"));
       return `${s.id}:${h ? (h.err ? "e" : h.gen) : ""}`;
     });
     const pin = S.histPin.get(ENV3_COMBINED_ID);
-    const sig = [LANG, ENV3_COMBINED_ID, S.transportUnavailable === "status", ...seriesSig,
+    const forecast = weatherForecastView();
+    const sig = [LANG, ENV3_COMBINED_ID, ...seriesSig, forecast?.revision,
                  pin ? (pin.t ?? `${pin.i}/${pin.gen}`) : ""].join("|");
-    if (sig === S.inspHistSig) return;
+    if (sig === S.inspHistSig) return started;
     S.inspHistSig = sig;
     const el = $("inspHist");
     el.hidden = !offered.length;
-    replaceHistoryHtml(el, offered.length ? env3HistHtml() : "");
-    return;
+    replaceHistoryHtml(el, offered.length ? env3HistHtml(historyView(ENV3_COMBINED_ID, "", forecast)) : "");
+    return started;
   }
   // A plain pill drawn from a ROW charts that row. A COMPUTED pill (ΔT, heat output, electrical
   // input, COP) or a grouped component (BUH's two stage rows) charts the explicit series named by
@@ -1747,13 +1754,13 @@ function renderInspectHist(e, row) {
   const id = explicitId || (row ? histIdFor(row.label) : pairedId)
     || (S.insp === "room" && hasRoomHist("room_temp") ? "room_temp" : "");
   if (id && mayFetch) {
-    if (trendSource) ensureHist(id, trendSource);
-    else ensureHistPair(id);                // throttled to once a minute inside; no-op once cached
+    if (trendSource) request(id, trendSource);
+    else started = ensureHistPair(id, mode);
     if (trendSource && id === "dhw_tank") {
-      ensureHist("smart_grid_mode");
-      ensureHist("smart_grid_mode", "modbus");
-      ensureHist("bsh_state");
-      ensureHist("bsh_state", "modbus");
+      request("smart_grid_mode");
+      request("smart_grid_mode", "modbus");
+      request("bsh_state");
+      request("bsh_state", "modbus");
     }
   }
   const h = id && trendSource !== "modbus" ? S.hist.get(id) : null;
@@ -1765,18 +1772,13 @@ function renderInspectHist(e, row) {
   // still leave a tooltip/crosshair DOM completely alone.
   const liveGen = id && typeof STATE_HIST !== "undefined" && STATE_HIST[id]
     ? historyView(id, trendSource)?.gen || "" : "";
-  const auxGen = id === "dhw_tank"
-    ? `${S.hist.get("smart_grid_mode")?.gen || ""}/` +
-      `${S.hist.get(histCacheKey("smart_grid_mode", "modbus"))?.gen || ""}/` +
-      `${S.hist.get("bsh_state")?.gen || ""}/` +
-      `${S.hist.get(histCacheKey("bsh_state", "modbus"))?.gen || ""}`
-    : "";
+  const auxGen = id === "dhw_tank" ? tankAuxRevision(tankAuxHistories()) : "";
   // histHtml carries localised axis/readout copy. A language switch must therefore invalidate the
   // inspector chart even when the series generation and pinned sample are unchanged.
   const sig = [LANG, id, trendSource, h ? (h.err ? "e" : h.gen) : "", mh ? (mh.err ? "e" : mh.gen) : "",
                rh ? (rh.err ? "e" : rh.gen) : "", id === "room_temp" ? roomHistName() : "",
                liveGen, auxGen, pin ? (pin.t ?? `${pin.i}/${pin.gen}`) : ""].join("|");
-  if (sig === S.inspHistSig) return;
+  if (sig === S.inspHistSig) return started;
   S.inspHistSig = sig;
   const el = $("inspHist");
   el.hidden = !id;
@@ -1793,9 +1795,10 @@ function renderInspectHist(e, row) {
     : pairedId ? histHtml(id, mb ? displayUnit(mb) : "", mb ? displayHomeHubLabel(mb) : inspTitleText(e, null), trendSource)
                : histHtml(id, DERIVED[id]?.unit || "",
                           e.aria ? inspFieldText(e, "aria", null) : inspTitleText(e, null), trendSource));
+  return started;
 }
 
-function renderInspect() {
+function renderInspect(mode = "") {
   if (S.stage === "settings") return;
   const e = S.insp ? INSPECT[S.insp] : null;
   // Freeze with the other trend hosts during a scrub so structural updates cannot replace the
@@ -1805,7 +1808,7 @@ function renderInspect() {
   // of the card's: the series arrives from an async fetch that changes no live value.
   // inspCurRow refuses a retained X10A row. renderInspectHist may still resolve this target's paired
   // Modbus ring, so a petrol headline gets petrol history without reviving stale X10A samples.
-  renderInspectHist(e, S.live && e ? inspCurRow(e) : null);
+  renderInspectHist(e, S.live && e ? inspCurRow(e) : null, mode);
   // Compare the inspector signature before rendering changed live readings; unchanged polls need
   // no DOM writes and preserve the reader's text selection.
   const sig = inspectSig(e);
@@ -1994,7 +1997,8 @@ function labelSchematicHits() {
 // viewport exactly where the reader put it: the inspector is deliberately below the drawing and can
 // be taller than the viewport, so scrollIntoView() would align its lower edge and move the diagram
 // out of sight just when the reader asks for its explanation.
-function inspectPick(key) {
+function inspectPick(key = null) {
+  cancelHistoryGesture();
   S.insp = S.insp !== key ? key : null;
-  renderInspect();
+  renderInspect(S.insp ? "open" : "");
 }

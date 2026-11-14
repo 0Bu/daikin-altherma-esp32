@@ -108,7 +108,7 @@ function wire() {
     e.preventDefault();          // Space would otherwise scroll the page
     inspectPick(hit.dataset.insp);
   });
-  $("inspClose").onclick = () => { S.insp = null; renderInspect(); };
+  $("inspClose").onclick = () => inspectPick();
   wireRestOfApp();
 }
 
@@ -300,11 +300,13 @@ function wireTrendScrub(gv) {
   gv.addEventListener("pointerdown", (e) => {
     const plot = trendPlotFromTarget(e.target);
     if (!plot || plot.closest("[hidden], [inert]") || S.scrub) return;
+    const i = scrubIndex(plot, e.clientX);
+    if (i < 0 || plot.closest(".vitem:not(.open)")) return;
     S.trendPointer = { plot, id: e.pointerId };
     S.scrub = plot.dataset.hist;
     scrubArm(plot);
     try { plot.setPointerCapture(e.pointerId); } catch { /* capture is an optimisation, not a requirement */ }
-    scrubMove(plot, scrubIndex(plot, e.clientX));
+    scrubMove(plot, i);
   });
   // The authoritative end of a captured drag: fires on pointerup, on pointercancel AND when the
   // element is removed from the DOM — the one exit the explicit handlers below cannot see.
@@ -454,7 +456,7 @@ function wireRestOfApp() {
   $("wfCancel").onclick = closeWifi;
   $("wifiBackdrop").onclick = closeWifi;
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("wifiModal").hidden) closeWifi(); });
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && S.insp) { S.insp = null; renderInspect(); } });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && S.insp) inspectPick(); });
   $("wifiForm").addEventListener("submit", (e) => {
     e.preventDefault();
     // NOT trimmed: leading/trailing spaces are valid SSID bytes (an AP may legitimately name itself
@@ -1114,10 +1116,7 @@ async function pollTick() {
     _pollBusy = false;
   }
 
-  if (ok) {
-    if (S.stage === "dashboard" && S.insp && typeof renderInspect === "function") renderInspect();
-    if (typeof recoverOpenHistory === "function") recoverOpenHistory();
-  }
+  if (ok && typeof recoverOpenHistory === "function") recoverOpenHistory();
   _pollFails = ok ? 0 : Math.min(_pollFails + 1, 4);
   pollSchedule(_pollFails ? Math.min(POLL_VALUES_MS * 2 ** _pollFails, POLL_BACKOFF_MAX_MS)
                           : POLL_VALUES_MS);

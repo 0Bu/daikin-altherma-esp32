@@ -235,7 +235,7 @@ async function installHooks(page, mutation) {
       const id = plot?.dataset.hist, source = plot?.dataset.source || "";
       const view = id && historyView(id, source);
       return { id, source, dom: plot?.dataset.rev,
-        model: [S.histEpoch, view?.gen, view?.t0].join("/") };
+        model: view && histViewRevision(view) };
     };
     document.addEventListener("keydown", window.__motionKey, true);
     document.addEventListener("keyup", window.__motionKey, true);
@@ -308,7 +308,7 @@ async function settleHistoryRevision(page, selectors) {
         : target?.closest(".vitem")?.querySelector("[data-hist]");
       if (!plot) return false;
       const view = historyView(plot.dataset.hist, plot.dataset.source || "");
-      return !!view && plot.dataset.rev === [S.histEpoch, view.gen, view.t0].join("/");
+      return !!view && plot.dataset.rev === histViewRevision(view);
     })).toString() + ")(" + JSON.stringify(selectors) + ")");
 }
 
@@ -375,7 +375,7 @@ async function toggleDisclosure(page, selector, id, open, context) {
       if (open) {
         if (plots.length !== 1 || plots[0].dataset.hist !== id) return false;
         const plot = plots[0], view = historyView(id, plot.dataset.source || "");
-        if (!view || plot.dataset.rev !== [S.histEpoch, view.gen, view.t0].join("/")) return false;
+        if (!view || plot.dataset.rev !== histViewRevision(view)) return false;
       } else if (plots.length) return false;
       return item.getAnimations({ subtree: true }).every(animation =>
         !Number.isFinite(animation.effect?.getTiming().iterations) ||
@@ -716,6 +716,68 @@ async function closeInspector(page) {
   await page.waitFor("document.getElementById('inspect').getAnimations({subtree:true}).every(animation => !Number.isFinite(animation.effect?.getTiming().iterations) || animation.playState !== 'running')");
   await click(page, "#inspClose");
   await page.waitFor("S.insp === null");
+}
+
+async function assertForecastRevision(page, server, fixture, context) {
+  const selector = "#inspHist .vhist-plot";
+  await prepareObservationViewport(page, selector, []);
+  const before = await evaluate(page, selector => {
+    const plot = document.querySelector(selector), rect = plot.getBoundingClientRect();
+    return { revision: plot.dataset.rev, gen: historyView(plot.dataset.hist).gen,
+      x: rect.left + rect.width * 0.95, y: rect.top + rect.height / 2 };
+  }, selector);
+  const { x, y } = before;
+  const hourly = fixture.status.weather_forecast.hourly;
+  const press = type => page.send("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount: 1 });
+  await press("mousePressed");
+  try {
+    await page.waitFor("S.trendPointer?.plot.dataset.hist === 'env3_combined'");
+    // Publish an updated forecast through the real status endpoint while the captured plot is held.
+    fixture.status.weather_forecast.hourly = hourly.slice(1);
+    await page.evaluate("pollNow(); true");
+    await page.waitFor("!_pollBusy && S.status.weather_forecast.hourly.length === " + (hourly.length - 1));
+    const during = await evaluate(page, ({ selector, x }) => {
+      const plot = document.querySelector(selector);
+      return { rev: plot.dataset.rev, gen: historyView(plot.dataset.hist).gen,
+        selected: scrubIndex(plot, x) };
+    }, { selector, x });
+    assert.deepEqual(during, { rev: before.revision, gen: before.gen, selected: -1 },
+      context + ": a forecast-only refresh invalidates the selection on the held chart");
+    await press("mouseReleased");
+    await settleHistoryRevision(page, [selector]);
+    assert.equal(await page.evaluate("S.histPin.has('env3_combined')"), false,
+      context + ": releasing the old forecast cannot pin a different timestamp");
+    assert.notEqual(await evaluate(page, selector => document.querySelector(selector).dataset.rev, selector),
+      before.revision, context + ": the refreshed forecast is mounted after release");
+    await press("mousePressed");
+    await page.waitFor("S.trendPointer?.plot.dataset.hist === 'env3_combined'");
+    await evaluate(page, () => {
+      document.querySelector("#inspHist [data-hist-series='env3_humidity']").focus({ preventScroll: true });
+      return true;
+    });
+    await page.key("Enter", { code: "Enter", keyCode: 13 });
+    assert.equal(await page.evaluate("!!S.trendPointer || !!S.scrub"), false,
+      context + ": native legend activation releases the in-progress gesture");
+    await press("mouseReleased");
+    assert.equal(await page.evaluate("S.histPin.has('env3_combined')"), false,
+      context + ": release after a legend change cannot pin the old plot");
+  } finally {
+    await press("mouseReleased");
+    fixture.status.weather_forecast.hourly = hourly;
+    await page.evaluate("S.histHidden.delete('env3_combined'); S.inspHistSig = null; pollNow(); true");
+    await page.waitFor("!_pollBusy && S.status.weather_forecast.hourly.length === " + hourly.length);
+  }
+  // The three ENV III rings and an eligible value plot share a single automatic admission.
+  const requests = server.historyRequests.length;
+  await evaluate(page, () => {
+    for (const entry of ENV3_COMBINED_SERIES) S.hist.get(histCacheKey(entry.id, "env3")).at = 0;
+    window.__automaticPoll = window.__motionAllPolls;
+    pollNow();
+    return true;
+  });
+  await page.waitFor("window.__motionAllPolls > window.__automaticPoll && !_pollBusy && !S.histBusy.size");
+  assert.deepEqual(server.historyRequests.slice(requests), ["env3:env3_temperature"],
+    context + ": one completed poll starts only one of three expired inspector reads");
 }
 
 async function prepareInheritedFlow(page) {
@@ -1226,6 +1288,8 @@ export async function assertHistoryMotion(page, server, context) {
       await closeInspector(page);
       await openInspector(page, key, id, label + "/cached", { freshOpening: false });
       assert.equal(server.historyRequests.length, requests, label + ": cached reopen must not refetch history");
+      if (key === "env3" && !mutation && page.inputMode !== "touch")
+        await assertForecastRevision(page, server, fixture, label);
       await closeInspector(page);
       if (restoreValues) fixture.values = restoreValues;
     }

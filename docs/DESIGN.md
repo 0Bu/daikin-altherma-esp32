@@ -319,15 +319,17 @@ gap at that resolution. Current uptime describes only this boot.
 Browser storage is not measured history. Source/reboot epochs retire cached rings, index pins,
 mounted plots and in-flight history requests, including A → B → A between polls.
 Replies carry sample epoch and boot identity. Delayed raw or derived replies cannot refill retired
-state or release a successor's busy lease. After a completed live poll, an open dashboard plot can
-retry a transient fetch failure after the cache cooldown, one recovery request per poll.
+state or release a successor's busy lease. After a completed live poll, the open inspector and
+visible Dashboard or Settings plots can refresh after the cache cooldown. They share one
+automatic history request per poll. A failed refresh keeps the last compatible samples.
 
-Hover previews a sample; tap pins it, a second tap on the same sample/Escape clears it. Pins attach
-to the sample instant and row, not array index or a particular chart. The two views of one row
-share the pin and freeze while either is scrubbed. Expired pins drop rather than clamp to a different
-instant. Closing the inspector preserves a pin for an open value row; collapsing the value panel
-clears it. Bubbles share one reserved row above the plot, with one measurement per line. The moving
-bubble paints over the pinned bubble with an opaque surface when they overlap. Both selected times
+Hover previews a sample; tap pins it, a second tap on the same sample/Escape clears it. The two views
+of a row share a pin and freeze while either is scrubbed. A dated pin tracks its sample instant.
+Without a device clock, an index pin expires as soon as the plotted series changes. Expired pins
+drop rather than move to a different instant. Closing the inspector preserves a pin for an open
+value row. Collapsing the value panel clears it. Bubbles share one reserved row above the plot, with
+one measurement per line. The moving bubble paints over the pinned bubble with an opaque surface
+when they overlap. Both selected times
 share the time axis below the plot; the moving time likewise paints over the pinned time. Comparisons
 do not add height or move the plot or pinned time. Phase intervals remain in categorical readouts.
 Source legends toggle individual numeric series and retain at least one visible series. Choices

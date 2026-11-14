@@ -290,7 +290,7 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [], elements 
   assert.doesNotMatch(style, /svg \.sc-snow, svg \.sc-quiet \{[^}]*visibility:\s*hidden/,
     "outdoor-mode pills must never be conditionally hidden");
 
-  const inspectPick = /function inspectPick\(key\) \{[\s\S]*?\n\}/.exec(SOURCE)?.[0] || "";
+  const inspectPick = /function inspectPick\(key = null\) \{[\s\S]*?\n\}/.exec(SOURCE)?.[0] || "";
   assert.match(inspectPick, /S\.insp = S\.insp !== key \? key : null/,
     "every schematic target must use the shared toggle-only inspector handler");
   assert.doesNotMatch(inspectPick, /scrollIntoView|scrollTo|scrollBy/,

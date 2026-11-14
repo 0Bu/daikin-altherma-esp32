@@ -1139,7 +1139,7 @@ assert.equal(S.hist.size, 0, "deleting a room mapping retires its cached reading
 assert.equal(h.histHtml("room_temp", "°C", "Raumtemperatur"), "");
 
 // Reserving tooltip shapes must scan the auxiliary day once, not once per sample. A later render
-// must still read changed auxiliary data even when it uses the same numeric view object.
+// reads changed auxiliary data from the next view. A mounted view keeps its own phase evidence.
 S.status.history = { rows: ["dhw_tank", "smart_grid_mode", "bsh_state"].map(id => ({id, label:id})),
   modbus_rows: [] };
 S.hist.clear();
@@ -1155,15 +1155,18 @@ try {
   assert.equal(context.auxScans, 1, "288 tooltip readouts must share one auxiliary scan");
   assert.match(first, /Boost aktiv/);
   assert.match(first, /Heizstab aktiv/);
-  S.hist.set("smart_grid_mode", fullRing(0));
-  const second = h.histTipsHtml(view, -1, 0);
+  S.hist.set("smart_grid_mode", { ...fullRing(0), gen: 2 });
+  const refreshed = h.historyView("dhw_tank");
+  assert.notEqual(h.histViewRevision(view), h.histViewRevision(refreshed));
+  assert.equal(h.scrubIndex({ dataset: { hist: "dhw_tank", rev: h.histViewRevision(view) } }, 4), -1);
+  const second = h.histTipsHtml(refreshed, -1, 0);
   assert.equal(context.auxScans, 2, "the next rendered view must refresh its auxiliary snapshot");
   assert.doesNotMatch(second, /Boost aktiv/);
   assert.match(second, /Heizstab aktiv/);
   // Re-seed the previous per-readout work: the same measured operation budget must reject it.
   vm.runInContext("this.originalReadout = histReadout; auxScans = 0; " +
     "histReadout = (view, index) => originalReadout(view, index);", context);
-  h.histTipsHtml(view, -1, 0);
+  h.histTipsHtml(refreshed, -1, 0);
   assert.ok(context.auxScans >= 289, "the old per-sample scan must exceed the one-scan budget");
 } finally {
   vm.runInContext("dhwAuxPhases = originalAuxScan; " +
