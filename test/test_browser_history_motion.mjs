@@ -467,7 +467,7 @@ async function prepareObservationViewport(page, selector, animationIds) {
 
 async function observe(page, server, context, selectors, { inspector = false, status = false,
   fixture = null, animationIds = ["fSup1", "rfHot", "scFan", "scPump"],
-  inactiveAnimationIds = [], changingPump = false } = {}) {
+  inactiveAnimationIds = [], changingPump = false, changingThermal = false } = {}) {
   await page.bringToFront();
   await page.waitFor("document.visibilityState === 'visible' && !document.hidden");
   // Opening/disclosure transitions may legitimately finish. Persistent flow CSSAnimation objects
@@ -505,7 +505,8 @@ async function observe(page, server, context, selectors, { inspector = false, st
       throw new Error("history focus and visibility must settle before polling observation");
     window.__motionFocused = document.activeElement;
     const body = document.getElementById("inspBody");
-    window.__motionBody = { node: body.firstChild, html: body.innerHTML };
+    window.__motionBody = { node: body.firstElementChild, html: body.firstElementChild?.outerHTML,
+      sentence: body.lastElementChild?.textContent };
     window.__motionLive = { flow: S.live?.flow, pump: S.live?.pump, rps: S.live?.rps,
       mbFields: [...(S.live?.mbFields || [])] };
     // Settings hides the entire schematic; its nonessential CSS animations legitimately stop.
@@ -619,8 +620,9 @@ async function observe(page, server, context, selectors, { inspector = false, st
         ...window.__motionInspectorRows.finish(), children: rows.childNodes.length,
         freshText: rows.textContent === expectedRows.content.textContent,
       } : null,
-      bodyUnchanged: body.innerHTML === window.__motionBody.html,
-      sameBody: body.firstChild === window.__motionBody.node,
+      bodyUnchanged: body.firstElementChild?.outerHTML === window.__motionBody.html,
+      sameBody: body.firstElementChild === window.__motionBody.node,
+      sentenceChanged: body.lastElementChild?.textContent !== window.__motionBody.sentence,
       animations: window.__motionAnimations.map(({ id, node, animation, time, initial }) => ({
         id, same: node.getAnimations().includes(animation), running: animation?.playState === "running",
         elapsed: animation?.currentTime - time, initial,
@@ -696,6 +698,9 @@ async function observe(page, server, context, selectors, { inspector = false, st
   }
   if (inspector && motion.bodyUnchanged)
     assert.equal(motion.sameBody, true, context + ": unchanged inspector prose must remain mounted");
+  if (changingThermal)
+    assert.equal(motion.bodyUnchanged && motion.sentenceChanged, true,
+      context + ": the thermal estimate must update while its introductory prose stays unchanged");
   assert.equal(motion.animations.length, motion.expectedAnimations,
     context + ": cover all visible schematic animation witnesses");
   for (const animation of motion.animations) {
@@ -1104,8 +1109,16 @@ export async function assertHistoryMotion(page, server, context) {
           return frame;
         };
       }
+      if (key === "pth") {
+        restoreValues = fixture.values;
+        fixture.values = tick => {
+          const frame = restoreValues(tick);
+          frame.values.find(row => row.concept === "flow").value = String(22 + tick % 10);
+          return frame;
+        };
+      }
       await observe(page, server, label, ["#inspHist .vhist-plot"], {
-        inspector: true, changingPump: key === "pump",
+        inspector: true, changingPump: key === "pump", changingThermal: key === "pth",
       });
       if (key === "sgrequest") {
         restoreValues = await assertSgTransition(page, server, fixture, label);

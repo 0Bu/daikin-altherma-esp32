@@ -1746,7 +1746,8 @@ function replaceHistoryHtml(host, html) {
   const diagnosisCard = host.getAttribute?.("data-dashboard-card") === "diagnosis";
   // Also reconcile plain read-only rows. Other hosts without charts keep full writes:
   // a control's live value is not represented by its attributes.
-  if (!html.includes('class="vhist') && host.id !== "valueGroups" && host.id !== "inspRows" && !diagnosisCard)
+  if (!html.includes('class="vhist') && host.id !== "valueGroups" && host.id !== "inspRows" &&
+      host.id !== "inspBody" && !diagnosisCard)
     host.innerHTML = html;
   else {
     const roots = root => [...root.querySelectorAll(".vhist")]
