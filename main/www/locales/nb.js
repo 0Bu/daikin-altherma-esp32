@@ -1,4 +1,4 @@
-// translation-source: 5acbeb6ebb5c01b59ba76e69d2d230d109a7b65c62bd3c0ed328fc75789138e8
+// translation-source: caf7fa0eafa413c661cf1bd9545148c50156312c034d4e698a374e79a8c32180
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -1061,7 +1061,7 @@ INSPECT_I18N.nb = inspectValues(
       : "Pumpe og vannmengde bekrefter ikke sirkulasjon i romgrenen."], // heat
     ["Romdrift aktiv", "Romoppvarming/-kjøling", "Signal for normal romdrift. Ikke termostatbehov og bekrefter ikke alene kompressor."], // spaceh
     ["Romtemperatur", 0, "Temperatur og mål for referansesonen; avhenger av sensorplassering."], // room
-    ["Sirkulasjonspumpe", "Kommando til sirkulasjonspumpen", "Flytter vann gjennom felleskretsen og grenen valgt av 3-veisventilen. Prosenten er den inverterte X10A-kommandoen: 0 % ber om stopp og 100 % om maksimal styring. Den er ikke målt turtall eller bevis på rotasjon eller vannføring. Les rapportert ON/OFF og målt vannføring hver for seg; sirkulasjon kan fortsette med kompressoren stoppet.", (d) => pumpNowText(d, [(n) => `Pumpekommando ${n} %.`, "Pumpestatus er ON.", "Pumpen rapporterer stopp (OFF).", "Rapportert pumpestatus er ukjent.", (n) => `Målt vannføring ${n} l/min.`, "Ingen måling av vannføring er tilgjengelig.", "OFF strider mot positiv vannføring; ekstern sirkulasjon, etterløp eller motstridende/utdaterte signaler er mulig.", "Vannsirkulasjon er ikke bekreftet."])], // pump
+    ["Sirkulasjonspumpe", "Kommando til sirkulasjonspumpen", "Visningen er 100 − rå X10A-verdi: 0 % ber om stopp og 100 % om maksimal styring. Kommandoen måler verken turtall eller vannføring. Vann kan sirkulere når kompressoren står.", (d) => pumpNowText(d, [(n) => `Pumpekommando ${n} %.`, "Pumpen rapporterer ON.", "Pumpen rapporterer stopp (OFF).", "Pumpestatus ukjent.", (n) => `Målt vannføring ${n} l/min.`, "Vannføring utilgjengelig.", "Rapportert OFF strider mot målt vannføring.", "Vannsirkulasjon er ikke bekreftet."])], // pump
     [(d) => pelMeasured(d) ? "Strømforbruk · HomeHub" : "Anslått strømforbruk", "Strømforbruk", (d) => pelMeasured(d)
       ? "Forbruk fra HomeHub-inngang 51. UI beregner det ikke, men offentlig dokumentasjon beviser ikke kalibrering, målepunkt eller hvilke varmere som inngår; ikke en sertifisert anleggsmåler."
       : "Elektrisk effekt anslås fra inverterstrømmen eller summen av alle oppgitte CT-faser med antatt 230 V. Faktisk spenning og effektfaktor er ukjent. Inverterens lastdekning er ikke verifisert. CT-dekningen avhenger av koblingen.", (d) => d.pelHeld ? "Kompressoren står; inverterstrømmen er fra siste syklus, så forbruk/virkningsgrad kan ikke vises."

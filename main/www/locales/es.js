@@ -1,4 +1,4 @@
-// translation-source: 5acbeb6ebb5c01b59ba76e69d2d230d109a7b65c62bd3c0ed328fc75789138e8
+// translation-source: caf7fa0eafa413c661cf1bd9545148c50156312c034d4e698a374e79a8c32180
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -1060,7 +1060,7 @@ INSPECT_I18N.es = inspectValues(
       : "Bomba y caudal actuales no demuestran circulación por el ramal de climatización."], // heat
     ["Climatización activa", "Funcionamiento de climatización", "Señal de funcionamiento normal de calefacción/refrigeración de espacios. No es demanda de termostato ni demuestra por sí sola que el compresor esté activo."], // spaceh
     ["Temperatura ambiente", 0, "Temperatura y consigna de la zona de referencia; dependen de la ubicación del sensor."], // room
-    ["Bomba de circulación", "Orden de la bomba de circulación", "Mueve agua por el circuito común y la rama seleccionada por la válvula de 3 vías. El porcentaje es la orden X10A invertida: 0 % solicita parada y 100 % esfuerzo máximo. No mide velocidad ni prueba giro o caudal. Leer por separado el estado ON/OFF y el caudal medido; puede haber circulación con el compresor parado.", (d) => pumpNowText(d, [(n) => `Orden de bomba ${n} %.`, "El estado de la bomba es ON.", "La bomba informa parada (OFF).", "El estado informado de la bomba es desconocido.", (n) => `Caudal medido ${n} l/min.`, "No hay medida de caudal.", "OFF contradice el caudal positivo; puede haber circulación externa, inercia o señales contradictorias/desactualizadas.", "La circulación de agua no está confirmada."])], // pump
+    ["Bomba de circulación", "Orden de la bomba de circulación", "El valor mostrado es 100 − valor bruto X10A: 0 % solicita parada y 100 % esfuerzo máximo. La orden no mide velocidad ni caudal. Puede haber circulación con el compresor parado.", (d) => pumpNowText(d, [(n) => `Orden de bomba ${n} %.`, "La bomba informa ON.", "La bomba informa parada (OFF).", "Estado de la bomba desconocido.", (n) => `Caudal medido ${n} l/min.`, "Caudal no disponible.", "El estado OFF informado contradice el caudal medido.", "La circulación de agua no está confirmada."])], // pump
     [(d) => pelMeasured(d) ? "Consumo eléctrico · HomeHub" : "Consumo eléctrico estimado", "Consumo eléctrico", (d) => pelMeasured(d)
       ? "Valor de consumo comunicado por HomeHub entrada 51. La UI no lo calcula, pero la guía pública no demuestra calibración, punto de medida ni qué calentadores incluye; no es un contador certificado de toda la instalación."
       : "Potencia estimada con la corriente del inversor o la suma de todas las fases CT declaradas, a 230 V supuestos. Se desconocen la tensión y el factor de potencia reales. Las cargas del inversor no están verificadas. Las de CT dependen del cableado.", (d) => d.pelHeld ? "El compresor está parado; la corriente del inversor pertenece al último ciclo y no es actual, por lo que no puede indicarse consumo ni eficiencia."

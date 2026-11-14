@@ -1,4 +1,4 @@
-// translation-source: 5acbeb6ebb5c01b59ba76e69d2d230d109a7b65c62bd3c0ed328fc75789138e8
+// translation-source: caf7fa0eafa413c661cf1bd9545148c50156312c034d4e698a374e79a8c32180
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -1061,7 +1061,7 @@ INSPECT_I18N.sv = inspectValues(
       : "Pump/flöde bevisar inte cirkulation i rumsgrenen."], // heat
     ["Rumsdrift", "Rumsuppvärmning eller -kylning", "Normal rumsdriftssignal; inte termostatbegäran eller bevis på kompressordrift."], // spaceh
     ["Rumstemperatur", 0, "Referenszonens temperatur och mål; betydelsen beror på givarplaceringen."], // room
-    ["Cirkulationspump", "Cirkulationspumpens kommando", "Flyttar vatten genom den gemensamma kretsen och grenen som 3-vägsventilen väljer. Procenten är det inverterade X10A-kommandot: 0 % begär stopp och 100 % maximal styrning. Det är inte uppmätt varvtal eller bevis för rotation eller flöde. Läs rapporterad ON/OFF-status och uppmätt flöde separat; cirkulation kan fortsätta när kompressorn står still.", (d) => pumpNowText(d, [(n) => `Pumpkommando ${n} %.`, "Pumpstatus är ON.", "Pumpen rapporterar stopp (OFF).", "Rapporterad pumpstatus är okänd.", (n) => `Uppmätt flöde ${n} l/min.`, "Ingen flödesmätning finns tillgänglig.", "OFF motsäger positivt flöde; extern cirkulation, eftergång eller motstridiga/inaktuella signaler är möjliga.", "Vattencirkulation är inte bekräftad."])], // pump
+    ["Cirkulationspump", "Cirkulationspumpens kommando", "Visningen är 100 − råvärdet från X10A: 0 % begär stopp och 100 % maximal styrning. Kommandot mäter varken varvtal eller flöde. Vatten kan cirkulera när kompressorn står still.", (d) => pumpNowText(d, [(n) => `Pumpkommando ${n} %.`, "Pumpen rapporterar ON.", "Pumpen rapporterar stopp (OFF).", "Pumpstatus okänd.", (n) => `Uppmätt flöde ${n} l/min.`, "Flöde otillgängligt.", "Rapporterat OFF motsäger uppmätt flöde.", "Vattencirkulation är inte bekräftad."])], // pump
     [(d) => pelMeasured(d) ? "Eleffekt · HomeHub" : "Uppskattad eleffekt", "Eleffekt", (d) => pelMeasured(d)
       ? "HomeHub-ingång 51; kalibrering, mätpunkt och inkluderade värmare är inte offentligt belagda."
       : "Eleffekten uppskattas från växelriktarströmmen eller summan av alla angivna CT-faser med antagna 230 V. Faktisk spänning och effektfaktor är okända. Växelriktarens lasttäckning är inte verifierad. CT-täckningen beror på inkopplingen.", (d) => d.pelHeld ? "Växelriktarströmmen är gammal efter stopp; el/verkningsgrad döljs."

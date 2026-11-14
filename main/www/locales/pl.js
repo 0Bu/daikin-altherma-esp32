@@ -1,4 +1,4 @@
-// translation-source: 5acbeb6ebb5c01b59ba76e69d2d230d109a7b65c62bd3c0ed328fc75789138e8
+// translation-source: caf7fa0eafa413c661cf1bd9545148c50156312c034d4e698a374e79a8c32180
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -1059,7 +1059,7 @@ INSPECT_I18N.pl = inspectValues(
       : "Pompa i przepływ nie potwierdzają cyrkulacji przez obieg domu."], // heat
     ["Praca ogrzewania/chłodzenia domu", "Praca ogrzewania lub chłodzenia domu", "Stan zwykłej pracy obiegu domu. Nie jest żądaniem termostatu i sam nie potwierdza pracy sprężarki."], // spaceh
     ["Temperatura w pomieszczeniu", 0, "Temperatura strefy odniesienia; porównuj ją z nastawą i trybem."], // room
-    ["Pompa obiegowa", "Polecenie pompy obiegowej", "Tłoczy wodę we wspólnym obiegu i gałęzi wybranej zaworem 3-drogowym. Procent to odwrócone polecenie X10A: 0 % żąda zatrzymania, a 100 % maksymalnego wysterowania. Nie jest pomiarem prędkości ani dowodem obrotów lub przepływu. Status ON/OFF i zmierzony przepływ należy czytać osobno; obieg może trwać przy wyłączonej sprężarce.", (d) => pumpNowText(d, [(n) => `Polecenie pompy ${n} %.`, "Status pompy to ON.", "Pompa zgłasza zatrzymanie (OFF).", "Zgłoszony stan pompy jest nieznany.", (n) => `Zmierzony przepływ ${n} l/min.`, "Brak pomiaru przepływu.", "OFF jest sprzeczne z dodatnim przepływem; możliwy jest obieg zewnętrzny, wybieg lub sprzeczne/nieaktualne sygnały.", "Obieg wody nie jest potwierdzony."])], // pump
+    ["Pompa obiegowa", "Polecenie pompy obiegowej", "Wartość wyświetlana to 100 − surowa wartość X10A: 0 % żąda zatrzymania, a 100 % maksymalnego wysterowania. Polecenie nie mierzy obrotów ani przepływu. Woda może krążyć przy wyłączonej sprężarce.", (d) => pumpNowText(d, [(n) => `Polecenie pompy ${n} %.`, "Pompa zgłasza ON.", "Pompa zgłasza zatrzymanie (OFF).", "Stan pompy nieznany.", (n) => `Zmierzony przepływ ${n} l/min.`, "Przepływ niedostępny.", "Zgłoszone OFF jest sprzeczne ze zmierzonym przepływem.", "Obieg wody nie jest potwierdzony."])], // pump
     [(d) => pelMeasured(d) ? "Pobór elektryczny (HomeHub)" : "Pobór elektryczny (szacunek)", "Pobór elektryczny", (d) => pelMeasured(d)
       ? "Wartość poboru z rejestru wejściowego HomeHub 51. Dokumentacja nie potwierdza kalibracji, dokładnego punktu pomiaru ani objęcia wszystkich grzałek; to nie jest certyfikowany licznik całej instalacji."
       : "Pobór szacuje się z prądu falownika lub sumy wszystkich zadeklarowanych faz CT przy założeniu 230 V. Rzeczywiste napięcie i współczynnik mocy są nieznane. Zakres pomiaru falownika nie jest zweryfikowany. Zakres CT zależy od okablowania.", (d) => d.pelHeld ? "Sprężarka stoi, więc prąd falownika jest wartością z poprzedniego cyklu, nie bieżącym pomiarem; nie można podać poboru ani sprawności."
