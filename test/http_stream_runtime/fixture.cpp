@@ -35,6 +35,10 @@ void* heap_caps_malloc(size_t size, unsigned) {
 }
 
 #include HTTP_COMMON_SOURCE
+// Test-only declaration for the negative control that restores the separate provenance read.
+namespace daik {
+const char* checkup_persist_state();
+}
 #include HTTP_STATUS_SOURCE
 #include STATE_DWELL_SOURCE
 
@@ -62,6 +66,8 @@ inline size_t                         scan_first_allocations = 0;
 inline daik::CheckupStopContextReport stop_report{};
 inline daik::logic::CheckupCyclingHours cycling_hours{};
 inline daik::logic::CheckupCyclingTrace cycling_trace{};
+inline daik::logic::CheckupRestore      checkup_persist     = daik::logic::CheckupRestore::NoRecord;
+inline bool                             reset_after_checkup = false;
 inline unsigned                       stop_report_calls = 0;
 inline std::string                    log;
 [[noreturn]] void                     fail(const char* message) {
@@ -99,6 +105,8 @@ void reset() {
     scan_first_allocations    = 0;
     stop_report               = {};
     cycling_hours             = {};
+    checkup_persist           = daik::logic::CheckupRestore::NoRecord;
+    reset_after_checkup       = false;
     stop_report_calls         = 0;
     std::memset(scan_rows, 0, sizeof(scan_rows));
     sdk::now        = 10000000;
@@ -412,12 +420,23 @@ void time_now(int64_t& seconds, int32_t& ms) {
     seconds = 2000000000;
     ms      = 0;
 }
-const char*                checkup_persist_state() { return "no_record"; }
-logic::CheckupReport       checkup_report(logic::CheckupCyclingHours* hours,
-                                          logic::CheckupCyclingTrace* trace) {
+const char* checkup_persist_state() {
+    return logic::checkup_restore_slug(fixture::checkup_persist);
+}
+logic::CheckupReport checkup_report(logic::CheckupCyclingHours* hours,
+                                    logic::CheckupCyclingTrace* trace,
+                                    logic::CheckupRestore*      persist) {
     if (hours) *hours = fixture::cycling_hours;
     if (trace) *trace = fixture::cycling_trace;
-    return {};
+    if (persist) *persist = fixture::checkup_persist;
+    logic::CheckupReport report{};
+    if (fixture::reset_after_checkup) {
+        if (fixture::checkup_persist == logic::CheckupRestore::Flash) report.covered_s = 1200;
+        // Model a producer reset immediately after the captured report releases its lock.
+        fixture::checkup_persist = logic::CheckupRestore::ModelChanged;
+        fixture::cycling_hours   = {};
+    }
+    return report;
 }
 CheckupStopContextReport checkup_stop_context_report() {
     ++fixture::stop_report_calls;
@@ -548,6 +567,41 @@ int main(int argc, char** argv) {
         check(invoke(req, "/status", daik::h_status) == ESP_OK, "expired cycling status failed");
         successful(req);
         emit(req, "cycling-expired");
+    });
+    run("checkup_persist_snapshot", [] {
+        const auto framed = +[](httpd_req_t* req) {
+            return daik::http_send_status_json(req, "{\"result\":", "}", false);
+        };
+        current.diagnostics_enabled = true;
+        reset_after_checkup         = true;
+        for (unsigned path = 0; path < 3; ++path) {
+            checkup_persist             = daik::logic::CheckupRestore::Flash;
+            cycling_hours.epoch         = 17;
+            cycling_hours.count         = 2;
+            cycling_hours.end_unix_s[0] = 1'999'998'000;
+            cycling_hours.hours[0]      = {1200, 600, 600,
+                                           0,    2,   daik::logic::CheckupCyclingSlot::Restored};
+            const char* uri             = path == 1 ? "/status?redact=1" : "/status";
+            const auto  handler         = path == 2 ? framed : daik::h_status;
+            auto        req             = request();
+            check(invoke(req, uri, handler) == ESP_OK, "diagnosis status failed");
+            successful(req);
+            check(checkup_persist == daik::logic::CheckupRestore::ModelChanged &&
+                      cycling_hours.count == 0,
+                  "fixture did not retire the captured restore generation");
+            check(req.response.find("\"persist\":\"flash\"") != std::string::npos,
+                  "health.persist came from after the captured diagnosis window");
+            emit(req, path == 0   ? "checkup-persist-plain"
+                      : path == 1 ? "checkup-persist-redacted"
+                                  : "checkup-persist-framed");
+        }
+        reset_after_checkup = false;
+        checkup_persist     = daik::logic::CheckupRestore::Unknown;
+        auto req            = request();
+        check(invoke(req, "/status", daik::h_status) == ESP_OK,
+              "unreadable diagnosis status failed");
+        successful(req);
+        emit(req, "checkup-persist-unknown");
     });
     run("stop_context_absent", [] {
         for (const bool confirmed : {false, true}) {
