@@ -3055,7 +3055,7 @@
     },
     "modbus_static_init": {
       "pattern": "^daik::mb_init\\(\\)$",
-      "max_bytes": 32
+      "max_bytes": 48
     },
     "modbus_static_mutex": {
       "pattern": "^xQueueCreateMutexStatic$",
@@ -3142,7 +3142,7 @@
       "max_bytes": 32
     },
     "modbus_create_reconfigure": {
-      "pattern": "^daik::mb_reconfigure\\(bool\\)$",
+      "pattern": "^daik::mb_reconfigure\\(bool, std::array<unsigned char, 16u> const&\\)$",
       "max_bytes": 64
     },
     "modbus_create_sdk": {
@@ -3207,6 +3207,30 @@
     },
     "modbus_create_pool_free": {
       "pattern": "^multi_heap_free_size$",
+      "max_bytes": 32
+    },
+    "modbus_history_retain": {
+      "pattern": "^daik::mb_retain_history\\(",
+      "max_bytes": 96
+    },
+    "modbus_history_collect": {
+      "pattern": "^daik::history_modbus_samples\\(",
+      "max_bytes": 64
+    },
+    "modbus_history_record": {
+      "pattern": "^daik::history_record_modbus\\(",
+      "max_bytes": 64
+    },
+    "modbus_history_fold": {
+      "pattern": "^daik::history_record_modbus_samples\\(",
+      "max_bytes": 64
+    },
+    "modbus_publication_claim": {
+      "pattern": "^daik::ModbusPublicationClaim::ModbusPublicationClaim\\(",
+      "max_bytes": 32
+    },
+    "modbus_publication_release": {
+      "pattern": "^daik::ModbusPublicationClaim::~ModbusPublicationClaim\\(\\)$",
       "max_bytes": 32
     }
   },
@@ -14373,6 +14397,156 @@
       "multipliers": {},
       "base_bytes": 1536,
       "max_bytes": 8192
+    },
+    "main_modbus_init_peer_sha_setup": {
+      "symbols": [
+        "main_task",
+        "boot_sequence",
+        "modbus_static_init",
+        "history_peer_target_hash",
+        "history_peer_mbedtls_sha256_init"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "main_modbus_init_peer_sha_start": {
+      "symbols": [
+        "main_task",
+        "boot_sequence",
+        "modbus_static_init",
+        "history_peer_target_hash",
+        "history_peer_mbedtls_sha256_starts"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "main_modbus_init_peer_sha_update": {
+      "symbols": [
+        "main_task",
+        "boot_sequence",
+        "modbus_static_init",
+        "history_peer_target_hash",
+        "history_peer_mbedtls_sha256_update",
+        "history_peer_mbedtls_internal_sha256_process",
+        "history_peer_mbedtls_platform_zeroize"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "main_modbus_init_peer_sha_finish": {
+      "symbols": [
+        "main_task",
+        "boot_sequence",
+        "modbus_static_init",
+        "history_peer_target_hash",
+        "history_peer_mbedtls_sha256_finish",
+        "history_peer_mbedtls_internal_sha256_process",
+        "history_peer_mbedtls_platform_zeroize"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "main_modbus_init_peer_sha_cleanup": {
+      "symbols": [
+        "main_task",
+        "boot_sequence",
+        "modbus_static_init",
+        "history_peer_target_hash",
+        "history_peer_mbedtls_sha256_free",
+        "history_peer_mbedtls_platform_zeroize"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "modbus_measured_history_collect": {
+      "symbols": [
+        "runtime_task_entry",
+        "modbus_task",
+        "modbus_poll",
+        "modbus_history_record",
+        "modbus_history_collect"
+      ],
+      "multipliers": {},
+      "base_bytes": 2048,
+      "max_bytes": 5120
+    },
+    "modbus_measured_history_fold": {
+      "symbols": [
+        "runtime_task_entry",
+        "modbus_task",
+        "modbus_poll",
+        "modbus_history_record",
+        "modbus_history_fold"
+      ],
+      "multipliers": {},
+      "base_bytes": 2048,
+      "max_bytes": 5120
+    },
+    "modbus_measured_history_retain": {
+      "symbols": [
+        "runtime_task_entry",
+        "modbus_task",
+        "modbus_poll",
+        "modbus_history_retain",
+        "modbus_history_collect"
+      ],
+      "multipliers": {},
+      "base_bytes": 2048,
+      "max_bytes": 5120
+    },
+    "modbus_measured_history_replay": {
+      "symbols": [
+        "runtime_task_entry",
+        "modbus_task",
+        "modbus_poll",
+        "modbus_history_fold"
+      ],
+      "multipliers": {},
+      "base_bytes": 2048,
+      "max_bytes": 5120
+    },
+    "httpd_modbus_publication_claim": {
+      "symbols": [
+        "config_hp",
+        "config_document",
+        "modbus_publication_claim"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_modbus_publication_release": {
+      "symbols": [
+        "config_hp",
+        "config_document",
+        "modbus_publication_release"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "mqtt_modbus_publication_claim": {
+      "symbols": [
+        "mqtt_task",
+        "modbus_publication_claim"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_modbus_publication_release": {
+      "symbols": [
+        "mqtt_task",
+        "modbus_publication_release"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
     }
   },
   "tasks": {
@@ -14624,7 +14798,9 @@
         "httpd_modbus_create_http_saved_heap_walk",
         "httpd_modbus_create_http_saved_heap_lock",
         "httpd_modbus_create_http_changed_heap_free",
-        "httpd_modbus_create_http_saved_heap_free"
+        "httpd_modbus_create_http_saved_heap_free",
+        "httpd_modbus_publication_claim",
+        "httpd_modbus_publication_release"
       ]
     },
     "main": {
@@ -14671,7 +14847,12 @@
         "main_modbus_create_boot_log",
         "main_modbus_create_boot_heap_walk",
         "main_modbus_create_boot_heap_lock",
-        "main_modbus_create_boot_heap_free"
+        "main_modbus_create_boot_heap_free",
+        "main_modbus_init_peer_sha_setup",
+        "main_modbus_init_peer_sha_start",
+        "main_modbus_init_peer_sha_update",
+        "main_modbus_init_peer_sha_finish",
+        "main_modbus_init_peer_sha_cleanup"
       ]
     },
     "mqtt": {
@@ -14766,7 +14947,9 @@
         "mqtt_heartbeat_modbus_status_allocation",
         "mqtt_heartbeat_modbus_status_unwind",
         "mqtt_curve_modbus_status_allocation",
-        "mqtt_curve_modbus_status_unwind"
+        "mqtt_curve_modbus_status_unwind",
+        "mqtt_modbus_publication_claim",
+        "mqtt_modbus_publication_release"
       ]
     },
     "poll": {
@@ -14897,7 +15080,11 @@
         "modbus_worker_start_wdt_log",
         "modbus_worker_start_log",
         "modbus_worker_start_lwip_existing_peek",
-        "modbus_worker_start_lwip_verify_peek"
+        "modbus_worker_start_lwip_verify_peek",
+        "modbus_measured_history_collect",
+        "modbus_measured_history_fold",
+        "modbus_measured_history_retain",
+        "modbus_measured_history_replay"
       ]
     },
     "syslog": {

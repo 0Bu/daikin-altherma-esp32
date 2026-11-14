@@ -130,7 +130,7 @@ assert.match(adopt,
 assert.match(body(history, "void history_record(const CachedValue"),
   /P\(\)\.x10a_target_fp = s_x10a_target_fp\.load\(\); P\(\)\.residual_us\[static_cast<size_t>\(logic::HistoryJournalSource::X10a\)\] = 0;/,
   "a runtime X10A reset zeroes the remainder with the rings");
-assert.match(body(history, "void history_record_modbus("),
+assert.match(body(history, "void history_record_modbus_samples("),
   /if \(s_mb_reset_requested\.exchange\(false\)\) \{[^}]*P\(\)\.residual_us\[static_cast<size_t>\(logic::HistoryJournalSource::Modbus\)\] = 0;/,
   "a runtime HomeHub reset zeroes the remainder with the rings");
 
@@ -191,7 +191,7 @@ assert.match(crcBody, /&P\(\)\.env3_live/);
 // ── a) commits: each raster zeroes the counter and notes its commit ─────────────────────────────
 for (const [signature, source] of [
   ["inline void advance_raster_locked(", "X10a"],
-  ["void history_record_modbus(", "Modbus"],
+  ["void history_record_modbus_samples(", "Modbus"],
   ["void history_record_env3(", "Env3"],
 ]) {
   const fn = body(history, signature);

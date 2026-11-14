@@ -1512,16 +1512,11 @@ static void close_modbus_buckets_locked(uint32_t bucket) {
     P().boots_since_commit = 0;
 }
 
-void history_record_modbus(const CachedValue* v, size_t n, uint32_t identity_generation,
-                           int64_t observed_us) {
-    if (!s_mtx) return;
-    const int64_t  now_us = observed_us >= 0 ? observed_us : esp_timer_get_time();
-    const uint32_t bucket = logic::history_bucket(now_us);
-
+ModbusHistorySamples history_modbus_samples(const CachedValue* v, size_t n) {
     // Parse before taking the history lock. strtod is locale-stable in this firmware and needs no
     // shared state from the rings; keeping it outside makes the critical section plain fixed-size
     // copies, just like the X10A path.
-    HistorySample sample[HOMEHUB_HISTORY_COUNT];
+    ModbusHistorySamples sample{};
     for (size_t t = 0; t < HOMEHUB_HISTORY_COUNT; t++) {
         sample[t] = HISTORY_NO_READING;
         if (!v || t == kModbusQuietHistory) continue;
@@ -1538,6 +1533,20 @@ void history_record_modbus(const CachedValue* v, size_t n, uint32_t identity_gen
         }
     }
 
+    return sample;
+}
+
+void history_record_modbus(const CachedValue* v, size_t n, uint32_t identity_generation,
+                           int64_t observed_us) {
+    if (!s_mtx) return;
+    const int64_t now_us = observed_us >= 0 ? observed_us : esp_timer_get_time();
+    history_record_modbus_samples(history_modbus_samples(v, n), identity_generation, now_us);
+}
+
+void history_record_modbus_samples(const ModbusHistorySamples& sample, uint32_t identity_generation,
+                                   int64_t now_us) {
+    if (!s_mtx) return;
+    const uint32_t bucket = logic::history_bucket(now_us);
     Lock lk(s_mtx);
     if (!lk.acquired()) return;
     if (s_flash_forgotten.load()) return;

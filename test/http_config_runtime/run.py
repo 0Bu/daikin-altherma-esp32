@@ -108,7 +108,7 @@ if 'PASS total=13 assertions=5233\n' not in legacy.stdout:
                        + legacy.stdout)
 print('PRESERVED ORIGINAL CASES ' + legacy.stdout.splitlines()[-1])
 baseline = command([binary])
-if 'PASS total=18 assertions=5587\n' not in baseline.stdout:
+if 'PASS total=18 assertions=5591\n' not in baseline.stdout:
     raise RuntimeError('the complete behavioral groups changed their assertion inventory\n'
                        + baseline.stdout)
 print(baseline.stdout, end='')
@@ -186,6 +186,10 @@ mutations = [
      'if (!set_hp_update_domains_compatible(x10a_sent, homehub_sent)) {',
      'if ((static_cast<void>(set_hp_update_domains_compatible(x10a_sent, homehub_sent)), false)) {',
      'hp_revisions'),
+    ('homehub_save_during_publication', 'source',
+     'if (!modbus_cutover->acquired())',
+     'if (false)',
+     'modbus_start_retry'),
     ('query_presence_permission', 'ota', 'downgrade = query_flag_on(downgrade_text);',
      'downgrade = true;', 'query_flags'),
     ('nonobject_root', 'json', 'if (!json_payload_is_object(payload)) return nullptr;', '', 'ingress'),
@@ -291,7 +295,7 @@ for tag, target, old, new, case in mutations:
 after = inputs([OUT / 'production.d', OUT / 'cjson.d'])
 if after != before:
     raise RuntimeError('compile inputs changed during the run')
-if len(controls) != 28:
+if len(controls) != 29:
     raise RuntimeError('the complete compiling negative-control inventory changed')
 record = {'compiler': compiler, 'c_compiler': c_compiler,
           'compiler_commands': {'c': CC, 'cxx': CXX},

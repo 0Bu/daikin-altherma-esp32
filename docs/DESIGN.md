@@ -327,6 +327,8 @@ show their conversion limits in place of numeric comparisons. Source-qualified h
 precedence over generic inspector copy in every locale, including a stand-in under an X10A row.
 Definition-metadata changes invalidate the comparison even when its numeric values do not change.
 
+<a id="history"></a>
+
 **History**
 
 A trended reading has a 24-hour sparkline in its inspector and value expander, with no separate
@@ -336,6 +338,9 @@ source legends. Room temperature can add the configured MQTT source as a third, 
 series with its name and MQTT attribution, including when no device room sensor is available.
 The device sensor and MQTT source keep distinct current values and explanations. Source replacement
 never splices two instruments into one series.
+During OTA, a matching cached frame can show samples held in memory with live activity paused.
+A reload restores the source binding. When a fresh frame confirms it, a visible open expander
+fetches missing HomeHub samples again.
 In the flow chart, the visible series determine the axes and cursor scale. A hidden provisional
 HomeHub trace cannot change the displayed X10A range.
 
@@ -352,13 +357,15 @@ inspector omits the signed heat-output chart. Raw current-transformer phases and
 retain their own histories. A five-minute bucket can contain phase currents, inverter current and
 compressor speed from different sweeps. The electrical-input and COP inspectors therefore omit
 derived history. Missing required inputs leave a gap. A gap is held-over only when every missing
-offered input was held. If none of a chart's inputs returns a nonempty series, it reports a history error.
+offered input was held. A successful empty series shows “No readings recorded yet.” A failed
+history request reports an error.
 Chart titles name the stable concept.
 
 Categorical histories use source-labelled tracks, written states, distinct state colours and
 hatching only for missing samples. Valve and Quiet use latest sampled state; BSH, BUH stages and
 Defrost retain any observed activation in their open five-minute bucket. Smart Grid retains all
-four states. The Modbus valve track shows completed samples and leaves the live edge unavailable.
+four states. The Modbus valve and tank-heater tracks show completed samples and leave the live
+edge unavailable.
 The raw API row carries the last full-sweep report. Disinfection and X10A Tank preheat remain
 different facts. Totals are sampled raster time. Events between sweeps may be missed.
 

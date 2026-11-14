@@ -1022,6 +1022,12 @@ static esp_err_t set_hp(httpd_req_t* req) {
             reset_mb_history ? history_modbus_target(config_modbus_host(c), c.mb_port, c.mb_unit_id)
                              : logic::HistoryModbusTarget{};
         const bool modbus_enabled = config_modbus_enabled(c);
+        std::optional<ModbusPublicationClaim> modbus_cutover;
+        if (reset_mb_history) {
+            modbus_cutover.emplace(ModbusPublication::ConfigSave);
+            if (!modbus_cutover->acquired())
+                return send_err(req, "409 Conflict", "HomeHub publication in progress; retry");
+        }
         // This route owns TWO independent durability domains. An explicit X10A statement requires
         // the atomic link-cache entry and a snapshot no detection commit has overtaken; a
         // HomeHub-only request succeeds with the service blob and treats the unchanged X10A cache
@@ -1055,7 +1061,7 @@ static esp_err_t set_hp(httpd_req_t* req) {
             history_modbus_reset(modbus_target);
             // The HomeHub stack is told separately, because it IS separate: this starts or stops
             // its task and re-resolves its address without touching the X10A poll engine above.
-            mb_reconfigure(modbus_enabled);
+            mb_reconfigure(modbus_enabled, modbus_target);
             // The heating-curve event and cadence came from the previous endpoint's gates.
             mqtt_heating_curve_homehub_reset();
             // Publish the tombstone only after generation, status and cache have crossed to the new

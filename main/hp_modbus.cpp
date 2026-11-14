@@ -120,6 +120,13 @@ static uint32_t    s_req_history_expected_generation = 0;
 static uint32_t    s_req_history_generation          = 0;
 static logic::HistoryModbusTarget s_req_configured_target{};
 static uint32_t                   s_req_peer_ipv4 = 0;
+// Two reply buckets cover a full sweep that straddles a raster boundary. The socket owner
+// retains only these scalars if the journal is busy when the responding peer is first bound.
+struct PendingModbusHistory {
+    uint32_t             bucket = UINT32_MAX;
+    ModbusHistorySamples samples{};
+};
+static std::array<PendingModbusHistory, 2> s_pending_history{};
 // The read cadence (logic/modbus_plan.hpp). Tick 0 is a FULL cycle, so a session that has just
 // opened publishes the whole map rather than only the fast gate/context batches — which is why
 // mb_session_reset() zeroes it on every new socket rather than letting it run across sessions.
@@ -173,6 +180,9 @@ static std::atomic<bool>     s_mb_task_running{false};
 static std::atomic<bool>     s_ota_quiesced{false};
 static std::atomic<uint32_t> s_mb_cache_revision{1};
 static std::atomic<uint32_t> s_target_generation{1};
+// The target digest is published with its generation under s_mtx after persistence.
+static logic::HistoryModbusTarget s_published_target{};
+static std::atomic_flag           s_publication_claim = ATOMIC_FLAG_INIT;
 // Mirrors the persisted HomeHub enable decision. /set_hp stages this bool before its durable write,
 // then mb_reconfigure() installs it without copying the string-owning Config after that boundary.
 static std::atomic<bool> s_target_enabled{false};
@@ -481,6 +491,7 @@ void mb_autodiscover_initial() {
 
 static bool close_sock() {
     s_have_req = false;
+    s_pending_history = {};
     // lwIP can fail before deleting the socket. Keep ownership until close succeeds.
     if (s_sock >= 0 && close(s_sock) != 0 && errno != EBADF) return false;
     s_sock = -1;
@@ -1022,6 +1033,42 @@ struct ModbusSweepHistory {
     }
 };
 
+static constexpr int64_t MB_HISTORY_BUCKET_US = static_cast<int64_t>(logic::HISTORY_DT_S) * 1000000;
+
+static void mb_record_pending_history(uint32_t now_bucket) {
+    for (auto& slot : s_pending_history) {
+        if (slot.bucket == UINT32_MAX) continue;
+        // The recorder accepts only the current bucket and its predecessor.
+        if (now_bucket - slot.bucket > 1) slot.bucket = UINT32_MAX;
+        if (slot.bucket != UINT32_MAX && s_req_history_generation) {
+            history_record_modbus_samples(slot.samples, s_req_history_generation,
+                                          slot.bucket * MB_HISTORY_BUCKET_US);
+            slot.bucket = UINT32_MAX;
+        }
+    }
+}
+
+static void mb_retain_history(const CachedValue* values, size_t count, uint32_t bucket) {
+    const auto samples = history_modbus_samples(values, count);
+    // Slots are kept oldest first. There can be only two distinct eligible buckets.
+    if (s_pending_history[0].bucket == UINT32_MAX) {
+        s_pending_history[0] = s_pending_history[1];
+        s_pending_history[1] = {};
+    }
+    auto& slot = s_pending_history[0].bucket == UINT32_MAX || s_pending_history[0].bucket == bucket
+                     ? s_pending_history[0]
+                     : s_pending_history[1];
+    if (slot.bucket != bucket) {
+        slot = {bucket, samples};
+        return;
+    }
+    for (size_t i = 0; i < samples.size(); ++i) {
+        if (!logic::history_is_absent(samples[i]) &&
+            (!logic::HOMEHUB_HISTORIES[i].event || slot.samples[i] != 10))
+            slot.samples[i] = samples[i];
+    }
+}
+
 // ── One poll cycle ───────────────────────────────────────────────────────────────────────────────
 // A full cycle builds and commits a new cache. The cycles between it read only the batches
 // carrying diagnosis gates or fast outdoor context. Use the same target the worker admitted.
@@ -1058,6 +1105,17 @@ static bool mb_poll_once(uint32_t cycle_target_generation, bool allow_reconnect)
     if (!target_copied ||
         s_target_generation.load(std::memory_order_acquire) != cycle_target_generation)
         return false;
+    const bool established_target =
+        s_have_req && s_req_target_generation == cycle_target_generation && target == s_req_host &&
+        c.mb_port == s_req_port && c.mb_unit_id == s_unit;
+    if (!established_target) {
+        const auto configured = history_modbus_target(target, c.mb_port, c.mb_unit_id);
+        Lock       lk(s_mtx);
+        if (!lk.acquired() || !s_target_enabled.load(std::memory_order_relaxed) ||
+            s_target_generation.load(std::memory_order_relaxed) != cycle_target_generation ||
+            configured != s_published_target || configured == logic::HistoryModbusTarget{})
+            return false;
+    }
 
     // /set_hp owns configured history identity. Bind only the resolved peer here, with a
     // generation captured before DNS so an old connection cannot override a configuration save.
@@ -1423,6 +1481,10 @@ static bool mb_poll_once(uint32_t cycle_target_generation, bool allow_reconnect)
         s_target_generation.load(std::memory_order_acquire) == cycle_target_generation)
         s_req_history_generation = history_modbus_bind_peer(
             s_req_configured_target, s_req_peer_ipv4, s_req_history_expected_generation);
+    const uint32_t now_bucket = logic::history_bucket(esp_timer_get_time());
+    if (current_session &&
+        s_target_generation.load(std::memory_order_acquire) == cycle_target_generation)
+        mb_record_pending_history(now_bucket);
     // A FAST CYCLE COMMITS NO VALUE CACHE. Publishing its subset would hand the trend rings a
     // bucket in which every full-only row looks like a failure to read. The cache and the rings
     // stay with the last FULL cycle. Its age
@@ -1480,20 +1542,23 @@ static bool mb_poll_once(uint32_t cycle_target_generation, bool allow_reconnect)
     // old target rather than presenting A as the first sample of B.
     if (s_target_generation.load(std::memory_order_acquire) != cycle_target_generation)
         current_session = false;
-    if (s_req_history_generation) {
-        constexpr int64_t bucket_us  = static_cast<int64_t>(logic::HISTORY_DT_S) * 1000000;
-        const uint32_t    now_bucket = logic::history_bucket(esp_timer_get_time());
-        // A bounded full sweep takes less than one raster period. If the task was delayed beyond
-        // that bound, keep the live cache and book a history gap instead of guessing reply slots.
-        if (current_session && history_split && now_bucket - first_history_bucket <= 1) {
+    // A bounded full sweep takes less than one raster period. If the task was delayed beyond
+    // that bound, keep the live cache and book a history gap instead of guessing reply slots.
+    if (current_session && history_split && now_bucket - first_history_bucket <= 1) {
+        if (s_req_history_generation) {
             history_record_modbus(fresh.data(), history_split, s_req_history_generation,
-                                  first_history_bucket * bucket_us);
+                                  first_history_bucket * MB_HISTORY_BUCKET_US);
             if (now_bucket != first_history_bucket)
                 history_record_modbus(fresh.data() + history_split, fresh.size() - history_split,
-                                      s_req_history_generation, now_bucket * bucket_us);
-        } else {
-            history_record_modbus(nullptr, 0, s_req_history_generation);
+                                      s_req_history_generation, now_bucket * MB_HISTORY_BUCKET_US);
+        } else if (bind_history) {
+            mb_retain_history(fresh.data(), history_split, first_history_bucket);
+            if (now_bucket != first_history_bucket && history_split < fresh.size())
+                mb_retain_history(fresh.data() + history_split, fresh.size() - history_split,
+                                  now_bucket);
         }
+    } else if (s_req_history_generation) {
+        history_record_modbus(nullptr, 0, s_req_history_generation);
     }
 
     const int     committed       = static_cast<int>(fresh.size());
@@ -1820,6 +1885,18 @@ bool mb_network_quiesced() { return !s_start_in_flight.load() && s_network_quies
 
 bool mb_target_enabled() noexcept { return s_target_enabled.load(std::memory_order_acquire); }
 
+ModbusPublicationClaim::ModbusPublicationClaim(ModbusPublication owner,
+                                               uint32_t          revision) noexcept {
+    if (s_publication_claim.test_and_set(std::memory_order_acquire)) return;
+    acquired_ = owner == ModbusPublication::ConfigSave ||
+                (mb_target_enabled() && mb_cache_generation() == revision);
+    if (!acquired_) s_publication_claim.clear(std::memory_order_release);
+}
+
+ModbusPublicationClaim::~ModbusPublicationClaim() {
+    if (acquired_) s_publication_claim.clear(std::memory_order_release);
+}
+
 void mb_retry_start() noexcept {
     if (s_mtx && s_cache_mtx) mb_task_start_if_enabled();
 }
@@ -1840,8 +1917,10 @@ void mb_init() {
         return;
     }
     // Discovery may have saved a target since boot took its first Config snapshot.
-    const bool enabled = with_config([](const Config& c) { return config_modbus_enabled(c); });
-    s_target_enabled.store(enabled, std::memory_order_release);
+    with_config([](const Config& c) {
+        s_published_target = history_modbus_target(config_modbus_host(c), c.mb_port, c.mb_unit_id);
+        s_target_enabled.store(config_modbus_enabled(c), std::memory_order_release);
+    });
 }
 
 void mb_start() {
@@ -1849,7 +1928,7 @@ void mb_start() {
     mb_retry_start();
 }
 
-void mb_reconfigure(bool enabled) noexcept {
+void mb_reconfigure(bool enabled, const logic::HistoryModbusTarget& target) noexcept {
     if (!s_mtx || !s_cache_mtx) return;
     {
         // Generation and every target-bound status fact change under ONE lock. If an old poll owns
@@ -1859,6 +1938,8 @@ void mb_reconfigure(bool enabled) noexcept {
         Lock     lk(s_mtx);
         uint32_t next = s_target_generation.load(std::memory_order_relaxed) + 1;
         if (next == 0) next = 1; // zero remains the pre-init/no-target sentinel
+        s_published_target = target;
+        s_target_enabled.store(enabled, std::memory_order_release);
         s_target_generation.store(next, std::memory_order_release);
         clear_status_error_locked();
         s_status.connected = false;
@@ -1880,7 +1961,6 @@ void mb_reconfigure(bool enabled) noexcept {
     // Release the previous target's cache before its worker needs memory for socket cleanup.
     mb_drop_cache();
     s_next_try_us.store(0, std::memory_order_release);
-    s_target_enabled.store(enabled, std::memory_order_release);
     mb_task_start_if_enabled();
     // Clearing the address is handled BY the task: its allocation-free atomic target flag is read
     // at the top of each cycle and retires it without another fallible Config snapshot. Nothing is

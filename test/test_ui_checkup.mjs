@@ -90,7 +90,7 @@ assert.match(configSource,
              /static esp_err_t do_detect[\s\S]*?hp_poll_reconfigure\(\);\s*checkup_reset\(\);\s*dwell_reset\(\);\s*history_reset\(\);/m,
              "explicit /detect must invalidate old cycles before arming all three X10A resets");
 assert.match(configSource,
-             /homehub_history_identity_changed\([\s\S]*?const auto modbus_target[\s\S]*?const bool modbus_enabled[\s\S]*?config_save\([\s\S]*?if \(reset_mb_history\) \{\s*history_modbus_reset\(modbus_target\);[\s\S]*?mb_reconfigure\(modbus_enabled\);[\s\S]*?mqtt_request_modbus_cleanup\(\);\s*\}/m,
+             /homehub_history_identity_changed\([\s\S]*?const auto modbus_target[\s\S]*?const bool modbus_enabled[\s\S]*?config_save\([\s\S]*?if \(reset_mb_history\) \{\s*history_modbus_reset\(modbus_target\);[\s\S]*?mb_reconfigure\(modbus_enabled, modbus_target\);[\s\S]*?mqtt_request_modbus_cleanup\(\);\s*\}/m,
              "/set_hp must reset HomeHub history and reconfigure only when host, port or unit identity changes");
 assert.match(modbusPollSource,
              /history_generation\s*=\s*history_modbus_generation\(\);[\s\S]*?if \(!mb_ensure_connected\([^;]+history_generation\)\)/,

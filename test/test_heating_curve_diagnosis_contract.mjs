@@ -142,7 +142,7 @@ assert.match(evaluator,
   /Lock lk\(s_mtx\);\s*if \(s_ref_requested_epoch\.load\([^)]*\) != scope_epoch\)\s*return s_heating_curve_diagnosis\.snapshot\(\);[^\n]*\n\s*if \(s_heating_curve_homehub_epoch\.load\([^)]*\) != homehub_epoch\)\s*return s_heating_curve_diagnosis\.snapshot\(\);/,
   "a cycle that straddles either scope change records nothing");
 const setHp = httpConfig.slice(httpConfig.indexOf("if (reset_mb_history) {"));
-assert.match(setHp, /^if \(reset_mb_history\) \{[^}]*mb_reconfigure\(modbus_enabled\);[^}]*mqtt_heating_curve_homehub_reset\(\);/,
+assert.match(setHp, /if \(reset_mb_history\) \{\s*history_modbus_reset\(modbus_target\);[^}]*mb_reconfigure\(modbus_enabled, modbus_target\);[^}]*mqtt_heating_curve_homehub_reset\(\);/,
   "the HomeHub identity change that retires its history also ends the heating-curve scope");
 
 const taskStart = mqtt.indexOf("static void mqtt_task(void*)");

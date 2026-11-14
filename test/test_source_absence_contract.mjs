@@ -673,7 +673,7 @@ const mbFingerprint = setHp.indexOf("const auto modbus_target");
 const mbEnabled = setHp.indexOf("const bool modbus_enabled", mbFingerprint);
 const mbSave = setHp.indexOf("} else if (!config_save(c))", mbEnabled);
 const mbHistoryReset = setHp.indexOf("history_modbus_reset(modbus_target)", mbSave);
-const mbReconfigure = setHp.indexOf("mb_reconfigure(modbus_enabled)", mbHistoryReset);
+const mbReconfigure = setHp.indexOf("mb_reconfigure(modbus_enabled, modbus_target)", mbHistoryReset);
 const mbCleanupRequest = setHp.indexOf("mqtt_request_modbus_cleanup()", mbReconfigure);
 assert.ok(mbFingerprint >= 0 && mbEnabled > mbFingerprint && mbSave > mbEnabled,
   "HomeHub post-save cutover values must be staged before the durable boundary");
@@ -692,7 +692,8 @@ assert.ok(mbHistoryResetStart >= 0 && mbHistoryResetEnd > mbHistoryResetStart,
   "HomeHub history cutover must remain an identifiable no-throw boundary");
 assert.doesNotMatch(mbHistoryResetBody, /history_modbus_target\s*\(|\bconfig\s*\(/,
   "HomeHub history cutover must not reconstruct the target through a Config allocation");
-const mbReconfigureStart = modbus.indexOf("void mb_reconfigure(bool enabled) noexcept");
+const mbReconfigureStart = modbus.indexOf(
+  "void mb_reconfigure(bool enabled, const logic::HistoryModbusTarget& target) noexcept");
 const mbReconfigureEnd = modbus.indexOf("\nsize_t mb_values_capacity()", mbReconfigureStart);
 const mbReconfigureBody = modbus.slice(mbReconfigureStart, mbReconfigureEnd);
 assert.ok(mbReconfigureStart >= 0 && mbReconfigureEnd > mbReconfigureStart,

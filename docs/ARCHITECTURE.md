@@ -203,7 +203,8 @@ semaphore if ownership was never established. The worker retries a failed admiss
 poll cadence.
 Worker creation waits for core boot and releases its own quiescence claim separately from the
 running task. OTA and Weather defer that allocation while they own the network heap. Creation and
-the first full-cache commit check contiguous and total memory against the recovery reserve.
+admission before a pending first sweep check contiguous and total memory against the recovery
+reserve.
 The worker stages row storage and bounded host copies before opening a socket. It releases an
 invalidated cache before trying to close the retired socket and retains the descriptor until
 cleanup succeeds.

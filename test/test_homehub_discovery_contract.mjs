@@ -37,7 +37,7 @@ assert.doesNotMatch(modbus.slice(startStart, startEnd), /\bconfig\s*\(/,
   "post-save task admission must not copy the string-owning Config");
 const init = modbus.slice(startEnd, initEnd);
 assert.match(init,
-  /with_config\(\[\]\(const Config& c\) \{ return config_modbus_enabled\(c\); \}\);[\s\S]*?s_target_enabled\.store\(enabled,/,
+  /with_config\(\[\]\(const Config& c\) \{\s*s_published_target = history_modbus_target\(config_modbus_host\(c\), c\.mb_port, c\.mb_unit_id\);\s*s_target_enabled\.store\(config_modbus_enabled\(c\),/,
   "boot must seed task admission from the post-discovery persisted config");
 assert.doesNotMatch(init, /mb_task_start_if_enabled\(|\bconfig\s*\(/,
   "boot must initialize the mutexes and target without starting a task or copying Config");

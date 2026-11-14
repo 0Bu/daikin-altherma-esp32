@@ -1450,9 +1450,12 @@ static bool publish_x10a_state(const Config& config, bool force) {
 }
 
 static bool publish_modbus_state(bool& published_live) {
-    bool live = false;
-    const std::vector<GroupedValue> values = current_modbus_values(live);
-    const std::string js = live ? build_flat_json(values) : std::string("{}");
+    const uint32_t                  revision = mb_cache_generation();
+    bool                            live     = false;
+    const std::vector<GroupedValue> values   = current_modbus_values(live);
+    const std::string               js       = live ? build_flat_json(values) : std::string("{}");
+    const ModbusPublicationClaim    publication(ModbusPublication::Mqtt, revision);
+    if (!publication.acquired()) return false;
     if (js != s_last_modbus_json) {
         if (!mqtt_publish(s_modbus, js.c_str(), static_cast<int>(js.size()), 0, 1)) return false;
         s_last_modbus_json = js;

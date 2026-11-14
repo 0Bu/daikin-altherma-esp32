@@ -228,6 +228,35 @@ void history_record_modbus(const CachedValue* v, size_t n, uint32_t gen, int64_t
     if (v && n && gen == adapter::history_generation) adapter::history_rows.assign(v, v + n);
     if (adapter::history_hook) adapter::history_hook();
 }
+ModbusHistorySamples history_modbus_samples(const CachedValue* v, size_t n) {
+    ModbusHistorySamples samples;
+    samples.fill(logic::HISTORY_NO_READING);
+    for (size_t i = 0; i < n; ++i) {
+        for (size_t series = 0; series < samples.size(); ++series) {
+            if (logic::HOMEHUB_HISTORIES[series].offset != v[i].off) continue;
+            int tenths;
+            if (logic::history_parse_tenths(v[i].value.c_str(), tenths))
+                samples[series] = static_cast<logic::HistorySample>(tenths);
+        }
+    }
+    return samples;
+}
+void history_record_modbus_samples(const ModbusHistorySamples& sample, uint32_t gen,
+                                   int64_t observed_us) {
+    ++adapter::history_calls;
+    if (gen != adapter::history_generation) {
+        ++adapter::history_gaps;
+        return;
+    }
+    CachedValue heater{};
+    heater.off = 32;
+    for (size_t series = 0; series < sample.size(); ++series) {
+        if (logic::HOMEHUB_HISTORIES[series].offset == 32 && sample[series] == 10)
+            heater.value = "1";
+    }
+    adapter::history_rows.assign(1, std::move(heater));
+    adapter::history_reply_slots[0] = observed_us;
+}
 } // namespace daik
 namespace test {
 #define REQUIRE(c)                                                                                 \
@@ -241,6 +270,11 @@ using daik::logic::MbFailure;
 using daik::logic::MbFailureType;
 
 bool poll_once() { return mb_poll_once(s_target_generation.load(), true); }
+
+void mb_reconfigure(bool enabled) {
+    const auto& c = adapter::cfg;
+    daik::mb_reconfigure(enabled, history_modbus_target(c.mb_host, c.mb_port, c.mb_unit_id));
+}
 
 void reset(bool fail_dynamic_mutex_create = false) {
     sdk::fail_allocations     = false;
@@ -292,6 +326,7 @@ void reset(bool fail_dynamic_mutex_create = false) {
     s_req_history_generation          = 0;
     s_req_configured_target           = {};
     s_req_peer_ipv4                   = 0;
+    s_pending_history                 = {};
     s_txn                             = 0;
     s_cycle_tick                      = 0;
     s_cache.clear();
@@ -781,6 +816,7 @@ struct Peer {
         s_req_target_generation  = s_target_generation;
         s_req_history_generation = adapter::history_generation;
         s_target_enabled         = true;
+        s_published_target       = history_modbus_target(s_req_host, s_req_port, s_unit);
         REQUIRE(status_socket_open(s_req_host, 502, 1, 0, s_target_generation));
         if (profile != ModbusProfile::Auto) {
             s_active_profile                    = profile;
@@ -1322,11 +1358,13 @@ void probe_resolved_peer_reconnect() {
     }
     {
         Peer peer(open(replacement_ipv4, replacement), {{MbFunc::ReadInput, 31, 0},
+                                                        {MbFunc::ReadInput, 32, 1},
                                                         {MbFunc::ReadInput, 49, 1570},
                                                         {MbFunc::ReadInput, 79, MB_WAIT}});
         REQUIRE(adapter::history_generation == first_history_generation);
-        adapter::history_bind_busy = true;
-        const auto calls           = adapter::history_calls;
+        adapter::history_bind_busy  = true;
+        const auto     calls        = adapter::history_calls;
+        const uint32_t first_bucket = logic::history_bucket(sdk::clock_us);
         poll_once();
         REQUIRE(current_compressor() == ModbusCompressor::Off);
         uint32_t   cache_history_generation = UINT32_MAX;
@@ -1337,10 +1375,14 @@ void probe_resolved_peer_reconnect() {
         REQUIRE(adapter::history_generation == first_history_generation);
         REQUIRE(mb_status().profile_basis == ModbusProfileBasis::Probing);
         REQUIRE(peer.requests == MB_PLAN.count + 1);
+        sdk::clock_us = (first_bucket + 1) * MB_HISTORY_BUCKET_US;
+        peer.set_word(MbFunc::ReadInput, 32, 0);
         adapter::history_bind_busy = false;
         poll_once(); // fast retry binds, but leaves the prior full-cache provenance at zero
         REQUIRE(adapter::history_generation == first_history_generation + 1);
-        REQUIRE(adapter::history_calls == calls);
+        REQUIRE(adapter::history_calls == calls + 1);
+        REQUIRE(adapter::history_reply_slots[0] == first_bucket * MB_HISTORY_BUCKET_US);
+        REQUIRE(cached_row(adapter::history_rows, 32).value == "1");
         (void)snapshot_rows(true, &cache_history_generation);
         REQUIRE(cache_history_generation == 0);
 
@@ -1416,6 +1458,7 @@ void poll_full_fast_break() {
 
     seed_cache();
     adapter::cfg.mb_host.clear();
+    mb_reconfigure(false);
     REQUIRE(!poll_once());
     REQUIRE(s_cache.capacity() == 0 && !mb_values_live());
 }
@@ -2137,6 +2180,32 @@ void first_sweep_heap_pressure() {
     adapter::cfg.mb_host = "replacement-before-generation-publication.local";
     REQUIRE(!mb_poll_once(s_target_generation.load(), false));
     REQUIRE(s_have_req && sdk::socket_connects == 0 && mb_values_live());
+    close_sock();
+    adapter::cfg.mb_host = "harness-peer";
+    s_req_host.clear();
+    REQUIRE(!mb_poll_once(s_target_generation.load(), false));
+    REQUIRE(sdk::socket_connects == 0 && sdk::mdns_a_calls == 0);
+    adapter::cfg.mb_host    = "replacement-before-generation-publication.local";
+    adapter::cfg.mb_port    = 1502;
+    adapter::cfg.mb_unit_id = 2;
+    REQUIRE(!mb_poll_once(s_target_generation.load(), true));
+    REQUIRE(!s_have_req && sdk::socket_connects == 0 && sdk::mdns_a_calls == 0);
+    const uint32_t revision = mb_cache_generation();
+    {
+        const ModbusPublicationClaim publish(ModbusPublication::Mqtt, revision);
+        REQUIRE(publish.acquired());
+        const ModbusPublicationClaim save(ModbusPublication::ConfigSave);
+        REQUIRE(!save.acquired());
+    }
+    {
+        const ModbusPublicationClaim save(ModbusPublication::ConfigSave);
+        REQUIRE(save.acquired());
+        const ModbusPublicationClaim publish(ModbusPublication::Mqtt, revision);
+        REQUIRE(!publish.acquired());
+        mb_reconfigure(true);
+    }
+    const ModbusPublicationClaim stale(ModbusPublication::Mqtt, revision);
+    REQUIRE(!stale.acquired());
 }
 void first_sweep_after_tls() {
     reset();

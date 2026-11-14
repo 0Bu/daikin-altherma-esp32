@@ -26,6 +26,10 @@ namespace daik {
 [[maybe_unused]] inline void history_modbus_reset(uint32_t) noexcept {
     history_modbus_reset(logic::HistoryModbusTarget{});
 }
+void mb_reconfigure(bool enabled, const logic::HistoryModbusTarget& target) noexcept;
+[[maybe_unused]] inline void mb_reconfigure(bool enabled) noexcept {
+    mb_reconfigure(enabled, logic::HistoryModbusTarget{});
+}
 } // namespace daik
 #ifndef CONFIG_HTTP_PRODUCTION_SOURCE
 #error Bind the full production configuration translation unit
@@ -48,8 +52,9 @@ const char*          oracle = "initial";
 unsigned             checks = 0, saves = 0, service_writes = 0, link_writes = 0, config_reads = 0;
 unsigned             reboots = 0, delays = 0, runtime_changes = 0, env_probes = 0, body_reads = 0;
 unsigned mqtt_inits = 0, mqtt_starts = 0, mqtt_stops = 0, mqtt_destroys = 0, semaphore_deletes = 0;
-unsigned dns_calls = 0, socket_calls = 0, socket_closes = 0, weather_commits = 0;
-unsigned post_write_allocations = 0, stale_attempts = 0, save_fault = 0;
+unsigned             dns_calls = 0, socket_calls = 0, socket_closes = 0, weather_commits = 0;
+unsigned             post_write_allocations = 0, stale_attempts = 0, save_fault = 0;
+bool                 modbus_publication_busy = false, modbus_change_claimed = false;
 
 unsigned detection_writes = 0, link_snapshot_reads = 0, restart_guard_calls = 0;
 bool     detect_before_service_save = false, reset_latched = false, latch_during_delay = false;
@@ -123,6 +128,7 @@ struct Store {
 };
 void reset() {
     tracking = durable_started = false;
+    modbus_publication_busy = modbus_change_claimed = false;
     current                    = daik::Config{};
     current.rx_pin             = 44;
     current.tx_pin             = 43;
@@ -417,7 +423,16 @@ void history_room_reset(uint32_t identity) noexcept {
     }
 }
 void hp_poll_reconfigure() { ++fixture::runtime_changes; }
-void mb_reconfigure(bool) noexcept { ++fixture::runtime_changes; }
+void mb_reconfigure(bool, const logic::HistoryModbusTarget&) noexcept {
+    ++fixture::runtime_changes;
+}
+ModbusPublicationClaim::ModbusPublicationClaim(ModbusPublication owner, uint32_t) noexcept {
+    acquired_ = owner == ModbusPublication::ConfigSave && !fixture::modbus_publication_busy;
+    if (acquired_) fixture::modbus_change_claimed = true;
+}
+ModbusPublicationClaim::~ModbusPublicationClaim() {
+    if (acquired_) fixture::modbus_change_claimed = false;
+}
 void mb_retry_start() noexcept {
     ++fixture::modbus_retries;
     fixture::modbus_pending = false;
@@ -1189,13 +1204,21 @@ void query_flags() {
 }
 void modbus_start_retry() {
     reset();
-    constexpr auto patch = R"({"mb_host":"retry-hub.local","mb_port":502,"mb_unit_id":1})";
-    modbus_pending       = true;
-    const auto first     = invoke(daik::set_hp, patch);
+    constexpr auto patch    = R"({"mb_host":"retry-hub.local","mb_port":502,"mb_unit_id":1})";
+    modbus_pending          = true;
+    modbus_publication_busy = true;
+    const auto busy         = invoke(daik::set_hp, patch);
+    modbus_publication_busy = false;
+    check(busy.status == "409 Conflict" && saves == 0 && runtime_changes == 0 &&
+              current.mb_host == "old-hh.invalid" && !modbus_change_claimed,
+          "an in-flight HomeHub state publication defers the settings write");
+    const auto first = invoke(daik::set_hp, patch);
     check(first.status == "200 OK" &&
               first.response == R"({"ok":true,"modbus_start_pending":true})" &&
               current.mb_host == "retry-hub.local" && service_writes == 1 && modbus_retries == 0,
           "a failed task start must report the already saved settings");
+    check(!modbus_change_claimed,
+          "the successful settings response released its publication claim");
     const unsigned changes_after_save = runtime_changes;
     durable_started                   = false;
     const auto retry                  = invoke(daik::set_hp, patch);

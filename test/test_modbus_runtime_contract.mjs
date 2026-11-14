@@ -126,9 +126,14 @@ try {
       after: "static bool mb_poll_once(uint32_t cycle_target_generation, bool allow_reconnect) {\n    cycle_target_generation = s_target_generation.load(std::memory_order_acquire);",
     },
     {
-      name: "poll-dials-unadmitted-config", scenario: "first_sweep_heap_pressure",
-      before: /if \(!allow_reconnect &&\s*\(host != s_req_host \|\| cfg\.mb_port != s_req_port \|\| cfg\.mb_unit_id != s_unit\)\)\s*return false;/,
-      after: "(void)allow_reconnect;",
+      name: "poll-dials-unpublished-target-on-first-sweep", scenario: "first_sweep_heap_pressure",
+      before: "configured != s_published_target || configured == logic::HistoryModbusTarget{}",
+      after: "configured == logic::HistoryModbusTarget{}",
+    },
+    {
+      name: "contended-peer-bind-loses-first-sample", scenario: "probe_resolved_peer_reconnect",
+      before: "mb_record_pending_history(now_bucket);",
+      after: "((void)&mb_record_pending_history);",
     },
     {
       name: "disabled-worker-retains-cache-allocation", scenario: "socket_setup_and_retirement",
@@ -214,8 +219,8 @@ try {
     },
     {
       name: "history-buckets-from-poll-end", scenario: "poll_history_reply_boundary",
-      before: "first_history_bucket * bucket_us);",
-      after: "now_bucket * bucket_us);",
+      before: "first_history_bucket * MB_HISTORY_BUCKET_US);",
+      after: "now_bucket * MB_HISTORY_BUCKET_US);",
     },
     {
       name: "history-tcp-handshake-only", scenario: "probe_resolved_peer_reconnect",

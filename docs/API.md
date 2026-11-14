@@ -431,10 +431,8 @@ the history lifetime in `/status`. An epoch of zero means the copied rows have n
 binding. Use a Modbus chart only with a nonzero epoch and matching boot ID and epoch.
 The status field `history.modbus_binding:true` advertises this protocol independently of Modbus
 row availability. After learning the protocol, the dashboard withdraws Modbus charts and pins
-when a current `/values` request fails, the array is missing, or the binding is invalid. During OTA
-a matching frame can show chart samples already held in memory with live activity paused. A reload
-restores the binding metadata and needs a separate history response for the samples. A matching
-boot ID and epoch in a fresh response can reopen the live charts.
+when a current `/values` request fails, the array is missing, or the binding is invalid.
+See [history presentation](DESIGN.md#history) for cached and resumed chart behavior.
 The latest valid reply of the current session must be at most seven seconds old. The last
 full-cache commit must be at most 627 seconds old. A fast poll can refresh the reply clock while
 the full-cache rows retain their earlier values. These clocks describe the session and cache.
@@ -592,15 +590,19 @@ fields so it cannot roll them back.
 HomeHub port is 1–65535, unit 1–247, host at most 512 bytes. Empty host durably disables
 polling, automatic discovery and dependent diagnosis. The save withdraws the old readings and
 releases their cache immediately. The worker retires its socket after OTA or Weather releases
-the network and retries a failed close on a later cycle. An enabled endpoint change can reuse its
-worker and report `close_pending` while it retries the previous socket's close. Disabling the source
-retires its worker. If re-enabled during retirement, the replacement waits for the old worker
-to release the network and deregister from the watchdog. X10A remains independent.
+the network and retries a failed close on a later cycle. A worker can reuse its task after an
+endpoint change, but opens the new socket only for the published target. It can report
+`close_pending` while retrying the previous close. Disabling the source retires its worker.
+If enabled again during retirement, the worker can continue after releasing the old socket.
+X10A remains independent.
 The response adds `"modbus_start_pending":true` when an enabled target still needs worker admission
 or the worker is retiring. Read `/status.modbus.connected` for the live link and `/values.modbus` for
-its readings. A failed heap check at task creation or before the first sweep defers the next start
-attempt by five seconds. A created worker retries task-local network semaphore and watchdog
+its readings. A failed heap check at task creation defers the next start by five seconds. Before
+the first sweep, that delay begins after the worker has released any old socket. A created worker
+retries task-local network semaphore and watchdog
 admission at its normal poll cadence.
+If retained HomeHub state is being published, an endpoint change can return 409 for retry before
+settings are saved.
 After core services have started, the X10A task retries worker creation even while its bus is
 unavailable. OTA and Weather network activity defer creation. If the X10A task itself could not
 start, saving the same enabled target can retry creation without retiring its history.

@@ -24,6 +24,7 @@
 #include <string>
 #include "hp_poll.hpp"      // CachedValue — the shared row shape, so /values needs no second type
 #include "logic/config_model.hpp"
+#include "logic/history_persist.hpp"
 #include "logic/modbus.hpp"
 #include "logic/outdoor_evidence.hpp"
 
@@ -82,9 +83,9 @@ void mb_start();
 // after any persisted result or explicit host save/delete, in safe mode, or without a LAN lease.
 void mb_autodiscover_initial();
 
-// Apply the staged enable decision after POST /set_hp and retire the previous cache. The owner
+// Publish the staged target after POST /set_hp and retire the previous cache. The owner
 // closes its socket. Worker creation requires boot and network-heap admission and can stay pending.
-void mb_reconfigure(bool enabled) noexcept;
+void mb_reconfigure(bool enabled, const logic::HistoryModbusTarget& target) noexcept;
 void mb_retry_start() noexcept;
 bool mb_task_pending() noexcept;
 
@@ -92,6 +93,21 @@ bool mb_task_pending() noexcept;
 // flips synchronously after a successful settings save and is therefore the MQTT publication
 // authority.
 bool mb_target_enabled() noexcept;
+
+// Serialize a durable HomeHub cutover with admission of its retained MQTT state.
+// These try-claims never wait on each other's task. MQTT binds its claim to the copied cache.
+enum class ModbusPublication { ConfigSave, Mqtt };
+class ModbusPublicationClaim {
+public:
+    explicit ModbusPublicationClaim(ModbusPublication owner, uint32_t revision = 0) noexcept;
+    ~ModbusPublicationClaim();
+    ModbusPublicationClaim(const ModbusPublicationClaim&)            = delete;
+    ModbusPublicationClaim& operator=(const ModbusPublicationClaim&) = delete;
+    bool                    acquired() const { return acquired_; }
+
+private:
+    bool acquired_ = false;
+};
 
 // Lock-free acknowledgement for OTA/Weather heap ownership. True means no HomeHub cycle is inside
 // its Config/DNS/socket/vector allocation region; a disabled/non-started task is quiescent too.

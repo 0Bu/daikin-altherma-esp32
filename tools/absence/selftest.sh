@@ -1069,8 +1069,8 @@ python3 - "$TMP/main/http_config.cpp" <<'PY4'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-old = "            mb_reconfigure(modbus_enabled);\n"
-new = "            mb_reconfigure(config_modbus_enabled(config()));\n"
+old = "            mb_reconfigure(modbus_enabled, modbus_target);\n"
+new = "            mb_reconfigure(config_modbus_enabled(config()), modbus_target);\n"
 seed = s.replace(old, new, 1)
 assert seed != s, "seed 56 did not apply — staged HomeHub enable cutover moved"
 open(p, "w").write(seed)
@@ -1097,8 +1097,8 @@ python3 - "$TMP/main/hp_modbus.cpp" <<'PY4'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-seed = s.replace("void mb_reconfigure(bool enabled) noexcept {",
-                 "void mb_reconfigure(bool enabled) {", 1)
+signature = "void mb_reconfigure(bool enabled, const logic::HistoryModbusTarget& target)"
+seed = s.replace(signature + " noexcept {", signature + " {", 1)
 assert seed != s, "seed 58 did not apply — HomeHub noexcept boundary moved"
 open(p, "w").write(seed)
 PY4

@@ -30,7 +30,8 @@ vm.runInContext(read("app_state") + "\n" + read("history") + "\n" + read("dashbo
   hydrateRoutedPopup = () => {};
   markUnreachable = () => {};
   this.ui = { S, refreshStatus, fillRefTemp, refTempFormPayload, formatRefSource, parseRefSource,
-    ensureHist, ensureDerived, syncHistSources, refreshValues, hasModbusHist, historyView, histCacheKey };
+    ensureHist, ensureDerived, syncHistSources, refreshValues, hasModbusHist, historyView, histCacheKey,
+    syncDashboardCards };
 `, context);
 const ui = context.ui;
 const plain = (value) => JSON.parse(JSON.stringify(value));
@@ -463,7 +464,28 @@ for (const failure of [new Error("503"), new SyntaxError("invalid JSON"), null, 
   await status(next);
   context.nextStatus = { ...healthy, modbus_history_epoch: 2 };
   assert.equal(await ui.refreshValues(false), true);
-  const request = ui.ensureHist("dhw_tank", "modbus", false);
+  ui.S.stage = "dashboard";
+  const shown = { dataset: { trend: "dhw_tank" } };
+  const selectedCard = { dataset: { dashboardCard: "modbus" }, querySelectorAll: (selector) => {
+    assert.equal(selector, ".vitem.open:not([hidden]) [data-trend]");
+    return [shown, shown];
+  } };
+  const nav = { contains: () => false, querySelectorAll: () => [], setAttribute() {} };
+  const host = { querySelectorAll: () => [selectedCard] };
+  elements.set("cardNav", nav);
+  elements.set("valueGroups", host);
+  context.document = { activeElement: null };
+  context.setHtml = () => {};
+  context.t = (key) => key;
+  context.esc = (value) => value;
+  ui.S.otaInstalling = true;
+  ui.syncDashboardCards();
+  assert.equal(pending.length, 0, "showing a saved frame during OTA must not fetch history");
+  ui.S.otaInstalling = false;
+  ui.syncDashboardCards();
+  ui.syncDashboardCards();
+  assert.equal(pending.length, 1, "a visible open trend reacquires the matching lease once");
+  const request = ui.S.histRequests.get(tankKey).done;
   reply(pending.shift(), 444, 2);
   await request;
   assert.equal(ui.S.hist.get(tankKey).v[0], 444);

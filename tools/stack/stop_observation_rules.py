@@ -383,7 +383,7 @@ BODIES = {
     'main/recovery_button.cpp': {'factory_reset': '2576aecad49c3d9a4515e6e0d8fef1697aebc5675c57a60b9ca4389936072d32', 'button_task': 'cbf986209f566a3f6eae80b8be629ef18911f8fa319084dd7959a4e76a7cf460'},
     'main/mqtt_ha.cpp': {'publish_heartbeat': '2d659e33a6c5f8bb0f682c4e58bb4ea60b3ce259acef21a27ce6474bf452bacc', 'build_heartbeat_payload': '22ff09e1059552ba1fed412dc780465042c603c8b3f4bf62142cd8c66601b761', 'mqtt_task': 'dc1a1f71d7a3d7ccb5cd73558f5e5be88e07059f2ba7c6c86a217cae95074049'},
     'main/hp_poll.cpp': {'checkup_record_poll_gap': '5fb1fd43670b4b4daffd1b4a1cddd3864e7cae719cdcfc11f8d3dddeb9e4ef88', 'poll_task': '6b62392ac706f8b567314ec445351f53176d555843b62169a445ef072a2284e3', 'poll_once': '808c07edf23ecbe963fc0694abaf01c9841ef5dd5f66aeb355d24e67ed193152', 'poll_detect': 'ffcdce0117bf432880af0af2f443d531ed82371213f96620e0d5a05be7b56ab6'},
-    'main/http_config.cpp': {'read_config_document': '9b8505b7d63f7b8fc63f184a6f5311c77c0e7f56616c4669cc0008069c05a9ca', 'set_wifi': '9fb0686e62526883f4d758e3c3e1b976ba7065c323ddfe1ea9dcff54fa98780a', 'parse_circulation_request': 'f62d40518fdda281234d009179430717ac4c0472c17f2678ac7d67088ec86092', 'set_weather': 'dac1f930149cd45d6495514ef8c5bf0ce42a8de449b6e49ae5a1695d10faf408', 'set_board': '6170a871f0b823113a09db5b8ac5fda2a3b88ba68abee4005dd34c8ec1db89c6', 'set_env3': '2dcb0874faa68175dbc2150d28b5676a3214515c0c66b15199ae9e1f37bd9c78', 'set_hp': '40eeede20c2deae7a876119faedbe7c1f5b3a534710d40065ddfaaac2f74eb10', 'set_diagnostics': 'a538c190e0a57f2a44db4ecafd14685d6d627f0771b0cad27d55d070f71f381b', 'do_detect': '22fd9b4a0da0665105a0dad61692cd77c29d2de6e42df36869d0c4e20ebe6b9c'},
+    'main/http_config.cpp': {'read_config_document': '9b8505b7d63f7b8fc63f184a6f5311c77c0e7f56616c4669cc0008069c05a9ca', 'set_wifi': '9fb0686e62526883f4d758e3c3e1b976ba7065c323ddfe1ea9dcff54fa98780a', 'parse_circulation_request': 'f62d40518fdda281234d009179430717ac4c0472c17f2678ac7d67088ec86092', 'set_weather': 'dac1f930149cd45d6495514ef8c5bf0ce42a8de449b6e49ae5a1695d10faf408', 'set_board': '6170a871f0b823113a09db5b8ac5fda2a3b88ba68abee4005dd34c8ec1db89c6', 'set_env3': '2dcb0874faa68175dbc2150d28b5676a3214515c0c66b15199ae9e1f37bd9c78', 'set_hp': '7f73a7684d73a79531d23f1aab5a2e0e4969b84b4aea4381ec6333fb12229508', 'set_diagnostics': 'a538c190e0a57f2a44db4ecafd14685d6d627f0771b0cad27d55d070f71f381b', 'do_detect': '22fd9b4a0da0665105a0dad61692cd77c29d2de6e42df36869d0c4e20ebe6b9c'},
     'main/http_status.cpp': {'append_status_json': '52c2b1b19950371f109c16f86846f1d4269cdfefc6caf929c5a339a092a2f56b', 'h_status': 'd06d3dc6e1be37c7bfa372a10f9e01f6b592ebe2fab4d0b9b74894d5c15c51b3', 'http_send_status_json': 'bd305a86cfd4ac55f17680e2c8e2c1fd0138ea46c58d726cc5a9815fe8d68b5c'},
     'main/main.cpp': {'boot_sequence': '535f04b41b357d2fe824ce0228b42dccef9900fa9e974b00b98f81afe1ef0e36'},
     'main/mcp_server.cpp': {'mcp_post': '619f17e24a6be7f967676f27ac84c5441502958638b9fc1d96afc6b3d7d9ef84'},
@@ -752,8 +752,14 @@ for task, callers, cap in (
             task, {'symbols': [*callers, 'history_peer_target_hash', *chain],
                    'multipliers': {}, 'base_bytes': 1536, 'max_bytes': cap},
         ]
+for phase, chain in _PEER_SHA_PHASES.items():
+    PATHS[f'main_modbus_init_peer_sha_{phase}'] = [
+        'main', {'symbols': ['main_task', 'boot_sequence', 'modbus_static_init',
+                             'history_peer_target_hash', *chain],
+                 'multipliers': {}, 'base_bytes': 1536, 'max_bytes': 5120},
+    ]
 SYMBOLS.update({
-    'modbus_static_init': {'pattern': r'^daik::mb_init\(\)$', 'max_bytes': 32},
+    'modbus_static_init': {'pattern': r'^daik::mb_init\(\)$', 'max_bytes': 48},
     'modbus_static_mutex': {'pattern': '^xQueueCreateMutexStatic$', 'max_bytes': 32},
     'modbus_static_queue': {'pattern': '^xQueueGenericCreateStatic$', 'max_bytes': 48},
     'modbus_static_queue_reset': {'pattern': '^xQueueGenericReset$', 'max_bytes': 32},
@@ -783,6 +789,38 @@ PATHS['modbus_history_peer_bind_target'] = [
                            'history_peer_bind', 'history_peer_target_compare'],
                'multipliers': {}, 'base_bytes': 1536, 'max_bytes': 5120},
 ]
+
+SYMBOLS.update({
+    'modbus_history_retain': {'pattern': r'^daik::mb_retain_history\(', 'max_bytes': 96},
+    'modbus_history_collect': {'pattern': r'^daik::history_modbus_samples\(', 'max_bytes': 64},
+    'modbus_history_record': {'pattern': r'^daik::history_record_modbus\(', 'max_bytes': 64},
+    'modbus_history_fold': {'pattern': r'^daik::history_record_modbus_samples\(', 'max_bytes': 64},
+    'modbus_publication_claim': {
+        'pattern': r'^daik::ModbusPublicationClaim::ModbusPublicationClaim\(', 'max_bytes': 32,
+    },
+    'modbus_publication_release': {
+        'pattern': r'^daik::ModbusPublicationClaim::~ModbusPublicationClaim\(\)$', 'max_bytes': 32,
+    },
+})
+for branch, chain in {
+    'collect': ['modbus_history_record', 'modbus_history_collect'],
+    'fold': ['modbus_history_record', 'modbus_history_fold'],
+    'retain': ['modbus_history_retain', 'modbus_history_collect'],
+    'replay': ['modbus_history_fold'],
+}.items():
+    PATHS[f'modbus_measured_history_{branch}'] = [
+        'modbus', {'symbols': ['runtime_task_entry', 'modbus_task', 'modbus_poll', *chain],
+                   'multipliers': {}, 'base_bytes': 2048, 'max_bytes': 5120},
+    ]
+for task, root, cap in (
+    ('httpd', ['config_hp', 'config_document'], 8192),
+    ('mqtt', ['mqtt_task'], 5120),
+):
+    for kind in ('claim', 'release'):
+        PATHS[f'{task}_modbus_publication_{kind}'] = [
+            task, {'symbols': [*root, f'modbus_publication_{kind}'], 'multipliers': {},
+                   'base_bytes': 1536, 'max_bytes': cap},
+        ]
 UPDATED_LIMITS['modbus_task'] = 96
 SYMBOLS.update({
     'modbus_worker_wdt_add': {'pattern': '^esp_task_wdt_add$', 'max_bytes': 64},
@@ -860,7 +898,8 @@ SYMBOLS.update({
     'modbus_create_start': {'pattern': r'^daik::mb_task_start_if_enabled\(\)$', 'max_bytes': 80},
     'modbus_create_boot': {'pattern': r'^daik::mb_start\(\)$', 'max_bytes': 32},
     'modbus_create_retry': {'pattern': r'^daik::mb_retry_start\(\)$', 'max_bytes': 32},
-    'modbus_create_reconfigure': {'pattern': r'^daik::mb_reconfigure\(bool\)$', 'max_bytes': 64},
+    'modbus_create_reconfigure': {'pattern': r'^daik::mb_reconfigure\(bool, std::array<unsigned char, 16u> const&\)$',
+                                 'max_bytes': 64},
     'modbus_create_sdk': {'pattern': '^xTaskCreatePinnedToCore$', 'max_bytes': 64},
     'modbus_create_init': {'pattern': r'^prvInitialiseNewTask\$constprop\$0$', 'max_bytes': 48},
     'modbus_create_ready': {'pattern': '^prvAddNewTaskToReadyList$', 'max_bytes': 48},
@@ -932,7 +971,7 @@ for caller, task, prefix, limit in (
 BODIES['main/history.cpp'].update({'history_modbus_reset_scope_locked': 'cbb56d64ed09e01703e672a55798194aaff30da5e3f5c83a96c131860716fd9a',
  'history_modbus_reset': 'feace54ffc1e23ee4c620c183eef77f11ae491619d1c2f627fd58e3a32c4f031',
  'history_modbus_bind_peer': '6edae4ad40931acb7057dbc1f3086fb70423b9aade42ced222805c0bcd7a0a8d',
- 'history_record_modbus': 'ab777a2adeb2ab11c8857a88e94986f24ed3125037a4dc0659649647d941bc67',
+ 'history_record_modbus': '3fd1216e98c185b23839a7cb31dc563740ef484e11fe1c4f0f275665707fdd05',
  'history_modbus_snapshot': '321197fd5dae1871507ca376de37d70761227dd63f31c1f3f5fed5ba72c7e027',
  'history_splice_snapshot': 'a63845e18ff6d4dfc71e09c6a8b17f821ae4722d029484de633c89c341cdd79e',
  'flash_trend_scope_matches': 'afb6a3e7dcb6b52bc36cb18dc8701bf231b7cfbcc3610dbbd0f9cbcf64222f71',
@@ -940,7 +979,7 @@ BODIES['main/history.cpp'].update({'history_modbus_reset_scope_locked': 'cbb56d6
  'flash_build_next_record': 'd6a33f73b0e9acb3b80aa66cf64c37f73aba25eac1ebfa5297da0ff3c627bd06'})
 BODIES['main/history_target.cpp'] = {'history_modbus_target': 'a768932c642ee9db5356c672b8ce1876a9ddc6c14385b290494c265f38a7f156'}
 BODIES['main/hp_modbus.cpp'] = {'mb_ensure_connected': 'a09adc44fb9ad2fea8e8f5c364e1a31a1d8eb44314c5f279d1e9d734ea5b4238',
- 'mb_poll_once': '8b82569d4043fed1e6b309ee6987005f35642436ca4a578fedce6e370e86e1c7',
+ 'mb_poll_once': '10818559405dad8d224b8583fb908514be3f344fdf684d7e71007951c39f9990',
  'status_socket_open': '6acb79527aee70827e7a0a62457febca550aa66fb7c71d750fcb3a56133a62c5'}
 BODIES['main/hp_modbus.cpp'].update({
     'mb_task': '3d238adfde4e9bdbc5f3a9c87dfcaa909ffcb122abf64af41a5625cd885f2d4a',
@@ -949,14 +988,14 @@ BODIES['main/hp_modbus.cpp'].update({
     'mb_task_start_if_enabled': 'a14ae89ef71a0ac8e2b477e1781510a520af5f1684f99fd5f60e1c8f5ba2959e',
     'mb_retry_start': '3c644ba9a4c7ff620e76335345808b7f335778e98ffe8f5876c97eddec29ed9c',
     'mb_start': '954ea9970f7921417de460b7f3ebc0298aba357ad5ac5c8bcdff7fbc87368af8',
-    'mb_reconfigure': '39c9c541f610ff08fa93c059768029a6caacaf65dbf063f24271dae382bf536f',
+    'mb_reconfigure': 'dc219722946933b9c84651634d4cc7872fcc017cde3efdb630db30ff7ae6d6e1',
     'mb_network_quiesced': '1be4f835658858fcf43554071c903544ebe5a95edd9ca09c73d5c9d633f3a5ff',
 })
 BODIES.setdefault('main/main.cpp', {})['boot_sequence'] = 'dbd24138cee2c0dc6738ac7aebcbad527be3c7d64f1d75b30817e178da997eb5'
 BODIES['main/hp_poll.cpp']['poll_task'] = 'd8c615499b948e0b026f4309ec51eaab153c999f9f6acdcdfb202ae88512cb8b'
 BODIES['main/hp_modbus.cpp']['mb_admit_worker'] = '59ca8a364dc6238ce38e267ca3cdd789a8821dc38a6750881b4ce637d1ad5ed9'
 BODIES['main/http_status.cpp']['append_status_json'] = '52c2b1b19950371f109c16f86846f1d4269cdfefc6caf929c5a339a092a2f56b'
-BODIES['main/hp_modbus.cpp']['mb_init'] = '84e35716eed5b32d90311bc4e6884ee8d9639fd13b66779f70dad617e338fa52'
+BODIES['main/hp_modbus.cpp']['mb_init'] = 'abaa42496323a873e3990687cfd6893675bfff88094fef9b8e929972c9301327'
 CALLERS.update({
     'mb_admit_worker': {'main/hp_modbus.cpp:<definition>': 1,
                         'main/hp_modbus.cpp:mb_task': 1},
@@ -1005,6 +1044,8 @@ CALLERS.update({'mb_init': {'main/main.cpp:boot_sequence': 1,
                            'main/history.hpp:<declaration>': 1,
                            'main/history_target.cpp:<definition>': 1,
                            'main/hp_modbus.cpp:mb_ensure_connected': 1,
+                           'main/hp_modbus.cpp:mb_poll_once': 1,
+                           'main/hp_modbus.cpp:mb_init': 1,
                            'main/http_config.cpp:set_hp': 1}})
 
 # Current-session peer confirmation and the cache-bound epoch share these measured callers.
@@ -1308,7 +1349,7 @@ BODIES['main/hp_modbus.cpp'].update({'failure_message': '215a5739c66c9a99ca1d125
  'status_clear_error': '4c8913f1fdbb94d9421b850c9f89160a614bbee457672b6fee1ddce97d29da28',
  'status_recovered': 'ed413f5bcbb8f189e6b97150ec5eba1ce836d26a382b4e0c5bd064c2afd054c3',
  'mb_status': '0845dca969b3c29eb56d3c0aa0547de01c61fad5908fe9411d100827a40f5434',
- 'mb_reconfigure': '39c9c541f610ff08fa93c059768029a6caacaf65dbf063f24271dae382bf536f'})
+ 'mb_reconfigure': 'dc219722946933b9c84651634d4cc7872fcc017cde3efdb630db30ff7ae6d6e1'})
 CALLERS.update({'failure_message': {'main/hp_modbus.cpp:<definition>': 1, 'main/hp_modbus.cpp:report_cycle_result': 1},
  'failure_code': {'main/hp_modbus.cpp:<definition>': 1, 'main/hp_modbus.cpp:report_cycle_result': 1},
  'report_connect_error': {'main/hp_modbus.cpp:<definition>': 1, 'main/hp_modbus.cpp:mb_ensure_connected': 1},

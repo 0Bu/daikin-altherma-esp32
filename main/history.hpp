@@ -120,6 +120,12 @@ size_t history_room_snapshot(logic::HistorySample* out, size_t max, uint32_t exp
 void history_record_modbus(const CachedValue* v, size_t n, uint32_t identity_generation,
                            int64_t observed_us = -1);
 
+// A pending peer bind retains only the already decoded history rows, without owning cache memory.
+using ModbusHistorySamples = std::array<logic::HistorySample, logic::HOMEHUB_HISTORY_COUNT>;
+ModbusHistorySamples history_modbus_samples(const CachedValue* v, size_t n);
+void history_record_modbus_samples(const ModbusHistorySamples& sample, uint32_t identity_generation,
+                                   int64_t observed_us);
+
 // Hold journal writes for buckets that this full sweep can still change.
 void history_modbus_sweep_begin() noexcept;
 void history_modbus_sweep_end() noexcept;

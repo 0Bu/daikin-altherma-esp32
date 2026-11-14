@@ -1429,13 +1429,14 @@ const modbusTask = modbus.slice(modbusTaskStart, modbusTaskEnd);
 const modbusOtaHold = modbusTask.indexOf("ota_download_active()");
 const modbusWeatherHold = modbusTask.indexOf("weather_fetch_active()", modbusOtaHold);
 const modbusClaim = modbusTask.indexOf("MbNetworkActivity network_activity", modbusWeatherHold);
-const modbusRecheck = modbusTask.indexOf("ota_download_active()", modbusClaim);
+const modbusRecheck = modbusTask.indexOf("if (ota_download_active() || weather_fetch_active())", modbusClaim);
 const modbusPollCall = modbusTask.indexOf("mb_poll_once(", modbusRecheck);
 const modbusPollStart = modbus.indexOf("static bool mb_poll_once(");
 const modbusPollEnd = modbus.indexOf("static void mb_task_start_if_enabled()", modbusPollStart);
 const modbusPoll = modbus.slice(modbusPollStart, modbusPollEnd);
 assert.ok(modbusOtaHold >= 0 && modbusWeatherHold > modbusOtaHold &&
           modbusClaim > modbusWeatherHold && modbusRecheck > modbusClaim &&
+          /^MbNetworkActivity network_activity;\s*$/.test(modbusTask.slice(modbusClaim, modbusRecheck)) &&
           modbusPollCall > modbusRecheck,
   "HomeHub must claim/recheck and stand aside before its Config copy and model-sized cycle allocation");
 assert.match(modbusTask.slice(modbusOtaHold, modbusPollCall),

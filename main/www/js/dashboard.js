@@ -212,6 +212,9 @@ function syncDashboardCards() {
     (buttons.find(button => button.dataset.card === focused) ||
       buttons.find(button => button.dataset.card === S.dashboardCard))?.focus({ preventScroll: true });
   }
+  if (!S.clickHold && !S.otaInstalling && S.stage === "dashboard")
+    for (const row of selected.querySelectorAll(".vitem.open:not([hidden]) [data-trend]"))
+      ensureHist(row.dataset.trend, "modbus");
   return selected;
 }
 
