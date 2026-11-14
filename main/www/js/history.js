@@ -700,8 +700,10 @@ function weatherForecastView() {
 // sample stays null in its own series — the other instrument may still draw at that instant.
 function alignedHistoryView(id, raw) {
   const supplied = raw;
+  // An expired ring can still describe a refused refresh, but it cannot anchor its peers.
   raw = raw.map(s => ({ ...s, h: expireHistSamples(s.h) }))
-    .filter((s) => s.h && !s.h.err && Array.isArray(s.h.v) && s.h.v.length);
+    .filter((s) => s.h && !s.h.err && Array.isArray(s.h.v) &&
+      s.h.v.length > (s.h.expired || 0));
   if (!raw.length) return null;
 
   const dt = raw[0].h.dt || 300;

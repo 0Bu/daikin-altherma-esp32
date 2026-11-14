@@ -410,7 +410,8 @@ leave the UI frozen indefinitely.
 The dashboard version and Settings Version row run the same check on the current screen. Inline
 progress follows that version; terminal failure is a persistent wrappable alert below the active
 header, dismissible only by its named close button. Repaint/navigation does not discard it.
-Connections continue updating while the directly painted firmware/board cards are held stable.
+Settings can refresh the firmware and board cards and repaint the version's progress indicator.
+Its persistent live region announces a change in progress text independently of those cards.
 
 | Phase | UI obligation |
 |---|---|
@@ -418,7 +419,7 @@ Connections continue updating while the directly painted firmware/board cards ar
 | Valid offer | Fetch optional generation-bound notes; show current/available version, channel and literal change list |
 | Confirmation | Explain signed installation, reboot and rollback; Cancel/backdrop/Escape sends no install request |
 | Install accepted | Bind generation/channel/version/application SHA and follow the immediate successor operation |
-| Download | Show real percentage inline in a polite live region; no repeated progress toasts |
+| Download | Show real percentage by the version and announce changed progress politely |
 | Busy/replaced offer | State retryable busy/check-again; preserve a complete terminal reason |
 | Completion | Wait boundedly for reboot and reload the page to obtain the new HTML/CSS/JavaScript |
 
@@ -586,6 +587,7 @@ Use shared components rather than near-identical render paths:
 | Accepted live save | Applied result; stay on view and refresh relevant facts |
 | No change | Close with No changes; no phantom reboot |
 | Invalid input/server 4xx | Inline reason where attributable; modal/draft remain |
+| Board draft stale (409) | Close the editor, refresh board status and ask the owner to reopen |
 | Persistence failure 500 | Explicit unsaved error; preserve draft, never claim reboot |
 | Busy 503 | Retryable device-busy wording; blame no field |
 | Transport failure | Unreachable/retrying; distinguish it from an answered refusal |

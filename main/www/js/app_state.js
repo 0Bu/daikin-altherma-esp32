@@ -73,9 +73,8 @@ const S = {
   // otaBusy, the compact OTA endpoint can still answer while the much larger /status builder is
   // deliberately refused. That is OTA activity, not proof that the device is unreachable.
   otaInstalling: false,
-  // Whether compact OTA progress or a short non-failure result is visible. It freezes the Settings
-  // rebuild — see renderSettings. Terminal failures use otaAlert instead, so their complete text
-  // never has to fit beside a version value.
+  // Whether compact OTA progress or a short non-failure result needs repainting after a Settings
+  // card rebuild. Terminal failures use otaAlert to keep their complete text readable.
   otaShown: false,
   // Terminal OTA failures are not progress suffixes: the device may return a complete actionable
   // sentence. It is mirrored into one alert-card slot per screen and remains until the user closes

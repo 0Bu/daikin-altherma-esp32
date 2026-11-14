@@ -434,6 +434,17 @@ assert.equal(h.histCacheKey("dhw_tank", "modbus"), "modbus:dhw_tank");
   assert.ok(h.expiredHistSlots(ageing) > 0,
     "a transient status refusal cannot put expired wall-clock samples back on screen");
   delete S.transportUnavailable;
+  S.hist.set("dhw_tank", { ...x10a, t0: time - 600 });
+  h.histPinToggle("dhw_tank", 0, "x10a");
+  S.hist.set("modbus:dhw_tank", { ...ageing, b0: null, v: [515], refreshFailed: true });
+  const mixed = h.historyView("dhw_tank");
+  assert.equal(mixed.b0, x10a.b0,
+    "a fully expired wall-only peer cannot replace a surviving boot-clock axis");
+  assert.equal(h.histPinIndex("dhw_tank", mixed), 0,
+    "an expired peer cannot hide a valid boot-bucket pin");
+  assert.deepEqual(Array.from(mixed.unavailable, s => s.source), ["modbus"]);
+  S.histPin.delete("dhw_tank");
+  S.hist.set("dhw_tank", x10a);
   S.status.ntp = ntp;
   S.status.uptime_s = uptime;
   historyResponse = old;
