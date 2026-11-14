@@ -508,7 +508,7 @@ function boardSettingsAvailable() {
 let boardDraftIdentity;
 function boardSettingsIdentity() {
   const { boot_id, board, env3 } = S.status;
-  return JSON.stringify([boot_id, board.preset_id, board.led_gpio, board.led_type, board.led_inverted,
+  return JSON.stringify([boot_id, board.config_revision, board.preset_id, board.led_gpio, board.led_type, board.led_inverted,
     board.btn_gpio, board.btn_active_low, board.pins_local, env3?.enabled, env3?.sda, env3?.scl]);
 }
 function openBoard() {

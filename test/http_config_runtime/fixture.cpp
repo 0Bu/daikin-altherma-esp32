@@ -352,6 +352,9 @@ bool config_save(const Config& requested) {
     fixture::last_save_outcome = config_save_transaction(fixture::current, requested, false, store);
     return fixture::last_save_outcome.result == ConfigSaveResult::Saved;
 }
+void http_boot_id(char (&out)[17]) {
+    std::memcpy(out, "0123456789abcdef", sizeof(out));
+}
 ConfigSaveResult config_save_link(const Config& requested) {
     ++fixture::saves;
     if (fixture::stale_attempts) {
@@ -1212,6 +1215,20 @@ void diagnostics_generation() {
     from_default();
     check(transition(true, 0U) == 1U, "a zero draw must still leave generation 0");
 }
+void board_draft_revision() {
+    const auto& board = route("board");
+    prepare(board);
+    const auto bound = changed(board.valid, "boot_id", R"("0123456789abcdef")");
+    const auto request = changed(bound.c_str(), "config_revision",
+                                 std::to_string(current.runtime_revision).c_str());
+    rejection(board, bound);
+    rejection(board, changed(request.c_str(), "config_revision", "1.5"));
+    rejection(board, changed(request.c_str(), "boot_id", R"("fedcba9876543210")"), "409 Conflict");
+    check(invoke(board.handler, request).status == "200 OK", "matching Board draft must save");
+    saves = reboots = service_writes = link_writes = 0;
+    durable_started = false;
+    rejection(board, request, "409 Conflict");
+}
 void room_history_lifetime() {
     reset();
     const auto send = [](Handler handler, const std::string& body) {
@@ -1297,6 +1314,7 @@ int main(int argc, char** argv) {
                           {"local_pin_reconcile", test::local_pin_reconcile},
                           {"query_flags", test::query_flags},
                           {"diagnostics_generation", test::diagnostics_generation},
+                          {"board_draft_revision", test::board_draft_revision},
                           {"room_history_lifetime", test::room_history_lifetime}};
     unsigned   ran     = 0;
     for (const auto& candidate : cases) {
@@ -1305,6 +1323,7 @@ int main(int argc, char** argv) {
                 if (std::strcmp(candidate.name, "factory_reset_reboot") == 0 ||
                     std::strcmp(candidate.name, "local_pin_reconcile") == 0 ||
                     std::strcmp(candidate.name, "diagnostics_generation") == 0 ||
+                    std::strcmp(candidate.name, "board_draft_revision") == 0 ||
                     std::strcmp(candidate.name, "room_history_lifetime") == 0)
                     continue;
             } else if (std::strcmp(argv[1], candidate.name) != 0)

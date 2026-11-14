@@ -1008,6 +1008,8 @@ function wireRestOfApp() {
       toast(t("env.err_pins"), "err"); return;
     }
     saveReboot("/set_board", {
+      ...(Number.isInteger(S.status.board.config_revision) && S.status.boot_id
+        ? { boot_id: S.status.boot_id, config_revision: S.status.board.config_revision } : {}),
       preset_id: $("bdPreset").value || "custom",
       // Type "None" is the wire's led_gpio = -1; the pin select keeps its last value so re-enabling
       // the indicator doesn't make the user find their pin again.

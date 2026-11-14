@@ -1011,6 +1011,15 @@ assert.match(dhwHtml, /vhist-legend-boost/, "DHW legend must display Boost indic
 assert.match(dhwHtml, /vhist-legend-bsh/, "DHW legend must display BSH indicator");
 assert.match(dhwHtml, /10 min/, "DHW legend must include Boost duration");
 assert.match(dhwHtml, /5 min/, "DHW legend must include BSH duration");
+{
+  const key = "modbus:smart_grid_mode";
+  const ring = S.hist.get(key);
+  S.hist.set(key, { ...ring, refreshFailed: true });
+  assert.match(h.histHtml("dhw_tank", "°C", "Tank"), /Boost aktiv · Modbus · hist\.retained/);
+  S.hist.set(key, { err: true, v: [] });
+  assert.match(h.histHtml("dhw_tank", "°C", "Tank"), /Boost aktiv · Modbus · Verlauf nicht verfügbar/);
+  S.hist.set(key, ring);
+}
 
 // Verify tooltips include active phases
 assert.doesNotMatch(h.scrubText(view, 0), /Boost|Heizstab/, "Sample 0 without active phases");

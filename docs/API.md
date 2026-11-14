@@ -580,6 +580,9 @@ real pin for the part or gives that pin to another board part ([Detection](ARCHI
 Pin claims must not
 collide with X10A, the other onboard part or ENV III. A board identity statement can save with no reboot; changing task-owned pins/accessory reboots.
 Switching away from M5Stack retires ENV III in the same atomic save.
+The dashboard sends `boot_id` and `board.config_revision` from its accepted `/status` as
+`boot_id` and `config_revision`. This optional pair rejects an older boot or configuration with
+409 before probing pins or saving. Clients that omit both retain their existing request semantics.
 
 `POST /set_env3` is the compatibility route (`enabled`, `sda`, `scl`, all optional). Both board routes
 share the same preflight: enabling new pins probes SHT30/QMP6988 (422 if absent, 503 if busy), enabling

@@ -1194,13 +1194,11 @@ function alignAuxSample(view, h, i) {
 
 function tankAuxHistories() {
   return [histCacheKey("smart_grid_mode", "modbus"), "smart_grid_mode", "bsh_state",
-    histCacheKey("bsh_state", "modbus")].map(key => {
-    const h = expireHistSamples(S.hist.get(key));
-    return h && !h.err && h.v?.length ? h : null;
-  });
+    histCacheKey("bsh_state", "modbus")].map(key => expireHistSamples(S.hist.get(key)));
 }
 
-const tankAuxRevision = histories => histories?.map(h => h ? `${h.gen}:${h.expired || 0}` : "").join(",");
+const tankAuxRevision = histories => histories?.map(h =>
+  h ? `${h.gen}:${h.expired || 0}:${!!h.refreshFailed}:${!!h.err}` : "").join(",");
 
 function dhwAuxPhases(view) {
   if (!view?.tankAux) return null;
@@ -1224,7 +1222,14 @@ function dhwAuxPhases(view) {
       bshCount++;
     }
   }
-  return { boost, bsh, boostCount, bshCount, dt: view.dt || 300 };
+  const sourceNames = ["Modbus", "X10A", "X10A", "Modbus"];
+  const phaseNames = ["hist.boost_active", "hist.boost_active", "hist.heater_active", "hist.heater_active"];
+  const sourceNotes = view.tankAux.flatMap((h, i) => {
+    if (!h?.err && !h?.refreshFailed) return [];
+    const status = h.v.some(v => v != null) ? "hist.retained" : "hist.err";
+    return [`${t(phaseNames[i])} · ${sourceNames[i]} · ${t(status)}`];
+  });
+  return { boost, bsh, boostCount, bshCount, sourceNotes, dt: view.dt || 300 };
 }
 
 function histEmptyHtml(cached, wrap) {
@@ -1387,6 +1392,7 @@ function histHtml(id, unit, name, source = "") {
         ` <small class="mono num">(${histDuration(aux.bshCount * aux.dt)})</small></span>`
       );
     }
+    for (const note of aux.sourceNotes) legendItems.push(`<span class="vhist-source">${esc(note)}</span>`);
   }
   const legend = legendItems.length
     ? `<div class="vhist-legend">${legendItems.join("")}</div>`

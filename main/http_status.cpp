@@ -307,6 +307,10 @@ template <typename JsonOut> static void append_json_uint(JsonOut& out, uint64_t 
 // uptime is already greater than the previous sample. Shared by streamed HTTP and MCP serializers.
 static const uint64_t s_status_boot_id = (static_cast<uint64_t>(esp_random()) << 32) | esp_random();
 
+void http_boot_id(char (&out)[17]) {
+    std::snprintf(out, sizeof(out), "%016llx", static_cast<unsigned long long>(s_status_boot_id));
+}
+
 template <typename JsonOut>
 static void append_status_json(JsonOut& j, bool redact) {
     const Config& c = config();
@@ -321,8 +325,7 @@ static void append_status_json(JsonOut& j, bool redact) {
     j += ",";
     j += "\"uptime_s\":" + std::to_string(esp_timer_get_time() / 1000000) + ",";
     char boot_id[17];
-    std::snprintf(boot_id, sizeof(boot_id), "%016llx",
-                  static_cast<unsigned long long>(s_status_boot_id));
+    http_boot_id(boot_id);
     j += "\"boot_id\":";
     json_append_quoted(j, boot_id);
     j += ",";
@@ -371,7 +374,9 @@ static void append_status_json(JsonOut& j, bool redact) {
         // a time and takes a bare string literal with no std::string wrapper at all, so it drops
         // the allocations too. Same shape below for the presets, and worth keeping if this block
         // grows again.
-        j += "\"board\":{\"led_gpio\":";
+        j += "\"board\":{\"config_revision\":";
+        append_json_uint(j, c.runtime_revision);
+        j += ",\"led_gpio\":";
         j += std::to_string(c.led_gpio);
         j += ",\"led_type\":";
         j += std::to_string(c.led_type);
@@ -2483,8 +2488,7 @@ static esp_err_t h_history(httpd_req_t* req) {
     j += ",\"epoch\":";
     j += std::to_string(history_snapshot_epoch);
     char boot_id[17];
-    std::snprintf(boot_id, sizeof(boot_id), "%016llx",
-                  static_cast<unsigned long long>(s_status_boot_id));
+    http_boot_id(boot_id);
     j += ",\"boot_id\":";
     json_append_quoted(j, boot_id);
     j += ",\"label\":";

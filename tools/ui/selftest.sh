@@ -95,7 +95,7 @@ echo "ui selftest: config warning and both stale-evaluation render failures are 
 # Re-seed the historical ENV III failure on its new owning Board Hardware dialog: Cancel and an
 # accepted atomic Save route through an undefined close helper. The behavioral matrix must fail on
 # the first real action, not merely parse the bundle.
-sed 's/function closeBoard() { closePopup("boardModal"); }/function closeBoard() { missingClosePopup("boardModal"); }/' \
+sed '/^function closeBoard()/s/closePopup("boardModal")/missingClosePopup("boardModal")/' \
   "$tmp/main/www/js/settings.js" > "$tmp/main/www/js/settings.js.mutated"
 mv "$tmp/main/www/js/settings.js.mutated" "$tmp/main/www/js/settings.js"
 
