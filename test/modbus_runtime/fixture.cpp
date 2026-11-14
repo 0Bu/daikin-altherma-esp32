@@ -808,6 +808,7 @@ struct Peer {
     std::atomic<bool>         batch_exception{false};
     std::atomic<int>          probe_exception{-1};
     std::atomic<bool>         all_exceptions{false};
+    std::atomic<bool>         all_unavailable{false};
     std::atomic<bool>         only_pressure{false};
     std::atomic<bool>         space_route_exception{false};
     std::atomic<bool>         compressor_exception{false};
@@ -893,6 +894,7 @@ struct Peer {
                     for (uint16_t i = 0; i < qty; ++i) {
                         const uint16_t off = addr + i + 1;
                         uint16_t       w   = off == 44 ? outdoor.load() : 1;
+                        if (all_unavailable) w = MB_UNAVAILABLE;
                         {
                             std::lock_guard<std::mutex> lock(response_mutex);
                             for (const auto& word : words)
@@ -1363,6 +1365,26 @@ void probe_resolved_peer_reconnect() {
     }
     {
         Peer peer(open(replacement_ipv4, replacement), std::vector<RegisterWord>{});
+        peer.all_unavailable = true;
+        const auto attempts  = adapter::history_bind_attempts;
+        poll_once();
+        REQUIRE(mb_status().connected && peer.requests > 0);
+        REQUIRE(current_compressor() == ModbusCompressor::Unknown);
+        REQUIRE(adapter::history_bind_attempts == attempts);
+        REQUIRE(adapter::history_generation == first_history_generation);
+        REQUIRE(adapter::mqtt_peer_cleanups == 0 && adapter::heating_curve_peer_resets == 0);
+        disconnect(peer);
+    }
+    {
+        Peer peer(open(first_ipv4, first), {{MbFunc::ReadInput, 49, 1234}});
+        poll_once();
+        REQUIRE(adapter::history_generation == first_history_generation);
+        REQUIRE(s_req_history_generation == first_history_generation);
+        REQUIRE(adapter::mqtt_peer_cleanups == 0 && adapter::heating_curve_peer_resets == 0);
+        disconnect(peer);
+    }
+    {
+        Peer peer(open(replacement_ipv4, replacement), std::vector<RegisterWord>{});
         REQUIRE(adapter::history_generation == first_history_generation);
         REQUIRE(s_req_history_generation == 0);
         peer.all_exceptions  = true;
@@ -1442,7 +1464,7 @@ void probe_resolved_peer_reconnect() {
         (void)snapshot_rows(true, &cache_history_generation);
         REQUIRE(cache_history_generation == 0);
     }
-    REQUIRE(s_target_generation == generation && sdk::mdns_a_calls == 5);
+    REQUIRE(s_target_generation == generation && sdk::mdns_a_calls == 7);
     close_sock();
 }
 void probe_only_replacement_retires_predecessor() {

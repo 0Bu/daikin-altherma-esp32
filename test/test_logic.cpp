@@ -8117,6 +8117,17 @@ static void test_homehub_map() {
     CHECK(HOMEHUB_HISTORIES[HOMEHUB_HISTORY_COUNT - 1].event);
     CHECK(!HOMEHUB_HISTORIES[HOMEHUB_HISTORY_COUNT - 1].has_x10a);
     CHECK(homehub_history_index("valve_dhw") >= 0);
+    CHECK(homehub_history_state_sample("0", '1') == 0);
+    CHECK(homehub_history_state_sample("1", '1') == 10);
+    CHECK(homehub_history_state_sample("2", '1') == HISTORY_NO_READING);
+    CHECK(homehub_history_state_sample("2", '3') == 20);
+    CHECK(homehub_history_state_sample("3", '3') == 30);
+    CHECK(homehub_history_state_sample("4", '3') == HISTORY_NO_READING);
+    CHECK(homehub_history_state_sample("-1", '3') == HISTORY_NO_READING);
+    CHECK(homehub_history_state_sample("", '1') == HISTORY_NO_READING);
+    CHECK(altherma4_water_pressure_word_valid(0));
+    CHECK(altherma4_water_pressure_word_valid(600));
+    CHECK(!altherma4_water_pressure_word_valid(601));
     CHECK(homehub_history_index("quiet_state") >= 0);
     CHECK(homehub_history_index("disinfection_state") >= 0);
     CHECK(std::string(homehub_history_for(33)) == "disinfection_state");

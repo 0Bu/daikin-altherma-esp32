@@ -369,7 +369,7 @@ function liveData() {
   }
   // The raw row can belong to an older full sweep. Only the fresh /values witness can drive
   // activity or contradict the current X10A speed.
-  d.mbCompressorOn = mbLive() ? S.modbusCompressorRunning ?? null : null;
+  d.mbCompressorOn = S.modbusCompressorRunning ?? null;
   d.compressorOn = d.rps != null ? d.rps > 0 : d.mbCompressorOn;
   // X10A reports the hydronic mode and must supply the route in Cooling + DHW and pure DHW.
   // A current X10A tank route also withholds pure Cooling when it contradicts the mode.

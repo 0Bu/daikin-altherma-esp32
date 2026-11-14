@@ -970,7 +970,6 @@ function schematicOperationMode() {
                                               (x.reg !== 0x10 && /^operation mode$/i.test(x.label || "")));
     return operationModeText(row?.value);
   }
-  if (!mbLive()) return null;
   return operationModeFromFlags(mbBool(52), mbBool(53));
 }
 // Localise the static markup in index.html: elements tagged data-i18n get their text set from the

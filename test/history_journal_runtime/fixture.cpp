@@ -7,6 +7,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <utility>
 #ifndef HISTORY_PRODUCTION_SOURCE
 #error "Bind complete production main/history.cpp"
@@ -779,6 +780,24 @@ void modbus_invalid_valve_does_not_replace_sample() {
     history_record_modbus(&valve, 1, generation);
     require(P().mb_ring[index].pending == 10,
             "invalid_valve_word_preserves_the_last_known_state_in_bucket");
+    for (const auto& [offset, id, good, invalid, pending] : {
+             std::tuple{32, "bsh_state", "0", "2", 0},
+             std::tuple{33, "disinfection_state", "0", "2", 0},
+             std::tuple{56, "smart_grid_mode", "2", "4", 20},
+         }) {
+        const auto  lane = static_cast<size_t>(homehub_history_index(id));
+        CachedValue row;
+        row.off               = offset;
+        row.modbus_definition = def::homehub_definition_id(*def::homehub_find(offset));
+        row.value             = good;
+        history_record_modbus(&row, 1, generation);
+        row.value = invalid;
+        require(history_modbus_samples(&row, 1)[lane] == HISTORY_NO_READING,
+                "out_of_domain_word_is_not_a_categorical_sample");
+        history_record_modbus(&row, 1, generation);
+        require(P().mb_ring[lane].pending == pending,
+                "out_of_domain_word_preserves_the_last_known_state_in_bucket");
+    }
 }
 enum class ModbusTransport {
     Cold,

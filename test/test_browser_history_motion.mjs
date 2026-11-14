@@ -133,18 +133,21 @@ async function installHooks(page, mutation) {
     let eager, detach, staleText;
     if (mutation === "history-eager") {
       const code = original.descAccordion.toString();
-      if (!code.includes("open && trendId")) throw new Error("history mutation target missing");
-      eager = window.eval("(" + code.replace("open && trendId", "trendId") + ")");
+      const target = /\bopen\s*&&\s*trendId\b/;
+      if (!target.test(code)) throw new Error("history mutation target missing");
+      eager = window.eval("(" + code.replace(target, "trendId") + ")");
     }
     if (mutation === "history-detach") {
       const code = original.replaceHistoryHtml.toString();
-      if (!code.includes("if (textOnly) {")) throw new Error("history detach mutation target missing");
-      detach = window.eval("(" + code.replace("if (textOnly) {", "if (false && textOnly) {") + ")");
+      const target = /\bif\s*\(\s*textOnly\s*\)\s*\{/;
+      if (!target.test(code)) throw new Error("history detach mutation target missing");
+      detach = window.eval("(" + code.replace(target, "if (false && textOnly) {") + ")");
     }
     if (mutation === "history-text-stale") {
       const code = original.replaceHistoryHtml.toString();
-      if (!code.includes("node.nodeValue = value;")) throw new Error("history text mutation target missing");
-      staleText = window.eval("(" + code.replace("node.nodeValue = value;", "void value;") + ")");
+      const target = /\bnode\.nodeValue\s*=\s*value\s*;?/;
+      if (!target.test(code)) throw new Error("history text mutation target missing");
+      staleText = window.eval("(" + code.replace(target, "void value;") + ")");
     }
     descAccordion = (...args) => {
       const previous = window.__motionClosed;

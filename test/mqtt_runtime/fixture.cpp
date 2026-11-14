@@ -513,6 +513,28 @@ void tls_reconnect_preserves_client_and_waits_for_homehub() {
     } catch (const StopTask&) {}
 }
 
+void tls_reconnect_after_lost_disconnect() {
+    adapter::cfg.mqtt_uri = "mqtts://host-witness";
+    daik::mqtt_ha_start();
+    int disconnected_at = 0;
+    sdk::on_delay       = [&](TickType_t) {
+        if (!disconnected_at && daik::s_connected.load()) {
+            disconnected_at = sdk::delays;
+            sdk_mqtt_state  = MQTT_CLIENT_STATE_WAITING_RECONNECT;
+        }
+        if (sdk::reconnect_calls) {
+            const bool same_client =
+                sdk::stop_calls == 0 && sdk::start_calls == 1 && daik::s_connected.load();
+            require(same_client, "LOST_DISCONNECT_RECOVERS_SAME_CLIENT");
+            throw StopTask{};
+        }
+        require(sdk::delays < 45, "LOST_DISCONNECT_RECOVERS_WITHIN_DEADLINE");
+    };
+    try {
+        sdk::task_fn(nullptr);
+    } catch (const StopTask&) {}
+}
+
 void ref_oom_recovery() {
     initial_config();
     feed("room", R"({"temperature":20,"time":1700000100})");
@@ -4127,6 +4149,23 @@ void source_cleanup_lost_sdk_ack() {
             "SOURCE_ACK_TIMEOUT_DOES_NOT_ADVANCE_OR_ENQUEUE_DUPLICATE");
 }
 
+void retirement_lost_sdk_ack() {
+    cleanup_fixture();
+    const auto owner = daik::MqttRetirementOwner::LegacyProbe;
+    require(!daik::retire_exact_topic(owner, daik::s_legacy_state) &&
+                daik::s_retirement_delivery.in_flight(),
+            "RETIREMENT_ACK_FIXTURE_QUEUES_ONE_TOMBSTONE");
+    sdk::ticks += 59999;
+    require(!daik::mqtt_cleanup_evidence_recovery_step(1),
+            "RETIREMENT_ACK_TIMEOUT_CANNOT_RESTART_EARLY");
+    ++sdk::ticks;
+    require(daik::mqtt_cleanup_evidence_recovery_step(1) && !daik::s_client_running &&
+                !daik::s_retirement_delivery.in_flight(),
+            "RETIREMENT_ACK_TIMEOUT_JOINS_TRANSPORT_BEFORE_RETRY");
+    require(daik::s_retirement_delivery.owner() == owner && sdk::publish_calls == 1,
+            "RETIREMENT_ACK_TIMEOUT_PRESERVES_EXACT_TOPIC_OWNER");
+}
+
 void retirement_after_gate_withdrawal() {
     cleanup_fixture();
     const std::string prior = "altherma3_r_erga";
@@ -4564,6 +4603,8 @@ int main(int argc, char** argv) {
             retirement_early_ack();
         else if (std::strcmp(scenario, "source_cleanup_lost_sdk_ack") == 0)
             source_cleanup_lost_sdk_ack();
+        else if (std::strcmp(scenario, "retirement_lost_sdk_ack") == 0)
+            retirement_lost_sdk_ack();
         else if (std::strcmp(scenario, "retirement_after_gate_withdrawal") == 0)
             retirement_after_gate_withdrawal();
         else if (std::strcmp(scenario, "journal_reboot_mid_retirement") == 0)
@@ -4610,6 +4651,8 @@ int main(int argc, char** argv) {
             tls_setup_recovery_waits_for_homehub();
         else if (std::strcmp(scenario, "tls_reconnect_preserves_client_and_waits_for_homehub") == 0)
             tls_reconnect_preserves_client_and_waits_for_homehub();
+        else if (std::strcmp(scenario, "tls_reconnect_after_lost_disconnect") == 0)
+            tls_reconnect_after_lost_disconnect();
         else if (std::strcmp(scenario, "ref_oom_recovery") == 0)
             ref_oom_recovery();
         else if (std::strcmp(scenario, "circulation_oom_recovery") == 0)

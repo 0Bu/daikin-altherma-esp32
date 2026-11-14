@@ -998,11 +998,13 @@ const mbBinaryValue = (r) => {
 // Legacy frames can describe holding 9 as binary Quiet activity. Its map and meaning are
 // unverified, so it cannot supply a live state.
 const mbBool = (off) => {
-  if (off === 9 || !mbLive()) return null;
+  if (off === 9) return null;
+  if (S.modbusActivity && (off === 52 || off === 53))
+    return off === 52 ? S.modbusActivity.dhw : S.modbusActivity.space;
+  if (!mbLive()) return null;
   const mb = S.status.modbus;
   // Prefer the current values frame before older firmware's status or raw cache.
   if (off === 52 || off === 53) {
-    if (S.modbusActivity) return off === 52 ? S.modbusActivity.dhw : S.modbusActivity.space;
     if (off === 52 && typeof mb.dhw_operation_known === "boolean")
       return mb.dhw_operation_known ? mb.dhw_operation_active : null;
   }

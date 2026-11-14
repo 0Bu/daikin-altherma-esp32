@@ -565,9 +565,9 @@ function renderApp() {
   // the HomeHub is live, the snapshot is still built — liveData() fills what the second source can
   // supply and blanks the rest (mbFallbackFor), so the drawing degrades to the handful of readings
   // that ARE being measured instead of going blank while data is arriving.
-  const modbusLive = mbLive() && (S.modbusCompressorRunning != null ||
+  const modbusLive = S.modbusCompressorRunning != null ||
     S.modbusActivity?.dhw != null || S.modbusActivity?.space != null ||
-    S._modbus?.some(row => row?.value != null));
+    (mbLive() && S._modbus?.some(row => row?.value != null));
   S.live = (hp.connected && (S._values || []).length > 0) || (x10aDown() && modbusLive)
     ? liveData() : null;
   if (S.transportUnavailable) S.live = null;

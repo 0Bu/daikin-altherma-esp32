@@ -1514,10 +1514,10 @@ static void close_modbus_buckets_locked(uint32_t bucket) {
 
 static __attribute__((noinline)) HistorySample modbus_history_sample(const std::string&    value,
                                                                      def::HomeHubValueKind kind) {
-    if (kind == def::HomeHubValueKind::ThreeWayValve) {
-        if (value.size() != 1 || (value[0] != '0' && value[0] != '1')) return HISTORY_NO_READING;
-        return static_cast<HistorySample>((value[0] - '0') * 10);
-    }
+    if (kind == def::HomeHubValueKind::Binary || kind == def::HomeHubValueKind::ThreeWayValve)
+        return logic::homehub_history_state_sample(value, '1');
+    if (kind == def::HomeHubValueKind::SmartGridMode)
+        return logic::homehub_history_state_sample(value, '3');
     int tenths = 0;
     return value_tenths(value, tenths) ? static_cast<HistorySample>(tenths) : HISTORY_NO_READING;
 }

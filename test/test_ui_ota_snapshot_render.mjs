@@ -234,6 +234,22 @@ async function startup(h, order) {
 
 {
   const h = harness();
+  const frame = status();
+  h.routes.set("/status", async () => response({ ...frame, hp: { connected: false },
+    modbus: { ...frame.modbus, connected: false } }));
+  h.routes.set("/values", async () => response({ values: [],
+    modbus_compressor_running: true, modbus_dhw_running: true, modbus_space_running: false }));
+  await h.refreshStatus(false);
+  await h.refreshValues();
+  assert.equal(h.S.status.modbus.connected, false);
+  assert.equal(h.S.live.compressorOn, true);
+  assert.equal(observe(h).headline, "Hot water",
+    "current activity can arrive before the next status poll reports the reconnected HomeHub");
+  assert.equal(observe(h).lwt, "—", "activity alone does not supply cached temperatures");
+}
+
+{
+  const h = harness();
   h.routes.set("/status", async () => response({ ...status(), hp: { connected: false } }));
   h.routes.set("/values", async () => response({ values: [], modbus: values().modbus,
     modbus_history_epoch: 1, modbus_history_boot_id: "boot-a" }));

@@ -566,9 +566,9 @@ static std::atomic<bool> s_transport_pause_requested{false};
 // Raised by the OTA lease before its pause request; consumed by the stop that it precedes.
 static std::atomic<bool> s_transport_pause_withdraws_online{false};
 static std::atomic<bool> s_transport_paused{false};
-static std::atomic<bool> s_transport_uses_tls{false};
-static std::atomic<bool> s_transport_start_observed{false};
-static int64_t           s_transport_start_watch_us = 0; // mqtt_task only
+static std::atomic<bool>    s_transport_uses_tls{false};
+static std::atomic<int64_t> s_tls_heap_priority_until_us{0};
+static int64_t              s_transport_start_watch_us = 0; // mqtt_task only
 static std::atomic<bool> s_client_running{false};
 static_assert(std::atomic<bool>::is_always_lock_free,
               "MQTT network quiesce acknowledgement must remain allocation- and lock-free");
@@ -661,6 +661,7 @@ static constexpr int64_t RETIRED_TOPIC_PROBE_US = 5LL * 1000 * 1000;
 static constexpr int64_t    SOURCE_CLEANUP_ACK_TIMEOUT_US = 60LL * 1000 * 1000;
 static constexpr int64_t    TRANSPORT_START_WATCH_US      = 20LL * 1000 * 1000;
 static constexpr int64_t    TRANSPORT_RECONNECT_DELAY_US  = 10LL * 1000 * 1000;
+static constexpr int64_t    TRANSPORT_HEAP_PRIORITY_US    = 15LL * 1000 * 1000;
 static std::atomic<int64_t> s_tls_reconnect_at_us{0};
 // This is a byte cap, not a pre-allocation. The source queue contributes one small tombstone; the
 // remaining headroom covers the four bounded retained probes, availability and the bounded crash
@@ -675,6 +676,12 @@ static void set_status(bool connected, const char* err) {
     s_status.connected = connected;
     if (err) s_error = err;
     else if (connected) s_error = "";
+}
+
+static void mark_transport_paused() {
+    const auto until = esp_timer_get_time() + TRANSPORT_HEAP_PRIORITY_US;
+    s_tls_heap_priority_until_us.store(until, std::memory_order_release);
+    s_transport_paused.store(true, std::memory_order_release);
 }
 
 // esp_mqtt_client_stop() joins the producer task and then deletes every queued item without a
@@ -728,7 +735,7 @@ static __attribute__((noinline)) void mqtt_transport_pause_if_requested() {
         source_cleanup_outbox_cleared_after_transport_stop();
         s_client_running.store(false, std::memory_order_release);
         s_transport_connecting.store(false, std::memory_order_release);
-        s_transport_paused.store(true, std::memory_order_release);
+        mark_transport_paused();
         s_connected.store(false, std::memory_order_release);
         set_status(false, "paused for network heap");
         diag_printf("mqtt: transport paused for network heap\n");
@@ -741,11 +748,12 @@ static __attribute__((noinline)) void mqtt_transport_pause_if_requested() {
 // event was lost. Stop/join the producer and clear its outbox before retrying the same idempotent
 // step; this preserves the one-cleanup-item bound instead of guessing and queuing a duplicate.
 static __attribute__((noinline)) bool mqtt_cleanup_evidence_recovery_step(int delay_s) {
-    const bool deadline = s_source_cleanup.in_flight() && s_source_cleanup_ack_deadline_us &&
+    const bool deadline = (s_source_cleanup.in_flight() || s_retirement_delivery.in_flight()) &&
+                          s_source_cleanup_ack_deadline_us &&
                           esp_timer_get_time() >= s_source_cleanup_ack_deadline_us;
     if (deadline) service_source_cleanup_evidence();
     if (!s_source_cleanup_evidence_lost.load(std::memory_order_acquire) &&
-        !(deadline && s_source_cleanup.in_flight()))
+        !(deadline && (s_source_cleanup.in_flight() || s_retirement_delivery.in_flight())))
         return false;
     if (!s_client_running.load(std::memory_order_acquire) || !s_client) {
         source_cleanup_outbox_cleared_after_transport_stop();
@@ -758,7 +766,7 @@ static __attribute__((noinline)) bool mqtt_cleanup_evidence_recovery_step(int de
         source_cleanup_outbox_cleared_after_transport_stop();
         s_client_running.store(false, std::memory_order_release);
         s_transport_connecting.store(false, std::memory_order_release);
-        s_transport_paused.store(true, std::memory_order_release);
+        mark_transport_paused();
         s_connected.store(false, std::memory_order_release);
         set_status(false, "restarting after MQTT cleanup evidence loss");
         diag_printf("mqtt: cleanup delivery evidence unavailable — transport stopped for retry\n");
@@ -838,6 +846,8 @@ static __attribute__((noinline)) bool mqtt_transport_resume_step(MqttTransportRe
     if (mqtt_transport_tls_configured()) {
         s_transport_connecting.store(true);
         if (!mb_network_quiesced()) {
+            s_transport_connecting.store(false, std::memory_order_release);
+            state.stable_samples = 0;
             vTaskDelay(pdMS_TO_TICKS(delay_s * 1000));
             return false;
         }
@@ -942,6 +952,7 @@ static bool retire_exact_topic(MqttRetirementOwner owner, const std::string& top
     const int id = mqtt_enqueue_id(topic, "", 0, 1, 1);
     if (id >= 0) {
         s_retirement_delivery.queued(owner, epoch, id);
+        s_source_cleanup_ack_deadline_us = esp_timer_get_time() + SOURCE_CLEANUP_ACK_TIMEOUT_US;
         service_source_cleanup_evidence();
     }
     return s_retirement_delivery.take_confirmed(owner);
@@ -1576,7 +1587,10 @@ static void apply_source_cleanup_completion(const MqttCleanupCompletion& complet
 static void service_source_cleanup_evidence() {
     MqttCleanupDeliveryEvidence evidence;
     while (s_source_cleanup_evidence.pop(evidence)) {
-        if (s_retirement_delivery.evidence(evidence)) continue;
+        if (s_retirement_delivery.evidence(evidence)) {
+            s_source_cleanup_ack_deadline_us = 0;
+            continue;
+        }
         if (evidence.outcome == MqttCleanupDeliveryOutcome::Published) {
             if (s_source_cleanup.acknowledge(evidence)) {
                 s_source_cleanup_ack_deadline_us = 0;
@@ -3141,7 +3155,6 @@ static __attribute__((noinline)) void service_reference_frames(const Config& c) 
 // task watchdog fires. Publish the activity and return; the network owner waits for the publisher
 // task to stop the complete client and acknowledge `mqtt_transport_network_quiesced()`.
 static void mqtt_transport_before_connect() {
-    s_transport_start_observed.store(true, std::memory_order_release);
     s_transport_connecting.store(true, std::memory_order_release);
 }
 
@@ -3155,7 +3168,6 @@ static void on_mqtt(void*, esp_event_base_t, int32_t id, void* data) {
         mqtt_transport_before_connect();
         break;
     case MQTT_EVENT_CONNECTED:
-        s_transport_start_observed.store(true, std::memory_order_release);
         s_tls_reconnect_at_us.store(0, std::memory_order_release);
         s_discovery_owner_admitted_session.store(0, std::memory_order_release);
         s_discovery_owner_rx_active = false;
@@ -3313,7 +3325,7 @@ static void mqtt_task(void*) {
     // Encrypted transport starts through the same admission as a resume. Claim its allocator
     // before the SDK task can allocate its transport list. Plain MQTT retains its ordinary start.
     if (mqtt_transport_tls_configured()) {
-        s_transport_paused.store(true, std::memory_order_release);
+        mark_transport_paused();
     } else if (!start_current_client()) {
         transport_resume.wait_s = transport_resume.backoff_s;
     }
@@ -3330,20 +3342,24 @@ static void mqtt_task(void*) {
         // still reports the deepest frame the task has ever built.
         stack_watch_sample(StackWatch::Mqtt);
         const int delay_s = POLL_INTERVAL_S;
-        // The pinned SDK can exit before emitting BEFORE_CONNECT when transport allocation fails.
-        // DISCONNECTED here means its task reached the epilogue and emptied the outbox. A normal
-        // broker disconnect uses WAITING_RECONNECT instead and retains its outbox identity.
-        if (s_transport_start_observed.load(std::memory_order_acquire)) {
-            s_transport_start_watch_us = 0;
-        } else if (s_transport_start_watch_us &&
-                   esp_timer_get_time() >= s_transport_start_watch_us) {
-            const auto state = esp_mqtt_client_get_state(s_client);
-            if (state != MQTT_CLIENT_STATE_NOT_STARTED) s_transport_start_watch_us = 0;
-            if (state == MQTT_CLIENT_STATE_DISCONNECTED) {
+        // A transport event can be lost if the SDK cannot allocate its copy. Sample the
+        // SDK at a bounded cadence, including after a previously confirmed connection.
+        if (s_transport_start_watch_us && esp_timer_get_time() >= s_transport_start_watch_us) {
+            s_transport_start_watch_us = esp_timer_get_time() + TRANSPORT_START_WATCH_US;
+            const auto state           = esp_mqtt_client_get_state(s_client);
+            if (state == MQTT_CLIENT_STATE_WAITING_RECONNECT) {
+                if (s_connected.load(std::memory_order_acquire) ||
+                    s_transport_connecting.load(std::memory_order_acquire) ||
+                    (mqtt_transport_tls_configured() &&
+                     !s_tls_reconnect_at_us.load(std::memory_order_acquire)))
+                    on_mqtt(nullptr, nullptr, MQTT_EVENT_DISCONNECTED, nullptr);
+            } else if (state == MQTT_CLIENT_STATE_DISCONNECTED ||
+                       (state == MQTT_CLIENT_STATE_CONNECTED && !s_connected.load() &&
+                        esp_mqtt_client_stop(s_client) == ESP_OK)) {
                 source_cleanup_outbox_cleared_after_transport_stop();
                 s_client_running.store(false, std::memory_order_release);
                 s_transport_connecting.store(false, std::memory_order_release);
-                s_transport_paused.store(true, std::memory_order_release);
+                mark_transport_paused();
                 transport_resume.wait_s = transport_resume.backoff_s;
                 set_status(false, "transport setup failed");
             }
@@ -3374,12 +3390,15 @@ static void mqtt_task(void*) {
             s_transport_connecting.store(true);
             if (mb_network_quiesced() && mqtt_tls_heap_ready()) {
                 s_tls_reconnect_at_us.store(0, std::memory_order_release);
-                if (esp_mqtt_client_reconnect(s_client) != ESP_OK) {
+                if (esp_mqtt_client_reconnect(s_client) == ESP_OK) {
+                    s_transport_start_watch_us = esp_timer_get_time() + TRANSPORT_START_WATCH_US;
+                } else {
                     s_transport_connecting.store(false, std::memory_order_release);
                     s_tls_reconnect_at_us.store(esp_timer_get_time() + TRANSPORT_RECONNECT_DELAY_US,
                                                 std::memory_order_release);
                 }
-            }
+            } else
+                s_transport_connecting.store(false, std::memory_order_release);
         }
         {
         MqttPublishActivity publish_activity;
@@ -3741,7 +3760,6 @@ static bool build_client() {
 static esp_err_t start_client_transport() {
     if (mqtt_transport_tls_configured())
         s_transport_connecting.store(true, std::memory_order_release);
-    s_transport_start_observed.store(false, std::memory_order_release);
     const auto rc = esp_mqtt_client_start(s_client);
     if (rc == ESP_OK)
         s_transport_start_watch_us = esp_timer_get_time() + TRANSPORT_START_WATCH_US;
@@ -3769,7 +3787,7 @@ static bool start_current_client() {
     set_status(false, "client start failed");
     diag_printf("mqtt: client start failed (%s)\n", esp_err_to_name(rc));
     // No task/session started. Keep this initialized client for the task's bounded resume retry.
-    s_transport_paused.store(true, std::memory_order_release);
+    mark_transport_paused();
     s_client_running.store(false, std::memory_order_release);
     return false;
 }
@@ -3916,9 +3934,10 @@ bool mqtt_transport_network_quiesced() {
 }
 
 bool mqtt_tls_resume_pending() noexcept {
-    const bool blocked =
-        s_transport_paused.load(std::memory_order_acquire) || s_transport_connecting.load();
-    return s_transport_uses_tls.load(std::memory_order_acquire) && blocked;
+    if (!s_transport_uses_tls.load(std::memory_order_acquire)) return false;
+    return s_transport_connecting.load(std::memory_order_acquire) ||
+           (s_transport_paused.load(std::memory_order_acquire) &&
+            esp_timer_get_time() < s_tls_heap_priority_until_us.load(std::memory_order_acquire));
 }
 
 bool mqtt_tls_resume_short_of_heap() noexcept {

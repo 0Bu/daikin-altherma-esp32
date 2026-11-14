@@ -1198,7 +1198,7 @@ static bool mb_poll_once(uint32_t cycle_target_generation, bool allow_reconnect)
         bool             space_route_active   = false;
         bool             heating_mode_known   = false;
         bool             heating_mode_active  = false;
-        bool             received_data        = false;
+        bool             usable_ordinary      = false;
         ModbusCompressor compressor           = ModbusCompressor::Unknown;
         int64_t          plant_gate_ms        = -1;
         int64_t          space_route_ms       = -1;
@@ -1223,7 +1223,12 @@ static bool mb_poll_once(uint32_t cycle_target_generation, bool allow_reconnect)
     // One register word: gates/fast context always, a cache row only on a full cycle. Gates are
     // read from the SAME word the row is built from — they are not a second read and cannot
     // disagree with it.
-    const auto take_row = [&](const def::HomeHubReg& r, uint16_t raw, int64_t observed_ms) {
+    const auto take_row = [&](const def::HomeHubReg& r, uint16_t raw, int64_t observed_ms,
+                              bool ordinary = true) {
+        if (ordinary && !mb_is_special(raw) &&
+            (r.offset != logic::MODBUS_PROBE_REGISTER ||
+             logic::altherma4_water_pressure_word_valid(raw)))
+            gates.usable_ordinary = true;
         if (r.space == MbFunc::ReadInput && r.offset == 31 && raw <= 1) {
             gates.compressor    = raw == 1 ? ModbusCompressor::On : ModbusCompressor::Off;
             gates.compressor_ms = observed_ms;
@@ -1348,7 +1353,6 @@ static bool mb_poll_once(uint32_t cycle_target_generation, bool allow_reconnect)
                 link_broken = true;
                 return;
             }
-            gates.received_data = true;
             take_row(r, raw, io.observed_ms);
         }
     };
@@ -1406,7 +1410,6 @@ static bool mb_poll_once(uint32_t cycle_target_generation, bool allow_reconnect)
                 link_broken = true;
                 break;
             }
-            gates.received_data = true;
             take_row(r, raw, io.observed_ms);
         }
     }
@@ -1417,7 +1420,8 @@ static bool mb_poll_once(uint32_t cycle_target_generation, bool allow_reconnect)
     const uint32_t now_s = static_cast<uint32_t>(esp_timer_get_time() / 1000000ULL);
     const bool can_probe = (cur_prof == ModbusProfile::Auto) || s_probe_tracker.should_probe(now_s);
 
-    bool profile_promoted = false;
+    bool profile_promoted         = false;
+    bool probe_pressure_available = false;
     if (full && can_probe && !link_broken && s_sock >= 0) {
         uint16_t probe_pdu = 0;
         if (mb_pdu_address(logic::MODBUS_PROBE_REGISTER, probe_pdu)) {
@@ -1444,7 +1448,8 @@ static bool mb_poll_once(uint32_t cycle_target_generation, bool allow_reconnect)
                                 static_cast<unsigned>(logic::MODBUS_PROBE_REGISTER));
                             if (const def::HomeHubReg* pr =
                                     def::altherma4_find(logic::MODBUS_PROBE_REGISTER)) {
-                                take_row(*pr, raw, io.observed_ms);
+                                take_row(*pr, raw, io.observed_ms, false);
+                                probe_pressure_available = true;
                             }
                         } else {
                             diag_printf("modbus: probe register %u answered %u — selected HomeHub "
@@ -1494,14 +1499,15 @@ static bool mb_poll_once(uint32_t cycle_target_generation, bool allow_reconnect)
         current_session =
             s_have_req && s_link_generation == cycle_generation &&
             s_target_generation.load(std::memory_order_acquire) == cycle_target_generation;
-        bind_history = current_session && s_req_history_generation == 0 && gates.received_data &&
+        bind_history = current_session && s_req_history_generation == 0 && gates.usable_ordinary &&
                        s_last_reply_ms >= 0;
     }
     const logic::OutdoorEvidence plant_outdoor = logic::outdoor_homehub_evidence(
         outdoor_row_answered, current_session, outdoor_temperature_c);
-    // A probe-only pressure row can enter the live cache without qualifying the history bind.
-    if (current_session && (gates.received_data || !fresh.empty()) &&
-        !admit_answering_peer(cycle_target_generation)) {
+    // Probe-only pressure can replace current readings without claiming the history. A peer
+    // returning only unavailable words can expose those gaps without retiring its predecessor.
+    const bool publishable = gates.usable_ordinary || probe_pressure_available;
+    if (current_session && publishable && !admit_answering_peer(cycle_target_generation)) {
         // An admitted MQTT publish or settings save owns the boundary. Retry a full sweep so
         // neither HTTP nor MQTT can see the new peer before its identity transition.
         s_cycle_tick = 0;
@@ -1943,7 +1949,7 @@ ModbusPublicationClaim::~ModbusPublicationClaim() {
 }
 
 void mb_retry_start() noexcept {
-    if (s_mtx && s_cache_mtx) mb_task_start_if_enabled();
+    if (s_start_allowed.load(std::memory_order_acquire)) mb_task_start_if_enabled();
 }
 
 bool mb_task_pending() noexcept {

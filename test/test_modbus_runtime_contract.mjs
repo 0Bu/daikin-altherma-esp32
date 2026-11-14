@@ -244,8 +244,13 @@ try {
     },
     {
       name: "peer-cutover-ignores-probe-only-state", scenario: "probe_only_replacement_retires_predecessor",
-      before: "(gates.received_data || !fresh.empty())",
-      after: "gates.received_data",
+      before: "if (current_session && publishable &&",
+      after: "if (current_session && (void(publishable), gates.usable_ordinary) &&",
+    },
+    {
+      name: "history-binds-unavailable-peer", scenario: "probe_resolved_peer_reconnect",
+      before: "if (ordinary && !mb_is_special(raw) &&",
+      after: "if (ordinary &&",
     },
     {
       name: "invalid-dhw-activity-as-off", scenario: "compressor_witness",
@@ -270,7 +275,7 @@ try {
     },
     {
       name: "history-exception-only", scenario: "probe_resolved_peer_reconnect",
-      before: /gates\.received_data &&\s*s_last_reply_ms >= 0/,
+      before: /gates\.usable_ordinary &&\s*s_last_reply_ms >= 0/,
       after: "s_last_reply_ms >= 0",
     },
     {
