@@ -461,6 +461,9 @@ for (const failure of [new Error("503"), new SyntaxError("invalid JSON"), null, 
   assert.equal(ui.hasModbusHist("dhw_tank"), false, "a different epoch still needs its status");
   const next = fixture();
   next.history.epoch = 2;
+  const auxiliary = ["smart_grid_mode", "bsh_state"].map(id => ({ id, label: id }));
+  next.history.rows.push(...auxiliary);
+  next.history.modbus_rows.push(...auxiliary);
   await status(next);
   context.nextStatus = { ...healthy, modbus_history_epoch: 2 };
   assert.equal(await ui.refreshValues(false), true);
@@ -484,9 +487,14 @@ for (const failure of [new Error("503"), new SyntaxError("invalid JSON"), null, 
   ui.S.otaInstalling = false;
   ui.syncDashboardCards();
   ui.syncDashboardCards();
-  assert.equal(pending.length, 1, "a visible open trend reacquires the matching lease once");
-  const request = ui.S.histRequests.get(tankKey).done;
-  reply(pending.shift(), 444, 2);
-  await request;
+  const series = ["dhw_tank", "smart_grid_mode", "bsh_state"];
+  assert.deepEqual(pending.map(r => r.url).sort(),
+    series.flatMap(id => [`/history?row=${id}`, `/history?row=${id}&source=modbus`]).sort(),
+    "the open tank chart reacquires both temperatures and both sources' auxiliary tracks once");
+  const requests = [...ui.S.histRequests.values()].map(request => request.done);
+  for (const request of pending.splice(0)) reply(request, 444, 2);
+  await Promise.all(requests);
   assert.equal(ui.S.hist.get(tankKey).v[0], 444);
+  for (const id of series) for (const source of ["x10a", "modbus"])
+    assert.equal(ui.S.hist.get(ui.histCacheKey(id, source)).v[0], 444);
 }

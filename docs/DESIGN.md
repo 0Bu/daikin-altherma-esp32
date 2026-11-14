@@ -364,8 +364,7 @@ Chart titles name the stable concept.
 Categorical histories use source-labelled tracks, written states, distinct state colours and
 hatching only for missing samples. Valve and Quiet use latest sampled state; BSH, BUH stages and
 Defrost retain any observed activation in their open five-minute bucket. Smart Grid retains all
-four states. The Modbus valve and tank-heater tracks show completed samples and leave the live
-edge unavailable.
+four states. Modbus state tracks show completed samples and leave the live edge unavailable.
 The raw API row carries the last full-sweep report. Disinfection and X10A Tank preheat remain
 different facts. Totals are sampled raster time. Events between sweeps may be missed.
 

@@ -214,7 +214,7 @@ function syncDashboardCards() {
   }
   if (!S.clickHold && !S.otaInstalling && S.stage === "dashboard")
     for (const row of selected.querySelectorAll(".vitem.open:not([hidden]) [data-trend]"))
-      ensureHist(row.dataset.trend, "modbus");
+      ensureHistPair(row.dataset.trend);
   return selected;
 }
 

@@ -90,7 +90,8 @@ scenarios = ['discovery_guard_clean', 'discovery_guard_default', 'discovery_guar
              'journal_foreign_scope', 'journal_foreign_board_scope', 'journal_bootstrap_auto',
              'journal_load_oom_recovery', 'journal_failure_live_metrics',
              'journal_prior_quarantined_row',
-             'independent_source_cutover', 'availability_retry_oom', 'full_mac_identity',
+             'independent_source_cutover', 'modbus_cutover_after_cleanup_sample',
+             'availability_retry_oom', 'full_mac_identity',
              'full_mac_read_failure',
              'legacy_retirement_delivery', 'retirement_oom_recovery', 'retained_probe_delivery',
              'stale_value_retirement', 'profile_scoped_label_retirement',
@@ -135,6 +136,10 @@ for scenario in scenarios:
     print(result.stdout.strip())
 
 mutations = [
+    ('modbus-late-cleanup-ignored', 'modbus_cutover_after_cleanup_sample',
+     'if (!publication.acquired() || s_modbus_cleanup_requested.load(std::memory_order_acquire))',
+     'if (!publication.acquired())',
+     'LATE_HOMEHUB_CUTOVER_CANNOT_PUBLISH_BEFORE_QUEUED_CLEANUP', 1),
     ('curve-dhw-route-veto-bypassed', 'curve_space_route_gate',
      'in.plant_gate_active = plant_gate.active;',
      'in.plant_gate_active = mbs.plant_gate_active;',

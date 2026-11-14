@@ -756,20 +756,8 @@ const currentBinaryTenths = (row) => {
 
 function stateHistoryCurrent(id, source) {
   if (S.otaCached) return { present: false, value: null };
-  if (source === "modbus") {
-    // These rows come from the last full sweep. Unrelated replies do not renew either reading.
-    if (id === "valve_dhw" || id === "bsh_state") return { present: true, value: null };
-    if (!Array.isArray(S._modbus)) return { present: false, value: null };
-    if (id === "smart_grid_mode") {
-      const row = S._modbus.find((r) => r && r.off === 56 && r.enum === "smart_grid_mode");
-      if (!row || row.value == null) return { present: true, value: null };
-      const raw = String(row.value).trim();
-      const mode = /^\d$/.test(raw) ? Number(raw) : -1;
-      return { present: true, value: mode >= 0 && mode <= 3 ? mode * 10 : null };
-    }
-    const row = S._modbus.find((r) => r && (r.history === id || r.concept === id));
-    return { present: true, value: currentBinaryTenths(row) };
-  }
+  // The HomeHub array exposes full-sweep rows without per-register observation age.
+  if (source === "modbus") return { present: true, value: null };
 
   if (source !== "x10a") return { present: false, value: null };
   if (id === "circulation_state") {

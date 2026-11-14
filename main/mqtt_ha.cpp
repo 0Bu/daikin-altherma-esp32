@@ -1454,9 +1454,11 @@ static bool publish_x10a_state(const Config& config, bool force) {
     bool                            live     = false;
     const std::vector<GroupedValue> values =
         mb_values_live() ? current_modbus_values(live) : std::vector<GroupedValue>{};
-    const std::string               js       = live ? build_flat_json(values) : std::string("{}");
-    const ModbusPublicationClaim    publication(ModbusPublication::Mqtt, revision);
-    if (!publication.acquired()) return false;
+    const std::string            js = live ? build_flat_json(values) : std::string("{}");
+    const ModbusPublicationClaim publication(ModbusPublication::Mqtt, revision);
+    // A target save can request retirement after this cycle sampled the cleanup queue.
+    if (!publication.acquired() || s_modbus_cleanup_requested.load(std::memory_order_acquire))
+        return false;
     if (js != s_last_modbus_json) {
         if (!mqtt_publish(s_modbus, js.c_str(), static_cast<int>(js.size()), 0, 1)) return false;
         s_last_modbus_json = js;

@@ -106,6 +106,8 @@ daik::ModbusStatus          modbus;
 bool                           modbus_enabled = false, modbus_live = false;
 uint32_t                       modbus_generation = 0, x10a_generation = 0;
 std::vector<daik::CachedValue> modbus_values;
+bool                           modbus_publication_claimed = false;
+void (*on_modbus_target_read)()                           = nullptr;
 daik::Env3Status               env;
 // One-shot seam: the heating-curve evaluator reads ENV III after the room status and before its
 // evaluation lock, so a scenario can land a concurrent HTTP reconfiguration exactly there.
@@ -218,7 +220,23 @@ HpX10aJsonCopyResult hp_values_x10a_json_copy(std::string& out, size_t, uint64_t
     out = adapter::x10a_payload;
     return HpX10aJsonCopyResult::Ok;
 }
-bool         mb_target_enabled() noexcept { return adapter::modbus_enabled; }
+bool mb_target_enabled() noexcept {
+    if (void (*hook)() = adapter::on_modbus_target_read) {
+        adapter::on_modbus_target_read = nullptr;
+        hook();
+    }
+    return adapter::modbus_enabled;
+}
+ModbusPublicationClaim::ModbusPublicationClaim(ModbusPublication owner,
+                                               uint32_t          revision) noexcept {
+    if (adapter::modbus_publication_claimed) return;
+    acquired_ = owner == ModbusPublication::ConfigSave ||
+                (adapter::modbus_enabled && adapter::modbus_generation == revision);
+    if (acquired_) adapter::modbus_publication_claimed = true;
+}
+ModbusPublicationClaim::~ModbusPublicationClaim() {
+    if (acquired_) adapter::modbus_publication_claimed = false;
+}
 ModbusStatus mb_status() { return adapter::modbus; }
 size_t       mb_values_capacity() { return adapter::modbus_values.size(); }
 size_t       mb_values_snapshot(CachedValue* out, size_t capacity, bool& live,
@@ -3229,6 +3247,39 @@ void independent_source_cutover() {
         sdk::task_fn(nullptr);
     } catch (const StopTask&) {}
 }
+void modbus_cutover_after_cleanup_sample() {
+    independent_sources_fixture();
+    int initial            = 0;
+    int initial_tombstones = 0;
+    sdk::on_delay          = [&](TickType_t delay) {
+        check_cycle(delay);
+        if (sdk::delays == 45) {
+            require_independent_fresh();
+            initial                        = accepted_count(daik::s_modbus);
+            initial_tombstones             = accepted_count(daik::s_modbus, "");
+            adapter::on_modbus_target_read = [] {
+                daik::ModbusPublicationClaim claim(daik::ModbusPublication::ConfigSave);
+                require(claim.acquired(), "HOMEHUB_TARGET_SAVE_CAN_BE_ADMITTED");
+                adapter::modbus_values[0].value = "3";
+                ++adapter::modbus_generation;
+                daik::mqtt_request_modbus_cleanup();
+            };
+        } else if (sdk::delays == 46) {
+            require(!adapter::on_modbus_target_read && accepted_count(daik::s_modbus) == initial,
+                             "LATE_HOMEHUB_CUTOVER_CANNOT_PUBLISH_BEFORE_QUEUED_CLEANUP");
+        } else if (sdk::delays > 46 && accepted_count(daik::s_modbus) > initial + 1) {
+            require(accepted_count(daik::s_modbus) == initial + 2 &&
+                                 accepted_count(daik::s_modbus, "") == initial_tombstones + 1 &&
+                                 last_accepted(daik::s_modbus)->length > 2,
+                             "HOMEHUB_CUTOVER_RETIRES_PREDECESSOR_BEFORE_NEW_STATE");
+            throw StopTask{};
+        }
+        require(sdk::delays < 150, "LATE_HOMEHUB_CUTOVER_MAKES_BOUNDED_PROGRESS");
+    };
+    try {
+        sdk::task_fn(nullptr);
+    } catch (const StopTask&) {}
+}
 void availability_retry_oom() {
     initial_config();
     adapter::hp.last_error.assign(80,
@@ -4349,6 +4400,8 @@ int main(int argc, char** argv) {
             independent_source_reconnect();
         else if (std::strcmp(scenario, "independent_source_cutover") == 0)
             independent_source_cutover();
+        else if (std::strcmp(scenario, "modbus_cutover_after_cleanup_sample") == 0)
+            modbus_cutover_after_cleanup_sample();
         else if (std::strcmp(scenario, "availability_retry_oom") == 0)
             availability_retry_oom();
         else if (std::strcmp(scenario, "full_mac_identity") == 0)

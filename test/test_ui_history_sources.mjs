@@ -787,23 +787,22 @@ assert.match(boostModbusHtml, /data-source="modbus"/,
 assert.match(h.scrubText(boostModbusView, 2), /^\d{2}:\d{2}–\d{2}:\d{2} · Empfehlung ein$/);
 assert.doesNotMatch(h.scrubText(boostModbusView, 2), /X10A|Modbus|Boost|ca\.|min/);
 
-// Regression: /history ends at the newest COMPLETED bucket while /values already carries the live
-// state. The chart must not paint that old bucket through the edge labelled "jetzt". Append the
-// current observation as its own cap, keep it scrub-readable, and exclude it from sampled totals.
+// The full-sweep row lacks a separately aged current Smart Grid reading. Keep the completed
+// buckets and mark the edge unavailable, even when the cache still carries an active request.
 S._modbus = [{ off: 56, value: 2, enum: "smart_grid_mode" }];
 const liveBoostView = h.historyView("smart_grid_mode", "modbus");
 const liveBoostHtml = h.histHtml("smart_grid_mode", "", "Smart-Grid-Anforderung", "modbus");
 assert.equal(liveBoostView.recordedN, 7);
 assert.equal(liveBoostView.liveIndex, 7);
-assert.deepEqual(Array.from(liveBoostView.series[0].v), [0, 10, 20, 30, null, 20, 0, 20]);
+assert.deepEqual(Array.from(liveBoostView.series[0].v), [0, 10, 20, 30, null, 20, 0, null]);
 assert.match(liveBoostHtml,
-  /vhist-state-on sg-recommended" style="left:87\.500%;width:12\.500%/,
-  "the live Recommended-on state must own the right edge instead of extending Free running to now");
+  /vhist-state-gap" style="left:87\.500%;width:12\.500%/,
+  "the live edge cannot inherit a cached state");
 assert.match(liveBoostHtml, /vhist-state-current" style="left:87\.500%;width:12\.500%/,
   "the display distinguishes the live observation from completed raster buckets");
 assert.match(liveBoostHtml, /Boost aktiv · 10 min/,
-  "one live observation must not be counted as an invented five minutes of Boost runtime");
-assert.equal(h.scrubText(liveBoostView, 7), "jetzt · Empfehlung ein",
+  "the sampled Boost duration counts only completed buckets");
+assert.equal(h.scrubText(liveBoostView, 7), "jetzt · nicht gemessen",
   "the state shown at the right edge and its tooltip must agree");
 delete S._modbus;
 
@@ -1017,11 +1016,11 @@ S.hist.set("modbus:bsh_state", { at: 1, gen: 1, dt: 300, unit: "", t0: 176872000
 const liveStateCases = [
   ["defrost_state", "x10a", 10],
   ["quiet_state", "x10a", 10],
-  ["smart_grid_mode", "modbus", 20],
+  ["smart_grid_mode", "modbus", null],
   ["bsh_state", "x10a", 10],
   ["bsh_state", "modbus", null],
   ["tank_preheat_state", "x10a", 10],
-  ["disinfection_state", "modbus", 10],
+  ["disinfection_state", "modbus", null],
   ["buh_state", "x10a", 20],
   ["valve_dhw", "x10a", 10],
   ["valve_dhw", "modbus", null],

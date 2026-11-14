@@ -490,7 +490,7 @@ void mb_autodiscover_initial() {
 }
 
 static bool close_sock() {
-    s_have_req = false;
+    s_have_req        = false;
     s_pending_history = {};
     // lwIP can fail before deleting the socket. Keep ownership until close succeeds.
     if (s_sock >= 0 && close(s_sock) != 0 && errno != EBADF) return false;
