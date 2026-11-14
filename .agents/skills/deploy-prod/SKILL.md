@@ -116,13 +116,12 @@ scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 r
 scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 run watch <run-id> --exit-status
 ```
 
-Then read `https://0bu.github.io/daikin-altherma-esp32/dev/manifest.json`. GitHub Pages can lag, so
-retry for a bounded time. Continue only if the manifest's `source_sha` equals the merge commit, and
-note its version and application SHA-256. If the classifier finds no firmware changes since the
-last confirmed publication, the manifest keeps the previous source. Report the merge and stop.
-If Step 0 required publication and the manifest still names the previous source after a green
-run and the bounded wait, treat it as **Case A**. A confirmed cumulative-changelog capacity
-failure uses Step 3a first.
+Use that exact merge run's build-relevance result. If it confirms publication was unnecessary
+and the run succeeds, report the merge and stop. Otherwise require successful publication and read
+`https://0bu.github.io/daikin-altherma-esp32/dev/manifest.json`. GitHub Pages can lag, so retry for
+a bounded time. Continue when the manifest's `source_sha` equals the merge commit. Note its version
+and application SHA-256. If publication fails or the manifest still names another source after the
+bounded wait, use **Case A**. A confirmed cumulative-changelog capacity failure uses Step 3a first.
 
 ### 3a. Automatic release baseline when the cumulative changelog is full
 
@@ -271,8 +270,10 @@ loop is part of the authorized chain.
    - Before the merge (Steps 0–2), commit the fix on the PR's own branch.
    - After the merge (Steps 3–4), create the fix branch in the session worktree from the current main:
      `git fetch origin`, then `git switch -c agent/fix-<topic> origin/main`.
-3. **Run `$deploy-test`** at the fix head: the identity-verified USB write of the signed local build,
-   health, and the behavior that failed. Repeat steps 2–3 until the bench is green.
+3. **Run `$deploy-test`** at the fix head. Before writing, verify the bench build's `HEAD^{tree}`
+   against the prospective merge tree as in Step 0. Then perform the identity-verified USB write
+   of the signed local build and verify health and the behavior that failed. Repeat steps 2–3
+   until the bench is green.
 4. **Publish the fix:**
    - Run `$skill-audit` and `$pr-hygiene-review` for the fix head. When the fix goes onto an open PR,
      put both stamps for the new head into its PR body **before** the push; the pre-push gate checks
