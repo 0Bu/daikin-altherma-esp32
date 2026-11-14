@@ -191,6 +191,7 @@ try {
   ]);
   const persistWires=new Set(["checkup-persist-plain","checkup-persist-redacted",
     "checkup-persist-framed"]);
+  let persistUnknownSeen=false;
   const stopIds=["low_rps_above_main_target","request_withdrawal","defrost",
     "dhw_transition","route_mode_transition"];
   const stopCountKeys=["witnessed_stops_recent_heating","unclassified_stops","unknown_stops",
@@ -231,6 +232,15 @@ try {
         {bucket:-1,end_unix_s:1999998000,restored:true,starts:2,run_s:600,observed_s:1200,space_s:600,dhw_s:0},
         {bucket:0,elapsed_s:0,starts:0,run_s:0,observed_s:0},
       ],name);
+    }
+    if(name==="checkup-persist-unknown") {
+      assert.equal(doc.health.persist,"unknown",name);
+      assert.equal(doc.health.covered_s,0,name);
+      assert.equal(doc.health.source_fresh,false,name);
+      const cycling=doc.health.checks.find(check=>check.id==="cycling");
+      assert.deepEqual(cycling.hours,[],name);
+      assert.equal(cycling.timeline,undefined,name);
+      persistUnknownSeen=true;
     }
     if(stopWires.has(name)) {
       const cycling=doc.health.checks.find(check=>check.id==="cycling");
@@ -370,6 +380,7 @@ try {
   assert.equal(stopWires.size,0,"all unknown, covered-zero and populated stop-context wire oracles must run");
   assert.equal(cyclingWires.size,0,"both partially elapsed and start-edge cycling frames must run");
   assert.equal(persistWires.size,0,"plain, redacted and framed diagnosis snapshots must run");
+  assert.ok(persistUnknownSeen,"unreadable diagnosis snapshot must run");
   const controls=[];
   if(!process.argv.includes("--no-mutations")) for(const mutation of mutations) {
     const result=execute(compile(mutation.name,mutation),[mutation.scenario],false);

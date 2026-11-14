@@ -595,6 +595,13 @@ int main(int argc, char** argv) {
                       : path == 1 ? "checkup-persist-redacted"
                                   : "checkup-persist-framed");
         }
+        reset_after_checkup = false;
+        checkup_persist     = daik::logic::CheckupRestore::Unknown;
+        auto req            = request();
+        check(invoke(req, "/status", daik::h_status) == ESP_OK,
+              "unreadable diagnosis status failed");
+        successful(req);
+        emit(req, "checkup-persist-unknown");
     });
     run("stop_context_absent", [] {
         for (const bool confirmed : {false, true}) {

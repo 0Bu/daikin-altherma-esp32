@@ -76,6 +76,7 @@ void checkup_dhw_reset();
 
 // Copy the judged window, optional chart hours and trace, and restore provenance under one lock.
 // GET /status and MCP use this snapshot. Its POD storage does not allocate under the lock.
+// An unreadable snapshot has unknown provenance and carries no accumulated evidence.
 logic::CheckupReport checkup_report(logic::CheckupCyclingHours* hours   = nullptr,
                                     logic::CheckupCyclingTrace* trace   = nullptr,
                                     logic::CheckupRestore*      persist = nullptr);

@@ -216,9 +216,9 @@ Individual Modbus/ENV III rings may be retired beside an X10A `accept`. Dwell v4
 blind time itself, so its verdict can be `accept` beside trend age refusals.
 
 `health` fields: `covered_s`, `span_s`, `source_fresh`, `source_age_s`, `persist`, `full_span`,
-`available`, `assessable`, `evaluated`, `status`, `checks`. Disabled diagnostics, and a reset that is
-still pending, keep the object with placeholder checks: each reads `unavailable`/`unsupported` and
-carries no accumulated evidence, so read `persist` and `diagnostics.enabled` rather than the reason.
+`available`, `assessable`, `evaluated`, `status`, `checks`. Disabled diagnostics, a pending reset
+or an unreadable snapshot produce placeholder checks with no accumulated evidence. Use
+`persist` and `diagnostics.enabled` to interpret them.
 `span_s` combines time since the current diagnostics window's first accepted sampling callback
 with any carried restore duration, capped at 24 hours. A callback can start the clock without
 readable data. Restore estimates the earlier span from one nominal hour before the earliest
@@ -231,7 +231,9 @@ withholds current fault-clear/current pressure and reassuring assessments; dated
 The serializer captures `health.persist`, the judged window and Cycling hours together.
 `health.persist:"flash_pending"` means recovery has not completed and proves no stored hours;
 `fresh` means none were selected; `flash` means admissible dated hourly reconstruction with live
-precedence. Completed RAM hours are never adopted. Other values describe startup-integrity refusal.
+precedence. Completed RAM hours are never adopted. `unknown` means the snapshot was unreadable.
+`model_changed` covers a source or link reset. `diagnostics_disabled` and `diagnostics_changed`
+also reflect a live consent transition. Other refusal values describe startup integrity or safe mode.
 
 Each check has `id`, `verdict`, `evidence`, `reason`, `observed_s`, `required_s` and its applicable
 numbers. Verdicts are `unavailable`, `collecting`, `ok`, `info`, `warn`; an `ok` with observation

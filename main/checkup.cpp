@@ -944,12 +944,8 @@ logic::CheckupReport checkup_report(logic::CheckupCyclingHours* hours,
         hours->epoch = 0;
     }
     if (trace) trace->unix_s = 0;
-    if (persist) *persist = logic::CheckupRestore::NoRecord;
-    if (!s_mtx) {
-        // Without a mutex the producer stays disabled. Only the startup verdict is available.
-        if (persist) *persist = s_persist_verdict;
-        return logic::CheckupReport{};
-    }
+    if (persist) *persist = logic::CheckupRestore::Unknown;
+    if (!s_mtx) return logic::CheckupReport{};
     Lock lk(s_mtx);
     if (!lk.acquired()) return logic::CheckupReport{};
     if (persist) *persist = s_persist_verdict;

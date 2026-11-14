@@ -115,10 +115,8 @@ Current observations take precedence. The
 [retention rules](ARCHITECTURE.md#history-and-diagnosis-persistence) distinguish live and restored
 hours. A completed tank-cooling window can use an initial temperature
 from the preceding bucket. Later clock corrections do not renew an assigned monotonic deadline;
-read-time span cannot fabricate observation coverage. `/status.health.persist` names
-`flash_pending` while confirmation is awaited (not proof that saved hours exist), `flash` after
-reconstruction, or `fresh` when no stored intervals were selected, including precedence/capacity
-exclusions. Startup refusal reasons remain explicit. An explicit profile/link reset retires pending
+read-time span cannot fabricate observation coverage. See [`/status.health.persist`](API.md#status)
+for restoration outcomes. An explicit profile/link reset retires pending
 restore for this boot, even if the same profile is selected again. HomeHub-only edits do not reset
 the X10A lifecycle. Safe mode and disabled diagnostics admit no old hours; unidentified-source
 empty samples advance time without booking observations.

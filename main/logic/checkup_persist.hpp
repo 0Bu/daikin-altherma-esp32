@@ -60,6 +60,7 @@ enum class CheckupRestore : uint8_t {
     FlashPending,        // RAM hours retired; journal recovery pending, not proof of stored hours
     Fresh,               // no stored intervals selected, including live/capacity precedence
     Flash,               // selected stored intervals establish absolute-age journal reconstruction
+    Unknown,             // the runtime snapshot could not be read
 };
 
 inline constexpr const char* checkup_restore_slug(CheckupRestore r) {
@@ -82,6 +83,8 @@ inline constexpr const char* checkup_restore_slug(CheckupRestore r) {
             return "fresh";
         case CheckupRestore::Flash:
             return "flash";
+        case CheckupRestore::Unknown:
+            return "unknown";
     }
     return "unknown";
 }

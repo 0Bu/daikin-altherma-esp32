@@ -398,6 +398,28 @@ void pending_expiry() {
                 after[CheckupCheck::Fault].verdict != CheckupVerdict::Info,
             "pending_expires_without_producer");
 }
+void report_without_mutex() {
+    // Start with a valid retained header and a journal awaiting confirmation.
+    sdk::reset_reason        = static_cast<int>(CrashReason::SW);
+    s_diagnostics_generation = 23;
+    checkup_persist_seal();
+    sdk::fail_create_once = true;
+    boot();
+    require(!s_mtx && s_persist_verdict == CheckupRestore::FlashPending,
+            "warm_start_with_pending_journal_exercised");
+    CheckupRestore      persist = CheckupRestore::FlashPending;
+    CheckupCyclingHours hours{};
+    hours.count = 1;
+    hours.epoch = 17;
+    CheckupCyclingTrace trace{};
+    trace.unix_s          = static_cast<uint32_t>(adapter::unix_origin);
+    const auto unreadable = checkup_report(&hours, &trace, &persist);
+    require(persist == CheckupRestore::Unknown, "allocation_failure_restore_unknown");
+    require(unreadable.covered_s == 0 && !unreadable.source_fresh && hours.count == 0 &&
+                hours.epoch == 0 && trace.unix_s == 0,
+            "allocation_failure_withholds_all_evidence");
+}
+
 void restored_expiry() {
     boot();
     auto cov = coverage();
@@ -453,6 +475,17 @@ void restored_expiry() {
     require(before[CheckupCheck::Pressure].a == 9 &&
                 before[CheckupCheck::Fault].verdict == CheckupVerdict::Info,
             "restored_finding_before_exact_deadline");
+    CheckupCyclingTrace trace{};
+    trace.unix_s          = static_cast<uint32_t>(now);
+    sdk::fail_take_once   = true;
+    const auto unreadable = checkup_report(&hours, &trace, &persist);
+    require(persist == CheckupRestore::Unknown, "lock_failure_restore_unknown");
+    require(unreadable.covered_s == 0 && !unreadable.source_fresh && hours.count == 0 &&
+                hours.epoch == 0 && trace.unix_s == 0,
+            "lock_failure_withholds_all_evidence");
+    checkup_report(&hours, nullptr, &persist);
+    require(persist == CheckupRestore::Flash && hours.count > 2,
+            "lock_failure_does_not_retire_valid_restore");
     sdk::now_us = deadline;
     auto after  = checkup_report(&hours);
     require(hours.count > 2 && hours.bucket_at(0) == old_id &&
@@ -826,6 +859,8 @@ int main(int argc, char** argv) {
             circulation_inflight();
         else if (name == "pending_expiry")
             pending_expiry();
+        else if (name == "report_without_mutex")
+            report_without_mutex();
         else if (name == "restored_expiry")
             restored_expiry();
         else if (name == "late_restore_prefix" || name == "late_restore_clock_behind")

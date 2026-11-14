@@ -1341,7 +1341,8 @@ static void append_status_json(JsonOut& j, bool redact) {
         // "flash_pending" awaits clock/source confirmation without proving stored hours exist;
         // "fresh" means no stored intervals were selected, including live/capacity precedence,
         // and "flash" means actual absolute-age journal reconstruction. Completed RAM hours never
-        // cross a restart; other slugs retain the startup integrity/consent refusal for diagnosis.
+        // cross a restart. Other slugs preserve refusals and runtime resets; "unknown" means the
+        // snapshot could not be read.
         j += ",\"persist\":";
         json_append_quoted(j, logic::checkup_restore_slug(persist));
         j += ",\"full_span\":";
