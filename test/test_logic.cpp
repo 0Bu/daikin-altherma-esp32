@@ -8124,6 +8124,7 @@ static void test_homehub_map() {
     CHECK(homehub_history_state_sample("3", '3') == 30);
     CHECK(homehub_history_state_sample("4", '3') == HISTORY_NO_READING);
     CHECK(homehub_history_state_sample("-1", '3') == HISTORY_NO_READING);
+    CHECK(homehub_history_state_sample("/", '3') == HISTORY_NO_READING);
     CHECK(homehub_history_state_sample("", '1') == HISTORY_NO_READING);
     CHECK(altherma4_water_pressure_word_valid(0));
     CHECK(altherma4_water_pressure_word_valid(600));
