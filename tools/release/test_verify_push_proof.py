@@ -26,10 +26,11 @@ class LocalProofTests(unittest.TestCase):
         return {"body": proof.PREFIX + json.dumps(self.label | fields), "user": {"id": proof.MAINTAINER_ID},
                 "created_at": self.time(-40), "updated_at": self.time(-40)}
 
-    def query(self, path, *, paginate=False):
-        if path == "issues/311/comments?per_page=100":
-            assert paginate
-            return [[], self.comments]
+    def query(self, path):
+        if path.startswith("issues/311/comments?"):
+            page = int(path.split("&page=")[1])
+            first = (page - 1) * proof.COMMENTS_PER_PAGE
+            return self.comments[first:first + proof.COMMENTS_PER_PAGE]
         rows = {
             "pulls/311": self.body,
             "git/ref/heads/main": {"object": {"sha": self.base}},
@@ -46,6 +47,11 @@ class LocalProofTests(unittest.TestCase):
     def test_exact_fork_pr_and_squash_pass(self):
         self.assertEqual(proof.verify_pr(311, self.head, self.query), self.label)
         self.assertEqual(proof.verify_landed(self.squash, self.query), self.label)
+
+    def test_unrelated_comments_do_not_hide_receipt_on_later_page(self):
+        comment = {"user": {"id": 42}, "body": "discussion" * 6000}
+        self.comments[:] = [comment] * (proof.COMMENTS_PER_PAGE * 4) + [self.comment()]
+        self.assertEqual(proof.verify_pr(311, self.head, self.query), self.label)
 
     def test_untrusted_author_or_application_cannot_certify(self):
         for fields in ({"user": {"id": 42}}, {"performed_via_github_app": True}):

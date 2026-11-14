@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Validate a maintainer's local check result without executing any PR source."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 from functools import partial
@@ -14,6 +14,7 @@ REPO = "0Bu/daikin-altherma-esp32"
 MAINTAINER_ID = 4757856
 PREFIX = "daikin-local-release-checks "
 MAX_AGE = 86400
+COMMENTS_PER_PAGE = 10
 SHA = re.compile(r"[0-9a-f]{40}")
 
 
@@ -21,15 +22,15 @@ class ProofError(ValueError):
     pass
 
 
-def api(path, *, paginate=False, local=False):
-    flags = ["--paginate", "--slurp"] if paginate else ["--method", "GET"]
+def api(path, *, local=False):
     if local:
         client = str(Path(__file__).resolve().parents[2] / "scripts/gh-with-git-credentials.sh")
     else:
         client = "gh"
-    result = subprocess.run([client, "api", "--hostname", "github.com", *flags, f"repos/{REPO}/{path}"],
+    result = subprocess.run([client, "api", "--hostname", "github.com", "--method", "GET",
+                             f"repos/{REPO}/{path}"],
                             capture_output=True, check=True, timeout=20)
-    if len(result.stdout) > 2 * 1024 * 1024:
+    if len(result.stdout) > 8 * 1024 * 1024:
         raise ProofError("GitHub metadata exceeds the verification limit")
     return json.loads(result.stdout)
 
@@ -46,10 +47,14 @@ def unique_items(items):
 
 
 def require_receipt(number, head, tree, base, *, boundary, query=api):
-    pages = query(f"issues/{number}/comments?per_page=100", paginate=True)
-    matches = []
-    for page in pages:
-        for item in page:
+    # Limit each response and stop as soon as a matching receipt is found.
+    since = datetime.fromtimestamp(boundary - MAX_AGE, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    page_number = 1
+    while True:
+        comments = query(f"issues/{number}/comments?since={since}&per_page={COMMENTS_PER_PAGE}&page={page_number}")
+        if not isinstance(comments, list) or len(comments) > COMMENTS_PER_PAGE:
+            raise ProofError("invalid GitHub issue comment page")
+        for item in comments:
             body = item.get("body") or ""
             if (item.get("user", {}).get("id") != MAINTAINER_ID or item.get("performed_via_github_app")
                     or not body.startswith(PREFIX) or len(body) > 1024):
@@ -68,10 +73,10 @@ def require_receipt(number, head, tree, base, *, boundary, query=api):
                 continue
             if type(receipt.get("finished_at")) is not int or not boundary - MAX_AGE <= receipt["finished_at"] <= created:
                 continue
-            matches.append(receipt)
-    if not matches:
-        raise ProofError("missing exact local check receipt from the maintainer")
-    return matches[-1]
+            return receipt
+        if len(comments) < COMMENTS_PER_PAGE:
+            raise ProofError("missing exact local check receipt from the maintainer")
+        page_number += 1
 
 
 def commit(path, query):

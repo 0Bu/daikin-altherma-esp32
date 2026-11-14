@@ -129,7 +129,7 @@ try {
     let output = "";
     child.stdout.on("data", chunk => { output += chunk; });
     child.stderr.on("data", chunk => { output += chunk; });
-    // Cleanup diagnostics can still be in the stderr pipe when the child exits.
+    // On a loaded runner the child can exit before the retained-ownership warning reaches stderr.
     const completed = new Promise(resolve => child.once("close", (code, signal) => resolve({ code, signal })));
     const watchdog = setTimeout(() => child.kill("SIGKILL"), 20000);
     try {

@@ -117,8 +117,7 @@ fails closed on both missing and extra project skills.
   authenticate the PR-body editor. Maintainer review and GitHub merge authorization remain the actor
   trust boundary. The checkbox records an already completed review. The protected policy checks
   current PR text and records on edits without restarting the source build.
-- The Renovate runner-pin exception waives human review records after GitHub verifies the local
-  check receipt. The policy then binds current PR metadata
+- The Renovate runner-pin exception uses only protected-base CI attestation. The policy binds current PR metadata
   to complete immutable GitHub commit-file pages for the exact one-commit head. The data-only
   protected-base `pr-policy.yml` workflow, which never loads PR code, accepts only a same-repository
   Renovate branch whose sole edit is the

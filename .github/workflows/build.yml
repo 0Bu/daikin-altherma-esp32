@@ -81,8 +81,8 @@ on:
   # pr-policy.yml workflow alone uses pull_request_target and never checks out PR code.
   pull_request:
     branches: [main]
-    # The protected PR policy checks live title, body and review records on edited.
-    types: [opened, synchronize, reopened, ready_for_review]
+    # The bootstrap still scans PR prose on edits. After cutover the protected policy owns it.
+    types: [opened, synchronize, reopened, edited, ready_for_review]
   workflow_dispatch:
     inputs:
       release:
@@ -374,13 +374,13 @@ jobs:
           # The OTA canaries also read MQTT startup, shared HTTP/poll/source ownership and stack data.
           emit ota '^(tools/(ota|production_ota|dev_ota|stack)/|tools/agent-hooks/agent_hook\.py$|scripts/(production-ota-gate|dev-ota-upload|local-ota-evidence|check-manifest-provenance)\.py$|test/(test_.*ota.*|dev_ota_upload/)|main/(CMakeLists\.txt$|[^/]+\.(cpp|hpp)$|logic/)|sdkconfig\.defaults$|docs/(SECURITY|FEATURES)\.md$|\.github/workflows/build\.yml$)'
 
-      # Commit text only. The protected policy checks the current editable PR text.
-      - name: Audit commit-text privacy and language
+      # The protected policy does not scan PR prose until the cutover reaches main.
+      - name: Audit commit and PR-text privacy and language
         if: steps.local_proof.outputs.accepted != 'yes' && (github.event_name == 'pull_request')
         env:
           EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: ./scripts/run-pr-hygiene-audit.sh --base "$EVENT_BASE_SHA" --head "$EVENT_HEAD_SHA" --event-file ''
+        run: ./scripts/run-pr-hygiene-audit.sh --base "$EVENT_BASE_SHA" --head "$EVENT_HEAD_SHA"
       - name: Verify the PR-hygiene audit still has teeth
         if: steps.local_proof.outputs.accepted != 'yes'
         run: ./tools/pr_hygiene/selftest.sh

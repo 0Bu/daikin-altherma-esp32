@@ -57,11 +57,10 @@ source-bound manifest, complete binary inventory, installer plan and changelog o
 
 All four source checkouts retain complete commit history and tags. Only `trusted_build` and
 `publish` filter historical blobs with `blob:none`; the current source tree remains complete.
-`prepare-ci-history.py` reads the HTTP runtime test's historical-source pin and hydrates that blob
-on the writable host before the build container. A missing blob or an unrecognized pin declaration
-or read expression blocks the build. PR and mechanical checkouts remain unfiltered: they remove
-persisted credentials and must support historical runtime/coverage reads without relying on a later
-authenticated lazy fetch.
+The local release suite hydrates the candidate and its first-parent tree, then uses
+`prepare-ci-history.py` to load the historical HTTP config and deadline regression sources before
+taking the offline snapshot. Missing source or a changed fixture read blocks the local checks.
+PR and mechanical checkouts remain unfiltered and remove persisted credentials.
 The publisher's `gh-pages` fetch filters blobs too. Version admission and changelog generation
 establish path presence from the tree and block when a listed feed blob cannot be read. Exact tree
 and public-byte verification still materialize every needed current file.
@@ -79,22 +78,30 @@ readback separately. Claim CI acceleration only after a comparable run of the pu
 
 The native `pre-push` hook runs the repository's full mechanical suite and unsigned ESP32-S3
 compile for maintainer pushes. It refreshes `origin/main` and checks the prospective merge tree
-in a private snapshot with main as the first parent. It runs the pinned formatter, the
-ASan/UBSan suite in Linux Docker on macOS, headless Linux Chromium and WebKit for browser-relevant changes, the pinned
-coredump decoder and the real-cJSON runtime suite. Fork contributors can submit a PR, then a
-maintainer reviews and tests its exact head with the same entry point on a local branch.
+in a private snapshot with main as the first parent. Checks include the pinned formatter,
+ASan/UBSan in Linux Docker on macOS, headless Linux Chromium and WebKit for browser-relevant changes,
+the pinned coredump decoder and the real-cJSON runtime suite. A maintainer reviews fork code before
+running its checks in a disposable environment without maintainer credentials. The snapshot runs
+candidate scripts with the current user's permissions. It provides source isolation only.
 
 To run the gate before pushing, or against a checked-out fork head, run
 `python3 tools/release/push_checks.py "$(git rev-parse HEAD)"` in the clean checkout.
 Post the emitted `daikin-local-release-checks` line as a new PR comment from the maintainer
 account. It is a maintainer assertion of a completed local run. It has a 24-hour window through
-merge. Editing the PR description refreshes `gates`, which validates the comment author,
-head, current main, merge tree and existing review records. Editable checkboxes document the
-reviews. The legacy PR build keeps running on the bootstrap PR because the protected base does
-not yet contain the verifier. Subsequent PRs keep both required check names and use only the
-brief admission jobs. A missing receipt blocks merge and signed publication.
-Existing open PRs need a fresh receipt and a PR policy run before merging after the cutover.
-Manual stable publication also requires a receipt that was valid when that main commit merged.
+merge. Keep the original comment because signed publication verifies it against the merge time.
+Editing the PR description refreshes `gates`, which validates the comment author, head, current
+main, merge tree and completed review records. The bootstrap PR runs the legacy build and PR
+prose audit. Its local merge command and signed publication verify the receipt while the old
+protected `gates` job still checks review records alone.
+
+After cutover both required check names remain and use brief admission jobs. Refresh evidence
+for existing open PRs before merging. Use the canonical synchronous merge command, which
+rechecks the receipt immediately before merging. A green GitHub check can outlive the receipt
+window. Signed publication, including manual stable publication, requires a receipt valid at
+the actual merge time. The protected policy's existing
+[Renovate runner-pin exception](AGENT_MIGRATION.md#operating-rules) does not need a local
+receipt to merge. The pin is outside the firmware inputs. Publication still requires a receipt
+if the dev feed is behind or a stable release is requested.
 
 ### First Pages publication
 
@@ -379,13 +386,11 @@ there is no timing-based legacy production fallback. This gate creates no releas
 Report host/CI checks, signed artifact identity, each injection, pre-reboot verifier/heap/stack,
 probation, API/source liveness, retained MQTT and rendered UI evidence separately.
 The private atomic receipt journal checkpoints before the sole POST and preserves completed
-artifact/bench/production stages and elapsed times. Before merge, maintainers can run
-`python3 tools/release/local_checks.py` on the clean PR merge tree whose first parent is refreshed
-`origin/main`. The runner tests an isolated checkout. The official gate reuses those successful
-host and contract checks for 24 hours on the same machine/user when the published commit has the
-identical tree and first parent. The cache lives under
-`~/.cache/daikin-altherma-esp32/release-checks/`. The gate repeats checks when their evidence is
-unavailable or incompatible. An ambiguous response leaves execution unknown; journal failure
+artifact/bench/production stages and elapsed times. The official gate reuses host and contract
+results from the pre-push run for 24 hours on the same machine and account, if the published
+commit has the identical tree and first parent. The cache lives under
+`~/.cache/daikin-altherma-esp32/release-checks/`. Missing or incompatible local evidence blocks
+the official gate before hardware contact. An ambiguous response leaves execution unknown; journal failure
 before a write blocks it. Public output includes only typed delivery evidence, excluding device
 identifiers, complete status, topics, coordinates and raw errors. Failure handling neither queries
 the device nor retries and exits with status 2.

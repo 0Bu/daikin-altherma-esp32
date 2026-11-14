@@ -32,15 +32,17 @@ def git(*arguments: str, capture: bool = True) -> bytes:
     return result.stdout if capture else b""
 
 
-def http_witness(source_tree: str | None) -> str:
-    """Read the existing runtime-test pin without executing the test or duplicating that pin."""
-    path = "test/http_config_runtime/run.py"
+def source_text(path: str, source_tree: str | None) -> tuple[str, str]:
     if source_tree:
         filename = f"{source_tree}:{path}"
-        source = git("show", filename).decode("utf-8")
-    else:
-        filename = str(ROOT / path)
-        source = Path(filename).read_text(encoding="utf-8")
+        return git("show", filename).decode("utf-8"), filename
+    filename = ROOT / path
+    return filename.read_text(encoding="utf-8"), str(filename)
+
+
+def http_config_witness(source_tree: str | None) -> str:
+    """Read the existing runtime-test pin without executing the test or duplicating that pin."""
+    source, filename = source_text("test/http_config_runtime/run.py", source_tree)
     tree = ast.parse(source, filename=filename)
     assignments = {
         name: [node.value for node in tree.body if isinstance(node, ast.Assign)
@@ -60,6 +62,15 @@ def http_witness(source_tree: str | None) -> str:
     if len(reads) != 1 or ast.dump(reads[0]) != ast.dump(expected):
         raise HistoryError("HTTP runtime historical read changed; review its hydration contract")
     return pins[0].value + ":main/http_config.cpp"
+
+
+def http_deadline_witness(source_tree: str | None) -> str:
+    source, _ = source_text("test/test_http_deadline_runtime.mjs", source_tree)
+    pins = re.findall(r'^const originalCommit = "([0-9a-f]{40})";$', source, re.MULTILINE)
+    read = 'execute("git", ["-c", "core.fsmonitor=false", "show", `${originalCommit}:main/http_deadline.cpp`])'
+    if len(pins) != 1 or source.count(read) != 1:
+        raise HistoryError("HTTP deadline runtime historical read changed; review its hydration contract")
+    return pins[0] + ":main/http_deadline.cpp"
 
 
 def hydrate(revision: str, path: str) -> None:
@@ -88,9 +99,10 @@ def main() -> int:
         raise HistoryError("--source-tree requires a full SHA")
     if git("rev-parse", "--is-shallow-repository").strip() != b"false":
         raise HistoryError("full commit history and tags are required; shallow checkout refused")
-    witness = http_witness(args.source_tree)
-    revision, path = witness.split(":", 1)
-    hydrate(revision, path)
+    witnesses = (http_config_witness(args.source_tree), http_deadline_witness(args.source_tree))
+    for witness in witnesses:
+        revision, path = witness.split(":", 1)
+        hydrate(revision, path)
     return 0
 
 

@@ -60,11 +60,10 @@ locally when no executable is selected; CI requires it. A missing Docker daemon 
 a browser setup failure, not permission to start a native macOS browser. Report either limitation rather
 than treating the skipped layer as tested.
 
-CI keeps fast checks as steps of one `mechanical_gates` job in
-[build.yml](../.github/workflows/build.yml). The required `build` check consumes that result before
-conditionally compiling the firmware. The separate protected-base `pr-policy.yml` owns required
-review evidence. CI may select mutation selftests by their inputs and run browser rendering only for
-relevant changes; that optimization does not reduce the local contributor obligations above.
+The [local release checks](../docs/MAINTENANCE.md#local-release-checks) supply evidence to the
+required GitHub checks. The protected-base `pr-policy.yml` verifies the receipt and review records.
+[build.yml](../.github/workflows/build.yml) retains the legacy tests and unsigned compile for the
+bootstrap PR, then uses the local evidence for later PRs and the trusted signing workflow.
 
 ## Logic, coverage and hostile inputs
 

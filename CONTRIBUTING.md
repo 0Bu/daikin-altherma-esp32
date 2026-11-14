@@ -71,9 +71,8 @@ resolved graph is committed in [dependencies.lock](dependencies.lock). For an in
 update, edit the manifest, run `scripts/idf-docker.sh idf.py update-dependencies`, then review both
 files. Do not hand-edit the lock.
 
-A local build is useful but is not required to open a PR: CI compiles build-relevant changes and
-retains diagnostic artifacts. State whether you built locally. PR artifacts contain compressed
-ELF/checksum and size reports, with no flashable binary or browser-installer manifest.
+State whether you built locally in the PR. Maintainer pushes run an unsigned target build as
+part of the [local release checks](docs/MAINTENANCE.md#local-release-checks).
 
 **Flashing requires a signed application.** The firmware uses the Secure Boot v2 signature
 scheme without hardware Secure Boot. An unsigned application can crash-loop before `app_main`.

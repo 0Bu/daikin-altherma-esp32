@@ -148,7 +148,14 @@ class PublicationEfficiencyTests(unittest.TestCase):
         build = workflow.split('  build:\n', 1)[1].split('  trusted_build:\n', 1)[0]
         trusted = workflow.split('  trusted_build:\n', 1)[1].split('  publish:\n', 1)[0]
         local = (ROOT / 'scripts/run-local-release-checks.sh').read_text()
-        self.assertIn('verify_push_proof.py pr "$PR_NUMBER" "$current_head"', policy)
+        exception = policy.index('if python3 tools/agent-policy/renovate_action_pr.py')
+        receipt = policy.index('verify_push_proof.py pr "$PR_NUMBER" "$current_head"')
+        self.assertIn('exit 0', policy[exception:receipt])
+        self.assertIn('types: [opened, synchronize, reopened, edited, ready_for_review]', workflow)
+        bootstrap_hygiene = mechanical.split('- name: Audit commit and PR-text privacy and language', 1)[1]
+        bootstrap_hygiene = bootstrap_hygiene.split('- name:', 1)[0]
+        self.assertIn("steps.local_proof.outputs.accepted != 'yes'", bootstrap_hygiene)
+        self.assertNotIn('--event-file', bootstrap_hygiene)
         self.assertIn('git cat-file -e HEAD^1:tools/release/verify_push_proof.py', mechanical)
         checks = mechanical.split('      - name: Scope the mutation self-tests', 1)[1]
         for step in re.split(r'(?m)^      - name: ', checks):

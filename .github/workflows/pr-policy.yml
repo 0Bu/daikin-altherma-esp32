@@ -65,8 +65,6 @@ jobs:
           [ "$current_base" = "$EVENT_BASE_SHA" ] \
             || { echo "agent policy: workflow base $EVENT_BASE_SHA is stale; current PR base is $current_base" >&2; exit 2; }
 
-          python3 tools/release/verify_push_proof.py pr "$PR_NUMBER" "$current_head"
-
           # Read the current editable text from GitHub. The scanner and its rules come from the
           # protected workflow commit; this job never checks out the candidate branch.
           jq '{pull_request: {title, body}}' "$policy_tmp/pr.json" > "$policy_tmp/hygiene-event.json"
@@ -94,16 +92,16 @@ jobs:
             gh api --paginate --slurp \
               "repos/$GITHUB_REPOSITORY/commits/$current_head?per_page=100" \
               > "$policy_tmp/head-commit-pages.json"
-            AGENT_PR_BODY_FILE="$policy_tmp/body.md" \
-            AGENT_PR_HEAD_SHA="$current_head" \
-            AGENT_CHANGED_FILES_FILE="$policy_tmp/files.txt" \
-            AGENT_PR_METADATA_FILE="$policy_tmp/pr.json" \
-            AGENT_PR_HEAD_COMMIT_FILE="$policy_tmp/head-commit.json" \
-            AGENT_PR_HEAD_COMMIT_PAGES_FILE="$policy_tmp/head-commit-pages.json" \
-              ./scripts/run-agent-policy.sh
-          else
-            AGENT_PR_BODY_FILE="$policy_tmp/body.md" \
-            AGENT_PR_HEAD_SHA="$current_head" \
-            AGENT_CHANGED_FILES_FILE="$policy_tmp/files.txt" \
-              ./scripts/run-agent-policy.sh
+            if python3 tools/agent-policy/renovate_action_pr.py "$policy_tmp/pr.json" \
+                "$policy_tmp/head-commit.json" "$policy_tmp/head-commit-pages.json" \
+                "$GITHUB_REPOSITORY" "$current_head"; then
+              echo 'Protected-base attestation passed for the Renovate runner pin.'
+              exit 0
+            fi
           fi
+
+          python3 tools/release/verify_push_proof.py pr "$PR_NUMBER" "$current_head"
+          AGENT_PR_BODY_FILE="$policy_tmp/body.md" \
+          AGENT_PR_HEAD_SHA="$current_head" \
+          AGENT_CHANGED_FILES_FILE="$policy_tmp/files.txt" \
+            ./scripts/run-agent-policy.sh

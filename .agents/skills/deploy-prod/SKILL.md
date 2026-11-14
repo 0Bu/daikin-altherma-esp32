@@ -54,7 +54,9 @@ A PR is firmware-relevant when a changed file matches
 [`tools/release/build-inputs.ere`](../../../tools/release/build-inputs.ere).
 For such a PR, `$deploy-test` must have passed at the exact PR head, and its pinned SHA and result
 must be recorded in the PR body. If not, run `$deploy-test` now; the same applies to every fix head
-from Step 8. A PR without firmware-relevant files skips this step.
+from Step 8. If refreshed main contributes changes to the prospective merge tree, update the
+PR branch and retest its new head so the bench includes those changes. A PR without
+firmware-relevant files skips this step.
 
 ### 1. Deterministic gates and PR records
 
@@ -113,8 +115,8 @@ scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 r
 
 Then read `https://0bu.github.io/daikin-altherma-esp32/dev/manifest.json`. GitHub Pages can lag, so
 retry for a bounded time. Continue only if the manifest's `source_sha` equals the merge commit, and
-note its version and application SHA-256. A PR without firmware-relevant files publishes no dev
-artifact, so the manifest keeps the previous source: report the merge and stop. If a
+note its version and application SHA-256. If the classifier finds no firmware changes since the
+last confirmed publication, the manifest keeps the previous source. Report the merge and stop. If a
 firmware-relevant PR's manifest keeps the previous source after a green run and the bounded wait,
 treat it as **Case A**. A confirmed cumulative-changelog capacity failure uses Step 3a first.
 
@@ -123,7 +125,7 @@ treat it as **Case A**. A confirmed cumulative-changelog capacity failure uses S
 This handoff is already authorized; do not ask for another release approval. Serialize it with
 other sessions' bench, merge and dev-feed gates before changing either published feed.
 
-1. Verify the exact current main head and its successful complete `mechanical_gates` result. The
+1. Verify the exact current main head and its accepted local check receipt. The
    only qualifying failure is `Generate public OTA changelog` reporting cumulative development
    history above the legacy text/document budget. Reproduce it with the production generator and
    the current published feed. Invalid history, provenance, ancestry, versions, transport, signing,
