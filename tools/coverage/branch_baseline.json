@@ -2,6 +2,21 @@
   "measurement_records": [
     {
       "compilers": {
+        "clang-17-darwin": "Apple Clang 17, arm64",
+        "gcc-13-linux-ubuntu24": "Ubuntu GCC 13.3, ESP-IDF v6.1 Docker, aarch64",
+        "gcc-15-linux-ubuntu26": "Ubuntu GCC 15.2, Docker, aarch64",
+        "gcc-15-github-linux-ubuntu26": "Ubuntu GCC 15.2, Docker, x86-64"
+      },
+      "hosted_confirmation": "The x86-64 Docker result is the hosted candidate. Authoritative GitHub CI must confirm it.",
+      "runner": "scripts/run-mock-tests.sh --coverage on Darwin and equivalent gcov measurement in Docker",
+      "scope": "Rolling compressor trace with observed starts, heating, hot water, unclassified runtime, gaps, expiry, reset and bounded retention.",
+      "source": "main/logic/checkup.hpp",
+      "source_sha256": "b24086dd99a1d6e41d3c27043a46ebf09adb87f22f53caa66728601e0efb528d",
+      "test_source_sha256": "c317156dba9e1f16caedb9cd5c7007b2a77f0664ad6d3eb6407f1c75df6a8233",
+      "validation_boundary": "Local host and container evidence only."
+    },
+    {
+      "compilers": {
         "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2), arm64",
         "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 via CI-pinned ESP-IDF v6.1 container, aarch64",
         "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, Ubuntu 26.04 Docker, aarch64"
@@ -1983,8 +1998,8 @@
         "taken": 6
       },
       "main/logic/checkup.hpp": {
-        "taken": 1021,
-        "outcomes": 1103
+        "taken": 1058,
+        "outcomes": 1141
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 331,
@@ -2421,8 +2436,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "taken": 1162,
-        "outcomes": 1257
+        "taken": 1197,
+        "outcomes": 1293
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 391,
@@ -2859,8 +2874,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "taken": 1162,
-        "outcomes": 1257
+        "taken": 1197,
+        "outcomes": 1293
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 391,
@@ -3297,8 +3312,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "taken": 1162,
-        "outcomes": 1257
+        "taken": 1197,
+        "outcomes": 1293
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 391,

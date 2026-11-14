@@ -1,4 +1,4 @@
-// translation-source: 00f8393aee827b21e658965c9ff792c99c563d60de18775bb092ec7c42167e1f
+// translation-source: 34200897e3bb460a7f6fcd68bd6ff940649f8810c9b3709dc7616000e01aee90
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
@@ -222,7 +222,6 @@ I18N.zh = localeValues([
   /* check.cycling.completed */ "已完成的运行",
   /* check.cycling.unclear */ "用途不明",
   /* check.cycling.unclear_hint */ "运行中可能切换模式，也可能只记录到一部分。",
-  /* check.cycling.assessment */ "评估",
   /* check.cycling.short */ "供暖运行的平均时长较短。",
   /* check.cycling.normal */ "供暖运行的平均时长足够。",
   /* check.cycling.few */ "供暖运行次数还太少。",
@@ -231,6 +230,8 @@ I18N.zh = localeValues([
   /* check.cycling.unavailable */ "没有压缩机数据。",
   /* check.cycling.stale */ "当前缺少测量数据。",
   /* check.cycling.history_empty */ "暂无历史记录。",
+  /* check.cycling.timed_starts */ (s) => `有时间记录：${s}`,
+  /* check.cycling.saved_starts */ (s) => `其中 ${s}来自重启前的每小时统计。这些启动没有具体时间记录。`,
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} 最低 ${min} °C · 平均 ${mean} °C`,
   /* check.min */ (m) => `${m} 分钟`,
@@ -1226,7 +1227,7 @@ DESCRIPTION_I18N.zh = descriptionValues([
 MODEL_DESCRIPTION_I18N.zh = modelDescriptionValues([
   ["机组消息", "不证明原因或已解决。"], // health_fault
   ["R5T：分层水箱单点，非能量。", "项目提示≥0.8 K/h仅适用无水泵/类似取水标记窗口。无标记也可能取水；0 K/h不排除热损失。循环重叠不证明原因。"], // health_dhw_loss
-  ["显示已观测到的压缩机启动次数，以及已经结束的运行。", "评估依据是供暖运行的平均时长。"], // health_cycling
+  ["测量有缺口时，部分启动可能漏计。", "启动次数没有固定的正常值。数据充足时，本项检查将已完成的供暖运行平均达到 10 分钟视为时长足够。"], // health_cycling
   ["除霜", "≥3次配对、>15%压缩机运行时间，仅计压缩机及除霜状态均可读时段。项目规则非Daikin限值；缺少湿度及整个盘管温度。"], // health_defrost
   ["水压", "共同项目规则≤1.0 bar；连续观察60秒后警告。非通用，按该机型手册。"], // health_pressure
   ["水泵60秒后流量", "限值需同机型/模式/条件；非额定，也不证明不足。"], // health_flow

@@ -1,4 +1,4 @@
-// translation-source: 00f8393aee827b21e658965c9ff792c99c563d60de18775bb092ec7c42167e1f
+// translation-source: 34200897e3bb460a7f6fcd68bd6ff940649f8810c9b3709dc7616000e01aee90
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -222,7 +222,6 @@ I18N.fr = localeValues([
   /* check.cycling.completed */ "Cycles terminés",
   /* check.cycling.unclear */ "Usage incertain",
   /* check.cycling.unclear_hint */ "Un cycle peut changer de mode ou n’avoir été observé qu’en partie.",
-  /* check.cycling.assessment */ "Bilan",
   /* check.cycling.short */ "Les cycles de chauffage sont courts en moyenne.",
   /* check.cycling.normal */ "Les cycles de chauffage durent assez longtemps en moyenne.",
   /* check.cycling.few */ "Trop peu de cycles de chauffage pour l’instant.",
@@ -231,6 +230,8 @@ I18N.fr = localeValues([
   /* check.cycling.unavailable */ "Aucune donnée du compresseur.",
   /* check.cycling.stale */ "Des mesures manquent actuellement.",
   /* check.cycling.history_empty */ "Pas encore d’historique.",
+  /* check.cycling.timed_starts */ (s) => `Avec heure : ${s}`,
+  /* check.cycling.saved_starts */ (s) => `Sur ce total, ${s} proviennent des relevés horaires d’avant le redémarrage. Leurs heures exactes ne sont pas disponibles.`,
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · moyenne ${mean} °C`,
   /* check.min */ (m) => `${m} min`,
@@ -1226,7 +1227,7 @@ DESCRIPTION_I18N.fr = descriptionValues([
 MODEL_DESCRIPTION_I18N.fr = modelDescriptionValues([
   ["Messages de la pompe ", "ni cause ni résolution prouvées."], // health_fault
   ["R5T : un point du ballon stratifié, pas une énergie.", "Indice interne ≥0,8 K/h sans indice pompe/puisage. Sans indice, un puisage reste possible ; 0 K/h n’exclut pas les pertes. Circulation ne prouve pas la cause."], // health_dhw_loss
-  ["Affiche les démarrages observés et les cycles terminés.", "Le bilan repose sur la durée moyenne des cycles de chauffage."], // health_cycling
+  ["Des mesures manquantes peuvent laisser certains démarrages non comptés.", "Il n’existe pas de nombre normal fixe de démarrages. Avec suffisamment de données, ce contrôle considère qu’une durée moyenne d’au moins 10 minutes est suffisante pour les cycles de chauffage terminés."], // health_cycling
   ["Dégivrage ", "≥3 associés, >15% du temps de marche du compresseur si états compresseur et dégivrage lisibles. Règle interne, pas Daikin; humidité et température de toute la batterie absentes."], // health_defrost
   ["Pression ", "règle interne commune ≤1,0 bar ; 60 s continues observées donnent ALERTE. Pas universelle ; manuel du modèle."], // health_pressure
   ["Débit après 60 s de pompe", "Seuil selon même modèle/mode/conditions ; pas nominal ni preuve de débit insuffisant."], // health_flow

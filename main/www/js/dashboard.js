@@ -1350,13 +1350,24 @@ function checkupCyclingDetailHtml(c, report) {
   else if (c.evidence === "heuristic" && c.verdict === "ok") assessment = "normal";
   else if (c.reason === "heating_runs_insufficient" && starts) assessment = "few";
 
-  return (starts ? `<div class="vdesc-p vdesc-n checkup-cycling-total">${esc(starts)}</div>` : "") +
+  const description = MODEL_DESCRIPTIONS.health_cycling;
+  const [what, normal] = modelDescriptionCopy("health_cycling") || [description.what, description.normal];
+  const saved = Array.isArray(c.hours) ? c.hours.reduce((sum, h) => sum +
+    (h?.restored && !h.expired && count(h.starts) ? h.starts : 0), 0) : 0;
+  const detail = [t(`check.cycling.${assessment}`)];
+  if (starts && saved > 0 && saved <= c.starts)
+    detail.push(t("check.cycling.saved_starts", t("check.starts", saved)));
+  else {
+    detail.push(what);
+    if (rows && c.censored_runs > 0) detail.push(t("check.cycling.unclear_hint"));
+  }
+
+  return `<div class="vdesc-p checkup-cycling-total"><span class="vdesc-n">${esc(starts || checkupStatusText(c))}</span></div>` +
+    `<div class="vdesc-p checkup-cycling-assessment">${esc(detail.join(" "))}</div>` +
     (rows ? `<div class="vdesc-p">${esc(t("check.cycling.completed"))}</div>` +
-      `<div class="inspect-rows checkup-cycling-grid">${rows}</div>` +
-      (c.censored_runs > 0 ? descParaHtml(esc(t("check.cycling.unclear_hint"))) : "") : "") +
-    `<div class="vdesc-p checkup-cycling-assessment"><span class="vdesc-n">` +
-    `${esc(t("check.cycling.assessment"))}</span> · ${esc(t(`check.cycling.${assessment}`))}</div>` +
-    `<div data-checkup-hours></div>`;
+      `<div class="inspect-rows checkup-cycling-grid">${rows}</div>` : "") +
+    `<div data-checkup-hours></div>` +
+    descNoteHtml(t("normal.label"), normal);
 }
 
 function syncCheckupCyclingChart(card) {
@@ -1375,15 +1386,139 @@ function renderCheckupCyclingChart(slot, open = true) {
 }
 
 let cyclingMarkup = [];
+let cyclingTrace;
+// The trace uses monotonic seconds for geometry and a single wall-clock anchor for labels.
+// No edge is synthesized for a missing interval or an hour restored from flash.
+function checkupCyclingTimelineHtml(trace, scope) {
+  const end = trace?.window_end_s, observedEnd = trace?.observed_end_s, unix = trace?.unix_s;
+  const records = trace?.records;
+  if (![end, observedEnd, unix].every(Number.isSafeInteger) || end > 0x1fffffff || end < observedEnd ||
+      observedEnd < 0 || unix <= 0 || unix > 0xffffffff ||
+      !Array.isArray(records) || !records.length || records.length > 192) return "";
+  const start = end - 86400;
+  const hours = Array.from({ length: 24 }, () => ({ starts: [], modes: new Set(), gap: false }));
+  const readable = [];
+  const modes = ["", "", "other", "space", "dhw"];
+  let cursor = start, kind = 0, prior = -1;
+  const cover = (from, until, state) => {
+    if (until <= from) return;
+    if (state !== 0) {
+      const previous = readable.at(-1);
+      if (previous?.[1] === from) previous[1] = until;
+      else readable.push([from, until]);
+    }
+    const first = Math.floor((from - start) / 3600);
+    const last = Math.ceil((until - start) / 3600);
+    for (let i = first; i < last; ++i) {
+      if (state === 0) hours[i].gap = true;
+      if (modes[state]) hours[i].modes.add(modes[state]);
+    }
+  };
+  for (const record of records) {
+    if (!Number.isSafeInteger(record) || record < 0 || record > 0xffffffff) return "";
+    const at = record >>> 3, next = record & 7;
+    if (at < prior || at > observedEnd || next > 5) return "";
+    prior = at;
+    if (next === 5) {
+      if (at >= start) hours[Math.min(23, Math.floor((at - start) / 3600))].starts.push(at);
+      continue;
+    }
+    if (at > cursor) cover(cursor, at, kind);
+    cursor = Math.max(at, start);
+    kind = next;
+  }
+  const last = Math.max(start, observedEnd);
+  cover(cursor, last, kind);
+  cover(last, end, 0);
+  const count = hours.reduce((n, h) => n + h.starts.length, 0);
+  const x = sec => ((sec - start) / 86400 * 2400).toFixed(2);
+  const y = n => (96 - n * 90 / Math.max(count, 1)).toFixed(2);
+  const stamp = new Intl.DateTimeFormat(LANG, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+  const date = new Intl.DateTimeFormat(LANG, { month: "short", day: "numeric" });
+  const wall = sec => (unix + sec - end) * 1000;
+  const clock = sec => stamp.format(wall(sec));
+  const offsetStamp = new Intl.DateTimeFormat(LANG, { hour: "2-digit", minute: "2-digit",
+    hourCycle: "h23", timeZoneName: "shortOffset" });
+  const events = hours.flatMap(h => h.starts);
+  let n = 0, path = "";
+  for (const [from, to] of readable) {
+    while (n < count && events[n] < from) {
+      path += `M ${x(events[n])} ${y(n)} V ${y(n + 1)} `;
+      ++n;
+    }
+    path += `M ${x(from)} ${y(n)} `;
+    while (n < count && events[n] <= to) {
+      path += `H ${x(events[n])} V ${y(n + 1)} `;
+      ++n;
+    }
+    path += `H ${x(to)} `;
+  }
+  while (n < count) {
+    path += `M ${x(events[n])} ${y(n)} V ${y(n + 1)} `;
+    ++n;
+  }
+  let cols = "";
+  hours.forEach(({ starts, modes, gap }, i) => {
+    const from = start + 3600 * i, to = from + 3600;
+    const offsetChange = new Date(wall(from)).getTimezoneOffset() !== new Date(wall(to)).getTimezoneOffset();
+    const span = offsetChange ? `${offsetStamp.format(wall(from))}–${offsetStamp.format(wall(to))}`
+      : `${clock(from)}–${clock(to)}`;
+    const countLabel = !gap || starts.length
+      ? checkupCyclingCountPrefix(starts.length) + t("check.starts", starts.length) : "";
+    const labels = [...modes].map(mode => t({ space: "mode.heat", dhw: "mode.dhw", other: "check.hour.other" }[mode]));
+    if (gap) labels.push(t("sys.nodata"));
+    const value = starts.length || !gap ? starts.length : "";
+    cols += `<button type="button" class="checkup-chart-col" data-bucket="${i}" data-span="${esc(span)}"` +
+      (offsetChange ? " data-offset-change" : "") +
+      ` tabindex="${i === 23 ? 0 : -1}" aria-pressed="false" aria-label="${esc([date.format(wall(from)), span, countLabel, ...labels].filter(Boolean).join(" · "))}">` +
+      `<b>${value}</b><s${gap && modes.size ? ' class="mixed-gap"' : ""}>${gap ? '<i class="gap"></i>' : ""}` +
+      [...modes].map(mode => `<i class="${mode}"></i>`).join("") + "</s></button>";
+  });
+  const axis = [0, 6, 12, 18, 24].map(i => `<span>${esc(clock(start + i * 3600))}</span>`).join("");
+  const legend = [["space", "mode.heat"], ["dhw", "mode.dhw"], ["other", "check.hour.other"], ["gap", "sys.nodata"]]
+    .filter(([mode]) => hours.some(h => mode === "gap" ? h.gap : h.modes.has(mode)))
+    .map(([mode, label]) => `<span class="checkup-chart-key"><i class="${mode}" aria-hidden="true"></i>${esc(t(label))}</span>`)
+    .join("");
+  const total = readable.length || count
+    ? t("check.cycling.timed_starts", checkupCyclingCountPrefix(count) + t("check.starts", count))
+    : t("sys.nodata");
+  return `<div class="vhist checkup-cycling-chart checkup-cycling-timeline" role="group" aria-label="${esc(t("hist.aria", t("check.cycling")))}"` +
+    ` data-cycling="${esc(scope)}"><div class="checkup-chart-graph"><div class="checkup-chart-plot">` +
+    `<span class="checkup-chart-total mono num">${esc(total)}</span>` +
+    `<svg viewBox="0 0 2400 100" preserveAspectRatio="none" aria-hidden="true"><path d="${path}"/></svg></div>` +
+    `<div class="checkup-chart-cols">${cols}</div></div><div class="vhist-axis checkup-chart-axis">` +
+    `<div class="checkup-chart-ticks">${axis}</div><span class="checkup-chart-span" aria-live="polite" hidden></span></div>` +
+    `<div class="checkup-chart-legend">${legend}</div></div>`;
+}
+
 function checkupCyclingChartHtml(c) {
+  const scope = JSON.stringify([S.status?.boot_id, c?.hours_epoch, "timeline"]);
+  if (cyclingTrace?.scope !== scope) cyclingTrace = null;
+  let trace = c?.timeline;
+  if (!trace && c && cyclingTrace) {
+    const previous = cyclingTrace.trace;
+    const elapsed = Math.max(0, (S.status?.uptime_s || 0) - previous.window_end_s);
+    // A temporarily omitted snapshot carries no new readings. Extend only the missing span.
+    trace = { ...previous, window_end_s: previous.window_end_s + elapsed, unix_s: previous.unix_s + elapsed };
+  }
+  if (trace) {
+    const key = JSON.stringify([LANG, scope, trace]);
+    if (cyclingMarkup[0] === key) return cyclingMarkup[1];
+    const timeline = checkupCyclingTimelineHtml(trace, scope);
+    if (timeline) {
+      if (trace === c.timeline) cyclingTrace = { scope, trace };
+      cyclingMarkup = [key, timeline];
+      return timeline;
+    }
+  }
   const hrs = Array.isArray(c?.hours) ? c.hours.slice(-24) : [];
   if (!hrs.length) return descParaHtml(esc(t("check.cycling.history_empty")));
   const identified = Number.isSafeInteger(c.hours_epoch) && hrs.every(h => Number.isSafeInteger(h?.bucket));
   // Only firmware bucket identities outlive a changing frame. Legacy snapshots can be explored,
   // but a pin must not jump to different evidence when that snapshot or its hour changes.
-  const scope = JSON.stringify([S.status?.boot_id, identified ? c.hours_epoch :
+  const hourlyScope = JSON.stringify([S.status?.boot_id, identified ? c.hours_epoch :
     [Math.floor((S.status?.uptime_s || 0) / 3600), hrs]]);
-  const key = JSON.stringify([LANG, scope, hrs]);
+  const key = JSON.stringify([LANG, hourlyScope, hrs]);
   if (cyclingMarkup[0] === key) return cyclingMarkup[1];
   const pad = 24 - hrs.length;
   let sumS = 0, sumR = 0, cols = "", hasObservation = false, hasGap = false;
@@ -1443,7 +1578,7 @@ function checkupCyclingChartHtml(c) {
     .map(([mode, label]) => `<span class="checkup-chart-key"><i class="${mode}" aria-hidden="true"></i>${esc(t(label))}</span>`)
     .join("");
   const html = `<div class="vhist checkup-cycling-chart" role="group" aria-label="${esc(t("hist.aria", t("check.cycling")))}"` +
-    ` data-cycling="${esc(scope)}" data-tip="${esc(meta)}">` +
+    ` data-cycling="${esc(hourlyScope)}" data-tip="${esc(meta)}">` +
     `<div class="checkup-chart-cols">${cols}</div>` +
     `<div class="vhist-axis"><span>${esc(t("check.hour.earlier", 23))}</span>${gapKey}<span>${esc(t("check.hour.latest"))}</span></div>` +
     `<div class="checkup-chart-legend">${legend}</div>` +

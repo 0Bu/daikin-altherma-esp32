@@ -10,17 +10,15 @@
 //
 // TWO SHAPES, because the two routes leak differently:
 //   * /status leaks by FIELD — named values in a JSON object built field by field, so the
-//     substitution happens where the value is written (http_status.cpp calls redact_or) and never as
-//     a post-processing pass over the finished string. That matters: append_status_json() runs
+//     substitution happens where the value is written (http_status.cpp calls redact_or) and never
+//     as a post-processing pass over the finished string. That matters: append_status_json() runs
 //     on the httpd task whose stack overflow killed v1.0.12, and a second full-size buffer is
 //     exactly what that budget has no room for.
 //   * /diag leaks by LINE — a handful of log statements interpolate a host, an IP or an SSID into
 //     free text. That is the non-trivial half and the one the CHECKs are really about.
 //
-// The VALUE is replaced, the KEY is kept. Dropping the field instead would be indistinguishable
-// from an OLDER firmware that never had it, and "which build produced this?" is the first question
-// triage asks of a frozen report ($bug-triage) — a privacy measure must not forge a
-// version signal.
+// The identifying-field substitutions below replace the value and keep its key. The status
+// serializer separately omits the optional compressor timeline in a redacted report.
 //
 // Deliberately NOT redacted, because they identify the FIRMWARE rather than the reporter:
 // version, app_elf_sha256, uptime, heap, the X10A pins, the detected model. And not wifi.rssi /
@@ -37,8 +35,8 @@
 namespace daik {
 
 // The one replacement token. Callers of the report format (and the bug-triage skill) key on this
-// exact string to tell "the reporter scrubbed it" apart from a JSON null (the device reported
-// nothing, e.g. bssid while offline) and from an absent key (an older build).
+// exact string to distinguish a scrubbed identifier from a JSON null (for example, an unavailable
+// BSSID) or a missing field.
 inline constexpr const char* REDACTED = "<redacted>";
 
 // The twenty-nine /status values http_status.cpp passes through redact_identifier (via its jstr_r

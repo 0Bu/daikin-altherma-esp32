@@ -344,15 +344,24 @@ for (const [label, count, mean] of [
   ["mode.heat", 12, "5 min"], ["mode.dhw", 2, "15 min"], ["check.cycling.unclear", 4, null],
 ]) assert.ok(detail.includes(runRow("en", label, count, mean)), label);
 assert.ok(detail.includes(escapeText(ui.text("en", "check.cycling.unclear_hint"))));
-assert.doesNotMatch(detail, /0 runs|830|project hint|90%|&lt;10 min|No universal/i);
-assert.ok(detail.indexOf("≥18 starts") < detail.indexOf("checkup-cycling-grid"));
-assert.ok(detail.indexOf("checkup-cycling-grid") < detail.indexOf("checkup-cycling-assessment"));
-assert.ok(detail.indexOf("checkup-cycling-assessment") < detail.indexOf("data-checkup-hours"));
+assert.doesNotMatch(detail, /0 runs|830|project hint|90%|&lt;10 min/i);
+assert.ok(detail.indexOf("≥18 starts") < detail.indexOf("checkup-cycling-assessment"));
+assert.ok(detail.indexOf("checkup-cycling-assessment") < detail.indexOf("checkup-cycling-grid"));
+assert.ok(detail.indexOf("checkup-cycling-grid") < detail.indexOf("data-checkup-hours"));
 assert.match(detail, /Heating runs are short on average\./);
+assert.match(detail, /Gaps in the readings can leave some starts uncounted\./);
+assert.match(detail, /Normal:<\/span> There is no fixed normal number of starts\./);
+
+const restoredCycling = { ...cycling, starts: 27, hours: [
+  { starts: 22, restored: true }, { starts: 5 }, { starts: 9, restored: true, expired: true },
+] };
+assert.match(ui.detail(restoredCycling), /Of these, 22 starts come from hourly totals saved before the restart/);
+assert.doesNotMatch(ui.detail({ ...restoredCycling, starts: 18 }), /saved before the restart/,
+  "a saved subtotal must be supported by the displayed total");
 
 const noRunCounts = { ...cycling, space_runs: null, space_mean_run_s: 600,
   dhw_runs: null, dhw_mean_run_s: 900, cooling_runs: null, censored_runs: null };
-assert.doesNotMatch(ui.detail(noRunCounts), /checkup-cycling-grid|0 runs|10 min|15 min/,
+assert.doesNotMatch(ui.detail(noRunCounts), /checkup-cycling-grid|0 runs|avg\.|15 min/,
   "missing run counts establish neither a zero nor an average");
 assert.ok(ui.detail({ ...cycling, dhw_runs: 0, dhw_mean_run_s: null })
   .includes(runRow("en", "mode.dhw", 0, null)), "an observed zero count stays distinct from missing data");
@@ -733,7 +742,7 @@ assert.match(model.health_dhw_loss.normal, /zero net cooling does not exclude he
 assert.match(JSON.stringify(model.health_dhw_loss), /correlation, not cause/);
 for (const copy of [model.health_cycling.what, model.health_cycling.normal,
   ...descriptionContext.modelDe.health_cycling]) {
-  assert.ok(copy.length <= 100, "cycling help must fit in a short sentence");
+  assert.ok(copy.length <= 265, "cycling help must fit in a short paragraph");
   assert.doesNotMatch(copy, /≥|90 ?%|Daikin|\bOFF\b|\bON\b/);
 }
 assert.match(model.health_defrost.what, /compressor runtime with readable compressor and defrost states/);
@@ -746,7 +755,7 @@ assert.match(JSON.stringify(model.health_retries), /Stable counters cannot rule 
 assert.doesNotMatch(JSON.stringify(model.health_retries), /with the compressor running|bei laufendem Verdichter/);
 
 // Execute the real card/body builders. Generic diagnoses retain three ordered blocks in each
-// locale. The cycling disclosure has its own assessment and lazy 24-hour chart.
+// locale. Cycling adds completed runs and its lazy 24-hour chart around the same explanation.
 const renderedContext = vm.createContext({
   S: { descOpen: new Set() }, document: { getElementById: () => null },
   localStorage: { getItem: () => "en", setItem: () => {} }, navigator: { language: "en" },
@@ -768,6 +777,11 @@ for (const lang of locales) {
       if (id === "health_cycling") {
         assert.match(diagnosis, /checkup-cycling-assessment/);
         assert.match(diagnosis, /data-checkup-hours/);
+        const normal = `<span class="vdesc-n">${ui.text(lang, "normal.label")}</span>`;
+        assert.ok(body.includes(normal), `${lang}/${id}: Normal block`);
+        assert.ok(body.startsWith('<div class="vdesc-p checkup-cycling-total"><span class="vdesc-n">'));
+        assert.ok(body.indexOf("checkup-cycling-assessment") < body.indexOf("data-checkup-hours"));
+        assert.ok(body.indexOf("data-checkup-hours") < body.indexOf(normal));
         assert.doesNotMatch(diagnosis, /checkup-stop-box|checkup-cycling-chart/);
       } else {
         assert.equal((diagnosis.match(/class="vdesc-p"/g) || []).length, 3, `${lang}/${id}/${verdict}`);

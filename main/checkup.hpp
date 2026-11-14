@@ -84,7 +84,8 @@ void checkup_dhw_reset();
 
 // Copy the judged window and optional chart hours together under the same lock. GET /status and
 // MCP use this snapshot. The POD report and chart storage do not allocate under the lock.
-logic::CheckupReport checkup_report(logic::CheckupCyclingHours* hours = nullptr);
+logic::CheckupReport checkup_report(logic::CheckupCyclingHours* hours = nullptr,
+                                    logic::CheckupCyclingTrace* trace = nullptr);
 
 // Compact completed-run evidence for MQTT. Shares the evaluator's pure projection, without
 // constructing the full eight-check report on the MQTT task's stack. No allocation under its lock.

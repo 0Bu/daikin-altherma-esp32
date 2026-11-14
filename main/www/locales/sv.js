@@ -1,4 +1,4 @@
-// translation-source: 00f8393aee827b21e658965c9ff792c99c563d60de18775bb092ec7c42167e1f
+// translation-source: 34200897e3bb460a7f6fcd68bd6ff940649f8810c9b3709dc7616000e01aee90
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -222,7 +222,6 @@ I18N.sv = localeValues([
   /* check.cycling.completed */ "Avslutade körningar",
   /* check.cycling.unclear */ "Oklart syfte",
   /* check.cycling.unclear_hint */ "En körning kan byta driftläge eller bara ha registrerats delvis.",
-  /* check.cycling.assessment */ "Bedömning",
   /* check.cycling.short */ "Värmekörningarna är korta i genomsnitt.",
   /* check.cycling.normal */ "Värmekörningarna är tillräckligt långa i genomsnitt.",
   /* check.cycling.few */ "För få värmekörningar än så länge.",
@@ -231,6 +230,8 @@ I18N.sv = localeValues([
   /* check.cycling.unavailable */ "Inga kompressordata.",
   /* check.cycling.stale */ "Mätvärden saknas just nu.",
   /* check.cycling.history_empty */ "Ingen historik ännu.",
+  /* check.cycling.timed_starts */ (s) => `Med klockslag: ${s}`,
+  /* check.cycling.saved_starts */ (s) => `Av dessa kommer ${s} från timvärden före omstarten. Klockslagen för de starterna saknas.`,
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · medel ${mean} °C`,
   /* check.min */ (m) => `${m} min`,
@@ -1243,7 +1244,7 @@ DESCRIPTION_I18N.sv = descriptionValues([
 MODEL_DESCRIPTION_I18N.sv = modelDescriptionValues([
   ["Enhetens meddelanden", "inga bevis på orsak eller lösning."], // health_fault
   ["R5T: en punkt i skiktad tank, inte energi.", "Projekttips ≥0,8 K/h utan pump-/tappmarkörer. Tappning möjlig utan markörer; 0 K/h utesluter inte värmeförlust. Cirkulation bevisar inte orsak."], // health_dhw_loss
-  ["Visar observerade starter och avslutade körningar.", "Bedömningen utgår från värmekörningarnas genomsnittliga längd."], // health_cycling
+  ["Vid luckor i mätningarna kan vissa starter saknas i räkningen.", "Det finns inget fast normalt antal starter. Med tillräckliga data bedömer den här kontrollen avslutade värmekörningar på minst 10 minuter i genomsnitt som tillräckligt långa."], // health_cycling
   ["Avfrostning", "≥3 parade, >15% av kompressorns drifttid där både kompressor- och avfrostningsstatus kan läsas. Intern regel, inte Daikin; fuktighet och hela värmeväxlarens temperatur saknas."], // health_defrost
   ["Tryck", "gemensam intern regel ≤1,0 bar; 60 s kontinuerligt observerat ger varning. Inte universell; modellmanual gäller."], // health_pressure
   ["Flöde efter 60 s pump", "Gräns kräver samma modell/läge/förhållanden; inte nominellt eller bevis på för lågt flöde."], // health_flow

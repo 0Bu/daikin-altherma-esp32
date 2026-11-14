@@ -721,7 +721,7 @@ __attribute__((noinline)) WeatherCycleWait weather_cycle(uint32_t               
                     : mqtt_quiesce_failed   ? "MQTT publisher"
                     : modbus_quiesce_failed ? "HomeHub poll"
                     : syslog_quiesce_failed ? "Syslog"
-                                            : "HTTP /values",
+                                            : "HTTP/MCP snapshot reader",
                     static_cast<unsigned>(blocked.free_internal),
                     static_cast<unsigned>(blocked.largest_internal));
         {

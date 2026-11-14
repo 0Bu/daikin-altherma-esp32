@@ -18,7 +18,7 @@ const input = path.join(work, "index_inlined.html");
 const gzipA = path.join(work, "index-a.html.gz");
 const gzipB = path.join(work, "index-b.html.gz");
 const minifiedPath = path.join(work, "index.min.html");
-const budget = 168256;
+const budget = 169400;
 
 try {
   const html = fs.readFileSync(path.join(root, "main/www/index.html"), "utf8");

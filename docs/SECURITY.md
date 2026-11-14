@@ -256,9 +256,11 @@ an authorized signing invocation passes the offline key by path without wrapping
 `GET /status?redact=1` redacts the following 29 identifying fields at emission, with `<redacted>`
 for set identifying values. HVAC mode preserves only its allowlisted public vocabulary; unknown
 source text is hidden without changing control evaluation.
-Unset strings remain empty, unset coordinates null; keys/types and configured-source evidence stay
-present. The dashboard uses ordinary unredacted status. `main/logic/redact.hpp` owns the ordered
-machine contract; the redaction audit compares it with this table and the serializer.
+For these substitutions, unset strings remain empty, unset coordinates stay null, and field keys,
+types and configured-source evidence are preserved. The redaction audit compares the ordered
+contract in `main/logic/redact.hpp` with this table and the serializer.
+Redacted status omits the optional compressor cycling `timeline` because it contains individual
+event timing. The dashboard and the LAN MCP `get_status` tool use ordinary unredacted status.
 
 <!-- redacted-status-fields:start -->
 | Field | Why it goes |

@@ -61,7 +61,7 @@ const catalog = catalogContext.__catalog;
 const lazyDomainCodes = ["zh", "ja", "nb", "sv", "fi"];
 const englishKeys = Object.keys(catalog.en).sort();
 const englishKeyOrder = Object.keys(catalog.en);
-assert.equal(englishKeys.length, 950, "the test must track the complete current UI catalog");
+assert.equal(englishKeys.length, 951, "the test must track the complete current UI catalog");
 for (const [code, source] of localeSources) {
   const sections = [`INSPECT_I18N.${code}`, `MODEL_DESCRIPTION_I18N.${code}`]
     .map(marker => source.indexOf(marker)).filter(index => index >= 0);
@@ -387,8 +387,9 @@ for (const code of codes.slice(2)) {
   assert.match(joined("health_dhw_loss"), /0[,.]8/, `${code} loses the 0.8 K/h project threshold`);
   assert.doesNotMatch(joined("health_dhw_loss"), /1[,.]85/,
     `${code} must not revive the removed upper cooling detection limit`);
-  assert.doesNotMatch(joined("health_cycling"), /\d|X10A|Daikin|rps/,
+  assert.doesNotMatch(joined("health_cycling").replace("10", ""), /\d|X10A|Daikin|rps/,
     `${code} cycling model copy must stay in plain language`);
+  assert.match(modelCopy.health_cycling[1], /10/, `${code} loses the ten-minute reference for heating`);
   assert.match(joined("health_defrost"), /15\s*%/, `${code} loses the 15% defrost heuristic`);
   assert.match(joined("health_defrost"), /\b3\b/, `${code} loses the three-defrost minimum`);
   assert.match(joined("health_defrost"), defrostDenominators[code][0],

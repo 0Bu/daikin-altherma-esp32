@@ -46,8 +46,8 @@ when the backtrace in `last_crash` is genuinely not enough (step 5).
    build, not against `main`** — you cannot re-read the device to resolve an ambiguity, so a claim
    about code the reporter is not running is simply wrong.
 
-   Check for **missing top-level blocks** (`sys`, `ntp`, `board`, `history`, `ota`) — their absence
-   means an older build, not a device that had nothing to say.
+   Compare missing top-level blocks (`sys`, `ntp`, `board`, `history`, `ota`) with the schema of
+   that build. Optional evidence, such as the compressor timeline, can be omitted on current builds.
 
 3. **Route by symptom, and name every gap in ONE comment.** The `What kind of problem is it?`
    dropdown decides what the report needed:
@@ -155,9 +155,9 @@ awk -v h="## Device report (/status)" '$0==h{f=1;next} /^## /{f=0} f' /tmp/repor
 3. `/status`: take the first fenced block in the section, else the whole section, then `jq -e .`.
 4. **If `/status` does not parse, stop** and ask for a clean re-paste. Reasoning from half a JSON
    blob is the failure this whole flow was built to prevent.
-5. **Three states, never conflated:** `"<redacted>"` = the device scrubbed it (`logic/redact.hpp`) ·
-   `null` = the device reported nothing (e.g. `bssid` while offline) · **key absent** = an older
-   build. Only the third one says anything about the firmware.
+5. `"<redacted>"` identifies a scrubbed value. `null` represents unavailable evidence for that
+   field, for example `bssid` while offline. Interpret an absent key against the schema of the
+   reported build and the [redaction contract](../../../docs/SECURITY.md#report-redaction-contract).
 6. `Firmware version` is an index; `/status.version` is the authority. If they disagree, report the
    disagreement — it usually means a stale copy-paste, which makes everything else suspect too.
 7. Tolerate a leading shell-echo line and a UTF-8 BOM before the JSON.

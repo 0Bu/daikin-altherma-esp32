@@ -1,4 +1,4 @@
-// translation-source: 00f8393aee827b21e658965c9ff792c99c563d60de18775bb092ec7c42167e1f
+// translation-source: 34200897e3bb460a7f6fcd68bd6ff940649f8810c9b3709dc7616000e01aee90
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -227,7 +227,6 @@ I18N.pl = localeValues([
   /* check.cycling.completed */ "Zakończone cykle",
   /* check.cycling.unclear */ "Nieustalone",
   /* check.cycling.unclear_hint */ "W trakcie cyklu tryb może się zmienić lub może brakować części pomiarów.",
-  /* check.cycling.assessment */ "Ocena",
   /* check.cycling.short */ "Cykle ogrzewania trwają średnio krótko.",
   /* check.cycling.normal */ "Cykle ogrzewania trwają średnio wystarczająco długo.",
   /* check.cycling.few */ "Jeszcze za mało cykli ogrzewania.",
@@ -236,6 +235,8 @@ I18N.pl = localeValues([
   /* check.cycling.unavailable */ "Brak danych ze sprężarki.",
   /* check.cycling.stale */ "Chwilowo brakuje odczytów.",
   /* check.cycling.history_empty */ "Nie ma jeszcze historii.",
+  /* check.cycling.timed_starts */ (s) => `Z godziną: ${s}`,
+  /* check.cycling.saved_starts */ (s) => `W tym ${s} z zapisów godzinowych sprzed restartu. Brak dokładnych godzin tych uruchomień.`,
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · średnia ${mean} °C`,
   /* check.min */ (m) => `${m} min`,
@@ -1236,7 +1237,7 @@ DESCRIPTION_I18N.pl = descriptionValues([
 MODEL_DESCRIPTION_I18N.pl = modelDescriptionValues([
   ["Komunikaty pompy", "nie dowodzą przyczyny ani naprawy."], // health_fault
   ["R5T: punkt warstwowego zbiornika, nie energia.", "Próg projektu ≥0,8 K/h bez oznaczeń pompy/poboru. Pobór możliwy bez oznaczeń; 0 K/h nie wyklucza strat. Cyrkulacja nie dowodzi przyczyny."], // health_dhw_loss
-  ["Pokazuje zaobserwowane uruchomienia i zakończone cykle.", "Ocena opiera się na średnim czasie trwania cykli ogrzewania."], // health_cycling
+  ["Przy brakujących pomiarach część uruchomień może nie zostać zliczona.", "Nie ma stałej liczby uruchomień uznawanej za normalną. Przy wystarczających danych ta kontrola uznaje średni czas zakończonych cykli ogrzewania wynoszący co najmniej 10 minut za wystarczający."], // health_cycling
   ["Odszranianie", "≥3 powiązane, >15% czasu pracy sprężarki przy czytelnych stanach sprężarki i odszraniania. Reguła projektu, nie Daikin; brak wilgotności i temperatury całego wymiennika."], // health_defrost
   ["Ciśnienie", "wspólna reguła projektu ≤1,0 bar; 60 s ciągłej obserwacji daje ostrzeżenie. Nie uniwersalna; obowiązuje instrukcja modelu."], // health_pressure
   ["Przepływ po 60 s pompy", "Limit wymaga tego samego modelu/trybu/warunków; nie nominalny ani dowód małego przepływu."], // health_flow
