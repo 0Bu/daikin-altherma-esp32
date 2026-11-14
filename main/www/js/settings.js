@@ -527,7 +527,9 @@ function openBoard() {
   $("bdError").hidden = true;
   openPopup("boardModal");
 }
-function closeBoard() { closePopup("boardModal"); boardDraftIdentity = undefined; }
+function closeBoard() {
+  if (closePopup("boardModal") !== false) boardDraftIdentity = undefined;
+}
 
 // ── ENV III outdoor-climate sensor ───────────────────────────────────────
 function env3AvailablePins() {

@@ -247,6 +247,10 @@ const modbus = { at: 1, gen: 1, dt: 300, unit: "°C", t0: null, b0: 100,
   clock += 300000;
   assert.equal(h.expiredHistSlots(full), 2,
     "the last accepted status advances on the browser monotonic clock even without fresh replies");
+  S.statusReceivedAt = clock;
+  S.status.uptime_s = (full.b0 + 290) * full.dt - 1;
+  assert.equal(h.expiredHistSlots(full), 2,
+    "a delayed boot-clock reply cannot revive an expired bucket in the same ring");
   S.status.uptime_s = uptime;
   delete S.statusReceivedAt;
   delete context.historyClock;
@@ -362,7 +366,7 @@ S.hist.set("modbus:dhw_tank", modbus);
   assert.match(h.histHtml("dhw_tank", "", "Tank", "x10a"), /Verlauf nicht verfügbar/,
     "the latest retry cannot keep an already old monotonic sample in view");
   S.status.uptime_s = recentStatus;
-  const legacy = { ...x10a, b0: null, t0: null, refreshFailed: true,
+  const legacy = { ...x10a, v: [...x10a.v], b0: null, t0: null, refreshFailed: true,
     at: Date.now(), receivedAt: Date.now() - 25 * 3600000 };
   S.hist.set("dhw_tank", legacy);
   assert.match(h.histHtml("dhw_tank", "", "Tank", "x10a"), /Verlauf nicht verfügbar/,
