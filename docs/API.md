@@ -590,16 +590,16 @@ return 409 without saving; revalidation can return 400. A service save reconcile
 fields so it cannot roll them back.
 
 HomeHub port is 1–65535, unit 1–247, host at most 512 bytes. Empty host durably disables
-polling, automatic discovery and dependent diagnosis. The save withdraws the old readings
-immediately. The owner retires its socket and cache after OTA or Weather releases the network
-and retries a failed close on a later cycle. An enabled endpoint change can reuse its worker
-and report `close_pending` while it retries the previous socket's close. Disabling the source
+polling, automatic discovery and dependent diagnosis. The save withdraws the old readings and
+releases their cache immediately. The worker retires its socket after OTA or Weather releases
+the network and retries a failed close on a later cycle. An enabled endpoint change can reuse its
+worker and report `close_pending` while it retries the previous socket's close. Disabling the source
 retires its worker. If re-enabled during retirement, the replacement waits for the old worker
 to release the network and deregister from the watchdog. X10A remains independent.
-When HomeHub settings are saved and polling is still pending, the response is
-`{"ok":true,"modbus_start_pending":true}`. This can occur during task startup, cleanup or
-resource pressure. A failed heap check at task creation or before the first sweep defers the next
-start attempt by five seconds. A created worker retries task-local network semaphore and watchdog
+The response adds `"modbus_start_pending":true` when an enabled target still needs worker admission
+or the worker is retiring. Read `/status.modbus.connected` for the live link and `/values.modbus` for
+its readings. A failed heap check at task creation or before the first sweep defers the next start
+attempt by five seconds. A created worker retries task-local network semaphore and watchdog
 admission at its normal poll cadence.
 After core services have started, the X10A task retries worker creation even while its bus is
 unavailable. OTA and Weather network activity defer creation. If the X10A task itself could not

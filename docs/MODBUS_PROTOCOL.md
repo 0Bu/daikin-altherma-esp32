@@ -424,6 +424,7 @@ green/yellow/red state colours as WiFi, MQTT, Syslog and NTP:
   [conversion limit](#deferred-physical-acceptance) in place of a numeric comparison.
 * **X10A down, HomeHub up** — the banner names the active source. Available Modbus rows appear
   in petrol, and missing readings show `—`. The unverified flow remains visible with its limit.
+  The headline uses affirmative space and hot-water activity. Two inactive flags leave it blank.
   Working ΔT, capacity and COP/EER are withheld. The EKRHH guide (4P744838-1E, §9.2.2, p. 43)
   identifies input **51** as heat pump power
   consumption. Its measurement boundary and heater coverage have not been established for matching

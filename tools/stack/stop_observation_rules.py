@@ -932,24 +932,24 @@ for caller, task, prefix, limit in (
 BODIES['main/history.cpp'].update({'history_modbus_reset_scope_locked': 'cbb56d64ed09e01703e672a55798194aaff30da5e3f5c83a96c131860716fd9a',
  'history_modbus_reset': 'feace54ffc1e23ee4c620c183eef77f11ae491619d1c2f627fd58e3a32c4f031',
  'history_modbus_bind_peer': '6edae4ad40931acb7057dbc1f3086fb70423b9aade42ced222805c0bcd7a0a8d',
- 'history_record_modbus': '66f9443e1e5df9e7def10f4070203f1858f1fde6f557b0b38dd1ac3ba0d8403a',
+ 'history_record_modbus': 'ab777a2adeb2ab11c8857a88e94986f24ed3125037a4dc0659649647d941bc67',
  'history_modbus_snapshot': '321197fd5dae1871507ca376de37d70761227dd63f31c1f3f5fed5ba72c7e027',
  'history_splice_snapshot': 'a63845e18ff6d4dfc71e09c6a8b17f821ae4722d029484de633c89c341cdd79e',
  'flash_trend_scope_matches': 'afb6a3e7dcb6b52bc36cb18dc8701bf231b7cfbcc3610dbbd0f9cbcf64222f71',
  'flash_record_valid': 'f3049d9921b9456b50d94bcace8c49fe4b96ed602dd9165df7dfd3439a2fee6a',
- 'flash_build_next_record': '0aad195a438a74f1c2b2a925c3749aec7abd9def84063bd0fcb8d5487507a66b'})
+ 'flash_build_next_record': 'd6a33f73b0e9acb3b80aa66cf64c37f73aba25eac1ebfa5297da0ff3c627bd06'})
 BODIES['main/history_target.cpp'] = {'history_modbus_target': 'a768932c642ee9db5356c672b8ce1876a9ddc6c14385b290494c265f38a7f156'}
 BODIES['main/hp_modbus.cpp'] = {'mb_ensure_connected': 'a09adc44fb9ad2fea8e8f5c364e1a31a1d8eb44314c5f279d1e9d734ea5b4238',
- 'mb_poll_once': '0877f991e968156f1b1ec1d186e2c3fc61368f465d477fdaaa97bdcba32bd229',
+ 'mb_poll_once': '8b82569d4043fed1e6b309ee6987005f35642436ca4a578fedce6e370e86e1c7',
  'status_socket_open': '6acb79527aee70827e7a0a62457febca550aa66fb7c71d750fcb3a56133a62c5'}
 BODIES['main/hp_modbus.cpp'].update({
-    'mb_task': 'd0ccd586b470123866df8cd1c5e57c8133616f34a164a086c5effe490fb8996d',
+    'mb_task': '3d238adfde4e9bdbc5f3a9c87dfcaa909ffcb122abf64af41a5625cd885f2d4a',
     'mb_retire_if_disabled': '3ad4e9aaa5746502185ec526b2fb7ac783035f4cfa312a5864a20e3ac64f06de',
     'mb_task_pending': '7280769fa87e4e8e4cbab4bcbc300132caeb105178b42697a8f86cffe9aebcca',
-    'mb_task_start_if_enabled': 'ce179ed53b66f02c70cfd37d45674fc16c4600b3d7d7d9f4f4f5179042400854',
+    'mb_task_start_if_enabled': 'a14ae89ef71a0ac8e2b477e1781510a520af5f1684f99fd5f60e1c8f5ba2959e',
     'mb_retry_start': '3c644ba9a4c7ff620e76335345808b7f335778e98ffe8f5876c97eddec29ed9c',
     'mb_start': '954ea9970f7921417de460b7f3ebc0298aba357ad5ac5c8bcdff7fbc87368af8',
-    'mb_reconfigure': 'a94f17e36b72c0132347dd27c4eff790abe4648fb12cfeed059db46ba9884044',
+    'mb_reconfigure': '39c9c541f610ff08fa93c059768029a6caacaf65dbf063f24271dae382bf536f',
     'mb_network_quiesced': '1be4f835658858fcf43554071c903544ebe5a95edd9ca09c73d5c9d633f3a5ff',
 })
 BODIES.setdefault('main/main.cpp', {})['boot_sequence'] = 'dbd24138cee2c0dc6738ac7aebcbad527be3c7d64f1d75b30817e178da997eb5'
@@ -1308,7 +1308,7 @@ BODIES['main/hp_modbus.cpp'].update({'failure_message': '215a5739c66c9a99ca1d125
  'status_clear_error': '4c8913f1fdbb94d9421b850c9f89160a614bbee457672b6fee1ddce97d29da28',
  'status_recovered': 'ed413f5bcbb8f189e6b97150ec5eba1ce836d26a382b4e0c5bd064c2afd054c3',
  'mb_status': '0845dca969b3c29eb56d3c0aa0547de01c61fad5908fe9411d100827a40f5434',
- 'mb_reconfigure': 'a94f17e36b72c0132347dd27c4eff790abe4648fb12cfeed059db46ba9884044'})
+ 'mb_reconfigure': '39c9c541f610ff08fa93c059768029a6caacaf65dbf063f24271dae382bf536f'})
 CALLERS.update({'failure_message': {'main/hp_modbus.cpp:<definition>': 1, 'main/hp_modbus.cpp:report_cycle_result': 1},
  'failure_code': {'main/hp_modbus.cpp:<definition>': 1, 'main/hp_modbus.cpp:report_cycle_result': 1},
  'report_connect_error': {'main/hp_modbus.cpp:<definition>': 1, 'main/hp_modbus.cpp:mb_ensure_connected': 1},

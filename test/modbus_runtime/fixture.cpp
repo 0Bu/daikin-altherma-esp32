@@ -196,6 +196,8 @@ bool                       weather_fetch_active() { return adapter::weather_acti
 void                       stack_watch_sample(StackWatch) noexcept { ++adapter::stack_samples; }
 uint32_t                   history_modbus_generation() { return adapter::history_generation; }
 void                       history_modbus_candidate(uint32_t) noexcept {}
+void                       history_modbus_sweep_begin() noexcept {}
+void                       history_modbus_sweep_end() noexcept {}
 logic::HistoryModbusTarget history_modbus_target(std::string_view host, int port,
                                                  int unit) noexcept {
     return fixture_port::history_modbus_target(host, port, unit);
@@ -237,6 +239,8 @@ namespace test {
 using namespace daik;
 using daik::logic::MbFailure;
 using daik::logic::MbFailureType;
+
+bool poll_once() { return mb_poll_once(s_target_generation.load(), true); }
 
 void reset(bool fail_dynamic_mutex_create = false) {
     sdk::fail_allocations     = false;
@@ -303,7 +307,6 @@ void reset(bool fail_dynamic_mutex_create = false) {
     s_mb_task_running          = false;
     s_ota_quiesced             = false;
     s_network_quiesced         = true;
-    s_reconfigure_reset        = false;
     s_next_try_us              = 0;
     s_mb_cache_revision        = 1;
     s_active_profile           = ModbusProfile::Auto;
@@ -1031,7 +1034,7 @@ void require_request_spans(const std::vector<WireRequest>& requests, bool native
 void homehub_definition_rows() {
     reset();
     Peer peer(false, ModbusProfile::HomeHub, wire_words(false));
-    mb_poll_once();
+    poll_once();
     require_catalog_rows(snapshot_rows(), false);
     require_catalog_rows(adapter::history_rows, false);
     require_request_spans(peer.requests_snapshot(), false);
@@ -1047,7 +1050,7 @@ void homehub_definition_rows() {
     // EKRHH input38 has no zero/None state; native's recognized inactive zero must not leak here.
     peer.set_word(MbFunc::ReadInput, 38, 0);
     s_cycle_tick = 0;
-    mb_poll_once();
+    poll_once();
     const auto  zero_rows = snapshot_rows();
     const auto& zero      = cached_row(zero_rows, 38);
     REQUIRE(zero.value == "0");
@@ -1058,7 +1061,7 @@ void homehub_definition_rows() {
 void native_definition_rows() {
     reset();
     Peer peer(false, ModbusProfile::Altherma4, wire_words(true));
-    mb_poll_once();
+    poll_once();
     require_catalog_rows(snapshot_rows(), true);
     require_catalog_rows(adapter::history_rows, true);
     require_request_spans(peer.requests_snapshot(), true);
@@ -1076,7 +1079,7 @@ void native_enum_case(uint16_t offset, MbFunc space, def::HomeHubValueKind expec
     for (uint16_t raw : raw_values) {
         peer.set_word(space, offset, raw);
         s_cycle_tick = 0;
-        mb_poll_once();
+        poll_once();
         const auto  rows       = snapshot_rows();
         const auto& row        = cached_row(rows, offset);
         const auto* definition = def::homehub_definition(row.modbus_definition);
@@ -1119,7 +1122,7 @@ void native_quiet_selection() {
 void native_power_label() {
     reset();
     Peer peer(false, ModbusProfile::Altherma4, wire_words(true));
-    mb_poll_once();
+    poll_once();
     const auto  rows       = snapshot_rows();
     const auto& row        = cached_row(rows, 58);
     const auto* definition = def::homehub_definition(row.modbus_definition);
@@ -1132,7 +1135,7 @@ void native_power_label() {
 void probe_native_promotion() {
     reset();
     Peer peer(true, ModbusProfile::Auto, wire_words(true));
-    mb_poll_once();
+    poll_once();
     auto rows = snapshot_rows();
     REQUIRE(rows.size() == 1 && rows[0].off == 79 && rows[0].value == "1.85");
     REQUIRE(def::homehub_definition(rows[0].modbus_definition) == def::altherma4_find(79));
@@ -1147,7 +1150,7 @@ void probe_native_promotion() {
     REQUIRE(s_cycle_tick == 0);
     peer.batch_exception      = false;
     const auto first_requests = peer.requests_snapshot().size();
-    mb_poll_once();
+    poll_once();
     rows = snapshot_rows();
     require_catalog_rows(rows, true);
     const auto requests = peer.requests_snapshot();
@@ -1162,7 +1165,7 @@ void probe_homehub_rows() {
         words.push_back({MbFunc::ReadInput, 79, MB_UNSUPPORTED});
         Peer peer(false, ModbusProfile::Auto, words);
         peer.probe_exception = exception ? 2 : -1;
-        mb_poll_once();
+        poll_once();
         const auto rows = snapshot_rows();
         require_catalog_rows(rows, false);
         REQUIRE(cached_row(rows, 49).modbus_flow_scale_unverified);
@@ -1176,7 +1179,7 @@ void probe_homehub_rows() {
         auto words = wire_words(false);
         words.push_back({MbFunc::ReadInput, 79, raw});
         Peer peer(false, ModbusProfile::Auto, words);
-        mb_poll_once();
+        poll_once();
         const auto rows = snapshot_rows();
         require_catalog_rows(rows, false);
         REQUIRE(cached_row(rows, 49).modbus_flow_scale_unverified);
@@ -1194,7 +1197,7 @@ void probe_homehub_rows() {
     peer.probe_exception = 0;
     for (int attempt = 0; attempt < logic::MODBUS_PROBE_MAX_RETRIES; ++attempt) {
         s_cycle_tick = 0;
-        mb_poll_once();
+        poll_once();
         REQUIRE(cached_row(snapshot_rows(), 49).modbus_flow_scale_unverified);
     }
     REQUIRE(mb_status().profile == ModbusProfile::HomeHub);
@@ -1204,7 +1207,7 @@ void probe_homehub_rows() {
     peer.set_word(MbFunc::ReadInput, 79, MB_UNSUPPORTED);
     sdk::clock_us = uint64_t{s_probe_tracker.next_reprobe_time_s} * 1000000;
     s_cycle_tick  = 0;
-    mb_poll_once();
+    poll_once();
     REQUIRE(mb_status().profile_basis == ModbusProfileBasis::Affirmative);
     const auto affirmative = snapshot_rows();
     REQUIRE(cached_row(affirmative, 49).modbus_flow_scale_unverified);
@@ -1222,7 +1225,7 @@ void native_gateway_baseline() {
         peer.set_word(MbFunc::ReadInput, 49, 0x0960);
         peer.set_word(MbFunc::ReadHolding, 9, 1); // native Automatic selection
         peer.probe_exception = exception;
-        mb_poll_once();
+        poll_once();
         const auto rows = snapshot_rows();
         REQUIRE(cached_row(rows, 49).value == "24.0");
         REQUIRE(cached_row(rows, 49).modbus_flow_scale_unverified);
@@ -1263,7 +1266,7 @@ void probe_resolved_peer_reconnect() {
     };
     const auto disconnect = [&](Peer& peer) {
         peer.break_link = true;
-        mb_poll_once();
+        poll_once();
         REQUIRE(s_sock < 0 && !mb_values_live());
         REQUIRE(current_compressor() == ModbusCompressor::Unknown);
     };
@@ -1272,7 +1275,7 @@ void probe_resolved_peer_reconnect() {
     {
         Peer peer(open(first_ipv4, first),
                   {{MbFunc::ReadInput, 49, 1234}, {MbFunc::ReadInput, 79, MB_UNSUPPORTED}});
-        mb_poll_once();
+        poll_once();
         REQUIRE(current_compressor() == ModbusCompressor::On);
         REQUIRE(cached_row(snapshot_rows(), 49).modbus_flow_scale_unverified);
         REQUIRE(mb_status().profile_basis == ModbusProfileBasis::Affirmative);
@@ -1284,7 +1287,7 @@ void probe_resolved_peer_reconnect() {
     {
         Peer peer(open(first_ipv4, first),
                   {{MbFunc::ReadInput, 49, 1234}, {MbFunc::ReadInput, 79, MB_WAIT}});
-        mb_poll_once();
+        poll_once();
         REQUIRE(cached_row(snapshot_rows(), 49).modbus_flow_scale_unverified);
         REQUIRE(peer.requests == MB_PLAN.count); // Same resolved peer retains affirmative evidence.
         REQUIRE(adapter::history_generation == first_history_generation);
@@ -1297,7 +1300,7 @@ void probe_resolved_peer_reconnect() {
         peer.all_exceptions  = true;
         peer.probe_exception = 0; // Preserve provisional profile selection for the retry.
         const auto attempts  = adapter::history_bind_attempts;
-        mb_poll_once();
+        poll_once();
         REQUIRE(adapter::history_bind_attempts == attempts);
         REQUIRE(current_compressor() == ModbusCompressor::Unknown);
         REQUIRE(adapter::history_generation == first_history_generation);
@@ -1309,7 +1312,7 @@ void probe_resolved_peer_reconnect() {
         sdk::on_send = [] { throw std::bad_alloc(); };
         bool caught  = false;
         try {
-            mb_poll_once();
+            poll_once();
         } catch (const std::bad_alloc&) {
             caught = true;
         }
@@ -1324,7 +1327,7 @@ void probe_resolved_peer_reconnect() {
         REQUIRE(adapter::history_generation == first_history_generation);
         adapter::history_bind_busy = true;
         const auto calls           = adapter::history_calls;
-        mb_poll_once();
+        poll_once();
         REQUIRE(current_compressor() == ModbusCompressor::Off);
         uint32_t   cache_history_generation = UINT32_MAX;
         const auto rows                     = snapshot_rows(true, &cache_history_generation);
@@ -1335,7 +1338,7 @@ void probe_resolved_peer_reconnect() {
         REQUIRE(mb_status().profile_basis == ModbusProfileBasis::Probing);
         REQUIRE(peer.requests == MB_PLAN.count + 1);
         adapter::history_bind_busy = false;
-        mb_poll_once(); // fast retry binds, but leaves the prior full-cache provenance at zero
+        poll_once(); // fast retry binds, but leaves the prior full-cache provenance at zero
         REQUIRE(adapter::history_generation == first_history_generation + 1);
         REQUIRE(adapter::history_calls == calls);
         (void)snapshot_rows(true, &cache_history_generation);
@@ -1343,7 +1346,7 @@ void probe_resolved_peer_reconnect() {
 
         peer.set_word(MbFunc::ReadInput, 79, MB_UNSUPPORTED);
         s_cycle_tick = 0;
-        mb_poll_once();
+        poll_once();
         REQUIRE(cached_row(snapshot_rows(true, &cache_history_generation), 49)
                     .modbus_flow_scale_unverified);
         REQUIRE(cached_row(adapter::history_rows, 49).modbus_flow_scale_unverified);
@@ -1361,7 +1364,7 @@ void definition_snapshot_cutover() {
         reset();
         const bool native = profile == ModbusProfile::Altherma4;
         Peer       peer(false, profile, wire_words(native));
-        mb_poll_once();
+        poll_once();
         auto retained_copy = snapshot_rows();
         bool called        = false;
         sdk::on_mutex_give = [&] {
@@ -1382,7 +1385,7 @@ void definition_snapshot_cutover() {
 void poll_full_fast_break() {
     reset();
     Peer peer(false, ModbusProfile::HomeHub, {{MbFunc::ReadInput, 37, 0}});
-    mb_poll_once();
+    poll_once();
     const auto revision = mb_cache_generation();
     const auto count    = s_cache.size();
     REQUIRE(count == static_cast<size_t>(def::HOMEHUB_REG_COUNT - 1));
@@ -1395,7 +1398,7 @@ void poll_full_fast_break() {
     peer.outdoor        = 1800;
     peer.set_word(MbFunc::ReadInput, 37, 1);
     sdk::clock_us.fetch_add(1000000);
-    mb_poll_once();
+    poll_once();
     st = mb_status();
     REQUIRE(mb_cache_generation() == revision && s_cache.size() == count);
     REQUIRE(st.plant_outdoor.temperature_c == 18.0);
@@ -1403,17 +1406,23 @@ void poll_full_fast_break() {
     REQUIRE(peer.requests.load() > requests && peer.requests.load() - requests < MB_PLAN.count);
     peer.break_link = true;
     sdk::clock_us.fetch_add(1000000);
-    mb_poll_once();
+    poll_once();
     st = mb_status();
     REQUIRE(!st.connected && st.values == 0 && !st.plant_gate_known && !st.heating_mode_known &&
             !st.space_route_known && !st.space_route_active && !st.plant_outdoor.available);
     REQUIRE(!mb_values_live());
+    REQUIRE(s_cache.capacity() == 0);
     REQUIRE(st.last_error_code == "connection_closed");
+
+    seed_cache();
+    adapter::cfg.mb_host.clear();
+    REQUIRE(!poll_once());
+    REQUIRE(s_cache.capacity() == 0 && !mb_values_live());
 }
 void poll_batch_fallback() {
     reset();
     Peer peer(true);
-    mb_poll_once();
+    poll_once();
     REQUIRE(mb_values_live());
     REQUIRE(s_cache.size() == static_cast<size_t>(def::HOMEHUB_REG_COUNT - 1));
     const int first = peer.requests;
@@ -1422,7 +1431,7 @@ void poll_batch_fallback() {
     for (bool b : s_batch_split) split = split || b;
     REQUIRE(split);
     sdk::clock_us.fetch_add(1000000);
-    mb_poll_once();
+    poll_once();
     REQUIRE(mb_values_live());
     REQUIRE(peer.requests > first);
 }
@@ -1434,7 +1443,7 @@ void poll_history_reply_boundary() {
     sdk::on_send               = [&] {
         if (s_status.rx_ok == 22) sdk::clock_us = boundary + 200000;
     };
-    mb_poll_once();
+    poll_once();
     sdk::on_send = {};
     REQUIRE(adapter::history_calls == 2);
     REQUIRE(adapter::history_reply_slots[0] == 0 && adapter::history_reply_slots[1] == boundary);
@@ -1443,7 +1452,7 @@ void poll_history_reply_boundary() {
 void partial_sweep_allocation_pressure() {
     reset();
     Peer peer(true, ModbusProfile::HomeHub, {{MbFunc::ReadInput, 49, 1234}});
-    mb_poll_once(); // Warm the previous cache, the recorder adapter and the single-read plan.
+    poll_once(); // Warm the previous cache, the recorder adapter and the single-read plan.
     REQUIRE(cached_row(snapshot_rows(), 49).value == "12.3");
     const auto revision      = mb_cache_generation();
     const auto history_calls = adapter::history_calls;
@@ -1458,7 +1467,7 @@ void partial_sweep_allocation_pressure() {
     };
     bool completed = false;
     try {
-        mb_poll_once();
+        poll_once();
         completed = true;
     } catch (const std::bad_alloc&) {}
     const bool exercised_pressure = sdk::fail_allocations;
@@ -1482,13 +1491,13 @@ void partial_sweep_allocation_pressure() {
 
     const auto logs = adapter::logs.size();
     s_cycle_tick    = 0;
-    mb_poll_once();
+    poll_once();
     REQUIRE(adapter::logs.size() == logs);
     peer.space_route_exception = false;
-    mb_poll_once(); // A healthy fast cycle cannot clear a full-cycle error.
+    poll_once(); // A healthy fast cycle cannot clear a full-cycle error.
     REQUIRE(mb_status().last_error == error && adapter::logs.size() == logs);
     s_cycle_tick = 0;
-    mb_poll_once();
+    poll_once();
     const auto recovered = mb_status();
     REQUIRE(recovered.last_error_code.empty() && recovered.last_error.empty());
     REQUIRE(recovered.last_error_detail == -1 && recovered.last_error_register == 0);
@@ -1502,7 +1511,7 @@ void compressor_witness() {
             false, profile,
             {{MbFunc::ReadInput, 31, 1}, {MbFunc::ReadInput, 52, 0}, {MbFunc::ReadInput, 53, 1}});
         REQUIRE(current_compressor() == ModbusCompressor::Unknown);
-        mb_poll_once();
+        poll_once();
         REQUIRE(current_compressor() == ModbusCompressor::On);
         REQUIRE(current_activity().dhw == false && current_activity().space == true);
         REQUIRE(mb_status().dhw_operation_known && !mb_status().dhw_operation_active);
@@ -1511,7 +1520,7 @@ void compressor_witness() {
         peer.set_word(MbFunc::ReadInput, 52, 1);
         peer.set_word(MbFunc::ReadInput, 53, 0);
         sdk::clock_us.fetch_add(1000000);
-        mb_poll_once();
+        poll_once();
         REQUIRE(current_compressor() == ModbusCompressor::Off);
         REQUIRE(current_activity().dhw == true && current_activity().space == false);
         REQUIRE(mb_status().dhw_operation_known && mb_status().dhw_operation_active);
@@ -1522,14 +1531,14 @@ void compressor_witness() {
         for (const uint16_t invalid : {uint16_t{2}, MB_WAIT, MB_UNAVAILABLE, MB_UNSUPPORTED}) {
             s_cycle_tick = 1;
             peer.set_word(MbFunc::ReadInput, 31, invalid);
-            mb_poll_once();
+            poll_once();
             REQUIRE(current_compressor() == ModbusCompressor::Unknown);
             REQUIRE(mb_values_live());
         }
 
         peer.set_word(MbFunc::ReadInput, 31, 1);
         s_cycle_tick = 1;
-        mb_poll_once();
+        poll_once();
         REQUIRE(current_compressor() == ModbusCompressor::On);
         const int64_t expiry_us = (s_compressor_ms + MB_REPLY_MAX_AGE_S * 1000LL) * 1000;
         sdk::clock_us           = expiry_us;
@@ -1546,26 +1555,26 @@ void compressor_witness() {
         REQUIRE(!current_activity().dhw && !current_activity().space);
 
         s_cycle_tick = 1;
-        mb_poll_once();
+        poll_once();
         REQUIRE(current_compressor() == ModbusCompressor::On);
         peer.batch_exception      = true;
         peer.compressor_exception = true;
         s_cycle_tick              = 1;
-        mb_poll_once();
+        poll_once();
         REQUIRE(current_compressor() == ModbusCompressor::Unknown);
         REQUIRE(mb_values_live());
         REQUIRE(mb_status().last_error_register == 31);
 
         peer.compressor_exception = false;
         s_cycle_tick              = 1;
-        mb_poll_once();
+        poll_once();
         REQUIRE(current_compressor() == ModbusCompressor::On);
         REQUIRE(status_socket_open(s_req_host, 502, 1, 1, s_target_generation));
         const auto disconnected = current_activity();
         REQUIRE(disconnected.compressor == ModbusCompressor::Unknown && !disconnected.dhw &&
                 !disconnected.space);
         peer.set_word(MbFunc::ReadInput, 31, 0);
-        mb_poll_once();
+        poll_once();
         REQUIRE(current_compressor() == ModbusCompressor::Off);
         unsigned released  = 0;
         sdk::on_mutex_give = [&] {
@@ -1596,7 +1605,7 @@ void space_route_values() {
     for (const auto profile : {ModbusProfile::HomeHub, ModbusProfile::Altherma4}) {
         reset();
         Peer peer(false, profile, {{MbFunc::ReadInput, 37, 0}});
-        mb_poll_once();
+        poll_once();
         REQUIRE(mb_status().space_route_known && mb_status().space_route_active);
         for (uint32_t tick : {0u, 1u}) {
             for (const auto& expected : cases) {
@@ -1604,7 +1613,7 @@ void space_route_values() {
                 s_cycle_tick = tick;
                 sdk::clock_us.fetch_add(1000000);
                 const auto revision = mb_cache_generation();
-                mb_poll_once();
+                poll_once();
                 const auto st = mb_status();
                 REQUIRE(st.connected && st.plant_gate_known && st.plant_gate_active &&
                         st.heating_mode_known && st.heating_mode_active);
@@ -1620,7 +1629,7 @@ void space_route_missing() {
     for (const auto profile : {ModbusProfile::HomeHub, ModbusProfile::Altherma4}) {
         reset();
         Peer peer(false, profile, {{MbFunc::ReadInput, 37, 0}});
-        mb_poll_once();
+        poll_once();
         REQUIRE(mb_status().space_route_known && mb_status().space_route_active);
         for (uint32_t tick : {0u, 1u}) {
             // An exception for this one register leaves the socket and other gate replies healthy.
@@ -1629,7 +1638,7 @@ void space_route_missing() {
             peer.space_route_exception = true;
             s_cycle_tick               = tick;
             sdk::clock_us.fetch_add(1000000);
-            mb_poll_once();
+            poll_once();
             auto st = mb_status();
             REQUIRE(st.connected && st.plant_gate_known && st.plant_gate_active &&
                     st.heating_mode_known && st.heating_mode_active);
@@ -1638,7 +1647,7 @@ void space_route_missing() {
             peer.space_route_exception = false;
             s_cycle_tick               = tick;
             sdk::clock_us.fetch_add(1000000);
-            mb_poll_once();
+            poll_once();
             st = mb_status();
             REQUIRE(st.connected && st.space_route_known && st.space_route_active);
         }
@@ -1665,12 +1674,12 @@ void space_route_age() {
     for (uint32_t tick : {0u, 1u}) {
         reset();
         Peer peer(false, ModbusProfile::HomeHub, {{MbFunc::ReadInput, 37, 0}});
-        mb_poll_once();
+        poll_once();
         REQUIRE(mb_status().space_route_known && mb_status().space_route_active);
         peer.batch_exception      = true;
         s_cycle_tick              = tick;
         sdk::transport_time_model = true;
-        mb_poll_once();
+        poll_once();
         sdk::transport_time_model = false;
         const int64_t now_ms      = sdk::clock_us / 1000;
         st                        = mb_status();
@@ -1685,7 +1694,7 @@ void space_route_cutover() {
     for (bool fast : {false, true}) {
         reset();
         Peer peer(false, ModbusProfile::HomeHub, {{MbFunc::ReadInput, 37, 0}});
-        mb_poll_once();
+        poll_once();
         REQUIRE(mb_status().space_route_known && mb_status().space_route_active);
         s_cycle_tick             = fast ? 1 : 0;
         const auto revision      = s_mb_cache_revision.load();
@@ -1706,7 +1715,7 @@ void space_route_cutover() {
             adapter::cfg.mb_host = "replacement-unresolved";
             mb_reconfigure(false);
         };
-        mb_poll_once();
+        poll_once();
         sdk::on_mutex_give = {};
         REQUIRE(called && !mb_values_live());
         const auto st = mb_status();
@@ -1718,7 +1727,7 @@ void space_route_cutover() {
     }
     reset();
     Peer peer(false, ModbusProfile::HomeHub, {{MbFunc::ReadInput, 37, 0}});
-    mb_poll_once();
+    poll_once();
     REQUIRE(mb_status().space_route_known && mb_status().space_route_active);
     close_sock();
     REQUIRE(status_socket_open("successor-session", 502, 1, 0, s_target_generation));
@@ -1738,7 +1747,7 @@ void poll_cutover() {
                 mb_reconfigure(false);
             }
         };
-        mb_poll_once();
+        poll_once();
         REQUIRE(called && s_cache.empty() && !mb_values_live());
         const auto st = mb_status();
         REQUIRE(!st.connected && st.values == 0 && !st.plant_gate_known && !st.heating_mode_known);
@@ -1753,7 +1762,7 @@ void poll_cutover() {
             called = true;
             mb_reconfigure(false);
         };
-        mb_poll_once();
+        poll_once();
         sdk::on_mutex_give = {};
         REQUIRE(called && !mb_values_live());
         const auto st = mb_status();
@@ -1767,7 +1776,7 @@ void poll_cutover() {
     {
         reset();
         Peer peer;
-        mb_poll_once();
+        poll_once();
         REQUIRE(mb_status().profile_basis == ModbusProfileBasis::Affirmative);
         int fast_requests = 0;
         for (int i = 0; i < MB_PLAN.count; ++i)
@@ -1781,7 +1790,7 @@ void poll_cutover() {
             called = true;
             mb_reconfigure(false);
         };
-        mb_poll_once();
+        poll_once();
         sdk::on_mutex_give = {};
         REQUIRE(called && !mb_values_live());
         const auto st = mb_status();
@@ -1795,7 +1804,7 @@ void zero_cache_commit() {
     reset();
     sdk::clock_us = 0;
     Peer peer;
-    mb_poll_once();
+    poll_once();
     REQUIRE(s_cache_commit_ms == 0 && s_full_cache_status_ms == 0 && s_last_reply_ms == 0);
     REQUIRE(s_plant_gate_ms == 0 && s_heating_mode_ms == 0 && s_space_route_ms == 0 &&
             s_plant_outdoor_ms == 0);
@@ -1817,7 +1826,7 @@ void profile_cutover() {
     s_status.profile_basis = ModbusProfileBasis::Affirmative;
     adapter::cfg.mb_host   = "unresolved-harness.local";
     mb_reconfigure(true);
-    mb_poll_once();
+    poll_once();
     const auto st = mb_status();
     REQUIRE(st.host == "unresolved-harness.local" && st.last_error_code == "resolve_failed");
     std::cout << "target-profile profile=" << int(st.profile) << " basis=" << int(st.profile_basis)
@@ -1828,10 +1837,10 @@ void profile_cutover() {
 void cache_count() {
     reset();
     Peer peer;
-    mb_poll_once();
+    poll_once();
     const auto committed_count = s_cache.size();
     sdk::clock_us.fetch_add((MB_CACHE_MAX_AGE_S + 1) * 1000000LL);
-    mb_poll_once();
+    poll_once();
     const auto  st   = mb_status();
     bool        live = true;
     CachedValue rows[64];
@@ -1845,7 +1854,7 @@ void fallback_watchdog() {
     reset();
     Peer peer(true);
     sdk::transport_time_model = true;
-    mb_poll_once();
+    poll_once();
     sdk::transport_time_model = false;
     int64_t maximum           = 0;
     for (size_t i = 1; i < sdk::watchdog_feeds.size(); ++i)
@@ -1859,7 +1868,7 @@ void fallback_watchdog() {
 void gate_age() {
     reset();
     Peer peer;
-    mb_poll_once();
+    poll_once();
     const int64_t committed_ms = sdk::clock_us / 1000;
     bool          observed     = false;
     peer.batch_exception       = true;
@@ -1877,7 +1886,7 @@ void gate_age() {
         REQUIRE(elapsed > MB_REPLY_MAX_AGE_S * 1000LL);
         REQUIRE(!st.plant_gate_known && !st.heating_mode_known && !st.plant_outdoor.available);
     };
-    mb_poll_once();
+    poll_once();
     sdk::transport_time_model = false;
     sdk::on_send              = {};
     REQUIRE(observed);
@@ -1934,14 +1943,14 @@ void lifecycle() {
     mb_retry_start();
     REQUIRE(sdk::create_calls == 0 && mb_task_pending() && mb_network_quiesced());
     adapter::ota_active    = false;
-    adapter::largest_block = 6144 + sizeof(StaticTask_t) + 4096 + HEAP_RECOVERY_BYTES - 1;
+    adapter::largest_block = 6144 + sizeof(StaticTask_t) + 4096 + MB_FIRST_SWEEP_HEAP - 1;
     mb_retry_start();
     REQUIRE(sdk::create_calls == 0 && !s_task && mb_task_pending());
     adapter::largest_block++;
     mb_retry_start();
     REQUIRE(sdk::create_calls == 0 && mb_task_pending());
     sdk::clock_us += 5000000;
-    adapter::free_bytes = 6144 + sizeof(StaticTask_t) + 4096 + HEAP_RECOVERY_BYTES - 1;
+    adapter::free_bytes = 6144 + sizeof(StaticTask_t) + 4096 + MB_FIRST_SWEEP_HEAP - 1;
     mb_retry_start();
     REQUIRE(sdk::create_calls == 0 && mb_task_pending());
     adapter::free_bytes++;
@@ -1990,8 +1999,8 @@ void retiring_reenable() {
         mb_reconfigure(true);
         cleanup_pending = s_task == old && sdk::create_calls == 1 && mb_task_pending();
     };
-    bool saw_running        = false;
-    sdk::on_delay           = [&] {
+    bool saw_running = false;
+    sdk::on_delay    = [&] {
         if (sdk::delays == 1) {
             REQUIRE(!mb_task_pending());
             mb_reconfigure(false);
@@ -2112,6 +2121,22 @@ void first_sweep_heap_pressure() {
     worker->fn(worker->arg);
     REQUIRE(!s_task && mb_task_pending() && mb_target_enabled());
     REQUIRE(adapter::config_reads == reads_before_first + 1 && sdk::socket_connects == 0);
+
+    reset();
+    mb_reconfigure(true);
+    const auto admitted_target = s_target_generation.load();
+    mb_reconfigure(true);
+    const auto reads_before_replacement = adapter::config_reads;
+    REQUIRE(!mb_poll_once(admitted_target, false));
+    REQUIRE(adapter::config_reads == reads_before_replacement && sdk::socket_connects == 0);
+    REQUIRE(mb_task_pending() && !mb_status().enabled);
+
+    reset();
+    Peer peer;
+    REQUIRE(poll_once());
+    adapter::cfg.mb_host = "replacement-before-generation-publication.local";
+    REQUIRE(!mb_poll_once(s_target_generation.load(), false));
+    REQUIRE(s_have_req && sdk::socket_connects == 0 && mb_values_live());
 }
 void first_sweep_after_tls() {
     reset();
@@ -2167,6 +2192,22 @@ void socket_setup_and_retirement() {
         worker->fn(worker->arg);
         REQUIRE(!s_task && s_sock == -1 && sdk::delays == 2 && sdk::delete_calls == 1);
     }
+
+    reset();
+    Peer peer;
+    REQUIRE(poll_once());
+    peer.break_link        = true;
+    sdk::fail_socket_close = 1;
+    REQUIRE(!poll_once());
+    REQUIRE(s_sock >= 0 && !s_have_req && s_cache.capacity() == 0);
+    adapter::config_throws = true;
+    bool refused           = false;
+    try {
+        poll_once();
+    } catch (const std::bad_alloc&) {
+        refused = true;
+    }
+    REQUIRE(refused && s_sock == -1);
 }
 void task_oom_and_quiesce() {
     reset();

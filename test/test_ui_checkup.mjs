@@ -93,7 +93,7 @@ assert.match(configSource,
              /homehub_history_identity_changed\([\s\S]*?const auto modbus_target[\s\S]*?const bool modbus_enabled[\s\S]*?config_save\([\s\S]*?if \(reset_mb_history\) \{\s*history_modbus_reset\(modbus_target\);[\s\S]*?mb_reconfigure\(modbus_enabled\);[\s\S]*?mqtt_request_modbus_cleanup\(\);\s*\}/m,
              "/set_hp must reset HomeHub history and reconfigure only when host, port or unit identity changes");
 assert.match(modbusPollSource,
-             /history_generation = history_modbus_generation\(\);\s*if \(!mb_ensure_connected\([^;]+history_generation\)\)/,
+             /history_generation\s*=\s*history_modbus_generation\(\);[\s\S]*?if \(!mb_ensure_connected\([^;]+history_generation\)\)/,
              "the Modbus socket must capture its history generation before connecting");
 assert.match(modbusPollSource,
              /gates\.received_data &&\s*s_last_reply_ms >= 0;[\s\S]*?history_modbus_bind_peer\(\s*s_req_configured_target, s_req_peer_ipv4,\s*s_req_history_expected_generation\)/,

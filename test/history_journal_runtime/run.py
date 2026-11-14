@@ -407,9 +407,20 @@ if not args.expect_red:
          "((void)observed_us, esp_timer_get_time())", ["modbus_reply_bucket"],
          "heater_reply_is_recorded_in_its_own_bucket"),
         ("discard_modbus_reply_after_raster_restore",
-         "if (bucket + 1 != s_mb_bucket || s_mb_reset_requested.load()) return;",
+         "if (bucket + 1 != s_mb_bucket) return;",
          "return;", ["restore_modbus_reply_overlap", "restore_modbus_reply_partial"],
          "modbus_delayed_reply_survives_concurrent_restore"),
+        ("discard_early_replacement_peer_reply",
+         "        s_mb_have_bucket        = false;\n        s_mb_last_commit_us     = kNoCommitUs;",
+         "        if (s_mb_have_bucket && bucket < s_mb_bucket) return;\n"
+         "        s_mb_have_bucket        = false;\n        s_mb_last_commit_us     = kNoCommitUs;",
+         ["modbus_live_peer_change"], "replacement_first_reply_in_previous_bucket_is_retained"),
+        ("write_modbus_bucket_during_full_sweep",
+         "    if (src == HistorySource::Modbus &&\n"
+         "        s_mb_last_commit_bucket - static_cast<int64_t>(age) >= s_mb_sweep_bucket.load())\n"
+         "        return false;\n",
+         "", ["restore_modbus_reply_overlap"],
+         "inflight_modbus_reply_holds_its_bucket_out_of_journal"),
         ("restore_leaves_modbus_open_bucket_behind",
          "else if (bucket > s_mb_bucket)", "else if (false && bucket > s_mb_bucket)",
          ["restore_modbus_pending_at_boundary"], "restore_does_not_commit_the_pending_bucket_twice"),

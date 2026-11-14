@@ -120,6 +120,10 @@ size_t history_room_snapshot(logic::HistorySample* out, size_t max, uint32_t exp
 void history_record_modbus(const CachedValue* v, size_t n, uint32_t identity_generation,
                            int64_t observed_us = -1);
 
+// Hold journal writes for buckets that this full sweep can still change.
+void history_modbus_sweep_begin() noexcept;
+void history_modbus_sweep_end() noexcept;
+
 // Snapshot the current HomeHub history identity before starting a poll. A configuration change bumps
 // it from the HTTP task; a cycle that began against the previous target is then refused at commit.
 uint32_t history_modbus_generation();

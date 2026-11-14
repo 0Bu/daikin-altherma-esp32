@@ -155,20 +155,20 @@ static int64_t  s_cache_commit_ms =
 // Task handle + the connect backoff. s_task is read/written under s_mtx so a /set_hp that lands
 // while the old task is retiring cannot race it into starting two tasks. Discovery is never part of
 // this loop; normal connect failures reuse the X10A sweep's host-tested policy.
-static TaskHandle_t     s_task                 = nullptr;
-static bool             s_task_retiring        = false; // written by worker under s_mtx
-static int64_t          s_task_retry_us        = 0;     // guarded by s_mtx
+static TaskHandle_t s_task          = nullptr;
+static bool         s_task_retiring = false; // written by worker under s_mtx
+static int64_t      s_task_retry_us = 0;     // guarded by s_mtx
 // Full-cache rows, bounded host copies and temporary socket/receive allocations.
 static constexpr size_t MB_FIRST_SWEEP_RESERVE =
     def::ALTHERMA4_REG_COUNT * sizeof(CachedValue) + 5 * (CONFIG_BLOB_MAX_STR + 1) + 4096;
-static DetectBackoff s_backoff;
-// The HTTP task never mutates s_backoff: it bumps the target generation and sends an atomic
-// one-shot; the poll task alone consumes that request and resets its own backoff. This mirrors
+static constexpr size_t MB_FIRST_SWEEP_HEAP = HEAP_RECOVERY_BYTES + MB_FIRST_SWEEP_RESERVE;
+static DetectBackoff    s_backoff;
+// The HTTP task never mutates s_backoff: it bumps the target generation, and the poll task
+// alone observes that generation and resets its own backoff. This mirrors
 // hp_poll.cpp and removes the former plain-int data race. The generation also invalidates a
 // cycle/cache that belongs to the previous HomeHub before the poll task has had time to close that
 // socket.
 static std::atomic<int64_t>  s_next_try_us{0};
-static std::atomic<bool>     s_reconfigure_reset{false};
 static std::atomic<bool>     s_mb_task_running{false};
 static std::atomic<bool>     s_ota_quiesced{false};
 static std::atomic<uint32_t> s_mb_cache_revision{1};
@@ -997,28 +997,67 @@ ModbusStatus mb_status() {
     return s;
 }
 
+// Release the detached vector after dropping the cache lock.
+static void mb_drop_cache(uint32_t expected_target_generation = 0) {
+    std::vector<CachedValue> invalidated_cache;
+    Lock                     lk(s_cache_mtx);
+    if (expected_target_generation != 0 &&
+        s_target_generation.load(std::memory_order_acquire) != expected_target_generation)
+        return;
+    s_cache.swap(invalidated_cache);
+    s_cache_generation         = 0;
+    s_cache_target_generation  = 0;
+    s_cache_history_generation = 0;
+    s_cache_commit_ms          = -1;
+    s_mb_cache_revision.fetch_add(1, std::memory_order_release);
+}
+
+struct ModbusSweepHistory {
+    const bool full;
+    explicit ModbusSweepHistory(bool full_sweep) : full(full_sweep) {
+        if (full) history_modbus_sweep_begin();
+    }
+    ~ModbusSweepHistory() {
+        if (full) history_modbus_sweep_end();
+    }
+};
+
 // ── One poll cycle ───────────────────────────────────────────────────────────────────────────────
-// Reads the HomeHub map into this stack's own cache. Structurally the twin of hp_poll's
-// poll_once(): sized reserve up front, everything staged in locals, one non-allocating commit.
-//
-// TWO CADENCES (logic/modbus_plan.hpp). A FULL cycle reads every batch and commits a new cache; the
-// cycles between it read only the batches carrying diagnosis gates or fast outdoor context and
-// commit only those facts and the link state. The link used to issue one request per register per
-// second — 31 MBAP round-trips a second at a hub that also serves the Onecta app, the MMI and evcc
-// — for a map whose fastest-moving member is a water temperature.
-static bool mb_poll_once() {
-    const uint32_t cycle_target_generation = s_target_generation.load(std::memory_order_acquire);
+// A full cycle builds and commits a new cache. The cycles between it read only the batches
+// carrying diagnosis gates or fast outdoor context. Use the same target the worker admitted.
+static bool mb_poll_once(uint32_t cycle_target_generation, bool allow_reconnect) {
+    if (s_target_generation.load(std::memory_order_acquire) != cycle_target_generation)
+        return false;
+    // A failed close leaves the descriptor with this worker. Retry it before copying the target
+    // or reserving a new cache, which may both fail under the same memory pressure.
+    if (s_sock >= 0 && (!s_have_req || s_req_target_generation != cycle_target_generation) &&
+        !close_sock()) {
+        status_error("close_pending", "waiting for HomeHub socket cleanup", errno, 0, true,
+                     cycle_target_generation);
+        return false;
+    }
     struct ModbusTargetConfig {
         int     mb_port    = 0;
         uint8_t mb_unit_id = 0;
     };
     std::string        target;
     ModbusTargetConfig c;
-    with_config([&](const Config& cfg) {
-        target       = config_modbus_host(cfg);
+    const bool         target_copied = with_config([&](const Config& cfg) {
+        if (s_target_generation.load(std::memory_order_acquire) != cycle_target_generation)
+            return false;
+        const auto& host = config_modbus_host(cfg);
+        // The saved Config can be visible before /set_hp publishes its new generation.
+        if (!allow_reconnect &&
+            (host != s_req_host || cfg.mb_port != s_req_port || cfg.mb_unit_id != s_unit))
+            return false;
+        target       = host;
         c.mb_port    = cfg.mb_port;
         c.mb_unit_id = cfg.mb_unit_id;
+        return true;
     });
+    if (!target_copied ||
+        s_target_generation.load(std::memory_order_acquire) != cycle_target_generation)
+        return false;
 
     // /set_hp owns configured history identity. Bind only the resolved peer here, with a
     // generation captured before DNS so an old connection cannot override a configuration save.
@@ -1040,18 +1079,11 @@ static bool mb_poll_once() {
         // separate trend rings retain only timestamped past samples and receive an explicit gap for
         // this failed cycle. The value cache is otherwise refreshed by full cycles and remains
         // bounded by the full cadence, including the declared request and fallback budgets.
-        {
-            Lock lk(s_cache_mtx);
-            s_cache.clear();
-            s_cache_generation         = 0;
-            s_cache_target_generation  = 0;
-            s_cache_history_generation = 0;
-            s_cache_commit_ms          = 0;
-            s_mb_cache_revision.fetch_add(1, std::memory_order_release);
-        }
+        mb_drop_cache(cycle_target_generation);
         {
             Lock lk(s_mtx);
-            s_status.values = 0;
+            if (s_target_generation.load(std::memory_order_acquire) == cycle_target_generation)
+                s_status.values = 0;
         }
         history_record_modbus(nullptr, 0, history_generation); // advance this identity with a gap
         // Back off before retrying — see s_backoff. Applied by SKIPPING cycles, never by
@@ -1072,7 +1104,8 @@ static bool mb_poll_once() {
 
     // A FULL cycle rebuilds the cache. A fast cycle refreshes the gates and named context without
     // replacing the full value cache.
-    const bool full = logic::mb_cycle_is_full(s_cycle_tick);
+    const bool               full = logic::mb_cycle_is_full(s_cycle_tick);
+    const ModbusSweepHistory sweep_history(full);
 
     uint32_t  first_history_bucket = 0;
     size_t    history_split        = 0;
@@ -1436,6 +1469,7 @@ static bool mb_poll_once() {
             s_compressor    = final_current_session ? gates.compressor : ModbusCompressor::Unknown;
             s_compressor_ms = final_current_session ? gates.compressor_ms : -1;
         }
+        if (!final_current_session) mb_drop_cache(cycle_target_generation);
         report_cycle_result(first_failure, full, final_current_session, cycle_target_generation);
         s_cycle_tick++;
         return false;
@@ -1469,19 +1503,13 @@ static bool mb_poll_once() {
         // Re-check while owning the store. If /set_hp bumped the target before waiting for this
         // lock, refuse the old buffer; if it bumps afterwards, mb_reconfigure waits and clears it
         // itself.
-        if (s_target_generation.load(std::memory_order_acquire) == cycle_target_generation) {
+        if (current_session &&
+            s_target_generation.load(std::memory_order_acquire) == cycle_target_generation) {
             s_cache            = std::move(fresh); // move-assign: steals the buffer, cannot throw
             s_cache_generation = cycle_generation;
             s_cache_target_generation  = cycle_target_generation;
             s_cache_history_generation = s_req_history_generation;
             s_cache_commit_ms          = cache_commit_ms;
-            s_mb_cache_revision.fetch_add(1, std::memory_order_release);
-        } else {
-            s_cache.clear();
-            s_cache_generation         = 0;
-            s_cache_target_generation  = 0;
-            s_cache_history_generation = 0;
-            s_cache_commit_ms          = -1;
             s_mb_cache_revision.fetch_add(1, std::memory_order_release);
         }
     }
@@ -1532,6 +1560,7 @@ static bool mb_poll_once() {
         s_compressor       = final_current_session ? gates.compressor : ModbusCompressor::Unknown;
         s_compressor_ms    = final_current_session ? gates.compressor_ms : -1;
     }
+    if (!final_current_session) mb_drop_cache(cycle_target_generation);
     report_cycle_result(first_failure, full, final_current_session, cycle_target_generation);
     s_cycle_tick = profile_promoted ? 0 : s_cycle_tick + 1;
     return final_current_session && committed > 0 && !profile_promoted;
@@ -1596,6 +1625,7 @@ static void mb_task(void*) {
     bool               ready               = false;
     bool               lwip_ready          = false;
     bool               first_sweep_pending = true;
+    uint32_t           admitted_target     = 0;
     OtaQuiesceState    ota_quiesce;
     bool               ota_quiesce_logged     = false;
     bool               ota_quiesce_cap_logged = false;
@@ -1670,22 +1700,24 @@ static void mb_task(void*) {
             } else if ((ready || (ready = mb_admit_worker(lwip_ready, failures))) &&
                        s_target_enabled.load(std::memory_order_acquire) && !ota_download_active() &&
                        !weather_fetch_active()) {
-                if (s_reconfigure_reset.exchange(false, std::memory_order_acq_rel)) {
+                const uint32_t target = s_target_generation.load(std::memory_order_acquire);
+                if (admitted_target != target) {
+                    admitted_target  = target;
                     s_backoff.silent = 0;
                     s_next_try_us.store(0, std::memory_order_release);
                     first_sweep_pending = true;
                 }
+                if (!s_have_req) first_sweep_pending = true;
                 bool enough_heap = true;
                 if (first_sweep_pending) {
                     esp_task_wdt_reset();
                     // The stack, semaphore and watchdog have already claimed their memory.
                     // Recheck before the first socket and cache allocations.
-                    constexpr size_t first_sweep_reserve =
-                        HEAP_RECOVERY_BYTES + MB_FIRST_SWEEP_RESERVE;
-                    enough_heap = heap_largest_internal_block() >= first_sweep_reserve &&
+                    enough_heap = heap_largest_internal_block() >= MB_FIRST_SWEEP_HEAP &&
                                   heap_caps_get_free_size(MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL) >=
-                                      first_sweep_reserve;
+                                      MB_FIRST_SWEEP_HEAP;
                     if (!enough_heap) {
+                        mb_drop_cache(target);
                         if (close_sock()) {
                             Lock lk(s_mtx);
                             s_status.enabled   = false;
@@ -1696,16 +1728,17 @@ static void mb_task(void*) {
                         }
                         mb_record_poll_gap();
                         status_error("close_pending", "waiting for HomeHub socket cleanup", errno,
-                                     0, true, s_target_generation.load(std::memory_order_acquire));
+                                     0, true, target);
                     } else {
                         Lock lk(s_mtx);
                         s_mb_task_running.store(true, std::memory_order_release);
-                        s_status.enabled = true;
+                        if (s_target_generation.load(std::memory_order_acquire) == target)
+                            s_status.enabled = true;
                     }
                 }
                 try {
                     if (enough_heap && esp_timer_get_time() >= s_next_try_us) {
-                        if (mb_poll_once()) first_sweep_pending = false;
+                        if (mb_poll_once(target, first_sweep_pending)) first_sweep_pending = false;
                         failures.succeeded();
                     }
                 } catch (const std::exception& e) {
@@ -1761,7 +1794,7 @@ static void mb_task_start_if_enabled() noexcept {
         // after the stack, TCB, semaphore, watchdog entry and initial sweep.
         constexpr size_t stack_bytes          = 6144;
         constexpr size_t worker_setup_reserve = sizeof(StaticTask_t) + 4096;
-        constexpr size_t startup_reserve = stack_bytes + worker_setup_reserve + HEAP_RECOVERY_BYTES;
+        constexpr size_t startup_reserve = stack_bytes + worker_setup_reserve + MB_FIRST_SWEEP_HEAP;
         const size_t free_bytes = heap_caps_get_free_size(MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL);
         if (heap_largest_internal_block() < startup_reserve || free_bytes < startup_reserve) {
             s_task_retry_us = now_us + 5 * 1000000;
@@ -1829,6 +1862,7 @@ void mb_reconfigure(bool enabled) noexcept {
         s_target_generation.store(next, std::memory_order_release);
         clear_status_error_locked();
         s_status.connected = false;
+        s_status.enabled   = false;
         s_last_reply_ms    = -1;
         s_poll_observed    = false;
         reset_observation_times_locked();
@@ -1843,19 +1877,9 @@ void mb_reconfigure(bool enabled) noexcept {
         s_status.heating_mode_active = false;
         s_status.plant_outdoor       = logic::OutdoorEvidence{};
     }
-    {
-        // Release the previous target's cache before its worker needs memory for socket cleanup.
-        std::vector<CachedValue> invalidated_cache;
-        Lock                     lk(s_cache_mtx);
-        s_cache.swap(invalidated_cache);
-        s_cache_generation         = 0;
-        s_cache_target_generation  = 0;
-        s_cache_history_generation = 0;
-        s_cache_commit_ms          = -1;
-        s_mb_cache_revision.fetch_add(1, std::memory_order_release);
-    }
+    // Release the previous target's cache before its worker needs memory for socket cleanup.
+    mb_drop_cache();
     s_next_try_us.store(0, std::memory_order_release);
-    s_reconfigure_reset.store(true, std::memory_order_release);
     s_target_enabled.store(enabled, std::memory_order_release);
     mb_task_start_if_enabled();
     // Clearing the address is handled BY the task: its allocation-free atomic target flag is read

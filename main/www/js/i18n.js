@@ -955,12 +955,11 @@ function operationModeText(value) {
 function operationModeFromFlags(dhw, space) {
   return dhw === true && space === true ? t("mode.space_dhw")
        : dhw === true ? t("mode.dhw")
-       : space === true ? t("mode.space")
-       : (dhw === false && space === false) ? t("mode.stop") : null;
+       : space === true ? t("mode.space") : null;
 }
 // The diagram and its explainer are two views of the same state. X10A carries the detailed hydronic
-// enum; while that bus is down, the HomeHub's two activity flags distinguish hot water, generic space
-// operation and stop. A current running compressor rules out stop when the two flags disagree.
+// enum. When X10A is unavailable, affirmative HomeHub flags can report hot water or space operation.
+// Zero flags describe those two functions only. Other modes can still be active.
 function schematicOperationMode() {
   const hp = S.status?.hp || {};
   if (hp.connected) {
@@ -972,10 +971,7 @@ function schematicOperationMode() {
     return operationModeText(row?.value);
   }
   if (!mbLive()) return null;
-  const dhw = mbBool(52);
-  const space = mbBool(53);
-  if (dhw === false && space === false && S.modbusCompressorRunning === true) return null;
-  return operationModeFromFlags(dhw, space);
+  return operationModeFromFlags(mbBool(52), mbBool(53));
 }
 // Localise the static markup in index.html: elements tagged data-i18n get their text set from the
 // dictionary. Runs once at boot (the static DOM is never rebuilt). SVG <text>/<tspan> nodes work the

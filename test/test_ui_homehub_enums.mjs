@@ -304,8 +304,8 @@ assert.equal(de.operationModeFromFlags(false, true), "Raumbetrieb",
   "the HomeHub space flag does not invent Heating when it cannot distinguish Heating/Cooling");
 assert.equal(de.operationModeFromFlags(true, true), "Raumbetrieb + Warmwasser",
   "simultaneous HomeHub flags stay generic about the unsupported space-mode direction");
-assert.equal(de.operationModeFromFlags(false, false), "Stopp",
-  "inactive HomeHub flags feed the same German schematic vocabulary");
+assert.equal(de.operationModeFromFlags(false, false), null,
+  "inactive HomeHub flags leave the overall operating mode unknown");
 assert.equal(de.operationModeFromFlags(null, false), null,
   "incomplete HomeHub flags do not guess an operation mode");
 // The headline names the hydronic mode. The outdoor controller's row is a different quantity, and a
@@ -323,12 +323,15 @@ assert.equal(en.schematicOperationMode(), "Heating", "Protocol S carries its one
 const mbStatus = en.state.status.modbus;
 en.state.status.hp.connected = false;
 en.state._modbus = [52, 53].map(off => ({ off, value: 0, binary: true }));
-assert.equal(en.schematicOperationMode(), "Stop", "an older server can still report its cached mode");
+assert.equal(en.schematicOperationMode(), null, "cached inactive flags do not assert stop");
 assert.equal(en.liveData().spaceOp, false, "an older server still supplies the space pill");
 Object.assign(mbStatus, { dhw_operation_known: true, dhw_operation_active: false,
   plant_gate_known: true, plant_gate_active: false });
-en.state.modbusCompressorRunning = true;
-assert.equal(en.schematicOperationMode(), null, "current compressor activity rules out stop");
+en.state._modbus.push({ off: 83, value: 4, profile: "altherma4", enum: "altherma4_unit_operation_mode" });
+for (const compressor of [false, null, true]) {
+  en.state.modbusCompressorRunning = compressor;
+  assert.equal(en.schematicOperationMode(), null, "inactive flags cannot hide native actuator mode");
+}
 mbStatus.dhw_operation_active = true;
 assert.equal(en.schematicOperationMode(), "Hot water", "the current DHW reply wins over the old row");
 mbStatus.dhw_operation_known = false;

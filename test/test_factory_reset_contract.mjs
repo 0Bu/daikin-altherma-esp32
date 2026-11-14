@@ -369,7 +369,7 @@ assert.match(httpConfig, /reset_checkup && c\.profile != "auto"[\s\S]*?history_x
   "manual concrete-profile or wiring-only updates must install a nonzero history scope");
 
 const modbus = code("main/hp_modbus.cpp");
-const mbPoll = modbus.slice(modbus.indexOf("static bool mb_poll_once()"),
+const mbPoll = modbus.slice(modbus.indexOf("static bool mb_poll_once("),
                             modbus.indexOf("void mb_start()"));
 const historyGeneration = mbPoll.indexOf("history_generation = history_modbus_generation()");
 assert.ok(historyGeneration >= 0 && historyGeneration < mbPoll.indexOf("mb_ensure_connected("),

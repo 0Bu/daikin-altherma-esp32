@@ -245,6 +245,7 @@ std::atomic<uint32_t> s_x10a_target_fp{0};
 std::atomic<bool> s_mb_reset_requested{false};
 std::atomic<uint32_t>      s_mb_identity_generation{1};
 std::atomic<uint32_t>      s_mb_candidate_ipv4{0};
+std::atomic<uint32_t>      s_mb_sweep_bucket{UINT32_MAX};
 uint32_t                   s_mb_ipv4 = 0; // history and flash owner locks after startup
 logic::HistoryModbusTarget s_mb_config_target{};
 bool                       s_mb_peer_bound = false; // history mutex
@@ -1164,6 +1165,12 @@ uint32_t history_modbus_bind_peer(const logic::HistoryModbusTarget& configured, 
 
 uint32_t history_modbus_generation() { return s_mb_identity_generation.load(); }
 
+void history_modbus_sweep_begin() noexcept {
+    s_mb_sweep_bucket.store(logic::history_bucket(esp_timer_get_time()));
+}
+
+void history_modbus_sweep_end() noexcept { s_mb_sweep_bucket.store(UINT32_MAX); }
+
 void history_modbus_candidate(uint32_t ipv4) noexcept { s_mb_candidate_ipv4.store(ipv4); }
 
 uint32_t history_modbus_candidate() noexcept { return s_mb_candidate_ipv4.load(); }
@@ -1539,8 +1546,17 @@ void history_record_modbus(const CachedValue* v, size_t n, uint32_t identity_gen
     if (!s_mb_peer_bound || identity_generation == 0 ||
         identity_generation != s_mb_identity_generation.load())
         return;
+    if (s_mb_reset_requested.exchange(false)) {
+        // The incoming reply starts the replacement peer's raster. Its sample can precede the
+        // retired peer's most recent bucket when a full sweep crosses the closing boundary.
+        s_mb_have_bucket        = false;
+        s_mb_last_commit_us     = kNoCommitUs;
+        s_mb_last_commit_bucket = -1;
+
+        P().residual_us[static_cast<size_t>(logic::HistoryJournalSource::Modbus)] = 0;
+    }
     if (s_mb_have_bucket && bucket < s_mb_bucket) {
-        if (bucket + 1 != s_mb_bucket || s_mb_reset_requested.load()) return;
+        if (bucket + 1 != s_mb_bucket) return;
         for (size_t t = 0; t < HOMEHUB_HISTORY_COUNT; t++) {
             if (!logic::history_is_absent(sample[t]))
                 s_mb_first_measured_bucket = std::min(s_mb_first_measured_bucket, bucket);
@@ -1571,12 +1587,6 @@ void history_record_modbus(const CachedValue* v, size_t n, uint32_t identity_gen
     }
     s_mb_bucket = bucket;
     s_mb_have_bucket = true;
-    if (s_mb_reset_requested.exchange(false)) {
-        const size_t completed = logic::history_completed_samples(bucket);
-        for (auto& ring : P().mb_ring) ring.reset_with_gaps(completed);
-        P().residual_us[static_cast<size_t>(logic::HistoryJournalSource::Modbus)] = 0;
-        s_persist_dirty = true;
-    }
     for (size_t t = 0; t < HOMEHUB_HISTORY_COUNT; t++) {
         if (homehub_event_ring(t)) P().mb_ring[t].fold_binary_event(sample[t]);
         else                       P().mb_ring[t].fold(sample[t]);
@@ -2392,6 +2402,9 @@ bool flash_build_next_record(HistorySource src, FlashJournalRecord& out, TickTyp
     }
     if (target > anchor) return false;
     const size_t age = static_cast<size_t>(anchor - target);
+    if (src == HistorySource::Modbus &&
+        s_mb_last_commit_bucket - static_cast<int64_t>(age) >= s_mb_sweep_bucket.load())
+        return false;
 
     auto& h = out.header;
     h.magic = logic::HISTORY_JOURNAL_MAGIC;

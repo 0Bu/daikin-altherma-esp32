@@ -360,7 +360,11 @@ async function assertPumpCommandTruth(page, context, locale) {
         rotor: false, pipe: false, checkDerived: true, gatewayTankRoute: false },
       { name: "native-flow-unverified", signal: null, state: null, flow: null, command: null,
         x10aDown: true, x10aEmpty: true, homehub: 0, gatewayFlow: 12, gatewayProfile: "altherma4",
-        rotor: false, pipe: false, compressorOff: true, gatewayModeKnown: true, plantStatus: "dyn.state_gate" },
+        rotor: false, pipe: false, compressorOff: true, gatewayModeKnown: true, nativeActuator: true,
+        mode: "sys.x10a_down", plantStatus: "schem.homehub_compressor_off" },
+      { name: "native-actuator-with-unknown-compressor", signal: null, state: null, flow: null, command: null,
+        x10aDown: true, x10aEmpty: true, homehub: 1, gatewayProfile: "altherma4",
+        rotor: false, pipe: false, gatewayModeKnown: true, nativeActuator: true, mode: "sys.x10a_down" },
       { name: "native-flow-beside-x10a", signal: 18, state: 1, flow: 12, command: 82,
         homehub: 0, gatewayFlow: 13, gatewayProfile: "altherma4", rotor: true, pipe: true },
       { name: "probing-flow-unverified", signal: null, state: null, flow: null, command: null,
@@ -398,6 +402,9 @@ async function assertPumpCommandTruth(page, context, locale) {
         if (sample.gatewayModeKnown) S._modbus.push(
           { label: "DHW normal operation", value: 0, off: 52, binary: true },
           { label: "Space heating/cooling normal operation", value: 0, off: 53, binary: true });
+        if (sample.nativeActuator) S._modbus.push(
+          { label: "Unit operation mode", value: 4, off: 83, profile: "altherma4",
+            enum: "altherma4_unit_operation_mode" });
         S._values = sample.x10aEmpty ? [] : [
           { label: "Water pump signal (0:max-100:stop)",
             value: sample.signal == null ? null : String(sample.signal), reg: 0x62, off: 12, conv: 152 },

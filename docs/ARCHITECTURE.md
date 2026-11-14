@@ -246,7 +246,8 @@ configured target. A valid ordinary data reply can confirm the peer while its se
 Binding takes the flash and history locks without waiting. Contention defers binding to a later
 poll. A new TCP peer immediately withholds the previous series from the history endpoint. If the
 confirmed IPv4 differs from the indexed candidate, its series starts without restored samples in
-that boot.
+that boot. A full sweep also holds journal writes for any bucket it can still update, so a reply
+that crosses a bucket boundary can reach flash with its original timestamp.
 
 Warm RAM has no room for the full Modbus binding. Modbus rings start empty after reboot, and
 compatible independent RAM histories can still restore. Older CRC-scoped Modbus journal records

@@ -102,8 +102,8 @@ try {
     },
     {
       name: "worker-skips-first-sweep-heap-check", scenario: "first_sweep_heap_pressure",
-      before: /heap_largest_internal_block\(\) >= first_sweep_reserve &&\s*heap_caps_get_free_size\(MALLOC_CAP_8BIT \| MALLOC_CAP_INTERNAL\) >=\s*first_sweep_reserve/,
-      after: "(static_cast<void>(first_sweep_reserve), true)",
+      before: /heap_largest_internal_block\(\) >= MB_FIRST_SWEEP_HEAP &&\s*heap_caps_get_free_size\(MALLOC_CAP_8BIT \| MALLOC_CAP_INTERNAL\) >=\s*MB_FIRST_SWEEP_HEAP/,
+      after: "true",
     },
     {
       name: "worker-admits-first-sweep-during-tls", scenario: "first_sweep_after_tls",
@@ -112,13 +112,38 @@ try {
     },
     {
       name: "first-sweep-admission-consumed-by-attempt", scenario: "first_sweep_heap_pressure",
-      before: "if (mb_poll_once()) first_sweep_pending = false;",
-      after: "first_sweep_pending = false; mb_poll_once();",
+      before: "if (mb_poll_once(target, first_sweep_pending)) first_sweep_pending = false;",
+      after: "first_sweep_pending = false; mb_poll_once(target, true);",
+    },
+    {
+      name: "worker-admission-ignores-first-sweep-cost", scenario: "lifecycle",
+      before: "stack_bytes + worker_setup_reserve + MB_FIRST_SWEEP_HEAP",
+      after: "stack_bytes + worker_setup_reserve + HEAP_RECOVERY_BYTES",
+    },
+    {
+      name: "poll-admits-replaced-target", scenario: "first_sweep_heap_pressure",
+      before: /static bool mb_poll_once\(uint32_t cycle_target_generation, bool allow_reconnect\) \{\n    if \(s_target_generation\.load\(std::memory_order_acquire\) != cycle_target_generation\)\s*return false;/,
+      after: "static bool mb_poll_once(uint32_t cycle_target_generation, bool allow_reconnect) {\n    cycle_target_generation = s_target_generation.load(std::memory_order_acquire);",
+    },
+    {
+      name: "poll-dials-unadmitted-config", scenario: "first_sweep_heap_pressure",
+      before: /if \(!allow_reconnect &&\s*\(host != s_req_host \|\| cfg\.mb_port != s_req_port \|\| cfg\.mb_unit_id != s_unit\)\)\s*return false;/,
+      after: "(void)allow_reconnect;",
     },
     {
       name: "disabled-worker-retains-cache-allocation", scenario: "socket_setup_and_retirement",
       before: "s_cache.swap(invalidated_cache);",
       after: "s_cache.clear();",
+    },
+    {
+      name: "disconnected-fast-poll-retains-cache-allocation", scenario: "poll_full_fast_break",
+      before: /if \(!final_current_session\) mb_drop_cache\(cycle_target_generation\);\n        report_cycle_result/,
+      after: "report_cycle_result",
+    },
+    {
+      name: "allocate-before-retrying-invalid-socket", scenario: "socket_setup_and_retirement",
+      before: /if \(s_sock >= 0 && \(!s_have_req \|\| s_req_target_generation != cycle_target_generation\) &&\s*!close_sock\(\)\)/,
+      after: "if (false)",
     },
     {
       name: "admit-socket-without-timeouts", scenario: "socket_setup_and_retirement",

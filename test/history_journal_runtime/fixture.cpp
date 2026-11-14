@@ -29,11 +29,11 @@ logic::HistoryModbusTarget history_modbus_target(std::string_view host, int port
 namespace {
 const esp_partition_t  partition{daik::logic::HISTORY_FLASH_PARTITION_OFFSET,
                                 daik::logic::HISTORY_FLASH_PARTITION_BYTES};
-const esp_partition_t* lookup_partition = &partition;
-bool                   refuse_erases    = false;
+const esp_partition_t* lookup_partition    = &partition;
+bool                   refuse_erases       = false;
 size_t                 fail_restore_offset = SIZE_MAX;
 unsigned               fail_restore_reads  = 0;
-}
+} // namespace
 const esp_partition_t* esp_partition_find_first(int, int, const char* label) {
     if (auto hook = std::exchange(journal_sdk::during_find, nullptr)) hook();
     return std::strcmp(label, "history") == 0 ? lookup_partition : nullptr;
@@ -667,15 +667,30 @@ void modbus_live_peer_change() {
             "replacement_ipv4_retires_old_ram_and_browser_epoch");
     require(history_modbus_bind_peer(configured_fp, peer_a, a_generation) == 0,
             "stale_generation_cannot_bind_retired_peer");
+    CachedValue delayed;
+    delayed.off               = 49;
+    delayed.value             = "21.5";
+    delayed.modbus_definition = def::homehub_definition_id(*def::homehub_find(49));
+    history_record_modbus(&delayed, 1, b_generation,
+                          history_raster_boundary_us(sdk::now_us) - 200000);
+    history_record_modbus(nullptr, 0, b_generation);
+    require(has_sample(flow_snapshot(), 215) && !has_sample(flow_snapshot(), 123),
+            "replacement_first_reply_in_previous_bucket_is_retained");
+    require(history_flash_service_journal(8, 0) > 0, "late_replacement_reply_is_persisted");
+    (void)written_flow(configured_fp, peer_b, 215);
+
+    const auto fresh_peer = history_modbus_bind_peer(configured_fp, peer_a, b_generation);
+    require(fresh_peer != 0, "second_peer_transition_binds");
+    const auto next_b_generation = bind_homehub(configured_fp, peer_b);
     record_flow("87.6", a_generation);
     sdk::now_us += 24 * 60 * 60 * 1000000LL;
-    history_record_modbus(nullptr, 0, b_generation);
+    history_record_modbus(nullptr, 0, next_b_generation);
     history_flash_service_journal(8, 0);
     require(s_flash_restore_slot_count[static_cast<size_t>(HistoryJournalSource::Modbus)] == 0 &&
                 s_flash_last_bucket[static_cast<size_t>(HistoryJournalSource::Modbus)] == INT64_MIN,
             "replacement_gaps_alone_do_not_advance_modbus_cursor");
     const auto first_replacement_slot = s_flash_next_slot;
-    record_flow("24.6", b_generation);
+    record_flow("24.6", next_b_generation);
     const auto replacement = flow_snapshot();
     require(has_sample(replacement, 246) && !has_sample(replacement, 123) &&
                 !has_sample(replacement, 876),
@@ -1071,7 +1086,16 @@ void restore_modbus_reply_overlap(const char* transport_path, bool partial_resto
     journal_sdk::unix_origin = delayed_boot_s + 1515;
     history_start();
     const auto generation = bind_homehub(configured, peer_a);
-    sdk::now_us           = history_bucket_us + 200000;
+    sdk::now_us           = history_bucket_us - 200000;
+    history_modbus_sweep_begin();
+    if (!partial_restore) {
+        CachedValue heater;
+        heater.off               = 32;
+        heater.modbus_definition = def::homehub_definition_id(*def::homehub_find(32));
+        heater.value             = "0";
+        history_record_modbus(&heater, 1, generation, sdk::now_us);
+    }
+    sdk::now_us = history_bucket_us + 200000;
     for (unsigned i = 0; i < 20 && !(partial_restore && s_mb_have_bucket); ++i)
         history_service_flash_restore();
     const auto index = static_cast<size_t>(logic::homehub_history_index("bsh_state"));
@@ -1079,12 +1103,19 @@ void restore_modbus_reply_overlap(const char* transport_path, bool partial_resto
     require(partial_restore ? !s_flash_restore_done && !P().mb_ring[index].count
                             : s_flash_restore_done && P().mb_ring[index].count,
             "restore_has_expected_heater_ring_progress");
+    if (!partial_restore) {
+        history_flash_service_journal(12, 0);
+        const auto src = static_cast<size_t>(HistoryJournalSource::Modbus);
+        require(s_flash_last_bucket[src] < history_bucket_from_unix(delayed_boot_s + 1515 + 300),
+                "inflight_modbus_reply_holds_its_bucket_out_of_journal");
+    }
 
     CachedValue heater;
     heater.off               = 32;
     heater.modbus_definition = def::homehub_definition_id(*def::homehub_find(32));
     heater.value             = "1";
     history_record_modbus(&heater, 1, generation, history_bucket_us - 200000);
+    history_modbus_sweep_end();
     for (unsigned i = 0; i < 20 && !s_flash_restore_done; ++i) history_service_flash_restore();
     require(s_flash_restore_done, "restore_finishes_after_first_modbus_reply");
     heater.value = "0";
