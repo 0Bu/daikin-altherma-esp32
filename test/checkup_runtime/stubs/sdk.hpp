@@ -16,6 +16,7 @@ struct HostMutex {
 using SemaphoreHandle_t = HostMutex*;
 namespace sdk {
 inline int64_t   now_us = 1000000;
+inline int       reset_reason = 1; // modeled cold/clean power-on by default
 inline HostMutex mutex;
 inline HostMutex additional_mutexes[3];
 inline unsigned  mutex_count = 0;
@@ -26,7 +27,7 @@ inline void (*before_take)()      = nullptr;
 inline void (*shutdown)()    = nullptr;
 } // namespace sdk
 inline int64_t     esp_timer_get_time() { return sdk::now_us; }
-inline int         esp_reset_reason() { return 1; } // modeled cold/clean power-on
+inline int         esp_reset_reason() { return sdk::reset_reason; }
 inline const char* esp_err_to_name(esp_err_t) { return "host-adapter"; }
 inline esp_err_t   esp_register_shutdown_handler(void (*fn)()) {
     sdk::shutdown = fn;
