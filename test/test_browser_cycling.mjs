@@ -559,7 +559,13 @@ export async function assertCyclingChart(page, server, context) {
     const cycling = status.health.checks[0];
     delete cycling.timeline;
     cycling.starts = 22;
-    cycling.hours = [{ ...hours[RESTORED], starts: 22 }];
+    cycling.hours_epoch = 2;
+    cycling.hours = [
+      { ...hours.find(hour => hour.bucket === RESTORED), bucket: -1, starts: 22,
+        end_unix_s: Date.parse("2026-11-13T15:14:00Z") / 1000 },
+      { bucket: 0, starts: 0, run_s: 0, observed_s: 0, elapsed_s: 60 },
+    ];
+    status.health.persist = "flash";
     await poll("2026-11-13T15:15:00Z");
     assert.deepEqual(await page.evaluate(`(() => {
       const chart = document.querySelector(".checkup-cycling-chart");
@@ -594,9 +600,12 @@ export async function assertCyclingChart(page, server, context) {
     if (!cyclingRow.open) await tap(page, ROW);
     await page.waitFor("!S.clickHold");
     await poll("2026-11-13T15:15:04Z");
-    const archived = await evaluate(page, chart => [...document.querySelectorAll(chart + " button b")]
-      .map(cell => cell.textContent).filter(Boolean), CHART);
-    assert.deepEqual(archived, ["22"], context + ": a readable snapshot restores the archived count");
+    const archived = await evaluate(page, chart => {
+      const saved = document.querySelector(chart + ' button[data-bucket="-1"]');
+      return { count: saved?.querySelector("b").textContent, label: saved?.getAttribute("aria-label") };
+    }, CHART);
+    assert.equal(archived.count, "22", context + ": a readable snapshot restores the archived count");
+    assert.match(archived.label, /^Saved time /, context + ": the browser identifies the restored interval");
     assert.ok(updates >= 3, context + ": verify continuity across repeated production polling");
     console.log("cycling chart checked: " + context + "; " + updates + " live status polls");
   } finally {
