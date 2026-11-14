@@ -362,6 +362,19 @@ function validHistoryBucket(start, count) {
   return start + Math.max(0, count - 1) <= Math.floor((uptime + seconds + 1 + POLL_TIMEOUT_MS / 1000) / 300);
 }
 
+function validHistoryTime(start, bucket, count) {
+  if (start == null) return true;
+  if (!Number.isSafeInteger(start) || Math.abs(start) > 8.64e12 - HIST_MAX_SAMPLES * 300)
+    return false;
+  if (Number.isInteger(bucket) || !count) return true;
+  // Without a monotonic anchor, a restored ring needs an accepted device clock for alignment.
+  const deviceTime = historyDeviceTime();
+  if (!Number.isFinite(deviceTime)) return false;
+  const last = start + (count - 1) * 300;
+  return last <= deviceTime + 1 + POLL_TIMEOUT_MS / 1000 &&
+    last + 300 > deviceTime - HIST_MAX_SAMPLES * 300;
+}
+
 async function readHistory(id, source, key, epoch, previous, request) {
   const sourceId = source === "modbus" ? (modbusEndpointId() || "modbus") : source;
   const controller = typeof AbortController === "function" ? new AbortController() : null;
@@ -396,7 +409,7 @@ async function readHistory(id, source, key, epoch, previous, request) {
         (j.unit != null && (typeof j.unit !== "string" || j.unit.length > 7)) ||
         (j.dt != null && j.dt !== 300) ||
         !validHistoryBucket(j.b0, j.v.length) ||
-        (j.t0 != null && (!Number.isSafeInteger(j.t0) || Math.abs(j.t0) > 8.64e12 - HIST_MAX_SAMPLES * 300)) ||
+        !validHistoryTime(j.t0, j.b0, j.v.length) ||
         (j.held != null && (!validHistoryHeld(j.held, j.v) ||
           (j.held.length > 0 && (expectedSource !== "x10a" || !X10A_HELD_HISTORY.has(id))))))) {
       S.hist.set(key, failed());
@@ -761,12 +774,19 @@ function alignedHistoryView(id, raw) {
 const historyBrowserTime = () => typeof historyClock === "function" ? historyClock() : Date.now();
 const historyElapsed = h => Math.max(0, h.receivedTick == null
   ? Date.now() - (h.receivedAt ?? Date.now()) : historyBrowserTime() - h.receivedTick);
+const historyStatusElapsed = (now = historyBrowserTime()) =>
+  Math.max(0, now - (S.statusReceivedAt ?? now)) / 1000;
+
+function historyDeviceTime() {
+  if (S.otaCached || !S.status?.ntp?.synced || S.transportUnavailable === "status")
+    return Number.NaN;
+  return Date.parse(S.status.ntp.time || "") / 1000 + historyStatusElapsed();
+}
 
 function expiredHistSlots(h) {
   if (!h?.v.length) return 0;
-  const now = historyBrowserTime();
   const elapsed = historyElapsed(h) / 1000;
-  const statusElapsed = S.otaCached ? 0 : Math.max(0, now - (S.statusReceivedAt ?? now)) / 1000;
+  const statusElapsed = S.otaCached ? 0 : historyStatusElapsed();
   const dt = h.dt || 300;
   let current = Math.floor(elapsed / dt) + h.v.length;
   let start = 0;
@@ -776,9 +796,9 @@ function expiredHistSlots(h) {
     current = Math.max(current + start, Number.isFinite(uptime) ? Math.floor((uptime + statusElapsed) / dt) : start);
   } else if (h.t0 != null) {
     start = Math.floor(h.t0 / dt);
-    const deviceTime = Date.parse(S.status?.ntp?.time || "") / 1000;
+    const deviceTime = historyDeviceTime();
     current = Math.max(current + start,
-      Number.isFinite(deviceTime) ? Math.floor((deviceTime + statusElapsed) / dt) : start);
+      Number.isFinite(deviceTime) ? Math.floor(deviceTime / dt) : start);
   }
   return Math.max(0, Math.min(h.v.length, current - HIST_MAX_SAMPLES - start));
 }
@@ -1186,8 +1206,10 @@ function stateRunWhen(view, from, count) {
     return `${clock(from)}–${clock(from + count)}`;
   }
   const n = view.recordedN ?? view.v.length;
-  if (histRetained(view))
-    return `${scrubTime(view, from)}–${scrubTime(view, Math.min(n - 1, from + count))}`;
+  if (histRetained(view)) {
+    // Without a clock, show the phase's last recorded slot. The caller reports its duration.
+    return scrubTime(view, from + count - 1);
+  }
   const old = ((n - from) * view.dt) / 3600;
   const recent = ((n - from - count) * view.dt) / 3600;
   return t("hist.boost_ago_range", histFmt1(old), histFmt1(Math.max(0, recent)));
@@ -1754,7 +1776,7 @@ function histPinIndex(id, h) {
     return i < 0 ? -1 : h.v.length + i;
   }
   if (p.live) {
-    if (h.liveIndex != null && p.gen === h.gen && p.sources === histPinSources(h) &&
+    if (h.liveIndex != null && p.sources === histPinSources(h) &&
         p.sample === liveHistoryPinSample(id, p.source)) return h.liveIndex;
     if (p.source === (h.scope ?? "")) S.histPin.delete(id);
     return -1;
@@ -1837,7 +1859,7 @@ function histPinToggle(id, i, source = "") {
   i = Math.max(0, Math.min(total - 1, i));
   if (histPinIndex(id, h) === i) S.histPin.delete(id);
   else if (i >= h.v.length) S.histPin.set(id, { t: forecast.points[i - h.v.length].time, forecast: true });
-  else if (i === h.liveIndex) S.histPin.set(id, { i, gen: h.gen, sources: histPinSources(h), source,
+  else if (i === h.liveIndex) S.histPin.set(id, { sources: histPinSources(h), source,
     live: true, sample: liveHistoryPinSample(id, source) });
   else if (h.t0 != null) {
     const visible = histPinSeries(h);

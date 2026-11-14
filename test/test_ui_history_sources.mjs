@@ -113,6 +113,7 @@ const labels = {
   "hist.loading": "Verlauf wird geladen…", "hist.err": "Verlauf nicht verfügbar.",
   "hist.none": "Noch keine Messwerte aufgezeichnet.", "hist.title": "Letzte 24 Stunden",
   "hist.now": "jetzt", "hist.nm": "nicht gemessen", "hist.held": "Außeneinheit ruht",
+  "hist.retained": "Letzter empfangener Messwert",
 };
 const context = {
   S, LANG: "de", renderApp() {}, renderCards() {}, renderInspect() {}, renderSettings() {},
@@ -310,7 +311,7 @@ S.hist.set("modbus:dhw_tank", modbus);
   await h.ensureHist("dhw_tank");
   h.histSeriesToggle("dhw_tank", "modbus");
   const retained = h.histHtml("dhw_tank", "", "Tank");
-  assert.match(retained, /vhist-retained[^>]*aria-label="X10A · hist\.retained"[^>]*left:0\.000%/,
+  assert.match(retained, /vhist-retained[^>]*aria-label="X10A · Letzter empfangener Messwert"[^>]*left:0\.000%/,
     "the last received marker points at the measurement before the trailing gaps");
   const recentStatus = S.status.uptime_s;
   S.hist.set("dhw_tank", { ...S.hist.get("dhw_tank"), t0: 1768720000 });
@@ -374,6 +375,26 @@ assert.equal(h.histCacheKey("dhw_tank", "modbus"), "modbus:dhw_tank");
   assert.deepEqual(Array.from(S.hist.get("modbus:dhw_tank").v), modbus.v,
     "an impossible boot-relative bucket must preserve the compatible ring");
   assert.equal(S.hist.get("modbus:dhw_tank").refreshFailed, true);
+  const ntp = S.status.ntp;
+  const time = 1768720600;
+  S.status.ntp = { synced: true, time: new Date(time * 1000).toISOString() };
+  S.hist.set("modbus:dhw_tank", { ...modbus, at: 0 });
+  historyResponse = { ...defaultHistoryResponse, b0: undefined, t0: 4102444800, v: [520] };
+  await h.ensureHist("dhw_tank", "modbus");
+  assert.deepEqual(Array.from(S.hist.get("modbus:dhw_tank").v), modbus.v,
+    "a future wall-clock-only reply must preserve the compatible ring");
+  assert.equal(S.hist.get("modbus:dhw_tank").refreshFailed, true);
+  S.hist.delete("modbus:dhw_tank");
+  historyResponse = { ...historyResponse, t0: time - 300 };
+  await h.ensureHist("dhw_tank", "modbus");
+  assert.equal(S.hist.get("modbus:dhw_tank").t0, time - 300,
+    "a time-only reply within the device window can restore history predating boot");
+  S.hist.set("modbus:dhw_tank", { ...modbus, at: 0 });
+  S.status.ntp = { synced: false, time: null };
+  await h.ensureHist("dhw_tank", "modbus");
+  assert.deepEqual(Array.from(S.hist.get("modbus:dhw_tank").v), modbus.v,
+    "an unverified wall anchor cannot displace the last compatible ring");
+  S.status.ntp = ntp;
   S.status.uptime_s = uptime;
   historyResponse = old;
   S.hist.set("modbus:dhw_tank", modbus);
@@ -947,6 +968,14 @@ assert.match(bshX10aHtml, /data-source="x10a"/);
 assert.match(h.scrubText(bshX10aView, 1), /^\d{2}:\d{2}–\d{2}:\d{2} · Aktiv$/);
 assert.doesNotMatch(h.scrubText(bshX10aView, 1), /X10A|Modbus|Heizstab|ca\.|min/);
 {
+  const old = S.hist.get("bsh_state");
+  S.hist.set("bsh_state", { ...old, t0: null, v: [10], refreshFailed: true });
+  const retained = h.historyView("bsh_state", "x10a");
+  assert.equal(h.scrubText(retained, 0), "Letzter empfangener Messwert · Aktiv",
+    "one undated retained slot shows its last reading once");
+  S.hist.set("bsh_state", old);
+}
+{
   const prevValues = S._values, prevModbus = S._modbus;
   S._values = [{ concept: "bsh_state", value: "1" }];
   S._modbus = [{ concept: "bsh_state", value: "0" }];
@@ -956,6 +985,12 @@ assert.doesNotMatch(h.scrubText(bshX10aView, 1), /X10A|Modbus|Heizstab|ca\.|min/
     "the paired chart does not render a pin tied to a filtered observation");
   assert.equal(h.histPinIndex("bsh_state", h.historyView("bsh_state", "x10a")), view.liveIndex,
     "rendering the paired chart must leave the source-filtered pin intact");
+  const old = S.hist.get("bsh_state");
+  S.hist.set("bsh_state", { ...old, gen: old.gen + 1, v: [...old.v, 0] });
+  const updated = h.historyView("bsh_state", "x10a");
+  assert.equal(h.histPinIndex("bsh_state", updated), updated.liveIndex,
+    "updating the recorded buckets cannot retire an unchanged live observation");
+  S.hist.set("bsh_state", old);
   S.histPin.delete("bsh_state");
   S._values = prevValues;
   S._modbus = prevModbus;
@@ -1196,7 +1231,7 @@ assert.match(dhwHtml, /5 min/, "DHW legend must include BSH duration");
   const key = "modbus:smart_grid_mode";
   const ring = S.hist.get(key);
   S.hist.set(key, { ...ring, refreshFailed: true });
-  assert.match(h.histHtml("dhw_tank", "°C", "Tank"), /Empfehlung ein · Modbus · hist\.retained/);
+  assert.match(h.histHtml("dhw_tank", "°C", "Tank"), /Empfehlung ein · Modbus · Letzter empfangener Messwert/);
   S.hist.set(key, { err: true, v: [] });
   assert.match(h.histHtml("dhw_tank", "°C", "Tank"), /Empfehlung ein · Modbus · Verlauf nicht verfügbar/);
   S.hist.set(key, ring);

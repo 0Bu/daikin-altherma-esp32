@@ -454,6 +454,8 @@ responses superseded by a newer status/source generation.
 The dashboard accepts up to 288 samples on the 300-second raster. It accepts a reply without row
 and source identity only if both are absent and `/status` predates the history epoch. A supplied
 identity must match the request, along with the boot and epoch tokens announced by `/status`.
+A nonempty wall-clock-only reply also needs a synchronized device clock and a newest sample in
+the rolling day. The browser preserves a compatible ring when it rejects the replacement.
 `v` does not record an unknown compressor state. A sweep dropped after a stop cannot put a number into
 its bucket, but any other outdoor sample without a readable speed stays a number, so a number is not
 proof that the page was current.
