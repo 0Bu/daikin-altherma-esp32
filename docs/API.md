@@ -229,6 +229,7 @@ empty pause/failure callbacks cannot renew it. `source_fresh` applies the 15-sec
 bound at read time. A stale source
 withholds current fault-clear/current pressure and reassuring assessments; dated findings remain.
 The serializer captures `health.persist`, the judged window and Cycling hours together.
+The independently collected Cycling Stop context can still report its own evidence.
 `health.persist:"flash_pending"` means recovery has not completed and proves no stored hours;
 `fresh` means none were selected; `flash` means admissible dated hourly reconstruction with live
 precedence. Completed RAM hours are never adopted. `unknown` means the snapshot was unreadable.

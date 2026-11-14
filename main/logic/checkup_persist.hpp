@@ -83,10 +83,9 @@ inline constexpr const char* checkup_restore_slug(CheckupRestore r) {
             return "fresh";
         case CheckupRestore::Flash:
             return "flash";
-        case CheckupRestore::Unknown:
+        default:
             return "unknown";
-    }
-    return "unknown";
+        }
 }
 
 // Order is deliberate, and is why this is a function rather than a chain of ifs at the call site:
