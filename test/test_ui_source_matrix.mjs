@@ -508,22 +508,22 @@ const X_2WV = (on) => ({ label: "2way valve(On:Heat_Off:Cool)", value: on ? "1" 
     const pumpText = c.INSPECT.pump.now(live).en;
     assert.equal(pumpText.includes("schem.flow_invalid"), invalid);
     assert.equal(pumpText.includes("Measured flow"), decoded != null);
-    if (decoded == null && !invalid) assert.match(pumpText, /No flow measurement is available/);
+    if (decoded == null && !invalid) assert.match(pumpText, /Flow unavailable/);
     if (invalid) {
       assert.equal(c.INSPECT.flow.head(live), "—");
       assert.equal(c.inspNowText(c.INSPECT.flow, live), "schem.flow_invalid");
     }
   }
   assert.match(c.INSPECT.pump.now({ pump: 0, pumpOn: false, flow: 5 }).en,
-    /pump reports stopped[\s\S]*Measured flow 5[\s\S]*OFF conflicts with flow/i);
+    /pump reports stopped[\s\S]*Measured flow 5[\s\S]*OFF conflicts with measured flow/i);
   const pumpOnNoFlow = c.INSPECT.pump.now({ pump: null, pumpOn: true, flow: null }).en;
-  assert.match(pumpOnNoFlow, /pump status is ON.*no flow measurement/i);
-  assert.doesNotMatch(pumpOnNoFlow, /pump reports stopped|measured flow is/i);
+  assert.match(pumpOnNoFlow, /pump reports ON.*flow unavailable/i);
+  assert.doesNotMatch(pumpOnNoFlow, /pump reports stopped|measured flow/i);
   const pumpUnknown = c.INSPECT.pump.now({ pump: null, pumpOn: null, flow: 0 }).en;
-  assert.match(pumpUnknown, /reported pump state is unknown/i);
+  assert.match(pumpUnknown, /pump state unknown/i);
   assert.doesNotMatch(pumpUnknown, /pump reports stopped/i);
   assert.match(c.INSPECT.pump.now({ pump: 45, pumpOn: true, flow: null }).en,
-    /no flow measurement is available[\s\S]*circulation is not established/i);
+    /flow unavailable[\s\S]*circulation is not established/i);
   assert.doesNotMatch(c.INSPECT.wtank.now({ valveDhw: true, pumpOn: false, flow: 0,
                                             lwt: 40, tank: 35 }).en, /Charging the tank/i,
     "a selected valve route alone must not be called an active tank charge");
