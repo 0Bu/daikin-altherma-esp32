@@ -111,8 +111,13 @@ try {
       after: "s_target_enabled.load(std::memory_order_acquire)",
     },
     {
-      name: "disabled-worker-retains-cache-allocation", scenario: "lifecycle",
-      before: "s_cache.swap(retired_cache);",
+      name: "first-sweep-admission-consumed-by-attempt", scenario: "first_sweep_heap_pressure",
+      before: "if (mb_poll_once()) first_sweep_pending = false;",
+      after: "first_sweep_pending = false; mb_poll_once();",
+    },
+    {
+      name: "disabled-worker-retains-cache-allocation", scenario: "socket_setup_and_retirement",
+      before: "s_cache.swap(invalidated_cache);",
       after: "s_cache.clear();",
     },
     {

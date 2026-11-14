@@ -1431,7 +1431,7 @@ const modbusWeatherHold = modbusTask.indexOf("weather_fetch_active()", modbusOta
 const modbusClaim = modbusTask.indexOf("MbNetworkActivity network_activity", modbusWeatherHold);
 const modbusRecheck = modbusTask.indexOf("ota_download_active()", modbusClaim);
 const modbusPollCall = modbusTask.indexOf("mb_poll_once()", modbusRecheck);
-const modbusPollStart = modbus.indexOf("static void mb_poll_once()");
+const modbusPollStart = modbus.indexOf("static bool mb_poll_once()");
 const modbusPollEnd = modbus.indexOf("static void mb_task_start_if_enabled()", modbusPollStart);
 const modbusPoll = modbus.slice(modbusPollStart, modbusPollEnd);
 assert.ok(modbusOtaHold >= 0 && modbusWeatherHold > modbusOtaHold &&
@@ -1443,6 +1443,9 @@ assert.match(modbusTask.slice(modbusOtaHold, modbusPollCall),
   "the HomeHub network hold must yield at its ordinary cadence");
 assert.match(modbusPoll, /(?:const Config& c = config\(\);|with_config\()[\s\S]*?std::vector/,
   "the allocation-rich HomeHub cycle must still own the Config snapshot and model-sized values");
+assert.ok(modbusPoll.indexOf("fresh.reserve(") >= 0 &&
+  modbusPoll.indexOf("fresh.reserve(") < modbusPoll.indexOf("mb_ensure_connected("),
+  "HomeHub stages cache storage before opening the socket");
 assert.match(modbus,
   /struct\s+MbNetworkActivity[\s\S]{0,220}?s_network_quiesced\.store\(false\)[\s\S]{0,220}?s_network_quiesced\.store\(true\)/,
   "HomeHub cycle ownership must withdraw and restore its acknowledgement by RAII");

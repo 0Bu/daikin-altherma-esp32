@@ -363,7 +363,7 @@
     },
     "modbus_task": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?mb_task\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?7mb_task[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
-      "max_bytes": 80
+      "max_bytes": 96
     },
     "modbus_poll": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?mb_poll_once\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?12mb_poll_once[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
@@ -3143,7 +3143,7 @@
     },
     "modbus_create_reconfigure": {
       "pattern": "^daik::mb_reconfigure\\(bool\\)$",
-      "max_bytes": 48
+      "max_bytes": 64
     },
     "modbus_create_sdk": {
       "pattern": "^xTaskCreatePinnedToCore$",

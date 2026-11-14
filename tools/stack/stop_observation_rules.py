@@ -783,7 +783,7 @@ PATHS['modbus_history_peer_bind_target'] = [
                            'history_peer_bind', 'history_peer_target_compare'],
                'multipliers': {}, 'base_bytes': 1536, 'max_bytes': 5120},
 ]
-UPDATED_LIMITS['modbus_task'] = 80
+UPDATED_LIMITS['modbus_task'] = 96
 SYMBOLS.update({
     'modbus_worker_wdt_add': {'pattern': '^esp_task_wdt_add$', 'max_bytes': 64},
     'modbus_worker_wdt_entry': {'pattern': '^add_entry$', 'max_bytes': 48},
@@ -860,7 +860,7 @@ SYMBOLS.update({
     'modbus_create_start': {'pattern': r'^daik::mb_task_start_if_enabled\(\)$', 'max_bytes': 80},
     'modbus_create_boot': {'pattern': r'^daik::mb_start\(\)$', 'max_bytes': 32},
     'modbus_create_retry': {'pattern': r'^daik::mb_retry_start\(\)$', 'max_bytes': 32},
-    'modbus_create_reconfigure': {'pattern': r'^daik::mb_reconfigure\(bool\)$', 'max_bytes': 48},
+    'modbus_create_reconfigure': {'pattern': r'^daik::mb_reconfigure\(bool\)$', 'max_bytes': 64},
     'modbus_create_sdk': {'pattern': '^xTaskCreatePinnedToCore$', 'max_bytes': 64},
     'modbus_create_init': {'pattern': r'^prvInitialiseNewTask\$constprop\$0$', 'max_bytes': 48},
     'modbus_create_ready': {'pattern': '^prvAddNewTaskToReadyList$', 'max_bytes': 48},
@@ -939,17 +939,17 @@ BODIES['main/history.cpp'].update({'history_modbus_reset_scope_locked': 'cbb56d6
  'flash_record_valid': 'f3049d9921b9456b50d94bcace8c49fe4b96ed602dd9165df7dfd3439a2fee6a',
  'flash_build_next_record': '0aad195a438a74f1c2b2a925c3749aec7abd9def84063bd0fcb8d5487507a66b'})
 BODIES['main/history_target.cpp'] = {'history_modbus_target': 'a768932c642ee9db5356c672b8ce1876a9ddc6c14385b290494c265f38a7f156'}
-BODIES['main/hp_modbus.cpp'] = {'mb_ensure_connected': '5fa7f3ba08c489eb357dccbfc77ac873aaf25619c3d5ee7f5ce45ba22f037ba8',
- 'mb_poll_once': '8729594303627438d967aee2cc7c4d59460a4c36385c233b3d9a70b3de4b353d',
+BODIES['main/hp_modbus.cpp'] = {'mb_ensure_connected': 'a09adc44fb9ad2fea8e8f5c364e1a31a1d8eb44314c5f279d1e9d734ea5b4238',
+ 'mb_poll_once': '0877f991e968156f1b1ec1d186e2c3fc61368f465d477fdaaa97bdcba32bd229',
  'status_socket_open': '6acb79527aee70827e7a0a62457febca550aa66fb7c71d750fcb3a56133a62c5'}
 BODIES['main/hp_modbus.cpp'].update({
-    'mb_task': 'ea0dbafb164ebcf0672fa9d0423162ceb42e72c027e280ddc96800ecbc9a6df7',
-    'mb_retire_if_disabled': 'b10e0d5b509b2c9cedcd2a22aa7ca9767ac69a669c6273f0a00b0e09dc908e5e',
+    'mb_task': 'd0ccd586b470123866df8cd1c5e57c8133616f34a164a086c5effe490fb8996d',
+    'mb_retire_if_disabled': '3ad4e9aaa5746502185ec526b2fb7ac783035f4cfa312a5864a20e3ac64f06de',
     'mb_task_pending': '7280769fa87e4e8e4cbab4bcbc300132caeb105178b42697a8f86cffe9aebcca',
     'mb_task_start_if_enabled': 'ce179ed53b66f02c70cfd37d45674fc16c4600b3d7d7d9f4f4f5179042400854',
     'mb_retry_start': '3c644ba9a4c7ff620e76335345808b7f335778e98ffe8f5876c97eddec29ed9c',
     'mb_start': '954ea9970f7921417de460b7f3ebc0298aba357ad5ac5c8bcdff7fbc87368af8',
-    'mb_reconfigure': 'b4723dacb7e58c134d7731e8bfe12b29ddcbb415301c2d76b8d906c76cda9b84',
+    'mb_reconfigure': 'a94f17e36b72c0132347dd27c4eff790abe4648fb12cfeed059db46ba9884044',
     'mb_network_quiesced': '1be4f835658858fcf43554071c903544ebe5a95edd9ca09c73d5c9d633f3a5ff',
 })
 BODIES.setdefault('main/main.cpp', {})['boot_sequence'] = 'dbd24138cee2c0dc6738ac7aebcbad527be3c7d64f1d75b30817e178da997eb5'
@@ -1308,14 +1308,16 @@ BODIES['main/hp_modbus.cpp'].update({'failure_message': '215a5739c66c9a99ca1d125
  'status_clear_error': '4c8913f1fdbb94d9421b850c9f89160a614bbee457672b6fee1ddce97d29da28',
  'status_recovered': 'ed413f5bcbb8f189e6b97150ec5eba1ce836d26a382b4e0c5bd064c2afd054c3',
  'mb_status': '0845dca969b3c29eb56d3c0aa0547de01c61fad5908fe9411d100827a40f5434',
- 'mb_reconfigure': 'b4723dacb7e58c134d7731e8bfe12b29ddcbb415301c2d76b8d906c76cda9b84'})
+ 'mb_reconfigure': 'a94f17e36b72c0132347dd27c4eff790abe4648fb12cfeed059db46ba9884044'})
 CALLERS.update({'failure_message': {'main/hp_modbus.cpp:<definition>': 1, 'main/hp_modbus.cpp:report_cycle_result': 1},
  'failure_code': {'main/hp_modbus.cpp:<definition>': 1, 'main/hp_modbus.cpp:report_cycle_result': 1},
  'report_connect_error': {'main/hp_modbus.cpp:<definition>': 1, 'main/hp_modbus.cpp:mb_ensure_connected': 1},
  'status_error': {'main/hp_modbus.cpp:<definition>': 1,
                   'main/hp_modbus.cpp:report_connect_error': 1,
                   'main/hp_modbus.cpp:mb_ensure_connected': 3,
-                  'main/hp_modbus.cpp:report_cycle_result': 1},
+                  'main/hp_modbus.cpp:report_cycle_result': 1,
+                  'main/hp_modbus.cpp:mb_retire_if_disabled': 1,
+                  'main/hp_modbus.cpp:mb_task': 1},
  'clear_status_error_locked': {'main/hp_modbus.cpp:<definition>': 1,
                                'main/hp_modbus.cpp:status_recovered': 1,
                                'main/hp_modbus.cpp:status_clear_error': 1,

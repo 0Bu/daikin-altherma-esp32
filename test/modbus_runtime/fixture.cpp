@@ -2097,6 +2097,21 @@ void first_sweep_heap_pressure() {
         mb_retry_start();
         REQUIRE(s_task && s_task != worker && sdk::create_calls == 2);
     }
+
+    reset();
+    mb_reconfigure(true);
+    const auto worker             = s_task;
+    adapter::config_throws        = true;
+    const auto reads_before_first = adapter::config_reads;
+    sdk::on_delay                 = [&] {
+        REQUIRE(sdk::delays == 1 && adapter::config_reads == reads_before_first + 1);
+        REQUIRE(s_next_try_us > sdk::clock_us && sdk::socket_connects == 0);
+        adapter::config_throws = false;
+        adapter::largest_block = HEAP_RECOVERY_BYTES + MB_FIRST_SWEEP_RESERVE - 1;
+    };
+    worker->fn(worker->arg);
+    REQUIRE(!s_task && mb_task_pending() && mb_target_enabled());
+    REQUIRE(adapter::config_reads == reads_before_first + 1 && sdk::socket_connects == 0);
 }
 void first_sweep_after_tls() {
     reset();
@@ -2135,10 +2150,14 @@ void socket_setup_and_retirement() {
         const int peer = listener.accept_peer();
         close(peer);
         const int connected = s_sock;
+        seed_cache();
+        REQUIRE(s_cache.capacity() > 0);
         mb_reconfigure(false);
+        REQUIRE(s_cache.capacity() == 0);
         sdk::fail_socket_close = 2;
         sdk::on_delay          = [&] {
             REQUIRE(s_task == worker && s_task_retiring && s_sock == connected && !s_have_req);
+            REQUIRE(s_cache.capacity() == 0);
             REQUIRE(mb_network_quiesced() && sdk::socket_connects == 1);
             if (sdk::delays == 1)
                 mb_reconfigure(true);

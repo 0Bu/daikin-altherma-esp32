@@ -1219,7 +1219,7 @@ end = s.index('\n        const bool ota_active', start)
 assert 'else if (mb_retire_if_disabled(ready))' in s[start:end], (
     "seed 66 did not apply — HomeHub disable admission moved")
 seed = s[:start] + s[end:]
-poll = '                    if (esp_timer_get_time() >= s_next_try_us) {\n'
+poll = '                    if (enough_heap && esp_timer_get_time() >= s_next_try_us) {\n'
 assert seed.count(poll) == 1, "seed 66 did not apply — HomeHub poll point moved"
 seed = seed.replace(poll,
                     '                    if (config_modbus_host(config()).empty()) break;\n' + poll, 1)
