@@ -393,9 +393,10 @@ function assertScalarGridPolling(historySource) {
 }
 
 assertScalarGridPolling(disclosureSource);
-const scalarBranch = `if (!html.includes('class="vhist') && host.id !== "valueGroups" && host.id !== "inspRows" && !diagnosisCard)
-    host.innerHTML = html;`;
-assert.equal(disclosureSource.split(scalarBranch).length, 2, "scalar-grid negative control must target one production branch");
+const scalarBranches = [...disclosureSource.matchAll(
+  /if \(!html\.includes\('class="vhist'\) && host\.id !== "valueGroups" && host\.id !== "inspRows" &&\s+host\.id !== "inspBody" && !diagnosisCard\)\s+host\.innerHTML = html;/g)];
+assert.equal(scalarBranches.length, 1, "scalar-grid negative control must target one production branch");
+const [scalarBranch] = scalarBranches[0];
 assert.throws(() => assertScalarGridPolling(disclosureSource.replace(scalarBranch,
   `if (!html.includes('class="vhist')) host.innerHTML = html;`)),
 error => error.code === "ERR_ASSERTION" && error.message.startsWith("no-chart scalar poll must retain the value grid"),
