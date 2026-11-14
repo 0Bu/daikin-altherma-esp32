@@ -111,6 +111,12 @@ echo controlled success
         self.assertFalse(local_checks.verify(self.root))
         self.assertEqual(len(self.commands()), 4)
 
+    def test_push_proof_refreshes_both_checks_before_issuing_a_new_receipt(self):
+        self.assertFalse(local_checks.verify(self.root))
+        self.assertTrue(local_checks.verify(self.root))
+        self.assertFalse(local_checks.verify(self.root, fresh=True))
+        self.assertEqual(len(self.commands()), 4)
+
     def test_changed_tree_is_retested(self):
         self.assertFalse(local_checks.verify(self.root, premerge=True))
         self.content("different candidate")

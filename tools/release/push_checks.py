@@ -45,7 +45,7 @@ def run(root, expected_head):
         subprocess.run([sys.executable, "scripts/prepare-ci-history.py"], cwd=checkout,
                        env=offline, check=True)
         # These two checks use the same private receipt as official bench and production OTA.
-        local.verify(checkout, expected_head=tested, require_receipt=True)
+        local.verify(checkout, expected_head=tested, require_receipt=True, fresh=True)
         subprocess.run(["bash", "scripts/run-local-release-checks.sh", base, head],
                        cwd=checkout, env=offline, check=True)
         subprocess.run(["scripts/idf-docker.sh", "--with-host-tests", "bash", "-ec",

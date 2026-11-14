@@ -242,7 +242,7 @@ def run_checks(root, env):
     return records
 
 
-def verify(root, *, premerge=False, expected_head=None, require_receipt=False):
+def verify(root, *, premerge=False, expected_head=None, require_receipt=False, fresh=False):
     env = check_environment()
     identity = source(root, env)
     if expected_head is not None and identity[0] != expected_head:
@@ -251,17 +251,20 @@ def verify(root, *, premerge=False, expected_head=None, require_receipt=False):
         raise CheckError("first parent must match refreshed origin/main; use the exact PR merge tree")
 
     path = cache_path()
-    try:
-        with open_cache(path) as directory:
-            cached = load_receipt(directory, identity)
-    except (OSError, ValueError):
-        cached = None
+    cached = None
+    if not fresh:
+        try:
+            with open_cache(path) as directory:
+                cached = load_receipt(directory, identity)
+        except (OSError, ValueError):
+            pass
     if cached:
         if source(root, env) != identity:
             raise CheckError("source changed while checking local release evidence")
         print(f"Local release checks reused for exact tree {identity[1]} and base {identity[2]}", flush=True)
         return True
 
+    hydrate_parent_coverage(root, env, identity[2])
     with frozen_checkout(root, env, identity) as (checkout, offline):
         records = run_checks(checkout, offline)
     if source(root, env) != identity:
