@@ -31,7 +31,7 @@ vm.runInContext(read("app_state") + "\n" + read("history") + "\n" + read("dashbo
   markUnreachable = () => {};
   this.ui = { S, refreshStatus, fillRefTemp, refTempFormPayload, formatRefSource, parseRefSource,
     ensureHist, ensureDerived, syncHistSources, refreshValues, hasModbusHist, historyView, histCacheKey,
-    syncDashboardCards };
+    syncDashboardCards, renderSettings };
 `, context);
 const ui = context.ui;
 const plain = (value) => JSON.parse(JSON.stringify(value));
@@ -497,4 +497,43 @@ for (const failure of [new Error("503"), new SyntaxError("invalid JSON"), null, 
   assert.equal(ui.S.hist.get(tankKey).v[0], 444);
   for (const id of series) for (const source of ["x10a", "modbus"])
     assert.equal(ui.S.hist.get(ui.histCacheKey(id, source)).v[0], 444);
+}
+
+// An open Settings chart must also recover when a values-only lease withdrawal drops its cache.
+await reset();
+{
+  const values = { values: [], modbus: [{ value: 22 }], modbus_history_boot_id: "boot-a" };
+  context.nextStatus = { ...values, modbus_history_epoch: 1 };
+  await ui.refreshValues(false);
+  const old = ui.ensureHist("free_heap", "x10a", false);
+  const oldRequest = pending.shift();
+  context.nextStatus = { values: [], modbus_history_epoch: 0, modbus_history_boot_id: "" };
+  await ui.refreshValues(false);
+  context.nextStatus = { ...values, modbus_history_epoch: 1 };
+  await ui.refreshValues(false);
+  elements.set("settingsCards", { querySelectorAll: selector => {
+    assert.equal(selector, ".vitem.open:not([hidden]) [data-trend]");
+    return [{ dataset: { trend: "free_heap" } }];
+  } });
+  context.syncOtaSettingsLock = context.renderSettingsDot = () => {};
+  context.connectionsHtml = context.esp32CardHtml = () => "";
+  context.document = { activeElement: null };
+  ui.S.stage = "dashboard";
+  ui.renderSettings();
+  ui.S.stage = "settings";
+  ui.S.otaInstalling = true;
+  ui.renderSettings();
+  assert.equal(pending.length, 0, "hidden Settings and OTA installation cannot load its chart");
+  ui.S.otaInstalling = false;
+  ui.renderSettings();
+  ui.renderSettings();
+  assert.deepEqual(pending.map(r => r.url), ["/history?row=free_heap"],
+    "the still-open Settings chart must reacquire its ring exactly once");
+  reply(oldRequest, 99);
+  await old;
+  assert.equal(ui.S.hist.has("free_heap"), false, "retired request cannot refill the Settings chart");
+  const request = ui.S.histRequests.get("free_heap").done;
+  reply(pending.shift(), 12);
+  await request;
+  assert.equal(ui.S.hist.get("free_heap").v[0], 12);
 }

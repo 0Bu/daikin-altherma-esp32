@@ -139,6 +139,6 @@ void                        mqtt_circulation_reconfigure(bool configured);
 // Requests stay pending across broker outages and are
 // reconstructed on reconnect; Weather and HomeHub cleanup also cover enabled identity changes.
 void mqtt_request_weather_cleanup();
-void mqtt_request_modbus_cleanup();
+void mqtt_request_modbus_cleanup() noexcept;
 
 } // namespace daik

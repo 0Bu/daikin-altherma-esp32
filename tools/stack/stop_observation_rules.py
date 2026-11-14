@@ -921,6 +921,33 @@ _MODBUS_CREATE_WAKE = [
     'sdk_queue_yield_required', 'sdk_queue_yield_other', 'sdk_queue_crosscore_yield',
     'sdk_queue_crosscore_send', 'sdk_queue_critical', 'sdk_queue_compare_swap',
 ]
+SYMBOLS.update({
+    'modbus_peer_admit': {'pattern': r'^daik::admit_answering_peer\(', 'max_bytes': 48},
+    'modbus_peer_curve_reset': {
+        'pattern': r'^daik::mqtt_heating_curve_homehub_reset\(\)$', 'max_bytes': 48,
+    },
+    'modbus_peer_curve_forget': {
+        'pattern': r'^daik::logic::HeatingCurveDiagnosis::forget_samples\(\)$', 'max_bytes': 32,
+    },
+    'modbus_peer_cleanup_request': {
+        'pattern': r'^daik::mqtt_request_modbus_cleanup\(\)$', 'max_bytes': 32,
+    },
+})
+for branch, chain in {
+    'claim': ['modbus_publication_claim'],
+    'release': ['modbus_publication_release'],
+    'cleanup': ['modbus_peer_cleanup_request'],
+    'forget': ['modbus_peer_curve_reset', 'modbus_peer_curve_forget'],
+    'take': ['modbus_peer_curve_reset', 'mqtt_input_lock', 'sdk_queue_sem_take',
+             'sdk_queue_remove_event', *_MODBUS_CREATE_WAKE],
+    'give': ['modbus_peer_curve_reset', 'sem_guard_release', 'sdk_queue_send',
+             'stop_queue_set_notify', 'sdk_queue_remove_event', *_MODBUS_CREATE_WAKE],
+}.items():
+    PATHS[f'modbus_peer_admission_{branch}'] = [
+        'modbus', {'symbols': ['runtime_task_entry', 'modbus_task', 'modbus_poll',
+                               'modbus_peer_admit', *chain],
+                   'multipliers': {}, 'base_bytes': 1536, 'max_bytes': 5120},
+    ]
 for branch, continuation in {
     'heap_walk': ['modbus_create_heap_sample', 'modbus_create_heap_largest',
                   'modbus_create_heap_info', 'modbus_create_pool_info', 'modbus_create_pool_walk',
@@ -979,8 +1006,21 @@ BODIES['main/history.cpp'].update({'history_modbus_reset_scope_locked': 'cbb56d6
  'flash_build_next_record': 'd6a33f73b0e9acb3b80aa66cf64c37f73aba25eac1ebfa5297da0ff3c627bd06'})
 BODIES['main/history_target.cpp'] = {'history_modbus_target': 'a768932c642ee9db5356c672b8ce1876a9ddc6c14385b290494c265f38a7f156'}
 BODIES['main/hp_modbus.cpp'] = {'mb_ensure_connected': 'a09adc44fb9ad2fea8e8f5c364e1a31a1d8eb44314c5f279d1e9d734ea5b4238',
- 'mb_poll_once': '4e11c95b3d57c1255e2eb371baa3d9162839890895881df10dfab43a2839b7fd',
+ 'mb_poll_once': '50e30ed6dcc44b9abaaf77216d9bcae7beee3e985d073e94d6cbdc99346dbd22',
  'status_socket_open': '6acb79527aee70827e7a0a62457febca550aa66fb7c71d750fcb3a56133a62c5'}
+BODIES['main/hp_modbus.cpp']['admit_answering_peer'] = (
+    '54a513bfa442904529aefbfe90436744c8aa37efb6bd75ef5d622d9e5d3d4aa9')
+BODIES['main/mqtt_ha.cpp'].update({
+    'forget_heating_curve_scope': '6b7d7115cb3965c1756f1746a9d49b0b5694719113e8cc533b4bcaf596ff93c3',
+    'mqtt_heating_curve_homehub_reset': '6f091b76bae8cbe86d2eeb459b43b6145dbce7d37d6fbf3594f5410036a848f5',
+    'mqtt_request_modbus_cleanup': 'c56b25999e6e4cc6ee18cb0c9422e55c1faba862c4082f03a1be70158f6ac2a2',
+})
+CALLERS['admit_answering_peer'] = {
+    'main/hp_modbus.cpp:<definition>': 1, 'main/hp_modbus.cpp:mb_poll_once': 1,
+}
+for name in ('mqtt_heating_curve_homehub_reset', 'mqtt_request_modbus_cleanup'):
+    CALLERS[name] = {'main/hp_modbus.cpp:admit_answering_peer': 1, 'main/http_config.cpp:set_hp': 1,
+                     'main/mqtt_ha.cpp:<definition>': 1, 'main/mqtt_ha.hpp:<declaration>': 1}
 BODIES['main/hp_modbus.cpp'].update({
     'mb_task': 'c32f7f05ad7a9b15cf828ea37c89c3715d09b261342036ff4b98ab803849005c',
     'mb_retire_if_disabled': '3ad4e9aaa5746502185ec526b2fb7ac783035f4cfa312a5864a20e3ac64f06de',

@@ -395,7 +395,7 @@ void         diag_printf(const char*, ...) {}
 void         mqtt_reference_reconfigure() { ++fixture::runtime_changes; }
 void         mqtt_circulation_reconfigure(bool) { ++fixture::runtime_changes; }
 void         mqtt_request_weather_cleanup() { ++fixture::runtime_changes; }
-void         mqtt_request_modbus_cleanup() { ++fixture::runtime_changes; }
+void         mqtt_request_modbus_cleanup() noexcept { ++fixture::runtime_changes; }
 void         mqtt_heating_curve_homehub_reset() noexcept { ++fixture::runtime_changes; }
 void         checkup_set_diagnostics(bool, uint32_t g) { fixture::checkup_generation(g); }
 void         checkup_reset() { ++fixture::runtime_changes; }

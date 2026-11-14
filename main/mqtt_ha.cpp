@@ -4048,7 +4048,9 @@ void mqtt_circulation_reconfigure(bool configured) {
 }
 
 void mqtt_request_weather_cleanup() { s_weather_cleanup_requested = true; }
-void mqtt_request_modbus_cleanup() { s_modbus_cleanup_requested = true; }
+void mqtt_request_modbus_cleanup() noexcept {
+    s_modbus_cleanup_requested.store(true, std::memory_order_release);
+}
 
 uint32_t mqtt_retirement_evidence() noexcept {
     return s_retirement_evidence.load(std::memory_order_acquire);

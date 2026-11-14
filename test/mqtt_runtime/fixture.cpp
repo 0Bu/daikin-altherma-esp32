@@ -230,7 +230,7 @@ bool mb_target_enabled() noexcept {
 ModbusPublicationClaim::ModbusPublicationClaim(ModbusPublication owner,
                                                uint32_t          revision) noexcept {
     if (adapter::modbus_publication_claimed) return;
-    acquired_ = owner == ModbusPublication::ConfigSave ||
+    acquired_ = owner != ModbusPublication::Mqtt ||
                 (adapter::modbus_enabled && adapter::modbus_generation == revision);
     if (acquired_) adapter::modbus_publication_claimed = true;
 }

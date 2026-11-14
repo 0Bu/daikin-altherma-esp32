@@ -937,6 +937,37 @@ async function assertNewGeneration(page, server, fixture, context, hosts) {
   await page.evaluate("delete window.__motionFlat; true");
 }
 
+async function assertSettingsHistoryRecovery(page, server, fixture, context) {
+  const id = "free_heap";
+  const selector = '#settingsCards [data-desc="board:free_heap"]';
+  const original = fixture.values;
+  const epoch = fixture.status.history.epoch;
+  const boot = fixture.status.boot_id;
+  let connected = true;
+  fixture.values = tick => ({ ...original(tick),
+    modbus_history_epoch: connected ? epoch : 0, modbus_history_boot_id: connected ? boot : "" });
+  try {
+    await page.evaluate("showStage('settings'); true");
+    await page.waitFor("!_pollBusy && modbusHistoryMatches()");
+    await toggleDisclosure(page, selector, id, true, context + "/open");
+    const previousEpoch = await page.evaluate("S.histEpoch");
+    const requests = server.historyRequests.filter(key => key === "x10a:" + id).length;
+    connected = false;
+    await page.waitFor("!_pollBusy && S.histEpoch > " + previousEpoch +
+      " && S.modbusHistoryLease?.epoch === 0");
+    connected = true;
+    await page.waitFor("!_pollBusy && modbusHistoryMatches() && S.hist.get('free_heap')?.v.length && " +
+      "document.querySelector('#settingsCards .vitem.open .vhist-plot[data-hist=free_heap]')");
+    assert.equal(await page.evaluate(`document.querySelector(${JSON.stringify(selector)})
+      .getAttribute("aria-expanded")`), "true", context + ": the Settings accordion stays open");
+    assert.equal(server.historyRequests.filter(key => key === "x10a:" + id).length, requests + 1,
+      context + ": source withdrawal re-fetches the open Settings trend exactly once");
+    await toggleDisclosure(page, selector, id, false, context + "/close");
+  } finally {
+    fixture.values = original;
+  }
+}
+
 async function disclosure(page, server, fixture, context, selectors, ids, settings = false, animation = {}) {
   await page.evaluate(settings ? "showStage('settings'); true" : "showStage('dashboard'); true");
   if (!settings) {
@@ -998,7 +1029,8 @@ export async function assertHistoryMotion(page, server, context) {
     { keys: NO_HISTORY_INSPECTORS }), [],
     context + ": no-history classification must reject newly declared trend metadata");
     if (only && ![...Object.keys(INSPECTOR_TRENDS), "board", "circulation", "x10a-row",
-      "modbus-numeric", "modbus-state", "env3-no-forecast", "room-mqtt-only", "room-stale"].includes(only))
+      "settings-recovery", "modbus-numeric", "modbus-state", "env3-no-forecast",
+      "room-mqtt-only", "room-stale"].includes(only))
       throw new Error("unknown history motion case: " + only);
     await mountFixture(page, server, fixture);
     if (!only && !mutation) for (const key of NO_HISTORY_INSPECTORS) {
@@ -1097,6 +1129,8 @@ export async function assertHistoryMotion(page, server, context) {
         ['#settingsCards [data-desc="board:free_heap"]', '#settingsCards [data-desc="board:max_alloc"]'],
         ["free_heap", "max_alloc"], true);
     if (disclosureMutation) return;
+    if (!only || only === "settings-recovery")
+      await assertSettingsHistoryRecovery(page, server, fixture, context + "/settings-recovery");
     if (!only || only === "circulation")
       await disclosure(page, server, fixture, context + "/circulation",
         ['#settingsCards [data-desc="diagnostics:circulation"]'], ["circulation_state"], true);

@@ -212,10 +212,14 @@ function syncDashboardCards() {
     (buttons.find(button => button.dataset.card === focused) ||
       buttons.find(button => button.dataset.card === S.dashboardCard))?.focus({ preventScroll: true });
   }
-  if (!S.clickHold && !S.otaInstalling && S.stage === "dashboard")
-    for (const row of selected.querySelectorAll(".vitem.open:not([hidden]) [data-trend]"))
-      ensureHistPair(row.dataset.trend);
+  if (S.stage === "dashboard") refreshOpenTrends(selected);
   return selected;
+}
+
+function refreshOpenTrends(host) {
+  if (S.clickHold || S.otaInstalling || S.otaCached) return;
+  for (const row of host?.querySelectorAll?.(".vitem.open:not([hidden]) [data-trend]") || [])
+    ensureHistPair(row.dataset.trend);
 }
 
 function selectDashboardCard(key) {
@@ -2240,6 +2244,7 @@ function renderSettings() {
       if (S.otaShown) paintOtaInline();
     }
   }
+  if (S.stage === "settings") refreshOpenTrends($("settingsCards"));
   $("settingsVer").textContent = "daikin-altherma-esp32 · v" + (S.status?.version || "?");
   syncOtaSettingsLock();
   renderSettingsDot();

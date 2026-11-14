@@ -121,6 +121,9 @@ static uint32_t    s_req_history_expected_generation = 0;
 static uint32_t    s_req_history_generation          = 0;
 static logic::HistoryModbusTarget s_req_configured_target{};
 static uint32_t                   s_req_peer_ipv4 = 0;
+// The last responding peer survives socket loss and provisional replacement connections.
+static uint32_t s_last_answering_target_generation = 0;
+static uint32_t s_last_answering_peer_ipv4         = 0;
 // Two reply buckets cover a full sweep that straddles a raster boundary. The socket owner
 // retains only these scalars if the journal is busy when the responding peer is first bound.
 struct PendingModbusHistory {
@@ -1073,6 +1076,23 @@ static void mb_retain_history(const CachedValue* values, size_t count, uint32_t 
     }
 }
 
+[[gnu::noinline]] static bool admit_answering_peer(uint32_t target_generation) noexcept {
+    if (s_last_answering_target_generation == target_generation &&
+        s_last_answering_peer_ipv4 != s_req_peer_ipv4) {
+        const ModbusPublicationClaim cutover(ModbusPublication::PeerChange);
+        if (!cutover.acquired() ||
+            s_target_generation.load(std::memory_order_acquire) != target_generation)
+            return false;
+        // The old socket is already offline. Queue its retirement before the new peer's cache
+        // can become live, even when its first full poll fits between MQTT cycles.
+        mqtt_heating_curve_homehub_reset();
+        mqtt_request_modbus_cleanup();
+    }
+    s_last_answering_target_generation = target_generation;
+    s_last_answering_peer_ipv4         = s_req_peer_ipv4;
+    return true;
+}
+
 // ── One poll cycle ───────────────────────────────────────────────────────────────────────────────
 // A full cycle builds and commits a new cache. The cycles between it read only the batches
 // carrying diagnosis gates or fast outdoor context. Use the same target the worker admitted.
@@ -1476,6 +1496,12 @@ static bool mb_poll_once(uint32_t cycle_target_generation, bool allow_reconnect)
     }
     const logic::OutdoorEvidence plant_outdoor = logic::outdoor_homehub_evidence(
         outdoor_row_answered, current_session, outdoor_temperature_c);
+    if (current_session && gates.received_data && !admit_answering_peer(cycle_target_generation)) {
+        // An admitted MQTT publish or settings save owns the boundary. Retry a full sweep so
+        // neither HTTP nor MQTT can see the new peer before its identity transition.
+        s_cycle_tick = 0;
+        return false;
+    }
     // A provisional socket can qualify only through a completed ordinary read. Retry a contended
     // bind at the normal poll cadence.
     if (bind_history &&
@@ -1902,7 +1928,7 @@ bool mb_target_enabled() noexcept { return s_target_enabled.load(std::memory_ord
 ModbusPublicationClaim::ModbusPublicationClaim(ModbusPublication owner,
                                                uint32_t          revision) noexcept {
     if (s_publication_claim.test_and_set(std::memory_order_acquire)) return;
-    acquired_ = owner == ModbusPublication::ConfigSave ||
+    acquired_ = owner != ModbusPublication::Mqtt ||
                 (mb_target_enabled() && mb_cache_generation() == revision);
     if (!acquired_) s_publication_claim.clear(std::memory_order_release);
 }

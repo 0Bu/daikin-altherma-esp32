@@ -3232,6 +3232,22 @@
     "modbus_publication_release": {
       "pattern": "^daik::ModbusPublicationClaim::~ModbusPublicationClaim\\(\\)$",
       "max_bytes": 32
+    },
+    "modbus_peer_admit": {
+      "pattern": "^daik::admit_answering_peer\\(",
+      "max_bytes": 48
+    },
+    "modbus_peer_curve_reset": {
+      "pattern": "^daik::mqtt_heating_curve_homehub_reset\\(\\)$",
+      "max_bytes": 48
+    },
+    "modbus_peer_curve_forget": {
+      "pattern": "^daik::logic::HeatingCurveDiagnosis::forget_samples\\(\\)$",
+      "max_bytes": 32
+    },
+    "modbus_peer_cleanup_request": {
+      "pattern": "^daik::mqtt_request_modbus_cleanup\\(\\)$",
+      "max_bytes": 32
     }
   },
   "paths": {
@@ -14547,6 +14563,98 @@
       "multipliers": {},
       "base_bytes": 1536,
       "max_bytes": 5120
+    },
+    "modbus_peer_admission_claim": {
+      "symbols": [
+        "runtime_task_entry",
+        "modbus_task",
+        "modbus_poll",
+        "modbus_peer_admit",
+        "modbus_publication_claim"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "modbus_peer_admission_release": {
+      "symbols": [
+        "runtime_task_entry",
+        "modbus_task",
+        "modbus_poll",
+        "modbus_peer_admit",
+        "modbus_publication_release"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "modbus_peer_admission_cleanup": {
+      "symbols": [
+        "runtime_task_entry",
+        "modbus_task",
+        "modbus_poll",
+        "modbus_peer_admit",
+        "modbus_peer_cleanup_request"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "modbus_peer_admission_forget": {
+      "symbols": [
+        "runtime_task_entry",
+        "modbus_task",
+        "modbus_poll",
+        "modbus_peer_admit",
+        "modbus_peer_curve_reset",
+        "modbus_peer_curve_forget"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "modbus_peer_admission_take": {
+      "symbols": [
+        "runtime_task_entry",
+        "modbus_task",
+        "modbus_poll",
+        "modbus_peer_admit",
+        "modbus_peer_curve_reset",
+        "mqtt_input_lock",
+        "sdk_queue_sem_take",
+        "sdk_queue_remove_event",
+        "sdk_queue_yield_required",
+        "sdk_queue_yield_other",
+        "sdk_queue_crosscore_yield",
+        "sdk_queue_crosscore_send",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "modbus_peer_admission_give": {
+      "symbols": [
+        "runtime_task_entry",
+        "modbus_task",
+        "modbus_poll",
+        "modbus_peer_admit",
+        "modbus_peer_curve_reset",
+        "sem_guard_release",
+        "sdk_queue_send",
+        "stop_queue_set_notify",
+        "sdk_queue_remove_event",
+        "sdk_queue_yield_required",
+        "sdk_queue_yield_other",
+        "sdk_queue_crosscore_yield",
+        "sdk_queue_crosscore_send",
+        "sdk_queue_critical",
+        "sdk_queue_compare_swap"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
     }
   },
   "tasks": {
@@ -15084,7 +15192,13 @@
         "modbus_measured_history_collect",
         "modbus_measured_history_fold",
         "modbus_measured_history_retain",
-        "modbus_measured_history_replay"
+        "modbus_measured_history_replay",
+        "modbus_peer_admission_claim",
+        "modbus_peer_admission_release",
+        "modbus_peer_admission_cleanup",
+        "modbus_peer_admission_forget",
+        "modbus_peer_admission_take",
+        "modbus_peer_admission_give"
       ]
     },
     "syslog": {

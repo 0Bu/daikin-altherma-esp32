@@ -233,6 +233,16 @@ try {
       after: "on_socket_open(host, port, unit, ((void)peer_ipv4, 0u), now_s)",
     },
     {
+      name: "peer-cutover-skips-retained-cleanup", scenario: "probe_resolved_peer_reconnect",
+      before: "        mqtt_request_modbus_cleanup();",
+      after: "        (void)0;",
+    },
+    {
+      name: "peer-cutover-ignores-held-publication", scenario: "probe_resolved_peer_reconnect",
+      before: /if \(!cutover\.acquired\(\) \|\|\s*s_target_generation\.load\(std::memory_order_acquire\) != target_generation\)/,
+      after: "if (s_target_generation.load(std::memory_order_acquire) != target_generation)",
+    },
+    {
       name: "history-resolved-peer", scenario: "probe_resolved_peer_reconnect",
       before: /s_req_peer_ipv4\s*= ntohl\(addr\.sin_addr\.s_addr\);/,
       after: "s_req_peer_ipv4 = ((void)addr.sin_addr.s_addr, 0u);",

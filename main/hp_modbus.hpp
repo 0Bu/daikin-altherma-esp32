@@ -94,9 +94,9 @@ bool mb_task_pending() noexcept;
 // authority.
 bool mb_target_enabled() noexcept;
 
-// Serialize a durable HomeHub cutover with admission of its retained MQTT state.
+// Serialize a settings or responding-peer cutover with admission of retained MQTT state.
 // These try-claims never wait on each other's task. MQTT binds its claim to the copied cache.
-enum class ModbusPublication { ConfigSave, Mqtt };
+enum class ModbusPublication { ConfigSave, PeerChange, Mqtt };
 class ModbusPublicationClaim {
 public:
     explicit ModbusPublicationClaim(ModbusPublication owner, uint32_t revision = 0) noexcept;

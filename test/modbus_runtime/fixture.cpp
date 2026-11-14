@@ -133,6 +133,7 @@ size_t       largest_block = 32 * 1024;
 size_t       free_bytes    = 64 * 1024;
 bool         config_throws = false, net_up = true, ota_active = false, weather_active = false;
 bool         mqtt_resume_pending = false, mqtt_resume_low = false;
+unsigned     mqtt_peer_cleanups = 0, heating_curve_peer_resets = 0;
 int config_reads = 0, config_saves = 0, history_calls = 0, history_gaps = 0, stack_samples = 0;
 
 uint32_t history_generation    = 1;
@@ -155,6 +156,8 @@ namespace daik {
 size_t heap_largest_internal_block() { return adapter::largest_block; }
 bool   mqtt_tls_resume_pending() noexcept { return adapter::mqtt_resume_pending; }
 bool   mqtt_tls_resume_short_of_heap() noexcept { return adapter::mqtt_resume_low; }
+void   mqtt_request_modbus_cleanup() noexcept { ++adapter::mqtt_peer_cleanups; }
+void   mqtt_heating_curve_homehub_reset() noexcept { ++adapter::heating_curve_peer_resets; }
 
 Config config() {
     ++adapter::config_reads;
@@ -321,17 +324,19 @@ void reset(bool fail_dynamic_mutex_create = false) {
     s_compressor_ms        = -1;
     s_compressor           = ModbusCompressor::Unknown;
     s_req_host.clear();
-    s_req_port                        = 0;
-    s_unit                            = 0;
-    s_have_req                        = false;
-    s_req_target_generation           = 0;
-    s_req_history_expected_generation = 0;
-    s_req_history_generation          = 0;
-    s_req_configured_target           = {};
-    s_req_peer_ipv4                   = 0;
-    s_pending_history                 = {};
-    s_txn                             = 0;
-    s_cycle_tick                      = 0;
+    s_req_port                         = 0;
+    s_unit                             = 0;
+    s_have_req                         = false;
+    s_req_target_generation            = 0;
+    s_req_history_expected_generation  = 0;
+    s_req_history_generation           = 0;
+    s_req_configured_target            = {};
+    s_req_peer_ipv4                    = 0;
+    s_last_answering_target_generation = 0;
+    s_last_answering_peer_ipv4         = 0;
+    s_pending_history                  = {};
+    s_txn                              = 0;
+    s_cycle_tick                       = 0;
     s_cache.clear();
     s_cache_generation         = 0;
     s_cache_target_generation  = 0;
@@ -357,37 +362,39 @@ void reset(bool fail_dynamic_mutex_create = false) {
     sdk::fail_wdt_add = sdk::fail_lwip_alloc = sdk::fail_lwip_retain = 0;
     sdk::lwip_gets = sdk::lwip_frees = 0;
     std::free(sdk::lwip_retained);
-    sdk::lwip_retained             = nullptr;
-    sdk::fail_mutex_create         = fail_dynamic_mutex_create;
-    sdk::create_calls              = 0;
-    sdk::delete_calls              = 0;
-    sdk::delays                    = 0;
-    sdk::wdt_add                   = 0;
-    sdk::wdt_delete                = 0;
-    sdk::wdt_reset                 = 0;
-    sdk::mdns_ptr_calls            = 0;
-    sdk::lock_depth                = 0;
-    adapter::cfg                   = Config{};
-    adapter::config_throws         = false;
-    adapter::largest_block         = 32 * 1024;
-    adapter::free_bytes            = 64 * 1024;
-    adapter::ota_active            = false;
-    adapter::weather_active        = false;
-    adapter::mqtt_resume_pending   = false;
-    adapter::mqtt_resume_low       = false;
-    adapter::net_up                = true;
-    adapter::config_reads          = 0;
-    adapter::config_saves          = 0;
-    adapter::history_calls         = 0;
-    adapter::history_reply_slots   = {};
-    adapter::history_reply_heater  = {};
-    adapter::history_gaps          = 0;
-    adapter::history_generation    = 1;
-    adapter::history_peer          = 0;
-    adapter::history_bind_busy     = false;
-    adapter::history_bind_attempts = 0;
-    adapter::stack_samples         = 0;
-    adapter::history_hook          = {};
+    sdk::lwip_retained                 = nullptr;
+    sdk::fail_mutex_create             = fail_dynamic_mutex_create;
+    sdk::create_calls                  = 0;
+    sdk::delete_calls                  = 0;
+    sdk::delays                        = 0;
+    sdk::wdt_add                       = 0;
+    sdk::wdt_delete                    = 0;
+    sdk::wdt_reset                     = 0;
+    sdk::mdns_ptr_calls                = 0;
+    sdk::lock_depth                    = 0;
+    adapter::cfg                       = Config{};
+    adapter::config_throws             = false;
+    adapter::largest_block             = 32 * 1024;
+    adapter::free_bytes                = 64 * 1024;
+    adapter::ota_active                = false;
+    adapter::weather_active            = false;
+    adapter::mqtt_resume_pending       = false;
+    adapter::mqtt_resume_low           = false;
+    adapter::mqtt_peer_cleanups        = 0;
+    adapter::heating_curve_peer_resets = 0;
+    adapter::net_up                    = true;
+    adapter::config_reads              = 0;
+    adapter::config_saves              = 0;
+    adapter::history_calls             = 0;
+    adapter::history_reply_slots       = {};
+    adapter::history_reply_heater      = {};
+    adapter::history_gaps              = 0;
+    adapter::history_generation        = 1;
+    adapter::history_peer              = 0;
+    adapter::history_bind_busy         = false;
+    adapter::history_bind_attempts     = 0;
+    adapter::stack_samples             = 0;
+    adapter::history_hook              = {};
     adapter::logs.clear();
     adapter::pressure_log[0]    = '\0';
     adapter::pressure_log_count = 0;
@@ -1332,6 +1339,7 @@ void probe_resolved_peer_reconnect() {
         REQUIRE(cached_row(snapshot_rows(), 49).modbus_flow_scale_unverified);
         REQUIRE(peer.requests == MB_PLAN.count); // Same resolved peer retains affirmative evidence.
         REQUIRE(adapter::history_generation == first_history_generation);
+        REQUIRE(adapter::mqtt_peer_cleanups == 0 && adapter::heating_curve_peer_resets == 0);
         disconnect(peer);
     }
     {
@@ -1345,6 +1353,7 @@ void probe_resolved_peer_reconnect() {
         REQUIRE(adapter::history_bind_attempts == attempts);
         REQUIRE(current_compressor() == ModbusCompressor::Unknown);
         REQUIRE(adapter::history_generation == first_history_generation);
+        REQUIRE(adapter::mqtt_peer_cleanups == 0 && adapter::heating_curve_peer_resets == 0);
         disconnect(peer);
     }
     {
@@ -1359,6 +1368,7 @@ void probe_resolved_peer_reconnect() {
         }
         sdk::on_send = {};
         REQUIRE(caught && adapter::history_generation == first_history_generation);
+        REQUIRE(adapter::mqtt_peer_cleanups == 0 && adapter::heating_curve_peer_resets == 0);
         close_sock();
     }
     {
@@ -1370,8 +1380,17 @@ void probe_resolved_peer_reconnect() {
         adapter::history_bind_busy  = true;
         const auto     calls        = adapter::history_calls;
         const uint32_t first_bucket = logic::history_bucket(sdk::clock_us);
+        {
+            const ModbusPublicationClaim publish(ModbusPublication::Mqtt, mb_cache_generation());
+            REQUIRE(publish.acquired());
+            poll_once();
+            REQUIRE(!mb_values_live() && current_compressor() == ModbusCompressor::Unknown);
+            REQUIRE(s_cycle_tick == 0 && adapter::mqtt_peer_cleanups == 0);
+        }
+        const auto requests_before_admission = peer.requests.load();
         poll_once();
         REQUIRE(current_compressor() == ModbusCompressor::Off);
+        REQUIRE(adapter::mqtt_peer_cleanups == 1 && adapter::heating_curve_peer_resets == 1);
         uint32_t   cache_history_generation = UINT32_MAX;
         const auto rows                     = snapshot_rows(true, &cache_history_generation);
         REQUIRE(cache_history_generation == 0 && adapter::history_calls == calls);
@@ -1379,7 +1398,7 @@ void probe_resolved_peer_reconnect() {
         REQUIRE(flow.value == "15.7" && flow.modbus_flow_scale_unverified);
         REQUIRE(adapter::history_generation == first_history_generation);
         REQUIRE(mb_status().profile_basis == ModbusProfileBasis::Probing);
-        REQUIRE(peer.requests == MB_PLAN.count + 1);
+        REQUIRE(peer.requests - requests_before_admission == MB_PLAN.count + 1);
         sdk::clock_us = (first_bucket + 1) * MB_HISTORY_BUCKET_US;
         peer.set_word(MbFunc::ReadInput, 32, 0);
         adapter::history_bind_busy = false;
@@ -1399,6 +1418,7 @@ void probe_resolved_peer_reconnect() {
         REQUIRE(cached_row(adapter::history_rows, 49).modbus_flow_scale_unverified);
         REQUIRE(cache_history_generation == adapter::history_generation);
         REQUIRE(mb_status().profile_basis == ModbusProfileBasis::Affirmative);
+        REQUIRE(adapter::mqtt_peer_cleanups == 1 && adapter::heating_curve_peer_resets == 1);
         ++adapter::history_generation;
         (void)snapshot_rows(true, &cache_history_generation);
         REQUIRE(cache_history_generation == 0);

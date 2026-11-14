@@ -144,7 +144,9 @@ silently fork existing series. See [DIAGNOSTIC_EVIDENCE.md](DIAGNOSTIC_EVIDENCE.
 state. Disconnection produces `{}`; disabling retracts the retained topic. Saved target intent,
 not a retiring task's lagging state, decides whether publication is allowed. Source reconfiguration
 first retracts old evidence; an enabled replacement may publish an empty pre-first-sample document
-on a later cycle. Read-only protocol/register rules: [MODBUS_PROTOCOL.md](MODBUS_PROTOCOL.md).
+on a later cycle. When the same configured name connects to a different IPv4 peer, the peer must
+answer a register read before the predecessor is retired. New state waits for acknowledged cleanup.
+Read-only protocol/register rules: [MODBUS_PROTOCOL.md](MODBUS_PROTOCOL.md).
 If staging HomeHub state runs out of heap, its publisher defers a retry for five seconds.
 The other source publishers continue on their existing schedule.
 Modbus input 49 publishes the catalog-converted flow as a number. The MQTT payload carries no scale
