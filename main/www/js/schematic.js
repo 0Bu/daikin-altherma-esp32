@@ -1712,9 +1712,10 @@ function inspectSig(e) {
 // Chart state has its own signature, independent of changing inspector readings. A new series
 // (`gen`), categorical live cap or pin updates its markup; ordinary scalar polls keep it mounted.
 function renderInspectHist(e, row) {
+  const mayFetch = typeof _pollBusy === "undefined" || !_pollBusy;
   if (e && e.env3) {
     const offered = ENV3_COMBINED_SERIES.filter((s) => hasEnv3Hist(s.id));
-    for (const s of offered) ensureHist(s.id, "env3");
+    if (mayFetch) for (const s of offered) ensureHist(s.id, "env3");
     const seriesSig = offered.map((s) => {
       const h = S.hist.get(histCacheKey(s.id, "env3"));
       return `${s.id}:${h ? (h.err ? "e" : h.gen) : ""}`;
@@ -1745,10 +1746,10 @@ function renderInspectHist(e, row) {
   const explicitId = trendId && offered(trendId) ? trendId : "";
   const id = explicitId || (row ? histIdFor(row.label) : pairedId)
     || (S.insp === "room" && hasRoomHist("room_temp") ? "room_temp" : "");
-  if (id) {
+  if (id && mayFetch) {
     if (trendSource) ensureHist(id, trendSource);
     else ensureHistPair(id);                // throttled to once a minute inside; no-op once cached
-    if (id === "dhw_tank") {
+    if (trendSource && id === "dhw_tank") {
       ensureHist("smart_grid_mode");
       ensureHist("smart_grid_mode", "modbus");
       ensureHist("bsh_state");

@@ -231,8 +231,9 @@ function histVisibleSeries(h) {
 }
 
 // Include the lifetime and time anchor even when a new flat ring draws identical SVG geometry.
+const histViewRevision = view => [S.histEpoch, view.gen, view.t0].join("/");
 function histRevision(view) {
-  return ` data-rev="${esc([S.histEpoch, view.gen, view.t0].join("/"))}"`;
+  return ` data-rev="${esc(histViewRevision(view))}"`;
 }
 
 function histLegendHtml(h, s, cls) {
@@ -1732,7 +1733,7 @@ function placeScrubReadout(graph, h, i, frac) {
 // Paint the crosshair for sample `i` on the existing nodes. A drag never rebuilds the plot;
 // only the small escaped readout changes.
 function scrubMove(plot, i) {
-  const h = historyView(plot.dataset.hist, plot.dataset.source || "");
+  const h = scrubView(plot);
   const n = +plot.dataset.n;
   if (!h || !n) return;
   const forecast = forecastScrubView(h);
@@ -1788,10 +1789,16 @@ function scrubMove(plot, i) {
   placeScrubReadout(graph, h, i, frac);
 }
 
+function scrubView(plot) {
+  const view = historyView(plot.dataset.hist, plot.dataset.source || "");
+  return view && (!plot.dataset.rev || plot.dataset.rev === histViewRevision(view)) ? view : null;
+}
+
 function scrubIndex(plot, clientX) {
+  const h = scrubView(plot);
+  if (!h) return -1;
   const r = plot.getBoundingClientRect();
   const n = +plot.dataset.n;
-  const h = historyView(plot.dataset.hist, plot.dataset.source || "");
   const forecast = forecastScrubView(h);
   const rawFrac = Math.max(0, Math.min(1, (clientX - r.left) / (r.width || 1)));
   if (forecast && rawFrac > forecast.nowFrac) {
@@ -1821,6 +1828,7 @@ function scrubArm(plot) {
 }
 
 function scrubEnd(plot) {
+  if (S.scrub === "checkup-cycling") return;
   const pointer = S.trendPointer;
   if (pointer && pointer.plot !== plot) return;
   if (pointer) {

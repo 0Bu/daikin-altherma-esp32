@@ -355,6 +355,7 @@ function wireTrendScrub(gv) {
       S.histPin.delete(plot.dataset.hist); scrubEnd(plot); return renderTrendHosts();
     }
     if (e.key === "Enter" || e.key === " ") {   // pin what the arrow keys are reading out
+      if (typeof scrubView === "function" && !scrubView(plot)) return renderTrendHosts();
       const cur = plot.dataset.cur == null ? n - 1 : +plot.dataset.cur;
       return histPinToggle(plot.dataset.hist, cur, plot.dataset.source || "");
     }
@@ -1113,7 +1114,10 @@ async function pollTick() {
     _pollBusy = false;
   }
 
-  if (ok && typeof recoverDashboardHistory === "function") recoverDashboardHistory();
+  if (ok) {
+    if (S.stage === "dashboard" && S.insp && typeof renderInspect === "function") renderInspect();
+    if (typeof recoverOpenHistory === "function") recoverOpenHistory();
+  }
   _pollFails = ok ? 0 : Math.min(_pollFails + 1, 4);
   pollSchedule(_pollFails ? Math.min(POLL_VALUES_MS * 2 ** _pollFails, POLL_BACKOFF_MAX_MS)
                           : POLL_VALUES_MS);

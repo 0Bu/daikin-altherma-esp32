@@ -150,10 +150,12 @@ function renderCards(hold = true) {
   }
 }
 
-function recoverDashboardHistory() {
-  if (S.stage !== "dashboard" || S.scrub || S.clickHold || S.histBusy.size) return;
-  const host = globalThis.document?.getElementById("valueGroups");
-  for (const button of host?.querySelectorAll(".vgroup:not([hidden]) .vitem.open [data-trend]") || [])
+function recoverOpenHistory() {
+  if (S.scrub || S.clickHold || S.histBusy.size) return;
+  const dashboard = S.stage === "dashboard";
+  const host = globalThis.document?.getElementById(dashboard ? "valueGroups" : "settingsCards");
+  const rows = dashboard ? ".vgroup:not([hidden]) .vitem.open [data-trend]" : ".vitem.open [data-trend]";
+  for (const button of host?.querySelectorAll(rows) || [])
     if (ensureHistPair(button.dataset.trend, true)) break;
 }
 

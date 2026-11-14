@@ -78,6 +78,7 @@ vm.runInContext(readAppFragments(["i18n.js", "app_state.js", "dashboard.js"]) +
     S, vcard, icon: dashboardCardIcon, sync: syncDashboardCards, select: selectDashboardCard,
     lang: code => { LANG = code; }, text: key => t(key),
     poll: busy => { _pollBusy = busy; },
+    recover: recoverOpenHistory,
     render: (diagnosis, model, values) => {
       checkupCardHtml = () => diagnosis;
       statusCardsHtml = () => model;
@@ -99,6 +100,23 @@ function expectSelection(key, message) {
   assert.deepEqual(selected().map(button => button.dataset.card), [key], `${message}: exactly one pressed button`);
   assert.equal(host.getAttribute("aria-labelledby"), selected()[0].id, `${message}: content naming`);
 }
+
+const settings = new Element(document, "settingsCards");
+document.elements.set(settings.id, settings);
+settings.querySelectorAll = selector => {
+  assert.equal(selector, ".vitem.open [data-trend]");
+  return ["free_heap", "max_alloc"].map(trend => ({ dataset: { trend } }));
+};
+const attempts = [];
+context.ensureHistPair = (trend, recover) => {
+  assert.equal(recover, true);
+  attempts.push(trend);
+  return Promise.resolve();
+};
+ui.S.stage = "settings";
+ui.recover();
+assert.deepEqual(attempts, ["free_heap"], "an open Settings chart can recover while admitting one request");
+ui.S.stage = "dashboard";
 
 assert.equal(ui.S.dashboardCard, "diagnosis", "a new dashboard starts with diagnosis selected");
 ui.S.status = { diagnostics: { enabled: true }, hp: { connected: true } };

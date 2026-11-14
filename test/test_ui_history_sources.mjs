@@ -203,7 +203,7 @@ const lifecycleSource = appState.slice(appState.indexOf("// ── History sourc
   appState.indexOf("// ── Navigation (dashboard ⇄ Settings)"));
 vm.runInContext(lifecycleSource + readAppFragments(["history.js"]) +
   "\nthis.__api = { hasHist, hasModbusHist, hasRoomHist, histCacheKey, historyView, histHtml, scrubText, histReadout, histVisibleSeries," +
-  " histTipsHtml, scrubMove, histSeriesToggle, ensureHist, ensureHistPair, ensureDerived, DERIVED, syncHistSources, invalidateHistSources };", context,
+  " histTipsHtml, scrubMove, scrubIndex, histViewRevision, histSeriesToggle, ensureHist, ensureHistPair, ensureDerived, DERIVED, syncHistSources, invalidateHistSources };", context,
   { filename: "main/www/js/history.js" });
 const h = context.__api;
 
@@ -218,6 +218,14 @@ assert.equal(h.hasHist("dhw_tank"), true);
 assert.equal(h.hasModbusHist("dhw_tank"), true);
 assert.equal(h.histCacheKey("dhw_tank", "modbus"), "modbus:dhw_tank");
 let view = h.historyView("dhw_tank");
+const mountedTank = {
+  dataset: { hist: "dhw_tank", n: String(view.v.length), rev: h.histViewRevision(view) },
+  getBoundingClientRect: () => ({ left: 0, width: 100 }),
+};
+assert.equal(h.scrubIndex(mountedTank, 0), 0, "the mounted ring can resolve its own first sample");
+S.hist.set("dhw_tank", { ...x10a, b0: x10a.b0 + 1, gen: x10a.gen + 1 });
+assert.equal(h.scrubIndex(mountedTank, 0), -1, "a delayed refresh cannot pin a replacement bucket on the frozen plot");
+S.hist.set("dhw_tank", x10a);
 assert.equal(view.series.length, 2);
 assert.deepEqual(Array.from(view.series[0].v), [452, null, 454]);
 assert.deepEqual(Array.from(view.series[1].v), [453, 455, 456]);

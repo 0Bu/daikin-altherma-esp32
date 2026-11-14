@@ -133,8 +133,9 @@ async function installHooks(page, mutation) {
     let eager, detach, staleText;
     if (mutation === "history-eager") {
       const code = original.descAccordion.toString();
-      if (!/open\s*&&\s*trendId/.test(code)) throw new Error("history mutation target missing");
-      eager = window.eval("(" + code.replace(/open\s*&&\s*trendId/, "trendId") + ")");
+      const guard = /open\s*&&\s*trendId\s*&&\s*visible/;
+      if (!guard.test(code)) throw new Error("history mutation target missing");
+      eager = window.eval("(" + code.replace(guard, "trendId") + ")");
     }
     if (mutation === "history-detach") {
       const code = original.replaceHistoryHtml.toString();
@@ -1139,7 +1140,7 @@ async function disclosure(page, server, fixture, context, selectors, ids, settin
       } finally {
         _pollBusy = false;
         renderCards(false);
-        recoverDashboardHistory();
+        recoverOpenHistory();
       }
     }, { selector: selectors[0] });
     assert.deepEqual(heldSelection, { hadPausedChart: true, visible: true, retired: true, inert: true },
