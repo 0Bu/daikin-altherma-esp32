@@ -982,7 +982,7 @@ BODIES['main/hp_modbus.cpp'] = {'mb_ensure_connected': 'a09adc44fb9ad2fea8e8f5c3
  'mb_poll_once': '10818559405dad8d224b8583fb908514be3f344fdf684d7e71007951c39f9990',
  'status_socket_open': '6acb79527aee70827e7a0a62457febca550aa66fb7c71d750fcb3a56133a62c5'}
 BODIES['main/hp_modbus.cpp'].update({
-    'mb_task': '3d238adfde4e9bdbc5f3a9c87dfcaa909ffcb122abf64af41a5625cd885f2d4a',
+    'mb_task': '25fb6af490258d135dcee47ad602fed7cf7f7e8b8e98d76ca12996452f6772dd',
     'mb_retire_if_disabled': '3ad4e9aaa5746502185ec526b2fb7ac783035f4cfa312a5864a20e3ac64f06de',
     'mb_task_pending': '7280769fa87e4e8e4cbab4bcbc300132caeb105178b42697a8f86cffe9aebcca',
     'mb_task_start_if_enabled': 'a14ae89ef71a0ac8e2b477e1781510a520af5f1684f99fd5f60e1c8f5ba2959e',

@@ -1015,6 +1015,9 @@ static void mb_drop_cache(uint32_t expected_target_generation = 0) {
     if (expected_target_generation != 0 &&
         s_target_generation.load(std::memory_order_acquire) != expected_target_generation)
         return;
+    if (expected_target_generation && !s_cache.capacity() && !s_cache_generation &&
+        s_cache_commit_ms < 0)
+        return;
     s_cache.swap(invalidated_cache);
     s_cache_generation         = 0;
     s_cache_target_generation  = 0;
@@ -1762,6 +1765,14 @@ static void mb_task(void*) {
                 // Recheck closes the opposite race if OTA or weather began right as we
                 // claimed network activity. Exit scope immediately so MbNetworkActivity
                 // destructor restores s_network_quiesced to true before the inter-cycle delay.
+            } else if (!ready && (heap_largest_internal_block() < MB_FIRST_SWEEP_HEAP ||
+                                  heap_caps_get_free_size(MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL) <
+                                      MB_FIRST_SWEEP_HEAP)) {
+                // No socket exists before worker admission. Release the task stack and any
+                // task-local semaphore instead of keeping them through sustained low heap.
+                Lock lk(s_mtx);
+                s_task_retry_us = esp_timer_get_time() + 5 * 1000000;
+                break;
             } else if ((ready || (ready = mb_admit_worker(lwip_ready, failures))) &&
                        s_target_enabled.load(std::memory_order_acquire) && !ota_download_active() &&
                        !weather_fetch_active()) {

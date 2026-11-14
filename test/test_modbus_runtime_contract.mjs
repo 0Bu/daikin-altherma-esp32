@@ -106,6 +106,16 @@ try {
       after: "true",
     },
     {
+      name: "unready-worker-keeps-stack-below-heap-floor", scenario: "worker_admission_pressure",
+      before: /else if \(!ready && \(heap_largest_internal_block\(\) < MB_FIRST_SWEEP_HEAP \|\|\s*heap_caps_get_free_size\(MALLOC_CAP_8BIT \| MALLOC_CAP_INTERNAL\) <\s*MB_FIRST_SWEEP_HEAP\)\)/,
+      after: "else if (false)",
+    },
+    {
+      name: "drop-empty-cache-repeatedly-invalidates-mqtt", scenario: "socket_setup_and_retirement",
+      before: /if \(expected_target_generation && !s_cache.capacity\(\) && !s_cache_generation &&\s*s_cache_commit_ms < 0\)\s*return;/,
+      after: "",
+    },
+    {
       name: "worker-admits-first-sweep-during-tls", scenario: "first_sweep_after_tls",
       before: /s_target_enabled\.load\(std::memory_order_acquire\) &&\s*!ota_download_active\(\) &&\s*!weather_fetch_active\(\)/,
       after: "s_target_enabled.load(std::memory_order_acquire)",

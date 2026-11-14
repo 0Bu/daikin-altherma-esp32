@@ -597,10 +597,10 @@ If enabled again during retirement, the worker can continue after releasing the 
 X10A remains independent.
 The response adds `"modbus_start_pending":true` when an enabled target still needs worker admission
 or the worker is retiring. Read `/status.modbus.connected` for the live link and `/values.modbus` for
-its readings. A failed heap check at task creation defers the next start by five seconds. Before
-the first sweep, that delay begins after the worker has released any old socket. A created worker
-retries task-local network semaphore and watchdog
-admission at its normal poll cadence.
+its readings. Insufficient heap at task creation or during worker setup defers the next start by
+five seconds. Before the first sweep, that delay begins after the worker releases any old socket.
+With enough heap, the worker retries task-local network semaphore and watchdog admission at its
+normal poll cadence.
 If retained HomeHub state is being published, an endpoint change can return 409 for retry before
 settings are saved.
 After core services have started, the X10A task retries worker creation even while its bus is

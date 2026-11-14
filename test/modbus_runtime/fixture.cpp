@@ -2123,6 +2123,18 @@ void worker_admission_pressure() {
     };
     unready->fn(unready->arg);
     REQUIRE(!s_task && sdk::delete_calls == 1 && sdk::wdt_delete == 1);
+
+    reset();
+    sdk::fail_lwip_alloc = 1;
+    mb_reconfigure(true);
+    const auto unscheduled = s_task;
+    sdk::on_delay          = [&] {
+        REQUIRE(sdk::delays == 1 && sdk::lwip_gets == 1 && sdk::wdt_add == 0);
+        adapter::largest_block = MB_FIRST_SWEEP_HEAP - 1;
+    };
+    unscheduled->fn(unscheduled->arg);
+    REQUIRE(!s_task && mb_task_pending() && s_task_retry_us > sdk::clock_us);
+    REQUIRE(sdk::lwip_gets == 1 && sdk::wdt_add == 0 && sdk::delete_calls == 1);
 }
 void first_sweep_heap_pressure() {
     for (bool largest : {false, true}) {
@@ -2131,7 +2143,7 @@ void first_sweep_heap_pressure() {
         const auto worker = s_task;
         REQUIRE(worker && mb_task_pending());
         auto& available         = largest ? adapter::largest_block : adapter::free_bytes;
-        available               = HEAP_RECOVERY_BYTES + MB_FIRST_SWEEP_RESERVE - 1;
+        sdk::on_wdt_add         = [&] { available = MB_FIRST_SWEEP_HEAP - 1; };
         const auto config_reads = adapter::config_reads;
         sdk::on_delay           = [] {
             mb_reconfigure(false);
@@ -2269,6 +2281,9 @@ void socket_setup_and_retirement() {
     sdk::fail_socket_close = 1;
     REQUIRE(!poll_once());
     REQUIRE(s_sock >= 0 && !s_have_req && s_cache.capacity() == 0);
+    const auto invalidated_revision = mb_cache_generation();
+    mb_drop_cache(s_target_generation);
+    REQUIRE(mb_cache_generation() == invalidated_revision);
     adapter::config_throws = true;
     bool refused           = false;
     try {

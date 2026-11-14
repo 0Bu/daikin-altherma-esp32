@@ -979,6 +979,10 @@ static void service_retained_cleanup_probe(const std::string& topic, std::atomic
 // session that is still connected. The register definition supplies the permanent JSON type. Only
 // Text16 is text; flags, enums and ordinary values retain their numeric Modbus constants.
 static std::vector<GroupedValue> current_modbus_values(bool& live) {
+    if (!mb_values_live()) {
+        live = false;
+        return {};
+    }
     const size_t cap = mb_values_capacity();
     std::vector<CachedValue> cache(cap ? cap : 1);
     const size_t n = mb_values_snapshot(cache.data(), cache.size(), live);
