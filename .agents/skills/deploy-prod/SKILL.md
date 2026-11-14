@@ -62,7 +62,8 @@ new head. Repeat for every fix head from Step 8.
 
 Freeze the source and reserve the bench and production window before merging. The native pre-push
 hook runs the local release suite on the clean candidate against refreshed `origin/main`. Keep
-Chromium and WebKit in headless Linux Docker. Run local reviews against the same head and finish
+the hook's parallel host and firmware checks in their isolated checkouts. The headless Linux Docker
+Chromium and WebKit phase starts after both finish. Run local reviews against the same head and finish
 the separately required bench acceptance in Step 0 before pushing the release branch.
 
 Post the exact emitted receipt as a PR comment from the authenticated maintainer account. A new

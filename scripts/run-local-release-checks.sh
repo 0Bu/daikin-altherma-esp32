@@ -3,27 +3,34 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-if [ "$#" -ne 2 ]; then
-    echo "usage: run-local-release-checks.sh BASE_SHA HEAD_SHA" >&2
+if [ "$#" -ne 3 ]; then
+    echo "usage: run-local-release-checks.sh host|browser BASE_SHA HEAD_SHA" >&2
     exit 2
 fi
-base="$1"
-candidate="$2"
+phase="$1"
+base="$2"
+candidate="$3"
 tested="$(git rev-parse --verify HEAD)"
 [[ "$base" =~ ^[0-9a-f]{40}$ && "$candidate" =~ ^[0-9a-f]{40}$ ]]
 [ "$(git rev-parse --verify HEAD^1)" = "$base" ]
 git merge-base --is-ancestor "$candidate" "$tested"
 
-export CLANG_FORMAT=clang-format-18
-unset DAIKIN_BROWSER_CONTAINER DAIKIN_BROWSER_ALLOW_LOCAL_SKIP DAIKIN_BROWSER_BIN
-unset DAIKIN_BROWSER_IMAGE DAIKIN_BROWSER_ENGINE
-unset DAIKIN_BROWSER_FLAGS DAIKIN_BROWSER_WORKERS
-export DAIKIN_BROWSER_TIMEOUT_MS=900000
-
 check() {
     printf '\nLocal release check: %s\n' "$*"
     "$@"
 }
+
+case "$phase" in
+    browser)
+        unset DAIKIN_BROWSER_CONTAINER DAIKIN_BROWSER_ALLOW_LOCAL_SKIP DAIKIN_BROWSER_BIN
+        unset DAIKIN_BROWSER_IMAGE DAIKIN_BROWSER_ENGINE
+        unset DAIKIN_BROWSER_FLAGS DAIKIN_BROWSER_WORKERS
+        DAIKIN_BROWSER_PARALLEL=1 DAIKIN_BROWSER_TIMEOUT_MS=900000 BEFORE="$base" \
+            check scripts/run-browser-render-tests.sh --if-ui-changed
+        exit 0 ;;
+    host) export CLANG_FORMAT=clang-format-18 ;;
+    *) echo "Unknown local release phase: $phase" >&2; exit 2 ;;
+esac
 
 check scripts/run-pr-hygiene-audit.sh --base "$base" --head "$candidate" --event-file ''
 check tools/pr_hygiene/selftest.sh
@@ -42,7 +49,6 @@ check tools/presenter/selftest.sh
 check scripts/run-ui-localization-audit.sh
 check node tools/ui_localization/selftest.mjs
 check scripts/run-ui-use-case-tests.sh
-BEFORE="$base" check scripts/run-browser-render-tests.sh --if-ui-changed
 check node tools/ota/selftest.mjs
 check node tools/production_ota/selftest.mjs
 check tools/absence/selftest.sh

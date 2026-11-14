@@ -128,6 +128,8 @@ check_rc "publication efficiency retains complete verification" 0 \
     python3 tools/release/test_publication_efficiency.py
 check_rc "protected policy only accepts an exact maintainer release receipt" 0 \
     python3 tools/release/test_verify_push_proof.py
+check_rc "local pre-push isolates the browser phase and propagates failed checks" 0 \
+    python3 tools/release/test_push_checks.py
 check_rc "production OTA reuses only matching local host checks" 0 \
     python3 tools/release/test_local_checks.py
 check_rc "release tag lookup refuses unknown remote identity" 0 \

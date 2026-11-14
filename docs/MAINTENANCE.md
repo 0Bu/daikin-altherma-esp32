@@ -81,7 +81,10 @@ The native `pre-push` hook runs the repository's full mechanical suite and unsig
 compile for maintainer pushes. It refreshes `origin/main` and checks the prospective merge tree
 in a private snapshot with main as the first parent. Checks include the pinned formatter,
 ASan/UBSan in Linux Docker on macOS, headless Linux Chromium and WebKit for browser-relevant changes,
-the pinned coredump decoder and the real-cJSON runtime suite. A maintainer reviews fork code before
+the pinned coredump decoder and the real-cJSON runtime suite. The host gates and ESP32-S3 compile
+run concurrently in separate snapshots of the same tree. Both finish before the browser phase
+starts, so the release run's own compile cannot affect the UI timing measurements. The log records
+elapsed time for each phase. A maintainer reviews fork code before
 running its checks in a disposable environment without maintainer credentials. The snapshot runs
 candidate scripts with the current user's permissions. Keep `origin` on the canonical repository
 and fetch the fork head separately.
