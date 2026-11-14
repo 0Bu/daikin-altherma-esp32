@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { makeHistoryMotionFixture } from "./test_browser_history_fixture.mjs";
 
 const ROW = "button[data-desc='model:health_cycling']";
+const DIAGNOSIS = '[data-dashboard-card="diagnosis"]';
 const CHART = ".checkup-cycling-chart";
 const COLS = `${CHART} .checkup-chart-cols`;
 const OPEN = 23;
@@ -558,7 +559,13 @@ export async function assertCyclingChart(page, server, context) {
     const cycling = status.health.checks[0];
     delete cycling.timeline;
     cycling.starts = 22;
-    cycling.hours = [{ ...hours[RESTORED], starts: 22 }];
+    cycling.hours_epoch = 2;
+    cycling.hours = [
+      { ...hours.find(hour => hour.bucket === RESTORED), bucket: -1, starts: 22,
+        end_unix_s: Date.parse("2026-11-13T15:14:00Z") / 1000 },
+      { bucket: 0, starts: 0, run_s: 0, observed_s: 0, elapsed_s: 60 },
+    ];
+    status.health.persist = "flash";
     await poll("2026-11-13T15:15:00Z");
     assert.deepEqual(await page.evaluate(`(() => {
       const chart = document.querySelector(".checkup-cycling-chart");
@@ -569,6 +576,36 @@ export async function assertCyclingChart(page, server, context) {
       };
     })()`), { timeline: false, counts: ["22"], selected: false },
     context + ": a reboot discards the previous trace and selection and shows saved hourly starts");
+    const restoredHealth = { ...status.health, persist: "flash" };
+    status.health = { status: "unavailable", persist: "unknown",
+      checks: [{ id: "cycling", verdict: "unavailable" }] };
+    for (const time of ["2026-11-13T15:15:01Z", "2026-11-13T15:15:02Z"]) {
+      await poll(time);
+      const diagnosis = await evaluate(page, ({ card, row, chart }) => {
+        const host = document.querySelector(card);
+        const empty = host.querySelector(".empty");
+        return { empty: empty?.textContent, visible: !!empty?.getClientRects().length,
+          cycling: !!host.querySelector(row), chart: !!host.querySelector(chart) };
+      }, { card: DIAGNOSIS, row: ROW, chart: CHART });
+      assert.deepEqual(diagnosis, { empty: "No data", visible: true, cycling: false, chart: false },
+        context + ": an unreadable snapshot removes the previously visible evidence");
+    }
+    status.health = restoredHealth;
+    await poll("2026-11-13T15:15:03Z");
+    const cyclingRow = await evaluate(page, row => {
+      const button = document.querySelector(row);
+      return { visible: !!button?.getClientRects().length, open: button?.getAttribute("aria-expanded") === "true" };
+    }, ROW);
+    assert.equal(cyclingRow.visible, true, context + ": Cycling returns when the snapshot becomes readable");
+    if (!cyclingRow.open) await tap(page, ROW);
+    await page.waitFor("!S.clickHold");
+    await poll("2026-11-13T15:15:04Z");
+    const archived = await evaluate(page, chart => {
+      const saved = document.querySelector(chart + ' button[data-bucket="-1"]');
+      return { count: saved?.querySelector("b").textContent, label: saved?.getAttribute("aria-label") };
+    }, CHART);
+    assert.equal(archived.count, "22", context + ": a readable snapshot restores the archived count");
+    assert.match(archived.label, /^Saved time /, context + ": the browser identifies the restored interval");
     assert.ok(updates >= 3, context + ": verify continuity across repeated production polling");
     console.log("cycling chart checked: " + context + "; " + updates + " live status polls");
   } finally {
