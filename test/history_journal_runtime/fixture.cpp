@@ -1065,28 +1065,33 @@ void x10a_dhw_reply_bucket() {
     check("smart_grid_mode", 20, "x10a_boost_uses_page_reply_bucket");
 }
 
-void restore_modbus_reply_overlap(const char* transport_path) {
+void restore_modbus_reply_overlap(const char* transport_path, bool partial_restore) {
     const auto configured = configure_homehub();
     load_synthetic_nor(transport_path);
     journal_sdk::unix_origin = delayed_boot_s + 1515;
     history_start();
     const auto generation = bind_homehub(configured, peer_a);
     sdk::now_us           = history_bucket_us + 200000;
-    for (unsigned i = 0; i < 20; ++i) history_service_flash_restore();
-    require(s_flash_restore_done && s_mb_have_bucket && s_mb_bucket == 1,
-            "restore_advanced_beyond_first_modbus_reply");
+    for (unsigned i = 0; i < 20 && !(partial_restore && s_mb_have_bucket); ++i)
+        history_service_flash_restore();
+    const auto index = static_cast<size_t>(logic::homehub_history_index("bsh_state"));
+    require(s_mb_have_bucket && s_mb_bucket == 1, "restore_advanced_beyond_first_modbus_reply");
+    require(partial_restore ? !s_flash_restore_done && !P().mb_ring[index].count
+                            : s_flash_restore_done && P().mb_ring[index].count,
+            "restore_has_expected_heater_ring_progress");
 
     CachedValue heater;
     heater.off               = 32;
     heater.modbus_definition = def::homehub_definition_id(*def::homehub_find(32));
     heater.value             = "1";
     history_record_modbus(&heater, 1, generation, history_bucket_us - 200000);
+    for (unsigned i = 0; i < 20 && !s_flash_restore_done; ++i) history_service_flash_restore();
+    require(s_flash_restore_done, "restore_finishes_after_first_modbus_reply");
     heater.value = "0";
     history_record_modbus(&heater, 1, generation, sdk::now_us);
     sdk::now_us += history_bucket_us;
     history_record_modbus(nullptr, 0, generation);
 
-    const auto    index = static_cast<size_t>(logic::homehub_history_index("bsh_state"));
     HistorySample samples[HISTORY_SAMPLES];
     const size_t  n = history_modbus_snapshot(index, samples, HISTORY_SAMPLES);
     require(n >= 2 && samples[n - 2] == 10 && samples[n - 1] == 0,
@@ -1237,7 +1242,9 @@ int main(int argc, char** argv) {
         else if (name == "restore_modbus_delayed" && argc == 3)
             restore_modbus_delayed(argv[2]);
         else if (name == "restore_modbus_reply_overlap" && argc == 3)
-            restore_modbus_reply_overlap(argv[2]);
+            restore_modbus_reply_overlap(argv[2], false);
+        else if (name == "restore_modbus_reply_partial" && argc == 3)
+            restore_modbus_reply_overlap(argv[2], true);
         else if ((name == "restore_trend_read_transient" ||
                   name == "restore_trend_read_persistent") &&
                  argc == 3)

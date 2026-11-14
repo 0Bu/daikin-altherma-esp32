@@ -997,7 +997,15 @@ const mbBinaryValue = (r) => {
 // rather than the concept vocabulary logic/homehub_map.hpp reserves for paired MEASUREMENTS.
 // Legacy frames can describe holding 9 as binary Quiet activity. Its map and meaning are
 // unverified, so it cannot supply a live state.
-const mbBool = (off) => off === 9 ? null : mbBinaryValue(mbRow(off));
+const mbBool = (off) => {
+  if (off === 9 || !mbLive()) return null;
+  const mb = S.status.modbus;
+  // Use the timed reply for space operation when the server provides it. The raw row can
+  // still describe an older full sweep and remains available in the values table.
+  if (off === 53 && typeof mb.plant_gate_known === "boolean")
+    return mb.plant_gate_known ? mb.plant_gate_active : null;
+  return mbBinaryValue(mbRow(off));
+};
 // EKRHH input 21 is a three-state enum, not a flag. Preserve the raw constant while ensuring the
 // status header never treats an unknown future value as a known Fault or Warning.
 const mbUnitAbnormality = () => modbusEnumNumber(mbRow(21), "unit_abnormality", 2);

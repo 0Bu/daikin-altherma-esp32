@@ -217,7 +217,8 @@ if not args.expect_red:
                                "bytes": transport.stat().st_size,
                                "only_cross_process_state": "synthetic NOR partition bytes"})
     transport = OUT / "modbus-delayed.synthetic-nor.bin"
-    for case in ("seed_modbus_delayed", "restore_modbus_delayed", "restore_modbus_reply_overlap"):
+    for case in ("seed_modbus_delayed", "restore_modbus_delayed",
+                 "restore_modbus_reply_overlap", "restore_modbus_reply_partial"):
         case_inputs[case] = [transport]
         result = execute(baseline, case, case, [transport])
         expected = result.returncode == 0 and "PASS case=" + case + " " in result.stdout
@@ -406,7 +407,7 @@ if not args.expect_red:
          "heater_reply_is_recorded_in_its_own_bucket"),
         ("discard_modbus_reply_after_raster_restore",
          "if (bucket + 1 != s_mb_bucket || s_mb_reset_requested.load()) return;",
-         "return;", ["restore_modbus_reply_overlap"],
+         "return;", ["restore_modbus_reply_overlap", "restore_modbus_reply_partial"],
          "modbus_delayed_reply_survives_concurrent_restore"),
         ("x10a_dhw_uses_poll_end",
          "dhw_reply_us >= 0 ? logic::history_bucket(dhw_reply_us) : s_bucket",

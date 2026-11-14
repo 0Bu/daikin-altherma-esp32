@@ -37,7 +37,7 @@ function renderer(lang, removeNativePrecedence = false) {
   };
   vm.createContext(context);
   vm.runInContext(source + "\nthis.__ui = { displayValue, displayUnit, displayReadingLabel, displayHomeHubLabel, descFor, mbNoteHtml, vDescRow, inspectSig, renderInspect, INSPECT, state: S, operationModeText, operationModeFromFlags, schematicOperationMode, labels: I18N[LANG]," +
-    " sgModeText: (mode) => t(`sg.mode${mode}`)," +
+    " liveData, sgModeText: (mode) => t(`sg.mode${mode}`)," +
     " sgBoostText: () => t(\"schem.sg_boost\") };", context,
     { filename: "main/www/app.sources" });
   return { ...context.__ui, element };
@@ -324,6 +324,7 @@ const mbStatus = en.state.status.modbus;
 en.state.status.hp.connected = false;
 en.state._modbus = [52, 53].map(off => ({ off, value: 0, binary: true }));
 assert.equal(en.schematicOperationMode(), "Stop", "an older server can still report its cached mode");
+assert.equal(en.liveData().spaceOp, false, "an older server still supplies the space pill");
 Object.assign(mbStatus, { dhw_operation_known: true, dhw_operation_active: false,
   plant_gate_known: true, plant_gate_active: false });
 en.state.modbusCompressorRunning = true;
@@ -333,6 +334,11 @@ assert.equal(en.schematicOperationMode(), "Hot water", "the current DHW reply wi
 mbStatus.dhw_operation_known = false;
 en.state.modbusCompressorRunning = false;
 assert.equal(en.schematicOperationMode(), null, "an expired reply does not fall back to the old row");
+mbStatus.plant_gate_active = true;
+assert.equal(en.schematicOperationMode(), en.labels["mode.space"], "the current space reply wins over the old row");
+assert.equal(en.liveData().spaceOp, true, "the space pill follows the same current reply");
+mbStatus.plant_gate_known = false;
+assert.equal(en.liveData().spaceOp, null, "the expired space reply withholds the pill despite the old row");
 en.state.status.hp.connected = true;
 en.state._modbus = [];
 // The raw row carries its age qualifier. An independently reported activity flag cannot clear it.

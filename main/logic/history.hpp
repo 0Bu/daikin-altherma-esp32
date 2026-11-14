@@ -627,9 +627,15 @@ struct TrendRing {
     }
 
     // A reply received before the boundary can arrive at the reducer after another
-    // producer has already closed its bucket. Amend that position without moving the raster.
+    // producer has already closed its bucket. The caller has checked the raster position.
+    // Restore can establish that boundary before it reaches this ring; preserve the live suffix
+    // so the later splice can fill older slots without taking precedence over this observation.
     bool fold_previous(HistorySample sample, bool event) {
-        if (!count || history_is_absent(sample)) return false;
+        if (history_is_absent(sample)) return false;
+        if (!count) {
+            push(sample);
+            return true;
+        }
         auto& latest = buf[(static_cast<size_t>(head) + HISTORY_SAMPLES - 1) % HISTORY_SAMPLES];
         if (event && latest == 10) return false;
         if (latest == sample) return false;
