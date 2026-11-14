@@ -28,7 +28,8 @@ vm.runInContext(read("app_state") + "\n" + read("history") + "\n" +
   hydrateRoutedPopup = () => {};
   this.ui = { S, refreshStatus, fillRefTemp, refTempFormPayload, formatRefSource, parseRefSource,
     ensureHist, ensureHistPair, ensureDerived, historyView, histPinIndex, histCacheKey, syncHistSources,
-    yieldHistoryToPoll, pumpHistoryQueue, histPinToggle, histAxisEnd, scrubTime, histHtml };
+    yieldHistoryToPoll, pumpHistoryQueue, histPinToggle, histSeriesToggle,
+    histAxisEnd, scrubTime, histHtml };
 `, context);
 const ui = context.ui;
 const plain = (value) => JSON.parse(JSON.stringify(value));
@@ -361,6 +362,11 @@ assert.equal(ui.S.histPin.has("dhw_tank"), false);
 assert.equal(ui.histPinIndex("dhw_tank", ui.historyView("dhw_tank")), -1);
 await status(fixture());
 assert.equal(ui.histPinIndex("dhw_tank", ui.historyView("dhw_tank")), -1);
+ui.histPinToggle("dhw_tank", 1);
+ui.histSeriesToggle("dhw_tank", "modbus");
+assert.equal(ui.S.histPin.has("dhw_tank"), false, "changing visible instruments retires the saved pin");
+ui.histSeriesToggle("dhw_tank", "modbus");
+assert.equal(ui.histPinIndex("dhw_tank", ui.historyView("dhw_tank")), -1, "legend round trip cannot restore a retired pin");
 
 // The cached delta uses two undated rings. A transient failure on both inputs preserves the
 // selected index and generation. A successful new ring changes that generation.

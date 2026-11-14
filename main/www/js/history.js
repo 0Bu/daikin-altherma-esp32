@@ -206,6 +206,8 @@ function histSeriesToggle(id, source) {
   if (visible) hidden.add(source); else hidden.delete(source);
   cancelHistoryGesture();
   S.histHidden.set(id, hidden);
+  const pin = S.histPin.get(id);
+  if (pin && pin.t == null && !pin.source && histPinIndex(id, h) < 0) S.histPin.delete(id);
   S.clickHold = false;
   S.inspHistSig = null;
   renderTrendHosts();
