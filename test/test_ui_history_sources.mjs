@@ -232,7 +232,16 @@ S.hist.set("modbus:dhw_tank", modbus);
   assert.match(retained, /vhist-retained[^>]*aria-label="X10A · hist\.retained"[^>]*left:0\.000%/,
     "the last received marker points at the measurement before the trailing gaps");
   const recentStatus = S.status.uptime_s;
+  S.hist.set("dhw_tank", { ...S.hist.get("dhw_tank"), t0: 1768720000 });
+  S.histPin.set("dhw_tank", { t: 1768720000 });
+  assert.match(h.histHtml("dhw_tank", "", "Tank", "x10a"), /vhist-cross vhist-pinned/);
+  S.status.uptime_s = (x10a.b0 + 289) * 300;
+  S.hist.set("dhw_tank", { ...S.hist.get("dhw_tank"), v: [452, 454, null] });
+  assert.doesNotMatch(h.histHtml("dhw_tank", "", "Tank", "x10a"), /vhist-cross vhist-pinned/,
+    "a dated pin cannot remain on an expired slot while newer compatible history stays visible");
+  S.histPin.delete("dhw_tank");
   S.status.uptime_s = (x10a.b0 + 290) * 300;
+  S.hist.set("dhw_tank", { ...S.hist.get("dhw_tank"), v: [452, null, null] });
   assert.match(h.histHtml("dhw_tank", "", "Tank", "x10a"), /Verlauf nicht verfügbar/,
     "the latest retry cannot keep an already old monotonic sample in view");
   S.status.uptime_s = recentStatus;
@@ -1023,20 +1032,37 @@ assert.match(dhwHtml, /5 min/, "DHW legend must include BSH duration");
 
 // Verify tooltips include active phases
 assert.doesNotMatch(h.scrubText(view, 0), /Boost|Heizstab/, "Sample 0 without active phases");
-assert.match(h.scrubText(view, 1), /(?:· |\n)Boost aktiv$/, "Sample 1 with active Boost");
-assert.match(h.scrubText(view, 2), /(?:· |\n)Boost aktiv \+ Heizstab aktiv$/, "Sample 2 with both active");
-assert.equal(h.histReadout(view, 1), "46,0 °C · Boost aktiv",
+assert.match(h.scrubText(view, 1), /(?:· |\n)Boost aktiv · Modbus$/, "Sample 1 with active Boost");
+assert.match(h.scrubText(view, 2), /(?:· |\n)Boost aktiv · Modbus \+ Heizstab aktiv · Modbus$/,
+  "sample 2 identifies the source of both active phases");
+assert.equal(h.histReadout(view, 1), "46,0 °C · Boost aktiv · Modbus",
   "a single visible curve appends active phase to value readout");
 {
   S.hist.set("modbus:dhw_tank", { dt: 300, unit: "°C", b0: 100, v: [450, 460, 470, 480], held: [] });
   h.histSeriesToggle("dhw_tank", "modbus");
   const pairedView = h.historyView("dhw_tank");
-  assert.match(h.histReadout(pairedView, 1), /<span class="vhist-tip-note">Boost aktiv<\/span>/,
+  assert.match(h.histReadout(pairedView, 1), /<span class="vhist-tip-note">Boost aktiv · Modbus<\/span>/,
     "active auxiliary phase renders as note row below tabular values when multiple series are shown");
   S.hist.delete("modbus:dhw_tank");
   S.histHidden.delete("dhw_tank");
 }
 assert.doesNotMatch(h.scrubText(view, 3), /Boost|Heizstab/, "Sample 3 without active phases");
+{
+  S.hist.set("smart_grid_mode", { dt: 300, b0: 100, v: [20, 20, 0, 0] });
+  S.hist.set("bsh_state", { dt: 300, b0: 100, v: [0, 10, 0, 0] });
+  const independent = h.historyView("dhw_tank");
+  const html = h.histHtml("dhw_tank", "°C", "Tank");
+  assert.match(html, /vhist-phase-boost vhist-phase-outline/);
+  assert.match(html, /Boost aktiv · X10A <small[^>]+>\(10 min\)/);
+  assert.match(html, /Boost aktiv · Modbus <small[^>]+>\(10 min\)/);
+  assert.match(h.scrubText(independent, 0), /Boost aktiv · X10A$/,
+    "an active X10A bucket remains visible alongside an inactive HomeHub bucket");
+  assert.match(h.scrubText(independent, 1), /Boost aktiv · X10A \+ Boost aktiv · Modbus \+ Heizstab aktiv · X10A$/);
+  assert.match(h.scrubText(independent, 2), /Boost aktiv · Modbus \+ Heizstab aktiv · Modbus$/,
+    "an inactive X10A bucket cannot conceal an active HomeHub heater sample");
+  S.hist.delete("smart_grid_mode");
+  S.hist.delete("bsh_state");
+}
 
 // ensureHistPair("dhw_tank") fetches auxiliary series
 fetchedUrls = [];
@@ -1250,7 +1276,7 @@ try {
   assert.match(second, /Heizstab aktiv/);
   // Re-seed the previous per-readout work: the same measured operation budget must reject it.
   vm.runInContext("this.originalReadout = histReadout; auxScans = 0; " +
-    "histReadout = (view, index) => originalReadout(view, index);", context);
+    "histReadout = (view, index) => originalReadout(view, index, dhwAuxPhases(view));", context);
   h.histTipsHtml(refreshed, -1, 0);
   assert.ok(context.auxScans >= 289, "the old per-sample scan must exceed the one-scan budget");
 } finally {

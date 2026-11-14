@@ -662,7 +662,8 @@ function alignedHistoryView(id, raw) {
       heldFlags[off + i] = histHeld(s.h, i);
     }
     return { source: s.source, name: s.name, unit: s.h.unit || "", v,
-             held: toRuns(heldFlags), raw: s.h };
+             held: toRuns(heldFlags), expiredUntil: s.h.expired ? off + s.h.expired : 0,
+             expiredFrom: Math.max(0, off), raw: s.h };
   });
   const primary = series.find((s) => s.source === "x10a") ||
                   series.find((s) => s.source === "env3") || series[0];
@@ -1192,44 +1193,32 @@ function alignAuxSample(view, h, i) {
   return (idx >= 0 && idx < h.v.length) ? h.v[idx] : null;
 }
 
+const DHW_PHASE_SERIES = [
+  { id: "smart_grid_mode", source: "x10a", kind: "boost", label: "hist.boost_active", active: 20 },
+  { id: "smart_grid_mode", source: "modbus", kind: "boost", label: "hist.boost_active", active: 20 },
+  { id: "bsh_state", source: "x10a", kind: "bsh", label: "hist.heater_active", active: 10 },
+  { id: "bsh_state", source: "modbus", kind: "bsh", label: "hist.heater_active", active: 10 },
+];
+
 function tankAuxHistories() {
-  return [histCacheKey("smart_grid_mode", "modbus"), "smart_grid_mode", "bsh_state",
-    histCacheKey("bsh_state", "modbus")].map(key => expireHistSamples(S.hist.get(key)));
+  return DHW_PHASE_SERIES.map(({ id, source }) => expireHistSamples(S.hist.get(histCacheKey(id, source))));
 }
 
 const tankAuxRevision = histories => histories?.map(h =>
   h ? `${h.gen}:${h.expired || 0}:${!!h.refreshFailed}:${!!h.err}` : "").join(",");
 
+const dhwPhaseLabel = (phase) => `${t(phase.label)} · ${phase.source === "modbus" ? "Modbus" : "X10A"}`;
+
 function dhwAuxPhases(view) {
-  if (!view?.tankAux) return null;
-  const [sgM, sgX, bshX, bshM] = view.tankAux;
-  if (!sgM && !sgX && !bshX && !bshM) return null;
-
-  const n = view.v.length;
-  const boost = Array(n).fill(false);
-  const bsh = Array(n).fill(false);
-  let boostCount = 0, bshCount = 0;
-
-  for (let i = 0; i < n; i++) {
-    const vSg = alignAuxSample(view, sgM, i) ?? alignAuxSample(view, sgX, i);
-    if (vSg != null && vSg === 20) {
-      boost[i] = true;
-      boostCount++;
-    }
-    const vBsh = alignAuxSample(view, bshX, i) ?? alignAuxSample(view, bshM, i);
-    if (vBsh != null && vBsh === 10) {
-      bsh[i] = true;
-      bshCount++;
-    }
-  }
-  const sourceNames = ["Modbus", "X10A", "X10A", "Modbus"];
-  const phaseNames = ["hist.boost_active", "hist.boost_active", "hist.heater_active", "hist.heater_active"];
-  const sourceNotes = view.tankAux.flatMap((h, i) => {
-    if (!h?.err && !h?.refreshFailed) return [];
-    const status = h.v.some(v => v != null) ? "hist.retained" : "hist.err";
-    return [`${t(phaseNames[i])} · ${sourceNames[i]} · ${t(status)}`];
+  return (view?.tankAux || []).flatMap((h, i) => {
+    if (!h) return [];
+    const phase = DHW_PHASE_SERIES[i];
+    const values = view.v.map((_, j) => alignAuxSample(view, h, j));
+    const flags = values.map(v => v === phase.active);
+    const status = h.err ? "hist.err" : h.refreshFailed
+      ? values.some(v => v != null) ? "hist.retained" : "hist.err" : "";
+    return [{ ...phase, flags, count: flags.filter(Boolean).length, status }];
   });
-  return { boost, bsh, boostCount, bshCount, sourceNotes, dt: view.dt || 300 };
 }
 
 function histEmptyHtml(cached, wrap) {
@@ -1350,12 +1339,12 @@ function histHtml(id, unit, name, source = "") {
       : `<span class="vhist-mark vhist-pinned${histSourceClass(s.source)}"` +
         ` style="left:${px}%;top:${((Y(s.v[pi] / 10) / HIST_H) * 100).toFixed(2)}%"></span>`).join("");
   }
-  const aux = id === "dhw_tank" ? dhwAuxPhases(view) : null;
+  const aux = id === "dhw_tank" ? dhwAuxPhases(view) : [];
   let phaseBands = "";
   const legendItems = (view.series.length > 1 || view.refreshFailed || ["modbus", "room"].includes(view.series[0].source))
     ? view.series.map((s) => histLegendHtml(view, s, histSourceClass(s.source)))
     : [];
-  if (aux) {
+  if (aux.length) {
     const toRuns = (flags) => {
       const out = [];
       for (let i = 0; i < flags.length; i++) {
@@ -1367,32 +1356,33 @@ function histHtml(id, unit, name, source = "") {
       return out;
     };
     const step = n > 1 ? HIST_W / (n - 1) : HIST_W;
-    const renderRuns = (runs, cls) => {
+    const renderRuns = (runs, cls, y, height) => {
       let s = "";
       for (const [from, count] of runs) {
         const x0 = n > 1 ? Math.max(0, X(from) - step / 2) : 0;
         const x1 = n > 1 ? Math.min(HIST_W, X(from + count - 1) + step / 2) : HIST_W;
         const w = Math.max(1, x1 - x0);
-        s += `<rect class="vhist-phase ${cls}" x="${x0.toFixed(1)}" y="0" width="${w.toFixed(1)}" height="${HIST_H}"/>`;
+        s += `<rect class="vhist-phase ${cls}" x="${x0.toFixed(1)}" y="${y}" width="${w.toFixed(1)}" height="${height}"/>`;
       }
       return s;
     };
-    phaseBands += renderRuns(toRuns(aux.boost), "vhist-phase-boost");
-    phaseBands += renderRuns(toRuns(aux.bsh), "vhist-phase-bsh");
-
-    if (aux.boostCount > 0) {
-      legendItems.push(
-        `<span class="vhist-source vhist-legend-boost"><i></i>${esc(t("hist.boost_active"))}` +
-        ` <small class="mono num">(${histDuration(aux.boostCount * aux.dt)})</small></span>`
+    for (const phase of aux) {
+      if (phase.count) {
+        // Give concurrent source lanes a fixed order within each phase band.
+        const paired = aux.some(peer => peer.kind === phase.kind && peer !== phase && peer.count > 0);
+        const height = paired ? HIST_H / 2 : HIST_H;
+        const y = paired && phase.source === "modbus" ? height : 0;
+        const outline = paired && phase.source === "x10a" ? " vhist-phase-outline" : "";
+        phaseBands += renderRuns(toRuns(phase.flags), `vhist-phase-${phase.kind}${outline}`, y, height);
+        legendItems.push(
+          `<span class="vhist-source vhist-legend-${phase.kind}${outline}"><i></i>${esc(dhwPhaseLabel(phase))}` +
+          ` <small class="mono num">(${histDuration(phase.count * view.dt)})</small></span>`
+        );
+      }
+      if (phase.status) legendItems.push(
+        `<span class="vhist-source">${esc(dhwPhaseLabel(phase))} · ${esc(t(phase.status))}</span>`
       );
     }
-    if (aux.bshCount > 0) {
-      legendItems.push(
-        `<span class="vhist-source vhist-legend-bsh"><i></i>${esc(t("hist.heater_active"))}` +
-        ` <small class="mono num">(${histDuration(aux.bshCount * aux.dt)})</small></span>`
-      );
-    }
-    for (const note of aux.sourceNotes) legendItems.push(`<span class="vhist-source">${esc(note)}</span>`);
   }
   const legend = legendItems.length
     ? `<div class="vhist-legend">${legendItems.join("")}</div>`
@@ -1401,9 +1391,9 @@ function histHtml(id, unit, name, source = "") {
     `<div class="vhist-head"><span class="vhist-t">${esc(full ? t("hist.title") : t("hist.recorded", spanH))}</span>` +
     `<span class="vhist-range mono num">${esc(rng)}</span></div>` + legend +
     `<div class="vhist-graph">` +
-      histTipsHtml(view, pi, pi >= 0 ? scrubFrac(pi, n) : 0) +
+      histTipsHtml(view, pi, pi >= 0 ? scrubFrac(pi, n) : 0, aux) +
       `<div class="vhist-plot" data-hist="${esc(id)}"${sourceAttr}${histRevision(view)} data-n="${n}" tabindex="0" role="img"` +
-        ` aria-label="${esc(t(pi >= 0 ? "hist.aria_pinned" : "hist.aria", name || id, pi >= 0 ? scrubText(view, pi) : ""))}">` +
+        ` aria-label="${esc(t(pi >= 0 ? "hist.aria_pinned" : "hist.aria", name || id, pi >= 0 ? scrubText(view, pi, true, aux) : ""))}">` +
         `<svg viewBox="0 0 ${HIST_W} ${HIST_H}" preserveAspectRatio="none" aria-hidden="true">${phaseBands}${area}${line}${dots}</svg>` +
         nowDots + pinCross + pinMarks +
         `<span class="vhist-cross vhist-live" hidden></span>` +
@@ -1669,7 +1659,11 @@ function histPinIndex(id, h) {
     if (h.t0 == null) return -1;                 // pinned with a clock, re-resolving without one
     const rel = p.t - h.t0, half = h.dt / 2;
     const i = Math.trunc((rel >= 0 ? rel + half : rel - half) / h.dt);
-    return (i < 0 || i >= h.v.length) ? -1 : i;
+    if (i < 0 || i >= h.v.length) return -1;
+    const shown = STATE_HIST[id] ? h.series : histVisibleSeries(h);
+    if (shown.some(s => i >= s.expiredFrom && i < s.expiredUntil) &&
+        !shown.some(s => s.v[i] != null || histHeld(s, i))) return -1;
+    return i;
   }
   return p.gen === h.gen && p.sources === histPinSources(h) ? p.i : -1;
 }
@@ -1736,9 +1730,8 @@ function scrubTime(h, i) {
 // Measure every distinct readout shape in a hidden grid cell. Tabular digits have equal widths;
 // replacing them deduplicates samples without losing a possible wrapped line or phase label.
 // The reserved row stays present, so a comparison never moves the plot or its time labels.
-function histTipsHtml(h, pi, frac) {
+function histTipsHtml(h, pi, frac, aux = dhwAuxPhases(h)) {
   // One auxiliary scan per rendered view, not one full-day scan for every sample's readout.
-  const aux = dhwAuxPhases(h);
   const shapes = new Set(Array.from({length:h.v.length + (forecastScrubView(h)?.points.length || 0)},
     (_, i) => histReadout(h, i, aux).replace(/\d/g, "8")));
   return `<div class="vhist-tips"><div class="vhist-tip vhist-reserve mono num" aria-hidden="true">` +
@@ -1756,7 +1749,7 @@ function histTimesHtml(h, pi, frac) {
 
 // Accessibility keeps time and readings together. Visible numeric bubbles omit the selected time;
 // state phase intervals remain evidence about the whole phase, distinct from the selected instant.
-function scrubText(h, i, includeTime = true, aux = dhwAuxPhases(h)) {
+function scrubText(h, i, includeTime = true, aux) {
   if (h.id === ENV3_COMBINED_ID && i >= h.v.length) {
     const forecast = forecastScrubView(h);
     const point = forecast?.points[i - h.v.length];
@@ -1848,8 +1841,9 @@ function scrubText(h, i, includeTime = true, aux = dhwAuxPhases(h)) {
     ? visible.map((s) => sourceText(s, true)).join("\n")
     : sourceText(visible[0] || (h.series ? h.series[0] : h), false);
   let res = (includeTime ? scrubTime(h, i) + " · " : "") + val;
-  if (h.id === "dhw_tank" && aux) {
-    const active = [aux.boost[i] && t("hist.boost_active"), aux.bsh[i] && t("hist.heater_active")].filter(Boolean);
+  if (h.tankAux) {
+    const active = (aux ? aux.filter(phase => phase.flags[i]) : DHW_PHASE_SERIES.filter((phase, j) =>
+      alignAuxSample(h, h.tankAux[j], i) === phase.active)).map(dhwPhaseLabel);
     if (active.length) res += (visible.length > 1 ? "\n" : " · ") + active.join(" + ");
   }
   return res;

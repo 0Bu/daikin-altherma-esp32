@@ -1153,6 +1153,11 @@ button.vhist-source:focus-visible { outline: 2px solid var(--brand); outline-off
 .vhist-source.vhist-legend-bsh i {
   background: color-mix(in srgb, var(--warn) 50%, transparent);
 }
+.vhist-phase.vhist-phase-outline {
+  fill: none; opacity: .55; stroke: var(--fg); stroke-dasharray: 2 2; vector-effect: non-scaling-stroke;
+}
+.vhist-source.vhist-phase-outline i { border: 1px dashed var(--vhist-colour); }
+.vhist-source.vhist-phase-outline i { background: transparent; }
 /* Forecasts repeat the same area-plus-upper-line construction below the measured ENV III opacity;
    the rest of the future stays transparent and provenance remains in the tooltip. */
 .vhist-forecast-divider { stroke: var(--muted); stroke-width: 1px;

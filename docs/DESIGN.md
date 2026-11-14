@@ -310,6 +310,9 @@ hatching only for missing samples. Valve and Quiet use latest sampled state; BSH
 Defrost retain any observed activation in their open five-minute bucket. Smart Grid retains all
 four states. Disinfection and X10A Tank preheat remain different facts. Totals are sampled raster
 time; events between sweeps may be missed.
+The tank-temperature chart identifies X10A and HomeHub Boost and booster-heater phases separately
+in its bands, legend totals and sample readouts. The two instruments can show different states at
+the same time.
 
 Rings share five-minute slots and an elapsed/rolling-day axis. A newly resolved row or changed source
 identity leaves earlier gaps. Compatible firmware records can restore after reboot/power loss;
