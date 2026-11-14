@@ -9,6 +9,8 @@ from pathlib import Path
 import platform
 import pwd
 import re
+import selectors
+import signal
 import stat
 import subprocess
 import sys
@@ -222,20 +224,39 @@ def run_checks(root, env):
     records = []
     for command in COMMANDS:
         print(f"Local release check: {' '.join(command)}", flush=True)
-        with tempfile.TemporaryFile() as output:
+        captured = bytearray()
+        timeout = 1800
+        deadline = time.monotonic() + timeout
+        with subprocess.Popen([str(root / command[0]), *command[1:]], cwd=root, env=env,
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                              start_new_session=True) as process, selectors.DefaultSelector() as stream:
+            stream.register(process.stdout, selectors.EVENT_READ)
             try:
-                result = subprocess.run([str(root / command[0]), *command[1:]], cwd=root, env=env,
-                                        stdout=output, stderr=subprocess.STDOUT, check=False, timeout=1800)
-            except subprocess.TimeoutExpired as error:
-                raise CheckError("local release check exceeded its deadline") from error
-            output.seek(0)
-            captured = output.read(MAX_RECEIPT_BYTES + 1)
+                while True:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0 or not stream.select(remaining):
+                        raise subprocess.TimeoutExpired(command, timeout)
+                    chunk = os.read(process.stdout.fileno(), 65536)
+                    if not chunk:
+                        break
+                    captured.extend(chunk)
+                    if len(captured) > MAX_RECEIPT_BYTES:
+                        raise CheckError(f"{command[0]} exceeded the check log limit")
+                result = process.wait(timeout=max(0, deadline - time.monotonic()))
+            except BaseException as error:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                if isinstance(error, subprocess.TimeoutExpired):
+                    raise CheckError("local release check exceeded its deadline") from error
+                raise
         log = captured.decode("utf-8", errors="replace")
-        if result.returncode:
+        if result:
             print(log, end="", file=sys.stderr)
-            raise CheckError(f"{command[0]} failed with exit code {result.returncode}")
-        if not log or len(captured) > MAX_RECEIPT_BYTES:
-            raise CheckError(f"{command[0]} did not produce a bounded check log")
+            raise CheckError(f"{command[0]} failed with exit code {result}")
+        if not log:
+            raise CheckError(f"{command[0]} did not produce a check log")
         print(log, end="", flush=True)
         records.append({"command": list(command), "exit_code": 0,
                         "log": log, "log_sha256": sha256(log.encode())})

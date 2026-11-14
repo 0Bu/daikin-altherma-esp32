@@ -117,6 +117,16 @@ echo controlled success
         self.assertFalse(local_checks.verify(self.root, fresh=True))
         self.assertEqual(len(self.commands()), 4)
 
+    def test_host_gate_output_is_bounded_before_completion(self):
+        command = ("scripts/overflow.sh",)
+        path = self.root / command[0]
+        path.write_text("#!/bin/sh\nwhile :; do printf '%s\\n' 'oversized log'; done\n")
+        path.chmod(0o755)
+        with patch.object(local_checks, "COMMANDS", (command,)), \
+                patch.object(local_checks, "MAX_RECEIPT_BYTES", 1024):
+            with self.assertRaisesRegex(local_checks.CheckError, "exceeded the check log limit"):
+                local_checks.run_checks(self.root, local_checks.check_environment())
+
     def test_changed_tree_is_retested(self):
         self.assertFalse(local_checks.verify(self.root, premerge=True))
         self.content("different candidate")
