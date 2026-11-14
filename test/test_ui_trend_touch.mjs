@@ -113,9 +113,11 @@ assert.deepEqual(calls, [], "a late release without a matching active pointer ca
   current = makePlot("HomeHub reading"); current.focus();
   const state = { histPin: new Map(), scrub: null, insp: "temperature" };
   const moves = [];
+  const samples = Array.from({ length: 20 }, (_, i) => i);
   const ctx = vm.createContext({
     S: state, document, clearTimeout() {},
-    historyData: { v: Array.from({ length: 20 }, (_, i) => i), dt: 300, t0: 1000 },
+    historyData: { v: samples, dt: 300, t0: 1000,
+      series: [{ source: "modbus", v: samples, offset: 0, raw: { v: samples } }] },
     renderCards: () => {
       keyboardHost.fire("focusout", current);
       document.activeElement = null;

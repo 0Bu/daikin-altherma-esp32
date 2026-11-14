@@ -234,7 +234,7 @@ function histSeriesToggle(id, source) {
   cancelHistoryGesture();
   S.histHidden.set(id, hidden);
   const pin = S.histPin.get(id);
-  if (pin && pin.t == null && !pin.source && histPinIndex(id, h) < 0) S.histPin.delete(id);
+  if (pin && !pin.forecast && !pin.source && histPinIndex(id, h) < 0) S.histPin.delete(id);
   S.clickHold = false;
   S.inspHistSig = null;
   renderTrendHosts();
@@ -729,8 +729,7 @@ function alignedHistoryView(id, raw) {
       heldFlags[off + i] = histHeld(s.h, i);
     }
     return { source: s.source, name: s.name, unit: s.h.unit || "", v, offset: off,
-             held: toRuns(heldFlags), expiredUntil: s.h.expired ? off + s.h.expired : 0,
-             expiredFrom: Math.max(0, off), raw: s.h };
+             held: toRuns(heldFlags), raw: s.h };
   });
   const primary = series.find((s) => s.source === "x10a") ||
                   series.find((s) => s.source === "env3") || series[0];
@@ -1781,19 +1780,26 @@ function histPinIndex(id, h) {
 
 function recordedPinIndex(id, h, point, i) {
   if (i < 0 || i >= (h.recordedN ?? h.v.length)) return -1;
-  const shown = STATE_HIST[id] ? h.series : histVisibleSeries(h);
-  if (shown.some(s => i >= s.expiredFrom && i < s.expiredUntil) &&
-      !shown.some(s => s.v[i] != null || histHeld(s, i))) {
+  const sources = histPinSeries(h).filter(s => point.lanes.includes(s.source));
+  if (!sources.length) return -1;
+  const kept = sources.some(s => point.witnessed
+    ? s.v[i] != null || histHeld(s, i)
+    : i >= s.offset + (s.raw.expired || 0) && i < s.offset + (s.raw.v?.length ?? 0));
+  if (!kept) {
     if ((point.source ?? "") === (h.scope ?? "")) S.histPin.delete(id);
     return -1;
   }
   return i;
 }
 
+function histPinSeries(h) {
+  return STATE_HIST[h.id] ? h.series : histVisibleSeries(h);
+}
+
 // Categorical charts show every source lane. Numeric fallback can change the visible instrument
 // without replacing either ring, so its selected sources are part of an undated sample identity.
 function histPinSources(h) {
-  return (STATE_HIST[h.id] ? h.series : histVisibleSeries(h)).map(s => s.source).join(",");
+  return histPinSeries(h).map(s => s.source).join(",");
 }
 
 // An undated numeric pin is tied to the plotted samples and their alignment.
@@ -1833,9 +1839,14 @@ function histPinToggle(id, i, source = "") {
   else if (i >= h.v.length) S.histPin.set(id, { t: forecast.points[i - h.v.length].time, forecast: true });
   else if (i === h.liveIndex) S.histPin.set(id, { i, gen: h.gen, sources: histPinSources(h), source,
     live: true, sample: liveHistoryPinSample(id, source) });
-  else if (h.t0 != null) S.histPin.set(id, { t: h.t0 + i * h.dt, source, anchor: h.t0, gen: h.gen,
-    bucket: Number.isInteger(h.b0) ? h.b0 + i : null });
-  else S.histPin.set(id, { i, gen: histPlottedPinRevision(h), sources: histPinSources(h), source });
+  else if (h.t0 != null) {
+    const visible = histPinSeries(h);
+    const witnessed = visible.filter(s => s.v[i] != null || histHeld(s, i));
+    S.histPin.set(id, { t: h.t0 + i * h.dt, source, anchor: h.t0, gen: h.gen,
+      bucket: Number.isInteger(h.b0) ? h.b0 + i : null,
+      witnessed: witnessed.length > 0,
+      lanes: (witnessed.length ? witnessed : visible).map(s => s.source) });
+  } else S.histPin.set(id, { i, gen: histPlottedPinRevision(h), sources: histPinSources(h), source });
   // Render PAST the click guard. That guard exists to stop a POLL from replacing the DOM in the
   // middle of a click; it must not delay the very update the click just asked for — a pin that
   // appeared 600 ms after the finger lifted would read as the same "it didn't take" the pin was

@@ -254,6 +254,48 @@ S.hist.set("dhw_tank", x10a);
 S.hist.set("modbus:dhw_tank", modbus);
 
 {
+  const dated = { t0: 1768720000 };
+  S.hist.set("dhw_tank", { ...x10a, ...dated });
+  S.hist.set("modbus:dhw_tank", { ...modbus, ...dated });
+  h.histPinToggle("dhw_tank", 0, "x10a");
+  assert.equal(h.histPinIndex("dhw_tank", h.historyView("dhw_tank", "modbus")), -1,
+    "a Modbus-only plot cannot substitute its reading for an X10A pin at the same bucket");
+  assert.equal(h.histPinIndex("dhw_tank", h.historyView("dhw_tank", "x10a")), 0,
+    "rendering the unrelated plot cannot remove the X10A pin");
+  S.histPin.delete("dhw_tank");
+
+  h.histPinToggle("dhw_tank", 0);
+  assert.equal(h.histPinIndex("dhw_tank", h.historyView("dhw_tank", "x10a")), 0,
+    "the combined plot shares a pin when both plots show the pinned instrument");
+  h.histSeriesToggle("dhw_tank", "modbus");
+  assert.equal(h.histPinIndex("dhw_tank", h.historyView("dhw_tank")), 0,
+    "showing an additional instrument preserves the original evidence");
+  h.histSeriesToggle("dhw_tank", "x10a");
+  assert.equal(h.histPinIndex("dhw_tank", h.historyView("dhw_tank")), -1,
+    "hiding the pinned instrument cannot leave a pin on its peer's measurement");
+  assert.equal(S.histPin.has("dhw_tank"), false);
+
+  S.histHidden.delete("dhw_tank");
+  h.histPinToggle("dhw_tank", 0);
+  S.status.hp = { connected: false };
+  assert.equal(h.histPinIndex("dhw_tank", h.historyView("dhw_tank")), -1,
+    "failover to HomeHub cannot render an X10A pin against different readings");
+  assert.equal(h.histPinIndex("dhw_tank", h.historyView("dhw_tank", "x10a")), 0,
+    "the X10A inspector can still show the original recorded reading");
+  delete S.status.hp;
+  S.histPin.delete("dhw_tank");
+
+  h.histPinToggle("dhw_tank", 0);
+  S.hist.set("dhw_tank", { ...x10a, b0: x10a.b0 + 1, t0: dated.t0 + 300 });
+  assert.equal(h.histPinIndex("dhw_tank", h.historyView("dhw_tank")), -1,
+    "a peer retaining the bucket cannot keep an original measurement that rolled out");
+  assert.equal(S.histPin.has("dhw_tank"), false);
+
+  S.hist.set("dhw_tank", x10a);
+  S.hist.set("modbus:dhw_tank", modbus);
+}
+
+{
   S.hist.set("dhw_tank", { ...x10a, at: 0, v: [] });
   S.hist.set("modbus:dhw_tank", { ...modbus, v: [] });
   assert.match(h.histHtml("dhw_tank", "", "Tank"), /Noch keine Messwerte aufgezeichnet/);
@@ -665,7 +707,7 @@ assert.match(style, /\.vhist-tip \{[^}]*width:\s*max-content;/,
   "the readout's width must not depend on its position, or the last sample wraps it to one word per line");
 assert.match(style, /\.vhist-tip \{[^}]*translateX\(calc\(var\(--tip-p\) \* -1%\)\)/,
   "the anchor must keep the readout inside the card at either end of the time axis");
-S.histPin.set("outdoor_air", { t: 1768720000 + 3 * 300 });        // the newest sample: p = 100
+h.histPinToggle("outdoor_air", 3); // the newest sample: p = 100
 assert.match(h.histHtml("outdoor_air", "°C", "Außentemperatur"),
   /<div class="vhist-tip vhist-pinned mono num" style="--tip-p:100\.000">/,
   "the pinned readout uses the same anchor as the selected instant");

@@ -332,9 +332,11 @@ A failed refresh keeps compatible readings within the most recent day. A distinc
 each retained series' last received sample. Categorical timelines keep their separate live cap,
 and weather charts show a verified current forecast even when the measured history is empty.
 
-Hover previews a sample; tap pins it, a second tap on the same sample/Escape clears it. The two views
-of a row share a pin where both display its source and freeze while either is scrubbed. A dated
-pin tracks the original boot-relative bucket when available, even if the wall time changes.
+Hover previews a sample. Tap pins it, and another tap on the same sample or Escape clears it.
+The two views of a row share a pin where both display an instrument selected by the pin.
+A peer's reading cannot keep a pinned measurement visible after its original source rolls out.
+A dated pin tracks the original boot-relative bucket when available, even if wall time changes.
+The two views freeze while either is scrubbed.
 Without a device clock, an index pin expires when the plotted series or its alignment changes. Expired pins
 drop rather than move to a different instant. Closing the inspector preserves a pin for an open
 value row. Collapsing the value panel clears it. Bubbles share one reserved row above the plot, with
