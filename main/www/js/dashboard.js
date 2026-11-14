@@ -146,12 +146,8 @@ function renderCards(hold = true) {
   else {
     syncCheckupCyclingChart(selected);
     if (S.stage === "dashboard" && selected)
-      for (const button of selected.querySelectorAll(".vitem.open [data-trend]")) {
-        const id = button.dataset.trend;
-        if ((hasHist(id) && !S.hist.has(id)) ||
-            (hasModbusHist(id) && !S.hist.has(histCacheKey(id, "modbus"))))
-          void ensureHistPair(id);
-      }
+      for (const button of selected.querySelectorAll(".vitem.open [data-trend]"))
+        void ensureHistPair(button.dataset.trend, true);
   }
 }
 
@@ -188,11 +184,25 @@ function syncDashboardCards() {
   return selected;
 }
 
+function retireDashboardHistory() {
+  const host = globalThis.document?.getElementById("valueGroups");
+  if (!host) return;
+  const rebuilding = S.trendRebuilding;
+  S.trendRebuilding = true;
+  try {
+    for (const slot of host.querySelectorAll("[data-chart], [data-checkup-hours]")) {
+      slot.replaceChildren();
+      delete slot._checkupMarkup;
+    }
+  } finally { S.trendRebuilding = rebuilding; }
+}
+
 function selectDashboardCard(key) {
   const cards = $("valueGroups").querySelectorAll(".vgroup[data-dashboard-card]");
   if (!Array.from(cards).some(card => card.dataset.dashboardCard === key)) return;
   // Switching cards abandons the gesture on the previously visible plot.
   S.scrub = null;
+  if (S.trendPointer) scrubEnd(S.trendPointer.plot);
   S.dashboardCard = key;
   // Switch within the installed frame while the live poll is in progress.
   if (_pollBusy) syncDashboardCards();

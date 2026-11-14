@@ -291,13 +291,15 @@ function wireTrendScrub(gv) {
   gv.addEventListener("pointermove", (e) => {
     const plot = trendPlotFromTarget(e.target);
     if (!plot || plot.closest("[hidden]")) return;
-    if (S.scrub && S.scrub !== plot.dataset.hist) return;
-    if (S.scrub) scrubArm(plot);              // a live drag keeps re-arming the watchdog
+    const pointer = S.trendPointer;
+    if (S.scrub && (!pointer || pointer.plot !== plot || pointer.id !== e.pointerId)) return;
+    if (pointer) scrubArm(plot);              // a live drag keeps re-arming the watchdog
     scrubMove(plot, scrubIndex(plot, e.clientX));
   });
   gv.addEventListener("pointerdown", (e) => {
     const plot = trendPlotFromTarget(e.target);
-    if (!plot) return;
+    if (!plot || plot.closest("[hidden]") || S.scrub) return;
+    S.trendPointer = { plot, id: e.pointerId };
     S.scrub = plot.dataset.hist;
     scrubArm(plot);
     try { plot.setPointerCapture(e.pointerId); } catch { /* capture is an optimisation, not a requirement */ }
@@ -307,7 +309,8 @@ function wireTrendScrub(gv) {
   // element is removed from the DOM — the one exit the explicit handlers below cannot see.
   gv.addEventListener("lostpointercapture", (e) => {
     const plot = trendPlotFromTarget(e.target);
-    if (plot) scrubEnd(plot);
+    if (plot && S.trendPointer?.plot === plot && S.trendPointer.id === e.pointerId)
+      scrubEnd(plot);
   });
   // A mouse leaving clears the readout; a touch ends on pointerup/cancel. pointerout covers the
   // former without also firing for every child element (pointerleave doesn't bubble to this
@@ -323,7 +326,7 @@ function wireTrendScrub(gv) {
   for (const ev of ["pointerup", "pointercancel"]) {
     gv.addEventListener(ev, (e) => {
       const plot = trendPlotFromTarget(e.target);
-      if (!plot) return;
+      if (!plot || S.trendPointer?.plot !== plot || S.trendPointer.id !== e.pointerId) return;
       // A release ON the plot PINS the sample under it (pointercancel does not — a gesture the
       // browser took away is not a choice the user made). The transient crosshair is torn down
       // either way; the pin is re-emitted by the render that follows, so what the user let go of is

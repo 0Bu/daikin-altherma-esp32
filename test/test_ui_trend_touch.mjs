@@ -66,7 +66,7 @@ const context = vm.createContext({
   scrubArm: () => calls.push(["arm"]),
   scrubMove: (_plot, i) => calls.push(["move", i]),
   scrubIndex: (_plot, x) => x,
-  scrubEnd: () => { calls.push(["end"]); S.scrub = null; },
+  scrubEnd: () => { calls.push(["end"]); S.scrub = S.trendPointer = null; },
   histPinToggle: (id, i, source) => calls.push(["pin", id, i, source]),
   scrubCount: () => 20, renderTrendHosts: () => {},
 });
@@ -86,6 +86,9 @@ assert.deepEqual(calls, [
   ["arm"], ["move", 11],
   ["end"], ["pin", "valve_dhw", 13, ""],
 ], "a drag starting on the tooltip moves and pins the newly selected sample");
+calls.length = 0;
+host.fire("pointerup", graph, 13);
+assert.deepEqual(calls, [], "a late release without a matching active pointer cannot pin");
 
 // Exercise the real pin/rebuild functions: a keyboard user keeps both the focused replacement plot
 // and its chosen cursor after pinning/unpinning. Escape belongs to this plot, not its inspector.

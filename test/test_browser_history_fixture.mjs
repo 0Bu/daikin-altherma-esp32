@@ -211,6 +211,8 @@ export function assertHistoryMotionFixtureInventory() {
   assert.ok(filter, "browser change filter must remain inspectable");
   for (const file of ["main/logic/history.hpp", "main/logic/homehub_map.hpp"])
     assert.match(file, new RegExp(filter[1]), "history-table-only changes must run the browser inventory gate");
+  assert.match("main/CMakeLists.txt", new RegExp(filter[1]),
+    "a firmware asset packaging change alone must run the browser gate");
   const table = (source, declaration) => {
     const start = source.indexOf(declaration), end = source.indexOf("\n};", start);
     assert.ok(start >= 0 && end > start, "history inventory declaration must remain present");

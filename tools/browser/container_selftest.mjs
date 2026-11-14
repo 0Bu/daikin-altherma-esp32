@@ -129,7 +129,8 @@ try {
     let output = "";
     child.stdout.on("data", chunk => { output += chunk; });
     child.stderr.on("data", chunk => { output += chunk; });
-    const completed = new Promise(resolve => child.once("exit", (code, signal) => resolve({ code, signal })));
+    // On a loaded runner the child can exit before the retained-ownership warning reaches stderr.
+    const completed = new Promise(resolve => child.once("close", (code, signal) => resolve({ code, signal })));
     const watchdog = setTimeout(() => child.kill("SIGKILL"), 20000);
     try {
       if (["interrupt", "build-interrupt", "pre-cid-interrupt", "empty-cid-interrupt"].includes(mode)) {
@@ -173,7 +174,7 @@ try {
       if (["rm-fails", "daemon-fails", "rm-hangs", "ps-hangs", "runtime-fails", "pre-cid-inflight",
         "ownership-mismatch", "name-collision", "ownership-lookup-fails", "inspect-hangs",
         "ownership-name-mismatch"].includes(mode)) {
-        assert.match(output, /container removal unverified; retained ownership record/);
+        assert.match(output, /container removal unverified; retained ownership record/, mode);
         const retained = fs.readdirSync(scratch);
         assert.equal(retained.length, 1, mode + ": retain container ownership and source after failed cleanup");
         const directory = path.join(scratch, retained[0]);

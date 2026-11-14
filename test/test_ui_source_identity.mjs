@@ -26,7 +26,7 @@ vm.runInContext(read("app_state") + "\n" + read("history") + "\n" +
   renderApp = () => {};
   hydrateRoutedPopup = () => {};
   this.ui = { S, refreshStatus, fillRefTemp, refTempFormPayload, formatRefSource, parseRefSource,
-    ensureHist, ensureDerived, syncHistSources };
+    ensureHist, ensureHistPair, ensureDerived, histCacheKey, syncHistSources };
 `, context);
 const ui = context.ui;
 const plain = (value) => JSON.parse(JSON.stringify(value));
@@ -254,6 +254,58 @@ reply(leavingRequest, 250); reply(returnRequest, 200);
 await Promise.all([leaving, returning, derived, secondDerived]);
 assert.equal(ui.S.hist.get("dt").v[0], 50);
 assert.equal(secondFinished, true);
+
+// Repainting an open chart while its requests stall must neither issue another fetch nor
+// subscribe another waiter. A source retirement aborts both transports and releases their leases.
+await reset();
+const timeout = new Map();
+let nextTimer = 0;
+Object.assign(context, {
+  AbortController,
+  POLL_TIMEOUT_MS: 6000,
+  setTimeout(callback, delay) {
+    assert.equal(delay, 6000);
+    timeout.set(++nextTimer, callback);
+    return nextTimer;
+  },
+  clearTimeout(timer) { timeout.delete(timer); },
+  fetch: (url, { signal }) => new Promise((resolve, reject) => {
+    signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    pending.push({ url, signal, resolve, reject });
+  }),
+});
+const initialPair = ui.ensureHistPair("dhw_tank", true);
+const [tankX10a, tankModbus] = pending.splice(0);
+assert.ok(tankX10a && tankModbus);
+assert.equal(timeout.size, 2);
+for (let paint = 0; paint < 30; ++paint)
+  assert.equal(ui.ensureHistPair("dhw_tank", true), undefined, "polls do not wait on existing requests");
+assert.equal(pending.length, 0);
+const replacement = fixture();
+replacement.history.epoch = 2;
+await status(replacement);
+await initialPair;
+assert.ok(tankX10a.signal.aborted && tankModbus.signal.aborted);
+assert.equal(timeout.size, 0);
+assert.equal(ui.S.hist.size, 0, "aborted old transports leave no errors in the new lifetime");
+const stalled = ui.ensureHist("dhw_tank");
+const stalledRequest = pending.shift();
+assert.equal(timeout.size, 1);
+timeout.values().next().value();
+await stalled;
+assert.equal(stalledRequest.signal.aborted, true);
+assert.equal(timeout.size, 0);
+assert.equal(ui.S.histBusy.size, 0);
+assert.equal(ui.S.hist.get("dhw_tank").err, true, "a current timeout leaves a bounded error state");
+ui.S.hist.set(ui.histCacheKey("dhw_tank", "modbus"), { at: Date.now() });
+assert.equal(ui.ensureHistPair("dhw_tank", true), undefined, "the selected chart honors the error cooldown");
+ui.S.hist.get("dhw_tank").at -= 60001;
+const recovering = ui.ensureHistPair("dhw_tank", true);
+assert.equal(pending.length, 1, "the selected chart retries its expired error without refetching its other ring");
+reply(pending.shift(), 450, 2);
+await recovering;
+assert.equal(ui.S.hist.get("dhw_tank").v[0], 450);
+context.fetch = (url) => new Promise((resolve, reject) => pending.push({ url, resolve, reject }));
 
 // A new status lifetime clears every lease, preserving main's global lifecycle model. Completion
 // of the predecessor may neither publish its samples nor release the successor's active request.

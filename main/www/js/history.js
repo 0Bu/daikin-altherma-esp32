@@ -269,7 +269,7 @@ const histAwaiting = (key, epoch) => {
   const waiting = S.histAwait?.get(key);
   return !!waiting && waiting.epoch === epoch && Date.now() - waiting.at < HIST_IDENTITY_WAIT_MS;
 };
-async function ensureHist(id, source = "x10a", paint = true, signal = null) {
+function ensureHist(id, source = "x10a", recoverOnly = false) {
   const epoch = syncHistSources();
   const key = histCacheKey(id, source);
   const offered = source === "modbus" ? hasModbusHist(id)
@@ -278,19 +278,24 @@ async function ensureHist(id, source = "x10a", paint = true, signal = null) {
   if (S.histBusy.has(key)) return S.histRequests.get(key)?.done;
   if (histAwaiting(key, epoch)) return;
   const c = S.hist.get(key);
-  if (c && Date.now() - c.at < 60000) return;
-  if (source === "x10a" && DERIVED[id]) { await ensureDerived(id); return; }
-  const previous = S.hist.get(key);
+  if (c && ((recoverOnly && !c.err) || Date.now() - c.at < 60000)) return;
+  if (source === "x10a" && DERIVED[id]) return ensureDerived(id);
+  return fetchHistory(id, source, key, epoch, c);
+}
+
+async function fetchHistory(id, source, key, epoch, previous) {
   const sourceId = source === "modbus" ? (modbusEndpointId() || "modbus") : source;
+  const controller = typeof AbortController === "function" ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), POLL_TIMEOUT_MS) : null;
   let finish;
-  const request = { epoch, done: new Promise((resolve) => { finish = resolve; }) };
+  const request = { controller, done: new Promise((resolve) => { finish = resolve; }) };
   (S.histRequests ||= new Map()).set(key, request);
   S.histBusy.add(key);
   try {
     const suffix = source === "modbus" ? "&source=modbus"
       : source === "env3" ? "&source=env3" : source === "room" ? "&source=room" : "";
     const r = await fetch("/history?row=" + encodeURIComponent(id) + suffix,
-                          signal ? { signal } : undefined);
+                          controller ? { signal: controller.signal } : undefined);
     const j = await r.json();
     if (syncHistSources() !== epoch || S.histRequests.get(key) !== request) return;
     // A JSON refusal that is not a history change (no snapshot identity, an unknown row) is an
@@ -331,29 +336,40 @@ async function ensureHist(id, source = "x10a", paint = true, signal = null) {
     if (syncHistSources() === epoch && S.histRequests.get(key) === request)
       S.hist.set(key, { at: Date.now(), source, sourceId, err: true, v: [] });
   } finally {
+    if (timer != null) clearTimeout(timer);
     finish();
     // An obsolete request must not release a successor using the same cache key.
     if (S.histRequests.get(key) === request) {
       S.histRequests.delete(key);
       S.histBusy.delete(key);
-      if (paint) renderApp();
+      renderApp();
     }
   }
 }
 
 // Direct schematic measurements may have two independent rings. Fetch both together only for a
 // chart the user actually opened; derived figures continue to fetch their X10A inputs alone.
-async function ensureHistPair(id) {
-  await Promise.all([
-    hasHist(id) ? ensureHist(id) : null,
-    hasModbusHist(id) ? ensureHist(id, "modbus") : null,
-    hasEnv3Hist(id) ? ensureHist(id, "env3") : null,
-    hasRoomHist(id) ? ensureHist(id, "room") : null,
-    id === "dhw_tank" ? ensureHist("smart_grid_mode") : null,
-    id === "dhw_tank" ? ensureHist("smart_grid_mode", "modbus") : null,
-    id === "dhw_tank" ? ensureHist("bsh_state") : null,
-    id === "dhw_tank" ? ensureHist("bsh_state", "modbus") : null,
-  ]);
+function ensureHistPair(id, recoverOnly = false) {
+  // A repaint needs no result from a request that is already running. Derived charts can still
+  // await their own inputs directly through ensureHist.
+  const requests = [];
+  const request = (row, source, offered) => {
+    const key = histCacheKey(row, source);
+    if (!offered || S.histBusy.has(key)) return;
+    const started = ensureHist(row, source, recoverOnly);
+    if (started) requests.push(started);
+  };
+  request(id, "x10a", hasHist(id));
+  request(id, "modbus", hasModbusHist(id));
+  request(id, "env3", hasEnv3Hist(id));
+  request(id, "room", hasRoomHist(id));
+  if (id === "dhw_tank") {
+    for (const row of ["smart_grid_mode", "bsh_state"]) {
+      request(row, "x10a", hasHist(row));
+      request(row, "modbus", hasModbusHist(row));
+    }
+  }
+  if (requests.length) return Promise.all(requests);
 }
 
 // A derived series: fetch every input (each through ensureHist above, so each is cached and
@@ -1800,12 +1816,20 @@ function scrubArm(plot) {
 }
 
 function scrubEnd(plot) {
+  const pointer = S.trendPointer;
+  if (pointer && pointer.plot !== plot) return;
+  if (pointer) {
+    S.trendPointer = null;
+    try { plot.releasePointerCapture(pointer.id); } catch {}
+  }
   clearTimeout(scrubWatchdog);
   if (plot) {
     plot.querySelector(".vhist-cross.vhist-live").hidden = true;
     plot.querySelectorAll(".vhist-mark.vhist-live").forEach((m) => { m.hidden = true; });
-    plot.parentElement.querySelector(".vhist-tip.vhist-live").hidden = true;
-    plot.parentElement.querySelector(".vhist-time.vhist-live").hidden = true;
+    const tip = plot.parentElement?.querySelector(".vhist-tip.vhist-live");
+    const time = plot.parentElement?.querySelector(".vhist-time.vhist-live");
+    if (tip) tip.hidden = true;
+    if (time) time.hidden = true;
   }
   if (S.scrub) { S.scrub = null; renderTrendHosts(); }   // resume the frozen trend hosts
 }

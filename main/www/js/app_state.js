@@ -42,6 +42,7 @@ const S = {
   // null. Freeze trend-host updates during a scrub: a structural or history change could otherwise
   // replace the captured plot and interrupt the gesture. scrubEnd resumes the affected hosts.
   scrub: null,
+  trendPointer: null,
   // Schematic inspector: which hit target (INSPECT key) is selected, and the last liveData() the
   // poll produced. The panel re-renders from S.live on every poll, so an open explainer keeps
   // showing the CURRENT reading rather than the one that was on screen when it was tapped.
@@ -113,11 +114,15 @@ function invalidateHistSources() {
   S.histEpoch = (S.histEpoch || 0) + 1;
   S.hist.clear();
   S.histBusy.clear();
-  (S.histRequests ||= new Map()).clear();
+  for (const request of S.histRequests?.values() || []) request.controller?.abort();
+  S.histRequests?.clear();
   (S.histAwait ||= new Map()).clear();
   S.histPin.clear();
   S.scrub = null;
+  if (S.trendPointer) scrubEnd(S.trendPointer.plot);
   S.inspHistSig = "";
+  // Retire the DOM immediately even when a poll or click is holding the value grid.
+  if (typeof retireDashboardHistory === "function") retireDashboardHistory();
 }
 function syncHistSources() {
   const s = S.status;

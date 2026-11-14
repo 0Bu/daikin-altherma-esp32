@@ -316,9 +316,11 @@ lost, including the recent unsaved tail. Compatible heap curves can survive warm
 restore dated five-minute journal records after clock sync; short interruptions may leave no visible
 gap at that resolution. Current uptime describes only this boot.
 
-Browser storage is not measured history. Source/reboot epochs retire cached rings, index pins and
-request leases, including A → B → A between polls. Replies carry sample epoch and boot identity;
-delayed raw/derived replies cannot refill retired state or release a successor's busy lease.
+Browser storage is not measured history. Source/reboot epochs retire cached rings, index pins,
+mounted dashboard plots and in-flight history requests, including A → B → A between polls.
+Replies carry sample epoch and boot identity. Delayed raw or derived replies cannot refill retired
+state or release a successor's busy lease. A visible open dashboard plot can retry a transient
+fetch failure after the cache cooldown.
 
 Hover previews a sample; tap pins it, a second tap on the same sample/Escape clears it. Pins attach
 to the sample instant and row, not array index or a particular chart. The two views of one row

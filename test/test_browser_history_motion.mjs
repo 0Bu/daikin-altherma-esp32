@@ -999,10 +999,34 @@ async function assertInactiveCardHistory(page, selector, context) {
     }, { selector });
     assert.equal(changed, true, context + ": a structural update keeps the inactive chart by owner");
     await page.waitFor("!_pollBusy");
-    await page.evaluate("S.scrub = 'previous-chart'; true");
     await click(page, selectors.own);
     await page.waitFor(`!S.scrub && document.querySelector(${JSON.stringify(selector)})
       ?.closest(".vitem.open")?.querySelector("[data-hist]")`);
+    const plotSelector = selector + ' ~ .vdesc [data-hist]';
+    await evaluate(page, ({ selector, selectors }) => {
+      const row = document.querySelector(selector);
+      const plot = row.closest(".vitem").querySelector("[data-hist]");
+      S.histPin.delete(plot.dataset.hist);
+      window.__switchDuringScrub = null;
+      document.addEventListener("pointerdown", function switching(event) {
+        if (!event.target.closest(".vhist-graph")?.contains(plot)) return;
+        document.removeEventListener("pointerdown", switching);
+        const captured = event.isTrusted && S.trendPointer?.plot === plot &&
+          plot.hasPointerCapture(event.pointerId);
+        document.querySelector(selectors.other).click();
+        document.querySelector(selectors.own).click();
+        window.__switchDuringScrub = { captured, active: !!S.trendPointer || !!S.scrub,
+          released: !plot.hasPointerCapture(event.pointerId) };
+      });
+      return true;
+    }, { selector, selectors });
+    await click(page, plotSelector);
+    const cancelled = await evaluate(page, ({ selector }) => ({
+      ...window.__switchDuringScrub,
+      pinned: S.histPin.has(document.querySelector(selector).dataset.trend),
+    }), { selector });
+    assert.deepEqual(cancelled, { captured: true, active: false, released: true, pinned: false },
+      context + ": leaving and returning during a trusted drag must release capture without a pin");
     await page.waitFor("!S.clickHold && !_pollBusy");
     await page.evaluate("showStage('settings'); window.__inactiveChartBuilds = 0; true");
     const settingsPolls = await page.evaluate("window.__motionAllPolls");
@@ -1096,7 +1120,26 @@ async function disclosure(page, server, fixture, context, selectors, ids, settin
     assert.deepEqual(refreshed, fresh, context + ": retain every other fresh reply");
     const retiredAt = server.historyRequests.length;
     await page.waitFor("!_pollBusy");
-    await page.evaluate("invalidateHistSources(); renderCards(false); true");
+    const heldSelection = await evaluate(page, ({ selector }) => {
+      const button = document.querySelector(selector), item = button.closest(".vitem");
+      const own = item.closest("[data-dashboard-card]").dataset.dashboardCard;
+      const nav = [...document.querySelectorAll("#cardNav [data-card]")];
+      nav.find(other => other.dataset.card !== own).click();
+      const prior = item.querySelector(".vhist");
+      _pollBusy = true;
+      try {
+        invalidateHistSources();
+        nav.find(other => other.dataset.card === own).click();
+        const current = document.querySelector(selector).closest(".vitem");
+        return { hadPausedChart: !!prior, visible: !current.closest("[hidden]"),
+          retired: !prior?.isConnected && !current.querySelector(".vhist") };
+      } finally {
+        _pollBusy = false;
+        renderCards(false);
+      }
+    }, { selector: selectors[0] });
+    assert.deepEqual(heldSelection, { hadPausedChart: true, visible: true, retired: true },
+      context + ": selection during a held poll cannot reveal a retired chart");
     await page.waitFor("S.hist.has('dhw_tank') && !S.histBusy.size && !_pollBusy");
     assert.ok(server.historyRequests.slice(retiredAt).includes("x10a:dhw_tank"),
       context + ": the still-open selected chart refetches after retirement");
