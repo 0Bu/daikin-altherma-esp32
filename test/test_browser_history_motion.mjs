@@ -860,17 +860,34 @@ async function assertSgTransition(page, server, fixture, context) {
     frame.modbus = frame.modbus.map(row => row.off === 56 ? { ...row, value: 3 } : row);
     return frame;
   };
-  // Only change the fixture's API frame. The next natural production poll owns the live-cap and
-  // revision change; no direct render, history-cache edit or shorter timer can manufacture it.
   await page.waitFor("!_pollBusy && S._modbus.some(row => row.off === 56 && row.value === 3)");
+  const held = await evaluate(page, () => {
+    const plot = document.querySelector("#inspHist .vhist-plot");
+    const view = historyView("smart_grid_mode");
+    return { unchanged: plot === window.__motionSg.plot && view.gen === window.__motionSg.gen,
+      cap: view.series.find(series => series.source === "modbus").v.at(-1),
+      focused: document.activeElement === plot };
+  });
+  assert.deepEqual(held, { unchanged: true, cap: null, focused: true },
+    context + ": a changed HomeHub full-sweep row leaves the unconfirmed live edge unchanged");
+  // A fresh X10A contact transition must still update the live edge through ordinary polling.
+  const withModbusChange = fixture.values;
+  fixture.values = tick => {
+    const frame = withModbusChange(tick);
+    frame.values = frame.values.map(row => row.binary_semantic === "smart_grid_contact_2"
+      ? { ...row, value: "1" } : row);
+    return frame;
+  };
+  await page.waitFor("!_pollBusy && S._values.some(row => " +
+    "row.binary_semantic === 'smart_grid_contact_2' && String(row.value) === '1')");
   const changed = await evaluate(page, () => {
     const plot = document.querySelector("#inspHist .vhist-plot");
-    const source = historyView("smart_grid_mode").series.find(series => series.source === "modbus");
+    const source = historyView("smart_grid_mode").series.find(series => series.source === "x10a");
     return { replaced: plot !== window.__motionSg.plot,
       revision: historyView("smart_grid_mode").gen !== window.__motionSg.gen,
       cap: source.v.at(-1), focused: document.activeElement === plot };
   });
-  assert.equal(changed.cap, 30, context + ": actual Modbus live-cap must change from 2 to 3");
+  assert.equal(changed.cap, 30, context + ": fresh X10A contacts move the live edge from 2 to 3");
   assert.equal(changed.revision && changed.replaced, true,
     context + ": changed categorical live-cap must replace its revision and plot");
   assert.equal(changed.focused, true, context + ": categorical repaint must restore keyboard focus on the new plot");
