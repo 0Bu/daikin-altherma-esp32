@@ -1315,6 +1315,7 @@ CALLERS.update({'failure_message': {'main/hp_modbus.cpp:<definition>': 1, 'main/
  'status_error': {'main/hp_modbus.cpp:<definition>': 1,
                   'main/hp_modbus.cpp:report_connect_error': 1,
                   'main/hp_modbus.cpp:mb_ensure_connected': 3,
+                  'main/hp_modbus.cpp:mb_poll_once': 1,
                   'main/hp_modbus.cpp:report_cycle_result': 1,
                   'main/hp_modbus.cpp:mb_retire_if_disabled': 1,
                   'main/hp_modbus.cpp:mb_task': 1},
