@@ -207,7 +207,7 @@ source="$(git -C "$T/partial" rev-parse HEAD)"
 ) >"$T/out.log" 2>&1
 check "the changelog cannot substitute first-publication history for an unreadable manifest" "$?" "1"
 check "no changelog was written for the unreadable reference" "$([ -e "$T/changelog.json" ] && echo yes || echo no)" "no"
-run_partial dev 1.0.0-dev.1
+GIT_NO_LAZY_FETCH=0 run_partial dev 1.0.0-dev.1
 check "when readable, the same dev manifest prevents a version regression" "$?" "1"
 
 publish 1.0.13 ""

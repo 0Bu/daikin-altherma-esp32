@@ -127,7 +127,7 @@ def pin_only_replacement(pr, target, query):
         return False
     policy_dir = Path(__file__).resolve().parents[1] / "agent-policy"
     sys.path.insert(0, str(policy_dir))
-    from renovate_action_pr import classify
+    from renovate_action_pr import _patch_replacements, classify
 
     original = query(f"commits/{head['sha']}")
     if not classify({**details, "state": "open"}, original, [original], REPO, head["sha"])[0]:
@@ -137,9 +137,14 @@ def pin_only_replacement(pr, target, query):
     files = actual.get("files")
     if actual.get("sha") != target or not isinstance(files, list) or len(files) != 1:
         return False
+    landed_file = files[0]
     attested = original["files"][0]
-    fields = ("filename", "status", "previous_filename", "additions", "deletions", "changes", "patch")
-    return all(files[0].get(field) == attested.get(field) for field in fields)
+    fields = ("filename", "status", "previous_filename", "additions", "deletions", "changes")
+    if (not all(landed_file.get(field) == attested.get(field) for field in fields)
+            or not isinstance(landed_file.get("patch"), str)):
+        return False
+    replacements, error = _patch_replacements(landed_file["patch"])
+    return error is None and replacements == _patch_replacements(attested["patch"])[0]
 
 
 def verify_landed(target, query=api):
