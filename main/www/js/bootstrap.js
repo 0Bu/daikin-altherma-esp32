@@ -182,7 +182,7 @@ function wireCyclingChart(host) {
     if (active) S.scrub = null;
     try { chart.releasePointerCapture(id); } catch {}
     S.cyclingHover = null;
-    if (chart.isConnected) {
+    if (chart.isConnected && !chart.closest("[hidden]")) {
       if (active && e?.type === "pointerup" && !moved &&
           Math.hypot(e.clientX - x, e.clientY - y) <= 4 &&
           document.elementFromPoint(e.clientX, e.clientY)?.closest("[data-bucket]") === button)
@@ -290,7 +290,7 @@ function wireTrendScrub(gv) {
   });
   gv.addEventListener("pointermove", (e) => {
     const plot = trendPlotFromTarget(e.target);
-    if (!plot) return;
+    if (!plot || plot.closest("[hidden]")) return;
     if (S.scrub && S.scrub !== plot.dataset.hist) return;
     if (S.scrub) scrubArm(plot);              // a live drag keeps re-arming the watchdog
     scrubMove(plot, scrubIndex(plot, e.clientX));
@@ -331,7 +331,7 @@ function wireTrendScrub(gv) {
       // Read the geometry BEFORE tearing anything down: scrubEnd may rebuild, and `plot` is then a
       // detached node whose bounding box is all zeroes.
       const label = plot.dataset.hist;
-      const i = e.type === "pointerup" ? scrubIndex(plot, e.clientX) : -1;
+      const i = e.type === "pointerup" && !plot.closest("[hidden]") ? scrubIndex(plot, e.clientX) : -1;
       scrubEnd(plot);
       if (i >= 0) histPinToggle(label, i, plot.dataset.source || "");
     });

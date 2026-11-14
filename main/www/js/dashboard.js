@@ -143,10 +143,19 @@ function renderCards(hold = true) {
   const selected = syncDashboardCards();
   // A source change can select a card whose charts were paused in this frame.
   if (S.dashboardCard !== card) renderCards(false);
-  else syncCheckupCyclingChart(selected);
+  else {
+    syncCheckupCyclingChart(selected);
+    if (S.stage === "dashboard" && selected)
+      for (const button of selected.querySelectorAll(".vitem.open [data-trend]")) {
+        const id = button.dataset.trend;
+        if ((hasHist(id) && !S.hist.has(id)) ||
+            (hasModbusHist(id) && !S.hist.has(histCacheKey(id, "modbus"))))
+          void ensureHistPair(id);
+      }
+  }
 }
 
-// Read the installed frame: setHtml may have held a newer one while a row was being tapped.
+// Reconcile navigation against the installed frame, including while a poll is deferred.
 // Keep inactive cards mounted so their accordions, trend state and delegated handlers survive.
 function syncDashboardCards() {
   const browser = $("cardBrowser"), nav = $("cardNav"), host = $("valueGroups");
@@ -182,9 +191,11 @@ function syncDashboardCards() {
 function selectDashboardCard(key) {
   const cards = $("valueGroups").querySelectorAll(".vgroup[data-dashboard-card]");
   if (!Array.from(cards).some(card => card.dataset.dashboardCard === key)) return;
+  // Switching cards abandons the gesture on the previously visible plot.
+  S.scrub = null;
   S.dashboardCard = key;
-  // Selection is immediate even while the pointer hold is protecting a pending values repaint.
-  if (S.scrub) syncDashboardCards();
+  // Switch within the installed frame while the live poll is in progress.
+  if (_pollBusy) syncDashboardCards();
   else renderCards(false);
 }
 

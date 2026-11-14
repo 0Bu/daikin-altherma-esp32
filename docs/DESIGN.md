@@ -621,9 +621,9 @@ capability/evidence state rather than inventing it from labels or missing fields
 
 ## 11. Build / delivery
 
-Markup, CSS and ordered classic-script fragments from [app.sources](../main/www/app.sources) are
-assembled, minified and deterministically gzipped into the signed application. They share one
-lexical scope. Provisioning and non-English locales are separate embedded assets. No font, CDN,
-remote script or stylesheet is loaded by the device UI. Hash navigation stays client-side.
+The [firmware asset pipeline](ARCHITECTURE.md#http-and-browser-transport) embeds the page, including
+the packed classic script from [app.sources](../main/www/app.sources). Provisioning and non-English
+locales are separate embedded assets. The device UI loads all assets locally. Hash navigation
+stays client-side.
 See the [JavaScript ownership map](../main/www/js/README.md) and [test reference](../test/README.md)
 for build-input and verification contracts.

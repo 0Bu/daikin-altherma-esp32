@@ -133,18 +133,18 @@ async function installHooks(page, mutation) {
     let eager, detach, staleText;
     if (mutation === "history-eager") {
       const code = original.descAccordion.toString();
-      if (!code.includes("open && trendId")) throw new Error("history mutation target missing");
-      eager = window.eval("(" + code.replace("open && trendId", "trendId") + ")");
+      if (!/open\s*&&\s*trendId/.test(code)) throw new Error("history mutation target missing");
+      eager = window.eval("(" + code.replace(/open\s*&&\s*trendId/, "trendId") + ")");
     }
     if (mutation === "history-detach") {
       const code = original.replaceHistoryHtml.toString();
-      if (!code.includes("if (textOnly) {")) throw new Error("history detach mutation target missing");
-      detach = window.eval("(" + code.replace("if (textOnly) {", "if (false && textOnly) {") + ")");
+      if (!/if\s*\(textOnly\)\s*\{/.test(code)) throw new Error("history detach mutation target missing");
+      detach = window.eval("(" + code.replace(/if\s*\(textOnly\)\s*\{/, "if (false && textOnly) {") + ")");
     }
     if (mutation === "history-text-stale") {
       const code = original.replaceHistoryHtml.toString();
-      if (!code.includes("node.nodeValue = value;")) throw new Error("history text mutation target missing");
-      staleText = window.eval("(" + code.replace("node.nodeValue = value;", "void value;") + ")");
+      if (!/node\.nodeValue\s*=\s*value;/.test(code)) throw new Error("history text mutation target missing");
+      staleText = window.eval("(" + code.replace(/node\.nodeValue\s*=\s*value;/, "void value;") + ")");
     }
     descAccordion = (...args) => {
       const previous = window.__motionClosed;
@@ -988,6 +988,28 @@ async function assertInactiveCardHistory(page, selector, context) {
     }, { selector });
     assert.deepEqual(hidden, { open: true, hidden: true, retained: true, builds: 0 },
       context + ": inactive card must retain its mounted chart and skip chart generation");
+    const changed = await evaluate(page, ({ selector }) => {
+      S._values.push({ label: "History test reading", value: "1", group: "History test" });
+      renderCards(false);
+      const item = document.querySelector(selector).closest(".vitem");
+      const retained = item.querySelector(".vhist") === window.__inactiveChart;
+      S._values.pop();
+      renderCards(false);
+      return retained;
+    }, { selector });
+    assert.equal(changed, true, context + ": a structural update keeps the inactive chart by owner");
+    await page.waitFor("!_pollBusy");
+    await page.evaluate("S.scrub = 'previous-chart'; true");
+    await click(page, selectors.own);
+    await page.waitFor(`!S.scrub && document.querySelector(${JSON.stringify(selector)})
+      ?.closest(".vitem.open")?.querySelector("[data-hist]")`);
+    await page.waitFor("!S.clickHold && !_pollBusy");
+    await page.evaluate("showStage('settings'); window.__inactiveChartBuilds = 0; true");
+    const settingsPolls = await page.evaluate("window.__motionAllPolls");
+    await page.waitFor("window.__motionAllPolls >= " + (settingsPolls + 3) + " && !_pollBusy");
+    assert.equal(await page.evaluate("window.__inactiveChartBuilds"), 0,
+      context + ": settings polls must skip the hidden dashboard chart");
+    await page.evaluate("showStage('dashboard'); renderCards(false); true");
   } finally {
     await page.evaluate("histHtml = window.__inactiveChartOriginal; delete window.__inactiveChartOriginal; delete window.__inactiveChart; true");
   }
@@ -1072,6 +1094,17 @@ async function disclosure(page, server, fixture, context, selectors, ids, settin
     delete refreshed["x10a:bsh_state"];
     delete fresh["x10a:bsh_state"];
     assert.deepEqual(refreshed, fresh, context + ": retain every other fresh reply");
+    const retiredAt = server.historyRequests.length;
+    await page.waitFor("!_pollBusy");
+    await page.evaluate("invalidateHistSources(); renderCards(false); true");
+    await page.waitFor("S.hist.has('dhw_tank') && !S.histBusy.size && !_pollBusy");
+    assert.ok(server.historyRequests.slice(retiredAt).includes("x10a:dhw_tank"),
+      context + ": the still-open selected chart refetches after retirement");
+    const stable = await evaluate(page, ({ selector }) => {
+      const slot = document.querySelector(selector).closest(".vitem").querySelector("[data-chart]");
+      return slot?.dataset.epoch === String(S.histEpoch);
+    }, { selector: selectors[0] });
+    assert.equal(stable, true, context + ": restored chart slots belong to the new history lifetime");
   }
   for (const [index, selector] of selectors.entries())
     await toggleDisclosure(page, selector, ids[index], false, context + "/cleanup");

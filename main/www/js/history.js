@@ -1856,6 +1856,7 @@ function replaceHistoryHtml(host, html) {
       // Inactive dashboard cards keep their last chart mounted without generating its markup.
       // On selection, catch up inside the slot without replacing another card's plot.
       const chart = b.getAttribute("data-chart");
+      if (chart !== null && a.dataset.epoch !== b.dataset.epoch) return false;
       if (chart) return true;
       const nextAttrs = attrs(b);
       if (chart === null && (attrs(a).length !== nextAttrs.length ||
@@ -1893,6 +1894,21 @@ function replaceHistoryHtml(host, html) {
       }
       const slot = (host.id === "valueGroups" || diagnosisCard) && host.querySelector("[data-checkup-hours]");
       if (slot) template.content.querySelector("[data-checkup-hours]")?.replaceWith(slot);
+      if (host.id === "valueGroups") {
+        // A paused slot has no generated markup. Keep its previous chart only for the same
+        // disclosure and series in the same card.
+        const key = node => JSON.stringify([node.closest("[data-dashboard-card]")?.dataset.dashboardCard,
+          owner(node), node.closest(".vitem")?.querySelector("[data-trend]")?.dataset.trend,
+          node.dataset.epoch]);
+        const slots = new Map([...host.querySelectorAll("[data-chart]")].map(node => [key(node), node]));
+        for (const next of template.content.querySelectorAll('[data-chart="1"]')) {
+          const id = key(next);
+          const old = slots.get(id);
+          if (!old) continue;
+          slots.delete(id);
+          next.replaceWith(old);
+        }
+      }
       host.replaceChildren(template.content);
     } finally { S.trendRebuilding = rebuilding; }
   }
@@ -2112,8 +2128,9 @@ function displayHomeHubLabel(row) {
 // board row is not a catalog label and could not be looked up at all.
 function descAccordion(key, label, valHtml, cls, bodyHtml, trendId, unit = "", paused) {
   const open = S.descOpen.has(key);
-  const chart = open && trendId && !paused ? histHtml(trendId, unit, label) : "";
-  if (trendId) bodyHtml += `<div data-chart="${open && paused ? 1 : ""}">${chart}</div>`;
+  const visible = !paused && !(paused === false && S.stage === "settings");
+  const chart = open && trendId && visible ? histHtml(trendId, unit, label) : "";
+  if (trendId) bodyHtml += `<div data-chart="${open && !visible ? 1 : ""}" data-epoch="${S.histEpoch || 0}">${chart}</div>`;
   const diagnosisLabel = key.startsWith("model:health_") || key === "service:refrigerant";
   return `<div class="vitem${open ? " open" : ""}">` +
     `<button class="vrow vrow-desc" type="button" data-desc="${esc(key)}"` +
