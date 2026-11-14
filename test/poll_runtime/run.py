@@ -12,7 +12,7 @@ import tempfile
 
 HERE = Path(__file__).resolve().parent
 CASES = [
-    'oom_raii', 'detect_adjacent', 'detect_silent', 'detect_no_match', 'detect_changed',
+    'oom_raii', 'modbus_retry', 'dhw_reply_time', 'detect_adjacent', 'detect_silent', 'detect_no_match', 'detect_changed',
     'detect_generation', 'detect_throw', 'detect_no_match_silent', 'detect_staging_oom',
     'detect_model_arguments',
     'saturation_recent', 'saturation_quiesce', 'saturation_oom',
@@ -43,6 +43,7 @@ REGRESSION_ORACLES = {
     'saturation_age_expired': 'saturation_at_cache_age_boundary_expires_witness',
     'saturation_wire_gap': 'saturation_expires_during_current_wire_wait',
     'saturation_commit_gap': 'saturation_age_uses_pressure_time_not_commit_time',
+    'dhw_reply_time': 'history_uses_hydronic_reply_time',
     'probe_wrap': 'probe_wrap_b_rejects_duplicate_a_ticket',
     'raw_recovery': 'raw_absent_pages_do_not_consume_round',
     'raw_empty': 'raw_empty_payloads_do_not_consume_round',
@@ -141,6 +142,8 @@ for case in selected_cases:
     print(('EXPECTED REGRESSION ' + case + ': ' if expected else '') + output, end='')
 source_text = SOURCE.read_text()
 mutations = {
+    'omit_modbus_retry': ('            mb_retry_start();\n', '',
+                         'modbus_retry_runs_before_x10a_identification', 'modbus_retry'),
     'replace_empty_gap_capability': (
         'static void checkup_record_poll_gap(uint32_t generation, bool profile_confirmed = false) {',
         'static void checkup_record_poll_gap(uint32_t generation, bool profile_confirmed = true) {',
@@ -286,6 +289,10 @@ mutations = {
         's_sat_witness_us = sat_out_us;',
         's_sat_witness_us = esp_timer_get_time();',
         'saturation_age_uses_pressure_time_not_commit_time', 'saturation_commit_gap'),
+    'stamp_dhw_at_end_of_sweep': (
+        'if (reg == 0x60) dhw_reply_us = esp_timer_get_time();',
+        'if (reg == 0x63) dhw_reply_us = esp_timer_get_time();',
+        'history_uses_hydronic_reply_time', 'dhw_reply_time'),
     'issue_duplicate_ticket_at_masked_zero': (
         '} while (!probe_ticket_usable(raw_ticket));',
         '} while (false);',
@@ -343,9 +350,9 @@ mutations = {
         '/* mutation: a lost reply at rest publishes the last run */',
         'held_lost_witness_leaves_mqtt', 'held_witness_lost'),
     'drop_readings_after_the_trend_saw_them': (
-        ['if (logic::ou_reading_dropped(cv.reg, rps_known, recently_stopped)) cv.value.clear();', 'history_record(fresh.data(), fresh.size(), cycle_generation);'],
+        ['if (logic::ou_reading_dropped(cv.reg, rps_known, recently_stopped)) cv.value.clear();', 'history_record(fresh.data(), fresh.size(), cycle_generation, dhw_reply_us);'],
         ['/* mutation: dropped too late for the rings */',
-         'history_record(fresh.data(), fresh.size(), cycle_generation); for (auto& cv : fresh) if (logic::ou_reading_dropped(cv.reg, rps_known, recently_stopped)) cv.value.clear();'],
+         'history_record(fresh.data(), fresh.size(), cycle_generation, dhw_reply_us); for (auto& cv : fresh) if (logic::ou_reading_dropped(cv.reg, rps_known, recently_stopped)) cv.value.clear();'],
         'held_lost_witness_reaches_no_trend', 'held_witness_lost'),
     'drop_every_page_after_lost_witness': (
         'if (logic::ou_reading_dropped(cv.reg, rps_known, recently_stopped)) cv.value.clear();',

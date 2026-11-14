@@ -250,6 +250,12 @@ const REMOVE = {
       last_sample_plant_outdoor_source: null };
     return s;
   },
+  homehubTask(s) {
+    const host = s.modbus.host;
+    REMOVE.homehub(s);
+    s.modbus.host = host;
+    return s;
+  },
   env3(s) {
     s.env3 = { ...s.env3, supported: false, enabled: false, connected: false, fresh: false,
       age_s: null, temperature_c: null, humidity_pct: null, pressure_hpa: null,
@@ -328,6 +334,7 @@ const SCENARIOS = [
   { name: "no circulation witness", remove: ["circulation"] },
   { name: "no weather location", remove: ["weather"] },
   { name: "no HomeHub", remove: ["homehub"] },
+  { name: "configured HomeHub task unavailable", remove: ["homehubTask"] },
   { name: "no ENV III", remove: ["env3"] },
   { name: "X10A bus silent", remove: ["x10a"] },
   { name: "no HomeHub and no weather", remove: ["homehub", "weather"] },
@@ -368,7 +375,7 @@ const SETUP_COPY = [
     falseWhen: (s) => s.reference_temperature.configured,
     why: "the heating-curve card told the reader to set up the room source they have configured" },
   { card: "dynamicControlCardHtml", text: () => ui.t("dyn.state_setup_homehub"),
-    falseWhen: (s) => s.modbus.enabled,
+    falseWhen: (s) => !!s.modbus.host,
     why: "the heating-curve card called a configured HomeHub 'not set up'" },
   { card: "circulationSettingsCardHtml", text: () => ui.t("circ.not_configured"),
     falseWhen: (s) => s.circulation_source.configured,
@@ -553,11 +560,16 @@ for (const scenario of SCENARIOS) {
   assert.doesNotMatch(plantFace, /data-act=/,
     `${scenario.name}: plant outdoor evidence must not offer a configuration action`);
   checks += 2;
-  if (scenario.remove.includes("homehub") || scenario.remove.includes("safeMode")) {
+  if (scenario.remove.some((source) => ["homehub", "homehubTask", "safeMode"].includes(source))) {
     assert.doesNotMatch(plantFace, /vrow-val settings-wrap (?:warn|err)/,
       `${scenario.name}: absent plant outdoor context must stay neutral and never gate sampling`);
     assert.doesNotMatch(plantFace, /9[,.]1.*°C|8[,.]9.*°C/,
-      `${scenario.name}: a removed HomeHub must not leak an old plant outdoor value`);
+      `${scenario.name}: unavailable HomeHub must not leak an old plant outdoor value`);
+    if (scenario.remove.includes("homehubTask")) {
+      assert.match(plantFace, /HomeHub/, "the configured outdoor source remains identified");
+      assert.ok(rendered.dynamicControlCardHtml.includes(ui.t("dyn.state_homehub")),
+        "a saved HomeHub with no task is offline");
+    }
     checks += 2;
   } else {
     assert.match(plantFace, /HomeHub/,

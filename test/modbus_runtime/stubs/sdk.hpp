@@ -1,6 +1,7 @@
 #pragma once
 #include <atomic>
 #include <cstdint>
+#include <cstdlib>
 #include <functional>
 #include <mutex>
 #include <vector>
@@ -17,6 +18,7 @@ constexpr TickType_t portMAX_DELAY = UINT32_MAX;
 struct FakeMutex {
     std::mutex mutex;
 };
+using StaticSemaphore_t = FakeMutex;
 using SemaphoreHandle_t = FakeMutex*;
 struct FakeTask {
     void (*fn)(void*);
@@ -25,6 +27,7 @@ struct FakeTask {
     unsigned priority;
 };
 using TaskHandle_t = FakeTask*;
+using StaticTask_t = FakeTask;
 namespace sdk {
 extern std::atomic<int64_t>  clock_us;
 extern std::atomic<bool>     real_clock;
@@ -37,10 +40,13 @@ ssize_t                      timed_send(int, const void*, size_t, int);
 ssize_t                      timed_recv(int, void*, size_t, int);
 extern bool                  fail_task_create;
 extern bool                  fail_mutex_create;
+extern unsigned              fail_wdt_add, fail_lwip_alloc, fail_lwip_retain;
+extern unsigned              lwip_gets, lwip_frees;
+extern void*                 lwip_retained;
 extern int create_calls, delete_calls, delays, wdt_add, wdt_delete, wdt_reset, mdns_ptr_calls;
 extern std::vector<TaskHandle_t>      tasks;
 extern std::vector<SemaphoreHandle_t> mutexes;
-extern std::function<void()>          on_delay, on_wdt_delete, on_mutex_give;
+extern std::function<void()>          on_delay, on_wdt_add, on_wdt_delete, on_mutex_give;
 extern thread_local int               lock_depth;
 int64_t                               time_us();
 } // namespace sdk
@@ -51,7 +57,8 @@ inline SemaphoreHandle_t xSemaphoreCreateMutex() {
     sdk::mutexes.push_back(m);
     return m;
 }
-inline BaseType_t xSemaphoreTake(SemaphoreHandle_t m, TickType_t ticks) {
+inline SemaphoreHandle_t xSemaphoreCreateMutexStatic(StaticSemaphore_t* storage) { return storage; }
+inline BaseType_t        xSemaphoreTake(SemaphoreHandle_t m, TickType_t ticks) {
     if (!m) return 0;
     if (ticks == 0 && !m->mutex.try_lock()) return 0;
     if (ticks != 0) m->mutex.lock();
@@ -81,6 +88,12 @@ inline void vTaskDelay(TickType_t ticks) {
 inline void vTaskDelete(TaskHandle_t) { ++sdk::delete_calls; }
 inline int  esp_task_wdt_add(TaskHandle_t) {
     ++sdk::wdt_add;
+    if (sdk::lock_depth != 0) std::abort();
+    if (sdk::fail_wdt_add) {
+        --sdk::fail_wdt_add;
+        return 1;
+    }
+    if (sdk::on_wdt_add) sdk::on_wdt_add();
     return 0;
 }
 inline int esp_task_wdt_delete(TaskHandle_t) {
@@ -93,7 +106,27 @@ inline int esp_task_wdt_reset() {
     sdk::watchdog_feeds.push_back(sdk::time_us());
     return 0;
 }
-constexpr int ESP_OK             = 0;
+constexpr int ESP_OK = 0;
+using sys_sem_t      = unsigned;
+extern "C" inline sys_sem_t* daikin_lwip_thread_sem_get(void) {
+    ++sdk::lwip_gets;
+    if (sdk::lock_depth != 0) std::abort();
+    if (sdk::lwip_retained) return static_cast<sys_sem_t*>(sdk::lwip_retained);
+    if (sdk::fail_lwip_alloc) {
+        --sdk::fail_lwip_alloc;
+        return nullptr;
+    }
+    auto* sem = static_cast<sys_sem_t*>(std::malloc(sizeof(sys_sem_t)));
+    if (!sem) return nullptr;
+    if (sdk::fail_lwip_retain) {
+        --sdk::fail_lwip_retain;
+        ++sdk::lwip_frees;
+        std::free(sem);
+        return nullptr;
+    }
+    sdk::lwip_retained = sem;
+    return sem;
+}
 constexpr int ESP_IPADDR_TYPE_V4 = 0;
 struct esp_ip4_addr_t {
     uint32_t addr = 0;
@@ -123,10 +156,15 @@ namespace sdk {
 extern mdns_result_t* mdns_results;
 extern bool           discovery_time_model;
 extern int            mdns_a_calls;
+extern esp_ip4_addr_t mdns_a_result;
 } // namespace sdk
-inline int mdns_query_a(const char*, int timeout_ms, esp_ip4_addr_t*) {
+inline int mdns_query_a(const char*, int timeout_ms, esp_ip4_addr_t* out) {
     ++sdk::mdns_a_calls;
     if (sdk::discovery_time_model) sdk::clock_us.fetch_add(timeout_ms * 1000LL);
+    if (sdk::mdns_a_result.addr != 0) {
+        *out = sdk::mdns_a_result;
+        return ESP_OK;
+    }
     return -1;
 }
 inline int mdns_query_ptr(const char*, const char*, int, int, mdns_result_t** result) {

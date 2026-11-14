@@ -181,8 +181,8 @@ The contract runner executes additional compiled production consumers:
 
 | Contract | Scope |
 |---|---|
-| `test_modbus_runtime_contract.mjs` | Complete `hp_modbus.cpp`, real POSIX transport and SDK/task adapters: 31 cases and 30 targeted controls for parsing, polling, expiry, target cutover, retirement, 32/42-row profile ownership, native enums and automatic native promotion. [Evidence limits](modbus_runtime/README.md) include modeled scheduler/config/history and no physical HomeHub/NVS proof. |
-| `test_modbus_metadata_contract.mjs` | Current HTTP/MCP serializer and MQTT snapshot consumer: 16 cases and 10 controls for snapshot-owned row definitions, raw numeric enums/text, native keys/labels, quiet-selection exclusion from activity metadata and bounded exact flat-JSON reservation. Physical native Altherma 4 scaling/acceptance remains pending. |
+| `test_modbus_runtime_contract.mjs` | Complete `hp_modbus.cpp`, real POSIX transport and SDK/task adapters. Tests and targeted controls cover parsing, polling, expiry, target cutover, worker admission and retirement, profile and history ownership across reconnects, native promotion, flow-scale qualification and partial replies under memory pressure. [Evidence limits](modbus_runtime/README.md) include modeled scheduler/config/history and no physical HomeHub/NVS proof. |
+| `test_modbus_metadata_contract.mjs` | Current HTTP/MCP serializer and MQTT snapshot consumer: 17 cases and 11 controls for snapshot-owned row definitions, flow scale qualification, numeric enums/text, quiet-selection exclusion and bounded flat-JSON reservation. Physical native Altherma 4 scaling remains pending. |
 
 `scripts/run-contract-tests.sh` discovers every `test/test_*_contract.mjs`, refusing an empty set,
 then runs the public-readiness audit. Source assertions pin target ownership, sequencing and
@@ -250,9 +250,11 @@ Forward, open/Cancel/backdrop/Escape, valid and invalid submissions, server reje
 ENV III, bug-report steps and generation-bound OTA confirmation. The transient OTA modal must not
 become a bookmarkable stale offer.
 
-The source reader validates [app.sources](../main/www/app.sources): local, present, unique ordered
-fragments that parse as one classic script. Firmware, audits, DOM tests, browser assembly and GIF
-recording consume that same concatenation. Focused UI cases cover live language changes, connection
+The source reader validates [app.sources](../main/www/app.sources) and its unique ordered fragments
+as a classic script. Audits, DOM tests, the firmware and the GIF recorder use the same concatenation.
+The Chromium and WebKit gate renders the minified, packed page produced by the firmware asset
+pipeline. The delivery contract compares the browser input with the decoded firmware gzip.
+Focused UI cases cover live language changes, connection
 failure copy, source precedence, binary/enum meanings, board/pin selection, diagnosis limitations,
 OTA reload adoption and stable narrow-row interaction.
 

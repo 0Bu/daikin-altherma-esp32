@@ -20,9 +20,11 @@
 // space operation, its independent valve route and heating rather than cooling.
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include "hp_poll.hpp"      // CachedValue — the shared row shape, so /values needs no second type
 #include "logic/config_model.hpp"
+#include "logic/history_persist.hpp"
 #include "logic/modbus.hpp"
 #include "logic/outdoor_evidence.hpp"
 
@@ -37,11 +39,12 @@ struct ModbusStatus {
     ModbusProfile profile     = ModbusProfile::Auto; // detected/active Modbus profile
     ModbusProfileBasis profile_basis =
         ModbusProfileBasis::Probing; // basis: probing, affirmative, fallback
-    // These route flags fit the existing alignment gap before host on ESP32-S3. Keep status
-    // snapshots at their existing size: HTTP and MQTT also copy this object on their task stacks.
-    bool        space_route_known  = false;
-    bool        space_route_active = false;
-    std::string host;                // configured address ("" = disabled)
+    // These flags fit the existing alignment gap before host on ESP32-S3. HTTP and MQTT also
+    // copy this object on their task stacks.
+    bool        space_route_known   = false;
+    bool        space_route_active  = false;
+    bool        dhw_operation_known = false; // input 52, with its own reply freshness
+    std::string host;                        // configured address ("" = disabled)
     int         port    = 0;
     int         unit_id = 0;
     uint32_t    rx_ok   = 0;           // successful register reads since boot
@@ -64,6 +67,7 @@ struct ModbusStatus {
     bool        plant_gate_active = false;
     bool        heating_mode_known  = false;
     bool        heating_mode_active = false;
+    bool        dhw_operation_active = false;
     // Plant-side outdoor context from input register 44. Unlike the full value cache, this row is
     // refreshed in an explicit one-second batch in the same cycle as input 38, and is published
     // only while its own reply is recent in the current TCP session. It is optional evidence,
@@ -71,23 +75,39 @@ struct ModbusStatus {
     logic::OutdoorEvidence plant_outdoor;
 };
 
-// Start the stack. Creates the status mutex always (so /status can report `enabled:false` before any
-// task exists) and the task only when the config enables it. Called once from app_main.
+// Initialize static source state before HTTP can save a target. Start polling separately.
+void mb_init();
 void mb_start();
 
 // Complete the fresh-device one-shot discovery before httpd/background config writers start. No-op
 // after any persisted result or explicit host save/delete, in safe mode, or without a LAN lease.
 void mb_autodiscover_initial();
 
-// Apply an already-staged enable decision after POST /set_hp. Starts the task if the HomeHub was
-// just enabled, stops it if just disabled, and drops a cached socket when the address changed. The
-// POD argument keeps the post-persistence cutover allocation-free and safe in the httpd task.
-void mb_reconfigure(bool enabled) noexcept;
+// Publish the staged target after POST /set_hp and retire the previous cache. The owner
+// closes its socket. Worker creation requires boot and network-heap admission and can stay pending.
+void mb_reconfigure(bool enabled, const logic::HistoryModbusTarget& target) noexcept;
+void mb_retry_start() noexcept;
+bool mb_task_pending() noexcept;
 
 // Lock-free current durable target intent. Unlike ModbusStatus::enabled (worker lifetime), this
 // flips synchronously after a successful settings save and is therefore the MQTT publication
 // authority.
 bool mb_target_enabled() noexcept;
+
+// Serialize a settings or responding-peer cutover with admission of retained MQTT state.
+// These try-claims never wait on each other's task. MQTT binds its claim to the copied cache.
+enum class ModbusPublication { ConfigSave, PeerChange, Mqtt };
+class ModbusPublicationClaim {
+public:
+    explicit ModbusPublicationClaim(ModbusPublication owner, uint32_t revision = 0) noexcept;
+    ~ModbusPublicationClaim();
+    ModbusPublicationClaim(const ModbusPublicationClaim&)            = delete;
+    ModbusPublicationClaim& operator=(const ModbusPublicationClaim&) = delete;
+    bool                    acquired() const { return acquired_; }
+
+private:
+    bool acquired_ = false;
+};
 
 // Lock-free acknowledgement for OTA/Weather heap ownership. True means no HomeHub cycle is inside
 // its Config/DNS/socket/vector allocation region; a disabled/non-started task is quiescent too.
@@ -102,6 +122,14 @@ bool mb_discover_homehub(std::string& found);
 // Thread-safe snapshot of the link state.
 ModbusStatus mb_status();
 
+enum class ModbusCompressor : uint8_t { Unknown, Off, On };
+
+struct ModbusActivity {
+    ModbusCompressor    compressor = ModbusCompressor::Unknown;
+    std::optional<bool> dhw;
+    std::optional<bool> space;
+};
+
 // Thread-safe snapshot copy of the HomeHub value cache. Returns the count written. Rows carry the
 // same CachedValue shape as the X10A cache, so /values and the browser need no second row type;
 // `reg` is the synthetic def::HOMEHUB_GROUP_REG and `off` the EKRHH offset, which is what
@@ -115,7 +143,11 @@ ModbusStatus mb_status();
 // the snapshot must not be served. It is an out-param rather than a separate mb_status() call
 // because that separate call is exactly the race — the cache and link state are behind two mutexes,
 // so only the accessor can tie them into one generation-checked answer.
-size_t mb_values_snapshot(CachedValue* out, size_t max, bool& live);
+// The optional history generation belongs to the copied full-cache rows. Zero means unavailable.
+// Optional activity comes from recent input 31, 52 and 53 replies in the same current session.
+size_t mb_values_snapshot(CachedValue* out, size_t max, bool& live,
+                          uint32_t*       history_generation = nullptr,
+                          ModbusActivity* activity           = nullptr);
 
 // Allocation-free check of the exact snapshot liveness rule, for periodic expiry publication.
 bool mb_values_live();

@@ -119,7 +119,7 @@ class Document {
 }
 
 const document = new Document();
-const fetchState = { mode: "ok", calls: [] };
+const fetchState = { mode: "ok", calls: [], toasts: [] };
 const response = (ok, payload, status = ok ? 200 : 400) => ({
   ok,
   status,
@@ -132,6 +132,8 @@ const fetch = async (url, options = {}) => {
     return new Promise((resolve, reject) => { fetchState.pending.set(url, { resolve, reject }); });
   if (fetchState.mode === "homehub_interleaved" && ["/discover_homehub", "/set_hp"].includes(url))
     return new Promise((resolve, reject) => { fetchState.pending.set(url, { resolve, reject }); });
+  if (fetchState.mode === "homehub_start_pending" && url === "/set_hp")
+    return response(true, { ok: true, modbus_start_pending: true });
   if (fetchState.mode === "delayed")
     return new Promise((resolve, reject) => { fetchState.respond = resolve; fetchState.fail = reject; });
   if (fetchState.mode === "throw") throw new Error("unreachable");
@@ -231,6 +233,7 @@ const context = vm.createContext({
   clearTimeout() {},
   setInterval: () => 1,
   clearInterval() {},
+  recordToast: (message, type) => fetchState.toasts.push({ message, type }),
   console,
   renderHeader() {},
 });
@@ -239,13 +242,13 @@ const source = readAppFragments(["i18n.js"]) + readUiLocale("de") +
   readAppFragments(["app_state.js", "settings.js", "bootstrap.js"])
     .replace(/\nboot\(\);\s*$/, "\n");
 vm.runInContext(`${source}
-  toast = () => {};
+  toast = recordToast;
   renderApp = () => {};
   const productionRefreshStatus = refreshStatus;
   refreshStatus = async () => true;
   collectBugReport = async () => ({ text: "redacted report", failed: false });
   this.__ui = {
-    S, MODALS, ROUTED_MODALS, TRANSIENT_MODALS, POPUP_ROUTES, wire, initNavigation,
+    S, t, MODALS, ROUTED_MODALS, TRANSIENT_MODALS, POPUP_ROUTES, wire, initNavigation,
     applyRouteFromLocation, hydrateRoutedPopup, askOtaInstall, settleOtaDecision,
     otaFail, paintOtaAlert, dismissOtaAlert,
     openWifi, openMqtt, openRefTemp, openCirculation, openWeather, openSyslog,
@@ -1282,6 +1285,14 @@ for (const order of ["discovery-first", "rejection-first"]) {
   assert.equal(document.getElementById("hhHost").value, "retry-discovery.local");
   assert.equal(searchButton.disabled, false);
   assert.equal(searchButton.textContent, idleLabel);
+}
+{
+  const item = cases.find((item) => item.modal === "homehubModal");
+  fetchState.mode = "homehub_start_pending";
+  open(item);
+  await document.getElementById("homehubForm").fire("submit");
+  assert.equal(document.getElementById("homehubModal").hidden, true, "the address was saved");
+  assert.deepEqual(fetchState.toasts.at(-1), { message: ui.t("hh.start_pending"), type: "err" });
 }
 fetchState.mode = "ok";
 

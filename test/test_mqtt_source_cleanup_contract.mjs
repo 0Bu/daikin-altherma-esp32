@@ -280,7 +280,7 @@ const setHpStart = http.indexOf("static esp_err_t set_hp(");
 const setHpEnd = http.indexOf("static esp_err_t discover_homehub_now", setHpStart);
 const setHp = http.slice(setHpStart, setHpEnd);
 const hpSave = setHp.indexOf("} else if (!config_save(c))");
-const hpReconfigure = setHp.indexOf("mb_reconfigure(modbus_enabled)", hpSave);
+const hpReconfigure = setHp.indexOf("mb_reconfigure(modbus_enabled, modbus_target)", hpSave);
 const hpRequest = setHp.indexOf("mqtt_request_modbus_cleanup()", hpReconfigure);
 assert.ok(hpSave >= 0 && hpReconfigure > hpSave && hpRequest > hpReconfigure,
   "HomeHub cleanup admission must follow persistence and synchronous cutover");

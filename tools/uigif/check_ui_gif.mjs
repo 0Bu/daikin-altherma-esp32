@@ -127,7 +127,7 @@ function schematicCss(css) {
 // The assembled UI functions that PAINT the frames. A rename must stop the gate loudly: silently
 // fingerprinting nothing is how a checker starts passing everything.
 const FNS = ["renderApp", "renderLive", "clearSchematic", "liveData", "plantState", "sysSet",
-             "vLwt", "fmt0", "fmt1"];
+             "vLwt", "waterThermalKind", "fmt0", "fmt1"];
 
 function fnSource(js, name) {
   const re = new RegExp(`^(?:function\\s+${name}\\s*\\(|const\\s+${name}\\s*=)`, "m");

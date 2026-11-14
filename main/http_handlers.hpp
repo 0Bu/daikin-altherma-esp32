@@ -30,6 +30,7 @@ esp_err_t http_send_status_json(httpd_req_t* req, std::string_view prefix = {},
                                 std::string_view suffix = {}, bool redact = false);
 esp_err_t http_send_values_json(httpd_req_t* req, std::string_view prefix = {},
                                 std::string_view suffix = {});
+void      http_running_image_identity(char (&boot_id)[17], char (&elf_sha)[65]) noexcept;
 
 // Register a route whose handler runs under the shared handle_all LAN-browser policy and try/catch
 // OOM guard: Host/Origin/Fetch Metadata are checked globally, body-bearing POSTs require JSON

@@ -43,6 +43,10 @@ inline SemaphoreHandle_t xSemaphoreCreateMutex() {
     mutex       = {};
     return &mutex;
 }
+namespace sdk {
+inline bool     measure_busy_lock   = false;
+inline unsigned blocking_busy_takes = 0;
+} // namespace sdk
 inline BaseType_t xSemaphoreTake(SemaphoreHandle_t s, TickType_t wait) {
     if (sdk::before_take) {
         auto f           = sdk::before_take;
@@ -52,6 +56,10 @@ inline BaseType_t xSemaphoreTake(SemaphoreHandle_t s, TickType_t wait) {
     if (!s) return pdFALSE;
     if (s->owned) {
         if (!wait) return pdFALSE;
+        if (sdk::measure_busy_lock) {
+            ++sdk::blocking_busy_takes;
+            return pdFALSE;
+        }
         throw std::runtime_error("modeled recursive lock");
     }
     s->owned = true;

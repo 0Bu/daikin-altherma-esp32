@@ -158,7 +158,7 @@ try {
     },
     {
       name: "network-lease", scenario: "header_exception",
-      before: "s_network_active.store(false, std::memory_order_release);",
+      before: "s_network_active.store(false);",
       after: "/* mutation: retain the network lease */",
     },
     {

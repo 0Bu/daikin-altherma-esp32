@@ -157,6 +157,9 @@ baseline = build(SOURCE, "baseline")
 phases = ["prepare_read", "prepare_erase", "body", "commit", "readback",
           "commit_accepted_error", "success"]
 cases = ["commit_rejected", "core_ahead", "nor_contract", "read_admission", "sequence_rejections",
+         "modbus_live_peer_change", "modbus_reply_bucket", "x10a_dhw_reply_bucket",
+         "modbus_peer_forget", "modbus_quiet_unverified", "modbus_invalid_valve",
+         "modbus_missing_target_digest",
          "core_sequence_prepare", "core_sequence_readback", "core_sequence_commit_error",
          "forget_before_start", "forget_during_lookup", "forget_during_scan",
          "forget_missing_partition", "forget_wrong_address", "forget_wrong_size",
@@ -176,10 +179,12 @@ for case in cases:
         (OUT / "failure.json").write_text(json.dumps(results[-1], indent=2) + "\n")
         raise RuntimeError("Unexpected semantic outcome: " + case)
 transport_evidence = []
+case_inputs = {}
 pending_cases = ["checkup_pending_healthy", "checkup_pending_forget"]
 if not args.expect_red or args.expect_red_case == "late-correction":
     transport = OUT / "late-correction.synthetic-nor.bin"
     paired_cases = ["seed_late_correction", "restore_late_correction"]
+    case_inputs.update({case: [transport] for case in pending_cases})
     for case in paired_cases + ([] if args.expect_red else pending_cases):
         result = execute(baseline, case, case, [transport])
         expected_failure = args.expect_red and case == "restore_late_correction"
@@ -195,6 +200,73 @@ if not args.expect_red or args.expect_red_case == "late-correction":
     transport_evidence.append({"path": str(transport), "sha256": digest(transport),
                                "bytes": transport.stat().st_size,
                                "only_cross_process_state": "synthetic NOR partition bytes"})
+if not args.expect_red:
+    transport = OUT / "trend-read-fault.synthetic-nor.bin"
+    for case in ("seed_trend_read_fault", "restore_trend_read_transient",
+                 "restore_trend_read_persistent"):
+        case_inputs[case] = [transport]
+        result = execute(baseline, case, case, [transport])
+        expected = result.returncode == 0 and "PASS case=" + case + " " in result.stdout
+        results.append({"case": case, "exit_code": result.returncode, "stdout": result.stdout,
+                        "stderr": result.stderr, "pass": expected})
+        print(result.stdout, end="", flush=True)
+        if not expected:
+            (OUT / "failure.json").write_text(json.dumps(results[-1], indent=2) + "\n")
+            raise RuntimeError("Unexpected trend restore read-fault outcome: " + case)
+    transport_evidence.append({"path": str(transport), "sha256": digest(transport),
+                               "bytes": transport.stat().st_size,
+                               "only_cross_process_state": "synthetic NOR partition bytes"})
+    transport = OUT / "modbus-delayed.synthetic-nor.bin"
+    for case in ("seed_modbus_delayed", "restore_modbus_delayed",
+                 "restore_modbus_reply_overlap", "restore_modbus_reply_partial",
+                 "restore_modbus_pending_at_boundary"):
+        case_inputs[case] = [transport]
+        result = execute(baseline, case, case, [transport])
+        expected = result.returncode == 0 and "PASS case=" + case + " " in result.stdout
+        results.append({"case": case, "exit_code": result.returncode, "stdout": result.stdout,
+                        "stderr": result.stderr, "pass": expected})
+        print(result.stdout, end="", flush=True)
+        if not expected:
+            (OUT / "failure.json").write_text(json.dumps(results[-1], indent=2) + "\n")
+            raise RuntimeError("Unexpected delayed Modbus history outcome: " + case)
+    transport_evidence.append({"path": str(transport), "sha256": digest(transport),
+                               "bytes": transport.stat().st_size,
+                               "only_cross_process_state": "synthetic NOR partition bytes"})
+    modbus_transports = [
+        ("cold", ["restore_modbus_cold_same", "restore_modbus_cold_different"],
+         "synthetic NOR partition bytes"),
+        ("legacy", ["restore_modbus_legacy"], "synthetic legacy NOR partition bytes"),
+        ("legacy_tagged", ["restore_modbus_legacy_tagged"],
+         "synthetic tag-1 NOR partition bytes from the configured/peer CRC collision"),
+        ("cold_collision", ["restore_modbus_cold_collision_same",
+                            "restore_modbus_cold_collision_replacement"],
+         "synthetic scoped NOR bytes for the two legacy CRC aliases"),
+        ("warm", ["restore_modbus_warm_same", "restore_modbus_warm_different"],
+         "synthetic retained History and liveness RAM regions"),
+        ("warm_legacy", ["restore_modbus_warm_legacy_alias", "restore_modbus_warm_legacy_corrupt_marker"],
+         "synthetic v4 retained History and liveness RAM with an aliased Modbus target"),
+        ("warm_combined", ["restore_modbus_warm_combined"],
+         "synthetic v5 retained History and liveness RAM with only a combined peer scope"),
+        ("warm_collision", ["restore_modbus_warm_collision_same",
+                            "restore_modbus_warm_collision_replacement",
+                            "restore_modbus_warm_collision_corrupt_config"],
+         "synthetic v6 retained History and liveness RAM after saving a colliding replacement"),
+    ]
+    for mode, restores, transport_kind in modbus_transports:
+        modbus_transport = OUT / f"modbus-{mode}.bin"
+        for case in [f"seed_modbus_{mode}", *restores]:
+            case_inputs[case] = [modbus_transport]
+            result = execute(baseline, case, case, [modbus_transport])
+            expected = result.returncode == 0 and "PASS case=" + case + " " in result.stdout
+            results.append({"case": case, "exit_code": result.returncode, "stdout": result.stdout,
+                            "stderr": result.stderr, "pass": expected})
+            print(result.stdout, end="", flush=True)
+            if not expected:
+                (OUT / "failure.json").write_text(json.dumps(results[-1], indent=2) + "\n")
+                raise RuntimeError("Unexpected Modbus peer runtime outcome: " + case)
+        transport_evidence.append({"path": str(modbus_transport), "sha256": digest(modbus_transport),
+                                   "bytes": modbus_transport.stat().st_size,
+                                   "only_cross_process_state": transport_kind})
 unknowns = []
 for case in ["unknown_case", "data_unknown", "barrier_unknown",
              "seed_late_correction", "restore_late_correction"]:
@@ -228,6 +300,16 @@ if not args.expect_red:
     under_lock = "flash_lk.acquired() && !s_flash_forgotten.load() && s_flash_scan_ok"
     if pending_body.count(pre_lock) != 1 or pending_body.count(under_lock) != 1:
         raise RuntimeError("Expected both pending query Forget checks")
+    modbus_snapshot_start = text.index("size_t history_modbus_snapshot(")
+    modbus_snapshot_end = text.index("\n\n", modbus_snapshot_start)
+    modbus_snapshot = text[modbus_snapshot_start:modbus_snapshot_end]
+    if modbus_snapshot.count(" || !s_mb_peer_bound") != 1:
+        raise RuntimeError("Expected one Modbus snapshot binding check")
+    modbus_peer_change = (
+        "if (ipv4 != s_mb_ipv4) return history_modbus_reset_scope_locked(ipv4);"
+    )
+    peer_start = text.index("uint32_t history_modbus_bind_peer(")
+    peer_body = text[peer_start:text.index("\n\n", peer_start)]
     mutations = [
         ("omit_failure_callback", "        if (stop_owned) stop_observation_flash_failed();",
          "        (void)stop_owned;", ["data_commit", "barrier_commit"],
@@ -262,6 +344,97 @@ if not args.expect_red:
          ["checkup_pending_forget"], "pending_rechecks_forget_under_lock"),
         ("query_pending_without_forget_fast_path", pending_body, pending_body.replace(pre_lock, ""),
          ["checkup_pending_forget"], "already_forgotten_pending_skips_lock"),
+        ("publish_unbound_modbus_snapshot", modbus_snapshot,
+         modbus_snapshot.replace(" || !s_mb_peer_bound", "").replace(
+             " || s_mb_candidate_ipv4.load() != s_mb_ipv4", ""),
+         ["restore_modbus_cold_same"],
+         "boot_keeps_unbound_modbus_samples_invisible"),
+        ("keep_modbus_history_on_peer_change", modbus_peer_change,
+         modbus_peer_change.replace("if (", "if (first_bind && ", 1),
+         ["modbus_live_peer_change"], "replacement_ipv4_retires_old_ram_and_browser_epoch"),
+        ("wait_for_peer_flash_lock", peer_body,
+         peer_body.replace("Lock flash_lk(s_flash_mtx, 0);", "Lock flash_lk(s_flash_mtx);"),
+         ["modbus_live_peer_change"], "peer_bind_does_not_wait_for_flash_owner"),
+        ("wait_for_peer_history_lock", peer_body,
+         peer_body.replace("Lock lk(s_mtx, 0);", "Lock lk(s_mtx);"),
+         ["modbus_live_peer_change"], "peer_bind_does_not_wait_for_history_owner"),
+        ("skip_peer_forget_fast_path", peer_body,
+         peer_body.replace(" ||\n        s_flash_forgotten.load()", "", 1),
+         ["modbus_peer_forget"], "forgotten_peer_bind_skips_locks"),
+        ("skip_peer_forget_recheck", peer_body,
+         peer_body.replace("!lk.acquired() || s_flash_forgotten.load()", "!lk.acquired()"),
+         ["modbus_peer_forget"], "peer_bind_rechecks_forget_after_locks"),
+        ("admit_unqualified_quiet", "if (!v || t == kModbusQuietHistory) continue;",
+         "if (!v) continue;", ["modbus_quiet_unverified"],
+         "baseline_quiet_does_not_enter_production_ring"),
+        ("restore_old_unqualified_quiet", "idx < HOMEHUB_HISTORY_COUNT && idx != kModbusQuietHistory",
+         "idx < HOMEHUB_HISTORY_COUNT", ["restore_modbus_cold_same"],
+         "old_false_quiet_column_is_not_restored"),
+        ("abort_trend_restore_after_read_error",
+         "                    s_flash_restore_retry = true;\n                    return;",
+         "                    s_flash_restore_done = true;\n                    return;",
+         ["restore_trend_read_transient", "restore_trend_read_persistent"],
+         "failed_batch_waits_for_retry_without_retiring_later_sources"),
+        ("skip_trend_restore_read_retry", "                if (!s_flash_restore_retry) {",
+         "                if (false) {", ["restore_trend_read_transient"],
+         "failed_batch_waits_for_retry_without_retiring_later_sources"),
+        ("do_not_crc_cover_peer_format",
+         "if (P().version == kCombinedModbusPeerPersistVersion ||\n"
+         "        P().version == kModbusPeerPersistVersion)",
+         "if (P().version == kModbusPeerPersistVersion)", ["restore_modbus_warm_legacy_corrupt_marker"],
+         "warm_start_exercises_real_crc_and_liveness_adoption"),
+        ("accept_colliding_configured_target",
+         "return logic::history_journal_modbus_config_matches(h, r.payload, sizeof(r.payload),\n"
+         "                                                            s_mb_config_target) &&",
+         "return logic::history_journal_modbus_scope_words(h) &&",
+         ["restore_modbus_cold_collision_replacement"],
+         "restore_requires_proven_matching_peer_and_bound_format"),
+        ("do_not_crc_cover_modbus_configuration",
+         "if (P().version == kModbusPeerPersistVersion)\n"
+         "        crc =\n"
+         "            config_crc32_update(crc, reinterpret_cast<const uint8_t*>(&s_liveness.modbus_config_fp),",
+         "if (false)\n"
+         "        crc =\n"
+         "            config_crc32_update(crc, reinterpret_cast<const uint8_t*>(&s_liveness.modbus_config_fp),",
+         ["restore_modbus_warm_collision_corrupt_config"],
+         "warm_start_exercises_real_crc_and_liveness_adoption"),
+        ("modbus_predecessor_visible_before_binding",
+         "s_mb_reset_requested.load() || s_mb_candidate_ipv4.load() != s_mb_ipv4)",
+         "s_mb_reset_requested.load())", ["modbus_live_peer_change"],
+         "candidate_hides_old_flow_while_journal_binding_is_busy"),
+        ("modbus_heater_uses_poll_end",
+         "observed_us >= 0 ? observed_us : esp_timer_get_time()",
+         "((void)observed_us, esp_timer_get_time())", ["modbus_reply_bucket"],
+         "heater_reply_is_recorded_in_its_own_bucket"),
+        ("discard_modbus_reply_after_raster_restore",
+         "if (bucket + 1 != s_mb_bucket) return;",
+         "return;", ["restore_modbus_reply_overlap", "restore_modbus_reply_partial"],
+         "modbus_delayed_reply_survives_concurrent_restore"),
+        ("discard_early_replacement_peer_reply",
+         "        s_mb_have_bucket        = false;\n        s_mb_last_commit_us     = kNoCommitUs;",
+         "        if (s_mb_have_bucket && bucket < s_mb_bucket) return;\n"
+         "        s_mb_have_bucket        = false;\n        s_mb_last_commit_us     = kNoCommitUs;",
+         ["modbus_live_peer_change"], "replacement_first_reply_in_previous_bucket_is_retained"),
+        ("write_modbus_bucket_during_full_sweep",
+         "    if (src == HistorySource::Modbus &&\n"
+         "        s_mb_last_commit_bucket - static_cast<int64_t>(age) >= s_mb_sweep_bucket.load())\n"
+         "        return false;\n",
+         "", ["restore_modbus_reply_overlap"],
+         "inflight_modbus_reply_holds_its_bucket_out_of_journal"),
+        ("restore_leaves_modbus_open_bucket_behind",
+         "else if (bucket > s_mb_bucket)", "else if (false && bucket > s_mb_bucket)",
+         ["restore_modbus_pending_at_boundary"], "restore_does_not_commit_the_pending_bucket_twice"),
+        ("x10a_dhw_uses_poll_end",
+         "dhw_reply_us >= 0 ? logic::history_bucket(dhw_reply_us) : s_bucket",
+         "((void)dhw_reply_us, s_bucket)", ["x10a_dhw_reply_bucket"],
+         "x10a_heater_uses_page_reply_bucket"),
+        ("anchor_modbus_history_to_delayed_poll",
+         "\n        s_mb_last_commit_us     = logic::history_raster_boundary_us(now_us);\n"
+         "        s_mb_last_commit_bucket =",
+         "\n        s_mb_last_commit_us = now_us;\n"
+         "        s_mb_last_commit_bucket =",
+         ["restore_modbus_delayed"],
+         "restored_delayed_modbus_has_one_sample_per_closing_boundary"),
     ]
     for name, before, after, controls, oracle in mutations:
         if text.count(before) != 1:
@@ -269,9 +442,23 @@ if not args.expect_red:
         source = OUT / (name + ".cpp")
         source.write_text(text.replace(before, after, 1))
         binary = build(source, name)
+        mutation_transport = None
+        if name == "do_not_crc_cover_modbus_configuration":
+            # Use this seal on both sides of the simulated reboot. Reading a baseline seal with
+            # a different CRC algorithm would fail before the corruption oracle was exercised.
+            mutation_transport = OUT / (name + ".synthetic-ram.bin")
+            seed = execute(binary, "seed_modbus_warm_collision", name + "-seed", [mutation_transport])
+            if seed.returncode != 0 or "PASS case=seed_modbus_warm_collision " not in seed.stdout:
+                raise RuntimeError("Mutation could not seed a valid warm region: " + name)
+        if name == "anchor_modbus_history_to_delayed_poll":
+            # The old writer produces valid NOR bytes; only the restored curve exposes the shift.
+            mutation_transport = OUT / (name + ".synthetic-nor.bin")
+            seed = execute(binary, "seed_modbus_delayed", name + "-seed", [mutation_transport])
+            if seed.returncode != 0 or "PASS case=seed_modbus_delayed " not in seed.stdout:
+                raise RuntimeError("Mutation could not seed delayed Modbus data: " + name)
         for case in controls:
-            result = execute(binary, case, name + "-" + case,
-                             [transport] if case in pending_cases else [])
+            transport = [mutation_transport] if mutation_transport else case_inputs.get(case, ())
+            result = execute(binary, case, name + "-" + case, transport)
             ok = oracle_failed(result, case, oracle)
             mutants.append({"mutation": name, "case": case, "compiled": True,
                             "oracle": oracle, "stdout": result.stdout,

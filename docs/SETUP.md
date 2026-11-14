@@ -101,7 +101,9 @@ collect a [bug report](REPORTING.md).
   [HOME_ASSISTANT.md](HOME_ASSISTANT.md). Give each installation a distinct base topic.
 - **HomeHub:** configure its separate Modbus source under **Settings → Connections → HomeHub**.
   A fresh device searches once; the dialog's **Search** fills the address, and **Save** applies it.
-  Saving an empty address disables further polling/search. See [MODBUS_PROTOCOL.md](MODBUS_PROTOCOL.md).
+  Check the HomeHub connection row for a connected state. A saved address can wait for resources
+  before polling starts. Saving an empty address disables further polling/search.
+  See [MODBUS_PROTOCOL.md](MODBUS_PROTOCOL.md).
 - **ENV III:** on a supported M5Stack preset, use **ESP32 → Hardware → Outdoor sensor**.
   [BOARDS.md](BOARDS.md#m5stack-env-iii-outdoor-temperature-humidity-and-pressure) explains pin conflicts.
 - **Plant diagnostics:** enable it under **Settings → Firmware**. It is off by default. Then

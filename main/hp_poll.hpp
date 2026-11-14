@@ -46,6 +46,7 @@ struct CachedValue {
     uint8_t modbus_definition =
         0;             // immutable catalog row that decoded this Modbus value; 0 = none.
                        // Uses a padding byte: provenance does not enlarge X10A snapshots.
+    bool     modbus_flow_scale_unverified = false; // input 49 only; bound to this full Modbus sweep
     uint16_t conv = 0; // the X10A row's converter id, in ValueDef's own type — the metadata
                        // its consumers need, and the reason none of the DERIVED facts are
                        // cached beside it: `conv_is_binary(conv)` says whether /values should

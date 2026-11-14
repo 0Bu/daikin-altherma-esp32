@@ -33,10 +33,16 @@
 // reading. That is the honest outcome, not a gap to be filled by loosening the rule.
 #include <cstddef>
 #include <cstdio>
+#include <string_view>
 #include "history.hpp"   // TRENDS / TrendDef / trend_row_matches — the shared concept vocabulary
 #include "modbus.hpp" // MbFunc / MbType — the codec vocabulary the history decode columns reuse
 
 namespace daik::logic {
+
+constexpr HistorySample homehub_history_state_sample(std::string_view value, char last) {
+    if (value.size() != 1 || value.front() < '0' || value.front() > last) return HISTORY_NO_READING;
+    return static_cast<HistorySample>((value.front() - '0') * 10);
+}
 
 // One HomeHub register ↔ X10A concept pairing. `offset` is the EKRHH 1-based data-model offset
 // (def/homehub.hpp), `concept_id` a logic/history.hpp trend id.

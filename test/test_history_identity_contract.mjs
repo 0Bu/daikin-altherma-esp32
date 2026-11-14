@@ -33,7 +33,7 @@ assert.match(http, /history_snapshot_epoch != history_epoch\(\)/,
   "a reset during label/raster assembly must refuse the response before chunks");
 // Epoch 0 is "no snapshot identity" (no history mutex or no lock), not a change a retry resolves.
 assert.match(http,
-  /if \(history_snapshot_epoch == 0\) \{[\s\S]{0,160}?history unavailable[\s\S]{0,200}?if \(history_snapshot_epoch != history_epoch\(\)\) \{[\s\S]{0,160}?history changed; retry/,
+  /if \(history_snapshot_epoch == 0\) \{[\s\S]{0,160}?history unavailable[\s\S]{0,200}?if \(history_snapshot_epoch != history_epoch\(\) \|\|\s*\(modbus && modbus_peer != history_modbus_candidate\(\)\)\) \{[\s\S]{0,160}?history changed; retry/,
   "a missing snapshot identity must not be reported as a retryable history change");
 assert.match(http, /reference_temperature_status\(c\)/,
   "status must bind the room sample to the same configuration snapshot");
@@ -67,7 +67,8 @@ for (const [name, next] of [
 const builder = functionBody("bool flash_build_next_record(", "bool flash_manifest_due(");
 const x10aGuard = builder.search(
   /src == HistorySource::X10a\s*&&\s*\(s_x10a_target_fp\.load\(\)\s*==\s*0\s*\|\|\s*s_reset_requested\.load\(\)\)/);
-const modbusGuard = builder.search(/src == HistorySource::Modbus\s*&&\s*s_mb_reset_requested\.load\(\)/);
+const modbusGuard = builder.search(
+  /src == HistorySource::Modbus\s*&&\s*\(!s_mb_peer_bound\s*\|\|\s*s_mb_reset_requested\.load\(\)\s*\|\|\s*s_mb_config_target == logic::HistoryModbusTarget\{\}\)/);
 const stamp = builder.indexOf("history_journal_set_scope(");
 assert.ok(x10aGuard >= 0, "the builder must refuse X10A while its identity reset is pending");
 assert.ok(modbusGuard >= 0, "the builder must refuse HomeHub while its identity reset is pending");
@@ -127,8 +128,8 @@ const cursorReset = /s_flash_(?:last|newest|oldest)_bucket\[[^\]]*\]\s*=\s*INT64
 const countResets = (text) => (text.match(cursorReset) || []).length;
 const resetOwners = [
   functionBody("void history_reset()", "void history_reset_on_detect"),
-  functionBody("void history_reset_on_detect", "void history_modbus_reset"),
-  functionBody("void history_modbus_reset", "uint32_t history_modbus_generation"),
+  functionBody("void history_reset_on_detect", "static uint32_t history_modbus_reset_scope_locked"),
+  functionBody("static uint32_t history_modbus_reset_scope_locked", "uint32_t history_modbus_generation"),
   functionBody("void history_room_reset", "void history_circulation_reset"),
   functionBody("void history_checkup_reset", "// The BOARD's own 24-hour trends"),
   functionBody("bool flash_journal_scan()", "esp_err_t flash_region_erased("),
@@ -266,7 +267,7 @@ assert.match(persistHeader, /HISTORY_PERSIST_VERSION\s*=\s*(?:[3-9]|\d{2,})\s*;/
 assert.match(history, /uint32_t circulation_fp;/, "the sealed region names the circulation identity");
 assert.match(functionBody("inline uint32_t history_persist_crc()", "// Called at the end of every record cycle"),
   /&P\(\)\.circulation_fp/, "the seal must cover the circulation identity it is compared with");
-assert.match(functionBody("inline void persist_wipe(", "uint32_t current_mb_target_fp()"),
+assert.match(functionBody("inline void persist_wipe(", "inline void persist_book_unobserved("),
   /P\(\)\.circulation_fp\s*=\s*circulation_fp/);
 // The ring's identity follows its reset, not the request: it is the identity of what the ring HOLDS.
 {

@@ -46,12 +46,16 @@ namespace fixture {
 inline std::string                    oracle;
 inline daik::Config                   current;
 inline std::vector<daik::CachedValue> rows, modbus_rows;
+inline uint32_t                       modbus_history_generation = 7;
+inline uint32_t                       modbus_candidate          = 1;
 inline daik::HpValuesIdentity         identity{"generic", 0x1234, 7, 11};
 inline bool                           ota = false, weather = false, modbus_live = false;
+inline daik::ModbusCompressor         modbus_compressor = daik::ModbusCompressor::Unknown;
 // Weather's TLS phase is `weather`; readers counts admitted /values snapshots in that exclusion.
-inline int                            values_readers = 0, values_readers_peak = 0;
-inline bool                           config_unreadable         = false;
-inline bool                           change_history_epoch      = false;
+inline int                              values_readers = 0, values_readers_peak = 0;
+inline bool                             config_unreadable         = false;
+inline bool                             change_history_epoch      = false;
+inline bool                             change_modbus_peer        = false;
 inline uint32_t                       epoch                     = 42;
 inline uint32_t                       room_identity             = 0;
 inline bool                           room_snapshot_unavailable = false;
@@ -92,6 +96,10 @@ void reset() {
     current.wifi_ssid                       = "Café \"quoted\"\\line\n";
     current.mqtt_base                       = "daikin-altherma-esp32";
     ota = weather = modbus_live = change_history_epoch = false;
+    modbus_compressor                                  = daik::ModbusCompressor::Unknown;
+    modbus_history_generation                          = 7;
+    modbus_candidate                                   = 1;
+    change_modbus_peer                                 = false;
     values_readers = values_readers_peak = 0;
     config_unreadable                    = false;
     epoch                                = 42;
@@ -325,13 +333,19 @@ uint32_t     hp_skipped_cycles() { return 0; }
 logic::RefrigerantServiceSnapshot refrigerant_service_status() { return {}; }
 ModbusStatus                      mb_status() {
     ModbusStatus s;
-    s.connected = fixture::modbus_live;
+    s.connected = fixture::modbus_live || fixture::modbus_compressor != ModbusCompressor::Unknown;
     return s;
 }
 ModbusProfile mb_active_profile() { return ModbusProfile::HomeHub; }
 size_t        mb_values_capacity() { return fixture::modbus_rows.size(); }
-size_t        mb_values_snapshot(CachedValue* out, size_t cap, bool& live) {
-    live           = fixture::modbus_live;
+size_t mb_values_snapshot(CachedValue* out, size_t cap, bool& live, uint32_t* history_generation,
+                          ModbusActivity* activity) {
+    live = fixture::modbus_live;
+    if (history_generation) *history_generation = live ? 7 : 0;
+    if (activity)
+        *activity = {fixture::modbus_compressor,
+                     fixture::modbus_live ? std::optional<bool>{false} : std::nullopt,
+                     fixture::modbus_live ? std::optional<bool>{true} : std::nullopt};
     const size_t n = std::min(cap, fixture::modbus_rows.size());
     for (size_t i = 0; i < n; ++i) out[i] = fixture::modbus_rows[i];
     return n;
@@ -366,6 +380,8 @@ bool hp_poll_generation_matches(uint32_t generation) {
 }
 const char* history_persist_state() { return "no_record"; }
 uint32_t    history_epoch() noexcept { return fixture::epoch; }
+uint32_t    history_modbus_generation() { return fixture::modbus_history_generation; }
+uint32_t    history_modbus_candidate() noexcept { return fixture::modbus_candidate; }
 size_t      history_label(size_t, char* out, size_t cap) {
     return std::snprintf(out, cap, "Supply Café \"quote\"\\line\n");
 }
@@ -385,6 +401,7 @@ size_t history_snapshot(size_t, logic::HistorySample* out, size_t max, uint32_t*
 }
 size_t history_modbus_snapshot(size_t t, logic::HistorySample* out, size_t max, uint32_t* epoch,
                                logic::HistoryMeta* meta) {
+    if (fixture::change_modbus_peer) ++fixture::modbus_candidate;
     return history_snapshot(t, out, max, epoch, meta);
 }
 size_t history_env3_snapshot(size_t t, logic::HistorySample* out, size_t max, uint32_t* epoch,
@@ -918,7 +935,8 @@ int main(int argc, char** argv) {
     });
     run("modbus_independent_types", [] {
         modbus_live = true;
-        for (const auto offset : {22, 40, 4}) {
+        modbus_compressor = daik::ModbusCompressor::On;
+        for (const auto offset : {22, 40, 4, 31}) {
             const auto* definition = daik::def::homehub_find(offset);
             check(definition != nullptr, "fixture must use a real Modbus definition");
             daik::CachedValue row;
@@ -926,7 +944,7 @@ int main(int argc, char** argv) {
             row.unit              = definition->unit;
             row.off               = static_cast<uint8_t>(offset);
             row.modbus_definition = daik::def::homehub_definition_id(*definition);
-            row.value             = offset == 22 ? "U4" : offset == 40 ? "12.3" : "1";
+            row.value = offset == 22 ? "U4" : offset == 40 ? "12.3" : offset == 31 ? "0" : "1";
             modbus_rows.push_back(row);
         }
         daik::CachedValue invalid;
@@ -940,10 +958,36 @@ int main(int argc, char** argv) {
               "independent Modbus response failed");
         successful(req);
         emit(req, "modbus-values");
-        modbus_live = false;
+        ++modbus_history_generation;
+        modbus_compressor = daik::ModbusCompressor::Off;
+        req               = request();
+        check(invoke(req, "/values", daik::h_values) == ESP_OK,
+              "a retired chart binding must not suppress copied live values");
+        successful(req);
+        emit(req, "modbus-values-history-retired");
+        change_modbus_peer = true;
+        req                = request();
+        check(invoke(req, "/history?row=flow&source=modbus", daik::h_history) == ESP_OK &&
+                  req.status == "503 Service Unavailable",
+              "a peer change during the history response must refuse the predecessor");
+        emit(req, "modbus-peer-refusal");
+        req = request();
+        check(invoke(req, "/history?row=quiet_state&source=modbus", daik::h_history) == ESP_OK &&
+                  req.status == "404 Not Found",
+              "baseline Holding 9 must not offer a Quiet activity timeline");
+        modbus_live       = false;
+        modbus_compressor = daik::ModbusCompressor::On;
+        req               = request();
+        check(invoke(req, "/values", daik::h_values) == ESP_OK &&
+                  req.response.find("\"modbus\":") == std::string::npos &&
+                  req.response.find("\"modbus_compressor_running\":true") != std::string::npos,
+              "an expired full cache must not suppress current compressor activity");
+        emit(req, "modbus-compressor-only");
+        modbus_compressor = daik::ModbusCompressor::Unknown;
         req         = request();
         check(invoke(req, "/values", daik::h_values) == ESP_OK &&
-                  req.response.find("\"modbus\":") == std::string::npos,
+                  req.response.find("\"modbus\":") == std::string::npos &&
+                  req.response.find("\"modbus_compressor_running\":null") != std::string::npos,
               "withdrawn Modbus source remained present");
     });
     run("shared_protocol_framing", [] {

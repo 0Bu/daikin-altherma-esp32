@@ -38,12 +38,18 @@ inline constexpr bool is_extended_register(uint16_t offset) {
 // Single register used to probe extended capabilities (Water pressure, offset 79).
 inline constexpr uint16_t MODBUS_PROBE_REGISTER = 79;
 
+inline constexpr bool altherma4_water_pressure_word_valid(uint16_t raw) {
+    // The provisional centibar interpretation bounds the display to its documented range.
+    // Zero can describe a depressurized circuit, but is insufficient to identify the profile.
+    return raw <= 600;
+}
+
 inline bool is_valid_altherma4_probe_value(uint16_t reg, uint16_t raw) {
     if (mb_is_special(raw)) return false;
     if (reg == MODBUS_PROBE_REGISTER) {
         // Existing centibar heuristic, not a manufacturer-verified scale or model identity.
         // Physical Altherma 4 acceptance remains pending (docs/MODBUS_PROTOCOL.md).
-        return raw > 0 && raw <= 600;
+        return raw > 0 && altherma4_water_pressure_word_valid(raw);
     }
     return true;
 }
@@ -96,7 +102,7 @@ inline ModbusProfileDecision evaluate_probe_result(ModbusProfile current_profile
         if (is_extended_register(reg)) {
             // Modbus Exception 02 (Illegal Data Address) affirmatively confirms this unit
             // does not have extended registers -> fall back definitively to HomeHub without error.
-            if (failure_detail == 0x02 || failure_detail <= 0) {
+            if (failure_detail == 0x02 || failure_detail < 0) {
                 return {ModbusProfile::HomeHub, true, false, true, true};
             }
             // Transient exception (e.g. 06 Server Busy): stay in Auto to retry on next cycle.
@@ -128,6 +134,7 @@ inline constexpr uint32_t MODBUS_PROBE_MAX_BACKOFF_S     = 14400; // 4 hours
 // and exponential back-off re-probing after retry exhaustion.
 struct ModbusProbeTracker {
     std::string        target_host;
+    uint32_t           peer_ipv4            = 0;
     int                target_port          = 0;
     int                target_unit          = 0;
     ModbusProfile      active_profile       = ModbusProfile::Auto;
@@ -137,12 +144,16 @@ struct ModbusProbeTracker {
     int                exhaustion_count     = 0;
     uint32_t           next_reprobe_time_s  = 0;
 
-    // Called when a socket opens to (host, port, unit).
+    // Called when a socket opens. The configured tuple and the IPv4 address dialed on
+    // this connection must both match before reusing profile evidence or probe backoff.
     // now_s: monotonic seconds since boot.
-    ModbusProfile on_socket_open(const std::string& host, int port, int unit, uint32_t now_s = 0) {
-        if (host != target_host || port != target_port || unit != target_unit) {
+    ModbusProfile on_socket_open(const std::string& host, int port, int unit,
+                                 uint32_t resolved_ipv4, uint32_t now_s = 0) {
+        if (host != target_host || port != target_port || unit != target_unit ||
+            resolved_ipv4 != peer_ipv4) {
             // Target changed: reset all probe state.
             target_host          = host;
+            peer_ipv4            = resolved_ipv4;
             target_port          = port;
             target_unit          = unit;
             active_profile       = ModbusProfile::Auto;
@@ -197,7 +208,7 @@ struct ModbusProbeTracker {
                    !is_valid_altherma4_probe_value(reg, raw_value)) {
             bool is_affirmative_homehub = false;
             if (failure_type == MbFailureType::Exception &&
-                (failure_detail == 0x02 || failure_detail <= 0)) {
+                (failure_detail == 0x02 || failure_detail < 0)) {
                 is_affirmative_homehub = true;
             } else if (failure_type == MbFailureType::None && raw_value == MB_UNSUPPORTED) {
                 is_affirmative_homehub = true;

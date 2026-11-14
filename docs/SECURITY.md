@@ -90,7 +90,8 @@ test capability, not official artifact promotion; see [MAINTENANCE.md](MAINTENAN
   heap admission, HTTP 206, one exact Content-Range and matching remaining Content-Length, and must
   commit new bytes before another reconnect. Chunked/200/416 or ambiguous range metadata aborts.
 - The existing sequential OTA handle and hash bind every byte across a resume. No failed host update
-  POST is repeated. The ten-minute stale-quiesce cap exceeds valid transfer and observer budgets.
+  POST is repeated. The [quiesce budget](ARCHITECTURE.md#ota-and-shared-heap-coordination) exceeds valid
+  transfer and observer budgets.
 
 The default dynamic TLS-record strategy remains selected; `HTTP_TLS_DYN_BUF_RX_STATIC` is not enabled
 because the pinned SDK's reported TLS-1.2 invalid-free/assert risk is unresolved. This is a retained

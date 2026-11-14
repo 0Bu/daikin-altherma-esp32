@@ -37,7 +37,7 @@ class Host {
   }
   fire(type, target, clientX = 0, key = "") {
     const event = {
-      type, target, clientX, pointerId: 7, relatedTarget: null, key,
+      type, target, clientX, pointerId: 7, button: 0, relatedTarget: null, key,
       preventDefault() {},
       stopPropagation() { this.stopped = true; },
     };
@@ -84,7 +84,7 @@ host.fire("pointerup", graph, 13);
 assert.deepEqual(calls, [
   ["arm"], ["capture", 7], ["move", 4],
   ["arm"], ["move", 11],
-  ["end"], ["pin", "valve_dhw", 13, ""],
+  ["pin", "valve_dhw", 13, ""], ["end"],
 ], "a drag starting on the tooltip moves and pins the newly selected sample");
 
 // Exercise the real pin/rebuild functions: a keyboard user keeps both the focused replacement plot
@@ -96,7 +96,7 @@ assert.deepEqual(calls, [
   const graphHost = { querySelectorAll: () => [current] };
   const makePlot = () => ({
     dataset: { hist: "temperature", source: "", n: "20" },
-    parentElement: { querySelector: () => ({ hidden: false }) },
+    parentElement: { querySelectorAll: () => [] },
     closest(selector) {
       if (selector === "[data-hist]") return this;
       if (selector === "#valueGroups, #inspHist, #settingsCards") return graphHost;
@@ -393,9 +393,10 @@ function assertScalarGridPolling(historySource) {
 }
 
 assertScalarGridPolling(disclosureSource);
-const scalarBranch = `if (!html.includes('class="vhist') && host.id !== "valueGroups" && host.id !== "inspRows" && !diagnosisCard)
-    host.innerHTML = html;`;
-assert.equal(disclosureSource.split(scalarBranch).length, 2, "scalar-grid negative control must target one production branch");
+const scalarBranches = [...disclosureSource.matchAll(
+  /if \(!html\.includes\('class="vhist'\) && host\.id !== "valueGroups" && host\.id !== "inspRows" &&\s+host\.id !== "inspBody" && !diagnosisCard\)\s+host\.innerHTML = html;/g)];
+assert.equal(scalarBranches.length, 1, "scalar-grid negative control must target one production branch");
+const [scalarBranch] = scalarBranches[0];
 assert.throws(() => assertScalarGridPolling(disclosureSource.replace(scalarBranch,
   `if (!html.includes('class="vhist')) host.innerHTML = html;`)),
 error => error.code === "ERR_ASSERTION" && error.message.startsWith("no-chart scalar poll must retain the value grid"),

@@ -23,7 +23,7 @@ paired seed/restore witness and requires the named acknowledged-correction oracl
 fresh process. A compiler, setup or sanitizer failure never counts as an expected RED. Historical
 RED receipts retain the source and fixture hashes from the respective pre-fix execution.
 
-The 36 baseline process cases cover:
+The baseline process cases cover:
 
 - Regular public Start/bind/record/seal calls creating one Stop population. Consent changes create
   reset barriers; the fixture never seeds private Store observations, claims or latches.
@@ -59,6 +59,13 @@ The 36 baseline process cases cover:
   healthy scan reports pending, a contended flash mutex makes the query return immediately, and
   real restore clears pending. A Forget interleaved before the query acquires the mutex suppresses
   pending even when all erase attempts fail and both scan flags still describe pending recovery.
+- The Modbus recorder keeps samples for the same configured target and IPv4 address. A peer change retires
+  the old RAM series, rejects stale generations, starts the replacement series with gaps, and
+  preserves the previous flash bytes. Fresh processes load synthetic NOR or sealed retained RAM
+  from the real recorder. Samples stay hidden until a matching peer binds. Warm restore rejects
+  distinct configurations with a colliding peer fingerprint and still admits compatible independent
+  trends. Legacy Modbus flash records establish the physical journal head and stay ineligible for
+  restoration.
 
 The append mutations remove the failure callback, restore the erroneous
 read-header classifier, clear the Core ahead episode after Stop success, or trust a commit error
@@ -67,7 +74,9 @@ reservation oracles must fail, and a passing paired seed followed by a fresh pro
 acknowledged late correction at its precise oracle. The Forget mutations restore null-partition
 success, publish readiness before the scan or without the History mutex, and report success
 without erasing. The pending-query mutations restore the unlocked flags read or drop either
-Forget check. The twelve independently compiled mutations must fail 23 named semantic oracles.
+Forget check. The Modbus mutations expose history before peer binding, retain the preceding
+peer's series after an address change or admit a warm fingerprint collision. The runner summary
+reports the baseline cases, independently compiled mutations and named semantic oracles.
 Five unknown-case probes must fail explicitly. Compilation errors never count as negative proof.
 
 This is deterministic host evidence for the History/Stop append and Forget contracts. The lookup

@@ -86,9 +86,8 @@ inline constexpr HomeHubReg HOMEHUB_REGS[] = {
      HomeHubValueKind::Binary},
     {31, MbFunc::ReadInput, MbType::Int16, 1, "", "Compressor running", HomeHubValueKind::Binary},
     // EKRHH §9.2.2 calls this "Booster heater run": the DHW tank immersion heater, paired with
-    // X10A's exact BSH bit. It is an ON/OFF fact only; offset 51 is whole-system electrical input
-    // and
-    // must not be relabelled as this heater's own power.
+    // X10A's exact BSH bit. It is an ON/OFF fact only. Offset 51 reports heat pump power with
+    // unverified load coverage and must not be relabelled as this heater's own power.
     {32, MbFunc::ReadInput, MbType::Int16, 1, "", "Booster heater run", HomeHubValueKind::Binary},
     // EKRHH exposes the controller's actual disinfection phase directly. This is deliberately not
     // paired with X10A "Tank preheat": preheating may precede a scheduled demand, but it does not
@@ -121,9 +120,8 @@ inline constexpr HomeHubReg HOMEHUB_REGS[] = {
     {50, MbFunc::ReadInput, MbType::Temp16, 1, "°C", "Remote controller room temperature Main"},
     // ── Flow + power (input)
     // ──────────────────────────────────────────────────────────────────────
-    // Flow is a plain Int16 carrying L/min x100 (EKRHH §9.2), so decode as Int16 then /100 — the
-    // extra
-    // divisor the `scale` field exists for. Power is a Pow16 (signed /100 kW), already scaled.
+    // The catalog provisionally divides the Int16 flow word by 100. See MODBUS_PROTOCOL.md for
+    // the physical acceptance boundary. Pow16 already applies the signed /100 kW conversion.
     {49, MbFunc::ReadInput, MbType::Int16, 100, "L/min", "Flow rate"},
     {51, MbFunc::ReadInput, MbType::Pow16, 1, "kW", "Heat pump power consumption"},
     // ── Setpoints + modes (holding; read-back only) ──────────────────────────────────────────────

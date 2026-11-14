@@ -566,8 +566,8 @@ try {
         "if (false) {")],
     ["HomeHub no longer acknowledges an in-flight allocation cycle", () =>
       replaceOnce("main/hp_modbus.cpp",
-        "s_network_quiesced.store(false, std::memory_order_release);",
-        "s_network_quiesced.store(true, std::memory_order_release);")],
+        "MbNetworkActivity() { s_network_quiesced.store(false); }",
+        "MbNetworkActivity() { s_network_quiesced.store(true); }")],
     ["Syslog no longer acknowledges an in-flight allocation cycle", () =>
       replaceOnce("main/syslog.cpp",
         "s_network_quiesced.store(false, std::memory_order_release);",
@@ -658,8 +658,8 @@ try {
       replaceOnce("main/mqtt_ha.cpp", "set_status(false, \"transport resume failed\");", "")],
     ["the MQTT resume starts without resetting a stale status", () =>
       replaceOnce("main/mqtt_ha.cpp",
-        "set_status(false, \"\");\n    const esp_err_t start_rc = start_client_transport();",
-        "const esp_err_t start_rc = start_client_transport();")],
+        /set_status\(false, ""\);\n([\s\S]{0,450}?const esp_err_t start_rc = start_client_transport\(\);)/,
+        "$1")],
     ["the client start writes the status before checking its result", () =>
       replaceOnce("main/mqtt_ha.cpp", "const esp_err_t rc = start_client_transport();",
         "const esp_err_t rc = start_client_transport();\n    set_status(false, \"\");")],

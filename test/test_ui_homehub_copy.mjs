@@ -69,7 +69,7 @@ const expected = new Map([
   [31, ["Compressor running", "Verdichter aktiv"]],
   [32, ["Booster heater run", "Heizstab aktiv"]],
   [33, ["Disinfection operation", "Speicherdesinfektion aktiv"]],
-  [37, ["3-way valve", "Position des 3-Wege-Ventils"]],
+  [37, ["3-way valve", "3-Wege-Ventil"]],
   [38, ["Current operation mode", "Aktueller Heiz- oder Kühlmodus"]],
   [52, ["DHW normal operation", "Warmwasserbetrieb"]],
   [53, ["Space heating/cooling normal operation", "Raumheiz- oder Kühlbetrieb"]],
@@ -140,7 +140,7 @@ const enumStates = {
   UnitAbnormality: [["No error", "Kein Fehler"], ["Fault", "Fehler"], ["Warning", "Warnung"]],
   OperationMode: [["Auto", "Auto"], ["Heating", "Heizen"], ["Cooling", "Kühlen"]],
   CurrentOperationMode: [["Heating", "Heizen"], ["Cooling", "Kühlen"]],
-  ThreeWayValve: [["Space heating", "Raumheizung"], ["DHW", "Brauchwarmwasser"]],
+  ThreeWayValve: [["Space circuit", "Raumkreis"], ["DHW", "Brauchwarmwasser"]],
   SmartGridMode: [["Free running", "Freier Betrieb"], ["Forced off", "Zwangsabschaltung"],
                   ["Recommended on", "Empfehlung ein"], ["Forced on", "Erzwungen ein"]],
 };
@@ -153,6 +153,12 @@ for (const row of rows.filter((r) => enumStates[r.kind])) {
     assert.ok(de.includes(german), `${row.label}: German copy must name ${german}`);
   }
 }
+
+const valve = firstDescription("3-way valve");
+assert.match(valve.what, /reported route.*Space circuit.*heating or cooling/);
+assert.match(valve.what, /does not confirm mechanical valve position or water flow/);
+assert.match(valve.de.what, /gemeldete Weg.*Raumkreis.*Heizen oder Kühlen/);
+assert.match(valve.de.what, /bestätigt weder die mechanische Ventilstellung noch den Durchfluss/);
 
 for (const off of [6, 7]) {
   const d = firstDescription(rows.find((r) => r.off === off).label);

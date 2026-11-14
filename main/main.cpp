@@ -160,8 +160,10 @@ static void boot_sequence() {
     if (!cfg.diagnostics_enabled) daik::history_circulation_reset();
                                  // same rule: judge .noinit before a producer task exists
     daik::dwell_start();     // and the per-row state ages, judged on the same terms
+    const bool normal_boot = !daik::safe_mode_active();
+    if (normal_boot) daik::mb_init();
     daik::http_start();                  // esp_http_server on :80 (web UI + config + OTA + MCP)
-    if (!daik::safe_mode_active()) {
+    if (normal_boot) {
         daik::env3_start();              // optional outdoor climate sensor (no-op unless configured)
         // Start the X10A owner before MQTT. The bridge starts one LWT transport immediately;
         // X10A source availability requires fresh bus evidence while other sources stay
@@ -170,20 +172,14 @@ static void boot_sequence() {
         daik::mqtt_ha_start();           // HA MQTT-Discovery bridge (no-op if mqtt_uri empty)
         daik::weather_forecast_start();  // worker stays dormant without location + diagnostics
                                          // consent
-        // The HomeHub Modbus stack — a SECOND, INDEPENDENT source (docs/MODBUS_PROTOCOL.md), not an
-        // alternative to the line above: both run, and neither notices the other failing. A saved
-        // address is polled; after the one-shot startup decision above, an empty address
-        // creates no task/socket/traffic and never triggers discovery again. The dialog retains a
-        // manual Search action.
-        // Skipped in safe mode for the same reason the consumers above are: a boot-looping board is being
-        // recovered through the web UI, and every optional consumer stays out of the way.
-        daik::mb_start();
     } else {
         // Recovery goes through the web UI, which safe mode keeps up.
         ESP_LOGW(TAG, "SAFE MODE: ENV III, X10A, HomeHub, MQTT and weather skipped");
     }
     daik::ota_health_gate_arm();         // keep rollback armed until this image proves healthy
     daik::safe_mode_arm_healthy();       // clear the crash counter after BOOT_HEALTHY_S of continuous uptime
+    // Reserve the core services and recovery workers before admitting the optional Modbus task.
+    if (normal_boot) daik::mb_start();
 }
 
 // An escape from the boot sequence, named and then made to count.

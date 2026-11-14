@@ -78,10 +78,12 @@ it, and this is where the review earns its keep.
    paired HomeHub measurement in petrol. Its inspector must then name that Modbus row rather than
    restore the stale X10A one or claim there is no current reading. Its trend may overlay the blue
    X10A gap with the independent petrol HomeHub ring, but must label both sources and align the same
-   5-minute bucket — never splice them into one repaired line. ΔT blanks with the pump stopped.
-   The HomeHub's compressor flag settles a row of unknown age (`held_unknown`) where it answers.
-   Otherwise the row keeps its number with the inspector's note, takes the same HomeHub stand-in,
-   and feeds no estimate.
+   5-minute bucket — never splice them into one repaired line. ΔT needs both water temperatures
+   and qualified measured flow above 0.5 L/min. A stop command or reported OFF alone does not
+   blank it when that flow is present; provisional Modbus flow does not qualify.
+   HomeHub compressor reports describe their own source. The X10A age marker remains authoritative.
+   An X10A number of unknown age that stays visible carries an age note and supplies no inverter
+   estimate. An independent paired HomeHub value can replace an unusable outdoor-air reading.
    A new pill on page `0x20`/`0x21` needs the same held-over treatment, and the gate cannot see that
    the value it draws is stale.
 
@@ -103,8 +105,12 @@ it, and this is where the review earns its keep.
 7. **Accessibility and motion.** Every hit target is a `<g role="button" tabindex="0">` named by its
    `INSPECT` title; the SVG is a labelled `role="group"`, never `aria-hidden` (a hidden subtree must
    not hold focusable elements). Animations are pure CSS and stop under `prefers-reduced-motion`,
-   with the active branch still distinguishable by colour. Shape and words carry state, never colour
-   alone (§9).
+   with the active branch still distinguishable by colour. Directional refrigerant motion requires
+   current positive X10A compressor speed and a known thermal mode. Use a current X10A valve
+   report for branch animation and to resolve Cooling + DHW. HomeHub can describe its compressor
+   and valve reports. During reported defrost, moving water uses a neutral tint and the transfer
+   estimate keeps its sign. Animate the pump rotor only from a current X10A ON report. Shape and
+   words carry state, never colour alone (§9).
 
 ## 3. Verify, don't assert
 

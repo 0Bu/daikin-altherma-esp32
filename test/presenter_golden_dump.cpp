@@ -76,8 +76,8 @@ const char* block_name(CopBlock b) {
     switch (b) {
     case CopBlock::NoPelSource:
         return "no_pel";
-    case CopBlock::BuhNoPostBuh:
-        return "buh_no_r2t";
+    case CopBlock::BackupHeater:
+        return "backup_heater";
     case CopBlock::TankHeater:
         return "tank_heater";
     default:
@@ -234,7 +234,7 @@ int main() {
 
     // ── The COP scope rule, exhaustively ───────────────────────────────────────────────────────
     // 3 electrical sources x 9 backup-heater step pairs x 3 tank-heater states x post-BUH row or
-    // not = 162 combinations, i.e. every input the rule has.
+    // not x inverter pair available or not = 324 combinations.
     //
     // The two heater STEPS are enumerated as raw tri-states (-1 unknown / 0 off / 1 on) rather than
     // as the (known, on) pair cop_plan() takes, and the collapse to that pair is done HERE. That is
@@ -253,11 +253,13 @@ int main() {
                         const bool    buh_known = buh_on || ((b1 != -1) && (b2 != -1));
                         const bool    bsh_known = s != -1;
                         const bool    bsh_on    = s == 1;
-                        const CopPlan plan =
-                            cop_plan(pel, buh_known, buh_on, bsh_known, bsh_on, pb != 0);
-                        std::printf("COP\t%s\t%d\t%d\t%d\t%d\t%s\t%s\t%d\n", pel_name(pel), b1, b2,
-                                    s, pb, scope_name(plan.scope), block_name(plan.block),
-                                    plan.use_post_buh ? 1 : 0);
+                        for (int inv = 0; inv < 2; inv++) {
+                            const CopPlan plan = cop_plan(pel, buh_known, buh_on, bsh_known, bsh_on,
+                                                          pb != 0, inv != 0);
+                            std::printf("COP\t%s\t%d\t%d\t%d\t%d\t%d\t%s\t%s\t%d\n", pel_name(pel),
+                                        b1, b2, s, pb, inv, scope_name(plan.scope),
+                                        block_name(plan.block), plan.use_post_buh ? 1 : 0);
+                        }
                     }
     return 0;
 }

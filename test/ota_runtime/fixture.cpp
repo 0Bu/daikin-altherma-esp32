@@ -367,6 +367,7 @@ bool          hp_poll_ota_quiesced() { return sdk::state.stalled_service != 1; }
 bool          mqtt_publish_network_quiesced() { return sdk::state.stalled_service != 2; }
 bool          mqtt_transport_network_quiesced() { return sdk::state.stalled_service != 3; }
 bool          mb_network_quiesced() { return sdk::state.stalled_service != 4; }
+void          mb_retry_start() noexcept {}
 bool          hp_modbus_ota_quiesced() { return true; }
 bool          syslog_network_quiesced() { return sdk::state.stalled_service != 5; }
 bool          weather_fetch_active() { return sdk::state.stalled_service == 6; }

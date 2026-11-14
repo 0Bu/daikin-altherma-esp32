@@ -7,7 +7,10 @@ import vm from "node:vm";
 import { readAppFragments, readUiLocale } from "../tools/ui/read_app_source.mjs";
 
 const appStateSource = readAppFragments(["app_state.js"]);
-const schematicSource = readAppFragments(["schematic.js"]);
+const historySource = readAppFragments(["history.js"]);
+const flowRule = historySource.match(/function usableWaterFlow\(value\) \{[\s\S]*?\n\}/)?.[0];
+assert.ok(flowRule, "load the production flow rule used by the schematic");
+const schematicSource = flowRule + readAppFragments(["schematic.js"]);
 
 function productionApi(source, exports, context) {
   const sandbox = vm.createContext(context);
@@ -19,7 +22,7 @@ function productionApi(source, exports, context) {
   return { sandbox, api: sandbox.__productionApi };
 }
 
-const historyWriter = productionApi(readAppFragments(["history.js"]), ["replaceHistoryHtml"], {}).api.replaceHistoryHtml;
+const historyWriter = productionApi(historySource, ["replaceHistoryHtml"], {}).api.replaceHistoryHtml;
 
 function element() {
   return {
@@ -117,14 +120,15 @@ function assertPersistentBannerRepaints(name, status) {
 
 {
   const { api } = productionApi(
-    appStateSource,
+    appStateSource + schematicSource,
     ["plantState", "modbusStatusView", "PLANT_COOL_RESIDUAL", "PLANT_RUNNING"],
     {
-      compressorRunning: (d) => d?.rps != null ? d.rps > 0 : d?.compressorOn === true,
       t: (key) => key,
     },
   );
+  const allHeatersOff = { buh1: false, buh2: false, bsh: false };
   const residual = api.plantState({
+    ...allHeatersOff,
     rps: 0, pumpOn: true, flow: 19.1, thermalMode: "cool", pthRaw: 0.4,
   });
   assert.equal(residual.key, "sys.residual_circulating",
@@ -136,7 +140,7 @@ function assertPersistentBannerRepaints(name, status) {
                                 thermalMode: "heat", pthRaw: 7.8 }).key,
     "sys.operating", "the HomeHub compressor witness keeps Modbus-only DHW in active operation");
   for (const pumpOn of [false, true]) for (const ouUnknown of [false, true]) {
-    const unknown = { rps: null, compressorOn: null, ouUnknown, pumpOn };
+    const unknown = { rps: null, compressorOn: null, ouUnknown, pumpOn, flow: 0, bsh: false };
     assert.equal(api.plantState(unknown).key, "dyn.state_gate",
       "an unknown compressor state must not become standby or compressor-off circulation");
     assert.equal(api.plantState(unknown).tone, "warn",
@@ -148,13 +152,35 @@ function assertPersistentBannerRepaints(name, status) {
   }
 
   const idleModbus = api.modbusStatusView("mode.dhw", {
-    rps: null, compressorOn: false, pumpOn: false, flow: 0, bsh: false,
+    rps: null, compressorOn: false, pumpOn: false, flow: null, provisionalFlow: 0, bsh: false,
   });
   assert.equal(idleModbus.mode, "mode.dhw", "the HomeHub DHW flag remains the mode headline");
-  assert.equal(idleModbus.status, "sys.standby · sys.mb_source",
-    "Modbus-only DHW with every activity witness off must say that the plant is not running");
-  assert.equal(idleModbus.tone, "idle",
-    "Modbus-only DHW standby must mute the dot instead of treating a known mode as active");
+  assert.equal(idleModbus.status, "dyn.state_gate · sys.mb_source",
+    "Modbus cannot certify zero flow or backup-heater inactivity");
+  assert.equal(idleModbus.tone, "warn");
+  const stopped = { rps: 0, pumpOn: false, flow: 0, ...allHeatersOff };
+  assert.equal(api.plantState(stopped).key, "sys.standby");
+  for (const flow of [0, 12]) {
+    const disagreement = { ...stopped, flow, compressorOn: false, mbCompressorOn: true };
+    assert.equal(api.plantState(disagreement).key, "dyn.state_gate",
+      "zero X10A speed with HomeHub ON leaves the common activity headline uncertain");
+    assert.equal(api.plantState(disagreement).tone, "warn");
+  }
+  assert.equal(api.plantState({ ...stopped, mbCompressorOn: false }).key, "sys.standby");
+  const noTankWitness = { ...stopped, bsh: null };
+  assert.equal(api.plantState(noTankWitness).key, "dyn.state_gate",
+    "the tank heater can run independently and unknown cannot authorize standby");
+  for (const stage of ["buh1", "buh2"]) {
+    assert.equal(api.plantState({ ...stopped, [stage]: null }).key, "dyn.state_gate");
+    for (const flow of [0, 12])
+      assert.equal(api.plantState({ ...stopped, flow, [stage]: true }).key, "schem.backup_heater_active");
+  }
+  for (const evidence of [{ flow: null }, { flow: null, provisionalFlow: 12 }, { flow: 0.3 }]) {
+    const inactive = { rps: null, compressorOn: false, pumpOn: false, bsh: false, ...evidence };
+    assert.equal(api.plantState(inactive).key, "dyn.state_gate",
+      "pump OFF and missing, provisional or small positive flow cannot establish standby");
+    assert.equal(api.modbusStatusView("mode.stop", inactive).status, "dyn.state_gate · sys.mb_source");
+  }
 
   const runningModbus = api.modbusStatusView("mode.dhw", {
     rps: null, compressorOn: true, pumpOn: true, flow: 14, bsh: false,
@@ -168,6 +194,13 @@ function assertPersistentBannerRepaints(name, status) {
   assert.equal(unknownMode.mode, "sys.x10a_down");
   assert.equal(unknownMode.status, "sys.mb_carrying");
   assert.equal(unknownMode.tone, "warn", "an unknown Modbus mode keeps the existing warning state");
+  const pumpUnknownMode = api.modbusStatusView(null, {
+    rps: null, compressorOn: false, pumpOn: true, flow: null, provisionalFlow: 12, bsh: false,
+  });
+  assert.equal(pumpUnknownMode.mode, "sys.mode_unknown");
+  assert.equal(pumpUnknownMode.status, "sys.pump_reported · sys.mb_source",
+    "missing mode inputs cannot suppress an independent pump report or establish circulation");
+  assert.equal(pumpUnknownMode.tone, "warn");
 }
 
 // A tone that can be RETURNED must be DRAWABLE. The block above pinned that "warn" is produced, and
@@ -177,14 +210,14 @@ function assertPersistentBannerRepaints(name, status) {
 // can return, so a future tone added to one side and forgotten on the other fails here.
 {
   const { api } = productionApi(
-    appStateSource,
+    appStateSource + schematicSource,
     ["plantState", "modbusStatusView", "TONE_FILL"],
-    { compressorRunning: (d) => d?.rps != null ? d.rps > 0 : d?.compressorOn === true,
-      t: (key) => key },
+    { t: (key) => key },
   );
   const style = fs.readFileSync(new URL("../main/www/style.css", import.meta.url), "utf8");
   const produced = new Set();
   for (const d of [{ rps: 0, pumpOn: false, flow: 0 },
+                   { rps: 0, pumpOn: true, flow: 0 },
                    { rps: 42, pumpOn: true, flow: 19, thermalMode: "heat", pthRaw: 7 },
                    { rps: 0, pumpOn: true, flow: 19, thermalMode: "cool", pthRaw: 0.4 }])
     produced.add(api.plantState(d).tone);

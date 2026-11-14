@@ -23,16 +23,21 @@ Protocol **S lacks the required water flow and leaving/return measurements**. On
 this recipe only when those rows are readable and their physical sensors are fitted.
 
 Use measured total active power and accumulated kWh, including the indoor/outdoor unit and backup
-heater if their heat is included in the numerator. A compressor-current estimate omits equipment
-and depends on voltage/power factor. HomeHub's internal power figure is an estimate too.
+heater if their heat is included in the numerator. Verify the measurement boundary and heater
+coverage of the power reported by HomeHub before using it in this ratio.
 A temperature measured before the backup heater, or a profile without R2T, is usable for this ratio
 only while **BUH is known off** and the other required water readings are available; otherwise its
 electricity is counted without its heat.
 
 The tank booster **BSH lies outside both water-temperature measurement points**. If its electricity
 is included, a whole-installation live COP requires BSH to be **known off**; unknown means an
-unproven boundary. The firmware suppresses that COP in both cases. The example below therefore
-requires a readable BSH binary sensor reporting `off`. Replace its example id with your own.
+unproven boundary. The example below requires a readable BSH binary sensor reporting `off`.
+Replace its example id with your own.
+
+The dashboard's inverter-current-based COP/EER estimate uses R1T before BUH and R4T, with
+electrical input estimated at an assumed 230 V. The actual electrical measurement boundary and
+heater coverage are unverified. The dashboard permits the CT-based ratio only when both BUH
+stages and BSH are confirmed off. The external meter in this recipe has its own measured scope.
 
 ## 1. Instantaneous thermal power
 
@@ -192,7 +197,9 @@ A plausible ratio is insufficient validation: the wrong water sensor can still y
 account for gaps. If the ratio collapses specifically when the backup heater runs, check the
 measurement boundary before diagnosing the plant.
 
-The read-only HomeHub source can supply its own flow and leaving/return temperatures, but keep its
-cadence, units and provenance separate from X10A. Its available map depends on model, MMI firmware
-and Modbus commissioning; see [MODBUS_PROTOCOL.md](MODBUS_PROTOCOL.md). This project does not
-integrate energy on the device or substitute cloud estimates for a physical electricity meter.
+Keep HomeHub flow and water temperatures separate from X10A by source, cadence and units.
+Independently verify the scale of Modbus input 49 before using it in heat and COP estimates.
+This applies to [`/values`](API.md#get-values), MQTT and History, including payloads without
+`flow_scale_unverified`.
+See the [Modbus map](MODBUS_PROTOCOL.md) for model and profile limits. The device does not integrate
+energy or substitute cloud estimates for a physical electricity meter.

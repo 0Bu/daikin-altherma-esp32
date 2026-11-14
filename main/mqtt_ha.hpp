@@ -55,6 +55,9 @@ bool mqtt_publish_network_quiesced();
 void mqtt_transport_pause_for_network_heap();
 void mqtt_transport_resume_after_network_heap();
 bool mqtt_transport_network_quiesced();
+// HomeHub startup must leave the shared heap available while a TLS broker resumes.
+bool mqtt_tls_resume_pending() noexcept;
+bool mqtt_tls_resume_short_of_heap() noexcept;
 // OTA only, immediately before its pause request: a connected publisher retains `offline` ahead of
 // the clean stop, because an install can restart the board before that client reconnects
 // (logic/mqtt_publish_gate.hpp). Resume discards an intent that no stop consumed.
@@ -136,6 +139,6 @@ void                        mqtt_circulation_reconfigure(bool configured);
 // Requests stay pending across broker outages and are
 // reconstructed on reconnect; Weather and HomeHub cleanup also cover enabled identity changes.
 void mqtt_request_weather_cleanup();
-void mqtt_request_modbus_cleanup();
+void mqtt_request_modbus_cleanup() noexcept;
 
 } // namespace daik

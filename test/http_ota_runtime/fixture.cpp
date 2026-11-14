@@ -40,6 +40,10 @@ esp_err_t http_send_json(httpd_req_t* req, const char* json) {
 uint32_t  ota_check_async(int64_t, const OtaFeedUrls*) { return 0; }
 uint32_t  ota_update_async(uint32_t, const char*, const char*, const char*, bool) { return 0; }
 OtaStatus ota_status(OtaFeedUrls*) { return {}; }
+void      http_running_image_identity(char (&boot_id)[17], char (&elf_sha)[65]) noexcept {
+    std::memcpy(boot_id, "1234567890abcdef", 17);
+    std::memcpy(elf_sha, "abc123def", 10);
+}
 bool      ota_changelog_chunk(uint32_t, size_t, char*, size_t, size_t&, size_t&) { return false; }
 bool      ota_changelog_release(uint32_t) { return true; }
 void      http_register_on(httpd_handle_t, HttpSurface, const char*, httpd_method_t,
@@ -48,6 +52,11 @@ void      http_register_on(httpd_handle_t, HttpSurface, const char*, httpd_metho
 
 int main() {
     using namespace fixture;
+    httpd_req_t compact;
+    compact.uri = "/ota/status";
+    assert(daik::ota_stat(&compact) == ESP_OK);
+    assert(compact.response.find("\"boot_id\":\"1234567890abcdef\"") != std::string::npos);
+    assert(compact.response.find("\"app_elf_sha256\":\"abc123def\"") != std::string::npos);
     constexpr const char* query =
         "/ota/upload?sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     for (const char* bad :

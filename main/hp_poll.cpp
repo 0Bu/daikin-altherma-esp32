@@ -12,6 +12,7 @@
 #include "hp_convert.hpp"
 #include "heap_guard.hpp"
 #include "hp_detect.hpp"
+#include "hp_modbus.hpp"
 #include "history.hpp"
 #include "stack_watch.hpp"
 #include "logic/availability.hpp"
@@ -44,6 +45,7 @@
 #include "rtos_guard.hpp"   // SemGuard — the ONE unwind-safe mutex guard
 #include "freertos/task.h"
 #include <atomic>
+#include <bitset>
 #include <cstdio>
 #include <exception>
 #include <utility>
@@ -352,7 +354,7 @@ static void checkup_record_poll_gap(uint32_t generation, bool profile_confirmed 
                                  // poll_task's try/catch, so an OOM here remains a skipped cycle.
     bool      any_ok = false;
     int       regs   = 0;
-    uint8_t   seen[256] = {0};
+    std::bitset<256> seen;
     // The BASE table, not the view: this scans for the profile's refrigerant row to pick the conv-405
     // saturation curve, and the overlay blocks carry no pressure or conv-405 row — static_asserts in
     // def/overlay.hpp pin that, so this stays correct rather than merely true today. Same reasoning
@@ -380,6 +382,7 @@ static void checkup_record_poll_gap(uint32_t generation, bool profile_confirmed 
         s_sat_witness_generation == cycle_generation ? s_sat_witness : SaturationWitness{};
     SaturationWitness       sat_out;                  // default: not captured -> next cycle fails open
     int64_t                 sat_out_us = -1;
+    int64_t                 dhw_reply_us = -1;
     // The BASE table, like rtype above: the witness is a generated pressure row and the overlays
     // carry no conv-405 row (def/overlay.hpp's static_asserts pin that).
     const bool has_sat_witness_row =
@@ -395,8 +398,8 @@ static void checkup_record_poll_gap(uint32_t generation, bool profile_confirmed 
         // below and mqtt_ha's discovery cannot disagree about the row set.
         if (!row_publishable(view[i])) continue;
         uint8_t reg = view[i].reg;
-        if (seen[reg]) continue;
-        seen[reg] = 1;
+        if (seen.test(reg)) continue;
+        seen.set(reg);
         regs++;
         // Feed the watchdog once per register: each hp_query blocks up to its serial timeout, so a
         // silent bus makes the whole sweep take (regs × timeout). Resetting per read keeps a
@@ -416,6 +419,7 @@ static void checkup_record_poll_gap(uint32_t generation, bool profile_confirmed 
         }
         d_rx_ok++;
         any_ok = true;
+        if (reg == 0x60) dhw_reply_us = esp_timer_get_time();
         const int      poff    = payload_offset(c.proto);
         const int      paylen  = n - poff - 1;                 // minus header, minus CRC byte
         const uint8_t* payload = buf + poff;
@@ -546,7 +550,7 @@ static void checkup_record_poll_gap(uint32_t generation, bool profile_confirmed 
     // Feed the trend rings BEFORE the commit and OUTSIDE the cache mutex: history.cpp takes its own
     // lock, and holding both would create a two-mutex order this file has no other reason to have.
     // `fresh` is still ours here — after the move below it is empty.
-    history_record(fresh.data(), fresh.size(), cycle_generation);
+    history_record(fresh.data(), fresh.size(), cycle_generation, dhw_reply_us);
 
     // The rolling plant diagnosis, on the same terms and for the same reason it is here rather than derived
     // later: compressor starts, defrosts and backup-heater minutes are EVENTS, and an event that
@@ -925,6 +929,8 @@ static void poll_task(void*) {
             // already unconditional, already 1 Hz and already reads the heap — and adding a resident
             // task to watch the largest contiguous block would spend the very resource it measures.
             heap_guard_sample();
+            // Service a pending HomeHub start even when X10A has no profile or transport.
+            mb_retry_start();
             if (config_profile() == "auto") {
                 retire_saturation_witness();
                 // Keep the CHECKUP's clock running while the bus is unidentified. Startup retires
