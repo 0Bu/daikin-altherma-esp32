@@ -352,9 +352,7 @@ bool config_save(const Config& requested) {
     fixture::last_save_outcome = config_save_transaction(fixture::current, requested, false, store);
     return fixture::last_save_outcome.result == ConfigSaveResult::Saved;
 }
-void http_boot_id(char (&out)[17]) {
-    std::memcpy(out, "0123456789abcdef", sizeof(out));
-}
+void http_boot_id(char (&out)[17]) { std::memcpy(out, "0123456789abcdef", sizeof(out)); }
 ConfigSaveResult config_save_link(const Config& requested) {
     ++fixture::saves;
     if (fixture::stale_attempts) {
@@ -1219,14 +1217,14 @@ void board_draft_revision() {
     const auto& board = route("board");
     prepare(board);
     const auto bound = changed(board.valid, "boot_id", R"("0123456789abcdef")");
-    const auto request = changed(bound.c_str(), "config_revision",
-                                 std::to_string(current.runtime_revision).c_str());
+    const auto request =
+        changed(bound.c_str(), "config_revision", std::to_string(current.runtime_revision).c_str());
     rejection(board, bound);
     rejection(board, changed(request.c_str(), "config_revision", "1.5"));
     rejection(board, changed(request.c_str(), "boot_id", R"("fedcba9876543210")"), "409 Conflict");
     check(invoke(board.handler, request).status == "200 OK", "matching Board draft must save");
     saves = reboots = service_writes = link_writes = 0;
-    durable_started = false;
+    durable_started                                = false;
     rejection(board, request, "409 Conflict");
 }
 void room_history_lifetime() {

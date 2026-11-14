@@ -1241,20 +1241,22 @@ static esp_err_t set_board(httpd_req_t* req) {
             j, HttpConfigFieldType::Boolean, {"led_inverted", "btn_active_low", "env3_enabled"}))
         return send_err(req, "400 Bad Request", error);
     const Config& cur = config();
-    const cJSON* const boot = cJSON_GetObjectItem(j, "boot_id");
+    const cJSON* const boot     = cJSON_GetObjectItem(j, "boot_id");
     const cJSON* const revision = cJSON_GetObjectItem(j, "config_revision");
     if (boot || revision) {
         if (!boot || !cJSON_IsNumber(revision) ||
             !(revision->valuedouble >= 0 && revision->valuedouble <= UINT32_MAX) ||
             revision->valuedouble != static_cast<uint32_t>(revision->valuedouble))
-            return send_err(req, "400 Bad Request", "boot_id and config_revision must be supplied together");
+            return send_err(req, "400 Bad Request",
+                            "boot_id and config_revision must be supplied together");
         char current_boot[17];
         http_boot_id(current_boot);
         if (std::strcmp(boot->valuestring, current_boot) != 0 ||
             revision->valuedouble != static_cast<double>(cur.runtime_revision))
-            return send_err(req, "409 Conflict", "Board settings changed. Reopen the editor before saving.");
+            return send_err(req, "409 Conflict",
+                            "Board settings changed. Reopen the editor before saving.");
     }
-    Config c = cur;
+    Config c                      = cur;
     c.led_gpio       = ji(j, "led_gpio", c.led_gpio);
     c.led_type       = ji(j, "led_type", c.led_type);
     c.led_inverted   = jb(j, "led_inverted", c.led_inverted);
