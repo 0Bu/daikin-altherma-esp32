@@ -48,20 +48,20 @@ UI evidence remain distinct.
 
 ### CI checkout and publication cost
 
-The dev critical path is `mechanical_gates → trusted_build → publish`. Local development checks
-do not replace any of these independent CI gates. CI/release contracts own the provenance, signing,
-stack-budget, reproducibility, readback and OTA selftests; the build-contract step adds only its
+For ordinary merges, the signed dev build starts after the local check receipt matches the squash
+tree and first parent. See the [Renovate runner-pin exception](#local-release-checks). The signing
+job builds the exact main commit. CI/release contracts own the
+provenance, signing, stack-budget, reproducibility, readback and OTA selftests; the build-contract step adds only its
 distinct configuration-default and size-report tests. Actual ELF and signed-artifact checks still
 run against each build. The publisher verifies signatures, then its candidate gate validates the
 source-bound manifest, complete binary inventory, installer plan and changelog once before mutation.
 
 All four source checkouts retain complete commit history and tags. Only `trusted_build` and
 `publish` filter historical blobs with `blob:none`; the current source tree remains complete.
-`prepare-ci-history.py` reads the HTTP runtime test's historical-source pin and hydrates that blob
-on the writable host before the build container. A missing blob or an unrecognized pin declaration
-or read expression blocks the build. PR and mechanical checkouts remain unfiltered: they remove
-persisted credentials and must support historical runtime/coverage reads without relying on a later
-authenticated lazy fetch.
+The local release suite hydrates the candidate and its first-parent tree, then uses
+`prepare-ci-history.py` to load the historical HTTP config and deadline regression sources before
+taking the offline snapshot. Missing source or a changed fixture read blocks the local checks.
+PR and mechanical checkouts remain unfiltered and remove persisted credentials.
 The publisher's `gh-pages` fetch filters blobs too. Version admission and changelog generation
 establish path presence from the tree and block when a listed feed blob cannot be read. Exact tree
 and public-byte verification still materialize every needed current file.
@@ -74,6 +74,38 @@ checking their bytes and signature. Attempts, delays and timeouts are unchanged.
 and CDN propagation overlap this wait; do not add Pages job durations to the main critical path.
 Measure checkout, queue/startup, downloads, compilation, tests, signing, deployment and public
 readback separately. Claim CI acceleration only after a comparable run of the published change.
+
+### Local release checks
+
+The native `pre-push` hook runs the repository's full mechanical suite and unsigned ESP32-S3
+compile for maintainer pushes. It refreshes `origin/main` and checks the prospective merge tree
+in private snapshots with main as the first parent. Host tests and the ESP32-S3 compile run
+concurrently in separate snapshots. Coverage includes the native test and the retained Ubuntu
+GCC 15 x86-64 branch profile in Docker. For UI-relevant changes, headless Linux Chromium and
+WebKit run after both check groups finish, so the compile cannot affect this run's UI timing.
+See [host tooling and checks](../test/README.md).
+
+To run the gate manually, use
+`scripts/agent-python.sh tools/release/push_checks.py "$(git rev-parse HEAD)"` in a clean checkout.
+Review fork code first and run it in a disposable environment without maintainer credentials.
+The scripts run with the current user's permissions. Keep `origin` on the canonical repository
+and fetch a fork head separately.
+Post the emitted `daikin-local-release-checks` line as a new PR comment from the maintainer
+account. It is a maintainer assertion of a completed local run. It has a 24-hour window through
+merge. Keep the original comment because signed publication verifies it against the merge time.
+Editing the PR description refreshes `gates`, which validates the comment author, head, current
+main, merge tree and completed review records. The bootstrap PR runs the legacy build and PR
+prose audit. Its local merge command and signed publication verify the receipt while the old
+protected `gates` job still checks review records alone.
+
+After cutover both required check names remain and use brief admission jobs. Refresh evidence
+for existing open PRs before merging. Use the canonical synchronous merge command, which
+rechecks the receipt immediately before merging. A green GitHub check can outlive the receipt
+window. Signed publication, including manual stable publication, requires a receipt valid at
+the actual merge time. The protected policy's existing
+[Renovate runner-pin exception](AGENT_MIGRATION.md#operating-rules) does not need a local
+receipt to merge. The pin is outside the firmware inputs. When publishing from such a main tip,
+the signer re-attests each intervening pin-only change and verifies the preceding source receipt.
 
 ### First Pages publication
 
@@ -358,7 +390,12 @@ there is no timing-based legacy production fallback. This gate creates no releas
 Report host/CI checks, signed artifact identity, each injection, pre-reboot verifier/heap/stack,
 probation, API/source liveness, retained MQTT and rendered UI evidence separately.
 The private atomic receipt journal checkpoints before the sole POST and preserves completed
-artifact/bench/production stages. An ambiguous response leaves execution unknown; journal failure
+artifact/bench/production stages and elapsed times. The official gate reuses host and contract
+results from the pre-push run for 24 hours on the same machine and account, if the published
+commit has the identical tree and first parent. The cache lives under
+`~/.cache/daikin-altherma-esp32/release-checks/`. With missing or incompatible local evidence,
+the gate reruns the two checks before contacting hardware. An ambiguous response leaves
+execution unknown; journal failure
 before a write blocks it. Public output includes only typed delivery evidence, excluding device
 identifiers, complete status, topics, coordinates and raw errors. Failure handling neither queries
 the device nor retries and exits with status 2.

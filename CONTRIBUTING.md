@@ -71,9 +71,8 @@ resolved graph is committed in [dependencies.lock](dependencies.lock). For an in
 update, edit the manifest, run `scripts/idf-docker.sh idf.py update-dependencies`, then review both
 files. Do not hand-edit the lock.
 
-A local build is useful but is not required to open a PR: CI compiles build-relevant changes and
-retains diagnostic artifacts. State whether you built locally. PR artifacts contain compressed
-ELF/checksum and size reports, with no flashable binary or browser-installer manifest.
+State whether you built locally in the PR. Maintainer pushes run an unsigned target build as
+part of the [local release checks](docs/MAINTENANCE.md#local-release-checks).
 
 **Flashing requires a signed application.** The firmware uses the Secure Boot v2 signature
 scheme without hardware Secure Boot. An unsigned application can crash-loop before `app_main`.
@@ -142,8 +141,9 @@ process. Use `$agentic-setup` for a broader setup review or authorized moderniza
 for repository fact drift; `--optimize` requires explicit edit authorization. The pre-push hook checks
 every destination and sent commit. Updating an open PR retains current-commit `$skill-audit` and
 `$pr-hygiene-review` stamps from a clean exact-commit checkout, without adding another gate record.
-A successful lookup finding no open PR allows push after the local audit; a failed lookup blocks it.
-This local hook does not change remote branch protection.
+A failed PR lookup blocks the push. The hook runs the
+[local release checks](docs/MAINTENANCE.md#local-release-checks) before every maintainer update,
+including the first branch push. Protected GitHub policy validates the resulting receipt.
 Agent setup, generated registration, trust review and runtime acceptance belong in
 [AGENT_MIGRATION.md](docs/AGENT_MIGRATION.md).
 
@@ -191,8 +191,8 @@ patches. It never applies to local/manual merges, ESP-IDF, esptool-js or mixed c
 CI runs PR-controlled code under ordinary `pull_request` in `build.yml`. Forks receive no
 repository secrets and a reduced token; same-repository workflow authors are trusted CI actors.
 The separate `pr-policy.yml` supplies `gates` from the protected base without loading PR code.
-The required `build` propagates the shared mechanical result and conditionally compiles relevant
-changes. Documentation-only PRs still run both required checks. Do not replace step conditions
+The required `build` reports the workflow's admission result. Its hosted compile is used during
+the transition to local checks. Documentation-only PRs still run both required checks. Do not replace step conditions
 with workflow path filters that leave required checks pending.
 
 ## Releases

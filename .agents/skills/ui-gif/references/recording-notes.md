@@ -13,14 +13,12 @@ checks the values, and none of them can see that the picture in the README shows
 pipes, a pill that has since moved, or a component that no longer exists. A screenshot cannot fail
 a test. It can only be out of date, and it looks exactly as good either way.
 
-The GIF gate compares fingerprints. CI also runs Chrome/Chromium rendering checks, but the
-recording workflow and decoded-frame review remain local. Fingerprints prove the recording is
-current; they cannot prove the capture or its meaning is correct.
+The GIF gate compares fingerprints. The headless browser checks, recording workflow and
+decoded-frame review run locally. Fingerprints establish recording freshness. Review the
+decoded frames to establish that the recording depicts the intended behavior.
 
-**This is a merge gate** (`tools/agent-hooks/require-pr-gates.sh`) and the audit is a CI `mechanical_gates`
-step. Neither was true before: the audit was kept out of CI because a gate whose remedy is
-unavailable where it fires gets the *stamp* rewritten rather than the recording re-made. That
-escape is closed — `check_ui_gif.mjs` refuses to write a stamp whose `ui` moved while `gif` stayed
+The [local release checks](../../../../docs/MAINTENANCE.md#local-release-checks) block a push if
+the GIF is stale. `check_ui_gif.mjs` refuses to write a stamp whose `ui` moved while `gif` stayed
 byte-identical, which is precisely what re-stamping an old recording looks like.
 `--allow-identical-gif` overrides it for the one honest case (you re-recorded and the encoder
 reproduced the file exactly, which a comment-only edit to the recorder can do). **Never** hand-edit

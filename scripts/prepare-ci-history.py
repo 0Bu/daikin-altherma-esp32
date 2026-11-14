@@ -6,11 +6,11 @@ eager materialization; historical firmware/GIF binaries need not be downloaded w
 """
 from __future__ import annotations
 
+import argparse
 import ast
 from pathlib import Path
 import re
 import subprocess
-import sys
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -32,10 +32,18 @@ def git(*arguments: str, capture: bool = True) -> bytes:
     return result.stdout if capture else b""
 
 
-def http_witness() -> str:
+def source_text(path: str, source_tree: str | None) -> tuple[str, str]:
+    if source_tree:
+        filename = f"{source_tree}:{path}"
+        return git("show", filename).decode("utf-8"), filename
+    filename = ROOT / path
+    return filename.read_text(encoding="utf-8"), str(filename)
+
+
+def http_config_witness(source_tree: str | None) -> str:
     """Read the existing runtime-test pin without executing the test or duplicating that pin."""
-    source = ROOT / "test/http_config_runtime/run.py"
-    tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
+    source, filename = source_text("test/http_config_runtime/run.py", source_tree)
+    tree = ast.parse(source, filename=filename)
     assignments = {
         name: [node.value for node in tree.body if isinstance(node, ast.Assign)
                and any(isinstance(target, ast.Name) and target.id == name
@@ -54,6 +62,15 @@ def http_witness() -> str:
     if len(reads) != 1 or ast.dump(reads[0]) != ast.dump(expected):
         raise HistoryError("HTTP runtime historical read changed; review its hydration contract")
     return pins[0].value + ":main/http_config.cpp"
+
+
+def http_deadline_witness(source_tree: str | None) -> str:
+    source, _ = source_text("test/test_http_deadline_runtime.mjs", source_tree)
+    pins = re.findall(r'^const originalCommit = "([0-9a-f]{40})";$', source, re.MULTILINE)
+    read = 'execute("git", ["-c", "core.fsmonitor=false", "show", `${originalCommit}:main/http_deadline.cpp`])'
+    if len(pins) != 1 or source.count(read) != 1:
+        raise HistoryError("HTTP deadline runtime historical read changed; review its hydration contract")
+    return pins[0] + ":main/http_deadline.cpp"
 
 
 def hydrate(revision: str, path: str) -> None:
@@ -75,13 +92,17 @@ def hydrate(revision: str, path: str) -> None:
 
 
 def main() -> int:
-    if len(sys.argv) != 1:
-        raise HistoryError("no arguments expected")
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--source-tree", help="read the runtime witness pin from this Git tree")
+    args = parser.parse_args()
+    if args.source_tree is not None and not re.fullmatch(r"[0-9a-f]{40}", args.source_tree):
+        raise HistoryError("--source-tree requires a full SHA")
     if git("rev-parse", "--is-shallow-repository").strip() != b"false":
         raise HistoryError("full commit history and tags are required; shallow checkout refused")
-    witness = http_witness()
-    revision, path = witness.split(":", 1)
-    hydrate(revision, path)
+    witnesses = (http_config_witness(args.source_tree), http_deadline_witness(args.source_tree))
+    for witness in witnesses:
+        revision, path = witness.split(":", 1)
+        hydrate(revision, path)
     return 0
 
 
