@@ -725,7 +725,7 @@ const modbusPublishStart = mqtt.indexOf("static inline bool publish_modbus_state
 const modbusPublishEnd = mqtt.indexOf("\n}\n\nstruct RetainedCleanupCycle", modbusPublishStart) + 2;
 const modbusPublish = mqtt.slice(modbusPublishStart, modbusPublishEnd);
 assert.match(modbusPublish,
-  /if \(js != s_last_modbus_json\) \{\s*if \(!mqtt_publish\(s_modbus,[\s\S]*?\)\) return false;\s*s_last_modbus_json = js;\s*\}/,
+  /if \(js != s_last_modbus_json\) \{\s*if \(!mqtt_publish\(s_modbus,[\s\S]*?\)\) return false;\s*s_last_modbus_json.swap\(js\);\s*\}/,
   "HomeHub dedup may advance only after the broker accepts current state");
 const weatherPublishStart = mqtt.indexOf("void publish_weather_state(");
 const weatherPublishEnd = mqtt.indexOf("\n}\n\n// ENV III", weatherPublishStart) + 2;

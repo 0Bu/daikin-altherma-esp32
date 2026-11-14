@@ -132,6 +132,7 @@ std::mutex   config_mutex;
 size_t       largest_block = 32 * 1024;
 size_t       free_bytes    = 64 * 1024;
 bool         config_throws = false, net_up = true, ota_active = false, weather_active = false;
+bool         mqtt_resume_pending = false, mqtt_resume_low = false;
 int config_reads = 0, config_saves = 0, history_calls = 0, history_gaps = 0, stack_samples = 0;
 
 uint32_t history_generation    = 1;
@@ -152,6 +153,8 @@ std::size_t heap_caps_get_free_size(unsigned) { return adapter::free_bytes; }
 
 namespace daik {
 size_t heap_largest_internal_block() { return adapter::largest_block; }
+bool   mqtt_tls_resume_pending() noexcept { return adapter::mqtt_resume_pending; }
+bool   mqtt_tls_resume_short_of_heap() noexcept { return adapter::mqtt_resume_low; }
 
 Config config() {
     ++adapter::config_reads;
@@ -370,6 +373,8 @@ void reset(bool fail_dynamic_mutex_create = false) {
     adapter::free_bytes            = 64 * 1024;
     adapter::ota_active            = false;
     adapter::weather_active        = false;
+    adapter::mqtt_resume_pending   = false;
+    adapter::mqtt_resume_low       = false;
     adapter::net_up                = true;
     adapter::config_reads          = 0;
     adapter::config_saves          = 0;
@@ -1985,8 +1990,12 @@ void lifecycle() {
     adapter::ota_active     = true;
     mb_retry_start();
     REQUIRE(sdk::create_calls == 0 && mb_task_pending() && mb_network_quiesced());
-    adapter::ota_active    = false;
-    adapter::largest_block = 6144 + sizeof(StaticTask_t) + 4096 + MB_FIRST_SWEEP_HEAP - 1;
+    adapter::ota_active          = false;
+    adapter::mqtt_resume_pending = true;
+    mb_retry_start();
+    REQUIRE(sdk::create_calls == 0 && mb_task_pending() && mb_network_quiesced());
+    adapter::mqtt_resume_pending = false;
+    adapter::largest_block       = 6144 + sizeof(StaticTask_t) + 4096 + MB_FIRST_SWEEP_HEAP - 1;
     mb_retry_start();
     REQUIRE(sdk::create_calls == 0 && !s_task && mb_task_pending());
     adapter::largest_block++;
@@ -2237,6 +2246,21 @@ void first_sweep_after_tls() {
     REQUIRE(sdk::wdt_add == 1 && sdk::wdt_delete == 1 && sdk::delete_calls == 1);
     REQUIRE(adapter::config_reads == reads && sdk::socket_connects == 0);
 }
+void established_worker_yields_to_broker() {
+    reset();
+    mb_reconfigure(true);
+    const auto worker = s_task;
+    Peer       peer;
+    sdk::on_delay = [&] {
+        REQUIRE(sdk::delays == 1 && peer.requests > 0 && mb_values_live());
+        adapter::mqtt_resume_pending = true;
+        adapter::mqtt_resume_low     = true;
+    };
+    worker->fn(worker->arg);
+    REQUIRE(!s_task && mb_task_pending() && mb_target_enabled());
+    REQUIRE(!mb_values_live() && s_cache.capacity() == 0 && s_sock < 0);
+    REQUIRE(sdk::wdt_delete == 1 && sdk::delete_calls == 1);
+}
 void socket_setup_and_retirement() {
     for (int option : {SO_RCVTIMEO, SO_SNDTIMEO}) {
         reset();
@@ -2334,50 +2358,52 @@ void task_oom_and_quiesce() {
 int main(int argc, char** argv) {
     std::signal(SIGPIPE, SIG_IGN);
     using T = std::pair<const char*, void (*)()>;
-    const T tests[]{{"deadline", test::deadline},
-                    {"receive_boundaries", test::receive_boundaries},
-                    {"whole_adu_deadline", test::whole_adu_deadline},
-                    {"read_success_lifetime", test::read_success_lifetime},
-                    {"transaction", test::transaction},
-                    {"read_failures", test::read_failures},
-                    {"snapshot_generation", test::snapshot_generation},
-                    {"expiry", test::expiry},
-                    {"reconfigure_generations", test::reconfigure_generations},
-                    {"homehub_definition_rows", test::homehub_definition_rows},
-                    {"native_definition_rows", test::native_definition_rows},
-                    {"native_current_mode", test::native_current_mode},
-                    {"native_demand_response", test::native_demand_response},
-                    {"native_unit_mode", test::native_unit_mode},
-                    {"native_quiet_selection", test::native_quiet_selection},
-                    {"native_power_label", test::native_power_label},
-                    {"probe_native_promotion", test::probe_native_promotion},
-                    {"probe_homehub_rows", test::probe_homehub_rows},
-                    {"native_gateway_baseline", test::native_gateway_baseline},
-                    {"probe_resolved_peer_reconnect", test::probe_resolved_peer_reconnect},
-                    {"definition_snapshot_cutover", test::definition_snapshot_cutover},
-                    {"poll_full_fast_break", test::poll_full_fast_break},
-                    {"poll_batch_fallback", test::poll_batch_fallback},
-                    {"poll_history_reply_boundary", test::poll_history_reply_boundary},
-                    {"partial_sweep_allocation_pressure", test::partial_sweep_allocation_pressure},
-                    {"compressor_witness", test::compressor_witness},
-                    {"space_route_values", test::space_route_values},
-                    {"space_route_missing", test::space_route_missing},
-                    {"space_route_age", test::space_route_age},
-                    {"space_route_cutover", test::space_route_cutover},
-                    {"poll_cutover", test::poll_cutover},
-                    {"zero_cache_commit", test::zero_cache_commit},
-                    {"profile_cutover", test::profile_cutover},
-                    {"cache_count", test::cache_count},
-                    {"discovery_budget", test::discovery_budget},
-                    {"fallback_watchdog", test::fallback_watchdog},
-                    {"gate_age", test::gate_age},
-                    {"lifecycle", test::lifecycle},
-                    {"retiring_reenable", test::retiring_reenable},
-                    {"worker_admission_pressure", test::worker_admission_pressure},
-                    {"first_sweep_heap_pressure", test::first_sweep_heap_pressure},
-                    {"first_sweep_after_tls", test::first_sweep_after_tls},
-                    {"socket_setup_and_retirement", test::socket_setup_and_retirement},
-                    {"task_oom_and_quiesce", test::task_oom_and_quiesce}};
+    const T tests[]{
+        {"deadline", test::deadline},
+        {"receive_boundaries", test::receive_boundaries},
+        {"whole_adu_deadline", test::whole_adu_deadline},
+        {"read_success_lifetime", test::read_success_lifetime},
+        {"transaction", test::transaction},
+        {"read_failures", test::read_failures},
+        {"snapshot_generation", test::snapshot_generation},
+        {"expiry", test::expiry},
+        {"reconfigure_generations", test::reconfigure_generations},
+        {"homehub_definition_rows", test::homehub_definition_rows},
+        {"native_definition_rows", test::native_definition_rows},
+        {"native_current_mode", test::native_current_mode},
+        {"native_demand_response", test::native_demand_response},
+        {"native_unit_mode", test::native_unit_mode},
+        {"native_quiet_selection", test::native_quiet_selection},
+        {"native_power_label", test::native_power_label},
+        {"probe_native_promotion", test::probe_native_promotion},
+        {"probe_homehub_rows", test::probe_homehub_rows},
+        {"native_gateway_baseline", test::native_gateway_baseline},
+        {"probe_resolved_peer_reconnect", test::probe_resolved_peer_reconnect},
+        {"definition_snapshot_cutover", test::definition_snapshot_cutover},
+        {"poll_full_fast_break", test::poll_full_fast_break},
+        {"poll_batch_fallback", test::poll_batch_fallback},
+        {"poll_history_reply_boundary", test::poll_history_reply_boundary},
+        {"partial_sweep_allocation_pressure", test::partial_sweep_allocation_pressure},
+        {"compressor_witness", test::compressor_witness},
+        {"space_route_values", test::space_route_values},
+        {"space_route_missing", test::space_route_missing},
+        {"space_route_age", test::space_route_age},
+        {"space_route_cutover", test::space_route_cutover},
+        {"poll_cutover", test::poll_cutover},
+        {"zero_cache_commit", test::zero_cache_commit},
+        {"profile_cutover", test::profile_cutover},
+        {"cache_count", test::cache_count},
+        {"discovery_budget", test::discovery_budget},
+        {"fallback_watchdog", test::fallback_watchdog},
+        {"gate_age", test::gate_age},
+        {"lifecycle", test::lifecycle},
+        {"retiring_reenable", test::retiring_reenable},
+        {"worker_admission_pressure", test::worker_admission_pressure},
+        {"first_sweep_heap_pressure", test::first_sweep_heap_pressure},
+        {"first_sweep_after_tls", test::first_sweep_after_tls},
+        {"established_worker_yields_to_broker", test::established_worker_yields_to_broker},
+        {"socket_setup_and_retirement", test::socket_setup_and_retirement},
+        {"task_oom_and_quiesce", test::task_oom_and_quiesce}};
     std::cout.setf(std::ios::unitbuf);
     int count = 0;
     for (auto& t : tests) {

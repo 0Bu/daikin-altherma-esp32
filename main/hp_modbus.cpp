@@ -21,6 +21,7 @@
 #include "diag_log.hpp"
 #include "history.hpp"
 #include "heap_guard.hpp"
+#include "mqtt_ha.hpp"
 #include "net.hpp"
 #include "ota_update.hpp"
 #include "stack_watch.hpp"
@@ -1092,15 +1093,17 @@ static bool mb_poll_once(uint32_t cycle_target_generation, bool allow_reconnect)
     };
     std::string        target;
     ModbusTargetConfig c;
-    const bool         target_copied = with_config([&](const Config& cfg) {
+    const bool         reuse_target =
+        s_sock >= 0 && s_have_req && s_req_target_generation == cycle_target_generation;
+    const bool target_copied = with_config([&](const Config& cfg) {
         if (s_target_generation.load(std::memory_order_acquire) != cycle_target_generation)
             return false;
         const auto& host = config_modbus_host(cfg);
         // The saved Config can be visible before /set_hp publishes its new generation.
-        if (!allow_reconnect &&
+        if ((reuse_target || !allow_reconnect) &&
             (host != s_req_host || cfg.mb_port != s_req_port || cfg.mb_unit_id != s_unit))
             return false;
-        target       = host;
+        if (!reuse_target) target = host;
         c.mb_port    = cfg.mb_port;
         c.mb_unit_id = cfg.mb_unit_id;
         return true;
@@ -1108,10 +1111,7 @@ static bool mb_poll_once(uint32_t cycle_target_generation, bool allow_reconnect)
     if (!target_copied ||
         s_target_generation.load(std::memory_order_acquire) != cycle_target_generation)
         return false;
-    const bool established_target =
-        s_have_req && s_req_target_generation == cycle_target_generation && target == s_req_host &&
-        c.mb_port == s_req_port && c.mb_unit_id == s_unit;
-    if (!established_target) {
+    if (!reuse_target) {
         const auto configured = history_modbus_target(target, c.mb_port, c.mb_unit_id);
         Lock       lk(s_mtx);
         if (!lk.acquired() || !s_target_enabled.load(std::memory_order_relaxed) ||
@@ -1124,13 +1124,11 @@ static bool mb_poll_once(uint32_t cycle_target_generation, bool allow_reconnect)
     // generation captured before DNS so an old connection cannot override a configuration save.
     const uint32_t           history_generation = history_modbus_generation();
     std::vector<CachedValue> fresh;
-    if (logic::mb_cycle_is_full(s_cycle_tick) || s_sock < 0 || !s_have_req ||
-        s_req_target_generation != cycle_target_generation || target != s_req_host ||
-        c.mb_port != s_req_port || c.mb_unit_id != s_unit)
+    if (logic::mb_cycle_is_full(s_cycle_tick) || !reuse_target)
         fresh.reserve(def::ALTHERMA4_REG_COUNT);
 
-    if (!mb_ensure_connected(target, c.mb_port, c.mb_unit_id, cycle_target_generation,
-                             history_generation)) {
+    if (!mb_ensure_connected(reuse_target ? s_req_host : target, c.mb_port, c.mb_unit_id,
+                             cycle_target_generation, history_generation)) {
         // THE CACHE GOES WITH THE LINK. Keeping it was a real defect: /values kept serving the last
         // good readings, the browser had no way to tell they were minutes old, and it went on
         // printing them as the live second opinion — complete with a computed "difference" against
@@ -1765,7 +1763,8 @@ static void mb_task(void*) {
                 // Recheck closes the opposite race if OTA or weather began right as we
                 // claimed network activity. Exit scope immediately so MbNetworkActivity
                 // destructor restores s_network_quiesced to true before the inter-cycle delay.
-            } else if (!ready && (heap_largest_internal_block() < MB_FIRST_SWEEP_HEAP ||
+            } else if (!ready && (mqtt_tls_resume_pending() ||
+                                  heap_largest_internal_block() < MB_FIRST_SWEEP_HEAP ||
                                   heap_caps_get_free_size(MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL) <
                                       MB_FIRST_SWEEP_HEAP)) {
                 // No socket exists before worker admission. Release the task stack and any
@@ -1784,15 +1783,16 @@ static void mb_task(void*) {
                     first_sweep_pending = true;
                 }
                 if (!s_have_req) first_sweep_pending = true;
-                bool enough_heap = true;
-                if (first_sweep_pending) {
+                // Sample after worker setup and before every sweep. Running firmware may have
+                // started another allocator since the last complete HomeHub response.
+                const bool enough_heap =
+                    heap_largest_internal_block() >= MB_FIRST_SWEEP_HEAP &&
+                    heap_caps_get_free_size(MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL) >=
+                        MB_FIRST_SWEEP_HEAP;
+                const bool broker_resuming = mqtt_tls_resume_pending();
+                if (first_sweep_pending || mqtt_tls_resume_short_of_heap()) {
                     esp_task_wdt_reset();
-                    // The stack, semaphore and watchdog have already claimed their memory.
-                    // Recheck before the first socket and cache allocations.
-                    enough_heap = heap_largest_internal_block() >= MB_FIRST_SWEEP_HEAP &&
-                                  heap_caps_get_free_size(MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL) >=
-                                      MB_FIRST_SWEEP_HEAP;
-                    if (!enough_heap) {
+                    if (!enough_heap || broker_resuming) {
                         mb_drop_cache(target);
                         if (close_sock()) {
                             Lock lk(s_mtx);
@@ -1811,9 +1811,11 @@ static void mb_task(void*) {
                         if (s_target_generation.load(std::memory_order_acquire) == target)
                             s_status.enabled = true;
                     }
+                } else if (!enough_heap || broker_resuming) {
+                    mb_record_poll_gap();
                 }
                 try {
-                    if (enough_heap && esp_timer_get_time() >= s_next_try_us) {
+                    if (enough_heap && !broker_resuming && esp_timer_get_time() >= s_next_try_us) {
                         if (mb_poll_once(target, first_sweep_pending)) first_sweep_pending = false;
                         failures.succeeded();
                     }
@@ -1866,6 +1868,7 @@ static void mb_task_start_if_enabled() noexcept {
         const MbTaskCreation creation;
         // Announce before rereading the TLS owners. Their quiescence checks observe this claim.
         if (ota_download_active() || weather_fetch_active()) return;
+        if (mqtt_tls_resume_pending()) return;
         // All startup allocations may come from the same extent. Leave recovery headroom
         // after the stack, TCB, semaphore, watchdog entry and initial sweep.
         constexpr size_t stack_bytes          = 6144;

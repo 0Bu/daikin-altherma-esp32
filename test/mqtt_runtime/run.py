@@ -90,7 +90,7 @@ scenarios = ['discovery_guard_clean', 'discovery_guard_default', 'discovery_guar
              'journal_foreign_scope', 'journal_foreign_board_scope', 'journal_bootstrap_auto',
              'journal_load_oom_recovery', 'journal_failure_live_metrics',
              'journal_prior_quarantined_row',
-             'independent_source_cutover', 'modbus_cutover_after_cleanup_sample',
+             'independent_source_cutover', 'modbus_cutover_after_cleanup_sample', 'modbus_publish_oom_isolation',
              'availability_retry_oom', 'full_mac_identity',
              'full_mac_read_failure',
              'legacy_retirement_delivery', 'retirement_oom_recovery', 'retained_probe_delivery',
@@ -136,6 +136,10 @@ for scenario in scenarios:
     print(result.stdout.strip())
 
 mutations = [
+    ('modbus-publish-oom-escapes', 'modbus_publish_oom_isolation',
+     's_modbus_publish_retry_us = esp_timer_get_time() + 5 * 1000000;',
+     'throw;',
+     'HOMEHUB_OOM_CANNOT_STARVE_ENV_PUBLICATION', 1),
     ('modbus-late-cleanup-ignored', 'modbus_cutover_after_cleanup_sample',
      'if (!publication.acquired() || s_modbus_cleanup_requested.load(std::memory_order_acquire))',
      'if (!publication.acquired())',

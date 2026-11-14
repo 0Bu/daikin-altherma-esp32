@@ -186,9 +186,9 @@ CONFIG_MDNS_ENABLE_BROWSE=n
 # silent until the next "got IP", and a disable at disconnect is missed the same way.
 CONFIG_MDNS_ACTION_QUEUE_LEN=8
 
-# C++ exceptions — HTTP handlers run under a try/catch OOM guard (503 instead of crash), the
-# same memory discipline.
+# C++ exceptions — reserve space for failure objects when the ordinary heap is exhausted.
 CONFIG_COMPILER_CXX_EXCEPTIONS=y
+CONFIG_COMPILER_CXX_EXCEPTIONS_EMG_POOL_SIZE=1024
 
 # PSRAM (uncomment if your board has it; not required)
 # CONFIG_SPIRAM=y

@@ -411,6 +411,8 @@ keeps the full-sweep rows. The link and cache have separate mutexes. Each TCP se
 generation and each cache commit records it. After copying the cache, `mb_values_snapshot()`
 checks liveness and verifies that the session and configured target still match the copy. This
 handles disconnects and reconnects during the copy without holding both mutexes.
+The worker reserves internal heap headroom before polling. It defers startup during TLS broker
+recovery and releases its resources when a paused broker falls below the resume heap floor.
 
 In the **web UI** (see [`DESIGN.md`](DESIGN.md)), X10A stays the prominent source everywhere and
 Modbus readings are marked in their own colour — a petrol token (`--src-mb`) that is neither a state

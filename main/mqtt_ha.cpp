@@ -326,8 +326,9 @@ static uint64_t    s_last_x10a_digest = 0;            // per-topic dedup guards 
                                                       // full-string copy cost a permanent ~3 KB block
                                                       // and one copy per cycle (private issue 10)
 static std::string s_last_modbus_json;
-static uint32_t    s_last_x10a_cache_gen   = 0;
-static uint32_t    s_last_modbus_cache_gen = 0;
+static uint32_t    s_last_x10a_cache_gen     = 0;
+static uint32_t    s_last_modbus_cache_gen   = 0;
+static int64_t     s_modbus_publish_retry_us = 0;
 static bool        s_last_modbus_live      = false;
 static std::string s_last_weather_json;
 static std::string s_last_env3_json;
@@ -564,6 +565,7 @@ static std::atomic<bool> s_transport_pause_requested{false};
 // Raised by the OTA lease before its pause request; consumed by the stop that it precedes.
 static std::atomic<bool> s_transport_pause_withdraws_online{false};
 static std::atomic<bool> s_transport_paused{false};
+static std::atomic<bool> s_transport_uses_tls{false};
 static std::atomic<bool> s_client_running{false};
 static_assert(std::atomic<bool>::is_always_lock_free,
               "MQTT network quiesce acknowledgement must remain allocation- and lock-free");
@@ -1454,14 +1456,14 @@ static bool publish_x10a_state(const Config& config, bool force) {
     bool                            live     = false;
     const std::vector<GroupedValue> values =
         mb_values_live() ? current_modbus_values(live) : std::vector<GroupedValue>{};
-    const std::string            js = live ? build_flat_json(values) : std::string("{}");
+    std::string                  js = live ? build_flat_json(values) : std::string("{}");
     const ModbusPublicationClaim publication(ModbusPublication::Mqtt, revision);
     // A target save can request retirement after this cycle sampled the cleanup queue.
     if (!publication.acquired() || s_modbus_cleanup_requested.load(std::memory_order_acquire))
         return false;
     if (js != s_last_modbus_json) {
         if (!mqtt_publish(s_modbus, js.c_str(), static_cast<int>(js.size()), 0, 1)) return false;
-        s_last_modbus_json = js;
+        s_last_modbus_json.swap(js);
     }
     published_live = live;
     return true;
@@ -3484,32 +3486,38 @@ static void mqtt_task(void*) {
                 // prof == auto is not an X10A seed; independent sources below still publish.
 
                 publish_stage = "modbus";
-                if (!cleanup_cycle.modbus) {
-                    const RetainedSourceAction modbus_action =
-                        retained_source_action(mb_target_enabled(), s_modbus_disabled_cleaned);
-                    if (modbus_action == RetainedSourceAction::PublishCurrent) {
-                        // State publication is independent of Home Assistant discovery. This also
-                        // starts correctly when MQTT connects before the separate Modbus task, or
-                        // when Modbus is enabled dynamically through POST /set_hp. The atomically
-                        // installed target intent — not a retiring task's status — prevents Off's
-                        // tombstone from being replaced by retained `{}`. A-to-B remains enabled
-                        // and may publish `{}` for the configured new source from the following
-                        // cycle.
-                        s_modbus_disabled_cleaned = false;
-                        const uint32_t mb_gen     = mb_cache_generation();
-                        if (mqtt_source_state_needs_publish(mb_gen, s_last_modbus_cache_gen,
-                                                            mb_values_live(), s_last_modbus_live,
-                                                            !s_last_modbus_json.empty())) {
-                            if (publish_modbus_state(s_last_modbus_live))
-                                s_last_modbus_cache_gen = mb_gen;
+                try {
+                    if (!cleanup_cycle.modbus) {
+                        const RetainedSourceAction modbus_action =
+                            retained_source_action(mb_target_enabled(), s_modbus_disabled_cleaned);
+                        if (modbus_action == RetainedSourceAction::PublishCurrent) {
+                            // State publication is independent of Home Assistant discovery. This
+                            // also starts correctly when MQTT connects before the separate Modbus
+                            // task, or when Modbus is enabled dynamically through POST /set_hp. The
+                            // atomically installed target intent — not a retiring task's status —
+                            // prevents Off's tombstone from being replaced by retained `{}`. A-to-B
+                            // remains enabled and may publish `{}` for the configured new source
+                            // from the following cycle.
+                            s_modbus_disabled_cleaned = false;
+                            const uint32_t mb_gen     = mb_cache_generation();
+                            if (esp_timer_get_time() >= s_modbus_publish_retry_us &&
+                                mqtt_source_state_needs_publish(
+                                    mb_gen, s_last_modbus_cache_gen, mb_values_live(),
+                                    s_last_modbus_live, !s_last_modbus_json.empty())) {
+                                if (publish_modbus_state(s_last_modbus_live))
+                                    s_last_modbus_cache_gen = mb_gen;
+                            }
+                        } else if (modbus_action == RetainedSourceAction::DeleteRetained) {
+                            // Covers a live POST /set_hp disable. Discovery and the duplicate
+                            // status topic are already retired; admit the delete to the ACK-driven
+                            // source queue.
+                            s_modbus_cleanup_requested.store(true, std::memory_order_release);
+                            s_last_modbus_cache_gen = 0;
                         }
-                    } else if (modbus_action == RetainedSourceAction::DeleteRetained) {
-                        // Covers a live POST /set_hp disable. Discovery and the duplicate status
-                        // topic are already retired; admit the delete to the ACK-driven source
-                        // queue.
-                        s_modbus_cleanup_requested.store(true, std::memory_order_release);
-                        s_last_modbus_cache_gen = 0;
                     }
+                } catch (const std::bad_alloc&) {
+                    s_modbus_publish_retry_us = esp_timer_get_time() + 5 * 1000000;
+                    diag_printf("mqtt: HomeHub publication deferred after allocation failure\n");
                 }
 
                 // Weather remains an independent firmware input. MQTT archives it only while its
@@ -3678,6 +3686,9 @@ static bool start_current_client() {
 void mqtt_ha_start() {
     MqttStartupActivity startup_activity;
     const Config& c = config();
+    s_transport_uses_tls.store(c.mqtt_uri.rfind("mqtts://", 0) == 0 ||
+                                   c.mqtt_uri.rfind("wss://", 0) == 0,
+                               std::memory_order_release);
     s_x10a_publish_required.store(!c.mqtt_uri.empty(), std::memory_order_release);
     s_mtx = xSemaphoreCreateMutex();
     if (!s_mtx) {
@@ -3811,6 +3822,20 @@ void mqtt_transport_withdraw_online_on_pause() {
 bool mqtt_transport_network_quiesced() {
     return !s_client_running.load(std::memory_order_acquire) ||
            s_transport_paused.load(std::memory_order_acquire);
+}
+
+bool mqtt_tls_resume_pending() noexcept {
+    return s_transport_uses_tls.load(std::memory_order_acquire) &&
+           (s_transport_paused.load(std::memory_order_acquire) ||
+            s_transport_connecting.load(std::memory_order_acquire));
+}
+
+bool mqtt_tls_resume_short_of_heap() noexcept {
+    return s_transport_uses_tls.load(std::memory_order_acquire) &&
+           s_transport_paused.load(std::memory_order_acquire) &&
+           (heap_caps_get_free_size(MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL) <
+                kMqttTlsResumeMinFree ||
+            heap_largest_internal_block() < kMqttTlsResumeMinLargest);
 }
 
 ReferenceTemperatureStatus reference_temperature_status(const Config& expected) {

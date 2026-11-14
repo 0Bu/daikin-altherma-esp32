@@ -145,6 +145,8 @@ state. Disconnection produces `{}`; disabling retracts the retained topic. Saved
 not a retiring task's lagging state, decides whether publication is allowed. Source reconfiguration
 first retracts old evidence; an enabled replacement may publish an empty pre-first-sample document
 on a later cycle. Read-only protocol/register rules: [MODBUS_PROTOCOL.md](MODBUS_PROTOCOL.md).
+If staging HomeHub state runs out of heap, its publisher defers a retry for five seconds.
+The other source publishers continue on their existing schedule.
 Modbus input 49 publishes the catalog-converted flow as a number. The MQTT payload carries no scale
 marker. Independently verify the divisor before using it as a flow measurement.
 

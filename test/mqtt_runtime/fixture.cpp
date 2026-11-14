@@ -3280,6 +3280,37 @@ void modbus_cutover_after_cleanup_sample() {
         sdk::task_fn(nullptr);
     } catch (const StopTask&) {}
 }
+void modbus_publish_oom_isolation() {
+    independent_sources_fixture();
+    int env_before = 0;
+    int mb_before  = 0;
+    sdk::on_delay  = [&](TickType_t delay) {
+        check_cycle(delay);
+        if (sdk::delays == 45) {
+            require_independent_fresh();
+            env_before = accepted_count(daik::s_env3);
+            mb_before  = accepted_count(daik::s_modbus);
+            adapter::env.samples++;
+            ++adapter::modbus_generation;
+            adapter::modbus_values[0].value = "36";
+            adapter::on_modbus_target_read  = [] { sdk::fail_next_new = true; };
+        } else if (sdk::delays == 46) {
+            require(accepted_count(daik::s_env3) > env_before &&
+                         accepted_count(daik::s_modbus) == mb_before,
+                     "HOMEHUB_OOM_CANNOT_STARVE_ENV_PUBLICATION");
+        } else if (sdk::delays > 46 && esp_timer_get_time() < daik::s_modbus_publish_retry_us) {
+            require(accepted_count(daik::s_modbus) == mb_before,
+                     "HOMEHUB_OOM_RETRY_WAITS_FOR_BACKOFF");
+        } else if (sdk::delays >= 52) {
+            require(accepted_count(daik::s_modbus) == mb_before + 1,
+                     "HOMEHUB_OOM_RECOVERS_AND_PUBLISHES_ONCE");
+            throw StopTask{};
+        }
+    };
+    try {
+        sdk::task_fn(nullptr);
+    } catch (const StopTask&) {}
+}
 void availability_retry_oom() {
     initial_config();
     adapter::hp.last_error.assign(80,
@@ -4402,6 +4433,8 @@ int main(int argc, char** argv) {
             independent_source_cutover();
         else if (std::strcmp(scenario, "modbus_cutover_after_cleanup_sample") == 0)
             modbus_cutover_after_cleanup_sample();
+        else if (std::strcmp(scenario, "modbus_publish_oom_isolation") == 0)
+            modbus_publish_oom_isolation();
         else if (std::strcmp(scenario, "availability_retry_oom") == 0)
             availability_retry_oom();
         else if (std::strcmp(scenario, "full_mac_identity") == 0)

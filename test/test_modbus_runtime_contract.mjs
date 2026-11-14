@@ -52,7 +52,7 @@ try {
   const binary = compile(sourcePath, "production");
   const baseline = execute(binary, [], 20000);
   assert.equal(baseline.status, 0, `production runtime cases\n${baseline.stdout}${baseline.stderr}`);
-  const baselineCount = 44;
+  const baselineCount = 45;
   assert.match(baseline.stdout, new RegExp(`PASS total=${baselineCount}\\b`));
   console.log(baseline.stdout.trim());
 
@@ -91,6 +91,16 @@ try {
       after: "wait_for_tls = false;",
     },
     {
+      name: "worker-starts-while-mqtt-tls-resumes", scenario: "lifecycle",
+      before: "if (mqtt_tls_resume_pending()) return;",
+      after: "(void)mqtt_tls_resume_pending();",
+    },
+    {
+      name: "worker-keeps-heap-needed-by-mqtt-tls", scenario: "established_worker_yields_to_broker",
+      before: "if (first_sweep_pending || mqtt_tls_resume_short_of_heap()) {",
+      after: "if (first_sweep_pending) {",
+    },
+    {
       name: "worker-ignores-http-heap-reserve", scenario: "lifecycle",
       before: "heap_largest_internal_block() < startup_reserve ||",
       after: "false ||",
@@ -107,7 +117,7 @@ try {
     },
     {
       name: "unready-worker-keeps-stack-below-heap-floor", scenario: "worker_admission_pressure",
-      before: /else if \(!ready && \(heap_largest_internal_block\(\) < MB_FIRST_SWEEP_HEAP \|\|\s*heap_caps_get_free_size\(MALLOC_CAP_8BIT \| MALLOC_CAP_INTERNAL\) <\s*MB_FIRST_SWEEP_HEAP\)\)/,
+      before: /else if \(!ready && \(mqtt_tls_resume_pending\(\) \|\|\s*heap_largest_internal_block\(\) < MB_FIRST_SWEEP_HEAP \|\|\s*heap_caps_get_free_size\(MALLOC_CAP_8BIT \| MALLOC_CAP_INTERNAL\) <\s*MB_FIRST_SWEEP_HEAP\)\)/,
       after: "else if (false)",
     },
     {
