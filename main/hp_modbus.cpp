@@ -95,10 +95,10 @@ static int64_t          s_last_reply_ms   = -1; // guarded by s_mtx; this sessio
 static bool             s_poll_observed = false; // guarded by s_mtx; last attempted cycle completed
 static int64_t s_full_cache_status_ms   = -1;    // guarded by s_mtx; exact cache commit time mirror
 static int64_t s_plant_gate_ms          = -1;    // guarded by s_mtx; successful input53 reply time
-static int64_t s_space_route_ms           = -1; // guarded by s_mtx; successful input37 reply time
-static int64_t s_heating_mode_ms          = -1; // guarded by s_mtx; successful input38 reply time
-static int64_t s_dhw_operation_ms         = -1; // guarded by s_mtx; successful input52 reply time
-static int64_t s_plant_outdoor_ms         = -1; // guarded by s_mtx; successful input44 reply time
+static int64_t s_space_route_ms         = -1;    // guarded by s_mtx; successful input37 reply time
+static int64_t s_heating_mode_ms        = -1;    // guarded by s_mtx; successful input38 reply time
+static int64_t s_dhw_operation_ms       = -1;    // guarded by s_mtx; successful input52 reply time
+static int64_t s_plant_outdoor_ms       = -1;    // guarded by s_mtx; successful input44 reply time
 
 // The input 31 observation and its timestamp are guarded by s_mtx.
 static int64_t          s_compressor_ms = -1;
@@ -1509,10 +1509,10 @@ static void mb_poll_once() {
         s_status.heating_mode_active = final_current_session && gates.heating_mode_active;
         s_status.plant_outdoor = final_current_session ? plant_outdoor : logic::OutdoorEvidence{};
         s_full_cache_status_ms = final_current_session ? cache_commit_ms : -1;
-        s_plant_gate_ms               = final_current_session ? gates.plant_gate_ms : -1;
-        s_space_route_ms              = final_current_session ? gates.space_route_ms : -1;
-        s_heating_mode_ms             = final_current_session ? gates.heating_mode_ms : -1;
-        s_dhw_operation_ms            = final_current_session ? gates.dhw_operation_ms : -1;
+        s_plant_gate_ms        = final_current_session ? gates.plant_gate_ms : -1;
+        s_space_route_ms       = final_current_session ? gates.space_route_ms : -1;
+        s_heating_mode_ms      = final_current_session ? gates.heating_mode_ms : -1;
+        s_dhw_operation_ms     = final_current_session ? gates.dhw_operation_ms : -1;
         s_status.dhw_operation_known  = s_dhw_operation_ms >= 0;
         s_status.dhw_operation_active = s_status.dhw_operation_known && gates.dhw_operation_active;
         s_plant_outdoor_ms            = final_current_session ? plant_outdoor_ms : -1;
