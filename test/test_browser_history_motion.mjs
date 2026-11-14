@@ -696,6 +696,8 @@ async function observe(page, server, context, selectors, { inspector = false, st
     context + ": history input responsiveness budget exceeded: " + Math.round(inputMax) + " ms");
   if (status) {
     assert.ok(motion.statusPolls >= 1, context + ": real status refresh must land during observation");
+    if (context.endsWith("/board"))
+      assert.equal(motion.builds, 0, context + ": unchanged board plots must not be rebuilt on live polls");
     assert.equal(await page.evaluate("S.status.sys.free_heap"), fixture.status.sys.free_heap,
       context + ": changed board telemetry must reach browser state");
     const boardAfter = await boardHeapReading(page);
@@ -784,7 +786,7 @@ async function assertForecastRevision(page, server, fixture, context) {
 async function prepareInheritedFlow(page) {
   await page.waitFor("!S.histBusy.size && !_pollBusy");
   return evaluate(page, async () => {
-    // Derived pth/cop cards normally preload this ring; a focused flow run must exercise the same
+    // The derived heat-output card normally preloads this ring; a focused flow run must exercise the same
     // inherited-cache path. Populate it through the real GET if those cards have not run.
     if (!S.hist.get("flow")) await ensureHist("flow");
     const cached = S.hist.get("flow");
@@ -1354,7 +1356,8 @@ export async function assertHistoryMotion(page, server, context) {
       }
     }
     console.log("history motion matrix passed: " + context + "; " +
-      (only ? "focused " + only : "28 history inspectors; 12 no-history routes; 5 disclosure paths; 3 conditional source variants") +
+      (only ? "focused " + only : `${Object.keys(INSPECTOR_TRENDS).length} history inspectors; ` +
+        `${NO_HISTORY_INSPECTORS.length} no-history routes; 5 disclosure paths; 3 conditional source variants`) +
       "; " + Math.round((performance.now() - started) / 1000) + " s");
   } finally {
     await evaluate(page, () => {

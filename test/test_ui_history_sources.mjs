@@ -406,7 +406,7 @@ assert.match(roomOnlyHtml, /vhist-source room/,
   "an MQTT-only history must still name its physical source");
 assert.match(h.scrubText(h.historyView("room_temp"), 2), /23,6 °C$/);
 assert.doesNotMatch(h.scrubText(h.historyView("room_temp"), 2), /Meross/);
-S.histPin.set("room_temp", { i: 2, gen: h.historyView("room_temp").gen });
+S.histPin.set("room_temp", { i: 2, gen: h.historyView("room_temp").gen, sources: "room" });
 assert.match(h.histHtml("room_temp", "°C", "Raumtemperatur"), /vhist-mark vhist-pinned room/);
 S.histPin.delete("room_temp");
 S.hist.delete("room:room_temp");
@@ -433,44 +433,49 @@ assert.equal(S.hist.get("dt").b0, 100);
 assert.deepEqual(Array.from(S.hist.get("dt").v), [null, 60, 60],
   "the earlier bucket remains a gap instead of being cut off with the shorter input");
 
-// The CT overlay at 0x63/16 can make CT-L3 unavailable for one bucket while L1/L2 still answer.
-// That is not a two-phase installation and must never become a plausible partial input sum. Both
-// derived consumers follow the live card: fall back to the INV ring until every CT phase declared
-// by this snapshot is present; only a complete positive CT set owns the whole-unit boundary.
-const threeCtPhases = { ct_l1: true, ct_l2: true, ct_l3: true, inv_current: true, comp_rps: true };
-assert.equal(h.DERIVED.pel.fn(
-  { ct_l1: 10, ct_l2: 10, ct_l3: null, inv_current: 5, comp_rps: 45 }, threeCtPhases), 1.15,
-  "a withheld CT-L3 bucket must use INV current instead of publishing the L1+L2 partial sum");
-assert.equal(h.DERIVED.pel.fn(
-  { ct_l1: 10, ct_l2: 10, ct_l3: null, inv_current: 5, comp_rps: null }, threeCtPhases), null,
-  "a sample without a speed reading is one the firmware could not withhold, ring or no ring");
-// Without a compressor-speed ring the firmware cannot store a held gap, so the inverter ring keeps
-// the last run's number at rest. A complete CT set is unaffected; the inverter input is refused.
-const noSpeedRing = { ct_l1: true, ct_l2: true, ct_l3: true, inv_current: true };
-assert.equal(h.DERIVED.pel.fn(
-  { ct_l1: 10, ct_l2: 10, ct_l3: null, inv_current: 5 }, noSpeedRing), null,
-  "an inverter ring without a speed ring must not be drawn as a live kilowatt");
-assert.equal(h.DERIVED.pel.fn(
-  { ct_l1: 10, ct_l2: 10, ct_l3: 10, inv_current: 5 }, noSpeedRing), 6.9,
-  "a complete CT set needs no speed ring");
-assert.equal(!!h.DERIVED.pel.ready({ inv_current: true }), false,
-  "a profile with only an inverter ring and no speed ring offers no electrical curve");
-assert.equal(!!h.DERIVED.pel.ready({ inv_current: true, comp_rps: true }), true,
-  "the inverter ring is offered beside a speed ring");
-assert.equal(h.DERIVED.pel.fn(
-  { ct_l1: 10, ct_l2: 10, ct_l3: 10, inv_current: 5, comp_rps: 45 }, threeCtPhases), 6.9,
-  "a complete positive CT set remains the preferred whole-unit electrical estimate");
-const partialCtCop = h.DERIVED.cop.fn({
-  flow: 20, leaving_water: 35, return_water: 30, comp_rps: 45, inv_current: 5,
-  ct_l1: 1, ct_l2: 1, ct_l3: null,
-}, threeCtPhases);
-assert.ok(partialCtCop > 0,
-  "an incomplete CT set must use the matching INV boundary instead of suppressing COP as CT-sourced");
-assert.equal(h.DERIVED.cop.fn({
-  flow: 20, leaving_water: 35, return_water: 30, comp_rps: 45, inv_current: 5,
-  ct_l1: 1, ct_l2: 1, ct_l3: 1,
-}, threeCtPhases), null,
-  "a complete positive CT set must still suppress the mismatched historical COP boundary");
+// A 5 A INV reading from a sweep without a speed witness and 18 rps from a later sweep can
+// occupy the same bucket. That raw current must stay visible without creating an estimate.
+{
+  const originalRows = S.status.history.rows;
+  const originalHistory = S.hist;
+  const originalResponse = historyResponse;
+  const originalUrls = fetchedUrls;
+  const rows = ["inv_current", "comp_rps", "flow", "leaving_water", "return_water"].map(id => ({ id }));
+  S.status.history.rows = rows;
+  const base = { at: Date.now(), gen: 1, dt: 300, b0: 100 };
+  S.hist = new Map([
+    ["inv_current", { ...base, unit: "A", v: [null, 50, 0, 50], held: [[0, 1]] }],
+    ["comp_rps", { ...base, v: [0, 180, 180, 0], held: [] }],
+  ]);
+  fetchedUrls = [];
+  assert.equal(h.hasHist("inv_current"), true, "raw inverter current remains available");
+  assert.deepEqual(Array.from(h.historyView("inv_current").v), [null, 50, 0, 50]);
+  assert.equal(!!h.hasHist("pel"), false, "raw inverter and speed rings alone cannot offer electrical history");
+  assert.equal(!!h.hasHist("cop"), false, "independent rings cannot offer a historical COP");
+  await h.ensureHistPair("pel");
+  await h.ensureHistPair("cop");
+  assert.deepEqual(fetchedUrls, []);
+  assert.equal(h.histHtml("pel", "", "Electrical input"), "");
+  assert.equal(h.histHtml("cop", "", "COP"), "");
+
+  // A later partial CT sweep can update L1/L2 and leave the preceding sweep's L3 in the same
+  // bucket. Preserve the raw readings and refuse the resulting apparent 11.5 kW.
+  S.status.history.rows = [...rows, { id: "ct_l1" }, { id: "ct_l2" }, { id: "ct_l3" }];
+  for (const [id, value] of [["ct_l1", 200], ["ct_l2", 200], ["ct_l3", 100]]) {
+    S.hist.set(id, { ...base, unit: "A", v: [100, value], held: [] });
+    assert.deepEqual(Array.from(h.historyView(id).v), [100, value]);
+  }
+  assert.equal(h.hasHist("pel"), false, "same-bucket CT readings cannot qualify a historical power estimate");
+  await h.ensureHistPair("pel");
+  assert.deepEqual(fetchedUrls, []);
+  assert.equal(h.histHtml("pel", "", "Electrical input"), "");
+  assert.equal(h.histHtml("cop", "", "COP"), "");
+  S.status.history.rows = originalRows;
+  S.hist = originalHistory;
+  historyFetchError = false;
+  historyResponse = originalResponse;
+  fetchedUrls = originalUrls;
+}
 
 // Thermal output has the same compressor boundary as the live pill. Preserve a no-flow bucket as
 // zero, retain signed active/defrost transfer, and refuse pump-overrun redistribution.

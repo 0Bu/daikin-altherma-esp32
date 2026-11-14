@@ -297,11 +297,12 @@ Computed readings chart their own units and expressions, not an input relabelled
 Heat output retains signed balance across heating, cooling and defrost; the live pill also applies
 current mode and useful-direction gates. Measured no flow records zero. Moving water needs a running
 compressor witness; stopped-compressor pump overrun leaves a gap. A profile without compressor
-frequency offers no heat-output curve. Other missing required inputs make a gap; held-over applies
-only when every missing input was held. The historical
-COP uses the conservative inverter-sourced boundary and omits CT-sourced samples rather than
-pairing asynchronous heater/temperature bucket events. An intentionally refused empty series says
-so. Chart titles name the stable concept, not the live one-second scope.
+frequency offers no heat-output curve. Raw current-transformer phases and inverter current retain
+their own histories. A five-minute bucket can contain phase currents, inverter current and
+compressor speed from different sweeps. The electrical-input and COP inspectors omit derived
+history. Missing input samples leave a gap. A gap is held-over only when every missing input was
+held. A successful empty series shows “No readings recorded yet.” An unavailable series reports
+an error. Chart titles name the stable concept.
 
 Categorical histories use source-labelled tracks, written states, distinct state colours and
 hatching only for missing samples. Valve and Quiet use latest sampled state; BSH, BUH stages and
@@ -321,8 +322,10 @@ mounted plots and in-flight history requests, including A → B → A between po
 Replies carry sample epoch and boot identity. Delayed raw or derived replies cannot refill retired
 state or release a successor's busy lease. After a completed live poll, the open inspector and
 visible Dashboard or Settings plots can refresh after the cache cooldown. They share one
-automatic history request per poll. Opening a chart can queue its independent rings on the same
-transport, which yields to live polls. A failed refresh keeps the last compatible samples.
+automatic history request per poll. Opening a chart can queue independent reads in that tab.
+Closing a chart ends its gesture. Already queued reads can still fill the cache. A live poll can
+interrupt a first read. The next attempt gets one request timeout to finish before polling resumes.
+A failed refresh keeps the last compatible samples.
 
 Hover previews a sample; tap pins it, a second tap on the same sample/Escape clears it. The two views
 of a row share a pin and freeze while either is scrubbed. A dated pin tracks its sample instant.

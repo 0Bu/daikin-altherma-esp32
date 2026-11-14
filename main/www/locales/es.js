@@ -1,4 +1,4 @@
-// translation-source: 34200897e3bb460a7f6fcd68bd6ff940649f8810c9b3709dc7616000e01aee90
+// translation-source: 203c0f333f1a4749e0dd21841787244ee126501eacbd291eb671d1b290a8c21f
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -950,7 +950,6 @@ I18N.es = localeValues([
   /* lang.sv */ "Svenska",
   /* lang.fi */ "Suomi",
   /* lang.saved */ "Idioma guardado",
-  /* hist.cop_none */ "No se muestra la curva de COP cuando la potencia eléctrica procede de las pinzas CT. Las cargas incluidas dependen del cableado; la potencia térmica registrada termina antes de BUH y no incluye el calor directo de BSH, por lo que no se garantiza la misma frontera de balance.",
 ]);
 INSPECT_I18N.es = inspectValues(
   ["Sin lectura actual:", "el compresor está parado y la unidad exterior solo actualiza sus sensores cuando funciona. Se oculta el valor del último ciclo para no presentarlo como una medición actual.", "No se puede leer la velocidad del compresor; los valores de la unidad exterior pueden ser del último ciclo."],

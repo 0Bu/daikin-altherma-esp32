@@ -511,6 +511,7 @@ async function readStatusFrame(paint = true, timeout, quiet = false) {
   if (!current() || !acceptImageLease(s)) return false;
   await setLangFromStatus(s, current);
   if (!current()) return false;
+  const wasX10aDown = S.status?.hp?.connected === false;
   S.status = s;
   S.statusAcceptedRequest = request;
   const epoch = S.histEpoch;
@@ -519,7 +520,8 @@ async function readStatusFrame(paint = true, timeout, quiet = false) {
     S.otaCached = false;
     otaCacheClear();
     invalidateLiveReadings("values");
-  }
+  } else if (wasX10aDown !== (s?.hp?.connected === false) &&
+             typeof expireFallbackHistoryPins === "function") expireFallbackHistoryPins();
   if (S.transportUnavailable === "status") { S.transportUnavailable = "values"; S.transportBusy = false; }
   const profile = s?.profile?.id || "";
   if (hpProbeIsOpen() && profile !== S.hpProbeCatalogProfile && !S.hpProbeCatalogBusy)

@@ -61,25 +61,9 @@ function hasHist(id) {
   return D ? D.ready(Object.fromEntries(D.ins.map((k) => [k, hasDeviceHist(k)]))) : hasDeviceHist(id);
 }
 
-// Sum CT current only when every phase ring declared by this firmware snapshot has a value in the
-// bucket. A null is not zero: CT-L3 is deliberately withheld while its shared byte carries the
-// HP-Forced flag, and adding the surviving phases would understate input. Returning null lets both
-// derived consumers use their INV fallback, exactly like liveData(); a real complete 0 A set still
-// returns zero and therefore also falls back for the compressor-only estimate.
-function completeCtCurrent(s, has) {
-  const keys = ["ct_l1", "ct_l2", "ct_l3"].filter((k) => has && has[k]);
-  return !keys.length || keys.some((k) => s[k] == null)
-    ? null : keys.reduce((a, k) => a + s[k], 0);
-}
-
-// ── Derived trends: computed pills and combined component states ───────────────────────────────
-// Pump speed, ΔT, heat output, electrical input and COP have no directly matching register value, so
-// the device has nothing to buffer for the displayed figure itself. BUH likewise has two physical
-// stage bits but one component-level inspector. Their 24-hour curves/timeline are assembled
-// HERE, out of the rings of what each is computed FROM,
-// by the same expressions liveData() uses for the live number — one definition of each figure
-// rather than a firmware copy and a browser copy free to drift apart. `inv_current` and `ct_l1..3`
-// are in logic/history.hpp's TRENDS for exactly this; they are inputs first and rows second.
+// Derived trends combine measurements on the same five-minute raster. The recorded
+// samples within a bucket can come from different sweeps. Electrical input and COP
+// stay live-only. Raw phase currents and inverter current have their own rings.
 //
 // Every input arrives on ONE raster: history.cpp commits every ring on the same bucket boundary, so
 // sample i is the same five minutes in all of them, and a row the profile lacks is simply not
@@ -133,49 +117,6 @@ const DERIVED = {
       if (s.leaving_water == null || s.return_water == null || s.comp_rps == null) return null;
       if (!(s.comp_rps > 5)) return null;
       return (s.flow / 60) * 4.186 * (s.leaving_water - s.return_water);
-    },
-  },
-  // Amps × an assumed 230 V, a complete declared CT set preferred over inverter current —
-  // liveData()'s rule, one sample at a time. The live version needs `d.ouHeldOver` to gate the INV
-  // fallback because /values still carries last run's number; here the ring has already withheld
-  // it, so a null is simply a null. An idle plant reads 0 A on fitted clamps, and the fallback is
-  // what makes that a compressor figure rather than a flat zero. The firmware can only store that gap
-  // where it can read the compressor speed. Without a speed sample it withheld nothing, so the live
-  // pill's refusal applies here as well.
-  pel: {
-    unit: "kW", ins: ["ct_l1", "ct_l2", "ct_l3", "inv_current", "comp_rps"],
-    ready: (h) => (h.inv_current && h.comp_rps) || h.ct_l1 || h.ct_l2 || h.ct_l3,
-    fn: (s, has) => {
-      const ct = completeCtCurrent(s, has);
-      if (ct != null && ct > 0) return (ct * 230) / 1000;
-      if (!has || !has.comp_rps || s.comp_rps == null) return null;
-      return s.inv_current == null ? null : (s.inv_current * 230) / 1000;
-    },
-  },
-  // The quotient, and it is deliberately drawn on FEWER samples than its two inputs. Two gates:
-  //   running — the live pill's own (rps > 5, ΔT > 0.5); a COP of a stopped plant is not a small
-  //             COP, it is not one at all.
-  //   scope   — cop_scope.hpp: the CT clamps see the whole unit INCLUDING both resistive heaters
-  //             while this historical quotient deliberately retains the pre-BUH boundary. R2T now
-  //             has its own curve, but tank-heater heat crosses neither water sensor and the five-
-  //             minute rings keep last readings/events rather than one synchronised plant sample.
-  //             A CT-sourced sample therefore still draws NOTHING instead of splicing together a
-  //             plausible whole-plant quotient. An INV-sourced sample has the heaters outside both
-  //             sides and needs no such evidence, which is why it survives.
-  cop: {
-    unit: "", ins: ["flow", "leaving_water", "return_water", "comp_rps", "inv_current",
-                    "ct_l1", "ct_l2", "ct_l3"],
-    none: "hist.cop_none",
-    ready: (h) => h.flow && h.leaving_water && h.return_water && h.comp_rps && h.inv_current,
-    fn: (s, has) => {
-      const ct = completeCtCurrent(s, has);
-      if (ct != null && ct > 0) return null;           // whole-unit divisor — see the note above
-      if (s.inv_current == null || s.flow == null) return null;
-      if (s.leaving_water == null || s.return_water == null || s.comp_rps == null) return null;
-      const dt = s.leaving_water - s.return_water;
-      const pel = (s.inv_current * 230) / 1000;
-      if (!(s.comp_rps > 5) || !(dt > 0.5) || !(pel > 0.2)) return null;
-      return ((s.flow / 60) * 4.186 * dt) / pel;
     },
   },
 };
@@ -328,7 +269,10 @@ function pumpHistoryQueue() {
 
 function yieldHistoryToPoll() {
   if (!historyTransport?.controller) return;
-  const { controller, active } = historyTransport;
+  const { controller, active, retried } = historyTransport;
+  // The first poll takes precedence. The retried read gets its own bounded timeout so a
+  // response slower than one poll interval can still complete without concurrent requests.
+  if (retried) return active;
   historyTransport.yielded = true;
   controller.abort();
   return active;
@@ -466,8 +410,7 @@ async function ensureDerived(id) {
   (S.histRequests ||= new Map()).set(id, request);
   S.histBusy.add(id);
   try {
-    const has = Object.fromEntries(D.ins.map((k) => [k, hasDeviceHist(k)]));
-    const use = D.ins.filter((k) => has[k]);
+    const use = D.ins.filter(hasDeviceHist);
     await Promise.all(use.map((k) => ensureHist(k)));
     if (syncHistSources() !== epoch || S.histRequests.get(id) !== request) return;
     // An input refused for its source identity is pending, not failed: wait with it rather than
@@ -477,11 +420,13 @@ async function ensureDerived(id) {
       (S.histAwait ||= new Map()).set(id, { epoch, at: Date.now() });
       return;
     }
-    if (previous && !previous.err && use.some(k => S.hist.get(k)?.refreshFailed)) {
+    // Keep transport failures separate from gaps in a successfully fetched ring.
+    const rings = use.map(k => [k, S.hist.get(k)]);
+    if (rings.some(([, h]) => !h || h.err || h.refreshFailed)) {
       S.hist.set(id, failed());
       return;
     }
-    const src = use.map((k) => [k, S.hist.get(k)]).filter(([, h]) => h && !h.err && h.v.length);
+    const src = rings.filter(([, h]) => h.v.length);
     if (!src.length) { S.hist.set(id, failed()); return; }
     const inputs = JSON.stringify([use, src.map(([key, h]) => [key, h.gen])]);
     if (previous && previous.inputs === inputs) {
@@ -515,7 +460,7 @@ async function ensureDerived(id) {
         s[k] = raw == null ? null : raw / 10;             // tenths on the wire, units in the formula
         if (raw == null) { missing++; if (j >= 0 && j < h.v.length && histHeld(h, j)) heldMissing++; }
       }
-      const out = D.fn(s, has);
+      const out = D.fn(s);
       v.push(out == null || !Number.isFinite(out) ? null : Math.round(out * 10));
       // A gap inherits its REASON, and only when EVERY missing input carries it: "the outdoor unit
       // was resting" is a statement that nothing failed, so one input that genuinely failed to
@@ -1192,22 +1137,11 @@ function histHtml(id, unit, name, source = "") {
     return wrap(`<div class="vhist-note">${esc(t("hist.loading"))}</div>`, "vhist-flat");
   if (!view && [hx, hm, he, hr].filter(Boolean).every((h) => h.err))
     return wrap(`<div class="vhist-note">${esc(t("hist.err"))}</div>`, "vhist-flat");
-  if (!view) {
-    const D = DERIVED[id];
-    return wrap(`<div class="vhist-note">${esc(D && D.none ? t(D.none) : t("hist.none"))}</div>`, "vhist-flat");
-  }
+  if (!view) return wrap(`<div class="vhist-note">${esc(t("hist.none"))}</div>`, "vhist-flat");
 
   const allPts = view.series.flatMap((s) => s.v.map((x) => x == null ? null : x / 10));
   const real = allPts.filter((x) => x != null);
-  // "No readings yet" is the RIGHT sentence for a ring the device has not filled, and the WRONG one
-  // for a derived figure that is being withheld on purpose — the COP on a CT-clamp install has a
-  // full set of inputs and still draws nothing, so the generic note would call a deliberate refusal
-  // an empty buffer, one line under a pill that is showing the very number. A derived series may
-  // therefore name its own empty case.
-  if (!real.length) {
-    const D = DERIVED[id];
-    return wrap(`<div class="vhist-note">${esc(D && D.none ? t(D.none) : t("hist.none"))}</div>`, "vhist-flat");
-  }
+  if (!real.length) return wrap(`<div class="vhist-note">${esc(t("hist.none"))}</div>`, "vhist-flat");
 
   if (STATE_HIST[id]) return stateHistHtml(id, name, view, wrap, STATE_HIST[id]);
 
@@ -1614,7 +1548,21 @@ function histPinIndex(id, h) {
     const i = Math.trunc((rel >= 0 ? rel + half : rel - half) / h.dt);
     return (i < 0 || i >= h.v.length) ? -1 : i;
   }
-  return p.gen === h.gen ? p.i : -1;             // index pin: valid only for the series it was made on
+  return p.gen === h.gen && p.sources === histPinSources(h) ? p.i : -1;
+}
+
+// Categorical charts show every source lane. Numeric fallback can change the visible instrument
+// without replacing either ring, so its selected sources are part of an undated sample identity.
+function histPinSources(h) {
+  return (STATE_HIST[h.id] ? h.series : histVisibleSeries(h)).map(s => s.source).join(",");
+}
+
+function expireFallbackHistoryPins() {
+  for (const [id, pin] of S.histPin) {
+    if (pin.t != null || pin.source || !hasModbusHist(id)) continue;
+    const view = historyView(id);
+    if (!view || histPinIndex(id, view) < 0) S.histPin.delete(id);
+  }
 }
 // Pin sample `i` of `label`, or UNPIN when that same sample is already pinned — tapping the readout
 // you just made is the obvious way to dismiss it, and needs no extra affordance on a 72 px plot.
@@ -1627,7 +1575,7 @@ function histPinToggle(id, i, source = "") {
   if (histPinIndex(id, h) === i) S.histPin.delete(id);
   else if (i >= h.v.length) S.histPin.set(id, { t: forecast.points[i - h.v.length].time, forecast: true });
   else if (h.t0 != null) S.histPin.set(id, { t: h.t0 + i * h.dt });
-  else S.histPin.set(id, { i, gen: h.gen });
+  else S.histPin.set(id, { i, gen: h.gen, sources: histPinSources(h), source });
   // Render PAST the click guard. That guard exists to stop a POLL from replacing the DOM in the
   // middle of a click; it must not delay the very update the click just asked for — a pin that
   // appeared 600 ms after the finger lifted would read as the same "it didn't take" the pin was
@@ -2251,10 +2199,11 @@ function displayHomeHubLabel(row) {
 // `trendId` is the series the panel carries, if any: the toggle fetches and un-pins by it, so the
 // id is derived ONCE (here, where the body was built) instead of again from the key — which for a
 // board row is not a catalog label and could not be looked up at all.
-function descAccordion(key, label, valHtml, cls, bodyHtml, trendId, unit = "", paused) {
+function descAccordion(key, label, valHtml, cls, bodyHtml, trendId, unit = "", paused,
+                       renderHistory = histHtml) {
   const open = S.descOpen.has(key);
   const visible = !paused && !(paused === false && S.stage === "settings");
-  const chart = open && trendId && visible ? histHtml(trendId, unit, label) : "";
+  const chart = open && trendId && visible ? renderHistory(trendId, unit, label) : "";
   if (trendId) bodyHtml += `<div data-chart="${open && !visible ? 1 : ""}" data-epoch="${S.histEpoch || 0}">${chart}</div>`;
   const diagnosisLabel = key.startsWith("model:health_") || key === "service:refrigerant";
   return `<div class="vitem${open ? " open" : ""}">` +

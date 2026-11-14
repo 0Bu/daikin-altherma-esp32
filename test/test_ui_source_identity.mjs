@@ -27,7 +27,7 @@ vm.runInContext(read("app_state") + "\n" + read("history") + "\n" +
   hydrateRoutedPopup = () => {};
   this.ui = { S, refreshStatus, fillRefTemp, refTempFormPayload, formatRefSource, parseRefSource,
     ensureHist, ensureHistPair, ensureDerived, historyView, histPinIndex, histCacheKey, syncHistSources,
-    yieldHistoryToPoll, pumpHistoryQueue };
+    yieldHistoryToPoll, pumpHistoryQueue, histPinToggle };
 `, context);
 const ui = context.ui;
 const plain = (value) => JSON.parse(JSON.stringify(value));
@@ -326,8 +326,15 @@ context._pollBusy = false;
 ui.pumpHistoryQueue();
 const resumed = pending.shift();
 assert.equal(resumed.url, firstRead.url, "the preempted read resumes once the poll finishes");
+context._pollBusy = true;
+const settling = ui.yieldHistoryToPoll();
+assert.equal(resumed.signal.aborted, false, "a second poll lets the retried request finish");
+assert.equal(pending.length, 0, "the retry and the following poll still share one transport");
 reply(resumed, 455);
-await new Promise(resolve => setImmediate(resolve));
+await settling;
+assert.equal(pending.length, 0, "the Modbus ring cannot start before the waiting poll finishes");
+context._pollBusy = false;
+ui.pumpHistoryQueue();
 assert.equal(pending.length, 1);
 assert.match(pending[0].url, /source=modbus/);
 reply(pending.shift(), 445);
@@ -336,6 +343,23 @@ assert.equal(ui.S.hist.get("dhw_tank").v[0], 455);
 assert.equal(ui.S.hist.get(ui.histCacheKey("dhw_tank", "modbus")).v[0], 445);
 
 context.fetch = (url) => new Promise((resolve, reject) => pending.push({ url, resolve, reject }));
+
+// Default fallback can change the plotted instrument while both undated ring generations stay
+// unchanged. The retired X10A pin must not silently select Modbus or reappear after failback.
+await reset();
+const undated = { at: Date.now(), gen: 1, t0: null, b0: 100, dt: 300, v: [452, 454] };
+ui.S.hist.set("dhw_tank", undated);
+ui.S.hist.set(ui.histCacheKey("dhw_tank", "modbus"), { ...undated, v: [431, 434] });
+context.renderTrendHosts = () => {};
+ui.histPinToggle("dhw_tank", 1);
+assert.equal(ui.histPinIndex("dhw_tank", ui.historyView("dhw_tank")), 1);
+const disconnected = fixture();
+disconnected.hp.connected = false;
+await status(disconnected);
+assert.equal(ui.S.histPin.has("dhw_tank"), false);
+assert.equal(ui.histPinIndex("dhw_tank", ui.historyView("dhw_tank")), -1);
+await status(fixture());
+assert.equal(ui.histPinIndex("dhw_tank", ui.historyView("dhw_tank")), -1);
 
 // The cached delta uses two undated rings. A transient failure on both inputs preserves the
 // selected index and generation. A successful new ring changes that generation.
@@ -347,7 +371,7 @@ await new Promise(resolve => setImmediate(resolve));
 reply(pending.shift(), 400);
 await delta;
 const oldDelta = ui.S.hist.get("dt");
-ui.S.histPin.set("dt", { i: 0, gen: ui.historyView("dt").gen });
+ui.histPinToggle("dt", 0);
 for (const id of ["leaving_water", "return_water", "dt"]) ui.S.hist.get(id).at = 0;
 const failedDelta = ui.ensureDerived("dt");
 assert.equal(pending.length, 1);

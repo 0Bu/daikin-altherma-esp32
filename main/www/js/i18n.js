@@ -905,7 +905,6 @@ const I18N = {
     "lang.uk": "Українська", "lang.zh": "简体中文", "lang.ja": "日本語",
     "lang.nb": "Norsk", "lang.sv": "Svenska", "lang.fi": "Suomi",
     "lang.saved": "Language saved",
-    "hist.cop_none": "No COP curve while electrical input comes from CT clamps. Their wiring decides which loads are included; buffered heat ends before BUH and excludes heat added directly by BSH, so the balance boundaries may not match.",
   },
 };
 function t(k, ...a) {

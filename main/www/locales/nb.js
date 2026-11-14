@@ -1,4 +1,4 @@
-// translation-source: 34200897e3bb460a7f6fcd68bd6ff940649f8810c9b3709dc7616000e01aee90
+// translation-source: 203c0f333f1a4749e0dd21841787244ee126501eacbd291eb671d1b290a8c21f
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -950,7 +950,6 @@ I18N.nb = localeValues([
   /* lang.sv */ "Svenska",
   /* lang.fi */ "Suomi",
   /* lang.saved */ "Språk lagret",
-  /* hist.cop_none */ "Ingen COP-historikk når strømverdien kommer fra CT-klemmer. Kablingen avgjør hvilke laster de dekker; varmemålingen slutter før BUH og omfatter ikke direkte BSH-varme. Balansegrensene kan derfor avvike.",
 ]);
 
 INSPECT_I18N.nb = inspectValues(

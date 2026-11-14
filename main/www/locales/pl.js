@@ -1,4 +1,4 @@
-// translation-source: 34200897e3bb460a7f6fcd68bd6ff940649f8810c9b3709dc7616000e01aee90
+// translation-source: 203c0f333f1a4749e0dd21841787244ee126501eacbd291eb671d1b290a8c21f
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -955,7 +955,6 @@ I18N.pl = localeValues([
   /* lang.sv */ "Svenska",
   /* lang.fi */ "Suomi",
   /* lang.saved */ "Zapisano język",
-  /* hist.cop_none */ "Brak wykresu COP dla CT: okablowanie określa odbiorniki, a ciepło przed BUH pomija BSH.",
 ]);
 INSPECT_I18N.pl = inspectValues(
   ["Brak bieżącego odczytu:", "sprężarka stoi, a jednostka zewnętrzna odświeża własne czujniki tylko podczas pracy. Wartość z poprzedniego cyklu jest ukryta, aby nie wyglądała na aktualny pomiar.", "Nie można odczytać prędkości sprężarki, więc wartości jednostki zewnętrznej mogą być z poprzedniego cyklu."],

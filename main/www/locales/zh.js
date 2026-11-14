@@ -1,4 +1,4 @@
-// translation-source: 34200897e3bb460a7f6fcd68bd6ff940649f8810c9b3709dc7616000e01aee90
+// translation-source: 203c0f333f1a4749e0dd21841787244ee126501eacbd291eb671d1b290a8c21f
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
@@ -950,7 +950,6 @@ I18N.zh = localeValues([
   /* lang.sv */ "Svenska",
   /* lang.fi */ "Suomi",
   /* lang.saved */ "语言已保存",
-  /* hist.cop_none */ "CT 供电功率时不画 COP：所含负载取决于接线，而热功率止于 BUH 前且不含 BSH，电热边界可能不一致。",
 ]);
 INSPECT_I18N.zh = inspectValues(
   ["无当前读数：", "压缩机已停；仅运行时更新的室外传感器会隐藏旧值。", "无法读取压缩机转速，室外机读数可能来自上次运行。"],

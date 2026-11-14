@@ -1,4 +1,4 @@
-// translation-source: 34200897e3bb460a7f6fcd68bd6ff940649f8810c9b3709dc7616000e01aee90
+// translation-source: 203c0f333f1a4749e0dd21841787244ee126501eacbd291eb671d1b290a8c21f
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -950,7 +950,6 @@ I18N.cs = localeValues([
   /* lang.sv */ "Svenska",
   /* lang.fi */ "Suomi",
   /* lang.saved */ "Jazyk uložen",
-  /* hist.cop_none */ "Graf COP chybí pro příkon z CT: zapojení určuje spotřebiče a teplo před BUH nezahrnuje BSH, takže hranice bilance nemusí souhlasit.",
 ]);
 INSPECT_I18N.cs = inspectValues(
   ["Chybí aktuální hodnota:", "kompresor stojí a venkovní jednotka obnovuje své snímače jen za chodu. Hodnota z minulého běhu je skryta, aby nepůsobila jako aktuální měření.", "Otáčky kompresoru nelze přečíst, takže hodnoty venkovní jednotky mohou být z minulého běhu."],

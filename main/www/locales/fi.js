@@ -1,4 +1,4 @@
-// translation-source: 34200897e3bb460a7f6fcd68bd6ff940649f8810c9b3709dc7616000e01aee90
+// translation-source: 203c0f333f1a4749e0dd21841787244ee126501eacbd291eb671d1b290a8c21f
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -950,7 +950,6 @@ I18N.fi = localeValues([
   /* lang.sv */ "Svenska",
   /* lang.fi */ "Suomi",
   /* lang.saved */ "Kieli tallennettu",
-  /* hist.cop_none */ "COP-käyrää ei näytetä, kun sähköteho tulee CT-virtamuuntajilta. Johdotus määrää kuormat; lämpölaskenta päättyy ennen BUH:ta eikä sisällä BSH:n suoraan tankkiin lisäämää lämpöä, joten taserajat eivät välttämättä vastaa toisiaan.",
 ]);
 
 DESCRIPTION_I18N.fi = descriptionValues([

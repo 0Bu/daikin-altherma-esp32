@@ -1,4 +1,4 @@
-// translation-source: 34200897e3bb460a7f6fcd68bd6ff940649f8810c9b3709dc7616000e01aee90
+// translation-source: 203c0f333f1a4749e0dd21841787244ee126501eacbd291eb671d1b290a8c21f
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -950,7 +950,6 @@ I18N.fr = localeValues([
   /* lang.sv */ "Svenska",
   /* lang.fi */ "Suomi",
   /* lang.saved */ "Langue enregistrée",
-  /* hist.cop_none */ "Aucune courbe de COP lorsque la puissance électrique provient des pinces CT. Les charges prises en compte dépendent du câblage ; la puissance thermique enregistrée s’arrête avant BUH et n’inclut pas la chaleur directe de BSH, donc une même frontière de bilan n’est pas garantie.",
 ]);
 INSPECT_I18N.fr = inspectValues(
   ["Aucun relevé actuel :", "le compresseur est arrêté et l’unité extérieure n’actualise ses propres capteurs qu’en fonctionnement. La valeur du dernier cycle est masquée pour ne pas la présenter comme actuelle.", "Vitesse du compresseur illisible : les valeurs de l’unité extérieure peuvent venir du dernier cycle."],

@@ -815,7 +815,6 @@ const PEL_INSPECT = {
     ? { en: "Electrical input (HomeHub)", de: "Stromaufnahme (HomeHub)" }
     : { en: "Electrical input (estimated)", de: "Geschätzte Stromaufnahme" },
   aria: { en: "Electrical input", de: "Stromaufnahme" },
-  trend: "pel",
   what: (d) => pelMeasured(d) ? PEL_MEASURED_WHAT : PEL_ESTIMATED_WHAT,
   head: (d) => (d.pel == null ? "—" : pelApproxText(d) + fmt1(d.pel) + " kW"),
   // Four cases: the measured gateway row, either X10A current source, a held-over inverter row, or
@@ -1132,7 +1131,6 @@ const INSPECT = {
     // The hit target's accessible name — stable, because it is applied once at startup (see
     // labelSchematicHits). Which COP it turns out to be is the panel's to say, not the label's.
     aria: { en: "Efficiency (estimated)", de: "Geschätzte Effizienz" },
-    trend: (d) => d && d.efficiencyKind === "eer" ? "" : "cop",
     what: (d) => d && d.efficiencyKind === "eer"
       ? { en: "Estimated cooling capacity divided by estimated electrical input. The cooling numerator uses internal PHE sensors and is accepted only with a running compressor and R1T below R4T. The result inherits the water/glycol, sensor, voltage and power-factor assumptions of both estimates. Daikin also describes calculated energy figures as estimates whose accuracy is not guaranteed. This is an instantaneous EER, not a seasonal efficiency figure; metered seasonal energy is more meaningful.",
           de: "Geschätzte Kälteleistung geteilt durch geschätzte elektrische Aufnahme. Die Kälteleistung im Zähler nutzt die internen PHE-Fühler und wird nur bei laufendem Verdichter sowie R1T unter R4T gewertet. Das Ergebnis übernimmt alle Annahmen zu Wasser oder Glykol, Fühlern, Spannung und Leistungsfaktor aus beiden Schätzungen. Auch Daikin bezeichnet berechnete Energiewerte als Schätzungen ohne garantierte Genauigkeit. Das ist ein momentaner EER und keine saisonale Effizienzkennzahl; aussagekräftiger ist saisonal gemessene Energie." }
@@ -1737,10 +1735,8 @@ function renderInspectHist(e, row, mode = "") {
     replaceHistoryHtml(el, offered.length ? env3HistHtml(historyView(ENV3_COMBINED_ID, "", forecast)) : "");
     return started;
   }
-  // A plain pill drawn from a ROW charts that row. A COMPUTED pill (ΔT, heat output, electrical
-  // input, COP) or a grouped component (BUH's two stage rows) charts the explicit series named by
-  // the entry's `trend`, even when one source row anchors the inspector. Never silently substitute
-  // one input: a flow-rate curve under a heat-output headline would be physically false.
+  // Plain pills can chart their source row. Computed or grouped pills use the explicit series
+  // named by `trend` so the chart represents the same quantity as the inspector.
   const pair = MB_PAIRS.find((p) => p.insp === S.insp);
   const pairedId = pair && hasModbusHist(pair.cid) ? pair.cid : "";
   const trendId = e && typeof e.trend === "function" ? e.trend(S.live) : e && e.trend;
@@ -1783,12 +1779,7 @@ function renderInspectHist(e, row, mode = "") {
   S.inspHistSig = sig;
   const el = $("inspHist");
   el.hidden = !id;
-  // The chart's name is the entry's STABLE concept, never its live title — the same rule
-  // labelSchematicHits follows, for the same reason. The COP is the one that would break: its title
-  // states which SYSTEM the present quotient describes (plant vs heat pump, logic/cop_scope.hpp),
-  // and a 24-hour curve cannot be named after the state of one second. It would have read "COP of
-  // the plant" over a series that is, by construction, the heat pump's own — a scope mismatch under
-  // a chart, which is the failure cop_scope exists to prevent.
+  // Label the chart with the stable quantity, independent of the current operating state.
   const mb = pairedId ? mbByConcept(pairedId) : null;
   const chartName = DERIVED[id] && e && e.aria ? inspFieldText(e, "aria", null) : null;
   replaceHistoryHtml(el, !id ? ""

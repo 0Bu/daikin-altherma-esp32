@@ -1,4 +1,4 @@
-// translation-source: 34200897e3bb460a7f6fcd68bd6ff940649f8810c9b3709dc7616000e01aee90
+// translation-source: 203c0f333f1a4749e0dd21841787244ee126501eacbd291eb671d1b290a8c21f
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -950,7 +950,6 @@ I18N.sv = localeValues([
   /* lang.sv */ "Svenska",
   /* lang.fi */ "Suomi",
   /* lang.saved */ "Språk sparat",
-  /* hist.cop_none */ "Ingen COP-historik när strömvärdet kommer från CT-klämmor. Kabeldragningen avgör vilka laster de täcker; värmemätningen slutar före BUH och omfattar inte direkt BSH-värme. Systemgränserna kan därför avvika.",
 ]);
 
 INSPECT_I18N.sv = inspectValues(

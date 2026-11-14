@@ -1203,6 +1203,19 @@ const fmtKiB = (b) => (b == null ? "—" : `${Math.round(b / 1024)} KiB`);
 // Both rows are expandable exactly like a value row — same accordion, same chart, same scrub and pin
 // — and attach their series by TREND ID, since the row labels here are translated and there is no
 // catalog label to match on.
+const boardHistoryMarkup = new WeakMap();
+function boardHistoryHtml(id, unit, label) {
+  const ring = S.hist.get(id);
+  if (!ring) return histHtml(id, unit, label, "x10a");
+  const pin = S.histPin.get(id);
+  const cached = boardHistoryMarkup.get(ring);
+  if (cached?.id === id && cached.epoch === S.histEpoch && cached.lang === LANG && cached.pin === pin)
+    return cached.html;
+  const html = histHtml(id, unit, label, "x10a");
+  boardHistoryMarkup.set(ring, { id, epoch: S.histEpoch, lang: LANG, pin, html });
+  return html;
+}
+
 function memoryRows(sys) {
   const row = (id, labelKey, bytes) => {
     const label = t(labelKey);
@@ -1212,7 +1225,7 @@ function memoryRows(sys) {
     if (!hid && !d) return vrow(label, fmtKiB(bytes), { cls: "mono num" });
     return descAccordion(`board:${id}`, label, val, "mono num",
                          d ? descBodyHtml(d, undefined, modelDescriptionCopy(id)) : "", hid, "KiB",
-                         S.stage === "dashboard" || undefined);
+                         S.stage === "dashboard" || undefined, boardHistoryHtml);
   };
   return row("free_heap", "card.freeheap", sys.free_heap) +
          row("max_alloc", "card.maxalloc", sys.max_alloc);

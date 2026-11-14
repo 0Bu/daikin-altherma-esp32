@@ -1,4 +1,4 @@
-// translation-source: 34200897e3bb460a7f6fcd68bd6ff940649f8810c9b3709dc7616000e01aee90
+// translation-source: 203c0f333f1a4749e0dd21841787244ee126501eacbd291eb671d1b290a8c21f
 I18N.de = localeValues([
   /* sys.nodata */ "Keine Daten",
   /* sys.unreachable */ "Nicht erreichbar",
@@ -950,7 +950,6 @@ I18N.de = localeValues([
   /* lang.sv */ "Svenska",
   /* lang.fi */ "Suomi",
   /* lang.saved */ "Sprache gespeichert",
-  /* hist.cop_none */ "Kein COP-Verlauf bei einem Stromwert von CT-Klemmen. Welche Lasten sie erfassen, hängt von der Verdrahtung ab; die Wärmeseite endet vor BUH und erfasst keine direkte BSH-Wärme. Die Bilanzgrenzen können daher abweichen.",
 ]);
 
 // Unchanged German specialist copy, loaded with the existing German locale asset.

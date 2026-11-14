@@ -1,4 +1,4 @@
-// translation-source: 34200897e3bb460a7f6fcd68bd6ff940649f8810c9b3709dc7616000e01aee90
+// translation-source: 203c0f333f1a4749e0dd21841787244ee126501eacbd291eb671d1b290a8c21f
 I18N.ja = localeValues([
   /* sys.nodata */ "データなし",
   /* sys.unreachable */ "接続不可",
@@ -950,7 +950,6 @@ I18N.ja = localeValues([
   /* lang.sv */ "Svenska",
   /* lang.fi */ "Suomi",
   /* lang.saved */ "言語を保存しました",
-  /* hist.cop_none */ "電力入力がCTクランプ由来の場合、COP曲線は表示しません。配線で対象負荷が決まり、蓄熱した熱量はBUH前まででBSHが直接加えた熱を含まないため、収支境界が一致するとは限りません。",
 ]);
 
 DESCRIPTION_I18N.ja = descriptionValues([

@@ -7,25 +7,21 @@ export const INSPECTOR_TRENDS = Object.freeze({
   env3: "env3_combined", sgrequest: "smart_grid_mode", comp: "comp_rps",
   out: "outdoor_air", ouhx: "outdoor_heat_exchanger", hp: "circuit_pressure",
   disch: "discharge", eev: "eev", r3t: "refrigerant_liquid", lwt: "leaving_water",
-  r2t: "leaving_water_post_buh", rwt: "return_water", dt: "dt", pth: "pth", cop: "cop",
+  r2t: "leaving_water_post_buh", rwt: "return_water", dt: "dt", pth: "pth",
   buh: "buh_state", bsh: "bsh_state", valve: "valve_dhw", valve2: "valve_heat",
-  tank: "dhw_tank", room: "room_temp", pump: "pump_speed", pel: "pel",
+  tank: "dhw_tank", room: "room_temp", pump: "pump_speed",
   defrost: "defrost_state", quiet: "quiet_state", flow: "flow",
   flow_switch: "water_flow_switch", wp: "water_pressure",
 });
 
 export const NO_HISTORY_INSPECTORS = Object.freeze([
   "status", "ou", "lp", "phe", "heat", "spaceh", "rhot", "rcold", "wsup", "wtank",
-  "wheat", "wret",
+  "wheat", "wret", "pel", "cop",
 ]);
 
-// These raw histories are deliberately absent from this operating profile, not forgotten coverage.
-// A positive CT source would intentionally refuse the INV-boundary COP witness. Tank preheat is
-// an auxiliary raw row outside the schematic; categorical disclosures use the Modbus-only case.
+// Tank preheat is an auxiliary raw row outside the schematic; categorical disclosures use the
+// Modbus-only case.
 export const OMITTED_HISTORY_MOTION_ROWS = Object.freeze({
-  ct_l1: "No CT source in the INV-scoped COP fixture",
-  ct_l2: "No CT source in the INV-scoped COP fixture",
-  ct_l3: "No CT source in the INV-scoped COP fixture",
   tank_preheat_state: "Auxiliary raw detail without its own schematic inspector",
 });
 
@@ -47,6 +43,9 @@ export const HISTORY_MOTION_ROWS = Object.freeze([
   { id: "room_temp", label: "Indoor ambient temp. (R1T)", unit: "°C", value: 21, reg: 0x61 },
   { id: "water_pressure", label: "Water pressure", unit: "bar", value: 1.5, reg: 0x62 },
   { id: "inv_current", label: "INV primary current (A)", unit: "A", value: 8.3, reg: 0x21 },
+  { id: "ct_l1", label: "Current measured by CT sensor of L1", unit: "A", value: 4.8, reg: 0x63 },
+  { id: "ct_l2", label: "Current measured by CT sensor of L2", unit: "A", value: 4.4, reg: 0x63 },
+  { id: "ct_l3", label: "Current measured by CT sensor of L3", unit: "A", value: 4.0, reg: 0x63 },
   { id: "pump_signal", label: "Water pump signal (0:max-100:stop)", unit: "%", value: 18, reg: 0x62 },
   { id: "defrost_state", label: "Defrost Operation", value: 0, reg: 0x10, binary: true },
   { id: "quiet_state", label: "Silent Mode", value: 0, reg: 0x60, binary: true },

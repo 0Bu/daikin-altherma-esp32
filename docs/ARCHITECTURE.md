@@ -365,7 +365,8 @@ backs off to 30 seconds while unreachable, and suspends ordinary polling while h
 English and the application code remain in the startup page, capped at 169,400 gzip bytes.
 The build packs the minified script into an LZMA frame with a 512 KiB dictionary and a 1 MiB
 decoded-size limit. The inline loader verifies the header, decoded length, prefix, CRC and UTF-8
-before inserting the classic script synchronously at the end of the body.
+before inserting the classic script synchronously at the end of the body. A validation failure
+prevents dashboard initialization.
 A first non-English locale request loads one local gzip resource containing twelve catalogs.
 It uses the same LZMA bounds and validates the payload before synchronous registration.
 Later language changes reuse the registered tables. A locale load failure retains English.
