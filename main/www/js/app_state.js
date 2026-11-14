@@ -233,11 +233,13 @@ function writeRoute(stage, popup = null, { replace = false, parent } = {}) {
 }
 
 function showStage(stage) {
-  if (S.stage !== stage) cancelHistoryGesture();
+  const changed = S.stage !== stage;
+  if (changed) cancelHistoryGesture();
   S.stage = stage;
   for (const [st, id] of Object.entries(VIEW)) $(id).classList.toggle("active", st === stage);
   renderHeader();
   window.scrollTo(0, 0);
+  if (!changed) return;
   if (stage === "settings") {
     if (typeof renderSettings === "function") renderSettings();
   } else {
