@@ -34,10 +34,10 @@ def run(root, expected_head):
         tested = local.git(root, identity_env, "-c", "commit.gpgsign=false", "commit-tree", derived_tree,
                            "-p", base, "-p", head, "-m", "Frozen local release checks").strip()
     identity = (tested, derived_tree, base)
-    # A partial clone can fetch the committed historical witness while still online. The
-    # candidate repeats the check inside the offline snapshot before the runtime suite.
-    subprocess.run([sys.executable, "scripts/prepare-ci-history.py"], cwd=root, env=env, check=True)
-    local.hydrate_parent_coverage(root, env, base)
+    local.hydrate_release_trees(root, env, derived_tree, base)
+    # Read the witness pin from the same tree the tests will run. Fetch it while online.
+    subprocess.run([sys.executable, "scripts/prepare-ci-history.py", "--source-tree", derived_tree],
+                   cwd=root, env=env, check=True)
     scratch_parent = root / "build"
     scratch_parent.mkdir(exist_ok=True)
     if scratch_parent.is_symlink():

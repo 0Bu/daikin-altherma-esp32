@@ -6,11 +6,11 @@ eager materialization; historical firmware/GIF binaries need not be downloaded w
 """
 from __future__ import annotations
 
+import argparse
 import ast
 from pathlib import Path
 import re
 import subprocess
-import sys
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -32,10 +32,16 @@ def git(*arguments: str, capture: bool = True) -> bytes:
     return result.stdout if capture else b""
 
 
-def http_witness() -> str:
+def http_witness(source_tree: str | None) -> str:
     """Read the existing runtime-test pin without executing the test or duplicating that pin."""
-    source = ROOT / "test/http_config_runtime/run.py"
-    tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
+    path = "test/http_config_runtime/run.py"
+    if source_tree:
+        filename = f"{source_tree}:{path}"
+        source = git("show", filename).decode("utf-8")
+    else:
+        filename = str(ROOT / path)
+        source = Path(filename).read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=filename)
     assignments = {
         name: [node.value for node in tree.body if isinstance(node, ast.Assign)
                and any(isinstance(target, ast.Name) and target.id == name
@@ -75,11 +81,14 @@ def hydrate(revision: str, path: str) -> None:
 
 
 def main() -> int:
-    if len(sys.argv) != 1:
-        raise HistoryError("no arguments expected")
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--source-tree", help="read the runtime witness pin from this Git tree")
+    args = parser.parse_args()
+    if args.source_tree is not None and not re.fullmatch(r"[0-9a-f]{40}", args.source_tree):
+        raise HistoryError("--source-tree requires a full SHA")
     if git("rev-parse", "--is-shallow-repository").strip() != b"false":
         raise HistoryError("full commit history and tags are required; shallow checkout refused")
-    witness = http_witness()
+    witness = http_witness(args.source_tree)
     revision, path = witness.split(":", 1)
     hydrate(revision, path)
     return 0

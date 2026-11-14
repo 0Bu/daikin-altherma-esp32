@@ -12,6 +12,8 @@ import tempfile
 import unittest
 import uuid
 
+import local_checks
+
 
 PROJECT = Path(__file__).resolve().parents[2]
 
@@ -97,9 +99,41 @@ class CheckoutTests(unittest.TestCase):
         output = self.git(clone, "rev-list", "--objects", "--all", "--missing=print").decode()
         return {line[1:] for line in output.splitlines() if line.startswith("?")}
 
-    def prepare(self, clone):
-        return subprocess.run([sys.executable, str(clone / "scripts/prepare-ci-history.py")],
+    def prepare(self, clone, *arguments):
+        return subprocess.run([sys.executable, str(clone / "scripts/prepare-ci-history.py"), *arguments],
                               cwd=clone, env=self.env, capture_output=True, text=True, timeout=30)
+
+    def test_offline_release_checkout_fetches_merge_tree_and_comparison_blobs(self):
+        base = self.git(self.origin, "rev-parse", "HEAD").decode().strip()
+        path = "main/format.cpp"
+        self.write(path, b"first archived formatter source\n")
+        self.commit()
+        old_source = self.git(self.origin, "rev-parse", f"HEAD:{path}").decode().strip()
+        release_base = self.git(self.origin, "rev-parse", "HEAD").decode().strip()
+        self.write(path, b"newly inherited formatter source\n")
+        self.commit()
+        partial = self.clone("release-partial", "--filter=blob:none", "--no-checkout")
+        self.git(partial, "checkout", "--detach", base)
+        tested = self.git(partial, "rev-parse", "origin/main").decode().strip()
+        tree = self.git(partial, "rev-parse", f"{tested}^{{tree}}").decode().strip()
+        new_source = self.git(partial, "rev-parse", f"{tested}:{path}").decode().strip()
+        self.assertTrue({old_source, new_source, self.witness_blob, self.binary_blob}
+                        <= self.missing(partial))
+        local_checks.hydrate_release_trees(partial, self.env, tree, release_base)
+        self.assertFalse({old_source, new_source} & self.missing(partial))
+        # The caller's runtime-test file can differ from the candidate version.
+        (partial / "test/http_config_runtime/run.py").write_text("different witness binding\n")
+        run = self.prepare(partial, "--source-tree", tree)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertIn(self.witness_commit, run.stdout)
+        self.assertIn(self.binary_blob, self.missing(partial))
+        with local_checks.frozen_checkout(partial, self.env, (tested, tree, release_base),
+                                          container_visible=True) as (checkout, offline):
+            self.assertEqual((checkout / path).read_bytes(), b"newly inherited formatter source\n")
+            self.assertEqual(self.git(checkout, "show", f"HEAD^1:{path}", env=offline),
+                             b"first archived formatter source\n")
+            self.assertEqual(self.git(checkout, "show", f"{self.witness_commit}:main/http_config.cpp",
+                                      env=offline), b"original configuration source\n")
 
     def test_filtered_history_retains_versions_and_hydrates_only_source(self):
         full = self.clone("full")

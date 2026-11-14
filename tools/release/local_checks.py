@@ -49,15 +49,18 @@ def check_environment():
     return env
 
 
-def git(root, env, *args):
+def git(root, env, *args, input_data=None, capture=True, timeout=30):
     try:
-        result = subprocess.run(["git", *args], cwd=root, env=env, stdout=subprocess.PIPE,
-                                stderr=subprocess.DEVNULL, check=False, timeout=30)
+        result = subprocess.run(
+            ["git", *args], cwd=root, env=env, input=input_data,
+            stdout=subprocess.PIPE if capture else subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, check=False, timeout=timeout,
+        )
     except subprocess.TimeoutExpired as error:
         raise CheckError("Git did not return the local source identity") from error
     if result.returncode:
         raise CheckError("Git could not establish the local source identity")
-    return result.stdout.decode("utf-8", errors="surrogateescape")
+    return result.stdout.decode("utf-8", errors="surrogateescape") if capture else ""
 
 
 def source(root, env):
@@ -79,6 +82,22 @@ def hydrate_parent_coverage(root, env, base):
     coverage_file = "tools/coverage/branch_baseline.json"
     if git(root, env, "ls-tree", base, "--", coverage_file):
         git(root, env, "cat-file", "-e", f"{base}:{coverage_file}")
+
+
+def hydrate_release_trees(root, env, tree, base):
+    # Comparing the trees offline can read the previous version of a file. Only
+    # walk these two snapshots, so unrelated historical binaries stay promised.
+    base_tree = git(root, env, "rev-parse", f"{base}^{{tree}}").strip()
+    offline = {**env, "GIT_NO_LAZY_FETCH": "1"}
+    arguments = ("rev-list", "--objects", "--no-object-names", "--missing=print", tree, base_tree)
+    objects = git(root, offline, *arguments).splitlines()
+    missing = [entry[1:] for entry in objects if entry.startswith("?")]
+    if not missing:
+        return
+    git(root, env, "cat-file", "--batch", input_data=("\n".join(missing) + "\n").encode(),
+        capture=False, timeout=120)
+    if any(entry.startswith("?") for entry in git(root, offline, *arguments).splitlines()):
+        raise CheckError("required release tree objects could not be hydrated")
 
 
 @contextmanager
@@ -229,19 +248,20 @@ def run_checks(root, env):
         deadline = time.monotonic() + timeout
         with subprocess.Popen([str(root / command[0]), *command[1:]], cwd=root, env=env,
                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                              start_new_session=True) as process, selectors.DefaultSelector() as stream:
-            stream.register(process.stdout, selectors.EVENT_READ)
+                              start_new_session=True) as process:
             try:
-                while True:
-                    remaining = deadline - time.monotonic()
-                    if remaining <= 0 or not stream.select(remaining):
-                        raise subprocess.TimeoutExpired(command, timeout)
-                    chunk = os.read(process.stdout.fileno(), 65536)
-                    if not chunk:
-                        break
-                    captured.extend(chunk)
-                    if len(captured) > MAX_RECEIPT_BYTES:
-                        raise CheckError(f"{command[0]} exceeded the check log limit")
+                with selectors.DefaultSelector() as stream:
+                    stream.register(process.stdout, selectors.EVENT_READ)
+                    while True:
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0 or not stream.select(remaining):
+                            raise subprocess.TimeoutExpired(command, timeout)
+                        chunk = os.read(process.stdout.fileno(), 65536)
+                        if not chunk:
+                            break
+                        captured.extend(chunk)
+                        if len(captured) > MAX_RECEIPT_BYTES:
+                            raise CheckError(f"{command[0]} exceeded the check log limit")
                 result = process.wait(timeout=max(0, deadline - time.monotonic()))
             except BaseException as error:
                 try:

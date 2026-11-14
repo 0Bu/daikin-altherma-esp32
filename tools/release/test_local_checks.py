@@ -127,6 +127,27 @@ echo controlled success
             with self.assertRaisesRegex(local_checks.CheckError, "exceeded the check log limit"):
                 local_checks.run_checks(self.root, local_checks.check_environment())
 
+    def test_selector_registration_failure_terminates_the_child(self):
+        command = ("scripts/waiting.sh",)
+        path = self.root / command[0]
+        path.write_text("#!/bin/sh\nexec sleep 5\n")
+        path.chmod(0o755)
+        started = []
+        launch = subprocess.Popen
+
+        def start(*args, **kwargs):
+            process = launch(*args, **kwargs)
+            started.append(process)
+            return process
+
+        with patch.object(local_checks, "COMMANDS", (command,)), \
+                patch.object(local_checks.selectors, "DefaultSelector") as selector, \
+                patch.object(local_checks.subprocess, "Popen", side_effect=start):
+            selector.return_value.__enter__.return_value.register.side_effect = OSError("register failed")
+            with self.assertRaisesRegex(OSError, "register failed"):
+                local_checks.run_checks(self.root, local_checks.check_environment())
+        self.assertEqual(started[0].returncode, -local_checks.signal.SIGKILL)
+
     def test_changed_tree_is_retested(self):
         self.assertFalse(local_checks.verify(self.root, premerge=True))
         self.content("different candidate")

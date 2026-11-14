@@ -129,7 +129,8 @@ try {
     let output = "";
     child.stdout.on("data", chunk => { output += chunk; });
     child.stderr.on("data", chunk => { output += chunk; });
-    const completed = new Promise(resolve => child.once("exit", (code, signal) => resolve({ code, signal })));
+    // Cleanup diagnostics can still be in the stderr pipe when the child exits.
+    const completed = new Promise(resolve => child.once("close", (code, signal) => resolve({ code, signal })));
     const watchdog = setTimeout(() => child.kill("SIGKILL"), 20000);
     try {
       if (["interrupt", "build-interrupt", "pre-cid-interrupt", "empty-cid-interrupt"].includes(mode)) {
