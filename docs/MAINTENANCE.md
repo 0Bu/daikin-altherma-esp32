@@ -79,8 +79,8 @@ readback separately. Claim CI acceleration only after a comparable run of the pu
 
 The native `pre-push` hook runs the repository's full mechanical suite and unsigned ESP32-S3
 compile for maintainer pushes. It refreshes `origin/main` and checks the prospective merge tree
-in a private snapshot with main as the first parent. It runs the formatter at its
-pinned version, headless Linux Chromium and WebKit for browser-relevant changes, the pinned
+in a private snapshot with main as the first parent. It runs the pinned formatter, the
+ASan/UBSan suite in Linux Docker on macOS, headless Linux Chromium and WebKit for browser-relevant changes, the pinned
 coredump decoder and the real-cJSON runtime suite. Fork contributors can submit a PR, then a
 maintainer reviews and tests its exact head with the same entry point on a local branch.
 

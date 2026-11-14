@@ -28,7 +28,13 @@ check() {
 check scripts/run-pr-hygiene-audit.sh --base "$base" --head "$candidate" --event-file ''
 check tools/pr_hygiene/selftest.sh
 check tools/coverage/selftest.sh
-CI=1 check scripts/run-sanitizer-fuzz-tests.sh
+case "$(uname -s)" in
+    Darwin)
+        check scripts/idf-docker.sh --with-host-tests env CI=1 CXX=clang++-18 \
+            scripts/run-sanitizer-fuzz-tests.sh ;;
+    *)
+        CI=1 check scripts/run-sanitizer-fuzz-tests.sh ;;
+esac
 check scripts/run-runtime-integration-tests.sh
 check scripts/run-format-check.sh
 check tools/format/selftest.sh
