@@ -586,12 +586,17 @@ export async function assertCyclingChart(page, server, context) {
     }
     status.health = restoredHealth;
     await poll("2026-11-13T15:15:03Z");
-    assert.equal(await evaluate(page, row => document.querySelector(row)?.getClientRects().length > 0, ROW),
-      true, context + ": Cycling returns when the snapshot becomes readable");
-    if (!(await evaluate(page, chart => !!document.querySelector(chart), CHART))) await tap(page, ROW);
-    await page.waitFor(`!!document.querySelector(${JSON.stringify(hour(RESTORED) + " b")})`);
-    assert.equal(await evaluate(page, selector => document.querySelector(selector).textContent, hour(RESTORED) + " b"),
-      "22", context + ": a readable snapshot restores the archived count");
+    const cyclingRow = await evaluate(page, row => {
+      const button = document.querySelector(row);
+      return { visible: !!button?.getClientRects().length, open: button?.getAttribute("aria-expanded") === "true" };
+    }, ROW);
+    assert.equal(cyclingRow.visible, true, context + ": Cycling returns when the snapshot becomes readable");
+    if (!cyclingRow.open) await tap(page, ROW);
+    await page.waitFor("!S.clickHold");
+    await poll("2026-11-13T15:15:04Z");
+    const archived = await evaluate(page, chart => [...document.querySelectorAll(chart + " button b")]
+      .map(cell => cell.textContent).filter(Boolean), CHART);
+    assert.deepEqual(archived, ["22"], context + ": a readable snapshot restores the archived count");
     assert.ok(updates >= 3, context + ": verify continuity across repeated production polling");
     console.log("cycling chart checked: " + context + "; " + updates + " live status polls");
   } finally {
