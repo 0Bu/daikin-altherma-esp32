@@ -1121,7 +1121,9 @@ async function pollTick() {
   }
 
   if (ok && typeof recoverOpenHistory === "function") recoverOpenHistory();
-  if (ok && typeof pumpHistoryQueue === "function") pumpHistoryQueue();
+  // An already queued disclosure must also settle after a failed live poll. A history endpoint
+  // can still answer when /values fails. Leave automatic refreshes behind the live-health gate.
+  if (typeof pumpHistoryQueue === "function") pumpHistoryQueue();
   _pollFails = ok ? 0 : Math.min(_pollFails + 1, 4);
   pollSchedule(_pollFails ? Math.min(POLL_VALUES_MS * 2 ** _pollFails, POLL_BACKOFF_MAX_MS)
                           : POLL_VALUES_MS);

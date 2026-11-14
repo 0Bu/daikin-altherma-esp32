@@ -103,4 +103,12 @@ await runPendingTick("steady-state tick");
 assert.equal(statusRequests, 2,
   "without a pollNow() the status cadence must still throttle /status to POLL_STATUS_MS");
 
-console.log("UI poll cadence: a forced /status survives a tick that was already awaiting a response");
+let explicitDrains = 0, autoRefreshes = 0;
+sandbox.refreshValues = async () => false;
+sandbox.pumpHistoryQueue = () => explicitDrains++;
+sandbox.recoverOpenHistory = () => autoRefreshes++;
+await runPendingTick("values endpoint refused a live read");
+assert.equal(explicitDrains, 1, "a failed values poll releases explicitly queued reads");
+assert.equal(autoRefreshes, 0, "a failed values poll does not schedule background history");
+
+console.log("UI poll cadence: forced status refresh and queued history after a failed live poll pass");
