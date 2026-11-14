@@ -37,11 +37,12 @@ struct ModbusStatus {
     ModbusProfile profile     = ModbusProfile::Auto; // detected/active Modbus profile
     ModbusProfileBasis profile_basis =
         ModbusProfileBasis::Probing; // basis: probing, affirmative, fallback
-    // These route flags fit the existing alignment gap before host on ESP32-S3. Keep status
-    // snapshots at their existing size: HTTP and MQTT also copy this object on their task stacks.
-    bool        space_route_known  = false;
-    bool        space_route_active = false;
-    std::string host;                // configured address ("" = disabled)
+    // These flags fit the existing alignment gap before host on ESP32-S3. HTTP and MQTT also
+    // copy this object on their task stacks.
+    bool        space_route_known   = false;
+    bool        space_route_active  = false;
+    bool        dhw_operation_known = false; // input 52, with its own reply freshness
+    std::string host;                        // configured address ("" = disabled)
     int         port    = 0;
     int         unit_id = 0;
     uint32_t    rx_ok   = 0;           // successful register reads since boot
@@ -64,6 +65,7 @@ struct ModbusStatus {
     bool        plant_gate_active = false;
     bool        heating_mode_known  = false;
     bool        heating_mode_active = false;
+    bool        dhw_operation_active = false;
     // Plant-side outdoor context from input register 44. Unlike the full value cache, this row is
     // refreshed in an explicit one-second batch in the same cycle as input 38, and is published
     // only while its own reply is recent in the current TCP session. It is optional evidence,
@@ -71,18 +73,19 @@ struct ModbusStatus {
     logic::OutdoorEvidence plant_outdoor;
 };
 
-// Start the stack. Creates the status mutex always (so /status can report `enabled:false` before any
-// task exists) and the task only when the config enables it. Called once from app_main.
+// Initialize static source state before HTTP can save a target. Start polling separately.
+void mb_init();
 void mb_start();
 
 // Complete the fresh-device one-shot discovery before httpd/background config writers start. No-op
 // after any persisted result or explicit host save/delete, in safe mode, or without a LAN lease.
 void mb_autodiscover_initial();
 
-// Apply an already-staged enable decision after POST /set_hp. Starts the task if the HomeHub was
-// just enabled, stops it if just disabled, and drops a cached socket when the address changed. The
-// POD argument keeps the post-persistence cutover allocation-free and safe in the httpd task.
+// Apply the staged enable decision after POST /set_hp and retire the previous cache. The owner
+// closes its socket. Worker creation requires boot and network-heap admission and can stay pending.
 void mb_reconfigure(bool enabled) noexcept;
+void mb_retry_start() noexcept;
+bool mb_task_pending() noexcept;
 
 // Lock-free current durable target intent. Unlike ModbusStatus::enabled (worker lifetime), this
 // flips synchronously after a successful settings save and is therefore the MQTT publication
@@ -102,6 +105,8 @@ bool mb_discover_homehub(std::string& found);
 // Thread-safe snapshot of the link state.
 ModbusStatus mb_status();
 
+enum class ModbusCompressor : uint8_t { Unknown, Off, On };
+
 // Thread-safe snapshot copy of the HomeHub value cache. Returns the count written. Rows carry the
 // same CachedValue shape as the X10A cache, so /values and the browser need no second row type;
 // `reg` is the synthetic def::HOMEHUB_GROUP_REG and `off` the EKRHH offset, which is what
@@ -115,7 +120,11 @@ ModbusStatus mb_status();
 // the snapshot must not be served. It is an out-param rather than a separate mb_status() call
 // because that separate call is exactly the race — the cache and link state are behind two mutexes,
 // so only the accessor can tie them into one generation-checked answer.
-size_t mb_values_snapshot(CachedValue* out, size_t max, bool& live);
+// The optional history generation belongs to the copied full-cache rows. Zero means unavailable.
+// The optional compressor state comes from its own recent input 31 reply in the current session.
+size_t mb_values_snapshot(CachedValue* out, size_t max, bool& live,
+                          uint32_t*         history_generation = nullptr,
+                          ModbusCompressor* compressor         = nullptr);
 
 // Allocation-free check of the exact snapshot liveness rule, for periodic expiry publication.
 bool mb_values_live();

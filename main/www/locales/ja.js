@@ -1,9 +1,10 @@
-// translation-source: 34200897e3bb460a7f6fcd68bd6ff940649f8810c9b3709dc7616000e01aee90
+// translation-source: 5acbeb6ebb5c01b59ba76e69d2d230d109a7b65c62bd3c0ed328fc75789138e8
 I18N.ja = localeValues([
   /* sys.nodata */ "データなし",
   /* sys.unreachable */ "接続不可",
   /* sys.x10a_down */ "X10A オフライン",
   /* sys.mb_carrying */ "運転モード不明 — Modbus値",
+  /* sys.mode_unknown */ "運転モード不明",
   /* sys.mb_only */ "X10A オフライン — Modbus値",
   /* sys.mb_source */ "X10A オフライン · Modbus",
   /* mode.stop */ "停止",
@@ -20,6 +21,7 @@ I18N.ja = localeValues([
   /* sys.standby */ "待機 — 停止中",
   /* sys.defrosting */ "霜取り中",
   /* sys.circulating */ "循環中 — 圧縮機停止",
+  /* sys.pump_reported */ "ポンプは運転中と報告 — 循環は未確認",
   /* sys.cool_mode */ "冷房モード",
   /* sys.residual_circulating */ "残熱循環 — 冷却出力なし",
   /* sys.bsh_active */ "タンク電気ヒーター作動中",
@@ -111,6 +113,7 @@ I18N.ja = localeValues([
   /* modbus.err.network_unreachable */ "HomeHubへのネットワーク経路がありません。",
   /* modbus.err.host_unreachable */ "ネットワーク上のHomeHubに到達できません。",
   /* modbus.err.connect_failed */ "HomeHubへの接続に失敗しました。",
+  /* modbus.err.close_pending */ "前の HomeHub 接続が閉じられるのを待っています。",
   /* modbus.err.request_failed */ (r) => `Modbus要求を作成できません${r ? `（レジスタ ${r}）` : ""}。`,
   /* modbus.err.send_timeout */ (r) => `Modbus要求の送信がタイムアウトしました${r ? `（レジスタ ${r}）` : ""}。`,
   /* modbus.err.send_failed */ (r) => `Modbus要求を送信できません${r ? `（レジスタ ${r}）` : ""}。`,
@@ -335,7 +338,7 @@ I18N.ja = localeValues([
   /* a4.operation_help */ "停止、タンク加熱、室内暖房、室内冷房、アクチュエーター運転を報告します。これは報告された状態であり、有効な熱伝達を証明するものではありません。",
   /* a4.heating_offset_help */ "主ゾーンの外気温連動の暖房曲線をケルビン単位で補正します。これは補正値であり、測定温度や水温の目標値全体ではありません。",
   /* a4.pre_phe_outdoor_help */ "屋外のプレート式熱交換器に入る前の水温です。水側のセンサーであり、外気温や冷媒温度ではありません。",
-  /* a4.flow_help */ "Altherma 4 の流量換算は未検証です。表示される L/min 値には既存の換算を使用しています。性能を評価する前に、機器自身の表示と比較してください。",
+  /* mb.flow_scale_help */ "この Modbus ソースの流量換算は未検証です。値を機器本体の表示と比較してください。",
   /* a4.pump_help */ "Altherma 4 の説明書ではポンプ速度とされていますが、単位は L/min です。ここに表示する % は未検証の仮定です。機器自身の表示と比較してください。",
   /* a4.pressure_help */ "Altherma 4 の圧力換算は未検証です。表示される bar 値には既存の換算を使用しています。圧力を評価する前に、機器自身の表示と比較してください。",
   /* a4.demand_response */ "デマンドレスポンスモード",
@@ -381,6 +384,8 @@ I18N.ja = localeValues([
   /* val.since_min */ (d) => `\u2265 ${d}`,
   /* val.since_gap */ (d) => `うち${d}は未観測`,
   /* hist.modbus_plateau */ (when, d) => `レジスタ値不変 ${when} · 約${d} · 測定時刻不明`,
+  /* hist.modbus_flow_unverified */ "記録された Modbus 流量の換算倍率は未確認です。",
+  /* hist.thermal_bucket_note */ "5 分区間のデータからの推定値です。各値の測定時刻は異なる場合があります。",
   /* hist.boost_total */ (d) => `ブースト作動 · ${d}`,
   /* hist.boost_none */ "記録期間にブーストなし。",
   /* hist.boost_ago_range */ (a, b) => `${a}～${b}時間前`,
@@ -421,7 +426,7 @@ I18N.ja = localeValues([
   /* hist.buh_aria */ (l, d) => `${l} — 補助ヒーター推移。${d}。矢印キーで各試料を確認。`,
   /* hist.valve_dhw_total */ (d) => `給湯 · ${d}`,
   /* hist.valve_space_total */ (d) => `室内回路 · ${d}`,
-  /* hist.valve_none */ "記録期間に給湯位置なし。",
+  /* hist.valve_none */ "記録期間に給湯経路の報告はありません。",
   /* hist.valve_dhw */ "給湯",
   /* hist.valve_space */ "室内回路",
   /* hist.valve_aria */ (l, d) => `${l} — 3方弁推移。${d}。矢印キーで各試料を確認。`,
@@ -463,7 +468,7 @@ I18N.ja = localeValues([
   /* ota.check_failed */ "確認失敗",
   /* ota.starting */ "開始中…",
   /* ota.pct */ (p) => `${p}%`,
-  /* ota.rebooting */ "再起動中…",
+  /* ota.rebooting */ "再起動を待機中…",
   /* ota.failed */ "更新失敗",
   /* ota.timeout */ "タイムアウト",
   /* ota.cancelled */ "中止しました",
@@ -477,7 +482,7 @@ I18N.ja = localeValues([
   /* ota.snapshot_label */ "データ状態",
   /* ota.snapshot_value */ "スナップショット",
   /* ota.snapshot_help */ "再読込前の最終受信状態です。インストール中はライブデータが止まる場合があり、再起動まで設定はロックされます。",
-  /* ota.reload_hint */ "導入済み — ページを再読込",
+  /* ota.reload_hint */ "再起動を確認できませんでした",
   /* ota.dialog_title */ "ファームウェア更新",
   /* ota.switch_title */ "ファームウェア版を切り替える",
   /* ota.changes_title */ "このアップデートの変更内容",
@@ -514,6 +519,21 @@ I18N.ja = localeValues([
   /* schem.room */ "室温",
   /* schem.flow_rate */ "流量",
   /* schem.water_press */ "水圧",
+  /* schem.capacity_low_speed */ "能力の推定には、X10Aで取得した現在の圧縮機回転数が毎秒5回転を超えている必要があります。",
+  /* schem.no_usable_power */ (metric) => (metric ? `${metric}を表示できません。` : "") + "利用できる消費電力の推定値がありません。",
+  /* schem.backup_heater_active */ "電気補助ヒーターは作動中との報告",
+  /* schem.compressor_off */ "圧縮機は停止中です。圧縮機の熱出力推定値はありません。",
+  /* schem.outdoor_held */ "X10Aで保持された室外機の値は表示しません。",
+  /* schem.outdoor_homehub */ "外気温はHomeHubのModbus値です。レジスターには測定時刻がありません。",
+  /* schem.homehub_compressor_off */ "HomeHubは圧縮機が「切」と報告しています。",
+  /* schem.outdoor_independent */ "電気ヒーターの作動と水の循環は別々に確認します。",
+  /* schem.water_route_unknown */ "三方弁が選んだ経路は不明です。共通回路の流量からは、貯湯槽側と室内側のどちらに水が流れているかは分かりません。",
+  /* schem.flow_invalid */ "X10A の流量測定値は無効です。",
+  /* schem.defrost_transfer */ "除霜中の推定熱移動量",
+  /* schem.transfer_sign */ "正の値は水が熱を受け取り、負の値は水が熱を放出することを示します。",
+  /* schem.efficiency_no_capacity */ (metric) => `${metric} は表示できません。この評価範囲で使える出力推定値がありません。`,
+  /* schem.efficiency_ct_pair */ (outlet) => `CT電流と ${outlet}・R4T の温度を使用しています。`,
+  /* schem.efficiency_inv_pair */ "補助ヒーター前のR1TとR4Tを使用します。電力はインバーター電流から230 Vと仮定して推定します。ヒーターを含め、どの電気負荷を捉えているかは確認されていません。",
   /* schem.r2t */ "R2T",
   /* schem.r3t */ "R3T",
   /* schem.flow_switch */ "流量スイッチ",
@@ -770,6 +790,7 @@ I18N.ja = localeValues([
   /* hh.found */ (host) => `HomeHubを検出：${host}`,
   /* hh.not_found */ "HomeHubが見つかりません。アドレスを手動入力してください。",
   /* hh.saved */ "Modbus設定を保存しました",
+  /* hh.start_pending */ "設定を保存しました。HomeHubのポーリングはまだ開始されていません。",
   /* hh.err_port */ "ポートは1～65535にしてください",
   /* hh.err_unit */ "ユニットIDは1～247にしてください",
   /* board.title */ "基板ハードウェア",
@@ -950,7 +971,6 @@ I18N.ja = localeValues([
   /* lang.sv */ "Svenska",
   /* lang.fi */ "Suomi",
   /* lang.saved */ "言語を保存しました",
-  /* hist.cop_none */ "電力入力がCTクランプ由来の場合、COP曲線は表示しません。配線で対象負荷が決まり、蓄熱した熱量はBUH前まででBSHが直接加えた熱を含まないため、収支境界が一致するとは限りません。",
 ]);
 
 DESCRIPTION_I18N.ja = descriptionValues([
@@ -980,7 +1000,7 @@ DESCRIPTION_I18N.ja = descriptionValues([
   ["再加熱はタンク温度が開始しきい値を下回ると再加熱目標まで上げます。"], // 23
   ["現在のタンク予約設定。快適蓄熱は高め、省エネ蓄熱は低めの目標です。"], // 24
   ["ハイブリッド設備で制御器がボイラーへDHW運転を要求している状態。要求は燃焼の証拠ではありません。"], // 25
-  ["切替弁は水をDHWタンクまたは室内回路へ送ります。位置だけでは回路運転を証明しません。"], // 26
+  ["報告される経路は給湯タンク側、または暖房・冷房用の室内回路側です。この報告だけでは弁の位置や流量は確認できません。"], // 26
   ["任意2WVのX10A出力ON/OFF。OFFだけで冷房や機械的位置、端子電圧は証明できません。"], // 27
   ["第2ゾーン混合弁の開度。高温往水と低温戻り水を混ぜて目標を保ちます。"], // 28
   ["選択中の暖房／冷房モードの往水目標。固定または外気補償で決まります。"], // 29
@@ -990,7 +1010,7 @@ DESCRIPTION_I18N.ja = descriptionValues([
   ["PHE共通戻りのR4T。R1T−R4TはPHEのΔTで、放熱器のΔTではなく一律5 K基準も使えません。"], // 33
   ["共通水回路の流量。必要最小値は機種とモードで異なり、低流量は7Hの原因になり得ます。"], // 34
   ["閉水回路の圧力。許容範囲は機種依存で、≤1.0 barなら該当機種の説明書を確認します。"], // 35
-  ["循環ポンプ速度指令は逆目盛です。0＝全速、100＝停止。"], // 36
+  ["循環ポンプへの逆目盛のX10A指令です。生の値0は最大指令、100は停止を要求します。回転数（RPM）の測定でも、回転や水の流れの証明でもありません。圧縮機が停止中でも、報告されたON/OFF状態と測定流量を別々に確認します。"], // 36
   ["水循環ポンプの状態。運転だけでは有効な熱移動を証明せず、実流量と照合します。"], // 37
   ["設定済み太陽熱回路のポンプ状態。ヒートポンプ側の水循環ポンプとは別です。"], // 38
   ["このプロファイルのポンプ速度。目盛と対象回路は機種依存で、実流量は別値です。"], // 39
@@ -1062,7 +1082,7 @@ DESCRIPTION_I18N.ja = descriptionValues([
   ["HomeHubの診断状態：異常なし、故障、警告。原因は隣接コード／副コードで確認します。"], // 105
   ["現在報告中の故障コードの意味。"], // 106
   ["隣接するDaikin故障コードを絞る数値副コード。状態と主コードを併せて読みます。"], // 107
-  ["HomeHubが報告する圧縮機運転。速度や容量は示さず、流量や回路状態と併読します。"], // 108
+  ["HomeHubは圧縮機の状態を「入」または「切」で報告します。回転数、能力、熱移動の判断には別の測定値が必要です。"], // 108
   ["通常DHW運転：運転中＝ON、待機／蓄熱＝OFF。開始理由までは示しません。"], // 109
   ["通常室内運転：運転中＝ON、待機／蓄熱＝OFF。モードと3WVで暖房／冷房と流路を確認します。"], // 110
   ["BUH前のPHE出口水温。水循環中だけ戻り温度と比較し、その差が水側ΔTです。"], // 111
@@ -1087,7 +1107,7 @@ MODEL_DESCRIPTION_I18N.ja = modelDescriptionValues([
   ["測定に欠けがあると、一部の起動が数えられないことがあります。", "起動回数に一律の正常値はありません。データが十分な場合、この診断では完了した暖房運転の平均が10分以上なら十分とみなします。"], // health_cycling
   ["除霜", "対応除霜≥3回、圧縮機と除霜の状態が両方読める圧縮機運転時間の>15%。内部基準、Daikin限界ではありません。湿度とコイル全体の温度なし。"], // health_defrost
   ["水圧", "共通内部基準1.0 bar以下、連続観測60秒で警告。全機種共通ではなく対象説明書が基準。"], // health_pressure
-  ["ポンプ60秒後の流量", "限界は同機種・モード・条件が必要。設計値や不足の証明ではありません。"], // health_flow
+  ["ポンプONを示す連続したX10A報告が少なくとも 60 秒をカバーした後の、採用された最低流量。", "限界は同機種・モード・条件が必要。設計値や不足の証明ではありません。"], // health_flow
   ["BUH/BSHのON時間", "エネルギーや不要加熱の証明ではありません。"], // health_heater
   ["5つの試験的カウンタ", "比較可能な増加のみ。欠測・リセット除外。安定でも制限を否定せず原因を証明しません。"], // health_retries
   ["RAM 24時間：安定・低下後の回復は正常。低下が続けば漏れの可能性。対応する通電再起動でRAM曲線を残せます。5分刻みは短い停止を隠す場合あり。RAM不可なら、ログの時刻付き互換区間のみ時刻同期後にフラッシュ復元。未完了/直近未保存区間は欠ける場合あり。"], // free_heap
@@ -1171,7 +1191,7 @@ MB_DELTA_I18N.ja = mbDeltaValues([
 ]);
 
 INSPECT_I18N.ja = inspectValues(
-  ["現在値なし:", "圧縮機停止中は室外機センサーが更新されません。前回運転値を現在の測定値と誤認しないよう非表示にします。", "圧縮機の回転数を読み取れないため、室外機の値は前回運転値の可能性があります。"],
+  ["現在値なし:", "圧縮機停止中は室外機センサーが更新されません。前回運転値を現在の測定値と誤認しないよう非表示にします。", "X10Aの室外機の値がいつ測定されたかは不明です。前回運転時の値の可能性があります。"],
   [
     ["運転モード", "運転モード", "室内機のモードです。これだけでは圧縮機運転や流量を確認できません。"], // status
     ["外気環境", "ENV IIIの外気環境", "接続したENV IIIが測る温度、湿度、気圧です。設置場所によって室内値か屋外値かが決まります。"], // env3
@@ -1183,10 +1203,8 @@ INSPECT_I18N.ja = inspectValues(
       : d.sgMode === 1 ? "外部エネルギー管理は強制停止を要求しています。"
       : d.sgMode === 3 ? "外部エネルギー管理は強制運転を要求しています。"
       : "外部Smart Grid要求なし。機器は自律運転中です。"], // sgrequest
-    ["室外機", "室外機", "ファンが熱交換器へ空気を送り、圧縮機が冷媒の圧力と温度を上げます。簡略図であり、モノブロック、地中熱、ハイブリッドは構成が異なります。", (d) => d.defrost ? "霜取り中 — 逆サイクルで氷を溶かし、短時間だけ水側から熱を取ります。"
-      : compressorRunning(d) ? d.rps != null ? `運転中 — 圧縮機 ${fmt0(d.rps)} rps${d.quiet ? "、静音モードで制限" : ""}。` : "運転中 — HomeHubが圧縮機を確認。速度と詳細値にはX10Aが必要です。"
-      : d.ouHeldOver && d.mbFields && d.mbFields.has("out") ? "待機中 — 熱移動なし。X10Aセンサーは更新停止、外気温は時刻情報のないModbus値、吐出温度は「—」です。"
-      : "待機中 — 圧縮機停止、暖冷房の熱移動なし。更新されない値は前回値でなく「—」表示です。"], // ou
+    ["室外機", "室外機", "ファンが熱交換器へ空気を送り、圧縮機が冷媒の圧力と温度を上げます。簡略図であり、モノブロック、地中熱、ハイブリッドは構成が異なります。", (d) => compressorRunning(d) ? d.rps != null ? `運転中 — 圧縮機 ${fmt0(d.rps)} rps${d.quiet ? "。X10Aは静音モードが有効と報告しています" : ""}。` : "HomeHubは圧縮機が「入」と報告しています。回転数や室外機の詳細な値にはX10Aが必要です。"
+      : "圧縮機は停止しています。"], // ou
     ["圧縮機", "圧縮機", "冷媒を圧縮します。rpsは運転を示しますが、それだけで熱出力を示しません。"], // comp
     ["外気温", "外気温", "室外機センサー付近の温度で、日射や設置条件の影響を受けます。"], // out
     ["室外熱交温度 · R4T", "室外熱交換器温度 R4T", "暖房時は0 °C未満になり得ます。温度と霜取り状態を合わせて着霜と除去を見ます。"], // ouhx
@@ -1195,7 +1213,7 @@ INSPECT_I18N.ja = inspectValues(
     ["低圧", "低圧", "圧縮機の冷媒低圧側です。対応センサーがないプロファイルもあります。"], // lp
     ["膨張弁", "膨張弁", "電子膨張弁の指令位置（パルス）です。開度率ではありません。"], // eev
     ["液側冷媒温度 · R3T", "液側冷媒温度 R3T", "室内熱交換器の液側冷媒温度です。戻り水温ではありません。"], // r3t
-    ["プレート熱交換器", "プレート熱交換器", "PHEは混合せず冷媒と水の間で熱を移します。出力は流量とR1T/R4Tから推定し、センサー位置は機種で異なります。", (d) => !compressorRunning(d, 5) ? "冷媒側の熱移動なし — 圧縮機停止。ポンプが残熱を運んでも暖冷房出力ではありません。"
+    ["プレート熱交換器", "プレート熱交換器", "PHEは混合せず冷媒と水の間で熱を移します。出力は流量とR1T/R4Tから推定し、センサー位置は機種で異なります。", (d) => needsCapacitySpeed(d) && !d.dtStale ? t("schem.capacity_low_speed") : compressorStopped(d) ? stoppedCapacityText(d)
       : d.dtStale ? "水側熱移動を計算できません — ポンプと流量がPHE通水を確認していません。"
       : d.pth == null ? "方向別推定なし — 選択モードで有効な熱移動を測定値が確認していません。"
       : d.pthKind === "cooling" ? `水から約 ${fmt1(d.pth)} kW除去（${fmt1(d.flow)} l/min、ΔT ${fmt1(d.dt)} K）。`
@@ -1204,45 +1222,43 @@ INSPECT_I18N.ja = inspectValues(
     ["BUH後水温 · R2T", "BUH後水温 R2T", "BUH後の水温です。R1Tと違い、追加された電気熱を含む場合があります。"], // r2t
     ["PHE入口 · R4T", "PHE入口水温 R4T", "PHEへ戻る水温です。R1T、流量、圧縮機、モードと合わせて見ます。"], // rwt
     ["PHE水側ΔT", "PHE水側温度差", "出口R1T−入口R4T。2センサーから算出し、流量と合わせて熱移動を示しますが、室内端末の送戻水温を直接測りません。", (d) => d.dtStale ? "運転中のΔTなし — ポンプと流量が通水を確認していません。停止中センサー差は運転点ではありません。"
-      : d.dt == null ? null : !compressorRunning(d, 5) ? `${fmt1(d.dt)} K、ポンプのみ — 残熱の均一化であり出力ではありません。`
+      : d.dt == null ? null : needsCapacitySpeed(d) ? `${fmt1(d.dt)} K. ${t("schem.capacity_low_speed")}` : compressorStopped(d) ? `${fmt1(d.dt)} K. ${stoppedCapacityText(d)}`
       : d.thermalMode === "cool" ? `${fmt1(d.dt)} K。冷房時はR1TがR4Tより低いため負値になります。`
       : `${fmt1(d.dt)} K。正値は水への熱移動を示します。`], // dt
     [(d) => d && d.pthKind === "cooling" ? "冷却出力（推定）" : "熱出力（推定）", "PHE熱出力推定", (d) => d && d.pthKind === "cooling" ? "水から除いた熱の推定: 流量 × (R4T−R1T) × 4.186（水を仮定）。センサーとグリコールが精度を制限し、確認済み冷房時だけ表示します。" : "水へ渡した熱の推定: 流量 × (R1T−R4T) × 4.186（水を仮定）。センサーとグリコールが精度を制限し、R1T後のBUHは含みません。", (d) => d.dtStale ? d.bsh === true ? "通水未確認のためPHE熱移動を計算できません。BSHはタンクを加熱できても、その熱はPHEセンサーを通らず、バスは出力を報告しません。" : "PHE通水未確認のため出力を計算できません。運転点がないのであり、0 kWではありません。"
-      : d.pth == null ? null : d.pthKind === "cooling" ? `≈ ${fmt1(d.pth)} kW冷却${d.cop != null ? `、EER ${fmt1(d.cop)}` : ""}。` : `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `、COP ${fmt1(d.cop)}` : ""}。`], // pth
-    [(d) => d && d.efficiencyKind === "eer" ? "ヒートポンプEER（推定）" : d && d.copScope === "plant" ? "BUH後COP（推定）" : "ヒートポンプCOP（推定）", "効率推定", (d) => d && d.efficiencyKind === "eer" ? "推定冷却出力÷推定電力。流体、センサー、電圧、力率の仮定を含む瞬時EERで、季節効率ではありません。" : "同じ収支境界の推定熱出力÷電力。CTではBUH後、インバータ電流ではヒートポンプのみになり得て、CT配線が含む負荷を決めます。流体、センサー、電圧、力率の仮定を含む瞬時値で季節効率ではありません。", (d) => d.copBlock === "tank_heater" ? "COPなし — タンクヒーター作動中。電力収支に含まれても、熱は水側センサーを通らず直接タンクへ入ります。"
-      : d.copBlock === "buh_no_r2t" ? "COPなし — BUH作動中ですが後段センサーがなく、電気と熱の境界が一致しません。"
-      : d.copBlock === "mb_scope" ? "COPなし — HomeHubはヒーター込み機器電力、熱はPHEのみです。ヒーター状態と後段センサーがなく境界を揃えられません。"
-      : d.copBlock === "no_pel" ? d.pelHeld ? "COPなし — 圧縮機停止中のインバータ電流は前回運転値です。" : "COPなし — CT電流もインバータ電流もありません。"
-      : d.cop == null ? null : d.efficiencyKind === "eer" ? `電力1 kW当たり冷却 ${fmt1(d.cop)} kW — 約${fmt1(d.pel)} kW入力で約${fmt1(d.copPth)} kW。`
-      : d.copScope === "plant" ? `CT電力1 kW当たりBUH後熱 ${fmt1(d.cop)} kW — 約${fmt1(d.pel)} kW入力で約${fmt1(d.copPth)} kW。境界はCT配線次第です。`
-      : `ヒートポンプ境界で電力1 kW当たり熱 ${fmt1(d.cop)} kW — 約${fmt1(d.pel)} kW入力で約${fmt1(d.copPth)} kW。BUHは両方に含みません。`], // cop
-    ["補助ヒーター · BUH", "補助ヒーター BUH", "凍結、霜取り、非常運転用の水回路電気ヒーターです。段数は個別のkW測定ではありません。", (d) => d.buh1 == null && d.buh2 == null ? null : d.buh2 ? "段2 — 両段作動。" : d.buh1 ? "段1 — 1段作動。" : "停止 — BUH作動なし。"], // buh
-    ["タンク電気ヒーター", "タンク電気ヒーター", "浸漬式BSHは圧縮機や水循環なしでもタンクを加熱します。X10Aは状態だけで出力は報告しません。", () => { const on = x10aDown() ? null : vOn(/^bsh$/i); return on == null ? null : on ? "タンク電気ヒーター作動中。" : "停止 — BSHは作動していません。"; }], // bsh
+      : needsCapacitySpeed(d) ? t("schem.capacity_low_speed")
+      : d.pth == null ? null : d.pthKind === "cooling" ? `≈ ${fmt1(d.pth)} kW冷却${d.cop != null && !d.copPostBuh ? `、EER ${fmt1(d.cop)}` : ""}。` : `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `、COP ${fmt1(d.cop)}` : ""}。`], // pth
+    [(d) => d && d.efficiencyKind === "eer" ? eerScopeText(d, "CT電流に基づくEER（推定）", "インバーター電流によるEER推定", "推定EER")
+      : eerScopeText(d || {}, "CT電流に基づくCOP（推定）", "インバーター電流によるCOP推定", "推定COP"), "効率推定", (d) => d && d.efficiencyKind === "eer"
+      ? "推定冷却出力÷推定電力。流体、センサー、電圧、力率の仮定を含む瞬時EERで、季節効率ではありません。" +
+        eerScopeText(d, post => ` ${post ? "補助ヒーター後のR2T" : "補助ヒーター前のR1T"}とR4T、CT電流を使用します。どの負荷を含むかはCTの配線で決まります。 CTでの計算にはBUHの両段とBSHの停止確認が必要です。`, " " + t("schem.efficiency_inv_pair")) : "推定熱出力を推定消費電力で割った値です。 CTでの計算にはBUHの両段とBSHの停止確認が必要です。" + heatingEfficiencyBoundary(d), (d) => d.copBlock === "tank_heater" ? `${d.bsh === true ? `${efficiencyMetric(d)} は表示できません。タンクヒーターは作動中と報告されています。` : `${efficiencyMetric(d)} は表示できません。タンクヒーターの状態は不明です。`}その熱はどちらの出水温度センサーも通りません。`
+      : d.copBlock === "backup_heater" ? `${d.buh1 === true || d.buh2 === true ? `${efficiencyMetric(d)} は表示できません。補助ヒーターは作動中と報告されています。` : `${efficiencyMetric(d)} は表示できません。補助ヒーターの状態は不明です。`}推定消費電力にヒーターの負荷が含まれるかは確認できません。`
+      : d.copBlock === "mb_scope" ? `現在は${efficiencyMetric(d)}を表示できません。利用できるデータでは、HomeHubの電力をプレート熱交換器で推定した熱出力と対応づけられません。電気ヒーターなど、どの負荷が電力値に含まれるかは不明です。`
+      : d.copBlock === "no_pel" ? d.pelHeld ? `${efficiencyMetric(d)}なし — 圧縮機停止中のインバータ電流は前回運転値です。` : t("schem.no_usable_power", efficiencyMetric(d))
+      : d.cop == null ? efficiencyUnavailable(d) : d.efficiencyKind === "eer" ? `電力1 kW当たり冷却 ${fmt1(d.cop)} kW — 約${fmt1(d.copPel)} kW入力で約${fmt1(d.copPth)} kW。`
+      : d.copScope === "plant" ? `CT推定電力1 kW当たりの水側熱出力 ${fmt1(d.cop)} kW — 約${fmt1(d.copPel)} kW入力で約${fmt1(d.copPth)} kW。境界はCT配線次第です。`
+      : `推定電力1 kW当たり水への熱 ${fmt1(d.cop)} kW。推定入力 ${fmt1(d.copPel)} kWに対し熱は約 ${fmt1(d.copPth)} kWです。`], // cop
+    ["補助ヒーター · BUH", "補助ヒーター BUH", "凍結、霜取り、非常運転用の水回路電気ヒーターです。段数は個別のkW測定ではありません。", (d) => d.buh2 === true ? "第2段はオンと報告されています。" : d.buh1 === true ? "第1段はオンと報告されています。" : d.buh1 === false && d.buh2 === false ? "両段ともオフと報告されています。" : null], // buh
+    ["タンク電気ヒーター", "タンク電気ヒーター", "浸漬式BSHは圧縮機や水循環なしでもタンクを加熱します。X10Aは状態だけで出力は報告しません。", (d) => d.bsh == null ? null : d.bsh ? "タンク電気ヒーター作動中。" : "停止 — BSHは作動していません。"], // bsh
     ["3方弁", "3方弁", "タンクまたは室内への経路指令です。機械的位置や流量の確認信号ではありません。", (d) => d.valveDhw == null ? null : d.valveDhw ? "タンク経路を指令。これだけで流量や加熱を確認できません。" : "室内経路を指令。これだけで循環を確認できません。"], // valve
     ["2方弁出力", "2方弁出力", "X10Aの2値出力です。機械的位置や暖冷房の証明ではありません。", (d) => d.valve2On == null ? null : d.valve2On ? "X10Aは2WV出力 入。モードと室内回路運転は別に確認してください。" : "X10Aは2WV出力 切。これだけで冷房を意味せず、待機中の暖房設定とも矛盾しません。"], // valve2
     ["給湯・蓄熱タンク", "給湯または蓄熱タンク", "R5T、設定温度、3WV経路で示します。温度だけでは加熱中と確認できません。"], // tank
     [(d) => activeSpaceKind(d) === "cool" ? "冷房回路" : activeSpaceKind(d) === "heat" ? "暖房回路" : "室内回路", "室内回路", "ラジエーター、床暖房、ファンコイル等です。R1T/R4Tはヒートポンプ内部で測り、現地配管後の温度を確認しません。", (d) => d.valveDhw === true ? "室内経路は未選択。実際のタンク流量はポンプと流量で別に確認します。"
-      : waterMoving(d) ? d.thermalMode === "cool" && !compressorRunning(d, 5) && d.pthRaw != null && d.pthRaw > 0 ? `残熱水が室内へ循環。R1T ${degC(d.lwt)}、端末後センサーなし。能動冷房ではありません。` : `水は${activeSpaceKind(d) === "cool" ? "冷房" : activeSpaceKind(d) === "heat" ? "暖房" : "室内"}回路へ。R1T ${degC(d.lwt)}、端末後センサーなし。` : "ポンプと流量が室内回路の循環を確認していません。"], // heat
+      : waterMoving(d) ? d.thermalMode === "cool" && compressorStopped(d) && heatersOff(d) && d.pthRaw != null && d.pthRaw > 0 ? `残熱水が室内へ循環。R1T ${degC(d.lwt)}、端末後センサーなし。能動冷房ではありません。` : `水は${activeSpaceKind(d) === "cool" ? "冷房" : activeSpaceKind(d) === "heat" ? "暖房" : "室内"}回路へ。R1T ${degC(d.lwt)}、端末後センサーなし。` : "ポンプと流量が室内回路の循環を確認していません。"], // heat
     ["室内空調運転", "室内暖房または冷房運転", "室内回路の通常運転状態です。サーモスタット要求ではなく、単独で圧縮機運転を確認しません。"], // spaceh
     ["室温", "室温", "基準ゾーンの温度です。設定温度とモードと合わせて見ます。"], // room
-    ["循環ポンプ", "循環ポンプ速度", "共通水回路と3WVで選んだ経路を循環させます。圧縮機停止中も余熱や保護で動き、速度だけでは流量を確認しません。", (d) => d.pump == null && d.flow == null && d.pumpOn == null ? null
-      : pumpFlowConflict(d) ? `ポンプは停止報告ですが流量 ${fmt1(d.flow)} l/min。外部循環、余運転、矛盾または古い信号があり得るため両方を確認してください。`
-      : d.pump != null && d.pump > 0 ? d.flow != null ? `速度 ${fmt0(d.pump)} %、流量 ${fmt1(d.flow)} l/min。` : `速度 ${fmt0(d.pump)} %、流量測定なし。循環未確認です。`
-      : waterMoving(d) ? `有効なポンプ速度なし、流量 ${fmt1(d.flow)} l/min。`
-      : d.pumpOn === true ? d.flow != null ? `ポンプ 入、流量は ${fmt1(d.flow)} l/minのみ。循環未確認です。` : "ポンプ 入、流量測定なし。循環未確認です。"
-      : d.pumpOn === false || d.pump === 0 ? d.flow != null ? `ポンプ停止、センサー ${fmt1(d.flow)} l/min。循環を確認できません。` : "ポンプ停止、流量測定なし。"
-      : `信頼できるポンプ状態なし。${fmt1(d.flow)} l/minだけでは循環を確認できません。`], // pump
-    [(d) => pelMeasured(d) ? "電力 · HomeHub" : "電力（推定）", "電力", (d) => pelMeasured(d) ? "HomeHubレジスタ51の電力です。資料では校正、測定点、全ヒーターを含むか確認できず、認証済み設備メーターではありません。" : "COP/EER用推定: CT各相の合計 × 仮定230 V。実電圧と力率は不明で、インバータ電流は圧縮機のみ、CT境界は配線次第です。", (d) => d.pelHeld ? "圧縮機停止中のインバータ電流は前回値です。電力と効率を示せません。"
-      : d.pel == null ? "現在の電流測定がなく、COP/EERを算出できません。"
+    ["循環ポンプ", "循環ポンプ指令", "共通水回路と三方弁で選ばれた分岐に水を送ります。百分率は反転した X10A 制御指令で、0 % は停止要求、100 % は最大駆動要求です。実測回転数ではなく、回転や流量の証明にもなりません。ON/OFF 状態と実測流量を別々に確認してください。圧縮機停止中も循環する場合があります。", (d) => pumpNowText(d, [(n) => `ポンプ指令 ${n} %.`, "ポンプ状態は ON です。", "ポンプは停止（OFF）を報告しています。", "報告されたポンプ状態は不明です。", (n) => `実測流量 ${n} l/min.`, "流量測定値はありません。", "OFF と正の流量が矛盾しています。外部循環、惰性流れ、または矛盾した／古い信号の可能性があります。", "水の循環は確認できません。"])], // pump
+    [(d) => pelMeasured(d) ? "電力 · HomeHub" : "電力（推定）", "電力", (d) => pelMeasured(d) ? "HomeHubレジスタ51の電力です。資料では校正、測定点、全ヒーターを含むか確認できず、認証済み設備メーターではありません。" : "インバーター電流または申告されたすべてのCT相の合計に、仮定の230 Vを掛けた推定電力です。実電圧と力率は不明です。インバーター電流が捉える負荷は未確認で、CTの測定範囲は配線によります。", (d) => d.pelHeld ? "圧縮機停止中のインバータ電流は前回値です。電力と効率を示せません。"
+      : d.pel == null ? t("schem.no_usable_power")
       : d.pelSrc === "MB" ? "HomeHubレジスタ51の値。正確な測定境界は未記載です。"
-      : d.pelSrc === "CT" ? "CT推定。含む負荷は配線次第です。" : "インバータ電流から算出 — 圧縮機のみ。"], // pel
-    ["霜取り", "霜取り", "逆サイクルで室外熱交換器の氷を溶かし、暖房を短時間中断します。", (d) => d.defrost == null ? null : d.defrost ? "霜取り作動中。" : "停止 — 霜取りなし。"], // defrost
+      : d.pelSrc === "CT" ? "CT推定。含む負荷は配線次第です。" : "インバーター電流による推定です。"], // pel
+    ["霜取り", "霜取り", "逆サイクルで室外熱交換器の氷を溶かし、暖房を短時間中断します。", (d) => d.defrost == null ? null : d.defrost ? "X10Aは霜取りが作動中と報告しています。" : "X10Aは霜取りが停止中と報告しています。"], // defrost
     ["静音モード", "静音モード", "通常はファンや圧縮機を制限して騒音を下げ、利用可能な出力も下がる場合があります。", (d) => d.quiet == null ? null : d.quiet ? "静音モード作動中。" : "停止 — 静音モードなし。"], // quiet
-    ["ガス配管", "ガス側冷媒配管", "分離型の機器間冷媒配管です。暖房では高温高圧ガスがPHEへ流れ、冷房では逆向きです。モノブロックにはありません。", (d) => compressorRunning(d) ? d.rps != null ? `循環中 — ${fmt1(d.circP)} bar、${fmt0(d.disch)} °C。` : "循環中 — HomeHubが圧縮機を確認。圧力と温度にはX10Aが必要です。" : "冷媒循環なし — 圧縮機停止。圧力均一化は回路と停止時間次第です。"], // rhot
-    ["液配管", "液側冷媒配管", "分離型の機器間液冷媒配管です。暖房では室外膨張弁へ戻り、冷房では逆向きです。モノブロックにはありません。", (d) => compressorRunning(d) ? d.rps != null ? `循環中 — 膨張弁 ${fmt0(d.eev)}パルス。` : "循環中 — HomeHubが圧縮機を確認。弁位置にはX10Aが必要です。" : "停止 — 圧縮機停止。"], // rcold
+    ["ガス配管", "ガス側冷媒配管", "分離型の機器間冷媒配管です。暖房では高温高圧ガスがPHEへ流れ、冷房では逆向きです。モノブロックにはありません。", (d) => compressorRunning(d) ? d.rps != null ? `循環中 — ${fmt1(d.circP)} bar、${fmt0(d.disch)} °C。` : "HomeHubは圧縮機が「入」と報告しています。圧力と吐出温度にはX10Aが必要です。" : "冷媒循環なし — 圧縮機停止。圧力均一化は回路と停止時間次第です。"], // rhot
+    ["液配管", "液側冷媒配管", "分離型の機器間液冷媒配管です。暖房では室外膨張弁へ戻り、冷房では逆向きです。モノブロックにはありません。", (d) => compressorRunning(d) ? d.rps != null ? `循環中 — 膨張弁 ${fmt0(d.eev)}パルス。` : "HomeHubは圧縮機が「入」と報告しています。膨張弁の位置にはX10Aが必要です。" : "圧縮機は停止しています。"], // rcold
     ["PHE出口配管", "PHE出口配管", "R1Tからの水はBUHとポンプを通り、3WVが室内またはタンクへ送ります。冷房では低温側で、BUH後センサーは電気熱を含み得ます。", (d) => waterMoving(d) ? `BUH前R1T ${degC(d.lwt)}、${fmt1(d.flow)} l/min${d.buh1 || d.buh2 ? "、後段BUH作動" : ""}。` : "ポンプと流量がこの配管の循環を確認していません。"], // wsup
     ["タンク回路", "タンク回路", "給湯・蓄熱タンクを加熱する水回路です。熱交換器構造は機種次第で、図は機能を示し実構造ではありません。", (d) => d.valveDhw === true ? waterMoving(d) ? `タンク選択、${fmt1(d.flow)} l/min。PHE ${degC(d.lwt)}、タンク ${degC(d.tank)}。` : "タンク選択中ですが、循環だけでは加熱中と確認できません。" : "タンク経路未選択。制御は室内回路を報告しています。"], // wtank
-    [(d) => activeSpaceKind(d) === "cool" ? "冷房分岐" : activeSpaceKind(d) === "heat" ? "暖房分岐" : "室内分岐", "室内分岐", "ラジエーター、床暖房、ファンコイルへの分岐です。R1T/R4Tはヒートポンプ内部で測り、この分岐ではなく、ΔTには配管影響も含みます。", (d) => d.valveDhw === true ? "室内分岐は未選択。制御はタンクを報告しています。" : waterMoving(d) ? d.thermalMode === "cool" && !compressorRunning(d, 5) && d.pthRaw != null && d.pthRaw > 0 ? `残熱循環 ${fmt1(d.flow)} l/min、能動冷房なし。R1T ${degC(d.lwt)}、R4T ${degC(d.ret)}。` : `室内へ循環 ${fmt1(d.flow)} l/min。R1T ${degC(d.lwt)}、R4T ${degC(d.ret)}。` : "室内分岐の循環は未確認です。"], // wheat
+    [(d) => activeSpaceKind(d) === "cool" ? "冷房分岐" : activeSpaceKind(d) === "heat" ? "暖房分岐" : "室内分岐", "室内分岐", "ラジエーター、床暖房、ファンコイルへの分岐です。R1T/R4Tはヒートポンプ内部で測り、この分岐ではなく、ΔTには配管影響も含みます。", (d) => d.valveDhw === true ? "室内分岐は未選択。制御はタンクを報告しています。" : waterMoving(d) ? d.thermalMode === "cool" && compressorStopped(d) && heatersOff(d) && d.pthRaw != null && d.pthRaw > 0 ? `残熱循環 ${fmt1(d.flow)} l/min、能動冷房なし。R1T ${degC(d.lwt)}、R4T ${degC(d.ret)}。` : `室内へ循環 ${fmt1(d.flow)} l/min。R1T ${degC(d.lwt)}、R4T ${degC(d.ret)}。` : "室内分岐の循環は未確認です。"], // wheat
     ["PHE戻り配管", "PHE戻り配管", "タンクと室内分岐の合流後、R4Tへ戻る共通配管です。通常、暖房ではR1Tより低く、冷房では高く、R4Tは端末付近ではありません。", (d) => waterMoving(d) ? `戻り ${degC(d.ret)}、${fmt1(d.flow)} l/min、${fmt1(d.wp)} bar。` : "戻り配管の循環は未確認です。"], // wret
     ["水流量", "水流量", "共通水回路の流量です。必要最小値は機種とモードで異なります。"], // flow
     ["流量スイッチ", "流量スイッチ状態", "X10Aの2値状態です。l/minを測らず、機種の最小流量も確認しません。", (d) => d.flowSwitch == null ? null : d.flowSwitch ? `X10A 入。ポンプと ${fmt1(d.flow)} l/minを比較してください。` : `X10A 切。ポンプ運転中は ${fmt1(d.flow)} l/minと7H/C0異常を確認してください。`], // flow_switch
@@ -1266,7 +1282,7 @@ HOMEHUB_LABEL_I18N.ja = homeHubValues([
   "圧縮機作動", // 31
   "タンクヒーター作動", // 32
   "タンク除菌作動", // 33
-  "3方弁位置", // 37
+  "三方弁", // 37
   "現在の暖房・冷房モード", // 38
   "PHE出口温度", // 40
   "BUH後送水温度", // 41

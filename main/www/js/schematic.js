@@ -20,6 +20,27 @@ const rowNum = (r) => { if (!r) return null; const n = parseFloat(r.value); retu
 const vNum = (re) => rowNum(vRow(re));
 // Bit-flag values arrive as numeric 1/0 (logic/convert.hpp conv 300-307). null = row absent.
 const vOn = (re) => { const r = vRow(re); return r ? String(r.value).trim() === "1" : null; };
+const pumpX10a = () => {
+  const row = x10aDown() ? null : vRow(/water pump operation/i);
+  return row?.held || row?.held_unknown || binaryValue(row) == null ? null : row;
+};
+const valveX10a = () => {
+  const row = x10aDown() ? null : vRow(/3.?way valve/i);
+  return row?.held === true || row?.held_unknown === true || binaryValue(row) == null ? null : row;
+};
+const defrostX10a = () => {
+  const row = x10aDown() ? null
+    : vFind((item) => item.reg === 0x10 && /^defrost operation$/i.test(item.label || ""));
+  return row?.held || row?.held_unknown || binaryValue(row) == null ? null : row;
+};
+const bshX10a = () => {
+  const row = x10aDown() ? null : vRow(/^bsh$/i);
+  return row?.held || row?.held_unknown || binaryValue(row) == null ? null : row;
+};
+const outdoorAirRow = () => {
+  const row = vRow(/outdoor air/i);
+  return rowNum(row) == null ? null : row;
+};
 
 // Page 0x20 / offset 2 across the supported model catalog. The sensor's physical role is stable
 // while Daikin's labels are not: ordinary air-source units call it the outdoor heat exchanger,
@@ -53,7 +74,7 @@ const highSideRow = () => {
 const OU_HELD_PAGES = [0x20, 0x21];
 // Is this /values row still a CURRENT reading? Takes the snapshot rather than reading S.live, so
 // every consumer answers from the same poll the rest of its render came from.
-const rowHeldOver = (r, d) => !!(d && d.ouHeldOver && r && OU_HELD_PAGES.includes(r.reg));
+const rowHeldOver = (r, d) => !!r && (r.held === true || (!!d?.ouHeldOver && OU_HELD_PAGES.includes(r.reg)));
 
 // Leaving-water MEASUREMENT for ΔT / heat output / COP — NOT a plain vNum, because a measurement
 // regex that can also match a setpoint row poisons all three (issue legacy-121, the legacy-35–legacy-39 failure
@@ -109,8 +130,8 @@ const vRwt = () => {
   const n = parseFloat(r.value);
   return Number.isFinite(n) ? n : null;
 };
-// The POST-BUH (R2T) leaving-water measurement — the COP numerator when the electrical figure is a
-// WHOLE-UNIT one. Host-tested twin: main/logic/cop_scope.hpp cop_is_post_buh / cop_post_buh_select
+// The POST-BUH (R2T) leaving-water measurement — the preferred numerator for a CT-based COP.
+// Host-tested twin: main/logic/cop_scope.hpp cop_is_post_buh / cop_post_buh_select
 // (test/test_logic.cpp test_cop_scope), gated against the whole catalog; keep the tokens below
 // byte-for-byte in sync with it and with lwtWater/lwtReject above.
 // The PAGE is half the address, not defensive style: "(R2T)" also names the compressor's discharge
@@ -130,8 +151,8 @@ const postBuhRow = () => {
 // WHICH COP a quotient would be, and when it is none — the addressable twin of
 // logic/cop_scope.hpp's cop_plan(), same branches in the same order. A named function rather than a
 // cascade inlined in liveData() so scripts/check-presenter-parity.sh can enumerate the whole input
-// space (3 electrical sources x 9 backup-heater step pairs x 3 tank-heater states x post-BUH row or
-// not = 162 combinations) against the C++ and diff every answer; a rule spelled out inside a
+// space (electrical source, heater states, post-BUH row and inverter fallback) against the C++
+// and diff every answer; a rule spelled out inside a
 // 200-line builder can only be tested through everything around it.
 //
 // It takes the two heaters as the RAW tri-states they arrive as (null = this profile carries no such
@@ -141,16 +162,15 @@ const postBuhRow = () => {
 // computed in the caller is a step the parity gate would have to re-implement to reach, which would
 // make the gate a third copy of the very thing it is comparing. Measured: while these two lines sat
 // in liveData(), the selftest's "unknown tank heater treated as off" mutation passed the gate.
-const copPlan = (pelSrc, buh1, buh2, bsh, pbOk) => {
-  const heaterQuiet = buh1 != null && buh2 != null && !(buh1 === true || buh2 === true);
-  const tankQuiet   = bsh != null && bsh !== true;
+const copPlan = (pelSrc, buh1, buh2, bsh, pbOk, invPairUsable) => {
+  const heaterQuiet = buh1 === false && buh2 === false;
+  const tankQuiet   = bsh === false;
   if (pelSrc == null)    return { scope: null,    block: "no_pel",      postBuh: false };
-  if (pelSrc === "INV")  return { scope: "hp",    block: null,          postBuh: false };
-  // Checked before the numerator is picked: no choice of row answers the tank heater, so claiming
-  // one would imply a pairing that does not exist.
-  if (!tankQuiet)        return { scope: "plant", block: "tank_heater", postBuh: false };
-  if (pbOk)              return { scope: "plant", block: null,          postBuh: true  };
-  return { scope: "plant", block: heaterQuiet ? null : "buh_no_r2t", postBuh: false };
+  if (pelSrc === "INV" || (invPairUsable && !(heaterQuiet && tankQuiet)))
+    return { scope: "hp", block: null, postBuh: false };
+  if (!tankQuiet)   return { scope: "plant", block: "tank_heater",   postBuh: false };
+  if (!heaterQuiet) return { scope: "plant", block: "backup_heater", postBuh: false };
+  return { scope: "plant", block: null, postBuh: pbOk };
 };
 // Diagram numbers are user-facing copy too. Keep their width fixed to one decimal while using the
 // selected locale's decimal separator (for example 24,3 in Ukrainian instead of 24.3).
@@ -160,47 +180,57 @@ const fmt1 = (n) => (n == null ? "—" : Number(n).toLocaleString(LANG, {
 const fmt0 = (n) => (n == null ? "—" : String(Math.round(n)));
 const setTxt = (id, s) => { const el = $(id); if (el && el.textContent !== s) el.textContent = s; };
 
-// The preferred witness is X10A's actual compressor speed. In a gateway-only snapshot that row is
-// necessarily absent, but HomeHub input 31 supplies the corresponding current ON/OFF state. Keep
-// the speed threshold used by the thermal calculation when speed exists; the binary fallback has
-// no intermediate range to apply it to.
-const compressorRunning = (d, minRps = 0) => {
+// X10A speed takes precedence for activity. HomeHub input 31 can report ON/OFF without a speed.
+const compressorRunning = (d) => {
   if (!d) return false;
-  return d.rps != null ? d.rps > minRps : d.compressorOn === true;
+  return d.rps != null ? d.rps > 0 : d.compressorOn === true;
+};
+const compressorConflict = d => d.rps === 0 && d.mbCompressorOn === true;
+const homehubOnlyCompressorOff = d => d.rps == null && d.mbCompressorOn === false;
+const compressorStopped = d => d.rps != null
+  ? d.rps === 0 && !compressorConflict(d) : d.compressorOn === false;
+const compressorConflictText = d =>
+  `${t("src.disagree")}. X10A ${fmt0(d.rps)} rps · HomeHub ${t("state.on")}`;
+const capacitySpeedQualified = d => d.rps > 5;
+const needsCapacitySpeed = d => !compressorStopped(d) && !capacitySpeedQualified(d);
+const backupHeaterActive = d => d.buh1 === true || d.buh2 === true;
+const heatersOff = d => d.buh1 === false && d.buh2 === false && d.bsh === false;
+const stoppedCapacityText = d => {
+  const stop = homehubOnlyCompressorOff(d)
+    ? t("schem.homehub_compressor_off") + " " + t("schem.capacity_low_speed")
+    : t("schem.compressor_off");
+  return backupHeaterActive(d) ? `${t("schem.backup_heater_active")}. ${stop}` : stop;
 };
 
 // Prefer the measured flow over the pump command/status. An external pump, coast-down or a stale/
 // conflicting binary status can produce real flow while the internal pump reports OFF. Conversely,
 // pump ON without a flow reading is only a pump report, not proof that water moves. Return null for
 // that unknown state so animations and prose do not turn a command into a measurement.
-const waterMoving = (d) => {
-  if (!d) return null;
-  if (d.flow != null) return d.flow > 0.5;
-  return d.pumpOn === false ? false : null;
-};
-const pumpFlowConflict = (d) => !!d && d.pumpOn === false && d.flow != null && d.flow > 0.5;
+const waterMoving = (d) => usableWaterFlow(d?.flow) ? d.flow > 0.5 : null;
+// Each sentence names a separate observation: a STOP command never supplies an OFF report.
+// Locale tables supply copy only; all thirteen languages use the same state/flow rule.
+// words: command, ON, OFF, unknown, measured flow, missing flow, conflict, unconfirmed circulation.
+function pumpNowText(d, words) {
+  const moving = waterMoving(d);
+  if (d.pump == null && d.pumpOn == null && moving == null && !d.flowInvalid && d.provisionalFlow == null) return null;
+  const parts = d.pump == null ? [] : [words[0](fmt1(d.pump))];
+  parts.push(d.pumpOn === true ? words[1] : d.pumpOn === false ? words[2] : words[3]);
+  if (moving != null) parts.push(words[4](fmt1(d.flow)));
+  else if (d.flowInvalid) parts.push(t("schem.flow_invalid"));
+  else if (d.provisionalFlow == null) parts.push(words[5]);
+  if (moving && d.pumpOn === false) parts.push(words[6]);
+  if (moving !== true) parts.push(words[7]);
+  return parts.join(" ");
+}
 
-// The colour is a claim about THERMAL transfer, not merely hydraulic motion. Modbus-only DHW has
-// enough independent evidence for heating (compressor + DHW valve + pump); Modbus-only space Auto
-// still cannot distinguish heating from cooling and therefore remains neutral.
+// Qualified flow establishes hydraulic motion. Defrost stays neutral. The selected heating or
+// cooling mode colours the pipes during compressor activity, or heating with a reported BUH stage.
 const waterThermalKind = (d, pumping) => {
   if (!d || pumping !== true) return null;
-  if (d.thermalMode == null || (!compressorRunning(d) && !(d.buh1 || d.buh2))) return "neutral";
+  if (d.thermalMode == null || d.thermalMode === "defrost") return "neutral";
+  const backupHeating = d.thermalMode === "heat" && backupHeaterActive(d);
+  if (!compressorRunning(d) && !backupHeating) return "neutral";
   return d.thermalMode === "cool" ? "cool" : "heat";
-};
-
-// The hydronic I/U mode is the only X10A row that distinguishes the SPACE circuit's season from
-// the task currently using the common water loop. Do not infer it from temperatures: the exact
-// cooling screenshot that prompted this rule had 57.8 °C residual DHW water while the I/U mode was
-// already Cooling. With X10A down the HomeHub can still say that space operation is active, but its
-// Auto holding setting does not say which side Auto selected, so the honest fallback is unknown.
-const spaceModeKind = () => {
-  if (x10aDown()) return null;
-  const r = vRow(/^i\/u operation mode$/i);
-  const raw = r && r.value != null ? String(r.value).trim() : "";
-  if (/^cooling(?:\s*\+\s*dhw)?$/i.test(raw)) return "cool";
-  if (/^heating(?:\s*\+\s*dhw)?$/i.test(raw)) return "heat";
-  return null;
 };
 
 // Turn the signed water-side balance into the one quantity the current task can honestly name.
@@ -210,7 +240,7 @@ const spaceModeKind = () => {
 // A direction opposite to the declared task is a transition, sensor tolerance or another state we
 // cannot classify — blank it rather than relabel it into a plausible-looking capacity.
 function thermalValue(d, raw, allowDefrost) {
-  if (raw == null || d.dtStale || !compressorRunning(d, 5)) return null;
+  if (raw == null || d.dtStale || !capacitySpeedQualified(d)) return null;
   if (d.defrost === true) return allowDefrost ? raw : null;
   if (d.thermalMode === "cool") return raw < 0 ? -raw : null;
   if (d.thermalMode === "heat") return raw > 0 ? raw : null;
@@ -231,7 +261,7 @@ function applyThermalPlan(d) {
 // Cooling + stopped compressor + 57 °C pump overrun is the generic space circuit carrying residual
 // heat; calling the emitter box "COOLING" makes the mode look like a claim about that hot water.
 function activeSpaceKind(d) {
-  if (!d || d.valveDhw === true) return null;
+  if (d?.valveDhw !== false) return null;
   return d.pthKind === "cooling" ? "cool" : d.pthKind === "heating" ? "heat" : null;
 }
 
@@ -251,15 +281,29 @@ function liveData() {
   const invRow = (S._values || []).find((x) => /inv primary current/i.test(x.label || "")) ||
     (S.status?.history?.rows || []).find((r) => r.id === "inv_current");
   const inv = rowNum(invRow);
+  const speedRow = x10aDown() ? null : vRow(/inv frequency/i);
+  const airRow = outdoorAirRow();
+  const flowRow = x10aDown() ? null : vRow(/flow sensor/i);
+  const flowText = flowRow?.held || flowRow?.held_unknown ? "" : String(flowRow?.value ?? "").trim();
+  const flow = flowText ? Number(flowText) : null;
+  const flowValid = usableWaterFlow(flow);
+  const fanRunning = !x10aDown() && (S._values || []).some(row => {
+    const label = row.label || "";
+    const fan = (row.reg === 0x30 && /^fan [12] \((?:step|10 rpm)\)$/i.test(label)) ||
+      (row.reg === 0x53 && /^outdoor fan \((?:upper|lower)\)\(rps\)$/i.test(label));
+    const speed = Number(row.value);
+    return fan && !row.held && !row.held_unknown && Number.isFinite(speed) && speed > 0;
+  });
   const postBuh = postBuhRow();
   const d = {
     lwt, ret,
     dt: lwt != null && ret != null ? lwt - ret : null,
-    out: vNum(/outdoor air/i),
+    out: rowNum(airRow),
     ouHx: rowNum(ouHxRow()),
-    flow: vNum(/flow sensor/i),
+    flow: flowValid ? flow : null, fanRunning,
+    flowInvalid: !!flowText && !flowValid,
     wp: vNum(/^water pressure$/i),
-    rps: vNum(/inv frequency/i),
+    rps: speedRow?.held === true || speedRow?.held_unknown === true ? null : rowNum(speedRow),
     lp: vNum(/^low pressure$/i),
     disch: vNum(/discharge pipe temp/i),
     eev: vNum(/expansion valve ?1/i),
@@ -270,12 +314,10 @@ function liveData() {
     room: vNum(ROOM_TEMP_RE),
     roomSet: vNum(/^rt setpoint/i),
     pumpSig: vNum(/water pump signal/i),
-    pumpOn: stateOf(/water pump operation/i, 30),
-    // Through stateOf, like every other plant state: X10A while its link is live, else a live
-    // gateway, else nothing. Keyed on the EKRHH OFFSET, not a label — those offsets are the
-    // documented data model (§9.2.2) and are the one thing about a HomeHub row that cannot be
-    // re-spelled.
-    valveDhw: stateOf(/3.?way valve/i, 37),        // label documents On:DHW / Off:Space
+    // HomeHub input 30 is a full-sweep reading. Unrelated fast replies do not refresh it.
+    pumpOn: binaryValue(pumpX10a()),
+    // The HomeHub full-sweep cache can lag its fast poll. Use the current X10A route here.
+    valveDhw: binaryValue(valveX10a()),
     // Historical X10A catalogs call this bit "On:Heat_Off:Cool", but it is a logical output state,
     // not the separate configured/current operating mode or mechanical position feedback. At idle
     // the live unit demonstrates that the two can differ, so retain the electrical ON/OFF fact.
@@ -283,10 +325,8 @@ function liveData() {
     flowSwitch: stateOf(/water flow switch/i),
     buh1: vOn(/buh step ?1/i),
     buh2: vOn(/buh step ?2/i),
-    // Exact anchor is intentional: "Thermal protector BSH" is a different flag. BSH is the tank's
-    // electric immersion heater and can be the only active component during an SG-Ready boost.
-    bsh: stateOf(/^bsh$/i, 32),
-    defrost: vOn(/defrost operation/i),
+    bsh: binaryValue(bshX10a()),
+    defrost: binaryValue(defrostX10a()),
     // "Space heating Operation ON/OFF" and HomeHub input 53 both mean normal SPACE heat/cool
     // OPERATION — not a thermostat demand and not heating-only. The controller can report it ON in
     // Cooling while Thermostat is OFF (live unit, 2026-08-01). Keep the exact row anchor, but name
@@ -296,7 +336,7 @@ function liveData() {
     // outdoor `Low noise control` bit is P2 observation telemetry whose polarity/trigger remains
     // uncorrelated; letting it fall through here would colour the pill and feed quiet history when
     // the hydronic page misses one sweep.
-    quiet: stateOf(/^silent mode$/i, 9),
+    quiet: x10aDown() ? null : vOn(/^silent mode$/i),
     // HomeHub holding offset 56 is the EXTERNAL Smart-Grid request. It is intentionally independent
     // of the plant's operating mode: mode 2 proves that evcc's boost reached the controller, while
     // the DHW flag / valve / flow separately prove whether the controller acted on it.
@@ -327,16 +367,29 @@ function liveData() {
     const sgX10a = x10aSmartGridMode();
     if (sgX10a != null) { d.sgMode = sgX10a; d.sgSrc = "X10A"; }
   }
-  // X10A leads when it can state a speed. When its whole link is down (or a profile has no speed
-  // row), the live HomeHub compressor flag supplies only the activity fact — never an invented rps.
-  d.compressorOn = !x10aDown() && d.rps != null ? d.rps > 0 : mbBool(31);
-  d.spaceMode = spaceModeKind();
-  // DHW always heats the tank-side hydronic loop, even when the simultaneous space season is Cooling.
-  // Otherwise the I/U mode decides which direction across the PHE is useful output.
-  d.thermalMode = d.defrost === true ? "defrost"
-                : d.valveDhw === true ? "heat" : d.spaceMode;
-  // Pump % — the wire value is inverted ("Water pump signal (0:max-100:stop)").
-  d.pump = d.pumpSig == null ? null : Math.min(100, Math.max(0, 100 - d.pumpSig));
+  // The raw row can belong to an older full sweep. Only the fresh /values witness can drive
+  // activity or contradict the current X10A speed.
+  d.mbCompressorOn = mbLive() ? S.modbusCompressorRunning ?? null : null;
+  d.compressorOn = d.rps != null ? d.rps > 0 : d.mbCompressorOn;
+  // X10A reports the hydronic mode and must supply the route in Cooling + DHW and pure DHW.
+  // A current X10A tank route also withholds pure Cooling when it contradicts the mode.
+  const modeRow = x10aDown() ? null : vRow(/^i\/u operation mode$/i);
+  const mode = String(modeRow?.value ?? "").trim().toLowerCase().replace(/\s*\+\s*/g, " + ");
+  const cooling = mode === "cooling";
+  const coolingDhw = mode === "cooling + dhw";
+  const heating = mode === "heating" || mode === "heating + dhw";
+  const route = d.valveDhw;
+  d.spaceMode = cooling || coolingDhw ? "cool" : heating ? "heat" : null;
+  d.thermalMode = null;
+  // Defrost can reverse the circuit before the I/U mode changes. Normal direction needs a
+  // current OFF report from the defrost page; a missing report leaves the direction unknown.
+  if (d.defrost === true) d.thermalMode = "defrost";
+  else if (d.defrost === false) {
+    if (heating || ((mode === "dhw" || coolingDhw) && route === true)) d.thermalMode = "heat";
+    else if ((cooling && route !== true) || (coolingDhw && route === false)) d.thermalMode = "cool";
+  }
+  // Pump command % — independent of the reported operation state and measured flow.
+  d.pump = pumpCommandPercent(d.pumpSig);
   // The outdoor unit refreshes its OWN register pages (0x20 sensors, 0x21 inverter) only while it
   // RUNS — stopped, it answers with the LAST RUN's values (logic/ou_stale.hpp, host-tested against
   // the whole catalog). Measured on a live unit: outdoor air held exactly 19.0 °C for five hours,
@@ -346,27 +399,22 @@ function liveData() {
   // A held-over 19.0 °C is exactly the legacy-35–legacy-39 shape: well-formed, plausible, and false — and it is
   // what made an idle plant look like a running one next to a "not running" headline.
   //
-  // Without a readable speed the firmware marks these pages `held_unknown` (logic/ou_stale.hpp), on a
-  // profile without that row for good. The HomeHub's compressor flag answers independently where it
-  // exists: OFF means held over, ON means current. With neither, the state is unknown. A reading then
-  // stays drawn, because blanking on a guess would cost one that may well be live; the inspector and
-  // the value table say it may be old, and anything DERIVED from it is refused below.
-  const speedUnread = d.rps == null && (S._values || []).some((x) => x.held_unknown === true);
-  d.ouHeldOver = d.rps === 0 || (speedUnread && d.compressorOn === false);
-  d.ouUnknown = speedUnread && d.compressorOn == null;
-  // X10A's outdoor-air row is held over at rest, but the independently polled HomeHub register can
-  // continue changing. Prefer that register value to a blank pill, while retaining ouHeldOver so every
-  // other page-0x20/0x21 value (notably discharge temperature) is still withheld. The pairing is the
-  // firmware's structural concept, never a browser label guess; a missing/disconnected HomeHub still
-  // leaves the ordinary "—" behaviour intact. A row of unknown age takes the same stand-in: a reading
-  // known to be current outranks one that may not be.
+  // HomeHub reports activity in its own poll. The X10A speed and row flags determine freshness.
+  const markedUnknown = (S._values || []).some((row) => row.held_unknown === true);
+  d.ouHeldOver = d.rps === 0;
+  d.ouUnknown = markedUnknown && !d.ouHeldOver;
+  // Prefer the structurally paired HomeHub air reading when the X10A value is unavailable or old.
   const takeMb = (key, cid) => {
     const r = mbByConcept(cid);
     if (!r) return;
     const n = parseFloat(r.value);
-    if (Number.isFinite(n)) { d[key] = n; d.mbFields.add(key); }
+    if (!Number.isFinite(n)) return;
+    if (key === "flow") d.provisionalFlow = n;
+    else d[key] = n;
+    d.mbFields.add(key);
   };
-  if (d.ouHeldOver || d.ouUnknown) takeMb("out", "outdoor_air");
+  d.outHeld = rowHeldOver(airRow, d);
+  if (d.out == null || d.outHeld || airRow?.held_unknown === true) takeMb("out", "outdoor_air");
   // Circuit refrigerant pressure for the schematic's high-side badge: the row the chart and the
   // refrigerant service read (highSideRow). On a profile whose high side is the outdoor 0x20/12
   // transducer the pill is blank at rest, since that page holds over and no other row is a sensor for
@@ -374,14 +422,9 @@ function liveData() {
   const hsRow = highSideRow();
   const hsBar = rowNum(hsRow);
   d.circP = hsBar > 0 && !rowHeldOver(hsRow, d) ? hsBar : null;
-  // ΔT is a WORKING POINT across the exchanger — it needs water moving to mean anything. With the
-  // pump off, R1T and R4T are two stagnant sensors cooling at different rates, and their difference
-  // (measured: 14.6 K on a plant idle for an hour) is not a small ΔT, it is no ΔT at all. Decided
-  // HERE rather than in renderLive so the drawing and the explainer cannot disagree about it — the
-  // pill blanked while the inspector went on quoting the number was the same split that let a
-  // held-over outdoor temperature survive in the explainer after the pill stopped showing it.
-  // A working ΔT needs measured water movement. Pump ON alone is not enough; a missing flow value
-  // therefore blanks the working-point claim just like a measured zero does.
+  // A working ΔT needs qualified measured flow. Without that evidence R1T and R4T can cool at
+  // different rates in stagnant water. Neither a pump command nor an ON/OFF report supplies the
+  // flow witness. The drawing and inspector share this decision.
   d.dtStale = waterMoving(d) !== true;
   // Derived figures, marked "est." in the UI — the bus has no energy registers. Thermal output from
   // flow/60 × ΔT × ρ·cp (water ≈ 4.186 kJ/l·K); electrical from the CT phase currents at an assumed 230 V,
@@ -398,59 +441,45 @@ function liveData() {
   // amps as a live kW figure right beside the "not running" headline: plausible, well-formed, false
   // — the legacy-35–legacy-39 shape, and the same reason d.circP already gates. Asserted against the whole
   // catalog by logic/ou_stale.hpp's test (which page each of these two rows lives on).
-  // A row of unknown age is refused for the same reason. Unlike a reading under its own name, a kW
-  // figure is a claim built on the row, and on every profile without a speed row this inverter current
-  // is the only electrical source.
-  const invLive = !d.ouHeldOver && !d.ouUnknown && inv != null;
-  const ctLive  = ctComplete && ct > 0;
-  d.pel = ctLive ? ct * 230 / 1000 : invLive ? inv * 230 / 1000 : null;
-  // NULL when neither source is usable — the third state the old two-way expression could not say.
-  // It is what decides the COP's SCOPE below, so "no source" must not read as "the inverter".
-  d.pelSrc = ctLive ? "CT" : invLive ? "INV" : null;
+  // The inverter estimate needs positive current X10A speed and an unmarked current row.
+  const invHeld = d.ouHeldOver || rowHeldOver(invRow, d);
+  const invCurrent = d.rps > 0 && !invHeld && invRow?.held_unknown !== true;
+  const invValid = inv != null && inv >= 0;
+  const invPower = invCurrent && invValid ? inv * 230 / 1000 : null;
+  const ctPower = ctComplete && ct > 0 ? ct * 230 / 1000 : null;
+  d.pel = ctPower ?? invPower;
+  d.pelSrc = ctPower != null ? "CT" : invPower != null ? "INV" : null;
   // Why the pill is blank, when it is: the INV source EXISTS but is frozen, which is a different
   // statement from "this profile has no current sensor" (the sub-label's other empty case) — so the
   // sub-label stays silent here and the explainer says which of the two it is. With the speed unread
   // it is a third statement again: the source may be frozen. Asked of the row and not of its value,
   // since a value the firmware dropped leaves this profile's source in place.
-  d.pelHeld = d.pel == null && !!invRow && d.ouHeldOver;
-  d.pelUnknown = d.pel == null && d.ouUnknown;
-  d.pelUnread = d.pel == null && !d.pelHeld && !d.pelUnknown && invRow
+  d.pelHeld = d.pel == null && !!invRow && invHeld;
+  d.pelUnknown = d.pel == null && invValid && !invHeld && !invCurrent;
+  d.pelUnread = d.pel == null && inv == null && !d.pelHeld && invRow
     ? displayReadingLabel(invRow.label) : null;
   // ── WHICH COP this quotient is, and when it is none ─────────────────────────────────────────
   // Transcribed from logic/cop_scope.hpp's cop_plan() — same branches, same order, so a change
   // there is visibly a change here (test_cop_scope gates the rule against the whole catalog).
   //
-  // The two electrical sources sit on different SYSTEM BOUNDARIES: the CT clamps see the whole unit
-  // including both resistive heaters, "INV primary current" only the compressor. The heat side above
-  // is the PRE-BUH outlet (lwtRow) — heat from the heat pump's own exchanger, with the heaters
-  // deliberately not credited to it. Divide a whole-unit denominator into that numerator and a
-  // heater's kilowatts land in the divisor while its heat never reaches the dividend: the quotient
-  // collapses, and reads as a failing heat pump while nothing at all is wrong.
-  //
-  // The two heaters are NOT the same problem. The BUH sits in the space-heating flow between R1T and
-  // R2T, so moving the NUMERATOR downstream of it re-pairs the boundaries. The BSH is the immersion
-  // heater inside the DHW tank: it heats tank water directly, downstream of the flow sensor and of
-  // both leaving-water sensors, so no row in the profile would re-pair them and the only honest
-  // answer is to state nothing. d.pth remains on the PHE boundary and is separately qualified by
-  // compressor state, operating mode and transfer direction.
+  // CT wiring does not establish heater coverage. Both heaters must be known OFF for the CT
+  // estimate. If either may be active, a separately usable inverter/R1T pair can carry the ratio.
+  // The electrical-input pill keeps its independent source.
   const pbRow  = postBuhRow();
   const pbT    = pbRow ? parseFloat(pbRow.value) : NaN;
-  // The row must also have a usable number and a return temperature to pair with, or it cannot
-  // carry the boundary — fall through to the no-row branch, which blocks while the heater fires.
   const pbOk   = pbRow != null && Number.isFinite(pbT) && d.ret != null;
-  // Both heaters go in as the raw tri-states; copPlan owns the "UNKNOWN is not OFF" collapse, so it
-  // is one rule in one place and the parity gate can reach it.
-  const plan = copPlan(d.pelSrc, d.buh1, d.buh2, d.bsh, pbOk);
+  const ratioSource = ctPower > 0.2 ? "CT" : invPower > 0.2 ? "INV" : null;
+  const preBuhPower = thermalValue(d, d.pthRaw, false);
+  const plan = copPlan(ratioSource, d.buh1, d.buh2, d.bsh, pbOk,
+    invPower > 0.2 && preBuhPower != null);
   d.copScope = plan.scope; d.copBlock = plan.block; d.copPostBuh = plan.postBuh;
-  // The COP's own heat figure: the same formula as d.pth, across whichever outlet the scope needs.
-  const copDt = d.copPostBuh ? pbT - d.ret : d.dt;
-  const copRaw = d.flow != null && copDt != null ? d.flow / 60 * 4.186 * copDt : null;
-  d.copPth = thermalValue(d, copRaw, false);
-  d.cop = d.copBlock == null && d.copPth != null && d.pel != null && d.pel > 0.2
-    ? d.copPth / d.pel : null;
+  d.copPel = d.copBlock == null ? (d.copScope === "hp" ? invPower : ctPower) : null;
+  d.copPth = d.copPostBuh && d.flow != null
+    ? thermalValue(d, d.flow / 60 * 4.186 * (pbT - d.ret), false) : preBuhPower;
+  d.cop = d.copPel != null && d.copPth != null ? d.copPth / d.copPel : null;
 
   // ── X10A down: let the SECOND stack carry what it can ────────────────────────────────────────
-  // Only the quantities the HomeHub actually measures, resolved through the concept the firmware
+  // Only the quantities the HomeHub reports, resolved through the concept the firmware
   // paired them on — never a guess, and never a stale X10A number left standing. Everything else
   // stays null and blanks, which is the honest shape of this state: the HomeHub knows about a dozen
   // registers where X10A knows a hundred, so the drawing becomes visibly sparse. `mbFields` records
@@ -474,42 +503,25 @@ function liveData() {
     // what used to blank the pump and the demand next to readings that were arriving.
     // sgSrc rides with sgMode: a preserved value whose provenance was blanked would let the
     // inspector name the wrong instrument, which is the one thing that pill's copy must get right.
-    const KEEP = new Set(["pumpOn", "compressorOn", "valveDhw", "spaceOp", "bsh", "quiet", "sgMode",
+    const KEEP = new Set(["pumpOn", "compressorOn", "mbCompressorOn", "spaceOp", "bsh", "sgMode",
                           "sgSrc", "mbFields"]);
     Object.keys(d).forEach((k) => { if (!KEEP.has(k)) d[k] = null; });
     d.ouHeldOver = false;         // nothing to hold over: the whole bus is silent, not one unit
     d.ouUnknown = false;
     MB_PAIRS.forEach((p) => takeMb(p.fld, p.cid));
-    // The HomeHub MEASURES the electrical input; X10A has no such row and the dashboard estimates it
-    // from CT clamps at an assumed 230 V. So on this path the figure is better than usual, and it is
-    // marked as measured rather than estimated.
-    //
-    // Addressed by its EKRHH OFFSET, never by its unit. THREE rows in the map carry "kW" — the
-    // measured consumption at input 51 and the two power-LIMIT setpoints at holding 57/58 — so a
-    // first-match on the unit promoted a configured ceiling to the plant's measured draw the moment
-    // 51 was unavailable or answered a sentinel. A limit is a number the installer typed; drawing it
-    // as a measurement is the legacy-35–legacy-39 shape wearing a plausible value, and the Modbus card would go
-    // on labelling it correctly one card below.
+    // Use the gateway-reported power from input 51. The dashboard does not calculate it from X10A
+    // current. Select it by offset because holding power limits share the kW unit.
     const pw = mbPower();
     if (pw) { const n = parseFloat(pw.value);
               if (Number.isFinite(n)) { d.pel = n; d.pelSrc = "MB"; d.mbFields.add("pel"); } }
-    // ΔT survives because both temperatures come from the gateway's own hydronic readings. Thermal
-    // output survives only with its independent input-31 compressor witness: without that current
-    // flag, the snapshot still cannot distinguish active PHE transfer from pump-only redistribution.
+    // Gateway flow remains provisional. The temperature difference stays unqualified, and both
+    // capacity and efficiency also require current X10A compressor speed.
     d.dt = (d.lwt != null && d.ret != null) ? d.lwt - d.ret : null;
     d.dtStale = waterMoving(d) !== true;
-    d.spaceMode = null;
-    d.thermalMode = d.valveDhw === true ? "heat" : null;
     applyThermalPlan(d);
-    // THE COP DOES NOT. It looks like the same arithmetic and is not: the gateway's power is the
-    // WHOLE UNIT's, backup heater and immersion heater included, while d.pth is heat across the
-    // plate exchanger alone. That is precisely the boundary mismatch logic/cop_scope.hpp exists to
-    // refuse — a quotient of two correct numbers describing two different systems, which collapses
-    // exactly when a heater fires and reads as a failing heat pump while nothing is wrong. On the
-    // X10A path cop_scope decides it from the BUH/BSH states and the post-BUH row; the gateway map
-    // carries neither, so there is nothing to decide it WITH, and the honest answer is the one this
-    // firmware gives everywhere else: publish nothing (feature_gate.hpp — disable, never degrade).
-    // A circulation-only quotient would be the other half of the same problem.
+    // The available gateway readings cannot establish a matching COP boundary. Input 51 can
+    // report electrical power, but its load coverage (including heaters) is unverified. Input 32
+    // (booster state) and input 41 (post-BUH temperature) do not establish which loads 51 covers.
     d.cop = null;
     d.copScope = null;
     d.copBlock = "mb_scope";      // named, so the explainer says WHY rather than showing a bare "—"
@@ -531,7 +543,7 @@ const SCHEM_PILL_IDS = [
 // the independent Modbus stack; mbFields is the proof that `n` is that replacement, not the retained
 // X10A cache. Shared by outdoor air and discharge so they cannot drift into two held-over policies.
 const ouReadingText = (d, key, n, fmt) =>
-  d.ouHeldOver && !(d.mbFields && d.mbFields.has(key)) ? "—" : fmt(n);
+  (key === "out" ? d.outHeld ?? d.ouHeldOver : d.ouHeldOver) && !d.mbFields?.has(key) ? "—" : fmt(n);
 
 // Compact permanent state pills contain only their stable names. Preserve the state in the
 // accessible name as well as in the inspector, so the colour-only face remains unambiguous.
@@ -673,15 +685,16 @@ function renderLive() {
   // Bit-flag states, each drawn at the component it belongs to: normal space heat/cool operation on
   // the space riser, the BUH step in the BUH label, low-noise mode on the outdoor unit. (Pump and
   // defrost were already drawn — rotation + "PUMP n%", the ❄ pill + the reversed refrigerant loop.)
-  const pumping = waterMoving(d);
+  const active = !S.otaCached;
+  const pumping = active && waterMoving(d);
   setTxt("svSpaceH", t(d.spaceOp ? "chip.space_on" : "chip.space_off"));
-  $("gSpaceH").classList.toggle("on", d.spaceOp === true);
+  $("gSpaceH").classList.toggle("on", active && d.spaceOp === true);
   const spaceKind = activeSpaceKind(d);
   setTxt("svSpaceCircuit", t(spaceKind === "cool" ? "schem.cooling"
                             : spaceKind === "heat" ? "schem.heating" : "schem.space_circuit"));
   // A non-breaking space: SVG collapses ordinary leading whitespace in a tspan, which would render
   // the step glued to the label ("BUH2").
-  setTxt("svBuh", d.buh2 ? "\u00A02" : d.buh1 ? "\u00A01" : "");
+  setTxt("svBuh", !active ? "" : d.buh2 ? "\u00A02" : d.buh1 ? "\u00A01" : "");
 
   // Schematic badges
   // Outdoor air, outdoor heat exchanger and discharge come off the pages the outdoor unit stops refreshing when it stops
@@ -701,69 +714,59 @@ function renderLive() {
   setTxt("svFlowSwitch", d.flowSwitch == null ? "—" : t(d.flowSwitch ? "state.on" : "state.off"));
   // ΔT only means something with water moving (d.dtStale, decided in liveData so the explainer
   // gates on the very same fact). Same reasoning as the derived kW/COP, which already gate.
-  setTxt("svDt", d.dtStale ? "—" : fmt1(d.dt)); setTxt("svFlow", fmt1(d.flow));
-  setTxt("svWp", fmt1(d.wp)); setTxt("svPump", fmt0(d.pump));
+  setTxt("svDt", d.dtStale ? "—" : fmt1(d.dt)); setTxt("svFlow", fmt1(d.flow ?? d.provisionalFlow));
+  setTxt("svWp", fmt1(d.wp)); setTxt("svPump", fmt1(d.pump));
   setTxt("svTank", fmt1(d.tank)); setTxt("svTankSet", fmt1(d.tankSet));
   setTxt("svRoom", fmt1(d.room)); setTxt("svRoomSet", fmt1(d.roomSet));
   // Blanks with the ΔT it is computed from (d.dtStale) — the pill two places to its left already
   // refuses to state that difference, and a product of a refused figure is the same split the ΔT
   // comment above warns about. The zero is arithmetically true (flow 0 carries nothing) and reads
   // as a measured plant output anyway: with the tank heater firing, "≈ 0.0 kW" sat beside a tank
-  // climbing at ~2.7 kW. No working point is not an output of zero. Note this gates the LIVE pill
-  // pill's instantaneous mode/direction gate. DERIVED.pth keeps measured no-flow buckets at zero
-  // but also requires the compressor witness when water moves, so pump overrun becomes a gap.
+  // climbing at ~2.7 kW. The live pill needs a current working point. History keeps measured
+  // no-flow buckets at zero and calculates the signed balance from the independent bucket values.
   setTxt("svPth", fmt1(d.pth));   // derived — applyThermalPlan already refuses pump-only circulation
-  // THREE-VALUED, and that is the whole fix. `d.valveDhw === true` collapsed "I cannot read the
-  // valve" into "heating", which is a positive claim: with X10A silent during a DHW run the drawing
-  // routed the water round the radiators while the plant was charging the tank (compared against the
-  // live X10A board, which showed the diverter on the tank in the same minute). Unknown now prints
-  // the bare "3WV" that clearSchematic() already uses and animates NEITHER branch.
-  const toDhw = d.valveDhw;                       // true | false | null(unknown)
-  setTxt("svValve", toDhw == null ? "3WV" : t(toDhw ? "schem.to_dhw" : "schem.to_space"));
+  setTxt("svValve", d.valveDhw == null ? "3WV" : t(d.valveDhw ? "schem.to_dhw" : "schem.to_space"));
 
   // Schematic state classes drive the CSS animations (flows, fan, pump, BUH glow, defrost)
   const sc = $("schem");
-  const compressorOn = compressorRunning(d);
-  sc.classList.toggle("fan-on", compressorOn && d.defrost !== true);
-  sc.classList.toggle("pump-on", pumping === true);
-  sc.classList.toggle("buh-on", !!(d.buh1 || d.buh2));
-  const bshActive = d.bsh === true;
-  sc.classList.toggle("bsh-on", bshActive);
-  sc.classList.toggle("defrost-on", d.defrost === true);
-  sc.classList.toggle("quiet-on", d.quiet === true);
-  sc.classList.toggle("valve2-on", d.valve2On === true);
-  sc.classList.toggle("flow-switch-on", d.flowSwitch === true);
-  // Water always moves in the same hydraulic direction, but its THERMAL role reverses in cooling:
-  // the supply is cold and the return warm. With the compressor stopped neither colour is earned —
-  // the live 57 °C case was residual heat being circulated, so use a neutral moving trace instead.
+  sc.classList.toggle("fan-on", active && d.fanRunning === true);
+  // The rotor represents reported pump activity, never command magnitude or external flow/RPM.
+  // Measured water motion still drives the pipe animations independently below.
+  sc.classList.toggle("pump-on", active && d.pumpOn === true);
+  sc.classList.toggle("buh-on", active && !!(d.buh1 || d.buh2));
+  sc.classList.toggle("bsh-on", active && d.bsh === true);
+  sc.classList.toggle("defrost-on", active && d.defrost === true);
+  sc.classList.toggle("quiet-on", active && d.quiet === true);
+  sc.classList.toggle("valve2-on", active && d.valve2On === true);
+  sc.classList.toggle("flow-switch-on", active && d.flowSwitch === true);
+  // The supply and return swap thermal colours in cooling. Water keeps its hydraulic direction
+  // and a neutral colour during defrost or when the heating/cooling role is unqualified.
   const waterKind = waterThermalKind(d, pumping);
   sc.classList.toggle("cooling-mode", waterKind === "cool");
-  sc.classList.toggle("water-neutral", waterKind === "neutral");
+  sc.classList.toggle("water-neutral", !active || waterKind === "neutral");
   // Mode 2 is evcc's boost / Daikin's Recommended on. The permanent pill changes colour without
   // implying that DHW is already running. The exact manufacturer mode remains written in the
   // HomeHub row, inspector and accessible name.
-  sc.classList.toggle("sg-boost-on", d.sgMode === 2);
-  updateSchematicStateA11y(d);
-  // A BSH row is itself evidence that this profile has a DHW tank, even if its temperature did not
-  // answer in this snapshot. Keep the branch visible so the active heater cannot disappear with it.
-  sc.classList.toggle("no-dhw", d.tank == null && d.bsh == null);
+  sc.classList.toggle("sg-boost-on", active && d.sgMode === 2);
+  updateSchematicStateA11y(active ? d : null);
+  // A HomeHub heater row can keep the tank visible. Its full-sweep value cannot establish activity.
+  sc.classList.toggle("no-dhw", d.tank == null && d.bsh == null && mbBool(32) == null);
   sc.classList.toggle("no-room", d.room == null && !roomReferencePresent());
   renderRoomReference(d);
-  sc.classList.toggle("no-spaceh", d.spaceOp == null);
+  sc.classList.toggle("no-spaceh", !active || d.spaceOp == null);
   const onCls = (id, on) => $(id).classList.toggle("on", !!on);
   onCls("fPhe", pumping);
   onCls("fSup1", pumping); onCls("fSup2", pumping); onCls("fSup3", pumping); onCls("fRet", pumping);
-  // Each branch needs the valve to SAY so — `!toDhw` was true for an unknown valve, which is how the
-  // heating branch came to animate on no evidence at all.
+  // Common flow proves movement only in the common loop. Each branch needs the current route.
+  const toDhw = d.valveDhw;
   const dhwPath = pumping && toDhw === true, heatPath = pumping && toDhw === false;
   onCls("fTank", dhwPath); onCls("fTankEdgeL", dhwPath); onCls("fTankEdgeR", dhwPath); onCls("fTankRet", dhwPath);
   onCls("fHeat", heatPath); onCls("fHeatRet", heatPath); onCls("fSpaceEdgeL", heatPath); onCls("fSpaceEdgeR", heatPath);
-  // Refrigerant direction is supportable only when both activity and the thermal task are known.
-  // This is true for Modbus-only DHW, but deliberately not for a gateway-only Auto space cycle.
-  const refrigerantOn = compressorOn && d.thermalMode != null;
+  // Directional refrigerant motion requires positive X10A speed and a known thermal task.
+  const refrigerantOn = active && d.rps > 0 && d.thermalMode != null;
   onCls("rfHot", refrigerantOn); onCls("rfPhe", refrigerantOn); onCls("rfCold", refrigerantOn);
   // Cooling and defrost both reverse the refrigerant circuit relative to ordinary heating/DHW.
-  const refrigerantReverse = d.defrost === true || d.thermalMode === "cool";
+  const refrigerantReverse = refrigerantOn && (d.defrost === true || d.thermalMode === "cool");
   $("rfHot").classList.toggle("rev", refrigerantReverse);
   $("rfPhe").classList.toggle("rev", refrigerantReverse);
   $("rfCold").classList.toggle("rev", refrigerantReverse);
@@ -772,9 +775,9 @@ function renderLive() {
   // COP beside the heat output it is computed from, and the electrical input on the outdoor unit
   // where the power actually goes in.
   // What is NOT drawn: their longer annotations. The ΔT's target and the electrical figure's source
-  // are in the inspector. The compact "≈" still matters in the closed drawing, but only for X10A's
-  // current×230 V estimate; the HomeHub register is a measurement and pelApproxText removes it.
-  setTxt("svCopLabel", d.efficiencyKind === "eer" ? "EER" : "COP");
+  // are in the inspector. The compact "≈" marks the local X10A current×230 V estimate. It is omitted
+  // for the value reported by HomeHub; the inspector explains that value's limits.
+  setTxt("svCopLabel", efficiencyMetric(d));
   setTxt("svCop", fmt1(d.cop));
   setTxt("pelApprox", pelApproxText(d));
   setTxt("svPel", fmt1(d.pel));
@@ -800,8 +803,8 @@ const tx = (o) => (o == null ? "" : typeof o === "string" ? o : o[LANG] ?? o.en)
 const degC = (n) => (n == null ? "—" : fmt1(n) + " °C");
 
 const PEL_ESTIMATED_WHAT = {
-  en: "Electrical-input ESTIMATE for COP/EER. The UI requires every declared CT phase and uses summed current × assumed 230 V; actual voltage and power factor are unknown. Inverter current covers only the compressor. CT scope depends on transformer wiring.",
-  de: "SCHÄTZUNG der elektrischen Aufnahme für COP/EER. Die UI verlangt jede gemeldete CT-Phase und rechnet Stromsumme × angenommene 230 V; Spannung und Leistungsfaktor sind unbekannt. Inverterstrom deckt nur den Verdichter ab. Der CT-Umfang hängt von der Verdrahtung ab.",
+  en: "Inverter current or the sum of all declared CT phases × assumed 230 V. Voltage and power factor are unknown. Inverter load coverage is unverified. CT coverage depends on wiring.",
+  de: "Inverterstrom oder Summe aller gemeldeten CT-Phasen × angenommene 230 V. Spannung und Leistungsfaktor sind unbekannt. Der Inverter-Messumfang ist unbelegt, der CT-Messumfang hängt von der Verdrahtung ab.",
 };
 const PEL_MEASURED_WHAT = {
       en: "The electrical power-consumption value reported by the heat-pump system through HomeHub input register 51. Unlike X10A's current×230 V estimate, the UI does not calculate this number. The public HomeHub register guide does not establish its calibration, exact measurement point or whether every electric heater is included; do not treat it as a certified whole-plant meter.",
@@ -814,28 +817,41 @@ const PEL_INSPECT = {
     ? { en: "Electrical input (HomeHub)", de: "Stromaufnahme (HomeHub)" }
     : { en: "Electrical input (estimated)", de: "Geschätzte Stromaufnahme" },
   aria: { en: "Electrical input", de: "Stromaufnahme" },
-  trend: "pel",
   what: (d) => pelMeasured(d) ? PEL_MEASURED_WHAT : PEL_ESTIMATED_WHAT,
   head: (d) => (d.pel == null ? "—" : pelApproxText(d) + fmt1(d.pel) + " kW"),
-  // Four cases: the measured gateway row, either X10A current source, a held-over inverter row, or
-  // no usable electrical source. Keeping this source-aware prevents a HomeHub measurement from
+  // Four cases: the reported gateway row, either X10A current source, a held-over inverter row, or
+  // no usable electrical source. Keeping this source-aware prevents a HomeHub reading from
   // being explained as compressor current merely because it is not a CT estimate. An inverter row of
   // unknown age is a fifth, which inspNowText answers before this runs.
   now: (d) => d.pelHeld
-    ? { en: "The compressor is off, so the inverter current this profile reads is left over from the last run rather than measured now — no input power or efficiency quotient can be stated.",
-        de: "Der Verdichter steht, daher stammt der Inverterstrom dieses Profils vom letzten Lauf und ist kein aktueller Messwert — Leistungsaufnahme und Effizienzquotient lassen sich nicht angeben." }
+    ? { en: "The compressor is off. Inverter current is from the last run, so input power and efficiency are unavailable.",
+        de: "Der Verdichter steht. Der Inverterstrom stammt vom letzten Lauf. Stromaufnahme und Effizienz sind nicht verfügbar." }
     : d.pel == null
-    ? { en: "No current reading on this profile, so no COP/EER can be derived either.",
-        de: "Dieses Profil liefert keinen Strommesswert, daher lässt sich auch kein COP/EER ableiten." }
+    ? t("schem.no_usable_power")
     : d.pelSrc === "MB"
     ? { en: "Reported through HomeHub input register 51; the exact measurement boundary is not documented here.",
         de: "Über HomeHub-Eingangsregister 51 gemeldet; die genaue Messgrenze ist hier nicht dokumentiert." }
     : d.pelSrc === "CT"
     ? { en: "Estimated from the CT clamps; included loads depend on their wiring.",
         de: "Aus den Stromwandlern geschätzt; welche Verbraucher enthalten sind, hängt von ihrer Verdrahtung ab." }
-    : { en: "From the inverter current (compressor only).", de: "Aus dem Inverterstrom des Verdichters." },
+    : { en: "Estimated from inverter current.", de: "Aus dem Inverterstrom geschätzt." },
   rows: [/current measured by ct/i, /inv primary current/i],
 };
+
+const efficiencyMetric = d => d?.efficiencyKind === "eer" ? "EER" : "COP";
+const efficiencyUnavailable = d => t("schem.efficiency_no_capacity", efficiencyMetric(d)) +
+  (!d.dtStale && needsCapacitySpeed(d) ? " " + t("schem.capacity_low_speed") : "");
+
+// Copy for a usable plan follows its selected electrical source and outlet. A blocked plan
+// has no paired boundary to describe, even when the electrical source is available.
+function eerScopeText(d, ct, inverter, unpaired = "") {
+  if (!d || d.copBlock != null) return unpaired;
+  if (d.copScope === "plant") return typeof ct === "function" ? ct(d.copPostBuh) : ct;
+  return d.copScope === "hp" ? inverter : unpaired;
+}
+const heatingEfficiencyBoundary = d => d?.cop != null ? eerScopeText(d,
+  post => " " + t("schem.efficiency_ct_pair", post ? "R2T" : "R1T"),
+  " " + t("schem.efficiency_inv_pair")) : "";
 
 const INSPECT = {
   status: {
@@ -920,30 +936,22 @@ const INSPECT = {
       en: "The heat-source side shown for an air-source system. The fan moves outdoor air across the coil; refrigerant absorbs heat there and the compressor raises its pressure and temperature before heat is transferred to the water circuit. Monobloc, ground-source and hybrid systems have a different physical layout, so this is a simplified flow diagram rather than a model-specific piping plan.",
       de: "Die hier für eine Luft/Wasser-Anlage gezeigte Wärmequellenseite. Der Ventilator führt Außenluft über den Wärmetauscher; dort nimmt das Kältemittel Wärme auf. Der Verdichter erhöht anschließend Druck und Temperatur, bevor die Wärme an den Wasserkreis übergeht. Monoblock-, Sole- und Hybridanlagen sind physisch anders aufgebaut; die Darstellung ist deshalb ein vereinfachtes Fließbild und kein modellspezifischer Rohrplan.",
     },
-    now: (d) => d.defrost
-      ? { en: "Defrosting — the circuit is running in reverse to melt ice off the evaporator, so heat is briefly taken back out of the heating water.",
-          de: "Abtauen — der Kreis läuft rückwärts, um den Verdampfer abzutauen; dabei wird dem Heizwasser kurzzeitig wieder Wärme entzogen." }
-      : compressorRunning(d)
+    now: (d) => compressorRunning(d)
         ? d.rps != null
-          ? { en: `Running — compressor at ${fmt0(d.rps)} rps${d.quiet ? ", capped by quiet mode" : ""}.`,
-              de: `Läuft — Verdichter mit ${fmt0(d.rps)} rps${d.quiet ? ", durch den Leise-Modus begrenzt" : ""}.` }
-          : { en: "Running — the HomeHub reports the compressor ON; speed and detailed outdoor-unit readings require X10A.",
-              de: "Läuft — der HomeHub meldet laufenden Verdichter; Drehzahl und detaillierte Außengerätewerte benötigen X10A." }
-        // Says why held X10A readings are not repeated at rest (logic/ou_stale.hpp). A structurally
-        // paired HomeHub outdoor register may replace the held value; unpaired fields stay "—".
-        : d.ouHeldOver && d.mbFields && d.mbFields.has("out")
-          ? { en: "Idle — the compressor is stopped, so no active heating or cooling transfer is taking place. X10A stops refreshing the outdoor unit's own sensors while it rests; outdoor air is therefore shown from the HomeHub Modbus register, while discharge temperature remains \"—\". The register is being read successfully but carries no source timestamp, so the age of the underlying measurement is unknown.",
-              de: "Standby — der Verdichter steht, daher findet kein aktiver Heiz- oder Kühltransfer statt. X10A aktualisiert die eigenen Sensoren der Außeneinheit im Stillstand nicht mehr; die Außentemperatur stammt deshalb aus dem HomeHub-Modbus-Register, die Heißgastemperatur bleibt „—“. Das Register wird erfolgreich gelesen, trägt aber keinen Quellzeitstempel; das Alter der zugrunde liegenden Messung ist daher unbekannt." }
-          : { en: "Idle — the compressor is stopped, so no active heating or cooling transfer is taking place. The outdoor unit also stops refreshing its own sensors while it rests, so outdoor air and discharge temperature read \"—\" rather than repeat the last run's values.",
-              de: "Standby — der Verdichter steht, daher findet kein aktiver Heiz- oder Kühltransfer statt. Die Außeneinheit aktualisiert im Stillstand auch ihre eigenen Sensoren nicht mehr; Außenluft und Heißgastemperatur zeigen daher „—“ statt die Werte des letzten Laufs zu wiederholen." },
-    rows: [/outdoor air/i, ouHxRow, /inv frequency/i, highSideRow, /discharge pipe temp/i, /expansion valve ?1/i, /defrost operation/i],
+          ? { en: `Running — compressor at ${fmt0(d.rps)} rps.${d.quiet ? " Quiet mode reports ON." : ""}`,
+              de: `Läuft — Verdichter mit ${fmt0(d.rps)} rps.${d.quiet ? " Leise-Modus meldet EIN." : ""}` }
+          : { en: "HomeHub reports the compressor ON. Speed and detailed outdoor-unit readings require X10A.",
+              de: "Der HomeHub meldet den Verdichter als aktiv. Drehzahl und detaillierte Außengerätewerte benötigen X10A." }
+        : { en: "The compressor is stopped.", de: "Der Verdichter steht." },
+    rows: [{ sel: () => outdoorAirRow(), cid: "outdoor_air" }, ouHxRow, /inv frequency/i,
+           highSideRow, /discharge pipe temp/i, /expansion valve ?1/i, () => defrostX10a()],
   },
   comp: {
     t: { en: "Compressor", de: "Verdichter" },
     re: /inv frequency/i, sample: "INV frequency (rps)",
     rows: [/inv frequency/i, /inv primary current/i, /discharge pipe temp/i],
   },
-  out: { t: { en: "Outdoor air", de: "Außentemperatur" }, re: /outdoor air/i, sample: "Outdoor Air Temp. (R1T)" },
+  out: { t: { en: "Outdoor air", de: "Außentemperatur" }, pick: () => outdoorAirRow(), sample: "Outdoor Air Temp. (R1T)" },
   ouhx: {
     t: {
       en: "Outdoor heat-exchanger temperature (R4T)",
@@ -1014,18 +1022,17 @@ const INSPECT = {
   phe: {
     t: { en: "Plate heat exchanger", de: "Plattenwärmetauscher" },
     what: {
-      en: "The plate heat exchanger transfers energy between refrigerant and the water circuit without mixing the two fluids. In heating/DHW it transfers heat into the water; in cooling it removes heat from it. The displayed mode-aware capacity is estimated from water flow and R1T/R4T across the exchanger. Those sensors belong to the hydraulic unit; their exact physical installation depends on the model.",
-      de: "Der Plattenwärmetauscher überträgt Energie zwischen Kältemittel und Wasserkreis, ohne dass sich beide Medien vermischen. Beim Heizen beziehungsweise bei Warmwasser geht Wärme ins Wasser, beim Kühlen wird sie ihm entzogen. Die angezeigte betriebsartabhängige Leistung wird aus Wasserdurchfluss sowie R1T/R4T über dem Wärmetauscher geschätzt. Diese Fühler gehören zur Hydraulikeinheit; ihre genaue Einbauposition hängt vom Modell ab.",
+      en: "The plate heat exchanger transfers heat between refrigerant and water without mixing them. Heating and hot-water operation warm the water; cooling removes heat. The estimate uses water flow and R1T/R4T across the exchanger. Sensor placement depends on the model.",
+      de: "Der Plattenwärmetauscher überträgt Wärme zwischen Kältemittel und Wasser, ohne beide zu mischen. Beim Heizen und bei Warmwasser geht Wärme ins Wasser; beim Kühlen wird sie ihm entzogen. Die Schätzung nutzt Durchfluss und R1T/R4T am Wärmetauscher. Die Fühlerposition hängt vom Modell ab.",
     },
-    // With the pump stopped the ΔT is not a small working point, it is none at all (d.dtStale) — so
-    // this says nothing is crossing, rather than quoting the two stagnant sensors' difference as if
-    // it were driving a heat flow.
-    now: (d) => !compressorRunning(d, 5)
-      ? { en: "No active refrigerant-side transfer — the compressor is stopped. Pump-only circulation can redistribute residual heat, but it is neither heating nor cooling capacity.",
-          de: "Kein aktiver Kältemittel-Wärmeübergang — der Verdichter steht. Reiner Pumpenumlauf kann Restwärme verteilen, ist aber weder Heiz- noch Kälteleistung." }
+    // With no qualified flow, the difference between the two temperature readings does not
+    // establish an operating point. Use the same decision as the ΔT pill.
+    now: (d) => compressorStopped(d)
+      ? stoppedCapacityText(d)
       : d.dtStale
       ? { en: "No water-side transfer can be calculated — current pump and flow readings do not establish water movement through the plates.",
           de: "Kein wasserseitiger Übergang berechenbar — die aktuellen Pumpen- und Durchflusswerte belegen keine Wasserbewegung durch die Platten." }
+      : needsCapacitySpeed(d) ? t("schem.capacity_low_speed")
       : d.pth == null
       ? { en: "No directional estimate — the readings do not establish useful transfer in the selected operating mode.",
           de: "Keine gerichtete Schätzung — die Messwerte belegen im gewählten Betrieb keinen nutzbaren Energieübergang." }
@@ -1065,9 +1072,9 @@ const INSPECT = {
       ? { en: "No working ΔT right now — current pump and flow readings do not establish water movement. Without measured circulation, the two sensors can drift apart while cooling and their difference is not an operating point.",
           de: "Derzeit kein Arbeits-ΔT — die aktuellen Pumpen- und Durchflusswerte belegen keine Wasserbewegung. Ohne gemessene Zirkulation können die beiden Fühler beim Auskühlen auseinanderdriften; ihre Differenz ist dann kein Arbeitspunkt." }
       : d.dt == null ? null
-      : !compressorRunning(d, 5)
-      ? { en: `${fmt1(d.dt)} K with pump-only circulation. This is residual-temperature equalisation, not evidence of heating or cooling output.`,
-          de: `${fmt1(d.dt)} K bei reinem Pumpenumlauf. Das ist ein Temperaturausgleich von Restwärme und kein Beleg für Heiz- oder Kälteleistung.` }
+      : needsCapacitySpeed(d) ? `${fmt1(d.dt)} K. ${t("schem.capacity_low_speed")}`
+      : compressorStopped(d)
+      ? `${fmt1(d.dt)} K. ${stoppedCapacityText(d)}`
       : d.thermalMode === "cool"
       ? { en: `${fmt1(d.dt)} K. In active cooling R1T should be below R4T, so this signed difference is negative.`,
           de: `${fmt1(d.dt)} K. Beim aktiven Kühlen soll R1T unter R4T liegen; die vorzeichenbehaftete Differenz ist daher negativ.` }
@@ -1082,16 +1089,13 @@ const INSPECT = {
     aria: { en: "Thermal capacity at the PHE (estimated)", de: "Geschätzte thermische Leistung am PHE" },
     trend: (d) => d && d.pthKind === "cooling" ? "" : "pth",
     what: (d) => d && d.pthKind === "cooling"
-      ? { en: "An ESTIMATE of heat removed from the water: flow/60 × (R4T−R1T) × ρ·cp (≈ 4.186 kJ/(l·K)), assuming water. Accuracy depends on the flow sensor, both temperature sensors and the actual fluid; glycol mixtures need different density and heat capacity. It is shown only with a running compressor and the cooling-direction temperature difference. R1T/R4T are internal PHE sensors, not downstream emitter sensors.",
-          de: "Eine SCHÄTZUNG der dem Wasser entzogenen Wärme: Durchfluss/60 × (R4T−R1T) × ρ·cp (≈ 4,186 kJ/(l·K)) unter Annahme von Wasser. Die Genauigkeit hängt vom Durchflusssensor, beiden Temperaturfühlern und dem tatsächlichen Medium ab; Glykolgemische benötigen andere Dichte und Wärmekapazität. Sie erscheint nur bei laufendem Verdichter und Temperaturdifferenz in Kühlrichtung. R1T/R4T sind interne PHE-Fühler und keine Fühler an den nachgeschalteten Flächen." }
-      : { en: "An ESTIMATE of heat transferred into the water: flow/60 × (R1T−R4T) × ρ·cp (≈ 4.186 kJ/(l·K)), assuming water. Accuracy depends on the flow sensor, both temperature sensors and the actual fluid; glycol mixtures need different density and heat capacity. It is shown only with a running compressor and the heating-direction temperature difference. The backup heater sits after R1T and is outside this figure.",
-          de: "Eine SCHÄTZUNG der ins Wasser übertragenen Wärme: Durchfluss/60 × (R1T−R4T) × ρ·cp (≈ 4,186 kJ/(l·K)) unter Annahme von Wasser. Die Genauigkeit hängt vom Durchflusssensor, beiden Temperaturfühlern und dem tatsächlichen Medium ab; Glykolgemische benötigen andere Dichte und Wärmekapazität. Sie erscheint nur bei laufendem Verdichter und Temperaturdifferenz in Heizrichtung. Der Zusatzheizer sitzt hinter R1T und ist in diesem Wert nicht enthalten." },
+      ? { en: "Estimated heat removed from water: flow/60 × (R4T−R1T) × ρ·cp (≈ 4.186 kJ/(l·K) for water). Sensor accuracy and fluid properties matter. The estimate needs a running compressor and a cooling-direction difference. R1T/R4T measure the PHE, not the emitters.",
+          de: "Geschätzter Wärmeentzug: Durchfluss/60 × (R4T−R1T) × ρ·cp (≈ 4,186 kJ/(l·K) für Wasser). Fühlergenauigkeit und Medium beeinflussen den Wert. Die Schätzung braucht Verdichterlauf und eine Temperaturdifferenz in Kühlrichtung. R1T/R4T messen am PHE, nicht an den Flächen." }
+      : { en: "Estimated heat added to water: flow/60 × (R1T−R4T) × ρ·cp (≈ 4.186 kJ/(l·K) for water). Sensor accuracy and fluid properties matter. The estimate needs a running compressor and a heating-direction difference. The backup heater is downstream of R1T and excluded.",
+          de: "Geschätzte Wärmezufuhr: Durchfluss/60 × (R1T−R4T) × ρ·cp (≈ 4,186 kJ/(l·K) für Wasser). Fühlergenauigkeit und Medium beeinflussen den Wert. Die Schätzung braucht Verdichterlauf und eine Temperaturdifferenz in Heizrichtung. Der Zusatzheizer hinter R1T ist nicht enthalten." },
     head: (d) => (d.dtStale || d.pth == null ? "—" : "≈ " + fmt1(d.pth) + " kW"),
-    // The COP is quoted here only while it is built on THIS figure. With a whole-unit electrical
-    // input the quotient moves to the post-BUH outlet (logic/cop_scope.hpp), so it is no longer
-    // this pill's number divided by anything — printing it beside this one would attach a plant
-    // ratio to a heat-pump-only heat output and invite exactly the boundary mix-up the split
-    // exists to prevent. The COP pill states it, with its own scope named.
+    // Quote COP here only when it uses this heat estimate. A CT-based ratio may use the post-BUH
+    // outlet instead; the COP pill names that scope.
     //
     // Blanks with the pill (d.dtStale), and — like the pel entry's three cases — says WHICH silence
     // this is. A stopped pump alone is one sentence; a stopped pump while the tank heater fires is
@@ -1106,10 +1110,11 @@ const INSPECT = {
               de: "Am PHE ist keine Wärmeübertragung berechenbar, weil die aktuellen Pumpen- und Durchflusswerte keine Zirkulation belegen. Der Speicher kann trotzdem durch seinen internen Heizstab erwärmt werden; dessen Wärme passiert keinen der beiden PHE-Wasserfühler, daher kann dieser Bus seine Heizleistung nicht angeben." }
           : { en: "No heat output can be calculated right now because current pump and flow readings do not establish water movement through the PHE. This is no usable operating point rather than an output of zero.",
               de: "Derzeit ist keine Wärmeleistung berechenbar, weil die aktuellen Pumpen- und Durchflusswerte keine Wasserbewegung durch den PHE belegen. Das ist kein nutzbarer Arbeitspunkt und nicht eine Leistung von null." })
+      : needsCapacitySpeed(d) ? t("schem.capacity_low_speed")
       : d.pth == null ? null
       : d.pthKind === "cooling"
-      ? { en: `≈ ${fmt1(d.pth)} kW cooling${d.cop != null ? `, EER ${fmt1(d.cop)}` : ""}.`,
-          de: `≈ ${fmt1(d.pth)} kW Kälteleistung${d.cop != null ? `; EER ${fmt1(d.cop)}` : ""}.` }
+      ? { en: `≈ ${fmt1(d.pth)} kW cooling${d.cop != null && !d.copPostBuh ? `, EER ${fmt1(d.cop)}` : ""}.`,
+          de: `≈ ${fmt1(d.pth)} kW Kälteleistung${d.cop != null && !d.copPostBuh ? `; EER ${fmt1(d.cop)}` : ""}.` }
       : { en: `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `, COP ${fmt1(d.cop)}` : ""}.`,
           de: `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `; COP ${fmt1(d.cop)}` : ""}.` },
     rows: [/flow sensor/i, /current measured by ct/i, /inv primary current/i],
@@ -1117,110 +1122,96 @@ const INSPECT = {
   // Its own pill next to the heat output, so its own entry — and the one derived figure with no
   // catalog row behind it at all, hence copy written here rather than pulled from DESCRIPTIONS.
   //
-  // The TITLE is live (see inspTitleText), because a COP is not one quantity. Which system the
-  // quotient describes follows the electrical source — whole-unit CT clamps give a PLANT COP, the
-  // inverter current a HEAT-PUMP one — and the two are different numbers whenever the backup heater
-  // runs. They look identical on the pill, so naming which one this is has to happen here or
-  // nowhere. The rule and the matching numerator are logic/cop_scope.hpp, gated over the catalog.
+  // The title identifies the electrical source. The CT path prefers a usable post-BUH row, but
+  // permits pre-BUH heat when backup heating is known to be off. The inspector lists the post-BUH
+  // row only when used. See logic/cop_scope.hpp for the source rule.
   cop: {
-    t: (d) => d && d.efficiencyKind === "eer"
-      ? { en: "EER of the heat pump (estimated)", de: "Geschätzter EER der Wärmepumpe" }
-      : (d && d.copScope === "plant"
-      ? { en: "COP with post-BUH boundary (estimated)", de: "Geschätzter COP mit Bilanz hinter BUH" }
-      : { en: "COP of the heat pump (estimated)", de: "Geschätzter COP der Wärmepumpe" }),
+    t: (d) => {
+      const metric = efficiencyMetric(d);
+      return { en: eerScopeText(d, `${metric} based on current transformers (estimated)`,
+                                `Inverter-current-based ${metric} estimate`, `Estimated ${metric}`),
+               de: eerScopeText(d, `Geschätzter ${metric} aus Stromwandlerwerten`,
+                                `${metric}-Schätzung aus Inverterstrom`, `Geschätzter ${metric}`) };
+    },
     // The hit target's accessible name — stable, because it is applied once at startup (see
     // labelSchematicHits). Which COP it turns out to be is the panel's to say, not the label's.
     aria: { en: "Efficiency (estimated)", de: "Geschätzte Effizienz" },
-    trend: (d) => d && d.efficiencyKind === "eer" ? "" : "cop",
     what: (d) => d && d.efficiencyKind === "eer"
-      ? { en: "Estimated cooling capacity divided by estimated electrical input. The cooling numerator uses internal PHE sensors and is accepted only with a running compressor and R1T below R4T. The result inherits the water/glycol, sensor, voltage and power-factor assumptions of both estimates. Daikin also describes calculated energy figures as estimates whose accuracy is not guaranteed. This is an instantaneous EER, not a seasonal efficiency figure; metered seasonal energy is more meaningful.",
-          de: "Geschätzte Kälteleistung geteilt durch geschätzte elektrische Aufnahme. Die Kälteleistung im Zähler nutzt die internen PHE-Fühler und wird nur bei laufendem Verdichter sowie R1T unter R4T gewertet. Das Ergebnis übernimmt alle Annahmen zu Wasser oder Glykol, Fühlern, Spannung und Leistungsfaktor aus beiden Schätzungen. Auch Daikin bezeichnet berechnete Energiewerte als Schätzungen ohne garantierte Genauigkeit. Das ist ein momentaner EER und keine saisonale Effizienzkennzahl; aussagekräftiger ist saisonal gemessene Energie." }
+      ? {
+        en: "Estimated cooling capacity divided by estimated input. Requires a running compressor and outlet below R4T. This live estimate depends on fluid, sensors, voltage and power factor." +
+          eerScopeText(d, post => ` Uses ${post ? "R2T after" : "R1T before"} the backup heater and R4T with current transformers. Both BUH stages and BSH must be confirmed off. CT wiring determines which loads are included.`,
+            " " + t("schem.efficiency_inv_pair")),
+        de: "Geschätzte Kälteleistung geteilt durch geschätzte Stromaufnahme. Erfordert laufenden Verdichter und Vorlauf unter R4T. Der Momentanwert hängt von Medium, Fühlern, Spannung und Leistungsfaktor ab." +
+          eerScopeText(d, post => ` Verwendet ${post ? "R2T hinter" : "R1T vor"} dem Zusatzheizer und R4T mit Stromwandlerwerten. Beide BUH-Stufen und der BSH müssen nachweislich aus sein. Die CT-Verdrahtung bestimmt die erfassten Verbraucher.`,
+            " " + t("schem.efficiency_inv_pair")),
+      }
       : {
-      en: "Estimated heat output divided by estimated electrical input. The two values must describe compatible boundaries: with CT currents the UI uses heat after the backup heater when that sensor exists; with inverter current it shows the heat pump alone. Whether the CTs include every relevant electrical load depends on their installation, so this is not automatically a whole-plant meter. The result inherits the fluid, sensor, voltage and power-factor assumptions of both estimates. Use it as a live indication; metered seasonal energy is more meaningful. With the compressor stopped it shows \"—\".",
-      de: "Geschätzte Wärmeleistung geteilt durch geschätzte elektrische Aufnahme. Beide Werte müssen zueinander passende Bilanzgrenzen beschreiben: Bei Stromwandlern verwendet die UI die Wärme hinter dem Zusatzheizer, sofern dieser Fühler vorhanden ist; beim Inverterstrom zeigt sie nur die Wärmepumpe. Ob die Stromwandler alle relevanten elektrischen Verbraucher erfassen, hängt von ihrem Einbau ab; der Wert ist daher nicht automatisch ein Gesamtanlagen-Zähler. Das Ergebnis übernimmt die Annahmen zu Medium, Fühlern, Spannung und Leistungsfaktor aus beiden Schätzungen. Als Live-Hinweis verwenden; aussagekräftiger ist saisonal gemessene Energie. Bei stehendem Verdichter zeigt er „—“.",
+      en: "Estimated heat output divided by estimated input. CT requires both BUH stages and BSH confirmed off. Otherwise a usable inverter estimate is required. CT coverage depends on wiring." + heatingEfficiencyBoundary(d),
+      de: "Geschätzte Wärmeleistung geteilt durch geschätzte Stromaufnahme. Für CT müssen beide BUH-Stufen und BSH nachweislich aus sein. Sonst ist eine nutzbare Inverterschätzung nötig. Der CT-Messumfang hängt von der Verdrahtung ab." + heatingEfficiencyBoundary(d),
       },
     head: (d) => fmt1(d.cop),
-    // Every block reason gets its OWN sentence. A suppressed wrong claim must not be replaced by
-    // another one, so "the heater is firing and this profile has no post-BUH sensor", "the gateway
-    // measures a different system" and "there is no current reading at all" cannot share a sentence
-    // — they are different facts about the hardware, and two of them named a code that reached no
-    // sentence at all, leaving the generic explainer beside a blank pill whose title still claimed
-    // a heat-pump boundary.
+    // The heater guards also block unknown states. Keep those distinct from reported operation.
     now: (d) => d.copBlock === "tank_heater"
-      ? { en: "No COP right now — the tank's electric heater is on. Its electrical load may be included in the available current boundary, while its heat goes straight into the tank and crosses neither leaving-water sensor. These readings cannot form a matching efficiency balance.",
-          de: "Derzeit kein COP — der Heizstab im Speicher läuft. Seine elektrische Last kann in der verfügbaren Strombilanz enthalten sein; seine Wärme geht jedoch direkt in den Speicher und passiert keinen der Vorlauffühler. Aus diesen Messwerten entsteht deshalb keine passende Effizienzbilanz." }
-      : d.copBlock === "buh_no_r2t"
-      ? { en: "No COP right now — the backup heater is firing, but this profile has no leaving-water sensor after it. The electrical estimate can include heater load while the heat estimate stops before the heater, so the two boundaries do not match.",
-          de: "Derzeit kein COP — der Zusatzheizer heizt, aber dieses Profil hat keinen Vorlauffühler hinter ihm. Die Stromschätzung kann die Heizlast enthalten, während die Wärmeschätzung vor dem Heizer endet; beide Bilanzgrenzen passen daher nicht zusammen." }
-      // The X10A bus is silent and the HomeHub is carrying the drawing. Its power register measures
-      // the WHOLE unit including both heaters, while the heat figure is the plate exchanger alone —
-      // and the gateway map carries neither heater state nor a post-BUH row, so unlike the X10A path
-      // there is nothing here to decide the pairing WITH.
+      ? { en: `No ${efficiencyMetric(d)}. ${d.bsh === true ? "The tank heater reports ON." : "The tank heater status is unknown."} Its heat bypasses both leaving-water sensors.`,
+          de: `Derzeit kein ${efficiencyMetric(d)}. ${d.bsh === true ? "Der Speicherheizstab meldet EIN." : "Der Status des Speicherheizstabs ist unbekannt."} Seine Wärme passiert keinen der Vorlauffühler.` }
+      : d.copBlock === "backup_heater"
+      ? { en: `No ${efficiencyMetric(d)}. ${d.buh1 === true || d.buh2 === true ? "The backup heater reports ON." : "The backup heater status is unknown."} The electrical estimate cannot establish whether the heater load is included.`,
+          de: `Derzeit kein ${efficiencyMetric(d)}. ${d.buh1 === true || d.buh2 === true ? "Der Zusatzheizer meldet EIN." : "Der Status des Zusatzheizers ist unbekannt."} Die Stromschätzung zeigt nicht, ob die Last des Heizers erfasst ist.` }
       : d.copBlock === "mb_scope"
-      ? { en: "No COP right now — the X10A bus is silent, so these readings come from the HomeHub. Its power figure covers the whole unit including both electric heaters, while the heat figure covers the heat exchanger alone, and this source reports neither heater state nor a post-heater sensor to match the two boundaries. A quotient of the two would describe two different systems.",
-          de: "Derzeit kein COP — der X10A-Bus schweigt, daher stammen diese Messwerte vom HomeHub. Dessen Leistungswert erfasst das gesamte Gerät einschließlich beider Elektroheizer, der Wärmewert dagegen nur den Wärmetauscher; zudem meldet diese Quelle weder den Heizerzustand noch einen Fühler hinter dem Heizer, um beide Bilanzgrenzen anzugleichen. Ein Quotient aus beiden beschriebe zwei verschiedene Systeme." }
+      ? { en: `No ${efficiencyMetric(d)} right now. The available data cannot match HomeHub power to the estimated heat across the plate heat exchanger. Which electrical loads the power reading covers, including heaters, is unknown.`,
+          de: `Derzeit kein ${efficiencyMetric(d)}. Die verfügbaren Daten erlauben keinen Vergleich der vom HomeHub gemeldeten elektrischen Leistung mit der geschätzten Wärmeleistung am Plattenwärmetauscher. Welche Verbraucher die Leistung umfasst, etwa Elektroheizer, ist unklar.` }
       // No usable electrical input at all. Which of the two reasons it is matters — the pill's own
       // explainer draws the same distinction, and saying "this profile has no row" about a profile
       // that has one would substitute a second wrong claim for the suppressed one. The third reason,
       // an inverter row of unknown age, is answered by inspNowText before this runs.
       : d.copBlock === "no_pel"
       ? (d.pelHeld
-        ? { en: "No COP right now — the compressor is off, so the inverter current this profile reads is left over from the last run rather than measured now. Without a current electrical input there is nothing to divide by.",
-            de: "Derzeit kein COP — der Verdichter steht, daher stammt der Inverterstrom dieses Profils vom letzten Lauf und ist kein aktueller Messwert. Ohne aktuelle Leistungsaufnahme lässt sich kein Effizienzquotient bilden." }
-        : { en: "No COP right now — this profile reports no electrical input at all (neither CT clamps nor an inverter current), so no efficiency quotient can be formed.",
-            de: "Derzeit kein COP — dieses Profil meldet überhaupt keine elektrische Aufnahme (weder Stromwandler noch Inverterstrom), daher lässt sich kein Effizienzquotient bilden." })
-      : d.cop == null ? null
+        ? { en: `No ${efficiencyMetric(d)}. The compressor is off and inverter current is from the last run.`,
+            de: `Kein ${efficiencyMetric(d)}. Der Verdichter steht und der Inverterstrom stammt vom letzten Lauf.` }
+        : t("schem.no_usable_power", efficiencyMetric(d)))
+      : d.cop == null ? efficiencyUnavailable(d)
       : d.efficiencyKind === "eer"
-      ? { en: `${fmt1(d.cop)} kW of cooling per kW of electricity — ≈ ${fmt1(d.copPth)} kW removed for ≈ ${fmt1(d.pel)} kW in.`,
-          de: `${fmt1(d.cop)} kW Kälteleistung je kW Strom — ≈ ${fmt1(d.copPth)} kW entzogen bei ≈ ${fmt1(d.pel)} kW Aufnahme.` }
-      : d.copScope === "plant"
-      ? { en: `${fmt1(d.cop)} kW of post-BUH water-side heat per kW of CT-estimated electricity — ≈ ${fmt1(d.copPth)} kW out for ≈ ${fmt1(d.pel)} kW in. The CT installation determines which electrical loads are included.`,
-          de: `${fmt1(d.cop)} kW wasserseitige Wärme hinter dem BUH je kW aus Stromwandlern geschätzter Aufnahme — ≈ ${fmt1(d.copPth)} kW raus für ≈ ${fmt1(d.pel)} kW rein. Welche elektrischen Lasten enthalten sind, bestimmt der Einbau der Stromwandler.` }
-      : { en: `${fmt1(d.cop)} kW of heat per kW of electricity for the heat-pump boundary — ≈ ${fmt1(d.copPth)} kW out for ≈ ${fmt1(d.pel)} kW in. The backup heater is outside both figures; whole-plant efficiency therefore cannot be derived from this value while the heater runs.`,
-          de: `${fmt1(d.cop)} kW Wärme je kW Strom innerhalb der Wärmepumpen-Bilanz — ≈ ${fmt1(d.copPth)} kW raus für ≈ ${fmt1(d.pel)} kW rein. Der Zusatzheizer liegt außerhalb beider Bilanzgrößen; die Effizienz der Gesamtanlage lässt sich daraus während seines Betriebs nicht ableiten.` },
+      ? { en: `${fmt1(d.cop)} kW of cooling per kW of electricity — ≈ ${fmt1(d.copPth)} kW removed for ≈ ${fmt1(d.copPel)} kW in.`,
+          de: `${fmt1(d.cop)} kW Kälteleistung je kW Strom — ≈ ${fmt1(d.copPth)} kW entzogen bei ≈ ${fmt1(d.copPel)} kW Aufnahme.` }
+      : { en: `${fmt1(d.cop)} kW of water-side heat per kW of estimated input: ≈ ${fmt1(d.copPth)} kW heat for ≈ ${fmt1(d.copPel)} kW input.`,
+          de: `${fmt1(d.cop)} kW wasserseitige Wärme je kW geschätzter Aufnahme: ≈ ${fmt1(d.copPth)} kW Wärme bei ≈ ${fmt1(d.copPel)} kW Aufnahme.` },
     // The numerator's own row, but ONLY while the plan actually uses it (d.copPostBuh) — listing it
     // under a heat-pump COP would name an input that figure never touched. Resolved through the one
     // postBuhRow(), never a second pattern: a looser copy here is exactly how the (R2T) tag would
     // start matching the discharge pipe again. pickRow already takes a function (see its definition).
     rows: [/flow sensor/i, () => (S.live && S.live.copPostBuh ? postBuhRow() : null),
-           /current measured by ct/i, /inv primary current/i, /buh step ?1/i, /^bsh$/i],
+           /current measured by ct/i, /inv primary current/i, /buh step ?1/i, /buh step ?2/i, /^bsh$/i],
   },
   buh: {
     t: { en: "Backup heater (BUH)", de: "Zusatzheizer · BUH" },
-    re: /buh step ?1/i, sample: "BUH step 1",
+    sample: "BUH step 1",
+    source: "X10A · BUH",
+    head: (d) => d.buh2 === true ? t("hist.buh_step2") : d.buh1 === true ? t("hist.buh_step1")
+      : d.buh1 === false && d.buh2 === false ? t("hist.state_off") : "—",
     trend: "buh_state",
-    now: (d) => (d.buh1 == null && d.buh2 == null) ? null
-      : d.buh2 ? { en: "Step 2 — both stages firing.", de: "Stufe 2 — beide Stufen heizen." }
-      : d.buh1 ? { en: "Step 1 — one stage firing.", de: "Stufe 1 — eine Stufe heizt." }
-      : { en: "Off — no backup-heater stage is active.", de: "Aus — keine Zusatzheizerstufe ist aktiv." },
+    now: (d) => d.buh2 === true ? { en: "Step 2 reports ON.", de: "Stufe 2 meldet EIN." }
+      : d.buh1 === true ? { en: "Step 1 reports ON.", de: "Stufe 1 meldet EIN." }
+      : d.buh1 === false && d.buh2 === false
+      ? { en: "Both stages report OFF.", de: "Beide Stufen melden AUS." } : null,
     rows: [/buh step ?1/i, /buh step ?2/i, /buh output capacity/i],
   },
   bsh: {
     t: { en: "Electric tank heater", de: "Heizstab" },
-    re: /^bsh$/i, sample: "BSH",
-    // This panel deliberately presents only the physical X10A BSH contact and its sampled X10A
-    // timeline: no HomeHub second opinion and no whole-system power context.
+    pick: () => bshX10a(), sample: "BSH",
+    // Show the current X10A state and its own sampled timeline.
     x10aOnly: true,
     trend: "bsh_state",
     trendSource: "x10a",
-    // Replace the raw bit (1/0) in the headline with its actual meaning. The source line remains
-    // "BSH", so the friendly state is still traceable to the exact X10A register.
-    head: () => {
-      const on = x10aDown() ? null : vOn(/^bsh$/i);
-      return on == null ? "—" : t(on ? "state.on" : "state.off");
-    },
-    now: () => {
-      const on = x10aDown() ? null : vOn(/^bsh$/i);
-      return on == null ? null
-      : on
+    now: (d) => d.bsh == null ? null
+      : d.bsh
         ? { en: "Electric tank heater active.", de: "Heizstab aktiv." }
         : { en: "Off — the tank is not using its electric immersion heater.",
-            de: "OFF — der Heizstab im Speicher ist nicht aktiv." };
-    },
+            de: "OFF — der Heizstab im Speicher ist nicht aktiv." },
   },
   valve: {
     t: { en: "3-way valve", de: "3-Wege-Ventil" },
-    re: /3.?way valve/i, sample: "3-way valve (On:DHW/Off:Space)",
+    pick: () => valveX10a(), sample: "3-way valve (On:DHW/Off:Space)",
+    x10aOnly: true,
     trend: "valve_dhw",
     now: (d) => d.valveDhw == null ? null
       : d.valveDhw ? { en: "The controller reports the tank route selected. This is not mechanical position feedback and does not by itself prove flow or tank charging.",
@@ -1245,7 +1236,7 @@ const INSPECT = {
     // Keep every member in the one table below the chart; neither the Modbus twin nor a sentence
     // repeating tank + setpoint belongs inside the explanatory prose above it.
     listAllValues: true,
-    rows: [/dhw tank temp/i, /dhw setpoint/i, /3.?way valve/i],
+    rows: [/dhw tank temp/i, /dhw setpoint/i, { sel: () => valveX10a(), cid: "valve_dhw" }],
   },
   heat: {
     t: (d) => activeSpaceKind(d) === "cool"
@@ -1261,7 +1252,7 @@ const INSPECT = {
       ? { en: "The space route is not selected. Whether water is actually moving through the tank branch is shown separately by pump and flow readings.",
           de: "Der Raumweg ist nicht gewählt. Ob tatsächlich Wasser durch den Speicherzweig fließt, zeigen Pumpen- und Durchflusswert separat." }
       : waterMoving(d)
-        ? d.thermalMode === "cool" && !compressorRunning(d, 5) && d.pthRaw != null && d.pthRaw > 0
+        ? d.thermalMode === "cool" && compressorStopped(d) && heatersOff(d) && d.pthRaw > 0
           ? { en: `Residual-hot water is routed into the hydraulic space branch. Internal R1T is ${degC(d.lwt)}; no downstream sensor confirms the emitter temperature. This is not active cooling.`,
               de: `Restwarmes Wasser wird hydraulisch in den Raumzweig geführt. Der interne R1T misst ${degC(d.lwt)}; kein nachgeschalteter Fühler bestätigt die Temperatur an den Flächen. Das ist kein aktiver Kühlbetrieb.` }
           : { en: `Water is routed toward the ${activeSpaceKind(d) === "cool" ? "cooling" : activeSpaceKind(d) === "heat" ? "heating" : "space"} circuit. Internal R1T is ${degC(d.lwt)}; no downstream sensor confirms the emitter temperature.`,
@@ -1284,52 +1275,23 @@ const INSPECT = {
   },
   pump: {
     t: { en: "Circulation pump", de: "Umwälzpumpe" },
-    aria: { en: "Circulation-pump speed", de: "Drehzahl der Umwälzpumpe" },
+    aria: { en: "Circulation-pump command", de: "Ansteuerung der Umwälzpumpe" },
     trend: "pump_speed",
-    what: {
-      en: "Circulates water through the common hydronic loop and the branch selected by the 3-way valve. In the split-system layout shown, it is on the supply side after the plate heat exchanger and backup heater. The controller adjusts its speed according to operating mode, target ΔT and minimum-flow requirements; it may also run with the compressor stopped for overrun, protection or temperature equalisation.",
-      de: "Fördert Wasser durch den gemeinsamen Hydraulikkreis und den vom 3-Wege-Ventil gewählten Zweig. Im gezeigten Split-System-Aufbau sitzt sie im Vorlauf hinter Plattenwärmetauscher und Zusatzheizer. Der Regler passt ihre Drehzahl an Betriebsart, Ziel-ΔT und Mindestdurchfluss an; für Nachlauf, Schutz oder Temperaturausgleich kann sie auch bei stehendem Verdichter laufen.",
-    },
-    re: /water pump operation/i, sample: "Water pump operation",
-    // 0 % is a stopped pump, not a pump "running at 0 %" — the old wording asserted circulation on
-    // an idle plant, next to a flow pill reading 0.0 l/min.
-    now: (d) => d.pump == null && d.flow == null && d.pumpOn == null ? null
-      : pumpFlowConflict(d)
-        ? { en: `The internal pump reports stopped, but the flow sensor reports ${fmt1(d.flow)} l/min. External circulation, coast-down or conflicting/stale signals can cause this; the two readings must be checked together.`,
-            de: `Die interne Pumpe meldet Stillstand, der Durchflusssensor jedoch ${fmt1(d.flow)} l/min. Externe Umwälzung, Nachlauf oder widersprüchliche beziehungsweise veraltete Signale kommen infrage; beide Werte müssen gemeinsam geprüft werden.` }
-      : d.pump != null && d.pump > 0
-        ? d.flow != null
-          ? { en: `The speed signal reports ${fmt0(d.pump)} %; measured flow is ${fmt1(d.flow)} l/min.`,
-              de: `Das Drehzahlsignal meldet ${fmt0(d.pump)} %; der gemessene Volumenstrom beträgt ${fmt1(d.flow)} l/min.` }
-          : { en: `The speed signal reports ${fmt0(d.pump)} %, but no flow measurement is available; circulation is not confirmed.`,
-              de: `Das Drehzahlsignal meldet ${fmt0(d.pump)} %, ein Durchflussmesswert fehlt jedoch; Zirkulation ist damit nicht bestätigt.` }
-      : waterMoving(d)
-        ? { en: `The flow sensor reports ${fmt1(d.flow)} l/min even though no usable pump-speed value is available.`,
-            de: `Der Durchflusssensor meldet ${fmt1(d.flow)} l/min, obwohl kein nutzbarer Pumpendrehzahlwert vorliegt.` }
-      : d.pumpOn === true
-        ? d.flow != null
-          ? { en: `The pump status is ON, but the flow sensor reports only ${fmt1(d.flow)} l/min; water circulation is not established.`,
-              de: `Der Pumpenstatus ist ON, der Durchflusssensor meldet jedoch nur ${fmt1(d.flow)} l/min; Wasserzirkulation ist damit nicht belegt.` }
-          : { en: "The pump status is ON, but no flow measurement is available; water circulation is not confirmed.",
-              de: "Der Pumpenstatus ist ON, ein Durchflussmesswert fehlt jedoch; Wasserzirkulation ist damit nicht bestätigt." }
-      : d.pumpOn === false || d.pump === 0
-        ? d.flow != null
-          ? { en: `The pump reports stopped; the flow sensor reports ${fmt1(d.flow)} l/min. These readings do not establish water circulation.`,
-              de: `Die Pumpe meldet Stillstand; der Durchflusssensor meldet ${fmt1(d.flow)} l/min. Diese Werte belegen keine Wasserzirkulation.` }
-          : { en: "The pump reports stopped and no flow measurement is available.",
-              de: "Die Pumpe meldet Stillstand; ein Durchflussmesswert ist nicht verfügbar." }
-        : { en: `No reliable pump state is available; the flow sensor reports ${fmt1(d.flow)} l/min and does not establish circulation.`,
-            de: `Kein verlässlicher Pumpenstatus ist verfügbar; der Durchflusssensor meldet ${fmt1(d.flow)} l/min und belegt keine Zirkulation.` },
-    rows: [/water pump signal/i, /flow sensor/i, /^water pressure$/i],
+    what: { en: "The displayed command is 100 − raw X10A: 0 % requests stop and 100 % maximum effort. The raw signal has the opposite endpoints. Read reported ON/OFF and measured flow separately. The command measures neither speed nor flow. Water can circulate while the compressor is off.",
+      de: "Die angezeigte Ansteuerung ist 100 − X10A-Rohwert: 0 % fordert Stopp und 100 % Maximum an. Das Rohsignal hat die umgekehrten Endpunkte. Status und Durchfluss getrennt ablesen. Die Ansteuerung misst weder Drehzahl noch Durchfluss. Wasser kann bei stehendem Verdichter zirkulieren." },
+    pick: () => pumpX10a(), sample: "Water pump operation",
+    now: (d) => ({ en: pumpNowText(d, [(n) => `Pump command ${n} %.`, "The pump status is ON.", "The pump reports stopped (OFF).", "The reported pump state is unknown.", (n) => `Measured flow ${n} l/min.`, "No flow measurement is available.", "Reported OFF conflicts with flow. Possible causes include external circulation, coast-down or stale readings.", "Water circulation is not established."]),
+      de: pumpNowText(d, [(n) => `Pumpenansteuerung ${n} %.`, "Der Pumpenstatus ist ON.", "Die Pumpe meldet Stillstand (OFF).", "Der gemeldete Pumpenstatus ist unbekannt.", (n) => `Gemessener Durchfluss ${n} l/min.`, "Ein Durchflussmesswert fehlt.", "Gemeldetes OFF und Durchfluss widersprechen sich. Mögliche Ursachen sind externe Umwälzung, Nachlauf oder alte Werte.", "Wasserzirkulation ist damit nicht belegt."]) }),
+    rows: [/water pump signal/i, { sel: /flow sensor/i, cid: "flow" }, /^water pressure$/i],
   },
   pel: PEL_INSPECT,
   defrost: {
     t: { en: "Defrost", de: "Abtauen" },
-    re: /defrost operation/i, sample: "Defrost Operation",
+    pick: () => defrostX10a(), sample: "Defrost Operation",
     trend: "defrost_state",
     now: (d) => d.defrost == null ? null : d.defrost
-      ? { en: "Defrost is active.", de: "Abtauen ist aktiv." }
-      : { en: "Off — no defrost cycle is active.", de: "Aus — kein Abtauvorgang ist aktiv." },
+      ? { en: "X10A reports defrost active.", de: "X10A meldet aktives Abtauen." }
+      : { en: "X10A reports defrost off.", de: "X10A meldet Abtauen als aus." },
   },
   quiet: {
     t: { en: "Quiet mode", de: "Leise-Modus" },
@@ -1357,8 +1319,8 @@ const INSPECT = {
       ? d.rps != null
         ? { en: `Flowing — ${fmt1(d.circP)} bar at ${fmt0(d.disch)} °C.`,
             de: `Durchströmt — ${fmt1(d.circP)} bar bei ${fmt0(d.disch)} °C.` }
-        : { en: "Flowing — the HomeHub confirms compressor operation; pressure and discharge temperature require X10A.",
-            de: "Durchströmt — der HomeHub bestätigt Verdichterbetrieb; Druck und Heißgastemperatur benötigen X10A." }
+        : { en: "HomeHub reports the compressor ON. Pressure and discharge temperature require X10A.",
+            de: "Der HomeHub meldet den Verdichter als aktiv. Druck und Heißgastemperatur benötigen X10A." }
       : { en: "No active refrigerant circulation — the compressor is stopped. Pressure equalisation depends on the circuit and how long it has been idle.",
           de: "Kein aktiver Kältemittelumlauf — der Verdichter steht. Ob und wie weit sich die Drücke angeglichen haben, hängt vom Kältekreis und der Stillstandszeit ab." },
     rows: [highSideRow, /discharge pipe temp/i],
@@ -1373,9 +1335,9 @@ const INSPECT = {
       ? d.rps != null
         ? { en: `Flowing — expansion valve at ${fmt0(d.eev)} pulses.`,
             de: `Durchströmt — Expansionsventil bei ${fmt0(d.eev)} Impulsen.` }
-        : { en: "Flowing — the HomeHub confirms compressor operation; expansion-valve position requires X10A.",
-            de: "Durchströmt — der HomeHub bestätigt Verdichterbetrieb; die Stellung des Expansionsventils benötigt X10A." }
-      : { en: "Still — the compressor is stopped.", de: "Kein Durchfluss — der Verdichter steht." },
+        : { en: "HomeHub reports the compressor ON. Expansion-valve position requires X10A.",
+            de: "Der HomeHub meldet den Verdichter als aktiv. Die Stellung des Expansionsventils benötigt X10A." }
+      : { en: "The compressor is stopped.", de: "Der Verdichter steht." },
     rows: [/^low pressure$/i, /expansion valve ?1/i],
   },
   wsup: {
@@ -1405,7 +1367,7 @@ const INSPECT = {
             de: "Der Speicherweg ist gewählt, die aktuellen Pumpen- und Durchflusswerte belegen jedoch keine aktive Speicherladung." }
       : { en: "The tank route is not selected; the controller reports the space route instead.",
           de: "Der Speicherweg ist nicht gewählt; die Regelung meldet stattdessen den Raumweg." },
-    rows: [/dhw tank temp/i, /dhw setpoint/i, /3.?way valve/i],
+    rows: [/dhw tank temp/i, /dhw setpoint/i, { sel: () => valveX10a(), cid: "valve_dhw" }],
   },
   wheat: {
     // Titled for the CIRCUIT, not one leg of it: this target is both the flow down from the valve
@@ -1423,7 +1385,7 @@ const INSPECT = {
       ? { en: "The space route is not selected; the controller reports the tank route instead.",
           de: "Der Raumweg ist nicht gewählt; die Regelung meldet stattdessen den Speicherweg." }
       : waterMoving(d)
-        ? d.thermalMode === "cool" && !compressorRunning(d, 5) && d.pthRaw != null && d.pthRaw > 0
+        ? d.thermalMode === "cool" && compressorStopped(d) && heatersOff(d) && d.pthRaw > 0
           ? { en: `Residual-heat circulation toward the hydraulic space branch at ${fmt1(d.flow)} l/min; no active cooling. Internal PHE sensors read R1T ${degC(d.lwt)} and R4T ${degC(d.ret)}; the field-side temperature is not measured.`,
               de: `Restwärme-Umlauf zum hydraulischen Raumzweig mit ${fmt1(d.flow)} l/min; keine aktive Kühlung. Die internen PHE-Fühler messen R1T ${degC(d.lwt)} und R4T ${degC(d.ret)}; die Temperatur an den Heiz-/Kühlflächen des Gebäudes wird nicht gemessen.` }
           : { en: `Circulating toward the space branch at ${fmt1(d.flow)} l/min. Internal PHE sensors read R1T ${degC(d.lwt)} and R4T ${degC(d.ret)}.`,
@@ -1448,6 +1410,7 @@ const INSPECT = {
   flow: {
     t: { en: "Flow rate", de: "Durchfluss" },
     re: /flow sensor/i, sample: "Flow sensor",
+    head: (d) => d.flowInvalid ? "—" : null,
     rows: [/flow sensor/i, /^water pressure$/i, /water pump signal/i],
   },
   flow_switch: {
@@ -1485,9 +1448,13 @@ const inspSourceField = (e, field, d) => {
   return typeof value === "function" ? value(d) : value;
 };
 const inspFieldText = (e, field, d) => {
+  if (e.i18nKey === "pth" && d?.defrost) {
+    if (field === "t") return t("schem.defrost_transfer");
+    if (field === "what") return `(L/min ÷ 60) × (R1T−R4T) × 4.186. ${t("schem.transfer_sign")}`;
+  }
   if (inspHasLocaleField(e, field)) {
     const localized = inspLocaleField(e, field, d);
-    return localized == null ? null : String(localized);
+    if (localized != null || field !== "what") return localized == null ? null : String(localized);
   }
   return tx(inspSourceField(e, field, d));
 };
@@ -1508,7 +1475,8 @@ const inspRow = (e) => (e.pick ? e.pick() : e.re ? vRow(e.re) : null);
 // that decides which one.
 const inspCurRow = (e) => {
   const r = inspRow(e);
-  return x10aDown() || rowHeldOver(r, S.live) || (r?.held_unknown === true && mbForInspect(S.insp)) ? null : r;
+  return x10aDown() || rowHeldOver(r, S.live) ||
+    (e.i18nKey === "out" && S.live?.mbFields?.has("out")) ? null : r;
 };
 
 // One member reading, resolved for BOTH the body and the change signature. Returns the pair the
@@ -1525,12 +1493,15 @@ function inspMember(sel) {
   const selector = spec && spec.group ? () => vRowGroup(spec.sel, spec.group)
                  : spec ? spec.sel : sel;
   const cid = spec && spec.cid ? spec.cid : null;
+  if (cid === "outdoor_air" && (x10aDown() || S.live?.mbFields?.has("out")))
+    return { x10a: null, mb: mbForInspect("out") };
   const r = pickRow(selector);
+  if (cid === "valve_dhw") return { x10a: r, mb: null };
   // X10A down: the retained row is not a reading any more. The gateway stands in where it carries
   // the same quantity (mbFallbackFor — the helper whose whole job is that substitution) and the
   // member simply disappears where it does not, rather than printing a stale number under its label.
   // With no X10A row at all, the explicit concept (cid) is what still finds the gateway's twin.
-  if (x10aDown()) return { x10a: null, mb: r ? mbFallbackFor(r.concept) : (cid ? mbFallbackFor(cid) : null) };
+  if (x10aDown()) return { x10a: null, mb: mbFallbackFor(r?.concept || cid) };
   return { x10a: r, mb: mbTwin(r) };
 }
 
@@ -1577,7 +1548,7 @@ function inspComparisonHtml(m, d) {
   return comparison && comparison.value != null && !rowHeldOver(comparison, d)
       && m.mb && m.mb.value != null
     ? mbDeltaHtml(comparison, m.mb)
-    : "";
+    : modbusScaleHtml(m.mb);
 }
 
 // The reading of a /values row as one string ("42.8 °C"); "—" for an absent row — and "—" for a row
@@ -1610,8 +1581,8 @@ const HELD_OVER_NOW = {
   // becoming a second, dimmer class of reading, so the panel has to. One sentence, because it also
   // explains the withheld electrical estimate and COP, and this copy lands in every locale's flash.
   unknown: {
-    en: "Compressor speed unreadable; outdoor unit values may be from the last run.",
-    de: "Verdichterdrehzahl nicht lesbar; Außengerätewerte können vom letzten Lauf stammen.",
+    en: "The age of these X10A outdoor-unit readings is unknown. They may be from the last run.",
+    de: "Das Alter dieser X10A-Außengerätewerte ist unbekannt. Sie können vom letzten Lauf stammen.",
   },
 };
 // A held X10A row is still unavailable, but it is no longer a blank headline when the drawing has
@@ -1619,11 +1590,14 @@ const HELD_OVER_NOW = {
 // row and must not append a contradictory "No current reading" note.
 const inspHeld = (e, d) => !!d && rowHeldOver(inspRow(e), d) && !mbForInspect(S.insp);
 const inspHeldHtml = (e, d) => {
-  if (inspUnknownAge(e, d)) return inspNowText(e, d) === heldUnknownText() ? "" : heldUnknownNoteHtml();
+  if (inspUnknownAge(e, d)) return inspNowText(e, d)?.startsWith(heldUnknownText()) ? "" : heldUnknownNoteHtml();
   if (!inspHeld(e, d)) return "";
   const localized = INSPECT_I18N[LANG]?.held;
-  return descNoteHtml(localized?.lead || tx(HELD_OVER_NOW.lead),
-                      localized?.why || tx(HELD_OVER_NOW.why));
+  const reason = compressorConflict(d) ? compressorConflictText(d)
+    : homehubOnlyCompressorOff(d) ? t("schem.homehub_compressor_off") + " " + t("schem.outdoor_held")
+    : !compressorStopped(d) ? t("schem.outdoor_held")
+    : localized?.why || tx(HELD_OVER_NOW.why);
+  return descNoteHtml(localized?.lead || tx(HELD_OVER_NOW.lead), reason);
 };
 // The headline or a listed member row: every number in the panel carries the same doubt.
 const inspUnknownAge = (e, d) => !!d && d.ouUnknown && (inspCurRow(e)?.held_unknown === true ||
@@ -1634,18 +1608,48 @@ const heldUnknownNoteHtml = () => descNoteHtml("", heldUnknownText());
 
 // The panels whose sentence is decided by compressorRunning(), which reads an unknown compressor as
 // stopped. The unknown-age sentence replaces theirs, so that no panel states a stop nobody measured.
-const COMPRESSOR_NOW = /^(?:ou|phe|rhot|rcold|dt)$/;
+const COMPRESSOR_NOW = /^(?:phe|rhot|rcold|dt)$/;
+const COMPRESSOR_CONFLICT_NOW = /^(?:comp|rhot|rcold)$/;
+const WATER_BRANCH_NOW = /^(?:heat|wtank|wheat)$/;
+function outdoorInspectorNow(e, d) {
+  const unknown = d.rps == null && d.compressorOn == null;
+  const state = compressorConflict(d) ? compressorConflictText(d)
+    : d.defrost === true ? inspFieldText(INSPECT.defrost, "now", d)
+    : unknown ? d.ouUnknown ? heldUnknownText() : t("dyn.state_gate")
+    : homehubOnlyCompressorOff(d) ? t("schem.homehub_compressor_off")
+    : inspFieldText(e, "now", d);
+  const water = !d.defrost && compressorStopped(d) ? " " + t("schem.outdoor_independent") : "";
+  // Link state, retained readings and the displayed air source are independent observations.
+  const link = x10aDown() ? t("sys.x10a_down") : d.ouHeldOver ? t("schem.outdoor_held") : "";
+  const source = Number.isFinite(d.out) && d.mbFields?.has("out") ? t("schem.outdoor_homehub") : "";
+  return [state + water, link, source].filter(Boolean).join(" · ");
+}
 // The live sentence above the timeless description — dropped entirely while the reading is held
 // over, where the note below the description answers instead.
 const inspNowText = (e, d) => {
+  if (S.otaCached && d) return t("ota.snapshot_value");
   if (!d || inspHeld(e, d)) return null;
+  if (e.i18nKey === "ou") return outdoorInspectorNow(e, d);
+  if (e.i18nKey === "flow" && d.flowInvalid) return t("schem.flow_invalid");
+  if (d.pthKind === "transfer" && (e.i18nKey === "phe" || e.i18nKey === "pth"))
+    return `≈ ${fmt1(d.pth)} kW.` + (e.i18nKey === "phe" ? " " + t("schem.transfer_sign") : "");
+  if (WATER_BRANCH_NOW.test(e.i18nKey) && d.valveDhw == null) return t("schem.water_route_unknown");
+  const conflict = compressorConflict(d);
+  if (conflict && COMPRESSOR_CONFLICT_NOW.test(e.i18nKey)) return compressorConflictText(d);
+  const reportedOff = homehubOnlyCompressorOff(d);
+  if (reportedOff && (e.i18nKey === "rhot" || e.i18nKey === "rcold"))
+    return t("schem.homehub_compressor_off");
   if (e.i18nKey === "pel" || e.i18nKey === "cop") {
+    if (d.pelHeld && (reportedOff || !compressorStopped(d))) {
+      const reason = t("schem.no_usable_power", e.i18nKey === "cop" ? efficiencyMetric(d) : "");
+      return reportedOff ? t("schem.homehub_compressor_off") + " " + reason : reason;
+    }
     if (d.pelUnknown) return heldUnknownText();
     if (d.pelUnread) return `${INSPECT_I18N[LANG]?.held?.lead || tx(HELD_OVER_NOW.lead)} ${d.pelUnread}`;
   }
-  // The outdoor unit's defrost is a fact, and a ΔT without measured water movement has its own reason.
+  // A ΔT without measured water movement has its own reason.
   if (d.rps == null && d.compressorOn == null && COMPRESSOR_NOW.test(e.i18nKey) &&
-      !(e.i18nKey === "ou" ? d.defrost : e.i18nKey === "dt" && d.dtStale))
+      !(e.i18nKey === "dt" && d.dtStale))
     return d.ouUnknown ? heldUnknownText() : t("dyn.state_gate");
   return (e.now || INSPECT_I18N[LANG]?.[e.i18nKey]?.now) ? inspFieldText(e, "now", d) : null;
 };
@@ -1662,7 +1666,8 @@ const inspTitleText = (e, d) => inspFieldText(e, "t", d);
 // covers the selection, the headline, the live sentence and every member reading, so a value moving
 // still repaints while an idle second does not.
 const inspectModbusSignature = (row) => row
-  ? JSON.stringify([row.value, row.label, row.unit, row.off, row.profile, row.enum, row.binary]) : "";
+  ? JSON.stringify([row.value, row.label, row.unit, row.off, row.profile, row.enum, row.binary,
+                    row.flow_scale_unverified]) : "";
 function inspectSourceStyle(mb = false, room = false) {
   for (const id of ["inspSrc", "inspNow"]) {
     $(id).classList.toggle("src-val-mb", mb);
@@ -1696,11 +1701,13 @@ function inspectSig(e) {
     return inspVal(m.x10a, d) + (m.mb ? "/" + inspectModbusSignature(m.mb) : "")
       + (m.compare ? "/" + m.compare.value : "");
   }) : []).join(",");
+  const held = !inspHeld(e, d) ? "" : compressorConflict(d) ? "held-conflict"
+    : homehubOnlyCompressorOff(d) ? "held-homehub" : compressorStopped(d) ? "held-stopped" : "held";
   // LANG guarantees the full body is redrawn even when this particular entry's title/live sentence
   // happens to be spelled identically in both dictionaries.
   return [LANG, S.insp, inspTitleText(e, d), inspVal(row, d), inspectModbusSignature(fb),
           d && e.head ? e.head(d) : "",
-          inspNowText(e, d) || "", inspHeld(e, d) ? "held" : "",
+          inspNowText(e, d) || "", held,
           inspUnknownAge(e, d) ? "unknown_age" : "", rows, roomSig].join("|");
 }
 
@@ -1882,7 +1889,7 @@ function renderInspect() {
   // never carries a fact by itself. Everywhere else the badge already appears beside a gateway
   // reading; this was the one place it did not.
   const srcName = fb ? displayHomeHubLabel(fb)
-                     : displayReadingLabel(row ? row.label : (e.sample || ""), row);
+                     : e.source || displayReadingLabel(row ? row.label : (e.sample || ""), row);
   setHtml("inspSrc", esc(srcName) +
     (fb ? ` <span class="mb-tag">${esc(t("src.modbus_tag"))}</span>` : ""), false);
   $("inspSrc").hidden = !(row || fb || e.sample);
@@ -1912,19 +1919,18 @@ function renderInspect() {
   // reads as a broken value.
   const sentence = inspNowText(e, d);
   const desc = e.sample ? descFor(e.sample, row || fb) : null;
-  const localizedWhat = inspLocaleField(e, "what", d);
-  const ownWhat = localizedWhat ?? inspSourceField(e, "what", d);
+  const ownWhat = inspFieldText(e, "what", d);
   // A native replacement must retain its source-specific interpretation limits in every locale.
   // Generic inspector copy describes the X10A quantity and cannot override the defining register.
   const preferSourceDesc = fb && desc?.sourceQualified;
-  const what = ownWhat && !preferSourceDesc ? descParaHtml(esc(localizedWhat ?? tx(ownWhat)))
+  const what = ownWhat && !preferSourceDesc ? descParaHtml(esc(ownWhat))
                        : (desc ? descBodyHtml(desc, (row || fb)?.value, descriptionCopy(desc)) : "");
   // Prose stays prose. Every live reading, including a leaf headline's second source, is rendered
   // together after the chart in the divided value list below.
   // The inspector records its signature immediately, so its writes cannot wait for clickHold.
   // setHtml still preserves identical prose while a values poll changes the headline number.
   setHtml("inspBody", what + (sentence ? descParaHtml(esc(sentence)) : "")
-    + inspHeldHtml(e, d), false);
+    + (S.otaCached ? "" : inspHeldHtml(e, d)), false);
   let rows = !d ? "" : inspValues(e, row, fb)
     // A member reading with a twin gets the gateway's value as its OWN row, labelled "(Modbus)" and
     // petrol throughout — never appended to the X10A value in the same cell, which is what this did

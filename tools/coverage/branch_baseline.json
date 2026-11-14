@@ -1,6 +1,22 @@
 {
   "measurement_records": [
     {
+      "runner": "Complete pure-logic suite with the run-mock-tests.sh --coverage compiler and gcov invocations on an isolated source snapshot",
+      "base_commit": "8655517bb0ba3167a78cfe40e053b16eee1d9d7a",
+      "scope": "COP and EER use the CT scope only with both heaters known off. A qualified inverter and R1T pair can carry the ratio when either heater may be active. Branch coverage for cop_scope.hpp changes from 22/30 to 32/36 on Clang and from 33/36 to 39/42 on GCC. The inventory update covers this header only.",
+      "source": "main/logic/cop_scope.hpp",
+      "source_sha256": "eb49c1f3ab20a96c1a66e14330dcc21a56d4ff6936cd55c98660c693e8bb855b",
+      "test_source_sha256": "e27262f725424127f0a19a29bc8f476a5fee40da3595343e3b0f7d7e12f37e23",
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2), arm64",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, pinned ESP-IDF v6.1 image, aarch64",
+        "gcc-15-github-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, local Ubuntu 26.04 x86_64 image",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, local Ubuntu 26.04 aarch64 image"
+      },
+      "hosted_confirmation": "The hosted profile is a candidate measured with the local x86_64 container. Authoritative GitHub CI must confirm before merge.",
+      "validation_boundary": "All four compilers ran the same test snapshot. Subsequent clang-format edits to the COP tests changed whitespace only. Presenter parity separately covers 324 source and heater combinations."
+    },
+    {
       "compilers": {
         "clang-17-darwin": "Apple Clang 17, arm64",
         "gcc-13-linux-ubuntu24": "Ubuntu GCC 13.3, ESP-IDF v6.1 Docker, aarch64",
@@ -1960,6 +1976,134 @@
       "measurement_limits": [
         "The local x86_64 Ubuntu 26.04 GCC image measures the hosted profile candidate. Authoritative GitHub confirmation remains separate."
       ]
+    },
+    {
+      "runner": "scripts/run-mock-tests.sh --coverage and equivalent Docker compiler/gcov invocations",
+      "base_commit": "8655517bb0ba3167a78cfe40e053b16eee1d9d7a",
+      "scope": "Require the resolved IPv4 peer to match before reusing Modbus profile evidence. The added peer comparison takes both outcomes on Clang and GCC.",
+      "sources": {
+        "main/logic/modbus_profile.hpp": "e96c243c8c99d5fe67f29868de964bce4ce0b6f4e2a976b96d70717e281d15aa"
+      },
+      "test_source_sha256": "9d5de1f224375de18cd12db40342a3c14f2415f548b100d48cb8f111ab90b97c",
+      "measured_line_counts": {
+        "clang-17-darwin": {
+          "covered": 10936,
+          "executable": 11109
+        },
+        "gcc-13-linux-ubuntu24": {
+          "covered": 10408,
+          "executable": 10691
+        },
+        "gcc-15-github-linux-ubuntu26": {
+          "covered": 10400,
+          "executable": 10693
+        },
+        "gcc-15-linux-ubuntu26": {
+          "covered": 10404,
+          "executable": 10693
+        }
+      },
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2), arm64",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, aarch64",
+        "gcc-15-github-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, local x86_64 container",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, aarch64"
+      },
+      "hosted_confirmation": "The local x86_64 Ubuntu 26.04 GCC image matched the hosted candidate profile. Authoritative GitHub CI must confirm before merge."
+    },
+    {
+      "runner": "scripts/run-mock-tests.sh --coverage and equivalent Docker compiler/gcov invocations",
+      "base_commit": "8655517bb0ba3167a78cfe40e053b16eee1d9d7a",
+      "scope": "Bind Modbus journal records to the configured target and the connected IPv4 peer. The new scope and tag checks add six taken outcomes on every measured profile.",
+      "sources": {
+        "main/logic/history_persist.hpp": "948951ec330e03586cf70352fc566d394faad441893cdec033bf337da3cc0b9f"
+      },
+      "test_source_sha256": "a2be9cb483e49107a38deeb2c514744de3a02252f5cdd18ad85f8e0402d6d7e7",
+      "measured_line_counts": {
+        "clang-17-darwin": {
+          "covered": 10957,
+          "executable": 11130
+        },
+        "gcc-13-linux-ubuntu24": {
+          "covered": 10428,
+          "executable": 10711
+        },
+        "gcc-15-github-linux-ubuntu26": {
+          "covered": 10420,
+          "executable": 10713
+        },
+        "gcc-15-linux-ubuntu26": {
+          "covered": 10424,
+          "executable": 10713
+        }
+      },
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2), arm64",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, aarch64",
+        "gcc-15-github-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, local x86_64 container",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, aarch64"
+      },
+      "hosted_confirmation": "The local x86_64 Ubuntu 26.04 GCC image matched the hosted candidate profile. Authoritative GitHub CI must confirm before merge."
+    },
+    {
+      "runner": "scripts/run-mock-tests.sh --coverage and equivalent Docker compiler/gcov invocations",
+      "base_commit": "49f16ecc516cd4de1a5ded056668d8fd3d1e65b0",
+      "scope": "Bind Modbus history records to exact IPv4 and a SHA-256 target digest. Malformed format, truncated payload, old layout and different configured target cases exercise the new admission outcomes.",
+      "sources": {
+        "main/logic/history_persist.hpp": "54e3225516288b54f84bbf5aa068aa3e7de01bafaff545451531c39f2d6720ea"
+      },
+      "test_source_sha256": "90a2260acf42f00b6718fc2b97f1c8017db2bc1bff9989ebc4acb221ecafab9b",
+      "measured_branch_counts": {
+        "clang-17-darwin": {
+          "main/logic/history_persist.hpp": {
+            "taken": 498,
+            "outcomes": 553
+          }
+        },
+        "gcc-13-linux-ubuntu24": {
+          "main/logic/history_persist.hpp": {
+            "taken": 589,
+            "outcomes": 648
+          }
+        },
+        "gcc-15-github-linux-ubuntu26": {
+          "main/logic/history_persist.hpp": {
+            "taken": 587,
+            "outcomes": 646
+          }
+        },
+        "gcc-15-linux-ubuntu26": {
+          "main/logic/history_persist.hpp": {
+            "taken": 587,
+            "outcomes": 646
+          }
+        }
+      },
+      "measured_line_counts": {
+        "clang-17-darwin": {
+          "covered": 10974,
+          "executable": 11145
+        },
+        "gcc-13-linux-ubuntu24": {
+          "covered": 10442,
+          "executable": 10725
+        },
+        "gcc-15-github-linux-ubuntu26": {
+          "covered": 10434,
+          "executable": 10727
+        },
+        "gcc-15-linux-ubuntu26": {
+          "covered": 10438,
+          "executable": 10727
+        }
+      },
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2), arm64",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, aarch64",
+        "gcc-15-github-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, local x86_64 container",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, aarch64"
+      },
+      "hosted_confirmation": "The local x86_64 Ubuntu 26.04 GCC image measured the hosted candidate profile. Authoritative GitHub CI confirmation remains separate."
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
@@ -2034,8 +2178,8 @@
         "taken": 185
       },
       "main/logic/cop_scope.hpp": {
-        "outcomes": 30,
-        "taken": 22
+        "outcomes": 36,
+        "taken": 32
       },
       "main/logic/crashinfo.hpp": {
         "outcomes": 237,
@@ -2118,8 +2262,8 @@
         "outcomes": 184
       },
       "main/logic/history_persist.hpp": {
-        "taken": 474,
-        "outcomes": 529
+        "taken": 498,
+        "outcomes": 553
       },
       "main/logic/homehub_map.hpp": {
         "outcomes": 70,
@@ -2198,8 +2342,8 @@
         "taken": 53
       },
       "main/logic/modbus_profile.hpp": {
-        "outcomes": 82,
-        "taken": 82
+        "outcomes": 84,
+        "taken": 84
       },
       "main/logic/modbus_snapshot.hpp": {
         "outcomes": 12,
@@ -2472,8 +2616,8 @@
         "taken": 197
       },
       "main/logic/cop_scope.hpp": {
-        "outcomes": 36,
-        "taken": 33
+        "outcomes": 42,
+        "taken": 39
       },
       "main/logic/crashinfo.hpp": {
         "outcomes": 266,
@@ -2556,8 +2700,8 @@
         "outcomes": 232
       },
       "main/logic/history_persist.hpp": {
-        "taken": 557,
-        "outcomes": 618
+        "taken": 589,
+        "outcomes": 648
       },
       "main/logic/homehub_map.hpp": {
         "outcomes": 78,
@@ -2636,8 +2780,8 @@
         "taken": 61
       },
       "main/logic/modbus_profile.hpp": {
-        "outcomes": 90,
-        "taken": 90
+        "outcomes": 92,
+        "taken": 92
       },
       "main/logic/modbus_snapshot.hpp": {
         "outcomes": 24,
@@ -2910,8 +3054,8 @@
         "taken": 197
       },
       "main/logic/cop_scope.hpp": {
-        "outcomes": 36,
-        "taken": 33
+        "outcomes": 42,
+        "taken": 39
       },
       "main/logic/crashinfo.hpp": {
         "outcomes": 266,
@@ -2994,8 +3138,8 @@
         "outcomes": 230
       },
       "main/logic/history_persist.hpp": {
-        "taken": 555,
-        "outcomes": 616
+        "taken": 587,
+        "outcomes": 646
       },
       "main/logic/homehub_map.hpp": {
         "outcomes": 78,
@@ -3074,8 +3218,8 @@
         "taken": 61
       },
       "main/logic/modbus_profile.hpp": {
-        "outcomes": 90,
-        "taken": 90
+        "outcomes": 92,
+        "taken": 92
       },
       "main/logic/modbus_snapshot.hpp": {
         "outcomes": 22,
@@ -3348,8 +3492,8 @@
         "taken": 197
       },
       "main/logic/cop_scope.hpp": {
-        "outcomes": 36,
-        "taken": 33
+        "outcomes": 42,
+        "taken": 39
       },
       "main/logic/crashinfo.hpp": {
         "outcomes": 266,
@@ -3432,8 +3576,8 @@
         "outcomes": 230
       },
       "main/logic/history_persist.hpp": {
-        "taken": 555,
-        "outcomes": 616
+        "taken": 587,
+        "outcomes": 646
       },
       "main/logic/homehub_map.hpp": {
         "outcomes": 78,
@@ -3512,8 +3656,8 @@
         "taken": 61
       },
       "main/logic/modbus_profile.hpp": {
-        "outcomes": 90,
-        "taken": 90
+        "outcomes": 92,
+        "taken": 92
       },
       "main/logic/modbus_snapshot.hpp": {
         "outcomes": 22,

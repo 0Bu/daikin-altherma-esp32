@@ -28,6 +28,7 @@
 #include "freertos/semphr.h"
 #include "rtos_guard.hpp"   // SemGuard — the ONE unwind-safe mutex guard
 
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstdint>
@@ -44,6 +45,12 @@ using logic::HISTORY_NO_READING;
 using logic::HISTORY_SAMPLES;
 using logic::HistorySample;
 using logic::HOMEHUB_HISTORY_COUNT;
+constexpr auto kModbusQuietHistory =
+    static_cast<size_t>(logic::homehub_history_index("quiet_state"));
+// v5 added a combined Modbus peer CRC. v6 seals a second CRC for the configured target.
+// Both formats remain readable for independent rings. Their Modbus CRCs cannot establish identity.
+constexpr uint16_t kCombinedModbusPeerPersistVersion = 5;
+constexpr uint16_t kModbusPeerPersistVersion         = 6;
 using logic::TREND_COUNT;
 
 namespace {
@@ -91,7 +98,7 @@ struct PersistedHistory {
     uint32_t catalog_fp;
     uint32_t crc;
     uint32_t x10a_target_fp;  // detected profile/link/fingerprint for the .noinit plant rings
-    uint32_t mb_target_fp;  // host/port/unit identity for the .noinit HomeHub rings
+    uint32_t mb_target_fp;    // legacy Modbus peer CRC; kept at zero in new seals
     // Which circulation witness the circulation ring's samples were recorded under (HIST-01/b;
     // logic::history_circulation_identity, zero = none). Sealed with the rings it describes: a
     // surviving ring whose witness is no longer the configured one is retired at startup, and the
@@ -192,6 +199,7 @@ uint32_t          s_bucket = 0;                    // the bucket P().ring[*].pen
 bool              s_have_bucket = false;
 uint32_t          s_mb_bucket = 0;
 bool              s_mb_have_bucket = false;
+uint32_t          s_mb_first_measured_bucket = UINT32_MAX; // current peer, monotonic raster
 uint32_t          s_env3_bucket = 0;
 bool              s_env3_have_bucket = false;
 // When the newest sample was committed, on the MONOTONIC clock. The route turns this into the
@@ -199,8 +207,8 @@ bool              s_env3_have_bucket = false;
 // bucket between commits, which mislabelled every timestamp and let a PINNED readout round onto
 // the neighbouring sample. Monotonic because the commit may predate the first SNTP sync — its
 // wall-clock instant is then unknowable, but its age never is. A flash seed claims the monotonic
-// raster boundary of the open bucket (logic::history_raster_boundary_us), so the restored samples
-// sit on the same grid as every later commit. INT64_MIN means "none".
+// raster boundary of the open bucket (logic::history_raster_boundary_us). Modbus commits use
+// that same boundary even when the full sweep finished late. INT64_MIN means "none".
 constexpr int64_t kNoCommitUs = INT64_MIN;
 static_assert(kNoCommitUs == logic::HISTORY_NO_COMMIT_US,
               "the commit sentinel is one definition shared with logic::history_snapshot_meta");
@@ -235,8 +243,11 @@ inline void forget_adopt_floor(size_t src) {
 std::atomic<bool> s_reset_requested{false};
 std::atomic<uint32_t> s_x10a_target_fp{0};
 std::atomic<bool> s_mb_reset_requested{false};
-std::atomic<uint32_t> s_mb_identity_generation{1};
-std::atomic<uint32_t> s_mb_target_fp{0};
+std::atomic<uint32_t>      s_mb_identity_generation{1};
+std::atomic<uint32_t>      s_mb_candidate_ipv4{0};
+uint32_t                   s_mb_ipv4 = 0; // history and flash owner locks after startup
+logic::HistoryModbusTarget s_mb_config_target{};
+bool                       s_mb_peer_bound = false; // history mutex
 std::atomic<bool> s_circulation_reset_requested{false};
 // The CURRENT circulation witness identity (logic::history_circulation_identity; zero = no witness
 // configured or consented). history_circulation_reset() publishes the new one together with its
@@ -314,6 +325,14 @@ inline uint32_t persist_crc_ring(uint32_t crc, const logic::TrendRing& r) {
 
 inline uint32_t history_persist_crc() {
     uint32_t crc = CONFIG_CRC32_INIT;
+    if (P().version == kCombinedModbusPeerPersistVersion ||
+        P().version == kModbusPeerPersistVersion)
+        crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(&P().version),
+                                  sizeof(P().version));
+    if (P().version == kModbusPeerPersistVersion)
+        crc =
+            config_crc32_update(crc, reinterpret_cast<const uint8_t*>(&s_liveness.modbus_config_fp),
+                                sizeof(s_liveness.modbus_config_fp));
     crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(&P().x10a_target_fp),
                               sizeof(P().x10a_target_fp));
     crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(&P().mb_target_fp),
@@ -385,9 +404,10 @@ inline bool x10a_rings_have_samples() {
 
 // Start this boot with nothing. REQUIRED rather than defensive: the region is uninitialised storage,
 // so without this every count, head and label would be whatever the last firmware left in DRAM.
-inline void persist_wipe(uint32_t catalog_fp, uint32_t x10a_target_fp, uint32_t mb_target_fp,
-                         uint32_t circulation_fp, bool env3_live) {
+inline void persist_wipe(uint32_t catalog_fp, uint32_t x10a_target_fp, uint32_t circulation_fp,
+                         bool env3_live) {
     std::memset(&P(), 0, sizeof(PersistedHistory));
+    s_liveness.modbus_config_fp = 0;
     // memset alone is NOT enough and the difference is a wrong reading rather than a crash: zero is
     // a perfectly valid sample, while `pending` must start at the NO_READING sentinel or every ring
     // would commit a confident 0.0 for its first bucket.
@@ -395,7 +415,7 @@ inline void persist_wipe(uint32_t catalog_fp, uint32_t x10a_target_fp, uint32_t 
     for (auto& r : P().mb_ring)     r.reset();
     for (auto& r : P().env3_ring)   r.reset();
     P().magic      = logic::HISTORY_PERSIST_MAGIC;
-    P().version    = logic::HISTORY_PERSIST_VERSION;
+    P().version            = kModbusPeerPersistVersion;
     P().boots_since_commit = 0; // nothing adopted: nothing is pending commit
     // Nothing is left for a booking remainder to describe (the memset above zeroed it; stated so
     // that a refusal, which reaches this wipe, visibly starts the diffusion over).
@@ -403,16 +423,10 @@ inline void persist_wipe(uint32_t catalog_fp, uint32_t x10a_target_fp, uint32_t 
     P().env3_live      = env3_live ? 1 : 0;
     P().catalog_fp = catalog_fp;
     P().x10a_target_fp = x10a_target_fp;
-    P().mb_target_fp = mb_target_fp;
+    P().mb_target_fp   = 0;
     P().circulation_fp = circulation_fp;
     s_persist_dirty = true;
     persist_seal_locked();
-}
-
-uint32_t current_mb_target_fp(const Config& c) {
-    return logic::history_homehub_target_fingerprint(
-        config_modbus_host(c).c_str(), static_cast<uint32_t>(c.mb_port),
-        static_cast<uint32_t>(c.mb_unit_id));
 }
 
 // Book the stretch of time between the previous boot's last commit and this boot's first bucket as
@@ -618,7 +632,10 @@ logic::TrendRing* ring_at(HistorySource src, size_t idx) {
     case HistorySource::X10a:
         return idx < TREND_COUNT ? &P().ring[idx].ring : nullptr;
     case HistorySource::Modbus:
-        return idx < HOMEHUB_HISTORY_COUNT ? &P().mb_ring[idx] : nullptr;
+        // Holding 9 has two meanings across the supported maps. Keep its reserved column as a
+        // gap even when an older record contains a value; we cannot attest EKRHH activity.
+        return idx < HOMEHUB_HISTORY_COUNT && idx != kModbusQuietHistory ? &P().mb_ring[idx]
+                                                                         : nullptr;
     case HistorySource::Env3:
         return idx < ENV3_HISTORY_COUNT ? &P().env3_ring[idx] : nullptr;
     case HistorySource::Room:
@@ -673,10 +690,9 @@ int64_t source_anchor_bucket_locked(HistorySource src) {
 // preceding slot remains the head.
 struct FlashJournalRecord {
     logic::HistoryJournalHeader header;
-    // Raw because ordinary trend records carry dense int16 samples, source four carries one
-    // CheckupJournalPayload, and the manifest flag changes the payload to uint32 ids. For ordinary
-    // and checkup records value_count remains a count of 16-bit words, so old v1 trend records stay
-    // byte-for-byte readable.
+    // Raw because trends carry dense int16 samples and Modbus appends a fixed target digest.
+    // Checkup has its own payload, and the manifest flag changes the payload to uint32 ids.
+    // The physical value_count remains a count of 16-bit words except for manifest records.
     alignas(8) uint8_t payload[logic::HISTORY_JOURNAL_SLOT_BYTES -
                                logic::HISTORY_JOURNAL_HEADER_BYTES];
 };
@@ -692,6 +708,8 @@ SemaphoreHandle_t s_flash_mtx = nullptr;       // serialises poll service, shutd
 bool s_flash_shutdown_started = false;         // the shutdown handler must not flush twice
 std::atomic<bool> s_flash_forgotten{false};     // factory reset crosses button/poll/shutdown tasks
 bool s_flash_restore_done = false;
+bool    s_flash_restore_retry = false;          // one retry of the current batch, on the next tick
+uint8_t s_flash_restore_read_error_sources = 0; // report a persistent read failure once per source
 bool s_flash_checkup_restore_done = false;
 bool s_flash_scan_ok = false;
 // Release-publish the partition and both locks after the scan.
@@ -834,8 +852,8 @@ void history_start() {
     const uint32_t want_fp = logic::history_catalog_fingerprint();
     const Config& boot_config = config();
     s_x10a_target_fp.store(boot_config.x10a_identity_fp);
-    const uint32_t want_mb_target_fp = current_mb_target_fp(boot_config);
-    s_mb_target_fp.store(want_mb_target_fp);
+    s_mb_config_target = history_modbus_target(config_modbus_host(boot_config), boot_config.mb_port,
+                                               boot_config.mb_unit_id);
     const uint32_t want_circulation_fp = logic::history_circulation_identity(boot_config);
     s_circulation_fp.store(want_circulation_fp);
     const uint32_t reason  = static_cast<uint32_t>(esp_reset_reason());
@@ -844,24 +862,17 @@ void history_start() {
     // the board and not in safe mode (which starts no optional source at all).
     s_env3_enabled       = !safe && boot_config.env3_enabled && env3_board_supported(boot_config);
     const bool env3_keep = logic::history_env3_ring_adoptable(P().env3_live != 0, s_env3_enabled);
-    // The HomeHub rings are adopted only for the target they were recorded under; any other target
-    // retires them below (and a HomeHub disabled at runtime keeps its ring but stops its raster, so
-    // the target the ring was sealed under is no longer the configured one).
-    const bool mb_keep = P().mb_target_fp == want_mb_target_fp;
-    // What the previous boot's liveness record has to MEASURE: the rasters whose samples THIS boot
-    // would adopt, which is the same decision the retire steps below make (env3_keep, mb_keep). A
-    // ring those steps drop anyway has nothing to book, and weighing it would let a source that is
-    // gone refuse the trends that are not. The X10A raster alone decides the region; an
-    // unmeasurable HomeHub or ENV III raster retires only its own rings
-    // (logic::history_raster_plan). A raster that merely stalled is measurable and is booked.
+    const bool shared_layout = P().version == kModbusPeerPersistVersion ||
+                               P().version == kCombinedModbusPeerPersistVersion;
+    // Only weigh rasters eligible for warm adoption. Modbus restores from its scoped journal.
     const bool weighed[logic::HISTORY_LIVENESS_RASTERS] = {
-        x10a_rings_have_samples(),
-        mb_keep && rings_have_samples(P().mb_ring, HOMEHUB_HISTORY_COUNT),
+        x10a_rings_have_samples(), false,
         env3_keep && rings_have_samples(P().env3_ring, ENV3_HISTORY_COUNT)};
     const logic::HistoryRasterPlan plan = logic::history_raster_plan(s_liveness, weighed);
     const auto                     persist_verdict = logic::history_restore_verdict(
-        reason, P().magic, P().version, P().catalog_fp, want_fp, P().crc, history_persist_crc(),
-        safe, P().boots_since_commit, plan.region_bookable);
+        reason, P().magic, shared_layout ? logic::HISTORY_PERSIST_VERSION : P().version,
+        P().catalog_fp, want_fp, P().crc, history_persist_crc(), safe, P().boots_since_commit,
+        plan.region_bookable);
     s_persist_verdict.store(persist_verdict, std::memory_order_relaxed);
     // The numbers behind a refusal or a retirement, while the previous boot's record is still
     // unread: that the record itself did not verify, or that it holds no usable commit for the
@@ -896,16 +907,13 @@ void history_start() {
             persist_seal_locked();
             diag_printf("history: X10A RAM rings rejected (detected identity changed)\n");
         }
-        if (P().mb_target_fp != want_mb_target_fp) {
-            // Config can be committed just before a software reset, before the Modbus task consumes
-            // its deferred reset. Preserve independent sources but never adopt the prior HomeHub as
-            // the new target merely because DRAM survived.
-            for (auto& r : P().mb_ring) r.reset();
-            P().mb_target_fp = want_mb_target_fp;
-            s_persist_dirty = true;
-            persist_seal_locked();
-            diag_printf("history: HomeHub RAM rings rejected (configured target changed)\n");
-        }
+        // The fixed warm region has no full target digest and exact IPv4. Reset only these
+        // rings after validating the old seal so independent histories can still be adopted.
+        for (auto& r : P().mb_ring) r.reset();
+        P().mb_target_fp                                                          = 0;
+        s_liveness.modbus_config_fp                                               = 0;
+        P().residual_us[static_cast<size_t>(logic::HistoryJournalSource::Modbus)] = 0;
+        P().version = kModbusPeerPersistVersion;
         if (P().circulation_fp != want_circulation_fp) {
             // The witness was remapped, or diagnostics were switched, between the previous boot's
             // last seal and this one. The surviving samples belong to the retired source, so only
@@ -931,15 +939,7 @@ void history_start() {
                         s_env3_enabled ? "was not running when it was sealed"
                                        : "is not running this boot");
         }
-        // A raster the record cannot measure retires its own rings alone. The verdict above
-        // already accepted the region on the X10A raster's word, so a HomeHub whose record entry
-        // is unusable costs the trends nothing but its own.
-        if (plan.retire_modbus) {
-            for (auto& r : P().mb_ring) r.reset();
-            s_persist_dirty = true;
-            log_unmeasured("HomeHub RAM rings retired:",
-                           plan.state[static_cast<size_t>(logic::HistoryJournalSource::Modbus)]);
-        }
+        // An unmeasurable ENV III raster retires only its own rings.
         if (plan.retire_env3) {
             for (auto& r : P().env3_ring) r.reset();
             s_persist_dirty = true;
@@ -956,7 +956,7 @@ void history_start() {
         // zero, which is also what the boot line reports (a retired ring was booked nothing).
         const int64_t claim_us = logic::history_raster_boundary_us(start_us);
         const bool    has[logic::HISTORY_LIVENESS_RASTERS] = {
-            x10a_rings_have_samples(), rings_have_samples(P().mb_ring, HOMEHUB_HISTORY_COUNT),
+            x10a_rings_have_samples(), false,
             rings_have_samples(P().env3_ring, ENV3_HISTORY_COUNT)};
         uint32_t gaps[logic::HISTORY_LIVENESS_RASTERS];
         for (size_t i = 0; i < logic::HISTORY_LIVENESS_RASTERS; ++i) {
@@ -987,8 +987,7 @@ void history_start() {
             crash_reason_slug(reason), static_cast<unsigned>(gaps[0]),
             static_cast<unsigned>(gaps[1]), static_cast<unsigned>(gaps[2]));
     } else {
-        persist_wipe(want_fp, boot_config.x10a_identity_fp, want_mb_target_fp, want_circulation_fp,
-                     s_env3_enabled);
+        persist_wipe(want_fp, boot_config.x10a_identity_fp, want_circulation_fp, s_env3_enabled);
         logic::history_liveness_begin(s_liveness, start_us);
         // Not noise: "wrong_catalog" after an update explains a chart that emptied itself for a
         // reason nobody would otherwise be able to reconstruct, and "bad_crc" on a board that was
@@ -1113,23 +1112,14 @@ void history_reset_on_detect(uint32_t identity_fp) {
     bump_history_epoch();
 }
 
-void history_modbus_reset(uint32_t target_fp) noexcept {
-    // Same deferred-reset boundary as X10A: a HomeHub host/port/unit edit can race the old poll
-    // cycle, so the Modbus task clears and reseeds its rings before folding the new identity. Bump
-    // generation and arm that reset under the SAME mutex as the fold: an old cycle either completes
-    // entirely before this boundary (and readers are then hidden by the pending flag), or observes
-    // the new generation and is refused. It can never consume B's reset and fold A as B's first row.
-    if (!s_mtx) return;
-    // Flash service takes flash -> history while assembling records. Use the same order so a target
-    // change cannot race an old scoped record into the journal or restore index.
-    Lock flash_lk(s_flash_mtx);
-    if (s_flash_mtx && !flash_lk.acquired()) return;
-    Lock lk(s_mtx);
-    if (!lk.acquired()) return;
+// The callers hold flash -> history, the same order as the journal writer. Invalidate the
+// recorder generation before the first fold for the new source. Leave the old flash bytes alone.
+static uint32_t history_modbus_reset_scope_locked(uint32_t ipv4) {
     uint32_t next = s_mb_identity_generation.load() + 1;
     if (next == 0) next = 1;  // zero remains an invalid/pre-init sentinel
     s_mb_identity_generation.store(next);
-    s_mb_target_fp.store(target_fp);
+    s_mb_ipv4                  = ipv4;
+    s_mb_first_measured_bucket = UINT32_MAX;
     s_mb_reset_requested.store(true);
     if (s_flash_mtx) {
         const size_t src = static_cast<size_t>(logic::HistoryJournalSource::Modbus);
@@ -1140,9 +1130,43 @@ void history_modbus_reset(uint32_t target_fp) noexcept {
         forget_adopt_floor(src);
     }
     bump_history_epoch();
+    return next;
+}
+
+void history_modbus_reset(const logic::HistoryModbusTarget& target) noexcept {
+    if (!s_mtx) return;
+    Lock flash_lk(s_flash_mtx);
+    if (s_flash_mtx && !flash_lk.acquired()) return;
+    Lock lk(s_mtx);
+    if (!lk.acquired()) return;
+    s_mb_config_target = target;
+    s_mb_peer_bound    = false;
+    history_modbus_reset_scope_locked(0);
+}
+
+uint32_t history_modbus_bind_peer(const logic::HistoryModbusTarget& configured, uint32_t ipv4,
+                                  uint32_t expected_generation) noexcept {
+    if (!s_mtx || !ipv4 || !expected_generation || configured == logic::HistoryModbusTarget{} ||
+        s_flash_forgotten.load())
+        return 0;
+    Lock flash_lk(s_flash_mtx, 0);
+    if (s_flash_mtx && !flash_lk.acquired()) return 0;
+    Lock lk(s_mtx, 0);
+    if (!lk.acquired() || s_flash_forgotten.load() || configured != s_mb_config_target ||
+        expected_generation != s_mb_identity_generation.load())
+        return 0;
+    const bool first_bind = !s_mb_peer_bound;
+    s_mb_peer_bound       = true;
+    if (ipv4 != s_mb_ipv4) return history_modbus_reset_scope_locked(ipv4);
+    if (first_bind) bump_history_epoch();
+    return expected_generation;
 }
 
 uint32_t history_modbus_generation() { return s_mb_identity_generation.load(); }
+
+void history_modbus_candidate(uint32_t ipv4) noexcept { s_mb_candidate_ipv4.store(ipv4); }
+
+uint32_t history_modbus_candidate() noexcept { return s_mb_candidate_ipv4.load(); }
 
 uint32_t history_room_generation() noexcept { return s_room_generation.load(); }
 
@@ -1300,7 +1324,8 @@ void history_record_room(bool valid, double temperature_c, uint32_t generation) 
     if (changed) room_seal_locked();
 }
 
-void history_record(const CachedValue* v, size_t n, uint32_t source_generation) {
+void history_record(const CachedValue* v, size_t n, uint32_t source_generation,
+                    int64_t dhw_reply_us) {
     if (!s_mtx) return;
     if (!v) n = 0;
 
@@ -1330,7 +1355,7 @@ void history_record(const CachedValue* v, size_t n, uint32_t source_generation) 
     // Resolve every row once before the lock. Besides avoiding a second catalog scan, this lets a
     // changed non-empty label reset ALL X10A plant rings together before any current-bucket sample
     // is folded. Board histories are independent of the heat-pump identity and remain intact.
-    int selected[TREND_COUNT];
+    int16_t selected[TREND_COUNT]; // signed index into at most 256 rows, or -1
     for (size_t t = 0; t < TREND_COUNT; t++) {
         const logic::TrendDef& d = logic::TRENDS[t];
         selected[t] = (d.kind == logic::TrendKind::Row ||
@@ -1420,6 +1445,7 @@ void history_record(const CachedValue* v, size_t n, uint32_t source_generation) 
     }
     if (circulation_generation == circulation_source_generation()) reset_circulation_locked(bucket);
 
+    const uint32_t dhw_bucket = dhw_reply_us >= 0 ? logic::history_bucket(dhw_reply_us) : s_bucket;
     for (size_t t = 0; t < TREND_COUNT; t++) {
         Trend& tr = P().ring[t];
         const logic::TrendDef& d = logic::TRENDS[t];
@@ -1433,7 +1459,10 @@ void history_record(const CachedValue* v, size_t n, uint32_t source_generation) 
             }
             if (copy_field(tr.label, sizeof(tr.label), d.label)) s_persist_dirty = true;
             if (copy_field(tr.unit, sizeof(tr.unit), d.unit)) s_persist_dirty = true;
-            tr.ring.fold(sg_mode);
+            if (dhw_bucket == s_bucket)
+                tr.ring.fold(sg_mode);
+            else if (dhw_bucket + 1 == s_bucket && tr.ring.fold_previous(sg_mode, false))
+                s_persist_dirty = true;
             continue;
         }
 
@@ -1455,7 +1484,11 @@ void history_record(const CachedValue* v, size_t n, uint32_t source_generation) 
         const bool has = value_tenths(v[idx].value, tenths);
         const HistorySample sample =
             logic::history_store(has, tenths, regs[idx], rps_known, rps_running);
-        if (d.kind == logic::TrendKind::BinaryEvent) tr.ring.fold_binary_event(sample);
+        if (d.conv == 305 && dhw_bucket != s_bucket) {
+            if (dhw_bucket + 1 == s_bucket && tr.ring.fold_previous(sample, true))
+                s_persist_dirty = true;
+        } else if (d.kind == logic::TrendKind::BinaryEvent)
+            tr.ring.fold_binary_event(sample);
         else tr.ring.fold(sample);
     }
     if (circulation_generation == circulation_source_generation())
@@ -1463,9 +1496,10 @@ void history_record(const CachedValue* v, size_t n, uint32_t source_generation) 
     persist_seal_locked();
 }
 
-void history_record_modbus(const CachedValue* v, size_t n, uint32_t identity_generation) {
+void history_record_modbus(const CachedValue* v, size_t n, uint32_t identity_generation,
+                           int64_t observed_us) {
     if (!s_mtx) return;
-    const int64_t now_us = esp_timer_get_time();
+    const int64_t  now_us = observed_us >= 0 ? observed_us : esp_timer_get_time();
     const uint32_t bucket = logic::history_bucket(now_us);
 
     // Parse before taking the history lock. strtod is locale-stable in this firmware and needs no
@@ -1474,7 +1508,7 @@ void history_record_modbus(const CachedValue* v, size_t n, uint32_t identity_gen
     HistorySample sample[HOMEHUB_HISTORY_COUNT];
     for (size_t t = 0; t < HOMEHUB_HISTORY_COUNT; t++) {
         sample[t] = HISTORY_NO_READING;
-        if (!v) continue;
+        if (!v || t == kModbusQuietHistory) continue;
         const uint16_t wanted = logic::HOMEHUB_HISTORIES[t].offset;
         for (size_t i = 0; i < n; i++) {
             if (v[i].off != wanted) continue;
@@ -1493,13 +1527,26 @@ void history_record_modbus(const CachedValue* v, size_t n, uint32_t identity_gen
     if (s_flash_forgotten.load()) return;
     // A /set_hp target change can land while this cycle is reading the old HomeHub. Never consume the
     // pending reset or fold that old sample into the freshly-reset identity.
-    if (identity_generation == 0 || identity_generation != s_mb_identity_generation.load()) return;
+    if (!s_mb_peer_bound || identity_generation == 0 ||
+        identity_generation != s_mb_identity_generation.load())
+        return;
+    if (s_mb_have_bucket && bucket < s_mb_bucket) {
+        if (bucket + 1 != s_mb_bucket || s_mb_reset_requested.load()) return;
+        for (size_t t = 0; t < HOMEHUB_HISTORY_COUNT; t++) {
+            if (!logic::history_is_absent(sample[t]))
+                s_mb_first_measured_bucket = std::min(s_mb_first_measured_bucket, bucket);
+            if (P().mb_ring[t].fold_previous(sample[t], homehub_event_ring(t)))
+                s_persist_dirty = true;
+        }
+        persist_seal_locked();
+        return;
+    }
     if (!s_mb_have_bucket) {
         const size_t completed = logic::history_completed_samples(bucket);
         for (auto& ring : P().mb_ring) ring.reset_with_gaps(completed);
         s_persist_dirty = true;
         if (completed) {
-            s_mb_last_commit_us = static_cast<int64_t>(bucket) * logic::HISTORY_DT_S * 1000000;
+            s_mb_last_commit_us     = logic::history_raster_boundary_us(now_us);
             s_mb_last_commit_bucket = static_cast<int64_t>(bucket) - 1;
             logic::history_liveness_commit(s_liveness, logic::HistoryJournalSource::Modbus,
                                            s_mb_last_commit_us);
@@ -1508,23 +1555,27 @@ void history_record_modbus(const CachedValue* v, size_t n, uint32_t identity_gen
         const uint32_t skipped = logic::history_skipped(s_mb_bucket, bucket);
         for (auto& ring : P().mb_ring) ring.commit(skipped);
         s_persist_dirty = true;
-        s_mb_last_commit_us = now_us;
+        // A delayed full sweep may finish in the next wall bucket. Use the closing boundary of
+        // the newest committed slot, including any explicit gaps, to keep journal positions stable.
+        s_mb_last_commit_us     = logic::history_raster_boundary_us(now_us);
         s_mb_last_commit_bucket = static_cast<int64_t>(bucket) - 1;
         P().boots_since_commit  = 0;
-        logic::history_liveness_commit(s_liveness, logic::HistoryJournalSource::Modbus, now_us);
+        logic::history_liveness_commit(s_liveness, logic::HistoryJournalSource::Modbus,
+                                       s_mb_last_commit_us);
     }
     s_mb_bucket = bucket;
     s_mb_have_bucket = true;
     if (s_mb_reset_requested.exchange(false)) {
         const size_t completed = logic::history_completed_samples(bucket);
         for (auto& ring : P().mb_ring) ring.reset_with_gaps(completed);
-        P().mb_target_fp = s_mb_target_fp.load();
         P().residual_us[static_cast<size_t>(logic::HistoryJournalSource::Modbus)] = 0;
         s_persist_dirty = true;
     }
     for (size_t t = 0; t < HOMEHUB_HISTORY_COUNT; t++) {
         if (homehub_event_ring(t)) P().mb_ring[t].fold_binary_event(sample[t]);
         else                       P().mb_ring[t].fold(sample[t]);
+        if (s_mb_first_measured_bucket == UINT32_MAX && !logic::history_is_absent(sample[t]))
+            s_mb_first_measured_bucket = bucket;
     }
     persist_seal_locked();
 }
@@ -1615,10 +1666,12 @@ size_t history_modbus_snapshot(size_t t, HistorySample* out, size_t max, uint32_
                                logic::HistoryMeta* meta) {
     if (epoch) *epoch = 0;
     clear_snapshot_meta(meta);
-    if (t >= HOMEHUB_HISTORY_COUNT || !out || !max || !s_mtx) return 0;
+    if (t >= HOMEHUB_HISTORY_COUNT || t == kModbusQuietHistory || !out || !max || !s_mtx) return 0;
     Lock lk(s_mtx);
     if (lk.acquired() && epoch) *epoch = history_epoch();
-    if (!lk.acquired() || s_flash_forgotten.load() || s_mb_reset_requested.load()) return 0;
+    if (!lk.acquired() || s_flash_forgotten.load() || !s_mb_peer_bound ||
+        s_mb_reset_requested.load() || s_mb_candidate_ipv4.load() != s_mb_ipv4)
+        return 0;
     const size_t n = P().mb_ring[t].snapshot(out, max);
     fill_snapshot_meta_locked(meta, s_mb_last_commit_us, s_mb_last_commit_bucket, n);
     return n;
@@ -1840,14 +1893,21 @@ void flash_manifest_cache_reset() {
     for (auto& current : s_flash_manifest_current) current = {};
 }
 
-const FlashManifestCache* flash_manifest_find(const logic::HistoryJournalHeader& h) {
+const FlashManifestCache* flash_manifest_find(const logic::HistoryJournalHeader& h,
+                                              size_t                             scope_words) {
     if (h.source >= 3) return nullptr;
     for (const auto& m : s_flash_manifests[h.source]) {
         if (!m.valid || m.catalog_fp != h.catalog_fp || m.source != h.source ||
-            m.count != h.value_count) continue;
+            m.count + scope_words != h.value_count)
+            continue;
         bool same = true;
-        for (size_t i = 0; i < 3; ++i)
-            if (m.rings[i] != h.rings[i]) { same = false; break; }
+        for (size_t i = 0; i < 3; ++i) {
+            const size_t suffix = i == h.source ? scope_words : 0;
+            if (m.rings[i] + suffix != h.rings[i]) {
+                same = false;
+                break;
+            }
+        }
         if (same) return &m;
     }
     return nullptr;
@@ -1907,19 +1967,24 @@ bool flash_manifest_cache_add(const FlashJournalRecord& r) {
     return true;
 }
 
-bool flash_trend_scope_matches(const logic::HistoryJournalHeader& h) {
+bool flash_trend_scope_matches(const FlashJournalRecord& r, bool find_modbus_peer) {
+    const auto& h = r.header;
     if (h.source == static_cast<uint8_t>(logic::HistoryJournalSource::X10a))
         return logic::history_journal_scope(h) == s_x10a_target_fp.load();
-    if (h.source == static_cast<uint8_t>(logic::HistoryJournalSource::Modbus))
-        return logic::history_journal_scope(h) == s_mb_target_fp.load();
+    if (h.source == static_cast<uint8_t>(logic::HistoryJournalSource::Modbus)) {
+        return logic::history_journal_modbus_config_matches(h, r.payload, sizeof(r.payload),
+                                                            s_mb_config_target) &&
+               ((find_modbus_peer && s_mb_ipv4 == 0) ||
+                logic::history_journal_scope(h) == s_mb_ipv4);
+    }
     return h.source == static_cast<uint8_t>(logic::HistoryJournalSource::Env3);
 }
 
-bool flash_current_layout_matches(const logic::HistoryJournalHeader& h) {
+bool flash_current_layout_matches(const logic::HistoryJournalHeader& h, size_t scope_words) {
     return logic::history_journal_trend_layout_matches(
         h, P().catalog_fp, static_cast<uint16_t>(TREND_COUNT),
-        static_cast<uint16_t>(HOMEHUB_HISTORY_COUNT),
-        static_cast<uint16_t>(ENV3_HISTORY_COUNT));
+        static_cast<uint16_t>(HOMEHUB_HISTORY_COUNT), static_cast<uint16_t>(ENV3_HISTORY_COUNT),
+        scope_words);
 }
 
 bool flash_record_physically_valid(const FlashJournalRecord& r) {
@@ -1940,7 +2005,7 @@ bool flash_record_physically_valid(const FlashJournalRecord& r) {
         logic::history_journal_crc_bytes(h, r.payload, payload_bytes);
 }
 
-bool flash_record_valid(const FlashJournalRecord& r) {
+bool flash_record_valid(const FlashJournalRecord& r, bool find_modbus_peer = false) {
     if (!flash_record_physically_valid(r)) return false;
     const auto& h = r.header;
     if (flash_is_manifest(h)) return false;
@@ -1953,10 +2018,11 @@ bool flash_record_valid(const FlashJournalRecord& r) {
             static_cast<uint16_t>(logic::CHECKUP_JOURNAL_WORDS), logic::CHECKUP_DT_S);
     if (h.source == static_cast<uint8_t>(logic::HistoryJournalSource::Room))
         return logic::history_journal_room_header_matches(h, s_room_identity.load());
-    if (!flash_trend_scope_matches(h)) return false;
-    return flash_current_layout_matches(h) ||
-           logic::history_legacy_disinfection_layout_matches(h) ||
-           flash_manifest_find(h) != nullptr;
+    if (!flash_trend_scope_matches(r, find_modbus_peer)) return false;
+    const size_t scope_words = logic::history_journal_modbus_scope_words(h);
+    return flash_current_layout_matches(h, scope_words) ||
+           (!scope_words && logic::history_legacy_disinfection_layout_matches(h)) ||
+           flash_manifest_find(h, scope_words) != nullptr;
 }
 
 int flash_record_stored_index(const logic::HistoryJournalHeader& h, size_t current_index) {
@@ -1968,10 +2034,11 @@ int flash_record_stored_index(const logic::HistoryJournalHeader& h, size_t curre
     if (h.source >= 3) return -1;
     const auto src = static_cast<logic::HistoryJournalSource>(h.source);
     if (current_index >= logic::history_journal_source_rings(src)) return -1;
-    if (flash_current_layout_matches(h)) return static_cast<int>(current_index);
-    if (logic::history_legacy_disinfection_layout_matches(h))
+    const size_t scope_words = logic::history_journal_modbus_scope_words(h);
+    if (flash_current_layout_matches(h, scope_words)) return static_cast<int>(current_index);
+    if (!scope_words && logic::history_legacy_disinfection_layout_matches(h))
         return logic::history_legacy_disinfection_stored_index(src, current_index);
-    const auto* manifest = flash_manifest_find(h);
+    const auto* manifest = flash_manifest_find(h, scope_words);
     return manifest ? manifest->stored_index[current_index] : -1;
 }
 
@@ -2096,8 +2163,13 @@ bool flash_journal_scan() {
             if (flash_record_physically_valid(r)) {
                 seen_valid++;
             }
-            if (flash_record_valid(r)) {
+            if (flash_record_valid(r, /*find_modbus_peer=*/true)) {
                 const size_t src = r.header.source;
+                // Keep the newest compatible peer as a candidate, and index only its records.
+                // Restored rings remain invisible until the connected peer confirms that scope.
+                if (src == static_cast<size_t>(logic::HistoryJournalSource::Modbus) &&
+                    s_mb_ipv4 == 0)
+                    s_mb_ipv4 = logic::history_journal_scope(r.header);
                 if (newest_sequence[src] == 0) {
                     newest_sequence[src]       = r.header.sequence;
                     s_flash_newest_bucket[src] = r.header.bucket;
@@ -2235,7 +2307,9 @@ bool flash_build_next_record(HistorySource src, FlashJournalRecord& out, TickTyp
     // whose pending reset is never consumed — its backlog must not be written under the empty host.
     if (src == HistorySource::X10a && (s_x10a_target_fp.load() == 0 || s_reset_requested.load()))
         return false;
-    if (src == HistorySource::Modbus && s_mb_reset_requested.load()) return false;
+    if (src == HistorySource::Modbus && (!s_mb_peer_bound || s_mb_reset_requested.load() ||
+                                         s_mb_config_target == logic::HistoryModbusTarget{}))
+        return false;
     if (src == HistorySource::Room &&
         (s_room_identity.load() == 0 || R().identity != s_room_identity.load() || !s_room_fed))
         return false;
@@ -2297,6 +2371,14 @@ bool flash_build_next_record(HistorySource src, FlashJournalRecord& out, TickTyp
     const int64_t oldest = anchor - static_cast<int64_t>(max_count - 1);
     int64_t       target = cursor == INT64_MIN ? oldest : cursor + 1;
     if (target < oldest) target = oldest;       // backlog older than the live 24-hour ring is gone
+    if (src == HistorySource::Modbus) {
+        // Explicit predecessor gaps align the RAM axis; they are not journal writes for this
+        // peer. Map its first measured monotonic bucket onto the same wall anchor as the ring.
+        if (s_mb_last_commit_bucket < static_cast<int64_t>(s_mb_first_measured_bucket))
+            return false;
+        const int64_t first = anchor - (s_mb_last_commit_bucket - s_mb_first_measured_bucket);
+        if (target < first) target = first;
+    }
     if (target > anchor) return false;
     const size_t age = static_cast<size_t>(anchor - target);
 
@@ -2329,7 +2411,7 @@ bool flash_build_next_record(HistorySource src, FlashJournalRecord& out, TickTyp
         // says why the previous firmware reads such a record unchanged.
         logic::history_journal_set_circulation_identity(h, P().circulation_fp);
     } else if (src == HistorySource::Modbus) {
-        logic::history_journal_set_scope(h, s_mb_target_fp.load());
+        logic::history_journal_set_modbus_scope(h, out.payload, s_mb_ipv4, s_mb_config_target);
     } else if (src == HistorySource::Room) {
         logic::history_journal_set_scope(h, s_room_identity.load());
     }
@@ -2339,8 +2421,8 @@ bool flash_build_next_record(HistorySource src, FlashJournalRecord& out, TickTyp
         if (r) (void)r->sample_from_newest(age, sample);
         std::memcpy(out.payload + i * sizeof(sample), &sample, sizeof(sample));
     }
-    h.crc = logic::history_journal_crc_bytes(
-        h, out.payload, value_count * sizeof(HistorySample));
+    h.crc =
+        logic::history_journal_crc_bytes(h, out.payload, logic::history_journal_payload_bytes(h));
     return true;
 }
 
@@ -2654,10 +2736,19 @@ bool flash_build_for_service(size_t src_i, FlashJournalRecord& r, TickType_t wai
 // Move the restore to `ring`; it is complete once it has passed the last ring. Poll task only.
 static void flash_restore_advance_to(size_t ring) {
     s_flash_restore_ring = ring;
+    s_flash_restore_retry = false;
     if (ring < kTotalRings) return;
     s_flash_restore_done = true;
     diag_printf("history: journal restore complete (%u/%u rings extended, 5-min raster)\n",
                 static_cast<unsigned>(s_flash_restored_rings), static_cast<unsigned>(kTotalRings));
+}
+
+static void flash_note_restore_read_failure(size_t source) {
+    const auto bit = static_cast<uint8_t>(1u << source);
+    if (s_flash_restore_read_error_sources & bit) return;
+    s_flash_restore_read_error_sources |= bit;
+    diag_printf("history: journal restore source %u leaves gaps at unreadable slots\n",
+                static_cast<unsigned>(source));
 }
 
 // Caller owns s_flash_mtx; the checkup and trend phases share one bounded restore transaction.
@@ -2704,7 +2795,8 @@ static void history_restore_checkup_flash() {
 // transposes four values into ring-shaped blocks: at most HISTORY_SAMPLES slot reads of
 // HISTORY_JOURNAL_SLOT_BYTES (~74 KiB), 2.3 KiB of static scratch and no heap allocation. A source
 // whose indexed window lies beyond the wall bucket is restored from nothing (the splice refuses it)
-// and reported once; it is never re-indexed or rewritten.
+// and reported once; it is never re-indexed or rewritten. Retry a read failure on the next tick
+// within the same per-tick bound. Unreadable slots on the retry remain gaps.
 void history_service_flash_restore() {
     // Expiration belongs to the reducer owner and must precede flash -> observation locking.
     checkup_stop_context_expire(esp_timer_get_time());
@@ -2746,7 +2838,7 @@ void history_service_flash_restore() {
 
     const size_t  src_i       = static_cast<size_t>(src);
     const int64_t newest      = s_flash_newest_bucket[src_i];
-    bool          read_failed = false;
+    bool          have_record = false;
     // HIST-01/b: the identity the circulation column may be restored under, read once for the whole
     // batch, and whether any record of it has fed this batch's block yet. A record is X10A-scoped,
     // but its circulation column belongs to the external witness it names; the other columns of the
@@ -2770,9 +2862,17 @@ void history_service_flash_restore() {
         for (size_t k = s_flash_restore_slot_count[src_i]; k > 0; k--) {
             FlashJournalRecord r;
             const esp_err_t e = flash_read_record(s_flash_restore_slots[src_i][k - 1], r);
-            if (e != ESP_OK) { read_failed = true; break; }
+            if (e != ESP_OK) {
+                if (!s_flash_restore_retry) {
+                    s_flash_restore_retry = true;
+                    return;
+                }
+                flash_note_restore_read_failure(src_i);
+                continue;
+            }
             if (!flash_record_valid(r) || r.header.bucket < oldest || r.header.bucket > newest)
                 continue;
+            have_record        = true;
             const size_t pos = static_cast<size_t>(r.header.bucket - oldest);
             const uint32_t record_circulation =
                 logic::history_journal_circulation_identity(r.header);
@@ -2792,13 +2892,7 @@ void history_service_flash_restore() {
             }
         }
     }
-    if (read_failed) {
-        s_flash_restore_done = true;
-        diag_printf("history: journal restore stopped (flash read failed)\n");
-        return;
-    }
-
-    if (newest != INT64_MIN) {
+    if (have_record) {
         const size_t start = logic::history_flash_restore_start(
             s_flash_oldest_bucket[src_i], newest, HISTORY_SAMPLES);
         for (size_t b = 0; b < batch; b++) {
@@ -2926,7 +3020,7 @@ bool history_flash_forget() {
         Lock history_lk(s_mtx);
         if (!history_lk.acquired()) return false;
         persist_wipe(logic::history_catalog_fingerprint(), s_x10a_target_fp.load(),
-                     s_mb_target_fp.load(), s_circulation_fp.load(), s_env3_enabled);
+                     s_circulation_fp.load(), s_env3_enabled);
         room_wipe_locked(0);
         s_room_identity.store(0);
         s_room_have_bucket        = false;
@@ -2936,6 +3030,7 @@ bool history_flash_forget() {
         s_room_adopt_real_end_us = s_room_adopt_floor_bucket = INT64_MIN;
         logic::history_liveness_begin(s_room_liveness, esp_timer_get_time());
         s_bucket = s_mb_bucket = s_env3_bucket = 0;
+        s_mb_first_measured_bucket             = UINT32_MAX;
         s_have_bucket = s_mb_have_bucket = s_env3_have_bucket = false;
         s_last_commit_us = s_mb_last_commit_us = s_env3_last_commit_us = kNoCommitUs;
         s_last_commit_bucket = s_mb_last_commit_bucket = s_env3_last_commit_bucket = -1;

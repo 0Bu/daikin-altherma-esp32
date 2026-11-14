@@ -108,7 +108,7 @@ if 'PASS total=13 assertions=5233\n' not in legacy.stdout:
                        + legacy.stdout)
 print('PRESERVED ORIGINAL CASES ' + legacy.stdout.splitlines()[-1])
 baseline = command([binary])
-if 'PASS total=17 assertions=5581\n' not in baseline.stdout:
+if 'PASS total=18 assertions=5587\n' not in baseline.stdout:
     raise RuntimeError('the complete behavioral groups changed their assertion inventory\n'
                        + baseline.stdout)
 print(baseline.stdout, end='')

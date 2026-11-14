@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 7058a2315d38a705197366825ec341f6a9d9d96fb7be36635832605f2e42960b -->
+<!-- diagnostic-evidence-contract: 70792245f645aba292b984417f82e6c8fe7fab831a9b695857ba40f5d9b6dddf -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -385,16 +385,16 @@ the listed Altherma 3 R W units (sections 6.4.3, 9.4.1, and 12.4). An Altherma 3
 `25 l/min` or `22 l/min`, depending on the variant ([D2], section 8.1.3). One firmware-wide good/bad
 limit would therefore be incorrect.
 
-**Firmware rule:** The row reports the lowest accepted flow after the internal pump ran
-continuously for at least 60 seconds. It assigns no good/bad assessment. See CHECKUP_FLOW_RUNUP_S
-and the Flow branch in [checkup.hpp](../main/logic/checkup.hpp).
+**Firmware rule:** The row reports the lowest accepted X10A flow after at least 60 seconds covered
+by consecutive X10A pump-ON reports. Each interval needs ON reports at both ends and the shared
+continuity rule. See CHECKUP_FLOW_RUNUP_S and the Flow branch in [checkup.hpp](../main/logic/checkup.hpp).
 
 **Project boundary:** Sixty seconds is a pump run-up filter, not a manufacturer limit. The filter
 does not establish part load or exclude later valve movements.
 
-**Not established:** The minimum has no retained operating-mode context and is not a design-flow
-measurement. It cannot be compared generally with a model manual's commissioning minimum or
-identify a hydraulic restriction.
+**Not established:** The ON reports do not independently verify pump rotation. The minimum has no
+retained operating-mode context and is not a design-flow measurement. It cannot be compared
+generally with a model manual's commissioning minimum or identify a hydraulic restriction.
 
 <a id="diagnosis-heater"></a>
 ### 7. Electric backup and booster heaters (`heater`)
@@ -412,6 +412,10 @@ is published immediately as **MEASURED**, without waiting for 24 hours. A zero a
 readable observed intervals; unsupported or unreadable inputs remain null. Proving BUH off requires
 every profile-provided step to be readable; either readable active step proves on. See the Heater
 branch in [checkup.hpp](../main/logic/checkup.hpp).
+
+The hot-water trend uses the X10A page `0x60` reply time or the independent Modbus reply time
+for its own source. A readable ON report marks the five-minute interval active. The displayed
+sum of marked intervals has the cadence of the [trend API](API.md#get-history).
 
 **Not established:** Runtime alone establishes neither energy consumed, unnecessary use nor a
 defect. Electrical power, delivered heat and the controller's operating reason are not supplied by

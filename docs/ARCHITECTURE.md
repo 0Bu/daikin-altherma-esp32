@@ -43,7 +43,7 @@ tasks and transport.
 | Local accessory | `env3.cpp` | `env3.hpp` |
 | MQTT publishing and external inputs | `mqtt_ha.cpp` | `ha_device.hpp`, `discovery.hpp`, `x10a_snapshot.hpp`, `mqtt_group.hpp`, `reference_temperature.hpp`, `circulation_source.hpp` |
 | Forecast and diagnosis | `weather_forecast.cpp`, `checkup.cpp`, MQTT sampler | `weather_forecast.hpp`, `checkup.hpp`, `heating_curve_diagnosis.hpp`, `instrument.hpp` |
-| History and duration evidence | `history.cpp`, `state_dwell.cpp` | `history.hpp`, `history_persist.hpp`, `state_dwell.hpp` |
+| History and duration evidence | `history.cpp`, `history_target.cpp`, `state_dwell.cpp` | `history.hpp`, `history_persist.hpp`, `state_dwell.hpp` |
 | HTTP and MCP | `http_common.cpp`, `http_status.cpp`, `http_config.cpp`, `http_ota.cpp`, `mcp_server.cpp` | `http_surface.hpp`, `http_request.hpp`, `mcp.hpp`, `redact.hpp` |
 | OTA and absolute download deadlines | `ota_update.cpp`, `http_deadline.cpp`, `http_client_diag.cpp` | `ota_manifest.hpp`, `ota_headroom.hpp`, `ota_quiesce.hpp`, `ota_transport.hpp`, `ota_upload.hpp`, `health_gate.hpp` |
 | Crash, heap, stack and recovery | `diag_crash.cpp`, `heap_guard.cpp`, `safe_mode.cpp`, `stack_watch.hpp`, `recovery_button.cpp` | `crashinfo.hpp`, `heap_watchdog.hpp`, `reset_reason.hpp` |
@@ -188,12 +188,23 @@ limited per boot so the log ring remains useful. Only nonempty captured page byt
 missing pages leave the edge or periodic capture pending.
 
 HomeHub and native Altherma 4 Modbus use separate read-only profiles selected from current metadata.
-`profile_basis` states the selection evidence; an unknown profile stays bounded rather than borrowing
-the HomeHub map. Source/profile identity scopes values, freshness and history.
+`profile_basis` states the selection evidence. Auto and fallback poll the bounded HomeHub baseline
+map. Profile selection does not qualify the flow scale, as described in
+[MODBUS_PROTOCOL.md](MODBUS_PROTOCOL.md). Source/profile identity scopes values, freshness and history.
 The Modbus task keeps a separate cache and session identity. Configuration changes stage a
 replacement before durable commit, then perform a non-throwing task handoff. A deleted target
 stops polling and future automatic discovery without interrupting X10A. Its register, pairing and
 lifecycle contract is [MODBUS_PROTOCOL.md](MODBUS_PROTOCOL.md).
+
+The HomeHub worker needs a retained task-local lwIP semaphore and a watchdog subscription before
+its first socket call. The build adds a checked entry point to a local copy of the pinned lwIP
+port. That entry point verifies thread-local ownership without a second allocation and frees the
+semaphore if ownership was never established. The worker retries a failed admission on its normal
+poll cadence.
+Worker creation waits for core boot and releases its own quiescence claim separately from the
+running task. OTA and Weather defer that allocation while they own the network heap. Creation and
+the first sweep check contiguous and total memory against the recovery reserve. A socket acquires
+both transport timeouts before it connects. The worker retains the descriptor until cleanup succeeds.
 
 ## History and diagnosis persistence
 
@@ -210,8 +221,8 @@ History has two independent persistence paths:
 
 | Medium | Restores | Acceptance and limits |
 |---|---|---|
-| `.noinit` DRAM | Compatible power-preserving resets without extra flash writes | Allowlisted reset reason, format, catalog fingerprint, CRC and matching X10A/HomeHub physical target scope; reject brownout/power glitch, unknown reset reasons and future anchors. The open bucket is discarded. OTA may move RAM and invalidate it. |
-| `history` flash journal | Compatible records across power loss and OTA | Successful scan, compatible semantic catalog, matching X10A target or HomeHub host/port/unit scope, and synchronized wall time; restore by original absolute bucket, leaving downtime gaps. Live observations win overlap, including live absence. |
+| `.noinit` DRAM | Compatible power-preserving resets without extra flash writes | Allowlisted reset reason, format, catalog fingerprint, CRC and matching source scope. HomeHub history restores through the flash journal. Reject brownout/power glitch, unknown reset reasons and future anchors. The open bucket is discarded. OTA may move RAM and invalidate it. |
+| `history` flash journal | Compatible records across power loss and OTA | Successful scan, compatible semantic catalog, matching source scope and synchronized wall time. Restore by original absolute bucket, leaving downtime gaps. Live observations win overlap, including live absence. |
 
 The journal occupies the upper 4 MiB of the official 8 MiB layout. Dense source records have a CRC
 and a commit word programmed last; a torn slot is skipped without erasing older committed neighbors.
@@ -224,7 +235,24 @@ labels. They allow unchanged curves to survive added or reordered rows. Duplicat
 manifests or unknown pre-manifest catalogs fail closed. Bounded manifest-generation caches and
 four-ring restore batches avoid a second full history matrix. The supported older catalog has an
 explicit adapter; a genuinely new or reinterpreted series has no fabricated predecessor.
+Trend restore retries a failed batch once on the next tick. A persistently unreadable slot leaves a
+gap while readable slots and independent sources still restore.
 Re-detecting a different X10A target clears the prior target's indexed restore.
+The Modbus journal binds each data record to the exact resolved IPv4 and a 128-bit SHA-256 prefix
+of the configured host, port and unit ID. The scan indexes the newest compatible peer for that
+configured target. A valid ordinary data reply can confirm the peer while its session is current.
+Binding takes the flash and history locks without waiting. Contention defers binding to a later
+poll. A new TCP peer immediately withholds the previous series from the history endpoint. If the
+confirmed IPv4 differs from the indexed candidate, its series starts without restored samples in
+that boot.
+
+Warm RAM has no room for the full Modbus binding. Modbus rings start empty after reboot, and
+compatible independent RAM histories can still restore. Older CRC-scoped Modbus journal records
+retain their physical sequence until normal rotation and do not supply samples. This can leave a
+gap in the Modbus chart after upgrading. The new Modbus records retain the existing slot geometry
+and use an extended payload width that the previous Modbus decoder cannot interpret.
+Older firmware that does not recognize the new shared warm RAM format refuses the whole retained
+region after rollback, including X10A and ENV III. Compatible dated flash records can still restore.
 
 Only committed records restore after clock sync and a successful scan. Power loss can discard the
 open bucket and queued records, so loss may exceed one interval. Adoption near a cursor can skip
@@ -483,8 +511,9 @@ publisher cycle finish. Weather then raises its TLS phase and drains admitted va
 (`/values`, MCP `get_hp_values`) and optional compressor traces (`/status`, MCP `get_status`).
 A trace releases its reader after serialization, or immediately when unavailable. Weather waits up
 to five seconds (else `http_busy`) before sampling heap. See the [trace omission rule](API.md#history-and-24-hour-checks).
-Stale quiesce flags have a bounded ten-minute cap, longer than valid OTA
-transfer and host observation budgets. MQTT restarts after stable headroom with exponential backoff
+The ten-minute quiesce budget exceeds valid OTA transfer and host observation budgets.
+HomeHub keeps its network work paused while OTA owns the TLS admission flag, including after
+that budget. MQTT restarts after stable headroom with exponential backoff
 on client-start failure. No model-sized HTTP/MQTT buffer remains allocated for the boot.
 
 OTA TLS requires four stable internal-heap samples of 56 KiB free and a 24 KiB largest block.

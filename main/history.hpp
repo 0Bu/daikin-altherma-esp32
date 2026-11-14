@@ -31,9 +31,10 @@
 //                    last sign of life and a panic), and those are bounded PER restart because the
 //                    rings carry no per-sample time. The rings are refused after a safe-mode boot,
 //                    after a boot that adopted them and committed nothing, and when the liveness
-//                    record cannot measure the X10A raster (logic/history_persist.hpp); a HomeHub
-//                    or ENV III raster it cannot measure retires its own rings alone. The flash
-//                    journal then restores by wall clock, and keeps absolute positions.
+//                    record cannot measure the X10A raster (logic/history_persist.hpp). An
+//                    unmeasurable ENV III raster retires independently. HomeHub restores only
+//                    from the journal after its configured target and responding peer bind.
+//                    Journal recovery uses the wall clock and keeps absolute positions.
 //   history        — one compact append-only record per source and completed five-minute bucket.
 //                    After the boot scan succeeds and wall time is synced, the 4 MiB ring journal
 //                    carries committed history across OTA, reboot and later power loss on the
@@ -52,8 +53,10 @@
 // retained ("Aufzeichnung · 11 h" until the first full day).
 #include "hp_poll.hpp"          // CachedValue
 #include "logic/history.hpp"
+#include "logic/history_persist.hpp"
 
 #include <cstddef>
+#include <string_view>
 
 namespace daik {
 
@@ -73,7 +76,8 @@ uint32_t history_epoch() noexcept;
 // NOT under the cache mutex (this takes its own, and holding two would invert a lock order for no
 // reason). Cheap: it resolves the trended rows, folds one sample into the pending bucket per trend,
 // and only touches the ring when a bucket boundary is crossed (once per HISTORY_DT_S).
-void history_record(const CachedValue* v, size_t n, uint32_t source_generation);
+void history_record(const CachedValue* v, size_t n, uint32_t source_generation,
+                    int64_t dhw_reply_us = -1);
 
 // The poll task's sign of life, once per cycle and from the shutdown handler: the last instant the
 // device is known to have been running, which the next boot measures each raster's last commit
@@ -113,7 +117,8 @@ size_t history_room_snapshot(logic::HistorySample* out, size_t max, uint32_t exp
 // disinfection timelines named in logic/homehub_map.hpp are buffered; other states and setpoints do
 // not acquire a chart. An empty cycle advances the source's time raster with gaps, so an outage does not
 // make the last Modbus point slide to "now".
-void history_record_modbus(const CachedValue* v, size_t n, uint32_t identity_generation);
+void history_record_modbus(const CachedValue* v, size_t n, uint32_t identity_generation,
+                           int64_t observed_us = -1);
 
 // Snapshot the current HomeHub history identity before starting a poll. A configuration change bumps
 // it from the HTTP task; a cycle that began against the previous target is then refused at commit.
@@ -149,9 +154,19 @@ uint32_t history_x10a_identity(const char* profile, int32_t rx_pin, int32_t tx_p
 
 // Start a new HomeHub observation identity after host, port or unit-id changes. Like the X10A
 // reset, elapsed positions remain explicit gaps on the common boot-aligned 24-hour raster. The
-// caller supplies the already-staged target fingerprint so this remains allocation-free after a
+// caller supplies the already-staged target digest so this remains allocation-free after a
 // durable /set_hp save.
-void history_modbus_reset(uint32_t target_fp) noexcept;
+logic::HistoryModbusTarget history_modbus_target(std::string_view host, int port,
+                                                 int unit) noexcept;
+void                       history_modbus_reset(const logic::HistoryModbusTarget& target) noexcept;
+
+// Confirm the resolved peer after a successful Modbus read. Returns the recorder generation for
+// this socket, or zero if the scope changed, history was forgotten or either owner is busy.
+uint32_t history_modbus_bind_peer(const logic::HistoryModbusTarget& configured, uint32_t ipv4,
+                                  uint32_t expected_generation) noexcept;
+// Publish the latest connected address before its first poll. Keep it across transport outages.
+void     history_modbus_candidate(uint32_t ipv4) noexcept;
+uint32_t history_modbus_candidate() noexcept;
 
 // Start a new identity for the external circulation witness without discarding the independent
 // X10A/HomeHub histories. The new identity (logic::history_circulation_identity: the mapping,

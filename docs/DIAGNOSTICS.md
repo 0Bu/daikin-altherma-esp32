@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: de3bfc233c3e8f3d9ddd7ba74ddf1f6ad11ec2be08a38245b5c4af4bb82a5ff0 -->
+<!-- user-docs-contract: 1981e45a5a4655cc21cc679215194adecbf6e386bac3beec05165e6488a236c3 -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default. Enable **Plant diagnostics** under **Settings → Firmware** to start an evidence
@@ -165,14 +165,15 @@ normal value does not erase an earlier low reading.
 <!-- user-docs: health_flow -->
 ### Lowest water flow
 
-**In plain language:** The board reports the lowest accepted flow after the internal pump has run
-continuously for at least sixty seconds.
+**In plain language:** The board reports the lowest accepted X10A flow after at least 60 seconds
+covered by consecutive X10A pump-ON reports.
 
 **Meaning:** The result is **MEASURED**. It filters pump-off and initial run-up values; it does
 not establish part load or retain the operating mode of the minimum.
 
-**Important limit:** Required flow differs by model, heating, cooling, DHW and defrost conditions.
-The minimum is not a design-flow measurement or a diagnosis of restricted flow.
+**Important limit:** The ON reports do not independently verify physical pump rotation. Required
+flow differs by model and operating mode. The minimum is not a design-flow measurement or a
+diagnosis of restricted flow.
 
 **Evidence and limits:** [Lowest water flow](DIAGNOSTIC_EVIDENCE.md#diagnosis-flow)
 
@@ -188,6 +189,8 @@ remains absent, rather than being counted as off.
 
 **Important limit:** Runtime does not establish electricity consumed, necessity or a defect.
 Controller settings, weather and operating schedules can make this activity intentional.
+The hot-water chart highlights five-minute intervals with observed heater activity. Its total
+describes those intervals and can exceed the measured runtime in this diagnosis.
 
 **Evidence and limits:** [Electric heaters](DIAGNOSTIC_EVIDENCE.md#diagnosis-heater)
 

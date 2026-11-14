@@ -29,10 +29,11 @@ const values = (lwt = "35.0") => {
     row("Return water temp before PHE (R4T)", "30.0", 0x61, "°C"),
     row("Leaving water temp. after BUH (R2T)", lwt, 0x61, "°C"),
     row("Flow sensor", "10.0", 0x61, "l/min"), row("INV frequency", "40", 0x21, "rps"),
-    row("INV primary current", "5", 0x21, "A"), row("Water pump operation", "1"),
+    row("Fan 1 (step)", "4", 0x30),
+    row("INV primary current", "5", 0x21, "A"), { ...row("Water pump operation", "1"), binary: true },
     row("Water pump signal", "50"), row("3way valve", "0"), row("BUH Step1", "0"),
-    row("BUH Step2", "0"), row("BSH", "0"), row("Space heating operation", "1"),
-    row("Defrost operation", "0")],
+    row("BUH Step2", "0"), { ...row("BSH", "0"), binary: true }, row("Space heating operation", "1"),
+    { ...row("Defrost operation", "0", 0x10), binary: true }],
   modbus: [{ label: "Tank temperature", value: 42, off: 7, unit: "°C" }] };
 };
 const cacheKey = "daikinOtaRenderV1";
@@ -44,7 +45,9 @@ function harness(cached, transform = (text) => text) {
   let clock = Date.now(), nextTimer = 0, reloads = 0, paints = 0;
   class Clock extends Date { static now() { return clock; } }
   if (cached) storage.set(cacheKey, JSON.stringify(cached));
-  const flows = ["fPhe", "fSup1", "fSup2", "fSup3", "fRet", "fHeat", "fHeatRet", "rfHot", "rfPhe", "rfCold"];
+  const flows = ["fPhe", "fSup1", "fSup2", "fSup3", "fRet", "fHeat", "fHeatRet",
+    "fTank", "fTankRet", "fTankEdgeL", "fTankEdgeR", "fSpaceEdgeL", "fSpaceEdgeR",
+    "rfHot", "rfPhe", "rfCold"];
   const controls = [{ disabled: false, dataset: {} }];
   const element = (id) => {
     if (elements.has(id)) return elements.get(id);
@@ -92,12 +95,13 @@ function harness(cached, transform = (text) => text) {
     const actualRenderApp = renderApp;
     renderApp = () => { onPaint(); return actualRenderApp(); };
     this.ui = { S, resumeOta, refreshStatus, refreshValues, renderApp, renderLive, otaCacheRestore,
-      language: () => LANG };
+      hasDeviceHist, hasModbusHist, ensureHist, histCacheKey, stateHistoryCurrent, inspNowText,
+      INSPECT, language: () => LANG };
   `, context);
   const statusReply = deferred(), compactReply = deferred();
   routes.set("/status", () => statusReply.promise);
   routes.set("/ota/status", () => compactReply.promise);
-  return { ...context.ui, context, storage, routes, statusReply, compactReply, controls, element,
+  return { ...context.ui, context, storage, routes, statusReply, compactReply, controls, element, flows,
     get reloads() { return reloads; }, get paints() { return paints; }, advance: (ms) => { clock += ms; },
     timerCount: (ms) => [...timers.values()].filter((timer) => timer.ms === ms).length,
     async tick(ms = 1000) {
@@ -106,11 +110,17 @@ function harness(cached, transform = (text) => text) {
       timers.delete(pending[0]); clock += ms; pending[1].fn(); await settle();
     } };
 }
-const compact = { state: "updating", generation: 7, current: "snapshot-test", progress: 78, channel: "dev" };
+const compact = { state: "updating", generation: 7, current: "snapshot-test", progress: 78, channel: "dev",
+  boot_id: "boot-a", app_elf_sha256: "image-a" };
 const observe = (h) => ({ lwt: h.element("svLwt").textContent, pth: h.element("svPth").textContent,
   fan: h.element("schem").classList.contains("fan-on"),
   pump: h.element("schem").classList.contains("pump-on"),
   headline: h.element("svMode").textContent, detail: h.element("svStatus").textContent });
+const motion = h => ({
+  classes: ["fan-on", "pump-on", "buh-on", "bsh-on", "defrost-on", "quiet-on", "sg-boost-on"]
+    .filter(name => h.element("schem").classList.contains(name)),
+  pipes: h.flows.filter(id => ["on", "rev"].some(name => h.element(id).classList.contains(name))),
+});
 
 async function startup(h, order) {
   const resume = h.resumeOta(), initial = h.refreshStatus(false);
@@ -126,6 +136,208 @@ async function startup(h, order) {
   await resume; await initial; await settle();
 }
 
+// Status still names peer A while /values may already carry peer B. Saving the render frame
+// must not turn an epoch-zero or mismatched response into permission to use A's history.
+{
+  const peerA = status();
+  const tank = { id: "dhw_tank", label: "DHW tank temperature" };
+  peerA.history.rows = [tank];
+  peerA.history.modbus_rows = [tank];
+  const cases = [
+    { name: "unbound peer B", lease: { epoch: 0, boot: "boot-a" }, visible: false },
+    { name: "peer B epoch", lease: { epoch: 2, boot: "boot-a" }, visible: false },
+    { name: "different boot", lease: { epoch: 1, boot: "boot-b" }, visible: false },
+    { name: "matching peer A", lease: { epoch: 1, boot: "boot-a" }, visible: true },
+    { name: "legacy values response", lease: null, visible: true },
+  ];
+  async function verify(name, saved, expected, visible) {
+    const h = harness(saved);
+    assert.equal(await h.otaCacheRestore(compact), true, name);
+    assert.equal(h.S.otaCached, true, name);
+    assert.deepEqual(h.S.modbusHistoryLease && { ...h.S.modbusHistoryLease }, expected, name);
+    assert.deepEqual(JSON.parse(JSON.stringify(h.S._modbus)), saved.modbus, "restore the recorded Modbus rows or their absence");
+    assert.equal(observe(h).lwt, "35.0", "the rest of the frame still renders");
+    assert.equal(h.hasDeviceHist(tank.id), true, "X10A history remains independent");
+    assert.equal(h.hasModbusHist(tank.id), visible, name);
+    let requests = 0;
+    h.routes.set("/history", async () => {
+      requests++;
+      return response({ boot_id: saved.status.boot_id, epoch: saved.status.history.epoch, v: [426, 428] });
+    });
+    await h.ensureHist(tank.id, "modbus", false);
+    assert.equal(requests, Number(visible), `${name}: only an admitted source may fetch a history`);
+    assert.equal(h.S.hist.has(h.histCacheKey(tank.id, "modbus")), visible, name);
+  }
+  for (const { name, lease, visible } of cases) {
+    const writer = harness();
+    writer.routes.set("/status", async () => response(peerA));
+    const payload = values();
+    if (lease) Object.assign(payload, {
+      modbus_history_epoch: lease.epoch, modbus_history_boot_id: lease.boot,
+    });
+    writer.routes.set("/values", async () => response(payload));
+    await writer.refreshStatus(false);
+    writer.S.otaInstalling = true;
+    await writer.refreshValues(false); // Production values-poll store while an OTA is in progress.
+    const saved = JSON.parse(writer.storage.get(cacheKey));
+    assert.deepEqual(saved.modbus_history_lease, lease, `${name}: store the exact values lease`);
+    await verify(name, saved, lease, visible);
+  }
+  const withheld = { epoch: 0, boot: "" };
+  const writer = harness();
+  writer.routes.set("/status", async () => response(peerA));
+  writer.routes.set("/values", async () => response({ ...values(),
+    modbus_history_epoch: 1, modbus_history_boot_id: "boot-a" }));
+  await writer.refreshStatus(false);
+  writer.S.otaInstalling = true;
+  await writer.refreshValues(false);
+  assert.equal(writer.hasModbusHist(tank.id), true);
+  writer.routes.set("/values", async () => response({ values: values().values }));
+  await writer.refreshValues(false);
+  const afterLoss = JSON.parse(writer.storage.get(cacheKey));
+  assert.deepEqual(afterLoss.modbus_history_lease, withheld,
+    "a known protocol gap must survive an OTA tab reload");
+  assert.deepEqual(afterLoss.modbus, []);
+  await verify("known values protocol without current Modbus", afterLoss, withheld, false);
+
+  const oldCache = { ...cache(), status: peerA };
+  await verify("old cache without a values lease", oldCache, withheld, false);
+  for (const lease of [{ epoch: 1 }, { boot: "boot-a" }, { epoch: "1", boot: "boot-a" }]) {
+    await verify("invalid cached lease", { ...oldCache, modbus_history_lease: lease }, withheld, false);
+  }
+  const legacy = { ...peerA, history: { ...peerA.history, epoch: undefined } };
+  await verify("old cache from unbound firmware", { ...oldCache, status: legacy }, null, true);
+}
+
+// The accepted /status can still say connected while the newer /values says no Modbus
+// rows. With X10A down the real SVG headline must stop claiming a HomeHub reading.
+{
+  const h = harness();
+  h.routes.set("/status", async () => response({ ...status(), hp: { connected: false } }));
+  h.routes.set("/values", async () => response({ values: [], modbus: values().modbus,
+    modbus_history_epoch: 1, modbus_history_boot_id: "boot-a" }));
+  await h.refreshStatus(false);
+  await h.refreshValues();
+  assert.equal(observe(h).detail, "Operating mode unknown — readings from Modbus");
+  for (const running of [true, false]) {
+    h.routes.set("/values", async () => response({ values: [], modbus_compressor_running: running }));
+    await h.refreshValues();
+    assert.equal(h.S.live.compressorOn, running, "a fresh compressor report is independent of the full cache");
+    assert.match(observe(h).detail, running ? /Operating.*Modbus/ : /compressor OFF/);
+    assert.equal(observe(h).lwt, "—", "activity does not resurrect stale readings");
+  }
+  for (const unavailable of [{ ...values(), modbus: [{ value: null }],
+    modbus_history_epoch: 1, modbus_history_boot_id: "boot-a" }, { values: [] }]) {
+    h.routes.set("/values", async () => response(unavailable));
+    await h.refreshValues();
+    assert.equal(h.S.status.modbus.connected, true, "the previous status has not been refreshed");
+    assert.equal(h.S.live, null);
+    assert.equal(observe(h).headline, "No data");
+    assert.equal(observe(h).detail, "Waiting for the heat pump…");
+  }
+}
+
+for (const identity of [
+  { boot_id: "boot-b" },
+  { app_elf_sha256: "image-b" },
+  { boot_id: undefined, app_elf_sha256: undefined },
+]) {
+  const h = harness(cache());
+  const resumed = h.resumeOta();
+  h.compactReply.resolve(response({ ...compact, ...identity }));
+  await resumed; await settle();
+  assert.equal(h.S.otaCached, false, "equal version alone cannot restore another boot or build");
+  assert.equal(h.S.status, null);
+  assert.equal(h.storage.has(cacheKey), false);
+  assert.match(h.element("settingsCards").innerHTML, /snapshot-test/);
+}
+
+for (const changed of [{ boot_id: "boot-b" }, { app_elf_sha256: "image-b" }]) {
+  const h = harness(cache());
+  await startup(h, "status-first");
+  h.routes.set("/ota/status", async () => response({ ...compact, ...changed }));
+  await h.tick();
+  assert.equal(h.S.otaCached, false, "a running observer must retire a replaced boot or image");
+  assert.equal(h.storage.has(cacheKey), false);
+  assert.equal(h.reloads, 1);
+
+  const reboot = harness(cache());
+  await startup(reboot, "status-first");
+  reboot.routes.set("/status", async () => response({ ...status(), ...changed, uptime_s: 150 }));
+  reboot.routes.set("/ota/status", async () => response({ ...compact, state: "done", busy: true }));
+  await reboot.tick();
+  assert.equal(reboot.reloads, 1, "same version and increasing uptime can still identify a new boot");
+}
+
+// A tab with only compact progress must recognize the original writer independently of cache.
+for (const initial of ["updating", "checking"]) {
+  for (const first of initial === "updating" ? ["compact", "full", "done"] : ["compact", "full"]) {
+    const h = harness(null);
+    const resumed = h.resumeOta(), statusProbe = h.refreshStatus(false);
+    h.statusReply.resolve(response({}, 503)); await settle();
+    h.compactReply.resolve(response({ ...compact, state: initial, busy: true }));
+    await resumed; await statusProbe; await settle();
+    assert.equal(h.S.otaCached, false); assert.equal(h.S.status, null);
+    const next = first === "full" ? { boot_id: "boot-b" } : { app_elf_sha256: "image-b" };
+    h.routes.set("/status", async () => response({ ...status(), ...next, uptime_s: 150 }));
+    h.routes.set("/ota/status", async () => first === "done"
+      ? response({ ...compact, state: "done", busy: true })
+      : response({ ...compact, ...next, state: "idle", generation: 0, busy: false }));
+    if (first === "full") assert.equal(await h.refreshStatus(), false);
+    await h.tick();
+    assert.equal(h.reloads, 1, `${initial}/${first}: the same-version reboot reloads exactly once`);
+    assert.equal(h.S.status, null, "the old page must not adopt the new boot");
+    assert.equal(h.S.otaAlert, "", "a reboot is not an unrelated operation replacing this update");
+  }
+}
+
+// A refused full status is consistent with a writer or reset hold still on the same boot.
+for (const [entry, priorBoot, firstBoot, reloadOnReturn] of [
+  ["compact", "boot-a", "boot-a", false],
+  ["full", "boot-a", "boot-a", false],
+  ["full", "boot-a", "boot-b", true],
+  ["compact", "boot-a", undefined, false],
+  ["full", undefined, "boot-a", false],
+  ["full", undefined, undefined, true],
+  ["full", null, 123, true],
+]) {
+  const h = harness();
+  const before = { ...status(), boot_id: priorBoot };
+  const writer = { ...compact, boot_id: priorBoot, state: "done", busy: true };
+  if (entry === "full") {
+    h.routes.set("/status", async () => response(before));
+    assert.equal(await h.refreshStatus(false), true);
+  }
+  h.routes.set("/status", async () => response({}, 503));
+  h.compactReply.resolve(response(writer));
+  await h.resumeOta();
+  await settle();
+  assert.equal(h.reloads, 0);
+  assert.equal(h.S.otaInstalling, true);
+  const present = { ...before, boot_id: firstBoot, uptime_s: 150 };
+  h.routes.set("/status", async () => response(present));
+  await h.tick();
+  assert.equal(h.reloads, Number(reloadOnReturn), `${entry}/${priorBoot}/${firstBoot}`);
+  if (!reloadOnReturn) {
+    assert.equal(h.S.otaBusy, true, "a same or unprovable boot keeps the reboot wait alive");
+    assert.equal(h.S.otaAlert, "");
+    // Once either side supplied a boot ID, omitting it cannot restore the down/up fallback.
+    h.routes.set("/status", async () => response({ ...present, boot_id: undefined }));
+    await h.tick();
+    assert.equal(h.reloads, 0);
+    if (priorBoot) {
+      h.routes.set("/status", async () => response({ ...present, boot_id: "boot-b" }));
+      await h.tick();
+      assert.equal(h.reloads, 1, "explicit new boot ends the wait");
+    } else {
+      h.advance(120001);
+      await h.tick();
+      assert.equal(h.reloads, 0, "timeout does not guess a reboot after a boot ID was seen");
+      assert.equal(h.S.otaAlert, "restart could not be verified");
+    }
+  }
+}
+
 for (const order of ["status-first", "cache-first"]) {
   const h = harness(cache());
   await startup(h, order);
@@ -135,7 +347,10 @@ for (const order of ["status-first", "cache-first"]) {
   assert.equal(h.S.transportUnavailable, null);
   assert.equal(h.S.transportBusy, false);
   assert.notEqual(observe(h).pth, "—");
-  assert.equal(observe(h).fan, true); assert.equal(observe(h).pump, true);
+  assert.deepEqual(motion(h), { classes: [], pipes: [] });
+  assert.equal(h.element("schem").classList.contains("water-neutral"), true);
+  assert.equal(h.inspNowText(h.INSPECT.pump, h.S.live), "Snapshot");
+  assert.equal(h.stateHistoryCurrent("pump_running", "x10a").present, false);
   assert.equal(observe(h).headline, "Firmware update");
   assert.match(observe(h).detail, /78%.*last received state/, "restored readings must be explicitly cached");
   assert.equal(h.controls[0].disabled, true);
@@ -145,20 +360,68 @@ for (const order of ["status-first", "cache-first"]) {
   assert.match(observe(h).detail, /last received state/);
 
   // One fresh status alone cannot promote the cached readings to current. Its following values
-  // response supplies a complete frame; another failure then blanks that live frame normally.
+  // response supplies a complete frame; another failure then preserves it as a frozen snapshot.
   h.routes.set("/status", async () => response({ ...status(), uptime_s: 101 }));
   await h.refreshStatus();
   assert.equal(h.S.otaCached, true);
   assert.equal(observe(h).lwt, "35.0");
   assert.match(observe(h).detail, /last received state/, "status alone cannot mark cached values current");
+  assert.deepEqual(motion(h), { classes: [], pipes: [] });
   h.routes.set("/values", async () => response(values("38.0")));
   await h.refreshValues();
   assert.equal(h.S.otaCached, false); assert.equal(observe(h).lwt, "38.0");
+  assert.equal(observe(h).fan, true); assert.equal(observe(h).pump, true);
+  assert.equal(h.element("rfHot").classList.contains("on"), true);
+  assert.equal(h.element("fPhe").classList.contains("on"), true);
+  assert.notEqual(h.inspNowText(h.INSPECT.pump, h.S.live), "Snapshot");
   assert.doesNotMatch(observe(h).detail, /last received state/);
   h.routes.set("/values", async () => { throw new Error("offline"); });
   await h.refreshValues();
-  assert.equal(h.S.otaCached, false); assert.equal(observe(h).lwt, "—");
+  assert.equal(h.S.otaCached, true); assert.equal(observe(h).lwt, "38.0");
+  assert.match(observe(h).detail, /last received state/);
   assert.equal(observe(h).fan, false); assert.equal(observe(h).pump, false);
+}
+
+// A tab which already has a complete frame can adopt an external update from either refusal.
+for (const route of ["/status", "/values"]) {
+  const h = harness();
+  h.routes.set("/status", async () => response(status()));
+  h.routes.set("/values", async () => response(values("38.0")));
+  await h.refreshStatus(); await h.refreshValues();
+  assert.equal(h.S.otaCached, false);
+  h.routes.set("/ota/status", async () => response(compact));
+  h.routes.set(route, async () => response({}, 503));
+  await (route === "/status" ? h.refreshStatus() : h.refreshValues());
+  await settle();
+  assert.equal(h.S.otaCached, true, `${route} refusal restores the same-image frame`);
+  assert.equal(observe(h).lwt, "38.0");
+  assert.deepEqual(motion(h), { classes: [], pipes: [] });
+}
+
+// A stale tank heater used to light and animate the perimeter independently of pipe classes.
+{
+  const active = cache();
+  const live = { values: active.values.map(row => row.label === "BSH" ? { ...row, value: "1" } : row),
+    modbus: active.modbus };
+  active.values = live.values;
+  const h = harness(active);
+  await startup(h, "cache-first");
+  assert.equal(h.S.live.bsh, true, "the heater reading is still retained in the captured frame");
+  assert.deepEqual(motion(h), { classes: [], pipes: [] });
+  h.routes.set("/status", async () => response(status()));
+  h.routes.set("/values", async () => response(live));
+  await h.refreshStatus();
+  await h.refreshValues();
+  assert.equal(h.element("schem").classList.contains("bsh-on"), true);
+
+  const seed = "  const active = !S.otaCached;";
+  const original = harness(active, source => {
+    assert.ok(source.includes(seed));
+    return source.replace(seed, "  const active = true;");
+  });
+  await startup(original, "status-first");
+  assert.ok(motion(original).classes.includes("bsh-on"));
+  assert.ok(motion(original).pipes.includes("fPhe"));
 }
 
 for (const order of ["status-first", "cache-first"]) {
@@ -174,7 +437,7 @@ for (const order of ["status-first", "cache-first"]) {
       reason = "timed out";
       for (let i = 0; i < 300; i++) await h.tick();
     } else {
-      reason = "installed — reload the page";
+      reason = "restart could not be verified";
       h.routes.set("/ota/status", async () => response({ state: "done", generation: 7, busy: true }));
       await h.tick();
       assert.equal(h.S.otaCached, true, "a successful install retains its snapshot while awaiting reboot");
@@ -215,10 +478,10 @@ for (const order of ["status-first", "cache-first"]) {
 
   const reboot = harness(cache());
   await startup(reboot, order);
-  reboot.routes.set("/status", async () => response({ ...status(), uptime_s: 1 }));
+  reboot.routes.set("/status", async () => response({ ...status(), boot_id: "boot-b", uptime_s: 1 }));
   reboot.routes.set("/ota/status", async () => response({ state: "done", generation: 7, busy: true }));
   await reboot.tick();
-  assert.equal(reboot.reloads, 1); assert.equal(reboot.S.otaCached, true);
+  assert.equal(reboot.reloads, 1); assert.equal(reboot.S.otaCached, false);
   assert.equal(reboot.controls[0].disabled, true, "successful reboot handoff retains its lock until reload");
 }
 
@@ -258,20 +521,26 @@ for (const invalid of [null, { ...cache(), saved_at_ms: Date.now() - 16 * 60 * 1
   assert.equal(h.storage.has(cacheKey), false);
   assert.equal(h.S.imageLease.version, compact.current);
   assert.equal(h.S.imageLease.elf, "", "rejected cache must contribute no firmware identity");
-  h.routes.set("/status", async () => response({ ...status(), app_elf_sha256: "confirmed-image" }));
+  h.routes.set("/status", async () => response(status()));
   assert.equal(await h.refreshStatus(), true);
-  assert.equal(h.S.imageLease.elf, "confirmed-image", "a partial compact lease learns the first full ELF");
+  assert.equal(h.S.imageLease.elf, compact.app_elf_sha256, "the full frame confirms the compact writer ELF");
   h.routes.set("/status", async () => response({ ...status(), app_elf_sha256: "image-b" }));
   assert.equal(await h.refreshStatus(), false); assert.equal(h.reloads, 1);
 }
 
-// A compact version hint is useful without a snapshot too, but an invalid cached ELF is never used.
+// Older firmware can supply just the version hint without a usable snapshot.
 {
   const h = harness(null);
-  const resumed = h.resumeOta(); h.compactReply.resolve(response(compact)); await resumed; await settle();
+  const resumed = h.resumeOta();
+  h.compactReply.resolve(response({ ...compact, boot_id: undefined, app_elf_sha256: undefined }));
+  await resumed; await settle();
   assert.equal(h.S.imageLease.version, compact.current); assert.equal(h.S.imageLease.elf, "");
+  h.routes.set("/status", async () => response(status()));
+  assert.equal(await h.refreshStatus(), true);
+  assert.equal(h.S.imageLease.elf, "image-a", "legacy compact status defers the ELF to the full frame");
   h.routes.set("/status", async () => response({ ...status(), version: "image-b-version" }));
-  assert.equal(await h.refreshStatus(), false); assert.equal(h.reloads, 1); assert.equal(h.S.status, null);
+  assert.equal(await h.refreshStatus(), false); assert.equal(h.reloads, 1);
+  assert.equal(h.S.status.version, compact.current);
 }
 
 // Cache validation precedes identity admission. Even a valid snapshot cannot replace an image
@@ -292,6 +561,7 @@ for (const invalid of [null, { ...cache(), saved_at_ms: Date.now() - 16 * 60 * 1
   h.compactReply.resolve(response(compact)); await resumed; await settle();
   assert.equal(h.S.status, fresh); assert.equal(h.S.imageLease.elf, "fresh-page-image");
   assert.equal(h.S.imageLease.version, "fresh-page-version"); assert.equal(h.reloads, 0);
+  assert.equal(h.S.otaBusy, false, "a delayed reply from another image cannot take the OTA lock");
   assert.equal(h.S.otaCached, false);
 }
 
@@ -371,7 +641,8 @@ for (const defect of ["cached-image", "cached-source"]) {
     assert.notEqual(mutated, text, `${defect}: mutate the actual identity protection`);
     return mutated;
   });
-  await startup(h, "status-first");
+  if (defect === "cached-image") assert.equal(await h.otaCacheRestore(compact), true);
+  else await startup(h, "status-first");
   h.routes.set("/status", async () => response({ ...status(), ...(defect === "cached-image" ?
     { app_elf_sha256: "image-b" } : { profile: { id: "profile-b" } }) }));
   assert.equal(await h.refreshStatus(), true);
@@ -382,7 +653,7 @@ for (const defect of ["cached-image", "cached-source"]) {
     h.routes.set("/values", async () => { throw new Error("new source unavailable"); });
     await h.refreshValues(); h.renderApp();
     assert.equal(h.S.status.profile.id, "profile-b"); assert.equal(h.S.otaCached, true);
-    assert.equal(observe(h).lwt, "35.0"); assert.equal(observe(h).fan, true); assert.equal(observe(h).pump, true);
+    assert.equal(observe(h).lwt, "35.0"); assert.deepEqual(motion(h), { classes: [], pipes: [] });
   }
 }
 
@@ -392,7 +663,8 @@ for (const order of ["status-first", "cache-first"]) {
   for (const changed of [{ profile: { id: "profile-b" } },
     { modbus: { ...status().modbus, host: "hub-b" } }, { boot_id: "boot-b" }]) {
     const h = harness(cache());
-    await startup(h, order);
+    if (changed.boot_id) assert.equal(await h.otaCacheRestore(compact), true);
+    else await startup(h, order);
     const next = { ...status(), ...changed, uptime_s: 101 };
     h.routes.set("/status", async () => response(next));
     assert.equal(await h.refreshStatus(), true);

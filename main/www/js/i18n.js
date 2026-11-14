@@ -162,6 +162,7 @@ const I18N = {
   en: {
     "sys.nodata": "No data", "sys.unreachable": "Unreachable",
     "sys.x10a_down": "X10A offline", "sys.mb_carrying": "Operating mode unknown — readings from Modbus",
+    "sys.mode_unknown": "Operating mode unknown",
     "sys.mb_only": "X10A offline — readings from Modbus", "sys.mb_source": "X10A offline · Modbus",
     "mode.stop": "Stop", "mode.heat": "Heating", "mode.cool": "Cooling", "mode.space": "Space H/C",
     "mode.dhw": "Hot water", "mode.heat_dhw": "Heating + hot water",
@@ -170,6 +171,7 @@ const I18N = {
     "sys.waiting": "Waiting for the heat pump…", "sys.operating": "Operating",
     "sys.standby": "Standby — not running", "sys.defrosting": "Defrosting",
     "sys.circulating": "Circulating — compressor off",
+    "sys.pump_reported": "Pump reports ON — circulation unconfirmed",
     "sys.cool_mode": "Cooling mode",
     "sys.residual_circulating": "Residual-heat circulation — no cooling output",
     "sys.bsh_active": "Electric tank heater active",
@@ -246,6 +248,7 @@ const I18N = {
     "modbus.err.network_unreachable": "No network route to the HomeHub.",
     "modbus.err.host_unreachable": "The HomeHub is not reachable on the network.",
     "modbus.err.connect_failed": "The connection to the HomeHub failed.",
+    "modbus.err.close_pending": "Waiting for HomeHub connection to close.",
     "modbus.err.request_failed": (r) => `Could not build the Modbus request${r ? ` for register ${r}` : ""}.`,
     "modbus.err.send_timeout": (r) => `Sending the Modbus request timed out${r ? ` at register ${r}` : ""}.`,
     "modbus.err.send_failed": (r) => `The Modbus request could not be sent${r ? ` at register ${r}` : ""}.`,
@@ -455,7 +458,7 @@ const I18N = {
     "a4.operation_help": "Reports Stop, Tank heat-up, Space heating, Space cooling or Actuator operation. This is a reported state, not proof of useful heat transfer.",
     "a4.heating_offset_help": "Adjusts the main-zone weather-dependent heating curve in kelvin. This is an offset, not a measured temperature or the complete water-temperature target.",
     "a4.pre_phe_outdoor_help": "Water temperature before the outdoor plate heat exchanger. This is a water-side sensor, not the outside-air or refrigerant temperature.",
-    "a4.flow_help": "Altherma 4 flow scaling is not verified. The displayed L/min value uses the existing conversion; compare it with the unit's own reading before judging performance.",
+    "mb.flow_scale_help": "The flow scale is unverified for this Modbus source. Compare the value with the unit's own display.",
     "a4.pump_help": "The Altherma 4 guide names pump speed but lists L/min. The % unit shown here is an unverified assumption; compare with the unit's own reading.",
     "a4.pressure_help": "Altherma 4 pressure scaling is not verified. The displayed bar value uses the existing conversion; compare it with the unit's own reading before judging pressure.",
     "a4.demand_response": "Demand response mode",
@@ -495,6 +498,8 @@ const I18N = {
     "val.since_min": (d) => `\u2265 ${d}`,
     "val.since_gap": (d) => `${d} of it not observed`,
     "hist.modbus_plateau": (when, d) => `register unchanged ${when} · approx. ${d} · measurement age unknown`,
+    "hist.modbus_flow_unverified": "The scale of recorded Modbus flow is unverified.",
+    "hist.thermal_bucket_note": "Estimate from five-minute samples that may have been taken at different times.",
     "hist.boost_total": (d) => `Boost active · ${d}`,
     "hist.boost_none": "No Boost in the recorded period.",
     "hist.boost_ago_range": (a, b) => `${a}–${b} h ago`,
@@ -526,7 +531,7 @@ const I18N = {
     "hist.buh_step1": "Step 1", "hist.buh_step2": "Step 2",
     "hist.buh_aria": (l, d) => `${l} — backup-heater timeline. ${d}. Arrow keys read individual samples.`,
     "hist.valve_dhw_total": (d) => `DHW · ${d}`, "hist.valve_space_total": (d) => `Space circuit · ${d}`,
-    "hist.valve_none": "No DHW position in the recorded period.",
+    "hist.valve_none": "No DHW route reported in the recorded period.",
     "hist.valve_dhw": "DHW", "hist.valve_space": "Space circuit",
     "hist.valve_aria": (l, d) => `${l} — 3-way-valve timeline. ${d}. Arrow keys read individual samples.`,
     "hist.circ_total": (d) => `Pump observed running · ${d} sampled raster time`,
@@ -556,7 +561,7 @@ const I18N = {
     // OTA status shown INLINE beside the header version (#otaStat) — short by design: it shares one
     // line with the IP and the version, so these read as a suffix, not as sentences.
     "ota.uptodate": "up to date", "ota.check_failed": "check failed", "ota.starting": "starting…",
-    "ota.pct": (p) => `${p}%`, "ota.rebooting": "rebooting…", "ota.failed": "update failed",
+    "ota.pct": (p) => `${p}%`, "ota.rebooting": "waiting for restart…", "ota.failed": "update failed",
     "ota.timeout": "timed out", "ota.cancelled": "cancelled", "ota.busy": "device busy",
     "ota.replaced": "update operation changed — check again",
     "ota.unreachable": "device unreachable",
@@ -565,8 +570,7 @@ const I18N = {
     "ota.snapshot_title": "Firmware update", "ota.snapshot_label": "Data state",
     "ota.snapshot_value": "Snapshot",
     "ota.snapshot_help": "Last received state before this reload. Live data may pause during installation; settings stay locked until restart.",
-    // The install finished; only the automatic page reload gave up waiting for the board.
-    "ota.reload_hint": "installed — reload the page",
+    "ota.reload_hint": "restart could not be verified",
     "ota.dialog_title": "Firmware update", "ota.switch_title": "Switch firmware version",
     "ota.changes_title": "Changes in this update",
     "ota.no_changes": "No changelog was supplied for this update.",
@@ -590,6 +594,21 @@ const I18N = {
     "schem.space_circuit": "SPACE CIRCUIT", "schem.heating": "HEATING", "schem.cooling": "COOLING",
     "schem.pump": "PUMP", "schem.return": "R4T", "schem.room": "Room",
     "schem.flow_rate": "flow", "schem.water_press": "water pressure",
+    "schem.capacity_low_speed": "Capacity requires current X10A compressor speed above 5 rps.",
+    "schem.no_usable_power": (metric) => (metric ? `${metric} unavailable. ` : "") + "No usable electrical input estimate.",
+    "schem.backup_heater_active": "Electric backup heater reports ON",
+    "schem.compressor_off": "Compressor off. No compressor capacity estimate.",
+    "schem.outdoor_held": "Held X10A outdoor readings are withheld.",
+    "schem.outdoor_homehub": "Outdoor air comes from HomeHub Modbus. The register carries no measurement timestamp.",
+    "schem.homehub_compressor_off": "HomeHub reports the compressor OFF.",
+    "schem.outdoor_independent": "Heater activity and water circulation are separate observations.",
+    "schem.water_route_unknown": "3-way valve route unknown. Common flow cannot identify the branch.",
+    "schem.flow_invalid": "The X10A flow reading is invalid.",
+    "schem.defrost_transfer": "Defrost heat transfer (estimated)",
+    "schem.transfer_sign": "Positive: heat enters the water. Negative: heat leaves it.",
+    "schem.efficiency_no_capacity": (metric) => `${metric} unavailable. No usable capacity estimate for this boundary.`,
+    "schem.efficiency_ct_pair": (outlet) => `Uses current transformers with ${outlet} and R4T.`,
+    "schem.efficiency_inv_pair": "Uses R1T before the backup heater and R4T. Input uses inverter current at an assumed 230 V. Heater and other load coverage is unverified.",
     "schem.r2t": "R2T", "schem.r3t": "R3T",
     "schem.flow_switch": "Flow switch", "schem.valve2": "2WV",
     "wifi.title": "WiFi configuration", "wifi.ssid": "WiFi network (SSID)", "wifi.pass": "WiFi password",
@@ -778,6 +797,7 @@ const I18N = {
     "hh.search": "Search", "hh.searching": "Searching…",
     "hh.found": (host) => `HomeHub found: ${host}`, "hh.not_found": "No HomeHub found — enter the address manually.",
     "hh.saved": "Modbus settings saved",
+    "hh.start_pending": "Settings saved. HomeHub polling is still pending.",
     "hh.err_port": "Port must be between 1 and 65535",
     "hh.err_unit": "Unit id must be between 1 and 247",
     "board.title": "Board hardware", "board.ledtype": "Status LED", "board.none": "None",
@@ -905,7 +925,6 @@ const I18N = {
     "lang.uk": "Українська", "lang.zh": "简体中文", "lang.ja": "日本語",
     "lang.nb": "Norsk", "lang.sv": "Svenska", "lang.fi": "Suomi",
     "lang.saved": "Language saved",
-    "hist.cop_none": "No COP curve while electrical input comes from CT clamps. Their wiring decides which loads are included; buffered heat ends before BUH and excludes heat added directly by BSH, so the balance boundaries may not match.",
   },
 };
 function t(k, ...a) {
@@ -941,8 +960,7 @@ function operationModeFromFlags(dhw, space) {
 }
 // The diagram and its explainer are two views of the same state. X10A carries the detailed hydronic
 // enum; while that bus is down, the HomeHub's two activity flags distinguish hot water, generic space
-// operation and stop, but NOT Heating from Cooling. Resolve only that supportable answer here so
-// a visible "Stopp" headline back into an unexplained dash.
+// operation and stop. A current running compressor rules out stop when the two flags disagree.
 function schematicOperationMode() {
   const hp = S.status?.hp || {};
   if (hp.connected) {
@@ -953,7 +971,14 @@ function schematicOperationMode() {
                                               (x.reg !== 0x10 && /^operation mode$/i.test(x.label || "")));
     return operationModeText(row?.value);
   }
-  return mbLive() ? operationModeFromFlags(mbBool(52), mbBool(53)) : null;
+  if (!mbLive()) return null;
+  const mb = S.status.modbus;
+  const dhw = mb.dhw_operation_known === undefined ? mbBool(52)
+    : mb.dhw_operation_known ? mb.dhw_operation_active : null;
+  const space = mb.plant_gate_known === undefined ? mbBool(53)
+    : mb.plant_gate_known ? mb.plant_gate_active : null;
+  if (dhw === false && space === false && S.modbusCompressorRunning === true) return null;
+  return operationModeFromFlags(dhw, space);
 }
 // Localise the static markup in index.html: elements tagged data-i18n get their text set from the
 // dictionary. Runs once at boot (the static DOM is never rebuilt). SVG <text>/<tspan> nodes work the

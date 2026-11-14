@@ -19,6 +19,10 @@ INLINED_INDEX_HELPERS = (
     'history_journal_reserve_sequence',
 )
 INLINED_SUPPRESSION_HELPERS = ('stop_context_unavailable_report',)
+INLINED_PEER_HELPERS = (
+    'mb_ensure_connected', 'mb_retire_if_disabled', 'mb_admit_worker', 'flash_trend_scope_matches',
+    'history_journal_modbus_config_matches', 'history_journal_set_modbus_scope',
+)
 INDEX_POST_VALIDATION_FENCE = (
     '    if (s_forgotten.load(std::memory_order_acquire)) return;\n'
     '    observation_index_add('
@@ -330,6 +334,10 @@ def validate_inlining(disassembly, error):
                re.match(r'^_Z.*' + str(len(helper)) + helper, name)
                for helper in INLINED_INDEX_HELPERS + INLINED_SUPPRESSION_HELPERS):
             raise error('stop observation inlining: newly outlined journal/index/scan helper needs frame/path review')
+        if any(re.search(r'\b' + helper + r'\(', name) or
+               re.match(r'^_Z.*' + str(len(helper)) + helper, name)
+               for helper in INLINED_PEER_HELPERS):
+            raise error('history peer inlining: newly outlined helper needs frame/path review')
         if (re.match(r'^daik::logic::ObservationIndexEntry::(?:bucket|sequence|slot)\(', name)
                 or re.match(r'^_ZNK4daik5logic21ObservationIndexEntry(?:6bucket|8sequence|4slot)E', name)):
             raise error('stop observation inlining: newly outlined index accessor needs frame/path review')
@@ -349,6 +357,61 @@ def validate_inlining(disassembly, error):
         leaf = disassembly[match.end():end]
         if re.search(r'\b(?:callx?[048]|j|jx)\s', leaf):
             raise error('stop observation suppression: bool load gained a call/tail-call or hidden lock')
+
+
+MODBUS_ASSIGN_FRAME = 'modbus_status_cstr_assignment'
+MODBUS_ASSIGN_CLONE = '_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEaSEPKc$isra$0'
+MODBUS_ASSIGN_REPLACE = (
+    'std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >'
+    '::_M_replace(unsigned int, unsigned int, char const*, unsigned int)'
+)
+
+
+def modbus_assignment_frame(disassembly, error):
+    """Bind the local C-string assignment clone by the two status snapshot call targets."""
+    headers = list(re.finditer(r'^([0-9a-f]+) <(.+)>:\s*$', disassembly, re.M))
+    by_address = {int(match[1], 16): i for i, match in enumerate(headers)}
+
+    def instructions(index):
+        end = headers[index + 1].start() if index + 1 < len(headers) else len(disassembly)
+        body = disassembly[headers[index].end():end]
+        return [(int(address, 16), mnemonic.strip())
+                for address, mnemonic in re.findall(
+                    r'^\s*([0-9a-f]+):\s+[0-9a-f]+\s+([^\n]+)$', body, re.M)]
+
+    owners = [i for i, match in enumerate(headers) if match[2] == 'daik::mb_status()']
+    if len(owners) != 1 or any(match[2] == MODBUS_ASSIGN_FRAME for match in headers):
+        raise error('Modbus status assignment: one snapshot owner and no synthetic ELF alias required')
+    references = [mnemonic for _, mnemonic in instructions(owners[0])
+                  if MODBUS_ASSIGN_CLONE in mnemonic]
+    calls = [re.fullmatch(r'call8\s+([0-9a-f]+) <' + re.escape(MODBUS_ASSIGN_CLONE) + r'>', text)
+             for text in references]
+    if len(calls) != 2 or not all(calls) or calls[0][1] != calls[1][1]:
+        raise error('Modbus status assignment: two direct calls to one local clone required')
+    address = int(calls[0][1], 16)
+    clone = by_address.get(address)
+    if clone is None or headers[clone][2] != MODBUS_ASSIGN_CLONE:
+        raise error('Modbus status assignment: local clone entry address changed')
+    rows = instructions(clone)
+    if not rows or rows[0][0] != address:
+        raise error('Modbus status assignment: missing first instruction at the clone address')
+    if rows[-1][1] == 'ill':
+        rows.pop()  # Alignment padding after RETW.
+    sequence = '\n'.join(text for _, text in rows)
+    expected = (
+        r'entry\s+a1,\s*([0-9]+)\n'
+        r'mov\.n\s+a10,\s*a3\n'
+        r'l32r\s+a8, [^\n]* \(40001248 <strlen>\)\ncallx8\s+a8\n'
+        r'l32i\.n\s+a12,\s*a2,\s*4\nmov\.n\s+a14,\s*a10\nmov\.n\s+a13,\s*a3\n'
+        r'movi\.n\s+a11,\s*0\nmov\.n\s+a10,\s*a2\n'
+        r'l32r\s+a8, [^\n]* \(([0-9a-f]+) <' + re.escape(MODBUS_ASSIGN_REPLACE) +
+        r'>\)\ncallx8\s+a8\nretw\.n'
+    )
+    measured = re.fullmatch(expected, sequence)
+    if (not measured or int(measured[1]) <= 0 or int(measured[2], 16) not in by_address or
+            headers[by_address[int(measured[2], 16)]][2] != MODBUS_ASSIGN_REPLACE):
+        raise error('Modbus status assignment: bounded strlen and measured replacement body changed')
+    return int(measured[1])
 
 
 def self_test(budgets, sources, error):
