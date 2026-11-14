@@ -1375,6 +1375,8 @@ async function assertPlantDiagnosis(page, context) {
       return {
         total: body.querySelector(".checkup-cycling-total")?.textContent,
         assessment: body.querySelector(".checkup-cycling-assessment")?.textContent,
+        order: Array.from(body.children, node => node.className),
+        normal: body.lastElementChild?.querySelector(".vdesc-n")?.textContent,
         rows: Array.from(body.querySelectorAll(".checkup-cycling-grid .inspect-row"),
           run => Array.from(run.children, cell => cell.textContent)),
         historyText: body.querySelector("[data-checkup-hours]")?.innerText,
@@ -1402,10 +1404,15 @@ async function assertPlantDiagnosis(page, context) {
       [t("mode.heat"), t("check.cycling.runs", 12) + " · " + t("check.cycling.mean", "16 min")],
       [t("mode.dhw"), t("check.cycling.runs", 2) + " · " + t("check.cycling.mean", "15 min")],
       [t("check.cycling.unclear"), t("check.cycling.runs", 3)],
-      t("check.cycling.assessment") + " · " + t("check.cycling.waiting")
+      [t("check.cycling.waiting"), modelDescriptionCopy("health_cycling")?.[0] ??
+        MODEL_DESCRIPTIONS.health_cycling.what, t("check.cycling.unclear_hint")].join(" ")
     ]`);
     assert.deepEqual(cycling.rows, cyclingCopy.slice(0, 3), `${context}: separate purpose rows`);
     assert.equal(cycling.assessment, cyclingCopy[3], `${context}: one plain-language assessment`);
+    assert.deepEqual(cycling.order.slice(0, 2),
+      ["vdesc-p checkup-cycling-total", "vdesc-p checkup-cycling-assessment"],
+      `${context}: cycling starts with the value, then the current assessment`);
+    assert.equal(cycling.normal, normalLabel, `${context}: cycling shares the Normal block`);
     assert.equal(cycling.oldStopBox, false, `${context}: cycling detail omits the technical stop table`);
     await captureNativeEvidence(page, `${context}/cycling-with-starts`,
       "[data-desc='model:health_cycling']", ".vitem");
@@ -1420,10 +1427,12 @@ async function assertPlantDiagnosis(page, context) {
     assert.equal(await page.evaluate(`document.querySelector("[data-desc='model:health_cycling'] .vrow-val").innerText`),
       await page.evaluate("t('check.status.unavailable')"), `${context}: preserve core cycling verdict`);
     const unavailable = await cyclingDetail();
-    assert.equal(unavailable.total, undefined, `${context}: no invented start count`);
+    assert.equal(unavailable.total, await page.evaluate("t('check.status.unavailable')"),
+      `${context}: lead with the status when there is no start count`);
     assert.deepEqual(unavailable.rows, [], `${context}: no invented completed runs`);
     assert.equal(unavailable.assessment,
-      await page.evaluate("t('check.cycling.assessment') + ' · ' + t('check.cycling.unavailable')"),
+      await page.evaluate(`t("check.cycling.unavailable") + " " +
+        (modelDescriptionCopy("health_cycling")?.[0] ?? MODEL_DESCRIPTIONS.health_cycling.what)`),
       `${context}: unavailable evidence has its own short assessment`);
     assert.equal(unavailable.historyText, await page.evaluate("t('check.cycling.history_empty')"),
       `${context}: no history is distinct from zero starts`);

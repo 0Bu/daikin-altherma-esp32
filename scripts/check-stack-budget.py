@@ -944,7 +944,16 @@ def validate_status_diagnosis_paths(budgets: dict[str, Any], sources: dict[str, 
     status = code["main/http_status.cpp"]
     if (len(re.findall(r"\bcheckup_report\s*\(", status)) != 1
             or not re.search(r"logic::CheckupCyclingHours\s+hrs\{\};\s*"
-                             r"const logic::CheckupReport hr\s*=\s*checkup_report\(&hrs\);", status)
+                             r"ValuesTlsReader trace_reader;\s*"
+                             r"trace_reader.admitted\s*=\s*!redact && c\.diagnostics_enabled && "
+                             r"weather_values_reader_enter\(\);\s*"
+                             r"using Trace\s*=\s*logic::CheckupCyclingTrace;\s*"
+                             r"void\* trace_storage\s*=\s*trace_reader.admitted\s*\?\s*"
+                             r"heap_caps_malloc\(sizeof\(Trace\), MALLOC_CAP_8BIT\)\s*: nullptr;\s*"
+                             r"std::unique_ptr<Trace, decltype\(&std::free\)> trace\(\s*"
+                             r"trace_storage \? new \(trace_storage\) Trace : nullptr, std::free\);\s*"
+                             r"const logic::CheckupReport hr\s*=\s*checkup_report\(&hrs, trace.get\(\)\);",
+                             status)
             or re.search(r"\bcheckup_cycling_hours(?:_locked)?\s*\(", status)
             or len(re.findall(r"\bappend_status_json\(out, redact\)", status)) != 1
             or not re.search(r"return http_send_status_json\(req, \{\}, \{\}, redact\);", status)
@@ -990,6 +999,8 @@ def validate_status_diagnosis_paths(budgets: dict[str, Any], sources: dict[str, 
                              r"if \(hours\)\s+\*hours\s*=\s*checkup_cycling_hours_locked\(now_us\);",
                              report_body)
             or len(re.findall(r"\bexpire_restored_locked\s*\(", report_body)) != 1
+            or not re.search(r"hours\.epoch\s*=\s*s_cycling_hours_epoch;\s*"
+                             r"if \(!hours\.count\) return hours;", hours_body)
             or len(re.findall(r"\btime_now\s*\(", hours_body)) != 1
             or re.search(r"\bexpire_restored_locked\s*\(", hours_body)):
         raise BudgetError("diagnosis status source: nested snapshot and separate expiry path changed")
@@ -2811,7 +2822,7 @@ def self_test() -> None:
      'daik::hp_query_detailed(unsigned char, daik::Protocol, unsigned char*, unsigned int, daik::HpQueryLogPolicy)': 64,
      'daik::hp_format(daik::ValueDef const&, unsigned char const*, int, int, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >&, daik::ValueDef const*, unsigned int, daik::SaturationWitness)': 64,
      'daik::history_record(daik::CachedValue const*, unsigned int, unsigned long)': 64,
-     'daik::checkup_report(daik::logic::CheckupCyclingHours*)': 64,
+     'daik::checkup_report(daik::logic::CheckupCyclingHours*, daik::logic::CheckupCyclingTrace*)': 64,
      'daik::checkup_cycling_hours_locked(long long)': 256,
      'daik::logic::checkup_cycling_hours(daik::logic::CheckupRing const&, bool)': 32,
      'daik::logic::checkup_evaluate(daik::logic::CheckupWindow const&, daik::logic::CheckupCoverage const&, daik::FaultClass, daik::logic::DhwLossWindow const&)': 80,
@@ -3776,7 +3787,7 @@ def self_test() -> None:
     diagnosis_controls += 1
     for name, before, after in (
         ("main/http_status.cpp", "return http_send_status_json(req, {}, {}, redact);", "return ESP_FAIL;"),
-        ("main/http_status.cpp", "checkup_report(&hrs)", "checkup_report(nullptr)"),
+        ("main/http_status.cpp", "checkup_report(&hrs, trace.get())", "checkup_report(nullptr)"),
         ("main/mcp_server.cpp", "return http_send_status_json(req, response, suffix, false);", "return ESP_FAIL;"),
         ("main/mqtt_ha.cpp", "publish_heartbeat();", "other_heartbeat();"),
         ("main/checkup.cpp", "P().layout_fp = logic::checkup_layout_fingerprint();",

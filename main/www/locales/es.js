@@ -1,4 +1,4 @@
-// translation-source: 00f8393aee827b21e658965c9ff792c99c563d60de18775bb092ec7c42167e1f
+// translation-source: 34200897e3bb460a7f6fcd68bd6ff940649f8810c9b3709dc7616000e01aee90
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -222,7 +222,6 @@ I18N.es = localeValues([
   /* check.cycling.completed */ "Ciclos terminados",
   /* check.cycling.unclear */ "Uso incierto",
   /* check.cycling.unclear_hint */ "Un ciclo puede cambiar de modo o haberse registrado solo en parte.",
-  /* check.cycling.assessment */ "Valoración",
   /* check.cycling.short */ "Los ciclos de calefacción son cortos de media.",
   /* check.cycling.normal */ "Los ciclos de calefacción duran lo suficiente de media.",
   /* check.cycling.few */ "Aún hay pocos ciclos de calefacción.",
@@ -231,6 +230,8 @@ I18N.es = localeValues([
   /* check.cycling.unavailable */ "Sin datos del compresor.",
   /* check.cycling.stale */ "Ahora mismo faltan mediciones.",
   /* check.cycling.history_empty */ "Aún no hay historial.",
+  /* check.cycling.timed_starts */ (s) => `Con hora: ${s}`,
+  /* check.cycling.saved_starts */ (s) => `De ellos, ${s} proceden de registros horarios anteriores al reinicio. No se dispone de sus horas exactas.`,
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} mín. ${min} °C · media ${mean} °C`,
   /* check.min */ (m) => `${m} min`,
@@ -1242,7 +1243,7 @@ DESCRIPTION_I18N.es = descriptionValues([
 MODEL_DESCRIPTION_I18N.es = modelDescriptionValues([
   ["Mensajes de la bomba", "no prueban causa ni resolución."], // health_fault
   ["R5T: un punto del depósito estratificado, no energía.", "Indicio interno ≥0,8 K/h sin señales de bomba/consumo. Consumo posible sin señales; 0 K/h no excluye pérdidas. Circulación no prueba causa."], // health_dhw_loss
-  ["Muestra los arranques observados y los ciclos terminados.", "La valoración se basa en la duración media de los ciclos de calefacción."], // health_cycling
+  ["Si faltan mediciones, algunos arranques pueden quedar sin contar.", "No hay un número fijo de arranques normal. Con datos suficientes, esta comprobación considera adecuada una duración media de al menos 10 minutos en los ciclos de calefacción terminados."], // health_cycling
   ["Desescarche", "≥3 asociados, >15% del tiempo de marcha del compresor con estados de compresor y desescarche legibles. Regla interna, no Daikin; faltan humedad y temperatura de toda la batería."], // health_defrost
   ["Presión", "regla interna común ≤1,0 bar; 60 s continuos observados dan AVISO. No universal; rige el manual del modelo."], // health_pressure
   ["Caudal tras 60 s de bomba", "El límite exige mismo modelo/modo/condiciones; no nominal ni prueba de flujo insuficiente."], // health_flow

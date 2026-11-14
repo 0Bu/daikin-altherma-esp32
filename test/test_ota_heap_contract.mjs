@@ -1554,7 +1554,7 @@ assert.match(httpStatus,
   /network_tls_busy\(httpd_req_t\* req\)[\s\S]*?503 Service Unavailable[\s\S]*?text\/plain[\s\S]*?network operation in progress/,
   "the bounded refusal must stay a small explicit pre-response busy-503");
 assert.match(httpStatus,
-  /struct ValuesTlsReader \{[\s\S]{0,320}?~ValuesTlsReader\(\) \{\s*if \(admitted\) weather_values_reader_leave\(\);\s*\}/,
+  /struct ValuesTlsReader \{[\s\S]{0,320}?~ValuesTlsReader\(\) \{ release\(\); \}\s*void release\(\) \{\s*if \(std::exchange\(admitted, false\)\) weather_values_reader_leave\(\);\s*\}/,
   "an admitted /values reader must leave Weather's exclusion on every exit, including unwinding");
 const valuesWaitStart = httpStatus.indexOf("static bool wait_for_values_tls_owner(ValuesTlsReader& reader)");
 const valuesWaitEnd = httpStatus.indexOf("static esp_err_t network_tls_busy", valuesWaitStart);

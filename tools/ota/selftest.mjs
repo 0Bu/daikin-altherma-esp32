@@ -752,8 +752,8 @@ try {
       replaceOnce("main/http_status.cpp", "const bool weather_tls = !weather_values_reader_enter();",
         "const bool weather_tls = weather_fetch_active() || !weather_values_reader_enter();")],
     ["an admitted values reader never leaves Weather's exclusion", () =>
-      replaceOnce("main/http_status.cpp", "if (admitted) weather_values_reader_leave();",
-        "(void)admitted;")],
+      replaceOnce("main/http_status.cpp", "if (std::exchange(admitted, false)) weather_values_reader_leave();",
+        "(void)std::exchange(admitted, false);")],
     ["a values reader reads the TLS phase before it is counted", () =>
       replaceOnce("main/logic/http_values_wait.hpp",
         "readers_.fetch_add(1, std::memory_order_seq_cst);\n        if (!tls_.load(std::memory_order_seq_cst)) return true;",

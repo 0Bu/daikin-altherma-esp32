@@ -1,4 +1,4 @@
-// translation-source: 00f8393aee827b21e658965c9ff792c99c563d60de18775bb092ec7c42167e1f
+// translation-source: 34200897e3bb460a7f6fcd68bd6ff940649f8810c9b3709dc7616000e01aee90
 I18N.it = localeValues([
   /* sys.nodata */ "Nessun dato",
   /* sys.unreachable */ "Non raggiungibile",
@@ -222,7 +222,6 @@ I18N.it = localeValues([
   /* check.cycling.completed */ "Cicli completati",
   /* check.cycling.unclear */ "Uso incerto",
   /* check.cycling.unclear_hint */ "Un ciclo può cambiare modalità o essere rilevato solo in parte.",
-  /* check.cycling.assessment */ "Valutazione",
   /* check.cycling.short */ "I cicli di riscaldamento sono brevi in media.",
   /* check.cycling.normal */ "In media i cicli di riscaldamento durano abbastanza.",
   /* check.cycling.few */ "Ancora troppo pochi cicli di riscaldamento.",
@@ -231,6 +230,8 @@ I18N.it = localeValues([
   /* check.cycling.unavailable */ "Nessun dato dal compressore.",
   /* check.cycling.stale */ "Al momento mancano misurazioni.",
   /* check.cycling.history_empty */ "Nessuno storico per ora.",
+  /* check.cycling.timed_starts */ (s) => `Con orario: ${s}`,
+  /* check.cycling.saved_starts */ (s) => `Di questi, ${s} provengono dai dati orari precedenti al riavvio. Gli orari esatti non sono disponibili.`,
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min ${min} °C · media ${mean} °C`,
   /* check.min */ (m) => `${m} min`,
@@ -1226,7 +1227,7 @@ DESCRIPTION_I18N.it = descriptionValues([
 MODEL_DESCRIPTION_I18N.it = modelDescriptionValues([
   ["Messaggi della pompa", "non provano causa né risoluzione."], // health_fault
   ["R5T: un punto del serbatoio stratificato, non energia.", "Indizio interno ≥0,8 K/h senza segnali pompa/prelievo. Senza segnali, i prelievi restano possibili; 0 K/h non esclude perdite. Circolazione non prova la causa."], // health_dhw_loss
-  ["Mostra gli avvii osservati e i cicli completati.", "La valutazione si basa sulla durata media dei cicli di riscaldamento."], // health_cycling
+  ["Se mancano misurazioni, alcuni avvii possono sfuggire al conteggio.", "Non esiste un numero fisso di avvii considerato normale. Con dati sufficienti, questo controllo considera adeguata una durata media di almeno 10 minuti per i cicli di riscaldamento conclusi."], // health_cycling
   ["Sbrinamento", "≥3 associati, >15% del tempo di marcia del compressore con stati compressore e sbrinamento leggibili. Regola interna, non Daikin; mancano umidità e temperatura dell’intera batteria."], // health_defrost
   ["Pressione", "regola interna comune ≤1,0 bar; 60 s continui osservati danno AVVISO. Non universale; vale il manuale del modello."], // health_pressure
   ["Portata dopo 60 s di pompa", "Limite per stesso modello/modo/condizioni; non nominale né prova di portata insufficiente."], // health_flow

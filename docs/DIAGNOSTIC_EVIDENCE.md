@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 756593b5a33017ef64a079101b3428b952c19055620cc3b7aa3a8b1946b3284c -->
+<!-- diagnostic-evidence-contract: 7058a2315d38a705197366825ec341f6a9d9d96fb7be36635832605f2e42960b -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -241,6 +241,8 @@ assessment; their runtime is only an observed lower bound. Saturated runtime/cou
 cause counts also block the assessment. A counted start survives a restart only when the saved
 hour containing that count restores. The new boot can observe the tail of a still-running compressor
 as a censored `start` run without adding a start ([PLANT.md](PLANT.md#reboot-and-persistence)).
+The [rolling chart trace](API.md#history-and-24-hour-checks) uses bounded current-boot evidence. Time before retained
+trace evidence is marked as missing.
 When a run completes into its retained start hour after that hour was journaled, the firmware
 requests a revised append ([persistence](ARCHITECTURE.md#history-and-diagnosis-persistence)).
 The completed run survives only if the revision is saved and restored. An earlier saved copy can
@@ -266,7 +268,7 @@ CHECKUP_CYCLING_MIN_STARTS, CHECKUP_CYCLING_SHORT_RUN_S and CHECKUP_CYCLING_CLAS
 [checkup.hpp](../main/logic/checkup.hpp). Fresh X10A outdoor minimum/mean accompanies only accepted
 completed heating runs, from samples whose predecessor was also running, and changes no threshold.
 
-The hourly chart counts compressor running intervals of at most 15 seconds separately from completed
+The hourly fallback counts compressor running intervals of at most 15 seconds separately from completed
 runs. Both endpoints must show the compressor running in the same heating or DHW class to assign
 that interval. The DHW route identifies DHW. Space heating requires the room circuit and reported
 heating mode. Other runtime, including confirmed defrost, stays unassigned. The chart can include

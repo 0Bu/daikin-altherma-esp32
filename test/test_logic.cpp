@@ -15316,6 +15316,65 @@ static void test_checkup_population() {
     clamped.covered_s = checkup_add_hour_s(3599, UINT32_MAX);
     CHECK(clamped.covered_s == 3600);
 
+    {
+        using Trace = CheckupCyclingTrace;
+        CheckupState  state;
+        CheckupBucket bucket;
+        CheckupSample sample;
+        Trace         trace;
+        sample.rps_known      = true;
+        sample.valve_known    = true;
+        sample.operating_mode = CheckupOperatingMode::Heating;
+        auto tick             = [&](int second) {
+            checkup_step(state, bucket, sample, int64_t{second} * 1000000, nullptr, &trace);
+        };
+        tick(100);
+        tick(101);
+        sample.rps_running = true;
+        tick(102);
+        tick(103);
+        sample.rps_running = false;
+        tick(104);
+        sample.rps_known = false;
+        tick(105);
+        sample.rps_known = sample.rps_running = true;
+        tick(106);
+        tick(107);
+        CHECK(bucket.starts == 2 && trace.count == 6);
+        CHECK(Trace::kind(trace.at(0)) == Trace::Off && Trace::second(trace.at(0)) == 100);
+        CHECK(Trace::kind(trace.at(1)) == Trace::Start && Trace::second(trace.at(1)) == 102);
+        CHECK(Trace::kind(trace.at(2)) == Trace::Heat && Trace::second(trace.at(2)) == 102);
+        CHECK(Trace::kind(trace.at(4)) == Trace::Gap && Trace::second(trace.at(4)) == 104);
+        CHECK(Trace::kind(trace.at(5)) == Trace::Heat && Trace::second(trace.at(5)) == 106);
+        CHECK(trace.end_s == 107);
+        trace.observe_window(107);
+        CHECK(trace.count == 6);
+        trace.observe_window(86503);
+        CHECK(trace.count == 4 && Trace::kind(trace.at(0)) == Trace::Heat);
+        sample.valve_dhw = true;
+        tick(108);
+        tick(109);
+        CHECK(Trace::kind(trace.at(trace.count - 2)) == Trace::Other);
+        CHECK(Trace::kind(trace.at(trace.count - 1)) == Trace::Dhw);
+        sample.valve_known = false;
+        tick(110);
+        tick(111);
+        CHECK(Trace::kind(trace.at(trace.count - 1)) == Trace::Other);
+        tick(130);
+        CHECK(Trace::kind(trace.at(trace.count - 1)) == Trace::Gap);
+        CHECK(bucket.starts == 2);
+        const auto retained = trace.count;
+        trace.record(-1, Trace::Heat, true);
+        trace.record((int64_t{Trace::max_second} + 1) * 1000000, Trace::Heat, true);
+        trace.push(Trace::max_second + 1, Trace::Start);
+        CHECK(trace.count == retained && trace.end_s == 130);
+        trace.reset();
+        CHECK(trace.count == 0 && trace.end_s == 0 && trace.state == Trace::Gap);
+        for (uint32_t i = 0; i < Trace::capacity + 2; ++i) trace.push(i, Trace::Start);
+        CHECK(trace.count == Trace::capacity && Trace::second(trace.at(0)) == 2);
+        CHECK(Trace::second(trace.at(trace.count - 1)) == Trace::capacity + 1);
+    }
+
     auto run = [](unsigned tail, unsigned missing_class, unsigned missing_rps,
                   bool changed_after_gap, bool return_to_dhw, bool stop_in_gap) {
         CheckupState  state;

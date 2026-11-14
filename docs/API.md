@@ -302,6 +302,26 @@ runtime, including zero when no time could be assigned to that mode. The rest of
 unassigned. Hourly runtime and starts measure different populations and cannot produce an
 average completed run.
 
+`cycling.timeline` is optional. It requires unredacted status, enabled diagnostics, eligible
+compressor records from the current boot, a synchronized clock and space for the snapshot.
+It can be omitted while the weather client reserves heap for TLS.
+`window_end_s` is the rolling chart's right edge in whole monotonic seconds. `unix_s` is the Unix
+time for that same edge. Clock corrections can shift the wall-clock labels while monotonic spacing
+stays fixed. `observed_end_s` is the latest processed sample in monotonic seconds. Treat time after
+that sample as missing. Each of up to 192
+`records` packs monotonic seconds in the high bits and a kind in the low three bits:
+0 gap, 1 no established runtime, 2 other runtime, 3 heating, 4 hot water, 5 detected start.
+Kinds 0–4 describe intervals from their timestamp up to the next interval record, or up to
+`observed_end_s` for the final interval. Kind 5 marks the first readable ON after an adjacent
+readable OFF at most 15 seconds earlier. The compressor may have started between those samples.
+Starts inferred across missing samples have no point in the trace. The volatile buffer can lose
+records within the 24-hour window if it fills. The last interval boundary before
+`window_end_s - 86400`, when retained, establishes the opening state. Otherwise the state is
+unknown until the first retained interval boundary. Start records do not establish interval
+state. The chart counts individual starts at or after the cutoff. The diagnosis total expires
+whole hourly slots and can include inferred and restored counts. The two totals can differ in
+either direction.
+
 `cycling.stop_context` is an independent observation object; it changes no legacy cycling field or
 verdict. `denominator` names `witnessed_stops_recent_heating`, the separately counted witnessed
 compressor stops with recent confirmed heating context. Counts overlap and must not be summed as

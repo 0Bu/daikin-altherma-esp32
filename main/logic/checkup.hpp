@@ -483,6 +483,59 @@ struct CheckupSample {
 };
 
 enum class CheckupRunClass : uint8_t { Unknown, SpaceHeating, Dhw, Cooling };
+
+// Compact, volatile evidence for the rolling chart. Changes describe the interval
+// starting at the timestamp; a Start is a point and does not change interval state.
+struct CheckupCyclingTrace {
+    enum Kind : uint8_t { Gap, Off, Other, Heat, Dhw, Start };
+    static constexpr size_t   capacity   = 192;
+    static constexpr uint32_t max_second = UINT32_MAX >> 3;
+    uint32_t                  records[capacity]{};
+    uint32_t                  end_s = 0, window_end_s = 0, unix_s = 0;
+    uint16_t                  head = 0, count = 0;
+    Kind                      state = Gap;
+
+    void reset() {
+        head = count = 0;
+        end_s        = 0;
+        state        = Gap;
+    }
+
+    uint32_t        at(size_t i) const { return records[(head + capacity - count + i) % capacity]; }
+    static uint32_t second(uint32_t record) { return record >> 3; }
+    static Kind     kind(uint32_t record) { return static_cast<Kind>(record & 7u); }
+
+    void push(uint32_t sec, Kind value) {
+        if (sec > max_second) return;
+        records[head] = (sec << 3) | value;
+        head          = (head + 1) % capacity;
+        if (count < capacity) ++count;
+    }
+
+    void record(int64_t now_us, Kind interval, bool start) {
+        if (now_us < 0 || now_us / 1000000 > max_second) return;
+        const auto now = static_cast<uint32_t>(now_us / 1000000);
+        if (interval != state) {
+            push(end_s, interval);
+            state = interval;
+        }
+        if (start) push(now, Start);
+        end_s = now;
+    }
+
+    void observe_window(uint32_t now) {
+        const uint32_t cutoff = now > 86400 ? now - 86400 : 0;
+        // Drop an obsolete prefix but keep the most recent interval boundary before
+        // the cutoff. It establishes the state at the left edge.
+        size_t remove = 0;
+        for (size_t i = 0; i < count; ++i) {
+            const auto event = at(i);
+            if (second(event) >= cutoff) break;
+            if (kind(event) != Start) remove = i;
+        }
+        count -= remove;
+    }
+};
 constexpr uint32_t CHECKUP_CYCLING_DHW_TAIL_S = 30;
 constexpr uint32_t CHECKUP_CYCLING_GAP_S      = 15;
 // One completion has one cause. Highest priority wins: expired start/journal, unwitnessed start,
@@ -1175,8 +1228,9 @@ constexpr uint32_t CHECKUP_PRESSURE_CONFIRM_S = 60;
 //
 // Away from a boundary the whole delta is booked into the open bucket.
 inline bool checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample& s, int64_t now_us,
-                         CheckupRing* ring = nullptr) {
+                         CheckupRing* ring = nullptr, CheckupCyclingTrace* trace = nullptr) {
     bool           reseal         = false;
+    bool           timed_start    = false;
     const uint32_t current_bucket = checkup_bucket(now_us);
     // ── continuity ──────────────────────────────────────────────────────────────────────────────
     // A gap longer than CHECKUP_MAX_GAP_S means the firmware was not watching. Seconds are not
@@ -1332,6 +1386,7 @@ inline bool checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample
                 reseal |= checkup_close_run(st, b, ring, current_bucket);
             }
             b.starts = checkup_add_u8(b.starts, 1);
+            timed_start = rps_edge_known;
             // Open a run. Tank/space comes from the valve; a space-side run additionally needs the
             // hydronic mode so Cooling can never be relabelled as space heating.
             st.run_open       = true;
@@ -1514,6 +1569,24 @@ inline bool checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample
     if (fault_error_active(s.fault))   b.flags |= CHECKUP_F_FAULT;
     if (fault_warning_active(s.fault)) b.flags |= CHECKUP_F_WARNING;
 
+    if (trace) {
+        auto interval = CheckupCyclingTrace::Gap;
+        if (continuous && st.prev_rps_known && s.rps_known) {
+            if (st.prev_rps_running && s.rps_running) {
+                interval = CheckupCyclingTrace::Other;
+                if (hour_class == st.prev_hour_class) {
+                    if (hour_class == CheckupRunClass::SpaceHeating)
+                        interval = CheckupCyclingTrace::Heat;
+                    else if (hour_class == CheckupRunClass::Dhw)
+                        interval = CheckupCyclingTrace::Dhw;
+                }
+            } else {
+                interval = CheckupCyclingTrace::Off;
+            }
+            // A sampled transition is readable but contributes no established runtime.
+        }
+        trace->record(now_us, interval, timed_start);
+    }
     st.prev_rps_known   = s.rps_known;
     st.prev_rps_running = s.rps_running;
     if (s.rps_known) {

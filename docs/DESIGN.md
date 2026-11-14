@@ -585,14 +585,23 @@ on one line and put the full observation in the disclosure. Inspector headings w
 and value labels keep their defined share. Split Settings actions own their padding and cannot
 overlap when stacked. Measure every shipped locale at 320 px.
 
-The cycling disclosure uses one row of hourly columns with start counts above stacked runtime
-bars. The columns own pointer and keyboard selection and share one readout. Keep leading padding
-and expired slots empty. Show positive start counts as lower bounds in the summary and readout.
-Hatch elapsed time without compressor readings only where the elapsed duration is known. Restored
-and legacy slots show readable time with unknown elapsed duration. Label a restored timestamp as
-saved time. Leave the unelapsed part of the open hour unfilled. The default readout uses one hourly
-snapshot and omits runtime without readable compressor seconds. Update the chart in its own slot
-and defer it while its card is hidden.
+The rolling cycling disclosure uses a step for each directly observed start and one row of
+hourly blocks showing start counts and the operating modes seen in each hour. The selected
+hour replaces all time labels on the axis with its time range. Update that range together with
+the counts and mode colors as the window rolls. Keep mixed-hour gaps visible alongside operating modes.
+During a drag, preview the hour under the pointer and restore the selection on release. If a poll
+omits the trace, retain the selected chart for the same boot and diagnosis epoch. Mark the time
+after the last sample as missing until a new trace arrives.
+Above each rolling block, show the number of retained timed starts. Leave it blank if there is
+missing trace time and no timed start. Use the lower-bound prefix
+for positive totals and accessible readouts. Update the chart in its own slot and defer it while
+its card is hidden.
+
+Until a timed trace is available, keep the hourly fallback with leading padding and expired
+slots empty. Hatch missing elapsed time where duration is known. Restored and legacy slots show
+readable time with unknown elapsed duration. Label restored timestamps as saved time. Leave the
+unelapsed part of the open hour unfilled. The default readout uses one hourly snapshot and omits
+runtime without readable compressor seconds.
 
 Use logical keyboard order, visible focus, Enter/Space activation, Escape at the innermost layer,
 modal focus return and scroll lock. Background controls are unavailable while a dialog is open.
