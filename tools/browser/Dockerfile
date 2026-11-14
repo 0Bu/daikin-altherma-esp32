@@ -8,7 +8,9 @@ ENV HOST_CC=/usr/bin/gcc-13
 
 WORKDIR /opt/daikin-browser
 COPY tools/browser/package.json tools/browser/package-lock.json ./
-RUN npm ci --ignore-scripts --no-audit --no-fund \
+# The pre-push snapshot can be created with umask 077. Playwright runs as UID 1000.
+RUN chmod 0644 package.json package-lock.json \
+    && npm ci --ignore-scripts --no-audit --no-fund \
     && node -e 'require("node:fs").symlinkSync(require("playwright").chromium.executablePath(), "/opt/daikin-browser/chromium")' \
     && npm cache clean --force
 
