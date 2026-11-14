@@ -54,8 +54,9 @@ Run `$deploy-test` whenever signed dev publication is possible. Compare the pros
 tree with the last proven dev source using
 [`tools/release/build-inputs.ere`](../../../tools/release/build-inputs.ere), including earlier
 unpublished changes. An unproven dev source requires the bench test. Record the exact head, Git
-tree and result in the PR body. If refreshed main changes the prospective tree, update the branch
-and retest the new head. Repeat for every fix head from Step 8.
+tree and result in the PR body. Before flashing, require the bench build's `HEAD^{tree}` to equal
+the prospective merge tree. If refreshed main changes that tree, update the branch and retest the
+new head. Repeat for every fix head from Step 8.
 
 ### 1. Deterministic gates and PR records
 
@@ -103,8 +104,10 @@ confirmed production acceptance. Record feed, bench and production timings as th
 
 ### 3. Watch the CI dev build on main
 
-The publication workflow binds the local receipt to the landed tree and its first parent before
-the signed build. It checks the exact published artifact and public readback.
+For ordinary merges, the publication workflow binds the local receipt to the landed tree and its
+first parent before the signed build. See the
+[Renovate runner-pin exception](../../../docs/MAINTENANCE.md#local-release-checks).
+The workflow checks the exact published artifact and public readback.
 
 Find the `build.yml` run for the merge commit and watch it:
 
@@ -116,9 +119,10 @@ scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 r
 Then read `https://0bu.github.io/daikin-altherma-esp32/dev/manifest.json`. GitHub Pages can lag, so
 retry for a bounded time. Continue only if the manifest's `source_sha` equals the merge commit, and
 note its version and application SHA-256. If the classifier finds no firmware changes since the
-last confirmed publication, the manifest keeps the previous source. Report the merge and stop. If a
-firmware-relevant PR's manifest keeps the previous source after a green run and the bounded wait,
-treat it as **Case A**. A confirmed cumulative-changelog capacity failure uses Step 3a first.
+last confirmed publication, the manifest keeps the previous source. Report the merge and stop.
+If Step 0 required publication and the manifest still names the previous source after a green
+run and the bounded wait, treat it as **Case A**. A confirmed cumulative-changelog capacity
+failure uses Step 3a first.
 
 ### 3a. Automatic release baseline when the cumulative changelog is full
 

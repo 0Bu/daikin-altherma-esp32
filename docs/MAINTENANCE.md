@@ -48,8 +48,9 @@ UI evidence remain distinct.
 
 ### CI checkout and publication cost
 
-The dev workflow starts its signed build after the local-check receipt matches the squash tree and
-its first parent. The signing job still builds the exact main commit. CI/release contracts own the
+For ordinary merges, the signed dev build starts after the local check receipt matches the squash
+tree and first parent. See the [Renovate runner-pin exception](#local-release-checks). The signing
+job builds the exact main commit. CI/release contracts own the
 provenance, signing, stack-budget, reproducibility, readback and OTA selftests; the build-contract step adds only its
 distinct configuration-default and size-report tests. Actual ELF and signed-artifact checks still
 run against each build. The publisher verifies signatures, then its candidate gate validates the
