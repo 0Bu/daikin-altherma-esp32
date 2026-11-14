@@ -321,9 +321,7 @@ jobs:
       # each self-test judges, so audited content changes which files it must run for, not what it
       # concludes.
       #
-      # Fail-open by construction: anything other than an ordinary pull_request, an unresolvable
-      # diff, or a change to this workflow runs the complete set. A push to main therefore always
-      # re-proves every gate, which is the backstop if a path mapping here is ever too narrow.
+      # During bootstrap an unresolvable diff or a change to this workflow runs the complete set.
       - name: Scope the mutation self-tests to the tooling this diff touches
         if: steps.local_proof.outputs.accepted != 'yes'
         id: scope

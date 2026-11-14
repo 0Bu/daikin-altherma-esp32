@@ -8,6 +8,7 @@ from functools import partial
 import re
 import subprocess
 import sys
+import time
 
 
 REPO = "0Bu/daikin-altherma-esp32"
@@ -15,6 +16,7 @@ MAINTAINER_ID = 4757856
 PREFIX = "daikin-local-release-checks "
 MAX_AGE = 86400
 COMMENTS_PER_PAGE = 10
+VERIFY_TIMEOUT_S = 90
 SHA = re.compile(r"[0-9a-f]{40}")
 
 
@@ -22,15 +24,18 @@ class ProofError(ValueError):
     pass
 
 
-def api(path, *, local=False):
+def api(path, *, local=False, deadline=None):
     if local:
         client = str(Path(__file__).resolve().parents[2] / "scripts/gh-with-git-credentials.sh")
     else:
         client = "gh"
+    timeout = min(20, deadline - time.monotonic()) if deadline is not None else 20
+    if timeout <= 0:
+        raise ProofError("GitHub evidence lookup exceeded its deadline")
     result = subprocess.run([client, "api", "--hostname", "github.com", "--method", "GET",
                              f"repos/{REPO}/{path}"],
-                            capture_output=True, check=True, timeout=20)
-    if len(result.stdout) > 8 * 1024 * 1024:
+                            capture_output=True, check=True, timeout=timeout)
+    if len(result.stdout) > 4 * 1024 * 1024:
         raise ProofError("GitHub metadata exceeds the verification limit")
     return json.loads(result.stdout)
 
@@ -102,13 +107,43 @@ def verify_pr(number, head, query=api):
     return require_receipt(number, head, tree, base, boundary=datetime.now().timestamp(), query=query)
 
 
-def verify_landed(target, query=api):
+def landed_pull(target, query):
     prs = query(f"commits/{target}/pulls?per_page=100")
     matches = [pr for pr in prs if pr.get("merge_commit_sha") == target and pr.get("merged_at")
                and pr["base"]["ref"] == "main" and pr["base"]["repo"]["full_name"] == REPO]
     if len(matches) != 1:
         raise ProofError("published commit does not have one matching merged PR")
-    pr = matches[0]
+    return matches[0]
+
+
+def pin_only_replacement(pr, target, query):
+    head = pr["head"]
+    if not (head.get("ref", "").startswith("renovate/")
+            and (head.get("repo") or {}).get("full_name") == REPO):
+        return False
+    details = query(f"pulls/{pr['number']}")
+    if (details.get("merge_commit_sha") != target or details["head"]["sha"] != head["sha"]
+            or details.get("commits") != 1 or details.get("changed_files") != 1):
+        return False
+    policy_dir = Path(__file__).resolve().parents[1] / "agent-policy"
+    sys.path.insert(0, str(policy_dir))
+    from renovate_action_pr import classify
+
+    original = query(f"commits/{head['sha']}")
+    if not classify({**details, "state": "open"}, original, [original], REPO, head["sha"])[0]:
+        return False
+    actual = query(f"commits/{target}")
+    # Match the landed patch to the attested change, ignoring per-commit links.
+    files = actual.get("files")
+    if actual.get("sha") != target or not isinstance(files, list) or len(files) != 1:
+        return False
+    attested = original["files"][0]
+    fields = ("filename", "status", "previous_filename", "additions", "deletions", "changes", "patch")
+    return all(files[0].get(field) == attested.get(field) for field in fields)
+
+
+def verify_landed(target, query=api):
+    pr = landed_pull(target, query)
     landed = query(f"git/commits/{target}")
     parents = [row["sha"] for row in landed["parents"]]
     if landed["sha"] != target or len(parents) != 1:
@@ -117,16 +152,22 @@ def verify_landed(target, query=api):
     head = pr["head"]["sha"]
     if not all(SHA.fullmatch(value) for value in (tree, parents[0], head)):
         raise ProofError("invalid landed Git identity")
+    if pin_only_replacement(pr, target, query):
+        # The independently attested runner update changes only its own workflow.
+        # Reuse the preceding firmware evidence, with every intervening pin re-attested.
+        return verify_landed(parents[0], query)
     return require_receipt(pr["number"], head, tree, parents[0],
                            boundary=timestamp(pr["merged_at"]), query=query)
 
 
 def main():
+    deadline = time.monotonic() + VERIFY_TIMEOUT_S
     if (len(sys.argv) == 4 and sys.argv[1] in {"pr", "local-pr"}
             and sys.argv[2].isdigit() and SHA.fullmatch(sys.argv[3])):
-        verify_pr(int(sys.argv[2]), sys.argv[3], query=partial(api, local=sys.argv[1] == "local-pr"))
+        verify_pr(int(sys.argv[2]), sys.argv[3], query=partial(api, local=sys.argv[1] == "local-pr",
+                                                             deadline=deadline))
     elif len(sys.argv) == 3 and sys.argv[1] == "landed" and SHA.fullmatch(sys.argv[2]):
-        verify_landed(sys.argv[2])
+        verify_landed(sys.argv[2], query=partial(api, deadline=deadline))
     else:
         raise ProofError("invalid receipt verification arguments")
     print("Local release proof verified.")

@@ -82,7 +82,8 @@ in a private snapshot with main as the first parent. Checks include the pinned f
 ASan/UBSan in Linux Docker on macOS, headless Linux Chromium and WebKit for browser-relevant changes,
 the pinned coredump decoder and the real-cJSON runtime suite. A maintainer reviews fork code before
 running its checks in a disposable environment without maintainer credentials. The snapshot runs
-candidate scripts with the current user's permissions. It provides source isolation only.
+candidate scripts with the current user's permissions. Keep `origin` on the canonical repository
+and fetch the fork head separately.
 
 To run the gate before pushing, or against a checked-out fork head, run
 `python3 tools/release/push_checks.py "$(git rev-parse HEAD)"` in the clean checkout.
@@ -100,8 +101,8 @@ rechecks the receipt immediately before merging. A green GitHub check can outliv
 window. Signed publication, including manual stable publication, requires a receipt valid at
 the actual merge time. The protected policy's existing
 [Renovate runner-pin exception](AGENT_MIGRATION.md#operating-rules) does not need a local
-receipt to merge. The pin is outside the firmware inputs. Publication still requires a receipt
-if the dev feed is behind or a stable release is requested.
+receipt to merge. The pin is outside the firmware inputs. When publishing from such a main tip,
+the signer re-attests each intervening pin-only change and verifies the preceding source receipt.
 
 ### First Pages publication
 
@@ -389,8 +390,9 @@ The private atomic receipt journal checkpoints before the sole POST and preserve
 artifact/bench/production stages and elapsed times. The official gate reuses host and contract
 results from the pre-push run for 24 hours on the same machine and account, if the published
 commit has the identical tree and first parent. The cache lives under
-`~/.cache/daikin-altherma-esp32/release-checks/`. Missing or incompatible local evidence blocks
-the official gate before hardware contact. An ambiguous response leaves execution unknown; journal failure
+`~/.cache/daikin-altherma-esp32/release-checks/`. With missing or incompatible local evidence,
+the gate reruns the two checks before contacting hardware. An ambiguous response leaves
+execution unknown; journal failure
 before a write blocks it. Public output includes only typed delivery evidence, excluding device
 identifiers, complete status, topics, coordinates and raw errors. Failure handling neither queries
 the device nor retries and exits with status 2.

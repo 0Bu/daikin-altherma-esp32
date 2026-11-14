@@ -50,13 +50,12 @@ hook binds the gate and the wrapper to the session worktree, so run them there a
 
 ### 0. Precondition: the exact head passed `$deploy-test`
 
-A PR is firmware-relevant when a changed file matches
-[`tools/release/build-inputs.ere`](../../../tools/release/build-inputs.ere).
-For such a PR, `$deploy-test` must have passed at the exact PR head, and its pinned SHA and result
-must be recorded in the PR body. If not, run `$deploy-test` now; the same applies to every fix head
-from Step 8. If refreshed main contributes changes to the prospective merge tree, update the
-PR branch and retest its new head so the bench includes those changes. A PR without
-firmware-relevant files skips this step.
+Run `$deploy-test` whenever signed dev publication is possible. Compare the prospective merge
+tree with the last proven dev source using
+[`tools/release/build-inputs.ere`](../../../tools/release/build-inputs.ere), including earlier
+unpublished changes. An unproven dev source requires the bench test. Record the exact head, Git
+tree and result in the PR body. If refreshed main changes the prospective tree, update the branch
+and retest the new head. Repeat for every fix head from Step 8.
 
 ### 1. Deterministic gates and PR records
 
@@ -90,8 +89,9 @@ scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 p
 scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 pr checks <pr-number>
 ```
 
-Wait for pending checks with the bounded watcher from `AGENTS.md`, not with sleeps. Then merge with
-the literal 40-hex `headRefOid`:
+Wait for pending checks with the bounded watcher from `AGENTS.md`. If bench acceptance applies,
+verify that the locally tested bench tree matches the tree in the receipt. Then merge with the
+literal 40-hex `headRefOid`:
 
 ```bash
 scripts/gh-with-git-credentials.sh api --hostname github.com --method PUT repos/0Bu/daikin-altherma-esp32/pulls/<pr-number>/merge -f sha=<full-40-hex-pr-head-sha> -f merge_method=squash

@@ -2,8 +2,7 @@ name: pr-policy
 
 # This workflow is the required PR review-policy trust boundary. pull_request_target loads this
 # workflow from the protected base branch, so it must remain data-only: never check out, source, or
-# execute the pull-request tree here. Mechanical tests and compile-only builds run separately under
-# the ordinary pull_request event in build.yml.
+# execute the pull-request tree here. The bootstrap build uses the ordinary pull_request event.
 on:
   pull_request_target:
     branches: [main]

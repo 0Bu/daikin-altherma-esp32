@@ -191,8 +191,8 @@ patches. It never applies to local/manual merges, ESP-IDF, esptool-js or mixed c
 CI runs PR-controlled code under ordinary `pull_request` in `build.yml`. Forks receive no
 repository secrets and a reduced token; same-repository workflow authors are trusted CI actors.
 The separate `pr-policy.yml` supplies `gates` from the protected base without loading PR code.
-The required `build` propagates the shared mechanical result and conditionally compiles relevant
-changes. Documentation-only PRs still run both required checks. Do not replace step conditions
+The required `build` reports the workflow's admission result. Its hosted compile is used during
+the transition to local checks. Documentation-only PRs still run both required checks. Do not replace step conditions
 with workflow path filters that leave required checks pending.
 
 ## Releases
