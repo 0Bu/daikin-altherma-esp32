@@ -22,6 +22,7 @@ CASES = [
     "source_freshness", "stale_finding", "backwards_clock", "generation_mismatch",
     "inflight_generation", "reset_read_barrier", "reset_during_lock", "consent_reset",
     "circulation_reset", "circulation_inflight", "pending_expiry", "restored_expiry",
+    "report_without_mutex",
     "late_restore_prefix", "late_restore_clock_behind",
     "consent_lock_new_generation", "consent_sampling_new_generation",
     "consent_lock_same_generation", "consent_sampling_same_generation",
@@ -213,6 +214,15 @@ for name, anchor in [("record entry", entry), ("commit guard", guard)]:
     if source_text.count(anchor) != 1:
         raise RuntimeError("Expected one production " + name + " anchor")
 mutations = [
+    ("report_false_absence_when_lock_fails",
+     source_text.replace("*persist = logic::CheckupRestore::Unknown;",
+                         "*persist = logic::CheckupRestore::NoRecord;"),
+     "restored_expiry", "lock_failure_restore_unknown"),
+    ("report_boot_verdict_without_mutex",
+     source_text.replace("    if (!s_mtx) return logic::CheckupReport{};",
+                         "    if (!s_mtx) { if (persist) *persist = s_persist_verdict; "
+                         "return logic::CheckupReport{}; }"),
+     "report_without_mutex", "allocation_failure_restore_unknown"),
     ("omit_consent_epoch_guard",
      source_text.replace(guard, "    if (!s_diagnostics_enabled.load(std::memory_order_acquire)) return;"),
      "consent_lock_new_generation", "consent_epoch_discards_staged_sample"),

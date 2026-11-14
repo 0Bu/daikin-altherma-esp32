@@ -156,12 +156,15 @@ const mutations=[
     before:"number(c.positive[k], known && supported);",after:"number(c.positive[k], known);"},
   {name:"elapsed-on-closed-hour",file:"status",scenario:"cycling_hours_wire",
     before:"if (hi + 1 == hrs.count) {",after:"if (hrs.count) {"},
+  {name:"late-checkup-persist-read",file:"status",scenario:"checkup_persist_snapshot",
+    before:"json_append_quoted(j, logic::checkup_restore_slug(persist));",
+    after:"json_append_quoted(j, checkup_persist_state());"},
 ];
 try {
   const compiler=execute(cxx,["--version"]).stdout.trim();
   const baseline=execute(compile("production"),[]);
   const caseCount=Number(baseline.stdout.match(/^PASS total=(\d+)$/m)?.[1]);
-  assert.equal(caseCount,23);
+  assert.equal(caseCount,24);
   assert.equal(caseCount,[...baseline.stdout.matchAll(/^PASS (?!total=)\S+$/gm)].length);
   const wires=[]; const decoder=new TextDecoder("utf-8",{fatal:true});
   const configCases=new Map([
@@ -188,6 +191,9 @@ try {
     ["cycling-trace-weather",{bucket:0,elapsed_s:0,starts:1,run_s:0,observed_s:0}],
     ["cycling-expired",{bucket:0,elapsed_s:0,starts:1,run_s:0,observed_s:0}],
   ]);
+  const persistWires=new Set(["checkup-persist-plain","checkup-persist-redacted",
+    "checkup-persist-framed"]);
+  let persistUnknownSeen=false;
   const stopIds=["low_rps_above_main_target","request_withdrawal","defrost",
     "dhw_transition","route_mode_transition"];
   const stopCountKeys=["witnessed_stops_recent_heating","unclassified_stops","unknown_stops",
@@ -217,6 +223,26 @@ try {
         unix_s: 2000000000, window_end_s: 451, observed_end_s: 450, records: [3283, 3365],
       });
       cyclingWires.delete(name);
+    }
+    if(persistWires.delete(name)) {
+      const health=(name==="checkup-persist-framed"?doc.result:doc).health;
+      assert.equal(health.persist,"flash",name);
+      assert.equal(health.covered_s,1200,name);
+      const cycling=health.checks.find(check=>check.id==="cycling");
+      assert.equal(cycling.hours_epoch,17,name);
+      assert.deepEqual(cycling.hours,[
+        {bucket:-1,end_unix_s:1999998000,restored:true,starts:2,run_s:600,observed_s:1200,space_s:600,dhw_s:0},
+        {bucket:0,elapsed_s:0,starts:0,run_s:0,observed_s:0},
+      ],name);
+    }
+    if(name==="checkup-persist-unknown") {
+      assert.equal(doc.health.persist,"unknown",name);
+      assert.equal(doc.health.covered_s,0,name);
+      assert.equal(doc.health.source_fresh,false,name);
+      const cycling=doc.health.checks.find(check=>check.id==="cycling");
+      assert.deepEqual(cycling.hours,[],name);
+      assert.equal(cycling.timeline,undefined,name);
+      persistUnknownSeen=true;
     }
     if(stopWires.has(name)) {
       const cycling=doc.health.checks.find(check=>check.id==="cycling");
@@ -380,6 +406,8 @@ try {
   assert.equal(roomWires.size,0,"all room-history and room-label wire oracles must run");
   assert.equal(stopWires.size,0,"all unknown, covered-zero and populated stop-context wire oracles must run");
   assert.equal(cyclingWires.size,0,"both partially elapsed and start-edge cycling frames must run");
+  assert.equal(persistWires.size,0,"plain, redacted and framed diagnosis snapshots must run");
+  assert.ok(persistUnknownSeen,"unreadable diagnosis snapshot must run");
   const controls=[];
   if(!process.argv.includes("--no-mutations")) for(const mutation of mutations) {
     const result=execute(compile(mutation.name,mutation),[mutation.scenario],false);

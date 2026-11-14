@@ -662,9 +662,10 @@ The rolling cycling disclosure uses a step for each directly observed start and 
 hourly blocks showing start counts and the operating modes seen in each hour. The selected
 hour replaces all time labels on the axis with its time range. Update that range together with
 the counts and mode colors as the window rolls. Keep mixed-hour gaps visible alongside operating modes.
-During a drag, preview the hour under the pointer and restore the selection on release. If a poll
-omits the trace, retain the selected chart for the same boot and diagnosis epoch. Mark the time
-after the last sample as missing until a new trace arrives.
+During a drag, preview the hour under the pointer and restore the selection on release. If a
+readable diagnosis snapshot omits the trace, retain the selected chart for the same boot and
+diagnosis epoch. Mark the time after the last sample as missing until a new trace arrives.
+An unreadable snapshot shows **No data**. See the [status contract](API.md#history-and-24-hour-checks).
 Above each rolling block, show the number of retained timed starts. Leave it blank if there is
 missing trace time and no timed start. Use the lower-bound prefix
 for positive totals and accessible readouts. Update the chart in its own slot and defer it while

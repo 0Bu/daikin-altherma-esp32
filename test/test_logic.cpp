@@ -29045,6 +29045,7 @@ static void test_checkup_scoped_flash_age() {
         {CheckupRestore::FlashPending, "flash_pending"},
         {CheckupRestore::Fresh, "fresh"},
         {CheckupRestore::Flash, "flash"},
+        {CheckupRestore::Unknown, "unknown"},
         {static_cast<CheckupRestore>(255), "unknown"},
     };
     for (const auto& entry : provenance)

@@ -626,6 +626,15 @@ context.S.status.health = { status: "unavailable", assessable: 0, evaluated: 0,
 card = ui.card();
 assert.match(card, />Observations<\/span>/);
 assert.doesNotMatch(card, /0\/0|N\/A<\/span>|>OK</);
+context.S.status.health = { status: "unavailable", persist: "unknown",
+  checks: [{ id: "cycling", verdict: "unavailable" }] };
+for (const lang of locales) {
+  const message = ui.text(lang, "sys.nodata");
+  card = ui.card();
+  assert.ok(card.includes(message), `${lang}: unreadable snapshot shows the localized empty state`);
+  assert.doesNotMatch(card, /health_cycling|N\/A|NaN/);
+}
+ui.setLang("en");
 context.S.status.health = { status: "warn", checks: [dhw, { ...pressure, verdict: "warn" }] };
 assert.match(ui.card(), />1 warning<\/span>/);
 assert.doesNotMatch(ui.card(), />1 note<\/span>/);

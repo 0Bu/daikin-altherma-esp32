@@ -1085,7 +1085,8 @@ def validate_status_diagnosis_paths(budgets: dict[str, Any], sources: dict[str, 
                              r"heap_caps_malloc\(sizeof\(Trace\), MALLOC_CAP_8BIT\)\s*: nullptr;\s*"
                              r"std::unique_ptr<Trace, decltype\(&std::free\)> trace\(\s*"
                              r"trace_storage \? new \(trace_storage\) Trace : nullptr, std::free\);\s*"
-                             r"const logic::CheckupReport hr\s*=\s*checkup_report\(&hrs, trace.get\(\)\);",
+                             r"logic::CheckupRestore\s+persist;\s*"
+                             r"const logic::CheckupReport hr\s*=\s*checkup_report\(&hrs, trace.get\(\), &persist\);",
                              status)
             or re.search(r"\bcheckup_cycling_hours(?:_locked)?\s*\(", status)
             or len(re.findall(r"\bappend_status_json\(out, redact\)", status)) != 1
@@ -2957,7 +2958,7 @@ def self_test() -> None:
      'daik::hp_query_detailed(unsigned char, daik::Protocol, unsigned char*, unsigned int, daik::HpQueryLogPolicy)': 64,
      'daik::hp_format(daik::ValueDef const&, unsigned char const*, int, int, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >&, daik::ValueDef const*, unsigned int, daik::SaturationWitness)': 64,
      'daik::history_record(daik::CachedValue const*, unsigned int, unsigned long, long long)': 64,
-     'daik::checkup_report(daik::logic::CheckupCyclingHours*, daik::logic::CheckupCyclingTrace*)': 64,
+     'daik::checkup_report(daik::logic::CheckupCyclingHours*, daik::logic::CheckupCyclingTrace*, daik::logic::CheckupRestore*)': 64,
      'daik::checkup_cycling_hours_locked(long long)': 256,
      'daik::logic::checkup_cycling_hours(daik::logic::CheckupRing const&, bool)': 32,
      'daik::logic::checkup_evaluate(daik::logic::CheckupWindow const&, daik::logic::CheckupCoverage const&, daik::FaultClass, daik::logic::DhwLossWindow const&)': 80,
@@ -3976,7 +3977,7 @@ def self_test() -> None:
     diagnosis_controls += 1
     for name, before, after in (
         ("main/http_status.cpp", "return http_send_status_json(req, {}, {}, redact);", "return ESP_FAIL;"),
-        ("main/http_status.cpp", "checkup_report(&hrs, trace.get())", "checkup_report(nullptr)"),
+        ("main/http_status.cpp", "checkup_report(&hrs, trace.get(), &persist)", "checkup_report(nullptr)"),
         ("main/mcp_server.cpp", "return http_send_status_json(req, response, suffix, false);", "return ESP_FAIL;"),
         ("main/mqtt_ha.cpp", "publish_heartbeat();", "other_heartbeat();"),
         ("main/checkup.cpp", "P().layout_fp = logic::checkup_layout_fingerprint();",

@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: ca91f90c3fb37ee4c3fea64fbed95eee8c7f5940d7a75c16897adb79d86692a4 -->
+<!-- user-docs-contract: 4124a3672249692519456abbd9ca4b033b8931e2113b4e0ae5eced412beee337 -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default. Enable **Plant diagnostics** under **Settings → Firmware** to start an evidence
@@ -27,6 +27,7 @@ the installation's health.
 | **MEASURED** | A measurement or event population without enough evidence for a good/bad assessment. |
 | **TENTATIVE** | An experimental counter comparison whose complete manufacturer semantics are unknown. |
 | **N/A** | The active profile does not supply the required signals. |
+| **No data** | The current diagnosis snapshot could not be read. |
 
 A reassuring day-based result needs both the full 24-hour span and at least 90% usable coverage
 of its own signals. Current fault state is separate. Missing or stale X10A data cannot establish a
@@ -117,9 +118,10 @@ how many came from those hours.
 In the rolling chart, each number counts the starts with a recorded time in that hour. A blank
 marks an hour with unavailable data and no timed start. Colors mark the modes seen in the hour.
 Hatching marks hours with gaps, including older readings that have dropped off the chart. It
-does not measure how long a gap lasted. If a status update arrives without new chart data, the
-open chart can keep the readings from the current diagnosis session and hatch the new gap.
-If the status update itself fails, the chart stays at the last successful update.
+does not measure how long a gap lasted. A readable diagnosis update without a fresh trace can
+keep the open chart from the current diagnosis session and hatch the new gap. If the update says
+the diagnosis could not be read, the card shows **No data** and hides the chart. If the status
+request itself fails, the chart stays at the last successful update.
 Select a block to show its current range on the axis. The `≥` sign means at least that many starts.
 
 After a restart, the rolling chart fills with new readings. Until a timed trace is available,

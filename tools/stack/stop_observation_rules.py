@@ -384,7 +384,7 @@ BODIES = {
     'main/mqtt_ha.cpp': {'publish_heartbeat': '2d659e33a6c5f8bb0f682c4e58bb4ea60b3ce259acef21a27ce6474bf452bacc', 'build_heartbeat_payload': '22ff09e1059552ba1fed412dc780465042c603c8b3f4bf62142cd8c66601b761', 'mqtt_task': '12c46d632de8ef06455a4dd966ec4341a4f092b2eafda7306b35a74f3b270ee7'},
     'main/hp_poll.cpp': {'checkup_record_poll_gap': '5fb1fd43670b4b4daffd1b4a1cddd3864e7cae719cdcfc11f8d3dddeb9e4ef88', 'poll_task': '6b62392ac706f8b567314ec445351f53176d555843b62169a445ef072a2284e3', 'poll_once': '808c07edf23ecbe963fc0694abaf01c9841ef5dd5f66aeb355d24e67ed193152', 'poll_detect': 'ffcdce0117bf432880af0af2f443d531ed82371213f96620e0d5a05be7b56ab6'},
     'main/http_config.cpp': {'read_config_document': '9b8505b7d63f7b8fc63f184a6f5311c77c0e7f56616c4669cc0008069c05a9ca', 'set_wifi': '9fb0686e62526883f4d758e3c3e1b976ba7065c323ddfe1ea9dcff54fa98780a', 'parse_circulation_request': 'f62d40518fdda281234d009179430717ac4c0472c17f2678ac7d67088ec86092', 'set_weather': 'dac1f930149cd45d6495514ef8c5bf0ce42a8de449b6e49ae5a1695d10faf408', 'set_board': '6170a871f0b823113a09db5b8ac5fda2a3b88ba68abee4005dd34c8ec1db89c6', 'set_env3': '2dcb0874faa68175dbc2150d28b5676a3214515c0c66b15199ae9e1f37bd9c78', 'set_hp': '7f73a7684d73a79531d23f1aab5a2e0e4969b84b4aea4381ec6333fb12229508', 'set_diagnostics': 'a538c190e0a57f2a44db4ecafd14685d6d627f0771b0cad27d55d070f71f381b', 'do_detect': '22fd9b4a0da0665105a0dad61692cd77c29d2de6e42df36869d0c4e20ebe6b9c'},
-    'main/http_status.cpp': {'append_status_json': '52c2b1b19950371f109c16f86846f1d4269cdfefc6caf929c5a339a092a2f56b', 'h_status': 'd06d3dc6e1be37c7bfa372a10f9e01f6b592ebe2fab4d0b9b74894d5c15c51b3', 'http_send_status_json': 'bd305a86cfd4ac55f17680e2c8e2c1fd0138ea46c58d726cc5a9815fe8d68b5c'},
+    'main/http_status.cpp': {'append_status_json': '104eeb17bd66634ed3ac228d31438f2e1d93ccc135506afd1d7619ae4c710f88', 'h_status': 'd06d3dc6e1be37c7bfa372a10f9e01f6b592ebe2fab4d0b9b74894d5c15c51b3', 'http_send_status_json': 'bd305a86cfd4ac55f17680e2c8e2c1fd0138ea46c58d726cc5a9815fe8d68b5c'},
     'main/main.cpp': {'boot_sequence': '535f04b41b357d2fe824ce0228b42dccef9900fa9e974b00b98f81afe1ef0e36'},
     'main/mcp_server.cpp': {'mcp_post': '619f17e24a6be7f967676f27ac84c5441502958638b9fc1d96afc6b3d7d9ef84'},
     'main/logic/stop_context.hpp': {'stop_context_seal': '9a48078c736ae0ae40ffba75e832a62bb86fa7831b6bbff802145d35adef4cc2', 'stop_context_expire': '0c9ac2546bedbcfbb950421742594ac5b6d4813a27fc6a234fc7c5a547f0312a', 'stop_context_step': '1dcf7320eabb145af25dc8b04e307351d45f9ecfc161fda808227fc1e4a3c044'},
@@ -1037,7 +1037,7 @@ BODIES.setdefault('main/ota_update.cpp', {})['ota_task'] = 'de662e0bdc40a7b5ab40
 BODIES.setdefault('main/main.cpp', {})['boot_sequence'] = 'dbd24138cee2c0dc6738ac7aebcbad527be3c7d64f1d75b30817e178da997eb5'
 BODIES['main/hp_poll.cpp']['poll_task'] = 'd8c615499b948e0b026f4309ec51eaab153c999f9f6acdcdfb202ae88512cb8b'
 BODIES['main/hp_modbus.cpp']['mb_admit_worker'] = '59ca8a364dc6238ce38e267ca3cdd789a8821dc38a6750881b4ce637d1ad5ed9'
-BODIES['main/http_status.cpp']['append_status_json'] = '52c2b1b19950371f109c16f86846f1d4269cdfefc6caf929c5a339a092a2f56b'
+BODIES['main/http_status.cpp']['append_status_json'] = '104eeb17bd66634ed3ac228d31438f2e1d93ccc135506afd1d7619ae4c710f88'
 BODIES['main/hp_modbus.cpp']['mb_init'] = 'abaa42496323a873e3990687cfd6893675bfff88094fef9b8e929972c9301327'
 CALLERS.update({
     'mb_admit_worker': {'main/hp_modbus.cpp:<definition>': 1,

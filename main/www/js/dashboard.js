@@ -1934,7 +1934,9 @@ function checkupValue(c) {
 function checkupCardHtml(includeHealth = true) {
   const h = includeHealth ? S.status?.health : null;
   let healthRows = "";
-  if (h && Array.isArray(h.checks)) {
+  const unreadable = h?.persist === "unknown";
+  if (unreadable) healthRows = `<span class="empty">${esc(t("sys.nodata"))}</span>`;
+  if (!unreadable && Array.isArray(h?.checks)) {
     for (const c of h.checks) {
       const key = CHECKUP_ROW[c.id];
       if (!key) continue;                             // a check this UI does not know: skipped, never guessed at
@@ -1948,7 +1950,8 @@ function checkupCardHtml(includeHealth = true) {
   // renderCards() gates the whole card on the diagnostics opt-in, including this observation.
   const rows = healthRows + refrigerantServiceRowHtml();
   if (!rows) return "";                               // older firmware — no card rather than an empty one
-  if (!healthRows) return vcard(t("card.checkup"), rows, "", "", "diagnosis", t("nav.diagnosis"));
+  if (unreadable || !healthRows)
+    return vcard(t("card.checkup"), rows, "", "", "diagnosis", t("nav.diagnosis"));
   // Findings are counts of serialized verdicts, not a health score or a second threshold rule.
   const warnings = h.checks.filter(c => c.verdict === "warn").length;
   const notes = h.checks.filter(c => c.verdict === "info").length;
