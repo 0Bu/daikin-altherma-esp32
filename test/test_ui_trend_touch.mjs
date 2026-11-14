@@ -92,20 +92,22 @@ assert.deepEqual(calls, [
 {
   const keyboardHost = new Host();
   const document = { activeElement: null };
-  let current;
-  const graphHost = { querySelectorAll: () => [current] };
-  const makePlot = () => ({
+  let current, other;
+  const graphHost = { querySelectorAll: () => [other, current] };
+  const makePlot = owner => ({
     dataset: { hist: "temperature", source: "", n: "20" },
     parentElement: { querySelector: () => ({ hidden: false }) },
     closest(selector) {
       if (selector === "[data-hist]") return this;
       if (selector === "#valueGroups, #inspHist, #settingsCards") return graphHost;
+      if (selector === ".vitem") return { querySelector: () => ({ dataset: { desc: owner } }) };
       return null;
     },
     querySelector: () => ({ hidden: false }), querySelectorAll: () => [],
     focus() { document.activeElement = this; },
   });
-  current = makePlot(); current.focus();
+  other = makePlot("X10A reading");
+  current = makePlot("HomeHub reading"); current.focus();
   const state = { histPin: new Map(), scrub: null, insp: "temperature" };
   const moves = [];
   const ctx = vm.createContext({
@@ -113,7 +115,9 @@ assert.deepEqual(calls, [
     historyData: { v: Array.from({ length: 20 }, (_, i) => i), dt: 300, t0: 1000 },
     renderCards: () => {
       keyboardHost.fire("focusout", current);
-      document.activeElement = null; current = makePlot();
+      document.activeElement = null;
+      other = makePlot("X10A reading");
+      current = makePlot("HomeHub reading");
     },
     renderInspect() {}, renderSettings() {},
   });
@@ -132,6 +136,7 @@ assert.deepEqual(calls, [
   keyboardHost.fire("keydown", current, 0, "Enter");
   assert.notEqual(current, first, "pinning must exercise the actual DOM replacement path");
   assert.equal(document.activeElement, current, "the replacement plot keeps keyboard focus");
+  assert.equal(other.dataset.cur, undefined, "the same-series chart in another row keeps its own cursor");
   assert.equal(+current.dataset.cur, 1, "the replacement plot keeps the chosen cursor");
   assert.equal(state.histPin.get("temperature").t, 1300);
   keyboardHost.fire("keydown", current, 0, "ArrowRight");

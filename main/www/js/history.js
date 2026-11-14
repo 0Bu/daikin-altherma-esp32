@@ -1810,12 +1810,17 @@ function scrubEnd(plot) {
   if (S.scrub) { S.scrub = null; renderTrendHosts(); }   // resume the frozen trend hosts
 }
 
+function historyRowOwner(node, host) {
+  const item = node?.closest?.(".vitem") || host?.closest?.(".vitem");
+  return item?.querySelector("[data-desc]")?.dataset.desc;
+}
+
 // Structural poll updates may replace card containers or an inspector's history. Preserve the
 // active control in either path so keyboard users can continue exploring the same series.
 function replaceHistoryHtml(host, html) {
   const active = globalThis.document?.activeElement;
   const { histId, histSeries, hist, source = "" } = active?.dataset || {};
-  const owner = node => node?.closest?.(".vitem")?.querySelector("[data-desc]")?.dataset.desc;
+  const owner = node => historyRowOwner(node, host);
   // The cycling chart may be mounted inside its own slot before the surrounding row is rendered.
   const signature = node => JSON.stringify([node.hasAttribute("data-cycling")
     ? "model:health_cycling" : owner(node), node.outerHTML]);
@@ -1920,13 +1925,14 @@ function renderTrendHosts() {
   const active = typeof document === "undefined" ? null : document.activeElement;
   const host = active?.closest?.("#valueGroups, #inspHist, #settingsCards");
   const id = active?.dataset?.hist, source = active?.dataset?.source || "", cursor = active?.dataset?.cur;
+  const activeOwner = historyRowOwner(active);
   S.trendRebuilding = true;
   try { renderCards(); renderInspect(); renderSettings(); }
   finally { S.trendRebuilding = false; }
   if (!host) return;
   if (!id) return;
   const next = Array.from(host.querySelectorAll("[data-hist]")).find((plot) =>
-    plot.dataset.hist === id && (plot.dataset.source || "") === source);
+    plot.dataset.hist === id && (plot.dataset.source || "") === source && historyRowOwner(plot) === activeOwner);
   if (!next) return;
   next.focus({ preventScroll: true });
   if (cursor != null) { next.dataset.cur = cursor; scrubMove(next, +cursor); }

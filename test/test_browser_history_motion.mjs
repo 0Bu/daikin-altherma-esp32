@@ -895,6 +895,70 @@ async function assertNewGeneration(page, server, fixture, context, hosts) {
   await page.evaluate("delete window.__motionFlat; true");
 }
 
+async function watchCachedDisclosureOpening(page, selector) {
+  await evaluate(page, ({ selector }) => {
+    const container = document.querySelector(selector)?.closest("#valueGroups");
+    if (!container) throw new Error("cached disclosure container missing");
+    const listener = event => {
+      if (!event.isTrusted) throw new Error("cached disclosure requires a native click");
+      const button = document.querySelector(selector), item = button.closest(".vitem");
+      const plot = item.querySelector("[data-hist]"), chart = plot.closest(".vhist");
+      const ancestors = new Set();
+      for (let node = plot; node; node = node.parentNode) ancestors.add(node);
+      let detached = false;
+      const record = records => {
+        for (const mutation of records)
+          for (const node of mutation.removedNodes)
+            if (ancestors.has(node)) detached = true;
+      };
+      const observer = new MutationObserver(record);
+      observer.observe(document, { childList: true, subtree: true });
+      plot.focus({ preventScroll: true });
+      window.__cachedDisclosureOpening = {
+        container, listener, plot, observer, record, detached: () => detached,
+        owner: button.dataset.desc, storedOwner: JSON.parse(chart._histMarkup)[0],
+        polls: window.__motionAllPolls, revision: plot.dataset.rev,
+      };
+    };
+    // The delegated production handler has already mounted the cached chart in this click task.
+    container.addEventListener("click", listener, { once: true });
+    window.__cachedDisclosureOpening = { container, listener };
+    return true;
+  }, { selector });
+}
+
+async function assertCachedDisclosureOpening(page, selector, context) {
+  await page.waitFor("window.__cachedDisclosureOpening?.plot && !_pollBusy && " +
+    "window.__motionAllPolls >= window.__cachedDisclosureOpening.polls + 3");
+  const state = await evaluate(page, ({ selector }) => {
+    const opened = window.__cachedDisclosureOpening;
+    opened.record(opened.observer.takeRecords());
+    opened.observer.disconnect();
+    delete window.__cachedDisclosureOpening;
+    const plot = document.querySelector(selector)?.closest(".vitem")?.querySelector("[data-hist]");
+    return { owner: opened.owner, storedOwner: opened.storedOwner, samePlot: opened.plot === plot,
+      sameFocus: document.activeElement === plot, connected: !opened.detached(),
+      sameRevision: opened.revision === plot?.dataset.rev };
+  }, { selector });
+  assert.deepEqual(state, { owner: state.owner, storedOwner: state.owner, samePlot: true,
+    sameFocus: true, connected: true, sameRevision: true },
+  context + ": native cached opening must keep its owner, plot and focus through real polls");
+}
+
+async function tankCacheState(page) {
+  return evaluate(page, () => {
+    const result = {};
+    for (const id of ["dhw_tank", "smart_grid_mode", "bsh_state"])
+      for (const source of ["x10a", "modbus"]) {
+        const value = S.hist.get(histCacheKey(id, source));
+        if (!value || value.err || Date.now() - value.at >= 60000)
+          throw new Error("missing fresh history reply: " + source + ":" + id);
+        result[source + ":" + id] = [value.gen, value.at];
+      }
+    return result;
+  });
+}
+
 async function disclosure(page, server, fixture, context, selectors, ids, settings = false, animation = {}) {
   await page.evaluate(settings ? "showStage('settings'); true" : "showStage('dashboard'); true");
   if (!settings) {
@@ -923,9 +987,28 @@ async function disclosure(page, server, fixture, context, selectors, ids, settin
   const before = server.historyRequests.length;
   for (const [index, selector] of selectors.entries())
     await toggleDisclosure(page, selector, ids[index], false, context + "/close");
+  const watchCachedTank = !settings && ids.length === 1 && ids[0] === "dhw_tank";
+  if (watchCachedTank) await watchCachedDisclosureOpening(page, selectors[0]);
   for (const [index, selector] of selectors.entries())
     await toggleDisclosure(page, selector, ids[index], true, context + "/cached-reopen");
+  if (watchCachedTank) await assertCachedDisclosureOpening(page, selectors[0], context);
   assert.equal(server.historyRequests.length, before, context + ": cached reopen must not refetch history");
+  if (watchCachedTank) {
+    const fresh = await tankCacheState(page), requestStart = server.historyRequests.length;
+    await toggleDisclosure(page, selectors[0], ids[0], false, context + "/close-before-expiry");
+    await evaluate(page, () => {
+      S.hist.get(histCacheKey("bsh_state", "x10a")).at = Date.now() - 60001;
+      return true;
+    });
+    await toggleDisclosure(page, selectors[0], ids[0], true, context + "/auxiliary-expired");
+    const refreshed = await tankCacheState(page);
+    assert.deepEqual(server.historyRequests.slice(requestStart), ["x10a:bsh_state"],
+      context + ": refresh only the expired auxiliary");
+    assert.equal(refreshed["x10a:bsh_state"][0], fresh["x10a:bsh_state"][0] + 1);
+    delete refreshed["x10a:bsh_state"];
+    delete fresh["x10a:bsh_state"];
+    assert.deepEqual(refreshed, fresh, context + ": retain every other fresh reply");
+  }
   for (const [index, selector] of selectors.entries())
     await toggleDisclosure(page, selector, ids[index], false, context + "/cleanup");
   await page.waitFor("!document.querySelector('#valueGroups .vitem:not(.open) .vhist, #settingsCards .vitem:not(.open) .vhist')",
@@ -1074,6 +1157,12 @@ export async function assertHistoryMotion(page, server, context) {
       window.__motionInspectorRows?.close();
       window.__motionTtl?.gridWitness?.close();
       window.__motionTtl?.rowsWitness?.close();
+      const cachedOpening = window.__cachedDisclosureOpening;
+      if (cachedOpening) {
+        cachedOpening.container.removeEventListener("click", cachedOpening.listener);
+        cachedOpening.observer?.disconnect();
+        delete window.__cachedDisclosureOpening;
+      }
       pollStop(); pollSchedule = () => {}; return true;
     });
     await page.waitFor("!_pollBusy && !S.histBusy.size");
