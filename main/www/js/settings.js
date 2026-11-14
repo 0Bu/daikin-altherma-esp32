@@ -506,6 +506,7 @@ function boardSettingsAvailable() {
     !S.otaCached && !S.otaBusy && !S.otaInstalling;
 }
 let boardDraftIdentity;
+let rejectedBoardDraft;
 function boardSettingsIdentity() {
   const { boot_id, board, env3 } = S.status;
   return JSON.stringify([boot_id, board.config_revision, board.preset_id, board.led_gpio, board.led_type, board.led_inverted,
@@ -513,7 +514,14 @@ function boardSettingsIdentity() {
 }
 function openBoard() {
   if (!boardSettingsAvailable()) return;
-  boardDraftIdentity = boardSettingsIdentity();
+  const identity = boardSettingsIdentity();
+  if (rejectedBoardDraft === identity) {
+    toast(t("board.draft_stale"), "err");
+    void refreshStatus();
+    return;
+  }
+  rejectedBoardDraft = undefined;
+  boardDraftIdentity = identity;
   fillBoard();
   fillEnv3();
   $("bdError").hidden = true;
@@ -909,7 +917,7 @@ function paintOtaInline() {
 }
 function otaInline(text, { ring = false, pct = null, cls = "" } = {}) {
   otaSeq++;
-  S.otaShown = !!(text || ring);          // freezes the Settings rebuild — see renderSettings
+  S.otaShown = !!(text || ring);
   S.otaView = { text, ring, pct, cls };   // lets a slot created after a refresh catch up immediately
   paintOtaInline();
 }
@@ -1342,8 +1350,7 @@ async function resumeOta(s = null) {
 
 // The pre-/status Settings surface used only after a refresh into a running OTA. It deliberately
 // contains ONLY facts /ota/status actually owns (current version + selected channel); connection,
-// plant and memory rows are omitted rather than guessed. The first later /status frame replaces it
-// with the complete cards through renderSettings's settingsHydrated exception.
+// plant and memory rows are omitted here. The first later /status frame restores the complete cards.
 function renderOtaResumeShell(s) {
   if (S.status) return false;
   const current = s.current || "?";
@@ -1507,7 +1514,7 @@ const REBOOT_POLL_WAIT_MS     = 21000;
 // off it reported "Saved" for REJECTED writes: with no reboot to wait for, the follow-up /status
 // answers on the first try, which the poll can't tell apart from a device that came back up.
 // (/set_wifi's 500 on a failed config_save is the same shape: nothing persisted, no reboot.)
-async function saveReboot(url, body, { btn, showError, close, then, busyMsg, busyLabel, mapError }) {
+async function saveReboot(url, body, { btn, showError, close, then, busyMsg, busyLabel, mapError, onError }) {
   // The reboot-poll keeps S.busy set for ~22 s AFTER the modal closes, so the card is reopenable
   // while a change is still landing. Say so — a silent `return` here is exactly the ignored-write
   // feedback gap this whole flow exists to close.
@@ -1532,6 +1539,7 @@ async function saveReboot(url, body, { btn, showError, close, then, busyMsg, bus
   if (!r.ok) {
     const error = await errorInfo(r, t("toast.rejected"));
     reject(mapError ? mapError(error.code, error.message) : error.message);
+    onError?.(error.code);
     return;
   }
   const res = await r.json().catch(() => ({}));

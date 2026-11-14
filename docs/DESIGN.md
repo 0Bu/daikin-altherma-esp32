@@ -325,19 +325,17 @@ gap at that resolution. Current uptime describes only this boot.
 
 Browser storage is not measured history. Source/reboot epochs retire cached rings, index pins,
 mounted plots and in-flight history requests, including A → B → A between polls.
-Replies carry sample epoch and boot identity. Delayed raw or derived replies cannot refill retired
-state or release a successor's busy lease. After a completed live poll, the open inspector and
-visible Dashboard or Settings plots can refresh after the cache cooldown. They share one
-automatic history request per poll. Opening a chart can queue independent reads in that tab.
-Closing a chart ends its gesture. Already queued reads can still fill the cache. A live poll can
-interrupt a first read. The next attempt gets one request timeout to finish before polling resumes.
+Replies carry sample epoch and boot identity. Visible charts refresh after the cache cooldown,
+with one automatic history request per completed live poll. Opening a chart can queue independent
+reads, and closing it ends the gesture. Already queued reads can still fill the cache.
 A failed refresh keeps compatible readings within the most recent day. A distinct marker identifies
 each retained series' last received sample. Categorical timelines keep their separate live cap,
 and weather charts show a verified current forecast even when the measured history is empty.
 
 Hover previews a sample; tap pins it, a second tap on the same sample/Escape clears it. The two views
-of a row share a pin and freeze while either is scrubbed. A dated pin tracks its sample instant.
-Without a device clock, an index pin expires as soon as the plotted series changes. Expired pins
+of a row share a pin where both display its source and freeze while either is scrubbed. A dated
+pin tracks the original boot-relative bucket when available, even if the wall time changes.
+Without a device clock, an index pin expires when the plotted series or its alignment changes. Expired pins
 drop rather than move to a different instant. Closing the inspector preserves a pin for an open
 value row. Collapsing the value panel clears it. Bubbles share one reserved row above the plot, with
 one measurement per line. The moving bubble paints over the pinned bubble with an opaque surface

@@ -97,7 +97,7 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [], elements 
     " inspMembers, inspValues, inspComparisonHtml, inspHeld, liveData, compressorRunning," +
     " waterMoving, pumpFlowConflict, waterThermalKind, activeSpaceKind, ouReadingText, updateSchematicStateA11y, INSPECT," +
     " pelMeasured, pelApproxText, PEL_INSPECT, vRow, vNum, highSideRow, inspHeldHtml, inspUnknownAge," +
-    " inspNowText, heldUnknownText, OUTDOOR_HX_RE };",
+    " inspFieldText, inspNowText, heldUnknownText, OUTDOOR_HX_RE };",
     context, { filename: "main/www/app.sources" });
   context.__api.S = context.S;
   context.__api.setTxLang = (lang) => { context.LANG = lang; };
@@ -916,6 +916,9 @@ const SG_INSP = (c, d) => c.INSPECT.sgrequest;
   assert.equal(c.waterThermalKind(d, true), "heat",
     "active Modbus-only DHW receives heating colours, never cooling or neutral colours");
   assert.equal(c.waterThermalKind({ ...d, defrost: true, pth: -7.7 }, true), "cool");
+  const defrost = { ...d, defrost: true, pth: -7.7, pthKind: "transfer" };
+  assert.equal(c.inspFieldText(c.INSPECT.pth, "what", defrost), "schem.defrost_transfer");
+  assert.match(c.inspNowText(c.INSPECT.phe, defrost), /schem\.defrost_transfer.*-7\.7 kW/);
   assert.equal(c.waterThermalKind({ ...d, defrost: true, pth: null }, true), "neutral");
   assert.equal(c.waterThermalKind({ ...d, defrost: true, pth: 7.7 }, true), "heat");
   assert.equal(d.pthKind, "heating");

@@ -1468,9 +1468,11 @@ const inspSourceField = (e, field, d) => {
 };
 const inspFieldText = (e, field, d) => {
   if (e === INSPECT.pth && field === "what" && d?.defrost === true) return t("schem.defrost_transfer");
+  if (e === INSPECT.phe && field === "now" && d?.defrost === true && d.pth < 0)
+    return t("schem.defrost_transfer") + " ≈ " + fmt1(d.pth) + " kW";
   if (inspHasLocaleField(e, field)) {
     const localized = inspLocaleField(e, field, d);
-    return localized == null ? null : String(localized);
+    if (localized != null || field !== "what") return localized == null ? null : String(localized);
   }
   return tx(inspSourceField(e, field, d));
 };
@@ -1683,6 +1685,7 @@ function inspectSig(e) {
   // happens to be spelled identically in both dictionaries.
   return [LANG, S.insp, inspTitleText(e, d), inspVal(row, d), inspectModbusSignature(fb),
           d && e.head ? e.head(d) : "",
+          inspFieldText(e, "what", d) || "",
           inspNowText(e, d) || "", inspHeld(e, d) ? "held" : "",
           inspUnknownAge(e, d) ? "unknown_age" : "", rows, roomSig].join("|");
 }
@@ -1895,12 +1898,11 @@ function renderInspect(mode = "") {
   // reads as a broken value.
   const sentence = inspNowText(e, d);
   const desc = e.sample ? descFor(e.sample, row || fb) : null;
-  const localizedWhat = inspLocaleField(e, "what", d);
-  const ownWhat = localizedWhat ?? inspSourceField(e, "what", d);
+  const ownWhat = inspFieldText(e, "what", d);
   // A native replacement must retain its source-specific interpretation limits in every locale.
   // Generic inspector copy describes the X10A quantity and cannot override the defining register.
   const preferSourceDesc = fb && desc?.sourceQualified;
-  const what = ownWhat && !preferSourceDesc ? descParaHtml(esc(localizedWhat ?? tx(ownWhat)))
+  const what = ownWhat && !preferSourceDesc ? descParaHtml(esc(ownWhat))
                        : (desc ? descBodyHtml(desc, (row || fb)?.value, descriptionCopy(desc)) : "");
   // Prose stays prose. Every live reading, including a leaf headline's second source, is rendered
   // together after the chart in the divided value list below.

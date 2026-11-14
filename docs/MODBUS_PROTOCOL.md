@@ -429,17 +429,17 @@ green/yellow/red state colours as WiFi, MQTT, Syslog and NTP:
   opinion presupposes a first one, and the only X10A number still in memory is one the bus stopped
   refreshing, so a "difference" against it would be a statement about two *instants* wearing the
   shape of a statement about two *instruments*.
-  ΔT uses the gateway's pair of water temperatures. The heat-output estimate also requires valid
-  flow, an active compressor and a supported mode and transfer direction. HomeHub input register
-  **51** reports heat-pump power consumption in
-  `kW`. The [Daikin EKRHH guide, 4P744838-1E, §9.2.2, p. 43][homehub-ekrhh-guide] leaves its
-  measurement point and heater inclusion unspecified.
-  The dashboard shows the reported input by register offset, since the other `kW` rows are power
-  limit setpoints. The COP gate requires evidence that this input and the plate heat exchanger's
-  output cover the same equipment and heater states.
+  ΔT uses the gateway's water temperatures. The heat-output estimate also requires valid flow, a
+  running compressor and a supported mode and transfer direction.
 * **No HomeHub** — nothing Modbus appears anywhere: no row, no group, no comparison, no banner.
 
 [homehub-ekrhh-guide]: https://www.daikin.nl/content/dam/document-library/Installer-reference-guide/heat/accessories/ekrhh/EKRHH_Installer%20reference%20guide_4PEN744838-1E_English.pdf#page=43
+
+**Electrical input and COP.** HomeHub input register **51** reports heat-pump power consumption in
+`kW`. The [Daikin EKRHH guide, 4P744838-1E, §9.2.2, p. 43][homehub-ekrhh-guide] leaves the
+measurement point and heater inclusion unspecified. The dashboard displays that input and
+withholds COP in the HomeHub-only view because the electrical and heat-exchanger boundaries
+cannot be matched.
 
 Registers with no X10A counterpart get their own group at the very end of the value list, after
 everything X10A carries.

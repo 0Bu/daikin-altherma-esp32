@@ -322,6 +322,9 @@ function validHistoryHeld(ranges, samples) {
   return true;
 }
 
+const X10A_HELD_HISTORY = new Set(["outdoor_air", "outdoor_heat_exchanger", "discharge",
+  "circuit_pressure", "inv_current"]);
+
 // A 288-sample response plus the maximally fragmented held map and escaped labels fits below 4 KiB.
 // Bound decoded bytes before parsing, including when the firmware uses chunked transfer.
 async function readHistoryJson(response) {
@@ -345,6 +348,18 @@ async function readHistoryJson(response) {
     reader.releaseLock();
   }
   return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, size)));
+}
+
+function validHistoryBucket(start, count) {
+  if (start == null) return true;
+  if (!Number.isSafeInteger(start) || start < 0 || start > Number.MAX_SAFE_INTEGER - HIST_MAX_SAMPLES)
+    return false;
+  const uptime = S.status?.uptime_s;
+  if (!Number.isFinite(uptime) || S.otaCached) return true;
+  const now = historyBrowserTime();
+  const seconds = Math.max(0, now - (S.statusReceivedAt ?? now)) / 1000;
+  // Uptime is whole seconds. Allow one crossing of the bucket edge while the request is in flight.
+  return start + Math.max(0, count - 1) <= Math.floor((uptime + seconds + 1 + POLL_TIMEOUT_MS / 1000) / 300);
 }
 
 async function readHistory(id, source, key, epoch, previous, request) {
@@ -380,9 +395,10 @@ async function readHistory(id, source, key, epoch, previous, request) {
         (j.label != null && (typeof j.label !== "string" || j.label.length > 79)) ||
         (j.unit != null && (typeof j.unit !== "string" || j.unit.length > 7)) ||
         (j.dt != null && j.dt !== 300) ||
-        (j.b0 != null && (!Number.isSafeInteger(j.b0) || j.b0 < 0 || j.b0 > Number.MAX_SAFE_INTEGER - HIST_MAX_SAMPLES)) ||
+        !validHistoryBucket(j.b0, j.v.length) ||
         (j.t0 != null && (!Number.isSafeInteger(j.t0) || Math.abs(j.t0) > 8.64e12 - HIST_MAX_SAMPLES * 300)) ||
-        (j.held != null && !validHistoryHeld(j.held, j.v)))) {
+        (j.held != null && (!validHistoryHeld(j.held, j.v) ||
+          (j.held.length > 0 && (expectedSource !== "x10a" || !X10A_HELD_HISTORY.has(id))))))) {
       S.hist.set(key, failed());
       return;
     }
@@ -822,13 +838,14 @@ function historyView(id, source = "", forecast) {
     { source: "room", name: roomHistName(), h: hasRoomHist(id) ? S.hist.get(histCacheKey(id, "room")) : null },
   ].filter((s) => !source || s.source === source);
   let view = alignedHistoryView(id, offered);
+  if (view) view.scope = source;
   if (view && id === "dhw_tank") view.tankAux = tankAuxHistories();
   if (!STATE_HIST[id]) return view;
   if (!view?.v.some(v => v != null)) {
     const live = offered.filter(s => (s.source === "x10a" ? hasHist(id) : hasModbusHist(id)) &&
       stateHistoryCurrent(id, s.source).value != null);
     if (!live.length) return null;
-    view = { id, dt: 300, t0: null, gen: "live", v: [], series: live.map(s => ({
+    view = { id, scope: source, dt: 300, t0: null, gen: "live", v: [], series: live.map(s => ({
       source: s.source, name: s.name, v: [], raw: {},
     })), unavailable: [] };
   } else {
@@ -1170,7 +1187,7 @@ function stateRunWhen(view, from, count) {
     return `${clock(from)}–${clock(from + count)}`;
   }
   const n = view.recordedN ?? view.v.length;
-  if (view.refreshFailed)
+  if (histRetained(view))
     return `${scrubTime(view, from)}–${scrubTime(view, Math.min(n - 1, from + count))}`;
   const old = ((n - from) * view.dt) / 3600;
   const recent = ((n - from - count) * view.dt) / 3600;
@@ -1727,10 +1744,8 @@ function scrubCount(plot) {
 // A tap PINS the readout so the value stays legible after the finger lifts; holding is no longer
 // required. Hover remains transient and paints its preview in front of the pin without changing it.
 //
-// The pin is stored as the sample's INSTANT and re-resolved on every render — the host-tested
-// history_pin_index() rule (logic/history.hpp). A pin whose instant has rolled off the back of the
-// day resolves to -1 and is dropped, rather than clamped to the oldest sample: clamping would leave
-// a readout on screen while silently changing which moment it describes.
+// Prefer the sample's boot-relative bucket. A wall-clock correction can move its displayed time
+// without changing the measurement. Older dated rings without buckets use their recorded time.
 function histPinIndex(id, h) {
   const p = S.histPin.get(id);
   if (!p || !h) return -1;
@@ -1742,25 +1757,37 @@ function histPinIndex(id, h) {
   if (p.live) {
     if (h.liveIndex != null && p.gen === h.gen && p.sources === histPinSources(h) &&
         p.sample === liveHistoryPinSample(id, p.source)) return h.liveIndex;
-    S.histPin.delete(id);
+    if (p.source === (h.scope ?? "")) S.histPin.delete(id);
     return -1;
   }
   if (!h.v.length) return -1;
   if (p.t != null) {
+    if (Number.isInteger(p.bucket)) {
+      if (!Number.isInteger(h.b0)) return -1;
+      return recordedPinIndex(id, h, p, p.bucket - h.b0);
+    }
     if (h.t0 == null) return -1;                 // pinned with a clock, re-resolving without one
-    const rel = p.t - h.t0, half = h.dt / 2;
-    const i = Math.trunc((rel >= 0 ? rel + half : rel - half) / h.dt);
-    if (i < 0 || i >= (h.recordedN ?? h.v.length)) return -1;
-    const shown = STATE_HIST[id] ? h.series : histVisibleSeries(h);
-    if (h.series.some(s => i >= s.expiredFrom && i < s.expiredUntil) &&
-        !shown.some(s => s.v[i] != null || histHeld(s, i))) {
-      S.histPin.delete(id);
+    if (p.anchor != null && Math.abs(p.anchor - h.t0) >= h.dt / 2 && p.gen !== h.gen) {
+      if (p.source === (h.scope ?? "")) S.histPin.delete(id);
       return -1;
     }
-    return i;
+    const rel = p.t - h.t0, half = h.dt / 2;
+    const i = Math.trunc((rel >= 0 ? rel + half : rel - half) / h.dt);
+    return recordedPinIndex(id, h, p, i);
   }
   return p.i < h.v.length && p.gen === histPlottedPinRevision(h) &&
     p.sources === histPinSources(h) ? p.i : -1;
+}
+
+function recordedPinIndex(id, h, point, i) {
+  if (i < 0 || i >= (h.recordedN ?? h.v.length)) return -1;
+  const shown = STATE_HIST[id] ? h.series : histVisibleSeries(h);
+  if (shown.some(s => i >= s.expiredFrom && i < s.expiredUntil) &&
+      !shown.some(s => s.v[i] != null || histHeld(s, i))) {
+    if ((point.source ?? "") === (h.scope ?? "")) S.histPin.delete(id);
+    return -1;
+  }
+  return i;
 }
 
 // Categorical charts show every source lane. Numeric fallback can change the visible instrument
@@ -1806,7 +1833,8 @@ function histPinToggle(id, i, source = "") {
   else if (i >= h.v.length) S.histPin.set(id, { t: forecast.points[i - h.v.length].time, forecast: true });
   else if (i === h.liveIndex) S.histPin.set(id, { i, gen: h.gen, sources: histPinSources(h), source,
     live: true, sample: liveHistoryPinSample(id, source) });
-  else if (h.t0 != null) S.histPin.set(id, { t: h.t0 + i * h.dt });
+  else if (h.t0 != null) S.histPin.set(id, { t: h.t0 + i * h.dt, source, anchor: h.t0, gen: h.gen,
+    bucket: Number.isInteger(h.b0) ? h.b0 + i : null });
   else S.histPin.set(id, { i, gen: histPlottedPinRevision(h), sources: histPinSources(h), source });
   // Render PAST the click guard. That guard exists to stop a POLL from replacing the DOM in the
   // middle of a click; it must not delay the very update the click just asked for — a pin that

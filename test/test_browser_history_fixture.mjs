@@ -98,7 +98,7 @@ function ring(row, source) {
   const base = row.value;
   return {
     id: row.id, label: row.label, source: row.kind === "mqtt" ? "mqtt" : source,
-    boot_id: BOOT_ID, epoch: EPOCH, dt: 300, b0: 1000,
+    boot_id: BOOT_ID, epoch: EPOCH, dt: 300, b0: 0,
     t0: END - 287 * 300, unit: row.unit || "", held: [],
     v: Array.from({ length: 288 }, (_, index) => {
       if ((index + seed) % gapPeriod === 17) return null;

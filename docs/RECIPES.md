@@ -24,8 +24,7 @@ this recipe only when those rows are readable and their physical sensors are fit
 
 Use measured total active power and accumulated kWh, including the indoor/outdoor unit and backup
 heater if their heat is included in the numerator. A compressor-current estimate omits equipment
-and depends on voltage/power factor. [HomeHub input 51](MODBUS_PROTOCOL.md#where-the-readings-go)
-reports heat-pump power consumption. Verify its electrical boundary before using it in a ratio.
+and depends on voltage/power factor. See the [HomeHub input scope](MODBUS_PROTOCOL.md#where-the-readings-go).
 A temperature measured before the backup heater, or a profile without R2T, is usable for this ratio
 only while **BUH is known off** and the other required water readings are available; otherwise its
 electricity is counted without its heat.

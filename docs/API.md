@@ -585,8 +585,9 @@ Pin claims must not
 collide with X10A, the other onboard part or ENV III. A board identity statement can save with no reboot; changing task-owned pins/accessory reboots.
 Switching away from M5Stack retires ENV III in the same atomic save.
 The dashboard sends `boot_id` and `board.config_revision` from its accepted `/status` as
-`boot_id` and `config_revision`. A missing or invalid member of the optional pair returns 400.
-An outdated boot or configuration returns 409 with `code: "board_draft_stale"` before probing
+`boot_id` and `config_revision`. A missing member, non-string boot ID, or invalid numeric revision
+returns 400. A boot ID or revision that differs from the current value returns 409 with
+`code: "board_draft_stale"` before probing
 pins or saving. Reopen the editor from current status before submitting again. Clients can omit both.
 
 `POST /set_env3` is the compatibility route (`enabled`, `sda`, `scl`, all optional). Both board routes

@@ -162,7 +162,7 @@ const fetch = async (url, options = {}) => {
   if (fetchState.mode === "reject") return response(false, { error: "rejected by test" });
   if (fetchState.mode === "reboot" && url === "/set_ntp")
     return response(true, { reboot: true, saved: true });
-  if (url === "/status") return response(true, {});
+  if (url === "/status") return response(true, fetchState.status || {});
   return response(true, { reboot: false, saved: false });
 };
 
@@ -410,14 +410,26 @@ assert.equal(document.getElementById("boardModal").hidden, true);
 ui.S.status = loadedStatus;
 loadRoute(`#settings/${ui.POPUP_ROUTES.boardModal}`);
 fetchState.mode = "board_stale";
+fetchState.status = loadedStatus;
 await document.getElementById("boardForm").fire("submit");
 await new Promise(resolve => setImmediate(resolve));
 assert.equal(document.getElementById("bdError").textContent,
   "Die Board-Einstellungen haben sich geändert. Öffne den Dialog vor dem Speichern erneut.",
   "a race rejected by the device tells the user to reopen the editor in their own language");
 assert.equal(ui.S.busy, false, "the conflict releases the save button");
+assert.equal(document.getElementById("boardModal").hidden, true);
+ui.openBoard();
+assert.equal(document.getElementById("boardModal").hidden, true, "the rejected revision cannot reopen");
+await new Promise(resolve => setImmediate(resolve));
+fetchState.status = { ...loadedStatus, boot_id: "updated-board-boot" };
+ui.openBoard();
+await ui.refreshStatus();
+ui.openBoard();
+assert.equal(document.getElementById("boardModal").hidden, false, "a fresh revision can open");
 fetchState.mode = "ok";
 await document.getElementById("bdCancel").onclick();
+delete fetchState.status;
+ui.S.status = loadedStatus;
 
 // An in-app popup has a real Settings parent: Back closes it and Forward opens the same one again.
 ui.openWifi();

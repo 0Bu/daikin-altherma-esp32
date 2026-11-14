@@ -1007,6 +1007,7 @@ function wireRestOfApp() {
       $("bdError").textContent = t("env.err_pins"); $("bdError").hidden = false;
       toast(t("env.err_pins"), "err"); return;
     }
+    const draftIdentity = boardDraftIdentity;
     saveReboot("/set_board", {
       ...(Number.isInteger(S.status.board.config_revision) && S.status.boot_id
         ? { boot_id: S.status.boot_id, config_revision: S.status.board.config_revision } : {}),
@@ -1029,6 +1030,12 @@ function wireRestOfApp() {
       busyMsg: t(env.enabled ? "env.checking" : "toast.saving_board"),
       busyLabel: env.enabled ? "env.checking" : "btn.saving",
       mapError: env3SaveError,
+      onError: (code) => {
+        if (code !== "board_draft_stale") return;
+        rejectedBoardDraft = draftIdentity;
+        closeBoard();
+        void refreshStatus();
+      },
     });
   });
 }

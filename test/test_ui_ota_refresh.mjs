@@ -234,7 +234,7 @@ function elementsFor(...ids) {
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(S.otaInstalling, true, "the adopted device-side install must own the reachability state");
-  assert.equal(S.otaShown, true, "the resumed progress must freeze only already-rendered Settings cards");
+  assert.equal(S.otaShown, true, "the resumed progress remains available to repaint");
   assert.equal(S.otaView.text, "48%", "the resumed percentage must survive as renderable state");
   assert.equal(elements.hdrIp.textContent, "daikin.local", "the OTA shell restores the reached host identity");
   assert.equal(elements.verLink.textContent, "v1.4.72-dev.333", "the compact status restores the running version");
@@ -281,6 +281,14 @@ function elementsFor(...ids) {
   assert.match(elements.settingsCards.innerHTML, /Protokoll/, "the complete protocol card is restored");
   assert.equal(elements.otaStatSet.children.at(-1)?.textContent, "48%",
     "hydrating the complete cards must repaint the retained OTA percentage");
+  const hydrated = elements.settingsCards.innerHTML;
+  S.transportUnavailable = "status";
+  S.descOpen = new Set();
+  S.status = { ...S.status, diagnostics: { enabled: true } };
+  sandbox.__api.renderSettings();
+  assert.notEqual(elements.settingsCards.innerHTML, hydrated,
+    "Settings content can be reconciled during OTA without replacing its progress evidence");
+  assert.equal(elements.otaStatSet.children.at(-1)?.textContent, "48%");
 }
 
 // A failing /status during an adopted install must not overwrite that stronger, successful

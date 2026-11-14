@@ -202,6 +202,7 @@ const context = {
     return historyReply(url, historyResponse);
   },
   setTimeout, clearTimeout, Date, Map, Set, TextDecoder, console,
+  POLL_TIMEOUT_MS: 6000,
 };
 vm.createContext(context);
 const lifecycleSource = appState.slice(appState.indexOf("// ── History source lifecycle"),
@@ -271,15 +272,22 @@ S.hist.set("modbus:dhw_tank", modbus);
     "the last received marker points at the measurement before the trailing gaps");
   const recentStatus = S.status.uptime_s;
   S.hist.set("dhw_tank", { ...S.hist.get("dhw_tank"), t0: 1768720000 });
-  S.histPin.set("dhw_tank", { t: 1768720000 });
+  h.histPinToggle("dhw_tank", 0, "x10a");
   assert.match(h.histHtml("dhw_tank", "", "Tank", "x10a"), /vhist-cross vhist-pinned/);
   S.status.uptime_s = (x10a.b0 + 289) * 300;
   S.hist.set("dhw_tank", { ...S.hist.get("dhw_tank"), v: [452, 454, null] });
   assert.doesNotMatch(h.histHtml("dhw_tank", "", "Tank", "x10a"), /vhist-cross vhist-pinned/,
     "a dated pin cannot remain on an expired slot while newer compatible history stays visible");
   assert.equal(S.histPin.has("dhw_tank"), false, "a retired pin must not return after the next refresh");
+  S.status.uptime_s = recentStatus;
+  S.hist.set("dhw_tank", { ...x10a, t0: 1768720000 });
+  h.histPinToggle("dhw_tank", 1, "x10a");
+  S.hist.set("dhw_tank", { ...x10a, t0: 1768720310 });
+  assert.equal(h.histPinIndex("dhw_tank", h.historyView("dhw_tank", "x10a")), 1,
+    "a corrected clock cannot move a pin away from the same boot-relative bucket");
+  S.histPin.delete("dhw_tank");
   S.status.uptime_s = (x10a.b0 + 290) * 300;
-  S.hist.set("dhw_tank", { ...S.hist.get("dhw_tank"), v: [452, null, null] });
+  S.hist.set("dhw_tank", { ...S.hist.get("dhw_tank"), refreshFailed: true, v: [452, null, null] });
   assert.match(h.histHtml("dhw_tank", "", "Tank", "x10a"), /Verlauf nicht verfügbar/,
     "the latest retry cannot keep an already old monotonic sample in view");
   S.status.uptime_s = recentStatus;
@@ -307,12 +315,24 @@ assert.equal(h.histCacheKey("dhw_tank", "modbus"), "modbus:dhw_tank");
     { label: "x".repeat(80) }, { unit: "x".repeat(8) },
     { v: ["457"] }, { v: [-32768] }, { v: Array(289).fill(457) },
     { dt: -3 }, { b0: -1 }, { t0: "now" }, { held: [null] }, { held: [[0, 1]] },
+    { held: [[0, 1]], v: [null, 457] },
   ]) {
     S.hist.delete("modbus:dhw_tank");
     historyResponse = { ...defaultHistoryResponse, ...invalid };
     await h.ensureHist("dhw_tank", "modbus");
     assert.equal(S.hist.get("modbus:dhw_tank").err, true, "invalid history cannot enter a source-labelled view");
   }
+  historyResponse = old;
+  S.hist.set("modbus:dhw_tank", modbus);
+  const uptime = S.status.uptime_s;
+  S.status.uptime_s = 32000;
+  S.hist.set("modbus:dhw_tank", { ...modbus, at: 0 });
+  historyResponse = { ...defaultHistoryResponse, b0: 1000000000 };
+  await h.ensureHist("dhw_tank", "modbus");
+  assert.deepEqual(Array.from(S.hist.get("modbus:dhw_tank").v), modbus.v,
+    "an impossible boot-relative bucket must preserve the compatible ring");
+  assert.equal(S.hist.get("modbus:dhw_tank").refreshFailed, true);
+  S.status.uptime_s = uptime;
   historyResponse = old;
   S.hist.set("modbus:dhw_tank", modbus);
 }
@@ -884,6 +904,20 @@ assert.doesNotMatch(bshX10aHtml, /vhist-state-lane-label mb">Modbus/);
 assert.match(bshX10aHtml, /data-source="x10a"/);
 assert.match(h.scrubText(bshX10aView, 1), /^\d{2}:\d{2}–\d{2}:\d{2} · Aktiv$/);
 assert.doesNotMatch(h.scrubText(bshX10aView, 1), /X10A|Modbus|Heizstab|ca\.|min/);
+{
+  const prevValues = S._values, prevModbus = S._modbus;
+  S._values = [{ concept: "bsh_state", value: "1" }];
+  S._modbus = [{ concept: "bsh_state", value: "0" }];
+  const view = h.historyView("bsh_state", "x10a");
+  h.histPinToggle("bsh_state", view.liveIndex, "x10a");
+  assert.equal(h.histPinIndex("bsh_state", h.historyView("bsh_state")), -1,
+    "the paired chart does not render a pin tied to a filtered observation");
+  assert.equal(h.histPinIndex("bsh_state", h.historyView("bsh_state", "x10a")), view.liveIndex,
+    "rendering the paired chart must leave the source-filtered pin intact");
+  S.histPin.delete("bsh_state");
+  S._values = prevValues;
+  S._modbus = prevModbus;
+}
 
 // Related does not mean equivalent: X10A tank preheat and HomeHub disinfection retain separate ids,
 // source lanes and state wording. Neither one may be overlaid as the other's second witness.
@@ -1184,7 +1218,7 @@ S.status.modbus = { host: "192.0.2.10", port: 502, unit_id: 1, enabled: true };
 S.status.uptime_s = 100;
 h.syncHistSources();
 fetchedUrls = [];
-historyResponse = { ...defaultHistoryResponse, v: [501] };
+historyResponse = { ...defaultHistoryResponse, b0: 0, v: [501] };
 await h.ensureHist("dhw_tank", "modbus");
 const homehubKey = h.histCacheKey("dhw_tank", "modbus");
 await h.ensureHist("dhw_tank", "modbus");
@@ -1196,7 +1230,7 @@ assert.equal(S.hist.size, 0);
 assert.equal(S.histPin.size, 0, "source changes must retire pins with the old measurement");
 S.status.modbus.host = "192.0.2.10";
 h.syncHistSources();
-historyResponse = { ...defaultHistoryResponse, v: [502] };
+historyResponse = { ...defaultHistoryResponse, b0: 0, v: [502] };
 await h.ensureHist("dhw_tank", "modbus");
 assert.deepEqual(Array.from(S.hist.get(homehubKey).v), [502],
   "A → B → A must refetch instead of reusing the earlier A lifetime");
@@ -1257,7 +1291,7 @@ assert.equal(S.histPin.size, 0);
 const pendingHistory = [];
 context.fetch = (url) => new Promise((resolve, reject) => pendingHistory.push({ url, resolve, reject }));
 const finishHistory = (pending, values) =>
-  pending.resolve(historyReply(pending.url, { ...defaultHistoryResponse, v: values }));
+  pending.resolve(historyReply(pending.url, { ...defaultHistoryResponse, b0: 0, v: values }));
 for (const failOld of [false, true]) {
   h.invalidateHistSources();
   const old = h.ensureHist("dhw_tank", "modbus");

@@ -2249,8 +2249,8 @@ function renderSettings() {
   }
   // Changed status regenerates card markup. Defer writes while an interactive control has focus
   // so replacement cannot close it mid-selection. A scrub also holds its plot's host.
-  // otaInline paints progress directly into the DOM. S.otaShown preserves that readout and its
-  // terminal messages against card replacement while Connections can still show link changes.
+  // The live OTA view is retained separately and repainted after a card update. This lets visible
+  // history age during a status refusal without dropping the progress message.
   if (S.scrub) return;
   const a = document.activeElement;
   const picking = !!(a && a.classList && (a.classList.contains("pin-sel") ||
@@ -2260,12 +2260,7 @@ function renderSettings() {
     $("connTile").hidden = false;             // resumeOta hides the unavailable pre-status shell
     setHtml("connTile", connectionsHtml());
   }
-  // otaShown normally freezes an ALREADY-RENDERED card so direct progress DOM writes survive the
-  // normal poll updates. A reload reverses that order: resumeOta learns about the download first
-  // and can set otaShown before /status has ever produced the full cards. Permit exactly that first
-  // status-backed render, then repaint the retained OTA view into the newly-created #otaStatSet.
-  const firstStatusRender = !S.settingsHydrated;
-  if (!picking && (!S.otaShown || firstStatusRender)) {
+  if (!picking) {
     setHtml("settingsCards", (S.otaCached ? otaSnapshotCardHtml() : "") + esp32CardHtml());
     if (!S.clickHold) {
       S.settingsHydrated = true;
