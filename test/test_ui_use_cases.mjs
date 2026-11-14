@@ -235,7 +235,10 @@ const context = vm.createContext({
   renderHeader() {},
 });
 
-const source = readAppFragments(["i18n.js"]) + readUiLocale("de") +
+const dashboard = readAppFragments(["dashboard.js"]);
+const retirement = dashboard.slice(dashboard.indexOf("function retireMountedHistory()"),
+  dashboard.indexOf("function selectDashboardCard("));
+const source = readAppFragments(["i18n.js"]) + readUiLocale("de") + retirement +
   readAppFragments(["app_state.js", "settings.js", "bootstrap.js"])
     .replace(/\nboot\(\);\s*$/, "\n");
 vm.runInContext(`${source}
@@ -933,12 +936,22 @@ ui.S.busy = false;
 open(circulationSource);
 // Accepted circulation Save retires the old chart/pin before /status catches up.
 configureValid(circulationSource);
+const settingsHost = document.getElementById("settingsCards");
+const settingsQuery = settingsHost.querySelectorAll;
+let previousCirculationPlot = { remove() { previousCirculationPlot = null; } };
+settingsHost.querySelectorAll = function (selector) {
+  if (selector === "#diagnostics-circulation-detail .vhist")
+    return previousCirculationPlot ? [previousCirculationPlot] : [];
+  return settingsQuery.call(this, selector);
+};
 ui.S.hist.set("circulation_state", { at: Date.now(), v: [10] });
 ui.S.histPin.set("circulation_state", { i: 0, gen: 1 });
 await document.getElementById("circulationForm").fire("submit");
 await settle();
 assert.equal(ui.S.hist.has("circulation_state"), false);
 assert.equal(ui.S.histPin.has("circulation_state"), false);
+assert.equal(previousCirculationPlot, null, "accepted Save must remove the mounted Settings plot immediately");
+settingsHost.querySelectorAll = settingsQuery;
 fetchState.calls.length = 0;
 ui.S.busy = false;
 open(circulationSource);

@@ -272,6 +272,7 @@ const histAwaiting = (key, epoch) => {
 function ensureHist(id, source = "x10a", recoverOnly = false) {
   const epoch = syncHistSources();
   const key = histCacheKey(id, source);
+  const derived = source === "x10a" && DERIVED[id];
   const offered = source === "modbus" ? hasModbusHist(id)
     : source === "env3" ? hasEnv3Hist(id) : source === "room" ? hasRoomHist(id) : hasHist(id);
   if (!offered) return;
@@ -279,7 +280,7 @@ function ensureHist(id, source = "x10a", recoverOnly = false) {
   if (histAwaiting(key, epoch)) return;
   const c = S.hist.get(key);
   if (c && ((recoverOnly && !c.err) || Date.now() - c.at < 60000)) return;
-  if (source === "x10a" && DERIVED[id]) return ensureDerived(id);
+  if (derived) return recoverOnly ? undefined : ensureDerived(id);
   return fetchHistory(id, source, key, epoch, c);
 }
 
@@ -289,6 +290,7 @@ async function fetchHistory(id, source, key, epoch, previous) {
   const timer = controller ? setTimeout(() => controller.abort(), POLL_TIMEOUT_MS) : null;
   let finish;
   const request = { controller, done: new Promise((resolve) => { finish = resolve; }) };
+  const failed = () => ({ at: Date.now(), gen: previous?.gen || 0, source, sourceId, err: true, v: [] });
   (S.histRequests ||= new Map()).set(key, request);
   S.histBusy.add(key);
   try {
@@ -302,7 +304,7 @@ async function fetchHistory(id, source, key, epoch, previous) {
     // error for this cache period, not a reason to re-ask every status period; only "history
     // changed" waits for the next status lifetime below.
     if (j && j.ok === false && j.error !== "history changed; retry") {
-      S.hist.set(key, { at: Date.now(), source, sourceId, err: true, v: [] });
+      S.hist.set(key, failed());
       return;
     }
     // /status owns the source lease. A reply composed after an unseen reset or reboot must wait
@@ -334,7 +336,7 @@ async function fetchHistory(id, source, key, epoch, previous) {
     S.hist.set(key, device);
   } catch (e) {
     if (syncHistSources() === epoch && S.histRequests.get(key) === request)
-      S.hist.set(key, { at: Date.now(), source, sourceId, err: true, v: [] });
+      S.hist.set(key, failed());
   } finally {
     if (timer != null) clearTimeout(timer);
     finish();
@@ -352,10 +354,11 @@ async function fetchHistory(id, source, key, epoch, previous) {
 function ensureHistPair(id, recoverOnly = false) {
   // A repaint needs no result from a request that is already running. Derived charts can still
   // await their own inputs directly through ensureHist.
+  if (recoverOnly && S.histBusy.size) return;
   const requests = [];
   const request = (row, source, offered) => {
     const key = histCacheKey(row, source);
-    if (!offered || S.histBusy.has(key)) return;
+    if (!offered || S.histBusy.has(key) || (recoverOnly && requests.length)) return;
     const started = ensureHist(row, source, recoverOnly);
     if (started) requests.push(started);
   };
@@ -391,6 +394,8 @@ async function ensureDerived(id) {
   const D = DERIVED[id];
   if (S.histBusy.has(id)) return S.histRequests.get(id)?.done;
   if (histAwaiting(id, epoch)) return;
+  const previousGen = S.hist.get(id)?.gen || 0;
+  const failed = () => ({ at: Date.now(), gen: previousGen, err: true, v: [] });
   let finish;
   const request = { epoch, done: new Promise((resolve) => { finish = resolve; }) };
   (S.histRequests ||= new Map()).set(id, request);
@@ -408,7 +413,7 @@ async function ensureDerived(id) {
       return;
     }
     const src = use.map((k) => [k, S.hist.get(k)]).filter(([, h]) => h && !h.err && h.v.length);
-    if (!src.length) { S.hist.set(id, { at: Date.now(), err: true, v: [] }); return; }
+    if (!src.length) { S.hist.set(id, failed()); return; }
     const dt = src[0][1].dt || 300;
     let start = 0, end = 0, mode = "tail";
     if (src.every(([, h]) => Number.isInteger(h.b0))) {
@@ -447,7 +452,7 @@ async function ensureDerived(id) {
         if (last && last[0] + last[1] === i) last[1]++; else heldRuns.push([i, 1]);
       }
     }
-    const gen = ((S.hist.get(id) || {}).gen || 0) + 1;
+    const gen = previousGen + 1;
     const wall = src.find(([, h]) => typeof h.t0 === "number");
     const bucket = src.find(([, h]) => Number.isInteger(h.b0));
     const t0 = mode === "time" ? start
@@ -463,7 +468,7 @@ async function ensureDerived(id) {
                      held: heldRuns, v });
   } catch (e) {
     if (syncHistSources() === epoch && S.histRequests.get(id) === request)
-      S.hist.set(id, { at: Date.now(), err: true, v: [] });
+      S.hist.set(id, failed());
   } finally {
     finish();
     if (S.histRequests.get(id) === request) {
@@ -1918,7 +1923,7 @@ function replaceHistoryHtml(host, html) {
       }
       const slot = (host.id === "valueGroups" || diagnosisCard) && host.querySelector("[data-checkup-hours]");
       if (slot) template.content.querySelector("[data-checkup-hours]")?.replaceWith(slot);
-      if (host.id === "valueGroups") {
+      if (host.id === "valueGroups" || host.id === "settingsCards") {
         // A paused slot has no generated markup. Keep its previous chart only for the same
         // disclosure and series in the same card.
         const key = node => JSON.stringify([node.closest("[data-dashboard-card]")?.dataset.dashboardCard,

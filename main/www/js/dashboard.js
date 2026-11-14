@@ -144,11 +144,17 @@ function renderCards(hold = true) {
   // A source change can select a card whose charts were paused in this frame.
   if (S.dashboardCard !== card) renderCards(false);
   else {
+    for (const slot of selected?.querySelectorAll("[data-chart][inert], [data-checkup-hours][inert]") || [])
+      slot.inert = false;
     syncCheckupCyclingChart(selected);
-    if (S.stage === "dashboard" && selected)
-      for (const button of selected.querySelectorAll(".vitem.open [data-trend]"))
-        void ensureHistPair(button.dataset.trend, true);
   }
+}
+
+function recoverDashboardHistory() {
+  if (S.stage !== "dashboard" || S.scrub || S.clickHold || S.histBusy.size) return;
+  const host = globalThis.document?.getElementById("valueGroups");
+  for (const button of host?.querySelectorAll(".vgroup:not([hidden]) .vitem.open [data-trend]") || [])
+    if (ensureHistPair(button.dataset.trend, true)) break;
 }
 
 // Reconcile navigation against the installed frame, including while a poll is deferred.
@@ -184,14 +190,21 @@ function syncDashboardCards() {
   return selected;
 }
 
-function retireDashboardHistory() {
+function retireMountedHistory() {
   const host = globalThis.document?.getElementById("valueGroups");
   if (!host) return;
   const rebuilding = S.trendRebuilding;
   S.trendRebuilding = true;
   try {
-    for (const slot of host.querySelectorAll("[data-chart], [data-checkup-hours]")) {
-      slot.replaceChildren();
+    const settings = document.getElementById("settingsCards");
+    const inspector = document.getElementById("inspHist");
+    const slots = [...host.querySelectorAll("[data-chart], [data-checkup-hours]"),
+      ...(settings?.querySelectorAll("[data-chart]") || [])];
+    if (inspector) slots.push(inspector);
+    for (const plot of settings?.querySelectorAll("#diagnostics-circulation-detail .vhist") || [])
+      plot.remove();
+    for (const slot of slots) {
+      slot.textContent = "";
       delete slot._checkupMarkup;
     }
   } finally { S.trendRebuilding = rebuilding; }
@@ -201,12 +214,15 @@ function selectDashboardCard(key) {
   const cards = $("valueGroups").querySelectorAll(".vgroup[data-dashboard-card]");
   if (!Array.from(cards).some(card => card.dataset.dashboardCard === key)) return;
   // Switching cards abandons the gesture on the previously visible plot.
-  S.scrub = null;
-  if (S.trendPointer) scrubEnd(S.trendPointer.plot);
+  cancelHistoryGesture();
   S.dashboardCard = key;
-  // Switch within the installed frame while the live poll is in progress.
-  if (_pollBusy) syncDashboardCards();
-  else renderCards(false);
+  // Switch within the installed frame while the live poll is in progress. Its old chart
+  // geometry cannot select a sample from the newer cache before the next complete paint.
+  if (_pollBusy) {
+    const selected = syncDashboardCards();
+    for (const slot of selected?.querySelectorAll("[data-chart], [data-checkup-hours]") || [])
+      slot.inert = true;
+  } else renderCards(false);
 }
 
 /*!
@@ -635,7 +651,7 @@ function circulationSettingsCardHtml() {
       body += descNoteHtml(t("circ.detail.age"), checkupDuration(c.age_s));
     body += `<div class="vdesc-p">${esc(t("circ.settings_help"))}</div>`;
   }
-  if (S.descOpen.has("diagnostics:circulation"))
+  if (S.stage !== "dashboard" && S.descOpen.has("diagnostics:circulation"))
     body += typeof histHtml === "function" ? histHtml("circulation_state", "", t("circ.row")) : "";
   const sourceName = c.configured ? (c.name || "MQTT") : t("circ.not_configured");
   // The face NAMES the source and states its condition in colour — the room-source row's shape. That
@@ -1190,7 +1206,8 @@ function memoryRows(sys) {
     const val = esc(fmtKiB(bytes));
     if (!hid && !d) return vrow(label, fmtKiB(bytes), { cls: "mono num" });
     return descAccordion(`board:${id}`, label, val, "mono num",
-                         d ? descBodyHtml(d, undefined, modelDescriptionCopy(id)) : "", hid, "KiB");
+                         d ? descBodyHtml(d, undefined, modelDescriptionCopy(id)) : "", hid, "KiB",
+                         S.stage === "dashboard" || undefined);
   };
   return row("free_heap", "card.freeheap", sys.free_heap) +
          row("max_alloc", "card.maxalloc", sys.max_alloc);

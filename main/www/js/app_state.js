@@ -110,6 +110,12 @@ const S = {
 // Firmware rings reset when an instrument is disabled or repointed. An endpoint is not a lifetime:
 // A → B → A must fetch A again, and an old response must never populate the new lifetime's cache.
 // Retire all chart/pin leases together; derived charts can depend on several source rings.
+function cancelHistoryGesture() {
+  S.scrub = null;
+  if (S.trendPointer) scrubEnd(S.trendPointer.plot);
+  if (S.cancelCyclingDrag) S.cancelCyclingDrag();
+}
+
 function invalidateHistSources() {
   S.histEpoch = (S.histEpoch || 0) + 1;
   S.hist.clear();
@@ -118,11 +124,10 @@ function invalidateHistSources() {
   S.histRequests?.clear();
   (S.histAwait ||= new Map()).clear();
   S.histPin.clear();
-  S.scrub = null;
-  if (S.trendPointer) scrubEnd(S.trendPointer.plot);
+  cancelHistoryGesture();
   S.inspHistSig = "";
-  // Retire the DOM immediately even when a poll or click is holding the value grid.
-  if (typeof retireDashboardHistory === "function") retireDashboardHistory();
+  // Retire mounted charts even when a poll or click is holding their containers.
+  if (typeof retireMountedHistory === "function") retireMountedHistory();
 }
 function syncHistSources() {
   const s = S.status;
@@ -228,10 +233,17 @@ function writeRoute(stage, popup = null, { replace = false, parent } = {}) {
 }
 
 function showStage(stage) {
+  if (S.stage !== stage) cancelHistoryGesture();
   S.stage = stage;
   for (const [st, id] of Object.entries(VIEW)) $(id).classList.toggle("active", st === stage);
   renderHeader();
   window.scrollTo(0, 0);
+  if (stage === "settings") {
+    if (typeof renderSettings === "function") renderSettings();
+  } else {
+    if (typeof renderCards === "function") renderCards();
+    if (typeof renderInspect === "function") renderInspect();
+  }
 }
 
 function returnToRoute(stage, popup = null) {

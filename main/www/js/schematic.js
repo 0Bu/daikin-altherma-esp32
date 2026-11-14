@@ -1795,6 +1795,7 @@ function renderInspectHist(e, row) {
 }
 
 function renderInspect() {
+  if (S.stage === "settings") return;
   const e = S.insp ? INSPECT[S.insp] : null;
   // Freeze with the other trend hosts during a scrub so structural updates cannot replace the
   // captured plot. scrubEnd resumes every affected host.

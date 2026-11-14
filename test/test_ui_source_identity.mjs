@@ -275,9 +275,9 @@ Object.assign(context, {
   }),
 });
 const initialPair = ui.ensureHistPair("dhw_tank", true);
-const [tankX10a, tankModbus] = pending.splice(0);
-assert.ok(tankX10a && tankModbus);
-assert.equal(timeout.size, 2);
+const [tankX10a] = pending.splice(0);
+assert.ok(tankX10a);
+assert.equal(timeout.size, 1, "background recovery starts one history transport at a time");
 for (let paint = 0; paint < 30; ++paint)
   assert.equal(ui.ensureHistPair("dhw_tank", true), undefined, "polls do not wait on existing requests");
 assert.equal(pending.length, 0);
@@ -285,9 +285,10 @@ const replacement = fixture();
 replacement.history.epoch = 2;
 await status(replacement);
 await initialPair;
-assert.ok(tankX10a.signal.aborted && tankModbus.signal.aborted);
+assert.ok(tankX10a.signal.aborted);
 assert.equal(timeout.size, 0);
 assert.equal(ui.S.hist.size, 0, "aborted old transports leave no errors in the new lifetime");
+ui.S.hist.set("dhw_tank", { at: 0, gen: 1, v: [400] });
 const stalled = ui.ensureHist("dhw_tank");
 const stalledRequest = pending.shift();
 assert.equal(timeout.size, 1);
@@ -305,6 +306,7 @@ assert.equal(pending.length, 1, "the selected chart retries its expired error wi
 reply(pending.shift(), 450, 2);
 await recovering;
 assert.equal(ui.S.hist.get("dhw_tank").v[0], 450);
+assert.equal(ui.S.hist.get("dhw_tank").gen, 2, "recovery cannot reuse the previous ring generation");
 context.fetch = (url) => new Promise((resolve, reject) => pending.push({ url, resolve, reject }));
 
 // A new status lifetime clears every lease, preserving main's global lifecycle model. Completion

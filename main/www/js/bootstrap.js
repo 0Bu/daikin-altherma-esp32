@@ -190,6 +190,7 @@ function wireCyclingChart(host) {
       else paintCyclingChart(chart);
     }
   };
+  S.cancelCyclingDrag = () => finish();
   const arm = () => {
     clearTimeout(watchdog);
     watchdog = setTimeout(finish, SCRUB_MAX_MS);
@@ -290,7 +291,7 @@ function wireTrendScrub(gv) {
   });
   gv.addEventListener("pointermove", (e) => {
     const plot = trendPlotFromTarget(e.target);
-    if (!plot || plot.closest("[hidden]")) return;
+    if (!plot || plot.closest("[hidden], [inert]")) return;
     const pointer = S.trendPointer;
     if (S.scrub && (!pointer || pointer.plot !== plot || pointer.id !== e.pointerId)) return;
     if (pointer) scrubArm(plot);              // a live drag keeps re-arming the watchdog
@@ -298,7 +299,7 @@ function wireTrendScrub(gv) {
   });
   gv.addEventListener("pointerdown", (e) => {
     const plot = trendPlotFromTarget(e.target);
-    if (!plot || plot.closest("[hidden]") || S.scrub) return;
+    if (!plot || plot.closest("[hidden], [inert]") || S.scrub) return;
     S.trendPointer = { plot, id: e.pointerId };
     S.scrub = plot.dataset.hist;
     scrubArm(plot);
@@ -334,7 +335,7 @@ function wireTrendScrub(gv) {
       // Read the geometry BEFORE tearing anything down: scrubEnd may rebuild, and `plot` is then a
       // detached node whose bounding box is all zeroes.
       const label = plot.dataset.hist;
-      const i = e.type === "pointerup" && !plot.closest("[hidden]") ? scrubIndex(plot, e.clientX) : -1;
+      const i = e.type === "pointerup" && !plot.closest("[hidden], [inert]") ? scrubIndex(plot, e.clientX) : -1;
       scrubEnd(plot);
       if (i >= 0) histPinToggle(label, i, plot.dataset.source || "");
     });
@@ -344,7 +345,7 @@ function wireTrendScrub(gv) {
   // that a keyboard couldn't reach.
   gv.addEventListener("keydown", (e) => {
     const plot = trendPlotFromTarget(e.target);
-    if (!plot) return;
+    if (!plot || plot.closest("[hidden], [inert]")) return;
     const n = scrubCount(plot);
     const step = e.key === "ArrowLeft" ? -1 : e.key === "ArrowRight" ? 1 : 0;
     if (!step && !["Home", "End", "Escape", "Enter", " "].includes(e.key)) return;
@@ -1112,6 +1113,7 @@ async function pollTick() {
     _pollBusy = false;
   }
 
+  if (ok && typeof recoverDashboardHistory === "function") recoverDashboardHistory();
   _pollFails = ok ? 0 : Math.min(_pollFails + 1, 4);
   pollSchedule(_pollFails ? Math.min(POLL_VALUES_MS * 2 ** _pollFails, POLL_BACKOFF_MAX_MS)
                           : POLL_VALUES_MS);

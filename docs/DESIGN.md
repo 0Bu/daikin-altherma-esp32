@@ -317,10 +317,10 @@ restore dated five-minute journal records after clock sync; short interruptions 
 gap at that resolution. Current uptime describes only this boot.
 
 Browser storage is not measured history. Source/reboot epochs retire cached rings, index pins,
-mounted dashboard plots and in-flight history requests, including A → B → A between polls.
+mounted plots and in-flight history requests, including A → B → A between polls.
 Replies carry sample epoch and boot identity. Delayed raw or derived replies cannot refill retired
-state or release a successor's busy lease. A visible open dashboard plot can retry a transient
-fetch failure after the cache cooldown.
+state or release a successor's busy lease. After a completed live poll, an open dashboard plot can
+retry a transient fetch failure after the cache cooldown, one recovery request per poll.
 
 Hover previews a sample; tap pins it, a second tap on the same sample/Escape clears it. Pins attach
 to the sample instant and row, not array index or a particular chart. The two views of one row

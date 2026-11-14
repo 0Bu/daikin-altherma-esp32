@@ -1013,6 +1013,8 @@ async function assertInactiveCardHistory(page, selector, context) {
         document.removeEventListener("pointerdown", switching);
         const captured = event.isTrusted && S.trendPointer?.plot === plot &&
           plot.hasPointerCapture(event.pointerId);
+        showStage("settings");
+        showStage("dashboard");
         document.querySelector(selectors.other).click();
         document.querySelector(selectors.own).click();
         window.__switchDuringScrub = { captured, active: !!S.trendPointer || !!S.scrub,
@@ -1132,13 +1134,15 @@ async function disclosure(page, server, fixture, context, selectors, ids, settin
         nav.find(other => other.dataset.card === own).click();
         const current = document.querySelector(selector).closest(".vitem");
         return { hadPausedChart: !!prior, visible: !current.closest("[hidden]"),
-          retired: !prior?.isConnected && !current.querySelector(".vhist") };
+          retired: !prior?.isConnected && !current.querySelector(".vhist"),
+          inert: current.querySelector("[data-chart]").inert };
       } finally {
         _pollBusy = false;
         renderCards(false);
+        recoverDashboardHistory();
       }
     }, { selector: selectors[0] });
-    assert.deepEqual(heldSelection, { hadPausedChart: true, visible: true, retired: true },
+    assert.deepEqual(heldSelection, { hadPausedChart: true, visible: true, retired: true, inert: true },
       context + ": selection during a held poll cannot reveal a retired chart");
     await page.waitFor("S.hist.has('dhw_tank') && !S.histBusy.size && !_pollBusy");
     assert.ok(server.historyRequests.slice(retiredAt).includes("x10a:dhw_tank"),

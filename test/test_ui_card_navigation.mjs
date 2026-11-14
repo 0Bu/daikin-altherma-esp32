@@ -48,7 +48,8 @@ class Element {
     if (selector === ".vgroup[data-dashboard-card]")
       return this.children.filter(child => child.dataset.dashboardCard != null);
     if (selector === "[data-card]") return this.children.filter(child => child.dataset.card != null);
-    if (selector === ".vitem.open [data-trend]") return [];
+    if (selector === "[data-chart][inert], [data-checkup-hours][inert]" ||
+        selector === "[data-chart], [data-checkup-hours]") return [];
     throw new Error(`unhandled card-navigation selector: ${selector}`);
   }
 }
