@@ -1006,7 +1006,7 @@ BODIES['main/history.cpp'].update({'history_modbus_reset_scope_locked': 'cbb56d6
  'flash_build_next_record': 'd6a33f73b0e9acb3b80aa66cf64c37f73aba25eac1ebfa5297da0ff3c627bd06'})
 BODIES['main/history_target.cpp'] = {'history_modbus_target': 'a768932c642ee9db5356c672b8ce1876a9ddc6c14385b290494c265f38a7f156'}
 BODIES['main/hp_modbus.cpp'] = {'mb_ensure_connected': 'a09adc44fb9ad2fea8e8f5c364e1a31a1d8eb44314c5f279d1e9d734ea5b4238',
- 'mb_poll_once': '50e30ed6dcc44b9abaaf77216d9bcae7beee3e985d073e94d6cbdc99346dbd22',
+ 'mb_poll_once': 'e06701710e482adb7830f1fe7fd01c961b598da46efa23d35dd0e905efeb28b7',
  'status_socket_open': '6acb79527aee70827e7a0a62457febca550aa66fb7c71d750fcb3a56133a62c5'}
 BODIES['main/hp_modbus.cpp']['admit_answering_peer'] = (
     '54a513bfa442904529aefbfe90436744c8aa37efb6bd75ef5d622d9e5d3d4aa9')

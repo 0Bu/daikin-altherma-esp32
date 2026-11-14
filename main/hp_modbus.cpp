@@ -1496,7 +1496,9 @@ static bool mb_poll_once(uint32_t cycle_target_generation, bool allow_reconnect)
     }
     const logic::OutdoorEvidence plant_outdoor = logic::outdoor_homehub_evidence(
         outdoor_row_answered, current_session, outdoor_temperature_c);
-    if (current_session && gates.received_data && !admit_answering_peer(cycle_target_generation)) {
+    // A probe-only pressure row can enter the live cache without qualifying the history bind.
+    if (current_session && (gates.received_data || !fresh.empty()) &&
+        !admit_answering_peer(cycle_target_generation)) {
         // An admitted MQTT publish or settings save owns the boundary. Retry a full sweep so
         // neither HTTP nor MQTT can see the new peer before its identity transition.
         s_cycle_tick = 0;

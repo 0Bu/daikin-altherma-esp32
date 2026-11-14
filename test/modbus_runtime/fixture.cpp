@@ -808,6 +808,7 @@ struct Peer {
     std::atomic<bool>         batch_exception{false};
     std::atomic<int>          probe_exception{-1};
     std::atomic<bool>         all_exceptions{false};
+    std::atomic<bool>         only_pressure{false};
     std::atomic<bool>         space_route_exception{false};
     std::atomic<bool>         compressor_exception{false};
     std::mutex                response_mutex;
@@ -873,7 +874,8 @@ struct Peer {
                 std::vector<uint8_t> r;
                 const int            probe_code =
                     req[7] == 4 && addr == 78 && qty == 1 ? probe_exception.load() : -1;
-                if (all_exceptions || (batch_exception && qty > 1) ||
+                if (all_exceptions || (only_pressure && !(req[7] == 4 && addr == 78 && qty == 1)) ||
+                    (batch_exception && qty > 1) ||
                     (space_route_exception && req[7] == 4 && addr == 36 && qty == 1) ||
                     (compressor_exception && req[7] == 4 && addr == 30 && qty == 1) ||
                     probe_code >= 0)
@@ -1424,6 +1426,43 @@ void probe_resolved_peer_reconnect() {
         REQUIRE(cache_history_generation == 0);
     }
     REQUIRE(s_target_generation == generation && sdk::mdns_a_calls == 5);
+    close_sock();
+}
+void probe_only_replacement_retires_predecessor() {
+    reset();
+    const TcpListener original, replacement;
+    const uint32_t    original_ipv4    = htonl(0xc0000232);
+    const uint32_t    replacement_ipv4 = htonl(0xc0000233);
+    sdk::tcp_peer_routes    = {{{original_ipv4, original.port}, {replacement_ipv4, replacement.port}}};
+    adapter::cfg.mb_host    = "reconnect-harness.local";
+    adapter::cfg.mb_port    = original.port;
+    adapter::cfg.mb_unit_id = 1;
+    s_target_enabled        = true;
+    const auto generation   = s_target_generation.load();
+    const auto open         = [&](uint32_t ipv4, const TcpListener& listener) {
+        sdk::mdns_a_result.addr = ipv4;
+        REQUIRE(mb_ensure_connected(adapter::cfg.mb_host, adapter::cfg.mb_port, 1, generation,
+                                    history_modbus_generation()));
+        return listener.accept_peer();
+    };
+    {
+        Peer peer(open(original_ipv4, original), {{MbFunc::ReadInput, 79, MB_UNSUPPORTED}});
+        poll_once();
+        REQUIRE(mb_values_live() && adapter::mqtt_peer_cleanups == 0);
+        peer.break_link = true;
+        poll_once();
+        REQUIRE(s_sock < 0 && !mb_values_live());
+    }
+    Peer       peer(open(replacement_ipv4, replacement), {{MbFunc::ReadInput, 79, 240}});
+    peer.only_pressure          = true;
+    const auto original_history = adapter::history_generation;
+    poll_once();
+    const auto rows = snapshot_rows();
+    REQUIRE(rows.size() == 1);
+    REQUIRE(cached_row(rows, 79).value == "2.40");
+    REQUIRE(mb_status().profile_basis == ModbusProfileBasis::Affirmative);
+    REQUIRE(adapter::mqtt_peer_cleanups == 1 && adapter::heating_curve_peer_resets == 1);
+    REQUIRE(adapter::history_generation == original_history);
     close_sock();
 }
 void definition_snapshot_cutover() {
@@ -2399,6 +2438,7 @@ int main(int argc, char** argv) {
         {"probe_homehub_rows", test::probe_homehub_rows},
         {"native_gateway_baseline", test::native_gateway_baseline},
         {"probe_resolved_peer_reconnect", test::probe_resolved_peer_reconnect},
+        {"probe_only_replacement_retires_predecessor", test::probe_only_replacement_retires_predecessor},
         {"definition_snapshot_cutover", test::definition_snapshot_cutover},
         {"poll_full_fast_break", test::poll_full_fast_break},
         {"poll_batch_fallback", test::poll_batch_fallback},

@@ -52,7 +52,7 @@ try {
   const binary = compile(sourcePath, "production");
   const baseline = execute(binary, [], 20000);
   assert.equal(baseline.status, 0, `production runtime cases\n${baseline.stdout}${baseline.stderr}`);
-  const baselineCount = 45;
+  const baselineCount = 46;
   assert.match(baseline.stdout, new RegExp(`PASS total=${baselineCount}\\b`));
   console.log(baseline.stdout.trim());
 
@@ -241,6 +241,11 @@ try {
       name: "peer-cutover-ignores-held-publication", scenario: "probe_resolved_peer_reconnect",
       before: /if \(!cutover\.acquired\(\) \|\|\s*s_target_generation\.load\(std::memory_order_acquire\) != target_generation\)/,
       after: "if (s_target_generation.load(std::memory_order_acquire) != target_generation)",
+    },
+    {
+      name: "peer-cutover-ignores-probe-only-state", scenario: "probe_only_replacement_retires_predecessor",
+      before: "(gates.received_data || !fresh.empty())",
+      after: "gates.received_data",
     },
     {
       name: "history-resolved-peer", scenario: "probe_resolved_peer_reconnect",
