@@ -230,8 +230,9 @@ bound at read time. A stale source
 withholds current fault-clear/current pressure and reassuring assessments; dated findings remain.
 The serializer captures `health.persist`, the judged window and Cycling hours together.
 The independently collected Cycling Stop context can still report its own evidence.
-`health.persist:"flash_pending"` means recovery is awaiting clock or source confirmation.
-Whether there are compatible stored hours is still undetermined.
+`health.persist:"flash_pending"` means flash recovery has yet to establish whether compatible
+hours exist. It may be waiting for clock or source confirmation, or a read error may have
+stopped the attempt. Device logs identify read errors.
 `fresh` means none were selected. `flash` means admissible dated hourly reconstruction with live
 precedence. Completed RAM hours are never adopted. `unknown` means the snapshot was unreadable.
 `model_changed` covers a source or link reset. `diagnostics_disabled` and `diagnostics_changed`

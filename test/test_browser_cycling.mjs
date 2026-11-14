@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { makeHistoryMotionFixture } from "./test_browser_history_fixture.mjs";
 
 const ROW = "button[data-desc='model:health_cycling']";
+const DIAGNOSIS = '[data-dashboard-card="diagnosis"]';
 const CHART = ".checkup-cycling-chart";
 const COLS = `${CHART} .checkup-chart-cols`;
 const OPEN = 23;
@@ -569,6 +570,28 @@ export async function assertCyclingChart(page, server, context) {
       };
     })()`), { timeline: false, counts: ["22"], selected: false },
     context + ": a reboot discards the previous trace and selection and shows saved hourly starts");
+    const restoredHealth = { ...status.health, persist: "flash" };
+    status.health = { status: "unavailable", persist: "unknown",
+      checks: [{ id: "cycling", verdict: "unavailable" }] };
+    for (const time of ["2026-11-13T15:15:01Z", "2026-11-13T15:15:02Z"]) {
+      await poll(time);
+      const diagnosis = await evaluate(page, ({ card, row, chart }) => {
+        const host = document.querySelector(card);
+        const empty = host.querySelector(".empty");
+        return { empty: empty?.textContent, visible: !!empty?.getClientRects().length,
+          cycling: !!host.querySelector(row), chart: !!host.querySelector(chart) };
+      }, { card: DIAGNOSIS, row: ROW, chart: CHART });
+      assert.deepEqual(diagnosis, { empty: "No data", visible: true, cycling: false, chart: false },
+        context + ": an unreadable snapshot removes the previously visible evidence");
+    }
+    status.health = restoredHealth;
+    await poll("2026-11-13T15:15:03Z");
+    assert.equal(await evaluate(page, row => document.querySelector(row)?.getClientRects().length > 0, ROW),
+      true, context + ": Cycling returns when the snapshot becomes readable");
+    if (!(await evaluate(page, chart => !!document.querySelector(chart), CHART))) await tap(page, ROW);
+    await page.waitFor(`!!document.querySelector(${JSON.stringify(hour(RESTORED) + " b")})`);
+    assert.equal(await evaluate(page, selector => document.querySelector(selector).textContent, hour(RESTORED) + " b"),
+      "22", context + ": a readable snapshot restores the archived count");
     assert.ok(updates >= 3, context + ": verify continuity across repeated production polling");
     console.log("cycling chart checked: " + context + "; " + updates + " live status polls");
   } finally {
