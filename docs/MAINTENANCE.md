@@ -48,11 +48,9 @@ UI evidence remain distinct.
 
 ### CI checkout and publication cost
 
-The dev workflow starts its signed build after the mechanical checks succeed. On a single squash
-merge, main can reuse successful steps from the completed PR workflow for the identical Git tree and
-first parent. A changed workflow, missing proof or skipped step keeps its regular check. The
-signing job still builds the exact main commit. CI/release contracts own the provenance, signing,
-stack-budget, reproducibility, readback and OTA selftests; the build-contract step adds only its
+The dev workflow starts its signed build after the local-check receipt matches the squash tree and
+its first parent. The signing job still builds the exact main commit. CI/release contracts own the
+provenance, signing, stack-budget, reproducibility, readback and OTA selftests; the build-contract step adds only its
 distinct configuration-default and size-report tests. Actual ELF and signed-artifact checks still
 run against each build. The publisher verifies signatures, then its candidate gate validates the
 source-bound manifest, complete binary inventory, installer plan and changelog once before mutation.
@@ -76,6 +74,27 @@ checking their bytes and signature. Attempts, delays and timeouts are unchanged.
 and CDN propagation overlap this wait; do not add Pages job durations to the main critical path.
 Measure checkout, queue/startup, downloads, compilation, tests, signing, deployment and public
 readback separately. Claim CI acceleration only after a comparable run of the published change.
+
+### Local release checks
+
+The native `pre-push` hook runs the repository's full mechanical suite and unsigned ESP32-S3
+compile for maintainer pushes. It refreshes `origin/main` and checks the prospective merge tree
+in a private snapshot with main as the first parent. It runs the formatter at its
+pinned version, headless Linux Chromium and WebKit for browser-relevant changes, the pinned
+coredump decoder and the real-cJSON runtime suite. Fork contributors can submit a PR, then a
+maintainer reviews and tests its exact head with the same entry point on a local branch.
+
+To run the gate before pushing, or against a checked-out fork head, run
+`python3 tools/release/push_checks.py "$(git rev-parse HEAD)"` in the clean checkout.
+Post the emitted `daikin-local-release-checks` line as a new PR comment from the maintainer
+account. It is a maintainer assertion of a completed local run. It has a 24-hour window through
+merge. Editing the PR description refreshes `gates`, which validates the comment author,
+head, current main, merge tree and existing review records. Editable checkboxes document the
+reviews. The legacy PR build keeps running on the bootstrap PR because the protected base does
+not yet contain the verifier. Subsequent PRs keep both required check names and use only the
+brief admission jobs. A missing receipt blocks merge and signed publication.
+Existing open PRs need a fresh receipt and a PR policy run before merging after the cutover.
+Manual stable publication also requires a receipt that was valid when that main commit merged.
 
 ### First Pages publication
 

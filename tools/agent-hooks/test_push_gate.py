@@ -14,6 +14,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 ORIGIN = "https://github.com/example/fixture.git"
+CANONICAL = "https://github.com/0Bu/daikin-altherma-esp32.git"
 ZERO = "0" * 40
 
 
@@ -26,6 +27,7 @@ class PushGateTests(unittest.TestCase):
         self.root = Path(self.fixture.name).resolve()
         self.response = Path(self.control.name) / "response.json"
         self.query_log = Path(self.control.name) / "query.json"
+        self.suite_log = Path(self.control.name) / "suite"
         for relative in (
             ".githooks/pre-push",
             "tools/agent-hooks/require-pr-gates.sh",
@@ -41,6 +43,13 @@ class PushGateTests(unittest.TestCase):
         audit = scripts / "run-agentic-setup-audit.sh"
         audit.write_text('#!/usr/bin/env bash\nexit "${FIXTURE_AUDIT_RC:-0}"\n')
         audit.chmod(0o755)
+        python = scripts / "agent-python.sh"
+        python.write_text(
+            '#!/usr/bin/env bash\n'
+            'printf "%s\\n" "$2" > "$FIXTURE_SUITE_LOG"\n'
+            'exit "${FIXTURE_SUITE_RC:-0}"\n'
+        )
+        python.chmod(0o755)
         runner = scripts / "gh-with-git-credentials.sh"
         runner.write_text('''#!/usr/bin/env python3
 import json, os, pathlib, sys
@@ -66,6 +75,7 @@ print(pathlib.Path(os.environ["FIXTURE_RESPONSE_FILE"]).read_text())
                     if not key.startswith(("AGENT_", "PROJECT_DIR", "FIXTURE_"))}
         self.env.update(FIXTURE_QUERY_LOG=str(self.query_log),
                         FIXTURE_RESPONSE_FILE=str(self.response),
+                        FIXTURE_SUITE_LOG=str(self.suite_log),
                         PYTHONDONTWRITEBYTECODE="1")
         self.set_pr("source")
 
@@ -121,6 +131,14 @@ print(pathlib.Path(os.environ["FIXTURE_RESPONSE_FILE"]).read_text())
     def test_successful_empty_query_allows_initial_push(self):
         self.response.write_text("[]")
         self.assertEqual(self.gate().returncode, 0)
+
+    def test_canonical_initial_push_requires_the_complete_local_suite(self):
+        self.git("remote", "set-url", "origin", CANONICAL)
+        self.response.write_text("[]")
+        self.assertEqual(self.gate(url=CANONICAL, extra={"FIXTURE_SUITE_RC": "1"}).returncode, 2)
+        self.assertFalse(self.query_log.exists())
+        self.assertEqual(self.suite_log.read_text().strip(), self.sha)
+        self.assertEqual(self.gate(url=CANONICAL).returncode, 0)
 
     def test_foreign_remote_is_rejected_before_query(self):
         self.assertEqual(self.gate(url="https://github.com/example/other.git").returncode, 2)

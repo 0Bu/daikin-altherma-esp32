@@ -85,8 +85,8 @@ fi
     echo "ci-build-all: --verify-reproducible is only valid for a signed publishing build" >&2
     exit 2
 }
-[ "$TEST_CJSON" = true ] || { [ "$MODE" = publish ] && [ "$VERIFY_REPRODUCIBLE" = false ]; } || {
-    echo "ci-build-all: cJSON evidence reuse requires a development publication build" >&2
+[ "$TEST_CJSON" = true ] || [ "$MODE" = publish ] || {
+    echo "ci-build-all: cJSON evidence reuse requires a publication build" >&2
     exit 2
 }
 
@@ -121,10 +121,6 @@ else
 fi
 
 VERSION="${1:-$(tr -d '[:space:]' < version.txt)}"
-[ "$TEST_CJSON" = true ] || [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+-dev\.[0-9]+$ ]] || {
-    echo "ci-build-all: cJSON evidence reuse requires a dev version" >&2
-    exit 2
-}
 TARGETS=(esp32s3)
 DIST=dist; rm -rf "$DIST"; mkdir -p "$DIST"
 SIGN_KEY="${OTA_SIGNING_KEY_FILE:-ota_signing_key.pem}"

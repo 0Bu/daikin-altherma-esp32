@@ -16,6 +16,7 @@ concurrency:
 permissions:
   contents: read
   pull-requests: read
+  issues: read
 
 jobs:
   # Keep this job named `gates`: branch protection requires that check alongside `build`.
@@ -27,6 +28,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
+      issues: read
     steps:
       - name: Check out trusted base policy
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -62,6 +64,8 @@ jobs:
             || { echo "agent policy: workflow head $EVENT_HEAD_SHA is stale; current PR head is $current_head" >&2; exit 2; }
           [ "$current_base" = "$EVENT_BASE_SHA" ] \
             || { echo "agent policy: workflow base $EVENT_BASE_SHA is stale; current PR base is $current_base" >&2; exit 2; }
+
+          python3 tools/release/verify_push_proof.py pr "$PR_NUMBER" "$current_head"
 
           # Read the current editable text from GitHub. The scanner and its rules come from the
           # protected workflow commit; this job never checks out the candidate branch.

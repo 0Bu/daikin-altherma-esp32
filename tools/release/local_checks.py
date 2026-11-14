@@ -33,7 +33,8 @@ class CheckError(ValueError):
 
 def check_environment():
     # Do not borrow a caller-supplied Git worktree/index or CI coverage runner identity.
-    ignored = {"BASH_ENV", "ENV", "NODE_OPTIONS", "GITHUB_ACTIONS", "RUNNER_OS", "ImageOS"}
+    ignored = {"BASH_ENV", "ENV", "NODE_OPTIONS", "GITHUB_ACTIONS", "RUNNER_OS", "ImageOS",
+               "GH_TOKEN", "GITHUB_TOKEN", "OTA_SIGNING_KEY_FILE"}
     env = {key: value for key, value in os.environ.items()
            if not key.startswith("GIT_") and key not in ignored}
     env["GIT_NO_REPLACE_OBJECTS"] = "1"
@@ -71,24 +72,32 @@ def source(root, env):
     return head, tree, base
 
 
+def hydrate_parent_coverage(root, env, base):
+    # A filtered clone may still need this parent blob once before going offline.
+    coverage_file = "tools/coverage/branch_baseline.json"
+    if git(root, env, "ls-tree", base, "--", coverage_file):
+        git(root, env, "cat-file", "-e", f"{base}:{coverage_file}")
+
+
 @contextmanager
-def frozen_checkout(root, env, identity):
-    # Only Git objects are shared. The index, metadata and working files are private, and ignored
-    # files in the caller's checkout do not enter the test. Coverage can still read both revisions.
-    with tempfile.TemporaryDirectory(prefix="daikin-release-source-") as scratch:
+def frozen_checkout(root, env, identity, *, scratch_parent=None, container_visible=False):
+    # The index, metadata and working files are private, and ignored caller files are excluded.
+    # The container path copies its objects and never relies on a host-only alternate.
+    with tempfile.TemporaryDirectory(prefix="daikin-release-source-", dir=scratch_parent) as scratch:
         checkout = Path(scratch) / "source"
         offline = {**env, "GIT_NO_LAZY_FETCH": "1", "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
-        git(root, offline, "clone", "--quiet", "--shared", "--no-checkout", "--no-tags",
+        clone_options = ("--local", "--no-hardlinks") if container_visible else ("--shared",)
+        git(root, offline, "clone", "--quiet", *clone_options, "--no-checkout", "--no-tags",
             "--template=", str(root), str(checkout))
+        if container_visible and (checkout / ".git/objects/info/alternates").exists():
+            raise CheckError("container build requires an isolated Git object directory")
         git(checkout, offline, "-c", "core.hooksPath=/dev/null",
             "checkout", "--detach", "--quiet", identity[0])
         if source(checkout, offline) != identity:
             raise CheckError("isolated local checkout does not match the verified Git source")
         # Do not let a partial clone silently drop the inherited coverage floor if its blob is
         # missing. A parent with no baseline is valid, but an unreadable one is not.
-        coverage_file = "tools/coverage/branch_baseline.json"
-        if git(checkout, offline, "ls-tree", "HEAD^1", "--", coverage_file):
-            git(checkout, offline, "cat-file", "-e", f"HEAD^1:{coverage_file}")
+        hydrate_parent_coverage(checkout, offline, "HEAD^1")
         yield checkout, offline
         if source(checkout, offline) != identity:
             raise CheckError("isolated Git source changed during local release checks")
@@ -233,7 +242,7 @@ def run_checks(root, env):
     return records
 
 
-def verify(root, *, premerge=False, expected_head=None):
+def verify(root, *, premerge=False, expected_head=None, require_receipt=False):
     env = check_environment()
     identity = source(root, env)
     if expected_head is not None and identity[0] != expected_head:
@@ -261,7 +270,7 @@ def verify(root, *, premerge=False, expected_head=None):
         with open_cache(path, create=True) as directory:
             save_receipt(directory, identity, records)
     except (OSError, ValueError) as error:
-        if premerge:
+        if premerge or require_receipt:
             raise CheckError("local checks passed but the private receipt could not be saved") from error
         print("Local checks passed without a reusable receipt", file=sys.stderr)
     return False

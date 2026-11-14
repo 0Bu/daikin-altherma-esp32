@@ -56,8 +56,9 @@ check_rc "publishing mode requires explicit source SHA" 2 \
 check_rc "default mode refuses missing key" 1 \
     env OTA_SIGNING_KEY_FILE="$T/no-such-key.pem" "$T/pack/scripts/ci-build-all.sh" \
         --source-sha "$SOURCE_SHA" 1.0.0
-check_rc "cJSON reuse is refused for a stable build" 2 \
-    "$T/pack/scripts/ci-build-all.sh" --with-tested-cjson --source-sha "$SOURCE_SHA" 1.0.0
+check_rc "cJSON reuse in a stable build still requires a signing key" 1 \
+    env OTA_SIGNING_KEY_FILE="$T/no-such-key.pem" "$T/pack/scripts/ci-build-all.sh" \
+        --with-tested-cjson --source-sha "$SOURCE_SHA" 1.0.0
 check_rc "cJSON reuse is refused for an untrusted compile-only build" 2 \
     "$T/pack/scripts/ci-build-all.sh" --compile-only --with-tested-cjson \
         --source-sha "$SOURCE_SHA" 1.0.0-dev.1
@@ -125,8 +126,8 @@ check_rc "filtered checkout and offline historical evidence pass" 0 \
     python3 tools/release/test_ci_checkout.py
 check_rc "publication efficiency retains complete verification" 0 \
     python3 tools/release/test_publication_efficiency.py
-check_rc "main reuses only completed PR checks for the identical Git tree and base" 0 \
-    python3 tools/release/test_premerge_checks.py
+check_rc "protected policy only accepts an exact maintainer release receipt" 0 \
+    python3 tools/release/test_verify_push_proof.py
 check_rc "production OTA reuses only matching local host checks" 0 \
     python3 tools/release/test_local_checks.py
 check_rc "release tag lookup refuses unknown remote identity" 0 \

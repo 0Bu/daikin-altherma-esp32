@@ -14,8 +14,9 @@ layout and accessibility evidence. None of these contacts a heat pump or proves 
 For an ordinary PR, run this complete local gate set. During development, start with the affected
 surface; the table below explains what each result means. Freeze code and documentation before the
 complete acceptance run. A relevant change or new finding invalidates only the affected evidence.
-Run faster complete checks locally before merging, then record their results and any missing
-evidence in the PR.
+The [pre-push release gate](../docs/MAINTENANCE.md#local-release-checks) runs the full mechanical
+suite and unsigned target compile before the branch is sent. Use the commands below for
+focused development runs and record completed reviews in the PR.
 
 ```bash
 scripts/run-mock-tests.sh --coverage

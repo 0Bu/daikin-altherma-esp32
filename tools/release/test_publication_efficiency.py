@@ -129,9 +129,9 @@ class PublicationEfficiencyTests(unittest.TestCase):
                 self.assertNotIn('filter: blob:none', block)
                 self.assertIn('persist-credentials: false', block)
             if job == 'trusted_build':
-                hydration = block.index('run: python3 scripts/prepare-ci-history.py')
-                self.assertLess(hydration, block.index('- name: Provision OTA signing key'))
-                self.assertLess(hydration, block.index('- name: Build firmware'))
+                proof_gate = block.index('verify_push_proof.py landed "$GITHUB_SHA"')
+                self.assertLess(proof_gate, block.index('- name: Provision OTA signing key'))
+                self.assertLess(proof_gate, block.index('- name: Build firmware'))
                 self.assertIn('target: esp32s3', block)
                 self.assertNotIn('contents: write', block)
             if job == 'publish':
@@ -139,19 +139,32 @@ class PublicationEfficiencyTests(unittest.TestCase):
                 self.assertIn('--attempts 30', block)
         relevant = (ROOT / 'tools/release/build-inputs.ere').read_text().strip()
         self.assertIsNotNone(re.search(relevant, 'scripts/prepare-ci-history.py'))
+        self.assertIn('scripts/prepare-ci-history.py', (ROOT / 'tools/release/push_checks.py').read_text())
 
-    def test_pr_reuse_preserves_signed_build_and_stack_check(self):
-        from premerge_checks import MECHANICAL
-
+    def test_local_evidence_preserves_signed_build_and_stack_check(self):
         workflow = (ROOT / '.github/workflows/build.yml').read_text()
+        policy = (ROOT / '.github/workflows/pr-policy.yml').read_text()
         mechanical = workflow.split('  mechanical_gates:\n', 1)[1].split('  build:\n', 1)[0]
+        build = workflow.split('  build:\n', 1)[1].split('  trusted_build:\n', 1)[0]
         trusted = workflow.split('  trusted_build:\n', 1)[1].split('  publish:\n', 1)[0]
-        for key, name in MECHANICAL.items():
-            step = mechanical.split(f'      - name: {name}\n', 1)[1].split('      - name: ', 1)[0]
-            self.assertIn(f"!contains(steps.dev_publication.outputs.reuse, ' {key} ')", step)
+        local = (ROOT / 'scripts/run-local-release-checks.sh').read_text()
+        self.assertIn('verify_push_proof.py pr "$PR_NUMBER" "$current_head"', policy)
+        self.assertIn('git cat-file -e HEAD^1:tools/release/verify_push_proof.py', mechanical)
+        checks = mechanical.split('      - name: Scope the mutation self-tests', 1)[1]
+        for step in re.split(r'(?m)^      - name: ', checks):
+            if '        run: ' in step:
+                self.assertIn("steps.local_proof.outputs.accepted != 'yes'", step)
+        for step in re.split(r'(?m)^      - (?:name: |uses: )', build)[2:]:
+            self.assertIn("needs.mechanical_gates.outputs.local_proof != 'yes'", step)
+        self.assertIn('local.verify(checkout', (ROOT / 'tools/release/push_checks.py').read_text())
+        for command in ('run-runtime-integration-tests.sh', 'run-browser-render-tests.sh',
+                        'run-decode-coredump-integration-tests.sh'):
+            self.assertIn(command, local)
         self.assertIn('needs: [mechanical_gates]', trusted)
         self.assertIn("needs.mechanical_gates.result == 'success'", trusted)
-        self.assertIn("!contains(needs.mechanical_gates.outputs.reuse, ' cjson ')", trusted)
+        self.assertIn('verify_push_proof.py landed "$GITHUB_SHA"', trusted)
+        self.assertLess(trusted.index('verify_push_proof.py landed'), trusted.index('name: Build firmware'))
+        self.assertNotIn('apt-get install', trusted)
         self.assertIn("--with-tested-cjson --source-sha", trusted)
         package = (ROOT / 'scripts/ci-build-all.sh').read_text()
         stack_check = package.index('python3 scripts/check-stack-budget.py --elf')

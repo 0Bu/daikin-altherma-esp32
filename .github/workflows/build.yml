@@ -137,16 +137,12 @@ jobs:
       pull-requests: read
       actions: read
     runs-on: ubuntu-26.04
-    # Main runs every mutation canary, and so does any PR that touches this file or most tooling.
-    # Read the complete suite's duration from this job's step timings on a recent main run and keep
-    # the cap well above it: a slow runner mirror alone has stretched the clang-format install by
-    # more than a quarter of an hour. The cap stays a wedged-runner guard with headroom above that
-    # duration, not a budget the healthy suite brushes against.
+    # The long timeout is for the bootstrap PR before its protected base can verify local evidence.
     timeout-minutes: 60
     outputs:
       firmware: ${{ steps.changes.outputs.firmware }}
-      reuse: ${{ steps.dev_publication.outputs.reuse }}
       tested_merge: ${{ steps.tested_merge.outputs.commit }}
+      local_proof: ${{ steps.local_proof.outputs.accepted }}
     steps:
       - name: Check out tested source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -158,7 +154,6 @@ jobs:
         id: dev_publication
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == '0Bu/daikin-altherma-esp32'
         env:
-          BEFORE: ${{ github.event.before }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -uo pipefail
@@ -176,12 +171,6 @@ jobs:
             state=unknown
             dev_source=""
           fi
-          # Missing or incompatible PR evidence keeps the original checks on the release path.
-          reuse=""
-          if [ "$state" != same ]; then
-            reuse="$(timeout 45s python3 tools/release/premerge_checks.py resolve "$BEFORE" "$GITHUB_SHA")" || reuse=""
-          fi
-          printf 'reuse=%s\n' "$reuse" >> "$GITHUB_OUTPUT"
           printf 'state=%s\nsource=%s\n' "$state" "$dev_source" >> "$GITHUB_OUTPUT"
 
       - name: Detect build-relevant changes
@@ -248,8 +237,24 @@ jobs:
           echo "firmware=$changed" >> "$GITHUB_OUTPUT"
           echo "build-relevant changes: $changed"
 
+      # The bootstrap PR still receives the required legacy build. Once the protected
+      # base contains the receipt verifier, its independent gates job owns PR admission.
+      - name: Route release test evidence
+        id: local_proof
+        run: |
+          set -euo pipefail
+          accepted=no
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            if git cat-file -e HEAD^1:tools/release/verify_push_proof.py; then
+              accepted=yes
+            fi
+          elif [ "$GITHUB_REF" = refs/heads/main ]; then
+            accepted=yes
+          fi
+          printf 'accepted=%s\n' "$accepted" >> "$GITHUB_OUTPUT"
+
       - name: Bind tested merge tree to the reviewed head
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && steps.local_proof.outputs.accepted != 'yes'
         env:
           EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -284,7 +289,7 @@ jobs:
 
       - name: Record tested merge tree
         id: tested_merge
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && steps.local_proof.outputs.accepted != 'yes'
         run: |
           set -euo pipefail
           [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]
@@ -320,6 +325,7 @@ jobs:
       # diff, or a change to this workflow runs the complete set. A push to main therefore always
       # re-proves every gate, which is the backstop if a path mapping here is ever too narrow.
       - name: Scope the mutation self-tests to the tooling this diff touches
+        if: steps.local_proof.outputs.accepted != 'yes'
         id: scope
         run: |
           set -euo pipefail
@@ -370,28 +376,30 @@ jobs:
 
       # Commit text only. The protected policy checks the current editable PR text.
       - name: Audit commit-text privacy and language
-        if: github.event_name == 'pull_request'
+        if: steps.local_proof.outputs.accepted != 'yes' && (github.event_name == 'pull_request')
         env:
           EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: ./scripts/run-pr-hygiene-audit.sh --base "$EVENT_BASE_SHA" --head "$EVENT_HEAD_SHA" --event-file ''
       - name: Verify the PR-hygiene audit still has teeth
+        if: steps.local_proof.outputs.accepted != 'yes'
         run: ./tools/pr_hygiene/selftest.sh
 
       # Host-side pure-logic tests (main/logic/) plus an aggregate executable-line floor. This is
       # deliberately coverage of the production headers only: counting the 6k-line test driver
       # would let new assertions make the percentage greener without exercising another branch.
       - name: Run host-side logic tests with coverage
-        if: ${{ !contains(steps.dev_publication.outputs.reuse, ' host ') }}
+        if: steps.local_proof.outputs.accepted != 'yes'
         run: ./scripts/run-mock-tests.sh --coverage
       - name: Verify the logic coverage gate still has teeth
+        if: steps.local_proof.outputs.accepted != 'yes'
         run: ./tools/coverage/selftest.sh
 
       # Hostile-input properties run under ASan+UBSan with deterministic seeds. This is bounded
       # fuzzing rather than an unending campaign, so every CI run repeats the exact parser,
       # framing and state-machine corpus and reports a reproducible failing input.
       - name: Run sanitizer-backed hostile-input properties
-        if: ${{ !contains(steps.dev_publication.outputs.reuse, ' sanitizer ') }}
+        if: steps.local_proof.outputs.accepted != 'yes'
         run: ./scripts/run-sanitizer-fuzz-tests.sh
 
       # Execute production pure headers behind fake clocks, NVS/allocator failpoints and fragmented
@@ -401,23 +409,26 @@ jobs:
       # HTTP behavior are exercised together. Production HTTP/MCP glue remains outside this host
       # seam; atomicity and both socket-deadline mutations prove the harness itself can fail.
       - name: Run runtime and transport integration harness
-        if: ${{ !contains(steps.dev_publication.outputs.reuse, ' runtime ') }}
+        if: steps.local_proof.outputs.accepted != 'yes'
         run: ./scripts/run-runtime-integration-tests.sh
 
       # Check only new files and changed C/C++ hunks with the exact formatter used by CI. Existing
       # legacy drift outside the diff is not rewritten; portable whitespace/encoding invariants
       # remain whole-tree checks. Both layers are fail-closed and have mutation self-tests.
       - name: Install pinned C/C++ formatter
+        if: steps.local_proof.outputs.accepted != 'yes'
         run: |
           if ! command -v clang-format-18 >/dev/null 2>&1; then
             sudo apt-get update
             sudo apt-get install -y --no-install-recommends clang-format-18
           fi
       - name: Check source formatting invariants
+        if: steps.local_proof.outputs.accepted != 'yes'
         env:
           CLANG_FORMAT: clang-format-18
         run: ./scripts/run-format-check.sh
       - name: Verify the format gate still has teeth
+        if: steps.local_proof.outputs.accepted != 'yes'
         run: ./tools/format/selftest.sh
 
       # The presenter-parity CHECK itself rides the step above (run-mock-tests.sh ends with it, in
@@ -428,15 +439,17 @@ jobs:
       # can drift from the C++ rule — including the mixed-zone row this project has already shipped
       # once — and fails if any of them survives.
       - name: Verify the presenter-parity gate still has teeth
-        if: steps.scope.outputs.presenter == 'yes'
+        if: steps.local_proof.outputs.accepted != 'yes' && (steps.scope.outputs.presenter == 'yes')
         run: ./tools/presenter/selftest.sh
 
       # Translation completeness is its own fail-closed contract. Key/count parity catches newly
       # added copy; a canonical-source fingerprint also makes an edited English/domain sentence
       # stale in every shipped locale until that translation has been reviewed and moved with it.
       - name: Audit complete UI localization
+        if: steps.local_proof.outputs.accepted != 'yes'
         run: ./scripts/run-ui-localization-audit.sh
       - name: Verify the localization gate still has teeth
+        if: steps.local_proof.outputs.accepted != 'yes'
         run: node ./tools/ui_localization/selftest.mjs
 
       # One source of truth for the whole device UI. It executes every test_ui_*.mjs contract, the
@@ -445,6 +458,7 @@ jobs:
       # ENV III board/no-sensor/sensor states. Its selftest re-seeds the undefined close-handler bug
       # that once left both footer buttons visible but inert.
       - name: Run complete UI use-case suite
+        if: steps.local_proof.outputs.accepted != 'yes'
         run: ./scripts/run-ui-use-case-tests.sh
 
       # Source contracts cannot see layout, native accessibility or real keyboard focus. Assemble
@@ -456,7 +470,7 @@ jobs:
       # A separately bounded WebKit phase covers iPad portrait/landscape, native touch, full histories,
       # continuous polling and actual flow paint, with nine targeted regression controls.
       - name: Run rendered browser and accessibility gate
-        if: ${{ !contains(steps.dev_publication.outputs.reuse, ' browser ') }}
+        if: steps.local_proof.outputs.accepted != 'yes'
         env:
           BEFORE: ${{ github.event.before }}
           # Give the sequential iPad runs and their failure controls time to finish on hosted runners.
@@ -479,10 +493,10 @@ jobs:
       # local loop skipped them and a new sibling was invisible everywhere at once; the script globs
       # test/test_*_contract.mjs, so one now joins the gate without a workflow edit.
       - name: Test firmware source-boundary contracts
-        if: ${{ !contains(steps.dev_publication.outputs.reuse, ' contracts ') }}
+        if: steps.local_proof.outputs.accepted != 'yes'
         run: ./scripts/run-contract-tests.sh
       - name: Verify the OTA contracts still have teeth
-        if: ${{ steps.scope.outputs.ota == 'yes' && !contains(steps.dev_publication.outputs.reuse, ' ota ') }}
+        if: steps.local_proof.outputs.accepted != 'yes' && steps.scope.outputs.ota == 'yes'
         run: |
           node tools/ota/selftest.mjs
           node tools/production_ota/selftest.mjs
@@ -494,7 +508,7 @@ jobs:
       # and a correct one are indistinguishable without re-seeding the defects, which is what this
       # does. It has already caught one of its own assertions written so that it could never fire.
       - name: Prove the source-absence matrix still catches its defects
-        if: steps.scope.outputs.absence == 'yes'
+        if: steps.local_proof.outputs.accepted != 'yes' && (steps.scope.outputs.absence == 'yes')
         run: ./tools/absence/selftest.sh
 
       # Keep the source-linked ESP-IDF inventory honest. The checker derives its positive surface
@@ -502,9 +516,10 @@ jobs:
       # IDF-shaped application includes. The evaluated negative list remains curated: CI does not
       # scrape an upstream web catalog or pretend that network availability proves completeness.
       - name: Audit the ESP-IDF feature matrix
+        if: steps.local_proof.outputs.accepted != 'yes'
         run: ./scripts/run-esp-idf-matrix-audit.sh
       - name: Verify the ESP-IDF matrix audit still has teeth
-        if: steps.scope.outputs.esp_idf_matrix == 'yes'
+        if: steps.local_proof.outputs.accepted != 'yes' && (steps.scope.outputs.esp_idf_matrix == 'yes')
         run: ./tools/esp_idf_matrix/selftest.sh
 
       # Domain-correctness gate: are the published values physically RIGHT? The logic tests above
@@ -514,12 +529,13 @@ jobs:
       # docs/REGISTERS.md. The human half of the gate is the $domain-review skill + its PR
       # checkbox; this is the mechanical half.
       - name: Audit the value catalog
+        if: steps.local_proof.outputs.accepted != 'yes'
         run: ./scripts/run-domain-audit.sh
       # A checker that has stopped checking turns "clean" from evidence into a lie, so the audit
       # must keep catching the four decode bugs it was built for (re-introduced into a throwaway
       # copy; the tree is never touched).
       - name: Verify the audit still has teeth
-        if: steps.scope.outputs.domain == 'yes'
+        if: steps.local_proof.outputs.accepted != 'yes' && (steps.scope.outputs.domain == 'yes')
         run: ./tools/domain/selftest.sh
 
       # Value-description coverage: the domain audit above asks whether a published value is
@@ -529,8 +545,10 @@ jobs:
       # is machine-generated and grows without touching this repo's JS, so the gap re-opens on its
       # own. Needs only node, which this runner already has.
       - name: Audit the value-description coverage
+        if: steps.local_proof.outputs.accepted != 'yes'
         run: ./scripts/run-description-audit.sh
       - name: Verify the description audit still has teeth
+        if: steps.local_proof.outputs.accepted != 'yes'
         run: ./tools/descriptions/selftest.sh
 
       # A tappable row can still explain a correct result only in installer language or omit what the
@@ -541,8 +559,10 @@ jobs:
       # The source stamp makes evaluator/threshold/UI changes stale that guide even when no row was
       # added. The $user-docs-review skill is the human half; this is the fail-closed mechanical one.
       - name: Audit English plain-language diagnosis help
+        if: steps.local_proof.outputs.accepted != 'yes'
         run: ./scripts/run-user-docs-audit.sh
       - name: Verify the user-docs audit still has teeth
+        if: steps.local_proof.outputs.accepted != 'yes'
         run: ./tools/user_docs/selftest.sh
 
       # Source quality is a separate contract from plain language. Bind every visible diagnosis to
@@ -551,8 +571,10 @@ jobs:
       # the cited register evidence and the ledger itself. $diagnostic-evidence-review is the human
       # half; mutation tests prove the mechanical half cannot silently become ceremonial.
       - name: Audit diagnostic evidence and sources
+        if: steps.local_proof.outputs.accepted != 'yes'
         run: ./scripts/run-diagnostic-evidence-audit.sh
       - name: Verify the diagnostic-evidence audit still has teeth
+        if: steps.local_proof.outputs.accepted != 'yes'
         run: ./tools/diagnostic_evidence/selftest.sh
 
       # The dashboard schematic: the two audits above can BOTH be clean while the picture is false.
@@ -563,9 +585,10 @@ jobs:
       # evaluates the real INSPECT/I18N/DESCRIPTIONS tables, so there is no second copy of the
       # coordinates or the rules to drift. Same runtime as the step above (node), seconds long.
       - name: Audit the dashboard schematic
+        if: steps.local_proof.outputs.accepted != 'yes'
         run: ./scripts/run-schematic-audit.sh
       - name: Verify the schematic audit still has teeth
-        if: steps.scope.outputs.schematic == 'yes'
+        if: steps.local_proof.outputs.accepted != 'yes' && (steps.scope.outputs.schematic == 'yes')
         run: ./tools/schematic/selftest.sh
 
       # Redaction coverage. A bug report is a PUBLIC issue carrying the device's own /status and
@@ -576,8 +599,10 @@ jobs:
       # notice. This is the only gate here whose subject is the USER's data rather than the
       # firmware's correctness. python3 only, seconds long.
       - name: Audit the diag redaction coverage
+        if: steps.local_proof.outputs.accepted != 'yes'
         run: ./scripts/run-redaction-audit.sh
       - name: Verify the redaction audit still has teeth
+        if: steps.local_proof.outputs.accepted != 'yes'
         run: ./tools/redact/selftest.sh
       # The docs hand the reader copy-pasteable YAML naming Home Assistant entity ids, each derived
       # from a catalog LABEL — so an id is only as stable as the label, and the catalog spells the
@@ -588,11 +613,13 @@ jobs:
       # exists only on the host-test FIXTURE profile detection can never assign. C++ host compiler
       # only, seconds long.
       - name: Audit the entity ids quoted in the docs
+        if: steps.local_proof.outputs.accepted != 'yes'
         run: ./scripts/run-doc-entity-audit.sh
       - name: Verify the doc entity-id audit still has teeth
+        if: steps.local_proof.outputs.accepted != 'yes'
         run: ./tools/docs/selftest.sh
       - name: Verify fresh host audits and explicit fixture reuse
-        if: steps.scope.outputs.host_audits == 'yes'
+        if: steps.local_proof.outputs.accepted != 'yes' && (steps.scope.outputs.host_audits == 'yes')
         run: ./scripts/run-host-audit-reuse-tests.sh
       # The README's dashboard recording (docs/media/dashboard.gif): the one artefact here that rots
       # INVISIBLY. A recording renders perfectly forever, whatever the UI has since become, so every
@@ -617,9 +644,10 @@ jobs:
       # true, are the readings still honest — remains the canonical $ui-gif skill's, now a merge
       # gate of its own.
       - name: Audit the README's dashboard recording
+        if: steps.local_proof.outputs.accepted != 'yes'
         run: ./scripts/run-ui-gif-audit.sh
       - name: Verify the recording audit still has teeth
-        if: steps.scope.outputs.uigif == 'yes'
+        if: steps.local_proof.outputs.accepted != 'yes' && (steps.scope.outputs.uigif == 'yes')
         run: ./tools/uigif/selftest.sh
 
       # The gh-pages publish follows the expensive firmware build, so a regression still fails late.
@@ -628,25 +656,30 @@ jobs:
       # against a throwaway bare repo — no network, no credentials, seconds long — so a regression
       # fails before the build, not after it.
       - name: Test the gh-pages publish (incl. concurrent publishers)
+        if: steps.local_proof.outputs.accepted != 'yes'
         run: ./scripts/run-pages-publish-tests.sh
       - name: Test the NVS-preserving Web Serial plan gate
+        if: steps.local_proof.outputs.accepted != 'yes'
         run: ./scripts/run-web-installer-plan-tests.sh
       - name: Test the publish-version gate
+        if: steps.local_proof.outputs.accepted != 'yes'
         run: ./scripts/run-publish-version-tests.sh
       - name: Test CI trust boundaries and release contracts
-        if: ${{ !contains(steps.dev_publication.outputs.reuse, ' release_tests ') }}
+        if: steps.local_proof.outputs.accepted != 'yes'
         run: ./scripts/run-ci-release-contract-tests.sh
       - name: Test the coredump artifact decoder
+        if: steps.local_proof.outputs.accepted != 'yes'
         run: ./scripts/run-decode-coredump-tests.sh
 
       - name: Exercise the pinned coredump decoder with synthetic evidence
-        if: ${{ steps.scope.outputs.coredump == 'yes' && !contains(steps.dev_publication.outputs.reuse, ' coredump ') }}
+        if: steps.local_proof.outputs.accepted != 'yes' && steps.scope.outputs.coredump == 'yes'
         run: ./scripts/run-decode-coredump-integration-tests.sh
 
       # Two cheap build-contract selftests. The first proves the post-Kconfig comparison catches a
       # missing, changed or malformed default before the firmware compile. The second pins the
       # parser that turns ESP-IDF's json2 size data into the artifact/job-summary budget table.
       - name: Test the ESP-IDF build contracts
+        if: steps.local_proof.outputs.accepted != 'yes'
         run: |
           python3 scripts/check-sdkconfig-defaults.py --self-test
           python3 scripts/report-firmware-size.py --self-test
@@ -656,17 +689,19 @@ jobs:
       # The canonical instruction contract owns the always-loaded budget and the deterministic
       # skill, reviewer, hook and safety-invariant checks.
       - name: Check agent instruction and configuration integrity
+        if: steps.local_proof.outputs.accepted != 'yes'
         run: ./scripts/run-agent-instructions-budget.sh
       - name: Audit canonical skills and reviewer prompts against repository facts
+        if: steps.local_proof.outputs.accepted != 'yes'
         run: ./scripts/run-skill-audit.sh
       - name: Verify the agent configuration gate still has teeth
-        if: steps.scope.outputs.agent_config == 'yes'
+        if: steps.local_proof.outputs.accepted != 'yes' && (steps.scope.outputs.agent_config == 'yes')
         run: ./tools/agent-config/selftest.sh
       - name: Verify the skill-audit gate still has teeth
-        if: steps.scope.outputs.agent_config == 'yes'
+        if: steps.local_proof.outputs.accepted != 'yes' && (steps.scope.outputs.agent_config == 'yes')
         run: ./tools/skill_audit/selftest.sh
       - name: Verify runner-neutral hook guards and merge binding
-        if: steps.scope.outputs.agent_hooks == 'yes'
+        if: steps.local_proof.outputs.accepted != 'yes' && (steps.scope.outputs.agent_hooks == 'yes')
         run: |
           python3 ./tools/agent-hooks/test_agent_hooks.py
           python3 ./tools/agent-hooks/test_push_gate.py
@@ -676,7 +711,7 @@ jobs:
       # stale stamps and conditional relevance fail CLOSED for canonical `$name` records. Live
       # enforcement runs separately in the required data-only `pr-policy.yml` workflow.
       - name: Verify the PR evidence policy still has teeth
-        if: steps.scope.outputs.agent_policy == 'yes'
+        if: steps.local_proof.outputs.accepted != 'yes' && (steps.scope.outputs.agent_policy == 'yes')
         run: ./tools/agent-policy/selftest.sh
 
       # Does this change reach anything the FIRMWARE BUILD or the PUBLISHED SITE is made of? If
@@ -693,9 +728,8 @@ jobs:
       # A push to main additionally decides the DEV PUBLISH with this flag (see the build job): a
       # docs-only merge must not move the version and hand every dev device a byte-identical image.
 
-  # Required untrusted-source check. It always reflects mechanical_gates, while the expensive
-  # compile steps run only when the diff reaches firmware or published-site inputs. This job stays
-  # named `build` because branch protection requires it; docs-only PRs pass it without compiling.
+  # Keep `build` for branch protection. The compile steps cover only bootstrap; the protected
+  # base's `gates` checks local evidence once the verifier lands.
   build:
     needs: [mechanical_gates]
     # Keep always(): every unsuccessful mechanical result must fail an open PR's required check.
@@ -713,13 +747,13 @@ jobs:
             || { echo "mechanical gates finished as $MECHANICAL_RESULT" >&2; exit 2; }
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        if: needs.mechanical_gates.result == 'success' && needs.mechanical_gates.outputs.firmware == 'yes'
+        if: needs.mechanical_gates.result == 'success' && needs.mechanical_gates.outputs.firmware == 'yes' && needs.mechanical_gates.outputs.local_proof != 'yes'
         with:
           fetch-depth: 0
           persist-credentials: false
 
       - name: Bind compiled merge tree to the reviewed head
-        if: needs.mechanical_gates.result == 'success' && needs.mechanical_gates.outputs.firmware == 'yes'
+        if: needs.mechanical_gates.result == 'success' && needs.mechanical_gates.outputs.firmware == 'yes' && needs.mechanical_gates.outputs.local_proof != 'yes'
         env:
           EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -756,7 +790,7 @@ jobs:
             || { echo "compiled merge tree base $tested_base predates the reviewed base $EVENT_BASE_SHA" >&2; exit 2; }
 
       - name: Stamp compile-only firmware version
-        if: needs.mechanical_gates.result == 'success' && needs.mechanical_gates.outputs.firmware == 'yes'
+        if: needs.mechanical_gates.result == 'success' && needs.mechanical_gates.outputs.firmware == 'yes' && needs.mechanical_gates.outputs.local_proof != 'yes'
         id: stamp
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -769,7 +803,7 @@ jobs:
           echo "stamping compile-only build $disp"
 
       - name: Derive the ccache key
-        if: needs.mechanical_gates.result == 'success' && needs.mechanical_gates.outputs.firmware == 'yes'
+        if: needs.mechanical_gates.result == 'success' && needs.mechanical_gates.outputs.firmware == 'yes' && needs.mechanical_gates.outputs.local_proof != 'yes'
         id: cckey
         run: |
           set -euo pipefail
@@ -778,7 +812,7 @@ jobs:
           echo "hash=$h" >> "$GITHUB_OUTPUT"
 
       - name: Restore ccache
-        if: needs.mechanical_gates.result == 'success' && needs.mechanical_gates.outputs.firmware == 'yes'
+        if: needs.mechanical_gates.result == 'success' && needs.mechanical_gates.outputs.firmware == 'yes' && needs.mechanical_gates.outputs.local_proof != 'yes'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6
         with:
           path: .ccache
@@ -787,7 +821,7 @@ jobs:
             ccache-esp32s3-${{ steps.cckey.outputs.hash }}-
 
       - name: Prefetch ESP-IDF container image
-        if: needs.mechanical_gates.result == 'success' && needs.mechanical_gates.outputs.firmware == 'yes'
+        if: needs.mechanical_gates.result == 'success' && needs.mechanical_gates.outputs.firmware == 'yes' && needs.mechanical_gates.outputs.local_proof != 'yes'
         run: |
           set -euo pipefail
           idf_ver="$(./scripts/idf-version.sh)"
@@ -802,7 +836,7 @@ jobs:
           fi
 
       - name: Compile firmware without flashable artifacts
-        if: needs.mechanical_gates.result == 'success' && needs.mechanical_gates.outputs.firmware == 'yes'
+        if: needs.mechanical_gates.result == 'success' && needs.mechanical_gates.outputs.firmware == 'yes' && needs.mechanical_gates.outputs.local_proof != 'yes'
         uses: espressif/esp-idf-ci-action@e6f5c74232b1ccd4c97ed641f1e48553853f1fd5  # v1.2.0
         with:
           esp_idf_version: v6.1
@@ -813,29 +847,29 @@ jobs:
             ./scripts/ci-build-all.sh --compile-only --source-sha "${{ github.event.pull_request.head.sha }}" "${{ steps.stamp.outputs.disp }}"
 
       - name: Publish firmware size summary
-        if: always() && needs.mechanical_gates.result == 'success' && needs.mechanical_gates.outputs.firmware == 'yes'
+        if: always() && needs.mechanical_gates.result == 'success' && needs.mechanical_gates.outputs.firmware == 'yes' && needs.mechanical_gates.outputs.local_proof != 'yes'
         run: |
           if [ -f dist/daikin-altherma-esp32-size.md ]; then
             cat dist/daikin-altherma-esp32-size.md >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Hand the ccache tree back to the runner
-        if: always() && needs.mechanical_gates.result == 'success' && needs.mechanical_gates.outputs.firmware == 'yes'
+        if: always() && needs.mechanical_gates.result == 'success' && needs.mechanical_gates.outputs.firmware == 'yes' && needs.mechanical_gates.outputs.local_proof != 'yes'
         run: sudo chown -R "$(id -u):$(id -g)" .ccache || true
 
       - name: Save ccache
-        if: needs.mechanical_gates.result == 'success' && needs.mechanical_gates.outputs.firmware == 'yes' && success()
+        if: needs.mechanical_gates.result == 'success' && needs.mechanical_gates.outputs.firmware == 'yes' && needs.mechanical_gates.outputs.local_proof != 'yes' && success()
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6
         with:
           path: .ccache
           key: ccache-esp32s3-${{ steps.cckey.outputs.hash }}-${{ github.run_id }}
 
       - name: Enforce non-flashable PR artifact boundary
-        if: needs.mechanical_gates.result == 'success' && needs.mechanical_gates.outputs.firmware == 'yes'
+        if: needs.mechanical_gates.result == 'success' && needs.mechanical_gates.outputs.firmware == 'yes' && needs.mechanical_gates.outputs.local_proof != 'yes'
         run: ./scripts/check-nonflashable-artifacts.sh dist
 
       - name: Upload compile diagnostics
-        if: needs.mechanical_gates.result == 'success' && needs.mechanical_gates.outputs.firmware == 'yes'
+        if: needs.mechanical_gates.result == 'success' && needs.mechanical_gates.outputs.firmware == 'yes' && needs.mechanical_gates.outputs.local_proof != 'yes'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         with:
           name: daikin-altherma-esp32-${{ steps.stamp.outputs.disp }}
@@ -862,6 +896,8 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
+      pull-requests: read
+      issues: read
     outputs:
       mode: ${{ steps.mode.outputs.mode }}
       version: ${{ steps.stamp.outputs.disp }}
@@ -871,8 +907,10 @@ jobs:
           fetch-depth: 0   # full history + tags for versioning / change detection
           filter: blob:none  # current source, without historical binary payloads
 
-      - name: Hydrate historical runtime evidence before the container
-        run: python3 scripts/prepare-ci-history.py
+      - name: Verify local check evidence for the publication source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/release/verify_push_proof.py landed "$GITHUB_SHA"
 
       # Bind dispatch admission before versioning, signing-key provisioning or publication.
       # main can move between acceptance and workflow_dispatch resolving its ref.
@@ -1058,7 +1096,6 @@ jobs:
           fi
 
       - name: Build firmware
-        if: ${{ !contains(needs.mechanical_gates.outputs.reuse, ' cjson ') }}
         uses: espressif/esp-idf-ci-action@e6f5c74232b1ccd4c97ed641f1e48553853f1fd5  # v1.2.0
         with:
           esp_idf_version: v6.1
@@ -1072,17 +1109,6 @@ jobs:
           # bins don't embed makes every device download an "update" that changes nothing, forever.
           # ci-build-all.sh reads the version back out of the built image and fails if the two ever
           # drift apart again.
-          command: >-
-            apt-get update &&
-            apt-get install -y --no-install-recommends clang-18 libclang-rt-18-dev &&
-            ./scripts/ci-build-all.sh --source-sha "${{ github.sha }}" --changelog-file ota-changelog.json "${{ steps.stamp.outputs.disp }}"
-
-      - name: Build firmware with tested cJSON consumers
-        if: contains(needs.mechanical_gates.outputs.reuse, ' cjson ')
-        uses: espressif/esp-idf-ci-action@e6f5c74232b1ccd4c97ed641f1e48553853f1fd5  # v1.2.0
-        with:
-          esp_idf_version: v6.1
-          target: esp32s3
           command: >-
             ./scripts/ci-build-all.sh --with-tested-cjson --source-sha "${{ github.sha }}" --changelog-file ota-changelog.json "${{ steps.stamp.outputs.disp }}"
 

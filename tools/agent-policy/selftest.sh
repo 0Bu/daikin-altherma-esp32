@@ -131,7 +131,6 @@ resolver_header = (
     "        id: dev_publication\n"
     "        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == '0Bu/daikin-altherma-esp32'\n"
     "        env:\n"
-    "          BEFORE: ${{ github.event.before }}\n"
     "          GH_TOKEN: ${{ github.token }}\n"
     "        run: |\n"
 )

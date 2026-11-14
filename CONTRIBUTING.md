@@ -142,8 +142,9 @@ process. Use `$agentic-setup` for a broader setup review or authorized moderniza
 for repository fact drift; `--optimize` requires explicit edit authorization. The pre-push hook checks
 every destination and sent commit. Updating an open PR retains current-commit `$skill-audit` and
 `$pr-hygiene-review` stamps from a clean exact-commit checkout, without adding another gate record.
-A successful lookup finding no open PR allows push after the local audit; a failed lookup blocks it.
-This local hook does not change remote branch protection.
+A failed PR lookup blocks the push. The hook runs the
+[local release checks](docs/MAINTENANCE.md#local-release-checks) before every maintainer update,
+including the first branch push. Protected GitHub policy validates the resulting receipt.
 Agent setup, generated registration, trust review and runtime acceptance belong in
 [AGENT_MIGRATION.md](docs/AGENT_MIGRATION.md).
 

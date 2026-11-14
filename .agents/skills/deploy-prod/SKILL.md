@@ -58,17 +58,14 @@ from Step 8. A PR without firmware-relevant files skips this step.
 
 ### 1. Deterministic gates and PR records
 
-Freeze the reviewed source and reserve the bench and production window before merging. Run
-deterministic gates locally where the complete pinned test is faster there (see `AGENTS.md` and
-[test/README.md](../../../test/README.md#run)). Keep Linux Docker for browser and target tests.
-Run independent checks in parallel when they do not compete with timing measurements. For
-firmware, use the ESP32-S3 build evidence from Step 0.
+Freeze the source and reserve the bench and production window before merging. The native pre-push
+hook runs the local release suite on the clean candidate against refreshed `origin/main`. Keep
+Chromium and WebKit in headless Linux Docker. Run local reviews against the same head and finish
+the separately required bench acceptance in Step 0 before pushing the release branch.
 
-Before merging firmware, run `python3 tools/release/local_checks.py` from the clean PR merge
-tree with its first parent equal to refreshed `origin/main`. This runs host coverage and source
-contracts and retains evidence for the two official OTA invocations. A rebased single-commit PR
-can use its own checkout when that commit has the same parent and tree. If the base or tree
-changes, refresh the evidence before merging.
+Post the exact emitted receipt as a PR comment from the authenticated maintainer account. A new
+comment is required for a new head or base. Update the PR body to refresh the protected policy
+after the receipt is posted. See [local release checks](../../../docs/MAINTENANCE.md#local-release-checks).
 
 Derive the required PR records from `tools/agent-hooks/require-pr-gates.sh`; never copy a list.
 `$project-review`, `$domain-review` and `$pr-hygiene-review` apply to every ordinary merge. The
@@ -104,8 +101,8 @@ confirmed production acceptance. Record feed, bench and production timings as th
 
 ### 3. Watch the CI dev build on main
 
-The protected workflow reuses matching GitHub PR results for selected checks on an identical
-merge tree and first-parent range. Missing evidence keeps the affected checks on the release path.
+The publication workflow binds the local receipt to the landed tree and its first parent before
+the signed build. It checks the exact published artifact and public readback.
 
 Find the `build.yml` run for the merge commit and watch it:
 
