@@ -505,14 +505,21 @@ function boardSettingsAvailable() {
   return !!S.status?.board && S.transportUnavailable !== "status" &&
     !S.otaCached && !S.otaBusy && !S.otaInstalling;
 }
+let boardDraftIdentity;
+function boardSettingsIdentity() {
+  const { boot_id, board, env3 } = S.status;
+  return JSON.stringify([boot_id, board.preset_id, board.led_gpio, board.led_type, board.led_inverted,
+    board.btn_gpio, board.btn_active_low, board.pins_local, env3?.enabled, env3?.sda, env3?.scl]);
+}
 function openBoard() {
   if (!boardSettingsAvailable()) return;
+  boardDraftIdentity = boardSettingsIdentity();
   fillBoard();
   fillEnv3();
   $("bdError").hidden = true;
   openPopup("boardModal");
 }
-function closeBoard() { closePopup("boardModal"); }
+function closeBoard() { closePopup("boardModal"); boardDraftIdentity = undefined; }
 
 // ── ENV III outdoor-climate sensor ───────────────────────────────────────
 function env3AvailablePins() {

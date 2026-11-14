@@ -85,7 +85,6 @@ function harness(cached, transform = (text) => text) {
     renderRecoveryBanner = () => {};
     renderRollbackBanner = () => {};
     renderCrashBanner = () => {};
-    renderHeaderMeta = () => {};
     renderSettings = () => syncOtaSettingsLock();
     renderCards = () => {};
     renderInspect = () => {};
@@ -259,6 +258,9 @@ for (const invalid of [null, { ...cache(), saved_at_ms: Date.now() - 16 * 60 * 1
   assert.equal(h.storage.has(cacheKey), false);
   assert.equal(h.S.imageLease.version, compact.current);
   assert.equal(h.S.imageLease.elf, "", "rejected cache must contribute no firmware identity");
+  h.renderApp();
+  assert.equal(h.element("verLink").textContent, "v" + compact.current,
+    "poll rendering must preserve the known version from compact OTA status");
   h.routes.set("/status", async () => response({ ...status(), app_elf_sha256: "confirmed-image" }));
   assert.equal(await h.refreshStatus(), true);
   assert.equal(h.S.imageLease.elf, "confirmed-image", "a partial compact lease learns the first full ELF");

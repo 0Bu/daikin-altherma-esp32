@@ -400,7 +400,12 @@ assert.equal(fetchState.calls.some(call => call.url === "/set_board"), false,
 ui.S.status = loadedStatus;
 ui.hydrateRoutedPopup();
 assert.equal(document.getElementById("boardModal").hidden, false, "the pending route opens with known hardware");
-await document.getElementById("bdCancel").onclick();
+ui.S.status = { ...loadedStatus, boot_id: "replacement-boot" };
+await document.getElementById("boardForm").fire("submit");
+assert.equal(fetchState.calls.some(call => call.url === "/set_board"), false,
+  "a draft from one boot cannot submit the old hardware configuration after status recovers on another");
+assert.equal(document.getElementById("boardModal").hidden, true);
+ui.S.status = loadedStatus;
 
 // An in-app popup has a real Settings parent: Back closes it and Forward opens the same one again.
 ui.openWifi();

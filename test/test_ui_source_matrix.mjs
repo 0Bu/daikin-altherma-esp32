@@ -1427,6 +1427,9 @@ assert.doesNotMatch(SOURCE, /chip\.demand_(?:on|off)|schem\.to_heat/);
   // facts about the hardware, and saying the wrong one substitutes a second false claim.
   const held = sentence({ cop: null, copBlock: "no_pel", pelHeld: true });
   const absent = sentence({ cop: null, copBlock: "no_pel", pelHeld: false });
+  const homeHub = sentence({ cop: null, copBlock: "mb_scope" });
+  assert.match(homeHub.en, /guide leaves it open which loads/);
+  assert.match(homeHub.de, /Dokumentation lässt offen, welche Verbraucher/);
   assert.notEqual(held.en, absent.en, "a held-over current must not read as an absent row");
   assert.match(held.de, /letzten Lauf/, "the held case names the previous run");
   assert.match(absent.de, /keine elektrische Aufnahme/, "the absent case names the missing input");

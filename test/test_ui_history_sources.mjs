@@ -231,6 +231,16 @@ S.hist.set("modbus:dhw_tank", modbus);
   const retained = h.histHtml("dhw_tank", "", "Tank");
   assert.match(retained, /vhist-retained[^>]*aria-label="X10A · hist\.retained"[^>]*left:0\.000%/,
     "the last received marker points at the measurement before the trailing gaps");
+  const recentStatus = S.status.uptime_s;
+  S.status.uptime_s = (x10a.b0 + 290) * 300;
+  assert.match(h.histHtml("dhw_tank", "", "Tank", "x10a"), /Verlauf nicht verfügbar/,
+    "the latest retry cannot keep an already old monotonic sample in view");
+  S.status.uptime_s = recentStatus;
+  const legacy = { ...x10a, b0: null, t0: null, refreshFailed: true,
+    at: Date.now(), receivedAt: Date.now() - 25 * 3600000 };
+  S.hist.set("dhw_tank", legacy);
+  assert.match(h.histHtml("dhw_tank", "", "Tank", "x10a"), /Verlauf nicht verfügbar/,
+    "legacy history ages from receipt even when there is no clock or bucket");
   historyFetchError = false;
   S.histHidden.delete("dhw_tank");
   S.hist.set("dhw_tank", x10a);
@@ -708,6 +718,12 @@ assert.equal(h.scrubText(liveBoostView, 7), "jetzt · Empfehlung ein",
     "the retained marker sits inside the last recorded bucket instead of the separate live cap");
   assert.match(retained, /<span>jetzt<\/span><\/div><\/div>$/,
     "the separately measured live observation retains its current-time label");
+  S.hist.set(key, old);
+  S.hist.set(key, { ...old, v: [], err: true });
+  const liveOnly = h.histHtml("smart_grid_mode", "", "Smart-Grid-Anforderung", "modbus");
+  assert.match(liveOnly, /vhist-state-on sg-recommended/);
+  assert.match(liveOnly, /Verlauf nicht verfügbar/);
+  assert.doesNotMatch(liveOnly, /Boost aktiv · 0/);
   S.hist.set(key, old);
 }
 delete S._modbus;

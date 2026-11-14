@@ -1,4 +1,4 @@
-// translation-source: e48a108e482c83165efc2a0fb7f44e45ea2f5ff28879f55570a2a130a9aee1ef
+// translation-source: 456568c508c4398e3b29e39470c90fba425fccf1699b14af2fbc6e9d1af09ecd
 I18N.it = localeValues([
   /* sys.nodata */ "Nessun dato",
   /* sys.unreachable */ "Non raggiungibile",
@@ -1012,7 +1012,7 @@ INSPECT_I18N.it = inspectValues(
       ? "Potenza frigorifera stimata divisa per assorbimento elettrico stimato. Eredita le incertezze di fluido, sensori, tensione e fattore di potenza. È un EER istantaneo, non stagionale; l’energia misurata su una stagione è più significativa."
       : "Potenza termica stimata divisa per assorbimento elettrico stimato con confini compatibili: dopo BUH con CT e R2T, oppure sola pompa di calore con corrente inverter. Il cablaggio CT decide i carichi inclusi. Indicazione istantanea, non contatore certificato.", (d) => d.copBlock === "tank_heater" ? "Nessun COP: la resistenza del serbatoio può essere inclusa nell’elettricità, ma il calore va direttamente al serbatoio senza attraversare i sensori di mandata; i confini non coincidono."
       : d.copBlock === "buh_no_r2t" ? "Nessun COP: BUH attivo senza sensore successivo. L’elettricità può includere il riscaldatore mentre il calore viene stimato prima di esso."
-      : d.copBlock === "mb_scope" ? "Nessun COP: HomeHub misura l’elettricità dell’intera unità, ma il calore del solo PHE e non fornisce né stati dei riscaldatori né sensore a valle per allineare i confini."
+      : d.copBlock === "mb_scope" ? "COP non disponibile. La guida HomeHub non specifica quali carichi elettrici comprende il registro. Il calore stimato riguarda lo scambiatore a piastre. Per calcolare il COP occorre verificare che entrambi i valori riguardino gli stessi componenti."
       : d.copBlock === "no_pel" ? d.pelHeld ? "Nessun COP: compressore fermo, la corrente inverter è dell’ultimo ciclo e non è attuale." : "Nessun COP: il profilo non fornisce né correnti CT né corrente inverter."
       : d.cop == null ? null
       : d.efficiencyKind === "eer" ? `${fmt1(d.cop)} kW frigoriferi per kW elettrico: ≈ ${fmt1(d.copPth)} kW sottratti con ≈ ${fmt1(d.pel)} kW assorbiti.`

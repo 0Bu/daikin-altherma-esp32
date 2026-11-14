@@ -1,4 +1,4 @@
-// translation-source: e48a108e482c83165efc2a0fb7f44e45ea2f5ff28879f55570a2a130a9aee1ef
+// translation-source: 456568c508c4398e3b29e39470c90fba425fccf1699b14af2fbc6e9d1af09ecd
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -1012,7 +1012,7 @@ INSPECT_I18N.fr = inspectValues(
       ? "Puissance froid estimée divisée par entrée électrique estimée. Hérite des incertitudes du fluide, des capteurs, de la tension et du facteur de puissance. EER instantané, non saisonnier ; l’énergie mesurée sur une saison est plus parlante."
       : "Puissance thermique estimée divisée par entrée électrique estimée, avec périmètres compatibles : après BUH avec CT et R2T, ou pompe à chaleur seule avec courant d’onduleur. Le câblage CT décide des charges incluses. Indication instantanée, pas compteur certifié.", (d) => d.copBlock === "tank_heater" ? "Aucun COP : la résistance du ballon peut être incluse dans l’électricité, mais sa chaleur va directement au ballon sans traverser les capteurs de départ ; les périmètres diffèrent."
       : d.copBlock === "buh_no_r2t" ? "Aucun COP : BUH actif sans capteur après lui. L’électricité peut inclure l’appoint alors que la chaleur est calculée avant."
-      : d.copBlock === "mb_scope" ? "Aucun COP : HomeHub mesure l’électricité de toute l’unité, mais la chaleur du seul PHE et ne fournit ni états des appoints ni capteur aval pour accorder les périmètres."
+      : d.copBlock === "mb_scope" ? "COP indisponible. Le guide HomeHub ne précise pas quelles charges électriques sont incluses. La chaleur estimée concerne l’échangeur à plaques. Le calcul du COP exige deux périmètres de mesure compatibles et vérifiés."
       : d.copBlock === "no_pel" ? d.pelHeld ? "Aucun COP : compresseur arrêté, le courant d’onduleur vient du dernier cycle et n’est pas actuel." : "Aucun COP : ce profil ne fournit ni courant CT ni courant d’onduleur."
       : d.cop == null ? null
       : d.efficiencyKind === "eer" ? `${fmt1(d.cop)} kW de froid par kW électrique : ≈ ${fmt1(d.copPth)} kW retirés pour ≈ ${fmt1(d.pel)} kW absorbés.`

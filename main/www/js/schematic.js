@@ -501,15 +501,8 @@ function liveData() {
     d.spaceMode = null;
     d.thermalMode = d.valveDhw === true ? "heat" : null;
     applyThermalPlan(d);
-    // THE COP DOES NOT. It looks like the same arithmetic and is not: the gateway's power is the
-    // WHOLE UNIT's, backup heater and immersion heater included, while d.pth is heat across the
-    // plate exchanger alone. That is precisely the boundary mismatch logic/cop_scope.hpp exists to
-    // refuse — a quotient of two correct numbers describing two different systems, which collapses
-    // exactly when a heater fires and reads as a failing heat pump while nothing is wrong. On the
-    // X10A path cop_scope decides it from the BUH/BSH states and the post-BUH row; the gateway map
-    // carries neither, so there is nothing to decide it WITH, and the honest answer is the one this
-    // firmware gives everywhere else: publish nothing (feature_gate.hpp — disable, never degrade).
-    // A circulation-only quotient would be the other half of the same problem.
+    // HomeHub register 51 reports electrical consumption. Its documented scope and available
+    // witnesses cannot establish an electrical boundary compatible with the plate exchanger.
     d.cop = null;
     d.copScope = null;
     d.copBlock = "mb_scope";      // named, so the explainer says WHY rather than showing a bare "—"
@@ -1151,13 +1144,9 @@ const INSPECT = {
       : d.copBlock === "buh_no_r2t"
       ? { en: "No COP right now — the backup heater is firing, but this profile has no leaving-water sensor after it. The electrical estimate can include heater load while the heat estimate stops before the heater, so the two boundaries do not match.",
           de: "Derzeit kein COP — der Zusatzheizer heizt, aber dieses Profil hat keinen Vorlauffühler hinter ihm. Die Stromschätzung kann die Heizlast enthalten, während die Wärmeschätzung vor dem Heizer endet; beide Bilanzgrenzen passen daher nicht zusammen." }
-      // The X10A bus is silent and the HomeHub is carrying the drawing. Its power register measures
-      // the WHOLE unit including both heaters, while the heat figure is the plate exchanger alone —
-      // and the gateway map carries neither heater state nor a post-BUH row, so unlike the X10A path
-      // there is nothing here to decide the pairing WITH.
       : d.copBlock === "mb_scope"
-      ? { en: "No COP right now — the X10A bus is silent, so these readings come from the HomeHub. Its power figure covers the whole unit including both electric heaters, while the heat figure covers the heat exchanger alone, and this source reports neither heater state nor a post-heater sensor to match the two boundaries. A quotient of the two would describe two different systems.",
-          de: "Derzeit kein COP — der X10A-Bus schweigt, daher stammen diese Messwerte vom HomeHub. Dessen Leistungswert erfasst das gesamte Gerät einschließlich beider Elektroheizer, der Wärmewert dagegen nur den Wärmetauscher; zudem meldet diese Quelle weder den Heizerzustand noch einen Fühler hinter dem Heizer, um beide Bilanzgrenzen anzugleichen. Ein Quotient aus beiden beschriebe zwei verschiedene Systeme." }
+      ? { en: "COP unavailable. The HomeHub guide leaves it open which loads its electrical input includes. The estimated heat covers the plate heat exchanger. COP requires a verified match between those two measurement boundaries.",
+          de: "COP nicht verfügbar. Die HomeHub-Dokumentation lässt offen, welche Verbraucher in der Stromaufnahme enthalten sind. Die geschätzte Wärmeleistung gilt für den Plattenwärmetauscher. Für einen COP müssen beide Bilanzgrenzen nachweislich zusammenpassen." }
       // No usable electrical input at all. Which of the two reasons it is matters — the pill's own
       // explainer draws the same distinction, and saying "this profile has no row" about a profile
       // that has one would substitute a second wrong claim for the suppressed one. The third reason,
@@ -1718,7 +1707,8 @@ function renderInspectHist(e, row, mode = "") {
     if (!mayFetch || (mode === "refresh" && (started || S.histBusy.size))) return;
     started = ensureHist(id, source, mode) || started;
   };
-  const historySig = h => h ? (h.err ? "e" : `${h.gen}:${!!h.refreshFailed}`) : "";
+  const historySig = h => !h ? "" : h.err ? "e"
+    : h.refreshFailed ? `${h.gen}:failed:${expiredHistSlots(h)}` : String(h.gen);
   if (e && e.env3) {
     const offered = ENV3_COMBINED_SERIES.filter((s) => hasEnv3Hist(s.id));
     for (const s of offered) request(s.id, "env3");

@@ -1,4 +1,4 @@
-// translation-source: e48a108e482c83165efc2a0fb7f44e45ea2f5ff28879f55570a2a130a9aee1ef
+// translation-source: 456568c508c4398e3b29e39470c90fba425fccf1699b14af2fbc6e9d1af09ecd
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -1018,7 +1018,7 @@ INSPECT_I18N.sv = inspectValues(
       : "Gränsmatchad värme ÷ el: CT+R2T efter BUH, annars växelriktarström för värmepumpen.", (d) => d.copBlock === "tank_heater"
       ? "Ingen COP: el kan omfatta BSH, men tankvärmen passerar inte framledningsgivaren."
       : d.copBlock === "buh_no_r2t" ? "Ingen COP: BUH är aktiv utan efterföljande givare; el- och värmegränsen skiljer sig."
-      : d.copBlock === "mb_scope" ? "Ingen COP: HomeHub mäter enhetens el men värmen bara PHE."
+      : d.copBlock === "mb_scope" ? "COP är inte tillgängligt. HomeHub-guiden anger inte vilka elförbrukare som ingår. Den uppskattade värmen gäller plattvärmeväxlaren. COP kräver att båda värdena bevisligen täcker samma utrustning."
       : d.copBlock === "no_pel"
       ? d.pelHeld ? "Ingen COP: växelriktarströmmen är ett gammalt värde efter stopp."
         : "Ingen COP: varken CT- eller växelriktarström finns."

@@ -1,4 +1,4 @@
-// translation-source: e48a108e482c83165efc2a0fb7f44e45ea2f5ff28879f55570a2a130a9aee1ef
+// translation-source: 456568c508c4398e3b29e39470c90fba425fccf1699b14af2fbc6e9d1af09ecd
 I18N.ja = localeValues([
   /* sys.nodata */ "データなし",
   /* sys.unreachable */ "接続不可",
@@ -1212,7 +1212,7 @@ INSPECT_I18N.ja = inspectValues(
       : d.pth == null ? null : d.pthKind === "cooling" ? `≈ ${fmt1(d.pth)} kW冷却${d.cop != null ? `、EER ${fmt1(d.cop)}` : ""}。` : `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `、COP ${fmt1(d.cop)}` : ""}。`], // pth
     [(d) => d && d.efficiencyKind === "eer" ? "ヒートポンプEER（推定）" : d && d.copScope === "plant" ? "BUH後COP（推定）" : "ヒートポンプCOP（推定）", "効率推定", (d) => d && d.efficiencyKind === "eer" ? "推定冷却出力÷推定電力。流体、センサー、電圧、力率の仮定を含む瞬時EERで、季節効率ではありません。" : "同じ収支境界の推定熱出力÷電力。CTではBUH後、インバータ電流ではヒートポンプのみになり得て、CT配線が含む負荷を決めます。流体、センサー、電圧、力率の仮定を含む瞬時値で季節効率ではありません。", (d) => d.copBlock === "tank_heater" ? "COPなし — タンクヒーター作動中。電力収支に含まれても、熱は水側センサーを通らず直接タンクへ入ります。"
       : d.copBlock === "buh_no_r2t" ? "COPなし — BUH作動中ですが後段センサーがなく、電気と熱の境界が一致しません。"
-      : d.copBlock === "mb_scope" ? "COPなし — HomeHubはヒーター込み機器電力、熱はPHEのみです。ヒーター状態と後段センサーがなく境界を揃えられません。"
+      : d.copBlock === "mb_scope" ? "COPは算出できません。HomeHubの資料には、入力電力にどの負荷が含まれるか記載されていません。推定熱量はプレート熱交換器の値です。COPの算出には、両方の測定範囲が一致することの確認が必要です。"
       : d.copBlock === "no_pel" ? d.pelHeld ? "COPなし — 圧縮機停止中のインバータ電流は前回運転値です。" : "COPなし — CT電流もインバータ電流もありません。"
       : d.cop == null ? null : d.efficiencyKind === "eer" ? `電力1 kW当たり冷却 ${fmt1(d.cop)} kW — 約${fmt1(d.pel)} kW入力で約${fmt1(d.copPth)} kW。`
       : d.copScope === "plant" ? `CT電力1 kW当たりBUH後熱 ${fmt1(d.cop)} kW — 約${fmt1(d.pel)} kW入力で約${fmt1(d.copPth)} kW。境界はCT配線次第です。`

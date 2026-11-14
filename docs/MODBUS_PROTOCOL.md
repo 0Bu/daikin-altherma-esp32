@@ -127,8 +127,8 @@ Read today (UC3 Daikin Altherma):
 * **Faults** (input): unit error active `21`, error code `22` (`Text16`), sub-code `23`
 * **Temperatures** (input, `Temp16`): leaving water PHE `40` / BUH `41`, return `42`, DHW tank `43`,
   outdoor air `44`, liquid refrigerant `45`, room `50`
-* **Flow + electrical input** (input): flow `49` (`Int16`, L/min ×100), whole-system electrical
-  input `51` (`Pow16`, kW). Offset `51` is not dedicated booster-heater power.
+* **Flow + electrical input** (input): flow `49` (`Int16`, L/min ×100), reported heat-pump power
+  consumption `51` (`Pow16`, kW).
 * **Disinfection state** (input): current disinfection operation `33` (`Int16`, binary). The
   HomeHub map does not expose the configured weekday, start time or disinfection temperature.
 * **Setpoints and modes** (holding, read back): LWT main heating `1` / cooling `2`,
@@ -431,11 +431,14 @@ green/yellow/red state colours as WiFi, MQTT, Syslog and NTP:
   shape of a statement about two *instruments*.
   ΔT and heat output survive, because both sides of each come from the one source and nothing is
   mixed across boundaries. HomeHub input register **51** reports heat-pump power consumption in
-  `kW`. The public register guide leaves its measurement point and heater inclusion unspecified.
+  `kW`. The [Daikin EKRHH guide, 4P744838-1E, §9.2.2, p. 43][homehub-ekrhh-guide] leaves its
+  measurement point and heater inclusion unspecified.
   The dashboard shows the reported input by register offset, since the other `kW` rows are power
   limit setpoints. The COP gate requires evidence that this input and the plate heat exchanger's
   output cover the same equipment and heater states.
 * **No HomeHub** — nothing Modbus appears anywhere: no row, no group, no comparison, no banner.
+
+[homehub-ekrhh-guide]: https://www.daikin.nl/content/dam/document-library/Installer-reference-guide/heat/accessories/ekrhh/EKRHH_Installer%20reference%20guide_4PEN744838-1E_English.pdf#page=43
 
 Registers with no X10A counterpart get their own group at the very end of the value list, after
 everything X10A carries.

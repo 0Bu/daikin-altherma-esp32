@@ -135,6 +135,7 @@ vm.runInContext(`${source}
     tooltip: (i) => { LANG = "de"; return scrubText(historyView(ENV3_COMBINED_ID), i); },
     tooltipHtml: (i) => { LANG = "de"; return histReadout(historyView(ENV3_COMBINED_ID), i); },
     toggle: (source) => histSeriesToggle(ENV3_COMBINED_ID, source),
+    pin: (i) => histPinToggle(ENV3_COMBINED_ID, i),
   };`, sandbox, { filename: "main/www/app.sources" });
 
 sandbox.__api.render();
@@ -248,8 +249,8 @@ assert.match(elements.inspHist.innerHTML, /class="vhist-line env-pressure"/,
 const pressureRing = S.hist.get("env3:env3_pressure");
 const pressureValues = pressureRing.v;
 pressureRing.v = pressureValues.map(() => null);
-assert.match(sandbox.__api.tooltipHtml(3), /env-temperature">Temperatur<\/span><span class="env-temperature">22,0 °C/,
-  "source fallback must keep forecast temperature on its own colour");
+assert.doesNotMatch(sandbox.__api.tooltipHtml(3), /env-temperature/,
+  "an explicitly hidden temperature forecast stays hidden even when the last visible sensor has no history");
 assert.match(sandbox.__api.tooltipHtml(3), /env-pressure">Luftdruck<\/span><span class="env-pressure">1.008,0 hPa/,
   "source fallback must keep forecast pressure on its own colour");
 pressureRing.v = pressureValues;
@@ -266,6 +267,30 @@ sandbox.__api.toggle("env3_temperature");
   assert.match(elements.inspHist.innerHTML, /vhist-axis-now/);
   assert.match(elements.inspHist.innerHTML, /vhist-line env-forecast-temperature/);
   S.hist.set(key, initial);
+}
+
+{
+  const keys = ["env3_temperature", "env3_humidity", "env3_pressure"].map(id => "env3:" + id);
+  const rings = keys.map(key => S.hist.get(key));
+  keys.forEach((key, i) => S.hist.set(key, { ...rings[i], gen: 4, v: [] }));
+  sandbox.__api.render();
+  assert.match(elements.inspHist.innerHTML, /data-hist="env3_combined"[^>]*data-n="0"/);
+  assert.match(elements.inspHist.innerHTML, /Open-Meteo · Prognose/);
+  assert.match(elements.inspHist.innerHTML, /vhist-line env-forecast-temperature/);
+  assert.doesNotMatch(elements.inspHist.innerHTML, /vhist-line env-temperature/);
+  assert.equal(sandbox.__api.tooltip(0),
+    `${forecastClock}\nOpen-Meteo · Prognose\nTemperatur  22,0 °C\nLuftfeuchte  46,0 %\nLuftdruck  1.008,0 hPa`);
+  sandbox.__api.pin(0);
+  sandbox.__api.render();
+  assert.match(elements.inspHist.innerHTML, /vhist-pinned/);
+  sandbox.__api.pin(0);
+  keys.forEach((key, i) => S.hist.set(key, rings[i]));
+  S.hist.set(keys[2], { ...rings[2], gen: 5, err: true, v: [] });
+  sandbox.__api.render();
+  assert.match(elements.inspHist.innerHTML, /vhist-line env-forecast-pressure/,
+    "one unavailable measured ring cannot suppress its own fresh forecast");
+  assert.doesNotMatch(elements.inspHist.innerHTML, /vhist-line env-pressure/);
+  S.hist.set(keys[2], rings[2]);
 }
 
 // Transport loss retires only the live status claims. The dated historical measurements remain

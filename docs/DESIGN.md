@@ -328,7 +328,7 @@ Closing a chart ends its gesture. Already queued reads can still fill the cache.
 interrupt a first read. The next attempt gets one request timeout to finish before polling resumes.
 A failed refresh keeps compatible readings within the most recent day. A distinct marker identifies
 each retained series' last received sample. Categorical timelines keep their separate live cap,
-and weather charts keep the current-time divider and forecast.
+and weather charts show a verified current forecast even when the measured history is empty.
 
 Hover previews a sample; tap pins it, a second tap on the same sample/Escape clears it. The two views
 of a row share a pin and freeze while either is scrubbed. A dated pin tracks its sample instant.

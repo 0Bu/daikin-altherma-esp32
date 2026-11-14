@@ -989,7 +989,12 @@ function wireRestOfApp() {
   $("boardForm").addEventListener("submit", (e) => {
     e.preventDefault();
     if (!boardSettingsAvailable()) {
-      toast(t("toast.unreachable"), "err");
+      toast(t(S.otaBusy || S.otaInstalling || S.transportBusy ? "toast.busy_retry" : "toast.unreachable"), "err");
+      return;
+    }
+    if (boardDraftIdentity !== boardSettingsIdentity()) {
+      closeBoard();
+      toast(t("toast.busy_retry"), "err");
       return;
     }
     const type = +$("bdLedType").value;

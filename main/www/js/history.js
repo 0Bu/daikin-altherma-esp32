@@ -171,11 +171,13 @@ function histVisibleSeries(h) {
   if (h.series.length === 1) return h.series;
   const hidden = histHiddenSet(h);
   const visible = h.series.filter((s) => !hidden.has(s.source));
+  if (h.forecast) return visible.length ? visible : h.series;
   if (visible.some((s) => s.v.some((v) => v != null))) return visible;
   // A source can disappear or roll into an all-gap ring after a legend choice. Keep an available
   // curve visible without discarding either source's history or the user's saved browser choice.
   const fallback = h.series.find((s) => s.v.some((v) => v != null));
-  return fallback ? h.series.filter((s) => visible.includes(s) || s === fallback) : visible;
+  return fallback ? h.series.filter((s) => visible.includes(s) || s === fallback)
+    : visible.length ? visible : h.series;
 }
 
 // Include the lifetime and time anchor even when a new flat ring draws identical SVG geometry.
@@ -187,12 +189,19 @@ function histRevision(view) {
 }
 
 function histLegendHtml(h, s, cls) {
-  const visible = histVisibleSeries(h).some((q) => q.source === s.source);
-  const dataSeries = histVisibleSeries(h).filter((q) => q.v.some((v) => v != null));
-  const last = visible && (dataSeries.length <= 1 ? (s.v.some((v) => v != null) || histVisibleSeries(h).length <= 1) : false);
+  const visible = histVisibleSeries(h);
+  const shown = visible.includes(s);
+  const last = shown && histLegendLast(h, visible, s);
   return `<button type="button" class="vhist-source${cls}" data-hist-id="${esc(h.id)}" ` +
-    `data-hist-series="${esc(s.source)}" aria-pressed="${visible}"${last ? " disabled" : ""}>` +
+    `data-hist-series="${esc(s.source)}" aria-pressed="${shown}"${last ? " disabled" : ""}>` +
     `<i></i>${esc(histSeriesLabel(s))}</button>`;
+}
+
+function histLegendLast(h, visible, s) {
+  if (h.forecast) return visible.length <= 1;
+  const withSamples = visible.filter(q => q.v.some(v => v != null));
+  if (withSamples.length === 0) return visible.length <= 1;
+  return withSamples.length === 1 && withSamples[0] === s;
 }
 
 function histSeriesLabel(series) {
@@ -217,11 +226,11 @@ function histSeriesToggle(id, source) {
   const h = historyView(id);
   const s = h?.series?.find((q) => q.source === source);
   if (!s) return;
-  const visible = histVisibleSeries(h).some((q) => q.source === source);
-  const dataSeries = histVisibleSeries(h).filter((q) => q.v.some((v) => v != null));
-  if (visible && (dataSeries.length <= 1 ? (s.v.some((v) => v != null) || histVisibleSeries(h).length <= 1) : false)) return;
+  const visible = histVisibleSeries(h);
+  const shown = visible.includes(s);
+  if (shown && histLegendLast(h, visible, s)) return;
   const hidden = new Set(histHiddenSet(h));
-  if (visible) hidden.add(source); else hidden.delete(source);
+  if (shown) hidden.add(source); else hidden.delete(source);
   cancelHistoryGesture();
   S.histHidden.set(id, hidden);
   const pin = S.histPin.get(id);
@@ -346,7 +355,8 @@ async function readHistory(id, source, key, epoch, previous, request) {
     // visual boundary too, otherwise the live row can say "22.8 L/min" while its own trend and
     // crosshair still say just "22.8". The API remains byte-for-byte compatible.
     const cadence = +j.dt;
-    const device = { at: Date.now(), gen, source, sourceId,
+    const receivedAt = Date.now();
+    const device = { at: receivedAt, receivedAt, gen, source, sourceId,
                      dt: Number.isSafeInteger(cadence) && cadence > 0 && cadence <= 86400 ? cadence : 300,
                      unit: displayUnit(j),
                      label: typeof j.label === "string" ? j.label : "",
@@ -511,7 +521,8 @@ async function ensureDerived(id) {
       : mode === "time" && bucket && typeof bucket[1].t0 === "number"
         ? bucket[1].b0 - Math.round((bucket[1].t0 - start) / dt)
       : bucket ? bucket[1].b0 - (n - bucket[1].v.length) : null;
-    S.hist.set(id, { at: Date.now(), gen, inputs, dt, unit: D.unit,
+    const receivedAt = Date.now();
+    S.hist.set(id, { at: receivedAt, receivedAt, gen, inputs, dt, unit: D.unit,
                      t0: typeof t0 === "number" ? t0 : null,
                      b0: Number.isInteger(b0) ? b0 : null,
                      held: heldRuns, v });
@@ -610,7 +621,8 @@ function weatherForecastView() {
 // sample stays null in its own series — the other instrument may still draw at that instant.
 function alignedHistoryView(id, raw) {
   const supplied = raw;
-  raw = raw.filter((s) => s.h && !s.h.err && Array.isArray(s.h.v) && s.h.v.length);
+  raw = raw.map(s => ({ ...s, h: expireHistSamples(s.h) }))
+    .filter((s) => s.h && !s.h.err && Array.isArray(s.h.v) && s.h.v.length);
   if (!raw.length) return null;
 
   const dt = raw[0].h.dt || 300;
@@ -673,27 +685,81 @@ function alignedHistoryView(id, raw) {
            b0: mode === "bucket" ? start : null,
            refreshFailed: withSamples.length > 0 && withSamples.every(s => s.raw.refreshFailed),
            unavailable,
-           gen: series.map((s) => `${s.source}:${s.raw.gen || 0}`).join("/"),
+           gen: series.map((s) => `${s.source}:${s.raw.gen || 0}${s.raw.expired ? "/" + s.raw.expired : ""}`).join("/"),
            v: union, series };
+}
+
+function expiredHistSlots(h) {
+  if (!h?.refreshFailed || !h.v.length) return 0;
+  const uptime = S.status?.uptime_s;
+  const deviceTime = Date.parse(S.status?.ntp?.time || "") / 1000;
+  const elapsed = Math.max(0, Date.now() - (h.receivedAt ?? Date.now())) / 1000;
+  const dt = h.dt || 300;
+  let current = Math.floor(elapsed / dt) + h.v.length;
+  let start = 0;
+  if (Number.isFinite(uptime) && Number.isInteger(h.b0)) {
+    current = Math.max(current + h.b0, Math.floor(uptime / dt));
+    start = h.b0;
+  } else if (Number.isFinite(deviceTime) && h.t0 != null) {
+    current = Math.max(current + Math.floor(h.t0 / dt), Math.floor(deviceTime / dt));
+    start = Math.floor(h.t0 / dt);
+  }
+  return Math.max(0, Math.min(h.v.length, current - HIST_MAX_SAMPLES - start));
+}
+
+function expireHistSamples(h) {
+  const expired = expiredHistSlots(h);
+  if (!expired) return h;
+  // Preserve the existing time and index identity while dropping readings outside the window.
+  const held = h.held?.flatMap(([from, count]) =>
+    from + count > expired ? [[Math.max(expired, from), from + count - Math.max(expired, from)]] : []);
+  return { ...h, expired, held, v: h.v.map((v, i) => i < expired ? null : v) };
 }
 
 function historyView(id, source = "", forecast) {
   if (id === ENV3_COMBINED_ID) {
-    const view = alignedHistoryView(id, ENV3_COMBINED_SERIES.map((s) => ({
+    const offered = ENV3_COMBINED_SERIES.filter(s => hasEnv3Hist(s.id)).map((s) => ({
       source: s.id, name: t(s.label), h: S.hist.get(histCacheKey(s.id, "env3")),
-    })));
-    if (Number.isFinite(view?.t0)) view.forecast = forecast === undefined ? weatherForecastView() : forecast;
-    return view;
+    }));
+    if (!offered.length) return null;
+    const view = alignedHistoryView(id, offered);
+    const weather = forecast === undefined ? weatherForecastView() : forecast;
+    if (view?.v.some(v => v != null)) {
+      if (weather && Number.isFinite(view.t0)) {
+        view.forecast = weather;
+        view.series = ENV3_COMBINED_SERIES.map(s =>
+          view.series.find(q => q.source === s.id) ||
+          { source: s.id, name: t(s.label), v: Array(view.v.length).fill(null), raw: {} });
+      }
+      return view;
+    }
+    if (!weather) return null;
+    return {
+      id, t0: weather.now, dt: 300, gen: "forecast", v: [], forecast: weather,
+      series: ENV3_COMBINED_SERIES.map(s => ({ source: s.id, name: t(s.label), v: [], raw: {} })),
+      unavailable: offered.filter(s => s.h?.err || s.h?.refreshFailed),
+    };
   }
   const x10aName = id === "circulation_state" ? "MQTT" : "X10A";
-  const view = alignedHistoryView(id, [
+  const offered = [
     { source: "x10a", name: x10aName, h: hasHist(id) ? S.hist.get(id) : null },
     { source: "modbus", name: "HomeHub · Modbus", h: hasModbusHist(id) ? S.hist.get(histCacheKey(id, "modbus")) : null },
     { source: "env3", name: "ENV III", h: hasEnv3Hist(id) ? S.hist.get(histCacheKey(id, "env3")) : null },
     { source: "room", name: roomHistName(), h: hasRoomHist(id) ? S.hist.get(histCacheKey(id, "room")) : null },
-  ].filter((s) => !source || s.source === source));
+  ].filter((s) => !source || s.source === source);
+  let view = alignedHistoryView(id, offered);
   if (view && id === "dhw_tank") view.tankAux = tankAuxHistories();
-  return STATE_HIST[id] ? stateHistoryLiveView(view) : view;
+  if (!STATE_HIST[id]) return view;
+  if (!view?.v.some(v => v != null)) {
+    const live = offered.filter(s =>
+      (s.source === "x10a" ? hasHist(id) : s.source === "modbus" && hasModbusHist(id)) &&
+      stateHistoryCurrent(id, s.source).value != null);
+    if (!live.length) return null;
+    view = { id, dt: 300, t0: null, gen: "live", v: [], series: live.map(s => ({
+      source: s.source, name: s.name, v: [], raw: {},
+    })), unavailable: [] };
+  }
+  return stateHistoryLiveView(view);
 }
 
 // Categorical states need timelines, not numeric curves. Every valid state gets an explicit level,
@@ -1093,10 +1159,10 @@ function stateHistHtml(id, name, view, wrap, cfg) {
     const px = (frac * 100).toFixed(3);
     pinCross = `<span class="vhist-cross vhist-pinned" style="left:${px}%"></span>`;
   }
-  const totalText = t(cfg.total, histDuration(total)) + (cfg.inactiveTotal
-    ? ` · ${t(cfg.inactiveTotal, histDuration(inactiveSeconds))}` : "");
+  const totalText = recordedN ? t(cfg.total, histDuration(total)) + (cfg.inactiveTotal
+    ? ` · ${t(cfg.inactiveTotal, histDuration(inactiveSeconds))}` : "") : "";
   return wrap(
-    `<div class="vhist-head"><span class="vhist-t">${esc(full ? t("hist.title") : t("hist.recorded", spanH))}</span>` +
+    `<div class="vhist-head"><span class="vhist-t">${esc(!recordedN ? t("hist.now") : full ? t("hist.title") : t("hist.recorded", spanH))}</span>` +
       `<span class="vhist-range mono num">${esc(totalText)}</span></div>` + levelLegend +
     `<div class="vhist-graph vhist-state-graph">` +
       histTipsHtml(view, pi, pi >= 0 ? scrubFrac(pi, n) : 0) +
@@ -1105,7 +1171,7 @@ function stateHistHtml(id, name, view, wrap, cfg) {
         `<span class="vhist-cross vhist-live" hidden></span>` +
       `</div>` + histTimesHtml(view, pi, pi >= 0 ? scrubFrac(pi, n) : 0) +
     `</div>` +
-    `<div class="vhist-axis"><span>${esc(histAxisStart(view, spanH))}</span>` +
+    `<div class="vhist-axis"><span>${recordedN ? esc(histAxisStart(view, spanH)) : ""}</span>` +
       (gaps ? `<span class="vhist-gap">${esc(t(cfg.gaps || "hist.gaps", gaps))}</span>` : "") +
       `<span>${esc(view.liveIndex == null ? histAxisEnd(view) : t("hist.now"))}</span></div>` +
     histUnavailableHtml(view)
@@ -1129,12 +1195,12 @@ function alignAuxSample(view, h, i) {
 function tankAuxHistories() {
   return [histCacheKey("smart_grid_mode", "modbus"), "smart_grid_mode", "bsh_state",
     histCacheKey("bsh_state", "modbus")].map(key => {
-    const h = S.hist.get(key);
+    const h = expireHistSamples(S.hist.get(key));
     return h && !h.err && h.v?.length ? h : null;
   });
 }
 
-const tankAuxRevision = histories => histories?.map(h => h ? h.gen : "").join(",");
+const tankAuxRevision = histories => histories?.map(h => h ? `${h.gen}:${h.expired || 0}` : "").join(",");
 
 function dhwAuxPhases(view) {
   if (!view?.tankAux) return null;
@@ -1189,7 +1255,8 @@ function histHtml(id, unit, name, source = "") {
 
   const allPts = view.series.flatMap((s) => s.v.map((x) => x == null ? null : x / 10));
 
-  if (STATE_HIST[id]) return stateHistHtml(id, name, view, wrap, STATE_HIST[id]);
+  if (STATE_HIST[id]) return stateHistHtml(id, name, view, wrap, STATE_HIST[id]) +
+    (view.recordedN === 0 ? histEmptyHtml(offered.map(key => S.hist.get(key)), wrap) : "");
 
   const n = view.v.length;
   const spanH = Math.max(1, Math.round((n * view.dt) / 3600));
@@ -1361,8 +1428,10 @@ function env3HistHtml(view = historyView(ENV3_COMBINED_ID)) {
   if (!offered.length) return "";
   const cached = offered.map((s) => S.hist.get(histCacheKey(s.id, "env3")));
   const wrap = (body, cls = "") => `<div class="vhist vhist-env3${cls ? " " + cls : ""}">${body}</div>`;
-  if (!view?.v.some(v => v != null)) return histEmptyHtml(cached, wrap);
+  if (!view) return histEmptyHtml(cached, wrap);
   const plotted = view.series.filter((s) => s.v.some((v) => v != null));
+  const geometry = forecastScrubView(view);
+  if (!plotted.length && !geometry) return histEmptyHtml(cached, wrap);
 
   const n = view.v.length;
   const spanH = Math.max(1, Math.round((n * view.dt) / 3600));
@@ -1370,8 +1439,7 @@ function env3HistHtml(view = historyView(ENV3_COMBINED_ID)) {
   const forecast = view.forecast;
   const futureEnd = forecast?.points.at(-1)?.time;
   const measuredStart = Number.isFinite(view.t0) ? view.t0 : null;
-  const measuredEnd = measuredStart == null ? null : measuredStart + (n - 1) * view.dt;
-  const geometry = forecastScrubView(view);
+  const measuredEnd = measuredStart == null ? null : measuredStart + Math.max(0, n - 1) * view.dt;
   const timedForecast = !!geometry;
   const domainEnd = timedForecast ? futureEnd : measuredEnd;
   const domainSpan = timedForecast ? domainEnd - measuredStart : 0;
@@ -1456,7 +1524,7 @@ function env3HistHtml(view = historyView(ENV3_COMBINED_ID)) {
   }
   // Units belong to readings, not series names. They stay in every measured/forecast tooltip, so
   // repeating them in this always-visible legend adds ink without adding meaning.
-  const legend = `<div class="vhist-legend">${plotted.map((s) =>
+  const legend = `<div class="vhist-legend">${(geometry ? view.series : plotted).map((s) =>
     histLegendHtml(view, s, " " + env3SeriesClass(s.source))
   ).join("")}</div>`;
 
@@ -1484,7 +1552,7 @@ function env3HistHtml(view = historyView(ENV3_COMBINED_ID)) {
   }
 
   return wrap(
-    `<div class="vhist-head"><span class="vhist-t">${esc(full ? t("hist.title") : t("hist.recorded", spanH))}</span>` +
+    `<div class="vhist-head"><span class="vhist-t">${esc(!n ? t("hist.forecast") : full ? t("hist.title") : t("hist.recorded", spanH))}</span>` +
       `<span class="vhist-range">${esc(t("env.history_scales"))}</span></div>` + legend +
     `<div class="vhist-graph">` +
       histTipsHtml(view, pi, pinFrac) +
@@ -1507,7 +1575,7 @@ function env3HistHtml(view = historyView(ENV3_COMBINED_ID)) {
     `</div>` +
     (forecastAreas
       ? `<div class="vhist-axis vhist-axis-future" style="--now-p:${(nowFrac * 100).toFixed(3)}">` +
-          `<span>${esc(histAxisStart(view, spanH))}</span>` +
+          `<span>${n ? esc(histAxisStart(view, spanH)) : ""}</span>` +
           `<span class="vhist-axis-now">${esc(t("hist.now"))}</span>` +
           `<span>${esc(t("hist.in_hours", futureH))}</span></div>`
       : `<div class="vhist-axis"><span>${esc(histAxisStart(view, spanH))}</span>` +
@@ -1538,7 +1606,7 @@ function forecastScrubView(h) {
 }
 
 function computeForecastScrubView(h) {
-  if (!h || h.id !== ENV3_COMBINED_ID || !h.v.length || !Number.isFinite(h.t0)) return null;
+  if (!h || h.id !== ENV3_COMBINED_ID || !Number.isFinite(h.t0)) return null;
   const forecast = h.forecast;
   const futureEnd = forecast?.points.at(-1)?.time;
   if (!forecast || !Number.isFinite(futureEnd) || futureEnd <= forecast.now ||
@@ -1547,7 +1615,7 @@ function computeForecastScrubView(h) {
   if (!points.length) return null;
   const domainSpan = futureEnd - h.t0;
   if (!(domainSpan > 0)) return null;
-  const measuredEnd = h.t0 + (h.v.length - 1) * h.dt;
+  const measuredEnd = h.t0 + Math.max(0, h.v.length - 1) * h.dt;
   const xFrac = (time) => Math.max(0, Math.min(1, (time - h.t0) / domainSpan));
   const scales = {};
   for (const spec of WEATHER_FORECAST_SERIES) {
@@ -1584,12 +1652,13 @@ function scrubCount(plot) {
 // a readout on screen while silently changing which moment it describes.
 function histPinIndex(id, h) {
   const p = S.histPin.get(id);
-  if (!p || !h || !h.v.length) return -1;
+  if (!p || !h) return -1;
   if (p.forecast) {
     const forecast = forecastScrubView(h);
     const i = forecast?.points.findIndex((point) => point.time === p.t) ?? -1;
     return i < 0 ? -1 : h.v.length + i;
   }
+  if (!h.v.length) return -1;
   if (p.t != null) {
     if (h.t0 == null) return -1;                 // pinned with a clock, re-resolving without one
     const rel = p.t - h.t0, half = h.dt / 2;
@@ -1616,9 +1685,10 @@ function expireFallbackHistoryPins() {
 // you just made is the obvious way to dismiss it, and needs no extra affordance on a 72 px plot.
 function histPinToggle(id, i, source = "") {
   const h = historyView(id, source);
-  if (!h || !h.v.length) return;
+  if (!h) return;
   const forecast = forecastScrubView(h);
   const total = h.v.length + (forecast?.points.length || 0);
+  if (!total) return;
   i = Math.max(0, Math.min(total - 1, i));
   if (histPinIndex(id, h) === i) S.histPin.delete(id);
   else if (i >= h.v.length) S.histPin.set(id, { t: forecast.points[i - h.v.length].time, forecast: true });
@@ -1829,9 +1899,10 @@ function placeScrubReadout(graph, h, i, frac) {
 function scrubMove(plot, i) {
   const h = scrubView(plot);
   const n = +plot.dataset.n;
-  if (!h || !n) return;
+  if (!h) return;
   const forecast = forecastScrubView(h);
   const total = n + (forecast?.points.length || 0);
+  if (!total) return;
   i = Math.max(0, Math.min(total - 1, i));
   const graph = plot.parentElement;
   // .vhist-live, never the bare class: a PINNED crosshair carries the same visual classes and sits
@@ -1894,7 +1965,7 @@ function scrubIndex(plot, clientX) {
   const n = +plot.dataset.n;
   const forecast = forecastScrubView(h);
   const rawFrac = Math.max(0, Math.min(1, (clientX - r.left) / (r.width || 1)));
-  if (forecast && rawFrac > forecast.nowFrac) {
+  if (forecast && (!n || rawFrac > forecast.nowFrac)) {
     let nearest = 0, distance = Infinity;
     forecast.points.forEach((point, i) => {
       const d = Math.abs(forecast.xFrac(point.time) - rawFrac);

@@ -1,4 +1,4 @@
-// translation-source: e48a108e482c83165efc2a0fb7f44e45ea2f5ff28879f55570a2a130a9aee1ef
+// translation-source: 456568c508c4398e3b29e39470c90fba425fccf1699b14af2fbc6e9d1af09ecd
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
@@ -1012,7 +1012,7 @@ INSPECT_I18N.zh = inspectValues(
       ? "制冷功率÷输入功率；继承介质、传感器、电压/功率因数误差，是瞬时 EER，非季节效率。"
       : "边界相容的热功率÷输入功率：有 R2T 时 CT 算 BUH 后，否则逆变器电流仅算热泵；瞬时值非认证计量。", (d) => d.copBlock === "tank_heater" ? "无 COP：电功率可能含 BSH，但其水箱热量不经过出水传感器，边界不一致。"
       : d.copBlock === "buh_no_r2t" ? "无 COP：BUH 启动却无下游传感器，电热边界不一致。"
-      : d.copBlock === "mb_scope" ? "无 COP：HomeHub 测整机电功率，而热量只算 PHE，边界不一致。"
+      : d.copBlock === "mb_scope" ? "无法计算 COP。HomeHub 指南未说明输入功率包含哪些用电设备。估算的热量仅对应板式换热器。计算 COP 前必须确认两个数值的测量范围一致。"
       : d.copBlock === "no_pel" ? d.pelHeld ? "无 COP：停机后逆变器电流是旧值。" : "无 COP：无 CT 或逆变器电流。"
       : d.cop == null ? null
       : d.efficiencyKind === "eer" ? `每 1 kW 电约制冷 ${fmt1(d.cop)} kW：${fmt1(d.copPth)} / ${fmt1(d.pel)} kW。`

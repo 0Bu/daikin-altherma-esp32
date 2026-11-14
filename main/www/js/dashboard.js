@@ -1206,7 +1206,7 @@ const fmtKiB = (b) => (b == null ? "—" : `${Math.round(b / 1024)} KiB`);
 const boardHistoryMarkup = new WeakMap();
 function boardHistoryHtml(id, unit, label) {
   const ring = S.hist.get(id);
-  if (!ring) return histHtml(id, unit, label, "x10a");
+  if (!ring || ring.refreshFailed) return histHtml(id, unit, label, "x10a");
   const pin = S.histPin.get(id);
   const cached = boardHistoryMarkup.get(ring);
   if (cached?.id === id && cached.epoch === S.histEpoch && cached.lang === LANG && cached.pin === pin)

@@ -638,7 +638,7 @@ function renderHeaderMeta() {
   const w = S.status?.wifi || {};
   $("hdrIp").textContent = w.ip || location.hostname;
   const vl = $("verLink");
-  vl.textContent = "v" + (S.status?.version || "?");
+  vl.textContent = "v" + (S.status?.version || (S.otaInstalling && S.imageLease?.version) || "?");
   vl.title = S.otaAvail ? t("ota.title_avail", S.otaAvail) : t("ota.title_check");
 }
 // The status block INSIDE the schematic (#scStatus): the operation mode is the drawing's headline —
