@@ -248,6 +248,11 @@ try {
       after: "gates.received_data",
     },
     {
+      name: "invalid-dhw-activity-as-off", scenario: "compressor_witness",
+      before: "r.offset == 52 && raw <= 1",
+      after: "r.offset == 52",
+    },
+    {
       name: "history-resolved-peer", scenario: "probe_resolved_peer_reconnect",
       before: /s_req_peer_ipv4\s*= ntohl\(addr\.sin_addr\.s_addr\);/,
       after: "s_req_peer_ipv4 = ((void)addr.sin_addr.s_addr, 0u);",

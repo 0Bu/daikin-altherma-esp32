@@ -1638,15 +1638,20 @@ void compressor_witness() {
         for (const uint16_t invalid : {uint16_t{2}, MB_WAIT, MB_UNAVAILABLE, MB_UNSUPPORTED}) {
             s_cycle_tick = 1;
             peer.set_word(MbFunc::ReadInput, 31, invalid);
+            peer.set_word(MbFunc::ReadInput, 52, invalid);
             poll_once();
             REQUIRE(current_compressor() == ModbusCompressor::Unknown);
+            REQUIRE(!current_activity().dhw.has_value());
+            REQUIRE(!mb_status().dhw_operation_known);
             REQUIRE(mb_values_live());
         }
 
         peer.set_word(MbFunc::ReadInput, 31, 1);
+        peer.set_word(MbFunc::ReadInput, 52, 1);
         s_cycle_tick = 1;
         poll_once();
         REQUIRE(current_compressor() == ModbusCompressor::On);
+        REQUIRE(current_activity().dhw == true);
         const int64_t expiry_us = (s_compressor_ms + MB_REPLY_MAX_AGE_S * 1000LL) * 1000;
         sdk::clock_us           = expiry_us;
         s_last_reply_ms         = expiry_us / 1000;
