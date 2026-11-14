@@ -721,7 +721,7 @@ assert.match(setHp.slice(mbReconfigure, mbCleanupRequest + 80),
 
 // Retained dedup state is an acknowledgement cache, not a build cache. A failed broker publish must
 // leave it unchanged so the next cycle retries the exact current document/discovery.
-const modbusPublishStart = mqtt.indexOf("static bool publish_modbus_state(bool& published_live)");
+const modbusPublishStart = mqtt.indexOf("static inline bool publish_modbus_state(bool& published_live)");
 const modbusPublishEnd = mqtt.indexOf("\n}\n\nstruct RetainedCleanupCycle", modbusPublishStart) + 2;
 const modbusPublish = mqtt.slice(modbusPublishStart, modbusPublishEnd);
 assert.match(modbusPublish,

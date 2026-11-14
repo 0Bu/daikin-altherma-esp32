@@ -1449,7 +1449,7 @@ static bool publish_x10a_state(const Config& config, bool force) {
     return true;
 }
 
-static bool publish_modbus_state(bool& published_live) {
+[[gnu::always_inline]] static inline bool publish_modbus_state(bool& published_live) {
     const uint32_t                  revision = mb_cache_generation();
     bool                            live     = false;
     const std::vector<GroupedValue> values =
