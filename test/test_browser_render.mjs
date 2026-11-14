@@ -2693,6 +2693,31 @@ try {
       assert.equal(await page.evaluate('document.getElementById("statusSnapshot").hidden'), true,
         `${viewport.name}/${locale}/settings: fresh status removes the snapshot warning`);
 
+      if (locale === browserLocales[0]) {
+        assert.equal(await page.evaluate(`(() => {
+          const progress = t("ota.pct", 31);
+          otaInline(progress, { ring: true, pct: 31 });
+          const live = document.getElementById("otaProgressSettings");
+          const oldVisual = document.getElementById("otaStatSet");
+          if (!live || !oldVisual) return false;
+          const observer = new MutationObserver(() => {});
+          observer.observe(live, { subtree: true, childList: true, characterData: true });
+          S.otaCached = true;
+          renderSettings();
+          const visual = document.getElementById("otaStatSet");
+          const stable = oldVisual !== visual && visual.getAttribute("aria-hidden") === "true" &&
+            visual.textContent === progress && live.isConnected && live.getAttribute("role") === "status" &&
+            live.textContent === progress && observer.takeRecords().length === 0;
+          otaInline(t("ota.pct", 42), { ring: true, pct: 42 });
+          const changed = live.textContent === t("ota.pct", 42) && observer.takeRecords().length > 0;
+          observer.disconnect();
+          S.otaCached = false;
+          otaInline("");
+          renderSettings();
+          return stable && changed;
+        })()`), true, `${viewport.name}/${locale}/settings: card rebuild keeps the OTA announcement stable`);
+      }
+
       await page.evaluate(`otaFail(${JSON.stringify(otaMemoryError)}); renderApp(); true`);
       await page.frame();
       assertLayout(await page.evaluate(layoutAudit), `${viewport.name}/${locale}/settings/ota-error`);

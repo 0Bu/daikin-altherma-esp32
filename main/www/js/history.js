@@ -366,10 +366,10 @@ function validHistoryTime(start, bucket, count) {
   if (start == null) return true;
   if (!Number.isSafeInteger(start) || Math.abs(start) > 8.64e12 - HIST_MAX_SAMPLES * 300)
     return false;
-  if (Number.isInteger(bucket) || !count) return true;
-  // Without a monotonic anchor, a restored ring needs an accepted device clock for alignment.
+  if (!count) return true;
+  // A restored ring without a monotonic anchor needs an accepted device clock for alignment.
   const deviceTime = historyDeviceTime();
-  if (!Number.isFinite(deviceTime)) return false;
+  if (!Number.isFinite(deviceTime)) return Number.isInteger(bucket);
   const last = start + (count - 1) * 300;
   return last <= deviceTime + 1 + POLL_TIMEOUT_MS / 1000 &&
     last + 300 > deviceTime - HIST_MAX_SAMPLES * 300;
@@ -559,6 +559,10 @@ async function ensureDerived(id) {
       mode = "time";
       start = Math.min(...src.map(([, h]) => h.t0));
       end = Math.max(...src.map(([, h]) => h.t0 + (h.v.length - 1) * dt));
+    } else if (src.some(([, h]) => h.b0 != null || h.t0 != null)) {
+      // An anchored ring and a legacy/restored peer without a common clock cannot be paired.
+      S.hist.set(id, { at: Date.now(), gen: previousGen + 1, inputs, v: [] });
+      return;
     } else {
       end = Math.max(...src.map(([, h]) => h.v.length)) - 1;
     }
@@ -591,14 +595,9 @@ async function ensureDerived(id) {
     }
     const gen = previousGen + 1;
     const wall = src.find(([, h]) => typeof h.t0 === "number");
-    const bucket = src.find(([, h]) => Number.isInteger(h.b0));
     const t0 = mode === "time" ? start
-      : mode === "bucket" && wall ? wall[1].t0 - (wall[1].b0 - start) * dt
-      : wall ? wall[1].t0 - (n - wall[1].v.length) * dt : null;
-    const b0 = mode === "bucket" ? start
-      : mode === "time" && bucket && typeof bucket[1].t0 === "number"
-        ? bucket[1].b0 - Math.round((bucket[1].t0 - start) / dt)
-      : bucket ? bucket[1].b0 - (n - bucket[1].v.length) : null;
+      : mode === "bucket" && wall ? wall[1].t0 - (wall[1].b0 - start) * dt : null;
+    const b0 = mode === "bucket" ? start : null;
     const receivedAt = Date.now();
     S.hist.set(id, { at: receivedAt, receivedAt, receivedTick: historyBrowserTime(), gen, inputs, dt, unit: D.unit,
                      t0: typeof t0 === "number" ? t0 : null,
@@ -747,9 +746,9 @@ function alignedHistoryView(id, raw) {
   const primary = series.find((s) => s.source === "x10a") ||
                   series.find((s) => s.source === "env3") || series[0];
   const wall = raw.find((s) => typeof s.h.t0 === "number");
+  // A relative overlay must never assign one instrument's wall clock to another.
   const t0 = mode === "time" ? start
-           : mode === "bucket" && wall ? wall.h.t0 - (wall.h.b0 - start) * dt
-           : primary.raw.t0;
+           : mode === "bucket" && wall ? wall.h.t0 - (wall.h.b0 - start) * dt : null;
   const union = Array.from({ length: n }, (_, i) => {
     const found = series.find((s) => s.v[i] != null);
     return found ? found.v[i] : null;
@@ -777,8 +776,9 @@ const historyElapsed = h => Math.max(0, h.receivedTick == null
 const historyStatusElapsed = (now = historyBrowserTime()) =>
   Math.max(0, now - (S.statusReceivedAt ?? now)) / 1000;
 
-function historyDeviceTime() {
-  if (S.otaCached || !S.status?.ntp?.synced || S.transportUnavailable === "status")
+function historyDeviceTime(retained = false) {
+  if (S.otaCached || !S.status?.ntp?.synced ||
+      (!retained && S.transportUnavailable === "status"))
     return Number.NaN;
   return Date.parse(S.status.ntp.time || "") / 1000 + historyStatusElapsed();
 }
@@ -796,7 +796,7 @@ function expiredHistSlots(h) {
     current = Math.max(current + start, Number.isFinite(uptime) ? Math.floor((uptime + statusElapsed) / dt) : start);
   } else if (h.t0 != null) {
     start = Math.floor(h.t0 / dt);
-    const deviceTime = historyDeviceTime();
+    const deviceTime = historyDeviceTime(true);
     current = Math.max(current + start,
       Number.isFinite(deviceTime) ? Math.floor(deviceTime / dt) : start);
   }
@@ -1788,7 +1788,11 @@ function histPinIndex(id, h) {
       return recordedPinIndex(id, h, p, p.bucket - h.b0);
     }
     if (h.t0 == null) return -1;                 // pinned with a clock, re-resolving without one
-    if (p.anchor != null && Math.abs(p.anchor - h.t0) >= h.dt / 2 && p.gen !== h.gen) {
+    const shiftedAnchor = Math.abs(p.anchor - h.t0);
+    // A restored ring has no boot-relative bucket. Its head may advance by complete raster slots.
+    // A changed wall-clock anchor without that alignment cannot identify the old sample.
+    const remainder = shiftedAnchor % h.dt;
+    if (p.gen !== h.gen && Math.min(remainder, h.dt - remainder) > 1) {
       if (p.source === (h.scope ?? "")) S.histPin.delete(id);
       return -1;
     }

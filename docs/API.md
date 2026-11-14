@@ -457,8 +457,10 @@ With live status, it bounds `b0` and the sample extent by reported uptime, elaps
 and the poll deadline. It accepts a reply without row
 and source identity only if both are absent and `/status` predates the history epoch. A supplied
 identity must match the request, along with the boot and epoch tokens announced by `/status`.
-A nonempty wall-clock-only reply also needs a synchronized device clock and a newest sample in
-the rolling day. The browser preserves a compatible ring when it rejects the replacement.
+A nonempty date-only reply also needs a synchronized device clock. When live clock evidence is
+available, any dated reply must end within the rolling day and poll tolerance. The browser
+preserves a compatible ring when it rejects the replacement. An overlay without a shared clock
+uses a relative axis. Derived readings require a common raster when any input is anchored.
 `v` does not record an unknown compressor state. A sweep dropped after a stop cannot put a number into
 its bucket, but any other outdoor sample without a readable speed stays a number, so a number is not
 proof that the page was current.
@@ -591,9 +593,9 @@ collide with X10A, the other onboard part or ENV III. A board identity statement
 Switching away from M5Stack retires ENV III in the same atomic save.
 The dashboard sends `boot_id` and `board.config_revision` from its accepted `/status` as
 `boot_id` and `config_revision`. A missing member, non-string boot ID, or invalid numeric revision
-returns 400. A boot ID or revision that differs from the current value returns 409 with
-`code: "board_draft_stale"` before probing
-pins or saving. Reopen the editor from current status before submitting again. Clients can omit both.
+returns 400. A boot ID or revision that differs from the current value when the handler checks the
+submitted draft returns 409 with `code: "board_draft_stale"` before probing or saving.
+Reopen the editor from current status before submitting again. Clients can omit both.
 
 `POST /set_env3` is the compatibility route (`enabled`, `sda`, `scl`, all optional). Both board routes
 share the same preflight: enabling new pins probes SHT30/QMP6988 (422 if absent, 503 if busy), enabling

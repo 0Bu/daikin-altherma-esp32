@@ -608,7 +608,7 @@ function firmwareRow(version) {
   const action = `<button class="settings-split-action vrow-fw" type="button" data-act="ota" ` +
     `aria-label="${esc(t("aria.ota"))}" title="${esc(title)}">` +
     `<span class="vrow-val mono">v${esc(version || "?")}` +
-    `<span class="otastat" id="otaStatSet" role="status" aria-live="polite"></span></span></button>`;
+    `<span class="otastat" id="otaStatSet" aria-hidden="true"></span></span></button>`;
   return settingsInfoRow("firmware:version", "firmware-version-detail", t("card.firmware"), action,
     `<div class="vdesc-p">${esc(t("card.firmware_help"))}</div>`);
 }

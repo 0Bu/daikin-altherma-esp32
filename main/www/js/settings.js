@@ -898,12 +898,15 @@ function otaRing(pct, indet) {
 // screen has to be able to report it. Paint each mounted slot when its progress changes so a user
 // who switches screens mid-download finds the progress there. Terminal failures use the
 // separate persistent OTA alert slots below. A missing progress slot is skipped, not an error: the
-// Settings one exists only while that card is rendered.
+// Settings one exists only while that card is rendered. Its live announcement stays mounted
+// outside the cards so unrelated status changes cannot reannounce the same progress.
 let otaSeq = 0;
 const OTA_SLOTS = ["otaStat", "otaStatSet"];
 const otaPaintedProgress = new WeakMap();
 function paintOtaInline() {
   const { text = "", ring = false, pct = null, cls = "" } = S.otaView || {};
+  const announcement = $("otaProgressSettings");
+  if (announcement && announcement.textContent !== text) announcement.textContent = text;
   const progress = JSON.stringify([text, ring, pct, cls]);
   for (const id of OTA_SLOTS) {
     const el = $(id);

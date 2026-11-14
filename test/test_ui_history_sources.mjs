@@ -258,6 +258,12 @@ S.hist.set("modbus:dhw_tank", modbus);
   const dated = { t0: 1768720000 };
   S.hist.set("dhw_tank", { ...x10a, ...dated });
   S.hist.set("modbus:dhw_tank", { ...modbus, ...dated });
+  S.hist.set("modbus:dhw_tank", { ...modbus, b0: null, t0: null });
+  assert.equal(h.historyView("dhw_tank").t0, null,
+    "a mixed overlay cannot date a peer that supplied neither clock");
+  assert.equal(h.historyView("dhw_tank", "x10a").t0, dated.t0,
+    "the dated instrument keeps its own clock in a source-scoped view");
+  S.hist.set("modbus:dhw_tank", { ...modbus, ...dated });
   h.histPinToggle("dhw_tank", 0, "x10a");
   assert.equal(h.histPinIndex("dhw_tank", h.historyView("dhw_tank", "modbus")), -1,
     "a Modbus-only plot cannot substitute its reading for an X10A pin at the same bucket");
@@ -340,6 +346,17 @@ S.hist.set("modbus:dhw_tank", modbus);
   assert.equal(h.histPinIndex("dhw_tank", h.historyView("dhw_tank", "x10a")), 1,
     "a corrected clock cannot move a pin away from the same boot-relative bucket");
   S.histPin.delete("dhw_tank");
+
+  const restoredRing = { ...x10a, b0: null, t0: 1768720000, v: [452, 453, 454] };
+  S.hist.set("dhw_tank", restoredRing);
+  h.histPinToggle("dhw_tank", 1, "x10a");
+  S.hist.set("dhw_tank", { ...restoredRing, t0: restoredRing.t0 + 300,
+    gen: restoredRing.gen + 1, v: [453, 454, 455] });
+  assert.equal(h.histPinIndex("dhw_tank", h.historyView("dhw_tank", "x10a")), 0,
+    "normal head movement preserves a selected sample from a dated restored ring");
+  S.histPin.delete("dhw_tank");
+  S.hist.set("dhw_tank", { ...x10a, t0: 1768720310 });
+
   S.status.uptime_s = (x10a.b0 + 290) * 300;
   S.hist.set("dhw_tank", { ...S.hist.get("dhw_tank"), refreshFailed: true, v: [452, null, null] });
   assert.match(h.histHtml("dhw_tank", "", "Tank", "x10a"), /Verlauf nicht verfügbar/,
@@ -395,8 +412,13 @@ assert.equal(h.histCacheKey("dhw_tank", "modbus"), "modbus:dhw_tank");
   assert.deepEqual(Array.from(S.hist.get("modbus:dhw_tank").v), modbus.v,
     "a future wall-clock-only reply must preserve the compatible ring");
   assert.equal(S.hist.get("modbus:dhw_tank").refreshFailed, true);
+  S.hist.set("modbus:dhw_tank", { ...modbus, at: 0 });
+  historyResponse = { ...historyResponse, b0: 102 };
+  await h.ensureHist("dhw_tank", "modbus");
+  assert.deepEqual(Array.from(S.hist.get("modbus:dhw_tank").v), modbus.v,
+    "a plausible boot bucket cannot vouch for a future wall clock");
   S.hist.delete("modbus:dhw_tank");
-  historyResponse = { ...historyResponse, t0: time - 300 };
+  historyResponse = { ...historyResponse, b0: undefined, t0: time - 300 };
   await h.ensureHist("dhw_tank", "modbus");
   assert.equal(S.hist.get("modbus:dhw_tank").t0, time - 300,
     "a time-only reply within the device window can restore history predating boot");
@@ -405,6 +427,13 @@ assert.equal(h.histCacheKey("dhw_tank", "modbus"), "modbus:dhw_tank");
   await h.ensureHist("dhw_tank", "modbus");
   assert.deepEqual(Array.from(S.hist.get("modbus:dhw_tank").v), modbus.v,
     "an unverified wall anchor cannot displace the last compatible ring");
+  S.status.ntp = { synced: true, time: new Date(time * 1000).toISOString() };
+  const ageing = { ...x10a, b0: null, t0: time - 289 * 300 };
+  assert.ok(h.expiredHistSlots(ageing) > 0);
+  S.transportUnavailable = "status";
+  assert.ok(h.expiredHistSlots(ageing) > 0,
+    "a transient status refusal cannot put expired wall-clock samples back on screen");
+  delete S.transportUnavailable;
   S.status.ntp = ntp;
   S.status.uptime_s = uptime;
   historyResponse = old;
@@ -652,6 +681,13 @@ await h.ensureDerived("dt");
 assert.equal(S.hist.get("dt").b0, 100);
 assert.deepEqual(Array.from(S.hist.get("dt").v), [null, 60, 60],
   "the earlier bucket remains a gap instead of being cut off with the shorter input");
+const bucketReturnWater = S.hist.get("return_water");
+S.hist.set("return_water", { ...bucketReturnWater, gen: 2, b0: null, t0: 1768720000 });
+await h.ensureDerived("dt");
+assert.deepEqual(Array.from(S.hist.get("dt").v), [],
+  "boot-relative supply and date-only return cannot be paired by ring length");
+S.hist.set("return_water", bucketReturnWater);
+await h.ensureDerived("dt");
 
 // A 5 A INV reading from a sweep without a speed witness and 18 rps from a later sweep can
 // occupy the same bucket. That raw current must stay visible without creating an estimate.
