@@ -325,17 +325,18 @@ gap at that resolution. Current uptime describes only this boot.
 
 Browser storage is not measured history. Source/reboot epochs retire cached rings, index pins,
 mounted plots and in-flight history requests, including A → B → A between polls.
-Replies carry sample epoch and boot identity. Visible charts refresh after the cache cooldown,
-with one automatic history request per completed live poll. Opening a chart can queue independent
-reads, and closing it ends the gesture. Already queued reads can still fill the cache.
+Replies carry sample epoch and boot identity. Visible charts refresh while live polling continues.
+Closing a chart ends its active gesture.
 A failed refresh keeps compatible readings within the most recent day. A distinct marker identifies
 each retained series' last received sample. Categorical timelines keep their separate live cap,
 and weather charts show a verified current forecast even when the measured history is empty.
 
 Hover previews a sample. Tap pins it, and another tap on the same sample or Escape clears it.
-The two views of a row share a pin where both display an instrument selected by the pin.
+The two views of a row share a recorded pin where both display an instrument selected by the pin.
 A peer's reading cannot keep a pinned measurement visible after its original source rolls out.
 A dated pin tracks the original boot-relative bucket when available, even if wall time changes.
+Live-state pins require the same visible instruments and current states. Refreshing completed
+history alone leaves a live-state pin in place.
 The two views freeze while either is scrubbed.
 Without a device clock, an index pin expires when the plotted series or its alignment changes. Expired pins
 drop rather than move to a different instant. Closing the inspector preserves a pin for an open

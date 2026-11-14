@@ -183,7 +183,7 @@ function histVisibleSeries(h) {
 // Include the lifetime and time anchor even when a new flat ring draws identical SVG geometry.
 const histViewRevision = view =>
   [S.histEpoch, view.gen, view.t0, view.refreshFailed || view.aged, view.forecast?.revision, tankAuxRevision(view.tankAux),
-    histVisibleSeries(view).map(series => series.source).join(",")].join("/");
+    histVisibleSeries(view).map(series => `${series.source}:${histRetained(series.raw) ? "retained" : "fresh"}`).join(",")].join("/");
 function histRevision(view) {
   return ` data-rev="${esc(histViewRevision(view))}"`;
 }
@@ -1880,11 +1880,16 @@ function histPinToggle(id, i, source = "") {
 
 // Selected time belongs on the axis, including relative ages when the source has no wall clock.
 function histAxisStart(h, spanH) {
-  return h.refreshFailed || h.aged ? t("hist.recorded", spanH) : t("hist.ago", spanH);
+  return histAxisRetained(h) ? t("hist.recorded", spanH) : t("hist.ago", spanH);
 }
 
 function histAxisEnd(h) {
-  return h.refreshFailed || h.aged ? "" : t("hist.now");
+  return histAxisRetained(h) ? "" : t("hist.now");
+}
+
+function histAxisRetained(h) {
+  const visible = histPinSeries(h).filter(s => s.v.some(value => value != null));
+  return visible.length ? visible.every(s => histRetained(s.raw)) : histRetained(h);
 }
 
 function scrubTime(h, i) {

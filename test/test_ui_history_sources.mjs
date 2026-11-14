@@ -313,6 +313,12 @@ S.hist.set("modbus:dhw_tank", modbus);
   const retained = h.histHtml("dhw_tank", "", "Tank");
   assert.match(retained, /vhist-retained[^>]*aria-label="X10A · Letzter empfangener Messwert"[^>]*left:0\.000%/,
     "the last received marker points at the measurement before the trailing gaps");
+  h.histSeriesToggle("dhw_tank", "modbus");
+  const retainedOnly = h.histHtml("dhw_tank", "", "Tank");
+  assert.match(retainedOnly, /<div class="vhist-axis"><span>Aufzeichnung/);
+  assert.doesNotMatch(retainedOnly.slice(retainedOnly.indexOf('<div class="vhist-axis">')), /jetzt/,
+    "a hidden fresh ring cannot label the retained plot as current");
+  h.histSeriesToggle("dhw_tank", "modbus");
   const recentStatus = S.status.uptime_s;
   S.hist.set("dhw_tank", { ...S.hist.get("dhw_tank"), t0: 1768720000 });
   h.histPinToggle("dhw_tank", 0, "x10a");

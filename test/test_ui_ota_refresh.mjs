@@ -282,13 +282,22 @@ function elementsFor(...ids) {
   assert.equal(elements.otaStatSet.children.at(-1)?.textContent, "48%",
     "hydrating the complete cards must repaint the retained OTA percentage");
   const hydrated = elements.settingsCards.innerHTML;
+  const dashboardProgress = elements.otaStat.children.at(-1);
+  const settingsProgress = elements.otaStatSet.children.at(-1);
+  sandbox.__api.renderSettings();
+  assert.equal(elements.otaStat.children.at(-1), dashboardProgress);
+  assert.equal(elements.otaStatSet.children.at(-1), settingsProgress,
+    "unchanged progress preserves its live-region child on both screens");
   S.transportUnavailable = "status";
   S.descOpen = new Set();
   S.status = { ...S.status, diagnostics: { enabled: true } };
+  elements.otaStatSet = new Element("otaStatSet");
   sandbox.__api.renderSettings();
   assert.notEqual(elements.settingsCards.innerHTML, hydrated,
     "Settings content can be reconciled during OTA without replacing its progress evidence");
   assert.equal(elements.otaStatSet.children.at(-1)?.textContent, "48%");
+  assert.equal(elements.otaStat.children.at(-1), dashboardProgress,
+    "remounting the Settings slot cannot replace the header progress");
 }
 
 // A failing /status during an adopted install must not overwrite that stronger, successful

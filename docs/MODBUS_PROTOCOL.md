@@ -405,33 +405,12 @@ copied. When it is not live the **key is omitted entirely** rather than emitted 
 array and an empty one are different claims, and only absence says "no current reading". A device
 without a HomeHub therefore sees exactly the payload it saw before this feature existed.
 
-In the **web UI** (see [`DESIGN.md`](DESIGN.md)), X10A stays the prominent source everywhere and
-Modbus readings are marked in their own colour — a petrol token (`--src-mb`) that is neither a state
-colour (`--ok`/`--warn`/`--err`) nor a temperature one (`--flow-*`), because provenance is a third
-thing. The Settings connection row is link state rather than reading provenance, so it uses the same
-green/yellow/red state colours as WiFi, MQTT, Syslog and NTP:
-
-* **Both up** — the row shows the X10A value, unmarked. Tapping it opens the explainer, and the
-  gateway's reading appears at the **end** of the body, after the "Normal:" note: a full row carrying
-  the *Modbus register's own label*, the badge and the value, then the **difference** between the two
-  when the conversion is established. Native Altherma 4 flow and pressure show the unverified
-  conversion limit instead of a numeric comparison.
-  It sits last, not first, because a reader opens an explainer to find out what the quantity *is* —
-  the row's own value is already stated an inch above, in the header they just tapped. The label is
-  the gateway's rather than the X10A row's on purpose: this line is what someone verifying a pairing
-  on real hardware reads, and reusing the X10A label would show them their own assumption back.
-  A wide gap is left to speak for itself rather than coloured as an error — the two sensors
-  legitimately sit at different points in the circuit.
-* **X10A down, HomeHub up** — a banner says so, and each row it can supply shows the **Modbus** value
-  in petrol. A row it cannot shows `—`; a stale X10A number is never left standing. The schematic
-  follows the same rule, which makes it visibly sparse — about a dozen registers against a hundred —
-  and that is the honest shape of the state. **No comparison is shown here at all**: a *second*
-  opinion presupposes a first one, and the only X10A number still in memory is one the bus stopped
-  refreshing, so a "difference" against it would be a statement about two *instants* wearing the
-  shape of a statement about two *instruments*.
-  ΔT uses the gateway's water temperatures. The heat-output estimate also requires valid flow, a
-  running compressor and a supported mode and transfer direction.
-* **No HomeHub** — nothing Modbus appears anywhere: no row, no group, no comparison, no banner.
+The [dashboard source rules](DESIGN.md#53-dashboard--the-operating-screen--default-after-setup)
+cover source labels and comparisons.
+When only HomeHub is reachable, the water temperatures can still supply ΔT. A heat-output estimate
+also needs valid flow, a running compressor and a supported mode and transfer direction. Without a
+configured HomeHub, the dashboard omits its readings and comparisons. The HomeHub setup row stays
+available in Settings.
 
 [homehub-ekrhh-guide]: https://www.daikin.nl/content/dam/document-library/Installer-reference-guide/heat/accessories/ekrhh/EKRHH_Installer%20reference%20guide_4PEN744838-1E_English.pdf#page=43
 
@@ -440,9 +419,6 @@ green/yellow/red state colours as WiFi, MQTT, Syslog and NTP:
 measurement point and heater inclusion unspecified. The dashboard displays that input and
 withholds COP in the HomeHub-only view because the electrical and heat-exchanger boundaries
 cannot be matched.
-
-Registers with no X10A counterpart get their own group at the very end of the value list, after
-everything X10A carries.
 
 **MQTT preserves the two sources instead of merging them.** X10A is retained as grouped JSON on
 `<base>/x10a`; an enabled HomeHub publishes its separate flat map on `<base>/modbus`. A disconnected

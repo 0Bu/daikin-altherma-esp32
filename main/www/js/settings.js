@@ -891,21 +891,23 @@ function otaRing(pct, indet) {
 
 // Write the inline readout. `text` is always plain text set via textContent — the only innerHTML is
 // our own ring markup, so a device-supplied /ota/status.message can never reach the DOM as markup.
-// Every write bumps otaSeq, which is what makes the delayed clear below safe.
+// Every progress update bumps otaSeq, which is what makes the delayed clear below safe.
 //
 // There are TWO compact-progress slots: the dashboard header's (#otaStat) and the one in the
 // Settings Firmware card's Version row (#otaStatSet). Either screen can start the flow, so either
-// screen has to be able to report it — and painting both unconditionally means a user who switches
-// screens mid-download finds the progress already there rather than gone. Terminal failures use the
+// screen has to be able to report it. Paint each mounted slot when its progress changes so a user
+// who switches screens mid-download finds the progress there. Terminal failures use the
 // separate persistent OTA alert slots below. A missing progress slot is skipped, not an error: the
 // Settings one exists only while that card is rendered.
 let otaSeq = 0;
 const OTA_SLOTS = ["otaStat", "otaStatSet"];
+const otaPaintedProgress = new WeakMap();
 function paintOtaInline() {
   const { text = "", ring = false, pct = null, cls = "" } = S.otaView || {};
+  const progress = JSON.stringify([text, ring, pct, cls]);
   for (const id of OTA_SLOTS) {
     const el = $(id);
-    if (!el) continue;
+    if (!el || otaPaintedProgress.get(el) === progress) continue;
     el.className = "otastat" + (cls ? " " + cls : "");
     el.innerHTML = ring ? otaRing(pct, pct == null) : "";
     if (text) {
@@ -913,6 +915,7 @@ function paintOtaInline() {
       span.textContent = text;
       el.appendChild(span);
     }
+    otaPaintedProgress.set(el, progress);
   }
 }
 function otaInline(text, { ring = false, pct = null, cls = "" } = {}) {

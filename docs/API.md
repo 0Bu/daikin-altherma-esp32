@@ -448,10 +448,13 @@ Unknown ids return 404. Available rows are listed in `/status.history`. The payl
 `v` is tenths of the row's actual unit; divide by ten. `dt` is the raster cadence. `b0` anchors
 monotonic five-minute buckets, `t0` is sample-zero wall time derived from the captured newest-sample
 age and omitted before clock sync. `epoch` is captured with the samples; `boot_id` matches `/status`.
-Unavailable age metadata or an epoch changed before emission returns 503. Clients must reject
-responses superseded by a newer status/source generation.
+The firmware omits `t0` if sample-age metadata is unavailable. A missing snapshot epoch or an
+epoch change before emission returns 503. Clients must reject responses superseded by a newer
+status/source generation.
 `held` marks eligible X10A outdoor nulls as held-over; all other source rasters leave it empty.
-The dashboard accepts up to 288 samples on the 300-second raster. It accepts a reply without row
+The dashboard accepts up to 4 KiB of decoded JSON and 288 samples on the 300-second raster.
+With live status, it bounds `b0` and the sample extent by reported uptime, elapsed browser time
+and the poll deadline. It accepts a reply without row
 and source identity only if both are absent and `/status` predates the history epoch. A supplied
 identity must match the request, along with the boot and epoch tokens announced by `/status`.
 A nonempty wall-clock-only reply also needs a synchronized device clock and a newest sample in
