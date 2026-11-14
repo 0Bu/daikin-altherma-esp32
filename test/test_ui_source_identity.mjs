@@ -26,7 +26,8 @@ vm.runInContext(read("app_state") + "\n" + read("history") + "\n" +
   renderApp = () => {};
   hydrateRoutedPopup = () => {};
   this.ui = { S, refreshStatus, fillRefTemp, refTempFormPayload, formatRefSource, parseRefSource,
-    ensureHist, ensureHistPair, ensureDerived, histCacheKey, syncHistSources };
+    ensureHist, ensureHistPair, ensureDerived, historyView, histPinIndex, histCacheKey, syncHistSources,
+    yieldHistoryToPoll, pumpHistoryQueue };
 `, context);
 const ui = context.ui;
 const plain = (value) => JSON.parse(JSON.stringify(value));
@@ -216,8 +217,10 @@ assert.equal(pending.length, 0, "the error state is cached, not re-asked at once
 // A derived chart whose input was refused for identity is pending, not "Trend unavailable.".
 await reset();
 const refusedDerived = ui.ensureHist("dt");
-const [leavingRefused, returnRefused] = [pending.shift(), pending.shift()];
-reply(leavingRefused, 250, 2); reply(returnRefused, 200, 2);
+assert.equal(pending.length, 1);
+reply(pending.shift(), 250, 2);
+await new Promise(resolve => setImmediate(resolve));
+reply(pending.shift(), 200, 2);
 await refusedDerived;
 assert.equal(ui.S.hist.has("dt"), false, "a refused input leaves the derived chart pending");
 await ui.ensureHist("dt");
@@ -241,7 +244,7 @@ assert.equal(ui.S.hist.get("dhw_tank").v[0], 333);
 // immediately while an input is busy used to cache an empty/error derived chart for one minute.
 await reset();
 const leaving = ui.ensureHist("leaving_water"), leavingRequest = pending.shift();
-const returning = ui.ensureHist("return_water"), returnRequest = pending.shift();
+const returning = ui.ensureHist("return_water");
 const derived = ui.ensureHist("dt");
 const secondDerived = ui.ensureHist("dt");
 let secondFinished = false;
@@ -250,7 +253,10 @@ await new Promise((resolve) => setImmediate(resolve));
 assert.equal(pending.length, 0, "shared input requests are not duplicated");
 assert.equal(ui.S.hist.has("dt"), false, "an active input is not absence");
 assert.equal(secondFinished, false, "a second derived consumer waits for the same assembly");
-reply(leavingRequest, 250); reply(returnRequest, 200);
+reply(leavingRequest, 250);
+await leaving;
+assert.equal(pending.length, 1, "the next independent history starts after the first reply");
+reply(pending.shift(), 200);
 await Promise.all([leaving, returning, derived, secondDerived]);
 assert.equal(ui.S.hist.get("dt").v[0], 50);
 assert.equal(secondFinished, true);
@@ -307,7 +313,57 @@ reply(pending.shift(), 450, 2);
 await recovering;
 assert.equal(ui.S.hist.get("dhw_tank").v[0], 450);
 assert.equal(ui.S.hist.get("dhw_tank").gen, 2, "recovery cannot reuse the previous ring generation");
+
+await reset();
+const opening = ui.ensureHistPair("dhw_tank");
+const firstRead = pending.shift();
+assert.ok(firstRead && pending.length === 0, "explicit paired disclosure starts a single transport");
+context._pollBusy = true;
+await ui.yieldHistoryToPoll();
+assert.equal(firstRead.signal.aborted, true, "live polling preempts the running history read");
+assert.equal(pending.length, 0, "nothing else starts while the live poll owns the transport");
+context._pollBusy = false;
+ui.pumpHistoryQueue();
+const resumed = pending.shift();
+assert.equal(resumed.url, firstRead.url, "the preempted read resumes once the poll finishes");
+reply(resumed, 455);
+await new Promise(resolve => setImmediate(resolve));
+assert.equal(pending.length, 1);
+assert.match(pending[0].url, /source=modbus/);
+reply(pending.shift(), 445);
+await opening;
+assert.equal(ui.S.hist.get("dhw_tank").v[0], 455);
+assert.equal(ui.S.hist.get(ui.histCacheKey("dhw_tank", "modbus")).v[0], 445);
+
 context.fetch = (url) => new Promise((resolve, reject) => pending.push({ url, resolve, reject }));
+
+// The cached delta uses two undated rings. A transient failure on both inputs preserves the
+// selected index and generation. A successful new ring changes that generation.
+await reset();
+const delta = ui.ensureDerived("dt");
+assert.equal(pending.length, 1);
+reply(pending.shift(), 450);
+await new Promise(resolve => setImmediate(resolve));
+reply(pending.shift(), 400);
+await delta;
+const oldDelta = ui.S.hist.get("dt");
+ui.S.histPin.set("dt", { i: 0, gen: ui.historyView("dt").gen });
+for (const id of ["leaving_water", "return_water", "dt"]) ui.S.hist.get(id).at = 0;
+const failedDelta = ui.ensureDerived("dt");
+assert.equal(pending.length, 1);
+pending.shift().reject(new Error("refresh interrupted"));
+await new Promise(resolve => setImmediate(resolve));
+reply(pending.shift(), 390);
+await failedDelta;
+assert.equal(ui.S.hist.get("dt").gen, oldDelta.gen);
+assert.equal(ui.histPinIndex("dt", ui.historyView("dt")), 0);
+for (const id of ["leaving_water", "dt"]) ui.S.hist.get(id).at = 0;
+const nextDelta = ui.ensureDerived("dt");
+assert.equal(pending.length, 1);
+reply(pending.shift(), 460);
+await nextDelta;
+assert.equal(ui.S.hist.get("dt").gen, oldDelta.gen + 1);
+assert.equal(ui.histPinIndex("dt", ui.historyView("dt")), -1);
 
 // A new status lifetime clears every lease, preserving main's global lifecycle model. Completion
 // of the predecessor may neither publish its samples nor release the successor's active request.
@@ -318,13 +374,14 @@ for (const failOld of [false, true]) {
   await status(changed);
   const returned = fixture(); returned.history.epoch = 3;
   await status(returned);
-  const current = ui.ensureHist("dhw_tank"), currentRequest = pending.shift();
+  const current = ui.ensureHist("dhw_tank");
+  assert.equal(pending.length, 0, "a retired request cannot leave two transports in flight");
   if (failOld) oldRequest.reject(new Error("retired transport"));
   else reply(oldRequest, 111, 1);
   await old;
   assert.equal(ui.S.hist.has("dhw_tank"), false);
   assert.equal(ui.S.histBusy.has("dhw_tank"), true);
-  reply(currentRequest, 444, 3); await current;
+  reply(pending.shift(), 444, 3); await current;
   assert.equal(ui.S.hist.get("dhw_tank").v[0], 444);
   assert.equal(ui.S.histBusy.has("dhw_tank"), false);
 }

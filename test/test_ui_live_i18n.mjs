@@ -343,6 +343,7 @@ assertPersistentBannerRepaints(
     hasHist: () => true,
     hasModbusHist: () => false,
     ensureHistPair: () => {},
+    histX10aDown: () => false,
     histCacheKey: (id) => id,
     histHtml: (_id, _unit, name) => name,
     replaceHistoryHtml: historyWriter,

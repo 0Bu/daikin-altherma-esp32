@@ -1093,6 +1093,10 @@ async function pollTick() {
   // _statusDue = 0 and silently drop that refresh (see the guard at the assignment).
   const gen = _pollGen;
   try {
+    if (typeof yieldHistoryToPoll === "function") {
+      const settling = yieldHistoryToPoll();
+      if (settling) await settling;
+    }
     const now = performance.now();
     if (now >= _statusDue) {
       // /values follows immediately.  Defer this full paint so the first load and every 8-second
@@ -1117,6 +1121,7 @@ async function pollTick() {
   }
 
   if (ok && typeof recoverOpenHistory === "function") recoverOpenHistory();
+  if (ok && typeof pumpHistoryQueue === "function") pumpHistoryQueue();
   _pollFails = ok ? 0 : Math.min(_pollFails + 1, 4);
   pollSchedule(_pollFails ? Math.min(POLL_VALUES_MS * 2 ** _pollFails, POLL_BACKOFF_MAX_MS)
                           : POLL_VALUES_MS);

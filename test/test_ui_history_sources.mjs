@@ -226,6 +226,11 @@ assert.equal(h.scrubIndex(mountedTank, 0), 0, "the mounted ring can resolve its 
 S.hist.set("dhw_tank", { ...x10a, b0: x10a.b0 + 1, gen: x10a.gen + 1 });
 assert.equal(h.scrubIndex(mountedTank, 0), -1, "a delayed refresh cannot pin a replacement bucket on the frozen plot");
 S.hist.set("dhw_tank", x10a);
+const previousHp = S.status.hp;
+S.status.hp = { ...previousHp, connected: false };
+assert.equal(h.scrubIndex(mountedTank, 0), -1,
+  "link loss with unchanged rings retires the mounted X10A selection before Modbus is shown");
+S.status.hp = previousHp;
 assert.equal(view.series.length, 2);
 assert.deepEqual(Array.from(view.series[0].v), [452, null, 454]);
 assert.deepEqual(Array.from(view.series[1].v), [453, 455, 456]);
@@ -1061,14 +1066,13 @@ for (const failOld of [false, true]) {
   S.status.modbus.host = "192.0.2.11"; h.syncHistSources();
   S.status.modbus.host = "192.0.2.10"; h.syncHistSources();
   const current = h.ensureHist("dhw_tank", "modbus");
-  const newTransport = pendingHistory.shift();
   if (failOld) oldTransport.reject(new Error("retired source error"));
   else finishHistory(oldTransport, [601]);
   await old;
   assert.equal(S.hist.has(homehubKey), false, "late success/error must not reinsert the retired series");
   assert.equal(S.histBusy.has(homehubKey), true,
     "an old finally must not release the new request for the same cache key");
-  finishHistory(newTransport, [602]);
+  finishHistory(pendingHistory.shift(), [602]);
   await current;
   assert.deepEqual(Array.from(S.hist.get(homehubKey).v), [602]);
   assert.equal(S.histBusy.has(homehubKey), false);
@@ -1083,7 +1087,7 @@ S.status.history.rows = [
 h.invalidateHistSources();
 const oldDerived = h.ensureDerived("dt");
 const retiredInputs = pendingHistory.splice(0);
-assert.equal(retiredInputs.length, 2);
+assert.equal(retiredInputs.length, 1);
 S.status.profile.id = "fixture-c";
 h.syncHistSources();
 for (const input of retiredInputs) finishHistory(input, [400]);
@@ -1091,8 +1095,11 @@ await oldDerived;
 assert.equal(S.hist.has("dt"), false, "late derived assembly must not revive a retired source");
 assert.equal(S.hist.size, 0, "late derived inputs must also stay retired");
 const currentDerived = h.ensureDerived("dt");
-for (const input of pendingHistory.splice(0))
-  finishHistory(input, input.url.includes("leaving_water") ? [410] : [390]);
+for (const value of [410, 390]) {
+  assert.equal(pendingHistory.length, 1);
+  finishHistory(pendingHistory.shift(), [value]);
+  await new Promise(resolve => setImmediate(resolve));
+}
 await currentDerived;
 assert.deepEqual(Array.from(S.hist.get("dt").v), [20], "the successor must derive only its own inputs");
 
@@ -1124,12 +1131,11 @@ const retiredRoom = pendingHistory.shift();
 S.status.mqtt.broker = "mqtt://broker-b.invalid"; h.syncHistSources();
 S.status.mqtt.broker = "mqtt://broker-a.invalid"; h.syncHistSources();
 const newRoom = h.ensureHist("room_temp", "room");
-const successorRoom = pendingHistory.shift();
 finishHistory(retiredRoom, [200]);
 await oldRoom;
 assert.equal(S.hist.has("room:room_temp"), false, "late MQTT history cannot revive its old broker");
 assert.equal(S.histBusy.has("room:room_temp"), true, "old completion cannot release the new MQTT lease");
-finishHistory(successorRoom, [237]);
+finishHistory(pendingHistory.shift(), [237]);
 await newRoom;
 assert.deepEqual(Array.from(S.hist.get("room:room_temp").v), [237]);
 S.status.history.room_rows = [];

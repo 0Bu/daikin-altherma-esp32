@@ -751,13 +751,14 @@ async function assertForecastRevision(page, server, fixture, context) {
       before.revision, context + ": the refreshed forecast is mounted after release");
     await press("mousePressed");
     await page.waitFor("S.trendPointer?.plot.dataset.hist === 'env3_combined'");
-    await evaluate(page, () => {
-      document.querySelector("#inspHist [data-hist-series='env3_humidity']").focus({ preventScroll: true });
-      return true;
+    // A normal mouse-down focuses the plot. Keep the real captured drag active while a second
+    // input activates the legend, without letting focusout end the gesture first.
+    const released = await evaluate(page, () => {
+      const button = document.querySelector("#inspHist [data-hist-series='env3_humidity']");
+      button.click();
+      return !S.trendPointer && !S.scrub;
     });
-    await page.key("Enter", { code: "Enter", keyCode: 13 });
-    assert.equal(await page.evaluate("!!S.trendPointer || !!S.scrub"), false,
-      context + ": native legend activation releases the in-progress gesture");
+    assert.equal(released, true, context + ": legend activation cancels the captured gesture");
     await press("mouseReleased");
     assert.equal(await page.evaluate("S.histPin.has('env3_combined')"), false,
       context + ": release after a legend change cannot pin the old plot");

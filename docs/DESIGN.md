@@ -321,7 +321,8 @@ mounted plots and in-flight history requests, including A → B → A between po
 Replies carry sample epoch and boot identity. Delayed raw or derived replies cannot refill retired
 state or release a successor's busy lease. After a completed live poll, the open inspector and
 visible Dashboard or Settings plots can refresh after the cache cooldown. They share one
-automatic history request per poll. A failed refresh keeps the last compatible samples.
+automatic history request per poll. Opening a chart can queue its independent rings on the same
+transport, which yields to live polls. A failed refresh keeps the last compatible samples.
 
 Hover previews a sample; tap pins it, a second tap on the same sample/Escape clears it. The two views
 of a row share a pin and freeze while either is scrubbed. A dated pin tracks its sample instant.

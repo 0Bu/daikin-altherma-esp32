@@ -120,7 +120,10 @@ function invalidateHistSources() {
   S.histEpoch = (S.histEpoch || 0) + 1;
   S.hist.clear();
   S.histBusy.clear();
-  for (const request of S.histRequests?.values() || []) request.controller?.abort();
+  for (const request of S.histRequests?.values() || []) {
+    if (request.run) request.finish();   // queued raw request has no transport to abort
+    else request.controller?.abort();
+  }
   S.histRequests?.clear();
   (S.histAwait ||= new Map()).clear();
   S.histPin.clear();

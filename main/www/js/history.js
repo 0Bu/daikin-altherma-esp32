@@ -204,10 +204,12 @@ const histCacheKey = (id, source) => {
 const histSourceClass = (source) => source === "modbus" ? " mb" : source === "room" ? " room" : "";
 
 function histX10aAvailable(h) {
-  if (typeof x10aDown === "function" ? x10aDown() : !!(S.status?.hp && S.status.hp.connected === false)) return false;
+  if (histX10aDown()) return false;
   const x10a = h.series?.find((s) => s.source === "x10a");
   return !!x10a && x10a.v.some((v) => v != null);
 }
+
+const histX10aDown = () => typeof x10aDown === "function" ? x10aDown() : S.status?.hp?.connected === false;
 
 function histHiddenSet(h) {
   if (S.histHidden?.has(h.id)) return S.histHidden.get(h.id);
@@ -232,7 +234,8 @@ function histVisibleSeries(h) {
 
 // Include the lifetime and time anchor even when a new flat ring draws identical SVG geometry.
 const histViewRevision = view =>
-  [S.histEpoch, view.gen, view.t0, view.forecast?.revision, tankAuxRevision(view.tankAux)].join("/");
+  [S.histEpoch, view.gen, view.t0, view.forecast?.revision, tankAuxRevision(view.tankAux),
+    histVisibleSeries(view).map(series => series.source).join(",")].join("/");
 function histRevision(view) {
   return ` data-rev="${esc(histViewRevision(view))}"`;
 }
@@ -281,7 +284,8 @@ function ensureHist(id, source = "x10a", mode = "open") {
   if (S.histBusy.has(key)) return S.histRequests.get(key)?.done;
   if (histAwaiting(key, epoch)) return;
   const c = S.hist.get(key);
-  if (c && Date.now() - c.at < 60000) return;
+  const cooldown = c?.refreshFailed && derived ? 8000 : 60000;
+  if (c && Date.now() - c.at < cooldown) return;
   if (derived) {
     if (mode === "refresh") {
       // Advance one raw input per poll. Assemble only when no input needs a transport.
@@ -296,18 +300,45 @@ function ensureHist(id, source = "x10a", mode = "open") {
   return fetchHistory(id, source, key, epoch, c);
 }
 
-async function fetchHistory(id, source, key, epoch, previous) {
+let historyTransport = null;
+
+function fetchHistory(id, source, key, epoch, previous) {
+  const request = { run: () => readHistory(id, source, key, epoch, previous, request) };
+  request.done = new Promise(resolve => { request.finish = resolve; });
+  (S.histRequests ||= new Map()).set(key, request);
+  S.histBusy.add(key);
+  pumpHistoryQueue();
+  return request.done;
+}
+
+function pumpHistoryQueue() {
+  if (historyTransport || (typeof _pollBusy !== "undefined" && _pollBusy)) return;
+  for (const request of S.histRequests?.values() || []) {
+    if (!request.run) continue;
+    historyTransport = request;
+    request.active = request.run();
+    break;
+  }
+}
+
+function yieldHistoryToPoll() {
+  if (!historyTransport?.controller) return;
+  const { controller, active } = historyTransport;
+  historyTransport.yielded = true;
+  controller.abort();
+  return active;
+}
+
+async function readHistory(id, source, key, epoch, previous, request) {
   const sourceId = source === "modbus" ? (modbusEndpointId() || "modbus") : source;
   const controller = typeof AbortController === "function" ? new AbortController() : null;
   const timer = controller ? setTimeout(() => controller.abort(), POLL_TIMEOUT_MS) : null;
-  let finish;
-  const request = { controller, done: new Promise((resolve) => { finish = resolve; }) };
+  request.controller = controller;
+  request.run = null;
   const failed = () => ({
     ...(previous && !previous.err ? previous : { gen: previous?.gen || 0, source, sourceId, err: true, v: [] }),
-    at: Date.now(),
+    at: Date.now(), refreshFailed: true,
   });
-  (S.histRequests ||= new Map()).set(key, request);
-  S.histBusy.add(key);
   try {
     const suffix = source === "modbus" ? "&source=modbus"
       : source === "env3" ? "&source=env3" : source === "room" ? "&source=room" : "";
@@ -318,7 +349,8 @@ async function fetchHistory(id, source, key, epoch, previous) {
     // A JSON refusal that is not a history change (no snapshot identity, an unknown row) is an
     // error for this cache period, not a reason to re-ask every status period; only "history
     // changed" waits for the next status lifetime below.
-    if (j && j.ok === false && j.error !== "history changed; retry") {
+    const changed = j?.ok === false && j.error === "history changed; retry";
+    if (j?.ok === false && !changed) {
       S.hist.set(key, failed());
       return;
     }
@@ -326,7 +358,7 @@ async function fetchHistory(id, source, key, epoch, previous) {
     // for that status lifetime before becoming a chart; a recent fetch alone proves no identity.
     const expectedEpoch = S.status?.history?.epoch;
     const expectedBoot = S.status?.boot_id;
-    if ((Number.isInteger(expectedEpoch) && j.epoch !== expectedEpoch) ||
+    if (changed || (Number.isInteger(expectedEpoch) && j.epoch !== expectedEpoch) ||
         (typeof expectedBoot === "string" && j.boot_id !== expectedBoot)) {
       (S.histAwait ||= new Map()).set(key, { epoch, at: Date.now() });
       return;
@@ -350,22 +382,32 @@ async function fetchHistory(id, source, key, epoch, previous) {
                      v: Array.isArray(j.v) ? j.v : [] };
     S.hist.set(key, device);
   } catch (e) {
-    if (syncHistSources() === epoch && S.histRequests.get(key) === request)
-      S.hist.set(key, failed());
+    if (syncHistSources() === epoch && S.histRequests.get(key) === request) {
+      if (request.yielded && !request.retried) {
+        request.yielded = false;
+        request.retried = true;
+        request.controller = null;
+        request.run = () => readHistory(id, source, key, epoch, previous, request);
+      } else S.hist.set(key, failed());
+    }
   } finally {
     if (timer != null) clearTimeout(timer);
-    finish();
+    historyTransport = null;
     // An obsolete request must not release a successor using the same cache key.
-    if (S.histRequests.get(key) === request) {
-      S.histRequests.delete(key);
-      S.histBusy.delete(key);
-      renderApp();
+    if (!request.run) {
+      request.finish();
+      if (S.histRequests.get(key) === request) {
+        S.histRequests.delete(key);
+        S.histBusy.delete(key);
+        renderApp();
+      }
     }
+    pumpHistoryQueue();
   }
 }
 
-// Direct schematic measurements may have two independent rings. Fetch both together only for a
-// chart the user actually opened; derived figures continue to fetch their X10A inputs alone.
+// Explicit disclosure may queue independent rings together. The shared transport reads them in
+// order. A background refresh can enqueue only one request. Derived charts use X10A inputs.
 function ensureHistPair(id, mode = "open") {
   // A repaint needs no result from a request that is already running. Derived charts can still
   // await their own inputs directly through ensureHist.
@@ -409,10 +451,11 @@ async function ensureDerived(id) {
   const D = DERIVED[id];
   if (S.histBusy.has(id)) return S.histRequests.get(id)?.done;
   if (histAwaiting(id, epoch)) return;
-  const previousGen = S.hist.get(id)?.gen || 0;
   const previous = S.hist.get(id);
+  const previousGen = previous?.gen || 0;
   const failed = () => previous && !previous.err
-    ? { ...previous, at: Date.now() } : { at: Date.now(), gen: previousGen, err: true, v: [] };
+    ? { ...previous, at: Date.now(), refreshFailed: true }
+    : { at: Date.now(), gen: previousGen, err: true, v: [] };
   let finish;
   const request = { epoch, done: new Promise((resolve) => { finish = resolve; }) };
   (S.histRequests ||= new Map()).set(id, request);
@@ -425,12 +468,21 @@ async function ensureDerived(id) {
     // An input refused for its source identity is pending, not failed: wait with it rather than
     // caching "Trend unavailable." for up to one status period. Marking the derived id as awaiting
     // too keeps the finally-block render from re-entering this function at once.
-    if (use.some((k) => !S.hist.get(k) && histAwaiting(k, epoch))) {
+    if (use.some(k => histAwaiting(k, epoch))) {
       (S.histAwait ||= new Map()).set(id, { epoch, at: Date.now() });
+      return;
+    }
+    if (previous && !previous.err && use.some(k => S.hist.get(k)?.refreshFailed)) {
+      S.hist.set(id, failed());
       return;
     }
     const src = use.map((k) => [k, S.hist.get(k)]).filter(([, h]) => h && !h.err && h.v.length);
     if (!src.length) { S.hist.set(id, failed()); return; }
+    const inputs = JSON.stringify([use, src.map(([key, h]) => [key, h.gen])]);
+    if (previous && previous.inputs === inputs) {
+      S.hist.set(id, { ...previous, at: Date.now() });
+      return;
+    }
     const dt = src[0][1].dt || 300;
     let start = 0, end = 0, mode = "tail";
     if (src.every(([, h]) => Number.isInteger(h.b0))) {
@@ -479,7 +531,7 @@ async function ensureDerived(id) {
       : mode === "time" && bucket && typeof bucket[1].t0 === "number"
         ? bucket[1].b0 - Math.round((bucket[1].t0 - start) / dt)
       : bucket ? bucket[1].b0 - (n - bucket[1].v.length) : null;
-    S.hist.set(id, { at: Date.now(), gen, dt, unit: D.unit,
+    S.hist.set(id, { at: Date.now(), gen, inputs, dt, unit: D.unit,
                      t0: typeof t0 === "number" ? t0 : null,
                      b0: Number.isInteger(b0) ? b0 : null,
                      held: heldRuns, v });
@@ -2385,7 +2437,8 @@ function toggleDesc(btn) {
   const key = btn.dataset.desc || "";
   const trend = btn.dataset.trend || "";
   const open = !item.classList.contains("open");
-  if (!open && S.trendPointer && item.contains(S.trendPointer.plot)) cancelHistoryGesture();
+  if (!open && ((S.trendPointer && item.contains(S.trendPointer.plot)) ||
+      (key === "model:health_cycling" && S.scrub === "checkup-cycling"))) cancelHistoryGesture();
   item.classList.toggle("open", open);
   btn.setAttribute("aria-expanded", open ? "true" : "false");
   if (open) S.descOpen.add(key);
