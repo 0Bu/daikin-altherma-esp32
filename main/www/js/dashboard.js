@@ -138,17 +138,9 @@ function renderCards(hold = true) {
   // require a live X10A link; passive refrigerant observations keep their independent collection.
   const checkup = S.status?.diagnostics?.enabled === true
     ? checkupCardHtml(S.status?.hp?.connected) : "";
-  const frame = () => checkup + statusCardsHtml() +
-    valueGroupsHtml(S._values || [], S.status?.hp?.connected);
-  const previous = S.dashboardCard;
-  setHtml("valueGroups", frame(), hold);
-  let selected = syncDashboardCards();
-  // A source can remove the selected card. Build the newly selected card's open charts
-  // in the same update once its fallback selection is known.
-  if (S.dashboardCard !== previous && (!hold || !S.clickHold)) {
-    setHtml("valueGroups", frame(), hold);
-    selected = syncDashboardCards();
-  }
+  setHtml("valueGroups", checkup + statusCardsHtml() +
+    valueGroupsHtml(S._values || [], S.status?.hp?.connected), hold);
+  const selected = syncDashboardCards();
   if (!hold || !S.clickHold) syncCheckupCyclingChart(selected);
 }
 
@@ -161,7 +153,7 @@ function syncDashboardCards() {
   browser.hidden = !cards.length;
   const selected = cards.find(card => card.dataset.dashboardCard === S.dashboardCard) || cards[0];
   if (!selected) {
-    setHtml("cardNav", "");
+    setHtml("cardNav", "", false);
     host.removeAttribute("aria-labelledby");
     return;
   }
@@ -173,18 +165,15 @@ function syncDashboardCards() {
     `<button type="button" class="dashboard-card-button" id="dashboard-card-${index}" ` +
     `data-card="${esc(card.dataset.dashboardCard)}" aria-pressed="false" aria-controls="valueGroups">` +
     `${dashboardCardIcon(card.dataset.dashboardCard)}` +
-    `<span class="dashboard-card-label">${esc(card.dataset.dashboardLabel)}</span></button>`).join(""));
+    `<span class="dashboard-card-label">${esc(card.dataset.dashboardLabel)}</span></button>`).join(""), false);
   for (const card of cards) card.hidden = card !== selected;
-  for (const button of nav.querySelectorAll("[data-card]")) {
-    const chosen = button.dataset.card === S.dashboardCard;
-    button.setAttribute("aria-pressed", chosen ? "true" : "false");
-    if (chosen) host.setAttribute("aria-labelledby", button.id);
-  }
-  if (focused != null && !nav.contains(active)) {
-    const buttons = Array.from(nav.querySelectorAll("[data-card]"));
-    (buttons.find(button => button.dataset.card === focused) ||
-      buttons.find(button => button.dataset.card === S.dashboardCard))?.focus({ preventScroll: true });
-  }
+  const buttons = [...nav.querySelectorAll("[data-card]")];
+  const chosenButton = buttons[cards.indexOf(selected)];
+  for (const button of buttons)
+    button.setAttribute("aria-pressed", String(button === chosenButton));
+  host.setAttribute("aria-labelledby", chosenButton.id);
+  if (focused && !nav.contains(active))
+    (buttons.find(button => button.dataset.card === focused) || chosenButton).focus({ preventScroll: true });
   return selected;
 }
 
@@ -193,7 +182,7 @@ function selectDashboardCard(key) {
   if (!Array.from(cards).some(card => card.dataset.dashboardCard === key)) return;
   S.dashboardCard = key;
   // Selection is immediate even while the pointer hold is protecting a pending values repaint.
-  if (S.scrub) syncCheckupCyclingChart(syncDashboardCards());
+  if (S.scrub) syncDashboardCards();
   else renderCards(false);
 }
 

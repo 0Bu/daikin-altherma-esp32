@@ -963,6 +963,7 @@ async function assertInactiveCardHistory(page, selector, context) {
   const selectors = await evaluate(page, ({ selector }) => {
     const own = document.querySelector(selector).closest("[data-dashboard-card]").dataset.dashboardCard;
     const other = [...document.querySelectorAll("#cardNav [data-card]")].find(button => button.dataset.card !== own);
+    window.__inactiveChart = document.querySelector(selector).closest(".vitem").querySelector(".vhist");
     return { own: '#cardNav [data-card="' + CSS.escape(own) + '"]',
       other: '#cardNav [data-card="' + CSS.escape(other.dataset.card) + '"]' };
   }, { selector });
@@ -981,13 +982,14 @@ async function assertInactiveCardHistory(page, selector, context) {
     await page.waitFor("window.__motionAllPolls >= " + (polls + 3) + " && !_pollBusy");
     const hidden = await evaluate(page, ({ selector }) => {
       const item = document.querySelector(selector).closest(".vitem");
-      return { open: item.classList.contains("open"), chart: !!item.querySelector(".vhist"),
+      return { open: item.classList.contains("open"), hidden: !!item.closest("[hidden]"),
+        retained: window.__inactiveChart?.isConnected && item.querySelector(".vhist") === window.__inactiveChart,
         builds: window.__inactiveChartBuilds };
     }, { selector });
-    assert.deepEqual(hidden, { open: true, chart: false, builds: 0 },
-      context + ": inactive card must preserve the disclosure and skip chart generation");
+    assert.deepEqual(hidden, { open: true, hidden: true, retained: true, builds: 0 },
+      context + ": inactive card must retain its mounted chart and skip chart generation");
   } finally {
-    await page.evaluate("histHtml = window.__inactiveChartOriginal; delete window.__inactiveChartOriginal; true");
+    await page.evaluate("histHtml = window.__inactiveChartOriginal; delete window.__inactiveChartOriginal; delete window.__inactiveChart; true");
   }
   await click(page, selectors.own);
   await page.waitFor(`document.querySelector(${JSON.stringify(selector)})?.closest(".vitem.open")?.querySelector(".vhist")`);

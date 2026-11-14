@@ -454,8 +454,8 @@ function assertDiagnosisCardPolling(historySource) {
 }
 
 assertDiagnosisCardPolling(disclosureSource);
-const diagnosisBranch = `if (host.id !== "valueGroups" || a.parentNode !== host ||
-          a.getAttribute("data-dashboard-card") !== "diagnosis") return false;`;
+const diagnosisBranch = `if (chart === null && (host.id !== "valueGroups" ||
+          a.parentNode !== host || a.getAttribute("data-dashboard-card") !== "diagnosis")) return false;`;
 assert.equal(disclosureSource.split(diagnosisBranch).length, 2);
 assert.throws(() => assertDiagnosisCardPolling(disclosureSource.replace(diagnosisBranch, "return false;")),
   error => error.code === "ERR_ASSERTION" && error.message.startsWith("a diagnosis refresh must not detach"),

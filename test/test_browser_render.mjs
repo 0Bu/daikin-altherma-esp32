@@ -1120,6 +1120,36 @@ async function assertDashboardCardNavigation(page, context, viewport) {
     assert.equal((await current()).key, "model", `${context}: a poll repaint preserves the selected card`);
 
     await page.evaluate(`(() => {
+      S._values[0].concept = "flow";
+      S._modbus[0].concept = "flow";
+      renderCards();
+      const model = document.querySelector('#cardNav button[data-card="model"]');
+      if (document.querySelector('#cardNav button[data-card="modbus"]'))
+        throw new Error("paired HomeHub reading must begin without its own card");
+      model.addEventListener("pointerdown", () => {
+        S.clickHold = true;
+        S.status.hp.connected = false;
+        S.status.diagnostics.enabled = false;
+        S._values = [];
+        renderCards();
+      }, { once: true });
+      return true;
+    })()`);
+    await clickElement(page, '#cardNav button[data-card="model"]');
+    assert.deepEqual(await current(), { key: "modbus", selected: ["modbus"], visible: ["modbus"], labelled: true },
+      `${context}: a source change during a native tap installs fallback content and navigation together`);
+    await page.evaluate(`(() => {
+      S.clickHold = false;
+      S.status.hp.connected = true;
+      S.status.diagnostics.enabled = true;
+      S._values = ${JSON.stringify(groups)}.map((group, index) => ({
+        group, label: "Fixture reading " + index, value: "12", unit: "°C", reg: 0x61, off: index,
+      }));
+      S._modbus = [{ off: 49, label: "Flow rate", value: 2.6, unit: "L/min", profile: "altherma4" }];
+      renderApp(); return true;
+    })()`);
+
+    await page.evaluate(`(() => {
       const button = document.querySelector('#cardNav button[data-card="diagnosis"]');
       button.scrollIntoView({ block: "center", behavior: "instant" }); button.focus();
       return true;

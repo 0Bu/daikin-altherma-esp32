@@ -1840,8 +1840,7 @@ function replaceHistoryHtml(host, html) {
     // Retaining a chart's identity is insufficient in WebKit: moving it through a detached
     // template still invalidates its painting ancestors. Scalar polls can update text in place.
     // Preflight the complete tree before applying anything; structural changes keep the fallback.
-    const text = [];
-    let diagnosisUpdate;
+    const text = [], scopedUpdates = [];
     // Card navigation owns group visibility after rendering; it is not source markup drift.
     const attrs = node => [...node.attributes].filter(attr =>
       attr.name !== "hidden" || !node.matches(".vgroup[data-dashboard-card]"));
@@ -1854,9 +1853,13 @@ function replaceHistoryHtml(host, html) {
       if (a.nodeType !== 1) return a.isEqualNode(b);
       if (a.classList.contains("vhist"))
         return a._histMarkup === signature(b);
+      // Inactive dashboard cards keep their last chart mounted without generating its markup.
+      // On selection, catch up inside the slot without replacing another card's plot.
+      const chart = b.getAttribute("data-chart");
+      if (chart) return true;
       const nextAttrs = attrs(b);
-      if (attrs(a).length !== nextAttrs.length ||
-          nextAttrs.some(attr => a.getAttribute(attr.name) !== attr.value)) return false;
+      if (chart === null && (attrs(a).length !== nextAttrs.length ||
+          nextAttrs.some(attr => a.getAttribute(attr.name) !== attr.value))) return false;
       // The live cycling chart owns its slot and updates independently of value rows.
       if (a.getAttribute("data-checkup-hours") !== null) return true;
       const before = text.length;
@@ -1864,10 +1867,10 @@ function replaceHistoryHtml(host, html) {
           [...a.childNodes].every((node, index) => same(node, b.childNodes[index]))) return true;
       // A diagnosis may gain a badge or completed-run rows while another card is visible.
       // Refresh its contents alone if the surrounding value grid is otherwise compatible.
-      if (host.id !== "valueGroups" || a.parentNode !== host ||
-          a.getAttribute("data-dashboard-card") !== "diagnosis") return false;
+      if (chart === null && (host.id !== "valueGroups" ||
+          a.parentNode !== host || a.getAttribute("data-dashboard-card") !== "diagnosis")) return false;
       text.length = before;
-      diagnosisUpdate = [a, b.innerHTML];
+      scopedUpdates.push([a, b]);
       return true;
     };
     const textOnly = host.childNodes && template.content.childNodes &&
@@ -1875,7 +1878,7 @@ function replaceHistoryHtml(host, html) {
       [...host.childNodes].every((node, index) => same(node, template.content.childNodes[index]));
     if (textOnly) {
       for (const [node, value] of text) node.nodeValue = value;
-      if (diagnosisUpdate) replaceHistoryHtml(...diagnosisUpdate);
+      for (const [a, b] of scopedUpdates) replaceHistoryHtml(a, b.innerHTML);
       return;
     }
     const rebuilding = S.trendRebuilding;
@@ -1894,15 +1897,12 @@ function replaceHistoryHtml(host, html) {
     } finally { S.trendRebuilding = rebuilding; }
   }
   if (focused && active.isConnected) active.focus({ preventScroll: true });
-  else if (focused && hist) for (const plot of host.querySelectorAll("[data-hist]")) {
-    if (plot.dataset.hist === hist && (plot.dataset.source || "") === source && owner(plot) === focusedOwner)
-      plot.focus({ preventScroll: true });
-  }
-  else if (focused && histSeries) {
-    const button = [...host.querySelectorAll("[data-hist-series]")].find(button =>
-      button.dataset.histId === histId && button.dataset.histSeries === histSeries &&
-      owner(button) === focusedOwner);
-    button?.focus({ preventScroll: true });
+  else if (focused && (hist || histSeries)) {
+    const next = [...host.querySelectorAll(hist ? "[data-hist]" : "[data-hist-series]")].find(node =>
+      owner(node) === focusedOwner && (hist
+        ? node.dataset.hist === hist && (node.dataset.source || "") === source
+        : node.dataset.histId === histId && node.dataset.histSeries === histSeries));
+    next?.focus({ preventScroll: true });
   }
   else if (focused && (cycling || active?.dataset?.desc)) {
     const chart = cycling && host.querySelector("[data-cycling]");
@@ -1931,8 +1931,7 @@ function renderTrendHosts() {
   S.trendRebuilding = true;
   try { renderCards(); renderInspect(); renderSettings(); }
   finally { S.trendRebuilding = false; }
-  if (!host) return;
-  if (!id) return;
+  if (!host || !id) return;
   const next = Array.from(host.querySelectorAll("[data-hist]")).find((plot) =>
     plot.dataset.hist === id && (plot.dataset.source || "") === source && historyRowOwner(plot) === activeOwner);
   if (!next) return;
@@ -2112,9 +2111,10 @@ function displayHomeHubLabel(row) {
 // `trendId` is the series the panel carries, if any: the toggle fetches and un-pins by it, so the
 // id is derived ONCE (here, where the body was built) instead of again from the key — which for a
 // board row is not a catalog label and could not be looked up at all.
-function descAccordion(key, label, valHtml, cls, bodyHtml, trendId, unit = "", showChart = true) {
+function descAccordion(key, label, valHtml, cls, bodyHtml, trendId, unit = "", paused) {
   const open = S.descOpen.has(key);
-  if (open && trendId && showChart) bodyHtml += histHtml(trendId, unit, label);
+  const chart = open && trendId && !paused ? histHtml(trendId, unit, label) : "";
+  if (trendId) bodyHtml += `<div data-chart="${open && paused ? 1 : ""}">${chart}</div>`;
   const diagnosisLabel = key.startsWith("model:health_") || key === "service:refrigerant";
   return `<div class="vitem${open ? " open" : ""}">` +
     `<button class="vrow vrow-desc" type="button" data-desc="${esc(key)}"` +
@@ -2130,7 +2130,7 @@ function descAccordion(key, label, valHtml, cls, bodyHtml, trendId, unit = "", s
 // unchanged row. Most catalog labels are unique within a render; the reused set carries its X10A
 // group from the server below. A derived row supplies its own key and visual label while keeping its
 // canonical label for description matching.
-function vDescRow(v, showChart = true) {
+function vDescRow(v, paused) {
   const label = v.label || "";
   const shownLabel = v.displayLabel || displayReadingLabel(label, v);
   // Ambiguous rows used to share one label-based key, so expanding either Error Code opened both
@@ -2184,7 +2184,7 @@ function vDescRow(v, showChart = true) {
   // below it is the same sentence on every device and at every hour.
   return descAccordion(key, shownLabel, val, cls,
                        dwell + unknownAge + (d ? descBodyHtml(d, src.value, descriptionCopy(d)) : "") +
-                       mbNoteHtml(v, cmp), hid, displayUnit(v), showChart);
+                       mbNoteHtml(v, cmp), hid, displayUnit(v), paused);
 }
 
 // A Model-card row: the same accordion as a value row when copy exists for it, else the plain row
@@ -2317,10 +2317,11 @@ function toggleDesc(btn) {
   // Opening a schematic history also fills the cache used by value rows. Do not build and parse
   // another SVG in every collapsed row on every two-second poll. Mount it only on disclosure,
   // including a cache hit (ensureHistPair then returns without triggering a repaint).
-  if (open && trend && !item.querySelector(".vhist"))
-    replaceHistoryHtml(item.querySelector(".vdesc-body"),
-      item.querySelector(".vdesc-body").innerHTML +
+  if (open && trend && !item.querySelector(".vhist")) {
+    const body = item.querySelector("[data-chart]") || item.querySelector(".vdesc-body");
+    replaceHistoryHtml(body, body.innerHTML +
       histHtml(trend, btn.dataset.unit || "", btn.querySelector(".vrow-label").textContent));
+  }
   // Fetch the trend only once the panel is actually opened — a device that buffers eleven series
   // would otherwise answer a request per row on every page load, for panels nobody looked at.
   if (open && trend) ensureHistPair(trend);
@@ -2376,8 +2377,7 @@ function valueGroupsHtml(vals, connected) {
     const label = grouped ? groupLabel(name) : t("group.Values");
     const navLabel = grouped && name === "Refrigerant / outdoor" ? t("nav.outdoor") : label;
     const key = `group:${name}`;
-    const active = S.dashboardCard === key;
-    html += vcard(label, shown.map(v => vDescRow(v, active)).join(""), badge, "", key, navLabel);
+    html += vcard(label, shown.map(v => vDescRow(v, key !== S.dashboardCard)).join(""), badge, "", key, navLabel);
   };
   for (const name of order) if (buckets.has(name)) { emit(name, buckets.get(name)); done.add(name); }
   for (const [name, rows] of buckets) if (!done.has(name)) emit(name, rows); // firmware-supplied custom groups
@@ -2429,7 +2429,7 @@ function modbusOnlyGroupHtml(all) {
     }
     return descAccordion(label, shown, val, "src-val-mb",
                          d ? descBodyHtml(d, m.value, descriptionCopy(d)) : "", hid, unit,
-                         S.dashboardCard === "modbus");
+                         S.dashboardCard !== "modbus");
   }).join("");
   // The heading has to match what is IN the card: "Modbus only" is true of the unpaired handful and
   // false the moment `all` folds the paired rows in beside them.
