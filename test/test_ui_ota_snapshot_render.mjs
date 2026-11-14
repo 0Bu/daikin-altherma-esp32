@@ -236,7 +236,8 @@ for (const state of ["idle", "error", "checking"]) {
   }
   h.renderApp();
   assert.equal(h.S.otaCached, false); assert.equal(h.S.live, null);
-  assert.equal(observe(h).lwt, "—"); assert.equal(h.controls[0].disabled, false);
+  assert.equal(observe(h).lwt, "—");
+  assert.equal(h.controls[0].disabled, true, "only a live status can unlock configuration again");
   assert.equal(h.storage.has(cacheKey), false);
   assert.notEqual(observe(h).headline, "Firmware update");
   assert.equal(h.S.imageLease.elf, "image-a", "idle/error/check retirement retains the page's image identity");
