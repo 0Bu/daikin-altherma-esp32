@@ -96,8 +96,8 @@ assert.match(modbusPollSource,
              /history_generation\s*=\s*history_modbus_generation\(\);[\s\S]*?if \(!mb_ensure_connected\([^;]+history_generation\)\)/,
              "the Modbus socket must capture its history generation before connecting");
 assert.match(modbusPollSource,
-             /gates\.received_data &&\s*s_last_reply_ms >= 0;[\s\S]*?history_modbus_bind_peer\(\s*s_req_configured_target, s_req_peer_ipv4,\s*s_req_history_expected_generation\)/,
-             "the Modbus socket must bind a peer only after current-session register data");
+             /bind_history = current_session && s_req_history_generation == 0 && gates\.usable_ordinary &&\s*s_last_reply_ms >= 0;[\s\S]*?if \(bind_history &&\s*s_target_generation\.load\(std::memory_order_acquire\) == cycle_target_generation\)\s*s_req_history_generation = history_modbus_bind_peer\(\s*s_req_configured_target, s_req_peer_ipv4,\s*s_req_history_expected_generation\)/,
+             "the Modbus socket must bind a peer only after usable ordinary register data from the current session");
 
 const context = {
   S: { status: null, descOpen: new Set() },
