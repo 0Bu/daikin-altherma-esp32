@@ -1815,7 +1815,10 @@ function scrubEnd(plot) {
 function replaceHistoryHtml(host, html) {
   const active = globalThis.document?.activeElement;
   const { histId, histSeries, hist, source = "" } = active?.dataset || {};
-  const owner = node => node?.closest?.(".vitem")?.querySelector("[data-desc]")?.dataset.desc;
+  const owner = node => {
+    const item = node?.closest?.(".vitem") || host?.closest?.(".vitem");
+    return item?.querySelector("[data-desc]")?.dataset.desc;
+  };
   // The cycling chart may be mounted inside its own slot before the surrounding row is rendered.
   const signature = node => JSON.stringify([node.hasAttribute("data-cycling")
     ? "model:health_cycling" : owner(node), node.outerHTML]);
