@@ -785,6 +785,7 @@ function historyDeviceTime(retained = false) {
   return Date.parse(S.status.ntp.time || "") / 1000 + historyStatusElapsed();
 }
 
+const wallHistoryExpiry = new WeakMap();
 function expiredHistSlots(h) {
   if (!h?.v.length) return 0;
   const elapsed = historyElapsed(h) / 1000;
@@ -801,6 +802,11 @@ function expiredHistSlots(h) {
     const deviceTime = historyDeviceTime(true);
     current = Math.max(current + start,
       Number.isFinite(deviceTime) ? Math.floor(deviceTime / dt) : start);
+    // Same cached samples can survive a refresh refusal or a backward clock correction.
+    const expired = Math.max(wallHistoryExpiry.get(h.v) || 0,
+      Math.min(h.v.length, current - HIST_MAX_SAMPLES - start));
+    if (expired) wallHistoryExpiry.set(h.v, expired);
+    return expired;
   }
   return Math.max(0, Math.min(h.v.length, current - HIST_MAX_SAMPLES - start));
 }

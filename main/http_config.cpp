@@ -1252,9 +1252,13 @@ static esp_err_t set_board(httpd_req_t* req) {
         char current_boot[17];
         http_boot_id(current_boot);
         if (std::strcmp(boot->valuestring, current_boot) != 0 ||
-            revision->valuedouble != static_cast<double>(cur.runtime_revision))
-            return send_err_code(req, "409 Conflict", "board_draft_stale",
-                                 "Board settings changed. Reopen the editor before saving.");
+            revision->valuedouble != static_cast<double>(cur.runtime_revision)) {
+            // Preserve the signal to retire this draft even if no C++ allocation can succeed.
+            httpd_resp_set_status(req, "409 Conflict");
+            return http_send_json(req,
+                                  R"({"ok":false,"code":"board_draft_stale",)"
+                                  R"("error":"Board settings changed. Reopen the editor before saving."})");
+        }
     }
     Config c                      = cur;
     c.led_gpio       = ji(j, "led_gpio", c.led_gpio);

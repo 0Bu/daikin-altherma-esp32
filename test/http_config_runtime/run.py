@@ -162,6 +162,10 @@ mutations = [
     ('ignore_board_draft_revision', 'source',
      'revision->valuedouble != static_cast<double>(cur.runtime_revision)',
      'false', 'board_draft_revision'),
+    ('allocate_board_draft_refusal', 'source',
+     re.compile(r'http_send_json\(req,\s+(R"\(\{"ok":false,"code":"board_draft_stale",\)"\s+'
+                r'R"\("error":"Board settings changed\. Reopen the editor before saving\."\}\)")\);'),
+     r'http_send_json(req, std::string(\1).c_str());', 'board_draft_revision'),
     ('leaked_request_scratch', 'source', re.compile(r'error\s*= root \? nullptr : "bad json";'),
      'static_cast<void>(body.release());\n    error = root ? nullptr : "bad json";', 'request_scratch'),
     ('swallowed_request_scratch_oom', 'source',
@@ -294,7 +298,7 @@ for tag, target, old, new, case in mutations:
 after = inputs([OUT / 'production.d', OUT / 'cjson.d'])
 if after != before:
     raise RuntimeError('compile inputs changed during the run')
-if len(controls) != 29:
+if len(controls) != 30:
     raise RuntimeError('the complete compiling negative-control inventory changed')
 record = {'compiler': compiler, 'c_compiler': c_compiler,
           'compiler_commands': {'c': CC, 'cxx': CXX},

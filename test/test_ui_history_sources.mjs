@@ -428,12 +428,18 @@ assert.equal(h.histCacheKey("dhw_tank", "modbus"), "modbus:dhw_tank");
   assert.deepEqual(Array.from(S.hist.get("modbus:dhw_tank").v), modbus.v,
     "an unverified wall anchor cannot displace the last compatible ring");
   S.status.ntp = { synced: true, time: new Date(time * 1000).toISOString() };
-  const ageing = { ...x10a, b0: null, t0: time - 289 * 300 };
+  const ageing = { ...x10a, b0: null, t0: time - 289 * 300, v: [450, 451, 452] };
   assert.ok(h.expiredHistSlots(ageing) > 0);
   S.transportUnavailable = "status";
   assert.ok(h.expiredHistSlots(ageing) > 0,
     "a transient status refusal cannot put expired wall-clock samples back on screen");
+  assert.ok(h.expiredHistSlots({ ...ageing, v: [453] }) > 0,
+    "an elapsed wall-clock ring is also refused on its first use during a status refusal");
   delete S.transportUnavailable;
+  S.status.ntp = { synced: true, time: new Date((time - 1200) * 1000).toISOString() };
+  assert.ok(h.expiredHistSlots({ ...ageing, refreshFailed: true }) > 0,
+    "a backward clock correction cannot revive expired readings in the same cached ring");
+  S.status.ntp = { synced: true, time: new Date(time * 1000).toISOString() };
   S.hist.set("dhw_tank", { ...x10a, t0: time - 600 });
   h.histPinToggle("dhw_tank", 0, "x10a");
   S.hist.set("modbus:dhw_tank", { ...ageing, b0: null, v: [515], refreshFailed: true });

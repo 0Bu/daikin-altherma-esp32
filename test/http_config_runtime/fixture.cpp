@@ -51,6 +51,7 @@ daik::ConfigSaveOutcome last_save_outcome;
 
 size_t live_arrays = 0, body_capacity = 0;
 bool   fail_next_array = false;
+bool   deny_after_boot_id = false, deny_rejection_allocations = false;
 
 bool   tracking = false, durable_started = false, network = true, dns_ok = true, tcp_ok = true;
 bool   semaphore_ok = true, mqtt_init_ok = true, mqtt_connected = true, mqtt_error = false;
@@ -162,6 +163,7 @@ void reset() {
     last_save_outcome         = {};
     body_capacity             = 0;
     fail_next_array           = false;
+    deny_after_boot_id = deny_rejection_allocations = false;
     network = dns_ok = tcp_ok = semaphore_ok = mqtt_init_ok = mqtt_connected = true;
     mqtt_register_ok = mqtt_start_ok = mqtt_wait_ok = proof_ok = weather_admission = refresh_ok =
         true;
@@ -302,6 +304,10 @@ void success(const Route& candidate) {
 } // namespace fixture
 
 void* operator new(size_t size) {
+    if (fixture::deny_rejection_allocations) {
+        fixture::deny_rejection_allocations = false;
+        throw std::bad_alloc();
+    }
     if (fixture::tracking && fixture::durable_started) {
         ++fixture::post_write_allocations;
         throw std::bad_alloc();
@@ -358,7 +364,10 @@ bool config_save(const Config& requested) {
     fixture::last_save_outcome = config_save_transaction(fixture::current, requested, false, store);
     return fixture::last_save_outcome.result == ConfigSaveResult::Saved;
 }
-void http_boot_id(char (&out)[17]) { std::memcpy(out, "0123456789abcdef", sizeof(out)); }
+void http_boot_id(char (&out)[17]) {
+    std::memcpy(out, "0123456789abcdef", sizeof(out));
+    if (fixture::deny_after_boot_id) fixture::deny_rejection_allocations = true;
+}
 ConfigSaveResult config_save_link(const Config& requested) {
     ++fixture::saves;
     if (fixture::stale_attempts) {
@@ -440,6 +449,8 @@ bool weather_forecast_request_refresh(uint64_t& token) noexcept {
     return true;
 }
 esp_err_t http_send_json(httpd_req_t* request, const char* body) {
+    // The harness records bytes in a string. Exclude that copy from the handler's budget.
+    fixture::deny_rejection_allocations = false;
     request->content_type = "application/json";
     request->response     = body;
     return ESP_OK;
@@ -1232,7 +1243,13 @@ void board_draft_revision() {
     check(invoke(board.handler, request).status == "200 OK", "matching Board draft must save");
     saves = reboots = service_writes = link_writes = 0;
     durable_started                                = false;
-    rejection(board, request, "409 Conflict", false, "board_draft_stale");
+    deny_after_boot_id                             = true;
+    try {
+        rejection(board, request, "409 Conflict", false, "board_draft_stale");
+    } catch (const std::bad_alloc&) {
+        check(false, "stale Board draft refusal must not allocate");
+    }
+    deny_after_boot_id = false;
 }
 void room_history_lifetime() {
     reset();
