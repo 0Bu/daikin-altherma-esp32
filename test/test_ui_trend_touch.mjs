@@ -153,15 +153,23 @@ assert.deepEqual(calls, [
 // Ordinary values polls use setHtml directly, outside the explicit pin/legend rebuild path.
 {
   const document = { activeElement: null };
-  const makeLegend = () => ({
+  const makeLegend = owner => ({
     dataset: { histId: "dhw_tank", histSeries: "modbus" },
+    closest: selector => selector === ".vitem" ? {
+      querySelector: () => ({ dataset: { desc: owner } }),
+    } : null,
     focus() { document.activeElement = this; },
   });
-  let current = makeLegend(); current.focus();
+  let current = makeLegend("Daikin tank"), other = makeLegend("HomeHub tank");
+  current.focus();
   const host = {
     contains: (el) => el === current,
-    querySelectorAll: () => [current],
-    set innerHTML(_html) { current = makeLegend(); document.activeElement = null; },
+    querySelectorAll: () => [current, other],
+    set innerHTML(_html) {
+      current = makeLegend("Daikin tank");
+      other = makeLegend("HomeHub tank");
+      document.activeElement = null;
+    },
   };
   const stateSource = readAppFragments(["app_state.js"]);
   const writer = stateSource.slice(stateSource.indexOf("const _html = {}"), stateSource.indexOf("function renderHeader()"));
@@ -171,7 +179,7 @@ assert.deepEqual(calls, [
   ctx.repaint("valueGroups", "updated readings");
   assert.notEqual(current, first, "the poll must replace the real container");
   assert.equal(document.activeElement, current,
-    "changing readings must preserve the focused legend button across a normal poll");
+    "changing readings must preserve the legend button on its original row among duplicate series");
 }
 
 // A cached disclosure can open and close before any poll renders its open state. Exercise the real

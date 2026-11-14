@@ -959,6 +959,64 @@ async function tankCacheState(page) {
   });
 }
 
+async function assertInactiveCardHistory(page, selector, context) {
+  const selectors = await evaluate(page, ({ selector }) => {
+    const own = document.querySelector(selector).closest("[data-dashboard-card]").dataset.dashboardCard;
+    const other = [...document.querySelectorAll("#cardNav [data-card]")].find(button => button.dataset.card !== own);
+    return { own: '#cardNav [data-card="' + CSS.escape(own) + '"]',
+      other: '#cardNav [data-card="' + CSS.escape(other.dataset.card) + '"]' };
+  }, { selector });
+  await click(page, selectors.other);
+  await evaluate(page, ({ selector }) => {
+    const button = document.querySelector(selector), original = histHtml;
+    window.__inactiveChartBuilds = 0;
+    window.__inactiveChartOriginal = original;
+    histHtml = (...args) => {
+      if (args[0] === button.dataset.trend) ++window.__inactiveChartBuilds;
+      return original(...args);
+    };
+  }, { selector });
+  try {
+    const polls = await page.evaluate("window.__motionAllPolls");
+    await page.waitFor("window.__motionAllPolls >= " + (polls + 3) + " && !_pollBusy");
+    const hidden = await evaluate(page, ({ selector }) => {
+      const item = document.querySelector(selector).closest(".vitem");
+      return { open: item.classList.contains("open"), chart: !!item.querySelector(".vhist"),
+        builds: window.__inactiveChartBuilds };
+    }, { selector });
+    assert.deepEqual(hidden, { open: true, chart: false, builds: 0 },
+      context + ": inactive card must preserve the disclosure and skip chart generation");
+  } finally {
+    await page.evaluate("histHtml = window.__inactiveChartOriginal; delete window.__inactiveChartOriginal; true");
+  }
+  await click(page, selectors.own);
+  await page.waitFor(`document.querySelector(${JSON.stringify(selector)})?.closest(".vitem.open")?.querySelector(".vhist")`);
+}
+
+async function assertDuplicateLegendFocus(page, context) {
+  const state = await evaluate(page, () => {
+    const host = document.createElement("section");
+    const row = (owner, value) => '<div class="vitem"><button data-desc="' + owner +
+      '">Tank</button><button data-hist-id="dhw_tank" data-hist-series="modbus">' +
+      value + "</button></div>";
+    host.innerHTML = row("x10a-tank", "Show HomeHub") + row("modbus-tank", "Show HomeHub");
+    document.body.append(host);
+    const previous = document.activeElement;
+    try {
+      const focused = host.querySelector("[data-hist-series]");
+      focused.focus({ preventScroll: true });
+      replaceHistoryHtml(host, row("x10a-tank", "Hide HomeHub") + row("modbus-tank", "Hide HomeHub"));
+      return { replaced: !focused.isConnected,
+        owner: document.activeElement.closest(".vitem")?.querySelector("[data-desc]")?.dataset.desc };
+    } finally {
+      host.remove();
+      previous?.focus({ preventScroll: true });
+    }
+  });
+  assert.deepEqual(state, { replaced: true, owner: "x10a-tank" },
+    context + ": structural repaint must restore the legend focus to its original row");
+}
+
 async function disclosure(page, server, fixture, context, selectors, ids, settings = false, animation = {}) {
   await page.evaluate(settings ? "showStage('settings'); true" : "showStage('dashboard'); true");
   if (!settings) {
@@ -991,7 +1049,11 @@ async function disclosure(page, server, fixture, context, selectors, ids, settin
   if (watchCachedTank) await watchCachedDisclosureOpening(page, selectors[0]);
   for (const [index, selector] of selectors.entries())
     await toggleDisclosure(page, selector, ids[index], true, context + "/cached-reopen");
-  if (watchCachedTank) await assertCachedDisclosureOpening(page, selectors[0], context);
+  if (watchCachedTank) {
+    await assertCachedDisclosureOpening(page, selectors[0], context);
+    await assertInactiveCardHistory(page, selectors[0], context);
+    await assertDuplicateLegendFocus(page, context);
+  }
   assert.equal(server.historyRequests.length, before, context + ": cached reopen must not refetch history");
   if (watchCachedTank) {
     const fresh = await tankCacheState(page), requestStart = server.historyRequests.length;

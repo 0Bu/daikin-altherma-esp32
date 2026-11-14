@@ -129,7 +129,7 @@ async function refreshValues(paint = true) {
 // Dashboard cards: diagnostics, detected unit and value groups share one selectable panel below
 // the live diagram. The board (ESP32) card and the
 // WiFi/MQTT/Syslog/NTP rows are NOT here: both moved behind the gear onto Settings (renderSettings).
-function renderCards() {
+function renderCards(hold = true) {
   // Freeze trend hosts during a scrub so structural updates cannot replace the captured plot.
   // Rows catch up when scrubEnd resumes rendering.
   if (S.scrub) return;
@@ -138,9 +138,17 @@ function renderCards() {
   // require a live X10A link; passive refrigerant observations keep their independent collection.
   const checkup = S.status?.diagnostics?.enabled === true
     ? checkupCardHtml(S.status?.hp?.connected) : "";
-  setHtml("valueGroups", checkup + statusCardsHtml() +
-    valueGroupsHtml(S._values || [], S.status?.hp?.connected));
-  const selected = syncDashboardCards();
+  const frame = () => checkup + statusCardsHtml() +
+    valueGroupsHtml(S._values || [], S.status?.hp?.connected);
+  const previous = S.dashboardCard;
+  setHtml("valueGroups", frame(), hold);
+  let selected = syncDashboardCards();
+  // A source can remove the selected card. Build the newly selected card's open charts
+  // in the same update once its fallback selection is known.
+  if (S.dashboardCard !== previous && (!hold || !S.clickHold)) {
+    setHtml("valueGroups", frame(), hold);
+    selected = syncDashboardCards();
+  }
   if (!S.clickHold) syncCheckupCyclingChart(selected);
 }
 
@@ -185,7 +193,8 @@ function selectDashboardCard(key) {
   if (!Array.from(cards).some(card => card.dataset.dashboardCard === key)) return;
   S.dashboardCard = key;
   // Selection is immediate even while the pointer hold is protecting a pending values repaint.
-  syncCheckupCyclingChart(syncDashboardCards());
+  if (S.scrub) syncCheckupCyclingChart(syncDashboardCards());
+  else renderCards(false);
 }
 
 /*!

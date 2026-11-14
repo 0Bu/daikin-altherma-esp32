@@ -1898,9 +1898,11 @@ function replaceHistoryHtml(host, html) {
     if (plot.dataset.hist === hist && (plot.dataset.source || "") === source && owner(plot) === focusedOwner)
       plot.focus({ preventScroll: true });
   }
-  else if (focused && histSeries) for (const button of host.querySelectorAll("[data-hist-series]")) {
-    if (button.dataset.histId === histId && button.dataset.histSeries === histSeries)
-      button.focus({ preventScroll: true });
+  else if (focused && histSeries) {
+    const button = [...host.querySelectorAll("[data-hist-series]")].find(button =>
+      button.dataset.histId === histId && button.dataset.histSeries === histSeries &&
+      owner(button) === focusedOwner);
+    button?.focus({ preventScroll: true });
   }
   else if (focused && (cycling || active?.dataset?.desc)) {
     const chart = cycling && host.querySelector("[data-cycling]");
@@ -2110,9 +2112,9 @@ function displayHomeHubLabel(row) {
 // `trendId` is the series the panel carries, if any: the toggle fetches and un-pins by it, so the
 // id is derived ONCE (here, where the body was built) instead of again from the key — which for a
 // board row is not a catalog label and could not be looked up at all.
-function descAccordion(key, label, valHtml, cls, bodyHtml, trendId, unit = "") {
+function descAccordion(key, label, valHtml, cls, bodyHtml, trendId, unit = "", showChart = true) {
   const open = S.descOpen.has(key);
-  if (open && trendId) bodyHtml += histHtml(trendId, unit, label);
+  if (open && trendId && showChart) bodyHtml += histHtml(trendId, unit, label);
   const diagnosisLabel = key.startsWith("model:health_") || key === "service:refrigerant";
   return `<div class="vitem${open ? " open" : ""}">` +
     `<button class="vrow vrow-desc" type="button" data-desc="${esc(key)}"` +
@@ -2128,7 +2130,7 @@ function descAccordion(key, label, valHtml, cls, bodyHtml, trendId, unit = "") {
 // unchanged row. Most catalog labels are unique within a render; the reused set carries its X10A
 // group from the server below. A derived row supplies its own key and visual label while keeping its
 // canonical label for description matching.
-function vDescRow(v) {
+function vDescRow(v, showChart = true) {
   const label = v.label || "";
   const shownLabel = v.displayLabel || displayReadingLabel(label, v);
   // Ambiguous rows used to share one label-based key, so expanding either Error Code opened both
@@ -2182,7 +2184,7 @@ function vDescRow(v) {
   // below it is the same sentence on every device and at every hour.
   return descAccordion(key, shownLabel, val, cls,
                        dwell + unknownAge + (d ? descBodyHtml(d, src.value, descriptionCopy(d)) : "") +
-                       mbNoteHtml(v, cmp), hid, displayUnit(v));
+                       mbNoteHtml(v, cmp), hid, displayUnit(v), showChart);
 }
 
 // A Model-card row: the same accordion as a value row when copy exists for it, else the plain row
@@ -2352,7 +2354,6 @@ function valueGroupsHtml(vals, connected) {
   const buckets = new Map();
   for (const v of rows) { const g = groupOf(v); (buckets.get(g) || buckets.set(g, []).get(g)).push(v); }
   const grouped = buckets.size > 1;
-  const rowsOf = (rows) => rows.map((v) => vDescRow(v)).join("");
   // Group headings are translated; a firmware-supplied custom group (not in the dictionary) keeps its
   // own name. Bucket KEYS stay the English group name (groupOf) — only the display label is localised.
   const groupLabel = (name) => (I18N.en["group." + name] != null ? t("group." + name) : name);
@@ -2374,7 +2375,9 @@ function valueGroupsHtml(vals, connected) {
     const badge  = prot && rows.some(isLimiting) ? t("protect.limiting") : "";
     const label = grouped ? groupLabel(name) : t("group.Values");
     const navLabel = grouped && name === "Refrigerant / outdoor" ? t("nav.outdoor") : label;
-    html += vcard(label, rowsOf(shown), badge, "", `group:${name}`, navLabel);
+    const key = `group:${name}`;
+    const active = S.dashboardCard === key;
+    html += vcard(label, shown.map(v => vDescRow(v, active)).join(""), badge, "", key, navLabel);
   };
   for (const name of order) if (buckets.has(name)) { emit(name, buckets.get(name)); done.add(name); }
   for (const [name, rows] of buckets) if (!done.has(name)) emit(name, rows); // firmware-supplied custom groups
@@ -2425,7 +2428,8 @@ function modbusOnlyGroupHtml(all) {
         `<span class="vrow-val src-val-mb">${val}</span></div>`;
     }
     return descAccordion(label, shown, val, "src-val-mb",
-                         d ? descBodyHtml(d, m.value, descriptionCopy(d)) : "", hid, unit);
+                         d ? descBodyHtml(d, m.value, descriptionCopy(d)) : "", hid, unit,
+                         S.dashboardCard === "modbus");
   }).join("");
   // The heading has to match what is IN the card: "Modbus only" is true of the unpaired handful and
   // false the moment `all` folds the paired rows in beside them.
