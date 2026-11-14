@@ -1,4 +1,4 @@
-// translation-source: 456568c508c4398e3b29e39470c90fba425fccf1699b14af2fbc6e9d1af09ecd
+// translation-source: 65571656f160db7c5cef68e1a9e2f1c556ae6ac67f346ba2f2b092cff1d703c9
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -454,6 +454,7 @@ I18N.pl = localeValues([
   /* toast.no_changes */ "Brak zmian",
   /* toast.reboot */ "Ponowne uruchamianie — łączenie…",
   /* toast.rebooted */ "Uruchomiono ponownie — połącz się ponownie z urządzeniem",
+  /* board.draft_stale */ "Ustawienia płytki się zmieniły. Otwórz edytor ponownie przed zapisaniem.",
   /* toast.busy_retry */ "Urządzenie zajęte — spróbuj ponownie za chwilę",
   /* toast.unreachable */ "Nie można połączyć się z urządzeniem",
   /* toast.rejected */ "Odrzucono",
@@ -509,6 +510,7 @@ I18N.pl = localeValues([
   /* schem.defrost_pill */ "❄ odszran.",
   /* schem.outdoor */ "Zewn.",
   /* insp.close */ "Zamknij",
+  /* schem.defrost_transfer */ "Podczas potwierdzonego odszraniania ciepło może przepływać z wody do czynnika chłodniczego. Rury wskazują ten kierunek tylko wtedy, gdy potwierdzają go bieżący przepływ i temperatury.",
   /* schem.leaving_water */ "R1T",
   /* schem.dhw_tank */ "ZBIORNIK CWU",
   /* schem.set */ "zadana",

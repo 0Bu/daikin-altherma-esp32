@@ -122,6 +122,7 @@ async function refreshValues(paint = true) {
   S.otaCached = false;
   S.transportUnavailable = null;
   S.transportBusy = false;
+  if (typeof expireLiveHistoryPins === "function") expireLiveHistoryPins();
   if (S.otaInstalling) otaCacheStore();
   if (paint) renderApp();
   return true;

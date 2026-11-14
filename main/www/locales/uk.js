@@ -1,4 +1,4 @@
-// translation-source: 456568c508c4398e3b29e39470c90fba425fccf1699b14af2fbc6e9d1af09ecd
+// translation-source: 65571656f160db7c5cef68e1a9e2f1c556ae6ac67f346ba2f2b092cff1d703c9
 I18N.uk = localeValues([
   /* sys.nodata */ "Немає даних",
   /* sys.unreachable */ "Недоступно",
@@ -449,6 +449,7 @@ I18N.uk = localeValues([
   /* toast.no_changes */ "Змін немає",
   /* toast.reboot */ "Перезапуск — повторне підключення…",
   /* toast.rebooted */ "Перезапущено — підключіться до пристрою знову",
+  /* board.draft_stale */ "Налаштування плати змінилися. Відкрийте редактор знову перед збереженням.",
   /* toast.busy_retry */ "Пристрій зайнятий — повторіть за мить",
   /* toast.unreachable */ "Не вдалося зв’язатися з пристроєм",
   /* toast.rejected */ "Відхилено",
@@ -504,6 +505,7 @@ I18N.uk = localeValues([
   /* schem.defrost_pill */ "❄ відтавання",
   /* schem.outdoor */ "Надворі",
   /* insp.close */ "Закрити",
+  /* schem.defrost_transfer */ "Під час підтвердженого розморожування тепло може переходити від води до холодоагенту. Труби показують цей напрямок лише тоді, коли його підтверджують поточна витрата води й температури.",
   /* schem.leaving_water */ "R1T",
   /* schem.dhw_tank */ "БАК ГВП",
   /* schem.set */ "задано",

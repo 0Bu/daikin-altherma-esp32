@@ -451,6 +451,9 @@ age and omitted before clock sync. `epoch` is captured with the samples; `boot_i
 Unavailable age metadata or an epoch changed before emission returns 503. Clients must reject
 responses superseded by a newer status/source generation.
 `held` marks eligible X10A outdoor nulls as held-over; all other source rasters leave it empty.
+The dashboard accepts up to 288 samples on the 300-second raster. It accepts a reply without row
+and source identity only if both are absent and `/status` predates the history epoch. A supplied
+identity must match the request, along with the boot and epoch tokens announced by `/status`.
 `v` does not record an unknown compressor state. A sweep dropped after a stop cannot put a number into
 its bucket, but any other outdoor sample without a readable speed stays a number, so a number is not
 proof that the page was current.
@@ -583,7 +586,8 @@ collide with X10A, the other onboard part or ENV III. A board identity statement
 Switching away from M5Stack retires ENV III in the same atomic save.
 The dashboard sends `boot_id` and `board.config_revision` from its accepted `/status` as
 `boot_id` and `config_revision`. A missing or invalid member of the optional pair returns 400.
-An outdated boot or configuration returns 409 before probing pins or saving. Clients can omit both.
+An outdated boot or configuration returns 409 with `code: "board_draft_stale"` before probing
+pins or saving. Reopen the editor from current status before submitting again. Clients can omit both.
 
 `POST /set_env3` is the compatibility route (`enabled`, `sda`, `scl`, all optional). Both board routes
 share the same preflight: enabling new pins probes SHT30/QMP6988 (422 if absent, 503 if busy), enabling

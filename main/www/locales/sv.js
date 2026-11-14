@@ -1,4 +1,4 @@
-// translation-source: 456568c508c4398e3b29e39470c90fba425fccf1699b14af2fbc6e9d1af09ecd
+// translation-source: 65571656f160db7c5cef68e1a9e2f1c556ae6ac67f346ba2f2b092cff1d703c9
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -449,6 +449,7 @@ I18N.sv = localeValues([
   /* toast.no_changes */ "Inga ändringar",
   /* toast.reboot */ "Startar på nytt — ansluter igen…",
   /* toast.rebooted */ "Startades om — anslut enheten igen",
+  /* board.draft_stale */ "Kortets inställningar har ändrats. Öppna redigeraren igen innan du sparar.",
   /* toast.busy_retry */ "Enheten är upptagen — försök direkt igen",
   /* toast.unreachable */ "Enheten svarar inte",
   /* toast.rejected */ "Avvisad",
@@ -504,6 +505,7 @@ I18N.sv = localeValues([
   /* schem.defrost_pill */ "❄ Avfrostning",
   /* schem.outdoor */ "Ute",
   /* insp.close */ "Stäng",
+  /* schem.defrost_transfer */ "Vid bekräftad avfrostning kan värme överföras från vattnet till köldmediet. Rören visar den riktningen bara när flödet och temperaturerna just nu stöder den.",
   /* schem.leaving_water */ "R1T",
   /* schem.dhw_tank */ "VV-TANK",
   /* schem.set */ "Mål",

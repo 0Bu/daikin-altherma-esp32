@@ -1,4 +1,4 @@
-// translation-source: 456568c508c4398e3b29e39470c90fba425fccf1699b14af2fbc6e9d1af09ecd
+// translation-source: 65571656f160db7c5cef68e1a9e2f1c556ae6ac67f346ba2f2b092cff1d703c9
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -449,6 +449,7 @@ I18N.cs = localeValues([
   /* toast.no_changes */ "Žádné změny",
   /* toast.reboot */ "Restartuji — znovu se připojuji…",
   /* toast.rebooted */ "Restartováno — znovu se připojte k zařízení",
+  /* board.draft_stale */ "Nastavení desky se změnilo. Před uložením znovu otevřete editor.",
   /* toast.busy_retry */ "Zařízení je zaneprázdněné — zkuste to za chvíli",
   /* toast.unreachable */ "Zařízení se nepodařilo kontaktovat",
   /* toast.rejected */ "Odmítnuto",
@@ -504,6 +505,7 @@ I18N.cs = localeValues([
   /* schem.defrost_pill */ "❄ odmraz.",
   /* schem.outdoor */ "Venku",
   /* insp.close */ "Zavřít",
+  /* schem.defrost_transfer */ "Při potvrzeném odmrazování může teplo přecházet z vody do chladiva. Potrubí tento směr zobrazuje jen tehdy, když ho potvrzuje aktuální průtok a teploty.",
   /* schem.leaving_water */ "R1T",
   /* schem.dhw_tank */ "ZÁSOBNÍK TUV",
   /* schem.set */ "žádaná",

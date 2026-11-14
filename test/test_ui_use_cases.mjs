@@ -135,6 +135,8 @@ const fetch = async (url, options = {}) => {
   if (fetchState.mode === "delayed")
     return new Promise((resolve, reject) => { fetchState.respond = resolve; fetchState.fail = reject; });
   if (fetchState.mode === "throw") throw new Error("unreachable");
+  if (fetchState.mode === "board_stale" && url === "/set_board")
+    return response(false, { code: "board_draft_stale", error: "Board settings changed." }, 409);
   if (fetchState.mode === "env3_missing" && url === "/set_board")
     return response(false, {
       code: "env3_sht30_not_found",
@@ -406,6 +408,16 @@ assert.equal(fetchState.calls.some(call => call.url === "/set_board"), false,
   "a draft from one boot cannot submit the old hardware configuration after status recovers on another");
 assert.equal(document.getElementById("boardModal").hidden, true);
 ui.S.status = loadedStatus;
+loadRoute(`#settings/${ui.POPUP_ROUTES.boardModal}`);
+fetchState.mode = "board_stale";
+await document.getElementById("boardForm").fire("submit");
+await new Promise(resolve => setImmediate(resolve));
+assert.equal(document.getElementById("bdError").textContent,
+  "Die Board-Einstellungen haben sich geändert. Öffne den Dialog vor dem Speichern erneut.",
+  "a race rejected by the device tells the user to reopen the editor in their own language");
+assert.equal(ui.S.busy, false, "the conflict releases the save button");
+fetchState.mode = "ok";
+await document.getElementById("bdCancel").onclick();
 
 // An in-app popup has a real Settings parent: Back closes it and Forward opens the same one again.
 ui.openWifi();

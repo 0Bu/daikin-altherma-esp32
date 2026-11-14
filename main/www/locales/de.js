@@ -1,4 +1,4 @@
-// translation-source: 456568c508c4398e3b29e39470c90fba425fccf1699b14af2fbc6e9d1af09ecd
+// translation-source: 65571656f160db7c5cef68e1a9e2f1c556ae6ac67f346ba2f2b092cff1d703c9
 I18N.de = localeValues([
   /* sys.nodata */ "Keine Daten",
   /* sys.unreachable */ "Nicht erreichbar",
@@ -449,6 +449,7 @@ I18N.de = localeValues([
   /* toast.no_changes */ "Keine Änderungen",
   /* toast.reboot */ "Neustart — verbinde neu…",
   /* toast.rebooted */ "Neu gestartet — bitte neu mit dem Gerät verbinden",
+  /* board.draft_stale */ "Die Board-Einstellungen haben sich geändert. Öffne den Dialog vor dem Speichern erneut.",
   /* toast.busy_retry */ "Gerät ausgelastet — gleich erneut versuchen",
   /* toast.unreachable */ "Gerät nicht erreichbar",
   /* toast.rejected */ "Abgelehnt",
@@ -504,6 +505,7 @@ I18N.de = localeValues([
   /* schem.defrost_pill */ "❄ Abtauen",
   /* schem.outdoor */ "Außen",
   /* insp.close */ "Schließen",
+  /* schem.defrost_transfer */ "Beim bestätigten Abtauen kann Wärme vom Wasser zum Kältemittel fließen. Die Leitungen zeigen diese Richtung nur, wenn der aktuelle Durchfluss und die Temperaturen sie belegen.",
   /* schem.leaving_water */ "R1T",
   /* schem.dhw_tank */ "WW-SPEICHER",
   /* schem.set */ "Soll",

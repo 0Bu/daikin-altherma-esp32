@@ -255,7 +255,8 @@ std::string changed(const char* original, const char* field, const char* value) 
     return body;
 }
 void rejection(const Route& candidate, const std::string& body,
-               const char* status = "400 Bad Request", bool strict_no_work = false) {
+               const char* status = "400 Bad Request", bool strict_no_work = false,
+               const char* code = nullptr) {
     const auto old_service = service, old_link = link;
     const auto before  = daik::config_blob_serialize(daik::config_blob_from(current));
     const auto request = invoke(candidate.handler, body);
@@ -267,6 +268,11 @@ void rejection(const Route& candidate, const std::string& body,
     check(bool(response) && cJSON_IsFalse(cJSON_GetObjectItem(response, "ok")) &&
               cJSON_IsString(cJSON_GetObjectItem(response, "error")),
           "rejection has no stable JSON error");
+    if (code) {
+        const auto* error_code = cJSON_GetObjectItem(response, "code");
+        check(cJSON_IsString(error_code) && std::strcmp(error_code->valuestring, code) == 0,
+              "rejection has the wrong machine-readable code");
+    }
     check(service == old_service && link == old_link &&
               daik::config_blob_serialize(daik::config_blob_from(current)) == before,
           "rejected request changed durable entries or live services");
@@ -1221,11 +1227,12 @@ void board_draft_revision() {
         changed(bound.c_str(), "config_revision", std::to_string(current.runtime_revision).c_str());
     rejection(board, bound);
     rejection(board, changed(request.c_str(), "config_revision", "1.5"));
-    rejection(board, changed(request.c_str(), "boot_id", R"("fedcba9876543210")"), "409 Conflict");
+    rejection(board, changed(request.c_str(), "boot_id", R"("fedcba9876543210")"), "409 Conflict",
+              false, "board_draft_stale");
     check(invoke(board.handler, request).status == "200 OK", "matching Board draft must save");
     saves = reboots = service_writes = link_writes = 0;
     durable_started                                = false;
-    rejection(board, request, "409 Conflict");
+    rejection(board, request, "409 Conflict", false, "board_draft_stale");
 }
 void room_history_lifetime() {
     reset();

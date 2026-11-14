@@ -1,4 +1,4 @@
-// translation-source: 456568c508c4398e3b29e39470c90fba425fccf1699b14af2fbc6e9d1af09ecd
+// translation-source: 65571656f160db7c5cef68e1a9e2f1c556ae6ac67f346ba2f2b092cff1d703c9
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -449,6 +449,7 @@ I18N.nb = localeValues([
   /* toast.no_changes */ "Ingen endringer",
   /* toast.reboot */ "Starter på nytt — kobler til igjen…",
   /* toast.rebooted */ "Startet på nytt — koble til enheten igjen",
+  /* board.draft_stale */ "Kortinnstillingene er endret. Åpne redigeringsvinduet på nytt før du lagrer.",
   /* toast.busy_retry */ "Enheten er opptatt — prøv straks igjen",
   /* toast.unreachable */ "Enheten svarer ikke",
   /* toast.rejected */ "Avvist",
@@ -504,6 +505,7 @@ I18N.nb = localeValues([
   /* schem.defrost_pill */ "❄ Avriming",
   /* schem.outdoor */ "Ute",
   /* insp.close */ "Lukk",
+  /* schem.defrost_transfer */ "Under bekreftet avriming kan varme gå fra vannet til kuldemediet. Rørene viser bare denne retningen når den støttes av gjennomstrømningen og temperaturene som måles nå.",
   /* schem.leaving_water */ "R1T",
   /* schem.dhw_tank */ "VV-TANK",
   /* schem.set */ "Mål",

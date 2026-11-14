@@ -1,4 +1,4 @@
-// translation-source: 456568c508c4398e3b29e39470c90fba425fccf1699b14af2fbc6e9d1af09ecd
+// translation-source: 65571656f160db7c5cef68e1a9e2f1c556ae6ac67f346ba2f2b092cff1d703c9
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
@@ -449,6 +449,7 @@ I18N.zh = localeValues([
   /* toast.no_changes */ "没有更改",
   /* toast.reboot */ "正在重启并重新连接…",
   /* toast.rebooted */ "已重启 — 请重新连接设备",
+  /* board.draft_stale */ "板卡设置已更改。请重新打开编辑窗口后再保存。",
   /* toast.busy_retry */ "设备忙 — 请稍后重试",
   /* toast.unreachable */ "无法访问设备",
   /* toast.rejected */ "已拒绝",
@@ -504,6 +505,7 @@ I18N.zh = localeValues([
   /* schem.defrost_pill */ "❄ 除霜",
   /* schem.outdoor */ "室外",
   /* insp.close */ "关闭",
+  /* schem.defrost_transfer */ "确认正在除霜时，热量可能从水传向制冷剂。只有当前流量和温度支持这一判断时，管路才会显示该方向。",
   /* schem.leaving_water */ "R1T",
   /* schem.dhw_tank */ "热水箱",
   /* schem.set */ "设定",

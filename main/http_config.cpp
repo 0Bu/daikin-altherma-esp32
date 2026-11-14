@@ -1253,8 +1253,8 @@ static esp_err_t set_board(httpd_req_t* req) {
         http_boot_id(current_boot);
         if (std::strcmp(boot->valuestring, current_boot) != 0 ||
             revision->valuedouble != static_cast<double>(cur.runtime_revision))
-            return send_err(req, "409 Conflict",
-                            "Board settings changed. Reopen the editor before saving.");
+            return send_err_code(req, "409 Conflict", "board_draft_stale",
+                                 "Board settings changed. Reopen the editor before saving.");
     }
     Config c                      = cur;
     c.led_gpio       = ji(j, "led_gpio", c.led_gpio);

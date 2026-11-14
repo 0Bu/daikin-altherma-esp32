@@ -570,6 +570,7 @@ function env3FormPayload() {
 }
 function env3SaveError(code, fallback) {
   const key = {
+    board_draft_stale: "board.draft_stale",
     env3_not_reachable: "env.err_not_reachable",
     env3_sht30_not_found: "env.err_sht30",
     env3_qmp6988_not_found: "env.err_qmp6988",

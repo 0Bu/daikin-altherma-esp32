@@ -220,7 +220,10 @@ useful transfer direction: positive ΔT for heating/DHW, negative for cooling, d
 cooling capacity. COP/EER additionally requires compatible thermal/electrical boundaries. Missing
 inputs, opposite-sign transfer and pump-only residual-temperature equalization leave these supported
 pills visible as `—`. A reported Cooling mode with hot residual circulation uses neutral pipes and
-Space circuit wording rather than claiming cooling output.
+Space circuit wording. During confirmed defrost, circulating water can give up heat to the
+refrigerant across the plate heat exchanger. The estimate retains its sign. Negative thermal power
+and cooler supply than return indicate heat leaving the water. The pipes stay neutral when current
+readings cannot establish the direction.
 
 Thermal power uses flow/60 × ΔT × ρ·cp, approximately 4.186 kJ/(l·K) for water with
 ρ≈1 kg/l; glycol mixtures have different density and heat capacity. Electrical power is estimated
@@ -497,9 +500,9 @@ The Hardware modal records board identity independently of pins. Choosing a pres
 peripherals; disabling LED/reset does not change the preset. ENV III is editable only for a pending
 M5Stack selection and hidden/disabled for Custom/Seeed. Safe distinct SDA/SCL options reflect exposed
 pins. An enabled sensor must pass its live SHT30/QMP6988 probe before one atomic board/sensor save;
-probe rejection preserves the draft. If a fresh status frame shows a different boot or
-configuration before submit, the browser closes the editor and asks the owner to reopen it. The
-Hardware explanation lists saved configuration, complete
+probe rejection preserves the draft. If a fresh status shows a different boot or configuration
+before submit, the browser closes the editor and asks the owner to reopen it. A conflict detected
+on the device gives the same instruction. The Hardware explanation lists saved configuration, complete
 indicator phases with static colour points and available ENV III live/history readings. Uptime uses
 at most two coarse units; per-task stack headroom remains diagnostic API evidence, not an invented
 chart.

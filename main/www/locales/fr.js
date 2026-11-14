@@ -1,4 +1,4 @@
-// translation-source: 456568c508c4398e3b29e39470c90fba425fccf1699b14af2fbc6e9d1af09ecd
+// translation-source: 65571656f160db7c5cef68e1a9e2f1c556ae6ac67f346ba2f2b092cff1d703c9
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -449,6 +449,7 @@ I18N.fr = localeValues([
   /* toast.no_changes */ "Aucune modification",
   /* toast.reboot */ "Redémarrage — reconnexion…",
   /* toast.rebooted */ "Redémarré — reconnectez-vous à l’appareil",
+  /* board.draft_stale */ "Les réglages de la carte ont changé. Rouvrez l’éditeur avant d’enregistrer.",
   /* toast.busy_retry */ "Appareil occupé — réessayez dans un instant",
   /* toast.unreachable */ "Impossible de joindre l’appareil",
   /* toast.rejected */ "Rejeté",
@@ -504,6 +505,7 @@ I18N.fr = localeValues([
   /* schem.defrost_pill */ "❄ dégivrage",
   /* schem.outdoor */ "Extérieur",
   /* insp.close */ "Fermer",
+  /* schem.defrost_transfer */ "Pendant un dégivrage confirmé, la chaleur peut passer de l’eau au fluide frigorigène. Les tuyaux n’indiquent ce sens que si le débit et les températures actuels le confirment.",
   /* schem.leaving_water */ "R1T",
   /* schem.dhw_tank */ "BALLON ECS",
   /* schem.set */ "consigne",

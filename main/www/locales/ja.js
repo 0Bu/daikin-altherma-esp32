@@ -1,4 +1,4 @@
-// translation-source: 456568c508c4398e3b29e39470c90fba425fccf1699b14af2fbc6e9d1af09ecd
+// translation-source: 65571656f160db7c5cef68e1a9e2f1c556ae6ac67f346ba2f2b092cff1d703c9
 I18N.ja = localeValues([
   /* sys.nodata */ "データなし",
   /* sys.unreachable */ "接続不可",
@@ -449,6 +449,7 @@ I18N.ja = localeValues([
   /* toast.no_changes */ "変更なし",
   /* toast.reboot */ "再起動中 — 再接続中…",
   /* toast.rebooted */ "再起動完了 — 機器へ再接続してください",
+  /* board.draft_stale */ "ボード設定が変更されました。保存する前に設定画面を開き直してください。",
   /* toast.busy_retry */ "機器がビジー — 少し待って再試行してください",
   /* toast.unreachable */ "機器に接続できません",
   /* toast.rejected */ "拒否されました",
@@ -504,6 +505,7 @@ I18N.ja = localeValues([
   /* schem.defrost_pill */ "❄ 霜取り",
   /* schem.outdoor */ "外気",
   /* insp.close */ "閉じる",
+  /* schem.defrost_transfer */ "霜取り運転が確認されると、水から冷媒へ熱が移ることがあります。現在の流量と温度がその方向を裏付ける場合にだけ、配管にその方向を表示します。",
   /* schem.leaving_water */ "R1T",
   /* schem.dhw_tank */ "給湯タンク",
   /* schem.set */ "設定",

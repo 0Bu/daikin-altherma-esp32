@@ -1,4 +1,4 @@
-// translation-source: 456568c508c4398e3b29e39470c90fba425fccf1699b14af2fbc6e9d1af09ecd
+// translation-source: 65571656f160db7c5cef68e1a9e2f1c556ae6ac67f346ba2f2b092cff1d703c9
 I18N.it = localeValues([
   /* sys.nodata */ "Nessun dato",
   /* sys.unreachable */ "Non raggiungibile",
@@ -449,6 +449,7 @@ I18N.it = localeValues([
   /* toast.no_changes */ "Nessuna modifica",
   /* toast.reboot */ "Riavvio — riconnessione…",
   /* toast.rebooted */ "Riavviato — riconnettersi al dispositivo",
+  /* board.draft_stale */ "Le impostazioni della scheda sono cambiate. Riapri l’editor prima di salvare.",
   /* toast.busy_retry */ "Dispositivo occupato — riprovare tra poco",
   /* toast.unreachable */ "Impossibile raggiungere il dispositivo",
   /* toast.rejected */ "Rifiutato",
@@ -504,6 +505,7 @@ I18N.it = localeValues([
   /* schem.defrost_pill */ "❄ sbrinamento",
   /* schem.outdoor */ "Esterno",
   /* insp.close */ "Chiudi",
+  /* schem.defrost_transfer */ "Durante uno sbrinamento confermato, il calore può passare dall’acqua al refrigerante. Le tubazioni indicano questa direzione solo se la portata e le temperature attuali la confermano.",
   /* schem.leaving_water */ "R1T",
   /* schem.dhw_tank */ "SERBATOIO ACS",
   /* schem.set */ "obiettivo",

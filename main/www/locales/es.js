@@ -1,4 +1,4 @@
-// translation-source: 456568c508c4398e3b29e39470c90fba425fccf1699b14af2fbc6e9d1af09ecd
+// translation-source: 65571656f160db7c5cef68e1a9e2f1c556ae6ac67f346ba2f2b092cff1d703c9
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -449,6 +449,7 @@ I18N.es = localeValues([
   /* toast.no_changes */ "Sin cambios",
   /* toast.reboot */ "Reiniciando — volviendo a conectar…",
   /* toast.rebooted */ "Reiniciado — vuelve a conectarte al dispositivo",
+  /* board.draft_stale */ "La configuración de la placa ha cambiado. Vuelve a abrir el editor antes de guardar.",
   /* toast.busy_retry */ "Dispositivo ocupado — vuelve a intentarlo en un momento",
   /* toast.unreachable */ "No se pudo acceder al dispositivo",
   /* toast.rejected */ "Rechazado",
@@ -504,6 +505,7 @@ I18N.es = localeValues([
   /* schem.defrost_pill */ "❄ desescarche",
   /* schem.outdoor */ "Exterior",
   /* insp.close */ "Cerrar",
+  /* schem.defrost_transfer */ "Durante un desescarche confirmado, el calor puede pasar del agua al refrigerante. Las tuberías solo indican esa dirección cuando la respaldan el caudal y las temperaturas actuales.",
   /* schem.leaving_water */ "R1T",
   /* schem.dhw_tank */ "DEPÓSITO ACS",
   /* schem.set */ "consigna",

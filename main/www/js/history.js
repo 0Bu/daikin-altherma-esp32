@@ -322,6 +322,31 @@ function validHistoryHeld(ranges, samples) {
   return true;
 }
 
+// A 288-sample response plus the maximally fragmented held map and escaped labels fits below 4 KiB.
+// Bound decoded bytes before parsing, including when the firmware uses chunked transfer.
+async function readHistoryJson(response) {
+  if (!response.body) throw new Error("History response has no body");
+  const limit = 4096;
+  const bytes = new Uint8Array(limit);
+  const reader = response.body.getReader();
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (size + value.byteLength > limit) {
+        void reader.cancel().catch(() => {});
+        throw new Error("History response exceeds its wire budget");
+      }
+      bytes.set(value, size);
+      size += value.byteLength;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, size)));
+}
+
 async function readHistory(id, source, key, epoch, previous, request) {
   const sourceId = source === "modbus" ? (modbusEndpointId() || "modbus") : source;
   const controller = typeof AbortController === "function" ? new AbortController() : null;
@@ -338,28 +363,31 @@ async function readHistory(id, source, key, epoch, previous, request) {
       : source === "env3" ? "&source=env3" : source === "room" ? "&source=room" : "";
     const r = await fetch("/history?row=" + encodeURIComponent(id) + suffix,
                           controller ? { signal: controller.signal } : undefined);
-    const j = await r.json();
+    const j = await readHistoryJson(r);
     if (syncHistSources() !== epoch || S.histRequests.get(key) !== request) return;
     // A JSON refusal that is not a history change (no snapshot identity, an unknown row) is an
     // error for this cache period, not a reason to re-ask every status period; only "history
     // changed" waits for the next status lifetime below.
     const changed = j?.ok === false && j.error === "history changed; retry";
     const expectedSource = id === "circulation_state" && source === "x10a" ? "mqtt" : source;
+    const expectedEpoch = S.status?.history?.epoch;
+    const expectedBoot = S.status?.boot_id;
+    const legacy = !Number.isInteger(expectedEpoch) && j?.id === undefined && j?.source === undefined;
     if (!changed && (r.ok === false || j?.ok === false || !Array.isArray(j?.v) ||
         j.v.length > HIST_MAX_SAMPLES || j.v.some(v => v !== null &&
           (!Number.isInteger(v) || v < -32766 || v > 32767)) ||
-        (j.dt != null && (!Number.isSafeInteger(j.dt) || j.dt <= 0 || j.dt > 86400)) ||
-        (j.b0 != null && (!Number.isSafeInteger(j.b0) || j.b0 < 0)) ||
-        (j.t0 != null && (!Number.isSafeInteger(j.t0) || Math.abs(j.t0) > 8.64e12)) ||
-        (j.held != null && !validHistoryHeld(j.held, j.v)) ||
-        (j.id != null && j.id !== id) || (j.source != null && j.source !== expectedSource))) {
+        (!legacy && (j.id !== id || j.source !== expectedSource || j.dt !== 300)) ||
+        (j.label != null && (typeof j.label !== "string" || j.label.length > 79)) ||
+        (j.unit != null && (typeof j.unit !== "string" || j.unit.length > 7)) ||
+        (j.dt != null && j.dt !== 300) ||
+        (j.b0 != null && (!Number.isSafeInteger(j.b0) || j.b0 < 0 || j.b0 > Number.MAX_SAFE_INTEGER - HIST_MAX_SAMPLES)) ||
+        (j.t0 != null && (!Number.isSafeInteger(j.t0) || Math.abs(j.t0) > 8.64e12 - HIST_MAX_SAMPLES * 300)) ||
+        (j.held != null && !validHistoryHeld(j.held, j.v)))) {
       S.hist.set(key, failed());
       return;
     }
     // /status owns the source lease. A reply composed after an unseen reset or reboot must wait
     // for that status lifetime before becoming a chart; a recent fetch alone proves no identity.
-    const expectedEpoch = S.status?.history?.epoch;
-    const expectedBoot = S.status?.boot_id;
     if (changed || (Number.isInteger(expectedEpoch) && j.epoch !== expectedEpoch) ||
         (typeof expectedBoot === "string" && j.boot_id !== expectedBoot)) {
       (S.histAwait ||= new Map()).set(key, { epoch, at: Date.now() });
@@ -376,10 +404,9 @@ async function readHistory(id, source, key, epoch, previous, request) {
     // A few legacy X10A rows carry their unit only in the catalog label. Normalise that at the
     // visual boundary too, otherwise the live row can say "22.8 L/min" while its own trend and
     // crosshair still say just "22.8". The API remains byte-for-byte compatible.
-    const cadence = +j.dt;
     const receivedAt = Date.now();
-    const device = { at: receivedAt, receivedAt, gen, source, sourceId,
-                     dt: Number.isSafeInteger(cadence) && cadence > 0 && cadence <= 86400 ? cadence : 300,
+    const device = { at: receivedAt, receivedAt, receivedTick: historyBrowserTime(), gen, source, sourceId,
+                     dt: 300,
                      unit: displayUnit(j),
                      label: typeof j.label === "string" ? j.label : "",
                      t0: Number.isSafeInteger(j.t0) && Math.abs(j.t0) <= 8.64e12 ? j.t0 : null,
@@ -544,7 +571,7 @@ async function ensureDerived(id) {
         ? bucket[1].b0 - Math.round((bucket[1].t0 - start) / dt)
       : bucket ? bucket[1].b0 - (n - bucket[1].v.length) : null;
     const receivedAt = Date.now();
-    S.hist.set(id, { at: receivedAt, receivedAt, gen, inputs, dt, unit: D.unit,
+    S.hist.set(id, { at: receivedAt, receivedAt, receivedTick: historyBrowserTime(), gen, inputs, dt, unit: D.unit,
                      t0: typeof t0 === "number" ? t0 : null,
                      b0: Number.isInteger(b0) ? b0 : null,
                      held: heldRuns, v });
@@ -685,7 +712,7 @@ function alignedHistoryView(id, raw) {
       v[off + i] = s.h.v[i];
       heldFlags[off + i] = histHeld(s.h, i);
     }
-    return { source: s.source, name: s.name, unit: s.h.unit || "", v,
+    return { source: s.source, name: s.name, unit: s.h.unit || "", v, offset: off,
              held: toRuns(heldFlags), expiredUntil: s.h.expired ? off + s.h.expired : 0,
              expiredFrom: Math.max(0, off), raw: s.h };
   });
@@ -716,26 +743,33 @@ function alignedHistoryView(id, raw) {
            v: union, series };
 }
 
+const historyBrowserTime = () => typeof historyClock === "function" ? historyClock() : Date.now();
+const historyElapsed = h => Math.max(0, h.receivedTick == null
+  ? Date.now() - (h.receivedAt ?? Date.now()) : historyBrowserTime() - h.receivedTick);
+
 function expiredHistSlots(h) {
   if (!h?.v.length) return 0;
-  const elapsed = Math.max(0, Date.now() - (h.receivedAt ?? Date.now())) / 1000;
+  const now = historyBrowserTime();
+  const elapsed = historyElapsed(h) / 1000;
+  const statusElapsed = S.otaCached ? 0 : Math.max(0, now - (S.statusReceivedAt ?? now)) / 1000;
   const dt = h.dt || 300;
   let current = Math.floor(elapsed / dt) + h.v.length;
   let start = 0;
   if (Number.isInteger(h.b0)) {
     start = h.b0;
     const uptime = S.status?.uptime_s;
-    current = Math.max(current + start, Number.isFinite(uptime) ? Math.floor(uptime / dt) : start);
+    current = Math.max(current + start, Number.isFinite(uptime) ? Math.floor((uptime + statusElapsed) / dt) : start);
   } else if (h.t0 != null) {
     start = Math.floor(h.t0 / dt);
     const deviceTime = Date.parse(S.status?.ntp?.time || "") / 1000;
-    current = Math.max(current + start, Number.isFinite(deviceTime) ? Math.floor(deviceTime / dt) : start);
+    current = Math.max(current + start,
+      Number.isFinite(deviceTime) ? Math.floor((deviceTime + statusElapsed) / dt) : start);
   }
   return Math.max(0, Math.min(h.v.length, current - HIST_MAX_SAMPLES - start));
 }
 
 const historyRingAged = (h, expired) => expired > 0 ||
-  (h.v.length > 0 && Number.isFinite(h.receivedAt) && Date.now() - h.receivedAt >= (h.dt || 300) * 1000);
+  (h.v.length > 0 && historyElapsed(h) >= (h.dt || 300) * 1000);
 
 function expireHistSamples(h) {
   if (!h?.v.length) return h;
@@ -1203,7 +1237,7 @@ function stateHistHtml(id, name, view, wrap, cfg) {
   const sourceAttr = view.series.length === 1 ? ` data-source="${esc(view.series[0].source)}"` : "";
   let pinCross = "";
   if (pi >= 0) {
-    const frac = scrubFrac(pi, n);
+    const frac = stateSampleFraction(pi, n);
     const px = (frac * 100).toFixed(3);
     pinCross = `<span class="vhist-cross vhist-pinned" style="left:${px}%"></span>`;
   }
@@ -1213,11 +1247,11 @@ function stateHistHtml(id, name, view, wrap, cfg) {
     `<div class="vhist-head"><span class="vhist-t">${esc(!recordedN ? t("hist.now") : full ? t("hist.title") : t("hist.recorded", spanH))}</span>` +
       `<span class="vhist-range mono num">${esc(totalText)}</span></div>` + levelLegend +
     `<div class="vhist-graph vhist-state-graph">` +
-      histTipsHtml(view, pi, pi >= 0 ? scrubFrac(pi, n) : 0) +
+      histTipsHtml(view, pi, pi >= 0 ? stateSampleFraction(pi, n) : 0) +
       `<div class="vhist-plot vhist-state-plot" data-hist="${esc(id)}"${sourceAttr}${histRevision(view)} data-n="${n}" tabindex="0" role="img"` +
         ` aria-label="${esc(t(cfg.aria, name || id, totalText))}">` + tracks + pinCross +
         `<span class="vhist-cross vhist-live" hidden></span>` +
-      `</div>` + histTimesHtml(view, pi, pi >= 0 ? scrubFrac(pi, n) : 0) +
+      `</div>` + histTimesHtml(view, pi, pi >= 0 ? stateSampleFraction(pi, n) : 0) +
     `</div>` +
     `<div class="vhist-axis"><span>${recordedN ? esc(histAxisStart(view, spanH)) : ""}</span>` +
       (gaps ? `<span class="vhist-gap">${esc(t(cfg.gaps || "hist.gaps", gaps))}</span>` : "") +
@@ -1251,7 +1285,7 @@ function tankAuxHistories() {
 }
 
 const tankAuxRevision = histories => histories?.map(h =>
-  h ? `${h.gen}:${h.expired || 0}:${!!h.refreshFailed}:${!!h.err}` : "").join(",");
+  h ? `${h.gen}:${h.expired || 0}:${!!histRetained(h)}:${!!h.err}` : "").join(",");
 
 const dhwPhaseLabel = (phase) => `${t(phase.label)} · ${phase.source === "modbus" ? "Modbus" : "X10A"}`;
 
@@ -1261,7 +1295,7 @@ function dhwAuxPhases(view) {
     const phase = DHW_PHASE_SERIES[i];
     const values = view.v.map((_, j) => alignAuxSample(view, h, j));
     const flags = values.map(v => v === phase.active);
-    const status = h.err ? "hist.err" : h.refreshFailed
+    const status = h.err ? "hist.err" : histRetained(h)
       ? values.some(v => v != null) ? "hist.retained" : "hist.err" : "";
     return [{ ...phase, flags, count: flags.filter(Boolean).length, status }];
   });
@@ -1408,8 +1442,9 @@ function histHtml(id, unit, name, source = "") {
       for (const [from, count] of runs) {
         const x0 = n > 1 ? Math.max(0, X(from) - step / 2) : 0;
         const x1 = n > 1 ? Math.min(HIST_W, X(from + count - 1) + step / 2) : HIST_W;
-        const w = Math.max(1, x1 - x0);
-        s += `<rect class="vhist-phase ${cls}" x="${x0.toFixed(1)}" y="${y}" width="${w.toFixed(1)}" height="${height}"/>`;
+        const x = Math.round(x0 * 10);
+        const w = (Math.round(x1 * 10) - x) / 10;
+        s += `<rect class="vhist-phase ${cls}" x="${(x / 10).toFixed(1)}" y="${y}" width="${w.toFixed(1)}" height="${height}"/>`;
       }
       return s;
     };
@@ -1640,6 +1675,7 @@ function env3HistHtml(view = historyView(ENV3_COMBINED_ID)) {
 // Where a sample sits, as a fraction 0..1 of the plot width. Mirrors X() in histHtml — a lone
 // sample is drawn at the right edge, which is also where "now" is.
 function scrubFrac(i, n) { return n <= 1 ? 1 : i / (n - 1); }
+function stateSampleFraction(i, n) { return (i + 0.5) / n; }
 
 // The outdoor-climate plot has two rasters on one time axis: five-minute measurements up to now,
 // then provider-timestamped Open-Meteo hours. One geometry helper keeps pointer, touch, keyboard and
@@ -1704,7 +1740,8 @@ function histPinIndex(id, h) {
     return i < 0 ? -1 : h.v.length + i;
   }
   if (p.live) {
-    if (h.liveIndex != null && p.gen === h.gen && p.sources === histPinSources(h)) return h.liveIndex;
+    if (h.liveIndex != null && p.gen === h.gen && p.sources === histPinSources(h) &&
+        p.sample === liveHistoryPinSample(id, p.source)) return h.liveIndex;
     S.histPin.delete(id);
     return -1;
   }
@@ -1713,7 +1750,7 @@ function histPinIndex(id, h) {
     if (h.t0 == null) return -1;                 // pinned with a clock, re-resolving without one
     const rel = p.t - h.t0, half = h.dt / 2;
     const i = Math.trunc((rel >= 0 ? rel + half : rel - half) / h.dt);
-    if (i < 0 || i >= h.v.length) return -1;
+    if (i < 0 || i >= (h.recordedN ?? h.v.length)) return -1;
     const shown = STATE_HIST[id] ? h.series : histVisibleSeries(h);
     if (h.series.some(s => i >= s.expiredFrom && i < s.expiredUntil) &&
         !shown.some(s => s.v[i] != null || histHeld(s, i))) {
@@ -1722,13 +1759,31 @@ function histPinIndex(id, h) {
     }
     return i;
   }
-  return p.gen === h.gen && p.sources === histPinSources(h) ? p.i : -1;
+  return p.i < h.v.length && p.gen === histPlottedPinRevision(h) &&
+    p.sources === histPinSources(h) ? p.i : -1;
 }
 
 // Categorical charts show every source lane. Numeric fallback can change the visible instrument
 // without replacing either ring, so its selected sources are part of an undated sample identity.
 function histPinSources(h) {
   return (STATE_HIST[h.id] ? h.series : histVisibleSeries(h)).map(s => s.source).join(",");
+}
+
+// An undated numeric pin is tied to the plotted samples and their alignment.
+function histPlottedPinRevision(h) {
+  if (STATE_HIST[h.id]) return h.gen;
+  return histVisibleSeries(h).map(s => [s.source, s.raw?.gen, s.raw?.expired, s.offset].join(":")).join("/");
+}
+
+function liveHistoryPinSample(id, source) {
+  return JSON.stringify((source ? [source] : ["x10a", "modbus"])
+    .map(kind => stateHistoryCurrent(id, kind).value));
+}
+
+function expireLiveHistoryPins() {
+  for (const [id, pin] of S.histPin) {
+    if (pin.live && pin.sample !== liveHistoryPinSample(id, pin.source)) S.histPin.delete(id);
+  }
 }
 
 function expireFallbackHistoryPins() {
@@ -1749,9 +1804,10 @@ function histPinToggle(id, i, source = "") {
   i = Math.max(0, Math.min(total - 1, i));
   if (histPinIndex(id, h) === i) S.histPin.delete(id);
   else if (i >= h.v.length) S.histPin.set(id, { t: forecast.points[i - h.v.length].time, forecast: true });
-  else if (i === h.liveIndex) S.histPin.set(id, { i, gen: h.gen, sources: histPinSources(h), source, live: true });
+  else if (i === h.liveIndex) S.histPin.set(id, { i, gen: h.gen, sources: histPinSources(h), source,
+    live: true, sample: liveHistoryPinSample(id, source) });
   else if (h.t0 != null) S.histPin.set(id, { t: h.t0 + i * h.dt });
-  else S.histPin.set(id, { i, gen: h.gen, sources: histPinSources(h), source });
+  else S.histPin.set(id, { i, gen: histPlottedPinRevision(h), sources: histPinSources(h), source });
   // Render PAST the click guard. That guard exists to stop a POLL from replacing the DOM in the
   // middle of a click; it must not delay the very update the click just asked for — a pin that
   // appeared 600 ms after the finger lifted would read as the same "it didn't take" the pin was
@@ -1988,7 +2044,7 @@ function scrubMove(plot, i) {
   }
   const measuredFrac = Number.isFinite(+plot.dataset.measuredP)
     ? Math.max(0.01, Math.min(1, +plot.dataset.measuredP / 100)) : 1;
-  const frac = scrubFrac(i, n) * measuredFrac;
+  const frac = STATE_HIST[h.id] ? stateSampleFraction(i, n) : scrubFrac(i, n) * measuredFrac;
   const x = frac * w;
 
   cross.hidden = false;
@@ -2024,6 +2080,7 @@ function scrubIndex(plot, clientX) {
   const n = +plot.dataset.n;
   const forecast = forecastScrubView(h);
   const rawFrac = Math.max(0, Math.min(1, (clientX - r.left) / (r.width || 1)));
+  if (STATE_HIST[h.id]) return Math.min(n - 1, Math.floor(rawFrac * n));
   if (forecast && (!n || rawFrac > forecast.nowFrac)) {
     let nearest = 0, distance = Infinity;
     forecast.points.forEach((point, i) => {

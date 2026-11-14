@@ -994,7 +994,7 @@ function wireRestOfApp() {
     }
     if (boardDraftIdentity !== boardSettingsIdentity()) {
       closeBoard();
-      toast(t("toast.busy_retry"), "err");
+      toast(t("board.draft_stale"), "err");
       return;
     }
     const type = +$("bdLedType").value;

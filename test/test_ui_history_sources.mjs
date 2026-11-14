@@ -103,6 +103,12 @@ const defaultHistoryResponse = { dt: 300, unit: "°C", label: "Domestic Hot Wate
   b0: 102, v: [457], held: [] };
 let historyResponse = defaultHistoryResponse;
 let historyFetchError = false;
+function historyReply(url, body) {
+  const q = new URL(url, "http://device").searchParams;
+  const id = q.get("row");
+  return Response.json({ id, source: q.get("source") || (id === "circulation_state" ? "mqtt" : "x10a"),
+    ...body, epoch: S.status?.history?.epoch, boot_id: S.status?.boot_id });
+}
 const labels = {
   "hist.loading": "Verlauf wird geladen…", "hist.err": "Verlauf nicht verfügbar.",
   "hist.none": "Noch keine Messwerte aufgezeichnet.", "hist.title": "Letzte 24 Stunden",
@@ -193,24 +199,56 @@ const context = {
     fetched = url;
     fetchedUrls.push(url);
     if (historyFetchError) throw new Error("temporary reboot window");
-    return { json: async () => ({ ...historyResponse,
-      epoch: S.status?.history?.epoch, boot_id: S.status?.boot_id }) };
+    return historyReply(url, historyResponse);
   },
-  setTimeout, clearTimeout, Date, Map, Set, console,
+  setTimeout, clearTimeout, Date, Map, Set, TextDecoder, console,
 };
 vm.createContext(context);
 const lifecycleSource = appState.slice(appState.indexOf("// ── History source lifecycle"),
   appState.indexOf("// ── Navigation (dashboard ⇄ Settings)"));
 vm.runInContext(lifecycleSource + readAppFragments(["history.js"]) +
   "\nthis.__api = { hasHist, hasModbusHist, hasRoomHist, histCacheKey, historyView, histHtml, scrubText, histReadout, histVisibleSeries," +
-  " histTipsHtml, scrubMove, scrubIndex, histPinToggle, histPinIndex, histViewRevision, histSeriesToggle, ensureHist, ensureHistPair, ensureDerived, DERIVED, syncHistSources, invalidateHistSources };", context,
+  " histTipsHtml, scrubMove, scrubIndex, histPinToggle, histPinIndex, expireLiveHistoryPins, expiredHistSlots, readHistoryJson, histViewRevision, histSeriesToggle, ensureHist, ensureHistPair, ensureDerived, DERIVED, syncHistSources, invalidateHistSources };", context,
   { filename: "main/www/js/history.js" });
 const h = context.__api;
+{
+  const stream = (chunks) => {
+    const seen = { cancelled: false, released: false };
+    return { seen, response: { body: { getReader: () => ({
+      read: async () => chunks.length ? { value: chunks.shift(), done: false } : { done: true },
+      cancel: async () => { seen.cancelled = true; },
+      releaseLock: () => { seen.released = true; },
+    }) } } };
+  };
+  const valid = stream([new TextEncoder().encode('{"v":[1]}')]);
+  assert.equal((await h.readHistoryJson(valid.response)).v[0], 1);
+  assert.equal(valid.seen.released, true);
+  const oversized = stream([new Uint8Array(3000), new Uint8Array(2000)]);
+  await assert.rejects(h.readHistoryJson(oversized.response), /wire budget/);
+  assert.deepEqual(oversized.seen, { cancelled: true, released: true });
+}
 
 const x10a = { at: 1, gen: 1, dt: 300, unit: "°C", t0: null, b0: 100,
                 held: [], v: [452, null, 454] };
 const modbus = { at: 1, gen: 1, dt: 300, unit: "°C", t0: null, b0: 100,
                  held: [], v: [453, 455, 456] };
+{
+  const uptime = S.status.uptime_s;
+  let clock = 0;
+  context.historyClock = () => clock;
+  const full = { ...x10a, v: Array(288).fill(457), receivedTick: clock };
+  S.statusReceivedAt = clock;
+  S.status.uptime_s = (full.b0 + 289) * full.dt - 1;
+  assert.equal(h.expiredHistSlots(full), 0);
+  clock += 1000;
+  assert.equal(h.expiredHistSlots(full), 1);
+  clock += 300000;
+  assert.equal(h.expiredHistSlots(full), 2,
+    "the last accepted status advances on the browser monotonic clock even without fresh replies");
+  S.status.uptime_s = uptime;
+  delete S.statusReceivedAt;
+  delete context.historyClock;
+}
 S.hist.set("dhw_tank", x10a);
 S.hist.set("modbus:dhw_tank", modbus);
 
@@ -265,6 +303,8 @@ assert.equal(h.histCacheKey("dhw_tank", "modbus"), "modbus:dhw_tank");
   const old = historyResponse;
   for (const invalid of [
     { source: "x10a", v: [457] }, { id: "outdoor_air", v: [457] },
+    { id: null }, { source: null }, { dt: 86400 }, { b0: Number.MAX_SAFE_INTEGER },
+    { label: "x".repeat(80) }, { unit: "x".repeat(8) },
     { v: ["457"] }, { v: [-32768] }, { v: Array(289).fill(457) },
     { dt: -3 }, { b0: -1 }, { t0: "now" }, { held: [null] }, { held: [[0, 1]] },
   ]) {
@@ -313,6 +353,17 @@ S.hist.set("modbus:dhw_tank", modbus);
 // Modbus is initially deactivated; only X10A is shown, so label is omitted and only value is rendered
 assert.equal(h.histVisibleSeries(view).length, 1);
 assert.equal(h.histVisibleSeries(view)[0].source, "x10a");
+{
+  h.histPinToggle("dhw_tank", 0);
+  S.hist.set("modbus:dhw_tank", { ...modbus, gen: 2, v: [461, 462, 463] });
+  assert.equal(h.histPinIndex("dhw_tank", h.historyView("dhw_tank")), 0,
+    "a hidden peer refreshing the same grid cannot retire a plotted sample's pin");
+  S.hist.set("modbus:dhw_tank", { ...modbus, gen: 3, b0: modbus.b0 - 1 });
+  assert.equal(h.histPinIndex("dhw_tank", h.historyView("dhw_tank")), -1,
+    "an index pin cannot change which sample it addresses when alignment moves");
+  S.histPin.delete("dhw_tank");
+  S.hist.set("modbus:dhw_tank", modbus);
+}
 assert.equal(h.scrubText(view, 1, false), "nicht gemessen",
   "a single visible curve omits its source label in tooltip readout");
 assert.equal(h.histReadout(view, 1), "nicht gemessen");
@@ -481,7 +532,7 @@ assert.match(roomOnlyHtml, /vhist-source room/,
   "an MQTT-only history must still name its physical source");
 assert.match(h.scrubText(h.historyView("room_temp"), 2), /23,6 °C$/);
 assert.doesNotMatch(h.scrubText(h.historyView("room_temp"), 2), /Meross/);
-S.histPin.set("room_temp", { i: 2, gen: h.historyView("room_temp").gen, sources: "room" });
+h.histPinToggle("room_temp", 2);
 assert.match(h.histHtml("room_temp", "°C", "Raumtemperatur"), /vhist-mark vhist-pinned room/);
 S.histPin.delete("room_temp");
 S.hist.delete("room:room_temp");
@@ -739,13 +790,23 @@ assert.equal(h.scrubText(liveBoostView, 7), "jetzt · Empfehlung ein",
 h.histPinToggle("smart_grid_mode", 7, "modbus");
 assert.equal(h.histPinIndex("smart_grid_mode", liveBoostView), 7);
 S._modbus[0].value = 3;
-assert.equal(h.histPinIndex("smart_grid_mode", h.historyView("smart_grid_mode", "modbus")), -1);
+h.expireLiveHistoryPins();
+S._modbus[0].value = 2;
+assert.equal(h.histPinIndex("smart_grid_mode", h.historyView("smart_grid_mode", "modbus")), -1,
+  "a live A-B-A transition retires the pin even while its view does not render");
 assert.equal(S.histPin.has("smart_grid_mode"), false, "a changed live observation retires its pin");
 S._modbus[0].value = 2;
 S.otaCached = true;
 assert.equal(h.historyView("smart_grid_mode", "modbus").liveIndex, undefined,
   "a retained OTA snapshot cannot create a live cap");
 delete S.otaCached;
+{
+  const track = { dataset: { hist: "smart_grid_mode", source: "modbus", n: "8" },
+    getBoundingClientRect: () => ({ left: 0, width: 100 }) };
+  assert.equal(h.scrubIndex(track, 88), 7, "tap inside the live cap selects the live state");
+  assert.equal(h.scrubIndex(track, 87), 6, "tap inside the last completed cell selects its own state");
+  assert.equal(h.scrubIndex(track, 12), 0, "taps follow painted cell edges instead of line-chart geometry");
+}
 {
   const key = "modbus:smart_grid_mode";
   const old = S.hist.get(key);
@@ -1195,10 +1256,8 @@ assert.equal(S.histPin.size, 0);
 // request must leave its successor's cache/lease alone, even though both use the same endpoint key.
 const pendingHistory = [];
 context.fetch = (url) => new Promise((resolve, reject) => pendingHistory.push({ url, resolve, reject }));
-const finishHistory = (pending, values) => pending.resolve({ json: async () => ({
-  ...defaultHistoryResponse, v: values,
-  epoch: S.status?.history?.epoch, boot_id: S.status?.boot_id,
-}) });
+const finishHistory = (pending, values) =>
+  pending.resolve(historyReply(pending.url, { ...defaultHistoryResponse, v: values }));
 for (const failOld of [false, true]) {
   h.invalidateHistSources();
   const old = h.ensureHist("dhw_tank", "modbus");

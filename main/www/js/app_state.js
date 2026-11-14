@@ -1,4 +1,6 @@
 
+const historyClock = () => typeof performance === "undefined" ? Date.now() : performance.now();
+
 // ── App state ────────────────────────────────────────────────────────────
 const S = {
   // Which screen is showing (a key of VIEW below). The app opens on "dashboard" and the header gear
@@ -484,6 +486,7 @@ function invalidateLiveReadings(reason, busy = false) {
   S._values = []; S._modbus = []; S.live = null;
   S.transportUnavailable = reason;
   S.transportBusy = busy;
+  if (typeof expireLiveHistoryPins === "function") expireLiveHistoryPins();
   renderApp();
 }
 async function refreshStatus(paint = true) {
@@ -507,10 +510,13 @@ async function readStatusFrame(paint = true, timeout, quiet = false) {
     return false;
   }
   if (!current() || !acceptImageLease(s)) return false;
+  const receivedAt = historyClock();
   await setLangFromStatus(s, current);
   if (!current()) return false;
   const wasX10aDown = S.status?.hp?.connected === false;
   S.status = s;
+  S.statusReceivedAt = receivedAt;
+  if (typeof expireLiveHistoryPins === "function") expireLiveHistoryPins();
   S.statusAcceptedRequest = request;
   const epoch = S.histEpoch;
   syncHistSources();

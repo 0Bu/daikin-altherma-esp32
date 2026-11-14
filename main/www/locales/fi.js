@@ -1,4 +1,4 @@
-// translation-source: 456568c508c4398e3b29e39470c90fba425fccf1699b14af2fbc6e9d1af09ecd
+// translation-source: 65571656f160db7c5cef68e1a9e2f1c556ae6ac67f346ba2f2b092cff1d703c9
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -449,6 +449,7 @@ I18N.fi = localeValues([
   /* toast.no_changes */ "Ei muutoksia",
   /* toast.reboot */ "Käynnistetään uudelleen — yhdistetään…",
   /* toast.rebooted */ "Käynnistetty uudelleen — yhdistä laitteeseen",
+  /* board.draft_stale */ "Piirilevyn asetukset ovat muuttuneet. Avaa muokkausikkuna uudelleen ennen tallennusta.",
   /* toast.busy_retry */ "Laite varattu — yritä hetken kuluttua",
   /* toast.unreachable */ "Laitetta ei tavoiteta",
   /* toast.rejected */ "Hylätty",
@@ -504,6 +505,7 @@ I18N.fi = localeValues([
   /* schem.defrost_pill */ "❄ sulatus",
   /* schem.outdoor */ "Ulkoilma",
   /* insp.close */ "Sulje",
+  /* schem.defrost_transfer */ "Vahvistetun sulatuksen aikana lämpöä voi siirtyä vedestä kylmäaineeseen. Putkisto näyttää tämän suunnan vain, kun nykyinen virtaus ja lämpötilat tukevat sitä.",
   /* schem.leaving_water */ "R1T",
   /* schem.dhw_tank */ "DHW-SÄILIÖ",
   /* schem.set */ "asetus",

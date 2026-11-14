@@ -925,6 +925,7 @@ const INSPECT = {
     rows: [/outdoor air/i, ouHxRow, /inv frequency/i, highSideRow, /discharge pipe temp/i, /expansion valve ?1/i, /defrost operation/i],
   },
   comp: {
+    trend: "comp_rps",
     t: { en: "Compressor", de: "Verdichter" },
     re: /inv frequency/i, sample: "INV frequency (rps)",
     rows: [/inv frequency/i, /inv primary current/i, /discharge pipe temp/i],
@@ -1466,6 +1467,7 @@ const inspSourceField = (e, field, d) => {
   return typeof value === "function" ? value(d) : value;
 };
 const inspFieldText = (e, field, d) => {
+  if (e === INSPECT.pth && field === "what" && d?.defrost === true) return t("schem.defrost_transfer");
   if (inspHasLocaleField(e, field)) {
     const localized = inspLocaleField(e, field, d);
     return localized == null ? null : String(localized);
@@ -1731,7 +1733,7 @@ function renderInspectHist(e, row, mode = "") {
   const offered = (id) => trendSource === "modbus" ? hasModbusHist(id)
     : trendSource === "x10a" ? hasHist(id) : hasHist(id) || hasModbusHist(id) || hasRoomHist(id);
   const explicitId = trendId && offered(trendId) ? trendId : "";
-  const id = explicitId || (row ? histIdFor(row.label) : pairedId)
+  const id = explicitId || (row ? histIdFor(row.label) : pairedId || (e?.sample ? histIdFor(e.sample) : ""))
     || (S.insp === "room" && hasRoomHist("room_temp") ? "room_temp" : "");
   if (id && mayFetch) {
     if (trendSource) request(id, trendSource);

@@ -983,7 +983,7 @@ button.vhist-source:focus-visible { outline: 2px solid var(--brand); outline-off
   background: var(--hatch); box-shadow: inset 0 0 0 1px var(--pipe); }
 .vhist-state-track.x10a { box-shadow: inset 0 0 0 1px var(--pipe), 0 0 0 1px var(--brand-sky); }
 .vhist-state-track.modbus { box-shadow: inset 0 0 0 1px var(--pipe), 0 0 0 1px var(--src-mb); }
-.vhist-state-on, .vhist-state-gap { position: absolute; inset-block: 0; min-width: 2px; }
+.vhist-state-on, .vhist-state-gap { position: absolute; inset-block: 0; }
 .vhist-state-on { background: var(--brand-sky); }
 .vhist-state-gap { background: repeating-linear-gradient(135deg, transparent 0 3px,
   var(--line) 3px 5px); }

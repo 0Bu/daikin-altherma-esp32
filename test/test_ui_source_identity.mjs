@@ -13,6 +13,7 @@ const $ = (id) => {
 const pending = [];
 const context = {
   $, LANG: "en", pollSignal: () => undefined, hpProbeIsOpen: () => false,
+  TextDecoder,
   esc: String, t: key => key,
   setLangFromStatus: async () => {}, displayUnit: (j) => j.unit,
   j: async () => context.nextStatus,
@@ -71,9 +72,14 @@ const reset = async () => {
 const sample = (value, epoch = 1, boot_id = "boot-a") => ({
   dt: 300, unit: "°C", label: "Temperature", v: [value], epoch, boot_id,
 });
-const reply = (request, value, epoch = 1, boot_id = "boot-a") => request.resolve({
-  json: async () => sample(value, epoch, boot_id),
-});
+const historyReply = (request, body) => {
+  const query = new URL(request.url, "http://device").searchParams;
+  const id = query.get("row");
+  const source = query.get("source") || (id === "circulation_state" ? "mqtt" : "x10a");
+  request.resolve(Response.json({ id, source, ...body }));
+};
+const reply = (request, value, epoch = 1, boot_id = "boot-a") =>
+  historyReply(request, sample(value, epoch, boot_id));
 await reset();
 
 // Actual historical unchanged-save witness: missing time must stay absent, with hidden gates intact.
@@ -172,7 +178,7 @@ for (const [epoch, boot, missing] of [[2, "boot-a", false], [1, "boot-b", false]
   const request = pending.shift();
   const body = sample(111, epoch, boot);
   if (missing) { delete body.epoch; delete body.boot_id; }
-  request.resolve({ json: async () => body });
+  historyReply(request, body);
   await loading;
   assert.equal(ui.S.hist.has("dhw_tank"), false, "unmatched snapshot identity is refused");
   assert.equal(ui.S.histBusy.has("dhw_tank"), false, "refusal releases the request");
@@ -203,7 +209,7 @@ await reset();
 const quietRender = context.renderApp;
 context.renderApp = () => { ui.ensureHist("dhw_tank"); };
 loading = ui.ensureHist("dhw_tank");
-pending.shift().resolve({ json: async () => ({ ok: false, error: "history changed; retry" }) });
+historyReply(pending.shift(), { ok: false, error: "history changed; retry" });
 await loading;
 for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve));
 assert.equal(pending.length, 0, "a refused reply does not re-enter as a request loop");
@@ -213,7 +219,7 @@ context.renderApp = quietRender;
 // cached error for the usual period, not a chart left loading and re-asked every status period.
 await reset();
 loading = ui.ensureHist("dhw_tank");
-pending.shift().resolve({ json: async () => ({ ok: false, error: "history unavailable" }) });
+historyReply(pending.shift(), { ok: false, error: "history unavailable" });
 await loading;
 assert.equal(ui.S.hist.get("dhw_tank")?.err, true, "an unavailable history is an error state");
 ui.S.histAwait?.delete("dhw_tank");
@@ -242,7 +248,7 @@ await reset();
 delete ui.S.status.history.epoch;
 delete ui.S.status.boot_id;
 loading = ui.ensureHist("dhw_tank");
-pending.shift().resolve({ json: async () => ({ dt: 300, v: [333] }) });
+pending.shift().resolve(Response.json({ dt: 300, v: [333] }));
 await loading;
 assert.equal(ui.S.hist.get("dhw_tank").v[0], 333);
 
@@ -427,7 +433,7 @@ assert.equal(ui.histAxisEnd(ui.historyView("dt")), "hist.now");
 await reset();
 const emptyDelta = ui.ensureDerived("dt");
 for (let i = 0; i < 2; i++) {
-  pending.shift().resolve({ json: async () => ({ ...sample(0), v: [] }) });
+  historyReply(pending.shift(), { ...sample(0), v: [] });
   await new Promise(resolve => setImmediate(resolve));
 }
 await emptyDelta;
