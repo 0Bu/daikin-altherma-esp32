@@ -308,6 +308,20 @@ function yieldHistoryToPoll() {
   return active;
 }
 
+function validHistoryHeld(ranges, samples) {
+  if (!Array.isArray(ranges) || ranges.length > Math.ceil(samples.length / 2)) return false;
+  let end = 0;
+  for (const range of ranges) {
+    if (!Array.isArray(range) || range.length !== 2) return false;
+    const [from, count] = range;
+    if (!Number.isSafeInteger(from) || !Number.isSafeInteger(count) || from < end ||
+        count <= 0 || from + count > samples.length) return false;
+    end = from + count;
+    for (let i = from; i < end; i++) if (samples[i] !== null) return false;
+  }
+  return true;
+}
+
 async function readHistory(id, source, key, epoch, previous, request) {
   const sourceId = source === "modbus" ? (modbusEndpointId() || "modbus") : source;
   const controller = typeof AbortController === "function" ? new AbortController() : null;
@@ -334,6 +348,10 @@ async function readHistory(id, source, key, epoch, previous, request) {
     if (!changed && (r.ok === false || j?.ok === false || !Array.isArray(j?.v) ||
         j.v.length > HIST_MAX_SAMPLES || j.v.some(v => v !== null &&
           (!Number.isInteger(v) || v < -32766 || v > 32767)) ||
+        (j.dt != null && (!Number.isSafeInteger(j.dt) || j.dt <= 0 || j.dt > 86400)) ||
+        (j.b0 != null && (!Number.isSafeInteger(j.b0) || j.b0 < 0)) ||
+        (j.t0 != null && (!Number.isSafeInteger(j.t0) || Math.abs(j.t0) > 8.64e12)) ||
+        (j.held != null && !validHistoryHeld(j.held, j.v)) ||
         (j.id != null && j.id !== id) || (j.source != null && j.source !== expectedSource))) {
       S.hist.set(key, failed());
       return;
@@ -1210,21 +1228,20 @@ function stateHistHtml(id, name, view, wrap, cfg) {
 
 function alignAuxSample(view, h, i) {
   if (!h || !Array.isArray(h.v) || !h.v.length) return null;
+  if ((h.dt || 300) !== view.dt) return null;
   let idx = -1;
   if (Number.isInteger(view.b0) && Number.isInteger(h.b0)) {
     idx = (view.b0 + i) - h.b0;
   } else if (typeof view.t0 === "number" && typeof h.t0 === "number") {
     const dt = h.dt || view.dt || 300;
     idx = Math.round(((view.t0 + i * (view.dt || 300)) - h.t0) / dt);
-  } else {
-    idx = h.v.length - view.v.length + i;
   }
   return (idx >= 0 && idx < h.v.length) ? h.v[idx] : null;
 }
 
 const DHW_PHASE_SERIES = [
-  { id: "smart_grid_mode", source: "x10a", kind: "boost", label: "hist.boost_active", active: 20 },
-  { id: "smart_grid_mode", source: "modbus", kind: "boost", label: "hist.boost_active", active: 20 },
+  { id: "smart_grid_mode", source: "x10a", kind: "boost", label: "sg.mode2", active: 20 },
+  { id: "smart_grid_mode", source: "modbus", kind: "boost", label: "sg.mode2", active: 20 },
   { id: "bsh_state", source: "x10a", kind: "bsh", label: "hist.heater_active", active: 10 },
   { id: "bsh_state", source: "modbus", kind: "bsh", label: "hist.heater_active", active: 10 },
 ];
@@ -1400,8 +1417,9 @@ function histHtml(id, unit, name, source = "") {
       if (phase.count) {
         // Give concurrent source lanes a fixed order within each phase band.
         const paired = aux.some(peer => peer.kind === phase.kind && peer !== phase && peer.count > 0);
-        const height = paired ? HIST_H / 2 : HIST_H;
-        const y = paired && phase.source === "modbus" ? height : 0;
+        const height = HIST_H / (paired ? 4 : 2);
+        const y = (phase.kind === "boost" ? 0 : HIST_H / 2) +
+          (paired && phase.source === "modbus" ? height : 0);
         const outline = paired && phase.source === "x10a" ? " vhist-phase-outline" : "";
         phaseBands += renderRuns(toRuns(phase.flags), `vhist-phase-${phase.kind}${outline}`, y, height);
         legendItems.push(
@@ -1685,6 +1703,11 @@ function histPinIndex(id, h) {
     const i = forecast?.points.findIndex((point) => point.time === p.t) ?? -1;
     return i < 0 ? -1 : h.v.length + i;
   }
+  if (p.live) {
+    if (h.liveIndex != null && p.gen === h.gen && p.sources === histPinSources(h)) return h.liveIndex;
+    S.histPin.delete(id);
+    return -1;
+  }
   if (!h.v.length) return -1;
   if (p.t != null) {
     if (h.t0 == null) return -1;                 // pinned with a clock, re-resolving without one
@@ -1726,6 +1749,7 @@ function histPinToggle(id, i, source = "") {
   i = Math.max(0, Math.min(total - 1, i));
   if (histPinIndex(id, h) === i) S.histPin.delete(id);
   else if (i >= h.v.length) S.histPin.set(id, { t: forecast.points[i - h.v.length].time, forecast: true });
+  else if (i === h.liveIndex) S.histPin.set(id, { i, gen: h.gen, sources: histPinSources(h), source, live: true });
   else if (h.t0 != null) S.histPin.set(id, { t: h.t0 + i * h.dt });
   else S.histPin.set(id, { i, gen: h.gen, sources: histPinSources(h), source });
   // Render PAST the click guard. That guard exists to stop a POLL from replacing the DOM in the

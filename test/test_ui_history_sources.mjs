@@ -203,7 +203,7 @@ const lifecycleSource = appState.slice(appState.indexOf("// ── History sourc
   appState.indexOf("// ── Navigation (dashboard ⇄ Settings)"));
 vm.runInContext(lifecycleSource + readAppFragments(["history.js"]) +
   "\nthis.__api = { hasHist, hasModbusHist, hasRoomHist, histCacheKey, historyView, histHtml, scrubText, histReadout, histVisibleSeries," +
-  " histTipsHtml, scrubMove, scrubIndex, histViewRevision, histSeriesToggle, ensureHist, ensureHistPair, ensureDerived, DERIVED, syncHistSources, invalidateHistSources };", context,
+  " histTipsHtml, scrubMove, scrubIndex, histPinToggle, histPinIndex, histViewRevision, histSeriesToggle, ensureHist, ensureHistPair, ensureDerived, DERIVED, syncHistSources, invalidateHistSources };", context,
   { filename: "main/www/js/history.js" });
 const h = context.__api;
 
@@ -266,6 +266,7 @@ assert.equal(h.histCacheKey("dhw_tank", "modbus"), "modbus:dhw_tank");
   for (const invalid of [
     { source: "x10a", v: [457] }, { id: "outdoor_air", v: [457] },
     { v: ["457"] }, { v: [-32768] }, { v: Array(289).fill(457) },
+    { dt: -3 }, { b0: -1 }, { t0: "now" }, { held: [null] }, { held: [[0, 1]] },
   ]) {
     S.hist.delete("modbus:dhw_tank");
     historyResponse = { ...defaultHistoryResponse, ...invalid };
@@ -735,6 +736,12 @@ assert.match(liveBoostHtml, /Boost aktiv · 10 min/,
   "one live observation must not be counted as an invented five minutes of Boost runtime");
 assert.equal(h.scrubText(liveBoostView, 7), "jetzt · Empfehlung ein",
   "the state shown at the right edge and its tooltip must agree");
+h.histPinToggle("smart_grid_mode", 7, "modbus");
+assert.equal(h.histPinIndex("smart_grid_mode", liveBoostView), 7);
+S._modbus[0].value = 3;
+assert.equal(h.histPinIndex("smart_grid_mode", h.historyView("smart_grid_mode", "modbus")), -1);
+assert.equal(S.histPin.has("smart_grid_mode"), false, "a changed live observation retires its pin");
+S._modbus[0].value = 2;
 S.otaCached = true;
 assert.equal(h.historyView("smart_grid_mode", "modbus").liveIndex, undefined,
   "a retained OTA snapshot cannot create a live cap");
@@ -1052,24 +1059,24 @@ assert.match(dhwHtml, /5 min/, "DHW legend must include BSH duration");
   const key = "modbus:smart_grid_mode";
   const ring = S.hist.get(key);
   S.hist.set(key, { ...ring, refreshFailed: true });
-  assert.match(h.histHtml("dhw_tank", "°C", "Tank"), /Boost aktiv · Modbus · hist\.retained/);
+  assert.match(h.histHtml("dhw_tank", "°C", "Tank"), /Empfehlung ein · Modbus · hist\.retained/);
   S.hist.set(key, { err: true, v: [] });
-  assert.match(h.histHtml("dhw_tank", "°C", "Tank"), /Boost aktiv · Modbus · Verlauf nicht verfügbar/);
+  assert.match(h.histHtml("dhw_tank", "°C", "Tank"), /Empfehlung ein · Modbus · Verlauf nicht verfügbar/);
   S.hist.set(key, ring);
 }
 
 // Verify tooltips include active phases
 assert.doesNotMatch(h.scrubText(view, 0), /Boost|Heizstab/, "Sample 0 without active phases");
-assert.match(h.scrubText(view, 1), /(?:· |\n)Boost aktiv · Modbus$/, "Sample 1 with active Boost");
-assert.match(h.scrubText(view, 2), /(?:· |\n)Boost aktiv · Modbus \+ Heizstab aktiv · Modbus$/,
+assert.match(h.scrubText(view, 1), /(?:· |\n)Empfehlung ein · Modbus$/, "Sample 1 with active Boost");
+assert.match(h.scrubText(view, 2), /(?:· |\n)Empfehlung ein · Modbus \+ Heizstab aktiv · Modbus$/,
   "sample 2 identifies the source of both active phases");
-assert.equal(h.histReadout(view, 1), "46,0 °C · Boost aktiv · Modbus",
+assert.equal(h.histReadout(view, 1), "46,0 °C · Empfehlung ein · Modbus",
   "a single visible curve appends active phase to value readout");
 {
   S.hist.set("modbus:dhw_tank", { dt: 300, unit: "°C", b0: 100, v: [450, 460, 470, 480], held: [] });
   h.histSeriesToggle("dhw_tank", "modbus");
   const pairedView = h.historyView("dhw_tank");
-  assert.match(h.histReadout(pairedView, 1), /<span class="vhist-tip-note">Boost aktiv · Modbus<\/span>/,
+  assert.match(h.histReadout(pairedView, 1), /<span class="vhist-tip-note">Empfehlung ein · Modbus<\/span>/,
     "active auxiliary phase renders as note row below tabular values when multiple series are shown");
   S.hist.delete("modbus:dhw_tank");
   S.histHidden.delete("dhw_tank");
@@ -1081,12 +1088,12 @@ assert.doesNotMatch(h.scrubText(view, 3), /Boost|Heizstab/, "Sample 3 without ac
   const independent = h.historyView("dhw_tank");
   const html = h.histHtml("dhw_tank", "°C", "Tank");
   assert.match(html, /vhist-phase-boost vhist-phase-outline/);
-  assert.match(html, /Boost aktiv · X10A <small[^>]+>\(10 min\)/);
-  assert.match(html, /Boost aktiv · Modbus <small[^>]+>\(10 min\)/);
-  assert.match(h.scrubText(independent, 0), /Boost aktiv · X10A$/,
+  assert.match(html, /Empfehlung ein · X10A <small[^>]+>\(10 min\)/);
+  assert.match(html, /Empfehlung ein · Modbus <small[^>]+>\(10 min\)/);
+  assert.match(h.scrubText(independent, 0), /Empfehlung ein · X10A$/,
     "an active X10A bucket remains visible alongside an inactive HomeHub bucket");
-  assert.match(h.scrubText(independent, 1), /Boost aktiv · X10A \+ Boost aktiv · Modbus \+ Heizstab aktiv · X10A$/);
-  assert.match(h.scrubText(independent, 2), /Boost aktiv · Modbus \+ Heizstab aktiv · Modbus$/,
+  assert.match(h.scrubText(independent, 1), /Empfehlung ein · X10A \+ Empfehlung ein · Modbus \+ Heizstab aktiv · X10A$/);
+  assert.match(h.scrubText(independent, 2), /Empfehlung ein · Modbus \+ Heizstab aktiv · Modbus$/,
     "an inactive X10A bucket cannot conceal an active HomeHub heater sample");
   S.hist.delete("smart_grid_mode");
   S.hist.delete("bsh_state");
@@ -1292,7 +1299,7 @@ try {
   const view = h.historyView("dhw_tank");
   const first = h.histTipsHtml(view, -1, 0);
   assert.equal(context.auxScans, 1, "288 tooltip readouts must share one auxiliary scan");
-  assert.match(first, /Boost aktiv/);
+  assert.match(first, /Empfehlung ein/);
   assert.match(first, /Heizstab aktiv/);
   S.hist.set("smart_grid_mode", { ...fullRing(0), gen: 2 });
   const refreshed = h.historyView("dhw_tank");
@@ -1300,7 +1307,7 @@ try {
   assert.equal(h.scrubIndex({ dataset: { hist: "dhw_tank", rev: h.histViewRevision(view) } }, 4), -1);
   const second = h.histTipsHtml(refreshed, -1, 0);
   assert.equal(context.auxScans, 2, "the next rendered view must refresh its auxiliary snapshot");
-  assert.doesNotMatch(second, /Boost aktiv/);
+  assert.doesNotMatch(second, /Empfehlung ein/);
   assert.match(second, /Heizstab aktiv/);
   // Re-seed the previous per-readout work: the same measured operation budget must reject it.
   vm.runInContext("this.originalReadout = histReadout; auxScans = 0; " +
