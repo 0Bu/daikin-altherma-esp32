@@ -12,9 +12,9 @@ files, update GitHub state, merge, flash, deploy, clear evidence, or mutate a li
 because this skill activated. When a mutation is explicitly requested, keep it within that scope and
 report analysis, changes, and verification separately.
 
-The GIF audit checks freshness in CI; CI also runs Chrome/Chromium rendering checks. Re-recording
-and the complete decoded-frame review remain local. A matching stamp proves freshness, never
-capture quality or visual truth. Never hand-edit `tools/uigif/gif_stamp.txt`; never use
+Pre-push checks include the GIF audit and headless browser rendering when required. Re-record
+and review every decoded frame locally. The stamp records freshness. Never hand-edit
+`tools/uigif/gif_stamp.txt`; never use
 `--allow-identical-gif` unless a real re-record reproduced identical bytes.
 
 **Conditional — and keyed on the audit, not on paths.** It is for changes that reach the drawing:

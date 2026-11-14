@@ -80,6 +80,8 @@ try {
   const pin = dockerfile.match(/^FROM mcr\.microsoft\.com\/playwright:v([\d.]+)-noble@sha256:([a-f0-9]{64})$/m);
   assert.ok(pin, "browser image must pin the official version and immutable digest");
   assert.equal(pin[1], manifest.dependencies.playwright, "browser image and API package must match");
+  assert.match(dockerfile, /^RUN chmod 0644 package\.json package-lock\.json \\$/m,
+    "package metadata must be readable by the unprivileged WebKit process with a private host umask");
   assert.equal(lock.packages["node_modules/playwright"].version, pin[1]);
   assert.equal(lock.packages["node_modules/playwright-core"].version, pin[1]);
   assert.match(lock.packages["node_modules/playwright"].integrity, /^sha512-/);
@@ -129,7 +131,8 @@ try {
     let output = "";
     child.stdout.on("data", chunk => { output += chunk; });
     child.stderr.on("data", chunk => { output += chunk; });
-    const completed = new Promise(resolve => child.once("exit", (code, signal) => resolve({ code, signal })));
+    // On a loaded runner the child can exit before the retained-ownership warning reaches stderr.
+    const completed = new Promise(resolve => child.once("close", (code, signal) => resolve({ code, signal })));
     const watchdog = setTimeout(() => child.kill("SIGKILL"), 20000);
     try {
       if (["interrupt", "build-interrupt", "pre-cid-interrupt", "empty-cid-interrupt"].includes(mode)) {

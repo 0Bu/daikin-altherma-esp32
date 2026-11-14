@@ -112,7 +112,7 @@ it, and this is where the review earns its keep.
 scripts/run-schematic-audit.sh     # must be clean (adjudications printed, not hidden)
 tools/schematic/selftest.sh        # if you touched the audit: all cases still caught
 scripts/run-description-audit.sh   # an INSPECT `sample` resolves through the SAME table
-scripts/run-mock-tests.sh          # lwt_select / ou_stale — the browser rules CI gates in C++
+scripts/run-mock-tests.sh          # lwt_select / ou_stale — C++ and browser parity
 ```
 
 If the change moved a rule the browser shares with the firmware (which row is *the* leaving water,

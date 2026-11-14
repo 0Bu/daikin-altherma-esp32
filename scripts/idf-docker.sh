@@ -19,6 +19,22 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 idf_version="$("$repo_root/scripts/idf-version.sh")"
 image="espressif/idf:${idf_version}"
 echo "idf-docker: using ${image} (from .github/workflows/build.yml)" >&2
+if [ "${1:-}" = "--with-host-tests" ]; then
+  shift
+  # Match the compile-only CI environment, keeping the additional tools in one cached image.
+  recipe="$repo_root/tools/release/LocalBuild.Dockerfile"
+  base_id="$(docker image inspect --format '{{.Id}}' "$image" 2>/dev/null || true)"
+  if [ -z "$base_id" ]; then
+    docker pull "$image"
+    base_id="$(docker image inspect --format '{{.Id}}' "$image")"
+  fi
+  recipe_hash="$(git hash-object -- "$recipe")"
+  base_tag="${base_id#sha256:}"
+  image="daikin-altherma-esp32-idf-tests:${base_tag:0:16}-${recipe_hash}"
+  if ! docker image inspect "$image" >/dev/null 2>&1; then
+    docker build --quiet --build-arg "IDF_VERSION=$idf_version" --tag "$image" - < "$recipe"
+  fi
+fi
 
 tty_flags=()
 if [ -t 0 ] && [ -t 1 ]; then tty_flags=(-it); fi

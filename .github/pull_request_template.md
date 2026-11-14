@@ -21,7 +21,7 @@ alone — those are repository-maintainer reviews and gate records, and are not 
 Run the complete [pre-PR gate set](https://github.com/0Bu/daikin-altherma-esp32/blob/main/test/README.md#run); use affected checks while developing.
 Report results for the reviewed source and distinguish missing evidence from a passing check.
 
-- Local checks and limitations:
+- Completed local checks (including head or tested merge tree and elapsed time) and limitations:
 - Firmware source/build (head SHA, local or CI result, or limitation):
 - Hardware, API and rendered UI evidence (where relevant; identify unverified layers):
 
@@ -31,6 +31,7 @@ Follow [AGENTS.md](https://github.com/0Bu/daikin-altherma-esp32/blob/main/AGENTS
 ## Maintainer gates
 
 <!-- Not runnable by outside contributors — leave unchecked, the maintainer fills these in.
+     Checkboxes record work already completed before merge. Checking a box does not run a suite.
      CI validates exact `$name` syntax and current-head freshness, not the identity of the body editor;
      maintainer review plus GitHub merge authorization is the actor trust boundary. The only PRs
      without these records are authoritative-CI-attested Renovate updates whose immutable,

@@ -13,8 +13,13 @@ layout and accessibility evidence. None of these contacts a heat pump or proves 
 
 For an ordinary PR, run this complete local gate set. During development, start with the affected
 surface; the table below explains what each result means. Freeze code and documentation before the
-complete acceptance run. A relevant change or new finding invalidates only the affected evidence;
-do not repeat the complete suite without a reason. Local results never replace publication CI.
+complete acceptance run. A relevant change or new finding invalidates only the affected evidence.
+The [pre-push release gate](../docs/MAINTENANCE.md#local-release-checks) runs the full mechanical
+suite and unsigned target compile before the branch is sent. Use the commands below for
+focused development runs and record completed reviews in the PR.
+
+The release checks require Docker with Linux x86-64 execution, Git with `merge-tree --write-tree`,
+the repository Python and Node.js tools, `clang-format-18` 18.1.8 and native C++ coverage tooling.
 
 ```bash
 scripts/run-mock-tests.sh --coverage
@@ -58,11 +63,9 @@ locally when no executable is selected; CI requires it. A missing Docker daemon 
 a browser setup failure, not permission to start a native macOS browser. Report either limitation rather
 than treating the skipped layer as tested.
 
-CI keeps fast checks as steps of one `mechanical_gates` job in
-[build.yml](../.github/workflows/build.yml). The required `build` check consumes that result before
-conditionally compiling the firmware. The separate protected-base `pr-policy.yml` owns required
-review evidence. CI may select mutation selftests by their inputs and run browser rendering only for
-relevant changes; that optimization does not reduce the local contributor obligations above.
+The protected-base `pr-policy.yml` verifies the local receipt and review records.
+[build.yml](../.github/workflows/build.yml) retains hosted tests and unsigned compilation for the
+bootstrap PR. After cutover it reports PR admission and verifies the receipt before signing.
 
 ## Logic, coverage and hostile inputs
 
@@ -393,7 +396,9 @@ scripts/run-build-change-detection-tests.sh
 selective historical-source hydration, an omitted historical binary and fail-closed missing inputs.
 Set `DAIKIN_CI_CHECKOUT_DOCKER_IMAGE=espressif/idf:v6.1` to add a read-only, network-disabled Linux
 read of the hydrated witness. `test_publication_efficiency.py` binds single CI selftest ownership,
-trust boundaries and manifest-first waiting to complete file/signature checks. Pages fixtures cover
+trust boundaries and manifest-first waiting to complete file/signature checks. The pre-merge
+fixtures verify that post-merge reuse rejects mismatched trees, parents, workflow runs and local
+receipts. Pages fixtures cover
 the shared empty root `.nojekyll`, legacy dev-only adoption, races and unsafe-marker rejection.
 
 These use temporary fixtures for concurrent Pages publishers, NVS-safe erase ranges, path validation,

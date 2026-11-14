@@ -107,7 +107,7 @@ policy = Path(sys.argv[4]).read_text(encoding="utf-8")
 if "  pull_request:\n" not in build or "  pull_request_target:\n" in build:
     raise SystemExit("mechanical/build workflow must use only the ordinary pull_request event")
 if "types: [opened, synchronize, reopened, edited, ready_for_review]" not in build:
-    raise SystemExit("ordinary pull_request workflow must rerun current-PR-text gates on edited")
+    raise SystemExit("ordinary pull_request workflow must audit bootstrap PR text on edits")
 if "  pull_request_target:\n" not in policy or re.search(r"^  pull_request:\s*$", policy, re.MULTILINE):
     raise SystemExit("trusted policy workflow must use only pull_request_target")
 mechanical_start = build.find("\n  mechanical_gates:\n")
@@ -125,8 +125,7 @@ if '"$MECHANICAL_RESULT" = success' not in untrusted_build:
     raise SystemExit("required build job does not fail when mechanical gates fail")
 if "allow-unsafe-pr-checkout" in untrusted_build:
     raise SystemExit("ordinary pull_request build must not use unsafe target opt-ins")
-# The shared mechanical job has one token-bearing step, executable only on authoritative main.
-# Bind its entire header before permitting that single step-local read token. PR code receives none.
+# The shared mechanical job has one step-local token, executable only on authoritative main.
 resolver_header = (
     "      - name: Resolve completed dev publication\n"
     "        id: dev_publication\n"
@@ -155,6 +154,11 @@ if trusted_checkout < 0 or trusted_enforce < trusted_checkout:
     raise SystemExit("trusted policy workflow ordering is incomplete")
 if "refs/pull/" in policy or "allow-unsafe-pr-checkout" in policy or "secrets." in policy:
     raise SystemExit("trusted policy workflow must never load PR code or secrets")
+if ("types: [opened, synchronize, reopened, edited, ready_for_review]" not in policy
+        or "ref: ${{ github.workflow_sha }}" not in policy
+        or './scripts/run-pr-hygiene-audit.sh --event-file "$policy_tmp/hygiene-event.json"' not in policy
+        or '$policy_tmp/pr.json" > "$policy_tmp/hygiene-event.json"' not in policy):
+    raise SystemExit("current PR text must be checked only against the protected policy on edited")
 for binding in ('git rev-parse HEAD^1', 'git rev-parse HEAD^2'):
     if binding not in build:
         raise SystemExit("PR mechanical/build evidence must bind both base and head SHAs")
