@@ -149,7 +149,7 @@ function renderCards(hold = true) {
     setHtml("valueGroups", frame(), hold);
     selected = syncDashboardCards();
   }
-  if (!S.clickHold) syncCheckupCyclingChart(selected);
+  if (!hold || !S.clickHold) syncCheckupCyclingChart(selected);
 }
 
 // Read the installed frame: setHtml may have held a newer one while a row was being tapped.
