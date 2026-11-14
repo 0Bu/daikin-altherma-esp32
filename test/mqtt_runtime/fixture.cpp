@@ -3251,7 +3251,7 @@ void modbus_cutover_after_cleanup_sample() {
     independent_sources_fixture();
     int initial            = 0;
     int initial_tombstones = 0;
-    int held_ack_cycles     = 0;
+    int held_ack_cycles    = 0;
     sdk::on_delay          = [&](TickType_t delay) {
         check_cycle(delay);
         if (sdk::delays == 45) {
@@ -3263,10 +3263,10 @@ void modbus_cutover_after_cleanup_sample() {
                 daik::ModbusPublicationClaim claim(daik::ModbusPublication::PeerChange);
                 require(claim.acquired(), "HOMEHUB_REPLACEMENT_CAN_BE_ADMITTED");
                 daik::CachedValue pressure;
-                pressure.off               = 79;
+                pressure.off = 79;
                 pressure.modbus_definition =
                     daik::def::homehub_definition_id(*daik::def::altherma4_find(79));
-                pressure.value = "2.40";
+                pressure.value         = "2.40";
                 adapter::modbus_values = {std::move(pressure)};
                 ++adapter::modbus_generation;
                 daik::mqtt_request_modbus_cleanup();
@@ -3275,21 +3275,25 @@ void modbus_cutover_after_cleanup_sample() {
             require(!adapter::on_modbus_target_read && accepted_count(daik::s_modbus) == initial,
                              "LATE_HOMEHUB_CUTOVER_CANNOT_PUBLISH_BEFORE_QUEUED_CLEANUP");
         } else if (daik::s_source_cleanup.in_flight() && held_ack_cycles < 3) {
-            require(accepted_count(daik::s_modbus) == initial + 1 &&
-                        last_accepted(daik::s_modbus)->length == 0,
-                    "HOMEHUB_PROBE_STATE_WAITS_FOR_PREDECESSOR_PUBACK");
+            const bool tombstone_only = accepted_count(daik::s_modbus) == initial + 1 &&
+                                        last_accepted(daik::s_modbus)->length == 0;
+            require(tombstone_only, "HOMEHUB_PROBE_STATE_WAITS_FOR_PREDECESSOR_PUBACK");
             if (++held_ack_cycles == 3) {
-                cleanup_event(daik::s_source_cleanup.in_flight_id(),
-                              MqttCleanupDeliveryOutcome::Published, daik::s_mqtt_client_epoch.load());
+                const int  msg_id = daik::s_source_cleanup.in_flight_id();
+                const auto epoch  = daik::s_mqtt_client_epoch.load();
+                cleanup_event(msg_id, MqttCleanupDeliveryOutcome::Published, epoch);
                 cleanup_witness::early_ack = true;
             }
         } else if (sdk::delays > 46 && accepted_count(daik::s_modbus) > initial + 1) {
-            require(accepted_count(daik::s_modbus) == initial + 2 &&
-                                 accepted_count(daik::s_modbus, "") == initial_tombstones + 1 &&
-                                 held_ack_cycles == 3 &&
-                                 std::string_view(last_accepted(daik::s_modbus)->payload.data())
-                                     .find("\"water_pressure\":2.4") != std::string_view::npos,
-                             "HOMEHUB_CUTOVER_RETIRES_PREDECESSOR_BEFORE_NEW_STATE");
+            const std::string_view payload(last_accepted(daik::s_modbus)->payload.data());
+            const bool             only_expected_publications =
+                accepted_count(daik::s_modbus) == initial + 2 &&
+                accepted_count(daik::s_modbus, "") == initial_tombstones + 1;
+            const bool replacement_published =
+                payload.find("\"water_pressure\":2.4") != std::string_view::npos;
+            const bool retired_first =
+                only_expected_publications && held_ack_cycles == 3 && replacement_published;
+            require(retired_first, "HOMEHUB_CUTOVER_RETIRES_PREDECESSOR_BEFORE_NEW_STATE");
             throw StopTask{};
         }
         require(sdk::delays < 150, "LATE_HOMEHUB_CUTOVER_MAKES_BOUNDED_PROGRESS");

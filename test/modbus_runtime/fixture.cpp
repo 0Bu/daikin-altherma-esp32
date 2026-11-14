@@ -1433,16 +1433,18 @@ void probe_only_replacement_retires_predecessor() {
     const TcpListener original, replacement;
     const uint32_t    original_ipv4    = htonl(0xc0000232);
     const uint32_t    replacement_ipv4 = htonl(0xc0000233);
-    sdk::tcp_peer_routes    = {{{original_ipv4, original.port}, {replacement_ipv4, replacement.port}}};
-    adapter::cfg.mb_host    = "reconnect-harness.local";
-    adapter::cfg.mb_port    = original.port;
+    sdk::tcp_peer_routes = {{{original_ipv4, original.port}, {replacement_ipv4, replacement.port}}};
+    adapter::cfg.mb_host = "reconnect-harness.local";
+    adapter::cfg.mb_port = original.port;
     adapter::cfg.mb_unit_id = 1;
     s_target_enabled        = true;
     const auto generation   = s_target_generation.load();
     const auto open         = [&](uint32_t ipv4, const TcpListener& listener) {
-        sdk::mdns_a_result.addr = ipv4;
-        REQUIRE(mb_ensure_connected(adapter::cfg.mb_host, adapter::cfg.mb_port, 1, generation,
-                                    history_modbus_generation()));
+        sdk::mdns_a_result.addr       = ipv4;
+        const auto history_generation = history_modbus_generation();
+        const auto connected = mb_ensure_connected(adapter::cfg.mb_host, adapter::cfg.mb_port, 1,
+                                                           generation, history_generation);
+        REQUIRE(connected);
         return listener.accept_peer();
     };
     {
@@ -1453,7 +1455,7 @@ void probe_only_replacement_retires_predecessor() {
         poll_once();
         REQUIRE(s_sock < 0 && !mb_values_live());
     }
-    Peer       peer(open(replacement_ipv4, replacement), {{MbFunc::ReadInput, 79, 240}});
+    Peer peer(open(replacement_ipv4, replacement), {{MbFunc::ReadInput, 79, 240}});
     peer.only_pressure          = true;
     const auto original_history = adapter::history_generation;
     poll_once();
@@ -2443,7 +2445,8 @@ int main(int argc, char** argv) {
         {"probe_homehub_rows", test::probe_homehub_rows},
         {"native_gateway_baseline", test::native_gateway_baseline},
         {"probe_resolved_peer_reconnect", test::probe_resolved_peer_reconnect},
-        {"probe_only_replacement_retires_predecessor", test::probe_only_replacement_retires_predecessor},
+        {"probe_only_replacement_retires_predecessor",
+         test::probe_only_replacement_retires_predecessor},
         {"definition_snapshot_cutover", test::definition_snapshot_cutover},
         {"poll_full_fast_break", test::poll_full_fast_break},
         {"poll_batch_fallback", test::poll_batch_fallback},
