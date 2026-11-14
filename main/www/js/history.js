@@ -1811,8 +1811,8 @@ function scrubEnd(plot) {
 }
 
 function historyRowOwner(node, host) {
-  const item = node?.closest?.(".vitem") || host?.closest?.(".vitem");
-  return item?.querySelector("[data-desc]")?.dataset.desc;
+  return (node?.closest?.(".vitem") || host?.closest?.(".vitem"))
+    ?.querySelector("[data-desc]")?.dataset.desc;
 }
 
 // Structural poll updates may replace card containers or an inspector's history. Preserve the
@@ -1897,13 +1897,12 @@ function replaceHistoryHtml(host, html) {
     } finally { S.trendRebuilding = rebuilding; }
   }
   if (focused && active.isConnected) active.focus({ preventScroll: true });
-  else if (focused && (hist || histSeries)) {
-    const next = [...host.querySelectorAll(hist ? "[data-hist]" : "[data-hist-series]")].find(node =>
+  else if (focused && (hist || histSeries))
+    [...host.querySelectorAll(hist ? "[data-hist]" : "[data-hist-series]")].find(node =>
       owner(node) === focusedOwner && (hist
         ? node.dataset.hist === hist && (node.dataset.source || "") === source
-        : node.dataset.histId === histId && node.dataset.histSeries === histSeries));
-    next?.focus({ preventScroll: true });
-  }
+        : node.dataset.histId === histId && node.dataset.histSeries === histSeries))
+      ?.focus({ preventScroll: true });
   else if (focused && (cycling || active?.dataset?.desc)) {
     const chart = cycling && host.querySelector("[data-cycling]");
     const sameScope = chart && chart.dataset.cycling === cycling.dataset.cycling;

@@ -132,16 +132,18 @@ async function refreshValues(paint = true) {
 function renderCards(hold = true) {
   // Freeze trend hosts during a scrub so structural updates cannot replace the captured plot.
   // Rows catch up when scrubEnd resumes rendering.
-  if (S.scrub) return;
-  // setHtml applies unchanged-markup and click-in-flight guards before reconciling the grid.
+  if (S.scrub || (hold && S.clickHold)) return;
   // The opt-in controls the entire diagnosis card and its navigation entry. Its 24-hour rows also
   // require a live X10A link; passive refrigerant observations keep their independent collection.
   const checkup = S.status?.diagnostics?.enabled === true
     ? checkupCardHtml(S.status?.hp?.connected) : "";
+  const card = S.dashboardCard;
   setHtml("valueGroups", checkup + statusCardsHtml() +
-    valueGroupsHtml(S._values || [], S.status?.hp?.connected), hold);
+    valueGroupsHtml(S._values || [], S.status?.hp?.connected), false);
   const selected = syncDashboardCards();
-  if (!hold || !S.clickHold) syncCheckupCyclingChart(selected);
+  // A source change can select a card whose charts were paused in this frame.
+  if (S.dashboardCard !== card) renderCards(false);
+  else syncCheckupCyclingChart(selected);
 }
 
 // Read the installed frame: setHtml may have held a newer one while a row was being tapped.
@@ -168,7 +170,7 @@ function syncDashboardCards() {
     `<span class="dashboard-card-label">${esc(card.dataset.dashboardLabel)}</span></button>`).join(""), false);
   for (const card of cards) card.hidden = card !== selected;
   const buttons = [...nav.querySelectorAll("[data-card]")];
-  const chosenButton = buttons[cards.indexOf(selected)];
+  const chosenButton = buttons.find(button => button.dataset.card === S.dashboardCard);
   for (const button of buttons)
     button.setAttribute("aria-pressed", String(button === chosenButton));
   host.setAttribute("aria-labelledby", chosenButton.id);

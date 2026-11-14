@@ -77,7 +77,7 @@ vm.runInContext(readAppFragments(["i18n.js", "app_state.js", "dashboard.js"]) +
     render: (diagnosis, model, values) => {
       checkupCardHtml = () => diagnosis;
       statusCardsHtml = () => model;
-      valueGroupsHtml = () => values;
+      valueGroupsHtml = typeof values === "function" ? values : () => values;
       renderCards();
     },
   };`, context);
@@ -193,6 +193,17 @@ ui.S.clickHold = false;
 ui.render(card("diagnosis"), "", "");
 expectSelection("diagnosis", "released hold installs the pending source change");
 assert.deepEqual(keys(), ["diagnosis"]);
+
+ui.render(card("diagnosis"), card("model"), "");
+ui.select("diagnosis");
+const paintStates = [];
+ui.render("", "", () => {
+  paintStates.push(ui.S.dashboardCard);
+  return card("modbus");
+});
+expectSelection("modbus", "fallback installs a newly available card");
+assert.deepEqual(paintStates, ["diagnosis", "modbus"],
+  "the selected fallback must render its open history in the same update");
 ui.render(card("diagnosis"), card("model"), "");
 ui.S.scrub = "fixture-trend";
 ui.render("", "", card("modbus"));
