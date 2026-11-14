@@ -6,9 +6,14 @@
 // The device keeps every source at one fixed cadence and reports the labels each source owns. The
 // browser never pattern-matches its own candidates: offering a trend the device isn't buffering
 // would be an empty chart by design.
-const histFmt1 = (n) => Number(n).toLocaleString(LANG, {
-  minimumFractionDigits: 1, maximumFractionDigits: 1,
-});
+let histFormatLanguage, histNumberFormat;
+function histFmt1(n) {
+  if (histFormatLanguage !== LANG) {
+    histNumberFormat = new Intl.NumberFormat(LANG, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+    histFormatLanguage = LANG;
+  }
+  return histNumberFormat.format(Number(n));
+}
 // Each entry is {id, label}: the ID is the stable history key GET /history takes. Paired sources
 // deliberately reuse logic/history.hpp's TRENDS ids ("dhw_tank", "outdoor_air", …); an honest
 // single-source timeline such as Modbus disinfection has its own id. The LABEL is how this profile
