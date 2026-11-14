@@ -1199,16 +1199,16 @@ function dwellNoteHtml(v, stateText) {
   return descParaHtml(`<span class="vdesc-n">${esc(stateText)}</span> ` + esc(tail) +
     (blind > 0 ? esc(" · " + t("val.since_gap", dwellDuration(blind))) : ""));
 }
-function stateRunWhen(view, from, count) {
+function stateRunWhen(view, from, count, series) {
   if (view.t0 != null) {
     const clock = (i) => new Date((view.t0 + i * view.dt) * 1000)
       .toLocaleTimeString(LANG, { hour: "2-digit", minute: "2-digit" });
     return `${clock(from)}–${clock(from + count)}`;
   }
   const n = view.recordedN ?? view.v.length;
-  if (histRetained(view)) {
+  if (histRetained(series.raw)) {
     // Without a clock, show the phase's last recorded slot. The caller reports its duration.
-    return scrubTime(view, from + count - 1);
+    return retainedSampleTime(from + count - 1, lastSample(series.v, n), view.dt);
   }
   const old = ((n - from) * view.dt) / 3600;
   const recent = ((n - from - count) * view.dt) / 3600;
@@ -1892,6 +1892,12 @@ function histAxisRetained(h) {
   return visible.length ? visible.every(s => histRetained(s.raw)) : histRetained(h);
 }
 
+function retainedSampleTime(i, last, dt) {
+  if (i > last) return "";
+  return i === last ? t("hist.retained")
+    : t("hist.before_retained", histFmt1(((last - i) * dt) / 3600));
+}
+
 function scrubTime(h, i) {
   if (h.liveIndex === i) return t("hist.now");
   const point = env3ChartId(h.id) && i >= h.v.length
@@ -1899,12 +1905,12 @@ function scrubTime(h, i) {
   const stamp = point ? point.time : h.t0 != null ? h.t0 + i * h.dt : null;
   if (stamp != null) return new Date(stamp * 1000)
     .toLocaleTimeString(LANG, { hour: "2-digit", minute: "2-digit" });
-  const retained = h.refreshFailed || h.aged;
-  const last = retained ? lastSample(h.v, h.recordedN)
-    : (h.recordedN ?? h.v.length) - 1;
-  const ageH = ((last - i) * h.dt) / 3600;
-  if (retained) return i > last ? "" : i === last
-    ? t("hist.retained") : t("hist.before_retained", histFmt1(ageH));
+  const end = h.recordedN ?? h.v.length;
+  if (histAxisRetained(h)) {
+    const last = Math.max(-1, ...histPinSeries(h).map(s => lastSample(s.v, end)));
+    return retainedSampleTime(i, last, h.dt);
+  }
+  const ageH = ((end - 1 - i) * h.dt) / 3600;
   return ageH < 0.05 ? t("hist.now") : t("hist.rel", histFmt1(ageH));
 }
 
@@ -1984,7 +1990,8 @@ function scrubText(h, i, includeTime = true, aux) {
       if (h.liveIndex === i) return `${t("hist.now")} · ${status}`;
       const [from, count] = sampleRunAt(
         h.liveIndex == null ? primary.v : primary.v.slice(0, h.recordedN), i);
-      return `${stateRunWhen(h, from, count)} · ${status}`;
+      const when = stateRunWhen(h, from, count, primary);
+      return when ? `${when} · ${status}` : status;
     }
     // A state chart is already a sequence of PHASES. Hovering any point therefore names the whole
     // containing phase — source, state, start/end and sampled duration — while the chart itself
@@ -2000,7 +2007,8 @@ function scrubText(h, i, includeTime = true, aux) {
         h.liveIndex == null ? s.v : s.v.slice(0, h.recordedN), i);
       return {
         source: s.source === "modbus" ? "Modbus" : s.name,
-        detail: t(cfg.run, valueText(s), stateRunWhen(h, from, count), histDuration(count * h.dt)),
+        detail: t(cfg.run, valueText(s), stateRunWhen(h, from, count, s) || t("hist.nm"),
+          histDuration(count * h.dt)),
       };
     });
     return blocks.map((b) => `${b.source}\n${b.detail}`).join("\n\n");
@@ -2013,7 +2021,7 @@ function scrubText(h, i, includeTime = true, aux) {
     let out = (withName ? `${s.source === "modbus" ? "Modbus" : s.name} ` : "") + valueText(s);
     if (h.id === "outdoor_air" && s.source === "modbus" && s.v?.[i] != null) {
       const [from, count] = sampleRunAt(s.v, i);
-      out += ` · ${t("hist.modbus_plateau", stateRunWhen(h, from, count), histDuration(count * h.dt))}`;
+      out += ` · ${t("hist.modbus_plateau", stateRunWhen(h, from, count, s), histDuration(count * h.dt))}`;
     }
     return out;
   };

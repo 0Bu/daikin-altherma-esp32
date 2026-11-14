@@ -318,6 +318,11 @@ S.hist.set("modbus:dhw_tank", modbus);
   assert.match(retainedOnly, /<div class="vhist-axis"><span>Aufzeichnung/);
   assert.doesNotMatch(retainedOnly.slice(retainedOnly.indexOf('<div class="vhist-axis">')), /jetzt/,
     "a hidden fresh ring cannot label the retained plot as current");
+  const retainedView = h.historyView("dhw_tank");
+  assert.match(h.scrubText(retainedView, 0), /^Letzter empfangener Messwert · /,
+    "an undated cursor uses the last sample of the visible retained curve");
+  assert.doesNotMatch(h.scrubText(retainedView, 2), /jetzt/,
+    "the last slot cannot borrow freshness from a hidden curve");
   h.histSeriesToggle("dhw_tank", "modbus");
   const recentStatus = S.status.uptime_s;
   S.hist.set("dhw_tank", { ...S.hist.get("dhw_tank"), t0: 1768720000 });
@@ -975,11 +980,17 @@ assert.match(h.scrubText(bshX10aView, 1), /^\d{2}:\d{2}–\d{2}:\d{2} · Aktiv$/
 assert.doesNotMatch(h.scrubText(bshX10aView, 1), /X10A|Modbus|Heizstab|ca\.|min/);
 {
   const old = S.hist.get("bsh_state");
+  const peer = S.hist.get("modbus:bsh_state");
   S.hist.set("bsh_state", { ...old, t0: null, v: [10], refreshFailed: true });
+  S.hist.set("modbus:bsh_state", { ...peer, t0: null });
   const retained = h.historyView("bsh_state", "x10a");
   assert.equal(h.scrubText(retained, 0), "Letzter empfangener Messwert · Aktiv",
     "one undated retained slot shows its last reading once");
+  assert.match(h.scrubText(h.historyView("bsh_state"), 0),
+    /X10A\nHeizstab aktiv\nLetzter empfangener Messwert · ca\. 5 min/,
+    "a fresh partner cannot change the retained lane's phase time");
   S.hist.set("bsh_state", old);
+  S.hist.set("modbus:bsh_state", peer);
 }
 {
   const prevValues = S._values, prevModbus = S._modbus;
