@@ -81,9 +81,8 @@ on:
   # pr-policy.yml workflow alone uses pull_request_target and never checks out PR code.
   pull_request:
     branches: [main]
-    # `edited` is required because title/body changes do not move the head SHA, but the hygiene gate
-    # below must replace the prior green check with a result for the current PR text.
-    types: [opened, synchronize, reopened, edited, ready_for_review]
+    # The protected PR policy checks live title, body and review records on edited.
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
     inputs:
       release:
@@ -131,9 +130,7 @@ jobs:
   # NOTE for branch protection: the required checks are now `gates` and `build`, not the three
   # old job names.
   mechanical_gates:
-    # A release is an explicit maintainer publication action for an already accepted main commit.
-    # PR/main CI owns testing; do not rerun or make those tests a prerequisite for tagging it.
-    # A later edit of a closed PR has no open-PR merge tree to bind or test.
+    # Explicit releases publish an already accepted commit. Closed PRs have no merge tree.
     if: (github.event_name != 'workflow_dispatch' || inputs.release != true) && (github.event_name != 'pull_request' || github.event.pull_request.state == 'open')
     permissions:
       contents: read
@@ -148,12 +145,108 @@ jobs:
     timeout-minutes: 60
     outputs:
       firmware: ${{ steps.changes.outputs.firmware }}
+      reuse: ${{ steps.dev_publication.outputs.reuse }}
+      tested_merge: ${{ steps.tested_merge.outputs.commit }}
     steps:
       - name: Check out tested source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Resolve completed dev publication
+        id: dev_publication
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == '0Bu/daikin-altherma-esp32'
+        env:
+          BEFORE: ${{ github.event.before }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          set +e
+          dev_source="$(./scripts/check-dev-manifest-source.sh origin)"
+          rc=$?
+          set -e
+          # Only finite helper states and an exact source SHA can influence build selection.
+          if [ "$rc" -eq 0 ] && [[ "$dev_source" =~ ^[0-9a-f]{40}$ ]]; then
+            state=ancestor
+          elif [ "$rc" -eq 1 ]; then
+            state=same
+            dev_source=""
+          else
+            state=unknown
+            dev_source=""
+          fi
+          # Missing or incompatible PR evidence keeps the original checks on the release path.
+          reuse=""
+          if [ "$state" != same ]; then
+            reuse="$(timeout 45s python3 tools/release/premerge_checks.py resolve "$BEFORE" "$GITHUB_SHA")" || reuse=""
+          fi
+          printf 'reuse=%s\n' "$reuse" >> "$GITHUB_OUTPUT"
+          printf 'state=%s\nsource=%s\n' "$state" "$dev_source" >> "$GITHUB_OUTPUT"
+
+      - name: Detect build-relevant changes
+        id: changes
+        env:
+          BEFORE: ${{ github.event.before }}
+          DEV_STATE: ${{ steps.dev_publication.outputs.state }}
+          DEV_SOURCE: ${{ steps.dev_publication.outputs.source }}
+        run: |
+          set -euo pipefail
+          # tools/web_asset/ is a BUILD/PUBLICATION INPUT, not tooling: main/CMakeLists.txt runs its
+          # minifier over the web UI and embeds the result in the image, while build-pages.sh copies
+          # vendor/LICENSE into both feeds. A change there must therefore rebuild and republish.
+          # production-ota-gate.py also binds local HEAD to manifest.source_sha; publishing its
+          # changes without a new artifact would make the corrected gate impossible to execute.
+          relevant="$(cat tools/release/build-inputs.ere)"
+          case "${{ github.event_name }}" in
+            pull_request)
+              # HEAD is the PR's merge ref, so HEAD^1 is the base tip: the diff is exactly what
+              # this PR changes, no matter how many commits it took or what landed on main since.
+              range="HEAD^1 HEAD" ;;
+            push)
+              if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+                # Compare against a valid dev feed bound to a completed publisher/readback proof.
+                # If an earlier run was superseded, cancelled or failed, firmware changes remain
+                # visible until actually built and published to the dev feed.
+                if [ "$DEV_STATE" = ancestor ] && [[ "$DEV_SOURCE" =~ ^[0-9a-f]{40}$ ]]; then
+                  range="$DEV_SOURCE ${{ github.sha }}"
+                elif [ "$DEV_STATE" = same ]; then
+                  range="same_source"
+                else
+                  echo 'dev publication evidence unproven: build conservatively'
+                  range=""
+                fi
+              elif [ -n "$BEFORE" ] && git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+                range="$BEFORE ${{ github.sha }}"
+              else
+                range=""
+              fi ;;
+            *)
+              # A manual dispatch is an explicit request to build (and possibly to cut a release).
+              range="" ;;
+          esac
+          # NOT `git diff … | grep -q`: under `set -o pipefail`, grep -q exits at the first match and
+          # git diff then dies of SIGPIPE, making the whole pipeline non-zero — so a LONG changed-file
+          # list with an early relevant match would take the else branch and skip the build in exactly
+          # the case that needs one. Materialise the list first; the failure direction matters more
+          # than the pipe.
+          if [ -z "$range" ]; then
+            changed=yes
+          elif [ "$range" = "same_source" ]; then
+            changed=no
+          else
+            git diff --name-only $range > /tmp/changed-files.txt
+            grep_rc=0
+            grep -qE "$relevant" /tmp/changed-files.txt || grep_rc=$?
+            if [ "$grep_rc" -eq 1 ]; then
+              changed=no
+            else
+              # An invalid classifier must never suppress a build.
+              changed=yes
+            fi
+          fi
+          echo "firmware=$changed" >> "$GITHUB_OUTPUT"
+          echo "build-relevant changes: $changed"
 
       - name: Bind tested merge tree to the reviewed head
         if: github.event_name == 'pull_request'
@@ -188,6 +281,14 @@ jobs:
             || { echo "tested merge tree base $tested_base is not on $BASE_REF" >&2; exit 2; }
           git merge-base --is-ancestor "$EVENT_BASE_SHA" "$tested_base" \
             || { echo "tested merge tree base $tested_base predates the reviewed base $EVENT_BASE_SHA" >&2; exit 2; }
+
+      - name: Record tested merge tree
+        id: tested_merge
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]
+          printf 'commit=%s\n' "$GITHUB_SHA" >> "$GITHUB_OUTPUT"
 
       # Which MUTATION SELF-TESTS ("still has teeth") this diff can actually affect.
       #
@@ -267,20 +368,13 @@ jobs:
           # The OTA canaries also read MQTT startup, shared HTTP/poll/source ownership and stack data.
           emit ota '^(tools/(ota|production_ota|dev_ota|stack)/|tools/agent-hooks/agent_hook\.py$|scripts/(production-ota-gate|dev-ota-upload|local-ota-evidence|check-manifest-provenance)\.py$|test/(test_.*ota.*|dev_ota_upload/)|main/(CMakeLists\.txt$|[^/]+\.(cpp|hpp)$|logic/)|sdkconfig\.defaults$|docs/(SECURITY|FEATURES)\.md$|\.github/workflows/build\.yml$)'
 
-      # Contributor-authored text: does the commit range this PR carries, or its title/description,
-      # hold personal information (an email outside GitHub's own noreply/example patterns, a phone
-      # number, a GPS coordinate pair, a pasted key or credential) or high-confidence German prose?
-      # Runs here, right after the merge-tree binding above, and receives those exact event SHAs;
-      # every other gate below needs only the checked-out tree and stays unconditional.
-      # Diff/firmware content is deliberately NOT in scope; tools/pr_hygiene/personal_info.mjs
-      # explains why a value-shaped heuristic cannot safely run over this codebase's diffs. PR-only:
-      # a push to main has already passed this as a PR, and there is no title/description to re-check.
-      - name: Audit commit and PR-text privacy and language
+      # Commit text only. The protected policy checks the current editable PR text.
+      - name: Audit commit-text privacy and language
         if: github.event_name == 'pull_request'
         env:
           EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: ./scripts/run-pr-hygiene-audit.sh --base "$EVENT_BASE_SHA" --head "$EVENT_HEAD_SHA"
+        run: ./scripts/run-pr-hygiene-audit.sh --base "$EVENT_BASE_SHA" --head "$EVENT_HEAD_SHA" --event-file ''
       - name: Verify the PR-hygiene audit still has teeth
         run: ./tools/pr_hygiene/selftest.sh
 
@@ -288,6 +382,7 @@ jobs:
       # deliberately coverage of the production headers only: counting the 6k-line test driver
       # would let new assertions make the percentage greener without exercising another branch.
       - name: Run host-side logic tests with coverage
+        if: ${{ !contains(steps.dev_publication.outputs.reuse, ' host ') }}
         run: ./scripts/run-mock-tests.sh --coverage
       - name: Verify the logic coverage gate still has teeth
         run: ./tools/coverage/selftest.sh
@@ -296,6 +391,7 @@ jobs:
       # fuzzing rather than an unending campaign, so every CI run repeats the exact parser,
       # framing and state-machine corpus and reports a reproducible failing input.
       - name: Run sanitizer-backed hostile-input properties
+        if: ${{ !contains(steps.dev_publication.outputs.reuse, ' sanitizer ') }}
         run: ./scripts/run-sanitizer-fuzz-tests.sh
 
       # Execute production pure headers behind fake clocks, NVS/allocator failpoints and fragmented
@@ -305,6 +401,7 @@ jobs:
       # HTTP behavior are exercised together. Production HTTP/MCP glue remains outside this host
       # seam; atomicity and both socket-deadline mutations prove the harness itself can fail.
       - name: Run runtime and transport integration harness
+        if: ${{ !contains(steps.dev_publication.outputs.reuse, ' runtime ') }}
         run: ./scripts/run-runtime-integration-tests.sh
 
       # Check only new files and changed C/C++ hunks with the exact formatter used by CI. Existing
@@ -359,6 +456,7 @@ jobs:
       # A separately bounded WebKit phase covers iPad portrait/landscape, native touch, full histories,
       # continuous polling and actual flow paint, with nine targeted regression controls.
       - name: Run rendered browser and accessibility gate
+        if: ${{ !contains(steps.dev_publication.outputs.reuse, ' browser ') }}
         env:
           BEFORE: ${{ github.event.before }}
           # Give the sequential iPad runs and their failure controls time to finish on hosted runners.
@@ -381,9 +479,10 @@ jobs:
       # local loop skipped them and a new sibling was invisible everywhere at once; the script globs
       # test/test_*_contract.mjs, so one now joins the gate without a workflow edit.
       - name: Test firmware source-boundary contracts
+        if: ${{ !contains(steps.dev_publication.outputs.reuse, ' contracts ') }}
         run: ./scripts/run-contract-tests.sh
       - name: Verify the OTA contracts still have teeth
-        if: steps.scope.outputs.ota == 'yes'
+        if: ${{ steps.scope.outputs.ota == 'yes' && !contains(steps.dev_publication.outputs.reuse, ' ota ') }}
         run: |
           node tools/ota/selftest.mjs
           node tools/production_ota/selftest.mjs
@@ -535,12 +634,13 @@ jobs:
       - name: Test the publish-version gate
         run: ./scripts/run-publish-version-tests.sh
       - name: Test CI trust boundaries and release contracts
+        if: ${{ !contains(steps.dev_publication.outputs.reuse, ' release_tests ') }}
         run: ./scripts/run-ci-release-contract-tests.sh
       - name: Test the coredump artifact decoder
         run: ./scripts/run-decode-coredump-tests.sh
 
       - name: Exercise the pinned coredump decoder with synthetic evidence
-        if: steps.scope.outputs.coredump == 'yes'
+        if: ${{ steps.scope.outputs.coredump == 'yes' && !contains(steps.dev_publication.outputs.reuse, ' coredump ') }}
         run: ./scripts/run-decode-coredump-integration-tests.sh
 
       # Two cheap build-contract selftests. The first proves the post-Kconfig comparison catches a
@@ -592,89 +692,6 @@ jobs:
       #
       # A push to main additionally decides the DEV PUBLISH with this flag (see the build job): a
       # docs-only merge must not move the version and hand every dev device a byte-identical image.
-      - name: Resolve completed dev publication
-        id: dev_publication
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == '0Bu/daikin-altherma-esp32'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -uo pipefail
-          set +e
-          dev_source="$(./scripts/check-dev-manifest-source.sh origin)"
-          rc=$?
-          set -e
-          # Only finite helper states and an exact source SHA can influence build selection.
-          if [ "$rc" -eq 0 ] && [[ "$dev_source" =~ ^[0-9a-f]{40}$ ]]; then
-            state=ancestor
-          elif [ "$rc" -eq 1 ]; then
-            state=same
-            dev_source=""
-          else
-            state=unknown
-            dev_source=""
-          fi
-          printf 'state=%s\nsource=%s\n' "$state" "$dev_source" >> "$GITHUB_OUTPUT"
-
-      - name: Detect build-relevant changes
-        id: changes
-        env:
-          BEFORE: ${{ github.event.before }}
-          DEV_STATE: ${{ steps.dev_publication.outputs.state }}
-          DEV_SOURCE: ${{ steps.dev_publication.outputs.source }}
-        run: |
-          set -euo pipefail
-          # tools/web_asset/ is a BUILD/PUBLICATION INPUT, not tooling: main/CMakeLists.txt runs its
-          # minifier over the web UI and embeds the result in the image, while build-pages.sh copies
-          # vendor/LICENSE into both feeds. A change there must therefore rebuild and republish.
-          # production-ota-gate.py also binds local HEAD to manifest.source_sha; publishing its
-          # changes without a new artifact would make the corrected gate impossible to execute.
-          relevant='^(LICENSE$|THIRD_PARTY_NOTICES[.]md$|main/|CMakeLists[.]txt$|sdkconfig[.]defaults$|dependencies[.]lock$|partitions[.]csv$|version[.]txt$|docs/(index[.]html|serial-port-release[.]mjs|web-installer[.]mjs|vendor/esptool-js-[0-9][0-9.]*[.](bundle[.]js|LICENSE))$|[.]github/workflows/build[.]yml$|scripts/(ci-build-all|build-pages|next-version|publish-pages-branch|require-signed|check-publish-version|idf-version|check-nonflashable-artifacts|check-dev-manifest-source)[.]sh$|scripts/pages-commit-payload[.]mjs$|scripts/(prepare-ci-history|generate-ota-changelog|check-sdkconfig-defaults|report-firmware-size|check-web-installer-plan|check-manifest-provenance|check-signing-key-continuity|check-stack-budget|check-reproducible-build|verify-published-artifacts|production-ota-gate)[.]py$|tools/(version|web_asset|release|stack)/)'
-          case "${{ github.event_name }}" in
-            pull_request)
-              # HEAD is the PR's merge ref, so HEAD^1 is the base tip: the diff is exactly what
-              # this PR changes, no matter how many commits it took or what landed on main since.
-              range="HEAD^1 HEAD" ;;
-            push)
-              if [ "${{ github.ref }}" = "refs/heads/main" ]; then
-                # Compare against a valid dev feed bound to a completed publisher/readback proof.
-                # If an earlier run was superseded, cancelled or failed, firmware changes remain
-                # visible until actually built and published to the dev feed.
-                if [ "$DEV_STATE" = ancestor ] && [[ "$DEV_SOURCE" =~ ^[0-9a-f]{40}$ ]]; then
-                  range="$DEV_SOURCE ${{ github.sha }}"
-                elif [ "$DEV_STATE" = same ]; then
-                  range="same_source"
-                else
-                  echo 'dev publication evidence unproven: build conservatively'
-                  range=""
-                fi
-              elif [ -n "$BEFORE" ] && git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
-                range="$BEFORE ${{ github.sha }}"
-              else
-                range=""
-              fi ;;
-            *)
-              # A manual dispatch is an explicit request to build (and possibly to cut a release).
-              range="" ;;
-          esac
-          # NOT `git diff … | grep -q`: under `set -o pipefail`, grep -q exits at the first match and
-          # git diff then dies of SIGPIPE, making the whole pipeline non-zero — so a LONG changed-file
-          # list with an early relevant match would take the else branch and skip the build in exactly
-          # the case that needs one. Materialise the list first; the failure direction matters more
-          # than the pipe.
-          if [ -z "$range" ]; then
-            changed=yes
-          elif [ "$range" = "same_source" ]; then
-            changed=no
-          else
-            git diff --name-only $range > /tmp/changed-files.txt
-            if grep -qE "$relevant" /tmp/changed-files.txt; then
-              changed=yes
-            else
-              changed=no
-            fi
-          fi
-          echo "firmware=$changed" >> "$GITHUB_OUTPUT"
-          echo "build-relevant changes: $changed"
 
   # Required untrusted-source check. It always reflects mechanical_gates, while the expensive
   # compile steps run only when the diff reaches firmware or published-site inputs. This job stays
@@ -707,8 +724,11 @@ jobs:
           EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           BASE_REF: ${{ github.event.pull_request.base.ref }}
+          TESTED_MERGE_SHA: ${{ needs.mechanical_gates.outputs.tested_merge }}
         run: |
           set -euo pipefail
+          [ "$(git rev-parse HEAD)" = "$TESTED_MERGE_SHA" ] \
+            || { echo "the compile checkout differs from the tested merge commit" >&2; exit 2; }
           tested_base="$(git rev-parse HEAD^1)"
           tested_head="$(git rev-parse HEAD^2)"
           # The HEAD binding is exact and stays exact: it is what stops CI from attesting a tree
@@ -831,8 +851,7 @@ jobs:
   # separate publisher below owns contents:write and never receives the private key.
   trusted_build:
     needs: [mechanical_gates]
-    # Skipped — not failed — when nothing the image or the site is made of changed. A skipped job
-    # still reports its check, so this stays compatible with `build` as a required check.
+    # The signed handoff is created only after the main checks succeed.
     if: >-
       always() && github.ref == 'refs/heads/main' &&
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
@@ -1039,6 +1058,7 @@ jobs:
           fi
 
       - name: Build firmware
+        if: ${{ !contains(needs.mechanical_gates.outputs.reuse, ' cjson ') }}
         uses: espressif/esp-idf-ci-action@e6f5c74232b1ccd4c97ed641f1e48553853f1fd5  # v1.2.0
         with:
           esp_idf_version: v6.1
@@ -1056,6 +1076,15 @@ jobs:
             apt-get update &&
             apt-get install -y --no-install-recommends clang-18 libclang-rt-18-dev &&
             ./scripts/ci-build-all.sh --source-sha "${{ github.sha }}" --changelog-file ota-changelog.json "${{ steps.stamp.outputs.disp }}"
+
+      - name: Build firmware with tested cJSON consumers
+        if: contains(needs.mechanical_gates.outputs.reuse, ' cjson ')
+        uses: espressif/esp-idf-ci-action@e6f5c74232b1ccd4c97ed641f1e48553853f1fd5  # v1.2.0
+        with:
+          esp_idf_version: v6.1
+          target: esp32s3
+          command: >-
+            ./scripts/ci-build-all.sh --with-tested-cjson --source-sha "${{ github.sha }}" --changelog-file ota-changelog.json "${{ steps.stamp.outputs.disp }}"
 
       - name: Publish firmware size summary
         if: always()
@@ -1082,7 +1111,7 @@ jobs:
           path: .ccache
           key: ccache-esp32s3-${{ steps.cckey.outputs.hash }}-${{ github.run_id }}
 
-      # This is the only cross-job handoff. It contains signed flashables, but never the private key;
+      # This handoff contains signed flashables, but never the private key;
       # the publisher downloads it with actions:read and owns the only contents:write token.
       # A full rerun rebuilds the same run/source/version; replace only this run-local bundle.
       # A failed-jobs-only publisher retry still downloads its original unchanged handoff.
@@ -1108,9 +1137,7 @@ jobs:
   # key to a write-capable job.
   publish:
     needs: [trusted_build]
-    # `trusted_build` deliberately admits a release dispatch through a skipped mechanical_gates job.
-    # `always()` prevents GitHub's implicit success() from propagating that transitive skip while
-    # the explicit result check still fails closed when the signed build itself did not succeed.
+    # An explicit stable release has already been accepted before dispatch.
     if: always() && needs.trusted_build.result == 'success'
     runs-on: ubuntu-26.04
     timeout-minutes: 10

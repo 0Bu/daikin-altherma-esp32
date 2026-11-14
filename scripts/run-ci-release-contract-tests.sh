@@ -56,6 +56,11 @@ check_rc "publishing mode requires explicit source SHA" 2 \
 check_rc "default mode refuses missing key" 1 \
     env OTA_SIGNING_KEY_FILE="$T/no-such-key.pem" "$T/pack/scripts/ci-build-all.sh" \
         --source-sha "$SOURCE_SHA" 1.0.0
+check_rc "cJSON reuse is refused for a stable build" 2 \
+    "$T/pack/scripts/ci-build-all.sh" --with-tested-cjson --source-sha "$SOURCE_SHA" 1.0.0
+check_rc "cJSON reuse is refused for an untrusted compile-only build" 2 \
+    "$T/pack/scripts/ci-build-all.sh" --compile-only --with-tested-cjson \
+        --source-sha "$SOURCE_SHA" 1.0.0-dev.1
 if [ ! -e "$T/pack/dist/manifest.json" ] && ! compgen -G "$T/pack/dist/*.bin" >/dev/null; then
     ok "missing-key failure leaves no flashable artifact"
 else
@@ -120,6 +125,10 @@ check_rc "filtered checkout and offline historical evidence pass" 0 \
     python3 tools/release/test_ci_checkout.py
 check_rc "publication efficiency retains complete verification" 0 \
     python3 tools/release/test_publication_efficiency.py
+check_rc "main reuses only completed PR checks for the identical Git tree and base" 0 \
+    python3 tools/release/test_premerge_checks.py
+check_rc "production OTA reuses only matching local host checks" 0 \
+    python3 tools/release/test_local_checks.py
 check_rc "release tag lookup refuses unknown remote identity" 0 \
     node test/test_release_tag_guard_contract.mjs
 check_rc "manifest provenance validator self-test passes" 0 \
@@ -197,8 +206,8 @@ trusted = jobs["trusted_build"]
 require("github.ref == 'refs/heads/main'" in trusted, "signed build is not restricted to main")
 require("always()" in trusted and
         "github.event_name == 'workflow_dispatch' && inputs.release == true" in trusted and
-        "needs.mechanical_gates.result == 'success'" in trusted,
-        "trusted build does not bypass tests only for an explicit release dispatch")
+        "needs.mechanical_gates.result == 'success'" in trusted and "needs: [mechanical_gates]" in trusted,
+        "trusted signing must wait for successful checks outside explicit release")
 require("environment:" not in trusted,
         "trusted build unexpectedly depends on an environment instead of the repository secret")
 require("contents: read" in trusted and "contents: write" not in trusted,
@@ -457,7 +466,7 @@ require('def post_update_once(\n    endpoint: ResolvedHttpEndpoint' in ota_gate 
 publish = jobs["publish"]
 require("needs: [trusted_build]" in publish and
         "if: always() && needs.trusted_build.result == 'success'" in publish,
-        "publisher depends on something other than the requested signed build")
+        "publisher must require successful trusted build")
 require("contents: write" in publish and "actions: read" in publish,
         "publisher permissions are incomplete")
 require("OTA_SIGNING_KEY" not in publish, "write-capable publisher can see signing key")
@@ -508,23 +517,24 @@ require("Rebind release tag immediately before release mutation" in publish and
         release_create < publish.find("Verify release tag target"),
         "release tag is not bound before mutation and verified after creation")
 
-relevant = re.search(r"relevant='([^']+)'", text)
-require(relevant is not None and "web-installer[.]mjs" in relevant.group(1),
+relevant = (workflow_dir.parents[1] / "tools/release/build-inputs.ere").read_text().strip()
+require(text.count('relevant="$(cat tools/release/build-inputs.ere)"') == 1
+        and "web-installer[.]mjs" in relevant,
         "docs/web-installer.mjs is missing from change trigger")
-require(re.search(relevant.group(1), "docs/vendor/esptool-js-0.7.0.bundle.js") is not None,
+require(re.search(relevant, "docs/vendor/esptool-js-0.7.0.bundle.js") is not None,
         "the vendored esptool-js bundle is missing from change trigger")
-require(re.search(relevant.group(1), "scripts/production-ota-gate.py") is not None,
+require(re.search(relevant, "scripts/production-ota-gate.py") is not None,
         "production OTA gate changes do not publish an exact-source dev artifact")
 for release_input in (
     "scripts/check-signing-key-continuity.py", "scripts/check-stack-budget.py",
     "scripts/check-reproducible-build.py", "scripts/verify-published-artifacts.py",
     "tools/release/ota_signing_key_digest.txt", "tools/stack/budgets.json",
 ):
-    require(re.search(relevant.group(1), release_input) is not None,
+    require(re.search(relevant, release_input) is not None,
             f"release input {release_input} is missing from change trigger")
-require("LICENSE$" in relevant.group(1) and "THIRD_PARTY_NOTICES[.]md$" in relevant.group(1),
+require("LICENSE$" in relevant and "THIRD_PARTY_NOTICES[.]md$" in relevant,
         "redistribution notices are missing from the Pages build trigger")
-require(re.search(relevant.group(1), "tools/web_asset/vendor/LICENSE") is not None,
+require(re.search(relevant, "tools/web_asset/vendor/LICENSE") is not None,
         "the Apache license source is missing from the Pages build trigger")
 require("release_version:" in text and "release-resume" in text and "dev-resume" in text,
         "explicit/idempotent feed resume contract is missing")
@@ -571,7 +581,7 @@ require("  pull_request:\n" in text and "  pull_request_target:\n" not in text,
 require("  pull_request_target:\n" in policy_text and "\n  gates:\n" in policy_text,
         "separate trusted policy workflow is missing")
 require("working-directory: .trusted-policy" in policy_text and
-        "ref: ${{ github.event.pull_request.base.sha }}" in policy_text,
+        "ref: ${{ github.workflow_sha }}" in policy_text,
         "policy workflow does not execute the protected-base verifier")
 require("refs/pull/" not in policy_text and "allow-unsafe-pr-checkout" not in policy_text and
         "secrets." not in policy_text,

@@ -137,8 +137,27 @@ class PublicationEfficiencyTests(unittest.TestCase):
             if job == 'publish':
                 self.assertNotIn('secrets.', block)
                 self.assertIn('--attempts 30', block)
-        relevant = re.search(r"relevant='([^']+)'", workflow).group(1)
+        relevant = (ROOT / 'tools/release/build-inputs.ere').read_text().strip()
         self.assertIsNotNone(re.search(relevant, 'scripts/prepare-ci-history.py'))
+
+    def test_pr_reuse_preserves_signed_build_and_stack_check(self):
+        from premerge_checks import MECHANICAL
+
+        workflow = (ROOT / '.github/workflows/build.yml').read_text()
+        mechanical = workflow.split('  mechanical_gates:\n', 1)[1].split('  build:\n', 1)[0]
+        trusted = workflow.split('  trusted_build:\n', 1)[1].split('  publish:\n', 1)[0]
+        for key, name in MECHANICAL.items():
+            step = mechanical.split(f'      - name: {name}\n', 1)[1].split('      - name: ', 1)[0]
+            self.assertIn(f"!contains(steps.dev_publication.outputs.reuse, ' {key} ')", step)
+        self.assertIn('needs: [mechanical_gates]', trusted)
+        self.assertIn("needs.mechanical_gates.result == 'success'", trusted)
+        self.assertIn("!contains(needs.mechanical_gates.outputs.reuse, ' cjson ')", trusted)
+        self.assertIn("--with-tested-cjson --source-sha", trusted)
+        package = (ROOT / 'scripts/ci-build-all.sh').read_text()
+        stack_check = package.index('python3 scripts/check-stack-budget.py --elf')
+        reuse_boundary = package.index('if [ "$TEST_CJSON" = true ]; then', stack_check)
+        self.assertLess(stack_check, reuse_boundary)
+        self.assertRegex(package[reuse_boundary:], r"fi\n    sfx=")
 
 
 if __name__ == '__main__':

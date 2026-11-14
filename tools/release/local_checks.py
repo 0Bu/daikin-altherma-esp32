@@ -1,0 +1,276 @@
+#!/usr/bin/env python3
+"""Run the official OTA host checks before merge and retain same-user local evidence."""
+
+from contextlib import contextmanager
+import hashlib
+import json
+import os
+from pathlib import Path
+import platform
+import pwd
+import re
+import stat
+import subprocess
+import sys
+import tempfile
+import time
+from uuid import uuid4
+
+
+ROOT = Path(__file__).resolve().parents[2]
+COMMANDS = (
+    ("scripts/run-mock-tests.sh", "--coverage"),
+    ("scripts/run-contract-tests.sh",),
+)
+MAX_AGE_S = 24 * 60 * 60
+MAX_RECEIPT_BYTES = 4 * 1024 * 1024
+SHA = re.compile(r"[0-9a-f]{40}")
+
+
+class CheckError(ValueError):
+    """Local verification could not establish the tested source or pass the checks."""
+
+
+def check_environment():
+    # Do not borrow a caller-supplied Git worktree/index or CI coverage runner identity.
+    ignored = {"BASH_ENV", "ENV", "NODE_OPTIONS", "GITHUB_ACTIONS", "RUNNER_OS", "ImageOS"}
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith("GIT_") and key not in ignored}
+    env["GIT_NO_REPLACE_OBJECTS"] = "1"
+    env["GIT_OPTIONAL_LOCKS"] = "0"
+    env["GIT_CONFIG_COUNT"] = "2"
+    env["GIT_CONFIG_KEY_0"] = "core.fsmonitor"
+    env["GIT_CONFIG_VALUE_0"] = "false"
+    env["GIT_CONFIG_KEY_1"] = "core.fileMode"
+    env["GIT_CONFIG_VALUE_1"] = "true"
+    return env
+
+
+def git(root, env, *args):
+    try:
+        result = subprocess.run(["git", *args], cwd=root, env=env, stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL, check=False, timeout=30)
+    except subprocess.TimeoutExpired as error:
+        raise CheckError("Git did not return the local source identity") from error
+    if result.returncode:
+        raise CheckError("Git could not establish the local source identity")
+    return result.stdout.decode("utf-8", errors="surrogateescape")
+
+
+def source(root, env):
+    if git(root, env, "status", "--porcelain=v1", "--untracked-files=all"):
+        raise CheckError("local release checks need a clean checkout")
+    if any(not entry.startswith("H ") for entry in git(root, env, "ls-files", "-v", "-z").split("\0") if entry):
+        raise CheckError("local release checks need an ordinary index without hidden or sparse paths")
+    head = git(root, env, "rev-parse", "--verify", "HEAD").strip()
+    tree = git(root, env, "rev-parse", "--verify", "HEAD^{tree}").strip()
+    base = git(root, env, "rev-parse", "--verify", "HEAD^1^{commit}").strip()
+    if not all(SHA.fullmatch(value) for value in (head, tree, base)):
+        raise CheckError("local release checks require the full HEAD, tree and first-parent SHAs")
+    # Coverage reads the baseline from HEAD and HEAD^1. A changed squash parent retires the proof.
+    return head, tree, base
+
+
+@contextmanager
+def frozen_checkout(root, env, identity):
+    # Only Git objects are shared. The index, metadata and working files are private, and ignored
+    # files in the caller's checkout do not enter the test. Coverage can still read both revisions.
+    with tempfile.TemporaryDirectory(prefix="daikin-release-source-") as scratch:
+        checkout = Path(scratch) / "source"
+        offline = {**env, "GIT_NO_LAZY_FETCH": "1", "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
+        git(root, offline, "clone", "--quiet", "--shared", "--no-checkout", "--no-tags",
+            "--template=", str(root), str(checkout))
+        git(checkout, offline, "-c", "core.hooksPath=/dev/null",
+            "checkout", "--detach", "--quiet", identity[0])
+        if source(checkout, offline) != identity:
+            raise CheckError("isolated local checkout does not match the verified Git source")
+        # Do not let a partial clone silently drop the inherited coverage floor if its blob is
+        # missing. A parent with no baseline is valid, but an unreadable one is not.
+        coverage_file = "tools/coverage/branch_baseline.json"
+        if git(checkout, offline, "ls-tree", "HEAD^1", "--", coverage_file):
+            git(checkout, offline, "cat-file", "-e", f"HEAD^1:{coverage_file}")
+        yield checkout, offline
+        if source(checkout, offline) != identity:
+            raise CheckError("isolated Git source changed during local release checks")
+
+
+def account_home():
+    return Path(pwd.getpwuid(os.getuid()).pw_dir).resolve()
+
+
+def cache_path():
+    return account_home() / ".cache" / "daikin-altherma-esp32" / "release-checks"
+
+
+@contextmanager
+def open_cache(path, *, create=False):
+    """Use an owned cache without following any symlink along the path below the home directory."""
+    home = account_home()
+    parts = path.relative_to(home).parts
+    if not parts or ".." in parts:
+        raise CheckError("invalid local release cache path")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    descriptor = os.open(home, flags)
+    try:
+        info = os.fstat(descriptor)
+        if info.st_uid != os.getuid() or info.st_mode & 0o022:
+            raise CheckError("home directory must be owned and protected from writes")
+        for part in parts:
+            if create:
+                try:
+                    os.mkdir(part, 0o700, dir_fd=descriptor)
+                except FileExistsError:
+                    pass
+            next_directory = os.open(part, flags, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = next_directory
+            info = os.fstat(descriptor)
+            if info.st_uid != os.getuid() or info.st_mode & 0o022:
+                raise CheckError("local release cache ancestors must be owned and protected from writes")
+        if info.st_mode & 0o077:
+            raise CheckError("local release cache must be private to the current user")
+        yield descriptor
+    finally:
+        os.close(descriptor)
+
+
+def machine_id():
+    identity = [platform.system(), platform.machine(), platform.node(), os.getuid()]
+    return hashlib.sha256(json.dumps(identity).encode()).hexdigest()
+
+
+def receipt_name(identity):
+    _, tree, base = identity
+    return f"{tree}-{base}.json"
+
+
+def sha256(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def unique_fields(pairs):
+    fields = dict(pairs)
+    if len(fields) != len(pairs):
+        raise CheckError("duplicate local release receipt field")
+    return fields
+
+
+def load_receipt(directory, identity):
+    try:
+        fd = os.open(receipt_name(identity), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                     dir_fd=directory)
+        with os.fdopen(fd, "rb") as stream:
+            info = os.fstat(stream.fileno())
+            if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_uid != os.getuid()
+                    or info.st_mode & 0o077 or not 0 < info.st_size <= MAX_RECEIPT_BYTES):
+                return None
+            data = stream.read(MAX_RECEIPT_BYTES + 1)
+        if len(data) != info.st_size:
+            return None
+        doc = json.loads(data, object_pairs_hook=unique_fields)
+        _, tree, base = identity
+        if (type(doc["schema_version"]) is not int or doc["schema_version"] != 1
+                or doc["machine"] != machine_id() or doc["tree"] != tree or doc["base"] != base
+                or not SHA.fullmatch(doc["head"]) or type(doc["finished_at"]) is not int
+                or not 0 <= time.time() - doc["finished_at"] <= MAX_AGE_S):
+            return None
+        if not isinstance(doc["checks"], list) or len(doc["checks"]) != len(COMMANDS):
+            return None
+        for record, command in zip(doc["checks"], COMMANDS):
+            if (record["command"] != list(command) or type(record["exit_code"]) is not int
+                    or record["exit_code"] != 0 or not record["log"]
+                    or sha256(record["log"].encode()) != record["log_sha256"]):
+                return None
+        return doc
+    except (AttributeError, KeyError, TypeError, ValueError, OSError, RecursionError):
+        return None
+
+
+def save_receipt(directory, identity, records):
+    head, tree, base = identity
+    doc = {"schema_version": 1, "machine": machine_id(), "tree": tree, "base": base, "head": head,
+           "finished_at": int(time.time()), "checks": records}
+    payload = (json.dumps(doc, ensure_ascii=False) + "\n").encode()
+    if len(payload) > MAX_RECEIPT_BYTES:
+        raise CheckError("local release check logs exceed the receipt size limit")
+    tmp = f".release-checks-{uuid4().hex}"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=directory)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(tmp, receipt_name(identity), src_dir_fd=directory, dst_dir_fd=directory)
+        os.fsync(directory)
+    finally:
+        try:
+            os.unlink(tmp, dir_fd=directory)
+        except FileNotFoundError:
+            pass
+
+
+def run_checks(root, env):
+    records = []
+    for command in COMMANDS:
+        print(f"Local release check: {' '.join(command)}", flush=True)
+        with tempfile.TemporaryFile() as output:
+            try:
+                result = subprocess.run([str(root / command[0]), *command[1:]], cwd=root, env=env,
+                                        stdout=output, stderr=subprocess.STDOUT, check=False, timeout=1800)
+            except subprocess.TimeoutExpired as error:
+                raise CheckError("local release check exceeded its deadline") from error
+            output.seek(0)
+            captured = output.read(MAX_RECEIPT_BYTES + 1)
+        log = captured.decode("utf-8", errors="replace")
+        if result.returncode:
+            print(log, end="", file=sys.stderr)
+            raise CheckError(f"{command[0]} failed with exit code {result.returncode}")
+        if not log or len(captured) > MAX_RECEIPT_BYTES:
+            raise CheckError(f"{command[0]} did not produce a bounded check log")
+        print(log, end="", flush=True)
+        records.append({"command": list(command), "exit_code": 0,
+                        "log": log, "log_sha256": sha256(log.encode())})
+    return records
+
+
+def verify(root, *, premerge=False, expected_head=None):
+    env = check_environment()
+    identity = source(root, env)
+    if expected_head is not None and identity[0] != expected_head:
+        raise CheckError("local release check HEAD differs from the expected source")
+    if premerge and identity[2] != git(root, env, "rev-parse", "--verify", "origin/main^{commit}").strip():
+        raise CheckError("first parent must match refreshed origin/main; use the exact PR merge tree")
+
+    path = cache_path()
+    try:
+        with open_cache(path) as directory:
+            cached = load_receipt(directory, identity)
+    except (OSError, ValueError):
+        cached = None
+    if cached:
+        if source(root, env) != identity:
+            raise CheckError("source changed while checking local release evidence")
+        print(f"Local release checks reused for exact tree {identity[1]} and base {identity[2]}", flush=True)
+        return True
+
+    with frozen_checkout(root, env, identity) as (checkout, offline):
+        records = run_checks(checkout, offline)
+    if source(root, env) != identity:
+        raise CheckError("source changed during local release checks")
+    try:
+        with open_cache(path, create=True) as directory:
+            save_receipt(directory, identity, records)
+    except (OSError, ValueError) as error:
+        if premerge:
+            raise CheckError("local checks passed but the private receipt could not be saved") from error
+        print("Local checks passed without a reusable receipt", file=sys.stderr)
+    return False
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 1:
+        sys.exit("Usage: python3 tools/release/local_checks.py")
+    try:
+        verify(ROOT, premerge=True)
+    except (CheckError, OSError) as error:
+        sys.exit(f"Local release checks: {error}")

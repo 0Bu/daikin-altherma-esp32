@@ -48,8 +48,10 @@ UI evidence remain distinct.
 
 ### CI checkout and publication cost
 
-The dev critical path is `mechanical_gates → trusted_build → publish`. Local development checks
-do not replace any of these independent CI gates. CI/release contracts own the provenance, signing,
+The dev workflow starts its signed build after the mechanical checks succeed. On a single squash
+merge, main can reuse successful steps from the completed PR workflow for the identical Git tree and
+first parent. A changed workflow, missing proof or skipped step keeps its regular check. The
+signing job still builds the exact main commit. CI/release contracts own the provenance, signing,
 stack-budget, reproducibility, readback and OTA selftests; the build-contract step adds only its
 distinct configuration-default and size-report tests. Actual ELF and signed-artifact checks still
 run against each build. The publisher verifies signatures, then its candidate gate validates the
@@ -358,7 +360,13 @@ there is no timing-based legacy production fallback. This gate creates no releas
 Report host/CI checks, signed artifact identity, each injection, pre-reboot verifier/heap/stack,
 probation, API/source liveness, retained MQTT and rendered UI evidence separately.
 The private atomic receipt journal checkpoints before the sole POST and preserves completed
-artifact/bench/production stages. An ambiguous response leaves execution unknown; journal failure
+artifact/bench/production stages and elapsed times. Before merge, maintainers can run
+`python3 tools/release/local_checks.py` on the clean PR merge tree whose first parent is refreshed
+`origin/main`. The runner tests an isolated checkout. The official gate reuses those successful
+host and contract checks for 24 hours on the same machine/user when the published commit has the
+identical tree and first parent. The cache lives under
+`~/.cache/daikin-altherma-esp32/release-checks/`. The gate repeats checks when their evidence is
+unavailable or incompatible. An ambiguous response leaves execution unknown; journal failure
 before a write blocks it. Public output includes only typed delivery evidence, excluding device
 identifiers, complete status, topics, coordinates and raw errors. Failure handling neither queries
 the device nor retries and exits with status 2.

@@ -85,6 +85,9 @@ class CIEventMatrixTests(unittest.TestCase):
         self.git('branch', '-M', 'main')
         self.write('README.md')
         self.write('main/hp_poll.cpp')
+        inputs = self.root / 'tools/release/build-inputs.ere'
+        inputs.parent.mkdir(parents=True)
+        shutil.copyfile(PROJECT / 'tools/release/build-inputs.ere', inputs)
         self.commit()
         self.baseline = self.git('rev-parse', 'HEAD').strip()
 
@@ -219,6 +222,11 @@ class CIEventMatrixTests(unittest.TestCase):
         self.assertNotEqual(values.get('firmware'), 'no')
         self.scope(SCOPES, PATH=self.git_diff_fixture(fail=True))
 
+    def test_invalid_release_input_pattern_cannot_skip_firmware(self):
+        (self.root / 'tools/release/build-inputs.ere').write_text('[\n')
+        self.commit()
+        self.classify('yes')
+
     def test_actual_mutation_scope_mapping_and_fallback(self):
         mapping = {
             'scripts/run-decode-coredump-tests.sh': {'coredump'},
@@ -288,10 +296,13 @@ class CIEventMatrixTests(unittest.TestCase):
             self.classify('no', workflow=mutated)
         self.write('LICENSE')
         self.commit()
-        mutated = self.workflow.replace('^(LICENSE$|', '^(')
-        self.assertNotEqual(mutated, self.workflow)
+        inputs = self.root / 'tools/release/build-inputs.ere'
+        old = inputs.read_text()
+        inputs.write_text(old.replace('^(LICENSE$|', '^('))
+        self.assertNotEqual(inputs.read_text(), old)
         with self.assertRaises(AssertionError):
-            self.classify('yes', workflow=mutated)
+            self.classify('yes')
+        inputs.write_text(old)
         self.write('scripts/production-ota-gate.py')
         self.commit()
         mutated = self.workflow.replace("emit ota '^(", "emit ota '^never-match/(")

@@ -42,6 +42,7 @@ MODE=publish
 SOURCE_SHA=""
 CHANGELOG_FILE=""
 VERIFY_REPRODUCIBLE=false
+TEST_CJSON=true
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --compile-only)
@@ -52,6 +53,9 @@ while [ "$#" -gt 0 ]; do
                 echo "ci-build-all: --verify-reproducible repeated" >&2; exit 2;
             }
             VERIFY_REPRODUCIBLE=true; shift ;;
+        --with-tested-cjson)
+            [ "$TEST_CJSON" = true ] || { echo "ci-build-all: repeated cJSON option" >&2; exit 2; }
+            TEST_CJSON=false; shift ;;
         --source-sha)
             [ -z "$SOURCE_SHA" ] || { echo "ci-build-all: --source-sha repeated" >&2; exit 2; }
             [ "$#" -ge 2 ] || { echo "ci-build-all: --source-sha requires 40 hex characters" >&2; exit 2; }
@@ -79,6 +83,10 @@ fi
 }
 [ "$VERIFY_REPRODUCIBLE" = false ] || [ "$MODE" = publish ] || {
     echo "ci-build-all: --verify-reproducible is only valid for a signed publishing build" >&2
+    exit 2
+}
+[ "$TEST_CJSON" = true ] || { [ "$MODE" = publish ] && [ "$VERIFY_REPRODUCIBLE" = false ]; } || {
+    echo "ci-build-all: cJSON evidence reuse requires a development publication build" >&2
     exit 2
 }
 
@@ -113,6 +121,10 @@ else
 fi
 
 VERSION="${1:-$(tr -d '[:space:]' < version.txt)}"
+[ "$TEST_CJSON" = true ] || [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+-dev\.[0-9]+$ ]] || {
+    echo "ci-build-all: cJSON evidence reuse requires a dev version" >&2
+    exit 2
+}
 TARGETS=(esp32s3)
 DIST=dist; rm -rf "$DIST"; mkdir -p "$DIST"
 SIGN_KEY="${OTA_SIGNING_KEY_FILE:-ota_signing_key.pem}"
@@ -199,15 +211,16 @@ for t in "${TARGETS[@]}"; do
         ccache -s || true
     fi
     python3 scripts/check-stack-budget.py --elf "$BUILD_DIR/daikin-altherma-esp32.elf"
-    # Resolve cJSON through the pinned target build before the complete production consumers run.
-    python3 test/json_ingress_runtime/run.py --real-cjson managed_components/espressif__cjson/cJSON
-    python3 test/mqtt_runtime/run.py --real-cjson managed_components/espressif__cjson/cJSON
-    python3 test/query_http_runtime/run.py --real-cjson managed_components/espressif__cjson/cJSON
-    # Retain the complete default-compiler matrix, then instrument the same source and cJSON with
-    # explicit Clang 18: GCC PR71962 rejects the inline constexpr profile guards under UBSan.
-    python3 test/http_config_runtime/run.py --real-cjson managed_components/espressif__cjson/cJSON
-    CC=clang-18 CXX=clang++-18 python3 test/http_config_runtime/run.py \
-        --real-cjson managed_components/espressif__cjson/cJSON --sanitizer undefined
+    if [ "$TEST_CJSON" = true ]; then
+        # Resolve cJSON through the pinned target build before testing its production consumers.
+        python3 test/json_ingress_runtime/run.py --real-cjson managed_components/espressif__cjson/cJSON
+        python3 test/mqtt_runtime/run.py --real-cjson managed_components/espressif__cjson/cJSON
+        python3 test/query_http_runtime/run.py --real-cjson managed_components/espressif__cjson/cJSON
+        python3 test/http_config_runtime/run.py --real-cjson managed_components/espressif__cjson/cJSON
+        # GCC PR71962 rejects the inline constexpr profile guards under UBSan.
+        CC=clang-18 CXX=clang++-18 python3 test/http_config_runtime/run.py \
+            --real-cjson managed_components/espressif__cjson/cJSON --sanitizer undefined
+    fi
     sfx="$(suffix "$t")"
     app="$BUILD_DIR/daikin-altherma-esp32.bin"
     repro_app=""

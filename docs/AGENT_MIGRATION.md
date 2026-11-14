@@ -116,7 +116,8 @@ fails closed on both missing and extra project skills.
   `tools/uigif/gif_stamp.txt`.
 - PR checkbox parsing proves an exact, applicable record stamped for the current head; it does not
   authenticate the PR-body editor. Maintainer review and GitHub merge authorization remain the actor
-  trust boundary.
+  trust boundary. The checkbox records an already completed review. The protected policy checks
+  current PR text and records on edits without restarting the source build.
 - Authoritative CI has one record-free platform-automerge exception. It binds current PR metadata
   to complete immutable GitHub commit-file pages for the exact one-commit head. The data-only
   protected-base `pr-policy.yml` workflow, which never loads PR code, accepts only a same-repository

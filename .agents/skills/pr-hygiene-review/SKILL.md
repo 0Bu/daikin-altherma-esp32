@@ -66,8 +66,8 @@ human read:
 scripts/run-pr-hygiene-audit.sh
 ```
 
-Locally, with no PR open yet, it checks the commit range only and says so; in CI, under the
-`pull_request` event, it also checks the live PR title/description.
+Locally, with no PR open yet, it checks the commit range only and says so. In CI, the source workflow
+checks the commit range, and the protected PR policy checks the current title and description on edits.
 
 If a finding is a false positive (a version string the phone-number heuristic misread, a technical
 term the German heuristic misread), the failure output names a SHA-256 fingerprint of the exact

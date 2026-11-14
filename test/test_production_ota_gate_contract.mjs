@@ -161,6 +161,8 @@ for label, transfer_sample in cases:
     def bench_cycle(**kwargs):
         events.append("stress bench.invalid")
         return {"cold_stress": {"uptime": [1, 181], "counters_after": {}}}
+    def verify_checks(source_sha):
+        assert source_sha == args.expected_source_sha, "host checks lost the artifact source binding"
     replacements = {
         "parse_args": lambda: args, "request_limited_bytes": lambda *a, **k: b"{}",
         "validate_manifest": lambda *a: "https://feed.invalid/app.bin",
@@ -168,7 +170,7 @@ for label, transfer_sample in cases:
         "require_official_manifest_snapshot": lambda *a: None,
         "verify_local_source": lambda *a: None, "request_bytes": lambda *a, **k: b"image",
         "verify_image": lambda *a: target_elf, "verify_http_range_support": lambda *a: None,
-        "run_local_gates": lambda: None,
+        "run_local_gates": verify_checks,
         "load_inventory": lambda: {role: {"host": f"{role}.invalid", "mac": role}
                                     for role in ("bench", "production")},
         "validate_release_manifest": lambda *a: ("1.0.0", "c" * 64, "https://feed.invalid/release.bin", "d" * 40),
@@ -533,6 +535,9 @@ for failing_phase in (None, "ack lost", "compact ack lost", "return", "stress", 
         check(saved["phase"] == "production_write_attempted", "attempt was not durable before POST")
         check(saved["receipt"]["production"].get("executed") is None, "uncertain POST claimed false or complete")
         check(len(syncs) == 2 * len(saved["phases"]), "attempt lacked durable file/directory fsync")
+        times = saved.get("phase_elapsed_ms", [])
+        check(len(times) == len(saved["phases"]) and times == sorted(times) and times[0] >= 0,
+              "journal did not retain chronological monotonic phase timings")
         events.append("post")
         if failing_phase == "ack lost": stop(OSError("private-host private-topic private-coordinate"))
         if failing_phase == "compact ack lost": stop(gate["CompactTransportError"]("private-host disconnected before acknowledgment"))
@@ -564,7 +569,7 @@ for failing_phase in (None, "ack lost", "compact ack lost", "return", "stress", 
         "require_official_manifest_snapshot": lambda *a: None,
         "validate_manifest": lambda *a: "https://feed.invalid/app.bin", "require_legacy_bench_restore_manifest": lambda *a: None,
         "verify_local_source": lambda *a: None, "request_bytes": lambda *a, **k: b"image",
-        "verify_image": lambda *a: elf, "verify_http_range_support": lambda *a: None, "run_local_gates": lambda: None,
+        "verify_image": lambda *a: elf, "verify_http_range_support": lambda *a: None, "run_local_gates": lambda *args: None,
         "load_inventory": lambda: {role: {"host": role + ".invalid", "mac": "private-mac"} for role in ("bench", "production")},
         "validate_release_manifest": lambda *a: ("1.0.2", "c" * 64, "https://feed.invalid/release.bin", "d" * 40),
         "verify_release_source_binding": lambda *a: None, "request_json": read_json,
@@ -1373,7 +1378,7 @@ with patch.dict(ns, {"parse_args": lambda: args,
     "request_limited_bytes": lambda url, *a, **k: documents[url.split("?")[0]],
     "verify_release_source_binding": lambda *a, **k: None, "verify_local_source": lambda *a: None,
     "request_bytes": lambda *a, **k: b"image", "verify_image": lambda *a: elf,
-    "verify_http_range_support": lambda *a: None, "run_local_gates": lambda: None,
+    "verify_http_range_support": lambda *a: None, "run_local_gates": lambda *args: None,
     "load_inventory": lambda: {"bench": {"host": "bench.invalid", "mac": mac},
                                "production": {"host": "production.invalid", "mac": "other"}},
     "request_json": lambda host, route: {"version": target, "app_elf_sha256": elf, "ota": {"channel": "dev"},
@@ -1522,7 +1527,7 @@ for feed in (dev, root):
     replacements = {"parse_args": lambda: args, "request_limited_bytes": read_manifest,
         "verify_local_source": lambda *a: None, "verify_release_source_binding": verify_tag,
         "request_bytes": lambda *a, **k: b"image", "verify_image": lambda *a: elf,
-        "verify_http_range_support": lambda *a: None, "run_local_gates": lambda: None,
+        "verify_http_range_support": lambda *a: None, "run_local_gates": lambda *args: None,
         "load_inventory": lambda: {"bench": {"host": "bench.invalid", "mac": bench_mac},
                                    "production": {"host": "production.invalid", "mac": prod_mac}},
         "request_json": read_bench,

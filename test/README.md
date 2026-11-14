@@ -13,8 +13,9 @@ layout and accessibility evidence. None of these contacts a heat pump or proves 
 
 For an ordinary PR, run this complete local gate set. During development, start with the affected
 surface; the table below explains what each result means. Freeze code and documentation before the
-complete acceptance run. A relevant change or new finding invalidates only the affected evidence;
-do not repeat the complete suite without a reason. Local results never replace publication CI.
+complete acceptance run. A relevant change or new finding invalidates only the affected evidence.
+Run faster complete checks locally before merging, then record their results and any missing
+evidence in the PR.
 
 ```bash
 scripts/run-mock-tests.sh --coverage
@@ -393,7 +394,9 @@ scripts/run-build-change-detection-tests.sh
 selective historical-source hydration, an omitted historical binary and fail-closed missing inputs.
 Set `DAIKIN_CI_CHECKOUT_DOCKER_IMAGE=espressif/idf:v6.1` to add a read-only, network-disabled Linux
 read of the hydrated witness. `test_publication_efficiency.py` binds single CI selftest ownership,
-trust boundaries and manifest-first waiting to complete file/signature checks. Pages fixtures cover
+trust boundaries and manifest-first waiting to complete file/signature checks. The pre-merge
+fixtures verify that post-merge reuse rejects mismatched trees, parents, workflow runs and local
+receipts. Pages fixtures cover
 the shared empty root `.nojekyll`, legacy dev-only adoption, races and unsafe-marker rejection.
 
 These use temporary fixtures for concurrent Pages publishers, NVS-safe erase ranges, path validation,

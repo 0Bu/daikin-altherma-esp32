@@ -31,7 +31,8 @@ class PublicationTests(unittest.TestCase):
                      'scripts/check-dev-manifest-source.sh', '.github/workflows/build.yml',
                      'scripts/check-publish-version.sh', 'scripts/check-manifest-provenance.py',
                      'scripts/generate-ota-changelog.py', 'tools/version/publish_gate.cpp',
-                     'tools/release/ota_signing_key_digest.txt', 'main/logic/version_cmp.hpp',
+                     'tools/release/ota_signing_key_digest.txt', 'tools/release/build-inputs.ere',
+                     'main/logic/version_cmp.hpp',
                      'main/ota_update.cpp', 'partitions.csv', 'dependencies.lock'):
             target = self.root / name
             target.parent.mkdir(parents=True, exist_ok=True)

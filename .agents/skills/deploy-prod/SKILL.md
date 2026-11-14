@@ -50,21 +50,31 @@ hook binds the gate and the wrapper to the session worktree, so run them there a
 
 ### 0. Precondition: the exact head passed `$deploy-test`
 
-A PR is firmware-relevant when a changed file matches the `relevant=` pattern of the `changes` step
-in `.github/workflows/build.yml`, because CI republishes the dev artifact for exactly those files.
+A PR is firmware-relevant when a changed file matches
+[`tools/release/build-inputs.ere`](../../../tools/release/build-inputs.ere).
 For such a PR, `$deploy-test` must have passed at the exact PR head, and its pinned SHA and result
 must be recorded in the PR body. If not, run `$deploy-test` now; the same applies to every fix head
 from Step 8. A PR without firmware-relevant files skips this step.
 
 ### 1. Deterministic gates and PR records
 
-Run the deterministic gates for the affected surface (the entry points are listed in `AGENTS.md`).
-For a firmware change, include `scripts/idf-docker.sh idf.py build`.
+Freeze the reviewed source and reserve the bench and production window before merging. Run
+deterministic gates locally where the complete pinned test is faster there (see `AGENTS.md` and
+[test/README.md](../../../test/README.md#run)). Keep Linux Docker for browser and target tests.
+Run independent checks in parallel when they do not compete with timing measurements. For
+firmware, use the ESP32-S3 build evidence from Step 0.
+
+Before merging firmware, run `python3 tools/release/local_checks.py` from the clean PR merge
+tree with its first parent equal to refreshed `origin/main`. This runs host coverage and source
+contracts and retains evidence for the two official OTA invocations. A rebased single-commit PR
+can use its own checkout when that commit has the same parent and tree. If the base or tree
+changes, refresh the evidence before merging.
 
 Derive the required PR records from `tools/agent-hooks/require-pr-gates.sh`; never copy a list.
 `$project-review`, `$domain-review` and `$pr-hygiene-review` apply to every ordinary merge. The
 `$heap-safety-review` record comes from the independent read-only `heap_safety_reviewer`, not from a
-skill. Stamp each record for the exact PR head (`git rev-parse --short=12 HEAD`). Then validate the
+skill. Tick and stamp only an already completed review for the exact PR head
+(`git rev-parse --short=12 HEAD`). A checkbox update runs PR policy. Then validate the
 body locally against the head and the changed files:
 
 ```bash
@@ -89,8 +99,13 @@ scripts/gh-with-git-credentials.sh api --hostname github.com --method PUT repos/
 ```
 
 Record the merge commit SHA from the response.
+Record the merge time too. The ordinary delivery target is 30 minutes from merge through
+confirmed production acceptance. Record feed, bench and production timings as they finish.
 
 ### 3. Watch the CI dev build on main
+
+The protected workflow reuses matching GitHub PR results for selected checks on an identical
+merge tree and first-parent range. Missing evidence keeps the affected checks on the release path.
 
 Find the `build.yml` run for the merge commit and watch it:
 
@@ -208,7 +223,9 @@ When both devices are verified healthy:
   saved-channel preference;
 - summarize device metrics (uptime, heap, MQTT status, X10A status);
 - confirm the rollout to both the bench and the production heat pump, and list every additional PR
-  the failure loop merged.
+  the failure loop merged;
+- report merge-to-feed, bench, promotion and total elapsed time, and explain any missed target.
+  Continue the gate's bounded verification after an accepted POST even if the target time passes.
 
 ### 7. Cleanup after a successful rollout
 
