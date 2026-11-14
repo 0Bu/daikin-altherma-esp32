@@ -330,7 +330,11 @@ async function readHistory(id, source, key, epoch, previous, request) {
     // error for this cache period, not a reason to re-ask every status period; only "history
     // changed" waits for the next status lifetime below.
     const changed = j?.ok === false && j.error === "history changed; retry";
-    if (!changed && (r.ok === false || j?.ok === false || !Array.isArray(j?.v))) {
+    const expectedSource = id === "circulation_state" && source === "x10a" ? "mqtt" : source;
+    if (!changed && (r.ok === false || j?.ok === false || !Array.isArray(j?.v) ||
+        j.v.length > HIST_MAX_SAMPLES || j.v.some(v => v !== null &&
+          (!Number.isInteger(v) || v < -32766 || v > 32767)) ||
+        (j.id != null && j.id !== id) || (j.source != null && j.source !== expectedSource))) {
       S.hist.set(key, failed());
       return;
     }
@@ -1688,8 +1692,11 @@ function histPinIndex(id, h) {
     const i = Math.trunc((rel >= 0 ? rel + half : rel - half) / h.dt);
     if (i < 0 || i >= h.v.length) return -1;
     const shown = STATE_HIST[id] ? h.series : histVisibleSeries(h);
-    if (shown.some(s => i >= s.expiredFrom && i < s.expiredUntil) &&
-        !shown.some(s => s.v[i] != null || histHeld(s, i))) return -1;
+    if (h.series.some(s => i >= s.expiredFrom && i < s.expiredUntil) &&
+        !shown.some(s => s.v[i] != null || histHeld(s, i))) {
+      S.histPin.delete(id);
+      return -1;
+    }
     return i;
   }
   return p.gen === h.gen && p.sources === histPinSources(h) ? p.i : -1;

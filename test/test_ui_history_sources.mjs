@@ -239,7 +239,7 @@ S.hist.set("modbus:dhw_tank", modbus);
   S.hist.set("dhw_tank", { ...S.hist.get("dhw_tank"), v: [452, 454, null] });
   assert.doesNotMatch(h.histHtml("dhw_tank", "", "Tank", "x10a"), /vhist-cross vhist-pinned/,
     "a dated pin cannot remain on an expired slot while newer compatible history stays visible");
-  S.histPin.delete("dhw_tank");
+  assert.equal(S.histPin.has("dhw_tank"), false, "a retired pin must not return after the next refresh");
   S.status.uptime_s = (x10a.b0 + 290) * 300;
   S.hist.set("dhw_tank", { ...S.hist.get("dhw_tank"), v: [452, null, null] });
   assert.match(h.histHtml("dhw_tank", "", "Tank", "x10a"), /Verlauf nicht verfügbar/,
@@ -261,6 +261,20 @@ S.hist.set("modbus:dhw_tank", modbus);
 assert.equal(h.hasHist("dhw_tank"), true);
 assert.equal(h.hasModbusHist("dhw_tank"), true);
 assert.equal(h.histCacheKey("dhw_tank", "modbus"), "modbus:dhw_tank");
+{
+  const old = historyResponse;
+  for (const invalid of [
+    { source: "x10a", v: [457] }, { id: "outdoor_air", v: [457] },
+    { v: ["457"] }, { v: [-32768] }, { v: Array(289).fill(457) },
+  ]) {
+    S.hist.delete("modbus:dhw_tank");
+    historyResponse = { ...defaultHistoryResponse, ...invalid };
+    await h.ensureHist("dhw_tank", "modbus");
+    assert.equal(S.hist.get("modbus:dhw_tank").err, true, "invalid history cannot enter a source-labelled view");
+  }
+  historyResponse = old;
+  S.hist.set("modbus:dhw_tank", modbus);
+}
 let view = h.historyView("dhw_tank");
 const mountedTank = {
   dataset: { hist: "dhw_tank", n: String(view.v.length), rev: h.histViewRevision(view) },
