@@ -93,12 +93,14 @@ static char             s_status_error_message[MB_ERROR_MESSAGE_BYTES]{}; // gua
 static uint32_t         s_link_generation = 0;  // guarded by s_mtx; zero = no connected session yet
 static int64_t          s_last_reply_ms   = -1; // guarded by s_mtx; this session's last valid reply
 static bool             s_poll_observed = false; // guarded by s_mtx; last attempted cycle completed
-static int64_t s_full_cache_status_ms   = -1;    // guarded by s_mtx; exact cache commit time mirror
-static int64_t s_plant_gate_ms          = -1;    // guarded by s_mtx; successful input53 reply time
-static int64_t s_space_route_ms         = -1;    // guarded by s_mtx; successful input37 reply time
-static int64_t s_heating_mode_ms        = -1;    // guarded by s_mtx; successful input38 reply time
-static int64_t s_dhw_operation_ms       = -1;    // guarded by s_mtx; successful input52 reply time
-static int64_t s_plant_outdoor_ms       = -1;    // guarded by s_mtx; successful input44 reply time
+
+// Guarded by s_mtx. Each gate uses its own successful register reply time.
+static int64_t s_full_cache_status_ms = -1; // exact cache commit time mirror
+static int64_t s_plant_gate_ms        = -1; // input 53
+static int64_t s_space_route_ms       = -1; // input 37
+static int64_t s_heating_mode_ms      = -1; // input 38
+static int64_t s_dhw_operation_ms     = -1; // input 52
+static int64_t s_plant_outdoor_ms     = -1; // input 44
 
 // The input 31 observation and its timestamp are guarded by s_mtx.
 static int64_t          s_compressor_ms = -1;
@@ -1512,12 +1514,14 @@ static void mb_poll_once() {
         s_plant_gate_ms        = final_current_session ? gates.plant_gate_ms : -1;
         s_space_route_ms       = final_current_session ? gates.space_route_ms : -1;
         s_heating_mode_ms      = final_current_session ? gates.heating_mode_ms : -1;
-        s_dhw_operation_ms     = final_current_session ? gates.dhw_operation_ms : -1;
+
+        s_dhw_operation_ms            = final_current_session ? gates.dhw_operation_ms : -1;
         s_status.dhw_operation_known  = s_dhw_operation_ms >= 0;
         s_status.dhw_operation_active = s_status.dhw_operation_known && gates.dhw_operation_active;
-        s_plant_outdoor_ms            = final_current_session ? plant_outdoor_ms : -1;
-        s_compressor    = final_current_session ? gates.compressor : ModbusCompressor::Unknown;
-        s_compressor_ms = final_current_session ? gates.compressor_ms : -1;
+
+        s_plant_outdoor_ms = final_current_session ? plant_outdoor_ms : -1;
+        s_compressor       = final_current_session ? gates.compressor : ModbusCompressor::Unknown;
+        s_compressor_ms    = final_current_session ? gates.compressor_ms : -1;
     }
     report_cycle_result(first_failure, full, final_current_session, cycle_target_generation);
     s_cycle_tick = profile_promoted ? 0 : s_cycle_tick + 1;
