@@ -566,8 +566,8 @@ try {
         "if (false) {")],
     ["HomeHub no longer acknowledges an in-flight allocation cycle", () =>
       replaceOnce("main/hp_modbus.cpp",
-        "s_network_quiesced.store(false, std::memory_order_release);",
-        "s_network_quiesced.store(true, std::memory_order_release);")],
+        "MbNetworkActivity() { s_network_quiesced.store(false); }",
+        "MbNetworkActivity() { s_network_quiesced.store(true); }")],
     ["Syslog no longer acknowledges an in-flight allocation cycle", () =>
       replaceOnce("main/syslog.cpp",
         "s_network_quiesced.store(false, std::memory_order_release);",

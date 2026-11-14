@@ -67,10 +67,11 @@ class Element {
     ntp: { synced: true, server: "pool.ntp.org" },
     heating_curve: { method_version: 2, armed: false, state: "off" },
   };
+  const identity = { boot_id: "fixture-boot", app_elf_sha256: "fixture-image" };
   const cacheKey = "daikinOtaRenderV1";
   const storage = new Map([[cacheKey, JSON.stringify({
     saved_at_ms: Date.now(),
-    status: cachedStatus,
+    status: { ...cachedStatus, ...identity },
     values: [{ label: "Operation Mode", value: "Heating" }],
     modbus: [{ label: "Leaving water temperature", value: "31.0" }],
   })]]);
@@ -122,7 +123,8 @@ class Element {
     // Real live-data/SVG invalidation is covered by test_ui_ota_snapshot_render.mjs.
     invalidateLiveReadings: () => {},
     renderOtaDashboardStatus: () => { dashboardStatusPaints += 1; },
-    j: async () => ({ state: "updating", generation: 7, progress: 78, current: "1.4.72-dev.333", channel: "dev" }),
+    j: async () => ({ state: "updating", generation: 7, progress: 78, current: "1.4.72-dev.333",
+      channel: "dev", ...identity }),
     setTimeout: () => 1,
     clearTimeout: () => {},
   };

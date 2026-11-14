@@ -1,9 +1,10 @@
-// translation-source: 34200897e3bb460a7f6fcd68bd6ff940649f8810c9b3709dc7616000e01aee90
+// translation-source: caf7fa0eafa413c661cf1bd9545148c50156312c034d4e698a374e79a8c32180
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
   /* sys.x10a_down */ "X10A frakoblet",
   /* sys.mb_carrying */ "Ukjent driftsmodus — verdier fra Modbus",
+  /* sys.mode_unknown */ "Ukjent driftsmodus",
   /* sys.mb_only */ "X10A frakoblet — verdier fra Modbus",
   /* sys.mb_source */ "X10A frakoblet · Modbus",
   /* mode.stop */ "Stopp",
@@ -20,6 +21,7 @@ I18N.nb = localeValues([
   /* sys.standby */ "Standby — ikke i drift",
   /* sys.defrosting */ "Avriming",
   /* sys.circulating */ "Sirkulasjon — kompressor av",
+  /* sys.pump_reported */ "Pumpen melder PÅ — sirkulasjon er ubekreftet",
   /* sys.cool_mode */ "Kjølemodus",
   /* sys.residual_circulating */ "Restvarme sirkulerer — ingen kjøleeffekt",
   /* sys.bsh_active */ "Tankvarmer aktiv",
@@ -111,6 +113,7 @@ I18N.nb = localeValues([
   /* modbus.err.network_unreachable */ "Ingen nettverksrute til HomeHub.",
   /* modbus.err.host_unreachable */ "HomeHub er ikke tilgjengelig på nettverket.",
   /* modbus.err.connect_failed */ "Tilkoblingen til HomeHub mislyktes.",
+  /* modbus.err.close_pending */ "Venter på at den forrige HomeHub-tilkoblingen lukkes.",
   /* modbus.err.request_failed */ (r) => `Kunne ikke opprette Modbus-forespørsel${r ? ` for register ${r}` : ""}.`,
   /* modbus.err.send_timeout */ (r) => `Tidsavbrudd ved sending av Modbus-forespørsel${r ? ` til register ${r}` : ""}.`,
   /* modbus.err.send_failed */ (r) => `Kunne ikke sende Modbus-forespørsel${r ? ` til register ${r}` : ""}.`,
@@ -335,7 +338,7 @@ I18N.nb = localeValues([
   /* a4.operation_help */ "Rapporterer Stopp, Tankoppvarming, Romoppvarming, Romkjøling eller Aktuatordrift. Dette er en rapportert tilstand, ikke bevis på nyttig varmeoverføring.",
   /* a4.heating_offset_help */ "Forskyver den væravhengige varmekurven for hovedsonen i kelvin. Dette er en forskyvning, ikke en målt temperatur eller hele måltemperaturen for vannet.",
   /* a4.pre_phe_outdoor_help */ "Vanntemperatur før den utendørs platevarmeveksleren. Dette er en sensor på vannsiden, ikke uteluft- eller kjølemedietemperatur.",
-  /* a4.flow_help */ "Skaleringen av vannmengde for Altherma 4 er ikke bekreftet. Verdien i L/min bruker eksisterende omregning; sammenlign med enhetens egen avlesning før ytelsen vurderes.",
+  /* mb.flow_scale_help */ "Skaleringen av vannmengde for denne Modbus-kilden er ikke bekreftet. Sammenlign verdien med det enheten viser.",
   /* a4.pump_help */ "Altherma 4-veiledningen oppgir pumpehastighet, men bruker L/min. Enheten % som vises her er en ubekreftet antakelse; sammenlign med enhetens egen avlesning.",
   /* a4.pressure_help */ "Trykkskaleringen for Altherma 4 er ikke bekreftet. Verdien i bar bruker eksisterende omregning; sammenlign med enhetens egen avlesning før trykket vurderes.",
   /* a4.demand_response */ "Modus for lastrespons",
@@ -381,6 +384,8 @@ I18N.nb = localeValues([
   /* val.since_min */ (d) => `\u2265 ${d}`,
   /* val.since_gap */ (d) => `${d} ikke observert`,
   /* hist.modbus_plateau */ (when, d) => `Register uendret ${when} · ca. ${d} · ukjent målealder`,
+  /* hist.modbus_flow_unverified */ "Skaleringen av registrert vannmengde fra Modbus er ubekreftet.",
+  /* hist.thermal_bucket_note */ "Anslag fra femminuttersverdier som kan være registrert på ulike tidspunkter.",
   /* hist.boost_total */ (d) => `Boost aktiv · ${d}`,
   /* hist.boost_none */ "Ingen boost i perioden.",
   /* hist.boost_ago_range */ (a, b) => `for ${a}–${b} t siden`,
@@ -421,7 +426,7 @@ I18N.nb = localeValues([
   /* hist.buh_aria */ (l, d) => `${l} — historikk for tilleggsvarmer. ${d}. Bruk piltastene.`,
   /* hist.valve_dhw_total */ (d) => `Tappevann · ${d}`,
   /* hist.valve_space_total */ (d) => `Romkrets · ${d}`,
-  /* hist.valve_none */ "Ingen tappevannsstilling i perioden.",
+  /* hist.valve_none */ "Ingen tappevannsrute meldt i perioden.",
   /* hist.valve_dhw */ "Tappevann",
   /* hist.valve_space */ "Romkrets",
   /* hist.valve_aria */ (l, d) => `${l} — historikk for 3-veisventil. ${d}. Bruk piltastene.`,
@@ -463,7 +468,7 @@ I18N.nb = localeValues([
   /* ota.check_failed */ "Kontroll mislyktes",
   /* ota.starting */ "starter…",
   /* ota.pct */ (p) => `${p}%`,
-  /* ota.rebooting */ "Starter på nytt…",
+  /* ota.rebooting */ "Venter på omstart…",
   /* ota.failed */ "Oppdatering mislyktes",
   /* ota.timeout */ "Tidsavbrudd",
   /* ota.cancelled */ "avbrutt",
@@ -477,7 +482,7 @@ I18N.nb = localeValues([
   /* ota.snapshot_label */ "Datastatus",
   /* ota.snapshot_value */ "Mellomlagret",
   /* ota.snapshot_help */ "Sist mottatte status før denne innlastingen. Direkte data kan stoppe under installasjonen; innstillinger er låst til omstart.",
-  /* ota.reload_hint */ "installert — last siden på nytt",
+  /* ota.reload_hint */ "Kunne ikke bekrefte omstart",
   /* ota.dialog_title */ "Fastvareoppdatering",
   /* ota.switch_title */ "Bytt fastvareversjon",
   /* ota.changes_title */ "Endringer i denne oppdateringen",
@@ -514,6 +519,21 @@ I18N.nb = localeValues([
   /* schem.room */ "Rom",
   /* schem.flow_rate */ "Vannmengde",
   /* schem.water_press */ "Vanntrykk",
+  /* schem.capacity_low_speed */ "Effektanslaget krever at X10A rapporterer en aktuell kompressorhastighet på over 5 o/s.",
+  /* schem.no_usable_power */ (metric) => (metric ? `${metric} er ikke tilgjengelig. ` : "") + "Ingen brukbar beregning av elektrisk effekt.",
+  /* schem.backup_heater_active */ "Den elektriske tilleggsvarmeren melder at den er på",
+  /* schem.compressor_off */ "Kompressoren står. Effekten fra kompressoren kan ikke anslås.",
+  /* schem.outdoor_held */ "Tilbakeholdte utedelsverdier fra X10A vises ikke.",
+  /* schem.outdoor_homehub */ "Utetemperaturen kommer fra HomeHub Modbus. Registeret oppgir ikke tidspunktet for målingen.",
+  /* schem.homehub_compressor_off */ "HomeHub melder at kompressoren er AV.",
+  /* schem.outdoor_independent */ "Drift av elektriske varmeelementer og vannsirkulasjon observeres separat.",
+  /* schem.water_route_unknown */ "Ruten til treveisventilen er ukjent. Vannmengden i felleskretsen viser ikke om vannet går til tank- eller romkretsen.",
+  /* schem.flow_invalid */ "X10A-målingen av vannmengde er ugyldig.",
+  /* schem.defrost_transfer */ "Anslått varmeoverføring under avriming",
+  /* schem.transfer_sign */ "Positiv: vannet tar opp varme. Negativ: vannet avgir varme.",
+  /* schem.efficiency_no_capacity */ (metric) => `${metric} er ikke tilgjengelig. Det mangler et brukbart effektanslag for denne avgrensningen.`,
+  /* schem.efficiency_ct_pair */ (outlet) => `Beregningen bruker strøm fra CT og temperaturene ${outlet} og R4T.`,
+  /* schem.efficiency_inv_pair */ "Beregningen bruker R1T før tilleggsvarmeren og R4T. Elektrisk effekt anslås fra inverterstrømmen med antatt 230 V. Hvilke laster som dekkes, inkludert varmeelementer, er ikke verifisert.",
   /* schem.r2t */ "R2T",
   /* schem.r3t */ "R3T",
   /* schem.flow_switch */ "STRØMNING",
@@ -770,6 +790,7 @@ I18N.nb = localeValues([
   /* hh.found */ (host) => `Fant HomeHub: ${host}`,
   /* hh.not_found */ "Fant ingen HomeHub — angi adressen manuelt.",
   /* hh.saved */ "Modbus-innstillinger lagret",
+  /* hh.start_pending */ "Innstillingene er lagret. Avlesingen fra HomeHub har ikke startet ennå.",
   /* hh.err_port */ "Porten må være fra 1 til 65535",
   /* hh.err_unit */ "Enhets-ID må være fra 1 til 247",
   /* board.title */ "Kortmaskinvare",
@@ -950,11 +971,10 @@ I18N.nb = localeValues([
   /* lang.sv */ "Svenska",
   /* lang.fi */ "Suomi",
   /* lang.saved */ "Språk lagret",
-  /* hist.cop_none */ "Ingen COP-historikk når strømverdien kommer fra CT-klemmer. Kablingen avgjør hvilke laster de dekker; varmemålingen slutter før BUH og omfatter ikke direkte BSH-varme. Balansegrensene kan derfor avvike.",
 ]);
 
 INSPECT_I18N.nb = inspectValues(
-  ["Ingen aktuell måling:", "kompressoren står, og utedelen oppdaterer bare egne sensorer når den går. Siste syklus skjules, så den ikke vises som fersk.", "Kompressorhastigheten kan ikke leses, så utedelens verdier kan være fra siste syklus."],
+  ["Ingen aktuell måling:", "kompressoren står, og utedelen oppdaterer bare egne sensorer når den går. Siste syklus skjules, så den ikke vises som fersk.", "Alderen på disse utedelsverdiene fra X10A er ukjent. De kan være fra siste kjøring."],
   [
     ["Driftsmodus", 0, "Innedelens modus; bekrefter ikke alene kompressor eller vannmengde."], // status
     ["Uteklima", "Uteklima fra ENV III", "Temperatur, fuktighet og trykk fra ENV III; plasseringen avgjør om verdien er uteluft."], // env3
@@ -969,15 +989,11 @@ INSPECT_I18N.nb = inspectValues(
       : d.sgMode === 1 ? "Energistyringen melder «Tvunget av»."
       : d.sgMode === 3 ? "Energistyringen melder «Tvunget på»."
       : "Ingen ekstern Smart Grid-kommando; enheten går autonomt."], // sgrequest
-    ["Utedel", 0, "Varmekilden i et luft/vann-anlegg. Viften flytter luft gjennom varmeveksleren, og kompressoren øker kjølemediets trykk og temperatur. Skissen er forenklet; monoblokk-, bergvarme- og hybridanlegg er annerledes.", (d) => d.defrost
-      ? "Avriming aktiv: kretsen reverseres, fjerner is fra fordamperen og tar kortvarig varme fra vannet."
-      : compressorRunning(d)
+    ["Utedel", 0, "Varmekilden i et luft/vann-anlegg. Viften flytter luft gjennom varmeveksleren, og kompressoren øker kjølemediets trykk og temperatur. Skissen er forenklet; monoblokk-, bergvarme- og hybridanlegg er annerledes.", (d) => compressorRunning(d)
       ? d.rps != null
-        ? `I drift: kompressor ${fmt0(d.rps)} rps${d.quiet ? ", begrenset av stillemodus" : ""}.`
-        : "I drift: HomeHub bekrefter kompressoren; hastighet og detaljmålinger krever X10A."
-      : d.ouHeldOver && d.mbFields && d.mbFields.has("out")
-      ? "Standby: kompressoren står. X10A oppdaterer ikke utesensorene; uteluft kommer fra HomeHub, utløp vises som «—», og faktisk alder på Modbus-verdien er ukjent."
-      : "Standby: kompressoren står uten aktiv overføring. Utedelens egne målinger vises som «—», ikke som verdier fra siste syklus."], // ou
+        ? `I drift: kompressor ${fmt0(d.rps)} rps${d.quiet ? ". X10A melder at stillemodus er aktiv" : ""}.`
+        : "HomeHub melder at kompressoren er på. Hastighet og detaljerte målinger fra utedelen krever X10A."
+      : "Kompressoren står."], // ou
     ["Kompressor", 0, "Komprimerer kjølemediet. rps er hastighet, ikke alene termisk eller elektrisk effekt."], // comp
     ["Uteluft", 0, "Utesensorens temperatur. X10A kan holde siste verdi i ro; da skjules den eller merkes HomeHub."], // out
     ["Uteveksler · R4T", "Temperatur i uteveksler R4T", "Utevekslerens temperatur. Under oppvarming kan den være under null og ise; tolk sammen med avriming."], // ouhx
@@ -986,8 +1002,7 @@ INSPECT_I18N.nb = inspectValues(
     ["Lavtrykk", 0, "Kjølemediets lavtrykk ved kompressorens sugeside. Noen profiler har ingen gyldig sensor og viser «—»."], // lp
     ["Ekspansjonsventil", 0, "Doserer kjølemedium og senker trykket. Posisjonen er styrepulser, ikke prosent eller bekreftet mekanisk åpning."], // eev
     ["Flytende kjølemedium · R3T", "Temperatur på flytende kjølemedium R3T", "Kjølemediet på væskesiden av inneveksleren; ikke vannets returtemperatur."], // r3t
-    ["Platevarmeveksler", 0, "Overfører energi mellom kjølemedium og vann uten blanding. Effekt anslås fra vannmengde og R1T/R4T; sensorplasseringen avhenger av modell.", (d) => !compressorRunning(d, 5)
-      ? "Ingen aktiv kjølemedieoverføring: kompressoren står. Pumpen kan flytte restvarme, men det er ikke varme-/kjøleeffekt."
+    ["Platevarmeveksler", 0, "Overfører energi mellom kjølemedium og vann uten blanding. Effekt anslås fra vannmengde og R1T/R4T; sensorplasseringen avhenger av modell.", (d) => needsCapacitySpeed(d) && !d.dtStale ? t("schem.capacity_low_speed") : compressorStopped(d) ? stoppedCapacityText(d)
       : d.dtStale ? "Kan ikke beregne vannoverføring: pumpe og vannmengde bekrefter ikke strømning gjennom platene."
       : d.pth == null ? "Målingene gir ikke et nyttig effektanslag i valgt retning."
       : d.pthKind === "cooling"
@@ -999,7 +1014,7 @@ INSPECT_I18N.nb = inspectValues(
     ["Vann-ΔT over PHE", "Vannets delta T over PHE", "R1T ved PHE-utløp minus R4T ved innløp. To sensorer og vannmengden beskriver overføring, men måler ikke tur/retur direkte ved avgiverne.", (d) => d.dtStale
       ? "Ingen arbeids-ΔT: pumpe og vannmengde bekrefter ikke sirkulasjon; sensoravvik uten strømning er ikke et driftspunkt."
       : d.dt == null ? null
-      : !compressorRunning(d, 5) ? `${fmt1(d.dt)} K med bare pumpedrift: utjevning av restvarme, ikke varmeeffekt.`
+      : needsCapacitySpeed(d) ? `${fmt1(d.dt)} K. ${t("schem.capacity_low_speed")}` : compressorStopped(d) ? `${fmt1(d.dt)} K. ${stoppedCapacityText(d)}`
       : d.thermalMode === "cool" ? `${fmt1(d.dt)} K. Ved aktiv kjøling skal R1T være lavere enn R4T, derfor negativ verdi.`
       : `${fmt1(d.dt)} K. Positiv verdi betyr at PHE tilfører vannet varme.`], // dt
     [(d) => d && d.pthKind === "cooling" ? "Anslått kjøleeffekt" : "Anslått varmeeffekt", "Anslått varmeeffekt ved PHE", (d) => d && d.pthKind === "cooling"
@@ -1008,28 +1023,28 @@ INSPECT_I18N.nb = inspectValues(
       ? d.bsh === true
         ? "Ingen PHE-beregning uten bekreftet sirkulasjon. BSH kan fortsatt varme tanken direkte, men denne varmen krysser ikke R1T/R4T og kan ikke måles på bussen."
         : "Ingen effektberegning uten bekreftet vannstrøm gjennom PHE. Manglende driftspunkt betyr ikke 0 kW."
+      : needsCapacitySpeed(d) ? t("schem.capacity_low_speed")
       : d.pth == null ? null
-      : d.pthKind === "cooling" ? `≈ ${fmt1(d.pth)} kW kjøling${d.cop != null ? `; EER ${fmt1(d.cop)}` : ""}.`
+      : d.pthKind === "cooling" ? `≈ ${fmt1(d.pth)} kW kjøling${d.cop != null && !d.copPostBuh ? `; EER ${fmt1(d.cop)}` : ""}.`
       : `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `; COP ${fmt1(d.cop)}` : ""}.`], // pth
-    [(d) => d && d.efficiencyKind === "eer" ? "Anslått EER for varmepumpen"
-      : d && d.copScope === "plant" ? "Anslått COP etter BUH" : "Anslått COP for varmepumpen", "Anslått virkningsgrad", (d) => d && d.efficiencyKind === "eer"
-      ? "Anslått kjøleeffekt delt på anslått elektrisk effekt. Arver usikkerhet i væske, sensorer, spenning og effektfaktor. Øyeblikkelig EER, ikke sesongverdi."
-      : "Anslått varme delt på anslått strøm med samsvarende grenser: etter BUH med CT og R2T, ellers bare varmepumpen med inverterstrøm. CT-kabling avgjør laster. Øyeblikksindikasjon, ikke sertifisert måler.", (d) => d.copBlock === "tank_heater"
-      ? "Ingen COP: strøm kan omfatte BSH, men varmen går direkte i tanken og krysser ikke tursensorene; grensene er ulike."
-      : d.copBlock === "buh_no_r2t" ? "Ingen COP: BUH er aktiv, men sensor etter den mangler; strøm kan omfatte varme beregnet før BUH."
-      : d.copBlock === "mb_scope" ? "Ingen COP: HomeHub måler hele enhetens strøm, men varme bare ved PHE og mangler varmerstatus/sensor etter BUH for like grenser."
+    [(d) => d && d.efficiencyKind === "eer" ? eerScopeText(d, "Anslått EER basert på CT-strøm", "EER-anslag fra inverterstrøm", "Anslått EER")
+      : eerScopeText(d || {}, "Anslått COP basert på CT-strøm", "COP-anslag fra inverterstrøm", "Anslått COP"), "Anslått virkningsgrad", (d) => d && d.efficiencyKind === "eer"
+      ? "Anslått kjøleeffekt delt på anslått elektrisk effekt. Arver usikkerhet i væske, sensorer, spenning og effektfaktor. Øyeblikkelig EER, ikke sesongverdi." +
+        eerScopeText(d, post => ` Beregningen bruker R4T og ${post ? "R2T etter" : "R1T før"} tilleggsvarmeren samt strøm fra CT. CT-koblingen avgjør hvilke laster som inngår. CT-beregningen krever at begge BUH-trinn og BSH er bekreftet avslått.`, " " + t("schem.efficiency_inv_pair"))
+      : "Anslått varmeeffekt delt på anslått elektrisk effekt. CT-beregningen krever at begge BUH-trinn og BSH er bekreftet avslått." + heatingEfficiencyBoundary(d), (d) => d.copBlock === "tank_heater"
+      ? `${d.bsh === true ? `Ingen ${efficiencyMetric(d)}. Tankvarmeren melder at den er på.` : `Ingen ${efficiencyMetric(d)}. Statusen til tankvarmeren er ukjent.`} Varmen passerer ingen av turtemperaturfølerne.`
+      : d.copBlock === "backup_heater" ? `${d.buh1 === true || d.buh2 === true ? `Ingen ${efficiencyMetric(d)}. Tilleggsvarmeren melder at den er på.` : `Ingen ${efficiencyMetric(d)}. Statusen til tilleggsvarmeren er ukjent.`} Effektanslaget viser ikke om varmerens elektriske last inngår.`
+      : d.copBlock === "mb_scope" ? `Ingen ${efficiencyMetric(d)}. Tilgjengelige data kan ikke knytte HomeHubs elektriske effekt til den estimerte varmeeffekten over platevarmeveksleren. Det er uklart hvilke elektriske laster, som varmeelementer, effektverdien omfatter.`
       : d.copBlock === "no_pel"
-      ? d.pelHeld ? "Ingen COP: kompressoren står, og inverterstrømmen er fra siste syklus."
-        : "Ingen COP: profilen gir verken CT-effekt eller inverterstrøm."
-      : d.cop == null ? null
-      : d.efficiencyKind === "eer" ? `${fmt1(d.cop)} kW kjøling/kW strøm: ≈ ${fmt1(d.copPth)} kW ut med ≈ ${fmt1(d.pel)} kW inn.`
-      : d.copScope === "plant" ? `${fmt1(d.cop)} kW varme etter BUH/kW CT-strøm: ≈ ${fmt1(d.copPth)} / ≈ ${fmt1(d.pel)} kW. CT-kabling avgjør laster.`
-      : `${fmt1(d.cop)} kW varme/kW strøm innen varmepumpegrensen: ≈ ${fmt1(d.copPth)} / ≈ ${fmt1(d.pel)} kW. BUH er utenfor begge.`], // cop
-    ["Tilleggsvarmer · BUH", "Tilleggsvarmer BUH", "Elektrisk vannkretsvarmer etter R1T. Trinnene kan øke turtemperatur og forbruk; ikke tankvarmeren BSH.", (d) => d.buh1 == null && d.buh2 == null ? null : d.buh2 ? "Trinn 2: begge trinn varmer." : d.buh1 ? "Trinn 1: ett trinn varmer." : "Inaktiv: ingen BUH-trinn aktive."], // buh
-    ["Tankvarmer", "Elektrisk tankvarmer", "Elektrisk BSH-element i tanken. Kan varme med kompressor, pumpe og vannmengde på null; X10A-statusen viser ikke effekt.", () => {
-      const on = x10aDown() ? null : vOn(/^bsh$/i);
-      return on == null ? null : on ? "Tankvarmer aktiv." : "Inaktiv: tankvarmeren er av.";
-    }], // bsh
+      ? d.pelHeld ? `Ingen ${efficiencyMetric(d)}: kompressoren står, og inverterstrømmen er fra siste syklus.`
+        : t("schem.no_usable_power", efficiencyMetric(d))
+      : d.cop == null ? efficiencyUnavailable(d)
+      : d.efficiencyKind === "eer" ? `${fmt1(d.cop)} kW kjøling/kW strøm: ≈ ${fmt1(d.copPth)} kW ut med ≈ ${fmt1(d.copPel)} kW inn.`
+      : d.copScope === "plant" ? `${fmt1(d.cop)} kW varme på vannsiden per kW elektrisk effekt anslått fra CT: ≈ ${fmt1(d.copPth)} / ≈ ${fmt1(d.copPel)} kW. CT-kabling avgjør laster.`
+      : `${fmt1(d.cop)} kW varme per kW anslått elektrisk effekt. Omtrent ${fmt1(d.copPth)} kW varme ved anslått ${fmt1(d.copPel)} kW inn.`], // cop
+    ["Tilleggsvarmer · BUH", "Tilleggsvarmer BUH", "Elektrisk vannkretsvarmer etter R1T. Trinnene kan øke turtemperatur og forbruk; ikke tankvarmeren BSH.", (d) => d.buh2 === true ? "Trinn 2 rapporteres på." : d.buh1 === true ? "Trinn 1 rapporteres på." : d.buh1 === false && d.buh2 === false ? "Begge trinn rapporteres av." : null], // buh
+    ["Tankvarmer", "Elektrisk tankvarmer", "Elektrisk BSH-element i tanken. Kan varme med kompressor, pumpe og vannmengde på null; X10A-statusen viser ikke effekt.", (d) => d.bsh == null ? null : d.bsh
+      ? "Tankvarmer aktiv." : "Inaktiv: tankvarmeren er av."], // bsh
     ["3-veisventil", 0, "Den logiske utgangen velger tank- eller romkrets. Den bekrefter ikke mekanisk posisjon eller vannmengde.", (d) => d.valveDhw == null ? null : d.valveDhw
       ? "Styringen viser tankvei; det beviser ikke mekanisk posisjon, vannmengde eller aktiv lading."
       : "Styringen viser romvei; det beviser ikke mekanisk posisjon eller sirkulasjon."], // valve
@@ -1040,34 +1055,28 @@ INSPECT_I18N.nb = inspectValues(
     [(d) => activeSpaceKind(d) === "cool" ? "Kjølekrets" : activeSpaceKind(d) === "heat" ? "Varmekrets" : "Romkrets", "Romkrets", "Byggets radiatorer, gulvvarme eller viftekonvektorer. Anlegget avgjør varme/kjøling; R1T/R4T måles inne i varmepumpen og bekrefter ikke avgivertemperatur.", (d) => d.valveDhw === true
       ? "Romveien er ikke valgt; pumpe og vannmengde viser separat om vann går gjennom tanken."
       : waterMoving(d)
-      ? d.thermalMode === "cool" && !compressorRunning(d, 5) && d.pthRaw != null && d.pthRaw > 0
+      ? d.thermalMode === "cool" && compressorStopped(d) && heatersOff(d) && d.pthRaw != null && d.pthRaw > 0
         ? `Varmt restvann sirkulerer mot romkretsen. Intern R1T: ${degC(d.lwt)}; ingen sensor etterpå bekrefter avgivertemperatur. Ikke aktiv kjøling.`
         : `Vann går til ${activeSpaceKind(d) === "cool" ? "kjølekretsen" : activeSpaceKind(d) === "heat" ? "varmekretsen" : "romkretsen"}. Intern R1T: ${degC(d.lwt)}; ingen sensor etterpå ved avgiverne.`
       : "Pumpe og vannmengde bekrefter ikke sirkulasjon i romgrenen."], // heat
     ["Romdrift aktiv", "Romoppvarming/-kjøling", "Signal for normal romdrift. Ikke termostatbehov og bekrefter ikke alene kompressor."], // spaceh
     ["Romtemperatur", 0, "Temperatur og mål for referansesonen; avhenger av sensorplassering."], // room
-    ["Sirkulasjonspumpe", "Hastighet på sirkulasjonspumpe", "Flytter vann i felleskretsen og grenen valgt av 3WV. Kan gå etter kompressorstopp for etterløp, vern eller utjevning; tolk hastighet og vannmengde sammen.", (d) => d.pump == null && d.flow == null && d.pumpOn == null ? null
-      : pumpFlowConflict(d) ? `Intern pumpe melder stopp, men sensoren måler ${fmt1(d.flow)} l/min. Ekstern sirkulasjon, etterløp eller motstridende signaler er mulig.`
-      : d.pump != null && d.pump > 0 ? d.flow != null ? `Hastighet ${fmt0(d.pump)} %; målt ${fmt1(d.flow)} l/min.` : `Hastighet ${fmt0(d.pump)} %, men vannmengde mangler; sirkulasjon er ikke bekreftet.`
-      : waterMoving(d) ? `Sensoren måler ${fmt1(d.flow)} l/min uten brukbar pumpehastighet.`
-      : d.pumpOn === true ? d.flow != null ? `Pumpe aktiv, men bare ${fmt1(d.flow)} l/min; sirkulasjon er ikke bekreftet.` : "Pumpe aktiv, men vannmengde mangler; sirkulasjon er ikke bekreftet."
-      : d.pumpOn === false || d.pump === 0 ? d.flow != null ? `Pumpe stoppet; sensoren viser ${fmt1(d.flow)} l/min. Signalene bekrefter ikke sirkulasjon.` : "Pumpe stoppet uten vannmengdemåling."
-      : `Ingen pålitelig pumpestatus; ${fmt1(d.flow)} l/min alene bekrefter ikke sirkulasjon.`], // pump
+    ["Sirkulasjonspumpe", "Kommando til sirkulasjonspumpen", "Visningen er 100 − rå X10A-verdi: 0 % ber om stopp og 100 % om maksimal styring. Kommandoen måler verken turtall eller vannføring. Vann kan sirkulere når kompressoren står.", (d) => pumpNowText(d, [(n) => `Pumpekommando ${n} %.`, "Pumpen rapporterer ON.", "Pumpen rapporterer stopp (OFF).", "Pumpestatus ukjent.", (n) => `Målt vannføring ${n} l/min.`, "Vannføring utilgjengelig.", "Rapportert OFF strider mot målt vannføring.", "Vannsirkulasjon er ikke bekreftet."])], // pump
     [(d) => pelMeasured(d) ? "Strømforbruk · HomeHub" : "Anslått strømforbruk", "Strømforbruk", (d) => pelMeasured(d)
       ? "Forbruk fra HomeHub-inngang 51. UI beregner det ikke, men offentlig dokumentasjon beviser ikke kalibrering, målepunkt eller hvilke varmere som inngår; ikke en sertifisert anleggsmåler."
-      : "Anslag for COP/EER. CT summerer oppgitte faser med antatt strøm × 230 V; virkelig spenning og effektfaktor er ukjent. Inverterstrøm dekker bare kompressoren.", (d) => d.pelHeld ? "Kompressoren står; inverterstrømmen er fra siste syklus, så forbruk/virkningsgrad kan ikke vises."
-      : d.pel == null ? "Profilen gir ingen aktuell elektrisk måling; COP/EER kan ikke beregnes."
+      : "Elektrisk effekt anslås fra inverterstrømmen eller summen av alle oppgitte CT-faser med antatt 230 V. Faktisk spenning og effektfaktor er ukjent. Inverterens lastdekning er ikke verifisert. CT-dekningen avhenger av koblingen.", (d) => d.pelHeld ? "Kompressoren står; inverterstrømmen er fra siste syklus, så forbruk/virkningsgrad kan ikke vises."
+      : d.pel == null ? t("schem.no_usable_power")
       : d.pelSrc === "MB" ? "Meldt av HomeHub-inngang 51; nøyaktig målegrense er ikke dokumentert."
       : d.pelSrc === "CT" ? "Anslått med CT-klemmer; kablingen avgjør inkluderte laster."
-      : "Beregnet fra inverterstrøm, bare for kompressoren."], // pel
-    ["Avriming", 0, "Reverserer kretsen midlertidig for å fjerne is fra uteveksleren. Normalt i kaldt/fuktig vær og tar kortvarig varme fra vannet.", (d) => d.defrost == null ? null : d.defrost ? "Avriming aktiv." : "Inaktiv: ingen avriming."], // defrost
+      : "Anslått fra inverterstrøm."], // pel
+    ["Avriming", 0, "Reverserer kretsen midlertidig for å fjerne is fra uteveksleren. Normalt i kaldt/fuktig vær og tar kortvarig varme fra vannet.", (d) => d.defrost == null ? null : d.defrost ? "X10A melder at avriming er aktiv." : "X10A melder at avriming er av."], // defrost
     ["Stillemodus", 0, "Begrenser støy og vanligvis utedelens hastighet/effekt. Signalet viser modus, ikke nivå eller termisk virkning.", (d) => d.quiet == null ? null : d.quiet ? "Stillemodus aktiv." : "Inaktiv: stillemodus er av."], // quiet
-    ["Gassrør", "Kjølemediets gassrør", "Kjølemedierør mellom enhetene i split-anlegg. Ved varme fører det varm høytrykksgass til PHE; ved kjøling reverseres strømmen. Monoblokk har ikke dette feltrøret.", (d) => compressorRunning(d) ? d.rps != null ? `Sirkulerer: ${fmt1(d.circP)} bar ved ${fmt0(d.disch)} °C.` : "Sirkulerer: HomeHub bekrefter kompressor; trykk/utløp krever X10A." : "Ingen aktiv kjølemediestrøm: kompressoren står. Trykkutjevning avhenger av krets og hviletid."], // rhot
-    ["Væskerør", "Kjølemediets væskerør", "Kjølemedierør mellom enhetene i split-anlegg. Ved varme returnerer kondensert høytrykksmedium mot ekspansjonsventilen; ved kjøling reverseres det. Monoblokk har ikke feltrøret.", (d) => compressorRunning(d) ? d.rps != null ? `Sirkulerer: ekspansjonsventil ${fmt0(d.eev)} pulser.` : "Sirkulerer: HomeHub bekrefter kompressor; ventilposisjon krever X10A." : "Ingen sirkulasjon: kompressoren står."], // rcold
+    ["Gassrør", "Kjølemediets gassrør", "Kjølemedierør mellom enhetene i split-anlegg. Ved varme fører det varm høytrykksgass til PHE; ved kjøling reverseres strømmen. Monoblokk har ikke dette feltrøret.", (d) => compressorRunning(d) ? d.rps != null ? `Sirkulerer: ${fmt1(d.circP)} bar ved ${fmt0(d.disch)} °C.` : "HomeHub melder at kompressoren er på. Trykk og utblåsningstemperatur krever X10A." : "Ingen aktiv kjølemediestrøm: kompressoren står. Trykkutjevning avhenger av krets og hviletid."], // rhot
+    ["Væskerør", "Kjølemediets væskerør", "Kjølemedierør mellom enhetene i split-anlegg. Ved varme returnerer kondensert høytrykksmedium mot ekspansjonsventilen; ved kjøling reverseres det. Monoblokk har ikke feltrøret.", (d) => compressorRunning(d) ? d.rps != null ? `Sirkulerer: ekspansjonsventil ${fmt0(d.eev)} pulser.` : "HomeHub melder at kompressoren er på. Ekspansjonsventilens stilling krever X10A." : "Kompressoren står."], // rcold
     ["PHE-utløpsrør", "Utløpsrør fra PHE", "Vann fra PHE via R1T, BUH, pumpe og 3WV. Varm side ved varme/tappevann og kald ved aktiv kjøling; R1T er før BUH og grenene.", (d) => waterMoving(d) ? `R1T før BUH: ${degC(d.lwt)} ved ${fmt1(d.flow)} l/min${d.buh1 || d.buh2 ? "; BUH-trinn aktivt etterpå" : ""}.` : "Pumpe og vannmengde bekrefter ikke sirkulasjon her."], // wsup
     ["Tankkrets", "Hydraulisk tankkrets", "Gren som lader varmtvanns-/akkumulatortanken. Intern veksler avhenger av modell; tegningen viser funksjon, ikke konstruksjon. I denne omkoblingen pauser tanklading direkte romstrøm.", (d) => d.valveDhw === true ? waterMoving(d) ? `Tankvei valgt: ${fmt1(d.flow)} l/min, PHE ut ${degC(d.lwt)}, tank ${degC(d.tank)}.` : "Tankvei valgt, men pumpe/vannmengde bekrefter ikke aktiv lading." : "Tankvei ikke valgt; styringen viser romkrets."], // wtank
     [(d) => activeSpaceKind(d) === "cool" ? "Kjølegren" : activeSpaceKind(d) === "heat" ? "Varmegren" : "Romgren", "Hydraulisk romgren", "Gren til radiatorer, gulvvarme, viftekonvektorer osv. R1T/R4T måles i hydraulikkmodulen og beviser ikke temperatur eller last ute i grenen.", (d) => d.valveDhw === true ? "Romgrenen er ikke valgt; styringen viser tank."
-      : waterMoving(d) ? d.thermalMode === "cool" && !compressorRunning(d, 5) && d.pthRaw != null && d.pthRaw > 0
+      : waterMoving(d) ? d.thermalMode === "cool" && compressorStopped(d) && heatersOff(d) && d.pthRaw != null && d.pthRaw > 0
         ? `Restvarme sirkulerer mot romkretsen ved ${fmt1(d.flow)} l/min; ikke aktiv kjøling. R1T ${degC(d.lwt)}, R4T ${degC(d.ret)}; feltsiden måles ikke.`
         : `Sirkulasjon mot romkretsen ved ${fmt1(d.flow)} l/min. Interne sensorer: R1T ${degC(d.lwt)}, R4T ${degC(d.ret)}.`
       : "Pumpe og vannmengde bekrefter ikke sirkulasjon i romgrenen."], // wheat
@@ -1094,7 +1103,7 @@ HOMEHUB_LABEL_I18N.nb = homeHubValues([
   "Kompressor aktiv", // 31
   "Tankvarmer aktiv", // 32
   "Tankdesinfeksjon aktiv", // 33
-  "3-veisventilens stilling", // 37
+  "3-veisventil", // 37
   "Aktuell varme-/kjølemodus", // 38
   "Tur ut av PHE", // 40
   "Tur etter BUH", // 41
@@ -1140,7 +1149,7 @@ DESCRIPTION_I18N.nb = descriptionValues([
   ["Ettervarming løfter tanken til målet igjen når temperaturen går under startgrensen."], // 23
   ["Planlagt forhåndsvalg: Komfort bruker høyt mål, Eco lavt."], // 24
   ["I hybridsystem ber styringen kjelen om tappevann."], // 25
-  ["3WV leder vann til tank eller rom; 1=tank, 0=rom, men posisjonen beviser ikke aktivitet."], // 26
+  ["Den rapporterte ruten går til tappevannstanken eller romkretsen for oppvarming eller kjøling. Meldingen alene bekrefter ikke ventilens stilling eller vannmengden."], // 26
   ["X10A PÅ/AV-utgang for valgfri 2WV; beviser ikke modus, spenning eller mekanisk posisjon."], // 27
   ["Åpning på blandeventilen for en ekstra sone."], // 28
   ["Turtemperaturmål for valgt varme- eller kjølemodus."], // 29
@@ -1150,7 +1159,7 @@ DESCRIPTION_I18N.nb = descriptionValues([
   ["R4T-retur til PHE; vurder ΔT med vannmengde, kompressor og modus, ikke en universell 5 K-regel."], // 33
   ["Vannmengde i felleskretsen; minimum avhenger av modell/modus, og lav verdi kan utløse 7H."], // 34
   ["Hydraulikktrykk: mange håndbøker krever >1 bar; ved ≤1,0 bar, bruk håndboken for nøyaktig modell."], // 35
-  ["Invertert pumpekommando: 0 er maksimal hastighet, 100 er stopp."], // 36
+  ["Invertert X10A-kommando til sirkulasjonspumpen: råverdi 0 ber om maksimal styring og 100 om stopp. Den måler ikke turtall (RPM) og beviser verken rotasjon eller vannstrøm. Les rapportert ON/OFF-status og målt vannstrøm hver for seg, også når kompressoren står."], // 36
   ["Pumpestatus; beviser ikke nyttig varme og kan være aktiv uten kompressor. Sammenlign vannmengde."], // 37
   ["Status for pumpen i en konfigurert solvarmekrets."], // 38
   ["Oppgitt hastighet for pumpen som profilen navngir."], // 39
@@ -1222,7 +1231,7 @@ DESCRIPTION_I18N.nb = descriptionValues([
   ["HomeHub-status Ingen feil/Feil/Advarsel; identifiserer ikke alene årsaken."], // 105
   ["Betydningen av feilkoden som meldes nå."], // 106
   ["Tilleggsunderkode; gyldig bare med hovedstatus/-kode og skjules når utilgjengelig."], // 107
-  ["HomeHub viser kompressor PÅ/AV, ikke hastighet/kapasitet; tolk med drift og vannmengde."], // 108
+  ["HomeHub oppgir kompressorens tilstand som PÅ eller AV. Hastighet, effekt og varmeoverføring krever egne målinger."], // 108
   ["Viser om normal tappevannsdrift er aktiv."], // 109
   ["Viser om normal romoppvarming eller -kjøling er aktiv."], // 110
   ["PHE-utløp før BUH; sammenlign med retur bare ved sirkulasjon for å få ΔT."], // 111
@@ -1247,7 +1256,7 @@ MODEL_DESCRIPTION_I18N.nb = modelDescriptionValues([
   ["Ved hull i målingene kan enkelte starter mangle i tellingen.", "Det finnes ikke et fast normalt antall starter. Med nok data regner denne kontrollen fullførte varmekjøringer med et snitt på minst 10 minutter som lange nok."], // health_cycling
   ["Avriming", "≥3 parede, >15% av kompressorens driftstid der både kompressor- og avrimingsstatus er lesbar. Intern regel, ikke Daikin; fuktighet og hele varmevekslerens temperatur mangler."], // health_defrost
   ["Trykk", "felles intern regel ≤1,0 bar; 60 s kontinuerlig observert gir advarsel. Ikke universell; modellmanual gjelder."], // health_pressure
-  ["Strømning etter 60 s pumpe", "Grense krever samme modell/modus/forhold; ikke nominell eller lavstrømningsbevis."], // health_flow
+  ["Laveste godkjente X10A-vannmengde etter minst 60 s dekket av sammenhengende meldinger om at pumpen er på.", "Grense krever samme modell/modus/forhold; ikke nominell eller lavstrømningsbevis."], // health_flow
   ["BUH/BSH ON-tid", "ikke energi eller bevis på unødig varme."], // health_heater
   ["5 eksperimentelle tellere", "sammenlignbare økninger; hull/reset utelates. Stabilitet utelukker ikke begrensning eller beviser årsak."], // health_retries
   ["RAM 24 h: stabil, fall snur; varig fall: mulig lekkasje; kompatibel omstart med strøm: RAM-kurve mulig; ellers kun daterte kompatible 5 min fra flashjournal etter tidssynk. 5 min oppløsning kan skjule korte stopp; åpne/siste ulagrede kan mangle."], // free_heap

@@ -218,10 +218,8 @@ svg .sc-rflow { fill: none; stroke-width: 3.5; stroke-linecap: round; stroke-das
 #schem { --phe-water-supply: var(--flow-hot); --phe-water-return: var(--flow-cold); }
 #schem.cooling-mode { --phe-water-supply: var(--flow-cold); --phe-water-return: var(--flow-hot); }
 #schem.water-neutral { --phe-water-supply: var(--muted); --phe-water-return: var(--muted); }
-/* The space-circuit perimeter gradient (top = supply, bottom = return) follows the SAME three-way
-   thermal swap as the water overlays: warm-in/cool-out while heating, reversed in cooling, neutral
-   grey when the flow is pump-only. The tank uses a fixed red->blue instead (a DHW charge is always a
-   heat input), which is why it does not read these. */
+/* The space-circuit perimeter follows the pipe colours: warm-in/cool-out while heating, reversed
+   in cooling, grey when circulation is thermally neutral. */
 #schem { --space-flow-top: var(--flow-hot); --space-flow-bot: var(--flow-cold); }
 #schem.cooling-mode { --space-flow-top: var(--flow-cold); --space-flow-bot: var(--flow-hot); }
 #schem.water-neutral { --space-flow-top: var(--muted); --space-flow-bot: var(--muted); }
@@ -282,26 +280,19 @@ svg .sc-bsh-state-box { fill: var(--hatch); stroke: var(--pipe); transition: fil
 svg .sc-bsh-state .sc-state { fill: var(--muted); transition: fill .3s; }
 .bsh-on .sc-bsh-state-box { fill: var(--warn); fill-opacity: .11; stroke: var(--warn); }
 .bsh-on .sc-bsh-state .sc-state { fill: var(--warn); }
-/* The DHW tank's charging flow runs on the box PERIMETER (two half-paths), not an internal coil:
-   a fixed red->blue vertical gradient (warm in at the top, cold at the bottom, and NOT swapped in
-   cooling — a DHW charge is always a heat input) with dashes animating down both sides while the
-   tank is charging. Its own class, so G010 (an overlay must trace a drawn pipe) does not apply to
-   what is a box edge. The resting grey edge is the box's own stroke; these only show when on. */
+/* Tank flow follows the box perimeter in two half-paths. The red-to-blue charge gradient keeps its
+   orientation in cooling. Defrost circulation uses grey. G010 applies to pipe overlays, while
+   these paths trace the tank edge. */
 svg .sc-tank-flow, svg .sc-space-flow {
   fill: none; stroke-width: 3; stroke-linecap: round;
   stroke-dasharray: 9 15; opacity: 0; transition: opacity .4s; pointer-events: none;
 }
 svg .sc-tank-flow { stroke: url(#tankFlow); }
-/* The space circuit runs the same perimeter animation, but its gradient SWAPS with mode: warm
-   supply on top / cool return below while HEATING, reversed in cooling, muted grey when the flow is
-   thermally neutral (pump-only) — the same three-way rule the space pipe overlays already follow. */
+#schem.defrost-on:not(.bsh-on) .sc-tank-flow { stroke: var(--muted); }
 svg .sc-space-flow { stroke: url(#spaceFlow); }
 svg .sc-tank-flow.on, svg .sc-space-flow.on { opacity: 1; animation: dashfwd 1.1s linear infinite; }
-/* Active immersion heater (BSH) drives the SAME tank perimeter, but in a FIXED orange keyed on
-   .bsh-on — electric heat, distinct from the red/blue hydronic charge. The id in the selector lets it
-   win over the gradient .on, so the costly electric source stays unmistakable even if a hydronic
-   charge overlaps. The box keeps its GREY resting stroke (the solid orange outline was dropped) so
-   the moving orange dashes read clearly, exactly like the red/blue charge over the same grey edge. */
+/* Active immersion heater (BSH) drives the same tank perimeter in fixed orange, including during
+   defrost. The box keeps its grey resting stroke. */
 #schem.bsh-on .sc-tank-flow { stroke: var(--warn); opacity: 1; animation: dashfwd 1.1s linear infinite; }
 svg .sc-bolt { fill: var(--muted); }
 /* Pump impeller vanes. The same-colour stroke is not decoration: it rounds the OUTLINE's corners
@@ -1135,23 +1126,12 @@ button.vhist-source:focus-visible { outline: 2px solid var(--brand); outline-off
 .vhist-area.env-forecast-temperature { fill: var(--flow-hot); opacity: .065; stroke: none; }
 .vhist-area.env-forecast-humidity { fill: var(--flow-cold); opacity: .065; stroke: none; }
 .vhist-area.env-forecast-pressure { fill: var(--env-pressure); opacity: .065; stroke: none; }
-/* Phase highlight bands for DHW tank (R5T) temperature chart */
-.vhist-phase { stroke: none; pointer-events: none; }
-.vhist-phase.vhist-phase-boost { fill: var(--src-mb); opacity: .14; }
-.vhist-phase.vhist-phase-bsh { fill: var(--warn); opacity: .22; }
-.vhist-source.vhist-legend-boost { --vhist-colour: var(--src-mb); }
-.vhist-source.vhist-legend-bsh { --vhist-colour: var(--warn); }
-.vhist-source.vhist-legend-boost i,
-.vhist-source.vhist-legend-bsh i {
-  border: none;
-  border-radius: 2px;
-}
-.vhist-source.vhist-legend-boost i {
-  background: color-mix(in srgb, var(--src-mb) 40%, transparent);
-}
-.vhist-source.vhist-legend-bsh i {
-  background: color-mix(in srgb, var(--warn) 50%, transparent);
-}
+.vhist-dhw-graph { grid-template-rows: auto 12px auto auto 24px; }
+.vhist-dhw-graph .vhist-time { grid-row: 5; }
+.vhist-dhw-graph .vhist-tip-note { white-space: pre-wrap; }
+.vhist-dhw-phases { grid-area: 4 / 1; display: grid; gap: 6px; margin-top: 8px; }
+.vhist-dhw-phases .vhist-state-track { height: 6px; }
+.vhist-dhw-phases .vhist-state-on, .vhist-dhw-phases .vhist-state-gap { min-width: 0; }
 /* Forecasts repeat the same area-plus-upper-line construction below the measured ENV III opacity;
    the rest of the future stays transparent and provenance remains in the tooltip. */
 .vhist-forecast-divider { stroke: var(--muted); stroke-width: 1px;

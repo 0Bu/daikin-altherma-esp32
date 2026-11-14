@@ -669,11 +669,11 @@ assert.match(mqttPublishGate,
 const setHpStart = httpConfig.indexOf("static esp_err_t set_hp(");
 const setHpEnd = httpConfig.indexOf("static esp_err_t discover_homehub_now", setHpStart);
 const setHp = httpConfig.slice(setHpStart, setHpEnd);
-const mbFingerprint = setHp.indexOf("const uint32_t modbus_target_fp");
+const mbFingerprint = setHp.indexOf("const auto modbus_target");
 const mbEnabled = setHp.indexOf("const bool modbus_enabled", mbFingerprint);
 const mbSave = setHp.indexOf("} else if (!config_save(c))", mbEnabled);
-const mbHistoryReset = setHp.indexOf("history_modbus_reset(modbus_target_fp)", mbSave);
-const mbReconfigure = setHp.indexOf("mb_reconfigure(modbus_enabled)", mbHistoryReset);
+const mbHistoryReset = setHp.indexOf("history_modbus_reset(modbus_target)", mbSave);
+const mbReconfigure = setHp.indexOf("mb_reconfigure(modbus_enabled, modbus_target)", mbHistoryReset);
 const mbCleanupRequest = setHp.indexOf("mqtt_request_modbus_cleanup()", mbReconfigure);
 assert.ok(mbFingerprint >= 0 && mbEnabled > mbFingerprint && mbSave > mbEnabled,
   "HomeHub post-save cutover values must be staged before the durable boundary");
@@ -681,18 +681,19 @@ assert.ok(mbHistoryReset > mbSave && mbReconfigure > mbHistoryReset &&
           mbCleanupRequest > mbReconfigure,
   "HomeHub generation/cache invalidation must precede predecessor cleanup admission");
 assert.match(history,
-  /void history_modbus_reset\(uint32_t target_fp\) noexcept/,
-  "HomeHub history cutover must accept a staged POD fingerprint without a Config copy");
+  /void history_modbus_reset\(const logic::HistoryModbusTarget& target\) noexcept/,
+  "HomeHub history cutover must accept a staged POD digest without a Config copy");
 const mbHistoryResetStart = history.indexOf(
-  "void history_modbus_reset(uint32_t target_fp) noexcept");
+  "void history_modbus_reset(const logic::HistoryModbusTarget& target) noexcept");
 const mbHistoryResetEnd = history.indexOf(
   "\nuint32_t history_modbus_generation()", mbHistoryResetStart);
 const mbHistoryResetBody = history.slice(mbHistoryResetStart, mbHistoryResetEnd);
 assert.ok(mbHistoryResetStart >= 0 && mbHistoryResetEnd > mbHistoryResetStart,
   "HomeHub history cutover must remain an identifiable no-throw boundary");
-assert.doesNotMatch(mbHistoryResetBody, /current_mb_target_fp\s*\(|\bconfig\s*\(/,
+assert.doesNotMatch(mbHistoryResetBody, /history_modbus_target\s*\(|\bconfig\s*\(/,
   "HomeHub history cutover must not reconstruct the target through a Config allocation");
-const mbReconfigureStart = modbus.indexOf("void mb_reconfigure(bool enabled) noexcept");
+const mbReconfigureStart = modbus.indexOf(
+  "void mb_reconfigure(bool enabled, const logic::HistoryModbusTarget& target) noexcept");
 const mbReconfigureEnd = modbus.indexOf("\nsize_t mb_values_capacity()", mbReconfigureStart);
 const mbReconfigureBody = modbus.slice(mbReconfigureStart, mbReconfigureEnd);
 assert.ok(mbReconfigureStart >= 0 && mbReconfigureEnd > mbReconfigureStart,
@@ -702,11 +703,16 @@ assert.doesNotMatch(mbReconfigureBody, /\bconfig\s*\(/,
 const mbTaskStart = modbus.indexOf("static void mb_task(void*)");
 const mbTaskEnd = modbus.indexOf("static void mb_task_start_if_enabled()", mbTaskStart);
 const mbTask = modbus.slice(mbTaskStart, mbTaskEnd);
-const mbDisableIntent = mbTask.indexOf(
-  "if (!s_target_enabled.load(std::memory_order_acquire)) break;");
-const mbTlsHold = mbTask.indexOf("if (ota_download_active() || weather_fetch_active())");
-assert.ok(mbDisableIntent >= 0 && mbTlsHold > mbDisableIntent,
-  "HomeHub disable must retire the task before TLS delay and any Config allocation");
+const mbDisableIntent = mbTask.indexOf("if (s_task_retiring || !s_target_enabled.load(std::memory_order_acquire))");
+const mbPoll = mbTask.indexOf("if (ota_quiesce_step(ota_quiesce, ota_active))");
+assert.ok(mbDisableIntent >= 0 && mbPoll > mbDisableIntent,
+  "HomeHub disable must be handled before the normal poll path");
+const mbRetirement = mbTask.slice(mbDisableIntent, mbPoll);
+assert.match(mbRetirement,
+  /wait_for_tls\s*=\s*ota_active \|\| weather_fetch_active\(\);\s*if \(wait_for_tls\) \{[^}]*\} else if \(mb_retire_if_disabled\(ready\)\)/,
+  "HomeHub must defer socket retirement while OTA or Weather owns TLS");
+assert.doesNotMatch(mbRetirement, /\bconfig\s*\(/,
+  "HomeHub retirement must not depend on a fallible Config copy");
 assert.doesNotMatch(mbTask, /config_modbus_host\(config\(\)\)\.empty\(\)/,
   "HomeHub disable must not loop forever when a Config snapshot cannot allocate");
 assert.match(setHp.slice(mbReconfigure, mbCleanupRequest + 80),
@@ -715,11 +721,11 @@ assert.match(setHp.slice(mbReconfigure, mbCleanupRequest + 80),
 
 // Retained dedup state is an acknowledgement cache, not a build cache. A failed broker publish must
 // leave it unchanged so the next cycle retries the exact current document/discovery.
-const modbusPublishStart = mqtt.indexOf("static bool publish_modbus_state(bool& published_live)");
+const modbusPublishStart = mqtt.indexOf("static inline bool publish_modbus_state(bool& published_live)");
 const modbusPublishEnd = mqtt.indexOf("\n}\n\nstruct RetainedCleanupCycle", modbusPublishStart) + 2;
 const modbusPublish = mqtt.slice(modbusPublishStart, modbusPublishEnd);
 assert.match(modbusPublish,
-  /if \(js != s_last_modbus_json\) \{\s*if \(!mqtt_publish\(s_modbus,[\s\S]*?\)\) return false;\s*s_last_modbus_json = js;\s*\}/,
+  /if \(js != s_last_modbus_json\) \{\s*if \(!mqtt_publish\(s_modbus,[\s\S]*?\)\) return false;\s*s_last_modbus_json.swap\(js\);\s*\}/,
   "HomeHub dedup may advance only after the broker accepts current state");
 const weatherPublishStart = mqtt.indexOf("void publish_weather_state(");
 const weatherPublishEnd = mqtt.indexOf("\n}\n\n// ENV III", weatherPublishStart) + 2;
@@ -801,7 +807,7 @@ assert.match(status,
   /if \(mb_status\(\)\.connected\) \{[\s\S]*?mb_values_snapshot\([\s\S]*?snapshot\.modbus_live = live;/,
   "/values must prove HomeHub liveness against the copied cache before transfer starts");
 assert.match(status,
-  /if \(snapshot\.modbus_live\) \{\s*\n\s*j \+= ",\\"modbus\\":";\s*\n\s*append_modbus_values_array\(j, snapshot\.modbus\);/,
+  /if \(snapshot\.modbus_live\) \{[^{}]*?\n\s*j \+= ",\\"modbus\\":";\s*\n\s*append_modbus_values_array\(j, snapshot\.modbus\);/,
   "/values must emit the HomeHub array only while that link is live, and omit the key otherwise");
 
 // The complete 129-row target body is larger than the contiguous block a healthy running board can
@@ -1042,13 +1048,16 @@ assert.ok(mainSrc.indexOf("heap_guard_begin()") < mainSrc.indexOf("safe_mode_act
 // a new lifetime even if a second client restores identical config before the next status poll.
 const historySource = read("main/history.cpp");
 for (const fn of ["history_reset()", "history_reset_on_detect(uint32_t identity_fp)",
-  "history_modbus_reset(uint32_t target_fp) noexcept", "history_circulation_reset()",
+  "history_modbus_reset_scope_locked(uint32_t ipv4)", "history_circulation_reset()",
   "history_checkup_reset()", "history_flash_forget()"]) {
   const at = historySource.indexOf(fn);
   const next = historySource.indexOf("\n}", at);
   assert.ok(at >= 0 && next > at && historySource.slice(at, next).includes("bump_history_epoch()"),
     `${fn} must retire browser leases at its lifecycle boundary`);
 }
+assert.match(historySource,
+  /void history_modbus_reset\(const logic::HistoryModbusTarget& target\) noexcept \{[^}]*history_modbus_reset_scope_locked\(0\)/,
+  "a HomeHub configuration change must retire browser leases through the shared scope reset");
 assert.match(historySource, /uint32_t history_epoch\(\) noexcept[\s\S]*?memory_order_acquire/);
 assert.match(historySource, /compare_exchange_weak[\s\S]*?memory_order_release/);
 

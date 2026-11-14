@@ -307,6 +307,21 @@ template <typename JsonOut> static void append_json_uint(JsonOut& out, uint64_t 
 // uptime is already greater than the previous sample. Shared by streamed HTTP and MCP serializers.
 static const uint64_t s_status_boot_id = (static_cast<uint64_t>(esp_random()) << 32) | esp_random();
 
+static void write_boot_id(char (&boot_id)[17]) noexcept {
+    static constexpr char hex[] = "0123456789abcdef";
+    uint64_t              value = s_status_boot_id;
+    for (unsigned i = 16; i > 0; --i) {
+        boot_id[i - 1] = hex[value & 0xf];
+        value >>= 4;
+    }
+    boot_id[16] = '\0';
+}
+
+void http_running_image_identity(char (&boot_id)[17], char (&elf_sha)[65]) noexcept {
+    write_boot_id(boot_id);
+    esp_app_get_elf_sha256(elf_sha, sizeof(elf_sha));
+}
+
 template <typename JsonOut>
 static void append_status_json(JsonOut& j, bool redact) {
     const Config& c = config();
@@ -321,15 +336,13 @@ static void append_status_json(JsonOut& j, bool redact) {
     j += ",";
     j += "\"uptime_s\":" + std::to_string(esp_timer_get_time() / 1000000) + ",";
     char boot_id[17];
-    std::snprintf(boot_id, sizeof(boot_id), "%016llx",
-                  static_cast<unsigned long long>(s_status_boot_id));
+    char elf_sha[65] = {0};
+    http_running_image_identity(boot_id, elf_sha);
     j += "\"boot_id\":";
     json_append_quoted(j, boot_id);
     j += ",";
     // Build identity: the running app's ELF sha (hex) — matches a core dump to the exact firmware
     // that produced it (scripts/decode-coredump.sh), and pairs with last_crash below.
-    char elf_sha[65] = {0};
-    esp_app_get_elf_sha256(elf_sha, sizeof(elf_sha));
     j += "\"app_elf_sha256\":";
     json_append_quoted(j, elf_sha);
     j += ",";
@@ -1192,6 +1205,10 @@ static void append_status_json(JsonOut& j, bool redact) {
     // absent, invalid or individually expired reply — never read that as an inactive plant.
     j += ",\"plant_gate_known\":";  j += mb.plant_gate_known ? "true" : "false";
     j += ",\"plant_gate_active\":"; j += mb.plant_gate_active ? "true" : "false";
+    j += ",\"dhw_operation_known\":";
+    j += mb.dhw_operation_known ? "true" : "false";
+    j += ",\"dhw_operation_active\":";
+    j += mb.dhw_operation_active ? "true" : "false";
     j += ",\"heating_mode_known\":";  j += mb.heating_mode_known ? "true" : "false";
     j += ",\"heating_mode_active\":"; j += mb.heating_mode_active ? "true" : "false";
     if (!mb.last_error.empty()) {
@@ -1220,7 +1237,7 @@ static void append_status_json(JsonOut& j, bool redact) {
     // concurrency, and HTTP safety; the v1.0.12 stack overflow happened on THIS task).
     j += "\"history\":{\"epoch\":";
     j += std::to_string(history_epoch());
-    j += ",\"dt\":";
+    j += ",\"modbus_binding\":true,\"dt\":";
     j += std::to_string(logic::HISTORY_DT_S);
     // The .noinit-RAM adoption verdict for this boot. "accept" means a compatible reset kept the
     // sealed bytes; every other value names why RAM started empty. This is deliberately independent
@@ -1264,10 +1281,10 @@ static void append_status_json(JsonOut& j, bool redact) {
     if (mb.enabled) {
         for (size_t mt = 0; mt < logic::HOMEHUB_HISTORY_COUNT; mt++) {
             const auto& hh = logic::HOMEHUB_HISTORIES[mt];
+            if (hh.offset == 9) continue; // Neither map qualifies Modbus quiet activity.
             const def::HomeHubReg* r  = mb.profile == ModbusProfile::Altherma4
                                             ? def::altherma4_find(hh.offset)
                                             : def::homehub_find(hh.offset);
-            if (r && !def::homehub_has_quiet_activity(*r)) continue;
             if (!r) continue;                         // compile-time table tests make this defensive
             if (!first_mb_trend) j += ",";
             first_mb_trend = false;
@@ -1994,6 +2011,8 @@ struct ValuesSnapshot {
     std::unique_ptr<logic::DwellReading[]> x10a_dwell;
     std::vector<CachedValue> modbus;
     bool modbus_live = false;
+    ModbusActivity                         modbus_activity;
+    uint32_t                               modbus_history_epoch = 0;
 };
 
 // Copy every source before sending the first response byte. Besides giving the two wire surfaces
@@ -2041,7 +2060,12 @@ __attribute__((noinline)) static ValuesSnapshot take_values_snapshot() {
         const size_t modbus_cap = mb_values_capacity();
         snapshot.modbus.resize(modbus_cap ? modbus_cap : 1);
         bool live = false;
-        const size_t n = mb_values_snapshot(snapshot.modbus.data(), snapshot.modbus.size(), live);
+        uint32_t       history_generation = 0;
+        const size_t   n = mb_values_snapshot(snapshot.modbus.data(), snapshot.modbus.size(), live,
+                                              &history_generation, &snapshot.modbus_activity);
+        const uint32_t epoch = history_epoch();
+        if (live && history_generation != 0 && history_generation == history_modbus_generation())
+            snapshot.modbus_history_epoch = epoch;
         snapshot.modbus.resize(n);
         snapshot.modbus_live = live;
         if (!live) snapshot.modbus.clear();
@@ -2183,11 +2207,11 @@ static void append_values_array(JsonOut& j, const std::vector<CachedValue>& v,
     j += "]";
 }
 
-// The HomeHub rows, from the OTHER stack's cache (hp_modbus.cpp). A separate array rather than mixed
-// into the one above, because they are a separate source with its own liveness: merging them would
-// make "is this reading current?" a per-row question the consumer cannot answer. Each row carries the
-// concept it pairs on, or none when the HomeHub has no X10A counterpart for it (the real power
-// measurement, the Smart-Grid mode) — those are simply Modbus-only readings.
+// The HomeHub rows, from the OTHER stack's cache (hp_modbus.cpp). A separate array rather than
+// mixed into the one above, because they are a separate source with its own liveness: merging them
+// would make "is this reading current?" a per-row question the consumer cannot answer. Each row
+// carries the concept it pairs on, or none when the HomeHub has no X10A counterpart for it
+// (reported power, Smart Grid mode) — those are simply Modbus-only readings.
 template <typename JsonOut>
 static void append_modbus_values_array(JsonOut& j, const std::vector<CachedValue>& v) {
     j += "[";
@@ -2209,6 +2233,8 @@ static void append_modbus_values_array(JsonOut& j, const std::vector<CachedValue
         if (reg && def::homehub_is_binary(*reg)) j += ",\"binary\":true";
         if (reg && def::homehub_definition_is_altherma4(v[i].modbus_definition))
             j += ",\"profile\":\"altherma4\"";
+        if (reg && reg->offset == 49 && v[i].modbus_flow_scale_unverified)
+            j += ",\"flow_scale_unverified\":true";
         // Keep the value raw and transport-friendly. The semantic id is metadata for the browser's
         // last-mile rendering, so profile-specific state names never become transport values.
         if (reg)
@@ -2234,23 +2260,33 @@ static void append_modbus_values_array(JsonOut& j, const std::vector<CachedValue
 }
 
 // The two sources ride ONE response but stay two arrays, mirroring the two stacks behind them:
-// `values` is X10A, `modbus` is the HomeHub. `modbus` is emitted only for a snapshot proven live, so
-// a device without one sees exactly the payload it saw before this feature existed. The one shared
-// serializer keeps GET /values and MCP structuredContent byte-for-byte equivalent.
+// `values` is X10A, `modbus` is the HomeHub. `modbus` is emitted only for a snapshot proven live,
+// so a device without one omits that array. The shared serializer keeps GET /values and MCP
+// structuredContent byte-for-byte equivalent.
 template <typename JsonOut>
 static void append_values_json(JsonOut& j, const ValuesSnapshot& snapshot) {
     j += "{\"values\":";
     append_values_array(j, snapshot.x10a, snapshot.x10a_label_ambiguous, snapshot.x10a_dwell);
-    // Emitted only while the link is CONNECTED, not merely enabled. That is a payload invariant
-    // worth having: if the `modbus` array is present, every row in it was read this cycle. Gating on
-    // `enabled` alone served the last good cache after the link dropped, and a consumer has no way
-    // to tell — the rows look identical. The browser is not the only consumer, so the guarantee
-    // belongs here rather than in a check each client has to remember to make.
-    //
-    // mb_values_snapshot() tied the cache copy and the link generations into `modbus_live` before
-    // transfer started. Not live → the key is not written at all: an ABSENT array and an empty one
-    // are different claims, and only absence says "no current reading".
+    j += ",\"modbus_compressor_running\":";
+    const auto& activity = snapshot.modbus_activity;
+    if (activity.compressor == ModbusCompressor::Unknown)
+        j += "null";
+    else
+        j += activity.compressor == ModbusCompressor::On ? "true" : "false";
+    j += ",\"modbus_dhw_running\":";
+    j += !activity.dhw ? "null" : *activity.dhw ? "true" : "false";
+    j += ",\"modbus_space_running\":";
+    j += !activity.space ? "null" : *activity.space ? "true" : "false";
+    // mb_values_snapshot() ties the last full sweep to the current session before transfer.
+    // A fast input-31 observation can change independently of those rows. Omit the array
+    // when the full-cache snapshot is unavailable.
     if (snapshot.modbus_live) {
+        char boot_id[17];
+        write_boot_id(boot_id);
+        j += ",\"modbus_history_boot_id\":\"";
+        j += std::string_view(boot_id, 16);
+        j += "\",\"modbus_history_epoch\":";
+        append_json_uint(j, snapshot.modbus_history_epoch);
         j += ",\"modbus\":";
         append_modbus_values_array(j, snapshot.modbus);
     }
@@ -2396,8 +2432,9 @@ static esp_err_t h_history(httpd_req_t* req) {
     // working request and quietly attach the wrong sensor's history to whatever asked.
     size_t t = 0;
     if (def_) { while (t < logic::TREND_COUNT && &logic::TRENDS[t] != def_) t++; }
-    const int mb_t = modbus ? logic::homehub_history_index(id) : -1;
-    const bool    native_modbus    = modbus && mb_active_profile() == ModbusProfile::Altherma4;
+    const int      mb_t             = modbus ? logic::homehub_history_index(id) : -1;
+    const uint32_t modbus_peer      = modbus ? history_modbus_candidate() : 0;
+    const bool     native_modbus    = modbus && mb_active_profile() == ModbusProfile::Altherma4;
     const int env_t = env3_source ? env3_history_index(id) : -1;
     bool          env3_configured  = false;
     uint32_t      room_identity    = 0;
@@ -2412,8 +2449,7 @@ static esp_err_t h_history(httpd_req_t* req) {
     } // Release the configuration snapshot before constructing the streamed history response.
     const bool x10a_unknown =
         !modbus && !env3_source && !room_source && (!def_ || t >= logic::TREND_COUNT);
-    const bool    missing_quiet =
-        native_modbus && mb_t >= 0 && logic::HOMEHUB_HISTORIES[mb_t].offset == 9;
+    const bool missing_quiet = mb_t >= 0 && logic::HOMEHUB_HISTORIES[mb_t].offset == 9;
     if (x10a_unknown || (modbus && (mb_t < 0 || missing_quiet)) ||
         (env3_source && (!env3_configured || env_t < 0)) ||
         (room_source && (!room_identity || std::strcmp(id, "room_temp") != 0))) {
@@ -2483,8 +2519,7 @@ static esp_err_t h_history(httpd_req_t* req) {
     j += ",\"epoch\":";
     j += std::to_string(history_snapshot_epoch);
     char boot_id[17];
-    std::snprintf(boot_id, sizeof(boot_id), "%016llx",
-                  static_cast<unsigned long long>(s_status_boot_id));
+    write_boot_id(boot_id);
     j += ",\"boot_id\":";
     json_append_quoted(j, boot_id);
     j += ",\"label\":";
@@ -2525,7 +2560,8 @@ static esp_err_t h_history(httpd_req_t* req) {
         httpd_resp_set_status(req, "503 Service Unavailable");
         return http_send_json(req, "{\"ok\":false,\"error\":\"history unavailable\"}");
     }
-    if (history_snapshot_epoch != history_epoch()) {
+    if (history_snapshot_epoch != history_epoch() ||
+        (modbus && modbus_peer != history_modbus_candidate())) {
         httpd_resp_set_status(req, "503 Service Unavailable");
         return http_send_json(req, "{\"ok\":false,\"error\":\"history changed; retry\"}");
     }

@@ -56,7 +56,21 @@ struct FakeMqtt {
     void* handler_arg                                        = nullptr;
 };
 using esp_mqtt_client_handle_t = FakeMqtt*;
+enum esp_mqtt_client_connection_state_t {
+    MQTT_CLIENT_STATE_NOT_INITIALIZED,
+    MQTT_CLIENT_STATE_NOT_STARTED,
+    MQTT_CLIENT_STATE_DISCONNECTED,
+    MQTT_CLIENT_STATE_CONNECTED,
+    MQTT_CLIENT_STATE_WAITING_RECONNECT,
+};
+inline esp_mqtt_client_connection_state_t sdk_mqtt_state = MQTT_CLIENT_STATE_CONNECTED;
+inline esp_mqtt_client_connection_state_t esp_mqtt_client_get_state(FakeMqtt*) {
+    return sdk_mqtt_state;
+}
 struct esp_mqtt_client_config_t {
+    struct {
+        bool disable_auto_reconnect = false;
+    } network;
     struct {
         int stack_size = 0;
     } task;
@@ -103,9 +117,12 @@ inline FakeSemaphore mutex, binary;
 inline FakeQueue     queue;
 inline FakeMqtt      client;
 inline int           message_id = 0, publish_calls = 0, subscribe_calls = 0;
-inline int                  start_calls = 0, start_failures = 0, destroy_calls = 0;
+inline int                    start_calls = 0, start_failures = 0, destroy_calls = 0;
 inline int                    init_calls = 0, stop_calls = 0;
-inline esp_err_t              mac_result = ESP_OK;
+inline bool                   modbus_network_idle = true, fail_sdk_transport_setup = false;
+inline int                    reconnect_calls        = 0;
+inline bool                   disable_auto_reconnect = false;
+inline esp_err_t              mac_result             = ESP_OK;
 inline std::array<uint8_t, 6> mac{2, 1, 1, 1, 1, 1};
 inline char                   client_id[160]{}, will_topic[256]{}, will_payload[32]{};
 inline int                    will_qos = 0, will_retain = 0;
@@ -267,6 +284,7 @@ inline const esp_app_desc_t* esp_app_get_description() {
 }
 inline esp_mqtt_client_handle_t esp_mqtt_client_init(const esp_mqtt_client_config_t* cfg) {
     ++sdk::init_calls;
+    sdk::disable_auto_reconnect = cfg->network.disable_auto_reconnect;
     std::snprintf(sdk::client_id, sizeof(sdk::client_id), "%s", cfg->credentials.client_id);
     std::snprintf(sdk::will_topic, sizeof(sdk::will_topic), "%s",
                   cfg->session.last_will.topic ? cfg->session.last_will.topic : "");
@@ -295,6 +313,20 @@ inline esp_err_t esp_mqtt_client_start(FakeMqtt* c) {
         --sdk::start_failures;
         return ESP_FAIL;
     }
+    if (sdk::fail_sdk_transport_setup) {
+        sdk::fail_sdk_transport_setup = false;
+        sdk_mqtt_state                = MQTT_CLIENT_STATE_DISCONNECTED;
+        return ESP_OK;
+    }
+    sdk_mqtt_state = MQTT_CLIENT_STATE_CONNECTED;
+    if (c->handler) c->handler(c->handler_arg, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
+    return ESP_OK;
+}
+inline esp_err_t esp_mqtt_client_reconnect(FakeMqtt* c) {
+    ++sdk::reconnect_calls;
+    if (sdk_mqtt_state != MQTT_CLIENT_STATE_WAITING_RECONNECT) return ESP_FAIL;
+    if (c->handler) c->handler(c->handler_arg, "mqtt", MQTT_EVENT_BEFORE_CONNECT, nullptr);
+    sdk_mqtt_state = MQTT_CLIENT_STATE_CONNECTED;
     if (c->handler) c->handler(c->handler_arg, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
     return ESP_OK;
 }
@@ -302,7 +334,7 @@ inline esp_err_t esp_mqtt_client_stop(FakeMqtt*) {
     ++sdk::stop_calls;
     return ESP_OK;
 }
-inline int       esp_mqtt_client_subscribe(FakeMqtt*, const char* topic, int) {
+inline int esp_mqtt_client_subscribe(FakeMqtt*, const char* topic, int) {
     const int row = sdk::subscribe_calls++;
     if (static_cast<size_t>(row) >= sdk::subscribed_topics.size())
         throw std::runtime_error("adapter subscribe trace bound exceeded");

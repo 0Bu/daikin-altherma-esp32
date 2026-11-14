@@ -59,16 +59,18 @@ assert.ok(planAt >= 0 && liveBegin > planAt,
   "the previous boot's liveness record must be judged before this boot overwrites it");
 assert.equal(count(start, /logic::history_liveness_begin\(s_liveness/g), 2,
   "both the adopting and the wiping path start a fresh liveness record");
-// The rasters weighed are the ones this boot would ADOPT, by the same rule the retire steps use: a
-// HomeHub ring only for the target it was sealed under, an ENV III ring only when its sensor ran
-// and runs. A HomeHub disabled at runtime keeps its frozen ring but not its target, so weighing the
-// raw ring made the whole region stale (a source that is gone costing the trends that are not).
-assert.match(start, /const bool mb_keep = P\(\)\.mb_target_fp == want_mb_target_fp;/,
-  "the HomeHub raster is weighed under the same keep rule as its retire step");
+// The warm CRC formats remain readable for independent rings. HomeHub can only restore from the
+// stronger flash format; ENV III still requires both boots' sensor intent.
+assert.match(start,
+  /const bool shared_layout = P\(\)\.version == kModbusPeerPersistVersion \|\| P\(\)\.version == kCombinedModbusPeerPersistVersion;/,
+  "independent rings must survive compatible older shared layouts");
+assert.match(body(history, "inline uint32_t history_persist_crc()"),
+  /P\(\)\.version == kModbusPeerPersistVersion\) crc = config_crc32_update\(crc, reinterpret_cast<const uint8_t\*>\(&s_liveness\.modbus_config_fp\), sizeof\(s_liveness\.modbus_config_fp\)\);/,
+  "the separately checked HomeHub configuration must be sealed");
 const weighedDecl = start.slice(start.indexOf("const bool weighed["),
   start.indexOf("const logic::HistoryRasterPlan plan"));
 assert.match(weighedDecl, /x10a_rings_have_samples\(\)/);
-assert.match(weighedDecl, /mb_keep && rings_have_samples\(P\(\)\.mb_ring, HOMEHUB_HISTORY_COUNT\)/);
+assert.match(weighedDecl, /x10a_rings_have_samples\(\), false, env3_keep/);
 assert.match(weighedDecl, /env3_keep && rings_have_samples\(P\(\)\.env3_ring, ENV3_HISTORY_COUNT\)/);
 assert.doesNotMatch(start, /history_commit_state|HistoryCommitState/,
   "the whole-region aggregate is retired: the X10A raster alone decides the region");
@@ -81,11 +83,12 @@ assert.doesNotMatch(raw("main/logic/history_persist.hpp") + raw("main/history.cp
 // the accepting branch only, and never touches the verdict.
 const adoptAt = start.indexOf("if (persist_verdict == logic::HistoryRestore::Accept) {");
 const adopt = start.slice(adoptAt, start.indexOf("} else {", adoptAt));
-assert.match(adopt, /if \(plan\.retire_modbus\) \{ for \(auto& r : P\(\)\.mb_ring\) r\.reset\(\);/,
-  "a stale HomeHub raster retires its own rings");
+assert.match(adopt,
+  /for \(auto& r : P\(\)\.mb_ring\) r\.reset\(\); P\(\)\.mb_target_fp = 0; s_liveness\.modbus_config_fp = 0;/,
+  "every warm adoption retires HomeHub rings and clears the legacy CRCs");
 assert.match(adopt, /if \(plan\.retire_env3\) \{ for \(auto& r : P\(\)\.env3_ring\) r\.reset\(\);/,
   "a stale ENV III raster retires its own ring");
-assert.equal(count(start, /plan\.retire_/g), 2, "only the two optional rasters retire alone");
+assert.equal(count(start, /plan\.retire_/g), 1, "only ENV III uses conditional liveness retirement");
 assert.doesNotMatch(verdictArgs, /retire_/, "a retirement never reaches the verdict");
 
 // Adoption: the counter moves and is sealed BEFORE the rings are re-anchored, so a crash between
@@ -127,8 +130,8 @@ assert.match(adopt,
 assert.match(body(history, "void history_record(const CachedValue"),
   /P\(\)\.x10a_target_fp = s_x10a_target_fp\.load\(\); P\(\)\.residual_us\[static_cast<size_t>\(logic::HistoryJournalSource::X10a\)\] = 0;/,
   "a runtime X10A reset zeroes the remainder with the rings");
-assert.match(body(history, "void history_record_modbus("),
-  /P\(\)\.mb_target_fp = s_mb_target_fp\.load\(\); P\(\)\.residual_us\[static_cast<size_t>\(logic::HistoryJournalSource::Modbus\)\] = 0;/,
+assert.match(body(history, "void history_record_modbus_samples("),
+  /if \(s_mb_reset_requested\.exchange\(false\)\) \{[^}]*P\(\)\.residual_us\[static_cast<size_t>\(logic::HistoryJournalSource::Modbus\)\] = 0;/,
   "a runtime HomeHub reset zeroes the remainder with the rings");
 
 // The boot line says what was booked: only a raster whose rings hold samples AFTER the retire
@@ -138,7 +141,7 @@ const hasAt = adopt.indexOf("const bool has[logic::HISTORY_LIVENESS_RASTERS] = {
 assert.ok(retireEnv3At >= 0 && hasAt > retireEnv3At,
   "which rasters hold samples is decided after every retire step, not before");
 assert.match(adopt.slice(hasAt, bookAt),
-  /x10a_rings_have_samples\(\), rings_have_samples\(P\(\)\.mb_ring, HOMEHUB_HISTORY_COUNT\), rings_have_samples\(P\(\)\.env3_ring, ENV3_HISTORY_COUNT\)\};/);
+  /x10a_rings_have_samples\(\), false, rings_have_samples\(P\(\)\.env3_ring, ENV3_HISTORY_COUNT\)\};/);
 assert.match(adopt, /HistoryAdoptBooking booking\{0, 0\}; if \(has\[i\]\) booking = /,
   "a raster without samples books nothing and carries nothing");
 assert.ok(adopt.indexOf("gaps[0]") > bookAt, "the boot line prints the counts that were booked");
@@ -188,15 +191,27 @@ assert.match(crcBody, /&P\(\)\.env3_live/);
 // ── a) commits: each raster zeroes the counter and notes its commit ─────────────────────────────
 for (const [signature, source] of [
   ["inline void advance_raster_locked(", "X10a"],
-  ["void history_record_modbus(", "Modbus"],
+  ["void history_record_modbus_samples(", "Modbus"],
   ["void history_record_env3(", "Env3"],
 ]) {
   const fn = body(history, signature);
   // A seed of an empty raster is not a commit of what was adopted: the counter is zeroed only on
-  // the bucket-crossing branch, which is the one that also assigns the commit instant of `now`.
-  assert.equal(count(fn, /boots_since_commit = 0;/g), 1, signature + " zeroes the sealed counter once");
-  assert.match(fn, /boots_since_commit = 0; (?:logic::)?history_liveness_commit\(s_liveness, logic::HistoryJournalSource::(X10a|Modbus|Env3), now_us\);/,
-    signature + " zeroes the counter and notes the commit together");
+  // the bucket-crossing branch. Modbus may poll late, so it uses the completed raster boundary.
+  const instant = source === "Modbus" ? "s_mb_last_commit_us" : "now_us";
+  if (source === "Modbus") {
+    const close = body(history, "static void close_modbus_buckets_locked(");
+    assert.equal(count(close, /boots_since_commit = 0;/g), 1);
+    assert.match(close, /P\(\)\.mb_ring\) ring\.commit\(skipped\); s_mb_bucket = bucket;/);
+    assert.match(fn, /else if \(bucket != s_mb_bucket\) \{ close_modbus_buckets_locked\(bucket\);/);
+    assert.match(body(history, "bool seed_source_timeline_locked("),
+      /else if \(bucket > s_mb_bucket\) close_modbus_buckets_locked\(bucket\);/);
+    assert.equal(count(fn, /s_mb_last_commit_us = logic::history_raster_boundary_us\(now_us\);/g), 2,
+      "the Modbus seed and commit both use the raster boundary");
+  } else {
+    assert.equal(count(fn, /boots_since_commit = 0;/g), 1, signature + " zeroes the sealed counter once");
+    assert.match(fn, new RegExp(`boots_since_commit = 0; (?:logic::)?history_liveness_commit\\(s_liveness, logic::HistoryJournalSource::${source}, ${instant}\\);`),
+      signature + " zeroes the counter and notes the commit together");
+  }
   assert.equal(count(fn, new RegExp("history_liveness_commit\\(s_liveness, logic::HistoryJournalSource::" + source, "g")), 2,
     signature + " notes both its seed and its commit in the liveness record");
 }

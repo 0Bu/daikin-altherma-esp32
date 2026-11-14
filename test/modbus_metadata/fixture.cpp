@@ -5,6 +5,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include "hp_modbus.hpp"
 #include "hp_poll.hpp"
 #include "def/homehub.hpp"
 #include "logic/config_model.hpp"
@@ -29,10 +30,13 @@ ModbusProfile mb_active_profile() {
 
 size_t mb_values_capacity() { return fixture_rows.size(); }
 
-size_t mb_values_snapshot(CachedValue* out, size_t max, bool& live) {
+size_t mb_values_snapshot(CachedValue* out, size_t max, bool& live, uint32_t* history_generation,
+                          ModbusActivity* activity) {
     const size_t n = std::min(max, fixture_rows.size());
     for (size_t i = 0; i < n; ++i) out[i] = fixture_rows[i];
     live = fixture_live;
+    if (history_generation) *history_generation = 0;
+    if (activity) *activity = {};
     if (replace_after_copy) {
         // The caller already owns the copied rows. Advance the independently mutable target and
         // current profile before current_modbus_values() uses any row metadata.
@@ -120,6 +124,12 @@ static void http_cases() {
     // replaces repeated keys. HTTP can observe both exact defining rows in one array.
     http("http-typed", typed_rows());
     http("http-invalid", invalid_rows());
+    const auto qualified                     = row(false, 49, 1200);
+    auto       provisional                   = qualified;
+    provisional.modbus_flow_scale_unverified = true;
+    auto unrelated                           = row(true, 79, 185);
+    unrelated.modbus_flow_scale_unverified   = true;
+    http("http-flow-scale", {qualified, provisional, unrelated});
     fixture_rows                 = native_rows();
     current_profile              = ModbusProfile::Altherma4;
     const auto retained_snapshot = fixture_rows;

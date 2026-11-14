@@ -41,12 +41,15 @@ are unchanged. The HTTP-only `denominator` string is represented by the numeric 
 `stop_context_witnessed_stops_recent_heating` on MQTT.
 
 An initial transport-start rejection retains the initialized client and retries with bounded
-backoff. Failed event registration prevents transport start and reports an explicit error.
+backoff. If the SDK stops before its connect callback, the publisher checks the stopped state
+and retries through the same admission path. Failed event registration prevents transport start
+and reports an explicit error.
 
 ## Outbound availability
 
-One client starts with the retained transport LWT immediately, without waiting for X10A. Bridge
-diagnostics, HomeHub, ENV III, forecast and inbound observers keep their independent lifecycles.
+One client starts with the retained transport LWT independently of X10A. Encrypted starts and
+reconnects wait for the HomeHub sweep to release the network and for the required internal heap.
+Bridge diagnostics, HomeHub, ENV III, forecast and inbound observers keep their independent lifecycles.
 X10A discovery uses `availability_mode: all`: both `<base>/status` and `<base>/x10a/status` must be
 online. Board discovery uses transport availability; accessory discovery also requires its own
 numeric reading, so missing accessory keys make that entity unavailable.
@@ -144,7 +147,13 @@ silently fork existing series. See [DIAGNOSTIC_EVIDENCE.md](DIAGNOSTIC_EVIDENCE.
 state. Disconnection produces `{}`; disabling retracts the retained topic. Saved target intent,
 not a retiring task's lagging state, decides whether publication is allowed. Source reconfiguration
 first retracts old evidence; an enabled replacement may publish an empty pre-first-sample document
-on a later cycle. Read-only protocol/register rules: [MODBUS_PROTOCOL.md](MODBUS_PROTOCOL.md).
+on a later cycle. When the same configured name connects to a different IPv4 peer, the peer must
+answer a register read before the predecessor is retired. New state waits for acknowledged cleanup.
+Read-only protocol/register rules: [MODBUS_PROTOCOL.md](MODBUS_PROTOCOL.md).
+If staging HomeHub state runs out of heap, its publisher defers a retry for five seconds.
+The other source publishers continue on their existing schedule.
+Modbus input 49 publishes the catalog-converted flow as a number. The MQTT payload carries no scale
+marker. Independently verify the divisor before using it as a flow measurement.
 
 Native Altherma 4 holding register 58 publishes `imposed_power_limit`; register 54 publishes
 `weather_dependent_main_heating_offset`. Holding register 57 is unlisted and absent. The current
@@ -312,6 +321,7 @@ latest reset remain unknown. Preserve private memory evidence before dismissal; 
 | X10A bracket-subscript discovery templates | Current `.get(..., 'None')` templates make omitted keys/groups unknown. Expect gaps in numeric statistics and `numeric_state` conditions while inputs are unknown. Older numeric/binary templates could keep the last state; text could become empty or a missing group could log a template error. |
 | `<base>/state` | Use `<base>/x10a`; grouped keys unchanged. Union old/new topic labels for historical queries. |
 | `<base>/modbus/status` | Use heartbeat HomeHub link fields. |
+| `quiet_mode_operation` in `<base>/modbus` | The baseline HomeHub payload omits this key. Treat absence as unknown activity. Native `quiet_mode_selection` reports the selected policy. |
 | `<base>/weather_forecast` and four weather discovery configs | Use `<base>/weather/openmeteo/forecast`; no weather HA entities. |
 | 27 historical HomeHub discovery configs under `<node>_modbus` | Retired; data topic `<base>/modbus` remains. Delete-only passes run on connect and every five minutes outside the X10A gate. |
 | Flat `room_*` / `heating_curve_*` heartbeat fields | Move consumers to the grouped `heating_curve` paths above; heartbeat is non-retained, so no tombstone applies. |

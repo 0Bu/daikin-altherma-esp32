@@ -1,9 +1,10 @@
-// translation-source: 34200897e3bb460a7f6fcd68bd6ff940649f8810c9b3709dc7616000e01aee90
+// translation-source: caf7fa0eafa413c661cf1bd9545148c50156312c034d4e698a374e79a8c32180
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
   /* sys.x10a_down */ "X10A ei yhteyttä",
   /* sys.mb_carrying */ "Toimintatila tuntematon — arvot Modbusista",
+  /* sys.mode_unknown */ "Toimintatila tuntematon",
   /* sys.mb_only */ "X10A ei yhteyttä — arvot Modbusista",
   /* sys.mb_source */ "X10A ei yhteyttä · Modbus",
   /* mode.stop */ "Pysäytetty",
@@ -20,6 +21,7 @@ I18N.fi = localeValues([
   /* sys.standby */ "Valmiustila — ei käynnissä",
   /* sys.defrosting */ "Sulatus käynnissä",
   /* sys.circulating */ "Kierto käynnissä — kompressori pois",
+  /* sys.pump_reported */ "Pumppu ilmoittaa käyvänsä — kiertoa ei ole vahvistettu",
   /* sys.cool_mode */ "Jäähdytystila",
   /* sys.residual_circulating */ "Jälkilämmön kierto — ei jäähdytystehoa",
   /* sys.bsh_active */ "Säiliön sähkövastus käytössä",
@@ -111,6 +113,7 @@ I18N.fi = localeValues([
   /* modbus.err.network_unreachable */ "HomeHubiin ei ole verkkoreittiä.",
   /* modbus.err.host_unreachable */ "HomeHubia ei tavoiteta verkossa.",
   /* modbus.err.connect_failed */ "Yhteys HomeHubiin epäonnistui.",
+  /* modbus.err.close_pending */ "Odotetaan aiemman HomeHub-yhteyden sulkeutumista.",
   /* modbus.err.request_failed */ (r) => `Modbus-pyyntöä ei voitu muodostaa${r ? ` rekisterille ${r}` : ""}.`,
   /* modbus.err.send_timeout */ (r) => `Modbus-pyynnön lähetys aikakatkaistiin${r ? ` rekisterissä ${r}` : ""}.`,
   /* modbus.err.send_failed */ (r) => `Modbus-pyyntöä ei voitu lähettää${r ? ` rekisterissä ${r}` : ""}.`,
@@ -335,7 +338,7 @@ I18N.fi = localeValues([
   /* a4.operation_help */ "Ilmoittaa Pysäytetty, Säiliön lämmitys, Tilalämmitys, Tilajäähdytys tai Toimilaitteen käyttö. Tämä on ilmoitettu tila, ei todiste hyödyllisestä lämmönsiirrosta.",
   /* a4.heating_offset_help */ "Siirtää pääalueen sääriippuvaista lämmityskäyrää kelvineinä. Tämä on siirtymä, ei mitattu lämpötila eikä veden koko tavoitelämpötila.",
   /* a4.pre_phe_outdoor_help */ "Veden lämpötila ennen ulkona olevaa levylämmönvaihdinta. Anturi mittaa vesipuolta, ei ulkoilman tai kylmäaineen lämpötilaa.",
-  /* a4.flow_help */ "Altherma 4:n virtaaman skaalausta ei ole varmistettu. L/min-arvo käyttää aiempaa muunnosta; vertaa laitteen omaan lukemaan ennen suorituskyvyn arviointia.",
+  /* mb.flow_scale_help */ "Tämän Modbus-lähteen virtaaman skaalausta ei ole varmistettu. Vertaa arvoa laitteen omaan näyttöön.",
   /* a4.pump_help */ "Altherma 4:n opas nimeää pumpun nopeuden mutta ilmoittaa yksiköksi L/min. Tässä näkyvä % on varmistamaton oletus; vertaa laitteen omaan lukemaan.",
   /* a4.pressure_help */ "Altherma 4:n paineen skaalausta ei ole varmistettu. Bar-arvo käyttää aiempaa muunnosta; vertaa laitteen omaan lukemaan ennen paineen arviointia.",
   /* a4.demand_response */ "Kysyntäjoustotila",
@@ -381,6 +384,8 @@ I18N.fi = localeValues([
   /* val.since_min */ (d) => `\u2265 ${d}`,
   /* val.since_gap */ (d) => `${d} siitä havaitsematta`,
   /* hist.modbus_plateau */ (when, d) => `rekisteri muuttumaton ${when} · noin ${d} · mittauksen ikä tuntematon`,
+  /* hist.modbus_flow_unverified */ "Tallennetun Modbus-virtauksen asteikkoa ei ole varmistettu.",
+  /* hist.thermal_bucket_note */ "Arvio viiden minuutin jaksojen arvoista, jotka on voitu mitata eri aikoina.",
   /* hist.boost_total */ (d) => `Tehostus aktiivinen · ${d}`,
   /* hist.boost_none */ "Tallennusjaksolla ei tehostusta.",
   /* hist.boost_ago_range */ (a, b) => `${a}–${b} h sitten`,
@@ -421,7 +426,7 @@ I18N.fi = localeValues([
   /* hist.buh_aria */ (l, d) => `${l} — varalämmittimen aikajana. ${d}. Nuolinäppäimet lukevat näytteet.`,
   /* hist.valve_dhw_total */ (d) => `Käyttövesi · ${d}`,
   /* hist.valve_space_total */ (d) => `Tilapiiri · ${d}`,
-  /* hist.valve_none */ "Tallennusjaksolla ei käyttövesiasentoa.",
+  /* hist.valve_none */ "Tallennusjaksolla ei ilmoitettu käyttövesireittiä.",
   /* hist.valve_dhw */ "Käyttövesi",
   /* hist.valve_space */ "Tilapiiri",
   /* hist.valve_aria */ (l, d) => `${l} — 3-tieventtiilin aikajana. ${d}. Nuolinäppäimet lukevat näytteet.`,
@@ -463,7 +468,7 @@ I18N.fi = localeValues([
   /* ota.check_failed */ "tarkistus epäonnistui",
   /* ota.starting */ "käynnistetään…",
   /* ota.pct */ (p) => `${p}%`,
-  /* ota.rebooting */ "käynnistetään uudelleen…",
+  /* ota.rebooting */ "Odotetaan uudelleenkäynnistystä…",
   /* ota.failed */ "päivitys epäonnistui",
   /* ota.timeout */ "aikakatkaistu",
   /* ota.cancelled */ "peruttu",
@@ -477,7 +482,7 @@ I18N.fi = localeValues([
   /* ota.snapshot_label */ "Datan tila",
   /* ota.snapshot_value */ "Tilannekuva",
   /* ota.snapshot_help */ "Viimeksi vastaanotettu tila ennen uudelleenlatausta. Reaaliaikainen data voi keskeytyä asennuksessa; asetukset pysyvät lukittuina uudelleenkäynnistykseen asti.",
-  /* ota.reload_hint */ "asennettu — lataa sivu uudelleen",
+  /* ota.reload_hint */ "Uudelleenkäynnistystä ei voitu vahvistaa",
   /* ota.dialog_title */ "Laiteohjelmistopäivitys",
   /* ota.switch_title */ "Vaihda laiteohjelmistoversiota",
   /* ota.changes_title */ "Tämän päivityksen muutokset",
@@ -514,6 +519,21 @@ I18N.fi = localeValues([
   /* schem.room */ "Huone",
   /* schem.flow_rate */ "virtaama",
   /* schem.water_press */ "vedenpaine",
+  /* schem.capacity_low_speed */ "Tehoarvio edellyttää X10A:n ilmoittamaa ajantasaista kompressorin nopeutta, joka on yli 5 r/s.",
+  /* schem.no_usable_power */ (metric) => (metric ? `${metric} ei ole saatavilla. ` : "") + "Käyttökelpoista sähkötehoarviota ei ole.",
+  /* schem.backup_heater_active */ "Varalämmitin ilmoittaa olevansa päällä",
+  /* schem.compressor_off */ "Kompressori on pysähtynyt. Sen tehosta ei ole arviota.",
+  /* schem.outdoor_held */ "X10A:n aiempia ulkoyksikön arvoja ei näytetä.",
+  /* schem.outdoor_homehub */ "Ulkolämpötila tulee HomeHubin Modbus-rekisteristä. Rekisteri ei ilmoita mittausaikaa.",
+  /* schem.homehub_compressor_off */ "HomeHub ilmoittaa kompressorin tilaksi POIS.",
+  /* schem.outdoor_independent */ "Sähkölämmittimien toiminta ja veden kierto havaitaan erikseen.",
+  /* schem.water_route_unknown */ "Kolmitieventtiilin valitsema reitti ei ole tiedossa. Yhteisen piirin virtaama ei kerro, kulkeeko vesi varaaja- vai tilapiiriin.",
+  /* schem.flow_invalid */ "X10A-virtaamalukema on virheellinen.",
+  /* schem.defrost_transfer */ "Arvioitu lämmönsiirto sulatuksessa",
+  /* schem.transfer_sign */ "Positiivinen arvo: vesi vastaanottaa lämpöä. Negatiivinen: vesi luovuttaa lämpöä.",
+  /* schem.efficiency_no_capacity */ (metric) => `${metric} ei ole saatavilla. Tälle tarkastelurajalle ei ole käyttökelpoista tehoarviota.`,
+  /* schem.efficiency_ct_pair */ (outlet) => `Käytössä ovat virtamuuntajien virta sekä lämpötilat ${outlet} ja R4T.`,
+  /* schem.efficiency_inv_pair */ "Käytössä ovat R1T ennen varalämmitintä ja R4T. Sähköteho arvioidaan invertterivirrasta olettaen 230 V. Arvion kattamia kuormia, lämmittimet mukaan lukien, ei ole varmistettu.",
   /* schem.r2t */ "R2T",
   /* schem.r3t */ "R3T",
   /* schem.flow_switch */ "VIRTAUSK.",
@@ -770,6 +790,7 @@ I18N.fi = localeValues([
   /* hh.found */ (host) => `HomeHub löytyi: ${host}`,
   /* hh.not_found */ "HomeHubia ei löytynyt. Anna osoite käsin.",
   /* hh.saved */ "Modbus-asetukset tallennettu",
+  /* hh.start_pending */ "Asetukset tallennettu. HomeHubin luku ei ole vielä alkanut.",
   /* hh.err_port */ "Portin on oltava 1–65535",
   /* hh.err_unit */ "Yksikkötunnuksen on oltava 1–247",
   /* board.title */ "Korttilaitteisto",
@@ -950,7 +971,6 @@ I18N.fi = localeValues([
   /* lang.sv */ "Svenska",
   /* lang.fi */ "Suomi",
   /* lang.saved */ "Kieli tallennettu",
-  /* hist.cop_none */ "COP-käyrää ei näytetä, kun sähköteho tulee CT-virtamuuntajilta. Johdotus määrää kuormat; lämpölaskenta päättyy ennen BUH:ta eikä sisällä BSH:n suoraan tankkiin lisäämää lämpöä, joten taserajat eivät välttämättä vastaa toisiaan.",
 ]);
 
 DESCRIPTION_I18N.fi = descriptionValues([
@@ -980,7 +1000,7 @@ DESCRIPTION_I18N.fi = descriptionValues([
   ["Uudelleenlämmitys nostaa tankin tavoitteeseen, kun lämpötila alittaa käynnistysrajan."], // 23
   ["Tankin ajastusprofiili: mukavuusvaraus käyttää korkeampaa ja säästövaraus matalampaa tavoitetta."], // 24
   ["Hybridilaitteessa säätimen DHW-pyyntö kattilalle; pyyntö ei todista palamista."], // 25
-  ["Vaihtoventtiili ohjaa veden DHW-tankkiin tai tilapiiriin; asento ei yksin todista piirin toimintaa."], // 26
+  ["Ilmoitettu reitti vie käyttövesivaraajaan tai lämmittävään tai jäähdyttävään tilapiiriin. Ilmoitus ei yksin vahvista venttiilin asentoa eikä virtausta."], // 26
   ["Valinnaisen 2WV:n X10A-lähtö; pois-tila ei yksin todista jäähdytystä, jännitettä tai mekaanista asentoa."], // 27
   ["Toisen alueen sekoitusventtiilin avautuma, jolla kuuma meno ja viileä paluu sovitetaan tavoitteeseen."], // 28
   ["Valitun lämmitys-/jäähdytystilan menoveden tavoite, kiinteä tai sääkompensoitu."], // 29
@@ -990,7 +1010,7 @@ DESCRIPTION_I18N.fi = descriptionValues([
   ["R4T yhteisessä PHE-paluussa; R1T−R4T on PHE:n ΔT, ei lämmönluovuttajien eikä yleinen 5 K sääntö."], // 33
   ["Yhteisen vesipiirin virtaus; vähimmäinen riippuu mallista ja tilasta, ja pieni virtaus voi aiheuttaa 7H:n."], // 34
   ["Suljetun vesipiirin paine; sallittu alue on mallikohtainen, ja arvolla ≤1,0 bar tarkista kyseisen mallin ohje."], // 35
-  ["Pumpun nopeuskomento käyttää käänteistä asteikkoa: 0 = täysi nopeus, 100 = pysäytys."], // 36
+  ["Käänteinen X10A-komento kiertovesipumpulle: raaka-arvo 0 pyytää suurinta ohjausta ja 100 pysäytystä. Se ei mittaa kierroslukua (RPM) eikä todista pyörimistä tai veden virtausta. Lue ilmoitettu ON/OFF-tila ja mitattu virtaus erikseen myös kompressorin ollessa pysähtynyt."], // 36
   ["Vesikiertopumpun tila; käynti ei yksin todista hyödyllistä lämmönsiirtoa, joten vertaa virtaukseen."], // 37
   ["Määritetyn aurinkolämpöpiirin pumppu, eri kuin lämpöpumpun vesikiertopumppu."], // 38
   ["Profiilin nimeämän pumpun nopeus; asteikko ja piiri ovat mallikohtaisia, todellinen virtaus on eri arvo."], // 39
@@ -1062,7 +1082,7 @@ DESCRIPTION_I18N.fi = descriptionValues([
   ["HomeHubin diagnostiikkatila: ei vikaa, vika tai varoitus; syy selviää viereisestä koodista/lisäkoodista."], // 105
   ["Parhaillaan ilmoitetun vikakoodin merkitys."], // 106
   ["Numeerinen lisäkoodi tarkentaa viereistä Daikin-vikakoodia; lue vain tilan ja pääkoodin kanssa."], // 107
-  ["HomeHubin ilmoitus kompressorin käynnistä; ei anna nopeutta tai kapasiteettia, joten vertaa virtaukseen ja piiritilaan."], // 108
+  ["HomeHub ilmoittaa kompressorin tilan PÄÄLLÄ tai POIS. Nopeus, teho ja lämmönsiirto edellyttävät omia mittauksia."], // 108
   ["Normaali DHW-käyttö: käynnissä = päällä, odotus/varaus = pois; ei kerro käynnistyksen syytä."], // 109
   ["Normaali tilakäyttö: käynnissä = päällä, odotus/varaus = pois; tila ja 3WV erottavat lämmityksen/jäähdytyksen ja reitin."], // 110
   ["PHE-lähtövesi ennen BUH:ta; vertaa paluuseen vain kierron aikana, jolloin erotus on vesipuolen ΔT."], // 111
@@ -1087,7 +1107,7 @@ MODEL_DESCRIPTION_I18N.fi = modelDescriptionValues([
   ["Mittauskatkojen vuoksi osa käynnistyksistä voi jäädä laskematta.", "Käynnistysten määrälle ei ole kiinteää normaaliarvoa. Kun tietoja on riittävästi, tämä tarkistus pitää päättyneiden lämmitysjaksojen vähintään 10 minuutin keskiarvoa riittävänä."], // health_cycling
   ["Sulatus", "≥3 yhdistettyä, >15% kompressorin käyntiajasta, kun sekä kompressorin että sulatuksen tila on luettavissa. Sisäinen sääntö, ei Daikin; kosteus ja koko kennon lämpötila puuttuvat."], // health_defrost
   ["Paine", "yhteinen sisäinen raja ≤1,0 bar; 60 s jatkuvaa havaintoa antaa varoituksen. Ei yleispätevä; mallin ohje pätee."], // health_pressure
-  ["Virtaus 60 s pumpun jälkeen", "Raja vaatii saman mallin/tilan/olosuhteet; ei nimellisarvo tai pienen virtauksen todiste."], // health_flow
+  ["Pienin hyväksytty X10A-virtaama sen jälkeen, kun peräkkäiset ilmoitukset pumpun päälläolosta ovat kattaneet vähintään 60 sekuntia.", "Raja vaatii saman mallin/tilan/olosuhteet; ei nimellisarvo tai pienen virtauksen todiste."], // health_flow
   ["BUH/BSH ON-aika", "ei energiaa tai turhan lämmön todiste."], // health_heater
   ["5 kokeellista laskuria", "vertailukelpoiset nousut; aukot/reset pois. Vakaus ei sulje pois rajoitusta eikä todista syytä."], // health_retries
   ["RAM 24 h vakaa, laskut palautuvat; jatkuva lasku: ehkä vuoto; sopiva käynnistys virta päällä voi säilyttää RAM-käyrän. Muuten vain flash-lokin sopivat päivätyt 5 min aikasynkin jälkeen; 5 min välein lyhyt katko ei aina näy; avoin/uusimmat tallentamatta voivat puuttua."], // free_heap
@@ -1171,7 +1191,7 @@ MB_DELTA_I18N.fi = mbDeltaValues([
 ]);
 
 INSPECT_I18N.fi = inspectValues(
-  ["Ei nykyistä mittausta:", "kompressori on pysähtynyt ja ulkoyksikkö päivittää omia antureitaan vain käydessään. Edellisen käynnin arvo piilotetaan, ettei sitä näytetä nykyisenä mittauksena.", "Kompressorin nopeutta ei voi lukea, joten ulkoyksikön arvot voivat olla edelliseltä käynniltä."],
+  ["Ei nykyistä mittausta:", "kompressori on pysähtynyt ja ulkoyksikkö päivittää omia antureitaan vain käydessään. Edellisen käynnin arvo piilotetaan, ettei sitä näytetä nykyisenä mittauksena.", "Näiden X10A-ulkoyksikkölukemien ikä ei ole tiedossa. Ne voivat olla edelliseltä käyntijaksolta."],
   [
     ["Toimintatila", "Toimintatila", "Sisäyksikön tila. Se ei yksin vahvista kompressorin käyntiä tai virtaamaa."], // status
     ["ENV III", "ENV III -olosuhteet", "Liitetyn ENV III:n lämpötila, kosteus ja ilmanpaine. Sijoitus ratkaisee, kuvaavatko arvot sisä- vai ulko-olosuhteita."], // env3
@@ -1183,10 +1203,8 @@ INSPECT_I18N.fi = inspectValues(
       : d.sgMode === 1 ? "Ulkoinen energianhallinta ilmoittaa pakotetun poiskytkennän."
       : d.sgMode === 3 ? "Ulkoinen energianhallinta ilmoittaa pakotetun päällekytkennän."
       : "Ulkoista Smart Grid -pyyntöä ei ole; yksikkö toimii itsenäisesti."], // sgrequest
-    ["Ulkoyksikkö", "Ulkoyksikkö", "Puhallin siirtää ilmaa lämmönvaihtimen läpi ja kompressori nostaa kylmäaineen painetta ja lämpötilaa. Kaavio on yksinkertaistus; monoblock-, maalämpö- ja hybridijärjestelmät ovat rakenteeltaan erilaisia.", (d) => d.defrost ? "Sulatus — käänteinen kierto sulattaa jään ja ottaa hetkeksi lämpöä vedestä."
-      : compressorRunning(d) ? d.rps != null ? `Käynnissä — kompressori ${fmt0(d.rps)} rps${d.quiet ? ", hiljainen tila rajoittaa" : ""}.` : "Käynnissä — HomeHub vahvistaa kompressorin; nopeus ja tarkat arvot vaativat X10A:n."
-      : d.ouHeldOver && d.mbFields && d.mbFields.has("out") ? "Valmiustila — ei aktiivista lämmönsiirtoa. X10A-anturit eivät päivity; ulkolämpötila tulee aikaleimattomasta Modbus-arvosta ja kuumakaasun lämpötila on “—”."
-      : "Valmiustila — kompressori pysähtynyt, ei aktiivista lämmitystä tai jäähdytystä. Päivittymättömät arvot näytetään “—”, ei edellisen käynnin arvoina."], // ou
+    ["Ulkoyksikkö", "Ulkoyksikkö", "Puhallin siirtää ilmaa lämmönvaihtimen läpi ja kompressori nostaa kylmäaineen painetta ja lämpötilaa. Kaavio on yksinkertaistus; monoblock-, maalämpö- ja hybridijärjestelmät ovat rakenteeltaan erilaisia.", (d) => compressorRunning(d) ? d.rps != null ? `Käynnissä — kompressori ${fmt0(d.rps)} rps${d.quiet ? ". X10A ilmoittaa hiljaisen tilan olevan käytössä" : ""}.` : "HomeHub ilmoittaa, että kompressori on päällä. Nopeus ja ulkoyksikön tarkemmat mittaukset edellyttävät X10A:ta."
+      : "Kompressori on pysähtynyt."], // ou
     ["Kompressori", "Kompressori", "Puristaa kylmäainetta. rps vahvistaa käynnin, mutta ei yksin lämpötehoa."], // comp
     ["Ulkolämpötila", "Ulkolämpötila", "Lämpötila ulkoyksikön anturin lähellä; aurinko ja asennus vaikuttavat siihen."], // out
     ["Ulkolämmönvaihdin · R4T", "Ulkolämmönvaihtimen lämpötila R4T", "Lämmityksessä lämmönvaihdin voi jäähtyä alle 0 °C:n. Lämpötila ja sulatustila yhdessä kuvaavat huurtumista ja sulatusta."], // ouhx
@@ -1195,7 +1213,7 @@ INSPECT_I18N.fi = inspectValues(
     ["Matalapaine", "Matalapaine", "Kylmäaineen paine kompressorin matalapainepuolella. Kaikissa profiileissa ei ole tätä anturia."], // lp
     ["Paisuntaventtiili", "Paisuntaventtiili", "Elektronisen venttiilin ohjattu asento pulsseina; luku ei ole avautumisprosentti."], // eev
     ["Nestepuolen kylmäaine · R3T", "Nestepuolen kylmäaineen lämpötila R3T", "Kylmäaineen lämpötila sisälämmönvaihtimen nestepuolella; ei paluuveden lämpötila."], // r3t
-    ["Levylämmönvaihdin", "Levylämmönvaihdin", "PHE siirtää energiaa kylmäaineen ja veden välillä sekoittamatta niitä. Teho arvioidaan virtaamasta ja R1T/R4T:stä; anturien tarkka sijainti riippuu mallista.", (d) => !compressorRunning(d, 5) ? "Ei aktiivista kylmäainepuolen siirtoa — kompressori pysähtynyt. Pumppu voi siirtää jälkilämpöä, mutta se ei ole lämmitys- tai jäähdytystehoa."
+    ["Levylämmönvaihdin", "Levylämmönvaihdin", "PHE siirtää energiaa kylmäaineen ja veden välillä sekoittamatta niitä. Teho arvioidaan virtaamasta ja R1T/R4T:stä; anturien tarkka sijainti riippuu mallista.", (d) => needsCapacitySpeed(d) && !d.dtStale ? t("schem.capacity_low_speed") : compressorStopped(d) ? stoppedCapacityText(d)
       : d.dtStale ? "Vesipuolen siirtoa ei voi laskea — pumppu ja virtaama eivät vahvista veden liikettä PHE:n läpi."
       : d.pth == null ? "Ei suunnattua arviota — arvot eivät vahvista hyödyllistä siirtoa valitussa tilassa."
       : d.pthKind === "cooling" ? `Vedestä poistuu noin ${fmt1(d.pth)} kW (${fmt1(d.flow)} l/min, ΔT ${fmt1(d.dt)} K).`
@@ -1204,45 +1222,43 @@ INSPECT_I18N.fi = inspectValues(
     ["Vesi BUH:n jälkeen · R2T", "Veden lämpötila BUH:n jälkeen R2T", "Veden lämpötila BUH:n jälkeen; toisin kuin R1T, se voi sisältää lisätyn sähköenergian."], // r2t
     ["PHE sisään · R4T", "PHE:n tuloveden lämpötila R4T", "PHE:lle palaavan veden lämpötila. Tarkastele R1T:n, virtaaman, kompressorin ja tilan kanssa."], // rwt
     ["PHE:n veden ΔT", "PHE:n veden lämpötilaero", "Lähdön R1T miinus tulon R4T. Lasketaan kahdesta anturista; virtaaman kanssa se kuvaa lämmönsiirtoa, mutta ei mittaa rakennuksen lämmönluovuttimien meno- ja paluulämpöä.", (d) => d.dtStale ? "Ei toimivaa ΔT:tä — pumppu ja virtaama eivät vahvista veden liikettä. Jäähtyvien anturien ero ei ole toimintapiste."
-      : d.dt == null ? null : !compressorRunning(d, 5) ? `${fmt1(d.dt)} K vain pumpulla — jälkilämmön tasaantumista, ei tehoa.`
+      : d.dt == null ? null : needsCapacitySpeed(d) ? `${fmt1(d.dt)} K. ${t("schem.capacity_low_speed")}` : compressorStopped(d) ? `${fmt1(d.dt)} K. ${stoppedCapacityText(d)}`
       : d.thermalMode === "cool" ? `${fmt1(d.dt)} K. Jäähdytyksessä R1T:n tulee olla R4T:tä alempi, joten ero on negatiivinen.`
       : `${fmt1(d.dt)} K. Positiivinen arvo tarkoittaa lämmön siirtymistä veteen.`], // dt
     [(d) => d && d.pthKind === "cooling" ? "Jäähdytysteho (arvio)" : "Lämpöteho (arvio)", "PHE:n arvioitu lämpöteho", (d) => d && d.pthKind === "cooling" ? "Vedestä poistetun lämmön arvio: virtaama × (R4T−R1T) × 4,186 olettaen veden. Anturit ja glykoli rajoittavat tarkkuutta; arvo näytetään vain vahvistetussa jäähdytyksessä." : "Veteen siirtyneen lämmön arvio: virtaama × (R1T−R4T) × 4,186 olettaen veden. Anturit ja glykoli rajoittavat tarkkuutta; R1T:n jälkeinen BUH ei sisälly.", (d) => d.dtStale ? d.bsh === true ? "PHE:n siirtoa ei voi laskea ilman vahvistettua kiertoa. BSH voi yhä lämmittää säiliötä, mutta sen lämpö ohittaa PHE-anturit eikä väylä ilmoita tehoa." : "Tehoa ei voi laskea ilman vahvistettua veden liikettä PHE:n läpi. Toimintapiste puuttuu; teho ei ole 0 kW."
-      : d.pth == null ? null : d.pthKind === "cooling" ? `≈ ${fmt1(d.pth)} kW jäähdytystä${d.cop != null ? `, EER ${fmt1(d.cop)}` : ""}.` : `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `, COP ${fmt1(d.cop)}` : ""}.`], // pth
-    [(d) => d && d.efficiencyKind === "eer" ? "Lämpöpumpun EER (arvio)" : d && d.copScope === "plant" ? "COP BUH:n jälkeen (arvio)" : "Lämpöpumpun COP (arvio)", "Arvioitu hyötysuhde", (d) => d && d.efficiencyKind === "eer" ? "Arvioitu jäähdytysteho jaettuna arvioidulla sähköteholla. Tulos perii nesteen, anturien, jännitteen ja tehokertoimen oletukset; hetkellinen, ei kausittainen EER." : "Arvioitu lämpöteho jaettuna saman taserajan sähköteholla. CT:llä lämpö voidaan laskea BUH:n jälkeen, invertterivirralla vain lämpöpumpulle; CT-kytkentä määrää mukana olevat kuormat. Tulos perii neste-, anturi-, jännite- ja tehokerroinoletukset ja on hetkellinen, ei kausittainen.", (d) => d.copBlock === "tank_heater" ? "COP ei saatavilla — säiliövastus käy. Sen sähkö voi sisältyä taseeseen, mutta lämpö menee suoraan säiliöön vesipuolen anturien ohi."
-      : d.copBlock === "buh_no_r2t" ? "COP ei saatavilla — BUH lämmittää, mutta profiilissa ei ole jälkianturia; sähkö- ja lämpöraja eivät täsmää."
-      : d.copBlock === "mb_scope" ? "COP ei saatavilla — HomeHub ilmoittaa koko yksikön sähkön lämmittimineen, lämpö koskee vain PHE:tä. Ilman lämmitintiloja ja jälkianturia rajoja ei voi sovittaa."
-      : d.copBlock === "no_pel" ? d.pelHeld ? "COP ei saatavilla — pysähtyneen kompressorin invertterivirta on edelliseltä käynniltä." : "COP ei saatavilla — profiili ei ilmoita CT- eikä invertterivirtaa."
-      : d.cop == null ? null : d.efficiencyKind === "eer" ? `${fmt1(d.cop)} kW jäähdytystä / 1 kW sähköä — ≈ ${fmt1(d.copPth)} kW teholla ≈ ${fmt1(d.pel)} kW.`
-      : d.copScope === "plant" ? `${fmt1(d.cop)} kW lämpöä BUH:n jälkeen / 1 kW CT-sähköä — ≈ ${fmt1(d.copPth)} kW teholla ≈ ${fmt1(d.pel)} kW. CT-kytkentä määrää rajan.`
-      : `${fmt1(d.cop)} kW lämpöä / 1 kW sähköä lämpöpumpun rajalla — ≈ ${fmt1(d.copPth)} kW teholla ≈ ${fmt1(d.pel)} kW. BUH ei sisälly kumpaankaan.`], // cop
-    ["Varalämmitin · BUH", "Varalämmitin BUH", "Vesipiirin sähkövastus pakkaselle, sulatukselle tai varakäytölle. Porras ei ole erillinen kW-mittaus.", (d) => d.buh1 == null && d.buh2 == null ? null : d.buh2 ? "Porras 2 — molemmat portaat lämmittävät." : d.buh1 ? "Porras 1 — yksi porras lämmittää." : "Pois — BUH-portaita ei käytössä."], // buh
-    ["Säiliön sähkövastus", "Säiliön sähkövastus", "Uppovastus BSH lämmittää säiliötä ilman kompressoria tai vesikiertoa. X10A ilmoittaa vain tilan, ei tehoa.", () => { const on = x10aDown() ? null : vOn(/^bsh$/i); return on == null ? null : on ? "Säiliön sähkövastus aktiivinen." : "Pois — säiliön vastus ei ole käytössä."; }], // bsh
+      : needsCapacitySpeed(d) ? t("schem.capacity_low_speed")
+      : d.pth == null ? null : d.pthKind === "cooling" ? `≈ ${fmt1(d.pth)} kW jäähdytystä${d.cop != null && !d.copPostBuh ? `, EER ${fmt1(d.cop)}` : ""}.` : `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `, COP ${fmt1(d.cop)}` : ""}.`], // pth
+    [(d) => d && d.efficiencyKind === "eer" ? eerScopeText(d, "CT-virtaan perustuva EER (arvio)", "Invertterivirrasta arvioitu EER", "Arvioitu EER")
+      : eerScopeText(d || {}, "CT-virtaan perustuva COP (arvio)", "Invertterivirrasta arvioitu COP", "Arvioitu COP"), "Arvioitu hyötysuhde", (d) => d && d.efficiencyKind === "eer"
+      ? "Arvioitu jäähdytysteho jaettuna arvioidulla sähköteholla. Tulos perii nesteen, anturien, jännitteen ja tehokertoimen oletukset; hetkellinen, ei kausittainen EER." +
+        eerScopeText(d, post => ` Käytössä ovat R4T ja ${post ? "R2T varalämmittimen jälkeen" : "R1T ennen varalämmitintä"} sekä virtamuuntajien virta. CT-kytkentä määrää mukana olevat kuormat. CT-laskenta edellyttää, että molemmat BUH-portaat ja BSH on todettu pois päältä.`, " " + t("schem.efficiency_inv_pair")) : "Arvioitu lämpöteho jaettuna arvioidulla sähköteholla. CT-laskenta edellyttää, että molemmat BUH-portaat ja BSH on todettu pois päältä." + heatingEfficiencyBoundary(d), (d) => d.copBlock === "tank_heater" ? `${d.bsh === true ? `${efficiencyMetric(d)} ei ole saatavilla. Säiliövastus ilmoittaa olevansa päällä.` : `${efficiencyMetric(d)} ei ole saatavilla. Säiliövastuksen tila ei ole tiedossa.`} Sen lämpö ohittaa molemmat menoveden anturit.`
+      : d.copBlock === "backup_heater" ? `${d.buh1 === true || d.buh2 === true ? `${efficiencyMetric(d)} ei ole saatavilla. Varalämmitin ilmoittaa olevansa päällä.` : `${efficiencyMetric(d)} ei ole saatavilla. Varalämmittimen tila ei ole tiedossa.`} Sähkötehoarviosta ei selviä, sisältyykö lämmittimen kuorma.`
+      : d.copBlock === "mb_scope" ? `${efficiencyMetric(d)} ei ole saatavilla. Käytettävissä olevilla tiedoilla HomeHubin sähkötehoa ei voi kohdistaa levylämmönvaihtimen arvioituun lämpötehoon. Ei tiedetä, mitkä sähkökuormat, kuten sähkölämmittimet, lukema kattaa.`
+      : d.copBlock === "no_pel" ? d.pelHeld ? `${efficiencyMetric(d)} ei saatavilla — pysähtyneen kompressorin invertterivirta on edelliseltä käynniltä.` : t("schem.no_usable_power", efficiencyMetric(d))
+      : d.cop == null ? efficiencyUnavailable(d) : d.efficiencyKind === "eer" ? `${fmt1(d.cop)} kW jäähdytystä / 1 kW sähköä — ≈ ${fmt1(d.copPth)} kW teholla ≈ ${fmt1(d.copPel)} kW.`
+      : d.copScope === "plant" ? `${fmt1(d.cop)} kW vesipuolen lämpötehoa / 1 kW arvioitua CT-sähkötehoa — ≈ ${fmt1(d.copPth)} kW teholla ≈ ${fmt1(d.copPel)} kW. CT-kytkentä määrää rajan.`
+      : `${fmt1(d.cop)} kW lämpöä per kW arvioitua sähkötehoa. Noin ${fmt1(d.copPth)} kW lämpöä arvioidulla ${fmt1(d.copPel)} kW:n sähköteholla.`], // cop
+    ["Varalämmitin · BUH", "Varalämmitin BUH", "Vesipiirin sähkövastus pakkaselle, sulatukselle tai varakäytölle. Porras ei ole erillinen kW-mittaus.", (d) => d.buh2 === true ? "Porras 2 ilmoittaa olevansa päällä." : d.buh1 === true ? "Porras 1 ilmoittaa olevansa päällä." : d.buh1 === false && d.buh2 === false ? "Molemmat portaat ilmoittavat olevansa pois päältä." : null], // buh
+    ["Säiliön sähkövastus", "Säiliön sähkövastus", "Uppovastus BSH lämmittää säiliötä ilman kompressoria tai vesikiertoa. X10A ilmoittaa vain tilan, ei tehoa.", (d) => d.bsh == null ? null : d.bsh ? "Säiliön sähkövastus aktiivinen." : "Pois — säiliön vastus ei ole käytössä."], // bsh
     ["3-tieventtiili", "3-tieventtiili", "Valitsee reitin säiliöön tai tilapiiriin. Ilmoitettu käsky ei vahvista mekaanista asentoa tai virtaamaa.", (d) => d.valveDhw == null ? null : d.valveDhw ? "Säiliöreitti valittu; ilmoitus ei yksin vahvista virtaamaa tai lämmitystä." : "Tilapiiri valittu; ilmoitus ei yksin vahvista kiertoa."], // valve
     ["2-tieventtiilin lähtö", "2-tieventtiilin lähtö", "X10A:n binäärilähtö; ei mekaaninen asentopalaute eikä todiste lämmityksestä/jäähdytyksestä.", (d) => d.valve2On == null ? null : d.valve2On ? "X10A ilmoittaa 2WV-lähdön PÄÄLLÄ; tarkista tila ja tilapiirin toiminta erikseen." : "X10A ilmoittaa 2WV-lähdön POIS; se ei yksin tarkoita jäähdytystä eikä kumoa lämmitystilaa levossa."], // valve2
     ["Käyttövesi-/varaajasäiliö", "Käyttövesi- tai varaajasäiliö", "Säiliötä kuvaavat R5T, tavoitelämpötila ja 3WV-reitti; lämpötila ei yksin vahvista latausta."], // tank
     [(d) => activeSpaceKind(d) === "cool" ? "Jäähdytyspiiri" : activeSpaceKind(d) === "heat" ? "Lämmityspiiri" : "Tilapiiri", "Tilapiiri", "Patterit, lattialämmitys tai puhallinkonvektorit. R1T/R4T mitataan lämpöpumpun sisällä eivätkä ne vahvista kenttäputkien jälkeistä lämpötilaa.", (d) => d.valveDhw === true ? "Tilapiirin reittiä ei ole valittu; pumppu ja virtaama näyttävät todellisen säiliökierron erikseen."
-      : waterMoving(d) ? d.thermalMode === "cool" && !compressorRunning(d, 5) && d.pthRaw != null && d.pthRaw > 0 ? `Jälkilämmin vesi kiertää tiloihin. R1T ${degC(d.lwt)}; luovuttimien jälkeen ei ole anturia. Tämä ei ole aktiivista jäähdytystä.` : `Vesi menee ${activeSpaceKind(d) === "cool" ? "jäähdytys" : activeSpaceKind(d) === "heat" ? "lämmitys" : "tila"}piiriin. R1T ${degC(d.lwt)}; luovuttimien jälkeen ei ole anturia.` : "Pumppu ja virtaama eivät vahvista tilapiirin kiertoa."], // heat
+      : waterMoving(d) ? d.thermalMode === "cool" && compressorStopped(d) && heatersOff(d) && d.pthRaw != null && d.pthRaw > 0 ? `Jälkilämmin vesi kiertää tiloihin. R1T ${degC(d.lwt)}; luovuttimien jälkeen ei ole anturia. Tämä ei ole aktiivista jäähdytystä.` : `Vesi menee ${activeSpaceKind(d) === "cool" ? "jäähdytys" : activeSpaceKind(d) === "heat" ? "lämmitys" : "tila"}piiriin. R1T ${degC(d.lwt)}; luovuttimien jälkeen ei ole anturia.` : "Pumppu ja virtaama eivät vahvista tilapiirin kiertoa."], // heat
     ["Tilalämmitys/-jäähdytys", "Tilalämmityksen tai -jäähdytyksen toiminta", "Tilapiirin normaalin lämmityksen/jäähdytyksen tila. Ei termostaattipyyntö eikä yksin vahvista kompressoria."], // spaceh
     ["Huonelämpötila", "Huonelämpötila", "Vertailuvyöhykkeen lämpötila; tarkastele tavoitteen ja tilan kanssa."], // room
-    ["Kiertovesipumppu", "Kiertovesipumpun nopeus", "Siirtää vettä yhteisessä piirissä ja 3WV:n valitsemalla reitillä. Voi käydä kompressorin seistessä jälkikierron tai suojauksen vuoksi; nopeus ei yksin vahvista virtaamaa.", (d) => d.pump == null && d.flow == null && d.pumpOn == null ? null
-      : pumpFlowConflict(d) ? `Pumppu ilmoittaa pysähtyneensä, mutta anturi näyttää ${fmt1(d.flow)} l/min. Syynä voi olla ulkoinen kierto, jälkikäynti tai ristiriitainen/vanha signaali; tarkista molemmat.`
-      : d.pump != null && d.pump > 0 ? d.flow != null ? `Nopeus ${fmt0(d.pump)} %; virtaama ${fmt1(d.flow)} l/min.` : `Nopeus ${fmt0(d.pump)} %, mutta virtaamamittausta ei ole; kiertoa ei vahvistettu.`
-      : waterMoving(d) ? `Virtaama ${fmt1(d.flow)} l/min ilman käyttökelpoista pumppunopeutta.`
-      : d.pumpOn === true ? d.flow != null ? `Pumppu PÄÄLLÄ, mutta virtaama vain ${fmt1(d.flow)} l/min; kiertoa ei vahvistettu.` : "Pumppu PÄÄLLÄ, mutta virtaamamittausta ei ole; kiertoa ei vahvistettu."
-      : d.pumpOn === false || d.pump === 0 ? d.flow != null ? `Pumppu pysähtynyt; anturi näyttää ${fmt1(d.flow)} l/min. Arvot eivät vahvista kiertoa.` : "Pumppu pysähtynyt, virtaamamittausta ei ole."
-      : `Luotettavaa pumpputilaa ei ole; ${fmt1(d.flow)} l/min ei vahvista kiertoa.`], // pump
-    [(d) => pelMeasured(d) ? "Sähköteho · HomeHub" : "Sähköteho (arvio)", "Sähköteho", (d) => pelMeasured(d) ? "HomeHub-rekisterin 51 sähköteho. Dokumentaatio ei vahvista kalibrointia, mittauskohtaa tai kaikkien lämmittimien sisältymistä; tämä ei ole sertifioitu järjestelmämittari." : "COP/EER-arvio: CT-vaiheiden summa × oletettu 230 V. Jännite ja tehokerroin ovat tuntemattomia; invertterivirta kattaa vain kompressorin ja CT-raja riippuu kytkennästä.", (d) => d.pelHeld ? "Kompressori on pysähtynyt, joten invertterivirta on edelliseltä käynniltä; sähkötehoa ja hyötysuhdetta ei voi ilmoittaa."
-      : d.pel == null ? "Profiilissa ei ole nykyistä virtamittausta, joten COP/EER ei ole laskettavissa."
+    ["Kiertovesipumppu", "Kiertovesipumpun ohjaus", "Näytetty arvo on 100 − X10A-raaka-arvo: 0 % pyytää pysäytystä ja 100 % enimmäisohjausta. Ohjaus ei mittaa kierroslukua eikä virtausta. Vesi voi kiertää kompressorin ollessa pysähtynyt.", (d) => pumpNowText(d, [(n) => `Pumpun ohjaus ${n} %.`, "Pumppu ilmoittaa tilaksi ON.", "Pumppu ilmoittaa pysähdyksen (OFF).", "Pumpun tila tuntematon.", (n) => `Mitattu virtaus ${n} l/min.`, "Virtaus ei saatavilla.", "Ilmoitettu OFF on ristiriidassa mitatun virtauksen kanssa.", "Veden kiertoa ei ole vahvistettu."])], // pump
+    [(d) => pelMeasured(d) ? "Sähköteho · HomeHub" : "Sähköteho (arvio)", "Sähköteho", (d) => pelMeasured(d) ? "HomeHub-rekisterin 51 sähköteho. Dokumentaatio ei vahvista kalibrointia, mittauskohtaa tai kaikkien lämmittimien sisältymistä; tämä ei ole sertifioitu järjestelmämittari." : "Sähköteho arvioidaan invertterivirrasta tai kaikkien ilmoitettujen CT-vaiheiden summasta olettaen 230 V. Jännitettä ja tehokerrointa ei tunneta. Invertterin kuormia ei ole varmistettu. CT:n kuormat riippuvat kytkennästä.", (d) => d.pelHeld ? "Kompressori on pysähtynyt, joten invertterivirta on edelliseltä käynniltä; sähkötehoa ja hyötysuhdetta ei voi ilmoittaa."
+      : d.pel == null ? t("schem.no_usable_power")
       : d.pelSrc === "MB" ? "Arvo HomeHub-rekisteristä 51; tarkkaa mittausrajaa ei ole dokumentoitu."
-      : d.pelSrc === "CT" ? "CT-arvio; mukana olevat kuormat riippuvat kytkennästä." : "Invertterivirrasta — vain kompressori."], // pel
-    ["Sulatus", "Sulatus", "Käänteinen kierto sulattaa jään ulkolämmönvaihtimesta; lämmitys keskeytyy hetkeksi.", (d) => d.defrost == null ? null : d.defrost ? "Sulatus aktiivinen." : "Pois — sulatus ei ole aktiivinen."], // defrost
+      : d.pelSrc === "CT" ? "CT-arvio; mukana olevat kuormat riippuvat kytkennästä." : "Arvio invertterivirrasta."], // pel
+    ["Sulatus", "Sulatus", "Käänteinen kierto sulattaa jään ulkolämmönvaihtimesta; lämmitys keskeytyy hetkeksi.", (d) => d.defrost == null ? null : d.defrost ? "X10A ilmoittaa sulatuksen olevan käynnissä." : "X10A ilmoittaa sulatuksen olevan pois päältä."], // defrost
     ["Hiljainen tila", "Hiljainen tila", "Vähentää melua yleensä rajoittamalla puhallinta tai kompressoria ja voi pienentää käytettävissä olevaa tehoa.", (d) => d.quiet == null ? null : d.quiet ? "Hiljainen tila aktiivinen." : "Pois — hiljainen tila ei ole aktiivinen."], // quiet
-    ["Kaasulinja", "Kylmäaineen kaasulinja", "Split-yksiköiden välinen kylmäainelinja. Lämmityksessä kuuma korkeapainekaasu kulkee PHE:lle; jäähdytyksessä suunta vaihtuu. Monoblockissa linjaa ei ole.", (d) => compressorRunning(d) ? d.rps != null ? `Kierto — ${fmt1(d.circP)} bar lämpötilassa ${fmt0(d.disch)} °C.` : "Kierto — HomeHub vahvistaa kompressorin; paine ja lämpötila vaativat X10A:n." : "Ei aktiivista kylmäainekiertoa — kompressori pysähtynyt; paineen tasaantuminen riippuu piiristä ja pysähdysajasta."], // rhot
-    ["Nestelinja", "Kylmäaineen nestelinja", "Split-yksiköiden välinen nestemäisen kylmäaineen linja. Lämmityksessä se palaa ulkoyksikön paisuntaventtiilille; jäähdytyksessä suunta vaihtuu. Monoblockissa linjaa ei ole.", (d) => compressorRunning(d) ? d.rps != null ? `Kierto — paisuntaventtiili ${fmt0(d.eev)} pulssia.` : "Kierto — HomeHub vahvistaa kompressorin; venttiilin asento vaatii X10A:n." : "Pysähtynyt — kompressori pois."], // rcold
+    ["Kaasulinja", "Kylmäaineen kaasulinja", "Split-yksiköiden välinen kylmäainelinja. Lämmityksessä kuuma korkeapainekaasu kulkee PHE:lle; jäähdytyksessä suunta vaihtuu. Monoblockissa linjaa ei ole.", (d) => compressorRunning(d) ? d.rps != null ? `Kierto — ${fmt1(d.circP)} bar lämpötilassa ${fmt0(d.disch)} °C.` : "HomeHub ilmoittaa, että kompressori on päällä. Paine ja kuumakaasun lämpötila edellyttävät X10A:ta." : "Ei aktiivista kylmäainekiertoa — kompressori pysähtynyt; paineen tasaantuminen riippuu piiristä ja pysähdysajasta."], // rhot
+    ["Nestelinja", "Kylmäaineen nestelinja", "Split-yksiköiden välinen nestemäisen kylmäaineen linja. Lämmityksessä se palaa ulkoyksikön paisuntaventtiilille; jäähdytyksessä suunta vaihtuu. Monoblockissa linjaa ei ole.", (d) => compressorRunning(d) ? d.rps != null ? `Kierto — paisuntaventtiili ${fmt0(d.eev)} pulssia.` : "HomeHub ilmoittaa, että kompressori on päällä. Venttiilin asento edellyttää X10A:ta." : "Kompressori on pysähtynyt."], // rcold
     ["PHE:n lähtöputki", "PHE:n lähtöputki", "R1T:n vesi kulkee BUH:n ja pumpun läpi; 3WV ohjaa sen tiloihin tai säiliöön. Jäähdytyksessä tämä on kylmä puoli; BUH:n jälkeinen anturi voi sisältää sähkövastuksen lämmön.", (d) => waterMoving(d) ? `R1T ennen BUH:ta ${degC(d.lwt)}, ${fmt1(d.flow)} l/min${d.buh1 || d.buh2 ? "; BUH aktiivinen jäljempänä" : ""}.` : "Pumppu ja virtaama eivät vahvista kiertoa putkessa."], // wsup
     ["Säiliöpiiri", "Säiliöpiiri", "Käyttövesi- tai varaajasäiliötä lämmittävä hydraulinen haara. Tarkka lämmönvaihdin riippuu rakenteesta; kuva näyttää toiminnon, ei mallin rakennetta.", (d) => d.valveDhw === true ? waterMoving(d) ? `Säiliö valittu, ${fmt1(d.flow)} l/min; PHE ${degC(d.lwt)}, säiliö ${degC(d.tank)}.` : "Säiliö valittu, mutta kierto ei vahvista aktiivista latausta." : "Säiliöreittiä ei ole valittu; ohjaus ilmoittaa tilapiirin."], // wtank
-    [(d) => activeSpaceKind(d) === "cool" ? "Jäähdytyshaara" : activeSpaceKind(d) === "heat" ? "Lämmityshaara" : "Tilahaara", "Tilahaara", "Haara pattereille, lattialämmitykselle tai puhallinkonvektoreille. R1T/R4T mitataan lämpöpumpun sisällä, ei tässä haarassa; ΔT sisältää myös putkiston vaikutuksen.", (d) => d.valveDhw === true ? "Tilahaaraa ei ole valittu; ohjaus ilmoittaa säiliön." : waterMoving(d) ? d.thermalMode === "cool" && !compressorRunning(d, 5) && d.pthRaw != null && d.pthRaw > 0 ? `Jälkilämmön kierto ${fmt1(d.flow)} l/min; ei aktiivista jäähdytystä. R1T ${degC(d.lwt)}, R4T ${degC(d.ret)}.` : `Kierto tiloihin ${fmt1(d.flow)} l/min. R1T ${degC(d.lwt)}, R4T ${degC(d.ret)}.` : "Tilahaaran kiertoa ei ole vahvistettu."], // wheat
+    [(d) => activeSpaceKind(d) === "cool" ? "Jäähdytyshaara" : activeSpaceKind(d) === "heat" ? "Lämmityshaara" : "Tilahaara", "Tilahaara", "Haara pattereille, lattialämmitykselle tai puhallinkonvektoreille. R1T/R4T mitataan lämpöpumpun sisällä, ei tässä haarassa; ΔT sisältää myös putkiston vaikutuksen.", (d) => d.valveDhw === true ? "Tilahaaraa ei ole valittu; ohjaus ilmoittaa säiliön." : waterMoving(d) ? d.thermalMode === "cool" && compressorStopped(d) && heatersOff(d) && d.pthRaw != null && d.pthRaw > 0 ? `Jälkilämmön kierto ${fmt1(d.flow)} l/min; ei aktiivista jäähdytystä. R1T ${degC(d.lwt)}, R4T ${degC(d.ret)}.` : `Kierto tiloihin ${fmt1(d.flow)} l/min. R1T ${degC(d.lwt)}, R4T ${degC(d.ret)}.` : "Tilahaaran kiertoa ei ole vahvistettu."], // wheat
     ["PHE:n paluuputki", "PHE:n paluuputki", "Yhteinen paluu R4T:lle säiliö- ja tilahaarojen yhdistyttyä. Lämmityksessä yleensä R1T:tä kylmempi, jäähdytyksessä lämpimämpi; R4T ei ole lämmönluovuttimien lähellä.", (d) => waterMoving(d) ? `Paluu ${degC(d.ret)}, ${fmt1(d.flow)} l/min, ${fmt1(d.wp)} bar.` : "Paluuputken kiertoa ei ole vahvistettu."], // wret
     ["Vesivirtaama", "Vesivirtaama", "Yhteisen piirin virtaama; vaadittu minimi riippuu mallista ja tilasta."], // flow
     ["Virtauskytkimen tila", "Virtauskytkimen tila", "X10A:n binääritila; ei mittaa l/min-arvoa eikä vahvista mallin minimivirtaamaa.", (d) => d.flowSwitch == null ? null : d.flowSwitch ? `X10A PÄÄLLÄ; vertaa pumppuun ja arvoon ${fmt1(d.flow)} l/min.` : `X10A POIS; pumpun käydessä vertaa arvoa ${fmt1(d.flow)} l/min ja vikaa 7H/C0.`], // flow_switch
@@ -1266,7 +1282,7 @@ HOMEHUB_LABEL_I18N.fi = homeHubValues([
   "Kompressori aktiivinen", // 31
   "Säiliövastus aktiivinen", // 32
   "Säiliön desinfiointi aktiivinen", // 33
-  "3-tieventtiilin asento", // 37
+  "3-tieventtiili", // 37
   "Nykyinen lämmitys-/jäähdytystila", // 38
   "PHE:n lähtölämpötila", // 40
   "Menovesi BUH:n jälkeen", // 41

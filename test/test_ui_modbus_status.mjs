@@ -3,7 +3,7 @@
 // a backend error cannot replace the address without explaining the failure below it.
 import assert from "node:assert/strict";
 import vm from "node:vm";
-import { readAppFragments } from "../tools/ui/read_app_source.mjs";
+import { readAppFragments, readUiLocale } from "../tools/ui/read_app_source.mjs";
 
 const dashboardSource = readAppFragments(["dashboard.js"]);
 
@@ -80,6 +80,15 @@ function baseModbus(patch) {
   assert.equal(row.cls, "ok", "a connected Modbus endpoint uses the shared healthy-link colour");
   assert.equal(row.value, "192.0.2.137:1502", "the configured non-default port is shown");
   assert.equal(row.detail, "Register 56: Ausnahme 2 (unzulässige Registeradresse)");
+}
+
+{
+  translated["modbus.err.close_pending"] =
+    readUiLocale("de").match(/\/\* modbus\.err\.close_pending \*\/ "([^"]+)"/)?.[1];
+  const row = baseModbus({
+    error: "waiting for HomeHub socket cleanup", error_code: "close_pending",
+  });
+  assert.equal(row.detail, "Die bisherige HomeHub-Verbindung wird noch geschlossen.");
 }
 
 {

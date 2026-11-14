@@ -21,9 +21,15 @@ const histFmt1 = (n) => Number(n).toLocaleString(LANG, {
 // (free_heap, max_alloc) is drawn on the Settings ESP32 card, whose row labels are TRANSLATED, so
 // there is no label to match on at all; it attaches by id like the firmware always intended.
 function histSpec() { const h = S.status && S.status.history; return h && Array.isArray(h.rows) ? h : null; }
+function modbusHistoryMatches() {
+  const lease = S.modbusHistoryLease;
+  const h = S.status?.history;
+  return lease ? lease.epoch > 0 && lease.epoch === h?.epoch && lease.boot === S.status?.boot_id
+    : h?.modbus_binding !== true;
+}
 function modbusHistRows() {
   const h = histSpec();
-  return h && Array.isArray(h.modbus_rows) ? h.modbus_rows : [];
+  return h && modbusHistoryMatches() && Array.isArray(h.modbus_rows) ? h.modbus_rows : [];
 }
 function env3HistRows() {
   const h = histSpec();
@@ -48,7 +54,8 @@ function histIdFor(label) { const r = histFor(label); return r ? r.id : ""; }
 // a firmware that predates a trend simply reports fewer rows, so its card draws no chart at all
 // rather than an empty one.
 function hasDeviceHist(id) { return !!id && !!histSpec() && histSpec().rows.some((r) => r && r.id === id); }
-function hasModbusHist(id) { return !!id && modbusHistRows().some((r) => r && r.id === id); }
+// A legacy Modbus ring may contain holding 9 values interpreted as activity. Ignore it.
+function hasModbusHist(id) { return !!id && id !== "quiet_state" && modbusHistRows().some((r) => r && r.id === id); }
 function hasEnv3Hist(id) { return !!id && env3HistRows().some((r) => r && r.id === id); }
 function hasRoomHist(id) { return !!id && roomHistRows().some((r) => r && r.id === id); }
 function hasHist(id) {
@@ -56,34 +63,31 @@ function hasHist(id) {
   return D ? D.ready(Object.fromEntries(D.ins.map((k) => [k, hasDeviceHist(k)]))) : hasDeviceHist(id);
 }
 
-// Sum CT current only when every phase ring declared by this firmware snapshot has a value in the
-// bucket. A null is not zero: CT-L3 is deliberately withheld while its shared byte carries the
-// HP-Forced flag, and adding the surviving phases would understate input. Returning null lets both
-// derived consumers use their INV fallback, exactly like liveData(); a real complete 0 A set still
-// returns zero and therefore also falls back for the compressor-only estimate.
-function completeCtCurrent(s, has) {
-  const keys = ["ct_l1", "ct_l2", "ct_l3"].filter((k) => has && has[k]);
-  return !keys.length || keys.some((k) => s[k] == null)
-    ? null : keys.reduce((a, k) => a + s[k], 0);
+// Decoded X10A command, not measured shaft speed: 0 = maximum, 100 = stop.
+// Invalid inputs stay absent in both the live pill and the derived history; clamping would turn
+// unsupported bytes into plausible commands. Keep fractional decoded values intact.
+function pumpCommandPercent(signal) {
+  return typeof signal === "number" && Number.isFinite(signal) && signal >= 0 && signal <= 100
+    ? 100 - signal : null;
+}
+
+// Project display guard with margin above the documented hydronic operating ranges.
+// Raw rows and raw history retain the decoded number for inspection.
+function usableWaterFlow(value) {
+  return Number.isFinite(value) && value >= 0 && value <= 100;
 }
 
 // ── Derived trends: computed pills and combined component states ───────────────────────────────
-// Pump speed, ΔT, heat output, electrical input and COP have no directly matching register value, so
-// the device has nothing to buffer for the displayed figure itself. BUH likewise has two physical
-// stage bits but one component-level inspector. Their 24-hour curves/timeline are assembled
-// HERE, out of the rings of what each is computed FROM,
-// by the same expressions liveData() uses for the live number — one definition of each figure
-// rather than a firmware copy and a browser copy free to drift apart. `inv_current` and `ct_l1..3`
-// are in logic/history.hpp's TRENDS for exactly this; they are inputs first and rows second.
+// Pump command, ΔT and heat output have no directly matching register value.
+// BUH likewise has two physical stage bits but one component-level inspector. Their curves use
+// recorded input rings and their own eligibility rules.
 //
 // Every input arrives on ONE raster: history.cpp commits every ring on the same bucket boundary, so
 // sample i is the same five minutes in all of them, and a row the profile lacks is simply not
 // offered (/status.history omits it) instead of silently shifting the axis under a curve.
 //
-// A sample is null wherever a required input is null, and the gap is drawn as a gap. That also
-// carries the held-over rule through for free: a reading the outdoor unit was not taking is null in
-// its own ring, so the figure derived from it is null too — never last run's amps drawn as a live
-// kilowatt, which is the exact failure the live pill's gate exists to prevent (logic/ou_stale.hpp).
+// Missing required inputs leave gaps. An aligned bucket cannot establish that separate inputs
+// were recorded in the same sweep.
 //
 // `ins` = every series to fetch. `ready(has)` = may this figure be offered at all on this profile
 // (feature_gate.hpp's DISABLE-NEVER-DEGRADE: no honest inputs, no curve — never a substitute one).
@@ -96,17 +100,15 @@ const DERIVED = {
   buh_state: {
     unit: "", ins: ["buh_step1", "buh_step2"],
     ready: (h) => h.buh_step1 && h.buh_step2,
-    fn: (s) => s.buh_step1 == null || s.buh_step2 == null ? null
-      : s.buh_step2 > 0 ? 2 : s.buh_step1 > 0 ? 1 : 0,
+    fn: (s) => s.buh_step2 === 1 ? 2 : s.buh_step1 === 1 ? 1
+      : s.buh_step1 === 0 && s.buh_step2 === 0 ? 0 : null,
   },
-  // The X10A row is an inverted control signal: 0 = maximum and 100 = stop. The schematic instead
-  // shows the intuitive speed percentage, so its chart must transform every sample by the exact same
-  // clamped expression as liveData(). Drawing the raw row would make an idle pump look maximal.
+  // Retain the legacy internal trend id. The displayed percentage is the inverted controller
+  // command, not measured speed; liveData() uses this same validation and inversion.
   pump_speed: {
     unit: "%", ins: ["pump_signal"],
     ready: (h) => h.pump_signal,
-    fn: (s) => s.pump_signal == null ? null
-      : Math.min(100, Math.max(0, 100 - s.pump_signal)),
+    fn: (s) => pumpCommandPercent(s.pump_signal),
   },
   dt: {
     unit: "K", ins: ["leaving_water", "return_water"],
@@ -115,62 +117,18 @@ const DERIVED = {
                                                                   : s.leaving_water - s.return_water),
   },
   // Water ρ·cp ≈ 4.186 kJ/l·K, flow in l/min — d.pth's formula, and SIGNED for its reason: during a
-  // defrost the unit pulls heat back out of the water and the curve must show that, not a floor.
-  // A stopped circuit with measured zero flow is zero transfer. With water still moving, however,
-  // the compressor witness is mandatory: pump overrun can redistribute stored heat and a non-zero
-  // arithmetic balance in that bucket is not heat-pump output (the same rule as thermalValue()).
+  // defrost can pull heat back out of the water. This arithmetic balance uses independent bucket
+  // samples. A speed value above the cutoff does not establish that the compressor was running
+  // when the temperature and flow were sampled.
   pth: {
     unit: "kW", ins: ["flow", "leaving_water", "return_water", "comp_rps"],
     ready: (h) => h.flow && h.leaving_water && h.return_water && h.comp_rps,
     fn: (s) => {
-      if (s.flow == null) return null;
-      if (!(s.flow > 0.5)) return 0;
+      if (!usableWaterFlow(s.flow)) return null;
+      if (s.flow <= 0.5) return 0;
       if (s.leaving_water == null || s.return_water == null || s.comp_rps == null) return null;
       if (!(s.comp_rps > 5)) return null;
       return (s.flow / 60) * 4.186 * (s.leaving_water - s.return_water);
-    },
-  },
-  // Amps × an assumed 230 V, a complete declared CT set preferred over inverter current —
-  // liveData()'s rule, one sample at a time. The live version needs `d.ouHeldOver` to gate the INV
-  // fallback because /values still carries last run's number; here the ring has already withheld
-  // it, so a null is simply a null. An idle plant reads 0 A on fitted clamps, and the fallback is
-  // what makes that a compressor figure rather than a flat zero. The firmware can only store that gap
-  // where it can read the compressor speed. Without a speed sample it withheld nothing, so the live
-  // pill's refusal applies here as well.
-  pel: {
-    unit: "kW", ins: ["ct_l1", "ct_l2", "ct_l3", "inv_current", "comp_rps"],
-    ready: (h) => (h.inv_current && h.comp_rps) || h.ct_l1 || h.ct_l2 || h.ct_l3,
-    fn: (s, has) => {
-      const ct = completeCtCurrent(s, has);
-      if (ct != null && ct > 0) return (ct * 230) / 1000;
-      if (!has || !has.comp_rps || s.comp_rps == null) return null;
-      return s.inv_current == null ? null : (s.inv_current * 230) / 1000;
-    },
-  },
-  // The quotient, and it is deliberately drawn on FEWER samples than its two inputs. Two gates:
-  //   running — the live pill's own (rps > 5, ΔT > 0.5); a COP of a stopped plant is not a small
-  //             COP, it is not one at all.
-  //   scope   — cop_scope.hpp: the CT clamps see the whole unit INCLUDING both resistive heaters
-  //             while this historical quotient deliberately retains the pre-BUH boundary. R2T now
-  //             has its own curve, but tank-heater heat crosses neither water sensor and the five-
-  //             minute rings keep last readings/events rather than one synchronised plant sample.
-  //             A CT-sourced sample therefore still draws NOTHING instead of splicing together a
-  //             plausible whole-plant quotient. An INV-sourced sample has the heaters outside both
-  //             sides and needs no such evidence, which is why it survives.
-  cop: {
-    unit: "", ins: ["flow", "leaving_water", "return_water", "comp_rps", "inv_current",
-                    "ct_l1", "ct_l2", "ct_l3"],
-    none: "hist.cop_none",
-    ready: (h) => h.flow && h.leaving_water && h.return_water && h.comp_rps && h.inv_current,
-    fn: (s, has) => {
-      const ct = completeCtCurrent(s, has);
-      if (ct != null && ct > 0) return null;           // whole-unit divisor — see the note above
-      if (s.inv_current == null || s.flow == null) return null;
-      if (s.leaving_water == null || s.return_water == null || s.comp_rps == null) return null;
-      const dt = s.leaving_water - s.return_water;
-      const pel = (s.inv_current * 230) / 1000;
-      if (!(s.comp_rps > 5) || !(dt > 0.5) || !(pel > 0.2)) return null;
-      return ((s.flow / 60) * 4.186 * dt) / pel;
     },
   },
 };
@@ -220,7 +178,7 @@ function histHiddenSet(h) {
 }
 
 function histVisibleSeries(h) {
-  if (h.series.length === 1) return h.series;
+  if (h.legendSeries || h.series.length === 1) return h.series;
   const hidden = histHiddenSet(h);
   const visible = h.series.filter((s) => !hidden.has(s.source));
   if (visible.some((s) => s.v.some((v) => v != null))) return visible;
@@ -246,7 +204,7 @@ function histLegendHtml(h, s, cls) {
 
 function histSeriesToggle(id, source) {
   const h = historyView(id);
-  const s = h?.series?.find((q) => q.source === source);
+  const s = (h?.legendSeries || h?.series)?.find((q) => q.source === source);
   if (!s) return;
   const visible = histVisibleSeries(h).some((q) => q.source === source);
   const dataSeries = histVisibleSeries(h).filter((q) => q.v.some((v) => v != null));
@@ -357,8 +315,8 @@ async function ensureHistPair(id) {
 }
 
 // A derived series: fetch every input (each through ensureHist above, so each is cached and
-// throttled exactly once however many figures read it — ΔT, heat output and COP all want the same
-// three rings), then run the figure's own expression down the samples.
+// throttled exactly once however many figures read it), then run the figure's own expression down
+// the samples.
 //
 // The result is written into S.hist under the derived id in the SAME shape a fetched series has, so
 // the renderer, the crosshair, the pin and the range readout need to know nothing about where a
@@ -411,9 +369,11 @@ async function ensureDerived(id) {
     const sourceIndex = (h, i) => mode === "bucket" ? start + i - h.b0
       : mode === "time" ? Math.round((start + i * dt - h.t0) / dt)
       : h.v.length - n + i;
+    // An offered input with no usable series has an ordinary gap in every bucket.
+    const unavailableInputs = use.length - src.length;
     const v = [], heldRuns = [];
     for (let i = 0; i < n; i++) {
-      const s = {}; let missing = 0, heldMissing = 0;
+      const s = {}; let missing = unavailableInputs, heldMissing = 0;
       for (const [k, h] of src) {
         const j = sourceIndex(h, i);
         const raw = j >= 0 && j < h.v.length ? h.v[j] : null;
@@ -536,6 +496,14 @@ function alignedHistoryView(id, raw) {
   raw = raw.filter((s) => s.h && !s.h.err && Array.isArray(s.h.v) && s.h.v.length);
   if (!raw.length) return null;
 
+  // The provisional HomeHub flow may be compared explicitly. A hidden source must not set
+  // the visible flow plot's range, time span or sample positions. Keep it only in the legend.
+  const legendSeries = id === "flow" && raw.length > 1
+    ? raw.map(({ source, name, h }) => ({ source, name, v: h.v })) : null;
+  if (legendSeries) {
+    const shown = histVisibleSeries({ id, series: legendSeries });
+    raw = raw.filter((s) => shown.some((item) => item.source === s.source));
+  }
   const dt = raw[0].h.dt || 300;
   let start = 0, end = 0, mode = "tail";
   if (raw.every((s) => Number.isInteger(s.h.b0))) {
@@ -589,7 +557,7 @@ function alignedHistoryView(id, raw) {
   return { id, dt, unit: sharedUnit, t0: typeof t0 === "number" ? t0 : null,
            b0: mode === "bucket" ? start : null,
            gen: series.map((s) => `${s.source}:${s.raw.gen || 0}`).join("/"),
-           v: union, series };
+           v: union, series, legendSeries };
 }
 
 function historyView(id, source = "") {
@@ -787,18 +755,9 @@ const currentBinaryTenths = (row) => {
 };
 
 function stateHistoryCurrent(id, source) {
-  if (source === "modbus") {
-    if (!Array.isArray(S._modbus)) return { present: false, value: null };
-    if (id === "smart_grid_mode") {
-      const row = S._modbus.find((r) => r && r.off === 56 && r.enum === "smart_grid_mode");
-      if (!row || row.value == null) return { present: true, value: null };
-      const raw = String(row.value).trim();
-      const mode = /^\d$/.test(raw) ? Number(raw) : -1;
-      return { present: true, value: mode >= 0 && mode <= 3 ? mode * 10 : null };
-    }
-    const row = S._modbus.find((r) => r && (r.history === id || r.concept === id));
-    return { present: true, value: currentBinaryTenths(row) };
-  }
+  if (S.otaCached) return { present: false, value: null };
+  // The HomeHub array exposes full-sweep rows without per-register observation age.
+  if (source === "modbus") return { present: true, value: null };
 
   if (source !== "x10a") return { present: false, value: null };
   if (id === "circulation_state") {
@@ -823,7 +782,7 @@ function stateHistoryCurrent(id, source) {
     const step = (concept) => currentBinaryTenths(
       S._values.find((r) => r && r.concept === concept));
     const step1 = step("buh_step1"), step2 = step("buh_step2");
-    const value = step1 == null || step2 == null ? null : step2 === 10 ? 20 : step1;
+    const value = step2 === 10 ? 20 : step1 === 10 ? 10 : step1 === 0 && step2 === 0 ? 0 : null;
     return { present: true, value };
   }
   const row = S._values.find((r) => r && r.concept === id);
@@ -854,6 +813,16 @@ function stateRuns(series, wanted, classify) {
     out.push([from, i - from + 1]);
   }
   return out;
+}
+
+function stateTrackSpans(s, cfg, style) {
+  const levels = cfg.levels || [{ match: cfg.classify, cls: "" }];
+  const on = levels.flatMap((level) => stateRuns(s, true, level.match).map(([from, count]) =>
+    `<span class="vhist-state-on${level.cls ? " " + level.cls : ""}" style="${style(from, count)}"></span>`
+  )).join("");
+  const missing = stateRuns(s, null, cfg.classify).map(([from, count]) =>
+    `<span class="vhist-state-gap" style="${style(from, count)}"></span>`).join("");
+  return on + missing;
 }
 
 // `bound` renders a LOWER BOUND rather than a measurement, and the difference is not cosmetic.
@@ -969,17 +938,11 @@ function stateHistHtml(id, name, view, wrap, cfg) {
   // repaint, fill in or conceal the other's status. Missing intervals stay hatched in their own
   // lane, and disagreements are visible as different colours at the same point in time.
   const tracks = view.series.map((s) => {
-    const levels = cfg.levels || [{ match: cfg.classify, cls: "" }];
-    const on = levels.flatMap((level) => stateRuns(s, true, level.match).map(([from, count]) =>
-      `<span class="vhist-state-on${level.cls ? " " + level.cls : ""}" ` +
-      `style="left:${pct(from)}%;width:${pct(count)}%"></span>`
-    )).join("");
-    const missing = stateRuns(s, null, cfg.classify).map(([from, count]) =>
-      `<span class="vhist-state-gap" style="left:${pct(from)}%;width:${pct(count)}%"></span>`).join("");
+    const spans = stateTrackSpans(s, cfg, (from, count) => `left:${pct(from)}%;width:${pct(count)}%`);
     const sourceLabel = s.source === "modbus" ? "Modbus" : s.name;
     return `<div class="vhist-state-lane">` +
       `<span class="vhist-state-lane-label${s.source === "modbus" ? " mb" : ""}">${sourceLabel}</span>` +
-      `<div class="vhist-state-track ${s.source}" aria-hidden="true">${on}${missing}${current}</div>` +
+      `<div class="vhist-state-track ${s.source}" aria-hidden="true">${spans}${current}</div>` +
     `</div>`;
   }).join("");
   const gaps = stateRuns(recordedPrimary, null, cfg.classify).length;
@@ -1018,46 +981,43 @@ function stateHistHtml(id, name, view, wrap, cfg) {
   , "vhist-state");
 }
 
-function alignAuxSample(view, h, i) {
-  if (!h || !Array.isArray(h.v) || !h.v.length) return null;
-  let idx = -1;
-  if (Number.isInteger(view.b0) && Number.isInteger(h.b0)) {
-    idx = (view.b0 + i) - h.b0;
-  } else if (typeof view.t0 === "number" && typeof h.t0 === "number") {
-    const dt = h.dt || view.dt || 300;
-    idx = Math.round(((view.t0 + i * (view.dt || 300)) - h.t0) / dt);
-  } else {
-    idx = h.v.length - view.v.length + i;
+function dhwAuxPhases(view) {
+  if (view?.id !== "dhw_tank") return null;
+  const tracks = [];
+  for (const [id, name] of [["smart_grid_mode", "Smart Grid"], ["bsh_state", "BSH"]]) {
+    for (const source of ["x10a", "modbus"]) {
+      if (!(source === "x10a" ? hasDeviceHist(id) : hasModbusHist(id))) continue;
+      const h = S.hist.get(histCacheKey(id, source));
+      if (!h?.v?.length || h.err) continue;
+      // Different replies can have different ends. Anchor each instrument to the temperature
+      // raster; two unanchored legacy responses cannot prove the same sample instant.
+      const offset = Number.isInteger(view.b0) && Number.isInteger(h.b0) ? view.b0 - h.b0
+        : Number.isFinite(view.t0) && Number.isFinite(h.t0) ? Math.round((view.t0 - h.t0) / view.dt)
+        : NaN;
+      const v = view.v.map((_, i) => h.dt === view.dt ? h.v[i + offset] ?? null : null);
+      tracks.push({ cfg: STATE_HIST[id], source, v,
+        label: `${source === "x10a" ? "X10A" : "Modbus"} · ${name}` });
+    }
   }
-  return (idx >= 0 && idx < h.v.length) ? h.v[idx] : null;
+  return tracks.length ? tracks : null;
 }
 
-function dhwAuxPhases(view) {
-  if (!view || view.id !== "dhw_tank" || !Array.isArray(view.v)) return null;
-  const sgM = S.hist?.get?.(histCacheKey("smart_grid_mode", "modbus"));
-  const sgX = S.hist?.get?.("smart_grid_mode");
-  const bshX = S.hist?.get?.("bsh_state");
-  const bshM = S.hist?.get?.(histCacheKey("bsh_state", "modbus"));
-  if (!sgM && !sgX && !bshX && !bshM) return null;
-
-  const n = view.v.length;
-  const boost = Array(n).fill(false);
-  const bsh = Array(n).fill(false);
-  let boostCount = 0, bshCount = 0;
-
-  for (let i = 0; i < n; i++) {
-    const vSg = alignAuxSample(view, sgM, i) ?? alignAuxSample(view, sgX, i);
-    if (vSg != null && vSg === 20) {
-      boost[i] = true;
-      boostCount++;
-    }
-    const vBsh = alignAuxSample(view, bshX, i) ?? alignAuxSample(view, bshM, i);
-    if (vBsh != null && vBsh === 10) {
-      bsh[i] = true;
-      bshCount++;
-    }
-  }
-  return { boost, bsh, boostCount, bshCount, dt: view.dt || 300 };
+function dhwPhaseTracks(view, tracks) {
+  if (!tracks) return "";
+  // Match the numeric plot's point positions. A band spans half a slot on each side.
+  const edge = (i) => view.v.length === 1 ? (i < 0 ? 0 : 100)
+    : Math.max(0, Math.min(100, 100 * i / (view.v.length - 1)));
+  const style = (from, count) => {
+    const left = edge(from - .5), width = edge(from + count - .5) - left;
+    return `left:${left.toFixed(3)}%;width:${width.toFixed(3)}%`;
+  };
+  return `<div class="vhist-dhw-phases">` + tracks.map((s) => {
+    const count = s.v.filter((v) => s.cfg.classify(v) === true).length;
+    const total = count ? ` · ${t(s.cfg.total, histDuration(count * view.dt))}` : "";
+    return `<div class="vhist-state-lane"><span class="vhist-state-lane-label${histSourceClass(s.source)}">` +
+      `${esc(s.label + total)}</span><div class="vhist-state-track ${s.source}" aria-hidden="true">` +
+      stateTrackSpans(s, s.cfg, style) + `</div></div>`;
+  }).join("") + `</div>`;
 }
 
 // One historied row's trend, as the markup appended under its explainer text. Every state is a
@@ -1081,22 +1041,11 @@ function histHtml(id, unit, name, source = "") {
     return wrap(`<div class="vhist-note">${esc(t("hist.loading"))}</div>`, "vhist-flat");
   if (!view && [hx, hm, he, hr].filter(Boolean).every((h) => h.err))
     return wrap(`<div class="vhist-note">${esc(t("hist.err"))}</div>`, "vhist-flat");
-  if (!view) {
-    const D = DERIVED[id];
-    return wrap(`<div class="vhist-note">${esc(D && D.none ? t(D.none) : t("hist.none"))}</div>`, "vhist-flat");
-  }
+  if (!view) return wrap(`<div class="vhist-note">${esc(t("hist.none"))}</div>`, "vhist-flat");
 
   const allPts = view.series.flatMap((s) => s.v.map((x) => x == null ? null : x / 10));
   const real = allPts.filter((x) => x != null);
-  // "No readings yet" is the RIGHT sentence for a ring the device has not filled, and the WRONG one
-  // for a derived figure that is being withheld on purpose — the COP on a CT-clamp install has a
-  // full set of inputs and still draws nothing, so the generic note would call a deliberate refusal
-  // an empty buffer, one line under a pill that is showing the very number. A derived series may
-  // therefore name its own empty case.
-  if (!real.length) {
-    const D = DERIVED[id];
-    return wrap(`<div class="vhist-note">${esc(D && D.none ? t(D.none) : t("hist.none"))}</div>`, "vhist-flat");
-  }
+  if (!real.length) return wrap(`<div class="vhist-note">${esc(t("hist.none"))}</div>`, "vhist-flat");
 
   if (STATE_HIST[id]) return stateHistHtml(id, name, view, wrap, STATE_HIST[id]);
 
@@ -1112,8 +1061,9 @@ function histHtml(id, unit, name, source = "") {
   // numeric trend uses the same visual grammar while a gap remains a real gap. Multiple sources use
   // the same geometry and are made more transparent by the wrapper class below. A run of ONE sample
   // still gets a dot because there is no interval whose area or upper edge could honestly be drawn.
+  const visible = histVisibleSeries(view);
   let line = "", area = "", dots = "", gaps = 0, held = 0;
-  for (const s of histVisibleSeries(view)) {
+  for (const s of visible) {
     const pts = s.v.map((x) => x == null ? null : x / 10);
     const sourceCls = histSourceClass(s.source);
     let run = [];
@@ -1153,7 +1103,7 @@ function histHtml(id, unit, name, source = "") {
   // a circle in it would render as an ellipse. Percentage positioning maps onto the same 0..HIST_H
   // scale exactly, and stays right whatever width the panel ends up at.
   const nowDots = view.series.map((s) => {
-    if (!histVisibleSeries(view).includes(s)) return "";
+    if (!visible.includes(s)) return "";
     const last = s.v[n - 1];
     return last == null ? "" : `<span class="vhist-now${histSourceClass(s.source)}"` +
       ` style="top:${((Y(last / 10) / HIST_H) * 100).toFixed(2)}%"></span>`;
@@ -1172,74 +1122,42 @@ function histHtml(id, unit, name, source = "") {
   // Its instant is re-resolved here on every render, so the pin follows its measurement as the ring
   // rolls and disappears once that measurement has left the day.
   const pi = histPinIndex(id, view);
-  const sourceAttr = view.series.length === 1 ? ` data-source="${esc(view.series[0].source)}"` : "";
+  const sourceAttr = !view.legendSeries && view.series.length === 1
+    ? ` data-source="${esc(view.series[0].source)}"` : "";
   let pinCross = "", pinMarks = "";
   if (pi >= 0) {
     const frac = scrubFrac(pi, n);
     const px = (frac * 100).toFixed(3);
     pinCross = `<span class="vhist-cross vhist-pinned" style="left:${px}%"></span>`;
-    pinMarks = histVisibleSeries(view).map((s) => s.v[pi] == null ? ""
+    pinMarks = visible.map((s) => s.v[pi] == null ? ""
       : `<span class="vhist-mark vhist-pinned${histSourceClass(s.source)}"` +
         ` style="left:${px}%;top:${((Y(s.v[pi] / 10) / HIST_H) * 100).toFixed(2)}%"></span>`).join("");
   }
-  const aux = id === "dhw_tank" ? dhwAuxPhases(view) : null;
-  let phaseBands = "";
-  const legendItems = (view.series.length > 1 || ["modbus", "room"].includes(view.series[0].source))
-    ? view.series.map((s) => histLegendHtml(view, s, histSourceClass(s.source)))
+  const aux = dhwAuxPhases(view);
+  const legendSeries = view.legendSeries || view.series;
+  const legendItems = (legendSeries.length > 1 || ["modbus", "room"].includes(legendSeries[0].source))
+    ? legendSeries.map((s) => histLegendHtml(view, s, histSourceClass(s.source)))
     : [];
-  if (aux) {
-    const toRuns = (flags) => {
-      const out = [];
-      for (let i = 0; i < flags.length; i++) {
-        if (!flags[i]) continue;
-        const from = i;
-        while (i + 1 < flags.length && flags[i + 1]) i++;
-        out.push([from, i - from + 1]);
-      }
-      return out;
-    };
-    const step = n > 1 ? HIST_W / (n - 1) : HIST_W;
-    const renderRuns = (runs, cls) => {
-      let s = "";
-      for (const [from, count] of runs) {
-        const x0 = n > 1 ? Math.max(0, X(from) - step / 2) : 0;
-        const x1 = n > 1 ? Math.min(HIST_W, X(from + count - 1) + step / 2) : HIST_W;
-        const w = Math.max(1, x1 - x0);
-        s += `<rect class="vhist-phase ${cls}" x="${x0.toFixed(1)}" y="0" width="${w.toFixed(1)}" height="${HIST_H}"/>`;
-      }
-      return s;
-    };
-    phaseBands += renderRuns(toRuns(aux.boost), "vhist-phase-boost");
-    phaseBands += renderRuns(toRuns(aux.bsh), "vhist-phase-bsh");
-
-    if (aux.boostCount > 0) {
-      legendItems.push(
-        `<span class="vhist-source vhist-legend-boost"><i></i>${esc(t("hist.boost_active"))}` +
-        ` <small class="mono num">(${histDuration(aux.boostCount * aux.dt)})</small></span>`
-      );
-    }
-    if (aux.bshCount > 0) {
-      legendItems.push(
-        `<span class="vhist-source vhist-legend-bsh"><i></i>${esc(t("hist.heater_active"))}` +
-        ` <small class="mono num">(${histDuration(aux.bshCount * aux.dt)})</small></span>`
-      );
-    }
-  }
   const legend = legendItems.length
     ? `<div class="vhist-legend">${legendItems.join("")}</div>`
     : "";
+  // No supported Modbus map establishes the flow scale, including for recorded samples.
+  const note = id === "pth" ? "hist.thermal_bucket_note"
+    : id === "flow" && visible.some((s) => s.source === "modbus" && s.v.some((v) => v != null))
+      ? "hist.modbus_flow_unverified" : "";
+  const noteHtml = note ? `<div class="vhist-note">${esc(t(note))}</div>` : "";
   return wrap(
     `<div class="vhist-head"><span class="vhist-t">${esc(full ? t("hist.title") : t("hist.recorded", spanH))}</span>` +
-    `<span class="vhist-range mono num">${esc(rng)}</span></div>` + legend +
-    `<div class="vhist-graph">` +
-      histTipsHtml(view, pi, pi >= 0 ? scrubFrac(pi, n) : 0) +
+    `<span class="vhist-range mono num">${esc(rng)}</span></div>` + legend + noteHtml +
+    `<div class="vhist-graph${aux ? " vhist-dhw-graph" : ""}">` +
+      histTipsHtml(view, pi, pi >= 0 ? scrubFrac(pi, n) : 0, aux) +
       `<div class="vhist-plot" data-hist="${esc(id)}"${sourceAttr}${histRevision(view)} data-n="${n}" tabindex="0" role="img"` +
-        ` aria-label="${esc(t(pi >= 0 ? "hist.aria_pinned" : "hist.aria", name || id, pi >= 0 ? scrubText(view, pi) : ""))}">` +
-        `<svg viewBox="0 0 ${HIST_W} ${HIST_H}" preserveAspectRatio="none" aria-hidden="true">${phaseBands}${area}${line}${dots}</svg>` +
+        ` aria-label="${esc(t(pi >= 0 ? "hist.aria_pinned" : "hist.aria", name || id, pi >= 0 ? scrubText(view, pi, true, aux) : ""))}">` +
+        `<svg viewBox="0 0 ${HIST_W} ${HIST_H}" preserveAspectRatio="none" aria-hidden="true">${area}${line}${dots}</svg>` +
         nowDots + pinCross + pinMarks +
         `<span class="vhist-cross vhist-live" hidden></span>` +
         view.series.map((s) => `<span class="vhist-mark vhist-live${histSourceClass(s.source)}" data-source="${s.source}" hidden></span>`).join("") +
-      `</div>` + histTimesHtml(view, pi, pi >= 0 ? scrubFrac(pi, n) : 0) +
+      `</div>` + dhwPhaseTracks(view, aux) + histTimesHtml(view, pi, pi >= 0 ? scrubFrac(pi, n) : 0) +
     `</div>` +
     `<div class="vhist-axis"><span>${esc(t("hist.ago", spanH))}</span>` +
       // Idle time is reported ahead of dropouts: on an outdoor-air trend it is normally the larger
@@ -1524,9 +1442,8 @@ function histPinToggle(id, i, source = "") {
   // middle of a click; it must not delay the very update the click just asked for — a pin that
   // appeared 600 ms after the finger lifted would read as the same "it didn't take" the pin was
   // added to fix. The scrub guard is left alone: a drag still in progress owns the DOM.
-  if (S.scrub) return;
   S.clickHold = false;
-  renderTrendHosts();
+  if (!S.scrub) renderTrendHosts();
 }
 
 // Selected time belongs on the axis, including relative ages when the source has no wall clock.
@@ -1544,9 +1461,7 @@ function scrubTime(h, i) {
 // Measure every distinct readout shape in a hidden grid cell. Tabular digits have equal widths;
 // replacing them deduplicates samples without losing a possible wrapped line or phase label.
 // The reserved row stays present, so a comparison never moves the plot or its time labels.
-function histTipsHtml(h, pi, frac) {
-  // One auxiliary scan per rendered view, not one full-day scan for every sample's readout.
-  const aux = dhwAuxPhases(h);
+function histTipsHtml(h, pi, frac, aux = dhwAuxPhases(h)) {
   const shapes = new Set(Array.from({length:h.v.length + (forecastScrubView(h)?.points.length || 0)},
     (_, i) => histReadout(h, i, aux).replace(/\d/g, "8")));
   return `<div class="vhist-tips"><div class="vhist-tip vhist-reserve mono num" aria-hidden="true">` +
@@ -1656,9 +1571,14 @@ function scrubText(h, i, includeTime = true, aux = dhwAuxPhases(h)) {
     ? visible.map((s) => sourceText(s, true)).join("\n")
     : sourceText(visible[0] || (h.series ? h.series[0] : h), false);
   let res = (includeTime ? scrubTime(h, i) + " · " : "") + val;
-  if (h.id === "dhw_tank" && aux) {
-    const active = [aux.boost[i] && t("hist.boost_active"), aux.bsh[i] && t("hist.heater_active")].filter(Boolean);
-    if (active.length) res += (visible.length > 1 ? "\n" : " · ") + active.join(" + ");
+  if (aux) res += aux.map(({ cfg, label, v }) => {
+    const state = cfg.classify(v[i]);
+    const key = state == null ? "hist.nm" : cfg.compactValueLabel ? cfg.compactValueLabel(v[i])
+      : state ? cfg.active : cfg.inactive;
+    return `\n${label}: ${t(key)}`;
+  }).join("");
+  if (h.id === "flow" && visible.some((s) => s.source === "modbus" && s.v[i] != null)) {
+    res += "\n" + t("hist.modbus_flow_unverified");
   }
   return res;
 }
@@ -1686,15 +1606,16 @@ function histReadout(h, i, aux) {
   const visible = histVisibleSeries(h);
   if (cfg || visible.length <= 1) return esc(scrubText(h, i, false, aux));
   const lines = scrubText(h, i, false, aux).split("\n");
-  const note = lines.length > visible.length ? lines.pop() : "";
+  const note = lines.splice(visible.length).join("\n");
   const rows = visible.map((s, idx) => {
     const label = s.source === "modbus" ? "Modbus" : s.name;
     const val = lines[idx] ? lines[idx].slice(label.length + 1) : "";
     const cls = histSourceClass(s.source);
     return `<span class="vhist-tip-label${cls}">${esc(label)}</span><span class="vhist-tip-val">${esc(val)}</span>`;
   }).join("");
+  const noteStyle = h.id === "flow" ? ' style="white-space: normal"' : "";
   return `<span class="vhist-tip-rows">${rows}` +
-    (note ? `<span class="vhist-tip-note">${esc(note)}</span>` : "") + `</span>`;
+    (note ? `<span class="vhist-tip-note"${noteStyle}>${esc(note)}</span>` : "") + `</span>`;
 }
 
 function placeScrubReadout(graph, h, i, frac) {
@@ -1799,15 +1720,15 @@ function scrubArm(plot) {
   scrubWatchdog = setTimeout(() => scrubEnd(plot), SCRUB_MAX_MS);
 }
 
-function scrubEnd(plot) {
-  clearTimeout(scrubWatchdog);
+function scrubEnd(plot, paint = true) {
   if (plot) {
-    plot.querySelector(".vhist-cross.vhist-live").hidden = true;
-    plot.querySelectorAll(".vhist-mark.vhist-live").forEach((m) => { m.hidden = true; });
-    plot.parentElement.querySelector(".vhist-tip.vhist-live").hidden = true;
-    plot.parentElement.querySelector(".vhist-time.vhist-live").hidden = true;
+    plot.parentElement?.querySelectorAll(".vhist-live").forEach((node) => { node.hidden = true; });
   }
-  if (S.scrub) { S.scrub = null; renderTrendHosts(); }   // resume the frozen trend hosts
+  if (S.scrub === plot) {
+    clearTimeout(scrubWatchdog);
+    S.scrub = null;
+    if (paint) renderTrendHosts();
+  }
 }
 
 // Structural poll updates may replace card containers or an inspector's history. Preserve the
@@ -1825,7 +1746,8 @@ function replaceHistoryHtml(host, html) {
   const diagnosisCard = host.getAttribute?.("data-dashboard-card") === "diagnosis";
   // Also reconcile plain read-only rows. Other hosts without charts keep full writes:
   // a control's live value is not represented by its attributes.
-  if (!html.includes('class="vhist') && host.id !== "valueGroups" && host.id !== "inspRows" && !diagnosisCard)
+  if (!html.includes('class="vhist') && host.id !== "valueGroups" && host.id !== "inspRows" &&
+      host.id !== "inspBody" && !diagnosisCard)
     host.innerHTML = html;
   else {
     const roots = root => [...root.querySelectorAll(".vhist")]
@@ -1958,7 +1880,7 @@ const HOMEHUB_ENUM_VALUE_I18N = Object.freeze({
     "mode.stop", "enum.tank_heat_up", "enum.space_heating", "enum.space_cooling", "enum.actuator",
   ]),
   altherma4_quiet_selection: Object.freeze(["state.off", "enum.automatic", "enum.manual"]),
-  three_way_valve: Object.freeze(["enum.space_heating", "enum.dhw"]),
+  three_way_valve: Object.freeze(["hist.valve_space", "enum.dhw"]),
   smart_grid_mode: Object.freeze([
     "enum.free_running", "enum.forced_off", "enum.recommended_on", "enum.forced_on",
   ]),
@@ -1970,7 +1892,7 @@ const HOMEHUB_ENUM_VALUE_I18N = Object.freeze({
 // from the configured/current mode and must never be promoted to Cooling. The public value itself
 // remains 0/1.
 const BINARY_VALUE_I18N = Object.freeze({
-  valve_dhw: Object.freeze({ "0": "enum.space_heating", "1": "enum.dhw" }),
+  valve_dhw: Object.freeze({ "0": "hist.valve_space", "1": "enum.dhw" }),
   valve_heat: Object.freeze({ "0": "state.off", "1": "state.on" }),
 });
 
@@ -2058,7 +1980,7 @@ const HOMEHUB_LABEL_DE = Object.freeze({
   31: "Verdichter aktiv",
   32: "Heizstab aktiv",
   33: "Speicherdesinfektion aktiv",
-  37: "Position des 3-Wege-Ventils",
+  37: "3-Wege-Ventil",
   38: "Aktueller Heiz- oder Kühlmodus",
   52: "Warmwasserbetrieb",
   53: "Raumheiz- oder Kühlbetrieb",
@@ -2145,10 +2067,9 @@ function vDescRow(v) {
   // current row while the pill above it, the inspector, the chart and MQTT all refuse it.
   const notCurrent = x10aDown() || rowNotMeasuring(v);
   const src = fb || v;
-  // A native stand-in needs its own interpretation limits, rather than the unavailable X10A
-  // instrument's explanation. Baseline HomeHub and ordinary X10A copy retain their established path.
-  const nativeFallback = fb?.profile === "altherma4";
-  const d = descFor(nativeFallback ? fb.label : label, nativeFallback ? fb : v);
+  // A native or provisional stand-in needs its own interpretation limits.
+  const useMbDesc = fb?.profile === "altherma4" || mbFlowScaleUnverified(fb);
+  const d = descFor(useMbDesc ? fb.label : label, useMbDesc ? fb : v);
   if (fb) cls = (cls ? cls + " " : "") + "src-val-mb";
   const unit = displayUnit(src);
   const val = (notCurrent && !fb)
@@ -2230,7 +2151,7 @@ const MODEL_DESCRIPTIONS = {
     what: "Lowest recorded water pressure.",
     normal: "Project rule: ≤1.0 bar gives NOTE; 60 continuously observed seconds gives WARNING. This common threshold is not verified for every model; its exact manual applies." },
   health_flow: {
-    what: "Lowest flow after 60 continuously observed seconds of internal pump operation.",
+    what: "Lowest accepted X10A flow after at least 60 seconds covered by consecutive pump-ON reports.",
     normal: "No universal normal value. Not nominal flow or proof of part load. Manual limits need the same model, mode and conditions; the value alone cannot establish insufficient flow." },
   health_heater: {
     what: "Observed ON time of the circuit heater (BUH) and tank heater (BSH).",
@@ -2376,11 +2297,8 @@ function valueGroupsHtml(vals, connected) {
   return html;
 }
 
-// The HomeHub registers with NO X10A counterpart — the real power measurement, the Smart-Grid mode,
-// the setpoint limits. They have no row to sit inside, so they get a group of their own, LAST: visible
-// (the power reading in particular is worth having — X10A has no equivalent and the dashboard has to
-// estimate it from CT clamps at an assumed 230 V) but after everything X10A carries, because X10A
-// stays the prominent source. Empty and therefore absent on a device with no HomeHub.
+// HomeHub registers without an X10A counterpart (reported power, Smart Grid mode and setpoint
+// limits) stay in their own group after the X10A entries. An absent HomeHub has no group.
 function modbusOnlyGroupHtml(all) {
   // `all` = X10A carried no rows at all, so the paired ones have no row to sit inside and belong here
   // too — otherwise they are simply not on screen while being actively measured.
@@ -2393,7 +2311,11 @@ function modbusOnlyGroupHtml(all) {
   // that does not exist here.
   const twinShown = (m) => !!m.concept &&
     (S._values || []).some((v) => v && v.concept === m.concept && v.value != null);
-  const rows = (S._modbus || []).filter((m) => m && (all || !twinShown(m)) && m.value != null);
+  const rows = (S._modbus || []).filter((m) => {
+    if (!m || m.value == null || (!all && twinShown(m))) return false;
+    if (m.off !== 9 && m.concept !== "quiet_state") return true;
+    return m.profile === "altherma4" && m.enum === "altherma4_quiet_selection";
+  });
   if (!rows.length) return "";
   // Through the SAME accordion the X10A rows use, not a bare row of its own. A reading with no
   // explainer is a naked value, and these were 25 of them: a valve destination without context tells

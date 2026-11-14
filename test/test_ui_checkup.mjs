@@ -90,11 +90,14 @@ assert.match(configSource,
              /static esp_err_t do_detect[\s\S]*?hp_poll_reconfigure\(\);\s*checkup_reset\(\);\s*dwell_reset\(\);\s*history_reset\(\);/m,
              "explicit /detect must invalidate old cycles before arming all three X10A resets");
 assert.match(configSource,
-             /homehub_history_identity_changed\([\s\S]*?const uint32_t modbus_target_fp[\s\S]*?const bool modbus_enabled[\s\S]*?config_save\([\s\S]*?if \(reset_mb_history\) \{\s*history_modbus_reset\(modbus_target_fp\);[\s\S]*?mb_reconfigure\(modbus_enabled\);[\s\S]*?mqtt_request_modbus_cleanup\(\);\s*\}/m,
+             /homehub_history_identity_changed\([\s\S]*?const auto modbus_target[\s\S]*?const bool modbus_enabled[\s\S]*?config_save\([\s\S]*?if \(reset_mb_history\) \{\s*history_modbus_reset\(modbus_target\);[\s\S]*?mb_reconfigure\(modbus_enabled, modbus_target\);[\s\S]*?mqtt_request_modbus_cleanup\(\);\s*\}/m,
              "/set_hp must reset HomeHub history and reconfigure only when host, port or unit identity changes");
 assert.match(modbusPollSource,
-             /if \(s_have_req && \(target != s_req_host \|\| c\.mb_port != s_req_port \|\| c\.mb_unit_id != s_unit\)\)\s*history_modbus_reset\(logic::history_homehub_target_fingerprint\(/m,
-             "the Modbus task must close the race where an old cycle consumes the HTTP reset");
+             /history_generation\s*=\s*history_modbus_generation\(\);[\s\S]*?if \(!mb_ensure_connected\([^;]+history_generation\)\)/,
+             "the Modbus socket must capture its history generation before connecting");
+assert.match(modbusPollSource,
+             /gates\.received_data &&\s*s_last_reply_ms >= 0;[\s\S]*?history_modbus_bind_peer\(\s*s_req_configured_target, s_req_peer_ipv4,\s*s_req_history_expected_generation\)/,
+             "the Modbus socket must bind a peer only after current-session register data");
 
 const context = {
   S: { status: null, descOpen: new Set() },

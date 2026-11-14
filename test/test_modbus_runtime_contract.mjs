@@ -52,13 +52,156 @@ try {
   const binary = compile(sourcePath, "production");
   const baseline = execute(binary, [], 20000);
   assert.equal(baseline.status, 0, `production runtime cases\n${baseline.stdout}${baseline.stderr}`);
-  assert.match(baseline.stdout, /PASS total=35\b/);
+  const baselineCount = 46;
+  assert.match(baseline.stdout, new RegExp(`PASS total=${baselineCount}\\b`));
   console.log(baseline.stdout.trim());
 
   // A successfully compiled mutation must fail its particular behavioral oracle. A crash,
   // compilation failure or another test failure cannot count as evidence that the oracle works.
   const mutations = [
     ...semanticMutations,
+    {
+      name: "dynamic-status-mutex", scenario: "lifecycle",
+      before: "xSemaphoreCreateMutexStatic(&s_mtx_storage)",
+      after: "((void)s_mtx_storage, xSemaphoreCreateMutex())",
+    },
+    {
+      name: "dynamic-cache-mutex", scenario: "lifecycle",
+      before: "xSemaphoreCreateMutexStatic(&s_cache_mtx_storage)",
+      after: "((void)s_cache_mtx_storage, xSemaphoreCreateMutex())",
+    },
+    {
+      name: "retiring-reports-active", scenario: "retiring_reenable",
+      before: "return !s_task || !s_status.enabled || s_task_retiring;",
+      after: "return !s_task || (!s_task_retiring && !s_status.enabled);",
+    },
+    {
+      name: "retiring-drops-reenable", scenario: "retiring_reenable",
+      before: "if (!s_target_enabled.load(std::memory_order_acquire)) return true;",
+      after: "return true;",
+    },
+    {
+      name: "retirement-releases-worker-before-cleanup", scenario: "retiring_reenable",
+      before: "if (!s_target_enabled.load(std::memory_order_acquire)) return true;",
+      after: "if (!s_target_enabled.load(std::memory_order_acquire)) { s_task = nullptr; return true; }",
+    },
+    {
+      name: "worker-closes-during-tls-ownership", scenario: "task_oom_and_quiesce",
+      before: /wait_for_tls\s*=\s*ota_active \|\| weather_fetch_active\(\);/,
+      after: "wait_for_tls = false;",
+    },
+    {
+      name: "worker-starts-while-mqtt-tls-resumes", scenario: "lifecycle",
+      before: "if (mqtt_tls_resume_pending()) return;",
+      after: "(void)mqtt_tls_resume_pending();",
+    },
+    {
+      name: "worker-keeps-heap-needed-by-mqtt-tls", scenario: "established_worker_yields_to_broker",
+      before: "if (first_sweep_pending || mqtt_tls_resume_short_of_heap()) {",
+      after: "if (first_sweep_pending) {",
+    },
+    {
+      name: "worker-ignores-http-heap-reserve", scenario: "lifecycle",
+      before: "heap_largest_internal_block() < startup_reserve ||",
+      after: "false ||",
+    },
+    {
+      name: "worker-ignores-total-heap-reserve", scenario: "lifecycle",
+      before: "free_bytes < startup_reserve",
+      after: "(static_cast<void>(free_bytes), false)",
+    },
+    {
+      name: "worker-skips-first-sweep-heap-check", scenario: "first_sweep_heap_pressure",
+      before: /heap_largest_internal_block\(\) >= MB_FIRST_SWEEP_HEAP &&\s*heap_caps_get_free_size\(MALLOC_CAP_8BIT \| MALLOC_CAP_INTERNAL\) >=\s*MB_FIRST_SWEEP_HEAP/,
+      after: "true",
+    },
+    {
+      name: "unready-worker-keeps-stack-below-heap-floor", scenario: "worker_admission_pressure",
+      before: /else if \(!ready && \(mqtt_tls_resume_pending\(\) \|\|\s*heap_largest_internal_block\(\) < MB_FIRST_SWEEP_HEAP \|\|\s*heap_caps_get_free_size\(MALLOC_CAP_8BIT \| MALLOC_CAP_INTERNAL\) <\s*MB_FIRST_SWEEP_HEAP\)\)/,
+      after: "else if (false)",
+    },
+    {
+      name: "drop-empty-cache-repeatedly-invalidates-mqtt", scenario: "socket_setup_and_retirement",
+      before: /if \(expected_target_generation && !s_cache.capacity\(\) && !s_cache_generation &&\s*s_cache_commit_ms < 0\)\s*return;/,
+      after: "",
+    },
+    {
+      name: "worker-admits-first-sweep-during-tls", scenario: "first_sweep_after_tls",
+      before: /s_target_enabled\.load\(std::memory_order_acquire\) &&\s*!ota_download_active\(\) &&\s*!weather_fetch_active\(\)/,
+      after: "s_target_enabled.load(std::memory_order_acquire)",
+    },
+    {
+      name: "first-sweep-admission-consumed-by-attempt", scenario: "first_sweep_heap_pressure",
+      before: "if (mb_poll_once(target, first_sweep_pending)) first_sweep_pending = false;",
+      after: "first_sweep_pending = false; mb_poll_once(target, true);",
+    },
+    {
+      name: "worker-admission-ignores-first-sweep-cost", scenario: "lifecycle",
+      before: "stack_bytes + worker_setup_reserve + MB_FIRST_SWEEP_HEAP",
+      after: "stack_bytes + worker_setup_reserve + HEAP_RECOVERY_BYTES",
+    },
+    {
+      name: "poll-admits-replaced-target", scenario: "first_sweep_heap_pressure",
+      before: /static bool mb_poll_once\(uint32_t cycle_target_generation, bool allow_reconnect\) \{\n    if \(s_target_generation\.load\(std::memory_order_acquire\) != cycle_target_generation\)\s*return false;/,
+      after: "static bool mb_poll_once(uint32_t cycle_target_generation, bool allow_reconnect) {\n    cycle_target_generation = s_target_generation.load(std::memory_order_acquire);",
+    },
+    {
+      name: "poll-dials-unpublished-target-on-first-sweep", scenario: "first_sweep_heap_pressure",
+      before: "configured != s_published_target || configured == logic::HistoryModbusTarget{}",
+      after: "configured == logic::HistoryModbusTarget{}",
+    },
+    {
+      name: "contended-peer-bind-loses-first-sample", scenario: "probe_resolved_peer_reconnect",
+      before: "mb_record_pending_history(now_bucket);",
+      after: "((void)&mb_record_pending_history);",
+    },
+    {
+      name: "disabled-worker-retains-cache-allocation", scenario: "socket_setup_and_retirement",
+      before: "s_cache.swap(invalidated_cache);",
+      after: "s_cache.clear();",
+    },
+    {
+      name: "disconnected-fast-poll-retains-cache-allocation", scenario: "poll_full_fast_break",
+      before: /if \(!final_current_session\) mb_drop_cache\(cycle_target_generation\);\n        report_cycle_result/,
+      after: "report_cycle_result",
+    },
+    {
+      name: "allocate-before-retrying-invalid-socket", scenario: "socket_setup_and_retirement",
+      before: /if \(s_sock >= 0 && \(!s_have_req \|\| s_req_target_generation != cycle_target_generation\) &&\s*!close_sock\(\)\)/,
+      after: "if (false)",
+    },
+    {
+      name: "admit-socket-without-timeouts", scenario: "socket_setup_and_retirement",
+      before: /setsockopt\(sock, SOL_SOCKET, SO_RCVTIMEO, &rt, sizeof\(rt\)\) != 0 \|\|\s*setsockopt\(sock, SOL_SOCKET, SO_SNDTIMEO, &rt, sizeof\(rt\)\) != 0/,
+      after: "(void)rt, false",
+    },
+    {
+      name: "discard-socket-on-failed-close", scenario: "socket_setup_and_retirement",
+      before: "if (s_sock >= 0 && close(s_sock) != 0 && errno != EBADF) return false;",
+      after: "if (s_sock >= 0) (void)close(s_sock);",
+    },
+    {
+      name: "worker-ignores-watchdog-add-failure", scenario: "worker_admission_pressure",
+      before: "if (esp_task_wdt_add(nullptr) != ESP_OK)",
+      after: "if ((void)esp_task_wdt_add(nullptr), false)",
+    },
+    {
+      name: "worker-ignores-lwip-readiness", scenario: "worker_admission_pressure",
+      before: "if (daikin_lwip_thread_sem_get() == nullptr)",
+      after: "if ((void)daikin_lwip_thread_sem_get(), false)",
+    },
+    {
+      name: "worker-reallocates-after-watchdog-failure", scenario: "worker_admission_pressure",
+      before: "lwip_ready = true;",
+      after: "lwip_ready = false;",
+    },
+    {
+      name: "allocate-partial-sweep-diagnostic", scenario: "partial_sweep_allocation_pressure",
+      before: /failure_message\(failure, message\);\s*status_error\(failure_code\(failure\.type\), message,/,
+      after: "failure_message(failure, message);\n"
+        + "        const std::string allocated(message);\n"
+        + "        status_error(failure_code(failure.type), allocated.c_str(),",
+    },
     {
       name: "receive-deadline", scenario: "deadline",
       before: "if (esp_timer_get_time() >= deadline_us) {",
@@ -70,9 +213,80 @@ try {
       after: "mb_parse_response(io.adu, got, static_cast<uint16_t>((io.adu[0] << 8) | io.adu[1]), unit, space, qty, out)",
     },
     {
+      name: "refresh-compressor-with-unrelated-reply", scenario: "compressor_witness",
+      before: "logic::modbus_observation_age_s(s_compressor_ms, now_ms)",
+      after: "logic::modbus_observation_age_s(s_last_reply_ms, now_ms)",
+    },
+    {
+      name: "keep-copied-compressor-across-target-cutover", scenario: "compressor_witness",
+      before: /if \(target_generation != s_target_generation\.load\(std::memory_order_acquire\)\) \{\s*live = false;\s*if \(activity\) \*activity = \{\};/,
+      after: "if (target_generation != s_target_generation.load(std::memory_order_acquire)) { live = false;",
+    },
+    {
       name: "session-generation", scenario: "snapshot_generation",
       before: "cache_generation, target_generation,",
       after: "((void)cache_generation, s_link_generation), target_generation,",
+    },
+    {
+      name: "profile-resolved-peer", scenario: "probe_resolved_peer_reconnect",
+      before: "on_socket_open(host, port, unit, peer_ipv4, now_s)",
+      after: "on_socket_open(host, port, unit, ((void)peer_ipv4, 0u), now_s)",
+    },
+    {
+      name: "peer-cutover-skips-retained-cleanup", scenario: "probe_resolved_peer_reconnect",
+      before: "        mqtt_request_modbus_cleanup();",
+      after: "        (void)0;",
+    },
+    {
+      name: "peer-cutover-ignores-held-publication", scenario: "probe_resolved_peer_reconnect",
+      before: /if \(!cutover\.acquired\(\) \|\|\s*s_target_generation\.load\(std::memory_order_acquire\) != target_generation\)/,
+      after: "if (s_target_generation.load(std::memory_order_acquire) != target_generation)",
+    },
+    {
+      name: "peer-cutover-ignores-probe-only-state", scenario: "probe_only_replacement_retires_predecessor",
+      before: "(gates.received_data || !fresh.empty())",
+      after: "gates.received_data",
+    },
+    {
+      name: "invalid-dhw-activity-as-off", scenario: "compressor_witness",
+      before: "r.offset == 52 && raw <= 1",
+      after: "r.offset == 52",
+    },
+    {
+      name: "history-resolved-peer", scenario: "probe_resolved_peer_reconnect",
+      before: /s_req_peer_ipv4\s*= ntohl\(addr\.sin_addr\.s_addr\);/,
+      after: "s_req_peer_ipv4 = ((void)addr.sin_addr.s_addr, 0u);",
+    },
+    {
+      name: "history-buckets-from-poll-end", scenario: "poll_history_reply_boundary",
+      before: "first_history_bucket * MB_HISTORY_BUCKET_US);",
+      after: "now_bucket * MB_HISTORY_BUCKET_US);",
+    },
+    {
+      name: "history-tcp-handshake-only", scenario: "probe_resolved_peer_reconnect",
+      before: /s_req_history_expected_generation = history_generation;\s*s_req_history_generation\s*= 0;/,
+      after: "s_req_history_expected_generation = history_generation;\n"
+        + "    s_req_history_generation = history_modbus_bind_peer(s_req_configured_target, s_req_peer_ipv4, history_generation);",
+    },
+    {
+      name: "history-exception-only", scenario: "probe_resolved_peer_reconnect",
+      before: /gates\.received_data &&\s*s_last_reply_ms >= 0/,
+      after: "s_last_reply_ms >= 0",
+    },
+    {
+      name: "history-cache-current-scope-instead-of-copied-scope", scenario: "probe_resolved_peer_reconnect",
+      before: /if \(history_generation && live && cache_history_generation == history_modbus_generation\(\)\)\s*\*history_generation = cache_history_generation;/,
+      after: "if (history_generation && live) *history_generation = ((void)cache_history_generation, history_modbus_generation());",
+    },
+    {
+      name: "qualify-unsupported-flow-scale", scenario: "native_gateway_baseline",
+      before: "cv.modbus_flow_scale_unverified = r.space == MbFunc::ReadInput && r.offset == 49;",
+      after: "cv.modbus_flow_scale_unverified = false;",
+    },
+    {
+      name: "publish-native-selection-as-quiet-activity", scenario: "native_gateway_baseline",
+      before: /if \(r\.space == MbFunc::ReadHolding && r\.offset == 9 &&\s*r\.kind != def::HomeHubValueKind::Altherma4QuietSelection\)\s*return;/,
+      after: "/* mutation: publish the unqualified activity row */",
     },
     {
       name: "target-profile", scenario: "profile_cutover",
@@ -111,8 +325,13 @@ try {
     },
     ...["s_plant_gate_ms", "s_heating_mode_ms", "s_plant_outdoor_ms"].map(timestamp => ({
       name: `observation-age-${timestamp}`, scenario: "gate_age",
-      before: `logic::modbus_observation_age_s(${timestamp}, now_ms)`,
-      after: "logic::modbus_observation_age_s(s_last_reply_ms, now_ms)",
+      before: `logic::modbus_observation_age_s(${timestamp}, now_ms) > MB_REPLY_MAX_AGE_S`,
+      after: "logic::modbus_observation_age_s(s_last_reply_ms, now_ms) > MB_REPLY_MAX_AGE_S",
+    })),
+    ...["s_dhw_operation_ms", "s_plant_gate_ms"].map(timestamp => ({
+      name: `values-activity-age-${timestamp}`, scenario: "compressor_witness",
+      before: `logic::modbus_observation_age_s(${timestamp}, now_ms) <= MB_REPLY_MAX_AGE_S`,
+      after: "logic::modbus_observation_age_s(s_last_reply_ms, now_ms) <= MB_REPLY_MAX_AGE_S",
     })),
     {
       name: "space-route-polarity", scenario: "space_route_values",
@@ -182,7 +401,7 @@ try {
       `${mutation.name}: only its specific assertion failure counts`);
     console.log(`negative control ${mutation.name}: rejected by ${mutation.scenario}`);
   }
-  console.log(`production Modbus runtime: 35 cases, ${mutations.length} negative controls; source sha256=${sourceHash}`);
+  console.log(`production Modbus runtime: ${baselineCount} cases, ${mutations.length} negative controls; source sha256=${sourceHash}`);
 } finally {
   fs.rmSync(dir, { recursive: true, force: true });
 }

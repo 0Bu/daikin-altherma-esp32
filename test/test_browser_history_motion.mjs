@@ -193,7 +193,20 @@ async function installHooks(page, mutation) {
       if (window.__motionObserve && (S.scrub || S.clickHold)) window.__motionHolds++;
       const result = original.renderApp(...args);
       if (!window.__motionObserve) return result;
-      window.__motionRenders.push({ started, duration: performance.now() - started });
+      let command = null;
+      if (S.insp === "pump") {
+        const pill = document.getElementById("svPump");
+        const sentence = document.querySelector("#inspBody .vdesc-p:last-child");
+        const visible = el => {
+          if (!el?.getClientRects().length || getComputedStyle(el).visibility !== "visible") return false;
+          for (let node = el; node; node = node.parentElement)
+            if (Number(getComputedStyle(node).opacity) === 0) return false;
+          return true;
+        };
+        command = { value: S.live?.pump, lang: LANG, pill: pill.textContent,
+          inspector: sentence?.textContent, visible: visible(pill) && visible(sentence) };
+      }
+      window.__motionRenders.push({ started, duration: performance.now() - started, command });
       if (window.__motionInactive?.some(({ node }) =>
         node.getAnimations().some(animation => animation instanceof CSSAnimation)))
         window.__motionUnexpectedMotion++;
@@ -321,7 +334,7 @@ async function openInspector(page, key, id, context, { freshOpening = true } = {
     const plot = document.querySelector("#inspHist [data-hist]");
     const view = plot && historyView(plot.dataset.hist, plot.dataset.source || "");
     return { id: plot?.dataset.hist || "", samples: view?.v.length || 0,
-      sources: view?.series.map(series => series.source) || [],
+      sources: (view?.legendSeries || view?.series)?.map(series => series.source) || [],
       forecast: !!document.querySelector("#inspHist .env-forecast-temperature") };
   });
   assert.equal(chart.id, id, context + ": inspector must show its own history");
@@ -454,7 +467,7 @@ async function prepareObservationViewport(page, selector, animationIds) {
 
 async function observe(page, server, context, selectors, { inspector = false, status = false,
   fixture = null, animationIds = ["fSup1", "rfHot", "scFan", "scPump"],
-  inactiveAnimationIds = [] } = {}) {
+  inactiveAnimationIds = [], changingPump = false, changingThermal = false } = {}) {
   await page.bringToFront();
   await page.waitFor("document.visibilityState === 'visible' && !document.hidden");
   // Opening/disclosure transitions may legitimately finish. Persistent flow CSSAnimation objects
@@ -492,7 +505,8 @@ async function observe(page, server, context, selectors, { inspector = false, st
       throw new Error("history focus and visibility must settle before polling observation");
     window.__motionFocused = document.activeElement;
     const body = document.getElementById("inspBody");
-    window.__motionBody = { node: body.firstChild, html: body.innerHTML };
+    window.__motionBody = { node: body.firstElementChild, html: body.firstElementChild?.outerHTML,
+      sentence: body.lastElementChild?.textContent };
     window.__motionLive = { flow: S.live?.flow, pump: S.live?.pump, rps: S.live?.rps,
       mbFields: [...(S.live?.mbFields || [])] };
     // Settings hides the entire schematic; its nonessential CSS animations legitimately stop.
@@ -606,8 +620,9 @@ async function observe(page, server, context, selectors, { inspector = false, st
         ...window.__motionInspectorRows.finish(), children: rows.childNodes.length,
         freshText: rows.textContent === expectedRows.content.textContent,
       } : null,
-      bodyUnchanged: body.innerHTML === window.__motionBody.html,
-      sameBody: body.firstChild === window.__motionBody.node,
+      bodyUnchanged: body.firstElementChild?.outerHTML === window.__motionBody.html,
+      sameBody: body.firstElementChild === window.__motionBody.node,
+      sentenceChanged: body.lastElementChild?.textContent !== window.__motionBody.sentence,
       animations: window.__motionAnimations.map(({ id, node, animation, time, initial }) => ({
         id, same: node.getAnimations().includes(animation), running: animation?.playState === "running",
         elapsed: animation?.currentTime - time, initial,
@@ -644,6 +659,18 @@ async function observe(page, server, context, selectors, { inspector = false, st
   assert.ok(server.valuesRequests >= requests + 3 && motion.polls >= 3,
     context + ": at least three real values polls");
   assert.ok(motion.duration >= 4000, context + ": three real updates must span two full polling intervals");
+  if (changingPump) {
+    const readings = motion.renders.map(row => row.command);
+    assert.ok(new Set(readings.map(row => row?.value)).size >= 3,
+      context + ": three distinct pump commands must reach the open inspector during live polling");
+    for (const row of readings) {
+      assert.ok(Number.isFinite(row?.value), context + ": each pump command must be readable");
+      assert.equal(row.visible, true, context + ": the pill and the live inspector sentence must be visible");
+      const text = row.value.toLocaleString(row.lang, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+      assert.equal(row.pill, text, context + ": the pill must show each new command");
+      assert.ok(row.inspector.includes(text), context + ": the open inspector must show each new command");
+    }
+  }
   assert.equal(motion.holds, 0, context + ": polling must not be hidden behind interaction holds");
   assert.equal(motion.closedBuilds, 0, context + ": polls must not rebuild cached charts in closed rows");
   assert.equal(motion.hiddenCharts, 0, context + ": closed rows must not retain duplicate history SVGs");
@@ -671,6 +698,9 @@ async function observe(page, server, context, selectors, { inspector = false, st
   }
   if (inspector && motion.bodyUnchanged)
     assert.equal(motion.sameBody, true, context + ": unchanged inspector prose must remain mounted");
+  if (changingThermal)
+    assert.equal(motion.bodyUnchanged && motion.sentenceChanged, true,
+      context + ": the thermal estimate must update while its introductory prose stays unchanged");
   assert.equal(motion.animations.length, motion.expectedAnimations,
     context + ": cover all visible schematic animation witnesses");
   for (const animation of motion.animations) {
@@ -720,7 +750,7 @@ async function closeInspector(page) {
 async function prepareInheritedFlow(page) {
   await page.waitFor("!S.histBusy.size && !_pollBusy");
   return evaluate(page, async () => {
-    // Derived pth/cop cards normally preload this ring; a focused flow run must exercise the same
+    // The derived heat-output card normally preloads this ring; a focused flow run must exercise the same
     // inherited-cache path. Populate it through the real GET if those cards have not run.
     if (!S.hist.get("flow")) await ensureHist("flow");
     const cached = S.hist.get("flow");
@@ -835,17 +865,34 @@ async function assertSgTransition(page, server, fixture, context) {
     frame.modbus = frame.modbus.map(row => row.off === 56 ? { ...row, value: 3 } : row);
     return frame;
   };
-  // Only change the fixture's API frame. The next natural production poll owns the live-cap and
-  // revision change; no direct render, history-cache edit or shorter timer can manufacture it.
   await page.waitFor("!_pollBusy && S._modbus.some(row => row.off === 56 && row.value === 3)");
+  const held = await evaluate(page, () => {
+    const plot = document.querySelector("#inspHist .vhist-plot");
+    const view = historyView("smart_grid_mode");
+    return { unchanged: plot === window.__motionSg.plot && view.gen === window.__motionSg.gen,
+      cap: view.series.find(series => series.source === "modbus").v.at(-1),
+      focused: document.activeElement === plot };
+  });
+  assert.deepEqual(held, { unchanged: true, cap: null, focused: true },
+    context + ": a changed HomeHub full-sweep row leaves the unconfirmed live edge unchanged");
+  // A fresh X10A contact transition must still update the live edge through ordinary polling.
+  const withModbusChange = fixture.values;
+  fixture.values = tick => {
+    const frame = withModbusChange(tick);
+    frame.values = frame.values.map(row => row.binary_semantic === "smart_grid_contact_2"
+      ? { ...row, value: "1" } : row);
+    return frame;
+  };
+  await page.waitFor("!_pollBusy && S._values.some(row => " +
+    "row.binary_semantic === 'smart_grid_contact_2' && String(row.value) === '1')");
   const changed = await evaluate(page, () => {
     const plot = document.querySelector("#inspHist .vhist-plot");
-    const source = historyView("smart_grid_mode").series.find(series => series.source === "modbus");
+    const source = historyView("smart_grid_mode").series.find(series => series.source === "x10a");
     return { replaced: plot !== window.__motionSg.plot,
       revision: historyView("smart_grid_mode").gen !== window.__motionSg.gen,
       cap: source.v.at(-1), focused: document.activeElement === plot };
   });
-  assert.equal(changed.cap, 30, context + ": actual Modbus live-cap must change from 2 to 3");
+  assert.equal(changed.cap, 30, context + ": fresh X10A contacts move the live edge from 2 to 3");
   assert.equal(changed.revision && changed.replaced, true,
     context + ": changed categorical live-cap must replace its revision and plot");
   assert.equal(changed.focused, true, context + ": categorical repaint must restore keyboard focus on the new plot");
@@ -893,6 +940,37 @@ async function assertNewGeneration(page, server, fixture, context, hosts) {
   assert.equal(changed.neighbor && changed.focused, true,
     context + ": changing one history must preserve its unchanged focused neighbor");
   await page.evaluate("delete window.__motionFlat; true");
+}
+
+async function assertSettingsHistoryRecovery(page, server, fixture, context) {
+  const id = "free_heap";
+  const selector = '#settingsCards [data-desc="board:free_heap"]';
+  const original = fixture.values;
+  const epoch = fixture.status.history.epoch;
+  const boot = fixture.status.boot_id;
+  let connected = true;
+  fixture.values = tick => ({ ...original(tick),
+    modbus_history_epoch: connected ? epoch : 0, modbus_history_boot_id: connected ? boot : "" });
+  try {
+    await page.evaluate("showStage('settings'); true");
+    await page.waitFor("!_pollBusy && modbusHistoryMatches()");
+    await toggleDisclosure(page, selector, id, true, context + "/open");
+    const previousEpoch = await page.evaluate("S.histEpoch");
+    const requests = server.historyRequests.filter(key => key === "x10a:" + id).length;
+    connected = false;
+    await page.waitFor("!_pollBusy && S.histEpoch > " + previousEpoch +
+      " && S.modbusHistoryLease?.epoch === 0");
+    connected = true;
+    await page.waitFor("!_pollBusy && modbusHistoryMatches() && S.hist.get('free_heap')?.v.length && " +
+      "document.querySelector('#settingsCards .vitem.open .vhist-plot[data-hist=free_heap]')");
+    assert.equal(await page.evaluate(`document.querySelector(${JSON.stringify(selector)})
+      .getAttribute("aria-expanded")`), "true", context + ": the Settings accordion stays open");
+    assert.equal(server.historyRequests.filter(key => key === "x10a:" + id).length, requests + 1,
+      context + ": source withdrawal re-fetches the open Settings trend exactly once");
+    await toggleDisclosure(page, selector, id, false, context + "/close");
+  } finally {
+    fixture.values = original;
+  }
 }
 
 async function disclosure(page, server, fixture, context, selectors, ids, settings = false, animation = {}) {
@@ -956,7 +1034,8 @@ export async function assertHistoryMotion(page, server, context) {
     { keys: NO_HISTORY_INSPECTORS }), [],
     context + ": no-history classification must reject newly declared trend metadata");
     if (only && ![...Object.keys(INSPECTOR_TRENDS), "board", "circulation", "x10a-row",
-      "modbus-numeric", "modbus-state", "env3-no-forecast", "room-mqtt-only", "room-stale"].includes(only))
+      "settings-recovery", "modbus-numeric", "modbus-state", "env3-no-forecast",
+      "room-mqtt-only", "room-stale"].includes(only))
       throw new Error("unknown history motion case: " + only);
     await mountFixture(page, server, fixture);
     if (!only && !mutation) for (const key of NO_HISTORY_INSPECTORS) {
@@ -979,16 +1058,68 @@ export async function assertHistoryMotion(page, server, context) {
           label + ": first native open must refresh the inherited flow cache generation");
         assert.equal(server.historyRequests.filter(key => key === "x10a:flow").length, flowRequests + 1,
           label + ": first native open must make one real GET for its inherited flow cache");
+        const isolated = await evaluate(page, () => {
+          const host = document.getElementById("inspHist");
+          const plot = host.querySelector(".vhist-plot");
+          const native = document.createElement("template");
+          native.innerHTML = histHtml("flow", "l/min", "Flow", "x10a");
+          const nativePlot = native.content.querySelector(".vhist-plot");
+          scrubMove(plot, 0);
+          const marker = plot.querySelector(".vhist-mark.vhist-live");
+          const hidden = host.querySelector('[data-hist-series="modbus"]');
+          const visible = historyView("flow"), comparison = historyView("flow", "modbus");
+          const result = {
+            path: plot.querySelector("svg").outerHTML === nativePlot.querySelector("svg").outerHTML,
+            scale: host.querySelector(".vhist-range").textContent ===
+              native.content.querySelector(".vhist-range").textContent,
+            span: visible.v.length === 288 && visible.b0 === comparison.b0 + 1,
+            legend: hidden.getAttribute("aria-pressed") === "false",
+            cursor: !marker.hidden && marker.style.left === "0px" &&
+              host.querySelector(".vhist-tip.vhist-live").textContent === histReadout(visible, 0),
+          };
+          scrubEnd(plot);
+          return result;
+        });
+        assert.deepEqual(isolated, { path: true, scale: true, span: true, legend: true, cursor: true },
+          label + ": hidden provisional flow cannot affect the native line, range or cursor");
+      }
+      if (key === "valve") {
+        assert.deepEqual(await evaluate(page, () => {
+          const view = historyView("valve_dhw"), at = view.liveIndex;
+          return view.series.map(s => [s.source, s.v[at], s.v.slice(0, at).some(v => v != null)]);
+        }), [["x10a", 10, true], ["modbus", null, true]],
+        label + ": the native valve has a current report; the Modbus lane keeps completed samples and shows a current gap");
       }
       if (key === "tank" && page.assertFlowPaint) await page.assertFlowPaint(label);
+      // The stale API fixture exposes a legacy Holding 9 ring that cannot witness Quiet activity.
+      const useModbus = key !== "bsh" && id !== "quiet_state" &&
+        MODBUS_HISTORY_ROWS.some(row => row.id === id);
       const expected = key === "env3" ? ["env3_temperature", "env3_humidity", "env3_pressure"]
-        : [ "x10a", ...(key !== "bsh" && MODBUS_HISTORY_ROWS.some(row => row.id === id) ? ["modbus"] : []),
+        : [ "x10a", ...(useModbus ? ["modbus"] : []),
           ...(key === "room" ? ["room"] : []) ];
       assert.deepEqual(chart.sources, expected, label + ": preserve independent history sources");
       if (key === "env3") assert.equal(chart.forecast, true, label + ": forecast must accompany real ENV III history");
       if (key === "flow") await assertFlowTtlTransition(page, server, label);
-      await observe(page, server, label, ["#inspHist .vhist-plot"], { inspector: true });
       let restoreValues;
+      if (key === "pump") {
+        restoreValues = fixture.values;
+        fixture.values = tick => {
+          const frame = restoreValues(tick);
+          frame.values.find(row => row.concept === "pump_signal").value = String(20 + tick % 10);
+          return frame;
+        };
+      }
+      if (key === "pth") {
+        restoreValues = fixture.values;
+        fixture.values = tick => {
+          const frame = restoreValues(tick);
+          frame.values.find(row => row.concept === "flow").value = String(22 + tick % 10);
+          return frame;
+        };
+      }
+      await observe(page, server, label, ["#inspHist .vhist-plot"], {
+        inspector: true, changingPump: key === "pump", changingThermal: key === "pth",
+      });
       if (key === "sgrequest") {
         restoreValues = await assertSgTransition(page, server, fixture, label);
         await observe(page, server, label + "/changed-cap-stable",
@@ -1011,6 +1142,8 @@ export async function assertHistoryMotion(page, server, context) {
         ['#settingsCards [data-desc="board:free_heap"]', '#settingsCards [data-desc="board:max_alloc"]'],
         ["free_heap", "max_alloc"], true);
     if (disclosureMutation) return;
+    if (!only || only === "settings-recovery")
+      await assertSettingsHistoryRecovery(page, server, fixture, context + "/settings-recovery");
     if (!only || only === "circulation")
       await disclosure(page, server, fixture, context + "/circulation",
         ['#settingsCards [data-desc="diagnostics:circulation"]'], ["circulation_state"], true);
@@ -1045,9 +1178,13 @@ export async function assertHistoryMotion(page, server, context) {
       await mountFixture(page, server, frame);
       const label = context + "/" + variant;
       if (variant === "modbus-numeric") {
+        // The controller still reports the pump ON. A missing X10A flow measurement stops the
+        // water trace, but cannot retire that independent reported-operation animation.
+        assert.equal(await page.evaluate("S.live?.pumpOn"), true,
+          label + ": retain the independent reported pump-ON witness");
         await disclosure(page, server, frame, label,
           ['#valueGroups [data-dashboard-card="modbus"] [data-trend="flow"]'], ["flow"], false,
-          { animationIds: ["rfHot", "scFan"], inactiveAnimationIds: ["fSup1", "scPump"] });
+          { animationIds: ["rfHot", "scFan", "scPump"], inactiveAnimationIds: ["fSup1"] });
       } else {
         const key = variant === "env3-no-forecast" ? "env3" : "room";
         const chart = await openInspector(page, key, INSPECTOR_TRENDS[key], label);
@@ -1061,7 +1198,8 @@ export async function assertHistoryMotion(page, server, context) {
       }
     }
     console.log("history motion matrix passed: " + context + "; " +
-      (only ? "focused " + only : "28 history inspectors; 12 no-history routes; 5 disclosure paths; 3 conditional source variants") +
+      (only ? "focused " + only : `${Object.keys(INSPECTOR_TRENDS).length} history inspectors; ` +
+        `${NO_HISTORY_INSPECTORS.length} no-history routes; 5 disclosure paths; 3 conditional source variants`) +
       "; " + Math.round((performance.now() - started) / 1000) + " s");
   } finally {
     await evaluate(page, () => {
