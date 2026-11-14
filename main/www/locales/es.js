@@ -1,4 +1,4 @@
-// translation-source: 203c0f333f1a4749e0dd21841787244ee126501eacbd291eb671d1b290a8c21f
+// translation-source: 63a21ee82689120ffd8fc53b1408385986ee8bc6afb789d41f77a9b4004139bf
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -357,6 +357,8 @@ I18N.es = localeValues([
   /* hist.recorded */ (h) => `Registrado · ${h} h`,
   /* hist.now */ "ahora",
   /* hist.ago */ (h) => `hace ${h} h`,
+  /* hist.retained */ "Última muestra guardada",
+  /* hist.before_retained */ (h) => `${h} h antes de la última muestra guardada`,
   /* hist.loading */ "Cargando tendencia…",
   /* hist.none */ "Aún no hay lecturas registradas.",
   /* hist.err */ "Tendencia no disponible.",

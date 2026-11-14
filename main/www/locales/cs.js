@@ -1,4 +1,4 @@
-// translation-source: 203c0f333f1a4749e0dd21841787244ee126501eacbd291eb671d1b290a8c21f
+// translation-source: 63a21ee82689120ffd8fc53b1408385986ee8bc6afb789d41f77a9b4004139bf
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -357,6 +357,8 @@ I18N.cs = localeValues([
   /* hist.recorded */ (h) => `Zaznamenáno · ${h} h`,
   /* hist.now */ "nyní",
   /* hist.ago */ (h) => `před ${h} h`,
+  /* hist.retained */ "Poslední uložený vzorek",
+  /* hist.before_retained */ (h) => `${h} h před posledním uloženým vzorkem`,
   /* hist.loading */ "Načítám průběh…",
   /* hist.none */ "Dosud nebyly zaznamenány žádné hodnoty.",
   /* hist.err */ "Průběh není dostupný.",

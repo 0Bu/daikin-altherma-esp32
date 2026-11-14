@@ -180,7 +180,7 @@ function histVisibleSeries(h) {
 
 // Include the lifetime and time anchor even when a new flat ring draws identical SVG geometry.
 const histViewRevision = view =>
-  [S.histEpoch, view.gen, view.t0, view.forecast?.revision, tankAuxRevision(view.tankAux),
+  [S.histEpoch, view.gen, view.t0, view.refreshFailed, view.forecast?.revision, tankAuxRevision(view.tankAux),
     histVisibleSeries(view).map(series => series.source).join(",")].join("/");
 function histRevision(view) {
   return ` data-rev="${esc(histViewRevision(view))}"`;
@@ -427,10 +427,13 @@ async function ensureDerived(id) {
       return;
     }
     const src = rings.filter(([, h]) => h.v.length);
-    if (!src.length) { S.hist.set(id, failed()); return; }
     const inputs = JSON.stringify([use, src.map(([key, h]) => [key, h.gen])]);
     if (previous && previous.inputs === inputs) {
-      S.hist.set(id, { ...previous, at: Date.now() });
+      S.hist.set(id, { ...previous, at: Date.now(), refreshFailed: false });
+      return;
+    }
+    if (!src.length) {
+      S.hist.set(id, { at: Date.now(), gen: previousGen + 1, inputs, v: [] });
       return;
     }
     const dt = src[0][1].dt || 300;
@@ -634,6 +637,7 @@ function alignedHistoryView(id, raw) {
   const sharedUnit = primary.unit || series.find((s) => s.unit)?.unit || "";
   return { id, dt, unit: sharedUnit, t0: typeof t0 === "number" ? t0 : null,
            b0: mode === "bucket" ? start : null,
+           refreshFailed: series.some(s => s.raw.refreshFailed),
            gen: series.map((s) => `${s.source}:${s.raw.gen || 0}`).join("/"),
            v: union, series };
 }
@@ -984,6 +988,8 @@ function stateRunWhen(view, from, count) {
     return `${clock(from)}–${clock(from + count)}`;
   }
   const n = view.recordedN ?? view.v.length;
+  if (view.refreshFailed)
+    return `${scrubTime(view, from)}–${scrubTime(view, Math.min(n - 1, from + count))}`;
   const old = ((n - from) * view.dt) / 3600;
   const recent = ((n - from - count) * view.dt) / 3600;
   return t("hist.boost_ago_range", histFmt1(old), histFmt1(Math.max(0, recent)));
@@ -1061,9 +1067,9 @@ function stateHistHtml(id, name, view, wrap, cfg) {
         `<span class="vhist-cross vhist-live" hidden></span>` +
       `</div>` + histTimesHtml(view, pi, pi >= 0 ? scrubFrac(pi, n) : 0) +
     `</div>` +
-    `<div class="vhist-axis"><span>${esc(t("hist.ago", spanH))}</span>` +
+    `<div class="vhist-axis"><span>${esc(histAxisStart(view, spanH))}</span>` +
       (gaps ? `<span class="vhist-gap">${esc(t(cfg.gaps || "hist.gaps", gaps))}</span>` : "") +
-      `<span>${esc(t("hist.now"))}</span></div>`
+      `<span>${esc(histAxisEnd(view))}</span></div>`
   , "vhist-state");
 }
 
@@ -1198,7 +1204,7 @@ function histHtml(id, unit, name, source = "") {
   // a circle in it would render as an ellipse. Percentage positioning maps onto the same 0..HIST_H
   // scale exactly, and stays right whatever width the panel ends up at.
   const nowDots = view.series.map((s) => {
-    if (!histVisibleSeries(view).includes(s)) return "";
+    if (s.raw.refreshFailed || !histVisibleSeries(view).includes(s)) return "";
     const last = s.v[n - 1];
     return last == null ? "" : `<span class="vhist-now${histSourceClass(s.source)}"` +
       ` style="top:${((Y(last / 10) / HIST_H) * 100).toFixed(2)}%"></span>`;
@@ -1286,12 +1292,12 @@ function histHtml(id, unit, name, source = "") {
         view.series.map((s) => `<span class="vhist-mark vhist-live${histSourceClass(s.source)}" data-source="${s.source}" hidden></span>`).join("") +
       `</div>` + histTimesHtml(view, pi, pi >= 0 ? scrubFrac(pi, n) : 0) +
     `</div>` +
-    `<div class="vhist-axis"><span>${esc(t("hist.ago", spanH))}</span>` +
+    `<div class="vhist-axis"><span>${esc(histAxisStart(view, spanH))}</span>` +
       // Idle time is reported ahead of dropouts: on an outdoor-air trend it is normally the larger
       // share of the day and the one that explains the shape of the chart.
       (held ? `<span class="vhist-idle">${esc(t("hist.heldnote", histFmt1((held * view.dt) / 3600)))}</span>` : "") +
       (gaps ? `<span class="vhist-gap">${esc(t("hist.gaps", gaps))}</span>` : "") +
-      `<span>${esc(t("hist.now"))}</span></div>`,
+      `<span>${esc(histAxisEnd(view))}</span></div>`,
     view.series.length > 1 ? "vhist-multi" : ""
   );
 }
@@ -1369,7 +1375,7 @@ function env3HistHtml(view = historyView(ENV3_COMBINED_ID)) {
     }
     flush();
     const last = s.v[n - 1];
-    if (last != null) {
+    if (last != null && !s.raw.refreshFailed) {
       nowDots += `<span class="vhist-now ${cls}${timedForecast ? " timed" : ""}" ` +
         `style="${timedForecast ? `left:${(measuredEndFrac * 100).toFixed(3)}%;right:auto;` : ""}` +
         `top:${((Y(last / 10) / HIST_H) * 100).toFixed(2)}%"></span>`;
@@ -1459,12 +1465,12 @@ function env3HistHtml(view = historyView(ENV3_COMBINED_ID)) {
     `</div>` +
     (forecastAreas
       ? `<div class="vhist-axis vhist-axis-future" style="--now-p:${(nowFrac * 100).toFixed(3)}">` +
-          `<span>${esc(t("hist.ago", spanH))}</span>` +
+          `<span>${esc(view.refreshFailed ? t("hist.retained") : t("hist.ago", spanH))}</span>` +
           `<span class="vhist-axis-now">${esc(t("hist.now"))}</span>` +
           `<span>${esc(t("hist.in_hours", futureH))}</span></div>`
-      : `<div class="vhist-axis"><span>${esc(t("hist.ago", spanH))}</span>` +
+      : `<div class="vhist-axis"><span>${esc(histAxisStart(view, spanH))}</span>` +
           (gaps ? `<span class="vhist-gap">${esc(t("hist.gaps", gaps))}</span>` : "") +
-          `<span>${esc(t("hist.now"))}</span></div>`),
+          `<span>${esc(histAxisEnd(view))}</span></div>`),
     "vhist-multi"
   );
 }
@@ -1586,6 +1592,14 @@ function histPinToggle(id, i, source = "") {
 }
 
 // Selected time belongs on the axis, including relative ages when the source has no wall clock.
+function histAxisStart(h, spanH) {
+  return h.refreshFailed ? t("hist.recorded", spanH) : t("hist.ago", spanH);
+}
+
+function histAxisEnd(h) {
+  return h.refreshFailed ? t("hist.retained") : t("hist.now");
+}
+
 function scrubTime(h, i) {
   if (h.liveIndex === i) return t("hist.now");
   const point = h.id === ENV3_COMBINED_ID && i >= h.v.length
@@ -1594,6 +1608,8 @@ function scrubTime(h, i) {
   if (stamp != null) return new Date(stamp * 1000)
     .toLocaleTimeString(LANG, { hour: "2-digit", minute: "2-digit" });
   const ageH = (((h.recordedN ?? h.v.length) - 1 - i) * h.dt) / 3600;
+  if (h.refreshFailed) return ageH < 0.05
+    ? t("hist.retained") : t("hist.before_retained", histFmt1(ageH));
   return ageH < 0.05 ? t("hist.now") : t("hist.rel", histFmt1(ageH));
 }
 

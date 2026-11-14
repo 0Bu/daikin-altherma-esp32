@@ -1717,12 +1717,13 @@ function renderInspectHist(e, row, mode = "") {
     if (!mayFetch || (mode === "refresh" && (started || S.histBusy.size))) return;
     started = ensureHist(id, source, mode) || started;
   };
+  const historySig = h => h ? (h.err ? "e" : `${h.gen}:${!!h.refreshFailed}`) : "";
   if (e && e.env3) {
     const offered = ENV3_COMBINED_SERIES.filter((s) => hasEnv3Hist(s.id));
     for (const s of offered) request(s.id, "env3");
     const seriesSig = offered.map((s) => {
       const h = S.hist.get(histCacheKey(s.id, "env3"));
-      return `${s.id}:${h ? (h.err ? "e" : h.gen) : ""}`;
+      return `${s.id}:${historySig(h)}`;
     });
     const pin = S.histPin.get(ENV3_COMBINED_ID);
     const forecast = weatherForecastView();
@@ -1772,8 +1773,8 @@ function renderInspectHist(e, row, mode = "") {
   const sourceDefault = h && mh && !S.histHidden?.has(id) ? histX10aDown() : "";
   // histHtml carries localised axis/readout copy. A language switch must therefore invalidate the
   // inspector chart even when the series generation and pinned sample are unchanged.
-  const sig = [LANG, id, trendSource, h ? (h.err ? "e" : h.gen) : "", mh ? (mh.err ? "e" : mh.gen) : "",
-               rh ? (rh.err ? "e" : rh.gen) : "", id === "room_temp" ? roomHistName() : "",
+  const sig = [LANG, id, trendSource, historySig(h), historySig(mh), historySig(rh),
+               id === "room_temp" ? roomHistName() : "",
                liveGen, auxGen, sourceDefault, pin ? (pin.t ?? `${pin.i}/${pin.gen}`) : ""].join("|");
   if (sig === S.inspHistSig) return started;
   S.inspHistSig = sig;

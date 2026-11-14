@@ -1,4 +1,4 @@
-// translation-source: 203c0f333f1a4749e0dd21841787244ee126501eacbd291eb671d1b290a8c21f
+// translation-source: 63a21ee82689120ffd8fc53b1408385986ee8bc6afb789d41f77a9b4004139bf
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
@@ -357,6 +357,8 @@ I18N.zh = localeValues([
   /* hist.recorded */ (h) => `已记录 · ${h} 小时`,
   /* hist.now */ "现在",
   /* hist.ago */ (h) => `${h} 小时前`,
+  /* hist.retained */ "最近一次已保存的读数",
+  /* hist.before_retained */ (h) => `最近一次已保存读数的 ${h} 小时前`,
   /* hist.loading */ "正在加载趋势…",
   /* hist.none */ "尚无已记录读数。",
   /* hist.err */ "趋势不可用。",

@@ -1,4 +1,4 @@
-// translation-source: 203c0f333f1a4749e0dd21841787244ee126501eacbd291eb671d1b290a8c21f
+// translation-source: 63a21ee82689120ffd8fc53b1408385986ee8bc6afb789d41f77a9b4004139bf
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -357,6 +357,8 @@ I18N.fi = localeValues([
   /* hist.recorded */ (h) => `Tallennettu · ${h} h`,
   /* hist.now */ "nyt",
   /* hist.ago */ (h) => `${h} h sitten`,
+  /* hist.retained */ "Viimeisin tallennettu näyte",
+  /* hist.before_retained */ (h) => `${h} h ennen viimeisintä tallennettua näytettä`,
   /* hist.loading */ "Ladataan käyrää…",
   /* hist.none */ "Mittauksia ei ole vielä tallennettu.",
   /* hist.err */ "Käyrä ei ole saatavilla.",

@@ -325,7 +325,7 @@ visible Dashboard or Settings plots can refresh after the cache cooldown. They s
 automatic history request per poll. Opening a chart can queue independent reads in that tab.
 Closing a chart ends its gesture. Already queued reads can still fill the cache. A live poll can
 interrupt a first read. The next attempt gets one request timeout to finish before polling resumes.
-A failed refresh keeps the last compatible samples.
+A failed refresh keeps the last compatible samples and marks the saved edge of the timeline.
 
 Hover previews a sample; tap pins it, a second tap on the same sample/Escape clears it. The two views
 of a row share a pin and freeze while either is scrubbed. A dated pin tracks its sample instant.

@@ -2236,6 +2236,10 @@ function renderSettings() {
   snapshot.hidden = S.transportUnavailable !== "status";
   if (!snapshot.hidden) snapshot.textContent = `${t("ota.snapshot_label")}: ${t("ota.snapshot_value")} · ` +
     t(S.transportBusy ? "toast.busy_retry" : "toast.unreachable");
+  if (S.otaInstalling && !S.status) {
+    syncOtaSettingsLock();
+    return;
+  }
   // Changed status regenerates card markup. Defer writes while an interactive control has focus
   // so replacement cannot close it mid-selection. A scrub also holds its plot's host.
   // otaInline paints progress directly into the DOM. S.otaShown preserves that readout and its

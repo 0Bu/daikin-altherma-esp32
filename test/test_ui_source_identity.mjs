@@ -13,6 +13,7 @@ const $ = (id) => {
 const pending = [];
 const context = {
   $, LANG: "en", pollSignal: () => undefined, hpProbeIsOpen: () => false,
+  esc: String, t: key => key,
   setLangFromStatus: async () => {}, displayUnit: (j) => j.unit,
   j: async () => context.nextStatus,
   fetch: (url) => new Promise((resolve, reject) => pending.push({ url, resolve, reject })),
@@ -27,7 +28,7 @@ vm.runInContext(read("app_state") + "\n" + read("history") + "\n" +
   hydrateRoutedPopup = () => {};
   this.ui = { S, refreshStatus, fillRefTemp, refTempFormPayload, formatRefSource, parseRefSource,
     ensureHist, ensureHistPair, ensureDerived, historyView, histPinIndex, histCacheKey, syncHistSources,
-    yieldHistoryToPoll, pumpHistoryQueue, histPinToggle };
+    yieldHistoryToPoll, pumpHistoryQueue, histPinToggle, histAxisEnd, scrubTime, histHtml };
 `, context);
 const ui = context.ui;
 const plain = (value) => JSON.parse(JSON.stringify(value));
@@ -381,6 +382,8 @@ reply(pending.shift(), 390);
 await failedDelta;
 assert.equal(ui.S.hist.get("dt").gen, oldDelta.gen);
 assert.equal(ui.histPinIndex("dt", ui.historyView("dt")), 0);
+assert.equal(ui.histAxisEnd(ui.historyView("dt")), "hist.retained");
+assert.equal(ui.scrubTime(ui.historyView("dt"), 0), "hist.retained");
 for (const id of ["leaving_water", "dt"]) ui.S.hist.get(id).at = 0;
 const nextDelta = ui.ensureDerived("dt");
 assert.equal(pending.length, 1);
@@ -388,6 +391,18 @@ reply(pending.shift(), 460);
 await nextDelta;
 assert.equal(ui.S.hist.get("dt").gen, oldDelta.gen + 1);
 assert.equal(ui.histPinIndex("dt", ui.historyView("dt")), -1);
+assert.equal(ui.histAxisEnd(ui.historyView("dt")), "hist.now");
+
+await reset();
+const emptyDelta = ui.ensureDerived("dt");
+for (let i = 0; i < 2; i++) {
+  pending.shift().resolve({ json: async () => ({ ...sample(0), v: [] }) });
+  await new Promise(resolve => setImmediate(resolve));
+}
+await emptyDelta;
+assert.match(ui.histHtml("dt", "K", "Temperature difference"), /hist\.none/,
+  "two successfully read empty inputs must be shown as empty");
+assert.doesNotMatch(ui.histHtml("dt", "K", "Temperature difference"), /hist\.err/);
 
 // A new status lifetime clears every lease, preserving main's global lifecycle model. Completion
 // of the predecessor may neither publish its samples nor release the successor's active request.

@@ -244,6 +244,13 @@ function elementsFor(...ids) {
   assert.match(elements.settingsCards.innerHTML, /Entwicklung/, "the OTA-only card uses the reported channel");
   assert.equal(dashboardStatusPaints, 1, "the dashboard must paint the known OTA state immediately");
 
+  // Entering Settings calls renderSettings even if /status has not answered during the install.
+  const recoveryCard = elements.settingsCards.innerHTML;
+  sandbox.__api.renderSettings();
+  assert.equal(elements.settingsCards.innerHTML, recoveryCard, "opening Settings retains the OTA-only card");
+  assert.equal(elements.connTile.hidden, true, "the OTA shell still has no connection evidence");
+  assert.equal(S.settingsHydrated, false, "compact OTA status cannot hydrate full Settings");
+
   // If /status later fits before the reboot, it must replace the recovery card ONCE despite
   // otaShown, and then repaint the retained percentage into the newly-created progress slot.
   S.status = {
