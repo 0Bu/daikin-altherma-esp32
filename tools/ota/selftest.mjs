@@ -658,8 +658,8 @@ try {
       replaceOnce("main/mqtt_ha.cpp", "set_status(false, \"transport resume failed\");", "")],
     ["the MQTT resume starts without resetting a stale status", () =>
       replaceOnce("main/mqtt_ha.cpp",
-        "set_status(false, \"\");\n    const esp_err_t start_rc = start_client_transport();",
-        "const esp_err_t start_rc = start_client_transport();")],
+        /set_status\(false, ""\);\n([\s\S]{0,450}?const esp_err_t start_rc = start_client_transport\(\);)/,
+        "$1")],
     ["the client start writes the status before checking its result", () =>
       replaceOnce("main/mqtt_ha.cpp", "const esp_err_t rc = start_client_transport();",
         "const esp_err_t rc = start_client_transport();\n    set_status(false, \"\");")],
