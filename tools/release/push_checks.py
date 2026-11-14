@@ -105,6 +105,9 @@ def run(root, expected_head):
         raise local.CheckError("local release checks require a real build directory")
     with local.frozen_checkout(root, env, identity, scratch_parent=scratch_parent,
                                container_visible=True) as (checkout, offline):
+        # Hook self-tests compare protected operations against the configured repository.
+        # A local clone initially points origin at the source directory instead.
+        local.git(checkout, offline, "remote", "set-url", "origin", f"https://github.com/{REPO}.git")
         # Validate the historical fixture from the actual merged test source without lazy fetching.
         subprocess.run([sys.executable, "scripts/prepare-ci-history.py"], cwd=checkout,
                        env=offline, check=True)

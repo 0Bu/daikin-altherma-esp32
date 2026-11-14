@@ -35,6 +35,10 @@ esac
 
 check scripts/run-pr-hygiene-audit.sh --base "$base" --head "$candidate" --event-file ''
 check tools/pr_hygiene/selftest.sh
+check python3 tools/agent-hooks/test_agent_hooks.py
+check python3 tools/agent-hooks/test_push_gate.py
+check tools/agent-hooks/selftest.sh
+check tools/agent-policy/selftest.sh
 check tools/coverage/selftest.sh
 # Reuse the former GitHub coverage profile with Ubuntu's Linux x86-64 compiler.
 # The native mock run still supplies the host evidence consumed during OTA.
@@ -98,7 +102,3 @@ check scripts/run-agent-instructions-budget.sh
 check scripts/run-skill-audit.sh
 check tools/agent-config/selftest.sh
 check tools/skill_audit/selftest.sh
-check python3 tools/agent-hooks/test_agent_hooks.py
-check python3 tools/agent-hooks/test_push_gate.py
-check tools/agent-hooks/selftest.sh
-check tools/agent-policy/selftest.sh
