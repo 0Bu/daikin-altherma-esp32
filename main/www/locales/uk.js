@@ -1,4 +1,4 @@
-// translation-source: 65571656f160db7c5cef68e1a9e2f1c556ae6ac67f346ba2f2b092cff1d703c9
+// translation-source: 57360fc01b9b51987c1e6a54c6b11b7295a1a3b53f13d2b3928a2b44e523c222
 I18N.uk = localeValues([
   /* sys.nodata */ "Немає даних",
   /* sys.unreachable */ "Недоступно",
@@ -230,8 +230,15 @@ I18N.uk = localeValues([
   /* check.cycling.unavailable */ "Немає даних про компресор.",
   /* check.cycling.stale */ "Наразі бракує показань.",
   /* check.cycling.history_empty */ "Історії ще немає.",
-  /* check.cycling.timed_starts */ (s) => `Із часом: ${s}`,
-  /* check.cycling.saved_starts */ (s) => `З них ${s} збережено в погодинних даних до перезапуску. Точний час цих запусків невідомий.`,
+  /* check.cycling.timed_starts */ (s) => `${s} із зафіксованим часом`,
+  /* check.cycling.run_start */ "Запуск",
+  /* check.cycling.run_stop */ "Зупинка",
+  /* check.cycling.run_duration */ "Тривалість",
+  /* check.cycling.run_ongoing */ "Працює",
+  /* check.cycling.run_stop_unknown */ "Час зупинки невідомий",
+  /* check.cycling.no_timed_runs */ "За цю годину не зафіксовано часу жодного запуску.",
+  /* check.cycling.run_details_unavailable */ "За цю годину немає даних про час окремих циклів.",
+  /* check.cycling.saved_starts */ (s) => `З них ${s} збережено в погодинних даних до перезапуску.`,
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} мін. ${min} °C · середнє ${mean} °C`,
   /* check.min */ (m) => `${m} хв`,

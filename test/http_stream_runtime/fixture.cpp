@@ -531,10 +531,15 @@ int main(int argc, char** argv) {
         cycling_hours.hours[0] = {2700, 1200, 600, 300, 2, Slot::Restored};
         using Trace                = daik::logic::CheckupCyclingTrace;
         cycling_trace.unix_s       = 2'000'000'000;
-        cycling_trace.window_end_s = 451;
-        cycling_trace.end_s        = 450;
-        cycling_trace.push(410, Trace::Heat);
-        cycling_trace.push(420, Trace::Start);
+        cycling_trace.window_end_s = 86400;
+        cycling_trace.end_s        = 86399;
+        cycling_trace.boot_s       = 451;
+        cycling_trace.live         = true;
+        cycling_trace.push(86359, Trace::Off);
+        cycling_trace.push(86369, Trace::Start);
+        cycling_trace.push(86369, Trace::Heat);
+        cycling_trace.push(86389, Trace::Off);
+        cycling_trace.push(86390, Trace::Stop);
         for (const bool partial : {true, false}) {
             cycling_hours.pending_elapsed_s = partial ? 450 : 0;
             cycling_hours.hours[1] = partial ? daik::logic::CheckupCyclingHour{420, 180, 0, 60, 1}

@@ -791,6 +791,16 @@ def parse_frames(disassembly: str, budgets: dict[str, Any] | None = None) -> dic
                 raise BudgetError(f"symbol {current}: missing first prologue")
             current = header.group(2)
             symbol_address = int(header.group(1), 16)
+            # Check symbol headers even when their first instruction is not recognized.
+            if any(helper in current for helper in ("flash_build_for_service",
+                                                    "flash_index_cycling_page",
+                                                    "flash_cycling_appended",
+                                                    "flash_decode_cycling_group",
+                                                    "cycling_trace_decode_part")):
+                raise BudgetError(f"cycling journal: unmodeled outlined helper {current}")
+            for helper, key in CYCLING_TRACKED_HELPERS.items():
+                if helper in current and not re.fullmatch(budgets["symbols"][key]["pattern"], current):
+                    raise BudgetError(f"cycling journal: unmodeled helper clone {current}")
             for name in INLINED_MQTT_HELPERS:
                 if (re.match(r"^daik::(?:\(anonymous namespace\)::)?" + name + r"\(", current)
                         or re.match(r"^_Z[ZN]+4daik(?:12_GLOBAL__N_1)?L?"
@@ -896,6 +906,8 @@ def validate_status_diagnosis_paths(budgets: dict[str, Any], sources: dict[str, 
         "checkup_freshness": ["checkup_summarize", "checkup_evidence_name"],
         "cycling_hours": ["checkup_cycling_hours_locked", "room_time_now"],
         "cycling_hours_builder": ["checkup_cycling_hours_locked", "checkup_cycling_hours_build"],
+        "cycling_trace": ["cycling_trace_snapshot", "cycling_trace_emit", "cycling_trace_push",
+                          "room_time_now"],
     }
     report_paths = {
         f"httpd_{transport}_{name}": [*prefix, *report, *tail]
@@ -1015,6 +1027,7 @@ def validate_status_diagnosis_paths(budgets: dict[str, Any], sources: dict[str, 
     summarize_body = stack_function_body(checkup_logic, "checkup_summarize")
     progress_body = stack_function_body(checkup_logic, "dhw_loss_progress")
     for caller, callee in (
+        (report_body, "cycling_snapshot_locked"),
         (report_body, "logic::checkup_aggregate"),
         (report_body, "logic::dhw_loss_aggregate"),
         (report_body, "logic::checkup_evaluate"),
@@ -1050,6 +1063,12 @@ def shutdown_path_members() -> dict[str, list[str]]:
     for name, prefix in SHUTDOWN_CALLERS.items():
         paths[name + "_journal"] = prefix + ["history_shutdown", "history_journal", "history_append"]
         paths[name + "_checkup"] = prefix + ["checkup_shutdown", "checkup_shutdown_reset"]
+        journal = prefix + ["history_shutdown", "history_journal"]
+        for phase, tail in CYCLING_WRITE_STACK.items():
+            paths[name + "_cycling_" + ("snapshot" if phase == "checkpoint" else phase)] = (
+                journal + tail)
+        for phase, tail in CYCLING_RESTORE_STACK.items():
+            paths[name + "_cycling_" + phase] = journal + tail
     # A successful factory reset has already forgotten the journal; the liveness touch and
     # independently registered checkup handler still run. Keep that exclusion source-bound.
     paths["button_shutdown_history_touch"] = ["button_task", "sdk_restart", "history_shutdown"]
@@ -1058,6 +1077,82 @@ def shutdown_path_members() -> dict[str, list[str]]:
     paths["poll_board_journal"] = ["poll_task", "history_board", "history_journal", "history_append"]
     paths.update({name: spec[1] for name, spec in stop_stack.shutdown_specs().items()})
     return paths
+
+
+# The checkup trace is composed without allocating under its mutex. Flash decodes the page group
+# only after the ordinary journal lock is held. Verify the separate nested flash read, header/CRC,
+# and checkup adoption branches on normal polling and on the restart drain's actual task callers.
+CYCLING_WRITE_STACK = {
+    "checkpoint": ["cycling_flash_build", "cycling_checkpoint", "cycling_trace_snapshot",
+                   "cycling_trace_emit", "cycling_trace_push", "room_time_now"],
+    "reset_check": ["cycling_flash_build", "cycling_reset_pending"],
+    "build_crc": ["cycling_flash_build", "cycling_flash_crc", "history_config_crc"],
+    "build_shape": ["cycling_flash_build", "cycling_page_valid", "cycling_part_count"],
+    "append_shape": ["history_append", "cycling_part_count"],
+    "append_ack": ["history_append", "cycling_checkpoint_acked"],
+    "append_owner": ["history_append", "cycling_record_owner"],
+}
+CYCLING_RESTORE_STACK = {
+    "read": ["cycling_flash_restore", "cycling_flash_record_read", "sdk_partition_read"],
+    "validate": ["cycling_flash_restore", "cycling_flash_page", "cycling_flash_crc",
+                 "history_config_crc"],
+    "shape": ["cycling_flash_restore", "cycling_flash_page", "cycling_page_valid",
+              "cycling_part_count"],
+    "decode": ["cycling_flash_restore", "cycling_trace_push"],
+    "adopt": ["cycling_flash_restore", "cycling_trace_restore"],
+}
+CYCLING_TRACKED_HELPERS = {"flash_build_next_cycling": "cycling_flash_build",
+                           "checkup_cycling_reset_pending": "cycling_reset_pending",
+                           "checkup_cycling_checkpoint_appended": "cycling_checkpoint_acked",
+                           "flash_cycling_owned": "cycling_record_owner",
+                           "flash_record_valid": "history_record_scope",
+                           "cycling_trace_page_valid": "cycling_page_valid",
+                           "cycling_trace_part_count": "cycling_part_count"}
+
+
+def validate_cycling_flash_paths(budgets: dict[str, Any], sources: dict[str, str]) -> None:
+    tasks = {
+        "poll": {
+            **{f"poll_cycling_{phase}": ["poll_task", "history_board", "history_journal", *tail]
+               for phase, tail in CYCLING_WRITE_STACK.items()},
+            **{f"poll_cycling_{phase}": ["poll_task", "history_board", "history_flash_restore", *tail]
+               for phase, tail in CYCLING_RESTORE_STACK.items()},
+            "poll_cycling_trend_filter": ["poll_task", "history_board", "history_flash_restore",
+                                          "history_record_scope", "cycling_record_owner"],
+        },
+        "main": {
+            "main_cycling_scan": ["main_task", "boot_sequence", "history_start", "cycling_flash_page",
+                                  "cycling_flash_crc", "history_config_crc"],
+            "main_cycling_scan_shape": ["main_task", "boot_sequence", "history_start",
+                                        "cycling_flash_page", "cycling_page_valid",
+                                        "cycling_part_count"],
+            "main_cycling_scan_owner": ["main_task", "boot_sequence", "history_start",
+                                        "history_record_scope", "cycling_record_owner"],
+        },
+    }
+    for owner, paths in tasks.items():
+        task = budgets["tasks"][owner]
+        maximum = task["stack_bytes"] - task["reserve_bytes"]
+        for name, members in paths.items():
+            rule = {"symbols": members, "multipliers": {}, "base_bytes": 1536, "max_bytes": maximum}
+            if name not in task["paths"] or budgets["paths"].get(name) != rule:
+                raise BudgetError(f"cycling journal path {name}: reviewed stack accounting changed")
+    history = stack_source_code(sources["main/history.cpp"])
+    checkup = stack_source_code(sources["main/checkup.cpp"])
+    for source, caller, callee in [
+        (history, "flash_journal_scan", "flash_index_cycling_page"),
+        (history, "history_service_flash_restore", "history_restore_cycling_flash"),
+        (history, "history_flash_service_journal", "history_restore_cycling_flash"),
+        (history, "history_restore_cycling_flash", "flash_decode_cycling_group"),
+        (history, "history_restore_cycling_flash", "checkup_cycling_restore"),
+        (history, "flash_build_for_service", "flash_build_next_cycling"),
+        (history, "flash_build_next_cycling", "checkup_cycling_checkpoint"),
+        (history, "flash_build_next_cycling", "checkup_cycling_reset_pending"),
+        (history, "flash_build_next_cycling", "history_journal_crc_bytes"),
+        (checkup, "checkup_cycling_checkpoint", "cycling_snapshot_locked"),
+    ]:
+        if len(re.findall(r"\b" + callee + r"\s*\(", stack_function_body(source, caller))) != 1:
+            raise BudgetError(f"cycling journal source: {caller}/{callee} changed")
 
 
 def stack_source_code(source: str) -> str:
@@ -1253,7 +1348,7 @@ def validate_shutdown_paths(budgets: dict[str, Any], sources: dict[str, str]) ->
                       stack_function_body(history, "history_start"))
             or not re.search(r"esp_register_shutdown_handler\(checkup_reboot_save\)",
                              stack_function_body(checkup, "checkup_start"))
-            or not re.search(r"history_flash_service_journal\(\s*12,\s*pdMS_TO_TICKS\(200\)\)",
+            or not re.search(r"history_flash_service_journal\(\s*12,\s*pdMS_TO_TICKS\(200\),\s*true\)",
                              stack_function_body(history, "history_flash_save"))
             or not re.search(r"history_flash_service_journal\(\s*3,\s*0\)",
                              stack_function_body(history, "history_record_board"))):
@@ -1274,8 +1369,8 @@ def validate_shutdown_paths(budgets: dict[str, Any], sources: dict[str, str]) ->
             or incomplete.start() > reset.find("esp_restart(")
             or not re.search(r"^\s*s_flash_forgotten\.store\(true\);",
                              stack_function_body(history, "history_flash_forget"))
-            or not re.search(r"if\s*\(!s_flash_part \|\| s_flash_shutdown_started \|\| "
-                             r"s_flash_forgotten\.load\(\)\) return;",
+            or not re.search(r"if\s*\(!s_flash_part \|\| s_flash_forgotten\.load\(\) \|\| "
+                             r"s_flash_shutdown_started\.exchange\(true\)\)\s*return;",
                              stack_function_body(history, "history_flash_save"))):
         raise BudgetError("shutdown source: factory-reset journal exclusion changed")
 
@@ -1334,6 +1429,11 @@ def validate_task_stacks(budgets: dict[str, Any], sources: dict[str, str]) -> No
             expected = {"http_deadline_watchdog": "deadline", "ota_health_gate": "ota_health",
                         "ota_health_shutdown_journal": "ota_health",
                         "ota_health_shutdown_checkup": "ota_health"}.get(path)
+            if path in {f"ota_health_shutdown_cycling_{phase}"
+                        for phase in ("snapshot", "reset_check", "build_crc", "build_shape",
+                                      "append_shape", "append_ack", "append_owner",
+                                      *CYCLING_RESTORE_STACK)}:
+                expected = "ota_health"
             if path in stop_stack.PATHS:
                 expected = stop_stack.PATHS[path][0]
             if expected is None:
@@ -1761,7 +1861,10 @@ CONFIG_DOCUMENT_PATHS = frozenset({
     "httpd_board_i2c_read", "httpd_board_i2c_write", "httpd_board_i2c_receive",
     "httpd_checkup_schema",
     *(f"httpd_shutdown_{name}_{phase}" for name in SHUTDOWN_HTTP_CALLERS
-      for phase in ("journal", "checkup")),
+      for phase in ("journal", "checkup", "cycling_snapshot", "cycling_reset_check",
+                    "cycling_build_crc", "cycling_build_shape", "cycling_append_shape",
+                    "cycling_append_ack", "cycling_append_owner",
+                    *(f"cycling_{part}" for part in CYCLING_RESTORE_STACK))),
 })
 CONFIG_DOCUMENT_PATHS |= frozenset(
     name for name, (owner, rule) in stop_stack.PATHS.items()
@@ -1957,6 +2060,7 @@ def validate_source_contract(budgets: dict[str, Any]) -> None:
                                 (REPO / "main/logic/mqtt_group.hpp").read_text(encoding="utf-8"))
     validate_room_history_paths(budgets, sources)
     validate_shutdown_paths(budgets, sources)
+    validate_cycling_flash_paths(budgets, sources)
     validate_ota_upload_paths(budgets, sources)
     validate_json_recursion(
         budgets, (REPO / "main/logic/payload_complete.hpp").read_text(encoding="utf-8"),
@@ -2802,7 +2906,24 @@ def self_test() -> None:
 00000029 <daik::config_save_link(daik::Config const&)>:
   29: 004136          entry a1, 32
 """
-    extra_frames = {'daik::service_reference_frames(daik::Config const&)': 32,
+    extra_frames = {
+        'daik::(anonymous namespace)::flash_cycling_owned(daik::logic::HistoryJournalHeader const&)': 32,
+        'daik::(anonymous namespace)::flash_record_valid(daik::(anonymous namespace)::FlashJournalRecord const&)': 32,
+        'daik::checkup_cycling_checkpoint_appended(unsigned long)': 32,
+        'daik::logic::cycling_trace_page_valid(daik::logic::HistoryJournalHeader const&, daik::logic::CyclingTracePageInfo const&)': 32,
+        'daik::logic::cycling_trace_part_count(unsigned int)': 32,
+        'daik::(anonymous namespace)::flash_build_next_cycling(daik::(anonymous namespace)::FlashJournalRecord&, unsigned long, bool)': 128,
+        'daik::checkup_cycling_reset_pending()': 32,
+        'daik::(anonymous namespace)::cycling_snapshot_locked(daik::logic::CheckupCyclingTrace&, long long)': 64,
+        'daik::logic::checkup_cycling_snapshot(daik::logic::CheckupCyclingTrace&, daik::logic::CheckupCyclingTrace const&, daik::logic::CheckupCyclingTrace const&, unsigned long, unsigned long, long long)::{lambda(daik::logic::CheckupCyclingTrace const&, long long, long long)\x231}::operator()(daik::logic::CheckupCyclingTrace const&, long long, long long) const': 48,
+        'daik::logic::CheckupCyclingTrace::push(unsigned long, daik::logic::CheckupCyclingTrace::Kind)': 32,
+        'daik::checkup_cycling_checkpoint(daik::logic::CheckupCyclingTrace&, daik::logic::CyclingTraceIdentity&, unsigned long&, unsigned long, bool)': 64,
+        'daik::history_restore_cycling_flash(unsigned long)': 176,
+        'daik::(anonymous namespace)::flash_read_record(unsigned int, daik::(anonymous namespace)::FlashJournalRecord&)': 32,
+        'daik::(anonymous namespace)::flash_cycling_page(daik::(anonymous namespace)::FlashJournalRecord const&, daik::logic::CyclingTracePageInfo&)': 112,
+        'daik::logic::history_journal_crc_bytes(daik::logic::HistoryJournalHeader, void const*, unsigned int)': 32,
+        'daik::checkup_cycling_restore(daik::logic::CheckupCyclingTrace const&, daik::logic::CyclingTraceIdentity const&, long long, unsigned long)': 64,
+        'daik::service_reference_frames(daik::Config const&)': 32,
      'daik::json_append_literal_string_member(std::string&, char const*, std::string const&, char const*)': 48,
      'daik::ha_discovery_identity(std::string&, std::string const&, char const*, char const*)': 32,
      '_ZN4daikL22decode_reference_frameERKNS_18ReferenceMqttFrameERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEESA_SA_SA_SA_SA_SA_SA_$constprop$0': 64,
@@ -2876,7 +2997,7 @@ def self_test() -> None:
      'daik::set_wifi(httpd_req*)': 64,
      'daik::set_syslog(httpd_req*)': 64,
      'daik::set_ntp(httpd_req*)': 64,
-     'daik::history_flash_service_journal(unsigned int, unsigned long)': 64,
+     'daik::history_flash_service_journal(unsigned int, unsigned long, bool)': 64,
      'daik::(anonymous namespace)::flash_append_record(daik::(anonymous namespace)::FlashJournalRecord&)': 64,
      'daik::mb_task(void*)': 64,
      'daik::mb_poll_once()': 64,
@@ -3947,13 +4068,13 @@ def self_test() -> None:
          "esp_register_shutdown_handler(other_handler)"),
         ("main/checkup.cpp", "esp_register_shutdown_handler(checkup_reboot_save)",
          "esp_register_shutdown_handler(other_handler)"),
-        ("main/history.cpp", "history_flash_service_journal(/*max_records=*/12, pdMS_TO_TICKS(200))",
-         "history_flash_service_journal(/*max_records=*/13, pdMS_TO_TICKS(200))"),
+        ("main/history.cpp", "history_flash_service_journal(/*max_records=*/12, pdMS_TO_TICKS(200),",
+         "history_flash_service_journal(/*max_records=*/13, pdMS_TO_TICKS(200),"),
         ("main/history.cpp", "history_flash_service_journal(/*max_records=*/3, /*wait_ticks=*/0)",
          "history_flash_service_journal(/*max_records=*/4, /*wait_ticks=*/0)"),
         ("main/history.cpp", "s_flash_forgotten.store(true);", "s_flash_forgotten.store(false);"),
-        ("main/history.cpp", "s_flash_shutdown_started || s_flash_forgotten.load()",
-         "s_flash_shutdown_started"),
+        ("main/history.cpp", "s_flash_forgotten.load() || s_flash_shutdown_started.exchange(true)",
+         "s_flash_shutdown_started.exchange(true)"),
         ("main/recovery_button.cpp", "wifi_e != ESP_OK || !history_erased || !crash_erased",
          "wifi_e != ESP_OK || !crash_erased"),
         ("main/recovery_button.cpp", "? history_flash_forget() : false", "? true : false"),
@@ -4005,6 +4126,19 @@ def self_test() -> None:
             assert expected in str(exc), f"{name}: unexpected failure {exc}"
         else:
             raise AssertionError(f"self-test accepted {name}")
+
+    for helper, expected in (
+        ("daik::(anonymous namespace)::flash_decode_cycling_group()", "unmodeled outlined helper"),
+        ("daik::(anonymous namespace)::flash_build_for_service()", "unmodeled outlined helper"),
+        ("daik::(anonymous namespace)::flash_index_cycling_page()", "unmodeled outlined helper"),
+        ("daik::(anonymous namespace)::flash_cycling_appended()", "unmodeled outlined helper"),
+        ("daik::logic::cycling_trace_decode_part()", "unmodeled outlined helper"),
+        ("daik::(anonymous namespace)::flash_build_next_cycling() [clone .isra.1]",
+         "unmodeled helper clone"),
+    ):
+        for first in ("004136 entry a1, 32", "000000 .word 0x000000"):
+            reject_disassembly(helper, fixture + f"\n00004000 <{helper}>:\n"
+                               f" 4000: {first}\n", expected)
 
     numeric_call = f"3003: fff7a5 call8 3000 <{STATUS_HEALTH_NUMBER_SYMBOL}>\n"
     numeric_disassembly_controls = 0

@@ -484,16 +484,19 @@ struct CheckupSample {
 
 enum class CheckupRunClass : uint8_t { Unknown, SpaceHeating, Dhw, Cooling };
 
-// Compact, volatile evidence for the rolling chart. Changes describe the interval
-// starting at the timestamp; a Start is a point and does not change interval state.
+// Compact evidence for the rolling chart. Changes describe the interval
+// starting at the timestamp. Start and Stop are points at the first readable sample
+// in the new compressor state, independent of the preceding interval boundary.
 struct CheckupCyclingTrace {
-    enum Kind : uint8_t { Gap, Off, Other, Heat, Dhw, Start };
+    enum Kind : uint8_t { Gap, Off, Other, Heat, Dhw, Start, Stop };
     static constexpr size_t   capacity   = 192;
     static constexpr uint32_t max_second = UINT32_MAX >> 3;
     uint32_t                  records[capacity]{};
     uint32_t                  end_s = 0, window_end_s = 0, unix_s = 0;
+    uint32_t                  boot_s = 0;
     uint16_t                  head = 0, count = 0;
     Kind                      state = Gap;
+    bool                      live  = false;
 
     void reset() {
         head = count = 0;
@@ -512,7 +515,7 @@ struct CheckupCyclingTrace {
         if (count < capacity) ++count;
     }
 
-    void record(int64_t now_us, Kind interval, bool start) {
+    void record(int64_t now_us, Kind interval, bool start, bool stop) {
         if (now_us < 0 || now_us / 1000000 > max_second) return;
         const auto now = static_cast<uint32_t>(now_us / 1000000);
         if (interval != state) {
@@ -520,6 +523,7 @@ struct CheckupCyclingTrace {
             state = interval;
         }
         if (start) push(now, Start);
+        if (stop) push(now, Stop);
         end_s = now;
     }
 
@@ -531,11 +535,62 @@ struct CheckupCyclingTrace {
         for (size_t i = 0; i < count; ++i) {
             const auto event = at(i);
             if (second(event) >= cutoff) break;
-            if (kind(event) != Start) remove = i;
+            if (kind(event) < Start) remove = i;
         }
         count -= remove;
     }
 };
+
+// Translate both time bases into offsets from the left edge of one rolling day. Keep only the
+// interval spanning that edge, and never join a run across the end of a previous boot.
+inline void checkup_cycling_snapshot(CheckupCyclingTrace& out, const CheckupCyclingTrace& saved,
+                                     const CheckupCyclingTrace& current, uint32_t unix_s,
+                                     uint32_t boot_s, int64_t saved_oldest_unix_s) {
+    using Trace = CheckupCyclingTrace;
+    out.reset();
+    out.window_end_s  = CHECKUP_WINDOW_S;
+    out.boot_s        = boot_s;
+    out.live          = false;
+    out.unix_s        = 0;
+    const auto append = [&](const Trace& trace, int64_t shift, int64_t cutoff) {
+        auto leading = Trace::Gap;
+        bool first   = true;
+        for (size_t i = 0; i < trace.count; ++i) {
+            const auto packed = trace.at(i);
+            const auto kind   = Trace::kind(packed);
+            const auto at     = shift + Trace::second(packed);
+            if (at < cutoff) {
+                if (kind < Trace::Start) leading = kind;
+                continue;
+            }
+            if (first && (at > cutoff || kind >= Trace::Start) && leading != Trace::Gap)
+                out.push(static_cast<uint32_t>(cutoff), leading);
+            first = false;
+            out.push(static_cast<uint32_t>(at), kind);
+        }
+        if (first && leading != Trace::Gap) out.push(static_cast<uint32_t>(cutoff), leading);
+    };
+    const int64_t live_offset  = static_cast<int64_t>(CHECKUP_WINDOW_S) - boot_s;
+    const int64_t saved_offset = static_cast<int64_t>(saved.unix_s) - unix_s;
+    const int64_t saved_end    = saved_offset + saved.end_s;
+    const int64_t saved_cutoff =
+        std::max<int64_t>(0, saved_oldest_unix_s - unix_s + CHECKUP_WINDOW_S);
+    // An overlapping wall-clock segment cannot be ordered reliably after a clock correction.
+    if (saved.count && saved.unix_s <= unix_s && saved_end >= saved_cutoff &&
+        saved_end <= live_offset) {
+        append(saved, saved_offset, saved_cutoff);
+        out.end_s = static_cast<uint32_t>(saved_end);
+    }
+    if (current.count && current.end_s <= boot_s && live_offset + current.end_s >= 0) {
+        if (out.count && Trace::kind(out.at(out.count - 1)) != Trace::Gap)
+            out.push(out.end_s, Trace::Gap);
+        append(current, live_offset, 0);
+        out.end_s = static_cast<uint32_t>(live_offset + current.end_s);
+        out.live  = true;
+    }
+    if (out.count) out.unix_s = unix_s;
+}
+
 constexpr uint32_t CHECKUP_CYCLING_DHW_TAIL_S = 30;
 constexpr uint32_t CHECKUP_CYCLING_GAP_S      = 15;
 // One completion has one cause. Highest priority wins: expired start/journal, unwitnessed start,
@@ -1570,7 +1625,8 @@ inline bool checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample
     if (fault_warning_active(s.fault)) b.flags |= CHECKUP_F_WARNING;
 
     if (trace) {
-        auto interval = CheckupCyclingTrace::Gap;
+        auto interval   = CheckupCyclingTrace::Gap;
+        bool timed_stop = false;
         if (continuous && st.prev_rps_known && s.rps_known) {
             if (st.prev_rps_running && s.rps_running) {
                 interval = CheckupCyclingTrace::Other;
@@ -1581,11 +1637,12 @@ inline bool checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample
                         interval = CheckupCyclingTrace::Dhw;
                 }
             } else {
-                interval = CheckupCyclingTrace::Off;
+                interval   = CheckupCyclingTrace::Off;
+                timed_stop = st.prev_rps_running;
             }
             // A sampled transition is readable but contributes no established runtime.
         }
-        trace->record(now_us, interval, timed_start);
+        trace->record(now_us, interval, timed_start, timed_stop);
     }
     st.prev_rps_known   = s.rps_known;
     st.prev_rps_running = s.rps_running;

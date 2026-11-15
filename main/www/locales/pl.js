@@ -1,4 +1,4 @@
-// translation-source: 65571656f160db7c5cef68e1a9e2f1c556ae6ac67f346ba2f2b092cff1d703c9
+// translation-source: 57360fc01b9b51987c1e6a54c6b11b7295a1a3b53f13d2b3928a2b44e523c222
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -235,8 +235,15 @@ I18N.pl = localeValues([
   /* check.cycling.unavailable */ "Brak danych ze sprężarki.",
   /* check.cycling.stale */ "Chwilowo brakuje odczytów.",
   /* check.cycling.history_empty */ "Nie ma jeszcze historii.",
-  /* check.cycling.timed_starts */ (s) => `Z godziną: ${s}`,
-  /* check.cycling.saved_starts */ (s) => `W tym ${s} z zapisów godzinowych sprzed restartu. Brak dokładnych godzin tych uruchomień.`,
+  /* check.cycling.timed_starts */ (s) => `${s} z zarejestrowaną godziną`,
+  /* check.cycling.run_start */ "Uruchomienie",
+  /* check.cycling.run_stop */ "Zatrzymanie",
+  /* check.cycling.run_duration */ "Czas trwania",
+  /* check.cycling.run_ongoing */ "W trakcie pracy",
+  /* check.cycling.run_stop_unknown */ "Czas zatrzymania nieznany",
+  /* check.cycling.no_timed_runs */ "W tej godzinie nie zarejestrowano czasu uruchomienia.",
+  /* check.cycling.run_details_unavailable */ "Brak czasów poszczególnych cykli dla tej godziny.",
+  /* check.cycling.saved_starts */ (s) => `W tym ${s} z zapisów godzinowych sprzed restartu.`,
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · średnia ${mean} °C`,
   /* check.min */ (m) => `${m} min`,

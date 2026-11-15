@@ -22,6 +22,7 @@ CASES = [
     "source_freshness", "stale_finding", "backwards_clock", "generation_mismatch",
     "inflight_generation", "reset_read_barrier", "reset_during_lock", "consent_reset",
     "circulation_reset", "circulation_inflight", "pending_expiry", "restored_expiry",
+    "restored_cycling_detail",
     "report_without_mutex",
     "late_restore_prefix", "late_restore_clock_behind",
     "consent_lock_new_generation", "consent_sampling_new_generation",

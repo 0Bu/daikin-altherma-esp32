@@ -91,6 +91,7 @@
 #include "logic/fixed_text.hpp"
 #include "logic/history.hpp"
 #include "logic/checkup_persist.hpp"
+#include "logic/cycling_persist.hpp"
 #include "logic/history_persist.hpp"
 #include "logic/lwt_select.hpp"
 #include "logic/rwt_select.hpp"
@@ -15363,37 +15364,47 @@ static void test_checkup_population() {
         tick(103);
         sample.rps_running = false;
         tick(104);
+        CHECK(trace.count == 5);
+        CHECK(Trace::kind(trace.at(3)) == Trace::Off && Trace::second(trace.at(3)) == 103);
+        CHECK(Trace::kind(trace.at(4)) == Trace::Stop && Trace::second(trace.at(4)) == 104);
+        auto clipped = trace;
+        clipped.observe_window(86505);
+        // The point stop cannot replace the interval needed to recover the opening state.
+        CHECK(clipped.count == 2 && Trace::kind(clipped.at(0)) == Trace::Off);
         sample.rps_known = false;
         tick(105);
         sample.rps_known = sample.rps_running = true;
         tick(106);
         tick(107);
-        CHECK(bucket.starts == 2 && trace.count == 6);
+        CHECK(bucket.starts == 2 && trace.count == 7);
         CHECK(Trace::kind(trace.at(0)) == Trace::Off && Trace::second(trace.at(0)) == 100);
         CHECK(Trace::kind(trace.at(1)) == Trace::Start && Trace::second(trace.at(1)) == 102);
         CHECK(Trace::kind(trace.at(2)) == Trace::Heat && Trace::second(trace.at(2)) == 102);
-        CHECK(Trace::kind(trace.at(4)) == Trace::Gap && Trace::second(trace.at(4)) == 104);
-        CHECK(Trace::kind(trace.at(5)) == Trace::Heat && Trace::second(trace.at(5)) == 106);
+        CHECK(Trace::kind(trace.at(5)) == Trace::Gap && Trace::second(trace.at(5)) == 104);
+        CHECK(Trace::kind(trace.at(6)) == Trace::Heat && Trace::second(trace.at(6)) == 106);
         CHECK(trace.end_s == 107);
         trace.observe_window(107);
-        CHECK(trace.count == 6);
+        CHECK(trace.count == 7);
         trace.observe_window(86503);
-        CHECK(trace.count == 4 && Trace::kind(trace.at(0)) == Trace::Heat);
+        CHECK(trace.count == 5 && Trace::kind(trace.at(0)) == Trace::Heat);
         sample.valve_dhw = true;
         tick(108);
         tick(109);
+        CHECK(trace.count == 7);
         CHECK(Trace::kind(trace.at(trace.count - 2)) == Trace::Other);
         CHECK(Trace::kind(trace.at(trace.count - 1)) == Trace::Dhw);
         sample.valve_known = false;
         tick(110);
         tick(111);
         CHECK(Trace::kind(trace.at(trace.count - 1)) == Trace::Other);
-        tick(130);
+        sample.rps_running = false;
+        tick(130); // Beyond the adjacency limit, no stop timestamp is recorded.
         CHECK(Trace::kind(trace.at(trace.count - 1)) == Trace::Gap);
+        CHECK(trace.count == 9);
         CHECK(bucket.starts == 2);
         const auto retained = trace.count;
-        trace.record(-1, Trace::Heat, true);
-        trace.record((int64_t{Trace::max_second} + 1) * 1000000, Trace::Heat, true);
+        trace.record(-1, Trace::Heat, true, false);
+        trace.record((int64_t{Trace::max_second} + 1) * 1000000, Trace::Heat, true, false);
         trace.push(Trace::max_second + 1, Trace::Start);
         CHECK(trace.count == retained && trace.end_s == 130);
         trace.reset();
@@ -15401,6 +15412,171 @@ static void test_checkup_population() {
         for (uint32_t i = 0; i < Trace::capacity + 2; ++i) trace.push(i, Trace::Start);
         CHECK(trace.count == Trace::capacity && Trace::second(trace.at(0)) == 2);
         CHECK(Trace::second(trace.at(trace.count - 1)) == Trace::capacity + 1);
+    }
+
+    {
+        using Trace             = CheckupCyclingTrace;
+        constexpr uint32_t wall = 2'000'000'000;
+        Trace              saved, current, snapshot;
+        saved.window_end_s = CHECKUP_WINDOW_S;
+        saved.unix_s       = wall;
+        saved.end_s        = 86398;
+        saved.push(0, Trace::Off);
+        saved.push(82799, Trace::Start);
+        saved.push(82799, Trace::Heat);
+        saved.push(82811, Trace::Stop);
+        saved.push(86397, Trace::Start);
+        saved.push(86397, Trace::Heat);
+        // A subsequent boot begins at the same whole second as the last old observation.
+        current.push(0, Trace::Off);
+        current.push(1, Trace::Start);
+        current.push(1, Trace::Heat);
+        current.push(6, Trace::Stop);
+        current.end_s = 8;
+        checkup_cycling_snapshot(snapshot, saved, current, wall + 8, 10, 0);
+        CHECK(snapshot.live && snapshot.boot_s == 10 && snapshot.end_s == 86398);
+        CHECK(snapshot.unix_s == wall + 8 && snapshot.window_end_s == CHECKUP_WINDOW_S);
+        CHECK(snapshot.count == 11);
+        CHECK(snapshot.at(0) == Trace::Off);
+        CHECK(Trace::second(snapshot.at(1)) == 82791 &&
+              Trace::kind(snapshot.at(1)) == Trace::Start);
+        CHECK(Trace::second(snapshot.at(3)) == 82803 && Trace::kind(snapshot.at(3)) == Trace::Stop);
+        CHECK(Trace::second(snapshot.at(6)) == 86390 && Trace::kind(snapshot.at(6)) == Trace::Gap);
+        CHECK(Trace::second(snapshot.at(7)) == 86390 && Trace::kind(snapshot.at(7)) == Trace::Off);
+        CHECK(Trace::second(snapshot.at(10)) == 86396 &&
+              Trace::kind(snapshot.at(10)) == Trace::Stop);
+
+        current.reset();
+        checkup_cycling_snapshot(snapshot, saved, current, wall + 30, 20, 0);
+        CHECK(snapshot.count == 6 && !snapshot.live && snapshot.end_s == 86368);
+        Trace second_boot = snapshot;
+        checkup_cycling_snapshot(snapshot, second_boot, current, wall + 50, 15, 0);
+        CHECK(snapshot.count == 6 && snapshot.end_s == 86348 && !snapshot.live);
+        checkup_cycling_snapshot(snapshot, saved, current, wall + 30, 20, wall - 3600);
+        CHECK(snapshot.count == 4 && !snapshot.live);
+        CHECK(Trace::kind(snapshot.at(0)) == Trace::Heat && Trace::second(snapshot.at(0)) == 82770);
+        CHECK(Trace::kind(snapshot.at(1)) == Trace::Stop);
+        CHECK(Trace::kind(snapshot.at(2)) == Trace::Start);
+        checkup_cycling_snapshot(snapshot, saved, current, wall + 8, 11, 0);
+        CHECK(!snapshot.count && !snapshot.unix_s); // The archive overlaps the new boot's clock.
+        checkup_cycling_snapshot(snapshot, saved, current, wall + 86400, 80, 0);
+        CHECK(!snapshot.count && !snapshot.unix_s);
+
+        current.push(0, Trace::Heat);
+        current.push(1, Trace::Start);
+        current.end_s = 50;
+        checkup_cycling_snapshot(snapshot, saved, current, wall + 86401, 86401, 0);
+        CHECK(snapshot.count == 2 && snapshot.at(0) == Trace::Heat);
+        CHECK(Trace::second(snapshot.at(1)) == 0 && Trace::kind(snapshot.at(1)) == Trace::Start);
+        checkup_cycling_snapshot(snapshot, saved, current, wall - 15, 5, 0);
+        CHECK(!snapshot.count && !snapshot.live); // Both clocks are ahead of the snapshot.
+        checkup_cycling_snapshot(snapshot, saved, current, wall + 180000, 180000, 0);
+        CHECK(!snapshot.count && !snapshot.live); // A stale live ring contributes no coverage.
+        current.reset();
+        current.push(0, Trace::Heat);
+        current.end_s = 86411;
+        checkup_cycling_snapshot(snapshot, saved, current, wall + 86411, 86411, 0);
+        CHECK(snapshot.live && snapshot.count == 1 && snapshot.at(0) == Trace::Heat);
+        current.reset();
+        current.push(0, Trace::Gap);
+        current.end_s = 86411;
+        checkup_cycling_snapshot(snapshot, saved, current, wall + 86411, 86411, 0);
+        CHECK(!snapshot.count && !snapshot.unix_s);
+        current.reset();
+        current.push(0, Trace::Off);
+        current.end_s = 60;
+        Trace empty;
+        checkup_cycling_snapshot(snapshot, empty, current, wall, CHECKUP_WINDOW_S, 0);
+        CHECK(snapshot.count == 1 && snapshot.at(0) == Trace::Off);
+        saved.reset();
+        saved.end_s = 86400;
+        for (uint32_t i = 0; i < Trace::capacity; ++i) saved.push(86000 + i, Trace::Start);
+        checkup_cycling_snapshot(snapshot, saved, empty, wall + 10, 10, 0);
+        CHECK(snapshot.count == Trace::capacity && Trace::second(snapshot.at(0)) == 85990 &&
+              !snapshot.live);
+    }
+    {
+        using Trace = CheckupCyclingTrace;
+        Trace trace, replay;
+        for (uint32_t i = 0; i < Trace::capacity; ++i)
+            trace.push(86000 + i, i % 2 ? Trace::Start : Trace::Off);
+        HistoryJournalHeader header{};
+        header.source      = static_cast<uint8_t>(HistoryJournalSource::Checkup);
+        header.catalog_fp  = CYCLING_TRACE_SCHEMA;
+        header.magic       = HISTORY_JOURNAL_MAGIC;
+        header.version     = HISTORY_JOURNAL_VERSION;
+        header.commit      = HISTORY_JOURNAL_COMMITTED;
+        header.dt_s        = CHECKUP_DT_S;
+        header.value_count = CYCLING_TRACE_PAGE_BYTES / sizeof(HistorySample);
+        header.slot_bytes  = HISTORY_JOURNAL_SLOT_BYTES;
+        header.rings[0]    = TREND_COUNT;
+        header.rings[1]    = HOMEHUB_HISTORY_COUNT;
+        header.rings[2]    = ENV3_HISTORY_COUNT;
+        header.sequence    = 8;
+        CyclingTracePageInfo part{};
+        part.first_sequence = 8;
+        part.identity       = {7, 3, 23};
+        part.count          = trace.count;
+        part.end_s          = 86400;
+        part.unix_s         = 2'000'000'000;
+        header.bucket       = part.unix_s / CHECKUP_DT_S;
+        CHECK(cycling_trace_header_matches(header));
+        CHECK(!cycling_trace_record_valid(7, part.end_s));
+        CHECK(cycling_trace_part_count(0) == 1);
+        CHECK(cycling_trace_part_count(part.count) == 4);
+        auto final        = part;
+        final.part        = 3;
+        final.previous[0] = 11;
+        final.previous[1] = 12;
+        final.previous[2] = 13;
+        for (auto& slot : part.previous) slot = CYCLING_TRACE_NO_SLOT;
+        for (part.part = 0; part.part < 4; ++part.part) {
+            header.sequence  = 8 + part.part;
+            const auto& page = part.part == 3 ? final : part;
+            CHECK(cycling_trace_page_valid(header, page));
+            CHECK(cycling_trace_group_matches(final, page));
+            uint8_t bytes[3 * CYCLING_TRACE_EVENTS_PER_PART]{};
+            CHECK(cycling_trace_part_events(page) > 0);
+            CHECK(cycling_trace_encode_part(trace, page, bytes));
+            CHECK(cycling_trace_decode_part(replay, page, bytes));
+            CHECK(!cycling_trace_decode_part(replay, page, bytes)); // part already applied
+        }
+        CHECK(replay.count == Trace::capacity);
+        for (size_t i = 0; i < trace.count; ++i) CHECK(replay.at(i) == trace.at(i));
+        auto changed = final;
+        changed.identity.source_fp++;
+        CHECK(!cycling_trace_group_matches(final, changed));
+        changed             = final;
+        changed.previous[2] = CYCLING_TRACE_NO_SLOT;
+        CHECK(!cycling_trace_page_valid(header, changed));
+        header.catalog_fp = CYCLING_TRACE_BARRIER_SCHEMA;
+        CHECK(!cycling_trace_page_valid(header, final));
+    }
+
+    {
+        using Trace = CheckupCyclingTrace;
+        Trace         trace;
+        CheckupState  state;
+        CheckupBucket bucket;
+        CheckupSample sample;
+        auto          tick = [&](int second, bool readable, bool running) {
+            sample.rps_known   = readable;
+            sample.rps_running = running;
+            checkup_step(state, bucket, sample, int64_t{second} * 1000000, nullptr, &trace);
+        };
+        tick(3598, true, false);
+        tick(3599, true, true);
+        tick(3614, true, false);
+        // A run with only one ON sample still has both edges, across the hour boundary.
+        CHECK(trace.count == 3);
+        CHECK(Trace::kind(trace.at(1)) == Trace::Start && Trace::second(trace.at(1)) == 3599);
+        CHECK(Trace::kind(trace.at(2)) == Trace::Stop && Trace::second(trace.at(2)) == 3614);
+        tick(3615, true, true);
+        tick(3616, false, false);
+        tick(3617, true, false);
+        CHECK(trace.count == 5);
+        CHECK(Trace::kind(trace.at(3)) == Trace::Start && Trace::second(trace.at(3)) == 3615);
+        CHECK(Trace::kind(trace.at(4)) == Trace::Gap && Trace::second(trace.at(4)) == 3615);
     }
 
     auto run = [](unsigned tail, unsigned missing_class, unsigned missing_rps,
@@ -23863,7 +24039,7 @@ static void test_history_persist() {
     }
     CHECK(HISTORY_FLASH_FUTURE_HOURS == 72);
     CHECK(HISTORY_FLASH_FUTURE_SAMPLES == 864);
-    CHECK(HISTORY_FLASH_FUTURE_RECORDS == 3888);
+    CHECK(HISTORY_FLASH_FUTURE_RECORDS == 12528);
     CHECK(HISTORY_JOURNAL_SLOT_COUNT >= HISTORY_FLASH_FUTURE_RECORDS);
     CHECK(HISTORY_FLASH_PARTITION_OFFSET == 0x400000);
 

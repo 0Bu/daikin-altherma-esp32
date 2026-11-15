@@ -23,7 +23,7 @@ paired seed/restore witness and requires the named acknowledged-correction oracl
 fresh process. A compiler, setup or sanitizer failure never counts as an expected RED. Historical
 RED receipts retain the source and fixture hashes from the respective pre-fix execution.
 
-The 36 baseline process cases cover:
+The baseline process cases cover:
 
 - Regular public Start/bind/record/seal calls creating one Stop population. Consent changes create
   reset barriers; the fixture never seeds private Store observations, claims or latches.
@@ -59,6 +59,9 @@ The 36 baseline process cases cover:
   healthy scan reports pending, a contended flash mutex makes the query return immediately, and
   real restore clears pending. A Forget interleaved before the query acquires the mutex suppresses
   pending even when all erase attempts fail and both scan flags still describe pending recovery.
+- A fresh process restores every record of a complete Cycling checkpoint and the newest trace
+  from a shutdown drain. Torn and corrupt page groups leave the previous checkpoint available.
+  A committed reset barrier or a newer checkpoint for a different source keeps old data hidden.
 
 The append mutations remove the failure callback, restore the erroneous
 read-header classifier, clear the Core ahead episode after Stop success, or trust a commit error

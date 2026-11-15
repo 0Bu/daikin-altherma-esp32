@@ -1557,7 +1557,11 @@ static void append_status_json(JsonOut& j, bool redact) {
                     append_json_uint(j, trace->window_end_s);
                     j += ",\"observed_end_s\":";
                     append_json_uint(j, trace->end_s);
-                    j += ",\"records\":[";
+                    j += ",\"boot_s\":";
+                    append_json_uint(j, trace->boot_s);
+                    j += ",\"live\":";
+                    j += trace->live ? "true" : "false";
+                    j += ",\"run_edges\":true,\"records\":[";
                     for (size_t i = 0; i < trace->count; ++i) {
                         if (i) j += ",";
                         append_json_uint(j, trace->at(i));

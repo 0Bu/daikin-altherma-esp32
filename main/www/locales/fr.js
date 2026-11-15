@@ -1,4 +1,4 @@
-// translation-source: 65571656f160db7c5cef68e1a9e2f1c556ae6ac67f346ba2f2b092cff1d703c9
+// translation-source: 57360fc01b9b51987c1e6a54c6b11b7295a1a3b53f13d2b3928a2b44e523c222
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -230,8 +230,15 @@ I18N.fr = localeValues([
   /* check.cycling.unavailable */ "Aucune donnée du compresseur.",
   /* check.cycling.stale */ "Des mesures manquent actuellement.",
   /* check.cycling.history_empty */ "Pas encore d’historique.",
-  /* check.cycling.timed_starts */ (s) => `Avec heure : ${s}`,
-  /* check.cycling.saved_starts */ (s) => `Sur ce total, ${s} proviennent des relevés horaires d’avant le redémarrage. Leurs heures exactes ne sont pas disponibles.`,
+  /* check.cycling.timed_starts */ (s) => `${s} avec heure enregistrée`,
+  /* check.cycling.run_start */ "Démarrage",
+  /* check.cycling.run_stop */ "Arrêt",
+  /* check.cycling.run_duration */ "Durée",
+  /* check.cycling.run_ongoing */ "En cours",
+  /* check.cycling.run_stop_unknown */ "Arrêt inconnu",
+  /* check.cycling.no_timed_runs */ "Aucune heure de démarrage relevée sur cette période.",
+  /* check.cycling.run_details_unavailable */ "Les horaires des cycles individuels sont indisponibles pour cette heure.",
+  /* check.cycling.saved_starts */ (s) => `Sur ce total, ${s} proviennent des relevés horaires d’avant le redémarrage.`,
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · moyenne ${mean} °C`,
   /* check.min */ (m) => `${m} min`,
