@@ -158,6 +158,7 @@ phases = ["prepare_read", "prepare_erase", "body", "commit", "readback",
           "commit_accepted_error", "success"]
 cases = ["commit_rejected", "core_ahead", "nor_contract", "restore_before_pending_bucket",
          "poll_during_shutdown_claim", "cycling_reset_before_last_page",
+         "cycling_reset_before_trend_restore",
          "read_admission", "sequence_rejections",
          "core_sequence_prepare", "core_sequence_readback", "core_sequence_commit_error",
          "forget_before_start", "forget_during_lookup", "forget_during_scan",
@@ -198,7 +199,8 @@ if not args.expect_red or args.expect_red_case == "late-correction":
                                "bytes": transport.stat().st_size,
                                "only_cross_process_state": "synthetic NOR partition bytes"})
 if not args.expect_red:
-    for phase in ["normal", "shutdown", "torn", "corrupt", "barrier", "incompatible"]:
+    for phase in ["normal", "shutdown", "torn", "corrupt", "barrier", "barrier_early_shutdown",
+                  "incompatible"]:
         cycling_transport = OUT / f"cycling-{phase}.synthetic-nor.bin"
         for case in ["seed_cycling", "restore_cycling"]:
             label = f"{case}_{phase}"
@@ -254,9 +256,12 @@ if not args.expect_red:
         ("poll_steals_shutdown_budget", "    if (shutdown) {",
          "    if (shutdown || s_flash_shutdown_started.load()) {",
          ["poll_during_shutdown_claim"], "poll_does_not_take_over_shutdown_budget"),
-        ("finish_retired_cycling_checkpoint", "!s_flash_cycling_reset_token && checkup_cycling_reset_pending()",
+        ("finish_retired_cycling_checkpoint", "!s_flash_cycling_reset_token && reset_pending",
          "!s_flash_cycling_reset_token && false",
          ["cycling_reset_before_last_page"], "reset_commits_in_place_of_retired_checkpoint_final_page"),
+        ("skip_reset_while_trend_restoration_incomplete", "if (!shutdown || !checkup_cycling_reset_pending()) return 0;",
+         "return 0;",
+         ["cycling_reset_before_trend_restore"], "shutdown_commits_only_reset_while_trends_restore"),
         ("anchor_at_late_fold",
          "return wall_bucket_of_instant_locked(logic::history_raster_boundary_us(commit_us));",
          "return wall_bucket_of_instant_locked(commit_us);",

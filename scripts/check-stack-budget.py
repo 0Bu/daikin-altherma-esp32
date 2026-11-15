@@ -791,6 +791,14 @@ def parse_frames(disassembly: str, budgets: dict[str, Any] | None = None) -> dic
                 raise BudgetError(f"symbol {current}: missing first prologue")
             current = header.group(2)
             symbol_address = int(header.group(1), 16)
+            # Check symbol headers even when their first instruction is not recognized.
+            if any(helper in current for helper in ("flash_build_for_service",
+                                                    "flash_decode_cycling_group",
+                                                    "cycling_trace_decode_part")):
+                raise BudgetError(f"cycling journal: unmodeled outlined helper {current}")
+            for helper, key in CYCLING_TRACKED_HELPERS.items():
+                if helper in current and not re.fullmatch(budgets["symbols"][key]["pattern"], current):
+                    raise BudgetError(f"cycling journal: unmodeled helper clone {current}")
             for name in INLINED_MQTT_HELPERS:
                 if (re.match(r"^daik::(?:\(anonymous namespace\)::)?" + name + r"\(", current)
                         or re.match(r"^_Z[ZN]+4daik(?:12_GLOBAL__N_1)?L?"
@@ -1077,13 +1085,21 @@ CYCLING_WRITE_STACK = {
                    "cycling_trace_emit", "cycling_trace_push", "room_time_now"],
     "reset_check": ["cycling_flash_build", "cycling_reset_pending"],
     "build_crc": ["cycling_flash_build", "cycling_flash_crc", "history_config_crc"],
+    "build_shape": ["cycling_flash_build", "cycling_page_valid", "cycling_part_count"],
 }
 CYCLING_RESTORE_STACK = {
     "read": ["cycling_flash_restore", "cycling_flash_record_read", "sdk_partition_read"],
     "validate": ["cycling_flash_restore", "cycling_flash_page", "cycling_flash_crc",
                  "history_config_crc"],
+    "shape": ["cycling_flash_restore", "cycling_flash_page", "cycling_page_valid",
+              "cycling_part_count"],
+    "decode": ["cycling_flash_restore", "cycling_trace_push"],
     "adopt": ["cycling_flash_restore", "cycling_trace_restore"],
 }
+CYCLING_TRACKED_HELPERS = {"flash_build_next_cycling": "cycling_flash_build",
+                           "checkup_cycling_reset_pending": "cycling_reset_pending",
+                           "cycling_trace_page_valid": "cycling_page_valid",
+                           "cycling_trace_part_count": "cycling_part_count"}
 
 
 def validate_cycling_flash_paths(budgets: dict[str, Any], sources: dict[str, str]) -> None:
@@ -1097,6 +1113,9 @@ def validate_cycling_flash_paths(budgets: dict[str, Any], sources: dict[str, str
         "main": {
             "main_cycling_scan": ["main_task", "boot_sequence", "history_start", "cycling_flash_page",
                                   "cycling_flash_crc", "history_config_crc"],
+            "main_cycling_scan_shape": ["main_task", "boot_sequence", "history_start",
+                                        "cycling_flash_page", "cycling_page_valid",
+                                        "cycling_part_count"],
         },
     }
     for owner, paths in tasks.items():
@@ -1399,7 +1418,8 @@ def validate_task_stacks(budgets: dict[str, Any], sources: dict[str, str]) -> No
                         "ota_health_shutdown_journal": "ota_health",
                         "ota_health_shutdown_checkup": "ota_health"}.get(path)
             if path in {f"ota_health_shutdown_cycling_{phase}"
-                        for phase in ("snapshot", "reset_check", "build_crc", *CYCLING_RESTORE_STACK)}:
+                        for phase in ("snapshot", "reset_check", "build_crc", "build_shape",
+                                      *CYCLING_RESTORE_STACK)}:
                 expected = "ota_health"
             if path in stop_stack.PATHS:
                 expected = stop_stack.PATHS[path][0]
@@ -1828,7 +1848,8 @@ CONFIG_DOCUMENT_PATHS = frozenset({
     "httpd_board_i2c_read", "httpd_board_i2c_write", "httpd_board_i2c_receive",
     "httpd_checkup_schema",
     *(f"httpd_shutdown_{name}_{phase}" for name in SHUTDOWN_HTTP_CALLERS
-      for phase in ("journal", "checkup", "cycling_snapshot", "cycling_reset_check", "cycling_build_crc",
+      for phase in ("journal", "checkup", "cycling_snapshot", "cycling_reset_check",
+                    "cycling_build_crc", "cycling_build_shape",
                     *(f"cycling_{part}" for part in CYCLING_RESTORE_STACK))),
 })
 CONFIG_DOCUMENT_PATHS |= frozenset(
@@ -2257,17 +2278,6 @@ def load_budgets(path: Path) -> dict[str, Any]:
 
 
 def evaluate(frames: dict[str, int], budgets: dict[str, Any]) -> dict[str, int]:
-    # The journal paths include these two helpers in their callers' measured frames.
-    # A compiler change that outlines one must add it to every applicable caller path.
-    inline_only = ("flash_build_for_service", "flash_decode_cycling_group")
-    measured_cycling = {"flash_build_next_cycling": "cycling_flash_build",
-                        "checkup_cycling_reset_pending": "cycling_reset_pending"}
-    for name in frames:
-        if any(helper in name for helper in inline_only):
-            raise BudgetError(f"cycling journal: unmodeled outlined helper {name}")
-        for helper, key in measured_cycling.items():
-            if helper in name and not re.fullmatch(budgets["symbols"][key]["pattern"], name):
-                raise BudgetError(f"cycling journal: unmodeled helper clone {name}")
     selected: dict[str, int] = {}
     errors: list[str] = []
     for key, rule in budgets["symbols"].items():
@@ -2883,6 +2893,8 @@ def self_test() -> None:
   29: 004136          entry a1, 32
 """
     extra_frames = {
+        'daik::logic::cycling_trace_page_valid(daik::logic::HistoryJournalHeader const&, daik::logic::CyclingTracePageInfo const&)': 32,
+        'daik::logic::cycling_trace_part_count(unsigned int)': 32,
         'daik::(anonymous namespace)::flash_build_next_cycling(daik::(anonymous namespace)::FlashJournalRecord&, unsigned long, bool)': 128,
         'daik::checkup_cycling_reset_pending()': 32,
         'daik::(anonymous namespace)::cycling_snapshot_locked(daik::logic::CheckupCyclingTrace&, long long)': 64,
@@ -4101,11 +4113,13 @@ def self_test() -> None:
     for helper, expected in (
         ("daik::(anonymous namespace)::flash_decode_cycling_group()", "unmodeled outlined helper"),
         ("daik::(anonymous namespace)::flash_build_for_service()", "unmodeled outlined helper"),
+        ("daik::logic::cycling_trace_decode_part()", "unmodeled outlined helper"),
         ("daik::(anonymous namespace)::flash_build_next_cycling() [clone .isra.1]",
          "unmodeled helper clone"),
     ):
-        reject_disassembly(helper, fixture + f"\n00004000 <{helper}>:\n"
-                           " 4000: 004136 entry a1, 32\n", expected)
+        for first in ("004136 entry a1, 32", "000000 .word 0x000000"):
+            reject_disassembly(helper, fixture + f"\n00004000 <{helper}>:\n"
+                               f" 4000: {first}\n", expected)
 
     numeric_call = f"3003: fff7a5 call8 3000 <{STATUS_HEALTH_NUMBER_SYMBOL}>\n"
     numeric_disassembly_controls = 0

@@ -2596,9 +2596,10 @@ bool flash_build_next_stop_observation(FlashJournalRecord& out) {
 }
 
 bool flash_build_next_cycling(FlashJournalRecord& out, TickType_t wait_ticks, bool shutdown) {
-    if (!s_flash_cycling_restore_done) return false;
+    const bool reset_pending = checkup_cycling_reset_pending();
+    if (!s_flash_cycling_restore_done && !reset_pending) return false;
     // An unfinished data group has no final page. Drop it before offering a reset marker.
-    if (s_flash_cycling_pending && !s_flash_cycling_reset_token && checkup_cycling_reset_pending())
+    if (s_flash_cycling_pending && !s_flash_cycling_reset_token && reset_pending)
         s_flash_cycling_pending = false;
     auto& trace = s_flash_cycling_trace;
     if (!s_flash_cycling_pending) {
@@ -2607,7 +2608,8 @@ bool flash_build_next_cycling(FlashJournalRecord& out, TickType_t wait_ticks, bo
             s_flash_cycling_last_offer_us == INT64_MIN ||
             now_us - s_flash_cycling_last_offer_us >=
                 static_cast<int64_t>(logic::HISTORY_FLASH_CYCLING_INTERVAL_S) * 1000000;
-        const bool allow_data       = shutdown ? !s_flash_cycling_shutdown_offered : due;
+        const bool allow_data =
+            s_flash_cycling_restore_done && (shutdown ? !s_flash_cycling_shutdown_offered : due);
         s_flash_cycling_reset_token = 0;
         if (!checkup_cycling_checkpoint(trace, s_flash_cycling_identity,
                                         s_flash_cycling_reset_token, wait_ticks, allow_data))
@@ -3062,11 +3064,18 @@ static size_t history_flash_service_journal(size_t max_records, TickType_t wait_
     Lock flash_lk(s_flash_mtx, wait_ticks);
     if (!flash_lk.acquired()) return 0;
     // Read all mutable restore state under its owner lock, including a concurrent factory forget.
-    if (s_flash_forgotten.load() || !s_flash_scan_ok || !s_flash_restore_done) return 0;
-    // The shutdown drain can be the first flash service after source confirmation/seal. Settle
-    // this independent archive before asking its producer for a record, too.
-    stop_observation_flash_service(flash_read_stop_observation);
-    if (shutdown) history_restore_cycling_flash(wait_ticks);
+    if (s_flash_forgotten.load() || !s_flash_scan_ok) return 0;
+    if (!s_flash_restore_done) {
+        // The cursor is safe after the scan. A shutdown can commit the reset marker before
+        // unrelated trend restoration finishes, but cannot publish new observation groups.
+        if (!shutdown || !checkup_cycling_reset_pending()) return 0;
+        max_records = 0;
+    } else {
+        // The drain can be the first service after source confirmation/seal. Settle the
+        // independent archives before asking their producers for records.
+        stop_observation_flash_service(flash_read_stop_observation);
+        if (shutdown) history_restore_cycling_flash(wait_ticks);
+    }
     // A failure episode that spent its abandon budget pauses the whole journal (the cursor is one
     // shared position): one attempt per HISTORY_JOURNAL_PAUSED_RETRY_S, none in between.
     if (!logic::history_journal_retry_due(s_flash_fail_paused, esp_timer_get_time(),

@@ -600,6 +600,15 @@ void cycling_reset_before_last_page() {
                 !s_flash_cycling_pending,
             "reset_commits_in_place_of_retired_checkpoint_final_page");
 }
+void cycling_reset_before_trend_restore() {
+    boot();
+    cycling_offer_unix_s = static_cast<uint32_t>(journal_sdk::unix_origin);
+    cycling_reset_token  = 9;
+    s_flash_restore_done = s_flash_cycling_restore_done = false;
+    history_flash_save();
+    require(cycling_ack == 9 && journal_sdk::writes == 2,
+            "shutdown_commits_only_reset_while_trends_restore");
+}
 void seed_cycling(const char* transport_path, const std::string& phase) {
     boot();
     cycling_offer_unix_s = static_cast<uint32_t>(journal_sdk::unix_origin);
@@ -624,6 +633,12 @@ void seed_cycling(const char* transport_path, const std::string& phase) {
                 "shutdown_adds_exactly_one_complete_fresh_checkpoint");
         history_flash_save();
         require(journal_sdk::writes == 40 && core_backlog == 1, "shutdown_does_not_drain_twice");
+    } else if (phase == "barrier_early_shutdown") {
+        cycling_reset_token  = 9;
+        s_flash_restore_done = s_flash_cycling_restore_done = false;
+        history_flash_save();
+        require(cycling_ack == 9 && journal_sdk::writes == 10,
+                "shutdown_commits_only_reset_while_trends_restore");
     } else if (phase == "barrier") {
         cycling_reset_token = 9;
         require(history_flash_service_journal(3, 0) == 1 && cycling_ack == 9,
@@ -660,7 +675,7 @@ void restore_cycling(const char* transport_path, const std::string& phase) {
     boot(false);
     require(journal_sdk::writes == 0 && journal_sdk::erases == 0,
             "cycling_restore_never_writes_or_erases");
-    if (phase == "barrier" || phase == "incompatible") {
+    if (phase == "barrier" || phase == "barrier_early_shutdown" || phase == "incompatible") {
         require(cycling_restored.count == 0, "retired_checkpoint_is_not_readmitted");
         return;
     }
@@ -783,6 +798,8 @@ int main(int argc, char** argv) {
             poll_during_shutdown_claim();
         else if (name == "cycling_reset_before_last_page")
             cycling_reset_before_last_page();
+        else if (name == "cycling_reset_before_trend_restore")
+            cycling_reset_before_trend_restore();
         else if (name == "forget_before_start")
             forget_case(ForgetPoint::BeforeStart);
         else if (name == "forget_during_lookup")
