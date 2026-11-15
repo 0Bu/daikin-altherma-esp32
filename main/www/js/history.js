@@ -372,7 +372,7 @@ function validHistoryTime(start, bucket, count) {
   if (!Number.isFinite(deviceTime)) return Number.isInteger(bucket);
   const last = start + (count - 1) * 300;
   return last <= deviceTime + 1 + POLL_TIMEOUT_MS / 1000 &&
-    last + 300 > deviceTime - HIST_MAX_SAMPLES * 300;
+    last >= deviceTime - HIST_MAX_SAMPLES * 300;
 }
 
 async function readHistory(id, source, key, epoch, previous, request) {
@@ -716,6 +716,9 @@ function alignedHistoryView(id, raw) {
     mode = "time";
     start = Math.min(...raw.map((s) => s.h.t0));
     end = Math.max(...raw.map((s) => s.h.t0 + (s.h.v.length - 1) * dt));
+  } else if (!env3ChartId(id) && raw.some(s => s.h.b0 != null || s.h.t0 != null)) {
+    // Independent ring tails do not establish simultaneous measurements.
+    return { id, v: [], series: [], separate: raw.map(s => s.source) };
   } else {
     end = Math.max(...raw.map((s) => s.h.v.length)) - 1;
   }
@@ -798,10 +801,11 @@ function expiredHistSlots(h) {
     const uptime = S.status?.uptime_s;
     current = Math.max(current + start, Number.isFinite(uptime) ? Math.floor((uptime + statusElapsed) / dt) : start);
   } else if (h.t0 != null) {
-    start = Math.floor(h.t0 / dt);
     const deviceTime = historyDeviceTime(true);
-    current = Math.max(current + start,
-      Number.isFinite(deviceTime) ? Math.floor(deviceTime / dt) : start);
+    if (Number.isFinite(deviceTime)) {
+      // A restored sample is dated at commit, which need not be a UTC raster boundary.
+      current = Math.max(current, Math.ceil((deviceTime - h.t0) / dt));
+    }
   }
   // A corrected clock or a delayed status reply cannot bring back expired cached samples.
   const expired = Math.max(historyExpiry.get(h.v) || 0,
@@ -864,6 +868,7 @@ function historyView(id, source = "", forecast) {
     { source: "room", name: roomHistName(), h: hasRoomHist(id) ? S.hist.get(histCacheKey(id, "room")) : null },
   ].filter((s) => !source || s.source === source);
   let view = alignedHistoryView(id, offered);
+  if (view?.separate) return view;
   if (view) view.scope = source;
   if (view && id === "dhw_tank") view.tankAux = tankAuxHistories();
   if (!STATE_HIST[id]) return view;
@@ -1066,6 +1071,7 @@ const currentBinaryTenths = (row) => {
 function stateHistoryCurrent(id, source) {
   if (S.otaCached) return { present: false, value: null };
   if (source === "modbus") {
+    if (S.status?.modbus?.connected === false) return { present: true, value: null };
     if (!Array.isArray(S._modbus)) return { present: false, value: null };
     if (id === "smart_grid_mode") {
       const row = S._modbus.find((r) => r && r.off === 56 && r.enum === "smart_grid_mode");
@@ -1361,7 +1367,7 @@ function histUnavailableHtml(view) {
 
 // Draw each registered source on its own raster. Null samples break the line instead of inventing
 // a measurement across a timeout or a reading the source refused.
-function histHtml(id, unit, name, source = "") {
+function histHtml(id, unit, name, source = "", identifySource = false) {
   const offeredX = (!source || source === "x10a") && hasHist(id);
   const offeredM = (!source || source === "modbus") && hasModbusHist(id);
   const offeredE = (!source || source === "env3") && hasEnv3Hist(id);
@@ -1371,6 +1377,8 @@ function histHtml(id, unit, name, source = "") {
     offeredE && histCacheKey(id, "env3"), offeredR && histCacheKey(id, "room")].filter(Boolean);
   const wrap = (body, cls) => `<div class="vhist${cls ? " " + cls : ""}">${body}</div>`;
   const view = historyView(id, source);
+  if (view?.separate)
+    return view.separate.map(kind => histHtml(id, unit, name, kind, true)).join("");
   if (!view?.v.some(v => v != null)) return histEmptyHtml(offered.map(key => S.hist.get(key)), wrap);
 
   const allPts = view.series.flatMap((s) => s.v.map((x) => x == null ? null : x / 10));
@@ -1467,7 +1475,8 @@ function histHtml(id, unit, name, source = "") {
   }
   const aux = id === "dhw_tank" ? dhwAuxPhases(view) : [];
   let phaseBands = "";
-  const legendItems = (view.series.length > 1 || histRetained(view) || ["modbus", "room"].includes(view.series[0].source))
+  const legendItems = (identifySource || view.series.length > 1 ||
+    histRetained(view) || ["modbus", "room"].includes(view.series[0].source))
     ? view.series.map((s) => histLegendHtml(view, s, histSourceClass(s.source)))
     : [];
   if (aux.length) {
@@ -1772,8 +1781,8 @@ function scrubCount(plot) {
 // A tap PINS the readout so the value stays legible after the finger lifts; holding is no longer
 // required. Hover remains transient and paints its preview in front of the pin without changing it.
 //
-// Prefer the sample's boot-relative bucket. A wall-clock correction can move its displayed time
-// without changing the measurement. Older dated rings without buckets use their recorded time.
+// A boot-relative bucket survives a wall-clock correction. For a wall-only ring, replacement
+// cannot distinguish an advanced ring from a corrected clock, so the pin belongs to its revision.
 function histPinIndex(id, h) {
   const p = S.histPin.get(id);
   if (!p || !h) return -1;
@@ -1790,22 +1799,8 @@ function histPinIndex(id, h) {
   }
   if (!h.v.length) return -1;
   if (p.t != null) {
-    if (Number.isInteger(p.bucket)) {
-      if (!Number.isInteger(h.b0)) return -1;
-      return recordedPinIndex(id, h, p, p.bucket - h.b0);
-    }
-    if (h.t0 == null) return -1;                 // pinned with a clock, re-resolving without one
-    const shiftedAnchor = Math.abs(p.anchor - h.t0);
-    // A restored ring has no boot-relative bucket. Its head may advance by complete raster slots.
-    // A changed wall-clock anchor without that alignment cannot identify the old sample.
-    const remainder = shiftedAnchor % h.dt;
-    if (p.gen !== h.gen && Math.min(remainder, h.dt - remainder) > 1) {
-      if (p.source === (h.scope ?? "")) S.histPin.delete(id);
-      return -1;
-    }
-    const rel = p.t - h.t0, half = h.dt / 2;
-    const i = Math.trunc((rel >= 0 ? rel + half : rel - half) / h.dt);
-    return recordedPinIndex(id, h, p, i);
+    if (!Number.isInteger(h.b0)) return -1;
+    return recordedPinIndex(id, h, p, p.bucket - h.b0);
   }
   return p.i < h.v.length && p.gen === histPlottedPinRevision(h) &&
     p.sources === histPinSources(h) ? p.i : -1;
@@ -1835,10 +1830,10 @@ function histPinSources(h) {
   return histPinSeries(h).map(s => s.source).join(",");
 }
 
-// An undated numeric pin is tied to the plotted samples and their alignment.
+// A numeric pin without a boot-relative bucket is tied to the plotted samples and their alignment.
 function histPlottedPinRevision(h) {
-  if (STATE_HIST[h.id]) return h.gen;
-  return histVisibleSeries(h).map(s => [s.source, s.raw?.gen, s.raw?.expired, s.offset].join(":")).join("/");
+  if (STATE_HIST[h.id]) return `${h.gen}:${h.t0}`;
+  return histVisibleSeries(h).map(s => [s.source, s.raw?.gen, s.raw?.expired, s.raw?.t0, s.offset].join(":")).join("/");
 }
 
 function liveHistoryPinSample(id, source) {
@@ -1872,11 +1867,10 @@ function histPinToggle(id, i, source = "") {
   else if (i >= h.v.length) S.histPin.set(id, { t: forecast.points[i - h.v.length].time, forecast: true });
   else if (i === h.liveIndex) S.histPin.set(id, { sources: histPinSources(h), source,
     live: true, sample: liveHistoryPinSample(id, source) });
-  else if (h.t0 != null) {
+  else if (h.t0 != null && Number.isInteger(h.b0)) {
     const visible = histPinSeries(h);
     const witnessed = visible.filter(s => s.v[i] != null || histHeld(s, i));
-    S.histPin.set(id, { t: h.t0 + i * h.dt, source, anchor: h.t0, gen: h.gen,
-      bucket: Number.isInteger(h.b0) ? h.b0 + i : null,
+    S.histPin.set(id, { t: h.t0 + i * h.dt, source, bucket: h.b0 + i,
       witnessed: witnessed.length > 0,
       lanes: (witnessed.length ? witnessed : visible).map(s => s.source) });
   } else S.histPin.set(id, { i, gen: histPlottedPinRevision(h), sources: histPinSources(h), source });

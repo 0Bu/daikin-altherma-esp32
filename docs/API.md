@@ -458,9 +458,10 @@ and the poll deadline. It accepts a reply without row
 and source identity only if both are absent and `/status` predates the history epoch. A supplied
 identity must match the request, along with the boot and epoch tokens announced by `/status`.
 A nonempty date-only reply also needs a synchronized device clock. When live clock evidence is
-available, any dated reply must end within the rolling day and poll tolerance. The browser
-preserves a compatible ring when it rejects the replacement. An overlay without a shared clock
-uses a relative axis. Derived readings require a common raster when any input is anchored.
+available, any nonempty dated reply must end within the rolling day and poll tolerance. The browser
+preserves a compatible ring when it rejects the replacement. Independent sources with incompatible
+time anchors use separate plots. An overlay of legacy unanchored rings uses a relative axis.
+Derived readings require a common raster when any input is anchored.
 `v` does not record an unknown compressor state. A sweep dropped after a stop cannot put a number into
 its bucket, but any other outdoor sample without a readable speed stays a number, so a number is not
 proof that the page was current.

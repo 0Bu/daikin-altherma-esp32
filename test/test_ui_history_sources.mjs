@@ -261,12 +261,21 @@ S.hist.set("modbus:dhw_tank", modbus);
 {
   const dated = { t0: 1768720000 };
   S.hist.set("dhw_tank", { ...x10a, ...dated });
-  S.hist.set("modbus:dhw_tank", { ...modbus, ...dated });
   S.hist.set("modbus:dhw_tank", { ...modbus, b0: null, t0: null });
-  assert.equal(h.historyView("dhw_tank").t0, null,
-    "a mixed overlay cannot date a peer that supplied neither clock");
+  assert.deepEqual(Array.from(h.historyView("dhw_tank").separate), ["x10a", "modbus"],
+    "a legacy ring without either clock has no joint cursor with a dated ring");
   assert.equal(h.historyView("dhw_tank", "x10a").t0, dated.t0,
     "the dated instrument keeps its own clock in a source-scoped view");
+  S.hist.set("dhw_tank", x10a);
+  S.hist.set("modbus:dhw_tank", { ...modbus, b0: null, t0: dated.t0 + 3600 });
+  assert.deepEqual(Array.from(h.historyView("dhw_tank").separate), ["x10a", "modbus"],
+    "boot-only and wall-only records cannot be paired by their trailing samples");
+  const separate = h.histHtml("dhw_tank", "", "Tank");
+  assert.deepEqual(Array.from(separate.matchAll(/data-hist="dhw_tank" data-source="([^"]+)"/g), m => m[1]),
+    ["x10a", "modbus"]);
+  assert.match(separate, /<i><\/i>X10A<\/button>/);
+  assert.equal(h.historyView("dhw_tank", "modbus").t0, dated.t0 + 3600);
+  S.hist.set("dhw_tank", { ...x10a, ...dated });
   S.hist.set("modbus:dhw_tank", { ...modbus, ...dated });
   h.histPinToggle("dhw_tank", 0, "x10a");
   assert.equal(h.histPinIndex("dhw_tank", h.historyView("dhw_tank", "modbus")), -1,
@@ -354,10 +363,15 @@ S.hist.set("modbus:dhw_tank", modbus);
   const restoredRing = { ...x10a, b0: null, t0: 1768720000, v: [452, 453, 454] };
   S.hist.set("dhw_tank", restoredRing);
   h.histPinToggle("dhw_tank", 1, "x10a");
-  S.hist.set("dhw_tank", { ...restoredRing, t0: restoredRing.t0 + 300,
-    gen: restoredRing.gen + 1, v: [453, 454, 455] });
-  assert.equal(h.histPinIndex("dhw_tank", h.historyView("dhw_tank", "x10a")), 0,
-    "normal head movement preserves a selected sample from a dated restored ring");
+  S.hist.set("dhw_tank", { ...restoredRing, refreshFailed: true });
+  assert.equal(h.histPinIndex("dhw_tank", h.historyView("dhw_tank", "x10a")), 1,
+    "a refused refresh can retain the unchanged dated sample and pin together");
+  for (const shift of [300, 306]) {
+    S.hist.set("dhw_tank", { ...restoredRing, t0: restoredRing.t0 + shift,
+      gen: restoredRing.gen + 1, v: [453, 454, 455] });
+    assert.equal(h.histPinIndex("dhw_tank", h.historyView("dhw_tank", "x10a")), -1,
+      "an unverified wall-clock shift cannot transfer a pin to a different measurement");
+  }
   S.histPin.delete("dhw_tank");
   S.hist.set("dhw_tank", { ...x10a, t0: 1768720310 });
 
@@ -426,6 +440,16 @@ assert.equal(h.histCacheKey("dhw_tank", "modbus"), "modbus:dhw_tank");
   await h.ensureHist("dhw_tank", "modbus");
   assert.equal(S.hist.get("modbus:dhw_tank").t0, time - 300,
     "a time-only reply within the device window can restore history predating boot");
+  const pastDay = time - 288 * 300 - 60;
+  S.hist.set("modbus:dhw_tank", { ...modbus, at: 0 });
+  historyResponse = { ...historyResponse, t0: pastDay, v: [520] };
+  await h.ensureHist("dhw_tank", "modbus");
+  assert.deepEqual(Array.from(S.hist.get("modbus:dhw_tank").v), modbus.v,
+    "a wall-only sample just beyond the rolling day cannot replace an accepted ring");
+  assert.equal(S.hist.get("modbus:dhw_tank").refreshFailed, true);
+  assert.equal(h.expiredHistSlots({ ...x10a, b0: null, t0: pastDay, v: [450] }), 1,
+    "cached restored samples expire by their own anchor even off the UTC raster boundary");
+  historyResponse = { ...historyResponse, t0: time - 300 };
   S.hist.set("modbus:dhw_tank", { ...modbus, at: 0 });
   S.status.ntp = { synced: false, time: null };
   await h.ensureHist("dhw_tank", "modbus");
@@ -947,6 +971,18 @@ assert.equal(h.histPinIndex("smart_grid_mode", h.historyView("smart_grid_mode", 
   "a live A-B-A transition retires the pin even while its view does not render");
 assert.equal(S.histPin.has("smart_grid_mode"), false, "a changed live observation retires its pin");
 S._modbus[0].value = 2;
+h.histPinToggle("smart_grid_mode", 7, "modbus");
+const priorModbus = S.status.modbus;
+S.status.modbus = { ...priorModbus, connected: false };
+const droppedBoost = h.historyView("smart_grid_mode", "modbus");
+assert.equal(droppedBoost.v[droppedBoost.liveIndex], null,
+  "an explicit HomeHub disconnect makes the current cap unmeasured");
+assert.deepEqual(Array.from(droppedBoost.series[0].v.slice(0, droppedBoost.recordedN)),
+  [0, 10, 20, 30, null, 20, 0], "the HomeHub disconnect preserves recorded history");
+h.expireLiveHistoryPins();
+S.status.modbus = priorModbus;
+assert.equal(S.histPin.has("smart_grid_mode"), false,
+  "a HomeHub reconnect cannot restore the revoked live observation's pin");
 S.otaCached = true;
 assert.equal(h.historyView("smart_grid_mode", "modbus").liveIndex, undefined,
   "a retained OTA snapshot cannot create a live cap");

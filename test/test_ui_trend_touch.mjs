@@ -143,7 +143,7 @@ assert.deepEqual(calls, [], "a late release without a matching active pointer ca
   assert.equal(document.activeElement, current, "the replacement plot keeps keyboard focus");
   assert.equal(other.dataset.cur, undefined, "the same-series chart in another row keeps its own cursor");
   assert.equal(+current.dataset.cur, 1, "the replacement plot keeps the chosen cursor");
-  assert.equal(state.histPin.get("temperature").t, 1300);
+  assert.equal(state.histPin.get("temperature").i, 1);
   keyboardHost.fire("keydown", current, 0, "ArrowRight");
   assert.equal(+current.dataset.cur, 2, "continued arrows start at the preserved cursor");
   const escape = keyboardHost.fire("keydown", current, 0, "Escape");

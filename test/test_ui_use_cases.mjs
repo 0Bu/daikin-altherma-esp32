@@ -432,6 +432,8 @@ delete fetchState.status;
 ui.S.status = loadedStatus;
 
 // While the request owns the modal, Escape cannot discard an otherwise retryable draft.
+ui.S.status = { ...loadedStatus, boot_id: "0123456789abcdef",
+  board: { ...loadedStatus.board, config_revision: 17 } };
 ui.openBoard();
 fetchState.mode = "delayed";
 fetchState.calls.length = 0;
@@ -447,8 +449,11 @@ await document.getElementById("boardForm").fire("submit");
 await new Promise(resolve => setImmediate(resolve));
 const boardAttempts = fetchState.calls.filter(call => call.url === "/set_board");
 assert.equal(boardAttempts.length, 2, "retry must submit the same board draft after Escape");
+assert.equal(boardAttempts[0].body.boot_id, "0123456789abcdef");
+assert.equal(boardAttempts[0].body.config_revision, 17);
 assert.deepEqual(boardAttempts[1].body, boardAttempts[0].body);
 assert.equal(document.getElementById("boardModal").hidden, true);
+ui.S.status = loadedStatus;
 
 // An in-app popup has a real Settings parent: Back closes it and Forward opens the same one again.
 ui.openWifi();
