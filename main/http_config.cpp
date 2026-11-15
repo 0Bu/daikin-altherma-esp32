@@ -1242,6 +1242,7 @@ static esp_err_t set_board(httpd_req_t* req) {
         return send_err(req, "400 Bad Request", error);
     const cJSON* const boot        = cJSON_GetObjectItem(j, "boot_id");
     const cJSON* const revision    = cJSON_GetObjectItem(j, "config_revision");
+    const bool         revision_bound = revision != nullptr;
     const auto         draft_stale = [req] {
         httpd_resp_set_status(req, "409 Conflict");
         return http_send_json(
@@ -1314,10 +1315,19 @@ static esp_err_t set_board(httpd_req_t* req) {
     // it is still the first time anyone stated what this board is.
     // board_save_needed/board_reboot_needed (logic/config_model.hpp, host-tested) keep them apart —
     // persist the statement, but claim no reboot for it, since no driver's pin changed.
-    if (!board_env_save_needed(c, cur))
+    if (!board_env_save_needed(c, cur)) {
+        if (revision_bound && c.runtime_revision != config_runtime_revision()) return draft_stale();
         return http_send_json(req, "{\"ok\":true,\"reboot\":false}");   // nothing to write, no reboot
+    }
 
-    if (!config_save(c)) return send_local_pins_save_failure(req, c);
+    if (revision_bound) {
+        const ConfigSaveResult saved = config_save_if_current(c);
+        if (saved == ConfigSaveResult::Stale) return draft_stale();
+        if (saved != ConfigSaveResult::Saved)
+            return send_err(req, "500 Internal Server Error", "config write failed");
+    } else if (!config_save(c)) {
+        return send_local_pins_save_failure(req, c);
+    }
     // Only the statement moved: persisted, but no driver's pin changed, so no reboot. `saved` is
     // what keeps the ANSWER honest — {"reboot":false} alone makes the UI say "no changes", which
     // would report a write to NVS as nothing having happened. Additive, so the four routes that

@@ -1332,6 +1332,18 @@ inline constexpr int64_t history_bucket_from_unix(int64_t unix_s, uint32_t dt = 
     return quotient - (unix_s % d < 0 ? 1 : 0);
 }
 
+// Project a captured monotonic commit onto the current wall clock. Combine fractional wall
+// time and age before flooring so the API and flash journal agree at a UTC bucket boundary.
+constexpr int64_t history_commit_unix_s(int64_t unix_s, int32_t wall_ms, int64_t now_us,
+                                        int64_t commit_us) {
+    if (commit_us == HISTORY_NO_COMMIT_US || wall_ms < 0 || wall_ms >= 1000) return INT64_MIN;
+    const uint64_t age_us =
+        now_us < commit_us ? 0 : static_cast<uint64_t>(now_us) - static_cast<uint64_t>(commit_us);
+    const int64_t age_s = static_cast<int64_t>(age_us / 1000000u) +
+                          (static_cast<uint64_t>(wall_ms) * 1000u < age_us % 1000000u ? 1 : 0);
+    return unix_s < INT64_MIN + age_s ? INT64_MIN : unix_s - age_s;
+}
+
 // The wall-clock bucket a source's newest commit is attributed to: the wall time of the commit
 // instant, `now - commit` ago. This is the ONE derivation of a live source's anchor — the journal
 // writer, the restore and the seed below all go through it — so a commit and the seed that precedes

@@ -293,6 +293,15 @@ S.hist.set("modbus:dhw_tank", modbus);
   assert.equal(currentBoot.b0, 0, "an expired preboot tail cannot prevent a common current-boot axis");
   assert.deepEqual(Array.from(currentBoot.series[0].v), [454, null]);
   assert.deepEqual(Array.from(currentBoot.series[1].v), [455, 456]);
+  const savedNtp = S.status.ntp;
+  const now = 1768820000;
+  S.status.ntp = { synced: true, time: new Date(now * 1000).toISOString() };
+  assert.equal(h.historyView("dhw_tank").t0, null,
+    "two retained clocks cannot label the aligned data after a correction");
+  S.hist.set("modbus:dhw_tank", { ...S.hist.get("modbus:dhw_tank"), t0: now - 86400 });
+  assert.equal(h.historyView("dhw_tank").t0, now - 86400 + 300,
+    "the refreshed HomeHub clock labels the common current-boot axis");
+  S.status.ntp = savedNtp;
   S.status.uptime_s = savedUptime;
   S.hist.set("dhw_tank", { ...x10a, ...dated });
   S.hist.set("modbus:dhw_tank", { ...modbus, ...dated });

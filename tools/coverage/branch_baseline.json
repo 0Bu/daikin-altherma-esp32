@@ -2022,8 +2022,8 @@
         "outcomes": 490
       },
       "main/logic/config_transaction.hpp": {
-        "outcomes": 114,
-        "taken": 78
+        "outcomes": 118,
+        "taken": 82
       },
       "main/logic/conv_override.hpp": {
         "outcomes": 26,
@@ -2114,12 +2114,12 @@
         "taken": 14
       },
       "main/logic/history.hpp": {
-        "taken": 179,
-        "outcomes": 184
+        "taken": 183,
+        "outcomes": 188
       },
       "main/logic/history_persist.hpp": {
-        "taken": 474,
-        "outcomes": 529
+        "taken": 476,
+        "outcomes": 531
       },
       "main/logic/homehub_map.hpp": {
         "outcomes": 70,
@@ -2460,8 +2460,8 @@
         "taken": 327
       },
       "main/logic/config_transaction.hpp": {
-        "outcomes": 110,
-        "taken": 77
+        "outcomes": 114,
+        "taken": 81
       },
       "main/logic/conv_override.hpp": {
         "outcomes": 30,
@@ -2552,12 +2552,12 @@
         "taken": 16
       },
       "main/logic/history.hpp": {
-        "taken": 228,
-        "outcomes": 232
+        "taken": 230,
+        "outcomes": 234
       },
       "main/logic/history_persist.hpp": {
-        "taken": 557,
-        "outcomes": 618
+        "taken": 559,
+        "outcomes": 620
       },
       "main/logic/homehub_map.hpp": {
         "outcomes": 78,
@@ -2898,8 +2898,8 @@
         "taken": 327
       },
       "main/logic/config_transaction.hpp": {
-        "outcomes": 110,
-        "taken": 77
+        "outcomes": 114,
+        "taken": 81
       },
       "main/logic/conv_override.hpp": {
         "outcomes": 30,
@@ -2990,12 +2990,12 @@
         "taken": 16
       },
       "main/logic/history.hpp": {
-        "taken": 226,
-        "outcomes": 230
+        "taken": 228,
+        "outcomes": 232
       },
       "main/logic/history_persist.hpp": {
-        "taken": 555,
-        "outcomes": 616
+        "taken": 557,
+        "outcomes": 618
       },
       "main/logic/homehub_map.hpp": {
         "outcomes": 78,
@@ -3336,8 +3336,8 @@
         "taken": 327
       },
       "main/logic/config_transaction.hpp": {
-        "outcomes": 110,
-        "taken": 77
+        "outcomes": 114,
+        "taken": 81
       },
       "main/logic/conv_override.hpp": {
         "outcomes": 30,
@@ -3428,12 +3428,12 @@
         "taken": 16
       },
       "main/logic/history.hpp": {
-        "taken": 226,
-        "outcomes": 230
+        "taken": 228,
+        "outcomes": 232
       },
       "main/logic/history_persist.hpp": {
-        "taken": 555,
-        "outcomes": 616
+        "taken": 557,
+        "outcomes": 618
       },
       "main/logic/homehub_map.hpp": {
         "outcomes": 78,

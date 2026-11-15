@@ -353,6 +353,14 @@ sandbox.__api.toggle("env3_temperature");
   S.histPin.delete("env3_combined");
   S.status.ntp.time = oldTime;
   S.status.uptime_s -= 5;
+  plot.dataset.rev = sandbox.__api.revision();
+  const hourly = S.status.weather_forecast.hourly;
+  events.pointerdown(pointer);
+  S.status.weather_forecast.hourly = hourly.filter(hour => hour.time_unix_s !== currentUnix + 7200);
+  events.pointerup({ ...pointer, type: "pointerup" });
+  assert.equal(S.histPin.has("env3_combined"), false,
+    "a forecast hour removed during the gesture must not create a latent pin");
+  S.status.weather_forecast.hourly = hourly;
 }
 
 // Transport loss retires only the live status claims. The dated historical measurements remain

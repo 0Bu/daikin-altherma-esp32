@@ -526,13 +526,15 @@ static_assert(ESP_OK == 0, "the transactions read a zero store code as success")
 // initial HomeHub discovery) finish before httpd and the poll task start. The lock also serializes
 // the write with detection's field-owned commit, so RAM and the atomic link entry keep one ordering
 // when /set_hp races a long detection sweep; the flash write is rare and may hold readers briefly.
-static ConfigSaveResult save_whole(const Config& requested, bool owns_link) {
+static ConfigSaveResult save_whole(const Config& requested, bool owns_link,
+                                   bool require_current = false) {
     ConfigSaveOutcome out;
     int               live_rx = -1, live_tx = -1; // the link a refused service save would carry
     {
         Lock         lk(g_mtx);
         NvsBlobStore store;
-        out     = config_save_transaction(g_cfg, requested, owns_link, store, s_load_yield);
+        out     = config_save_transaction(g_cfg, requested, owns_link, store, s_load_yield,
+                                          require_current);
         live_rx = g_cfg.rx_pin;
         live_tx = g_cfg.tx_pin;
         if (!owns_link && out.result == ConfigSaveResult::Saved)
@@ -545,7 +547,7 @@ static ConfigSaveResult save_whole(const Config& requested, bool owns_link) {
         s_cfg_blob_unreadable.store(false, std::memory_order_release);
     // A Stale X10A save is routine (its handler re-derives and retries), but a Stale SERVICE save
     // is the reconcile refusing a newer detected link that collides with the requested local pins.
-    if (!owns_link && out.result == ConfigSaveResult::Stale)
+    if (!owns_link && !require_current && out.result == ConfigSaveResult::Stale)
         diag_printf("config: save refused — detected X10A link (rx=%d tx=%d) collides with the "
                     "requested local pins\n",
                     live_rx, live_tx);
@@ -575,6 +577,10 @@ static ConfigSaveResult save_whole(const Config& requested, bool owns_link) {
 
 bool config_save(const Config& c) {
     return save_whole(c, /*owns_link=*/false) == ConfigSaveResult::Saved;
+}
+
+ConfigSaveResult config_save_if_current(const Config& c) {
+    return save_whole(c, /*owns_link=*/false, /*require_current=*/true);
 }
 
 ConfigSaveResult config_save_link(const Config& c) { return save_whole(c, /*owns_link=*/true); }

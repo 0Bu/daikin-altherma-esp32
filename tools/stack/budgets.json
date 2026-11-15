@@ -165,12 +165,16 @@
       "pattern": "^daik::config_save_link\\(",
       "max_bytes": 32
     },
+    "config_save_if_current": {
+      "pattern": "^daik::config_save_if_current\\(",
+      "max_bytes": 32
+    },
     "config_save_whole": {
       "pattern": "^daik::save_whole\\(",
       "max_bytes": 64
     },
     "config_transaction": {
-      "pattern": "^_ZN4daik23config_save_transactionINS_12_GLOBAL__N_112NvsBlobStoreEEENS_17ConfigSaveOutcomeERNS_6ConfigERKS4_bRT_RKNS_15LocalPinsRepairE\\$constprop\\$[0-9]+$",
+      "pattern": "^(?:daik::ConfigSaveOutcome daik::config_save_transaction<daik::\\(anonymous namespace\\)::NvsBlobStore>\\(|_ZN4daik23config_save_transactionINS_12_GLOBAL__N_112NvsBlobStoreEEENS_17ConfigSaveOutcomeERNS_6ConfigERKS4_bRT_RKNS_15LocalPinsRepairEb(?:\\$constprop\\$[0-9]+)?$)",
       "max_bytes": 1600
     },
     "config_nvs_blob": {
@@ -3412,6 +3416,19 @@
         "config_hp",
         "config_document",
         "config_save_link",
+        "config_save_whole",
+        "config_transaction",
+        "config_nvs_blob"
+      ],
+      "multipliers": {},
+      "base_bytes": 3072,
+      "max_bytes": 8192
+    },
+    "httpd_config_board_save": {
+      "symbols": [
+        "config_board",
+        "config_document",
+        "config_save_if_current",
         "config_save_whole",
         "config_transaction",
         "config_nvs_blob"
@@ -11718,6 +11735,7 @@
         "httpd_mcp_parse",
         "httpd_config_save",
         "httpd_config_save_link",
+        "httpd_config_board_save",
         "httpd_wifi_scan",
         "httpd_mqtt_tls",
         "httpd_values",

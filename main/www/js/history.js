@@ -768,7 +768,7 @@ function alignedHistoryView(id, raw) {
   });
   const primary = series.find((s) => s.source === "x10a") ||
                   series.find((s) => s.source === "env3") || series[0];
-  const wall = raw.find((s) => typeof s.h.t0 === "number");
+  const wall = raw.find((s) => historyWallLabelAllowed(s.h));
   // A relative overlay must never assign one instrument's wall clock to another.
   const t0 = mode === "time" ? start
            : mode === "bucket" && wall ? wall.h.t0 - (wall.h.b0 - start) * dt : null;
@@ -848,10 +848,16 @@ function expireHistSamples(h) {
 }
 
 const histRetained = h => h.refreshFailed || h.aged;
+function historyWallLabelAllowed(h) {
+  if (!Number.isFinite(h.t0)) return false;
+  if (!Number.isInteger(h.b0) || !Number.isFinite(historyDeviceTime())) return true;
+  return validHistoryTime(h.t0, h.b0, h.v.length);
+}
+
 function historyRingRevision(h) {
   if (!h || h.err || !Array.isArray(h.v)) return h ? "error" : "";
   const expired = expiredHistSlots(h);
-  return `${h.gen}:${h.refreshFailed ? "failed" : ""}:${historyRingAged(h, expired) ? "aged" : ""}:${expired}`;
+  return `${h.gen}:${h.refreshFailed ? "failed" : ""}:${historyRingAged(h, expired) ? "aged" : ""}:${expired}:${historyWallLabelAllowed(h)}`;
 }
 
 function forecastClockAgrees(ring, weather) {
@@ -1911,14 +1917,20 @@ function expireFallbackHistoryPins() {
 }
 // Pin sample `i` of `label`, or UNPIN when that same sample is already pinned — tapping the readout
 // you just made is the obvious way to dismiss it, and needs no extra affordance on a 72 px plot.
-function histPinToggle(id, i, source = "", h = historyView(id, source)) {
+function histPinToggle(id, i, source = "", captured) {
+  const h = captured || historyView(id, source);
   if (!h) return;
   const forecast = forecastScrubView(h);
   const total = h.v.length + (forecast?.points.length || 0);
   if (!total) return;
   i = Math.max(0, Math.min(total - 1, i));
   if (histPinIndex(id, h) === i) S.histPin.delete(id);
-  else if (i >= h.v.length) S.histPin.set(id, { t: forecast.points[i - h.v.length].time, forecast: true });
+  else if (i >= h.v.length) {
+    const t = forecast.points[i - h.v.length].time;
+    if (captured && !forecastScrubView(historyView(id, source))?.points.some(point => point.time === t))
+      return;
+    S.histPin.set(id, { t, forecast: true });
+  }
   else if (i === h.liveIndex) S.histPin.set(id, { sources: histPinSources(h), source,
     live: true, sample: liveHistoryPinSample(id, source) });
   else if (Number.isInteger(h.b0)) {

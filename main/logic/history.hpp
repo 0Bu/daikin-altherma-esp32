@@ -468,18 +468,6 @@ struct HistoryMeta {
     int64_t newest_commit_us = HISTORY_NO_COMMIT_US;
 };
 
-// Project a captured monotonic commit onto the current wall clock. Combine fractional wall
-// time and age before flooring so the API and flash journal agree at a UTC bucket boundary.
-constexpr int64_t history_commit_unix_s(int64_t unix_s, int32_t wall_ms, int64_t now_us,
-                                        int64_t commit_us) {
-    if (commit_us == HISTORY_NO_COMMIT_US || wall_ms < 0 || wall_ms >= 1000) return INT64_MIN;
-    const uint64_t age_us =
-        now_us < commit_us ? 0 : static_cast<uint64_t>(now_us) - static_cast<uint64_t>(commit_us);
-    const int64_t age_s = static_cast<int64_t>(age_us / 1000000u) +
-                          (static_cast<uint64_t>(wall_ms) * 1000u < age_us % 1000000u ? 1 : 0);
-    return unix_s < INT64_MIN + age_s ? INT64_MIN : unix_s - age_s;
-}
-
 constexpr int64_t history_t0(int64_t newest_unix, size_t n, uint32_t dt) {
     const int64_t span = static_cast<int64_t>(n ? n - 1 : 0) * static_cast<int64_t>(dt);
     return newest_unix < INT64_MIN + span ? INT64_MIN : newest_unix - span;

@@ -108,7 +108,7 @@ if 'PASS total=13 assertions=5233\n' not in legacy.stdout:
                        + legacy.stdout)
 print('PRESERVED ORIGINAL CASES ' + legacy.stdout.splitlines()[-1])
 baseline = command([binary])
-if 'PASS total=18 assertions=5624\n' not in baseline.stdout:
+if 'PASS total=18 assertions=5634\n' not in baseline.stdout:
     raise RuntimeError('the complete behavioral groups changed their assertion inventory\n'
                        + baseline.stdout)
 print(baseline.stdout, end='')
@@ -204,9 +204,12 @@ mutations = [
      'if (nvs_restart_held_by_factory_reset("config")) return;\n    vTaskDelay(pdMS_TO_TICKS(400));',
      'factory_reset_reboot'),
     ('board_conflict_is_write_failure', 'board',
-     'if (!config_save(c)) return send_local_pins_save_failure(req, c);',
-     'if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");',
+     'return send_local_pins_save_failure(req, c);',
+     'return send_err(req, "500 Internal Server Error", "config write failed");',
      'local_pin_reconcile'),
+    ('board_stale_reconciles_detected_link', 'transaction',
+     'require_current && revision != ConfigSaveRevision::Current',
+     'require_current && revision == ConfigSaveRevision::Stale', 'board_draft_revision'),
     ('env_conflict_is_write_failure', 'env',
      'if (!config_save(c)) return send_local_pins_save_failure(req, c);',
      'if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");',
@@ -298,7 +301,7 @@ for tag, target, old, new, case in mutations:
 after = inputs([OUT / 'production.d', OUT / 'cjson.d'])
 if after != before:
     raise RuntimeError('compile inputs changed during the run')
-if len(controls) != 30:
+if len(controls) != 31:
     raise RuntimeError('the complete compiling negative-control inventory changed')
 record = {'compiler': compiler, 'c_compiler': c_compiler,
           'compiler_commands': {'c': CC, 'cxx': CXX},

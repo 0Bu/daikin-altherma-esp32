@@ -1755,7 +1755,8 @@ CONFIG_DOCUMENT_OWNERS = frozenset({
 CONFIG_DOCUMENT_PATHS = frozenset({
     "httpd_config_hp", "httpd_config_mqtt", "httpd_config_board", "httpd_config_env3",
     "httpd_config_weather", "httpd_config_diagnostics", "httpd_config_circulation",
-    "httpd_hp_query_probe", "httpd_config_save", "httpd_config_save_link", "httpd_mqtt_tls",
+    "httpd_hp_query_probe", "httpd_config_save", "httpd_config_save_link", "httpd_config_board_save",
+    "httpd_mqtt_tls",
     "httpd_i2c_read", "httpd_i2c_write", "httpd_i2c_receive",
     "httpd_checkup_schema",
     *(f"httpd_shutdown_{name}_{phase}" for name in SHUTDOWN_HTTP_CALLERS
@@ -2783,9 +2784,11 @@ def self_test() -> None:
   22: c2008136 \t
 00000023 <daik::config_save(daik::Config const&)>:
   23: 004136          entry a1, 32
-00000024 <daik::save_whole(daik::Config const&, bool)>:
+00000024 <daik::save_whole(daik::Config const&, bool, bool)>:
   24: 004136          entry a1, 48
-00000025 <_ZN4daik23config_save_transactionINS_12_GLOBAL__N_112NvsBlobStoreEEENS_17ConfigSaveOutcomeERNS_6ConfigERKS4_bRT_RKNS_15LocalPinsRepairE$constprop$0>:
+00000383 <daik::config_save_if_current(daik::Config const&)>:
+ 383: 004136          entry a1, 32
+00000025 <_ZN4daik23config_save_transactionINS_12_GLOBAL__N_112NvsBlobStoreEEENS_17ConfigSaveOutcomeERNS_6ConfigERKS4_bRT_RKNS_15LocalPinsRepairEb$constprop$0>:
   25: 004136          entry a1, 1600
 00000026 <daik::nvs_set_blob(char const*, void const*, unsigned int)>:
   26: 004136          entry a1, 48
@@ -3591,6 +3594,7 @@ def self_test() -> None:
     assert selected["path:httpd_mcp_parse"] == 3536
     assert selected["path:httpd_config_save"] == 8048
     assert selected["path:httpd_config_save_link"] == 8048
+    assert selected["path:httpd_config_board_save"] == 7024
     assert selected["path:httpd_wifi_scan"] == 5248
     assert selected["path:httpd_mqtt_tls"] == 8016
 

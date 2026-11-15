@@ -2186,6 +2186,24 @@ static void test_config_transaction() {
         CHECK(link.identity_fp == 0x11111111u);
     }
 
+    // A Board draft is revision-bound even when a newer detection uses free pins.
+    {
+        Config live  = config_tx_live();
+        Config req   = live;
+        req.btn_gpio = 21;
+        ConfigTxStore store;
+        store.seed(live);
+        live.runtime_revision = config_next_revision(live.runtime_revision);
+        const auto stale      = config_save_transaction(live, req, false, store, {}, true);
+        CHECK(stale.result == ConfigSaveResult::Stale);
+        CHECK(store.attempts.empty());
+        CHECK(live.btn_gpio != req.btn_gpio);
+        req.runtime_revision = live.runtime_revision;
+        CHECK(config_save_transaction(live, req, false, store, {}, true).result ==
+              ConfigSaveResult::Saved);
+        CHECK(live.btn_gpio == 21);
+    }
+
     // A service save in a boot whose X10A link took the indicator's pin (RAM -1): "cfg" keeps the
     // stored pin while RAM keeps the yield — the WiFi setup a factory reset requires must not store
     // the repair as the owner's choice. A save that states a real pin replaces it; that, or a save
@@ -14819,21 +14837,24 @@ static void test_history() {
     // *now*. That drift is what let a pinned readout round onto the neighbouring slot and describe
     // a different measurement than the one tapped.
     {
+        const auto oldest = [](int64_t wall, size_t n, uint32_t dt) {
+            return history_t0(rt(wall), rt(n), rt(dt));
+        };
         // Same newest sample, three different request times → one answer.
-        const int64_t t_a =
-            history_t0(history_commit_unix_s(1'000'000, 800, 0, 0), 2, HISTORY_DT_S);
+        const int64_t t_a = oldest(history_commit_unix_s(1'000'000, 800, 0, 0), 2, HISTORY_DT_S);
         const int64_t t_b =
-            history_t0(history_commit_unix_s(1'000'071, 100, 70'300'000, 0), 2, HISTORY_DT_S);
+            oldest(history_commit_unix_s(1'000'071, 100, 70'300'000, 0), 2, HISTORY_DT_S);
         const int64_t t_c =
-            history_t0(history_commit_unix_s(1'000'300, 100, 299'300'000, 0), 2, HISTORY_DT_S);
+            oldest(history_commit_unix_s(1'000'300, 100, 299'300'000, 0), 2, HISTORY_DT_S);
         CHECK(t_a == t_b);
         CHECK(t_b == t_c);
         CHECK(t_a == 1'000'000 - 300); // sample 0 is one bucket before the newest
         // A closed bucket moves it by exactly one bucket, never by the request delay.
-        CHECK(history_t0(1'000'300, 3, HISTORY_DT_S) == t_a);
+        CHECK(oldest(1'000'300, 3, HISTORY_DT_S) == t_a);
         // Degenerate counts must not underflow into a bogus instant.
-        CHECK(history_t0(1'000'000, 0, HISTORY_DT_S) == 1'000'000);
-        CHECK(history_t0(1'000'000, 1, HISTORY_DT_S) == 1'000'000);
+        CHECK(oldest(1'000'000, 0, HISTORY_DT_S) == 1'000'000);
+        CHECK(oldest(1'000'000, 1, HISTORY_DT_S) == 1'000'000);
+        CHECK(oldest(INT64_MIN, 2, HISTORY_DT_S) == INT64_MIN);
         const int64_t newest = history_commit_unix_s(2'000'000'100, 100, 300'000, 0);
         CHECK(newest == 2'000'000'099);
         CHECK(history_bucket_from_unix(newest) ==

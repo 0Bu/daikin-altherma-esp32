@@ -725,8 +725,11 @@ async function assertForecastRevision(page, server, fixture, context) {
   await prepareObservationViewport(page, selector, []);
   const before = await evaluate(page, selector => {
     const plot = document.querySelector(selector), rect = plot.getBoundingClientRect();
-    return { revision: plot.dataset.rev, gen: historyView(plot.dataset.hist).gen,
-      x: rect.left + rect.width * 0.95, y: rect.top + rect.height / 2 };
+    const view = scrubView(plot), x = rect.left + rect.width * 0.95;
+    const selected = scrubIndex(plot, x);
+    return { revision: plot.dataset.rev, gen: view.gen, selected,
+      time: forecastScrubView(view).points[selected - view.v.length].time,
+      x, y: rect.top + rect.height / 2 };
   }, selector);
   const { x, y } = before;
   const hourly = fixture.status.weather_forecast.hourly;
@@ -743,14 +746,15 @@ async function assertForecastRevision(page, server, fixture, context) {
       return { rev: plot.dataset.rev, gen: historyView(plot.dataset.hist).gen,
         selected: scrubIndex(plot, x) };
     }, { selector, x });
-    assert.deepEqual(during, { rev: before.revision, gen: before.gen, selected: -1 },
-      context + ": a forecast-only refresh invalidates the selection on the held chart");
+    assert.deepEqual(during, { rev: before.revision, gen: before.gen, selected: before.selected },
+      context + ": a forecast refresh leaves the selection on the held chart");
     await press("mouseReleased");
     await settleHistoryRevision(page, [selector]);
-    assert.equal(await page.evaluate("S.histPin.has('env3_combined')"), false,
-      context + ": releasing the old forecast cannot pin a different timestamp");
+    assert.equal(await page.evaluate("S.histPin.get('env3_combined')?.t"), before.time,
+      context + ": releasing the original plot pins the same hour after the refresh");
     assert.notEqual(await evaluate(page, selector => document.querySelector(selector).dataset.rev, selector),
       before.revision, context + ": the refreshed forecast is mounted after release");
+    await page.evaluate("S.histPin.delete('env3_combined')");
     await press("mousePressed");
     await page.waitFor("S.trendPointer?.plot.dataset.hist === 'env3_combined'");
     // A normal mouse-down focuses the plot. Keep the real captured drag active while a second

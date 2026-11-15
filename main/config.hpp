@@ -90,6 +90,9 @@ bool config_factory_seed_blob(std::vector<uint8_t>& out);
 // poll task must NOT use this — see the compare-and-commit detection helpers below.
 [[nodiscard]] bool config_save(const Config& c);
 
+// A Board draft belongs to one configuration revision. Compare it inside the save mutex.
+[[nodiscard]] ConfigSaveResult config_save_if_current(const Config& c);
+
 // The X10A /set_hp save (ConfigSaveResult: logic/config_transaction.hpp). That route owns the link
 // and changes nothing else that is persisted, so it writes ONLY the atomic link-cache entry — never
 // the service blob — and succeeds exactly when that entry lands; on Failed no durable entry changed

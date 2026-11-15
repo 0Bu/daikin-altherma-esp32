@@ -2137,6 +2137,7 @@ async function assertHistoryReadouts(page, context) {
           t0:end - 5700,unit,held:[],v});
         S.hist.clear(); S.histPin.clear(); S.histHidden.clear(); S.scrub = null;
         S.status.history = {rows:[{id,label:id}],modbus_rows:[{id,label:id}],env3_rows:[]};
+        S.status.uptime_s = 36000;
         S.status.ntp = {synced:true,time:"2026-08-12T10:00:00Z"};
         if (id === ENV3_COMBINED_ID) {
           S.status.history.rows = []; S.status.history.modbus_rows = [];

@@ -416,7 +416,7 @@ for (const [name, next, ring, commit] of [
   assert.ok(routeAt >= 0 && route.length > 200, "the /history route body");
   assert.match(route, /logic::HistoryMeta\s+history_meta;/);
   assert.equal((route.match(/&history_meta\)/g) || []).length, 4, "all four trend sources hand their meta back");
-  assert.match(route, /newest_age\s*=\s*history_meta\.newest_age_s/);
+  assert.match(route, /history_commit_unix_s\(unix_s, wall_ms, esp_timer_get_time\(\),\s*history_meta\.newest_commit_us\)/);
   assert.match(route, /b0\s*=\s*history_meta\.oldest_bucket/);
 }
 

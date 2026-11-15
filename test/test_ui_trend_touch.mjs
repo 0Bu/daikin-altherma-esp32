@@ -65,6 +65,7 @@ const context = vm.createContext({
   S, console,
   scrubArm: () => calls.push(["arm"]),
   scrubMove: (_plot, i) => calls.push(["move", i]),
+  scrubView: () => ({}),
   scrubIndex: (_plot, x) => x,
   scrubEnd: () => { calls.push(["end"]); S.scrub = S.trendPointer = null; },
   histPinToggle: (id, i, source) => calls.push(["pin", id, i, source]),

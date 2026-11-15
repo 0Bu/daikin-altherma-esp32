@@ -345,7 +345,7 @@ ConfigLinkSnapshot config_link_snapshot() {
     ++fixture::link_snapshot_reads;
     return {fixture::current.proto, fixture::current.rx_pin, fixture::current.tx_pin};
 }
-bool config_save(const Config& requested) {
+ConfigSaveResult save_service(const Config& requested, bool require_current) {
     ++fixture::saves;
     if (fixture::detect_before_service_save) {
         fixture::detect_before_service_save = false;
@@ -362,8 +362,15 @@ bool config_save(const Config& requested) {
             fixture::fail("prepared concurrent detection did not commit its real transaction");
     }
     fixture::Store store;
-    fixture::last_save_outcome = config_save_transaction(fixture::current, requested, false, store);
-    return fixture::last_save_outcome.result == ConfigSaveResult::Saved;
+    fixture::last_save_outcome =
+        config_save_transaction(fixture::current, requested, false, store, {}, require_current);
+    return fixture::last_save_outcome.result;
+}
+bool config_save(const Config& requested) {
+    return save_service(requested, false) == ConfigSaveResult::Saved;
+}
+ConfigSaveResult config_save_if_current(const Config& requested) {
+    return save_service(requested, true);
 }
 void http_boot_id(char (&out)[17]) noexcept {
     std::memcpy(out, "0123456789abcdef", sizeof(out));
@@ -1254,6 +1261,25 @@ void board_draft_revision() {
     deny_after_boot_id = false;
     check(config_reads == config_reads_before,
           "an already stale draft must not copy the configuration");
+
+    prepare(board);
+    const auto before = service;
+    const auto sensor = changed(
+        R"({"preset_id":"m5stack_atoms3_lite","env3_enabled":true,"env3_sda":2,"env3_scl":1})",
+        "boot_id", R"("0123456789abcdef")");
+    const auto sensor_request  = changed(sensor.c_str(), "config_revision",
+                                         std::to_string(current.runtime_revision).c_str());
+    detect_before_service_save = true;
+    detected_rx                = 9;
+    detected_tx                = 10;
+    const auto refused         = invoke(board.handler, sensor_request);
+    check(refused.status == "409 Conflict" &&
+              refused.response.find("\"code\":\"board_draft_stale\"") != std::string::npos,
+          "a draft that became stale during preflight must receive its specific rejection");
+    check(
+        env_probes == 1 && detection_writes == 1 && service_writes == 0 && link_writes == 0 &&
+            reboots == 0 && service == before && current.rx_pin == 9 && current.tx_pin == 10,
+        "detection at the save boundary must keep its link and reject a previously current draft");
 }
 void room_history_lifetime() {
     reset();

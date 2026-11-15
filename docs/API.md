@@ -603,6 +603,7 @@ The dashboard sends `boot_id` and `board.config_revision` from its accepted `/st
 `boot_id` and `config_revision`. A missing member, non-string boot ID, or invalid numeric revision
 returns 400. A boot ID or revision that differs from the current value when the handler checks the
 submitted draft returns 409 with `code: "board_draft_stale"` before probing or saving.
+The save checks the revision again under the configuration mutex after the ENV III preflight.
 Reopen the editor from current status before submitting again. Clients can omit both.
 
 `POST /set_env3` is the compatibility route (`enabled`, `sda`, `scl`, all optional). Both board routes
