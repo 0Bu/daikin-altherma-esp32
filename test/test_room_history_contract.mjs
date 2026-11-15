@@ -248,6 +248,9 @@ void stop_observation_flash_service(StopObservationReader reader){
  need(flash_depth==1&&history_depth==0,"stop restore service without sole flash owner");
  need(reader==flash_read_stop_observation,"stop restore received a different reader");++stop_services;
 }
+void history_restore_cycling_flash(uint32_t wait){
+ need(flash_depth==1&&history_depth==0&&wait==0,"cycling restore must use the nonblocking flash owner");
+}
 ` + restoreFunctions + String.raw`
 void prepare_restore(){
  need(flash_depth==0&&history_depth==0,"fixture leaked owner");

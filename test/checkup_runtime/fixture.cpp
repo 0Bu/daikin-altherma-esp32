@@ -420,6 +420,81 @@ void report_without_mutex() {
             "allocation_failure_withholds_all_evidence");
 }
 
+void restored_cycling_detail() {
+    constexpr auto profile    = "altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw";
+    sdk::now_us               = 0;
+    const auto           wall = adapter::unix_origin;
+    CyclingTraceIdentity identity{checkup_model_fingerprint(profile, def::lookup_view(profile)),
+                                  0x12345678, 23};
+    using Trace = CheckupCyclingTrace;
+    Trace saved;
+    saved.unix_s       = static_cast<uint32_t>(wall - 900);
+    saved.window_end_s = CHECKUP_WINDOW_S;
+    saved.end_s        = 86399;
+    saved.push(86000, Trace::Off);
+    saved.push(86005, Trace::Start);
+    saved.push(86005, Trace::Heat);
+    saved.push(86020, Trace::Off);
+    saved.push(86021, Trace::Stop);
+    saved.push(86399, Trace::Start);
+    checkup_start(true, 23);
+    using Result = CheckupFlashRestoreResult;
+    require(checkup_cycling_restore(saved, identity, wall, 0) == Result::Deferred,
+            "cycling_waits_for_current_source");
+    checkup_reset_on_detect(profile, identity.source_fp);
+    auto other = identity;
+    ++other.diagnostics_generation;
+    require(checkup_cycling_restore(saved, other, wall, 0) == Result::Ignored,
+            "cycling_rejects_different_consent");
+    require(checkup_cycling_restore(saved, identity, wall - 905, 0) == Result::Ignored,
+            "cycling_rejects_future_checkpoint");
+    require(checkup_cycling_restore(saved, identity, wall, 0) == Result::Restored,
+            "cycling_restored");
+    Trace view;
+    checkup_report(nullptr, &view);
+    require(view.count == 6 && !view.live && view.unix_s == wall && view.boot_s == 0 &&
+                view.end_s == 85499,
+            "cycling_restart_gap_and_no_fresh_claim");
+    require(Trace::second(view.at(1)) == 85105 && Trace::second(view.at(4)) == 85121,
+            "cycling_restored_edges_keep_absolute_time");
+    const auto                     cov = coverage();
+    const std::vector<CachedValue> rows{row(CHECKUP_LOC_PRESSURE, "1.5")};
+    sample(1, rows, cov);
+    sample(2, rows, cov, true, true);
+    sample(3, rows, cov);
+    uint32_t barrier = 0;
+    require(checkup_cycling_checkpoint(view, other, barrier, 0, true) && !barrier && view.live &&
+                view.boot_s == 3 && view.count > 7 && other.source_fp == identity.source_fp,
+            "cycling_checkpoint_contains_both_boots");
+    require(Trace::kind(view.at(6)) == Trace::Gap, "cycling_checkpoint_separates_boots");
+    sdk::now_us                = int64_t{85400} * 1000000;
+    const auto starting_points = [&] {
+        checkup_report(nullptr, &view);
+        unsigned count = 0;
+        for (size_t i = 0; i < view.count; ++i) count += Trace::kind(view.at(i)) == Trace::Start;
+        return count;
+    };
+    require(starting_points() == 2, "cycling_oldest_start_aged_out");
+    adapter::unix_origin -= 600;
+    require(starting_points() == 2, "cycling_wall_step_cannot_reintroduce_aged_out_start");
+    adapter::unix_origin += 600;
+    checkup_reset();
+    adapter::unix_origin = -1 - sdk::now_us / 1000000;
+    require(checkup_cycling_checkpoint(view, other, barrier, 0, false) && barrier && !view.count &&
+                view.unix_s == 1 && !other.model_fp && !other.source_fp,
+            "cycling_reset_barrier_has_sequence_without_wall_time");
+    adapter::unix_origin = wall;
+    checkup_cycling_checkpoint_appended(barrier);
+    require(!checkup_cycling_checkpoint(view, other, barrier, 0, false),
+            "cycling_durable_barrier_acknowledged");
+    require(checkup_cycling_restore(saved, identity, wall, 0) == Result::Ignored,
+            "cycling_explicit_reset_cannot_reattach_saved_points");
+    checkup_cycling_forget();
+    checkup_report(nullptr, &view);
+    require(!view.unix_s && !checkup_cycling_checkpoint(view, other, barrier, 0, true),
+            "cycling_forget_withholds_trace_and_checkpoint");
+}
+
 void restored_expiry() {
     boot();
     auto cov = coverage();
@@ -861,6 +936,8 @@ int main(int argc, char** argv) {
             pending_expiry();
         else if (name == "report_without_mutex")
             report_without_mutex();
+        else if (name == "restored_cycling_detail")
+            restored_cycling_detail();
         else if (name == "restored_expiry")
             restored_expiry();
         else if (name == "late_restore_prefix" || name == "late_restore_clock_behind")

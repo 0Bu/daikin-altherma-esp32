@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: 29babea9c4f5636271924ecdb9213afe5a4b99890177bf0efda6a00218ccfedb -->
+<!-- user-docs-contract: c5da50eee2e84b3a768afd5785f69b85a330e014d2f02fbdebd72e8107f1b9d6 -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default. Enable **Plant diagnostics** under **Settings → Firmware** to start an evidence
@@ -115,18 +115,25 @@ was seen off. The diagnosis total uses hourly counts and can include starts with
 time. When the total includes saved hourly counts from before a restart, the explanation shows
 how many came from those hours.
 
-In the rolling chart, each number counts the starts with a recorded time in that hour. A blank
-marks an hour with unavailable data and no timed start. Colors mark the modes seen in the hour.
-Hatching marks hours with gaps, including older readings that have dropped off the chart. It
-does not measure how long a gap lasted. A readable diagnosis update without a fresh trace can
-keep the open chart from the current diagnosis session and hatch the new gap. If the update says
-the diagnosis could not be read, the card shows **No data** and hides the chart. If the status
-request itself fails, the chart stays at the last successful update.
-Select a block to show its current range on the axis. The `≥` sign means at least that many starts.
+The caption counts the starts with a recorded time across the chart. Each block shows the count
+for its hour. The `≥` sign means at least that many starts. A blank marks an hour with unavailable
+data and no timed start. Colors mark the modes seen in the hour. Hatching marks hours with gaps,
+including older readings that have dropped off the chart. It does not measure how long a gap lasted.
+A readable diagnosis update without new chart data can keep the open chart and hatch the new gap.
+An unreadable diagnosis shows **No data** and hides the chart. If the status request itself fails,
+the chart can stay at the last successful update. The list then shows the stop and duration as
+unknown for any run that was still open.
 
-After a restart, the rolling chart fills with new readings. Until a timed trace is available,
-the hourly fallback can show saved counts and runtime. Tap a bar to see its available time and
-durations below the chart. Zero-start bars have no number above them.
+Tap anywhere in the graph above an hourly block, or tap the block itself, to select that hour.
+The list below the graph shows the observed start, stop and duration for runs that started in the
+selected hour, even if they stopped later. The times mark the first readings in the new state.
+If a recent reading still shows the run in progress, the list gives the elapsed time through
+that reading. If a gap or restart interrupts a run, its stop and total duration are unknown.
+
+The chart can restore saved readings and run times after a restart, including a firmware update.
+The board adds new measurements as polling resumes and shows the downtime as a gap. When the
+timed chart is unavailable, the entire chart can show hourly totals. Tap a bar in that view to see
+its recorded time and runtime where available. A bar with zero starts has no number above it.
 
 **Evidence and limits:** [Compressor cycling](DIAGNOSTIC_EVIDENCE.md#diagnosis-cycling)
 

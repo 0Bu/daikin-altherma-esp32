@@ -16,8 +16,10 @@
 // An explicit X10A re-detection, profile or pin identity change still empties the window. A
 // HomeHub-only edit is a separate source and deliberately does not.
 #include "hp_poll.hpp"          // CachedValue
+#include "freertos/FreeRTOS.h"
 #include "logic/checkup.hpp"
 #include "logic/checkup_persist.hpp"
+#include "logic/cycling_persist.hpp"
 #include "stop_observation_store.hpp"
 
 #include <cstddef>
@@ -30,6 +32,16 @@ namespace daik {
 using CheckupFlashRecord = logic::CheckupJournalRecord;
 
 enum class CheckupFlashRestoreResult : uint8_t { Deferred, Ignored, Restored };
+
+bool                      checkup_cycling_checkpoint(logic::CheckupCyclingTrace&  trace,
+                                                     logic::CyclingTraceIdentity& identity, uint32_t& reset_token,
+                                                     TickType_t wait_ticks, bool allow_data);
+bool                      checkup_cycling_reset_pending();
+void                      checkup_cycling_checkpoint_appended(uint32_t reset_token);
+CheckupFlashRestoreResult checkup_cycling_restore(const logic::CheckupCyclingTrace&  trace,
+                                                  const logic::CyclingTraceIdentity& identity,
+                                                  int64_t now_unix_s, TickType_t wait_ticks);
+void                      checkup_cycling_forget();
 
 // Capture before collecting a poll's inputs, not after the sweep. Admission rejects a token from
 // before any diagnostics transition; this live epoch is independent of the saved generation.

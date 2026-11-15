@@ -90,7 +90,7 @@ export async function startFixtureServer({ pageFile, projectRoot }) {
   const historyRequests = [];
   let valuesRequests = 0;
 
-  const server = http.createServer((request, response) => {
+  const server = http.createServer(async (request, response) => {
     const url = new URL(request.url, "http://127.0.0.1");
     if (url.pathname === "/" || url.pathname === "/index.html")
       return send(response, 200, "text/html; charset=utf-8", html);
@@ -125,14 +125,16 @@ export async function startFixtureServer({ pageFile, projectRoot }) {
       return response.end(localeBundle);
     }
     if (url.pathname === "/status") {
+      if (telemetry.statusUnavailable) return send(response, 500, "text/plain", "fixture status unavailable");
       response.writeHead(200, JSON_HEADERS);
       return response.end(JSON.stringify(telemetry.status));
     }
     if (url.pathname === "/values") {
       valuesRequests++;
+      const frame = telemetry;
+      if (frame.valuesGate) await frame.valuesGate;
       response.writeHead(200, JSON_HEADERS);
-      return response.end(JSON.stringify(typeof telemetry.values === "function"
-        ? telemetry.values() : telemetry.values));
+      return response.end(JSON.stringify(typeof frame.values === "function" ? frame.values() : frame.values));
     }
     if (url.pathname === "/history") {
       const key = `${url.searchParams.get("source") || "x10a"}:${url.searchParams.get("row")}`;

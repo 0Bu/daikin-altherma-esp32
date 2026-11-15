@@ -124,6 +124,12 @@ bool                         s_boot_handoff_valid = false;
 // Current-boot completions carry the same deadline: a stopped producer must still lose old hours.
 logic::CheckupJournalSlotTimes s_slot_times;
 logic::CheckupCyclingTrace     s_cycling_trace;
+logic::CheckupCyclingTrace     s_cycling_restored;
+uint32_t                       s_cycling_restore_anchor = 0;
+std::atomic<bool>              s_cycling_forgotten{false};
+bool                           s_cycling_restore_allowed = false;
+std::atomic<uint32_t>          s_cycling_reset_token{0};
+std::atomic<uint32_t>          s_cycling_reset_acked{0};
 uint32_t                       s_cycling_hours_epoch   = 0;
 int32_t                        s_cycling_newest_bucket = 0;
 // Capability of the CURRENT converter-adjudicated profile. hp_poll derives it from the profile rows,
@@ -175,6 +181,34 @@ int64_t s_seal_end_unix_s = INT64_MIN;
 // Everything inside a critical section in this file is a plain integer copy — nothing allocates —
 // so the unwind safety is belt-and-braces here rather than the reason the guard is used.
 using Lock = SemGuard;
+
+void retire_cycling_locked() {
+    s_cycling_restore_allowed = false;
+    s_cycling_restored.reset();
+    const uint32_t next = s_cycling_reset_token.load(std::memory_order_relaxed) + 1u;
+    s_cycling_reset_token.store(next ? next : 1u, std::memory_order_release);
+}
+
+[[gnu::noinline]] bool cycling_snapshot_locked(logic::CheckupCyclingTrace& out, int64_t now_us) {
+    if (s_cycling_forgotten.load(std::memory_order_acquire) || !s_source_confirmed ||
+        (!s_cycling_trace.count && !s_cycling_restored.count) || now_us < 0 ||
+        now_us / 1000000 > logic::CheckupCyclingTrace::max_second)
+        return false;
+    int64_t unix_s = -1;
+    int32_t ms     = 0;
+    time_now(unix_s, ms);
+    const auto     boot_s = static_cast<uint32_t>(now_us / 1000000);
+    const uint32_t wall =
+        logic::checkup_cycling_end_unix_s(now_us - now_us % 1000000, now_us, unix_s, ms);
+    if (wall <= boot_s) return false;
+    // Keep a monotonic age floor for restored data, even if the wall clock moves backwards.
+    s_cycling_restore_anchor = std::max(s_cycling_restore_anchor, wall - boot_s);
+    const int64_t oldest_saved_unix =
+        static_cast<int64_t>(s_cycling_restore_anchor) + boot_s - logic::CHECKUP_WINDOW_S;
+    logic::checkup_cycling_snapshot(out, s_cycling_restored, s_cycling_trace, wall, boot_s,
+                                    oldest_saved_unix);
+    return out.unix_s != 0 && !s_cycling_forgotten.load(std::memory_order_acquire);
+}
 
 uint32_t circulation_identity() {
     return with_config([](const Config& c) {
@@ -289,6 +323,8 @@ void persist_wipe(bool keep_handoff = false) {
     P().ring.reset();
     P().dhw.reset();
     s_cycling_trace.reset();
+    s_cycling_restored.reset();
+    s_cycling_restore_anchor = 0;
     for (auto& expiry : s_slot_times.expiry_us) expiry = 0;
     for (auto& end : s_slot_times.restored_end_unix_s) end = 0;
     ++s_cycling_hours_epoch;
@@ -480,6 +516,7 @@ void checkup_start(bool diagnostics_enabled, uint32_t diagnostics_generation) {
     s_requested_dhw_source_fp.store(s_dhw_source_fp);
     s_diagnostics_enabled.store(diagnostics_enabled, std::memory_order_release);
     s_diagnostics_generation = diagnostics_generation;
+    s_cycling_restore_allowed = !safe_mode_active();
     const uint32_t want_fp = logic::checkup_layout_fingerprint();
     const uint32_t reason  = static_cast<uint32_t>(esp_reset_reason());
     s_persist_verdict        = logic::checkup_restore_verdict(
@@ -524,6 +561,7 @@ void checkup_set_diagnostics(bool enabled, uint32_t generation) {
     s_diagnostics_epoch.fetch_add(1, std::memory_order_acq_rel);
     s_diagnostics_enabled.store(enabled, std::memory_order_release);
     s_diagnostics_generation = generation;
+    retire_cycling_locked();
     s_stop_context           = {};
     s_stop_allow_restore     = false;
     stop_observation_set_diagnostics(enabled, generation);
@@ -549,6 +587,7 @@ void checkup_reset() {
     if (!s_mtx) return;
     Lock lk(s_mtx);
     if (!lk.acquired()) return;
+    retire_cycling_locked();
     s_boot_handoff_valid = false;
     // An explicit /detect or automatic-profile rewiring withdraws the old confirmation immediately.
     s_stop_context       = {};
@@ -604,6 +643,7 @@ void checkup_reset_on_detect(const char* profile_id, uint32_t source_fp) {
     }
     s_boot_handoff_valid = false;
     s_persist_verdict    = logic::CheckupRestore::ModelChanged;
+    retire_cycling_locked();
     s_reset_requested.store(true);
 }
 
@@ -956,20 +996,7 @@ logic::CheckupReport checkup_report(logic::CheckupCyclingHours* hours,
     expire_restored_locked();
     const int64_t  now_us        = esp_timer_get_time();
     if (hours) *hours = checkup_cycling_hours_locked(now_us);
-    if (trace && s_cov.rps && s_cycling_trace.count &&
-        now_us / 1000000 <= logic::CheckupCyclingTrace::max_second) {
-        int64_t unix_s = -1;
-        int32_t ms     = 0;
-        time_now(unix_s, ms);
-        const uint32_t anchor =
-            logic::checkup_cycling_end_unix_s(now_us - now_us % 1000000, now_us, unix_s, ms);
-        if (anchor) {
-            *trace              = s_cycling_trace;
-            trace->window_end_s = static_cast<uint32_t>(now_us / 1000000);
-            trace->unix_s       = anchor;
-            trace->observe_window(trace->window_end_s);
-        }
-    }
+    if (trace && !cycling_snapshot_locked(*trace, now_us)) trace->unix_s = 0;
     const bool     have_source   = s_source_last_us >= 0 && now_us >= s_source_last_us;
     const int64_t  source_gap_us = have_source ? now_us - s_source_last_us : 0;
     const uint32_t source_age_s =
@@ -1199,5 +1226,66 @@ CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* record
                 static_cast<unsigned>(materialized), logic::checkup_restore_slug(refused));
     return CheckupFlashRestoreResult::Restored;
 }
+
+bool checkup_cycling_checkpoint(logic::CheckupCyclingTrace&  trace,
+                                logic::CyclingTraceIdentity& identity, uint32_t& reset_token,
+                                TickType_t wait_ticks, bool allow_data) {
+    if (!s_mtx || s_cycling_forgotten.load(std::memory_order_acquire)) return false;
+    Lock lk(s_mtx, wait_ticks);
+    if (!lk.acquired() || s_cycling_forgotten.load(std::memory_order_acquire)) return false;
+    reset_token            = 0;
+    const uint32_t pending = s_cycling_reset_token.load(std::memory_order_relaxed);
+    if (pending != s_cycling_reset_acked.load(std::memory_order_acquire)) {
+        trace.reset();
+        trace.window_end_s = logic::CHECKUP_WINDOW_S;
+        // Fence order comes only from its journal sequence. Keep the nonzero wire field
+        // for legacy slot validation without assigning a wall timestamp to the reset.
+        trace.unix_s = 1;
+        trace.live   = false;
+        identity     = {};
+        reset_token  = pending;
+        return true;
+    }
+    if (!allow_data || !s_diagnostics_enabled.load(std::memory_order_acquire) ||
+        s_reset_requested.load() || !s_cycling_trace.count ||
+        !cycling_snapshot_locked(trace, esp_timer_get_time()))
+        return false;
+    identity = {s_model_fp, s_source_fp, s_diagnostics_generation};
+    return true;
+}
+
+bool checkup_cycling_reset_pending() {
+    return s_cycling_reset_token.load(std::memory_order_acquire) !=
+           s_cycling_reset_acked.load(std::memory_order_acquire);
+}
+
+void checkup_cycling_checkpoint_appended(uint32_t reset_token) {
+    if (reset_token) s_cycling_reset_acked.store(reset_token, std::memory_order_release);
+}
+
+CheckupFlashRestoreResult checkup_cycling_restore(const logic::CheckupCyclingTrace&  trace,
+                                                  const logic::CyclingTraceIdentity& identity,
+                                                  int64_t now_unix_s, TickType_t wait_ticks) {
+    using Result = CheckupFlashRestoreResult;
+    if (s_cycling_forgotten.load(std::memory_order_acquire)) return Result::Ignored;
+    if (!s_mtx) return Result::Deferred;
+    Lock lk(s_mtx, wait_ticks);
+    if (!lk.acquired()) return Result::Deferred;
+    if (!trace.count || !s_cycling_restore_allowed ||
+        !s_diagnostics_enabled.load(std::memory_order_acquire) || s_reset_requested.load() ||
+        s_cycling_forgotten.load(std::memory_order_acquire))
+        return Result::Ignored;
+    if (!s_source_confirmed || now_unix_s <= 0) return Result::Deferred;
+    const int64_t observed_unix_s =
+        static_cast<int64_t>(trace.unix_s) + trace.end_s - trace.window_end_s;
+    if (s_model_fp != identity.model_fp || s_source_fp != identity.source_fp ||
+        s_diagnostics_generation != identity.diagnostics_generation || trace.unix_s > now_unix_s ||
+        observed_unix_s <= now_unix_s - logic::CHECKUP_WINDOW_S)
+        return Result::Ignored;
+    s_cycling_restored = trace;
+    return Result::Restored;
+}
+
+void checkup_cycling_forget() { s_cycling_forgotten.store(true, std::memory_order_release); }
 
 } // namespace daik

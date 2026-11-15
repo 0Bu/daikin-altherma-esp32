@@ -267,7 +267,8 @@ def validate_sources(budgets, sources, error):
     ready_publish = 'if(s_mtx)s_flash_forget_ready.store(true,std::memory_order_release);'
     if ('std::atomic<bool>s_flash_forget_ready{false};' not in normalized(history)
             or not history_forget.startswith('s_flash_forgotten.store(true);'
-                                             'stop_observation_forget();bump_history_epoch();'
+                                             'stop_observation_forget();checkup_cycling_forget();'
+                                             'bump_history_epoch();'
                                              'if(!s_flash_forget_ready.load(std::memory_order_acquire))returnfalse;')
             or 's_flash_scan_ok=flash_journal_scan();' not in flash_start
             or not flash_start.endswith(ready_publish)):

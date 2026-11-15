@@ -1,4 +1,4 @@
-// translation-source: 65571656f160db7c5cef68e1a9e2f1c556ae6ac67f346ba2f2b092cff1d703c9
+// translation-source: 57360fc01b9b51987c1e6a54c6b11b7295a1a3b53f13d2b3928a2b44e523c222
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -230,8 +230,15 @@ I18N.nb = localeValues([
   /* check.cycling.unavailable */ "Ingen kompressordata.",
   /* check.cycling.stale */ "Målinger mangler akkurat nå.",
   /* check.cycling.history_empty */ "Ingen historikk ennå.",
-  /* check.cycling.timed_starts */ (s) => `Med tidspunkt: ${s}`,
-  /* check.cycling.saved_starts */ (s) => `Av disse kommer ${s} fra timetall før omstart. Klokkeslettene for disse startene mangler.`,
+  /* check.cycling.timed_starts */ (s) => `${s} med registrert klokkeslett`,
+  /* check.cycling.run_start */ "Start",
+  /* check.cycling.run_stop */ "Stopp",
+  /* check.cycling.run_duration */ "Varighet",
+  /* check.cycling.run_ongoing */ "I drift",
+  /* check.cycling.run_stop_unknown */ "Ukjent stopptid",
+  /* check.cycling.no_timed_runs */ "Ingen starttidspunkter er registrert i denne timen.",
+  /* check.cycling.run_details_unavailable */ "Tidspunkter for de enkelte driftsperiodene mangler for denne timen.",
+  /* check.cycling.saved_starts */ (s) => `Av disse kommer ${s} fra timetall før omstart.`,
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · snitt ${mean} °C`,
   /* check.min */ (m) => `${m} min`,

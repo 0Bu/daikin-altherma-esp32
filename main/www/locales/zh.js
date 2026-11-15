@@ -1,4 +1,4 @@
-// translation-source: 65571656f160db7c5cef68e1a9e2f1c556ae6ac67f346ba2f2b092cff1d703c9
+// translation-source: 57360fc01b9b51987c1e6a54c6b11b7295a1a3b53f13d2b3928a2b44e523c222
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
@@ -230,8 +230,15 @@ I18N.zh = localeValues([
   /* check.cycling.unavailable */ "没有压缩机数据。",
   /* check.cycling.stale */ "当前缺少测量数据。",
   /* check.cycling.history_empty */ "暂无历史记录。",
-  /* check.cycling.timed_starts */ (s) => `有时间记录：${s}`,
-  /* check.cycling.saved_starts */ (s) => `其中 ${s}来自重启前的每小时统计。这些启动没有具体时间记录。`,
+  /* check.cycling.timed_starts */ (s) => `${s}有时间记录`,
+  /* check.cycling.run_start */ "启动",
+  /* check.cycling.run_stop */ "停止",
+  /* check.cycling.run_duration */ "运行时长",
+  /* check.cycling.run_ongoing */ "运行中",
+  /* check.cycling.run_stop_unknown */ "停止时间未知",
+  /* check.cycling.no_timed_runs */ "这一小时没有带时间记录的启动。",
+  /* check.cycling.run_details_unavailable */ "这一小时没有单次运行的时间记录。",
+  /* check.cycling.saved_starts */ (s) => `其中 ${s}来自重启前的每小时统计。`,
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} 最低 ${min} °C · 平均 ${mean} °C`,
   /* check.min */ (m) => `${m} 分钟`,

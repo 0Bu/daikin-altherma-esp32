@@ -1,4 +1,4 @@
-// translation-source: 65571656f160db7c5cef68e1a9e2f1c556ae6ac67f346ba2f2b092cff1d703c9
+// translation-source: 57360fc01b9b51987c1e6a54c6b11b7295a1a3b53f13d2b3928a2b44e523c222
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -230,8 +230,15 @@ I18N.es = localeValues([
   /* check.cycling.unavailable */ "Sin datos del compresor.",
   /* check.cycling.stale */ "Ahora mismo faltan mediciones.",
   /* check.cycling.history_empty */ "Aún no hay historial.",
-  /* check.cycling.timed_starts */ (s) => `Con hora: ${s}`,
-  /* check.cycling.saved_starts */ (s) => `De ellos, ${s} proceden de registros horarios anteriores al reinicio. No se dispone de sus horas exactas.`,
+  /* check.cycling.timed_starts */ (s) => `${s} con hora registrada`,
+  /* check.cycling.run_start */ "Arranque",
+  /* check.cycling.run_stop */ "Parada",
+  /* check.cycling.run_duration */ "Duración",
+  /* check.cycling.run_ongoing */ "En marcha",
+  /* check.cycling.run_stop_unknown */ "Parada desconocida",
+  /* check.cycling.no_timed_runs */ "No se registró la hora de ningún arranque en este intervalo.",
+  /* check.cycling.run_details_unavailable */ "No hay datos de los ciclos individuales para esta hora.",
+  /* check.cycling.saved_starts */ (s) => `De ellos, ${s} proceden de registros horarios anteriores al reinicio.`,
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} mín. ${min} °C · media ${mean} °C`,
   /* check.min */ (m) => `${m} min`,

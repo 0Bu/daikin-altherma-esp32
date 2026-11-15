@@ -301,6 +301,21 @@ calls handlers in reverse registration order. The handler dates the open hour by
 and freezes it. The drain then offers it after every live hour as a short record
 (`checkup_seal_*` in `checkup_persist.hpp`). `PLANT.md` owns when it is skipped.
 
+The rolling compressor trace uses the dated journal with a separate payload fingerprint. The writer
+can offer an eligible checkpoint at most once every 120 seconds, with up to 192 records in four
+journal slots. The bounded shutdown flush can save a newer trace. Restoration checks a
+bounded set of groups newer than the last committed reset fence, newest first. A damaged or
+incomplete group can fall back to an older candidate. The first structurally complete group
+determines the result. Admission requires synchronized time, a matching model, link and
+diagnostics-consent identity, and observations eligible for the rolling window. An incompatible
+complete group ends the search. A scoped reset withdraws restored evidence immediately. Once the
+writer sees the pending reset, it drops any unfinished data group and gives the fence the next
+eligible write for this trace. The reset becomes durable when the fence commits. Power loss
+before that commit can leave an earlier compatible group eligible. After the journal scan, an
+orderly shutdown can save the undated fence even before time sync or trend restoration. No
+observations are admitted by that fence-only drain. Restored observations keep
+their saved times and age with a monotonic floor. The journal retains its existing geometry.
+
 Hourly diagnosis state grows by source, not by bucket. Each byte added to `CheckupBucket` or
 `DhwLossBucket` is held 24 times in `.noinit` (23 completed hours and the open one) and once per
 journal record, and 23 stored records must still fit the 4 KiB sector scratch (see Memory
