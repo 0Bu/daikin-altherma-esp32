@@ -207,8 +207,15 @@ assert.equal(count(adoptFn, /history_liveness_commit\(s_liveness, logic::History
   "adoption notes the claimed boundary as each raster's commit, not the boot instant");
 assert.doesNotMatch(adoptFn, /now_us/, "persist_adopt knows only the claim");
 const seed = body(history, "bool seed_source_timeline_locked(");
-assert.match(seed, /logic::history_raster_boundary_us\(now_us\)/,
-  "the flash seed claims the last monotonic boundary");
+assert.match(seed, /uint32_t bucket = logic::history_bucket\(now_us\);/,
+  "a recorder without an open bucket starts at the current monotonic boundary");
+for (const [source, prefix] of [["X10a", "s_"], ["Modbus", "s_mb_"],
+  ["Env3", "s_env3_"], ["Room", "s_room_"]]) {
+  assert.ok(seed.includes(`case HistorySource::${source}: if (${prefix}have_bucket) bucket = ${prefix}bucket; break;`),
+    `the flash seed preserves the pending ${source} bucket`);
+}
+assert.match(seed, /commit_us = static_cast<int64_t>\(bucket\) \* logic::HISTORY_DT_S \* 1000000;/,
+  "the flash seed claims the boundary of the selected open bucket");
 assert.match(seed, /logic::history_anchor_bucket\(unix_s, now_us, commit_us, logic::HISTORY_DT_S, ms\)/,
   "the seed combines the actual wall-clock milliseconds with the monotonic age");
 assert.equal(count(seed, /history_liveness_commit\(s_liveness/g), 3);
