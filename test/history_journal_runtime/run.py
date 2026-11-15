@@ -234,6 +234,10 @@ if not args.expect_red:
     seed_body = text[seed_start:seed_end]
     seed_boundary = re.search(r"^    const int64_t +commit_us\s*=.+;$", seed_body, re.M).group(0)
     mutations = [
+        ("anchor_at_late_fold",
+         "return wall_bucket_of_instant_locked(logic::history_raster_boundary_us(commit_us));",
+         "return wall_bucket_of_instant_locked(commit_us);",
+         ["restore_before_pending_bucket"], "late_first_commit_keeps_its_journal_bucket"),
         ("seed_past_pending_bucket", seed_body, seed_body.replace(
             seed_boundary, "    bucket = logic::history_bucket(now_us);\n" + seed_boundary),
          ["restore_before_pending_bucket"], "restore_keeps_pending_bucket_open"),

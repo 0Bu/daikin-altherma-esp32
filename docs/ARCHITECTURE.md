@@ -213,6 +213,10 @@ History has two independent persistence paths:
 | `.noinit` DRAM | Compatible power-preserving resets without extra flash writes | Allowlisted reset reason, format, catalog fingerprint, CRC and matching X10A/HomeHub physical target scope; reject brownout/power glitch, unknown reset reasons and future anchors. The open bucket is discarded. OTA may move RAM and invalidate it. |
 | `history` flash journal | Compatible records across power loss and OTA | Successful scan, compatible semantic catalog, matching X10A target or HomeHub host/port/unit scope, and synchronized wall time; restore by original absolute bucket, leaving downtime gaps. Live observations win overlap, including live absence. |
 
+Restore splices records before the recorder's pending five-minute bucket. The pending observation
+closes on its normal boundary even when the next poll arrives late. The saved wall bucket follows
+that boundary, preserving the order and position of the restored samples.
+
 The journal occupies the upper 4 MiB of the official 8 MiB layout. Dense source records have a CRC
 and a commit word programmed last; a torn slot is skipped without erasing older committed neighbors.
 Erase sectors rotate over the partition. Record geometry grows by powers of two with a compile-time

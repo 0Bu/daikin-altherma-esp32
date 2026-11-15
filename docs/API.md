@@ -448,24 +448,25 @@ Unknown ids return 404. Available rows are listed in `/status.history`. The payl
 `v` is tenths of the row's actual unit; divide by ten. `dt` is the raster cadence. `b0` is the
 monotonic five-minute bucket of sample zero. When a restored ring begins before boot, `boot_b0`
 carries its negative bucket instead. `t0` is sample-zero wall time derived from the captured newest
-sample age and omitted before clock sync. `epoch` is captured with the samples and `boot_id` matches
-`/status`.
+completed bucket boundary and omitted before clock sync. `epoch` is captured with the samples
+and `boot_id` matches `/status`.
 The firmware omits `t0` if sample-age metadata is unavailable. A missing snapshot epoch or an
 epoch change before emission returns 503. Clients must reject responses superseded by a newer
 status/source generation.
 `held` marks eligible X10A outdoor nulls as held-over; all other source rasters leave it empty.
 The dashboard accepts up to 4 KiB of decoded JSON and 288 samples on the 300-second raster.
-With live status, it bounds boot-relative buckets and the sample extent by reported uptime, elapsed browser time
-and the poll deadline. It accepts a reply without row
+With live status, it bounds boot-relative buckets by reported uptime, elapsed browser time and
+one second for whole-second uptime. It accepts a reply without row
 and source identity only if both are absent and `/status` predates the history epoch. A supplied
 identity must match the request, along with the boot and epoch tokens announced by `/status`.
 A nonempty date-only reply also needs a synchronized device clock. When live clock evidence is
-available, any nonempty dated reply must end within the rolling day and poll tolerance. The browser
-preserves a compatible ring when it rejects the replacement. Independent sources with incompatible
+available, the wall time needs to agree with the completed bucket and fit within the rolling day
+and poll tolerance. The browser preserves a compatible ring when it rejects the replacement.
+Independent sources with incompatible
 time anchors use separate plots. A clock correction can move dated samples by a full bucket.
 Anchored comparisons require a shared boot raster. Independent recorders can book different
-warm-reset gaps, so their pre-boot histories remain separate. A valid boot anchor can carry
-the data on a relative axis when the wall clock disagrees with the last status. An overlay
+warm-reset gaps, so their plots remain separate while the window includes pre-boot histories.
+A valid boot anchor carries the data on a relative axis when the wall clock disagrees with the last status. An overlay
 of legacy unanchored rings also uses a relative axis.
 `v` does not record an unknown compressor state. A sweep dropped after a stop cannot put a number into
 its bucket, but any other outdoor sample without a readable speed stays a number, so a number is not

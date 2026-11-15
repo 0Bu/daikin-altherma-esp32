@@ -363,12 +363,17 @@ function validHistoryBucket(start, count) {
   return start + count <= Math.floor((uptime + seconds + 1) / 300);
 }
 
-function validHistoryTime(start, count) {
+function validHistoryTime(start, bootBucket, count) {
   if (start == null || !count) return true;
   // A restored ring without a monotonic anchor needs an accepted device clock for alignment.
   const deviceTime = historyDeviceTime();
   if (!Number.isFinite(deviceTime)) return false;
   const last = start + (count - 1) * 300;
+  const uptime = S.status?.uptime_s;
+  if (Number.isInteger(bootBucket) && Number.isFinite(uptime)) {
+    const expected = deviceTime - (uptime + historyStatusElapsed()) + (bootBucket + count) * 300;
+    if (Math.abs(last - expected) > 2 + POLL_TIMEOUT_MS / 1000) return false;
+  }
   return last <= deviceTime + 1 + POLL_TIMEOUT_MS / 1000 &&
     last >= deviceTime - HIST_MAX_SAMPLES * 300;
 }
@@ -403,7 +408,7 @@ async function readHistory(id, source, key, epoch, previous, request) {
     const time = j?.t0;
     const wallTimeShape = time == null ||
       (Number.isSafeInteger(time) && Math.abs(time) <= 8.64e12 - HIST_MAX_SAMPLES * 300);
-    const wallTimeValid = wallTimeShape && validHistoryTime(time, Array.isArray(j?.v) ? j.v.length : 0);
+    const wallTimeValid = wallTimeShape && validHistoryTime(time, bucket, Array.isArray(j?.v) ? j.v.length : 0);
     if (!changed && (r.ok === false || j?.ok === false || !Array.isArray(j?.v) ||
         j.v.length > HIST_MAX_SAMPLES || j.v.some(v => v !== null &&
           (!Number.isInteger(v) || v < -32766 || v > 32767)) ||
@@ -859,7 +864,9 @@ function historyView(id, source = "", forecast) {
     if (view?.separate) return { ...view, separateForecast: weather };
     if (view?.v.some(v => v != null)) {
       if (weather) {
-        if (!Number.isFinite(view.t0)) return { ...view, separateForecast: weather };
+        const measuredEnd = view.t0 + (view.v.length - 1) * view.dt;
+        if (!Number.isFinite(view.t0) || measuredEnd > weather.now)
+          return { ...view, t0: null, separateForecast: weather };
         view.forecast = weather;
         view.series = ENV3_COMBINED_SERIES.map(s =>
           view.series.find(q => q.source === s.id) ||

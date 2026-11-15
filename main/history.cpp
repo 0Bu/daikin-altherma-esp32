@@ -661,7 +661,10 @@ int64_t wall_bucket_of_instant_locked(int64_t instant_us) {
 }
 
 int64_t source_anchor_bucket_locked(HistorySource src) {
-    return wall_bucket_of_instant_locked(source_last_commit_us(src));
+    const int64_t commit_us = source_last_commit_us(src);
+    if (commit_us == kNoCommitUs) return INT64_MIN;
+    // The recorder can fold after the wall clock enters its next bucket.
+    return wall_bucket_of_instant_locked(logic::history_raster_boundary_us(commit_us));
 }
 
 // ── The history flash journal ───────────────────────────────────────────────────────────────────
@@ -1590,8 +1593,9 @@ static void clear_snapshot_meta(logic::HistoryMeta* meta) {
 
 static void fill_snapshot_meta_locked(logic::HistoryMeta* meta, int64_t last_commit_us,
                                       int64_t last_commit_bucket, size_t n) {
-    if (!meta) return;
-    meta->newest_age_s = logic::history_meta_newest_age_s(esp_timer_get_time(), last_commit_us);
+    if (!meta || last_commit_us == kNoCommitUs) return;
+    meta->newest_age_s = logic::history_meta_newest_age_s(
+        esp_timer_get_time(), logic::history_raster_boundary_us(last_commit_us));
     meta->oldest_bucket =
         logic::history_meta_oldest_bucket(meta->newest_age_s, last_commit_bucket, n);
 }

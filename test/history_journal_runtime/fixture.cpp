@@ -590,11 +590,12 @@ void checkup_pending(const char* transport_path, bool forget_interleave) {
 
 void restore_before_pending_bucket() {
     boot();
-    sdk::now_us = 299000000;
+    journal_sdk::unix_origin = journal_sdk::unix_origin / HISTORY_DT_S * HISTORY_DT_S + 299;
+    sdk::now_us              = 299000000;
     advance_raster_locked(sdk::now_us, 0);
     P().ring[0].ring.fold(430);
 
-    sdk::now_us = 301000000;
+    sdk::now_us = 301500000;
     const auto stored_anchor =
         history_anchor_bucket(journal_sdk::unix_origin, 0, 0, HISTORY_DT_S, 0);
     const HistorySample stored[] = {400, 410};
@@ -609,6 +610,8 @@ void restore_before_pending_bucket() {
     require(history_snapshot(0, samples, 4, nullptr, &meta) == 3 && meta.oldest_bucket == -2 &&
                 samples[0] == 400 && samples[1] == 410 && samples[2] == 430,
             "first_commit_preserves_restored_sample_identity");
+    require(source_anchor_bucket_locked(HistorySource::X10a) == stored_anchor + 1,
+            "late_first_commit_keeps_its_journal_bucket");
 }
 } // namespace
 int main(int argc, char** argv) {

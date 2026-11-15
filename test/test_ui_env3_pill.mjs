@@ -305,6 +305,13 @@ sandbox.__api.toggle("env3_temperature");
   assert.doesNotMatch(elements.inspHist.innerHTML, /env-forecast-temperature/,
     "a cached OTA status cannot supply a current forecast");
   delete S.otaCached;
+  for (const [index, t0] of [currentUnix + 600, currentUnix - 300].entries()) {
+    for (const [id, ring] of rings) S.hist.set(id, { ...ring, gen: 7 + index, t0 });
+    sandbox.__api.render();
+    assert.match(elements.inspHist.innerHTML, /data-hist="env3_combined"[\s\S]*vhist-line env-temperature/);
+    assert.match(elements.inspHist.innerHTML, /data-hist="env3_forecast"[\s\S]*vhist-line env-forecast-temperature/,
+      "a corrected clock keeps measured points and the fresh forecast on independent axes");
+  }
   for (const [id, ring] of rings) S.hist.set(id, ring);
 }
 

@@ -163,7 +163,7 @@ mutations = [
      'revision->valuedouble != static_cast<double>(config_runtime_revision())',
      'false', 'board_draft_revision'),
     ('allocate_board_draft_refusal', 'source',
-     re.compile(r'http_send_json\(req,\s+(R"\(\{"ok":false,"code":"board_draft_stale",\)"\s+'
+     re.compile(r'http_send_json\(\s*req,\s+(R"\(\{"ok":false,"code":"board_draft_stale",\)"\s+'
                 r'R"\("error":"Board settings changed\. Reopen the editor before saving\."\}\)")\);'),
      r'http_send_json(req, std::string(\1).c_str());', 'board_draft_revision'),
     ('leaked_request_scratch', 'source', re.compile(r'error\s*= root \? nullptr : "bad json";'),

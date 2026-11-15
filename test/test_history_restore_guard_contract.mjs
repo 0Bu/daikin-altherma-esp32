@@ -224,7 +224,8 @@ assert.doesNotMatch(history + code("main/logic/history_persist.hpp"), /history_a
 assert.match(body(history, "int64_t wall_bucket_of_instant_locked("),
   /logic::history_anchor_bucket\(unix_s, esp_timer_get_time\(\), instant_us, logic::HISTORY_DT_S, ms\)/,
   "the live anchor, the floor and the seed share one derivation");
-assert.match(body(history, "int64_t source_anchor_bucket_locked("), /wall_bucket_of_instant_locked\(source_last_commit_us\(src\)\)/);
+assert.match(body(history, "int64_t source_anchor_bucket_locked("),
+  /commit_us = source_last_commit_us\(src\); if \(commit_us == kNoCommitUs\) return INT64_MIN; return wall_bucket_of_instant_locked\(logic::history_raster_boundary_us\(commit_us\)\)/);
 
 // A wipe starts the counter over, and the factory-reset wipe starts the liveness record over.
 assert.match(body(history, "inline void persist_wipe("),

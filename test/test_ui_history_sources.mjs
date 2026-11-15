@@ -477,13 +477,21 @@ assert.equal(h.histCacheKey("dhw_tank", "modbus"), "modbus:dhw_tank");
   assert.deepEqual(Array.from(S.hist.get("modbus:dhw_tank").v), modbus.v,
     "a future wall-clock-only reply must preserve the compatible ring");
   assert.equal(S.hist.get("modbus:dhw_tank").refreshFailed, true);
+  for (const t0 of [4102444800, time - 3600]) {
+    S.hist.set("modbus:dhw_tank", { ...modbus, at: 0 });
+    historyResponse = { ...historyResponse, b0: 102, t0 };
+    await h.ensureHist("dhw_tank", "modbus");
+    assert.deepEqual(Array.from(S.hist.get("modbus:dhw_tank").v), [520],
+      "an observed boot bucket can preserve the sample after a wall-clock step");
+    assert.equal(S.hist.get("modbus:dhw_tank").t0, null,
+      "a discrepant wall clock cannot label the sample, even within the accepted day");
+  }
+  const matchingWallTime = time - 32000 + 103 * 300;
   S.hist.set("modbus:dhw_tank", { ...modbus, at: 0 });
-  historyResponse = { ...historyResponse, b0: 102 };
+  historyResponse = { ...historyResponse, t0: matchingWallTime };
   await h.ensureHist("dhw_tank", "modbus");
-  assert.deepEqual(Array.from(S.hist.get("modbus:dhw_tank").v), [520],
-    "an observed boot bucket can preserve the sample after a wall-clock step");
-  assert.equal(S.hist.get("modbus:dhw_tank").t0, null,
-    "the discrepant wall clock cannot label the boot-relative sample");
+  assert.equal(S.hist.get("modbus:dhw_tank").t0, matchingWallTime,
+    "the timestamp is displayed when it agrees with the status clock and completed bucket");
   S.hist.delete("modbus:dhw_tank");
   historyResponse = { ...historyResponse, b0: undefined, t0: time - 300 };
   await h.ensureHist("dhw_tank", "modbus");
