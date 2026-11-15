@@ -357,6 +357,10 @@ sandbox.__api.toggle("env3_temperature");
   const hourly = S.status.weather_forecast.hourly;
   events.pointerdown(pointer);
   S.status.weather_forecast.hourly = hourly.filter(hour => hour.time_unix_s !== currentUnix + 7200);
+  plot.dataset.cur = "4";
+  events.keydown({ target: plot, key: "Enter", preventDefault() {} });
+  assert.equal(S.histPin.has("env3_combined"), false,
+    "keyboard confirmation during the same drag cannot pin a replacement hour");
   events.pointerup({ ...pointer, type: "pointerup" });
   assert.equal(S.histPin.has("env3_combined"), false,
     "a forecast hour removed during the gesture must not create a latent pin");

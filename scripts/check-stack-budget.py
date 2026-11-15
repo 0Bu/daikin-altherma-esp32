@@ -1758,6 +1758,7 @@ CONFIG_DOCUMENT_PATHS = frozenset({
     "httpd_hp_query_probe", "httpd_config_save", "httpd_config_save_link", "httpd_config_board_save",
     "httpd_mqtt_tls",
     "httpd_i2c_read", "httpd_i2c_write", "httpd_i2c_receive",
+    "httpd_board_i2c_read", "httpd_board_i2c_write", "httpd_board_i2c_receive",
     "httpd_checkup_schema",
     *(f"httpd_shutdown_{name}_{phase}" for name in SHUTDOWN_HTTP_CALLERS
       for phase in ("journal", "checkup")),
@@ -2756,6 +2757,8 @@ def self_test() -> None:
   14: 004136          entry a1, 2336
 00000015 <daik::set_board(httpd_req*)>:
   15: 004136          entry a1, 2176
+00000384 <daik::env3_save_preflight(httpd_req*, daik::Config const&, daik::Config&, bool&)>:
+ 384: 004136          entry a1, 112
 00000016 <daik::set_env3(httpd_req*)>:
   16: 004136          entry a1, 1792
 00000017 <daik::set_weather(httpd_req*)>:

@@ -360,9 +360,10 @@ function wireTrendScrub(gv) {
       S.histPin.delete(plot.dataset.hist); scrubEnd(plot); return renderTrendHosts();
     }
     if (e.key === "Enter" || e.key === " ") {   // pin what the arrow keys are reading out
-      if (typeof scrubView === "function" && !scrubView(plot)) return renderTrendHosts();
+      const view = scrubView(plot);
+      if (!view) return renderTrendHosts();
       const cur = plot.dataset.cur == null ? n - 1 : +plot.dataset.cur;
-      return histPinToggle(plot.dataset.hist, cur, plot.dataset.source || "");
+      return histPinToggle(plot.dataset.hist, cur, plot.dataset.source || "", view);
     }
     const cur = plot.dataset.cur == null ? n - 1 : +plot.dataset.cur;
     const next = e.key === "Home" ? 0 : e.key === "End" ? n - 1 : cur + step;

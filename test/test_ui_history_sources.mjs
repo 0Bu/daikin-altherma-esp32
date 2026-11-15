@@ -298,6 +298,10 @@ S.hist.set("modbus:dhw_tank", modbus);
   S.status.ntp = { synced: true, time: new Date(now * 1000).toISOString() };
   assert.equal(h.historyView("dhw_tank").t0, null,
     "two retained clocks cannot label the aligned data after a correction");
+  S.transportUnavailable = "status";
+  assert.equal(h.historyView("dhw_tank").t0, null,
+    "status transport loss cannot revive a wall label already contradicted by the accepted clock");
+  delete S.transportUnavailable;
   S.hist.set("modbus:dhw_tank", { ...S.hist.get("modbus:dhw_tank"), t0: now - 86400 });
   assert.equal(h.historyView("dhw_tank").t0, now - 86400 + 300,
     "the refreshed HomeHub clock labels the common current-boot axis");

@@ -364,10 +364,9 @@ function validHistoryBucket(start, count) {
   return start + count <= Math.floor((uptime + seconds + 1) / 300);
 }
 
-function validHistoryTime(start, bootBucket, count) {
+function validHistoryTime(start, bootBucket, count, deviceTime = historyDeviceTime()) {
   if (start == null || !count) return true;
   // A restored ring without a monotonic anchor needs an accepted device clock for alignment.
-  const deviceTime = historyDeviceTime();
   if (!Number.isFinite(deviceTime)) return false;
   const last = start + (count - 1) * 300;
   const uptime = S.status?.uptime_s;
@@ -850,8 +849,9 @@ function expireHistSamples(h) {
 const histRetained = h => h.refreshFailed || h.aged;
 function historyWallLabelAllowed(h) {
   if (!Number.isFinite(h.t0)) return false;
-  if (!Number.isInteger(h.b0) || !Number.isFinite(historyDeviceTime())) return true;
-  return validHistoryTime(h.t0, h.b0, h.v.length);
+  const clock = historyDeviceTime(true);
+  if (!Number.isInteger(h.b0) || !Number.isFinite(clock)) return true;
+  return validHistoryTime(h.t0, h.b0, h.v.length, clock);
 }
 
 function historyRingRevision(h) {

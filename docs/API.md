@@ -460,15 +460,14 @@ With live status, it bounds boot-relative buckets by reported uptime, elapsed br
 the status request began and one second for whole-second uptime. It accepts a reply without row
 and source identity only if both are absent and `/status` predates the history epoch. A supplied
 identity must match the request, along with the boot and epoch tokens announced by `/status`.
-A nonempty date-only reply also needs a synchronized device clock. When live clock evidence is
-available, the wall time needs to agree with the completed bucket and fit within the rolling day
-and poll tolerance. The browser preserves a compatible ring when it rejects the replacement.
-Independent sources with incompatible
-time anchors use separate plots. A clock correction can move dated samples by a full bucket.
-Anchored comparisons require a shared boot raster. Independent recorders can book different
-warm-reset gaps, so their plots remain separate while the window includes pre-boot histories.
-A valid boot anchor carries the data on a relative axis when the wall clock disagrees with the last status. An overlay
-of legacy unanchored rings also uses a relative axis.
+A nonempty date-only reply needs a synchronized device clock and dates within the rolling day and
+poll tolerance. With a boot anchor and reported uptime, the browser also checks wall time against
+the completed bucket. If the wall time disagrees, the browser keeps the boot-aligned samples and
+drops that timestamp. A compatible peer can supply wall-clock labels for the shared raster.
+Without a compatible clock the chart uses a relative axis, as it does for legacy unanchored rings.
+The browser preserves compatible cached readings if it rejects a replacement. Independent sources
+with incompatible anchors use separate plots. Independent recorders can book different warm-reset
+gaps, so their plots stay separate while either still contains pre-boot samples.
 `v` does not record an unknown compressor state. A sweep dropped after a stop cannot put a number into
 its bucket, but any other outdoor sample without a readable speed stays a number, so a number is not
 proof that the page was current.
@@ -610,8 +609,9 @@ Reopen the editor from current status before submitting again. Clients can omit 
 share the same preflight: enabling new pins probes SHT30/QMP6988 (422 if absent, 503 if busy), enabling
 running pins needs fresh evidence (422 if unreachable), moving an active bus is 409 `env3_disable_first`.
 Disabling needs no hardware proof. Responses include machine codes; only successful real changes reboot.
-If detection commits an X10A link onto a claimed pin while either save is in flight, nothing is
-saved and the route answers 409 without a machine code.
+If detection commits an X10A link onto a claimed pin during a save without draft tokens, the
+request writes nothing and receives an uncoded 409. A revision-bound Board save instead receives
+the draft-stale error described above.
 
 ### Plant diagnostics and sources
 
