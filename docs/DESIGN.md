@@ -290,8 +290,9 @@ when its numeric values do not change.
 
 A trended reading has a 24-hour sparkline in its inspector and value expander, with no separate
 history card or range picker. Numeric charts share a light area/darker line grammar; gaps break both,
-and a lone sample is a dot. Paired X10A/HomeHub series share axes and cursor time, with blue/petrol
-source legends. Room temperature can add the configured MQTT source as a third, separately coloured
+and a lone sample is a dot. X10A and HomeHub use blue/petrol source legends. Sources share an
+axis and cursor when their time rasters align. Incompatible anchors use separate plots and cursors.
+Room temperature can add the configured MQTT source as a third, separately coloured
 series with its name and MQTT attribution, including when no device room sensor is available.
 The device sensor and MQTT source keep distinct current values and explanations. Source replacement
 never splices two instruments into one series.
@@ -330,12 +331,11 @@ Closing a chart ends its active gesture.
 A failed refresh keeps compatible readings within the most recent day. A distinct marker identifies
 each retained series' last received sample. Categorical timelines keep their separate live cap,
 and weather charts show a verified current forecast even when the measured history is empty.
-Independent sources with incompatible time anchors have their own plots and cursors.
 
 Hover previews a sample. Tap pins it, and another tap on the same sample or Escape clears it.
 The two views of a row share a recorded pin where both display an instrument selected by the pin.
 A peer's reading cannot keep a pinned measurement visible after its original source rolls out.
-A dated pin tracks the original boot-relative bucket when available, even if wall time changes.
+A pin tracks the original boot-relative bucket when available, including before clock sync.
 Live-state pins require the same visible instruments and current states. Refreshing completed
 history alone leaves a live-state pin in place.
 The two views freeze while either is scrubbed.
@@ -587,7 +587,7 @@ Use shared components rather than near-identical render paths:
 | Accepted rebooting save | Reboot/reconnect feedback, then return to the same Settings context |
 | Accepted live save | Applied result; stay on view and refresh relevant facts |
 | No change | Close with No changes; no phantom reboot |
-| Invalid input/server 4xx | Inline reason where attributable; modal/draft remain |
+| Input validation refusal | Inline reason where attributable; modal/draft remain |
 | Board draft stale (409) | Close the editor, refresh board status and ask the owner to reopen |
 | Persistence failure 500 | Explicit unsaved error; preserve draft, never claim reboot |
 | Busy 503 | Retryable device-busy wording; blame no field |

@@ -107,7 +107,7 @@ function historyReply(url, body) {
   const q = new URL(url, "http://device").searchParams;
   const id = q.get("row");
   return Response.json({ id, source: q.get("source") || (id === "circulation_state" ? "mqtt" : "x10a"),
-    ...body, epoch: S.status?.history?.epoch, boot_id: S.status?.boot_id });
+    epoch: S.status?.history?.epoch, boot_id: S.status?.boot_id, ...body });
 }
 const labels = {
   "hist.loading": "Verlauf wird geladen…", "hist.err": "Verlauf nicht verfügbar.",
@@ -275,6 +275,15 @@ S.hist.set("modbus:dhw_tank", modbus);
     ["x10a", "modbus"]);
   assert.match(separate, /<i><\/i>X10A<\/button>/);
   assert.equal(h.historyView("dhw_tank", "modbus").t0, dated.t0 + 3600);
+  S.hist.set("dhw_tank", { ...x10a, b0: null, ...dated });
+  S.hist.set("modbus:dhw_tank", { ...modbus, b0: null, t0: dated.t0 + 150 });
+  assert.deepEqual(Array.from(h.historyView("dhw_tank").separate), ["x10a", "modbus"],
+    "wall clock alone cannot overlay rings with different raster boundaries");
+  S.hist.set("modbus:dhw_tank", { ...modbus, b0: null, t0: dated.t0 + 300 });
+  const shared = h.historyView("dhw_tank");
+  assert.equal(shared.t0, dated.t0);
+  assert.deepEqual(Array.from(shared.series[1].v), [null, ...modbus.v],
+    "exact wall boundaries preserve each source's measurements and leading gap");
   S.hist.set("dhw_tank", { ...x10a, ...dated });
   S.hist.set("modbus:dhw_tank", { ...modbus, ...dated });
   h.histPinToggle("dhw_tank", 0, "x10a");
@@ -358,6 +367,13 @@ S.hist.set("modbus:dhw_tank", modbus);
   S.hist.set("dhw_tank", { ...x10a, t0: 1768720310 });
   assert.equal(h.histPinIndex("dhw_tank", h.historyView("dhw_tank", "x10a")), 1,
     "a corrected clock cannot move a pin away from the same boot-relative bucket");
+  S.histPin.delete("dhw_tank");
+  S.hist.set("dhw_tank", x10a);
+  h.histPinToggle("dhw_tank", 2, "x10a");
+  S.hist.set("dhw_tank", { ...x10a, b0: x10a.b0 + 1, t0: 1768720000,
+    gen: x10a.gen + 1, v: [null, 454, 455] });
+  assert.equal(h.histPinIndex("dhw_tank", h.historyView("dhw_tank", "x10a")), 1,
+    "a boot-relative pin survives the first clock sync and a one-slot roll");
   S.histPin.delete("dhw_tank");
 
   const restoredRing = { ...x10a, b0: null, t0: 1768720000, v: [452, 453, 454] };
@@ -449,6 +465,26 @@ assert.equal(h.histCacheKey("dhw_tank", "modbus"), "modbus:dhw_tank");
   assert.equal(S.hist.get("modbus:dhw_tank").refreshFailed, true);
   assert.equal(h.expiredHistSlots({ ...x10a, b0: null, t0: pastDay, v: [450] }), 1,
     "cached restored samples expire by their own anchor even off the UTC raster boundary");
+  const oldReceivedAt = S.statusReceivedAt;
+  let tick = 0;
+  context.historyClock = () => tick;
+  S.statusReceivedAt = tick;
+  S.hist.delete("modbus:dhw_tank");
+  historyResponse = { ...historyResponse, t0: time + 6 - 287 * 300, v: Array(288).fill(520) };
+  await h.ensureHist("dhw_tank", "modbus");
+  const almostDay = S.hist.get("modbus:dhw_tank");
+  assert.equal(almostDay.t0, historyResponse.t0, "the newest sample is within the poll tolerance");
+  S.status.ntp = { synced: false, time: null };
+  tick = 300000;
+  assert.equal(h.expiredHistSlots(almostDay), 0,
+    "receipt plus five minutes cannot drop a sample still inside the wall-clock day");
+  tick += 6000;
+  assert.equal(h.expiredHistSlots(almostDay), 0, "the 24-hour wall boundary is inclusive");
+  tick += 1000;
+  assert.equal(h.expiredHistSlots(almostDay), 1, "the accepted device clock advances without new status");
+  delete context.historyClock;
+  S.statusReceivedAt = oldReceivedAt;
+  S.status.ntp = { synced: true, time: new Date(time * 1000).toISOString() };
   historyResponse = { ...historyResponse, t0: time - 300 };
   S.hist.set("modbus:dhw_tank", { ...modbus, at: 0 });
   S.status.ntp = { synced: false, time: null };
@@ -527,8 +563,8 @@ assert.equal(h.histVisibleSeries(view)[0].source, "x10a");
   assert.equal(h.histPinIndex("dhw_tank", h.historyView("dhw_tank")), 0,
     "a hidden peer refreshing the same grid cannot retire a plotted sample's pin");
   S.hist.set("modbus:dhw_tank", { ...modbus, gen: 3, b0: modbus.b0 - 1 });
-  assert.equal(h.histPinIndex("dhw_tank", h.historyView("dhw_tank")), -1,
-    "an index pin cannot change which sample it addresses when alignment moves");
+  assert.equal(h.histPinIndex("dhw_tank", h.historyView("dhw_tank")), 1,
+    "a boot-relative pin stays with its sample when the aligned view starts earlier");
   S.histPin.delete("dhw_tank");
   S.hist.set("modbus:dhw_tank", modbus);
 }
@@ -686,6 +722,20 @@ assert.match(roomHtml, /vhist-pt room/);
 assert.match(roomHtml, /vhist-now room/);
 assert.match(roomHtml, /vhist-mark vhist-live room/);
 assert.match(roomHtml, /1 Lücke/);
+{
+  const x = S.hist.get("room_temp"), mb = S.hist.get("modbus:room_temp");
+  const mqtt = S.hist.get("room:room_temp");
+  S.hist.set("modbus:room_temp", { ...mb, b0: null, t0: 1768720150 });
+  S.hist.set("room:room_temp", { err: true, v: [] });
+  const splitRoom = h.histHtml("room_temp", "°C", "Raumtemperatur");
+  assert.match(splitRoom, /data-source="x10a"/);
+  assert.match(splitRoom, /data-source="modbus"/);
+  assert.match(splitRoom, /MQTT · Verlauf nicht verfügbar/,
+    "a third failed instrument is still named below the independent charts");
+  S.hist.set("room_temp", x);
+  S.hist.set("modbus:room_temp", mb);
+  S.hist.set("room:room_temp", mqtt);
+}
 for (const cls of ["line", "area", "pt", "mark"])
   assert.match(style, new RegExp(`\\.vhist-${cls}\\.room`), `${cls} must use the independent room colour`);
 S.status.history.rows = S.status.history.rows.filter((r) => r.id !== "room_temp");
@@ -727,10 +777,21 @@ assert.equal(S.hist.get("dt").b0, 100);
 assert.deepEqual(Array.from(S.hist.get("dt").v), [null, 60, 60],
   "the earlier bucket remains a gap instead of being cut off with the shorter input");
 const bucketReturnWater = S.hist.get("return_water");
+const bucketLeavingWater = S.hist.get("leaving_water");
 S.hist.set("return_water", { ...bucketReturnWater, gen: 2, b0: null, t0: 1768720000 });
 await h.ensureDerived("dt");
 assert.deepEqual(Array.from(S.hist.get("dt").v), [],
   "boot-relative supply and date-only return cannot be paired by ring length");
+S.hist.set("leaving_water", { ...bucketLeavingWater, gen: 2, b0: null, t0: 1768720000 });
+S.hist.set("return_water", { ...bucketReturnWater, gen: 3, b0: null, t0: 1768720150 });
+await h.ensureDerived("dt");
+assert.deepEqual(Array.from(S.hist.get("dt").v), [],
+  "off-raster wall-only operands cannot fabricate a temperature spread");
+S.hist.set("return_water", { ...bucketReturnWater, gen: 4, b0: null, t0: 1768720300 });
+await h.ensureDerived("dt");
+assert.deepEqual(Array.from(S.hist.get("dt").v), [null, 60, 60],
+  "aligned wall-only operands keep the same sampled spread");
+S.hist.set("leaving_water", bucketLeavingWater);
 S.hist.set("return_water", bucketReturnWater);
 await h.ensureDerived("dt");
 
@@ -962,6 +1023,17 @@ assert.match(liveBoostHtml, /Boost aktiv · 10 min/,
   "one live observation must not be counted as an invented five minutes of Boost runtime");
 assert.equal(h.scrubText(liveBoostView, 7), "jetzt · Empfehlung ein",
   "the state shown at the right edge and its tooltip must agree");
+{
+  const recorded = S.hist.get("modbus:smart_grid_mode");
+  S.hist.set("modbus:smart_grid_mode", { ...recorded, b0: null });
+  h.histPinToggle("smart_grid_mode", 2, "modbus");
+  S._modbus[0].value = 3;
+  assert.equal(h.histPinIndex("smart_grid_mode", h.historyView("smart_grid_mode", "modbus")), 2,
+    "a change in the live state cannot hide a pin on a completed wall-clock sample");
+  S.histPin.delete("smart_grid_mode");
+  S.hist.set("modbus:smart_grid_mode", recorded);
+  S._modbus[0].value = 2;
+}
 h.histPinToggle("smart_grid_mode", 7, "modbus");
 assert.equal(h.histPinIndex("smart_grid_mode", liveBoostView), 7);
 S._modbus[0].value = 3;
@@ -1087,9 +1159,10 @@ assert.doesNotMatch(h.scrubText(bshX10aView, 1), /X10A|Modbus|Heizstab|ca\.|min/
 }
 {
   const prevValues = S._values, prevModbus = S._modbus;
-  S._values = [{ concept: "bsh_state", value: "1" }];
-  S._modbus = [{ concept: "bsh_state", value: "0" }];
+  S._values = [{ concept: "bsh_state", value: "1", binary: true }];
+  S._modbus = [{ concept: "bsh_state", value: "0", binary: true }];
   const view = h.historyView("bsh_state", "x10a");
+  assert.equal(view.v[view.liveIndex], 10);
   h.histPinToggle("bsh_state", view.liveIndex, "x10a");
   assert.equal(h.histPinIndex("bsh_state", h.historyView("bsh_state")), -1,
     "the paired chart does not render a pin tied to a filtered observation");
@@ -1365,6 +1438,19 @@ assert.equal(h.histReadout(view, 1), "46,0 °C · Empfehlung ein · Modbus",
 }
 assert.doesNotMatch(h.scrubText(view, 3), /Boost|Heizstab/, "Sample 3 without active phases");
 {
+  const tank = S.hist.get("dhw_tank");
+  const boost = S.hist.get("modbus:smart_grid_mode");
+  S.hist.set("dhw_tank", { ...tank, b0: null, t0: 1768720000 });
+  S.hist.set("modbus:smart_grid_mode", { ...boost, b0: null, t0: 1768720150 });
+  assert.doesNotMatch(h.histHtml("dhw_tank", "°C", "Tank"), /vhist-phase-boost/,
+    "a wall-only phase does not move to a different tank bucket");
+  S.hist.set("modbus:smart_grid_mode", { ...boost, b0: null, t0: 1768720000 });
+  assert.match(h.histHtml("dhw_tank", "°C", "Tank"), /vhist-phase-boost/,
+    "a matching wall raster preserves the auxiliary phase");
+  S.hist.set("dhw_tank", tank);
+  S.hist.set("modbus:smart_grid_mode", boost);
+}
+{
   S.hist.set("smart_grid_mode", { dt: 300, b0: 100, v: [20, 20, 0, 0] });
   S.hist.set("bsh_state", { dt: 300, b0: 100, v: [0, 10, 0, 0] });
   const independent = h.historyView("dhw_tank");
@@ -1472,6 +1558,15 @@ S.status.history.epoch = 9;
 h.syncHistSources();
 assert.equal(S.hist.size, 0, "an unobserved source ABA must retire the old firmware lifetime");
 assert.equal(S.histPin.size, 0);
+
+for (const identity of [{ boot_id: "0000000000000001" }, { epoch: 8 }]) {
+  S.histAwait?.clear();
+  historyResponse = { ...defaultHistoryResponse, b0: 0, v: [519], ...identity };
+  await h.ensureHist("dhw_tank", "modbus");
+  assert.equal(S.hist.has(homehubKey), false, "a mismatched wire lifetime cannot replace the cache");
+  assert.ok(S.histAwait.has(homehubKey), "the request waits for an accepted status frame");
+}
+S.histAwait.clear();
 
 // Hold the transport while the source leaves and returns. Both success and failure of the retired
 // request must leave its successor's cache/lease alone, even though both use the same endpoint key.
