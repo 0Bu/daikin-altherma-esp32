@@ -228,9 +228,9 @@ assert.match(service, /logic::history_journal_retry_due\(/, "a paused journal re
 assert.ok(service.indexOf("history_journal_retry_due(") < service.indexOf("flash_build_for_service("),
   "the pause gate precedes every build and append attempt");
 assert.match(service, /flash_build_for_service\(src_i, r, wait_ticks\)/);
-// The shutdown drain is the same bounded final flush as before: no journal walk exists any more.
+// The shutdown drain retains its ordinary write budget and enables the final cycling checkpoint.
 assert.match(functionBody("void history_flash_save()", "// The factory reset"),
-  /history_flash_service_journal\(\s*\/\*max_records=\*\/12,\s*pdMS_TO_TICKS\(200\)\)/);
+  /history_flash_service_journal\(\s*\/\*max_records=\*\/12,\s*pdMS_TO_TICKS\(200\),\s*\/\*shutdown=\*\/true\)/);
 
 // HIST-02/d: a source whose identity reset is pending is stepped OVER. Returning at its first ring
 // left the restore unfinished for good (a disabled HomeHub never consumes its reset), and the
