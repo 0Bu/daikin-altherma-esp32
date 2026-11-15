@@ -2968,6 +2968,14 @@
     "cycling_checkpoint_acked": {
       "pattern": "^daik::checkup_cycling_checkpoint_appended\\(unsigned long\\)$",
       "max_bytes": 32
+    },
+    "cycling_record_owner": {
+      "pattern": "^daik::\\(anonymous namespace\\)::flash_cycling_owned\\(daik::logic::HistoryJournalHeader const\\&\\)$",
+      "max_bytes": 32
+    },
+    "history_record_scope": {
+      "pattern": "^daik::\\(anonymous namespace\\)::flash_record_valid\\(daik::\\(anonymous namespace\\)::FlashJournalRecord const\\&\\)$",
+      "max_bytes": 32
     }
   },
   "paths": {
@@ -13714,6 +13722,186 @@
       "multipliers": {},
       "base_bytes": 1536,
       "max_bytes": 7168
+    },
+    "httpd_shutdown_wifi_cycling_append_owner": {
+      "symbols": [
+        "config_wifi",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "cycling_record_owner"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_mqtt_cycling_append_owner": {
+      "symbols": [
+        "config_mqtt",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "cycling_record_owner"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_syslog_cycling_append_owner": {
+      "symbols": [
+        "config_syslog",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "cycling_record_owner"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_ntp_cycling_append_owner": {
+      "symbols": [
+        "config_ntp",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "cycling_record_owner"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_board_cycling_append_owner": {
+      "symbols": [
+        "config_board",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "cycling_record_owner"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_env3_cycling_append_owner": {
+      "symbols": [
+        "config_env3",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "cycling_record_owner"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "poll_shutdown_cycling_append_owner": {
+      "symbols": [
+        "poll_task",
+        "heap_guard",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "cycling_record_owner"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "eth_shutdown_cycling_append_owner": {
+      "symbols": [
+        "eth_task",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "cycling_record_owner"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "ota_shutdown_cycling_append_owner": {
+      "symbols": [
+        "ota_task",
+        "ota_activate",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "cycling_record_owner"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "ota_health_shutdown_cycling_append_owner": {
+      "symbols": [
+        "ota_health_task",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "cycling_record_owner"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "poll_cycling_append_owner": {
+      "symbols": [
+        "poll_task",
+        "history_board",
+        "history_journal",
+        "history_append",
+        "cycling_record_owner"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "main_cycling_scan_owner": {
+      "symbols": [
+        "main_task",
+        "boot_sequence",
+        "history_start",
+        "history_record_scope",
+        "cycling_record_owner"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "poll_cycling_trend_filter": {
+      "symbols": [
+        "poll_task",
+        "history_board",
+        "history_flash_restore",
+        "history_record_scope",
+        "cycling_record_owner"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
     }
   },
   "tasks": {
@@ -13986,7 +14174,13 @@
         "httpd_shutdown_board_cycling_append_shape",
         "httpd_shutdown_board_cycling_append_ack",
         "httpd_shutdown_env3_cycling_append_shape",
-        "httpd_shutdown_env3_cycling_append_ack"
+        "httpd_shutdown_env3_cycling_append_ack",
+        "httpd_shutdown_wifi_cycling_append_owner",
+        "httpd_shutdown_mqtt_cycling_append_owner",
+        "httpd_shutdown_syslog_cycling_append_owner",
+        "httpd_shutdown_ntp_cycling_append_owner",
+        "httpd_shutdown_board_cycling_append_owner",
+        "httpd_shutdown_env3_cycling_append_owner"
       ]
     },
     "main": {
@@ -14011,7 +14205,8 @@
         "main_stop_pending_take",
         "main_stop_pending_release",
         "main_cycling_scan",
-        "main_cycling_scan_shape"
+        "main_cycling_scan_shape",
+        "main_cycling_scan_owner"
       ]
     },
     "mqtt": {
@@ -14191,7 +14386,10 @@
         "poll_shutdown_cycling_append_shape",
         "poll_shutdown_cycling_append_ack",
         "poll_cycling_append_shape",
-        "poll_cycling_append_ack"
+        "poll_cycling_append_ack",
+        "poll_shutdown_cycling_append_owner",
+        "poll_cycling_append_owner",
+        "poll_cycling_trend_filter"
       ]
     },
     "modbus": {
@@ -14341,7 +14539,8 @@
         "eth_shutdown_cycling_shape",
         "eth_shutdown_cycling_decode",
         "eth_shutdown_cycling_append_shape",
-        "eth_shutdown_cycling_append_ack"
+        "eth_shutdown_cycling_append_ack",
+        "eth_shutdown_cycling_append_owner"
       ]
     },
     "dns": {
@@ -14410,7 +14609,8 @@
         "ota_shutdown_cycling_shape",
         "ota_shutdown_cycling_decode",
         "ota_shutdown_cycling_append_shape",
-        "ota_shutdown_cycling_append_ack"
+        "ota_shutdown_cycling_append_ack",
+        "ota_shutdown_cycling_append_owner"
       ]
     },
     "ota_health": {
@@ -14449,7 +14649,8 @@
         "ota_health_shutdown_cycling_shape",
         "ota_health_shutdown_cycling_decode",
         "ota_health_shutdown_cycling_append_shape",
-        "ota_health_shutdown_cycling_append_ack"
+        "ota_health_shutdown_cycling_append_ack",
+        "ota_health_shutdown_cycling_append_owner"
       ]
     },
     "deadline": {

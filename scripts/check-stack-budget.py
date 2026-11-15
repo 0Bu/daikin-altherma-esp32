@@ -1090,6 +1090,7 @@ CYCLING_WRITE_STACK = {
     "build_shape": ["cycling_flash_build", "cycling_page_valid", "cycling_part_count"],
     "append_shape": ["history_append", "cycling_part_count"],
     "append_ack": ["history_append", "cycling_checkpoint_acked"],
+    "append_owner": ["history_append", "cycling_record_owner"],
 }
 CYCLING_RESTORE_STACK = {
     "read": ["cycling_flash_restore", "cycling_flash_record_read", "sdk_partition_read"],
@@ -1103,6 +1104,8 @@ CYCLING_RESTORE_STACK = {
 CYCLING_TRACKED_HELPERS = {"flash_build_next_cycling": "cycling_flash_build",
                            "checkup_cycling_reset_pending": "cycling_reset_pending",
                            "checkup_cycling_checkpoint_appended": "cycling_checkpoint_acked",
+                           "flash_cycling_owned": "cycling_record_owner",
+                           "flash_record_valid": "history_record_scope",
                            "cycling_trace_page_valid": "cycling_page_valid",
                            "cycling_trace_part_count": "cycling_part_count"}
 
@@ -1114,6 +1117,8 @@ def validate_cycling_flash_paths(budgets: dict[str, Any], sources: dict[str, str
                for phase, tail in CYCLING_WRITE_STACK.items()},
             **{f"poll_cycling_{phase}": ["poll_task", "history_board", "history_flash_restore", *tail]
                for phase, tail in CYCLING_RESTORE_STACK.items()},
+            "poll_cycling_trend_filter": ["poll_task", "history_board", "history_flash_restore",
+                                          "history_record_scope", "cycling_record_owner"],
         },
         "main": {
             "main_cycling_scan": ["main_task", "boot_sequence", "history_start", "cycling_flash_page",
@@ -1121,6 +1126,8 @@ def validate_cycling_flash_paths(budgets: dict[str, Any], sources: dict[str, str
             "main_cycling_scan_shape": ["main_task", "boot_sequence", "history_start",
                                         "cycling_flash_page", "cycling_page_valid",
                                         "cycling_part_count"],
+            "main_cycling_scan_owner": ["main_task", "boot_sequence", "history_start",
+                                        "history_record_scope", "cycling_record_owner"],
         },
     }
     for owner, paths in tasks.items():
@@ -1424,7 +1431,7 @@ def validate_task_stacks(budgets: dict[str, Any], sources: dict[str, str]) -> No
                         "ota_health_shutdown_checkup": "ota_health"}.get(path)
             if path in {f"ota_health_shutdown_cycling_{phase}"
                         for phase in ("snapshot", "reset_check", "build_crc", "build_shape",
-                                      "append_shape", "append_ack",
+                                      "append_shape", "append_ack", "append_owner",
                                       *CYCLING_RESTORE_STACK)}:
                 expected = "ota_health"
             if path in stop_stack.PATHS:
@@ -1856,7 +1863,7 @@ CONFIG_DOCUMENT_PATHS = frozenset({
     *(f"httpd_shutdown_{name}_{phase}" for name in SHUTDOWN_HTTP_CALLERS
       for phase in ("journal", "checkup", "cycling_snapshot", "cycling_reset_check",
                     "cycling_build_crc", "cycling_build_shape", "cycling_append_shape",
-                    "cycling_append_ack",
+                    "cycling_append_ack", "cycling_append_owner",
                     *(f"cycling_{part}" for part in CYCLING_RESTORE_STACK))),
 })
 CONFIG_DOCUMENT_PATHS |= frozenset(
@@ -2900,6 +2907,8 @@ def self_test() -> None:
   29: 004136          entry a1, 32
 """
     extra_frames = {
+        'daik::(anonymous namespace)::flash_cycling_owned(daik::logic::HistoryJournalHeader const&)': 32,
+        'daik::(anonymous namespace)::flash_record_valid(daik::(anonymous namespace)::FlashJournalRecord const&)': 32,
         'daik::checkup_cycling_checkpoint_appended(unsigned long)': 32,
         'daik::logic::cycling_trace_page_valid(daik::logic::HistoryJournalHeader const&, daik::logic::CyclingTracePageInfo const&)': 32,
         'daik::logic::cycling_trace_part_count(unsigned int)': 32,
