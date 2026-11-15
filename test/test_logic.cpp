@@ -14840,12 +14840,15 @@ static void test_history() {
         const auto oldest = [](int64_t wall, size_t n, uint32_t dt) {
             return history_t0(rt(wall), rt(n), rt(dt));
         };
+        const auto project = [](int64_t wall, int32_t ms, int64_t elapsed) {
+            int64_t projected = 0;
+            CHECK(history_commit_unix_s(wall, ms, elapsed, 0, projected));
+            return projected;
+        };
         // Same newest sample, three different request times → one answer.
-        const int64_t t_a = oldest(history_commit_unix_s(1'000'000, 800, 0, 0), 2, HISTORY_DT_S);
-        const int64_t t_b =
-            oldest(history_commit_unix_s(1'000'071, 100, 70'300'000, 0), 2, HISTORY_DT_S);
-        const int64_t t_c =
-            oldest(history_commit_unix_s(1'000'300, 100, 299'300'000, 0), 2, HISTORY_DT_S);
+        const int64_t t_a = oldest(project(1'000'000, 800, 0), 2, HISTORY_DT_S);
+        const int64_t t_b = oldest(project(1'000'071, 100, 70'300'000), 2, HISTORY_DT_S);
+        const int64_t t_c = oldest(project(1'000'300, 100, 299'300'000), 2, HISTORY_DT_S);
         CHECK(t_a == t_b);
         CHECK(t_b == t_c);
         CHECK(t_a == 1'000'000 - 300); // sample 0 is one bucket before the newest
@@ -14855,7 +14858,7 @@ static void test_history() {
         CHECK(oldest(1'000'000, 0, HISTORY_DT_S) == 1'000'000);
         CHECK(oldest(1'000'000, 1, HISTORY_DT_S) == 1'000'000);
         CHECK(oldest(INT64_MIN, 2, HISTORY_DT_S) == INT64_MIN);
-        const int64_t newest = history_commit_unix_s(2'000'000'100, 100, 300'000, 0);
+        const int64_t newest = project(2'000'000'100, 100, 300'000);
         CHECK(newest == 2'000'000'099);
         CHECK(history_bucket_from_unix(newest) ==
               history_anchor_bucket(2'000'000'100, 300'000, 0, HISTORY_DT_S, 100));
@@ -24229,6 +24232,7 @@ static void test_history_persist() {
     CHECK(anchor(0, 1'000'000, -1'000'000) == -1); // valid adopted instant before boot
     CHECK(anchor(INT64_MIN, 1, 0) == INT64_MIN);   // subtraction cannot underflow
     CHECK(anchor(INT64_MIN, 0, 0, 0, 1) == INT64_MIN);
+    CHECK(anchor(INT64_MIN, 0, 0) == history_bucket_from_unix(INT64_MIN));
     CHECK(anchor(INT64_MIN + 1, 1'000'000, 0, 0, 1) == INT64_MIN);
     CHECK(anchor(INT64_MAX, INT64_MAX, INT64_MIN + 1, 999, 1) < INT64_MAX);
     CHECK(anchor(900, 0, 0, 0, 0) == 0);

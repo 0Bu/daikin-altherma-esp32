@@ -2510,9 +2510,9 @@ static esp_err_t h_history(httpd_req_t* req) {
         int64_t unix_s;
         int32_t wall_ms;
         time_now(unix_s, wall_ms);
-        if (unix_s >= 0) {
-            const auto newest = logic::history_commit_unix_s(unix_s, wall_ms, esp_timer_get_time(),
-                                                             history_meta.newest_commit_us);
+        int64_t newest;
+        if (unix_s >= 0 && logic::history_commit_unix_s(unix_s, wall_ms, esp_timer_get_time(),
+                                                        history_meta.newest_commit_us, newest)) {
             const auto oldest = logic::history_t0(newest, n, logic::HISTORY_DT_S);
             if (oldest != INT64_MIN) {
                 j += ",\"t0\":";

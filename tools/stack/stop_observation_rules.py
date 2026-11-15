@@ -400,7 +400,7 @@ HEADERS = {
     'main/logic/heartbeat.hpp': '7e915487758d6e71c2335b70027af43afb0b9d9eaf5f77fb2cca41401e1d8d7a',
     'main/logic/instrument.hpp': 'd55abe4a7f5b1d99886a866780a50242dfebb03eec2b0d4fbd7e814f9fe4d232',
     'main/stop_observation_store.hpp': 'fbf3232aa5aa6e219464d0cbb0c7d4fba6a9246fcecf79e924298733c3f46af0',
-    'main/logic/history_persist.hpp': 'ca3868174e4d0f69124a91b2ebcef44cd0e0177d82ac849042366455a0ea465a',
+    'main/logic/history_persist.hpp': 'bbefa4f685f3d0f77a5a8380d763137ef1377a142a3a5b0aacc916e94c4eaf77',
 }
 
 CALLERS = {

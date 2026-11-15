@@ -1334,14 +1334,16 @@ inline constexpr int64_t history_bucket_from_unix(int64_t unix_s, uint32_t dt = 
 
 // Project a captured monotonic commit onto the current wall clock. Combine fractional wall
 // time and age before flooring so the API and flash journal agree at a UTC bucket boundary.
-constexpr int64_t history_commit_unix_s(int64_t unix_s, int32_t wall_ms, int64_t now_us,
-                                        int64_t commit_us) {
-    if (commit_us == HISTORY_NO_COMMIT_US || wall_ms < 0 || wall_ms >= 1000) return INT64_MIN;
+constexpr bool history_commit_unix_s(int64_t unix_s, int32_t wall_ms, int64_t now_us,
+                                     int64_t commit_us, int64_t& projected) {
+    if (commit_us == HISTORY_NO_COMMIT_US || wall_ms < 0 || wall_ms >= 1000) return false;
     const uint64_t age_us =
         now_us < commit_us ? 0 : static_cast<uint64_t>(now_us) - static_cast<uint64_t>(commit_us);
     const int64_t age_s = static_cast<int64_t>(age_us / 1000000u) +
                           (static_cast<uint64_t>(wall_ms) * 1000u < age_us % 1000000u ? 1 : 0);
-    return unix_s < INT64_MIN + age_s ? INT64_MIN : unix_s - age_s;
+    if (unix_s < INT64_MIN + age_s) return false;
+    projected = unix_s - age_s;
+    return true;
 }
 
 // The wall-clock bucket a source's newest commit is attributed to: the wall time of the commit
@@ -1350,8 +1352,10 @@ constexpr int64_t history_commit_unix_s(int64_t unix_s, int32_t wall_ms, int64_t
 // it are compared on the same arithmetic. INT64_MIN (no commit) has no anchor.
 inline constexpr int64_t history_anchor_bucket(int64_t unix_s, int64_t now_us, int64_t commit_us,
                                                uint32_t dt = HISTORY_DT_S, int32_t wall_ms = 0) {
-    const int64_t commit_unix = history_commit_unix_s(unix_s, wall_ms, now_us, commit_us);
-    return commit_unix == INT64_MIN ? INT64_MIN : history_bucket_from_unix(commit_unix, dt);
+    int64_t commit_unix = 0;
+    return history_commit_unix_s(unix_s, wall_ms, now_us, commit_us, commit_unix)
+               ? history_bucket_from_unix(commit_unix, dt)
+               : INT64_MIN;
 }
 
 // The last boundary of THIS boot's monotonic raster at or before `now_us`: the instant the open
