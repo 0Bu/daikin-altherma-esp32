@@ -610,11 +610,11 @@ no pins. A submission that needs no write checks the revision again before retur
 Reopen the editor from current status before submitting again. Clients can omit both tokens.
 
 `POST /set_env3` is the compatibility route (`enabled`, `sda`, `scl`, all optional). Both board routes
-share the same preflight: enabling ENV III probes SHT30/QMP6988 (422 if absent, 503 if busy).
-Keeping the active pin pair requires a fresh connected sample (422 if unreachable). Moving an
-active bus returns 409 `env3_disable_first`. Disabling needs no hardware proof. Probe and active-bus
-refusals have machine codes. Changes to saved enablement or SDA/SCL pins reboot the device, including
-a pin change while ENV III is disabled.
+share the same preflight. Enabling ENV III probes SHT30/QMP6988 (422 if absent, 503 if busy).
+While ENV III stays enabled, keeping its active pin pair requires a fresh connected sample (422 if
+unreachable), and moving to a valid new pair returns 409 `env3_disable_first`. A request may
+disable ENV III and change its saved pins together without a probe. Changes to saved enablement or
+SDA/SCL pins reboot the device, including a pin change while ENV III is disabled.
 At the save step, a concurrent X10A link change onto a claimed pin returns an uncoded 409 for
 requests without draft tokens. A revision-bound Board save returns the draft-stale error whenever
 the revision has changed. Both refusals leave the submitted settings unwritten.
