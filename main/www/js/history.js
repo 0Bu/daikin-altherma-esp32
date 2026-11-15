@@ -1862,7 +1862,7 @@ function expireLiveHistoryPins() {
 
 function expireFallbackHistoryPins() {
   for (const [id, pin] of S.histPin) {
-    if (pin.forecast || pin.bucket != null || pin.source || !hasModbusHist(id)) continue;
+    if (pin.forecast || pin.source || !hasModbusHist(id)) continue;
     const view = historyView(id);
     if (!view || histPinIndex(id, view) < 0) S.histPin.delete(id);
   }

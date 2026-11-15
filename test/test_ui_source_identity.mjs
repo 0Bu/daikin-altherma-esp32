@@ -380,7 +380,7 @@ ui.S.insp = null;
 // Default fallback can change the plotted instrument while both undated ring generations stay
 // unchanged. The retired X10A pin must not silently select Modbus or reappear after failback.
 await reset();
-const undated = { at: Date.now(), gen: 1, t0: null, b0: 100, dt: 300, v: [452, 454] };
+const undated = { at: Date.now(), gen: 1, t0: null, b0: null, dt: 300, v: [452, 454] };
 ui.S.hist.set("dhw_tank", undated);
 ui.S.hist.set(ui.histCacheKey("dhw_tank", "modbus"), { ...undated, v: [431, 434] });
 context.renderTrendHosts = () => {};
@@ -398,6 +398,17 @@ ui.histSeriesToggle("dhw_tank", "modbus");
 assert.equal(ui.S.histPin.has("dhw_tank"), false, "changing visible instruments retires the saved pin");
 ui.histSeriesToggle("dhw_tank", "modbus");
 assert.equal(ui.histPinIndex("dhw_tank", ui.historyView("dhw_tank")), -1, "legend round trip cannot restore a retired pin");
+
+const bootOnly = { ...undated, b0: 100 };
+ui.S.histHidden.delete("dhw_tank");
+ui.S.hist.set("dhw_tank", bootOnly);
+ui.S.hist.set(ui.histCacheKey("dhw_tank", "modbus"), { ...bootOnly, v: [431, 434] });
+ui.histPinToggle("dhw_tank", 1);
+assert.equal(ui.histPinIndex("dhw_tank", ui.historyView("dhw_tank")), 1);
+await status(disconnected);
+assert.equal(ui.S.histPin.has("dhw_tank"), false, "status failover retires an unscoped boot pin");
+await status(fixture());
+assert.equal(ui.histPinIndex("dhw_tank", ui.historyView("dhw_tank")), -1);
 
 // The cached delta uses two undated rings. A transient failure on both inputs preserves the
 // selected index and generation. A successful new ring changes that generation.
