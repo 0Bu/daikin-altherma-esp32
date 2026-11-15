@@ -213,6 +213,10 @@ History has two independent persistence paths:
 | `.noinit` DRAM | Compatible power-preserving resets without extra flash writes | Allowlisted reset reason, format, catalog fingerprint, CRC and matching X10A/HomeHub physical target scope; reject brownout/power glitch, unknown reset reasons and future anchors. The open bucket is discarded. OTA may move RAM and invalidate it. |
 | `history` flash journal | Compatible records across power loss and OTA | Successful scan, compatible semantic catalog, matching X10A target or HomeHub host/port/unit scope, and synchronized wall time; restore by original absolute bucket, leaving downtime gaps. Live observations win overlap, including live absence. |
 
+Restore splices records before the recorder's pending five-minute bucket. The pending observation
+closes on its normal boundary even when the next poll arrives late. The saved wall bucket follows
+that boundary, preserving the order and position of the restored samples.
+
 The journal occupies the upper 4 MiB of the official 8 MiB layout. Dense source records have a CRC
 and a commit word programmed last; a torn slot is skipped without erasing older committed neighbors.
 Erase sectors rotate over the partition. Record geometry grows by powers of two with a compile-time
@@ -253,8 +257,8 @@ The room raster runs on the MQTT task without X10A or HomeHub. Its independent s
 journal records bind the broker, temperature/time mappings, maximum age and persisted source/consent
 generations. A rename or target-only edit preserves it; source removal/replacement retires it alone.
 X10A journal append requires a resolved identity and no pending source reset; a pending reset also
-skips that source's restoration. `b0`
-aligns monotonic buckets even before SNTP; `t0` is omitted until wall time is known. Missing samples
+skips that source's restoration. `b0` and negative `boot_b0` align monotonic buckets even before SNTP.
+See [the history API](API.md#get-history) for timestamp units and anchor availability. Missing samples
 stay gaps. Browser storage holds only a transient render frame during OTA, not measurement history.
 
 Completed diagnosis hours restore only from the dated flash journal after SNTP and current source
@@ -362,16 +366,17 @@ backs off to 30 seconds while unreachable, and suspends ordinary polling while h
 `/events` route or WebSocket broadcaster; building HTTP state never runs on the UART owner.
 [DESIGN.md](DESIGN.md) owns user-visible states and modal behavior.
 
-English and the application code remain in the startup page. A first non-English locale request
-loads one device-local gzip resource containing all twelve external catalogs. The build preserves
-the minified source bytes in a bounded LZMA frame; the browser validates its header, exact decoded
-length and CRC before synchronous script registration. The dictionary is fixed at 512 KiB and the
-decoded frame is capped at 1 MiB. Per-catalog 32 KiB quality checks and the aggregate flash cap
-remain build gates. The decoder and its license ship in that resource; no CDN or runtime download
-is needed. This reduces firmware flash at the cost of a larger first locale transfer and transient
-browser memory/CPU. Later language changes reuse the registered tables; failure retains English.
-The producer, pinned dependencies and integrity tests live under `tools/web_asset/` and
-`test/test_locale_bundle.mjs`.
+English and the application code remain in the startup page, capped at 169,400 gzip bytes.
+The build packs the minified script into an LZMA frame with a 512 KiB dictionary and a 1 MiB
+decoded-size limit. The inline loader verifies the header, decoded length, prefix, CRC and UTF-8
+before inserting the classic script synchronously at the end of the body. A validation failure
+prevents dashboard initialization.
+A first non-English locale request loads one local gzip resource containing twelve catalogs.
+It uses the same LZMA bounds and validates the payload before synchronous registration.
+Later language changes reuse the registered tables. A locale load failure retains English.
+Both resources embed the pinned decoder and its license. Packing reduces flash use and costs
+transient browser memory and CPU. Per-catalog 32 KiB and aggregate locale size checks still
+apply. See `tools/web_asset/` and the delivery and locale contracts in [test/README.md](../test/README.md#ui-interaction-rendering-and-recording).
 
 Registration goes through the common exception boundary. The open setup AP exposes provisioning;
 the configured LAN exposes the full API. The surface follows whether that AP is running, not the

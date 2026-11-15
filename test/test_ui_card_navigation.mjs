@@ -48,6 +48,8 @@ class Element {
     if (selector === ".vgroup[data-dashboard-card]")
       return this.children.filter(child => child.dataset.dashboardCard != null);
     if (selector === "[data-card]") return this.children.filter(child => child.dataset.card != null);
+    if (selector === "[data-chart][inert], [data-checkup-hours][inert]" ||
+        selector === "[data-chart], [data-checkup-hours]") return [];
     throw new Error(`unhandled card-navigation selector: ${selector}`);
   }
 }
@@ -67,6 +69,7 @@ const context = vm.createContext({
   localStorage: { getItem: () => "en", setItem() {} },
   fetch() { throw new Error("card selection must not fetch or write settings"); },
   valueGroupsHtml: () => "",
+  _pollBusy: false,
   setTimeout, clearTimeout,
 });
 vm.runInContext(readAppFragments(["i18n.js", "app_state.js", "dashboard.js"]) +
@@ -74,10 +77,12 @@ vm.runInContext(readAppFragments(["i18n.js", "app_state.js", "dashboard.js"]) +
   this.ui = {
     S, vcard, icon: dashboardCardIcon, sync: syncDashboardCards, select: selectDashboardCard,
     lang: code => { LANG = code; }, text: key => t(key),
+    poll: busy => { _pollBusy = busy; },
+    recover: recoverOpenHistory,
     render: (diagnosis, model, values) => {
       checkupCardHtml = () => diagnosis;
       statusCardsHtml = () => model;
-      valueGroupsHtml = () => values;
+      valueGroupsHtml = typeof values === "function" ? values : () => values;
       renderCards();
     },
   };`, context);
@@ -95,6 +100,23 @@ function expectSelection(key, message) {
   assert.deepEqual(selected().map(button => button.dataset.card), [key], `${message}: exactly one pressed button`);
   assert.equal(host.getAttribute("aria-labelledby"), selected()[0].id, `${message}: content naming`);
 }
+
+const settings = new Element(document, "settingsCards");
+document.elements.set(settings.id, settings);
+settings.querySelectorAll = selector => {
+  assert.equal(selector, ".vitem.open [data-trend]");
+  return ["free_heap", "max_alloc"].map(trend => ({ dataset: { trend } }));
+};
+const attempts = [];
+context.ensureHistPair = (trend, recover) => {
+  assert.equal(recover, "refresh");
+  attempts.push(trend);
+  return Promise.resolve();
+};
+ui.S.stage = "settings";
+ui.recover();
+assert.deepEqual(attempts, ["free_heap"], "an open Settings chart can recover while admitting one request");
+ui.S.stage = "dashboard";
 
 assert.equal(ui.S.dashboardCard, "diagnosis", "a new dashboard starts with diagnosis selected");
 ui.S.status = { diagnostics: { enabled: true }, hp: { connected: true } };
@@ -193,15 +215,36 @@ ui.S.clickHold = false;
 ui.render(card("diagnosis"), "", "");
 expectSelection("diagnosis", "released hold installs the pending source change");
 assert.deepEqual(keys(), ["diagnosis"]);
+
+ui.render(card("diagnosis"), card("model"), "");
+ui.select("diagnosis");
+const paintStates = [];
+ui.render("", "", () => {
+  paintStates.push(ui.S.dashboardCard);
+  return card("modbus");
+});
+expectSelection("modbus", "fallback installs a newly available card");
+assert.deepEqual(paintStates, ["diagnosis", "modbus"],
+  "the selected fallback must render its open history in the same update");
+
+ui.render(card("diagnosis"), card("model"), card("modbus"));
+ui.select("model");
+ui.S.clickHold = true;
+ui.poll(true);
+ui.render(card("diagnosis"), "", "");
+ui.select("modbus");
+expectSelection("modbus", "selection during a pending values reply uses the mounted frame");
+ui.poll(false);
+ui.S.clickHold = false;
+ui.render(card("diagnosis"), "", "");
+expectSelection("diagnosis", "a completed frame reconciles source loss after selection");
 ui.render(card("diagnosis"), card("model"), "");
 ui.S.scrub = "fixture-trend";
 ui.render("", "", card("modbus"));
 assert.deepEqual(keys(), ["diagnosis", "model"], "scrub protects its installed values frame");
 ui.select("model");
-expectSelection("model", "selection remains immediate during scrubbing");
-ui.S.scrub = null;
-ui.render("", "", card("modbus"));
-expectSelection("modbus", "source reconciliation resumes after the scrub");
+assert.equal(ui.S.scrub, null, "card selection ends the previous scrub");
+expectSelection("modbus", "selection applies the pending source change and its fallback immediately");
 
 // The card-level opt-in must suppress even a nonempty renderer result (e.g. the independent
 // refrigerant observation), not just its 24-hour rows. Exercise the actual render/reconcile path.

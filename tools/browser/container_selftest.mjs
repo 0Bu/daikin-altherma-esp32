@@ -176,7 +176,7 @@ try {
       if (["rm-fails", "daemon-fails", "rm-hangs", "ps-hangs", "runtime-fails", "pre-cid-inflight",
         "ownership-mismatch", "name-collision", "ownership-lookup-fails", "inspect-hangs",
         "ownership-name-mismatch"].includes(mode)) {
-        assert.match(output, /container removal unverified; retained ownership record/);
+        assert.match(output, /container removal unverified; retained ownership record/, mode);
         const retained = fs.readdirSync(scratch);
         assert.equal(retained.length, 1, mode + ": retain container ownership and source after failed cleanup");
         const directory = path.join(scratch, retained[0]);

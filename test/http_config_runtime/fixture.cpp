@@ -51,6 +51,7 @@ daik::ConfigSaveOutcome last_save_outcome;
 
 size_t live_arrays = 0, body_capacity = 0;
 bool   fail_next_array = false;
+bool   deny_after_boot_id = false, deny_rejection_allocations = false;
 
 bool   tracking = false, durable_started = false, network = true, dns_ok = true, tcp_ok = true;
 bool   semaphore_ok = true, mqtt_init_ok = true, mqtt_connected = true, mqtt_error = false;
@@ -162,6 +163,7 @@ void reset() {
     last_save_outcome         = {};
     body_capacity             = 0;
     fail_next_array           = false;
+    deny_after_boot_id = deny_rejection_allocations = false;
     network = dns_ok = tcp_ok = semaphore_ok = mqtt_init_ok = mqtt_connected = true;
     mqtt_register_ok = mqtt_start_ok = mqtt_wait_ok = proof_ok = weather_admission = refresh_ok =
         true;
@@ -255,7 +257,8 @@ std::string changed(const char* original, const char* field, const char* value) 
     return body;
 }
 void rejection(const Route& candidate, const std::string& body,
-               const char* status = "400 Bad Request", bool strict_no_work = false) {
+               const char* status = "400 Bad Request", bool strict_no_work = false,
+               const char* code = nullptr) {
     const auto old_service = service, old_link = link;
     const auto before  = daik::config_blob_serialize(daik::config_blob_from(current));
     const auto request = invoke(candidate.handler, body);
@@ -267,6 +270,11 @@ void rejection(const Route& candidate, const std::string& body,
     check(bool(response) && cJSON_IsFalse(cJSON_GetObjectItem(response, "ok")) &&
               cJSON_IsString(cJSON_GetObjectItem(response, "error")),
           "rejection has no stable JSON error");
+    if (code) {
+        const auto* error_code = cJSON_GetObjectItem(response, "code");
+        check(cJSON_IsString(error_code) && std::strcmp(error_code->valuestring, code) == 0,
+              "rejection has the wrong machine-readable code");
+    }
     check(service == old_service && link == old_link &&
               daik::config_blob_serialize(daik::config_blob_from(current)) == before,
           "rejected request changed durable entries or live services");
@@ -296,6 +304,10 @@ void success(const Route& candidate) {
 } // namespace fixture
 
 void* operator new(size_t size) {
+    if (fixture::deny_rejection_allocations) {
+        fixture::deny_rejection_allocations = false;
+        throw std::bad_alloc();
+    }
     if (fixture::tracking && fixture::durable_started) {
         ++fixture::post_write_allocations;
         throw std::bad_alloc();
@@ -328,11 +340,12 @@ Config config() {
     ++fixture::config_reads;
     return fixture::current;
 }
+uint32_t           config_runtime_revision() { return fixture::current.runtime_revision; }
 ConfigLinkSnapshot config_link_snapshot() {
     ++fixture::link_snapshot_reads;
     return {fixture::current.proto, fixture::current.rx_pin, fixture::current.tx_pin};
 }
-bool config_save(const Config& requested) {
+ConfigSaveResult save_service(const Config& requested, bool require_current) {
     ++fixture::saves;
     if (fixture::detect_before_service_save) {
         fixture::detect_before_service_save = false;
@@ -349,8 +362,19 @@ bool config_save(const Config& requested) {
             fixture::fail("prepared concurrent detection did not commit its real transaction");
     }
     fixture::Store store;
-    fixture::last_save_outcome = config_save_transaction(fixture::current, requested, false, store);
-    return fixture::last_save_outcome.result == ConfigSaveResult::Saved;
+    fixture::last_save_outcome =
+        config_save_transaction(fixture::current, requested, false, store, {}, require_current);
+    return fixture::last_save_outcome.result;
+}
+bool config_save(const Config& requested) {
+    return save_service(requested, false) == ConfigSaveResult::Saved;
+}
+ConfigSaveResult config_save_if_current(const Config& requested) {
+    return save_service(requested, true);
+}
+void http_boot_id(char (&out)[17]) noexcept {
+    std::memcpy(out, "0123456789abcdef", sizeof(out));
+    if (fixture::deny_after_boot_id) fixture::deny_rejection_allocations = true;
 }
 ConfigSaveResult config_save_link(const Config& requested) {
     ++fixture::saves;
@@ -433,6 +457,8 @@ bool weather_forecast_request_refresh(uint64_t& token) noexcept {
     return true;
 }
 esp_err_t http_send_json(httpd_req_t* request, const char* body) {
+    // The harness records bytes in a string. Exclude that copy from the handler's budget.
+    fixture::deny_rejection_allocations = false;
     request->content_type = "application/json";
     request->response     = body;
     return ESP_OK;
@@ -1212,6 +1238,49 @@ void diagnostics_generation() {
     from_default();
     check(transition(true, 0U) == 1U, "a zero draw must still leave generation 0");
 }
+void board_draft_revision() {
+    const auto& board = route("board");
+    prepare(board);
+    const auto bound = changed(board.valid, "boot_id", R"("0123456789abcdef")");
+    const auto request =
+        changed(bound.c_str(), "config_revision", std::to_string(current.runtime_revision).c_str());
+    rejection(board, bound);
+    rejection(board, changed(request.c_str(), "config_revision", "1.5"));
+    rejection(board, changed(request.c_str(), "boot_id", R"("fedcba9876543210")"), "409 Conflict",
+              false, "board_draft_stale");
+    check(invoke(board.handler, request).status == "200 OK", "matching Board draft must save");
+    saves = reboots = service_writes = link_writes = 0;
+    durable_started                                = false;
+    deny_after_boot_id                             = true;
+    const auto config_reads_before                 = config_reads;
+    try {
+        rejection(board, request, "409 Conflict", false, "board_draft_stale");
+    } catch (const std::bad_alloc&) {
+        check(false, "stale Board draft refusal must not allocate");
+    }
+    deny_after_boot_id = false;
+    check(config_reads == config_reads_before,
+          "an already stale draft must not copy the configuration");
+
+    prepare(board);
+    const auto before = service;
+    const auto sensor = changed(
+        R"({"preset_id":"m5stack_atoms3_lite","env3_enabled":true,"env3_sda":2,"env3_scl":1})",
+        "boot_id", R"("0123456789abcdef")");
+    const auto sensor_request  = changed(sensor.c_str(), "config_revision",
+                                         std::to_string(current.runtime_revision).c_str());
+    detect_before_service_save = true;
+    detected_rx                = 9;
+    detected_tx                = 10;
+    const auto refused         = invoke(board.handler, sensor_request);
+    check(refused.status == "409 Conflict" &&
+              refused.response.find("\"code\":\"board_draft_stale\"") != std::string::npos,
+          "a draft that became stale during preflight must receive its specific rejection");
+    check(
+        env_probes == 1 && detection_writes == 1 && service_writes == 0 && link_writes == 0 &&
+            reboots == 0 && service == before && current.rx_pin == 9 && current.tx_pin == 10,
+        "detection at the save boundary must keep its link and reject a previously current draft");
+}
 void room_history_lifetime() {
     reset();
     const auto send = [](Handler handler, const std::string& body) {
@@ -1297,6 +1366,7 @@ int main(int argc, char** argv) {
                           {"local_pin_reconcile", test::local_pin_reconcile},
                           {"query_flags", test::query_flags},
                           {"diagnostics_generation", test::diagnostics_generation},
+                          {"board_draft_revision", test::board_draft_revision},
                           {"room_history_lifetime", test::room_history_lifetime}};
     unsigned   ran     = 0;
     for (const auto& candidate : cases) {
@@ -1305,6 +1375,7 @@ int main(int argc, char** argv) {
                 if (std::strcmp(candidate.name, "factory_reset_reboot") == 0 ||
                     std::strcmp(candidate.name, "local_pin_reconcile") == 0 ||
                     std::strcmp(candidate.name, "diagnostics_generation") == 0 ||
+                    std::strcmp(candidate.name, "board_draft_revision") == 0 ||
                     std::strcmp(candidate.name, "room_history_lifetime") == 0)
                     continue;
             } else if (std::strcmp(argv[1], candidate.name) != 0)

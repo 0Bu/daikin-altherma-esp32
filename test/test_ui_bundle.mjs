@@ -224,11 +224,11 @@ assert.ok(httpStatus.includes('j += "],\\\"env3_rows\\\":[";') &&
   "status and /history must expose the independent ENV III trend source");
 assert.match(app, /if \(e\.env3\)[\s\S]*t\("env\.temperature"\)[\s\S]*t\("env\.humidity"\)[\s\S]*t\("env\.pressure"\)/,
   "the ENV III inspector must carry all three localized live readings");
-assert.match(app, /const ENV3_COMBINED_ID = "env3_combined"[\s\S]*const ENV3_COMBINED_SERIES[\s\S]*function env3HistHtml\(\)/,
+assert.match(app, /const ENV3_COMBINED_ID = "env3_combined"[\s\S]*const ENV3_COMBINED_SERIES[\s\S]*function env3HistHtml\(/,
   "one combined timeline must render the three independently scaled ENV III series");
 assert.match(app, /function env3SeriesClass\(source\)[\s\S]*env-temperature[\s\S]*env-humidity[\s\S]*env-pressure/,
   "the three ENV III lines must keep distinct stable style classes");
-assert.match(app, /if \(e && e\.env3\)[\s\S]*ensureHist\(s\.id, "env3"\)[\s\S]*env3HistHtml\(\)/,
+assert.match(app, /if \(e && e\.env3\)[\s\S]*request\(s\.id, "env3"\)[\s\S]*env3HistHtml\(historyView\(ENV3_COMBINED_ID,/,
   "opening the ENV III pill must fetch all three rings and render their combined inspector trend");
 assert.match(app, /env3_sht30_not_found:\s*"env\.err_sht30"[\s\S]*mapError:\s*env3SaveError/,
   "ENV III probe failures must stay in the dialog as localized errors");

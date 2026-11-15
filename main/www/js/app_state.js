@@ -1,4 +1,6 @@
 
+const historyClock = () => typeof performance === "undefined" ? Date.now() : performance.now();
+
 // ── App state ────────────────────────────────────────────────────────────
 const S = {
   // Which screen is showing (a key of VIEW below). The app opens on "dashboard" and the header gear
@@ -42,6 +44,7 @@ const S = {
   // null. Freeze trend-host updates during a scrub: a structural or history change could otherwise
   // replace the captured plot and interrupt the gesture. scrubEnd resumes the affected hosts.
   scrub: null,
+  trendPointer: null,
   // Schematic inspector: which hit target (INSPECT key) is selected, and the last liveData() the
   // poll produced. The panel re-renders from S.live on every poll, so an open explainer keeps
   // showing the CURRENT reading rather than the one that was on screen when it was tapped.
@@ -70,9 +73,8 @@ const S = {
   // otaBusy, the compact OTA endpoint can still answer while the much larger /status builder is
   // deliberately refused. That is OTA activity, not proof that the device is unreachable.
   otaInstalling: false,
-  // Whether compact OTA progress or a short non-failure result is visible. It freezes the Settings
-  // rebuild — see renderSettings. Terminal failures use otaAlert instead, so their complete text
-  // never has to fit beside a version value.
+  // Whether compact OTA progress or a short non-failure result needs repainting after a Settings
+  // card rebuild. Terminal failures use otaAlert to keep their complete text readable.
   otaShown: false,
   // Terminal OTA failures are not progress suffixes: the device may return a complete actionable
   // sentence. It is mirrored into one alert-card slot per screen and remains until the user closes
@@ -109,15 +111,27 @@ const S = {
 // Firmware rings reset when an instrument is disabled or repointed. An endpoint is not a lifetime:
 // A → B → A must fetch A again, and an old response must never populate the new lifetime's cache.
 // Retire all chart/pin leases together; derived charts can depend on several source rings.
+function cancelHistoryGesture() {
+  S.scrub = null;
+  if (S.trendPointer) scrubEnd(S.trendPointer.plot);
+  if (S.cancelCyclingDrag) S.cancelCyclingDrag();
+}
+
 function invalidateHistSources() {
   S.histEpoch = (S.histEpoch || 0) + 1;
   S.hist.clear();
   S.histBusy.clear();
-  (S.histRequests ||= new Map()).clear();
+  for (const request of S.histRequests?.values() || []) {
+    if (request.run) request.finish();   // queued raw request has no transport to abort
+    else request.controller?.abort();
+  }
+  S.histRequests?.clear();
   (S.histAwait ||= new Map()).clear();
   S.histPin.clear();
-  S.scrub = null;
+  cancelHistoryGesture();
   S.inspHistSig = "";
+  // Retire mounted charts even when a poll or click is holding their containers.
+  if (typeof retireMountedHistory === "function") retireMountedHistory();
 }
 function syncHistSources() {
   const s = S.status;
@@ -223,10 +237,19 @@ function writeRoute(stage, popup = null, { replace = false, parent } = {}) {
 }
 
 function showStage(stage) {
+  const changed = S.stage !== stage;
+  if (changed) cancelHistoryGesture();
   S.stage = stage;
   for (const [st, id] of Object.entries(VIEW)) $(id).classList.toggle("active", st === stage);
   renderHeader();
   window.scrollTo(0, 0);
+  if (!changed) return;
+  if (stage === "settings") {
+    if (typeof renderSettings === "function") renderSettings();
+  } else {
+    if (typeof renderCards === "function") renderCards();
+    if (typeof renderInspect === "function") renderInspect();
+  }
 }
 
 function returnToRoute(stage, popup = null) {
@@ -376,8 +399,7 @@ function applyRouteFromLocation() {
     for (const id of TRANSIENT_MODALS)
       if (!$(id).hidden) closeOverlayForReplacement(id);
     if (route.popup && $(route.popup).hidden) openPopupForRoute(route.popup);
-    // On a reload the route is restored before the first /status arrives. Keep the popup visible,
-    // then refill it from that first response unless the user has already started editing.
+    // Reload may restore a route before /status. The first response can hydrate or open its editor.
     if (route.popup && !S.status) _routePopupNeedsHydration = route.popup;
     else if (route.popup && $(route.popup).hidden) unavailablePopup = true;
   } finally {
@@ -396,8 +418,7 @@ function hydrateRoutedPopup() {
   _applyingRoute = true;
   try { openPopupForRoute(id); }
   finally { _applyingRoute = false; }
-  // ENV III is the only board-gated popup. Once status proves the board cannot expose it, keep the
-  // URL truthful instead of leaving an address whose selected dialog cannot exist on this device.
+  // A route whose editor is unavailable returns to Settings.
   if ($(id).hidden) {
     writeRoute("settings", null, { replace: true, parent: null });
     applyRouteFromLocation();
@@ -464,6 +485,7 @@ function invalidateLiveReadings(reason, busy = false) {
   S._values = []; S._modbus = []; S.live = null;
   S.transportUnavailable = reason;
   S.transportBusy = busy;
+  if (typeof expireLiveHistoryPins === "function") expireLiveHistoryPins();
   renderApp();
 }
 async function refreshStatus(paint = true) {
@@ -472,6 +494,7 @@ async function refreshStatus(paint = true) {
 // Return the accepted request id so an async observer can recheck ownership before its callback.
 async function readStatusFrame(paint = true, timeout, quiet = false) {
   const request = S.statusRequest = (S.statusRequest || 0) + 1;
+  const requestedAt = historyClock();
   const current = () => request === S.statusRequest && !S.imageReloading;
   let s;
   try { s = await j("/status", { signal: pollSignal(timeout) }); }
@@ -487,9 +510,14 @@ async function readStatusFrame(paint = true, timeout, quiet = false) {
     return false;
   }
   if (!current() || !acceptImageLease(s)) return false;
+  const receivedAt = historyClock();
   await setLangFromStatus(s, current);
   if (!current()) return false;
+  const wasX10aDown = S.status?.hp?.connected === false;
   S.status = s;
+  S.statusRequestedAt = requestedAt;
+  S.statusReceivedAt = receivedAt;
+  if (typeof expireLiveHistoryPins === "function") expireLiveHistoryPins();
   S.statusAcceptedRequest = request;
   const epoch = S.histEpoch;
   syncHistSources();
@@ -497,7 +525,8 @@ async function readStatusFrame(paint = true, timeout, quiet = false) {
     S.otaCached = false;
     otaCacheClear();
     invalidateLiveReadings("values");
-  }
+  } else if (wasX10aDown !== (s?.hp?.connected === false) &&
+             typeof expireFallbackHistoryPins === "function") expireFallbackHistoryPins();
   if (S.transportUnavailable === "status") { S.transportUnavailable = "values"; S.transportBusy = false; }
   const profile = s?.profile?.id || "";
   if (hpProbeIsOpen() && profile !== S.hpProbeCatalogProfile && !S.hpProbeCatalogBusy)
@@ -616,7 +645,7 @@ function renderHeaderMeta() {
   const w = S.status?.wifi || {};
   $("hdrIp").textContent = w.ip || location.hostname;
   const vl = $("verLink");
-  vl.textContent = "v" + (S.status?.version || "?");
+  vl.textContent = "v" + (S.status?.version || (S.otaInstalling && S.imageLease?.version) || "?");
   vl.title = S.otaAvail ? t("ota.title_avail", S.otaAvail) : t("ota.title_check");
 }
 // The status block INSIDE the schematic (#scStatus): the operation mode is the drawing's headline —

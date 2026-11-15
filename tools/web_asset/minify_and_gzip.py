@@ -346,15 +346,29 @@ def main() -> int:
     parser.add_argument("--gzip-encoder", choices=("zlib", "zopfli"), default="zlib")
     parser.add_argument("--zopfli-iterations", type=int, choices=(5,))
     parser.add_argument("--gzip-memory-level", type=int, choices=range(1, 10))
+    parser.add_argument("--pack-startup-script", type=Path, metavar="APP_SOURCES",
+                        help="pack the dashboard script assembled from this app.sources manifest")
     args = parser.parse_args()
     if args.gzip_encoder == "zopfli" and (
             args.zopfli_iterations != 5 or args.gzip_memory_level is not None):
         parser.error("Zopfli requires --zopfli-iterations 5 and no --gzip-memory-level")
     if args.gzip_encoder != "zopfli" and args.zopfli_iterations is not None:
         parser.error("--zopfli-iterations requires --gzip-encoder zopfli")
+    if args.pack_startup_script is not None and args.gzip_encoder != "zopfli":
+        parser.error("startup script packing requires Zopfli5")
 
     source = args.input.read_text(encoding="utf-8")
-    minified = minify_page(source)
+    if args.pack_startup_script is None:
+        minified = minify_page(source)
+    else:
+        from pack_startup_script import pack_startup_script, validate_assembled_app
+
+        try:
+            validate_assembled_app(source, args.pack_startup_script)
+            minified = pack_startup_script(minify_page(source))
+        except (OSError, ValueError) as error:
+            print(f"dashboard: {error}", file=sys.stderr)
+            return 2
     payload = minified.encode("utf-8")
     if args.gzip_encoder == "zopfli":
         # Locale minification imports this module without needing a native compiler.

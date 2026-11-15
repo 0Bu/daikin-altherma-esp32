@@ -501,13 +501,35 @@ function fillBoard() {
   // later LED/button customization; the request path validates those GPIOs separately.
   $("bdPreset").value = presets.some((p) => p.id === b.preset_id) ? b.preset_id : "custom";
 }
+function boardSettingsAvailable() {
+  return !!S.status?.board && S.transportUnavailable !== "status" &&
+    !S.otaCached && !S.otaBusy && !S.otaInstalling;
+}
+let boardDraftIdentity;
+let rejectedBoardDraft;
+function boardSettingsIdentity() {
+  const { boot_id, board, env3 } = S.status;
+  return JSON.stringify([boot_id, board.config_revision, board.preset_id, board.led_gpio, board.led_type, board.led_inverted,
+    board.btn_gpio, board.btn_active_low, board.pins_local, env3?.enabled, env3?.sda, env3?.scl]);
+}
 function openBoard() {
+  if (!boardSettingsAvailable()) return;
+  const identity = boardSettingsIdentity();
+  if (rejectedBoardDraft === identity) {
+    toast(t("board.draft_stale"), "err");
+    void refreshStatus();
+    return;
+  }
+  rejectedBoardDraft = undefined;
+  boardDraftIdentity = identity;
   fillBoard();
   fillEnv3();
   $("bdError").hidden = true;
   openPopup("boardModal");
 }
-function closeBoard() { closePopup("boardModal"); }
+function closeBoard() {
+  if (closePopup("boardModal") !== false) boardDraftIdentity = undefined;
+}
 
 // ── ENV III outdoor-climate sensor ───────────────────────────────────────
 function env3AvailablePins() {
@@ -558,6 +580,7 @@ function env3FormPayload() {
 }
 function env3SaveError(code, fallback) {
   const key = {
+    board_draft_stale: "board.draft_stale",
     env3_not_reachable: "env.err_not_reachable",
     env3_sht30_not_found: "env.err_sht30",
     env3_qmp6988_not_found: "env.err_qmp6988",
@@ -870,21 +893,26 @@ function otaRing(pct, indet) {
 
 // Write the inline readout. `text` is always plain text set via textContent — the only innerHTML is
 // our own ring markup, so a device-supplied /ota/status.message can never reach the DOM as markup.
-// Every write bumps otaSeq, which is what makes the delayed clear below safe.
+// Every progress update bumps otaSeq, which is what makes the delayed clear below safe.
 //
 // There are TWO compact-progress slots: the dashboard header's (#otaStat) and the one in the
 // Settings Firmware card's Version row (#otaStatSet). Either screen can start the flow, so either
-// screen has to be able to report it — and painting both unconditionally means a user who switches
-// screens mid-download finds the progress already there rather than gone. Terminal failures use the
+// screen has to be able to report it. Paint each mounted slot when its progress changes so a user
+// who switches screens mid-download finds the progress there. Terminal failures use the
 // separate persistent OTA alert slots below. A missing progress slot is skipped, not an error: the
-// Settings one exists only while that card is rendered.
+// Settings one exists only while that card is rendered. Its live announcement stays mounted
+// outside the cards so unrelated status changes cannot reannounce the same progress.
 let otaSeq = 0;
 const OTA_SLOTS = ["otaStat", "otaStatSet"];
+const otaPaintedProgress = new WeakMap();
 function paintOtaInline() {
   const { text = "", ring = false, pct = null, cls = "" } = S.otaView || {};
+  const announcement = $("otaProgressSettings");
+  if (announcement && announcement.textContent !== text) announcement.textContent = text;
+  const progress = JSON.stringify([text, ring, pct, cls]);
   for (const id of OTA_SLOTS) {
     const el = $(id);
-    if (!el) continue;
+    if (!el || otaPaintedProgress.get(el) === progress) continue;
     el.className = "otastat" + (cls ? " " + cls : "");
     el.innerHTML = ring ? otaRing(pct, pct == null) : "";
     if (text) {
@@ -892,11 +920,12 @@ function paintOtaInline() {
       span.textContent = text;
       el.appendChild(span);
     }
+    otaPaintedProgress.set(el, progress);
   }
 }
 function otaInline(text, { ring = false, pct = null, cls = "" } = {}) {
   otaSeq++;
-  S.otaShown = !!(text || ring);          // freezes the Settings rebuild — see renderSettings
+  S.otaShown = !!(text || ring);
   S.otaView = { text, ring, pct, cls };   // lets a slot created after a refresh catch up immediately
   paintOtaInline();
 }
@@ -1016,7 +1045,8 @@ async function otaCacheRestore(otaStatus) {
 // at the exact time their context is most useful. Guard the optional DOM methods so the browser-free
 // UI tests and the pre-status recovery shell share this exact production path.
 function syncOtaSettingsLock() {
-  const locked = !!(S.otaBusy || S.otaInstalling || S.otaCached);
+  const locked = !!(!S.status || S.transportUnavailable === "status" ||
+    S.otaBusy || S.otaInstalling || S.otaCached);
   for (const id of ["connTile", "settingsCards"]) {
     const controls = $(id)?.querySelectorAll?.("button, select, input") || [];
     for (const control of controls) {
@@ -1328,8 +1358,7 @@ async function resumeOta(s = null) {
 
 // The pre-/status Settings surface used only after a refresh into a running OTA. It deliberately
 // contains ONLY facts /ota/status actually owns (current version + selected channel); connection,
-// plant and memory rows are omitted rather than guessed. The first later /status frame replaces it
-// with the complete cards through renderSettings's settingsHydrated exception.
+// plant and memory rows are omitted here. The first later /status frame restores the complete cards.
 function renderOtaResumeShell(s) {
   if (S.status) return false;
   const current = s.current || "?";
@@ -1493,7 +1522,7 @@ const REBOOT_POLL_WAIT_MS     = 21000;
 // off it reported "Saved" for REJECTED writes: with no reboot to wait for, the follow-up /status
 // answers on the first try, which the poll can't tell apart from a device that came back up.
 // (/set_wifi's 500 on a failed config_save is the same shape: nothing persisted, no reboot.)
-async function saveReboot(url, body, { btn, showError, close, then, busyMsg, busyLabel, mapError }) {
+async function saveReboot(url, body, { btn, showError, close, then, busyMsg, busyLabel, mapError, onError }) {
   // The reboot-poll keeps S.busy set for ~22 s AFTER the modal closes, so the card is reopenable
   // while a change is still landing. Say so — a silent `return` here is exactly the ignored-write
   // feedback gap this whole flow exists to close.
@@ -1518,6 +1547,7 @@ async function saveReboot(url, body, { btn, showError, close, then, busyMsg, bus
   if (!r.ok) {
     const error = await errorInfo(r, t("toast.rejected"));
     reject(mapError ? mapError(error.code, error.message) : error.message);
+    onError?.(error.code);
     return;
   }
   const res = await r.json().catch(() => ({}));

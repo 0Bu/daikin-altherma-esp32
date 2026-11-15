@@ -1,4 +1,4 @@
-// translation-source: 34200897e3bb460a7f6fcd68bd6ff940649f8810c9b3709dc7616000e01aee90
+// translation-source: 65571656f160db7c5cef68e1a9e2f1c556ae6ac67f346ba2f2b092cff1d703c9
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -357,6 +357,8 @@ I18N.fr = localeValues([
   /* hist.recorded */ (h) => `Enregistré · ${h} h`,
   /* hist.now */ "maintenant",
   /* hist.ago */ (h) => `il y a ${h} h`,
+  /* hist.retained */ "Dernière mesure reçue",
+  /* hist.before_retained */ (h) => `${h} h avant la dernière mesure reçue`,
   /* hist.loading */ "Chargement de la tendance…",
   /* hist.none */ "Aucun relevé enregistré pour le moment.",
   /* hist.err */ "Tendance indisponible.",
@@ -447,6 +449,7 @@ I18N.fr = localeValues([
   /* toast.no_changes */ "Aucune modification",
   /* toast.reboot */ "Redémarrage — reconnexion…",
   /* toast.rebooted */ "Redémarré — reconnectez-vous à l’appareil",
+  /* board.draft_stale */ "Les réglages de la carte ont changé. Rouvrez l’éditeur avant d’enregistrer.",
   /* toast.busy_retry */ "Appareil occupé — réessayez dans un instant",
   /* toast.unreachable */ "Impossible de joindre l’appareil",
   /* toast.rejected */ "Rejeté",
@@ -502,6 +505,7 @@ I18N.fr = localeValues([
   /* schem.defrost_pill */ "❄ dégivrage",
   /* schem.outdoor */ "Extérieur",
   /* insp.close */ "Fermer",
+  /* schem.defrost_transfer */ "Pendant un dégivrage confirmé, la chaleur peut passer de l’eau au fluide frigorigène. Les tuyaux n’indiquent ce sens que si le débit et les températures actuels le confirment.",
   /* schem.leaving_water */ "R1T",
   /* schem.dhw_tank */ "BALLON ECS",
   /* schem.set */ "consigne",
@@ -950,7 +954,6 @@ I18N.fr = localeValues([
   /* lang.sv */ "Svenska",
   /* lang.fi */ "Suomi",
   /* lang.saved */ "Langue enregistrée",
-  /* hist.cop_none */ "Aucune courbe de COP lorsque la puissance électrique provient des pinces CT. Les charges prises en compte dépendent du câblage ; la puissance thermique enregistrée s’arrête avant BUH et n’inclut pas la chaleur directe de BSH, donc une même frontière de bilan n’est pas garantie.",
 ]);
 INSPECT_I18N.fr = inspectValues(
   ["Aucun relevé actuel :", "le compresseur est arrêté et l’unité extérieure n’actualise ses propres capteurs qu’en fonctionnement. La valeur du dernier cycle est masquée pour ne pas la présenter comme actuelle.", "Vitesse du compresseur illisible : les valeurs de l’unité extérieure peuvent venir du dernier cycle."],
@@ -1011,7 +1014,7 @@ INSPECT_I18N.fr = inspectValues(
       ? "Puissance froid estimée divisée par entrée électrique estimée. Hérite des incertitudes du fluide, des capteurs, de la tension et du facteur de puissance. EER instantané, non saisonnier ; l’énergie mesurée sur une saison est plus parlante."
       : "Puissance thermique estimée divisée par entrée électrique estimée, avec périmètres compatibles : après BUH avec CT et R2T, ou pompe à chaleur seule avec courant d’onduleur. Le câblage CT décide des charges incluses. Indication instantanée, pas compteur certifié.", (d) => d.copBlock === "tank_heater" ? "Aucun COP : la résistance du ballon peut être incluse dans l’électricité, mais sa chaleur va directement au ballon sans traverser les capteurs de départ ; les périmètres diffèrent."
       : d.copBlock === "buh_no_r2t" ? "Aucun COP : BUH actif sans capteur après lui. L’électricité peut inclure l’appoint alors que la chaleur est calculée avant."
-      : d.copBlock === "mb_scope" ? "Aucun COP : HomeHub mesure l’électricité de toute l’unité, mais la chaleur du seul PHE et ne fournit ni états des appoints ni capteur aval pour accorder les périmètres."
+      : d.copBlock === "mb_scope" ? "COP indisponible. Le guide HomeHub ne précise pas quelles charges électriques sont incluses. La chaleur estimée concerne l’échangeur à plaques. Le calcul du COP exige deux périmètres de mesure compatibles et vérifiés."
       : d.copBlock === "no_pel" ? d.pelHeld ? "Aucun COP : compresseur arrêté, le courant d’onduleur vient du dernier cycle et n’est pas actuel." : "Aucun COP : ce profil ne fournit ni courant CT ni courant d’onduleur."
       : d.cop == null ? null
       : d.efficiencyKind === "eer" ? `${fmt1(d.cop)} kW de froid par kW électrique : ≈ ${fmt1(d.copPth)} kW retirés pour ≈ ${fmt1(d.pel)} kW absorbés.`

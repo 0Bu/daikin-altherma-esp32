@@ -108,7 +108,7 @@ if 'PASS total=13 assertions=5233\n' not in legacy.stdout:
                        + legacy.stdout)
 print('PRESERVED ORIGINAL CASES ' + legacy.stdout.splitlines()[-1])
 baseline = command([binary])
-if 'PASS total=17 assertions=5581\n' not in baseline.stdout:
+if 'PASS total=18 assertions=5634\n' not in baseline.stdout:
     raise RuntimeError('the complete behavioral groups changed their assertion inventory\n'
                        + baseline.stdout)
 print(baseline.stdout, end='')
@@ -159,6 +159,13 @@ controls = [rejected(original_binary, 'wrong_types', 'original-present-type'),
 
 # Mutant headers bind explicitly at their one quoted include; the entire HTTP TU still compiles.
 mutations = [
+    ('ignore_board_draft_revision', 'source',
+     'revision->valuedouble != static_cast<double>(config_runtime_revision())',
+     'false', 'board_draft_revision'),
+    ('allocate_board_draft_refusal', 'source',
+     re.compile(r'http_send_json\(\s*req,\s+(R"\(\{"ok":false,"code":"board_draft_stale",\)"\s+'
+                r'R"\("error":"Board settings changed\. Reopen the editor before saving\."\}\)")\);'),
+     r'http_send_json(req, std::string(\1).c_str());', 'board_draft_revision'),
     ('leaked_request_scratch', 'source', re.compile(r'error\s*= root \? nullptr : "bad json";'),
      'static_cast<void>(body.release());\n    error = root ? nullptr : "bad json";', 'request_scratch'),
     ('swallowed_request_scratch_oom', 'source',
@@ -197,9 +204,12 @@ mutations = [
      'if (nvs_restart_held_by_factory_reset("config")) return;\n    vTaskDelay(pdMS_TO_TICKS(400));',
      'factory_reset_reboot'),
     ('board_conflict_is_write_failure', 'board',
-     'if (!config_save(c)) return send_local_pins_save_failure(req, c);',
-     'if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");',
+     'return send_local_pins_save_failure(req, c);',
+     'return send_err(req, "500 Internal Server Error", "config write failed");',
      'local_pin_reconcile'),
+    ('board_stale_reconciles_detected_link', 'transaction',
+     'require_current && revision != ConfigSaveRevision::Current',
+     'require_current && revision == ConfigSaveRevision::Stale', 'board_draft_revision'),
     ('env_conflict_is_write_failure', 'env',
      'if (!config_save(c)) return send_local_pins_save_failure(req, c);',
      'if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");',
@@ -291,7 +301,7 @@ for tag, target, old, new, case in mutations:
 after = inputs([OUT / 'production.d', OUT / 'cjson.d'])
 if after != before:
     raise RuntimeError('compile inputs changed during the run')
-if len(controls) != 28:
+if len(controls) != 31:
     raise RuntimeError('the complete compiling negative-control inventory changed')
 record = {'compiler': compiler, 'c_compiler': c_compiler,
           'compiler_commands': {'c': CC, 'cxx': CXX},

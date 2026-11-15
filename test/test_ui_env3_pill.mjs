@@ -13,6 +13,7 @@ const style = fs.readFileSync(new URL("../main/www/style.css", import.meta.url),
 const source = readAppFragments(["i18n.js"]) + readUiLocale("de") +
   readHistoryLifecycle() + readHtmlRenderer() + "\n" +
   readAppFragments(["dashboard.js", "descriptions.js", "history.js", "schematic.js"]);
+const wireTrendScrub = readAppFragments(["bootstrap.js"]).match(/^function wireTrendScrub\(gv\) \{[\s\S]*?^\}/m)[0];
 
 assert.match(index,
   /id="gEnv3"[^>]*data-insp="env3"[\s\S]*?class="sc-env3-box" x="624"[\s\S]*?id="gSgRequest"[\s\S]*?x="706"/,
@@ -79,6 +80,7 @@ const now = Date.now();
 const currentUnix = Date.parse("2026-08-12T10:00:00Z") / 1000;
 const S = {
   status: {
+    uptime_s: 1200,
     env3: { supported: true, enabled: true, fresh: true, error: "",
             temperature_c: 21.5, humidity_pct: 48, pressure_hpa: 1007 },
     ntp: { synced: true, time: "2026-08-12T10:00:00Z" },
@@ -121,13 +123,14 @@ const document = {
   },
 };
 const sandbox = vm.createContext({
-  S, document, renderSettings() {},
+  S, document, renderSettings() {}, POLL_TIMEOUT_MS: 6000,
   navigator: { language: "de-DE" },
   localStorage: { getItem() { return null; }, setItem() {} },
   setTimeout, clearTimeout,
   fetch() { throw new Error("fresh seeded histories must not be fetched in this test"); },
 });
-vm.runInContext(`${source}
+vm.runInContext(`${source}\n${wireTrendScrub}
+  const trendPlotFromTarget = plot => plot;
   renderCards = () => {}; renderSettings = () => {};
   this.__api = {
     render: () => { LANG = "de"; renderEnv3Pill(); renderInspect(); },
@@ -135,6 +138,10 @@ vm.runInContext(`${source}
     tooltip: (i) => { LANG = "de"; return scrubText(historyView(ENV3_COMBINED_ID), i); },
     tooltipHtml: (i) => { LANG = "de"; return histReadout(historyView(ENV3_COMBINED_ID), i); },
     toggle: (source) => histSeriesToggle(ENV3_COMBINED_ID, source),
+    pin: (i) => histPinToggle(ENV3_COMBINED_ID, i),
+    wireTrendScrub,
+    revision: () => histViewRevision(historyView(ENV3_COMBINED_ID)),
+    mounted: plot => scrubView(plot),
   };`, sandbox, { filename: "main/www/app.sources" });
 
 sandbox.__api.render();
@@ -248,13 +255,117 @@ assert.match(elements.inspHist.innerHTML, /class="vhist-line env-pressure"/,
 const pressureRing = S.hist.get("env3:env3_pressure");
 const pressureValues = pressureRing.v;
 pressureRing.v = pressureValues.map(() => null);
-assert.match(sandbox.__api.tooltipHtml(3), /env-temperature">Temperatur<\/span><span class="env-temperature">22,0 °C/,
-  "source fallback must keep forecast temperature on its own colour");
+assert.doesNotMatch(sandbox.__api.tooltipHtml(3), /env-temperature/,
+  "an explicitly hidden temperature forecast stays hidden even when the last visible sensor has no history");
 assert.match(sandbox.__api.tooltipHtml(3), /env-pressure">Luftdruck<\/span><span class="env-pressure">1.008,0 hPa/,
   "source fallback must keep forecast pressure on its own colour");
 pressureRing.v = pressureValues;
 sandbox.__api.toggle("env3_humidity");
 sandbox.__api.toggle("env3_temperature");
+
+{
+  const key = "env3:env3_temperature";
+  const initial = S.hist.get(key);
+  S.hist.set(key, { ...initial, refreshFailed: true, v: [initial.v[0], null, null] });
+  sandbox.__api.render();
+  assert.match(elements.inspHist.innerHTML, /vhist-retained env-temperature[^>]*left:0\.000%/,
+    "the retained measurement is placed at its real sample before the forecast divider");
+  assert.match(elements.inspHist.innerHTML, /vhist-axis-now/);
+  assert.match(elements.inspHist.innerHTML, /vhist-line env-forecast-temperature/);
+  S.hist.set(key, initial);
+}
+
+{
+  const keys = ["env3_temperature", "env3_humidity", "env3_pressure"].map(id => "env3:" + id);
+  const rings = keys.map(key => S.hist.get(key));
+  keys.forEach((key, i) => S.hist.set(key, { ...rings[i], gen: 4, v: [] }));
+  sandbox.__api.render();
+  assert.match(elements.inspHist.innerHTML, /data-hist="env3_combined"[^>]*data-n="0"/);
+  assert.match(elements.inspHist.innerHTML, /Open-Meteo · Prognose/);
+  assert.match(elements.inspHist.innerHTML, /vhist-line env-forecast-temperature/);
+  assert.doesNotMatch(elements.inspHist.innerHTML, /vhist-line env-temperature/);
+  assert.equal(sandbox.__api.tooltip(0),
+    `${forecastClock}\nOpen-Meteo · Prognose\nTemperatur  22,0 °C\nLuftfeuchte  46,0 %\nLuftdruck  1.008,0 hPa`);
+  sandbox.__api.pin(0);
+  sandbox.__api.render();
+  assert.match(elements.inspHist.innerHTML, /vhist-pinned/);
+  sandbox.__api.pin(0);
+  keys.forEach((key, i) => S.hist.set(key, rings[i]));
+  S.hist.set(keys[2], { ...rings[2], gen: 5, err: true, v: [] });
+  sandbox.__api.render();
+  assert.match(elements.inspHist.innerHTML, /vhist-line env-forecast-pressure/,
+    "one unavailable measured ring cannot suppress its own fresh forecast");
+  assert.doesNotMatch(elements.inspHist.innerHTML, /vhist-line env-pressure/);
+  S.hist.set(keys[2], rings[2]);
+}
+
+{
+  const rings = [...S.hist.entries()];
+  for (const [id, ring] of rings) S.hist.set(id, { ...ring, gen: 6, t0: null });
+  sandbox.__api.render();
+  assert.match(elements.inspHist.innerHTML, /data-hist="env3_combined"[\s\S]*vhist-line env-temperature/);
+  assert.match(elements.inspHist.innerHTML, /data-hist="env3_forecast"[\s\S]*vhist-line env-forecast-temperature/,
+    "an undated sensor ring and a fresh forecast have independent axes");
+  S.otaCached = true;
+  sandbox.__api.render();
+  assert.doesNotMatch(elements.inspHist.innerHTML, /env-forecast-temperature/,
+    "a cached OTA status cannot supply a current forecast");
+  delete S.otaCached;
+  for (const [index, t0] of [currentUnix + 600, currentUnix - 300].entries()) {
+    for (const [id, ring] of rings) S.hist.set(id, { ...ring, gen: 7 + index, t0 });
+    sandbox.__api.render();
+    assert.match(elements.inspHist.innerHTML, /data-hist="env3_combined"[\s\S]*vhist-line env-temperature/);
+    assert.match(elements.inspHist.innerHTML, /data-hist="env3_forecast"[\s\S]*vhist-line env-forecast-temperature/,
+      "a corrected clock keeps measured points and the fresh forecast on independent axes");
+  }
+  for (const [id, ring] of rings) S.hist.set(id, ring);
+}
+
+{
+  const oldTime = S.status.ntp.time;
+  S.status.ntp.time = new Date((currentUnix + 3600) * 1000).toISOString();
+  sandbox.__api.render();
+  assert.match(elements.inspHist.innerHTML, /data-hist="env3_forecast"/,
+    "a forward clock correction also separates the stale measurement times from the forecast");
+  S.status.ntp.time = oldTime;
+
+  const plot = {
+    dataset: { hist: "env3_combined", n: "3", rev: sandbox.__api.revision() },
+    getBoundingClientRect: () => ({ left: 0, width: 100 }),
+    querySelector: () => ({ hidden: false, style: {} }),
+    querySelectorAll: () => [], closest: () => null,
+    parentElement: { querySelector: () => ({ style: { setProperty() {} } }) },
+  };
+  const events = {};
+  sandbox.__api.wireTrendScrub({ addEventListener: (event, handle) => { events[event] = handle; } });
+  const pointer = { target: plot, pointerId: 1, clientX: 68 };
+  events.pointerdown(pointer);
+  const mounted = sandbox.__api.mounted(plot);
+  assert.ok(mounted?.forecast, "the pointer owns the rendered forecast");
+  S.status.ntp.time = new Date((currentUnix + 5) * 1000).toISOString();
+  S.status.uptime_s += 5;
+  assert.equal(sandbox.__api.mounted(plot), mounted,
+    "a routine poll cannot invalidate the geometry of a captured drag");
+  events.pointermove(pointer);
+  events.pointerup({ ...pointer, type: "pointerup" });
+  assert.equal(S.histPin.get("env3_combined")?.t, currentUnix + 7200,
+    "pointerup pins the forecast hour selected on the mounted plot");
+  S.histPin.delete("env3_combined");
+  S.status.ntp.time = oldTime;
+  S.status.uptime_s -= 5;
+  plot.dataset.rev = sandbox.__api.revision();
+  const hourly = S.status.weather_forecast.hourly;
+  events.pointerdown(pointer);
+  S.status.weather_forecast.hourly = hourly.filter(hour => hour.time_unix_s !== currentUnix + 7200);
+  plot.dataset.cur = "4";
+  events.keydown({ target: plot, key: "Enter", preventDefault() {} });
+  assert.equal(S.histPin.has("env3_combined"), false,
+    "keyboard confirmation during the same drag cannot pin a replacement hour");
+  events.pointerup({ ...pointer, type: "pointerup" });
+  assert.equal(S.histPin.has("env3_combined"), false,
+    "a forecast hour removed during the gesture must not create a latent pin");
+  S.status.weather_forecast.hourly = hourly;
+}
 
 // Transport loss retires only the live status claims. The dated historical measurements remain
 // inspectable; a values-only error does not erase independent freshly obtained ENV III status.

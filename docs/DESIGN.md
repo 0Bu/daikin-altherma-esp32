@@ -220,7 +220,10 @@ useful transfer direction: positive ΔT for heating/DHW, negative for cooling, d
 cooling capacity. COP/EER additionally requires compatible thermal/electrical boundaries. Missing
 inputs, opposite-sign transfer and pump-only residual-temperature equalization leave these supported
 pills visible as `—`. A reported Cooling mode with hot residual circulation uses neutral pipes and
-Space circuit wording rather than claiming cooling output.
+Space circuit wording. During confirmed defrost, circulating water can give up heat to the
+refrigerant across the plate heat exchanger. The estimate retains its sign. Negative thermal power
+and cooler supply than return indicate heat leaving the water. The pipes stay neutral when current
+readings cannot establish the direction.
 
 Thermal power uses flow/60 × ΔT × ρ·cp, approximately 4.186 kJ/(l·K) for water with
 ρ≈1 kg/l; glycol mixtures have different density and heat capacity. Electrical power is estimated
@@ -287,8 +290,9 @@ when its numeric values do not change.
 
 A trended reading has a 24-hour sparkline in its inspector and value expander, with no separate
 history card or range picker. Numeric charts share a light area/darker line grammar; gaps break both,
-and a lone sample is a dot. Paired X10A/HomeHub series share axes and cursor time, with blue/petrol
-source legends. Room temperature can add the configured MQTT source as a third, separately coloured
+and a lone sample is a dot. X10A and HomeHub use blue/petrol source legends. Sources share an
+axis and cursor when their time rasters align. Incompatible anchors use separate plots and cursors.
+Room temperature can add the configured MQTT source as a third, separately coloured
 series with its name and MQTT attribution, including when no device room sensor is available.
 The device sensor and MQTT source keep distinct current values and explanations. Source replacement
 never splices two instruments into one series.
@@ -297,35 +301,52 @@ Computed readings chart their own units and expressions, not an input relabelled
 Heat output retains signed balance across heating, cooling and defrost; the live pill also applies
 current mode and useful-direction gates. Measured no flow records zero. Moving water needs a running
 compressor witness; stopped-compressor pump overrun leaves a gap. A profile without compressor
-frequency offers no heat-output curve. Other missing required inputs make a gap; held-over applies
-only when every missing input was held. The historical
-COP uses the conservative inverter-sourced boundary and omits CT-sourced samples rather than
-pairing asynchronous heater/temperature bucket events. An intentionally refused empty series says
-so. Chart titles name the stable concept, not the live one-second scope.
+frequency offers no heat-output curve. Raw current-transformer phases and inverter current retain
+their own histories. A five-minute bucket can contain phase currents, inverter current and
+compressor speed from different sweeps. The electrical-input and COP inspectors omit derived
+history. Missing input samples leave a gap. A gap is held-over only when every missing input was
+held. A successful empty series shows “No readings recorded yet.” An unavailable series reports
+an error, with its source named if the other series can still draw. Chart titles name the stable
+concept.
 
 Categorical histories use source-labelled tracks, written states, distinct state colours and
 hatching only for missing samples. Valve and Quiet use latest sampled state; BSH, BUH stages and
 Defrost retain any observed activation in their open five-minute bucket. Smart Grid retains all
 four states. Disinfection and X10A Tank preheat remain different facts. Totals are sampled raster
 time; events between sweeps may be missed.
+The tank-temperature chart distinguishes the Smart Grid “Recommended on” request from observed
+booster-heater operation. Bands, sampled durations and readouts identify X10A and HomeHub separately.
 
-Rings share five-minute slots and an elapsed/rolling-day axis. A newly resolved row or changed source
-identity leaves earlier gaps. Compatible firmware records can restore after reboot/power loss;
-restoration waits for valid time and can be partial. Open buckets and incompatible records may be
-lost, including the recent unsaved tail. Compatible heap curves can survive warm RAM restarts or
-restore dated five-minute journal records after clock sync; short interruptions may leave no visible
-gap at that resolution. Current uptime describes only this boot.
+Rings use five-minute slots on an elapsed or rolling-day axis. A newly resolved row or changed source
+identity leaves earlier gaps. Flash restoration waits for a synchronized clock and can be partial.
+Compatible RAM histories can survive a warm restart before clock sync. Independent recorders book
+their warm-reset gaps separately. Open buckets and incompatible records can be lost, including the
+recent unsaved tail. Current uptime describes this boot.
 
-Browser storage is not measured history. Source/reboot epochs retire cached rings, index pins and
-request leases, including A → B → A between polls. Replies carry sample epoch and boot identity;
-delayed raw/derived replies cannot refill retired state or release a successor's busy lease.
+Browser storage is not measured history. Source/reboot epochs retire cached rings, index pins,
+mounted plots and in-flight history requests, including A → B → A between polls.
+Replies carry sample epoch and boot identity. Visible charts refresh while live polling continues.
+Closing a chart ends its active gesture.
+A failed refresh keeps compatible readings within the most recent day. A distinct marker identifies
+each retained series' last received sample. Categorical timelines keep their separate live cap.
+Weather charts show a verified current forecast even when the measured history is empty.
+Incompatible measurement and forecast clocks get separate axes until a successful refresh
+establishes a shared time basis.
 
-Hover previews a sample; tap pins it, a second tap on the same sample/Escape clears it. Pins attach
-to the sample instant and row, not array index or a particular chart. The two views of one row
-share the pin and freeze while either is scrubbed. Expired pins drop rather than clamp to a different
-instant. Closing the inspector preserves a pin for an open value row; collapsing the value panel
-clears it. Bubbles share one reserved row above the plot, with one measurement per line. The moving
-bubble paints over the pinned bubble with an opaque surface when they overlap. Both selected times
+Hover previews a sample. Tap pins it, and another tap on the same sample or Escape clears it.
+A boot-relative pin can appear in both views of a row when both show the selected instrument.
+A peer's reading cannot keep a pinned measurement visible after its original source rolls out.
+A pin tracks the original boot-relative bucket when available, including before clock sync.
+Live-state pins require the same visible instruments and current states. Refreshing completed
+history alone leaves a live-state pin in place.
+The two views freeze while either is scrubbed. Routine status polls leave the selected forecast
+hour tied to the graph under the pointer until the gesture ends.
+A recorded pin without a boot-relative bucket expires when the plotted series or its alignment
+changes. A forecast pin stays while its timestamp remains selectable on the same chart.
+Closing the inspector preserves a pin for an open
+value row. Collapsing the value panel clears it. Bubbles share one reserved row above the plot, with
+one measurement per line. The moving bubble paints over the pinned bubble with an opaque surface
+when they overlap. Both selected times
 share the time axis below the plot; the moving time likewise paints over the pinned time. Comparisons
 do not add height or move the plot or pinned time. Phase intervals remain in categorical readouts.
 Source legends toggle individual numeric series and retain at least one visible series. Choices
@@ -393,7 +414,8 @@ leave the UI frozen indefinitely.
 The dashboard version and Settings Version row run the same check on the current screen. Inline
 progress follows that version; terminal failure is a persistent wrappable alert below the active
 header, dismissible only by its named close button. Repaint/navigation does not discard it.
-Connections continue updating while the directly painted firmware/board cards are held stable.
+Settings can refresh the firmware and board cards and repaint the version's progress indicator.
+Its persistent live region announces a change in progress text independently of those cards.
 
 | Phase | UI obligation |
 |---|---|
@@ -401,7 +423,7 @@ Connections continue updating while the directly painted firmware/board cards ar
 | Valid offer | Fetch optional generation-bound notes; show current/available version, channel and literal change list |
 | Confirmation | Explain signed installation, reboot and rollback; Cancel/backdrop/Escape sends no install request |
 | Install accepted | Bind generation/channel/version/application SHA and follow the immediate successor operation |
-| Download | Show real percentage inline in a polite live region; no repeated progress toasts |
+| Download | Show real percentage by the version and announce changed progress politely |
 | Busy/replaced offer | State retryable busy/check-again; preserve a complete terminal reason |
 | Completion | Wait boundedly for reboot and reload the page to obtain the new HTML/CSS/JavaScript |
 
@@ -483,8 +505,12 @@ becomes synced after an actual reply, and HomeHub has its independent state.
 The Hardware modal records board identity independently of pins. Choosing a preset fills recommended
 peripherals; disabling LED/reset does not change the preset. ENV III is editable only for a pending
 M5Stack selection and hidden/disabled for Custom/Seeed. Safe distinct SDA/SCL options reflect exposed
-pins. An enabled sensor must pass its live SHT30/QMP6988 probe before one atomic board/sensor save;
-rejection preserves the entire draft. The Hardware explanation lists saved configuration, complete
+pins. Enabling the sensor requires a live SHT30/QMP6988 probe. Keeping an active pin pair requires
+a fresh connected sample. The board and sensor settings save together. A preflight refusal preserves
+the draft. On Save, if the current status shows a different boot or
+configuration, the browser closes the editor and asks the owner to reopen it. A device refusal with
+`board_draft_stale` gives the same instruction. Pin and ENV III conflicts preserve the draft and
+explain the required correction. The Hardware explanation lists saved configuration, complete
 indicator phases with static colour points and available ENV III live/history readings. Uptime uses
 at most two coarse units; per-task stack headroom remains diagnostic API evidence, not an invented
 chart.
@@ -566,7 +592,8 @@ Use shared components rather than near-identical render paths:
 | Accepted rebooting save | Reboot/reconnect feedback, then return to the same Settings context |
 | Accepted live save | Applied result; stay on view and refresh relevant facts |
 | No change | Close with No changes; no phantom reboot |
-| Invalid input/server 4xx | Inline reason where attributable; modal/draft remain |
+| Input validation refusal | Inline reason where attributable; modal/draft remain |
+| Board draft stale (409) | Close the editor, refresh board status and ask the owner to reopen |
 | Persistence failure 500 | Explicit unsaved error; preserve draft, never claim reboot |
 | Busy 503 | Retryable device-busy wording; blame no field |
 | Transport failure | Unreachable/retrying; distinguish it from an answered refusal |
@@ -621,9 +648,9 @@ capability/evidence state rather than inventing it from labels or missing fields
 
 ## 11. Build / delivery
 
-Markup, CSS and ordered classic-script fragments from [app.sources](../main/www/app.sources) are
-assembled, minified and deterministically gzipped into the signed application. They share one
-lexical scope. Provisioning and non-English locales are separate embedded assets. No font, CDN,
-remote script or stylesheet is loaded by the device UI. Hash navigation stays client-side.
+The [firmware asset pipeline](ARCHITECTURE.md#http-and-browser-transport) embeds the page, including
+the packed classic script from [app.sources](../main/www/app.sources). Provisioning and non-English
+locales are separate embedded assets. The device UI loads all assets locally. Hash navigation
+stays client-side.
 See the [JavaScript ownership map](../main/www/js/README.md) and [test reference](../test/README.md)
 for build-input and verification contracts.

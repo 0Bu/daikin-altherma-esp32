@@ -362,7 +362,7 @@ assert.match(config, /bool config_factory_seed_blob\([\s\S]*?Lock lk\(g_mtx\);\s
 // The stored link wins over the optional board parts at load; they yield to it afterwards.
 assert.match(config, /if \(!link_pins_safe\(c\.rx_pin, c\.tx_pin, hw_octal_spi\(\), ReservedPins\{\},/,
   "config_load must check the stored X10A pair against the chip rule only");
-assert.match(config, /config_save_transaction\(g_cfg, requested, owns_link, store, s_load_yield\);[\s\S]*?if \(!owns_link && out\.result == ConfigSaveResult::Saved\)\s*config_yield_forget_restated\(s_load_yield, requested\);\s*\}/,
+assert.match(config, /config_save_transaction\(g_cfg, requested, owns_link, store, s_load_yield,\s*require_current\);[\s\S]*?if \(!owns_link && out\.result == ConfigSaveResult::Saved\)\s*config_yield_forget_restated\(s_load_yield, requested\);\s*\}/,
   "every service save must keep the yielded pins, and forget a part only after it is re-stated or its stored pin goes to another board part, under the lock");
 const httpConfig = code("main/http_config.cpp");
 assert.match(httpConfig, /reset_checkup && c\.profile != "auto"[\s\S]*?history_x10a_identity\([\s\S]*?if \(c\.x10a_identity_fp != 0\)[\s\S]*?history_reset_on_detect\(c\.x10a_identity_fp\)/,

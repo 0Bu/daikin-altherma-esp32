@@ -1,4 +1,4 @@
-// translation-source: 34200897e3bb460a7f6fcd68bd6ff940649f8810c9b3709dc7616000e01aee90
+// translation-source: 65571656f160db7c5cef68e1a9e2f1c556ae6ac67f346ba2f2b092cff1d703c9
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -357,6 +357,8 @@ I18N.sv = localeValues([
   /* hist.recorded */ (h) => `Registrerad · ${h} t`,
   /* hist.now */ "nu",
   /* hist.ago */ (h) => `för ${h} t sedan`,
+  /* hist.retained */ "Senaste mottagna mätvärdet",
+  /* hist.before_retained */ (h) => `${h} h före det senaste mottagna mätvärdet`,
   /* hist.loading */ "Laddar historik…",
   /* hist.none */ "Inga mätningar är registrerade ännu.",
   /* hist.err */ "Historiken är otillgänglig.",
@@ -447,6 +449,7 @@ I18N.sv = localeValues([
   /* toast.no_changes */ "Inga ändringar",
   /* toast.reboot */ "Startar på nytt — ansluter igen…",
   /* toast.rebooted */ "Startades om — anslut enheten igen",
+  /* board.draft_stale */ "Kortets inställningar har ändrats. Öppna redigeraren igen innan du sparar.",
   /* toast.busy_retry */ "Enheten är upptagen — försök direkt igen",
   /* toast.unreachable */ "Enheten svarar inte",
   /* toast.rejected */ "Avvisad",
@@ -502,6 +505,7 @@ I18N.sv = localeValues([
   /* schem.defrost_pill */ "❄ Avfrostning",
   /* schem.outdoor */ "Ute",
   /* insp.close */ "Stäng",
+  /* schem.defrost_transfer */ "Vid bekräftad avfrostning kan värme överföras från vattnet till köldmediet. Rören visar den riktningen bara när flödet och temperaturerna just nu stöder den.",
   /* schem.leaving_water */ "R1T",
   /* schem.dhw_tank */ "VV-TANK",
   /* schem.set */ "Mål",
@@ -950,7 +954,6 @@ I18N.sv = localeValues([
   /* lang.sv */ "Svenska",
   /* lang.fi */ "Suomi",
   /* lang.saved */ "Språk sparat",
-  /* hist.cop_none */ "Ingen COP-historik när strömvärdet kommer från CT-klämmor. Kabeldragningen avgör vilka laster de täcker; värmemätningen slutar före BUH och omfattar inte direkt BSH-värme. Systemgränserna kan därför avvika.",
 ]);
 
 INSPECT_I18N.sv = inspectValues(
@@ -1017,7 +1020,7 @@ INSPECT_I18N.sv = inspectValues(
       : "Gränsmatchad värme ÷ el: CT+R2T efter BUH, annars växelriktarström för värmepumpen.", (d) => d.copBlock === "tank_heater"
       ? "Ingen COP: el kan omfatta BSH, men tankvärmen passerar inte framledningsgivaren."
       : d.copBlock === "buh_no_r2t" ? "Ingen COP: BUH är aktiv utan efterföljande givare; el- och värmegränsen skiljer sig."
-      : d.copBlock === "mb_scope" ? "Ingen COP: HomeHub mäter enhetens el men värmen bara PHE."
+      : d.copBlock === "mb_scope" ? "COP är inte tillgängligt. HomeHub-guiden anger inte vilka elförbrukare som ingår. Den uppskattade värmen gäller plattvärmeväxlaren. COP kräver att båda värdena bevisligen täcker samma utrustning."
       : d.copBlock === "no_pel"
       ? d.pelHeld ? "Ingen COP: växelriktarströmmen är ett gammalt värde efter stopp."
         : "Ingen COP: varken CT- eller växelriktarström finns."

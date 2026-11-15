@@ -1,4 +1,4 @@
-// translation-source: 34200897e3bb460a7f6fcd68bd6ff940649f8810c9b3709dc7616000e01aee90
+// translation-source: 65571656f160db7c5cef68e1a9e2f1c556ae6ac67f346ba2f2b092cff1d703c9
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -357,6 +357,8 @@ I18N.cs = localeValues([
   /* hist.recorded */ (h) => `Zaznamenáno · ${h} h`,
   /* hist.now */ "nyní",
   /* hist.ago */ (h) => `před ${h} h`,
+  /* hist.retained */ "Poslední přijatý vzorek",
+  /* hist.before_retained */ (h) => `${h} h před posledním přijatým vzorkem`,
   /* hist.loading */ "Načítám průběh…",
   /* hist.none */ "Dosud nebyly zaznamenány žádné hodnoty.",
   /* hist.err */ "Průběh není dostupný.",
@@ -447,6 +449,7 @@ I18N.cs = localeValues([
   /* toast.no_changes */ "Žádné změny",
   /* toast.reboot */ "Restartuji — znovu se připojuji…",
   /* toast.rebooted */ "Restartováno — znovu se připojte k zařízení",
+  /* board.draft_stale */ "Nastavení desky se změnilo. Před uložením znovu otevřete editor.",
   /* toast.busy_retry */ "Zařízení je zaneprázdněné — zkuste to za chvíli",
   /* toast.unreachable */ "Zařízení se nepodařilo kontaktovat",
   /* toast.rejected */ "Odmítnuto",
@@ -502,6 +505,7 @@ I18N.cs = localeValues([
   /* schem.defrost_pill */ "❄ odmraz.",
   /* schem.outdoor */ "Venku",
   /* insp.close */ "Zavřít",
+  /* schem.defrost_transfer */ "Při potvrzeném odmrazování může teplo přecházet z vody do chladiva. Potrubí tento směr zobrazuje jen tehdy, když ho potvrzuje aktuální průtok a teploty.",
   /* schem.leaving_water */ "R1T",
   /* schem.dhw_tank */ "ZÁSOBNÍK TUV",
   /* schem.set */ "žádaná",
@@ -950,7 +954,6 @@ I18N.cs = localeValues([
   /* lang.sv */ "Svenska",
   /* lang.fi */ "Suomi",
   /* lang.saved */ "Jazyk uložen",
-  /* hist.cop_none */ "Graf COP chybí pro příkon z CT: zapojení určuje spotřebiče a teplo před BUH nezahrnuje BSH, takže hranice bilance nemusí souhlasit.",
 ]);
 INSPECT_I18N.cs = inspectValues(
   ["Chybí aktuální hodnota:", "kompresor stojí a venkovní jednotka obnovuje své snímače jen za chodu. Hodnota z minulého běhu je skryta, aby nepůsobila jako aktuální měření.", "Otáčky kompresoru nelze přečíst, takže hodnoty venkovní jednotky mohou být z minulého běhu."],
@@ -993,7 +996,7 @@ INSPECT_I18N.cs = inspectValues(
       : d.pth == null ? null : d.pthKind === "cooling" ? `≈ ${fmt1(d.pth)} kW chlazení${d.cop != null ? `, EER ${fmt1(d.cop)}` : ""}.` : `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `, COP ${fmt1(d.cop)}` : ""}.`], // pth
     [(d) => d && d.efficiencyKind === "eer" ? "EER tepelného čerpadla (odhad)" : d && d.copScope === "plant" ? "COP za BUH (odhad)" : "COP tepelného čerpadla (odhad)", "Odhadovaná účinnost", (d) => d && d.efficiencyKind === "eer" ? "Odhadovaný chladicí výkon dělený odhadovaným příkonem. Výsledek přebírá předpoklady o kapalině, snímačích, napětí a účiníku; je okamžitý, ne sezonní." : "Odhadovaný tepelný výkon dělený příkonem se stejnou bilanční hranicí. U CT může být teplo za BUH, u proudu měniče jen tepelné čerpadlo; zapojení CT určuje zahrnuté spotřebiče. Výsledek přebírá předpoklady o kapalině, snímačích, napětí a účiníku a je okamžitý, nikoli sezonní.", (d) => d.copBlock === "tank_heater" ? "COP není dostupný — těleso zásobníku je zapnuté. Jeho příkon může být v elektrické bilanci, ale teplo jde přímo do zásobníku a míjí vodní snímače."
       : d.copBlock === "buh_no_r2t" ? "COP není dostupný — BUH topí, ale profil nemá snímač za ním; elektrická a tepelná hranice si neodpovídají."
-      : d.copBlock === "mb_scope" ? "COP není dostupný — HomeHub udává příkon celé jednotky včetně těles, ale tepelný výkon jen PHE. Bez stavu těles a snímače za nimi nelze hranice sladit."
+      : d.copBlock === "mb_scope" ? "COP není dostupný. Příručka HomeHub neuvádí, které elektrické spotřebiče zahrnuje údaj o příkonu. Odhad tepla se týká deskového výměníku. Pro výpočet COP je třeba ověřit shodu obou rozsahů měření."
       : d.copBlock === "no_pel" ? d.pelHeld ? "COP není dostupný — proud měniče je při stojícím kompresoru z minulého běhu." : "COP není dostupný — profil neudává CT ani proud měniče."
       : d.cop == null ? null : d.efficiencyKind === "eer" ? `${fmt1(d.cop)} kW chlazení na 1 kW elektřiny — ≈ ${fmt1(d.copPth)} kW při ≈ ${fmt1(d.pel)} kW příkonu.`
       : d.copScope === "plant" ? `${fmt1(d.cop)} kW tepla za BUH na 1 kW příkonu CT — ≈ ${fmt1(d.copPth)} kW při ≈ ${fmt1(d.pel)} kW. Rozsah určuje zapojení CT.`

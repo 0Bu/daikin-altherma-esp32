@@ -1,4 +1,4 @@
-// translation-source: 34200897e3bb460a7f6fcd68bd6ff940649f8810c9b3709dc7616000e01aee90
+// translation-source: 65571656f160db7c5cef68e1a9e2f1c556ae6ac67f346ba2f2b092cff1d703c9
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -357,6 +357,8 @@ I18N.es = localeValues([
   /* hist.recorded */ (h) => `Registrado · ${h} h`,
   /* hist.now */ "ahora",
   /* hist.ago */ (h) => `hace ${h} h`,
+  /* hist.retained */ "Última muestra recibida",
+  /* hist.before_retained */ (h) => `${h} h antes de la última muestra recibida`,
   /* hist.loading */ "Cargando tendencia…",
   /* hist.none */ "Aún no hay lecturas registradas.",
   /* hist.err */ "Tendencia no disponible.",
@@ -447,6 +449,7 @@ I18N.es = localeValues([
   /* toast.no_changes */ "Sin cambios",
   /* toast.reboot */ "Reiniciando — volviendo a conectar…",
   /* toast.rebooted */ "Reiniciado — vuelve a conectarte al dispositivo",
+  /* board.draft_stale */ "La configuración de la placa ha cambiado. Vuelve a abrir el editor antes de guardar.",
   /* toast.busy_retry */ "Dispositivo ocupado — vuelve a intentarlo en un momento",
   /* toast.unreachable */ "No se pudo acceder al dispositivo",
   /* toast.rejected */ "Rechazado",
@@ -502,6 +505,7 @@ I18N.es = localeValues([
   /* schem.defrost_pill */ "❄ desescarche",
   /* schem.outdoor */ "Exterior",
   /* insp.close */ "Cerrar",
+  /* schem.defrost_transfer */ "Durante un desescarche confirmado, el calor puede pasar del agua al refrigerante. Las tuberías solo indican esa dirección cuando la respaldan el caudal y las temperaturas actuales.",
   /* schem.leaving_water */ "R1T",
   /* schem.dhw_tank */ "DEPÓSITO ACS",
   /* schem.set */ "consigna",
@@ -950,7 +954,6 @@ I18N.es = localeValues([
   /* lang.sv */ "Svenska",
   /* lang.fi */ "Suomi",
   /* lang.saved */ "Idioma guardado",
-  /* hist.cop_none */ "No se muestra la curva de COP cuando la potencia eléctrica procede de las pinzas CT. Las cargas incluidas dependen del cableado; la potencia térmica registrada termina antes de BUH y no incluye el calor directo de BSH, por lo que no se garantiza la misma frontera de balance.",
 ]);
 INSPECT_I18N.es = inspectValues(
   ["Sin lectura actual:", "el compresor está parado y la unidad exterior solo actualiza sus sensores cuando funciona. Se oculta el valor del último ciclo para no presentarlo como una medición actual.", "No se puede leer la velocidad del compresor; los valores de la unidad exterior pueden ser del último ciclo."],
@@ -1016,7 +1019,7 @@ INSPECT_I18N.es = inspectValues(
       : "Potencia térmica estimada dividida por entrada eléctrica estimada, usando límites compatibles: tras BUH con CT cuando existe R2T, o solo la bomba de calor con corriente del inversor. El cableado CT decide qué cargas incluye. Es una indicación instantánea, no un contador certificado.", (d) => d.copBlock === "tank_heater"
       ? "Sin COP: la resistencia del depósito puede estar incluida en la electricidad, pero su calor va directo al depósito y no cruza los sensores de impulsión; los límites no coinciden."
       : d.copBlock === "buh_no_r2t" ? "Sin COP: BUH está activo, pero falta un sensor posterior. La electricidad puede incluir el calentador mientras el calor se calcula antes de él."
-      : d.copBlock === "mb_scope" ? "Sin COP: HomeHub mide electricidad de toda la unidad, pero el calor solo del PHE y no aporta estados de calentadores ni sensor posterior para igualar los límites."
+      : d.copBlock === "mb_scope" ? "COP no disponible. La guía de HomeHub no especifica qué consumos eléctricos incluye el registro. El calor estimado corresponde al intercambiador de placas. Para calcular el COP hay que confirmar que ambos abarcan los mismos equipos."
       : d.copBlock === "no_pel"
       ? d.pelHeld ? "Sin COP: el compresor está parado y la corriente del inversor es del último ciclo, no actual."
         : "Sin COP: este perfil no aporta entrada eléctrica mediante CT ni corriente del inversor."

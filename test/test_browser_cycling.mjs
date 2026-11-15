@@ -301,6 +301,23 @@ export async function assertCyclingChart(page, server, context) {
           buttons: 0, clickCount: 1, ...end });
       }
       assert.deepEqual(await pinned(), [LAST], context + ": releasing a drag preserves the existing pin");
+      const beforeClose = await point(page, hour(LAST));
+      await page.send("Input.dispatchMouseEvent", { type: "mousePressed", button: "left", buttons: 1,
+        clickCount: 1, ...beforeClose });
+      try {
+        await page.waitFor("S.scrub === 'checkup-cycling'");
+        await evaluate(page, sel => document.querySelector(sel).click(), ROW);
+        assert.equal(await page.evaluate("S.scrub"), null,
+          context + ": collapsing the cycling disclosure releases its captured gesture");
+      } finally {
+        await page.send("Input.dispatchMouseEvent", { type: "mouseReleased", button: "left",
+          buttons: 0, clickCount: 1, ...beforeClose });
+      }
+      await tap(page, ROW);
+      await page.waitFor(`document.querySelector('${CHART}') && !S.clickHold`);
+      assert.deepEqual(await pinned(), [], context + ": the old release cannot pin a collapsed chart");
+      await tap(page, hour(LAST));
+      assert.deepEqual(await pinned(), [LAST], context + ": reopened chart accepts a new pin");
     }
     await evaluate(page, sel => document.querySelector(sel).focus(), hour(LAST));
     await page.waitFor("!S.clickHold");

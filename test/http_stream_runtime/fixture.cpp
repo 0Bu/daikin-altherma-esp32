@@ -39,6 +39,14 @@ void* heap_caps_malloc(size_t size, unsigned) {
 namespace daik {
 const char* checkup_persist_state();
 }
+#ifdef HTTP_STREAM_LEGACY_HISTORY
+namespace daik::logic {
+// The frozen historical handler uses the pre-subsecond signature.
+constexpr int64_t history_t0(int64_t now_unix, uint32_t age, size_t n, uint32_t dt) {
+    return now_unix - age - static_cast<int64_t>(n ? n - 1 : 0) * dt;
+}
+} // namespace daik::logic
+#endif
 #include HTTP_STATUS_SOURCE
 #include STATE_DWELL_SOURCE
 
@@ -49,11 +57,12 @@ inline std::vector<daik::CachedValue> rows, modbus_rows;
 inline daik::HpValuesIdentity         identity{"generic", 0x1234, 7, 11};
 inline bool                           ota = false, weather = false, modbus_live = false;
 // Weather's TLS phase is `weather`; readers counts admitted /values snapshots in that exclusion.
-inline int                            values_readers = 0, values_readers_peak = 0;
-inline bool                           config_unreadable         = false;
-inline bool                           change_history_epoch      = false;
-inline uint32_t                       epoch                     = 42;
-inline uint32_t                       room_identity             = 0;
+inline int                              values_readers = 0, values_readers_peak = 0;
+inline bool                             config_unreadable         = false;
+inline bool                             change_history_epoch      = false;
+inline bool                             history_restored          = false;
+inline uint32_t                         epoch                     = 42;
+inline uint32_t                         room_identity             = 0;
 inline bool                           room_snapshot_unavailable = false;
 inline unsigned                       room_snapshot_calls       = 0;
 inline int                            failure = 0, stage_race = 0;
@@ -91,7 +100,7 @@ void reset() {
     current.profile                         = "generic";
     current.wifi_ssid                       = "Café \"quoted\"\\line\n";
     current.mqtt_base                       = "daikin-altherma-esp32";
-    ota = weather = modbus_live = change_history_epoch = false;
+    ota = weather = modbus_live = change_history_epoch = history_restored = false;
     values_readers = values_readers_peak = 0;
     config_unreadable                    = false;
     epoch                                = 42;
@@ -377,8 +386,9 @@ size_t history_snapshot(size_t, logic::HistorySample* out, size_t max, uint32_t*
         out[i] = i % 2 ? logic::HISTORY_HELD_OVER : static_cast<int16_t>(static_cast<int>(i) - 100);
     if (epoch) *epoch = fixture::epoch;
     if (meta) {
-        meta->newest_age_s  = 10;
-        meta->oldest_bucket = 100;
+        meta->newest_age_s     = fixture::history_restored ? 0 : 10;
+        meta->oldest_bucket    = fixture::history_restored ? -288 : 100;
+        meta->newest_commit_us = fixture::history_restored ? 0 : sdk::now - 10000000;
     }
     if (fixture::change_history_epoch) ++fixture::epoch;
     return n;
@@ -404,8 +414,9 @@ size_t history_room_snapshot(logic::HistorySample* out, size_t max, uint32_t exp
         out[i] = i % 4 == 1 ? logic::HISTORY_NO_READING : static_cast<int16_t>(201 + i % 50);
     if (epoch) *epoch = fixture::epoch;
     if (meta) {
-        meta->newest_age_s  = 17;
-        meta->oldest_bucket = 700;
+        meta->newest_age_s     = 17;
+        meta->oldest_bucket    = 700;
+        meta->newest_commit_us = sdk::now - 17000000;
     }
     if (fixture::change_history_epoch) ++fixture::epoch;
     return n;
@@ -417,8 +428,8 @@ TimeStatus time_status() {
     return s;
 }
 void time_now(int64_t& seconds, int32_t& ms) {
-    seconds = 2000000000;
-    ms      = 0;
+    seconds = fixture::history_restored ? 2000000100 : 2000000000;
+    ms      = fixture::history_restored ? 100 : 0;
 }
 const char* checkup_persist_state() {
     return logic::checkup_restore_slug(fixture::checkup_persist);
@@ -731,6 +742,19 @@ int main(int argc, char** argv) {
                   req.status == "503 Service Unavailable" && req.emission_attempts == 0,
               "history mixed two epochs before send");
         emit(req, "epoch-refusal");
+    });
+    run("restored_history_boot_raster", [] {
+        history_restored = true;
+        sdk::now         = 300000;
+        auto req         = request();
+        check(invoke(req, "/history?row=leaving_water", daik::h_history) == ESP_OK,
+              "restored History response failed");
+        successful(req);
+        emit(req, "restored-history");
+        check(req.response.find("\"boot_b0\":-288") != std::string::npos,
+              "the restored ring must retain the negative boot origin on the wire");
+        check(req.response.find("\"t0\":1999913999,") != std::string::npos,
+              "the wall time and persisted bucket must stay before the UTC boundary");
     });
     run("room_history_completed", [] {
         configure_room();

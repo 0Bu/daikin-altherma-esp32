@@ -307,6 +307,16 @@ template <typename JsonOut> static void append_json_uint(JsonOut& out, uint64_t 
 // uptime is already greater than the previous sample. Shared by streamed HTTP and MCP serializers.
 static const uint64_t s_status_boot_id = (static_cast<uint64_t>(esp_random()) << 32) | esp_random();
 
+void http_boot_id(char (&out)[17]) noexcept {
+    constexpr char hex[] = "0123456789abcdef";
+    uint64_t       value = s_status_boot_id;
+    for (size_t i = 16; i > 0; --i) {
+        out[i - 1] = hex[value & 0xf];
+        value >>= 4;
+    }
+    out[16] = '\0';
+}
+
 template <typename JsonOut>
 static void append_status_json(JsonOut& j, bool redact) {
     const Config& c = config();
@@ -321,8 +331,7 @@ static void append_status_json(JsonOut& j, bool redact) {
     j += ",";
     j += "\"uptime_s\":" + std::to_string(esp_timer_get_time() / 1000000) + ",";
     char boot_id[17];
-    std::snprintf(boot_id, sizeof(boot_id), "%016llx",
-                  static_cast<unsigned long long>(s_status_boot_id));
+    http_boot_id(boot_id);
     j += "\"boot_id\":";
     json_append_quoted(j, boot_id);
     j += ",";
@@ -371,7 +380,9 @@ static void append_status_json(JsonOut& j, bool redact) {
         // a time and takes a bare string literal with no std::string wrapper at all, so it drops
         // the allocations too. Same shape below for the presets, and worth keeping if this block
         // grows again.
-        j += "\"board\":{\"led_gpio\":";
+        j += "\"board\":{\"config_revision\":";
+        append_json_uint(j, c.runtime_revision);
+        j += ",\"led_gpio\":";
         j += std::to_string(c.led_gpio);
         j += ",\"led_type\":";
         j += std::to_string(c.led_type);
@@ -2483,8 +2494,7 @@ static esp_err_t h_history(httpd_req_t* req) {
     j += ",\"epoch\":";
     j += std::to_string(history_snapshot_epoch);
     char boot_id[17];
-    std::snprintf(boot_id, sizeof(boot_id), "%016llx",
-                  static_cast<unsigned long long>(s_status_boot_id));
+    http_boot_id(boot_id);
     j += ",\"boot_id\":";
     json_append_quoted(j, boot_id);
     j += ",\"label\":";
@@ -2496,24 +2506,25 @@ static esp_err_t h_history(httpd_req_t* req) {
     // labelled °C is exactly the legacy-35–legacy-39 shape.
     j += ",\"unit\":";
     json_append_quoted(j, unit);
-    const TimeStatus ts = time_status();
-    const int32_t    newest_age = history_meta.newest_age_s;
-    if (ts.synced && n && newest_age >= 0) {
-        // Derived from the AGE of the newest sample, not from `now`: the ring commits a bucket every
-        // HISTORY_DT_S, so between commits the newest sample ages while `now` moves on. Measured on a
-        // live unit, the old `now - (n-1)*dt` form reported t0 values 70 s apart for two fetches 70 s
-        // apart with an unchanged sample count — every timestamp up to a bucket late, and a PINNED
-        // readout eventually rounding onto the neighbouring sample and describing a different
-        // measurement than the one tapped. logic/history_t0 carries the rule and the invariance test.
-        j += ",\"t0\":";
-        j += std::to_string(logic::history_t0(ts.unix_time, static_cast<uint32_t>(newest_age),
-                                              n, logic::HISTORY_DT_S));
+    if (n && history_meta.newest_commit_us != logic::HISTORY_NO_COMMIT_US) {
+        int64_t unix_s;
+        int32_t wall_ms;
+        time_now(unix_s, wall_ms);
+        int64_t newest;
+        if (unix_s >= 0 && logic::history_commit_unix_s(unix_s, wall_ms, esp_timer_get_time(),
+                                                        history_meta.newest_commit_us, newest)) {
+            const auto oldest = logic::history_t0(newest, n, logic::HISTORY_DT_S);
+            if (oldest != INT64_MIN) {
+                j += ",\"t0\":";
+                j += std::to_string(oldest);
+            }
+        }
     }
     const int64_t b0 = history_meta.oldest_bucket;
-    if (b0 >= 0) {
+    if (b0 != logic::HISTORY_NO_BUCKET) {
         // Exact source alignment even before SNTP: all recorders derive this monotonic bucket from
         // the same esp_timer clock, so a Modbus line cannot slide onto the neighbouring X10A sample.
-        j += ",\"b0\":";
+        j += b0 < 0 ? ",\"boot_b0\":" : ",\"b0\":";
         j += std::to_string(b0);
     }
     j += ",\"v\":[";

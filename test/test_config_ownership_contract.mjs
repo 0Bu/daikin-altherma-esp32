@@ -48,7 +48,7 @@ const save = transaction.slice(saveStart, saveEnd);
 const decision = at(save,
   /config_save_revision\(\s*owns_link,\s*requested\.runtime_revision,\s*live\.runtime_revision\)/);
 const staleReturn = at(save,
-  /if \(revision == ConfigSaveRevision::Stale\) \{\s*out\.result = ConfigSaveResult::Stale;\s*return out;\s*\}/,
+  /if \(revision == ConfigSaveRevision::Stale \|\|\s*\(require_current && revision != ConfigSaveRevision::Current\)\) \{\s*out\.result = ConfigSaveResult::Stale;\s*return out;\s*\}/,
   decision);
 const copy = at(save, /Config\s+c\s*=\s*requested;/, staleReturn);
 const reconcile = at(save,
@@ -114,12 +114,12 @@ assert.equal(count(config, /nvs_set_blob\(/), 1,
 assert.match(config,
   /struct NvsBlobStore \{\s*int write_blob\(const char\* key, const uint8_t\* data, size_t len\) \{\s*return nvs_set_blob\(key, data, len\);\s*\}\s*\};/,
   "the store adapter must forward the write unchanged");
-const saveWholeStart = config.indexOf("static ConfigSaveResult save_whole(const Config& requested, bool owns_link)");
+const saveWholeStart = config.indexOf("static ConfigSaveResult save_whole(const Config& requested, bool owns_link,");
 const saveWholeEnd = config.indexOf("\nbool config_save(const Config& c)", saveWholeStart);
 assert.ok(saveWholeStart >= 0 && saveWholeEnd > saveWholeStart, "the one whole-struct save must remain identifiable");
 const saveWhole = config.slice(saveWholeStart, saveWholeEnd);
 const lock = at(saveWhole, /Lock\s+lk\(g_mtx\);/);
-const run = saveWhole.indexOf("config_save_transaction(g_cfg, requested, owns_link, store, s_load_yield)");
+const run = at(saveWhole, /config_save_transaction\(g_cfg, requested, owns_link, store, s_load_yield,\s*require_current\)/);
 assert.ok(lock >= 0 && run > lock,
   "the transaction must run on the live config under the mutex that detection commits under");
 assert.doesNotMatch(saveWhole, /g_cfg\s*=|runtime_revision|nvs_set_blob\(/,
@@ -144,6 +144,9 @@ assert.match(configHeader, /\[\[nodiscard\]\] bool config_save\(const Config& c\
   "config_save must no longer accept a caller-chosen link ownership flag");
 assert.match(configHeader, /\[\[nodiscard\]\] ConfigSaveResult config_save_link\(const Config& c\);/,
   "the X10A save result must stay impossible to ignore");
+assert.match(config,
+  /ConfigSaveResult config_save_if_current\(const Config& c\) \{\s*return save_whole\(c, \/\*owns_link=\*\/false, \/\*require_current=\*\/true\);\s*\}/,
+  "a revision-bound Board save must own only the service blob and require an exact revision");
 
 // 3. Exactly one owner of the link, and no reconciling save on its X10A path.
 const linkSaves = [...http.matchAll(/config_save_link\(/g)].length;
@@ -283,9 +286,12 @@ for (const [route, next] of [["set_board", "set_env3"], ["set_env3", "set_ota"]]
   const end = http.indexOf(`static esp_err_t ${next}(`, start);
   assert.ok(start >= 0 && end > start, `the /${route} handler must remain identifiable`);
   assert.match(http.slice(start, end),
-    /if \(!config_save\(c\)\) return send_local_pins_save_failure\(req, c\);/,
+    /if \(!config_save\(c\)\)\s*\{?\s*return send_local_pins_save_failure\(req, c\);/,
     `/${route} must map a failed save through the shared conflict-aware answer`);
 }
+assert.match(http.slice(http.indexOf("static esp_err_t set_board("), http.indexOf("static esp_err_t set_env3(")),
+  /if \(revision_bound\) \{\s*const ConfigSaveResult saved = config_save_if_current\(c\);\s*if \(saved == ConfigSaveResult::Stale\) return draft_stale\(\);/,
+  "a Board draft becoming stale during preflight must receive 409 from the atomic save decision");
 const status = read("main/http_status.cpp");
 assert.match(status,
   /board_presets_offerable\(presets, BOARD_PRESETS_MAX, hw_octal_spi\(\),\s*config_board_reserved_pins\(c, net_eth_reserved_pins\(\)\)\)/,

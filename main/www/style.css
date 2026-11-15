@@ -788,7 +788,7 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
    announces its checked state through role=switch; the painted track carries no text or meaning on
    its own. */
 .settings-toggle { position: relative; display: inline-flex; align-items: center; cursor: pointer; }
-.settings-toggle input {
+.settings-toggle input, .ota-progress-announcement {
   position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0);
   clip-path: inset(50%); white-space: nowrap;
 }
@@ -983,7 +983,7 @@ button.vhist-source:focus-visible { outline: 2px solid var(--brand); outline-off
   background: var(--hatch); box-shadow: inset 0 0 0 1px var(--pipe); }
 .vhist-state-track.x10a { box-shadow: inset 0 0 0 1px var(--pipe), 0 0 0 1px var(--brand-sky); }
 .vhist-state-track.modbus { box-shadow: inset 0 0 0 1px var(--pipe), 0 0 0 1px var(--src-mb); }
-.vhist-state-on, .vhist-state-gap { position: absolute; inset-block: 0; min-width: 2px; }
+.vhist-state-on, .vhist-state-gap { position: absolute; inset-block: 0; }
 .vhist-state-on { background: var(--brand-sky); }
 .vhist-state-gap { background: repeating-linear-gradient(135deg, transparent 0 3px,
   var(--line) 3px 5px); }
@@ -1066,6 +1066,7 @@ button.vhist-source:focus-visible { outline: 2px solid var(--brand); outline-off
    somewhere else would need two taps. */
 .vhist-cross.vhist-pinned { opacity: 1; background: var(--brand-strong); }
 .vhist-mark.vhist-pinned { background: var(--brand-strong); }
+.vhist-mark.vhist-retained { background: var(--card); border: 1.5px solid var(--muted); box-shadow: none; }
 .vhist-tip.vhist-pinned { border-color: var(--brand); color: var(--fg); font-weight: 600; }
 /* Proportional anchoring keeps the full bubble inside the card even at either endpoint. */
 .vhist-tip { --tip-p: 0; grid-area: 1 / 1; position: relative; z-index: 3; align-self: end;
@@ -1152,6 +1153,11 @@ button.vhist-source:focus-visible { outline: 2px solid var(--brand); outline-off
 .vhist-source.vhist-legend-bsh i {
   background: color-mix(in srgb, var(--warn) 50%, transparent);
 }
+.vhist-phase.vhist-phase-outline {
+  fill: none; opacity: .55; stroke: var(--fg); stroke-dasharray: 2 2; vector-effect: non-scaling-stroke;
+}
+.vhist-source.vhist-phase-outline i { border: 1px dashed var(--vhist-colour); }
+.vhist-source.vhist-phase-outline i { background: transparent; }
 /* Forecasts repeat the same area-plus-upper-line construction below the measured ENV III opacity;
    the rest of the future stays transparent and provenance remains in the tooltip. */
 .vhist-forecast-divider { stroke: var(--muted); stroke-width: 1px;

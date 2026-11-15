@@ -661,7 +661,10 @@ int64_t wall_bucket_of_instant_locked(int64_t instant_us) {
 }
 
 int64_t source_anchor_bucket_locked(HistorySource src) {
-    return wall_bucket_of_instant_locked(source_last_commit_us(src));
+    const int64_t commit_us = source_last_commit_us(src);
+    if (commit_us == kNoCommitUs) return INT64_MIN;
+    // The recorder can fold after the wall clock enters its next bucket.
+    return wall_bucket_of_instant_locked(logic::history_raster_boundary_us(commit_us));
 }
 
 // ── The history flash journal ───────────────────────────────────────────────────────────────────
@@ -1584,15 +1587,19 @@ void history_record_env3(bool valid, float temperature_c, float humidity_pct, fl
 // fills `meta` before releasing it, and nothing in here allocates.
 static void clear_snapshot_meta(logic::HistoryMeta* meta) {
     if (!meta) return;
-    meta->newest_age_s  = -1;
-    meta->oldest_bucket = -1;
+    meta->newest_age_s     = -1;
+    meta->oldest_bucket    = logic::HISTORY_NO_BUCKET;
+    meta->newest_commit_us = logic::HISTORY_NO_COMMIT_US;
 }
 
 static void fill_snapshot_meta_locked(logic::HistoryMeta* meta, int64_t last_commit_us,
                                       int64_t last_commit_bucket, size_t n) {
-    if (!meta) return;
-    meta->newest_age_s  = logic::history_meta_newest_age_s(esp_timer_get_time(), last_commit_us);
-    meta->oldest_bucket = logic::history_meta_oldest_bucket(last_commit_bucket, n);
+    if (!meta || last_commit_us == kNoCommitUs) return;
+    meta->newest_commit_us = logic::history_raster_boundary_us(last_commit_us);
+    meta->newest_age_s =
+        logic::history_meta_newest_age_s(esp_timer_get_time(), meta->newest_commit_us);
+    meta->oldest_bucket =
+        logic::history_meta_oldest_bucket(meta->newest_age_s, last_commit_bucket, n);
 }
 
 size_t history_snapshot(size_t t, HistorySample* out, size_t max, uint32_t* epoch,
@@ -1692,11 +1699,27 @@ bool seed_source_timeline_locked(HistorySource src, int64_t stored_anchor, int64
     int64_t unix_s = -1; int32_t ms = 0;
     time_now(unix_s, ms);
     if (unix_s < 0) return false;
-    const int64_t  now_us    = esp_timer_get_time();
-    const uint32_t bucket    = logic::history_bucket(now_us);
-    const int64_t  commit_us = logic::history_raster_boundary_us(now_us);
+    const int64_t now_us = esp_timer_get_time();
+    uint32_t      bucket = logic::history_bucket(now_us);
+    // The recorder can still own a pending bucket after the clock crosses its boundary.
+    // Splice before that bucket so the next record call can close it exactly once.
+    switch (src) {
+    case HistorySource::X10a:
+        if (s_have_bucket) bucket = s_bucket;
+        break;
+    case HistorySource::Modbus:
+        if (s_mb_have_bucket) bucket = s_mb_bucket;
+        break;
+    case HistorySource::Env3:
+        if (s_env3_have_bucket) bucket = s_env3_bucket;
+        break;
+    case HistorySource::Room:
+        if (s_room_have_bucket) bucket = s_room_bucket;
+        break;
+    }
+    const int64_t commit_us = static_cast<int64_t>(bucket) * logic::HISTORY_DT_S * 1000000;
     live_anchor = logic::history_anchor_bucket(unix_s, now_us, commit_us, logic::HISTORY_DT_S, ms);
-    if (stored_anchor > live_anchor) return false;       // stored clock was ahead — never slide it back
+    if (stored_anchor > live_anchor) return false; // stored clock was ahead — never slide it back
 
     const int64_t mono_commit_bucket = bucket ? static_cast<int64_t>(bucket) - 1 : -1;
 

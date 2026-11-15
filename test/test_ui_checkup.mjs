@@ -18,18 +18,10 @@ const pollSource = fs.readFileSync(new URL("../main/hp_poll.cpp", import.meta.ur
 const modbusPollSource = fs.readFileSync(new URL("../main/hp_modbus.cpp", import.meta.url), "utf8");
 const configSource = fs.readFileSync(new URL("../main/http_config.cpp", import.meta.url), "utf8");
 
-// The checkup is the dashboard's first card after the live diagram, before the Model and live
-// "Operation" cards. Its bounded 24-hour verdict is therefore visible before the reader scans
-// current operating state, and a future card reshuffle cannot silently bury it below that group.
-// Asserted against GROUP_ORDER, which is what the page is laid out by. It used to be asserted
-// against the first entry of GROUPS — true only while that one array carried both the reading order
-// and the match precedence, and quietly wrong the moment precedence had to put an exactly-bounded
-// group first. A display claim has to be checked against the display order.
+// The executable card navigation test covers diagnosis opt-in and its order before Model.
+// GROUP_ORDER, independent of match precedence, determines the order of the live-value groups.
 assert.match(dashboardSource, /const GROUP_ORDER = \["Operation"/s,
              "Operation must remain the first live-value group");
-assert.match(dashboardSource,
-             /const checkup = S\.status\?\.diagnostics\?\.enabled === true\s*\? checkupCardHtml\(S\.status\?\.hp\?\.connected\) : "";\s*setHtml\("valueGroups",\s*checkup\s*\+\s*statusCardsHtml\(\)\s*\+/s,
-             "the opted-in diagnosis card must precede Model; disabled diagnostics must omit the whole card");
 assert.doesNotMatch(dashboardSource, /checkup \+ service \+|refrigerantServiceCardHtml/,
                     "refrigerant service must not return as a separate dashboard card");
 assert.match(dashboardSource,

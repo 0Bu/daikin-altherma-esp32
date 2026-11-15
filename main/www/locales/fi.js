@@ -1,4 +1,4 @@
-// translation-source: 34200897e3bb460a7f6fcd68bd6ff940649f8810c9b3709dc7616000e01aee90
+// translation-source: 65571656f160db7c5cef68e1a9e2f1c556ae6ac67f346ba2f2b092cff1d703c9
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -357,6 +357,8 @@ I18N.fi = localeValues([
   /* hist.recorded */ (h) => `Tallennettu · ${h} h`,
   /* hist.now */ "nyt",
   /* hist.ago */ (h) => `${h} h sitten`,
+  /* hist.retained */ "Viimeisin vastaanotettu näyte",
+  /* hist.before_retained */ (h) => `${h} h ennen viimeisintä vastaanotettua näytettä`,
   /* hist.loading */ "Ladataan käyrää…",
   /* hist.none */ "Mittauksia ei ole vielä tallennettu.",
   /* hist.err */ "Käyrä ei ole saatavilla.",
@@ -447,6 +449,7 @@ I18N.fi = localeValues([
   /* toast.no_changes */ "Ei muutoksia",
   /* toast.reboot */ "Käynnistetään uudelleen — yhdistetään…",
   /* toast.rebooted */ "Käynnistetty uudelleen — yhdistä laitteeseen",
+  /* board.draft_stale */ "Piirilevyn asetukset ovat muuttuneet. Avaa muokkausikkuna uudelleen ennen tallennusta.",
   /* toast.busy_retry */ "Laite varattu — yritä hetken kuluttua",
   /* toast.unreachable */ "Laitetta ei tavoiteta",
   /* toast.rejected */ "Hylätty",
@@ -502,6 +505,7 @@ I18N.fi = localeValues([
   /* schem.defrost_pill */ "❄ sulatus",
   /* schem.outdoor */ "Ulkoilma",
   /* insp.close */ "Sulje",
+  /* schem.defrost_transfer */ "Vahvistetun sulatuksen aikana lämpöä voi siirtyä vedestä kylmäaineeseen. Putkisto näyttää tämän suunnan vain, kun nykyinen virtaus ja lämpötilat tukevat sitä.",
   /* schem.leaving_water */ "R1T",
   /* schem.dhw_tank */ "DHW-SÄILIÖ",
   /* schem.set */ "asetus",
@@ -950,7 +954,6 @@ I18N.fi = localeValues([
   /* lang.sv */ "Svenska",
   /* lang.fi */ "Suomi",
   /* lang.saved */ "Kieli tallennettu",
-  /* hist.cop_none */ "COP-käyrää ei näytetä, kun sähköteho tulee CT-virtamuuntajilta. Johdotus määrää kuormat; lämpölaskenta päättyy ennen BUH:ta eikä sisällä BSH:n suoraan tankkiin lisäämää lämpöä, joten taserajat eivät välttämättä vastaa toisiaan.",
 ]);
 
 DESCRIPTION_I18N.fi = descriptionValues([
@@ -1211,7 +1214,7 @@ INSPECT_I18N.fi = inspectValues(
       : d.pth == null ? null : d.pthKind === "cooling" ? `≈ ${fmt1(d.pth)} kW jäähdytystä${d.cop != null ? `, EER ${fmt1(d.cop)}` : ""}.` : `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `, COP ${fmt1(d.cop)}` : ""}.`], // pth
     [(d) => d && d.efficiencyKind === "eer" ? "Lämpöpumpun EER (arvio)" : d && d.copScope === "plant" ? "COP BUH:n jälkeen (arvio)" : "Lämpöpumpun COP (arvio)", "Arvioitu hyötysuhde", (d) => d && d.efficiencyKind === "eer" ? "Arvioitu jäähdytysteho jaettuna arvioidulla sähköteholla. Tulos perii nesteen, anturien, jännitteen ja tehokertoimen oletukset; hetkellinen, ei kausittainen EER." : "Arvioitu lämpöteho jaettuna saman taserajan sähköteholla. CT:llä lämpö voidaan laskea BUH:n jälkeen, invertterivirralla vain lämpöpumpulle; CT-kytkentä määrää mukana olevat kuormat. Tulos perii neste-, anturi-, jännite- ja tehokerroinoletukset ja on hetkellinen, ei kausittainen.", (d) => d.copBlock === "tank_heater" ? "COP ei saatavilla — säiliövastus käy. Sen sähkö voi sisältyä taseeseen, mutta lämpö menee suoraan säiliöön vesipuolen anturien ohi."
       : d.copBlock === "buh_no_r2t" ? "COP ei saatavilla — BUH lämmittää, mutta profiilissa ei ole jälkianturia; sähkö- ja lämpöraja eivät täsmää."
-      : d.copBlock === "mb_scope" ? "COP ei saatavilla — HomeHub ilmoittaa koko yksikön sähkön lämmittimineen, lämpö koskee vain PHE:tä. Ilman lämmitintiloja ja jälkianturia rajoja ei voi sovittaa."
+      : d.copBlock === "mb_scope" ? "COP ei ole käytettävissä. HomeHubin ohje ei kerro, mitkä sähkökuormat sisältyvät lukemaan. Lämpöarvio koskee levylämmönvaihdinta. COP:n laskeminen edellyttää, että mittausten rajaukset vastaavat toisiaan."
       : d.copBlock === "no_pel" ? d.pelHeld ? "COP ei saatavilla — pysähtyneen kompressorin invertterivirta on edelliseltä käynniltä." : "COP ei saatavilla — profiili ei ilmoita CT- eikä invertterivirtaa."
       : d.cop == null ? null : d.efficiencyKind === "eer" ? `${fmt1(d.cop)} kW jäähdytystä / 1 kW sähköä — ≈ ${fmt1(d.copPth)} kW teholla ≈ ${fmt1(d.pel)} kW.`
       : d.copScope === "plant" ? `${fmt1(d.cop)} kW lämpöä BUH:n jälkeen / 1 kW CT-sähköä — ≈ ${fmt1(d.copPth)} kW teholla ≈ ${fmt1(d.pel)} kW. CT-kytkentä määrää rajan.`

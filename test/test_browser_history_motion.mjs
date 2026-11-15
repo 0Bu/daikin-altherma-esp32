@@ -133,18 +133,19 @@ async function installHooks(page, mutation) {
     let eager, detach, staleText;
     if (mutation === "history-eager") {
       const code = original.descAccordion.toString();
-      if (!code.includes("open && trendId")) throw new Error("history mutation target missing");
-      eager = window.eval("(" + code.replace("open && trendId", "trendId") + ")");
+      const guard = /open\s*&&\s*trendId\s*&&\s*visible/;
+      if (!guard.test(code)) throw new Error("history mutation target missing");
+      eager = window.eval("(" + code.replace(guard, "trendId") + ")");
     }
     if (mutation === "history-detach") {
       const code = original.replaceHistoryHtml.toString();
-      if (!code.includes("if (textOnly) {")) throw new Error("history detach mutation target missing");
-      detach = window.eval("(" + code.replace("if (textOnly) {", "if (false && textOnly) {") + ")");
+      if (!/if\s*\(textOnly\)\s*\{/.test(code)) throw new Error("history detach mutation target missing");
+      detach = window.eval("(" + code.replace(/if\s*\(textOnly\)\s*\{/, "if (false && textOnly) {") + ")");
     }
     if (mutation === "history-text-stale") {
       const code = original.replaceHistoryHtml.toString();
-      if (!code.includes("node.nodeValue = value;")) throw new Error("history text mutation target missing");
-      staleText = window.eval("(" + code.replace("node.nodeValue = value;", "void value;") + ")");
+      if (!/node\.nodeValue\s*=\s*value;/.test(code)) throw new Error("history text mutation target missing");
+      staleText = window.eval("(" + code.replace(/node\.nodeValue\s*=\s*value;/, "void value;") + ")");
     }
     descAccordion = (...args) => {
       const previous = window.__motionClosed;
@@ -234,7 +235,7 @@ async function installHooks(page, mutation) {
       const id = plot?.dataset.hist, source = plot?.dataset.source || "";
       const view = id && historyView(id, source);
       return { id, source, dom: plot?.dataset.rev,
-        model: [S.histEpoch, view?.gen, view?.t0].join("/") };
+        model: view && histViewRevision(view) };
     };
     document.addEventListener("keydown", window.__motionKey, true);
     document.addEventListener("keyup", window.__motionKey, true);
@@ -307,7 +308,7 @@ async function settleHistoryRevision(page, selectors) {
         : target?.closest(".vitem")?.querySelector("[data-hist]");
       if (!plot) return false;
       const view = historyView(plot.dataset.hist, plot.dataset.source || "");
-      return !!view && plot.dataset.rev === [S.histEpoch, view.gen, view.t0].join("/");
+      return !!view && plot.dataset.rev === histViewRevision(view);
     })).toString() + ")(" + JSON.stringify(selectors) + ")");
 }
 
@@ -374,7 +375,7 @@ async function toggleDisclosure(page, selector, id, open, context) {
       if (open) {
         if (plots.length !== 1 || plots[0].dataset.hist !== id) return false;
         const plot = plots[0], view = historyView(id, plot.dataset.source || "");
-        if (!view || plot.dataset.rev !== [S.histEpoch, view.gen, view.t0].join("/")) return false;
+        if (!view || plot.dataset.rev !== histViewRevision(view)) return false;
       } else if (plots.length) return false;
       return item.getAnimations({ subtree: true }).every(animation =>
         !Number.isFinite(animation.effect?.getTiming().iterations) ||
@@ -695,6 +696,8 @@ async function observe(page, server, context, selectors, { inspector = false, st
     context + ": history input responsiveness budget exceeded: " + Math.round(inputMax) + " ms");
   if (status) {
     assert.ok(motion.statusPolls >= 1, context + ": real status refresh must land during observation");
+    if (context.endsWith("/board"))
+      assert.equal(motion.builds, 0, context + ": unchanged board plots must not be rebuilt on live polls");
     assert.equal(await page.evaluate("S.status.sys.free_heap"), fixture.status.sys.free_heap,
       context + ": changed board telemetry must reach browser state");
     const boardAfter = await boardHeapReading(page);
@@ -717,10 +720,77 @@ async function closeInspector(page) {
   await page.waitFor("S.insp === null");
 }
 
+async function assertForecastRevision(page, server, fixture, context) {
+  const selector = "#inspHist .vhist-plot";
+  await prepareObservationViewport(page, selector, []);
+  const before = await evaluate(page, selector => {
+    const plot = document.querySelector(selector), rect = plot.getBoundingClientRect();
+    const view = scrubView(plot), x = rect.left + rect.width * 0.95;
+    const selected = scrubIndex(plot, x);
+    return { revision: plot.dataset.rev, gen: view.gen, selected,
+      time: forecastScrubView(view).points[selected - view.v.length].time,
+      x, y: rect.top + rect.height / 2 };
+  }, selector);
+  const { x, y } = before;
+  const hourly = fixture.status.weather_forecast.hourly;
+  const press = type => page.send("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount: 1 });
+  await press("mousePressed");
+  try {
+    await page.waitFor("S.trendPointer?.plot.dataset.hist === 'env3_combined'");
+    // Publish an updated forecast through the real status endpoint while the captured plot is held.
+    fixture.status.weather_forecast.hourly = hourly.slice(1);
+    await page.evaluate("pollNow(); true");
+    await page.waitFor("!_pollBusy && S.status.weather_forecast.hourly.length === " + (hourly.length - 1));
+    const during = await evaluate(page, ({ selector, x }) => {
+      const plot = document.querySelector(selector);
+      return { rev: plot.dataset.rev, gen: historyView(plot.dataset.hist).gen,
+        selected: scrubIndex(plot, x) };
+    }, { selector, x });
+    assert.deepEqual(during, { rev: before.revision, gen: before.gen, selected: before.selected },
+      context + ": a forecast refresh leaves the selection on the held chart");
+    await press("mouseReleased");
+    await settleHistoryRevision(page, [selector]);
+    assert.equal(await page.evaluate("S.histPin.get('env3_combined')?.t"), before.time,
+      context + ": releasing the original plot pins the same hour after the refresh");
+    assert.notEqual(await evaluate(page, selector => document.querySelector(selector).dataset.rev, selector),
+      before.revision, context + ": the refreshed forecast is mounted after release");
+    await page.evaluate("S.histPin.delete('env3_combined')");
+    await press("mousePressed");
+    await page.waitFor("S.trendPointer?.plot.dataset.hist === 'env3_combined'");
+    // A normal mouse-down focuses the plot. Keep the real captured drag active while a second
+    // input activates the legend, without letting focusout end the gesture first.
+    const released = await evaluate(page, () => {
+      const button = document.querySelector("#inspHist [data-hist-series='env3_humidity']");
+      button.click();
+      return !S.trendPointer && !S.scrub;
+    });
+    assert.equal(released, true, context + ": legend activation cancels the captured gesture");
+    await press("mouseReleased");
+    assert.equal(await page.evaluate("S.histPin.has('env3_combined')"), false,
+      context + ": release after a legend change cannot pin the old plot");
+  } finally {
+    await press("mouseReleased");
+    fixture.status.weather_forecast.hourly = hourly;
+    await page.evaluate("S.histHidden.delete('env3_combined'); S.inspHistSig = null; pollNow(); true");
+    await page.waitFor("!_pollBusy && S.status.weather_forecast.hourly.length === " + hourly.length);
+  }
+  // The three ENV III rings and an eligible value plot share a single automatic admission.
+  const requests = server.historyRequests.length;
+  await evaluate(page, () => {
+    for (const entry of ENV3_COMBINED_SERIES) S.hist.get(histCacheKey(entry.id, "env3")).at = 0;
+    window.__automaticPoll = window.__motionAllPolls;
+    pollNow();
+    return true;
+  });
+  await page.waitFor("window.__motionAllPolls > window.__automaticPoll && !_pollBusy && !S.histBusy.size");
+  assert.deepEqual(server.historyRequests.slice(requests), ["env3:env3_temperature"],
+    context + ": one completed poll starts only one of three expired inspector reads");
+}
+
 async function prepareInheritedFlow(page) {
   await page.waitFor("!S.histBusy.size && !_pollBusy");
   return evaluate(page, async () => {
-    // Derived pth/cop cards normally preload this ring; a focused flow run must exercise the same
+    // The derived heat-output card normally preloads this ring; a focused flow run must exercise the same
     // inherited-cache path. Populate it through the real GET if those cards have not run.
     if (!S.hist.get("flow")) await ensureHist("flow");
     const cached = S.hist.get("flow");
@@ -895,6 +965,178 @@ async function assertNewGeneration(page, server, fixture, context, hosts) {
   await page.evaluate("delete window.__motionFlat; true");
 }
 
+async function watchCachedDisclosureOpening(page, selector) {
+  await evaluate(page, ({ selector }) => {
+    const container = document.querySelector(selector)?.closest("#valueGroups");
+    if (!container) throw new Error("cached disclosure container missing");
+    const listener = event => {
+      if (!event.isTrusted) throw new Error("cached disclosure requires a native click");
+      const button = document.querySelector(selector), item = button.closest(".vitem");
+      const plot = item.querySelector("[data-hist]"), chart = plot.closest(".vhist");
+      const ancestors = new Set();
+      for (let node = plot; node; node = node.parentNode) ancestors.add(node);
+      let detached = false;
+      const record = records => {
+        for (const mutation of records)
+          for (const node of mutation.removedNodes)
+            if (ancestors.has(node)) detached = true;
+      };
+      const observer = new MutationObserver(record);
+      observer.observe(document, { childList: true, subtree: true });
+      plot.focus({ preventScroll: true });
+      window.__cachedDisclosureOpening = {
+        container, listener, plot, observer, record, detached: () => detached,
+        owner: button.dataset.desc, storedOwner: JSON.parse(chart._histMarkup)[0],
+        polls: window.__motionAllPolls, revision: plot.dataset.rev,
+      };
+    };
+    // The delegated production handler has already mounted the cached chart in this click task.
+    container.addEventListener("click", listener, { once: true });
+    window.__cachedDisclosureOpening = { container, listener };
+    return true;
+  }, { selector });
+}
+
+async function assertCachedDisclosureOpening(page, selector, context) {
+  await page.waitFor("window.__cachedDisclosureOpening?.plot && !_pollBusy && " +
+    "window.__motionAllPolls >= window.__cachedDisclosureOpening.polls + 3");
+  const state = await evaluate(page, ({ selector }) => {
+    const opened = window.__cachedDisclosureOpening;
+    opened.record(opened.observer.takeRecords());
+    opened.observer.disconnect();
+    delete window.__cachedDisclosureOpening;
+    const plot = document.querySelector(selector)?.closest(".vitem")?.querySelector("[data-hist]");
+    return { owner: opened.owner, storedOwner: opened.storedOwner, samePlot: opened.plot === plot,
+      sameFocus: document.activeElement === plot, connected: !opened.detached(),
+      sameRevision: opened.revision === plot?.dataset.rev };
+  }, { selector });
+  assert.deepEqual(state, { owner: state.owner, storedOwner: state.owner, samePlot: true,
+    sameFocus: true, connected: true, sameRevision: true },
+  context + ": native cached opening must keep its owner, plot and focus through real polls");
+}
+
+async function tankCacheState(page) {
+  return evaluate(page, () => {
+    const result = {};
+    for (const id of ["dhw_tank", "smart_grid_mode", "bsh_state"])
+      for (const source of ["x10a", "modbus"]) {
+        const value = S.hist.get(histCacheKey(id, source));
+        if (!value || value.err || Date.now() - value.at >= 60000)
+          throw new Error("missing fresh history reply: " + source + ":" + id);
+        result[source + ":" + id] = [value.gen, value.at];
+      }
+    return result;
+  });
+}
+
+async function assertInactiveCardHistory(page, selector, context) {
+  const selectors = await evaluate(page, ({ selector }) => {
+    const own = document.querySelector(selector).closest("[data-dashboard-card]").dataset.dashboardCard;
+    const other = [...document.querySelectorAll("#cardNav [data-card]")].find(button => button.dataset.card !== own);
+    window.__inactiveChart = document.querySelector(selector).closest(".vitem").querySelector(".vhist");
+    return { own: '#cardNav [data-card="' + CSS.escape(own) + '"]',
+      other: '#cardNav [data-card="' + CSS.escape(other.dataset.card) + '"]' };
+  }, { selector });
+  await click(page, selectors.other);
+  await evaluate(page, ({ selector }) => {
+    const button = document.querySelector(selector), original = histHtml;
+    window.__inactiveChartBuilds = 0;
+    window.__inactiveChartOriginal = original;
+    histHtml = (...args) => {
+      if (args[0] === button.dataset.trend) ++window.__inactiveChartBuilds;
+      return original(...args);
+    };
+  }, { selector });
+  try {
+    const polls = await page.evaluate("window.__motionAllPolls");
+    await page.waitFor("window.__motionAllPolls >= " + (polls + 3) + " && !_pollBusy");
+    const hidden = await evaluate(page, ({ selector }) => {
+      const item = document.querySelector(selector).closest(".vitem");
+      return { open: item.classList.contains("open"), hidden: !!item.closest("[hidden]"),
+        retained: window.__inactiveChart?.isConnected && item.querySelector(".vhist") === window.__inactiveChart,
+        builds: window.__inactiveChartBuilds };
+    }, { selector });
+    assert.deepEqual(hidden, { open: true, hidden: true, retained: true, builds: 0 },
+      context + ": inactive card must retain its mounted chart and skip chart generation");
+    const changed = await evaluate(page, ({ selector }) => {
+      S._values.push({ label: "History test reading", value: "1", group: "History test" });
+      renderCards(false);
+      const item = document.querySelector(selector).closest(".vitem");
+      const retained = item.querySelector(".vhist") === window.__inactiveChart;
+      S._values.pop();
+      renderCards(false);
+      return retained;
+    }, { selector });
+    assert.equal(changed, true, context + ": a structural update keeps the inactive chart by owner");
+    await page.waitFor("!_pollBusy");
+    await click(page, selectors.own);
+    await page.waitFor(`!S.scrub && document.querySelector(${JSON.stringify(selector)})
+      ?.closest(".vitem.open")?.querySelector("[data-hist]")`);
+    const plotSelector = selector + ' ~ .vdesc [data-hist]';
+    await evaluate(page, ({ selector, selectors }) => {
+      const row = document.querySelector(selector);
+      const plot = row.closest(".vitem").querySelector("[data-hist]");
+      S.histPin.delete(plot.dataset.hist);
+      window.__switchDuringScrub = null;
+      document.addEventListener("pointerdown", function switching(event) {
+        if (!event.target.closest(".vhist-graph")?.contains(plot)) return;
+        document.removeEventListener("pointerdown", switching);
+        const captured = event.isTrusted && S.trendPointer?.plot === plot &&
+          plot.hasPointerCapture(event.pointerId);
+        showStage("settings");
+        showStage("dashboard");
+        document.querySelector(selectors.other).click();
+        document.querySelector(selectors.own).click();
+        window.__switchDuringScrub = { captured, active: !!S.trendPointer || !!S.scrub,
+          released: !plot.hasPointerCapture(event.pointerId) };
+      });
+      return true;
+    }, { selector, selectors });
+    await click(page, plotSelector);
+    const cancelled = await evaluate(page, ({ selector }) => ({
+      ...window.__switchDuringScrub,
+      pinned: S.histPin.has(document.querySelector(selector).dataset.trend),
+    }), { selector });
+    assert.deepEqual(cancelled, { captured: true, active: false, released: true, pinned: false },
+      context + ": leaving and returning during a trusted drag must release capture without a pin");
+    await page.waitFor("!S.clickHold && !_pollBusy");
+    await page.evaluate("showStage('settings'); window.__inactiveChartBuilds = 0; true");
+    const settingsPolls = await page.evaluate("window.__motionAllPolls");
+    await page.waitFor("window.__motionAllPolls >= " + (settingsPolls + 3) + " && !_pollBusy");
+    assert.equal(await page.evaluate("window.__inactiveChartBuilds"), 0,
+      context + ": settings polls must skip the hidden dashboard chart");
+    await page.evaluate("showStage('dashboard'); renderCards(false); true");
+  } finally {
+    await page.evaluate("histHtml = window.__inactiveChartOriginal; delete window.__inactiveChartOriginal; delete window.__inactiveChart; true");
+  }
+  await click(page, selectors.own);
+  await page.waitFor(`document.querySelector(${JSON.stringify(selector)})?.closest(".vitem.open")?.querySelector(".vhist")`);
+}
+
+async function assertDuplicateLegendFocus(page, context) {
+  const state = await evaluate(page, () => {
+    const host = document.createElement("section");
+    const row = (owner, value) => '<div class="vitem"><button data-desc="' + owner +
+      '">Tank</button><button data-hist-id="dhw_tank" data-hist-series="modbus">' +
+      value + "</button></div>";
+    host.innerHTML = row("x10a-tank", "Show HomeHub") + row("modbus-tank", "Show HomeHub");
+    document.body.append(host);
+    const previous = document.activeElement;
+    try {
+      const focused = host.querySelector("[data-hist-series]");
+      focused.focus({ preventScroll: true });
+      replaceHistoryHtml(host, row("x10a-tank", "Hide HomeHub") + row("modbus-tank", "Hide HomeHub"));
+      return { replaced: !focused.isConnected,
+        owner: document.activeElement.closest(".vitem")?.querySelector("[data-desc]")?.dataset.desc };
+    } finally {
+      host.remove();
+      previous?.focus({ preventScroll: true });
+    }
+  });
+  assert.deepEqual(state, { replaced: true, owner: "x10a-tank" },
+    context + ": structural repaint must restore the legend focus to its original row");
+}
+
 async function disclosure(page, server, fixture, context, selectors, ids, settings = false, animation = {}) {
   await page.evaluate(settings ? "showStage('settings'); true" : "showStage('dashboard'); true");
   if (!settings) {
@@ -923,9 +1165,64 @@ async function disclosure(page, server, fixture, context, selectors, ids, settin
   const before = server.historyRequests.length;
   for (const [index, selector] of selectors.entries())
     await toggleDisclosure(page, selector, ids[index], false, context + "/close");
+  const watchCachedTank = !settings && ids.length === 1 && ids[0] === "dhw_tank";
+  if (watchCachedTank) await watchCachedDisclosureOpening(page, selectors[0]);
   for (const [index, selector] of selectors.entries())
     await toggleDisclosure(page, selector, ids[index], true, context + "/cached-reopen");
+  if (watchCachedTank) {
+    await assertCachedDisclosureOpening(page, selectors[0], context);
+    await assertInactiveCardHistory(page, selectors[0], context);
+    await assertDuplicateLegendFocus(page, context);
+  }
   assert.equal(server.historyRequests.length, before, context + ": cached reopen must not refetch history");
+  if (watchCachedTank) {
+    const fresh = await tankCacheState(page), requestStart = server.historyRequests.length;
+    await toggleDisclosure(page, selectors[0], ids[0], false, context + "/close-before-expiry");
+    await evaluate(page, () => {
+      S.hist.get(histCacheKey("bsh_state", "x10a")).at = Date.now() - 60001;
+      return true;
+    });
+    await toggleDisclosure(page, selectors[0], ids[0], true, context + "/auxiliary-expired");
+    const refreshed = await tankCacheState(page);
+    assert.deepEqual(server.historyRequests.slice(requestStart), ["x10a:bsh_state"],
+      context + ": refresh only the expired auxiliary");
+    assert.equal(refreshed["x10a:bsh_state"][0], fresh["x10a:bsh_state"][0] + 1);
+    delete refreshed["x10a:bsh_state"];
+    delete fresh["x10a:bsh_state"];
+    assert.deepEqual(refreshed, fresh, context + ": retain every other fresh reply");
+    const retiredAt = server.historyRequests.length;
+    await page.waitFor("!_pollBusy");
+    const heldSelection = await evaluate(page, ({ selector }) => {
+      const button = document.querySelector(selector), item = button.closest(".vitem");
+      const own = item.closest("[data-dashboard-card]").dataset.dashboardCard;
+      const nav = [...document.querySelectorAll("#cardNav [data-card]")];
+      nav.find(other => other.dataset.card !== own).click();
+      const prior = item.querySelector(".vhist");
+      _pollBusy = true;
+      try {
+        invalidateHistSources();
+        nav.find(other => other.dataset.card === own).click();
+        const current = document.querySelector(selector).closest(".vitem");
+        return { hadPausedChart: !!prior, visible: !current.closest("[hidden]"),
+          retired: !prior?.isConnected && !current.querySelector(".vhist"),
+          inert: current.querySelector("[data-chart]").inert };
+      } finally {
+        _pollBusy = false;
+        renderCards(false);
+        recoverOpenHistory();
+      }
+    }, { selector: selectors[0] });
+    assert.deepEqual(heldSelection, { hadPausedChart: true, visible: true, retired: true, inert: true },
+      context + ": selection during a held poll cannot reveal a retired chart");
+    await page.waitFor("S.hist.has('dhw_tank') && !S.histBusy.size && !_pollBusy");
+    assert.ok(server.historyRequests.slice(retiredAt).includes("x10a:dhw_tank"),
+      context + ": the still-open selected chart refetches after retirement");
+    const stable = await evaluate(page, ({ selector }) => {
+      const slot = document.querySelector(selector).closest(".vitem").querySelector("[data-chart]");
+      return slot?.dataset.epoch === String(S.histEpoch);
+    }, { selector: selectors[0] });
+    assert.equal(stable, true, context + ": restored chart slots belong to the new history lifetime");
+  }
   for (const [index, selector] of selectors.entries())
     await toggleDisclosure(page, selector, ids[index], false, context + "/cleanup");
   await page.waitFor("!document.querySelector('#valueGroups .vitem:not(.open) .vhist, #settingsCards .vitem:not(.open) .vhist')",
@@ -998,6 +1295,8 @@ export async function assertHistoryMotion(page, server, context) {
       await closeInspector(page);
       await openInspector(page, key, id, label + "/cached", { freshOpening: false });
       assert.equal(server.historyRequests.length, requests, label + ": cached reopen must not refetch history");
+      if (key === "env3" && !mutation && page.inputMode !== "touch")
+        await assertForecastRevision(page, server, fixture, label);
       await closeInspector(page);
       if (restoreValues) fixture.values = restoreValues;
     }
@@ -1061,7 +1360,8 @@ export async function assertHistoryMotion(page, server, context) {
       }
     }
     console.log("history motion matrix passed: " + context + "; " +
-      (only ? "focused " + only : "28 history inspectors; 12 no-history routes; 5 disclosure paths; 3 conditional source variants") +
+      (only ? "focused " + only : `${Object.keys(INSPECTOR_TRENDS).length} history inspectors; ` +
+        `${NO_HISTORY_INSPECTORS.length} no-history routes; 5 disclosure paths; 3 conditional source variants`) +
       "; " + Math.round((performance.now() - started) / 1000) + " s");
   } finally {
     await evaluate(page, () => {
@@ -1074,6 +1374,12 @@ export async function assertHistoryMotion(page, server, context) {
       window.__motionInspectorRows?.close();
       window.__motionTtl?.gridWitness?.close();
       window.__motionTtl?.rowsWitness?.close();
+      const cachedOpening = window.__cachedDisclosureOpening;
+      if (cachedOpening) {
+        cachedOpening.container.removeEventListener("click", cachedOpening.listener);
+        cachedOpening.observer?.disconnect();
+        delete window.__cachedDisclosureOpening;
+      }
       pollStop(); pollSchedule = () => {}; return true;
     });
     await page.waitFor("!_pollBusy && !S.histBusy.size");

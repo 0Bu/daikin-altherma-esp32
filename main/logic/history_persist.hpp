@@ -1332,24 +1332,30 @@ inline constexpr int64_t history_bucket_from_unix(int64_t unix_s, uint32_t dt = 
     return quotient - (unix_s % d < 0 ? 1 : 0);
 }
 
+// Project a captured monotonic commit onto the current wall clock. Combine fractional wall
+// time and age before flooring so the API and flash journal agree at a UTC bucket boundary.
+constexpr bool history_commit_unix_s(int64_t unix_s, int32_t wall_ms, int64_t now_us,
+                                     int64_t commit_us, int64_t& projected) {
+    if (commit_us == HISTORY_NO_COMMIT_US || wall_ms < 0 || wall_ms >= 1000) return false;
+    const uint64_t age_us =
+        now_us < commit_us ? 0 : static_cast<uint64_t>(now_us) - static_cast<uint64_t>(commit_us);
+    const int64_t age_s = static_cast<int64_t>(age_us / 1000000u) +
+                          (static_cast<uint64_t>(wall_ms) * 1000u < age_us % 1000000u ? 1 : 0);
+    if (unix_s < INT64_MIN + age_s) return false;
+    projected = unix_s - age_s;
+    return true;
+}
+
 // The wall-clock bucket a source's newest commit is attributed to: the wall time of the commit
 // instant, `now - commit` ago. This is the ONE derivation of a live source's anchor — the journal
 // writer, the restore and the seed below all go through it — so a commit and the seed that precedes
 // it are compared on the same arithmetic. INT64_MIN (no commit) has no anchor.
 inline constexpr int64_t history_anchor_bucket(int64_t unix_s, int64_t now_us, int64_t commit_us,
                                                uint32_t dt = HISTORY_DT_S, int32_t wall_ms = 0) {
-    if (commit_us == INT64_MIN || wall_ms < 0 || wall_ms >= 1000) return INT64_MIN;
-    // Unsigned, once `now >= commit` is established: a commit instant restored from damaged DRAM
-    // must not turn the subtraction into signed overflow.
-    const uint64_t age_us =
-        now_us < commit_us ? 0 : static_cast<uint64_t>(now_us) - static_cast<uint64_t>(commit_us);
-    // Keep the subsecond remainder until wall time and age have been combined. Flooring age
-    // first can put a restored seed and the first live completion in the same wall bucket.
-    // Millisecond wall-clock precision and separately sampled clocks remain timing limits.
-    const int64_t age_s = static_cast<int64_t>(age_us / 1000000u) +
-                          (static_cast<uint64_t>(wall_ms) * 1000u < age_us % 1000000u ? 1 : 0);
-    if (unix_s < INT64_MIN + age_s) return INT64_MIN;
-    return history_bucket_from_unix(unix_s - age_s, dt);
+    int64_t commit_unix = 0;
+    return history_commit_unix_s(unix_s, wall_ms, now_us, commit_us, commit_unix)
+               ? history_bucket_from_unix(commit_unix, dt)
+               : INT64_MIN;
 }
 
 // The last boundary of THIS boot's monotonic raster at or before `now_us`: the instant the open

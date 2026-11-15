@@ -587,6 +587,34 @@ void checkup_pending(const char* transport_path, bool forget_interleave) {
     require(journal_sdk::erases == 0 && journal_sdk::writes == 0 && journal_sdk::flash == before,
             "pending_queries_and_restore_preserve_nor");
 }
+
+void restore_before_pending_bucket() {
+    boot();
+    journal_sdk::unix_origin = journal_sdk::unix_origin / HISTORY_DT_S * HISTORY_DT_S + 299;
+    sdk::now_us              = 299000000;
+    advance_raster_locked(sdk::now_us, 0);
+    P().ring[0].ring.fold(430);
+
+    sdk::now_us = 301500000;
+    const auto stored_anchor =
+        history_anchor_bucket(journal_sdk::unix_origin, 0, 0, HISTORY_DT_S, 0);
+    const HistorySample stored[] = {400, 410};
+    require(splice_locked(HistorySource::X10a, 0, stored, 2, 1, stored_anchor),
+            "restore_splices_older_history");
+    HistorySample samples[4] = {};
+    HistoryMeta   meta;
+    require(history_snapshot(0, samples, 4, nullptr, &meta) == 2 && meta.oldest_bucket == -2 &&
+                meta.newest_age_s == 301 && meta.newest_commit_us == 0 && samples[0] == 400 &&
+                samples[1] == 410,
+            "restore_keeps_pending_bucket_open");
+    advance_raster_locked(sdk::now_us, 1);
+    require(history_snapshot(0, samples, 4, nullptr, &meta) == 3 && meta.oldest_bucket == -2 &&
+                meta.newest_age_s == 1 && meta.newest_commit_us == 300000000 && samples[0] == 400 &&
+                samples[1] == 410 && samples[2] == 430,
+            "first_commit_preserves_restored_sample_identity");
+    require(source_anchor_bucket_locked(HistorySource::X10a) == stored_anchor + 1,
+            "late_first_commit_keeps_its_journal_bucket");
+}
 } // namespace
 int main(int argc, char** argv) {
     const std::string name = argc >= 2 ? argv[1] : "unknown_case";
@@ -606,6 +634,8 @@ int main(int argc, char** argv) {
             core_ahead();
         else if (name == "nor_contract")
             nor_contract();
+        else if (name == "restore_before_pending_bucket")
+            restore_before_pending_bucket();
         else if (name == "forget_before_start")
             forget_case(ForgetPoint::BeforeStart);
         else if (name == "forget_during_lookup")

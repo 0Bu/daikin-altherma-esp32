@@ -114,6 +114,13 @@ class EvidenceTests(unittest.TestCase):
         self.assertEqual(binding["base"], self.head.decode())
         self.assertEqual(self.git("rev-parse", "HEAD").stdout.strip(), self.head)
 
+    def test_packaging_changes_require_rendered_browser_evidence(self):
+        for relative in ("main/CMakeLists.txt", "tools/web_asset/build_locale_bundle.py"):
+            with self.subTest(path=relative):
+                required = e.required_evidence({"changed_paths": [relative]}, self.root)
+                self.assertIn("ui-use-case-review", required["canonical_gates"])
+                self.assertIn("browser", required["checks"])
+
     def test_clean_committed_http_and_ui_feature_keeps_full_scope_and_base_head_review(self):
         for relative in ("main/http_ota.cpp", "main/www/local-test.html"):
             path = self.root / relative

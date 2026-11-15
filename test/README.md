@@ -253,9 +253,11 @@ Forward, open/Cancel/backdrop/Escape, valid and invalid submissions, server reje
 ENV III, bug-report steps and generation-bound OTA confirmation. The transient OTA modal must not
 become a bookmarkable stale offer.
 
-The source reader validates [app.sources](../main/www/app.sources): local, present, unique ordered
-fragments that parse as one classic script. Firmware, audits, DOM tests, browser assembly and GIF
-recording consume that same concatenation. Focused UI cases cover live language changes, connection
+The source reader validates [app.sources](../main/www/app.sources) and its unique ordered fragments
+as a classic script. Audits, DOM tests, the firmware and the GIF recorder use the same concatenation.
+Chromium and WebKit render the minified, packed page generated with the firmware asset tools.
+The delivery contract compares that input with decoded HTML from a separately generated host gzip.
+Focused UI cases cover live language changes, connection
 failure copy, source precedence, binary/enum meanings, board/pin selection, diagnosis limitations,
 OTA reload adoption and stable narrow-row interaction.
 

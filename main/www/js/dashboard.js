@@ -122,6 +122,7 @@ async function refreshValues(paint = true) {
   S.otaCached = false;
   S.transportUnavailable = null;
   S.transportBusy = false;
+  if (typeof expireLiveHistoryPins === "function") expireLiveHistoryPins();
   if (S.otaInstalling) otaCacheStore();
   if (paint) renderApp();
   return true;
@@ -129,22 +130,40 @@ async function refreshValues(paint = true) {
 // Dashboard cards: diagnostics, detected unit and value groups share one selectable panel below
 // the live diagram. The board (ESP32) card and the
 // WiFi/MQTT/Syslog/NTP rows are NOT here: both moved behind the gear onto Settings (renderSettings).
-function renderCards() {
+function renderCards(hold = true) {
   // Freeze trend hosts during a scrub so structural updates cannot replace the captured plot.
   // Rows catch up when scrubEnd resumes rendering.
-  if (S.scrub) return;
-  // setHtml applies unchanged-markup and click-in-flight guards before reconciling the grid.
+  if (S.scrub || (hold && S.clickHold)) return;
   // The opt-in controls the entire diagnosis card and its navigation entry. Its 24-hour rows also
   // require a live X10A link; passive refrigerant observations keep their independent collection.
   const checkup = S.status?.diagnostics?.enabled === true
     ? checkupCardHtml(S.status?.hp?.connected) : "";
+  const card = S.dashboardCard;
   setHtml("valueGroups", checkup + statusCardsHtml() +
-    valueGroupsHtml(S._values || [], S.status?.hp?.connected));
+    valueGroupsHtml(S._values || [], S.status?.hp?.connected), false);
   const selected = syncDashboardCards();
-  if (!S.clickHold) syncCheckupCyclingChart(selected);
+  // A source change can select a card whose charts were paused in this frame.
+  if (S.dashboardCard !== card) renderCards(false);
+  else {
+    for (const slot of selected?.querySelectorAll("[data-chart][inert], [data-checkup-hours][inert]") || [])
+      slot.inert = false;
+    syncCheckupCyclingChart(selected);
+  }
 }
 
-// Read the installed frame: setHtml may have held a newer one while a row was being tapped.
+function recoverOpenHistory() {
+  if (S.scrub || S.clickHold || S.histBusy.size) return;
+  const dashboard = S.stage === "dashboard";
+  const inspector = dashboard && S.insp && INSPECT[S.insp];
+  if (inspector && renderInspectHist(inspector, S.live ? inspCurRow(inspector) : null, "refresh"))
+    return;
+  const host = globalThis.document?.getElementById(dashboard ? "valueGroups" : "settingsCards");
+  const rows = dashboard ? ".vgroup:not([hidden]) .vitem.open [data-trend]" : ".vitem.open [data-trend]";
+  for (const button of host?.querySelectorAll(rows) || [])
+    if (ensureHistPair(button.dataset.trend, "refresh")) break;
+}
+
+// Reconcile navigation against the installed frame, including while a poll is deferred.
 // Keep inactive cards mounted so their accordions, trend state and delegated handlers survive.
 function syncDashboardCards() {
   const browser = $("cardBrowser"), nav = $("cardNav"), host = $("valueGroups");
@@ -153,7 +172,7 @@ function syncDashboardCards() {
   browser.hidden = !cards.length;
   const selected = cards.find(card => card.dataset.dashboardCard === S.dashboardCard) || cards[0];
   if (!selected) {
-    setHtml("cardNav", "");
+    setHtml("cardNav", "", false);
     host.removeAttribute("aria-labelledby");
     return;
   }
@@ -165,27 +184,51 @@ function syncDashboardCards() {
     `<button type="button" class="dashboard-card-button" id="dashboard-card-${index}" ` +
     `data-card="${esc(card.dataset.dashboardCard)}" aria-pressed="false" aria-controls="valueGroups">` +
     `${dashboardCardIcon(card.dataset.dashboardCard)}` +
-    `<span class="dashboard-card-label">${esc(card.dataset.dashboardLabel)}</span></button>`).join(""));
+    `<span class="dashboard-card-label">${esc(card.dataset.dashboardLabel)}</span></button>`).join(""), false);
   for (const card of cards) card.hidden = card !== selected;
-  for (const button of nav.querySelectorAll("[data-card]")) {
-    const chosen = button.dataset.card === S.dashboardCard;
-    button.setAttribute("aria-pressed", chosen ? "true" : "false");
-    if (chosen) host.setAttribute("aria-labelledby", button.id);
-  }
-  if (focused != null && !nav.contains(active)) {
-    const buttons = Array.from(nav.querySelectorAll("[data-card]"));
-    (buttons.find(button => button.dataset.card === focused) ||
-      buttons.find(button => button.dataset.card === S.dashboardCard))?.focus({ preventScroll: true });
-  }
+  const buttons = [...nav.querySelectorAll("[data-card]")];
+  const chosenButton = buttons.find(button => button.dataset.card === S.dashboardCard);
+  for (const button of buttons)
+    button.setAttribute("aria-pressed", String(button === chosenButton));
+  host.setAttribute("aria-labelledby", chosenButton.id);
+  if (focused && !nav.contains(active))
+    (buttons.find(button => button.dataset.card === focused) || chosenButton).focus({ preventScroll: true });
   return selected;
+}
+
+function retireMountedHistory() {
+  const host = globalThis.document?.getElementById("valueGroups");
+  if (!host) return;
+  const rebuilding = S.trendRebuilding;
+  S.trendRebuilding = true;
+  try {
+    const settings = document.getElementById("settingsCards");
+    const inspector = document.getElementById("inspHist");
+    const slots = [...host.querySelectorAll("[data-chart], [data-checkup-hours]"),
+      ...(settings?.querySelectorAll("[data-chart]") || [])];
+    if (inspector) slots.push(inspector);
+    for (const plot of settings?.querySelectorAll("#diagnostics-circulation-detail .vhist") || [])
+      plot.remove();
+    for (const slot of slots) {
+      slot.textContent = "";
+      delete slot._checkupMarkup;
+    }
+  } finally { S.trendRebuilding = rebuilding; }
 }
 
 function selectDashboardCard(key) {
   const cards = $("valueGroups").querySelectorAll(".vgroup[data-dashboard-card]");
   if (!Array.from(cards).some(card => card.dataset.dashboardCard === key)) return;
+  // Switching cards abandons the gesture on the previously visible plot.
+  cancelHistoryGesture();
   S.dashboardCard = key;
-  // Selection is immediate even while the pointer hold is protecting a pending values repaint.
-  syncCheckupCyclingChart(syncDashboardCards());
+  // Switch within the installed frame while the live poll is in progress. Its old chart
+  // geometry cannot select a sample from the newer cache before the next complete paint.
+  if (_pollBusy) {
+    const selected = syncDashboardCards();
+    for (const slot of selected?.querySelectorAll("[data-chart], [data-checkup-hours]") || [])
+      slot.inert = true;
+  } else renderCards(false);
 }
 
 /*!
@@ -565,7 +608,7 @@ function firmwareRow(version) {
   const action = `<button class="settings-split-action vrow-fw" type="button" data-act="ota" ` +
     `aria-label="${esc(t("aria.ota"))}" title="${esc(title)}">` +
     `<span class="vrow-val mono">v${esc(version || "?")}` +
-    `<span class="otastat" id="otaStatSet" role="status" aria-live="polite"></span></span></button>`;
+    `<span class="otastat" id="otaStatSet" aria-hidden="true"></span></span></button>`;
   return settingsInfoRow("firmware:version", "firmware-version-detail", t("card.firmware"), action,
     `<div class="vdesc-p">${esc(t("card.firmware_help"))}</div>`);
 }
@@ -614,7 +657,7 @@ function circulationSettingsCardHtml() {
       body += descNoteHtml(t("circ.detail.age"), checkupDuration(c.age_s));
     body += `<div class="vdesc-p">${esc(t("circ.settings_help"))}</div>`;
   }
-  if (S.descOpen.has("diagnostics:circulation"))
+  if (S.stage !== "dashboard" && S.descOpen.has("diagnostics:circulation"))
     body += typeof histHtml === "function" ? histHtml("circulation_state", "", t("circ.row")) : "";
   const sourceName = c.configured ? (c.name || "MQTT") : t("circ.not_configured");
   // The face NAMES the source and states its condition in colour — the room-source row's shape. That
@@ -1161,6 +1204,21 @@ const fmtKiB = (b) => (b == null ? "—" : `${Math.round(b / 1024)} KiB`);
 // Both rows are expandable exactly like a value row — same accordion, same chart, same scrub and pin
 // — and attach their series by TREND ID, since the row labels here are translated and there is no
 // catalog label to match on.
+const boardHistoryMarkup = new WeakMap();
+function boardHistoryHtml(id, unit, label) {
+  const ring = S.hist.get(id);
+  if (!ring) return histHtml(id, unit, label, "x10a");
+  const revision = historyRingRevision(ring);
+  const pin = S.histPin.get(id);
+  const cached = boardHistoryMarkup.get(ring);
+  if (cached?.id === id && cached.epoch === S.histEpoch && cached.lang === LANG &&
+      cached.pin === pin && cached.revision === revision)
+    return cached.html;
+  const html = histHtml(id, unit, label, "x10a");
+  boardHistoryMarkup.set(ring, { id, epoch: S.histEpoch, lang: LANG, pin, revision, html });
+  return html;
+}
+
 function memoryRows(sys) {
   const row = (id, labelKey, bytes) => {
     const label = t(labelKey);
@@ -1169,7 +1227,8 @@ function memoryRows(sys) {
     const val = esc(fmtKiB(bytes));
     if (!hid && !d) return vrow(label, fmtKiB(bytes), { cls: "mono num" });
     return descAccordion(`board:${id}`, label, val, "mono num",
-                         d ? descBodyHtml(d, undefined, modelDescriptionCopy(id)) : "", hid, "KiB");
+                         d ? descBodyHtml(d, undefined, modelDescriptionCopy(id)) : "", hid, "KiB",
+                         S.stage === "dashboard" || undefined, boardHistoryHtml);
   };
   return row("free_heap", "card.freeheap", sys.free_heap) +
          row("max_alloc", "card.maxalloc", sys.max_alloc);
@@ -2177,13 +2236,21 @@ function settingsConnectionsDown() {
 // esp32CardHtml().
 function renderSettings() {
   const snapshot = $("statusSnapshot");
-  snapshot.hidden = S.transportUnavailable !== "status";
-  if (!snapshot.hidden) snapshot.textContent = `${t("ota.snapshot_label")}: ${t("ota.snapshot_value")} · ` +
-    t(S.transportBusy ? "toast.busy_retry" : "toast.unreachable");
+  const otaOnly = S.otaInstalling && !S.status;
+  snapshot.hidden = S.transportUnavailable !== "status" && !otaOnly;
+  if (!snapshot.hidden) {
+    const snapshotLabel = S.status ? `${t("ota.snapshot_label")}: ${t("ota.snapshot_value")}` : t("sys.nodata");
+    snapshot.textContent = S.otaInstalling ? snapshotLabel : `${snapshotLabel} · ` +
+      t(S.transportBusy ? "toast.busy_retry" : "toast.unreachable");
+  }
+  if (otaOnly) {
+    syncOtaSettingsLock();
+    return;
+  }
   // Changed status regenerates card markup. Defer writes while an interactive control has focus
   // so replacement cannot close it mid-selection. A scrub also holds its plot's host.
-  // otaInline paints progress directly into the DOM. S.otaShown preserves that readout and its
-  // terminal messages against card replacement while Connections can still show link changes.
+  // The live OTA view is retained separately and repainted after a card update. This lets visible
+  // history age during a status refusal without dropping the progress message.
   if (S.scrub) return;
   const a = document.activeElement;
   const picking = !!(a && a.classList && (a.classList.contains("pin-sel") ||
@@ -2193,12 +2260,7 @@ function renderSettings() {
     $("connTile").hidden = false;             // resumeOta hides the unavailable pre-status shell
     setHtml("connTile", connectionsHtml());
   }
-  // otaShown normally freezes an ALREADY-RENDERED card so direct progress DOM writes survive the
-  // normal poll updates. A reload reverses that order: resumeOta learns about the download first
-  // and can set otaShown before /status has ever produced the full cards. Permit exactly that first
-  // status-backed render, then repaint the retained OTA view into the newly-created #otaStatSet.
-  const firstStatusRender = !S.settingsHydrated;
-  if (!picking && (!S.otaShown || firstStatusRender)) {
+  if (!picking) {
     setHtml("settingsCards", (S.otaCached ? otaSnapshotCardHtml() : "") + esp32CardHtml());
     if (!S.clickHold) {
       S.settingsHydrated = true;
