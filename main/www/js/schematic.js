@@ -1714,9 +1714,10 @@ function renderInspectHist(e, row, mode = "") {
     });
     const pin = S.histPin.get(ENV3_COMBINED_ID);
     const forecastPin = S.histPin.get(ENV3_FORECAST_ID);
+    const sensorPins = offered.map(s => S.histPin.get(s.id));
     const forecast = weatherForecastView();
-    const sig = [LANG, ENV3_COMBINED_ID, ...seriesSig, forecast?.revision, forecastPin?.t,
-                 JSON.stringify(pin ?? null)].join("|");
+    const sig = [LANG, ENV3_COMBINED_ID, ...seriesSig, forecast?.revision,
+                 JSON.stringify([pin, forecastPin, ...sensorPins])].join("|");
     if (sig === S.inspHistSig) return started;
     S.inspHistSig = sig;
     const el = $("inspHist");

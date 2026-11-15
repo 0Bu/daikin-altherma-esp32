@@ -587,6 +587,29 @@ void checkup_pending(const char* transport_path, bool forget_interleave) {
     require(journal_sdk::erases == 0 && journal_sdk::writes == 0 && journal_sdk::flash == before,
             "pending_queries_and_restore_preserve_nor");
 }
+
+void restore_before_pending_bucket() {
+    boot();
+    sdk::now_us = 299000000;
+    advance_raster_locked(sdk::now_us, 0);
+    P().ring[0].ring.fold(430);
+
+    sdk::now_us = 301000000;
+    const auto stored_anchor =
+        history_anchor_bucket(journal_sdk::unix_origin, 0, 0, HISTORY_DT_S, 0);
+    const HistorySample stored[] = {400, 410};
+    require(splice_locked(HistorySource::X10a, 0, stored, 2, 1, stored_anchor),
+            "restore_splices_older_history");
+    HistorySample samples[4] = {};
+    HistoryMeta   meta;
+    require(history_snapshot(0, samples, 4, nullptr, &meta) == 2 && meta.oldest_bucket == -2 &&
+                samples[0] == 400 && samples[1] == 410,
+            "restore_keeps_pending_bucket_open");
+    advance_raster_locked(sdk::now_us, 1);
+    require(history_snapshot(0, samples, 4, nullptr, &meta) == 3 && meta.oldest_bucket == -2 &&
+                samples[0] == 400 && samples[1] == 410 && samples[2] == 430,
+            "first_commit_preserves_restored_sample_identity");
+}
 } // namespace
 int main(int argc, char** argv) {
     const std::string name = argc >= 2 ? argv[1] : "unknown_case";
@@ -606,6 +629,8 @@ int main(int argc, char** argv) {
             core_ahead();
         else if (name == "nor_contract")
             nor_contract();
+        else if (name == "restore_before_pending_bucket")
+            restore_before_pending_bucket();
         else if (name == "forget_before_start")
             forget_case(ForgetPoint::BeforeStart);
         else if (name == "forget_during_lookup")

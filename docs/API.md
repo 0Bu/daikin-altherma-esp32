@@ -442,7 +442,7 @@ Query: `row=<trend-id>` and optional `source=x10a|modbus|env3|room`; absent sour
 Unknown ids return 404. Available rows are listed in `/status.history`. The payload is:
 
 ```text
-{id,source,label,epoch,boot_id,dt,unit[,t0][,b0],v:[number|null,…],held:[[from,count],…]}
+{id,source,label,epoch,boot_id,dt,unit[,t0][,b0|boot_b0],v:[number|null,…],held:[[from,count],…]}
 ```
 
 `v` is tenths of the row's actual unit; divide by ten. `dt` is the raster cadence. `b0` is the
@@ -462,9 +462,11 @@ identity must match the request, along with the boot and epoch tokens announced 
 A nonempty date-only reply also needs a synchronized device clock. When live clock evidence is
 available, any nonempty dated reply must end within the rolling day and poll tolerance. The browser
 preserves a compatible ring when it rejects the replacement. Independent sources with incompatible
-time anchors use separate plots. A clock correction can move dated samples by a full bucket,
-so the dashboard requires the shared boot raster to pair anchored histories. An overlay of
-legacy unanchored rings uses a relative axis.
+time anchors use separate plots. A clock correction can move dated samples by a full bucket.
+Anchored comparisons require a shared boot raster. Independent recorders can book different
+warm-reset gaps, so their pre-boot histories remain separate. A valid boot anchor can carry
+the data on a relative axis when the wall clock disagrees with the last status. An overlay
+of legacy unanchored rings also uses a relative axis.
 `v` does not record an unknown compressor state. A sweep dropped after a stop cannot put a number into
 its bucket, but any other outdoor sample without a readable speed stays a number, so a number is not
 proof that the page was current.

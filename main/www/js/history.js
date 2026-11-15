@@ -359,18 +359,15 @@ function validHistoryBucket(start, count) {
   if (!Number.isFinite(uptime) || S.otaCached) return true;
   const now = historyBrowserTime();
   const seconds = Math.max(0, now - (S.statusReceivedAt ?? now)) / 1000;
-  // Uptime is whole seconds. Allow one crossing of the bucket edge while the request is in flight.
-  return start + count <= Math.floor((uptime + seconds + 1 + POLL_TIMEOUT_MS / 1000) / 300);
+  // The upper bound uses elapsed monotonic time and one second for integer uptime.
+  return start + count <= Math.floor((uptime + seconds + 1) / 300);
 }
 
-function validHistoryTime(start, bucket, count) {
-  if (start == null) return true;
-  if (!Number.isSafeInteger(start) || Math.abs(start) > 8.64e12 - HIST_MAX_SAMPLES * 300)
-    return false;
-  if (!count) return true;
+function validHistoryTime(start, count) {
+  if (start == null || !count) return true;
   // A restored ring without a monotonic anchor needs an accepted device clock for alignment.
   const deviceTime = historyDeviceTime();
-  if (!Number.isFinite(deviceTime)) return Number.isInteger(bucket);
+  if (!Number.isFinite(deviceTime)) return false;
   const last = start + (count - 1) * 300;
   return last <= deviceTime + 1 + POLL_TIMEOUT_MS / 1000 &&
     last >= deviceTime - HIST_MAX_SAMPLES * 300;
@@ -403,6 +400,10 @@ async function readHistory(id, source, key, epoch, previous, request) {
     const expectedBoot = S.status?.boot_id;
     const legacy = !Number.isInteger(expectedEpoch) && j?.id === undefined && j?.source === undefined;
     const bucket = j?.b0 ?? j?.boot_b0;
+    const time = j?.t0;
+    const wallTimeShape = time == null ||
+      (Number.isSafeInteger(time) && Math.abs(time) <= 8.64e12 - HIST_MAX_SAMPLES * 300);
+    const wallTimeValid = wallTimeShape && validHistoryTime(time, Array.isArray(j?.v) ? j.v.length : 0);
     if (!changed && (r.ok === false || j?.ok === false || !Array.isArray(j?.v) ||
         j.v.length > HIST_MAX_SAMPLES || j.v.some(v => v !== null &&
           (!Number.isInteger(v) || v < -32766 || v > 32767)) ||
@@ -413,7 +414,8 @@ async function readHistory(id, source, key, epoch, previous, request) {
         (j.b0 != null && (j.b0 < 0 || j.boot_b0 != null)) ||
         (j.boot_b0 != null && !(j.boot_b0 < 0)) ||
         !validHistoryBucket(bucket, j.v.length) ||
-        !validHistoryTime(j.t0, bucket, j.v.length) ||
+        !wallTimeShape ||
+        (!wallTimeValid && bucket == null) ||
         (j.held != null && (!validHistoryHeld(j.held, j.v) ||
           (j.held.length > 0 && (expectedSource !== "x10a" || !X10A_HELD_HISTORY.has(id))))))) {
       S.hist.set(key, failed());
@@ -444,7 +446,7 @@ async function readHistory(id, source, key, epoch, previous, request) {
                      dt: 300,
                      unit: displayUnit(j),
                      label: typeof j.label === "string" ? j.label : "",
-                     t0: Number.isSafeInteger(j.t0) && Math.abs(j.t0) <= 8.64e12 ? j.t0 : null,
+                     t0: wallTimeValid ? time ?? null : null,
                      b0: Number.isSafeInteger(bucket) ? bucket : null,
                      held: Array.isArray(j.held) ? j.held : [],
                      v: j.v };
@@ -713,7 +715,9 @@ function alignedHistoryView(id, raw) {
 
   const dt = raw[0].h.dt || 300;
   let start = 0, end = 0, mode = "tail";
-  if (raw.every((s) => Number.isInteger(s.h.b0))) {
+  // Warm-restored recorders book unobserved gaps independently before the current boot.
+  const sameRecorder = raw.length === 1 || env3ChartId(id);
+  if (raw.every((s) => Number.isInteger(s.h.b0) && (sameRecorder || s.h.b0 >= 0))) {
     mode = "bucket";
     start = Math.min(...raw.map((s) => s.h.b0));
     end = Math.max(...raw.map((s) => s.h.b0 + s.h.v.length - 1));
@@ -852,6 +856,7 @@ function historyView(id, source = "", forecast) {
     if (!offered.length) return null;
     const view = id === ENV3_COMBINED_ID ? alignedHistoryView(id, offered) : null;
     const weather = forecast === undefined ? weatherForecastView() : forecast;
+    if (view?.separate) return { ...view, separateForecast: weather };
     if (view?.v.some(v => v != null)) {
       if (weather) {
         if (!Number.isFinite(view.t0)) return { ...view, separateForecast: weather };
@@ -1320,12 +1325,14 @@ function stateHistHtml(id, name, view, wrap, cfg) {
   , "vhist-state");
 }
 
-function alignAuxSample(view, h, i) {
+function alignAuxSample(view, h, i, source) {
   if (!h || !Array.isArray(h.v) || !h.v.length) return null;
   if ((h.dt || 300) !== view.dt) return null;
   let idx = -1;
   if (Number.isInteger(view.b0) && Number.isInteger(h.b0)) {
-    idx = (view.b0 + i) - h.b0;
+    const bucket = view.b0 + i;
+    if (bucket < 0 && !view.series.some(s => s.source === source)) return null;
+    idx = bucket - h.b0;
   }
   return (idx >= 0 && idx < h.v.length) ? h.v[idx] : null;
 }
@@ -1350,7 +1357,7 @@ function dhwAuxPhases(view) {
   return (view?.tankAux || []).flatMap((h, i) => {
     if (!h) return [];
     const phase = DHW_PHASE_SERIES[i];
-    const values = view.v.map((_, j) => alignAuxSample(view, h, j));
+    const values = view.v.map((_, j) => alignAuxSample(view, h, j, phase.source));
     const flags = values.map(v => v === phase.active);
     const status = h.err ? "hist.err" : histRetained(h)
       ? values.some(v => v != null) ? "hist.retained" : "hist.err" : "";
@@ -1573,6 +1580,14 @@ function env3HistHtml(view = historyView(ENV3_COMBINED_ID)) {
   const cached = offered.map((s) => S.hist.get(histCacheKey(s.id, "env3")));
   const wrap = (body, cls = "") => `<div class="vhist vhist-env3${cls ? " " + cls : ""}">${body}</div>`;
   if (!view) return histEmptyHtml(cached, wrap);
+  if (view.separate) {
+    const measured = offered.filter(s => view.separate.includes(s.id))
+      .map(s => histHtml(s.id, "", t(s.label), "env3")).join("");
+    const unavailable = histUnavailableHtml(view);
+    const forecast = view.separateForecast
+      ? env3HistHtml(historyView(ENV3_FORECAST_ID, "", view.separateForecast)) : "";
+    return measured + (unavailable ? wrap(unavailable, "vhist-flat") : "") + forecast;
+  }
   const plotted = view.series.filter((s) => s.v.some((v) => v != null));
   const geometry = forecastScrubView(view);
   if (!plotted.length && !geometry) return histEmptyHtml(cached, wrap);
@@ -2048,7 +2063,7 @@ function scrubText(h, i, includeTime = true, aux) {
   let res = (includeTime ? scrubTime(h, i) + " · " : "") + val;
   if (h.tankAux) {
     const active = (aux ? aux.filter(phase => phase.flags[i]) : DHW_PHASE_SERIES.filter((phase, j) =>
-      alignAuxSample(h, h.tankAux[j], i) === phase.active)).map(dhwPhaseLabel);
+      alignAuxSample(h, h.tankAux[j], i, phase.source) === phase.active)).map(dhwPhaseLabel);
     if (active.length) res += (visible.length > 1 ? "\n" : " · ") + active.join(" + ");
   }
   return res;

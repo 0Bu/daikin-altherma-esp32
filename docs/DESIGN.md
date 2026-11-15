@@ -317,12 +317,11 @@ time; events between sweeps may be missed.
 The tank-temperature chart distinguishes the Smart Grid “Recommended on” request from observed
 booster-heater operation. Bands, sampled durations and readouts identify X10A and HomeHub separately.
 
-Rings share five-minute slots and an elapsed/rolling-day axis. A newly resolved row or changed source
-identity leaves earlier gaps. Compatible firmware records can restore after reboot/power loss;
-restoration waits for valid time and can be partial. Open buckets and incompatible records may be
-lost, including the recent unsaved tail. Compatible heap curves can survive warm RAM restarts or
-restore dated five-minute journal records after clock sync; short interruptions may leave no visible
-gap at that resolution. Current uptime describes only this boot.
+Rings use five-minute slots on an elapsed or rolling-day axis. A newly resolved row or changed source
+identity leaves earlier gaps. Flash restoration waits for a synchronized clock and can be partial.
+Compatible RAM histories can survive a warm restart before clock sync. Independent recorders book
+their warm-reset gaps separately. Open buckets and incompatible records can be lost, including the
+recent unsaved tail. Current uptime describes this boot.
 
 Browser storage is not measured history. Source/reboot epochs retire cached rings, index pins,
 mounted plots and in-flight history requests, including A → B → A between polls.
@@ -333,13 +332,14 @@ each retained series' last received sample. Categorical timelines keep their sep
 and weather charts show a verified current forecast even when the measured history is empty.
 
 Hover previews a sample. Tap pins it, and another tap on the same sample or Escape clears it.
-The two views of a row share a recorded pin where both display an instrument selected by the pin.
+A boot-relative pin can appear in both views of a row when both show the selected instrument.
 A peer's reading cannot keep a pinned measurement visible after its original source rolls out.
 A pin tracks the original boot-relative bucket when available, including before clock sync.
 Live-state pins require the same visible instruments and current states. Refreshing completed
 history alone leaves a live-state pin in place.
 The two views freeze while either is scrubbed.
-A pin without a boot-relative bucket expires when the plotted series or its alignment changes.
+A recorded pin without a boot-relative bucket expires when the plotted series or its alignment
+changes. A forecast pin stays while its timestamp remains selectable on the same chart.
 Closing the inspector preserves a pin for an open
 value row. Collapsing the value panel clears it. Bubbles share one reserved row above the plot, with
 one measurement per line. The moving bubble paints over the pinned bubble with an opaque surface

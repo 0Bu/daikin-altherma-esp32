@@ -1693,11 +1693,27 @@ bool seed_source_timeline_locked(HistorySource src, int64_t stored_anchor, int64
     int64_t unix_s = -1; int32_t ms = 0;
     time_now(unix_s, ms);
     if (unix_s < 0) return false;
-    const int64_t  now_us    = esp_timer_get_time();
-    const uint32_t bucket    = logic::history_bucket(now_us);
-    const int64_t  commit_us = logic::history_raster_boundary_us(now_us);
+    const int64_t now_us = esp_timer_get_time();
+    uint32_t      bucket = logic::history_bucket(now_us);
+    // The recorder can still own a pending bucket after the clock crosses its boundary.
+    // Splice before that bucket so the next record call can close it exactly once.
+    switch (src) {
+    case HistorySource::X10a:
+        if (s_have_bucket) bucket = s_bucket;
+        break;
+    case HistorySource::Modbus:
+        if (s_mb_have_bucket) bucket = s_mb_bucket;
+        break;
+    case HistorySource::Env3:
+        if (s_env3_have_bucket) bucket = s_env3_bucket;
+        break;
+    case HistorySource::Room:
+        if (s_room_have_bucket) bucket = s_room_bucket;
+        break;
+    }
+    const int64_t commit_us = static_cast<int64_t>(bucket) * logic::HISTORY_DT_S * 1000000;
     live_anchor = logic::history_anchor_bucket(unix_s, now_us, commit_us, logic::HISTORY_DT_S, ms);
-    if (stored_anchor > live_anchor) return false;       // stored clock was ahead — never slide it back
+    if (stored_anchor > live_anchor) return false; // stored clock was ahead — never slide it back
 
     const int64_t mono_commit_bucket = bucket ? static_cast<int64_t>(bucket) - 1 : -1;
 

@@ -209,7 +209,7 @@ vm.createContext(context);
 const lifecycleSource = appState.slice(appState.indexOf("// ── History source lifecycle"),
   appState.indexOf("// ── Navigation (dashboard ⇄ Settings)"));
 vm.runInContext(lifecycleSource + readAppFragments(["history.js"]) +
-  "\nthis.__api = { hasHist, hasModbusHist, hasRoomHist, histCacheKey, historyView, histHtml, scrubText, histReadout, histVisibleSeries," +
+  "\nthis.__api = { hasHist, hasModbusHist, hasRoomHist, histCacheKey, historyView, histHtml, env3HistHtml, scrubText, histReadout, histVisibleSeries," +
   " histTipsHtml, scrubMove, scrubIndex, histPinToggle, histPinIndex, expireLiveHistoryPins, expiredHistSlots, readHistoryJson, histViewRevision, histSeriesToggle, ensureHist, ensureHistPair, ensureDerived, DERIVED, syncHistSources, invalidateHistSources };", context,
   { filename: "main/www/js/history.js" });
 const h = context.__api;
@@ -284,10 +284,9 @@ S.hist.set("modbus:dhw_tank", modbus);
     "a full-bucket wall-clock correction can look aligned without a boot anchor");
   S.hist.set("dhw_tank", { ...x10a, b0: -2, ...dated });
   S.hist.set("modbus:dhw_tank", { ...modbus, b0: -1, t0: dated.t0 + 307 });
-  const shared = h.historyView("dhw_tank");
-  assert.equal(shared.t0, dated.t0);
-  assert.deepEqual(Array.from(shared.series[1].v), [null, ...modbus.v],
-    "signed boot buckets preserve source measurements despite different wall projections");
+  assert.deepEqual(Array.from(h.historyView("dhw_tank").separate), ["x10a", "modbus"],
+    "each recorder can have booked a different warm-reset gap before boot");
+  assert.deepEqual(Array.from(h.historyView("dhw_tank", "modbus").v), modbus.v);
   S.hist.set("dhw_tank", { ...x10a, ...dated });
   S.hist.set("modbus:dhw_tank", { ...modbus, ...dated });
   h.histPinToggle("dhw_tank", 0, "x10a");
@@ -326,6 +325,21 @@ S.hist.set("modbus:dhw_tank", modbus);
 
   S.hist.set("dhw_tank", x10a);
   S.hist.set("modbus:dhw_tank", modbus);
+}
+
+{
+  const priorRows = S.status.history.env3_rows;
+  const temp = "env3_temperature", humidity = "env3_humidity";
+  S.status.history.env3_rows = [temp, humidity].map(id => ({ id }));
+  S.hist.set("env3:" + temp, { ...x10a, b0: -3, t0: 1768720000 });
+  S.hist.set("env3:" + humidity, { ...x10a, b0: null, t0: 1768720150, v: [630, 640, 650] });
+  const html = h.env3HistHtml();
+  assert.match(html, /data-hist="env3_temperature" data-source="env3"/);
+  assert.match(html, /data-hist="env3_humidity" data-source="env3"/,
+    "independently dated ENV III series remain visible even without a shared plot");
+  S.status.history.env3_rows = priorRows;
+  S.hist.delete("env3:" + temp);
+  S.hist.delete("env3:" + humidity);
 }
 
 {
@@ -447,6 +461,12 @@ assert.equal(h.histCacheKey("dhw_tank", "modbus"), "modbus:dhw_tank");
   await h.ensureHist("dhw_tank", "modbus");
   assert.equal(S.hist.get("modbus:dhw_tank").refreshFailed, true,
     "the currently open bucket is unavailable as a completed measurement");
+  S.status.uptime_s = 294;
+  S.hist.set("modbus:dhw_tank", { ...modbus, at: 0 });
+  historyResponse = { ...defaultHistoryResponse, b0: undefined, boot_b0: -1, v: [523, 524] };
+  await h.ensureHist("dhw_tank", "modbus");
+  assert.equal(S.hist.get("modbus:dhw_tank").refreshFailed, true,
+    "the request timeout is not evidence that a partially elapsed bucket completed");
   S.status.uptime_s = 32000;
   const ntp = S.status.ntp;
   const time = 1768720600;
@@ -460,8 +480,10 @@ assert.equal(h.histCacheKey("dhw_tank", "modbus"), "modbus:dhw_tank");
   S.hist.set("modbus:dhw_tank", { ...modbus, at: 0 });
   historyResponse = { ...historyResponse, b0: 102 };
   await h.ensureHist("dhw_tank", "modbus");
-  assert.deepEqual(Array.from(S.hist.get("modbus:dhw_tank").v), modbus.v,
-    "a plausible boot bucket cannot vouch for a future wall clock");
+  assert.deepEqual(Array.from(S.hist.get("modbus:dhw_tank").v), [520],
+    "an observed boot bucket can preserve the sample after a wall-clock step");
+  assert.equal(S.hist.get("modbus:dhw_tank").t0, null,
+    "the discrepant wall clock cannot label the boot-relative sample");
   S.hist.delete("modbus:dhw_tank");
   historyResponse = { ...historyResponse, b0: undefined, t0: time - 300 };
   await h.ensureHist("dhw_tank", "modbus");
@@ -1483,8 +1505,12 @@ assert.doesNotMatch(h.scrubText(view, 3), /Boost|Heizstab/, "Sample 3 without ac
     "a wall-only phase does not move to a different tank bucket");
   S.hist.set("dhw_tank", { ...tank, b0: -4, t0: 1768720000 });
   S.hist.set("modbus:smart_grid_mode", { ...boost, b0: -4, t0: 1768720007 });
-  assert.match(h.histHtml("dhw_tank", "°C", "Tank"), /vhist-phase-boost/,
-    "the matching restored boot raster preserves the auxiliary phase");
+  assert.doesNotMatch(h.histHtml("dhw_tank", "°C", "Tank"), /vhist-phase-boost/,
+    "another recorder's restored phase may have a different gap before boot");
+  S.hist.set("smart_grid_mode", { ...boost, b0: -4 });
+  assert.match(h.histHtml("dhw_tank", "°C", "Tank"), /Empfehlung ein · X10A/,
+    "the same recorder's restored boot raster preserves its own auxiliary phase");
+  S.hist.delete("smart_grid_mode");
   S.hist.set("dhw_tank", tank);
   S.hist.set("modbus:smart_grid_mode", boost);
 }
