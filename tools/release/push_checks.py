@@ -2,6 +2,7 @@
 """Run the local release suite and retain proof for the exact pushed commit."""
 
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import ExitStack
 import json
 import os
 import shutil
@@ -9,6 +10,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+from threading import Event
 import time
 
 import local_checks as local
@@ -40,33 +42,61 @@ def run_phase(label, command, checkout, env, *, timeout, log=None):
         print(f"Local release phase ended: {label} ({time.monotonic() - started:.1f}s)", flush=True)
 
 
-def check_candidate(checkout, offline, build_checkout, build_env, tested, base, head):
-    # The compiler writes sdkconfig, managed components and build outputs. Keep
-    # those writes separate from the host gates, some of which inspect Git state.
-    command = ["scripts/idf-docker.sh", "--with-host-tests", "bash", "-ec",
-               'test "$(git rev-parse HEAD)" = "$1"; exec scripts/ci-build-all.sh '
-               '--compile-only --source-sha "$2"', "release-checks", tested, head]
+def check_candidate(checkout, offline, build_checkout, build_env, runtime_checkout, runtime_env,
+                    tested, base, head):
+    # Each worker has its own source checkout. The build worker also owns the
+    # Docker host checks, so only one of our compilation containers runs at a time.
     host_checks = ["bash", "scripts/run-local-release-checks.sh"]
-    with tempfile.TemporaryFile(mode="w+b", dir=checkout.parent) as build_log:
+    host_failed = Event()
+
+    def build_and_check(log):
+        command = ["scripts/idf-docker.sh", "--with-host-tests", "bash", "-ec",
+                   'test "$(git rev-parse HEAD)" = "$1"; exec scripts/ci-build-all.sh '
+                   '--compile-only --source-sha "$2"', "release-checks", tested, head]
+        run_phase("ESP32-S3 and real cJSON", command, build_checkout, build_env, timeout=1800, log=log)
+        if host_failed.is_set():
+            return
+        subprocess.run(["scripts/check-nonflashable-artifacts.sh", "dist"],
+                       cwd=build_checkout, env=build_env, stdout=log, stderr=subprocess.STDOUT,
+                       timeout=60, check=True)
+        if not host_failed.is_set():
+            run_phase("Docker host checks", [*host_checks, "docker", base, head],
+                      build_checkout, build_env, timeout=1800, log=log)
+
+    def check_runtime(log):
         try:
-            with ThreadPoolExecutor(max_workers=1) as workers:
-                firmware = workers.submit(run_phase, "ESP32-S3 and real cJSON", command,
-                                          build_checkout, build_env, timeout=1800, log=build_log)
-                # The OTA gate reuses these two host results on the landed tree.
-                local.verify(checkout, expected_head=tested, require_receipt=True, fresh=True)
-                run_phase("host tests and audits", [*host_checks, "host", base, head],
-                          checkout, offline, timeout=1800)
-                firmware.result()
+            run_phase("runtime and transport tests", [*host_checks, "runtime", base, head],
+                      runtime_checkout, runtime_env, timeout=1800, log=log)
+        except BaseException:
+            host_failed.set()
+            raise
+
+    with ExitStack() as logs:
+        build_log = logs.enter_context(tempfile.TemporaryFile(mode="w+b", dir=checkout.parent))
+        runtime_log = logs.enter_context(tempfile.TemporaryFile(mode="w+b", dir=checkout.parent))
+        try:
+            with ThreadPoolExecutor(max_workers=2) as workers:
+                build = workers.submit(build_and_check, build_log)
+                runtime = workers.submit(check_runtime, runtime_log)
+                try:
+                    # The OTA gate reuses these two host results on the landed tree.
+                    started = time.monotonic()
+                    local.verify(checkout, expected_head=tested, require_receipt=True, fresh=True)
+                    print(f"Local release host receipt checks: {time.monotonic() - started:.1f}s", flush=True)
+                    run_phase("host audits and release contracts", [*host_checks, "audits", base, head],
+                              checkout, offline, timeout=1800)
+                    build.result()
+                    runtime.result()
+                except BaseException:
+                    host_failed.set()
+                    raise
         finally:
-            # The executor joins the build before reading the log, including on failure.
-            build_log.seek(0)
-            sys.stdout.flush()
-            shutil.copyfileobj(build_log, sys.stdout.buffer)
-            sys.stdout.buffer.flush()
-    subprocess.run(["scripts/check-nonflashable-artifacts.sh", "dist"],
-                   cwd=build_checkout, env=build_env, timeout=60, check=True)
-    # Frame and input budgets need an uncontended browser phase. No host gate
-    # or firmware compiler from this invocation may still be running.
+            for phase_log in (build_log, runtime_log):
+                phase_log.seek(0)
+                sys.stdout.flush()
+                shutil.copyfileobj(phase_log, sys.stdout.buffer)
+                sys.stdout.buffer.flush()
+    # Keep all host work out of the browser frame and input measurements.
     run_phase("headless Chromium and WebKit", [*host_checks, "browser", base, head],
               checkout, offline, timeout=2100)
 
@@ -113,7 +143,9 @@ def run(root, expected_head):
                        env=offline, check=True)
         with local.frozen_checkout(root, env, identity, scratch_parent=scratch_parent,
                                    container_visible=True) as (build_checkout, build_env):
-            check_candidate(checkout, offline, build_checkout, build_env, tested, base, head)
+            with local.frozen_checkout(checkout, offline, identity) as (runtime_checkout, runtime_env):
+                check_candidate(checkout, offline, build_checkout, build_env, runtime_checkout, runtime_env,
+                                tested, base, head)
     if local.source(root, env) != actual:
         raise local.CheckError("checkout changed during local release checks")
     if local.git(root, env, "ls-remote", "--refs", "origin", "refs/heads/main").split() != [
