@@ -629,8 +629,9 @@ missing trace time and no timed start. Use the lower-bound prefix
 for positive totals and accessible readouts. Update the chart in its own slot and defer it while
 its card is hidden.
 
-When a timed trace is unavailable, use hourly totals for the entire chart. Leave leading padding
-and expired slots empty. Hatch missing elapsed time where duration is known. Restored and legacy
+When neither a fresh nor a usable cached trace exists, use the available hourly totals for the
+entire chart. Show **No history yet** if those totals are absent too. Leave leading padding and
+expired slots empty. Hatch missing elapsed time where duration is known. Restored and legacy
 slots show readable time with unknown elapsed duration. Label restored timestamps as saved time.
 Leave the unelapsed part of the open hour unfilled. The default readout uses one hourly snapshot
 and omits runtime without readable compressor seconds.

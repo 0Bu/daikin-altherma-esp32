@@ -301,9 +301,9 @@ calls handlers in reverse registration order. The handler dates the open hour by
 and freezes it. The drain then offers it after every live hour as a short record
 (`checkup_seal_*` in `checkup_persist.hpp`). `PLANT.md` owns when it is skipped.
 
-The rolling compressor trace uses the dated journal with a separate payload fingerprint. While
-eligible data advances, the writer can checkpoint up to 192 records every 120 seconds using up
-to four journal slots. The bounded shutdown flush can save a newer trace. Restoration checks a
+The rolling compressor trace uses the dated journal with a separate payload fingerprint. The writer
+can offer an eligible checkpoint at most once every 120 seconds, with up to 192 records in four
+journal slots. The bounded shutdown flush can save a newer trace. Restoration checks a
 bounded set of groups newer than the last committed reset fence, newest first. A damaged or
 incomplete group can fall back to an older candidate. The first structurally complete group
 determines the result. Admission requires synchronized time, a matching model, link and

@@ -109,9 +109,9 @@ restart tries to save. If the compressor is already running when observations re
 counts no start for that run. When it stops, the observed remainder is a censored run.
 
 The chart saves timed compressor observations separately from the hourly diagnosis records.
-A software restart, including an OTA installation, can make an additional save. A power loss,
-crash or watchdog panic can lose unsaved data. Recovery checks the latest complete chart
-checkpoint once time and the current source are confirmed.
+A software restart, including an OTA installation, can make an additional save. Power loss,
+crashes and watchdog panics lose the unsealed diagnosis hour. The timed chart can recover its
+latest committed checkpoint once time and the current source are confirmed.
 See the [journal rules](ARCHITECTURE.md#history-and-diagnosis-persistence) for restore and reset limits.
 
 Current observations take precedence for hourly totals. The
