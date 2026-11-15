@@ -104,7 +104,7 @@ void run() {
  history_record_room(true,99.0,gen);
  need(!s_room_fed&&R().ring.count==0&&R().ring.pending==HISTORY_NO_READING,"old in-flight sample refused");
  HistorySample v[HISTORY_SAMPLES]; uint32_t e=0; HistoryMeta meta;
- need(history_room_snapshot(v,HISTORY_SAMPLES,A,&e,&meta)==0&&e==0&&meta.oldest_bucket==-1,"old HTTP config refused");
+ need(history_room_snapshot(v,HISTORY_SAMPLES,A,&e,&meta)==0&&e==0&&meta.oldest_bucket==HISTORY_NO_BUCKET,"old HTTP config refused");
  history_record_room(true,26.0,history_room_generation());
  need(R().ring.pending==260&&s_room_fed,"new generation accepted");
  history_room_reset(0); history_record_room(true,27.0,history_room_generation());
