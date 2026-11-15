@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 2589aae41c08d272de29897683bdb35417921178fdcc244e138a10996476ad02 -->
+<!-- diagnostic-evidence-contract: 7f6f523c5b0982fa8b414b5a695200943f8a63dd4c0dba33bf468fde14f09707 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -323,8 +323,9 @@ restoration, forgetting and pre-commit reset limits are described in
 
 **Not established:** The note identifies neither oversizing nor incorrect hydraulic balancing.
 The observed run population and its outdoor context do not establish building load, delivered heat
-or continuous weather coverage. Defrost behaviour has not yet been observed by this project; if the
-compressor stops at defrost entry or exit, one heating run counts as several.
+or continuous weather coverage. A compressor pause around defrost can split an operating sequence
+into separate recorded runs. The [production observation below](#diagnosis-defrost) recorded such a
+pause on the hot-water route. Its timing does not establish a space-heating start or stop.
 
 <a id="diagnosis-defrost"></a>
 ### 4. Defrost events (`defrost`)
@@ -342,9 +343,19 @@ runtime remain observations with a reason; no readable defrost observation remai
 Missing readings remain missing, not zero. See
 CHECKUP_DEFROST_MIN_COUNT and CHECKUP_DEFROST_SHARE_PCT in [checkup.hpp](../main/logic/checkup.hpp).
 
-Fresh X10A outdoor minimum/mean belongs to the same accepted running-compressor population and
-does not alter the rule. Separate live R4T de-icer temperature does not enter the population;
-its placement and the controller's defrost logic are model-specific.
+The X10A outdoor minimum, mean and sample count use fresh outdoor readings from the paired
+running-compressor population, including intervals with defrost off. They do not alter the rule.
+The separately reported de-icer temperature does not enter this population.
+
+**Field observation:** On 14 November 2026 at 18:55–19:02 UTC, official dev firmware 1.0.16-dev.8
+with the EBLA/EDLA D-series 4–8 kW profile recorded one defrost event on the hot-water route. The
+diagnosis counted 267 seconds of paired defrost and compressor runtime. Archived publications
+spanned about 397 seconds from the first to the last readable ON state, including reported
+compressor stops. In 148 of 176 paired water-side publications with positive flow and reported
+compressor speed above 5 rps, the pre-backup-heater outlet R1T read below the inlet R4T. Outdoor
+air read 2.5 °C in those publications. Matching publication times give no guarantee of simultaneous
+sampling. This case leaves warm-weather defrost, space-heating defrost, post-defrost recovery and
+physical outdoor-coil identity unverified.
 
 **Project boundary:** The three-event requirement and 15% share are project heuristics, not Daikin
 limits. The page-0x20 mapping and positive-compressor freshness pairing are project evidence, not a
