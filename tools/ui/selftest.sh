@@ -95,14 +95,16 @@ echo "ui selftest: config warning and both stale-evaluation render failures are 
 # Re-seed the historical ENV III failure on its new owning Board Hardware dialog: Cancel and an
 # accepted atomic Save route through an undefined close helper. The behavioral matrix must fail on
 # the first real action, not merely parse the bundle.
-sed '/^function closeBoard()/s/closePopup("boardModal")/missingClosePopup("boardModal")/' \
+sed '/^function closeBoard()/,/^}/s/closePopup("boardModal")/missingClosePopup("boardModal")/' \
   "$tmp/main/www/js/settings.js" > "$tmp/main/www/js/settings.js.mutated"
 mv "$tmp/main/www/js/settings.js.mutated" "$tmp/main/www/js/settings.js"
 
-if (cd "$tmp" && node test/test_ui_use_cases.mjs >/dev/null 2>&1); then
+if (cd "$tmp" && node test/test_ui_use_cases.mjs >board-close.log 2>&1); then
   echo "ui selftest: historical undefined close handler escaped the use-case suite" >&2
   exit 1
 fi
+grep -q 'ReferenceError: missingClosePopup is not defined' "$tmp/board-close.log" || {
+  echo "ui selftest: Board close mutation failed outside the historical handler" >&2; exit 1; }
 
 echo "ui selftest: historical ENV III modal-action failure is detected"
 
