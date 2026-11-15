@@ -479,8 +479,11 @@ void restored_cycling_detail() {
     require(starting_points() == 2, "cycling_wall_step_cannot_reintroduce_aged_out_start");
     adapter::unix_origin += 600;
     checkup_reset();
-    require(checkup_cycling_checkpoint(view, other, barrier, 0, false) && barrier && !view.count,
-            "cycling_reset_barrier_bypasses_periodic_throttle");
+    adapter::unix_origin = -1 - sdk::now_us / 1000000;
+    require(checkup_cycling_checkpoint(view, other, barrier, 0, false) && barrier && !view.count &&
+                view.unix_s == 1 && !other.model_fp && !other.source_fp,
+            "cycling_reset_barrier_has_sequence_without_wall_time");
+    adapter::unix_origin = wall;
     checkup_cycling_checkpoint_appended(barrier);
     require(!checkup_cycling_checkpoint(view, other, barrier, 0, false),
             "cycling_durable_barrier_acknowledged");

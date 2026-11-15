@@ -2597,7 +2597,8 @@ bool flash_build_next_stop_observation(FlashJournalRecord& out) {
 
 bool flash_build_next_cycling(FlashJournalRecord& out, TickType_t wait_ticks, bool shutdown) {
     const bool reset_pending = checkup_cycling_reset_pending();
-    if (!s_flash_cycling_restore_done && !reset_pending) return false;
+    const bool restore_done  = s_flash_restore_done && s_flash_cycling_restore_done;
+    if (!restore_done && !reset_pending) return false;
     // An unfinished data group has no final page. Drop it before offering a reset marker.
     if (s_flash_cycling_pending && !s_flash_cycling_reset_token && reset_pending)
         s_flash_cycling_pending = false;
@@ -2609,7 +2610,7 @@ bool flash_build_next_cycling(FlashJournalRecord& out, TickType_t wait_ticks, bo
             now_us - s_flash_cycling_last_offer_us >=
                 static_cast<int64_t>(logic::HISTORY_FLASH_CYCLING_INTERVAL_S) * 1000000;
         const bool allow_data =
-            s_flash_cycling_restore_done && (shutdown ? !s_flash_cycling_shutdown_offered : due);
+            restore_done && (shutdown ? !s_flash_cycling_shutdown_offered : due);
         s_flash_cycling_reset_token = 0;
         if (!checkup_cycling_checkpoint(trace, s_flash_cycling_identity,
                                         s_flash_cycling_reset_token, wait_ticks, allow_data))
@@ -3060,14 +3061,14 @@ void history_service_flash_restore() {
 
 static size_t history_flash_service_journal(size_t max_records, TickType_t wait_ticks,
                                             bool shutdown) {
-    if (!s_flash_part || !s_flash_mtx || s_flash_forgotten.load() || !time_synced()) return 0;
+    if (!s_flash_part || !s_flash_mtx || s_flash_forgotten.load()) return 0;
     Lock flash_lk(s_flash_mtx, wait_ticks);
     if (!flash_lk.acquired()) return 0;
     // Read all mutable restore state under its owner lock, including a concurrent factory forget.
     if (s_flash_forgotten.load() || !s_flash_scan_ok) return 0;
-    if (!s_flash_restore_done) {
-        // The cursor is safe after the scan. A shutdown can commit the reset marker before
-        // unrelated trend restoration finishes, but cannot publish new observation groups.
+    if (!s_flash_restore_done || !time_synced()) {
+        // Once the scan establishes the cursor, a shutdown can commit an undated fence
+        // without publishing observations before time sync or trend restoration.
         if (!shutdown || !checkup_cycling_reset_pending()) return 0;
         max_records = 0;
     } else {
@@ -3089,7 +3090,8 @@ static size_t history_flash_service_journal(size_t max_records, TickType_t wait_
         // ordinary write budget available to trends and the other diagnosis records.
         if (s_flash_cycling_part == 0 && !s_flash_cycling_reset_token)
             s_flash_cycling_pending = false;
-        for (; written < 2 * logic::HISTORY_FLASH_CYCLING_MAX_PARTS; ++written) {
+        const size_t cycling_budget = max_records ? 2 * logic::HISTORY_FLASH_CYCLING_MAX_PARTS : 1;
+        for (; written < cycling_budget; ++written) {
             if (!flash_build_for_service(kCyclingTraceSource, r, wait_ticks, true)) break;
             if (flash_append_record(r) != ESP_OK) return written;
         }

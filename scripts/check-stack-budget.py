@@ -793,6 +793,8 @@ def parse_frames(disassembly: str, budgets: dict[str, Any] | None = None) -> dic
             symbol_address = int(header.group(1), 16)
             # Check symbol headers even when their first instruction is not recognized.
             if any(helper in current for helper in ("flash_build_for_service",
+                                                    "flash_index_cycling_page",
+                                                    "flash_cycling_appended",
                                                     "flash_decode_cycling_group",
                                                     "cycling_trace_decode_part")):
                 raise BudgetError(f"cycling journal: unmodeled outlined helper {current}")
@@ -1086,6 +1088,8 @@ CYCLING_WRITE_STACK = {
     "reset_check": ["cycling_flash_build", "cycling_reset_pending"],
     "build_crc": ["cycling_flash_build", "cycling_flash_crc", "history_config_crc"],
     "build_shape": ["cycling_flash_build", "cycling_page_valid", "cycling_part_count"],
+    "append_shape": ["history_append", "cycling_part_count"],
+    "append_ack": ["history_append", "cycling_checkpoint_acked"],
 }
 CYCLING_RESTORE_STACK = {
     "read": ["cycling_flash_restore", "cycling_flash_record_read", "sdk_partition_read"],
@@ -1098,6 +1102,7 @@ CYCLING_RESTORE_STACK = {
 }
 CYCLING_TRACKED_HELPERS = {"flash_build_next_cycling": "cycling_flash_build",
                            "checkup_cycling_reset_pending": "cycling_reset_pending",
+                           "checkup_cycling_checkpoint_appended": "cycling_checkpoint_acked",
                            "cycling_trace_page_valid": "cycling_page_valid",
                            "cycling_trace_part_count": "cycling_part_count"}
 
@@ -1419,6 +1424,7 @@ def validate_task_stacks(budgets: dict[str, Any], sources: dict[str, str]) -> No
                         "ota_health_shutdown_checkup": "ota_health"}.get(path)
             if path in {f"ota_health_shutdown_cycling_{phase}"
                         for phase in ("snapshot", "reset_check", "build_crc", "build_shape",
+                                      "append_shape", "append_ack",
                                       *CYCLING_RESTORE_STACK)}:
                 expected = "ota_health"
             if path in stop_stack.PATHS:
@@ -1849,7 +1855,8 @@ CONFIG_DOCUMENT_PATHS = frozenset({
     "httpd_checkup_schema",
     *(f"httpd_shutdown_{name}_{phase}" for name in SHUTDOWN_HTTP_CALLERS
       for phase in ("journal", "checkup", "cycling_snapshot", "cycling_reset_check",
-                    "cycling_build_crc", "cycling_build_shape",
+                    "cycling_build_crc", "cycling_build_shape", "cycling_append_shape",
+                    "cycling_append_ack",
                     *(f"cycling_{part}" for part in CYCLING_RESTORE_STACK))),
 })
 CONFIG_DOCUMENT_PATHS |= frozenset(
@@ -2893,6 +2900,7 @@ def self_test() -> None:
   29: 004136          entry a1, 32
 """
     extra_frames = {
+        'daik::checkup_cycling_checkpoint_appended(unsigned long)': 32,
         'daik::logic::cycling_trace_page_valid(daik::logic::HistoryJournalHeader const&, daik::logic::CyclingTracePageInfo const&)': 32,
         'daik::logic::cycling_trace_part_count(unsigned int)': 32,
         'daik::(anonymous namespace)::flash_build_next_cycling(daik::(anonymous namespace)::FlashJournalRecord&, unsigned long, bool)': 128,
@@ -4113,6 +4121,8 @@ def self_test() -> None:
     for helper, expected in (
         ("daik::(anonymous namespace)::flash_decode_cycling_group()", "unmodeled outlined helper"),
         ("daik::(anonymous namespace)::flash_build_for_service()", "unmodeled outlined helper"),
+        ("daik::(anonymous namespace)::flash_index_cycling_page()", "unmodeled outlined helper"),
+        ("daik::(anonymous namespace)::flash_cycling_appended()", "unmodeled outlined helper"),
         ("daik::logic::cycling_trace_decode_part()", "unmodeled outlined helper"),
         ("daik::(anonymous namespace)::flash_build_next_cycling() [clone .isra.1]",
          "unmodeled helper clone"),

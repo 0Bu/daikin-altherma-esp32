@@ -311,7 +311,9 @@ diagnostics-consent identity, and observations eligible for the rolling window. 
 complete group ends the search. A scoped reset withdraws restored evidence immediately. Once the
 writer sees the pending reset, it drops any unfinished data group and gives the fence the next
 eligible write for this trace. The reset becomes durable when the fence commits. Power loss
-before that commit can leave an earlier compatible group eligible. Restored observations keep
+before that commit can leave an earlier compatible group eligible. After the journal scan, an
+orderly shutdown can save the undated fence even before time sync or trend restoration. No
+observations are admitted by that fence-only drain. Restored observations keep
 their saved times and age with a monotonic floor. The journal retains its existing geometry.
 
 Hourly diagnosis state grows by source, not by bucket. Each byte added to `CheckupBucket` or

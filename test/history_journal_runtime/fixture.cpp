@@ -118,7 +118,7 @@ bool checkup_cycling_checkpoint(logic::CheckupCyclingTrace& trace, logic::Cyclin
         return false;
     token = cycling_reset_token;
     trace.reset();
-    trace.unix_s       = cycling_offer_unix_s;
+    trace.unix_s       = token ? 1 : cycling_offer_unix_s;
     trace.window_end_s = logic::CHECKUP_WINDOW_S;
     id                 = {};
     if (!token) {
@@ -600,14 +600,24 @@ void cycling_reset_before_last_page() {
                 !s_flash_cycling_pending,
             "reset_commits_in_place_of_retired_checkpoint_final_page");
 }
-void cycling_reset_before_trend_restore() {
+void cycling_reset_before_trend_restore(bool trace_ready) {
     boot();
-    cycling_offer_unix_s = static_cast<uint32_t>(journal_sdk::unix_origin);
-    cycling_reset_token  = 9;
-    s_flash_restore_done = s_flash_cycling_restore_done = false;
+    cycling_offer_unix_s         = static_cast<uint32_t>(journal_sdk::unix_origin);
+    cycling_reset_token          = 9;
+    s_flash_restore_done         = false;
+    s_flash_cycling_restore_done = trace_ready;
     history_flash_save();
     require(cycling_ack == 9 && journal_sdk::writes == 2,
             "shutdown_commits_only_reset_while_trends_restore");
+}
+void cycling_reset_before_time_sync() {
+    boot();
+    journal_sdk::synced  = false;
+    cycling_reset_token  = 9;
+    cycling_offer_unix_s = static_cast<uint32_t>(journal_sdk::unix_origin);
+    history_flash_save();
+    require(cycling_ack == 9 && journal_sdk::writes == 2,
+            "shutdown_commits_undated_reset_without_observations");
 }
 void seed_cycling(const char* transport_path, const std::string& phase) {
     boot();
@@ -799,7 +809,11 @@ int main(int argc, char** argv) {
         else if (name == "cycling_reset_before_last_page")
             cycling_reset_before_last_page();
         else if (name == "cycling_reset_before_trend_restore")
-            cycling_reset_before_trend_restore();
+            cycling_reset_before_trend_restore(false);
+        else if (name == "cycling_reset_after_trace_restore")
+            cycling_reset_before_trend_restore(true);
+        else if (name == "cycling_reset_before_time_sync")
+            cycling_reset_before_time_sync();
         else if (name == "forget_before_start")
             forget_case(ForgetPoint::BeforeStart);
         else if (name == "forget_during_lookup")

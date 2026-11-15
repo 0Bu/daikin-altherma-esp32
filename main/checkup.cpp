@@ -1236,16 +1236,14 @@ bool checkup_cycling_checkpoint(logic::CheckupCyclingTrace&  trace,
     reset_token            = 0;
     const uint32_t pending = s_cycling_reset_token.load(std::memory_order_relaxed);
     if (pending != s_cycling_reset_acked.load(std::memory_order_acquire)) {
-        int64_t unix_s = -1;
-        int32_t ms     = 0;
-        time_now(unix_s, ms);
-        if (unix_s <= 0 || unix_s > UINT32_MAX) return false;
         trace.reset();
         trace.window_end_s = logic::CHECKUP_WINDOW_S;
-        trace.unix_s       = static_cast<uint32_t>(unix_s);
-        trace.live         = false;
-        identity           = {};
-        reset_token        = pending;
+        // Fence order comes only from its journal sequence. Keep the nonzero wire field
+        // for legacy slot validation without assigning a wall timestamp to the reset.
+        trace.unix_s = 1;
+        trace.live   = false;
+        identity     = {};
+        reset_token  = pending;
         return true;
     }
     if (!allow_data || !s_diagnostics_enabled.load(std::memory_order_acquire) ||
