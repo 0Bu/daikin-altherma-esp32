@@ -1240,14 +1240,14 @@ static esp_err_t set_board(httpd_req_t* req) {
     if (const char* error = config_request_field_error(
             j, HttpConfigFieldType::Boolean, {"led_inverted", "btn_active_low", "env3_enabled"}))
         return send_err(req, "400 Bad Request", error);
-    const cJSON* const boot        = cJSON_GetObjectItem(j, "boot_id");
-    const cJSON* const revision    = cJSON_GetObjectItem(j, "config_revision");
+    const cJSON* const boot           = cJSON_GetObjectItem(j, "boot_id");
+    const cJSON* const revision       = cJSON_GetObjectItem(j, "config_revision");
     const bool         revision_bound = revision != nullptr;
-    const auto         draft_stale = [req] {
+    const auto         draft_stale    = [req] {
         httpd_resp_set_status(req, "409 Conflict");
         return http_send_json(
             req, R"({"ok":false,"code":"board_draft_stale",)"
-                         R"("error":"Board settings changed. Reopen the editor before saving."})");
+                            R"("error":"Board settings changed. Reopen the editor before saving."})");
     };
     if (boot || revision) {
         if (!boot || !cJSON_IsNumber(revision) ||

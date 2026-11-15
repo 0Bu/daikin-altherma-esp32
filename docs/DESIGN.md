@@ -505,8 +505,9 @@ becomes synced after an actual reply, and HomeHub has its independent state.
 The Hardware modal records board identity independently of pins. Choosing a preset fills recommended
 peripherals; disabling LED/reset does not change the preset. ENV III is editable only for a pending
 M5Stack selection and hidden/disabled for Custom/Seeed. Safe distinct SDA/SCL options reflect exposed
-pins. An enabled sensor must pass its live SHT30/QMP6988 probe before one atomic board/sensor save;
-probe rejection preserves the draft. On Save, if the current status shows a different boot or
+pins. Enabling the sensor requires a live SHT30/QMP6988 probe. Keeping an active pin pair requires
+a fresh connected sample. The board and sensor settings save together. A preflight refusal preserves
+the draft. On Save, if the current status shows a different boot or
 configuration, the browser closes the editor and asks the owner to reopen it. A device refusal with
 `board_draft_stale` gives the same instruction. Pin and ENV III conflicts preserve the draft and
 explain the required correction. The Hardware explanation lists saved configuration, complete

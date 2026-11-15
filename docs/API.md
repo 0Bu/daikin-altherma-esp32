@@ -460,12 +460,12 @@ With live status, it bounds boot-relative buckets by reported uptime, elapsed br
 the status request began and one second for whole-second uptime. It accepts a reply without row
 and source identity only if both are absent and `/status` predates the history epoch. A supplied
 identity must match the request, along with the boot and epoch tokens announced by `/status`.
-A nonempty date-only reply needs a synchronized device clock. Its newest sample must fall within
-the rolling day and poll tolerance. Older samples are clipped from the view. With a boot anchor and
-reported uptime, the browser also checks wall time against the completed bucket. A contradictory
-timestamp is dropped from a new reply. A cached timestamp that disagrees with the last accepted
-status is hidden, including during a polling outage. A compatible peer can still supply wall-clock
-labels for the shared raster.
+For a nonempty date-only reply the browser needs a synchronized device clock and checks the newest
+sample against the rolling day and poll tolerance. A failed check rejects the reply. The chart
+leaves expired slots empty. With a boot anchor and reported uptime, the browser also checks wall
+time against the completed bucket. It drops contradictory wall time from a new boot-anchored reply
+and hides a cached clock label that conflicts with the last accepted status, including during a
+polling outage. A compatible peer can still supply wall-clock labels for the shared raster.
 Without a compatible clock the chart uses a relative axis, as it does for legacy unanchored rings.
 The browser preserves compatible cached readings if it rejects a replacement. Independent sources
 with incompatible anchors use separate plots. Independent recorders can book different warm-reset
@@ -604,15 +604,17 @@ The dashboard sends `boot_id` and `board.config_revision` from its accepted `/st
 `boot_id` and `config_revision`. A missing member, non-string boot ID, or invalid numeric revision
 returns 400. A boot ID or revision that differs from the current value when the handler checks the
 submitted draft returns 409 with `code: "board_draft_stale"` before probing or saving.
-Validation and the ENV III preflight can return their own errors. The save rechecks the revision
-under the configuration mutex after those checks, including for changes that claim no pins.
-Reopen the editor from current status before submitting again. Clients can omit both.
+Validation and the ENV III preflight can return their own errors. For a write the handler checks
+the revision again under the configuration mutex after preflight, including for changes that claim
+no pins. A submission that needs no write checks the revision again before returning success.
+Reopen the editor from current status before submitting again. Clients can omit both tokens.
 
 `POST /set_env3` is the compatibility route (`enabled`, `sda`, `scl`, all optional). Both board routes
-share the same preflight: enabling new pins probes SHT30/QMP6988 (422 if absent, 503 if busy), enabling
-running pins needs fresh evidence (422 if unreachable), moving an active bus is 409 `env3_disable_first`.
-Disabling needs no hardware proof. Probe and active-bus refusals have machine codes. Only successful
-changes to task-owned hardware reboot.
+share the same preflight: enabling ENV III probes SHT30/QMP6988 (422 if absent, 503 if busy).
+Keeping the active pin pair requires a fresh connected sample (422 if unreachable). Moving an
+active bus returns 409 `env3_disable_first`. Disabling needs no hardware proof. Probe and active-bus
+refusals have machine codes. Changes to saved enablement or SDA/SCL pins reboot the device, including
+a pin change while ENV III is disabled.
 At the save step, a concurrent X10A link change onto a claimed pin returns an uncoded 409 for
 requests without draft tokens. A revision-bound Board save returns the draft-stale error whenever
 the revision has changed. Both refusals leave the submitted settings unwritten.
