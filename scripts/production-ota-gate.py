@@ -4427,9 +4427,27 @@ def run_release_hil(
 
 
 def self_test() -> None:
+    from unittest.mock import patch
+
     global HTTP_TIMEOUT_S
     source = "a" * 40
     app = "b" * 64
+    for head, status, expected_error in (
+        (source, "", None),
+        ("c" * 40, "", "is not manifest source"),
+        (source, " M main/www/js/history.js\n", "working tree is dirty"),
+    ):
+        git_output = {("rev-parse", "HEAD"): head, ("status", "--porcelain"): status}
+        with patch.dict(globals(), run_checked=lambda argv, *, capture: git_output[tuple(argv[1:])]):
+            try:
+                verify_local_source(source)
+            except GateError as exc:
+                if expected_error is None or expected_error not in str(exc):
+                    raise
+            else:
+                if expected_error is not None:
+                    raise AssertionError(f"local source check missed {expected_error!r}")
+
     class LimitedResponse:
         status = 200
 

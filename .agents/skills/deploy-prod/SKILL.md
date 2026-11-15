@@ -44,11 +44,18 @@ Run every `scripts/production-ota-gate.py` and signing command directly, unchain
 the hook rejects such a command when it contains a newline, including a backslash continuation.
 Credential-wrapper commands take literal values only (no shell variables, `$(...)` or `--jq`). The
 hook binds the gate and the wrapper to the session worktree, so run them there and never through a
-`cd … &&` chain. Keep every branch this workflow needs in that session worktree.
+`cd … &&` chain.
 
 ## Steps
 
 ### 0. Precondition: the exact head passed `$deploy-test`
+
+Use a dedicated, clean session worktree for the whole deployment, including any fix branches.
+If the current checkout is shared or has unrelated changes, leave it intact and prepare the
+deployment worktree before running the gates. In Codex Desktop, creating a worktree can update
+the session directory only on a subsequent turn. Complete that handoff and run the relative
+self-test from Step 2 before starting gates in a new worktree. Reserve the checkout for this
+deployment through production acceptance.
 
 Run `$deploy-test` whenever signed dev publication is possible. Compare the prospective merge
 tree with the last proven dev source using
@@ -93,16 +100,27 @@ scripts/gh-with-git-credentials.sh --repo github.com/0Bu/daikin-altherma-esp32 p
 ```
 
 Wait for pending checks with the bounded watcher from `AGENTS.md`. If bench acceptance applies,
-verify that the locally tested bench tree matches the tree in the receipt. Then merge with the
+verify that the locally tested bench tree matches the tree in the receipt. Immediately before
+merging, require empty `git status --porcelain` output and `git rev-parse HEAD` equal to the PR's
+`headRefOid` in the deployment worktree. Check that the worktree and host temporary directory have
+space for the remaining artifact and gate evidence. Run this relative command directly from the
+deployment worktree:
+
+```bash
+scripts/production-ota-gate.py --self-test
+```
+
+This exercises the session hook's OTA path binding using local fixtures. If the hook
+rejects the command or the checkout is unready, resolve it before merging. Then merge with the
 literal 40-hex `headRefOid`:
 
 ```bash
 scripts/gh-with-git-credentials.sh api --hostname github.com --method PUT repos/0Bu/daikin-altherma-esp32/pulls/<pr-number>/merge -f sha=<full-40-hex-pr-head-sha> -f merge_method=squash
 ```
 
-Record the merge commit SHA from the response.
-Record the merge time too. The ordinary delivery target is 30 minutes from merge through
-confirmed production acceptance. Record feed, bench and production timings as they finish.
+Record the merge commit SHA and merge time. The ordinary delivery target is under 30 minutes
+from merge through confirmed production acceptance. Record feed, bench and production timings
+as they finish.
 
 ### 3. Watch the CI dev build on main
 
@@ -110,6 +128,11 @@ For ordinary merges, the publication workflow binds the local receipt to the lan
 first parent before the signed build. See the
 [Renovate runner-pin exception](../../../docs/MAINTENANCE.md#local-release-checks).
 The workflow checks the exact published artifact and public readback.
+
+While publication starts, fetch the returned commit with `git fetch --no-tags origin <merge-sha>`
+and run `git switch --detach <merge-sha>` in the same reserved worktree. Require a clean checkout
+at that SHA. When signed publication is required, compare `HEAD^{tree}` with the accepted check
+receipt or bench evidence. Resolve any mismatch before OTA.
 
 Find the `build.yml` run for the merge commit and watch it:
 
@@ -178,10 +201,8 @@ shapes; no saved-channel change is needed. Full feed binding and round-trip rule
 
 ### 4. Bench delivery gate
 
-The gate requires a clean checkout whose `HEAD` is the merge commit. The hook admits only the
-session worktree's own `scripts/production-ota-gate.py`. So run Steps 4 and 5 from the session
-worktree, clean and detached at the merge commit (`git fetch origin`, then
-`git switch --detach <merge-sha>`).
+Run Steps 4 and 5 from the deployment worktree prepared in Step 3. The gate verifies its clean
+`HEAD` against the manifest source before any OTA write.
 
 Read the bench's current version from `/status` on the inventory host. After a `$deploy-test` run,
 that is the tested local image's version. Then run, on one line:
@@ -236,7 +257,8 @@ When both devices are verified healthy:
 1. **Branches:** GitHub deletes a merged PR's head branch. Confirm with
    `git ls-remote --heads origin <branch>`, and delete it only if it still exists. Then run
    `git fetch --prune origin` and `git branch -d <branch>` for local branches this deployment created.
-2. **Worktrees:** remove only worktrees this deployment created, each by its exact path.
+2. **Worktrees:** remove only disposable worktrees this deployment created, each by its exact path.
+   Keep the registered session worktree while the session still uses it.
 3. **Files:** remove only temporary files this deployment created, such as its own PR body files or
    its signed image duplicate. Keep rollout, signing and diagnostic evidence, and never delete files
    by a shared fixed path that another session may own.

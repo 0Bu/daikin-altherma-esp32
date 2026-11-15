@@ -96,8 +96,11 @@ def verify_pr(number, head, query=api):
     if (not pr.get("state") == "open" or pr["base"]["ref"] != "main"
             or pr["base"]["repo"]["full_name"] != REPO or pr["head"]["sha"] != head):
         raise ProofError("PR does not match the current open head")
+    # For a mergeable open PR, GitHub returns the test merge commit in the PR response.
+    tested = pr.get("merge_commit_sha")
+    if pr.get("mergeable") is not True or not isinstance(tested, str) or not SHA.fullmatch(tested):
+        raise ProofError("GitHub has no mergeable test commit for this PR")
     base = commit("git/ref/heads/main", query)
-    tested = commit(f"git/ref/pull/{number}/merge", query)
     detail = query(f"git/commits/{tested}")
     if [row["sha"] for row in detail["parents"]] != [base, head] or detail["sha"] != tested:
         raise ProofError("PR merge tree is stale")
