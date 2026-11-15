@@ -251,6 +251,23 @@ class AgentHookFastTests(unittest.TestCase):
                 self.assertEqual(result, 0)
                 self.assertEqual(json.loads(output)["hookSpecificOutput"]["permissionDecision"], "deny")
 
+    def test_relative_ota_self_test_requires_the_session_worktree(self):
+        command = "scripts/production-ota-gate.py --self-test"
+        payload = {"cwd": str(ROOT), "tool_name": "exec_command", "tool_input": {"cmd": command}}
+        self.assertEqual(self.run_pre_tool(payload), (0, ""))
+
+        with tempfile.TemporaryDirectory() as other_worktree:
+            for worktree_payload in (
+                {**payload, "cwd": other_worktree},
+                {**payload, "tool_input": {"cmd": command, "workdir": other_worktree}},
+            ):
+                with self.subTest(payload=worktree_payload):
+                    result, output = self.run_pre_tool(worktree_payload)
+                    self.assertEqual(result, 0)
+                    decision = json.loads(output)["hookSpecificOutput"]
+                    self.assertEqual(decision["permissionDecision"], "deny")
+                    self.assertIn("not a canonical direct", decision["permissionDecisionReason"])
+
     def test_canonical_ota_feed_and_version_are_bound_together(self):
         base = "https://0bu.github.io/daikin-altherma-esp32/"
 
