@@ -610,12 +610,14 @@ no pins. A submission that needs no write checks the revision again before retur
 Reopen the editor from current status before submitting again. Clients can omit both tokens.
 
 `POST /set_env3` is the compatibility route (`enabled`, `sda`, `scl`, all optional). Both board routes
-share the same preflight. Enabling ENV III probes SHT30/QMP6988. A failed sensor check returns
-422 with `env3_sht30_not_found` or `env3_qmp6988_not_found`. An unavailable probe returns 503
-with `env3_probe_busy`. While ENV III stays enabled, keeping its active pin pair requires a fresh
+share the same preflight. Enabling ENV III probes SHT30/QMP6988 on the selected pair. If that probe
+cannot start, the handler returns 503 `env3_probe_busy`. If a sensor fails verification, the handler
+tries that pair once with SDA and SCL exchanged. If both sensors pass, a successful save uses the
+exchanged mapping. Any failed retry returns the first probe's 422 `env3_sht30_not_found` or
+`env3_qmp6988_not_found`. While ENV III stays enabled, keeping its active pin pair requires a fresh
 connected sample (422 `env3_not_reachable` otherwise). Moving to a valid new pair returns
-409 `env3_disable_first`. A request may disable ENV III and change its saved pins together without
-a probe. Changes to saved enablement or SDA/SCL pins reboot the device, including a pin change while
+409 `env3_disable_first`. A request may disable ENV III and change its saved pins together without a
+probe. Changes to saved enablement or SDA/SCL pins reboot the device, including a pin change while
 ENV III is disabled.
 At the save step, a concurrent X10A link change onto a claimed pin returns an uncoded 409 for
 requests without draft tokens. A revision-bound Board save returns the draft-stale error whenever
