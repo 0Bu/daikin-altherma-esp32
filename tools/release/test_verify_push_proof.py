@@ -17,7 +17,8 @@ class LocalProofTests(unittest.TestCase):
         self.label = {"schema": 1, "repo": proof.REPO, "head": self.head, "base": self.base,
                       "tree": self.tree, "finished_at": self.now - 60}
         self.body = {"number": 311, "state": "open", "base": {"ref": "main", "repo": {"full_name": proof.REPO}},
-                     "head": {"sha": self.head, "repo": {"full_name": "fork/example"}}}
+                     "head": {"sha": self.head, "repo": {"full_name": "fork/example"}},
+                     "mergeable": True, "merge_commit_sha": self.merge}
         self.comments = [self.comment()]
 
     def time(self, delta):
@@ -35,7 +36,6 @@ class LocalProofTests(unittest.TestCase):
         rows = {
             "pulls/311": self.body,
             "git/ref/heads/main": {"object": {"sha": self.base}},
-            "git/ref/pull/311/merge": {"object": {"sha": self.merge}},
             f"git/commits/{self.merge}": {"sha": self.merge, "tree": {"sha": self.tree},
                                            "parents": [{"sha": self.base}, {"sha": self.head}]},
             f"commits/{self.squash}/pulls?per_page=100": [
@@ -48,6 +48,23 @@ class LocalProofTests(unittest.TestCase):
     def test_exact_fork_pr_and_squash_pass(self):
         self.assertEqual(proof.verify_pr(311, self.head, self.query), self.label)
         self.assertEqual(proof.verify_landed(self.squash, self.query), self.label)
+
+    def test_open_pr_requires_a_ready_test_merge_commit(self):
+        for mergeable, commit in ((None, self.merge), (False, self.merge), (True, None), (True, "bad-sha")):
+            with self.subTest(mergeable=mergeable, commit=commit):
+                self.body.update(mergeable=mergeable, merge_commit_sha=commit)
+                with self.assertRaisesRegex(proof.ProofError, "no mergeable test commit"):
+                    proof.verify_pr(311, self.head, self.query)
+
+    def test_test_merge_commit_must_have_the_current_base_and_head_parents(self):
+        def query(path):
+            row = self.query(path)
+            if path == f"git/commits/{self.merge}":
+                return row | {"parents": [{"sha": self.squash}, {"sha": self.head}]}
+            return row
+
+        with self.assertRaisesRegex(proof.ProofError, "PR merge tree is stale"):
+            proof.verify_pr(311, self.head, query)
 
     def test_unrelated_comments_do_not_hide_receipt_on_later_page(self):
         comment = {"user": {"id": 42}, "body": "discussion" * 6000}
