@@ -79,10 +79,12 @@ readback separately. Claim CI acceleration only after a comparable run of the pu
 
 The native `pre-push` hook runs the repository's full mechanical suite and unsigned ESP32-S3
 compile for maintainer pushes. It refreshes `origin/main` and checks the prospective merge tree
-in private snapshots with main as the first parent. Host tests and the ESP32-S3 compile run
-concurrently in separate snapshots. Coverage includes the native test and the retained Ubuntu
-GCC 15 x86-64 branch profile in Docker. For UI-relevant changes, headless Linux Chromium and
-WebKit run after both check groups finish, so the compile cannot affect this run's UI timing.
+in private snapshots with main as the first parent. Native runtime tests, host audits and release
+contracts, and the ESP32-S3 build with Docker host checks run in three parallel groups on separate
+checkouts. The compiler and Docker host checks run in sequence within their group to limit
+container contention. Coverage includes the native test and the Ubuntu GCC 15 x86-64 branch
+profile. For UI-relevant changes, headless Linux Chromium and WebKit start after all three groups
+finish so their work cannot affect the UI timing measurements.
 See [host tooling and checks](../test/README.md).
 
 To run the gate manually, use
