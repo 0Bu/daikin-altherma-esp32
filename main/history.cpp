@@ -1585,14 +1585,15 @@ void history_record_env3(bool valid, float temperature_c, float humidity_pct, fl
 static void clear_snapshot_meta(logic::HistoryMeta* meta) {
     if (!meta) return;
     meta->newest_age_s  = -1;
-    meta->oldest_bucket = -1;
+    meta->oldest_bucket = logic::HISTORY_NO_BUCKET;
 }
 
 static void fill_snapshot_meta_locked(logic::HistoryMeta* meta, int64_t last_commit_us,
                                       int64_t last_commit_bucket, size_t n) {
     if (!meta) return;
-    meta->newest_age_s  = logic::history_meta_newest_age_s(esp_timer_get_time(), last_commit_us);
-    meta->oldest_bucket = logic::history_meta_oldest_bucket(last_commit_bucket, n);
+    meta->newest_age_s = logic::history_meta_newest_age_s(esp_timer_get_time(), last_commit_us);
+    meta->oldest_bucket =
+        logic::history_meta_oldest_bucket(meta->newest_age_s, last_commit_bucket, n);
 }
 
 size_t history_snapshot(size_t t, HistorySample* out, size_t max, uint32_t* epoch,

@@ -1716,7 +1716,7 @@ function renderInspectHist(e, row, mode = "") {
     const forecastPin = S.histPin.get(ENV3_FORECAST_ID);
     const forecast = weatherForecastView();
     const sig = [LANG, ENV3_COMBINED_ID, ...seriesSig, forecast?.revision, forecastPin?.t,
-                 pin ? (pin.t ?? `${pin.i}/${pin.gen}`) : ""].join("|");
+                 JSON.stringify(pin ?? null)].join("|");
     if (sig === S.inspHistSig) return started;
     S.inspHistSig = sig;
     const el = $("inspHist");
@@ -1755,15 +1755,17 @@ function renderInspectHist(e, row, mode = "") {
   // Categorical histories append a display-only live sample. Include only that derived state in the
   // chart signature, so an actual change repaints the current cap while unchanged values polls
   // still leave a tooltip/crosshair DOM completely alone.
-  const liveGen = id && typeof STATE_HIST !== "undefined" && STATE_HIST[id]
-    ? historyView(id, trendSource)?.gen || "" : "";
+  const state = id && typeof STATE_HIST !== "undefined" && STATE_HIST[id]
+    ? historyView(id, trendSource) : null;
+  const liveGen = state?.separate
+    ? state.separate.map(source => historyView(id, source)?.gen).join("/") : state?.gen;
   const auxGen = id === "dhw_tank" ? tankAuxRevision(tankAuxHistories()) : "";
   const sourceDefault = h && mh && !S.histHidden?.has(id) ? histX10aDown() : "";
   // histHtml carries localised axis/readout copy. A language switch must therefore invalidate the
   // inspector chart even when the series generation and pinned sample are unchanged.
   const sig = [LANG, id, trendSource, historyRingRevision(h), historyRingRevision(mh), historyRingRevision(rh),
                id === "room_temp" ? roomHistName() : "",
-               liveGen, auxGen, sourceDefault, pin ? (pin.t ?? `${pin.i}/${pin.gen}`) : ""].join("|");
+               liveGen, auxGen, sourceDefault, JSON.stringify(pin ?? null)].join("|");
   if (sig === S.inspHistSig) return started;
   S.inspHistSig = sig;
   const el = $("inspHist");

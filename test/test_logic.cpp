@@ -25016,10 +25016,10 @@ static void test_history_identity() {
         CHECK(m.oldest_bucket == 1000); // a single sample is its own sample zero
         // Nothing committed: no age, and no sample zero.
         m = history_snapshot_meta(500 * kSec, HISTORY_NO_COMMIT_US, -1, 0);
-        CHECK(m.newest_age_s == -1 && m.oldest_bucket == -1);
+        CHECK(m.newest_age_s == -1 && m.oldest_bucket == HISTORY_NO_BUCKET);
         // An empty copy has no sample zero even if a commit exists.
         m = history_snapshot_meta(500 * kSec, 200 * kSec, 1000, 0);
-        CHECK(m.newest_age_s == 300 && m.oldest_bucket == -1);
+        CHECK(m.newest_age_s == 300 && m.oldest_bucket == HISTORY_NO_BUCKET);
         // A commit restored from flash predates this boot's zero: a NEGATIVE timestamp is a real
         // age.
         m = history_snapshot_meta(10 * kSec, -290 * kSec, 1000, 288);
@@ -25027,18 +25027,19 @@ static void test_history_identity() {
         // A clock reading before the commit yields age 0, never a negative age.
         m = history_snapshot_meta(100 * kSec, 200 * kSec, 1000, 288);
         CHECK(m.newest_age_s == 0);
-        // The bucket sentinel is negative; a real bucket of zero is valid.
+        // The boundary after restore can precede boot, including a real final bucket of -1.
         CHECK(history_snapshot_meta(1, 0, 0, 1).oldest_bucket == 0);
         CHECK(history_snapshot_meta(1, 0, -1, 1).oldest_bucket == -1);
+        CHECK(history_snapshot_meta(1, 0, -1, 288).oldest_bucket == -288);
         // The two halves are the pieces history.cpp fills the struct from.
         CHECK(history_meta_newest_age_s(500 * kSec, 200 * kSec) == 300);
         CHECK(history_meta_newest_age_s(500 * kSec, HISTORY_NO_COMMIT_US) == -1);
-        CHECK(history_meta_oldest_bucket(1000, 288) == 1000 - 287);
-        CHECK(history_meta_oldest_bucket(-1, 288) == -1);
-        CHECK(history_meta_oldest_bucket(1000, 0) == -1);
+        CHECK(history_meta_oldest_bucket(5, 1000, 288) == 1000 - 287);
+        CHECK(history_meta_oldest_bucket(-1, -1, 288) == HISTORY_NO_BUCKET);
+        CHECK(history_meta_oldest_bucket(5, 1000, 0) == HISTORY_NO_BUCKET);
         // The default is "none", which is what every early return leaves behind.
         const HistoryMeta none;
-        CHECK(none.newest_age_s == -1 && none.oldest_bucket == -1);
+        CHECK(none.newest_age_s == -1 && none.oldest_bucket == HISTORY_NO_BUCKET);
         // Both facts belong to ONE commit: they are a function of the same (commit, count) pair, so
         // a snapshot taken after the next commit moves them together and never apart.
         const HistoryMeta before = history_snapshot_meta(1000 * kSec, 700 * kSec, 100, 288);

@@ -307,8 +307,14 @@ template <typename JsonOut> static void append_json_uint(JsonOut& out, uint64_t 
 // uptime is already greater than the previous sample. Shared by streamed HTTP and MCP serializers.
 static const uint64_t s_status_boot_id = (static_cast<uint64_t>(esp_random()) << 32) | esp_random();
 
-void http_boot_id(char (&out)[17]) {
-    std::snprintf(out, sizeof(out), "%016llx", static_cast<unsigned long long>(s_status_boot_id));
+void http_boot_id(char (&out)[17]) noexcept {
+    constexpr char hex[] = "0123456789abcdef";
+    uint64_t       value = s_status_boot_id;
+    for (size_t i = 16; i > 0; --i) {
+        out[i - 1] = hex[value & 0xf];
+        value >>= 4;
+    }
+    out[16] = '\0';
 }
 
 template <typename JsonOut>
@@ -2514,10 +2520,10 @@ static esp_err_t h_history(httpd_req_t* req) {
                                               n, logic::HISTORY_DT_S));
     }
     const int64_t b0 = history_meta.oldest_bucket;
-    if (b0 >= 0) {
+    if (b0 != logic::HISTORY_NO_BUCKET) {
         // Exact source alignment even before SNTP: all recorders derive this monotonic bucket from
         // the same esp_timer clock, so a Modbus line cannot slide onto the neighbouring X10A sample.
-        j += ",\"b0\":";
+        j += b0 < 0 ? ",\"boot_b0\":" : ",\"b0\":";
         j += std::to_string(b0);
     }
     j += ",\"v\":[";

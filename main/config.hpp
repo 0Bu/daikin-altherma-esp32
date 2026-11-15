@@ -30,6 +30,7 @@ ConfigLinkSnapshot config_link_snapshot();
 // These read individual fields without copying the entire 656-byte Config struct with its
 // 24 std::string members, avoiding continuous heap fragmentation on frequent read paths.
 bool        config_wifi_configured();
+uint32_t    config_runtime_revision();
 bool        config_diagnostics_enabled();
 OtaChannel config_ota_channel();
 Protocol    config_x10a_protocol();

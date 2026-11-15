@@ -1240,9 +1240,14 @@ static esp_err_t set_board(httpd_req_t* req) {
     if (const char* error = config_request_field_error(
             j, HttpConfigFieldType::Boolean, {"led_inverted", "btn_active_low", "env3_enabled"}))
         return send_err(req, "400 Bad Request", error);
-    const Config& cur = config();
-    const cJSON* const boot     = cJSON_GetObjectItem(j, "boot_id");
-    const cJSON* const revision = cJSON_GetObjectItem(j, "config_revision");
+    const cJSON* const boot        = cJSON_GetObjectItem(j, "boot_id");
+    const cJSON* const revision    = cJSON_GetObjectItem(j, "config_revision");
+    const auto         draft_stale = [req] {
+        httpd_resp_set_status(req, "409 Conflict");
+        return http_send_json(
+            req, R"({"ok":false,"code":"board_draft_stale",)"
+                         R"("error":"Board settings changed. Reopen the editor before saving."})");
+    };
     if (boot || revision) {
         if (!boot || !cJSON_IsNumber(revision) ||
             !(revision->valuedouble >= 0 && revision->valuedouble <= UINT32_MAX) ||
@@ -1252,16 +1257,15 @@ static esp_err_t set_board(httpd_req_t* req) {
         char current_boot[17];
         http_boot_id(current_boot);
         if (std::strcmp(boot->valuestring, current_boot) != 0 ||
-            revision->valuedouble != static_cast<double>(cur.runtime_revision)) {
-            // Preserve the signal to retire this draft even if no C++ allocation can succeed.
-            httpd_resp_set_status(req, "409 Conflict");
-            return http_send_json(req,
-                                  R"({"ok":false,"code":"board_draft_stale",)"
-                                  R"("error":"Board settings changed. Reopen the editor before saving."})");
-        }
+            revision->valuedouble != static_cast<double>(config_runtime_revision()))
+            return draft_stale();
     }
+    const Config& cur = config();
+    // Detection can advance the revision between the cheap check and the full snapshot.
+    if (revision && revision->valuedouble != static_cast<double>(cur.runtime_revision))
+        return draft_stale();
     Config c                      = cur;
-    c.led_gpio       = ji(j, "led_gpio", c.led_gpio);
+    c.led_gpio                    = ji(j, "led_gpio", c.led_gpio);
     c.led_type       = ji(j, "led_type", c.led_type);
     c.led_inverted   = jb(j, "led_inverted", c.led_inverted);
     c.btn_gpio       = ji(j, "btn_gpio", c.btn_gpio);

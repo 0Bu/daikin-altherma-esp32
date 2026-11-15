@@ -108,7 +108,7 @@ if 'PASS total=13 assertions=5233\n' not in legacy.stdout:
                        + legacy.stdout)
 print('PRESERVED ORIGINAL CASES ' + legacy.stdout.splitlines()[-1])
 baseline = command([binary])
-if 'PASS total=18 assertions=5623\n' not in baseline.stdout:
+if 'PASS total=18 assertions=5624\n' not in baseline.stdout:
     raise RuntimeError('the complete behavioral groups changed their assertion inventory\n'
                        + baseline.stdout)
 print(baseline.stdout, end='')
@@ -160,7 +160,7 @@ controls = [rejected(original_binary, 'wrong_types', 'original-present-type'),
 # Mutant headers bind explicitly at their one quoted include; the entire HTTP TU still compiles.
 mutations = [
     ('ignore_board_draft_revision', 'source',
-     'revision->valuedouble != static_cast<double>(cur.runtime_revision)',
+     'revision->valuedouble != static_cast<double>(config_runtime_revision())',
      'false', 'board_draft_revision'),
     ('allocate_board_draft_refusal', 'source',
      re.compile(r'http_send_json\(req,\s+(R"\(\{"ok":false,"code":"board_draft_stale",\)"\s+'

@@ -410,6 +410,20 @@ assert.equal(ui.S.histPin.has("dhw_tank"), false, "status failover retires an un
 await status(fixture());
 assert.equal(ui.histPinIndex("dhw_tank", ui.historyView("dhw_tank")), -1);
 
+{
+  const inspector = { trend: "dhw_tank", aria: "Tank" };
+  const historyMarkup = [];
+  context.replaceHistoryHtml = (_el, html) => historyMarkup.push(html);
+  ui.histPinToggle("dhw_tank", 0);
+  ui.renderInspectHist(inspector, null);
+  ui.histPinToggle("dhw_tank", 1);
+  ui.renderInspectHist(inspector, null);
+  assert.equal(historyMarkup.length, 2, "pinning a new boot bucket must invalidate the inspector");
+  assert.match(historyMarkup[0], /vhist-cross vhist-pinned" style="left:0\.000%/);
+  assert.match(historyMarkup[1], /vhist-cross vhist-pinned" style="left:100\.000%/);
+  ui.histPinToggle("dhw_tank", 1);
+}
+
 // The cached delta uses two undated rings. A transient failure on both inputs preserves the
 // selected index and generation. A successful new ring changes that generation.
 await reset();

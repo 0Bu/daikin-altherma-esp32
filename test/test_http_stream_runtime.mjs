@@ -162,7 +162,7 @@ try {
   const compiler=execute(cxx,["--version"]).stdout.trim();
   const baseline=execute(compile("production"),[]);
   const caseCount=Number(baseline.stdout.match(/^PASS total=(\d+)$/m)?.[1]);
-  assert.equal(caseCount,24);
+  assert.equal(caseCount,25);
   assert.equal(caseCount,[...baseline.stdout.matchAll(/^PASS (?!total=)\S+$/gm)].length);
   const wires=[]; const decoder=new TextDecoder("utf-8",{fatal:true});
   const configCases=new Map([
@@ -320,6 +320,12 @@ try {
       assert.equal(doc.held.length,144); assert.equal(doc.t0,2000000000-10-287*300); assert.equal(doc.b0,100);
       assert.deepEqual(doc.v,Array.from({length:288},(_,i)=>i%2?null:i-100));
       assert.deepEqual(doc.held,Array.from({length:144},(_,i)=>[i*2+1,1]));
+    }
+    if(name==="restored-history") {
+      assert.equal(doc.boot_b0,-288);
+      assert.equal(Object.hasOwn(doc,"b0"),false);
+      assert.equal(doc.v.length,288);
+      assert.match(doc.boot_id,/^[0-9a-f]{16}$/);
     }
     if(name==="room-history"||name==="room-history-renamed") {
       assert.equal(doc.id,"room_temp"); assert.equal(doc.source,"room"); assert.equal(doc.epoch,42);

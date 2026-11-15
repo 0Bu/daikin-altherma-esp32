@@ -340,6 +340,7 @@ Config config() {
     ++fixture::config_reads;
     return fixture::current;
 }
+uint32_t           config_runtime_revision() { return fixture::current.runtime_revision; }
 ConfigLinkSnapshot config_link_snapshot() {
     ++fixture::link_snapshot_reads;
     return {fixture::current.proto, fixture::current.rx_pin, fixture::current.tx_pin};
@@ -364,7 +365,7 @@ bool config_save(const Config& requested) {
     fixture::last_save_outcome = config_save_transaction(fixture::current, requested, false, store);
     return fixture::last_save_outcome.result == ConfigSaveResult::Saved;
 }
-void http_boot_id(char (&out)[17]) {
+void http_boot_id(char (&out)[17]) noexcept {
     std::memcpy(out, "0123456789abcdef", sizeof(out));
     if (fixture::deny_after_boot_id) fixture::deny_rejection_allocations = true;
 }
@@ -1244,12 +1245,15 @@ void board_draft_revision() {
     saves = reboots = service_writes = link_writes = 0;
     durable_started                                = false;
     deny_after_boot_id                             = true;
+    const auto config_reads_before                 = config_reads;
     try {
         rejection(board, request, "409 Conflict", false, "board_draft_stale");
     } catch (const std::bad_alloc&) {
         check(false, "stale Board draft refusal must not allocate");
     }
     deny_after_boot_id = false;
+    check(config_reads == config_reads_before,
+          "an already stale draft must not copy the configuration");
 }
 void room_history_lifetime() {
     reset();

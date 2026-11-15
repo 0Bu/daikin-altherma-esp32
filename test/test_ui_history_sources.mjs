@@ -280,10 +280,14 @@ S.hist.set("modbus:dhw_tank", modbus);
   assert.deepEqual(Array.from(h.historyView("dhw_tank").separate), ["x10a", "modbus"],
     "wall clock alone cannot overlay rings with different raster boundaries");
   S.hist.set("modbus:dhw_tank", { ...modbus, b0: null, t0: dated.t0 + 300 });
+  assert.deepEqual(Array.from(h.historyView("dhw_tank").separate), ["x10a", "modbus"],
+    "a full-bucket wall-clock correction can look aligned without a boot anchor");
+  S.hist.set("dhw_tank", { ...x10a, b0: -2, ...dated });
+  S.hist.set("modbus:dhw_tank", { ...modbus, b0: -1, t0: dated.t0 + 307 });
   const shared = h.historyView("dhw_tank");
   assert.equal(shared.t0, dated.t0);
   assert.deepEqual(Array.from(shared.series[1].v), [null, ...modbus.v],
-    "exact wall boundaries preserve each source's measurements and leading gap");
+    "signed boot buckets preserve source measurements despite different wall projections");
   S.hist.set("dhw_tank", { ...x10a, ...dated });
   S.hist.set("modbus:dhw_tank", { ...modbus, ...dated });
   h.histPinToggle("dhw_tank", 0, "x10a");
@@ -437,6 +441,13 @@ assert.equal(h.histCacheKey("dhw_tank", "modbus"), "modbus:dhw_tank");
   assert.deepEqual(Array.from(S.hist.get("modbus:dhw_tank").v), modbus.v,
     "an impossible boot-relative bucket must preserve the compatible ring");
   assert.equal(S.hist.get("modbus:dhw_tank").refreshFailed, true);
+  S.status.uptime_s = 600;
+  S.hist.set("modbus:dhw_tank", { ...modbus, at: 0 });
+  historyResponse = { ...defaultHistoryResponse, b0: 2 };
+  await h.ensureHist("dhw_tank", "modbus");
+  assert.equal(S.hist.get("modbus:dhw_tank").refreshFailed, true,
+    "the currently open bucket is unavailable as a completed measurement");
+  S.status.uptime_s = 32000;
   const ntp = S.status.ntp;
   const time = 1768720600;
   S.status.ntp = { synced: true, time: new Date(time * 1000).toISOString() };
@@ -545,6 +556,11 @@ for (const dated of [false, true]) {
   const far = dated ? { b0: null, t0: a.t0 + 1000 * 300 } : { b0: a.b0 + 1000, t0: null };
   S.hist.set("dhw_tank", { ...x10a, ...a, refreshFailed: true });
   S.hist.set("modbus:dhw_tank", { ...modbus, ...far, v: Array(day).fill(470) });
+  if (dated) {
+    assert.deepEqual(Array.from(h.historyView("dhw_tank").separate), ["x10a", "modbus"]);
+    assert.equal(h.historyView("dhw_tank", "modbus").v.length, day);
+    continue;
+  }
   const bounded = h.historyView("dhw_tank");
   assert.equal(bounded.v.length, day);
   assert.equal(dated ? bounded.t0 : bounded.b0, dated ? far.t0 : far.b0);
@@ -789,8 +805,28 @@ assert.deepEqual(Array.from(S.hist.get("dt").v), [],
   "off-raster wall-only operands cannot fabricate a temperature spread");
 S.hist.set("return_water", { ...bucketReturnWater, gen: 4, b0: null, t0: 1768720300 });
 await h.ensureDerived("dt");
+assert.deepEqual(Array.from(S.hist.get("dt").v), [],
+  "a whole-bucket wall correction is indistinguishable from alignment without boot evidence");
+S.hist.set("leaving_water", { ...bucketLeavingWater, gen: 3, b0: -2, t0: 1768720000 });
+S.hist.set("return_water", { ...bucketReturnWater, gen: 5, b0: -1, t0: 1768720307 });
+await h.ensureDerived("dt");
 assert.deepEqual(Array.from(S.hist.get("dt").v), [null, 60, 60],
-  "aligned wall-only operands keep the same sampled spread");
+  "boot-aligned restored operands keep the sampled spread across wall projections");
+{
+  const uptime = S.status.uptime_s;
+  const from = { ...bucketLeavingWater, gen: 20, b0: 0, v: [400, 410] };
+  const to = { ...bucketReturnWater, gen: 20, b0: 0, v: [350, 360] };
+  S.status.uptime_s = 289 * 300;
+  assert.equal(h.expiredHistSlots(from), 1);
+  assert.equal(h.expiredHistSlots(to), 1);
+  S.status.uptime_s = 288 * 300;
+  S.hist.set("leaving_water", from);
+  S.hist.set("return_water", to);
+  await h.ensureDerived("dt");
+  assert.deepEqual(Array.from(S.hist.get("dt").v), [null, 50],
+    "opening derived history cannot republish source buckets that had already expired");
+  S.status.uptime_s = uptime;
+}
 S.hist.set("leaving_water", bucketLeavingWater);
 S.hist.set("return_water", bucketReturnWater);
 await h.ensureDerived("dt");
@@ -1079,7 +1115,8 @@ delete S.otaCached;
   S.hist.set(key, { ...old, v: [], err: true });
   const liveOnly = h.histHtml("smart_grid_mode", "", "Smart-Grid-Anforderung", "modbus");
   assert.match(liveOnly, /vhist-state-on sg-recommended/);
-  assert.match(liveOnly, /Verlauf nicht verfügbar/);
+  assert.match(liveOnly, /HomeHub · Modbus · Verlauf nicht verfügbar/,
+    "a current HomeHub observation does not hide a refusal of its recorded history");
   assert.doesNotMatch(liveOnly, /Boost aktiv · 0/);
   S.hist.set("smart_grid_mode", { ...old, gen: 7, v: [0, 20] });
   const currentPair = h.historyView("smart_grid_mode");
@@ -1444,9 +1481,10 @@ assert.doesNotMatch(h.scrubText(view, 3), /Boost|Heizstab/, "Sample 3 without ac
   S.hist.set("modbus:smart_grid_mode", { ...boost, b0: null, t0: 1768720150 });
   assert.doesNotMatch(h.histHtml("dhw_tank", "°C", "Tank"), /vhist-phase-boost/,
     "a wall-only phase does not move to a different tank bucket");
-  S.hist.set("modbus:smart_grid_mode", { ...boost, b0: null, t0: 1768720000 });
+  S.hist.set("dhw_tank", { ...tank, b0: -4, t0: 1768720000 });
+  S.hist.set("modbus:smart_grid_mode", { ...boost, b0: -4, t0: 1768720007 });
   assert.match(h.histHtml("dhw_tank", "°C", "Tank"), /vhist-phase-boost/,
-    "a matching wall raster preserves the auxiliary phase");
+    "the matching restored boot raster preserves the auxiliary phase");
   S.hist.set("dhw_tank", tank);
   S.hist.set("modbus:smart_grid_mode", boost);
 }
@@ -1491,7 +1529,7 @@ S.status.modbus = { host: "192.0.2.10", port: 502, unit_id: 1, enabled: true };
 S.status.uptime_s = 100;
 h.syncHistSources();
 fetchedUrls = [];
-historyResponse = { ...defaultHistoryResponse, b0: 0, v: [501] };
+historyResponse = { ...defaultHistoryResponse, b0: undefined, boot_b0: -1, v: [501] };
 await h.ensureHist("dhw_tank", "modbus");
 const homehubKey = h.histCacheKey("dhw_tank", "modbus");
 await h.ensureHist("dhw_tank", "modbus");
@@ -1503,7 +1541,7 @@ assert.equal(S.hist.size, 0);
 assert.equal(S.histPin.size, 0, "source changes must retire pins with the old measurement");
 S.status.modbus.host = "192.0.2.10";
 h.syncHistSources();
-historyResponse = { ...defaultHistoryResponse, b0: 0, v: [502] };
+historyResponse = { ...defaultHistoryResponse, b0: undefined, boot_b0: -1, v: [502] };
 await h.ensureHist("dhw_tank", "modbus");
 assert.deepEqual(Array.from(S.hist.get(homehubKey).v), [502],
   "A → B → A must refetch instead of reusing the earlier A lifetime");
@@ -1561,7 +1599,7 @@ assert.equal(S.histPin.size, 0);
 
 for (const identity of [{ boot_id: "0000000000000001" }, { epoch: 8 }]) {
   S.histAwait?.clear();
-  historyResponse = { ...defaultHistoryResponse, b0: 0, v: [519], ...identity };
+  historyResponse = { ...defaultHistoryResponse, b0: undefined, boot_b0: -1, v: [519], ...identity };
   await h.ensureHist("dhw_tank", "modbus");
   assert.equal(S.hist.has(homehubKey), false, "a mismatched wire lifetime cannot replace the cache");
   assert.ok(S.histAwait.has(homehubKey), "the request waits for an accepted status frame");
@@ -1573,7 +1611,8 @@ S.histAwait.clear();
 const pendingHistory = [];
 context.fetch = (url) => new Promise((resolve, reject) => pendingHistory.push({ url, resolve, reject }));
 const finishHistory = (pending, values) =>
-  pending.resolve(historyReply(pending.url, { ...defaultHistoryResponse, b0: 0, v: values }));
+  pending.resolve(historyReply(pending.url, { ...defaultHistoryResponse, b0: undefined,
+    boot_b0: -values.length, v: values }));
 for (const failOld of [false, true]) {
   h.invalidateHistSources();
   const old = h.ensureHist("dhw_tank", "modbus");

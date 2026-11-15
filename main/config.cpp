@@ -138,6 +138,11 @@ bool config_wifi_configured() {
     return !g_cfg.wifi_ssid.empty();
 }
 
+uint32_t config_runtime_revision() {
+    Lock lk(g_mtx);
+    return g_cfg.runtime_revision;
+}
+
 bool config_diagnostics_enabled() {
     Lock lk(g_mtx);
     return g_cfg.diagnostics_enabled;

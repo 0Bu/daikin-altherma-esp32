@@ -504,8 +504,9 @@ peripherals; disabling LED/reset does not change the preset. ENV III is editable
 M5Stack selection and hidden/disabled for Custom/Seeed. Safe distinct SDA/SCL options reflect exposed
 pins. An enabled sensor must pass its live SHT30/QMP6988 probe before one atomic board/sensor save;
 probe rejection preserves the draft. On Save, if the current status shows a different boot or
-configuration, the browser closes the editor and asks the owner to reopen it. A conflict detected
-on the device gives the same instruction. The Hardware explanation lists saved configuration, complete
+configuration, the browser closes the editor and asks the owner to reopen it. A device refusal with
+`board_draft_stale` gives the same instruction. Pin and ENV III conflicts preserve the draft and
+explain the required correction. The Hardware explanation lists saved configuration, complete
 indicator phases with static colour points and available ENV III live/history readings. Uptime uses
 at most two coarse units; per-task stack headroom remains diagnostic API evidence, not an invented
 chart.

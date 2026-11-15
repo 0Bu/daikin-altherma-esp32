@@ -352,14 +352,15 @@ async function readHistoryJson(response) {
 
 function validHistoryBucket(start, count) {
   if (start == null) return true;
-  if (!Number.isSafeInteger(start) || start < 0 || start > Number.MAX_SAFE_INTEGER - HIST_MAX_SAMPLES)
+  if (!Number.isSafeInteger(start) || start < -HIST_MAX_SAMPLES ||
+      start > Number.MAX_SAFE_INTEGER - HIST_MAX_SAMPLES || !count || start + count < 0)
     return false;
   const uptime = S.status?.uptime_s;
   if (!Number.isFinite(uptime) || S.otaCached) return true;
   const now = historyBrowserTime();
   const seconds = Math.max(0, now - (S.statusReceivedAt ?? now)) / 1000;
   // Uptime is whole seconds. Allow one crossing of the bucket edge while the request is in flight.
-  return start + Math.max(0, count - 1) <= Math.floor((uptime + seconds + 1 + POLL_TIMEOUT_MS / 1000) / 300);
+  return start + count <= Math.floor((uptime + seconds + 1 + POLL_TIMEOUT_MS / 1000) / 300);
 }
 
 function validHistoryTime(start, bucket, count) {
@@ -401,6 +402,7 @@ async function readHistory(id, source, key, epoch, previous, request) {
     const expectedEpoch = S.status?.history?.epoch;
     const expectedBoot = S.status?.boot_id;
     const legacy = !Number.isInteger(expectedEpoch) && j?.id === undefined && j?.source === undefined;
+    const bucket = j?.b0 ?? j?.boot_b0;
     if (!changed && (r.ok === false || j?.ok === false || !Array.isArray(j?.v) ||
         j.v.length > HIST_MAX_SAMPLES || j.v.some(v => v !== null &&
           (!Number.isInteger(v) || v < -32766 || v > 32767)) ||
@@ -408,8 +410,10 @@ async function readHistory(id, source, key, epoch, previous, request) {
         (j.label != null && (typeof j.label !== "string" || j.label.length > 79)) ||
         (j.unit != null && (typeof j.unit !== "string" || j.unit.length > 7)) ||
         (j.dt != null && j.dt !== 300) ||
-        !validHistoryBucket(j.b0, j.v.length) ||
-        !validHistoryTime(j.t0, j.b0, j.v.length) ||
+        (j.b0 != null && (j.b0 < 0 || j.boot_b0 != null)) ||
+        (j.boot_b0 != null && !(j.boot_b0 < 0)) ||
+        !validHistoryBucket(bucket, j.v.length) ||
+        !validHistoryTime(j.t0, bucket, j.v.length) ||
         (j.held != null && (!validHistoryHeld(j.held, j.v) ||
           (j.held.length > 0 && (expectedSource !== "x10a" || !X10A_HELD_HISTORY.has(id))))))) {
       S.hist.set(key, failed());
@@ -441,7 +445,7 @@ async function readHistory(id, source, key, epoch, previous, request) {
                      unit: displayUnit(j),
                      label: typeof j.label === "string" ? j.label : "",
                      t0: Number.isSafeInteger(j.t0) && Math.abs(j.t0) <= 8.64e12 ? j.t0 : null,
-                     b0: Number.isSafeInteger(j.b0) ? j.b0 : null,
+                     b0: Number.isSafeInteger(bucket) ? bucket : null,
                      held: Array.isArray(j.held) ? j.held : [],
                      v: j.v };
     S.hist.set(key, device);
@@ -541,8 +545,8 @@ async function ensureDerived(id) {
       S.hist.set(id, failed());
       return;
     }
-    const src = rings.filter(([, h]) => h.v.length);
-    const inputs = JSON.stringify([use, src.map(([key, h]) => [key, h.gen])]);
+    const src = rings.filter(([, h]) => h.v.length).map(([key, h]) => [key, expireHistSamples(h)]);
+    const inputs = JSON.stringify([use, src.map(([key, h]) => [key, h.gen, h.expired || 0])]);
     if (previous && previous.inputs === inputs) {
       S.hist.set(id, { ...previous, at: Date.now(), refreshFailed: false });
       return;
@@ -557,12 +561,12 @@ async function ensureDerived(id) {
       mode = "bucket";
       start = Math.min(...src.map(([, h]) => h.b0));
       end = Math.max(...src.map(([, h]) => h.b0 + h.v.length - 1));
-    } else if (src.every(([, h]) => sameHistoryWallRaster(h, src[0][1].t0, dt))) {
+    } else if (src.length === 1 && Number.isSafeInteger(src[0][1].t0)) {
       mode = "time";
       start = Math.min(...src.map(([, h]) => h.t0));
       end = Math.max(...src.map(([, h]) => h.t0 + (h.v.length - 1) * dt));
     } else if (src.some(([, h]) => h.b0 != null || h.t0 != null)) {
-      // An anchored ring and a legacy/restored peer without a common clock cannot be paired.
+      // A wall-clock correction between requests can shift timestamps by a full bucket.
       S.hist.set(id, { at: Date.now(), gen: previousGen + 1, inputs, v: [] });
       return;
     } else {
@@ -697,12 +701,7 @@ function weatherForecastView() {
   return { now, points, anchor, revision: JSON.stringify([now, points, anchor]) };
 }
 
-function sameHistoryWallRaster(h, origin, dt) {
-  return Number.isSafeInteger(origin) && Number.isSafeInteger(h.t0) &&
-    (h.dt || 300) === dt && (h.t0 - origin) % dt === 0;
-}
-
-// `b0` is authoritative even before SNTP. Wall-only rings need matching raster boundaries.
+// The boot raster is authoritative even before SNTP. A wall-only ring has its own axis.
 // Legacy rings without either anchor retain the relative tail view.
 function alignedHistoryView(id, raw) {
   const supplied = raw;
@@ -718,11 +717,11 @@ function alignedHistoryView(id, raw) {
     mode = "bucket";
     start = Math.min(...raw.map((s) => s.h.b0));
     end = Math.max(...raw.map((s) => s.h.b0 + s.h.v.length - 1));
-  } else if (raw.every((s) => sameHistoryWallRaster(s.h, raw[0].h.t0, dt))) {
+  } else if (raw.length === 1 && Number.isSafeInteger(raw[0].h.t0)) {
     mode = "time";
     start = Math.min(...raw.map((s) => s.h.t0));
     end = Math.max(...raw.map((s) => s.h.t0 + (s.h.v.length - 1) * dt));
-  } else if (!env3ChartId(id) && raw.some(s => s.h.b0 != null || s.h.t0 != null)) {
+  } else if (raw.some(s => s.h.b0 != null || s.h.t0 != null)) {
     // Independent ring tails do not establish simultaneous measurements.
     const plotted = raw.filter(s => !s.h.refreshFailed || s.h.v.some(v => v != null));
     const unavailable = supplied.filter(s => (s.h?.err || s.h?.refreshFailed) &&
@@ -888,7 +887,7 @@ function historyView(id, source = "", forecast) {
     if (!live.length) return null;
     view = { id, scope: source, dt: 300, t0: null, gen: "live", v: [], series: live.map(s => ({
       source: s.source, name: s.name, v: [], raw: {},
-    })), unavailable: [] };
+    })), unavailable: offered.filter(s => s.h?.err || s.h?.refreshFailed) };
   } else {
     for (const s of offered) {
       const supported = s.source === "x10a" ? hasHist(id) : s.source === "modbus" && hasModbusHist(id);
@@ -1327,8 +1326,6 @@ function alignAuxSample(view, h, i) {
   let idx = -1;
   if (Number.isInteger(view.b0) && Number.isInteger(h.b0)) {
     idx = (view.b0 + i) - h.b0;
-  } else if (sameHistoryWallRaster(h, view.t0, view.dt)) {
-    idx = (view.t0 - h.t0) / view.dt + i;
   }
   return (idx >= 0 && idx < h.v.length) ? h.v[idx] : null;
 }
@@ -1397,7 +1394,8 @@ function histHtml(id, unit, name, source = "", identifySource = false) {
   const allPts = view.series.flatMap((s) => s.v.map((x) => x == null ? null : x / 10));
 
   if (STATE_HIST[id]) return stateHistHtml(id, chartName, view, wrap, STATE_HIST[id]) +
-    (view.recordedN === 0 ? histEmptyHtml(offered.map(key => S.hist.get(key)), wrap) : "");
+    (view.recordedN === 0 && !view.unavailable.length
+      ? histEmptyHtml(offered.map(key => S.hist.get(key)), wrap) : "");
 
   const n = view.v.length;
   const spanH = Math.max(1, Math.round((n * view.dt) / 3600));
