@@ -157,6 +157,7 @@ baseline = build(SOURCE, "baseline")
 phases = ["prepare_read", "prepare_erase", "body", "commit", "readback",
           "commit_accepted_error", "success"]
 cases = ["commit_rejected", "core_ahead", "nor_contract", "restore_before_pending_bucket",
+         "poll_during_shutdown_claim", "cycling_reset_before_last_page",
          "read_admission", "sequence_rejections",
          "core_sequence_prepare", "core_sequence_readback", "core_sequence_commit_error",
          "forget_before_start", "forget_during_lookup", "forget_during_scan",
@@ -250,6 +251,12 @@ if not args.expect_red:
     seed_body = text[seed_start:seed_end]
     seed_boundary = re.search(r"^    const int64_t +commit_us\s*=.+;$", seed_body, re.M).group(0)
     mutations = [
+        ("poll_steals_shutdown_budget", "    if (shutdown) {",
+         "    if (shutdown || s_flash_shutdown_started.load()) {",
+         ["poll_during_shutdown_claim"], "poll_does_not_take_over_shutdown_budget"),
+        ("finish_retired_cycling_checkpoint", "!s_flash_cycling_reset_token && checkup_cycling_reset_pending()",
+         "!s_flash_cycling_reset_token && false",
+         ["cycling_reset_before_last_page"], "reset_commits_in_place_of_retired_checkpoint_final_page"),
         ("anchor_at_late_fold",
          "return wall_bucket_of_instant_locked(logic::history_raster_boundary_us(commit_us));",
          "return wall_bucket_of_instant_locked(commit_us);",

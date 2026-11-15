@@ -692,11 +692,11 @@ static_assert(logic::CHECKUP_JOURNAL_PAYLOAD_BYTES <= sizeof(FlashJournalRecord:
               "one diagnostic hour must fit the shared journal slot");
 
 const esp_partition_t* s_flash_part = nullptr;
-SemaphoreHandle_t s_flash_mtx = nullptr;       // serialises poll service, shutdown and factory erase
-bool s_flash_shutdown_started = false;         // the shutdown handler must not flush twice
-std::atomic<bool> s_flash_forgotten{false};     // factory reset crosses button/poll/shutdown tasks
-bool s_flash_restore_done = false;
-bool s_flash_checkup_restore_done = false;
+SemaphoreHandle_t      s_flash_mtx = nullptr; // serialises poll service, shutdown and factory erase
+std::atomic<bool>      s_flash_shutdown_started{false}; // claim the shutdown drain once
+std::atomic<bool>      s_flash_forgotten{false}; // factory reset crosses button/poll/shutdown tasks
+bool                   s_flash_restore_done         = false;
+bool                   s_flash_checkup_restore_done = false;
 bool s_flash_scan_ok = false;
 // Release-publish the partition and both locks after the scan.
 std::atomic<bool> s_flash_forget_ready{false};
@@ -848,8 +848,9 @@ void room_start_locked(uint32_t want_room, uint32_t reason, bool safe, int64_t s
 } // namespace
 
 // Declared here rather than in the header: only history_start() calls them, and only once.
-static void history_flash_start();
-static size_t history_flash_service_journal(size_t max_records, TickType_t wait_ticks);
+static void   history_flash_start();
+static size_t history_flash_service_journal(size_t max_records, TickType_t wait_ticks,
+                                            bool shutdown = false);
 
 void history_start() {
     if (s_mtx) return;                              // app_main is the sole caller; defensive idempotence
@@ -2594,8 +2595,11 @@ bool flash_build_next_stop_observation(FlashJournalRecord& out) {
     return true;
 }
 
-bool flash_build_next_cycling(FlashJournalRecord& out, TickType_t wait_ticks) {
+bool flash_build_next_cycling(FlashJournalRecord& out, TickType_t wait_ticks, bool shutdown) {
     if (!s_flash_cycling_restore_done) return false;
+    // An unfinished data group has no final page. Drop it before offering a reset marker.
+    if (s_flash_cycling_pending && !s_flash_cycling_reset_token && checkup_cycling_reset_pending())
+        s_flash_cycling_pending = false;
     auto& trace = s_flash_cycling_trace;
     if (!s_flash_cycling_pending) {
         const int64_t now_us = esp_timer_get_time();
@@ -2603,14 +2607,14 @@ bool flash_build_next_cycling(FlashJournalRecord& out, TickType_t wait_ticks) {
             s_flash_cycling_last_offer_us == INT64_MIN ||
             now_us - s_flash_cycling_last_offer_us >=
                 static_cast<int64_t>(logic::HISTORY_FLASH_CYCLING_INTERVAL_S) * 1000000;
-        const bool allow_data = s_flash_shutdown_started ? !s_flash_cycling_shutdown_offered : due;
+        const bool allow_data       = shutdown ? !s_flash_cycling_shutdown_offered : due;
         s_flash_cycling_reset_token = 0;
         if (!checkup_cycling_checkpoint(trace, s_flash_cycling_identity,
                                         s_flash_cycling_reset_token, wait_ticks, allow_data))
             return false;
         if (!s_flash_cycling_reset_token) {
             s_flash_cycling_last_offer_us    = now_us;
-            s_flash_cycling_shutdown_offered = s_flash_shutdown_started;
+            s_flash_cycling_shutdown_offered = shutdown;
         }
         s_flash_cycling_part    = 0;
         s_flash_cycling_pending = true;
@@ -2840,9 +2844,10 @@ void flash_note_restore_ahead(size_t src_i, int64_t newest, int64_t wall_bucket)
 
 // The next record of source `src_i` for the journal service, or false. A cursor that is ahead of
 // the source's clock yields false and one report (flash_note_cursor_ahead) — no rewind, no walk.
-bool flash_build_for_service(size_t src_i, FlashJournalRecord& r, TickType_t wait_ticks) {
+bool flash_build_for_service(size_t src_i, FlashJournalRecord& r, TickType_t wait_ticks,
+                             bool shutdown = false) {
     if (src_i == kStopObservationSource) return flash_build_next_stop_observation(r);
-    if (src_i == kCyclingTraceSource) return flash_build_next_cycling(r, wait_ticks);
+    if (src_i == kCyclingTraceSource) return flash_build_next_cycling(r, wait_ticks, shutdown);
     FutureCursorNote note;
     const bool       built =
         src_i == static_cast<size_t>(logic::HistoryJournalSource::Checkup)
@@ -3051,7 +3056,8 @@ void history_service_flash_restore() {
     flash_restore_advance_to(s_flash_restore_ring + batch);
 }
 
-static size_t history_flash_service_journal(size_t max_records, TickType_t wait_ticks) {
+static size_t history_flash_service_journal(size_t max_records, TickType_t wait_ticks,
+                                            bool shutdown) {
     if (!s_flash_part || !s_flash_mtx || s_flash_forgotten.load() || !time_synced()) return 0;
     Lock flash_lk(s_flash_mtx, wait_ticks);
     if (!flash_lk.acquired()) return 0;
@@ -3060,7 +3066,7 @@ static size_t history_flash_service_journal(size_t max_records, TickType_t wait_
     // The shutdown drain can be the first flash service after source confirmation/seal. Settle
     // this independent archive before asking its producer for a record, too.
     stop_observation_flash_service(flash_read_stop_observation);
-    if (s_flash_shutdown_started) history_restore_cycling_flash(wait_ticks);
+    if (shutdown) history_restore_cycling_flash(wait_ticks);
     // A failure episode that spent its abandon budget pauses the whole journal (the cursor is one
     // shared position): one attempt per HISTORY_JOURNAL_PAUSED_RETRY_S, none in between.
     if (!logic::history_journal_retry_due(s_flash_fail_paused, esp_timer_get_time(),
@@ -3069,13 +3075,13 @@ static size_t history_flash_service_journal(size_t max_records, TickType_t wait_
 
     size_t             written = 0;
     FlashJournalRecord r;
-    if (s_flash_shutdown_started) {
+    if (shutdown) {
         // Finish any group already in flight, then offer a final checkpoint. Leave all of the
         // ordinary write budget available to trends and the other diagnosis records.
         if (s_flash_cycling_part == 0 && !s_flash_cycling_reset_token)
             s_flash_cycling_pending = false;
         for (; written < 2 * logic::HISTORY_FLASH_CYCLING_MAX_PARTS; ++written) {
-            if (!flash_build_for_service(kCyclingTraceSource, r, wait_ticks)) break;
+            if (!flash_build_for_service(kCyclingTraceSource, r, wait_ticks, true)) break;
             if (flash_append_record(r) != ESP_OK) return written;
         }
     }
@@ -3083,7 +3089,7 @@ static size_t history_flash_service_journal(size_t max_records, TickType_t wait_
         bool appended = false;
         for (size_t try_src = 0; try_src < kJournalServiceSources; ++try_src) {
             const size_t src_i = (s_flash_service_source + try_src) % kJournalServiceSources;
-            if (src_i == kCyclingTraceSource && s_flash_shutdown_started) continue;
+            if (src_i == kCyclingTraceSource && shutdown) continue;
             // Profile detection can legitimately take minutes while X10A is unavailable. Keep the
             // independent trend sources durable during that wait, but never append a diagnostic
             // record ahead of its one-shot restore or it could become the apparent journal head.
@@ -3146,9 +3152,10 @@ void history_flash_save() {
             logic::history_liveness_touch(s_room_liveness, esp_timer_get_time());
         }
     }
-    if (!s_flash_part || s_flash_shutdown_started || s_flash_forgotten.load()) return;
-    s_flash_shutdown_started = true;
-    const size_t written = history_flash_service_journal(/*max_records=*/12, pdMS_TO_TICKS(200));
+    if (!s_flash_part || s_flash_forgotten.load() || s_flash_shutdown_started.exchange(true))
+        return;
+    const size_t written = history_flash_service_journal(/*max_records=*/12, pdMS_TO_TICKS(200),
+                                                         /*shutdown=*/true);
     if (written)
         diag_printf("history: journal flushed %u record(s) before reboot\n",
                     static_cast<unsigned>(written));

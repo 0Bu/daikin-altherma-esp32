@@ -108,11 +108,11 @@ For a run crossing an hour boundary, that is the earlier hour, separate from the
 restart tries to save. If the compressor is already running when observations resume, the new boot
 counts no start for that run. When it stops, the observed remainder is a censored run.
 
-A power loss, crash or watchdog panic can lose unsaved diagnosis hours and compressor readings.
-The compressor chart can recover its last compatible saved trace after the clock and current
-source are confirmed, including after an OTA restart. An interrupted run remains incomplete and
-downtime appears as a gap. Earlier firmware that only saved hourly totals cannot supply
-individual times. See the [journal rules](ARCHITECTURE.md#history-and-diagnosis-persistence).
+The chart saves timed compressor observations separately from the hourly diagnosis records.
+A software restart, including an OTA installation, can make an additional save. A power loss,
+crash or watchdog panic can lose unsaved data. Recovery checks the latest complete chart
+checkpoint once time and the current source are confirmed.
+See the [journal rules](ARCHITECTURE.md#history-and-diagnosis-persistence) for restore and reset limits.
 
 Current observations take precedence for hourly totals. The
 [retention rules](ARCHITECTURE.md#history-and-diagnosis-persistence) distinguish live and restored

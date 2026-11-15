@@ -128,7 +128,7 @@ logic::CheckupCyclingTrace     s_cycling_restored;
 uint32_t                       s_cycling_restore_anchor = 0;
 std::atomic<bool>              s_cycling_forgotten{false};
 bool                           s_cycling_restore_allowed = false;
-uint32_t                       s_cycling_reset_token     = 0;
+std::atomic<uint32_t>          s_cycling_reset_token{0};
 std::atomic<uint32_t>          s_cycling_reset_acked{0};
 uint32_t                       s_cycling_hours_epoch   = 0;
 int32_t                        s_cycling_newest_bucket = 0;
@@ -185,7 +185,8 @@ using Lock = SemGuard;
 void retire_cycling_locked() {
     s_cycling_restore_allowed = false;
     s_cycling_restored.reset();
-    if (++s_cycling_reset_token == 0) ++s_cycling_reset_token;
+    const uint32_t next = s_cycling_reset_token.load(std::memory_order_relaxed) + 1u;
+    s_cycling_reset_token.store(next ? next : 1u, std::memory_order_release);
 }
 
 [[gnu::noinline]] bool cycling_snapshot_locked(logic::CheckupCyclingTrace& out, int64_t now_us) {
@@ -1232,8 +1233,9 @@ bool checkup_cycling_checkpoint(logic::CheckupCyclingTrace&  trace,
     if (!s_mtx || s_cycling_forgotten.load(std::memory_order_acquire)) return false;
     Lock lk(s_mtx, wait_ticks);
     if (!lk.acquired() || s_cycling_forgotten.load(std::memory_order_acquire)) return false;
-    reset_token = 0;
-    if (s_cycling_reset_token != s_cycling_reset_acked.load(std::memory_order_acquire)) {
+    reset_token            = 0;
+    const uint32_t pending = s_cycling_reset_token.load(std::memory_order_relaxed);
+    if (pending != s_cycling_reset_acked.load(std::memory_order_acquire)) {
         int64_t unix_s = -1;
         int32_t ms     = 0;
         time_now(unix_s, ms);
@@ -1243,7 +1245,7 @@ bool checkup_cycling_checkpoint(logic::CheckupCyclingTrace&  trace,
         trace.unix_s       = static_cast<uint32_t>(unix_s);
         trace.live         = false;
         identity           = {};
-        reset_token        = s_cycling_reset_token;
+        reset_token        = pending;
         return true;
     }
     if (!allow_data || !s_diagnostics_enabled.load(std::memory_order_acquire) ||
@@ -1252,6 +1254,11 @@ bool checkup_cycling_checkpoint(logic::CheckupCyclingTrace&  trace,
         return false;
     identity = {s_model_fp, s_source_fp, s_diagnostics_generation};
     return true;
+}
+
+bool checkup_cycling_reset_pending() {
+    return s_cycling_reset_token.load(std::memory_order_acquire) !=
+           s_cycling_reset_acked.load(std::memory_order_acquire);
 }
 
 void checkup_cycling_checkpoint_appended(uint32_t reset_token) {

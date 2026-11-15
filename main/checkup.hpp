@@ -36,6 +36,7 @@ enum class CheckupFlashRestoreResult : uint8_t { Deferred, Ignored, Restored };
 bool                      checkup_cycling_checkpoint(logic::CheckupCyclingTrace&  trace,
                                                      logic::CyclingTraceIdentity& identity, uint32_t& reset_token,
                                                      TickType_t wait_ticks, bool allow_data);
+bool                      checkup_cycling_reset_pending();
 void                      checkup_cycling_checkpoint_appended(uint32_t reset_token);
 CheckupFlashRestoreResult checkup_cycling_restore(const logic::CheckupCyclingTrace&  trace,
                                                   const logic::CyclingTraceIdentity& identity,

@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: 5bd2e184f80cd11aa1ea98703899994916c741e775790164450f0009ec1134b5 -->
+<!-- user-docs-contract: b7bd1b82f4b32b19ba2dc3fa5de1a00f51fcdcd8d6f2f2936b4b3651c768651d -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default. Enable **Plant diagnostics** under **Settings → Firmware** to start an evidence
@@ -121,7 +121,8 @@ data and no timed start. Colors mark the modes seen in the hour. Hatching marks 
 including older readings that have dropped off the chart. It does not measure how long a gap lasted.
 A readable diagnosis update without new chart data can keep the open chart and hatch the new gap.
 An unreadable diagnosis shows **No data** and hides the chart. If the status request itself fails,
-the chart stays at the last successful update.
+the chart can stay at the last successful update. The list then shows the stop and duration as
+unknown for any run that was still open.
 
 Tap anywhere in the graph above an hourly block, or tap the block itself, to select that hour.
 The list below the graph shows the observed start, stop and duration for runs that started in the
@@ -130,10 +131,9 @@ If a recent reading still shows the run in progress, the list gives the elapsed 
 that reading. If a gap or restart interrupts a run, its stop and total duration are unknown.
 
 The chart can restore saved readings and run times after a restart, including a firmware update.
-The board adds new measurements as polling resumes and shows the downtime as a gap. Recent
-readings can be lost if power fails before the next save, and older firmware may have saved only
-hourly totals. Where individual times are unavailable, the hourly view can still show saved starts
-and runtime. In that view, a bar with zero starts has no number above it.
+The board adds new measurements as polling resumes and shows the downtime as a gap. When the
+timed chart is unavailable, the entire chart can show hourly totals. Tap a bar in that view to see
+its recorded time and runtime where available. A bar with zero starts has no number above it.
 
 **Evidence and limits:** [Compressor cycling](DIAGNOSTIC_EVIDENCE.md#diagnosis-cycling)
 

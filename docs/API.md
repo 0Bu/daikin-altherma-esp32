@@ -312,12 +312,16 @@ average completed run.
 `cycling.timeline` is optional. It requires unredacted status, enabled diagnostics, a synchronized
 clock, eligible compressor observations and space for the snapshot. The weather client can reserve
 that space for TLS. Eligible observations can come from compatible flash records or live readings.
+Factory history forgetting advances `history.epoch` and suppresses the precise timeline for the
+rest of the boot, even if the journal erase fails.
 `unix_s` is the Unix time at the right edge. `boot_s`, when present, gives current uptime at the
 snapshot in whole seconds. With this field the chart runs from 0 to `window_end_s:86400`, and
-the Unix time of coordinate `s` is `unix_s - window_end_s + s`. Legacy snapshots without
-`boot_s` use boot-relative monotonic coordinates. `observed_end_s` gives the latest chart sample
-on the same scale as the records. Time after that sample is missing. `live` indicates whether
-the trace includes a sample from this boot.
+the Unix time of coordinate `s` is `unix_s - window_end_s + s`. A wall-clock correction changes
+the Unix times assigned to this boot's observations. Restored observations keep their saved Unix
+times. If the restored segment overlaps the start of this boot on the corrected clock, the firmware
+omits that segment. Legacy snapshots without `boot_s` use boot-relative monotonic coordinates.
+`observed_end_s` gives the latest chart sample on the same scale as the records. Time after that
+sample is missing. `live` indicates whether the trace includes a sample from this boot.
 `run_edges:true` identifies snapshots with support for both start and stop points. Older snapshots
 can show starts without supplying stop data for run details.
 Each of up to 192 `records` packs the sample coordinate in the high bits and a kind in the low

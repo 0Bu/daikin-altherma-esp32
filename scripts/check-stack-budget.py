@@ -1308,7 +1308,7 @@ def validate_shutdown_paths(budgets: dict[str, Any], sources: dict[str, str]) ->
                       stack_function_body(history, "history_start"))
             or not re.search(r"esp_register_shutdown_handler\(checkup_reboot_save\)",
                              stack_function_body(checkup, "checkup_start"))
-            or not re.search(r"history_flash_service_journal\(\s*12,\s*pdMS_TO_TICKS\(200\)\)",
+            or not re.search(r"history_flash_service_journal\(\s*12,\s*pdMS_TO_TICKS\(200\),\s*true\)",
                              stack_function_body(history, "history_flash_save"))
             or not re.search(r"history_flash_service_journal\(\s*3,\s*0\)",
                              stack_function_body(history, "history_record_board"))):
@@ -1329,8 +1329,8 @@ def validate_shutdown_paths(budgets: dict[str, Any], sources: dict[str, str]) ->
             or incomplete.start() > reset.find("esp_restart(")
             or not re.search(r"^\s*s_flash_forgotten\.store\(true\);",
                              stack_function_body(history, "history_flash_forget"))
-            or not re.search(r"if\s*\(!s_flash_part \|\| s_flash_shutdown_started \|\| "
-                             r"s_flash_forgotten\.load\(\)\) return;",
+            or not re.search(r"if\s*\(!s_flash_part \|\| s_flash_forgotten\.load\(\) \|\| "
+                             r"s_flash_shutdown_started\.exchange\(true\)\)\s*return;",
                              stack_function_body(history, "history_flash_save"))):
         raise BudgetError("shutdown source: factory-reset journal exclusion changed")
 
@@ -2946,7 +2946,7 @@ def self_test() -> None:
      'daik::set_wifi(httpd_req*)': 64,
      'daik::set_syslog(httpd_req*)': 64,
      'daik::set_ntp(httpd_req*)': 64,
-     'daik::history_flash_service_journal(unsigned int, unsigned long)': 64,
+     'daik::history_flash_service_journal(unsigned int, unsigned long, bool)': 64,
      'daik::(anonymous namespace)::flash_append_record(daik::(anonymous namespace)::FlashJournalRecord&)': 64,
      'daik::mb_task(void*)': 64,
      'daik::mb_poll_once()': 64,
@@ -4017,13 +4017,13 @@ def self_test() -> None:
          "esp_register_shutdown_handler(other_handler)"),
         ("main/checkup.cpp", "esp_register_shutdown_handler(checkup_reboot_save)",
          "esp_register_shutdown_handler(other_handler)"),
-        ("main/history.cpp", "history_flash_service_journal(/*max_records=*/12, pdMS_TO_TICKS(200))",
-         "history_flash_service_journal(/*max_records=*/13, pdMS_TO_TICKS(200))"),
+        ("main/history.cpp", "history_flash_service_journal(/*max_records=*/12, pdMS_TO_TICKS(200),",
+         "history_flash_service_journal(/*max_records=*/13, pdMS_TO_TICKS(200),"),
         ("main/history.cpp", "history_flash_service_journal(/*max_records=*/3, /*wait_ticks=*/0)",
          "history_flash_service_journal(/*max_records=*/4, /*wait_ticks=*/0)"),
         ("main/history.cpp", "s_flash_forgotten.store(true);", "s_flash_forgotten.store(false);"),
-        ("main/history.cpp", "s_flash_shutdown_started || s_flash_forgotten.load()",
-         "s_flash_shutdown_started"),
+        ("main/history.cpp", "s_flash_forgotten.load() || s_flash_shutdown_started.exchange(true)",
+         "s_flash_shutdown_started.exchange(true)"),
         ("main/recovery_button.cpp", "wifi_e != ESP_OK || !history_erased || !crash_erased",
          "wifi_e != ESP_OK || !crash_erased"),
         ("main/recovery_button.cpp", "? history_flash_forget() : false", "? true : false"),

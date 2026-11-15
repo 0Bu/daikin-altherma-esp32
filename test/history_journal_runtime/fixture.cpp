@@ -129,6 +129,7 @@ bool checkup_cycling_checkpoint(logic::CheckupCyclingTrace& trace, logic::Cyclin
     }
     return true;
 }
+bool checkup_cycling_reset_pending() { return cycling_reset_token != 0; }
 void checkup_cycling_checkpoint_appended(uint32_t reset_token) {
     cycling_ack         = reset_token;
     cycling_reset_token = 0;
@@ -580,6 +581,25 @@ void load_synthetic_nor(const char* transport_path) {
     require(static_cast<bool>(transport) && transport.peek() == std::char_traits<char>::eof(),
             "cold_process_loads_exact_synthetic_partition_bytes");
 }
+void poll_during_shutdown_claim() {
+    boot();
+    cycling_offer_unix_s = static_cast<uint32_t>(journal_sdk::unix_origin);
+    // The shutdown callback has claimed its drain but has not acquired the flash lock yet.
+    s_flash_shutdown_started.store(true);
+    require(history_flash_service_journal(3, 0) == 3 && s_flash_cycling_pending &&
+                !s_flash_cycling_shutdown_offered,
+            "poll_does_not_take_over_shutdown_budget");
+}
+void cycling_reset_before_last_page() {
+    boot();
+    cycling_offer_unix_s = static_cast<uint32_t>(journal_sdk::unix_origin);
+    require(history_flash_service_journal(3, 0) == 3 && s_flash_cycling_pending,
+            "ordinary_checkpoint_waits_for_its_final_page");
+    cycling_reset_token = 9;
+    require(history_flash_service_journal(1, 0) == 1 && cycling_ack == 9 &&
+                !s_flash_cycling_pending,
+            "reset_commits_in_place_of_retired_checkpoint_final_page");
+}
 void seed_cycling(const char* transport_path, const std::string& phase) {
     boot();
     cycling_offer_unix_s = static_cast<uint32_t>(journal_sdk::unix_origin);
@@ -602,6 +622,8 @@ void seed_cycling(const char* transport_path, const std::string& phase) {
                 "shutdown_cycling_preserves_full_ordinary_journal_budget");
         require(journal_sdk::writes == 40 && !s_flash_cycling_pending,
                 "shutdown_adds_exactly_one_complete_fresh_checkpoint");
+        history_flash_save();
+        require(journal_sdk::writes == 40 && core_backlog == 1, "shutdown_does_not_drain_twice");
     } else if (phase == "barrier") {
         cycling_reset_token = 9;
         require(history_flash_service_journal(3, 0) == 1 && cycling_ack == 9,
@@ -757,6 +779,10 @@ int main(int argc, char** argv) {
             nor_contract();
         else if (name == "restore_before_pending_bucket")
             restore_before_pending_bucket();
+        else if (name == "poll_during_shutdown_claim")
+            poll_during_shutdown_claim();
+        else if (name == "cycling_reset_before_last_page")
+            cycling_reset_before_last_page();
         else if (name == "forget_before_start")
             forget_case(ForgetPoint::BeforeStart);
         else if (name == "forget_during_lookup")

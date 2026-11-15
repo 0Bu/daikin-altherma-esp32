@@ -619,19 +619,21 @@ labels with its range and lists the runs that started in it. Keep mixed-hour gap
 modes, including the gap between restored evidence and new readings. During a drag, preview the
 highlight and range while keeping the run list tied to the selection. Restore the selected
 highlight and range on release. If a readable diagnosis snapshot omits the trace, retain the
-chart for the same boot and diagnosis epoch. Mark the time after the last sample as missing until
-a new trace arrives. An unreadable snapshot shows **No data**. See the
+chart while the boot ID, `history.epoch` and `cycling.hours_epoch` all match. Mark the time
+after the last sample as missing until a new trace arrives. An unreadable snapshot shows **No data**.
+A status transport failure can leave the graph visible from the last update. Mark an open run's
+stop and duration unknown while its live evidence is stale. See the
 [status contract](API.md#history-and-24-hour-checks).
 Above each rolling block, show the number of retained timed starts. Leave it blank if there is
 missing trace time and no timed start. Use the lower-bound prefix
 for positive totals and accessible readouts. Update the chart in its own slot and defer it while
 its card is hidden.
 
-Until a timed trace is available, keep the hourly fallback with leading padding and expired
-slots empty. Hatch missing elapsed time where duration is known. Restored and legacy slots show
-readable time with unknown elapsed duration. Label restored timestamps as saved time. Leave the
-unelapsed part of the open hour unfilled. The default readout uses one hourly snapshot and omits
-runtime without readable compressor seconds.
+When a timed trace is unavailable, use hourly totals for the entire chart. Leave leading padding
+and expired slots empty. Hatch missing elapsed time where duration is known. Restored and legacy
+slots show readable time with unknown elapsed duration. Label restored timestamps as saved time.
+Leave the unelapsed part of the open hour unfilled. The default readout uses one hourly snapshot
+and omits runtime without readable compressor seconds.
 
 Use logical keyboard order, visible focus, Enter/Space activation, Escape at the innermost layer,
 modal focus return and scroll lock. Background controls are unavailable while a dialog is open.
