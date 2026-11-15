@@ -282,11 +282,18 @@ S.hist.set("modbus:dhw_tank", modbus);
   S.hist.set("modbus:dhw_tank", { ...modbus, b0: null, t0: dated.t0 + 300 });
   assert.deepEqual(Array.from(h.historyView("dhw_tank").separate), ["x10a", "modbus"],
     "a full-bucket wall-clock correction can look aligned without a boot anchor");
-  S.hist.set("dhw_tank", { ...x10a, b0: -2, ...dated });
-  S.hist.set("modbus:dhw_tank", { ...modbus, b0: -1, t0: dated.t0 + 307 });
+  S.hist.set("dhw_tank", { ...x10a, b0: -2, ...dated, v: [...x10a.v] });
+  S.hist.set("modbus:dhw_tank", { ...modbus, b0: -1, t0: dated.t0 + 307, v: [...modbus.v] });
   assert.deepEqual(Array.from(h.historyView("dhw_tank").separate), ["x10a", "modbus"],
     "each recorder can have booked a different warm-reset gap before boot");
   assert.deepEqual(Array.from(h.historyView("dhw_tank", "modbus").v), modbus.v);
+  const savedUptime = S.status.uptime_s;
+  S.status.uptime_s = 86400;
+  const currentBoot = h.historyView("dhw_tank");
+  assert.equal(currentBoot.b0, 0, "an expired preboot tail cannot prevent a common current-boot axis");
+  assert.deepEqual(Array.from(currentBoot.series[0].v), [454, null]);
+  assert.deepEqual(Array.from(currentBoot.series[1].v), [455, 456]);
+  S.status.uptime_s = savedUptime;
   S.hist.set("dhw_tank", { ...x10a, ...dated });
   S.hist.set("modbus:dhw_tank", { ...modbus, ...dated });
   h.histPinToggle("dhw_tank", 0, "x10a");
@@ -467,6 +474,16 @@ assert.equal(h.histCacheKey("dhw_tank", "modbus"), "modbus:dhw_tank");
   await h.ensureHist("dhw_tank", "modbus");
   assert.equal(S.hist.get("modbus:dhw_tank").refreshFailed, true,
     "the request timeout is not evidence that a partially elapsed bucket completed");
+  context.historyClock = () => 5500;
+  S.statusRequestedAt = 0;
+  S.statusReceivedAt = 5500;
+  S.hist.set("modbus:dhw_tank", { ...modbus, at: 0 });
+  await h.ensureHist("dhw_tank", "modbus");
+  assert.deepEqual(Array.from(S.hist.get("modbus:dhw_tank").v), [523, 524],
+    "a delayed accepted status reply must allow the newly completed bucket");
+  delete context.historyClock;
+  delete S.statusRequestedAt;
+  delete S.statusReceivedAt;
   S.status.uptime_s = 32000;
   const ntp = S.status.ntp;
   const time = 1768720600;

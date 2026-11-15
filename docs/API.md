@@ -445,18 +445,19 @@ Unknown ids return 404. Available rows are listed in `/status.history`. The payl
 {id,source,label,epoch,boot_id,dt,unit[,t0][,b0|boot_b0],v:[number|null,…],held:[[from,count],…]}
 ```
 
-`v` is tenths of the row's actual unit; divide by ten. `dt` is the raster cadence. `b0` is the
-monotonic five-minute bucket of sample zero. When a restored ring begins before boot, `boot_b0`
-carries its negative bucket instead. `t0` is sample-zero wall time derived from the captured newest
-completed bucket boundary and omitted before clock sync. `epoch` is captured with the samples
-and `boot_id` matches `/status`.
-The firmware omits `t0` if sample-age metadata is unavailable. A missing snapshot epoch or an
+`v` is tenths of the row's actual unit. Divide by ten. `dt` is the raster cadence in seconds.
+`b0` is the monotonic five-minute bucket of sample zero. When a restored ring begins before boot,
+`boot_b0` carries its negative bucket instead. Both are omitted if no completed sample is available.
+`t0` is the Unix time of sample zero in seconds. The current SNTP mapping projects the captured
+completed bucket boundary onto wall time using the same rounding as the flash journal. The firmware
+omits `t0` before synchronization or without that boundary. `epoch` is captured with the samples
+and `boot_id` matches `/status`. A missing snapshot epoch or an
 epoch change before emission returns 503. Clients must reject responses superseded by a newer
 status/source generation.
 `held` marks eligible X10A outdoor nulls as held-over; all other source rasters leave it empty.
 The dashboard accepts up to 4 KiB of decoded JSON and 288 samples on the 300-second raster.
-With live status, it bounds boot-relative buckets by reported uptime, elapsed browser time and
-one second for whole-second uptime. It accepts a reply without row
+With live status, it bounds boot-relative buckets by reported uptime, elapsed browser time since
+the status request began and one second for whole-second uptime. It accepts a reply without row
 and source identity only if both are absent and `/status` predates the history epoch. A supplied
 identity must match the request, along with the boot and epoch tokens announced by `/status`.
 A nonempty date-only reply also needs a synchronized device clock. When live clock evidence is

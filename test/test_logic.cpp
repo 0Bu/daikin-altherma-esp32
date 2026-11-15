@@ -14820,20 +14820,24 @@ static void test_history() {
     // a different measurement than the one tapped.
     {
         // Same newest sample, three different request times → one answer.
-        const int64_t t_a = history_t0(1'000'000, 0, 2, HISTORY_DT_S);
-        const int64_t t_b = history_t0(1'000'070, 70, 2, HISTORY_DT_S);
-        const int64_t t_c = history_t0(1'000'299, 299, 2, HISTORY_DT_S);
+        const int64_t t_a =
+            history_t0(history_commit_unix_s(1'000'000, 800, 0, 0), 2, HISTORY_DT_S);
+        const int64_t t_b =
+            history_t0(history_commit_unix_s(1'000'071, 100, 70'300'000, 0), 2, HISTORY_DT_S);
+        const int64_t t_c =
+            history_t0(history_commit_unix_s(1'000'300, 100, 299'300'000, 0), 2, HISTORY_DT_S);
         CHECK(t_a == t_b);
         CHECK(t_b == t_c);
         CHECK(t_a == 1'000'000 - 300); // sample 0 is one bucket before the newest
         // A closed bucket moves it by exactly one bucket, never by the request delay.
-        CHECK(history_t0(1'000'300, 0, 3, HISTORY_DT_S) == t_a);
+        CHECK(history_t0(1'000'300, 3, HISTORY_DT_S) == t_a);
         // Degenerate counts must not underflow into a bogus instant.
-        CHECK(history_t0(1'000'000, 0, 0, HISTORY_DT_S) == 1'000'000);
-        CHECK(history_t0(1'000'000, 0, 1, HISTORY_DT_S) == 1'000'000);
-        // A full ring: sample 0 is 287 buckets back, still independent of the request time.
-        CHECK(history_t0(2'000'000, 0, HISTORY_SAMPLES, HISTORY_DT_S) ==
-              history_t0(2'000'123, 123, HISTORY_SAMPLES, HISTORY_DT_S));
+        CHECK(history_t0(1'000'000, 0, HISTORY_DT_S) == 1'000'000);
+        CHECK(history_t0(1'000'000, 1, HISTORY_DT_S) == 1'000'000);
+        const int64_t newest = history_commit_unix_s(2'000'000'100, 100, 300'000, 0);
+        CHECK(newest == 2'000'000'099);
+        CHECK(history_bucket_from_unix(newest) ==
+              history_anchor_bucket(2'000'000'100, 300'000, 0, HISTORY_DT_S, 100));
     }
 
     // --- pinning a readout to an instant, not a slot ---------------------------------------------

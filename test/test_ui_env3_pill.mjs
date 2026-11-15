@@ -13,6 +13,7 @@ const style = fs.readFileSync(new URL("../main/www/style.css", import.meta.url),
 const source = readAppFragments(["i18n.js"]) + readUiLocale("de") +
   readHistoryLifecycle() + readHtmlRenderer() + "\n" +
   readAppFragments(["dashboard.js", "descriptions.js", "history.js", "schematic.js"]);
+const wireTrendScrub = readAppFragments(["bootstrap.js"]).match(/^function wireTrendScrub\(gv\) \{[\s\S]*?^\}/m)[0];
 
 assert.match(index,
   /id="gEnv3"[^>]*data-insp="env3"[\s\S]*?class="sc-env3-box" x="624"[\s\S]*?id="gSgRequest"[\s\S]*?x="706"/,
@@ -79,6 +80,7 @@ const now = Date.now();
 const currentUnix = Date.parse("2026-08-12T10:00:00Z") / 1000;
 const S = {
   status: {
+    uptime_s: 1200,
     env3: { supported: true, enabled: true, fresh: true, error: "",
             temperature_c: 21.5, humidity_pct: 48, pressure_hpa: 1007 },
     ntp: { synced: true, time: "2026-08-12T10:00:00Z" },
@@ -121,13 +123,14 @@ const document = {
   },
 };
 const sandbox = vm.createContext({
-  S, document, renderSettings() {},
+  S, document, renderSettings() {}, POLL_TIMEOUT_MS: 6000,
   navigator: { language: "de-DE" },
   localStorage: { getItem() { return null; }, setItem() {} },
   setTimeout, clearTimeout,
   fetch() { throw new Error("fresh seeded histories must not be fetched in this test"); },
 });
-vm.runInContext(`${source}
+vm.runInContext(`${source}\n${wireTrendScrub}
+  const trendPlotFromTarget = plot => plot;
   renderCards = () => {}; renderSettings = () => {};
   this.__api = {
     render: () => { LANG = "de"; renderEnv3Pill(); renderInspect(); },
@@ -136,6 +139,9 @@ vm.runInContext(`${source}
     tooltipHtml: (i) => { LANG = "de"; return histReadout(historyView(ENV3_COMBINED_ID), i); },
     toggle: (source) => histSeriesToggle(ENV3_COMBINED_ID, source),
     pin: (i) => histPinToggle(ENV3_COMBINED_ID, i),
+    wireTrendScrub,
+    revision: () => histViewRevision(historyView(ENV3_COMBINED_ID)),
+    mounted: plot => scrubView(plot),
   };`, sandbox, { filename: "main/www/app.sources" });
 
 sandbox.__api.render();
@@ -313,6 +319,40 @@ sandbox.__api.toggle("env3_temperature");
       "a corrected clock keeps measured points and the fresh forecast on independent axes");
   }
   for (const [id, ring] of rings) S.hist.set(id, ring);
+}
+
+{
+  const oldTime = S.status.ntp.time;
+  S.status.ntp.time = new Date((currentUnix + 3600) * 1000).toISOString();
+  sandbox.__api.render();
+  assert.match(elements.inspHist.innerHTML, /data-hist="env3_forecast"/,
+    "a forward clock correction also separates the stale measurement times from the forecast");
+  S.status.ntp.time = oldTime;
+
+  const plot = {
+    dataset: { hist: "env3_combined", n: "3", rev: sandbox.__api.revision() },
+    getBoundingClientRect: () => ({ left: 0, width: 100 }),
+    querySelector: () => ({ hidden: false, style: {} }),
+    querySelectorAll: () => [], closest: () => null,
+    parentElement: { querySelector: () => ({ style: { setProperty() {} } }) },
+  };
+  const events = {};
+  sandbox.__api.wireTrendScrub({ addEventListener: (event, handle) => { events[event] = handle; } });
+  const pointer = { target: plot, pointerId: 1, clientX: 68 };
+  events.pointerdown(pointer);
+  const mounted = sandbox.__api.mounted(plot);
+  assert.ok(mounted?.forecast, "the pointer owns the rendered forecast");
+  S.status.ntp.time = new Date((currentUnix + 5) * 1000).toISOString();
+  S.status.uptime_s += 5;
+  assert.equal(sandbox.__api.mounted(plot), mounted,
+    "a routine poll cannot invalidate the geometry of a captured drag");
+  events.pointermove(pointer);
+  events.pointerup({ ...pointer, type: "pointerup" });
+  assert.equal(S.histPin.get("env3_combined")?.t, currentUnix + 7200,
+    "pointerup pins the forecast hour selected on the mounted plot");
+  S.histPin.delete("env3_combined");
+  S.status.ntp.time = oldTime;
+  S.status.uptime_s -= 5;
 }
 
 // Transport loss retires only the live status claims. The dated historical measurements remain

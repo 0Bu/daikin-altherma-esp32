@@ -2506,18 +2506,19 @@ static esp_err_t h_history(httpd_req_t* req) {
     // labelled °C is exactly the legacy-35–legacy-39 shape.
     j += ",\"unit\":";
     json_append_quoted(j, unit);
-    const TimeStatus ts = time_status();
-    const int32_t    newest_age = history_meta.newest_age_s;
-    if (ts.synced && n && newest_age >= 0) {
-        // Derived from the AGE of the newest sample, not from `now`: the ring commits a bucket every
-        // HISTORY_DT_S, so between commits the newest sample ages while `now` moves on. Measured on a
-        // live unit, the old `now - (n-1)*dt` form reported t0 values 70 s apart for two fetches 70 s
-        // apart with an unchanged sample count — every timestamp up to a bucket late, and a PINNED
-        // readout eventually rounding onto the neighbouring sample and describing a different
-        // measurement than the one tapped. logic/history_t0 carries the rule and the invariance test.
-        j += ",\"t0\":";
-        j += std::to_string(logic::history_t0(ts.unix_time, static_cast<uint32_t>(newest_age),
-                                              n, logic::HISTORY_DT_S));
+    if (n && history_meta.newest_commit_us != logic::HISTORY_NO_COMMIT_US) {
+        int64_t unix_s;
+        int32_t wall_ms;
+        time_now(unix_s, wall_ms);
+        if (unix_s >= 0) {
+            const auto newest = logic::history_commit_unix_s(unix_s, wall_ms, esp_timer_get_time(),
+                                                             history_meta.newest_commit_us);
+            const auto oldest = logic::history_t0(newest, n, logic::HISTORY_DT_S);
+            if (oldest != INT64_MIN) {
+                j += ",\"t0\":";
+                j += std::to_string(oldest);
+            }
+        }
     }
     const int64_t b0 = history_meta.oldest_bucket;
     if (b0 != logic::HISTORY_NO_BUCKET) {

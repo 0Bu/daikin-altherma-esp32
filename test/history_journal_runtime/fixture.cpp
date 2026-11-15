@@ -604,11 +604,13 @@ void restore_before_pending_bucket() {
     HistorySample samples[4] = {};
     HistoryMeta   meta;
     require(history_snapshot(0, samples, 4, nullptr, &meta) == 2 && meta.oldest_bucket == -2 &&
-                samples[0] == 400 && samples[1] == 410,
+                meta.newest_age_s == 301 && meta.newest_commit_us == 0 && samples[0] == 400 &&
+                samples[1] == 410,
             "restore_keeps_pending_bucket_open");
     advance_raster_locked(sdk::now_us, 1);
     require(history_snapshot(0, samples, 4, nullptr, &meta) == 3 && meta.oldest_bucket == -2 &&
-                samples[0] == 400 && samples[1] == 410 && samples[2] == 430,
+                meta.newest_age_s == 1 && meta.newest_commit_us == 300000000 && samples[0] == 400 &&
+                samples[1] == 410 && samples[2] == 430,
             "first_commit_preserves_restored_sample_identity");
     require(source_anchor_bucket_locked(HistorySource::X10a) == stored_anchor + 1,
             "late_first_commit_keeps_its_journal_bucket");

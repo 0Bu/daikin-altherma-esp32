@@ -257,8 +257,8 @@ The room raster runs on the MQTT task without X10A or HomeHub. Its independent s
 journal records bind the broker, temperature/time mappings, maximum age and persisted source/consent
 generations. A rename or target-only edit preserves it; source removal/replacement retires it alone.
 X10A journal append requires a resolved identity and no pending source reset; a pending reset also
-skips that source's restoration. `b0`
-aligns monotonic buckets even before SNTP; `t0` is omitted until wall time is known. Missing samples
+skips that source's restoration. `b0` and negative `boot_b0` align monotonic buckets even before SNTP.
+See [the history API](API.md#get-history) for timestamp units and anchor availability. Missing samples
 stay gaps. Browser storage holds only a transient render frame during OTA, not measurement history.
 
 Completed diagnosis hours restore only from the dated flash journal after SNTP and current source

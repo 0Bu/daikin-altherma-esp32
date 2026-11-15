@@ -39,6 +39,14 @@ void* heap_caps_malloc(size_t size, unsigned) {
 namespace daik {
 const char* checkup_persist_state();
 }
+#ifdef HTTP_STREAM_LEGACY_HISTORY
+namespace daik::logic {
+// The frozen historical handler uses the pre-subsecond signature.
+constexpr int64_t history_t0(int64_t now_unix, uint32_t age, size_t n, uint32_t dt) {
+    return now_unix - age - static_cast<int64_t>(n ? n - 1 : 0) * dt;
+}
+} // namespace daik::logic
+#endif
 #include HTTP_STATUS_SOURCE
 #include STATE_DWELL_SOURCE
 
@@ -378,8 +386,9 @@ size_t history_snapshot(size_t, logic::HistorySample* out, size_t max, uint32_t*
         out[i] = i % 2 ? logic::HISTORY_HELD_OVER : static_cast<int16_t>(static_cast<int>(i) - 100);
     if (epoch) *epoch = fixture::epoch;
     if (meta) {
-        meta->newest_age_s  = 10;
-        meta->oldest_bucket = fixture::history_restored ? -288 : 100;
+        meta->newest_age_s     = fixture::history_restored ? 0 : 10;
+        meta->oldest_bucket    = fixture::history_restored ? -288 : 100;
+        meta->newest_commit_us = fixture::history_restored ? 0 : sdk::now - 10000000;
     }
     if (fixture::change_history_epoch) ++fixture::epoch;
     return n;
@@ -405,8 +414,9 @@ size_t history_room_snapshot(logic::HistorySample* out, size_t max, uint32_t exp
         out[i] = i % 4 == 1 ? logic::HISTORY_NO_READING : static_cast<int16_t>(201 + i % 50);
     if (epoch) *epoch = fixture::epoch;
     if (meta) {
-        meta->newest_age_s  = 17;
-        meta->oldest_bucket = 700;
+        meta->newest_age_s     = 17;
+        meta->oldest_bucket    = 700;
+        meta->newest_commit_us = sdk::now - 17000000;
     }
     if (fixture::change_history_epoch) ++fixture::epoch;
     return n;
@@ -418,8 +428,8 @@ TimeStatus time_status() {
     return s;
 }
 void time_now(int64_t& seconds, int32_t& ms) {
-    seconds = 2000000000;
-    ms      = 0;
+    seconds = fixture::history_restored ? 2000000100 : 2000000000;
+    ms      = fixture::history_restored ? 100 : 0;
 }
 const char* checkup_persist_state() {
     return logic::checkup_restore_slug(fixture::checkup_persist);
@@ -735,6 +745,7 @@ int main(int argc, char** argv) {
     });
     run("restored_history_boot_raster", [] {
         history_restored = true;
+        sdk::now         = 300000;
         auto req         = request();
         check(invoke(req, "/history?row=leaving_water", daik::h_history) == ESP_OK,
               "restored History response failed");
@@ -742,6 +753,8 @@ int main(int argc, char** argv) {
         emit(req, "restored-history");
         check(req.response.find("\"boot_b0\":-288") != std::string::npos,
               "the restored ring must retain the negative boot origin on the wire");
+        check(req.response.find("\"t0\":1999913999,") != std::string::npos,
+              "the wall time and persisted bucket must stay before the UTC boundary");
     });
     run("room_history_completed", [] {
         configure_room();

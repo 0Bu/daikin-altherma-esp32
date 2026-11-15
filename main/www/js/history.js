@@ -358,8 +358,9 @@ function validHistoryBucket(start, count) {
   const uptime = S.status?.uptime_s;
   if (!Number.isFinite(uptime) || S.otaCached) return true;
   const now = historyBrowserTime();
-  const seconds = Math.max(0, now - (S.statusReceivedAt ?? now)) / 1000;
-  // The upper bound uses elapsed monotonic time and one second for integer uptime.
+  const seconds = Math.max(0, now - (S.statusRequestedAt ?? S.statusReceivedAt ?? now)) / 1000;
+  // The device cannot have sampled uptime before the status request began. Use that earliest
+  // instant for the upper bound and allow one second for integer uptime.
   return start + count <= Math.floor((uptime + seconds + 1) / 300);
 }
 
@@ -722,9 +723,9 @@ function alignedHistoryView(id, raw) {
   let start = 0, end = 0, mode = "tail";
   // Warm-restored recorders book unobserved gaps independently before the current boot.
   const sameRecorder = raw.length === 1 || env3ChartId(id);
-  if (raw.every((s) => Number.isInteger(s.h.b0) && (sameRecorder || s.h.b0 >= 0))) {
+  if (raw.every((s) => Number.isInteger(s.h.b0) && (sameRecorder || s.h.b0 + (s.h.expired || 0) >= 0))) {
     mode = "bucket";
-    start = Math.min(...raw.map((s) => s.h.b0));
+    start = Math.min(...raw.map((s) => s.h.b0 + (s.h.expired || 0)));
     end = Math.max(...raw.map((s) => s.h.b0 + s.h.v.length - 1));
   } else if (raw.length === 1 && Number.isSafeInteger(raw[0].h.t0)) {
     mode = "time";
@@ -853,6 +854,21 @@ function historyRingRevision(h) {
   return `${h.gen}:${h.refreshFailed ? "failed" : ""}:${historyRingAged(h, expired) ? "aged" : ""}:${expired}`;
 }
 
+function forecastClockAgrees(ring, weather) {
+  if (!Number.isFinite(ring.t0)) return false;
+  const uptime = S.status?.uptime_s;
+  const tolerance = 2 + POLL_TIMEOUT_MS / 1000;
+  if (Number.isInteger(ring.b0) && Number.isFinite(uptime)) {
+    const expected = weather.now - uptime + (ring.b0 + 1) * ring.dt;
+    return Math.abs(ring.t0 - expected) <= tolerance;
+  }
+  if (Number.isFinite(ring.receivedDeviceTime)) {
+    const expected = ring.receivedDeviceTime + historyElapsed(ring) / 1000;
+    return Math.abs(expected - historyDeviceTime()) <= tolerance;
+  }
+  return true;
+}
+
 function historyView(id, source = "", forecast) {
   if (env3ChartId(id)) {
     const offered = ENV3_COMBINED_SERIES.filter(s => hasEnv3Hist(s.id)).map((s) => ({
@@ -865,7 +881,8 @@ function historyView(id, source = "", forecast) {
     if (view?.v.some(v => v != null)) {
       if (weather) {
         const measuredEnd = view.t0 + (view.v.length - 1) * view.dt;
-        if (!Number.isFinite(view.t0) || measuredEnd > weather.now)
+        if (!Number.isFinite(view.t0) || measuredEnd > weather.now ||
+            !view.series.every(s => !s.v.some(v => v != null) || forecastClockAgrees(s.raw, weather)))
           return { ...view, t0: null, separateForecast: weather };
         view.forecast = weather;
         view.series = ENV3_COMBINED_SERIES.map(s =>
@@ -1840,9 +1857,14 @@ function histPinIndex(id, h) {
 }
 
 function recordedPinIndex(id, h, point, i) {
-  if (i < 0 || i >= (h.recordedN ?? h.v.length)) return -1;
+  if (i >= (h.recordedN ?? h.v.length)) return -1;
   const sources = histPinSeries(h).filter(s => point.lanes.includes(s.source));
   if (!sources.length) return -1;
+  if (i < 0) {
+    if ((point.source ?? "") === (h.scope ?? "") &&
+        sources.some(s => i >= s.offset && i < s.offset + (s.raw.expired || 0))) S.histPin.delete(id);
+    return -1;
+  }
   const kept = sources.some(s => point.witnessed
     ? s.v[i] != null || histHeld(s, i)
     : i >= s.offset + (s.raw.expired || 0) && i < s.offset + (s.raw.v?.length ?? 0));
@@ -1889,8 +1911,7 @@ function expireFallbackHistoryPins() {
 }
 // Pin sample `i` of `label`, or UNPIN when that same sample is already pinned — tapping the readout
 // you just made is the obvious way to dismiss it, and needs no extra affordance on a 72 px plot.
-function histPinToggle(id, i, source = "") {
-  const h = historyView(id, source);
+function histPinToggle(id, i, source = "", h = historyView(id, source)) {
   if (!h) return;
   const forecast = forecastScrubView(h);
   const total = h.v.length + (forecast?.points.length || 0);
@@ -2181,12 +2202,12 @@ function scrubMove(plot, i) {
 }
 
 function scrubView(plot) {
+  if (S.trendPointer?.plot === plot && S.trendPointer.view) return S.trendPointer.view;
   const view = historyView(plot.dataset.hist, plot.dataset.source || "");
   return view && (!plot.dataset.rev || plot.dataset.rev === histViewRevision(view)) ? view : null;
 }
 
-function scrubIndex(plot, clientX) {
-  const h = scrubView(plot);
+function scrubIndex(plot, clientX, h = scrubView(plot)) {
   if (!h) return -1;
   const r = plot.getBoundingClientRect();
   const n = +plot.dataset.n;

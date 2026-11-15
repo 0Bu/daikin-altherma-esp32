@@ -300,9 +300,11 @@ function wireTrendScrub(gv) {
   gv.addEventListener("pointerdown", (e) => {
     const plot = trendPlotFromTarget(e.target);
     if (!plot || plot.closest("[hidden], [inert]") || S.scrub) return;
-    const i = scrubIndex(plot, e.clientX);
+    const view = scrubView(plot);
+    const i = scrubIndex(plot, e.clientX, view);
     if (i < 0 || plot.closest(".vitem:not(.open)")) return;
-    S.trendPointer = { plot, id: e.pointerId };
+    // A forecast's visible geometry is frozen during the drag, even when a poll advances now.
+    S.trendPointer = { plot, id: e.pointerId, view: view.forecast ? view : null };
     S.scrub = plot.dataset.hist;
     scrubArm(plot);
     try { plot.setPointerCapture(e.pointerId); } catch { /* capture is an optimisation, not a requirement */ }
@@ -338,8 +340,9 @@ function wireTrendScrub(gv) {
       // detached node whose bounding box is all zeroes.
       const label = plot.dataset.hist;
       const i = e.type === "pointerup" && !plot.closest("[hidden], [inert]") ? scrubIndex(plot, e.clientX) : -1;
+      const view = S.trendPointer.view || undefined;
       scrubEnd(plot);
-      if (i >= 0) histPinToggle(label, i, plot.dataset.source || "");
+      if (i >= 0) histPinToggle(label, i, plot.dataset.source || "", view);
     });
   }
   // Keyboard: the plot is focusable, so arrow keys step through samples and the tooltip is the

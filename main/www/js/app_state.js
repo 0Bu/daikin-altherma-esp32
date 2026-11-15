@@ -494,6 +494,7 @@ async function refreshStatus(paint = true) {
 // Return the accepted request id so an async observer can recheck ownership before its callback.
 async function readStatusFrame(paint = true, timeout, quiet = false) {
   const request = S.statusRequest = (S.statusRequest || 0) + 1;
+  const requestedAt = historyClock();
   const current = () => request === S.statusRequest && !S.imageReloading;
   let s;
   try { s = await j("/status", { signal: pollSignal(timeout) }); }
@@ -514,6 +515,7 @@ async function readStatusFrame(paint = true, timeout, quiet = false) {
   if (!current()) return false;
   const wasX10aDown = S.status?.hp?.connected === false;
   S.status = s;
+  S.statusRequestedAt = requestedAt;
   S.statusReceivedAt = receivedAt;
   if (typeof expireLiveHistoryPins === "function") expireLiveHistoryPins();
   S.statusAcceptedRequest = request;

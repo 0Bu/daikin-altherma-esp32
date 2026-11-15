@@ -328,8 +328,10 @@ mounted plots and in-flight history requests, including A → B → A between po
 Replies carry sample epoch and boot identity. Visible charts refresh while live polling continues.
 Closing a chart ends its active gesture.
 A failed refresh keeps compatible readings within the most recent day. A distinct marker identifies
-each retained series' last received sample. Categorical timelines keep their separate live cap,
-and weather charts show a verified current forecast even when the measured history is empty.
+each retained series' last received sample. Categorical timelines keep their separate live cap.
+Weather charts show a verified current forecast even when the measured history is empty.
+Incompatible measurement and forecast clocks get separate axes until a successful refresh
+establishes a shared time basis.
 
 Hover previews a sample. Tap pins it, and another tap on the same sample or Escape clears it.
 A boot-relative pin can appear in both views of a row when both show the selected instrument.
@@ -337,7 +339,8 @@ A peer's reading cannot keep a pinned measurement visible after its original sou
 A pin tracks the original boot-relative bucket when available, including before clock sync.
 Live-state pins require the same visible instruments and current states. Refreshing completed
 history alone leaves a live-state pin in place.
-The two views freeze while either is scrubbed.
+The two views freeze while either is scrubbed. Routine status polls leave the selected forecast
+hour tied to the graph under the pointer until the gesture ends.
 A recorded pin without a boot-relative bucket expires when the plotted series or its alignment
 changes. A forecast pin stays while its timestamp remains selectable on the same chart.
 Closing the inspector preserves a pin for an open

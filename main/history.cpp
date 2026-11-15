@@ -1587,15 +1587,17 @@ void history_record_env3(bool valid, float temperature_c, float humidity_pct, fl
 // fills `meta` before releasing it, and nothing in here allocates.
 static void clear_snapshot_meta(logic::HistoryMeta* meta) {
     if (!meta) return;
-    meta->newest_age_s  = -1;
-    meta->oldest_bucket = logic::HISTORY_NO_BUCKET;
+    meta->newest_age_s     = -1;
+    meta->oldest_bucket    = logic::HISTORY_NO_BUCKET;
+    meta->newest_commit_us = logic::HISTORY_NO_COMMIT_US;
 }
 
 static void fill_snapshot_meta_locked(logic::HistoryMeta* meta, int64_t last_commit_us,
                                       int64_t last_commit_bucket, size_t n) {
     if (!meta || last_commit_us == kNoCommitUs) return;
-    meta->newest_age_s = logic::history_meta_newest_age_s(
-        esp_timer_get_time(), logic::history_raster_boundary_us(last_commit_us));
+    meta->newest_commit_us = logic::history_raster_boundary_us(last_commit_us);
+    meta->newest_age_s =
+        logic::history_meta_newest_age_s(esp_timer_get_time(), meta->newest_commit_us);
     meta->oldest_bucket =
         logic::history_meta_oldest_bucket(meta->newest_age_s, last_commit_bucket, n);
 }

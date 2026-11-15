@@ -435,29 +435,20 @@ constexpr uint32_t history_skipped(uint32_t prev, uint32_t now) {
 // The wall-clock instant of sample 0, and the one property that matters about it: it must be
 // INVARIANT to when the request arrived.
 //
-// The route first derived it as `now - (n-1)*dt`, which silently assumes the newest sample was taken
-// *now*. It was not: the ring commits a bucket every HISTORY_DT_S, so between two commits the newest
-// sample ages while `now` keeps moving — measured on a live unit, two fetches 70 s apart with an
-// unchanged sample count reported t0 values exactly 70 s apart. Two consequences, and the second is
-// the one that corrupts a reading rather than merely mislabelling it:
+// The route first derived it as `now - (n-1)*dt`, which silently assumes the newest sample was
+// taken *now*. It was not: the ring commits a bucket every HISTORY_DT_S, so between two commits the
+// newest sample ages while `now` keeps moving — measured on a live unit, two fetches 70 s apart
+// with an unchanged sample count reported t0 values exactly 70 s apart. Two consequences, and the
+// second is the one that corrupts a reading rather than merely mislabelling it:
 //
 //   * Every timestamp shown was up to one bucket (5 min) late.
 //   * A PINNED readout is anchored to an instant and re-resolved against a fresh t0. Once the drift
-//     passes half a bucket, history_pin_index rounds to the NEIGHBOURING slot — so the bubble goes on
-//     standing there while describing a different measurement than the one the user tapped. The
+//     passes half a bucket, history_pin_index rounds to the NEIGHBOURING slot — so the bubble goes
+//     on standing there while describing a different measurement than the one the user tapped. The
 //     anchor was defeated by its own reference point.
 //
-// So the caller passes the AGE of the newest sample, measured on the monotonic clock (seconds since
-// the last bucket commit), and the answer stops depending on request timing. Monotonic on purpose:
-// the commit may well have happened before SNTP ever synced, so its wall-clock instant is not
-// knowable — its age always is.
-constexpr int64_t history_t0(int64_t now_unix, uint32_t newest_age_s, size_t n, uint32_t dt) {
-    return now_unix - static_cast<int64_t>(newest_age_s)
-                    - static_cast<int64_t>(n ? n - 1 : 0) * static_cast<int64_t>(dt);
-}
-
 // The two facts the route needs BESIDE a series' samples to place them on the time axis: how long
-// ago the newest one was committed (-> t0, above) and the monotonic bucket of sample zero (-> b0,
+// ago the newest one was committed (-> t0) and the monotonic bucket of sample zero (-> b0,
 // the exact alignment key between sources). Both are functions of the SAME commit as the samples,
 // so they have to be read in the SAME critical section: taken afterwards, under a separate lock, a
 // bucket commit landing in between has already shifted the ring by one slot — sample zero is then
@@ -466,15 +457,33 @@ constexpr int64_t history_t0(int64_t now_unix, uint32_t newest_age_s, size_t n, 
 // nothing else.
 constexpr int64_t HISTORY_NO_BUCKET = INT64_MIN;
 
-struct HistoryMeta {
-    int32_t newest_age_s  = -1; // whole seconds since the newest commit; -1 = nothing committed
-    int64_t oldest_bucket = HISTORY_NO_BUCKET; // signed boot-relative bucket of sample zero
-};
-
 // "Nothing has been committed on this source" on the monotonic microsecond axis. It is INT64_MIN
 // rather than zero or -1 because zero is a real instant (the raster boundary a flash seed claims
 // in a boot's first bucket, history_raster_boundary_us) and no ordinary value may mean "none".
 constexpr int64_t HISTORY_NO_COMMIT_US = INT64_MIN;
+
+struct HistoryMeta {
+    int32_t newest_age_s     = -1; // whole seconds since the newest commit; -1 = nothing committed
+    int64_t oldest_bucket    = HISTORY_NO_BUCKET; // signed boot-relative bucket of sample zero
+    int64_t newest_commit_us = HISTORY_NO_COMMIT_US;
+};
+
+// Project a captured monotonic commit onto the current wall clock. Combine fractional wall
+// time and age before flooring so the API and flash journal agree at a UTC bucket boundary.
+constexpr int64_t history_commit_unix_s(int64_t unix_s, int32_t wall_ms, int64_t now_us,
+                                        int64_t commit_us) {
+    if (commit_us == HISTORY_NO_COMMIT_US || wall_ms < 0 || wall_ms >= 1000) return INT64_MIN;
+    const uint64_t age_us =
+        now_us < commit_us ? 0 : static_cast<uint64_t>(now_us) - static_cast<uint64_t>(commit_us);
+    const int64_t age_s = static_cast<int64_t>(age_us / 1000000u) +
+                          (static_cast<uint64_t>(wall_ms) * 1000u < age_us % 1000000u ? 1 : 0);
+    return unix_s < INT64_MIN + age_s ? INT64_MIN : unix_s - age_s;
+}
+
+constexpr int64_t history_t0(int64_t newest_unix, size_t n, uint32_t dt) {
+    const int64_t span = static_cast<int64_t>(n ? n - 1 : 0) * static_cast<int64_t>(dt);
+    return newest_unix < INT64_MIN + span ? INT64_MIN : newest_unix - span;
+}
 
 // `last_commit_us` is the newest commit on the monotonic clock (HISTORY_NO_COMMIT_US = none) and
 // `last_commit_bucket` its bucket (-1 is valid after a restore before the first live bucket).
@@ -492,13 +501,12 @@ constexpr int64_t history_meta_oldest_bucket(int32_t newest_age, int64_t last_co
                                 : HISTORY_NO_BUCKET;
 }
 
-// Both at once, for the tests and any caller that wants the pair; history.cpp fills the two fields
-// directly so no struct temporary lands on the stack of the httpd task's /history path.
 constexpr HistoryMeta history_snapshot_meta(int64_t now_us, int64_t last_commit_us,
                                             int64_t last_commit_bucket, size_t n) {
     HistoryMeta m;
-    m.newest_age_s  = history_meta_newest_age_s(now_us, last_commit_us);
-    m.oldest_bucket = history_meta_oldest_bucket(m.newest_age_s, last_commit_bucket, n);
+    m.newest_age_s     = history_meta_newest_age_s(now_us, last_commit_us);
+    m.oldest_bucket    = history_meta_oldest_bucket(m.newest_age_s, last_commit_bucket, n);
+    m.newest_commit_us = last_commit_us;
     return m;
 }
 
