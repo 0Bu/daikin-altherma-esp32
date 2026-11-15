@@ -1,4 +1,4 @@
-// translation-source: 65571656f160db7c5cef68e1a9e2f1c556ae6ac67f346ba2f2b092cff1d703c9
+// translation-source: 57360fc01b9b51987c1e6a54c6b11b7295a1a3b53f13d2b3928a2b44e523c222
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -230,8 +230,15 @@ I18N.fi = localeValues([
   /* check.cycling.unavailable */ "Kompressorista ei ole tietoa.",
   /* check.cycling.stale */ "Mittauksia puuttuu tällä hetkellä.",
   /* check.cycling.history_empty */ "Ei vielä historiaa.",
-  /* check.cycling.timed_starts */ (s) => `Aikaleimalla: ${s}`,
-  /* check.cycling.saved_starts */ (s) => `Näistä ${s} on tallennettu tuntitietoihin ennen uudelleenkäynnistystä. Niiden kellonajat puuttuvat.`,
+  /* check.cycling.timed_starts */ (s) => `${s} (kellonaika kirjattu)`,
+  /* check.cycling.run_start */ "Käynnistys",
+  /* check.cycling.run_stop */ "Pysäytys",
+  /* check.cycling.run_duration */ "Kesto",
+  /* check.cycling.run_ongoing */ "Käynnissä",
+  /* check.cycling.run_stop_unknown */ "Pysäytysaika tuntematon",
+  /* check.cycling.no_timed_runs */ "Tältä tunnilta ei ole kirjattu käynnistysaikoja.",
+  /* check.cycling.run_details_unavailable */ "Tältä tunnilta ei ole saatavilla yksittäisten käyntijaksojen aikoja.",
+  /* check.cycling.saved_starts */ (s) => `Näistä ${s} on tallennettu tuntitietoihin ennen uudelleenkäynnistystä.`,
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min ${min} °C · keskiarvo ${mean} °C`,
   /* check.min */ (m) => `${m} min`,

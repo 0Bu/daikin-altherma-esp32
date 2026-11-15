@@ -1,4 +1,4 @@
-// translation-source: 65571656f160db7c5cef68e1a9e2f1c556ae6ac67f346ba2f2b092cff1d703c9
+// translation-source: 57360fc01b9b51987c1e6a54c6b11b7295a1a3b53f13d2b3928a2b44e523c222
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -230,8 +230,15 @@ I18N.cs = localeValues([
   /* check.cycling.unavailable */ "Chybí údaje o kompresoru.",
   /* check.cycling.stale */ "Aktuálně chybí měření.",
   /* check.cycling.history_empty */ "Zatím bez historie.",
-  /* check.cycling.timed_starts */ (s) => `S časem: ${s}`,
-  /* check.cycling.saved_starts */ (s) => `Z toho ${s} pochází z hodinových záznamů před restartem. Časy těchto startů nejsou k dispozici.`,
+  /* check.cycling.timed_starts */ (s) => `${s} se zaznamenaným časem`,
+  /* check.cycling.run_start */ "Start",
+  /* check.cycling.run_stop */ "Zastavení",
+  /* check.cycling.run_duration */ "Délka běhu",
+  /* check.cycling.run_ongoing */ "V chodu",
+  /* check.cycling.run_stop_unknown */ "Čas zastavení neznámý",
+  /* check.cycling.no_timed_runs */ "V této hodině nebyl zaznamenán čas žádného startu.",
+  /* check.cycling.run_details_unavailable */ "Časy jednotlivých běhů pro tuto hodinu nejsou k dispozici.",
+  /* check.cycling.saved_starts */ (s) => `Z toho ${s} pochází z hodinových záznamů před restartem.`,
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · průměr ${mean} °C`,
   /* check.min */ (m) => `${m} min`,

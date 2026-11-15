@@ -899,11 +899,11 @@ button.checkup-chart-col:focus-visible { outline: 2px solid var(--brand-strong);
   background: color-mix(in srgb, var(--brand-sky) 22%, transparent);
   box-shadow: inset 0 0 0 1px var(--brand); border-radius: 2px;
 }
-.checkup-chart-plot { position: relative; height: 112px; padding-top: 16px; }
-.checkup-chart-total { position: absolute; top: 0; right: 0; font-size: 10px; color: var(--muted); }
-.checkup-chart-plot svg { width: 100%; height: 100%; display: block; }
+.checkup-chart-total { margin-bottom: 4px; text-align: right; font-size: 10px; color: var(--muted); }
+.checkup-chart-plot { width: 100%; height: 96px; display: block; }
 .checkup-chart-plot path { fill: none; stroke: var(--brand); stroke-width: 2px; vector-effect: non-scaling-stroke; }
-.checkup-cycling-timeline .checkup-chart-cols { position: relative; height: 29px; gap: 0; }
+.checkup-cycling-timeline .checkup-chart-graph { padding-bottom: 29px; }
+.checkup-cycling-timeline .checkup-chart-cols { position: absolute; inset: 0; height: auto; gap: 0; }
 .checkup-cycling-timeline .checkup-chart-col.active { background: none; outline: none; }
 .checkup-cycling-timeline .checkup-chart-col:focus-visible { outline: 2px solid var(--brand-strong); }
 .checkup-cycling-timeline .checkup-chart-col s { height: 10px; width: calc(100% - 1px); background: none; }
@@ -918,6 +918,13 @@ button.checkup-chart-col:focus-visible { outline: 2px solid var(--brand-strong);
   left: clamp(4em, calc((var(--checkup-hour) + .5) * 100% / 24), calc(100% - 4em));
 }
 .checkup-chart-span.wide { left: 50%; }
+.checkup-run-details { margin-top: 8px; font-size: 12px; }
+.checkup-run-stale, [data-cycling-stale="true"] .checkup-run-live { display: none; }
+[data-cycling-stale="true"] .checkup-run-stale { display: inline; }
+.checkup-run-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.checkup-run-table th, .checkup-run-table td {
+  padding: 4px 4px 4px 0; border-top: 1px solid var(--line); text-align: start; vertical-align: top;
+}
 
 /* HOW LONG THE ROW HAS READ WHAT IT READS needs no rule of its own. Its state word reuses .vdesc-n
    above — the panel's lead-in-in-stronger-ink token — and everything after it is plain .vdesc-body

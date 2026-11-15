@@ -157,6 +157,9 @@ baseline = build(SOURCE, "baseline")
 phases = ["prepare_read", "prepare_erase", "body", "commit", "readback",
           "commit_accepted_error", "success"]
 cases = ["commit_rejected", "core_ahead", "nor_contract", "restore_before_pending_bucket",
+         "poll_during_shutdown_claim", "cycling_reset_before_last_page",
+         "cycling_reset_before_trend_restore", "cycling_reset_after_trace_restore",
+         "cycling_reset_before_time_sync",
          "read_admission", "sequence_rejections",
          "core_sequence_prepare", "core_sequence_readback", "core_sequence_commit_error",
          "forget_before_start", "forget_during_lookup", "forget_during_scan",
@@ -196,6 +199,23 @@ if not args.expect_red or args.expect_red_case == "late-correction":
     transport_evidence.append({"path": str(transport), "sha256": digest(transport),
                                "bytes": transport.stat().st_size,
                                "only_cross_process_state": "synthetic NOR partition bytes"})
+if not args.expect_red:
+    for phase in ["normal", "shutdown", "torn", "corrupt", "barrier", "barrier_early_shutdown",
+                  "incompatible"]:
+        cycling_transport = OUT / f"cycling-{phase}.synthetic-nor.bin"
+        for case in ["seed_cycling", "restore_cycling"]:
+            label = f"{case}_{phase}"
+            result = execute(baseline, case, label, [cycling_transport, phase])
+            expected = result.returncode == 0 and "PASS case=" + case + " " in result.stdout
+            results.append({"case": label, "exit_code": result.returncode,
+                            "stdout": result.stdout, "stderr": result.stderr, "pass": expected})
+            print(result.stdout, end="", flush=True)
+            if not expected:
+                (OUT / "failure.json").write_text(json.dumps(results[-1], indent=2) + "\n")
+                raise RuntimeError("Unexpected cycling checkpoint outcome: " + label)
+        transport_evidence.append({"path": str(cycling_transport), "sha256": digest(cycling_transport),
+                                   "bytes": cycling_transport.stat().st_size,
+                                   "only_cross_process_state": "synthetic NOR partition bytes"})
 unknowns = []
 for case in ["unknown_case", "data_unknown", "barrier_unknown",
              "seed_late_correction", "restore_late_correction"]:
@@ -234,6 +254,21 @@ if not args.expect_red:
     seed_body = text[seed_start:seed_end]
     seed_boundary = re.search(r"^    const int64_t +commit_us\s*=.+;$", seed_body, re.M).group(0)
     mutations = [
+        ("poll_steals_shutdown_budget", "    if (shutdown) {",
+         "    if (shutdown || s_flash_shutdown_started.load()) {",
+         ["poll_during_shutdown_claim"], "poll_does_not_take_over_shutdown_budget"),
+        ("finish_retired_cycling_checkpoint", "!s_flash_cycling_reset_token && reset_pending",
+         "!s_flash_cycling_reset_token && false",
+         ["cycling_reset_before_last_page"], "reset_commits_in_place_of_retired_checkpoint_final_page"),
+        ("skip_reset_while_trend_restoration_incomplete", "if (!shutdown || !checkup_cycling_reset_pending()) return 0;",
+         "return 0;",
+         ["cycling_reset_before_trend_restore"], "shutdown_commits_only_reset_while_trends_restore"),
+        ("allow_obs_after_undated_reset", "max_records ? 2 * logic::HISTORY_FLASH_CYCLING_MAX_PARTS : 1",
+         "2 * logic::HISTORY_FLASH_CYCLING_MAX_PARTS",
+         ["cycling_reset_before_time_sync"], "shutdown_commits_undated_reset_without_observations"),
+        ("reject_reset_before_time_sync", "if (!s_flash_restore_done || !time_synced()) {",
+         "if (!time_synced()) return 0;\n    if (!s_flash_restore_done) {",
+         ["cycling_reset_before_time_sync"], "shutdown_commits_undated_reset_without_observations"),
         ("anchor_at_late_fold",
          "return wall_bucket_of_instant_locked(logic::history_raster_boundary_us(commit_us));",
          "return wall_bucket_of_instant_locked(commit_us);",
@@ -247,8 +282,9 @@ if not args.expect_red:
         ("old_read_classifier", "const bool      stop_owned = logic::observation_append_owned(r.header);",
          "const bool      stop_owned = logic::observation_header_matches(r.header);",
          ["data_commit", "barrier_commit"], "failed_append_releases_claim_for_real_service_retry"),
-        ("clear_core_ahead_on_stop_success", "if (!flash_is_manifest(r.header) && !stop_owned)",
-         "if (!flash_is_manifest(r.header))", ["core_ahead"],
+        ("clear_core_ahead_on_stop_success",
+         "if (!flash_is_manifest(r.header) && !stop_owned && !flash_cycling_owned(r.header))",
+         "if (!flash_is_manifest(r.header) && !flash_cycling_owned(r.header))", ["core_ahead"],
          "stop_success_preserves_core_ahead_episode"),
         ("trust_write_error_over_valid_readback",
          "const bool committed = read_e == ESP_OK && flash_record_physically_valid(verify) &&",

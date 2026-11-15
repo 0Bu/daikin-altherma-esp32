@@ -1,4 +1,4 @@
-// translation-source: 65571656f160db7c5cef68e1a9e2f1c556ae6ac67f346ba2f2b092cff1d703c9
+// translation-source: 57360fc01b9b51987c1e6a54c6b11b7295a1a3b53f13d2b3928a2b44e523c222
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -230,8 +230,15 @@ I18N.sv = localeValues([
   /* check.cycling.unavailable */ "Inga kompressordata.",
   /* check.cycling.stale */ "Mätvärden saknas just nu.",
   /* check.cycling.history_empty */ "Ingen historik ännu.",
-  /* check.cycling.timed_starts */ (s) => `Med klockslag: ${s}`,
-  /* check.cycling.saved_starts */ (s) => `Av dessa kommer ${s} från timvärden före omstarten. Klockslagen för de starterna saknas.`,
+  /* check.cycling.timed_starts */ (s) => `${s} med registrerat klockslag`,
+  /* check.cycling.run_start */ "Start",
+  /* check.cycling.run_stop */ "Stopp",
+  /* check.cycling.run_duration */ "Varaktighet",
+  /* check.cycling.run_ongoing */ "Pågår",
+  /* check.cycling.run_stop_unknown */ "Okänd stopptid",
+  /* check.cycling.no_timed_runs */ "Inga starttider har registrerats under den här timmen.",
+  /* check.cycling.run_details_unavailable */ "Tider för enskilda körningar saknas för den här timmen.",
+  /* check.cycling.saved_starts */ (s) => `Av dessa kommer ${s} från timvärden före omstarten.`,
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · medel ${mean} °C`,
   /* check.min */ (m) => `${m} min`,

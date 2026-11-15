@@ -161,8 +161,8 @@ assert.match(appendFn,
   /const bool\s+stop_owned = logic::observation_append_owned\(r\.header\);[\s\S]*flash_append_record_at\(r, slot\)/,
   "append dispatch captures builder ownership before the separate commit transaction");
 assert.match(appendFn,
-  /flash_note_append_success\(slot\);[\s\S]*if \(!flash_is_manifest\(r\.header\) && !stop_owned\)\s+s_flash_ahead_logged\[r\.header\.source\] = false;/,
-  "the latch is released by a successful data append, not by a manifest or an observation");
+  /flash_note_append_success\(slot\);[\s\S]*if \(!flash_is_manifest\(r\.header\) && !stop_owned && !flash_cycling_owned\(r\.header\)\)\s+s_flash_ahead_logged\[r\.header\.source\] = false;/,
+  "only appending a source's own data releases its ahead-of-clock latch");
 assert.match(appendFn, /if \(stop_owned\) stop_observation_flash_failed\(\);/,
   "a failed builder-owned observation releases its reservation without a committed read header");
 const noteRestore = functionBody("void flash_note_restore_ahead(", "// The next record of source");
@@ -228,9 +228,9 @@ assert.match(service, /logic::history_journal_retry_due\(/, "a paused journal re
 assert.ok(service.indexOf("history_journal_retry_due(") < service.indexOf("flash_build_for_service("),
   "the pause gate precedes every build and append attempt");
 assert.match(service, /flash_build_for_service\(src_i, r, wait_ticks\)/);
-// The shutdown drain is the same bounded final flush as before: no journal walk exists any more.
+// The shutdown drain retains its ordinary write budget and enables the final cycling checkpoint.
 assert.match(functionBody("void history_flash_save()", "// The factory reset"),
-  /history_flash_service_journal\(\s*\/\*max_records=\*\/12,\s*pdMS_TO_TICKS\(200\)\)/);
+  /history_flash_service_journal\(\s*\/\*max_records=\*\/12,\s*pdMS_TO_TICKS\(200\),\s*\/\*shutdown=\*\/true\)/);
 
 // HIST-02/d: a source whose identity reset is pending is stepped OVER. Returning at its first ring
 // left the restore unfinished for good (a disabled HomeHub never consumes its reset), and the

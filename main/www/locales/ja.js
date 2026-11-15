@@ -1,4 +1,4 @@
-// translation-source: 65571656f160db7c5cef68e1a9e2f1c556ae6ac67f346ba2f2b092cff1d703c9
+// translation-source: 57360fc01b9b51987c1e6a54c6b11b7295a1a3b53f13d2b3928a2b44e523c222
 I18N.ja = localeValues([
   /* sys.nodata */ "データなし",
   /* sys.unreachable */ "接続不可",
@@ -230,8 +230,15 @@ I18N.ja = localeValues([
   /* check.cycling.unavailable */ "圧縮機のデータがありません。",
   /* check.cycling.stale */ "現在、測定値がありません。",
   /* check.cycling.history_empty */ "まだ履歴がありません。",
-  /* check.cycling.timed_starts */ (s) => `時刻付き: ${s}`,
-  /* check.cycling.saved_starts */ (s) => `このうち${s}は再起動前の時間別集計です。個別の起動時刻はありません。`,
+  /* check.cycling.timed_starts */ (s) => `${s}（時刻を記録）`,
+  /* check.cycling.run_start */ "起動",
+  /* check.cycling.run_stop */ "停止",
+  /* check.cycling.run_duration */ "運転時間",
+  /* check.cycling.run_ongoing */ "運転中",
+  /* check.cycling.run_stop_unknown */ "停止時刻不明",
+  /* check.cycling.no_timed_runs */ "この時間帯に起動時刻の記録はありません。",
+  /* check.cycling.run_details_unavailable */ "この時間帯の個別運転の時刻データはありません。",
+  /* check.cycling.saved_starts */ (s) => `このうち${s}は再起動前の時間別集計です。`,
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} 最低 ${min} °C · 平均 ${mean} °C`,
   /* check.min */ (m) => `${m}分`,
