@@ -2186,6 +2186,24 @@ static void test_config_transaction() {
         CHECK(link.identity_fp == 0x11111111u);
     }
 
+    // A Board draft is revision-bound even when a newer detection uses free pins.
+    {
+        Config live  = config_tx_live();
+        Config req   = live;
+        req.btn_gpio = 21;
+        ConfigTxStore store;
+        store.seed(live);
+        live.runtime_revision = config_next_revision(live.runtime_revision);
+        const auto stale      = config_save_transaction(live, req, false, store, {}, true);
+        CHECK(stale.result == ConfigSaveResult::Stale);
+        CHECK(store.attempts.empty());
+        CHECK(live.btn_gpio != req.btn_gpio);
+        req.runtime_revision = live.runtime_revision;
+        CHECK(config_save_transaction(live, req, false, store, {}, true).result ==
+              ConfigSaveResult::Saved);
+        CHECK(live.btn_gpio == 21);
+    }
+
     // A service save in a boot whose X10A link took the indicator's pin (RAM -1): "cfg" keeps the
     // stored pin while RAM keeps the yield — the WiFi setup a factory reset requires must not store
     // the repair as the owner's choice. A save that states a real pin replaces it; that, or a save
@@ -14819,21 +14837,31 @@ static void test_history() {
     // *now*. That drift is what let a pinned readout round onto the neighbouring slot and describe
     // a different measurement than the one tapped.
     {
+        const auto oldest = [](int64_t wall, size_t n, uint32_t dt) {
+            return history_t0(rt(wall), rt(n), rt(dt));
+        };
+        const auto project = [](int64_t wall, int32_t ms, int64_t elapsed) {
+            int64_t projected = 0;
+            CHECK(history_commit_unix_s(wall, ms, elapsed, 0, projected));
+            return projected;
+        };
         // Same newest sample, three different request times → one answer.
-        const int64_t t_a = history_t0(1'000'000, 0, 2, HISTORY_DT_S);
-        const int64_t t_b = history_t0(1'000'070, 70, 2, HISTORY_DT_S);
-        const int64_t t_c = history_t0(1'000'299, 299, 2, HISTORY_DT_S);
+        const int64_t t_a = oldest(project(1'000'000, 800, 0), 2, HISTORY_DT_S);
+        const int64_t t_b = oldest(project(1'000'071, 100, 70'300'000), 2, HISTORY_DT_S);
+        const int64_t t_c = oldest(project(1'000'300, 100, 299'300'000), 2, HISTORY_DT_S);
         CHECK(t_a == t_b);
         CHECK(t_b == t_c);
         CHECK(t_a == 1'000'000 - 300); // sample 0 is one bucket before the newest
         // A closed bucket moves it by exactly one bucket, never by the request delay.
-        CHECK(history_t0(1'000'300, 0, 3, HISTORY_DT_S) == t_a);
+        CHECK(oldest(1'000'300, 3, HISTORY_DT_S) == t_a);
         // Degenerate counts must not underflow into a bogus instant.
-        CHECK(history_t0(1'000'000, 0, 0, HISTORY_DT_S) == 1'000'000);
-        CHECK(history_t0(1'000'000, 0, 1, HISTORY_DT_S) == 1'000'000);
-        // A full ring: sample 0 is 287 buckets back, still independent of the request time.
-        CHECK(history_t0(2'000'000, 0, HISTORY_SAMPLES, HISTORY_DT_S) ==
-              history_t0(2'000'123, 123, HISTORY_SAMPLES, HISTORY_DT_S));
+        CHECK(oldest(1'000'000, 0, HISTORY_DT_S) == 1'000'000);
+        CHECK(oldest(1'000'000, 1, HISTORY_DT_S) == 1'000'000);
+        CHECK(oldest(INT64_MIN, 2, HISTORY_DT_S) == INT64_MIN);
+        const int64_t newest = project(2'000'000'100, 100, 300'000);
+        CHECK(newest == 2'000'000'099);
+        CHECK(history_bucket_from_unix(newest) ==
+              history_anchor_bucket(2'000'000'100, 300'000, 0, HISTORY_DT_S, 100));
     }
 
     // --- pinning a readout to an instant, not a slot ---------------------------------------------
@@ -24204,6 +24232,7 @@ static void test_history_persist() {
     CHECK(anchor(0, 1'000'000, -1'000'000) == -1); // valid adopted instant before boot
     CHECK(anchor(INT64_MIN, 1, 0) == INT64_MIN);   // subtraction cannot underflow
     CHECK(anchor(INT64_MIN, 0, 0, 0, 1) == INT64_MIN);
+    CHECK(anchor(INT64_MIN, 0, 0) == history_bucket_from_unix(INT64_MIN));
     CHECK(anchor(INT64_MIN + 1, 1'000'000, 0, 0, 1) == INT64_MIN);
     CHECK(anchor(INT64_MAX, INT64_MAX, INT64_MIN + 1, 999, 1) < INT64_MAX);
     CHECK(anchor(900, 0, 0, 0, 0) == 0);
@@ -25016,10 +25045,10 @@ static void test_history_identity() {
         CHECK(m.oldest_bucket == 1000); // a single sample is its own sample zero
         // Nothing committed: no age, and no sample zero.
         m = history_snapshot_meta(500 * kSec, HISTORY_NO_COMMIT_US, -1, 0);
-        CHECK(m.newest_age_s == -1 && m.oldest_bucket == -1);
+        CHECK(m.newest_age_s == -1 && m.oldest_bucket == HISTORY_NO_BUCKET);
         // An empty copy has no sample zero even if a commit exists.
         m = history_snapshot_meta(500 * kSec, 200 * kSec, 1000, 0);
-        CHECK(m.newest_age_s == 300 && m.oldest_bucket == -1);
+        CHECK(m.newest_age_s == 300 && m.oldest_bucket == HISTORY_NO_BUCKET);
         // A commit restored from flash predates this boot's zero: a NEGATIVE timestamp is a real
         // age.
         m = history_snapshot_meta(10 * kSec, -290 * kSec, 1000, 288);
@@ -25027,18 +25056,19 @@ static void test_history_identity() {
         // A clock reading before the commit yields age 0, never a negative age.
         m = history_snapshot_meta(100 * kSec, 200 * kSec, 1000, 288);
         CHECK(m.newest_age_s == 0);
-        // The bucket sentinel is negative; a real bucket of zero is valid.
+        // The boundary after restore can precede boot, including a real final bucket of -1.
         CHECK(history_snapshot_meta(1, 0, 0, 1).oldest_bucket == 0);
         CHECK(history_snapshot_meta(1, 0, -1, 1).oldest_bucket == -1);
+        CHECK(history_snapshot_meta(1, 0, -1, 288).oldest_bucket == -288);
         // The two halves are the pieces history.cpp fills the struct from.
         CHECK(history_meta_newest_age_s(500 * kSec, 200 * kSec) == 300);
         CHECK(history_meta_newest_age_s(500 * kSec, HISTORY_NO_COMMIT_US) == -1);
-        CHECK(history_meta_oldest_bucket(1000, 288) == 1000 - 287);
-        CHECK(history_meta_oldest_bucket(-1, 288) == -1);
-        CHECK(history_meta_oldest_bucket(1000, 0) == -1);
+        CHECK(history_meta_oldest_bucket(5, 1000, 288) == 1000 - 287);
+        CHECK(history_meta_oldest_bucket(-1, -1, 288) == HISTORY_NO_BUCKET);
+        CHECK(history_meta_oldest_bucket(5, 1000, 0) == HISTORY_NO_BUCKET);
         // The default is "none", which is what every early return leaves behind.
         const HistoryMeta none;
-        CHECK(none.newest_age_s == -1 && none.oldest_bucket == -1);
+        CHECK(none.newest_age_s == -1 && none.oldest_bucket == HISTORY_NO_BUCKET);
         // Both facts belong to ONE commit: they are a function of the same (commit, count) pair, so
         // a snapshot taken after the next commit moves them together and never apart.
         const HistoryMeta before = history_snapshot_meta(1000 * kSec, 700 * kSec, 100, 288);

@@ -1,4 +1,4 @@
-// translation-source: 34200897e3bb460a7f6fcd68bd6ff940649f8810c9b3709dc7616000e01aee90
+// translation-source: 65571656f160db7c5cef68e1a9e2f1c556ae6ac67f346ba2f2b092cff1d703c9
 I18N.it = localeValues([
   /* sys.nodata */ "Nessun dato",
   /* sys.unreachable */ "Non raggiungibile",
@@ -357,6 +357,8 @@ I18N.it = localeValues([
   /* hist.recorded */ (h) => `Registrato · ${h} h`,
   /* hist.now */ "ora",
   /* hist.ago */ (h) => `${h} h fa`,
+  /* hist.retained */ "Ultimo campione ricevuto",
+  /* hist.before_retained */ (h) => `${h} h prima dell’ultimo campione ricevuto`,
   /* hist.loading */ "Caricamento andamento…",
   /* hist.none */ "Nessuna lettura ancora registrata.",
   /* hist.err */ "Andamento non disponibile.",
@@ -447,6 +449,7 @@ I18N.it = localeValues([
   /* toast.no_changes */ "Nessuna modifica",
   /* toast.reboot */ "Riavvio — riconnessione…",
   /* toast.rebooted */ "Riavviato — riconnettersi al dispositivo",
+  /* board.draft_stale */ "Le impostazioni della scheda sono cambiate. Riapri l’editor prima di salvare.",
   /* toast.busy_retry */ "Dispositivo occupato — riprovare tra poco",
   /* toast.unreachable */ "Impossibile raggiungere il dispositivo",
   /* toast.rejected */ "Rifiutato",
@@ -502,6 +505,7 @@ I18N.it = localeValues([
   /* schem.defrost_pill */ "❄ sbrinamento",
   /* schem.outdoor */ "Esterno",
   /* insp.close */ "Chiudi",
+  /* schem.defrost_transfer */ "Durante uno sbrinamento confermato, il calore può passare dall’acqua al refrigerante. Le tubazioni indicano questa direzione solo se la portata e le temperature attuali la confermano.",
   /* schem.leaving_water */ "R1T",
   /* schem.dhw_tank */ "SERBATOIO ACS",
   /* schem.set */ "obiettivo",
@@ -950,7 +954,6 @@ I18N.it = localeValues([
   /* lang.sv */ "Svenska",
   /* lang.fi */ "Suomi",
   /* lang.saved */ "Lingua salvata",
-  /* hist.cop_none */ "Nessuna curva COP quando la potenza elettrica proviene dalle pinze CT. I carichi inclusi dipendono dal cablaggio; la potenza termica registrata termina prima di BUH e non comprende il calore diretto di BSH, quindi non è garantito lo stesso confine di bilancio.",
 ]);
 INSPECT_I18N.it = inspectValues(
   ["Nessuna lettura attuale:", "il compressore è fermo e l’unità esterna aggiorna i propri sensori solo durante il funzionamento. Il valore dell’ultimo ciclo viene nascosto per non mostrarlo come attuale.", "Velocità del compressore non leggibile: i valori dell’unità esterna possono essere dell’ultimo ciclo."],
@@ -1011,7 +1014,7 @@ INSPECT_I18N.it = inspectValues(
       ? "Potenza frigorifera stimata divisa per assorbimento elettrico stimato. Eredita le incertezze di fluido, sensori, tensione e fattore di potenza. È un EER istantaneo, non stagionale; l’energia misurata su una stagione è più significativa."
       : "Potenza termica stimata divisa per assorbimento elettrico stimato con confini compatibili: dopo BUH con CT e R2T, oppure sola pompa di calore con corrente inverter. Il cablaggio CT decide i carichi inclusi. Indicazione istantanea, non contatore certificato.", (d) => d.copBlock === "tank_heater" ? "Nessun COP: la resistenza del serbatoio può essere inclusa nell’elettricità, ma il calore va direttamente al serbatoio senza attraversare i sensori di mandata; i confini non coincidono."
       : d.copBlock === "buh_no_r2t" ? "Nessun COP: BUH attivo senza sensore successivo. L’elettricità può includere il riscaldatore mentre il calore viene stimato prima di esso."
-      : d.copBlock === "mb_scope" ? "Nessun COP: HomeHub misura l’elettricità dell’intera unità, ma il calore del solo PHE e non fornisce né stati dei riscaldatori né sensore a valle per allineare i confini."
+      : d.copBlock === "mb_scope" ? "COP non disponibile. La guida HomeHub non specifica quali carichi elettrici comprende il registro. Il calore stimato riguarda lo scambiatore a piastre. Per calcolare il COP occorre verificare che entrambi i valori riguardino gli stessi componenti."
       : d.copBlock === "no_pel" ? d.pelHeld ? "Nessun COP: compressore fermo, la corrente inverter è dell’ultimo ciclo e non è attuale." : "Nessun COP: il profilo non fornisce né correnti CT né corrente inverter."
       : d.cop == null ? null
       : d.efficiencyKind === "eer" ? `${fmt1(d.cop)} kW frigoriferi per kW elettrico: ≈ ${fmt1(d.copPth)} kW sottratti con ≈ ${fmt1(d.pel)} kW assorbiti.`

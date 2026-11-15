@@ -470,6 +470,8 @@ const I18N = {
     "meaning.label": "How to read it:",
     "hist.title": "Last 24 hours", "hist.recorded": (h) => `Recorded · ${h} h`,
     "hist.now": "now", "hist.ago": (h) => `${h} h ago`,
+    "hist.retained": "Last received sample",
+    "hist.before_retained": (h) => `${h} h before the last received sample`,
     "hist.loading": "Loading trend…", "hist.none": "No readings recorded yet.",
     "hist.err": "Trend unavailable.",
     "hist.gaps": (n) => `${n} gap${n === 1 ? "" : "s"} — not measured`,
@@ -546,6 +548,7 @@ const I18N = {
     "hist.flow_switch_aria": (l, d) => `${l} — water-flow-switch timeline. ${d}. Arrow keys read individual samples.`,
     "toast.saved": "Saved", "toast.no_changes": "No changes",
     "toast.reboot": "Rebooting — reconnecting…", "toast.rebooted": "Rebooted — reconnect to the device",
+    "board.draft_stale": "Board settings changed. Reopen the editor before saving.",
     "toast.busy_retry": "Device busy — retry in a moment", "toast.unreachable": "Couldn't reach the device",
     "toast.rejected": "Rejected", "toast.applying": "Still applying the last change…",
     "toast.check_wifi": "Check WiFi settings", "toast.check_broker": "Check the broker address",
@@ -585,6 +588,7 @@ const I18N = {
     "schem.group_aria": "Live system schematic — tap a value or component for an explanation",
     "schem.outdoor_unit": "OUTDOOR UNIT", "schem.defrost_pill": "❄ defrost", "schem.outdoor": "Outdoor",
     "insp.close": "Close",
+    "schem.defrost_transfer": "During confirmed defrost, heat can move from the water into the refrigerant. The pipes show that direction only when current circulation and temperatures support it.",
     "schem.leaving_water": "R1T", "schem.dhw_tank": "DHW TANK", "schem.set": "set",
     "schem.bsh_label": "E-heater",
     "schem.space_circuit": "SPACE CIRCUIT", "schem.heating": "HEATING", "schem.cooling": "COOLING",
@@ -905,7 +909,6 @@ const I18N = {
     "lang.uk": "Українська", "lang.zh": "简体中文", "lang.ja": "日本語",
     "lang.nb": "Norsk", "lang.sv": "Svenska", "lang.fi": "Suomi",
     "lang.saved": "Language saved",
-    "hist.cop_none": "No COP curve while electrical input comes from CT clamps. Their wiring decides which loads are included; buffered heat ends before BUH and excludes heat added directly by BSH, so the balance boundaries may not match.",
   },
 };
 function t(k, ...a) {

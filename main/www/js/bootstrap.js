@@ -108,7 +108,7 @@ function wire() {
     e.preventDefault();          // Space would otherwise scroll the page
     inspectPick(hit.dataset.insp);
   });
-  $("inspClose").onclick = () => { S.insp = null; renderInspect(); };
+  $("inspClose").onclick = () => inspectPick();
   wireRestOfApp();
 }
 
@@ -182,7 +182,7 @@ function wireCyclingChart(host) {
     if (active) S.scrub = null;
     try { chart.releasePointerCapture(id); } catch {}
     S.cyclingHover = null;
-    if (chart.isConnected) {
+    if (chart.isConnected && !chart.closest("[hidden]")) {
       if (active && e?.type === "pointerup" && !moved &&
           Math.hypot(e.clientX - x, e.clientY - y) <= 4 &&
           document.elementFromPoint(e.clientX, e.clientY)?.closest("[data-bucket]") === button)
@@ -190,6 +190,7 @@ function wireCyclingChart(host) {
       else paintCyclingChart(chart);
     }
   };
+  S.cancelCyclingDrag = () => finish();
   const arm = () => {
     clearTimeout(watchdog);
     watchdog = setTimeout(finish, SCRUB_MAX_MS);
@@ -290,24 +291,31 @@ function wireTrendScrub(gv) {
   });
   gv.addEventListener("pointermove", (e) => {
     const plot = trendPlotFromTarget(e.target);
-    if (!plot) return;
-    if (S.scrub && S.scrub !== plot.dataset.hist) return;
-    if (S.scrub) scrubArm(plot);              // a live drag keeps re-arming the watchdog
+    if (!plot || plot.closest("[hidden], [inert]")) return;
+    const pointer = S.trendPointer;
+    if (S.scrub && (!pointer || pointer.plot !== plot || pointer.id !== e.pointerId)) return;
+    if (pointer) scrubArm(plot);              // a live drag keeps re-arming the watchdog
     scrubMove(plot, scrubIndex(plot, e.clientX));
   });
   gv.addEventListener("pointerdown", (e) => {
     const plot = trendPlotFromTarget(e.target);
-    if (!plot) return;
+    if (!plot || plot.closest("[hidden], [inert]") || S.scrub) return;
+    const view = scrubView(plot);
+    const i = scrubIndex(plot, e.clientX, view);
+    if (i < 0 || plot.closest(".vitem:not(.open)")) return;
+    // A forecast's visible geometry is frozen during the drag, even when a poll advances now.
+    S.trendPointer = { plot, id: e.pointerId, view: view.forecast ? view : null };
     S.scrub = plot.dataset.hist;
     scrubArm(plot);
     try { plot.setPointerCapture(e.pointerId); } catch { /* capture is an optimisation, not a requirement */ }
-    scrubMove(plot, scrubIndex(plot, e.clientX));
+    scrubMove(plot, i);
   });
   // The authoritative end of a captured drag: fires on pointerup, on pointercancel AND when the
   // element is removed from the DOM — the one exit the explicit handlers below cannot see.
   gv.addEventListener("lostpointercapture", (e) => {
     const plot = trendPlotFromTarget(e.target);
-    if (plot) scrubEnd(plot);
+    if (plot && S.trendPointer?.plot === plot && S.trendPointer.id === e.pointerId)
+      scrubEnd(plot);
   });
   // A mouse leaving clears the readout; a touch ends on pointerup/cancel. pointerout covers the
   // former without also firing for every child element (pointerleave doesn't bubble to this
@@ -323,7 +331,7 @@ function wireTrendScrub(gv) {
   for (const ev of ["pointerup", "pointercancel"]) {
     gv.addEventListener(ev, (e) => {
       const plot = trendPlotFromTarget(e.target);
-      if (!plot) return;
+      if (!plot || S.trendPointer?.plot !== plot || S.trendPointer.id !== e.pointerId) return;
       // A release ON the plot PINS the sample under it (pointercancel does not — a gesture the
       // browser took away is not a choice the user made). The transient crosshair is torn down
       // either way; the pin is re-emitted by the render that follows, so what the user let go of is
@@ -331,9 +339,10 @@ function wireTrendScrub(gv) {
       // Read the geometry BEFORE tearing anything down: scrubEnd may rebuild, and `plot` is then a
       // detached node whose bounding box is all zeroes.
       const label = plot.dataset.hist;
-      const i = e.type === "pointerup" ? scrubIndex(plot, e.clientX) : -1;
+      const i = e.type === "pointerup" && !plot.closest("[hidden], [inert]") ? scrubIndex(plot, e.clientX) : -1;
+      const view = S.trendPointer.view || undefined;
       scrubEnd(plot);
-      if (i >= 0) histPinToggle(label, i, plot.dataset.source || "");
+      if (i >= 0) histPinToggle(label, i, plot.dataset.source || "", view);
     });
   }
   // Keyboard: the plot is focusable, so arrow keys step through samples and the tooltip is the
@@ -341,7 +350,7 @@ function wireTrendScrub(gv) {
   // that a keyboard couldn't reach.
   gv.addEventListener("keydown", (e) => {
     const plot = trendPlotFromTarget(e.target);
-    if (!plot) return;
+    if (!plot || plot.closest("[hidden], [inert]")) return;
     const n = scrubCount(plot);
     const step = e.key === "ArrowLeft" ? -1 : e.key === "ArrowRight" ? 1 : 0;
     if (!step && !["Home", "End", "Escape", "Enter", " "].includes(e.key)) return;
@@ -351,8 +360,10 @@ function wireTrendScrub(gv) {
       S.histPin.delete(plot.dataset.hist); scrubEnd(plot); return renderTrendHosts();
     }
     if (e.key === "Enter" || e.key === " ") {   // pin what the arrow keys are reading out
+      const view = scrubView(plot);
+      if (!view) return renderTrendHosts();
       const cur = plot.dataset.cur == null ? n - 1 : +plot.dataset.cur;
-      return histPinToggle(plot.dataset.hist, cur, plot.dataset.source || "");
+      return histPinToggle(plot.dataset.hist, cur, plot.dataset.source || "", view);
     }
     const cur = plot.dataset.cur == null ? n - 1 : +plot.dataset.cur;
     const next = e.key === "Home" ? 0 : e.key === "End" ? n - 1 : cur + step;
@@ -449,7 +460,7 @@ function wireRestOfApp() {
   $("wfCancel").onclick = closeWifi;
   $("wifiBackdrop").onclick = closeWifi;
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("wifiModal").hidden) closeWifi(); });
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && S.insp) { S.insp = null; renderInspect(); } });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && S.insp) inspectPick(); });
   $("wifiForm").addEventListener("submit", (e) => {
     e.preventDefault();
     // NOT trimmed: leading/trailing spaces are valid SSID bytes (an AP may legitimately name itself
@@ -981,6 +992,15 @@ function wireRestOfApp() {
     $(id).addEventListener("change", () => { $("bdError").hidden = true; });
   $("boardForm").addEventListener("submit", (e) => {
     e.preventDefault();
+    if (!boardSettingsAvailable()) {
+      toast(t(S.otaBusy || S.otaInstalling || S.transportBusy ? "toast.busy_retry" : "toast.unreachable"), "err");
+      return;
+    }
+    if (boardDraftIdentity !== boardSettingsIdentity()) {
+      closeBoard();
+      toast(t("board.draft_stale"), "err");
+      return;
+    }
     const type = +$("bdLedType").value;
     // Belt-and-braces beside boardPinOptions' fallback: an empty select (a device that offered no
     // local pins at all) must read as "no indicator", never as GPIO0 — `+""` is 0, and 0 is a real
@@ -991,7 +1011,10 @@ function wireRestOfApp() {
       $("bdError").textContent = t("env.err_pins"); $("bdError").hidden = false;
       toast(t("env.err_pins"), "err"); return;
     }
+    const draftIdentity = boardDraftIdentity;
     saveReboot("/set_board", {
+      ...(Number.isInteger(S.status.board.config_revision) && S.status.boot_id
+        ? { boot_id: S.status.boot_id, config_revision: S.status.board.config_revision } : {}),
       preset_id: $("bdPreset").value || "custom",
       // Type "None" is the wire's led_gpio = -1; the pin select keeps its last value so re-enabling
       // the indicator doesn't make the user find their pin again.
@@ -1011,6 +1034,12 @@ function wireRestOfApp() {
       busyMsg: t(env.enabled ? "env.checking" : "toast.saving_board"),
       busyLabel: env.enabled ? "env.checking" : "btn.saving",
       mapError: env3SaveError,
+      onError: (code) => {
+        if (code !== "board_draft_stale") return;
+        rejectedBoardDraft = draftIdentity;
+        closeBoard();
+        void refreshStatus();
+      },
     });
   });
 }
@@ -1086,6 +1115,10 @@ async function pollTick() {
   // _statusDue = 0 and silently drop that refresh (see the guard at the assignment).
   const gen = _pollGen;
   try {
+    if (typeof yieldHistoryToPoll === "function") {
+      const settling = yieldHistoryToPoll();
+      if (settling) await settling;
+    }
     const now = performance.now();
     if (now >= _statusDue) {
       // /values follows immediately.  Defer this full paint so the first load and every 8-second
@@ -1105,13 +1138,20 @@ async function pollTick() {
     // doubles the wait for the timeout that decides the backoff.
     if (ok) ok = await refreshValues(!deferredPaint);
     if (deferredPaint) renderApp();
+  } catch (error) {
+    ok = false;
+    console.error("Live update failed", error);
   } finally {
     _pollBusy = false;
+    _pollFails = ok ? 0 : Math.min(_pollFails + 1, 4);
+    pollSchedule(_pollFails ? Math.min(POLL_VALUES_MS * 2 ** _pollFails, POLL_BACKOFF_MAX_MS)
+                            : POLL_VALUES_MS);
   }
 
-  _pollFails = ok ? 0 : Math.min(_pollFails + 1, 4);
-  pollSchedule(_pollFails ? Math.min(POLL_VALUES_MS * 2 ** _pollFails, POLL_BACKOFF_MAX_MS)
-                          : POLL_VALUES_MS);
+  if (ok && typeof recoverOpenHistory === "function") recoverOpenHistory();
+  // An already queued disclosure must also settle after a failed live poll. A history endpoint
+  // can still answer when /values fails. Leave automatic refreshes behind the live-health gate.
+  if (typeof pumpHistoryQueue === "function") pumpHistoryQueue();
 }
 
 // Poll right now, status included, and let the chain carry on from there. Used on the first tick

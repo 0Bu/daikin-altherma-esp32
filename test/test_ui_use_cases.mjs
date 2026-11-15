@@ -135,6 +135,8 @@ const fetch = async (url, options = {}) => {
   if (fetchState.mode === "delayed")
     return new Promise((resolve, reject) => { fetchState.respond = resolve; fetchState.fail = reject; });
   if (fetchState.mode === "throw") throw new Error("unreachable");
+  if (fetchState.mode === "board_stale" && url === "/set_board")
+    return response(false, { code: "board_draft_stale", error: "Board settings changed." }, 409);
   if (fetchState.mode === "env3_missing" && url === "/set_board")
     return response(false, {
       code: "env3_sht30_not_found",
@@ -160,7 +162,7 @@ const fetch = async (url, options = {}) => {
   if (fetchState.mode === "reject") return response(false, { error: "rejected by test" });
   if (fetchState.mode === "reboot" && url === "/set_ntp")
     return response(true, { reboot: true, saved: true });
-  if (url === "/status") return response(true, {});
+  if (url === "/status") return response(true, fetchState.status || {});
   return response(true, { reboot: false, saved: false });
 };
 
@@ -235,7 +237,10 @@ const context = vm.createContext({
   renderHeader() {},
 });
 
-const source = readAppFragments(["i18n.js"]) + readUiLocale("de") +
+const dashboard = readAppFragments(["dashboard.js"]);
+const retirement = dashboard.slice(dashboard.indexOf("function retireMountedHistory()"),
+  dashboard.indexOf("function selectDashboardCard("));
+const source = readAppFragments(["i18n.js"]) + readUiLocale("de") + retirement +
   readAppFragments(["app_state.js", "settings.js", "bootstrap.js"])
     .replace(/\nboot\(\);\s*$/, "\n");
 vm.runInContext(`${source}
@@ -386,6 +391,69 @@ ui.hydrateRoutedPopup();
 assert.equal(document.getElementById("wfSSID").value, "ExampleNet",
   "an untouched reload popup must hydrate from the first status response");
 await document.getElementById("wfCancel").onclick();
+
+ui.S.status = null;
+fetchState.calls.length = 0;
+loadRoute(`#settings/${ui.POPUP_ROUTES.boardModal}`);
+assert.equal(document.getElementById("boardModal").hidden, true, "the hardware editor awaits device status");
+await document.getElementById("boardForm").fire("submit");
+assert.equal(fetchState.calls.some(call => call.url === "/set_board"), false,
+  "a forged pre-status submit cannot persist hardware defaults");
+ui.S.status = loadedStatus;
+ui.hydrateRoutedPopup();
+assert.equal(document.getElementById("boardModal").hidden, false, "the pending route opens with known hardware");
+ui.S.status = { ...loadedStatus, boot_id: "replacement-boot" };
+await document.getElementById("boardForm").fire("submit");
+assert.equal(fetchState.calls.some(call => call.url === "/set_board"), false,
+  "a draft from one boot cannot submit the old hardware configuration after status recovers on another");
+assert.equal(document.getElementById("boardModal").hidden, true);
+ui.S.status = loadedStatus;
+loadRoute(`#settings/${ui.POPUP_ROUTES.boardModal}`);
+fetchState.mode = "board_stale";
+fetchState.status = loadedStatus;
+await document.getElementById("boardForm").fire("submit");
+await new Promise(resolve => setImmediate(resolve));
+assert.equal(document.getElementById("bdError").textContent,
+  "Die Board-Einstellungen haben sich geändert. Öffne den Dialog vor dem Speichern erneut.",
+  "a race rejected by the device tells the user to reopen the editor in their own language");
+assert.equal(ui.S.busy, false, "the conflict releases the save button");
+assert.equal(document.getElementById("boardModal").hidden, true);
+ui.openBoard();
+assert.equal(document.getElementById("boardModal").hidden, true, "the rejected revision cannot reopen");
+await new Promise(resolve => setImmediate(resolve));
+fetchState.status = { ...loadedStatus, boot_id: "updated-board-boot" };
+ui.openBoard();
+await ui.refreshStatus();
+ui.openBoard();
+assert.equal(document.getElementById("boardModal").hidden, false, "a fresh revision can open");
+fetchState.mode = "ok";
+await document.getElementById("bdCancel").onclick();
+delete fetchState.status;
+ui.S.status = loadedStatus;
+
+// While the request owns the modal, Escape cannot discard an otherwise retryable draft.
+ui.S.status = { ...loadedStatus, boot_id: "0123456789abcdef",
+  board: { ...loadedStatus.board, config_revision: 17 } };
+ui.openBoard();
+fetchState.mode = "delayed";
+fetchState.calls.length = 0;
+await document.getElementById("boardForm").fire("submit");
+assert.equal(ui.S.pendingSave?.modal, "boardModal");
+await document.fire("keydown", { key: "Escape" });
+assert.equal(document.getElementById("boardModal").hidden, false);
+fetchState.respond(response(false, { error: "Board check could not finish." }, 422));
+await new Promise(resolve => setImmediate(resolve));
+assert.equal(document.getElementById("boardModal").hidden, false);
+fetchState.mode = "ok";
+await document.getElementById("boardForm").fire("submit");
+await new Promise(resolve => setImmediate(resolve));
+const boardAttempts = fetchState.calls.filter(call => call.url === "/set_board");
+assert.equal(boardAttempts.length, 2, "retry must submit the same board draft after Escape");
+assert.equal(boardAttempts[0].body.boot_id, "0123456789abcdef");
+assert.equal(boardAttempts[0].body.config_revision, 17);
+assert.deepEqual(boardAttempts[1].body, boardAttempts[0].body);
+assert.equal(document.getElementById("boardModal").hidden, true);
+ui.S.status = loadedStatus;
 
 // An in-app popup has a real Settings parent: Back closes it and Forward opens the same one again.
 ui.openWifi();
@@ -933,12 +1001,22 @@ ui.S.busy = false;
 open(circulationSource);
 // Accepted circulation Save retires the old chart/pin before /status catches up.
 configureValid(circulationSource);
+const settingsHost = document.getElementById("settingsCards");
+const settingsQuery = settingsHost.querySelectorAll;
+let previousCirculationPlot = { remove() { previousCirculationPlot = null; } };
+settingsHost.querySelectorAll = function (selector) {
+  if (selector === "#diagnostics-circulation-detail .vhist")
+    return previousCirculationPlot ? [previousCirculationPlot] : [];
+  return settingsQuery.call(this, selector);
+};
 ui.S.hist.set("circulation_state", { at: Date.now(), v: [10] });
 ui.S.histPin.set("circulation_state", { i: 0, gen: 1 });
 await document.getElementById("circulationForm").fire("submit");
 await settle();
 assert.equal(ui.S.hist.has("circulation_state"), false);
 assert.equal(ui.S.histPin.has("circulation_state"), false);
+assert.equal(previousCirculationPlot, null, "accepted Save must remove the mounted Settings plot immediately");
+settingsHost.querySelectorAll = settingsQuery;
 fetchState.calls.length = 0;
 ui.S.busy = false;
 open(circulationSource);

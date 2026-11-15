@@ -1120,6 +1120,36 @@ async function assertDashboardCardNavigation(page, context, viewport) {
     assert.equal((await current()).key, "model", `${context}: a poll repaint preserves the selected card`);
 
     await page.evaluate(`(() => {
+      S._values[0].concept = "flow";
+      S._modbus[0].concept = "flow";
+      renderCards();
+      const model = document.querySelector('#cardNav button[data-card="model"]');
+      if (document.querySelector('#cardNav button[data-card="modbus"]'))
+        throw new Error("paired HomeHub reading must begin without its own card");
+      model.addEventListener("pointerdown", () => {
+        S.clickHold = true;
+        S.status.hp.connected = false;
+        S.status.diagnostics.enabled = false;
+        S._values = [];
+        renderCards();
+      }, { once: true });
+      return true;
+    })()`);
+    await clickElement(page, '#cardNav button[data-card="model"]');
+    assert.deepEqual(await current(), { key: "modbus", selected: ["modbus"], visible: ["modbus"], labelled: true },
+      `${context}: a source change during a native tap installs fallback content and navigation together`);
+    await page.evaluate(`(() => {
+      S.clickHold = false;
+      S.status.hp.connected = true;
+      S.status.diagnostics.enabled = true;
+      S._values = ${JSON.stringify(groups)}.map((group, index) => ({
+        group, label: "Fixture reading " + index, value: "12", unit: "°C", reg: 0x61, off: index,
+      }));
+      S._modbus = [{ off: 49, label: "Flow rate", value: 2.6, unit: "L/min", profile: "altherma4" }];
+      renderApp(); return true;
+    })()`);
+
+    await page.evaluate(`(() => {
       const button = document.querySelector('#cardNav button[data-card="diagnosis"]');
       button.scrollIntoView({ block: "center", behavior: "instant" }); button.focus();
       return true;
@@ -2107,6 +2137,7 @@ async function assertHistoryReadouts(page, context) {
           t0:end - 5700,unit,held:[],v});
         S.hist.clear(); S.histPin.clear(); S.histHidden.clear(); S.scrub = null;
         S.status.history = {rows:[{id,label:id}],modbus_rows:[{id,label:id}],env3_rows:[]};
+        S.status.uptime_s = 36000;
         S.status.ntp = {synced:true,time:"2026-08-12T10:00:00Z"};
         if (id === ENV3_COMBINED_ID) {
           S.status.history.rows = []; S.status.history.modbus_rows = [];
@@ -2662,6 +2693,31 @@ try {
       await page.evaluate('S.transportUnavailable = null; S.transportBusy = false; renderApp(); true');
       assert.equal(await page.evaluate('document.getElementById("statusSnapshot").hidden'), true,
         `${viewport.name}/${locale}/settings: fresh status removes the snapshot warning`);
+
+      if (locale === browserLocales[0]) {
+        assert.equal(await page.evaluate(`(() => {
+          const progress = t("ota.pct", 31);
+          otaInline(progress, { ring: true, pct: 31 });
+          const live = document.getElementById("otaProgressSettings");
+          const oldVisual = document.getElementById("otaStatSet");
+          if (!live || !oldVisual) return false;
+          const observer = new MutationObserver(() => {});
+          observer.observe(live, { subtree: true, childList: true, characterData: true });
+          S.otaCached = true;
+          renderSettings();
+          const visual = document.getElementById("otaStatSet");
+          const stable = oldVisual !== visual && visual.getAttribute("aria-hidden") === "true" &&
+            visual.textContent === progress && live.isConnected && live.getAttribute("role") === "status" &&
+            live.textContent === progress && observer.takeRecords().length === 0;
+          otaInline(t("ota.pct", 42), { ring: true, pct: 42 });
+          const changed = live.textContent === t("ota.pct", 42) && observer.takeRecords().length > 0;
+          observer.disconnect();
+          S.otaCached = false;
+          otaInline("");
+          renderSettings();
+          return stable && changed;
+        })()`), true, `${viewport.name}/${locale}/settings: card rebuild keeps the OTA announcement stable`);
+      }
 
       await page.evaluate(`otaFail(${JSON.stringify(otaMemoryError)}); renderApp(); true`);
       await page.frame();

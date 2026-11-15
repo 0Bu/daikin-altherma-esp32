@@ -302,7 +302,7 @@ if [ "$verified_renovate_actions" -eq 0 ]; then
     check_gate "schematic-review" "schematic review" \
         '^(main/www/|docs/DESIGN\.md$|tools/schematic/|\.agents/skills/schematic-review/)'
     check_gate "ui-use-case-review" "complete UI use-case review" \
-        '^(main/www/|test/test_ui_|test/test_homehub_discovery_contract\.mjs$|test/test_mcp_dashboard\.mjs$|scripts/run-ui-use-case-tests\.sh$|tools/ui/|\.agents/skills/ui-use-case-review/|tools/agent-hooks/|\.agents/hooks\.json$|\.github/(pull_request_template\.md|workflows/build\.yml)$|docs/DESIGN\.md$)' \
+        '^(main/www/|main/CMakeLists\.txt$|tools/web_asset/|test/test_ui_|test/test_homehub_discovery_contract\.mjs$|test/test_mcp_dashboard\.mjs$|scripts/run-ui-use-case-tests\.sh$|tools/ui/|\.agents/skills/ui-use-case-review/|tools/agent-hooks/|\.agents/hooks\.json$|\.github/(pull_request_template\.md|workflows/build\.yml)$|docs/DESIGN\.md$)' \
         ui_suite_relevant
     check_gate "absence-review" "source-absence review" \
         '^(main/(http_status|http_config|history|mqtt_ha|hp_modbus|hp_poll|env3|weather_forecast|safe_mode|main)\.(cpp|hpp)$|main/logic/(redact|heating_curve_diagnosis|circulation_source|history|env3|mqtt_publish_gate|health_gate|ota_channel)\.hpp$|main/www/|test/(runtime/|test_(ui_absence_matrix|source_absence_contract).*\.mjs$)|tools/(absence|browser)/|scripts/run-browser-render-tests\.sh$|\.agents/skills/absence-review/)' \

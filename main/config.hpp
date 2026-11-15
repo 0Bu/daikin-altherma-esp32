@@ -30,6 +30,7 @@ ConfigLinkSnapshot config_link_snapshot();
 // These read individual fields without copying the entire 656-byte Config struct with its
 // 24 std::string members, avoiding continuous heap fragmentation on frequent read paths.
 bool        config_wifi_configured();
+uint32_t    config_runtime_revision();
 bool        config_diagnostics_enabled();
 OtaChannel config_ota_channel();
 Protocol    config_x10a_protocol();
@@ -88,6 +89,9 @@ bool config_factory_seed_blob(std::vector<uint8_t>& out);
 // For the whole-struct writers only: the /set_* handlers, serialized on the single httpd task. The
 // poll task must NOT use this — see the compare-and-commit detection helpers below.
 [[nodiscard]] bool config_save(const Config& c);
+
+// A Board draft belongs to one configuration revision. Compare it inside the save mutex.
+[[nodiscard]] ConfigSaveResult config_save_if_current(const Config& c);
 
 // The X10A /set_hp save (ConfigSaveResult: logic/config_transaction.hpp). That route owns the link
 // and changes nothing else that is persisted, so it writes ONLY the atomic link-cache entry — never

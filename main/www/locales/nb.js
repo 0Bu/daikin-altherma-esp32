@@ -1,4 +1,4 @@
-// translation-source: 34200897e3bb460a7f6fcd68bd6ff940649f8810c9b3709dc7616000e01aee90
+// translation-source: 65571656f160db7c5cef68e1a9e2f1c556ae6ac67f346ba2f2b092cff1d703c9
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -357,6 +357,8 @@ I18N.nb = localeValues([
   /* hist.recorded */ (h) => `Registrert · ${h} t`,
   /* hist.now */ "nå",
   /* hist.ago */ (h) => `for ${h} t siden`,
+  /* hist.retained */ "Siste mottatte måling",
+  /* hist.before_retained */ (h) => `${h} t før siste mottatte måling`,
   /* hist.loading */ "Laster historikk…",
   /* hist.none */ "Ingen målinger er registrert ennå.",
   /* hist.err */ "Historikken er utilgjengelig.",
@@ -447,6 +449,7 @@ I18N.nb = localeValues([
   /* toast.no_changes */ "Ingen endringer",
   /* toast.reboot */ "Starter på nytt — kobler til igjen…",
   /* toast.rebooted */ "Startet på nytt — koble til enheten igjen",
+  /* board.draft_stale */ "Kortinnstillingene er endret. Åpne redigeringsvinduet på nytt før du lagrer.",
   /* toast.busy_retry */ "Enheten er opptatt — prøv straks igjen",
   /* toast.unreachable */ "Enheten svarer ikke",
   /* toast.rejected */ "Avvist",
@@ -502,6 +505,7 @@ I18N.nb = localeValues([
   /* schem.defrost_pill */ "❄ Avriming",
   /* schem.outdoor */ "Ute",
   /* insp.close */ "Lukk",
+  /* schem.defrost_transfer */ "Under bekreftet avriming kan varme gå fra vannet til kuldemediet. Rørene viser bare denne retningen når den støttes av gjennomstrømningen og temperaturene som måles nå.",
   /* schem.leaving_water */ "R1T",
   /* schem.dhw_tank */ "VV-TANK",
   /* schem.set */ "Mål",
@@ -950,7 +954,6 @@ I18N.nb = localeValues([
   /* lang.sv */ "Svenska",
   /* lang.fi */ "Suomi",
   /* lang.saved */ "Språk lagret",
-  /* hist.cop_none */ "Ingen COP-historikk når strømverdien kommer fra CT-klemmer. Kablingen avgjør hvilke laster de dekker; varmemålingen slutter før BUH og omfatter ikke direkte BSH-varme. Balansegrensene kan derfor avvike.",
 ]);
 
 INSPECT_I18N.nb = inspectValues(
@@ -1017,7 +1020,7 @@ INSPECT_I18N.nb = inspectValues(
       : "Anslått varme delt på anslått strøm med samsvarende grenser: etter BUH med CT og R2T, ellers bare varmepumpen med inverterstrøm. CT-kabling avgjør laster. Øyeblikksindikasjon, ikke sertifisert måler.", (d) => d.copBlock === "tank_heater"
       ? "Ingen COP: strøm kan omfatte BSH, men varmen går direkte i tanken og krysser ikke tursensorene; grensene er ulike."
       : d.copBlock === "buh_no_r2t" ? "Ingen COP: BUH er aktiv, men sensor etter den mangler; strøm kan omfatte varme beregnet før BUH."
-      : d.copBlock === "mb_scope" ? "Ingen COP: HomeHub måler hele enhetens strøm, men varme bare ved PHE og mangler varmerstatus/sensor etter BUH for like grenser."
+      : d.copBlock === "mb_scope" ? "COP er utilgjengelig. HomeHub-veiledningen sier ikke hvilke elektriske laster som inngår. Varmeestimatet gjelder platevarmeveksleren. For å beregne COP må begge måleverdiene ha samme bekreftede systemgrense."
       : d.copBlock === "no_pel"
       ? d.pelHeld ? "Ingen COP: kompressoren står, og inverterstrømmen er fra siste syklus."
         : "Ingen COP: profilen gir verken CT-effekt eller inverterstrøm."

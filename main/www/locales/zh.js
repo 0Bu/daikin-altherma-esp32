@@ -1,4 +1,4 @@
-// translation-source: 34200897e3bb460a7f6fcd68bd6ff940649f8810c9b3709dc7616000e01aee90
+// translation-source: 65571656f160db7c5cef68e1a9e2f1c556ae6ac67f346ba2f2b092cff1d703c9
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
@@ -357,6 +357,8 @@ I18N.zh = localeValues([
   /* hist.recorded */ (h) => `已记录 · ${h} 小时`,
   /* hist.now */ "现在",
   /* hist.ago */ (h) => `${h} 小时前`,
+  /* hist.retained */ "最近一次收到的读数",
+  /* hist.before_retained */ (h) => `最近一次收到的读数的 ${h} 小时前`,
   /* hist.loading */ "正在加载趋势…",
   /* hist.none */ "尚无已记录读数。",
   /* hist.err */ "趋势不可用。",
@@ -447,6 +449,7 @@ I18N.zh = localeValues([
   /* toast.no_changes */ "没有更改",
   /* toast.reboot */ "正在重启并重新连接…",
   /* toast.rebooted */ "已重启 — 请重新连接设备",
+  /* board.draft_stale */ "板卡设置已更改。请重新打开编辑窗口后再保存。",
   /* toast.busy_retry */ "设备忙 — 请稍后重试",
   /* toast.unreachable */ "无法访问设备",
   /* toast.rejected */ "已拒绝",
@@ -502,6 +505,7 @@ I18N.zh = localeValues([
   /* schem.defrost_pill */ "❄ 除霜",
   /* schem.outdoor */ "室外",
   /* insp.close */ "关闭",
+  /* schem.defrost_transfer */ "确认正在除霜时，热量可能从水传向制冷剂。只有当前流量和温度支持这一判断时，管路才会显示该方向。",
   /* schem.leaving_water */ "R1T",
   /* schem.dhw_tank */ "热水箱",
   /* schem.set */ "设定",
@@ -950,7 +954,6 @@ I18N.zh = localeValues([
   /* lang.sv */ "Svenska",
   /* lang.fi */ "Suomi",
   /* lang.saved */ "语言已保存",
-  /* hist.cop_none */ "CT 供电功率时不画 COP：所含负载取决于接线，而热功率止于 BUH 前且不含 BSH，电热边界可能不一致。",
 ]);
 INSPECT_I18N.zh = inspectValues(
   ["无当前读数：", "压缩机已停；仅运行时更新的室外传感器会隐藏旧值。", "无法读取压缩机转速，室外机读数可能来自上次运行。"],
@@ -1011,7 +1014,7 @@ INSPECT_I18N.zh = inspectValues(
       ? "制冷功率÷输入功率；继承介质、传感器、电压/功率因数误差，是瞬时 EER，非季节效率。"
       : "边界相容的热功率÷输入功率：有 R2T 时 CT 算 BUH 后，否则逆变器电流仅算热泵；瞬时值非认证计量。", (d) => d.copBlock === "tank_heater" ? "无 COP：电功率可能含 BSH，但其水箱热量不经过出水传感器，边界不一致。"
       : d.copBlock === "buh_no_r2t" ? "无 COP：BUH 启动却无下游传感器，电热边界不一致。"
-      : d.copBlock === "mb_scope" ? "无 COP：HomeHub 测整机电功率，而热量只算 PHE，边界不一致。"
+      : d.copBlock === "mb_scope" ? "无法计算 COP。HomeHub 指南未说明输入功率包含哪些用电设备。估算的热量仅对应板式换热器。计算 COP 前必须确认两个数值的测量范围一致。"
       : d.copBlock === "no_pel" ? d.pelHeld ? "无 COP：停机后逆变器电流是旧值。" : "无 COP：无 CT 或逆变器电流。"
       : d.cop == null ? null
       : d.efficiencyKind === "eer" ? `每 1 kW 电约制冷 ${fmt1(d.cop)} kW：${fmt1(d.copPth)} / ${fmt1(d.pel)} kW。`

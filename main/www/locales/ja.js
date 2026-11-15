@@ -1,4 +1,4 @@
-// translation-source: 34200897e3bb460a7f6fcd68bd6ff940649f8810c9b3709dc7616000e01aee90
+// translation-source: 65571656f160db7c5cef68e1a9e2f1c556ae6ac67f346ba2f2b092cff1d703c9
 I18N.ja = localeValues([
   /* sys.nodata */ "データなし",
   /* sys.unreachable */ "接続不可",
@@ -357,6 +357,8 @@ I18N.ja = localeValues([
   /* hist.recorded */ (h) => `記録 · ${h}時間`,
   /* hist.now */ "現在",
   /* hist.ago */ (h) => `${h}時間前`,
+  /* hist.retained */ "最後に受信した測定値",
+  /* hist.before_retained */ (h) => `最後に受信した測定値の ${h} 時間前`,
   /* hist.loading */ "推移を読込中…",
   /* hist.none */ "記録はまだありません。",
   /* hist.err */ "推移を表示できません。",
@@ -447,6 +449,7 @@ I18N.ja = localeValues([
   /* toast.no_changes */ "変更なし",
   /* toast.reboot */ "再起動中 — 再接続中…",
   /* toast.rebooted */ "再起動完了 — 機器へ再接続してください",
+  /* board.draft_stale */ "ボード設定が変更されました。保存する前に設定画面を開き直してください。",
   /* toast.busy_retry */ "機器がビジー — 少し待って再試行してください",
   /* toast.unreachable */ "機器に接続できません",
   /* toast.rejected */ "拒否されました",
@@ -502,6 +505,7 @@ I18N.ja = localeValues([
   /* schem.defrost_pill */ "❄ 霜取り",
   /* schem.outdoor */ "外気",
   /* insp.close */ "閉じる",
+  /* schem.defrost_transfer */ "霜取り運転が確認されると、水から冷媒へ熱が移ることがあります。現在の流量と温度がその方向を裏付ける場合にだけ、配管にその方向を表示します。",
   /* schem.leaving_water */ "R1T",
   /* schem.dhw_tank */ "給湯タンク",
   /* schem.set */ "設定",
@@ -950,7 +954,6 @@ I18N.ja = localeValues([
   /* lang.sv */ "Svenska",
   /* lang.fi */ "Suomi",
   /* lang.saved */ "言語を保存しました",
-  /* hist.cop_none */ "電力入力がCTクランプ由来の場合、COP曲線は表示しません。配線で対象負荷が決まり、蓄熱した熱量はBUH前まででBSHが直接加えた熱を含まないため、収支境界が一致するとは限りません。",
 ]);
 
 DESCRIPTION_I18N.ja = descriptionValues([
@@ -1211,7 +1214,7 @@ INSPECT_I18N.ja = inspectValues(
       : d.pth == null ? null : d.pthKind === "cooling" ? `≈ ${fmt1(d.pth)} kW冷却${d.cop != null ? `、EER ${fmt1(d.cop)}` : ""}。` : `≈ ${fmt1(d.pth)} kW${d.cop != null && !d.copPostBuh ? `、COP ${fmt1(d.cop)}` : ""}。`], // pth
     [(d) => d && d.efficiencyKind === "eer" ? "ヒートポンプEER（推定）" : d && d.copScope === "plant" ? "BUH後COP（推定）" : "ヒートポンプCOP（推定）", "効率推定", (d) => d && d.efficiencyKind === "eer" ? "推定冷却出力÷推定電力。流体、センサー、電圧、力率の仮定を含む瞬時EERで、季節効率ではありません。" : "同じ収支境界の推定熱出力÷電力。CTではBUH後、インバータ電流ではヒートポンプのみになり得て、CT配線が含む負荷を決めます。流体、センサー、電圧、力率の仮定を含む瞬時値で季節効率ではありません。", (d) => d.copBlock === "tank_heater" ? "COPなし — タンクヒーター作動中。電力収支に含まれても、熱は水側センサーを通らず直接タンクへ入ります。"
       : d.copBlock === "buh_no_r2t" ? "COPなし — BUH作動中ですが後段センサーがなく、電気と熱の境界が一致しません。"
-      : d.copBlock === "mb_scope" ? "COPなし — HomeHubはヒーター込み機器電力、熱はPHEのみです。ヒーター状態と後段センサーがなく境界を揃えられません。"
+      : d.copBlock === "mb_scope" ? "COPは算出できません。HomeHubの資料には、入力電力にどの負荷が含まれるか記載されていません。推定熱量はプレート熱交換器の値です。COPの算出には、両方の測定範囲が一致することの確認が必要です。"
       : d.copBlock === "no_pel" ? d.pelHeld ? "COPなし — 圧縮機停止中のインバータ電流は前回運転値です。" : "COPなし — CT電流もインバータ電流もありません。"
       : d.cop == null ? null : d.efficiencyKind === "eer" ? `電力1 kW当たり冷却 ${fmt1(d.cop)} kW — 約${fmt1(d.pel)} kW入力で約${fmt1(d.copPth)} kW。`
       : d.copScope === "plant" ? `CT電力1 kW当たりBUH後熱 ${fmt1(d.cop)} kW — 約${fmt1(d.pel)} kW入力で約${fmt1(d.copPth)} kW。境界はCT配線次第です。`

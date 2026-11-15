@@ -127,8 +127,8 @@ Read today (UC3 Daikin Altherma):
 * **Faults** (input): unit error active `21`, error code `22` (`Text16`), sub-code `23`
 * **Temperatures** (input, `Temp16`): leaving water PHE `40` / BUH `41`, return `42`, DHW tank `43`,
   outdoor air `44`, liquid refrigerant `45`, room `50`
-* **Flow + electrical input** (input): flow `49` (`Int16`, L/min ×100), whole-system electrical
-  input `51` (`Pow16`, kW). Offset `51` is not dedicated booster-heater power.
+* **Flow + electrical input** (input): flow `49` (`Int16`, L/min ×100), reported heat-pump power
+  consumption `51` (`Pow16`, kW).
 * **Disinfection state** (input): current disinfection operation `33` (`Int16`, binary). The
   HomeHub map does not expose the configured weekday, start time or disinfection temperature.
 * **Setpoints and modes** (holding, read back): LWT main heating `1` / cooling `2`,
@@ -405,46 +405,20 @@ copied. When it is not live the **key is omitted entirely** rather than emitted 
 array and an empty one are different claims, and only absence says "no current reading". A device
 without a HomeHub therefore sees exactly the payload it saw before this feature existed.
 
-In the **web UI** (see [`DESIGN.md`](DESIGN.md)), X10A stays the prominent source everywhere and
-Modbus readings are marked in their own colour — a petrol token (`--src-mb`) that is neither a state
-colour (`--ok`/`--warn`/`--err`) nor a temperature one (`--flow-*`), because provenance is a third
-thing. The Settings connection row is link state rather than reading provenance, so it uses the same
-green/yellow/red state colours as WiFi, MQTT, Syslog and NTP:
+The [dashboard source rules](DESIGN.md#53-dashboard--the-operating-screen--default-after-setup)
+cover source labels and comparisons.
+When only HomeHub is reachable, the water temperatures can still supply ΔT. A heat-output estimate
+also needs valid flow, a running compressor and a supported mode and transfer direction. Without a
+configured HomeHub, the dashboard omits its readings and comparisons. The HomeHub setup row stays
+available in Settings.
 
-* **Both up** — the row shows the X10A value, unmarked. Tapping it opens the explainer, and the
-  gateway's reading appears at the **end** of the body, after the "Normal:" note: a full row carrying
-  the *Modbus register's own label*, the badge and the value, then the **difference** between the two
-  when the conversion is established. Native Altherma 4 flow and pressure show the unverified
-  conversion limit instead of a numeric comparison.
-  It sits last, not first, because a reader opens an explainer to find out what the quantity *is* —
-  the row's own value is already stated an inch above, in the header they just tapped. The label is
-  the gateway's rather than the X10A row's on purpose: this line is what someone verifying a pairing
-  on real hardware reads, and reusing the X10A label would show them their own assumption back.
-  A wide gap is left to speak for itself rather than coloured as an error — the two sensors
-  legitimately sit at different points in the circuit.
-* **X10A down, HomeHub up** — a banner says so, and each row it can supply shows the **Modbus** value
-  in petrol. A row it cannot shows `—`; a stale X10A number is never left standing. The schematic
-  follows the same rule, which makes it visibly sparse — about a dozen registers against a hundred —
-  and that is the honest shape of the state. **No comparison is shown here at all**: a *second*
-  opinion presupposes a first one, and the only X10A number still in memory is one the bus stopped
-  refreshing, so a "difference" against it would be a statement about two *instants* wearing the
-  shape of a statement about two *instruments*.
-  ΔT and heat output survive, because both sides of each come from the one source and nothing is
-  mixed across boundaries. **The COP does not.** It looks like the same arithmetic and is not: the
-  gateway measures the *whole unit's* electrical input, backup and immersion heater included, while
-  the heat figure is across the plate exchanger alone — precisely the boundary mismatch
-  [`cop_scope.hpp`](../main/logic/cop_scope.hpp) refuses, and one that collapses exactly when a
-  heater fires, reading as a failing heat pump while nothing is wrong. The gateway now carries the
-  compressor and tank-heater states, but not the BUH stage state and all source-boundary evidence the
-  quotient needs, so the answer remains: publish nothing, and name the reason
-  (`feature_gate.hpp` — disable, never degrade).
-  The electrical input itself *is* better here, since the HomeHub measures what X10A only estimates
-  from CT clamps at an assumed 230 V — read from input register **51** by its offset, never by its
-  unit, because the map carries three `kW` rows and the other two are the power *limit* setpoints.
-* **No HomeHub** — nothing Modbus appears anywhere: no row, no group, no comparison, no banner.
+[homehub-ekrhh-guide]: https://www.daikin.nl/content/dam/document-library/Installer-reference-guide/heat/accessories/ekrhh/EKRHH_Installer%20reference%20guide_4PEN744838-1E_English.pdf#page=43
 
-Registers with no X10A counterpart get their own group at the very end of the value list, after
-everything X10A carries.
+**Electrical input and COP.** HomeHub input register **51** reports heat-pump power consumption in
+`kW`. The [Daikin EKRHH guide, 4P744838-1E, §9.2.2, p. 43][homehub-ekrhh-guide] leaves the
+measurement point and heater inclusion unspecified. The dashboard displays that input and
+withholds COP in the HomeHub-only view because the electrical and heat-exchanger boundaries
+cannot be matched.
 
 **MQTT preserves the two sources instead of merging them.** X10A is retained as grouped JSON on
 `<base>/x10a`; an enabled HomeHub publishes its separate flat map on `<base>/modbus`. A disconnected

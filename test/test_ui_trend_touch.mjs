@@ -65,8 +65,9 @@ const context = vm.createContext({
   S, console,
   scrubArm: () => calls.push(["arm"]),
   scrubMove: (_plot, i) => calls.push(["move", i]),
+  scrubView: () => ({}),
   scrubIndex: (_plot, x) => x,
-  scrubEnd: () => { calls.push(["end"]); S.scrub = null; },
+  scrubEnd: () => { calls.push(["end"]); S.scrub = S.trendPointer = null; },
   histPinToggle: (id, i, source) => calls.push(["pin", id, i, source]),
   scrubCount: () => 20, renderTrendHosts: () => {},
 });
@@ -86,34 +87,43 @@ assert.deepEqual(calls, [
   ["arm"], ["move", 11],
   ["end"], ["pin", "valve_dhw", 13, ""],
 ], "a drag starting on the tooltip moves and pins the newly selected sample");
+calls.length = 0;
+host.fire("pointerup", graph, 13);
+assert.deepEqual(calls, [], "a late release without a matching active pointer cannot pin");
 
 // Exercise the real pin/rebuild functions: a keyboard user keeps both the focused replacement plot
 // and its chosen cursor after pinning/unpinning. Escape belongs to this plot, not its inspector.
 {
   const keyboardHost = new Host();
   const document = { activeElement: null };
-  let current;
-  const graphHost = { querySelectorAll: () => [current] };
-  const makePlot = () => ({
+  let current, other;
+  const graphHost = { querySelectorAll: () => [other, current] };
+  const makePlot = owner => ({
     dataset: { hist: "temperature", source: "", n: "20" },
     parentElement: { querySelector: () => ({ hidden: false }) },
     closest(selector) {
       if (selector === "[data-hist]") return this;
       if (selector === "#valueGroups, #inspHist, #settingsCards") return graphHost;
+      if (selector === ".vitem") return { querySelector: () => ({ dataset: { desc: owner } }) };
       return null;
     },
     querySelector: () => ({ hidden: false }), querySelectorAll: () => [],
     focus() { document.activeElement = this; },
   });
-  current = makePlot(); current.focus();
+  other = makePlot("X10A reading");
+  current = makePlot("HomeHub reading"); current.focus();
   const state = { histPin: new Map(), scrub: null, insp: "temperature" };
   const moves = [];
+  const samples = Array.from({ length: 20 }, (_, i) => i);
   const ctx = vm.createContext({
     S: state, document, clearTimeout() {},
-    historyData: { v: Array.from({ length: 20 }, (_, i) => i), dt: 300, t0: 1000 },
+    historyData: { v: samples, dt: 300, t0: 1000,
+      series: [{ source: "modbus", v: samples, offset: 0, raw: { v: samples } }] },
     renderCards: () => {
       keyboardHost.fire("focusout", current);
-      document.activeElement = null; current = makePlot();
+      document.activeElement = null;
+      other = makePlot("X10A reading");
+      current = makePlot("HomeHub reading");
     },
     renderInspect() {}, renderSettings() {},
   });
@@ -132,8 +142,9 @@ assert.deepEqual(calls, [
   keyboardHost.fire("keydown", current, 0, "Enter");
   assert.notEqual(current, first, "pinning must exercise the actual DOM replacement path");
   assert.equal(document.activeElement, current, "the replacement plot keeps keyboard focus");
+  assert.equal(other.dataset.cur, undefined, "the same-series chart in another row keeps its own cursor");
   assert.equal(+current.dataset.cur, 1, "the replacement plot keeps the chosen cursor");
-  assert.equal(state.histPin.get("temperature").t, 1300);
+  assert.equal(state.histPin.get("temperature").i, 1);
   keyboardHost.fire("keydown", current, 0, "ArrowRight");
   assert.equal(+current.dataset.cur, 2, "continued arrows start at the preserved cursor");
   const escape = keyboardHost.fire("keydown", current, 0, "Escape");
@@ -148,15 +159,23 @@ assert.deepEqual(calls, [
 // Ordinary values polls use setHtml directly, outside the explicit pin/legend rebuild path.
 {
   const document = { activeElement: null };
-  const makeLegend = () => ({
+  const makeLegend = owner => ({
     dataset: { histId: "dhw_tank", histSeries: "modbus" },
+    closest: selector => selector === ".vitem" ? {
+      querySelector: () => ({ dataset: { desc: owner } }),
+    } : null,
     focus() { document.activeElement = this; },
   });
-  let current = makeLegend(); current.focus();
+  let current = makeLegend("Daikin tank"), other = makeLegend("HomeHub tank");
+  current.focus();
   const host = {
     contains: (el) => el === current,
-    querySelectorAll: () => [current],
-    set innerHTML(_html) { current = makeLegend(); document.activeElement = null; },
+    querySelectorAll: () => [current, other],
+    set innerHTML(_html) {
+      current = makeLegend("Daikin tank");
+      other = makeLegend("HomeHub tank");
+      document.activeElement = null;
+    },
   };
   const stateSource = readAppFragments(["app_state.js"]);
   const writer = stateSource.slice(stateSource.indexOf("const _html = {}"), stateSource.indexOf("function renderHeader()"));
@@ -166,7 +185,7 @@ assert.deepEqual(calls, [
   ctx.repaint("valueGroups", "updated readings");
   assert.notEqual(current, first, "the poll must replace the real container");
   assert.equal(document.activeElement, current,
-    "changing readings must preserve the focused legend button across a normal poll");
+    "changing readings must preserve the legend button on its original row among duplicate series");
 }
 
 // A cached disclosure can open and close before any poll renders its open state. Exercise the real
@@ -441,8 +460,8 @@ function assertDiagnosisCardPolling(historySource) {
 }
 
 assertDiagnosisCardPolling(disclosureSource);
-const diagnosisBranch = `if (host.id !== "valueGroups" || a.parentNode !== host ||
-          a.getAttribute("data-dashboard-card") !== "diagnosis") return false;`;
+const diagnosisBranch = `if (chart === null && (host.id !== "valueGroups" ||
+          a.parentNode !== host || a.getAttribute("data-dashboard-card") !== "diagnosis")) return false;`;
 assert.equal(disclosureSource.split(diagnosisBranch).length, 2);
 assert.throws(() => assertDiagnosisCardPolling(disclosureSource.replace(diagnosisBranch, "return false;")),
   error => error.code === "ERR_ASSERTION" && error.message.startsWith("a diagnosis refresh must not detach"),

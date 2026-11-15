@@ -6,9 +6,14 @@
 // The device keeps every source at one fixed cadence and reports the labels each source owns. The
 // browser never pattern-matches its own candidates: offering a trend the device isn't buffering
 // would be an empty chart by design.
-const histFmt1 = (n) => Number(n).toLocaleString(LANG, {
-  minimumFractionDigits: 1, maximumFractionDigits: 1,
-});
+let histFormatLanguage, histNumberFormat;
+function histFmt1(n) {
+  if (histFormatLanguage !== LANG) {
+    histNumberFormat = new Intl.NumberFormat(LANG, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+    histFormatLanguage = LANG;
+  }
+  return histNumberFormat.format(Number(n));
+}
 // Each entry is {id, label}: the ID is the stable history key GET /history takes. Paired sources
 // deliberately reuse logic/history.hpp's TRENDS ids ("dhw_tank", "outdoor_air", …); an honest
 // single-source timeline such as Modbus disinfection has its own id. The LABEL is how this profile
@@ -56,25 +61,9 @@ function hasHist(id) {
   return D ? D.ready(Object.fromEntries(D.ins.map((k) => [k, hasDeviceHist(k)]))) : hasDeviceHist(id);
 }
 
-// Sum CT current only when every phase ring declared by this firmware snapshot has a value in the
-// bucket. A null is not zero: CT-L3 is deliberately withheld while its shared byte carries the
-// HP-Forced flag, and adding the surviving phases would understate input. Returning null lets both
-// derived consumers use their INV fallback, exactly like liveData(); a real complete 0 A set still
-// returns zero and therefore also falls back for the compressor-only estimate.
-function completeCtCurrent(s, has) {
-  const keys = ["ct_l1", "ct_l2", "ct_l3"].filter((k) => has && has[k]);
-  return !keys.length || keys.some((k) => s[k] == null)
-    ? null : keys.reduce((a, k) => a + s[k], 0);
-}
-
-// ── Derived trends: computed pills and combined component states ───────────────────────────────
-// Pump speed, ΔT, heat output, electrical input and COP have no directly matching register value, so
-// the device has nothing to buffer for the displayed figure itself. BUH likewise has two physical
-// stage bits but one component-level inspector. Their 24-hour curves/timeline are assembled
-// HERE, out of the rings of what each is computed FROM,
-// by the same expressions liveData() uses for the live number — one definition of each figure
-// rather than a firmware copy and a browser copy free to drift apart. `inv_current` and `ct_l1..3`
-// are in logic/history.hpp's TRENDS for exactly this; they are inputs first and rows second.
+// Derived trends combine measurements on the same five-minute raster. The recorded
+// samples within a bucket can come from different sweeps. Electrical input and COP
+// stay live-only. Raw phase currents and inverter current have their own rings.
 //
 // Every input arrives on ONE raster: history.cpp commits every ring on the same bucket boundary, so
 // sample i is the same five minutes in all of them, and a row the profile lacks is simply not
@@ -130,49 +119,6 @@ const DERIVED = {
       return (s.flow / 60) * 4.186 * (s.leaving_water - s.return_water);
     },
   },
-  // Amps × an assumed 230 V, a complete declared CT set preferred over inverter current —
-  // liveData()'s rule, one sample at a time. The live version needs `d.ouHeldOver` to gate the INV
-  // fallback because /values still carries last run's number; here the ring has already withheld
-  // it, so a null is simply a null. An idle plant reads 0 A on fitted clamps, and the fallback is
-  // what makes that a compressor figure rather than a flat zero. The firmware can only store that gap
-  // where it can read the compressor speed. Without a speed sample it withheld nothing, so the live
-  // pill's refusal applies here as well.
-  pel: {
-    unit: "kW", ins: ["ct_l1", "ct_l2", "ct_l3", "inv_current", "comp_rps"],
-    ready: (h) => (h.inv_current && h.comp_rps) || h.ct_l1 || h.ct_l2 || h.ct_l3,
-    fn: (s, has) => {
-      const ct = completeCtCurrent(s, has);
-      if (ct != null && ct > 0) return (ct * 230) / 1000;
-      if (!has || !has.comp_rps || s.comp_rps == null) return null;
-      return s.inv_current == null ? null : (s.inv_current * 230) / 1000;
-    },
-  },
-  // The quotient, and it is deliberately drawn on FEWER samples than its two inputs. Two gates:
-  //   running — the live pill's own (rps > 5, ΔT > 0.5); a COP of a stopped plant is not a small
-  //             COP, it is not one at all.
-  //   scope   — cop_scope.hpp: the CT clamps see the whole unit INCLUDING both resistive heaters
-  //             while this historical quotient deliberately retains the pre-BUH boundary. R2T now
-  //             has its own curve, but tank-heater heat crosses neither water sensor and the five-
-  //             minute rings keep last readings/events rather than one synchronised plant sample.
-  //             A CT-sourced sample therefore still draws NOTHING instead of splicing together a
-  //             plausible whole-plant quotient. An INV-sourced sample has the heaters outside both
-  //             sides and needs no such evidence, which is why it survives.
-  cop: {
-    unit: "", ins: ["flow", "leaving_water", "return_water", "comp_rps", "inv_current",
-                    "ct_l1", "ct_l2", "ct_l3"],
-    none: "hist.cop_none",
-    ready: (h) => h.flow && h.leaving_water && h.return_water && h.comp_rps && h.inv_current,
-    fn: (s, has) => {
-      const ct = completeCtCurrent(s, has);
-      if (ct != null && ct > 0) return null;           // whole-unit divisor — see the note above
-      if (s.inv_current == null || s.flow == null) return null;
-      if (s.leaving_water == null || s.return_water == null || s.comp_rps == null) return null;
-      const dt = s.leaving_water - s.return_water;
-      const pel = (s.inv_current * 230) / 1000;
-      if (!(s.comp_rps > 5) || !(dt > 0.5) || !(pel > 0.2)) return null;
-      return ((s.flow / 60) * 4.186 * dt) / pel;
-    },
-  },
 };
 
 // Was sample `i` absent because the outdoor unit was ASLEEP rather than because something failed to
@@ -204,10 +150,12 @@ const histCacheKey = (id, source) => {
 const histSourceClass = (source) => source === "modbus" ? " mb" : source === "room" ? " room" : "";
 
 function histX10aAvailable(h) {
-  if (typeof x10aDown === "function" ? x10aDown() : !!(S.status?.hp && S.status.hp.connected === false)) return false;
+  if (histX10aDown()) return false;
   const x10a = h.series?.find((s) => s.source === "x10a");
   return !!x10a && x10a.v.some((v) => v != null);
 }
+
+const histX10aDown = () => typeof x10aDown === "function" ? x10aDown() : S.status?.hp?.connected === false;
 
 function histHiddenSet(h) {
   if (S.histHidden?.has(h.id)) return S.histHidden.get(h.id);
@@ -223,38 +171,70 @@ function histVisibleSeries(h) {
   if (h.series.length === 1) return h.series;
   const hidden = histHiddenSet(h);
   const visible = h.series.filter((s) => !hidden.has(s.source));
+  if (h.forecast) return visible.length ? visible : h.series;
   if (visible.some((s) => s.v.some((v) => v != null))) return visible;
   // A source can disappear or roll into an all-gap ring after a legend choice. Keep an available
   // curve visible without discarding either source's history or the user's saved browser choice.
   const fallback = h.series.find((s) => s.v.some((v) => v != null));
-  return fallback ? h.series.filter((s) => visible.includes(s) || s === fallback) : visible;
+  return fallback ? h.series.filter((s) => visible.includes(s) || s === fallback)
+    : visible.length ? visible : h.series;
 }
 
 // Include the lifetime and time anchor even when a new flat ring draws identical SVG geometry.
+const histViewRevision = view =>
+  [S.histEpoch, view.gen, view.t0, view.refreshFailed || view.aged, view.forecast?.revision, tankAuxRevision(view.tankAux),
+    histVisibleSeries(view).map(series => `${series.source}:${histRetained(series.raw) ? "retained" : "fresh"}`).join(",")].join("/");
 function histRevision(view) {
-  return ` data-rev="${esc([S.histEpoch, view.gen, view.t0].join("/"))}"`;
+  return ` data-rev="${esc(histViewRevision(view))}"`;
 }
 
 function histLegendHtml(h, s, cls) {
-  const visible = histVisibleSeries(h).some((q) => q.source === s.source);
-  const dataSeries = histVisibleSeries(h).filter((q) => q.v.some((v) => v != null));
-  const last = visible && (dataSeries.length <= 1 ? (s.v.some((v) => v != null) || histVisibleSeries(h).length <= 1) : false);
+  const visible = histVisibleSeries(h);
+  const shown = visible.includes(s);
+  const last = shown && histLegendLast(h, visible, s);
   return `<button type="button" class="vhist-source${cls}" data-hist-id="${esc(h.id)}" ` +
-    `data-hist-series="${esc(s.source)}" aria-pressed="${visible}"${last ? " disabled" : ""}>` +
-    `<i></i>${esc(s.name)}</button>`;
+    `data-hist-series="${esc(s.source)}" aria-pressed="${shown}"${last ? " disabled" : ""}>` +
+    `<i></i>${esc(histSeriesLabel(s))}</button>`;
+}
+
+function histLegendLast(h, visible, s) {
+  if (h.forecast) return visible.length <= 1;
+  const withSamples = visible.filter(q => q.v.some(v => v != null));
+  if (withSamples.length === 0) return visible.length <= 1;
+  return withSamples.length === 1 && withSamples[0] === s;
+}
+
+function histSeriesLabel(series) {
+  return histRetained(series.raw) && series.v.some(v => v != null)
+    ? `${series.name} · ${t("hist.retained")}` : series.name;
+}
+
+function lastSample(values, end = values.length) {
+  while (end > 0) {
+    if (values[--end] != null) return end;
+  }
+  return -1;
+}
+
+function histRetainedMarker(series, fraction, cls = "", top = 50) {
+  const label = esc(`${series.name} · ${t("hist.retained")}`);
+  return `<span class="vhist-mark vhist-retained${cls}" role="img" aria-label="${label}" ` +
+    `style="left:${(fraction * 100).toFixed(3)}%;top:${top.toFixed(2)}%"></span>`;
 }
 
 function histSeriesToggle(id, source) {
   const h = historyView(id);
   const s = h?.series?.find((q) => q.source === source);
   if (!s) return;
-  const visible = histVisibleSeries(h).some((q) => q.source === source);
-  const dataSeries = histVisibleSeries(h).filter((q) => q.v.some((v) => v != null));
-  if (visible && (dataSeries.length <= 1 ? (s.v.some((v) => v != null) || histVisibleSeries(h).length <= 1) : false)) return;
+  const visible = histVisibleSeries(h);
+  const shown = visible.includes(s);
+  if (shown && histLegendLast(h, visible, s)) return;
   const hidden = new Set(histHiddenSet(h));
-  if (visible) hidden.add(source); else hidden.delete(source);
+  if (shown) hidden.add(source); else hidden.delete(source);
+  cancelHistoryGesture();
   S.histHidden.set(id, hidden);
-  S.scrub = null;
+  const pin = S.histPin.get(id);
+  if (pin && !pin.forecast && !pin.source && histPinIndex(id, h) < 0) S.histPin.delete(id);
   S.clickHold = false;
   S.inspHistSig = null;
   renderTrendHosts();
@@ -269,42 +249,186 @@ const histAwaiting = (key, epoch) => {
   const waiting = S.histAwait?.get(key);
   return !!waiting && waiting.epoch === epoch && Date.now() - waiting.at < HIST_IDENTITY_WAIT_MS;
 };
-async function ensureHist(id, source = "x10a", paint = true, signal = null) {
+function ensureHist(id, source = "x10a", mode = "open") {
   const epoch = syncHistSources();
   const key = histCacheKey(id, source);
+  const derived = source === "x10a" && DERIVED[id];
   const offered = source === "modbus" ? hasModbusHist(id)
     : source === "env3" ? hasEnv3Hist(id) : source === "room" ? hasRoomHist(id) : hasHist(id);
   if (!offered) return;
   if (S.histBusy.has(key)) return S.histRequests.get(key)?.done;
   if (histAwaiting(key, epoch)) return;
   const c = S.hist.get(key);
-  if (c && Date.now() - c.at < 60000) return;
-  if (source === "x10a" && DERIVED[id]) { await ensureDerived(id); return; }
-  const previous = S.hist.get(key);
-  const sourceId = source === "modbus" ? (modbusEndpointId() || "modbus") : source;
-  let finish;
-  const request = { epoch, done: new Promise((resolve) => { finish = resolve; }) };
+  const cooldown = c?.refreshFailed && derived ? 8000 : 60000;
+  if (c && Date.now() - c.at < cooldown) return;
+  if (derived) {
+    if (mode === "refresh") {
+      // Advance one raw input per poll. Assemble only when no input needs a transport.
+      for (const input of DERIVED[id].ins) {
+        if (!hasDeviceHist(input)) continue;
+        const started = ensureHist(input);
+        if (started) return started;
+      }
+    }
+    return ensureDerived(id);
+  }
+  return fetchHistory(id, source, key, epoch, c);
+}
+
+let historyTransport = null;
+const HIST_MAX_SAMPLES = 288;  // Firmware HISTORY_SAMPLES at its five-minute cadence
+
+function fetchHistory(id, source, key, epoch, previous) {
+  const request = { run: () => readHistory(id, source, key, epoch, previous, request) };
+  request.done = new Promise(resolve => { request.finish = resolve; });
   (S.histRequests ||= new Map()).set(key, request);
   S.histBusy.add(key);
+  pumpHistoryQueue();
+  return request.done;
+}
+
+function pumpHistoryQueue() {
+  if (historyTransport || (typeof _pollBusy !== "undefined" && _pollBusy)) return;
+  for (const request of S.histRequests?.values() || []) {
+    if (!request.run) continue;
+    historyTransport = request;
+    request.active = request.run();
+    break;
+  }
+}
+
+function yieldHistoryToPoll() {
+  if (!historyTransport?.controller) return;
+  const { controller, active, retried } = historyTransport;
+  // The first poll takes precedence. The retried read gets its own bounded timeout so a
+  // response slower than one poll interval can still complete without concurrent requests.
+  if (retried) return active;
+  historyTransport.yielded = true;
+  controller.abort();
+  return active;
+}
+
+function validHistoryHeld(ranges, samples) {
+  if (!Array.isArray(ranges) || ranges.length > Math.ceil(samples.length / 2)) return false;
+  let end = 0;
+  for (const range of ranges) {
+    if (!Array.isArray(range) || range.length !== 2) return false;
+    const [from, count] = range;
+    if (!Number.isSafeInteger(from) || !Number.isSafeInteger(count) || from < end ||
+        count <= 0 || from + count > samples.length) return false;
+    end = from + count;
+    for (let i = from; i < end; i++) if (samples[i] !== null) return false;
+  }
+  return true;
+}
+
+const X10A_HELD_HISTORY = new Set(["outdoor_air", "outdoor_heat_exchanger", "discharge",
+  "circuit_pressure", "inv_current"]);
+
+// A 288-sample response plus the maximally fragmented held map and escaped labels fits below 4 KiB.
+// Bound decoded bytes before parsing, including when the firmware uses chunked transfer.
+async function readHistoryJson(response) {
+  if (!response.body) throw new Error("History response has no body");
+  const limit = 4096;
+  const bytes = new Uint8Array(limit);
+  const reader = response.body.getReader();
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (size + value.byteLength > limit) {
+        void reader.cancel().catch(() => {});
+        throw new Error("History response exceeds its wire budget");
+      }
+      bytes.set(value, size);
+      size += value.byteLength;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, size)));
+}
+
+function validHistoryBucket(start, count) {
+  if (start == null) return true;
+  if (!Number.isSafeInteger(start) || start < -HIST_MAX_SAMPLES ||
+      start > Number.MAX_SAFE_INTEGER - HIST_MAX_SAMPLES || !count || start + count < 0)
+    return false;
+  const uptime = S.status?.uptime_s;
+  if (!Number.isFinite(uptime) || S.otaCached) return true;
+  const now = historyBrowserTime();
+  const seconds = Math.max(0, now - (S.statusRequestedAt ?? S.statusReceivedAt ?? now)) / 1000;
+  // The device cannot have sampled uptime before the status request began. Use that earliest
+  // instant for the upper bound and allow one second for integer uptime.
+  return start + count <= Math.floor((uptime + seconds + 1) / 300);
+}
+
+function validHistoryTime(start, bootBucket, count, deviceTime = historyDeviceTime()) {
+  if (start == null || !count) return true;
+  // A restored ring without a monotonic anchor needs an accepted device clock for alignment.
+  if (!Number.isFinite(deviceTime)) return false;
+  const last = start + (count - 1) * 300;
+  const uptime = S.status?.uptime_s;
+  if (Number.isInteger(bootBucket) && Number.isFinite(uptime)) {
+    const expected = deviceTime - (uptime + historyStatusElapsed()) + (bootBucket + count) * 300;
+    if (Math.abs(last - expected) > 2 + POLL_TIMEOUT_MS / 1000) return false;
+  }
+  return last <= deviceTime + 1 + POLL_TIMEOUT_MS / 1000 &&
+    last >= deviceTime - HIST_MAX_SAMPLES * 300;
+}
+
+async function readHistory(id, source, key, epoch, previous, request) {
+  const sourceId = source === "modbus" ? (modbusEndpointId() || "modbus") : source;
+  const controller = typeof AbortController === "function" ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), POLL_TIMEOUT_MS) : null;
+  request.controller = controller;
+  request.run = null;
+  const failed = () => ({
+    ...(previous && !previous.err && previous.v.some(v => v != null)
+      ? previous : { gen: previous?.gen || 0, source, sourceId, err: true, v: [] }),
+    at: Date.now(), refreshFailed: true,
+  });
   try {
     const suffix = source === "modbus" ? "&source=modbus"
       : source === "env3" ? "&source=env3" : source === "room" ? "&source=room" : "";
     const r = await fetch("/history?row=" + encodeURIComponent(id) + suffix,
-                          signal ? { signal } : undefined);
-    const j = await r.json();
+                          controller ? { signal: controller.signal } : undefined);
+    const j = await readHistoryJson(r);
     if (syncHistSources() !== epoch || S.histRequests.get(key) !== request) return;
     // A JSON refusal that is not a history change (no snapshot identity, an unknown row) is an
     // error for this cache period, not a reason to re-ask every status period; only "history
     // changed" waits for the next status lifetime below.
-    if (j && j.ok === false && j.error !== "history changed; retry") {
-      S.hist.set(key, { at: Date.now(), source, sourceId, err: true, v: [] });
+    const changed = j?.ok === false && j.error === "history changed; retry";
+    const expectedSource = id === "circulation_state" && source === "x10a" ? "mqtt" : source;
+    const expectedEpoch = S.status?.history?.epoch;
+    const expectedBoot = S.status?.boot_id;
+    const legacy = !Number.isInteger(expectedEpoch) && j?.id === undefined && j?.source === undefined;
+    const bucket = j?.b0 ?? j?.boot_b0;
+    const time = j?.t0;
+    const wallTimeShape = time == null ||
+      (Number.isSafeInteger(time) && Math.abs(time) <= 8.64e12 - HIST_MAX_SAMPLES * 300);
+    const wallTimeValid = wallTimeShape && validHistoryTime(time, bucket, Array.isArray(j?.v) ? j.v.length : 0);
+    if (!changed && (r.ok === false || j?.ok === false || !Array.isArray(j?.v) ||
+        j.v.length > HIST_MAX_SAMPLES || j.v.some(v => v !== null &&
+          (!Number.isInteger(v) || v < -32766 || v > 32767)) ||
+        (!legacy && (j.id !== id || j.source !== expectedSource || j.dt !== 300)) ||
+        (j.label != null && (typeof j.label !== "string" || j.label.length > 79)) ||
+        (j.unit != null && (typeof j.unit !== "string" || j.unit.length > 7)) ||
+        (j.dt != null && j.dt !== 300) ||
+        (j.b0 != null && (j.b0 < 0 || j.boot_b0 != null)) ||
+        (j.boot_b0 != null && !(j.boot_b0 < 0)) ||
+        !validHistoryBucket(bucket, j.v.length) ||
+        !wallTimeShape ||
+        (!wallTimeValid && bucket == null) ||
+        (j.held != null && (!validHistoryHeld(j.held, j.v) ||
+          (j.held.length > 0 && (expectedSource !== "x10a" || !X10A_HELD_HISTORY.has(id))))))) {
+      S.hist.set(key, failed());
       return;
     }
     // /status owns the source lease. A reply composed after an unseen reset or reboot must wait
     // for that status lifetime before becoming a chart; a recent fetch alone proves no identity.
-    const expectedEpoch = S.status?.history?.epoch;
-    const expectedBoot = S.status?.boot_id;
-    if ((Number.isInteger(expectedEpoch) && j.epoch !== expectedEpoch) ||
+    if (changed || (Number.isInteger(expectedEpoch) && j.epoch !== expectedEpoch) ||
         (typeof expectedBoot === "string" && j.boot_id !== expectedBoot)) {
       (S.histAwait ||= new Map()).set(key, { epoch, at: Date.now() });
       return;
@@ -313,47 +437,74 @@ async function ensureHist(id, source = "x10a", paint = true, signal = null) {
     // t0 = the unix instant of sample 0, present only when the device's SNTP clock is synced. Null
     // means the scrub readout falls back to an AGE ("vor 6.3 h") — never a fabricated wall-clock
     // time, the same rule logic/timestamp.hpp applies to an unsynced clock on the firmware side.
-    // `gen` counts fetches. It is what makes an index-anchored pin (no wall clock on the device)
-    // honest: such a pin is only valid for the exact series it was made on, and a refetch may have
+    // `gen` counts fetches. An index pin without a boot-relative bucket is only valid for the
+    // exact series it was made on, and a refetch may have
     // rolled the ring — so it is dropped rather than re-pointed at a different sample.
     const gen = ((previous || {}).gen || 0) + 1;
     // A few legacy X10A rows carry their unit only in the catalog label. Normalise that at the
     // visual boundary too, otherwise the live row can say "22.8 L/min" while its own trend and
     // crosshair still say just "22.8". The API remains byte-for-byte compatible.
-    const device = { at: Date.now(), gen, source, sourceId, dt: +j.dt || 300, unit: displayUnit(j),
+    const receivedAt = Date.now();
+    const receivedDeviceTime = historyDeviceTime();
+    const device = { at: receivedAt, receivedAt, receivedTick: historyBrowserTime(), receivedDeviceTime,
+                     gen, source, sourceId,
+                     dt: 300,
+                     unit: displayUnit(j),
                      label: typeof j.label === "string" ? j.label : "",
-                     t0: typeof j.t0 === "number" ? j.t0 : null,
-                     b0: Number.isInteger(j.b0) ? j.b0 : null,
+                     t0: wallTimeValid ? time ?? null : null,
+                     b0: Number.isSafeInteger(bucket) ? bucket : null,
                      held: Array.isArray(j.held) ? j.held : [],
-                     v: Array.isArray(j.v) ? j.v : [] };
+                     v: j.v };
     S.hist.set(key, device);
   } catch (e) {
-    if (syncHistSources() === epoch && S.histRequests.get(key) === request)
-      S.hist.set(key, { at: Date.now(), source, sourceId, err: true, v: [] });
-  } finally {
-    finish();
-    // An obsolete request must not release a successor using the same cache key.
-    if (S.histRequests.get(key) === request) {
-      S.histRequests.delete(key);
-      S.histBusy.delete(key);
-      if (paint) renderApp();
+    if (syncHistSources() === epoch && S.histRequests.get(key) === request) {
+      if (request.yielded && !request.retried) {
+        request.yielded = false;
+        request.retried = true;
+        request.controller = null;
+        request.run = () => readHistory(id, source, key, epoch, previous, request);
+      } else S.hist.set(key, failed());
     }
+  } finally {
+    if (timer != null) clearTimeout(timer);
+    historyTransport = null;
+    // An obsolete request must not release a successor using the same cache key.
+    if (!request.run) {
+      request.finish();
+      if (S.histRequests.get(key) === request) {
+        S.histRequests.delete(key);
+        S.histBusy.delete(key);
+        renderApp();
+      }
+    }
+    pumpHistoryQueue();
   }
 }
 
-// Direct schematic measurements may have two independent rings. Fetch both together only for a
-// chart the user actually opened; derived figures continue to fetch their X10A inputs alone.
-async function ensureHistPair(id) {
-  await Promise.all([
-    hasHist(id) ? ensureHist(id) : null,
-    hasModbusHist(id) ? ensureHist(id, "modbus") : null,
-    hasEnv3Hist(id) ? ensureHist(id, "env3") : null,
-    hasRoomHist(id) ? ensureHist(id, "room") : null,
-    id === "dhw_tank" ? ensureHist("smart_grid_mode") : null,
-    id === "dhw_tank" ? ensureHist("smart_grid_mode", "modbus") : null,
-    id === "dhw_tank" ? ensureHist("bsh_state") : null,
-    id === "dhw_tank" ? ensureHist("bsh_state", "modbus") : null,
-  ]);
+// Explicit disclosure may queue independent rings together. The shared transport reads them in
+// order. A background refresh can enqueue only one request. Derived charts use X10A inputs.
+function ensureHistPair(id, mode = "open") {
+  // A repaint needs no result from a request that is already running. Derived charts can still
+  // await their own inputs directly through ensureHist.
+  if (mode !== "open" && S.histBusy.size) return;
+  const requests = [];
+  const request = (row, source, offered) => {
+    const key = histCacheKey(row, source);
+    if (!offered || S.histBusy.has(key) || (mode !== "open" && requests.length)) return;
+    const started = ensureHist(row, source, mode);
+    if (started) requests.push(started);
+  };
+  request(id, "x10a", hasHist(id));
+  request(id, "modbus", hasModbusHist(id));
+  request(id, "env3", hasEnv3Hist(id));
+  request(id, "room", hasRoomHist(id));
+  if (id === "dhw_tank") {
+    for (const row of ["smart_grid_mode", "bsh_state"]) {
+      request(row, "x10a", hasHist(row));
+      request(row, "modbus", hasModbusHist(row));
+    }
+  }
+  if (requests.length) return Promise.all(requests);
 }
 
 // A derived series: fetch every input (each through ensureHist above, so each is cached and
@@ -375,41 +526,65 @@ async function ensureDerived(id) {
   const D = DERIVED[id];
   if (S.histBusy.has(id)) return S.histRequests.get(id)?.done;
   if (histAwaiting(id, epoch)) return;
+  const previous = S.hist.get(id);
+  const previousGen = previous?.gen || 0;
+  const failed = () => previous && !previous.err && previous.v.some(v => v != null)
+    ? { ...previous, at: Date.now(), refreshFailed: true }
+    : { at: Date.now(), gen: previousGen, err: true, v: [] };
   let finish;
   const request = { epoch, done: new Promise((resolve) => { finish = resolve; }) };
   (S.histRequests ||= new Map()).set(id, request);
   S.histBusy.add(id);
   try {
-    const has = Object.fromEntries(D.ins.map((k) => [k, hasDeviceHist(k)]));
-    const use = D.ins.filter((k) => has[k]);
+    const use = D.ins.filter(hasDeviceHist);
     await Promise.all(use.map((k) => ensureHist(k)));
     if (syncHistSources() !== epoch || S.histRequests.get(id) !== request) return;
     // An input refused for its source identity is pending, not failed: wait with it rather than
     // caching "Trend unavailable." for up to one status period. Marking the derived id as awaiting
     // too keeps the finally-block render from re-entering this function at once.
-    if (use.some((k) => !S.hist.get(k) && histAwaiting(k, epoch))) {
+    if (use.some(k => histAwaiting(k, epoch))) {
       (S.histAwait ||= new Map()).set(id, { epoch, at: Date.now() });
       return;
     }
-    const src = use.map((k) => [k, S.hist.get(k)]).filter(([, h]) => h && !h.err && h.v.length);
-    if (!src.length) { S.hist.set(id, { at: Date.now(), err: true, v: [] }); return; }
+    // Keep transport failures separate from gaps in a successfully fetched ring.
+    const rings = use.map(k => [k, S.hist.get(k)]);
+    if (rings.some(([, h]) => !h || h.err || h.refreshFailed)) {
+      S.hist.set(id, failed());
+      return;
+    }
+    const src = rings.filter(([, h]) => h.v.length).map(([key, h]) => [key, expireHistSamples(h)]);
+    const inputs = JSON.stringify([use, src.map(([key, h]) => [key, h.gen, h.expired || 0])]);
+    if (previous && previous.inputs === inputs) {
+      S.hist.set(id, { ...previous, at: Date.now(), refreshFailed: false });
+      return;
+    }
+    if (!src.length) {
+      S.hist.set(id, { at: Date.now(), gen: previousGen + 1, inputs, v: [] });
+      return;
+    }
     const dt = src[0][1].dt || 300;
     let start = 0, end = 0, mode = "tail";
     if (src.every(([, h]) => Number.isInteger(h.b0))) {
       mode = "bucket";
       start = Math.min(...src.map(([, h]) => h.b0));
       end = Math.max(...src.map(([, h]) => h.b0 + h.v.length - 1));
-    } else if (src.every(([, h]) => typeof h.t0 === "number" && h.dt === dt)) {
+    } else if (src.length === 1 && Number.isSafeInteger(src[0][1].t0)) {
       mode = "time";
       start = Math.min(...src.map(([, h]) => h.t0));
       end = Math.max(...src.map(([, h]) => h.t0 + (h.v.length - 1) * dt));
+    } else if (src.some(([, h]) => h.b0 != null || h.t0 != null)) {
+      // A wall-clock correction between requests can shift timestamps by a full bucket.
+      S.hist.set(id, { at: Date.now(), gen: previousGen + 1, inputs, v: [] });
+      return;
     } else {
       end = Math.max(...src.map(([, h]) => h.v.length)) - 1;
     }
-    const n = mode === "tail" ? end + 1
-      : Math.round((end - start) / (mode === "time" ? dt : 1)) + 1;
+    const step = mode === "time" ? dt : 1;
+    const span = (end - start) / step + 1;
+    const n = Math.min(span, HIST_MAX_SAMPLES);
+    start += (span - n) * step;
     const sourceIndex = (h, i) => mode === "bucket" ? start + i - h.b0
-      : mode === "time" ? Math.round((start + i * dt - h.t0) / dt)
+      : mode === "time" ? (start + i * dt - h.t0) / dt
       : h.v.length - n + i;
     const v = [], heldRuns = [];
     for (let i = 0; i < n; i++) {
@@ -420,7 +595,7 @@ async function ensureDerived(id) {
         s[k] = raw == null ? null : raw / 10;             // tenths on the wire, units in the formula
         if (raw == null) { missing++; if (j >= 0 && j < h.v.length && histHeld(h, j)) heldMissing++; }
       }
-      const out = D.fn(s, has);
+      const out = D.fn(s);
       v.push(out == null || !Number.isFinite(out) ? null : Math.round(out * 10));
       // A gap inherits its REASON, and only when EVERY missing input carries it: "the outdoor unit
       // was resting" is a statement that nothing failed, so one input that genuinely failed to
@@ -431,23 +606,20 @@ async function ensureDerived(id) {
         if (last && last[0] + last[1] === i) last[1]++; else heldRuns.push([i, 1]);
       }
     }
-    const gen = ((S.hist.get(id) || {}).gen || 0) + 1;
+    const gen = previousGen + 1;
     const wall = src.find(([, h]) => typeof h.t0 === "number");
-    const bucket = src.find(([, h]) => Number.isInteger(h.b0));
     const t0 = mode === "time" ? start
-      : mode === "bucket" && wall ? wall[1].t0 - (wall[1].b0 - start) * dt
-      : wall ? wall[1].t0 - (n - wall[1].v.length) * dt : null;
-    const b0 = mode === "bucket" ? start
-      : mode === "time" && bucket && typeof bucket[1].t0 === "number"
-        ? bucket[1].b0 - Math.round((bucket[1].t0 - start) / dt)
-      : bucket ? bucket[1].b0 - (n - bucket[1].v.length) : null;
-    S.hist.set(id, { at: Date.now(), gen, dt, unit: D.unit,
+      : mode === "bucket" && wall ? wall[1].t0 - (wall[1].b0 - start) * dt : null;
+    const b0 = mode === "bucket" ? start : null;
+    const receivedAt = Date.now();
+    S.hist.set(id, { at: receivedAt, receivedAt, receivedTick: historyBrowserTime(),
+                     receivedDeviceTime: historyDeviceTime(), gen, inputs, dt, unit: D.unit,
                      t0: typeof t0 === "number" ? t0 : null,
                      b0: Number.isInteger(b0) ? b0 : null,
                      held: heldRuns, v });
   } catch (e) {
     if (syncHistSources() === epoch && S.histRequests.get(id) === request)
-      S.hist.set(id, { at: Date.now(), err: true, v: [] });
+      S.hist.set(id, failed());
   } finally {
     finish();
     if (S.histRequests.get(id) === request) {
@@ -484,6 +656,8 @@ function histScale(pts, sampleCount) {
 }
 
 const ENV3_COMBINED_ID = "env3_combined";
+const ENV3_FORECAST_ID = "env3_forecast";
+const env3ChartId = id => id === ENV3_COMBINED_ID || id === ENV3_FORECAST_ID;
 const ENV3_COMBINED_SERIES = Object.freeze([
   { id: "env3_temperature", label: "env.temperature" },
   { id: "env3_humidity", label: "env.humidity" },
@@ -505,7 +679,7 @@ const WEATHER_FORECAST_SERIES = Object.freeze([
 // the right of "now"; stale, incomplete or malformed responses disappear instead of being drawn as
 // plausible measurements. Device NTP time, not the browser clock, is the shared axis anchor.
 function weatherForecastView() {
-  if (S.transportUnavailable === "status") return null;
+  if (S.otaCached || S.transportUnavailable === "status") return null;
   const w = S.status?.weather_forecast;
   const nowMs = Date.parse(S.status?.ntp?.time || "");
   if (!w?.configured || !w.available || !w.fresh || !Array.isArray(w.hourly) ||
@@ -525,31 +699,50 @@ function weatherForecastView() {
     if (points.length && time <= points[points.length - 1].time) return null;
     points.push({ time, temperature, humidity, pressure });
   }
-  return points.length >= 2 ? { now, points } : null;
+  if (points.length < 2) return null;
+  const anchor = Object.fromEntries(WEATHER_FORECAST_SERIES.map(spec => {
+    const env = S.status?.env3;
+    const current = env?.[spec.env];
+    return [spec.key, env?.fresh && Number.isFinite(current) ? current : null];
+  }));
+  return { now, points, anchor, revision: JSON.stringify([now, points, anchor]) };
 }
 
-// One timeline carrying one or more independent instruments. `b0` is the firmware's monotonic
-// 5-minute bucket and therefore the authoritative alignment even before SNTP; wall time is the next
-// choice, and tail alignment is the backwards-compatible fallback for an older response. A missing
-// sample stays null in its own series — the other instrument may still draw at that instant.
+// The boot raster is authoritative even before SNTP. A wall-only ring has its own axis.
+// Legacy rings without either anchor retain the relative tail view.
 function alignedHistoryView(id, raw) {
-  raw = raw.filter((s) => s.h && !s.h.err && Array.isArray(s.h.v) && s.h.v.length);
+  const supplied = raw;
+  // An expired ring can still describe a refused refresh, but it cannot anchor its peers.
+  raw = raw.map(s => ({ ...s, h: expireHistSamples(s.h) }))
+    .filter((s) => s.h && !s.h.err && Array.isArray(s.h.v) &&
+      s.h.v.length > (s.h.expired || 0));
   if (!raw.length) return null;
 
   const dt = raw[0].h.dt || 300;
   let start = 0, end = 0, mode = "tail";
-  if (raw.every((s) => Number.isInteger(s.h.b0))) {
+  // Warm-restored recorders book unobserved gaps independently before the current boot.
+  const sameRecorder = raw.length === 1 || env3ChartId(id);
+  if (raw.every((s) => Number.isInteger(s.h.b0) && (sameRecorder || s.h.b0 + (s.h.expired || 0) >= 0))) {
     mode = "bucket";
-    start = Math.min(...raw.map((s) => s.h.b0));
+    start = Math.min(...raw.map((s) => s.h.b0 + (s.h.expired || 0)));
     end = Math.max(...raw.map((s) => s.h.b0 + s.h.v.length - 1));
-  } else if (raw.every((s) => typeof s.h.t0 === "number" && s.h.dt === dt)) {
+  } else if (raw.length === 1 && Number.isSafeInteger(raw[0].h.t0)) {
     mode = "time";
     start = Math.min(...raw.map((s) => s.h.t0));
     end = Math.max(...raw.map((s) => s.h.t0 + (s.h.v.length - 1) * dt));
+  } else if (raw.some(s => s.h.b0 != null || s.h.t0 != null)) {
+    // Independent ring tails do not establish simultaneous measurements.
+    const plotted = raw.filter(s => !s.h.refreshFailed || s.h.v.some(v => v != null));
+    const unavailable = supplied.filter(s => (s.h?.err || s.h?.refreshFailed) &&
+      !plotted.some(p => p.source === s.source));
+    return { id, v: [], series: [], separate: plotted.map(s => s.source), unavailable };
   } else {
     end = Math.max(...raw.map((s) => s.h.v.length)) - 1;
   }
-  const n = mode === "tail" ? end + 1 : Math.round((end - start) / (mode === "time" ? dt : 1)) + 1;
+  const step = mode === "time" ? dt : 1;
+  const span = (end - start) / step + 1;
+  const n = Math.min(span, HIST_MAX_SAMPLES);
+  start += (span - n) * step;
   const toRuns = (flags) => {
     const out = [];
     for (let i = 0; i < flags.length; i++) {
@@ -562,22 +755,22 @@ function alignedHistoryView(id, raw) {
   };
   const series = raw.map((s) => {
     const off = mode === "bucket" ? s.h.b0 - start
-              : mode === "time" ? Math.round((s.h.t0 - start) / dt)
+              : mode === "time" ? (s.h.t0 - start) / dt
               : n - s.h.v.length;
     const v = Array(n).fill(null), heldFlags = Array(n).fill(false);
-    for (let i = 0; i < s.h.v.length; i++) {
+    for (let i = Math.max(0, -off); i < Math.min(s.h.v.length, n - off); i++) {
       v[off + i] = s.h.v[i];
       heldFlags[off + i] = histHeld(s.h, i);
     }
-    return { source: s.source, name: s.name, unit: s.h.unit || "", v,
+    return { source: s.source, name: s.name, unit: s.h.unit || "", v, offset: off,
              held: toRuns(heldFlags), raw: s.h };
   });
   const primary = series.find((s) => s.source === "x10a") ||
                   series.find((s) => s.source === "env3") || series[0];
-  const wall = raw.find((s) => typeof s.h.t0 === "number");
+  const wall = raw.find((s) => historyWallLabelAllowed(s.h));
+  // A relative overlay must never assign one instrument's wall clock to another.
   const t0 = mode === "time" ? start
-           : mode === "bucket" && wall ? wall.h.t0 - (wall.h.b0 - start) * dt
-           : primary.raw.t0;
+           : mode === "bucket" && wall ? wall.h.t0 - (wall.h.b0 - start) * dt : null;
   const union = Array.from({ length: n }, (_, i) => {
     const found = series.find((s) => s.v[i] != null);
     return found ? found.v[i] : null;
@@ -586,26 +779,159 @@ function alignedHistoryView(id, raw) {
   // field. Prefer the primary source's unit, but do not throw away the paired source's honest unit
   // merely because X10A's field is empty.
   const sharedUnit = primary.unit || series.find((s) => s.unit)?.unit || "";
+  const withSamples = series.filter(s => s.v.some(v => v != null));
+  const unavailable = supplied.filter(s => s.h?.err ||
+    (s.h?.refreshFailed && !withSamples.some(available => available.source === s.source)));
+  const displayed = withSamples.length ? withSamples : series;
   return { id, dt, unit: sharedUnit, t0: typeof t0 === "number" ? t0 : null,
            b0: mode === "bucket" ? start : null,
-           gen: series.map((s) => `${s.source}:${s.raw.gen || 0}`).join("/"),
+           refreshFailed: withSamples.length > 0 && withSamples.every(s => s.raw.refreshFailed),
+           aged: displayed.every(s => histRetained(s.raw)),
+           unavailable,
+           gen: series.map((s) => `${s.source}:${s.raw.gen || 0}${s.raw.expired ? "/" + s.raw.expired : ""}`).join("/"),
            v: union, series };
 }
 
-function historyView(id, source = "") {
-  if (id === ENV3_COMBINED_ID) {
-    return alignedHistoryView(id, ENV3_COMBINED_SERIES.map((s) => ({
+const historyBrowserTime = () => typeof historyClock === "function" ? historyClock() : Date.now();
+const historyElapsed = h => Math.max(0, h.receivedTick == null
+  ? Date.now() - (h.receivedAt ?? Date.now()) : historyBrowserTime() - h.receivedTick);
+const historyStatusElapsed = (now = historyBrowserTime()) =>
+  Math.max(0, now - (S.statusReceivedAt ?? now)) / 1000;
+
+function historyDeviceTime(retained = false) {
+  if (S.otaCached || !S.status?.ntp?.synced ||
+      (!retained && S.transportUnavailable === "status"))
+    return Number.NaN;
+  return Date.parse(S.status.ntp.time || "") / 1000 + historyStatusElapsed();
+}
+
+const historyExpiry = new WeakMap();
+function expiredHistSlots(h) {
+  if (!h?.v.length) return 0;
+  const elapsed = historyElapsed(h) / 1000;
+  const statusElapsed = S.otaCached ? 0 : historyStatusElapsed();
+  const dt = h.dt || 300;
+  let current = Math.floor(elapsed / dt) + h.v.length;
+  let start = 0;
+  if (Number.isInteger(h.b0)) {
+    start = h.b0;
+    const uptime = S.status?.uptime_s;
+    current = Math.max(current + start, Number.isFinite(uptime) ? Math.floor((uptime + statusElapsed) / dt) : start);
+  } else if (h.t0 != null) {
+    const clock = historyDeviceTime(true);
+    const receivedClock = h.receivedDeviceTime + elapsed;
+    const deviceTime = Math.max(Number.isFinite(clock) ? clock : -Infinity,
+      Number.isFinite(receivedClock) ? receivedClock : -Infinity);
+    // Receipt can precede the newest dated sample within the poll tolerance.
+    current = Math.ceil((deviceTime - h.t0) / dt);
+  }
+  // A corrected clock or a delayed status reply cannot bring back expired cached samples.
+  const expired = Math.max(historyExpiry.get(h.v) || 0,
+    Math.min(h.v.length, current - HIST_MAX_SAMPLES - start));
+  if (expired) historyExpiry.set(h.v, expired);
+  return expired;
+}
+
+const historyRingAged = (h, expired) => expired > 0 ||
+  (h.v.length > 0 && historyElapsed(h) >= (h.dt || 300) * 1000);
+
+function expireHistSamples(h) {
+  if (!h?.v.length) return h;
+  const expired = expiredHistSlots(h);
+  const aged = historyRingAged(h, expired);
+  if (!expired) return aged ? { ...h, aged } : h;
+  // Preserve the existing time and index identity while dropping readings outside the window.
+  const held = h.held?.flatMap(([from, count]) =>
+    from + count > expired ? [[Math.max(expired, from), from + count - Math.max(expired, from)]] : []);
+  return { ...h, aged, expired, held, v: h.v.map((v, i) => i < expired ? null : v) };
+}
+
+const histRetained = h => h.refreshFailed || h.aged;
+function historyWallLabelAllowed(h) {
+  if (!Number.isFinite(h.t0)) return false;
+  const clock = historyDeviceTime(true);
+  if (!Number.isInteger(h.b0) || !Number.isFinite(clock)) return true;
+  return validHistoryTime(h.t0, h.b0, h.v.length, clock);
+}
+
+function historyRingRevision(h) {
+  if (!h || h.err || !Array.isArray(h.v)) return h ? "error" : "";
+  const expired = expiredHistSlots(h);
+  return `${h.gen}:${h.refreshFailed ? "failed" : ""}:${historyRingAged(h, expired) ? "aged" : ""}:${expired}:${historyWallLabelAllowed(h)}`;
+}
+
+function forecastClockAgrees(ring, weather) {
+  if (!Number.isFinite(ring.t0)) return false;
+  const uptime = S.status?.uptime_s;
+  const tolerance = 2 + POLL_TIMEOUT_MS / 1000;
+  if (Number.isInteger(ring.b0) && Number.isFinite(uptime)) {
+    const expected = weather.now - uptime + (ring.b0 + 1) * ring.dt;
+    return Math.abs(ring.t0 - expected) <= tolerance;
+  }
+  if (Number.isFinite(ring.receivedDeviceTime)) {
+    const expected = ring.receivedDeviceTime + historyElapsed(ring) / 1000;
+    return Math.abs(expected - historyDeviceTime()) <= tolerance;
+  }
+  return true;
+}
+
+function historyView(id, source = "", forecast) {
+  if (env3ChartId(id)) {
+    const offered = ENV3_COMBINED_SERIES.filter(s => hasEnv3Hist(s.id)).map((s) => ({
       source: s.id, name: t(s.label), h: S.hist.get(histCacheKey(s.id, "env3")),
-    })));
+    }));
+    if (!offered.length) return null;
+    const view = id === ENV3_COMBINED_ID ? alignedHistoryView(id, offered) : null;
+    const weather = forecast === undefined ? weatherForecastView() : forecast;
+    if (view?.separate) return { ...view, separateForecast: weather };
+    if (view?.v.some(v => v != null)) {
+      if (weather) {
+        const measuredEnd = view.t0 + (view.v.length - 1) * view.dt;
+        if (!Number.isFinite(view.t0) || measuredEnd > weather.now ||
+            !view.series.every(s => !s.v.some(v => v != null) || forecastClockAgrees(s.raw, weather)))
+          return { ...view, t0: null, separateForecast: weather };
+        view.forecast = weather;
+        view.series = ENV3_COMBINED_SERIES.map(s =>
+          view.series.find(q => q.source === s.id) ||
+          { source: s.id, name: t(s.label), v: Array(view.v.length).fill(null), raw: {} });
+      }
+      return view;
+    }
+    if (!weather) return null;
+    return {
+      id, t0: weather.now, dt: 300, gen: "forecast", v: [], forecast: weather,
+      series: ENV3_COMBINED_SERIES.map(s => ({ source: s.id, name: t(s.label), v: [], raw: {} })),
+      unavailable: offered.filter(s => s.h?.err || s.h?.refreshFailed),
+    };
   }
   const x10aName = id === "circulation_state" ? "MQTT" : "X10A";
-  const view = alignedHistoryView(id, [
+  const offered = [
     { source: "x10a", name: x10aName, h: hasHist(id) ? S.hist.get(id) : null },
     { source: "modbus", name: "HomeHub · Modbus", h: hasModbusHist(id) ? S.hist.get(histCacheKey(id, "modbus")) : null },
     { source: "env3", name: "ENV III", h: hasEnv3Hist(id) ? S.hist.get(histCacheKey(id, "env3")) : null },
     { source: "room", name: roomHistName(), h: hasRoomHist(id) ? S.hist.get(histCacheKey(id, "room")) : null },
-  ].filter((s) => !source || s.source === source));
-  return STATE_HIST[id] ? stateHistoryLiveView(view) : view;
+  ].filter((s) => !source || s.source === source);
+  let view = alignedHistoryView(id, offered);
+  if (view?.separate) return view;
+  if (view) view.scope = source;
+  if (view && id === "dhw_tank") view.tankAux = tankAuxHistories();
+  if (!STATE_HIST[id]) return view;
+  if (!view?.v.some(v => v != null)) {
+    const live = offered.filter(s => (s.source === "x10a" ? hasHist(id) : hasModbusHist(id)) &&
+      stateHistoryCurrent(id, s.source).value != null);
+    if (!live.length) return null;
+    view = { id, scope: source, dt: 300, t0: null, gen: "live", v: [], series: live.map(s => ({
+      source: s.source, name: s.name, v: [], raw: {},
+    })), unavailable: offered.filter(s => s.h?.err || s.h?.refreshFailed) };
+  } else {
+    for (const s of offered) {
+      const supported = s.source === "x10a" ? hasHist(id) : s.source === "modbus" && hasModbusHist(id);
+      if (supported && !view.series.some(series => series.source === s.source) &&
+          stateHistoryCurrent(id, s.source).value != null)
+        view.series.push({ source: s.source, name: s.name, v: Array(view.v.length).fill(null), raw: {} });
+    }
+  }
+  return stateHistoryLiveView(view);
 }
 
 // Categorical states need timelines, not numeric curves. Every valid state gets an explicit level,
@@ -787,7 +1113,9 @@ const currentBinaryTenths = (row) => {
 };
 
 function stateHistoryCurrent(id, source) {
+  if (S.otaCached) return { present: false, value: null };
   if (source === "modbus") {
+    if (S.status?.modbus?.connected === false) return { present: true, value: null };
     if (!Array.isArray(S._modbus)) return { present: false, value: null };
     if (id === "smart_grid_mode") {
       const row = S._modbus.find((r) => r && r.off === 56 && r.enum === "smart_grid_mode");
@@ -928,13 +1256,17 @@ function dwellNoteHtml(v, stateText) {
   return descParaHtml(`<span class="vdesc-n">${esc(stateText)}</span> ` + esc(tail) +
     (blind > 0 ? esc(" · " + t("val.since_gap", dwellDuration(blind))) : ""));
 }
-function stateRunWhen(view, from, count) {
+function stateRunWhen(view, from, count, series) {
   if (view.t0 != null) {
     const clock = (i) => new Date((view.t0 + i * view.dt) * 1000)
       .toLocaleTimeString(LANG, { hour: "2-digit", minute: "2-digit" });
     return `${clock(from)}–${clock(from + count)}`;
   }
   const n = view.recordedN ?? view.v.length;
+  if (histRetained(series.raw)) {
+    // Without a clock, show the phase's last recorded slot. The caller reports its duration.
+    return retainedSampleTime(from + count - 1, lastSample(series.v, n), view.dt);
+  }
   const old = ((n - from) * view.dt) / 3600;
   const recent = ((n - from - count) * view.dt) / 3600;
   return t("hist.boost_ago_range", histFmt1(old), histFmt1(Math.max(0, recent)));
@@ -958,6 +1290,7 @@ function stateHistHtml(id, name, view, wrap, cfg) {
   // witnesses and must not silently pool their durations into one apparently exact number.
   const primary = view.series.find((s) => s.source === cfg.primary) || view.series[0];
   const recordedPrimary = { ...primary, v: primary.v.slice(0, recordedN) };
+  const primaryMeasured = recordedPrimary.v.some(v => cfg.classify(v) != null);
   const active = stateRuns(recordedPrimary, true, cfg.classify);
   const total = active.reduce((sum, r) => sum + r[1] * view.dt, 0);
   const inactive = stateRuns(recordedPrimary, false, cfg.classify);
@@ -976,10 +1309,13 @@ function stateHistHtml(id, name, view, wrap, cfg) {
     )).join("");
     const missing = stateRuns(s, null, cfg.classify).map(([from, count]) =>
       `<span class="vhist-state-gap" style="left:${pct(from)}%;width:${pct(count)}%"></span>`).join("");
-    const sourceLabel = s.source === "modbus" ? "Modbus" : s.name;
+    const last = histRetained(s.raw) ? lastSample(s.v, recordedN) : -1;
+    const stateSource = s.source === "modbus" ? "Modbus" : s.name;
+    const sourceLabel = last >= 0 ? `${stateSource} · ${t("hist.retained")}` : stateSource;
     return `<div class="vhist-state-lane">` +
-      `<span class="vhist-state-lane-label${s.source === "modbus" ? " mb" : ""}">${sourceLabel}</span>` +
-      `<div class="vhist-state-track ${s.source}" aria-hidden="true">${on}${missing}${current}</div>` +
+      `<span class="vhist-state-lane-label${s.source === "modbus" ? " mb" : ""}">${esc(sourceLabel)}</span>` +
+      `<div class="vhist-state-track ${s.source}" aria-hidden="true">${on}${missing}${current}` +
+      (last >= 0 ? histRetainedMarker(s, (last + 0.5) / n) : "") + `</div>` +
     `</div>`;
   }).join("");
   const gaps = stateRuns(recordedPrimary, null, cfg.classify).length;
@@ -996,109 +1332,107 @@ function stateHistHtml(id, name, view, wrap, cfg) {
   const sourceAttr = view.series.length === 1 ? ` data-source="${esc(view.series[0].source)}"` : "";
   let pinCross = "";
   if (pi >= 0) {
-    const frac = scrubFrac(pi, n);
+    const frac = stateSampleFraction(pi, n);
     const px = (frac * 100).toFixed(3);
     pinCross = `<span class="vhist-cross vhist-pinned" style="left:${px}%"></span>`;
   }
-  const totalText = t(cfg.total, histDuration(total)) + (cfg.inactiveTotal
-    ? ` · ${t(cfg.inactiveTotal, histDuration(inactiveSeconds))}` : "");
+  const totalText = primaryMeasured ? t(cfg.total, histDuration(total)) + (cfg.inactiveTotal
+    ? ` · ${t(cfg.inactiveTotal, histDuration(inactiveSeconds))}` : "") : "";
   return wrap(
-    `<div class="vhist-head"><span class="vhist-t">${esc(full ? t("hist.title") : t("hist.recorded", spanH))}</span>` +
+    `<div class="vhist-head"><span class="vhist-t">${esc(!recordedN ? t("hist.now") : full ? t("hist.title") : t("hist.recorded", spanH))}</span>` +
       `<span class="vhist-range mono num">${esc(totalText)}</span></div>` + levelLegend +
     `<div class="vhist-graph vhist-state-graph">` +
-      histTipsHtml(view, pi, pi >= 0 ? scrubFrac(pi, n) : 0) +
+      histTipsHtml(view, pi, pi >= 0 ? stateSampleFraction(pi, n) : 0) +
       `<div class="vhist-plot vhist-state-plot" data-hist="${esc(id)}"${sourceAttr}${histRevision(view)} data-n="${n}" tabindex="0" role="img"` +
         ` aria-label="${esc(t(cfg.aria, name || id, totalText))}">` + tracks + pinCross +
         `<span class="vhist-cross vhist-live" hidden></span>` +
-      `</div>` + histTimesHtml(view, pi, pi >= 0 ? scrubFrac(pi, n) : 0) +
+      `</div>` + histTimesHtml(view, pi, pi >= 0 ? stateSampleFraction(pi, n) : 0) +
     `</div>` +
-    `<div class="vhist-axis"><span>${esc(t("hist.ago", spanH))}</span>` +
+    `<div class="vhist-axis"><span>${recordedN ? esc(histAxisStart(view, spanH)) : ""}</span>` +
       (gaps ? `<span class="vhist-gap">${esc(t(cfg.gaps || "hist.gaps", gaps))}</span>` : "") +
-      `<span>${esc(t("hist.now"))}</span></div>`
+      `<span>${esc(view.liveIndex == null ? histAxisEnd(view) : t("hist.now"))}</span></div>` +
+    histUnavailableHtml(view)
   , "vhist-state");
 }
 
-function alignAuxSample(view, h, i) {
+function alignAuxSample(view, h, i, source) {
   if (!h || !Array.isArray(h.v) || !h.v.length) return null;
+  if ((h.dt || 300) !== view.dt) return null;
   let idx = -1;
   if (Number.isInteger(view.b0) && Number.isInteger(h.b0)) {
-    idx = (view.b0 + i) - h.b0;
-  } else if (typeof view.t0 === "number" && typeof h.t0 === "number") {
-    const dt = h.dt || view.dt || 300;
-    idx = Math.round(((view.t0 + i * (view.dt || 300)) - h.t0) / dt);
-  } else {
-    idx = h.v.length - view.v.length + i;
+    const bucket = view.b0 + i;
+    if (bucket < 0 && !view.series.some(s => s.source === source)) return null;
+    idx = bucket - h.b0;
   }
   return (idx >= 0 && idx < h.v.length) ? h.v[idx] : null;
 }
 
-function dhwAuxPhases(view) {
-  if (!view || view.id !== "dhw_tank" || !Array.isArray(view.v)) return null;
-  const sgM = S.hist?.get?.(histCacheKey("smart_grid_mode", "modbus"));
-  const sgX = S.hist?.get?.("smart_grid_mode");
-  const bshX = S.hist?.get?.("bsh_state");
-  const bshM = S.hist?.get?.(histCacheKey("bsh_state", "modbus"));
-  if (!sgM && !sgX && !bshX && !bshM) return null;
+const DHW_PHASE_SERIES = [
+  { id: "smart_grid_mode", source: "x10a", kind: "boost", label: "sg.mode2", active: 20 },
+  { id: "smart_grid_mode", source: "modbus", kind: "boost", label: "sg.mode2", active: 20 },
+  { id: "bsh_state", source: "x10a", kind: "bsh", label: "hist.heater_active", active: 10 },
+  { id: "bsh_state", source: "modbus", kind: "bsh", label: "hist.heater_active", active: 10 },
+];
 
-  const n = view.v.length;
-  const boost = Array(n).fill(false);
-  const bsh = Array(n).fill(false);
-  let boostCount = 0, bshCount = 0;
-
-  for (let i = 0; i < n; i++) {
-    const vSg = alignAuxSample(view, sgM, i) ?? alignAuxSample(view, sgX, i);
-    if (vSg != null && vSg === 20) {
-      boost[i] = true;
-      boostCount++;
-    }
-    const vBsh = alignAuxSample(view, bshX, i) ?? alignAuxSample(view, bshM, i);
-    if (vBsh != null && vBsh === 10) {
-      bsh[i] = true;
-      bshCount++;
-    }
-  }
-  return { boost, bsh, boostCount, bshCount, dt: view.dt || 300 };
+function tankAuxHistories() {
+  return DHW_PHASE_SERIES.map(({ id, source }) => expireHistSamples(S.hist.get(histCacheKey(id, source))));
 }
 
-// One historied row's trend, as the markup appended under its explainer text. Every state is a
-// SENTENCE rather than an empty box: not fetched, no readings yet, fetch failed. `null` samples are
-// GAPS (a timed-out register, or a reading reading_plausible() refused) and must break the line —
-// interpolating across them would draw a measurement that was never taken, which is exactly the
-// failure the blanked pills elsewhere in this UI exist to prevent.
-function histHtml(id, unit, name, source = "") {
+const tankAuxRevision = histories => histories?.map(h =>
+  h ? `${h.gen}:${h.expired || 0}:${!!histRetained(h)}:${!!h.err}` : "").join(",");
+
+const dhwPhaseLabel = (phase) => `${t(phase.label)} · ${phase.source === "modbus" ? "Modbus" : "X10A"}`;
+
+function dhwAuxPhases(view) {
+  return (view?.tankAux || []).flatMap((h, i) => {
+    if (!h) return [];
+    const phase = DHW_PHASE_SERIES[i];
+    const values = view.v.map((_, j) => alignAuxSample(view, h, j, phase.source));
+    const flags = values.map(v => v === phase.active);
+    const status = h.err ? "hist.err" : histRetained(h)
+      ? values.some(v => v != null) ? "hist.retained" : "hist.err" : "";
+    return [{ ...phase, flags, count: flags.filter(Boolean).length, status }];
+  });
+}
+
+function histEmptyHtml(cached, wrap) {
+  const status = cached.some(h => h?.err || h?.refreshFailed) ? "hist.err"
+    : cached.some(h => !h) ? "hist.loading"
+    : cached.some(h => expiredHistSlots(h) > 0) ? "hist.nm" : "hist.none";
+  return wrap(`<div class="vhist-note">${esc(t(status))}</div>`, "vhist-flat");
+}
+
+function histUnavailableHtml(view) {
+  return view.unavailable.length
+    ? `<div class="vhist-note">${esc(view.unavailable.map(s => s.name).join(", "))} · ${esc(t("hist.err"))}</div>`
+    : "";
+}
+
+// Draw each registered source on its own raster. Null samples break the line instead of inventing
+// a measurement across a timeout or a reading the source refused.
+function histHtml(id, unit, name, source = "", identifySource = false) {
   const offeredX = (!source || source === "x10a") && hasHist(id);
   const offeredM = (!source || source === "modbus") && hasModbusHist(id);
   const offeredE = (!source || source === "env3") && hasEnv3Hist(id);
   const offeredR = (!source || source === "room") && hasRoomHist(id);
   if (!offeredX && !offeredM && !offeredE && !offeredR) return "";
-  const hx = offeredX ? S.hist.get(id) : null;
-  const hm = offeredM ? S.hist.get(histCacheKey(id, "modbus")) : null;
-  const he = offeredE ? S.hist.get(histCacheKey(id, "env3")) : null;
-  const hr = offeredR ? S.hist.get(histCacheKey(id, "room")) : null;
+  const offered = [offeredX && id, offeredM && histCacheKey(id, "modbus"),
+    offeredE && histCacheKey(id, "env3"), offeredR && histCacheKey(id, "room")].filter(Boolean);
   const wrap = (body, cls) => `<div class="vhist${cls ? " " + cls : ""}">${body}</div>`;
   const view = historyView(id, source);
-  if (!view && ((offeredX && !hx) || (offeredM && !hm) || (offeredE && !he) || (offeredR && !hr)))
-    return wrap(`<div class="vhist-note">${esc(t("hist.loading"))}</div>`, "vhist-flat");
-  if (!view && [hx, hm, he, hr].filter(Boolean).every((h) => h.err))
-    return wrap(`<div class="vhist-note">${esc(t("hist.err"))}</div>`, "vhist-flat");
-  if (!view) {
-    const D = DERIVED[id];
-    return wrap(`<div class="vhist-note">${esc(D && D.none ? t(D.none) : t("hist.none"))}</div>`, "vhist-flat");
+  if (view?.separate) {
+    const unavailable = histUnavailableHtml(view);
+    return view.separate.map(kind => histHtml(id, unit, name, kind, true)).join("") +
+      (unavailable ? wrap(unavailable, "vhist-flat") : "");
   }
+  if (!view?.v.some(v => v != null)) return histEmptyHtml(offered.map(key => S.hist.get(key)), wrap);
+  const chartName = identifySource ? `${name || id} · ${view.series[0].name}` : name;
 
   const allPts = view.series.flatMap((s) => s.v.map((x) => x == null ? null : x / 10));
-  const real = allPts.filter((x) => x != null);
-  // "No readings yet" is the RIGHT sentence for a ring the device has not filled, and the WRONG one
-  // for a derived figure that is being withheld on purpose — the COP on a CT-clamp install has a
-  // full set of inputs and still draws nothing, so the generic note would call a deliberate refusal
-  // an empty buffer, one line under a pill that is showing the very number. A derived series may
-  // therefore name its own empty case.
-  if (!real.length) {
-    const D = DERIVED[id];
-    return wrap(`<div class="vhist-note">${esc(D && D.none ? t(D.none) : t("hist.none"))}</div>`, "vhist-flat");
-  }
 
-  if (STATE_HIST[id]) return stateHistHtml(id, name, view, wrap, STATE_HIST[id]);
+  if (STATE_HIST[id]) return stateHistHtml(id, chartName, view, wrap, STATE_HIST[id]) +
+    (view.recordedN === 0 && !view.unavailable.length
+      ? histEmptyHtml(offered.map(key => S.hist.get(key)), wrap) : "");
 
   const n = view.v.length;
   const spanH = Math.max(1, Math.round((n * view.dt) / 3600));
@@ -1154,6 +1488,11 @@ function histHtml(id, unit, name, source = "") {
   // scale exactly, and stays right whatever width the panel ends up at.
   const nowDots = view.series.map((s) => {
     if (!histVisibleSeries(view).includes(s)) return "";
+    if (s.raw.refreshFailed || s.raw.aged) {
+      const last = lastSample(s.v);
+      return last < 0 ? "" : histRetainedMarker(s, X(last) / HIST_W, histSourceClass(s.source),
+        (Y(s.v[last] / 10) / HIST_H) * 100);
+    }
     const last = s.v[n - 1];
     return last == null ? "" : `<span class="vhist-now${histSourceClass(s.source)}"` +
       ` style="top:${((Y(last / 10) / HIST_H) * 100).toFixed(2)}%"></span>`;
@@ -1182,12 +1521,13 @@ function histHtml(id, unit, name, source = "") {
       : `<span class="vhist-mark vhist-pinned${histSourceClass(s.source)}"` +
         ` style="left:${px}%;top:${((Y(s.v[pi] / 10) / HIST_H) * 100).toFixed(2)}%"></span>`).join("");
   }
-  const aux = id === "dhw_tank" ? dhwAuxPhases(view) : null;
+  const aux = id === "dhw_tank" ? dhwAuxPhases(view) : [];
   let phaseBands = "";
-  const legendItems = (view.series.length > 1 || ["modbus", "room"].includes(view.series[0].source))
+  const legendItems = (identifySource || view.series.length > 1 ||
+    histRetained(view) || ["modbus", "room"].includes(view.series[0].source))
     ? view.series.map((s) => histLegendHtml(view, s, histSourceClass(s.source)))
     : [];
-  if (aux) {
+  if (aux.length) {
     const toRuns = (flags) => {
       const out = [];
       for (let i = 0; i < flags.length; i++) {
@@ -1199,29 +1539,33 @@ function histHtml(id, unit, name, source = "") {
       return out;
     };
     const step = n > 1 ? HIST_W / (n - 1) : HIST_W;
-    const renderRuns = (runs, cls) => {
+    const renderRuns = (runs, cls, y, height) => {
       let s = "";
       for (const [from, count] of runs) {
         const x0 = n > 1 ? Math.max(0, X(from) - step / 2) : 0;
         const x1 = n > 1 ? Math.min(HIST_W, X(from + count - 1) + step / 2) : HIST_W;
-        const w = Math.max(1, x1 - x0);
-        s += `<rect class="vhist-phase ${cls}" x="${x0.toFixed(1)}" y="0" width="${w.toFixed(1)}" height="${HIST_H}"/>`;
+        const x = Math.round(x0 * 10);
+        const w = (Math.round(x1 * 10) - x) / 10;
+        s += `<rect class="vhist-phase ${cls}" x="${(x / 10).toFixed(1)}" y="${y}" width="${w.toFixed(1)}" height="${height}"/>`;
       }
       return s;
     };
-    phaseBands += renderRuns(toRuns(aux.boost), "vhist-phase-boost");
-    phaseBands += renderRuns(toRuns(aux.bsh), "vhist-phase-bsh");
-
-    if (aux.boostCount > 0) {
-      legendItems.push(
-        `<span class="vhist-source vhist-legend-boost"><i></i>${esc(t("hist.boost_active"))}` +
-        ` <small class="mono num">(${histDuration(aux.boostCount * aux.dt)})</small></span>`
-      );
-    }
-    if (aux.bshCount > 0) {
-      legendItems.push(
-        `<span class="vhist-source vhist-legend-bsh"><i></i>${esc(t("hist.heater_active"))}` +
-        ` <small class="mono num">(${histDuration(aux.bshCount * aux.dt)})</small></span>`
+    for (const phase of aux) {
+      if (phase.count) {
+        // Give concurrent source lanes a fixed order within each phase band.
+        const paired = aux.some(peer => peer.kind === phase.kind && peer !== phase && peer.count > 0);
+        const height = HIST_H / (paired ? 4 : 2);
+        const y = (phase.kind === "boost" ? 0 : HIST_H / 2) +
+          (paired && phase.source === "modbus" ? height : 0);
+        const outline = paired && phase.source === "x10a" ? " vhist-phase-outline" : "";
+        phaseBands += renderRuns(toRuns(phase.flags), `vhist-phase-${phase.kind}${outline}`, y, height);
+        legendItems.push(
+          `<span class="vhist-source vhist-legend-${phase.kind}${outline}"><i></i>${esc(dhwPhaseLabel(phase))}` +
+          ` <small class="mono num">(${histDuration(phase.count * view.dt)})</small></span>`
+        );
+      }
+      if (phase.status) legendItems.push(
+        `<span class="vhist-source">${esc(dhwPhaseLabel(phase))} · ${esc(t(phase.status))}</span>`
       );
     }
   }
@@ -1232,21 +1576,21 @@ function histHtml(id, unit, name, source = "") {
     `<div class="vhist-head"><span class="vhist-t">${esc(full ? t("hist.title") : t("hist.recorded", spanH))}</span>` +
     `<span class="vhist-range mono num">${esc(rng)}</span></div>` + legend +
     `<div class="vhist-graph">` +
-      histTipsHtml(view, pi, pi >= 0 ? scrubFrac(pi, n) : 0) +
+      histTipsHtml(view, pi, pi >= 0 ? scrubFrac(pi, n) : 0, aux) +
       `<div class="vhist-plot" data-hist="${esc(id)}"${sourceAttr}${histRevision(view)} data-n="${n}" tabindex="0" role="img"` +
-        ` aria-label="${esc(t(pi >= 0 ? "hist.aria_pinned" : "hist.aria", name || id, pi >= 0 ? scrubText(view, pi) : ""))}">` +
+        ` aria-label="${esc(t(pi >= 0 ? "hist.aria_pinned" : "hist.aria", chartName || id, pi >= 0 ? scrubText(view, pi, true, aux) : ""))}">` +
         `<svg viewBox="0 0 ${HIST_W} ${HIST_H}" preserveAspectRatio="none" aria-hidden="true">${phaseBands}${area}${line}${dots}</svg>` +
         nowDots + pinCross + pinMarks +
         `<span class="vhist-cross vhist-live" hidden></span>` +
         view.series.map((s) => `<span class="vhist-mark vhist-live${histSourceClass(s.source)}" data-source="${s.source}" hidden></span>`).join("") +
       `</div>` + histTimesHtml(view, pi, pi >= 0 ? scrubFrac(pi, n) : 0) +
     `</div>` +
-    `<div class="vhist-axis"><span>${esc(t("hist.ago", spanH))}</span>` +
+    `<div class="vhist-axis"><span>${esc(histAxisStart(view, spanH))}</span>` +
       // Idle time is reported ahead of dropouts: on an outdoor-air trend it is normally the larger
       // share of the day and the one that explains the shape of the chart.
       (held ? `<span class="vhist-idle">${esc(t("hist.heldnote", histFmt1((held * view.dt) / 3600)))}</span>` : "") +
       (gaps ? `<span class="vhist-gap">${esc(t("hist.gaps", gaps))}</span>` : "") +
-      `<span>${esc(t("hist.now"))}</span></div>`,
+      `<span>${esc(histAxisEnd(view))}</span></div>` + histUnavailableHtml(view),
     view.series.length > 1 ? "vhist-multi" : ""
   );
 }
@@ -1260,31 +1604,32 @@ function env3SeriesClass(source) {
 // temperature and humidity underneath pressure. One full-width chart therefore gives every line
 // its own honest local range while sharing the exact same time raster. The legend explicitly says
 // so, and the cursor reports each visible raw measurement at the selected instant.
-function env3HistHtml() {
+function env3HistHtml(view = historyView(ENV3_COMBINED_ID)) {
   const offered = ENV3_COMBINED_SERIES.filter((s) => hasEnv3Hist(s.id));
   if (!offered.length) return "";
   const cached = offered.map((s) => S.hist.get(histCacheKey(s.id, "env3")));
   const wrap = (body, cls = "") => `<div class="vhist vhist-env3${cls ? " " + cls : ""}">${body}</div>`;
-  const view = historyView(ENV3_COMBINED_ID);
-  if (!view && cached.some((h) => !h))
-    return wrap(`<div class="vhist-note">${esc(t("hist.loading"))}</div>`, "vhist-flat");
-  if (!view && cached.filter(Boolean).every((h) => h.err))
-    return wrap(`<div class="vhist-note">${esc(t("hist.err"))}</div>`, "vhist-flat");
-  if (!view) return wrap(`<div class="vhist-note">${esc(t("hist.none"))}</div>`, "vhist-flat");
-
+  if (!view) return histEmptyHtml(cached, wrap);
+  if (view.separate) {
+    const measured = offered.filter(s => view.separate.includes(s.id))
+      .map(s => histHtml(s.id, "", t(s.label), "env3")).join("");
+    const unavailable = histUnavailableHtml(view);
+    const forecast = view.separateForecast
+      ? env3HistHtml(historyView(ENV3_FORECAST_ID, "", view.separateForecast)) : "";
+    return measured + (unavailable ? wrap(unavailable, "vhist-flat") : "") + forecast;
+  }
   const plotted = view.series.filter((s) => s.v.some((v) => v != null));
-  if (!plotted.length)
-    return wrap(`<div class="vhist-note">${esc(t("hist.none"))}</div>`, "vhist-flat");
+  const geometry = forecastScrubView(view);
+  if (!plotted.length && !geometry) return histEmptyHtml(cached, wrap);
 
   const n = view.v.length;
   const spanH = Math.max(1, Math.round((n * view.dt) / 3600));
   const full = n * view.dt >= 23.5 * 3600;
-  const forecast = weatherForecastView();
+  const forecast = view.forecast;
   const futureEnd = forecast?.points.at(-1)?.time;
   const measuredStart = Number.isFinite(view.t0) ? view.t0 : null;
-  const measuredEnd = measuredStart == null ? null : measuredStart + (n - 1) * view.dt;
-  const timedForecast = forecast && measuredStart != null && forecast.now >= measuredStart &&
-    Number.isFinite(futureEnd) && futureEnd > forecast.now;
+  const measuredEnd = measuredStart == null ? null : measuredStart + Math.max(0, n - 1) * view.dt;
+  const timedForecast = !!geometry;
   const domainEnd = timedForecast ? futureEnd : measuredEnd;
   const domainSpan = timedForecast ? domainEnd - measuredStart : 0;
   const timeX = (unix) => ((unix - measuredStart) / domainSpan) * HIST_W;
@@ -1294,18 +1639,15 @@ function env3HistHtml() {
     ? Math.max(0, Math.min(1, timeX(measuredEnd) / HIST_W)) : 1;
   const nowFrac = timedForecast
     ? Math.max(0, Math.min(1, timeX(forecast.now) / HIST_W)) : 1;
-  const forecastSpecForMeasured = (source) =>
-    WEATHER_FORECAST_SERIES.find((spec) => spec.measured === source);
-  const scalePoints = (s) => {
-    const measured = s.v.map((v) => v == null ? null : v / 10);
-    const spec = timedForecast ? forecastSpecForMeasured(s.source) : null;
-    return spec ? [...measured, ...forecast.points.map((p) => p[spec.key])] : measured;
+  const scaleY = (s) => {
+    const spec = WEATHER_FORECAST_SERIES.find((spec) => spec.measured === s.source);
+    return geometry && spec ? geometry.scales[spec.key] : histScale(s.v.map(v => v == null ? null : v / 10), n).Y;
   };
   let areas = "", lines = "", dots = "", nowDots = "";
   for (const s of plotted) {
     if (!histVisibleSeries(view).includes(s)) continue;
     const pts = s.v.map((v) => v == null ? null : v / 10);
-    const { Y } = histScale(scalePoints(s), n);
+    const Y = scaleY(s);
     const X = sampleX;
     const cls = env3SeriesClass(s.source);
     let run = [];
@@ -1327,8 +1669,12 @@ function env3HistHtml() {
       if (pts[i] == null) flush(); else run.push(i);
     }
     flush();
+    if (histRetained(s.raw)) {
+      const last = lastSample(s.v);
+      nowDots += histRetainedMarker(s, X(last) / HIST_W, " " + cls, (Y(pts[last]) / HIST_H) * 100);
+    }
     const last = s.v[n - 1];
-    if (last != null) {
+    if (last != null && !histRetained(s.raw)) {
       nowDots += `<span class="vhist-now ${cls}${timedForecast ? " timed" : ""}" ` +
         `style="${timedForecast ? `left:${(measuredEndFrac * 100).toFixed(3)}%;right:auto;` : ""}` +
         `top:${((Y(last / 10) / HIST_H) * 100).toFixed(2)}%"></span>`;
@@ -1343,18 +1689,13 @@ function env3HistHtml() {
   if (timedForecast) {
     for (const spec of WEATHER_FORECAST_SERIES) {
       if (!histVisibleSeries(view).some((s) => s.source === spec.measured)) continue;
-      const measured = plotted.find((s) => s.source === spec.measured);
-      const rawCurrent = S.status?.env3?.[spec.env];
-      const current = typeof rawCurrent === "number" ? rawCurrent : Number.NaN;
+      const current = forecast.anchor[spec.key];
       const points = [];
-      if (S.status?.env3?.fresh && Number.isFinite(current))
-        points.push({ time: forecast.now, value: current, anchor: true });
-      for (const p of forecast.points) {
-        if (p.time > forecast.now) points.push({ time: p.time, value: p[spec.key], anchor: false });
-      }
+      if (current != null)
+        points.push({ time: forecast.now, value: current });
+      for (const p of geometry.points) points.push({ time: p.time, value: p[spec.key] });
       if (points.length < 2) continue;
-      const past = measured ? measured.v.map((v) => v == null ? null : v / 10) : [];
-      const { Y } = histScale([...past, ...points.map((p) => p.value)], n);
+      const Y = geometry.scales[spec.key];
       const d = points.map((p, i) =>
         `${i ? "L" : "M"}${timeX(p.time).toFixed(1)} ${Y(p.value).toFixed(1)}`).join("");
       forecastAreas += `<path class="vhist-area ${spec.cls}" ` +
@@ -1372,11 +1713,11 @@ function env3HistHtml() {
   }
   // Units belong to readings, not series names. They stay in every measured/forecast tooltip, so
   // repeating them in this always-visible legend adds ink without adding meaning.
-  const legend = `<div class="vhist-legend">${plotted.map((s) =>
+  const legend = `<div class="vhist-legend">${(geometry ? view.series : plotted).map((s) =>
     histLegendHtml(view, s, " " + env3SeriesClass(s.source))
   ).join("")}</div>`;
 
-  const pi = histPinIndex(ENV3_COMBINED_ID, view);
+  const pi = histPinIndex(view.id, view);
   let pinFrac = 0;
   let pinCross = "", pinMarks = "";
   if (pi >= 0) {
@@ -1393,18 +1734,18 @@ function env3HistHtml() {
         ).join("")
       : plotted.filter((s) => histVisibleSeries(view).includes(s)).map((s) => {
           if (s.v[pi] == null) return "";
-          const { Y } = histScale(scalePoints(s), n);
+          const Y = scaleY(s);
           return `<span class="vhist-mark vhist-pinned ${env3SeriesClass(s.source)}" ` +
             `style="left:${px}%;top:${((Y(s.v[pi] / 10) / HIST_H) * 100).toFixed(2)}%"></span>`;
         }).join("");
   }
 
-  return wrap(
-    `<div class="vhist-head"><span class="vhist-t">${esc(full ? t("hist.title") : t("hist.recorded", spanH))}</span>` +
+  const chart = wrap(
+    `<div class="vhist-head"><span class="vhist-t">${esc(!n ? t("hist.forecast") : full ? t("hist.title") : t("hist.recorded", spanH))}</span>` +
       `<span class="vhist-range">${esc(t("env.history_scales"))}</span></div>` + legend +
     `<div class="vhist-graph">` +
       histTipsHtml(view, pi, pinFrac) +
-      `<div class="vhist-plot" data-hist="${ENV3_COMBINED_ID}"${histRevision(view)} data-n="${n}" ` +
+      `<div class="vhist-plot" data-hist="${view.id}"${histRevision(view)} data-n="${n}" ` +
         `data-measured-p="${(measuredEndFrac * 100).toFixed(3)}" tabindex="0" role="img" ` +
         `aria-label="${esc(t(pi >= 0 ? "hist.aria_pinned" : "hist.aria", t("env.history_title"),
           pi >= 0 ? scrubText(view, pi) : ""))}">` +
@@ -1423,14 +1764,15 @@ function env3HistHtml() {
     `</div>` +
     (forecastAreas
       ? `<div class="vhist-axis vhist-axis-future" style="--now-p:${(nowFrac * 100).toFixed(3)}">` +
-          `<span>${esc(t("hist.ago", spanH))}</span>` +
+          `<span>${n ? esc(histAxisStart(view, spanH)) : ""}</span>` +
           `<span class="vhist-axis-now">${esc(t("hist.now"))}</span>` +
           `<span>${esc(t("hist.in_hours", futureH))}</span></div>`
-      : `<div class="vhist-axis"><span>${esc(t("hist.ago", spanH))}</span>` +
+      : `<div class="vhist-axis"><span>${esc(histAxisStart(view, spanH))}</span>` +
           (gaps ? `<span class="vhist-gap">${esc(t("hist.gaps", gaps))}</span>` : "") +
-          `<span>${esc(t("hist.now"))}</span></div>`),
+          `<span>${esc(histAxisEnd(view))}</span></div>`) + histUnavailableHtml(view),
     "vhist-multi"
   );
+  return view.separateForecast ? chart + env3HistHtml(historyView(ENV3_FORECAST_ID, "", view.separateForecast)) : chart;
 }
 
 // ── Scrubbing a trend (hover with a mouse, drag with a finger — one code path) ─────────────────
@@ -1443,13 +1785,20 @@ function env3HistHtml() {
 // Where a sample sits, as a fraction 0..1 of the plot width. Mirrors X() in histHtml — a lone
 // sample is drawn at the right edge, which is also where "now" is.
 function scrubFrac(i, n) { return n <= 1 ? 1 : i / (n - 1); }
+function stateSampleFraction(i, n) { return (i + 0.5) / n; }
 
 // The outdoor-climate plot has two rasters on one time axis: five-minute measurements up to now,
 // then provider-timestamped Open-Meteo hours. One geometry helper keeps pointer, touch, keyboard and
 // pinned tooltips on the same forecast point the SVG drew.
 function forecastScrubView(h) {
-  if (!h || h.id !== ENV3_COMBINED_ID || !h.v.length || !Number.isFinite(h.t0)) return null;
-  const forecast = weatherForecastView();
+  if (!h?.forecast) return null;
+  if (h.forecastGeometry === undefined) h.forecastGeometry = computeForecastScrubView(h);
+  return h.forecastGeometry;
+}
+
+function computeForecastScrubView(h) {
+  if (!h || !env3ChartId(h.id) || !Number.isFinite(h.t0)) return null;
+  const forecast = h.forecast;
   const futureEnd = forecast?.points.at(-1)?.time;
   if (!forecast || !Number.isFinite(futureEnd) || futureEnd <= forecast.now ||
       forecast.now < h.t0) return null;
@@ -1457,20 +1806,20 @@ function forecastScrubView(h) {
   if (!points.length) return null;
   const domainSpan = futureEnd - h.t0;
   if (!(domainSpan > 0)) return null;
-  const measuredEnd = h.t0 + (h.v.length - 1) * h.dt;
+  const measuredEnd = h.t0 + Math.max(0, h.v.length - 1) * h.dt;
   const xFrac = (time) => Math.max(0, Math.min(1, (time - h.t0) / domainSpan));
   const scales = {};
   for (const spec of WEATHER_FORECAST_SERIES) {
     const measured = h.series.find((s) => s.source === spec.measured);
     const scaleValues = measured ? measured.v.map((v) => v == null ? null : v / 10) : [];
-    const rawCurrent = S.status?.env3?.[spec.env];
-    const current = typeof rawCurrent === "number" ? rawCurrent : Number.NaN;
-    if (S.status?.env3?.fresh && Number.isFinite(current)) scaleValues.push(current);
+    const current = forecast.anchor[spec.key];
+    if (current != null) scaleValues.push(current);
     scaleValues.push(...points.map((p) => p[spec.key]));
     scales[spec.key] = histScale(scaleValues, h.v.length).Y;
   }
   return {
     points,
+    scales,
     measuredFrac: xFrac(measuredEnd),
     nowFrac: xFrac(forecast.now),
     xFrac,
@@ -1479,7 +1828,7 @@ function forecastScrubView(h) {
 }
 
 function scrubCount(plot) {
-  const h = historyView(plot.dataset.hist, plot.dataset.source || "");
+  const h = scrubView(plot);
   const forecast = forecastScrubView(h);
   return (h?.v.length || 0) + (forecast?.points.length || 0);
 }
@@ -1488,38 +1837,109 @@ function scrubCount(plot) {
 // A tap PINS the readout so the value stays legible after the finger lifts; holding is no longer
 // required. Hover remains transient and paints its preview in front of the pin without changing it.
 //
-// The pin is stored as the sample's INSTANT and re-resolved on every render — the host-tested
-// history_pin_index() rule (logic/history.hpp). A pin whose instant has rolled off the back of the
-// day resolves to -1 and is dropped, rather than clamped to the oldest sample: clamping would leave
-// a readout on screen while silently changing which moment it describes.
+// A boot-relative bucket survives a wall-clock correction. For a wall-only ring, replacement
+// cannot distinguish an advanced ring from a corrected clock, so the pin belongs to its revision.
 function histPinIndex(id, h) {
   const p = S.histPin.get(id);
-  if (!p || !h || !h.v.length) return -1;
+  if (!p || !h) return -1;
   if (p.forecast) {
     const forecast = forecastScrubView(h);
     const i = forecast?.points.findIndex((point) => point.time === p.t) ?? -1;
     return i < 0 ? -1 : h.v.length + i;
   }
-  if (p.t != null) {
-    if (h.t0 == null) return -1;                 // pinned with a clock, re-resolving without one
-    const rel = p.t - h.t0, half = h.dt / 2;
-    const i = Math.trunc((rel >= 0 ? rel + half : rel - half) / h.dt);
-    return (i < 0 || i >= h.v.length) ? -1 : i;
+  if (p.live) {
+    if (h.liveIndex != null && p.sources === histPinSources(h) &&
+        p.sample === liveHistoryPinSample(id, p.source)) return h.liveIndex;
+    if (p.source === (h.scope ?? "")) S.histPin.delete(id);
+    return -1;
   }
-  return p.gen === h.gen ? p.i : -1;             // index pin: valid only for the series it was made on
+  if (!h.v.length) return -1;
+  if (p.bucket != null) {
+    if (!Number.isInteger(h.b0)) return -1;
+    return recordedPinIndex(id, h, p, p.bucket - h.b0);
+  }
+  return p.i < h.v.length && p.gen === histPlottedPinRevision(h) &&
+    p.sources === histPinSources(h) ? p.i : -1;
+}
+
+function recordedPinIndex(id, h, point, i) {
+  if (i >= (h.recordedN ?? h.v.length)) return -1;
+  const sources = histPinSeries(h).filter(s => point.lanes.includes(s.source));
+  if (!sources.length) return -1;
+  if (i < 0) {
+    if ((point.source ?? "") === (h.scope ?? "") &&
+        sources.some(s => i >= s.offset && i < s.offset + (s.raw.expired || 0))) S.histPin.delete(id);
+    return -1;
+  }
+  const kept = sources.some(s => point.witnessed
+    ? s.v[i] != null || histHeld(s, i)
+    : i >= s.offset + (s.raw.expired || 0) && i < s.offset + (s.raw.v?.length ?? 0));
+  if (!kept) {
+    if ((point.source ?? "") === (h.scope ?? "")) S.histPin.delete(id);
+    return -1;
+  }
+  return i;
+}
+
+function histPinSeries(h) {
+  return STATE_HIST[h.id] ? h.series : histVisibleSeries(h);
+}
+
+// Categorical charts show every source lane. Numeric fallback can change the visible instrument
+// without replacing either ring, so its selected sources are part of an undated sample identity.
+function histPinSources(h) {
+  return histPinSeries(h).map(s => s.source).join(",");
+}
+
+// The recorded pin depends on the rings and their alignment, independent of the live cap.
+function histPlottedPinRevision(h) {
+  const rings = histPinSeries(h).map(s => [s.source, s.raw?.gen, s.raw?.expired, s.raw?.t0, s.offset].join(":"));
+  return [h.t0, ...rings].join("/");
+}
+
+function liveHistoryPinSample(id, source) {
+  return JSON.stringify((source ? [source] : ["x10a", "modbus"])
+    .map(kind => stateHistoryCurrent(id, kind).value));
+}
+
+function expireLiveHistoryPins() {
+  for (const [id, pin] of S.histPin) {
+    if (pin.live && pin.sample !== liveHistoryPinSample(id, pin.source)) S.histPin.delete(id);
+  }
+}
+
+function expireFallbackHistoryPins() {
+  for (const [id, pin] of S.histPin) {
+    if (pin.forecast || pin.source || !hasModbusHist(id)) continue;
+    const view = historyView(id);
+    if (!view || histPinIndex(id, view) < 0) S.histPin.delete(id);
+  }
 }
 // Pin sample `i` of `label`, or UNPIN when that same sample is already pinned — tapping the readout
 // you just made is the obvious way to dismiss it, and needs no extra affordance on a 72 px plot.
-function histPinToggle(id, i, source = "") {
-  const h = historyView(id, source);
-  if (!h || !h.v.length) return;
+function histPinToggle(id, i, source = "", captured) {
+  const h = captured || historyView(id, source);
+  if (!h) return;
   const forecast = forecastScrubView(h);
   const total = h.v.length + (forecast?.points.length || 0);
+  if (!total) return;
   i = Math.max(0, Math.min(total - 1, i));
   if (histPinIndex(id, h) === i) S.histPin.delete(id);
-  else if (i >= h.v.length) S.histPin.set(id, { t: forecast.points[i - h.v.length].time, forecast: true });
-  else if (h.t0 != null) S.histPin.set(id, { t: h.t0 + i * h.dt });
-  else S.histPin.set(id, { i, gen: h.gen });
+  else if (i >= h.v.length) {
+    const t = forecast.points[i - h.v.length].time;
+    if (captured && !forecastScrubView(historyView(id, source))?.points.some(point => point.time === t))
+      return;
+    S.histPin.set(id, { t, forecast: true });
+  }
+  else if (i === h.liveIndex) S.histPin.set(id, { sources: histPinSources(h), source,
+    live: true, sample: liveHistoryPinSample(id, source) });
+  else if (Number.isInteger(h.b0)) {
+    const visible = histPinSeries(h);
+    const witnessed = visible.filter(s => s.v[i] != null || histHeld(s, i));
+    S.histPin.set(id, { source, bucket: h.b0 + i,
+      witnessed: witnessed.length > 0,
+      lanes: (witnessed.length ? witnessed : visible).map(s => s.source) });
+  } else S.histPin.set(id, { i, gen: histPlottedPinRevision(h), sources: histPinSources(h), source });
   // Render PAST the click guard. That guard exists to stop a POLL from replacing the DOM in the
   // middle of a click; it must not delay the very update the click just asked for — a pin that
   // appeared 600 ms after the finger lifted would read as the same "it didn't take" the pin was
@@ -1530,23 +1950,46 @@ function histPinToggle(id, i, source = "") {
 }
 
 // Selected time belongs on the axis, including relative ages when the source has no wall clock.
+function histAxisStart(h, spanH) {
+  return histAxisRetained(h) ? t("hist.recorded", spanH) : t("hist.ago", spanH);
+}
+
+function histAxisEnd(h) {
+  return histAxisRetained(h) ? "" : t("hist.now");
+}
+
+function histAxisRetained(h) {
+  const visible = histPinSeries(h).filter(s => s.v.some(value => value != null));
+  return visible.length ? visible.every(s => histRetained(s.raw)) : histRetained(h);
+}
+
+function retainedSampleTime(i, last, dt) {
+  if (i > last) return "";
+  return i === last ? t("hist.retained")
+    : t("hist.before_retained", histFmt1(((last - i) * dt) / 3600));
+}
+
 function scrubTime(h, i) {
   if (h.liveIndex === i) return t("hist.now");
-  const point = h.id === ENV3_COMBINED_ID && i >= h.v.length
+  const point = env3ChartId(h.id) && i >= h.v.length
     ? forecastScrubView(h)?.points[i - h.v.length] : null;
   const stamp = point ? point.time : h.t0 != null ? h.t0 + i * h.dt : null;
   if (stamp != null) return new Date(stamp * 1000)
     .toLocaleTimeString(LANG, { hour: "2-digit", minute: "2-digit" });
-  const ageH = (((h.recordedN ?? h.v.length) - 1 - i) * h.dt) / 3600;
+  const end = h.recordedN ?? h.v.length;
+  if (histAxisRetained(h)) {
+    const last = Math.max(-1, ...histPinSeries(h).map(s => lastSample(s.v, end)));
+    return retainedSampleTime(i, last, h.dt);
+  }
+  const ageH = ((end - 1 - i) * h.dt) / 3600;
   return ageH < 0.05 ? t("hist.now") : t("hist.rel", histFmt1(ageH));
 }
 
 // Measure every distinct readout shape in a hidden grid cell. Tabular digits have equal widths;
 // replacing them deduplicates samples without losing a possible wrapped line or phase label.
 // The reserved row stays present, so a comparison never moves the plot or its time labels.
-function histTipsHtml(h, pi, frac) {
+function histTipsHtml(h, pi, frac, aux = dhwAuxPhases(h)) {
   // One auxiliary scan per rendered view, not one full-day scan for every sample's readout.
-  const aux = dhwAuxPhases(h);
   const shapes = new Set(Array.from({length:h.v.length + (forecastScrubView(h)?.points.length || 0)},
     (_, i) => histReadout(h, i, aux).replace(/\d/g, "8")));
   return `<div class="vhist-tips"><div class="vhist-tip vhist-reserve mono num" aria-hidden="true">` +
@@ -1564,8 +2007,8 @@ function histTimesHtml(h, pi, frac) {
 
 // Accessibility keeps time and readings together. Visible numeric bubbles omit the selected time;
 // state phase intervals remain evidence about the whole phase, distinct from the selected instant.
-function scrubText(h, i, includeTime = true, aux = dhwAuxPhases(h)) {
-  if (h.id === ENV3_COMBINED_ID && i >= h.v.length) {
+function scrubText(h, i, includeTime = true, aux) {
+  if (env3ChartId(h.id) && i >= h.v.length) {
     const forecast = forecastScrubView(h);
     const point = forecast?.points[i - h.v.length];
     if (!point) return "";
@@ -1593,7 +2036,7 @@ function scrubText(h, i, includeTime = true, aux = dhwAuxPhases(h)) {
     return v != null ? histFmt1(v / 10) + (s.unit ? " " + s.unit : "")
          : histHeld(s, i) ? t("hist.held") : cfg?.missing ? t(cfg.missing) : t("hist.nm");
   };
-  if (h.id === ENV3_COMBINED_ID) {
+  if (env3ChartId(h.id)) {
     const rows = (includeTime ? h.series : histVisibleSeries(h)).map((s) =>
       `${s.name}  ${s.v[i] == null ? t("hist.nm") : valueText(s)}`);
     return (includeTime ? [scrubTime(h, i), ...rows] : rows).join("\n");
@@ -1618,7 +2061,8 @@ function scrubText(h, i, includeTime = true, aux = dhwAuxPhases(h)) {
       if (h.liveIndex === i) return `${t("hist.now")} · ${status}`;
       const [from, count] = sampleRunAt(
         h.liveIndex == null ? primary.v : primary.v.slice(0, h.recordedN), i);
-      return `${stateRunWhen(h, from, count)} · ${status}`;
+      const when = stateRunWhen(h, from, count, primary);
+      return when ? `${when} · ${status}` : status;
     }
     // A state chart is already a sequence of PHASES. Hovering any point therefore names the whole
     // containing phase — source, state, start/end and sampled duration — while the chart itself
@@ -1634,7 +2078,8 @@ function scrubText(h, i, includeTime = true, aux = dhwAuxPhases(h)) {
         h.liveIndex == null ? s.v : s.v.slice(0, h.recordedN), i);
       return {
         source: s.source === "modbus" ? "Modbus" : s.name,
-        detail: t(cfg.run, valueText(s), stateRunWhen(h, from, count), histDuration(count * h.dt)),
+        detail: t(cfg.run, valueText(s), stateRunWhen(h, from, count, s) || t("hist.nm"),
+          histDuration(count * h.dt)),
       };
     });
     return blocks.map((b) => `${b.source}\n${b.detail}`).join("\n\n");
@@ -1647,7 +2092,7 @@ function scrubText(h, i, includeTime = true, aux = dhwAuxPhases(h)) {
     let out = (withName ? `${s.source === "modbus" ? "Modbus" : s.name} ` : "") + valueText(s);
     if (h.id === "outdoor_air" && s.source === "modbus" && s.v?.[i] != null) {
       const [from, count] = sampleRunAt(s.v, i);
-      out += ` · ${t("hist.modbus_plateau", stateRunWhen(h, from, count), histDuration(count * h.dt))}`;
+      out += ` · ${t("hist.modbus_plateau", stateRunWhen(h, from, count, s), histDuration(count * h.dt))}`;
     }
     return out;
   };
@@ -1656,8 +2101,9 @@ function scrubText(h, i, includeTime = true, aux = dhwAuxPhases(h)) {
     ? visible.map((s) => sourceText(s, true)).join("\n")
     : sourceText(visible[0] || (h.series ? h.series[0] : h), false);
   let res = (includeTime ? scrubTime(h, i) + " · " : "") + val;
-  if (h.id === "dhw_tank" && aux) {
-    const active = [aux.boost[i] && t("hist.boost_active"), aux.bsh[i] && t("hist.heater_active")].filter(Boolean);
+  if (h.tankAux) {
+    const active = (aux ? aux.filter(phase => phase.flags[i]) : DHW_PHASE_SERIES.filter((phase, j) =>
+      alignAuxSample(h, h.tankAux[j], i, phase.source) === phase.active)).map(dhwPhaseLabel);
     if (active.length) res += (visible.length > 1 ? "\n" : " · ") + active.join(" + ");
   }
   return res;
@@ -1670,7 +2116,7 @@ function scrubText(h, i, includeTime = true, aux = dhwAuxPhases(h)) {
 // markup, so switching the live bubble from textContent to innerHTML below does not create an HTML
 // injection path through translations, units or device data.
 function histReadout(h, i, aux) {
-  if (h.id === ENV3_COMBINED_ID) {
+  if (env3ChartId(h.id)) {
     const text = scrubText(h, i, false, aux);
     if (!text) return "";
     const lines = text.split("\n");
@@ -1711,11 +2157,12 @@ function placeScrubReadout(graph, h, i, frac) {
 // Paint the crosshair for sample `i` on the existing nodes. A drag never rebuilds the plot;
 // only the small escaped readout changes.
 function scrubMove(plot, i) {
-  const h = historyView(plot.dataset.hist, plot.dataset.source || "");
+  const h = scrubView(plot);
   const n = +plot.dataset.n;
-  if (!h || !n) return;
+  if (!h) return;
   const forecast = forecastScrubView(h);
   const total = n + (forecast?.points.length || 0);
+  if (!total) return;
   i = Math.max(0, Math.min(total - 1, i));
   const graph = plot.parentElement;
   // .vhist-live, never the bare class: a PINNED crosshair carries the same visual classes and sits
@@ -1742,24 +2189,23 @@ function scrubMove(plot, i) {
   }
   const measuredFrac = Number.isFinite(+plot.dataset.measuredP)
     ? Math.max(0.01, Math.min(1, +plot.dataset.measuredP / 100)) : 1;
-  const frac = scrubFrac(i, n) * measuredFrac;
+  const frac = STATE_HIST[h.id] ? stateSampleFraction(i, n) : scrubFrac(i, n) * measuredFrac;
   const x = frac * w;
 
   cross.hidden = false;
   cross.style.left = x.toFixed(1) + "px";
   // One marker per instrument. Both share the crosshair and scale; a gap hides only that source's
   // marker, never the other one.
-  const separateScales = h.id === ENV3_COMBINED_ID;
+  const separateScales = env3ChartId(h.id);
   const allPts = h.series.flatMap((s) => s.v.map((z) => z == null ? null : z / 10));
   const sharedY = separateScales ? null : histScale(allPts, n).Y;
   for (const mark of marks) {
     const s = h.series.find((q) => q.source === mark.dataset.source);
     const v = s ? s.v[i] : null;
     if (v == null || !histVisibleSeries(h).includes(s)) { mark.hidden = true; continue; }
-    const scaleValues = s.v.map((z) => z == null ? null : z / 10);
     const spec = forecast && WEATHER_FORECAST_SERIES.find((item) => item.measured === s.source);
-    if (spec) scaleValues.push(...weatherForecastView().points.map((point) => point[spec.key]));
-    const Y = separateScales ? histScale(scaleValues, n).Y : sharedY;
+    const Y = spec ? forecast.scales[spec.key] : separateScales
+      ? histScale(s.v.map(z => z == null ? null : z / 10), n).Y : sharedY;
     mark.hidden = false;
     mark.style.left = x.toFixed(1) + "px";
     mark.style.top = ((Y(v / 10) / HIST_H) * 100).toFixed(2) + "%";
@@ -1767,13 +2213,20 @@ function scrubMove(plot, i) {
   placeScrubReadout(graph, h, i, frac);
 }
 
-function scrubIndex(plot, clientX) {
+function scrubView(plot) {
+  if (S.trendPointer?.plot === plot && S.trendPointer.view) return S.trendPointer.view;
+  const view = historyView(plot.dataset.hist, plot.dataset.source || "");
+  return view && (!plot.dataset.rev || plot.dataset.rev === histViewRevision(view)) ? view : null;
+}
+
+function scrubIndex(plot, clientX, h = scrubView(plot)) {
+  if (!h) return -1;
   const r = plot.getBoundingClientRect();
   const n = +plot.dataset.n;
-  const h = historyView(plot.dataset.hist, plot.dataset.source || "");
   const forecast = forecastScrubView(h);
   const rawFrac = Math.max(0, Math.min(1, (clientX - r.left) / (r.width || 1)));
-  if (forecast && rawFrac > forecast.nowFrac) {
+  if (STATE_HIST[h.id]) return Math.min(n - 1, Math.floor(rawFrac * n));
+  if (forecast && (!n || rawFrac > forecast.nowFrac)) {
     let nearest = 0, distance = Infinity;
     forecast.points.forEach((point, i) => {
       const d = Math.abs(forecast.xFrac(point.time) - rawFrac);
@@ -1800,14 +2253,28 @@ function scrubArm(plot) {
 }
 
 function scrubEnd(plot) {
+  if (S.scrub === "checkup-cycling") return;
+  const pointer = S.trendPointer;
+  if (pointer && pointer.plot !== plot) return;
+  if (pointer) {
+    S.trendPointer = null;
+    try { plot.releasePointerCapture(pointer.id); } catch {}
+  }
   clearTimeout(scrubWatchdog);
   if (plot) {
     plot.querySelector(".vhist-cross.vhist-live").hidden = true;
     plot.querySelectorAll(".vhist-mark.vhist-live").forEach((m) => { m.hidden = true; });
-    plot.parentElement.querySelector(".vhist-tip.vhist-live").hidden = true;
-    plot.parentElement.querySelector(".vhist-time.vhist-live").hidden = true;
+    const tip = plot.parentElement?.querySelector(".vhist-tip.vhist-live");
+    const time = plot.parentElement?.querySelector(".vhist-time.vhist-live");
+    if (tip) tip.hidden = true;
+    if (time) time.hidden = true;
   }
   if (S.scrub) { S.scrub = null; renderTrendHosts(); }   // resume the frozen trend hosts
+}
+
+function historyRowOwner(node, host) {
+  return (node?.closest?.(".vitem") || host?.closest?.(".vitem"))
+    ?.querySelector("[data-desc]")?.dataset.desc;
 }
 
 // Structural poll updates may replace card containers or an inspector's history. Preserve the
@@ -1815,7 +2282,7 @@ function scrubEnd(plot) {
 function replaceHistoryHtml(host, html) {
   const active = globalThis.document?.activeElement;
   const { histId, histSeries, hist, source = "" } = active?.dataset || {};
-  const owner = node => node?.closest?.(".vitem")?.querySelector("[data-desc]")?.dataset.desc;
+  const owner = node => historyRowOwner(node, host);
   // The cycling chart may be mounted inside its own slot before the surrounding row is rendered.
   const signature = node => JSON.stringify([node.hasAttribute("data-cycling")
     ? "model:health_cycling" : owner(node), node.outerHTML]);
@@ -1835,8 +2302,7 @@ function replaceHistoryHtml(host, html) {
     // Retaining a chart's identity is insufficient in WebKit: moving it through a detached
     // template still invalidates its painting ancestors. Scalar polls can update text in place.
     // Preflight the complete tree before applying anything; structural changes keep the fallback.
-    const text = [];
-    let diagnosisUpdate;
+    const text = [], scopedUpdates = [];
     // Card navigation owns group visibility after rendering; it is not source markup drift.
     const attrs = node => [...node.attributes].filter(attr =>
       attr.name !== "hidden" || !node.matches(".vgroup[data-dashboard-card]"));
@@ -1849,9 +2315,14 @@ function replaceHistoryHtml(host, html) {
       if (a.nodeType !== 1) return a.isEqualNode(b);
       if (a.classList.contains("vhist"))
         return a._histMarkup === signature(b);
+      // Inactive dashboard cards keep their last chart mounted without generating its markup.
+      // On selection, catch up inside the slot without replacing another card's plot.
+      const chart = b.getAttribute("data-chart");
+      if (chart !== null && a.dataset.epoch !== b.dataset.epoch) return false;
+      if (chart) return true;
       const nextAttrs = attrs(b);
-      if (attrs(a).length !== nextAttrs.length ||
-          nextAttrs.some(attr => a.getAttribute(attr.name) !== attr.value)) return false;
+      if (chart === null && (attrs(a).length !== nextAttrs.length ||
+          nextAttrs.some(attr => a.getAttribute(attr.name) !== attr.value))) return false;
       // The live cycling chart owns its slot and updates independently of value rows.
       if (a.getAttribute("data-checkup-hours") !== null) return true;
       const before = text.length;
@@ -1859,10 +2330,10 @@ function replaceHistoryHtml(host, html) {
           [...a.childNodes].every((node, index) => same(node, b.childNodes[index]))) return true;
       // A diagnosis may gain a badge or completed-run rows while another card is visible.
       // Refresh its contents alone if the surrounding value grid is otherwise compatible.
-      if (host.id !== "valueGroups" || a.parentNode !== host ||
-          a.getAttribute("data-dashboard-card") !== "diagnosis") return false;
+      if (chart === null && (host.id !== "valueGroups" ||
+          a.parentNode !== host || a.getAttribute("data-dashboard-card") !== "diagnosis")) return false;
       text.length = before;
-      diagnosisUpdate = [a, b.innerHTML];
+      scopedUpdates.push([a, b]);
       return true;
     };
     const textOnly = host.childNodes && template.content.childNodes &&
@@ -1870,7 +2341,7 @@ function replaceHistoryHtml(host, html) {
       [...host.childNodes].every((node, index) => same(node, template.content.childNodes[index]));
     if (textOnly) {
       for (const [node, value] of text) node.nodeValue = value;
-      if (diagnosisUpdate) replaceHistoryHtml(...diagnosisUpdate);
+      for (const [a, b] of scopedUpdates) replaceHistoryHtml(a, b.innerHTML);
       return;
     }
     const rebuilding = S.trendRebuilding;
@@ -1885,18 +2356,31 @@ function replaceHistoryHtml(host, html) {
       }
       const slot = (host.id === "valueGroups" || diagnosisCard) && host.querySelector("[data-checkup-hours]");
       if (slot) template.content.querySelector("[data-checkup-hours]")?.replaceWith(slot);
+      if (host.id === "valueGroups" || host.id === "settingsCards") {
+        // A paused slot has no generated markup. Keep its previous chart only for the same
+        // disclosure and series in the same card.
+        const key = node => JSON.stringify([node.closest("[data-dashboard-card]")?.dataset.dashboardCard,
+          owner(node), node.closest(".vitem")?.querySelector("[data-trend]")?.dataset.trend,
+          node.dataset.epoch]);
+        const slots = new Map([...host.querySelectorAll("[data-chart]")].map(node => [key(node), node]));
+        for (const next of template.content.querySelectorAll('[data-chart="1"]')) {
+          const id = key(next);
+          const old = slots.get(id);
+          if (!old) continue;
+          slots.delete(id);
+          next.replaceWith(old);
+        }
+      }
       host.replaceChildren(template.content);
     } finally { S.trendRebuilding = rebuilding; }
   }
   if (focused && active.isConnected) active.focus({ preventScroll: true });
-  else if (focused && hist) for (const plot of host.querySelectorAll("[data-hist]")) {
-    if (plot.dataset.hist === hist && (plot.dataset.source || "") === source && owner(plot) === focusedOwner)
-      plot.focus({ preventScroll: true });
-  }
-  else if (focused && histSeries) for (const button of host.querySelectorAll("[data-hist-series]")) {
-    if (button.dataset.histId === histId && button.dataset.histSeries === histSeries)
-      button.focus({ preventScroll: true });
-  }
+  else if (focused && (hist || histSeries))
+    [...host.querySelectorAll(hist ? "[data-hist]" : "[data-hist-series]")].find(node =>
+      owner(node) === focusedOwner && (hist
+        ? node.dataset.hist === hist && (node.dataset.source || "") === source
+        : node.dataset.histId === histId && node.dataset.histSeries === histSeries))
+      ?.focus({ preventScroll: true });
   else if (focused && (cycling || active?.dataset?.desc)) {
     const chart = cycling && host.querySelector("[data-cycling]");
     const sameScope = chart && chart.dataset.cycling === cycling.dataset.cycling;
@@ -1920,16 +2404,19 @@ function renderTrendHosts() {
   const active = typeof document === "undefined" ? null : document.activeElement;
   const host = active?.closest?.("#valueGroups, #inspHist, #settingsCards");
   const id = active?.dataset?.hist, source = active?.dataset?.source || "", cursor = active?.dataset?.cur;
+  const activeOwner = historyRowOwner(active);
   S.trendRebuilding = true;
   try { renderCards(); renderInspect(); renderSettings(); }
   finally { S.trendRebuilding = false; }
-  if (!host) return;
-  if (!id) return;
+  if (!host || !id) return;
   const next = Array.from(host.querySelectorAll("[data-hist]")).find((plot) =>
-    plot.dataset.hist === id && (plot.dataset.source || "") === source);
+    plot.dataset.hist === id && (plot.dataset.source || "") === source && historyRowOwner(plot) === activeOwner);
   if (!next) return;
   next.focus({ preventScroll: true });
-  if (cursor != null) { next.dataset.cur = cursor; scrubMove(next, +cursor); }
+  if (cursor != null && next.dataset.rev === active.dataset.rev) {
+    next.dataset.cur = cursor;
+    scrubMove(next, +cursor);
+  }
 }
 
 const chevIcon = `<svg class="vrow-chev" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>`;
@@ -2104,9 +2591,12 @@ function displayHomeHubLabel(row) {
 // `trendId` is the series the panel carries, if any: the toggle fetches and un-pins by it, so the
 // id is derived ONCE (here, where the body was built) instead of again from the key — which for a
 // board row is not a catalog label and could not be looked up at all.
-function descAccordion(key, label, valHtml, cls, bodyHtml, trendId, unit = "") {
+function descAccordion(key, label, valHtml, cls, bodyHtml, trendId, unit = "", paused,
+                       renderHistory = histHtml) {
   const open = S.descOpen.has(key);
-  if (open && trendId) bodyHtml += histHtml(trendId, unit, label);
+  const visible = !paused && !(paused === false && S.stage === "settings");
+  const chart = open && trendId && visible ? renderHistory(trendId, unit, label) : "";
+  if (trendId) bodyHtml += `<div data-chart="${open && !visible ? 1 : ""}" data-epoch="${S.histEpoch || 0}">${chart}</div>`;
   const diagnosisLabel = key.startsWith("model:health_") || key === "service:refrigerant";
   return `<div class="vitem${open ? " open" : ""}">` +
     `<button class="vrow vrow-desc" type="button" data-desc="${esc(key)}"` +
@@ -2122,7 +2612,7 @@ function descAccordion(key, label, valHtml, cls, bodyHtml, trendId, unit = "") {
 // unchanged row. Most catalog labels are unique within a render; the reused set carries its X10A
 // group from the server below. A derived row supplies its own key and visual label while keeping its
 // canonical label for description matching.
-function vDescRow(v) {
+function vDescRow(v, paused) {
   const label = v.label || "";
   const shownLabel = v.displayLabel || displayReadingLabel(label, v);
   // Ambiguous rows used to share one label-based key, so expanding either Error Code opened both
@@ -2176,7 +2666,7 @@ function vDescRow(v) {
   // below it is the same sentence on every device and at every hour.
   return descAccordion(key, shownLabel, val, cls,
                        dwell + unknownAge + (d ? descBodyHtml(d, src.value, descriptionCopy(d)) : "") +
-                       mbNoteHtml(v, cmp), hid, displayUnit(v));
+                       mbNoteHtml(v, cmp), hid, displayUnit(v), paused);
 }
 
 // A Model-card row: the same accordion as a value row when copy exists for it, else the plain row
@@ -2293,6 +2783,8 @@ function toggleDesc(btn) {
   const key = btn.dataset.desc || "";
   const trend = btn.dataset.trend || "";
   const open = !item.classList.contains("open");
+  if (!open && ((S.trendPointer && item.contains(S.trendPointer.plot)) ||
+      (key === "model:health_cycling" && S.scrub === "checkup-cycling"))) cancelHistoryGesture();
   item.classList.toggle("open", open);
   btn.setAttribute("aria-expanded", open ? "true" : "false");
   if (open) S.descOpen.add(key);
@@ -2309,10 +2801,11 @@ function toggleDesc(btn) {
   // Opening a schematic history also fills the cache used by value rows. Do not build and parse
   // another SVG in every collapsed row on every two-second poll. Mount it only on disclosure,
   // including a cache hit (ensureHistPair then returns without triggering a repaint).
-  if (open && trend && !item.querySelector(".vhist"))
-    replaceHistoryHtml(item.querySelector(".vdesc-body"),
-      item.querySelector(".vdesc-body").innerHTML +
+  if (open && trend && !item.querySelector(".vhist")) {
+    const body = item.querySelector("[data-chart]") || item.querySelector(".vdesc-body");
+    replaceHistoryHtml(body, body.innerHTML +
       histHtml(trend, btn.dataset.unit || "", btn.querySelector(".vrow-label").textContent));
+  }
   // Fetch the trend only once the panel is actually opened — a device that buffers eleven series
   // would otherwise answer a request per row on every page load, for panels nobody looked at.
   if (open && trend) ensureHistPair(trend);
@@ -2346,7 +2839,6 @@ function valueGroupsHtml(vals, connected) {
   const buckets = new Map();
   for (const v of rows) { const g = groupOf(v); (buckets.get(g) || buckets.set(g, []).get(g)).push(v); }
   const grouped = buckets.size > 1;
-  const rowsOf = (rows) => rows.map((v) => vDescRow(v)).join("");
   // Group headings are translated; a firmware-supplied custom group (not in the dictionary) keeps its
   // own name. Bucket KEYS stay the English group name (groupOf) — only the display label is localised.
   const groupLabel = (name) => (I18N.en["group." + name] != null ? t("group." + name) : name);
@@ -2368,7 +2860,8 @@ function valueGroupsHtml(vals, connected) {
     const badge  = prot && rows.some(isLimiting) ? t("protect.limiting") : "";
     const label = grouped ? groupLabel(name) : t("group.Values");
     const navLabel = grouped && name === "Refrigerant / outdoor" ? t("nav.outdoor") : label;
-    html += vcard(label, rowsOf(shown), badge, "", `group:${name}`, navLabel);
+    const key = `group:${name}`;
+    html += vcard(label, shown.map(v => vDescRow(v, key !== S.dashboardCard)).join(""), badge, "", key, navLabel);
   };
   for (const name of order) if (buckets.has(name)) { emit(name, buckets.get(name)); done.add(name); }
   for (const [name, rows] of buckets) if (!done.has(name)) emit(name, rows); // firmware-supplied custom groups
@@ -2419,7 +2912,8 @@ function modbusOnlyGroupHtml(all) {
         `<span class="vrow-val src-val-mb">${val}</span></div>`;
     }
     return descAccordion(label, shown, val, "src-val-mb",
-                         d ? descBodyHtml(d, m.value, descriptionCopy(d)) : "", hid, unit);
+                         d ? descBodyHtml(d, m.value, descriptionCopy(d)) : "", hid, unit,
+                         S.dashboardCard !== "modbus");
   }).join("");
   // The heading has to match what is IN the card: "Modbus only" is true of the unpaired handful and
   // false the moment `all` folds the paired rows in beside them.

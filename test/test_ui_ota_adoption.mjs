@@ -14,7 +14,11 @@ function harness(compact) {
     pollSignal: () => "bounded-probe-signal", t: (key) => key,
     j: async (url, options) => {
       requests.push({ url, options });
-      if (url === "/status") throw new Error("503");
+      if (url === "/status") {
+        const frame = context.ui.recoveredStatus;
+        if (frame) return frame;
+        throw new Error("503");
+      }
       if (compact instanceof Error) throw compact;
       return compact;
     },
@@ -28,15 +32,18 @@ function harness(compact) {
     otaWatch = (generation) => { events.push("watch:" + generation); return completion; };
     otaPoll = (_states, _tries, _tick, generation) => { events.push("check:" + generation); return completion; };
     otaWaitReboot = () => events.push("wait-reboot");
-    this.ui = { S, resumeOta, refreshStatus };
+    setLangFromStatus = async () => {};
+    hydrateRoutedPopup = () => {};
+    this.ui = { S, resumeOta, refreshStatus, syncOtaSettingsLock };
   `, context);
   context.completion = completion;
   context.ui.S.status = { version: "same" };
-  return { ...context.ui, events, requests, controls, finish };
+  return { ...context.ui, events, requests, controls, finish,
+    recoverStatus: () => { context.ui.recoveredStatus = { version: "same" }; } };
 }
 
-// External manifest checking also owns the write lock; normal check completion releases it without
-// pretending that this observer accepted an install or waiting for a reboot that will never occur.
+// Manifest completion releases the OTA lock. Configuration still requires a current full status
+// and the observer must never wait for a reboot from a check.
 for (const compact of [{ state: "checking", busy: true, generation: 45 },
   { state: "idle", busy: true, generation: 46 }]) {
   const h = harness(compact);
@@ -47,6 +54,10 @@ for (const compact of [{ state: "checking", busy: true, generation: 45 },
   assert.ok(h.events.includes("check:" + compact.generation));
   h.finish({ state: "idle", busy: false, generation: compact.generation }); await settle();
   assert.equal(h.S.otaBusy, false); assert.equal(h.S.busy, false);
+  assert.equal(h.controls[0].disabled, true, "a compact status cannot unlock configuration");
+  h.recoverStatus();
+  assert.equal(await h.refreshStatus(false), true);
+  h.syncOtaSettingsLock();
   assert.equal(h.controls[0].disabled, false);
   assert.equal(h.events.includes("wait-reboot"), false);
 }

@@ -392,8 +392,7 @@ bool mb_discover_homehub(std::string& found) {
 }
 
 void mb_autodiscover_initial() {
-    Config c = config();
-    if (!config_modbus_should_search(c)) return;
+    if (!config_modbus_should_search(config())) return;
     // A stored settings blob this build could not use (a newer layout after a rollback, damage, a
     // read error) leaves the running config on the fallback, whose pending search decision is not
     // the owner's. Persisting its outcome would replace that blob with the fallback image, so skip
@@ -415,7 +414,7 @@ void mb_autodiscover_initial() {
     // This function is called before http_start(), so config_save's whole-blob write cannot race a
     // web save. Persist the decision even on a miss: later hubs are configured manually and boot
     // never becomes a continuous multicast scan loop.
-    c = config();
+    Config c = config();
     if (!config_modbus_should_search(c)) return;
     c.mb_discovery_done = true;
     if (ok) c.mb_host = found;

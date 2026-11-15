@@ -85,7 +85,6 @@ function harness(cached, transform = (text) => text) {
     renderRecoveryBanner = () => {};
     renderRollbackBanner = () => {};
     renderCrashBanner = () => {};
-    renderHeaderMeta = () => {};
     renderSettings = () => syncOtaSettingsLock();
     renderCards = () => {};
     renderInspect = () => {};
@@ -185,7 +184,7 @@ for (const order of ["status-first", "cache-first"]) {
     assert.equal(h.S.busy, false); assert.equal(h.S.otaBusy, false); assert.equal(h.S.otaInstalling, false);
     assert.equal(h.storage.has(cacheKey), false);
     assert.equal(h.S.otaAlert, reason); assert.equal(h.element("otaAlertDashMessage").textContent, reason);
-    assert.equal(h.controls[0].disabled, false);
+    assert.equal(h.controls[0].disabled, true, "discarding the snapshot still leaves no accepted status");
     h.renderApp(); h.renderLive();
     assert.equal(h.S.live, null); assert.equal(observe(h).lwt, "—");
     assert.equal(observe(h).fan, false); assert.equal(observe(h).pump, false);
@@ -236,7 +235,8 @@ for (const state of ["idle", "error", "checking"]) {
   }
   h.renderApp();
   assert.equal(h.S.otaCached, false); assert.equal(h.S.live, null);
-  assert.equal(observe(h).lwt, "—"); assert.equal(h.controls[0].disabled, false);
+  assert.equal(observe(h).lwt, "—");
+  assert.equal(h.controls[0].disabled, true, "only a live status can unlock configuration again");
   assert.equal(h.storage.has(cacheKey), false);
   assert.notEqual(observe(h).headline, "Firmware update");
   assert.equal(h.S.imageLease.elf, "image-a", "idle/error/check retirement retains the page's image identity");
@@ -258,6 +258,9 @@ for (const invalid of [null, { ...cache(), saved_at_ms: Date.now() - 16 * 60 * 1
   assert.equal(h.storage.has(cacheKey), false);
   assert.equal(h.S.imageLease.version, compact.current);
   assert.equal(h.S.imageLease.elf, "", "rejected cache must contribute no firmware identity");
+  h.renderApp();
+  assert.equal(h.element("verLink").textContent, "v" + compact.current,
+    "poll rendering must preserve the known version from compact OTA status");
   h.routes.set("/status", async () => response({ ...status(), app_elf_sha256: "confirmed-image" }));
   assert.equal(await h.refreshStatus(), true);
   assert.equal(h.S.imageLease.elf, "confirmed-image", "a partial compact lease learns the first full ELF");

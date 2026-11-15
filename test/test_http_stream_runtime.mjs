@@ -89,6 +89,7 @@ function compile(tag,mutation) {
   execute(cxx,["-std=c++20","-O0","-g","-ffunction-sections","-fdata-sections","-Wall","-Wextra","-Wno-unused-parameter",
     ...(sanitizer?["-fsanitize=undefined","-fno-sanitize-recover=all"]:[]),
     ...(mutation?.special==="legacy-values"?["-DHTTP_STREAM_LEGACY_DWELL"]:[]),
+    ...(mutation?.special==="legacy-history"?["-DHTTP_STREAM_LEGACY_HISTORY"]:[]),
     '-DCONFIG_DAIKIN_HOSTNAME="daikin-altherma-esp32"','-DCONFIG_IDF_TARGET="esp32s3"',
     '-DCONFIG_DAIKIN_MQTT_BASE_TOPIC="daikin-altherma-esp32"',`-I${path.join(fixture,"stubs")}`,`-I${main}`,
     `-DHTTP_COMMON_SOURCE=${JSON.stringify(path.join(directory,paths.common))}`,
@@ -114,6 +115,9 @@ const mutations=[
     before:"if (!weather_tls) weather_values_reader_leave();",after:"/* mutation: keep a refused reader counted */"},
   {name:"history-epoch-bypass",file:"status",scenario:"history_epoch_refusal",
     before:"if (history_snapshot_epoch != history_epoch())",after:"if (false)"},
+  {name:"history-separately-rounded-clocks",file:"status",scenario:"restored_history_boot_raster",
+    before:/logic::history_commit_unix_s\(unix_s, wall_ms, esp_timer_get_time\(\),\s*history_meta\.newest_commit_us, newest\)/,
+    after:"((newest = unix_s - history_meta.newest_age_s), true)"},
   {name:"room-source-attribution",file:"status",scenario:"room_history_completed",
     before:': room_source ? "room"',after:': room_source ? "mqtt"'},
   {name:"room-config-admission",file:"status",scenario:"room_history_refusals",
@@ -162,7 +166,7 @@ try {
   const compiler=execute(cxx,["--version"]).stdout.trim();
   const baseline=execute(compile("production"),[]);
   const caseCount=Number(baseline.stdout.match(/^PASS total=(\d+)$/m)?.[1]);
-  assert.equal(caseCount,24);
+  assert.equal(caseCount,25);
   assert.equal(caseCount,[...baseline.stdout.matchAll(/^PASS (?!total=)\S+$/gm)].length);
   const wires=[]; const decoder=new TextDecoder("utf-8",{fatal:true});
   const configCases=new Map([
@@ -320,6 +324,13 @@ try {
       assert.equal(doc.held.length,144); assert.equal(doc.t0,2000000000-10-287*300); assert.equal(doc.b0,100);
       assert.deepEqual(doc.v,Array.from({length:288},(_,i)=>i%2?null:i-100));
       assert.deepEqual(doc.held,Array.from({length:144},(_,i)=>[i*2+1,1]));
+    }
+    if(name==="restored-history") {
+      assert.equal(doc.boot_b0,-288);
+      assert.equal(Object.hasOwn(doc,"b0"),false);
+      assert.equal(doc.v.length,288);
+      assert.equal(doc.t0,2000000099-287*300);
+      assert.match(doc.boot_id,/^[0-9a-f]{16}$/);
     }
     if(name==="room-history"||name==="room-history-renamed") {
       assert.equal(doc.id,"room_temp"); assert.equal(doc.source,"room"); assert.equal(doc.epoch,42);

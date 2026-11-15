@@ -234,7 +234,7 @@ function elementsFor(...ids) {
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(S.otaInstalling, true, "the adopted device-side install must own the reachability state");
-  assert.equal(S.otaShown, true, "the resumed progress must freeze only already-rendered Settings cards");
+  assert.equal(S.otaShown, true, "the resumed progress remains available to repaint");
   assert.equal(S.otaView.text, "48%", "the resumed percentage must survive as renderable state");
   assert.equal(elements.hdrIp.textContent, "daikin.local", "the OTA shell restores the reached host identity");
   assert.equal(elements.verLink.textContent, "v1.4.72-dev.333", "the compact status restores the running version");
@@ -243,6 +243,18 @@ function elementsFor(...ids) {
   assert.match(elements.settingsCards.innerHTML, /v1\.4\.72-dev\.333/, "the OTA-only card uses the reported version");
   assert.match(elements.settingsCards.innerHTML, /Entwicklung/, "the OTA-only card uses the reported channel");
   assert.equal(dashboardStatusPaints, 1, "the dashboard must paint the known OTA state immediately");
+
+  // Entering Settings calls renderSettings even if /status has not answered during the install.
+  const recoveryCard = elements.settingsCards.innerHTML;
+  sandbox.__api.renderSettings();
+  assert.equal(elements.settingsCards.innerHTML, recoveryCard, "opening Settings retains the OTA-only card");
+  assert.equal(elements.connTile.hidden, true, "the OTA shell still has no connection evidence");
+  assert.equal(S.settingsHydrated, false, "compact OTA status cannot hydrate full Settings");
+  S.transportUnavailable = "status";
+  sandbox.__api.renderSettings();
+  assert.equal(elements.statusSnapshot.hidden, false);
+  assert.equal(elements.statusSnapshot.textContent, "sys.nodata",
+    "without a full frame, Settings report missing data without a snapshot or unreachable claim");
 
   // If /status later fits before the reboot, it must replace the recovery card ONCE despite
   // otaShown, and then repaint the retained percentage into the newly-created progress slot.
@@ -260,6 +272,7 @@ function elementsFor(...ids) {
     syslog: { configured: false },
     ntp: { synced: true, server: "pool.ntp.org" },
   };
+  S.transportUnavailable = null;
   sandbox.__api.renderSettings();
 
   assert.equal(S.settingsHydrated, true, "the first status-backed Settings render must complete");
@@ -268,6 +281,23 @@ function elementsFor(...ids) {
   assert.match(elements.settingsCards.innerHTML, /Protokoll/, "the complete protocol card is restored");
   assert.equal(elements.otaStatSet.children.at(-1)?.textContent, "48%",
     "hydrating the complete cards must repaint the retained OTA percentage");
+  const hydrated = elements.settingsCards.innerHTML;
+  const dashboardProgress = elements.otaStat.children.at(-1);
+  const settingsProgress = elements.otaStatSet.children.at(-1);
+  sandbox.__api.renderSettings();
+  assert.equal(elements.otaStat.children.at(-1), dashboardProgress);
+  assert.equal(elements.otaStatSet.children.at(-1), settingsProgress,
+    "unchanged progress preserves its live-region child on both screens");
+  S.transportUnavailable = "status";
+  S.descOpen = new Set();
+  S.status = { ...S.status, diagnostics: { enabled: true } };
+  elements.otaStatSet = new Element("otaStatSet");
+  sandbox.__api.renderSettings();
+  assert.notEqual(elements.settingsCards.innerHTML, hydrated,
+    "Settings content can be reconciled during OTA without replacing its progress evidence");
+  assert.equal(elements.otaStatSet.children.at(-1)?.textContent, "48%");
+  assert.equal(elements.otaStat.children.at(-1), dashboardProgress,
+    "remounting the Settings slot cannot replace the header progress");
 }
 
 // A failing /status during an adopted install must not overwrite that stronger, successful

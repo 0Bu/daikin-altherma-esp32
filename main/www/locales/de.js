@@ -1,4 +1,4 @@
-// translation-source: 34200897e3bb460a7f6fcd68bd6ff940649f8810c9b3709dc7616000e01aee90
+// translation-source: 65571656f160db7c5cef68e1a9e2f1c556ae6ac67f346ba2f2b092cff1d703c9
 I18N.de = localeValues([
   /* sys.nodata */ "Keine Daten",
   /* sys.unreachable */ "Nicht erreichbar",
@@ -357,6 +357,8 @@ I18N.de = localeValues([
   /* hist.recorded */ (h) => `Aufzeichnung · ${h} h`,
   /* hist.now */ "jetzt",
   /* hist.ago */ (h) => `vor ${h} h`,
+  /* hist.retained */ "Letzter empfangener Messwert",
+  /* hist.before_retained */ (h) => `${h} h vor dem letzten empfangenen Messwert`,
   /* hist.loading */ "Verlauf wird geladen…",
   /* hist.none */ "Noch keine Messwerte aufgezeichnet.",
   /* hist.err */ "Verlauf nicht verfügbar.",
@@ -447,6 +449,7 @@ I18N.de = localeValues([
   /* toast.no_changes */ "Keine Änderungen",
   /* toast.reboot */ "Neustart — verbinde neu…",
   /* toast.rebooted */ "Neu gestartet — bitte neu mit dem Gerät verbinden",
+  /* board.draft_stale */ "Die Board-Einstellungen haben sich geändert. Öffne den Dialog vor dem Speichern erneut.",
   /* toast.busy_retry */ "Gerät ausgelastet — gleich erneut versuchen",
   /* toast.unreachable */ "Gerät nicht erreichbar",
   /* toast.rejected */ "Abgelehnt",
@@ -502,6 +505,7 @@ I18N.de = localeValues([
   /* schem.defrost_pill */ "❄ Abtauen",
   /* schem.outdoor */ "Außen",
   /* insp.close */ "Schließen",
+  /* schem.defrost_transfer */ "Beim bestätigten Abtauen kann Wärme vom Wasser zum Kältemittel fließen. Die Leitungen zeigen diese Richtung nur, wenn der aktuelle Durchfluss und die Temperaturen sie belegen.",
   /* schem.leaving_water */ "R1T",
   /* schem.dhw_tank */ "WW-SPEICHER",
   /* schem.set */ "Soll",
@@ -950,7 +954,6 @@ I18N.de = localeValues([
   /* lang.sv */ "Svenska",
   /* lang.fi */ "Suomi",
   /* lang.saved */ "Sprache gespeichert",
-  /* hist.cop_none */ "Kein COP-Verlauf bei einem Stromwert von CT-Klemmen. Welche Lasten sie erfassen, hängt von der Verdrahtung ab; die Wärmeseite endet vor BUH und erfasst keine direkte BSH-Wärme. Die Bilanzgrenzen können daher abweichen.",
 ]);
 
 // Unchanged German specialist copy, loaded with the existing German locale asset.

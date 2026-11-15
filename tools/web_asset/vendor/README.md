@@ -28,10 +28,11 @@ The emitted gzip has zero timestamp, no filename, OS byte 255 and a verified exa
 and MCP retain zlib. The standalone locale helper also defaults to zlib and needs no native compiler
 unless `--gzip-encoder zopfli` is selected.
 
-## Browser locale decoder
+## Browser decoder
 
 `lzma-js/` contains the unmodified decompressor and its complete MIT license, with exact upstream
-commit and file hashes in `UPSTREAM.json`. `build_locale_bundle.py` uses Python's standard-library
-LZMA encoder and embeds this decoder in the locale resource. The
+commit and file hashes in `UPSTREAM.json`. `pack_startup_script.py` and `build_locale_bundle.py`
+use Python's standard-library LZMA encoder and embed this decoder in the dashboard and locale
+resources, respectively. The
 [architecture reference](../../../docs/ARCHITECTURE.md#http-and-browser-transport) owns the delivery
 and resource bounds.

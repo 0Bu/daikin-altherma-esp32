@@ -1231,7 +1231,7 @@ static esp_err_t set_board(httpd_req_t* req) {
     JsonGuard   j(read_config_document(req, 512, parse_error));
     if (!j) return send_err(req, "400 Bad Request", parse_error);
     if (const char* error =
-            config_request_field_error(j, HttpConfigFieldType::String, {"preset_id"}))
+            config_request_field_error(j, HttpConfigFieldType::String, {"preset_id", "boot_id"}))
         return send_err(req, "400 Bad Request", error);
     if (const char* error = config_request_field_error(
             j, HttpConfigFieldType::Integer,
@@ -1240,9 +1240,33 @@ static esp_err_t set_board(httpd_req_t* req) {
     if (const char* error = config_request_field_error(
             j, HttpConfigFieldType::Boolean, {"led_inverted", "btn_active_low", "env3_enabled"}))
         return send_err(req, "400 Bad Request", error);
+    const cJSON* const boot           = cJSON_GetObjectItem(j, "boot_id");
+    const cJSON* const revision       = cJSON_GetObjectItem(j, "config_revision");
+    const bool         revision_bound = revision != nullptr;
+    const auto         draft_stale    = [req] {
+        httpd_resp_set_status(req, "409 Conflict");
+        return http_send_json(
+            req, R"({"ok":false,"code":"board_draft_stale",)"
+                            R"("error":"Board settings changed. Reopen the editor before saving."})");
+    };
+    if (boot || revision) {
+        if (!boot || !cJSON_IsNumber(revision) ||
+            !(revision->valuedouble >= 0 && revision->valuedouble <= UINT32_MAX) ||
+            revision->valuedouble != static_cast<uint32_t>(revision->valuedouble))
+            return send_err(req, "400 Bad Request",
+                            "boot_id and config_revision must be supplied together");
+        char current_boot[17];
+        http_boot_id(current_boot);
+        if (std::strcmp(boot->valuestring, current_boot) != 0 ||
+            revision->valuedouble != static_cast<double>(config_runtime_revision()))
+            return draft_stale();
+    }
     const Config& cur = config();
-    Config c = cur;
-    c.led_gpio       = ji(j, "led_gpio", c.led_gpio);
+    // Detection can advance the revision between the cheap check and the full snapshot.
+    if (revision && revision->valuedouble != static_cast<double>(cur.runtime_revision))
+        return draft_stale();
+    Config c                      = cur;
+    c.led_gpio                    = ji(j, "led_gpio", c.led_gpio);
     c.led_type       = ji(j, "led_type", c.led_type);
     c.led_inverted   = jb(j, "led_inverted", c.led_inverted);
     c.btn_gpio       = ji(j, "btn_gpio", c.btn_gpio);
@@ -1291,10 +1315,19 @@ static esp_err_t set_board(httpd_req_t* req) {
     // it is still the first time anyone stated what this board is.
     // board_save_needed/board_reboot_needed (logic/config_model.hpp, host-tested) keep them apart —
     // persist the statement, but claim no reboot for it, since no driver's pin changed.
-    if (!board_env_save_needed(c, cur))
+    if (!board_env_save_needed(c, cur)) {
+        if (revision_bound && c.runtime_revision != config_runtime_revision()) return draft_stale();
         return http_send_json(req, "{\"ok\":true,\"reboot\":false}");   // nothing to write, no reboot
+    }
 
-    if (!config_save(c)) return send_local_pins_save_failure(req, c);
+    if (revision_bound) {
+        const ConfigSaveResult saved = config_save_if_current(c);
+        if (saved == ConfigSaveResult::Stale) return draft_stale();
+        if (saved != ConfigSaveResult::Saved)
+            return send_err(req, "500 Internal Server Error", "config write failed");
+    } else if (!config_save(c)) {
+        return send_local_pins_save_failure(req, c);
+    }
     // Only the statement moved: persisted, but no driver's pin changed, so no reboot. `saved` is
     // what keeps the ANSWER honest — {"reboot":false} alone makes the UI say "no changes", which
     // would report a write to NVS as nothing having happened. Additive, so the four routes that

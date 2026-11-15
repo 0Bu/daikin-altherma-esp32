@@ -156,7 +156,8 @@ def oracle_failed(result, case, oracle):
 baseline = build(SOURCE, "baseline")
 phases = ["prepare_read", "prepare_erase", "body", "commit", "readback",
           "commit_accepted_error", "success"]
-cases = ["commit_rejected", "core_ahead", "nor_contract", "read_admission", "sequence_rejections",
+cases = ["commit_rejected", "core_ahead", "nor_contract", "restore_before_pending_bucket",
+         "read_admission", "sequence_rejections",
          "core_sequence_prepare", "core_sequence_readback", "core_sequence_commit_error",
          "forget_before_start", "forget_during_lookup", "forget_during_scan",
          "forget_missing_partition", "forget_wrong_address", "forget_wrong_size",
@@ -228,7 +229,18 @@ if not args.expect_red:
     under_lock = "flash_lk.acquired() && !s_flash_forgotten.load() && s_flash_scan_ok"
     if pending_body.count(pre_lock) != 1 or pending_body.count(under_lock) != 1:
         raise RuntimeError("Expected both pending query Forget checks")
+    seed_start = text.index("bool seed_source_timeline_locked(")
+    seed_end = text.index("\n\nbool splice_locked(", seed_start)
+    seed_body = text[seed_start:seed_end]
+    seed_boundary = re.search(r"^    const int64_t +commit_us\s*=.+;$", seed_body, re.M).group(0)
     mutations = [
+        ("anchor_at_late_fold",
+         "return wall_bucket_of_instant_locked(logic::history_raster_boundary_us(commit_us));",
+         "return wall_bucket_of_instant_locked(commit_us);",
+         ["restore_before_pending_bucket"], "late_first_commit_keeps_its_journal_bucket"),
+        ("seed_past_pending_bucket", seed_body, seed_body.replace(
+            seed_boundary, "    bucket = logic::history_bucket(now_us);\n" + seed_boundary),
+         ["restore_before_pending_bucket"], "restore_keeps_pending_bucket_open"),
         ("omit_failure_callback", "        if (stop_owned) stop_observation_flash_failed();",
          "        (void)stop_owned;", ["data_commit", "barrier_commit"],
          "failed_append_releases_claim_for_real_service_retry"),

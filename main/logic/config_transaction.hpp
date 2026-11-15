@@ -172,11 +172,14 @@ inline void config_blob_keep_yielded_pins(ConfigBlob& b, const LocalPinsRepair& 
 template <class Store>
 ConfigSaveOutcome config_save_transaction(Config& live, const Config& requested, bool owns_link,
                                           Store&                 store,
-                                          const LocalPinsRepair& yielded = LocalPinsRepair{}) {
+                                          const LocalPinsRepair& yielded = LocalPinsRepair{},
+                                          bool                   require_current = false) {
     ConfigSaveOutcome        out;
     const ConfigSaveRevision revision =
         config_save_revision(owns_link, requested.runtime_revision, live.runtime_revision);
-    if (revision == ConfigSaveRevision::Stale) {
+    // A revision-bound Board draft also refuses safe link reconciliation.
+    if (revision == ConfigSaveRevision::Stale ||
+        (require_current && revision != ConfigSaveRevision::Current)) {
         out.result = ConfigSaveResult::Stale;
         return out;
     }

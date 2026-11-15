@@ -1,4 +1,4 @@
-// translation-source: 34200897e3bb460a7f6fcd68bd6ff940649f8810c9b3709dc7616000e01aee90
+// translation-source: 65571656f160db7c5cef68e1a9e2f1c556ae6ac67f346ba2f2b092cff1d703c9
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -362,6 +362,8 @@ I18N.pl = localeValues([
   /* hist.recorded */ (h) => `Zarejestrowano · ${h} h`,
   /* hist.now */ "teraz",
   /* hist.ago */ (h) => `${h} h temu`,
+  /* hist.retained */ "Ostatnia odebrana próbka",
+  /* hist.before_retained */ (h) => `${h} godz. przed ostatnią odebraną próbką`,
   /* hist.loading */ "Ładowanie przebiegu…",
   /* hist.none */ "Nie zarejestrowano jeszcze odczytów.",
   /* hist.err */ "Przebieg niedostępny.",
@@ -452,6 +454,7 @@ I18N.pl = localeValues([
   /* toast.no_changes */ "Brak zmian",
   /* toast.reboot */ "Ponowne uruchamianie — łączenie…",
   /* toast.rebooted */ "Uruchomiono ponownie — połącz się ponownie z urządzeniem",
+  /* board.draft_stale */ "Ustawienia płytki się zmieniły. Otwórz edytor ponownie przed zapisaniem.",
   /* toast.busy_retry */ "Urządzenie zajęte — spróbuj ponownie za chwilę",
   /* toast.unreachable */ "Nie można połączyć się z urządzeniem",
   /* toast.rejected */ "Odrzucono",
@@ -507,6 +510,7 @@ I18N.pl = localeValues([
   /* schem.defrost_pill */ "❄ odszran.",
   /* schem.outdoor */ "Zewn.",
   /* insp.close */ "Zamknij",
+  /* schem.defrost_transfer */ "Podczas potwierdzonego odszraniania ciepło może przepływać z wody do czynnika chłodniczego. Rury wskazują ten kierunek tylko wtedy, gdy potwierdzają go bieżący przepływ i temperatury.",
   /* schem.leaving_water */ "R1T",
   /* schem.dhw_tank */ "ZBIORNIK CWU",
   /* schem.set */ "zadana",
@@ -955,7 +959,6 @@ I18N.pl = localeValues([
   /* lang.sv */ "Svenska",
   /* lang.fi */ "Suomi",
   /* lang.saved */ "Zapisano język",
-  /* hist.cop_none */ "Brak wykresu COP dla CT: okablowanie określa odbiorniki, a ciepło przed BUH pomija BSH.",
 ]);
 INSPECT_I18N.pl = inspectValues(
   ["Brak bieżącego odczytu:", "sprężarka stoi, a jednostka zewnętrzna odświeża własne czujniki tylko podczas pracy. Wartość z poprzedniego cyklu jest ukryta, aby nie wyglądała na aktualny pomiar.", "Nie można odczytać prędkości sprężarki, więc wartości jednostki zewnętrznej mogą być z poprzedniego cyklu."],
@@ -1021,7 +1024,7 @@ INSPECT_I18N.pl = inspectValues(
       : "Szacowana moc cieplna podzielona przez zgodny zakresowo pobór energii. Dla CT ciepło może być liczone za BUH, a dla prądu falownika dotyczy samej pompy; montaż CT decyduje o ujętych odbiornikach. To wskazanie chwilowe, nie licznik sezonowy.", (d) => d.copBlock === "tank_heater"
       ? "Brak COP — grzałka zbiornika jest włączona. Jej pobór może wejść do bilansu prądu, lecz ciepło trafia prosto do zbiornika i nie przechodzi przez czujniki wody; zakresy nie pasują."
       : d.copBlock === "buh_no_r2t" ? "Brak COP — BUH grzeje, ale profil nie ma czujnika wody za nim. Pobór może obejmować grzałkę, a moc cieplna kończy się przed nią."
-      : d.copBlock === "mb_scope" ? "Brak COP — X10A milczy, a HomeHub podaje pobór całej jednostki z grzałkami, podczas gdy moc cieplna dotyczy tylko PHE. Bez stanu grzałek i czujnika za nimi zakresów nie można uzgodnić."
+      : d.copBlock === "mb_scope" ? "COP niedostępny. Dokumentacja HomeHub nie określa, które odbiorniki obejmuje podany pobór prądu. Szacowane ciepło dotyczy wymiennika płytowego. Obliczenie COP wymaga potwierdzenia zgodności zakresów pomiaru."
       : d.copBlock === "no_pel"
       ? d.pelHeld ? "Brak COP — przy stojącej sprężarce prąd falownika jest pozostałością z poprzedniego cyklu, a nie bieżącym pomiarem."
         : "Brak COP — profil nie podaje poboru ani z CT, ani z prądu falownika."

@@ -74,6 +74,7 @@ physical measurement. `?redact=1` applies the [report redaction contract](SECURI
 |---|---|---|
 | Root | `version`, `platform`, `uptime_s`, `boot_id`, `app_elf_sha256`, `pins_avail` | Running build, uptime, 16-hex-digit random per-boot token and X10A-eligible GPIOs. The configured nine-character ELF hash prefix helps correlate symbols; it is not full artifact/flash verification. |
 | `board` | `led_gpio`, `led_type`, `led_inverted`, `btn_gpio`, `btn_active_low`, `user_set`, `preset_id`, `preset_name`, `vendor`, `pins_local`, `presets` | Persisted hardware identity and local-I/O candidates, excluding current X10A claims. A preset fills fields; submission saves them. |
+| `board.config_revision` | Unsigned 32-bit integer | RAM-only configuration revision for draft validation. Pair with `boot_id`. |
 | `board.presets[]` | `id`, `name`, `vendor`, `led_gpio`, `led_type`, `led_inverted`, `btn_gpio`, `btn_active_low`, `i2c_pins` | Supported hardware presets. A selected identity remains listed even if its original factory pins are now unavailable; other presets whose pins are claimed (including detected Ethernet) are withheld. |
 | `wifi` | `ssid`, `ip`, `rssi`, `connected`, `bssid`, `mac`, `std`, `rolled_back` | BSSID/PHY standard are null offline. `rolled_back` is sticky until the next WiFi save. |
 | `net` | `kind`, `ip`, `eth` | Active transport (`none`, `wifi`, `eth`) and its address, independent of X10A/HomeHub. |
@@ -441,15 +442,34 @@ Query: `row=<trend-id>` and optional `source=x10a|modbus|env3|room`; absent sour
 Unknown ids return 404. Available rows are listed in `/status.history`. The payload is:
 
 ```text
-{id,source,label,epoch,boot_id,dt,unit[,t0][,b0],v:[number|null,…],held:[[from,count],…]}
+{id,source,label,epoch,boot_id,dt,unit[,t0][,b0|boot_b0],v:[number|null,…],held:[[from,count],…]}
 ```
 
-`v` is tenths of the row's actual unit; divide by ten. `dt` is the raster cadence. `b0` anchors
-monotonic five-minute buckets, `t0` is sample-zero wall time derived from the captured newest-sample
-age and omitted before clock sync. `epoch` is captured with the samples; `boot_id` matches `/status`.
-Unavailable age metadata or an epoch changed before emission returns 503. Clients must reject
-responses superseded by a newer status/source generation.
+`v` is tenths of the row's actual unit. Divide by ten. `dt` is the raster cadence in seconds.
+`b0` is the monotonic five-minute bucket of sample zero. When a restored ring begins before boot,
+`boot_b0` carries its negative bucket instead. Both are omitted if no completed sample is available.
+`t0` is the Unix time of sample zero in seconds. The current SNTP mapping projects the captured
+completed bucket boundary onto wall time using the same rounding as the flash journal. The firmware
+omits `t0` before synchronization or without that boundary. `epoch` is captured with the samples
+and `boot_id` matches `/status`. A missing snapshot epoch or an
+epoch change before emission returns 503. Clients must reject responses superseded by a newer
+status/source generation.
 `held` marks eligible X10A outdoor nulls as held-over; all other source rasters leave it empty.
+The dashboard accepts up to 4 KiB of decoded JSON and 288 samples on the 300-second raster.
+With live status, it bounds boot-relative buckets by reported uptime, elapsed browser time since
+the status request began and one second for whole-second uptime. It accepts a reply without row
+and source identity only if both are absent and `/status` predates the history epoch. A supplied
+identity must match the request, along with the boot and epoch tokens announced by `/status`.
+For a nonempty date-only reply the browser needs a synchronized device clock and checks the newest
+sample against the rolling day and poll tolerance. A failed check rejects the reply. The chart
+leaves expired slots empty. With a boot anchor and reported uptime, the browser also checks wall
+time against the completed bucket. It drops contradictory wall time from a new boot-anchored reply
+and hides a cached clock label that conflicts with the last accepted status, including during a
+polling outage. A compatible peer can still supply wall-clock labels for the shared raster.
+Without a compatible clock the chart uses a relative axis, as it does for legacy unanchored rings.
+The browser preserves compatible cached readings if it rejects a replacement. Independent sources
+with incompatible anchors use separate plots. Independent recorders can book different warm-reset
+gaps, so their plots stay separate while either still contains pre-boot samples.
 `v` does not record an unknown compressor state. A sweep dropped after a stop cannot put a number into
 its bucket, but any other outdoor sample without a readable speed stays a number, so a number is not
 proof that the page was current.
@@ -580,13 +600,28 @@ real pin for the part or gives that pin to another board part ([Detection](ARCHI
 Pin claims must not
 collide with X10A, the other onboard part or ENV III. A board identity statement can save with no reboot; changing task-owned pins/accessory reboots.
 Switching away from M5Stack retires ENV III in the same atomic save.
+The dashboard sends `boot_id` and `board.config_revision` from its accepted `/status` as
+`boot_id` and `config_revision`. A missing member, non-string boot ID, or invalid numeric revision
+returns 400. A boot ID or revision that differs from the current value when the handler checks the
+submitted draft returns 409 with `code: "board_draft_stale"` before probing or saving.
+Validation and the ENV III preflight can return their own errors. For a write the handler checks
+the revision again under the configuration mutex after preflight, including for changes that claim
+no pins. A submission that needs no write checks the revision again before returning success.
+Reopen the editor from current status before submitting again. Clients can omit both tokens.
 
 `POST /set_env3` is the compatibility route (`enabled`, `sda`, `scl`, all optional). Both board routes
-share the same preflight: enabling new pins probes SHT30/QMP6988 (422 if absent, 503 if busy), enabling
-running pins needs fresh evidence (422 if unreachable), moving an active bus is 409 `env3_disable_first`.
-Disabling needs no hardware proof. Responses include machine codes; only successful real changes reboot.
-If detection commits an X10A link onto a claimed pin while either save is in flight, nothing is
-saved and the route answers 409 without a machine code.
+share the same preflight. Enabling ENV III probes SHT30/QMP6988 on the selected pair. If that probe
+cannot start, the handler returns 503 `env3_probe_busy`. If a sensor fails verification, the handler
+tries that pair once with SDA and SCL exchanged. If both sensors pass, a successful save uses the
+exchanged mapping. Any failed retry returns the first probe's 422 `env3_sht30_not_found` or
+`env3_qmp6988_not_found`. While ENV III stays enabled, keeping its active pin pair requires a fresh
+connected sample (422 `env3_not_reachable` otherwise). Moving to a valid new pair returns
+409 `env3_disable_first`. A request may disable ENV III and change its saved pins together without a
+probe. Changes to saved enablement or SDA/SCL pins reboot the device, including a pin change while
+ENV III is disabled.
+At the save step, a concurrent X10A link change onto a claimed pin returns an uncoded 409 for
+requests without draft tokens. A revision-bound Board save returns the draft-stale error whenever
+the revision has changed. Both refusals leave the submitted settings unwritten.
 
 ### Plant diagnostics and sources
 

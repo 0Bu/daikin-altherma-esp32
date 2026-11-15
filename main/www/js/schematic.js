@@ -185,6 +185,8 @@ const pumpFlowConflict = (d) => !!d && d.pumpOn === false && d.flow != null && d
 // still cannot distinguish heating from cooling and therefore remains neutral.
 const waterThermalKind = (d, pumping) => {
   if (!d || pumping !== true) return null;
+  if (d.defrost === true)
+    return !Number.isFinite(d.pth) || d.pth === 0 ? "neutral" : d.pth < 0 ? "cool" : "heat";
   if (d.thermalMode == null || (!compressorRunning(d) && !(d.buh1 || d.buh2))) return "neutral";
   return d.thermalMode === "cool" ? "cool" : "heat";
 };
@@ -480,36 +482,20 @@ function liveData() {
     d.ouHeldOver = false;         // nothing to hold over: the whole bus is silent, not one unit
     d.ouUnknown = false;
     MB_PAIRS.forEach((p) => takeMb(p.fld, p.cid));
-    // The HomeHub MEASURES the electrical input; X10A has no such row and the dashboard estimates it
-    // from CT clamps at an assumed 230 V. So on this path the figure is better than usual, and it is
-    // marked as measured rather than estimated.
-    //
-    // Addressed by its EKRHH OFFSET, never by its unit. THREE rows in the map carry "kW" — the
-    // measured consumption at input 51 and the two power-LIMIT setpoints at holding 57/58 — so a
-    // first-match on the unit promoted a configured ceiling to the plant's measured draw the moment
-    // 51 was unavailable or answered a sentinel. A limit is a number the installer typed; drawing it
-    // as a measurement is the legacy-35–legacy-39 shape wearing a plausible value, and the Modbus card would go
-    // on labelling it correctly one card below.
+    // EKRHH input 51 reports heat-pump power consumption. Holding registers 57 and 58 share its
+    // kW unit and represent configured limits. Select by register identity and preserve the source.
     const pw = mbPower();
     if (pw) { const n = parseFloat(pw.value);
               if (Number.isFinite(n)) { d.pel = n; d.pelSrc = "MB"; d.mbFields.add("pel"); } }
-    // ΔT survives because both temperatures come from the gateway's own hydronic readings. Thermal
-    // output survives only with its independent input-31 compressor witness: without that current
-    // flag, the snapshot still cannot distinguish active PHE transfer from pump-only redistribution.
+    // Both temperatures come from the gateway. The thermal plan also requires valid flow, a
+    // current input-31 compressor witness and a supported mode and transfer direction.
     d.dt = (d.lwt != null && d.ret != null) ? d.lwt - d.ret : null;
     d.dtStale = waterMoving(d) !== true;
     d.spaceMode = null;
     d.thermalMode = d.valveDhw === true ? "heat" : null;
     applyThermalPlan(d);
-    // THE COP DOES NOT. It looks like the same arithmetic and is not: the gateway's power is the
-    // WHOLE UNIT's, backup heater and immersion heater included, while d.pth is heat across the
-    // plate exchanger alone. That is precisely the boundary mismatch logic/cop_scope.hpp exists to
-    // refuse — a quotient of two correct numbers describing two different systems, which collapses
-    // exactly when a heater fires and reads as a failing heat pump while nothing is wrong. On the
-    // X10A path cop_scope decides it from the BUH/BSH states and the post-BUH row; the gateway map
-    // carries neither, so there is nothing to decide it WITH, and the honest answer is the one this
-    // firmware gives everywhere else: publish nothing (feature_gate.hpp — disable, never degrade).
-    // A circulation-only quotient would be the other half of the same problem.
+    // HomeHub register 51 reports electrical consumption. Its documented scope and available
+    // witnesses cannot establish an electrical boundary compatible with the plate exchanger.
     d.cop = null;
     d.copScope = null;
     d.copBlock = "mb_scope";      // named, so the explainer says WHY rather than showing a bare "—"
@@ -585,6 +571,7 @@ function renderEnv3Pill() {
   if (!configured) {
     group.setAttribute("aria-hidden", "true");
     if (S.insp === "env3") {
+      cancelHistoryGesture();
       S.insp = null;
       // Null is an invalidation sentinel, not the closed inspector's real empty signature. Using
       // "" for both let renderInspect() take its unchanged-DOM early return and leave the tongue
@@ -814,7 +801,6 @@ const PEL_INSPECT = {
     ? { en: "Electrical input (HomeHub)", de: "Stromaufnahme (HomeHub)" }
     : { en: "Electrical input (estimated)", de: "Geschätzte Stromaufnahme" },
   aria: { en: "Electrical input", de: "Stromaufnahme" },
-  trend: "pel",
   what: (d) => pelMeasured(d) ? PEL_MEASURED_WHAT : PEL_ESTIMATED_WHAT,
   head: (d) => (d.pel == null ? "—" : pelApproxText(d) + fmt1(d.pel) + " kW"),
   // Four cases: the measured gateway row, either X10A current source, a held-over inverter row, or
@@ -939,6 +925,7 @@ const INSPECT = {
     rows: [/outdoor air/i, ouHxRow, /inv frequency/i, highSideRow, /discharge pipe temp/i, /expansion valve ?1/i, /defrost operation/i],
   },
   comp: {
+    trend: "comp_rps",
     t: { en: "Compressor", de: "Verdichter" },
     re: /inv frequency/i, sample: "INV frequency (rps)",
     rows: [/inv frequency/i, /inv primary current/i, /discharge pipe temp/i],
@@ -1131,7 +1118,6 @@ const INSPECT = {
     // The hit target's accessible name — stable, because it is applied once at startup (see
     // labelSchematicHits). Which COP it turns out to be is the panel's to say, not the label's.
     aria: { en: "Efficiency (estimated)", de: "Geschätzte Effizienz" },
-    trend: (d) => d && d.efficiencyKind === "eer" ? "" : "cop",
     what: (d) => d && d.efficiencyKind === "eer"
       ? { en: "Estimated cooling capacity divided by estimated electrical input. The cooling numerator uses internal PHE sensors and is accepted only with a running compressor and R1T below R4T. The result inherits the water/glycol, sensor, voltage and power-factor assumptions of both estimates. Daikin also describes calculated energy figures as estimates whose accuracy is not guaranteed. This is an instantaneous EER, not a seasonal efficiency figure; metered seasonal energy is more meaningful.",
           de: "Geschätzte Kälteleistung geteilt durch geschätzte elektrische Aufnahme. Die Kälteleistung im Zähler nutzt die internen PHE-Fühler und wird nur bei laufendem Verdichter sowie R1T unter R4T gewertet. Das Ergebnis übernimmt alle Annahmen zu Wasser oder Glykol, Fühlern, Spannung und Leistungsfaktor aus beiden Schätzungen. Auch Daikin bezeichnet berechnete Energiewerte als Schätzungen ohne garantierte Genauigkeit. Das ist ein momentaner EER und keine saisonale Effizienzkennzahl; aussagekräftiger ist saisonal gemessene Energie." }
@@ -1152,13 +1138,9 @@ const INSPECT = {
       : d.copBlock === "buh_no_r2t"
       ? { en: "No COP right now — the backup heater is firing, but this profile has no leaving-water sensor after it. The electrical estimate can include heater load while the heat estimate stops before the heater, so the two boundaries do not match.",
           de: "Derzeit kein COP — der Zusatzheizer heizt, aber dieses Profil hat keinen Vorlauffühler hinter ihm. Die Stromschätzung kann die Heizlast enthalten, während die Wärmeschätzung vor dem Heizer endet; beide Bilanzgrenzen passen daher nicht zusammen." }
-      // The X10A bus is silent and the HomeHub is carrying the drawing. Its power register measures
-      // the WHOLE unit including both heaters, while the heat figure is the plate exchanger alone —
-      // and the gateway map carries neither heater state nor a post-BUH row, so unlike the X10A path
-      // there is nothing here to decide the pairing WITH.
       : d.copBlock === "mb_scope"
-      ? { en: "No COP right now — the X10A bus is silent, so these readings come from the HomeHub. Its power figure covers the whole unit including both electric heaters, while the heat figure covers the heat exchanger alone, and this source reports neither heater state nor a post-heater sensor to match the two boundaries. A quotient of the two would describe two different systems.",
-          de: "Derzeit kein COP — der X10A-Bus schweigt, daher stammen diese Messwerte vom HomeHub. Dessen Leistungswert erfasst das gesamte Gerät einschließlich beider Elektroheizer, der Wärmewert dagegen nur den Wärmetauscher; zudem meldet diese Quelle weder den Heizerzustand noch einen Fühler hinter dem Heizer, um beide Bilanzgrenzen anzugleichen. Ein Quotient aus beiden beschriebe zwei verschiedene Systeme." }
+      ? { en: "COP unavailable. The HomeHub guide leaves it open which loads its electrical input includes. The estimated heat covers the plate heat exchanger. COP requires a verified match between those two measurement boundaries.",
+          de: "COP nicht verfügbar. Die HomeHub-Dokumentation lässt offen, welche Verbraucher in der Stromaufnahme enthalten sind. Die geschätzte Wärmeleistung gilt für den Plattenwärmetauscher. Für einen COP müssen beide Bilanzgrenzen nachweislich zusammenpassen." }
       // No usable electrical input at all. Which of the two reasons it is matters — the pill's own
       // explainer draws the same distinction, and saying "this profile has no row" about a profile
       // that has one would substitute a second wrong claim for the suppressed one. The third reason,
@@ -1485,9 +1467,12 @@ const inspSourceField = (e, field, d) => {
   return typeof value === "function" ? value(d) : value;
 };
 const inspFieldText = (e, field, d) => {
+  if (e === INSPECT.pth && field === "what" && d?.defrost === true) return t("schem.defrost_transfer");
+  if (e === INSPECT.phe && field === "now" && d?.defrost === true && d.pth < 0)
+    return t("schem.defrost_transfer") + " ≈ " + fmt1(d.pth) + " kW";
   if (inspHasLocaleField(e, field)) {
     const localized = inspLocaleField(e, field, d);
-    return localized == null ? null : String(localized);
+    if (localized != null || field !== "what") return localized == null ? null : String(localized);
   }
   return tx(inspSourceField(e, field, d));
 };
@@ -1700,6 +1685,7 @@ function inspectSig(e) {
   // happens to be spelled identically in both dictionaries.
   return [LANG, S.insp, inspTitleText(e, d), inspVal(row, d), inspectModbusSignature(fb),
           d && e.head ? e.head(d) : "",
+          inspFieldText(e, "what", d) || "",
           inspNowText(e, d) || "", inspHeld(e, d) ? "held" : "",
           inspUnknownAge(e, d) ? "unknown_age" : "", rows, roomSig].join("|");
 }
@@ -1711,28 +1697,36 @@ function inspectSig(e) {
 //
 // Chart state has its own signature, independent of changing inspector readings. A new series
 // (`gen`), categorical live cap or pin updates its markup; ordinary scalar polls keep it mounted.
-function renderInspectHist(e, row) {
+function renderInspectHist(e, row, mode = "") {
+  const mayFetch = mode === "open" ||
+    (mode === "refresh" && (typeof _pollBusy === "undefined" || !_pollBusy));
+  let started;
+  const request = (id, source) => {
+    if (!mayFetch || (mode === "refresh" && (started || S.histBusy.size))) return;
+    started = ensureHist(id, source, mode) || started;
+  };
   if (e && e.env3) {
     const offered = ENV3_COMBINED_SERIES.filter((s) => hasEnv3Hist(s.id));
-    for (const s of offered) ensureHist(s.id, "env3");
+    for (const s of offered) request(s.id, "env3");
     const seriesSig = offered.map((s) => {
       const h = S.hist.get(histCacheKey(s.id, "env3"));
-      return `${s.id}:${h ? (h.err ? "e" : h.gen) : ""}`;
+      return `${s.id}:${historyRingRevision(h)}`;
     });
     const pin = S.histPin.get(ENV3_COMBINED_ID);
-    const sig = [LANG, ENV3_COMBINED_ID, S.transportUnavailable === "status", ...seriesSig,
-                 pin ? (pin.t ?? `${pin.i}/${pin.gen}`) : ""].join("|");
-    if (sig === S.inspHistSig) return;
+    const forecastPin = S.histPin.get(ENV3_FORECAST_ID);
+    const sensorPins = offered.map(s => S.histPin.get(s.id));
+    const forecast = weatherForecastView();
+    const sig = [LANG, ENV3_COMBINED_ID, ...seriesSig, forecast?.revision,
+                 JSON.stringify([pin, forecastPin, ...sensorPins])].join("|");
+    if (sig === S.inspHistSig) return started;
     S.inspHistSig = sig;
     const el = $("inspHist");
     el.hidden = !offered.length;
-    replaceHistoryHtml(el, offered.length ? env3HistHtml() : "");
-    return;
+    replaceHistoryHtml(el, offered.length ? env3HistHtml(historyView(ENV3_COMBINED_ID, "", forecast)) : "");
+    return started;
   }
-  // A plain pill drawn from a ROW charts that row. A COMPUTED pill (ΔT, heat output, electrical
-  // input, COP) or a grouped component (BUH's two stage rows) charts the explicit series named by
-  // the entry's `trend`, even when one source row anchors the inspector. Never silently substitute
-  // one input: a flow-rate curve under a heat-output headline would be physically false.
+  // Plain pills can chart their source row. Computed or grouped pills use the explicit series
+  // named by `trend` so the chart represents the same quantity as the inspector.
   const pair = MB_PAIRS.find((p) => p.insp === S.insp);
   const pairedId = pair && hasModbusHist(pair.cid) ? pair.cid : "";
   const trendId = e && typeof e.trend === "function" ? e.trend(S.live) : e && e.trend;
@@ -1743,16 +1737,16 @@ function renderInspectHist(e, row) {
   const offered = (id) => trendSource === "modbus" ? hasModbusHist(id)
     : trendSource === "x10a" ? hasHist(id) : hasHist(id) || hasModbusHist(id) || hasRoomHist(id);
   const explicitId = trendId && offered(trendId) ? trendId : "";
-  const id = explicitId || (row ? histIdFor(row.label) : pairedId)
+  const id = explicitId || (row ? histIdFor(row.label) : pairedId || (e?.sample ? histIdFor(e.sample) : ""))
     || (S.insp === "room" && hasRoomHist("room_temp") ? "room_temp" : "");
-  if (id) {
-    if (trendSource) ensureHist(id, trendSource);
-    else ensureHistPair(id);                // throttled to once a minute inside; no-op once cached
-    if (id === "dhw_tank") {
-      ensureHist("smart_grid_mode");
-      ensureHist("smart_grid_mode", "modbus");
-      ensureHist("bsh_state");
-      ensureHist("bsh_state", "modbus");
+  if (id && mayFetch) {
+    if (trendSource) request(id, trendSource);
+    else started = ensureHistPair(id, mode);
+    if (trendSource && id === "dhw_tank") {
+      request("smart_grid_mode");
+      request("smart_grid_mode", "modbus");
+      request("bsh_state");
+      request("bsh_state", "modbus");
     }
   }
   const h = id && trendSource !== "modbus" ? S.hist.get(id) : null;
@@ -1762,29 +1756,22 @@ function renderInspectHist(e, row) {
   // Categorical histories append a display-only live sample. Include only that derived state in the
   // chart signature, so an actual change repaints the current cap while unchanged values polls
   // still leave a tooltip/crosshair DOM completely alone.
-  const liveGen = id && typeof STATE_HIST !== "undefined" && STATE_HIST[id]
-    ? historyView(id, trendSource)?.gen || "" : "";
-  const auxGen = id === "dhw_tank"
-    ? `${S.hist.get("smart_grid_mode")?.gen || ""}/` +
-      `${S.hist.get(histCacheKey("smart_grid_mode", "modbus"))?.gen || ""}/` +
-      `${S.hist.get("bsh_state")?.gen || ""}/` +
-      `${S.hist.get(histCacheKey("bsh_state", "modbus"))?.gen || ""}`
-    : "";
+  const state = id && typeof STATE_HIST !== "undefined" && STATE_HIST[id]
+    ? historyView(id, trendSource) : null;
+  const liveGen = state?.separate
+    ? state.separate.map(source => historyView(id, source)?.gen).join("/") : state?.gen;
+  const auxGen = id === "dhw_tank" ? tankAuxRevision(tankAuxHistories()) : "";
+  const sourceDefault = h && mh && !S.histHidden?.has(id) ? histX10aDown() : "";
   // histHtml carries localised axis/readout copy. A language switch must therefore invalidate the
   // inspector chart even when the series generation and pinned sample are unchanged.
-  const sig = [LANG, id, trendSource, h ? (h.err ? "e" : h.gen) : "", mh ? (mh.err ? "e" : mh.gen) : "",
-               rh ? (rh.err ? "e" : rh.gen) : "", id === "room_temp" ? roomHistName() : "",
-               liveGen, auxGen, pin ? (pin.t ?? `${pin.i}/${pin.gen}`) : ""].join("|");
-  if (sig === S.inspHistSig) return;
+  const sig = [LANG, id, trendSource, historyRingRevision(h), historyRingRevision(mh), historyRingRevision(rh),
+               id === "room_temp" ? roomHistName() : "",
+               liveGen, auxGen, sourceDefault, JSON.stringify(pin ?? null)].join("|");
+  if (sig === S.inspHistSig) return started;
   S.inspHistSig = sig;
   const el = $("inspHist");
   el.hidden = !id;
-  // The chart's name is the entry's STABLE concept, never its live title — the same rule
-  // labelSchematicHits follows, for the same reason. The COP is the one that would break: its title
-  // states which SYSTEM the present quotient describes (plant vs heat pump, logic/cop_scope.hpp),
-  // and a 24-hour curve cannot be named after the state of one second. It would have read "COP of
-  // the plant" over a series that is, by construction, the heat pump's own — a scope mismatch under
-  // a chart, which is the failure cop_scope exists to prevent.
+  // Label the chart with the stable quantity, independent of the current operating state.
   const mb = pairedId ? mbByConcept(pairedId) : null;
   const chartName = DERIVED[id] && e && e.aria ? inspFieldText(e, "aria", null) : null;
   replaceHistoryHtml(el, !id ? ""
@@ -1792,9 +1779,11 @@ function renderInspectHist(e, row) {
     : pairedId ? histHtml(id, mb ? displayUnit(mb) : "", mb ? displayHomeHubLabel(mb) : inspTitleText(e, null), trendSource)
                : histHtml(id, DERIVED[id]?.unit || "",
                           e.aria ? inspFieldText(e, "aria", null) : inspTitleText(e, null), trendSource));
+  return started;
 }
 
-function renderInspect() {
+function renderInspect(mode = "") {
+  if (S.stage === "settings") return;
   const e = S.insp ? INSPECT[S.insp] : null;
   // Freeze with the other trend hosts during a scrub so structural updates cannot replace the
   // captured plot. scrubEnd resumes every affected host.
@@ -1803,7 +1792,7 @@ function renderInspect() {
   // of the card's: the series arrives from an async fetch that changes no live value.
   // inspCurRow refuses a retained X10A row. renderInspectHist may still resolve this target's paired
   // Modbus ring, so a petrol headline gets petrol history without reviving stale X10A samples.
-  renderInspectHist(e, S.live && e ? inspCurRow(e) : null);
+  renderInspectHist(e, S.live && e ? inspCurRow(e) : null, mode);
   // Compare the inspector signature before rendering changed live readings; unchanged polls need
   // no DOM writes and preserve the reader's text selection.
   const sig = inspectSig(e);
@@ -1912,12 +1901,11 @@ function renderInspect() {
   // reads as a broken value.
   const sentence = inspNowText(e, d);
   const desc = e.sample ? descFor(e.sample, row || fb) : null;
-  const localizedWhat = inspLocaleField(e, "what", d);
-  const ownWhat = localizedWhat ?? inspSourceField(e, "what", d);
+  const ownWhat = inspFieldText(e, "what", d);
   // A native replacement must retain its source-specific interpretation limits in every locale.
   // Generic inspector copy describes the X10A quantity and cannot override the defining register.
   const preferSourceDesc = fb && desc?.sourceQualified;
-  const what = ownWhat && !preferSourceDesc ? descParaHtml(esc(localizedWhat ?? tx(ownWhat)))
+  const what = ownWhat && !preferSourceDesc ? descParaHtml(esc(ownWhat))
                        : (desc ? descBodyHtml(desc, (row || fb)?.value, descriptionCopy(desc)) : "");
   // Prose stays prose. Every live reading, including a leaf headline's second source, is rendered
   // together after the chart in the divided value list below.
@@ -1992,7 +1980,8 @@ function labelSchematicHits() {
 // viewport exactly where the reader put it: the inspector is deliberately below the drawing and can
 // be taller than the viewport, so scrollIntoView() would align its lower edge and move the diagram
 // out of sight just when the reader asks for its explanation.
-function inspectPick(key) {
+function inspectPick(key = null) {
+  cancelHistoryGesture();
   S.insp = S.insp !== key ? key : null;
-  renderInspect();
+  renderInspect(S.insp ? "open" : "");
 }
