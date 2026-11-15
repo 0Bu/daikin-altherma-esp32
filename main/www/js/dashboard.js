@@ -131,6 +131,7 @@ async function refreshValues(paint = true) {
 // the live diagram. The board (ESP32) card and the
 // WiFi/MQTT/Syslog/NTP rows are NOT here: both moved behind the gear onto Settings (renderSettings).
 function renderCards(hold = true) {
+  if (S.otaCached || S.transportUnavailable === "status") markCyclingStale();
   // Freeze trend hosts during a scrub so structural updates cannot replace the captured plot.
   // Rows catch up when scrubEnd resumes rendering.
   if (S.scrub || (hold && S.clickHold)) return;
@@ -1439,25 +1440,70 @@ function syncCheckupCyclingChart(card) {
 function renderCheckupCyclingChart(slot, open = true) {
   const check = open && S.status?.health?.checks?.find(c => c.id === "cycling");
   const html = open ? checkupCyclingChartHtml(check) : "";
-  if (slot._checkupMarkup === html) return;
-  replaceHistoryHtml(slot, html);
-  slot._checkupMarkup = html;
+  if (slot._checkupMarkup !== html) {
+    replaceHistoryHtml(slot, html);
+    slot._checkupMarkup = html;
+  }
+  const trace = check?.timeline;
+  // Both device timestamps are rounded down. Use the upper bound on the sample age.
+  const age = historyClock() - cyclingStatusAt + 1000 * (trace?.window_end_s - trace?.observed_end_s + 1);
+  if (trace?.live === false || S.otaCached || S.transportUnavailable === "status" ||
+      !(age >= 0 && age < CYCLING_FRESH_MS)) markCyclingStale();
+  else {
+    $("valueGroups").setAttribute("data-cycling-stale", "false");
+    clearTimeout(cyclingExpiry);
+    cyclingExpiry = setTimeout(markCyclingStale, CYCLING_FRESH_MS - age);
+  }
 }
 
 let cyclingMarkup = [];
 let cyclingTrace;
-// The trace uses monotonic seconds for geometry and a single wall-clock anchor for labels.
-// No edge is synthesized for a missing interval or an hour restored from flash.
+
+function checkupCyclingDuration(s) {
+  return s >= 60 && s % 60
+    ? t("check.min", `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`) : dwellDuration(s);
+}
+
+function checkupCyclingRunsHtml(runs, wall) {
+  const clockOptions = { hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" };
+  const clock = new Intl.DateTimeFormat(LANG, clockOptions);
+  const heads = ["start", "stop", "duration"].map(key => `<th scope="col">${esc(t(`check.cycling.run_${key}`))}</th>`);
+  const rows = runs.map(({ start, stop, latest }) => {
+    const from = new Date(wall(start)), to = stop == null ? null : new Date(wall(stop));
+    const date = to && from.toDateString() !== to.toDateString();
+    const offset = to && from.getTimezoneOffset() !== to.getTimezoneOffset();
+    const stamp = date || offset ? new Intl.DateTimeFormat(LANG, {
+      ...clockOptions,
+      ...(date && { month: "short", day: "numeric" }),
+      ...(offset && { timeZoneName: "shortOffset" }),
+    }) : clock;
+    const time = value => `<time datetime="${value.toISOString()}">${esc(stamp.format(value))}</time>`;
+    const unknown = esc(t("check.cycling.run_stop_unknown"));
+    const ongoing = (live, stale) => `<span class="checkup-run-live">${live}</span><span class="checkup-run-stale">${stale}</span>`;
+    const end = to ? time(to) : latest == null ? unknown : ongoing(esc(t("check.cycling.run_ongoing")), unknown);
+    const duration = ended => esc(checkupCyclingDuration(ended - start));
+    const elapsed = to ? duration(stop) : latest == null ? "—" : ongoing(duration(latest), "—");
+    return `<tr><td>${time(from)}</td><td>${end}</td><td>${elapsed}</td></tr>`;
+  });
+  return `<table class="checkup-run-table"><thead><tr>${heads.join("")}</tr></thead><tbody>${rows.join("")}</tbody></table>`;
+}
+
+// Geometry uses seconds in the trace's frame and labels use its wall-clock anchor.
+// A dated frame can include older boots, with a gap record standing between observations.
 function checkupCyclingTimelineHtml(trace, scope) {
   const end = trace?.window_end_s, observedEnd = trace?.observed_end_s, unix = trace?.unix_s;
-  const records = trace?.records;
+  const records = trace?.records, boot = trace?.boot_s;
   if (![end, observedEnd, unix].every(Number.isSafeInteger) || end > 0x1fffffff || end < observedEnd ||
       observedEnd < 0 || unix <= 0 || unix > 0xffffffff ||
+      (boot !== undefined && (!Number.isSafeInteger(boot) || boot < 0 || end < 86400 ||
+        observedEnd > 86400 || typeof trace.live !== "boolean")) ||
       !Array.isArray(records) || !records.length || records.length > 192) return "";
   const start = end - 86400;
-  const hours = Array.from({ length: 24 }, () => ({ starts: [], modes: new Set(), gap: false }));
+  const hours = Array.from({ length: 24 }, () => ({ starts: [], runs: [], modes: new Set(), gap: false, observed: false }));
   const readable = [];
   const modes = ["", "", "other", "space", "dhw"];
+  const runEdges = trace.run_edges === true;
+  let run;
   let cursor = start, kind = 0, prior = -1;
   const cover = (from, until, state) => {
     if (until <= from) return;
@@ -1470,18 +1516,33 @@ function checkupCyclingTimelineHtml(trace, scope) {
     const last = Math.ceil((until - start) / 3600);
     for (let i = first; i < last; ++i) {
       if (state === 0) hours[i].gap = true;
+      else hours[i].observed = true;
       if (modes[state]) hours[i].modes.add(modes[state]);
     }
   };
   for (const record of records) {
     if (!Number.isSafeInteger(record) || record < 0 || record > 0xffffffff) return "";
     const at = record >>> 3, next = record & 7;
-    if (at < prior || at > observedEnd || next > 5) return "";
+    if (at < prior || at > observedEnd || next > 6) return "";
     prior = at;
     if (next === 5) {
-      if (at >= start) hours[Math.min(23, Math.floor((at - start) / 3600))].starts.push(at);
+      if (at >= start) {
+        const hour = hours[Math.min(23, Math.floor((at - start) / 3600))];
+        hour.starts.push(at);
+        if (runEdges) {
+          run = { start: at };
+          hour.runs.push(run);
+        }
+      }
       continue;
     }
+    if (next === 6) {
+      if (run) run.stop = at;
+      run = undefined;
+      continue;
+    }
+    // A later stop cannot establish that the same run continued through a gap.
+    if (next === 0) run = undefined;
     if (at > cursor) cover(cursor, at, kind);
     cursor = Math.max(at, start);
     kind = next;
@@ -1489,15 +1550,16 @@ function checkupCyclingTimelineHtml(trace, scope) {
   const last = Math.max(start, observedEnd);
   cover(cursor, last, kind);
   cover(last, end, 0);
+  if (run && trace.live !== false && end - observedEnd <= 15) run.latest = observedEnd;
   const count = hours.reduce((n, h) => n + h.starts.length, 0);
   const x = sec => ((sec - start) / 86400 * 2400).toFixed(2);
   const y = n => (96 - n * 90 / Math.max(count, 1)).toFixed(2);
-  const stamp = new Intl.DateTimeFormat(LANG, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+  const clockOptions = { hour: "2-digit", minute: "2-digit", hourCycle: "h23" };
+  const stamp = new Intl.DateTimeFormat(LANG, clockOptions);
   const date = new Intl.DateTimeFormat(LANG, { month: "short", day: "numeric" });
   const wall = sec => (unix + sec - end) * 1000;
   const clock = sec => stamp.format(wall(sec));
-  const offsetStamp = new Intl.DateTimeFormat(LANG, { hour: "2-digit", minute: "2-digit",
-    hourCycle: "h23", timeZoneName: "shortOffset" });
+  const offsetStamp = new Intl.DateTimeFormat(LANG, { ...clockOptions, timeZoneName: "shortOffset" });
   const events = hours.flatMap(h => h.starts);
   let n = 0, path = "";
   for (const [from, to] of readable) {
@@ -1516,8 +1578,8 @@ function checkupCyclingTimelineHtml(trace, scope) {
     path += `M ${x(events[n])} ${y(n)} V ${y(n + 1)} `;
     ++n;
   }
-  let cols = "";
-  hours.forEach(({ starts, modes, gap }, i) => {
+  let cols = "", details = "";
+  hours.forEach(({ starts, runs, modes, gap, observed }, i) => {
     const from = start + 3600 * i, to = from + 3600;
     const offsetChange = new Date(wall(from)).getTimezoneOffset() !== new Date(wall(to)).getTimezoneOffset();
     const span = offsetChange ? `${offsetStamp.format(wall(from))}–${offsetStamp.format(wall(to))}`
@@ -1529,9 +1591,11 @@ function checkupCyclingTimelineHtml(trace, scope) {
     const value = starts.length || !gap ? starts.length : "";
     cols += `<button type="button" class="checkup-chart-col" data-bucket="${i}" data-span="${esc(span)}"` +
       (offsetChange ? " data-offset-change" : "") +
+      (runEdges && observed ? " data-run-observed" : "") +
       ` tabindex="${i === 23 ? 0 : -1}" aria-pressed="false" aria-label="${esc([date.format(wall(from)), span, countLabel, ...labels].filter(Boolean).join(" · "))}">` +
       `<b>${value}</b><s${gap && modes.size ? ' class="mixed-gap"' : ""}>${gap ? '<i class="gap"></i>' : ""}` +
       [...modes].map(mode => `<i class="${mode}"></i>`).join("") + "</s></button>";
+    if (runs.length) details += `<template data-hour-runs="${i}">${checkupCyclingRunsHtml(runs, wall)}</template>`;
   });
   const axis = [0, 6, 12, 18, 24].map(i => `<span>${esc(clock(start + i * 3600))}</span>`).join("");
   const legend = [["space", "mode.heat"], ["dhw", "mode.dhw"], ["other", "check.hour.other"], ["gap", "sys.nodata"]]
@@ -1542,22 +1606,24 @@ function checkupCyclingTimelineHtml(trace, scope) {
     ? t("check.cycling.timed_starts", checkupCyclingCountPrefix(count) + t("check.starts", count))
     : t("sys.nodata");
   return `<div class="vhist checkup-cycling-chart checkup-cycling-timeline" role="group" aria-label="${esc(t("hist.aria", t("check.cycling")))}"` +
-    ` data-cycling="${esc(scope)}"><div class="checkup-chart-graph"><div class="checkup-chart-plot">` +
-    `<span class="checkup-chart-total mono num">${esc(total)}</span>` +
-    `<svg viewBox="0 0 2400 100" preserveAspectRatio="none" aria-hidden="true"><path d="${path}"/></svg></div>` +
+    ` data-cycling="${esc(scope)}"><div class="checkup-chart-total mono num">${esc(total)}</div>` +
+    `<div class="checkup-chart-graph"><svg class="checkup-chart-plot" viewBox="0 0 2400 100" preserveAspectRatio="none" aria-hidden="true"><path d="${path}"/></svg>` +
     `<div class="checkup-chart-cols">${cols}</div></div><div class="vhist-axis checkup-chart-axis">` +
     `<div class="checkup-chart-ticks">${axis}</div><span class="checkup-chart-span" aria-live="polite" hidden></span></div>` +
-    `<div class="checkup-chart-legend">${legend}</div></div>`;
+    `<div class="checkup-chart-legend">${legend}</div><div class="checkup-run-details" hidden></div>${details}</div>`;
 }
 
 function checkupCyclingChartHtml(c) {
-  const scope = JSON.stringify([S.status?.boot_id, c?.hours_epoch, "timeline"]);
+  // History forget retires precise times independently of the diagnosis hour buckets.
+  const scope = JSON.stringify([S.status?.boot_id, S.status?.history?.epoch, c?.hours_epoch, "timeline"]);
   if (cyclingTrace?.scope !== scope) cyclingTrace = null;
   let trace = c?.timeline;
   if (!trace && c && cyclingTrace) {
     const previous = cyclingTrace.trace;
-    const elapsed = Math.max(0, (S.status?.uptime_s || 0) - previous.window_end_s);
-    // A temporarily omitted snapshot carries no new readings. Extend only the missing span.
+    const uptime = S.status?.uptime_s || 0;
+    const elapsed = Math.max(0, uptime - (previous.boot_s ?? previous.window_end_s));
+    // A temporarily omitted snapshot carries no new readings. Move both anchors so
+    // the chart advances but the wall time of each retained record stays the same.
     trace = { ...previous, window_end_s: previous.window_end_s + elapsed, unix_s: previous.unix_s + elapsed };
   }
   if (trace) {
@@ -1583,8 +1649,7 @@ function checkupCyclingChartHtml(c) {
   let sumS = 0, sumR = 0, cols = "", hasObservation = false, hasGap = false;
   const stamp = new Intl.DateTimeFormat(LANG, { month: "short", day: "numeric", hour: "2-digit",
     minute: "2-digit", timeZoneName: "shortOffset" });
-  const duration = s => s >= 60 && s % 60
-    ? t("check.min", `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`) : dwellDuration(s);
+  const duration = checkupCyclingDuration;
   const startsText = n => checkupCyclingCountPrefix(n) + t("check.starts", n);
   const percent = s => (s / 36).toFixed(3) + "%";
   for (let i = 0; i < 24; i++) {
@@ -1641,7 +1706,7 @@ function checkupCyclingChartHtml(c) {
     `<div class="checkup-chart-cols">${cols}</div>` +
     `<div class="vhist-axis"><span>${esc(t("check.hour.earlier", 23))}</span>${gapKey}<span>${esc(t("check.hour.latest"))}</span></div>` +
     `<div class="checkup-chart-legend">${legend}</div>` +
-    `<div class="vhist-range mono num">${esc(meta)}</div></div>`;
+    `<div class="vhist-range mono num">${esc(meta)}</div><div class="checkup-run-details" hidden></div></div>`;
   cyclingMarkup = [key, html];
   return html;
 }

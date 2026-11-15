@@ -2,6 +2,36 @@
   "measurement_records": [
     {
       "compilers": {
+        "clang-17-darwin": "Apple Clang 17.0.0 (clang-1700.6.4.2), arm64",
+        "gcc-13-linux-ubuntu24": "Ubuntu GCC 13.3, ESP-IDF v6.1 Docker, aarch64",
+        "gcc-15-github-linux-ubuntu26": "Ubuntu GCC 15.2, Docker, x86-64",
+        "gcc-15-linux-ubuntu26": "Ubuntu GCC 15.2, Docker, aarch64"
+      },
+      "hosted_confirmation": "The x86-64 Docker result is the hosted candidate. Authoritative GitHub CI must confirm it.",
+      "runner": "scripts/run-mock-tests.sh --coverage on Darwin and equivalent gcov measurement in Docker",
+      "scope": "Checked page framing, four-page round trip with 192 events, grouping, invalid slot links, reset envelope rejection and duplicate submission.",
+      "source": "main/logic/cycling_persist.hpp",
+      "source_sha256": "9489c5e450ff6cc0d2eed9a552c324e65f70155ec60c00bb03cf37f9db230f9b",
+      "test_source_sha256": "a680a0eea57c0aac7c2636275c2004e9bc356b30c5e8ef1468ea505feecd38b0",
+      "validation_boundary": "Local host and container evidence only."
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple Clang 17.0.0 (clang-1700.6.4.2), arm64",
+        "gcc-13-linux-ubuntu24": "Ubuntu GCC 13.3, ESP-IDF v6.1 Docker, aarch64",
+        "gcc-15-github-linux-ubuntu26": "Ubuntu GCC 15.2, Docker, x86-64",
+        "gcc-15-linux-ubuntu26": "Ubuntu GCC 15.2, Docker, aarch64"
+      },
+      "hosted_confirmation": "The x86-64 Docker result is the hosted candidate. Authoritative GitHub CI must confirm it.",
+      "runner": "scripts/run-mock-tests.sh --coverage on Darwin and equivalent gcov measurement in Docker",
+      "scope": "Timed compressor transitions, clipping of both trace windows, absolute-time restoration, restart gaps and a durable age floor after wall-clock correction.",
+      "source": "main/logic/checkup.hpp",
+      "source_sha256": "e67dfdb5ca68a91619bc5bbe02102bf985120a6508af2140df565c7adbfdb156",
+      "test_source_sha256": "a680a0eea57c0aac7c2636275c2004e9bc356b30c5e8ef1468ea505feecd38b0",
+      "validation_boundary": "Local host and container evidence only."
+    },
+    {
+      "compilers": {
         "clang-17-darwin": "Apple Clang 17, arm64",
         "gcc-13-linux-ubuntu24": "Ubuntu GCC 13.3, ESP-IDF v6.1 Docker, aarch64",
         "gcc-15-linux-ubuntu26": "Ubuntu GCC 15.2, Docker, aarch64",
@@ -1998,8 +2028,8 @@
         "taken": 6
       },
       "main/logic/checkup.hpp": {
-        "taken": 1058,
-        "outcomes": 1141
+        "taken": 1096,
+        "outcomes": 1179
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 331,
@@ -2400,6 +2430,10 @@
       "main/logic/observation_hourly.hpp": {
         "taken": 137,
         "outcomes": 138
+      },
+      "main/logic/cycling_persist.hpp": {
+        "taken": 49,
+        "outcomes": 88
       }
     },
     "gcc-13-linux-ubuntu24": {
@@ -2436,8 +2470,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "taken": 1197,
-        "outcomes": 1293
+        "taken": 1239,
+        "outcomes": 1335
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 391,
@@ -2838,6 +2872,10 @@
       "main/logic/observation_hourly.hpp": {
         "taken": 157,
         "outcomes": 158
+      },
+      "main/logic/cycling_persist.hpp": {
+        "taken": 56,
+        "outcomes": 98
       }
     },
     "gcc-15-github-linux-ubuntu26": {
@@ -2874,8 +2912,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "taken": 1197,
-        "outcomes": 1293
+        "taken": 1239,
+        "outcomes": 1335
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 391,
@@ -3276,6 +3314,10 @@
       "main/logic/observation_hourly.hpp": {
         "taken": 157,
         "outcomes": 158
+      },
+      "main/logic/cycling_persist.hpp": {
+        "taken": 56,
+        "outcomes": 98
       }
     },
     "gcc-15-linux-ubuntu26": {
@@ -3312,8 +3354,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "taken": 1197,
-        "outcomes": 1293
+        "taken": 1239,
+        "outcomes": 1335
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 391,
@@ -3714,6 +3756,10 @@
       "main/logic/observation_hourly.hpp": {
         "taken": 157,
         "outcomes": 158
+      },
+      "main/logic/cycling_persist.hpp": {
+        "taken": 56,
+        "outcomes": 98
       }
     }
   },

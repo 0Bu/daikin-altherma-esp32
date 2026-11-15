@@ -148,8 +148,21 @@ function paintCyclingChart(chart, focus = document.activeElement) {
   if (!pin) S.cyclingPin = null;
   if (!hover) S.cyclingHover = null;
   const span = chart.querySelector(".checkup-chart-span");
+  const hour = (S.scrub === "checkup-cycling" && hover) || pin;
+  const details = chart.querySelector(".checkup-run-details");
+  if (details) {
+    // Keep the list at its pinned height while a drag previews other hours.
+    details.hidden = !pin;
+    const key = pin?.dataset.bucket;
+    if (details._bucket !== key) {
+      details._bucket = key;
+      const template = pin && chart.querySelector(`[data-hour-runs="${key}"]`);
+      if (template) details.replaceChildren(template.content.cloneNode(true));
+      else details.textContent = pin ? t(pin.hasAttribute("data-run-observed")
+        ? "check.cycling.no_timed_runs" : "check.cycling.run_details_unavailable") : "";
+    }
+  }
   if (span) {
-    const hour = (S.scrub === "checkup-cycling" && hover) || pin;
     span.hidden = !hour;
     const label = hour?.dataset.span || "";
     if (span.textContent !== label) span.textContent = label;

@@ -222,7 +222,10 @@ try {
       if (["cycling-expired", "cycling-trace-oom", "cycling-trace-weather"].includes(name))
         assert.equal(cycling.timeline, undefined);
       else assert.deepEqual(cycling.timeline, {
-        unix_s: 2000000000, window_end_s: 451, observed_end_s: 450, records: [3283, 3365],
+        unix_s: 2000000000, window_end_s: 86400, observed_end_s: 86399,
+        boot_s: 451, live: true, run_edges: true,
+        records: [[86359, 1], [86369, 5], [86369, 3], [86389, 1], [86390, 6]]
+          .map(([time, kind]) => time * 8 + kind),
       });
       cyclingWires.delete(name);
     }

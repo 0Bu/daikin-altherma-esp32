@@ -1,4 +1,4 @@
-// translation-source: 65571656f160db7c5cef68e1a9e2f1c556ae6ac67f346ba2f2b092cff1d703c9
+// translation-source: 57360fc01b9b51987c1e6a54c6b11b7295a1a3b53f13d2b3928a2b44e523c222
 I18N.it = localeValues([
   /* sys.nodata */ "Nessun dato",
   /* sys.unreachable */ "Non raggiungibile",
@@ -230,8 +230,15 @@ I18N.it = localeValues([
   /* check.cycling.unavailable */ "Nessun dato dal compressore.",
   /* check.cycling.stale */ "Al momento mancano misurazioni.",
   /* check.cycling.history_empty */ "Nessuno storico per ora.",
-  /* check.cycling.timed_starts */ (s) => `Con orario: ${s}`,
-  /* check.cycling.saved_starts */ (s) => `Di questi, ${s} provengono dai dati orari precedenti al riavvio. Gli orari esatti non sono disponibili.`,
+  /* check.cycling.timed_starts */ (s) => `${s} con orario registrato`,
+  /* check.cycling.run_start */ "Avvio",
+  /* check.cycling.run_stop */ "Arresto",
+  /* check.cycling.run_duration */ "Durata",
+  /* check.cycling.run_ongoing */ "In corso",
+  /* check.cycling.run_stop_unknown */ "Arresto sconosciuto",
+  /* check.cycling.no_timed_runs */ "Nessun orario di avvio rilevato in quest’ora.",
+  /* check.cycling.run_details_unavailable */ "Per quest’ora non sono disponibili gli orari dei singoli cicli.",
+  /* check.cycling.saved_starts */ (s) => `Di questi, ${s} provengono dai dati orari precedenti al riavvio.`,
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min ${min} °C · media ${mean} °C`,
   /* check.min */ (m) => `${m} min`,

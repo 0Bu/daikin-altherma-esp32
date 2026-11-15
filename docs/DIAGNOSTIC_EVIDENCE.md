@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 20947995cc47bf27b57e682bd6c5d10e4323d0a25935c76329054d43fce090cf -->
+<!-- diagnostic-evidence-contract: 17a45ae08709e88689ce42ecae913afd6d2b7f5c7de513105f68ee5ec447f36e -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -220,8 +220,9 @@ than about six minutes reduced efficiency in the tested systems, while heat emis
 control, and outside temperature also affected the result ([R1], summary and sections 1–2). This
 supports the relevance of very short runs but does not provide a universal Daikin limit.
 
-**Firmware rule:** Starts and completed runs are retained separately. A witnessed OFF-to-ON
-transition across missing readings establishes at least one start before readable duration accrues.
+**Firmware rule:** Starts and completed runs are retained separately. Within a continuous sampling
+segment, unreadable compressor samples between known OFF and ON establish at least one inferred
+start before readable duration accrues. A sample interval longer than 15 seconds breaks the segment.
 Valve/mode inputs classify pure space heating, DHW or cooling. Missing class or RPS readings may
 bridge at most 15 seconds between matching known-running endpoints, using their monotonic
 timestamps independently of hourly duration booking. That bridge adds no readable coverage.
@@ -243,8 +244,10 @@ assessment; their runtime is only an observed lower bound. Saturated runtime/cou
 cause counts also block the assessment. A counted start survives a restart only when the saved
 hour containing that count restores. The new boot can observe the tail of a still-running compressor
 as a censored `start` run without adding a start ([PLANT.md](PLANT.md#reboot-and-persistence)).
-The [rolling chart trace](API.md#history-and-24-hour-checks) uses bounded current-boot evidence. Time before retained
-trace evidence is marked as missing.
+The [rolling chart trace](API.md#history-and-24-hour-checks) combines compatible saved observations
+with current readings. The [run list](DIAGNOSTICS.md#compressor-cycling) pairs start and stop only in
+a continuous segment. A restart breaks that segment. Completed-run classification and its own
+short-gap allowance are independent of the chart.
 When a run completes into its retained start hour after that hour was journaled, the firmware
 requests a revised append ([persistence](ARCHITECTURE.md#history-and-diagnosis-persistence)).
 The completed run survives only if the revision is saved and restored. An earlier saved copy can

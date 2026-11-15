@@ -103,15 +103,18 @@ The bounded shutdown drain appends it after every completed hour. It is skipped 
 not newer than the newest completed or already journaled hour, because a second record could only
 replace that hour. A drain that reaches its record budget or cannot take its locks loses it as well.
 
-A counted start survives a restart only if its own hour was saved and restored from a compatible
-record. For a run crossing an hour boundary, that is the earlier hour, separate from the open hour
-the restart tries to save. If the compressor is already running when observations resume, the
-new boot counts no start for that run. When it stops, the observed remainder is a censored run.
+The diagnosis total retains a counted start when its hour restores from a compatible record.
+For a run crossing an hour boundary, that is the earlier hour, separate from the open hour the
+restart tries to save. If the compressor is already running when observations resume, the new boot
+counts no start for that run. When it stops, the observed remainder is a censored run.
 
-A power loss, a crash or a task or interrupt watchdog panic still loses the open hour. Completed
-hours not yet saved stay missing.
+A power loss, crash or watchdog panic can lose unsaved diagnosis hours and compressor readings.
+The compressor chart can recover its last compatible saved trace after the clock and current
+source are confirmed, including after an OTA restart. An interrupted run remains incomplete and
+downtime appears as a gap. Earlier firmware that only saved hourly totals cannot supply
+individual times. See the [journal rules](ARCHITECTURE.md#history-and-diagnosis-persistence).
 
-Current observations take precedence. The
+Current observations take precedence for hourly totals. The
 [retention rules](ARCHITECTURE.md#history-and-diagnosis-persistence) distinguish live and restored
 hours. A completed tank-cooling window can use an initial temperature
 from the preceding bucket. Later clock corrections do not renew an assigned monotonic deadline;
@@ -122,11 +125,11 @@ restore for this boot, even if the same profile is selected again. HomeHub-only 
 the X10A lifecycle. Safe mode and disabled diagnostics admit no old hours; unidentified-source
 empty samples advance time without booking observations.
 
-Apart from the journaled open hour, a software restart can carry only the ongoing tank-loss filter
-through a separately sealed **one-shot handoff**, adopted after the same full X10A and circulation
-scopes are confirmed with diagnostics enabled and no reset requested. It preserves the hourly cooling candidate/settling timer,
-never undated completed counters or transient compressor edges. Power loss, crash, changed source
-or an incompatible or absent handoff starts a fresh filter. Handoff v3 rejects v2.
+A software restart can also carry the ongoing tank-loss filter through a separately sealed
+**one-shot handoff**. Adoption requires full X10A and circulation scope confirmation, enabled
+diagnostics and no pending reset. The handoff preserves the hourly cooling candidate and settling
+timer. Power loss, crash, changed source or an incompatible or absent handoff starts a fresh
+filter. Handoff v3 rejects v2.
 
 Adoption books **five seconds plus all new-boot uptime through source confirmation as blind time**.
 Together with earlier gaps, exceeding either two minutes of continuous blindness or 10% of the

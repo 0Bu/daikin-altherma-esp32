@@ -196,6 +196,22 @@ if not args.expect_red or args.expect_red_case == "late-correction":
     transport_evidence.append({"path": str(transport), "sha256": digest(transport),
                                "bytes": transport.stat().st_size,
                                "only_cross_process_state": "synthetic NOR partition bytes"})
+if not args.expect_red:
+    for phase in ["normal", "shutdown", "torn", "corrupt", "barrier", "incompatible"]:
+        cycling_transport = OUT / f"cycling-{phase}.synthetic-nor.bin"
+        for case in ["seed_cycling", "restore_cycling"]:
+            label = f"{case}_{phase}"
+            result = execute(baseline, case, label, [cycling_transport, phase])
+            expected = result.returncode == 0 and "PASS case=" + case + " " in result.stdout
+            results.append({"case": label, "exit_code": result.returncode,
+                            "stdout": result.stdout, "stderr": result.stderr, "pass": expected})
+            print(result.stdout, end="", flush=True)
+            if not expected:
+                (OUT / "failure.json").write_text(json.dumps(results[-1], indent=2) + "\n")
+                raise RuntimeError("Unexpected cycling checkpoint outcome: " + label)
+        transport_evidence.append({"path": str(cycling_transport), "sha256": digest(cycling_transport),
+                                   "bytes": cycling_transport.stat().st_size,
+                                   "only_cross_process_state": "synthetic NOR partition bytes"})
 unknowns = []
 for case in ["unknown_case", "data_unknown", "barrier_unknown",
              "seed_late_correction", "restore_late_correction"]:
@@ -247,8 +263,9 @@ if not args.expect_red:
         ("old_read_classifier", "const bool      stop_owned = logic::observation_append_owned(r.header);",
          "const bool      stop_owned = logic::observation_header_matches(r.header);",
          ["data_commit", "barrier_commit"], "failed_append_releases_claim_for_real_service_retry"),
-        ("clear_core_ahead_on_stop_success", "if (!flash_is_manifest(r.header) && !stop_owned)",
-         "if (!flash_is_manifest(r.header))", ["core_ahead"],
+        ("clear_core_ahead_on_stop_success",
+         "if (!flash_is_manifest(r.header) && !stop_owned && !flash_cycling_owned(r.header))",
+         "if (!flash_is_manifest(r.header) && !flash_cycling_owned(r.header))", ["core_ahead"],
          "stop_success_preserves_core_ahead_episode"),
         ("trust_write_error_over_valid_readback",
          "const bool committed = read_e == ESP_OK && flash_record_physically_valid(verify) &&",

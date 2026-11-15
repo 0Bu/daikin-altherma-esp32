@@ -17,6 +17,16 @@ const esp_partition_t  partition{daik::logic::HISTORY_FLASH_PARTITION_OFFSET,
                                 daik::logic::HISTORY_FLASH_PARTITION_BYTES};
 const esp_partition_t* lookup_partition = &partition;
 bool                   refuse_erases    = false;
+unsigned                         core_backlog         = 0;
+constexpr uint32_t               cycling_model        = 202;
+constexpr uint32_t               cycling_source       = 101;
+constexpr uint32_t               cycling_generation   = 11;
+uint32_t                         cycling_offer_unix_s = 0;
+uint32_t                         cycling_reset_token  = 0;
+uint32_t                         cycling_ack          = 0;
+uint32_t                         cycling_offer_model  = cycling_model;
+bool                             cycling_forgotten    = false;
+daik::logic::CheckupCyclingTrace cycling_restored;
 }
 const esp_partition_t* esp_partition_find_first(int, int, const char* label) {
     if (auto hook = std::exchange(journal_sdk::during_find, nullptr)) hook();
@@ -88,7 +98,11 @@ bool checkup_flash_next(int64_t, int64_t, int64_t& bucket, logic::CheckupJournal
 }
 void checkup_flash_appended(int64_t) {
     ++journal_sdk::core_appended;
-    journal_sdk::core_pending = false;
+    if (core_backlog) {
+        --core_backlog;
+        ++journal_sdk::core_bucket;
+    }
+    journal_sdk::core_pending = core_backlog > 0;
 }
 CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* records, size_t count,
                                                 int64_t) {
@@ -98,6 +112,38 @@ CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* record
             throw std::runtime_error("core adapter received another logical source");
     return CheckupFlashRestoreResult::Restored;
 }
+bool checkup_cycling_checkpoint(logic::CheckupCyclingTrace& trace, logic::CyclingTraceIdentity& id,
+                                uint32_t& token, TickType_t, bool allow_data) {
+    if (cycling_forgotten || (!cycling_reset_token && (!allow_data || !cycling_offer_unix_s)))
+        return false;
+    token = cycling_reset_token;
+    trace.reset();
+    trace.unix_s       = cycling_offer_unix_s;
+    trace.window_end_s = logic::CHECKUP_WINDOW_S;
+    id                 = {};
+    if (!token) {
+        for (uint32_t i = 0; i < trace.capacity; ++i)
+            trace.push(80000 + 31 * i, static_cast<logic::CheckupCyclingTrace::Kind>(i % 7));
+        trace.end_s = 86000;
+        id          = {cycling_offer_model, cycling_source, cycling_generation};
+    }
+    return true;
+}
+void checkup_cycling_checkpoint_appended(uint32_t reset_token) {
+    cycling_ack         = reset_token;
+    cycling_reset_token = 0;
+}
+CheckupFlashRestoreResult checkup_cycling_restore(const logic::CheckupCyclingTrace&  trace,
+                                                  const logic::CyclingTraceIdentity& id, int64_t,
+                                                  TickType_t) {
+    if (!trace.count || cycling_forgotten || id.model_fp != cycling_model)
+        return CheckupFlashRestoreResult::Ignored;
+    if (id.source_fp != cycling_source || id.diagnostics_generation != cycling_generation)
+        throw std::runtime_error("cycling adapter received foreign physical source or consent");
+    cycling_restored = trace;
+    return CheckupFlashRestoreResult::Restored;
+}
+void checkup_cycling_forget() { cycling_forgotten = true; }
 } // namespace daik
 namespace {
 using namespace daik;
@@ -534,6 +580,77 @@ void load_synthetic_nor(const char* transport_path) {
     require(static_cast<bool>(transport) && transport.peek() == std::char_traits<char>::eof(),
             "cold_process_loads_exact_synthetic_partition_bytes");
 }
+void seed_cycling(const char* transport_path, const std::string& phase) {
+    boot();
+    cycling_offer_unix_s = static_cast<uint32_t>(journal_sdk::unix_origin);
+    require(history_flash_service_journal(3, 0) == 3 && s_flash_cycling_pending,
+            "normal_poll_bounds_multislot_checkpoint_work");
+    require(history_flash_service_journal(3, 0) == 1 && !s_flash_cycling_pending,
+            "last_page_finishes_normal_checkpoint_once");
+    require(journal_sdk::core_appended == 0 && s_flash_last_bucket[3] == INT64_MIN,
+            "cycling_never_updates_core_hour_cursor");
+    if (phase == "shutdown") {
+        sdk::now_us += 10000000;
+        cycling_offer_unix_s += 10;
+        require(history_flash_service_journal(3, 0) == 0,
+                "checkpoint_throttle_withholds_normal_write");
+        core_backlog              = 13;
+        journal_sdk::core_pending = true;
+        journal_sdk::core_bucket  = journal_sdk::unix_origin / 3600 - core_backlog;
+        history_flash_save();
+        require(journal_sdk::core_appended == 12 && journal_sdk::core_pending && core_backlog == 1,
+                "shutdown_cycling_preserves_full_ordinary_journal_budget");
+        require(journal_sdk::writes == 40 && !s_flash_cycling_pending,
+                "shutdown_adds_exactly_one_complete_fresh_checkpoint");
+    } else if (phase == "barrier") {
+        cycling_reset_token = 9;
+        require(history_flash_service_journal(3, 0) == 1 && cycling_ack == 9,
+                "barrier_is_immediate_and_acked_after_verified_commit");
+    } else if (phase == "torn" || phase == "corrupt" || phase == "incompatible") {
+        sdk::now_us += 130000000;
+        cycling_offer_unix_s += 130;
+        if (phase == "incompatible") cycling_offer_model = 303;
+        require(history_flash_service_journal(3, 0) == 3,
+                "newer_checkpoint_prefix_lands_before_failure");
+        if (phase == "torn") {
+            journal_sdk::fail_write = journal_sdk::writes + 2;
+            require(history_flash_service_journal(3, 0) == 0,
+                    "newer_checkpoint_final_commit_is_torn");
+        } else {
+            require(history_flash_service_journal(3, 0) == 1,
+                    "newer_checkpoint_final_page_is_committed");
+            if (phase == "corrupt") {
+                const size_t offset = history_journal_slot_offset(5) +
+                                      HISTORY_JOURNAL_HEADER_BYTES + sizeof(CyclingTracePageInfo);
+                journal_sdk::flash[offset] &= 0xf0;
+            }
+        }
+    }
+    std::ofstream transport(transport_path, std::ios::binary);
+    transport.write(reinterpret_cast<const char*>(journal_sdk::flash.data()),
+                    static_cast<std::streamsize>(journal_sdk::flash.size()));
+    require(static_cast<bool>(transport), "save_only_cycling_synthetic_nor_transport");
+}
+
+void restore_cycling(const char* transport_path, const std::string& phase) {
+    load_synthetic_nor(transport_path);
+    sdk::now_us = 140000000;
+    boot(false);
+    require(journal_sdk::writes == 0 && journal_sdk::erases == 0,
+            "cycling_restore_never_writes_or_erases");
+    if (phase == "barrier" || phase == "incompatible") {
+        require(cycling_restored.count == 0, "retired_checkpoint_is_not_readmitted");
+        return;
+    }
+    require(
+        cycling_restored.count == cycling_restored.capacity && cycling_restored.end_s == 86000 &&
+            cycling_restored.window_end_s == CHECKUP_WINDOW_S &&
+            cycling_restored.unix_s == journal_sdk::unix_origin + (phase == "shutdown" ? 10 : 0),
+        "cold_restore_picks_latest_complete_checkpoint_and_keeps_its_time");
+    for (uint32_t i = 0; i < cycling_restored.count; ++i)
+        require(cycling_restored.at(i) == (80000 + 31 * i) * 8 + i % 7,
+                "cold_restore_keeps_every_ordered_record");
+}
 void restore_late_correction(const char* transport_path) {
     load_synthetic_nor(transport_path);
     sdk::now_us = 3620000000LL;
@@ -623,6 +740,10 @@ int main(int argc, char** argv) {
             seed_late_correction(argv[2]);
         else if (name == "restore_late_correction" && argc == 3)
             restore_late_correction(argv[2]);
+        else if (name == "seed_cycling" && argc == 4)
+            seed_cycling(argv[2], argv[3]);
+        else if (name == "restore_cycling" && argc == 4)
+            restore_cycling(argv[2], argv[3]);
         else if ((name == "checkup_pending_healthy" || name == "checkup_pending_forget") &&
                  argc == 3)
             checkup_pending(argv[2], name == "checkup_pending_forget");

@@ -301,6 +301,15 @@ calls handlers in reverse registration order. The handler dates the open hour by
 and freezes it. The drain then offers it after every live hour as a short record
 (`checkup_seal_*` in `checkup_persist.hpp`). `PLANT.md` owns when it is skipped.
 
+The rolling compressor trace uses the dated journal with a separate payload fingerprint. While
+eligible data advances, the writer can checkpoint up to 192 records every 120 seconds using up
+to four journal slots. The bounded shutdown flush can save a newer trace. Restoration requires a
+complete committed group, matching model, link and diagnostics consent, and synchronized time.
+A partial checkpoint cannot replace the latest compatible complete group. The restored trace
+keeps its original calendar times and ages with a monotonic floor. Downtime separates restored
+evidence from new readings, and the 24-hour cutoff and record limit bound both. The journal
+retains its existing geometry.
+
 Hourly diagnosis state grows by source, not by bucket. Each byte added to `CheckupBucket` or
 `DhwLossBucket` is held 24 times in `.noinit` (23 completed hours and the open one) and once per
 journal record, and 23 stored records must still fit the 4 KiB sector scratch (see Memory

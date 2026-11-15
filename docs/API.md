@@ -309,25 +309,34 @@ runtime, including zero when no time could be assigned to that mode. The rest of
 unassigned. Hourly runtime and starts measure different populations and cannot produce an
 average completed run.
 
-`cycling.timeline` is optional. It requires unredacted status, enabled diagnostics, eligible
-compressor records from the current boot, a synchronized clock and space for the snapshot.
-It can be omitted while the weather client reserves heap for TLS.
-`window_end_s` is the rolling chart's right edge in whole monotonic seconds. `unix_s` is the Unix
-time for that same edge. Clock corrections can shift the wall-clock labels while monotonic spacing
-stays fixed. `observed_end_s` is the latest processed sample in monotonic seconds. Treat time after
-that sample as missing. Each of up to 192
-`records` packs monotonic seconds in the high bits and a kind in the low three bits:
-0 gap, 1 no established runtime, 2 other runtime, 3 heating, 4 hot water, 5 detected start.
+`cycling.timeline` is optional. It requires unredacted status, enabled diagnostics, a synchronized
+clock, eligible compressor observations and space for the snapshot. The weather client can reserve
+that space for TLS. Eligible observations can come from compatible flash records or live readings.
+`unix_s` is the Unix time at the right edge. `boot_s`, when present, gives current uptime at the
+snapshot in whole seconds. With this field the chart runs from 0 to `window_end_s:86400`, and
+the Unix time of coordinate `s` is `unix_s - window_end_s + s`. Legacy snapshots without
+`boot_s` use boot-relative monotonic coordinates. `observed_end_s` gives the latest chart sample
+on the same scale as the records. Time after that sample is missing. `live` indicates whether
+the trace includes a sample from this boot.
+`run_edges:true` identifies snapshots with support for both start and stop points. Older snapshots
+can show starts without supplying stop data for run details.
+Each of up to 192 `records` packs the sample coordinate in the high bits and a kind in the low
+three bits. Kind 0 is a gap, 1 is no established runtime, 2 is other runtime, 3 is heating, 4 is
+hot water, 5 is a detected start and 6 is a detected stop.
 Kinds 0–4 describe intervals from their timestamp up to the next interval record, or up to
 `observed_end_s` for the final interval. Kind 5 marks the first readable ON after an adjacent
-readable OFF at most 15 seconds earlier. The compressor may have started between those samples.
-Starts inferred across missing samples have no point in the trace. The volatile buffer can lose
-records within the 24-hour window if it fills. The last interval boundary before
-`window_end_s - 86400`, when retained, establishes the opening state. Otherwise the state is
-unknown until the first retained interval boundary. Start records do not establish interval
-state. The chart counts individual starts at or after the cutoff. The diagnosis total expires
-whole hourly slots and can include inferred and restored counts. The two totals can differ in
-either direction.
+readable OFF at most 15 seconds earlier. Kind 6 marks the first readable OFF after an adjacent
+readable ON within the same limit. These point records describe sample times and leave interval
+state unchanged. The compressor can change state between the two samples. Pair a start and stop
+only within continuous compressor observations. A restart leaves a gap. Readers that only count
+starts can skip kind 6.
+Dashboard versions that reject kind 6 can show hourly counts when available. The dashboard
+[reloads on a detected firmware image change](DESIGN.md#4-information-architecture-the-state-machine).
+Starts inferred across missing samples have no point in the trace. The bounded buffer can lose
+records within the 24-hour window if it fills. The opening state is unknown until the first
+retained interval boundary unless the trace establishes a state at the left edge. The chart counts
+individual starts at or after its cutoff. The diagnosis total expires whole hourly slots and can
+include inferred and restored counts. The two totals can differ in either direction.
 
 `cycling.stop_context` is an independent observation object; it changes no legacy cycling field or
 verdict. `denominator` names `witnessed_stops_recent_heating`, the separately counted witnessed

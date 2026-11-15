@@ -613,13 +613,15 @@ and value labels keep their defined share. Split Settings actions own their padd
 overlap when stacked. Measure every shipped locale at 320 px.
 
 The rolling cycling disclosure uses a step for each directly observed start and one row of
-hourly blocks showing start counts and the operating modes seen in each hour. The selected
-hour replaces all time labels on the axis with its time range. Update that range together with
-the counts and mode colors as the window rolls. Keep mixed-hour gaps visible alongside operating modes.
-During a drag, preview the hour under the pointer and restore the selection on release. If a
-readable diagnosis snapshot omits the trace, retain the selected chart for the same boot and
-diagnosis epoch. Mark the time after the last sample as missing until a new trace arrives.
-An unreadable snapshot shows **No data**. See the [status contract](API.md#history-and-24-hour-checks).
+hourly blocks showing start counts and observed modes. Each block is selectable through the full
+plot height. The caption sits above the selection highlight. The selected hour replaces time
+labels with its range and lists the runs that started in it. Keep mixed-hour gaps visible alongside
+modes, including the gap between restored evidence and new readings. During a drag, preview the
+highlight and range while keeping the run list tied to the selection. Restore the selected
+highlight and range on release. If a readable diagnosis snapshot omits the trace, retain the
+chart for the same boot and diagnosis epoch. Mark the time after the last sample as missing until
+a new trace arrives. An unreadable snapshot shows **No data**. See the
+[status contract](API.md#history-and-24-hour-checks).
 Above each rolling block, show the number of retained timed starts. Leave it blank if there is
 missing trace time and no timed start. Use the lower-bound prefix
 for positive totals and accessible readouts. Update the chart in its own slot and defer it while

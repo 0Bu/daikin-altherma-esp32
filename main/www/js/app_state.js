@@ -491,6 +491,13 @@ function invalidateLiveReadings(reason, busy = false) {
 async function refreshStatus(paint = true) {
   return !!(await readStatusFrame(paint));
 }
+const CYCLING_FRESH_MS = 15000;
+let cyclingStatusAt = -Infinity, cyclingExpiry;
+function markCyclingStale() {
+  if (cyclingExpiry != null) clearTimeout(cyclingExpiry);
+  cyclingExpiry = undefined;
+  globalThis.document?.getElementById?.("valueGroups")?.setAttribute?.("data-cycling-stale", "true");
+}
 // Return the accepted request id so an async observer can recheck ownership before its callback.
 async function readStatusFrame(paint = true, timeout, quiet = false) {
   const request = S.statusRequest = (S.statusRequest || 0) + 1;
@@ -518,6 +525,9 @@ async function readStatusFrame(paint = true, timeout, quiet = false) {
   S.statusRequestedAt = requestedAt;
   S.statusReceivedAt = receivedAt;
   if (typeof expireLiveHistoryPins === "function") expireLiveHistoryPins();
+  cyclingStatusAt = requestedAt;
+  // A new frame can report a stop before the following /values request lets the chart repaint.
+  markCyclingStale();
   S.statusAcceptedRequest = request;
   const epoch = S.histEpoch;
   syncHistSources();

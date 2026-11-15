@@ -1,4 +1,4 @@
-// translation-source: 65571656f160db7c5cef68e1a9e2f1c556ae6ac67f346ba2f2b092cff1d703c9
+// translation-source: 57360fc01b9b51987c1e6a54c6b11b7295a1a3b53f13d2b3928a2b44e523c222
 I18N.de = localeValues([
   /* sys.nodata */ "Keine Daten",
   /* sys.unreachable */ "Nicht erreichbar",
@@ -230,8 +230,15 @@ I18N.de = localeValues([
   /* check.cycling.unavailable */ "Keine Verdichterdaten.",
   /* check.cycling.stale */ "Aktuell fehlen Messwerte.",
   /* check.cycling.history_empty */ "Noch kein Verlauf.",
-  /* check.cycling.timed_starts */ (s) => `Mit Uhrzeit: ${s}`,
-  /* check.cycling.saved_starts */ (s) => `Davon stammen ${s} aus Stundenwerten vor dem Neustart. Für diese Starts fehlen die Uhrzeiten.`,
+  /* check.cycling.timed_starts */ (s) => `${s} mit erfasster Uhrzeit`,
+  /* check.cycling.run_start */ "Start",
+  /* check.cycling.run_stop */ "Stopp",
+  /* check.cycling.run_duration */ "Dauer",
+  /* check.cycling.run_ongoing */ "Läuft",
+  /* check.cycling.run_stop_unknown */ "Stopp unbekannt",
+  /* check.cycling.no_timed_runs */ "Keine Startzeit in dieser Stunde erfasst.",
+  /* check.cycling.run_details_unavailable */ "Für diese Stunde sind keine einzelnen Start- und Stoppzeiten verfügbar.",
+  /* check.cycling.saved_starts */ (s) => `Davon stammen ${s} aus Stundenwerten vor dem Neustart.`,
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · Mittel ${mean} °C`,
   /* check.min */ (m) => `${m} min`,
