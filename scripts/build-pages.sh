@@ -45,7 +45,7 @@ esac
 rm -rf "$OUT"; mkdir -p "$OUT"
 
 cp docs/index.html docs/serial-port-release.mjs docs/web-installer.mjs "$OUT/"
-cp docs/vendor/esptool-js-0.7.0.bundle.js docs/vendor/esptool-js-0.7.0.LICENSE "$OUT/"
+cp docs/vendor/esptool-js-0.7.1.bundle.js docs/vendor/esptool-js-0.7.1.LICENSE "$OUT/"
 cp main/www/heat_pump_icon.png "$OUT/heat-pump-icon.png"
 cp LICENSE "$OUT/LICENSE.txt"
 cp THIRD_PARTY_NOTICES.md "$OUT/THIRD_PARTY_NOTICES.md"
