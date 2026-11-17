@@ -1,4 +1,4 @@
-// translation-source: 57360fc01b9b51987c1e6a54c6b11b7295a1a3b53f13d2b3928a2b44e523c222
+// translation-source: 7e05fca97bff772abf43c5704d541747bc310184005cce90ce5b76eab24256ce
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -961,6 +961,8 @@ I18N.cs = localeValues([
   /* lang.sv */ "Svenska",
   /* lang.fi */ "Suomi",
   /* lang.saved */ "Jazyk uložen",
+  /* check.detail.dhw_reason.blind_modbus */ "chybí údaje: Modbus neodpovídá nebo je dotazování pozastaveno",
+  /* check.detail.source_stale_modbus */ "Žádný čerstvý vzorek Modbus; aktuální stav neznámý. Historie zachována.",
 ]);
 INSPECT_I18N.cs = inspectValues(
   ["Chybí aktuální hodnota:", "kompresor stojí a venkovní jednotka obnovuje své snímače jen za chodu. Hodnota z minulého běhu je skryta, aby nepůsobila jako aktuální měření.", "Otáčky kompresoru nelze přečíst, takže hodnoty venkovní jednotky mohou být z minulého běhu."],

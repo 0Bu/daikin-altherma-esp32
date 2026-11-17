@@ -135,4 +135,7 @@ bool hp_modbus_ota_quiesced();
 // Increments on each cache update, clear, or session reset.
 uint32_t mb_cache_generation();
 
+// True when `generation` still matches the active HomeHub target generation.
+bool mb_target_generation_matches(uint32_t generation) noexcept;
+
 }  // namespace daik

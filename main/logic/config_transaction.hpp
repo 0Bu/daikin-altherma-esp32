@@ -100,6 +100,8 @@ inline ConfigBlob config_blob_from(const Config& c) {
     b.weather_longitude_e6           = c.weather_longitude_e6;
     b.diagnostics_enabled            = c.diagnostics_enabled;
     b.diagnostics_generation         = c.diagnostics_generation;
+    b.diagnostics_source             = static_cast<uint8_t>(c.diagnostics_source);
+    b.has_diagnostics_source         = true;
     b.ref_temp_generation            = c.ref_temp_generation;
     b.env3_enabled                   = c.env3_enabled;
     b.env3_sda                       = c.env3_sda;

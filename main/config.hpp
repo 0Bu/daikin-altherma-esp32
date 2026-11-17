@@ -31,8 +31,9 @@ ConfigLinkSnapshot config_link_snapshot();
 // 24 std::string members, avoiding continuous heap fragmentation on frequent read paths.
 bool        config_wifi_configured();
 uint32_t    config_runtime_revision();
-bool        config_diagnostics_enabled();
-OtaChannel config_ota_channel();
+bool              config_diagnostics_enabled();
+DiagnosticsSource config_diagnostics_source();
+OtaChannel        config_ota_channel();
 Protocol    config_x10a_protocol();
 std::string config_profile();
 

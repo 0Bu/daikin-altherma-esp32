@@ -1944,6 +1944,7 @@ static __attribute__((noinline)) std::string build_heartbeat_payload() {
     f.modbus_fails     = mbs.rx_fail;
     f.modbus_stack_min_free_bytes = stack_watch_min_free_bytes(StackWatch::Modbus);
     f.cycling                     = checkup_cycling_evidence();
+    f.modbus_cycling              = checkup_cycling_evidence(DiagnosticsSource::Modbus);
     f.stop_context                = stop_context_payload_fields(checkup_stop_context_report());
     return build_heartbeat_json(f);
 }
@@ -3892,11 +3893,11 @@ CirculationPumpSample circulation_pump_sample() {
     uint32_t max_age_s = CIRC_SOURCE_MAX_AGE_DEFAULT_S;
     CirculationPowerState state = CirculationPowerState::Unknown;
     {
-        Lock lk(s_mtx);
-        configured               = s_circulation_status.configured;
+        Lock           lk(s_mtx);
         const uint32_t requested = s_circulation_requested_epoch.load(std::memory_order_acquire);
-        if (!circulation_epoch_current_locked(requested)) return {configured, false, false};
-        has_value = s_circulation_status.has_value;
+        if (!circulation_epoch_current_locked(requested)) return {false, false, false};
+        configured      = s_circulation_capture_enabled && s_circulation_status.configured;
+        has_value       = s_circulation_status.has_value;
         retained = s_circulation_status.retained;
         has_source_time = s_circulation_status.has_source_time;
         received_ms = s_circulation_status.received_ms;
@@ -3993,6 +3994,20 @@ bool mqtt_circulation_test_proof_valid(uint32_t proof,
            s_circulation_probe.config.on_tenths_w == candidate.on_tenths_w &&
            s_circulation_probe.config.off_tenths_w == candidate.off_tenths_w &&
            s_circulation_probe.config.confirm_s == candidate.confirm_s;
+}
+
+void mqtt_circulation_set_diagnostics(bool configured) {
+    Lock     lk(s_mtx);
+    uint32_t next = s_circulation_requested_epoch.load(std::memory_order_relaxed) + 1;
+    s_circulation_requested_epoch.store(next ? next : 1, std::memory_order_release);
+    s_circulation_reconfigure       = true;
+    s_circulation_probe_reconfigure = true;
+    if (lk.acquired()) {
+        reset_circulation_status_locked(configured);
+        s_circulation_probe.active = false;
+        s_circulation_probe.passed = false;
+        s_circulation_probe_capture_generation.store(0, std::memory_order_release);
+    }
 }
 
 void mqtt_circulation_reconfigure(bool configured) {

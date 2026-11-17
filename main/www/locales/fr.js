@@ -1,4 +1,4 @@
-// translation-source: 57360fc01b9b51987c1e6a54c6b11b7295a1a3b53f13d2b3928a2b44e523c222
+// translation-source: 7e05fca97bff772abf43c5704d541747bc310184005cce90ce5b76eab24256ce
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -961,6 +961,8 @@ I18N.fr = localeValues([
   /* lang.sv */ "Svenska",
   /* lang.fi */ "Suomi",
   /* lang.saved */ "Langue enregistrée",
+  /* check.detail.dhw_reason.blind_modbus */ "relevés manquants : Modbus sans réponse ou interrogation en pause",
+  /* check.detail.source_stale_modbus */ "Pas de mesure Modbus récente ; état actuel inconnu. Historique conservé.",
 ]);
 INSPECT_I18N.fr = inspectValues(
   ["Aucun relevé actuel :", "le compresseur est arrêté et l’unité extérieure n’actualise ses propres capteurs qu’en fonctionnement. La valeur du dernier cycle est masquée pour ne pas la présenter comme actuelle.", "Vitesse du compresseur illisible : les valeurs de l’unité extérieure peuvent venir du dernier cycle."],
@@ -985,7 +987,7 @@ INSPECT_I18N.fr = inspectValues(
         ? `En marche : compresseur à ${fmt0(d.rps)} rps${d.quiet ? ", limité par le mode silencieux" : ""}.`
         : "En marche : le HomeHub confirme le compresseur actif ; vitesse et mesures détaillées exigent X10A."
       : d.ouHeldOver && d.mbFields && d.mbFields.has("out")
-      ? "En veille : compresseur arrêté. X10A n’actualise plus les capteurs extérieurs ; l’air extérieur vient du HomeHub, le refoulement reste « — » et l’âge réel de cette mesure Modbus est inconnu."
+      ? "En veille : compresseur arrêté. X10A n’actualise plus les capteurs extérieurs ; l’air extérieur vient du registre Modbus, le refoulement reste « — » et l’âge réel de cette mesure est inconnu."
       : "En veille : compresseur arrêté, sans transfert actif. Les capteurs propres à l’unité extérieure restent « — » pour ne pas répéter les valeurs du dernier cycle."], // ou
     ["Compresseur", 0, "Comprime le fluide frigorigène pour augmenter sa pression et sa température. La fréquence en rps indique la vitesse, pas à elle seule la puissance thermique ou électrique."], // comp
     ["Air extérieur", 0, "Température au capteur extérieur. Au repos, X10A peut la retenir ; elle est alors masquée ou HomeHub est identifié."], // out

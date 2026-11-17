@@ -155,12 +155,16 @@ static void boot_sequence() {
     // and before HTTP can ask for a snapshot — rather than racing two lazy creators on first boot.
     daik::history_start();
     daik::checkup_start(cfg.diagnostics_enabled, cfg.diagnostics_generation);
-    // The circulation-power ring is diagnosis evidence, not general X10A history. Keep retained
-    // pre-opt-in data inaccessible until an explicit enable starts and reseeds this source.
-    if (!cfg.diagnostics_enabled) daik::history_circulation_reset();
-                                 // same rule: judge .noinit before a producer task exists
-    daik::dwell_start();     // and the per-row state ages, judged on the same terms
-    daik::http_start();                  // esp_http_server on :80 (web UI + config + OTA + MCP)
+    // The circulation-power ring is diagnosis evidence, not general X10A history. Clear any
+    // pre-opt-in ring on fresh configs; when paused within a non-zero generation, keep the ring
+    // intact while hiding its trend label until re-enabled.
+    if (cfg.diagnostics_generation == 0)
+        daik::history_circulation_reset();
+    else if (!cfg.diagnostics_enabled)
+        daik::history_set_diagnostics(false);
+    // same rule: judge .noinit before a producer task exists
+    daik::dwell_start(); // and the per-row state ages, judged on the same terms
+    daik::http_start();  // esp_http_server on :80 (web UI + config + OTA + MCP)
     if (!daik::safe_mode_active()) {
         daik::env3_start();              // optional outdoor climate sensor (no-op unless configured)
         // Start the X10A owner before MQTT. The bridge starts one LWT transport immediately;

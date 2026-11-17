@@ -278,7 +278,6 @@ public:
 
         if (!in.room_control_eligible || !std::isfinite(in.room_error_k))
             return blocked(HeatingCurveReason::RoomUnavailable);
-        if (!in.x10a_connected) return blocked(HeatingCurveReason::X10aUnavailable);
         if (in.now_ms < 0 || in.now_unix_s < 0 ||
             (last_now_ms_ >= 0 && in.now_ms < last_now_ms_))
             return blocked(HeatingCurveReason::ClockInvalid);

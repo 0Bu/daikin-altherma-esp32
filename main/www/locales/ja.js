@@ -1,4 +1,4 @@
-// translation-source: 57360fc01b9b51987c1e6a54c6b11b7295a1a3b53f13d2b3928a2b44e523c222
+// translation-source: 7e05fca97bff772abf43c5704d541747bc310184005cce90ce5b76eab24256ce
 I18N.ja = localeValues([
   /* sys.nodata */ "データなし",
   /* sys.unreachable */ "接続不可",
@@ -961,6 +961,8 @@ I18N.ja = localeValues([
   /* lang.sv */ "Svenska",
   /* lang.fi */ "Suomi",
   /* lang.saved */ "言語を保存しました",
+  /* check.detail.dhw_reason.blind_modbus */ "未読取：Modbus応答なしまたはポーリング一時停止",
+  /* check.detail.source_stale_modbus */ "新鮮なModbus試料なし。現在状態不明。過去記録は保持。",
 ]);
 
 DESCRIPTION_I18N.ja = descriptionValues([

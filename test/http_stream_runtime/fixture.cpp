@@ -77,8 +77,11 @@ inline daik::logic::CheckupCyclingHours cycling_hours{};
 inline daik::logic::CheckupCyclingTrace cycling_trace{};
 inline daik::logic::CheckupRestore      checkup_persist     = daik::logic::CheckupRestore::NoRecord;
 inline bool                             reset_after_checkup = false;
-inline unsigned                       stop_report_calls = 0;
-inline std::string                    log;
+inline unsigned                         stop_report_calls   = 0;
+inline bool                             checkup_x10a_has_data      = false;
+inline bool                             checkup_modbus_has_data    = false;
+inline daik::DiagnosticsSource          last_checkup_report_source = daik::DiagnosticsSource::X10a;
+inline std::string                      log;
 [[noreturn]] void                     fail(const char* message) {
     std::fprintf(stderr, "FAIL %s: %s\n", oracle.c_str(), message);
     std::exit(1);
@@ -117,6 +120,9 @@ void reset() {
     checkup_persist           = daik::logic::CheckupRestore::NoRecord;
     reset_after_checkup       = false;
     stop_report_calls         = 0;
+    checkup_x10a_has_data      = false;
+    checkup_modbus_has_data    = false;
+    last_checkup_report_source = daik::DiagnosticsSource::X10a;
     std::memset(scan_rows, 0, sizeof(scan_rows));
     sdk::now        = 10000000;
     sdk::clock_step = 0;
@@ -434,9 +440,14 @@ void time_now(int64_t& seconds, int32_t& ms) {
 const char* checkup_persist_state() {
     return logic::checkup_restore_slug(fixture::checkup_persist);
 }
+bool checkup_has_data(DiagnosticsSource source) {
+    return source == DiagnosticsSource::Modbus ? fixture::checkup_modbus_has_data
+                                               : fixture::checkup_x10a_has_data;
+}
 logic::CheckupReport checkup_report(logic::CheckupCyclingHours* hours,
                                     logic::CheckupCyclingTrace* trace,
-                                    logic::CheckupRestore*      persist) {
+                                    logic::CheckupRestore* persist, DiagnosticsSource source) {
+    fixture::last_checkup_report_source = source;
     if (hours) *hours = fixture::cycling_hours;
     if (trace) *trace = fixture::cycling_trace;
     if (persist) *persist = fixture::checkup_persist;
@@ -1056,6 +1067,31 @@ int main(int argc, char** argv) {
         check(invoke(req, "/scan", daik::h_scan) == ESP_OK && scan_calls == 0 &&
                   req.status == "503 Service Unavailable" && req.emission_attempts == 0,
               "OTA admission reached the scan service");
+    });
+    run("status_modbus_diagnostics", [] {
+        current.mb_host             = "192.0.2.50";
+        current.diagnostics_enabled = true;
+        current.diagnostics_source  = daik::DiagnosticsSource::X10a;
+        rows.clear();
+        checkup_x10a_has_data               = false;
+        checkup_modbus_has_data             = true;
+        stop_report.observation.readable_us = 10000000;
+        stop_report.observation.confirmed   = true;
+        stop_report.capability_mask         = 31;
+        const unsigned before_stop_calls    = stop_report_calls;
+        auto           req                  = request();
+        check(invoke(req, "/status", daik::h_status) == ESP_OK, "modbus diagnostics status failed");
+        successful(req);
+        emit(req, "status-modbus-diagnostics");
+        check(last_checkup_report_source == daik::DiagnosticsSource::Modbus &&
+                  stop_report_calls == before_stop_calls,
+              "modbus diagnostics view must read modbus slot without stop_context");
+        check(req.response.find("\"health\":{\"source\":\"modbus\"") != std::string::npos &&
+                  req.response.find(
+                      "\"diagnostics\":{\"enabled\":true,\"source\":\"x10a\",\"effective_source\":"
+                      "\"modbus\",\"available_sources\":[\"modbus\"]}") != std::string::npos &&
+                  req.response.find("\"stop_context\":{\"confirmed\":false") != std::string::npos,
+              "status payload missing modbus diagnostics provenance or empty stop_context");
     });
     check(count > 0, "unknown oracle");
     std::printf("PASS total=%u\n", count);

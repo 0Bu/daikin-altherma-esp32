@@ -72,6 +72,7 @@ uint32_t random_value = 0x10203040U, runtime_generation = 0;
 unsigned random_calls = 0, runtime_generation_calls = 0;
 uint32_t room_history_identity = 0;
 unsigned room_history_resets   = 0;
+unsigned modbus_checkup_resets = 0;
 
 [[noreturn]] void fail(const char* reason) {
     std::fprintf(stderr, "FAIL oracle=%s: %s\n", oracle, reason);
@@ -180,6 +181,7 @@ void reset() {
     random_calls = runtime_generation = runtime_generation_calls = 0;
     room_history_identity = daik::logic::history_room_identity(current);
     room_history_resets   = 0;
+    modbus_checkup_resets = 0;
 }
 using Handler = esp_err_t (*)(httpd_req_t*);
 struct Route {
@@ -404,6 +406,10 @@ void         mqtt_request_modbus_cleanup() { ++fixture::runtime_changes; }
 void         mqtt_heating_curve_homehub_reset() noexcept { ++fixture::runtime_changes; }
 void         checkup_set_diagnostics(bool, uint32_t g) { fixture::checkup_generation(g); }
 void         checkup_reset() { ++fixture::runtime_changes; }
+void         checkup_modbus_reset() {
+    ++fixture::modbus_checkup_resets;
+    ++fixture::runtime_changes;
+}
 void         checkup_reset_on_detect(const char*, uint32_t) { ++fixture::runtime_changes; }
 void         dwell_reset() { ++fixture::runtime_changes; }
 void         dwell_reset_on_detect(const char*) { ++fixture::runtime_changes; }
@@ -413,7 +419,9 @@ uint32_t     history_x10a_identity(const char* profile, int32_t rx, int32_t tx, 
     return logic::history_x10a_target_fingerprint(profile, rx, tx, proto);
 }
 void history_checkup_reset() { ++fixture::runtime_changes; }
+void history_set_diagnostics(bool) { ++fixture::runtime_changes; }
 void history_circulation_reset() { ++fixture::runtime_changes; }
+void mqtt_circulation_set_diagnostics(bool) { ++fixture::runtime_changes; }
 void history_modbus_reset(uint32_t) noexcept { ++fixture::runtime_changes; }
 void history_room_reset(uint32_t identity) noexcept {
     if (fixture::room_history_identity != identity) {
@@ -1193,7 +1201,7 @@ uint32_t persisted_generation() {
 }
 // One actual /set_diagnostics transition from the stated generation with the given draw. Returns
 // the generation the handler committed to RAM, the durable service entry and the live producer.
-uint32_t transition(bool enabled, uint32_t draw) {
+uint32_t transition(bool enabled, uint32_t draw, unsigned expected_draws) {
     saves = service_writes = link_writes = runtime_changes = weather_commits = 0;
     random_calls = runtime_generation_calls = 0;
     durable_started                         = false;
@@ -1202,7 +1210,8 @@ uint32_t transition(bool enabled, uint32_t draw) {
         invoke(daik::set_diagnostics, enabled ? R"({"enabled":true})" : R"({"enabled":false})");
     check(response.status == "200 OK" && saves == 1 && service_writes == 1,
           "diagnostics transition did not save exactly once");
-    check(random_calls == 1, "diagnostics transition must draw esp_random() exactly once");
+    check(random_calls == expected_draws,
+          "diagnostics transition drew esp_random() an unexpected number of times");
     check(current.diagnostics_enabled == enabled && runtime_generation_calls == 1,
           "diagnostics transition did not publish the requested consent");
     check(persisted_generation() == current.diagnostics_generation &&
@@ -1222,21 +1231,22 @@ void diagnostics_generation() {
     };
     from_default();
     const uint32_t draw = 0x6d2b79f5U; // independent of the logic test's draw
-    check(transition(true, draw) == draw,
+    check(transition(true, draw, 1U) == draw,
           "first opt-in from generation 0 must persist the actual esp_random() draw");
-    // Later transitions advance by one; a newer draw must not restart the sequence.
-    check(transition(false, 0x0badf00dU) == draw + 1U,
-          "a re-toggle must advance the persisted generation by one");
-    check(transition(true, 0U) == draw + 2U, "a second re-toggle must advance by one again");
+    // Pausing and resuming keep the established generation without re-drawing or clearing data.
+    check(transition(false, 0x0badf00dU, 0U) == draw,
+          "pausing diagnostics must preserve the persisted generation");
+    check(transition(true, 0U, 0U) == draw,
+          "resuming diagnostics must preserve the persisted generation");
     saves = random_calls = runtime_generation_calls = 0;
     durable_started                                 = false;
     const auto unchanged = invoke(daik::set_diagnostics, R"({"enabled":true})");
     check(unchanged.status == "200 OK" && saves == 0 && random_calls == 0 &&
-              runtime_generation_calls == 0 && persisted_generation() == draw + 2U,
+              runtime_generation_calls == 0 && persisted_generation() == draw,
           "an unchanged consent request must keep its generation without a draw");
     // A zero draw still leaves the default generation for a non-zero one.
     from_default();
-    check(transition(true, 0U) == 1U, "a zero draw must still leave generation 0");
+    check(transition(true, 0U, 1U) == 1U, "a zero draw must still leave generation 0");
 }
 void board_draft_revision() {
     const auto& board = route("board");
@@ -1335,12 +1345,76 @@ void room_history_lifetime() {
               generation() == first + 4 && room_history_identity != 0,
           "broker replacement must open a distinct room history lifetime");
     const uint32_t active = room_history_identity;
+    const unsigned resets_before = room_history_resets;
     check(send(daik::set_diagnostics, R"({"enabled":false})").status == "200 OK" &&
-              room_history_identity == 0,
-          "diagnostics withdrawal must retire room history immediately");
+              room_history_identity == active && room_history_resets == resets_before,
+          "pausing diagnostics must preserve room history identity");
     check(send(daik::set_diagnostics, R"({"enabled":true})").status == "200 OK" &&
-              room_history_identity != 0 && room_history_identity != active,
-          "new diagnostics consent must not revive an earlier room history");
+              room_history_identity == active && room_history_resets == resets_before,
+          "resuming diagnostics must preserve existing room history");
+}
+void diagnostics_source() {
+    reset();
+    const auto send = [](Handler handler, const std::string& body) {
+        saves = service_writes = link_writes = runtime_changes = weather_commits = 0;
+        modbus_checkup_resets                                                    = 0;
+        durable_started                                                          = false;
+        return invoke(handler, body);
+    };
+    const auto persisted = [] {
+        daik::ConfigBlob blob;
+        check(daik::config_blob_deserialize(service.data(), service.size(), blob),
+              "diagnostics source service blob must decode");
+        check(blob.diagnostics_source == static_cast<uint8_t>(current.diagnostics_source) &&
+                  blob.diagnostics_generation == current.diagnostics_generation,
+              "diagnostics source durable and RAM state must agree");
+        return blob;
+    };
+
+    check(send(daik::set_diagnostics, R"({"enabled":true,"source":"modbus"})").status == "200 OK" &&
+              saves == 1 && service_writes == 1 &&
+              current.diagnostics_source == daik::DiagnosticsSource::Modbus &&
+              persisted().diagnostics_generation == 9 && runtime_changes == 0 &&
+              weather_commits == 0,
+          "enabling or selecting modbus must persist source without advancing generation or "
+          "clearing data");
+    check(send(daik::set_diagnostics, R"({"source":"x10a"})").status == "200 OK" && saves == 1 &&
+              current.diagnostics_source == daik::DiagnosticsSource::X10a &&
+              persisted().diagnostics_generation == 9 && runtime_changes == 0 &&
+              weather_commits == 0,
+          "source switch to x10a must omit enabled requirement and keep generation");
+    check(send(daik::set_diagnostics, R"({"source":"x10a"})").status == "200 OK" && saves == 0 &&
+              service_writes == 0 && persisted().diagnostics_generation == 9,
+          "unchanged source switch must be a no-op");
+    check(send(daik::set_diagnostics, R"({"source":"modbus"})").status == "200 OK" && saves == 1 &&
+              current.diagnostics_source == daik::DiagnosticsSource::Modbus &&
+              persisted().diagnostics_generation == 9 && runtime_changes == 0 &&
+              weather_commits == 0,
+          "source switch back to modbus must keep generation and dual storage");
+    check(send(daik::set_diagnostics, R"({"enabled":false})").status == "200 OK" && saves == 1 &&
+              !current.diagnostics_enabled && persisted().diagnostics_generation == 9 &&
+              runtime_changes > 0,
+          "pausing diagnostics must preserve generation and pause producers");
+    for (const char* bad :
+         {R"({})", R"({"source":"bogus"})", R"({"enabled":"yes","source":"modbus"})"}) {
+        check(send(daik::set_diagnostics, bad).status == "400 Bad Request" && saves == 0 &&
+                  service_writes == 0 && !current.diagnostics_enabled &&
+                  current.diagnostics_source == daik::DiagnosticsSource::Modbus &&
+                  persisted().diagnostics_generation == 9,
+              "invalid diagnostics payload must return 400 without mutating config");
+    }
+    check(send(daik::set_diagnostics, R"({"enabled":true,"source":"modbus"})").status == "200 OK" &&
+              persisted().diagnostics_generation == 9,
+          "re-enabling diagnostics with modbus source failed");
+    check(send(daik::set_hp, R"({"mb_host":"new-hh.invalid"})").status == "200 OK" &&
+              modbus_checkup_resets == 1,
+          "changing HomeHub host must reset only modbus checkup state");
+    check(send(daik::set_hp, R"({"mb_port":1502})").status == "200 OK" &&
+              modbus_checkup_resets == 1,
+          "changing HomeHub port must reset modbus checkup state");
+    check(send(daik::set_hp, R"({"mb_unit_id":2})").status == "200 OK" &&
+              modbus_checkup_resets == 1,
+          "changing HomeHub unit id must reset modbus checkup state");
 }
 } // namespace test
 
@@ -1367,7 +1441,8 @@ int main(int argc, char** argv) {
                           {"query_flags", test::query_flags},
                           {"diagnostics_generation", test::diagnostics_generation},
                           {"board_draft_revision", test::board_draft_revision},
-                          {"room_history_lifetime", test::room_history_lifetime}};
+                          {"room_history_lifetime", test::room_history_lifetime},
+                          {"diagnostics_source", test::diagnostics_source}};
     unsigned   ran     = 0;
     for (const auto& candidate : cases) {
         if (argc > 1) {
@@ -1376,7 +1451,8 @@ int main(int argc, char** argv) {
                     std::strcmp(candidate.name, "local_pin_reconcile") == 0 ||
                     std::strcmp(candidate.name, "diagnostics_generation") == 0 ||
                     std::strcmp(candidate.name, "board_draft_revision") == 0 ||
-                    std::strcmp(candidate.name, "room_history_lifetime") == 0)
+                    std::strcmp(candidate.name, "room_history_lifetime") == 0 ||
+                    std::strcmp(candidate.name, "diagnostics_source") == 0)
                     continue;
             } else if (std::strcmp(argv[1], candidate.name) != 0)
                 continue;

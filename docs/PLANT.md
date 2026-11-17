@@ -6,15 +6,20 @@ catalogs board/platform capabilities; [DIAGNOSTICS.md](DIAGNOSTICS.md) explains 
 
 ## Collection and prerequisites
 
-**Plant diagnostics is off by default**, including migrated configurations. Enable it under
-**Settings → Firmware**. Enabling starts a new evidence generation; disabling clears the accumulated
-checkup/curve sample state and stops additional room, forecast and circulation collection. Saved
-source mappings remain dormant, ready for a later opt-in. Evidence never crosses an opt-out boundary.
+**Plant diagnostics is off by default**, including migrated configurations. Enable or pause it
+under **Settings → Firmware** (`Off`, `X10A`, or `Modbus`). First opt-in draws an active evidence
+generation. Setting `Off` pauses new diagnostic, room, forecast and circulation collection while
+preserving already collected 24-hour X10A and Modbus checkup/DHW/cycling/stop-context stores as well
+as room and circulation 24-hour histories (all of which keep aging out after 24 hours; retained MQTT
+forecast evidence is cleared). Re-enabling resumes inside the same generation without bridging the
+paused interval; `X10A`/`Modbus` chooses which independent store the dashboard card displays while
+both continue recording. Saved source mappings remain dormant across pauses, ready for resume.
+Only a factory reset or source/endpoint/mapping change clears the affected store.
 
 | Feature | Requires diagnostics opt-in | Inputs / boundary |
 |---|---|---|
-| Rolling checkup | Yes | Supported fresh X10A rows; optional external circulation-power witness. |
-| Heating-curve diagnosis | Yes | X10A, active HomeHub, eligible MQTT room source and synchronized clock; forecast optional. |
+| Rolling checkup | Yes | Separate X10A and HomeHub/Altherma 4 Modbus rolling windows; optional external circulation-power witness. |
+| Heating-curve diagnosis | Yes | Active HomeHub, eligible MQTT room source and synchronized clock; forecast optional. |
 | Open-Meteo forecast | Yes | Explicit saved location, network and synchronized clock. |
 | Refrigerant heating observation | No | Existing X10A sweep; suitable ordinary heating run. |
 | ENV III | No | Supported M5Stack board, enabled/proven I²C mapping. |
@@ -35,10 +40,11 @@ The checkup observes unit fault classes, tank cooling, compressor runs, defrost,
 heater activity and experimental counter changes. [DIAGNOSTICS.md](DIAGNOSTICS.md) explains the
 results; [DIAGNOSTIC_EVIDENCE.md](DIAGNOSTIC_EVIDENCE.md) owns thresholds and claim boundaries.
 
-Each completed X10A sweep contributes only the rows it read. Integrated state time requires readable
-endpoints and bounded gaps; a pulse entirely between sweeps can still be missed. Five-minute trends
-cannot reconstruct completed runs or hourly tank cooling and are not reused as diagnosis evidence.
-Temporary allocation/TLS pauses preserve profile capabilities while adding no observed time.
+Each completed X10A sweep and each HomeHub/Altherma 4 Modbus poll contributes only the rows it
+read to its own store. Integrated state time requires readable endpoints and bounded gaps; a pulse
+entirely between polls can still be missed. Five-minute trends cannot reconstruct completed runs or
+hourly tank cooling and are not reused as diagnosis evidence. Temporary allocation/TLS pauses preserve
+profile capabilities while adding no observed time.
 
 Read-time source age, elapsed lifecycle span and per-signal coverage are separate facts. A stopped
 producer cannot retain a current all-clear. Historical findings remain age-bounded; observation-only rows
@@ -69,10 +75,10 @@ ongoing filter; renaming it does not. Its empty post-edit window says nothing ab
 The window holds 23 completed one-hour buckets plus the pending hour, at most 24 hours.
 **Every boot retires completed `.noinit` diagnosis hours and undated open counters.** Completed hours
 can restore only from compatible, dated history-journal records after clock synchronization and
-**current-boot confirmation of the full X10A source**. Records bind endpoint, full profile/link scope,
+**current-boot confirmation of the matching source (X10A profile/link or Modbus profile/host/port/unit)**. Records bind endpoint, full source/profile scope,
 diagnostics-consent generation, consumer-schema/method fingerprint and CRC
 ([identity contract](ARCHITECTURE.md#history-and-diagnosis-persistence)). DHW additionally binds the
-circulation configuration; a mismatch empties only its bucket, preserving independent X10A evidence.
+circulation configuration; a mismatch empties only its bucket, preserving independent bus evidence.
 Old unscoped formats are rejected. A cached model guess cannot admit records. Core journal layout 3
 requires independent heating and hot-water runtime. It rejects earlier core records in full,
 including their completed tank-cooling results. Raw trends, the independent Stop journal and the
@@ -82,18 +88,18 @@ A late restore can add only hours whose saved labels precede this boot's complet
 wall clock cannot date those live hours within the window, recovery keeps the live history and
 skips the saved hours.
 
-**A software restart (any `esp_restart()`) tries to save the open hour.**
+**A software restart (any `esp_restart()`) tries to save each confirmed source's open hour.**
 Software restarts include:
 - an OTA installation or rollback;
 - a settings save that restarts the board;
 - a WiFi credential rollback or an Ethernet-to-WiFi fallback;
 - a heap-watchdog restart.
 
-Saving it needs all of the following:
+Saving a source's open hour needs all of the following:
 - a synchronized clock;
-- a confirmed X10A source;
-- diagnostics enabled;
-- no queued X10A or diagnostics reset (a circulation-only reset empties just the hour's tank-cooling
+- a confirmed matching source (X10A and/or HomeHub/Altherma 4 Modbus);
+- a started diagnostics generation (enabled, or paused with an open pre-pause hour);
+- no queued reset for that source (a circulation-only reset empties just the hour's tank-cooling
   part);
 - a writable history journal;
 - at least one observed second in the open hour.
@@ -120,13 +126,15 @@ hours. A completed tank-cooling window can use an initial temperature
 from the preceding bucket. Later clock corrections do not renew an assigned monotonic deadline;
 read-time span cannot fabricate observation coverage. See
 [`/status.health.persist`](API.md#history-and-24-hour-checks)
-for restoration outcomes. An explicit profile/link reset retires pending
+for restoration outcomes. An explicit profile/link reset retires pending X10A
 restore for this boot, even if the same profile is selected again. HomeHub-only edits do not reset
-the X10A lifecycle. Safe mode and disabled diagnostics admit no old hours; unidentified-source
-empty samples advance time without booking observations.
+the X10A lifecycle, and switching the Plant diagnostics display source (`x10a`/`modbus`) leaves
+both histories untouched. Safe mode and pre-opt-in states (`diagnostics_generation == 0`) admit no
+old hours, while booting while paused retains the active generation's compatible flash records for
+resumption; unidentified-source empty samples advance time without booking observations.
 
-A software restart can also carry the ongoing tank-loss filter through a separately sealed
-**one-shot handoff**. Adoption requires full X10A and circulation scope confirmation, enabled
+A software restart can also carry each source's ongoing tank-loss filter through a separately sealed
+**one-shot handoff**. Adoption requires confirmation of that source and circulation scope, enabled
 diagnostics and no pending reset. The handoff preserves the hourly cooling candidate and settling
 timer. Power loss, crash, changed source or an incompatible or absent handoff starts a fresh
 filter. Handoff v3 rejects v2.
@@ -226,7 +234,7 @@ trusted source time. Actual/target range is 5–35 °C and optional enabled/HVAC
 [MQTT.md](MQTT.md#room-input-and-heating-curve-evidence) defines freshness, reason codes and payloads.
 
 Method 3 first establishes HomeHub connectivity, active normal space operation (input 53) with
-space routing (input 37 = 0), then Heating rather than Cooling (input 38), before room/X10A/clock
+space routing (input 37 = 0), then Heating rather than Cooling (input 38), before room and clock
 evidence. The [EKRHH Installer reference guide, 4P744838-1E (2026.01), §9.2.2, page 43](https://www.daikin.eu/content/dam/document-library/Installer-reference-guide/heat/accessories/ekrhh/EKRHH_Installer%20reference%20guide_4PEN744838-1E_English.pdf)
 defines the valve independently; normal-operation flags do not establish exclusive routing.
 Each prerequisite needs its own current-session reply within the seven-second project bound.

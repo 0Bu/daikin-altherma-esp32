@@ -59,9 +59,11 @@ assert.match(style, /\.vrow-val\.dim\s*\{[^}]*color:\s*var\(--muted\)/s,
              "CHECKING/observation-only rows need a distinct neutral visual state");
 assert.match(style, /\.mb-tag\s*\{[^}]*opacity:\s*\.5;/s,
              "Modbus source badge must stay visually subordinate to the reading");
-assert.match(checkupSource, /if \(apply_reset_locked\(\)\) return;/,
-             "record must discard the sample that consumes an identity reset");
-assert.match(checkupSource, /if \(s_reset_requested\.load\(\)\) return logic::CheckupReport\{\};/,
+assert.match(checkupSource, /if \(apply_reset_locked\(s_x10a\)\) return;/,
+             "X10A record must discard the sample that consumes an identity reset");
+assert.match(checkupSource, /if \(apply_reset_locked\(s_modbus\)\) return;/,
+             "Modbus record must discard the sample that consumes an identity reset");
+assert.match(checkupSource, /if \(slot\.reset_requested\.load\(\)\) return logic::CheckupReport\{\};/,
              "report must stay empty without consuming a pending identity reset");
 assert.ok(pollSource.indexOf("checkup_reset_on_detect(") < pollSource.indexOf("config_commit_detected_model("),
           "automatic detection must request reset before publishing the resolved profile");
@@ -82,10 +84,10 @@ assert.match(configSource,
              /static esp_err_t do_detect[\s\S]*?hp_poll_reconfigure\(\);\s*checkup_reset\(\);\s*dwell_reset\(\);\s*history_reset\(\);/m,
              "explicit /detect must invalidate old cycles before arming all three X10A resets");
 assert.match(configSource,
-             /homehub_history_identity_changed\([\s\S]*?const uint32_t modbus_target_fp[\s\S]*?const bool modbus_enabled[\s\S]*?config_save\([\s\S]*?if \(reset_mb_history\) \{\s*history_modbus_reset\(modbus_target_fp\);[\s\S]*?mb_reconfigure\(modbus_enabled\);[\s\S]*?mqtt_request_modbus_cleanup\(\);\s*\}/m,
-             "/set_hp must reset HomeHub history and reconfigure only when host, port or unit identity changes");
+             /homehub_history_identity_changed\([\s\S]*?const uint32_t modbus_target_fp[\s\S]*?const bool modbus_enabled[\s\S]*?config_save\([\s\S]*?if \(reset_mb_history\) \{\s*checkup_modbus_reset\(\);\s*history_modbus_reset\(modbus_target_fp\);[\s\S]*?mb_reconfigure\(modbus_enabled\);[\s\S]*?mqtt_request_modbus_cleanup\(\);\s*\}/m,
+             "/set_hp must reset HomeHub history/checkup and reconfigure only when host, port or unit identity changes");
 assert.match(modbusPollSource,
-             /if \(s_have_req && \(target != s_req_host \|\| c\.mb_port != s_req_port \|\| c\.mb_unit_id != s_unit\)\)\s*history_modbus_reset\(logic::history_homehub_target_fingerprint\(/m,
+             /if \(s_have_req && \(target != s_req_host \|\| c\.mb_port != s_req_port \|\| c\.mb_unit_id != s_unit\)\) \{\s*history_modbus_reset\(logic::history_homehub_target_fingerprint\([\s\S]*?\);\s*checkup_modbus_reset\(\);\s*\}/m,
              "the Modbus task must close the race where an old cycle consumes the HTTP reset");
 
 const context = {
@@ -105,6 +107,7 @@ vm.runInContext(
      detail: checkupDetailHtml,
      chart: checkupCyclingChartHtml,
      card: checkupCardHtml,
+     ready: checkupSourceReadyFor,
      copy: I18N,
      text: (lang, key, ...args) => { LANG = lang; return t(key, ...args); },
      setLang: (lang) => { LANG = lang; },
@@ -820,4 +823,83 @@ for (const lang of locales) {
     assert.match(diagnosis, /not measured tank energy/);
   }
 }
+
+ui.setLang("en");
+const modbusChecks = [
+  { id: "fault", verdict: "ok", observed_s: 3600 },
+  { id: "pressure", verdict: "unavailable", observed_s: 0 },
+  { id: "defrost", verdict: "unavailable", observed_s: 0 },
+  { id: "retries", verdict: "unavailable", observed_s: 0 },
+  { id: "flow", verdict: "ok", observed_s: 3600 },
+  { id: "heater", verdict: "ok", observed_s: 3600 },
+  { id: "cycling", verdict: "ok", observed_s: 3600 },
+  { id: "dhw_loss", verdict: "ok", observed_s: 3600 },
+];
+context.S.status = {
+  diagnostics: { enabled: true, source: "modbus", effective_source: "modbus", available_sources: ["modbus"] },
+  health: { source: "modbus", status: "ok", persist: "no_record", source_fresh: true, checks: modbusChecks },
+  refrigerant_service: { state: "observing", continuous_s: 60, samples: 6 },
+};
+let cardHtml = ui.card(true);
+assert.match(cardHtml, /Plant diagnostics · 24 h · Modbus</);
+for (const shown of ["health_fault", "health_flow", "health_heater", "health_cycling", "health_dhw_loss"])
+  assert.ok(cardHtml.includes(shown), `Modbus card must render ${shown}`);
+for (const hidden of ["health_defrost", "health_pressure", "health_retries", "refrigerant_service"])
+  assert.ok(!cardHtml.includes(hidden), `Modbus card must hide ${hidden}`);
+
+context.S.status.health.checks = modbusChecks.map((c) =>
+  c.id === "flow" ? { id: "flow", verdict: "unavailable", observed_s: 0 } : c);
+cardHtml = ui.card(true);
+assert.ok(!cardHtml.includes("health_flow"), "Altherma 4 Modbus mode must hide unavailable flow row");
+
+context.S.status.diagnostics = { enabled: true, source: "x10a", effective_source: "x10a", available_sources: ["x10a", "modbus"] };
+context.S.status.health = { source: "x10a", status: "ok", persist: "no_record", source_fresh: true, checks: modbusChecks };
+assert.match(ui.card(true), /Plant diagnostics · 24 h · X10A</);
+
+context.S.status.diagnostics.available_sources = ["x10a"];
+assert.match(ui.card(true), /Plant diagnostics · 24 h</);
+
+const mbDetail = ui.detail(
+  { id: "dhw_loss", verdict: "info", blocked: true, abort_reasons: ["blind", "draw"], aborts: 1, windows: 0, observed_s: 300, required_s: 0 },
+  false, { source: "modbus", source_fresh: false });
+assert.ok(mbDetail.includes(ui.text("en", "check.detail.dhw_reason.blind_modbus")));
+assert.ok(mbDetail.includes(ui.text("en", "check.detail.source_stale_modbus")));
+assert.doesNotMatch(mbDetail, /X10A|HomeHub/);
+const mbOutdoorMetric = ui.metric({
+  id: "defrost", verdict: "ok", count: 3, paired_count: 3, share_pct: 5,
+  outdoor_source: "homehub", outdoor_min_c: 2.0, outdoor_mean_c: 3.0, outdoor_samples: 10,
+});
+assert.match(mbOutdoorMetric, /Modbus/);
+assert.doesNotMatch(mbOutdoorMetric, /HomeHub/);
+assert.equal(ui.ready({
+  diagnostics: { enabled: true, effective_source: "x10a" },
+  hp: { connected: false }, modbus: { connected: false },
+  health: { source: "x10a", covered_s: 3600, available: 7, persist: "fresh" },
+}), true, "retained X10A history must stay visible when X10A disconnects");
+assert.equal(ui.ready({
+  diagnostics: { enabled: true, effective_source: "modbus" },
+  hp: { connected: false }, modbus: { connected: false },
+  health: { source: "modbus", covered_s: 3600, available: 5, persist: "fresh" },
+}), true, "retained Modbus history must stay visible when Modbus disconnects");
+assert.equal(ui.ready({
+  diagnostics: { enabled: true, effective_source: "modbus" },
+  hp: { connected: false }, modbus: { connected: false },
+  health: { source: "modbus", covered_s: 0, available: 5, persist: "fresh" },
+}), true, "confirmed Modbus capabilities must stay visible across transient disconnects");
+assert.equal(ui.ready({
+  diagnostics: { enabled: true, effective_source: "x10a" },
+  hp: { connected: false }, modbus: { connected: false },
+  health: { source: "x10a", covered_s: 0, available: 0, persist: "fresh" },
+}), false, "disconnected X10A with no retained window stays hidden");
+assert.equal(ui.ready({
+  diagnostics: { enabled: true, effective_source: "modbus" },
+  hp: { connected: false }, modbus: { connected: false },
+  health: { source: "modbus", covered_s: 0, available: 0, persist: "fresh" },
+}), false, "disconnected Modbus with no retained window stays hidden");
+assert.equal(ui.ready({
+  diagnostics: { enabled: true, effective_source: "modbus" },
+  hp: { connected: false }, modbus: { connected: false },
+  health: { source: "modbus", covered_s: 0, available: 0, persist: "unknown" },
+}), true, "unreadable restore must remain visible instead of hiding the card");
+
 console.log("plant-diagnostics UI contract: evidence, lifecycle, localized claims and counterexamples verified");

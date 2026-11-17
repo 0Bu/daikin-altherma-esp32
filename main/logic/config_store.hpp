@@ -196,6 +196,10 @@ struct ConfigBlob {
     uint32_t    diagnostics_generation = 0;
     // v20: independent MQTT room-temperature history lifetime. Older mappings start at zero.
     uint32_t ref_temp_generation = 0;
+    // v21: preferred plant-diagnostics display source (0 = X10A, 1 = Modbus). Defaults to X10A on
+    // upgrade so existing installations keep their active card view.
+    uint8_t diagnostics_source     = 0;
+    bool    has_diagnostics_source = false;
 };
 
 inline constexpr uint8_t  CONFIG_BLOB_MAGIC0  = 'D', CONFIG_BLOB_MAGIC1 = 'K',
@@ -213,7 +217,8 @@ inline constexpr uint8_t  CONFIG_BLOB_MAGIC0  = 'D', CONFIG_BLOB_MAGIC1 = 'K',
 // compile-time default, so the upgrade is a no-op for every existing device), v17 appends
 // independent target/timestamp topics plus the optional fixed target, and v18 appends
 // the one-shot HomeHub discovery decision, and v19 appends the default-off diagnostics consent plus
-// a transition generation; v20 appends the independent room-history generation. HomeHub enabled
+// a transition generation; v20 appends the independent room-history generation; v21 appends the
+// preferred plant-diagnostics display source byte (0 = X10A, 1 = Modbus). HomeHub enabled
 // derives solely from whether mb_host is empty;
 // v5-v8 actuation bits decode OFF and every pre-v14 controller mode migrates OFF.
 // Bumping the version rather than reusing the previous one is what makes the trailing-garbage check
@@ -222,7 +227,7 @@ inline constexpr uint8_t  CONFIG_BLOB_MAGIC0  = 'D', CONFIG_BLOB_MAGIC1 = 'K',
 // the field. The fallback path is no substitute: it is the legacy per-key layout, which only a
 // device upgraded from the per-key era still holds (frozen at that era's values — no current build
 // writes or erases those keys), and otherwise the Kconfig defaults.
-inline constexpr uint8_t  CONFIG_BLOB_VERSION     = 20;
+inline constexpr uint8_t  CONFIG_BLOB_VERSION     = 21;
 inline constexpr uint8_t  CONFIG_BLOB_VERSION_MIN = 1;
 // A string field longer than this is treated as corruption on decode: real credentials are short, so a
 // huge length is a garbled blob, not a value. Bounds the work and rejects a hostile/garbled length.
@@ -421,6 +426,8 @@ inline std::vector<uint8_t> config_blob_serialize(const ConfigBlob& c) {
     detail::blob_put_u32(v, c.diagnostics_generation);
     // v20 block: retire historical samples across mapping replacement, including A -> B -> A.
     detail::blob_put_u32(v, c.ref_temp_generation);
+    // v21 block: preferred plant-diagnostics display source (0 = X10A, 1 = Modbus).
+    v.push_back(c.diagnostics_source);
     detail::blob_put_u32(v, config_crc32(v.data(), v.size()));   // CRC covers everything before it
     return v;
 }
@@ -571,6 +578,11 @@ inline bool config_blob_deserialize(const uint8_t* d, size_t n, ConfigBlob& out)
         c.has_diagnostics = true;
     }
     if (version >= 20 && !get_u32(c.ref_temp_generation)) return false;
+    if (version >= 21) {
+        if (p + 1 > body_end) return false;
+        c.diagnostics_source     = d[p++];
+        c.has_diagnostics_source = true;
+    }
     // Exact per version: a v1 blob must END after ntp_server, a v2 blob after the board block, a v3
     // blob after the channel byte, a v4 blob after the language byte, v5/v6 after the HomeHub block
     // v7 after the reference-source strings, v8/v9 after timestamp/max-age, and v10 after the
@@ -578,8 +590,8 @@ inline bool config_blob_deserialize(const uint8_t* d, size_t n, ConfigBlob& out)
     // three room-control mapping strings, v14 after its one retired byte, v15 after the
     // circulation-pump source mapping and thresholds, v16 after the MQTT base topic, and v17 after
     // the independent room target/time topics and fixed-target value, and v18 after the one-shot
-    // HomeHub discovery decision, v19 after diagnostics consent + generation, and v20 after the
-    // independent room-history generation.
+    // HomeHub discovery decision, v19 after diagnostics consent + generation, v20 after the
+    // independent room-history generation, and v21 after the diagnostics display source byte.
     // v6 and v9 change a flag's meaning without changing the HomeHub block's size, as does v14's
     // retirement of the mode byte — the LENGTH is the contract here, not what a byte still means.
     // Accepting a prefix would let a truncated v2 decode as a valid v1 with silently-default pins.

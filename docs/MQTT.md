@@ -39,6 +39,12 @@ such as `stop_context_request_withdrawal_positive`. These share the HTTP
 including its nullable counts and flags. Known flags use `0` or `1`; existing fields and HA entities
 are unchanged. The HTTP-only `denominator` string is represented by the numeric field
 `stop_context_witnessed_stops_recent_heating` on MQTT.
+Eight parallel `modbus_cycling_*` flat integer fields (`modbus_cycling_censored_transition_runs`,
+`modbus_cycling_censored_handover_runs`, `modbus_cycling_censored_unreadable_runs`,
+`modbus_cycling_censored_restart_runs`, `modbus_cycling_censored_start_runs`,
+`modbus_cycling_classified_runtime_s`, `modbus_cycling_censored_runtime_s`, and
+`modbus_cycling_runtime_saturated`) track the independent HomeHub/Altherma 4 Modbus cycling store
+with identical semantics, while `cycling_*` and `stop_context_*` remain X10A-only.
 
 An initial transport-start rejection retains the initialized client and retries with bounded
 backoff. Failed event registration prevents transport start and reports an explicit error.
@@ -209,6 +215,7 @@ with a boot unless stated otherwise.
 | MQTT / skipped work | `mqtt_connected`, `mqtt_count`, `mqtt_fails`, `mqtt_reconnects`, `mqtt_skipped`, `mqtt_quiesced`, `poll_skipped`. |
 | X10A | `bus_connected`, text `bus_proto`, `bus_registers`, `bus_values`, `bus_last_ok_s`, `bus_rx_received`, `bus_rx_fails`, `bus_crc_err`, `bus_timeout_err`, `bus_tx_reads`, `bus_ou_held_over`. |
 | HomeHub | `modbus_enabled`, `modbus_connected`, `modbus_rx`, `modbus_fails`. |
+| Plant diagnostics | `cycling_*`, `stop_context_*`, `modbus_cycling_*` (omitted while diagnostics is off). |
 
 Stack minima are null until sampled; WiFi RSSI/BSSID are null when offline. `max_alloc` is contiguous
 heap headroom. `heap_restarts` counts watchdog resets inherited by this boot, returns to zero on a

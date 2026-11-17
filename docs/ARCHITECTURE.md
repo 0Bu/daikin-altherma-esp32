@@ -273,13 +273,20 @@ For a change confined to the saved hourly records, bump `CHECKUP_JOURNAL_LAYOUT_
 The current core layout stores independent mode totals. Earlier core layouts cannot supply them,
 including the two byte layouts that shared one fingerprint.
 The separate Stop journal, DHW restart handoff and trend history retain their own compatibility rules.
-Circulation broker/mapping/interpretation
-identity gates only DHW buckets; changed circulation must not retire independent X10A evidence.
+X10A (`s_x10a`, `CHECKUP_PERSIST_MAGIC`) and HomeHub/Altherma 4 Modbus (`s_modbus`,
+`CHECKUP_MODBUS_PERSIST_MAGIC`) use separate `.noinit` stores, separate 24 h `CheckupRing` /
+`DhwLossRing` rings, separate cycling traces, and separate flash-journal sources
+(`kCheckupModbusSource`, `kCyclingModbusTraceSource`). Circulation broker/mapping/interpretation
+identity gates only DHW buckets; changed circulation or HomeHub config must not retire independent
+X10A evidence, and switching the `diagnostics_source` preference (`v21`) only chooses which store
+`/status.health` renders without merging or clearing either history.
 A narrowly scoped one-shot DHW handoff may preserve an unfinished candidate; it cannot lend coverage
-to completed checks. Disabling diagnostics clears runtime evidence; re-enabling starts a new
-generation. Each poll binds a separate live consent epoch before collecting inputs and rechecks it
+to completed checks. The first opt-in draws a durable non-zero generation; pausing diagnostics
+(`enabled: false`) preserves both 24-hour diagnostic stores, closes any open run as censored without
+bridging paused time, and hides the report while continuing 24-hour expiration, and re-enabling
+resumes within the same generation. Each poll binds a separate live consent epoch before collecting inputs and rechecks it
 under the checkup mutex. A transition rejects the old sample even if the saved generation repeats;
-X10A and circulation epochs remain independent. Same-boot journal creation is not proof of reboot
+X10A, Modbus, and circulation epochs remain independent. Same-boot journal creation is not proof of reboot
 restoration. `DIAGNOSTICS.md` explains
 results; `PLANT.md` owns lifecycle.
 A run completion is booked to its retained start hour. If the journal cursor has reached that
@@ -302,7 +309,7 @@ and freezes it. The drain then offers it after every live hour as a short record
 (`checkup_seal_*` in `checkup_persist.hpp`). `PLANT.md` owns when it is skipped.
 
 The rolling compressor trace uses the dated journal with a separate payload fingerprint. The writer
-can offer an eligible checkpoint at most once every 120 seconds, with up to 192 records in four
+can offer an eligible checkpoint at most once every 180 seconds, with up to 192 records in four
 journal slots. The bounded shutdown flush can save a newer trace. Restoration checks a
 bounded set of groups newer than the last committed reset fence, newest first. A damaged or
 incomplete group can fall back to an older candidate. The first structurally complete group

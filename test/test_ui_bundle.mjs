@@ -97,7 +97,7 @@ assert.match(app, /function dynamicStateRow\([\s\S]*"dyn\.state_waiting", cls: "
 // consent and therefore has its own id/handler/route and no actuator semantics.
 assert.doesNotMatch(app, /e32DynamicLwt|onDynamicLwtPick|set_dynamic_lwt/,
   "the retired heating-curve controller mode must stay absent");
-assert.match(app, /function diagnosticsRow\(enabled\)[\s\S]*id="e32Diagnostics"[\s\S]*function onDiagnosticsPick\(\)[\s\S]*post\("\/set_diagnostics", \{ enabled \}\)/,
+assert.match(app, /function diagnosticsRow\(diag\)[\s\S]*id="e32Diagnostics"[\s\S]*function onDiagnosticsPick\(\)[\s\S]*post\("\/set_diagnostics", payload\)/,
   "Firmware must own the persistent master diagnostics opt-in");
 assert.doesNotMatch(app,
   /Aus ist der Standard|unvollständig oder irreführend|Off is the default|incomplete or misleading/,
@@ -108,7 +108,7 @@ assert.doesNotMatch(app, /function dynamicControlCardHtml\(\)[\s\S]{0,600}?retur
   "the card itself must not invent another visibility rule");
 assert.match(app, /vcard\(t\("card\.fw_title"\), fwRows\) \+[\s\S]{0,160}?diagnosticsEnabled \? circulationSettingsCardHtml\(\) \+ dynamicControlCardHtml\(\) : ""/,
   "dependent plant and heating-curve cards must render only after the Firmware opt-in");
-assert.match(app, /const checkup = S\.status\?\.diagnostics\?\.enabled === true\s*\? checkupCardHtml\(S\.status\?\.hp\?\.connected\) : "";/,
+assert.match(app, /const checkup = S\.status\?\.diagnostics\?\.enabled === true\s*\? checkupCardHtml\(checkupSourceReady\) : "";/,
   "the whole dashboard diagnosis card must share the Firmware master opt-in");
 // A current measurement and its diagnosis eligibility are separate facts. The source row stays
 // amber when the diagnosis is blocked, but the general status must still say the reading is valid.

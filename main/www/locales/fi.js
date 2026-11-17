@@ -1,4 +1,4 @@
-// translation-source: 57360fc01b9b51987c1e6a54c6b11b7295a1a3b53f13d2b3928a2b44e523c222
+// translation-source: 7e05fca97bff772abf43c5704d541747bc310184005cce90ce5b76eab24256ce
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -961,6 +961,8 @@ I18N.fi = localeValues([
   /* lang.sv */ "Svenska",
   /* lang.fi */ "Suomi",
   /* lang.saved */ "Kieli tallennettu",
+  /* check.detail.dhw_reason.blind_modbus */ "lukemat puuttuvat: Modbus ei vastaa tai lukeminen keskeytetty",
+  /* check.detail.source_stale_modbus */ "Ei tuoretta Modbus-näytettä; nykytila tuntematon. Historia säilyy.",
 ]);
 
 DESCRIPTION_I18N.fi = descriptionValues([

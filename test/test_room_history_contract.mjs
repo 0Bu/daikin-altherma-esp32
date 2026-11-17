@@ -152,7 +152,7 @@ const sourceEnum = source.match(/^enum class HistorySource[^\n]+/m)?.[0];
 assert.ok(journalStart >= 0 && journalEnd > journalStart && sourceEnum);
 let restoreFixture = fixture.slice(0, fixture.indexOf("\nvoid runtime_boot("));
 assert.ok(restoreFixture.endsWith('throw std::runtime_error(why); }'));
-restoreFixture = '#include "logic/checkup_persist.hpp"\n#include "stop_observation_store.hpp"\n' + restoreFixture;
+restoreFixture = '#include "logic/config_model.hpp"\n#include "logic/checkup_persist.hpp"\n#include "stop_observation_store.hpp"\n' + restoreFixture;
 const lockModel = String.raw`
 int flash_depth=0, history_depth=0, owned_reads=0;
 bool flash_contended=false;
@@ -160,6 +160,7 @@ void (*after_flash_release)()=nullptr;
 void need(bool, const char*);
 template<typename T> struct FlashOwned {
  T value{};
+ operator T&() { need(flash_depth==1,"unguarded restore metadata read"); ++owned_reads; return value; }
  operator T() const { need(flash_depth==1,"unguarded restore metadata read"); ++owned_reads; return value; }
  FlashOwned& operator=(T v) { need(flash_depth==1,"unguarded restore metadata write"); value=v; return *this; }
  FlashOwned& operator=(const FlashOwned& v) { return *this=static_cast<T>(v); }
@@ -199,7 +200,14 @@ using esp_err_t=int; constexpr int ESP_OK=0;
 constexpr size_t kTotalRings=HISTORY_FLASH_TOTAL_RINGS,kRestoreRingsPerTick=4;
 FlashOwned<bool> s_flash_scan_ok,s_flash_restore_done,s_flash_checkup_restore_done;
 FlashOwned<size_t> s_flash_restore_ring,s_flash_restored_rings;
-FlashOwned<uint16_t> s_flash_restore_slots[HISTORY_JOURNAL_SOURCE_COUNT][HISTORY_SAMPLES];
+uint16_t s_flash_restore_slots[HISTORY_JOURNAL_SOURCE_COUNT][HISTORY_SAMPLES];
+constexpr size_t kCheckupModbusSource = HISTORY_JOURNAL_SOURCE_COUNT + 2;
+struct CheckupModbusFlashState {
+ FlashOwned<bool> restore_done;
+ uint16_t restore_slots[logic::CHECKUP_COMPLETED_BUCKETS];
+ FlashOwned<uint16_t> restore_slot_count;
+ FlashOwned<int64_t> newest_bucket;
+} s_flash_mb_checkup;
 std::atomic<bool> s_reset_requested{false},s_mb_reset_requested{false},s_circulation_reset_requested{false};
 std::atomic<uint32_t> s_circulation_fp{0};
 bool s_persist_dirty=false;
@@ -229,11 +237,16 @@ bool flash_record_valid(const FlashJournalRecord& r){
  return r.header.source==static_cast<uint8_t>(HistoryJournalSource::Checkup)||
         history_journal_room_header_matches(r.header,s_room_identity.load());
 }
+bool flash_record_physically_valid(const FlashJournalRecord& r){return flash_record_valid(r);}
+bool flash_is_manifest(const HistoryJournalHeader&){return false;}
+bool flash_modbus_checkup_owned(const HistoryJournalHeader&){return false;}
 int flash_record_stored_index(const HistoryJournalHeader&,size_t index){return index==0?0:-1;}
 void flash_note_restore_ahead(size_t,int64_t,int64_t){need(flash_depth==1,"restore note without owner");}
-CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord*,size_t n,int64_t){
- need(flash_depth==1,"checkup restore lost caller flash owner");need(n==1,"checkup record selection");
- ++checkup_calls;return CheckupFlashRestoreResult::Restored;
+CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord*,size_t n,int64_t,DiagnosticsSource src=DiagnosticsSource::X10a){
+ need(flash_depth==1,"checkup restore lost caller flash owner");
+ if(src==DiagnosticsSource::X10a){need(n==1,"checkup record selection");++checkup_calls;}
+ else need(n==0,"unexpected modbus checkup records in room fixture");
+ return CheckupFlashRestoreResult::Restored;
 }
 // This fixture has only room/core-checkup records. Keep the new independent observation boundary
 // typed against production and guarded rather than removing its calls from the extracted path.
@@ -258,6 +271,7 @@ void prepare_restore(){
  flash_reads=checkup_calls=stop_expirations=stop_services=0;
  Lock flash(s_flash_mtx);room_wipe_locked(101);s_room_identity.store(101);
  s_flash_scan_ok=true;s_flash_restore_done=false;s_flash_checkup_restore_done=false;
+ s_flash_mb_checkup.restore_done=false;s_flash_mb_checkup.restore_slot_count=0;s_flash_mb_checkup.newest_bucket=INT64_MIN;
  s_flash_restore_ring=kTotalRings-1;s_flash_restored_rings=0;
  for(size_t s=0;s<HISTORY_JOURNAL_SOURCE_COUNT;++s){
   s_flash_newest_bucket[s]=s_flash_oldest_bucket[s]=INT64_MIN;s_flash_restore_slot_count[s]=0;

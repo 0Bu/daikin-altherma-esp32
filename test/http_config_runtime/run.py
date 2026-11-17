@@ -108,7 +108,7 @@ if 'PASS total=13 assertions=5233\n' not in legacy.stdout:
                        + legacy.stdout)
 print('PRESERVED ORIGINAL CASES ' + legacy.stdout.splitlines()[-1])
 baseline = command([binary])
-if 'PASS total=18 assertions=5634\n' not in baseline.stdout:
+if 'PASS total=19 assertions=5688\n' not in baseline.stdout:
     raise RuntimeError('the complete behavioral groups changed their assertion inventory\n'
                        + baseline.stdout)
 print(baseline.stdout, end='')
@@ -232,10 +232,10 @@ mutations = [
      'diagnostics_next_generation(c.diagnostics_generation, esp_random())',
      'diagnostics_next_generation(c.diagnostics_generation, esp_random() & 0u)',
      'diagnostics_generation'),
-    # A later transition advances by one instead of taking a fresh draw.
+    # Pausing/resuming preserves an existing non-zero generation without taking a fresh draw.
     ('generation_redrawn_each_transition', 'source',
-     'diagnostics_next_generation(c.diagnostics_generation, esp_random())',
-     'diagnostics_next_generation(0u, esp_random())', 'diagnostics_generation'),
+     'if (next_enabled && c.diagnostics_generation == 0)',
+     'if (next_enabled)', 'diagnostics_generation'),
     ('room_generation_omitted', 'room',
      'if (logic::history_room_identity(c) != previous_room_identity)',
      'if (logic::history_room_identity(c) != previous_room_identity && false)',

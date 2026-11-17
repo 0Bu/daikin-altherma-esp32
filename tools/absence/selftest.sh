@@ -853,7 +853,7 @@ s = open(p).read()
 start = s.index("static esp_err_t set_diagnostics(")
 end = s.index("static esp_err_t set_circulation", start)
 body = s[start:end]
-mutated = body.replace("    if (weather_was_publishable && !enabled) mqtt_request_weather_cleanup();\n", "", 1)
+mutated = body.replace("        if (weather_was_publishable && !next_enabled) mqtt_request_weather_cleanup();\n", "", 1)
 assert mutated != body, "seed 42 did not apply — diagnostics Weather cleanup moved"
 open(p, "w").write(s[:start] + mutated + s[end:])
 PY4
@@ -1719,12 +1719,14 @@ restore
 
 # 98. A literal age origin instead of the real current-boot monotonic clock.
 python3 - "$TMP/main/checkup.cpp" <<'PY4'
-import sys
+import re, sys
 p = sys.argv[1]
 s = open(p).read()
-old = "logic::dhw_loss_adopt(s_dhw_state, s_boot_handoff.candidate, esp_timer_get_time())"
-seed = s.replace(old, "logic::dhw_loss_adopt(s_dhw_state, s_boot_handoff.candidate, 0)", 1)
-assert seed != s, "seed 98 did not apply — scoped DHW adoption moved"
+seed, count = re.subn(
+    r"logic::dhw_loss_adopt\(s_x10a\.dhw_state,\s*s_x10a\.boot_handoff\.candidate,\s*esp_timer_get_time\(\)\)",
+    "logic::dhw_loss_adopt(s_x10a.dhw_state, s_x10a.boot_handoff.candidate, 0)",
+    s, count=1)
+assert count == 1, "seed 98 did not apply — scoped DHW adoption moved"
 open(p, "w").write(seed)
 PY4
 expect_red "the DHW adoption forgetting the current boot uptime" run_contract
@@ -1735,8 +1737,8 @@ python3 - "$TMP/main/checkup.cpp" <<'PY4'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-old = "logic::dhw_loss_adopt(s_dhw_state, s_boot_handoff.candidate,"
-seed = s.replace(old, "logic::dhw_loss_adopt(s_dhw_state, P().dhw.pending, s_boot_handoff.candidate,", 1)
+old = "logic::dhw_loss_adopt(s_x10a.dhw_state, s_x10a.boot_handoff.candidate,"
+seed = s.replace(old, "logic::dhw_loss_adopt(s_x10a.dhw_state, s_x10a.P().dhw.pending, s_x10a.boot_handoff.candidate,", 1)
 assert seed != s, "seed 99 did not apply — scoped DHW adoption moved"
 open(p, "w").write(seed)
 PY4
@@ -1748,7 +1750,7 @@ python3 - "$TMP/main/checkup.cpp" <<'PY4'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-seed = s.replace("s_boot_handoff.source_fp == source_fp", "true", 1)
+seed = s.replace("s_x10a.boot_handoff.source_fp == source_fp", "true", 1)
 assert seed != s, "seed 100 did not apply — handoff source admission moved"
 open(p, "w").write(seed)
 PY4
@@ -1760,8 +1762,8 @@ python3 - "$TMP/main/checkup.cpp" <<'PY4'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-old = "s_boot_handoff.pending = kEmptyDhwLossBucket;"
-seed = s.replace(old, "P().dhw.pending = s_boot_handoff.pending;", 1)
+old = "slot.boot_handoff.pending = kEmptyDhwLossBucket;"
+seed = s.replace(old, "slot.P().dhw.pending = slot.boot_handoff.pending;", 1)
 assert seed != s, "seed 101 did not apply — handoff pending clear moved"
 open(p, "w").write(seed)
 PY4
@@ -1932,7 +1934,7 @@ python3 - "$TMP/main/checkup.cpp" <<'PY4'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-seed = s.replace("if (logic::checkup_flash_restore_retired(s_persist_verdict))", "if (false)", 1)
+seed = s.replace("if (logic::checkup_flash_restore_retired(slot.persist_verdict))", "if (false)", 1)
 assert seed != s, "seed 113 did not apply - the reset lifecycle guard moved"
 open(p, "w").write(seed)
 PY4

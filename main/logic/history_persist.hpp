@@ -578,22 +578,20 @@ inline constexpr bool history_journal_retry_due(bool paused, int64_t now_us,
 }
 
 // A capacity guard for the CURRENT catalog. The journal retains at least 72 hours even if all four
-// trend sources close every five-minute bucket and checkup writes two records per hour: each hour
-// once when it completes, and at most once more in a late-completion replay. A replay re-appends
-// only hours inside the run that revised its start hour (checkup_journal_revision_bucket), and
-// runs do not overlap, so no hour is replayed twice. The remaining slots are wear reserve: records
-// are ignored by age, never erased merely because they passed 72 h. The independent stop-context
-// logical source adds four records/hour: close, seam coverage, late stop revision, and one reset
-// barrier. Cycling adds up to four slots per two-minute checkpoint. Repeated explicit resets or
-// shutdowns consume wear reserve and can shorten retention.
+// trend sources close every five-minute bucket and both X10A and Modbus checkups write two records
+// per hour: each hour once when it completes, and at most once more in a late-completion replay.
+// The independent stop-context logical source adds four records/hour: close, seam coverage, late
+// stop revision, and one reset barrier. Both cycling traces add up to four slots per three-minute
+// checkpoint. Repeated explicit resets or shutdowns consume wear reserve and can shorten retention.
 inline constexpr size_t HISTORY_FLASH_CYCLING_MAX_PARTS  = 4;
-inline constexpr size_t HISTORY_FLASH_CYCLING_INTERVAL_S = 120;
+inline constexpr size_t HISTORY_FLASH_CYCLING_INTERVAL_S = 180;
 inline constexpr size_t HISTORY_FLASH_FUTURE_HOURS       = 72;
 inline constexpr size_t HISTORY_FLASH_FUTURE_SAMPLES =
     HISTORY_FLASH_FUTURE_HOURS * 60u * 60u / HISTORY_DT_S;
 inline constexpr size_t HISTORY_FLASH_FUTURE_RECORDS =
     HISTORY_FLASH_FUTURE_SAMPLES * 4u +
-    (2u + 4u + 3600u / HISTORY_FLASH_CYCLING_INTERVAL_S * HISTORY_FLASH_CYCLING_MAX_PARTS) *
+    (2u + 2u + 4u +
+     2u * (3600u / HISTORY_FLASH_CYCLING_INTERVAL_S * HISTORY_FLASH_CYCLING_MAX_PARTS)) *
         HISTORY_FLASH_FUTURE_HOURS;
 static_assert(HISTORY_FLASH_FUTURE_SAMPLES == 864,
               "72 hours at the five-minute raster must contain 864 samples per ring");
@@ -929,19 +927,21 @@ inline constexpr uint32_t history_circulation_identity_clamp(uint32_t hash) {
 
 // The identity of the witness a configuration defines: every field that decides WHICH power stream
 // the circulation samples were derived from and HOW (topic, the JSON paths into it, the freshness
-// bound, the ON/OFF thresholds and their confirmation time), plus the diagnostics consent, which
-// is the opt-in boundary for collecting it at all (each transition advances the generation, so the
-// evidence of one consent interval can never be restored into another). Exactly the set
-// http_config.cpp's set_circulation treats as an evidence-mapping change, and nothing else: the
-// display name and every unrelated setting leave it alone, and so does the MQTT broker connection
-// (a broker change reconnects the same topic without retiring the live ring, so the stored one
-// follows the same rule). Zero when the source is not configured or not consented — no witness
-// exists, so nothing may be restored.
+// bound, the ON/OFF thresholds and their confirmation time), plus the diagnostics generation, which
+// separates consent generations (prior to first opt-in, generation is 0). Pausing diagnostics
+// (`diagnostics_enabled == false`) at a non-zero generation preserves the series identity so saved
+// 24-hour samples can resume without wiping. Exactly the set http_config.cpp's set_circulation
+// treats as an evidence-mapping change, and nothing else: the display name and every unrelated
+// setting leave it alone, and so does the MQTT broker connection (a broker change reconnects the
+// same topic without retiring the live ring, so the stored one follows the same rule). Zero before
+// first opt-in (`diagnostics_generation == 0`) or when unconfigured — no witness exists, so
+// nothing may be restored.
 //
 // Templated on the configuration type only so this header need not name Config; `c` is a
 // daik::Config.
 template <typename Cfg> inline uint32_t history_circulation_identity(const Cfg& c) {
-    if (!c.diagnostics_enabled || c.circulation_topic.empty()) return HISTORY_CIRCULATION_NONE;
+    if (c.diagnostics_generation == 0 || c.circulation_topic.empty())
+        return HISTORY_CIRCULATION_NONE;
     uint32_t crc = CONFIG_CRC32_INIT;
     crc          = history_fp_u32(crc, 0x43495231u); // "CIR1" circulation-identity contract
     crc          = history_fp_u32(crc, c.diagnostics_generation);
@@ -956,9 +956,12 @@ template <typename Cfg> inline uint32_t history_circulation_identity(const Cfg& 
 }
 
 // Actual-temperature evidence has a separate durable generation for delete/re-add and A -> B -> A
-// cutovers. Display names, targets and thermostat gates cannot change the meaning of this series.
+// cutovers. Returns zero before first opt-in (`diagnostics_generation == 0`) or when unconfigured;
+// pausing diagnostics (`diagnostics_enabled == false`) at a non-zero generation preserves the
+// series identity. Display names, targets and thermostat gates cannot change the meaning of this
+// series.
 template <typename Cfg> inline uint32_t history_room_identity(const Cfg& c) {
-    if (!c.diagnostics_enabled || c.mqtt_uri.empty() || c.ref_temp_topic.empty()) return 0;
+    if (c.diagnostics_generation == 0 || c.mqtt_uri.empty() || c.ref_temp_topic.empty()) return 0;
     uint32_t crc           = history_fp_u32(CONFIG_CRC32_INIT, HISTORY_ROOM_SCHEMA);
     crc                    = history_fp_u32(crc, c.diagnostics_generation);
     crc                    = history_fp_u32(crc, c.ref_temp_generation);

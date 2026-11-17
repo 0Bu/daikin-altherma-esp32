@@ -35,6 +35,7 @@ CASES = [
     "stop_forget_during_report",
     "stop_forget_before_checkup_start", "stop_forget_report_lock_failure",
     "stop_forget_checkup_alloc_failure", "stop_unstarted_report_pending",
+    "modbus_dual_source",
 ]
 
 parser = argparse.ArgumentParser(description=__doc__)
@@ -274,7 +275,7 @@ mutations.append(("use_stale_history_tick_clock",
                   source_text[:expire_start] + old_clock_body + source_text[expire_end:],
                   "stop_tick_wait", "stop_tick_flushes_before_journal_service"))
 report_start = source_text.index("CheckupStopContextReport checkup_stop_context_report() {")
-report_end = source_text.index("\nvoid expire_restored_locked()", report_start)
+report_end = source_text.index("\nstatic void expire_restored_locked(CheckupSlot& slot)", report_start)
 report_body = source_text[report_start:report_end]
 for name, condition, case, oracle in [
     ("omit_stop_forget_absent_mutex_default",

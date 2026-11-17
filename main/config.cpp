@@ -148,6 +148,11 @@ bool config_diagnostics_enabled() {
     return g_cfg.diagnostics_enabled;
 }
 
+DiagnosticsSource config_diagnostics_source() {
+    Lock lk(g_mtx);
+    return g_cfg.diagnostics_source;
+}
+
 OtaChannel config_ota_channel() {
     Lock lk(g_mtx);
     return g_cfg.ota_channel;
@@ -260,6 +265,8 @@ void config_load() {
             c.diagnostics_enabled = b.diagnostics_enabled;
             c.diagnostics_generation = b.diagnostics_generation;
         }
+        if (b.has_diagnostics_source)
+            c.diagnostics_source = diagnostics_source_from_int(b.diagnostics_source);
         if (b.has_circulation && b.circulation_on_tenths_w <= UINT16_MAX &&
             b.circulation_off_tenths_w <= UINT16_MAX && b.circulation_confirm_s <= UINT16_MAX) {
             const uint16_t on_w = static_cast<uint16_t>(b.circulation_on_tenths_w);

@@ -130,6 +130,7 @@ CirculationSourceTestResult mqtt_circulation_test(const CirculationSourceTestCon
                                                   uint32_t timeout_ms);
 bool mqtt_circulation_test_proof_valid(uint32_t proof,
                                        const CirculationSourceTestConfig& candidate);
+void                        mqtt_circulation_set_diagnostics(bool configured);
 void                        mqtt_circulation_reconfigure(bool configured);
 
 // Explicit source/consent changes own these retained-topic tombstones independently of X10A.

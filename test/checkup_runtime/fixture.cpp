@@ -10,10 +10,10 @@
 #include CHECKUP_PRODUCTION_SOURCE
 
 namespace adapter {
-daik::Config                cfg;
-uint32_t                    poll_generation = 7, circulation_generation = 11;
+daik::Config cfg;
+uint32_t     poll_generation = 7, circulation_generation = 11, mb_target_generation = 3;
 daik::CirculationPumpSample circulation{true, true, false};
-bool                        journal_pending     = true;
+bool                        journal_pending = true, mb_journal_pending = true;
 unsigned                    circulation_samples = 0;
 void (*on_circulation)()                        = nullptr;
 void (*on_time)()                               = nullptr;
@@ -27,6 +27,7 @@ const Config& config_ref_locked() { return adapter::cfg; }
 } // namespace detail
 void diag_printf(const char*, ...) {}
 bool history_checkup_flash_pending() { return adapter::journal_pending; }
+bool history_modbus_checkup_flash_pending() { return adapter::mb_journal_pending; }
 bool safe_mode_active() { return false; }
 bool time_synced() { return true; }
 void time_now(int64_t& s, int32_t& ms) {
@@ -39,8 +40,11 @@ void time_now(int64_t& s, int32_t& ms) {
     ms = 0;
 }
 bool     hp_poll_generation_matches(uint32_t g) { return g == adapter::poll_generation; }
-uint32_t              hp_poll_generation() { return adapter::poll_generation; }
-uint32_t circulation_source_generation() { return adapter::circulation_generation; }
+uint32_t hp_poll_generation() { return adapter::poll_generation; }
+bool     mb_target_generation_matches(uint32_t g) noexcept {
+    return g == adapter::mb_target_generation;
+}
+uint32_t              circulation_source_generation() { return adapter::circulation_generation; }
 CirculationPumpSample circulation_pump_sample() {
     ++adapter::circulation_samples;
     if (adapter::on_circulation) {
@@ -402,10 +406,10 @@ void report_without_mutex() {
     // Start with a valid retained header and a journal awaiting confirmation.
     sdk::reset_reason        = static_cast<int>(CrashReason::SW);
     s_diagnostics_generation = 23;
-    checkup_persist_seal();
+    checkup_persist_seal(s_x10a);
     sdk::fail_create_once = true;
     boot();
-    require(!s_mtx && s_persist_verdict == CheckupRestore::FlashPending,
+    require(!s_mtx && s_x10a.persist_verdict == CheckupRestore::FlashPending,
             "warm_start_with_pending_journal_exercised");
     CheckupRestore      persist = CheckupRestore::FlashPending;
     CheckupCyclingHours hours{};
@@ -851,10 +855,16 @@ void stop_context_case(const std::string& name) {
         sdk::now_us = 42000000;
         checkup_record(stopped.data(), stopped.size(), true, false, cov, adapter::poll_generation,
                        old_epoch, true);
+        const auto paused = checkup_stop_context_report();
+        require(!paused.pending && paused.observation.readable_us == 40000000 &&
+                    paused.observation.counters.witnessed_stops_recent_heating == 0,
+                "stop_consent_rejects_staged_inputs");
+        checkup_set_diagnostics(false, 24);
+        checkup_set_diagnostics(true, 24);
         const auto r = checkup_stop_context_report();
         require(!r.pending && r.observation.readable_us == 0 &&
                     r.observation.counters.witnessed_stops_recent_heating == 0,
-                "stop_consent_rejects_staged_inputs");
+                "stop_new_consent_retires_prior_observation");
         return;
     }
     if (name == "stop_tick_wait") {
@@ -899,6 +909,127 @@ void stop_context_case(const std::string& name) {
     require(checkup_stop_context_report().observation.counters.witnessed_stops_recent_heating == 1,
             "stop_repeat_report_does_not_duplicate");
 }
+CachedValue mb_row(uint8_t offset, const char* value) {
+    CachedValue v;
+    v.reg   = def::HOMEHUB_GROUP_REG;
+    v.off   = offset;
+    v.value = value;
+    return v;
+}
+void modbus_dual_source() {
+    boot();
+    require(s_x10a.persist_magic == CHECKUP_PERSIST_MAGIC &&
+                s_modbus.persist_magic == CHECKUP_MODBUS_PERSIST_MAGIC,
+            "independent_persist_magics_configured");
+    checkup_modbus_confirm_source(ModbusProfile::HomeHub, 0x11223344U);
+
+    const auto xcov  = coverage();
+    const auto xrows = heater("1", "0", "0");
+    sample(10, xrows, xcov, true, false);
+    sample(20, xrows, xcov, true, false);
+    sample(30, xrows, xcov, true, false);
+
+    const std::vector<CachedValue> mb_rows{
+        mb_row(21, "1"), mb_row(30, "1"),    mb_row(31, "1"),   mb_row(32, "1"),    mb_row(37, "1"),
+        mb_row(38, "1"), mb_row(43, "48.0"), mb_row(44, "5.0"), mb_row(49, "12.0"),
+    };
+    const uint32_t epoch = checkup_consent_epoch();
+    sdk::now_us          = 100000000;
+    checkup_record_modbus(mb_rows.data(), mb_rows.size(), ModbusProfile::HomeHub,
+                          adapter::mb_target_generation, epoch, true);
+    sdk::now_us = 110000000;
+    checkup_record_modbus(mb_rows.data(), mb_rows.size(), ModbusProfile::HomeHub,
+                          adapter::mb_target_generation, epoch, true);
+    sdk::now_us = 120000000;
+    checkup_record_modbus(mb_rows.data(), mb_rows.size(), ModbusProfile::HomeHub,
+                          adapter::mb_target_generation + 1, epoch, true);
+
+    require(checkup_has_data(DiagnosticsSource::X10a) &&
+                checkup_has_data(DiagnosticsSource::Modbus),
+            "dual_source_slots_accumulate_independently");
+    const auto xrep = checkup_report(nullptr, nullptr, nullptr, DiagnosticsSource::X10a);
+    const auto mrep = checkup_report(nullptr, nullptr, nullptr, DiagnosticsSource::Modbus);
+    require(xrep.covered_s == 20 && xrep[CheckupCheck::Fault].verdict != CheckupVerdict::Warn,
+            "x10a_slot_keeps_its_own_window");
+    require(mrep.covered_s == 10 && mrep[CheckupCheck::Fault].verdict == CheckupVerdict::Warn &&
+                mrep[CheckupCheck::Pressure].verdict == CheckupVerdict::Unavailable,
+            "modbus_slot_accumulates_without_stale_generation");
+
+    checkup_modbus_reset();
+    require(!checkup_has_data(DiagnosticsSource::Modbus) &&
+                checkup_has_data(DiagnosticsSource::X10a),
+            "modbus_reset_preserves_x10a_slot");
+    const auto mreset = checkup_report(nullptr, nullptr, nullptr, DiagnosticsSource::Modbus);
+    const auto xafter = checkup_report(nullptr, nullptr, nullptr, DiagnosticsSource::X10a);
+    require(mreset.covered_s == 0 && xafter.covered_s == 20,
+            "modbus_reset_report_stays_empty_while_x10a_remains");
+
+    checkup_modbus_confirm_source(ModbusProfile::HomeHub, 0x11223344U);
+    sdk::now_us = 130000000;
+    checkup_record_modbus(mb_rows.data(), mb_rows.size(), ModbusProfile::HomeHub,
+                          adapter::mb_target_generation, epoch, true);
+    require(!checkup_has_data(DiagnosticsSource::Modbus),
+            "first_modbus_sample_consumes_reset_barrier");
+    sdk::now_us = 140000000;
+    checkup_record_modbus(mb_rows.data(), mb_rows.size(), ModbusProfile::HomeHub,
+                          adapter::mb_target_generation, epoch, true);
+    sdk::now_us = 150000000;
+    checkup_record_modbus(mb_rows.data(), mb_rows.size(), ModbusProfile::HomeHub,
+                          adapter::mb_target_generation, epoch, true);
+    require(checkup_has_data(DiagnosticsSource::Modbus) &&
+                checkup_report(nullptr, nullptr, nullptr, DiagnosticsSource::Modbus).covered_s ==
+                    10,
+            "modbus_resumes_after_reset");
+
+    checkup_set_diagnostics(false, 23);
+    CheckupRestore paused_persist = CheckupRestore::Fresh;
+    const auto xpaused = checkup_report(nullptr, nullptr, &paused_persist, DiagnosticsSource::X10a);
+    const auto mpaused = checkup_report(nullptr, nullptr, nullptr, DiagnosticsSource::Modbus);
+    require(checkup_consent_epoch() != epoch &&
+                paused_persist == CheckupRestore::DiagnosticsDisabled && xpaused.covered_s == 0 &&
+                mpaused.covered_s == 0 && checkup_has_data(DiagnosticsSource::X10a) &&
+                checkup_has_data(DiagnosticsSource::Modbus),
+            "pausing_diagnostics_hides_reports_while_preserving_both_slots");
+    checkup_record_modbus(mb_rows.data(), mb_rows.size(), ModbusProfile::HomeHub,
+                          adapter::mb_target_generation, checkup_consent_epoch(), true);
+
+    checkup_set_diagnostics(true, 23);
+    const auto xresumed = checkup_report(nullptr, nullptr, nullptr, DiagnosticsSource::X10a);
+    const auto mresumed = checkup_report(nullptr, nullptr, nullptr, DiagnosticsSource::Modbus);
+    require(xresumed.covered_s == 20 && !xresumed.source_fresh && mresumed.covered_s == 10 &&
+                !mresumed.source_fresh,
+            "resuming_same_generation_keeps_both_sources_without_stale_freshness");
+
+    const uint32_t resumed_epoch = checkup_consent_epoch();
+    sample(60, xrows, xcov, true, false);
+    sample(70, xrows, xcov, true, false);
+    sdk::now_us = 180000000;
+    checkup_record_modbus(mb_rows.data(), mb_rows.size(), ModbusProfile::HomeHub,
+                          adapter::mb_target_generation, resumed_epoch, true);
+    sdk::now_us = 190000000;
+    checkup_record_modbus(mb_rows.data(), mb_rows.size(), ModbusProfile::HomeHub,
+                          adapter::mb_target_generation, resumed_epoch, true);
+    require(checkup_report(nullptr, nullptr, nullptr, DiagnosticsSource::X10a).covered_s == 30 &&
+                checkup_report(nullptr, nullptr, nullptr, DiagnosticsSource::Modbus).covered_s ==
+                    20,
+            "resuming_does_not_bridge_paused_seconds");
+
+    checkup_set_diagnostics(false, 23);
+    sdk::now_us +=
+        (static_cast<int64_t>(logic::CHECKUP_WINDOW_S) + logic::CHECKUP_DT_S + 60LL) * 1000000LL;
+    checkup_set_diagnostics(true, 23);
+    require(!checkup_has_data(DiagnosticsSource::X10a) &&
+                !checkup_has_data(DiagnosticsSource::Modbus) &&
+                checkup_report(nullptr, nullptr, nullptr, DiagnosticsSource::X10a).covered_s == 0 &&
+                checkup_report(nullptr, nullptr, nullptr, DiagnosticsSource::Modbus).covered_s == 0,
+            "paused_pending_buckets_expire_while_offline");
+
+    checkup_set_diagnostics(false, 24);
+    require(checkup_consent_epoch() != resumed_epoch &&
+                !checkup_has_data(DiagnosticsSource::X10a) &&
+                !checkup_has_data(DiagnosticsSource::Modbus),
+            "new_generation_clears_both_sources_and_advances_epoch");
+}
 } // namespace
 int main(int argc, char** argv) {
     std::string name = argc == 2 ? argv[1] : "";
@@ -942,6 +1073,8 @@ int main(int argc, char** argv) {
             restored_expiry();
         else if (name == "late_restore_prefix" || name == "late_restore_clock_behind")
             late_restore(name == "late_restore_clock_behind");
+        else if (name == "modbus_dual_source")
+            modbus_dual_source();
         else if (name.rfind("consent_lock_", 0) == 0 || name.rfind("consent_sampling_", 0) == 0 ||
                  name.rfind("consent_caller_", 0) == 0)
             consent_staged_sample(name);

@@ -63,6 +63,7 @@ void history_start();
 // Startup-only query, before producers: journal recovery is pending after a successful scan.
 // This does not establish that compatible diagnostic records exist.
 bool history_checkup_flash_pending();
+bool history_modbus_checkup_flash_pending();
 
 // Allocation-free browser lifetime token. Any source/consent reset advances it, including A -> B
 // -> A between status polls; ordinary samples/flushes do not. It is independent of producer
@@ -165,6 +166,10 @@ void history_circulation_reset();
 // A diagnostics consent transition starts a new durable checkup generation. Forget the previous
 // journal cursor/restore index without touching the independent X10A/HomeHub/ENV III trend records.
 void history_checkup_reset();
+
+// Pause or resume diagnostics visibility for the circulation trend within the same consent
+// generation without wiping its accumulated 24-hour ring or journal identity.
+void history_set_diagnostics(bool enabled);
 
 // Copy trend `t`'s samples OLDEST-FIRST into `out`. Returns the count written (0 ..
 // HISTORY_SAMPLES, and 0 when the profile carries no such row or nothing has been recorded yet).

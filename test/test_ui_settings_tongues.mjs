@@ -633,8 +633,25 @@ assert.match(html, /id="e32Lang"[^]*<option value="auto" selected>Browser<\/opti
   "the language selector must survive the split explanation row");
 assert.doesNotMatch(html, /e32DynamicLwt|role="switch"/,
   "the retired heating-curve mode switch must stay absent");
-assert.match(html, /id="e32Diagnostics"[^]*<option value="on" selected>Ein<\/option>/,
-  "the Firmware card must show the enabled master diagnostics consent");
+assert.match(html, /id="e32Diagnostics"[^]*<option value="x10a" selected>X10A<\/option>/,
+  "the Firmware card must show the enabled master diagnostics source selection");
+S.status.diagnostics = { enabled: true, source: "modbus", effective_source: "modbus", available_sources: ["modbus"] };
+html = sandbox.__renderEsp32();
+const diagSelect = html.match(/<select[^>]*id="e32Diagnostics"[\s\S]*?<\/select>/)?.[0] || "";
+assert.match(diagSelect, /<option value="off">Aus<\/option>/,
+  "Modbus-only diagnostics selector must retain Off");
+assert.match(diagSelect, /<option value="modbus" selected>Modbus<\/option>/,
+  "Modbus-only diagnostics selector must select Modbus");
+assert.doesNotMatch(diagSelect, /value="x10a"/,
+  "unavailable X10A option must stay absent when only Modbus is available");
+S.status.diagnostics = { enabled: true, source: "modbus", effective_source: "x10a", available_sources: [] };
+html = sandbox.__renderEsp32();
+const fallbackDiagSelect = html.match(/<select[^>]*id="e32Diagnostics"[\s\S]*?<\/select>/)?.[0] || "";
+assert.match(fallbackDiagSelect, /<option value="x10a" selected>X10A<\/option>/,
+  "empty available_sources must fall back to X10A instead of unconfigured Modbus");
+assert.doesNotMatch(fallbackDiagSelect, /value="modbus"/,
+  "unconfigured Modbus must not reappear when available_sources is empty");
+S.status.diagnostics = { enabled: true };
 assert.ok(html.indexOf("card.fw_title") < 0, "translated card titles must be resolved");
 assert.ok(html.indexOf("<div class=\"section-label\">Firmware") <
           html.indexOf("<div class=\"section-label\">Heizkurven-Diagnose"),

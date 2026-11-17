@@ -284,22 +284,22 @@ assert.doesNotMatch(history.replace(recordEnv3, ""), /s_env3_fed = true/,
   "only the ENV III producer may mark the ring fed");
 
 // Checkup completed hours always start empty. Integrity only gates the separate handoff.
-const cStart = body(checkup, "void checkup_start(");
-assert.match(cStart, /s_source_confirmed = false;/);
-assert.match(cStart, /s_source_fp = 0;/);
-assert.match(cStart, /persist_wipe\(\);/);
+const cStart = body(checkup, "void slot_start(");
+assert.match(cStart, /slot\.source_confirmed = false;/);
+assert.match(cStart, /slot\.source_fp = 0;/);
+assert.match(cStart, /persist_wipe\(slot\);/);
 assert.match(cStart, /checkup_restore_route\(integrity\)/);
-assert.doesNotMatch(cStart, /carried_span_us = P\(\)\.span_us|dhw_loss_adopt\(/);
-assert.ok(cStart.indexOf("P().dhw_handoff.magic = 0;") < cStart.indexOf("persist_wipe();"));
+assert.doesNotMatch(cStart, /carried_span_us = slot\.P\(\)\.span_us|dhw_loss_adopt\(/);
+assert.ok(cStart.indexOf("slot.P().dhw_handoff.magic = 0;") < cStart.indexOf("persist_wipe(slot);"));
 assert.match(checkup, /constexpr logic::DhwLossBucket\s+kEmptyDhwLossBucket\{\};/);
 assert.match(checkup, /constexpr logic::DhwLossState\s+kFreshDhwLossState\{\};/);
-assert.match(cStart, /s_boot_handoff\.pending = kEmptyDhwLossBucket;/);
+assert.match(cStart, /slot\.boot_handoff\.pending = kEmptyDhwLossBucket;/);
 const explicitReset = body(checkup, "void checkup_reset()");
-assert.match(explicitReset, /s_source_confirmed = false;/);
-assert.match(explicitReset, /s_source_fp = 0;/);
-assert.match(explicitReset, /s_model_fp = 0;/);
+assert.match(explicitReset, /s_x10a\.source_confirmed = false;/);
+assert.match(explicitReset, /s_x10a\.source_fp = 0;/);
+assert.match(explicitReset, /s_x10a\.model_fp = 0;/);
 const detect = body(checkup, "void checkup_reset_on_detect(");
-assert.match(detect, /s_source_confirmed = source_fp != 0 && fp != 0;/);
+assert.match(detect, /s_x10a\.source_confirmed = source_fp != 0 && fp != 0;/);
 // One immutable structural catalog view binds both the core identity and the independent stop
 // input plan. Inlining a second lookup here would no longer prove that both consume that view.
 const detectView = detect.match(/const auto ([A-Za-z_]\w*) = def::lookup_view\(profile_id\);/);
@@ -311,18 +311,18 @@ const stopInputPlan = `logic::stop_context_input_plan(profile_id, ${detectView[1
 assert.ok(detect.indexOf(`const uint32_t fp = ${coreFingerprint};`) > detectView.index &&
   detect.indexOf(`const auto stop_inputs = ${stopInputPlan};`) > detectView.index,
   "both core fingerprint and stop-input plan must consume the same resolved structural view");
-assert.match(detect, /s_model_fp = fp;/,
+assert.match(detect, /s_x10a\.model_fp = fp;/,
   "the core identity derived from the shared view must become the active model fingerprint");
 assert.match(detect, /s_stop_inputs = stop_inputs;/,
   "the source-bound plan derived from the shared view must become the active stop-input plan");
-assert.match(detect, /if \(s_source_confirmed && s_boot_handoff_valid/);
-assert.match(detect, /s_boot_handoff\.source_fp == source_fp/);
-assert.match(detect, /s_boot_handoff\.dhw_source_fp == s_dhw_source_fp/,
+assert.match(detect, /if \(s_x10a\.source_confirmed && s_x10a\.boot_handoff_valid/);
+assert.match(detect, /s_x10a\.boot_handoff\.source_fp == source_fp/);
+assert.match(detect, /s_x10a\.boot_handoff\.dhw_source_fp == s_x10a\.dhw_source_fp/,
   "an intentional restart cannot revive a candidate from a replaced circulation witness");
-assert.match(detect, /!s_reset_requested\.load\(\) &&\s*!s_dhw_reset_requested\.load\(\)/);
-assert.match(detect, /s_boot_handoff_valid = false;/);
+assert.match(detect, /!s_x10a\.reset_requested\.load\(\) &&\s*!s_x10a\.dhw_reset_requested\.load\(\)/);
+assert.match(detect, /s_x10a\.boot_handoff_valid = false;/);
 assert.match(body(checkup, "void checkup_reboot_save()"), /h\.payload\.pending = kEmptyDhwLossBucket;/);
-assert.match(body(checkup, "void checkup_reboot_save()"), /h\.payload\.dhw_source_fp = s_dhw_source_fp;/);
+assert.match(body(checkup, "void checkup_reboot_save()"), /h\.payload\.dhw_source_fp = slot->dhw_source_fp;/);
 const circulationIdentity = body(checkup, "uint32_t circulation_identity()");
 assert.match(circulationIdentity, /with_config\(/);
 for (const field of ["mqtt_uri", "circulation_topic", "circulation_power_path", "circulation_time_path",
@@ -330,13 +330,13 @@ for (const field of ["mqtt_uri", "circulation_topic", "circulation_power_path", 
   assert.ok(circulationIdentity.includes("c." + field), "DHW witness identity must include " + field);
 assert.doesNotMatch(circulationIdentity, /config\(\)|circulation_name/,
   "the identity must not copy Config or change when a display name changes");
-const dhwReset = body(checkup, "bool apply_dhw_reset_locked()");
-assert.match(dhwReset, /P\(\)\.dhw\.head = P\(\)\.ring\.head;/);
-assert.match(dhwReset, /P\(\)\.dhw\.count = P\(\)\.ring\.count;/,
+const dhwReset = body(checkup, "bool apply_dhw_reset_locked(");
+assert.match(dhwReset, /slot\.P\(\)\.dhw\.head = slot\.P\(\)\.ring\.head;/);
+assert.match(dhwReset, /slot\.P\(\)\.dhw\.count = slot\.P\(\)\.ring\.count;/,
   "DHW-only reset keeps the shared hourly geometry and unrelated persistence writable");
 const cFlash = body(checkup, "CheckupFlashRestoreResult checkup_flash_restore(");
-assert.match(explicitReset, /s_persist_verdict = logic::CheckupRestore::ModelChanged;/);
-assert.match(cFlash, /if \(logic::checkup_flash_restore_retired\(s_persist_verdict\)\) return CheckupFlashRestoreResult::Ignored;/);
+assert.match(explicitReset, /s_x10a\.persist_verdict = logic::CheckupRestore::ModelChanged;/);
+assert.match(cFlash, /if \(logic::checkup_flash_restore_retired\(slot\.persist_verdict\)\) return CheckupFlashRestoreResult::Ignored;/);
 assert.ok(cFlash.indexOf("checkup_flash_restore_retired") < cFlash.indexOf("checkup_flash_source_ready"),
   "explicit resets retire old journal adoption even after same-source manual confirmation");
 assert.match(cFlash, /checkup_flash_source_ready/);
@@ -345,8 +345,8 @@ assert.match(cFlash, /logic::checkup_journal_choose\(/);
 assert.doesNotMatch(checkup, /s_restore_live/,
   "this boot's completed hours compete in place, never through a static copy");
 assert.match(cFlash,
-  /if \(logic::checkup_journal_rebuild\( ?P\(\)\.ring, P\(\)\.dhw, s_slot_times, live, records, count, earliest_bucket, latest_bucket, now_unix_s, now_us, s_source_confirmed, s_model_fp, s_source_fp, s_diagnostics_generation, reset_requested, s_dhw_source_fp, s_dhw_reset_requested\.load\(\)\)\) s_dhw_scope_us = now_us;/,
-  "a mismatched circulation mapping must retire DHW alone, while admitting dated X10A checks");
+  /if \(logic::checkup_journal_rebuild\( ?P\(\)\.ring, P\(\)\.dhw, slot\.slot_times, live, records, count, earliest_bucket, latest_bucket, now_unix_s, now_us, slot\.source_confirmed, slot\.model_fp, slot\.source_fp, s_diagnostics_generation, reset_requested, slot\.dhw_source_fp, slot\.dhw_reset_requested\.load\(\)\)\) slot\.dhw_scope_us = now_us;/,
+  "a mismatched circulation mapping must retire DHW alone, while admitting dated checks");
 assert.doesNotMatch(cFlash, /\.reset\(\);/, "the rebuild must not clear the live hours it keeps");
 const noMaterialized = cFlash.indexOf("if (!materialized)");
 assert.ok(noMaterialized >= 0 && noMaterialized < cFlash.indexOf("logic::checkup_journal_rebuild("),
@@ -368,52 +368,53 @@ assert.match(persistRebuild,
 assert.match(persistRebuild,
   /const int64_t end = c\.stored->payload\.end_unix_s; restored_end_unix_s\[p\] = end > 0 && end < UINT32_MAX \? static_cast<uint32_t>\(end\) : UINT32_MAX;/,
   "a restored interval takes its own saved wall time");
-assert.match(cFlash, /s_persist_verdict = logic::CheckupRestore::Flash;/);
-assert.doesNotMatch(cFlash, /s_persist_verdict = logic::CheckupRestore::Accept/);
-assert.match(body(checkup, "logic::CheckupReport checkup_report("), /expire_restored_locked\(\);/);
-assert.match(body(checkup, "void expire_restored_locked()"), /checkup_restored_expired/);
+assert.match(cFlash, /slot\.persist_verdict = logic::CheckupRestore::Flash;/);
+assert.doesNotMatch(cFlash, /persist_verdict = logic::CheckupRestore::Accept/);
+assert.match(body(checkup, "logic::CheckupReport checkup_report("), /expire_restored_locked\(slot\);/);
+assert.match(body(checkup, "void expire_restored_locked(CheckupSlot& slot) {"), /checkup_restored_expired/);
 const cRecord = body(checkup, "void checkup_record(");
-assert.match(cRecord, /if \(profile_confirmed\) s_cov = coverage;/,
+const cCommitFold = body(checkup, "void commit_and_fold_locked(");
+assert.match(cRecord, /if \(profile_confirmed\) s_x10a\.cov = coverage;/,
   "temporary empty cycles must not overwrite the current profile's capabilities");
-assert.match(cRecord, /if \(n\) s_source_last_us = now;/,
+assert.match(cRecord, /if \(n\) s_x10a\.source_last_us = now;/,
   "empty callbacks must not renew successful source observation age");
-assert.match(cRecord,
+assert.match(cCommitFold,
   /const int64_t completed_start_us = completed_end_us - static_cast<int64_t>\(logic::CHECKUP_DT_S\) \* 1000000LL;/,
   "completed-hour expiry must use the bucket start, matching ordinary ring replacement");
-assert.match(cRecord, /s_slot_times\.expiry_us\[committed_i\] = logic::checkup_live_expiry_us\(completed_start_us\);/,
+assert.match(cCommitFold, /slot\.slot_times\.expiry_us\[committed_i\] = logic::checkup_live_expiry_us\(completed_start_us\);/,
   "a stalled producer cannot keep completed findings for an extra hour");
-assert.match(cRecord, /s_slot_times\.expiry_us\[slot\] = 0; s_slot_times\.restored_end_unix_s\[slot\] = 0;/,
+assert.match(cCommitFold, /slot\.slot_times\.expiry_us\[idx\] = 0; slot\.slot_times\.restored_end_unix_s\[idx\] = 0;/,
   "the same overwritten slot loses both its deadline and its stored time");
 assert.match(body(checkup, "void persist_wipe("),
-  /for \(auto& expiry : s_slot_times\.expiry_us\) expiry = 0;/,
+  /for \(auto& expiry : slot\.slot_times\.expiry_us\) expiry = 0;/,
   "a new checkup lifecycle clears all expiry markers");
-assert.match(body(checkup, "void expire_restored_locked()"),
+assert.match(body(checkup, "void expire_restored_locked(CheckupSlot& slot) {"),
   /s_slot_times\.expiry_us\[i\] = logic::CHECKUP_EXPIRED_SLOT_US; s_slot_times\.restored_end_unix_s\[i\] = 0;/,
   "an expired interval drops its wall time but retains its blank slot");
 assert.match(body(checkup, "static logic::CheckupCyclingHours checkup_cycling_hours_locked("),
   /if \(expiry_us == logic::CHECKUP_EXPIRED_SLOT_US\) \{ hours\.hours\[i\]\.provenance = logic::CheckupCyclingSlot::Expired;/,
   "the chart keeps expiration distinct from ordinary gaps and restored hours");
 const cReport = body(checkup, "logic::CheckupReport checkup_report(");
-assert.match(cReport, /Lock lk\(s_mtx\);.*expire_restored_locked\(\);.*if \(hours\) \*hours = checkup_cycling_hours_locked\(now_us\);/,
+assert.match(cReport, /Lock lk\(s_mtx\);.*expire_restored_locked\(slot\);.*if \(hours\) \*hours = checkup_cycling_hours_locked\(slot,\s*now_us\);/,
   "cycling hours and the judged diagnosis share the same admitted snapshot");
-assert.match(cReport, /source_fresh \? s_fault_now : FaultClass::Unknown/,
+assert.match(cReport, /source_fresh \? slot\.fault_now : FaultClass::Unknown/,
   "the last cycle's fault class must not masquerade as a current observation after a stall");
 assert.match(cReport, /logic::checkup_apply_freshness\(report, source_fresh, source_age_s, span_s\);/,
   "the pure freshness policy receives read-time source age and actual lifecycle span");
 assert.match(cReport,
-  /if \(source_fresh && !s_dhw_reset_requested\.load\(\)\) \{[^}]*report\.dhw_candidate_s = p\.candidate_observed_s;[^}]*report\.dhw_settle_remaining_s = p\.settle_remaining_s;/,
+  /if \(source_fresh && !slot\.dhw_reset_requested\.load\(\)\) \{[^}]*report\.dhw_candidate_s = p\.candidate_observed_s;[^}]*report\.dhw_settle_remaining_s = p\.settle_remaining_s;/,
   "candidate and settling progress require a fresh source, not just retained filter state");
 assert.match(cReport,
   /logic::checkup_apply_freshness\(report, source_fresh, source_age_s, span_s\); return report; \}$/,
   "no later report population may reintroduce current state after the freshness gate");
-assert.match(body(checkup, "void expire_restored_locked()"),
-  /const int64_t pending_start_us = static_cast<int64_t>\(s_state\.bucket\) \* logic::CHECKUP_DT_S \* 1000000LL;/,
+assert.match(body(checkup, "void expire_restored_locked(CheckupSlot& slot) {"),
+  /const int64_t pending_start_us = static_cast<int64_t>\(slot\.state\.bucket\) \* logic::CHECKUP_DT_S \* 1000000LL;/,
   "open-hour expiry must use the bucket start, not rejuvenating it at the last sample");
-assert.match(body(checkup, "void expire_restored_locked()"),
-  /if \(s_state\.have_bucket && s_state\.last_us >= 0 && logic::checkup_restored_expired\(logic::checkup_live_expiry_us\(pending_start_us\), now_us\)\)/,
-  "the open hour needs a valid bucket and the same start-based expiry during a producer stall");
-assert.match(body(checkup, "void expire_restored_locked()"),
-  /P\(\)\.ring\.pending = logic::CheckupBucket\{\};[\s\S]*changed = true; \} if \(changed\) checkup_persist_seal\(\);/,
+assert.match(body(checkup, "void expire_restored_locked(CheckupSlot& slot) {"),
+  /if \(slot\.state\.have_bucket && logic::checkup_restored_expired\(logic::checkup_live_expiry_us\(pending_start_us\), now_us\)\)/,
+  "the open hour needs a valid bucket and the same start-based expiry across pauses and producer stalls");
+assert.match(body(checkup, "void expire_restored_locked(CheckupSlot& slot) {"),
+  /slot\.P\(\)\.ring\.pending = logic::CheckupBucket\{\};[\s\S]*changed = true; \} if \(changed\) checkup_persist_seal\(slot\);/,
   "pending-only expiry must reseal even when no completed slot expired");
 const gapCallback = body(poll, "static void checkup_record_poll_gap(");
 assert.match(gapCallback, /bool profile_confirmed = false\)/,
@@ -430,21 +431,23 @@ assert.equal(count(task, /checkup_record_poll_gap\(generation, true\);/g), 1,
 // target glue feeds them. An empty sweep (a held or failed cycle) is the one blind sample: neither
 // a constant nor a later overwrite may replace it.
 assert.match(cRecord, /s\.x10a_blind = !n;/,
-  "the sample's X10A blindness must come from the empty-sweep condition");
-assert.equal(count(checkup, /\.x10a_blind =/g), 1,
-  "no other assignment may override the empty-sweep blindness of the sample");
+  "the X10A sample's blindness must come from the empty-sweep condition");
+assert.match(body(checkup, "void checkup_record_modbus("), /s\.x10a_blind = !n;/,
+  "the Modbus sample's blindness must come from the empty-sweep condition");
+assert.equal(count(checkup, /\.x10a_blind =/g), 2,
+  "no other assignment may override the empty-sweep blindness of either source sample");
 // Every restart of DHW evidence without the shared lifecycle stamps its scope start, so a DHW
 // window cannot claim full-day coverage across that restart.
-assert.match(dhwReset, /s_dhw_scope_us = esp_timer_get_time\(\);/,
+assert.match(dhwReset, /slot\.dhw_scope_us = esp_timer_get_time\(\);/,
   "the DHW-only reset must stamp the DHW scope start");
-assert.match(cFlash, /s_dhw_reset_requested\.load\(\)\)\) s_dhw_scope_us = now_us;/,
+assert.match(cFlash, /slot\.dhw_reset_requested\.load\(\)\)\) slot\.dhw_scope_us = now_us;/,
   "a restore that refuses DHW identity must stamp the DHW scope at the restore instant");
 assert.match(persistRebuild, /dhw_retired = dhw_retired \|\| !keep_dhw;/);
 assert.match(persistRebuild, /if \(dhw_reset_requested \|\| !dhw_source_fp\) \{ dhw\.buf\[p\] = DhwLossBucket\{\}; dhw_retired = true; \}/,
   "a kept live hour loses only its DHW bucket when the circulation identity is gone");
 assert.match(cFlash, /const int64_t now_us = esp_timer_get_time\(\);/,
   "the restore instant must be the current monotonic time");
-assert.equal(count(checkup, /(?<!int64_t )s_dhw_scope_us = /g), 3,
+assert.equal(count(checkup, /slot\.dhw_scope_us = /g), 3,
   "the DHW scope changes only at the shared wipe, the DHW-only reset and the refused restore");
 
 // The consent generation the journal admission compares: the first opt-in from the default 0 takes
@@ -470,16 +473,20 @@ assert.equal(count(httpConfig, /c\.diagnostics_generation = diagnostics_next_gen
 const fold = body(checkup, "void fold_checkup_locked(");
 assert.equal(count(checkup, /logic::checkup_step\(/g), 1,
   "the checkup is folded only through fold_checkup_locked");
-assert.equal(count(cRecord, /fold_checkup_locked\(s, now\);/g), 2,
+assert.equal(count(cCommitFold, /fold_checkup_locked\(slot, s, now\);/g), 2,
   "both the hour-boundary and the ordinary sample fold arm late completions");
-assert.ok(fold.indexOf("const bool run_open = s_state.run_open;") <
+assert.equal(count(cRecord, /commit_and_fold_locked\(s_x10a,/g), 1,
+  "X10A commits through commit_and_fold_locked");
+assert.equal(count(body(checkup, "void checkup_record_modbus("), /commit_and_fold_locked\(s_modbus,/g), 1,
+  "Modbus commits through commit_and_fold_locked");
+assert.ok(fold.indexOf("const bool run_open = slot.state.run_open;") <
           fold.indexOf("logic::checkup_step("),
   "the open run and its start hour are captured before the fold closes them");
 assert.match(fold,
-  /if \(!logic::checkup_step\([^;]*\)\) return; logic::checkup_journal_revision_arm\(s_revision, run_open, run_start\);/,
+  /if \(!logic::checkup_step\([^;]*\)\) return; logic::checkup_journal_revision_arm\(slot\.revision, run_open, run_start\);/,
   "only a fold that booked something arms, through the pure oldest-start-hour rule");
 const flashNext = body(checkup, "bool checkup_flash_next(");
-const take = "logic::checkup_journal_revision_take( s_revision, s_revision_acked.load(), newest, current, live_count, after_bucket)";
+const take = "logic::checkup_journal_revision_take( slot.revision, slot.revision_acked.load(), newest, current, live_count, after_bucket)";
 assert.ok(flashNext.includes(take),
   "the revision maps through the same live anchor as the record and retires on its own commit");
 assert.match(flashNext,
@@ -488,42 +495,51 @@ assert.match(flashNext,
 assert.ok(flashNext.indexOf(take) < flashNext.indexOf("logic::checkup_journal_next_target("),
   "the revision is settled before the next record is chosen");
 assert.match(flashNext,
-  /if \(logic::checkup_journal_revision_emit\(s_revision, target, revision\)\) s_revision_acked\.store\(INT64_MIN\);/,
+  /if \(logic::checkup_journal_revision_emit\(slot\.revision, target, revision\)\) slot\.revision_acked\.store\(INT64_MIN\);/,
   "an earlier commit of the same bucket must not retire a new revision");
-assert.match(body(checkup, "void persist_wipe("), /s_revision = \{\};/,
+assert.match(body(checkup, "void persist_wipe("), /slot\.revision = \{\};/,
   "a wipe withdraws a pending revision together with its hours");
-assert.match(checkup, /void checkup_flash_appended\(int64_t bucket\) \{ s_revision_acked\.store\(bucket\); \}/,
+assert.match(checkup, /void checkup_flash_appended\(int64_t bucket, DiagnosticsSource source\) \{ slot_for\(source\)\.revision_acked\.store\(bucket\); \}/,
   "the journal's commit confirmation writes the acknowledgement");
-assert.equal(count(checkup, /s_revision_acked\.store\(/g), 2,
+assert.equal(count(checkup, /revision_acked\.store\(/g), 2,
   "only the emit reset and the journal's commit confirmation write the acknowledgement");
 // One wall-clock label per monotonic hour for the whole boot, in the writer and in the restore's
 // live records alike; a record's end time is kept inside the bucket its label names.
 assert.equal(count(checkup, /latched_newest_locked\(/g), 4,
   "the writer, the restore and the planned-restart seal label hours through the boot latch");
-assert.match(flashNext, /const int64_t newest = latched_newest_locked\(latest_end_unix_s\);/);
+assert.match(flashNext, /const int64_t newest = latched_newest_locked\(slot, latest_end_unix_s\);/);
 assert.match(flashNext, /logic::checkup_journal_end_in_bucket\( latest_end_unix_s - static_cast<int64_t>\(age\) \* logic::CHECKUP_DT_S, target\)/);
-assert.match(cFlash, /const int64_t newest_label = latched_newest_locked\(latest_end\);/);
+assert.match(cFlash, /const int64_t newest_label = latched_newest_locked\(slot, latest_end\);/);
 assert.match(cFlash, /live\.newest_label = newest_label; live\.newest_end_unix_s = latest_end;/);
 assert.match(body(code("main/logic/checkup_persist.hpp"), "inline constexpr int64_t checkup_journal_live_end("),
   /return checkup_journal_end_in_bucket\( live\.newest_end_unix_s - static_cast<int64_t>\(live\.count - 1 - k\) \* CHECKUP_DT_S, checkup_journal_live_label\(live, k\)\);/,
   "a live hour's end stays inside the bucket its latched label names");
 // A DHW-only restart empties the hours before it: an append made later never presents them as
 // the current circulation source's evidence.
-assert.match(dhwReset, /s_dhw_restart_armed = true; s_dhw_restart_bucket = logic::checkup_bucket\(s_dhw_scope_us\);/,
+assert.match(dhwReset, /slot\.dhw_restart_armed = true; slot\.dhw_restart_bucket = logic::checkup_bucket\(slot\.dhw_scope_us\);/,
   "the DHW-only reset records its monotonic hour");
 assert.match(flashNext,
-  /if \(logic::checkup_journal_dhw_withheld\(s_dhw_restart_armed, s_dhw_restart_bucket, current, age\)\) \{ payload\.dhw_source_fp = 0; payload\.dhw = kEmptyDhwLossBucket; \}/,
+  /if \(logic::checkup_journal_dhw_withheld\(slot\.dhw_restart_armed, slot\.dhw_restart_bucket, current, age\)\) \{ payload\.dhw_source_fp = 0; payload\.dhw = kEmptyDhwLossBucket; \}/,
   "pre-restart hours carry no DHW identity");
-assert.match(body(checkup, "void persist_wipe("), /s_dhw_restart_armed = false;/);
+assert.match(body(checkup, "void persist_wipe("), /slot\.dhw_restart_armed = false;/);
 const appendAt2 = body(history, "esp_err_t flash_append_record_at(");
 assert.match(appendAt2,
   /s_flash_last_bucket\[src\] = r\.header\.bucket;[^}]*if \(src == static_cast<size_t>\(logic::HistoryJournalSource::Checkup\)\) checkup_flash_appended\(r\.header\.bucket\);/,
   "only a verified data commit of the checkup source confirms a revision");
+assert.match(appendAt2, /checkup_flash_appended\(r\.header\.bucket, DiagnosticsSource::Modbus\);/,
+  "Modbus checkup appends acknowledge only the Modbus revision");
 const scan = body(history, "bool flash_journal_scan()");
 assert.match(scan, /if \(src == checkup_src\) \{[^]*?logic::checkup_journal_index_step\(s_flash_checkup_index, r\.header\.bucket\)/,
   "checkup records are indexed only through the pure revision-aware index");
-assert.match(scan, /logic::checkup_journal_index_retained\(ix, i\)/,
-  "the checkup candidates are clipped to the window ending at the newest indexed hour");
+assert.match(scan, /logic::checkup_journal_index_step\( s_flash_mb_checkup\.index, r\.header\.bucket\)/,
+  "Modbus checkup records are indexed independently through the pure revision-aware index");
+assert.match(scan, /clip_checkup_index\(s_flash_checkup_index,/,
+  "X10A checkup candidates are clipped to the window ending at the newest indexed hour");
+assert.match(scan, /clip_checkup_index\(s_flash_mb_checkup\.index,/,
+  "Modbus checkup candidates are clipped to the window ending at the newest indexed hour");
+const clipCheckup = body(history, "void clip_checkup_index(");
+assert.match(clipCheckup, /logic::checkup_journal_index_retained\(ix, i\)/,
+  "the shared clip helper retains only candidates in the window ending at the newest indexed hour");
 assert.doesNotMatch(scan, /CHECKUP_COMPLETED_BUCKETS/,
   "the trend retention path no longer carries a checkup branch");
 
@@ -535,23 +551,24 @@ assert.ok(startup.indexOf("daik::history_start();") >= 0 &&
   startup.indexOf("daik::history_start();") < startup.indexOf("daik::checkup_start("),
   "the checkup shutdown handler must register after history's drain so it runs first");
 const rebootSave = body(checkup, "void checkup_reboot_save()");
-assert.ok(rebootSave.indexOf("apply_dhw_reset_locked();") < rebootSave.indexOf("seal_open_hour_locked();"),
+assert.ok(rebootSave.indexOf("apply_dhw_reset_locked(s_x10a);") < rebootSave.indexOf("seal_open_hour_locked(*slot);") &&
+          rebootSave.indexOf("apply_dhw_reset_locked(s_modbus);") < rebootSave.indexOf("seal_open_hour_locked(*slot);"),
   "queued resets retire the open hour before it can be sealed");
-const sealOpen = body(checkup, "void seal_open_hour_locked()");
+const sealOpen = body(checkup, "void seal_open_hour_locked(");
 assert.match(sealOpen, /time_now\(unix_s, ms\);/);
 assert.match(sealOpen,
-  /logic::checkup_seal_end_unix_s\(unix_s, now_us, P\(\)\.ring\.latest_sample_us, s_state\.bucket\)/);
-assert.match(sealOpen, /newest = latched_newest_locked\(unix_s - \(now_us - s_last_commit_us\) \/ 1000000\);/);
+  /logic::checkup_seal_end_unix_s\(\s*unix_s, now_us, slot\.P\(\)\.ring\.latest_sample_us, slot\.state\.bucket\)/);
+assert.match(sealOpen, /newest = latched_newest_locked\(slot, unix_s - \(now_us - slot\.last_commit_us\) \/ 1000000\);/);
 assert.match(sealOpen, /logic::checkup_seal_bucket\(end, newest, covered\)/);
-assert.match(cRecord, /if \(s_seal_bucket != INT64_MIN\) return;/,
+assert.match(cRecord, /if \(s_x10a\.seal_bucket != INT64_MIN\) return;/,
   "a sealed open hour must not change before the drain journals it");
-assert.equal(count(flashNext, /return sealed_flash_next_locked\(after_bucket, bucket, payload\);/g), 1,
+assert.equal(count(flashNext, /return sealed_flash_next_locked\(slot, after_bucket, bucket, payload\);/g), 1,
   "the sealed hour is offered only when no live hour is due, from one inlinable call site");
 assert.ok(flashNext.indexOf("checkup_journal_next_target") <
   flashNext.lastIndexOf("sealed_flash_next_locked"), "every live target is appended first");
 const sealedNext = body(checkup, "bool sealed_flash_next_locked(");
-assert.match(sealedNext, /logic::checkup_seal_emits\(s_seal_bucket, after_bucket\)/);
-assert.match(sealedNext, /payload\.checkup = P\(\)\.ring\.pending; payload\.dhw = P\(\)\.dhw\.pending;/);
-assert.match(body(checkup, "void persist_wipe("), /s_seal_bucket = s_seal_end_unix_s = INT64_MIN;/,
+assert.match(sealedNext, /logic::checkup_seal_emits\(slot\.seal_bucket, after_bucket\)/);
+assert.match(sealedNext, /payload\.checkup = slot\.P\(\)\.ring\.pending; payload\.dhw = slot\.P\(\)\.dhw\.pending;/);
+assert.match(body(checkup, "void persist_wipe("), /slot\.seal_bucket = slot\.seal_end_unix_s = INT64_MIN;/,
   "a wipe leaves no sealed hour to journal");
 console.log("history restore guard contract: ok");

@@ -76,6 +76,7 @@
 #include <cstdlib>
 
 #include "fault_state.hpp"   // FaultClass — the fault check composes conv 203's own class table
+#include "modbus_profile.hpp" // ModbusProfile — structural capability selection for HomeHub/Altherma 4
 #include "ou_stale.hpp"      // ou_is_rps_witness — the compressor witness, called not restated
 #include "outdoor_evidence.hpp" // one provenance/freshness answer shared with heating-curve events
 
@@ -320,8 +321,12 @@ inline int32_t checkup_div_round_nearest(int64_t numerator, uint32_t denominator
                               : (numerator - half) / denominator);
 }
 
-inline void checkup_outdoor_add(CheckupOutdoorStats& stats, const OutdoorEvidence& evidence) {
-    if (!outdoor_evidence_valid(evidence) || evidence.source != OutdoorSource::X10a) return;
+inline void checkup_outdoor_add(CheckupOutdoorStats& stats, const OutdoorEvidence& evidence,
+                                OutdoorSource expected = OutdoorSource::X10a) {
+    if (!outdoor_evidence_valid(evidence) ||
+        (expected != OutdoorSource::X10a && expected != OutdoorSource::HomeHub) ||
+        evidence.source != expected)
+        return;
     const long rounded = std::lround(evidence.temperature_c * 10.0);
     // The real outdoor domain is far narrower; this representation guard also keeps sum_tenths
     // inside int32 even at the one-day sample ceiling.
@@ -724,6 +729,23 @@ inline bool checkup_close_run(CheckupState& st, CheckupBucket& b, CheckupRing* r
     st.run_cause      = CheckupCensorCause::None;
     st.run_had_gap    = false;
     st.run_outdoor = CheckupOutdoorStats{};
+    return reseal;
+}
+
+// Break edge/interval continuity when diagnostics is paused (`Off`), closing any open run as
+// censored at its last observed timestamp without counting the paused interval, while keeping the
+// pending hour anchored for resumption within the same consent generation.
+inline bool checkup_pause_state(CheckupState& st, CheckupBucket& b, CheckupRing* ring = nullptr) {
+    bool reseal = false;
+    if (st.run_open) {
+        checkup_censor_run(st, CheckupCensorCause::Unreadable);
+        reseal = checkup_close_run(st, b, ring, st.bucket);
+    }
+    const bool     have_bucket = st.have_bucket;
+    const uint32_t bucket      = st.bucket;
+    st                         = CheckupState{};
+    st.have_bucket             = have_bucket;
+    st.bucket                  = bucket;
     return reseal;
 }
 
@@ -1283,7 +1305,8 @@ constexpr uint32_t CHECKUP_PRESSURE_CONFIRM_S = 60;
 //
 // Away from a boundary the whole delta is booked into the open bucket.
 inline bool checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample& s, int64_t now_us,
-                         CheckupRing* ring = nullptr, CheckupCyclingTrace* trace = nullptr) {
+                         CheckupRing* ring = nullptr, CheckupCyclingTrace* trace = nullptr,
+                         OutdoorSource expected_outdoor = OutdoorSource::X10a) {
     bool           reseal         = false;
     bool           timed_start    = false;
     const uint32_t current_bucket = checkup_bucket(now_us);
@@ -1357,7 +1380,7 @@ inline bool checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample
                 b.dfr_run_s = checkup_add_hour_s(b.dfr_run_s, dt);
                 if (s.defrost_on && st.prev_dfr_on)
                     b.defrost_s = checkup_add_hour_s(b.defrost_s, dt);
-                checkup_outdoor_add(b.defrost_outdoor, s.outdoor);
+                checkup_outdoor_add(b.defrost_outdoor, s.outdoor, expected_outdoor);
             }
         }
         if (s.buh_known && st.prev_buh_known) {
@@ -1552,7 +1575,7 @@ inline bool checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample
                 // running is fresh outdoor context.
                 if (was_running && st.run_class_pure &&
                     st.run_class == CheckupRunClass::SpaceHeating)
-                    checkup_outdoor_add(st.run_outdoor, s.outdoor);
+                    checkup_outdoor_add(st.run_outdoor, s.outdoor, expected_outdoor);
                 st.run_blind_s = 0;
             }
         }
@@ -1818,7 +1841,7 @@ constexpr bool dhw_loss_scope_full(bool lifecycle_full, int64_t scope_us, int64_
     return lifecycle_full && (scope_us < 0 || now_us - scope_us >= CHECKUP_WINDOW_US);
 }
 
-inline DhwLossWindow dhw_loss_aggregate(const DhwLossRing& r) {
+[[gnu::always_inline]] inline DhwLossWindow dhw_loss_aggregate(const DhwLossRing& r) {
     DhwLossWindow w;
     auto fold = [&w](const DhwLossBucket& b) {
         w.observed_s += b.observed_s;
@@ -1894,6 +1917,24 @@ inline void checkup_cover_row(CheckupCoverage& c, unsigned reg, unsigned off, in
         c.retries = true;
         c.retry_mask |= static_cast<uint8_t>(1u << retry);
     }
+}
+
+// Structural capability matrix for the independent Modbus source (EKRHH 4P744838-1E §9.2 and
+// Altherma 4 4P773396-1C §7.2). Native Altherma 4 flow/pressure scaling remains physically
+// unverified and is therefore withheld from automated checkup verdicts until verified on hardware.
+inline constexpr CheckupCoverage checkup_modbus_coverage(ModbusProfile profile) {
+    CheckupCoverage c;
+    if (profile != ModbusProfile::HomeHub && profile != ModbusProfile::Altherma4) return c;
+    c.rps        = true; // Input 31: compressor running
+    c.valve      = true; // Input 37: 3-way valve (0 = space, 1 = DHW)
+    c.mode       = true; // Input 38: current operation mode (1 = heating, 2 = cooling, 0 = none)
+    c.bsh        = true; // Input 32: DHW booster heater run
+    c.pump       = true; // Input 30: circulation pump running
+    c.r5t        = true; // Input 43: DHW tank temperature
+    c.fault      = true; // Input 21: unit abnormality (0 normal, 1 fault, 2 warning)
+    c.fault_rows = 1;
+    c.flow       = (profile == ModbusProfile::HomeHub); // Input 49 (/100 verified on EKRHH only)
+    return c;
 }
 
 // ── Verdicts ────────────────────────────────────────────────────────────────────────────────────
@@ -2282,19 +2323,20 @@ inline void checkup_apply_freshness(CheckupReport& r, bool fresh, uint32_t age_s
 // right now and one that cleared three hours ago are different findings and must not collapse into
 // one badge.
 inline CheckupReport checkup_evaluate(const CheckupWindow& w, const CheckupCoverage& cov,
-                                    FaultClass fault_now, const DhwLossWindow& dhw = {}) {
+                                      FaultClass fault_now, const DhwLossWindow& dhw = {},
+                                      OutdoorSource outdoor_source = OutdoorSource::X10a) {
     CheckupReport r;
     r.covered_s = w.covered_s;
     r.full_span = w.full_span;
     if (w.cycling_outdoor_samples) {
-        r.cycling_outdoor.source = OutdoorSource::X10a;
+        r.cycling_outdoor.source      = outdoor_source;
         r.cycling_outdoor.min_tenths = w.cycling_outdoor_min_tenths;
         r.cycling_outdoor.mean_tenths = checkup_div_round_nearest(
             w.cycling_outdoor_sum_tenths, w.cycling_outdoor_samples);
         r.cycling_outdoor.samples = w.cycling_outdoor_samples;
     }
     if (w.defrost_outdoor_samples) {
-        r.defrost_outdoor.source = OutdoorSource::X10a;
+        r.defrost_outdoor.source      = outdoor_source;
         r.defrost_outdoor.min_tenths = w.defrost_outdoor_min_tenths;
         r.defrost_outdoor.mean_tenths = checkup_div_round_nearest(
             w.defrost_outdoor_sum_tenths, w.defrost_outdoor_samples);
