@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 538910cd6da955159766a293fb583f4f028f68d428d134c929c24145f5b729c7 -->
+<!-- diagnostic-evidence-contract: e628088cb0064042adc9be60cdddad5326e25ab9cd1947a99d3d9881b0f7e0ba -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -9,17 +9,22 @@ For every row in the **Plant diagnostics · 24 h** card, this page answers four 
 3. Which threshold or filter belongs only to this project?
 4. What must not be concluded from the result?
 
-The whole feature is an explicit opt-in under Settings › Firmware and is off by default. Turning it
-on begins a fresh evidence generation; turning it off stops and clears the diagnosis and its
-additional room, forecast, and circulation sources. None of the results below is a recommendation.
-Polls begun before a consent transition cannot supply diagnosis evidence for the new generation.
+The whole feature is an explicit opt-in under Settings › Firmware and is off by default. The first
+opt-in starts a fresh evidence generation; turning it off pauses recording and hides the card while
+keeping already collected 24-hour diagnostic histories (which continue aging out after 24 hours),
+stops live room/forecast/circulation sampling and closes any open run as censored without bridging
+paused time on resume. Only factory reset or a source/mapping change clears stored history. None of
+the results below is a recommendation. Polls begun before a consent transition cannot supply
+diagnosis evidence for the replacement state.
 
 The card observes ordinary operation; it does not command service mode, full load, or a stationary
 refrigerant test. No manufacturer settling duration can therefore be inferred from a complete
 24-hour window, and none of the eight results is a passed commissioning test.
 
-X10A evidence is scoped to the configured target generation. Changed wiring, profile or detected
-source discards an in-flight old-source sample and retires pending restoration for that boot.
+X10A evidence is scoped to its configured target generation, and HomeHub/Altherma 4 Modbus evidence
+to its configured target endpoint and detected Modbus profile. Changed wiring, profile, endpoint or
+detected source discards an in-flight old-source sample and retires pending restoration for that
+boot.
 A manual profile selection establishes a decoding contract, not a physical reply.
 Retained checkup counters additionally require a compatible stored layout and the same resolved
 consumer schema and evidence method. A changed measurement definition cannot borrow an old counter
@@ -29,7 +34,8 @@ decoder, schema and method provenance and qualification must be established for 
 as a golden fixture. The existing population fixture is synthetic, not a reconstructed field event.
 
 At read time the diagnosis publishes elapsed span separately from usable signal coverage and the
-age of the last nonempty X10A sample. A source older than the 15-second project bound cannot support
+age of the last nonempty sample on the active source (`X10A` or `Modbus`). A source older than the
+15-second project bound cannot support
 a current fault all-clear or reassuring assessment. Temporary TLS/allocation pauses contribute no
 measurement coverage and do not withdraw profile capabilities. Historical findings remain within
 their admissible age; live, restored and open evidence expires even if the producer stops. The
@@ -52,7 +58,7 @@ that review.
 |-------|---------|
 | **Device report** | The heat pump reports the state itself. The firmware transports and retains it but does not invent a cause. |
 | **Manufacturer limit** | A specific Daikin manual states the limit. It applies only to the listed models and conditions. |
-| **Observation** | The firmware counts or measures an available X10A signal without declaring it good or bad. |
+| **Observation** | The firmware counts or measures an available X10A or Modbus signal without declaring it good or bad. |
 | **Project heuristic** | The project cautiously marks a pattern as notable. The threshold is not a Daikin service limit. |
 | **Experimental** | The signal name and a change are observable, but public documentation does not establish the complete manufacturer semantics. |
 
@@ -148,12 +154,16 @@ not established by any field reading; on the Monobloc CA it rests on the project
 **External evidence:** Daikin's Altherma 3 R W installer reference states that the user interface
 shows a short and long description when a malfunction occurs. Its error-code table includes
 refrigerant-circuit, electronics, and 7H water-flow faults ([D1], section 12.4, printed pages 89–90).
+HomeHub EKRHH Modbus exposes a single general unit-error state in input register 21 ([D3], Modbus
+input registers).
 
 **Firmware rule:** A currently readable error class produces **WARNING** immediately; warnings and
 cautions produce **NOTE**. An earlier observed error/warning flag remains a **NOTE** in the rolling
 window. Normal requires every fault-class row supplied by the profile to be readable and normal.
-Missing current rows cannot establish that a retained fault has cleared. See the Fault branch of
-[checkup_evaluate()](../main/logic/checkup.hpp) and [fault_state.hpp](../main/logic/fault_state.hpp).
+Missing current rows cannot establish that a retained fault has cleared. X10A and Modbus track
+independent fault histories (`checkup_modbus_coverage` supplies 1 fault row on Modbus). See the
+Fault branch of [checkup_evaluate()](../main/logic/checkup.hpp) and
+[fault_state.hpp](../main/logic/fault_state.hpp).
 
 **Not established:** The supported classes are not a comprehensive plant-health test. No root
 cause, spontaneous recovery, absence of intervention or code-specific service conclusion is inferred.
@@ -165,6 +175,8 @@ cause, spontaneous recovery, absence of intervention or code-specific service co
 volume and standing loss are separate declared parameters ([E1], Article 2(17), Annex III section 7).
 Water's specific heat is approximately 4.18 kJ/(kg K) ([E2], liquid-phase heat capacity and molar mass).
 This supports an illustrative heat calculation, not whole-tank calorimetry from one sensor.
+HomeHub EKRHH Modbus exposes tank sensor R5T (43), circulation pump (30), tank booster heater BSH
+(32), and 3-way valve (37) as read-only input registers ([D3], Modbus input registers).
 
 **Firmware rule:** Complete one-hour windows retain the net temperature drop at tank sensor R5T,
 floored to 0.1 K/h; a net rise contributes zero cooling. Each endpoint needs two consecutive
@@ -206,7 +218,10 @@ this temperature. Zero net cooling does not mean zero heat transfer. No marker p
 isolation, and no accepted window excludes losses in discarded intervals. Unseen charging can
 still affect a later window. Missing replies or polling pauses establish no wiring defect.
 
-Changing circulation identity retires DHW evidence independently. Saved cooling hours use the core
+Changing circulation identity retires DHW evidence independently. X10A and Modbus maintain
+separate 24 h DHW-loss stores without merging; switching the displayed card source preserves both,
+and pausing diagnostics preserves completed hours and existing abort counts while discarding any open
+live candidate/settle filter without incrementing aborts. Saved cooling hours use the core
 journal's layout and schema checks. An unfinished candidate has a separate handoff compatibility
 check. See the [restart and admission rules](PLANT.md#reboot-and-persistence) and
 [evidence fields](API.md).
@@ -218,7 +233,9 @@ check. See the [restart and admission rules](PLANT.md#reboot-and-persistence) an
 studied one air-source and one ground-source heat pump with fixed compressor speeds. Runs shorter
 than about six minutes reduced efficiency in the tested systems, while heat emission, water volume,
 control, and outside temperature also affected the result ([R1], summary and sections 1–2). This
-supports the relevance of very short runs but does not provide a universal Daikin limit.
+supports the relevance of very short runs but does not provide a universal Daikin limit. HomeHub
+EKRHH Modbus exposes compressor run (31), pump (30), 3-way valve (37), operation mode (38), and
+outdoor ambient temperature (44) as input registers ([D3], Modbus input registers).
 
 **Firmware rule:** Starts and completed runs are retained separately. Within a continuous sampling
 segment, unreadable compressor samples between known OFF and ON establish at least one inferred
@@ -270,8 +287,9 @@ the detailed reason and the disclosure gives a short assessment.
 There is no pooled starts/runtime fallback, and unfinished
 runs never enter the completed mean. Completed-run evidence ages with its start edge. See
 CHECKUP_CYCLING_MIN_STARTS, CHECKUP_CYCLING_SHORT_RUN_S and CHECKUP_CYCLING_CLASSIFIED_PCT in
-[checkup.hpp](../main/logic/checkup.hpp). Fresh X10A outdoor minimum/mean accompanies only accepted
-completed heating runs, from samples whose predecessor was also running, and changes no threshold.
+[checkup.hpp](../main/logic/checkup.hpp). Fresh X10A or HomeHub Modbus (input 44) outdoor
+minimum/mean accompanies only accepted completed heating runs, from samples whose predecessor was
+also running, and changes no threshold.
 
 The hourly fallback counts compressor running intervals of at most 15 seconds separately from completed
 runs. Both endpoints must show the compressor running in the same heating or DHW class to assign
@@ -281,6 +299,10 @@ parts of runs that start or finish outside the slot. The
 [hourly API contract](API.md#history-and-24-hour-checks) defines how starts are assigned and which
 slots establish elapsed duration. See the [core journal upgrade rules](PLANT.md#reboot-and-persistence)
 for restore compatibility.
+
+X10A and Modbus track separate 24 h cycling rings and traces without merging; switching the
+displayed card source preserves both, while `stop_context` remains X10A-only (`confirmed: false` in
+Modbus mode).
 
 **Project boundary:** Twelve heating runs, ten minutes and the 90% evidence requirements are
 project heuristics, not limits copied from R1 or specified by Daikin. R1 studied different,
@@ -341,10 +363,10 @@ depend strongly on outside-air temperature, relative humidity, and heat-exchange
 **Firmware rule:** Rising edges count defrost starts. Defrost share uses only intervals with
 readable compressor and defrost states at both endpoints. At least three paired events and more
 than 15% of paired compressor runtime produce **NOTE** immediately. A reassuring assessment
-additionally requires a complete 24-hour span and 90% paired coverage. Fewer events or no paired
-runtime remain observations with a reason; no readable defrost observation remains CHECKING.
-Missing readings remain missing, not zero. See
-CHECKUP_DEFROST_MIN_COUNT and CHECKUP_DEFROST_SHARE_PCT in [checkup.hpp](../main/logic/checkup.hpp).
+additionally requires a complete 24-hour span and 90% paired coverage. Fewer events or no paired runtime remain observations with a reason; no readable defrost observation remains CHECKING.
+Missing readings remain missing, not zero. Neither HomeHub EKRHH nor native Altherma 4 Modbus exposes
+a defrost state, so `checkup_modbus_coverage` leaves `defrost` unsupported (`unavailable`, hidden in
+Modbus UI mode). See CHECKUP_DEFROST_MIN_COUNT and CHECKUP_DEFROST_SHARE_PCT in [checkup.hpp](../main/logic/checkup.hpp).
 
 The X10A outdoor minimum, mean and sample count use fresh outdoor readings from the paired
 running-compressor population, including intervals with defrost off. They do not alter the rule.
@@ -375,15 +397,19 @@ continuous weather coverage.
 procedure requires pump inlet pressure **above 1 bar** and names the pressure sensor, expansion
 vessel, valve, and pre-pressure as checks ([D1], section 12.3.4, printed page 87). Other Altherma
 manuals also state at least or above 1 bar, but the permitted filling and operating range remains
-model-specific ([D2], section 8.1.3).
+model-specific ([D2], section 8.1.3). Native Altherma 4 Modbus lists water pressure in input
+register 79 with an ambiguous 10–600 bar range note ([D4], section 7.2).
 
 **Firmware rule:** The accepted rolling minimum is retained unchanged, including zero. At or
 below 1.0 bar produces **NOTE**; at least 60 continuously observed seconds at that level produces
 **WARNING**. Confirmation requires readable endpoints and does not rewrite the minimum. The API
 publishes the observed-at timestamp only with synchronized wall time, current pressure only when
 the last fresh sample supplied it, and a separate confirmed-low flag. A reassuring result requires
-a full day and 90% readable pressure time. See CHECKUP_BAR_WARN_TENTHS and
-CHECKUP_PRESSURE_CONFIRM_S in [checkup.hpp](../main/logic/checkup.hpp).
+a full day and 90% readable pressure time. HomeHub EKRHH exposes no water-pressure register, and
+native Altherma 4 input 79's centibar scaling remains physically unverified, so
+`checkup_modbus_coverage` withholds `pressure` from automated verdicts (`unavailable`, hidden in
+Modbus UI mode). See CHECKUP_BAR_WARN_TENTHS and CHECKUP_PRESSURE_CONFIRM_S in
+[checkup.hpp](../main/logic/checkup.hpp).
 
 **Project boundary:** The one-minute confirmation is a project filter. The firmware's common
 1.0-bar threshold is a project diagnostic boundary, not every model's filling specification.
@@ -398,12 +424,15 @@ an earlier low observation or explain its cause.
 
 **External evidence:** Minimum water flow is model-specific. [D1] states `12 l/min` and fault 7H for
 the listed Altherma 3 R W units (sections 6.4.3, 9.4.1, and 12.4). An Altherma 3 H HT F manual states
-`25 l/min` or `22 l/min`, depending on the variant ([D2], section 8.1.3). One firmware-wide good/bad
-limit would therefore be incorrect.
+`25 l/min` or `22 l/min`, depending on the variant ([D2], section 8.1.3). HomeHub EKRHH Modbus
+exposes leaving-water flow rate in input register 49 scaled by 1/100 to `l/min` ([D3], Modbus input
+registers). One firmware-wide good/bad limit would therefore be incorrect.
 
 **Firmware rule:** The row reports the lowest accepted flow after the internal pump ran
-continuously for at least 60 seconds. It assigns no good/bad assessment. See CHECKUP_FLOW_RUNUP_S
-and the Flow branch in [checkup.hpp](../main/logic/checkup.hpp).
+continuously for at least 60 seconds. It assigns no good/bad assessment. On Modbus,
+`checkup_modbus_coverage` enables `flow` only for the `HomeHub` EKRHH profile (input 49 `/100`);
+native `Altherma4` Modbus leaves `flow` unsupported (`unavailable`, hidden in Modbus UI mode). See
+CHECKUP_FLOW_RUNUP_S and the Flow branch in [checkup.hpp](../main/logic/checkup.hpp).
 
 **Project boundary:** Sixty seconds is a pump run-up filter, not a manufacturer limit. The filter
 does not establish part load or exclude later valve movements.
@@ -426,8 +455,9 @@ emergency operation after a heat-pump failure ([D1], sections 8.4.6 and 8.4.9, p
 heater (BUH) steps in the water circuit and the tank booster heater (BSH). Usable runtime evidence
 is published immediately as **MEASURED**, without waiting for 24 hours. A zero applies only to
 readable observed intervals; unsupported or unreadable inputs remain null. Proving BUH off requires
-every profile-provided step to be readable; either readable active step proves on. See the Heater
-branch in [checkup.hpp](../main/logic/checkup.hpp).
+every profile-provided step to be readable; either readable active step proves on. On Modbus,
+`checkup_modbus_coverage` enables `bsh` (HomeHub EKRHH input register 32, [D3]) while `buh` steps
+remain unsupported and null. See the Heater branch in [checkup.hpp](../main/logic/checkup.hpp).
 
 **Not established:** Runtime alone establishes neither energy consumed, unnecessary use nor a
 defect. Electrical power, delivered heat and the controller's operating reason are not supplied by
@@ -447,7 +477,9 @@ All profile-declared counters and the compressor state must be readable at both 
 non-zero startup value is a baseline; a decrease invalidates the comparison. A usable comparison
 without an increase displays **TENTATIVE**; a comparable increase displays **NOTE**. Both retain
 experimental evidence and appear without a day-long wait. The retained event flag does not identify
-which counter increased or when. See checkup_retry_index(),
+which counter increased or when. Neither HomeHub EKRHH nor native Altherma 4 Modbus exposes page-0x10
+protection-limit counters, so `checkup_modbus_coverage` leaves `retries` unsupported (`unavailable`,
+hidden in Modbus UI mode). See checkup_retry_index(),
 CHECKUP_RETRY_COUNT and the Retries branch in [checkup.hpp](../main/logic/checkup.hpp).
 
 **Experimental boundary:** Public Daikin documentation does not establish complete semantics for
@@ -476,6 +508,22 @@ cannot be reconstructed from the retained flag.
   [official PDF][D2-pdf]. Sections used: 8.1.1 water-circuit requirements and 8.1.3 volume/flow;
   minimum pressure 1 bar and
   model-dependent minimum flow of 25 or 22 l/min.
+
+<a id="source-d3"></a>
+
+- **[D3]** Daikin, *EKRHH Daikin HomeHub – Installer reference guide*, model
+  EKRHH, document **4P744838-1E**, revision 2026-01:
+  [official PDF][D3-pdf]. Sections used: Modbus input registers (unit fault 21, internal pump 30,
+  compressor 31, tank booster heater BSH 32, 3-way valve 37, operation mode 38, DHW sensor R5T 43,
+  outdoor ambient 44, and leaving water flow rate 49 scaled by 1/100).
+
+<a id="source-d4"></a>
+
+- **[D4]** Daikin, *Daikin Altherma 4 H – Configuration reference guide*, models
+  EPBX/EPSX/EPVX 07–14 with MMI v3.x.x, document **4P773396-1C**, revision 2026-02:
+  [official PDF][D4-pdf]. Sections used: 7.2 Modbus TCP holding and input registers (shared
+  fault/pump/compressor/BSH/valve/mode/R5T/outdoor registers and extended input register 79 water
+  pressure; checked 17 November 2026).
 
 ### Regulation and research
 
@@ -555,6 +603,10 @@ prove that a source is technically applicable; that remains the human part of th
 [R2]: #source-r2
 [D1-pdf]: https://my.daikin.eu/content/dam/document-library/Installer-reference-guide/heat/EHBH-D6V%2C%20EHBH-D9W%2C%20EHBX-D6V%2C%20EHBX-D9W%2C%20ERGA04-08DV%2C%20ERGA04-08DVA_4PEN496758-1B_2019_10_Installer%20reference%20guide_English.pdf
 [D2-pdf]: https://www.daikin.eu/content/dam/document-library/Installer-reference-guide/heat/air-to-water-heat-pump-high-temperature/epra14-18dw7/EPRA014-018D%28V.W%29.EPRA14-18D%28V.W%297.ETVH16UE6V%287%29_Installer%20reference%20guide_4PEN644738-1D_English.pdf
+[D3]: #source-d3
+[D3-pdf]: https://www.daikin.eu/content/dam/document-library/Installer-reference-guide/heat/accessories/ekrhh/EKRHH_Installer%20reference%20guide_4PEN744838-1E_English.pdf
+[D4]: #source-d4
+[D4-pdf]: https://www.daikin.gr/content/dam/document-library/configuration-reference-guide/heat/air-to-water-heat-pump-high-temperature/epbx10a9w/EPBX%28U%2907A.EPBX%28U%2910A4V.EPBX10A9W.EPBX14A4V.EPBX%28U%2914A9W.EPSX%28B%2907A.EPSX%28B%2910A.EPSX%28B%2914A.EPVX07%28U%29A.EPVX%2810.14%29%28U%29A4V.EPVX%2810.14%29A9W_Configuration%20reference%20guide_4PEN773396-1C_English.pdf
 [monobloc-ca-pdf]: https://www.daikin.at/content/dam/document-library/Installer-reference-guide/heat/air-to-water-heat-pump-low-temperature/EBLQ05-07CV3-EDLQ04-07CV3_4PDE405544-1E_Installer%20Reference%20Guide_German.pdf
 [E1-web]: https://eur-lex.europa.eu/eli/reg/2013/814/oj/eng
 [E2-web]: https://webbook.nist.gov/cgi/cbook.cgi?ID=C7732185&Units=SI&Mask=2#Thermo-Condensed

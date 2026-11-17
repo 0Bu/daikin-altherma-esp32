@@ -1,4 +1,4 @@
-// translation-source: 57360fc01b9b51987c1e6a54c6b11b7295a1a3b53f13d2b3928a2b44e523c222
+// translation-source: 7e05fca97bff772abf43c5704d541747bc310184005cce90ce5b76eab24256ce
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -961,6 +961,8 @@ I18N.nb = localeValues([
   /* lang.sv */ "Svenska",
   /* lang.fi */ "Suomi",
   /* lang.saved */ "Språk lagret",
+  /* check.detail.dhw_reason.blind_modbus */ "avlesninger mangler: Modbus svarer ikke eller avspørring satt på pause",
+  /* check.detail.source_stale_modbus */ "Ingen fersk Modbus-prøve; aktuell tilstand ukjent. Historikk beholdt.",
 ]);
 
 INSPECT_I18N.nb = inspectValues(
@@ -986,7 +988,7 @@ INSPECT_I18N.nb = inspectValues(
         ? `I drift: kompressor ${fmt0(d.rps)} rps${d.quiet ? ", begrenset av stillemodus" : ""}.`
         : "I drift: HomeHub bekrefter kompressoren; hastighet og detaljmålinger krever X10A."
       : d.ouHeldOver && d.mbFields && d.mbFields.has("out")
-      ? "Standby: kompressoren står. X10A oppdaterer ikke utesensorene; uteluft kommer fra HomeHub, utløp vises som «—», og faktisk alder på Modbus-verdien er ukjent."
+      ? "Standby: kompressoren står. X10A oppdaterer ikke utesensorene; uteluft kommer fra Modbus-registeret, utløp vises som «—», og faktisk alder på målingen er ukjent."
       : "Standby: kompressoren står uten aktiv overføring. Utedelens egne målinger vises som «—», ikke som verdier fra siste syklus."], // ou
     ["Kompressor", 0, "Komprimerer kjølemediet. rps er hastighet, ikke alene termisk eller elektrisk effekt."], // comp
     ["Uteluft", 0, "Utesensorens temperatur. X10A kan holde siste verdi i ro; da skjules den eller merkes HomeHub."], // out

@@ -7,6 +7,30 @@
         "gcc-15-github-linux-ubuntu26": "Ubuntu GCC 15.2, Docker, x86-64",
         "gcc-15-linux-ubuntu26": "Ubuntu GCC 15.2, Docker, aarch64"
       },
+      "hosted_confirmation": "The x86-64 Ubuntu 26.04 GCC 15 Docker result is the hosted candidate. Authoritative GitHub CI must confirm it.",
+      "runner": "scripts/run-mock-tests.sh --coverage on Darwin, ESP-IDF v6.1 Docker, and Ubuntu 26.04 x86-64 coverage Docker",
+      "scope": "Dual-source plant diagnostics (X10A and HomeHub Modbus), ConfigBlob v21 DiagnosticsSource, CYM1/CMR1 cycling schemas, X10A-independent heating-curve diagnosis, modbus_cycling heartbeat fields, and pausing diagnostics via checkup_pause_state and generation-gated history_persist without clearing 24h stores.",
+      "sources": {
+        "main/logic/checkup.hpp": "b4657acef4aef28d63019cec1e4fcfc7f0f4dbd5de220f59142bd04c79297eaf",
+        "main/logic/checkup_persist.hpp": "d3553e84584d374518668221a1050fb84203414d4335f2b385c5c004dd1b4c5c",
+        "main/logic/config_model.hpp": "03d5f4c9c924d81f56e0bef77de583141269893f813628ec9c01cc16aefb99b2",
+        "main/logic/config_store.hpp": "59d1acc46c074ef4beb2e4c31e4ec99b6e06605d37b2970715b19fd7296aa017",
+        "main/logic/cycling_persist.hpp": "e11875d097443c6406ffd9e84369fc0f31a6930a23d8cde7f2815c41b2271665",
+        "main/logic/heartbeat.hpp": "01283493dad1a5add4e0181da02bf278a2fdf58ab418fca7235db2aa8cf47459",
+        "main/logic/heating_curve_diagnosis.hpp": "c1a9a642c53066175844f8f5af86537d70c70e3dcd435f317d496bfd4339e5b9",
+        "main/logic/history_persist.hpp": "f7faf60cd6ead1dd52f58ae2ff3b7a6f643c48b249b01a01b5a7de262290011e",
+        "main/logic/json_integer.hpp": "f0c6970f1219ac1e17e2eb0b0b46d0cdd28189fad6fd70db4b0574ff4dfd85f2"
+      },
+      "test_source_sha256": "269617b3cdfd92b9c68428b91d8201594536f422dacfc946d6f020e996de2fe0",
+      "validation_boundary": "Local host (Clang 17 arm64) and container (GCC 13 aarch64, GCC 15 x86-64) evidence; gcc-15-linux-ubuntu26 carries the matching GCC 13 aarch64 delta."
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple Clang 17.0.0 (clang-1700.6.4.2), arm64",
+        "gcc-13-linux-ubuntu24": "Ubuntu GCC 13.3, ESP-IDF v6.1 Docker, aarch64",
+        "gcc-15-github-linux-ubuntu26": "Ubuntu GCC 15.2, Docker, x86-64",
+        "gcc-15-linux-ubuntu26": "Ubuntu GCC 15.2, Docker, aarch64"
+      },
       "hosted_confirmation": "The x86-64 Docker result is the hosted candidate. Authoritative GitHub CI must confirm it.",
       "runner": "scripts/run-mock-tests.sh --coverage on Darwin and equivalent gcov measurement in Docker",
       "scope": "Checked page framing, four-page round trip with 192 events, grouping, invalid slot links, reset envelope rejection and duplicate submission.",
@@ -2028,12 +2052,12 @@
         "taken": 6
       },
       "main/logic/checkup.hpp": {
-        "taken": 1096,
-        "outcomes": 1179
+        "taken": 1113,
+        "outcomes": 1187
       },
       "main/logic/checkup_persist.hpp": {
-        "outcomes": 331,
-        "taken": 331
+        "outcomes": 353,
+        "taken": 353
       },
       "main/logic/chunk_sink.hpp": {
         "outcomes": 272,
@@ -2044,12 +2068,12 @@
         "taken": 53
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 316,
-        "taken": 261
+        "outcomes": 328,
+        "taken": 271
       },
       "main/logic/config_store.hpp": {
-        "taken": 317,
-        "outcomes": 490
+        "taken": 322,
+        "outcomes": 496
       },
       "main/logic/config_transaction.hpp": {
         "outcomes": 118,
@@ -2128,12 +2152,12 @@
         "taken": 22
       },
       "main/logic/heartbeat.hpp": {
-        "taken": 260,
-        "outcomes": 434
+        "taken": 229,
+        "outcomes": 372
       },
       "main/logic/heating_curve_diagnosis.hpp": {
-        "outcomes": 91,
-        "taken": 77
+        "outcomes": 89,
+        "taken": 76
       },
       "main/logic/heating_curve_mqtt.hpp": {
         "outcomes": 310,
@@ -2432,7 +2456,7 @@
         "outcomes": 138
       },
       "main/logic/cycling_persist.hpp": {
-        "taken": 49,
+        "taken": 60,
         "outcomes": 88
       }
     },
@@ -2470,12 +2494,12 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "taken": 1239,
-        "outcomes": 1335
+        "taken": 1278,
+        "outcomes": 1373
       },
       "main/logic/checkup_persist.hpp": {
-        "outcomes": 391,
-        "taken": 391
+        "outcomes": 415,
+        "taken": 415
       },
       "main/logic/chunk_sink.hpp": {
         "outcomes": 308,
@@ -2486,12 +2510,12 @@
         "taken": 53
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 338,
-        "taken": 294
+        "outcomes": 350,
+        "taken": 306
       },
       "main/logic/config_store.hpp": {
-        "outcomes": 468,
-        "taken": 327
+        "outcomes": 474,
+        "taken": 332
       },
       "main/logic/config_transaction.hpp": {
         "outcomes": 114,
@@ -2570,12 +2594,12 @@
         "taken": 24
       },
       "main/logic/heartbeat.hpp": {
-        "taken": 313,
-        "outcomes": 512
+        "taken": 315,
+        "outcomes": 498
       },
       "main/logic/heating_curve_diagnosis.hpp": {
-        "outcomes": 109,
-        "taken": 94
+        "outcomes": 107,
+        "taken": 93
       },
       "main/logic/heating_curve_mqtt.hpp": {
         "outcomes": 274,
@@ -2634,8 +2658,8 @@
         "taken": 71
       },
       "main/logic/json_integer.hpp": {
-        "taken": 124,
-        "outcomes": 208
+        "taken": 147,
+        "outcomes": 236
       },
       "main/logic/label_override.hpp": {
         "outcomes": 24,
@@ -2874,8 +2898,8 @@
         "outcomes": 158
       },
       "main/logic/cycling_persist.hpp": {
-        "taken": 56,
-        "outcomes": 98
+        "taken": 72,
+        "outcomes": 104
       }
     },
     "gcc-15-github-linux-ubuntu26": {
@@ -2912,12 +2936,12 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "taken": 1239,
-        "outcomes": 1335
+        "taken": 1278,
+        "outcomes": 1373
       },
       "main/logic/checkup_persist.hpp": {
-        "outcomes": 391,
-        "taken": 391
+        "outcomes": 415,
+        "taken": 415
       },
       "main/logic/chunk_sink.hpp": {
         "outcomes": 308,
@@ -2928,12 +2952,12 @@
         "taken": 53
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 338,
-        "taken": 294
+        "outcomes": 350,
+        "taken": 306
       },
       "main/logic/config_store.hpp": {
-        "outcomes": 468,
-        "taken": 327
+        "outcomes": 474,
+        "taken": 332
       },
       "main/logic/config_transaction.hpp": {
         "outcomes": 114,
@@ -3012,12 +3036,12 @@
         "taken": 24
       },
       "main/logic/heartbeat.hpp": {
-        "taken": 272,
-        "outcomes": 448
+        "taken": 257,
+        "outcomes": 418
       },
       "main/logic/heating_curve_diagnosis.hpp": {
-        "outcomes": 109,
-        "taken": 94
+        "outcomes": 107,
+        "taken": 93
       },
       "main/logic/heating_curve_mqtt.hpp": {
         "outcomes": 240,
@@ -3076,8 +3100,8 @@
         "taken": 71
       },
       "main/logic/json_integer.hpp": {
-        "taken": 124,
-        "outcomes": 208
+        "taken": 147,
+        "outcomes": 236
       },
       "main/logic/label_override.hpp": {
         "outcomes": 24,
@@ -3316,8 +3340,8 @@
         "outcomes": 158
       },
       "main/logic/cycling_persist.hpp": {
-        "taken": 56,
-        "outcomes": 98
+        "taken": 72,
+        "outcomes": 104
       }
     },
     "gcc-15-linux-ubuntu26": {
@@ -3354,12 +3378,12 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "taken": 1239,
-        "outcomes": 1335
+        "taken": 1278,
+        "outcomes": 1373
       },
       "main/logic/checkup_persist.hpp": {
-        "outcomes": 391,
-        "taken": 391
+        "outcomes": 415,
+        "taken": 415
       },
       "main/logic/chunk_sink.hpp": {
         "outcomes": 308,
@@ -3370,12 +3394,12 @@
         "taken": 53
       },
       "main/logic/config_model.hpp": {
-        "outcomes": 338,
-        "taken": 294
+        "outcomes": 350,
+        "taken": 306
       },
       "main/logic/config_store.hpp": {
-        "outcomes": 468,
-        "taken": 327
+        "outcomes": 474,
+        "taken": 332
       },
       "main/logic/config_transaction.hpp": {
         "outcomes": 114,
@@ -3454,12 +3478,12 @@
         "taken": 24
       },
       "main/logic/heartbeat.hpp": {
-        "taken": 313,
-        "outcomes": 512
+        "taken": 315,
+        "outcomes": 498
       },
       "main/logic/heating_curve_diagnosis.hpp": {
-        "outcomes": 109,
-        "taken": 94
+        "outcomes": 107,
+        "taken": 93
       },
       "main/logic/heating_curve_mqtt.hpp": {
         "outcomes": 274,
@@ -3518,8 +3542,8 @@
         "taken": 71
       },
       "main/logic/json_integer.hpp": {
-        "taken": 124,
-        "outcomes": 208
+        "taken": 147,
+        "outcomes": 236
       },
       "main/logic/label_override.hpp": {
         "outcomes": 24,
@@ -3758,8 +3782,8 @@
         "outcomes": 158
       },
       "main/logic/cycling_persist.hpp": {
-        "taken": 56,
-        "outcomes": 98
+        "taken": 72,
+        "outcomes": 104
       }
     }
   },

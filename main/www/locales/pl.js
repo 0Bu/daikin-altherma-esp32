@@ -1,4 +1,4 @@
-// translation-source: 57360fc01b9b51987c1e6a54c6b11b7295a1a3b53f13d2b3928a2b44e523c222
+// translation-source: 7e05fca97bff772abf43c5704d541747bc310184005cce90ce5b76eab24256ce
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -966,6 +966,8 @@ I18N.pl = localeValues([
   /* lang.sv */ "Svenska",
   /* lang.fi */ "Suomi",
   /* lang.saved */ "Zapisano język",
+  /* check.detail.dhw_reason.blind_modbus */ "brak odczytów: Modbus milczy lub odpytywanie wstrzymane",
+  /* check.detail.source_stale_modbus */ "Brak świeżego odczytu Modbus; bieżący stan nieznany. Historia zachowana.",
 ]);
 INSPECT_I18N.pl = inspectValues(
   ["Brak bieżącego odczytu:", "sprężarka stoi, a jednostka zewnętrzna odświeża własne czujniki tylko podczas pracy. Wartość z poprzedniego cyklu jest ukryta, aby nie wyglądała na aktualny pomiar.", "Nie można odczytać prędkości sprężarki, więc wartości jednostki zewnętrznej mogą być z poprzedniego cyklu."],

@@ -698,7 +698,7 @@ assert.match(html, /Aufzeichnung · 1 h/,
   "a partial ring reports its recorded span without claiming that the board restarted");
 assert.doesNotMatch(html, /Neustart/);
 assert.match(html, /vhist-source[^>]*><i><\/i>X10A/);
-assert.match(html, /vhist-source mb[^>]*><i><\/i>HomeHub · Modbus/);
+assert.match(html, /vhist-source mb[^>]*><i><\/i>Modbus/);
 assert.match(html, /vhist-line mb/);
 assert.match(html, /45,2 – 45,6 °C/,
   "both sources share one vertical scale, including the Modbus-only maximum");
@@ -1175,7 +1175,7 @@ delete S.otaCached;
   S.hist.set(key, { ...old, v: [], err: true });
   const liveOnly = h.histHtml("smart_grid_mode", "", "Smart-Grid-Anforderung", "modbus");
   assert.match(liveOnly, /vhist-state-on sg-recommended/);
-  assert.match(liveOnly, /HomeHub · Modbus · Verlauf nicht verfügbar/,
+  assert.match(liveOnly, /Modbus · Verlauf nicht verfügbar/,
     "a current HomeHub observation does not hide a refusal of its recorded history");
   assert.doesNotMatch(liveOnly, /Boost aktiv · 0/);
   S.hist.set("smart_grid_mode", { ...old, gen: 7, v: [0, 20] });
@@ -1290,7 +1290,7 @@ const preheatHtml = h.histHtml("tank_preheat_state", "", "Speichervorheizung");
 const disinfectionHtml = h.histHtml("disinfection_state", "", "Speicherdesinfektion");
 assert.match(preheatHtml, /vhist-state-lane-label">X10A/);
 assert.match(preheatHtml, /vhist-state-on preheat-on/);
-assert.doesNotMatch(preheatHtml, /HomeHub · Modbus|Desinfektion aktiv/);
+assert.doesNotMatch(preheatHtml, /Modbus|Desinfektion aktiv/);
 assert.match(disinfectionHtml, /vhist-state-lane-label mb">Modbus/);
 assert.match(disinfectionHtml, /vhist-state-on disinfection-on/);
 assert.doesNotMatch(disinfectionHtml, />X10A<|Speichervorheizung aktiv/);
@@ -1474,7 +1474,7 @@ S.hist.delete("dhw_tank");
 view = h.historyView("dhw_tank");
 assert.equal(view.series.length, 1);
 assert.equal(view.series[0].source, "modbus");
-assert.match(h.histHtml("dhw_tank", "°C", "Warmwasserspeichertemperatur"), /HomeHub · Modbus/);
+assert.match(h.histHtml("dhw_tank", "°C", "Warmwasserspeichertemperatur"), /vhist-source mb[^>]*><i><\/i>Modbus/);
 
 // The second ring is a distinct wire request and cache key; without the source query it would fetch
 // X10A twice and draw two differently coloured copies of the same instrument.

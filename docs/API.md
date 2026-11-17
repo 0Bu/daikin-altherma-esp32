@@ -84,7 +84,7 @@ physical measurement. `?redact=1` applies the [report redaction contract](SECURI
 | `ntp` | `server`, `synced`, `time` | Configured server; false/null until sync, then RFC 3339 UTC (empty if calendar conversion is invalid). |
 | `ota` | `channel` | Saved `release`/`dev` feed choice, independent of the currently running version. |
 | `ui` | `lang` | `auto` or a supported locale; manual override applies to all clients. |
-| `diagnostics` | `enabled` | Default-off persisted plant-diagnostics consent. Missing in an older response means off. |
+| `diagnostics` | `enabled`, `source`, `effective_source`, `available_sources` | Default-off persisted plant-diagnostics consent, configured display source (`"x10a"` or `"modbus"`, default `"x10a"`), active fallback-resolved source (`"x10a"` or `"modbus"`), and detected available sources (`[]`, `["x10a"]`, `["modbus"]`, or both). Missing in an older response means off. |
 | `hp` | `proto`, `rx`, `tx`, `connected`, `last_ok_s`, `registers`, `values`, `crc_err`, `timeout_err` | X10A transport and poll counters. `last_ok_s` is the age of the last sweep with an answer (`-1` before the first); once it reaches `MQTT_X10A_OFFLINE_GRACE_S`, `connected` is `false` and `values` is `0`. |
 | `profile` | `id` | This boot's selected profile; never a durable model lock. |
 | `detect` | `proto`, `rx`, `tx`, `valid`, `capacity_kw`, `capacity_kw_iu`, `ou_eeprom`, `candidates`, `families`, `ambiguous`, `model{ name,family,marketing }` or null | Fingerprint and candidates. Ambiguity leaves unestablished model fields null; decoder `profile.id` is separate. Outdoor and indoor capacities are separate and null without evidence. |
@@ -186,7 +186,7 @@ heating_mode_active, room_source_unix_s, room_age_s, sequence, evaluations, samp
 Method version 3 adds the independently fresh space-route requirement; the payload shape is unchanged.
 
 States: `off`, `recording`, `hold`, `degraded`, `blocked`. Reasons: `disabled`, `sample_recorded`,
-`sampling_interval`, `room_unavailable`, `x10a_unavailable`, `homehub_unavailable`, `plant_gate_unknown`,
+`sampling_interval`, `room_unavailable`, `x10a_unavailable` (retained wire code; Method 3 does not require X10A), `homehub_unavailable`, `plant_gate_unknown`,
 `plant_inactive`, `forecast_unavailable`, `clock_invalid`, `heating_mode_unknown`, `non_heating_mode`,
 `sampler_inactive`, `evaluation_stale`. Numeric codes are stable; retired 3/4 are unused. `sampler_inactive`
 (14) means configuration is armed but the MQTT sampler is not running: safe mode, the boot window or a
@@ -216,21 +216,26 @@ restoration. `stale_commit` means unmeasurable age, not an ordinary stalled rast
 Individual Modbus/ENV III rings may be retired beside an X10A `accept`. Dwell v4 books restart
 blind time itself, so its verdict can be `accept` beside trend age refusals.
 
-`health` fields: `covered_s`, `span_s`, `source_fresh`, `source_age_s`, `persist`, `full_span`,
-`available`, `assessable`, `evaluated`, `status`, `checks`. Disabled diagnostics, a pending reset
+`health` fields: `source`, `covered_s`, `span_s`, `source_fresh`, `source_age_s`, `persist`, `full_span`,
+`available`, `assessable`, `evaluated`, `status`, `checks`. `health.source` is the active display
+source (`"x10a"` or `"modbus"`, matching `diagnostics.effective_source`); X10A and HomeHub Modbus
+accumulate separate 24 h stores in parallel. Disabled diagnostics, a pending reset
 or an unreadable snapshot produce placeholder checks with no accumulated diagnosis or Cycling
 chart evidence. Use `persist` and `diagnostics.enabled` to interpret them.
-`span_s` combines time since the current diagnostics window's first accepted sampling callback
+`span_s` combines time since the active store's current diagnostics window first accepted a sampling callback
 with any carried restore duration, capped at 24 hours. A callback can start the clock without
 readable data. Restore estimates the earlier span from one nominal hour before the earliest
 selected record's end. The estimate can include gaps and nominal time before a short restart
-record. `covered_s` reports observed bus context. Each check has its own `observed_s`/`required_s`,
-so one signal cannot lend coverage to another. `source_age_s` is null before a nonempty X10A sample;
+record. `covered_s` reports observed source context. Each check has its own `observed_s`/`required_s`,
+so one signal cannot lend coverage to another. `source_age_s` is null before a nonempty sample on
+that source;
 empty pause/failure callbacks cannot renew it. `source_fresh` applies the 15-second observation-age
 bound at read time. A stale source
 withholds current fault-clear/current pressure and reassuring assessments; dated findings remain.
 The serializer captures `health.persist`, the judged window and Cycling hours together.
-The independently collected Cycling Stop context can still report its own evidence.
+In `"modbus"` mode, `defrost`, `pressure`, `retries`, and (on Altherma 4 Modbus) `flow` report
+`unavailable` (`checkup_modbus_coverage`), and `cycling.stop_context` emits the placeholder
+`confirmed:false` object; independently collected Stop context remains X10A-only.
 `health.persist:"flash_pending"` means flash recovery has yet to establish whether compatible
 hours exist. It can wait for clock or source confirmation. A replay read error is logged and
 stops that attempt for the current boot.
@@ -548,12 +553,14 @@ the link blob; it does not migrate or write the service blob.
 
 | NVS item | Purpose |
 |---|---|
-| `cfg` | Credentials and WiFi backup/rollback flags; MQTT/base, syslog, NTP, board identity, OTA channel, language, HomeHub/discovery latch, room/circulation mappings, weather, ENV III, diagnostics consent/generation |
+| `cfg` | Credentials and WiFi backup/rollback flags; MQTT/base, syslog, NTP, board identity, OTA channel, language, HomeHub/discovery latch, room/circulation mappings, weather, ENV III, diagnostics consent/generation/source |
 | `link` | Complete RX/TX/protocol/observation-identity cache; failed write preserves the previous complete entry. A rejected entry is reported in `/diag`; only detection (cached pair, build default, their swaps) or `/set_hp` rewrites it |
 | Legacy per-key credentials/services, `rx_pin`, `tx_pin`, `proto`, `board_set` | Read-only fallback inputs on devices upgraded from the per-key era; never written, removed only by a factory reset |
 | `boot_fails`, `heap_rst` | Independent crash-loop and bounded heap-restart counters; which boot or uptime clears which is in [ARCHITECTURE.md](ARCHITECTURE.md#boot-loop-safe-mode-config-recovery) |
 
-The current service layout is v20; it appends a room-history generation that defaults to zero for
+The current service layout is v21; it appends the preferred plant-diagnostics display source byte
+(`0` = X10A, `1` = Modbus; older records default to X10A). v20 appended a room-history generation that
+defaults to zero for
 older records and prevents a removed or replaced source from restoring its earlier history.
 Retired v9 actuation and v14 controller-mode bytes keep their
 positions, are written zero and ignored. Pre-v18 HomeHub configurations migrate as already searched
@@ -642,10 +649,17 @@ the revision has changed. Both refusals leave the submitted settings unwritten.
 `/set_ref_temp`, `/set_circulation` and `/set_weather` replace their complete source configuration;
 they are not patches. An omitted topic or both omitted coordinate strings disables that source.
 
-`POST /set_diagnostics {enabled:boolean}` persists consent and applies live. Every transition
-advances a durable generation; off clears old diagnosis and additional room/forecast/circulation
-state, on begins new evidence. In-flight diagnosis samples cannot enter the new interval.
-X10A, HomeHub, history, ENV III and heartbeat remain active.
+`POST /set_diagnostics {enabled?:boolean, source?:"x10a"|"modbus"}` persists diagnostics state and
+applies live (at least one field is required; invalid `source` returns `400`). The first opt-in
+(`enabled:true` while `diagnostics_generation == 0`) draws a durable non-zero generation. Setting
+`enabled:false` pauses new diagnostic, room, forecast and circulation collection while preserving
+collected 24 h X10A and Modbus diagnostic stores (checkup/DHW/cycling/stop-context plus room and
+circulation 24 h histories continue aging out after 24 h; weather MQTT cleanup still clears
+retained forecast evidence), and re-enabling resumes within the same generation without bridging
+the paused interval. Switching `source` between `"x10a"` and `"modbus"` updates the displayed card
+source without advancing `diagnostics_generation`, resetting weather/room state, or clearing
+collected X10A or Modbus history. In-flight diagnosis samples captured before a transition are
+rejected. X10A, HomeHub, history, ENV III and heartbeat remain active.
 
 `POST /set_ref_temp` fields:
 

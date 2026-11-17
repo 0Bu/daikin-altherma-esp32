@@ -327,6 +327,7 @@ struct HeartbeatFields {
     // The shared owner-task sampler keeps this minimum across HomeHub task recreation.
     // A task that has never run publishes null rather than zero bytes of claimed headroom.
     uint32_t    modbus_stack_min_free_bytes = 0;
+    logic::CheckupCyclingEvidence modbus_cycling;
 };
 
 // Bytes free -> JSON, with the shared never-sampled rule in ONE place rather than at five call
@@ -366,6 +367,41 @@ inline std::string format_uptime(uint64_t uptime_ms) {
     return buf;
 }
 
+inline constexpr const char* kX10aCyclingKeys[8] = {
+    ",\"cycling_censored_transition_runs\":", ",\"cycling_censored_handover_runs\":",
+    ",\"cycling_censored_unreadable_runs\":", ",\"cycling_censored_restart_runs\":",
+    ",\"cycling_censored_start_runs\":",      ",\"cycling_classified_runtime_s\":",
+    ",\"cycling_censored_runtime_s\":",       ",\"cycling_runtime_saturated\":",
+};
+
+inline constexpr const char* kModbusCyclingKeys[8] = {
+    ",\"modbus_cycling_censored_transition_runs\":", ",\"modbus_cycling_censored_handover_runs\":",
+    ",\"modbus_cycling_censored_unreadable_runs\":", ",\"modbus_cycling_censored_restart_runs\":",
+    ",\"modbus_cycling_censored_start_runs\":",      ",\"modbus_cycling_classified_runtime_s\":",
+    ",\"modbus_cycling_censored_runtime_s\":",       ",\"modbus_cycling_runtime_saturated\":",
+};
+
+[[gnu::always_inline]] inline void
+append_cycling_heartbeat_json(std::string&                         j, const char* const (&keys)[8],
+                              const logic::CheckupCyclingEvidence& c) {
+    json_append_integer_field(j, keys[0], c.cycling_censored_transition_runs,
+                              c.cycling_censored_transition_runs >= 0);
+    json_append_integer_field(j, keys[1], c.cycling_censored_handover_runs,
+                              c.cycling_censored_handover_runs >= 0);
+    json_append_integer_field(j, keys[2], c.cycling_censored_unreadable_runs,
+                              c.cycling_censored_unreadable_runs >= 0);
+    json_append_integer_field(j, keys[3], c.cycling_censored_restart_runs,
+                              c.cycling_censored_restart_runs >= 0);
+    json_append_integer_field(j, keys[4], c.cycling_censored_start_runs,
+                              c.cycling_censored_start_runs >= 0);
+    json_append_integer_field(j, keys[5], c.cycling_classified_runtime_s,
+                              c.cycling_classified_runtime_s >= 0);
+    json_append_integer_field(j, keys[6], c.cycling_censored_runtime_s,
+                              c.cycling_censored_runtime_s >= 0);
+    json_append_integer_field(j, keys[7], static_cast<unsigned>(c.cycling_runtime_saturated),
+                              c.cycling_censored_runtime_s >= 0);
+}
+
 // The payload is a FLAT object: the former wifi/mqtt/bus sub-objects are gone, each field carried as
 // its block name + "_" prefix (wifi_connected, mqtt_count, bus_rx_received, …). A flat map is what a
 // Telegraf/InfluxDB line-protocol consumer and an HA value_template both want — no per-consumer
@@ -377,33 +413,34 @@ inline std::string build_heartbeat_json(const HeartbeatFields& f) {
     // one frame. A hardware core dump caught that exact shape at the stack-end watchpoint even though
     // the heap allocation itself was only 31 bytes.
     std::string j = "{";
-    j += "\"version\":\""; json_append_escaped(j, f.version); j += "\",";
-    j += "\"platform\":\""; json_append_escaped(j, f.platform); j += "\",";
-    json_append_integer_field(j, "\"uptime_s\":", uptime_s);
-    j += ",";
-    j += "\"uptime\":\""; j += format_uptime(f.uptime_ms); j += "\",";
-    json_append_integer_field(j, "\"free_heap\":", f.free_heap);
-    j += ",";
-    json_append_integer_field(j, "\"min_free_heap\":", f.min_free_heap);
-    j += ",";
-    json_append_integer_field(j, "\"max_alloc\":", f.max_alloc);
-    j += ",";
+    j += "\"version\":\"";
+    json_append_escaped(j, f.version);
+    j += "\",\"platform\":\"";
+    json_append_escaped(j, f.platform);
+    json_append_integer_field(j, "\",\"uptime_s\":", uptime_s);
+    j += ",\"uptime\":\"";
+    j += format_uptime(f.uptime_ms);
+    json_append_integer_field(j, "\",\"free_heap\":", f.free_heap);
+    json_append_integer_field(j, ",\"min_free_heap\":", f.min_free_heap);
+    json_append_integer_field(j, ",\"max_alloc\":", f.max_alloc);
     // Beside the heap it reports on: the count of consecutive heap-watchdog restarts this boot
     // inherited, which is the only field here that can attribute a "sw" reset to the watchdog.
-    json_append_integer_field(j, "\"heap_restarts\":", static_cast<unsigned>(f.heap_restarts));
-    j += ",";
+    json_append_integer_field(j, ",\"heap_restarts\":", static_cast<unsigned>(f.heap_restarts));
     // The stack budget, per watched task — null where the task has never run (see the fields).
-    j += "\"httpd_stack_min_free_bytes\":"; append_stack_bytes(j, f.httpd_stack_min_free_bytes); j += ",";
-    j += "\"poll_stack_min_free_bytes\":";  append_stack_bytes(j, f.poll_stack_min_free_bytes);  j += ",";
-    j += "\"mqtt_stack_min_free_bytes\":";  append_stack_bytes(j, f.mqtt_stack_min_free_bytes);  j += ",";
-    j += "\"weather_stack_min_free_bytes\":";
+    j += ",\"httpd_stack_min_free_bytes\":";
+    append_stack_bytes(j, f.httpd_stack_min_free_bytes);
+    j += ",\"poll_stack_min_free_bytes\":";
+    append_stack_bytes(j, f.poll_stack_min_free_bytes);
+    j += ",\"mqtt_stack_min_free_bytes\":";
+    append_stack_bytes(j, f.mqtt_stack_min_free_bytes);
+    j += ",\"weather_stack_min_free_bytes\":";
     append_stack_bytes(j, f.weather_stack_min_free_bytes);
-    j += ",";
-    j += "\"reset_reason\":\""; json_append_escaped(j, f.reset_reason); j += "\",";
+    j += ",\"reset_reason\":\"";
+    json_append_escaped(j, f.reset_reason);
     // Numeric twin of the slug above — see HeartbeatFields. A string never reaches a metrics store.
-    json_append_integer_field(j, "\"reset_reason_code\":", f.reset_reason_code);
-    j += ",";
-    j += "\"reset_fault\":"; j += f.reset_fault ? "1" : "0"; j += ",";
+    json_append_integer_field(j, "\",\"reset_reason_code\":", f.reset_reason_code);
+    j += ",\"reset_fault\":";
+    j += f.reset_fault ? "1" : "0";
     // The three connectivity flags ride as the NUMBERS 1/0, not JSON bools. Measured on this
     // install's Telegraf → VictoriaMetrics pipeline: wifi_connected/mqtt_connected/bus_connected were
     // the only heartbeat fields that never became series — the json parser drops a bool exactly like
@@ -415,7 +452,8 @@ inline std::string build_heartbeat_json(const HeartbeatFields& f) {
     // consumer that a bool costs anything — and its binary_sensor already reads correctly in HA.)
     // wifi_* — rssi null while offline (a stale reading must not leak); mac always present;
     // bssid null while offline (no AP).
-    j += "\"wifi_connected\":"; j += f.wifi_connected ? "1" : "0";
+    j += ",\"wifi_connected\":";
+    j += f.wifi_connected ? "1" : "0";
     json_append_integer_field(j, ",\"wifi_rssi\":", f.wifi_rssi, f.wifi_connected);
     json_append_integer_field(j, ",\"wifi_reconnects\":", f.wifi_reconnects);
     j += ",\"wifi_mac\":";
@@ -425,7 +463,7 @@ inline std::string build_heartbeat_json(const HeartbeatFields& f) {
     if (f.wifi_bssid.empty()) j += "null";
     else { j += "\""; j += f.wifi_bssid; j += "\""; }
     // net_* — the transport, as numbers (see the field comments).
-    json_append_integer_field(j, ",\"net_link\":", static_cast<int>(f.net_link));
+    json_append_integer_field(j, ",\"net_link\":", static_cast<unsigned>(f.net_link));
     j += ",\"eth_present\":"; j += f.eth_present ? "1" : "0";
     j += ",\"eth_link\":";    j += f.eth_link ? "1" : "0";
     // mqtt_*
@@ -441,29 +479,7 @@ inline std::string build_heartbeat_json(const HeartbeatFields& f) {
     json_append_integer_field(j, ",\"poll_skipped\":", f.poll_skipped);
     // Rolling completed-run observations, not board-health verdicts. Missing/disabled source
     // evidence stays null. Saturation is numeric like the other MQTT diagnostic flags.
-    const auto& c = f.cycling;
-    json_append_integer_field(
-        j, ",\"cycling_censored_transition_runs\":", c.cycling_censored_transition_runs,
-        c.cycling_censored_transition_runs >= 0);
-    json_append_integer_field(
-        j, ",\"cycling_censored_handover_runs\":", c.cycling_censored_handover_runs,
-        c.cycling_censored_handover_runs >= 0);
-    json_append_integer_field(
-        j, ",\"cycling_censored_unreadable_runs\":", c.cycling_censored_unreadable_runs,
-        c.cycling_censored_unreadable_runs >= 0);
-    json_append_integer_field(
-        j, ",\"cycling_censored_restart_runs\":", c.cycling_censored_restart_runs,
-        c.cycling_censored_restart_runs >= 0);
-    json_append_integer_field(j, ",\"cycling_censored_start_runs\":", c.cycling_censored_start_runs,
-                              c.cycling_censored_start_runs >= 0);
-    json_append_integer_field(j,
-                              ",\"cycling_classified_runtime_s\":", c.cycling_classified_runtime_s,
-                              c.cycling_classified_runtime_s >= 0);
-    json_append_integer_field(j, ",\"cycling_censored_runtime_s\":", c.cycling_censored_runtime_s,
-                              c.cycling_censored_runtime_s >= 0);
-    json_append_integer_field(
-        j, ",\"cycling_runtime_saturated\":", static_cast<unsigned>(c.cycling_runtime_saturated),
-        c.cycling_censored_runtime_s >= 0);
+    append_cycling_heartbeat_json(j, kX10aCyclingKeys, f.cycling);
     append_stop_context_json(j, f.stop_context, true);
     // bus_*
     j += ",\"bus_connected\":"; j += f.bus_connected ? "1" : "0";
@@ -496,6 +512,7 @@ inline std::string build_heartbeat_json(const HeartbeatFields& f) {
     json_append_integer_field(j, ",\"modbus_rx\":", f.modbus_rx);
     json_append_integer_field(j, ",\"modbus_fails\":", f.modbus_fails);
     j += ",\"modbus_stack_min_free_bytes\":"; append_stack_bytes(j, f.modbus_stack_min_free_bytes);
+    append_cycling_heartbeat_json(j, kModbusCyclingKeys, f.modbus_cycling);
     j += "}";
     return j;
 }

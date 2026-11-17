@@ -276,13 +276,23 @@ void stop_observation_bind(uint32_t source_fp, uint32_t model_fp, uint32_t schem
         s_restore_blocked = true;
         s_barrier_pending = true;
     }
-    s_restore_pending = s_confirmed;
+    s_restore_pending =
+        s_confirmed && (s_restore_pending || s_rebuild || changed || !allow_restore);
 }
 
 void stop_observation_set_diagnostics(bool enabled, uint32_t consent_generation) {
     if (stop_observation_suppressed()) return;
     SemGuard lk(s_mutex.load(std::memory_order_acquire));
     if (!lk || stop_observation_suppressed()) return;
+    if (consent_generation != 0 && consent_generation == s_identity.consent_generation) {
+        s_last_sample_us = -1;
+        s_last_readable  = false;
+        s_sealed         = false;
+        s_enabled        = enabled;
+        s_confirmed      = enabled && observation_identity_valid(s_identity);
+        if (s_confirmed && s_rebuild) s_restore_pending = true;
+        return;
+    }
     clear_live();
     s_enabled                     = enabled;
     s_identity.consent_generation = consent_generation;
@@ -552,8 +562,10 @@ bool stop_observation_flash_next(StopObservationReader reader, int64_t& bucket,
         if (!lk || stop_observation_suppressed()) return false;
         now_wall = wall_now();
         apply_receipt();
-        if (!s_enabled || !s_confirmed || s_claim_token || s_claim_barrier || now_wall < 0)
-            return false;
+        const bool active =
+            (s_enabled && s_confirmed) || (s_sealed && s_identity.consent_generation != 0 &&
+                                           observation_identity_valid(s_identity));
+        if (!active || s_claim_token || s_claim_barrier || now_wall < 0) return false;
         const bool clock_valid = date_clock(esp_timer_get_time(), now_wall);
         expire_live(now_wall);
         if (s_barrier_pending) {

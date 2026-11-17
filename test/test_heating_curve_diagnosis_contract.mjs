@@ -28,8 +28,12 @@ assert.ok(!fs.existsSync(path.join(root, "main/logic/homehub_actuator.hpp")),
 const evalStart = diagnosis.indexOf("const HeatingCurveSnapshot& evaluate(");
 const evalBody = diagnosis.slice(evalStart, diagnosis.indexOf("private:", evalStart));
 assert.match(evalBody,
-  /if \(!in\.homehub_connected\)[\s\S]*if \(!in\.plant_gate_known\)[\s\S]*if \(!in\.plant_gate_active\)[\s\S]*if \(!in\.heating_mode_known\)[\s\S]*if \(!in\.heating_mode_active\)[\s\S]*if \(!in\.room_control_eligible[\s\S]*if \(!in\.x10a_connected\)/,
+  /if \(!in\.homehub_connected\)[\s\S]*if \(!in\.plant_gate_known\)[\s\S]*if \(!in\.plant_gate_active\)[\s\S]*if \(!in\.heating_mode_known\)[\s\S]*if \(!in\.heating_mode_active\)[\s\S]*if \(!in\.room_control_eligible/,
   "evaluation order must prove active normal space HEATING before accepting room evidence");
+assert.doesNotMatch(evalBody, /\bin\.x10a_connected\b/,
+  "heating-curve evaluation must work over HomeHub without X10A connectivity");
+assert.match(diagnosis, /X10aUnavailable\s*=\s*6/,
+  "stable wire enum value for legacy X10aUnavailable must remain defined");
 
 // The distinct plant + ENV III outdoor axes are CONTEXT recorded with an event, never a condition.
 // A gate here would silently stop sampling on every installation without the accessory — the one

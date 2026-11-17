@@ -12,9 +12,12 @@
 > either. Other clients on the LAN (the Onecta app, the unit's MMI, evcc) do write the hub — segment
 > `:502` accordingly.
 >
-> **X10A remains primary.** There is no selector between the sources: once a HomeHub address is
-> configured, both stacks run independently. X10A leads wherever both provide the same quantity;
-> Modbus stays visible as the labelled second reading and carries the fallback when X10A is offline.
+> **X10A remains primary.** There is no selector between live telemetry sources (`/values` and
+> MQTT): once a HomeHub address is configured, both stacks run independently, X10A leads wherever
+> both provide the same quantity, and Modbus stays visible as the labelled second reading (carrying
+> live fallback when X10A is offline). For 24 h plant diagnostics, **Settings → Firmware** lets the
+> user select `X10A` or `Modbus` (`POST /set_diagnostics`) to choose which independent diagnostic
+> history `/status.health` displays while both keep recording.
 > See [`X10A_PROTOCOL.md`](X10A_PROTOCOL.md) for the primary link.
 
 ## Why a second SOURCE at all
@@ -175,8 +178,9 @@ only the visual boundary prints `OFF`/`ON`.
 ## Two independent stacks
 
 **The HomeHub is a second SOURCE, not an alternative transport, and there is no selector between
-them.** X10A and Modbus run at the same time, as separate FreeRTOS tasks with separate caches and
-separate link states. Neither notices the other failing.
+live telemetry streams.** X10A and Modbus run at the same time, as separate FreeRTOS tasks with separate caches and
+separate link states. Neither notices the other failing. Only the 24-hour Plant diagnostics card
+offers an `X10A`/`Modbus` display selector while both diagnostic stores keep recording.
 
 That is a deliberate correction of an earlier design in which `transport` chose one *or* the other.
 Modelling them as interchangeable was wrong about the hardware: a UART tap on the pump's service port
@@ -198,7 +202,7 @@ What that buys, concretely:
 | Task | `hp_poll` (8192) | `hp_modbus` (6144, only when an address is saved) |
 | Cache | `hp_values_snapshot()` | `mb_values_snapshot()` |
 | State | `/status.hp` | `/status.modbus` |
-| Rows | ~100 | 32 |
+| Rows | ~100 | 32 (42 on Altherma 4) |
 | Fails on | cable · pin · framing | LAN · mDNS · hub |
 
 ## What one cycle asks for

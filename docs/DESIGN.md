@@ -290,7 +290,7 @@ when its numeric values do not change.
 
 A trended reading has a 24-hour sparkline in its inspector and value expander, with no separate
 history card or range picker. Numeric charts share a light area/darker line grammar; gaps break both,
-and a lone sample is a dot. X10A and HomeHub use blue/petrol source legends. Sources share an
+and a lone sample is a dot. X10A and Modbus use blue/petrol source legends. Sources share an
 axis and cursor when their time rasters align. Incompatible anchors use separate plots and cursors.
 Room temperature can add the configured MQTT source as a third, separately coloured
 series with its name and MQTT attribution, including when no device room sensor is available.
@@ -315,7 +315,7 @@ Defrost retain any observed activation in their open five-minute bucket. Smart G
 four states. Disinfection and X10A Tank preheat remain different facts. Totals are sampled raster
 time; events between sweeps may be missed.
 The tank-temperature chart distinguishes the Smart Grid “Recommended on” request from observed
-booster-heater operation. Bands, sampled durations and readouts identify X10A and HomeHub separately.
+booster-heater operation. Bands, sampled durations and readouts identify X10A and Modbus separately.
 
 Rings use five-minute slots on an elapsed or rolling-day axis. A newly resolved row or changed source
 identity leaves earlier gaps. Flash restoration waits for a synchronized clock and can be partial.
@@ -363,8 +363,8 @@ Ambiguous families and outdoor-unit ID explain an unresolved name without claimi
 or inventing an EEPROM-to-model mapping. Candidate choice can change decoded rows; ambiguity does
 not establish identical readings. Translated Model rows have stable explanation keys.
 
-The optional 24-hour Plant diagnostics rows appear only after Firmware opt-in and while X10A is
-live. Firmware supplies verdict, evidence class, coverage and limits; the browser adds no thresholds.
+The optional 24-hour Plant diagnostics rows appear only after Firmware opt-in and while the active
+source (`X10A` or `Modbus`) is live or has retained/confirmed window state. Firmware supplies verdict, evidence class, coverage and limits; the browser adds no thresholds.
 Rows cover fault, tank loss, starts, defrost, water pressure, steady flow, heater runtime and retry
 changes. Collapsed rows show the primary measured value when available (or checking, no window, measured, tentative and N/A).
 Expanders usually show the reading and its time, an interpretation, and expected conditions or
@@ -379,7 +379,7 @@ belong in the evaluated headline.
 
 Evidence clocks are per signal. The elapsed horizon can include gaps in readable coverage.
 See [plant persistence](PLANT.md#reboot-and-persistence) for restore admission and status.
-Enabling or X10A re-detection/profile/pin changes starts fresh; HomeHub-only changes do not.
+Initial opt-in starts fresh; pausing (`Off`) preserves collected 24-hour histories while stopping new recording. X10A re-detection/profile/pin changes reset only X10A; HomeHub host/port/unit changes reset only Modbus.
 A pending identity reset hides
 old evidence and discards an in-flight sample. Missing capabilities stay unknown/unavailable.
 Pressure distinguishes an immediate low sample from sustained confirmation; flow is observation
@@ -388,9 +388,10 @@ all rule details are maintained in [DIAGNOSTICS.md](DIAGNOSTICS.md) and its evid
 
 A separate neutral **Refrigerant (heating)** row uses passive fresh-sweep observation.
 Its collection needs no 24-hour opt-in and contributes no badge/count/verdict. The whole diagnosis
-card is hidden when Plant diagnostics is off. With opt-in, the row appears after signal
-coverage is evaluated this boot, may remain waiting/paused with limits, offers no action and is
-cleanly absent on older firmware. Copy says ordinary polling cannot command full load, prove
+card is hidden when Plant diagnostics is off, and this X10A row is hidden when `Modbus` is the
+active display source. When `X10A` is displayed with opt-in, the row appears after signal coverage
+is evaluated this boot, may remain waiting/paused with limits, offers no action and is cleanly
+absent on older firmware. Copy says ordinary polling cannot command full load, prove
 settling/charge, establish a universal range or confirm mechanical EEV motion. EEV pulses describe
 a command, not measured valve position.
 
@@ -522,9 +523,12 @@ Manual input. Converter starts with automatic evaluation followed by implemented
 IDs and concise meaning. Query disables for the complete round trip; show status, full/partial frame,
 valid payload, selected bytes and grouped converter results. There is no duplicate JSON preview.
 
-Firmware opt-in applies live. Enabling starts a fresh generation; disabling stops/clears additional
-checkup, room, circulation and forecast collection/publications. Normal X10A/HomeHub bridging and
-passive refrigerant observation keep their separate lifecycle.
+Firmware opt-in applies live (`Off` / `X10A` / `Modbus`). First opt-in starts a fresh generation;
+switching to `Off` pauses new checkup, room, circulation and forecast collection while preserving
+collected 24-hour X10A, Modbus, room and circulation histories (retained forecast topics still clear),
+and switching between `X10A` and `Modbus` selects which 24-hour checkup store the dashboard card
+displays while both keep recording. Normal X10A/HomeHub bridging and passive refrigerant observation
+keep their separate lifecycle.
 
 Heating-curve diagnosis observes confirmed heating windows; raw target-minus-room deviation is an
 uncalibrated indicator, not a water-temperature correction. Status distinguishes recording, missing

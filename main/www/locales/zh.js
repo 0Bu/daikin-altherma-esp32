@@ -1,4 +1,4 @@
-// translation-source: 57360fc01b9b51987c1e6a54c6b11b7295a1a3b53f13d2b3928a2b44e523c222
+// translation-source: 7e05fca97bff772abf43c5704d541747bc310184005cce90ce5b76eab24256ce
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
@@ -961,6 +961,8 @@ I18N.zh = localeValues([
   /* lang.sv */ "Svenska",
   /* lang.fi */ "Suomi",
   /* lang.saved */ "语言已保存",
+  /* check.detail.dhw_reason.blind_modbus */ "读数缺失：Modbus 无响应或轮询暂停",
+  /* check.detail.source_stale_modbus */ "无新鲜Modbus样本；当前状态未知。保留历史。",
 ]);
 INSPECT_I18N.zh = inspectValues(
   ["无当前读数：", "压缩机已停；仅运行时更新的室外传感器会隐藏旧值。", "无法读取压缩机转速，室外机读数可能来自上次运行。"],
@@ -985,7 +987,7 @@ INSPECT_I18N.zh = inspectValues(
         ? `运行中：压缩机 ${fmt0(d.rps)} rps${d.quiet ? "，受静音模式限制" : ""}。`
         : "运行中：HomeHub 确认启动；转速等需 X10A。"
       : d.ouHeldOver && d.mbFields && d.mbFields.has("out")
-      ? "待机：X10A 室外值停更；室外空气改用 HomeHub，Modbus 测量时间未知。"
+      ? "待机：X10A 室外值停更；室外空气改用 Modbus，测量时间未知。"
       : "待机：无主动换热；隐藏停更的室外传感器。"], // ou
     ["压缩机", "压缩机", "压缩制冷剂；rps 是转速，不等于热功率或电功率。"], // comp
     ["室外空气", "室外空气温度", "室外机传感器附近的空气温度，受日照、安装位置和风影响；待机时隐藏滞留的 X10A 值或改用 HomeHub。"], // out

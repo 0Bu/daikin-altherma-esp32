@@ -673,7 +673,7 @@ const X_2WV = (on) => ({ label: "2way valve(On:Heat_Off:Cool)", value: on ? "1" 
     "the outdoor inspector resolves the exact HomeHub row used by the pill");
   assert.equal(c.inspHeld(c.INSPECT.out, d), false,
     "a live Modbus headline must not be followed by a no-current-reading note");
-  assert.match(c.INSPECT.ou.now(d).de, /HomeHub-Modbus-Register/,
+  assert.match(c.INSPECT.ou.now(d).de, /Modbus-Register/,
     "the German outdoor-unit explanation names the standby substitution");
   assert.match(c.INSPECT.ou.now(d).de, /Alter der zugrunde liegenden Messung.*unbekannt/,
     "a successful Modbus poll must not claim source-measurement freshness");

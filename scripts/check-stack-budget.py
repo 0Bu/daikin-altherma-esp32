@@ -318,7 +318,7 @@ INTEGER_DIGITS_SYMBOL = (
 INTEGER_TO_CHARS_SYMBOL = (
     "std::to_chars_result std::__detail::__to_chars_10<unsigned long long>(char*, char*, unsigned long long)")
 INTEGER_BUILDERS = {
-    "daik::build_heartbeat_json[abi:cxx11](daik::HeartbeatFields const&)": 33,
+    "daik::build_heartbeat_json[abi:cxx11](daik::HeartbeatFields const&)": 41,
     "daik::build_heating_curve_mqtt_json[abi:cxx11](daik::HeatingCurveMqttFields const&)": 21,
 }
 STATUS_HEALTH_NUMBER_SYMBOL = (
@@ -965,7 +965,8 @@ def validate_status_diagnosis_paths(budgets: dict[str, Any], sources: dict[str, 
                              r"std::unique_ptr<Trace, decltype\(&std::free\)> trace\(\s*"
                              r"trace_storage \? new \(trace_storage\) Trace : nullptr, std::free\);\s*"
                              r"logic::CheckupRestore\s+persist;\s*"
-                             r"const logic::CheckupReport hr\s*=\s*checkup_report\(&hrs, trace.get\(\), &persist\);",
+                             r"const logic::CheckupReport hr\s*=\s*"
+                             r"checkup_report\(&hrs, trace\.get\(\), &persist, diag_effective\);",
                              status)
             or re.search(r"\bcheckup_cycling_hours(?:_locked)?\s*\(", status)
             or len(re.findall(r"\bappend_status_json\(out, redact\)", status)) != 1
@@ -982,18 +983,18 @@ def validate_status_diagnosis_paths(budgets: dict[str, Any], sources: dict[str, 
     checkup = stack_source_code(sources["main/checkup.cpp"])
     mqtt = stack_source_code(sources["main/mqtt_ha.cpp"])
     persist = stack_source_code(sources["main/logic/checkup_persist.hpp"])
-    for caller, callee in (
-        (stack_function_body(mqtt, "mqtt_task"), "publish_heartbeat"),
-        (stack_function_body(mqtt, "publish_heartbeat"), "build_heartbeat_payload"),
-        (stack_function_body(mqtt, "build_heartbeat_payload"), "checkup_cycling_evidence"),
-        (stack_function_body(checkup, "checkup_cycling_evidence"), "expire_restored_locked"),
-        (stack_function_body(checkup, "checkup_cycling_evidence"), "logic::checkup_aggregate"),
-        (stack_function_body(checkup, "expire_restored_locked"), "checkup_persist_seal"),
-        (stack_function_body(checkup, "checkup_persist_seal"), "logic::checkup_layout_fingerprint"),
-        (stack_function_body(checkup, "checkup_persist_seal"), "checkup_persist_crc"),
-        (stack_function_body(persist, "checkup_fp_u32"), "config_crc32_update"),
+    for caller, callee, want in (
+        (stack_function_body(mqtt, "mqtt_task"), "publish_heartbeat", 1),
+        (stack_function_body(mqtt, "publish_heartbeat"), "build_heartbeat_payload", 1),
+        (stack_function_body(mqtt, "build_heartbeat_payload"), "checkup_cycling_evidence", 2),
+        (stack_function_body(checkup, "checkup_cycling_evidence"), "expire_restored_locked", 1),
+        (stack_function_body(checkup, "checkup_cycling_evidence"), "logic::checkup_aggregate", 1),
+        (stack_function_body(checkup, "expire_restored_locked"), "checkup_persist_seal", 1),
+        (stack_function_body(checkup, "checkup_persist_seal"), "logic::checkup_layout_fingerprint", 1),
+        (stack_function_body(checkup, "checkup_persist_seal"), "checkup_persist_crc", 1),
+        (stack_function_body(persist, "checkup_fp_u32"), "config_crc32_update", 1),
     ):
-        if len(re.findall(r"\b" + re.escape(callee) + r"\s*\(", caller)) != 1:
+        if len(re.findall(r"\b" + re.escape(callee) + r"\s*\(", caller)) != want:
             raise BudgetError(f"diagnosis status source: {callee} cycling stack path changed")
     for source, caller, callee in (
         (checkup, "checkup_persist_crc", "config_crc32_update"),
@@ -1005,14 +1006,15 @@ def validate_status_diagnosis_paths(budgets: dict[str, Any], sources: dict[str, 
     hours_body = stack_function_body(checkup, "checkup_cycling_hours_locked")
     if (len(re.findall(r"\bcheckup_report\s*\(", checkup)) != 1
             or len(re.findall(r"\bcheckup_cycling_hours_locked\s*\(", checkup)) != 2
-            or not re.search(r"\[\[gnu::noinline\]\]\s+static logic::CheckupCyclingHours "
-                             r"checkup_cycling_hours_locked\(int64_t now_us\)", checkup)
-            or not re.search(r"\bLock\s+lk\(s_mtx\);[\s\S]*?\bexpire_restored_locked\(\);\s*"
+            or not re.search(r"\[\[gnu::noinline\]\]\s+static logic::CheckupCyclingHours\s+"
+                             r"checkup_cycling_hours_locked\(const CheckupSlot& slot, int64_t now_us\)",
+                             checkup)
+            or not re.search(r"\bLock\s+lk\(s_mtx\);[\s\S]*?\bexpire_restored_locked\(slot\);\s*"
                              r"const int64_t\s+now_us\s*=\s*esp_timer_get_time\(\);\s*"
-                             r"if \(hours\)\s+\*hours\s*=\s*checkup_cycling_hours_locked\(now_us\);",
+                             r"if \(hours\)\s+\*hours\s*=\s*checkup_cycling_hours_locked\(slot, now_us\);",
                              report_body)
             or len(re.findall(r"\bexpire_restored_locked\s*\(", report_body)) != 1
-            or not re.search(r"hours\.epoch\s*=\s*s_cycling_hours_epoch;\s*"
+            or not re.search(r"hours\.epoch\s*=\s*slot\.cycling_hours_epoch;\s*"
                              r"if \(!hours\.count\) return hours;", hours_body)
             or len(re.findall(r"\btime_now\s*\(", hours_body)) != 1
             or re.search(r"\bexpire_restored_locked\s*\(", hours_body)):
@@ -2909,20 +2911,29 @@ def self_test() -> None:
     extra_frames = {
         'daik::(anonymous namespace)::flash_cycling_owned(daik::logic::HistoryJournalHeader const&)': 32,
         'daik::(anonymous namespace)::flash_record_valid(daik::(anonymous namespace)::FlashJournalRecord const&)': 32,
-        'daik::checkup_cycling_checkpoint_appended(unsigned long)': 32,
-        'daik::logic::cycling_trace_page_valid(daik::logic::HistoryJournalHeader const&, daik::logic::CyclingTracePageInfo const&)': 32,
+        'daik::checkup_cycling_checkpoint_appended(unsigned long, daik::DiagnosticsSource)': 32,
+        'daik::logic::cycling_trace_page_valid_schema(daik::logic::HistoryJournalHeader const&, daik::logic::CyclingTracePageInfo const&, unsigned long)': 48,
         'daik::logic::cycling_trace_part_count(unsigned int)': 32,
-        'daik::(anonymous namespace)::flash_build_next_cycling(daik::(anonymous namespace)::FlashJournalRecord&, unsigned long, bool)': 128,
-        'daik::checkup_cycling_reset_pending()': 32,
-        'daik::(anonymous namespace)::cycling_snapshot_locked(daik::logic::CheckupCyclingTrace&, long long)': 64,
+        'daik::(anonymous namespace)::flash_build_next_cycling(daik::(anonymous namespace)::FlashJournalRecord&, unsigned long, bool, bool)': 128,
+        'daik::checkup_cycling_reset_pending(daik::DiagnosticsSource)': 32,
+        'daik::(anonymous namespace)::cycling_snapshot_locked(daik::(anonymous namespace)::CheckupSlot&, daik::logic::CheckupCyclingTrace&, long long)': 64,
         'daik::logic::checkup_cycling_snapshot(daik::logic::CheckupCyclingTrace&, daik::logic::CheckupCyclingTrace const&, daik::logic::CheckupCyclingTrace const&, unsigned long, unsigned long, long long)::{lambda(daik::logic::CheckupCyclingTrace const&, long long, long long)\x231}::operator()(daik::logic::CheckupCyclingTrace const&, long long, long long) const': 48,
         'daik::logic::CheckupCyclingTrace::push(unsigned long, daik::logic::CheckupCyclingTrace::Kind)': 32,
-        'daik::checkup_cycling_checkpoint(daik::logic::CheckupCyclingTrace&, daik::logic::CyclingTraceIdentity&, unsigned long&, unsigned long, bool)': 64,
+        'daik::checkup_cycling_checkpoint(daik::logic::CheckupCyclingTrace&, daik::logic::CyclingTraceIdentity&, unsigned long&, unsigned long, bool, daik::DiagnosticsSource)': 64,
         'daik::history_restore_cycling_flash(unsigned long)': 176,
         'daik::(anonymous namespace)::flash_read_record(unsigned int, daik::(anonymous namespace)::FlashJournalRecord&)': 32,
-        'daik::(anonymous namespace)::flash_cycling_page(daik::(anonymous namespace)::FlashJournalRecord const&, daik::logic::CyclingTracePageInfo&)': 112,
+        'daik::(anonymous namespace)::flash_cycling_page_for(daik::(anonymous namespace)::FlashJournalRecord const&, daik::logic::CyclingTracePageInfo&, bool)': 112,
         'daik::logic::history_journal_crc_bytes(daik::logic::HistoryJournalHeader, void const*, unsigned int)': 32,
-        'daik::checkup_cycling_restore(daik::logic::CheckupCyclingTrace const&, daik::logic::CyclingTraceIdentity const&, long long, unsigned long)': 64,
+        'daik::checkup_cycling_restore(daik::logic::CheckupCyclingTrace const&, daik::logic::CyclingTraceIdentity const&, long long, unsigned long, daik::DiagnosticsSource)': 64,
+        'daik::checkup_modbus_confirm_source(daik::ModbusProfile, unsigned long)': 48,
+        'unsigned long daik::logic::checkup_modbus_model_fingerprint<daik::def::HomeHubReg>(daik::ModbusProfile, daik::def::HomeHubReg const*, int)': 96,
+        'daik::logic::dhw_loss_adopt(daik::logic::DhwLossState&, daik::logic::DhwLossCarry const&, long long)': 128,
+        'daik::checkup_record_modbus(daik::CachedValue const*, unsigned int, daik::ModbusProfile, unsigned long, unsigned long, bool)': 192,
+        'daik::logic::checkup_modbus_coverage(daik::ModbusProfile)': 64,
+        'daik::(anonymous namespace)::commit_and_fold_locked(daik::(anonymous namespace)::CheckupSlot&, daik::logic::CheckupSample const&, long long, unsigned long, bool)': 48,
+        'daik::(anonymous namespace)::fold_checkup_locked(daik::(anonymous namespace)::CheckupSlot&, daik::logic::CheckupSample const&, long long)': 48,
+        'daik::logic::checkup_step(daik::logic::CheckupState&, daik::logic::CheckupBucket&, daik::logic::CheckupSample const&, long long, daik::logic::CheckupRing*, daik::logic::CheckupCyclingTrace*, daik::logic::OutdoorSource)': 112,
+        'daik::logic::dhw_loss_step(daik::logic::DhwLossState&, daik::logic::DhwLossBucket&, daik::logic::CheckupSample const&, long long)': 48,
         'daik::service_reference_frames(daik::Config const&)': 32,
      'daik::json_append_literal_string_member(std::string&, char const*, std::string const&, char const*)': 48,
      'daik::ha_discovery_identity(std::string&, std::string const&, char const*, char const*)': 32,
@@ -2950,10 +2961,10 @@ def self_test() -> None:
      'daik::hp_query_detailed(unsigned char, daik::Protocol, unsigned char*, unsigned int, daik::HpQueryLogPolicy)': 64,
      'daik::hp_format(daik::ValueDef const&, unsigned char const*, int, int, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >&, daik::ValueDef const*, unsigned int, daik::SaturationWitness)': 64,
      'daik::history_record(daik::CachedValue const*, unsigned int, unsigned long)': 64,
-     'daik::checkup_report(daik::logic::CheckupCyclingHours*, daik::logic::CheckupCyclingTrace*, daik::logic::CheckupRestore*)': 64,
-     'daik::checkup_cycling_hours_locked(long long)': 256,
+     'daik::checkup_report(daik::logic::CheckupCyclingHours*, daik::logic::CheckupCyclingTrace*, daik::logic::CheckupRestore*, daik::DiagnosticsSource)': 64,
+     'daik::checkup_cycling_hours_locked(daik::(anonymous namespace)::CheckupSlot const&, long long)': 256,
      'daik::logic::checkup_cycling_hours(daik::logic::CheckupRing const&, bool)': 32,
-     'daik::logic::checkup_evaluate(daik::logic::CheckupWindow const&, daik::logic::CheckupCoverage const&, daik::FaultClass, daik::logic::DhwLossWindow const&)': 80,
+     'daik::logic::checkup_evaluate(daik::logic::CheckupWindow const&, daik::logic::CheckupCoverage const&, daik::FaultClass, daik::logic::DhwLossWindow const&, daik::logic::OutdoorSource)': 80,
      'daik::logic::checkup_summarize(daik::logic::CheckupReport&)': 32,
      'daik::logic::checkup_result_evidence_name(daik::logic::CheckupCheck, daik::logic::CheckupCheckResult const&)': 32,
      'daik::logic::dhw_loss_progress(daik::logic::DhwLossState const&, long long)': 48,
@@ -2971,8 +2982,8 @@ def self_test() -> None:
      'daik::logic::checkup_fp_u32(unsigned long, unsigned long)': 32,
      'daik::def::lookup(char const*)': 32,
      'daik::def::resolved(daik::def::Profile const&)': 64,
-     'daik::checkup_cycling_evidence()': 64,
-     'daik::expire_restored_locked()': 48,
+     'daik::checkup_cycling_evidence(daik::DiagnosticsSource)': 64,
+     'daik::expire_restored_locked(daik::(anonymous namespace)::CheckupSlot&)': 48,
      'daik::history_service_flash_restore()': 416,
      'daik::checkup_flash_restore(daik::logic::CheckupJournalRecord const*, unsigned int, long long)': 224,
      'daik::logic::checkup_journal_rebuild(daik::logic::CheckupRing&)': 176,
@@ -2980,8 +2991,8 @@ def self_test() -> None:
      'daik::logic::checkup_journal_select_slot(long long)::{lambda(daik::logic::CheckupJournalRecord const&)}::operator()(daik::logic::CheckupJournalRecord const&) const': 64,
      'daik::logic::checkup_journal_restore_admits(daik::logic::CheckupJournalPayload const&)': 32,
      'daik::logic::checkup_journal_in_window(long long, long long)': 32,
-     'daik::(anonymous namespace)::checkup_persist_seal()': 32,
-     'daik::(anonymous namespace)::checkup_persist_crc()': 32,
+     'daik::(anonymous namespace)::checkup_persist_seal(daik::(anonymous namespace)::CheckupSlot&)': 32,
+     'daik::(anonymous namespace)::checkup_persist_crc(daik::(anonymous namespace)::CheckupSlot const&)': 32,
      'daik::logic::checkup_layout_fingerprint()': 32,
      'daik::logic::checkup_aggregate(daik::logic::CheckupRing const&)': 32,
      '_ZZN4daik5logic17checkup_aggregateERKNS0_11CheckupRingEENKUlRKNS0_13CheckupBucketEE_clES6_$isra$0': 64,
@@ -3916,27 +3927,27 @@ def self_test() -> None:
     diagnosis_controls += 1
     for name, before, after in (
         ("main/http_status.cpp", "return http_send_status_json(req, {}, {}, redact);", "return ESP_FAIL;"),
-        ("main/http_status.cpp", "checkup_report(&hrs, trace.get(), &persist)", "checkup_report(nullptr)"),
+        ("main/http_status.cpp", "checkup_report(&hrs, trace.get(), &persist, diag_effective)", "checkup_report(nullptr)"),
         ("main/mcp_server.cpp", "return http_send_status_json(req, response, suffix, false);", "return ESP_FAIL;"),
         ("main/mqtt_ha.cpp", "publish_heartbeat();", "other_heartbeat();"),
-        ("main/checkup.cpp", "P().layout_fp = logic::checkup_layout_fingerprint();",
-         "P().layout_fp = 0;"),
-        ("main/checkup.cpp", "P().crc                    = checkup_persist_crc();",
-         "P().crc                    = 0;"),
+        ("main/checkup.cpp", "p.layout_fp              = logic::checkup_layout_fingerprint();",
+         "p.layout_fp              = 0;"),
+        ("main/checkup.cpp", "p.crc                    = checkup_persist_crc(slot);",
+         "p.crc                    = 0;"),
         ("main/logic/checkup_persist.hpp", "return config_crc32_update(crc, b, sizeof(b));",
          "return crc;"),
         ("main/hp_poll.cpp", "static void poll_task(void*) {",
          "static void poll_task(void*) { checkup_report();"),
         ("main/checkup.cpp", "[[gnu::noinline]] static logic::CheckupCyclingHours",
          "static logic::CheckupCyclingHours"),
-        ("main/checkup.cpp", "if (hours) *hours = checkup_cycling_hours_locked(now_us);",
+        ("main/checkup.cpp", "if (hours) *hours = checkup_cycling_hours_locked(slot, now_us);",
          "if (hours) *hours = {};"),
-        ("main/checkup.cpp", "logic::checkup_aggregate(P().ring)", "other_aggregate(P().ring)"),
-        ("main/checkup.cpp", "logic::dhw_loss_aggregate(P().dhw)", "other_aggregate(P().dhw)"),
+        ("main/checkup.cpp", "logic::checkup_aggregate(slot.P().ring)", "other_aggregate(slot.P().ring)"),
+        ("main/checkup.cpp", "logic::dhw_loss_aggregate(slot.P().dhw)", "other_aggregate(slot.P().dhw)"),
         ("main/checkup.cpp", "logic::checkup_evaluate(", "other_evaluate("),
         ("main/checkup.cpp", "logic::dhw_loss_progress(", "other_progress("),
         ("main/checkup.cpp", "logic::checkup_apply_freshness(", "other_freshness("),
-        ("main/checkup.cpp", "logic::checkup_cycling_hours(P().ring, s_cov.rps)", "other_hours()"),
+        ("main/checkup.cpp", "logic::checkup_cycling_hours(slot.P().ring, slot.cov.rps)", "other_hours()"),
         ("main/logic/checkup.hpp", "fold(r.pending);", "other_fold(r.pending);"),
         ("main/logic/checkup.hpp", "checkup_summarize(r);", "other_summarize(r);"),
         ("main/logic/checkup.hpp", "checkup_result_evidence_name(id, c)", "other_evidence_name(id, c)"),

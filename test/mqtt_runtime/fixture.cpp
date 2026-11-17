@@ -118,6 +118,7 @@ double                         room_history_temperature = 0.0;
 std::string                    x10a_payload;
 daik::WeatherForecastStatus weather;
 daik::logic::CheckupCyclingEvidence                                cycling;
+daik::logic::CheckupCyclingEvidence                                modbus_cycling;
 daik::CheckupStopContextReport                                     stop_context;
 daik::CrashInfo             boot, live_crash;
 daik::EthInfo               ethernet;
@@ -249,7 +250,9 @@ void                  history_record_room(bool valid, double temperature, uint32
     if (generation == adapter::room_generation) ++adapter::room_history_accepted;
 }
 void                  checkup_dhw_reset() {}
-logic::CheckupCyclingEvidence checkup_cycling_evidence() { return adapter::cycling; }
+logic::CheckupCyclingEvidence checkup_cycling_evidence(DiagnosticsSource source) {
+    return source == DiagnosticsSource::Modbus ? adapter::modbus_cycling : adapter::cycling;
+}
 CheckupStopContextReport      checkup_stop_context_report() { return adapter::stop_context; }
 CrashInfo             diag_crash_info() { return adapter::boot; }
 CrashInfo             diag_crash_info_live() { return adapter::live_crash; }
@@ -1535,6 +1538,12 @@ void outgoing_heartbeat() {
         require(cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(
                     root.get(), "stop_context_witnessed_stops_recent_heating")),
                 "STOP_CONTEXT_ABSENT_POPULATION_NULL");
+        require(cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(
+                    root.get(), "modbus_cycling_censored_unreadable_runs")),
+                "MODBUS_CYCLING_ABSENT_EVIDENCE_NULL");
+        require(cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(root.get(),
+                                                              "modbus_cycling_runtime_saturated")),
+                "MODBUS_CYCLING_ABSENT_SATURATION_NULL");
     }
     adapter::stop_context.observation.confirmed   = true;
     adapter::stop_context.observation.readable_us = 60000000;
@@ -1554,6 +1563,14 @@ void outgoing_heartbeat() {
     adapter::cycling.cycling_classified_runtime_s     = 6696;
     adapter::cycling.cycling_censored_runtime_s       = 65535;
     adapter::cycling.cycling_runtime_saturated        = true;
+    adapter::modbus_cycling.cycling_censored_transition_runs = 2;
+    adapter::modbus_cycling.cycling_censored_handover_runs   = 1;
+    adapter::modbus_cycling.cycling_censored_unreadable_runs = 4;
+    adapter::modbus_cycling.cycling_censored_restart_runs    = 0;
+    adapter::modbus_cycling.cycling_censored_start_runs      = 3;
+    adapter::modbus_cycling.cycling_classified_runtime_s     = 1800;
+    adapter::modbus_cycling.cycling_censored_runtime_s       = 120;
+    adapter::modbus_cycling.cycling_runtime_saturated        = false;
     daik::on_mqtt(nullptr, "mqtt", MQTT_EVENT_CONNECTED, nullptr);
     sdk::ticks                  = 123456;
     adapter::cfg.proto          = daik::Protocol::S;
@@ -1609,6 +1626,22 @@ void outgoing_heartbeat() {
         wire_number(root.get(), "cycling_censored_runtime_s", 65535,
                     "CYCLING_CENSORED_TIME_ON_WIRE");
         wire_number(root.get(), "cycling_runtime_saturated", 1, "CYCLING_SATURATED_ON_WIRE");
+        wire_number(root.get(), "modbus_cycling_censored_transition_runs", 2,
+                    "MODBUS_CYCLING_TRANSITION_ON_WIRE");
+        wire_number(root.get(), "modbus_cycling_censored_handover_runs", 1,
+                    "MODBUS_CYCLING_HANDOVER_ON_WIRE");
+        wire_number(root.get(), "modbus_cycling_censored_unreadable_runs", 4,
+                    "MODBUS_CYCLING_UNREADABLE_ON_WIRE");
+        wire_number(root.get(), "modbus_cycling_censored_restart_runs", 0,
+                    "MODBUS_CYCLING_ZERO_RESTART_ON_WIRE");
+        wire_number(root.get(), "modbus_cycling_censored_start_runs", 3,
+                    "MODBUS_CYCLING_START_ON_WIRE");
+        wire_number(root.get(), "modbus_cycling_classified_runtime_s", 1800,
+                    "MODBUS_CYCLING_CLASSIFIED_TIME_ON_WIRE");
+        wire_number(root.get(), "modbus_cycling_censored_runtime_s", 120,
+                    "MODBUS_CYCLING_CENSORED_TIME_ON_WIRE");
+        wire_number(root.get(), "modbus_cycling_runtime_saturated", 0,
+                    "MODBUS_CYCLING_UNSATURATED_ON_WIRE");
         wire_number(root.get(), "free_heap", 100000, "HEARTBEAT_FREE_HEAP_ON_WIRE");
         wire_number(root.get(), "min_free_heap", 90000, "HEARTBEAT_MIN_FREE_HEAP_ON_WIRE");
         wire_number(root.get(), "max_alloc", 40000, "HEARTBEAT_LARGEST_INTERNAL_BLOCK_ON_WIRE");

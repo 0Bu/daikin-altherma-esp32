@@ -813,46 +813,85 @@ static esp_err_t test_circulation(httpd_req_t* req) {
     return http_send_json(req, response);
 }
 
-// POST /set_diagnostics {enabled:boolean}. This is the one opt-in boundary for the rolling checkup,
-// heating-curve evaluation and their external source collection. It is deliberately not the retired
-// dynamic-LWT controller mode: no write path exists, and ordinary X10A/HomeHub telemetry is untouched.
-// Every transition gets a new generation before any runtime producer is woken, so RAM/flash evidence
-// from an earlier interval fails closed even across a power loss immediately after this response.
+// POST /set_diagnostics {enabled?:boolean, source?:"x10a"|"modbus"}.
+// First opt-in (enabled:true when diagnostics_generation == 0) draws a non-zero generation;
+// enabled:false pauses collection while keeping collected 24 h X10A/Modbus stores (aging out
+// after 24 h); source selects the displayed store without bumping generation or clearing data.
 static esp_err_t set_diagnostics(httpd_req_t* req) {
     const char* parse_error = nullptr;
     JsonGuard   j(read_config_document(req, 128, parse_error));
     if (!j) return send_err(req, "400 Bad Request", parse_error);
-    cJSON* item = cJSON_GetObjectItemCaseSensitive(j, "enabled");
-    if (!cJSON_IsBool(item)) {
+    if (const char* error =
+            config_request_field_error(j, HttpConfigFieldType::Boolean, {"enabled"}))
+        return send_err(req, "400 Bad Request", error);
+    if (const char* error = config_request_field_error(j, HttpConfigFieldType::String, {"source"}))
+        return send_err(req, "400 Bad Request", error);
+    const cJSON* const enabled_item = cJSON_GetObjectItemCaseSensitive(j, "enabled");
+    const cJSON* const source_item  = cJSON_GetObjectItemCaseSensitive(j, "source");
+    if (!enabled_item && !source_item) {
         j.reset();
         return send_err(req, "400 Bad Request", "enabled must be boolean");
     }
-    const bool enabled = cJSON_IsTrue(item);
+    const bool        has_enabled = enabled_item != nullptr;
+    const bool        req_enabled = has_enabled && cJSON_IsTrue(enabled_item);
+    bool              has_source  = false;
+    DiagnosticsSource req_source  = DiagnosticsSource::X10a;
+    if (source_item) {
+        if (!parse_diagnostics_source(source_item->valuestring, req_source)) {
+            j.reset();
+            return send_err(req, "400 Bad Request", "source must be x10a or modbus");
+        }
+        has_source = true;
+    }
     j.reset();
 
-    Config c = config();
-    if (c.diagnostics_enabled == enabled)
+    Config                  c            = config();
+    const bool              next_enabled = has_enabled ? req_enabled : c.diagnostics_enabled;
+    const DiagnosticsSource next_source  = has_source ? req_source : c.diagnostics_source;
+    const bool              enabled_chg  = c.diagnostics_enabled != next_enabled;
+    const bool              source_chg   = c.diagnostics_source != next_source;
+    if (!enabled_chg && !source_chg)
         return http_send_json(req, "{\"ok\":true,\"saved\":false,\"reboot\":false}");
     const bool weather_was_publishable = c.diagnostics_enabled && c.weather_enabled;
-    c.diagnostics_enabled = enabled;
-    c.diagnostics_generation = diagnostics_next_generation(c.diagnostics_generation, esp_random());
-    const uint32_t      room_identity = logic::history_room_identity(c);
-    WeatherSourceChange weather_change(c.weather_enabled, enabled);
-    if (!weather_change)
-        return send_err(req, "503 Service Unavailable",
-                        "weather request still active; retry diagnostics change");
-    if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");
-    weather_change.commit();
+    c.diagnostics_enabled              = next_enabled;
+    c.diagnostics_source               = next_source;
+    if (enabled_chg) {
+        const uint32_t prev_generation = c.diagnostics_generation;
+        if (next_enabled && c.diagnostics_generation == 0) {
+            c.diagnostics_generation =
+                diagnostics_next_generation(c.diagnostics_generation, esp_random());
+        }
+        const bool          generation_chg = c.diagnostics_generation != prev_generation;
+        const uint32_t      room_identity  = logic::history_room_identity(c);
+        WeatherSourceChange weather_change(c.weather_enabled, next_enabled);
+        if (!weather_change)
+            return send_err(req, "503 Service Unavailable",
+                            "weather request still active; retry diagnostics change");
+        if (!config_save(c))
+            return send_err(req, "500 Internal Server Error", "config write failed");
+        weather_change.commit();
 
-    checkup_set_diagnostics(enabled, c.diagnostics_generation);
-    history_checkup_reset();
-    history_room_reset(room_identity);
-    mqtt_reference_reconfigure();
-    mqtt_circulation_reconfigure(!c.circulation_topic.empty());
-    if (weather_was_publishable && !enabled) mqtt_request_weather_cleanup();
-    weather_forecast_reconfigure();
-    diag_printf("diagnostics: %s (generation %lu)\n", enabled ? "enabled" : "disabled",
-                static_cast<unsigned long>(c.diagnostics_generation));
+        checkup_set_diagnostics(next_enabled, c.diagnostics_generation);
+        if (generation_chg)
+            history_checkup_reset();
+        else
+            history_set_diagnostics(next_enabled);
+        history_room_reset(room_identity);
+        mqtt_reference_reconfigure();
+        if (generation_chg)
+            mqtt_circulation_reconfigure(!c.circulation_topic.empty());
+        else
+            mqtt_circulation_set_diagnostics(!c.circulation_topic.empty());
+        if (weather_was_publishable && !next_enabled) mqtt_request_weather_cleanup();
+        weather_forecast_reconfigure();
+        diag_printf("diagnostics: %s (generation %lu, source %s)\n",
+                    next_enabled ? "enabled" : "disabled",
+                    static_cast<unsigned long>(c.diagnostics_generation),
+                    diagnostics_source_name(c.diagnostics_source));
+        return http_send_json(req, "{\"ok\":true,\"saved\":true,\"reboot\":false}");
+    }
+    if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");
+    diag_printf("diagnostics: display source %s\n", diagnostics_source_name(c.diagnostics_source));
     return http_send_json(req, "{\"ok\":true,\"saved\":true,\"reboot\":false}");
 }
 
@@ -1052,6 +1091,7 @@ static esp_err_t set_hp(httpd_req_t* req) {
             }
         }
         if (reset_mb_history) {
+            checkup_modbus_reset();
             history_modbus_reset(modbus_target_fp);
             // The HomeHub stack is told separately, because it IS separate: this starts or stops
             // its task and re-resolves its address without touching the X10A poll engine above.

@@ -1134,8 +1134,8 @@ static void append_status_json(JsonOut& j, bool redact) {
         }
         j += "},";
     }
+    const HpStats hp = hp_stats();
     {
-        const HpStats hp = hp_stats();
         j += "\"hp\":{\"proto\":";
         j += jstr(std::string(1, static_cast<char>(c.proto)));
         j += ",\"rx\":";
@@ -1320,6 +1320,11 @@ static void append_status_json(JsonOut& j, bool redact) {
     // Unknown scalar evidence uses null where the field is required. Optional evidence objects,
     // including the compressor timeline, may be absent. Append literals separately to limit the
     // number of temporaries live at once on the httpd stack.
+    const bool modbus_diag_avail = !config_modbus_host(c).empty();
+    const bool x10a_diag_avail   = hp.connected || (hp.last_ok_s >= 0 && hp.last_ok_s <= 30) ||
+                                 checkup_has_data(DiagnosticsSource::X10a);
+    const DiagnosticsSource diag_effective =
+        diagnostics_effective_source(c.diagnostics_source, x10a_diag_avail, modbus_diag_avail);
     {
         logic::CheckupCyclingHours hrs{};
         // The optional chart must not need exception storage under heap pressure.
@@ -1331,13 +1336,15 @@ static void append_status_json(JsonOut& j, bool redact) {
         std::unique_ptr<Trace, decltype(&std::free)> trace(
             trace_storage ? new (trace_storage) Trace : nullptr, std::free);
         logic::CheckupRestore      persist;
-        const logic::CheckupReport hr            = checkup_report(&hrs, trace.get(), &persist);
+        const logic::CheckupReport hr = checkup_report(&hrs, trace.get(), &persist, diag_effective);
         const auto                 release_trace = [&] {
             trace.reset();
             trace_reader.release();
         };
         if (!trace || !trace->unix_s) release_trace();
-        j += "\"health\":{\"covered_s\":";
+        j += "\"health\":{\"source\":";
+        json_append_quoted(j, diagnostics_source_name(diag_effective));
+        j += ",\"covered_s\":";
         append_json_uint(j, hr.covered_s);
         j += ",\"span_s\":";
         append_json_uint(j, hr.span_s);
@@ -1571,7 +1578,9 @@ static void append_status_json(JsonOut& j, bool redact) {
                 release_trace();
                 j += ",\"stop_context\":";
                 append_stop_context_json(
-                    j, stop_context_payload_fields(checkup_stop_context_report()));
+                    j, diag_effective == DiagnosticsSource::Modbus
+                           ? StopContextPayloadFields{}
+                           : stop_context_payload_fields(checkup_stop_context_report()));
                 break;
             case logic::CheckupCheck::Defrost: {
                 num("count", ck.a);
@@ -1793,7 +1802,15 @@ static void append_status_json(JsonOut& j, bool redact) {
     // Kept separate from system/link health: X10A, HomeHub and the technical heartbeat remain active.
     j += "\"diagnostics\":{\"enabled\":";
     j += c.diagnostics_enabled ? "true" : "false";
-    j += "},";
+    j += ",\"source\":";
+    json_append_quoted(j, diagnostics_source_name(c.diagnostics_source));
+    j += ",\"effective_source\":";
+    json_append_quoted(j, diagnostics_source_name(diag_effective));
+    j += ",\"available_sources\":[";
+    if (x10a_diag_avail) j += "\"x10a\"";
+    if (x10a_diag_avail && modbus_diag_avail) j += ",";
+    if (modbus_diag_avail) j += "\"modbus\"";
+    j += "]},";
 
     // Which OTA feed this device follows (logic/ota_channel.hpp; POST /set_ota). Reported HERE and
     // not only on /ota/status because the Settings screen's ESP32 card renders the selector from
@@ -2362,7 +2379,7 @@ static esp_err_t h_models(httpd_req_t* req) {
     return http_send_json(req, def::MODELS_JSON);
 }
 
-// GET /history?row=<trend id>[&source=x10a|modbus|env3] — one 24-hour series, oldest sample first.
+// GET /history?row=<trend id>[&source=x10a|modbus|env3|room] — one 24-hour series, oldest first.
 // X10A is the backwards-compatible default; the external circulation witness identifies itself as
 // MQTT, Modbus carries paired HomeHub measurements/state timelines, and ENV III owns three
 // independent outdoor-climate rings.
@@ -2420,7 +2437,7 @@ static esp_err_t h_history(httpd_req_t* req) {
     {
         const Config active_config = config();
         env3_configured = active_config.env3_enabled && env3_board_supported(active_config);
-        if (room_source && !safe_mode_active()) {
+        if (room_source && active_config.diagnostics_enabled && !safe_mode_active()) {
             room_identity = logic::history_room_identity(active_config);
             std::snprintf(lbl, sizeof(lbl), "%s", active_config.ref_temp_name.c_str());
         }

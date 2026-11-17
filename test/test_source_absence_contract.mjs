@@ -234,20 +234,20 @@ assert.match(checkupPersist,
 assert.match(checkup, /constexpr logic::DhwLossBucket\s+kEmptyDhwLossBucket\{\};/,
   "the empty pending-counter template retains the production bucket defaults");
 assert.match(checkup,
-  /void checkup_reboot_save\(\)[\s\S]*?(?:Lock\s+lk\(s_mtx,\s*pdMS_TO_TICKS\(200\)\)|xSemaphoreTake\(s_mtx,\s*pdMS_TO_TICKS\(200\)\))[\s\S]*?dhw_loss_checkpoint\(s_dhw_state,[\s\S]*?h\.payload\.pending\s*=\s*kEmptyDhwLossBucket/,
+  /void checkup_reboot_save\(\)[\s\S]*?(?:Lock\s+lk\(s_mtx,\s*pdMS_TO_TICKS\(200\)\)|xSemaphoreTake\(s_mtx,\s*pdMS_TO_TICKS\(200\)\))[\s\S]*?dhw_loss_checkpoint\(slot->dhw_state,[\s\S]*?h\.payload\.pending\s*=\s*kEmptyDhwLossBucket/,
   "intentional reboot must checkpoint only the ongoing DHW candidate and clear undated pending counters under a bounded lock");
-assert.doesNotMatch(checkup, /h\.payload\.pending\s*=\s*P\(\)\.dhw\.pending/,
+assert.doesNotMatch(checkup, /h\.payload\.pending\s*=\s*slot->P\(\)\.dhw\.pending/,
   "undated completed pending counters must not enter the reboot checkpoint");
 assert.match(checkup,
-  /checkup_restore_keeps_dhw_handoff\(integrity\)[\s\S]*?checkup_dhw_handoff_valid\([\s\S]*?s_boot_handoff\s*=\s*P\(\)\.dhw_handoff\.payload;\s*s_boot_handoff\.pending\s*=\s*kEmptyDhwLossBucket/,
+  /checkup_restore_keeps_dhw_handoff\(integrity\)[\s\S]*?checkup_dhw_handoff_valid\([\s\S]*?slot\.boot_handoff\s*=\s*slot\.P\(\)\.dhw_handoff\.payload;\s*slot\.boot_handoff\.pending\s*=\s*kEmptyDhwLossBucket/,
   "startup must stage only an integrity-valid candidate and explicitly discard its undated pending counters");
-assert.doesNotMatch(checkup, /P\(\)\.dhw\.pending\s*=\s*(?:P\(\)\.dhw_handoff\.payload|s_boot_handoff)\.pending/,
+assert.doesNotMatch(checkup, /P\(\)\.dhw\.pending\s*=\s*(?:slot\.P\(\)\.dhw_handoff\.payload|slot\.boot_handoff)\.pending/,
   "startup must not restore undated completed pending counters");
 assert.match(checkup,
-  /if \(s_boot_handoff_valid[\s\S]*?s_diagnostics_enabled\.load\(std::memory_order_acquire\)[\s\S]*?s_boot_handoff_model == fp[\s\S]*?s_boot_handoff\.source_fp == source_fp[\s\S]*?s_boot_handoff\.dhw_source_fp == s_dhw_source_fp\) \{\s*logic::dhw_loss_adopt\(s_dhw_state,\s*s_boot_handoff\.candidate,\s*esp_timer_get_time\(\)\)/,
+  /if \(s_x10a\.source_confirmed && s_x10a\.boot_handoff_valid[\s\S]*?s_diagnostics_enabled\.load\(std::memory_order_acquire\)[\s\S]*?s_x10a\.boot_handoff_model == fp[\s\S]*?s_x10a\.boot_handoff\.source_fp == source_fp[\s\S]*?s_x10a\.boot_handoff\.dhw_source_fp == s_x10a\.dhw_source_fp\) \{\s*logic::dhw_loss_adopt\(s_x10a\.dhw_state,\s*s_x10a\.boot_handoff\.candidate,\s*esp_timer_get_time\(\)\)/,
   "DHW adoption requires current consent, matching model/link and circulation identities, and the real boot clock");
 assert.match(checkup,
-  /P\(\)\.dhw_handoff\.magic = 0;[\s\S]*?s_source_confirmed\s*=\s*false;[\s\S]*?persist_wipe\(\);/,
+  /slot\.P\(\)\.dhw_handoff\.magic = 0;[\s\S]*?slot\.source_confirmed\s*=\s*false;[\s\S]*?persist_wipe\(slot\);/,
   "startup must consume the one-shot handoff before producers and retire undated completed RAM hours");
 // Adoption may retain only a charge/settle deadline, or reject a carried segment after the blind
 // allowance. A neutral applied-checkpoint log must not claim that every candidate resumed.
@@ -501,7 +501,7 @@ const diagnosticsEnd = httpConfig.indexOf("\n}\n\nstatic esp_err_t set_circulati
 const setDiagnostics = httpConfig.slice(diagnosticsStart, diagnosticsEnd);
 const diagnosticsGeneration = setDiagnostics.indexOf("diagnostics_next_generation(");
 const diagnosticsBegin = setDiagnostics.indexOf(
-  "WeatherSourceChange weather_change(c.weather_enabled, enabled)", diagnosticsGeneration);
+  "WeatherSourceChange weather_change(c.weather_enabled, next_enabled)", diagnosticsGeneration);
 const diagnosticsSave = setDiagnostics.indexOf("config_save(c)", diagnosticsBegin);
 const diagnosticsCommit = setDiagnostics.indexOf("weather_change.commit()", diagnosticsSave);
 const diagnosticsCleanup = setDiagnostics.indexOf("mqtt_request_weather_cleanup()",

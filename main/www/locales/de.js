@@ -1,4 +1,4 @@
-// translation-source: 57360fc01b9b51987c1e6a54c6b11b7295a1a3b53f13d2b3928a2b44e523c222
+// translation-source: 7e05fca97bff772abf43c5704d541747bc310184005cce90ce5b76eab24256ce
 I18N.de = localeValues([
   /* sys.nodata */ "Keine Daten",
   /* sys.unreachable */ "Nicht erreichbar",
@@ -961,6 +961,8 @@ I18N.de = localeValues([
   /* lang.sv */ "Svenska",
   /* lang.fi */ "Suomi",
   /* lang.saved */ "Sprache gespeichert",
+  /* check.detail.dhw_reason.blind_modbus */ "Messwerte fehlen: Modbus schweigt oder Abfrage pausiert",
+  /* check.detail.source_stale_modbus */ "Keine frische Modbus-Abfrage; aktueller Zustand unbekannt. Historie bleibt erhalten.",
 ]);
 
 // Unchanged German specialist copy, loaded with the existing German locale asset.

@@ -4,6 +4,7 @@
 // only adds the NVS load/save around it).
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include "crc.hpp"
 #include "config_store.hpp" // CONFIG_BLOB_MAX_STR — the persisted-field bound validate() enforces
 #include "board_pins.hpp"   // board_pin_offerable — the chip-reserved-pin rule validate() enforces
@@ -66,6 +67,44 @@ inline const char* modbus_profile_basis_name(ModbusProfileBasis b) {
     return "unknown";
 }
 
+// Which source feeds the active 24h plant-diagnostics card display when diagnostics consent is
+// enabled. Recording still tracks both X10A and configured HomeHub Modbus in parallel; switching
+// views never resets either store, and when only one source is available the display falls back
+// to it without overwriting the persisted preference.
+enum class DiagnosticsSource : uint8_t {
+    X10a   = 0,
+    Modbus = 1,
+};
+
+inline constexpr const char* diagnostics_source_name(DiagnosticsSource s) noexcept {
+    return s == DiagnosticsSource::Modbus ? "modbus" : "x10a";
+}
+
+inline constexpr DiagnosticsSource diagnostics_source_from_int(int v) noexcept {
+    return v == static_cast<int>(DiagnosticsSource::Modbus) ? DiagnosticsSource::Modbus
+                                                            : DiagnosticsSource::X10a;
+}
+
+inline bool parse_diagnostics_source(std::string_view sv, DiagnosticsSource& out) noexcept {
+    if (sv == "x10a") {
+        out = DiagnosticsSource::X10a;
+        return true;
+    }
+    if (sv == "modbus") {
+        out = DiagnosticsSource::Modbus;
+        return true;
+    }
+    return false;
+}
+
+inline constexpr DiagnosticsSource diagnostics_effective_source(DiagnosticsSource preferred,
+                                                                bool              x10a_available,
+                                                                bool modbus_available) noexcept {
+    if (!modbus_available) return DiagnosticsSource::X10a;
+    if (!x10a_available) return DiagnosticsSource::Modbus;
+    return preferred;
+}
+
 // Fixed poll cadence: the heat pump is queried every second (near-real-time; the MQTT bridge
 // publishes only changes, so a fast poll is cheap). Not runtime-configurable.
 inline constexpr int POLL_INTERVAL_S = 1;
@@ -125,6 +164,7 @@ struct Config {
     // subscribe, fetch, record or publish. Each transition advances the generation so evidence from
     // an earlier consent interval cannot be restored from RAM/flash into a newly enabled one.
     uint32_t    diagnostics_generation = 0;
+    DiagnosticsSource diagnostics_source     = DiagnosticsSource::X10a;
     std::string syslog_host;       // "" = Syslog disabled
     int         syslog_port = 514;
     // SNTP server (main/sntp_time.cpp). Unlike syslog_host, "" is not "off" — SNTP has no disabled
