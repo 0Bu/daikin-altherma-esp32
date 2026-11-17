@@ -152,7 +152,7 @@ const mutations=[
     before:/const bool\s+known = f\.confirmed && f\.has_readable;/,
     after:"const bool known = f.confirmed && f.has_readable && f.counters.witnessed_stops_recent_heating > 0;"},
   {name:"omitted-stop-context",file:"status",scenario:"stop_context_populated",
-    before:/append_stop_context_json\(\s*j, stop_context_payload_fields\(checkup_stop_context_report\(\)\)\);/,
+    before:/append_stop_context_json\(\s*j,\s*diag_effective == DiagnosticsSource::Modbus\s*\?\s*StopContextPayloadFields\{\}\s*:\s*stop_context_payload_fields\(checkup_stop_context_report\(\)\)\);/,
     after:'j += "null";'},
   {name:"unsupported-stop-count-leak",file:"heartbeat",scenario:"stop_context_populated",
     before:"number(c.positive[k], known && supported);",after:"number(c.positive[k], known);"},
@@ -166,7 +166,7 @@ try {
   const compiler=execute(cxx,["--version"]).stdout.trim();
   const baseline=execute(compile("production"),[]);
   const caseCount=Number(baseline.stdout.match(/^PASS total=(\d+)$/m)?.[1]);
-  assert.equal(caseCount,25);
+  assert.equal(caseCount,26);
   assert.equal(caseCount,[...baseline.stdout.matchAll(/^PASS (?!total=)\S+$/gm)].length);
   const wires=[]; const decoder=new TextDecoder("utf-8",{fatal:true});
   const configCases=new Map([

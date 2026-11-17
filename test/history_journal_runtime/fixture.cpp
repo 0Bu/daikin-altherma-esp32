@@ -27,6 +27,16 @@ uint32_t                         cycling_ack          = 0;
 uint32_t                         cycling_offer_model  = cycling_model;
 bool                             cycling_forgotten    = false;
 daik::logic::CheckupCyclingTrace cycling_restored;
+bool                             mb_core_pending         = false;
+int64_t                          mb_core_bucket          = 0;
+unsigned                         mb_core_appended        = 0;
+unsigned                         mb_core_restore         = 0;
+constexpr uint32_t               mb_cycling_model        = 303;
+constexpr uint32_t               mb_cycling_source       = 404;
+uint32_t                         mb_cycling_offer_unix_s = 0;
+uint32_t                         mb_cycling_reset_token  = 0;
+uint32_t                         mb_cycling_ack          = 0;
+daik::logic::CheckupCyclingTrace mb_cycling_restored;
 }
 const esp_partition_t* esp_partition_find_first(int, int, const char* label) {
     if (auto hook = std::exchange(journal_sdk::during_find, nullptr)) hook();
@@ -90,13 +100,25 @@ bool                  hp_poll_generation_matches(uint32_t generation) { return g
 uint32_t              circulation_source_generation() { return 1; }
 CirculationPumpSample circulation_pump_sample() { return {}; }
 void                  checkup_stop_context_expire(int64_t) { ++journal_sdk::stop_expiry; }
-bool checkup_flash_next(int64_t, int64_t, int64_t& bucket, logic::CheckupJournalPayload& payload) {
+bool checkup_flash_next(int64_t, int64_t, int64_t& bucket, logic::CheckupJournalPayload& payload,
+                        DiagnosticsSource source) {
+    if (source == DiagnosticsSource::Modbus) {
+        if (!mb_core_pending) return false;
+        bucket  = mb_core_bucket;
+        payload = {mb_cycling_model, mb_cycling_source, 0, 11, bucket * 3600, {}, {}};
+        return true;
+    }
     if (!journal_sdk::core_pending) return false;
     bucket  = journal_sdk::core_bucket;
-    payload = {202, 101, 0, 11, bucket * 3600};
+    payload = {202, 101, 0, 11, bucket * 3600, {}, {}};
     return true;
 }
-void checkup_flash_appended(int64_t) {
+void checkup_flash_appended(int64_t, DiagnosticsSource source) {
+    if (source == DiagnosticsSource::Modbus) {
+        ++mb_core_appended;
+        mb_core_pending = false;
+        return;
+    }
     ++journal_sdk::core_appended;
     if (core_backlog) {
         --core_backlog;
@@ -105,7 +127,14 @@ void checkup_flash_appended(int64_t) {
     journal_sdk::core_pending = core_backlog > 0;
 }
 CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* records, size_t count,
-                                                int64_t) {
+                                                int64_t, DiagnosticsSource                source) {
+    if (source == DiagnosticsSource::Modbus) {
+        ++mb_core_restore;
+        for (size_t i = 0; i < count; ++i)
+            if (records[i].payload.model_fp != mb_cycling_model)
+                throw std::runtime_error("modbus adapter received x10a checkup source");
+        return CheckupFlashRestoreResult::Restored;
+    }
     ++journal_sdk::core_restore;
     for (size_t i = 0; i < count; ++i)
         if (records[i].payload.model_fp != 202)
@@ -113,35 +142,55 @@ CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* record
     return CheckupFlashRestoreResult::Restored;
 }
 bool checkup_cycling_checkpoint(logic::CheckupCyclingTrace& trace, logic::CyclingTraceIdentity& id,
-                                uint32_t& token, TickType_t, bool allow_data) {
-    if (cycling_forgotten || (!cycling_reset_token && (!allow_data || !cycling_offer_unix_s)))
-        return false;
-    token = cycling_reset_token;
+                                uint32_t& token, TickType_t, bool allow_data,
+                                DiagnosticsSource source) {
+    const bool     is_mb      = source == DiagnosticsSource::Modbus;
+    const uint32_t offer_unix = is_mb ? mb_cycling_offer_unix_s : cycling_offer_unix_s;
+    const uint32_t reset_tok  = is_mb ? mb_cycling_reset_token : cycling_reset_token;
+    if (cycling_forgotten || (!reset_tok && (!allow_data || !offer_unix))) return false;
+    token = reset_tok;
     trace.reset();
-    trace.unix_s       = token ? 1 : cycling_offer_unix_s;
+    trace.unix_s       = token ? 1 : offer_unix;
     trace.window_end_s = logic::CHECKUP_WINDOW_S;
     id                 = {};
     if (!token) {
         for (uint32_t i = 0; i < trace.capacity; ++i)
             trace.push(80000 + 31 * i, static_cast<logic::CheckupCyclingTrace::Kind>(i % 7));
         trace.end_s = 86000;
-        id          = {cycling_offer_model, cycling_source, cycling_generation};
+        id          = is_mb ? logic::CyclingTraceIdentity{mb_cycling_model, mb_cycling_source,
+                                                 cycling_generation}
+                            : logic::CyclingTraceIdentity{cycling_offer_model, cycling_source,
+                                                 cycling_generation};
     }
     return true;
 }
-bool checkup_cycling_reset_pending() { return cycling_reset_token != 0; }
-void checkup_cycling_checkpoint_appended(uint32_t reset_token) {
+bool checkup_cycling_reset_pending(DiagnosticsSource source) {
+    return (source == DiagnosticsSource::Modbus ? mb_cycling_reset_token : cycling_reset_token) !=
+           0;
+}
+void checkup_cycling_checkpoint_appended(uint32_t reset_token, DiagnosticsSource source) {
+    if (source == DiagnosticsSource::Modbus) {
+        mb_cycling_ack         = reset_token;
+        mb_cycling_reset_token = 0;
+        return;
+    }
     cycling_ack         = reset_token;
     cycling_reset_token = 0;
 }
 CheckupFlashRestoreResult checkup_cycling_restore(const logic::CheckupCyclingTrace&  trace,
                                                   const logic::CyclingTraceIdentity& id, int64_t,
-                                                  TickType_t) {
-    if (!trace.count || cycling_forgotten || id.model_fp != cycling_model)
+                                                  TickType_t, DiagnosticsSource source) {
+    const bool     is_mb = source == DiagnosticsSource::Modbus;
+    const uint32_t exp_m = is_mb ? mb_cycling_model : cycling_model;
+    const uint32_t exp_s = is_mb ? mb_cycling_source : cycling_source;
+    if (!trace.count || cycling_forgotten || id.model_fp != exp_m)
         return CheckupFlashRestoreResult::Ignored;
-    if (id.source_fp != cycling_source || id.diagnostics_generation != cycling_generation)
+    if (id.source_fp != exp_s || id.diagnostics_generation != cycling_generation)
         throw std::runtime_error("cycling adapter received foreign physical source or consent");
-    cycling_restored = trace;
+    if (is_mb)
+        mb_cycling_restored = trace;
+    else
+        cycling_restored = trace;
     return CheckupFlashRestoreResult::Restored;
 }
 void checkup_cycling_forget() { cycling_forgotten = true; }
@@ -163,6 +212,7 @@ void boot(bool clear_flash = true) {
     for (unsigned i = 0; i < 20; ++i) history_service_flash_restore();
     require(s_flash_restore_done, "complete_trend_restore");
     require(s_flash_checkup_restore_done, "complete_core_restore");
+    require(s_flash_mb_checkup.restore_done, "complete_modbus_core_restore");
     stop_observation_flash_service(flash_read_stop_observation);
     require(!stop_observation_report().restore_pending, "real_store_initial_restore_complete");
 }
@@ -586,18 +636,18 @@ void poll_during_shutdown_claim() {
     cycling_offer_unix_s = static_cast<uint32_t>(journal_sdk::unix_origin);
     // The shutdown callback has claimed its drain but has not acquired the flash lock yet.
     s_flash_shutdown_started.store(true);
-    require(history_flash_service_journal(3, 0) == 3 && s_flash_cycling_pending &&
-                !s_flash_cycling_shutdown_offered,
+    require(history_flash_service_journal(3, 0) == 3 && s_flash_cycling.pending &&
+                !s_flash_cycling.shutdown_offered,
             "poll_does_not_take_over_shutdown_budget");
 }
 void cycling_reset_before_last_page() {
     boot();
     cycling_offer_unix_s = static_cast<uint32_t>(journal_sdk::unix_origin);
-    require(history_flash_service_journal(3, 0) == 3 && s_flash_cycling_pending,
+    require(history_flash_service_journal(3, 0) == 3 && s_flash_cycling.pending,
             "ordinary_checkpoint_waits_for_its_final_page");
     cycling_reset_token = 9;
     require(history_flash_service_journal(1, 0) == 1 && cycling_ack == 9 &&
-                !s_flash_cycling_pending,
+                !s_flash_cycling.pending,
             "reset_commits_in_place_of_retired_checkpoint_final_page");
 }
 void cycling_reset_before_trend_restore(bool trace_ready) {
@@ -605,7 +655,7 @@ void cycling_reset_before_trend_restore(bool trace_ready) {
     cycling_offer_unix_s         = static_cast<uint32_t>(journal_sdk::unix_origin);
     cycling_reset_token          = 9;
     s_flash_restore_done         = false;
-    s_flash_cycling_restore_done = trace_ready;
+    s_flash_cycling.restore_done = trace_ready;
     history_flash_save();
     require(cycling_ack == 9 && journal_sdk::writes == 2,
             "shutdown_commits_only_reset_while_trends_restore");
@@ -622,9 +672,9 @@ void cycling_reset_before_time_sync() {
 void seed_cycling(const char* transport_path, const std::string& phase) {
     boot();
     cycling_offer_unix_s = static_cast<uint32_t>(journal_sdk::unix_origin);
-    require(history_flash_service_journal(3, 0) == 3 && s_flash_cycling_pending,
+    require(history_flash_service_journal(3, 0) == 3 && s_flash_cycling.pending,
             "normal_poll_bounds_multislot_checkpoint_work");
-    require(history_flash_service_journal(3, 0) == 1 && !s_flash_cycling_pending,
+    require(history_flash_service_journal(3, 0) == 1 && !s_flash_cycling.pending,
             "last_page_finishes_normal_checkpoint_once");
     require(journal_sdk::core_appended == 0 && s_flash_last_bucket[3] == INT64_MIN,
             "cycling_never_updates_core_hour_cursor");
@@ -639,13 +689,13 @@ void seed_cycling(const char* transport_path, const std::string& phase) {
         history_flash_save();
         require(journal_sdk::core_appended == 12 && journal_sdk::core_pending && core_backlog == 1,
                 "shutdown_cycling_preserves_full_ordinary_journal_budget");
-        require(journal_sdk::writes == 40 && !s_flash_cycling_pending,
+        require(journal_sdk::writes == 40 && !s_flash_cycling.pending,
                 "shutdown_adds_exactly_one_complete_fresh_checkpoint");
         history_flash_save();
         require(journal_sdk::writes == 40 && core_backlog == 1, "shutdown_does_not_drain_twice");
     } else if (phase == "barrier_early_shutdown") {
         cycling_reset_token  = 9;
-        s_flash_restore_done = s_flash_cycling_restore_done = false;
+        s_flash_restore_done = s_flash_cycling.restore_done = false;
         history_flash_save();
         require(cycling_ack == 9 && journal_sdk::writes == 10,
                 "shutdown_commits_only_reset_while_trends_restore");
@@ -654,8 +704,8 @@ void seed_cycling(const char* transport_path, const std::string& phase) {
         require(history_flash_service_journal(3, 0) == 1 && cycling_ack == 9,
                 "barrier_is_immediate_and_acked_after_verified_commit");
     } else if (phase == "torn" || phase == "corrupt" || phase == "incompatible") {
-        sdk::now_us += 130000000;
-        cycling_offer_unix_s += 130;
+        sdk::now_us += 190000000;
+        cycling_offer_unix_s += 190;
         if (phase == "incompatible") cycling_offer_model = 303;
         require(history_flash_service_journal(3, 0) == 3,
                 "newer_checkpoint_prefix_lands_before_failure");
@@ -681,7 +731,7 @@ void seed_cycling(const char* transport_path, const std::string& phase) {
 
 void restore_cycling(const char* transport_path, const std::string& phase) {
     load_synthetic_nor(transport_path);
-    sdk::now_us = 140000000;
+    sdk::now_us = 250000000;
     boot(false);
     require(journal_sdk::writes == 0 && journal_sdk::erases == 0,
             "cycling_restore_never_writes_or_erases");
@@ -779,6 +829,56 @@ void restore_before_pending_bucket() {
     require(source_anchor_bucket_locked(HistorySource::X10a) == stored_anchor + 1,
             "late_first_commit_keeps_its_journal_bucket");
 }
+void write_nor_file(const char* nor_path) {
+    FILE* out = std::fopen(nor_path, "wb");
+    require(out != nullptr, "open_nor_for_write");
+    const size_t written =
+        std::fwrite(journal_sdk::flash.data(), 1, journal_sdk::flash.size(), out);
+    std::fclose(out);
+    require(written == journal_sdk::flash.size(), "write_nor_image");
+}
+void read_nor_file(const char* nor_path) {
+    journal_sdk::flash.assign(HISTORY_FLASH_PARTITION_BYTES, 0xff);
+    FILE* in = std::fopen(nor_path, "rb");
+    require(in != nullptr, "open_nor_for_read");
+    const size_t read_bytes =
+        std::fread(journal_sdk::flash.data(), 1, journal_sdk::flash.size(), in);
+    std::fclose(in);
+    require(read_bytes == journal_sdk::flash.size(), "read_nor_image");
+}
+void seed_modbus_checkup_journal(const char* nor_path) {
+    boot();
+    mb_core_pending         = true;
+    mb_core_bucket          = journal_sdk::unix_origin / 3600 - 1;
+    mb_cycling_offer_unix_s = static_cast<uint32_t>(journal_sdk::unix_origin);
+    while (history_flash_service_journal(3, 0) > 0) {}
+    require(mb_core_appended == 1 && journal_sdk::core_appended == 0 &&
+                s_flash_mb_checkup.last_bucket == mb_core_bucket &&
+                s_flash_last_bucket[static_cast<size_t>(HistoryJournalSource::Checkup)] ==
+                    INT64_MIN,
+            "modbus_checkup_hour_uses_independent_cursor");
+    write_nor_file(nor_path);
+}
+void restore_modbus_checkup_journal(const char* nor_path) {
+    read_nor_file(nor_path);
+    boot(false);
+    require(mb_core_restore == 1 && journal_sdk::core_restore == 0 &&
+                mb_cycling_restored.count == mb_cycling_restored.capacity &&
+                cycling_restored.count == 0,
+            "modbus_journal_restores_without_touching_x10a");
+
+    mb_cycling_reset_token = 5;
+    require(history_flash_service_journal(1, 0) == 1 && mb_cycling_ack == 5,
+            "modbus_cycling_barrier_commits_without_affecting_x10a");
+    write_nor_file(nor_path);
+}
+void verify_modbus_barrier_journal(const char* nor_path) {
+    read_nor_file(nor_path);
+    boot(false);
+    require(mb_cycling_restored.count == 0 && mb_core_restore == 1 &&
+                journal_sdk::core_restore == 0,
+            "modbus_cycling_barrier_retires_prior_checkpoint");
+}
 } // namespace
 int main(int argc, char** argv) {
     const std::string name = argc >= 2 ? argv[1] : "unknown_case";
@@ -787,6 +887,12 @@ int main(int argc, char** argv) {
             seed_late_correction(argv[2]);
         else if (name == "restore_late_correction" && argc == 3)
             restore_late_correction(argv[2]);
+        else if (name == "seed_modbus_checkup_journal" && argc == 3)
+            seed_modbus_checkup_journal(argv[2]);
+        else if (name == "restore_modbus_checkup_journal" && argc == 3)
+            restore_modbus_checkup_journal(argv[2]);
+        else if (name == "verify_modbus_barrier_journal" && argc == 3)
+            verify_modbus_barrier_journal(argv[2]);
         else if (name == "seed_cycling" && argc == 4)
             seed_cycling(argv[2], argv[3]);
         else if (name == "restore_cycling" && argc == 4)

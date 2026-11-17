@@ -688,13 +688,18 @@ async function onLangPick() {
 }
 
 // Optional plant diagnostics are explicit opt-in and apply live. The status refresh both confirms
-// persistence and reveals/hides the dependent source cards; their saved mappings are not deleted.
+// persistence and reveals/hides the dependent source cards; switching sources keeps both stores.
 async function onDiagnosticsPick() {
   const sel = $("e32Diagnostics");
-  const enabled = sel.value === "on";
+  const val = sel.value;
+  const enabled = val !== "off";
+  const wasEnabled = S.status?.diagnostics?.enabled === true;
+  const payload = enabled
+    ? { enabled: true, source: val === "on" ? "x10a" : val }
+    : { enabled: false };
   sel.blur();
   try {
-    const r = await post("/set_diagnostics", { enabled });
+    const r = await post("/set_diagnostics", payload);
     if (!r.ok) {
       toast(await errorOf(r, t("toast.rejected")), "err");
       await refreshStatus();
@@ -702,7 +707,8 @@ async function onDiagnosticsPick() {
     }
   } catch { toast(t("toast.unreachable"), "err"); return; }
   await refreshStatus();
-  toast(t(enabled ? "diagnostics.saved_on" : "diagnostics.saved_off"), "ok");
+  toast(t(!enabled ? "diagnostics.saved_off"
+                   : (wasEnabled ? "toast.saved" : "diagnostics.saved_on")), "ok");
 }
 
 function hpProbeSelectionMatches(row, request = hpProbeDraftRequest()) {

@@ -130,15 +130,26 @@ async function refreshValues(paint = true) {
 // Dashboard cards: diagnostics, detected unit and value groups share one selectable panel below
 // the live diagram. The board (ESP32) card and the
 // WiFi/MQTT/Syslog/NTP rows are NOT here: both moved behind the gear onto Settings (renderSettings).
+function checkupSourceReadyFor(status = S.status) {
+  const diagSource = status?.health?.source || status?.diagnostics?.effective_source || "x10a";
+  const hasRetainedHealth = Number(status?.health?.covered_s) > 0 ||
+    status?.health?.persist === "unknown" ||
+    Number(status?.health?.available) > 0;
+  return (diagSource === "modbus"
+    ? status?.modbus?.connected === true
+    : status?.hp?.connected === true) || hasRetainedHealth;
+}
 function renderCards(hold = true) {
   if (S.otaCached || S.transportUnavailable === "status") markCyclingStale();
   // Freeze trend hosts during a scrub so structural updates cannot replace the captured plot.
   // Rows catch up when scrubEnd resumes rendering.
   if (S.scrub || (hold && S.clickHold)) return;
-  // The opt-in controls the entire diagnosis card and its navigation entry. Its 24-hour rows also
-  // require a live X10A link; passive refrigerant observations keep their independent collection.
+  // The opt-in controls the entire diagnosis card and its navigation entry. Its 24-hour rows
+  // follow the active diagnostics source (X10A or Modbus); passive refrigerant observations keep
+  // their independent X10A collection.
+  const checkupSourceReady = checkupSourceReadyFor();
   const checkup = S.status?.diagnostics?.enabled === true
-    ? checkupCardHtml(S.status?.hp?.connected) : "";
+    ? checkupCardHtml(checkupSourceReady) : "";
   const card = S.dashboardCard;
   setHtml("valueGroups", checkup + statusCardsHtml() +
     valueGroupsHtml(S._values || [], S.status?.hp?.connected), false);
@@ -398,13 +409,31 @@ function langRow(cur) {
 }
 
 // The one device-wide consent boundary for optional plant diagnostics. OFF is persisted/default and
-// leaves the source mappings dormant; ON starts a fresh evidence generation without rebooting.
-function diagnosticsRow(enabled) {
+// leaves the source mappings dormant; X10A / Modbus keeps both sources recording in parallel and
+// chooses which one feeds the dashboard checkup card.
+function diagnosticsRow(diag) {
+  const obj = diag && typeof diag === "object" ? diag : null;
+  const enabled = obj ? obj.enabled === true : diag === true;
+  const s = S.status || {};
+  const avail = Array.isArray(obj?.available_sources)
+    ? (obj.available_sources.length
+        ? obj.available_sources.filter((v) => v === "x10a" || v === "modbus")
+        : [obj.effective_source === "modbus" ? "modbus" : "x10a"])
+    : (() => {
+        const list = [];
+        if (s.hp?.connected || !s.modbus?.host) list.push("x10a");
+        if (s.modbus?.host) list.push("modbus");
+        return list.length ? list : ["x10a"];
+      })();
+  const effective = obj?.effective_source || obj?.source || "x10a";
+  const selected = !enabled ? "off" : (avail.includes(effective) ? effective : avail[0]);
   const opt = (value, label) =>
-    `<option value="${value}"${value === (enabled ? "on" : "off") ? " selected" : ""}>${esc(label)}</option>`;
+    `<option value="${value}"${value === selected ? " selected" : ""}>${esc(label)}</option>`;
+  const labels = { x10a: "X10A", modbus: "Modbus" };
+  const sourceOpts = avail.map((src) => opt(src, labels[src] || src)).join("");
   const select = `<select class="input diagnostics-sel" id="e32Diagnostics" ` +
     `aria-label="${esc(t("card.diagnostics"))}">` +
-    opt("off", t("diagnostics.off")) + opt("on", t("diagnostics.on")) + `</select>`;
+    opt("off", t("diagnostics.off")) + sourceOpts + `</select>`;
   return settingsInfoRow("firmware:diagnostics", "firmware-diagnostics-detail",
     t("card.diagnostics"), select,
     `<div class="vdesc-p">${esc(t("card.diagnostics_help"))}</div>`);
@@ -734,7 +763,7 @@ function esp32CardHtml() {
     firmwareRow(s.version) +
     channelRow(s.ota?.channel === "dev" ? "dev" : "release") +
     langRow(uiLangSupported(s.ui?.lang) ? s.ui.lang : "auto") +
-    diagnosticsRow(diagnosticsEnabled);
+    diagnosticsRow(s.diagnostics || diagnosticsEnabled);
   return vcard("ESP32", esp32Rows) + vcard(t("card.proto_title"), protoRows) +
          vcard(t("card.fw_title"), fwRows) +
          (diagnosticsEnabled ? circulationSettingsCardHtml() + dynamicControlCardHtml() : "");
@@ -1615,7 +1644,8 @@ function checkupCyclingTimelineHtml(trace, scope) {
 
 function checkupCyclingChartHtml(c) {
   // History forget retires precise times independently of the diagnosis hour buckets.
-  const scope = JSON.stringify([S.status?.boot_id, S.status?.history?.epoch, c?.hours_epoch, "timeline"]);
+  const source = S.status?.health?.source || "x10a";
+  const scope = JSON.stringify([S.status?.boot_id, S.status?.history?.epoch, source, c?.hours_epoch, "timeline"]);
   if (cyclingTrace?.scope !== scope) cyclingTrace = null;
   let trace = c?.timeline;
   if (!trace && c && cyclingTrace) {
@@ -1641,7 +1671,7 @@ function checkupCyclingChartHtml(c) {
   const identified = Number.isSafeInteger(c.hours_epoch) && hrs.every(h => Number.isSafeInteger(h?.bucket));
   // Only firmware bucket identities outlive a changing frame. Legacy snapshots can be explored,
   // but a pin must not jump to different evidence when that snapshot or its hour changes.
-  const hourlyScope = JSON.stringify([S.status?.boot_id, identified ? c.hours_epoch :
+  const hourlyScope = JSON.stringify([S.status?.boot_id, source, identified ? c.hours_epoch :
     [Math.floor((S.status?.uptime_s || 0) / 3600), hrs]]);
   const key = JSON.stringify([LANG, hourlyScope, hrs]);
   if (cyclingMarkup[0] === key) return cyclingMarkup[1];
@@ -1765,9 +1795,9 @@ function checkupDetailKey(c, statusKey) {
 // The reasons the firmware sent, as words. It sends SLUGS and never a bitmask, so this translates
 // rather than decodes — an unknown slug from a newer firmware is dropped instead of rendering a
 // placeholder that looks like a cause.
-function checkupDhwReasons(c) {
+function checkupDhwReasons(c, isModbus = false) {
   const list = Array.isArray(c.abort_reasons) ? c.abort_reasons : [];
-  return list.map((r) => t(`check.detail.dhw_reason.${r}`))
+  return list.map((r) => t(`check.detail.dhw_reason.${isModbus && r === "blind" ? "blind_modbus" : r}`))
              .filter((s) => s && !s.startsWith("check.detail."))
              .join(", ");
 }
@@ -1775,6 +1805,7 @@ function checkupDhwReasons(c) {
 const checkupFmt1 = (n) => n.toLocaleString(LANG, { maximumFractionDigits: 1 });
 function checkupDetailHtml(c, fullSpan = c.full_span === true, report = {}) {
   if (c.id === "cycling") return checkupCyclingDetailHtml(c, report);
+  const isModbus = report?.source === "modbus";
   const statusKey = checkupStatusKey(c);
   const metric = checkupMetricValue(c);
   const parts = metric.split(" · ");
@@ -1787,7 +1818,7 @@ function checkupDetailHtml(c, fullSpan = c.full_span === true, report = {}) {
   const normal = copy ? copy[1] : base.normal;
   let detail;
   // Discard reasons are aggregates, without a per-candidate cause ranking. Missing readings
-  // include necessary valve/heater/pump inputs as well as tank temperature; missing X10A
+  // include necessary valve/heater/pump inputs as well as tank temperature; missing X10A/HomeHub
   // replies and deliberate board-side polling pauses can both create that gap.
   if (c.id === "dhw_loss" && c.blocked === true) {
     const reasons = Array.isArray(c.abort_reasons) ? c.abort_reasons : [];
@@ -1795,7 +1826,7 @@ function checkupDetailHtml(c, fullSpan = c.full_span === true, report = {}) {
     const sentence = blindOnly
       ? t("check.detail.dhw_blocked_link", Number(c.aborts) || 0,
           checkupDuration(c.best_aborted_s))
-      : t("check.detail.dhw_blocked", Number(c.aborts) || 0, checkupDhwReasons(c),
+      : t("check.detail.dhw_blocked", Number(c.aborts) || 0, checkupDhwReasons(c, isModbus),
           checkupDuration(c.best_aborted_s));
     detail = sentence;
   }
@@ -1816,7 +1847,7 @@ function checkupDetailHtml(c, fullSpan = c.full_span === true, report = {}) {
       // Appended to all three: what was thrown away is the same fact whatever is happening now, and
       // it is the half that says whether waiting will ever help.
       if (Number(c.aborts) > 0)
-        detail += t("check.detail.dhw_aborted", Number(c.aborts), checkupDhwReasons(c),
+        detail += t("check.detail.dhw_aborted", Number(c.aborts), checkupDhwReasons(c, isModbus),
                     checkupDuration(c.best_aborted_s));
     } else {
       detail = c.required_s > 0
@@ -1829,12 +1860,13 @@ function checkupDetailHtml(c, fullSpan = c.full_span === true, report = {}) {
   // The reason is selected by firmware, not inferred from missing numbers in the browser.
   const reasonKey = {
     defrost_events_insufficient: "defrost_events_insufficient",
-    source_stale: "source_stale", no_paired_runtime: "no_paired_runtime",
+    source_stale: isModbus ? "source_stale_modbus" : "source_stale",
+    no_paired_runtime: "no_paired_runtime",
   }[c.reason];
   if (reasonKey) detail += ` ${t(`check.detail.${reasonKey}`)}`;
   if (compactMetric && parts.length) detail += ` ${parts.join(" · ")}.`;
   if (c.id === "dhw_loss" && statusKey !== "collecting" && !c.blocked && Number(c.aborts) > 0)
-    detail += t("check.detail.dhw_aborted", Number(c.aborts), checkupDhwReasons(c),
+    detail += t("check.detail.dhw_aborted", Number(c.aborts), checkupDhwReasons(c, isModbus),
                 checkupDuration(c.best_aborted_s));
   if (c.id === "defrost" && checkupOutdoorContext(c))
     detail += t("check.detail.outdoor_defrost");
@@ -1860,7 +1892,7 @@ function checkupDetailHtml(c, fullSpan = c.full_span === true, report = {}) {
     if (channelCoverage.length) detail += ` ${channelCoverage.join(" · ")}.`;
   }
   if (report.source_fresh === false && c.reason !== "source_stale")
-    detail += ` ${t("check.detail.source_stale")}`;
+    detail += ` ${t(isModbus ? "check.detail.source_stale_modbus" : "check.detail.source_stale")}`;
   if (statusKey === "collecting" && Number(c.required_s) > Number(c.observed_s))
     detail += ` ${t("check.detail.coverage_missing",
                     Math.ceil(c.required_s - c.observed_s).toLocaleString(LANG))}`;
@@ -1927,7 +1959,7 @@ function checkupOutdoorContext(c) {
       !(Number(c.outdoor_samples) > 0)) return "";
   const fmt = (n) => n.toLocaleString(LANG,
     { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-  const source = outdoorSourceLabel(c.outdoor_source);
+  const source = c.outdoor_source === "homehub" ? "Modbus" : outdoorSourceLabel(c.outdoor_source);
   return c.outdoor_min_c === c.outdoor_mean_c
     ? t("check.outdoor_one", source, fmt(c.outdoor_mean_c))
     : t("check.outdoor_range", source, fmt(c.outdoor_min_c), fmt(c.outdoor_mean_c));
@@ -2013,13 +2045,25 @@ function checkupValue(c) {
   return (c.id === "fault" && c.verdict === "collecting") ? st : (checkupMetricValue(c) || st);
 }
 
+const MODBUS_HIDDEN_CHECKS = new Set(["defrost", "pressure", "retries"]);
 function checkupCardHtml(includeHealth = true) {
   const h = includeHealth ? S.status?.health : null;
+  const source = h?.source || S.status?.diagnostics?.effective_source || "x10a";
+  const isModbus = source === "modbus";
+  const avail = S.status?.diagnostics?.available_sources;
+  const dualAvail = Array.isArray(avail) && avail.includes("x10a") && avail.includes("modbus");
+  const cardTitle = isModbus ? `${t("card.checkup")} · Modbus`
+                  : dualAvail ? `${t("card.checkup")} · X10A`
+                  : t("card.checkup");
   let healthRows = "";
   const unreadable = h?.persist === "unknown";
+  const visibleChecks = Array.isArray(h?.checks)
+    ? h.checks.filter((c) => !isModbus ||
+        (!MODBUS_HIDDEN_CHECKS.has(c.id) && !(c.id === "flow" && c.verdict === "unavailable")))
+    : [];
   if (unreadable) healthRows = `<span class="empty">${esc(t("sys.nodata"))}</span>`;
-  if (!unreadable && Array.isArray(h?.checks)) {
-    for (const c of h.checks) {
+  if (!unreadable && visibleChecks.length) {
+    for (const c of visibleChecks) {
       const key = CHECKUP_ROW[c.id];
       if (!key) continue;                             // a check this UI does not know: skipped, never guessed at
       const tone = CHECKUP_TONE[checkupStatusKey(c)] || "";
@@ -2030,20 +2074,20 @@ function checkupCardHtml(includeHealth = true) {
   }
   // This row remains independent of /status.health and is not counted by the badge below.
   // renderCards() gates the whole card on the diagnostics opt-in, including this observation.
-  const rows = healthRows + refrigerantServiceRowHtml();
+  const rows = healthRows + (isModbus ? "" : refrigerantServiceRowHtml());
   if (!rows) return "";                               // older firmware — no card rather than an empty one
   if (unreadable || !healthRows)
-    return vcard(t("card.checkup"), rows, "", "", "diagnosis", t("nav.diagnosis"));
+    return vcard(cardTitle, rows, "", "", "diagnosis", t("nav.diagnosis"));
   // Findings are counts of serialized verdicts, not a health score or a second threshold rule.
-  const warnings = h.checks.filter(c => c.verdict === "warn").length;
-  const notes = h.checks.filter(c => c.verdict === "info").length;
+  const warnings = visibleChecks.filter(c => c.verdict === "warn").length;
+  const notes = visibleChecks.filter(c => c.verdict === "info").length;
   const badge = warnings ? t("check.summary.warnings", warnings)
               : notes ? t("check.summary.notes", notes)
               : h.status === "ok" ? t("check.summary.ok")
               : h.status === "collecting" ? t("check.summary.collecting")
               : t("check.summary.observations");
   const badgeCls = { warn: "err", ok: "ok", collecting: "dim", unavailable: "dim" }[h.status] || "";
-  return vcard(t("card.checkup"), rows, badge, badgeCls, "diagnosis", t("nav.diagnosis"));
+  return vcard(cardTitle, rows, badge, badgeCls, "diagnosis", t("nav.diagnosis"));
 }
 
 // A read-only context window for a qualified refrigerant service check.  This is deliberately not a

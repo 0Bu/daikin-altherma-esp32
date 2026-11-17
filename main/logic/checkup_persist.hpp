@@ -31,7 +31,8 @@
 
 namespace daik::logic {
 
-inline constexpr uint32_t CHECKUP_PERSIST_MAGIC   = 0x504b4843u;   // "CHKP" little-endian
+inline constexpr uint32_t CHECKUP_PERSIST_MAGIC        = 0x504b4843u; // "CHKP" little-endian
+inline constexpr uint32_t CHECKUP_MODBUS_PERSIST_MAGIC = 0x4d4b4843u; // "CHKM" little-endian
 // v2 adds the diagnostics consent generation to the warm-restart image.  A v1
 // image must not be interpreted with the shifted v2 layout.  v3 seals the count of boots that
 // adopted the window and have not completed an hour since (HIST-03/b): a v2 image cannot say
@@ -102,16 +103,15 @@ inline constexpr const char* checkup_restore_slug(CheckupRestore r) {
 // admit completed RAM hours: startup retires those hours regardless of this verdict. Integrity
 // instead gates the separate one-shot DHW handoff. `Flash` is not a verdict of this function:
 // later compatible absolute-age journal reconstruction reports it only after selecting evidence.
-inline constexpr CheckupRestore
-checkup_restore_verdict(uint32_t reset_reason, uint32_t magic, uint16_t version, uint32_t layout_fp,
-                        uint32_t want_layout_fp, uint32_t stored_crc, uint32_t actual_crc,
-                        bool safe_mode = false, bool diagnostics_enabled = true,
-                        uint32_t stored_generation = 0, uint32_t wanted_generation = 0,
-                        uint32_t boots_since_commit = 0) {
+inline constexpr CheckupRestore checkup_restore_verdict(
+    uint32_t reset_reason, uint32_t magic, uint16_t version, uint32_t layout_fp,
+    uint32_t want_layout_fp, uint32_t stored_crc, uint32_t actual_crc, bool safe_mode = false,
+    bool diagnostics_enabled = true, uint32_t stored_generation = 0, uint32_t wanted_generation = 0,
+    uint32_t boots_since_commit = 0, uint32_t expected_magic = CHECKUP_PERSIST_MAGIC) {
     if (!diagnostics_enabled)                         return CheckupRestore::DiagnosticsDisabled;
     if (safe_mode)                                  return CheckupRestore::SafeMode;
     if (!history_reset_preserves_ram(reset_reason)) return CheckupRestore::PowerCycle;
-    if (magic != CHECKUP_PERSIST_MAGIC)             return CheckupRestore::NoRecord;
+    if (magic != expected_magic) return CheckupRestore::NoRecord;
     if (version != CHECKUP_PERSIST_VERSION)         return CheckupRestore::WrongVersion;
     if (layout_fp != want_layout_fp)                return CheckupRestore::WrongLayout;
     if (stored_crc != actual_crc)                   return CheckupRestore::BadCrc;
@@ -255,6 +255,11 @@ inline uint32_t checkup_schema_row_fingerprint(const ProfileView& view, const Va
     return config_crc32_final(crc);
 }
 
+inline uint32_t checkup_nonzero_fp(uint32_t crc) {
+    const uint32_t result = config_crc32_final(crc);
+    return result ? result : 1u; // zero is never a confirmed decoder/source identity
+}
+
 // Bind the resolved consumer schema as well as the name. Canonical key order preserves harmless
 // reordering; multiplicity stays explicit. Conflicting duplicate selectors or multiple distinct
 // compressor witnesses fail closed instead of letting first-row order establish identity.
@@ -305,8 +310,44 @@ inline uint32_t checkup_model_fingerprint(const char* profile_id, const ProfileV
         previous      = key;
         have_previous = true;
     }
-    const uint32_t result = config_crc32_final(crc);
-    return result ? result : 1u; // zero is never a confirmed decoder identity
+    return checkup_nonzero_fp(crc);
+}
+
+// Consumer schema identity for Modbus checkup sources (HomeHub vs Altherma 4). Templated on the
+// register table entry type so main/logic/ keeps no direct def/ dependency.
+template <typename Reg>
+inline uint32_t checkup_modbus_model_fingerprint(ModbusProfile profile, const Reg* regs,
+                                                 int count) {
+    if ((profile != ModbusProfile::HomeHub && profile != ModbusProfile::Altherma4) || !regs ||
+        count <= 0)
+        return 0;
+    const CheckupCoverage cov                = checkup_modbus_coverage(profile);
+    constexpr uint16_t    kConsumedOffsets[] = {21, 30, 31, 32, 37, 38, 43, 44, 49};
+    uint32_t              crc                = checkup_profile_name_crc("checkup-mb-v1");
+    crc                                      = checkup_fp_u32(crc, CHECKUP_EVIDENCE_METHOD_VERSION);
+    crc                                      = checkup_fp_u32(crc, static_cast<uint32_t>(profile));
+    for (uint16_t off : kConsumedOffsets) {
+        if (off == 49 && !cov.flow) continue;
+        const Reg* r = nullptr;
+        for (int i = 0; i < count; ++i) {
+            if (regs[i].offset == off && regs[i].space == MbFunc::ReadInput) {
+                r = &regs[i];
+                break;
+            }
+        }
+        if (!r) return 0;
+        crc               = checkup_fp_u32(crc, r->offset);
+        crc               = checkup_fp_u32(crc, static_cast<uint32_t>(r->space));
+        crc               = checkup_fp_u32(crc, static_cast<uint32_t>(r->type));
+        crc               = checkup_fp_u32(crc, static_cast<uint32_t>(r->scale));
+        crc               = checkup_fp_u32(crc, static_cast<uint32_t>(r->kind));
+        const char*  unit = r->unit ? r->unit : "";
+        const size_t ulen = std::strlen(unit);
+        if (ulen) crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(unit), ulen);
+        const uint8_t nul = 0;
+        crc               = config_crc32_update(crc, &nul, 1);
+    }
+    return checkup_nonzero_fp(crc);
 }
 
 // The electrical circulation witness is independently configured. Its broker, value/time mapping
@@ -327,12 +368,11 @@ inline uint32_t checkup_dhw_source_fingerprint(const char* broker, const char* t
         if (n) crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(field), n);
         crc = config_crc32_update(crc, &nul, 1);
     }
-    crc               = checkup_fp_u32(crc, max_age_s);
-    crc               = checkup_fp_u32(crc, on_tenths_w);
-    crc               = checkup_fp_u32(crc, off_tenths_w);
-    crc               = checkup_fp_u32(crc, confirm_s);
-    const uint32_t fp = config_crc32_final(crc);
-    return fp ? fp : 1; // zero remains the unsupported legacy identity
+    crc = checkup_fp_u32(crc, max_age_s);
+    crc = checkup_fp_u32(crc, on_tenths_w);
+    crc = checkup_fp_u32(crc, off_tenths_w);
+    crc = checkup_fp_u32(crc, confirm_s);
+    return checkup_nonzero_fp(crc);
 }
 
 // ── Durable hourly journal payload ───────────────────────────────────────────────────────────────
@@ -386,6 +426,14 @@ inline uint32_t checkup_journal_fingerprint() {
     crc = checkup_fp_u32(crc, static_cast<uint32_t>(offsetof(CheckupJournalPayload, end_unix_s)));
     crc = checkup_fp_u32(crc, static_cast<uint32_t>(offsetof(CheckupJournalPayload, checkup)));
     crc = checkup_fp_u32(crc, static_cast<uint32_t>(offsetof(CheckupJournalPayload, dhw)));
+    return config_crc32_final(crc);
+}
+
+// Separate envelope fingerprint inside HistoryJournalSource::Checkup so Modbus completed hours
+// share the physical partition scan cleanly without ever mixing into X10A restore slots.
+inline uint32_t checkup_modbus_journal_fingerprint() {
+    uint32_t crc = checkup_profile_name_crc("checkup-mb-jnl");
+    crc          = checkup_fp_u32(crc, checkup_journal_fingerprint());
     return config_crc32_final(crc);
 }
 

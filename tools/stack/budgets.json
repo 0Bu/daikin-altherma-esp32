@@ -123,7 +123,7 @@
     },
     "config_circulation": {
       "pattern": "^daik::set_circulation\\(",
-      "max_bytes": 976
+      "max_bytes": 992
     },
     "circulation_parser": {
       "pattern": "^daik::parse_circulation_request\\(",
@@ -263,7 +263,7 @@
     },
     "mqtt_heartbeat_payload": {
       "pattern": "^daik::build_heartbeat_json\\[abi:cxx11\\]\\(",
-      "max_bytes": 432
+      "max_bytes": 496
     },
     "mqtt_crash": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?publish_crash\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?13publish_crash[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
@@ -302,11 +302,11 @@
       "max_bytes": 784
     },
     "checkup_cycling_hours_locked": {
-      "pattern": "^(?:daik::checkup_cycling_hours_locked\\(long long\\)(?: \\[clone .+\\])?|_ZN4daikL28checkup_cycling_hours_locked[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+)$",
+      "pattern": "^(?:daik::checkup_cycling_hours_locked\\(daik::\\(anonymous namespace\\)::CheckupSlot const\\&, long long\\)(?: \\[clone .+\\])?|_ZN4daikL28checkup_cycling_hours_locked[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+)$",
       "max_bytes": 512
     },
     "checkup_evaluate": {
-      "pattern": "^daik::logic::checkup_evaluate\\(daik::logic::CheckupWindow const&, daik::logic::CheckupCoverage const&, daik::FaultClass, daik::logic::DhwLossWindow const&\\)$",
+      "pattern": "^daik::logic::checkup_evaluate\\(daik::logic::CheckupWindow const&, daik::logic::CheckupCoverage const&, daik::FaultClass, daik::logic::DhwLossWindow const&, daik::logic::OutdoorSource\\)$",
       "max_bytes": 80
     },
     "checkup_summarize": {
@@ -371,7 +371,7 @@
     },
     "modbus_task": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?mb_task\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?7mb_task[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
-      "max_bytes": 64
+      "max_bytes": 80
     },
     "modbus_poll": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?mb_poll_once\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?12mb_poll_once[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
@@ -435,7 +435,7 @@
     },
     "config_load": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?config_load\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?11config_load[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
-      "max_bytes": 2368
+      "max_bytes": 2384
     },
     "history_start": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?history_start\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?13history_start[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
@@ -467,7 +467,7 @@
     },
     "http_values_model": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?h_active_model_values\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?21h_active_model_values[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
-      "max_bytes": 864
+      "max_bytes": 880
     },
     "http_board_pins": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?board_pins\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?10board_pins[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
@@ -699,7 +699,7 @@
     },
     "mqtt_heartbeat_builder": {
       "pattern": "^(?:daik::build_heartbeat_payload(?:\\[abi:cxx11\\])?\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daikL23build_heartbeat_payload[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
-      "max_bytes": 1008
+      "max_bytes": 1040
     },
     "mqtt_curve_builder": {
       "pattern": "^(?:daik::build_heating_curve_payload(?:\\[abi:cxx11\\])?\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daikL27build_heating_curve_payload[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
@@ -1655,7 +1655,7 @@
     },
     "checkup_shutdown": {
       "pattern": "^daik::.*checkup_reboot_save\\(",
-      "max_bytes": 112
+      "max_bytes": 128
     },
     "config_wifi": {
       "pattern": "^daik::set_wifi\\(",
@@ -2286,7 +2286,7 @@
       "max_bytes": 32
     },
     "cycling_crc": {
-      "pattern": "^daik::\\(anonymous namespace\\)::checkup_persist_crc\\(",
+      "pattern": "^(?:daik::\\(anonymous namespace\\)::checkup_persist_crc\\(|_ZN4daik12_GLOBAL__N_1L19checkup_persist_crc[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
       "max_bytes": 32
     },
     "cycling_layout_fingerprint": {
@@ -2914,7 +2914,7 @@
       "max_bytes": 32
     },
     "cycling_trace_snapshot": {
-      "pattern": "^daik::\\(anonymous namespace\\)::cycling_snapshot_locked\\(daik::logic::CheckupCyclingTrace\\&, long long\\)$",
+      "pattern": "^daik::\\(anonymous namespace\\)::cycling_snapshot_locked\\(daik::\\(anonymous namespace\\)::CheckupSlot\\&, daik::logic::CheckupCyclingTrace\\&, long long\\)$",
       "max_bytes": 64
     },
     "cycling_trace_emit": {
@@ -2926,7 +2926,7 @@
       "max_bytes": 32
     },
     "cycling_checkpoint": {
-      "pattern": "^daik::checkup_cycling_checkpoint\\(daik::logic::CheckupCyclingTrace\\&, daik::logic::CyclingTraceIdentity\\&, unsigned long\\&, unsigned long, bool\\)$",
+      "pattern": "^daik::checkup_cycling_checkpoint\\(daik::logic::CheckupCyclingTrace\\&, daik::logic::CyclingTraceIdentity\\&, unsigned long\\&, unsigned long, bool, daik::DiagnosticsSource\\)$",
       "max_bytes": 80
     },
     "cycling_flash_restore": {
@@ -2938,7 +2938,7 @@
       "max_bytes": 32
     },
     "cycling_flash_page": {
-      "pattern": "^daik::\\(anonymous namespace\\)::flash_cycling_page\\(daik::\\(anonymous namespace\\)::FlashJournalRecord const\\&, daik::logic::CyclingTracePageInfo\\&\\)$",
+      "pattern": "^daik::\\(anonymous namespace\\)::flash_cycling_page_for\\(daik::\\(anonymous namespace\\)::FlashJournalRecord const\\&, daik::logic::CyclingTracePageInfo\\&, bool\\)$",
       "max_bytes": 112
     },
     "cycling_flash_crc": {
@@ -2946,27 +2946,27 @@
       "max_bytes": 32
     },
     "cycling_trace_restore": {
-      "pattern": "^daik::checkup_cycling_restore\\(daik::logic::CheckupCyclingTrace const\\&, daik::logic::CyclingTraceIdentity const\\&, long long, unsigned long\\)$",
+      "pattern": "^daik::checkup_cycling_restore\\(daik::logic::CheckupCyclingTrace const\\&, daik::logic::CyclingTraceIdentity const\\&, long long, unsigned long, daik::DiagnosticsSource\\)$",
       "max_bytes": 64
     },
     "cycling_flash_build": {
-      "pattern": "^daik::\\(anonymous namespace\\)::flash_build_next_cycling\\(daik::\\(anonymous namespace\\)::FlashJournalRecord\\&, unsigned long, bool\\)$",
-      "max_bytes": 128
+      "pattern": "^daik::\\(anonymous namespace\\)::flash_build_next_cycling\\(daik::\\(anonymous namespace\\)::FlashJournalRecord\\&, unsigned long, bool, bool\\)$",
+      "max_bytes": 144
     },
     "cycling_reset_pending": {
-      "pattern": "^daik::checkup_cycling_reset_pending\\(\\)$",
+      "pattern": "^daik::checkup_cycling_reset_pending\\(daik::DiagnosticsSource\\)$",
       "max_bytes": 32
     },
     "cycling_page_valid": {
-      "pattern": "^daik::logic::cycling_trace_page_valid\\(daik::logic::HistoryJournalHeader const\\&, daik::logic::CyclingTracePageInfo const\\&\\)$",
-      "max_bytes": 32
+      "pattern": "^daik::logic::cycling_trace_page_valid(?:_schema)?\\(daik::logic::HistoryJournalHeader const\\&, daik::logic::CyclingTracePageInfo const\\&(?:, (?:bool|unsigned long))?\\)$",
+      "max_bytes": 48
     },
     "cycling_part_count": {
       "pattern": "^daik::logic::cycling_trace_part_count\\(unsigned int\\)$",
       "max_bytes": 32
     },
     "cycling_checkpoint_acked": {
-      "pattern": "^daik::checkup_cycling_checkpoint_appended\\(unsigned long\\)$",
+      "pattern": "^daik::checkup_cycling_checkpoint_appended\\(unsigned long, daik::DiagnosticsSource\\)$",
       "max_bytes": 32
     },
     "cycling_record_owner": {
@@ -2976,6 +2976,42 @@
     "history_record_scope": {
       "pattern": "^daik::\\(anonymous namespace\\)::flash_record_valid\\(daik::\\(anonymous namespace\\)::FlashJournalRecord const\\&\\)$",
       "max_bytes": 32
+    },
+    "modbus_checkup_confirm": {
+      "pattern": "^daik::checkup_modbus_confirm_source\\(daik::ModbusProfile, unsigned long\\)$",
+      "max_bytes": 48
+    },
+    "modbus_checkup_model_fingerprint": {
+      "pattern": "^unsigned long daik::logic::checkup_modbus_model_fingerprint<daik::def::HomeHubReg>\\(daik::ModbusProfile, daik::def::HomeHubReg const\\*, int\\)$",
+      "max_bytes": 96
+    },
+    "modbus_checkup_dhw_adopt": {
+      "pattern": "^daik::logic::dhw_loss_adopt\\(daik::logic::DhwLossState\\&, daik::logic::DhwLossCarry const\\&, long long\\)$",
+      "max_bytes": 128
+    },
+    "modbus_checkup_record": {
+      "pattern": "^daik::checkup_record_modbus\\(daik::CachedValue const\\*, unsigned int, daik::ModbusProfile, unsigned long, unsigned long, bool\\)$",
+      "max_bytes": 192
+    },
+    "modbus_checkup_coverage": {
+      "pattern": "^daik::logic::checkup_modbus_coverage\\(daik::ModbusProfile\\)$",
+      "max_bytes": 64
+    },
+    "checkup_commit_and_fold": {
+      "pattern": "^daik::\\(anonymous namespace\\)::commit_and_fold_locked\\(daik::\\(anonymous namespace\\)::CheckupSlot\\&, daik::logic::CheckupSample const\\&, long long, unsigned long, bool\\)$",
+      "max_bytes": 48
+    },
+    "checkup_fold_locked": {
+      "pattern": "^daik::\\(anonymous namespace\\)::fold_checkup_locked\\(daik::\\(anonymous namespace\\)::CheckupSlot\\&, daik::logic::CheckupSample const\\&, long long\\)$",
+      "max_bytes": 48
+    },
+    "checkup_step": {
+      "pattern": "^daik::logic::checkup_step\\(daik::logic::CheckupState\\&, daik::logic::CheckupBucket\\&, daik::logic::CheckupSample const\\&, long long, daik::logic::CheckupRing\\*, daik::logic::CheckupCyclingTrace\\*, daik::logic::OutdoorSource\\)$",
+      "max_bytes": 112
+    },
+    "dhw_loss_step": {
+      "pattern": "^daik::logic::dhw_loss_step\\(daik::logic::DhwLossState\\&, daik::logic::DhwLossBucket\\&, daik::logic::CheckupSample const\\&, long long\\)$",
+      "max_bytes": 48
     }
   },
   "paths": {
@@ -3722,6 +3758,38 @@
         "modbus_task",
         "modbus_poll",
         "modbus_history"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "modbus_checkup_confirm": {
+      "symbols": [
+        "modbus_task",
+        "modbus_poll",
+        "modbus_checkup_confirm",
+        "modbus_checkup_model_fingerprint",
+        "modbus_checkup_dhw_adopt",
+        "cycling_seal",
+        "cycling_layout_fingerprint",
+        "cycling_crc",
+        "checkup_schema_crc",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "modbus_checkup_record": {
+      "symbols": [
+        "modbus_task",
+        "modbus_poll",
+        "modbus_checkup_record",
+        "modbus_checkup_coverage",
+        "checkup_commit_and_fold",
+        "checkup_fold_locked",
+        "checkup_step",
+        "dhw_loss_step"
       ],
       "multipliers": {},
       "base_bytes": 1536,
@@ -14397,7 +14465,9 @@
       "reserve_bytes": 1024,
       "paths": [
         "modbus_poll",
-        "modbus_history"
+        "modbus_history",
+        "modbus_checkup_confirm",
+        "modbus_checkup_record"
       ]
     },
     "syslog": {

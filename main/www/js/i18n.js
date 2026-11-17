@@ -916,6 +916,8 @@ const I18N = {
     "lang.uk": "Українська", "lang.zh": "简体中文", "lang.ja": "日本語",
     "lang.nb": "Norsk", "lang.sv": "Svenska", "lang.fi": "Suomi",
     "lang.saved": "Language saved",
+    "check.detail.dhw_reason.blind_modbus": "readings missing: Modbus silent or polling paused",
+    "check.detail.source_stale_modbus": "No fresh Modbus sample; current state unknown. History retained.",
   },
 };
 function t(k, ...a) {

@@ -133,6 +133,7 @@
 #include "def/signatures.hpp"
 #include "def/model_names.hpp"
 #include "def/homehub.hpp"
+#include "def/altherma4.hpp"
 #include "logic/homehub_map.hpp"
 
 static int g_failures = 0;
@@ -5401,7 +5402,15 @@ static void test_heartbeat() {
           "\"bus_crc_err\":0,\"bus_timeout_err\":2,\"bus_ou_held_over\":0,"
           "\"bus_tx_reads\":763734,"
           "\"modbus_enabled\":0,\"modbus_connected\":0,\"modbus_rx\":0,\"modbus_fails\":0,"
-          "\"modbus_stack_min_free_bytes\":null}");
+          "\"modbus_stack_min_free_bytes\":null,"
+          "\"modbus_cycling_censored_transition_runs\":null,"
+          "\"modbus_cycling_censored_handover_runs\":null,"
+          "\"modbus_cycling_censored_unreadable_runs\":null,"
+          "\"modbus_cycling_censored_restart_runs\":null,"
+          "\"modbus_cycling_censored_start_runs\":null,"
+          "\"modbus_cycling_classified_runtime_s\":null,"
+          "\"modbus_cycling_censored_runtime_s\":null,"
+          "\"modbus_cycling_runtime_saturated\":null}");
     HeartbeatFields      cycling_fields;
     logic::CheckupWindow cycling_window;
     cycling_fields.cycling = checkup_cycling_evidence(cycling_window, true);
@@ -5409,6 +5418,7 @@ static void test_heartbeat() {
     CHECK(cycling_json.find("\"cycling_censored_handover_runs\":0") != std::string::npos);
     CHECK(cycling_json.find("\"cycling_censored_runtime_s\":0") != std::string::npos);
     CHECK(cycling_json.find("\"cycling_runtime_saturated\":0") != std::string::npos);
+    CHECK(cycling_json.find("\"modbus_cycling_censored_handover_runs\":null") != std::string::npos);
     cycling_window.censored_handover_runs    = 4;
     cycling_window.censored_unreadable_runs  = 2;
     cycling_window.censored_runtime_s        = 65535;
@@ -5419,6 +5429,34 @@ static void test_heartbeat() {
     CHECK(cycling_json.find("\"cycling_censored_unreadable_runs\":2") != std::string::npos);
     CHECK(cycling_json.find("\"cycling_censored_runtime_s\":65535") != std::string::npos);
     CHECK(cycling_json.find("\"cycling_runtime_saturated\":1") != std::string::npos);
+    CHECK(cycling_json.find("\"modbus_cycling_censored_handover_runs\":null") != std::string::npos);
+
+    HeartbeatFields      mb_cycling_fields;
+    logic::CheckupWindow mb_cycling_window;
+    mb_cycling_window.space_run_s               = 1800;
+    mb_cycling_window.dhw_run_s                 = 600;
+    mb_cycling_window.censored_transition_runs  = 1;
+    mb_cycling_window.censored_handover_runs    = 2;
+    mb_cycling_window.censored_unreadable_runs  = 3;
+    mb_cycling_window.censored_restart_runs     = 1;
+    mb_cycling_window.censored_start_runs       = 4;
+    mb_cycling_window.censored_runtime_s        = 321;
+    mb_cycling_window.cycling_runtime_saturated = true;
+    mb_cycling_fields.modbus_cycling            = checkup_cycling_evidence(mb_cycling_window, true);
+    const std::string mb_cycling_json           = build_heartbeat_json(mb_cycling_fields);
+    CHECK(mb_cycling_json.find("\"cycling_censored_handover_runs\":null") != std::string::npos);
+    CHECK(mb_cycling_json.find("\"modbus_cycling_censored_transition_runs\":1,") !=
+          std::string::npos);
+    CHECK(mb_cycling_json.find("\"modbus_cycling_censored_handover_runs\":2,") !=
+          std::string::npos);
+    CHECK(mb_cycling_json.find("\"modbus_cycling_censored_unreadable_runs\":3,") !=
+          std::string::npos);
+    CHECK(mb_cycling_json.find("\"modbus_cycling_censored_restart_runs\":1,") != std::string::npos);
+    CHECK(mb_cycling_json.find("\"modbus_cycling_censored_start_runs\":4,") != std::string::npos);
+    CHECK(mb_cycling_json.find("\"modbus_cycling_classified_runtime_s\":1800,") !=
+          std::string::npos);
+    CHECK(mb_cycling_json.find("\"modbus_cycling_censored_runtime_s\":321,") != std::string::npos);
+    CHECK(mb_cycling_json.find("\"modbus_cycling_runtime_saturated\":1}") != std::string::npos);
 
     // ── legacy-215: the reset reason has to survive a NUMERIC-ONLY consumer ──
     // Telegraf's json parser keeps numeric fields and drops everything else, so the `reset_reason`
@@ -5504,10 +5542,10 @@ static void test_heartbeat() {
     // the honest outcome: no sample rather than a false one.
     CHECK(j.find("\"mqtt_stack_min_free_bytes\":null,") != std::string::npos);
     CHECK(j.find("\"weather_stack_min_free_bytes\":null,") != std::string::npos);
-    CHECK(j.find("\"modbus_stack_min_free_bytes\":null}") != std::string::npos);
+    CHECK(j.find("\"modbus_stack_min_free_bytes\":null,") != std::string::npos);
     CHECK(j.find("\"mqtt_stack_min_free_bytes\":0,") == std::string::npos);
     CHECK(j.find("\"weather_stack_min_free_bytes\":0,") == std::string::npos);
-    CHECK(j.find("\"modbus_stack_min_free_bytes\":0}") == std::string::npos);
+    CHECK(j.find("\"modbus_stack_min_free_bytes\":0,") == std::string::npos);
     // A sampled slot is a bare NUMBER, not a string, and the first sample wins even when it is
     // lower than everything after it (append_stack_bytes is the one rendering rule for all five).
     {
@@ -5518,7 +5556,7 @@ static void test_heartbeat() {
         const std::string sj            = build_heartbeat_json(sf);
         CHECK(sj.find("\"httpd_stack_min_free_bytes\":1,") != std::string::npos);
         CHECK(sj.find("\"weather_stack_min_free_bytes\":1024,") != std::string::npos);
-        CHECK(sj.find("\"modbus_stack_min_free_bytes\":731}") != std::string::npos);
+        CHECK(sj.find("\"modbus_stack_min_free_bytes\":731,") != std::string::npos);
         CHECK(sj.find("\"httpd_stack_min_free_bytes\":\"") == std::string::npos);
         // Unsampled tasks in the SAME payload still read null, so one running task cannot make the
         // other four look like they were measured.
@@ -5682,9 +5720,15 @@ static void test_heartbeat() {
     CHECK(mj.find("\"modbus_connected\":1,") != std::string::npos);
     CHECK(mj.find("\"modbus_rx\":12,") != std::string::npos);
     CHECK(mj.find("\"modbus_fails\":3,") != std::string::npos);
-    // Last field of the payload now that the actuator block is gone (legacy-294) — hence the
-    // closing brace rather than a comma, which is itself the assertion that nothing follows it.
-    CHECK(mj.find("\"modbus_stack_min_free_bytes\":731}") != std::string::npos);
+    // Last stack field is followed by the 8 payload-only modbus_cycling_* fields (null when empty).
+    CHECK(mj.find("\"modbus_stack_min_free_bytes\":731,") != std::string::npos);
+    CHECK(mj.find("\"modbus_cycling_runtime_saturated\":null}") != std::string::npos);
+
+    HeartbeatFields neg_bus;
+    neg_bus.registers              = -1;
+    neg_bus.values                 = -1;
+    const std::string neg_bus_json = build_heartbeat_json(neg_bus);
+    CHECK(neg_bus_json.find("\"bus_registers\":-1,\"bus_values\":-1,") != std::string::npos);
 
     // SOURCE freshness is its own field, and it is independent of bus health (legacy-209 defect 5):
     // the link is up, the device is publishing, and the outdoor unit is simply not measuring. A
@@ -11488,14 +11532,15 @@ static void test_config_store() {
     // older-version suffix rather than folded into the literals, so a new blob version is one edit
     // here instead of fifteen scattered ones — and each literal still reads as the blocks v<N>
     // predates.
-    const size_t base_suffix_bytes            = 2;
-    const size_t ref_multi_suffix_bytes       = 2 + 2 + 4;
-    const size_t discovery_suffix_bytes       = 1;
-    const size_t diagnostics_suffix_bytes     = 1 + 4;
-    const size_t room_generation_suffix_bytes = 4;
-    const size_t current_suffix_bytes         = base_suffix_bytes + ref_multi_suffix_bytes +
-                                        discovery_suffix_bytes + diagnostics_suffix_bytes +
-                                        room_generation_suffix_bytes;
+    const size_t base_suffix_bytes               = 2;
+    const size_t ref_multi_suffix_bytes          = 2 + 2 + 4;
+    const size_t discovery_suffix_bytes          = 1;
+    const size_t diagnostics_suffix_bytes        = 1 + 4;
+    const size_t room_generation_suffix_bytes    = 4;
+    const size_t diagnostics_source_suffix_bytes = 1;
+    const size_t current_suffix_bytes =
+        base_suffix_bytes + ref_multi_suffix_bytes + discovery_suffix_bytes +
+        diagnostics_suffix_bytes + room_generation_suffix_bytes + diagnostics_source_suffix_bytes;
     const size_t circ_suffix_bytes =
         2 + circ.circulation_name.size() + 2 + circ.circulation_topic.size() + 2 +
         circ.circulation_power_path.size() + 2 + circ.circulation_time_path.size() + 16;
@@ -11535,7 +11580,7 @@ static void test_config_store() {
     board.board_preset_id   = static_cast<int32_t>(BoardPresetId::M5StackAtomS3Lite);
     board.board_user_set    = true;
     std::vector<uint8_t> bb = config_blob_serialize(board);
-    CHECK(bb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 20);
+    CHECK(bb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 21);
     ConfigBlob rt;
     CHECK(config_blob_deserialize(bb.data(), bb.size(), rt));
     CHECK(rt.has_board && rt.led_gpio == 35 && rt.led_type == 1 && !rt.led_inverted);
@@ -11629,10 +11674,10 @@ static void test_config_store() {
     // A genuine v17 blob has the independent room mappings but no discovery decision. The load
     // layer uses has_modbus_discovery_state=false to apply the conservative pre-v18 migration.
     std::vector<uint8_t> v17 = base_buf;
-    v17.erase(
-        v17.end() - 4 -
-            (discovery_suffix_bytes + diagnostics_suffix_bytes + room_generation_suffix_bytes),
-        v17.end() - 4);
+    v17.erase(v17.end() - 4 -
+                  (discovery_suffix_bytes + diagnostics_suffix_bytes +
+                   room_generation_suffix_bytes + diagnostics_source_suffix_bytes),
+              v17.end() - 4);
     v17[4] = 17;
     restamp(v17);
     ConfigBlob v17_rt;
@@ -11642,7 +11687,7 @@ static void test_config_store() {
     std::vector<uint8_t> v16 = base_buf;
     v16.erase(v16.end() - 4 -
                   (ref_multi_suffix_bytes + discovery_suffix_bytes + diagnostics_suffix_bytes +
-                   room_generation_suffix_bytes),
+                   room_generation_suffix_bytes + diagnostics_source_suffix_bytes),
               v16.end() - 4);
     v16[4] = 16;
     restamp(v16);
@@ -11656,7 +11701,7 @@ static void test_config_store() {
     std::vector<uint8_t> v15 = base_buf;
     v15.erase(v15.end() - 4 -
                   (16 + ref_multi_suffix_bytes + discovery_suffix_bytes + diagnostics_suffix_bytes +
-                   room_generation_suffix_bytes),
+                   room_generation_suffix_bytes + diagnostics_source_suffix_bytes),
               v15.end() - 4);
     v15[4] = 15;
     restamp(v15);
@@ -11668,7 +11713,9 @@ static void test_config_store() {
     // a zero generation; a v19 stamp missing that complete five-byte block is truncated and
     // rejected.
     std::vector<uint8_t> v18 = base_buf;
-    v18.erase(v18.end() - 4 - (diagnostics_suffix_bytes + room_generation_suffix_bytes),
+    v18.erase(v18.end() - 4 -
+                  (diagnostics_suffix_bytes + room_generation_suffix_bytes +
+                   diagnostics_source_suffix_bytes),
               v18.end() - 4);
     v18[4] = 18;
     restamp(v18);
@@ -11684,23 +11731,62 @@ static void test_config_store() {
     // v20 adds only the durable room-source generation. A real v19 remains readable with zero;
     // claiming v20 without the whole four-byte suffix is rejected even with a valid CRC.
     std::vector<uint8_t> v19 = base_buf;
-    v19.erase(v19.end() - 8, v19.end() - 4);
+    v19.erase(v19.end() - 4 - (room_generation_suffix_bytes + diagnostics_source_suffix_bytes),
+              v19.end() - 4);
     v19[4] = 19;
     restamp(v19);
     ConfigBlob v19_rt;
     CHECK(config_blob_deserialize(v19.data(), v19.size(), v19_rt));
-    CHECK(v19_rt.has_diagnostics && v19_rt.ref_temp_generation == 0);
+    CHECK(v19_rt.has_diagnostics && v19_rt.ref_temp_generation == 0 &&
+          !v19_rt.has_diagnostics_source && v19_rt.diagnostics_source == 0);
     std::vector<uint8_t> v20_short = v19;
     v20_short[4]                   = 20;
     restamp(v20_short);
     CHECK(!config_blob_deserialize(v20_short.data(), v20_short.size(), out));
+    // v21 adds only the 1-byte diagnostics display source preference. A real v20 remains readable
+    // and defaults to X10A (0); claiming v21 without that byte fails closed.
+    std::vector<uint8_t> v20 = base_buf;
+    v20.erase(v20.end() - 4 - diagnostics_source_suffix_bytes, v20.end() - 4);
+    v20[4] = 20;
+    restamp(v20);
+    ConfigBlob v20_rt;
+    CHECK(config_blob_deserialize(v20.data(), v20.size(), v20_rt));
+    CHECK(v20_rt.has_diagnostics && !v20_rt.has_diagnostics_source &&
+          v20_rt.diagnostics_source == 0);
+    std::vector<uint8_t> v21_short = v20;
+    v21_short[4]                   = 21;
+    restamp(v21_short);
+    CHECK(!config_blob_deserialize(v21_short.data(), v21_short.size(), out));
     ConfigBlob room_generation;
     room_generation.ref_temp_generation = UINT32_MAX;
+    room_generation.diagnostics_source  = static_cast<uint8_t>(DiagnosticsSource::Modbus);
     const auto room_generation_blob     = config_blob_serialize(room_generation);
     ConfigBlob room_generation_rt;
     CHECK(config_blob_deserialize(room_generation_blob.data(), room_generation_blob.size(),
                                   room_generation_rt));
-    CHECK(room_generation_rt.ref_temp_generation == UINT32_MAX);
+    CHECK(room_generation_rt.ref_temp_generation == UINT32_MAX &&
+          room_generation_rt.has_diagnostics_source &&
+          room_generation_rt.diagnostics_source == static_cast<uint8_t>(DiagnosticsSource::Modbus));
+    DiagnosticsSource parsed_src = DiagnosticsSource::X10a;
+    CHECK(parse_diagnostics_source("modbus", parsed_src) &&
+          parsed_src == DiagnosticsSource::Modbus);
+    CHECK(parse_diagnostics_source("x10a", parsed_src) && parsed_src == DiagnosticsSource::X10a);
+    CHECK(!parse_diagnostics_source("auto", parsed_src));
+    CHECK(diagnostics_source_from_int(::rt(0)) == DiagnosticsSource::X10a);
+    CHECK(diagnostics_source_from_int(::rt(1)) == DiagnosticsSource::Modbus);
+    CHECK(diagnostics_source_from_int(::rt(99)) == DiagnosticsSource::X10a);
+    CHECK(std::string(diagnostics_source_name(::rt(DiagnosticsSource::Modbus))) == "modbus");
+    CHECK(std::string(diagnostics_source_name(::rt(DiagnosticsSource::X10a))) == "x10a");
+    CHECK(diagnostics_effective_source(::rt(DiagnosticsSource::X10a), ::rt(true), ::rt(true)) ==
+          DiagnosticsSource::X10a);
+    CHECK(diagnostics_effective_source(::rt(DiagnosticsSource::X10a), ::rt(false), ::rt(true)) ==
+          DiagnosticsSource::Modbus);
+    CHECK(diagnostics_effective_source(::rt(DiagnosticsSource::Modbus), ::rt(true), ::rt(false)) ==
+          DiagnosticsSource::X10a);
+    CHECK(diagnostics_effective_source(::rt(DiagnosticsSource::Modbus), ::rt(true), ::rt(true)) ==
+          DiagnosticsSource::Modbus);
+    CHECK(diagnostics_effective_source(::rt(DiagnosticsSource::Modbus), ::rt(false), ::rt(false)) ==
+          DiagnosticsSource::X10a);
 
     // ── v3: the OTA update channel ───────────────────────────────────────────────────────────────
     ConfigBlob chan;
@@ -11772,7 +11858,7 @@ static void test_config_store() {
     mb.mb_unit_id            = 3;
     mb.homehub_enabled       = false;
     std::vector<uint8_t> mbb = config_blob_serialize(mb);
-    CHECK(mbb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 20);
+    CHECK(mbb[4] == CONFIG_BLOB_VERSION && CONFIG_BLOB_VERSION == 21);
     ConfigBlob mrt;
     CHECK(config_blob_deserialize(mbb.data(), mbb.size(), mrt));
     CHECK(mrt.has_modbus && mrt.mb_host == "homehub-524288-example.local");
@@ -12884,7 +12970,14 @@ static void test_heating_curve_diagnosis() {
     CHECK(gates.evaluate(in).reason == HeatingCurveReason::RoomUnavailable);
     in                = ready();
     in.x10a_connected = false;
-    CHECK(gates.evaluate(in).reason == HeatingCurveReason::X10aUnavailable);
+    {
+        const HeatingCurveSnapshot modbus_only = gates.evaluate(in);
+        CHECK(modbus_only.sample_eligible &&
+              modbus_only.reason == HeatingCurveReason::SampleRecorded);
+    }
+    CHECK(std::string(heating_curve_reason_name(HeatingCurveReason::X10aUnavailable)) ==
+          "x10a_unavailable");
+    CHECK(static_cast<int>(HeatingCurveReason::X10aUnavailable) == 6);
     in            = ready();
     in.now_unix_s = -1;
     CHECK(gates.evaluate(in).reason == HeatingCurveReason::ClockInvalid);
@@ -12921,9 +13014,10 @@ static void test_heating_curve_diagnosis() {
     in              = ready();
     in.room_error_k = 3.0;
     CHECK(recovery.evaluate(in).sequence == 1);
-    in.now_ms         = 1000;
-    in.x10a_connected = false;
-    CHECK(recovery.evaluate(in).state == HeatingCurveState::Blocked);
+    in.now_ms            = 1000;
+    in.homehub_connected = false;
+    CHECK(recovery.evaluate(in).state == HeatingCurveState::Blocked &&
+          recovery.snapshot().reason == HeatingCurveReason::HomeHubUnavailable);
     in                               = ready();
     in.now_ms                        = 2000;
     in.room_error_k                  = -3.0;
@@ -15551,6 +15645,32 @@ static void test_checkup_population() {
         CHECK(!cycling_trace_page_valid(header, changed));
         header.catalog_fp = CYCLING_TRACE_BARRIER_SCHEMA;
         CHECK(!cycling_trace_page_valid(header, final));
+        CHECK(cycling_trace_header_matches(header));
+        CHECK(!cycling_trace_header_matches(header, true));
+
+        // Modbus cycling trace schemas (CYM1 / CMR1) remain isolated from X10A schemas (CYT1 /
+        // CYR1).
+        HistoryJournalHeader mb_header = header;
+        mb_header.catalog_fp           = CYCLING_MODBUS_TRACE_SCHEMA;
+        CHECK(cycling_trace_header_matches(mb_header, true));
+        CHECK(!cycling_trace_header_matches(mb_header, false));
+        CHECK(cycling_modbus_trace_header_matches(mb_header));
+        CHECK(cycling_trace_page_valid(mb_header, final, true));
+        CHECK(cycling_modbus_trace_page_valid(mb_header, final));
+        mb_header.catalog_fp = CYCLING_MODBUS_TRACE_BARRIER_SCHEMA;
+        CHECK(cycling_trace_header_matches(mb_header, true));
+        CHECK(!cycling_trace_page_valid(mb_header, final, true));
+        auto barrier_page        = final;
+        barrier_page.part        = 0;
+        barrier_page.count       = 0;
+        barrier_page.end_s       = 0;
+        barrier_page.identity    = {};
+        barrier_page.previous[0] = CYCLING_TRACE_NO_SLOT;
+        barrier_page.previous[1] = CYCLING_TRACE_NO_SLOT;
+        barrier_page.previous[2] = CYCLING_TRACE_NO_SLOT;
+        mb_header.sequence       = barrier_page.first_sequence;
+        CHECK(cycling_trace_page_valid(mb_header, barrier_page, true));
+        CHECK(!cycling_trace_page_valid(mb_header, barrier_page, false));
     }
 
     {
@@ -16030,6 +16150,47 @@ static void test_checkup_evidence_overhaul() {
     const auto loss  = dhw_loss_aggregate(cooling);
     CHECK(loss.windows >= 20 && loss.aborts == 0 && loss.high_windows > 0);
     CHECK(loss.max_loss_tenths_k_h == 20 && loss.draw_windows > 0);
+
+    // Pausing (`Off`) breaks interval/edge continuity and closes an open run as censored without
+    // losing the already covered bucket seconds or bridging the paused stretch on resume.
+    CheckupRing   pause_ring;
+    CheckupState  pause_state;
+    CheckupSample pause_sample;
+    pause_sample.rps_known = pause_sample.valve_known = true;
+    pause_sample.operating_mode                       = CheckupOperatingMode::Heating;
+    pause_sample.rps_running                          = false;
+    checkup_step(pause_state, pause_ring.pending, pause_sample, 10'000'000, &pause_ring);
+    checkup_step(pause_state, pause_ring.pending, pause_sample, 20'000'000, &pause_ring);
+    pause_state.bucket      = 0;
+    pause_state.have_bucket = true;
+    CHECK(pause_ring.pending.covered_s == 10 && pause_state.have_bucket && pause_state.bucket == 0);
+    CHECK(!checkup_pause_state(pause_state, pause_ring.pending, &pause_ring));
+    CHECK(pause_state.have_bucket && pause_state.bucket == 0 && pause_state.last_us == -1);
+    checkup_step(pause_state, pause_ring.pending, pause_sample, 50'000'000, &pause_ring);
+    CHECK(pause_ring.pending.covered_s == 10);
+    checkup_step(pause_state, pause_ring.pending, pause_sample, 60'000'000, &pause_ring);
+    CHECK(pause_ring.pending.covered_s == 20);
+
+    // Pausing during an open run closes it into its start hour as unreadable without bridging
+    // `Off`, including flagging a completed-hour reseal when the run crossed an hour boundary.
+    CheckupRing  run_pause_ring;
+    CheckupState run_pause_state;
+    checkup_step(run_pause_state, run_pause_ring.pending, pause_sample, 3'590'000'000,
+                 &run_pause_ring);
+    pause_sample.rps_running = true;
+    checkup_step(run_pause_state, run_pause_ring.pending, pause_sample, 3'595'000'000,
+                 &run_pause_ring);
+    run_pause_state.bucket      = 0;
+    run_pause_state.have_bucket = true;
+    run_pause_ring.commit(0);
+    run_pause_state.bucket = 1;
+    checkup_step(run_pause_state, run_pause_ring.pending, pause_sample, 3'605'000'000,
+                 &run_pause_ring);
+    CHECK(run_pause_state.run_open && run_pause_state.run_start_bucket == 0);
+    CHECK(checkup_pause_state(run_pause_state, run_pause_ring.pending, &run_pause_ring));
+    CHECK(!run_pause_state.run_open && run_pause_state.have_bucket && run_pause_state.bucket == 1);
+    CHECK(run_pause_ring.buf[0].censored_unreadable_runs == 1);
+    CHECK(run_pause_ring.buf[0].censored_runtime_s == 10);
     CHECK(loss.quiet_high_windows == 0);
     auto report = checkup_evaluate(window, cov, FaultClass::Unknown, loss);
     CHECK(report[CheckupCheck::DhwLoss].observation_only);
@@ -16380,11 +16541,21 @@ static void test_checkup() {
         checkup_outdoor_add(stats, outdoor_x10a_evidence(true, true, true, 5.0));
         CHECK(stats.samples == 2 && stats.min_tenths == -50);
         checkup_outdoor_add(stats, outdoor_x10a_evidence(true, true, true, 400.0));
+        checkup_outdoor_add(stats, outdoor_x10a_evidence(true, true, true, -400.0));
         CHECK(stats.samples == 2 && stats.min_tenths == -50);
         CHECK(checkup_outdoor_mean_tenths(stats) == 0);
-        // Another source cannot enter an X10A-labelled aggregate.
+        // Another source cannot enter an X10A-labelled aggregate, and vice versa.
         checkup_outdoor_add(stats, outdoor_homehub_evidence(true, true, -20.0));
         CHECK(stats.samples == 2 && stats.min_tenths == -50);
+        CheckupOutdoorStats mb_stats;
+        checkup_outdoor_add(mb_stats, outdoor_x10a_evidence(true, true, true, -20.0),
+                            OutdoorSource::HomeHub);
+        checkup_outdoor_add(mb_stats, outdoor_homehub_evidence(true, true, -20.0),
+                            OutdoorSource::None);
+        CHECK(mb_stats.samples == 0);
+        checkup_outdoor_add(mb_stats, outdoor_homehub_evidence(true, true, -5.0),
+                            OutdoorSource::HomeHub);
+        CHECK(mb_stats.samples == 1 && mb_stats.min_tenths == -50);
         CheckupOutdoorStats more;
         checkup_outdoor_add(more, outdoor_x10a_evidence(true, true, true, 10.0));
         checkup_outdoor_merge(stats, more);
@@ -16439,6 +16610,34 @@ static void test_checkup() {
         CHECK(weather_report.cycling_outdoor.samples == 2 &&
               weather_report.cycling_outdoor.min_tenths == -30 &&
               weather_report.cycling_outdoor.mean_tenths == -20);
+
+        CheckupState  mb_st;
+        CheckupBucket mb_b;
+        CheckupSample mb_s;
+        mb_s.rps_known      = true;
+        mb_s.rps_running    = false;
+        mb_s.valve_known    = true;
+        mb_s.valve_dhw      = false;
+        mb_s.operating_mode = CheckupOperatingMode::Heating;
+        checkup_step(mb_st, mb_b, mb_s, 0, nullptr, nullptr, OutdoorSource::HomeHub);
+        mb_s.rps_running = true;
+        mb_s.outdoor     = outdoor_homehub_evidence(true, true, -4.0);
+        checkup_step(mb_st, mb_b, mb_s, 1'000'000, nullptr, nullptr, OutdoorSource::HomeHub);
+        mb_s.outdoor = outdoor_homehub_evidence(true, true, -2.0);
+        checkup_step(mb_st, mb_b, mb_s, 2'000'000, nullptr, nullptr, OutdoorSource::HomeHub);
+        mb_s.rps_running = false;
+        mb_s.outdoor     = {};
+        checkup_step(mb_st, mb_b, mb_s, 3'000'000, nullptr, nullptr, OutdoorSource::HomeHub);
+        CHECK(mb_b.space_runs == 1 && mb_b.cycling_outdoor.samples == 1 &&
+              mb_b.cycling_outdoor.min_tenths == -20);
+        CheckupRing mb_ring;
+        mb_ring.pending = mb_b;
+        const CheckupReport mb_weather =
+            checkup_evaluate(checkup_aggregate(mb_ring), CheckupCoverage{}, FaultClass::Unknown, {},
+                             OutdoorSource::HomeHub);
+        CHECK(mb_weather.cycling_outdoor.source == OutdoorSource::HomeHub);
+        CHECK(mb_weather.cycling_outdoor.samples == 1 &&
+              mb_weather.cycling_outdoor.min_tenths == -20);
 
         // Defrost context follows its simultaneously-known compressor denominator, not a generic
         // page-0x20 sample. Unknown defrost evidence contributes nothing.
@@ -22860,6 +23059,60 @@ static void test_checkup_persist() {
     CHECK(CHECKUP_JOURNAL_WORDS * sizeof(uint16_t) == CHECKUP_JOURNAL_PAYLOAD_BYTES);
     CHECK(checkup_journal_fingerprint() == checkup_journal_fingerprint());
     CHECK(checkup_journal_fingerprint() != checkup_layout_fingerprint());
+    CHECK(checkup_modbus_journal_fingerprint() != 0);
+    CHECK(checkup_modbus_journal_fingerprint() != checkup_journal_fingerprint());
+
+    const CheckupCoverage hh_cov = checkup_modbus_coverage(rt(ModbusProfile::HomeHub));
+    CHECK(hh_cov.rps && hh_cov.valve && hh_cov.mode && hh_cov.bsh && hh_cov.pump && hh_cov.r5t &&
+          hh_cov.fault && hh_cov.fault_rows == 1 && hh_cov.flow && !hh_cov.defrost && !hh_cov.buh &&
+          !hh_cov.pressure && !hh_cov.retries);
+    const CheckupCoverage a4_cov = checkup_modbus_coverage(rt(ModbusProfile::Altherma4));
+    CHECK(a4_cov.rps && a4_cov.valve && a4_cov.mode && a4_cov.bsh && a4_cov.pump && a4_cov.r5t &&
+          a4_cov.fault && a4_cov.fault_rows == 1 && !a4_cov.flow && !a4_cov.defrost &&
+          !a4_cov.buh && !a4_cov.pressure && !a4_cov.retries);
+    const CheckupCoverage none_cov = checkup_modbus_coverage(rt(ModbusProfile::Auto));
+    CHECK(!none_cov.rps && !none_cov.fault && !none_cov.flow);
+    const uint32_t hh_fp = checkup_modbus_model_fingerprint(
+        ModbusProfile::HomeHub, def::HOMEHUB_REGS,
+        static_cast<int>(sizeof(def::HOMEHUB_REGS) / sizeof(def::HOMEHUB_REGS[0])));
+    const uint32_t a4_fp = checkup_modbus_model_fingerprint(
+        ModbusProfile::Altherma4, def::ALTHERMA4_REGS,
+        static_cast<int>(sizeof(def::ALTHERMA4_REGS) / sizeof(def::ALTHERMA4_REGS[0])));
+    CHECK(hh_fp != 0 && a4_fp != 0 && hh_fp != a4_fp);
+    CHECK(checkup_modbus_model_fingerprint(
+              ModbusProfile::Auto, def::HOMEHUB_REGS,
+              static_cast<int>(sizeof(def::HOMEHUB_REGS) / sizeof(def::HOMEHUB_REGS[0]))) == 0);
+    CHECK(checkup_modbus_model_fingerprint<def::HomeHubReg>(ModbusProfile::HomeHub, nullptr, 1) ==
+          0);
+    CHECK(checkup_modbus_model_fingerprint(ModbusProfile::HomeHub, def::HOMEHUB_REGS, 0) == 0);
+    const def::HomeHubReg incomplete_mb_regs[] = {
+        {21, MbFunc::ReadHolding, MbType::Int16, 1, "", "Holding twin"},
+        {21, MbFunc::ReadInput, MbType::Int16, 1, nullptr, "Fault"},
+    };
+    CHECK(checkup_modbus_model_fingerprint(ModbusProfile::Altherma4, incomplete_mb_regs, 2) == 0);
+    const def::HomeHubReg null_unit_mb_regs[] = {
+        {21, MbFunc::ReadInput, MbType::Int16, 1, nullptr, "Abnormality",
+         def::HomeHubValueKind::UnitAbnormality},
+        {30, MbFunc::ReadInput, MbType::Int16, 1, "", "Pump", def::HomeHubValueKind::Binary},
+        {31, MbFunc::ReadInput, MbType::Int16, 1, "", "Comp", def::HomeHubValueKind::Binary},
+        {32, MbFunc::ReadInput, MbType::Int16, 1, "", "BSH", def::HomeHubValueKind::Binary},
+        {37, MbFunc::ReadInput, MbType::Int16, 1, "", "Valve",
+         def::HomeHubValueKind::ThreeWayValve},
+        {38, MbFunc::ReadInput, MbType::Int16, 1, "", "Mode",
+         def::HomeHubValueKind::Altherma4CurrentOperationMode},
+        {43, MbFunc::ReadInput, MbType::Temp16, 1, nullptr, "DHW"},
+        {44, MbFunc::ReadInput, MbType::Temp16, 1, nullptr, "OAT"},
+    };
+    CHECK(checkup_modbus_model_fingerprint(ModbusProfile::Altherma4, null_unit_mb_regs, 8) != 0);
+    CHECK(checkup_restore_verdict(static_cast<uint32_t>(CrashReason::SW),
+                                  CHECKUP_MODBUS_PERSIST_MAGIC, CHECKUP_PERSIST_VERSION,
+                                  checkup_layout_fingerprint(), checkup_layout_fingerprint(), 1u,
+                                  1u, false, true, 1u, 1u, 0u,
+                                  CHECKUP_MODBUS_PERSIST_MAGIC) == CheckupRestore::Accept);
+    CHECK(checkup_restore_verdict(static_cast<uint32_t>(CrashReason::SW), CHECKUP_PERSIST_MAGIC,
+                                  CHECKUP_PERSIST_VERSION, checkup_layout_fingerprint(),
+                                  checkup_layout_fingerprint(), 1u, 1u, false, true, 1u, 1u, 0u,
+                                  CHECKUP_MODBUS_PERSIST_MAGIC) == CheckupRestore::NoRecord);
     CHECK(checkup_journal_bucket(7'199) == 1);
     CHECK(checkup_journal_bucket(7'200) == 2);
     CHECK(checkup_journal_bucket(-1) == INT64_MIN);
@@ -22872,6 +23125,67 @@ static void test_checkup_persist() {
     CHECK(checkup_journal_next_live_bucket(4, 6, 2) == 5);
     CHECK(checkup_journal_next_live_bucket(6, 6, 2) == INT64_MIN);
     CHECK(checkup_journal_next_live_bucket(INT64_MIN, 6, 0) == INT64_MIN);
+    {
+        DhwLossRing dr;
+        dr.pending.max_loss_tenths_k_h = 5;
+        dr.pending.best_aborted_s      = 120;
+        CHECK(dhw_loss_aggregate(dr).max_loss_tenths_k_h == 5);
+
+        DhwLossBucket db{};
+        db.max_loss_tenths_k_h = 6;
+        db.best_aborted_s      = 150;
+        dr.push(db);
+        dr.pending.max_loss_tenths_k_h = 9;
+        dr.pending.best_aborted_s      = 300;
+        const auto dw1                 = dhw_loss_aggregate(dr);
+        CHECK(dw1.max_loss_tenths_k_h == 9 && dw1.best_aborted_s == 300);
+
+        for (size_t i = dr.count; i < CHECKUP_COMPLETED_BUCKETS; ++i) dr.push(db);
+        dr.head                        = 3;
+        dr.pending.max_loss_tenths_k_h = 4;
+        dr.pending.best_aborted_s      = 60;
+        const auto dw2                 = dhw_loss_aggregate(dr);
+        CHECK(dw2.max_loss_tenths_k_h == 6 && dw2.best_aborted_s == 150);
+
+        CheckupRing cr;
+        cr.pending.cycling_outdoor.samples    = 1;
+        cr.pending.cycling_outdoor.min_tenths = 25;
+        cr.pending.cycling_outdoor.sum_tenths = 25;
+        cr.pending.defrost_outdoor.samples    = 1;
+        cr.pending.defrost_outdoor.min_tenths = 15;
+        cr.pending.defrost_outdoor.sum_tenths = 15;
+        const auto cw0                        = checkup_aggregate(cr);
+        CHECK(cw0.cycling_outdoor_min_tenths == 25 && cw0.defrost_outdoor_min_tenths == 15);
+
+        CheckupBucket cb0{}, cb1{};
+        cb0.cycling_outdoor.samples    = 1;
+        cb0.cycling_outdoor.min_tenths = 50;
+        cb0.cycling_outdoor.sum_tenths = 50;
+        cb0.defrost_outdoor.samples    = 1;
+        cb0.defrost_outdoor.min_tenths = 40;
+        cb0.defrost_outdoor.sum_tenths = 40;
+        cb1.cycling_outdoor.samples    = 1;
+        cb1.cycling_outdoor.min_tenths = 30;
+        cb1.cycling_outdoor.sum_tenths = 30;
+        cb1.defrost_outdoor.samples    = 1;
+        cb1.defrost_outdoor.min_tenths = 20;
+        cb1.defrost_outdoor.sum_tenths = 20;
+        cr.push(cb0);
+        cr.push(cb1);
+        cr.pending.cycling_outdoor.min_tenths = 60;
+        cr.pending.cycling_outdoor.sum_tenths = 60;
+        cr.pending.defrost_outdoor.min_tenths = 50;
+        cr.pending.defrost_outdoor.sum_tenths = 50;
+        const auto cw1                        = checkup_aggregate(cr);
+        CHECK(cw1.cycling_outdoor_min_tenths == 30 && cw1.defrost_outdoor_min_tenths == 20);
+
+        cr.pending.cycling_outdoor.min_tenths = 10;
+        cr.pending.cycling_outdoor.sum_tenths = 10;
+        cr.pending.defrost_outdoor.min_tenths = 5;
+        cr.pending.defrost_outdoor.sum_tenths = 5;
+        const auto cw2                        = checkup_aggregate(cr);
+        CHECK(cw2.cycling_outdoor_min_tenths == 10 && cw2.defrost_outdoor_min_tenths == 5);
+    }
 }
 
 // ── Late completions of already appended hours ─────────────────────────────────
@@ -23711,15 +24025,15 @@ static void test_room_history() {
 
     Config c;
     CHECK(history_room_identity(c) == 0);
-    c.diagnostics_enabled = true;
+    c.diagnostics_enabled    = true;
+    c.diagnostics_generation = 8;
     CHECK(history_room_identity(c) == 0);
     c.mqtt_uri = "mqtt://broker.example";
     CHECK(history_room_identity(c) == 0);
-    c.ref_temp_topic         = "fixture/room";
-    c.ref_temp_path          = "temperature";
-    c.ref_temp_generation    = 5;
-    c.diagnostics_generation = 8;
-    const uint32_t identity  = history_room_identity(c);
+    c.ref_temp_topic        = "fixture/room";
+    c.ref_temp_path         = "temperature";
+    c.ref_temp_generation   = 5;
+    const uint32_t identity = history_room_identity(c);
     CHECK(identity != 0);
     Config renamed                         = c;
     renamed.ref_temp_name                  = "Example sensor";
@@ -23759,6 +24073,8 @@ static void test_room_history() {
     changed(other);
     other                     = c;
     other.diagnostics_enabled = false;
+    CHECK(history_room_identity(other) == identity);
+    other.diagnostics_generation = 0;
     CHECK(history_room_identity(other) == 0);
 
     HistoryJournalHeader h{};
@@ -24039,7 +24355,7 @@ static void test_history_persist() {
     }
     CHECK(HISTORY_FLASH_FUTURE_HOURS == 72);
     CHECK(HISTORY_FLASH_FUTURE_SAMPLES == 864);
-    CHECK(HISTORY_FLASH_FUTURE_RECORDS == 12528);
+    CHECK(HISTORY_FLASH_FUTURE_RECORDS == 15552);
     CHECK(HISTORY_JOURNAL_SLOT_COUNT >= HISTORY_FLASH_FUTURE_RECORDS);
     CHECK(HISTORY_FLASH_PARTITION_OFFSET == 0x400000);
 
@@ -24670,11 +24986,15 @@ static void test_history_identity() {
         CHECK(same([](Config& c) { c.mb_host = "homehub.local"; }));
         CHECK(same([](Config& c) { c.weather_enabled = true; }));
     }
-    // Zero means "no witness": not consented, or not configured. Nothing is restorable under it.
+    // Zero means "no witness": pre-opt-in (`diagnostics_generation == 0`), or not configured.
+    // Pausing (`diagnostics_enabled == false`) at a non-zero generation preserves identity.
     {
         Config off              = witness;
         off.diagnostics_enabled = false;
-        CHECK(history_circulation_identity(off) == HISTORY_CIRCULATION_NONE);
+        CHECK(history_circulation_identity(off) == id);
+        Config pre_opt_in                 = off;
+        pre_opt_in.diagnostics_generation = 0;
+        CHECK(history_circulation_identity(pre_opt_in) == HISTORY_CIRCULATION_NONE);
         Config unconfigured = witness;
         unconfigured.circulation_topic.clear();
         CHECK(history_circulation_identity(unconfigured) == HISTORY_CIRCULATION_NONE);
@@ -30094,6 +30414,50 @@ static void test_stop_context_output() {
     CHECK(flat.find("\"stop_context_defrost_positive\":null") != std::string::npos);
     CHECK(flat.find("\"stop_context_request_withdrawal_positive\":1") != std::string::npos);
     CHECK(flat.find("\"stop_context_saturated\":1") != std::string::npos);
+
+    f.dated               = true;
+    f.coverage_partial    = false;
+    f.restore_pending     = false;
+    f.persistence_pending = true;
+    f.pending             = true;
+    f.counters.saturated  = false;
+    json                  = nested();
+    CHECK(json.find("\"dated\":true") != std::string::npos);
+    CHECK(json.find("\"coverage_partial\":false") != std::string::npos);
+    CHECK(json.find("\"restore_pending\":false") != std::string::npos);
+    CHECK(json.find("\"persistence_pending\":true") != std::string::npos);
+    CHECK(json.find("\"pending\":true") != std::string::npos);
+    CHECK(json.find("\"saturated\":false") != std::string::npos);
+    std::string flat2;
+    append_stop_context_json(flat2, f, true);
+    CHECK(flat2.find("\"stop_context_dated\":1") != std::string::npos);
+    CHECK(flat2.find("\"stop_context_coverage_partial\":0") != std::string::npos);
+    CHECK(flat2.find("\"stop_context_saturated\":0") != std::string::npos);
+
+    struct ObsStub {
+        logic::StopContextCounters counters;
+        uint64_t                   readable_us         = 0;
+        uint16_t                   observed_hours      = 0;
+        uint16_t                   dropped             = 0;
+        bool                       confirmed           = false;
+        bool                       dated               = false;
+        bool                       partial             = true;
+        bool                       restore_pending     = true;
+        bool                       persistence_pending = false;
+    };
+    struct ReportStub {
+        ObsStub observation;
+        uint8_t capability_mask = 0;
+        bool    pending         = false;
+    } report_stub;
+    const auto p0 = stop_context_payload_fields(report_stub);
+    CHECK(!p0.has_readable && p0.readable_s == 0);
+    report_stub.observation.readable_us = 2500000;
+    report_stub.observation.confirmed   = true;
+    report_stub.capability_mask         = logic::STOP_CONTEXT_ALL;
+    report_stub.pending                 = true;
+    const auto p1                       = stop_context_payload_fields(report_stub);
+    CHECK(p1.has_readable && p1.readable_s == 2 && p1.confirmed && p1.pending);
 }
 
 static void test_stop_context_inputs() {

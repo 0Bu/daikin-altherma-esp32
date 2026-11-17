@@ -15,6 +15,7 @@
 #include <atomic>
 
 #include "hp_modbus.hpp"
+#include "checkup.hpp"
 #include "config.hpp"
 #include "logic/task_failure.hpp"
 #include "def/homehub.hpp"
@@ -889,6 +890,7 @@ ModbusStatus mb_status() {
 static void mb_poll_once() {
     const uint32_t cycle_target_generation =
         s_target_generation.load(std::memory_order_acquire);
+    const uint32_t consent_epoch = checkup_consent_epoch();
     struct ModbusTargetConfig {
         int     mb_port    = 0;
         uint8_t mb_unit_id = 0;
@@ -905,9 +907,11 @@ static void mb_poll_once() {
     // change. /set_hp also requests this reset immediately to hide the old series from readers; this
     // second request covers an old cycle that happened to consume that flag before noticing the new
     // configuration. The reset keeps the boot-aligned raster and replaces old-target data with gaps.
-    if (s_have_req && (target != s_req_host || c.mb_port != s_req_port || c.mb_unit_id != s_unit))
+    if (s_have_req && (target != s_req_host || c.mb_port != s_req_port || c.mb_unit_id != s_unit)) {
         history_modbus_reset(logic::history_homehub_target_fingerprint(
             target.c_str(), static_cast<uint32_t>(c.mb_port), static_cast<uint32_t>(c.mb_unit_id)));
+        checkup_modbus_reset();
+    }
     // Capture after the task-owned target correction above. Capturing before it made the first full
     // cycle for every new HomeHub self-reject as stale and left an avoidable full-cadence gap.
     const uint32_t history_generation = history_modbus_generation();
@@ -932,6 +936,8 @@ static void mb_poll_once() {
         }
         { Lock lk(s_mtx); s_status.values = 0; }
         history_record_modbus(nullptr, 0, history_generation); // advance this identity with a gap
+        checkup_record_modbus(nullptr, 0, s_active_profile.load(std::memory_order_acquire),
+                              cycle_target_generation, consent_epoch, false);
         // Back off before retrying — see s_backoff. Applied by SKIPPING cycles, never by lengthening
         // the delay, so the top-of-loop watchdog reset keeps its cadence.
         s_next_try_us = esp_timer_get_time() +
@@ -1295,6 +1301,22 @@ static void mb_poll_once() {
         current_session = false;
     history_record_modbus(current_session ? fresh.data() : nullptr,
                           current_session ? fresh.size() : 0, history_generation);
+    {
+        const uint32_t modbus_target_fp = logic::history_homehub_target_fingerprint(
+            target.c_str(), static_cast<uint32_t>(c.mb_port), static_cast<uint32_t>(c.mb_unit_id));
+        const ModbusProfile resolved_prof = s_active_profile.load(std::memory_order_acquire);
+        const bool          profile_settled =
+            !profile_promoted && s_probe_tracker.profile_basis != ModbusProfileBasis::Probing &&
+            (resolved_prof == ModbusProfile::HomeHub || resolved_prof == ModbusProfile::Altherma4);
+        if (current_session && !link_broken && profile_settled) {
+            checkup_modbus_confirm_source(resolved_prof, modbus_target_fp);
+            checkup_record_modbus(fresh.data(), fresh.size(), resolved_prof,
+                                  cycle_target_generation, consent_epoch, true);
+        } else if (!current_session || link_broken) {
+            checkup_record_modbus(nullptr, 0, resolved_prof, cycle_target_generation, consent_epoch,
+                                  false);
+        }
+    }
 
     const int committed = static_cast<int>(fresh.size());
     const int64_t cache_commit_ms = esp_timer_get_time() / 1000;
@@ -1362,11 +1384,15 @@ static void mb_poll_once() {
 
 static void mb_task_start_if_enabled() noexcept;
 
-static void mb_record_poll_gap() {
+static void mb_record_poll_gap(uint32_t target_generation, uint32_t consent_epoch) {
     // No Config or formatted error allocation on an OOM path. An incomplete full sweep can have
     // received replies before it threw; those replies prove a socket, not a refreshed value map.
-    Lock lk(s_mtx);
-    s_poll_observed = false;
+    {
+        Lock lk(s_mtx);
+        s_poll_observed = false;
+    }
+    checkup_record_modbus(nullptr, 0, s_active_profile.load(std::memory_order_acquire),
+                          target_generation, consent_epoch, false);
 }
 
 // The task. Self-guarded like every other allocating FreeRTOS loop here (AGENTS.md → Memory,
@@ -1429,6 +1455,9 @@ static void mb_task(void*) {
                 // claimed network activity. Exit scope immediately so MbNetworkActivity
                 // destructor restores s_network_quiesced to true before the inter-cycle delay.
             } else {
+                const uint32_t cycle_target_generation =
+                    s_target_generation.load(std::memory_order_acquire);
+                const uint32_t cycle_consent_epoch = checkup_consent_epoch();
                 try {
                     if (s_reconfigure_reset.exchange(false, std::memory_order_acq_rel)) {
                         s_backoff.silent = 0;
@@ -1441,11 +1470,11 @@ static void mb_task(void*) {
                     // can throw when the exception was std::bad_alloc. Transport/protocol failures
                     // take the structured status_error() path before reaching this last-resort
                     // guard.
-                    mb_record_poll_gap();
+                    mb_record_poll_gap(cycle_target_generation, cycle_consent_epoch);
                     if (failures.first_failure())
                         diag_printf("modbus: cycle skipped (%s)\n", e.what());
                 } catch (...) {
-                    mb_record_poll_gap();
+                    mb_record_poll_gap(cycle_target_generation, cycle_consent_epoch);
                     if (failures.first_failure()) diag_printf("modbus: cycle skipped (oom?)\n");
                 }
             }
@@ -1650,5 +1679,9 @@ bool hp_modbus_ota_quiesced() {
 }
 
 uint32_t mb_cache_generation() { return s_mb_cache_revision.load(std::memory_order_acquire); }
+
+bool mb_target_generation_matches(uint32_t generation) noexcept {
+    return generation != 0 && s_target_generation.load(std::memory_order_acquire) == generation;
+}
 
 }  // namespace daik

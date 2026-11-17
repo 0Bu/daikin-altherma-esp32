@@ -218,6 +218,25 @@ void reset_and_consent() {
     boot(false);
     require(stop_observation_report().counters.witnessed_stops_recent_heating == 0,
             "durable same-scope reset survives reboot");
+    tick(10, true, event(9, 7));
+    tick(20);
+    require(stop_observation_report().counters.witnessed_stops_recent_heating == 1 &&
+                stop_observation_report().readable_us == 10000000,
+            "pre-pause stop and readable evidence recorded");
+    stop_observation_set_diagnostics(false, 11);
+    require(!stop_observation_report().confirmed, "paused diagnostics hides report");
+    tick(50, true, event(45, 7));
+    stop_observation_set_diagnostics(true, 11);
+    stop_observation_bind(101, 202, 303, 7, true);
+    require(stop_observation_report().confirmed &&
+                stop_observation_report().counters.witnessed_stops_recent_heating == 1 &&
+                stop_observation_report().readable_us == 10000000 &&
+                !stop_observation_report().persistence_pending,
+            "same-generation pause and resume keeps stop observation without barrier");
+    tick(60);
+    tick(70);
+    require(stop_observation_report().readable_us == 20000000,
+            "pause interval not bridged on resume");
     stop_observation_set_diagnostics(false, 12);
     require(!stop_observation_report().confirmed, "consent withdrawn immediately");
     stop_observation_set_diagnostics(true, 13);

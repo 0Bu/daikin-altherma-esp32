@@ -1,4 +1,4 @@
-// translation-source: 57360fc01b9b51987c1e6a54c6b11b7295a1a3b53f13d2b3928a2b44e523c222
+// translation-source: 7e05fca97bff772abf43c5704d541747bc310184005cce90ce5b76eab24256ce
 I18N.it = localeValues([
   /* sys.nodata */ "Nessun dato",
   /* sys.unreachable */ "Non raggiungibile",
@@ -961,6 +961,8 @@ I18N.it = localeValues([
   /* lang.sv */ "Svenska",
   /* lang.fi */ "Suomi",
   /* lang.saved */ "Lingua salvata",
+  /* check.detail.dhw_reason.blind_modbus */ "letture mancanti: Modbus senza risposta o interrogazione in pausa",
+  /* check.detail.source_stale_modbus */ "Nessuna lettura Modbus recente; stato attuale sconosciuto. Storia conservata.",
 ]);
 INSPECT_I18N.it = inspectValues(
   ["Nessuna lettura attuale:", "il compressore è fermo e l’unità esterna aggiorna i propri sensori solo durante il funzionamento. Il valore dell’ultimo ciclo viene nascosto per non mostrarlo come attuale.", "Velocità del compressore non leggibile: i valori dell’unità esterna possono essere dell’ultimo ciclo."],
@@ -985,7 +987,7 @@ INSPECT_I18N.it = inspectValues(
         ? `In funzione: compressore a ${fmt0(d.rps)} rps${d.quiet ? ", limitato dalla modalità silenziosa" : ""}.`
         : "In funzione: HomeHub conferma il compressore attivo; velocità e letture dettagliate richiedono X10A."
       : d.ouHeldOver && d.mbFields && d.mbFields.has("out")
-      ? "In attesa: compressore fermo. X10A non aggiorna più i sensori esterni; l’aria esterna proviene da HomeHub, lo scarico resta «—» e l’età reale della lettura Modbus è sconosciuta."
+      ? "In attesa: compressore fermo. X10A non aggiorna più i sensori esterni; l’aria esterna proviene dal registro Modbus, lo scarico resta «—» e l’età reale della lettura è sconosciuta."
       : "In attesa: compressore fermo, senza trasferimento attivo. I sensori propri dell’unità esterna restano «—» per non ripetere i valori dell’ultimo ciclo."], // ou
     ["Compressore", 0, "Comprime il refrigerante per aumentarne pressione e temperatura. La frequenza in rps indica la velocità, non da sola la potenza termica o elettrica."], // comp
     ["Aria esterna", 0, "Temperatura al sensore esterno. A riposo X10A può trattenerla; viene nascosta o HomeHub è identificato."], // out

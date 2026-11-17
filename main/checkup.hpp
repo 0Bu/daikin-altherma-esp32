@@ -19,6 +19,7 @@
 #include "freertos/FreeRTOS.h"
 #include "logic/checkup.hpp"
 #include "logic/checkup_persist.hpp"
+#include "logic/config_model.hpp"
 #include "logic/cycling_persist.hpp"
 #include "stop_observation_store.hpp"
 
@@ -33,14 +34,17 @@ using CheckupFlashRecord = logic::CheckupJournalRecord;
 
 enum class CheckupFlashRestoreResult : uint8_t { Deferred, Ignored, Restored };
 
-bool                      checkup_cycling_checkpoint(logic::CheckupCyclingTrace&  trace,
-                                                     logic::CyclingTraceIdentity& identity, uint32_t& reset_token,
-                                                     TickType_t wait_ticks, bool allow_data);
-bool                      checkup_cycling_reset_pending();
-void                      checkup_cycling_checkpoint_appended(uint32_t reset_token);
-CheckupFlashRestoreResult checkup_cycling_restore(const logic::CheckupCyclingTrace&  trace,
-                                                  const logic::CyclingTraceIdentity& identity,
-                                                  int64_t now_unix_s, TickType_t wait_ticks);
+bool checkup_cycling_checkpoint(logic::CheckupCyclingTrace&  trace,
+                                logic::CyclingTraceIdentity& identity, uint32_t& reset_token,
+                                TickType_t wait_ticks, bool allow_data,
+                                DiagnosticsSource source = DiagnosticsSource::X10a);
+bool checkup_cycling_reset_pending(DiagnosticsSource source = DiagnosticsSource::X10a);
+void checkup_cycling_checkpoint_appended(uint32_t          reset_token,
+                                         DiagnosticsSource source = DiagnosticsSource::X10a);
+CheckupFlashRestoreResult
+                          checkup_cycling_restore(const logic::CheckupCyclingTrace&  trace,
+                                                  const logic::CyclingTraceIdentity& identity, int64_t now_unix_s,
+                                                  TickType_t wait_ticks, DiagnosticsSource source = DiagnosticsSource::X10a);
 void                      checkup_cycling_forget();
 
 // Capture before collecting a poll's inputs, not after the sweep. Admission rejects a token from
@@ -62,12 +66,18 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
                     const logic::CheckupCoverage& coverage, uint32_t source_generation,
                     uint32_t consent_epoch, bool profile_confirmed = true);
 
+// Feed one confirmed HomeHub/Modbus full poll cycle into the independent Modbus checkup slot.
+void checkup_record_modbus(const CachedValue* v, size_t n, ModbusProfile profile,
+                           uint32_t source_generation, uint32_t consent_epoch,
+                           bool source_confirmed = true);
+
 // Judge the previous boot's handoff integrity and retire completed RAM hours. app_main calls ONCE,
 // before any producer task exists, which is what makes the decision single-threaded and lock-free.
 void checkup_start(bool diagnostics_enabled, uint32_t diagnostics_generation);
 
-// Apply the persisted master switch live. A transition synchronously starts a fresh evidence
-// identity, so neither the next poll cycle nor a reboot can carry the previous interval across it.
+// Apply the persisted master switch live. Advancing `generation` starts a fresh evidence
+// identity, while toggling `enabled` within the same non-zero `generation` pauses or resumes
+// recording and preserves already-accumulated 24-hour evidence.
 void checkup_set_diagnostics(bool enabled, uint32_t generation);
 
 // Confirm this boot's detected or explicitly selected profile/link scope. Startup's cached scope
@@ -76,26 +86,38 @@ void checkup_set_diagnostics(bool enabled, uint32_t generation);
 // also requires the exact resolved consumer schema; an unknown name cannot borrow generic's scope.
 void checkup_reset_on_detect(const char* profile_id, uint32_t source_fp);
 
+// Confirm this boot's HomeHub Modbus profile and host/port fingerprint. Unlocks independent Modbus
+// flash restore or clears the Modbus slot when identity changes.
+void checkup_modbus_confirm_source(ModbusProfile profile, uint32_t source_fp);
+
 // Start a new observation identity after explicit X10A re-detection, link rewiring or profile
 // selection. Cross-task safe: only record consumes it under the checkup mutex and discards that
 // in-flight sample; report stays empty while the request is pending.
 // HomeHub-only reconfiguration must not call this; it is an independent source.
 void checkup_reset();
 
+// Start a new Modbus observation identity after HomeHub reconfiguration/deletion.
+void checkup_modbus_reset();
+
 // Start only the DHW-loss/circulation window over after its independent source, mapping or power
-// thresholds change. Other X10A-backed findings keep their already-collected 24-hour evidence.
+// thresholds change. Other findings keep their already-collected 24-hour evidence.
 void checkup_dhw_reset();
+
+// True when the requested source has non-empty live or restored evidence in its slot.
+bool checkup_has_data(DiagnosticsSource source);
 
 // Copy the judged window, optional chart hours and trace, and restore provenance under one lock.
 // GET /status and MCP use this snapshot. Its POD storage does not allocate under the lock.
 // An unreadable snapshot has unknown provenance and carries no accumulated evidence.
 logic::CheckupReport checkup_report(logic::CheckupCyclingHours* hours   = nullptr,
                                     logic::CheckupCyclingTrace* trace   = nullptr,
-                                    logic::CheckupRestore*      persist = nullptr);
+                                    logic::CheckupRestore*      persist = nullptr,
+                                    DiagnosticsSource           source  = DiagnosticsSource::X10a);
 
 // Compact completed-run evidence for MQTT. Shares the evaluator's pure projection, without
 // constructing the full eight-check report on the MQTT task's stack. No allocation under its lock.
-logic::CheckupCyclingEvidence checkup_cycling_evidence();
+logic::CheckupCyclingEvidence
+checkup_cycling_evidence(DiagnosticsSource source = DiagnosticsSource::X10a);
 
 struct CheckupStopContextReport {
     StopObservationReport observation;
@@ -111,13 +133,14 @@ CheckupStopContextReport checkup_stop_context_report();
 // has completed. A run that completes into an already appended start hour makes that hour the next
 // record again (logic::checkup_journal_next_target). Called under the FLASH mutex, and takes only
 // the independent checkup mutex.
-bool checkup_flash_next(int64_t now_unix_s, int64_t after_bucket,
-                        int64_t& bucket, logic::CheckupJournalPayload& payload);
+bool checkup_flash_next(int64_t now_unix_s, int64_t after_bucket, int64_t& bucket,
+                        logic::CheckupJournalPayload& payload,
+                        DiagnosticsSource             source = DiagnosticsSource::X10a);
 
 // The journal confirms that the record for `bucket` is committed. Takes no mutex (one atomic
 // store): it only retires a re-appended hour, and the next checkup_flash_next applies it under the
 // checkup mutex.
-void checkup_flash_appended(int64_t bucket);
+void checkup_flash_appended(int64_t bucket, DiagnosticsSource source = DiagnosticsSource::X10a);
 
 // Splice journal records behind this boot's live pending hour. Deferred until profile detection has
 // confirmed the current profile/link scope and consumed its reset. Current-boot pending/live data
@@ -125,6 +148,7 @@ void checkup_flash_appended(int64_t bucket);
 // one copy per hour, not necessarily in bucket order, and may contain gaps or other source
 // identities, all rejected explicitly.
 CheckupFlashRestoreResult checkup_flash_restore(const CheckupFlashRecord* records, size_t count,
-                                                int64_t now_unix_s);
+                                                int64_t           now_unix_s,
+                                                DiagnosticsSource source = DiagnosticsSource::X10a);
 
 } // namespace daik

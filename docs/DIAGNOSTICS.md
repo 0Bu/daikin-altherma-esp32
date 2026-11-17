@@ -1,12 +1,19 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: c5da50eee2e84b3a768afd5785f69b85a330e014d2f02fbdebd72e8107f1b9d6 -->
+<!-- user-docs-contract: 362c4e6eedc368f17d59dd2891d81ad2a2c81b3bd2f860b049c4393421e25000 -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
-It is off by default. Enable **Plant diagnostics** under **Settings → Firmware** to start an evidence
-window. Disabling clears this evidence and stops additional room, forecast and circulation collection.
-It also hides the Diagnostics name and card; Model becomes the default card when available.
-Re-enabling starts fresh; an unfinished diagnosis update is not carried across the change.
+It is off by default (`Off`). Under **Settings → Firmware**, choose **X10A** or **Modbus** for
+**Plant diagnostics** to start an evidence window: the firmware records X10A and HomeHub Modbus into
+separate 24 h histories, while the setting selects which source the card displays (when only one
+source is available, only that option and **Off** are shown). Switching between **X10A** and
+**Modbus** keeps both histories; choosing **Off** pauses recording while keeping already collected
+24 h diagnostic histories (which continue aging out normally after 24 hours), stops additional
+room, forecast and circulation collection, and hides the Diagnostics name and card (Model becomes
+the default card when available). Re-enabling resumes into the preserved 24 h window without
+bridging the paused interval or carrying an unfinished run/candidate across pausing.
+In **Modbus** mode, X10A-only checks (`defrost`, `pressure`, `retries`, `flow` on Altherma 4
+Modbus, and passive **Refrigerant (heating)**) are unavailable and omitted from the card.
 
 Select **Diagnostics** below the schematic to show the **Plant diagnostics · 24 h** card.
 Open a row to see what was measured and what the result means. The observation window describes
@@ -30,7 +37,8 @@ the installation's health.
 | **No data** | The current diagnosis snapshot could not be read. |
 
 A reassuring day-based result needs both the full 24-hour span and at least 90% usable coverage
-of its own signals. Current fault state is separate. Missing or stale X10A data cannot establish a
+of its own signals. Current fault state is separate. Missing or stale data on the active source
+cannot establish a
 current all-clear; retained observations can still explain an earlier finding. Firmware pauses and
 timeouts reduce evidence without pretending that the profile no longer has the sensor.
 
@@ -39,10 +47,10 @@ source confirmation. A software restart, such as an update or a settings save th
 board, also tries to save the open hour. It cannot when that hour shares its clock hour with the
 previous saved hour. Other open and unsaved hours may be lost. Hourly evidence ages out even when
 polling stops. See the [retention rules](ARCHITECTURE.md#history-and-diagnosis-persistence).
-Changed X10A identity, an incompatible saved-hour format or a changed measurement definition
-starts fresh hourly collection, including
+Changed source identity, an incompatible saved-hour format or a changed measurement definition
+starts fresh hourly collection for that source, including
 tank-cooling results. Changing the independent circulation witness clears only tank-cooling
-evidence. Trend history and the handoff for an unfinished tank-cooling window have their own
+evidence, while switching between X10A and Modbus keeps both histories intact. Trend history and the handoff for an unfinished tank-cooling window have their own
 compatibility rules.
 See [PLANT.md](PLANT.md#reboot-and-persistence).
 
@@ -220,7 +228,8 @@ changes or their cause.
 ## Refrigerant (heating)
 
 This expandable row is technical context, **not a ninth health diagnosis**. It watches existing
-read-only X10A traffic automatically without Plant diagnostics opt-in or a service mode. Until this
+read-only X10A traffic automatically without Plant diagnostics opt-in or a service mode (the row is
+X10A-only and hidden when the card displays **Modbus**). Until this
 boot detects a profile and evaluates its signal coverage—including safe mode—the row/status object
 is absent. It does not affect `/status.health` or the eight-row summary.
 

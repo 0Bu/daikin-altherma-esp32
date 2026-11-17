@@ -1,4 +1,4 @@
-// translation-source: 57360fc01b9b51987c1e6a54c6b11b7295a1a3b53f13d2b3928a2b44e523c222
+// translation-source: 7e05fca97bff772abf43c5704d541747bc310184005cce90ce5b76eab24256ce
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -961,6 +961,8 @@ I18N.sv = localeValues([
   /* lang.sv */ "Svenska",
   /* lang.fi */ "Suomi",
   /* lang.saved */ "Språk sparat",
+  /* check.detail.dhw_reason.blind_modbus */ "avläsningar saknas: Modbus svarar inte eller avläsningen pausad",
+  /* check.detail.source_stale_modbus */ "Inget färskt Modbus-prov; aktuellt tillstånd okänt. Historik behålls.",
 ]);
 
 INSPECT_I18N.sv = inspectValues(
@@ -986,7 +988,7 @@ INSPECT_I18N.sv = inspectValues(
         ? `I drift: kompressor ${fmt0(d.rps)} rps${d.quiet ? ", begränsad av tyst läge" : ""}.`
         : "I drift: HomeHub bekräftar kompressorn; varvtal och detaljer kräver X10A."
       : d.ouHeldOver && d.mbFields && d.mbFields.has("out")
-      ? "Standby: X10A står; HomeHub ger uteluft utan känt mättidsstempel."
+      ? "Standby: X10A står; Modbus ger uteluft utan känt mättidsstempel."
       : "Standby utan aktiv värmeöverföring; gamla utomhusvärden döljs."], // ou
     ["Kompressor", 0, "Komprimerar köldmediet; rps är varvtal, inte värme- eller eleffekt."], // comp
     ["Uteluft", 0, "Utomhusenhetens givare; gamla X10A-värden döljs i vila eller ersätts tydligt av HomeHub."], // out

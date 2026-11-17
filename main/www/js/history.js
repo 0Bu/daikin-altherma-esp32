@@ -907,7 +907,7 @@ function historyView(id, source = "", forecast) {
   const x10aName = id === "circulation_state" ? "MQTT" : "X10A";
   const offered = [
     { source: "x10a", name: x10aName, h: hasHist(id) ? S.hist.get(id) : null },
-    { source: "modbus", name: "HomeHub · Modbus", h: hasModbusHist(id) ? S.hist.get(histCacheKey(id, "modbus")) : null },
+    { source: "modbus", name: "Modbus", h: hasModbusHist(id) ? S.hist.get(histCacheKey(id, "modbus")) : null },
     { source: "env3", name: "ENV III", h: hasEnv3Hist(id) ? S.hist.get(histCacheKey(id, "env3")) : null },
     { source: "room", name: roomHistName(), h: hasRoomHist(id) ? S.hist.get(histCacheKey(id, "room")) : null },
   ].filter((s) => !source || s.source === source);

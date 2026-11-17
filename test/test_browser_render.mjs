@@ -1934,7 +1934,7 @@ async function assertHybridRoom(page, context, locale) {
     }))()`), {
       sources: ["x10a", "modbus", "room"], headline: "21.5 °C",
       mqttRow: `Meross MTS200B · MQTT${decimal.format(23.6)} °C`,
-      legend: ["X10A", "HomeHub · Modbus", "Meross MTS200B · MQTT"],
+      legend: ["X10A", "Modbus", "Meross MTS200B · MQTT"],
       roomLine: true, roomArea: true, gap: null,
     }, `${context}: the additional MQTT curve retains all three instruments and the device headline`);
     assert.ok(await page.evaluate('scrubText(historyView("room_temp"), 142).includes("Meross MTS200B · MQTT " + t("hist.nm"))'),

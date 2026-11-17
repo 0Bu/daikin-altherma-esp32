@@ -110,7 +110,9 @@ assert.match(builder, /note\.bound\s*=\s*anchor/, "the trend builder bounds by t
 assert.match(checkupBuilder, /note\.bound\s*=\s*wall_bucket/,
   "the checkup builder bounds by the wall hour bucket");
 const forService = functionBody("bool flash_build_for_service(", "} // namespace");
-assert.match(forService, /flash_build_next_checkup_record\(r,\s*wait_ticks,\s*note\)/);
+assert.match(forService, /flash_build_next_checkup_record\(r,\s*wait_ticks,\s*note,\s*src_i\s*==\s*kCheckupModbusSource\)/);
+assert.match(forService, /kCyclingModbusTraceSource/,
+  "independent Modbus cycling stream must use its own journal dispatcher");
 assert.match(forService,
   /flash_build_next_record\(static_cast<HistorySource>\(src_i\),\s*r,\s*wait_ticks,\s*note\)/);
 assert.match(forService, /flash_note_cursor_ahead\(src_i,\s*note\)/,
@@ -161,7 +163,7 @@ assert.match(appendFn,
   /const bool\s+stop_owned = logic::observation_append_owned\(r\.header\);[\s\S]*flash_append_record_at\(r, slot\)/,
   "append dispatch captures builder ownership before the separate commit transaction");
 assert.match(appendFn,
-  /flash_note_append_success\(slot\);[\s\S]*if \(!flash_is_manifest\(r\.header\) && !stop_owned && !flash_cycling_owned\(r\.header\)\)\s+s_flash_ahead_logged\[r\.header\.source\] = false;/,
+  /flash_note_append_success\(slot\);[\s\S]*if \(!flash_is_manifest\(r\.header\) && !stop_owned && !flash_cycling_owned\(r\.header\)\)\s+s_flash_ahead_logged\[flash_modbus_checkup_owned\(r\.header\)\s*\?\s*kCheckupModbusSource\s*:\s*r\.header\.source\]\s*=\s*false;/,
   "only appending a source's own data releases its ahead-of-clock latch");
 assert.match(appendFn, /if \(stop_owned\) stop_observation_flash_failed\(\);/,
   "a failed builder-owned observation releases its reservation without a committed read header");

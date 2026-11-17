@@ -64,7 +64,9 @@ daik::Config cfg;
 std::mutex   config_mutex;
 bool         config_throws = false, net_up = true, ota_active = false, weather_active = false;
 int      config_reads = 0, config_saves = 0, history_calls = 0, history_gaps = 0, stack_samples = 0;
-uint32_t history_generation = 1;
+int      checkup_calls = 0, checkup_live_calls = 0, checkup_confirm_calls = 0, checkup_resets = 0;
+uint32_t history_generation = 1, checkup_consent_epoch_val = 1;
+daik::ModbusProfile            checkup_last_profile = daik::ModbusProfile::Auto;
 std::function<void()>    history_hook;
 std::vector<std::string> logs;
 std::vector<daik::CachedValue> history_rows;
@@ -105,6 +107,18 @@ bool     net_is_up() { return adapter::net_up; }
 bool     ota_download_active() { return adapter::ota_active; }
 bool     weather_fetch_active() { return adapter::weather_active; }
 void     stack_watch_sample(StackWatch) noexcept { ++adapter::stack_samples; }
+uint32_t checkup_consent_epoch() { return adapter::checkup_consent_epoch_val; }
+void     checkup_modbus_confirm_source(ModbusProfile profile, uint32_t) {
+    ++adapter::checkup_confirm_calls;
+    adapter::checkup_last_profile = profile;
+}
+void checkup_record_modbus(const CachedValue*, size_t, ModbusProfile profile, uint32_t, uint32_t,
+                           bool source_confirmed) {
+    ++adapter::checkup_calls;
+    if (source_confirmed) ++adapter::checkup_live_calls;
+    adapter::checkup_last_profile = profile;
+}
+void     checkup_modbus_reset() { ++adapter::checkup_resets; }
 uint32_t history_modbus_generation() { return adapter::history_generation; }
 void     history_modbus_reset(uint32_t) noexcept { ++adapter::history_generation; }
 void     history_record_modbus(const CachedValue* v, size_t n, uint32_t gen) {
@@ -196,11 +210,17 @@ void reset() {
     adapter::net_up             = true;
     adapter::config_reads       = 0;
     adapter::config_saves       = 0;
-    adapter::history_calls      = 0;
-    adapter::history_gaps       = 0;
-    adapter::history_generation = 1;
-    adapter::stack_samples      = 0;
-    adapter::history_hook       = {};
+    adapter::history_calls             = 0;
+    adapter::history_gaps              = 0;
+    adapter::history_generation        = 1;
+    adapter::stack_samples             = 0;
+    adapter::checkup_calls             = 0;
+    adapter::checkup_live_calls        = 0;
+    adapter::checkup_confirm_calls     = 0;
+    adapter::checkup_resets            = 0;
+    adapter::checkup_consent_epoch_val = 1;
+    adapter::checkup_last_profile      = ModbusProfile::Auto;
+    adapter::history_hook              = {};
     adapter::logs.clear();
     adapter::history_rows.clear();
     mb_start();
@@ -526,8 +546,9 @@ void expiry() {
     REQUIRE(!mb_values_live());
     reset();
     seed_cache();
-    mb_record_poll_gap();
+    mb_record_poll_gap(s_target_generation.load(), 1);
     REQUIRE(!mb_values_live());
+    REQUIRE(adapter::checkup_calls == 1 && adapter::checkup_live_calls == 0);
     status = mb_status();
     REQUIRE(status.values == 0 && !status.plant_gate_known && !status.space_route_known &&
             !status.space_route_active);
@@ -947,11 +968,14 @@ void probe_native_promotion() {
     REQUIRE(peer.requests > MB_PLAN.count + 1);
     for (bool split : s_batch_split) REQUIRE(!split);
     REQUIRE(s_cycle_tick == 0);
+    REQUIRE(adapter::checkup_confirm_calls == 0 && adapter::checkup_live_calls == 0);
     peer.batch_exception      = false;
     const auto first_requests = peer.requests_snapshot().size();
     mb_poll_once();
     rows = snapshot_rows();
     require_catalog_rows(rows, true);
+    REQUIRE(adapter::checkup_confirm_calls == 1 && adapter::checkup_live_calls == 1 &&
+            adapter::checkup_last_profile == ModbusProfile::Altherma4);
     const auto requests = peer.requests_snapshot();
     require_request_spans(
         std::vector<WireRequest>(requests.begin() + first_requests, requests.end()), true);
@@ -969,6 +993,8 @@ void probe_homehub_rows() {
         REQUIRE(mb_status().profile == ModbusProfile::HomeHub);
         REQUIRE(mb_status().profile_basis == ModbusProfileBasis::Affirmative);
         REQUIRE(peer.requests == MB_PLAN.count + 1);
+        REQUIRE(adapter::checkup_confirm_calls == 1 && adapter::checkup_live_calls == 1 &&
+                adapter::checkup_last_profile == ModbusProfile::HomeHub);
     }
     // Pending/invalid probes do not append a speculative native row or relabel the baseline.
     for (uint16_t raw : {uint16_t{0}, MB_WAIT, MB_UNAVAILABLE}) {
@@ -981,6 +1007,7 @@ void probe_homehub_rows() {
         REQUIRE(mb_status().profile == ModbusProfile::Auto);
         REQUIRE(mb_status().profile_basis == ModbusProfileBasis::Probing);
         REQUIRE(peer.requests == MB_PLAN.count + 1);
+        REQUIRE(adapter::checkup_confirm_calls == 0 && adapter::checkup_live_calls == 0);
     }
 }
 void definition_snapshot_cutover() {
@@ -1263,6 +1290,16 @@ void poll_cutover() {
         REQUIRE(st.profile == ModbusProfile::Auto &&
                 st.profile_basis == ModbusProfileBasis::Probing);
         REQUIRE(mb_active_profile() == ModbusProfile::Auto);
+    }
+    {
+        reset();
+        Peer peer;
+        mb_poll_once();
+        const auto resets_before = adapter::checkup_resets;
+        adapter::cfg.mb_host     = "192.0.2.99";
+        mb_reconfigure(true);
+        mb_poll_once();
+        REQUIRE(adapter::checkup_resets == resets_before + 1);
     }
 }
 void zero_cache_commit() {
