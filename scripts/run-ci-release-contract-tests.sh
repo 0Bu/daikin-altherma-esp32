@@ -536,7 +536,7 @@ relevant = (workflow_dir.parents[1] / "tools/release/build-inputs.ere").read_tex
 require(text.count('relevant="$(cat tools/release/build-inputs.ere)"') == 1
         and "web-installer[.]mjs" in relevant,
         "docs/web-installer.mjs is missing from change trigger")
-require(re.search(relevant, "docs/vendor/esptool-js-0.7.0.bundle.js") is not None,
+require(re.search(relevant, "docs/vendor/esptool-js-0.7.1.bundle.js") is not None,
         "the vendored esptool-js bundle is missing from change trigger")
 require(re.search(relevant, "scripts/production-ota-gate.py") is not None,
         "production OTA gate changes do not publish an exact-source dev artifact")
