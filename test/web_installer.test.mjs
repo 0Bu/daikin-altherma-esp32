@@ -1005,7 +1005,7 @@ test("the published page checks the device first and keeps one log below the car
 
 // Reviewed bundles by version: a bump vendors new bytes after checking the npm tarball integrity and
 // adds their digest here.
-const VENDORED_ESPTOOL_SHA256 = { "0.7.0": "00ebe6fb0b202976d3e2a3c6b9a6bd438c26a81d2af6739c95ac276a64c1a84e" };
+const VENDORED_ESPTOOL_SHA256 = { "0.7.1": "d6a4b0b7c9b747a7370cfa976164a962f56332d5faa7c3b45cdb95a2a8b1d456" };
 
 test("the vendored esptool-js bundle is the reviewed npm file, self-contained and published flat", () => {
   const html = fs.readFileSync(new URL("../docs/index.html", import.meta.url), "utf8");
@@ -1125,7 +1125,7 @@ function lifecyclePort(name) {
   return port;
 }
 
-// Like esptool-js 0.7.0: the loader opens the port through Transport.connect(device.open) and the
+// Like esptool-js 0.7.1: the loader opens the port through Transport.connect(device.open) and the
 // transport closes it in disconnect().
 function lifecycleEsptool() {
   class Transport {

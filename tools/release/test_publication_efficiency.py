@@ -20,8 +20,8 @@ class PublicationEfficiencyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
             for name in ('scripts/build-pages.sh', 'docs/index.html', 'docs/serial-port-release.mjs',
-                         'docs/web-installer.mjs', 'docs/vendor/esptool-js-0.7.0.bundle.js',
-                         'docs/vendor/esptool-js-0.7.0.LICENSE', 'main/www/heat_pump_icon.png',
+                         'docs/web-installer.mjs', 'docs/vendor/esptool-js-0.7.1.bundle.js',
+                         'docs/vendor/esptool-js-0.7.1.LICENSE', 'main/www/heat_pump_icon.png',
                          'LICENSE', 'THIRD_PARTY_NOTICES.md', 'tools/web_asset/vendor/LICENSE',
                          'dist/manifest.json', 'dist/artifacts.json', 'dist/changelog.json', 'dist/app.bin'):
                 target = root / name
