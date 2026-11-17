@@ -130,7 +130,6 @@ PACKED_ENTRY_SYMBOLS = frozenset({
     'esp_transport_read_exact_size',
     'esp_transport_read_internal',
     'esp_transport_write',
-    'find_key',
     'gcm_mask',
     'gdma_new_ahb_channel',
     'heap_caps_aligned_alloc',
@@ -445,6 +444,12 @@ SDK_PUBLIC_MACROS = (
     "CONFIG_MBEDTLS_ECP_NIST_OPTIM", "CONFIG_MBEDTLS_ECDSA_C",
     "CONFIG_MBEDTLS_SSL_PROTO_TLS1_2", "CONFIG_MBEDTLS_SSL_PROTO_TLS1_3",
     "CONFIG_MBEDTLS_DYNAMIC_BUFFER", "CONFIG_MBEDTLS_CERTIFICATE_BUNDLE",
+    "CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY",
+    "CONFIG_MBEDTLS_X509_TRUSTED_CERT_CALLBACK",
+    "CONFIG_MBEDTLS_CIPHER_MODE_CFB", "CONFIG_MBEDTLS_CIPHER_MODE_OFB",
+    "CONFIG_MBEDTLS_CIPHER_MODE_XTS", "CONFIG_MBEDTLS_X509_CRL_PARSE_C",
+    "CONFIG_MBEDTLS_PKCS5_C", "CONFIG_MBEDTLS_PK_PARSE_EC_EXTENDED",
+    "CONFIG_MBEDTLS_SSL_MAX_FRAGMENT_LENGTH", "CONFIG_MBEDTLS_SSL_ALL_ALERT_MESSAGES",
     "CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN", "CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN",
     "CONFIG_MBEDTLS_DHM_C", "CONFIG_MBEDTLS_KEY_EXCHANGE_PSK",
     "CONFIG_MBEDTLS_KEY_EXCHANGE_ECDHE_PSK", "CONFIG_MBEDTLS_KEY_EXCHANGE_DHE_PSK",
@@ -456,7 +461,7 @@ SDK_PUBLIC_MACROS = (
     "CONFIG_MBEDTLS_ECP_DP_SECP256K1_ENABLED", "CONFIG_MBEDTLS_ECP_DP_BP256R1_ENABLED",
     "CONFIG_MBEDTLS_ECP_DP_BP384R1_ENABLED", "CONFIG_MBEDTLS_ECP_DP_BP512R1_ENABLED",
     "CONFIG_MBEDTLS_ECP_DP_CURVE25519_ENABLED", "CONFIG_MBEDTLS_ECP_DP_CURVE448_ENABLED",
-    "CONFIG_MBEDTLS_AES_C", "CONFIG_MBEDTLS_HARDWARE_AES", "CONFIG_MBEDTLS_AES_USE_INTERRUPT",
+    "CONFIG_MBEDTLS_AES_C", "CONFIG_MBEDTLS_AES_FEWER_TABLES", "CONFIG_MBEDTLS_HARDWARE_AES", "CONFIG_MBEDTLS_AES_USE_INTERRUPT",
     "CONFIG_MBEDTLS_AES_INTERRUPT_LEVEL", "CONFIG_MBEDTLS_CIPHER_MODE_CBC",
     "CONFIG_MBEDTLS_GCM_C", "CONFIG_MBEDTLS_CCM_C", "CONFIG_MBEDTLS_CHACHA20_C",
     "CONFIG_MBEDTLS_CAMELLIA_C", "CONFIG_MBEDTLS_ARIA_C", "CONFIG_MBEDTLS_DES_C",
@@ -1194,7 +1199,7 @@ def reviewed_ota_upload_paths() -> dict[str, tuple[str, list[str], dict[str, int
                         "sdk_multi_lock", "sdk_queue_critical", "sdk_queue_compare_swap",
                         "runtime_task_entry"], {}, 1536, 10752)
     result["ota_lwip_boot_specific"] = (
-        "ota", prime + ["tls_find_key", "sdk_queue_critical", "sdk_queue_compare_swap",
+        "ota", prime + ["sdk_queue_critical", "sdk_queue_compare_swap",
                         "runtime_task_entry"], {}, 1536, 10752)
     root = ["ota_task", "ota_activate"]
     for phase, sdk in (("end", ["ota_sdk_end", "ota_sdk_verify_partition"]),
@@ -3304,7 +3309,6 @@ def self_test() -> None:
      'sys_thread_sem_get': 32,
      'sys_thread_sem_init': 64,
      'pthread_setspecific': 32,
-     'find_key': 32,
      'esp_sha_dma': 64,
      'esp_sha_dma_start': 32,
      'psa_mac_verify_setup': 32,
@@ -4013,7 +4017,7 @@ def self_test() -> None:
         ("ota_lwip_boot_allocate", ("tls_sys_thread_sem_get", "tls_sys_thread_sem_init",
                                     "tls_pthread_setspecific", "tls_calloc", "sdk_malloc_caps")),
         ("ota_lwip_boot_specific", ("tls_sys_thread_sem_get", "tls_sys_thread_sem_init",
-                                    "tls_pthread_setspecific", "tls_find_key")),
+                                    "tls_pthread_setspecific", "sdk_queue_critical")),
     ):
         for member in members:
             changed = json.loads(json.dumps(budgets))

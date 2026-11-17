@@ -396,7 +396,7 @@ scripts/run-build-change-detection-tests.sh
 `run-ci-release-contract-tests.sh` includes real offline partial-clone fixtures in
 `tools/release/test_ci_checkout.py`: full current source/history/tags, unchanged version derivation,
 selective historical-source hydration, an omitted historical binary and fail-closed missing inputs.
-Set `DAIKIN_CI_CHECKOUT_DOCKER_IMAGE=espressif/idf:v6.1` to add a read-only, network-disabled Linux
+Set `DAIKIN_CI_CHECKOUT_DOCKER_IMAGE=espressif/idf:v6.1.1` to add a read-only, network-disabled Linux
 read of the hydrated witness. `test_publication_efficiency.py` binds single CI selftest ownership,
 trust boundaries and manifest-first waiting to complete file/signature checks. The pre-merge
 fixtures verify that post-merge reuse rejects mismatched trees, parents, workflow runs and local
