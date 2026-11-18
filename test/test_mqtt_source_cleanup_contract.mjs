@@ -260,13 +260,13 @@ const completionStart = mqtt.indexOf("static void apply_source_cleanup_completio
 const completionEnd = mqtt.indexOf("static void service_source_cleanup_evidence", completionStart);
 const completion = mqtt.slice(completionStart, completionEnd);
 assert.match(completion,
-  /case MqttCleanupSource::Weather:[\s\S]*?s_last_weather_json\.clear\(\)/,
+  /case MqttCleanupSource::Weather:[\s\S]*?s_last_weather_digest\.clear\(\)/,
   "completed Weather cleanup must invalidate predecessor publish deduplication");
 assert.match(completion,
-  /case MqttCleanupSource::Modbus:[\s\S]*?s_last_modbus_json\.clear\(\)/,
+  /case MqttCleanupSource::Modbus:[\s\S]*?s_last_modbus_digest\.clear\(\)/,
   "completed HomeHub cleanup must invalidate predecessor publish deduplication");
 assert.match(completion,
-  /case MqttCleanupSource::Env3:[\s\S]*?s_last_env3_json\.clear\(\)[\s\S]*?s_last_env3_samples\s*=\s*0/,
+  /case MqttCleanupSource::Env3:[\s\S]*?s_last_env3_digest\.clear\(\)[\s\S]*?s_last_env3_samples\s*=\s*0/,
   "completed ENV III cleanup must invalidate payload and sample acknowledgements");
 
 assert.match(publishGate,

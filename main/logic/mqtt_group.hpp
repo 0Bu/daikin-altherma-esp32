@@ -248,6 +248,42 @@ inline uint64_t fnv1a64(std::string_view data) {
     return h;
 }
 
+// Allocation-free per-topic publish deduplication guard for Modbus, Weather, and ENV III state
+// payloads. Storing an 8-byte FNV-1a digest instead of a heap-backed std::string copy saves ~2 KiB
+// of steady-state heap and avoids post-reconnect allocations splitting ESP32-S3's 31 KiB block.
+struct MqttPayloadDigest {
+    uint64_t digest = 0;
+    bool     valid  = false;
+
+    constexpr void clear() noexcept {
+        digest = 0;
+        valid  = false;
+    }
+    constexpr bool empty() const noexcept { return !valid; }
+    // Pass raw pointer + length to noinline leaf helpers so Xtensa GCC neither constructs
+    // std::string_view temporaries in caller stack frames nor CSEs a 64-bit digest across
+    // synchronous mqtt_publish().
+    __attribute__((noinline)) bool matches(const char* data, size_t len) const noexcept {
+        return valid && fnv1a64(std::string_view(data, len)) == digest;
+    }
+    bool matches(const std::string& payload) const noexcept {
+        return matches(payload.c_str(), payload.size());
+    }
+    bool matches(const char* payload) const noexcept {
+        return matches(payload, __builtin_strlen(payload));
+    }
+    __attribute__((noinline)) void record(const char* data, size_t len) noexcept {
+        digest = fnv1a64(std::string_view(data, len));
+        valid  = true;
+    }
+    void record(const std::string& payload) noexcept { record(payload.c_str(), payload.size()); }
+    void record(const char* payload) noexcept { record(payload, __builtin_strlen(payload)); }
+    constexpr bool operator==(const MqttPayloadDigest& o) const noexcept {
+        return valid == o.valid && (!valid || digest == o.digest);
+    }
+    constexpr bool operator!=(const MqttPayloadDigest& o) const noexcept { return !(*this == o); }
+};
+
 // Allocation-free source-cache encoder. Unlike GroupedValue, a poll-cache row owns only its
 // formatted value; group and JSON key are derived from the static register/label metadata. This is
 // deliberate: private issue 10's first implementation kept a second vector of every row, another

@@ -442,6 +442,7 @@ mutex, then checks profile, observation identity and revision before encoding wi
 Revision drift defers the cycle. Missing/held rows are skipped without constructing another vector.
 The 12 KiB payload limit is a refusal ceiling, not a permanent reservation. Release the local payload
 after synchronous QoS0 submission; commit the digest only after publish acceptance so `-1` is retried.
+HomeHub, Weather and ENV III state topics likewise retain only an 8-byte FNV-1a digest (`MqttPayloadDigest`) after accepted submission.
 
 Room and circulation inputs decode on the owning MQTT client. Configuration/source epochs reject
 queued frames from an earlier binding. A configured room timestamp mapping is the sole age authority;

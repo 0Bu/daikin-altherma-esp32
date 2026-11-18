@@ -368,16 +368,16 @@ mutations = [
      'f.max_alloc = esp_get_free_heap_size();',
      'HEARTBEAT_LARGEST_INTERNAL_BLOCK_ON_WIRE', 1),
     ('weather-allocating-accepted-cache', 'outgoing_weather',
-     's_last_weather_json.swap(js);', 's_last_weather_json = js;',
+     's_last_weather_digest.record(js);', '(void)std::string(64, \'x\'); s_last_weather_digest.record(js);',
      'WEATHER_ACCEPTED_PAYLOAD_COMMITTED_TO_CACHE', 1),
     ('weather-rejected-sdk-cache-advance', 'outgoing_weather',
-     '''    if (js != s_last_weather_json &&
+     '''    if (!s_last_weather_digest.matches(js) &&
         mqtt_publish(s_weather, js.c_str(), static_cast<int>(js.size()), 0, 1))''',
-     '''    if (js != s_last_weather_json &&
+     '''    if (!s_last_weather_digest.matches(js) &&
         (mqtt_publish(s_weather, js.c_str(), static_cast<int>(js.size()), 0, 1), true))''',
      'WEATHER_REJECTED_SDK_PUBLISH_RETAINS_LAST_ACCEPTED_CACHE', 1),
     ('weather-unchanged-payload-repeat', 'outgoing_weather',
-     '''    if (js != s_last_weather_json &&
+     '''    if (!s_last_weather_digest.matches(js) &&
         mqtt_publish(s_weather, js.c_str(), static_cast<int>(js.size()), 0, 1))''',
      '''    if (mqtt_publish(s_weather, js.c_str(), static_cast<int>(js.size()), 0, 1))''',
      'WEATHER_UNCHANGED_ACCEPTED_PAYLOAD_SUPPRESSES_REPEAT', 1),

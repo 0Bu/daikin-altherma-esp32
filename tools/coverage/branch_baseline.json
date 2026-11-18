@@ -2313,8 +2313,8 @@
         "outcomes": 83
       },
       "main/logic/mqtt_group.hpp": {
-        "outcomes": 308,
-        "taken": 258
+        "outcomes": 314,
+        "taken": 264
       },
       "main/logic/mqtt_publish_gate.hpp": {
         "taken": 20,
@@ -2755,8 +2755,8 @@
         "outcomes": 87
       },
       "main/logic/mqtt_group.hpp": {
-        "outcomes": 524,
-        "taken": 371
+        "outcomes": 534,
+        "taken": 381
       },
       "main/logic/mqtt_publish_gate.hpp": {
         "taken": 35,
@@ -3197,8 +3197,8 @@
         "outcomes": 87
       },
       "main/logic/mqtt_group.hpp": {
-        "outcomes": 524,
-        "taken": 371
+        "outcomes": 534,
+        "taken": 381
       },
       "main/logic/mqtt_publish_gate.hpp": {
         "taken": 35,
@@ -3639,8 +3639,8 @@
         "outcomes": 87
       },
       "main/logic/mqtt_group.hpp": {
-        "outcomes": 524,
-        "taken": 371
+        "outcomes": 534,
+        "taken": 381
       },
       "main/logic/mqtt_publish_gate.hpp": {
         "taken": 35,

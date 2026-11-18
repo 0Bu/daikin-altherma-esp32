@@ -191,6 +191,7 @@ static bool mqtt_publish(const std::string& topic, const char* payload, int len,
 // releases.
 static constexpr size_t REF_QUEUE_DEPTH = 8;
 static constexpr size_t REF_TEMP_PAYLOAD_MAX = 1024;
+static constexpr size_t DISCOVERY_OWNER_PAYLOAD_MAX = 2048;
 struct ReferenceMqttFrame {
     char   topic[REF_TEMP_TOPIC_MAX + 1] = {0};
     char   payload[REF_TEMP_PAYLOAD_MAX + 1] = {0};
@@ -211,10 +212,20 @@ constexpr ReferenceMqttFrame reference_frame_scratch() {
     frame.received_unix_s = 0;
     return frame;
 }
-static ReferenceMqttFrame  s_ref_rx          = reference_frame_scratch();
-static ReferenceMqttFrame  s_ref_task_frame  = reference_frame_scratch(); // mqtt_task-owned
-static bool                s_ref_rx_active = false;
-static size_t              s_ref_rx_received = 0;
+// esp-mqtt delivers one packet's fragments sequentially on its single event task. Sharing one
+// event-task reassembly union avoids keeping a separate 1,256-byte ReferenceMqttFrame static
+// alongside the 2,048-byte discovery-owner reassembly buffer.
+union EventMqttRxScratch {
+    ReferenceMqttFrame ref;
+    char               discovery[DISCOVERY_OWNER_PAYLOAD_MAX];
+    constexpr EventMqttRxScratch() : ref(reference_frame_scratch()) {}
+};
+static EventMqttRxScratch  s_event_rx;
+static ReferenceMqttFrame& s_ref_rx         = s_event_rx.ref;
+static ReferenceMqttFrame  s_ref_task_frame = reference_frame_scratch(); // mqtt_task-owned
+static bool                s_ref_rx_active  = false;
+static bool                s_event_rx_discovery_active = false;
+static size_t              s_ref_rx_received           = 0;
 // Written by the event task, read + reported by mqtt_task — the same split as the flags above, and
 // std::atomic for the reason stated there. Relaxed ordering: it is a counter, ordering nothing and
 // synchronising nothing, and taking a lock on the event task is what this hand-off exists to avoid.
@@ -325,12 +336,12 @@ static uint64_t    s_last_x10a_digest = 0;            // per-topic dedup guards 
                                                       // fnv1a64 of the last X10A payload — the old
                                                       // full-string copy cost a permanent ~3 KB block
                                                       // and one copy per cycle (private issue 10)
-static std::string s_last_modbus_json;
-static uint32_t    s_last_x10a_cache_gen   = 0;
-static uint32_t    s_last_modbus_cache_gen = 0;
-static bool        s_last_modbus_live      = false;
-static std::string s_last_weather_json;
-static std::string s_last_env3_json;
+static MqttPayloadDigest s_last_modbus_digest;
+static uint32_t          s_last_x10a_cache_gen   = 0;
+static uint32_t          s_last_modbus_cache_gen = 0;
+static bool              s_last_modbus_live      = false;
+static MqttPayloadDigest s_last_weather_digest;
+static MqttPayloadDigest s_last_env3_digest;
 // Rate-limit the hard-cap diagnostic. The payload itself is no longer boot-long storage: dev.12's
 // persistent cache/group vectors and dev.13's static 12 KiB JSON block made the live 129-row board
 // permanently unable to build /status. The two-pass cache accessor below allocates exactly one
@@ -385,12 +396,11 @@ enum class DiscoveryOwnerState : uint8_t { Pending, Admitted, Blocked, Encoded }
 static std::atomic<DiscoveryOwnerState> s_discovery_owner_state{DiscoveryOwnerState::Pending};
 static bool s_discovery_owner_required = true; // immutable while the MQTT client is running
 static std::array<std::string, 2> s_discovery_owner_filters; // staged before client start
-static constexpr size_t           DISCOVERY_OWNER_PAYLOAD_MAX = 2048;
 static constexpr uint32_t         DISCOVERY_OWNER_CONFIG_MAX  = 512;
 static constexpr uint32_t         DISCOVERY_OWNER_QUIET_MS = 5000, DISCOVERY_OWNER_TOTAL_MS = 30000;
-static char                  s_discovery_owner_rx[DISCOVERY_OWNER_PAYLOAD_MAX]; // event task only
 static size_t                s_discovery_owner_received = 0, s_discovery_owner_total = 0;
-static bool                  s_discovery_owner_rx_active = false;
+static bool                       s_discovery_owner_rx_active   = false;
+static bool                       s_discovery_owner_uses_ref_rx = false;
 static std::atomic<bool>     s_discovery_owner_fragment_pending{false};
 static std::atomic<uint32_t> s_discovery_owner_last_data_ms{0}, s_discovery_owner_started_ms{0};
 static std::atomic<uint32_t> s_discovery_owner_configs{0};
@@ -426,7 +436,8 @@ static void capture_discovery_owner_frame(esp_mqtt_event_handle_t e) noexcept {
     if (!s_discovery_owner_required || !e || (e->client && e->client != s_client)) return;
     if (e->current_data_offset == 0) {
         if (s_discovery_owner_rx_active) discovery_owner_block(); // interrupted document
-        s_discovery_owner_rx_active = false;
+        s_discovery_owner_rx_active   = false;
+        s_discovery_owner_uses_ref_rx = false;
         s_discovery_owner_fragment_pending.store(false, std::memory_order_release);
         if (!e->topic || e->topic_len <= 0 ||
             !mqtt_discovery_namespace_topic(
@@ -443,6 +454,19 @@ static void capture_discovery_owner_frame(esp_mqtt_event_handle_t e) noexcept {
         s_discovery_owner_total     = static_cast<size_t>(e->total_data_len);
         s_discovery_owner_received  = 0;
         s_discovery_owner_rx_active = true;
+        // Payloads <= REF_TEMP_PAYLOAD_MAX reassemble in s_event_rx.ref.payload so a discovery
+        // packet that also matches an explicit input topic shares one active union member; larger
+        // discovery payloads (> 1024 B) are always rejected by capture_reference_frame.
+        s_discovery_owner_uses_ref_rx = s_discovery_owner_total <= REF_TEMP_PAYLOAD_MAX;
+        if (s_discovery_owner_uses_ref_rx) {
+            if (s_event_rx_discovery_active) {
+                new (&s_event_rx.ref) ReferenceMqttFrame(reference_frame_scratch());
+                s_event_rx_discovery_active = false;
+            }
+        } else if (!s_event_rx_discovery_active) {
+            new (&s_event_rx.discovery) char[DISCOVERY_OWNER_PAYLOAD_MAX];
+            s_event_rx_discovery_active = true;
+        }
         s_discovery_owner_fragment_pending.store(true, std::memory_order_release);
         if (s_discovery_owner_state.load(std::memory_order_acquire) ==
                 DiscoveryOwnerState::Pending &&
@@ -454,22 +478,27 @@ static void capture_discovery_owner_frame(esp_mqtt_event_handle_t e) noexcept {
     if (e->current_data_offset < 0 || e->data_len <= 0 || !e->data ||
         static_cast<size_t>(e->current_data_offset) != s_discovery_owner_received ||
         e->total_data_len != static_cast<int>(s_discovery_owner_total) ||
-        static_cast<size_t>(e->data_len) > s_discovery_owner_total - s_discovery_owner_received) {
+        static_cast<size_t>(e->data_len) > s_discovery_owner_total - s_discovery_owner_received ||
+        (s_discovery_owner_uses_ref_rx == s_event_rx_discovery_active)) {
         discovery_owner_block();
-        s_discovery_owner_rx_active = false;
+        s_discovery_owner_rx_active   = false;
+        s_discovery_owner_uses_ref_rx = false;
         s_discovery_owner_fragment_pending.store(false, std::memory_order_release);
         return;
     }
-    std::memcpy(s_discovery_owner_rx + s_discovery_owner_received, e->data,
+    char* const payload_buf =
+        s_discovery_owner_uses_ref_rx ? s_event_rx.ref.payload : s_event_rx.discovery;
+    std::memcpy(payload_buf + s_discovery_owner_received, e->data,
                 static_cast<size_t>(e->data_len));
     s_discovery_owner_received += static_cast<size_t>(e->data_len);
     s_discovery_owner_last_data_ms.store(static_cast<uint32_t>(esp_timer_get_time() / 1000),
                                          std::memory_order_release);
     if (s_discovery_owner_received == s_discovery_owner_total) {
-        if (!mqtt_discovery_payload_owned(s_discovery_owner_rx, s_discovery_owner_total, s_base,
-                                          s_node, s_board))
+        if (!mqtt_discovery_payload_owned(payload_buf, s_discovery_owner_total, s_base, s_node,
+                                          s_board))
             discovery_owner_block();
-        s_discovery_owner_rx_active = false;
+        s_discovery_owner_rx_active   = false;
+        s_discovery_owner_uses_ref_rx = false;
         s_discovery_owner_fragment_pending.store(false, std::memory_order_release);
     }
 }
@@ -678,12 +707,11 @@ static inline void release_string_capacity(std::string& s) {
 }
 
 static __attribute__((noinline)) void release_paused_state_caches() {
-    s_last_modbus_json.clear();
-    release_string_capacity(s_last_modbus_json);
-    s_last_weather_json.clear();
-    release_string_capacity(s_last_weather_json);
-    s_last_env3_json.clear();
-    release_string_capacity(s_last_env3_json);
+    s_last_modbus_digest.clear();
+    s_last_weather_digest.clear();
+    s_last_env3_digest.clear();
+    s_announced_profile.clear();
+    release_string_capacity(s_announced_profile);
 }
 
 // The clean stop below discards the installation LWT, and an OTA install can restart the board
@@ -1468,9 +1496,9 @@ static bool publish_modbus_state(bool& published_live) {
     bool live = false;
     const std::vector<GroupedValue> values = current_modbus_values(live);
     const std::string js = live ? build_flat_json(values) : std::string("{}");
-    if (js != s_last_modbus_json) {
+    if (!s_last_modbus_digest.matches(js)) {
         if (!mqtt_publish(s_modbus, js.c_str(), static_cast<int>(js.size()), 0, 1)) return false;
-        s_last_modbus_json = js;
+        s_last_modbus_digest.record(js);
     }
     published_live = live;
     return true;
@@ -1522,21 +1550,18 @@ static void apply_source_cleanup_completion(const MqttCleanupCompletion& complet
     switch (completion.source) {
     case MqttCleanupSource::Weather:
         s_disabled_weather_cleaned = true;
-        s_last_weather_json.clear();
-        release_string_capacity(s_last_weather_json);
+        s_last_weather_digest.clear();
         if (!completion.discovery_skipped)
             diag_printf("mqtt: superseded Weather state and retired discovery deleted\n");
         break;
     case MqttCleanupSource::Modbus:
         s_modbus_disabled_cleaned = true;
-        s_last_modbus_json.clear();
-        release_string_capacity(s_last_modbus_json);
+        s_last_modbus_digest.clear();
         if (!completion.discovery_skipped)
             diag_printf("mqtt: superseded HomeHub state and retired discovery deleted\n");
         break;
     case MqttCleanupSource::Env3:
-        s_last_env3_json.clear();
-        release_string_capacity(s_last_env3_json);
+        s_last_env3_digest.clear();
         s_last_env3_samples        = 0;
         s_env3_discovery_announced = false;
         s_env3_disabled_cleaned    = !completion.env3_enabled;
@@ -1653,9 +1678,9 @@ static __attribute__((noinline)) std::string build_weather_payload(bool config_e
 static __attribute__((noinline)) void publish_weather_state(bool config_enabled) {
     std::string js = build_weather_payload(config_enabled);
     if (js.empty()) return;
-    if (js != s_last_weather_json &&
+    if (!s_last_weather_digest.matches(js) &&
         mqtt_publish(s_weather, js.c_str(), static_cast<int>(js.size()), 0, 1)) {
-        s_last_weather_json.swap(js);
+        s_last_weather_digest.record(js);
     }
 }
 
@@ -1676,9 +1701,9 @@ static void publish_env3_state() {
     // text repeats — and leaving it implicit in a payload field would make a future decision to
     // drop that field silently reintroduce the gap that reads like a dropout.
     const bool new_sample = env.fresh && env.samples != s_last_env3_samples;
-    if (new_sample || js != s_last_env3_json) {
+    if (new_sample || !s_last_env3_digest.matches(js)) {
         if (mqtt_publish(s_env3, js.c_str(), static_cast<int>(js.size()), 0, 1)) {
-            s_last_env3_json    = js;
+            s_last_env3_digest.record(js);
             s_last_env3_samples = env.samples;
         }
     }
@@ -2117,6 +2142,10 @@ static void capture_reference_frame(esp_mqtt_event_handle_t e) {
         s_ref_rx_active = false;
         return;
     }
+    if (e->current_data_offset == 0 && s_event_rx_discovery_active) {
+        new (&s_event_rx.ref) ReferenceMqttFrame(reference_frame_scratch());
+        s_event_rx_discovery_active = false;
+    }
     if (e->current_data_offset == 0) {
         s_ref_rx.reference_epoch   = s_ref_requested_epoch.load(std::memory_order_acquire);
         s_ref_rx.circulation_epoch = s_circulation_requested_epoch.load(std::memory_order_acquire);
@@ -2134,7 +2163,7 @@ static void capture_reference_frame(esp_mqtt_event_handle_t e) {
         int32_t received_sub_ms = 0;
         time_now(s_ref_rx.received_unix_s, received_sub_ms);
     }
-    if (!s_ref_rx_active ||
+    if (!s_ref_rx_active || s_event_rx_discovery_active ||
         !mqtt_fragment_fits(e->current_data_offset, e->data_len, e->total_data_len,
                             s_ref_rx_received, s_ref_rx.payload_len, REF_TEMP_PAYLOAD_MAX) ||
         (e->data_len > 0 && !e->data)) {
@@ -3126,7 +3155,9 @@ static void on_mqtt(void*, esp_event_base_t, int32_t id, void* data) {
         break;
     case MQTT_EVENT_CONNECTED:
         s_discovery_owner_admitted_session.store(0, std::memory_order_release);
-        s_discovery_owner_rx_active = false;
+        s_discovery_owner_rx_active   = false;
+        s_discovery_owner_uses_ref_rx = false;
+        s_ref_rx_active               = false;
         s_discovery_owner_fragment_pending.store(false, std::memory_order_release);
         s_discovery_owner_configs.store(0, std::memory_order_relaxed);
         s_discovery_owner_last_data_ms.store(0, std::memory_order_release);
@@ -3412,14 +3443,11 @@ static void mqtt_task(void*) {
                     s_last_x10a_digest = 0;                    // force full per-topic state re-seeds
                     s_last_x10a_digest_valid = false;
                     s_x10a_publish_proven.store(false, std::memory_order_release);
-                    s_last_modbus_json.clear();
-                    release_string_capacity(s_last_modbus_json);
+                    s_last_modbus_digest.clear();
                     s_last_x10a_cache_gen   = 0;
                     s_last_modbus_cache_gen = 0;
-                    s_last_weather_json.clear();
-                    release_string_capacity(s_last_weather_json);
-                    s_last_env3_json.clear();
-                    release_string_capacity(s_last_env3_json);
+                    s_last_weather_digest.clear();
+                    s_last_env3_digest.clear();
                     s_last_env3_samples = 0;
                     // Force the board/link diagnostic discovery to re-publish on THIS (re)connect. The
                     // disconnect handler also clears s_heartbeat_announced, but a DISCONNECT landing
@@ -3515,7 +3543,7 @@ static void mqtt_task(void*) {
                         const uint32_t mb_gen     = mb_cache_generation();
                         if (mqtt_source_state_needs_publish(mb_gen, s_last_modbus_cache_gen,
                                                             mb_values_live(), s_last_modbus_live,
-                                                            !s_last_modbus_json.empty())) {
+                                                            !s_last_modbus_digest.empty())) {
                             if (publish_modbus_state(s_last_modbus_live))
                                 s_last_modbus_cache_gen = mb_gen;
                         }

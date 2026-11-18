@@ -816,17 +816,28 @@ struct CyclingFinalPage {
 };
 constexpr size_t kCyclingFinalPages = 8;
 
+enum class CyclingTraceOwner : uint8_t { None, X10a, Modbus };
+constexpr CyclingTraceOwner cycling_trace_owner_for(bool is_modbus) {
+    return is_modbus ? CyclingTraceOwner::Modbus : CyclingTraceOwner::X10a;
+}
+
+// Shared staging/decode trace under s_flash_mtx. Only one source stream may hold an in-flight
+// multi-part checkpoint at a time, avoiding a second 792-byte static trace buffer in DRAM.
+logic::CheckupCyclingTrace s_flash_cycling_trace{};
+CyclingTraceOwner          s_flash_cycling_trace_owner = CyclingTraceOwner::None;
+
 struct CyclingFlashStream {
     CyclingFinalPage            finals[kCyclingFinalPages]{};
-    logic::CheckupCyclingTrace  trace;
-    logic::CyclingTraceIdentity identity;
+    logic::CyclingTraceIdentity identity{};
     uint64_t                    fence          = 0;
     uint64_t                    first_sequence = 0;
-    int64_t                     last_offer_us  = INT64_MIN;
+    int64_t                     last_offer_us  = 0;
     uint32_t                    reset_token    = 0;
     uint16_t                    slots[logic::HISTORY_FLASH_CYCLING_MAX_PARTS - 1]{};
+    uint16_t                    trace_count      = 0;
     size_t                      restore_index    = 0;
     uint8_t                     part             = 0;
+    bool                        has_offer        = false;
     bool                        restore_done     = false;
     bool                        decoded          = false;
     bool                        pending          = false;
@@ -839,15 +850,15 @@ struct CyclingFlashStream {
 
     void reset_after_forget() {
         reset_for_scan();
-        trace.reset();
-        trace.unix_s   = 0;
         identity       = {};
         first_sequence = 0;
-        last_offer_us  = INT64_MIN;
+        last_offer_us  = 0;
         reset_token    = 0;
         for (auto& s : slots) s = 0;
+        trace_count      = 0;
         restore_index    = 0;
         part             = 0;
+        has_offer        = false;
         restore_done     = true;
         decoded          = false;
         pending          = false;
@@ -855,8 +866,8 @@ struct CyclingFlashStream {
     }
 };
 
-CyclingFlashStream s_flash_cycling;
-CyclingFlashStream s_flash_cycling_modbus;
+CyclingFlashStream s_flash_cycling{};
+CyclingFlashStream s_flash_cycling_modbus{};
 
 struct CheckupModbusFlashState {
     int64_t                    last_bucket                                     = INT64_MIN;
@@ -2335,7 +2346,8 @@ bool flash_decode_cycling_group(CyclingFlashStream& cs, const CyclingFinalPage& 
         final.part + 1u != logic::cycling_trace_part_count(final.count))
         return false;
 
-    auto& trace = cs.trace;
+    auto& trace                 = s_flash_cycling_trace;
+    s_flash_cycling_trace_owner = CyclingTraceOwner::None;
     trace.reset();
     uint64_t preceding = 0;
     for (uint8_t i = 0; i <= final.part; ++i) {
@@ -2353,10 +2365,12 @@ bool flash_decode_cycling_group(CyclingFlashStream& cs, const CyclingFinalPage& 
             return false;
         preceding = r.header.sequence;
     }
-    trace.end_s        = final.end_s;
-    trace.window_end_s = logic::CHECKUP_WINDOW_S;
-    trace.unix_s       = final.unix_s;
-    cs.identity        = final.identity;
+    trace.end_s                 = final.end_s;
+    trace.window_end_s          = logic::CHECKUP_WINDOW_S;
+    trace.unix_s                = final.unix_s;
+    cs.identity                 = final.identity;
+    cs.trace_count              = trace.count;
+    s_flash_cycling_trace_owner = cycling_trace_owner_for(is_modbus);
     return true;
 }
 
@@ -2881,33 +2895,45 @@ bool flash_build_next_stop_observation(FlashJournalRecord& out) {
 
 [[gnu::noinline]] bool flash_build_next_cycling(FlashJournalRecord& out, TickType_t wait_ticks,
                                                 bool shutdown, bool is_modbus = false) {
-    CyclingFlashStream&     cs = is_modbus ? s_flash_cycling_modbus : s_flash_cycling;
-    const DiagnosticsSource diag_src =
+    CyclingFlashStream&       cs    = is_modbus ? s_flash_cycling_modbus : s_flash_cycling;
+    const CyclingFlashStream& other = is_modbus ? s_flash_cycling : s_flash_cycling_modbus;
+    const DiagnosticsSource   diag_src =
         is_modbus ? DiagnosticsSource::Modbus : DiagnosticsSource::X10a;
     const bool reset_pending = checkup_cycling_reset_pending(diag_src);
     const bool restore_done  = s_flash_restore_done && cs.restore_done;
     if (!restore_done && !reset_pending) return false;
     auto& s_flash_cycling_reset_token = cs.reset_token;
     // An unfinished data group has no final page. Drop it before offering a reset marker.
-    if (cs.pending && !s_flash_cycling_reset_token && reset_pending) cs.pending = false;
-    auto& trace = cs.trace;
+    if (cs.pending && !s_flash_cycling_reset_token && reset_pending) {
+        cs.pending = false;
+        if (s_flash_cycling_trace_owner == cycling_trace_owner_for(is_modbus))
+            s_flash_cycling_trace_owner = CyclingTraceOwner::None;
+    }
+    if (other.pending) return false;
+    const CyclingTraceOwner want_owner = cycling_trace_owner_for(is_modbus);
+    auto&                   trace      = s_flash_cycling_trace;
+    if (cs.pending && s_flash_cycling_trace_owner != want_owner) cs.pending = false;
     if (!cs.pending) {
         const int64_t now_us = esp_timer_get_time();
         const bool    due =
-            cs.last_offer_us == INT64_MIN ||
+            !cs.has_offer ||
             now_us - cs.last_offer_us >=
                 static_cast<int64_t>(logic::HISTORY_FLASH_CYCLING_INTERVAL_S) * 1000000;
         const bool allow_data       = restore_done && (shutdown ? !cs.shutdown_offered : due);
         s_flash_cycling_reset_token = 0;
+        s_flash_cycling_trace_owner = CyclingTraceOwner::None;
         if (!checkup_cycling_checkpoint(trace, cs.identity, s_flash_cycling_reset_token, wait_ticks,
                                         allow_data, diag_src))
             return false;
         if (!s_flash_cycling_reset_token) {
             cs.last_offer_us    = now_us;
+            cs.has_offer        = true;
             cs.shutdown_offered = shutdown;
         }
-        cs.part    = 0;
-        cs.pending = true;
+        cs.trace_count              = trace.count;
+        cs.part                     = 0;
+        cs.pending                  = true;
+        s_flash_cycling_trace_owner = want_owner;
     }
 
     std::memset(&out, 0xff, sizeof(out));
@@ -2944,7 +2970,8 @@ bool flash_build_next_stop_observation(FlashJournalRecord& out) {
         page.previous[i] = final && i < page.part ? cs.slots[i] : logic::CYCLING_TRACE_NO_SLOT;
     if (!logic::cycling_trace_page_valid(h, page, is_modbus) ||
         !logic::cycling_trace_encode_part(trace, page, out.payload + sizeof(page))) {
-        cs.pending = false;
+        cs.pending                  = false;
+        s_flash_cycling_trace_owner = CyclingTraceOwner::None;
         return false;
     }
     h.crc = logic::history_journal_crc_bytes(h, out.payload, logic::CYCLING_TRACE_PAGE_BYTES);
@@ -2954,11 +2981,13 @@ bool flash_build_next_stop_observation(FlashJournalRecord& out) {
 void flash_cycling_appended(uint16_t slot, uint64_t sequence, bool is_modbus) {
     CyclingFlashStream& cs = is_modbus ? s_flash_cycling_modbus : s_flash_cycling;
     if (cs.part == 0) cs.first_sequence = sequence;
-    if (cs.part + 1u < logic::cycling_trace_part_count(cs.trace.count)) {
+    if (cs.part + 1u < logic::cycling_trace_part_count(cs.trace_count)) {
         cs.slots[cs.part++] = slot;
         return;
     }
     cs.pending = false;
+    if (s_flash_cycling_trace_owner == cycling_trace_owner_for(is_modbus))
+        s_flash_cycling_trace_owner = CyclingTraceOwner::None;
     if (cs.reset_token)
         checkup_cycling_checkpoint_appended(cs.reset_token, is_modbus ? DiagnosticsSource::Modbus
                                                                       : DiagnosticsSource::X10a);
@@ -3236,9 +3265,12 @@ void history_restore_cycling_flash(TickType_t wait_ticks) {
     time_now(unix_s, ms);
     if (unix_s < 0) return;
     for (bool is_modbus : {false, true}) {
-        CyclingFlashStream& cs = is_modbus ? s_flash_cycling_modbus : s_flash_cycling;
-        if (cs.restore_done) continue;
-        if (!cs.decoded) {
+        CyclingFlashStream&       cs    = is_modbus ? s_flash_cycling_modbus : s_flash_cycling;
+        const CyclingFlashStream& other = is_modbus ? s_flash_cycling : s_flash_cycling_modbus;
+        if (cs.restore_done || other.pending) continue;
+        const CyclingTraceOwner want_owner = cycling_trace_owner_for(is_modbus);
+        if (!cs.decoded || s_flash_cycling_trace_owner != want_owner) {
+            cs.decoded = false;
             if (cs.restore_index < kCyclingFinalPages &&
                 cs.finals[cs.restore_index].sequence > cs.fence) {
                 if (!flash_decode_cycling_group(cs, cs.finals[cs.restore_index], is_modbus)) {
@@ -3248,16 +3280,20 @@ void history_restore_cycling_flash(TickType_t wait_ticks) {
                     continue;
                 }
             } else {
-                cs.trace.reset();
-                cs.trace.unix_s = 0;
-                cs.identity     = {};
+                s_flash_cycling_trace.reset();
+                s_flash_cycling_trace.unix_s = 0;
+                cs.identity                  = {};
+                cs.trace_count               = 0;
+                s_flash_cycling_trace_owner  = want_owner;
             }
             cs.decoded = true;
         }
-        const auto result = checkup_cycling_restore(cs.trace, cs.identity, unix_s, wait_ticks,
-                                                    is_modbus ? DiagnosticsSource::Modbus
-                                                              : DiagnosticsSource::X10a);
+        const auto result = checkup_cycling_restore(
+            s_flash_cycling_trace, cs.identity, unix_s, wait_ticks,
+            is_modbus ? DiagnosticsSource::Modbus : DiagnosticsSource::X10a);
         cs.restore_done   = result != CheckupFlashRestoreResult::Deferred;
+        if (cs.restore_done && s_flash_cycling_trace_owner == want_owner)
+            s_flash_cycling_trace_owner = CyclingTraceOwner::None;
     }
 }
 
@@ -3418,12 +3454,21 @@ static size_t history_flash_service_journal(size_t max_records, TickType_t wait_
     if (shutdown) {
         // Finish any group already in flight, then offer a final checkpoint. Leave all of the
         // ordinary write budget available to trends and the other diagnosis records.
-        if (s_flash_cycling.part == 0 && !s_flash_cycling.reset_token)
+        if (s_flash_cycling.part == 0 && !s_flash_cycling.reset_token) {
             s_flash_cycling.pending = false;
-        if (s_flash_cycling_modbus.part == 0 && !s_flash_cycling_modbus.reset_token)
+            if (s_flash_cycling_trace_owner == CyclingTraceOwner::X10a)
+                s_flash_cycling_trace_owner = CyclingTraceOwner::None;
+        }
+        if (s_flash_cycling_modbus.part == 0 && !s_flash_cycling_modbus.reset_token) {
             s_flash_cycling_modbus.pending = false;
+            if (s_flash_cycling_trace_owner == CyclingTraceOwner::Modbus)
+                s_flash_cycling_trace_owner = CyclingTraceOwner::None;
+        }
         const size_t cycling_budget = max_records ? 2 * logic::HISTORY_FLASH_CYCLING_MAX_PARTS : 1;
-        for (size_t cyc_src : {kCyclingTraceSource, kCyclingModbusTraceSource}) {
+        const size_t order[2]       = {
+            s_flash_cycling_modbus.pending ? kCyclingModbusTraceSource : kCyclingTraceSource,
+            s_flash_cycling_modbus.pending ? kCyclingTraceSource : kCyclingModbusTraceSource};
+        for (size_t cyc_src : order) {
             for (size_t cyc_written = 0; cyc_written < cycling_budget; ++cyc_written) {
                 if (!flash_build_for_service(cyc_src, r, wait_ticks, true)) break;
                 if (flash_append_record(r) != ESP_OK) return written;
@@ -3564,6 +3609,9 @@ bool history_flash_forget() {
         s_flash_mb_checkup.restore_done = true;
         s_flash_cycling.reset_after_forget();
         s_flash_cycling_modbus.reset_after_forget();
+        s_flash_cycling_trace.reset();
+        s_flash_cycling_trace.unix_s = 0;
+        s_flash_cycling_trace_owner  = CyclingTraceOwner::None;
         flash_manifest_cache_reset();
         s_flash_restore_done         = true;
         s_flash_checkup_restore_done = true;
