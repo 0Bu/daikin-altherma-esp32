@@ -200,7 +200,11 @@ using esp_err_t=int; constexpr int ESP_OK=0;
 constexpr size_t kTotalRings=HISTORY_FLASH_TOTAL_RINGS,kRestoreRingsPerTick=4;
 FlashOwned<bool> s_flash_scan_ok,s_flash_restore_done,s_flash_checkup_restore_done;
 FlashOwned<size_t> s_flash_restore_ring,s_flash_restored_rings;
-uint16_t s_flash_restore_slots[HISTORY_JOURNAL_SOURCE_COUNT][HISTORY_SAMPLES];
+constexpr size_t trend_restore_slot_row(size_t src) {
+ return src > static_cast<size_t>(HistoryJournalSource::Checkup) ? src - 1 : src;
+}
+uint16_t s_flash_restore_slots[HISTORY_JOURNAL_SOURCE_COUNT - 1][HISTORY_SAMPLES];
+uint16_t s_flash_checkup_restore_slots[logic::CHECKUP_JOURNAL_INDEX_CAP];
 constexpr size_t kCheckupModbusSource = HISTORY_JOURNAL_SOURCE_COUNT + 2;
 struct CheckupModbusFlashState {
  FlashOwned<bool> restore_done;
@@ -214,7 +218,11 @@ bool s_persist_dirty=false;
 struct ExistingStore {uint32_t circulation_fp=0;} existing_store;
 ExistingStore& P(){return existing_store;}
 alignas(8) unsigned char s_flash_sector[HISTORY_FLASH_ERASE_BYTES];
-HistorySample s_flash_restore_blocks[4][HISTORY_SAMPLES],s_splice_live[HISTORY_SAMPLES],s_splice_out[HISTORY_SAMPLES];
+struct FlashTrendRestoreScratch {
+ HistorySample blocks[4][HISTORY_SAMPLES];
+ HistorySample splice_live[HISTORY_SAMPLES];
+ HistorySample splice_out[HISTORY_SAMPLES];
+};
 FlashJournalRecord stored[4];
 int flash_reads=0,checkup_calls=0,stop_expirations=0,stop_services=0; bool queue_reset=false;
 void diag_printf(const char*,...){}
@@ -278,9 +286,9 @@ void prepare_restore(){
  }
  const size_t room=static_cast<size_t>(HistoryJournalSource::Room),checkup=static_cast<size_t>(HistoryJournalSource::Checkup);
  s_flash_newest_bucket[room]=1000;s_flash_oldest_bucket[room]=999;s_flash_restore_slot_count[room]=2;
- s_flash_restore_slots[room][0]=1;s_flash_restore_slots[room][1]=2;
+ s_flash_restore_slots[trend_restore_slot_row(room)][0]=1;s_flash_restore_slots[trend_restore_slot_row(room)][1]=2;
  s_flash_newest_bucket[checkup]=83;s_flash_oldest_bucket[checkup]=83;s_flash_restore_slot_count[checkup]=1;
- s_flash_restore_slots[checkup][0]=3;
+ s_flash_checkup_restore_slots[0]=3;
  for(size_t slot=1;slot<=2;++slot){
   auto& h=stored[slot].header;h={};h.magic=HISTORY_JOURNAL_MAGIC;h.version=HISTORY_JOURNAL_VERSION;
   h.source=static_cast<uint8_t>(HistoryJournalSource::Room);h.flags=HISTORY_JOURNAL_FLAG_TARGET_SCOPED;
