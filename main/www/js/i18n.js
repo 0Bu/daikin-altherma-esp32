@@ -51,8 +51,8 @@ const INSPECT_LOCALE_KEYS = ("status env3 sgrequest ou comp out ouhx hp disch lp
   "r2t rwt dt pth cop buh bsh valve valve2 tank heat spaceh room pump pel defrost quiet rhot " +
   "rcold wsup wtank wheat wret flow flow_switch wp").split(" ");
 const HOMEHUB_LOCALE_OFFSETS =
-  "1 2 3 4 6 7 9 10 21 22 23 30 31 32 33 37 38 40 41 42 43 44 45 49 50 51 52 53 54 56 57 58".split(" ");
-const DESCRIPTION_LOCALE_COUNT = 125;
+  "1 2 3 4 6 7 9 10 12 13 21 22 23 30 31 32 33 35 36 37 38 40 41 42 43 44 45 49 50 51 52 53 54 55 56 57 58".split(" ");
+const DESCRIPTION_LOCALE_COUNT = 130;
 const FAULT_CODE_LOCALE_COUNT = 63;
 const MB_DELTA_LOCALE_KEYS = ["outdoor_air", "room_temp"];
 const MODEL_DESCRIPTION_LOCALE_KEYS = ("health_fault health_dhw_loss health_cycling health_defrost " +
@@ -79,7 +79,7 @@ function homeHubValues(values) {
 // position is their stable locale identifier. Model rows already have stable ids. Each compact row
 // is [what] or [what, normal]; a compact locale may fold essential normal context into `what` and
 // omit the second field, but it never falls back to English. Keeping the rows positional avoids
-// repeating 125 regexes/keys in every signed locale asset. The locale contract pins their order.
+// repeating 130 regexes/keys in every signed locale asset. The locale contract pins their order.
 function descriptionValues(values) {
   if (!Array.isArray(values) || values.length !== DESCRIPTION_LOCALE_COUNT)
     throw new Error("description locale length");
@@ -173,6 +173,7 @@ const I18N = {
     "sys.cool_mode": "Cooling mode",
     "sys.residual_circulating": "Residual-heat circulation — no cooling output",
     "sys.bsh_active": "Electric tank heater active",
+    "sys.disinfecting": "Tank disinfection active",
     "sys.online": "Online", "sys.fault": "Fault", "sys.warning": "Warning",
     "sys.fault_line": (c) => "Fault · " + c + " — check the Daikin fault code.",
     "sys.warning_line": (c) => "Warning · " + c + " — check the heat pump.",
@@ -467,6 +468,11 @@ const I18N = {
     "a4.pressure_help": "Altherma 4 pressure scaling is not verified. The displayed bar value uses the existing conversion; compare it with the unit's own reading before judging pressure.",
     "a4.demand_response": "Demand response mode",
     "a4.unit_operation": "Unit operating state",
+    "a4.cooling_offset": "Weather-dependent cooling offset, main zone",
+    "a4.add_target": "Heating/cooling target, additional zone",
+    "a4.abnormality_counter": "User abnormality counter",
+    "a4.cooling_offset_help": "Adjusts the main-zone weather-dependent cooling curve in kelvin. This is an offset, not a measured temperature or the complete water-temperature target.",
+    "a4.abnormality_help": "Cumulative count of user-facing abnormalities recorded by the unit. An unchanged non-zero value reflects past events, not an active fault; check Unit abnormality and its fault code for the current state.",
     "enum.unknown": (n) => `Unknown (${n})`,
     "chip.space_on": "Space H/C ON", "chip.space_off": "Space H/C OFF", "chip.quiet": "Quiet",
     "schem.sg_boost": "BOOST",
@@ -553,6 +559,18 @@ const I18N = {
     "hist.flow_switch_on": "X10A status ON", "hist.flow_switch_off": "X10A status OFF",
     "hist.flow_switch_none": "No ON state recorded for this X10A status in the selected period.",
     "hist.flow_switch_aria": (l, d) => `${l} — water-flow-switch timeline. ${d}. Arrow keys read individual samples.`,
+    "hist.comp_total": (d, n) => `Compressor · ${d} · ${n} ${n === 1 ? "phase" : "phases"}`,
+    "hist.comp_none": "No compressor operation observed in the recorded period.",
+    "hist.comp_active": "Compressor running", "hist.comp_inactive": "Compressor off",
+    "hist.comp_aria": (l, d) => `${l} — HomeHub compressor timeline. ${d}. Use arrow keys to read individual samples.`,
+    "hist.mb_defrost_total": (d) => `Defrost / restart · ${d}`,
+    "hist.mb_defrost_none": "No defrost or restart phase observed in the recorded period.",
+    "hist.mb_defrost_active": "Defrost / restart", "hist.mb_defrost_inactive": "Normal / idle",
+    "hist.mb_defrost_aria": (l, d) => `${l} — HomeHub defrost/restart timeline. ${d}. Use arrow keys to read individual samples.`,
+    "hist.pump_total": (d) => `Pump · ${d}`,
+    "hist.pump_none": "No circulation-pump operation observed in the recorded period.",
+    "hist.pump_active": "Pump running", "hist.pump_inactive": "Pump off",
+    "hist.pump_aria": (l, d) => `${l} — HomeHub circulation-pump timeline. ${d}. Use arrow keys to read individual samples.`,
     "toast.saved": "Saved", "toast.no_changes": "No changes",
     "toast.reboot": "Rebooting — reconnecting…", "toast.rebooted": "Rebooted — reconnect to the device",
     "board.draft_stale": "Board settings changed. Reopen the editor before saving.",
@@ -945,16 +963,16 @@ function operationModeText(value) {
   const key = OPERATION_MODE_I18N[raw];
   return key ? t(key) : raw;
 }
-function operationModeFromFlags(dhw, space) {
-  return dhw === true && space === true ? t("mode.space_dhw")
+function operationModeFromFlags(dhw, space, spaceMode = null) {
+  const sc = spaceMode === "heat" ? "heat" : spaceMode === "cool" ? "cool" : "space";
+  return dhw === true && space === true ? t(`mode.${sc}_dhw`)
        : dhw === true ? t("mode.dhw")
-       : space === true ? t("mode.space")
+       : space === true ? t(`mode.${sc}`)
        : (dhw === false && space === false) ? t("mode.stop") : null;
 }
 // The diagram and its explainer are two views of the same state. X10A carries the detailed hydronic
 // enum; while that bus is down, the HomeHub's two activity flags distinguish hot water, generic space
-// operation and stop, but NOT Heating from Cooling. Resolve only that supportable answer here so
-// a visible "Stopp" headline back into an unexplained dash.
+// operation and stop, and input 38 refines active space operation to Heating or Cooling where known.
 function schematicOperationMode() {
   const hp = S.status?.hp || {};
   if (hp.connected) {
@@ -965,7 +983,8 @@ function schematicOperationMode() {
                                               (x.reg !== 0x10 && /^operation mode$/i.test(x.label || "")));
     return operationModeText(row?.value);
   }
-  return mbLive() ? operationModeFromFlags(mbBool(52), mbBool(53)) : null;
+  return mbLive() ? operationModeFromFlags(mbBool(52), mbBool(53),
+    typeof mbCurrentSpaceMode === "function" ? mbCurrentSpaceMode() : null) : null;
 }
 // Localise the static markup in index.html: elements tagged data-i18n get their text set from the
 // dictionary. Runs once at boot (the static DOM is never rebuilt). SVG <text>/<tspan> nodes work the

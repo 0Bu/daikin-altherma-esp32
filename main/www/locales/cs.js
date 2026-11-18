@@ -1,4 +1,4 @@
-// translation-source: 7e05fca97bff772abf43c5704d541747bc310184005cce90ce5b76eab24256ce
+// translation-source: 480bf7bd3b16592ffbaf33f9d54b1362d56dd3b72b7c310293449045f5e86f04
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -23,6 +23,7 @@ I18N.cs = localeValues([
   /* sys.cool_mode */ "Režim chlazení",
   /* sys.residual_circulating */ "Oběh zbytkového tepla — bez chladicího výkonu",
   /* sys.bsh_active */ "Elektrické topné těleso zásobníku je aktivní",
+  /* sys.disinfecting */ "Dezinfekce zásobníku aktivní",
   /* sys.online */ "V síti",
   /* sys.fault */ "Porucha",
   /* sys.warning */ "Varování",
@@ -347,6 +348,11 @@ I18N.cs = localeValues([
   /* a4.pressure_help */ "Přepočet tlaku Altherma 4 není ověřen. Hodnota v bar používá dosavadní přepočet; před hodnocením tlaku ji porovnejte s údajem jednotky.",
   /* a4.demand_response */ "Režim odezvy na poptávku",
   /* a4.unit_operation */ "Provozní stav jednotky",
+  /* a4.cooling_offset */ "Ekvitermní korekce chlazení, hlavní zóna",
+  /* a4.add_target */ "Cíl vytápění/chlazení, přídavná zóna",
+  /* a4.abnormality_counter */ "Počítadlo uživatelských poruch",
+  /* a4.cooling_offset_help */ "Posouvá ekvitermní chladicí křivku hlavní zóny v kelvinech. Jde o korekci, nikoli naměřenou teplotu ani celý cíl výstupní vody.",
+  /* a4.abnormality_help */ "Kumulovaný počet uživatelských odchylek zaznamenaných jednotkou. Neměnná nenulová hodnota odráží minulé události, nikoli aktivní poruchu; zkontrolujte diagnostický stav a kód chyby.",
   /* enum.unknown */ (n) => `Neznámé (${n})`,
   /* chip.space_on */ "Okruh ZAP",
   /* chip.space_off */ "Okruh VYP",
@@ -452,6 +458,21 @@ I18N.cs = localeValues([
   /* hist.flow_switch_off */ "Stav X10A VYP",
   /* hist.flow_switch_none */ "Ve zvoleném období nebyl pro tento stav X10A zaznamenán stav ZAP.",
   /* hist.flow_switch_aria */ (l, d) => `${l} — časová osa spínače průtoku vody. ${d}. Jednotlivé vzorky lze přečíst klávesami se šipkami.`,
+  /* hist.comp_total */ (d, n) => `Kompresor · ${d} · ${n} ${n === 1 ? "fáze" : "fází"}`,
+  /* hist.comp_none */ "V zaznamenaném období nebyl pozorován provoz kompresoru.",
+  /* hist.comp_active */ "Kompresor v chodu",
+  /* hist.comp_inactive */ "Kompresor vypnutý",
+  /* hist.comp_aria */ (l, d) => `${l} — časová osa kompresoru HomeHub. ${d}. Jednotlivé vzorky lze přečíst klávesami se šipkami.`,
+  /* hist.mb_defrost_total */ (d) => `Odtávání / restart · ${d}`,
+  /* hist.mb_defrost_none */ "V zaznamenaném období nebyla pozorována fáze odtávání ani restartu.",
+  /* hist.mb_defrost_active */ "Odtávání / restart",
+  /* hist.mb_defrost_inactive */ "Normální / klid",
+  /* hist.mb_defrost_aria */ (l, d) => `${l} — časová osa odtávání/restartu HomeHub. ${d}. Jednotlivé vzorky lze přečíst klávesami se šipkami.`,
+  /* hist.pump_total */ (d) => `Čerpadlo · ${d}`,
+  /* hist.pump_none */ "V zaznamenaném období nebyl pozorován provoz oběhového čerpadla.",
+  /* hist.pump_active */ "Čerpadlo v chodu",
+  /* hist.pump_inactive */ "Čerpadlo vypnuté",
+  /* hist.pump_aria */ (l, d) => `${l} — časová osa oběhového čerpadla HomeHub. ${d}. Jednotlivé vzorky lze přečíst klávesami se šipkami.`,
   /* toast.saved */ "Uloženo",
   /* toast.no_changes */ "Žádné změny",
   /* toast.reboot */ "Restartuji — znovu se připojuji…",
@@ -1053,6 +1074,8 @@ HOMEHUB_LABEL_I18N.cs = homeHubValues([
   "Nastavení chlazení hlavní zóny", // 7
   "Tichý režim", // 9
   "Nastavení dohřevu TUV", // 10
+  "Dohřev TUV povolen", // 12
+  "Booster režim TUV zapnut", // 13
   "Diagnostický stav jednotky", // 21
   "Kód chyby jednotky", // 22
   "Podkód chyby jednotky", // 23
@@ -1060,6 +1083,8 @@ HOMEHUB_LABEL_I18N.cs = homeHubValues([
   "Kompresor aktivní", // 31
   "Těleso zásobníku aktivní", // 32
   "Dezinfekce zásobníku aktivní", // 33
+  "Odtávání nebo restart", // 35
+  "Teplý start", // 36
   "Poloha trojcestného ventilu", // 37
   "Aktuální režim vytápění/chlazení", // 38
   "Teplota výstupu PHE", // 40
@@ -1074,6 +1099,7 @@ HOMEHUB_LABEL_I18N.cs = homeHubValues([
   "Provoz TUV", // 52
   "Provoz vytápění/chlazení domu", // 53
   "Korekce výstupu hlavní topné zóny", // 54
+  "Korekce výstupu hlavní chladicí zóny", // 55
   "Režim Smart Grid", // 56
   "Limit výkonu akumulace", // 57
   "Celkový limit výkonu", // 58
@@ -1103,108 +1129,113 @@ DESCRIPTION_I18N.cs = descriptionValues([
   ["Bit požadavku pokojového termostatu hlavní zóny pro chlazení či vytápění."], // 20
   ["Čtyři syrové bity limitu zůstávají zvlášť; jejich kódování není ověřeno."], // 21
   ["Bit povelu/stavu ohřevu PHE. Katalog neurčuje, zda jde o povel či zpětnou vazbu."], // 22
-  ["Dohřev vrací nádrž na nastavenou teplotu po poklesu pod spínací mez."], // 23
-  ["Aktivní plánovaná předvolba nádrže: Storage comfort používá vyšší cíl, Storage eco nižší."], // 24
-  ["V hybridu regulátor žádá kotel o TUV."], // 25
-  ["Přepínací ventil vede vodu do zásobníku TUV nebo domu."], // 26
-  ["Výstup 2WV zůstává ZAP./VYP.; VYP. nedokazuje chlazení ani polohu ventilu."], // 27
-  ["Otevření směšovacího ventilu druhé zóny."], // 28
-  ["Cílová výstupní teplota pro zvolený režim vytápění či chlazení."], // 29
-  ["Smíšená výstupní teplota za ventilem druhé topné zóny, obvykle chladnější."], // 30
-  ["R2T měří vodu za BUH; umístění závisí na hydraulice, ne na otopných tělesech."], // 31
-  ["R1T měří vodu z PHE před BUH; režim, R4T a průtok určují význam i odhad výkonu."], // 32
-  ["R4T je společná vratka do PHE; R1T−R4T je ΔT PHE, ne přímo otopných těles."], // 33
-  ["Rychlost oběhu vody ve společném okruhu vytápění/chlazení a TUV."], // 34
-  ["Tlak vody; rozsah závisí na modelu, při ≤1,0 bar použijte přesný návod."], // 35
-  ["Povel rychlosti oběhového čerpadla s obrácenou stupnicí: 0 = plná rychlost, 100 = stojí."], // 36
-  ["Běh oběhového čerpadla nedokazuje přenos tepla; potvrďte jej průtokem."], // 37
-  ["Stav čerpadla nakonfigurovaného solárního termického okruhu."], // 38
-  ["Hlášená rychlost čerpadla pojmenovaného profilem."], // 39
-  ["Flow switch X10A hlásí jen pohyb; neměří průtok ani splnění minima modelu."], // 40
-  ["Aktuální režim vodní strany: zastaveno, vytápění, chlazení, TUV nebo kombinace."], // 41
-  ["Smart Grid hlásí čtyřstavový energetický povel, ne režim vytápění/chlazení."], // 42
-  ["Živý režim domu je vytápění/chlazení bez automatiky a sám nedokazuje běh kompresoru."], // 43
-  ["Nastavená volba HomeHub Auto/vytápění/chlazení z registru 3."], // 44
-  ["Stav venkovní jednotky: zastaveno, vytápění nebo chlazení; sám nedokazuje přenos tepla."], // 45
-  ["Odmrazování je v chladu a vlhku normální; samotný bit bez vlhkosti neurčuje četnost."], // 46
-  ["Třída aktivní poruchy: normální stav, chyba, varování nebo upozornění."], // 47
-  ["Význam právě hlášeného kódu poruchy."], // 48
-  ["Nouzový provoz po poruše tepelného čerpadla."], // 49
-  ["Poplachové relé jednotky, sepnuté při poruše pro připojený externí alarm nebo dohled."], // 50
-  ["Cílová pokojová teplota hlavní zóny při vytápění či chlazení."], // 51
-  ["„Thermo ON“ je vnitřní požadavek, ne určení zátěže ani důkaz běhu kompresoru."], // 52
-  ["Stav výstupní svorky „Space H Operation“."], // 53
-  ["Běžný provoz domu není jen vytápění ani termostat; skutečnost ukazuje I/U a pohony."], // 54
-  ["Nastavená cílová pokojová teplota zóny řízené vlastním pokojovým čidlem jednotky."], // 55
-  ["Pokojová teplota měřená vestavěným nebo kabelovým čidlem jednotky."], // 56
-  ["Ochrana výtlaku: Drop=ON/OFF, Retry=0…7; jen růst v souvislých srovnatelných vzorcích dokládá událost, ne absolutní hodnota."], // 57
-  ["Ochrana proudu invertoru: Drop=ON/OFF, Retry=0…7; jen růst v souvislých srovnatelných vzorcích dokládá událost, ne absolutní hodnota."], // 58
-  ["Ochrana vysokého tlaku: Drop=ON/OFF, Retry=0…7; jen růst v souvislých srovnatelných vzorcích dokládá událost, ne absolutní hodnota."], // 59
-  ["Ochrana nízkého tlaku: Drop=ON/OFF, Retry=0…7; jen růst v souvislých srovnatelných vzorcích dokládá událost, ne absolutní hodnota."], // 60
-  ["Ochrana teploty chladiče invertoru: Drop=ON/OFF, Retry=0…7; jen růst v souvislých srovnatelných vzorcích dokládá událost, ne absolutní hodnota."], // 61
-  ["Vnitřní souhrnný příznak omezení mimo pět pojmenovaných ochran."], // 62
-  ["Teplota vody na vstupu či výstupu PHE mezi chladivem a vodním okruhem."], // 63
-  ["Teplota venkovního výměníku; pod 0 °C bez vlhkosti sama nedokazuje námrazu."], // 64
-  ["Venkovní teplota měřená u jednotky pro ekvitermní řízení a provozní rozhodnutí."], // 65
-  ["Horký plyn za kompresorem; závisí na tlaku, otáčkách, režimu a zátěži. Jeden údaj či rozsah jiné řady nedokazuje závadu ani nedostatek chladiva."], // 66
-  ["Teplota chladného nízkotlakého chladiva vracejícího se do kompresoru."], // 67
-  ["Teplota chladiva v kapalinovém potrubí mezi výměníky."], // 68
-  ["Teplota chladiva u vstupu či výstupu výparníku, který odebírá teplo."], // 69
-  ["Teplota vstřikovacího potrubí chladiva pro řízení vstřiku a ochranu okruhu."], // 70
-  ["Teplota dvoufázové směsi chladiva; vnitřní regulační vstup, ne uživatelský cíl."], // 71
-  ["Čidlo odmrazování venkovního výměníku; poloha i řízení závisí na modelu. Jeden bod nedokazuje led na celé ploše ani konec odmrazení."], // 72
-  ["Sytostní teplota vypočtená z tlaku pro nastavené chladivo; není z čidla ani tlakem v bar."], // 73
-  ["Vysoký/nízký tlak: hodnoťte stabilní trend stejného režimu/modelu; rozběh, návrat oleje a odmrazení jej mění. Obecný rozsah není."], // 74
-  ["Otáčky invertorového kompresoru za sekundu, hlavní regulační veličina výkonu."], // 75
-  ["Povel EEV v krocích bez mechanické zpětné vazby; není to % ani průtok. Sám nedokazuje pohyb, zadření či nedostatek chladiva."], // 76
-  ["Teplota výkonové elektroniky motoru venkovního ventilátoru."], // 77
-  ["Rychlost venkovního ventilátoru jako stupeň nebo ot/min."], // 78
-  ["Vnitřní cíl dle modelu/režimu; porovnejte s odpovídající saturační teplotou z tlaku. Rozdíl neurčuje příčinu ani náplň."], // 79
-  ["Vnitřní cíl teploty výtlaku/portu kompresoru pro ochrannou logiku."], // 80
-  ["Cílové ΔT závisí na modelu a režimu; může být 8 či 10 K, obecné pravidlo 5 K neplatí."], // 81
-  ["Chladivo jednotky, např. R32/R410A, určující tlakově-teplotní křivku sytosti."], // 82
-  ["Teplota u portu kompresoru pro vnitřní ochranný dohled."], // 83
-  ["Tlak v chladivovém okruhu hlášený venkovní jednotkou."], // 84
-  ["Jen úplná sada CT × 230 V dává nekalibrovaný odhad; zapojení, napětí a účiník výsledek omezují."], // 85
-  ["Proud invertoru kompresoru jako přibližná míra jeho zatížení."], // 86
-  ["Teplota chladiče invertoru/výkonové elektroniky venkovní jednotky."], // 87
-  ["Aktivní stupně elektrického BUH jako výkonový stupeň."], // 88
-  ["Stupeň odporového BUH přidávající teplo přímo do vody."], // 89
-  ["HomeHub 32: stav BSH, ne výkon; registr 51 je zvláštní příkon „tepelného čerpadla“, ne výkon BSH, a jeho rozsah není potvrzen."], // 90
-  ["BSH může topit bez kompresoru a čerpadla; X10A hlásí jen ZAP./VYP., ne výkon."], // 91
-  ["Stav tepelného ochranného řetězce elektrického tělesa."], // 92
-  ["Ochrana potrubí závisí na modelu a napájení; při výpadku ji nelze zaručit."], // 93
-  ["Příznak mrazu X10A není veřejně přiřazen jednoznačně ochraně místnosti či potrubí."], // 94
-  ["Hodnota zemního solankového okruhu geotermální jednotky nebo jeho čerpadla."], // 95
-  ["Zvolený zdroj hybridu: tepelné čerpadlo, kombinace nebo kotel."], // 96
-  ["Cílová výstupní teplota hybridního vytápění, nikoli měřená voda."], // 97
-  ["Zda je bivalentní provoz druhého zdroje aktivní či povolený."], // 98
-  ["Aktuální požadavek regulátoru na kotel v bivalentním/hybridním systému."], // 99
-  ["Cílová teplota vody požadovaná pro kotel, ne měřená teplota."], // 100
-  ["BE_COP porovnává hybridní zdroje; není měřený COP a škála X10A není popsána."], // 101
-  ["Externí tarif, Smart Grid či solar může omezit nebo žádat teplo; akci určuje nastavení."], // 102
-  ["Jmenovitý výkon/velikostní třída vnitřní či venkovní jednotky."], // 103
-  ["Tichý režim snižuje hluk venkovní jednotky a může snížit dostupný výkon."], // 104
-  ["Aktuální diagnostický stav HomeHub: bez chyby, porucha nebo varování."], // 105
-  ["Význam právě hlášeného kódu poruchy."], // 106
-  ["Číselný podkód upřesňující sousední diagnostický kód Daikin."], // 107
-  ["HomeHub hlásí jen běh kompresoru, ne otáčky ani výkon; význam určuje okruh a průtok."], // 108
-  ["Provoz TUV: v provozu = ZAP., klid/bufrování = VYP.; příznak neuvádí důvod."], // 109
-  ["Provoz domu: v provozu = ZAP., klid/bufrování = VYP.; režim určí vytápění/chlazení."], // 110
-  ["Teplota vody z PHE před BUH."], // 111
-  ["Výstupní teplota vody za BUH."], // 112
-  ["Teplota vody v zásobníku TUV."], // 113
-  ["Teplota chladiva v kapalinovém potrubí mezi venkovní jednotkou a vnitřním výměníkem."], // 114
-  ["Pokojová teplota hlavní zóny z dálkového ovladače."], // 115
-  ["Elektrický příkon systému hlášený HomeHub; X10A poskytuje jen odhad z fázových proudů."], // 116
-  ["Cílová výstupní teplota hlavní topné zóny čtená z HomeHub; firmware ji nemění."], // 117
-  ["Cílová výstupní teplota hlavní chladicí zóny čtená z HomeHub; firmware ji nemění."], // 118
-  ["Zda je prostorový okruh vůbec POVOLEN — přepínač, ne aktuální aktivita."], // 119
-  ["Tichý provoz snižuje hluk a může snížit dostupný výkon."], // 120
-  ["Cíl dohřevu TUV není spínací teplota; start závisí i na hysterezi a plánu."], // 121
-  ["Čtená korekce cíle vytápění −10…+10 K; nenulová hodnota nedokazuje aktivní provoz."], // 122
-  ["Limit Smart Grid „doporučené zapnutí“; platí nižší z něj a obecného limitu, nejde o aktuální příkon."], // 123
-  ["Obecný limit HomeHub i při volném provozu; je to nastavený strop, ne měřený příkon."], // 124
+  ["Povolení automatického dohřevu TUV v registru 12; ON = povoleno, OFF = zakázáno, nedokazuje aktivní ohřev."], // 23
+  ["Požadavek rychlého ohřevu TUV (booster) v registru 13; ON = požadováno či aktivní, OFF = běžný provoz."], // 24
+  ["Dohřev vrací nádrž na nastavenou teplotu po poklesu pod spínací mez."], // 25
+  ["Aktivní plánovaná předvolba nádrže: Storage comfort používá vyšší cíl, Storage eco nižší."], // 26
+  ["V hybridu regulátor žádá kotel o TUV."], // 27
+  ["Přepínací ventil vede vodu do zásobníku TUV nebo domu."], // 28
+  ["Výstup 2WV zůstává ZAP./VYP.; VYP. nedokazuje chlazení ani polohu ventilu."], // 29
+  ["Otevření směšovacího ventilu druhé zóny."], // 30
+  ["Cílová výstupní teplota pro zvolený režim vytápění či chlazení."], // 31
+  ["Smíšená výstupní teplota za ventilem druhé topné zóny, obvykle chladnější."], // 32
+  ["R2T měří vodu za BUH; umístění závisí na hydraulice, ne na otopných tělesech."], // 33
+  ["R1T měří vodu z PHE před BUH; režim, R4T a průtok určují význam i odhad výkonu."], // 34
+  ["R4T je společná vratka do PHE; R1T−R4T je ΔT PHE, ne přímo otopných těles."], // 35
+  ["Rychlost oběhu vody ve společném okruhu vytápění/chlazení a TUV."], // 36
+  ["Tlak vody; rozsah závisí na modelu, při ≤1,0 bar použijte přesný návod."], // 37
+  ["Povel rychlosti oběhového čerpadla s obrácenou stupnicí: 0 = plná rychlost, 100 = stojí."], // 38
+  ["Běh oběhového čerpadla nedokazuje přenos tepla; potvrďte jej průtokem."], // 39
+  ["Stav čerpadla nakonfigurovaného solárního termického okruhu."], // 40
+  ["Hlášená rychlost čerpadla pojmenovaného profilem."], // 41
+  ["Flow switch X10A hlásí jen pohyb; neměří průtok ani splnění minima modelu."], // 42
+  ["Aktuální režim vodní strany: zastaveno, vytápění, chlazení, TUV nebo kombinace."], // 43
+  ["Smart Grid hlásí čtyřstavový energetický povel, ne režim vytápění/chlazení."], // 44
+  ["Živý režim domu je vytápění/chlazení bez automatiky a sám nedokazuje běh kompresoru."], // 45
+  ["Nastavená volba HomeHub Auto/vytápění/chlazení z registru 3."], // 46
+  ["Stav venkovní jednotky: zastaveno, vytápění nebo chlazení; sám nedokazuje přenos tepla."], // 47
+  ["Sdílený příznak odtávání a přípravy restartu kompresoru v registru 35; OFF = běžný chod, ON = odtávání nebo příprava restartu."], // 48
+  ["Příznak teplého startu v registru 36; OFF = ustálený chod, ON = krátký předehřev výměníku."], // 49
+  ["Odmrazování je v chladu a vlhku normální; samotný bit bez vlhkosti neurčuje četnost."], // 50
+  ["Třída aktivní poruchy: normální stav, chyba, varování nebo upozornění."], // 51
+  ["Význam právě hlášeného kódu poruchy."], // 52
+  ["Nouzový provoz po poruše tepelného čerpadla."], // 53
+  ["Poplachové relé jednotky, sepnuté při poruše pro připojený externí alarm nebo dohled."], // 54
+  ["Cílová pokojová teplota hlavní zóny při vytápění či chlazení."], // 55
+  ["„Thermo ON“ je vnitřní požadavek, ne určení zátěže ani důkaz běhu kompresoru."], // 56
+  ["Stav výstupní svorky „Space H Operation“."], // 57
+  ["Běžný provoz domu není jen vytápění ani termostat; skutečnost ukazuje I/U a pohony."], // 58
+  ["Nastavená cílová pokojová teplota zóny řízené vlastním pokojovým čidlem jednotky."], // 59
+  ["Pokojová teplota měřená vestavěným nebo kabelovým čidlem jednotky."], // 60
+  ["Ochrana výtlaku: Drop=ON/OFF, Retry=0…7; jen růst v souvislých srovnatelných vzorcích dokládá událost, ne absolutní hodnota."], // 61
+  ["Ochrana proudu invertoru: Drop=ON/OFF, Retry=0…7; jen růst v souvislých srovnatelných vzorcích dokládá událost, ne absolutní hodnota."], // 62
+  ["Ochrana vysokého tlaku: Drop=ON/OFF, Retry=0…7; jen růst v souvislých srovnatelných vzorcích dokládá událost, ne absolutní hodnota."], // 63
+  ["Ochrana nízkého tlaku: Drop=ON/OFF, Retry=0…7; jen růst v souvislých srovnatelných vzorcích dokládá událost, ne absolutní hodnota."], // 64
+  ["Ochrana teploty chladiče invertoru: Drop=ON/OFF, Retry=0…7; jen růst v souvislých srovnatelných vzorcích dokládá událost, ne absolutní hodnota."], // 65
+  ["Vnitřní souhrnný příznak omezení mimo pět pojmenovaných ochran."], // 66
+  ["Teplota vody na vstupu či výstupu PHE mezi chladivem a vodním okruhem."], // 67
+  ["Teplota venkovního výměníku; pod 0 °C bez vlhkosti sama nedokazuje námrazu."], // 68
+  ["Venkovní teplota měřená u jednotky pro ekvitermní řízení a provozní rozhodnutí."], // 69
+  ["Horký plyn za kompresorem; závisí na tlaku, otáčkách, režimu a zátěži. Jeden údaj či rozsah jiné řady nedokazuje závadu ani nedostatek chladiva."], // 70
+  ["Teplota chladného nízkotlakého chladiva vracejícího se do kompresoru."], // 71
+  ["Teplota chladiva v kapalinovém potrubí mezi výměníky."], // 72
+  ["Teplota chladiva u vstupu či výstupu výparníku, který odebírá teplo."], // 73
+  ["Teplota vstřikovacího potrubí chladiva pro řízení vstřiku a ochranu okruhu."], // 74
+  ["Teplota dvoufázové směsi chladiva; vnitřní regulační vstup, ne uživatelský cíl."], // 75
+  ["Čidlo odmrazování venkovního výměníku; poloha i řízení závisí na modelu. Jeden bod nedokazuje led na celé ploše ani konec odmrazení."], // 76
+  ["Sytostní teplota vypočtená z tlaku pro nastavené chladivo; není z čidla ani tlakem v bar."], // 77
+  ["Vysoký/nízký tlak: hodnoťte stabilní trend stejného režimu/modelu; rozběh, návrat oleje a odmrazení jej mění. Obecný rozsah není."], // 78
+  ["Otáčky invertorového kompresoru za sekundu, hlavní regulační veličina výkonu."], // 79
+  ["Povel EEV v krocích bez mechanické zpětné vazby; není to % ani průtok. Sám nedokazuje pohyb, zadření či nedostatek chladiva."], // 80
+  ["Teplota výkonové elektroniky motoru venkovního ventilátoru."], // 81
+  ["Rychlost venkovního ventilátoru jako stupeň nebo ot/min."], // 82
+  ["Vnitřní cíl dle modelu/režimu; porovnejte s odpovídající saturační teplotou z tlaku. Rozdíl neurčuje příčinu ani náplň."], // 83
+  ["Vnitřní cíl teploty výtlaku/portu kompresoru pro ochrannou logiku."], // 84
+  ["Cílové ΔT závisí na modelu a režimu; může být 8 či 10 K, obecné pravidlo 5 K neplatí."], // 85
+  ["Chladivo jednotky, např. R32/R410A, určující tlakově-teplotní křivku sytosti."], // 86
+  ["Teplota u portu kompresoru pro vnitřní ochranný dohled."], // 87
+  ["Tlak v chladivovém okruhu hlášený venkovní jednotkou."], // 88
+  ["Jen úplná sada CT × 230 V dává nekalibrovaný odhad; zapojení, napětí a účiník výsledek omezují."], // 89
+  ["Proud invertoru kompresoru jako přibližná míra jeho zatížení."], // 90
+  ["Teplota chladiče invertoru/výkonové elektroniky venkovní jednotky."], // 91
+  ["Aktivní stupně elektrického BUH jako výkonový stupeň."], // 92
+  ["Stupeň odporového BUH přidávající teplo přímo do vody."], // 93
+  ["HomeHub 32: stav BSH, ne výkon; registr 51 je zvláštní příkon „tepelného čerpadla“, ne výkon BSH, a jeho rozsah není potvrzen."], // 94
+  ["BSH může topit bez kompresoru a čerpadla; X10A hlásí jen ZAP./VYP., ne výkon."], // 95
+  ["Stav tepelného ochranného řetězce elektrického tělesa."], // 96
+  ["Ochrana potrubí závisí na modelu a napájení; při výpadku ji nelze zaručit."], // 97
+  ["Příznak mrazu X10A není veřejně přiřazen jednoznačně ochraně místnosti či potrubí."], // 98
+  ["Hodnota zemního solankového okruhu geotermální jednotky nebo jeho čerpadla."], // 99
+  ["Zvolený zdroj hybridu: tepelné čerpadlo, kombinace nebo kotel."], // 100
+  ["Cílová výstupní teplota hybridního vytápění, nikoli měřená voda."], // 101
+  ["Zda je bivalentní provoz druhého zdroje aktivní či povolený."], // 102
+  ["Aktuální požadavek regulátoru na kotel v bivalentním/hybridním systému."], // 103
+  ["Cílová teplota vody požadovaná pro kotel, ne měřená teplota."], // 104
+  ["BE_COP porovnává hybridní zdroje; není měřený COP a škála X10A není popsána."], // 105
+  ["Externí tarif, Smart Grid či solar může omezit nebo žádat teplo; akci určuje nastavení."], // 106
+  ["Jmenovitý výkon/velikostní třída vnitřní či venkovní jednotky."], // 107
+  ["Tichý režim snižuje hluk venkovní jednotky a může snížit dostupný výkon."], // 108
+  ["Aktuální diagnostický stav HomeHub: bez chyby, porucha nebo varování."], // 109
+  ["Význam právě hlášeného kódu poruchy."], // 110
+  ["Číselný podkód upřesňující sousední diagnostický kód Daikin."], // 111
+  ["HomeHub hlásí jen běh kompresoru, ne otáčky ani výkon; význam určuje okruh a průtok."], // 112
+  ["Provoz TUV: v provozu = ZAP., klid/bufrování = VYP.; příznak neuvádí důvod."], // 113
+  ["Provoz domu: v provozu = ZAP., klid/bufrování = VYP.; režim určí vytápění/chlazení."], // 114
+  ["Teplota vody z PHE před BUH."], // 115
+  ["Výstupní teplota vody za BUH."], // 116
+  ["Teplota vody v zásobníku TUV."], // 117
+  ["Teplota chladiva v kapalinovém potrubí mezi venkovní jednotkou a vnitřním výměníkem."], // 118
+  ["Pokojová teplota hlavní zóny z dálkového ovladače."], // 119
+  ["Elektrický příkon systému hlášený HomeHub; X10A poskytuje jen odhad z fázových proudů."], // 120
+  ["Cílová výstupní teplota hlavní topné zóny čtená z HomeHub; firmware ji nemění."], // 121
+  ["Cílová výstupní teplota hlavní chladicí zóny čtená z HomeHub; firmware ji nemění."], // 122
+  ["Zda je prostorový okruh vůbec POVOLEN — přepínač, ne aktuální aktivita."], // 123
+  ["Tichý provoz snižuje hluk a může snížit dostupný výkon."], // 124
+  ["Cíl dohřevu TUV není spínací teplota; start závisí i na hysterezi a plánu."], // 125
+  ["Čtená korekce cíle vytápění −10…+10 K; nenulová hodnota nedokazuje aktivní provoz."], // 126
+  ["Čtená korekce cíle chlazení −10…+10 K; nenulová hodnota nedokazuje aktivní chlazení."], // 127
+  ["Limit Smart Grid „doporučené zapnutí“; platí nižší z něj a obecného limitu, nejde o aktuální příkon."], // 128
+  ["Obecný limit HomeHub i při volném provozu; je to nastavený strop, ne měřený příkon."], // 129
 ]);
 
 MODEL_DESCRIPTION_I18N.cs = modelDescriptionValues([

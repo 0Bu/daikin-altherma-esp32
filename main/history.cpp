@@ -109,14 +109,15 @@ struct PersistedHistory {
     int32_t residual_us[logic::HISTORY_LIVENESS_RASTERS];
 
     Trend ring[TREND_COUNT];
-    // Eight paired HomeHub measurements plus BSH, 3-way-valve, Quiet, Smart-Grid and the standalone
-    // disinfection state get a second ring. Unlike X10A trends,
-    // their labels/units are fixed by def/homehub.hpp, so this side needs no per-ring string buffers.
+    // Eleven paired HomeHub measurements/states plus Smart-Grid and the five standalone Modbus
+    // timelines (disinfection, compressor, power, defrost/restart, and pump) get a second ring.
+    // Unlike X10A trends, their labels/units are fixed by def/homehub.hpp, so this side needs no
+    // per-ring string buffers.
     logic::TrendRing mb_ring[HOMEHUB_HISTORY_COUNT];
     logic::TrendRing env3_ring[ENV3_HISTORY_COUNT];
 };
-static_assert(HOMEHUB_HISTORY_COUNT * logic::HISTORY_BYTES_PER_TREND == 7488,
-              "thirteen HomeHub histories should cost exactly 7488 bytes");
+static_assert(HOMEHUB_HISTORY_COUNT * logic::HISTORY_BYTES_PER_TREND == 9792,
+              "seventeen HomeHub histories should cost exactly 9792 bytes");
 static_assert(ENV3_HISTORY_COUNT * logic::HISTORY_BYTES_PER_TREND == 1728,
               "three ENV III histories should cost exactly 1728 bytes");
 

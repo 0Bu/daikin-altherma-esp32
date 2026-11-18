@@ -3,15 +3,15 @@
 // rather than a repeat of one.
 //
 // The firmware keeps a fixed-cadence ring per trended X10A/board row and serves it from GET
-// /history; history.cpp also instantiates thirteen rings for the HomeHub histories in
-// homehub_map.hpp: eight structurally paired measurements, tank-heater, 3-way-valve and Quiet
-// states, Smart-Grid mode, plus the Modbus-only disinfection state. The web UI draws either or both
-// under a value row's explainer. Everything that decides *what* is trended and *whether an X10A
-// sample counts* lives here rather than at the call site, for the same reason lwt_select.hpp and
-// ou_stale.hpp do: the rule runs against the generated def/ profile tables, which are C++, so the
-// CI logic-test can gate it against the whole catalog instead of one profile someone happened to
-// own. Adding an X10A trend is one row in TRENDS below; a HomeHub history must instead be one of
-// HOMEHUB_HISTORIES, so labels cannot expand the contract.
+// /history; history.cpp also instantiates seventeen rings for the HomeHub histories in
+// homehub_map.hpp: eleven paired measurements/states, Smart-Grid mode, and the five standalone
+// Modbus timelines (disinfection, compressor, power, defrost/restart, and pump). The web UI draws
+// either or both under a value row's explainer. Everything that decides *what* is trended and
+// *whether an X10A sample counts* lives here rather than at the call site, for the same reason
+// lwt_select.hpp and ou_stale.hpp do: the rule runs against the generated def/ profile tables,
+// which are C++, so the CI logic-test can gate it against the whole catalog instead of one profile
+// someone happened to own. Adding an X10A trend is one row in TRENDS below; a HomeHub history must
+// instead be one of HOMEHUB_HISTORIES, so labels cannot expand the contract.
 //
 // ── Why a trend is a LOCATOR and not a label ────────────────────────────────────────────────────
 // A trend names the row it buffers by (register page, byte offset, unit) — never by its text. The

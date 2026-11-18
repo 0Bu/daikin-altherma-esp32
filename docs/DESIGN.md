@@ -290,8 +290,8 @@ when its numeric values do not change.
 
 A trended reading has a 24-hour sparkline in its inspector and value expander, with no separate
 history card or range picker. Numeric charts share a light area/darker line grammar; gaps break both,
-and a lone sample is a dot. X10A and Modbus use blue/petrol source legends. Sources share an
-axis and cursor when their time rasters align. Incompatible anchors use separate plots and cursors.
+and a lone sample is a dot. Paired X10A and Modbus series share one chart, axis and cursor, with
+blue/petrol source legends; Modbus starts hidden when X10A is available and toggles on demand.
 Room temperature can add the configured MQTT source as a third, separately coloured
 series with its name and MQTT attribution, including when no device room sensor is available.
 The device sensor and MQTT source keep distinct current values and explanations. Source replacement
@@ -300,17 +300,22 @@ never splices two instruments into one series.
 Computed readings chart their own units and expressions, not an input relabelled as output.
 Heat output retains signed balance across heating, cooling and defrost; the live pill also applies
 current mode and useful-direction gates. Measured no flow records zero. Moving water needs a running
-compressor witness; stopped-compressor pump overrun leaves a gap. A profile without compressor
-frequency offers no heat-output curve. Raw current-transformer phases and inverter current retain
-their own histories. A five-minute bucket can contain phase currents, inverter current and
-compressor speed from different sweeps. The electrical-input and COP inspectors omit derived
-history. Missing input samples leave a gap. A gap is held-over only when every missing input was
+compressor speed or HomeHub `compressor_state` (`modbus` source), so a profile without a
+compressor witness omits heat-output curves and stopped-compressor pump overrun leaves a gap. Raw
+current-transformer phases and inverter current retain their own histories, while HomeHub provides
+its own `modbus_power` (`51`, HomeHub electrical input), `compressor_state` (`31`, including
+contiguous active-phase count across the 24-hour five-minute raster), `modbus_defrost_state`
+(`35`), and `pump_state` (`30`) timelines without splicing into X10A series; a five-minute bucket
+can contain phase currents, inverter current and compressor speed from different sweeps. The X10A
+electrical-input and both COP inspectors omit derived history. Missing input samples leave a gap. A gap is held-over only when every missing input was
 held. A successful empty series shows “No readings recorded yet.” An unavailable series reports
 an error, with its source named if the other series can still draw. Chart titles name the stable
 concept.
 
-Categorical histories use source-labelled tracks, written states, distinct state colours and
-hatching only for missing samples. Valve and Quiet use latest sampled state; BSH, BUH stages and
+Categorical histories share one compact plot with distinct state colours, hatching only for missing
+samples, X10A active when available and paired Modbus toggleable in the legend; the bubble states
+the phase range and state while the selected instant appears on the lower time scale. Valve and
+Quiet use latest sampled state; BSH, BUH stages and
 Defrost retain any observed activation in their open five-minute bucket. Smart Grid retains all
 four states. Disinfection and X10A Tank preheat remain different facts. Totals are sampled raster
 time; events between sweeps may be missed.
@@ -349,7 +354,7 @@ one measurement per line. The moving bubble paints over the pinned bubble with a
 when they overlap. Both selected times
 share the time axis below the plot; the moving time likewise paints over the pinned time. Comparisons
 do not add height or move the plot or pinned time. Phase intervals remain in categorical readouts.
-Source legends toggle individual numeric series and retain at least one visible series. Choices
+Source legends toggle numeric or paired-state series by source and retain at least one visible series. Choices
 survive polling within the page and apply to both views of the same chart.
 Pointer-loss and a watchdog always release suspended rendering.
 

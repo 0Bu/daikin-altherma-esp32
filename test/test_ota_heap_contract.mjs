@@ -369,7 +369,8 @@ const namedHttpSymbols = {
   http_scan: ["h_scan", 768], wifi_scan: ["wifi_scan", 1920],
 };
 for (const [key, [name, maximum]] of Object.entries(namedHttpSymbols)) {
-  assert.equal(stackBudgets.symbols[key].pattern, `^daik::${name}\\(`);
+  assert.equal(stackBudgets.symbols[key].pattern,
+    key === "config_board" ? "^daik::set_board\\(httpd_req\\*\\)$" : `^daik::${name}\\(`);
   assert.equal(stackBudgets.symbols[key].max_bytes, maximum);
 }
 assert.equal(stackBudgets.symbols.config_transaction.pattern,

@@ -1,14 +1,14 @@
 #pragma once
 // The 24-hour trend rings. One fixed-cadence buffer per entry in logic/history.hpp's TRENDS, fed by
-// the X10A poll task, thirteen rings fed by the independent HomeHub task and three rings fed by ENV
-// III, and an independent MQTT room-temperature ring, read by GET /history. The HomeHub set is
-// eight paired measurements plus BSH,
-// 3-way-valve, Quiet and Smart-Grid state timelines, and the Modbus-only disinfection state.
+// the X10A poll task, seventeen rings fed by the independent HomeHub task and three rings fed by
+// ENV III, and an independent MQTT room-temperature ring, read by GET /history. The HomeHub set is
+// eight paired measurements plus BSH, 3-way-valve, Quiet and Smart-Grid state timelines, and the
+// Modbus-only disinfection, compressor, power, defrost/restart and circulation-pump series.
 //
 // The buffers are STATIC storage, never heap: on this board the binding limit is the largest
 // CONTIGUOUS free block, not free heap, and a static array does not compete for it. They occupy one
 // `.noinit` region so the LIVE arrays themselves survive a power-kept reset; there is no shadow
-// copy. Thirty-two X10A/board/state rings cost 18432 bytes, thirteen HomeHub rings another 7488
+// copy. Thirty-two X10A/board/state rings cost 18432 bytes, seventeen HomeHub rings another 9792
 // bytes and three ENV III rings 1728 bytes — see logic/history.hpp's HISTORY_BYTES_PER_TREND and
 // the ceiling asserts beside the arrays.
 //
@@ -50,7 +50,7 @@
 // change removes the old readings but preserves the boot-aligned raster as explicit gaps, so every
 // chart shows the same elapsed window without splicing devices. The UI draws the span actually
 // retained ("Aufzeichnung · 11 h" until the first full day).
-#include "hp_poll.hpp"          // CachedValue
+#include "hp_poll.hpp" // CachedValue
 #include "logic/history.hpp"
 
 #include <cstddef>
@@ -86,9 +86,9 @@ void history_record(const CachedValue* v, size_t n, uint32_t source_generation);
 void history_liveness_touch() noexcept;
 
 // Feed the BOARD's own trends (free heap, largest contiguous block). Called from the poll task at
-// the top of EVERY cycle, before it decides whether to detect or to sweep, because these describe the
-// ESP32 and not the heat pump: routing them through history_record() made them vanish on a board
-// whose X10A bus never answers (the profile stays "auto", so poll_once() — and with it
+// the top of EVERY cycle, before it decides whether to detect or to sweep, because these describe
+// the ESP32 and not the heat pump: routing them through history_record() made them vanish on a
+// board whose X10A bus never answers (the profile stays "auto", so poll_once() — and with it
 // history_record() — never runs), which is precisely the board someone is diagnosing. One producer,
 // no branch that can skip it.
 void history_record_board();
@@ -110,14 +110,15 @@ void   history_room_reset(uint32_t identity) noexcept;
 size_t history_room_snapshot(logic::HistorySample* out, size_t max, uint32_t expected_identity,
                              uint32_t* epoch = nullptr, logic::HistoryMeta* meta = nullptr);
 
-// Feed one HomeHub cycle. The paired measurements/states plus the explicit Smart-Grid and
-// disinfection timelines named in logic/homehub_map.hpp are buffered; other states and setpoints do
-// not acquire a chart. An empty cycle advances the source's time raster with gaps, so an outage does not
-// make the last Modbus point slide to "now".
+// Feed one HomeHub cycle. The eleven paired measurements/states, Smart-Grid, and the five
+// standalone Modbus timelines named in logic/homehub_map.hpp (seventeen rings total) are buffered;
+// other states and setpoints do not acquire a chart. An empty cycle advances the source's time
+// raster with gaps, so an outage does not make the last Modbus point slide to "now".
 void history_record_modbus(const CachedValue* v, size_t n, uint32_t identity_generation);
 
-// Snapshot the current HomeHub history identity before starting a poll. A configuration change bumps
-// it from the HTTP task; a cycle that began against the previous target is then refused at commit.
+// Snapshot the current HomeHub history identity before starting a poll. A configuration change
+// bumps it from the HTTP task; a cycle that began against the previous target is then refused at
+// commit.
 uint32_t history_modbus_generation();
 
 // Fold the independent ENV III observation into its three 24-hour rings. Called from the sensor's

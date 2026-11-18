@@ -289,6 +289,7 @@ function liveData() {
     // electric immersion heater and can be the only active component during an SG-Ready boost.
     bsh: stateOf(/^bsh$/i, 32),
     defrost: vOn(/defrost operation/i),
+    disinfection: mbBool(33),
     // "Space heating Operation ON/OFF" and HomeHub input 53 both mean normal SPACE heat/cool
     // OPERATION — not a thermostat demand and not heating-only. The controller can report it ON in
     // Cooling while Thermostat is OFF (live unit, 2026-08-01). Keep the exact row anchor, but name
@@ -476,8 +477,8 @@ function liveData() {
     // what used to blank the pump and the demand next to readings that were arriving.
     // sgSrc rides with sgMode: a preserved value whose provenance was blanked would let the
     // inspector name the wrong instrument, which is the one thing that pill's copy must get right.
-    const KEEP = new Set(["pumpOn", "compressorOn", "valveDhw", "spaceOp", "bsh", "quiet", "sgMode",
-                          "sgSrc", "mbFields"]);
+    const KEEP = new Set(["pumpOn", "compressorOn", "valveDhw", "spaceOp", "bsh", "quiet", "disinfection",
+                          "sgMode", "sgSrc", "mbFields"]);
     Object.keys(d).forEach((k) => { if (!KEEP.has(k)) d[k] = null; });
     d.ouHeldOver = false;         // nothing to hold over: the whole bus is silent, not one unit
     d.ouUnknown = false;
@@ -491,8 +492,18 @@ function liveData() {
     // current input-31 compressor witness and a supported mode and transfer direction.
     d.dt = (d.lwt != null && d.ret != null) ? d.lwt - d.ret : null;
     d.dtStale = waterMoving(d) !== true;
-    d.spaceMode = null;
-    d.thermalMode = d.valveDhw === true ? "heat" : null;
+    d.spaceMode = mbCurrentSpaceMode();
+    d.thermalMode = d.valveDhw === true ? "heat" : d.spaceMode;
+    const mbTankSet = mbRow(10);
+    if (mbTankSet) {
+      const n = parseFloat(mbTankSet.value);
+      if (Number.isFinite(n)) { d.tankSet = n; d.mbFields.add("tankSet"); }
+    }
+    const mbRoomSet = mbRoomSetpointRow(d);
+    if (mbRoomSet) {
+      const n = parseFloat(mbRoomSet.value);
+      if (Number.isFinite(n)) { d.roomSet = n; d.mbFields.add("roomSet"); }
+    }
     applyThermalPlan(d);
     // HomeHub register 51 reports electrical consumption. Its documented scope and available
     // witnesses cannot establish an electrical boundary compatible with the plate exchanger.
@@ -647,7 +658,8 @@ function renderLive() {
   // The paired pills come from MB_PAIRS; the four DERIVED ones have no register and so no
   // concept — they are marked because their inputs were (liveData adds them to mbFields).
   const MB_PILL = { ...Object.fromEntries(MB_PAIRS.map((p) => [p.fld, p.pill])),
-                    pel: "svPel", dt: "svDt", pth: "svPth", cop: "svCop" };
+                    pel: "svPel", dt: "svDt", pth: "svPth", cop: "svCop",
+                    tankSet: "svTankSet", roomSet: "svRoomSet" };
   Object.keys(MB_PILL).forEach((k) => {
     const el = $(MB_PILL[k]);
     if (el && el.closest("text")) el.closest("text").classList.toggle("sc-mb", mbf.has(k));
@@ -1227,7 +1239,8 @@ const INSPECT = {
     // Keep every member in the one table below the chart; neither the Modbus twin nor a sentence
     // repeating tank + setpoint belongs inside the explanatory prose above it.
     listAllValues: true,
-    rows: [/dhw tank temp/i, /dhw setpoint/i, /3.?way valve/i],
+    rows: [/dhw tank temp/i, { sel: /dhw setpoint/i, mbFallback: () => mbRow(10) }, /3.?way valve/i,
+           { mbOff: 33 }],
   },
   heat: {
     t: (d) => activeSpaceKind(d) === "cool"
@@ -1250,19 +1263,21 @@ const INSPECT = {
               de: `Wasser wird zum ${activeSpaceKind(d) === "cool" ? "Kühlkreis" : activeSpaceKind(d) === "heat" ? "Heizkreis" : "Raumkreis"} geführt. Der interne R1T misst ${degC(d.lwt)}; kein nachgeschalteter Fühler bestätigt die Flächentemperatur.` }
         : { en: "Current pump and flow readings do not establish circulation through the space branch.",
             de: "Die aktuellen Pumpen- und Durchflusswerte belegen keine Zirkulation durch den Raumzweig." },
-    rows: [ROOM_TEMP_RE, /^rt setpoint/i, { sel: /^space heating operation/i, cid: "space_op" }],
+    rows: [ROOM_TEMP_RE, { sel: /^rt setpoint/i, mbFallback: () => mbRoomSetpointRow() },
+           { sel: /^space heating operation/i, cid: "space_op" }],
   },
   // This catalog row is normal space heat/cool operation, not a heating demand. "Thermostat ON/OFF"
   // remains with the indoor-unit status byte; neither bit alone proves compressor operation.
   spaceh: {
     t: { en: "Space heating/cooling operation", de: "Raumheiz-/kühlbetrieb" },
     re: /^space heating operation/i, sample: "Space heating Operation ON/OFF",
-    rows: [/^space heating operation/i, ROOM_TEMP_RE, /^rt setpoint/i],
+    rows: [/^space heating operation/i, ROOM_TEMP_RE,
+           { sel: /^rt setpoint/i, mbFallback: () => mbRoomSetpointRow() }],
   },
   room: {
     t: { en: "Room temperature", de: "Raumtemperatur" },
     re: ROOM_TEMP_RE, sample: "Indoor Ambient Temp. (R1T)",
-    rows: [ROOM_TEMP_RE, /^rt setpoint/i],
+    rows: [ROOM_TEMP_RE, { sel: /^rt setpoint/i, mbFallback: () => mbRoomSetpointRow() }],
   },
   pump: {
     t: { en: "Circulation pump", de: "Umwälzpumpe" },
@@ -1387,7 +1402,8 @@ const INSPECT = {
             de: "Der Speicherweg ist gewählt, die aktuellen Pumpen- und Durchflusswerte belegen jedoch keine aktive Speicherladung." }
       : { en: "The tank route is not selected; the controller reports the space route instead.",
           de: "Der Speicherweg ist nicht gewählt; die Regelung meldet stattdessen den Raumweg." },
-    rows: [/dhw tank temp/i, /dhw setpoint/i, /3.?way valve/i],
+    rows: [/dhw tank temp/i, { sel: /dhw setpoint/i, mbFallback: () => mbRow(10) }, /3.?way valve/i,
+           { mbOff: 33 }],
   },
   wheat: {
     // Titled for the CIRCUIT, not one leg of it: this target is both the flow down from the valve
@@ -1502,6 +1518,7 @@ const inspCurRow = (e) => {
 // decides whether the body repaints — a body that renders something the signature cannot see stops
 // updating and shows a value from whenever something else last moved, looking perfectly current.
 function inspMember(sel) {
+  if (sel && sel.mbOff != null) return { x10a: null, mb: mbRow(sel.mbOff) };
   // A selector may carry an explicit Modbus concept ({sel, cid}) so its HomeHub twin can stand in even
   // on a board with NO X10A row to source the concept from — X10A absent, HomeHub live. Without it the
   // space-operation evidence (the only reading a HomeHub-only plant can offer here) vanished with the
@@ -1514,8 +1531,11 @@ function inspMember(sel) {
   // X10A down: the retained row is not a reading any more. The gateway stands in where it carries
   // the same quantity (mbFallbackFor — the helper whose whole job is that substitution) and the
   // member simply disappears where it does not, rather than printing a stale number under its label.
-  // With no X10A row at all, the explicit concept (cid) is what still finds the gateway's twin.
-  if (x10aDown()) return { x10a: null, mb: r ? mbFallbackFor(r.concept) : (cid ? mbFallbackFor(cid) : null) };
+  // With no X10A row at all, the explicit concept (cid) or explicit fallback resolves the gateway row.
+  if (x10aDown()) {
+    const fbRow = r ? mbFallbackFor(r.concept) : (cid ? mbFallbackFor(cid) : null);
+    return { x10a: null, mb: fbRow || (spec && spec.mbFallback ? spec.mbFallback() : null) };
+  }
   return { x10a: r, mb: mbTwin(r) };
 }
 
@@ -1727,17 +1747,29 @@ function renderInspectHist(e, row, mode = "") {
   }
   // Plain pills can chart their source row. Computed or grouped pills use the explicit series
   // named by `trend` so the chart represents the same quantity as the inspector.
+  const MB_INSPECT_TREND = Object.freeze({
+    comp: "compressor_state",
+    pump: "pump_state",
+    defrost: "modbus_defrost_state",
+  });
+  const down = typeof histX10aDown === "function" ? histX10aDown() : S.status?.hp?.connected === false;
   const pair = MB_PAIRS.find((p) => p.insp === S.insp);
   const pairedId = pair && hasModbusHist(pair.cid) ? pair.cid : "";
   const trendId = e && typeof e.trend === "function" ? e.trend(S.live) : e && e.trend;
   // Function-capable like `trend` above, and for the same reason: an entry whose SOURCE depends on
   // which instrument answered this second cannot state it as a constant (INSPECT.sgrequest).
-  const trendSource = (e && (typeof e.trendSource === "function" ? e.trendSource(S.live)
-                                                                 : e.trendSource)) || "";
+  let trendSource = (e && (typeof e.trendSource === "function" ? e.trendSource(S.live)
+                                                               : e.trendSource)) || "";
   const offered = (id) => trendSource === "modbus" ? hasModbusHist(id)
     : trendSource === "x10a" ? hasHist(id) : hasHist(id) || hasModbusHist(id) || hasRoomHist(id);
   const explicitId = trendId && offered(trendId) ? trendId : "";
-  const id = explicitId || (row ? histIdFor(row.label) : pairedId || (e?.sample ? histIdFor(e.sample) : ""))
+  const mbFallbackId = S.insp === "pel" ? (S.live?.pelSrc === "MB" ? "modbus_power" : "")
+    : S.insp === "ou" ? (down ? "compressor_state" : "")
+    : (!explicitId || down ? (MB_INSPECT_TREND[S.insp] || "") : "");
+  const useMbFallback = !!mbFallbackId && hasModbusHist(mbFallbackId);
+  if (useMbFallback) trendSource = "modbus";
+  const id = (useMbFallback ? mbFallbackId : explicitId)
+    || (row ? histIdFor(row.label) : pairedId || (e?.sample ? histIdFor(e.sample) : ""))
     || (S.insp === "room" && hasRoomHist("room_temp") ? "room_temp" : "");
   if (id && mayFetch) {
     if (trendSource) request(id, trendSource);
@@ -1758,8 +1790,7 @@ function renderInspectHist(e, row, mode = "") {
   // still leave a tooltip/crosshair DOM completely alone.
   const state = id && typeof STATE_HIST !== "undefined" && STATE_HIST[id]
     ? historyView(id, trendSource) : null;
-  const liveGen = state?.separate
-    ? state.separate.map(source => historyView(id, source)?.gen).join("/") : state?.gen;
+  const liveGen = state?.gen || "";
   const auxGen = id === "dhw_tank" ? tankAuxRevision(tankAuxHistories()) : "";
   const sourceDefault = h && mh && !S.histHidden?.has(id) ? histX10aDown() : "";
   // histHtml carries localised axis/readout copy. A language switch must therefore invalidate the
@@ -1773,8 +1804,12 @@ function renderInspectHist(e, row, mode = "") {
   el.hidden = !id;
   // Label the chart with the stable quantity, independent of the current operating state.
   const mb = pairedId ? mbByConcept(pairedId) : null;
+  const mbHist = useMbFallback ? (S._modbus || []).find((m) => m && m.history === id) : null;
   const chartName = DERIVED[id] && e && e.aria ? inspFieldText(e, "aria", null) : null;
   replaceHistoryHtml(el, !id ? ""
+    : mbHist ? histHtml(id, typeof displayUnit === "function" ? displayUnit(mbHist) : (mbHist.unit || ""),
+                        typeof displayHomeHubLabel === "function" ? displayHomeHubLabel(mbHist) : (mbHist.label || id),
+                        trendSource)
     : row ? histHtml(id, displayUnit(row), chartName || displayReadingLabel(row.label, row), trendSource)
     : pairedId ? histHtml(id, mb ? displayUnit(mb) : "", mb ? displayHomeHubLabel(mb) : inspTitleText(e, null), trendSource)
                : histHtml(id, DERIVED[id]?.unit || "",
@@ -1900,7 +1935,7 @@ function renderInspect(mode = "") {
   // void when there is no reading. Never the headline either: a sentence in a 19px number slot
   // reads as a broken value.
   const sentence = inspNowText(e, d);
-  const desc = e.sample ? descFor(e.sample, row || fb) : null;
+  const desc = fb ? descFor(fb.label, fb) : (e.sample ? descFor(e.sample, row) : null);
   const ownWhat = inspFieldText(e, "what", d);
   // A native replacement must retain its source-specific interpretation limits in every locale.
   // Generic inspector copy describes the X10A quantity and cannot override the defining register.

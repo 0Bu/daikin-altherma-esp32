@@ -1,8 +1,8 @@
 // ── 24-hour trend (a historied value row's explainer carries a sparkline under the text) ──────
 // WHICH rows have a trend is the FIRMWARE's answer. /status.history.rows names X10A rings;
-// modbus_rows names the paired HomeHub measurements/states plus Smart-Grid and the standalone
-// disinfection timeline; env3_rows names temperature, humidity and pressure from the independent outdoor
-// sensor.
+// modbus_rows names the seventeen HomeHub rings (paired measurements/states, Smart-Grid, plus the
+// standalone disinfection, compressor, power, defrost/restart, and pump timelines); env3_rows names
+// temperature, humidity and pressure from the independent outdoor sensor.
 // The device keeps every source at one fixed cadence and reports the labels each source owns. The
 // browser never pattern-matches its own candidates: offering a trend the device isn't buffering
 // would be an empty chart by design.
@@ -53,7 +53,12 @@ function histIdFor(label) { const r = histFor(label); return r ? r.id : ""; }
 // a firmware that predates a trend simply reports fewer rows, so its card draws no chart at all
 // rather than an empty one.
 function hasDeviceHist(id) { return !!id && !!histSpec() && histSpec().rows.some((r) => r && r.id === id); }
-function hasModbusHist(id) { return !!id && modbusHistRows().some((r) => r && r.id === id); }
+function hasDeviceModbusHist(id) { return !!id && modbusHistRows().some((r) => r && r.id === id); }
+function hasModbusHist(id) {
+  const D = DERIVED[id];
+  return D ? (D.mbIns ? D.mbReady(Object.fromEntries(D.mbIns.map((k) => [k, hasDeviceModbusHist(k)]))) : false)
+           : hasDeviceModbusHist(id);
+}
 function hasEnv3Hist(id) { return !!id && env3HistRows().some((r) => r && r.id === id); }
 function hasRoomHist(id) { return !!id && roomHistRows().some((r) => r && r.id === id); }
 function hasHist(id) {
@@ -102,6 +107,10 @@ const DERIVED = {
     ready: (h) => h.leaving_water && h.return_water,
     fn: (s) => (s.leaving_water == null || s.return_water == null ? null
                                                                   : s.leaving_water - s.return_water),
+    mbIns: ["leaving_water", "return_water"],
+    mbReady: (h) => h.leaving_water && h.return_water,
+    mbFn: (s) => (s.leaving_water == null || s.return_water == null ? null
+                                                                    : s.leaving_water - s.return_water),
   },
   // Water ρ·cp ≈ 4.186 kJ/l·K, flow in l/min — d.pth's formula, and SIGNED for its reason: during a
   // defrost the unit pulls heat back out of the water and the curve must show that, not a floor.
@@ -116,6 +125,15 @@ const DERIVED = {
       if (!(s.flow > 0.5)) return 0;
       if (s.leaving_water == null || s.return_water == null || s.comp_rps == null) return null;
       if (!(s.comp_rps > 5)) return null;
+      return (s.flow / 60) * 4.186 * (s.leaving_water - s.return_water);
+    },
+    mbIns: ["flow", "leaving_water", "return_water", "compressor_state"],
+    mbReady: (h) => h.flow && h.leaving_water && h.return_water && h.compressor_state,
+    mbFn: (s) => {
+      if (s.flow == null) return null;
+      if (!(s.flow > 0.5)) return 0;
+      if (s.leaving_water == null || s.return_water == null || s.compressor_state == null) return null;
+      if (!(s.compressor_state > 0)) return null;
       return (s.flow / 60) * 4.186 * (s.leaving_water - s.return_water);
     },
   },
@@ -158,7 +176,13 @@ function histX10aAvailable(h) {
 const histX10aDown = () => typeof x10aDown === "function" ? x10aDown() : S.status?.hp?.connected === false;
 
 function histHiddenSet(h) {
-  if (S.histHidden?.has(h.id)) return S.histHidden.get(h.id);
+  if (S.histHidden?.has(h.id)) {
+    const saved = S.histHidden.get(h.id);
+    if (!STATE_HIST[h.id] || !histX10aAvailable(h) || !saved.has("x10a")) return saved;
+    const copy = new Set(saved);
+    copy.delete("x10a");
+    return copy;
+  }
   if (!h.series || h.series.length <= 1 || !h.series.some((s) => s.source === "modbus")) {
     return new Set();
   }
@@ -198,6 +222,7 @@ function histLegendHtml(h, s, cls) {
 }
 
 function histLegendLast(h, visible, s) {
+  if (STATE_HIST[h.id] && s.source === "x10a" && histX10aAvailable(h)) return true;
   if (h.forecast) return visible.length <= 1;
   const withSamples = visible.filter(q => q.v.some(v => v != null));
   if (withSamples.length === 0) return visible.length <= 1;
@@ -252,7 +277,7 @@ const histAwaiting = (key, epoch) => {
 function ensureHist(id, source = "x10a", mode = "open") {
   const epoch = syncHistSources();
   const key = histCacheKey(id, source);
-  const derived = source === "x10a" && DERIVED[id];
+  const derived = (source === "x10a" && !!DERIVED[id]) || (source === "modbus" && !!DERIVED[id]?.mbIns);
   const offered = source === "modbus" ? hasModbusHist(id)
     : source === "env3" ? hasEnv3Hist(id) : source === "room" ? hasRoomHist(id) : hasHist(id);
   if (!offered) return;
@@ -264,13 +289,15 @@ function ensureHist(id, source = "x10a", mode = "open") {
   if (derived) {
     if (mode === "refresh") {
       // Advance one raw input per poll. Assemble only when no input needs a transport.
-      for (const input of DERIVED[id].ins) {
-        if (!hasDeviceHist(input)) continue;
-        const started = ensureHist(input);
+      const ins = source === "modbus" ? DERIVED[id].mbIns : DERIVED[id].ins;
+      const hasInput = source === "modbus" ? hasDeviceModbusHist : hasDeviceHist;
+      for (const input of ins) {
+        if (!hasInput(input)) continue;
+        const started = ensureHist(input, source);
         if (started) return started;
       }
     }
-    return ensureDerived(id);
+    return ensureDerived(id, source);
   }
   return fetchHistory(id, source, key, epoch, c);
 }
@@ -521,45 +548,50 @@ function ensureHistPair(id, mode = "open") {
 // derived curve to 1 h or 8 h after one row appeared/reset later. `b0` makes padding exact rather
 // than a guess; wall time is the next choice, and newest-tail alignment remains only for legacy
 // responses without either anchor.
-async function ensureDerived(id) {
+async function ensureDerived(id, source = "x10a") {
   const epoch = syncHistSources();
   const D = DERIVED[id];
-  if (S.histBusy.has(id)) return S.histRequests.get(id)?.done;
-  if (histAwaiting(id, epoch)) return;
-  const previous = S.hist.get(id);
+  const isMb = source === "modbus";
+  const key = histCacheKey(id, source);
+  if (S.histBusy.has(key)) return S.histRequests.get(key)?.done;
+  if (histAwaiting(key, epoch)) return;
+  const previous = S.hist.get(key);
   const previousGen = previous?.gen || 0;
   const failed = () => previous && !previous.err && previous.v.some(v => v != null)
     ? { ...previous, at: Date.now(), refreshFailed: true }
     : { at: Date.now(), gen: previousGen, err: true, v: [] };
   let finish;
   const request = { epoch, done: new Promise((resolve) => { finish = resolve; }) };
-  (S.histRequests ||= new Map()).set(id, request);
-  S.histBusy.add(id);
+  (S.histRequests ||= new Map()).set(key, request);
+  S.histBusy.add(key);
   try {
-    const use = D.ins.filter(hasDeviceHist);
-    await Promise.all(use.map((k) => ensureHist(k)));
-    if (syncHistSources() !== epoch || S.histRequests.get(id) !== request) return;
+    const ins = isMb ? D.mbIns : D.ins;
+    const hasInput = isMb ? hasDeviceModbusHist : hasDeviceHist;
+    const fn = isMb ? D.mbFn : D.fn;
+    const use = ins.filter(hasInput);
+    await Promise.all(use.map((k) => ensureHist(k, source)));
+    if (syncHistSources() !== epoch || S.histRequests.get(key) !== request) return;
     // An input refused for its source identity is pending, not failed: wait with it rather than
     // caching "Trend unavailable." for up to one status period. Marking the derived id as awaiting
     // too keeps the finally-block render from re-entering this function at once.
-    if (use.some(k => histAwaiting(k, epoch))) {
-      (S.histAwait ||= new Map()).set(id, { epoch, at: Date.now() });
+    if (use.some(k => histAwaiting(histCacheKey(k, source), epoch))) {
+      (S.histAwait ||= new Map()).set(key, { epoch, at: Date.now() });
       return;
     }
     // Keep transport failures separate from gaps in a successfully fetched ring.
-    const rings = use.map(k => [k, S.hist.get(k)]);
+    const rings = use.map(k => [k, S.hist.get(histCacheKey(k, source))]);
     if (rings.some(([, h]) => !h || h.err || h.refreshFailed)) {
-      S.hist.set(id, failed());
+      S.hist.set(key, failed());
       return;
     }
-    const src = rings.filter(([, h]) => h.v.length).map(([key, h]) => [key, expireHistSamples(h)]);
-    const inputs = JSON.stringify([use, src.map(([key, h]) => [key, h.gen, h.expired || 0])]);
+    const src = rings.filter(([, h]) => h.v.length).map(([k, h]) => [k, expireHistSamples(h)]);
+    const inputs = JSON.stringify([use, src.map(([k, h]) => [k, h.gen, h.expired || 0])]);
     if (previous && previous.inputs === inputs) {
-      S.hist.set(id, { ...previous, at: Date.now(), refreshFailed: false });
+      S.hist.set(key, { ...previous, at: Date.now(), refreshFailed: false });
       return;
     }
     if (!src.length) {
-      S.hist.set(id, { at: Date.now(), gen: previousGen + 1, inputs, v: [] });
+      S.hist.set(key, { at: Date.now(), gen: previousGen + 1, inputs, v: [] });
       return;
     }
     const dt = src[0][1].dt || 300;
@@ -574,7 +606,7 @@ async function ensureDerived(id) {
       end = Math.max(...src.map(([, h]) => h.t0 + (h.v.length - 1) * dt));
     } else if (src.some(([, h]) => h.b0 != null || h.t0 != null)) {
       // A wall-clock correction between requests can shift timestamps by a full bucket.
-      S.hist.set(id, { at: Date.now(), gen: previousGen + 1, inputs, v: [] });
+      S.hist.set(key, { at: Date.now(), gen: previousGen + 1, inputs, v: [] });
       return;
     } else {
       end = Math.max(...src.map(([, h]) => h.v.length)) - 1;
@@ -595,7 +627,7 @@ async function ensureDerived(id) {
         s[k] = raw == null ? null : raw / 10;             // tenths on the wire, units in the formula
         if (raw == null) { missing++; if (j >= 0 && j < h.v.length && histHeld(h, j)) heldMissing++; }
       }
-      const out = D.fn(s);
+      const out = fn(s);
       v.push(out == null || !Number.isFinite(out) ? null : Math.round(out * 10));
       // A gap inherits its REASON, and only when EVERY missing input carries it: "the outdoor unit
       // was resting" is a statement that nothing failed, so one input that genuinely failed to
@@ -612,19 +644,19 @@ async function ensureDerived(id) {
       : mode === "bucket" && wall ? wall[1].t0 - (wall[1].b0 - start) * dt : null;
     const b0 = mode === "bucket" ? start : null;
     const receivedAt = Date.now();
-    S.hist.set(id, { at: receivedAt, receivedAt, receivedTick: historyBrowserTime(),
+    S.hist.set(key, { at: receivedAt, receivedAt, receivedTick: historyBrowserTime(),
                      receivedDeviceTime: historyDeviceTime(), gen, inputs, dt, unit: D.unit,
                      t0: typeof t0 === "number" ? t0 : null,
                      b0: Number.isInteger(b0) ? b0 : null,
                      held: heldRuns, v });
   } catch (e) {
-    if (syncHistSources() === epoch && S.histRequests.get(id) === request)
-      S.hist.set(id, failed());
+    if (syncHistSources() === epoch && S.histRequests.get(key) === request)
+      S.hist.set(key, failed());
   } finally {
     finish();
-    if (S.histRequests.get(id) === request) {
-      S.histRequests.delete(id);
-      S.histBusy.delete(id);
+    if (S.histRequests.get(key) === request) {
+      S.histRequests.delete(key);
+      S.histBusy.delete(key);
       renderApp();
     }
   }
@@ -720,29 +752,21 @@ function alignedHistoryView(id, raw) {
 
   const dt = raw[0].h.dt || 300;
   let start = 0, end = 0, mode = "tail";
-  // Warm-restored recorders book unobserved gaps independently before the current boot.
-  const sameRecorder = raw.length === 1 || env3ChartId(id);
-  if (raw.every((s) => Number.isInteger(s.h.b0) && (sameRecorder || s.h.b0 + (s.h.expired || 0) >= 0))) {
+  if (raw.every((s) => Number.isInteger(s.h.b0))) {
     mode = "bucket";
     start = Math.min(...raw.map((s) => s.h.b0 + (s.h.expired || 0)));
     end = Math.max(...raw.map((s) => s.h.b0 + s.h.v.length - 1));
-  } else if (raw.length === 1 && Number.isSafeInteger(raw[0].h.t0)) {
+  } else if (raw.every((s) => Number.isSafeInteger(s.h.t0) && (s.h.dt || 300) === dt)) {
     mode = "time";
-    start = Math.min(...raw.map((s) => s.h.t0));
+    start = Math.min(...raw.map((s) => s.h.t0 + (s.h.expired || 0) * dt));
     end = Math.max(...raw.map((s) => s.h.t0 + (s.h.v.length - 1) * dt));
-  } else if (raw.some(s => s.h.b0 != null || s.h.t0 != null)) {
-    // Independent ring tails do not establish simultaneous measurements.
-    const plotted = raw.filter(s => !s.h.refreshFailed || s.h.v.some(v => v != null));
-    const unavailable = supplied.filter(s => (s.h?.err || s.h?.refreshFailed) &&
-      !plotted.some(p => p.source === s.source));
-    return { id, v: [], series: [], separate: plotted.map(s => s.source), unavailable };
   } else {
-    end = Math.max(...raw.map((s) => s.h.v.length)) - 1;
+    end = Math.max(...raw.map((s) => s.h.v.length - (s.h.expired || 0))) - 1;
   }
   const step = mode === "time" ? dt : 1;
-  const span = (end - start) / step + 1;
+  const span = mode === "tail" ? end + 1 : Math.round((end - start) / step) + 1;
   const n = Math.min(span, HIST_MAX_SAMPLES);
-  start += (span - n) * step;
+  start = mode === "time" ? end - (n - 1) * dt : start + (span - n) * step;
   const toRuns = (flags) => {
     const out = [];
     for (let i = 0; i < flags.length; i++) {
@@ -755,7 +779,7 @@ function alignedHistoryView(id, raw) {
   };
   const series = raw.map((s) => {
     const off = mode === "bucket" ? s.h.b0 - start
-              : mode === "time" ? (s.h.t0 - start) / dt
+              : mode === "time" ? Math.round((s.h.t0 - start) / dt)
               : n - s.h.v.length;
     const v = Array(n).fill(null), heldFlags = Array(n).fill(false);
     for (let i = Math.max(0, -off); i < Math.min(s.h.v.length, n - off); i++) {
@@ -769,7 +793,7 @@ function alignedHistoryView(id, raw) {
                   series.find((s) => s.source === "env3") || series[0];
   const wall = raw.find((s) => historyWallLabelAllowed(s.h));
   // A relative overlay must never assign one instrument's wall clock to another.
-  const t0 = mode === "time" ? start
+  const t0 = mode === "time" ? (wall ? start : null)
            : mode === "bucket" && wall ? wall.h.t0 - (wall.h.b0 - start) * dt : null;
   const union = Array.from({ length: n }, (_, i) => {
     const found = series.find((s) => s.v[i] != null);
@@ -883,7 +907,6 @@ function historyView(id, source = "", forecast) {
     if (!offered.length) return null;
     const view = id === ENV3_COMBINED_ID ? alignedHistoryView(id, offered) : null;
     const weather = forecast === undefined ? weatherForecastView() : forecast;
-    if (view?.separate) return { ...view, separateForecast: weather };
     if (view?.v.some(v => v != null)) {
       if (weather) {
         const measuredEnd = view.t0 + (view.v.length - 1) * view.dt;
@@ -912,7 +935,6 @@ function historyView(id, source = "", forecast) {
     { source: "room", name: roomHistName(), h: hasRoomHist(id) ? S.hist.get(histCacheKey(id, "room")) : null },
   ].filter((s) => !source || s.source === source);
   let view = alignedHistoryView(id, offered);
-  if (view?.separate) return view;
   if (view) view.scope = source;
   if (view && id === "dhw_tank") view.tankAux = tankAuxHistories();
   if (!STATE_HIST[id]) return view;
@@ -1036,7 +1058,7 @@ const STATE_HIST = Object.freeze({
     aria: "hist.buh_aria",
     valueLabel: (v) => v === 0 ? "hist.buh_inactive"
       : v === 10 ? "hist.buh_step1" : v === 20 ? "hist.buh_step2" : "",
-    compactValueLabel: (v) => v === 0 ? "hist.state_off"
+    compactValueLabel: (v) => v === 0 ? "state.off"
       : v === 10 ? "hist.buh_step1" : v === 20 ? "hist.buh_step2" : "",
     levels: [
       { match: (v) => [0, 10, 20].includes(v) ? v === 0 : null,
@@ -1052,6 +1074,7 @@ const STATE_HIST = Object.freeze({
     primary: "x10a", total: "hist.valve_dhw_total", inactiveTotal: "hist.valve_space_total",
     run: "hist.state_phase_run", none: "hist.valve_none",
     active: "hist.valve_dhw", inactive: "hist.valve_space", aria: "hist.valve_aria",
+    compactValueLabel: (v) => v === 0 ? "hist.valve_space" : v === 10 ? "hist.valve_dhw" : "",
     levels: [
       { match: (v) => [0, 10].includes(v) ? v === 0 : null,
         cls: "valve-space", label: "hist.valve_space" },
@@ -1064,6 +1087,7 @@ const STATE_HIST = Object.freeze({
     primary: "x10a", total: "hist.circ_total", run: "hist.state_phase_run",
     none: "hist.circ_none", active: "hist.circ_on", inactive: "hist.circ_off",
     missing: "hist.circ_unavailable", gaps: "hist.circ_gaps", aria: "hist.circ_aria",
+    compactValueLabel: (v) => v === 0 ? "hist.circ_off" : v === 10 ? "hist.circ_on" : "",
     levels: [
       { match: (v) => [0, 10].includes(v) ? v === 0 : null,
         cls: "state-off", label: "hist.circ_off" },
@@ -1093,6 +1117,42 @@ const STATE_HIST = Object.freeze({
         cls: "state-off", label: "hist.flow_switch_off" },
       { match: (v) => [0, 10].includes(v) ? v === 10 : null,
         cls: "flow-switch-on", label: "hist.flow_switch_on" },
+    ],
+  },
+  compressor_state: {
+    classify: (v) => [0, 10].includes(v) ? v === 10 : null,
+    primary: "modbus", total: "hist.comp_total", showRuns: true, run: "hist.state_phase_run",
+    none: "hist.comp_none", active: "hist.comp_active", inactive: "hist.comp_inactive",
+    aria: "hist.comp_aria",
+    levels: [
+      { match: (v) => [0, 10].includes(v) ? v === 0 : null,
+        cls: "state-off", label: "hist.comp_inactive" },
+      { match: (v) => [0, 10].includes(v) ? v === 10 : null,
+        cls: "comp-on", label: "hist.comp_active" },
+    ],
+  },
+  modbus_defrost_state: {
+    classify: (v) => [0, 10].includes(v) ? v === 10 : null,
+    primary: "modbus", total: "hist.mb_defrost_total", run: "hist.state_phase_run",
+    none: "hist.mb_defrost_none", active: "hist.mb_defrost_active",
+    inactive: "hist.mb_defrost_inactive", aria: "hist.mb_defrost_aria",
+    levels: [
+      { match: (v) => [0, 10].includes(v) ? v === 0 : null,
+        cls: "state-off", label: "hist.mb_defrost_inactive" },
+      { match: (v) => [0, 10].includes(v) ? v === 10 : null,
+        cls: "defrost-on", label: "hist.mb_defrost_active" },
+    ],
+  },
+  pump_state: {
+    classify: (v) => [0, 10].includes(v) ? v === 10 : null,
+    primary: "modbus", total: "hist.pump_total", run: "hist.state_phase_run",
+    none: "hist.pump_none", active: "hist.pump_active", inactive: "hist.pump_inactive",
+    aria: "hist.pump_aria",
+    levels: [
+      { match: (v) => [0, 10].includes(v) ? v === 0 : null,
+        cls: "state-off", label: "hist.pump_inactive" },
+      { match: (v) => [0, 10].includes(v) ? v === 10 : null,
+        cls: "circulation-on", label: "hist.pump_active" },
     ],
   },
 });
@@ -1286,9 +1346,10 @@ function stateHistHtml(id, name, view, wrap, cfg) {
   const recordedN = view.recordedN ?? n;
   const spanH = Math.max(1, Math.round((recordedN * view.dt) / 3600));
   const full = recordedN * view.dt >= 23.5 * 3600;
-  // Totals retain the concept's authoritative source. The independent lanes remain diagnostic
+  const visible = histVisibleSeries(view);
+  // Totals retain the concept's authoritative visible source. Independent lanes remain diagnostic
   // witnesses and must not silently pool their durations into one apparently exact number.
-  const primary = view.series.find((s) => s.source === cfg.primary) || view.series[0];
+  const primary = visible.find((s) => s.source === cfg.primary) || visible[0];
   const recordedPrimary = { ...primary, v: primary.v.slice(0, recordedN) };
   const primaryMeasured = recordedPrimary.v.some(v => cfg.classify(v) != null);
   const active = stateRuns(recordedPrimary, true, cfg.classify);
@@ -1298,10 +1359,8 @@ function stateHistHtml(id, name, view, wrap, cfg) {
   const pct = (i) => ((i / n) * 100).toFixed(3);
   const current = view.liveIndex == null ? ""
     : `<span class="vhist-state-current" style="left:${pct(view.liveIndex)}%;width:${pct(1)}%"></span>`;
-  // historyView() orders X10A before Modbus. Render that order directly so neither source can
-  // repaint, fill in or conceal the other's status. Missing intervals stay hatched in their own
-  // lane, and disagreements are visible as different colours at the same point in time.
-  const tracks = view.series.map((s) => {
+  // X10A stays active when available; HomeHub/Modbus can be toggled on via the source legend.
+  const tracks = visible.map((s) => {
     const levels = cfg.levels || [{ match: cfg.classify, cls: "" }];
     const on = levels.flatMap((level) => stateRuns(s, true, level.match).map(([from, count]) =>
       `<span class="vhist-state-on${level.cls ? " " + level.cls : ""}" ` +
@@ -1310,34 +1369,42 @@ function stateHistHtml(id, name, view, wrap, cfg) {
     const missing = stateRuns(s, null, cfg.classify).map(([from, count]) =>
       `<span class="vhist-state-gap" style="left:${pct(from)}%;width:${pct(count)}%"></span>`).join("");
     const last = histRetained(s.raw) ? lastSample(s.v, recordedN) : -1;
-    const stateSource = s.source === "modbus" ? "Modbus" : s.name;
-    const sourceLabel = last >= 0 ? `${stateSource} · ${t("hist.retained")}` : stateSource;
-    return `<div class="vhist-state-lane">` +
-      `<span class="vhist-state-lane-label${s.source === "modbus" ? " mb" : ""}">${esc(sourceLabel)}</span>` +
-      `<div class="vhist-state-track ${s.source}" aria-hidden="true">${on}${missing}${current}` +
-      (last >= 0 ? histRetainedMarker(s, (last + 0.5) / n) : "") + `</div>` +
-    `</div>`;
+    return `<div class="vhist-state-track ${s.source}" aria-hidden="true">${on}${missing}${current}` +
+      (last >= 0 ? histRetainedMarker(s, (last + 0.5) / n) : "") + `</div>`;
   }).join("");
   const gaps = stateRuns(recordedPrimary, null, cfg.classify).length;
-  const hasMissing = view.series.some((s) => stateRuns(s, null, cfg.classify).length > 0);
-  const levelLegend = cfg.levels
-    ? `<div class="vhist-legend vhist-level-legend">${cfg.levels.map((level) =>
-        `<span class="vhist-level ${level.cls}"><i></i>${esc(t(level.label))}</span>`).join("")}` +
-        (hasMissing
-          ? `<span class="vhist-level state-unavailable"><i></i>${esc(t(cfg.missing || "hist.nm"))}</span>` : "") +
-      `</div>`
+  const hasMissing = visible.some((s) => stateRuns(s, null, cfg.classify).length > 0);
+  const sourceItems = view.series.length > 1
+    ? view.series.map((s) => histLegendHtml(view, s, histSourceClass(s.source)))
+    : (histRetained(view) || view.series[0]?.source === "modbus" || id === "circulation_state")
+      ? view.series.map((s) => `<span class="vhist-source${histSourceClass(s.source)}"><i></i>${esc(histSeriesLabel(s))}</span>`)
+      : [];
+  const levelItems = cfg.levels
+    ? [
+        ...cfg.levels.map((level) => `<span class="vhist-level ${level.cls}"><i></i>${esc(t(level.label))}</span>`),
+        ...(hasMissing ? [`<span class="vhist-level state-unavailable"><i></i>${esc(t(cfg.missing || "hist.nm"))}</span>`] : []),
+      ]
+    : [];
+  const levelLegend = (sourceItems.length || levelItems.length)
+    ? `<div class="vhist-legend vhist-level-legend">${[...sourceItems, ...levelItems].join("")}</div>`
     : "";
 
   const pi = histPinIndex(id, view);
-  const sourceAttr = view.series.length === 1 ? ` data-source="${esc(view.series[0].source)}"` : "";
+  const sourceAttr = view.scope ? ` data-source="${esc(view.scope)}"` : "";
   let pinCross = "";
   if (pi >= 0) {
     const frac = stateSampleFraction(pi, n);
     const px = (frac * 100).toFixed(3);
     pinCross = `<span class="vhist-cross vhist-pinned" style="left:${px}%"></span>`;
   }
-  const totalText = primaryMeasured ? t(cfg.total, histDuration(total)) + (cfg.inactiveTotal
-    ? ` · ${t(cfg.inactiveTotal, histDuration(inactiveSeconds))}` : "") : "";
+  const totalText = primaryMeasured
+    ? (cfg.showRuns ? t(cfg.total, histDuration(total), active.length)
+                    : t(cfg.total, histDuration(total))) +
+      (cfg.inactiveTotal ? ` · ${t(cfg.inactiveTotal, histDuration(inactiveSeconds))}` : "")
+    : "";
+  const axis = `<div class="vhist-axis"><span>${recordedN ? esc(histAxisStart(view, spanH)) : ""}</span>` +
+    (gaps ? `<span class="vhist-gap">${esc(t(cfg.gaps || "hist.gaps", gaps))}</span>` : "") +
+    `<span>${esc(view.liveIndex == null ? histAxisEnd(view) : t("hist.now"))}</span></div>`;
   return wrap(
     `<div class="vhist-head"><span class="vhist-t">${esc(!recordedN ? t("hist.now") : full ? t("hist.title") : t("hist.recorded", spanH))}</span>` +
       `<span class="vhist-range mono num">${esc(totalText)}</span></div>` + levelLegend +
@@ -1346,23 +1413,23 @@ function stateHistHtml(id, name, view, wrap, cfg) {
       `<div class="vhist-plot vhist-state-plot" data-hist="${esc(id)}"${sourceAttr}${histRevision(view)} data-n="${n}" tabindex="0" role="img"` +
         ` aria-label="${esc(t(cfg.aria, name || id, totalText))}">` + tracks + pinCross +
         `<span class="vhist-cross vhist-live" hidden></span>` +
-      `</div>` + histTimesHtml(view, pi, pi >= 0 ? stateSampleFraction(pi, n) : 0) +
+      `</div>` + axis + histTimesHtml(view, pi, pi >= 0 ? stateSampleFraction(pi, n) : 0) +
     `</div>` +
-    `<div class="vhist-axis"><span>${recordedN ? esc(histAxisStart(view, spanH)) : ""}</span>` +
-      (gaps ? `<span class="vhist-gap">${esc(t(cfg.gaps || "hist.gaps", gaps))}</span>` : "") +
-      `<span>${esc(view.liveIndex == null ? histAxisEnd(view) : t("hist.now"))}</span></div>` +
     histUnavailableHtml(view)
   , "vhist-state");
 }
 
-function alignAuxSample(view, h, i, source) {
+function alignAuxSample(view, h, i) {
   if (!h || !Array.isArray(h.v) || !h.v.length) return null;
-  if ((h.dt || 300) !== view.dt) return null;
+  const dt = h.dt || 300;
+  if (dt !== view.dt) return null;
   let idx = -1;
   if (Number.isInteger(view.b0) && Number.isInteger(h.b0)) {
-    const bucket = view.b0 + i;
-    if (bucket < 0 && !view.series.some(s => s.source === source)) return null;
-    idx = bucket - h.b0;
+    idx = (view.b0 + i) - h.b0;
+  } else if (typeof view.t0 === "number" && typeof h.t0 === "number") {
+    idx = Math.round(((view.t0 + i * view.dt) - h.t0) / dt);
+  } else if (view.b0 == null && h.b0 == null && view.t0 == null && h.t0 == null) {
+    idx = h.v.length - view.v.length + i;
   }
   return (idx >= 0 && idx < h.v.length) ? h.v[idx] : null;
 }
@@ -1420,11 +1487,6 @@ function histHtml(id, unit, name, source = "", identifySource = false) {
     offeredE && histCacheKey(id, "env3"), offeredR && histCacheKey(id, "room")].filter(Boolean);
   const wrap = (body, cls) => `<div class="vhist${cls ? " " + cls : ""}">${body}</div>`;
   const view = historyView(id, source);
-  if (view?.separate) {
-    const unavailable = histUnavailableHtml(view);
-    return view.separate.map(kind => histHtml(id, unit, name, kind, true)).join("") +
-      (unavailable ? wrap(unavailable, "vhist-flat") : "");
-  }
   if (!view?.v.some(v => v != null)) return histEmptyHtml(offered.map(key => S.hist.get(key)), wrap);
   const chartName = identifySource ? `${name || id} · ${view.series[0].name}` : name;
 
@@ -1610,14 +1672,6 @@ function env3HistHtml(view = historyView(ENV3_COMBINED_ID)) {
   const cached = offered.map((s) => S.hist.get(histCacheKey(s.id, "env3")));
   const wrap = (body, cls = "") => `<div class="vhist vhist-env3${cls ? " " + cls : ""}">${body}</div>`;
   if (!view) return histEmptyHtml(cached, wrap);
-  if (view.separate) {
-    const measured = offered.filter(s => view.separate.includes(s.id))
-      .map(s => histHtml(s.id, "", t(s.label), "env3")).join("");
-    const unavailable = histUnavailableHtml(view);
-    const forecast = view.separateForecast
-      ? env3HistHtml(historyView(ENV3_FORECAST_ID, "", view.separateForecast)) : "";
-    return measured + (unavailable ? wrap(unavailable, "vhist-flat") : "") + forecast;
-  }
   const plotted = view.series.filter((s) => s.v.some((v) => v != null));
   const geometry = forecastScrubView(view);
   if (!plotted.length && !geometry) return histEmptyHtml(cached, wrap);
@@ -1848,8 +1902,8 @@ function histPinIndex(id, h) {
     return i < 0 ? -1 : h.v.length + i;
   }
   if (p.live) {
-    if (h.liveIndex != null && p.sources === histPinSources(h) &&
-        p.sample === liveHistoryPinSample(id, p.source)) return h.liveIndex;
+    if (h.liveIndex != null && p.source === (h.scope ?? "") && p.sources === histPinSources(h) &&
+        p.sample === liveHistoryPinSample(id, p.source, h)) return h.liveIndex;
     if (p.source === (h.scope ?? "")) S.histPin.delete(id);
     return -1;
   }
@@ -1882,11 +1936,11 @@ function recordedPinIndex(id, h, point, i) {
 }
 
 function histPinSeries(h) {
-  return STATE_HIST[h.id] ? h.series : histVisibleSeries(h);
+  return histVisibleSeries(h);
 }
 
-// Categorical charts show every source lane. Numeric fallback can change the visible instrument
-// without replacing either ring, so its selected sources are part of an undated sample identity.
+// Numeric and categorical charts can toggle visible instruments without replacing either ring,
+// so the selected visible sources are part of an undated or live sample identity.
 function histPinSources(h) {
   return histPinSeries(h).map(s => s.source).join(",");
 }
@@ -1897,9 +1951,9 @@ function histPlottedPinRevision(h) {
   return [h.t0, ...rings].join("/");
 }
 
-function liveHistoryPinSample(id, source) {
-  return JSON.stringify((source ? [source] : ["x10a", "modbus"])
-    .map(kind => stateHistoryCurrent(id, kind).value));
+function liveHistoryPinSample(id, source, h = historyView(id, source)) {
+  const sources = source ? [source] : (h ? histVisibleSeries(h).map(s => s.source) : ["x10a", "modbus"]);
+  return JSON.stringify(sources.map(kind => stateHistoryCurrent(id, kind).value));
 }
 
 function expireLiveHistoryPins() {
@@ -1932,7 +1986,7 @@ function histPinToggle(id, i, source = "", captured) {
     S.histPin.set(id, { t, forecast: true });
   }
   else if (i === h.liveIndex) S.histPin.set(id, { sources: histPinSources(h), source,
-    live: true, sample: liveHistoryPinSample(id, source) });
+    live: true, sample: liveHistoryPinSample(id, source, h) });
   else if (Number.isInteger(h.b0)) {
     const visible = histPinSeries(h);
     const witnessed = visible.filter(s => s.v[i] != null || histHeld(s, i));
@@ -2043,46 +2097,29 @@ function scrubText(h, i, includeTime = true, aux) {
   }
   const cfg = STATE_HIST[h.id];
   if (cfg) {
-    // A deliberately source-filtered BOOST/BSH/BUH view stays terse. A paired view names BOTH
-    // witnesses instead, matching the two labelled lanes and keeping their exact phase details
-    // available without guessing from colours alone.
-    if (cfg.compactTooltip && h.series.length === 1) {
-      const primary = h.series.find((s) => s.source === cfg.primary) || h.series[0];
-      const v = primary.v[i];
-      let status = t("hist.nm");
-      if (v != null) {
-        const key = cfg.compactValueLabel ? cfg.compactValueLabel(v) : "";
-        if (key) status = t(key);
-        else {
-          const state = cfg.classify(v);
-          if (state != null) status = t(state ? "hist.state_active" : "hist.state_off");
-        }
-      }
+    const stateStatus = (v) => {
+      if (v == null) return t(cfg.missing || "hist.nm");
+      const key = cfg.compactValueLabel ? cfg.compactValueLabel(v) : "";
+      if (key) return t(key);
+      const state = cfg.classify(v);
+      return state == null ? t(cfg.missing || "hist.nm") : t(state ? "state.on" : "state.off");
+    };
+    const phaseText = (s) => {
+      const status = stateStatus(s.v[i]);
       if (h.liveIndex === i) return `${t("hist.now")} · ${status}`;
       const [from, count] = sampleRunAt(
-        h.liveIndex == null ? primary.v : primary.v.slice(0, h.recordedN), i);
-      const when = stateRunWhen(h, from, count, primary);
-      return when ? `${when} · ${status}` : status;
-    }
-    // A state chart is already a sequence of PHASES. Hovering any point therefore names the whole
-    // containing phase — source, state, start/end and sampled duration — while the chart itself
-    // stays compact. Source, state and timing form deliberate vertical rows; timing and duration
-    // share one row because they describe the same interval. Paired instruments always retain one
-    // block each, even when they agree, matching their independent source-labelled lanes.
-    const blocks = h.series.map((s) => {
-      if (h.liveIndex === i) return {
-        source: s.source === "modbus" ? "Modbus" : s.name,
-        detail: `${t("hist.now")} · ${valueText(s)}`,
-      };
-      const [from, count] = sampleRunAt(
         h.liveIndex == null ? s.v : s.v.slice(0, h.recordedN), i);
-      return {
-        source: s.source === "modbus" ? "Modbus" : s.name,
-        detail: t(cfg.run, valueText(s), stateRunWhen(h, from, count, s) || t("hist.nm"),
-          histDuration(count * h.dt)),
-      };
-    });
-    return blocks.map((b) => `${b.source}\n${b.detail}`).join("\n\n");
+      const when = stateRunWhen(h, from, count, s);
+      return when ? `${when} · ${status}` : status;
+    };
+    const visible = histVisibleSeries(h);
+    if (visible.length <= 1) {
+      const s = visible[0] || h.series.find((q) => q.source === cfg.primary) || h.series[0];
+      return s ? phaseText(s) : "";
+    }
+    return visible.map((s) =>
+      `${s.source === "modbus" ? "Modbus" : s.name} ${phaseText(s)}`
+    ).join("\n");
   }
   // With two lines the readout names both instruments at the SAME instant. A gap in either remains
   // visible as words rather than borrowing its neighbour's value. The HomeHub outdoor register has
@@ -2130,9 +2167,9 @@ function histReadout(h, i, aux) {
   }
   const cfg = STATE_HIST[h.id];
   const visible = histVisibleSeries(h);
-  if (cfg || visible.length <= 1) return esc(scrubText(h, i, false, aux));
+  if (visible.length <= 1) return esc(scrubText(h, i, false, aux));
   const lines = scrubText(h, i, false, aux).split("\n");
-  const note = lines.length > visible.length ? lines.pop() : "";
+  const note = !cfg && lines.length > visible.length ? lines.pop() : "";
   const rows = visible.map((s, idx) => {
     const label = s.source === "modbus" ? "Modbus" : s.name;
     const val = lines[idx] ? lines[idx].slice(label.length + 1) : "";
@@ -2545,6 +2582,8 @@ const HOMEHUB_LABEL_DE = Object.freeze({
   31: "Verdichter aktiv",
   32: "Heizstab aktiv",
   33: "Speicherdesinfektion aktiv",
+  35: "Abtauen oder Wiederanlauf",
+  36: "Warmstart",
   37: "Position des 3-Wege-Ventils",
   38: "Aktueller Heiz- oder Kühlmodus",
   52: "Warmwasserbetrieb",
@@ -2566,7 +2605,10 @@ const HOMEHUB_LABEL_DE = Object.freeze({
   7: "Kühl-Solltemperatur der Hauptzone",
   9: "Leisebetrieb",
   10: "Sollwert für Warmwasser-Nachheizung",
+  12: "Warmwasser-Nachheizung freigegeben",
+  13: "Warmwasser-Booster-Modus",
   54: "Vorlaufkorrektur der Haupt-Heizzone",
+  55: "Kühl-Vorlaufkorrektur der Hauptzone",
   56: "Smart-Grid-Betriebsart",
   57: "Leistungsgrenze für Pufferung",
   58: "Allgemeine Leistungsgrenze",
@@ -2575,8 +2617,9 @@ function displayHomeHubLabel(row) {
   const fallback = displayReadingLabel(row && row.label, row);
   if (!row || row.off == null) return fallback;
   if (row.profile === "altherma4") {
-    const key = ({9: "a4.quiet_selection", 54: "a4.heating_offset", 58: "a4.imposed_power_limit",
-      65: "a4.demand_response", 74: "a4.pre_phe_outdoor", 80: "a4.main_target",
+    const key = ({9: "a4.quiet_selection", 54: "a4.heating_offset", 55: "a4.cooling_offset",
+      58: "a4.imposed_power_limit", 65: "a4.demand_response", 74: "a4.pre_phe_outdoor",
+      80: "a4.main_target", 81: "a4.add_target", 82: "a4.abnormality_counter",
       83: "a4.unit_operation"})[row.off];
     if (key) return t(key);
   }

@@ -1,4 +1,4 @@
-// translation-source: 7e05fca97bff772abf43c5704d541747bc310184005cce90ce5b76eab24256ce
+// translation-source: 480bf7bd3b16592ffbaf33f9d54b1362d56dd3b72b7c310293449045f5e86f04
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -28,6 +28,7 @@ I18N.pl = localeValues([
   /* sys.cool_mode */ "Tryb chłodzenia",
   /* sys.residual_circulating */ "Cyrkulacja ciepła resztkowego — bez chłodzenia",
   /* sys.bsh_active */ "Elektryczna grzałka zbiornika aktywna",
+  /* sys.disinfecting */ "Dezynfekcja zbiornika aktywna",
   /* sys.online */ "W sieci",
   /* sys.fault */ "Usterka",
   /* sys.warning */ "Ostrzeżenie",
@@ -352,6 +353,11 @@ I18N.pl = localeValues([
   /* a4.pressure_help */ "Skalowanie ciśnienia Altherma 4 nie zostało potwierdzone. Wartość bar używa dotychczasowego przeliczenia; przed oceną ciśnienia porównaj ją z odczytem urządzenia.",
   /* a4.demand_response */ "Tryb reakcji na zapotrzebowanie",
   /* a4.unit_operation */ "Stan pracy jednostki",
+  /* a4.cooling_offset */ "Korekta pogodowa chłodzenia, strefa główna",
+  /* a4.add_target */ "Cel grzania/chłodzenia, strefa dodatkowa",
+  /* a4.abnormality_counter */ "Licznik błędów użytkownika",
+  /* a4.cooling_offset_help */ "Przesuwa krzywą pogodową chłodzenia strefy głównej w kelwinach. Jest to korekta, nie zmierzona temperatura ani pełna nastawa wody.",
+  /* a4.abnormality_help */ "Łączna liczba błędów użytkownika zarejestrowanych przez jednostkę. Niezmienna wartość niezerowa dotyczy zdarzeń z przeszłości, nie aktywnej usterki; sprawdź stan diagnostyczny i kod błędu.",
   /* enum.unknown */ (n) => `Nieznane (${n})`,
   /* chip.space_on */ "Obieg WŁ.",
   /* chip.space_off */ "Obieg WYŁ.",
@@ -457,6 +463,21 @@ I18N.pl = localeValues([
   /* hist.flow_switch_off */ "Stan X10A WYŁ.",
   /* hist.flow_switch_none */ "Nie zarejestrowano włączenia tego stanu X10A w wybranym okresie.",
   /* hist.flow_switch_aria */ (l, d) => `${l} — oś czasu styku przepływu wody. ${d}. Klawisze strzałek odczytują poszczególne próbki.`,
+  /* hist.comp_total */ (d, n) => `Sprężarka · ${d} · ${n} ${n === 1 ? "faza" : "faz"}`,
+  /* hist.comp_none */ "W zarejestrowanym okresie nie zaobserwowano pracy sprężarki.",
+  /* hist.comp_active */ "Sprężarka pracuje",
+  /* hist.comp_inactive */ "Sprężarka wyłączona",
+  /* hist.comp_aria */ (l, d) => `${l} — oś czasu sprężarki HomeHub. ${d}. Klawisze strzałek odczytują poszczególne próbki.`,
+  /* hist.mb_defrost_total */ (d) => `Odszranianie / restart · ${d}`,
+  /* hist.mb_defrost_none */ "W zarejestrowanym okresie nie zaobserwowano fazy odszraniania ani restartu.",
+  /* hist.mb_defrost_active */ "Odszranianie / restart",
+  /* hist.mb_defrost_inactive */ "Normalnie / postój",
+  /* hist.mb_defrost_aria */ (l, d) => `${l} — oś czasu odszraniania/restartu HomeHub. ${d}. Klawisze strzałek odczytują poszczególne próbki.`,
+  /* hist.pump_total */ (d) => `Pompa · ${d}`,
+  /* hist.pump_none */ "W zarejestrowanym okresie nie zaobserwowano pracy pompy obiegowej.",
+  /* hist.pump_active */ "Pompa pracuje",
+  /* hist.pump_inactive */ "Pompa wyłączona",
+  /* hist.pump_aria */ (l, d) => `${l} — oś czasu pompy obiegowej HomeHub. ${d}. Klawisze strzałek odczytują poszczególne próbki.`,
   /* toast.saved */ "Zapisano",
   /* toast.no_changes */ "Brak zmian",
   /* toast.reboot */ "Ponowne uruchamianie — łączenie…",
@@ -1092,6 +1113,8 @@ HOMEHUB_LABEL_I18N.pl = homeHubValues([
   "Nastawa chłodzenia głównej strefy", // 7
   "Tryb cichy", // 9
   "Nastawa dogrzewania CWU", // 10
+  "Dogrzewanie CWU włączone", // 12
+  "Tryb szybki CWU aktywny", // 13
   "Stan diagnostyczny jednostki", // 21
   "Kod błędu jednostki", // 22
   "Podkod błędu jednostki", // 23
@@ -1099,6 +1122,8 @@ HOMEHUB_LABEL_I18N.pl = homeHubValues([
   "Sprężarka aktywna", // 31
   "Grzałka zbiornika aktywna", // 32
   "Dezynfekcja zbiornika aktywna", // 33
+  "Odszranianie lub restart", // 35
+  "Gorący start", // 36
   "Pozycja zaworu 3-drogowego", // 37
   "Bieżący tryb ogrzewania/chłodzenia", // 38
   "Temperatura wyjścia PHE", // 40
@@ -1113,6 +1138,7 @@ HOMEHUB_LABEL_I18N.pl = homeHubValues([
   "Praca CWU", // 52
   "Praca ogrzewania/chłodzenia domu", // 53
   "Korekta zasilania głównej strefy grzewczej", // 54
+  "Korekta zasilania głównej strefy chłodzenia", // 55
   "Tryb Smart Grid", // 56
   "Limit mocy buforowania", // 57
   "Ogólny limit mocy", // 58
@@ -1142,108 +1168,113 @@ DESCRIPTION_I18N.pl = descriptionValues([
   ["Bit żądania termostatu głównej strefy dla chłodzenia lub ogrzewania."], // 20
   ["Cztery surowe bity limitu pozostają osobno; ich kodowanie nie jest potwierdzone."], // 21
   ["Bit grzałki PHE nie rozstrzyga polecenia ani sprzężenia i nie dowodzi poboru prądu."], // 22
-  ["Dogrzewanie podnosi temperaturę zasobnika do nastawy po spadku poniżej progu."], // 23
-  ["Storage comfort wybiera wyższą, a Storage eco niższą zaprogramowaną temperaturę."], // 24
-  ["W układzie hybrydowym sterownik żąda od kotła przygotowania CWU."], // 25
-  ["Zawór przełączający kieruje wodę do zasobnika CWU albo obiegu domu."], // 26
-  ["Wyjście 2WV pozostaje WŁ./WYŁ.; WYŁ. nie dowodzi chłodzenia ani położenia zaworu."], // 27
-  ["Stopień otwarcia zaworu mieszającego drugiej strefy."], // 28
-  ["Docelowa temperatura zasilania dla wybranego ogrzewania lub chłodzenia."], // 29
-  ["Temperatura zmieszanego zasilania drugiej strefy za zaworem mieszającym."], // 30
-  ["Temperatura wody za elektrycznym BUH, zwykle R2T."], // 31
-  ["R1T mierzy wodę z PHE przed BUH; tryb, R4T i przepływ określają sens i szacunek mocy."], // 32
-  ["R4T jest wspólnym powrotem do PHE; R1T−R4T to ΔT PHE, nie odbiorników."], // 33
-  ["Szybkość obiegu wody we wspólnym układzie ogrzewania/chłodzenia i CWU."], // 34
-  ["Ciśnienie wody; zakres zależy od modelu, przy ≤1,0 bar sprawdź jego instrukcję."], // 35
-  ["Odwrócone polecenie pompy: 0 = pełna prędkość, 100 = postój."], // 36
-  ["Praca pompy obiegowej nie dowodzi przekazywania ciepła; potwierdź przepływem."], // 37
-  ["Stan pompy solarnej, niezależnej od pompy obiegowej układu pompy ciepła."], // 38
-  ["Zgłoszona prędkość pompy wskazanej przez profil."], // 39
-  ["Flow switch X10A zgłasza tylko ruch; nie mierzy przepływu ani minimum modelu."], // 40
-  ["Bieżący tryb strony wodnej: postój, ogrzewanie, chłodzenie, CWU lub połączenie."], // 41
-  ["Smart Grid zgłasza czterostanowe polecenie energetyczne, nie tryb ogrzewania/chłodzenia."], // 42
-  ["Bieżący tryb domu to ogrzewanie/chłodzenie bez trybu automatycznego; nie dowodzi pracy sprężarki."], // 43
-  ["Ustawiony wybór HomeHub: Auto, ogrzewanie lub chłodzenie."], // 44
-  ["Stan jednostki zewnętrznej: postój, ogrzewanie lub chłodzenie; nie dowodzi przekazywania ciepła."], // 45
-  ["Odszranianie jest normalne w zimnej, wilgotnej pogodzie; sam bit bez wilgotności nie ocenia częstotliwości."], // 46
-  ["Klasa aktywnej usterki: stan normalny, błąd, ostrzeżenie albo przestroga."], // 47
-  ["Znaczenie aktualnie zgłoszonego kodu usterki."], // 48
-  ["Tryb awaryjny po usterce pompy ciepła."], // 49
-  ["Przekaźnik alarmowy sygnalizuje usterkę podłączonemu zewnętrznemu monitoringowi."], // 50
-  ["Docelowa temperatura pomieszczenia głównej strefy w ogrzewaniu lub chłodzeniu."], // 51
-  ["„Thermo ON“ to wewnętrzne żądanie, nie wskazanie odbiornika ani dowód pracy sprężarki."], // 52
-  ["Stan zacisku wyjściowego „Space H Operation”."], // 53
-  ["Normalna praca domu nie oznacza tylko ogrzewania ani termostatu; rozstrzygają I/U i napędy."], // 54
-  ["Docelowa temperatura strefy sterowanej własnym czujnikiem pokojowym urządzenia."], // 55
-  ["Temperatura pomieszczenia zmierzona wbudowanym lub przewodowym czujnikiem urządzenia."], // 56
-  ["Ochrona temperatury tłoczenia: Drop=ON/OFF, Retry=0…7; tylko wzrost w ciągłych porównywalnych próbkach dowodzi zdarzenia, nie wartość bezwzględna."], // 57
-  ["Ochrona prądu inwertera: Drop=ON/OFF, Retry=0…7; tylko wzrost w ciągłych porównywalnych próbkach dowodzi zdarzenia, nie wartość bezwzględna."], // 58
-  ["Ochrona wysokiego ciśnienia: Drop=ON/OFF, Retry=0…7; tylko wzrost w ciągłych porównywalnych próbkach dowodzi zdarzenia, nie wartość bezwzględna."], // 59
-  ["Ochrona niskiego ciśnienia: Drop=ON/OFF, Retry=0…7; tylko wzrost w ciągłych porównywalnych próbkach dowodzi zdarzenia, nie wartość bezwzględna."], // 60
-  ["Ochrona temperatury radiatora inwertera: Drop=ON/OFF, Retry=0…7; tylko wzrost w ciągłych porównywalnych próbkach dowodzi zdarzenia, nie wartość bezwzględna."], // 61
-  ["Wewnętrzna zbiorcza flaga ograniczenia, nieprzypisana do pięciu nazwanych zabezpieczeń."], // 62
-  ["Temperatura wody na wejściu lub wyjściu PHE między czynnikiem a obiegiem wody."], // 63
-  ["Temperatura wymiennika zewnętrznego; sama bez wilgotności nie dowodzi oblodzenia."], // 64
-  ["Temperatura zewnętrzna przy urządzeniu może różnić się przez słońce i przepływ powietrza."], // 65
-  ["Gorący gaz za sprężarką; zależy od ciśnienia, prędkości, trybu i obciążenia. Jedna wartość lub zakres innej rodziny nie dowodzi usterki ani braku czynnika."], // 66
-  ["Temperatura chłodnego gazu czynnika o niskim ciśnieniu wracającego do sprężarki."], // 67
-  ["Temperatura czynnika chłodniczego w przewodzie cieczowym między wymiennikami."], // 68
-  ["Temperatura czynnika przy wejściu lub wyjściu parownika."], // 69
-  ["Temperatura przewodu wtrysku czynnika."], // 70
-  ["Temperatura w części obiegu zawierającej ciecz i parę."], // 71
-  ["Czujnik odszraniania na wymienniku; położenie i sterowanie zależą od modelu. Jeden punkt nie dowodzi lodu na całej powierzchni ani końca odszraniania."], // 72
-  ["Temperatura nasycenia z ciśnienia dla danego czynnika; nie jest czujnikiem ani wartością bar."], // 73
-  ["Ciśnienie wysokie/niskie: oceniaj stabilny trend tego samego trybu/modelu; rozruch, powrót oleju i odszranianie je zmieniają. Brak uniwersalnego zakresu."], // 74
-  ["Prędkość sprężarki w rps steruje wydajnością, lecz nie mierzy mocy cieplnej."], // 75
-  ["Polecenie EEV w krokach, bez mechanicznego sprzężenia, nie % ani przepływ. Samo nie dowodzi ruchu, zacięcia ani braku czynnika."], // 76
-  ["Temperatura elektroniki sterującej silnika wentylatora zewnętrznego."], // 77
-  ["Prędkość wentylatora zewnętrznego jest podana jako stopień lub obr./min."], // 78
-  ["Cel wewnętrzny zależny od modelu/trybu; porównaj z odpowiadającą temperaturą nasycenia z ciśnienia. Różnica nie diagnozuje przyczyny ani napełnienia."], // 79
-  ["Wewnętrzny cel temperatury tłoczenia służy ochronie sprężarki."], // 80
-  ["Cel ΔT zależy od modelu i trybu; porównuj z nim, nie z uniwersalnymi 5 K."], // 81
-  ["Rodzaj czynnika, np. R32/R410A, wyznacza krzywą ciśnienie–temperatura nasycenia."], // 82
-  ["Temperatura mierzona przy porcie sprężarki, używana przez wewnętrzny nadzór ochronny."], // 83
-  ["Odczyt ciśnienia w obiegu czynnika z jednostki zewnętrznej."], // 84
-  ["Tylko pełny zestaw CT × 230 V daje niekalibrowany szacunek; okablowanie, napięcie i cos φ ograniczają wynik."], // 85
-  ["Prąd pobierany przez inwerter sprężarki — przybliżenie intensywności jej pracy."], // 86
-  ["Temperatura radiatora inwertera/elektroniki mocy w jednostce zewnętrznej."], // 87
-  ["Aktywne stopnie elektrycznego BUH przedstawione jako stopień mocy."], // 88
-  ["Stopień BUH dodaje ciepło do wody; jego zezwolenia i progi ustawia instalator."], // 89
-  ["HomeHub 32: stan BSH, nie moc; rejestr 51 to osobny pobór „pompy ciepła”, nie moc BSH, a jego zakres nie jest potwierdzony."], // 90
-  ["BSH może grzać bez sprężarki i pompy; X10A zgłasza tylko WŁ./WYŁ., nie moc."], // 91
-  ["Stan łańcucha ochrony termicznej grzałki, który ma przerwać jej pracę po otwarciu."], // 92
-  ["Ochrona rur przed mrozem wymaga zasilania i nie gwarantuje działania przy jego zaniku."], // 93
-  ["Bit mrozu X10A nie jest publicznie jednoznacznie przypisany ochronie pomieszczenia lub rur."], // 94
-  ["Solanka gruntowa: dopuszczalne stężenie, ciśnienie i temperatury zależą od instalacji."], // 95
-  ["Tryb źródła w układzie hybrydowym: tylko pompa, praca łączona lub tylko kocioł."], // 96
-  ["Docelowa temperatura zasilania podczas ogrzewania hybrydowego."], // 97
-  ["Czy praca biwalentna z drugim źródłem jest aktywna lub dozwolona przez konfigurację."], // 98
-  ["Bieżące żądanie pracy kotła w układzie biwalentnym lub hybrydowym."], // 99
-  ["Docelowa temperatura wody żądana dla ogrzewania kotłem, nie zmierzona temperatura."], // 100
-  ["BE_COP porównuje źródła hybrydowe; nie jest zmierzonym COP, a skala X10A nie jest opisana."], // 101
-  ["Taryfa, Smart Grid lub solar może ograniczyć albo żądać ciepła; działanie określa konfiguracja."], // 102
-  ["Nominalna moc/klasa jednostki to stała cecha modelu, nie bieżący pomiar."], // 103
-  ["Tryb cichy zmniejsza hałas, lecz może ograniczyć dostępną moc ogrzewania/chłodzenia."], // 104
-  ["Bieżący stan diagnostyczny z HomeHub: brak błędu, usterka lub ostrzeżenie."], // 105
-  ["Znaczenie aktualnie zgłoszonego kodu usterki."], // 106
-  ["Numeryczny podkod zawężający sąsiedni kod diagnostyczny Daikin."], // 107
-  ["HomeHub zgłasza tylko pracę sprężarki, nie obroty ani moc; sens określa obieg i przepływ."], // 108
-  ["Praca CWU: praca = WŁ., oczekiwanie/buforowanie = WYŁ.; flaga nie podaje przyczyny."], // 109
-  ["Praca domu: praca = WŁ., oczekiwanie/buforowanie = WYŁ.; tryb rozróżnia ogrzewanie/chłodzenie."], // 110
-  ["Temperatura wody opuszczającej PHE przed elektrycznym BUH."], // 111
-  ["Temperatura zasilania za elektrycznym BUH."], // 112
-  ["Temperatura wody zmierzona w zasobniku CWU."], // 113
-  ["Temperatura ciekłego czynnika wymaga kontekstu trybu; pojedynczy odczyt nie diagnozuje."], // 114
-  ["Temperatura głównej strefy zgłaszana przez sterownik pokojowy."], // 115
-  ["Pobór układu z HomeHub zależy od grzałek; nie przypisuj całej wartości sprężarce."], // 116
-  ["Odczytywany cel zasilania ogrzewania może być stały lub pogodowy; firmware go nie zmienia."], // 117
-  ["Cel chłodzenia jest tylko odczytywany i ma znaczenie wyłącznie przy aktywnym chłodzeniu."], // 118
-  ["Czy obieg domu jest w ogóle WŁĄCZONY — to przełącznik, nie bieżąca aktywność."], // 119
-  ["Cicha praca zmniejsza hałas jednostki zewnętrznej i może obniżyć dostępną moc."], // 120
-  ["Cel dogrzewania CWU nie jest progiem startu; wpływają też histereza i harmonogram."], // 121
-  ["Odczytywana korekta celu ogrzewania −10…+10 K; niezerowa wartość nie dowodzi aktywnej pracy."], // 122
-  ["Limit Smart Grid „zalecane włączenie”; działa niższy z nim i limitem ogólnym, to nie bieżący pobór."], // 123
-  ["Ogólny limit HomeHub, także przy swobodnej pracy; to ustawiony sufit, nie zmierzony pobór."], // 124
+  ["Zezwolenie na dogrzewanie CWU w rejestrze 12; ON = zezwolono, OFF = wyłączone, bez dowodu aktywnego ładowania."], // 23
+  ["Żądanie trybu szybkiego/booster CWU w rejestrze 13; ON = żądany lub aktywny, OFF = normalna praca."], // 24
+  ["Dogrzewanie podnosi temperaturę zasobnika do nastawy po spadku poniżej progu."], // 25
+  ["Storage comfort wybiera wyższą, a Storage eco niższą zaprogramowaną temperaturę."], // 26
+  ["W układzie hybrydowym sterownik żąda od kotła przygotowania CWU."], // 27
+  ["Zawór przełączający kieruje wodę do zasobnika CWU albo obiegu domu."], // 28
+  ["Wyjście 2WV pozostaje WŁ./WYŁ.; WYŁ. nie dowodzi chłodzenia ani położenia zaworu."], // 29
+  ["Stopień otwarcia zaworu mieszającego drugiej strefy."], // 30
+  ["Docelowa temperatura zasilania dla wybranego ogrzewania lub chłodzenia."], // 31
+  ["Temperatura zmieszanego zasilania drugiej strefy za zaworem mieszającym."], // 32
+  ["Temperatura wody za elektrycznym BUH, zwykle R2T."], // 33
+  ["R1T mierzy wodę z PHE przed BUH; tryb, R4T i przepływ określają sens i szacunek mocy."], // 34
+  ["R4T jest wspólnym powrotem do PHE; R1T−R4T to ΔT PHE, nie odbiorników."], // 35
+  ["Szybkość obiegu wody we wspólnym układzie ogrzewania/chłodzenia i CWU."], // 36
+  ["Ciśnienie wody; zakres zależy od modelu, przy ≤1,0 bar sprawdź jego instrukcję."], // 37
+  ["Odwrócone polecenie pompy: 0 = pełna prędkość, 100 = postój."], // 38
+  ["Praca pompy obiegowej nie dowodzi przekazywania ciepła; potwierdź przepływem."], // 39
+  ["Stan pompy solarnej, niezależnej od pompy obiegowej układu pompy ciepła."], // 40
+  ["Zgłoszona prędkość pompy wskazanej przez profil."], // 41
+  ["Flow switch X10A zgłasza tylko ruch; nie mierzy przepływu ani minimum modelu."], // 42
+  ["Bieżący tryb strony wodnej: postój, ogrzewanie, chłodzenie, CWU lub połączenie."], // 43
+  ["Smart Grid zgłasza czterostanowe polecenie energetyczne, nie tryb ogrzewania/chłodzenia."], // 44
+  ["Bieżący tryb domu to ogrzewanie/chłodzenie bez trybu automatycznego; nie dowodzi pracy sprężarki."], // 45
+  ["Ustawiony wybór HomeHub: Auto, ogrzewanie lub chłodzenie."], // 46
+  ["Stan jednostki zewnętrznej: postój, ogrzewanie lub chłodzenie; nie dowodzi przekazywania ciepła."], // 47
+  ["Łączny znacznik odszraniania i restartu sprężarki w rejestrze 35; OFF = praca normalna, ON = odszranianie lub przygotowanie restartu."], // 48
+  ["Znacznik gorącego startu w rejestrze 36; OFF = praca ciągła, ON = krótkie podgrzanie wymiennika."], // 49
+  ["Odszranianie jest normalne w zimnej, wilgotnej pogodzie; sam bit bez wilgotności nie ocenia częstotliwości."], // 50
+  ["Klasa aktywnej usterki: stan normalny, błąd, ostrzeżenie albo przestroga."], // 51
+  ["Znaczenie aktualnie zgłoszonego kodu usterki."], // 52
+  ["Tryb awaryjny po usterce pompy ciepła."], // 53
+  ["Przekaźnik alarmowy sygnalizuje usterkę podłączonemu zewnętrznemu monitoringowi."], // 54
+  ["Docelowa temperatura pomieszczenia głównej strefy w ogrzewaniu lub chłodzeniu."], // 55
+  ["„Thermo ON“ to wewnętrzne żądanie, nie wskazanie odbiornika ani dowód pracy sprężarki."], // 56
+  ["Stan zacisku wyjściowego „Space H Operation”."], // 57
+  ["Normalna praca domu nie oznacza tylko ogrzewania ani termostatu; rozstrzygają I/U i napędy."], // 58
+  ["Docelowa temperatura strefy sterowanej własnym czujnikiem pokojowym urządzenia."], // 59
+  ["Temperatura pomieszczenia zmierzona wbudowanym lub przewodowym czujnikiem urządzenia."], // 60
+  ["Ochrona temperatury tłoczenia: Drop=ON/OFF, Retry=0…7; tylko wzrost w ciągłych porównywalnych próbkach dowodzi zdarzenia, nie wartość bezwzględna."], // 61
+  ["Ochrona prądu inwertera: Drop=ON/OFF, Retry=0…7; tylko wzrost w ciągłych porównywalnych próbkach dowodzi zdarzenia, nie wartość bezwzględna."], // 62
+  ["Ochrona wysokiego ciśnienia: Drop=ON/OFF, Retry=0…7; tylko wzrost w ciągłych porównywalnych próbkach dowodzi zdarzenia, nie wartość bezwzględna."], // 63
+  ["Ochrona niskiego ciśnienia: Drop=ON/OFF, Retry=0…7; tylko wzrost w ciągłych porównywalnych próbkach dowodzi zdarzenia, nie wartość bezwzględna."], // 64
+  ["Ochrona temperatury radiatora inwertera: Drop=ON/OFF, Retry=0…7; tylko wzrost w ciągłych porównywalnych próbkach dowodzi zdarzenia, nie wartość bezwzględna."], // 65
+  ["Wewnętrzna zbiorcza flaga ograniczenia, nieprzypisana do pięciu nazwanych zabezpieczeń."], // 66
+  ["Temperatura wody na wejściu lub wyjściu PHE między czynnikiem a obiegiem wody."], // 67
+  ["Temperatura wymiennika zewnętrznego; sama bez wilgotności nie dowodzi oblodzenia."], // 68
+  ["Temperatura zewnętrzna przy urządzeniu może różnić się przez słońce i przepływ powietrza."], // 69
+  ["Gorący gaz za sprężarką; zależy od ciśnienia, prędkości, trybu i obciążenia. Jedna wartość lub zakres innej rodziny nie dowodzi usterki ani braku czynnika."], // 70
+  ["Temperatura chłodnego gazu czynnika o niskim ciśnieniu wracającego do sprężarki."], // 71
+  ["Temperatura czynnika chłodniczego w przewodzie cieczowym między wymiennikami."], // 72
+  ["Temperatura czynnika przy wejściu lub wyjściu parownika."], // 73
+  ["Temperatura przewodu wtrysku czynnika."], // 74
+  ["Temperatura w części obiegu zawierającej ciecz i parę."], // 75
+  ["Czujnik odszraniania na wymienniku; położenie i sterowanie zależą od modelu. Jeden punkt nie dowodzi lodu na całej powierzchni ani końca odszraniania."], // 76
+  ["Temperatura nasycenia z ciśnienia dla danego czynnika; nie jest czujnikiem ani wartością bar."], // 77
+  ["Ciśnienie wysokie/niskie: oceniaj stabilny trend tego samego trybu/modelu; rozruch, powrót oleju i odszranianie je zmieniają. Brak uniwersalnego zakresu."], // 78
+  ["Prędkość sprężarki w rps steruje wydajnością, lecz nie mierzy mocy cieplnej."], // 79
+  ["Polecenie EEV w krokach, bez mechanicznego sprzężenia, nie % ani przepływ. Samo nie dowodzi ruchu, zacięcia ani braku czynnika."], // 80
+  ["Temperatura elektroniki sterującej silnika wentylatora zewnętrznego."], // 81
+  ["Prędkość wentylatora zewnętrznego jest podana jako stopień lub obr./min."], // 82
+  ["Cel wewnętrzny zależny od modelu/trybu; porównaj z odpowiadającą temperaturą nasycenia z ciśnienia. Różnica nie diagnozuje przyczyny ani napełnienia."], // 83
+  ["Wewnętrzny cel temperatury tłoczenia służy ochronie sprężarki."], // 84
+  ["Cel ΔT zależy od modelu i trybu; porównuj z nim, nie z uniwersalnymi 5 K."], // 85
+  ["Rodzaj czynnika, np. R32/R410A, wyznacza krzywą ciśnienie–temperatura nasycenia."], // 86
+  ["Temperatura mierzona przy porcie sprężarki, używana przez wewnętrzny nadzór ochronny."], // 87
+  ["Odczyt ciśnienia w obiegu czynnika z jednostki zewnętrznej."], // 88
+  ["Tylko pełny zestaw CT × 230 V daje niekalibrowany szacunek; okablowanie, napięcie i cos φ ograniczają wynik."], // 89
+  ["Prąd pobierany przez inwerter sprężarki — przybliżenie intensywności jej pracy."], // 90
+  ["Temperatura radiatora inwertera/elektroniki mocy w jednostce zewnętrznej."], // 91
+  ["Aktywne stopnie elektrycznego BUH przedstawione jako stopień mocy."], // 92
+  ["Stopień BUH dodaje ciepło do wody; jego zezwolenia i progi ustawia instalator."], // 93
+  ["HomeHub 32: stan BSH, nie moc; rejestr 51 to osobny pobór „pompy ciepła”, nie moc BSH, a jego zakres nie jest potwierdzony."], // 94
+  ["BSH może grzać bez sprężarki i pompy; X10A zgłasza tylko WŁ./WYŁ., nie moc."], // 95
+  ["Stan łańcucha ochrony termicznej grzałki, który ma przerwać jej pracę po otwarciu."], // 96
+  ["Ochrona rur przed mrozem wymaga zasilania i nie gwarantuje działania przy jego zaniku."], // 97
+  ["Bit mrozu X10A nie jest publicznie jednoznacznie przypisany ochronie pomieszczenia lub rur."], // 98
+  ["Solanka gruntowa: dopuszczalne stężenie, ciśnienie i temperatury zależą od instalacji."], // 99
+  ["Tryb źródła w układzie hybrydowym: tylko pompa, praca łączona lub tylko kocioł."], // 100
+  ["Docelowa temperatura zasilania podczas ogrzewania hybrydowego."], // 101
+  ["Czy praca biwalentna z drugim źródłem jest aktywna lub dozwolona przez konfigurację."], // 102
+  ["Bieżące żądanie pracy kotła w układzie biwalentnym lub hybrydowym."], // 103
+  ["Docelowa temperatura wody żądana dla ogrzewania kotłem, nie zmierzona temperatura."], // 104
+  ["BE_COP porównuje źródła hybrydowe; nie jest zmierzonym COP, a skala X10A nie jest opisana."], // 105
+  ["Taryfa, Smart Grid lub solar może ograniczyć albo żądać ciepła; działanie określa konfiguracja."], // 106
+  ["Nominalna moc/klasa jednostki to stała cecha modelu, nie bieżący pomiar."], // 107
+  ["Tryb cichy zmniejsza hałas, lecz może ograniczyć dostępną moc ogrzewania/chłodzenia."], // 108
+  ["Bieżący stan diagnostyczny z HomeHub: brak błędu, usterka lub ostrzeżenie."], // 109
+  ["Znaczenie aktualnie zgłoszonego kodu usterki."], // 110
+  ["Numeryczny podkod zawężający sąsiedni kod diagnostyczny Daikin."], // 111
+  ["HomeHub zgłasza tylko pracę sprężarki, nie obroty ani moc; sens określa obieg i przepływ."], // 112
+  ["Praca CWU: praca = WŁ., oczekiwanie/buforowanie = WYŁ.; flaga nie podaje przyczyny."], // 113
+  ["Praca domu: praca = WŁ., oczekiwanie/buforowanie = WYŁ.; tryb rozróżnia ogrzewanie/chłodzenie."], // 114
+  ["Temperatura wody opuszczającej PHE przed elektrycznym BUH."], // 115
+  ["Temperatura zasilania za elektrycznym BUH."], // 116
+  ["Temperatura wody zmierzona w zasobniku CWU."], // 117
+  ["Temperatura ciekłego czynnika wymaga kontekstu trybu; pojedynczy odczyt nie diagnozuje."], // 118
+  ["Temperatura głównej strefy zgłaszana przez sterownik pokojowy."], // 119
+  ["Pobór układu z HomeHub zależy od grzałek; nie przypisuj całej wartości sprężarce."], // 120
+  ["Odczytywany cel zasilania ogrzewania może być stały lub pogodowy; firmware go nie zmienia."], // 121
+  ["Cel chłodzenia jest tylko odczytywany i ma znaczenie wyłącznie przy aktywnym chłodzeniu."], // 122
+  ["Czy obieg domu jest w ogóle WŁĄCZONY — to przełącznik, nie bieżąca aktywność."], // 123
+  ["Cicha praca zmniejsza hałas jednostki zewnętrznej i może obniżyć dostępną moc."], // 124
+  ["Cel dogrzewania CWU nie jest progiem startu; wpływają też histereza i harmonogram."], // 125
+  ["Odczytywana korekta celu ogrzewania −10…+10 K; niezerowa wartość nie dowodzi aktywnej pracy."], // 126
+  ["Odczytywana korekta celu chłodzenia −10…+10 K; niezerowa wartość nie dowodzi aktywnego chłodzenia."], // 127
+  ["Limit Smart Grid „zalecane włączenie”; działa niższy z nim i limitem ogólnym, to nie bieżący pobór."], // 128
+  ["Ogólny limit HomeHub, także przy swobodnej pracy; to ustawiony sufit, nie zmierzony pobór."], // 129
 ]);
 
 MODEL_DESCRIPTION_I18N.pl = modelDescriptionValues([

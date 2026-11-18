@@ -20,7 +20,7 @@ const rowRe = /\{\s*(\d+)\s*,\s*MbFunc::[^}]*?"((?:[^"\\]|\\.)*)"\s*(?:,\s*HomeH
 const rows = [...map.matchAll(rowRe)].map((m) => ({
   off: Number(m[1]), label: m[2].replace(/\\(["\\])/g, "$1"), kind: m[3] || "Number",
 }));
-assert.equal(rows.length, 32, "all 32 curated HomeHub registers must be audited");
+assert.equal(rows.length, 37, "all 37 curated HomeHub registers must be audited");
 
 const firstDescription = (label) => descriptions.find((d) => {
   d.re.lastIndex = 0;
@@ -28,8 +28,8 @@ const firstDescription = (label) => descriptions.find((d) => {
 });
 
 function labels(lang) {
-  const offsets = [1, 2, 3, 4, 6, 7, 9, 10, 21, 22, 23, 30, 31, 32, 33, 37,
-    38, 40, 41, 42, 43, 44, 45, 49, 50, 51, 52, 53, 54, 56, 57, 58];
+  const offsets = [1, 2, 3, 4, 6, 7, 9, 10, 12, 13, 21, 22, 23, 30, 31, 32, 33, 35, 36, 37,
+    38, 40, 41, 42, 43, 44, 45, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58];
   const context = {
     LANG: lang,
     I18N: Object.create(null),
@@ -69,6 +69,8 @@ const expected = new Map([
   [31, ["Compressor running", "Verdichter aktiv"]],
   [32, ["Booster heater run", "Heizstab aktiv"]],
   [33, ["Disinfection operation", "Speicherdesinfektion aktiv"]],
+  [35, ["Defrost / Restart", "Abtauen oder Wiederanlauf"]],
+  [36, ["Hot start", "Warmstart"]],
   [37, ["3-way valve", "Position des 3-Wege-Ventils"]],
   [38, ["Current operation mode", "Aktueller Heiz- oder Kühlmodus"]],
   [52, ["DHW normal operation", "Warmwasserbetrieb"]],
@@ -90,7 +92,10 @@ const expected = new Map([
   [7, ["Room thermostat control Cooling setpoint Main", "Kühl-Solltemperatur der Hauptzone"]],
   [9, ["Quiet mode operation", "Leisebetrieb"]],
   [10, ["DHW reheat setpoint", "Sollwert für Warmwasser-Nachheizung"]],
+  [12, ["DHW reheat ON/OFF", "Warmwasser-Nachheizung freigegeben"]],
+  [13, ["DHW booster mode ON/OFF", "Warmwasser-Booster-Modus"]],
   [54, ["Leaving water Main Heating offset", "Vorlaufkorrektur der Haupt-Heizzone"]],
+  [55, ["Leaving water Main Cooling offset", "Kühl-Vorlaufkorrektur der Hauptzone"]],
   [56, ["Smart Grid operation mode", "Smart-Grid-Betriebsart"]],
   [57, ["Power limit during Recommended on / buffering", "Leistungsgrenze für Pufferung"]],
   [58, ["General power limit", "Allgemeine Leistungsgrenze"]],
@@ -173,4 +178,4 @@ assert.doesNotMatch(`${indoorMode.de.what} ${indoorMode.de.normal}`,
   /Wasserseite \(|Heizen\+Warmwasser|\bWW\b/,
   "the German operation-mode explanation uses fluent copy and the visible state names");
 
-console.log("HomeHub copy: 32/32 values, labels and localized explanations are semantically pinned");
+console.log("HomeHub copy: 37/37 values, labels and localized explanations are semantically pinned");

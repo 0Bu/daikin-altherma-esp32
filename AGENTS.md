@@ -50,6 +50,9 @@ measurements, incident history, and field-by-field reference material in the lin
   exact step.
 - Keep concurrent subagent work within the project limit of three concurrent subagents. Parallelize
   independent reads; serialize hardware access, GitHub mutations, shared build trees, and writes.
+- Coordinate shared `bench` work and tests unbureaucratically and efficiently with other sessions
+  when available: check live `/status` and active writers first, sequence runs via brief peer notes
+  instead of colliding or stalling, and proceed once idle.
 - Available focused project reviewers are `doc_drift_checker`, `heap_safety_reviewer`, and
   `x10a_decode_reviewer` under `.agents/agents/`. They are read-only evidence gatherers, not fixers.
 - Verify their effective permissions. Native roles can inherit a writable parent's sandbox despite

@@ -61,7 +61,7 @@ const catalog = catalogContext.__catalog;
 const lazyDomainCodes = ["zh", "ja", "nb", "sv", "fi"];
 const englishKeys = Object.keys(catalog.en).sort();
 const englishKeyOrder = Object.keys(catalog.en);
-assert.equal(englishKeys.length, 963, "the test must track the complete current UI catalog");
+assert.equal(englishKeys.length, 984, "the test must track the complete current UI catalog");
 for (const [code, source] of localeSources) {
   const sections = [`INSPECT_I18N.${code}`, `MODEL_DESCRIPTION_I18N.${code}`]
     .map(marker => source.indexOf(marker)).filter(index => index >= 0);
@@ -233,8 +233,8 @@ assert.equal(inspectKeys.length, 40, "specialist-copy gate must track every sche
 const inspectNowKeys = new Set(["sgrequest", "ou", "phe", "dt", "pth", "cop", "buh", "bsh",
   "valve", "valve2", "heat", "pump", "pel", "defrost", "quiet", "rhot", "rcold", "wsup",
   "wtank", "wheat", "wret", "flow_switch"]);
-const homeHubOffsets = [1, 2, 3, 4, 6, 7, 9, 10, 21, 22, 23, 30, 31, 32, 33, 37,
-  38, 40, 41, 42, 43, 44, 45, 49, 50, 51, 52, 53, 54, 56, 57, 58];
+const homeHubOffsets = [1, 2, 3, 4, 6, 7, 9, 10, 12, 13, 21, 22, 23, 30, 31, 32, 33, 35, 36, 37,
+  38, 40, 41, 42, 43, 44, 45, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58];
 
 function sourceAssignment(source, start, terminator) {
   const from = source.indexOf(start);
@@ -264,7 +264,7 @@ const faultSchema = tableLiteral(descriptionsSource,
   "const DAIKIN_FAULT_CODES = Object.freeze([", "\n]);");
 const descriptionSchema = tableLiteral(descriptionsSource, "const DESCRIPTIONS = [", "\n];");
 const modelSchema = tableLiteral(historySource, "const MODEL_DESCRIPTIONS = {", "\n};");
-assert.equal(descriptionSchema.length, 125, "specialist-copy gate must track every value description");
+assert.equal(descriptionSchema.length, 130, "specialist-copy gate must track every value description");
 assert.deepEqual(Object.keys(modelSchema), ["health_fault", "health_dhw_loss", "health_cycling",
   "health_defrost", "health_pressure", "health_flow", "health_heater", "health_retries",
   "free_heap", "max_alloc", "capacity", "capacity_iu", "candidates", "candidates_nocap",
