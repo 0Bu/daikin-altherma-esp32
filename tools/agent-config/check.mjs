@@ -149,6 +149,7 @@ const expectedSkills = [
   "domain-review",
   "feature-docs",
   "flash-esp32",
+  "ota",
   "pr-hygiene-review",
   "project-review",
   "renovate-review",

@@ -547,12 +547,18 @@ guard_case "quote-split production OTA path is denied" \
 guard_case "foreign production gate copy is denied" \
     "$(payload exec_command command "/tmp/production-ota-gate.py --execute")" deny
 canonical_ota_gate="$root/scripts/production-ota-gate.py --manifest-url https://0bu.github.io/daikin-altherma-esp32/dev/manifest.json --expected-source-sha abcdef1234567890abcdef1234567890abcdef12 --expected-version 1.2.3-dev.4 --expected-app-sha256 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb --expected-current-version 1.2.3 --confirm-production production --execute"
-canonical_dev_upload="$root/scripts/dev-ota-upload.py --confirm-production-test production --image /tmp/app.bin --expected-app-sha256 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb --expected-current-version 1.2.3-dev.4 --expected-current-elf abc123def --evidence /tmp/receipt.json --expected-source-sha256 cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+canonical_dev_upload="$root/scripts/dev-ota-upload.py --target production --image /tmp/app.bin --expected-app-sha256 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 guard_case "canonical dev upload preflight is allowed" \
     "$(payload exec_command command "$canonical_dev_upload")" ""
 guard_case "canonical dev upload execution is allowed" \
     "$(payload exec_command command "$canonical_dev_upload --execute")" ""
-guard_case "dev upload cannot bypass the production identity lease" \
+guard_case "canonical dev upload can target bench" \
+    "$(payload exec_command command "${canonical_dev_upload/--target production/--target bench} --execute")" ""
+guard_case "canonical dev upload can target an explicit board IP" \
+    "$(payload exec_command command "${canonical_dev_upload/--target production/--target 192.0.2.170} --execute")" ""
+guard_case "shared default mDNS target requires an explicit MAC" \
+    "$(payload exec_command command "${canonical_dev_upload/--target production/--target daikin-altherma-esp32.local} --execute")" deny
+guard_case "dev upload cannot bypass the target binding" \
     "$(payload exec_command command "$canonical_dev_upload --host foreign.invalid --execute")" deny
 guard_case "dev upload cannot run through an interpreter wrapper" \
     "$(payload exec_command command "python3 $canonical_dev_upload --execute")" deny
