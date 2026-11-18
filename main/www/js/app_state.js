@@ -721,6 +721,7 @@ function modbusStatusView(mode, live) {
 
 function sysSet(mode, status, tone) {
   setTxt("svMode", mode);
+  if (typeof fitSchematicModeHeadline === "function") fitSchematicModeHeadline(S._headerPillLeftX);
   setTxt("svStatus", status);
   $("svStatus").setAttribute("class", "sc-status" + (tone ? " " + tone : ""));
   $("svDot").setAttribute("fill", TONE_FILL[tone || ""]);

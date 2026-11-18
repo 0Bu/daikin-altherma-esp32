@@ -1,4 +1,4 @@
-// translation-source: 8d39ceba8be704e3a02e1f3012fba8f388b32c4e1e353afc033c83be08bee81f
+// translation-source: 7868c79654d72277f20939757ce97fa1a10e51ae6f225d939d15f7dd6f917646
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -1062,6 +1062,8 @@ INSPECT_I18N.cs = inspectValues(
     ["Průtok vody", 0, "Průtok společným okruhem; minimum závisí na modelu a režimu."], // flow
     ["Stav spínače průtoku", 0, "Binární stav X10A; neměří l/min ani nepotvrzuje minimum modelu.", (d) => d.flowSwitch == null ? null : d.flowSwitch ? `X10A ZAP; porovnejte s čerpadlem a ${fmt1(d.flow)} l/min.` : `X10A VYP; při chodu čerpadla porovnejte ${fmt1(d.flow)} l/min a chybu 7H/C0.`], // flow_switch
     ["Tlak vody", 0, "Tlak v uzavřeném hydraulickém okruhu. Povolený rozsah závisí na modelu, výšce a expanzní nádobě; viz návod."], // wp
+    ["Servisní port X10A", "Zdroj dat X10A", "Kabelové spojení X10A pouze pro čtení; hodnoty jsou modře."], // x10a
+    ["Modbus TCP", "Zdroj dat Modbus", "Nezávislé spojení Modbus TCP pouze pro čtení (HomeHub/Altherma 4); hodnoty petrolejově."], // modbus
   ],
 );
 
@@ -1254,4 +1256,75 @@ MODEL_DESCRIPTION_I18N.cs = modelDescriptionValues([
   ["Stejná třída a registry: volba zástupce nemění dekódované hodnoty."], // 12
   ["Několik rodin Daikin má stejné servisní registry, takže obchodní název nelze rozlišit; nadpis zůstane „Daikin Altherma“. Venkovní jednotka výkon nehlásí, kandidáti tedy mohou mít různé třídy. Firmware volí variantu nejbližší vnitřní jednotce, ne však s plnou jistotou. Ověřte štítkem."], // 13
   ["Syrové ID bajty venkovní jednotky bez veřejné tabulky názvů; při nejasnosti je znak po znaku porovnejte se štítkem."], // 14
+]);
+
+FAULT_CODE_I18N.cs = faultCodeValues([
+  "Problém s průtokem vody", // 7H
+  "Porucha snímače teploty vratné vody", // 80
+  "Porucha snímače teploty výstupní vody", // 81
+  "Aktivována protimrazová ochrana výměníku", // 89
+  "Neobvyklý nárůst teploty na výstupu TUV", // 8F
+  "Neobvyklý nárůst teploty výstupní vody", // 8H
+  "Porucha detekce průchodu nulou", // A1
+  "Problém s omezením vysokého tlaku nebo protimrazovou ochranou", // A5
+  "Pomocný ohřívač je přehřátý nebo nepřipojený", // AA
+  "Topné těleso zásobníku je přehřáté", // AC
+  "Dezinfekce zásobníku proti legionelle nebyla dokončena", // AH
+  "Překročena doba ohřevu TUV", // AJ
+  "Porucha snímače průtoku", // C0
+  "Porucha snímače teploty výměníku", // C4
+  "Porucha snímače výměníku", // C5
+  "Porucha snímače pokojové teploty", // CJ
+  "Vadná deska elektroniky venkovní jednotky", // E1
+  "Porucha detekce svodového proudu", // E2
+  "Sepnul vysokotlaký spínač venkovní jednotky", // E3
+  "Porucha sacího tlaku", // E4
+  "Přehřátý motor invertorového kompresoru venkovní jednotky", // E5
+  "Kompresor venkovní jednotky se nespustil", // E6
+  "Porucha motoru ventilátoru venkovní jednotky", // E7
+  "Přepětí na vstupu venkovní jednotky", // E8
+  "Porucha elektronického expanzního ventilu", // E9
+  "Problém přepnutí chlazení/topení venkovní jednotky", // EA
+  "Neobvyklý nárůst teploty zásobníku", // EC
+  "Porucha teploty výtlačného potrubí venkovní jednotky", // F3
+  "Neobvykle vysoký tlak venkovní jednotky při chlazení", // F6
+  "Neobvykle vysoký tlak; sepnut vysokotlaký spínač", // FA
+  "Porucha snímače napětí nebo proudu venkovní jednotky", // H0
+  "Porucha externího snímače teploty", // H1
+  "Porucha vysokotlakého spínače venkovní jednotky", // H3
+  "Porucha ochrany kompresoru proti přetížení", // H5
+  "Porucha snímače polohy venkovní jednotky", // H6
+  "Porucha systému CT vstupního proudu venkovního kompresoru", // H8
+  "Porucha snímače venkovní teploty venkovní jednotky", // H9
+  "Porucha snímače teploty zásobníku", // HC
+  "Porucha snímače tlaku vody", // HJ
+  "Porucha snímače výtlačného potrubí venkovní jednotky", // J3
+  "Porucha snímače výměníku venkovní jednotky", // J6
+  "Porucha snímače vysokého tlaku venkovní jednotky", // JA
+  "Porucha desky invertoru", // L1
+  "Neobvyklý nárůst teploty v řídicí skříni venkovní jednotky", // L3
+  "Neobvyklý nárůst teploty chladiče invertoru venkovní jednotky", // L4
+  "Detekován nadproud DC v invertoru venkovní jednotky", // L5
+  "Sepnula tepelná ochrana desky invertoru", // L8
+  "Sepnula ochrana proti zablokování kompresoru", // L9
+  "Porucha komunikačního systému venkovní jednotky", // LC
+  "Nesymetrie nebo výpadek fáze napájení", // P1
+  "Detekováno neobvyklé stejnosměrné napětí", // P3
+  "Porucha snímače teploty chladiče venkovní jednotky", // P4
+  "Nesoulad nastavení výkonu", // PJ
+  "Nedostatek chladiva ve venkovní jednotce", // U0
+  "Obrácený sled nebo výpadek fáze", // U1
+  "Porucha síťového napětí venkovní jednotky", // U2
+  "Vysoušení potěru podlahového topení nebylo správně dokončeno", // U3
+  "Problém komunikace mezi vnitřní a venkovní jednotkou", // U4
+  "Problém komunikace s uživatelským rozhraním", // U5
+  "Porucha přenosu mezi hlavním CPU a CPU invertoru venkovní jednotky", // U7
+  "Problém komunikace s LAN adaptérem, pokojovým termostatem nebo USB", // U8
+  "Nesprávná kombinace nebo kompatibilita jednotek", // UA
+  "Detekováno prohozené potrubí nebo vadné komunikační vedení", // UF
+], "Není přenášen žádný chybový kód.", "Pro tento kód není uložen stručný popis.");
+
+MB_DELTA_I18N.cs = mbDeltaValues([
+  "při stojícím kompresoru X10A drží hodnotu z posledního běhu; registr HomeHub se dál čte, ale nemá čas měření", // outdoor_air
+  "obě hodnoty pocházejí z různých prostorových regulátorů", // room_temp
 ]);
