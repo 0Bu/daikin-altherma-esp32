@@ -1,4 +1,4 @@
-// translation-source: 7e05fca97bff772abf43c5704d541747bc310184005cce90ce5b76eab24256ce
+// translation-source: 052b8f35753bd74f454b65f49eeab66cbe3f0a3966074b9bc6c86e63988ee5bd
 I18N.it = localeValues([
   /* sys.nodata */ "Nessun dato",
   /* sys.unreachable */ "Non raggiungibile",
@@ -1030,7 +1030,7 @@ INSPECT_I18N.it = inspectValues(
       : d.copScope === "plant" ? `${fmt1(d.cop)} kW termici dopo BUH per kW elettrico stimato da CT: ≈ ${fmt1(d.copPth)} / ≈ ${fmt1(d.pel)} kW. Il cablaggio CT determina i carichi inclusi.`
       : `${fmt1(d.cop)} kW termici per kW elettrico nel confine pompa di calore: ≈ ${fmt1(d.copPth)} / ≈ ${fmt1(d.pel)} kW. BUH è fuori da entrambi i valori.`], // cop
     ["Riscaldatore ausiliario · BUH", "Riscaldatore ausiliario BUH", "Riscaldatore elettrico del circuito acqua posto dopo R1T. Gli stadi possono aumentare mandata e consumo; non è la resistenza interna BSH del serbatoio.", (d) => d.buh1 == null && d.buh2 == null ? null : d.buh2 ? "Stadio 2: entrambi gli stadi scaldano." : d.buh1 ? "Stadio 1: uno stadio scalda." : "Inattivo: nessuno stadio BUH riscalda."], // buh
-    ["Resistenza serbatoio", "Resistenza elettrica del serbatoio", "Resistenza a immersione BSH nel serbatoio. Può scaldare con compressore, pompa e portata a zero; il contatto X10A non misura la potenza.", () => { const on = x10aDown() ? null : vOn(/^bsh$/i); return on == null ? null : on ? "Resistenza del serbatoio attiva." : "Inattiva: resistenza del serbatoio spenta."; }], // bsh
+    ["Resistenza serbatoio", "Resistenza elettrica del serbatoio", "Resistenza a immersione BSH nel serbatoio. Può scaldare con compressore, pompa e portata a zero; il segnale indica lo stato acceso/spento, non la potenza.", (d) => d.bsh == null ? null : d.bsh ? "Resistenza del serbatoio attiva." : "Inattiva: resistenza del serbatoio spenta."], // bsh
     ["Valvola a 3 vie", 0, "L’uscita logica seleziona il serbatoio o gli ambienti. Non è un ritorno meccanico di posizione né una prova di portata.", (d) => d.valveDhw == null ? null : d.valveDhw ? "Il controllo indica il percorso serbatoio. Non dimostra posizione meccanica, portata o carica attiva." : "Il controllo indica il percorso ambienti. Non dimostra posizione meccanica o circolazione."], // valve
     ["Uscita valvola a 2 vie", 0, "Uscita binaria X10A per una 2WV del circuito ambienti. Non indica la posizione meccanica e non equivale alla modalità caldo/freddo.", (d) => d.valve2On == null ? null : d.valve2On ? "X10A indica l’uscita 2WV attiva. Non dimostra riscaldamento attivo o posizione meccanica; verificare modalità e funzionamento ambienti." : "X10A indica l’uscita 2WV inattiva. Da sola non significa raffrescamento e non contraddice una modalità riscaldamento configurata, soprattutto a riposo."], // valve2
     ["Serbatoio ACS", "Serbatoio ACS o accumulo termico", "Serbatoio misurato da R5T. Carica, obiettivo e resistenza BSH sono mostrati separatamente."], // tank

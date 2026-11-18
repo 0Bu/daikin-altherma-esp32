@@ -1,4 +1,4 @@
-// translation-source: 7e05fca97bff772abf43c5704d541747bc310184005cce90ce5b76eab24256ce
+// translation-source: 052b8f35753bd74f454b65f49eeab66cbe3f0a3966074b9bc6c86e63988ee5bd
 I18N.ja = localeValues([
   /* sys.nodata */ "データなし",
   /* sys.unreachable */ "接続不可",
@@ -1229,7 +1229,7 @@ INSPECT_I18N.ja = inspectValues(
       : d.copScope === "plant" ? `CT電力1 kW当たりBUH後熱 ${fmt1(d.cop)} kW — 約${fmt1(d.pel)} kW入力で約${fmt1(d.copPth)} kW。境界はCT配線次第です。`
       : `ヒートポンプ境界で電力1 kW当たり熱 ${fmt1(d.cop)} kW — 約${fmt1(d.pel)} kW入力で約${fmt1(d.copPth)} kW。BUHは両方に含みません。`], // cop
     ["補助ヒーター · BUH", "補助ヒーター BUH", "凍結、霜取り、非常運転用の水回路電気ヒーターです。段数は個別のkW測定ではありません。", (d) => d.buh1 == null && d.buh2 == null ? null : d.buh2 ? "段2 — 両段作動。" : d.buh1 ? "段1 — 1段作動。" : "停止 — BUH作動なし。"], // buh
-    ["タンク電気ヒーター", "タンク電気ヒーター", "浸漬式BSHは圧縮機や水循環なしでもタンクを加熱します。X10Aは状態だけで出力は報告しません。", () => { const on = x10aDown() ? null : vOn(/^bsh$/i); return on == null ? null : on ? "タンク電気ヒーター作動中。" : "停止 — BSHは作動していません。"; }], // bsh
+    ["タンク電気ヒーター", "タンク電気ヒーター", "浸漬式BSHは圧縮機や水循環なしでもタンクを加熱します。状態のみで出力は報告しません。", (d) => d.bsh == null ? null : d.bsh ? "タンク電気ヒーター作動中。" : "停止 — BSHは作動していません。"], // bsh
     ["3方弁", "3方弁", "タンクまたは室内への経路指令です。機械的位置や流量の確認信号ではありません。", (d) => d.valveDhw == null ? null : d.valveDhw ? "タンク経路を指令。これだけで流量や加熱を確認できません。" : "室内経路を指令。これだけで循環を確認できません。"], // valve
     ["2方弁出力", "2方弁出力", "X10Aの2値出力です。機械的位置や暖冷房の証明ではありません。", (d) => d.valve2On == null ? null : d.valve2On ? "X10Aは2WV出力 入。モードと室内回路運転は別に確認してください。" : "X10Aは2WV出力 切。これだけで冷房を意味せず、待機中の暖房設定とも矛盾しません。"], // valve2
     ["給湯・蓄熱タンク", "給湯または蓄熱タンク", "R5T、設定温度、3WV経路で示します。温度だけでは加熱中と確認できません。"], // tank

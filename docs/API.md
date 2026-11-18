@@ -473,7 +473,8 @@ omits `t0` before synchronization or without that boundary. `epoch` is captured 
 and `boot_id` matches `/status`. A missing snapshot epoch or an
 epoch change before emission returns 503. Clients must reject responses superseded by a newer
 status/source generation.
-`held` marks eligible X10A outdoor nulls as held-over; all other source rasters leave it empty.
+`held` marks eligible X10A outdoor-page nulls and compressor-idle `pel`/`cop` nulls as held-over;
+all other source rasters leave it empty.
 The dashboard accepts up to 4 KiB of decoded JSON and 288 samples on the 300-second raster.
 With live status, it bounds boot-relative buckets by reported uptime, elapsed browser time since
 the status request began and one second for whole-second uptime. It accepts a reply without row
@@ -486,9 +487,10 @@ time against the completed bucket. It drops contradictory wall time from a new b
 and hides a cached clock label that conflicts with the last accepted status, including during a
 polling outage. A compatible peer can still supply wall-clock labels for the shared raster.
 Without a compatible clock the chart uses a relative axis, as it does for legacy unanchored rings.
-The browser preserves compatible cached readings if it rejects a replacement. Independent sources
-with incompatible anchors use separate plots. Independent recorders can book different warm-reset
-gaps, so their plots stay separate while either still contains pre-boot samples.
+The browser preserves compatible cached readings if it rejects a replacement. Paired sources share
+one plot aligned by monotonic bucket, wall-clock slot or relative tail, with HomeHub initially
+hidden while X10A is available; pre-boot warm-reset and relative-tail slots do not prove
+simultaneous sampling across independent recorders.
 `v` does not record an unknown compressor state. A sweep dropped after a stop cannot put a number into
 its bucket, but any other outdoor sample without a readable speed stays a number, so a number is not
 proof that the page was current.

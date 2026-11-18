@@ -1,16 +1,17 @@
 #pragma once
 // The 24-hour trend rings. One fixed-cadence buffer per entry in logic/history.hpp's TRENDS, fed by
-// the X10A poll task, thirteen rings fed by the independent HomeHub task and three rings fed by ENV
+// the X10A poll task, fourteen rings fed by the independent HomeHub task and three rings fed by ENV
 // III, and an independent MQTT room-temperature ring, read by GET /history. The HomeHub set is
 // eight paired measurements plus BSH,
-// 3-way-valve, Quiet and Smart-Grid state timelines, and the Modbus-only disinfection state.
+// 3-way-valve, Quiet and Smart-Grid state timelines, electrical input (input 51), and the
+// Modbus-only disinfection state.
 //
 // The buffers are STATIC storage, never heap: on this board the binding limit is the largest
 // CONTIGUOUS free block, not free heap, and a static array does not compete for it. They occupy one
 // `.noinit` region so the LIVE arrays themselves survive a power-kept reset; there is no shadow
-// copy. Thirty-two X10A/board/state rings cost 18432 bytes, thirteen HomeHub rings another 7488
-// bytes and three ENV III rings 1728 bytes — see logic/history.hpp's HISTORY_BYTES_PER_TREND and
-// the ceiling asserts beside the arrays.
+// copy. Thirty-four X10A/board/state/derived rings cost 19584 bytes, fourteen HomeHub rings another
+// 8064 bytes and three ENV III rings 1728 bytes — see logic/history.hpp's HISTORY_BYTES_PER_TREND
+// and the ceiling asserts beside the arrays.
 //
 // NOT in NVS, and that has not changed: a 576-byte blob rewritten every 5 minutes is ~100k writes a
 // year in the partition that holds the WiFi credentials, to save a history that is only ever
@@ -69,6 +70,11 @@ bool history_modbus_checkup_flash_pending();
 // -> A between status polls; ordinary samples/flushes do not. It is independent of producer
 // generation checks, and is boot-local: clients also compare the device's per-boot identity.
 uint32_t history_epoch() noexcept;
+
+// Hand the poll task's adjudicated single-sweep X10A derived-history coverage (`pel`, `cop`) to
+// `history_record()` via poll-task-only static scratch, avoiding per-sweep Config/profile lookups
+// and extra stack frames on `poll_task`.
+void history_set_derived_coverage(const logic::HistoryDerivedCoverage& cov) noexcept;
 
 // Feed one poll cycle. Called from the poll task right after a sweep, with that cycle's values —
 // NOT under the cache mutex (this takes its own, and holding two would invert a lock order for no

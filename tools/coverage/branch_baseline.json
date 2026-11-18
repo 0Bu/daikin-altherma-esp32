@@ -2014,6 +2014,20 @@
       "measurement_limits": [
         "The local x86_64 Ubuntu 26.04 GCC image measures the hosted profile candidate. Authoritative GitHub confirmation remains separate."
       ]
+    },
+    {
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2)",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+        "gcc-15-github-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+      },
+      "scope": "Single-sweep X10A electrical power and heating/DHW COP trend helpers in history.hpp, plus HomeHub input 51 pel history in homehub_map.hpp. All changed branch ratios increase across Clang, GCC 13 and GCC 15.",
+      "sources": {
+        "main/logic/history.hpp": "single-sweep pel and cop trend helpers",
+        "main/logic/homehub_map.hpp": "HomeHub input 51 pel history"
+      }
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
@@ -2089,7 +2103,7 @@
       },
       "main/logic/cop_scope.hpp": {
         "outcomes": 30,
-        "taken": 22
+        "taken": 25
       },
       "main/logic/crashinfo.hpp": {
         "outcomes": 237,
@@ -2168,8 +2182,8 @@
         "taken": 14
       },
       "main/logic/history.hpp": {
-        "taken": 183,
-        "outcomes": 188
+        "taken": 339,
+        "outcomes": 348
       },
       "main/logic/history_persist.hpp": {
         "taken": 476,
@@ -2610,8 +2624,8 @@
         "taken": 16
       },
       "main/logic/history.hpp": {
-        "taken": 230,
-        "outcomes": 234
+        "taken": 410,
+        "outcomes": 416
       },
       "main/logic/history_persist.hpp": {
         "taken": 559,
@@ -3052,8 +3066,8 @@
         "taken": 16
       },
       "main/logic/history.hpp": {
-        "taken": 228,
-        "outcomes": 232
+        "taken": 408,
+        "outcomes": 414
       },
       "main/logic/history_persist.hpp": {
         "taken": 557,
@@ -3494,8 +3508,8 @@
         "taken": 16
       },
       "main/logic/history.hpp": {
-        "taken": 228,
-        "outcomes": 232
+        "taken": 408,
+        "outcomes": 414
       },
       "main/logic/history_persist.hpp": {
         "taken": 557,

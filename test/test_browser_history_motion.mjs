@@ -275,8 +275,8 @@ async function expireOpeningHistory(page, id, inspector = "") {
       const key = histCacheKey(id, source);
       if (keys.has(key)) return;
       keys.add(key);
-      if (source === "x10a" && DERIVED[id])
-        for (const input of DERIVED[id].ins) add(input, "x10a");
+      if ((source === "x10a" && DERIVED[id]) || (source === "modbus" && DERIVED[id]?.modbus))
+        for (const input of DERIVED[id].ins) add(input, source);
     };
     if (entry?.env3 || id === ENV3_COMBINED_ID)
       for (const series of ENV3_COMBINED_SERIES) add(series.id, "env3");
@@ -1279,7 +1279,7 @@ export async function assertHistoryMotion(page, server, context) {
       }
       if (key === "tank" && page.assertFlowPaint) await page.assertFlowPaint(label);
       const expected = key === "env3" ? ["env3_temperature", "env3_humidity", "env3_pressure"]
-        : [ "x10a", ...(key !== "bsh" && MODBUS_HISTORY_ROWS.some(row => row.id === id) ? ["modbus"] : []),
+        : [ "x10a", ...((key === "dt" || MODBUS_HISTORY_ROWS.some(row => row.id === id)) ? ["modbus"] : []),
           ...(key === "room" ? ["room"] : []) ];
       assert.deepEqual(chart.sources, expected, label + ": preserve independent history sources");
       if (key === "env3") assert.equal(chart.forecast, true, label + ": forecast must accompany real ENV III history");

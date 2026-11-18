@@ -377,10 +377,11 @@ Eight measurements plus three state pairs, and — measured across the catalog �
 liquid refrigerant, flow, room temperature,
 booster-heater run (HomeHub input `32` ↔ X10A BSH converter `305`) and 3-way-valve position (input
 `37` ↔ converter `306`), and EKRHH Quiet mode (holding `9` ↔ X10A `0x60/2`, converter `301`).
-Native Altherma 4 holding 9 reports selection and is excluded from this activity pairing. The rest carry no pairing on
-purpose, each for a stated reason: the real power measurement has
-no X10A equivalent at all (X10A estimates it from CT clamps at an assumed 230 V, so pairing a
-measurement with an estimate would hide which is which); other setpoints, modes and faults are not readings.
+Native Altherma 4 holding 9 reports selection and is excluded from this activity pairing. Smart-Grid
+mode (holding `56`) and electrical input (input `51`, see **Electrical input and COP** below) omit
+live `concept` pairing in `HOMEHUB_CONCEPTS` yet share `smart_grid_mode` and `pel` in
+`HOMEHUB_HISTORIES` so their 24-hour series overlay with distinct source legends while live
+headlines keep separate provenance; other setpoints, modes and faults are not paired readings.
 Disinfection input `33` is likewise deliberately unpaired: X10A `0x62/8` converter `303` is named
 **Tank preheat**, a preparatory state rather than proof that disinfection is active. Both receive
 their own event timeline, so their timing can be compared without merging their meaning.
@@ -390,8 +391,8 @@ their own event timeline, so their timing can be compared without merging their 
 `/values` carries the two sources as **two arrays** — `values` (X10A) and `modbus` — mirroring the two
 stacks. They are not merged: the two have separate liveness, and merging would make "is this reading
 current?" a per-row question no consumer could answer. Each row on both sides carries its `concept`
-where one exists; a Modbus-only timeline additionally carries `history` without acquiring a false
-X10A pairing.
+where one exists; every historied Modbus row carries `history`, including unpaired timelines
+(`smart_grid_mode`, `pel`, `disinfection_state`) without acquiring a live `concept` pairing.
 
 The `modbus` array is emitted **only while the link is live at the moment the snapshot is taken** —
 not merely while the stack is configured, and not merely while it was connected when the request
@@ -420,9 +421,10 @@ available in Settings.
 
 **Electrical input and COP.** HomeHub input register **51** reports heat-pump power consumption in
 `kW`. The [Daikin EKRHH guide, 4P744838-1E, §9.2.2, p. 43][homehub-ekrhh-guide] leaves the
-measurement point and heater inclusion unspecified. The dashboard displays that input and
-withholds COP in the HomeHub-only view because the electrical and heat-exchanger boundaries
-cannot be matched.
+measurement point and heater inclusion unspecified. The dashboard displays that input, records its
+independent 24-hour `pel` history without live-headline pairing against X10A's current×230 V
+estimate, and withholds COP in the HomeHub-only view because the electrical and heat-exchanger
+boundaries cannot be matched.
 
 **MQTT preserves the two sources instead of merging them.** X10A is retained as grouped JSON on
 `<base>/x10a`; an enabled HomeHub publishes its separate flat map on `<base>/modbus`. A disconnected

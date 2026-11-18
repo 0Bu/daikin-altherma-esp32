@@ -1,4 +1,4 @@
-// translation-source: 7e05fca97bff772abf43c5704d541747bc310184005cce90ce5b76eab24256ce
+// translation-source: 052b8f35753bd74f454b65f49eeab66cbe3f0a3966074b9bc6c86e63988ee5bd
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -1037,10 +1037,7 @@ INSPECT_I18N.es = inspectValues(
       : d.copScope === "plant" ? `${fmt1(d.cop)} kW térmicos tras BUH por kW eléctrico estimado con CT: ≈ ${fmt1(d.copPth)} kW / ≈ ${fmt1(d.pel)} kW. El cableado CT determina las cargas incluidas.`
       : `${fmt1(d.cop)} kW térmicos por kW eléctrico dentro del límite de la bomba de calor: ≈ ${fmt1(d.copPth)} kW / ≈ ${fmt1(d.pel)} kW. BUH queda fuera de ambas cifras.`], // cop
     ["Calentador auxiliar · BUH", "Calentador auxiliar BUH", "Calentador eléctrico del circuito de agua situado después de R1T. Sus etapas pueden elevar la temperatura de impulsión y el consumo; no es la resistencia interna del depósito BSH.", (d) => d.buh1 == null && d.buh2 == null ? null : d.buh2 ? "Etapa 2: ambas etapas calientan." : d.buh1 ? "Etapa 1: una etapa calienta." : "Inactivo: ninguna etapa BUH está activa."], // buh
-    ["Resistencia del depósito", "Resistencia eléctrica del depósito", "Resistencia eléctrica de inmersión BSH dentro del depósito. Puede calentar el agua con compresor, bomba y caudal a cero; su contacto X10A no mide potencia.", () => {
-      const on = x10aDown() ? null : vOn(/^bsh$/i);
-      return on == null ? null : on ? "Resistencia del depósito activa." : "Inactiva: la resistencia del depósito está apagada.";
-    }], // bsh
+    ["Resistencia del depósito", "Resistencia eléctrica del depósito", "Resistencia eléctrica de inmersión BSH dentro del depósito. Puede calentar el agua con compresor, bomba y caudal a cero; el estado solo indica encendido/apagado, no potencia.", (d) => d.bsh == null ? null : d.bsh ? "Resistencia del depósito activa." : "Inactiva: la resistencia del depósito está apagada."], // bsh
     ["Válvula de 3 vías", 0, "La salida lógica selecciona el camino del depósito o de climatización. No es una confirmación mecánica de posición ni demuestra caudal.", (d) => d.valveDhw == null ? null : d.valveDhw
       ? "El control indica el camino del depósito. Esto no demuestra posición mecánica, caudal ni carga activa."
       : "El control indica el camino de climatización. Esto no demuestra posición mecánica ni circulación."], // valve

@@ -1,4 +1,4 @@
-// translation-source: 7e05fca97bff772abf43c5704d541747bc310184005cce90ce5b76eab24256ce
+// translation-source: 052b8f35753bd74f454b65f49eeab66cbe3f0a3966074b9bc6c86e63988ee5bd
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
@@ -1030,7 +1030,7 @@ INSPECT_I18N.zh = inspectValues(
       : d.copScope === "plant" ? `CT：每 1 kW 电在 BUH 后约供热 ${fmt1(d.cop)} kW（${fmt1(d.copPth)} / ${fmt1(d.pel)} kW）；负载取决于接线。`
       : `热泵边界：每 1 kW 电约供热 ${fmt1(d.cop)} kW（${fmt1(d.copPth)} / ${fmt1(d.pel)} kW），不含 BUH。`], // cop
     ["备用加热器 · BUH", "备用加热器 BUH", "R1T 下游水路电热，不是水箱 BSH。", (d) => d.buh1 == null && d.buh2 == null ? null : d.buh2 ? "2 级：两级加热。" : d.buh1 ? "1 级：一级加热。" : "BUH 各级关闭。"], // buh
-    ["水箱电加热器", "水箱电加热器 BSH", "水箱浸入式 BSH；可独立加热，X10A 只报状态不测功率。", () => { const on = x10aDown() ? null : vOn(/^bsh$/i); return on == null ? null : on ? "BSH 已启动。" : "BSH 已关闭。"; }], // bsh
+    ["水箱电加热器", "水箱电加热器 BSH", "水箱浸入式 BSH；可独立加热，该信号只报状态不测功率。", (d) => d.bsh == null ? null : d.bsh ? "BSH 已启动。" : "BSH 已关闭。"], // bsh
     ["三通阀", "三通阀 3WV", "逻辑输出选择水箱/空间；不反馈机械位置或流量。", (d) => d.valveDhw == null ? null : d.valveDhw ? "指示水箱路径；不证明位置、流量或加热。" : "指示空间路径；不证明位置或循环。"], // valve
     ["二通阀输出", "二通阀输出 2WV", "空间 2WV 的 X10A 输出；不反馈位置或冷暖模式。", (d) => d.valve2On == null ? null : d.valve2On ? "2WV 输出启动；不证明供暖或位置。" : "2WV 输出关闭；不表示制冷，也不否定待机供暖模式。"], // valve2
     ["生活热水箱", "生活热水箱或蓄热罐", "R5T 测量的生活热水箱或蓄热罐。水箱加热、目标和 BSH 状态分别显示。"], // tank

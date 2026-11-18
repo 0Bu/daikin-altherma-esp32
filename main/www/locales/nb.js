@@ -1,4 +1,4 @@
-// translation-source: 7e05fca97bff772abf43c5704d541747bc310184005cce90ce5b76eab24256ce
+// translation-source: 052b8f35753bd74f454b65f49eeab66cbe3f0a3966074b9bc6c86e63988ee5bd
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -1038,10 +1038,7 @@ INSPECT_I18N.nb = inspectValues(
       : d.copScope === "plant" ? `${fmt1(d.cop)} kW varme etter BUH/kW CT-strøm: ≈ ${fmt1(d.copPth)} / ≈ ${fmt1(d.pel)} kW. CT-kabling avgjør laster.`
       : `${fmt1(d.cop)} kW varme/kW strøm innen varmepumpegrensen: ≈ ${fmt1(d.copPth)} / ≈ ${fmt1(d.pel)} kW. BUH er utenfor begge.`], // cop
     ["Tilleggsvarmer · BUH", "Tilleggsvarmer BUH", "Elektrisk vannkretsvarmer etter R1T. Trinnene kan øke turtemperatur og forbruk; ikke tankvarmeren BSH.", (d) => d.buh1 == null && d.buh2 == null ? null : d.buh2 ? "Trinn 2: begge trinn varmer." : d.buh1 ? "Trinn 1: ett trinn varmer." : "Inaktiv: ingen BUH-trinn aktive."], // buh
-    ["Tankvarmer", "Elektrisk tankvarmer", "Elektrisk BSH-element i tanken. Kan varme med kompressor, pumpe og vannmengde på null; X10A-statusen viser ikke effekt.", () => {
-      const on = x10aDown() ? null : vOn(/^bsh$/i);
-      return on == null ? null : on ? "Tankvarmer aktiv." : "Inaktiv: tankvarmeren er av.";
-    }], // bsh
+    ["Tankvarmer", "Elektrisk tankvarmer", "Elektrisk BSH-element i tanken. Kan varme med kompressor, pumpe og vannmengde på null; statusen viser bare av/på, ikke effekt.", (d) => d.bsh == null ? null : d.bsh ? "Tankvarmer aktiv." : "Inaktiv: tankvarmeren er av."], // bsh
     ["3-veisventil", 0, "Den logiske utgangen velger tank- eller romkrets. Den bekrefter ikke mekanisk posisjon eller vannmengde.", (d) => d.valveDhw == null ? null : d.valveDhw
       ? "Styringen viser tankvei; det beviser ikke mekanisk posisjon, vannmengde eller aktiv lading."
       : "Styringen viser romvei; det beviser ikke mekanisk posisjon eller sirkulasjon."], // valve

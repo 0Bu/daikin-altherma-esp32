@@ -1,4 +1,4 @@
-// translation-source: 7e05fca97bff772abf43c5704d541747bc310184005cce90ce5b76eab24256ce
+// translation-source: 052b8f35753bd74f454b65f49eeab66cbe3f0a3966074b9bc6c86e63988ee5bd
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -1229,7 +1229,7 @@ INSPECT_I18N.fi = inspectValues(
       : d.copScope === "plant" ? `${fmt1(d.cop)} kW lämpöä BUH:n jälkeen / 1 kW CT-sähköä — ≈ ${fmt1(d.copPth)} kW teholla ≈ ${fmt1(d.pel)} kW. CT-kytkentä määrää rajan.`
       : `${fmt1(d.cop)} kW lämpöä / 1 kW sähköä lämpöpumpun rajalla — ≈ ${fmt1(d.copPth)} kW teholla ≈ ${fmt1(d.pel)} kW. BUH ei sisälly kumpaankaan.`], // cop
     ["Varalämmitin · BUH", "Varalämmitin BUH", "Vesipiirin sähkövastus pakkaselle, sulatukselle tai varakäytölle. Porras ei ole erillinen kW-mittaus.", (d) => d.buh1 == null && d.buh2 == null ? null : d.buh2 ? "Porras 2 — molemmat portaat lämmittävät." : d.buh1 ? "Porras 1 — yksi porras lämmittää." : "Pois — BUH-portaita ei käytössä."], // buh
-    ["Säiliön sähkövastus", "Säiliön sähkövastus", "Uppovastus BSH lämmittää säiliötä ilman kompressoria tai vesikiertoa. X10A ilmoittaa vain tilan, ei tehoa.", () => { const on = x10aDown() ? null : vOn(/^bsh$/i); return on == null ? null : on ? "Säiliön sähkövastus aktiivinen." : "Pois — säiliön vastus ei ole käytössä."; }], // bsh
+    ["Säiliön sähkövastus", "Säiliön sähkövastus", "Uppovastus BSH lämmittää säiliötä ilman kompressoria tai vesikiertoa. Signaali ilmoittaa vain tilan, ei tehoa.", (d) => d.bsh == null ? null : d.bsh ? "Säiliön sähkövastus aktiivinen." : "Pois — säiliön vastus ei ole käytössä."], // bsh
     ["3-tieventtiili", "3-tieventtiili", "Valitsee reitin säiliöön tai tilapiiriin. Ilmoitettu käsky ei vahvista mekaanista asentoa tai virtaamaa.", (d) => d.valveDhw == null ? null : d.valveDhw ? "Säiliöreitti valittu; ilmoitus ei yksin vahvista virtaamaa tai lämmitystä." : "Tilapiiri valittu; ilmoitus ei yksin vahvista kiertoa."], // valve
     ["2-tieventtiilin lähtö", "2-tieventtiilin lähtö", "X10A:n binäärilähtö; ei mekaaninen asentopalaute eikä todiste lämmityksestä/jäähdytyksestä.", (d) => d.valve2On == null ? null : d.valve2On ? "X10A ilmoittaa 2WV-lähdön PÄÄLLÄ; tarkista tila ja tilapiirin toiminta erikseen." : "X10A ilmoittaa 2WV-lähdön POIS; se ei yksin tarkoita jäähdytystä eikä kumoa lämmitystilaa levossa."], // valve2
     ["Käyttövesi-/varaajasäiliö", "Käyttövesi- tai varaajasäiliö", "Säiliötä kuvaavat R5T, tavoitelämpötila ja 3WV-reitti; lämpötila ei yksin vahvista latausta."], // tank

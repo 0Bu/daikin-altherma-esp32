@@ -974,19 +974,18 @@ button.vhist-source:focus-visible { outline: 2px solid var(--brand); outline-off
 .vhist-source.mb { --vhist-colour: var(--src-mb); }
 .vhist-source.room { --vhist-colour: var(--src-room); overflow-wrap: anywhere; }
 .vhist-source small { color: inherit; font-size: 10.5px; }
-/* Component states are categorical timelines, not numeric curves. Paired X10A/HomeHub witnesses
-   keep one independent, labelled lane each: ordinary state colour remains comparable across the
-   lanes, while a missing interval is hatched only for the source that did not measure it. Exact
-   readings and phase timing remain available in the shared tooltip. A genuinely single-source
-   history keeps its one source label and outline. */
-/* State readouts retain deliberate source/state/interval rows above the categorical lanes. */
+/* Component states are categorical timelines, not numeric curves. X10A stays active when
+   available and HomeHub/Modbus can be toggled on via the source legend; exact phase ranges
+   appear in the compact tooltip above the bar while the selected time sits directly on the
+   lower time scale. */
+.vhist-state .vhist-head { margin-bottom: 4px; }
+.vhist-state .vhist-level-legend { align-items: center; gap: 3px 12px; margin: 0 0 4px; }
+.vhist-state button.vhist-source { padding: 1px 0; }
+.vhist-graph.vhist-state-graph { grid-template-rows: auto 9px auto auto; }
 .vhist-state-graph .vhist-tip { white-space: pre-wrap; }
-.vhist-state-plot { height: auto; display: grid; gap: 7px; padding: 4px 0; }
-.vhist-state-lane { display: grid; gap: 3px; }
-.vhist-state-lane-label { color: var(--brand-sky); font-size: 11px; font-weight: 700;
-  line-height: 1; }
-.vhist-state-lane-label.mb { color: var(--src-mb); }
-.vhist-state-track { position: relative; height: 15px; overflow: hidden; border-radius: 999px;
+.vhist-state-graph .vhist-tip-val { white-space: normal; }
+.vhist-plot.vhist-state-plot { height: auto; display: grid; gap: 5px; padding: 0; }
+.vhist-state-track { position: relative; height: 14px; overflow: hidden; border-radius: 999px;
   background: var(--hatch); box-shadow: inset 0 0 0 1px var(--pipe); }
 .vhist-state-track.x10a { box-shadow: inset 0 0 0 1px var(--pipe), 0 0 0 1px var(--brand-sky); }
 .vhist-state-track.modbus { box-shadow: inset 0 0 0 1px var(--pipe), 0 0 0 1px var(--src-mb); }
@@ -1190,6 +1189,10 @@ button.vhist-source:focus-visible { outline: 2px solid var(--brand); outline-off
   transform: translateX(calc(var(--tip-p) * -1%)); }
 .vhist-time.vhist-pinned { color: var(--brand-strong); font-weight: 600; }
 .vhist-time.vhist-live { z-index: 4; background: var(--brand-tint); }
+.vhist-state-graph .vhist-axis { grid-area: 4 / 1; z-index: 1; margin-top: 5px; }
+.vhist-state-graph .vhist-time { box-sizing: border-box; margin-top: 5px; padding: 0 3px; border-radius: 3px; }
+.vhist-state-graph .vhist-time.vhist-pinned { z-index: 2; background: var(--card); }
+.inspect-card .vhist-state-graph .vhist-time.vhist-pinned { background: var(--brand-tint); }
 .vhist-axis.vhist-axis-future { position: relative; min-height: 18px; }
 .vhist-axis-future .vhist-axis-now { position: absolute; left: calc(var(--now-p) * 1%);
   transform: translateX(-50%); color: var(--muted); font-weight: 700; }

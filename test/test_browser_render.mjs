@@ -2349,6 +2349,51 @@ async function assertHistoryReadouts(page, context) {
         })()`);
         assert.deepEqual(legend,{initialInactive:true,hidden:true,protectedLast:true,unchanged:true,pollFocus:true,restored:true,ringsUnchanged:true},
           `${context}/${id}: legend clicks hide and restore independent series while retaining the final curve and source history`);
+      } else {
+        const stateLegend = await page.evaluate(`(() => {
+          const host=document.getElementById("browserHistoryFixture"),id=host.dataset.hist;
+          const rings=JSON.stringify(Array.from(S.hist));
+          const rect=el=>{const r=el.getBoundingClientRect();return {left:r.left,right:r.right,
+            top:r.top+scrollY,bottom:r.bottom+scrollY,height:r.height,width:r.width};};
+          const button=source=>host.querySelector('[data-hist-series="' + source + '"]');
+          const initialPlot=rect(host.querySelector(".vhist-state-plot"));
+          const axis=rect(host.querySelector(".vhist-axis")),pinTime=rect(host.querySelector(".vhist-time.vhist-pinned"));
+          const initial={
+            singleTrack:host.querySelectorAll(".vhist-state-track").length === 1 &&
+              !!host.querySelector(".vhist-state-track.x10a") && !host.querySelector(".vhist-state-lane-label"),
+            compactPlot:Math.abs(initialPlot.height - 14) < 1.5,
+            sharedScale:Math.abs(axis.top - pinTime.top) < 2,
+            x10aLocked:button("x10a").getAttribute("aria-pressed") === "true" && button("x10a").disabled,
+            modbusOff:button("modbus").getAttribute("aria-pressed") === "false" && !button("modbus").disabled,
+          };
+          button("x10a").click(); window.__browserHistoryRender();
+          const stillSingle=host.querySelectorAll(".vhist-state-track").length === 1;
+          button("modbus").click(); window.__browserHistoryRender();
+          const plot=host.querySelector("[data-hist]");
+          scrubMove(plot,+plot.dataset.n - 1);
+          const pairedPlot=rect(plot),liveTip=rect(host.querySelector(".vhist-tip.vhist-live")),clip=rect(host);
+          const labels=[...host.querySelectorAll(".vhist-tip.vhist-live .vhist-tip-label")].map(el=>el.textContent);
+          const paired={
+            twoTracks:host.querySelectorAll(".vhist-state-track").length === 2 &&
+              !!host.querySelector(".vhist-state-track.x10a") && !!host.querySelector(".vhist-state-track.modbus"),
+            pairedHeight:Math.abs(pairedPlot.height - 33) < 2,
+            x10aStillLocked:button("x10a").getAttribute("aria-pressed") === "true" && button("x10a").disabled,
+            modbusOn:button("modbus").getAttribute("aria-pressed") === "true" && !button("modbus").disabled,
+            dualTip:labels.length === 2 && labels[0] === "X10A" && labels[1] === "Modbus",
+            abovePlot:liveTip.bottom <= pairedPlot.top - 8,
+            inside:liveTip.left >= clip.left - 1 && liveTip.right <= clip.right + 1,
+          };
+          button("modbus").click(); window.__browserHistoryRender();
+          return { ...initial, stillSingle, ...paired,
+            collapsedAgain:host.querySelectorAll(".vhist-state-track").length === 1 &&
+              button("modbus").getAttribute("aria-pressed") === "false",
+            ringsUnchanged:JSON.stringify(Array.from(S.hist)) === rings };
+        })()`);
+        assert.deepEqual(stateLegend,{
+          singleTrack:true,compactPlot:true,sharedScale:true,x10aLocked:true,modbusOff:true,
+          stillSingle:true,twoTracks:true,pairedHeight:true,x10aStillLocked:true,modbusOn:true,
+          dualTip:true,abovePlot:true,inside:true,collapsedAgain:true,ringsUnchanged:true,
+        },`${context}/${id}: state timeline keeps X10A active, toggles Modbus in one compact chart and shares the lower time scale`);
       }
     }
     assert.deepEqual(page.diagnostics,[],`${context}: history interactions must emit no browser errors`);

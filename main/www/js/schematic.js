@@ -801,6 +801,7 @@ const PEL_INSPECT = {
     ? { en: "Electrical input (HomeHub)", de: "Stromaufnahme (HomeHub)" }
     : { en: "Electrical input (estimated)", de: "Geschätzte Stromaufnahme" },
   aria: { en: "Electrical input", de: "Stromaufnahme" },
+  trend: "pel",
   what: (d) => pelMeasured(d) ? PEL_MEASURED_WHAT : PEL_ESTIMATED_WHAT,
   head: (d) => (d.pel == null ? "—" : pelApproxText(d) + fmt1(d.pel) + " kW"),
   // Four cases: the measured gateway row, either X10A current source, a held-over inverter row, or
@@ -930,7 +931,7 @@ const INSPECT = {
     re: /inv frequency/i, sample: "INV frequency (rps)",
     rows: [/inv frequency/i, /inv primary current/i, /discharge pipe temp/i],
   },
-  out: { t: { en: "Outdoor air", de: "Außentemperatur" }, re: /outdoor air/i, sample: "Outdoor Air Temp. (R1T)" },
+  out: { t: { en: "Outdoor air", de: "Außentemperatur" }, re: /outdoor air/i, sample: "Outdoor Air Temp. (R1T)", trend: "outdoor_air" },
   ouhx: {
     t: {
       en: "Outdoor heat-exchanger temperature (R4T)",
@@ -987,6 +988,7 @@ const INSPECT = {
   eev: {
     t: { en: "Expansion valve", de: "Expansionsventil" },
     re: /expansion valve ?1/i, sample: "Expansion valve 1 (pls)",
+    trend: "eev",
     rows: [/expansion valve ?1/i, /^low pressure$/i],
   },
   r3t: {
@@ -1027,6 +1029,7 @@ const INSPECT = {
     t: { en: "PHE water outlet (pre-BUH, R1T)", de: "PHE-Wasseraustritt · vor BUH · R1T" },
     pick: lwtRow,
     sample: "Leaving Water Temp. before BUH (R1T)",
+    trend: "leaving_water",
   },
   r2t: {
     t: { en: "Leaving water after BUH (R2T)", de: "Vorlauf nach BUH · R2T" },
@@ -1037,7 +1040,7 @@ const INSPECT = {
       de: "Hinter dem Zusatzheizer gemeldete Wassertemperatur. Anders als der R1T-Wert vor dem BUH kann sie die vom elektrischen Heizer eingebrachte Wärme enthalten. Die genaue Lage zu Pumpe und bauseitigen Ventilen hängt von der Hydraulikeinheit ab.",
     },
   },
-  rwt: { t: { en: "PHE water inlet (R4T)", de: "PHE-Wassereintritt · R4T" }, pick: rwtRow, sample: "Inlet Water Temp. (R4T)" },
+  rwt: { t: { en: "PHE water inlet (R4T)", de: "PHE-Wassereintritt · R4T" }, pick: rwtRow, sample: "Inlet Water Temp. (R4T)", trend: "return_water" },
   dt: {
     t: { en: "Water-side ΔT across the PHE", de: "Wasserseitiges ΔT am PHE" },
     trend: "dt",   // computed series — see DERIVED
@@ -1067,7 +1070,7 @@ const INSPECT = {
       ? { en: "Cooling capacity (estimated)", de: "Geschätzte Kälteleistung" }
       : { en: "Heat output (estimated)", de: "Geschätzte Wärmeleistung" },
     aria: { en: "Thermal capacity at the PHE (estimated)", de: "Geschätzte thermische Leistung am PHE" },
-    trend: (d) => d && d.pthKind === "cooling" ? "" : "pth",
+    trend: "pth",
     what: (d) => d && d.pthKind === "cooling"
       ? { en: "An ESTIMATE of heat removed from the water: flow/60 × (R4T−R1T) × ρ·cp (≈ 4.186 kJ/(l·K)), assuming water. Accuracy depends on the flow sensor, both temperature sensors and the actual fluid; glycol mixtures need different density and heat capacity. It is shown only with a running compressor and the cooling-direction temperature difference. R1T/R4T are internal PHE sensors, not downstream emitter sensors.",
           de: "Eine SCHÄTZUNG der dem Wasser entzogenen Wärme: Durchfluss/60 × (R4T−R1T) × ρ·cp (≈ 4,186 kJ/(l·K)) unter Annahme von Wasser. Die Genauigkeit hängt vom Durchflusssensor, beiden Temperaturfühlern und dem tatsächlichen Medium ab; Glykolgemische benötigen andere Dichte und Wärmekapazität. Sie erscheint nur bei laufendem Verdichter und Temperaturdifferenz in Kühlrichtung. R1T/R4T sind interne PHE-Fühler und keine Fühler an den nachgeschalteten Flächen." }
@@ -1118,6 +1121,7 @@ const INSPECT = {
     // The hit target's accessible name — stable, because it is applied once at startup (see
     // labelSchematicHits). Which COP it turns out to be is the panel's to say, not the label's.
     aria: { en: "Efficiency (estimated)", de: "Geschätzte Effizienz" },
+    trend: (d) => d && d.efficiencyKind === "eer" ? "" : "cop",
     what: (d) => d && d.efficiencyKind === "eer"
       ? { en: "Estimated cooling capacity divided by estimated electrical input. The cooling numerator uses internal PHE sensors and is accepted only with a running compressor and R1T below R4T. The result inherits the water/glycol, sensor, voltage and power-factor assumptions of both estimates. Daikin also describes calculated energy figures as estimates whose accuracy is not guaranteed. This is an instantaneous EER, not a seasonal efficiency figure; metered seasonal energy is more meaningful.",
           de: "Geschätzte Kälteleistung geteilt durch geschätzte elektrische Aufnahme. Die Kälteleistung im Zähler nutzt die internen PHE-Fühler und wird nur bei laufendem Verdichter sowie R1T unter R4T gewertet. Das Ergebnis übernimmt alle Annahmen zu Wasser oder Glykol, Fühlern, Spannung und Leistungsfaktor aus beiden Schätzungen. Auch Daikin bezeichnet berechnete Energiewerte als Schätzungen ohne garantierte Genauigkeit. Das ist ein momentaner EER und keine saisonale Effizienzkennzahl; aussagekräftiger ist saisonal gemessene Energie." }
@@ -1180,25 +1184,13 @@ const INSPECT = {
   bsh: {
     t: { en: "Electric tank heater", de: "Heizstab" },
     re: /^bsh$/i, sample: "BSH",
-    // This panel deliberately presents only the physical X10A BSH contact and its sampled X10A
-    // timeline: no HomeHub second opinion and no whole-system power context.
-    x10aOnly: true,
     trend: "bsh_state",
-    trendSource: "x10a",
-    // Replace the raw bit (1/0) in the headline with its actual meaning. The source line remains
-    // "BSH", so the friendly state is still traceable to the exact X10A register.
-    head: () => {
-      const on = x10aDown() ? null : vOn(/^bsh$/i);
-      return on == null ? "—" : t(on ? "state.on" : "state.off");
-    },
-    now: () => {
-      const on = x10aDown() ? null : vOn(/^bsh$/i);
-      return on == null ? null
-      : on
+    head: (d) => d.bsh == null ? "—" : t(d.bsh ? "state.on" : "state.off"),
+    now: (d) => d.bsh == null ? null
+      : d.bsh
         ? { en: "Electric tank heater active.", de: "Heizstab aktiv." }
         : { en: "Off — the tank is not using its electric immersion heater.",
-            de: "OFF — der Heizstab im Speicher ist nicht aktiv." };
-    },
+            de: "Aus — der Heizstab im Speicher ist nicht aktiv." },
   },
   valve: {
     t: { en: "3-way valve", de: "3-Wege-Ventil" },
@@ -1223,6 +1215,7 @@ const INSPECT = {
   tank: {
     t: { en: "DHW tank / thermal store", de: "Warmwasser-/Wärmespeicher" },
     re: /dhw tank temp/i, sample: "DHW Tank Temp. (R5T)",
+    trend: "dhw_tank",
     // The tank box represents a GROUP even though its temperature is also the compact headline.
     // Keep every member in the one table below the chart; neither the Modbus twin nor a sentence
     // repeating tank + setpoint belongs inside the explanatory prose above it.
@@ -1262,6 +1255,7 @@ const INSPECT = {
   room: {
     t: { en: "Room temperature", de: "Raumtemperatur" },
     re: ROOM_TEMP_RE, sample: "Indoor Ambient Temp. (R1T)",
+    trend: "room_temp",
     rows: [ROOM_TEMP_RE, /^rt setpoint/i],
   },
   pump: {
@@ -1430,6 +1424,7 @@ const INSPECT = {
   flow: {
     t: { en: "Flow rate", de: "Durchfluss" },
     re: /flow sensor/i, sample: "Flow sensor",
+    trend: "flow",
     rows: [/flow sensor/i, /^water pressure$/i, /water pump signal/i],
   },
   flow_switch: {
@@ -1446,6 +1441,7 @@ const INSPECT = {
   wp: {
     t: { en: "Water pressure", de: "Wasserdruck" },
     re: /^water pressure$/i, sample: "Water pressure",
+    trend: "water_pressure",
     rows: [/^water pressure$/i, /flow sensor/i],
   },
 };
@@ -1542,9 +1538,6 @@ function inspMembers(e, row, fb) {
 // path that inserted a leaf's Modbus value between the timeless description and the chart, while
 // all other values sat below the chart behind dividers.
 function inspValues(e, row, fb) {
-  // Some inspectors intentionally expose one authoritative X10A contact only. Do not manufacture
-  // the generic leaf twin or append component/context rows for those entries.
-  if (e && e.x10aOnly) return [];
   const members = inspMembers(e, row, fb);
   // Keep the old comparison contract: a second opinion is only meaningful while the primary
   // headline has a current value. Grouped targets still show all available readings independently.
@@ -1758,8 +1751,7 @@ function renderInspectHist(e, row, mode = "") {
   // still leave a tooltip/crosshair DOM completely alone.
   const state = id && typeof STATE_HIST !== "undefined" && STATE_HIST[id]
     ? historyView(id, trendSource) : null;
-  const liveGen = state?.separate
-    ? state.separate.map(source => historyView(id, source)?.gen).join("/") : state?.gen;
+  const liveGen = state?.gen || "";
   const auxGen = id === "dhw_tank" ? tankAuxRevision(tankAuxHistories()) : "";
   const sourceDefault = h && mh && !S.histHidden?.has(id) ? histX10aDown() : "";
   // histHtml carries localised axis/readout copy. A language switch must therefore invalidate the
@@ -1777,7 +1769,7 @@ function renderInspectHist(e, row, mode = "") {
   replaceHistoryHtml(el, !id ? ""
     : row ? histHtml(id, displayUnit(row), chartName || displayReadingLabel(row.label, row), trendSource)
     : pairedId ? histHtml(id, mb ? displayUnit(mb) : "", mb ? displayHomeHubLabel(mb) : inspTitleText(e, null), trendSource)
-               : histHtml(id, DERIVED[id]?.unit || "",
+               : histHtml(id, id === "pel" ? "kW" : (DERIVED[id]?.unit || ""),
                           e.aria ? inspFieldText(e, "aria", null) : inspTitleText(e, null), trendSource));
   return started;
 }
@@ -1900,7 +1892,8 @@ function renderInspect(mode = "") {
   // void when there is no reading. Never the headline either: a sentence in a 19px number slot
   // reads as a broken value.
   const sentence = inspNowText(e, d);
-  const desc = e.sample ? descFor(e.sample, row || fb) : null;
+  const descLabel = fb ? fb.label : (row ? row.label : e.sample);
+  const desc = descLabel ? descFor(descLabel, row || fb) : null;
   const ownWhat = inspFieldText(e, "what", d);
   // A native replacement must retain its source-specific interpretation limits in every locale.
   // Generic inspector copy describes the X10A quantity and cannot override the defining register.

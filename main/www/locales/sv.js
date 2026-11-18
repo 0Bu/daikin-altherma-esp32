@@ -1,4 +1,4 @@
-// translation-source: 7e05fca97bff772abf43c5704d541747bc310184005cce90ce5b76eab24256ce
+// translation-source: 052b8f35753bd74f454b65f49eeab66cbe3f0a3966074b9bc6c86e63988ee5bd
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -1038,10 +1038,7 @@ INSPECT_I18N.sv = inspectValues(
       : d.copScope === "plant" ? `${fmt1(d.cop)} kW värme/kW CT-el efter BUH: ${fmt1(d.copPth)} / ${fmt1(d.pel)} kW; lasten beror på inkopplingen.`
       : `${fmt1(d.cop)} kW värme/kW el inom värmepumpens gräns: ${fmt1(d.copPth)} / ${fmt1(d.pel)} kW; BUH ingår inte.`], // cop
     ["Tillsatsvärmare · BUH", "Tillsatsvärmare BUH", "Elvärmare i vattenkretsen efter R1T, inte tankens BSH.", (d) => d.buh1 == null && d.buh2 == null ? null : d.buh2 ? "Steg 2: båda stegen värmer." : d.buh1 ? "Steg 1 värmer." : "Alla BUH-steg är av."], // buh
-    ["Tankvärmare", "Tankvärmare BSH", "Tankens doppvärmare BSH kan värma självständigt; X10A mäter inte effekten.", () => {
-      const on = x10aDown() ? null : vOn(/^bsh$/i);
-      return on == null ? null : on ? "BSH är aktiv." : "BSH är av.";
-    }], // bsh
+    ["Tankvärmare", "Tankvärmare BSH", "Tankens doppvärmare BSH kan värma självständigt; statusen visar av/på, inte effekten.", (d) => d.bsh == null ? null : d.bsh ? "BSH är aktiv." : "BSH är av."], // bsh
     ["3-vägsventil", "3-vägsventil 3WV", "Logikutgång väljer tank/rum utan återkoppling av mekaniskt läge/flöde.", (d) => d.valveDhw == null ? null : d.valveDhw
       ? "Tankväg anges; bevisar inte läge, flöde eller tankladdning."
       : "Rumsväg anges; bevisar inte läge eller cirkulation."], // valve

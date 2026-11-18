@@ -957,10 +957,12 @@ const mbForInspect = (key) => {
   // needs to prove that an external energy manager's request reached the HomeHub.
   if (key === "sgrequest") return mbRow(MB_OFF_SMART_GRID);
   if (!mbLive()) return null;
-  // Quiet is not a numeric pill in MB_PAIRS. Its inspector still needs the matching HomeHub row as
-  // a named source, including while X10A is live as the second opinion. The BSH inspector is
-  // intentionally X10A-only and therefore has no equivalent exception here.
+  // Paired categorical state inspectors are not numeric pills in MB_PAIRS, so resolve their exact
+  // HomeHub row directly whenever no current X10A row is available (`renderInspect` calls this only
+  // when `row == null`).
   if (key === "quiet") return mbByConcept("quiet_state");
+  if (key === "bsh") return mbByConcept("bsh_state");
+  if (key === "valve") return mbByConcept("valve_dhw");
   const p = MB_PAIRS.find((q) => q.insp === key);
   // Normally only a silent X10A link makes the gateway lead. `mbFields` is the per-reading exception:
   // liveData marks outdoor air there while X10A is connected but its sleeping outdoor-unit row is

@@ -8,6 +8,7 @@ export const INSPECTOR_TRENDS = Object.freeze({
   out: "outdoor_air", ouhx: "outdoor_heat_exchanger", hp: "circuit_pressure",
   disch: "discharge", eev: "eev", r3t: "refrigerant_liquid", lwt: "leaving_water",
   r2t: "leaving_water_post_buh", rwt: "return_water", dt: "dt", pth: "pth",
+  pel: "pel", cop: "cop",
   buh: "buh_state", bsh: "bsh_state", valve: "valve_dhw", valve2: "valve_heat",
   tank: "dhw_tank", room: "room_temp", pump: "pump_speed",
   defrost: "defrost_state", quiet: "quiet_state", flow: "flow",
@@ -16,7 +17,7 @@ export const INSPECTOR_TRENDS = Object.freeze({
 
 export const NO_HISTORY_INSPECTORS = Object.freeze([
   "status", "ou", "lp", "phe", "heat", "spaceh", "rhot", "rcold", "wsup", "wtank",
-  "wheat", "wret", "pel", "cop",
+  "wheat", "wret",
 ]);
 
 // Tank preheat is an auxiliary raw row outside the schematic; categorical disclosures use the
@@ -61,10 +62,13 @@ export const HISTORY_MOTION_ROWS = Object.freeze([
   { id: "free_heap", label: "Free heap", value: 180, unit: "KiB", kind: "board" },
   { id: "max_alloc", label: "Largest free block", value: 96, unit: "KiB", kind: "board" },
   { id: "circulation_state", label: "DHW circulation pump", value: 1, binary: true, kind: "mqtt" },
+  { id: "pel", label: "Electrical input (estimated)", value: 2.8, unit: "kW", kind: "derived" },
+  { id: "cop", label: "COP (estimated)", value: 3.1, unit: "", kind: "derived" },
 ]);
 
 // HOMEHUB_HISTORIES, not MB_PAIRS, is the offer boundary. In particular, water pressure has a
-// possible current-value pairing but no HomeHub history. Power is likewise not a historied row.
+// possible current-value pairing (Altherma 4) but no HomeHub history, whereas electrical power
+// (offset 51) is historied under `pel` while remaining unpaired in HOMEHUB_CONCEPTS.
 export const MODBUS_HISTORY_ROWS = Object.freeze([
   { id: "leaving_water", label: "Leaving water temperature PHE", off: 40, value: 45.1, unit: "°C" },
   { id: "leaving_water_post_buh", label: "Leaving water temperature BUH", off: 41, value: 45.1, unit: "°C" },
@@ -79,6 +83,7 @@ export const MODBUS_HISTORY_ROWS = Object.freeze([
   { id: "quiet_state", label: "Quiet mode operation", off: 9, value: 0, binary: true },
   { id: "smart_grid_mode", label: "Smart-Grid operation mode", off: 56, value: 2, enum: "smart_grid_mode" },
   { id: "disinfection_state", label: "Disinfection operation", off: 33, value: 0, binary: true },
+  { id: "pel", label: "Heat pump power consumption", off: 51, value: 2.1, unit: "kW" },
 ]);
 
 export const ENV3_HISTORY_ROWS = Object.freeze([
@@ -188,6 +193,7 @@ export function makeHistoryMotionFixture(originalStatus, lang = "en") {
     modbus: [
       ...MODBUS_HISTORY_ROWS.map(row => {
         const value = reading(row, tick);
+        if ([33, 51, 56].includes(row.off)) delete value.concept;
         return { ...value, value: Number(value.value), history: row.id,
           reg: 0xee, profile: "homehub" };
       }),
@@ -196,7 +202,6 @@ export function makeHistoryMotionFixture(originalStatus, lang = "en") {
       { label: "DHW normal operation", value: 1, unit: "", off: 52, binary: true },
       { label: "Space heating/cooling normal operation", value: 1, unit: "", off: 53, binary: true },
       { label: "Current operation mode", value: 1, unit: "", off: 38, enum: "current_operation_mode" },
-      { label: "Heat pump power consumption", value: 2.1, unit: "kW", off: 51 },
     ],
   });
   return { status, histories, values };

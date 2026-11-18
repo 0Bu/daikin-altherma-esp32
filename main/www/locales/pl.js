@@ -1,4 +1,4 @@
-// translation-source: 7e05fca97bff772abf43c5704d541747bc310184005cce90ce5b76eab24256ce
+// translation-source: 052b8f35753bd74f454b65f49eeab66cbe3f0a3966074b9bc6c86e63988ee5bd
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -1042,7 +1042,7 @@ INSPECT_I18N.pl = inspectValues(
       : d.copScope === "plant" ? `${fmt1(d.cop)} kW ciepła za BUH na 1 kW poboru z CT — ≈ ${fmt1(d.copPth)} kW przy ≈ ${fmt1(d.pel)} kW. Zakres odbiorników zależy od montażu CT.`
       : `${fmt1(d.cop)} kW ciepła na 1 kW prądu w granicy pompy — ≈ ${fmt1(d.copPth)} kW przy ≈ ${fmt1(d.pel)} kW. BUH jest poza obiema wielkościami.`], // cop
     ["Grzałka dodatkowa (BUH)", "Grzałka dodatkowa BUH", "Elektryczna grzałka w obiegu wodnym, używana m.in. przy mrozie, odszranianiu lub awarii. Stopień opisuje załączoną moc, nie oddzielny pomiar kW.", (d) => d.buh1 == null && d.buh2 == null ? null : d.buh2 ? "Stopień 2 — pracują oba stopnie." : d.buh1 ? "Stopień 1 — pracuje jeden stopień." : "Wyłączona — żaden stopień BUH nie pracuje."], // buh
-    ["Elektryczna grzałka zbiornika", 0, "Grzałka zanurzeniowa BSH ogrzewa zbiornik bez sprężarki i obiegu wody. X10A podaje tylko stan włączona/wyłączona, nie jej moc.", () => { const on = x10aDown() ? null : vOn(/^bsh$/i); return on == null ? null : on ? "Elektryczna grzałka zbiornika jest aktywna." : "Wyłączona — zbiornik nie używa grzałki zanurzeniowej."; }], // bsh
+    ["Elektryczna grzałka zbiornika", 0, "Grzałka zanurzeniowa BSH ogrzewa zbiornik bez sprężarki i obiegu wody. Sygnał podaje tylko stan włączona/wyłączona, nie jej moc.", (d) => d.bsh == null ? null : d.bsh ? "Elektryczna grzałka zbiornika jest aktywna." : "Wyłączona — zbiornik nie używa grzałki zanurzeniowej."], // bsh
     ["Zawór 3-drogowy", 0, "Sterownik wybiera nim drogę do zbiornika albo obiegu domu. Jest to zgłoszone polecenie, nie mechaniczne potwierdzenie położenia ani przepływu.", (d) => d.valveDhw == null ? null : d.valveDhw ? "Sterownik wybrał drogę do zbiornika; samo zgłoszenie nie potwierdza przepływu ani ładowania." : "Sterownik wybrał drogę do obiegu domu; samo zgłoszenie nie potwierdza cyrkulacji."], // valve
     ["Wyjście zaworu 2-drogowego", 0, "Binarny sygnał wyjściowy X10A dla zaworu 2-drogowego. Nie jest mechanicznym potwierdzeniem położenia ani samodzielnym dowodem ogrzewania lub chłodzenia.", (d) => d.valve2On == null ? null : d.valve2On ? "X10A zgłasza wyjście 2WV WŁ.; osobno sprawdź tryb i pracę obiegu." : "X10A zgłasza wyjście 2WV WYŁ.; samo to nie oznacza chłodzenia ani nie przeczy ustawionemu ogrzewaniu podczas postoju obiegu."], // valve2
     ["Zbiornik CWU / bufor", "Zbiornik CWU lub bufor", "Zbiornik opisują R5T, nastawa i droga 3WV; sama temperatura nie dowodzi ładowania."], // tank

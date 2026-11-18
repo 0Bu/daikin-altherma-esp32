@@ -90,12 +90,14 @@ inline constexpr HomeHubDecode HOMEHUB_DECODE_TEMP{MbFunc::ReadInput, MbType::Te
 inline constexpr HomeHubDecode HOMEHUB_DECODE_FLAG{MbFunc::ReadInput, MbType::Int16, 1, ""};
 inline constexpr HomeHubDecode HOMEHUB_DECODE_HOLDING{MbFunc::ReadHolding, MbType::Int16, 1, ""};
 
-// Histories are a slightly wider contract than source PAIRING. The eight measurements and three exact
-// state flags/selectors above are still paired one-for-one, while Smart-Grid mode is
-// assembled from TWO X10A contacts and
-// therefore cannot honestly be attached to either source row as its twin. It can still share one
-// history concept: both sources report the same documented 0..3 enum, and the UI draws their state
-// tracks independently so a disagreement remains visible.
+// Histories are a slightly wider contract than source PAIRING. The eight measurements and three
+// exact state flags/selectors above are still paired one-for-one, while Smart-Grid mode (holding
+// 56) and electrical input power (input 51) deliberately carry no live substitution pairing in
+// HOMEHUB_CONCEPTS: Smart-Grid combines two X10A terminal contacts against an external Modbus
+// request, and input 51 is a gateway kW reading whereas X10A `pel` is a single-sweep I x 230 V
+// estimate. Both still share one history id (`smart_grid_mode`, `pel`) so the UI draws their
+// 24-hour series on one chart with distinct source provenance (`X10A` vs. `Modbus`) while keeping
+// live headline provenance explicit.
 //
 // Disinfection is different again: HomeHub input 33 names the actual operation, while X10A exposes
 // only "Tank preheat". They receive separate ids and charts so correlation remains possible without
@@ -125,6 +127,7 @@ inline constexpr HomeHubHistory HOMEHUB_HISTORIES[] = {
     {9, "quiet_state", false, true, HOMEHUB_DECODE_HOLDING},
     {56, "smart_grid_mode", false, true, HOMEHUB_DECODE_HOLDING},
     {33, "disinfection_state", true, false, HOMEHUB_DECODE_FLAG},
+    {51, "pel", false, true, {MbFunc::ReadInput, MbType::Pow16, 1, "kW"}},
 };
 inline constexpr size_t HOMEHUB_HISTORY_COUNT =
     sizeof(HOMEHUB_HISTORIES) / sizeof(HOMEHUB_HISTORIES[0]);

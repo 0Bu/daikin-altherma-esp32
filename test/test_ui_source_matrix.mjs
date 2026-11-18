@@ -829,23 +829,26 @@ const SG_INSP = (c, d) => c.INSPECT.sgrequest;
   assert.equal(invalid.mbSmartGridMode(), null, "unknown Smart-Grid enum must fail closed");
 }
 
-// BSH still uses the shared arbitration in the schematic, but its inspector intentionally presents
-// only the physical X10A contact and X10A timeline: no HomeHub value or whole-system power row.
+// BSH unifies the physical X10A contact and HomeHub input 32 ("Booster heater run") across the
+// schematic, headline, leaf twin row and sampled `bsh_state` timeline, without pulling in whole-
+// system power (offset 51) or altering the X10A BSH prose.
 {
   const both = ctx({ x10a: true, mbEnabled: true, mbConnected: true,
                      values: [X_BSH(false)], modbus: [M_BSH(true)] });
   const live = both.liveData();
   both.S.live = live;
   assert.equal(live.bsh, false, "live X10A BSH leads a contradictory HomeHub state");
-  assert.equal(both.INSPECT.bsh.x10aOnly, true);
+  assert.equal(both.INSPECT.bsh.x10aOnly, undefined);
   assert.equal(both.INSPECT.bsh.trend, "bsh_state",
     "the BSH inspector keeps its sampled state timeline");
-  assert.equal(both.INSPECT.bsh.trendSource, "x10a",
-    "the BSH inspector timeline excludes the HomeHub/Modbus lane");
+  assert.equal(both.INSPECT.bsh.trendSource, undefined,
+    "the BSH inspector timeline overlays both X10A and HomeHub/Modbus lanes");
   assert.equal(both.INSPECT.bsh.rows, undefined,
-    "the BSH inspector has no additional value/context rows");
-  assert.equal(both.inspValues(both.INSPECT.bsh, both.inspCurRow(both.INSPECT.bsh), null).length, 0,
-    "the generic leaf twin must not put the HomeHub BSH value back into the X10A-only panel");
+    "the BSH inspector has no extra whole-system power/context rows");
+  const twinRows = both.inspValues(both.INSPECT.bsh, both.inspCurRow(both.INSPECT.bsh), null);
+  assert.equal(twinRows.length, 1,
+    "the leaf twin exposes the disagreeing HomeHub Booster heater run row alongside X10A");
+  assert.match(twinRows[0].mb.label, /Booster heater run/i);
   assert.equal(both.INSPECT.bsh.head(live), "state.off");
 
   const power = { label: "Heat pump power consumption", value: "2.40", unit: "kW", off: 51 };
@@ -854,12 +857,12 @@ const SG_INSP = (c, d) => c.INSPECT.sgrequest;
   const d = down.liveData();
   down.S.live = d;
   assert.equal(d.bsh, true, "HomeHub input 32 keeps the heater state live when X10A is silent");
-  assert.equal(down.mbForInspect("bsh"), null,
-    "the X10A-only heater inspector never promotes the HomeHub state into its headline");
-  assert.equal(down.INSPECT.bsh.head(d), "—",
-    "a HomeHub-only state must not be rendered under the X10A BSH source label");
-  assert.equal(down.INSPECT.bsh.now(d), null,
-    "the inspector prose must not leak the HomeHub-only state either");
+  assert.equal(down.mbForInspect("bsh")?.off, 32,
+    "when X10A is silent, mbForInspect names HomeHub input 32 as the source");
+  assert.equal(down.INSPECT.bsh.head(d), "state.on",
+    "HomeHub input 32 drives the BSH headline when X10A is silent");
+  assert.ok(down.INSPECT.bsh.now(d),
+    "the BSH inspector state sentence reflects the active HomeHub heater state");
   assert.equal(down.INSPECT.buh.trend, "buh_state");
   assert.doesNotMatch(down.descFor("BSH").what, /HomeHub|Modbus/,
     "the X10A BSH explanation contains no second-source copy");

@@ -1,4 +1,4 @@
-// translation-source: 7e05fca97bff772abf43c5704d541747bc310184005cce90ce5b76eab24256ce
+// translation-source: 052b8f35753bd74f454b65f49eeab66cbe3f0a3966074b9bc6c86e63988ee5bd
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -1011,7 +1011,7 @@ INSPECT_I18N.cs = inspectValues(
       : d.copScope === "plant" ? `${fmt1(d.cop)} kW tepla za BUH na 1 kW příkonu CT — ≈ ${fmt1(d.copPth)} kW při ≈ ${fmt1(d.pel)} kW. Rozsah určuje zapojení CT.`
       : `${fmt1(d.cop)} kW tepla na 1 kW elektřiny v hranici čerpadla — ≈ ${fmt1(d.copPth)} kW při ≈ ${fmt1(d.pel)} kW. BUH je mimo obě veličiny.`], // cop
     ["Záložní topné těleso (BUH)", "Záložní topné těleso BUH", "Elektrické těleso ve vodním okruhu pro mráz, odmrazování nebo nouzový provoz. Stupeň není samostatné měření kW.", (d) => d.buh1 == null && d.buh2 == null ? null : d.buh2 ? "Stupeň 2 — pracují oba stupně." : d.buh1 ? "Stupeň 1 — pracuje jeden stupeň." : "Vypnuto — žádný stupeň BUH není aktivní."], // buh
-    ["Elektrické těleso zásobníku", 0, "Ponorné těleso BSH ohřívá zásobník bez kompresoru a oběhu vody. X10A udává jen stav, ne výkon.", () => { const on = x10aDown() ? null : vOn(/^bsh$/i); return on == null ? null : on ? "Elektrické těleso zásobníku je aktivní." : "Vypnuto — zásobník těleso nepoužívá."; }], // bsh
+    ["Elektrické těleso zásobníku", 0, "Ponorné těleso BSH ohřívá zásobník bez kompresoru a oběhu vody. Signál udává jen stav, ne výkon.", (d) => d.bsh == null ? null : d.bsh ? "Elektrické těleso zásobníku je aktivní." : "Vypnuto — zásobník těleso nepoužívá."], // bsh
     ["Trojcestný ventil", 0, "Volí cestu k zásobníku nebo domu. Jde o hlášený povel, ne mechanické potvrzení polohy ani průtoku.", (d) => d.valveDhw == null ? null : d.valveDhw ? "Zvolena cesta k zásobníku; samo hlášení nepotvrzuje průtok ani ohřev." : "Zvolena cesta do domu; samo hlášení nepotvrzuje oběh."], // valve
     ["Výstup dvoucestného ventilu", 0, "Binární výstup X10A; není mechanickým potvrzením polohy ani důkazem vytápění/chlazení.", (d) => d.valve2On == null ? null : d.valve2On ? "X10A hlásí 2WV ZAP; režim a provoz domu ověřte zvlášť." : "X10A hlásí 2WV VYP; samo to neznamená chlazení ani rozpor s vytápěním při klidu domu."], // valve2
     ["Zásobník TUV / akumulace", "Zásobník TUV nebo akumulace", "Zásobník popisují R5T, nastavení a cesta 3WV; teplota sama nepotvrzuje ohřev."], // tank

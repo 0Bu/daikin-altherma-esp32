@@ -1,4 +1,4 @@
-// translation-source: 7e05fca97bff772abf43c5704d541747bc310184005cce90ce5b76eab24256ce
+// translation-source: 052b8f35753bd74f454b65f49eeab66cbe3f0a3966074b9bc6c86e63988ee5bd
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -1030,7 +1030,7 @@ INSPECT_I18N.fr = inspectValues(
       : d.copScope === "plant" ? `${fmt1(d.cop)} kW thermiques après BUH par kW électrique estimé par CT : ≈ ${fmt1(d.copPth)} / ≈ ${fmt1(d.pel)} kW. Le câblage CT fixe les charges incluses.`
       : `${fmt1(d.cop)} kW thermiques par kW électrique dans le périmètre pompe à chaleur : ≈ ${fmt1(d.copPth)} / ≈ ${fmt1(d.pel)} kW. Le BUH est hors des deux valeurs.`], // cop
     ["Chauffage d’appoint · BUH", "Chauffage d’appoint BUH", "Appoint électrique du circuit d’eau placé après R1T. Ses étages peuvent relever le départ et la consommation ; ce n’est pas la résistance interne BSH du ballon.", (d) => d.buh1 == null && d.buh2 == null ? null : d.buh2 ? "Étage 2 : les deux étages chauffent." : d.buh1 ? "Étage 1 : un étage chauffe." : "Inactif : aucun étage BUH ne chauffe."], // buh
-    ["Résistance du ballon", "Résistance électrique du ballon", "Résistance d’immersion BSH dans le ballon. Elle peut chauffer avec compresseur, pompe et débit à zéro ; son contact X10A ne mesure aucune puissance.", () => { const on = x10aDown() ? null : vOn(/^bsh$/i); return on == null ? null : on ? "Résistance du ballon active." : "Inactive : résistance du ballon arrêtée."; }], // bsh
+    ["Résistance du ballon", "Résistance électrique du ballon", "Résistance d’immersion BSH dans le ballon. Elle peut chauffer avec compresseur, pompe et débit à zéro ; ce signal indique l’état marche/arrêt, pas la puissance.", (d) => d.bsh == null ? null : d.bsh ? "Résistance du ballon active." : "Inactive : résistance du ballon arrêtée."], // bsh
     ["Vanne 3 voies", 0, "La sortie logique sélectionne le ballon ou les locaux. Ce n’est ni un retour mécanique de position ni une confirmation de débit.", (d) => d.valveDhw == null ? null : d.valveDhw ? "La commande indique le ballon. Cela ne prouve ni position mécanique, ni débit, ni charge active." : "La commande indique les locaux. Cela ne prouve ni position mécanique ni circulation."], // valve
     ["Sortie vanne 2 voies", 0, "Sortie binaire X10A pour une 2WV du circuit locaux. Elle n’indique pas la position mécanique et n’équivaut pas au mode chauffage/froid.", (d) => d.valve2On == null ? null : d.valve2On ? "X10A indique la sortie 2WV active. Cela ne prouve ni chauffage actif ni position mécanique ; vérifier mode et fonctionnement des locaux." : "X10A indique la sortie 2WV inactive. Cela ne signifie pas à lui seul le froid et ne contredit pas un mode chauffage configuré, surtout au repos."], // valve2
     ["Ballon ECS", "Ballon ECS ou stockage thermique", "Ballon mesuré par R5T. Charge, consigne et résistance BSH sont affichées séparément."], // tank
