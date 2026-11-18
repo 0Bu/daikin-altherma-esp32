@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: badc4a75efa06511d113fda6962d63d24ab5fca8af26111d2adad1ae6650adf4 -->
+<!-- user-docs-contract: 4dfe7bccb8e2acaf2419b7645cfbb6bea5d122450da7748c83c243be1ea4f43c -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default (`Off`). Under **Settings → Firmware**, choose **X10A** or **Modbus** for

@@ -1,4 +1,4 @@
-// translation-source: 480bf7bd3b16592ffbaf33f9d54b1362d56dd3b72b7c310293449045f5e86f04
+// translation-source: 8d39ceba8be704e3a02e1f3012fba8f388b32c4e1e353afc033c83be08bee81f
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",

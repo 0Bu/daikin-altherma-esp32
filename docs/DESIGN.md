@@ -305,10 +305,15 @@ compressor witness omits heat-output curves and stopped-compressor pump overrun 
 current-transformer phases and inverter current retain their own histories, while HomeHub provides
 its own `modbus_power` (`51`, HomeHub electrical input), `compressor_state` (`31`, including
 contiguous active-phase count across the 24-hour five-minute raster), `modbus_defrost_state`
-(`35`), and `pump_state` (`30`) timelines without splicing into X10A series; a five-minute bucket
-can contain phase currents, inverter current and compressor speed from different sweeps. The X10A
-electrical-input and both COP inspectors omit derived history. Missing input samples leave a gap. A gap is held-over only when every missing input was
-held. A successful empty series shows “No readings recorded yet.” An unavailable series reports
+(`35`), and `pump_state` (`30`) timelines without splicing into X10A series. Because a five-minute
+bucket can combine raw rings from different sweeps, X10A electrical input (`pel`) and heating/DHW
+COP (`cop`) are evaluated per sweep into dedicated firmware rings: partial CT sweeps leave a gap,
+all-zero CTs fall back to witnessed inverter current (held-over at `0 rps`), and `cop` is held-over
+at `0 rps` while leaving a gap during defrost, non-heating tasks, `≤ 5 rps`, `≤ 0.5 L/min`,
+`≤ 0.2 kW`, non-positive ΔT or unmatched heater boundaries. When X10A `pel` is offered, HomeHub
+`modbus_power` (`51`) pairs onto the same electrical-input chart as an independent toggleable
+Modbus series; cooling EER omits COP history. In browser-derived curves, missing inputs leave a
+gap, marked held-over on X10A only when every missing input was held. A successful empty series shows “No readings recorded yet.” An unavailable series reports
 an error, with its source named if the other series can still draw. Chart titles name the stable
 concept.
 

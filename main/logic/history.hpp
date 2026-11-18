@@ -60,8 +60,10 @@
 #include <cstdlib>
 #include <cmath>
 
-#include "logic/lwt_select.hpp"   // lwt_ci_contains — the compressor witness still matches by label
+#include "logic/cop_scope.hpp"  // cop_is_post_buh / cop_plan — single-sweep COP boundary pairing
+#include "logic/lwt_select.hpp" // lwt_ci_contains / lwt_select — leaving-water and witness rules
 #include "logic/ou_stale.hpp"     // ou_reading_held_over — the held-over rule, composed not copied
+#include "logic/rwt_select.hpp"   // rwt_select — return-water measurement selection
 
 namespace daik::logic {
 
@@ -95,9 +97,10 @@ inline HistorySample history_room_sample(bool valid, double temperature_c) {
 }
 
 // The whole point of the memory analysis, stated where a future trend addition will see it: one
-// trend costs 576 bytes. Put the buffers in static storage, never on the heap — free heap is not the
-// binding limit on this board, the largest CONTIGUOUS block is, and a static array does not compete
-// for it. TrendRing's non-zero pending sentinel currently places the array in .data, not .bss.
+// trend costs 576 bytes. Put the buffers in static storage, never on the heap — free heap is not
+// the binding limit on this board, the largest CONTIGUOUS block is, and a static array does not
+// compete for it. On target, `history.cpp` places the rings inside `__NOINIT_ATTR` unions
+// (`NOLOAD`).
 constexpr size_t HISTORY_BYTES_PER_TREND = HISTORY_SAMPLES * sizeof(HistorySample);
 static_assert(HISTORY_BYTES_PER_TREND == 576, "trend cost changed — re-check the memory budget");
 
@@ -133,13 +136,15 @@ constexpr bool history_row_identity_changed(const char* stored_label, int resolv
 // own memory, which has no register, no profile and no held-over state — it is sampled directly by
 // the recorder on the same cadence.
 enum class TrendKind : uint8_t {
-    Row,         // a decoded value from the poll cache, addressed by (reg, off, unit)
-    BinaryState, // an exact bit row; the latest observed state wins inside the open bucket
-    BinaryEvent, // an exact bit row; any observed ON is retained for the open 5-minute bucket
-    SmartGridMode, // four-state combination of X10A Smart-Grid contact 1 + contact 2
-    FreeHeap,   // esp_get_free_heap_size()
-    MaxAlloc,   // largest CONTIGUOUS free block — the real OOM ceiling on this board
-    CirculationState,      // external MQTT power witness, latest confirmed ON/OFF
+    Row,              // a decoded value from the poll cache, addressed by (reg, off, unit)
+    BinaryState,      // an exact bit row; the latest observed state wins inside the open bucket
+    BinaryEvent,      // an exact bit row; any observed ON is retained for the open 5-minute bucket
+    SmartGridMode,    // four-state combination of X10A Smart-Grid contact 1 + contact 2
+    FreeHeap,         // esp_get_free_heap_size()
+    MaxAlloc,         // largest CONTIGUOUS free block — the real OOM ceiling on this board
+    CirculationState, // external MQTT power witness, latest confirmed ON/OFF
+    ElectricalPower,  // single-sweep X10A electrical input estimate (I x 230 V, kW)
+    Cop,              // single-sweep X10A heating/DHW COP estimate (cop_plan boundary pairing)
 };
 
 // `reg`/`off`/`unit` are the LOCATOR for an ordinary Row (see the header note). BinaryState and
@@ -263,9 +268,15 @@ inline constexpr TrendDef TRENDS[] = {
     {"free_heap", TrendKind::FreeHeap, 0, 0, "KiB", "Free heap"},
     {"max_alloc", TrendKind::MaxAlloc, 0, 0, "KiB", "Largest free block"},
     {"circulation_state", TrendKind::CirculationState, 0, 0, "", "DHW circulation pump"},
+    // Single-sweep derived plant curves. Evaluated inside history_record() from one poll sweep's
+    // fresh rows rather than reconstructed in the browser across five independent last-wins rings,
+    // so a transient CT phase drop, page timeout or mid-bucket heater pulse can never cross-mix
+    // sweeps from different instants inside one 5-minute bucket.
+    {"pel", TrendKind::ElectricalPower, 0, 0, "kW", "Electrical input (estimated)"},
+    {"cop", TrendKind::Cop, 0, 0, "", "COP (estimated)"},
 };
 constexpr size_t TREND_COUNT = sizeof(TRENDS) / sizeof(TRENDS[0]);
-// 32 trends = 18432 bytes of ring (plus ~78 bytes of label/unit/counters each in history.cpp). The
+// 34 trends = 19584 bytes of ring (plus ~78 bytes of label/unit/counters each in history.cpp). The
 // ceiling is a deliberate stop sign, not a hardware limit: .bss does not compete for the largest
 // CONTIGUOUS free block, which is what actually binds on this board, so the cost of a trend is a
 // few per cent of free heap and nothing at all of the fragmentation budget. Raise it only with the
@@ -280,15 +291,15 @@ constexpr size_t TREND_COUNT = sizeof(TRENDS) / sizeof(TRENDS[0]);
 // the values someone is looking at; the value LIST reaches the rest through the same explainer and
 // gets a chart only where a trend already exists.
 //
-// MEASURED, not derived: `idf.py size` across that change moved the image by +4576 bytes, which is
-// the 7 x 576 of ring plus 7 x ~78 of per-trend label/unit/counters this comment predicts. It moved
-// `.data`, though, NOT `.bss` — Trend's `pending` member initialises to HISTORY_NO_READING, a
-// non-zero value, so the whole array is initialised data. Same DIRAM at runtime and the same
-// non-competition with the largest contiguous block, which is what the paragraph above is actually
-// about; the difference is that each ring also costs its own size AGAIN in the flash image. Worth
-// knowing before anyone adds trends by the dozen.
-static_assert(TREND_COUNT * HISTORY_BYTES_PER_TREND <= 18432,
-              "trend buffers are static data on a heap-tight board — justify growth before raising this");
+// MEASURED, not derived: `idf.py size` across that historical 7-trend addition moved DRAM by
+// +4576 bytes, matching 7 x 576 of ring plus 7 x ~78 of per-trend label/unit/counters. Today the
+// target store (`PersistedHistory` in `main/history.cpp`) lives in a `__NOINIT_ATTR` union
+// (`NOLOAD`), so each ring still costs static DIRAM (never competing with the largest contiguous
+// heap block) without duplicating its bytes into the flash image. Worth knowing before anyone adds
+// trends by the dozen.
+static_assert(
+    TREND_COUNT * HISTORY_BYTES_PER_TREND <= 19584,
+    "trend buffers are static data on a heap-tight board — justify growth before raising this");
 
 // A board metric in bytes, as the ring stores it: tenths of a KiB (~102-byte resolution, finer than
 // anything worth reading off a 24-hour chart). CLAMPED, never wrapped: the ring is int16, so this
@@ -569,6 +580,148 @@ constexpr HistorySample history_smart_grid_mode(bool c1_known, bool c1_on,
     if (!c1_known || !c2_known) return HISTORY_NO_READING;
     const int mode = c1_on ? (c2_on ? 3 : 2) : (c2_on ? 1 : 0);
     return static_cast<HistorySample>(mode * 10);
+}
+
+// ── Single-sweep derived electrical power and COP ───────────────────────────────────────────────
+// Structural coverage of the active X10A profile, evaluated against the resolved publishable view
+// rather than against one sweep's answering pages so a timed-out 0x63 or 0x10 page never looks
+// like an absent feature.
+struct HistoryDerivedCoverage {
+    uint8_t ct_expected   = 0;
+    bool    has_inv       = false;
+    bool    has_rps       = false;
+    bool    has_flow      = false;
+    bool    has_lwt       = false;
+    bool    has_rwt       = false;
+    bool    has_post_buh  = false;
+    bool    has_buh1      = false;
+    bool    has_buh2      = false;
+    bool    has_bsh       = false;
+    bool    has_defrost   = false;
+    bool    has_valve_dhw = false;
+    bool    has_iu_mode   = false;
+
+    constexpr bool pel_supported() const { return ct_expected > 0 || (has_inv && has_rps); }
+    constexpr bool cop_supported() const {
+        return pel_supported() && has_rps && has_flow && has_rwt && (has_lwt || has_post_buh) &&
+               (has_valve_dhw || has_iu_mode);
+    }
+};
+
+inline bool history_is_ct_current_label(const char* label) {
+    return lwt_ci_contains(label, "current measured by ct");
+}
+
+inline void history_cover_derived_row(HistoryDerivedCoverage& cov, const char* label,
+                                      const char* unit, uint8_t reg, uint8_t off, int conv) {
+    if (history_is_ct_current_label(label)) cov.ct_expected++;
+    if (reg == 0x21 && off == 0 && (trend_cstr_eq(unit, "") || trend_cstr_eq(unit, "A")))
+        cov.has_inv = true;
+    if (ou_is_rps_witness(label, reg)) cov.has_rps = true;
+    if (reg == 0x62 && off == 9 && (trend_cstr_eq(unit, "") || trend_cstr_eq(unit, "L/min")))
+        cov.has_flow = true;
+    if (lwt_is_measurement(label)) cov.has_lwt = true;
+    if (rwt_is_measurement(label)) cov.has_rwt = true;
+    if (cop_is_post_buh(label, reg)) cov.has_post_buh = true;
+    if (reg == 0x60 && off == 12 && conv == 304) cov.has_buh1 = true;
+    if (reg == 0x60 && off == 12 && conv == 303) cov.has_buh2 = true;
+    if (reg == 0x60 && off == 12 && conv == 305) cov.has_bsh = true;
+    if (reg == 0x10 && off == 1 && conv == 304) cov.has_defrost = true;
+    if (reg == 0x60 && off == 12 && conv == 306) cov.has_valve_dhw = true;
+    if (reg == 0x60 && off == 2 && conv == 315) cov.has_iu_mode = true;
+}
+
+constexpr bool history_iu_mode_is_heating(const char* s) {
+    return trend_cstr_eq(s, "Heating") || trend_cstr_eq(s, "Heating + DHW");
+}
+
+constexpr HistorySample history_amps_tenths_to_kw_tenths(int amps_tenths) {
+    if (amps_tenths < 0) return HISTORY_NO_READING;
+    const int64_t kw_t = (static_cast<int64_t>(amps_tenths) * 23 + 50) / 100;
+    return kw_t > INT16_MAX ? INT16_MAX : static_cast<HistorySample>(kw_t);
+}
+
+struct HistoryPelEval {
+    PelSource     source      = PelSource::None;
+    HistorySample sample      = HISTORY_NO_READING;
+    int           amps_tenths = 0;
+};
+
+// Single-sweep X10A electrical input (I x 230 V, tenths of kW). When the profile declares CT
+// phase rows, all declared phases must be readable in this sweep: a withheld CT-L3 (bit 7) or
+// timed-out 0x63 page yields NO_READING rather than summing partial phases or splicing compressor-
+// only current onto a whole-unit curve. An all-zero CT sum (unwired clamps) falls through to the
+// inverter current, gated by the compressor speed witness so frozen 0x21 amps become HELD_OVER.
+constexpr HistoryPelEval history_electrical_power(const HistoryDerivedCoverage& cov,
+                                                  uint8_t ct_valid, int ct_sum_tenths,
+                                                  bool inv_known, int inv_tenths, bool rps_known,
+                                                  bool rps_running) {
+    if (cov.ct_expected > 0) {
+        if (ct_valid < cov.ct_expected || ct_sum_tenths < 0) return {};
+        if (ct_sum_tenths > 0) {
+            return {PelSource::Ct, history_amps_tenths_to_kw_tenths(ct_sum_tenths), ct_sum_tenths};
+        }
+    }
+    if (!cov.has_inv || !cov.has_rps || !rps_known) return {};
+    if (!rps_running) return {PelSource::None, HISTORY_HELD_OVER, 0};
+    if (!inv_known || inv_tenths < 0) return {};
+    return {PelSource::Inv, history_amps_tenths_to_kw_tenths(inv_tenths), inv_tenths};
+}
+
+struct HistoryCopInputs {
+    bool rps_known       = false;
+    int  rps_tenths      = 0;
+    bool flow_known      = false;
+    int  flow_tenths     = 0;
+    bool lwt_known       = false;
+    int  lwt_tenths      = 0;
+    bool rwt_known       = false;
+    int  rwt_tenths      = 0;
+    bool post_buh_known  = false;
+    int  post_buh_tenths = 0;
+    bool buh1_known      = false;
+    bool buh1_on         = false;
+    bool buh2_known      = false;
+    bool buh2_on         = false;
+    bool bsh_known       = false;
+    bool bsh_on          = false;
+    bool defrost_known   = false;
+    bool defrost_on      = false;
+    bool valve_dhw_known = false;
+    bool valve_dhw_on    = false;
+    bool iu_heating      = false;
+};
+
+// Single-sweep heating/DHW COP in tenths, using cop_plan()'s boundary pairing and excluding
+// cooling EER, defrost, low-speed spin-up (<= 5 rps), low flow (<= 0.5 L/min) and electrical
+// inputs <= 0.2 kW. A witnessed stopped compressor (0 rps) stores HELD_OVER so idle intervals
+// distinguish "compressor paused" from missing telemetry.
+inline HistorySample history_cop_sample(const HistoryDerivedCoverage& cov,
+                                        const HistoryPelEval& pel, const HistoryCopInputs& in) {
+    if (!cov.cop_supported() || !in.rps_known) return HISTORY_NO_READING;
+    if (in.rps_tenths <= 0) return HISTORY_HELD_OVER;
+    if (in.rps_tenths <= 50) return HISTORY_NO_READING;
+    if (!in.flow_known || in.flow_tenths <= 5) return HISTORY_NO_READING;
+    if (cov.has_defrost && (!in.defrost_known || in.defrost_on)) return HISTORY_NO_READING;
+    const bool heating_task = (in.valve_dhw_known && in.valve_dhw_on) ||
+                              ((!cov.has_valve_dhw || in.valve_dhw_known) && in.iu_heating);
+    if (!heating_task) return HISTORY_NO_READING;
+    if (pel.source == PelSource::None || static_cast<int64_t>(pel.amps_tenths) * 23 <= 200)
+        return HISTORY_NO_READING;
+    const bool    buh_known = in.buh1_known && in.buh2_known;
+    const bool    buh_on    = in.buh1_on || in.buh2_on;
+    const bool    pb_ok     = in.post_buh_known && in.rwt_known;
+    const CopPlan plan = cop_plan(pel.source, buh_known, buh_on, in.bsh_known, in.bsh_on, pb_ok);
+    if (!plan.showable() || !in.rwt_known || (!plan.use_post_buh && !in.lwt_known))
+        return HISTORY_NO_READING;
+    const int dt_tenths = (plan.use_post_buh ? in.post_buh_tenths : in.lwt_tenths) - in.rwt_tenths;
+    if (dt_tenths <= 0) return HISTORY_NO_READING;
+    const double pth_kw = (static_cast<double>(in.flow_tenths) * 0.1) / 60.0 * 4.186 *
+                          (static_cast<double>(dt_tenths) * 0.1);
+    const double pel_kw = (static_cast<double>(pel.amps_tenths) * 0.1) * 0.230;
+    const double tenths = std::round((pth_kw / pel_kw) * 10.0);
+    if (!(tenths >= 1.0 && tenths <= INT16_MAX)) return HISTORY_NO_READING;
+    return static_cast<HistorySample>(tenths);
 }
 
 // A reading in tenths of its unit, parsed back from the FORMATTED string the poll cache holds.

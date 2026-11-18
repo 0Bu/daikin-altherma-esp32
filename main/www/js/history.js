@@ -52,8 +52,12 @@ function histIdFor(label) { const r = histFor(label); return r ? r.id : ""; }
 // Is the device keeping this series? Asked by ID — a board row has no catalog label to look up, and
 // a firmware that predates a trend simply reports fewer rows, so its card draws no chart at all
 // rather than an empty one.
+const modbusHistRowId = (id) => id === "pel" ? "modbus_power" : id;
 function hasDeviceHist(id) { return !!id && !!histSpec() && histSpec().rows.some((r) => r && r.id === id); }
-function hasDeviceModbusHist(id) { return !!id && modbusHistRows().some((r) => r && r.id === id); }
+function hasDeviceModbusHist(id) {
+  const mid = modbusHistRowId(id);
+  return !!mid && modbusHistRows().some((r) => r && r.id === mid);
+}
 function hasModbusHist(id) {
   const D = DERIVED[id];
   return D ? (D.mbIns ? D.mbReady(Object.fromEntries(D.mbIns.map((k) => [k, hasDeviceModbusHist(k)]))) : false)
@@ -66,9 +70,10 @@ function hasHist(id) {
   return D ? D.ready(Object.fromEntries(D.ins.map((k) => [k, hasDeviceHist(k)]))) : hasDeviceHist(id);
 }
 
-// Derived trends combine measurements on the same five-minute raster. The recorded
-// samples within a bucket can come from different sweeps. Electrical input and COP
-// stay live-only. Raw phase currents and inverter current have their own rings.
+// Derived trends combine measurements on the same five-minute raster. Single-sweep X10A electrical
+// input (`pel`) and heating/DHW COP (`cop`) are evaluated per sweep in the firmware (`logic/history.hpp`)
+// so partial CT phases, page timeouts or mid-bucket heater pulses never cross-mix different sweeps.
+// Raw phase currents and inverter current retain their own rings.
 //
 // Every input arrives on ONE raster: history.cpp commits every ring on the same bucket boundary, so
 // sample i is the same five minutes in all of them, and a row the profile lacks is simply not
@@ -160,8 +165,9 @@ const modbusEndpointId = () => {
 };
 const histCacheKey = (id, source) => {
   if (source === "modbus") {
+    const mid = modbusHistRowId(id);
     const ep = modbusEndpointId();
-    return ep ? `modbus:${ep}:${id}` : `modbus:${id}`;
+    return ep ? `modbus:${ep}:${mid}` : `modbus:${mid}`;
   }
   return source === "env3" ? `env3:${id}` : source === "room" ? `room:${id}` : id;
 };
@@ -350,7 +356,7 @@ function validHistoryHeld(ranges, samples) {
 }
 
 const X10A_HELD_HISTORY = new Set(["outdoor_air", "outdoor_heat_exchanger", "discharge",
-  "circuit_pressure", "inv_current"]);
+  "circuit_pressure", "inv_current", "pel", "cop"]);
 
 // A 288-sample response plus the maximally fragmented held map and escaped labels fits below 4 KiB.
 // Bound decoded bytes before parsing, including when the firmware uses chunked transfer.
@@ -417,9 +423,10 @@ async function readHistory(id, source, key, epoch, previous, request) {
     at: Date.now(), refreshFailed: true,
   });
   try {
+    const wireId = source === "modbus" ? modbusHistRowId(id) : id;
     const suffix = source === "modbus" ? "&source=modbus"
       : source === "env3" ? "&source=env3" : source === "room" ? "&source=room" : "";
-    const r = await fetch("/history?row=" + encodeURIComponent(id) + suffix,
+    const r = await fetch("/history?row=" + encodeURIComponent(wireId) + suffix,
                           controller ? { signal: controller.signal } : undefined);
     const j = await readHistoryJson(r);
     if (syncHistSources() !== epoch || S.histRequests.get(key) !== request) return;
@@ -439,7 +446,7 @@ async function readHistory(id, source, key, epoch, previous, request) {
     if (!changed && (r.ok === false || j?.ok === false || !Array.isArray(j?.v) ||
         j.v.length > HIST_MAX_SAMPLES || j.v.some(v => v !== null &&
           (!Number.isInteger(v) || v < -32766 || v > 32767)) ||
-        (!legacy && (j.id !== id || j.source !== expectedSource || j.dt !== 300)) ||
+        (!legacy && (j.id !== wireId || j.source !== expectedSource || j.dt !== 300)) ||
         (j.label != null && (typeof j.label !== "string" || j.label.length > 79)) ||
         (j.unit != null && (typeof j.unit !== "string" || j.unit.length > 7)) ||
         (j.dt != null && j.dt !== 300) ||
