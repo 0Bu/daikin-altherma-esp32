@@ -252,44 +252,78 @@ def test_info_mi_failures(directory: Path) -> None:
         marker = directory / f"{fault}.reached"
         # Forward to the real pinned GDB until the mandatory command under test. Only that
         # command's response is injected; loader, MI parser and full pinned info flow remain real.
-        proxy.write_text("#!/usr/bin/env python3\n" + textwrap.dedent(f"""
-            import os
-            from pathlib import Path
-            import signal
-            import subprocess
-            import sys
-            import threading
-            signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
-            child = subprocess.Popen([{real_gdb!r}, *sys.argv[1:]], stdin=subprocess.PIPE,
-                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-            def relay():
-                for line in child.stdout:
-                    print(line, end="", flush=True)
-            threading.Thread(target=relay, daemon=True).start()
-            try:
-                for line in sys.stdin:
-                    is_fault = ('"bt"' in line) if {fault!r}.startswith('bt-') else line.startswith('-thread-info')
-                    if is_fault:
-                        Path({str(marker)!r}).write_text(line)
-                        if {fault!r}.endswith('-error'):
-                            print('^error,msg="synthetic mandatory command failure"', flush=True)
-                        elif {fault!r} == 'bt-empty':
-                            print('^done', flush=True)
-                        elif {fault!r} == 'threads-empty':
-                            print('^done,threads=[],current-thread-id="1"', flush=True)
-                        elif {fault!r} == 'bt-exit':
-                            child.terminate()
-                            child.wait(timeout=3)
-                            sys.exit(37)
-                        # bt-incomplete deliberately returns no MI completion.
-                    else:
-                        child.stdin.write(line)
-                        child.stdin.flush()
-            finally:
-                if child.poll() is None:
-                    child.terminate()
-                    child.wait(timeout=3)
-        """))
+        proxy.write_text(
+            "#!/usr/bin/env python3\n"
+            f"REAL_GDB = {real_gdb!r}\n"
+            f"FAULT = {fault!r}\n"
+            f"MARKER = {str(marker)!r}\n"
+            + textwrap.dedent(r'''
+                from pathlib import Path
+                import re
+                import signal
+                import subprocess
+                import sys
+                import threading
+
+                signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+                out_lock = threading.Lock()
+
+                def emit(text: str) -> None:
+                    with out_lock:
+                        sys.stdout.write(text)
+                        sys.stdout.flush()
+
+                child = subprocess.Popen(
+                    [REAL_GDB, *sys.argv[1:]],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                )
+
+                def relay() -> None:
+                    for out_line in child.stdout:
+                        emit(out_line)
+
+                threading.Thread(target=relay, daemon=True).start()
+                try:
+                    for raw_line in sys.stdin:
+                        token, command = re.match(r"^(\d*)(.*)$", raw_line.rstrip("\r\n")).groups()
+                        is_fault = (
+                            ('"bt"' in command)
+                            if FAULT.startswith("bt-")
+                            else command.startswith("-thread-info")
+                        )
+                        if is_fault:
+                            Path(MARKER).write_text(raw_line)
+                            if FAULT == "bt-error":
+                                frame_tag = "#" + "0"
+                                emit(
+                                    f'~"{frame_tag}  fixture_leaf () at fixture.c:4\\n"\n'
+                                    f'{token}^error,msg="synthetic mandatory command failure"\n(gdb) \n'
+                                )
+                            elif FAULT == "threads-error":
+                                emit(
+                                    f'{token}^error,msg="synthetic mandatory command failure"\n(gdb) \n'
+                                )
+                            elif FAULT == "bt-empty":
+                                emit(f"{token}^done\n(gdb) \n")
+                            elif FAULT == "threads-empty":
+                                emit(f'{token}^done,threads=[],current-thread-id="1"\n(gdb) \n')
+                            elif FAULT == "bt-exit":
+                                child.terminate()
+                                child.wait(timeout=3)
+                                sys.exit(37)
+                            # bt-incomplete deliberately returns no MI completion.
+                        else:
+                            child.stdin.write(raw_line)
+                            child.stdin.flush()
+                finally:
+                    if child.poll() is None:
+                        child.terminate()
+                        child.wait(timeout=3)
+            ''').lstrip("\n")
+        )
         proxy.chmod(0o700)
         original = decode.ESPCoreDumpFileLoader._create_temp_file
         created = []
@@ -310,6 +344,8 @@ def test_info_mi_failures(directory: Path) -> None:
                     raise AssertionError(f"MI fixture failed before reaching {fault}: {error}") from error
                 print(f"Pinned info flow + injected {fault}: rejected ({type(error).__name__})", flush=True)
             else:
+                if not marker.exists():
+                    raise AssertionError(f"MI fixture never intercepted {fault}")
                 raise AssertionError(f"Failed mandatory MI command was accepted: {fault}")
             if any(path.exists() for path in created):
                 raise AssertionError(f"Loader temporary leaked after {fault}")

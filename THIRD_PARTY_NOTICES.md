@@ -28,7 +28,7 @@ License:
 
 ## ESP-IDF and Espressif components
 
-Firmware builds use [ESP-IDF](https://github.com/espressif/esp-idf) 6.1.0 and these Espressif
+Firmware builds use [ESP-IDF](https://github.com/espressif/esp-idf) 6.1.1 and these Espressif
 components: cJSON 1.7.19~2, led_strip 3.0.3, mDNS 1.12.0, ESP-MQTT 1.1.0, W5500 2.0.0 and
 wiznet_common 1.0.0.
 
