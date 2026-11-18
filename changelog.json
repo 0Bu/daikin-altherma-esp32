@@ -1,1 +1,1 @@
-{"version":"1.0.17","changelog":"Add dual-source Modbus 24h store, pause mode, and Modbus source labels"}
+{"version":"1.0.18","changelog":"Reclaim static DRAM and paused MQTT caches for OTA TLS\nAdd Package 1 registers, schematic fallbacks, and 24h histories"}
