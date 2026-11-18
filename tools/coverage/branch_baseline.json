@@ -2014,6 +2014,38 @@
       "measurement_limits": [
         "The local x86_64 Ubuntu 26.04 GCC image measures the hosted profile candidate. Authoritative GitHub confirmation remains separate."
       ]
+    },
+    {
+      "runner": "scripts/run-mock-tests.sh --coverage compiler and gcov invocation on frozen source",
+      "base_commit": "cc930ab0efdd00179aafd36275bdeac80566c5e6",
+      "scope": "Streamed /diag tail cursor (diag_stream_begin, diag_stream_read) replaces 6 KiB static diag_dump materialization while keeping truncation, line-boundary, and wraparound semantics intact across all covered branch outcomes.",
+      "sources": {
+        "main/logic/diag_tail.hpp": "d9fedc0f3888ffa518da0999de51b44b26d0031fcd785447c905f3727efb12bb"
+      },
+      "test_source_sha256": "129d4cea31aea74fb5a208f88c134df621453883b0cbd55808173920b774afd0",
+      "measured_line_counts": {
+        "clang-17-darwin": {
+          "covered": 11311,
+          "executable": 11479
+        },
+        "gcc-13-linux-ubuntu24": {
+          "covered": 10736,
+          "executable": 11016
+        },
+        "gcc-15-github-linux-ubuntu26": {
+          "covered": 10729,
+          "executable": 11018
+        }
+      },
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2)",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+        "gcc-15-github-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+      },
+      "measurement_limits": [
+        "The local x86_64 Ubuntu 26.04 GCC image measures the hosted profile candidate. Authoritative GitHub confirmation remains separate.",
+        "gcc-15-linux-ubuntu26 carries the matching measured GCC 15 delta (206/206) without a separate local arm64 Ubuntu 26.04 container run."
+      ]
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
@@ -2112,8 +2144,8 @@
         "taken": 29
       },
       "main/logic/diag_tail.hpp": {
-        "outcomes": 72,
-        "taken": 72
+        "outcomes": 184,
+        "taken": 184
       },
       "main/logic/discovery.hpp": {
         "taken": 147,
@@ -2554,8 +2586,8 @@
         "taken": 31
       },
       "main/logic/diag_tail.hpp": {
-        "outcomes": 82,
-        "taken": 82
+        "outcomes": 206,
+        "taken": 206
       },
       "main/logic/discovery.hpp": {
         "taken": 161,
@@ -2996,8 +3028,8 @@
         "taken": 31
       },
       "main/logic/diag_tail.hpp": {
-        "outcomes": 82,
-        "taken": 82
+        "outcomes": 206,
+        "taken": 206
       },
       "main/logic/discovery.hpp": {
         "taken": 161,
@@ -3438,8 +3470,8 @@
         "taken": 31
       },
       "main/logic/diag_tail.hpp": {
-        "outcomes": 82,
-        "taken": 82
+        "outcomes": 206,
+        "taken": 206
       },
       "main/logic/discovery.hpp": {
         "taken": 161,

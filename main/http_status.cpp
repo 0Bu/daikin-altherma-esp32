@@ -2525,21 +2525,21 @@ static esp_err_t h_diag(httpd_req_t* req) {
             diag_set_verbose(query_flag_on(v));
         redact = query_flag(q, "redact");
     } // Query scratch has no borrowed consumer during the diagnostic transfer.
-    // Plain diagnostics copy into static storage. Redacted per-line strings require their own
-    // OTA admission check before the bounded stream starts.
+    // Plain diagnostics stream from static 1 KiB storage. Redacted per-line strings require
+    // their own OTA admission check before the bounded stream starts.
     if (redact && ota_download_active()) return network_tls_busy(req);
-    static char  buf[6144];
-    const size_t max_dump = ota_download_active() ? 512 : sizeof(buf);
-    size_t       n        = diag_dump(buf, max_dump);
+    static char             buf[1024];
+    static DiagStreamCursor cursor;
+    const size_t            max_dump = ota_download_active() ? 512 : kDiagRingBytes;
+    cursor                           = diag_stream_open(max_dump);
     httpd_resp_set_type(req, "text/plain");
     if (!redact) {
-        // Stream plain /diag in 1 KiB chunks instead of one monolithic send. When OTA is
-        // actively downloading, clamp the dump to 512 B so lwIP queues only a single small TCP
-        // pbuf, preventing multi-pbuf internal heap fragmentation while mbedTLS re-allocates
-        // its 16 KiB RX record buffer.
-        for (size_t off = 0; off < n; off += 1024) {
-            const size_t len = std::min<size_t>(1024, n - off);
-            if (httpd_resp_send_chunk(req, buf + off, len) != ESP_OK) return ESP_FAIL;
+        // Stream plain /diag in 1 KiB chunks instead of materializing a 6 KiB ring copy. When OTA
+        // is actively downloading, max_dump caps the open cursor to 512 B so lwIP queues only a
+        // single small TCP pbuf, preventing multi-pbuf internal heap fragmentation while mbedTLS
+        // re-allocates its 16 KiB RX record buffer.
+        while (const size_t n = diag_stream_next(cursor, buf, sizeof(buf), false)) {
+            if (httpd_resp_send_chunk(req, buf, n) != ESP_OK) return ESP_FAIL;
         }
         return httpd_resp_send_chunk(req, nullptr, 0);
     }
@@ -2547,17 +2547,19 @@ static esp_err_t h_diag(httpd_req_t* req) {
     // Redact each record without materializing the ring. A late per-line allocation failure
     // closes the committed stream instead of reaching the outer guard's clean-error response.
     HttpJsonChunks chunks(HttpChunkEmitter{req});
-    return finish_bounded_stream(chunks,
-                                 [&](auto& out) {
-                                     for (size_t start = 0; start < n;) {
-                                         size_t eol = start;
-                                         while (eol < n && buf[eol] != '\n') ++eol;
-                                         if (eol < n) ++eol;
-                                         out += redact_diag_line(
-                                             std::string_view(buf + start, eol - start));
-                                         start = eol;
-                                     }
-                                 })
+    return finish_bounded_stream(
+               chunks,
+               [&](auto& out) {
+                   while (const size_t n = diag_stream_next(cursor, buf, sizeof(buf), true)) {
+                       for (size_t start = 0; start < n;) {
+                           size_t eol = start;
+                           while (eol < n && buf[eol] != '\n') ++eol;
+                           if (eol < n) ++eol;
+                           out += redact_diag_line(std::string_view(buf + start, eol - start));
+                           start = eol;
+                       }
+                   }
+               })
                ? ESP_OK
                : ESP_FAIL;
 }

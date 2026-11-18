@@ -15,10 +15,11 @@
 
 namespace daik {
 
-static constexpr size_t RING = 6144;
-static char             s_buf[RING];
-static size_t           s_len = 0;          // bytes used (grows then wraps)
-static bool             s_wrapped = false;
+static constexpr size_t  RING = kDiagRingBytes;
+static char              s_buf[RING];
+static size_t            s_len     = 0; // bytes used (grows then wraps)
+static bool              s_wrapped = false;
+static uint64_t          s_written = 0; // cumulative bytes appended since init/clear
 static std::atomic<bool> s_verbose{false};
 static StaticSemaphore_t s_mtx_buf;
 static SemaphoreHandle_t s_mtx = nullptr;
@@ -31,7 +32,11 @@ void diag_log_init() {
 static void append(const char* p, size_t n) {
     for (size_t i = 0; i < n; i++) {
         s_buf[s_len++] = p[i];
-        if (s_len >= RING) { s_len = 0; s_wrapped = true; }
+        ++s_written;
+        if (s_len >= RING) {
+            s_len     = 0;
+            s_wrapped = true;
+        }
     }
 }
 
@@ -80,9 +85,23 @@ size_t diag_dump(char* out, size_t max) {
     return diag_dump_tail(s_buf, RING, s_len, s_wrapped, out, max);
 }
 
+DiagStreamCursor diag_stream_open(size_t max) {
+    SemGuard lk(s_mtx);
+    if (!lk) return {};
+    return diag_stream_begin(s_buf, RING, s_len, s_wrapped, s_written, max);
+}
+
+size_t diag_stream_next(DiagStreamCursor& cursor, char* out, size_t max, bool whole_lines) {
+    SemGuard lk(s_mtx);
+    if (!lk) return 0;
+    return diag_stream_read(cursor, s_buf, RING, s_written, out, max, whole_lines);
+}
+
 void diag_clear() {
     SemGuard lk(s_mtx);
-    s_len = 0; s_wrapped = false;
+    s_len     = 0;
+    s_wrapped = false;
+    s_written = 0;
 }
 
 } // namespace daik

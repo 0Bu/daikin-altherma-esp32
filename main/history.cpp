@@ -762,11 +762,11 @@ CyclingFlashStream s_flash_cycling;
 CyclingFlashStream s_flash_cycling_modbus;
 
 struct CheckupModbusFlashState {
-    int64_t                    last_bucket                    = INT64_MIN;
-    int64_t                    newest_bucket                  = INT64_MIN;
-    int64_t                    oldest_bucket                  = INT64_MIN;
-    uint16_t                   restore_slots[HISTORY_SAMPLES] = {};
-    uint16_t                   restore_slot_count             = 0;
+    int64_t                    last_bucket                                     = INT64_MIN;
+    int64_t                    newest_bucket                                   = INT64_MIN;
+    int64_t                    oldest_bucket                                   = INT64_MIN;
+    uint16_t                   restore_slots[logic::CHECKUP_JOURNAL_INDEX_CAP] = {};
+    uint16_t                   restore_slot_count                              = 0;
     logic::CheckupJournalIndex index{};
     uint64_t                   newest_sequence = 0;
     bool                       index_done      = false;
@@ -793,8 +793,14 @@ int64_t  s_flash_newest_bucket[kJournalSources] = {INT64_MIN, INT64_MIN, INT64_M
                                                    INT64_MIN};
 int64_t  s_flash_oldest_bucket[kJournalSources] = {INT64_MIN, INT64_MIN, INT64_MIN, INT64_MIN,
                                                    INT64_MIN};
-uint16_t s_flash_restore_slots[kJournalSources][HISTORY_SAMPLES] = {};
-uint16_t s_flash_restore_slot_count[kJournalSources] = {};
+
+constexpr size_t kTrendJournalSources = kJournalSources - 1;
+constexpr size_t trend_restore_slot_row(size_t src) {
+    return src > static_cast<size_t>(logic::HistoryJournalSource::Checkup) ? src - 1 : src;
+}
+uint16_t s_flash_restore_slots[kTrendJournalSources][HISTORY_SAMPLES]    = {};
+uint16_t s_flash_checkup_restore_slots[logic::CHECKUP_JOURNAL_INDEX_CAP] = {};
+uint16_t s_flash_restore_slot_count[kJournalSources]                     = {};
 // Boot index of the checkup source: up to CHECKUP_JOURNAL_INDEX_CAP candidate hours before the
 // window is clipped to the CHECKUP_COMPLETED_BUCKETS restorable hours.
 logic::CheckupJournalIndex s_flash_checkup_index;
@@ -844,10 +850,20 @@ bool s_flash_restore_ahead_logged[kJournalServiceSources] = {};
 
 // Static scratch avoids adding a 4 KiB scan buffer or four 576-byte restore blocks to the poll
 // task's measured 8 KiB stack. All access is serialised on the poll task or s_flash_mtx.
+// Trend/splice scratch shares the 4 KiB sector buffer because flash scans, checkup/cycling
+// restores, and history_service_flash_restore() run sequentially without overlapping sector uses.
 alignas(FlashJournalRecord) uint8_t s_flash_sector[logic::HISTORY_FLASH_ERASE_BYTES];
-HistorySample s_flash_restore_blocks[kRestoreRingsPerTick][HISTORY_SAMPLES];
-static HistorySample s_splice_live[HISTORY_SAMPLES];
-static HistorySample s_splice_out[HISTORY_SAMPLES];
+struct FlashTrendRestoreScratch {
+    HistorySample blocks[kRestoreRingsPerTick][HISTORY_SAMPLES];
+    HistorySample splice_live[HISTORY_SAMPLES];
+    HistorySample splice_out[HISTORY_SAMPLES];
+};
+static_assert(sizeof(FlashTrendRestoreScratch) <= sizeof(s_flash_sector),
+              "trend/splice scratch must fit in s_flash_sector");
+static_assert(alignof(FlashTrendRestoreScratch) <= alignof(FlashJournalRecord),
+              "trend/splice scratch alignment must not exceed s_flash_sector");
+static_assert(std::is_trivially_copyable_v<FlashTrendRestoreScratch>,
+              "trend/splice scratch must be trivially copyable for sector reuse");
 
 HistorySource source_of_slot(size_t slot, size_t& idx) {
     if (slot < TREND_COUNT) { idx = slot; return HistorySource::X10a; }
@@ -1889,14 +1905,18 @@ bool splice_locked(HistorySource src, size_t idx, const HistorySample* v, size_t
     int64_t live_anchor = source_anchor_bucket_locked(src);
     if (live_anchor == INT64_MIN && !seed_source_timeline_locked(src, newest_bucket, live_anchor))
         return false;
-    const size_t live_n = r->snapshot(s_splice_live, HISTORY_SAMPLES);
+    auto* const  scratch = reinterpret_cast<FlashTrendRestoreScratch*>(s_flash_sector);
+    const size_t live_n  = r->snapshot(scratch->splice_live, HISTORY_SAMPLES);
 
     logic::HistorySnapshotView view;
-    view.v = v; view.n = n; view.stride = stride; view.newest_bucket = newest_bucket;
-    const size_t len = logic::history_splice(view, s_splice_live, live_n, live_anchor,
-                                             s_splice_out, HISTORY_SAMPLES);
-    if (len <= live_n) return false;                 // nothing older survived the window — not an error
-    ring_replace_locked(*r, s_splice_out, len);
+    view.v             = v;
+    view.n             = n;
+    view.stride        = stride;
+    view.newest_bucket = newest_bucket;
+    const size_t len   = logic::history_splice(view, scratch->splice_live, live_n, live_anchor,
+                                               scratch->splice_out, HISTORY_SAMPLES);
+    if (len <= live_n) return false; // nothing older survived the window — not an error
+    ring_replace_locked(*r, scratch->splice_out, len);
     if (src == HistorySource::Room)
         room_seal_locked();
     else
@@ -2369,7 +2389,8 @@ bool flash_journal_scan() {
                             s_flash_mb_checkup.index_done = true;
                             remaining--;
                         } else if (step == logic::CheckupJournalIndexStep::Keep &&
-                                   s_flash_mb_checkup.restore_slot_count < HISTORY_SAMPLES) {
+                                   s_flash_mb_checkup.restore_slot_count <
+                                       logic::CHECKUP_JOURNAL_INDEX_CAP) {
                             s_flash_mb_checkup
                                 .restore_slots[s_flash_mb_checkup.restore_slot_count++] =
                                 static_cast<uint16_t>(slot);
@@ -2393,8 +2414,10 @@ bool flash_journal_scan() {
                         if (step == logic::CheckupJournalIndexStep::Stop) {
                             done[src] = true;
                             remaining--;
-                        } else if (step == logic::CheckupJournalIndexStep::Keep) {
-                            s_flash_restore_slots[src][s_flash_restore_slot_count[src]++] =
+                        } else if (step == logic::CheckupJournalIndexStep::Keep &&
+                                   s_flash_restore_slot_count[src] <
+                                       logic::CHECKUP_JOURNAL_INDEX_CAP) {
+                            s_flash_checkup_restore_slots[s_flash_restore_slot_count[src]++] =
                                 static_cast<uint16_t>(slot);
                         }
                     }
@@ -2406,8 +2429,9 @@ bool flash_journal_scan() {
                         remaining--;
                     } else if (r.header.bucket <= s_flash_newest_bucket[src] &&
                                s_flash_restore_slot_count[src] < HISTORY_SAMPLES) {
-                        s_flash_restore_slots[src][s_flash_restore_slot_count[src]++] =
-                            static_cast<uint16_t>(slot);
+                        s_flash_restore_slots[trend_restore_slot_row(src)]
+                                             [s_flash_restore_slot_count[src]++] =
+                                                 static_cast<uint16_t>(slot);
                         if (s_flash_oldest_bucket[src] == INT64_MIN ||
                             r.header.bucket < s_flash_oldest_bucket[src])
                             s_flash_oldest_bucket[src] = r.header.bucket;
@@ -2424,7 +2448,7 @@ bool flash_journal_scan() {
 
     // Clip the checkup candidates to the newest copy of each hour in the 23-hour window ending at
     // the newest indexed hour. That hour, not the newest-sequence copy, is the append cursor.
-    clip_checkup_index(s_flash_checkup_index, s_flash_restore_slots[checkup_src],
+    clip_checkup_index(s_flash_checkup_index, s_flash_checkup_restore_slots,
                        s_flash_restore_slot_count[checkup_src], s_flash_oldest_bucket[checkup_src],
                        s_flash_newest_bucket[checkup_src], s_flash_last_bucket[checkup_src]);
     clip_checkup_index(s_flash_mb_checkup.index, s_flash_mb_checkup.restore_slots,
@@ -3045,7 +3069,7 @@ static void history_restore_checkup_flash() {
             is_modbus ? s_flash_mb_checkup.restore_done : s_flash_checkup_restore_done;
         if (restore_done) continue;
         const uint16_t* slots =
-            is_modbus ? s_flash_mb_checkup.restore_slots : s_flash_restore_slots[src];
+            is_modbus ? s_flash_mb_checkup.restore_slots : s_flash_checkup_restore_slots;
         const uint16_t slot_count =
             is_modbus ? s_flash_mb_checkup.restore_slot_count : s_flash_restore_slot_count[src];
         const int64_t newest_bucket =
@@ -3121,7 +3145,7 @@ void history_restore_cycling_flash(TickType_t wait_ticks) {
 
 // Restore at most four rings per poll tick. Each batch reads a source's indexed records once and
 // transposes four values into ring-shaped blocks: at most HISTORY_SAMPLES slot reads of
-// HISTORY_JOURNAL_SLOT_BYTES (~74 KiB), 2.3 KiB of static scratch and no heap allocation. A source
+// HISTORY_JOURNAL_SLOT_BYTES (~74 KiB), reused sector scratch and no heap allocation. A source
 // whose indexed window lies beyond the wall bucket is restored from nothing (the splice refuses it)
 // and reported once; it is never re-indexed or rewritten.
 void history_service_flash_restore() {
@@ -3160,6 +3184,8 @@ void history_service_flash_restore() {
     const size_t source_rings = logic::history_journal_source_rings(journal_source(src));
     size_t batch = source_rings - first_idx;
     if (batch > kRestoreRingsPerTick) batch = kRestoreRingsPerTick;
+    auto* const s_flash_restore_blocks =
+        reinterpret_cast<FlashTrendRestoreScratch*>(s_flash_sector)->blocks;
     for (size_t b = 0; b < batch; b++)
         for (size_t i = 0; i < HISTORY_SAMPLES; i++)
             s_flash_restore_blocks[b][i] = HISTORY_NO_READING;
@@ -3189,8 +3215,12 @@ void history_service_flash_restore() {
         // Index is newest-first; replay oldest-first so a newer duplicate bucket wins defensively.
         for (size_t k = s_flash_restore_slot_count[src_i]; k > 0; k--) {
             FlashJournalRecord r;
-            const esp_err_t e = flash_read_record(s_flash_restore_slots[src_i][k - 1], r);
-            if (e != ESP_OK) { read_failed = true; break; }
+            const esp_err_t    e =
+                flash_read_record(s_flash_restore_slots[trend_restore_slot_row(src_i)][k - 1], r);
+            if (e != ESP_OK) {
+                read_failed = true;
+                break;
+            }
             if (!flash_record_valid(r) || r.header.bucket < oldest || r.header.bucket > newest)
                 continue;
             const size_t pos = static_cast<size_t>(r.header.bucket - oldest);

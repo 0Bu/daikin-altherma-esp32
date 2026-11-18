@@ -909,6 +909,13 @@ try {
     ["the changelog timer daemon blocks on the OTA mutex", () =>
       replaceOnce("main/ota_update.cpp", "Lock lk(s_mtx, 0);",
         "Lock lk(s_mtx);")],
+    ["plain /diag reintroduces its static 6 KiB ring copy", () =>
+      replaceOnce("main/http_status.cpp", /static\s+char\s+buf\[1024\];/,
+        "static char buf[6144];")],
+    ["paused MQTT keeps its last state JSON caches on heap", () =>
+      replaceOnce("main/mqtt_ha.cpp",
+        "        release_paused_state_caches();\n        diag_printf(\"mqtt: transport paused for network heap\\n\");",
+        "        diag_printf(\"mqtt: transport paused for network heap\\n\");")],
   ];
 
   let caught = 0;

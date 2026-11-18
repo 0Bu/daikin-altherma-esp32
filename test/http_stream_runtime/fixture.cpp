@@ -469,6 +469,14 @@ size_t diag_dump(char* out, size_t cap) {
     std::memcpy(out, fixture::log.data(), n);
     return n;
 }
+DiagStreamCursor diag_stream_open(size_t max) {
+    return diag_stream_begin(fixture::log.data(), kDiagRingBytes, fixture::log.size(), false,
+                             fixture::log.size(), max);
+}
+size_t diag_stream_next(DiagStreamCursor& cursor, char* out, size_t cap, bool whole_lines) {
+    return diag_stream_read(cursor, fixture::log.data(), kDiagRingBytes, fixture::log.size(), out,
+                            cap, whole_lines);
+}
 void diag_set_verbose(bool) {}
 } // namespace daik
 
