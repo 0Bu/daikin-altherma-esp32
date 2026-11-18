@@ -21,7 +21,13 @@ from esp_coredump import CoreDump
 from esp_coredump import coredump as coredump_api
 from esp_coredump.corefile import ESPCoreDumpError
 from esp_coredump.corefile.elf import ESPCoreDumpElfFile, ElfFile
-from esp_coredump.corefile.gdb import EspGDB
+from esp_coredump.corefile.gdb import (
+    DEFAULT_GDB_TIMEOUT_SEC,
+    EspGDB,
+    STREAM_PAYLOAD_DECODED,
+    mi_escape,
+    mi_unescape,
+)
 from esp_coredump.corefile.loader import ESPCoreDumpFileLoader
 
 
@@ -35,44 +41,72 @@ class VerifiedDump:
 class StrictEspGDB(EspGDB):
     """Keep the pinned decoder, but require completed, successful MI commands.
 
-    esp-coredump 1.17.0's multi-response path ignores MI errors and completion timeouts.
-    In particular, a failed `bt` can otherwise produce an apparently successful info report.
+    esp-coredump 1.18.1's tokenized `_run_mi` path ignores command errors in `__init__`
+    and `run_cmd`, and spins until timeout without checking for early GDB exit.
+    In particular, a failed `bt` or `-thread-info` can otherwise produce an apparently
+    successful info report.
     """
 
-    def _gdbmi_run_cmd_get_responses(
-        self, cmd, resp_message, resp_type, multiple=True, done_message=None,
-        done_type=None, response_delay_sec=None,
-    ):
-        self.p.write(cmd, read_response=False)
-        deadline = time.monotonic() + (response_delay_sec or self.timeout)
-        responses = []
+    def __init__(self, gdb_args, timeout_sec=DEFAULT_GDB_TIMEOUT_SEC):
+        self._last_error: str | None = None
+        try:
+            super().__init__(gdb_args, timeout_sec=timeout_sec)
+            if self._last_error is not None:
+                raise ESPCoreDumpError(f"GDB startup command failed: {self._last_error}")
+        except BaseException:
+            if hasattr(self, "p"):
+                super().__del__()
+            raise
+
+    def _run_mi(self, cmd, timeout_sec=None):
+        self.token += 1
+        self.p.write(f"{self.token}{cmd}", read_response=False)
+        console = []
+        deadline = time.monotonic() + (timeout_sec or self.timeout)
         while time.monotonic() < deadline:
-            batch = self.p.get_gdb_response(timeout_sec=0, raise_error_on_timeout=False)
-            responses.extend(batch)
-            if any(item.get("type") == "result" and item.get("message") == "error" for item in batch):
-                raise ESPCoreDumpError(f"GDB command failed: {cmd}")
-            if any(item.get("type") == (done_type or "result")
-                   and item.get("message") == (done_message or "done") for item in batch):
-                filtered = [item for item in responses
-                            if item.get("type") == resp_type and item.get("message") == resp_message]
-                if not multiple and not filtered:
-                    raise ESPCoreDumpError(f"GDB command returned no required response: {cmd}")
-                return filtered
+            for rsp in self.p.get_gdb_response(timeout_sec=0, raise_error_on_timeout=False):
+                if rsp.get("type") == "console":
+                    console.append(rsp.get("payload", ""))
+                elif rsp.get("type") == "result" and rsp.get("token") != self.token:
+                    console = []
+                elif rsp.get("type") == "result":
+                    text = "".join(console)
+                    text = text if STREAM_PAYLOAD_DECODED else mi_unescape(text)
+                    if rsp.get("message") == "error":
+                        payload = rsp.get("payload")
+                        error = (
+                            payload.get("msg", "MI error")
+                            if isinstance(payload, dict)
+                            else str(payload or "MI error")
+                        )
+                        self._last_error = error
+                        return None, text, error
+                    self._last_error = None
+                    return rsp.get("payload"), text, None
             process = self.p.gdb_process
             if process is None or process.poll() is not None:
                 status = None if process is None else process.returncode
-                raise ESPCoreDumpError(f"GDB exited before completing command (status {status}): {cmd}")
+                raise ESPCoreDumpError(
+                    f"GDB exited before completing command (status {status}): {cmd}"
+                )
             time.sleep(0.01)
         raise ESPCoreDumpError(f"GDB command did not complete: {cmd}")
 
     def run_cmd(self, gdb_cmd):
-        result = super().run_cmd(gdb_cmd)
+        _, text, error = self._run_mi(f'-interpreter-exec console "{mi_escape(gdb_cmd)}"')
+        if error is not None:
+            raise ESPCoreDumpError(f"GDB command failed ({gdb_cmd}): {error}")
+        result = text.rstrip("\n")
         if gdb_cmd == "bt" and not re.search(r"(?m)^#\d+\s", result):
             raise ESPCoreDumpError("GDB returned no backtrace frames")
         return result
 
-    def get_thread_info(self, response_delay_sec=3):
-        threads, current = super().get_thread_info(response_delay_sec)
+    def get_thread_info(self, response_delay_sec=DEFAULT_GDB_TIMEOUT_SEC):
+        result, _, error = self._run_mi("-thread-info", response_delay_sec)
+        if error is not None:
+            raise ESPCoreDumpError(f"GDB command failed (-thread-info): {error}")
+        threads = result.get("threads") if isinstance(result, dict) else None
+        current = result.get("current-thread-id") if isinstance(result, dict) else None
         if not threads or not current:
             raise ESPCoreDumpError("GDB returned no current thread information")
         return threads, current

@@ -62,7 +62,7 @@ class PublicationTests(unittest.TestCase):
                 {'path': 'daikin-altherma-esp32-web-partition-table.bin', 'offset': 0x8000},
                 {'path': 'daikin-altherma-esp32-web-ota_data_initial.bin', 'offset': 0xf000},
                 {'path': 'daikin-altherma-esp32.bin', 'offset': 0x20000}]}],
-            'provenance': {'source_sha': self.source, 'idf_version': 'v6.1',
+            'provenance': {'source_sha': self.source, 'idf_version': 'v6.1.1',
                            'dependencies_lock_sha256': hashlib.sha256((self.root / 'dependencies.lock').read_bytes()).hexdigest(),
                            'app_sha256': hashlib.sha256(app).hexdigest(),
                            'signing_key_sha256': dev.provenance.pinned_signing_digest()},

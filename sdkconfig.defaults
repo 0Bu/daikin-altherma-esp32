@@ -144,10 +144,34 @@ CONFIG_MBEDTLS_CLIENT_SSL_SESSION_TICKETS=n
 CONFIG_MBEDTLS_SERVER_SSL_SESSION_TICKETS=n
 # No filesystem: certs/keys come from the CA bundle and NVS, never a VFS path. ~1.2 KB.
 CONFIG_MBEDTLS_FS_IO=n
+# Unused mbedTLS block modes, CRL/encrypted-key/explicit-EC parsing, full software AES tables,
+# optional TLS alert/MFLN extensions, and non-WebPKI curves: TLS 1.2 and WPA2/WPA3 use
+# GCM/CCM/CBC/ECB/CMAC with ESP32-S3 hardware AES and dynamic record buffers, esp_crt_bundle uses
+# named NIST P-256/P-384/P-521 or Curve25519 roots without CRLs, and no encrypted client key exists.
+# Dropping these unused paths (~15 KiB total) keeps ESP-IDF 6.1.1 within the 0x1e0000 staged binary
+# size (1920.0 / 1948.0 KiB policy cap, 28.0 KiB policy headroom; 60 KiB free in 0x1f0000 after sig).
+CONFIG_MBEDTLS_AES_FEWER_TABLES=y
+CONFIG_MBEDTLS_CIPHER_MODE_CFB=n
+CONFIG_MBEDTLS_CIPHER_MODE_OFB=n
+CONFIG_MBEDTLS_CIPHER_MODE_XTS=n
+CONFIG_MBEDTLS_X509_CRL_PARSE_C=n
+CONFIG_MBEDTLS_PKCS5_C=n
+CONFIG_MBEDTLS_PK_PARSE_EC_EXTENDED=n
+CONFIG_MBEDTLS_SSL_MAX_FRAGMENT_LENGTH=n
+CONFIG_MBEDTLS_SSL_ALL_ALERT_MESSAGES=n
+CONFIG_MBEDTLS_ECP_DP_SECP256K1_ENABLED=n
+CONFIG_MBEDTLS_ECP_DP_BP256R1_ENABLED=n
+CONFIG_MBEDTLS_ECP_DP_BP384R1_ENABLED=n
+CONFIG_MBEDTLS_ECP_DP_BP512R1_ENABLED=n
 # Keep CA verification for MQTTS, OTA and forecasts, but use ESP-IDF's common-root subset. It
 # retains roughly 99% public-root coverage at about half the flash cost of the full Mozilla set;
 # brokers chained only to a rare excluded root need a certificate chain rooted in this subset.
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_CMN=y
+# Disable ESP-IDF 6.1.1's default cross-signed CA callback: it allocates a temporary
+# mbedtls_x509_crt, PSA public-key slot and issuer RDN list (~1+ KiB internal heap) on every
+# bundle-verified handshake, encroaching on Weather's measured 48/20 KiB gate (800 B live trough)
+# and adding an unmodeled callback path. Keep the 6.1 in-place esp_crt_verify_callback path.
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY=n
 # Allocate TLS RX/TX records only when needed, size them for the actual record, and return large
 # buffers to small cache buffers after use. ESP-IDF 6.1's dynamic-buffer port applies this to OTA,
 # weather and optional MQTTS and removes the connection-long 16 KiB RX + 4 KiB TX reservation.
