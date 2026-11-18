@@ -102,7 +102,7 @@
       "max_bytes": 2336
     },
     "config_board": {
-      "pattern": "^daik::set_board\\(",
+      "pattern": "^daik::set_board\\(httpd_req\\*\\)$",
       "max_bytes": 2176
     },
     "config_env3": {
@@ -1676,6 +1676,34 @@
     "status_unsigned_number": {
       "pattern": "^void\\ daik::append_json_uint<daik::BoundedChunkSink<daik::HttpChunkEmitter,\\ 1024u>\\ >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter,\\ 1024u>\\&,\\ unsigned\\ long\\ long\\)$",
       "max_bytes": 64
+    },
+    "status_bool_field": {
+      "pattern": "^daik::append_status_json<daik::BoundedChunkSink<daik::HttpChunkEmitter,\\ 1024u>\\ >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter,\\ 1024u>\\&,\\ bool\\)::\\{lambda\\(char\\ const\\*,\\ bool\\)[#]1\\}::operator\\(\\)\\(char\\ const\\*,\\ bool\\)\\ const$",
+      "max_bytes": 32
+    },
+    "status_uint_field": {
+      "pattern": "^daik::append_status_json<daik::BoundedChunkSink<daik::HttpChunkEmitter,\\ 1024u>\\ >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter,\\ 1024u>\\&,\\ bool\\)::\\{lambda\\(char\\ const\\*,\\ unsigned\\ long\\ long\\)[#]1\\}::operator\\(\\)\\(char\\ const\\*,\\ unsigned\\ long\\ long\\)\\ const$",
+      "max_bytes": 32
+    },
+    "status_int_field": {
+      "pattern": "^daik::append_status_json<daik::BoundedChunkSink<daik::HttpChunkEmitter,\\ 1024u>\\ >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter,\\ 1024u>\\&,\\ bool\\)::\\{lambda\\(char\\ const\\*,\\ long\\ long\\)[#]1\\}::operator\\(\\)\\(char\\ const\\*,\\ long\\ long\\)\\ const$",
+      "max_bytes": 32
+    },
+    "status_quoted_field": {
+      "pattern": "^daik::append_status_json<daik::BoundedChunkSink<daik::HttpChunkEmitter,\\ 1024u>\\ >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter,\\ 1024u>\\&,\\ bool\\)::\\{lambda\\(char\\ const\\*,\\ std::basic_string_view<char,\\ std::char_traits<char>\\ >\\)[#]1\\}::operator\\(\\)\\(char\\ const\\*,\\ std::basic_string_view<char,\\ std::char_traits<char>\\ >\\)\\ const$",
+      "max_bytes": 48
+    },
+    "status_quoted_string": {
+      "pattern": "^void\\ daik::json_append_quoted<daik::BoundedChunkSink<daik::HttpChunkEmitter,\\ 1024u>\\ >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter,\\ 1024u>\\&,\\ std::basic_string_view<char,\\ std::char_traits<char>\\ >\\)$",
+      "max_bytes": 48
+    },
+    "status_escaped_string": {
+      "pattern": "^void\\ daik::json_append_escaped<daik::BoundedChunkSink<daik::HttpChunkEmitter,\\ 1024u>\\ >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter,\\ 1024u>\\&,\\ std::basic_string_view<char,\\ std::char_traits<char>\\ >\\)$",
+      "max_bytes": 64
+    },
+    "status_utf8_sequence_length": {
+      "pattern": "^daik::utf8_sequence_length\\(std::basic_string_view<char,\\ std::char_traits<char>\\ >\\)$",
+      "max_bytes": 48
     },
     "mqtt_public_start": {
       "pattern": "^daik::mqtt_ha_start\\(\\)$",
@@ -5075,6 +5103,100 @@
         "status_serializer",
         "status_health_number",
         "status_unsigned_number"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_bool_field": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "status_bool_field"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_direct_bool_field": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "status_bool_field"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_uint_field": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "status_uint_field",
+        "status_unsigned_number"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_direct_uint_field": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "status_uint_field",
+        "status_unsigned_number"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_int_field": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "status_int_field",
+        "status_unsigned_number"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_direct_int_field": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "status_int_field",
+        "status_unsigned_number"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_quoted_field": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "status_quoted_field",
+        "status_quoted_string",
+        "status_escaped_string",
+        "status_utf8_sequence_length"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_direct_quoted_field": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "status_quoted_field",
+        "status_quoted_string",
+        "status_escaped_string",
+        "status_utf8_sequence_length"
       ],
       "multipliers": {},
       "base_bytes": 1536,
@@ -14034,6 +14156,14 @@
         "httpd_shutdown_env3_checkup",
         "httpd_mcp_health_number",
         "httpd_direct_health_number",
+        "httpd_mcp_bool_field",
+        "httpd_direct_bool_field",
+        "httpd_mcp_uint_field",
+        "httpd_direct_uint_field",
+        "httpd_mcp_int_field",
+        "httpd_direct_int_field",
+        "httpd_mcp_quoted_field",
+        "httpd_direct_quoted_field",
         "httpd_checkup_schema",
         "httpd_ota_upload_admission",
         "httpd_ota_upload_async_begin",

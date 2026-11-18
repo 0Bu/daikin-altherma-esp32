@@ -679,6 +679,7 @@ const TONE_FILL = {
 // `idle` mutes the DOT but not the text — distinct from `dim` (no data at all), which mutes both.
 const PLANT_RUNNING = { key: "sys.operating", tone: "" };
 const PLANT_DEFROST = { key: "sys.defrosting", tone: "" };
+const PLANT_DISINFECTION = { key: "sys.disinfecting", tone: "" };
 const PLANT_CIRC = { key: "sys.circulating", tone: "" };
 const PLANT_COOL_RESIDUAL = { key: "sys.residual_circulating", tone: "idle" };
 const PLANT_BSH = { key: "sys.bsh_active", tone: "" };
@@ -687,6 +688,7 @@ const PLANT_UNKNOWN = { key: "dyn.state_gate", tone: "warn" };
 function plantState(d) {
   if (!d) return PLANT_STANDBY;
   if (d.defrost === true) return PLANT_DEFROST;
+  if (d.disinfection === true) return PLANT_DISINFECTION;
   // The tank's electric immersion heater can run with compressor, water pump and flow all at zero.
   // It is still active plant operation — and expensive resistive heat — so the exact X10A BSH flag
   // takes precedence over the generic compressor/pump states below.

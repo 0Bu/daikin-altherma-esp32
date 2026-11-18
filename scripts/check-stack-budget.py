@@ -38,7 +38,7 @@ STACK_MOVSP_RE = re.compile(r"movsp\s+a1,")
 # carries the same ENTRY immediate as the decoded `entry` of an unpacked link (32 bytes, 48 for
 # mqtt_enqueue_id, 1264 for mcp_post, 608 for dns_task), and each stays within its separate first-
 # frame budget in tools/stack/budgets.json. A packed body hides any `movsp a1` from
-# validate_dynamic_stack; none of the six uses alloca or a variable-length array.
+# validate_dynamic_stack; none of the ten uses alloca or a variable-length array.
 PACKED_ENTRY_SYMBOLS = frozenset({
     'esp_http_client_open',
     'esp_http_client_connect',
@@ -69,8 +69,12 @@ PACKED_ENTRY_SYMBOLS = frozenset({
     'calloc',
     'ccm_auth_crypt',
     'daik::discovery_owner_block()',
+    'daik::do_detect(httpd_req*)',
+    'daik::http_send_values_json(httpd_req*, std::basic_string_view<char, std::char_traits<char> >, std::basic_string_view<char, std::char_traits<char> >)',
+    'daik::take_values_snapshot()',
     'daik::dns_task(void*)',
     'daik::mcp_post(httpd_req*)',
+    'daik::reboot_soon()',
     'daik::request_periodic_discovery_retirement()',
     'daik::retirement_store_note(unsigned long, char const*)',
     'ecp_add_mixed',
@@ -929,6 +933,24 @@ def validate_status_diagnosis_paths(budgets: dict[str, Any], sources: dict[str, 
                                     "status_health_number", "status_unsigned_number"],
         "httpd_direct_health_number": ["http_send_status_json", "status_serializer",
                                        "status_health_number", "status_unsigned_number"],
+        "httpd_mcp_bool_field": ["mcp_post", "http_send_status_json", "status_serializer",
+                                 "status_bool_field"],
+        "httpd_direct_bool_field": ["http_send_status_json", "status_serializer",
+                                    "status_bool_field"],
+        "httpd_mcp_uint_field": ["mcp_post", "http_send_status_json", "status_serializer",
+                                 "status_uint_field", "status_unsigned_number"],
+        "httpd_direct_uint_field": ["http_send_status_json", "status_serializer",
+                                    "status_uint_field", "status_unsigned_number"],
+        "httpd_mcp_int_field": ["mcp_post", "http_send_status_json", "status_serializer",
+                                "status_int_field", "status_unsigned_number"],
+        "httpd_direct_int_field": ["http_send_status_json", "status_serializer",
+                                   "status_int_field", "status_unsigned_number"],
+        "httpd_mcp_quoted_field": ["mcp_post", "http_send_status_json", "status_serializer",
+                                   "status_quoted_field", "status_quoted_string",
+                                   "status_escaped_string", "status_utf8_sequence_length"],
+        "httpd_direct_quoted_field": ["http_send_status_json", "status_serializer",
+                                      "status_quoted_field", "status_quoted_string",
+                                      "status_escaped_string", "status_utf8_sequence_length"],
     }
     http_paths = set(budgets["tasks"]["httpd"]["paths"])
     for name, members in expected.items():
@@ -3519,6 +3541,13 @@ def self_test() -> None:
         'httpd_recv_with_opt': 48,
         'lwip_shutdown': 32,
         'netconn_shutdown': 32,
+        'daik::append_status_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, bool)::{lambda(char const*, bool)\x231}::operator()(char const*, bool) const': 32,
+        'daik::append_status_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, bool)::{lambda(char const*, unsigned long long)\x231}::operator()(char const*, unsigned long long) const': 32,
+        'daik::append_status_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, bool)::{lambda(char const*, long long)\x231}::operator()(char const*, long long) const': 32,
+        'daik::append_status_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, bool)::{lambda(char const*, std::basic_string_view<char, std::char_traits<char> >)\x231}::operator()(char const*, std::basic_string_view<char, std::char_traits<char> >) const': 48,
+        'void daik::json_append_quoted<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, std::basic_string_view<char, std::char_traits<char> >)': 48,
+        'void daik::json_append_escaped<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, std::basic_string_view<char, std::char_traits<char> >)': 64,
+        'daik::utf8_sequence_length(std::basic_string_view<char, std::char_traits<char> >)': 48,
     })
     for index, (name, frame) in enumerate(extra_frames.items(), 0x1000):
         fixture += f"\n{index:08x} <{name}>:\n{index:x}: 004136 entry a1, {frame}\n"
@@ -3674,6 +3703,14 @@ def self_test() -> None:
     assert selected["path:httpd_direct_cycling_hours_builder"] == 6864
     assert selected["path:httpd_mcp_health_number"] == 7840
     assert selected["path:httpd_direct_health_number"] == 6608
+    assert selected["path:httpd_mcp_bool_field"] == 7776
+    assert selected["path:httpd_direct_bool_field"] == 6544
+    assert selected["path:httpd_mcp_uint_field"] == 7840
+    assert selected["path:httpd_direct_uint_field"] == 6608
+    assert selected["path:httpd_mcp_int_field"] == 7840
+    assert selected["path:httpd_direct_int_field"] == 6608
+    assert selected["path:httpd_mcp_quoted_field"] == 7952
+    assert selected["path:httpd_direct_quoted_field"] == 6720
     assert selected["ota_task"] == 2608
     assert selected["path:httpd_ota_status"] == 6624
     assert selected["path:ota_task_manifest_fetch"] == 4672
@@ -3885,7 +3922,21 @@ def self_test() -> None:
                          ("httpd_mcp_health_number", "status_health_number"),
                          ("httpd_mcp_health_number", "status_unsigned_number"),
                          ("httpd_direct_health_number", "status_health_number"),
-                         ("httpd_direct_health_number", "status_unsigned_number")):
+                         ("httpd_direct_health_number", "status_unsigned_number"),
+                         ("httpd_mcp_bool_field", "status_bool_field"),
+                         ("httpd_direct_bool_field", "status_bool_field"),
+                         ("httpd_mcp_uint_field", "status_uint_field"),
+                         ("httpd_direct_uint_field", "status_uint_field"),
+                         ("httpd_mcp_int_field", "status_int_field"),
+                         ("httpd_direct_int_field", "status_int_field"),
+                         ("httpd_mcp_quoted_field", "status_quoted_field"),
+                         ("httpd_mcp_quoted_field", "status_quoted_string"),
+                         ("httpd_mcp_quoted_field", "status_escaped_string"),
+                         ("httpd_mcp_quoted_field", "status_utf8_sequence_length"),
+                         ("httpd_direct_quoted_field", "status_quoted_field"),
+                         ("httpd_direct_quoted_field", "status_quoted_string"),
+                         ("httpd_direct_quoted_field", "status_escaped_string"),
+                         ("httpd_direct_quoted_field", "status_utf8_sequence_length")):
         changed = json.loads(json.dumps(budgets))
         changed["paths"][name]["symbols"].remove(member)
         try:
@@ -3906,7 +3957,10 @@ def self_test() -> None:
     diagnosis_controls += 1
     for member in ("cycling_aggregate", "cycling_fold", "checkup_evaluate", "checkup_summarize",
                    "checkup_evidence_name", "checkup_dhw_progress", "checkup_dhw_age",
-                   "checkup_dhw_fold", "checkup_cycling_hours_build", "cycling_layout_fingerprint"):
+                   "checkup_dhw_fold", "checkup_cycling_hours_build", "cycling_layout_fingerprint",
+                   "status_bool_field", "status_uint_field", "status_int_field",
+                   "status_quoted_field", "status_quoted_string", "status_escaped_string",
+                   "status_utf8_sequence_length"):
         rule = budgets["symbols"][member]
         pattern = re.compile(rule["pattern"])
         for grown in (False, True):

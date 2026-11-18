@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: e628088cb0064042adc9be60cdddad5326e25ab9cd1947a99d3d9881b0f7e0ba -->
+<!-- diagnostic-evidence-contract: 7c65f854b2e1c83d231784679a52a355b0d5a46dd6c801b68051dc3f8305a102 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -364,9 +364,10 @@ depend strongly on outside-air temperature, relative humidity, and heat-exchange
 readable compressor and defrost states at both endpoints. At least three paired events and more
 than 15% of paired compressor runtime produce **NOTE** immediately. A reassuring assessment
 additionally requires a complete 24-hour span and 90% paired coverage. Fewer events or no paired runtime remain observations with a reason; no readable defrost observation remains CHECKING.
-Missing readings remain missing, not zero. Neither HomeHub EKRHH nor native Altherma 4 Modbus exposes
-a defrost state, so `checkup_modbus_coverage` leaves `defrost` unsupported (`unavailable`, hidden in
-Modbus UI mode). See CHECKUP_DEFROST_MIN_COUNT and CHECKUP_DEFROST_SHARE_PCT in [checkup.hpp](../main/logic/checkup.hpp).
+Missing readings remain missing, not zero. HomeHub EKRHH and native Altherma 4 expose only a
+combined `Defrost / Restart` flag on input `35`, which cannot separate reverse-cycle defrost from
+restart preparation, so `checkup_modbus_coverage` leaves `defrost` unsupported (`unavailable`,
+hidden in Modbus UI mode). See CHECKUP_DEFROST_MIN_COUNT and CHECKUP_DEFROST_SHARE_PCT in [checkup.hpp](../main/logic/checkup.hpp).
 
 The X10A outdoor minimum, mean and sample count use fresh outdoor readings from the paired
 running-compressor population, including intervals with defrost off. They do not alter the rule.

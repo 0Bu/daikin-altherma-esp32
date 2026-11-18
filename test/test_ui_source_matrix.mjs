@@ -939,6 +939,57 @@ const SG_INSP = (c, d) => c.INSPECT.sgrequest;
     "gateway-only Auto space operation does not guess Heating or Cooling");
   assert.equal(space.waterThermalKind(autoSpace, true), "neutral",
     "unknown gateway-only space direction remains neutral even with the compressor ON");
+
+  // Input 38 ("Current operation mode") provides space direction in both EKRHH and Altherma 4
+  // Modbus-only views, enabling thermal mode, water colours and space thermal output.
+  for (const [enumId, val, expectedMode] of [
+    ["current_operation_mode", "1", "heat"],
+    ["altherma4_current_operation_mode", "2", "cool"],
+  ]) {
+    const dirMb = dhwModbus.map((r) => r.off === 37 ? M_VALVE(false) : r);
+    dirMb.push({ off: 38, value: val, enum: enumId });
+    if (expectedMode === "cool") {
+      const lwtIdx = dirMb.findIndex((r) => r.concept === "leaving_water");
+      dirMb[lwtIdx] = { ...dirMb[lwtIdx], value: "18.0" };
+    }
+    const dirCtx = ctx({ x10a: false, mbEnabled: true, mbConnected: true, values: [], modbus: dirMb });
+    const dl = dirCtx.liveData();
+    assert.equal(dl.spaceMode, expectedMode, `input 38 ${enumId}=${val} sets spaceMode`);
+    assert.equal(dl.thermalMode, expectedMode, `space valve sets thermalMode=${expectedMode}`);
+    assert.equal(dirCtx.waterThermalKind(dl, true), expectedMode);
+    assert.ok(dl.pth > 0, `positive ${expectedMode} capacity over flow with compressor ON`);
+  }
+
+  // Holding 10 (DHW reheat setpoint), Holding 6/7 (room setpoint when room temp exists), Input 33
+  // (disinfection) and live compressor (31) / pump (30) inspectors in Modbus-only mode.
+  const spMb = [
+    ...dhwModbus,
+    { off: 38, value: "1", enum: "current_operation_mode" },
+    { off: 3, value: "1", enum: "operation_mode" },
+    { off: 10, label: "DHW reheat setpoint", value: "48", unit: "°C" },
+    { off: 50, concept: "room_temp", label: "Remote controller room temperature Main", value: "21.5", unit: "°C" },
+    { off: 6, label: "Room thermostat control Heating setpoint Main", value: "22", unit: "°C" },
+    { off: 7, label: "Room thermostat control Cooling setpoint Main", value: "25", unit: "°C" },
+    { off: 33, label: "Disinfection operation", value: "1", binary: true },
+  ];
+  const spCtx = ctx({ x10a: false, mbEnabled: true, mbConnected: true, values: [], modbus: spMb });
+  spCtx.S.live = spCtx.liveData();
+  assert.equal(spCtx.S.live.tankSet, 48);
+  assert.equal(spCtx.S.live.roomSet, 22);
+  assert.equal(spCtx.S.live.disinfection, true);
+  assert.ok(spCtx.S.live.mbFields.has("tankSet") && spCtx.S.live.mbFields.has("roomSet"));
+  assert.equal(spCtx.mbForInspect("comp")?.off, 31);
+  assert.equal(spCtx.mbForInspect("pump")?.off, 30);
+  const tankRows = spCtx.inspMembers(spCtx.INSPECT.tank, null, null).map((m) => m.mb?.off);
+  assert.ok(tankRows.includes(10) && tankRows.includes(33), "tank inspector includes Holding 10 and Input 33");
+  const roomRows = spCtx.inspMembers(spCtx.INSPECT.room, null, null).map((m) => m.mb?.off);
+  assert.ok(roomRows.includes(6), "room inspector falls back to Holding 6 setpoint");
+
+  // Auto mode (Holding 3 = 0) with Input 38 Stopped (0) refuses to guess Holding 6 vs 7.
+  const idleAutoMb = spMb.map((r) => r.off === 3 ? { ...r, value: "0" }
+    : r.off === 38 ? { ...r, value: "0" } : r);
+  const idleAutoCtx = ctx({ x10a: false, mbEnabled: true, mbConnected: true, values: [], modbus: idleAutoMb });
+  assert.equal(idleAutoCtx.liveData().roomSet, null, "Auto mode with Stop does not guess roomSet 6 vs 7");
 }
 
 // ── 5. THE REGRESSION: X10A drops with a FILLED cache, the gateway says the OPPOSITE ───────────

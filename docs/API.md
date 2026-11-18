@@ -449,7 +449,7 @@ Modbus rows contain `label`, `value`, `unit`, `off`, with applicable `binary`, `
 `history`. Numeric, flag and enum `value` fields are JSON numbers or null; text values are strings or
 null. `off` belongs to the selected catalog; native rows include `profile:"altherma4"` and do not
 borrow HomeHub enum meanings. Native quiet-policy selection proves no active quiet state/history.
-The full-cache limit is 537 seconds and individual reply-age limit seven seconds; these transport
+The full-cache limit is 614 seconds and individual reply-age limit seven seconds; these transport
 bounds cannot prove simultaneity. Native promotion first exposes only its pressure probe until a
 full sweep. History additionally requires matching space/offset/codec/scale/unit provenance.
 Source caches are staged before the first chunk;
@@ -486,9 +486,9 @@ time against the completed bucket. It drops contradictory wall time from a new b
 and hides a cached clock label that conflicts with the last accepted status, including during a
 polling outage. A compatible peer can still supply wall-clock labels for the shared raster.
 Without a compatible clock the chart uses a relative axis, as it does for legacy unanchored rings.
-The browser preserves compatible cached readings if it rejects a replacement. Independent sources
-with incompatible anchors use separate plots. Independent recorders can book different warm-reset
-gaps, so their plots stay separate while either still contains pre-boot samples.
+The browser preserves compatible cached readings if it rejects a replacement. Paired sources share
+one plot aligned by monotonic bucket, wall-clock slot or relative tail, with HomeHub initially
+hidden while X10A is available.
 `v` does not record an unknown compressor state. A sweep dropped after a stop cannot put a number into
 its bucket, but any other outdoor sample without a readable speed stays a number, so a number is not
 proof that the page was current.

@@ -325,6 +325,16 @@ const DESCRIPTIONS = [
     normal: "Compare neutral ON/OFF with temperature, operating phase and measured power.",
     de: { what: "Das Ausgangs- oder Statusbit der PHE-Heizung. Der Katalog klärt nicht, ob es Befehl oder Rückmeldung ist; allein belegt es daher keinen Heizstrom.",
           normal: "Neutrales ON/OFF mit Temperatur, Betriebsphase und gemessener Leistung vergleichen." } },
+  { exact: true, re: /^dhw reheat on\/off$/i,
+    what: "Whether automatic DHW reheat operation is enabled on the controller, read back from HomeHub holding register 12. It is a configuration setting, not proof that the tank is currently being reheated.",
+    normal: "ON = automatic DHW reheat enabled; OFF = disabled. Whether the unit is actively charging the tank is shown separately by DHW normal operation, the 3-way valve and flow.",
+    de: { what: "Ob die automatische Warmwasser-Nachheizung am Regler freigegeben ist, zurückgelesen aus HomeHub-Holding-Register 12. Das ist eine Einstellung und kein Beleg dafür, dass der Speicher gerade nachgeheizt wird.",
+          normal: "ON = automatische Warmwasser-Nachheizung freigegeben; OFF = gesperrt. Ob die Anlage den Speicher gerade aktiv lädt, zeigen Warmwasserbetrieb, 3-Wege-Ventil und Durchfluss separat." } },
+  { exact: true, re: /^dhw booster mode on\/off$/i,
+    what: "Whether DHW powerful / booster tank heat-up is requested on the controller, read back from HomeHub holding register 13. This firmware only reads the setting.",
+    normal: "OFF in ordinary operation; ON while a one-off fast tank heat-up is active or requested. Depending on unit configuration, booster mode can also call on the electric heater.",
+    de: { what: "Ob die schnelle Warmwasser-Aufheizung (Powerful / Booster) am Regler angefordert ist, zurückgelesen aus HomeHub-Holding-Register 13. Diese Firmware liest die Einstellung nur.",
+          normal: "Im Normalbetrieb OFF; während einer angeforderten Schnellaufheizung des Speichers ON. Je nach Anlagenkonfiguration kann dabei auch der Elektroheizer hinzugenommen werden." } },
   { re: /reheat on/i,
     what: "Reheat operation raises the tank back to the configured reheat setpoint after it has cooled below the switch-on threshold. It can run on its own or in addition to a schedule, depending on the selected tank mode.",
     normal: "ON while the controller is reheating the tank; OFF once the reheat target is reached.",
@@ -449,6 +459,16 @@ const DESCRIPTIONS = [
     normal: "Read it together with the indoor-unit mode, compressor, pump and water temperatures. A reported mode can remain selected while the compressor is stopped.",
     de: { what: "Der aktuell von der Außeneinheit gemeldete Betriebszustand, zum Beispiel Stopp, Heizen oder Kühlen. Das ist nicht die über den HomeHub eingestellte Auswahl Auto/Heizen/Kühlen und belegt allein keinen nutzbaren Wärmeübergang.",
           normal: "Zusammen mit Betriebsart der Hydraulikeinheit, Verdichter, Pumpe und Wassertemperaturen lesen. Eine Betriebsart kann auch bei stehendem Verdichter ausgewählt bleiben." } },
+  { exact: true, re: /^defrost \/ restart$/i,
+    what: "Combined HomeHub status flag on input register 35 covering outdoor-coil defrost and compressor restart preparation. Unlike the dedicated X10A defrost bit, this single Modbus flag does not distinguish an active reverse-cycle defrost from a restart phase.",
+    normal: "OFF during normal steady operation; ON briefly during defrost or restart preparation. Because both states share one flag, read water temperatures and flow before concluding that reverse-cycle defrosting took place.",
+    de: { what: "Kombiniertes HomeHub-Statusflag auf Eingangsregister 35 für Abtauung und Verdichter-Wiederanlauf. Anders als das eigene X10A-Abtaubit unterscheidet dieses einzelne Modbus-Signal nicht zwischen aktivem Abtaukreis und einer Neustartphase.",
+          normal: "Im normalen Dauerbetrieb OFF; während Abtauung oder Wiederanlaufvorbereitung vorübergehend ON. Da sich beide Phasen ein Flag teilen, Wassertemperaturen und Durchfluss mitprüfen, bevor auf echtes Abtauen geschlossen wird." } },
+  { exact: true, re: /^hot start$/i,
+    what: "HomeHub status flag on input register 36 for the brief hot-start phase at the beginning of heating or after defrost.",
+    normal: "OFF in steady operation; ON briefly while the unit pre-warms the heat exchanger before normal space delivery resumes.",
+    de: { what: "HomeHub-Statusflag auf Eingangsregister 36 für die kurze Warmstartphase zu Heizbeginn oder nach dem Abtauen.",
+          normal: "Im stationären Betrieb OFF; vorübergehend ON, solange die Anlage den Wärmetauscher vorwärmt, bevor die normale Förderung in den Raumkreis fortgesetzt wird." } },
   { re: /defrost/i,
     what: "The unit is melting frost off the outdoor coil by briefly running its cycle in reverse. Heating output pauses and steam may rise from the outdoor unit.",
     normal: "A self-ending defrost is normal in cold, damp weather. This status bit alone cannot diagnose frequent defrosting: humidity, coil-surface temperature and operating context are missing. If it appears excessive, check visible icing, unobstructed airflow and the unit's fault codes.",
@@ -838,6 +858,11 @@ const DESCRIPTIONS = [
     normal: "The accepted range is -10 to +10 K. A non-zero offset is not proof of heat delivery: the separate space-operation state must also be active.",
     de: { what: "Die vorzeichenbehaftete Korrektur des Heiz-Vorlaufziels der Hauptzone. Diese Firmware liest sie nur — geändert wird sie über die Daikin-App oder die Regelung der Anlage selbst; diese Zeile ist der unabhängige Rücklesewert des zuletzt gesetzten Werts.",
           normal: "Zulässig sind -10 bis +10 K. Ein Wert ungleich null beweist noch keine Wärmeabgabe: Zusätzlich muss der getrennte Raumheizbetrieb aktiv sein." } },
+  { exact: true, re: /^leaving water main cooling offset$/i,
+    what: "The signed correction applied to the main-zone cooling leaving-water target. This firmware only reads it — the Daikin app and the unit's own controller are what change it; this row is the independent readback of whatever they last set.",
+    normal: "The accepted range is -10 to +10 K. A non-zero offset is not proof of cooling delivery: the separate space-operation state and cooling mode must also be active.",
+    de: { what: "Die vorzeichenbehaftete Korrektur des Kühl-Vorlaufziels der Hauptzone. Diese Firmware liest sie nur — geändert wird sie über die Daikin-App oder die Regelung der Anlage selbst; diese Zeile ist der unabhängige Rücklesewert des zuletzt gesetzten Werts.",
+          normal: "Zulässig sind -10 bis +10 K. Ein Wert ungleich null beweist noch keine Kühlleistung: Zusätzlich müssen Raumbetrieb und Kühlmodus aktiv sein." } },
   { exact: true, re: /^power limit during recommended on \/ buffering$/i,
     what: "The electrical power limit used during Smart-Grid Recommended on buffering.",
     normal: "During buffering in Recommended on, the effective limit is the lower of this value and General power limit. It is a configured ceiling, not the unit's current consumption.",
@@ -971,6 +996,8 @@ const mbForInspect = (key) => {
   // X10A is down, so the inspector needs the real register row for its label and Modbus badge rather
   // than treating the measured headline as an untraceable derived value.
   if (key === "pel") return mbPower();
+  if (key === "comp") return mbRow(31);
+  if (key === "pump") return mbRow(30);
   return p ? mbByConcept(p.cid) : null;
 };
 // A true binary row as a tri-state boolean (null = absent or malformed). A plain numeric 0/1 can be
@@ -1009,6 +1036,21 @@ const mbBool = (off) => mbBinaryValue(mbRow(off));
 // EKRHH input 21 is a three-state enum, not a flag. Preserve the raw constant while ensuring the
 // status header never treats an unknown future value as a known Fault or Warning.
 const mbUnitAbnormality = () => modbusEnumNumber(mbRow(21), "unit_abnormality", 2);
+const mbCurrentSpaceMode = () => {
+  const r = mbRow(38);
+  const v = modbusEnumNumber(r, "current_operation_mode", 3) ??
+            modbusEnumNumber(r, "altherma4_current_operation_mode", 2);
+  return v === 1 ? "heat" : v === 2 ? "cool" : null;
+};
+const mbConfiguredSpaceMode = () => {
+  const v = modbusEnumNumber(mbRow(3), "operation_mode", 2);
+  return v === 1 ? "heat" : v === 2 ? "cool" : null;
+};
+const mbRoomSetpointRow = (live = S.live) => {
+  if (!mbLive() || live?.room == null) return null;
+  const m = live?.spaceMode || mbConfiguredSpaceMode();
+  return m === "heat" ? mbRow(6) : m === "cool" ? mbRow(7) : null;
+};
 // The same register as raw TEXT — the error code is a Text16, not a flag.
 const mbVal = (off) => { const r = mbRow(off); return r ? String(r.value) : null; };
 // The MEASURED power consumption (EKRHH input register 51, def/homehub.hpp). Named because the map
@@ -1112,9 +1154,10 @@ const stateOf = (re, mbOffset) => {
 function descFor(label, row = null) {
   if (row?.profile === "altherma4") {
     const key = ({9: "a4.quiet_help", 38: "a4.current_help", 49: "a4.flow_help",
-      54: "a4.heating_offset_help",
+      54: "a4.heating_offset_help", 55: "a4.cooling_offset_help",
       58: "a4.limit_help", 65: "a4.demand_help", 68: "a4.pump_help",
-      74: "a4.pre_phe_outdoor_help", 79: "a4.pressure_help", 83: "a4.operation_help"})[row.off];
+      74: "a4.pre_phe_outdoor_help", 79: "a4.pressure_help", 82: "a4.abnormality_help",
+      83: "a4.operation_help"})[row.off];
     if (key) return { what: t(key), sourceQualified: true };
   }
   const l = label || "";

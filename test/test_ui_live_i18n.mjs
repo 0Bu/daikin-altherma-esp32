@@ -145,6 +145,8 @@ function assertPersistentBannerRepaints(name, status) {
       "a positive defrost witness remains independently observable");
     assert.equal(api.plantState({ ...unknown, bsh: true }).key, "sys.bsh_active",
       "a positive tank-heater witness remains independently observable");
+    assert.equal(api.plantState({ ...unknown, disinfection: true }).key, "sys.disinfecting",
+      "active Modbus disinfection surfaces in plantState");
   }
 
   const idleModbus = api.modbusStatusView("mode.dhw", {

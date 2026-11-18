@@ -836,8 +836,11 @@ static_assert(
 
 constexpr auto MB_PLAN_ALTHERMA4 = mb_plan_make_from<def::ALTHERMA4_REG_COUNT>(def::ALTHERMA4_REGS);
 static_assert(MB_PLAN_ALTHERMA4.ok, "Altherma 4 register table does not yield a usable read plan");
-static_assert(MB_PLAN_ALTHERMA4.count == 15,
+static_assert(MB_PLAN_ALTHERMA4.count == 14,
               "Altherma 4 request budget changed — re-check the documented native map");
+static_assert(MB_PLAN.count <= def::ALTHERMA4_REG_COUNT &&
+                  MB_PLAN_ALTHERMA4.count <= def::ALTHERMA4_REG_COUNT,
+              "s_batch_split must cover every planned Modbus batch");
 static constexpr uint32_t MB_CACHE_MAX_AGE_S = logic::modbus_cache_max_age_s(
     logic::MB_FULL_CYCLE_TICKS, POLL_INTERVAL_S * 1000, MB_REQUEST_BUDGET_MS,
     logic::mb_plan_max_requests(MB_PLAN_ALTHERMA4.batch, MB_PLAN_ALTHERMA4.count, true),
@@ -1248,9 +1251,9 @@ static void mb_poll_once() {
             status_recovered(cycle_target_generation);
         }
     };
-    // A FAST CYCLE COMMITS NO VALUE CACHE. It read thirteen of the map's registers, so its
+    // A FAST CYCLE COMMITS NO VALUE CACHE. It read fifteen of the map's registers, so its
     // `fresh` is not a cache and its raster position is not a sample: committing it would publish a
-    // /values array of thirteen rows and hand the trend rings a bucket in which 19 of the 32 rows
+    // /values array of fifteen rows and hand the trend rings a bucket in which 22 of the 37 rows
     // look like a failure to read. The cache and the rings stay with the last FULL cycle. Its age
     // includes both poll delays and bounded requests — and `values`/`connected` below still report
     // this cycle's link, so a hub that went away is visible within a second rather than within a

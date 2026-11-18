@@ -278,6 +278,23 @@ assert.equal(de.operationModeFromFlags(false, false), "Stopp",
   "inactive HomeHub flags feed the same German schematic vocabulary");
 assert.equal(de.operationModeFromFlags(null, false), null,
   "incomplete HomeHub flags do not guess an operation mode");
+assert.equal(de.operationModeFromFlags(false, true, "heat"), "Heizen",
+  "input 38 Heating narrows generic HomeHub space operation to Heating");
+assert.equal(de.operationModeFromFlags(true, true, "cool"), "Kühlen + Warmwasser",
+  "input 38 Cooling narrows simultaneous space + DHW operation to Cooling + hot water");
+en.state.status.hp.connected = false;
+en.state._modbus = [
+  { off: 52, value: "0", binary: true },
+  { off: 53, value: "1", binary: true },
+  { off: 38, value: "1", enum: "current_operation_mode" },
+];
+assert.equal(en.schematicOperationMode(), "Heating", "HomeHub input 38 refines space headline");
+en.state._modbus[2] = { off: 38, value: "2", enum: "altherma4_current_operation_mode", profile: "altherma4" };
+assert.equal(en.schematicOperationMode(), "Cooling", "native input 38 refines space headline to Cooling");
+en.state._modbus[2] = { off: 38, value: "0", enum: "altherma4_current_operation_mode", profile: "altherma4" };
+assert.equal(en.schematicOperationMode(), "Space H/C", "input 38 None falls back to generic Space H/C");
+en.state._modbus = [];
+en.state.status.hp.connected = true;
 // The headline names the hydronic mode. The outdoor controller's row is a different quantity, and a
 // sweep that lost the hydronic page must blank the headline rather than print that row under its name.
 const OUTDOOR_MODE = { label: "Operation Mode", value: "Fan Only", reg: 0x10 };

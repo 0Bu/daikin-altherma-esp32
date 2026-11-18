@@ -64,7 +64,7 @@ export const HISTORY_MOTION_ROWS = Object.freeze([
 ]);
 
 // HOMEHUB_HISTORIES, not MB_PAIRS, is the offer boundary. In particular, water pressure has a
-// possible current-value pairing but no HomeHub history. Power is likewise not a historied row.
+// possible current-value pairing but no HomeHub history.
 export const MODBUS_HISTORY_ROWS = Object.freeze([
   { id: "leaving_water", label: "Leaving water temperature PHE", off: 40, value: 45.1, unit: "°C" },
   { id: "leaving_water_post_buh", label: "Leaving water temperature BUH", off: 41, value: 45.1, unit: "°C" },
@@ -79,6 +79,10 @@ export const MODBUS_HISTORY_ROWS = Object.freeze([
   { id: "quiet_state", label: "Quiet mode operation", off: 9, value: 0, binary: true },
   { id: "smart_grid_mode", label: "Smart-Grid operation mode", off: 56, value: 2, enum: "smart_grid_mode" },
   { id: "disinfection_state", label: "Disinfection operation", off: 33, value: 0, binary: true },
+  { id: "compressor_state", label: "Compressor running", off: 31, value: 1, binary: true },
+  { id: "modbus_power", label: "Heat pump power consumption", off: 51, value: 2.1, unit: "kW" },
+  { id: "modbus_defrost_state", label: "Defrost / Restart", off: 35, value: 0, binary: true },
+  { id: "pump_state", label: "Circulation pump running", off: 30, value: 1, binary: true },
 ]);
 
 export const ENV3_HISTORY_ROWS = Object.freeze([
@@ -191,12 +195,9 @@ export function makeHistoryMotionFixture(originalStatus, lang = "en") {
         return { ...value, value: Number(value.value), history: row.id,
           reg: 0xee, profile: "homehub" };
       }),
-      { label: "Circulation pump running", value: 1, unit: "", off: 30, binary: true },
-      { label: "Compressor running", value: 1, unit: "", off: 31, binary: true },
       { label: "DHW normal operation", value: 1, unit: "", off: 52, binary: true },
       { label: "Space heating/cooling normal operation", value: 1, unit: "", off: 53, binary: true },
       { label: "Current operation mode", value: 1, unit: "", off: 38, enum: "current_operation_mode" },
-      { label: "Heat pump power consumption", value: 2.1, unit: "kW", off: 51 },
     ],
   });
   return { status, histories, values };

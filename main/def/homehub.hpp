@@ -106,6 +106,8 @@ inline constexpr HomeHubReg HOMEHUB_REGS[] = {
      HomeHubValueKind::Binary},
     // Unlike offset 53, this CURRENT mode distinguishes the active heating and cooling seasons.
     // The diagnosis requires 53 active, 37 on space, and 38 on HEATING.
+    {35, MbFunc::ReadInput, MbType::Int16, 1, "", "Defrost / Restart", HomeHubValueKind::Binary},
+    {36, MbFunc::ReadInput, MbType::Int16, 1, "", "Hot start", HomeHubValueKind::Binary},
     {38, MbFunc::ReadInput, MbType::Int16, 1, "", "Current operation mode",
      HomeHubValueKind::CurrentOperationMode},
     // ── Temperatures (input, Temp16 = signed /100 °C)
@@ -138,10 +140,14 @@ inline constexpr HomeHubReg HOMEHUB_REGS[] = {
     {9, MbFunc::ReadHolding, MbType::Int16, 1, "", "Quiet mode operation",
      HomeHubValueKind::Binary},
     {10, MbFunc::ReadHolding, MbType::Int16, 1, "°C", "DHW reheat setpoint"},
+    {12, MbFunc::ReadHolding, MbType::Int16, 1, "", "DHW reheat ON/OFF", HomeHubValueKind::Binary},
+    {13, MbFunc::ReadHolding, MbType::Int16, 1, "", "DHW booster mode ON/OFF",
+     HomeHubValueKind::Binary},
     // The main-zone weather-dependent offset, an Int16 in K. This firmware only READS it; the
     // Onecta app and the unit's MMI are its writers, so this row is the independent readback of
     // whatever they last set.
     {54, MbFunc::ReadHolding, MbType::Int16, 1, "K", "Leaving water Main Heating offset"},
+    {55, MbFunc::ReadHolding, MbType::Int16, 1, "K", "Leaving water Main Cooling offset"},
     {56, MbFunc::ReadHolding, MbType::Int16, 1, "", "Smart Grid operation mode",
      HomeHubValueKind::SmartGridMode},
     {57, MbFunc::ReadHolding, MbType::Pow16, 1, "kW",

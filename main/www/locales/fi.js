@@ -1,4 +1,4 @@
-// translation-source: 7e05fca97bff772abf43c5704d541747bc310184005cce90ce5b76eab24256ce
+// translation-source: 480bf7bd3b16592ffbaf33f9d54b1362d56dd3b72b7c310293449045f5e86f04
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -23,6 +23,7 @@ I18N.fi = localeValues([
   /* sys.cool_mode */ "Jäähdytystila",
   /* sys.residual_circulating */ "Jälkilämmön kierto — ei jäähdytystehoa",
   /* sys.bsh_active */ "Säiliön sähkövastus käytössä",
+  /* sys.disinfecting */ "Säiliön desinfiointi käynnissä",
   /* sys.online */ "Yhteydessä",
   /* sys.fault */ "Vika",
   /* sys.warning */ "Varoitus",
@@ -347,6 +348,11 @@ I18N.fi = localeValues([
   /* a4.pressure_help */ "Altherma 4:n paineen skaalausta ei ole varmistettu. Bar-arvo käyttää aiempaa muunnosta; vertaa laitteen omaan lukemaan ennen paineen arviointia.",
   /* a4.demand_response */ "Kysyntäjoustotila",
   /* a4.unit_operation */ "Yksikön toimintatila",
+  /* a4.cooling_offset */ "Sääkäyrän jäähdytyskorjaus, pääalue",
+  /* a4.add_target */ "Lämmitys-/jäähdytystavoite, lisäalue",
+  /* a4.abnormality_counter */ "Käyttäjähäiriölaskuri",
+  /* a4.cooling_offset_help */ "Siirtää pääalueen sääriippuvaista jäähdytyskäyrää kelvineinä. Tämä on korjausarvo, ei mitattu lämpötila eikä koko menoveden asetusarvo.",
+  /* a4.abnormality_help */ "Yksikön tallentamien käyttäjähäiriöiden kertynyt määrä. Muuttumaton nollasta poikkeava arvo kuvaa aiempia tapahtumia, ei aktiivista vikaa; tarkista diagnoositila ja vikakoodi.",
   /* enum.unknown */ (n) => `Tuntematon (${n})`,
   /* chip.space_on */ "Piiri PÄÄLLÄ",
   /* chip.space_off */ "Piiri POIS",
@@ -452,6 +458,21 @@ I18N.fi = localeValues([
   /* hist.flow_switch_off */ "X10A-tila POIS",
   /* hist.flow_switch_none */ "Valitulla jaksolla ei tallennettu tämän X10A-tilan PÄÄLLÄ-tilaa.",
   /* hist.flow_switch_aria */ (l, d) => `${l} — virtauskytkimen aikajana. ${d}. Nuolinäppäimet lukevat näytteet.`,
+  /* hist.comp_total */ (d, n) => `Kompressori · ${d} · ${n} ${n === 1 ? "jakso" : "jaksoa"}`,
+  /* hist.comp_none */ "Kompressorin käyntiä ei havaittu tallennetulla jaksolla.",
+  /* hist.comp_active */ "Kompressori käy",
+  /* hist.comp_inactive */ "Kompressori seis",
+  /* hist.comp_aria */ (l, d) => `${l} — HomeHub-kompressoriaikajana. ${d}. Nuolinäppäimet lukevat näytteet.`,
+  /* hist.mb_defrost_total */ (d) => `Sulatus / uudelleenkäynnistys · ${d}`,
+  /* hist.mb_defrost_none */ "Sulatus- tai uudelleenkäynnistysjaksoa ei havaittu tallennetulla jaksolla.",
+  /* hist.mb_defrost_active */ "Sulatus / uudelleenkäynnistys",
+  /* hist.mb_defrost_inactive */ "Normaali / lepo",
+  /* hist.mb_defrost_aria */ (l, d) => `${l} — HomeHub-sulatus-/käynnistysaikajana. ${d}. Nuolinäppäimet lukevat näytteet.`,
+  /* hist.pump_total */ (d) => `Pumppu · ${d}`,
+  /* hist.pump_none */ "Kiertopumpun käyntiä ei havaittu tallennetulla jaksolla.",
+  /* hist.pump_active */ "Pumppu käy",
+  /* hist.pump_inactive */ "Pumppu seis",
+  /* hist.pump_aria */ (l, d) => `${l} — HomeHub-kiertopumpun aikajana. ${d}. Nuolinäppäimet lukevat näytteet.`,
   /* toast.saved */ "Tallennettu",
   /* toast.no_changes */ "Ei muutoksia",
   /* toast.reboot */ "Käynnistetään uudelleen — yhdistetään…",
@@ -989,108 +1010,113 @@ DESCRIPTION_I18N.fi = descriptionValues([
   ["Pääalueen lämmitys-/jäähdytystermostaatin pyyntö; pyydetty tila ei todista toteutunutta lämmönsiirtoa."], // 20
   ["Neljä raakaa tehorajoitusbittiä; älä muunna yhdeksi portaaksi ennen koodauksen mittausvahvistusta."], // 21
   ["PHE-lämmittimen komento-/tilabitti; komennon ja palautteen ero on tuntematon eikä bitti todista virtaa."], // 22
-  ["Uudelleenlämmitys nostaa tankin tavoitteeseen, kun lämpötila alittaa käynnistysrajan."], // 23
-  ["Tankin ajastusprofiili: mukavuusvaraus käyttää korkeampaa ja säästövaraus matalampaa tavoitetta."], // 24
-  ["Hybridilaitteessa säätimen DHW-pyyntö kattilalle; pyyntö ei todista palamista."], // 25
-  ["Vaihtoventtiili ohjaa veden DHW-tankkiin tai tilapiiriin; asento ei yksin todista piirin toimintaa."], // 26
-  ["Valinnaisen 2WV:n X10A-lähtö; pois-tila ei yksin todista jäähdytystä, jännitettä tai mekaanista asentoa."], // 27
-  ["Toisen alueen sekoitusventtiilin avautuma, jolla kuuma meno ja viileä paluu sovitetaan tavoitteeseen."], // 28
-  ["Valitun lämmitys-/jäähdytystilan menoveden tavoite, kiinteä tai sääkompensoitu."], // 29
-  ["Toisen alueen sekoitettu menolämpö venttiilin jälkeen, esimerkiksi matalalämpöiseen lattialämmitykseen."], // 30
-  ["Veden lämpö BUH:n jälkeen, yleensä R2T; voi sisältää BUH-lämmön mutta ei ole lämmönluovuttajan anturi."], // 31
-  ["R1T PHE:n jälkeen ennen BUH:ta; R4T:n, virtauksen ja tilan kanssa sillä arvioidaan lämpötehoa."], // 32
-  ["R4T yhteisessä PHE-paluussa; R1T−R4T on PHE:n ΔT, ei lämmönluovuttajien eikä yleinen 5 K sääntö."], // 33
-  ["Yhteisen vesipiirin virtaus; vähimmäinen riippuu mallista ja tilasta, ja pieni virtaus voi aiheuttaa 7H:n."], // 34
-  ["Suljetun vesipiirin paine; sallittu alue on mallikohtainen, ja arvolla ≤1,0 bar tarkista kyseisen mallin ohje."], // 35
-  ["Pumpun nopeuskomento käyttää käänteistä asteikkoa: 0 = täysi nopeus, 100 = pysäytys."], // 36
-  ["Vesikiertopumpun tila; käynti ei yksin todista hyödyllistä lämmönsiirtoa, joten vertaa virtaukseen."], // 37
-  ["Määritetyn aurinkolämpöpiirin pumppu, eri kuin lämpöpumpun vesikiertopumppu."], // 38
-  ["Profiilin nimeämän pumpun nopeus; asteikko ja piiri ovat mallikohtaisia, todellinen virtaus on eri arvo."], // 39
-  ["Binäärinen X10A-tila ”Water flow switch”. Malleissa, joissa virtauskytkin on dokumentoitu, päällä tarkoittaa havaittua veden liikettä; tila ei mittaa l/min eikä osoita mallikohtaista vähimmäisvirtausta. Jotkin tuetut mallit ilmoittavat tilan ilman dokumentoitua erillistä fyysistä kytkintä. Pumpun käydessä vertaa mitattuun virtaukseen ja 7H/C0-vikaan."], // 40
-  ["Vesipuolen nykytila: pysäytys, lämmitys, jäähdytys, DHW tai yhdistelmä; ei todista kompressorin käyntiä."], // 41
-  ["Smart Gridin nelitilainen energiakäsky HomeHubista tai X10A-koskettimista, ei lämmitys-/jäähdytystila."], // 42
-  ["Nykyinen tilakäyttö on lämmitys tai jäähdytys ilman automaattia; ei todista kompressorin käyntiä."], // 43
-  ["HomeHubiin määritetty automaatti-/lämmitys-/jäähdytysvalinta, ei ulkoyksikön nykyinen toiminta."], // 44
-  ["Ulkoyksikön ilmoittama pysäytys/lämmitys/jäähdytys; valittu tila ei takaa kompressoria tai lämmönsiirtoa."], // 45
-  ["Ulkokennon sulatus on normaalia kylmässä kosteassa säässä; bitti ilman kosteutta ei arvioi toistuvuutta."], // 46
-  ["Nykyinen vikaluokka: normaali, virhe, varoitus tai huomautus; muu kuin normaali vaatii vikakoodin tarkistuksen."], // 47
-  ["Parhaillaan ilmoitetun vikakoodin merkitys."], // 48
-  ["Hätäkäyttö lämpöpumpun vian jälkeen; asetuksesta riippuen BUH tai kattila voi hoitaa lämmityksen/DHW:n."], // 49
-  ["Yksikön hälytysrele ilmoittaa vian ulkoiselle valvonnalle."], // 50
-  ["Pääalueen lämmitys-/jäähdytyshuoneen tavoite, ei termostaatin päällä/pois-pyyntö."], // 51
-  ["Sisäyksikön thermo ON -pyyntö; ei yksilöi kuormaa eikä todista kompressorin käyntiä."], // 52
-  ["Space H Operation -lähtöliittimen tila, ei tavallinen tilalämmityksen toimintatila."], // 53
-  ["Ilmaisee normaalin tilalämmityksen/-jäähdytyksen sallinnan tai toiminnan, ei itse termostaattipyyntöä."], // 54
-  ["Yksikön oman huoneanturin ohjaaman alueen huonelämpötilan tavoite."], // 55
-  ["Sisäisen tai johdollisen huoneanturin mittaus; käyttö ohjauksessa riippuu valitusta säätötavasta."], // 56
-  ["Purkauslämpösuoja: Drop päällä/pois, Retry 0–7. Vain katkeamattomien vertailukelpoisten näytteiden kasvu osoittaa toiminnan, ei syytä tai poikkeavaa absoluuttista arvoa; kynnys, nollaus ja 7→0 ovat tuntemattomat."], // 57
-  ["Invertterivirtasuoja: Drop päällä/pois, Retry 0–7. Vain katkeamattomien vertailukelpoisten näytteiden kasvu osoittaa toiminnan, ei syytä tai poikkeavaa absoluuttista arvoa; kynnys, nollaus ja 7→0 ovat tuntemattomat."], // 58
-  ["Korkeapainesuoja: Drop päällä/pois, Retry 0–7. Vain katkeamattomien vertailukelpoisten näytteiden kasvu osoittaa toiminnan, ei syytä tai poikkeavaa absoluuttista arvoa; kynnys, nollaus ja 7→0 ovat tuntemattomat."], // 59
-  ["Matalapainesuoja: Drop päällä/pois, Retry 0–7. Vain katkeamattomien vertailukelpoisten näytteiden kasvu osoittaa toiminnan, ei syytä tai poikkeavaa absoluuttista arvoa; kynnys, nollaus ja 7→0 ovat tuntemattomat."], // 60
-  ["Invertterin jäähdytyselementin lämpösuoja: Drop päällä/pois, Retry 0–7. Vain katkeamattomien vertailukelpoisten näytteiden kasvu osoittaa toiminnan, ei syytä tai poikkeavaa absoluuttista arvoa; kynnys, nollaus ja 7→0 ovat tuntemattomat."], // 61
-  ["Muu sisäinen rajoitusbitti kuin viisi nimettyä suojaa; päällä kertoo vain tunnistamattomasta rajoituksesta."], // 62
-  ["PHE:n tulo- tai lähtöveden lämpötila kylmäaineen ja veden välisessä lämmönvaihdossa."], // 63
-  ["Ulkokennoanturin lämpötila; alle 0 °C lämmityksessä ei ilman kosteustietoa todista huurretta."], // 64
-  ["Yksikön läheltä mitattu ulkoilma; aurinko, asennuspaikka ja tuuli voivat erottaa sen säähavainnosta."], // 65
-  ["Kuuma kaasu kompressorin jälkeen; riippuu paineesta, nopeudesta, tilasta ja kuormasta. Yksi arvo tai toisen sarjan alue ei osoita vikaa tai kylmäainevajetta."], // 66
-  ["Kompressorille palaavan viileän matalapaineisen kylmäainekaasun lämpötila."], // 67
-  ["Lämmönvaihtimien välisen nestelinjan kylmäainelämpötila."], // 68
-  ["Höyrystimen tulo-/lähtökylmäaineen lämpötila lämmön vastaanottokohdassa."], // 69
-  ["Kylmäaineen ruiskutuslinjan lämpötila kompressorin ohjausta ja suojausta varten."], // 70
-  ["Kaksifaasisessa neste-höyry-kylmäaineessa mitattu sisäinen ohjauslämpö, ei käyttäjän asetus."], // 71
-  ["Ulkokennon sulatusanturi; sijainti ja ohjaus ovat mallikohtaisia. Yksi piste ei osoita koko kennon jäätä tai sulatuksen päättymistä."], // 72
-  ["Kylmäainepaineesta laskettu kyllästymislämpötila, ei erillinen lämpöanturi tai bar-paine."], // 73
-  ["Korkea-/matalapaine: arvioi saman tilan/mallin vakaa trendi; käynnistys, öljynpalautus ja sulatus muuttavat sitä. Yleistä normaalialuetta ei ole."], // 74
-  ["Invertterikompressorin nopeus rps; keskeinen tehonsäätöarvo, ei suora lämpötehomittaus."], // 75
-  ["EEV-askeleet ovat komento ilman mekaanista palautetta, eivät % tai virtaus. Yksin ne eivät osoita liikettä, jumia tai kylmäainevajetta."], // 76
-  ["Ulkopuhaltimen moottoriohjaimen elektroniikan lämpötila."], // 77
-  ["Ulkopuhaltimen nopeus portaana tai rpm; voi olla 0 seisokin tai sulatuksen osassa."], // 78
-  ["Mallin/tilan sisäinen tavoite; vertaa vastaavaan paineesta laskettuun kyllästyslämpöön. Ero ei diagnosoi syytä tai täyttöä."], // 79
-  ["Kompressorin purkaus-/porttilämpötilan sisäinen suojaustavoite."], // 80
-  ["Meno- ja paluuveden tavoite-ΔT; mallista ja tilasta riippuen myös 8/10 K, ei yleinen 5 K."], // 81
-  ["Laitteen kylmäaine, kuten R32 tai R410A; määrää paine–lämpötila-kyllästyskäyrän."], // 82
-  ["Kompressorin portilta mitattu lämpötila sisäistä ohjausta ja suojausta varten."], // 83
-  ["Ulkoyksikön ilmoittama kylmäainepiirin paine."], // 84
-  ["Arvio täydellisistä CT-vaiheista oletuksella 230 V; johdotusraja, todellinen jännite ja tehokerroin puuttuvat."], // 85
-  ["Kompressorin invertterivirta; karkea kompressorikuorman mitta, ei lämpöteho."], // 86
-  ["Ulkoinvertterin/tehoelektroniikan jäähdytyselementin lämpö; korkea arvo voi rajoittaa tehoa."], // 87
-  ["Aktiivisten BUH-portaiden määrä; 0 on pois, suurempia portaita voidaan käyttää pakkasella, sulatuksessa, DHW:ssa tai hädässä."], // 88
-  ["Vettä suoraan lämmittävän BUH-vastuksen porras; sallinta ja tasapainolämpö ovat asentajan asetuksia."], // 89
-  ["HomeHub 32 on BSH:n päällä/pois-tila, ei teho. 51 on erillinen lämpöpumpun sähköteho eikä BSH:n teho."], // 90
-  ["DHW-tankin uppovastus BSH voi toimia ilman kompressoria ja kiertoa; X10A ei ilmoita sen tehoa."], // 91
-  ["Sähkölämmittimen lämpösuojapiiri; avoin tila voi tarkoittaa ylikuumenemista, johdinvikaa tai puuttuvaa vastusta."], // 92
-  ["Vesiputkiston jäätymissuojaus riippuu mallista ja sähköstä eikä takaa suojaa sähkökatkossa."], // 93
-  ["X10A-jäätymissuojaustila; ilman tarkkaa malliasetusta pumppua, vastusta ja suoja-aluetta ei voi nimetä."], // 94
-  ["Maalämpömallin keruupiirin/pumpun arvo; neste, pitoisuus, paine ja lämpörajat riippuvat suunnittelusta."], // 95
-  ["Hybridin lämmönlähdevalinta: lämpöpumppu, yhdistelmä tai kattila; ei mitattu lämpöteho."], // 96
-  ["Hybridilämmityksen menoveden tavoite, ei mitattu veden lämpötila."], // 97
-  ["Toisen lämmönlähteen rinnakkaiskäytön sallinta/tila; päällä ei todista kattilan palamista."], // 98
-  ["Kattilan käyttöpyyntö rinnakkais-/hybridijärjestelmässä; ei todista palamista tai tuotettua lämpöä."], // 99
-  ["Kattilalämmitykselle pyydetty veden lämpötavoite, ei kattilan tai piirin mittaus."], // 100
-  ["Sisäinen rinnakkaiskäytön BE_COP-vertailuarvo; ei nykyinen mitattu COP, eikä X10A-asteikko ole julkinen."], // 101
-  ["Sähköyhtiön, Smart Gridin tai aurinkojärjestelmän ulkoinen tulo; vaikutus riippuu kosketinasetuksesta."], // 102
-  ["Sisä-/ulkoyksikön nimellisteholuokka; kiinteä malliarvo, ei nykyinen teho."], // 103
-  ["Hiljainen tila vähentää ulkomelua, mutta voi samalla pienentää käytettävissä olevaa lämmitys-/jäähdytystehoa."], // 104
-  ["HomeHubin diagnostiikkatila: ei vikaa, vika tai varoitus; syy selviää viereisestä koodista/lisäkoodista."], // 105
-  ["Parhaillaan ilmoitetun vikakoodin merkitys."], // 106
-  ["Numeerinen lisäkoodi tarkentaa viereistä Daikin-vikakoodia; lue vain tilan ja pääkoodin kanssa."], // 107
-  ["HomeHubin ilmoitus kompressorin käynnistä; ei anna nopeutta tai kapasiteettia, joten vertaa virtaukseen ja piiritilaan."], // 108
-  ["Normaali DHW-käyttö: käynnissä = päällä, odotus/varaus = pois; ei kerro käynnistyksen syytä."], // 109
-  ["Normaali tilakäyttö: käynnissä = päällä, odotus/varaus = pois; tila ja 3WV erottavat lämmityksen/jäähdytyksen ja reitin."], // 110
-  ["PHE-lähtövesi ennen BUH:ta; vertaa paluuseen vain kierron aikana, jolloin erotus on vesipuolen ΔT."], // 111
-  ["Menovesi BUH:n jälkeen; vastuksen osuus pitää vahvistaa BUH-tilasta, ei vain lämpöerosta."], // 112
-  ["DHW-tankin veden lämpö; jos se ei nouse DHW-käytössä, tarkista toiminta, virtaus ja diagnoosit."], // 113
-  ["Ulkoyksikön ja sisälämmönvaihtimen välisen nestelinjan kylmäaine; yksittäinen arvo ilman käyttötilaa ei diagnosoi."], // 114
-  ["Kaukosäätimen ilmoittama pääalueen huonelämpö; arvo voi puuttua normaalisti ilman sopivaa anturia/asetusta."], // 115
-  ["HomeHubin lämpöpumpun sähkönkulutus; tila ja lämmittimet vaikuttavat, joten kaikkea ei voi kohdistaa kompressorille."], // 116
-  ["HomeHubista luettu pääalueen lämmitysmenoveden tavoite; voi olla kiinteä tai sääkompensoitu ja on vain luku."], // 117
-  ["HomeHubista luettu pääalueen jäähdytysmenoveden tavoite; voi jäädä näkyviin jäähdytyksen ollessa pois ja on vain luku."], // 118
-  ["Koko tilapiirin sallintakytkin, ei tieto nykyisestä käynnistä."], // 119
-  ["Hiljainen käyttö vähentää melua ja käytettävissä olevaa tehoa; käsiohjaus, ajastus tai asentajaraja voi aktivoida sen."], // 120
-  ["DHW-uudelleenlämmityksen tankkitavoite, ei käynnistyslämpö; käynnistys riippuu hystereesistä ja ajastuksesta."], // 121
-  ["Lämmitysmenoveden vain luku -korjaus −10…+10 K; muu kuin 0 ei todista käynnissä olevaa tilalämmitystä."], // 122
-  ["Smart Gridin suositeltu päällä -varauksen tehoraja; pienempi tästä ja yleisrajasta pätee, eikä arvo ole nykykulutus."], // 123
-  ["HomeHubin yleinen tehoraja, voimassa myös vapaassa käytössä; asetusraja, ei mitattu sähkönkulutus."], // 124
+  ["Rekisterin 12 automaattisen käyttöveden uudelleenlämmityksen sallinta; ON = sallittu, OFF = estetty, ei todista käynnissä olevaa latausta."], // 23
+  ["Rekisterin 13 käyttöveden tehokuumennuksen (booster) pyyntö; ON = pyydetty tai käynnissä, OFF = normaali toiminta."], // 24
+  ["Uudelleenlämmitys nostaa tankin tavoitteeseen, kun lämpötila alittaa käynnistysrajan."], // 25
+  ["Tankin ajastusprofiili: mukavuusvaraus käyttää korkeampaa ja säästövaraus matalampaa tavoitetta."], // 26
+  ["Hybridilaitteessa säätimen DHW-pyyntö kattilalle; pyyntö ei todista palamista."], // 27
+  ["Vaihtoventtiili ohjaa veden DHW-tankkiin tai tilapiiriin; asento ei yksin todista piirin toimintaa."], // 28
+  ["Valinnaisen 2WV:n X10A-lähtö; pois-tila ei yksin todista jäähdytystä, jännitettä tai mekaanista asentoa."], // 29
+  ["Toisen alueen sekoitusventtiilin avautuma, jolla kuuma meno ja viileä paluu sovitetaan tavoitteeseen."], // 30
+  ["Valitun lämmitys-/jäähdytystilan menoveden tavoite, kiinteä tai sääkompensoitu."], // 31
+  ["Toisen alueen sekoitettu menolämpö venttiilin jälkeen, esimerkiksi matalalämpöiseen lattialämmitykseen."], // 32
+  ["Veden lämpö BUH:n jälkeen, yleensä R2T; voi sisältää BUH-lämmön mutta ei ole lämmönluovuttajan anturi."], // 33
+  ["R1T PHE:n jälkeen ennen BUH:ta; R4T:n, virtauksen ja tilan kanssa sillä arvioidaan lämpötehoa."], // 34
+  ["R4T yhteisessä PHE-paluussa; R1T−R4T on PHE:n ΔT, ei lämmönluovuttajien eikä yleinen 5 K sääntö."], // 35
+  ["Yhteisen vesipiirin virtaus; vähimmäinen riippuu mallista ja tilasta, ja pieni virtaus voi aiheuttaa 7H:n."], // 36
+  ["Suljetun vesipiirin paine; sallittu alue on mallikohtainen, ja arvolla ≤1,0 bar tarkista kyseisen mallin ohje."], // 37
+  ["Pumpun nopeuskomento käyttää käänteistä asteikkoa: 0 = täysi nopeus, 100 = pysäytys."], // 38
+  ["Vesikiertopumpun tila; käynti ei yksin todista hyödyllistä lämmönsiirtoa, joten vertaa virtaukseen."], // 39
+  ["Määritetyn aurinkolämpöpiirin pumppu, eri kuin lämpöpumpun vesikiertopumppu."], // 40
+  ["Profiilin nimeämän pumpun nopeus; asteikko ja piiri ovat mallikohtaisia, todellinen virtaus on eri arvo."], // 41
+  ["Binäärinen X10A-tila ”Water flow switch”. Malleissa, joissa virtauskytkin on dokumentoitu, päällä tarkoittaa havaittua veden liikettä; tila ei mittaa l/min eikä osoita mallikohtaista vähimmäisvirtausta. Jotkin tuetut mallit ilmoittavat tilan ilman dokumentoitua erillistä fyysistä kytkintä. Pumpun käydessä vertaa mitattuun virtaukseen ja 7H/C0-vikaan."], // 42
+  ["Vesipuolen nykytila: pysäytys, lämmitys, jäähdytys, DHW tai yhdistelmä; ei todista kompressorin käyntiä."], // 43
+  ["Smart Gridin nelitilainen energiakäsky HomeHubista tai X10A-koskettimista, ei lämmitys-/jäähdytystila."], // 44
+  ["Nykyinen tilakäyttö on lämmitys tai jäähdytys ilman automaattia; ei todista kompressorin käyntiä."], // 45
+  ["HomeHubiin määritetty automaatti-/lämmitys-/jäähdytysvalinta, ei ulkoyksikön nykyinen toiminta."], // 46
+  ["Ulkoyksikön ilmoittama pysäytys/lämmitys/jäähdytys; valittu tila ei takaa kompressoria tai lämmönsiirtoa."], // 47
+  ["Rekisterin 35 yhdistetty sulatus- ja kompressorin uudelleenkäynnistyslippu; OFF = normaali, ON = sulatus tai käynnistysvalmistelu."], // 48
+  ["Rekisterin 36 kuumakäynnistyslippu; OFF = jatkuva käynti, ON = lämmönvaihtimen lyhyt esilämmitys ennen käynnin jatkumista."], // 49
+  ["Ulkokennon sulatus on normaalia kylmässä kosteassa säässä; bitti ilman kosteutta ei arvioi toistuvuutta."], // 50
+  ["Nykyinen vikaluokka: normaali, virhe, varoitus tai huomautus; muu kuin normaali vaatii vikakoodin tarkistuksen."], // 51
+  ["Parhaillaan ilmoitetun vikakoodin merkitys."], // 52
+  ["Hätäkäyttö lämpöpumpun vian jälkeen; asetuksesta riippuen BUH tai kattila voi hoitaa lämmityksen/DHW:n."], // 53
+  ["Yksikön hälytysrele ilmoittaa vian ulkoiselle valvonnalle."], // 54
+  ["Pääalueen lämmitys-/jäähdytyshuoneen tavoite, ei termostaatin päällä/pois-pyyntö."], // 55
+  ["Sisäyksikön thermo ON -pyyntö; ei yksilöi kuormaa eikä todista kompressorin käyntiä."], // 56
+  ["Space H Operation -lähtöliittimen tila, ei tavallinen tilalämmityksen toimintatila."], // 57
+  ["Ilmaisee normaalin tilalämmityksen/-jäähdytyksen sallinnan tai toiminnan, ei itse termostaattipyyntöä."], // 58
+  ["Yksikön oman huoneanturin ohjaaman alueen huonelämpötilan tavoite."], // 59
+  ["Sisäisen tai johdollisen huoneanturin mittaus; käyttö ohjauksessa riippuu valitusta säätötavasta."], // 60
+  ["Purkauslämpösuoja: Drop päällä/pois, Retry 0–7. Vain katkeamattomien vertailukelpoisten näytteiden kasvu osoittaa toiminnan, ei syytä tai poikkeavaa absoluuttista arvoa; kynnys, nollaus ja 7→0 ovat tuntemattomat."], // 61
+  ["Invertterivirtasuoja: Drop päällä/pois, Retry 0–7. Vain katkeamattomien vertailukelpoisten näytteiden kasvu osoittaa toiminnan, ei syytä tai poikkeavaa absoluuttista arvoa; kynnys, nollaus ja 7→0 ovat tuntemattomat."], // 62
+  ["Korkeapainesuoja: Drop päällä/pois, Retry 0–7. Vain katkeamattomien vertailukelpoisten näytteiden kasvu osoittaa toiminnan, ei syytä tai poikkeavaa absoluuttista arvoa; kynnys, nollaus ja 7→0 ovat tuntemattomat."], // 63
+  ["Matalapainesuoja: Drop päällä/pois, Retry 0–7. Vain katkeamattomien vertailukelpoisten näytteiden kasvu osoittaa toiminnan, ei syytä tai poikkeavaa absoluuttista arvoa; kynnys, nollaus ja 7→0 ovat tuntemattomat."], // 64
+  ["Invertterin jäähdytyselementin lämpösuoja: Drop päällä/pois, Retry 0–7. Vain katkeamattomien vertailukelpoisten näytteiden kasvu osoittaa toiminnan, ei syytä tai poikkeavaa absoluuttista arvoa; kynnys, nollaus ja 7→0 ovat tuntemattomat."], // 65
+  ["Muu sisäinen rajoitusbitti kuin viisi nimettyä suojaa; päällä kertoo vain tunnistamattomasta rajoituksesta."], // 66
+  ["PHE:n tulo- tai lähtöveden lämpötila kylmäaineen ja veden välisessä lämmönvaihdossa."], // 67
+  ["Ulkokennoanturin lämpötila; alle 0 °C lämmityksessä ei ilman kosteustietoa todista huurretta."], // 68
+  ["Yksikön läheltä mitattu ulkoilma; aurinko, asennuspaikka ja tuuli voivat erottaa sen säähavainnosta."], // 69
+  ["Kuuma kaasu kompressorin jälkeen; riippuu paineesta, nopeudesta, tilasta ja kuormasta. Yksi arvo tai toisen sarjan alue ei osoita vikaa tai kylmäainevajetta."], // 70
+  ["Kompressorille palaavan viileän matalapaineisen kylmäainekaasun lämpötila."], // 71
+  ["Lämmönvaihtimien välisen nestelinjan kylmäainelämpötila."], // 72
+  ["Höyrystimen tulo-/lähtökylmäaineen lämpötila lämmön vastaanottokohdassa."], // 73
+  ["Kylmäaineen ruiskutuslinjan lämpötila kompressorin ohjausta ja suojausta varten."], // 74
+  ["Kaksifaasisessa neste-höyry-kylmäaineessa mitattu sisäinen ohjauslämpö, ei käyttäjän asetus."], // 75
+  ["Ulkokennon sulatusanturi; sijainti ja ohjaus ovat mallikohtaisia. Yksi piste ei osoita koko kennon jäätä tai sulatuksen päättymistä."], // 76
+  ["Kylmäainepaineesta laskettu kyllästymislämpötila, ei erillinen lämpöanturi tai bar-paine."], // 77
+  ["Korkea-/matalapaine: arvioi saman tilan/mallin vakaa trendi; käynnistys, öljynpalautus ja sulatus muuttavat sitä. Yleistä normaalialuetta ei ole."], // 78
+  ["Invertterikompressorin nopeus rps; keskeinen tehonsäätöarvo, ei suora lämpötehomittaus."], // 79
+  ["EEV-askeleet ovat komento ilman mekaanista palautetta, eivät % tai virtaus. Yksin ne eivät osoita liikettä, jumia tai kylmäainevajetta."], // 80
+  ["Ulkopuhaltimen moottoriohjaimen elektroniikan lämpötila."], // 81
+  ["Ulkopuhaltimen nopeus portaana tai rpm; voi olla 0 seisokin tai sulatuksen osassa."], // 82
+  ["Mallin/tilan sisäinen tavoite; vertaa vastaavaan paineesta laskettuun kyllästyslämpöön. Ero ei diagnosoi syytä tai täyttöä."], // 83
+  ["Kompressorin purkaus-/porttilämpötilan sisäinen suojaustavoite."], // 84
+  ["Meno- ja paluuveden tavoite-ΔT; mallista ja tilasta riippuen myös 8/10 K, ei yleinen 5 K."], // 85
+  ["Laitteen kylmäaine, kuten R32 tai R410A; määrää paine–lämpötila-kyllästyskäyrän."], // 86
+  ["Kompressorin portilta mitattu lämpötila sisäistä ohjausta ja suojausta varten."], // 87
+  ["Ulkoyksikön ilmoittama kylmäainepiirin paine."], // 88
+  ["Arvio täydellisistä CT-vaiheista oletuksella 230 V; johdotusraja, todellinen jännite ja tehokerroin puuttuvat."], // 89
+  ["Kompressorin invertterivirta; karkea kompressorikuorman mitta, ei lämpöteho."], // 90
+  ["Ulkoinvertterin/tehoelektroniikan jäähdytyselementin lämpö; korkea arvo voi rajoittaa tehoa."], // 91
+  ["Aktiivisten BUH-portaiden määrä; 0 on pois, suurempia portaita voidaan käyttää pakkasella, sulatuksessa, DHW:ssa tai hädässä."], // 92
+  ["Vettä suoraan lämmittävän BUH-vastuksen porras; sallinta ja tasapainolämpö ovat asentajan asetuksia."], // 93
+  ["HomeHub 32 on BSH:n päällä/pois-tila, ei teho. 51 on erillinen lämpöpumpun sähköteho eikä BSH:n teho."], // 94
+  ["DHW-tankin uppovastus BSH voi toimia ilman kompressoria ja kiertoa; X10A ei ilmoita sen tehoa."], // 95
+  ["Sähkölämmittimen lämpösuojapiiri; avoin tila voi tarkoittaa ylikuumenemista, johdinvikaa tai puuttuvaa vastusta."], // 96
+  ["Vesiputkiston jäätymissuojaus riippuu mallista ja sähköstä eikä takaa suojaa sähkökatkossa."], // 97
+  ["X10A-jäätymissuojaustila; ilman tarkkaa malliasetusta pumppua, vastusta ja suoja-aluetta ei voi nimetä."], // 98
+  ["Maalämpömallin keruupiirin/pumpun arvo; neste, pitoisuus, paine ja lämpörajat riippuvat suunnittelusta."], // 99
+  ["Hybridin lämmönlähdevalinta: lämpöpumppu, yhdistelmä tai kattila; ei mitattu lämpöteho."], // 100
+  ["Hybridilämmityksen menoveden tavoite, ei mitattu veden lämpötila."], // 101
+  ["Toisen lämmönlähteen rinnakkaiskäytön sallinta/tila; päällä ei todista kattilan palamista."], // 102
+  ["Kattilan käyttöpyyntö rinnakkais-/hybridijärjestelmässä; ei todista palamista tai tuotettua lämpöä."], // 103
+  ["Kattilalämmitykselle pyydetty veden lämpötavoite, ei kattilan tai piirin mittaus."], // 104
+  ["Sisäinen rinnakkaiskäytön BE_COP-vertailuarvo; ei nykyinen mitattu COP, eikä X10A-asteikko ole julkinen."], // 105
+  ["Sähköyhtiön, Smart Gridin tai aurinkojärjestelmän ulkoinen tulo; vaikutus riippuu kosketinasetuksesta."], // 106
+  ["Sisä-/ulkoyksikön nimellisteholuokka; kiinteä malliarvo, ei nykyinen teho."], // 107
+  ["Hiljainen tila vähentää ulkomelua, mutta voi samalla pienentää käytettävissä olevaa lämmitys-/jäähdytystehoa."], // 108
+  ["HomeHubin diagnostiikkatila: ei vikaa, vika tai varoitus; syy selviää viereisestä koodista/lisäkoodista."], // 109
+  ["Parhaillaan ilmoitetun vikakoodin merkitys."], // 110
+  ["Numeerinen lisäkoodi tarkentaa viereistä Daikin-vikakoodia; lue vain tilan ja pääkoodin kanssa."], // 111
+  ["HomeHubin ilmoitus kompressorin käynnistä; ei anna nopeutta tai kapasiteettia, joten vertaa virtaukseen ja piiritilaan."], // 112
+  ["Normaali DHW-käyttö: käynnissä = päällä, odotus/varaus = pois; ei kerro käynnistyksen syytä."], // 113
+  ["Normaali tilakäyttö: käynnissä = päällä, odotus/varaus = pois; tila ja 3WV erottavat lämmityksen/jäähdytyksen ja reitin."], // 114
+  ["PHE-lähtövesi ennen BUH:ta; vertaa paluuseen vain kierron aikana, jolloin erotus on vesipuolen ΔT."], // 115
+  ["Menovesi BUH:n jälkeen; vastuksen osuus pitää vahvistaa BUH-tilasta, ei vain lämpöerosta."], // 116
+  ["DHW-tankin veden lämpö; jos se ei nouse DHW-käytössä, tarkista toiminta, virtaus ja diagnoosit."], // 117
+  ["Ulkoyksikön ja sisälämmönvaihtimen välisen nestelinjan kylmäaine; yksittäinen arvo ilman käyttötilaa ei diagnosoi."], // 118
+  ["Kaukosäätimen ilmoittama pääalueen huonelämpö; arvo voi puuttua normaalisti ilman sopivaa anturia/asetusta."], // 119
+  ["HomeHubin lämpöpumpun sähkönkulutus; tila ja lämmittimet vaikuttavat, joten kaikkea ei voi kohdistaa kompressorille."], // 120
+  ["HomeHubista luettu pääalueen lämmitysmenoveden tavoite; voi olla kiinteä tai sääkompensoitu ja on vain luku."], // 121
+  ["HomeHubista luettu pääalueen jäähdytysmenoveden tavoite; voi jäädä näkyviin jäähdytyksen ollessa pois ja on vain luku."], // 122
+  ["Koko tilapiirin sallintakytkin, ei tieto nykyisestä käynnistä."], // 123
+  ["Hiljainen käyttö vähentää melua ja käytettävissä olevaa tehoa; käsiohjaus, ajastus tai asentajaraja voi aktivoida sen."], // 124
+  ["DHW-uudelleenlämmityksen tankkitavoite, ei käynnistyslämpö; käynnistys riippuu hystereesistä ja ajastuksesta."], // 125
+  ["Lämmitysmenoveden vain luku -korjaus −10…+10 K; muu kuin 0 ei todista käynnissä olevaa tilalämmitystä."], // 126
+  ["Jäähdytysmenoveden vain luku -korjaus −10…+10 K; muu kuin 0 ei todista käynnissä olevaa jäähdytystä."], // 127
+  ["Smart Gridin suositeltu päällä -varauksen tehoraja; pienempi tästä ja yleisrajasta pätee, eikä arvo ole nykykulutus."], // 128
+  ["HomeHubin yleinen tehoraja, voimassa myös vapaassa käytössä; asetusraja, ei mitattu sähkönkulutus."], // 129
 ]);
 
 MODEL_DESCRIPTION_I18N.fi = modelDescriptionValues([
@@ -1271,6 +1297,8 @@ HOMEHUB_LABEL_I18N.fi = homeHubValues([
   "Pääalueen jäähdytystavoite", // 7
   "Hiljainen tila", // 9
   "Käyttöveden uudelleenlämmitystavoite", // 10
+  "Käyttöveden uudelleenlämmitys päällä", // 12
+  "Käyttöveden teholämmitystila", // 13
   "Yksikön diagnostiikkatila", // 21
   "Yksikön vikakoodi", // 22
   "Yksikön vian alikoodi", // 23
@@ -1278,6 +1306,8 @@ HOMEHUB_LABEL_I18N.fi = homeHubValues([
   "Kompressori aktiivinen", // 31
   "Säiliövastus aktiivinen", // 32
   "Säiliön desinfiointi aktiivinen", // 33
+  "Sulatus tai uudelleenkäynnistys", // 35
+  "Kuumakäynnistys", // 36
   "3-tieventtiilin asento", // 37
   "Nykyinen lämmitys-/jäähdytystila", // 38
   "PHE:n lähtölämpötila", // 40
@@ -1292,6 +1322,7 @@ HOMEHUB_LABEL_I18N.fi = homeHubValues([
   "Käyttövesitoiminta", // 52
   "Tilalämmitys/-jäähdytys", // 53
   "Pääalueen lämmitysmenoveden korjaus", // 54
+  "Pääalueen jäähdytysmenoveden korjaus", // 55
   "Smart Grid -tila", // 56
   "Varaajan tehoraja", // 57
   "Kokonaistehoraja", // 58
