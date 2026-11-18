@@ -27729,6 +27729,156 @@ static void test_diag_tail() {
     std::memcpy(record, "kept", 4);
     n = diag_finish_record(record, 4, sizeof(record), true);
     CHECK(std::string(record, n) == std::string("kept") + kDiagTruncatedMarker);
+
+    auto collect_stream = [](const char* ring, size_t ring_size, size_t len, bool wrapped,
+                             uint64_t written, size_t max_bytes, size_t chunk_cap,
+                             bool whole_lines) {
+        DiagStreamCursor cur = diag_stream_begin(ring, ring_size, len, wrapped, written, max_bytes);
+        std::string      result;
+        char             buf[128] = {};
+        while (const size_t got =
+                   diag_stream_read(cur, ring, ring_size, written, buf, chunk_cap, whole_lines)) {
+            if (whole_lines) CHECK(buf[got - 1] == '\n');
+            result.append(buf, got);
+        }
+        return result;
+    };
+
+    // Byte-for-byte parity with diag_dump_tail() across unwrapped, truncated, and wrapped rings.
+    CHECK(collect_stream(nullptr, 64, 0, false, 0, 64, 16, false).empty());
+    CHECK(collect_stream("x\n", 0, 0, false, 0, 64, 16, false).empty());
+    CHECK(collect_stream("x\n", 2, 0, false, 0, 0, 16, false).empty());
+    CHECK(collect_stream("x\n", 2, 3, false, 3, 64, 16, false).empty());
+    CHECK(collect_stream("x\n", 2, 2, true, 2, 64, 16, false).empty());
+    CHECK(collect_stream("x\n", 2, 0, false, 0, 64, 16, false).empty());
+    CHECK(collect_stream("x\n", 2, 1, false, 0, 64, 16, false).empty());
+    CHECK(collect_stream("x\n", 2, 1, false, 2, 64, 16, false).empty());
+    CHECK(collect_stream("xy", 2, 1, true, 8, 64, 16, false).empty());
+
+    const std::string simple = "alpha\nbeta\ngamma\n";
+    CHECK(collect_stream(simple.data(), simple.size(), simple.size(), false, simple.size(),
+                         simple.size(), 7, false) == simple);
+    CHECK(collect_stream(simple.data(), simple.size(), simple.size(), false, simple.size(),
+                         simple.size(), 10, true) == simple);
+
+    // Zero-newline and no-newline-tail edges.
+    const std::string no_nl = "no_newline_anywhere_in_this_long_buffer";
+    CHECK(collect_stream(no_nl.data(), no_nl.size(), no_nl.size(), false, no_nl.size(),
+                         no_nl.size(), 32, false) == kDiagTruncatedMarker);
+    CHECK(collect_stream(no_nl.data(), no_nl.size(), no_nl.size(), false, no_nl.size(), 25, 32,
+                         false) == kDiagTruncatedMarker);
+
+    char ref_out[1024] = {};
+    n = diag_dump_tail(lines.data(), lines.size(), lines.size(), false, ref_out, 512);
+    std::string ref_trunc(ref_out, n);
+    CHECK(collect_stream(lines.data(), lines.size(), lines.size(), false, lines.size(), 512, 12,
+                         false) == ref_trunc);
+    CHECK(collect_stream(lines.data(), lines.size(), lines.size(), false, lines.size(), 512, 20,
+                         false) == ref_trunc);
+    CHECK(collect_stream(lines.data(), lines.size(), lines.size(), false, lines.size(), 512, 64,
+                         true) == ref_trunc);
+
+    // Line-aligned truncation cut (char_at(start - 1) == '\n').
+    const std::string aligned_cut = "0123456789\n0123456789\n0123456789\n0123456789\n";
+    n = diag_dump_tail(aligned_cut.data(), aligned_cut.size(), aligned_cut.size(), false, ref_out,
+                       31);
+    CHECK(collect_stream(aligned_cut.data(), aligned_cut.size(), aligned_cut.size(), false,
+                         aligned_cut.size(), 31, 64, true) == std::string(ref_out, n));
+
+    // Partial trailing line drops identically to diag_dump_tail(); tiny caps enforce whole-line
+    // bounds.
+    const std::string with_partial = "first line\nsecond line\nunfinished";
+    n = diag_dump_tail(with_partial.data(), with_partial.size(), with_partial.size(), false,
+                       ref_out, sizeof(ref_out));
+    CHECK(collect_stream(with_partial.data(), with_partial.size(), with_partial.size(), false,
+                         with_partial.size(), sizeof(ref_out), 32,
+                         true) == std::string(ref_out, n));
+    {
+        DiagStreamCursor tiny_cur =
+            diag_stream_begin(with_partial.data(), with_partial.size(), with_partial.size(), false,
+                              with_partial.size(), sizeof(ref_out));
+        char tiny_buf[16] = {};
+        CHECK(diag_stream_read(tiny_cur, nullptr, 10, 10, tiny_buf, 16, false) == 0);
+        CHECK(diag_stream_read(tiny_cur, with_partial.data(), 0, 10, tiny_buf, 16, false) == 0);
+        CHECK(diag_stream_read(tiny_cur, with_partial.data(), with_partial.size(),
+                               with_partial.size(), nullptr, 16, false) == 0);
+        CHECK(diag_stream_read(tiny_cur, with_partial.data(), with_partial.size(),
+                               with_partial.size(), tiny_buf, 0, false) == 0);
+        CHECK(diag_stream_read(tiny_cur, with_partial.data(), with_partial.size(),
+                               with_partial.size(), tiny_buf, sizeof(tiny_buf), true) == 0);
+    }
+    CHECK(collect_stream(with_partial.data(), with_partial.size(), with_partial.size(), false,
+                         with_partial.size(), 5, 16,
+                         false) == std::string(kDiagTruncatedMarker, 5));
+
+    // Wrapped ring parity with full payload + marker split + pos > 0 whole-line fallback.
+    std::string       wrapped_ring(40, '\0');
+    const std::string wrapped_logical = "wrap-1111\nwrap-2222\nwrap-3333\nwrap-4444\n";
+    const size_t      wrap_off        = 17;
+    for (size_t i = 0; i < wrapped_ring.size(); ++i)
+        wrapped_ring[(wrap_off + i) % wrapped_ring.size()] = wrapped_logical[i];
+    n = diag_dump_tail(wrapped_ring.data(), wrapped_ring.size(), wrap_off, true, ref_out, 64);
+    const std::string ref_wrap_all(ref_out, n);
+    CHECK(collect_stream(wrapped_ring.data(), wrapped_ring.size(), wrap_off, true,
+                         wrapped_ring.size() + wrap_off, 64, 24, true) == ref_wrap_all);
+    CHECK(collect_stream(wrapped_ring.data(), wrapped_ring.size(), wrap_off, true,
+                         wrapped_ring.size() + wrap_off, 64, 9, false) == ref_wrap_all);
+    n = diag_dump_tail(wrapped_ring.data(), wrapped_ring.size(), wrap_off, true, ref_out, 36);
+    CHECK(collect_stream(wrapped_ring.data(), wrapped_ring.size(), wrap_off, true,
+                         wrapped_ring.size() + wrap_off, 36, 24, true) == std::string(ref_out, n));
+
+    // Oversized line in whole_lines=true skips unreadable lines (middle and trailing).
+    const std::string big_then_small = std::string(40, 'Z') + "\ntail-ok\n";
+    CHECK(collect_stream(big_then_small.data(), big_then_small.size(), big_then_small.size(), false,
+                         big_then_small.size(), big_then_small.size(), 24, true) == "tail-ok\n");
+    const std::string only_big = std::string(40, 'Y') + "\n";
+    CHECK(collect_stream(only_big.data(), only_big.size(), only_big.size(), false, only_big.size(),
+                         only_big.size(), 24, true)
+              .empty());
+
+    // Concurrent overwrite advances past mid-line overwrite, tail overwrite, and full wraparound.
+    char              live_ring[64] = {};
+    const std::string initial_live  = "aaa1\nbbb2\nccc3\nddd4\n";
+    std::memcpy(live_ring, initial_live.data(), initial_live.size());
+    uint64_t         written = initial_live.size();
+    DiagStreamCursor live_cur =
+        diag_stream_begin(live_ring, sizeof(live_ring), written, false, written, sizeof(live_ring));
+    const std::string overwrite = std::string(56, 'Q'); // lands inside "ccc3\n"
+    for (char c : overwrite) {
+        live_ring[written % sizeof(live_ring)] = c;
+        ++written;
+    }
+    char         chunk[64]      = {};
+    const size_t got_after_wrap = diag_stream_read(live_cur, live_ring, sizeof(live_ring), written,
+                                                   chunk, sizeof(chunk), true);
+    CHECK(std::string(chunk, got_after_wrap) == "ddd4\n");
+
+    char tail_ring[64] = {};
+    std::memcpy(tail_ring, initial_live.data(), initial_live.size());
+    DiagStreamCursor tail_cur = diag_stream_begin(tail_ring, sizeof(tail_ring), initial_live.size(),
+                                                  false, initial_live.size(), sizeof(tail_ring));
+    DiagStreamCursor lap_cur  = tail_cur;
+    DiagStreamCursor reset_cur = tail_cur;
+    uint64_t         written2  = initial_live.size();
+    for (int i = 0; i < 61; ++i) {
+        tail_ring[written2 % sizeof(tail_ring)] = 'R';
+        ++written2;
+    }
+    CHECK(diag_stream_read(tail_cur, tail_ring, sizeof(tail_ring), written2, chunk, sizeof(chunk),
+                           false) == 0);
+    CHECK(diag_stream_read(lap_cur, tail_ring, sizeof(tail_ring), 90, chunk, sizeof(chunk),
+                           false) == 0);
+
+    // Resetting the ring while a cursor has unread bytes ends the stream cleanly.
+    CHECK(diag_stream_read(reset_cur, tail_ring, sizeof(tail_ring), 0, chunk, sizeof(chunk),
+                           false) == 0);
+
+    // Defensive bound if a caller passes a cursor whose span contains no newline in
+    // whole_lines=true.
+    DiagStreamCursor malformed_cur{0, 10, 0, 0};
+    const char       no_nl_10[] = "ZZZZZZZZZZ";
+    CHECK(diag_stream_read(malformed_cur, no_nl_10, 10, 10, chunk, 4, true) == 0 &&
+          malformed_cur.next_seq == 10);
 }
 
 // The 27 observability rows were audited on the reference unit, which detection reads with the

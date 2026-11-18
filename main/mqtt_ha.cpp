@@ -673,6 +673,19 @@ static void source_cleanup_outbox_cleared_after_transport_stop() noexcept {
     s_connected_client_epoch.store(0, std::memory_order_release);
 }
 
+static inline void release_string_capacity(std::string& s) {
+    if (s.empty() && s.capacity() > 0) std::string{}.swap(s);
+}
+
+static __attribute__((noinline)) void release_paused_state_caches() {
+    s_last_modbus_json.clear();
+    release_string_capacity(s_last_modbus_json);
+    s_last_weather_json.clear();
+    release_string_capacity(s_last_weather_json);
+    s_last_env3_json.clear();
+    release_string_capacity(s_last_env3_json);
+}
+
 // The clean stop below discards the installation LWT, and an OTA install can restart the board
 // before this client reconnects (logic/mqtt_publish_gate.hpp). Publish the retained `offline` on
 // the same ordered stream first: esp-mqtt writes a connected publish synchronously, so the broker
@@ -712,6 +725,7 @@ static __attribute__((noinline)) void mqtt_transport_pause_if_requested() {
         s_transport_paused.store(true, std::memory_order_release);
         s_connected.store(false, std::memory_order_release);
         set_status(false, "paused for network heap");
+        release_paused_state_caches();
         diag_printf("mqtt: transport paused for network heap\n");
     } else {
         diag_printf("mqtt: transport pause failed (%s)\n", esp_err_to_name(stop_rc));
@@ -737,6 +751,7 @@ static __attribute__((noinline)) bool mqtt_cleanup_evidence_recovery_step(int de
         s_transport_paused.store(true, std::memory_order_release);
         s_connected.store(false, std::memory_order_release);
         set_status(false, "restarting after MQTT cleanup evidence loss");
+        release_paused_state_caches();
         diag_printf("mqtt: cleanup evidence lost — transport stopped for bounded retry\n");
     } else {
         diag_printf("mqtt: cleanup evidence recovery stop failed (%s)\n", esp_err_to_name(stop_rc));
@@ -1508,17 +1523,20 @@ static void apply_source_cleanup_completion(const MqttCleanupCompletion& complet
     case MqttCleanupSource::Weather:
         s_disabled_weather_cleaned = true;
         s_last_weather_json.clear();
+        release_string_capacity(s_last_weather_json);
         if (!completion.discovery_skipped)
             diag_printf("mqtt: superseded Weather state and retired discovery deleted\n");
         break;
     case MqttCleanupSource::Modbus:
         s_modbus_disabled_cleaned = true;
         s_last_modbus_json.clear();
+        release_string_capacity(s_last_modbus_json);
         if (!completion.discovery_skipped)
             diag_printf("mqtt: superseded HomeHub state and retired discovery deleted\n");
         break;
     case MqttCleanupSource::Env3:
         s_last_env3_json.clear();
+        release_string_capacity(s_last_env3_json);
         s_last_env3_samples        = 0;
         s_env3_discovery_announced = false;
         s_env3_disabled_cleaned    = !completion.env3_enabled;
@@ -3395,10 +3413,13 @@ static void mqtt_task(void*) {
                     s_last_x10a_digest_valid = false;
                     s_x10a_publish_proven.store(false, std::memory_order_release);
                     s_last_modbus_json.clear();
+                    release_string_capacity(s_last_modbus_json);
                     s_last_x10a_cache_gen   = 0;
                     s_last_modbus_cache_gen = 0;
                     s_last_weather_json.clear();
+                    release_string_capacity(s_last_weather_json);
                     s_last_env3_json.clear();
+                    release_string_capacity(s_last_env3_json);
                     s_last_env3_samples = 0;
                     // Force the board/link diagnostic discovery to re-publish on THIS (re)connect. The
                     // disconnect handler also clears s_heartbeat_announced, but a DISCONNECT landing

@@ -1425,8 +1425,9 @@ const transportPauseEnd = mqtt.indexOf("static __attribute__((noinline)) bool mq
 const transportPause = mqtt.slice(transportPauseStart, transportPauseEnd);
 const transportStop = transportPause.indexOf("esp_mqtt_client_stop(s_client)");
 assert.ok(transportPauseStart >= 0 && transportStop >= 0 &&
-  transportPause.indexOf("s_transport_connecting.store(false, std::memory_order_release)", transportStop) > transportStop,
-  "a successful transport stop must explicitly release BEFORE_CONNECT activity");
+  transportPause.indexOf("s_transport_connecting.store(false, std::memory_order_release)", transportStop) > transportStop &&
+  transportPause.indexOf("release_paused_state_caches()", transportStop) > transportStop,
+  "a successful transport stop must release BEFORE_CONNECT activity and paused state JSON caches");
 
 // The live plant also runs HomeHub and Syslog. Both used to allocate after the OTA flag rose:
 // HomeHub copied the string-owning Config and periodically reserved a fresh values vector; every
@@ -1652,13 +1653,17 @@ assert.ok(diagStart >= 0 && diagEnd > diagStart, "/diag must remain identifiable
 assert.match(diagHandler,
   /if\s*\(redact\s*&&\s*ota_download_active\(\)\)\s*return network_tls_busy\(req\);[\s\S]{0,1600}?HttpJsonChunks\s+chunks/,
   "redacted /diag must refuse OTA before its bounded stream and per-line allocations");
-assert.match(diagHandler, /finish_bounded_stream\(chunks,/,
+assert.match(diagHandler, /finish_bounded_stream\(\s*chunks,/,
   "redacted /diag must abort post-emission failures without a replacement response");
+assert.doesNotMatch(diagHandler, /\bbuf\s*\[\s*6144\s*\]/,
+  "/diag must not keep a static 6 KiB ring copy alongside streaming cursor support");
+assert.match(diagHandler, /static\s+char\s+buf\[1024\]/,
+  "/diag must stream through a bounded 1 KiB chunk buffer");
 assert.match(diagHandler,
-  /ota_download_active\(\)\s*\?\s*512\s*:\s*sizeof\(buf\)/,
+  /ota_download_active\(\)\s*\?\s*512\s*:\s*kDiagRingBytes/,
   "plain /diag must clamp ring dump to 512 B during active OTA to prevent multi-pbuf lwIP heap fragmentation");
 assert.match(diagHandler,
-  /for\s*\([^)]*off\s*\+=\s*1024\)[\s\S]{0,120}?httpd_resp_send_chunk\(/,
+  /while\s*\([^)]*diag_stream_next\([^)]*sizeof\(buf\),\s*false\)\)[\s\S]{0,120}?httpd_resp_send_chunk\(/,
   "plain /diag must stream in chunks to avoid burst pbuf heap pressure during OTA");
 const scanStart = httpStatus.indexOf("static esp_err_t h_scan(");
 const scanEnd = httpStatus.indexOf("void http_register_status(", scanStart);
