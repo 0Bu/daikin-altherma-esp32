@@ -1,4 +1,4 @@
-// translation-source: 7e05fca97bff772abf43c5704d541747bc310184005cce90ce5b76eab24256ce
+// translation-source: 480bf7bd3b16592ffbaf33f9d54b1362d56dd3b72b7c310293449045f5e86f04
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -23,6 +23,7 @@ I18N.sv = localeValues([
   /* sys.cool_mode */ "Kylläge",
   /* sys.residual_circulating */ "Restvärme cirkulerar — ingen kyleffekt",
   /* sys.bsh_active */ "Tankvärmare aktiv",
+  /* sys.disinfecting */ "Tankdesinfektion aktiv",
   /* sys.online */ "Ansluten",
   /* sys.fault */ "Fel",
   /* sys.warning */ "Varning",
@@ -347,6 +348,11 @@ I18N.sv = localeValues([
   /* a4.pressure_help */ "Tryckskalningen för Altherma 4 är inte verifierad. Värdet i bar använder befintlig omräkning; jämför med enhetens egen avläsning innan trycket bedöms.",
   /* a4.demand_response */ "Läge för efterfrågerespons",
   /* a4.unit_operation */ "Enhetens drifttillstånd",
+  /* a4.cooling_offset */ "Väderberoende kylkorrigering, huvudzon",
+  /* a4.add_target */ "Värme-/kylmål, extrazon",
+  /* a4.abnormality_counter */ "Användarfelräknare",
+  /* a4.cooling_offset_help */ "Förskjuter huvudzonens väderberoende kylkurva i kelvin. Detta är en justering, inte en uppmätt temperatur eller det fullständiga framledningsmålet.",
+  /* a4.abnormality_help */ "Ackumulerat antal användaravvikelser registrerade av enheten. Ett oförändrat nollskilt värde speglar tidigare händelser, inte ett aktivt fel; kontrollera enhetsstatus och felkod.",
   /* enum.unknown */ (n) => `Okänd (${n})`,
   /* chip.space_on */ "Rumsdrift PÅ",
   /* chip.space_off */ "Rumsdrift AV",
@@ -452,6 +458,21 @@ I18N.sv = localeValues([
   /* hist.flow_switch_off */ "X10A-status AV",
   /* hist.flow_switch_none */ "Inget PÅ-tillstånd för denna X10A-status under perioden.",
   /* hist.flow_switch_aria */ (l, d) => `${l} — historik för flödesvakt. ${d}. Använd piltangenterna.`,
+  /* hist.comp_total */ (d, n) => `Kompressor · ${d} · ${n} ${n === 1 ? "fas" : "faser"}`,
+  /* hist.comp_none */ "Ingen kompressordrift observerades under den registrerade perioden.",
+  /* hist.comp_active */ "Kompressor igång",
+  /* hist.comp_inactive */ "Kompressor av",
+  /* hist.comp_aria */ (l, d) => `${l} — HomeHub-kompressorhistorik. ${d}. Använd piltangenterna.`,
+  /* hist.mb_defrost_total */ (d) => `Avfrostning / omstart · ${d}`,
+  /* hist.mb_defrost_none */ "Ingen avfrostnings- eller omstartsfas observerades under den registrerade perioden.",
+  /* hist.mb_defrost_active */ "Avfrostning / omstart",
+  /* hist.mb_defrost_inactive */ "Normal / stillestånd",
+  /* hist.mb_defrost_aria */ (l, d) => `${l} — HomeHub-historik för avfrostning/omstart. ${d}. Använd piltangenterna.`,
+  /* hist.pump_total */ (d) => `Pump · ${d}`,
+  /* hist.pump_none */ "Ingen cirkulationspumpsdrift observerades under den registrerade perioden.",
+  /* hist.pump_active */ "Pump igång",
+  /* hist.pump_inactive */ "Pump av",
+  /* hist.pump_aria */ (l, d) => `${l} — HomeHub-historik för cirkulationspump. ${d}. Använd piltangenterna.`,
   /* toast.saved */ "Sparad",
   /* toast.no_changes */ "Inga ändringar",
   /* toast.reboot */ "Startar på nytt — ansluter igen…",
@@ -1099,6 +1120,8 @@ HOMEHUB_LABEL_I18N.sv = homeHubValues([
   "Kylmål · huvudzon", // 7
   "Tyst läge", // 9
   "Återvärmningsmål varmvatten", // 10
+  "Återvärmning varmvatten på", // 12
+  "Boosterläge varmvatten", // 13
   "Enhetens diagnosstatus", // 21
   "Enhetens felkod", // 22
   "Enhetens felunderkod", // 23
@@ -1106,6 +1129,8 @@ HOMEHUB_LABEL_I18N.sv = homeHubValues([
   "Kompressor aktiv", // 31
   "Tankvärmare aktiv", // 32
   "Tankdesinfektion aktiv", // 33
+  "Avfrostning eller omstart", // 35
+  "Varmstart", // 36
   "3-vägsventilens läge", // 37
   "Aktuellt värme-/kylläge", // 38
   "Framledning från PHE", // 40
@@ -1120,6 +1145,7 @@ HOMEHUB_LABEL_I18N.sv = homeHubValues([
   "Varmvattendrift", // 52
   "Rumsdrift", // 53
   "Framledningskorr. · huvudzon", // 54
+  "Kylkorrigering · huvudzon", // 55
   "Smart Grid-läge", // 56
   "Effektgräns för lagring", // 57
   "Allmän effektgräns", // 58
@@ -1149,108 +1175,113 @@ DESCRIPTION_I18N.sv = descriptionValues([
   ["Huvudtermostatens värme-/kylbehov; bekräfta respons med läge, pump, ventil och kompressor."], // 20
   ["En av fyra råa begränsningsbitar; härled inte steg innan observerad kodning är dokumenterad."], // 21
   ["Bit för PHE-värmare; okänt om kommando eller återkoppling och inget bevis på ström."], // 22
-  ["Återvärmning höjer tanken till målet när temperaturen sjunker under startgränsen."], // 23
-  ["Schemalagt förval: Komfort använder högt mål, Eco lågt."], // 24
-  ["I hybridsystem begär styrningen varmvatten från pannan."], // 25
-  ["3WV leder vatten till tank eller rum; 1=tank, 0=rum, men läget bevisar inte aktivitet."], // 26
-  ["X10A PÅ/AV-utgång för valfri 2WV; bevisar inte spänning eller mekaniskt läge."], // 27
-  ["Blandningsventilens öppning för en extra zon."], // 28
-  ["Framledningstemperaturens mål för valt värme- eller kylläge."], // 29
-  ["Blandad framledningstemperatur för sekundärzonen efter blandningsventilen."], // 30
-  ["Temperatur efter BUH, oftast R2T; kan omfatta BUH-värme men bevisar inte avgivartemperatur."], // 31
-  ["R1T från PHE före BUH; R4T/flöde ger en uppskattning vars placering är modellberoende."], // 32
-  ["R4T-retur till PHE; bedöm ΔT med flöde, kompressor och läge, inte en universell 5 K-regel."], // 33
-  ["Vattenflöde i gemensam krets; minimum beror på modell/läge och lågt värde kan utlösa 7H."], // 34
-  ["Hydraultryck: många handböcker kräver >1 bar; vid ≤1,0 bar gäller handboken för exakt modell."], // 35
-  ["Inverterat pumpkommando: 0 är maxhastighet och 100 är stopp."], // 36
-  ["Pumpstatus; bevisar inte nyttig värme och kan vara aktiv utan kompressor. Jämför flödet."], // 37
-  ["Status för pumpen i en konfigurerad solvärmekrets."], // 38
-  ["Angiven hastighet för pumpen som profilen namnger."], // 39
-  ["Binär X10A-status «Water flow switch». På modeller med dokumenterad flödesvakt betyder PÅ att vattenrörelse upptäckts; statusen mäter inte l/min och bevisar inte modellens miniminivå. Vissa stödda modeller visar statusen utan dokumenterad separat fysisk brytare. Jämför med uppmätt flöde och 7H/C0 när pumpen går."], // 40
-  ["Hydrauliskt läge: stopp, värme, kyla, varmvatten eller kombinerat; bevisar inte kompressordrift."], // 41
-  ["Smart Grid-kommando med fyra lägen från HomeHub eller två X10A-kontakter; inte värme-/kylläge."], // 42
-  ["Aktuellt rumsläge värme/kyla utan Auto; kräver aktivitetssignal och bevisar inte kompressordrift."], // 43
-  ["HomeHub-val Auto/värme/kyla; konfiguration, inte aktuell drift eller bevis på aktivitet."], // 44
-  ["Utomhusstatus stopp/värme/kyla; kan stå kvar med kompressorn av och bevisar inte värme."], // 45
-  ["Avfrostning av utomhusenheten; normalt i kallt/fuktigt väder, men biten diagnostiserar inte frekvens."], // 46
-  ["Allvarlighetsklass för aktivt meddelande: Normal, Fel, Varning eller Försiktighet."], // 47
-  ["Betydelsen av felkoden som rapporteras nu."], // 48
-  ["Nöddrift efter värmepumpsfel."], // 49
-  ["Enhetens larmrelä; signalerar fel till anslutet externt larm/övervakning."], // 50
-  ["Målrumstemperatur för huvudzonen i värme- eller kylläge."], // 51
-  ["Intern «thermo ON»-begäran; identifierar inte last/kompressor, och «Space heating Operation» är inte behov."], // 52
-  ["Elektrisk «Space H Operation»-utgång; inte normal aktivitet eller bevis på kompressor/värme."], // 53
-  ["Normal rumsuppvärmnings/-kylaktivitet, inte behov; kan vara PÅ i kyla med kompressorn av."], // 54
-  ["Konfigurerad målrumstemperatur för zonen som styrs av enhetens egen givare."], // 55
-  ["Rumstemperatur från enhetens inbyggda eller kabelanslutna givare."], // 56
-  ["Utloppsskydd: PÅ/AV + räknare 0–7; bara jämförbar ökning visar aktivitet, inte orsak. Gräns/återställning/7→0 är odokumenterat."], // 57
-  ["Växelriktarströmskydd: PÅ/AV + räknare 0–7; bara jämförbar ökning visar aktivitet, inte orsak. Gräns/återställning/7→0 är odokumenterat."], // 58
-  ["Högtrycksskydd: PÅ/AV + räknare 0–7; bara jämförbar ökning visar aktivitet, inte orsak. Gräns/återställning/7→0 är odokumenterat."], // 59
-  ["Lågtrycksskydd: PÅ/AV + räknare 0–7; bara jämförbar ökning visar aktivitet, inte orsak. Gräns/återställning/7→0 är odokumenterat."], // 60
-  ["Växelriktartemperaturskydd: PÅ/AV + räknare 0–7; bara jämförbar ökning visar aktivitet, inte orsak. Gräns/återställning/7→0 är odokumenterat."], // 61
-  ["Generisk intern begränsningsbit, inte kopplad till de fem namngivna skydden."], // 62
-  ["Vatten vid plattvärmeväxlarens in-/utlopp, där energi överförs mellan köldmedium och vatten."], // 63
-  ["Givare på utomhusvärmeväxlaren; <0 °C kan vara normalt och bevisar inte is utan fuktdata."], // 64
-  ["Utetemperatur uppmätt av enheten för väderkompensering och driftval."], // 65
-  ["Varm gas från kompressorn; beror på tryck, varvtal, läge och last. Ett värde eller intervall från annan serie bevisar inte fel eller köldmediebrist."], // 66
-  ["Temperatur på kall lågtrycksgas tillbaka till kompressorn."], // 67
-  ["Köldmedietemperatur i vätskeröret mellan värmeväxlarna."], // 68
-  ["Köldmedium vid förångarens in-/utlopp, där värme tas upp."], // 69
-  ["Köldmediets insprutningstemperatur för intern reglering och skydd."], // 70
-  ["Temperatur i köldmediekretsens tvåfasdel med både vätska och ånga."], // 71
-  ["Avfrostningsgivare ute; placering och styrning är modellspecifika. En punkt bevisar inte is på hela batteriet eller avslutad avfrostning."], // 72
-  ["Mättnadstemperatur beräknad från tryck; inte en egen givare eller tryck i bar."], // 73
-  ["Hög-/lågtryck: bedöm stabil trend i samma läge/modell; start, oljeretur och avfrostning ändrar det. Inget allmänt normalområde."], // 74
-  ["Kompressorhastighet i rps; högre betyder ofta större behov men mäter inte värme."], // 75
-  ["EEV-steg är kommando utan mekanisk återkoppling, inte % eller flöde. Ensamt bevisar det inte rörelse, fast ventil eller köldmediebrist."], // 76
-  ["Temperatur på elektroniken som styr utomhusfläktmotorn."], // 77
-  ["Utomhusfläktens hastighet som steg eller rpm."], // 78
-  ["Internt mål efter modell/läge; jämför med motsvarande mättnadstemperatur från tryck. Avvikelsen diagnostiserar inte orsak eller fyllning."], // 79
-  ["Internt mål för kompressorns utlopps-/porttemperatur som används av skyddet."], // 80
-  ["Önskad ΔT mellan framledning och retur; modell-/lägesberoende, inte en universell 5 K-regel."], // 81
-  ["Köldmediet som enheten fyllts med, t.ex. R32 eller R410A."], // 82
-  ["Temperatur vid en kompressorport för intern övervakning och skydd."], // 83
-  ["Tryckmätning i utomhusenhetens köldmediekrets."], // 84
-  ["Fasström från CT; 230 V-uppskattningen är okalibrerad och bortser från verklig spänning/effektfaktor."], // 85
-  ["Ström som kompressorväxelriktaren drar; grov belastningsindikator."], // 86
-  ["Temperatur i kylflänsen för utomhusenhetens växelriktare/kraftelektronik."], // 87
-  ["Aktiva steg i elektrisk tillsatsvärme, uttryckta som effektnivå."], // 88
-  ["BUH-steg: 0=inget; högre steg kan stödja vid kyla, avfrostning, varmvatten eller nödläge."], // 89
-  ["HomeHub-ingång 32: BSH PÅ/AV, inte effekt; ingång 51 är värmepumpsförbrukning, inte BSH."], // 90
-  ["BSH i tanken kan värma utan kompressor/pump; X10A ger PÅ/AV, inte effekt."], // 91
-  ["Status för en elektrisk värmares termiska skyddskedja; öppen kedja stoppar driften."], // 92
-  ["Rörfrostskydd; modellberoende, kräver ström och täcker inte strömavbrott."], // 93
-  ["X10A-frostskyddsstatus; utan modelldata identifierar den inte pump, värmare eller skyddad zon."], // 94
-  ["Markslinga med frostskyddsvätska och pump; vätska, tryck och gränser beror på konstruktion/handbok."], // 95
-  ["Hybridkälla värmepump/kombinerat/panna; ett val, inte uppmätt värme."], // 96
-  ["Hybridens framledningsmål, inte mätt temperatur; tolka med läge och faktiska värden."], // 97
-  ["Bivalent tillåtelse/status; PÅ bevisar inte att pannan brinner."], // 98
-  ["Begäran till pannan; bevisar inte förbränning eller levererad värme."], // 99
-  ["Pannans vattenmål, inte mätt temperatur; beror på behov och anläggning."], // 100
-  ["Bivalent BE_COP-värde; X10A-betydelse/skala är odokumenterad och inte aktuell COP."], // 101
-  ["Tariff-, Smart Grid- eller solingång; åtgärden är konfigurationsberoende, PÅ visar bara kontakten."], // 102
-  ["Fast nominell inne-/uteeffektklass i kW eller kod; inte aktuell mätning."], // 103
-  ["Tyst läge sänker utomhusbuller och kan begränsa tillgänglig värme-/kyleffekt."], // 104
-  ["HomeHub-status Inget fel/Fel/Varning; identifierar inte ensam orsaken."], // 105
-  ["Betydelsen av felkoden som rapporteras nu."], // 106
-  ["Extra underkod; giltig bara med huvudstatus/-kod och dold när den saknas."], // 107
-  ["HomeHub visar kompressor PÅ/AV, inte hastighet/kapacitet; tolka med drift och vattenflöde."], // 108
-  ["Visar om normal varmvattendrift är aktiv."], // 109
-  ["Visar om normal rumsuppvärmning eller -kylning är aktiv."], // 110
-  ["PHE-utlopp före BUH; jämför med retur bara vid cirkulation för att få ΔT."], // 111
-  ["Framledning efter BUH; ökning kan bero på elvärme men måste bekräftas med BUH-status."], // 112
-  ["Vattnets uppmätta temperatur i varmvattentanken."], // 113
-  ["Vätskerörstemperatur; förhållandet är lägesberoende och ett värde räcker inte för diagnos."], // 114
-  ["Huvudzonens rumstemperatur rapporterad av fjärrkontrollen."], // 115
-  ["Elförbrukning via HomeHub; beror på läge/laster och ska inte tillskrivas bara kompressorn."], // 116
-  ["HomeHubs framledningsmål för värme, endast avläsning; sänkning hjälper bara om rumsmålet nås."], // 117
-  ["HomeHubs framledningsmål för kyla, endast avläsning; relevant när kyla är tillåten/aktiv."], // 118
-  ["Visar om rumskretsen är aktiverad: brytarläge, inte aktuell aktivitet."], // 119
-  ["Tyst läge sänker utomhusbuller enligt vald nivå och kan minska tillgänglig effekt."], // 120
-  ["Återvärmningsmål för varmvatten, inte startgräns; hysteres och program gäller också."], // 121
-  ["Korrigering −10…+10 K av värmemålet; bevisar inte värme utan aktiv rumsdrift."], // 122
-  ["Lagringsgräns vid Rekommenderad på; lägsta av denna och allmän gräns gäller. Inte förbrukning."], // 123
-  ["Allmän HomeHub-gräns: ett tak, inte förbrukning; lägre värde begränsar effekt i Smart Grid-läge."], // 124
+  ["Aktivering av automatisk återvärmning av varmvatten i register 12; ON = tillåten, OFF = avstängd, bevisar inte pågående laddning."], // 23
+  ["Begäran om snabbladdning/booster av varmvatten i register 13; ON = begärd eller aktiv, OFF = normal drift."], // 24
+  ["Återvärmning höjer tanken till målet när temperaturen sjunker under startgränsen."], // 25
+  ["Schemalagt förval: Komfort använder högt mål, Eco lågt."], // 26
+  ["I hybridsystem begär styrningen varmvatten från pannan."], // 27
+  ["3WV leder vatten till tank eller rum; 1=tank, 0=rum, men läget bevisar inte aktivitet."], // 28
+  ["X10A PÅ/AV-utgång för valfri 2WV; bevisar inte spänning eller mekaniskt läge."], // 29
+  ["Blandningsventilens öppning för en extra zon."], // 30
+  ["Framledningstemperaturens mål för valt värme- eller kylläge."], // 31
+  ["Blandad framledningstemperatur för sekundärzonen efter blandningsventilen."], // 32
+  ["Temperatur efter BUH, oftast R2T; kan omfatta BUH-värme men bevisar inte avgivartemperatur."], // 33
+  ["R1T från PHE före BUH; R4T/flöde ger en uppskattning vars placering är modellberoende."], // 34
+  ["R4T-retur till PHE; bedöm ΔT med flöde, kompressor och läge, inte en universell 5 K-regel."], // 35
+  ["Vattenflöde i gemensam krets; minimum beror på modell/läge och lågt värde kan utlösa 7H."], // 36
+  ["Hydraultryck: många handböcker kräver >1 bar; vid ≤1,0 bar gäller handboken för exakt modell."], // 37
+  ["Inverterat pumpkommando: 0 är maxhastighet och 100 är stopp."], // 38
+  ["Pumpstatus; bevisar inte nyttig värme och kan vara aktiv utan kompressor. Jämför flödet."], // 39
+  ["Status för pumpen i en konfigurerad solvärmekrets."], // 40
+  ["Angiven hastighet för pumpen som profilen namnger."], // 41
+  ["Binär X10A-status «Water flow switch». På modeller med dokumenterad flödesvakt betyder PÅ att vattenrörelse upptäckts; statusen mäter inte l/min och bevisar inte modellens miniminivå. Vissa stödda modeller visar statusen utan dokumenterad separat fysisk brytare. Jämför med uppmätt flöde och 7H/C0 när pumpen går."], // 42
+  ["Hydrauliskt läge: stopp, värme, kyla, varmvatten eller kombinerat; bevisar inte kompressordrift."], // 43
+  ["Smart Grid-kommando med fyra lägen från HomeHub eller två X10A-kontakter; inte värme-/kylläge."], // 44
+  ["Aktuellt rumsläge värme/kyla utan Auto; kräver aktivitetssignal och bevisar inte kompressordrift."], // 45
+  ["HomeHub-val Auto/värme/kyla; konfiguration, inte aktuell drift eller bevis på aktivitet."], // 46
+  ["Utomhusstatus stopp/värme/kyla; kan stå kvar med kompressorn av och bevisar inte värme."], // 47
+  ["Kombinerad flagga för avfrostning och kompressoromstart i register 35; OFF = normal drift, ON = avfrostning eller omstartsförberedelse."], // 48
+  ["Varmstartsflagga i register 36; OFF = stabil drift, ON = kort förvärmning av värmeväxlaren innan värmedrift fortsätter."], // 49
+  ["Avfrostning av utomhusenheten; normalt i kallt/fuktigt väder, men biten diagnostiserar inte frekvens."], // 50
+  ["Allvarlighetsklass för aktivt meddelande: Normal, Fel, Varning eller Försiktighet."], // 51
+  ["Betydelsen av felkoden som rapporteras nu."], // 52
+  ["Nöddrift efter värmepumpsfel."], // 53
+  ["Enhetens larmrelä; signalerar fel till anslutet externt larm/övervakning."], // 54
+  ["Målrumstemperatur för huvudzonen i värme- eller kylläge."], // 55
+  ["Intern «thermo ON»-begäran; identifierar inte last/kompressor, och «Space heating Operation» är inte behov."], // 56
+  ["Elektrisk «Space H Operation»-utgång; inte normal aktivitet eller bevis på kompressor/värme."], // 57
+  ["Normal rumsuppvärmnings/-kylaktivitet, inte behov; kan vara PÅ i kyla med kompressorn av."], // 58
+  ["Konfigurerad målrumstemperatur för zonen som styrs av enhetens egen givare."], // 59
+  ["Rumstemperatur från enhetens inbyggda eller kabelanslutna givare."], // 60
+  ["Utloppsskydd: PÅ/AV + räknare 0–7; bara jämförbar ökning visar aktivitet, inte orsak. Gräns/återställning/7→0 är odokumenterat."], // 61
+  ["Växelriktarströmskydd: PÅ/AV + räknare 0–7; bara jämförbar ökning visar aktivitet, inte orsak. Gräns/återställning/7→0 är odokumenterat."], // 62
+  ["Högtrycksskydd: PÅ/AV + räknare 0–7; bara jämförbar ökning visar aktivitet, inte orsak. Gräns/återställning/7→0 är odokumenterat."], // 63
+  ["Lågtrycksskydd: PÅ/AV + räknare 0–7; bara jämförbar ökning visar aktivitet, inte orsak. Gräns/återställning/7→0 är odokumenterat."], // 64
+  ["Växelriktartemperaturskydd: PÅ/AV + räknare 0–7; bara jämförbar ökning visar aktivitet, inte orsak. Gräns/återställning/7→0 är odokumenterat."], // 65
+  ["Generisk intern begränsningsbit, inte kopplad till de fem namngivna skydden."], // 66
+  ["Vatten vid plattvärmeväxlarens in-/utlopp, där energi överförs mellan köldmedium och vatten."], // 67
+  ["Givare på utomhusvärmeväxlaren; <0 °C kan vara normalt och bevisar inte is utan fuktdata."], // 68
+  ["Utetemperatur uppmätt av enheten för väderkompensering och driftval."], // 69
+  ["Varm gas från kompressorn; beror på tryck, varvtal, läge och last. Ett värde eller intervall från annan serie bevisar inte fel eller köldmediebrist."], // 70
+  ["Temperatur på kall lågtrycksgas tillbaka till kompressorn."], // 71
+  ["Köldmedietemperatur i vätskeröret mellan värmeväxlarna."], // 72
+  ["Köldmedium vid förångarens in-/utlopp, där värme tas upp."], // 73
+  ["Köldmediets insprutningstemperatur för intern reglering och skydd."], // 74
+  ["Temperatur i köldmediekretsens tvåfasdel med både vätska och ånga."], // 75
+  ["Avfrostningsgivare ute; placering och styrning är modellspecifika. En punkt bevisar inte is på hela batteriet eller avslutad avfrostning."], // 76
+  ["Mättnadstemperatur beräknad från tryck; inte en egen givare eller tryck i bar."], // 77
+  ["Hög-/lågtryck: bedöm stabil trend i samma läge/modell; start, oljeretur och avfrostning ändrar det. Inget allmänt normalområde."], // 78
+  ["Kompressorhastighet i rps; högre betyder ofta större behov men mäter inte värme."], // 79
+  ["EEV-steg är kommando utan mekanisk återkoppling, inte % eller flöde. Ensamt bevisar det inte rörelse, fast ventil eller köldmediebrist."], // 80
+  ["Temperatur på elektroniken som styr utomhusfläktmotorn."], // 81
+  ["Utomhusfläktens hastighet som steg eller rpm."], // 82
+  ["Internt mål efter modell/läge; jämför med motsvarande mättnadstemperatur från tryck. Avvikelsen diagnostiserar inte orsak eller fyllning."], // 83
+  ["Internt mål för kompressorns utlopps-/porttemperatur som används av skyddet."], // 84
+  ["Önskad ΔT mellan framledning och retur; modell-/lägesberoende, inte en universell 5 K-regel."], // 85
+  ["Köldmediet som enheten fyllts med, t.ex. R32 eller R410A."], // 86
+  ["Temperatur vid en kompressorport för intern övervakning och skydd."], // 87
+  ["Tryckmätning i utomhusenhetens köldmediekrets."], // 88
+  ["Fasström från CT; 230 V-uppskattningen är okalibrerad och bortser från verklig spänning/effektfaktor."], // 89
+  ["Ström som kompressorväxelriktaren drar; grov belastningsindikator."], // 90
+  ["Temperatur i kylflänsen för utomhusenhetens växelriktare/kraftelektronik."], // 91
+  ["Aktiva steg i elektrisk tillsatsvärme, uttryckta som effektnivå."], // 92
+  ["BUH-steg: 0=inget; högre steg kan stödja vid kyla, avfrostning, varmvatten eller nödläge."], // 93
+  ["HomeHub-ingång 32: BSH PÅ/AV, inte effekt; ingång 51 är värmepumpsförbrukning, inte BSH."], // 94
+  ["BSH i tanken kan värma utan kompressor/pump; X10A ger PÅ/AV, inte effekt."], // 95
+  ["Status för en elektrisk värmares termiska skyddskedja; öppen kedja stoppar driften."], // 96
+  ["Rörfrostskydd; modellberoende, kräver ström och täcker inte strömavbrott."], // 97
+  ["X10A-frostskyddsstatus; utan modelldata identifierar den inte pump, värmare eller skyddad zon."], // 98
+  ["Markslinga med frostskyddsvätska och pump; vätska, tryck och gränser beror på konstruktion/handbok."], // 99
+  ["Hybridkälla värmepump/kombinerat/panna; ett val, inte uppmätt värme."], // 100
+  ["Hybridens framledningsmål, inte mätt temperatur; tolka med läge och faktiska värden."], // 101
+  ["Bivalent tillåtelse/status; PÅ bevisar inte att pannan brinner."], // 102
+  ["Begäran till pannan; bevisar inte förbränning eller levererad värme."], // 103
+  ["Pannans vattenmål, inte mätt temperatur; beror på behov och anläggning."], // 104
+  ["Bivalent BE_COP-värde; X10A-betydelse/skala är odokumenterad och inte aktuell COP."], // 105
+  ["Tariff-, Smart Grid- eller solingång; åtgärden är konfigurationsberoende, PÅ visar bara kontakten."], // 106
+  ["Fast nominell inne-/uteeffektklass i kW eller kod; inte aktuell mätning."], // 107
+  ["Tyst läge sänker utomhusbuller och kan begränsa tillgänglig värme-/kyleffekt."], // 108
+  ["HomeHub-status Inget fel/Fel/Varning; identifierar inte ensam orsaken."], // 109
+  ["Betydelsen av felkoden som rapporteras nu."], // 110
+  ["Extra underkod; giltig bara med huvudstatus/-kod och dold när den saknas."], // 111
+  ["HomeHub visar kompressor PÅ/AV, inte hastighet/kapacitet; tolka med drift och vattenflöde."], // 112
+  ["Visar om normal varmvattendrift är aktiv."], // 113
+  ["Visar om normal rumsuppvärmning eller -kylning är aktiv."], // 114
+  ["PHE-utlopp före BUH; jämför med retur bara vid cirkulation för att få ΔT."], // 115
+  ["Framledning efter BUH; ökning kan bero på elvärme men måste bekräftas med BUH-status."], // 116
+  ["Vattnets uppmätta temperatur i varmvattentanken."], // 117
+  ["Vätskerörstemperatur; förhållandet är lägesberoende och ett värde räcker inte för diagnos."], // 118
+  ["Huvudzonens rumstemperatur rapporterad av fjärrkontrollen."], // 119
+  ["Elförbrukning via HomeHub; beror på läge/laster och ska inte tillskrivas bara kompressorn."], // 120
+  ["HomeHubs framledningsmål för värme, endast avläsning; sänkning hjälper bara om rumsmålet nås."], // 121
+  ["HomeHubs framledningsmål för kyla, endast avläsning; relevant när kyla är tillåten/aktiv."], // 122
+  ["Visar om rumskretsen är aktiverad: brytarläge, inte aktuell aktivitet."], // 123
+  ["Tyst läge sänker utomhusbuller enligt vald nivå och kan minska tillgänglig effekt."], // 124
+  ["Återvärmningsmål för varmvatten, inte startgräns; hysteres och program gäller också."], // 125
+  ["Korrigering −10…+10 K av värmemålet; bevisar inte värme utan aktiv rumsdrift."], // 126
+  ["Korrigering −10…+10 K av kylmålet; bevisar inte kyla utan aktiv rumsdrift och kylläge."], // 127
+  ["Lagringsgräns vid Rekommenderad på; lägsta av denna och allmän gräns gäller. Inte förbrukning."], // 128
+  ["Allmän HomeHub-gräns: ett tak, inte förbrukning; lägre värde begränsar effekt i Smart Grid-läge."], // 129
 ]);
 
 MODEL_DESCRIPTION_I18N.sv = modelDescriptionValues([

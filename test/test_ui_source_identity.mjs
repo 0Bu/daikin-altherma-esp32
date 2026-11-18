@@ -486,4 +486,49 @@ for (const failOld of [false, true]) {
   assert.equal(ui.S.hist.get("dhw_tank").v[0], 444);
   assert.equal(ui.S.histBusy.has("dhw_tank"), false);
 }
+
+// Inspector history fallbacks resolve Modbus-only series without inventing X10A rings.
+{
+  await reset();
+  const rendered = [];
+  context.MB_PAIRS = [];
+  context.replaceHistoryHtml = (_el, html) => rendered.push(html);
+  context.displayHomeHubLabel = (r) => r.label;
+  context.inspFieldText = (_e, _f) => "Inspector";
+  const mbOnly = fixture();
+  mbOnly.hp.connected = false;
+  mbOnly.history.rows = [{ id: "free_heap", label: "Free memory" }];
+  mbOnly.history.modbus_rows = [
+    { id: "modbus_power", label: "Heat pump power consumption" },
+    { id: "compressor_state", label: "Compressor running" },
+    { id: "modbus_defrost_state", label: "Defrost / Restart" },
+    { id: "pump_state", label: "Circulation pump running" },
+  ];
+  await status(mbOnly);
+  ui.S._modbus = [
+    { off: 51, history: "modbus_power", label: "Heat pump power consumption", value: "1.4", unit: "kW" },
+    { off: 31, history: "compressor_state", label: "Compressor running", value: "1", binary: true },
+    { off: 35, history: "modbus_defrost_state", label: "Defrost / Restart", value: "0", binary: true },
+    { off: 30, history: "pump_state", label: "Circulation pump running", value: "1", binary: true },
+  ];
+  ui.S.hist.set(ui.histCacheKey("modbus_power", "modbus"), { at: Date.now(), gen: 1, dt: 300, unit: "kW", b0: 1, held: [], v: [12, 14] });
+  ui.S.hist.set(ui.histCacheKey("compressor_state", "modbus"), { at: Date.now(), gen: 1, dt: 300, unit: "", b0: 1, held: [], v: [10, 0, 10] });
+  ui.S.hist.set(ui.histCacheKey("modbus_defrost_state", "modbus"), { at: Date.now(), gen: 1, dt: 300, unit: "", b0: 1, held: [], v: [0, 10, 0] });
+  ui.S.hist.set(ui.histCacheKey("pump_state", "modbus"), { at: Date.now(), gen: 1, dt: 300, unit: "", b0: 1, held: [], v: [10, 10, 0] });
+  ui.S.live = { pelSrc: "MB" };
+  for (const [insp, expectedId] of [["pel", "modbus_power"], ["ou", "compressor_state"],
+    ["comp", "compressor_state"], ["defrost", "modbus_defrost_state"], ["pump", "pump_state"]]) {
+    ui.S.insp = insp;
+    ui.S.inspHistSig = "";
+    ui.renderInspectHist({}, null);
+    assert.match(rendered.at(-1), new RegExp(`data-hist="${expectedId}"`),
+      `${insp} inspector falls back to ${expectedId}`);
+  }
+  ui.S.live = { pelSrc: "INV" };
+  ui.S.insp = "pel";
+  ui.S.inspHistSig = "";
+  ui.renderInspectHist({}, null);
+  assert.equal(rendered.at(-1), "", "INV pel keeps inspector history hidden");
+  ui.S.insp = null;
+}
 console.log("room mapping round trips, snapshot identity admission and shared history awaits pass");

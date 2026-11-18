@@ -7914,7 +7914,7 @@ static void test_modbus_plan() {
         // of them fell into a full-only batch, the diagnosis would silently evaluate a gate that
         // is refreshed once per full cycle instead of once per second.
         CHECK(fast_batches == 3);
-        CHECK(fast_regs == 13);
+        CHECK(fast_regs == 15);
         // Every gate offset really is inside some fast batch — the assertion above counts batches,
         // this one proves the coverage it is standing in for.
         for (size_t g = 0; g < MB_GATE_OFFSET_COUNT; g++) {
@@ -8042,7 +8042,7 @@ static void test_homehub() {
     CHECK(homehub_format(*ec, 0x5538, buf, sizeof(buf)) && std::string(buf) == "U8");
     CHECK(homehub_is_text(*ec));
     // Dimensionless Int16 does not determine the SEMANTICS. EKRHH 4P744838-1E §9.2 uses the same
-    // numeric wire type for one real number (the error sub-code), six binary flags and four enums.
+    // numeric wire type for one real number (the error sub-code), ten binary flags and four enums.
     // Pin the complete classification and the one true text row.
     int dimensionless = 0, statuses = 0, text_rows = 0;
     for (int i = 0; i < HOMEHUB_REG_COUNT; i++) {
@@ -8055,7 +8055,7 @@ static void test_homehub() {
         else
             statuses++;
     }
-    CHECK(dimensionless == 14 && statuses == 13 && text_rows == 1);
+    CHECK(dimensionless == 18 && statuses == 17 && text_rows == 1);
 
     const HomeHubReg* compressor = find(31);
     CHECK(compressor && compressor->kind == HomeHubValueKind::Binary &&
@@ -8115,14 +8115,30 @@ static void test_homehub() {
     CHECK(homehub_format(*lwt_offset, static_cast<uint16_t>(-3), buf, sizeof(buf)) &&
           std::string(buf) == "-3");
 
+    const HomeHubReg* cool_offset = find(55);
+    CHECK(cool_offset && cool_offset->space == MbFunc::ReadHolding &&
+          cool_offset->type == MbType::Int16 && cool_offset->scale == 1);
+    CHECK(std::string(cool_offset->unit) == "K");
+    CHECK(homehub_decode(*cool_offset, static_cast<uint16_t>(-4), v) && approx(v.value, -4.0));
+    CHECK(homehub_format(*cool_offset, static_cast<uint16_t>(-4), buf, sizeof(buf)) &&
+          std::string(buf) == "-4");
+    for (uint16_t special : {MB_WAIT, MB_UNAVAILABLE, MB_UNSUPPORTED}) {
+        CHECK(!homehub_decode(*cool_offset, special, v));
+        CHECK(!homehub_format(*cool_offset, special, buf, sizeof(buf)));
+    }
+
     // Real flags keep numeric 1/0 at the API boundary and are marked structurally for ON/OFF UI.
-    for (uint16_t off : {30, 32, 33, 52, 53, 4, 9}) {
+    for (uint16_t off : {30, 32, 33, 35, 36, 52, 53, 4, 9, 12, 13}) {
         const HomeHubReg* flag = find(off);
         CHECK(flag && homehub_is_binary(*flag));
         CHECK(!homehub_is_text(*flag));
         CHECK(homehub_enum_id(flag->kind) == nullptr);
         CHECK(homehub_format(*flag, 0, buf, sizeof(buf)) && std::string(buf) == "0");
         CHECK(homehub_format(*flag, 1, buf, sizeof(buf)) && std::string(buf) == "1");
+        for (uint16_t special : {MB_WAIT, MB_UNAVAILABLE, MB_UNSUPPORTED}) {
+            CHECK(!homehub_decode(*flag, special, v));
+            CHECK(!homehub_format(*flag, special, buf, sizeof(buf)));
+        }
     }
     // The 1-based EKRHH offset maps to the 0-based wire PDU address.
     uint16_t pdu = 0xFFFF;
@@ -8157,9 +8173,9 @@ static void test_homehub_map() {
         CHECK(homehub_concept_index(c.concept_id) == static_cast<int>(i));
     }
     // The history set repeats the paired concepts, adds the derived Smart-Grid state, then the
-    // deliberately Modbus-only disinfection operation. Every entry names a real register; only an
-    // entry declared as an X10A timeline may share a real TRENDS id.
-    CHECK(HOMEHUB_HISTORY_COUNT == HOMEHUB_CONCEPT_COUNT + 2);
+    // Modbus-only disinfection, compressor, power, defrost/restart and pump series. Every entry
+    // names a real register; only an entry declared as an X10A timeline may share a real TRENDS id.
+    CHECK(HOMEHUB_HISTORY_COUNT == HOMEHUB_CONCEPT_COUNT + 6);
     for (size_t i = 0; i < HOMEHUB_HISTORY_COUNT; i++) {
         const auto& h          = HOMEHUB_HISTORIES[i];
         bool        reg_exists = false;
@@ -8172,16 +8188,37 @@ static void test_homehub_map() {
         CHECK((trend_by_id(h.trend_id) != nullptr) == h.has_x10a);
         CHECK(homehub_history_index(h.trend_id) == static_cast<int>(i));
     }
-    CHECK(std::string(HOMEHUB_HISTORIES[HOMEHUB_HISTORY_COUNT - 1].trend_id) ==
+    CHECK(std::string(HOMEHUB_HISTORIES[HOMEHUB_CONCEPT_COUNT + 1].trend_id) ==
           "disinfection_state");
-    CHECK(HOMEHUB_HISTORIES[HOMEHUB_HISTORY_COUNT - 1].offset == 33);
-    CHECK(HOMEHUB_HISTORIES[HOMEHUB_HISTORY_COUNT - 1].event);
-    CHECK(!HOMEHUB_HISTORIES[HOMEHUB_HISTORY_COUNT - 1].has_x10a);
+    CHECK(HOMEHUB_HISTORIES[HOMEHUB_CONCEPT_COUNT + 1].offset == 33);
+    CHECK(HOMEHUB_HISTORIES[HOMEHUB_CONCEPT_COUNT + 1].event);
+    CHECK(!HOMEHUB_HISTORIES[HOMEHUB_CONCEPT_COUNT + 1].has_x10a);
+    CHECK(std::string(HOMEHUB_HISTORIES[HOMEHUB_CONCEPT_COUNT + 2].trend_id) == "compressor_state");
+    CHECK(HOMEHUB_HISTORIES[HOMEHUB_CONCEPT_COUNT + 2].offset == 31);
+    CHECK(HOMEHUB_HISTORIES[HOMEHUB_CONCEPT_COUNT + 2].event);
+    CHECK(!HOMEHUB_HISTORIES[HOMEHUB_CONCEPT_COUNT + 2].has_x10a);
+    CHECK(std::string(HOMEHUB_HISTORIES[HOMEHUB_CONCEPT_COUNT + 3].trend_id) == "modbus_power");
+    CHECK(HOMEHUB_HISTORIES[HOMEHUB_CONCEPT_COUNT + 3].offset == 51);
+    CHECK(!HOMEHUB_HISTORIES[HOMEHUB_CONCEPT_COUNT + 3].event);
+    CHECK(!HOMEHUB_HISTORIES[HOMEHUB_CONCEPT_COUNT + 3].has_x10a);
+    CHECK(std::string(HOMEHUB_HISTORIES[HOMEHUB_CONCEPT_COUNT + 4].trend_id) ==
+          "modbus_defrost_state");
+    CHECK(HOMEHUB_HISTORIES[HOMEHUB_CONCEPT_COUNT + 4].offset == 35);
+    CHECK(HOMEHUB_HISTORIES[HOMEHUB_CONCEPT_COUNT + 4].event);
+    CHECK(!HOMEHUB_HISTORIES[HOMEHUB_CONCEPT_COUNT + 4].has_x10a);
+    CHECK(std::string(HOMEHUB_HISTORIES[HOMEHUB_CONCEPT_COUNT + 5].trend_id) == "pump_state");
+    CHECK(HOMEHUB_HISTORIES[HOMEHUB_CONCEPT_COUNT + 5].offset == 30);
+    CHECK(!HOMEHUB_HISTORIES[HOMEHUB_CONCEPT_COUNT + 5].event);
+    CHECK(!HOMEHUB_HISTORIES[HOMEHUB_CONCEPT_COUNT + 5].has_x10a);
     CHECK(homehub_history_index("valve_dhw") >= 0);
     CHECK(homehub_history_index("quiet_state") >= 0);
     CHECK(homehub_history_index("disinfection_state") >= 0);
     CHECK(std::string(homehub_history_for(33)) == "disinfection_state");
-    CHECK(homehub_history_for(51) == nullptr);
+    CHECK(std::string(homehub_history_for(31)) == "compressor_state");
+    CHECK(std::string(homehub_history_for(51)) == "modbus_power");
+    CHECK(std::string(homehub_history_for(35)) == "modbus_defrost_state");
+    CHECK(std::string(homehub_history_for(30)) == "pump_state");
+    CHECK(homehub_history_for(54) == nullptr);
     CHECK(homehub_history_index("heat_pump_power") == -1);
     CHECK(homehub_history_index(nullptr) == -1);
     // Lookup both ways.
@@ -8197,6 +8234,8 @@ static void test_homehub_map() {
           nullptr); // disinfection is HomeHub-only; preheat is not its twin
     CHECK(homehub_concept_for(51) ==
           nullptr); // power: X10A has no equivalent, deliberately unpaired
+    for (uint16_t off : {31, 35, 36, 12, 13, 55}) CHECK(homehub_concept_for(off) == nullptr);
+    for (uint16_t off : {36, 12, 13, 55}) CHECK(homehub_history_for(off) == nullptr);
     CHECK(homehub_concept_for(999) == nullptr);
     std::string unk_concept = "heat_pump_power";
     CHECK(homehub_concept_index(unk_concept.c_str()) == -1);
@@ -8348,8 +8387,16 @@ static void test_altherma4() {
     using namespace daik::def;
     using namespace daik::logic;
 
-    CHECK(ALTHERMA4_REG_COUNT == 42);
+    CHECK(ALTHERMA4_REG_COUNT == 49);
     CHECK(ALTHERMA4_REG_COUNT > HOMEHUB_REG_COUNT);
+    CHECK(homehub_find(12) != nullptr && homehub_find(13) != nullptr);
+    CHECK(homehub_find(35) != nullptr && homehub_find(36) != nullptr);
+    CHECK(homehub_find(55) != nullptr);
+    CHECK(altherma4_find(12) != nullptr && altherma4_find(13) != nullptr);
+    CHECK(altherma4_find(35) != nullptr && altherma4_find(36) != nullptr);
+    CHECK(altherma4_find(55) != nullptr);
+    CHECK(std::string(altherma4_find(81)->label) == "Space heating/cooling target Additional zone");
+    CHECK(std::string(altherma4_find(82)->label) == "User abnormality counter");
 
     // Every register must remain independently addressable and findable
     for (int i = 0; i < ALTHERMA4_REG_COUNT; i++) {
@@ -8470,6 +8517,15 @@ static void test_altherma4() {
     CHECK(r80 && r80->space == MbFunc::ReadInput && r80->type == MbType::Temp16 &&
           std::string(r80->unit) == "°C");
 
+    const HomeHubReg* r81 = altherma4_find(81);
+    CHECK(r81 && r81->space == MbFunc::ReadInput && r81->type == MbType::Temp16 &&
+          r81->scale == 1 && std::string(r81->unit) == "°C");
+
+    const HomeHubReg* r82 = altherma4_find(82);
+    CHECK(r82 && r82->space == MbFunc::ReadInput && r82->type == MbType::Int16 && r82->scale == 1 &&
+          std::string(r82->unit).empty() && r82->kind == HomeHubValueKind::Number &&
+          !homehub_is_binary(*r82));
+
     const HomeHubReg* r83 = altherma4_find(83);
     CHECK(r83 && r83->space == MbFunc::ReadInput &&
           r83->kind == HomeHubValueKind::Altherma4UnitOperationMode);
@@ -8526,6 +8582,22 @@ static void test_altherma4() {
     CHECK(homehub_format(*r77, 4900, buf, sizeof(buf)) && std::string(buf) == "49.0");
     CHECK(homehub_decode(*r80, 3000, val) && approx(val.value, 30.0));
     CHECK(homehub_format(*r80, 3000, buf, sizeof(buf)) && std::string(buf) == "30.0");
+    CHECK(homehub_decode(*r81, 2450, val) && approx(val.value, 24.5));
+    CHECK(homehub_format(*r81, 2450, buf, sizeof(buf)) && std::string(buf) == "24.5");
+    CHECK(homehub_decode(*r81, static_cast<uint16_t>(-550), val) && approx(val.value, -5.5));
+    CHECK(homehub_format(*r81, static_cast<uint16_t>(-550), buf, sizeof(buf)) &&
+          std::string(buf) == "-5.5");
+    CHECK(homehub_decode(*r82, 3, val) && approx(val.value, 3.0));
+    CHECK(homehub_format(*r82, 3, buf, sizeof(buf)) && std::string(buf) == "3");
+    CHECK(homehub_decode(*r82, static_cast<uint16_t>(-1), val) && approx(val.value, -1.0));
+    CHECK(homehub_format(*r82, static_cast<uint16_t>(-1), buf, sizeof(buf)) &&
+          std::string(buf) == "-1");
+    for (uint16_t special : {MB_WAIT, MB_UNAVAILABLE, MB_UNSUPPORTED}) {
+        CHECK(!homehub_decode(*r81, special, val));
+        CHECK(!homehub_format(*r81, special, buf, sizeof(buf)));
+        CHECK(!homehub_decode(*r82, special, val));
+        CHECK(!homehub_format(*r82, special, buf, sizeof(buf)));
+    }
     CHECK(homehub_decode(*r83, 1, val) && approx(val.value, 1.0));
     CHECK(homehub_format(*r83, 1, buf, sizeof(buf)) && std::string(buf) == "1");
 
@@ -8552,7 +8624,7 @@ static void test_altherma4() {
 
     // Non-paired extended registers return nullptr for concept (they are honest Modbus-only
     // readings)
-    const uint16_t non_paired_ext[] = {65, 66, 67, 68, 74, 75, 76, 77, 80, 83};
+    const uint16_t non_paired_ext[] = {65, 66, 67, 68, 74, 75, 76, 77, 80, 81, 82, 83};
     for (uint16_t off : non_paired_ext) {
         CHECK(homehub_concept_for(off) == nullptr);
     }
@@ -8574,7 +8646,7 @@ static void test_altherma4() {
     CHECK(mb_plan_order(spaces, offsets, ALTHERMA4_REG_COUNT, order));
     int bcount =
         mb_plan_build(spaces, offsets, ALTHERMA4_REG_COUNT, order, batch, ALTHERMA4_REG_COUNT);
-    CHECK(bcount == 15); // removing unlisted holding 57 splits the native 56..58 batch
+    CHECK(bcount == 14); // unlisted holding 57 splits 54..56 and 58; input 81..82 merges 79..83
     int holding_batches = 0;
     int input_batches   = 0;
     for (int i = 0; i < bcount; ++i) {
@@ -8585,7 +8657,24 @@ static void test_altherma4() {
         } else
             input_batches++;
     }
-    CHECK(holding_batches == 6 && input_batches == 9);
+    CHECK(holding_batches == 6 && input_batches == 8);
+    constexpr uint32_t altherma4_cache_budget = []() {
+        MbFunc   s[ALTHERMA4_REG_COUNT]   = {};
+        uint16_t off[ALTHERMA4_REG_COUNT] = {};
+        uint8_t  ord[ALTHERMA4_REG_COUNT] = {};
+        MbBatch  bat[ALTHERMA4_REG_COUNT] = {};
+        for (int i = 0; i < ALTHERMA4_REG_COUNT; i++) {
+            s[i]   = ALTHERMA4_REGS[i].space;
+            off[i] = ALTHERMA4_REGS[i].offset;
+        }
+        if (!mb_plan_order(s, off, ALTHERMA4_REG_COUNT, ord)) return uint32_t{0};
+        const int cnt = mb_plan_build(s, off, ALTHERMA4_REG_COUNT, ord, bat, ALTHERMA4_REG_COUNT);
+        return modbus_cache_max_age_s(MB_FULL_CYCLE_TICKS, 1000, 4500,
+                                      mb_plan_max_requests(bat, cnt, true),
+                                      mb_plan_max_requests(bat, cnt, false));
+    }();
+    static_assert(altherma4_cache_budget == 614);
+    CHECK(altherma4_cache_budget == 614);
 
     // Verify ModbusProfile names including unknown fallback
     CHECK(std::string(modbus_profile_name(ModbusProfile::Auto)) == "auto");
@@ -14757,9 +14846,10 @@ static void test_history_measurement_units() {
     CHECK(!trend_row_matches(temperature_twin, 0x62, 15, "bar"));
     CHECK(!trend_row_matches(temperature_twin, 0x62, 15, ""));
     // The unit upgrade changed accepted cache metadata, never the catalog bytes used by persisted
-    // series ids. The fingerprint moved once since, with the high-side trend's series id (B5,
-    // test_history_identity); 0xa1783c86 was the generation before it.
-    CHECK(history_catalog_fingerprint() == 0x537c75e6u);
+    // series ids. The fingerprint moved with the high-side trend's series id (B5,
+    // test_history_identity; 0xa1783c86 was before it) and again from 0x537c75e6 when Paket 1
+    // expanded HOMEHUB_HISTORIES from 13 to 17 rings.
+    CHECK(history_catalog_fingerprint() == 0x15f5f2ebu);
 }
 
 static void test_history() {
@@ -16382,23 +16472,23 @@ static void test_checkup() {
         CHECK(sizeof(CheckupCyclingHours) == 348); // elapsed clock occupies the existing padding
         CHECK(checkup_cycling_hours(CheckupRing{}, true).count == 0);
         CheckupRing ring{};
-        ring.count                      = 2;
-        ring.head                       = 2;
-        ring.buf[0].starts              = 3;
-        ring.buf[0].run_s               = 1200;
+        ring.count         = 2;
+        ring.head          = 2;
+        ring.buf[0].starts = 3;
+        ring.buf[0].run_s  = 1200;
         ring.buf[0].set_space_hour_s(900);
-        ring.buf[0].dhw_hour_s          = 200;
-        ring.buf[0].rps_observed_s      = 3600;
-        ring.buf[1].starts              = 1;
-        ring.buf[1].run_s               = 600;
+        ring.buf[0].dhw_hour_s     = 200;
+        ring.buf[0].rps_observed_s = 3600;
+        ring.buf[1].starts         = 1;
+        ring.buf[1].run_s          = 600;
         ring.buf[1].set_space_hour_s(600);
-        ring.buf[1].rps_observed_s      = 3500;
-        ring.pending.starts             = 2;
-        ring.pending.run_s              = 500;
+        ring.buf[1].rps_observed_s = 3500;
+        ring.pending.starts        = 2;
+        ring.pending.run_s         = 500;
         ring.pending.set_space_hour_s(300);
-        ring.pending.dhw_hour_s         = 200;
-        ring.pending.rps_observed_s     = 900;
-        CheckupCyclingHours hours       = checkup_cycling_hours(ring, true);
+        ring.pending.dhw_hour_s     = 200;
+        ring.pending.rps_observed_s = 900;
+        CheckupCyclingHours hours   = checkup_cycling_hours(ring, true);
         CHECK(hours.count == 3);
         CHECK(hours.hours[0].starts == 3 && hours.hours[0].run_s == 1200 &&
               hours.hours[0].space_s == 900 && hours.hours[0].dhw_s == 200 &&
@@ -23006,7 +23096,7 @@ static void test_checkup_persist() {
     const uint32_t model_fp                    = checkup_fixture_model("altherma3_r_erga");
     const uint32_t handoff_fp                  = checkup_dhw_handoff_layout_fingerprint();
     CHECK(handoff_fp == 0x33a0a26eu); // Preserve the previous firmware's separate DHW handoff.
-    const uint32_t handoff_crc                 = checkup_dhw_handoff_crc(model_fp, dhw_handoff);
+    const uint32_t handoff_crc = checkup_dhw_handoff_crc(model_fp, dhw_handoff);
     CHECK(checkup_dhw_handoff_valid(CHECKUP_DHW_HANDOFF_MAGIC, CHECKUP_DHW_HANDOFF_VERSION,
                                     handoff_fp, model_fp, model_fp, handoff_crc, dhw_handoff));
     CHECK(!checkup_dhw_handoff_valid(CHECKUP_DHW_HANDOFF_MAGIC, CHECKUP_DHW_HANDOFF_VERSION,
@@ -23626,10 +23716,10 @@ struct CheckupRestoreCase {
 };
 
 struct CheckupRestoreOut {
-    CheckupRing ring;
-    DhwLossRing dhw;
+    CheckupRing             ring;
+    DhwLossRing             dhw;
     CheckupJournalSlotTimes times;
-    bool        dhw_retired                       = false;
+    bool                    dhw_retired = false;
 };
 
 // Copy this boot's completed hours into records, clear both rings, then push the selected interval
@@ -24176,11 +24266,11 @@ static void test_history_persist() {
     // --- the verdict, and the ORDER it decides in -----------------------------------------------
     const uint32_t fp = history_catalog_fingerprint();
     // HIST-01/c: the fingerprint is now a fold of every ring's series id, so it moved from the
-    // previous generation (0xda95bbc0, legacy-8's catalog). Records of that generation are no
+    // previous generation (legacy-8's catalog). Records of that generation are no
     // longer on the direct fast path; they are read through their manifests
-    // (test_history_identity pins both the mapping and how the old constant was built). B5 moved
-    // it again (0xa1783c86 -> this) by giving the high-side trend a new series id.
-    CHECK(fp == 0x537c75e6u);
+    // (test_history_identity pins both the mapping and how the old constant was built). B5 and
+    // the 13->17 Modbus ring expansion (0x537c75e6u -> this) moved it to the current value.
+    CHECK(fp == 0x15f5f2ebu);
     const uint32_t sw = static_cast<uint32_t>(CrashReason::SW);
     CHECK(history_restore_verdict(sw, HISTORY_PERSIST_MAGIC, HISTORY_PERSIST_VERSION, fp, fp, 7,
                                   7) == HistoryRestore::Accept);
@@ -24216,7 +24306,7 @@ static void test_history_persist() {
     CHECK(history_fp_u32(CONFIG_CRC32_INIT, 1) != history_fp_u32(CONFIG_CRC32_INIT, 256));
 
     // --- the official 8 MB append journal -------------------------------------------------------
-    CHECK(HISTORY_FLASH_TOTAL_RINGS == 49);
+    CHECK(HISTORY_FLASH_TOTAL_RINGS == 53);
     CHECK(HISTORY_FLASH_PARTITION_BYTES == 4u * 1024u * 1024u);
     CHECK(HISTORY_FLASH_ERASE_BYTES == 4096);
     CHECK(HISTORY_JOURNAL_HEADER_BYTES == 64);
@@ -24230,7 +24320,7 @@ static void test_history_persist() {
     CHECK(HISTORY_JOURNAL_SLOTS_PER_SECTOR == 16);
     CHECK(HISTORY_JOURNAL_SLOT_COUNT == 16384);
     CHECK(history_journal_source_rings(HistoryJournalSource::X10a) == 32);
-    CHECK(history_journal_source_rings(HistoryJournalSource::Modbus) == 13);
+    CHECK(history_journal_source_rings(HistoryJournalSource::Modbus) == 17);
     CHECK(history_journal_source_rings(HistoryJournalSource::Env3) == 3);
     CHECK(history_journal_source_rings(HistoryJournalSource::Checkup) == 0);
     CHECK(HISTORY_JOURNAL_SOURCE_COUNT == 5);
@@ -25187,8 +25277,9 @@ static void test_history_identity() {
         for (size_t i = 0; i < ENV3_HISTORY_COUNT; i++)
             crc = history_fp_u32(crc, history_series_id(HistoryJournalSource::Env3, i));
         CHECK(history_catalog_fingerprint() == config_crc32_final(crc));
-        // Pinned: this is the generation the flash records of this build carry.
-        CHECK(history_catalog_fingerprint() == 0x537c75e6u);
+        // Pinned: this is the generation the flash records of this build carry (was 0x537c75e6u
+        // before 17 Modbus rings).
+        CHECK(history_catalog_fingerprint() == 0x15f5f2ebu);
     }
     {
         // B5: the high-side trend changed what its samples mean on twinless profiles (hydronic
@@ -25264,7 +25355,7 @@ static void test_history_identity() {
             return config_crc32_final(crc);
         };
         const uint32_t previous_fp = previous_catalog_fp();
-        CHECK(previous_fp == 0xda95bbc0u);
+        CHECK(previous_fp == 0x22cedd55u); // was 0xda95bbc0u before 17 Modbus rings
         CHECK(previous_fp != history_catalog_fingerprint());
 
         // A record of that generation: structurally valid, not the current layout, not the frozen

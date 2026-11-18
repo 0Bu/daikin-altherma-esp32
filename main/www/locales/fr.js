@@ -1,4 +1,4 @@
-// translation-source: 7e05fca97bff772abf43c5704d541747bc310184005cce90ce5b76eab24256ce
+// translation-source: 480bf7bd3b16592ffbaf33f9d54b1362d56dd3b72b7c310293449045f5e86f04
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -23,6 +23,7 @@ I18N.fr = localeValues([
   /* sys.cool_mode */ "Mode rafraîchissement",
   /* sys.residual_circulating */ "Circulation de chaleur résiduelle — aucune puissance frigorifique",
   /* sys.bsh_active */ "Résistance électrique du ballon active",
+  /* sys.disinfecting */ "Désinfection du ballon active",
   /* sys.online */ "En ligne",
   /* sys.fault */ "Défaut",
   /* sys.warning */ "Avertissement",
@@ -347,6 +348,11 @@ I18N.fr = localeValues([
   /* a4.pressure_help */ "La conversion de pression Altherma 4 n'est pas vérifiée. La valeur en bar utilise la conversion existante ; comparez-la à la mesure de l'unité avant d'évaluer la pression.",
   /* a4.demand_response */ "Mode de réponse à la demande",
   /* a4.unit_operation */ "État de fonctionnement de l’unité",
+  /* a4.cooling_offset */ "Correction froid selon la température extérieure, zone principale",
+  /* a4.add_target */ "Cible chauffage/froid, zone additionnelle",
+  /* a4.abnormality_counter */ "Compteur d’anomalies utilisateur",
+  /* a4.cooling_offset_help */ "Déplace en kelvin la courbe de refroidissement climatique de la zone principale. C’est un décalage, pas une température mesurée ni la consigne complète de départ.",
+  /* a4.abnormality_help */ "Compteur cumulé d’anomalies signalées côté utilisateur par l’unité. Une valeur constante non nulle reflète des événements passés, pas un défaut actif ; vérifier Anomalie de l’unité et son code défaut.",
   /* enum.unknown */ (n) => `Inconnu (${n})`,
   /* chip.space_on */ "Locaux actifs",
   /* chip.space_off */ "Locaux arrêtés",
@@ -452,6 +458,21 @@ I18N.fr = localeValues([
   /* hist.flow_switch_off */ "Fluxostat inactif",
   /* hist.flow_switch_none */ "Aucun état actif enregistré pour ce signal X10A pendant la période sélectionnée.",
   /* hist.flow_switch_aria */ (l, d) => `${l} — chronologie du détecteur de débit d’eau. ${d}. Les touches fléchées lisent les échantillons individuels.`,
+  /* hist.comp_total */ (d, n) => `Compresseur · ${d} · ${n} ${n === 1 ? "phase" : "phases"}`,
+  /* hist.comp_none */ "Aucun fonctionnement du compresseur observé sur la période enregistrée.",
+  /* hist.comp_active */ "Compresseur en marche",
+  /* hist.comp_inactive */ "Compresseur arrêté",
+  /* hist.comp_aria */ (l, d) => `${l} — chronologie du compresseur HomeHub. ${d}. Les touches fléchées lisent les échantillons individuels.`,
+  /* hist.mb_defrost_total */ (d) => `Dégivrage / redémarrage · ${d}`,
+  /* hist.mb_defrost_none */ "Aucune phase de dégivrage ou de redémarrage observée sur la période enregistrée.",
+  /* hist.mb_defrost_active */ "Dégivrage / redémarrage",
+  /* hist.mb_defrost_inactive */ "Normal / arrêt",
+  /* hist.mb_defrost_aria */ (l, d) => `${l} — chronologie dégivrage/redémarrage HomeHub. ${d}. Les touches fléchées lisent les échantillons individuels.`,
+  /* hist.pump_total */ (d) => `Circulateur · ${d}`,
+  /* hist.pump_none */ "Aucun fonctionnement du circulateur observé sur la période enregistrée.",
+  /* hist.pump_active */ "Circulateur en marche",
+  /* hist.pump_inactive */ "Circulateur arrêté",
+  /* hist.pump_aria */ (l, d) => `${l} — chronologie du circulateur HomeHub. ${d}. Les touches fléchées lisent les échantillons individuels.`,
   /* toast.saved */ "Enregistré",
   /* toast.no_changes */ "Aucune modification",
   /* toast.reboot */ "Redémarrage — reconnexion…",
@@ -1082,6 +1103,8 @@ HOMEHUB_LABEL_I18N.fr = homeHubValues([
   "Consigne froid · zone principale", // 7
   "Mode silencieux", // 9
   "Consigne de réchauffage ECS", // 10
+  "Réchauffage ECS autorisé", // 12
+  "Mode boost ECS demandé", // 13
   "État de diagnostic de l’unité", // 21
   "Code défaut de l’unité", // 22
   "Sous-code défaut de l’unité", // 23
@@ -1089,6 +1112,8 @@ HOMEHUB_LABEL_I18N.fr = homeHubValues([
   "Compresseur actif", // 31
   "Résistance du ballon active", // 32
   "Désinfection du ballon active", // 33
+  "Dégivrage ou redémarrage", // 35
+  "Démarrage à chaud", // 36
   "Position de la vanne 3 voies", // 37
   "Mode chauffage ou froid actuel", // 38
   "Départ à la sortie du PHE", // 40
@@ -1103,6 +1128,7 @@ HOMEHUB_LABEL_I18N.fr = homeHubValues([
   "Fonctionnement ECS", // 52
   "Fonctionnement des locaux", // 53
   "Correction de départ · zone principale", // 54
+  "Correction froid · zone principale", // 55
   "Mode Smart Grid", // 56
   "Limite de puissance pour stockage", // 57
   "Limite générale de puissance", // 58
@@ -1132,108 +1158,113 @@ DESCRIPTION_I18N.fr = descriptionValues([
   ["Demande thermostat principal chaud/froid ; confirmer par mode, pompe, vanne et compresseur."], // 20
   ["L’un des quatre bits bruts de limite ; ne déduire aucun étage avant d’établir le codage observé."], // 21
   ["Bit chauffage PHE : commande ou retour inconnu, et aucune preuve de courant."], // 22
-  ["Le réchauffage remonte le ballon à sa consigne après passage sous le seuil de démarrage."], // 23
-  ["Préréglage programmé : Confort emploie la cible haute et Éco la basse."], // 24
-  ["Dans un système hybride, le régulateur demande l’ECS à la chaudière."], // 25
-  ["3WV dirige l’eau vers ECS ou locaux ; 1=ECS et 0=locaux, sans prouver l’activité."], // 26
-  ["Sortie X10A ON/OFF d’une 2WV optionnelle ; elle ne prouve ni mode, ni tension, ni position mécanique."], // 27
-  ["Ouverture de la vanne mélangeuse d’une seconde zone."], // 28
-  ["Cible de départ du mode chauffage ou froid sélectionné."], // 29
-  ["Température de départ mélangée d’une zone secondaire, après sa vanne mélangeuse."], // 30
-  ["Température après BUH, généralement R2T ; elle inclut son apport sans prouver la température aux émetteurs."], // 31
-  ["R1T sort du PHE avant BUH ; avec R4T et débit, estime la puissance par mode, emplacement selon l’unité."], // 32
-  ["Retour R4T au PHE ; évaluer le ΔT avec débit, compresseur et mode, jamais avec 5 K universels."], // 33
-  ["Débit du circuit commun ; le minimum dépend du modèle et du mode, et une valeur basse peut causer 7H."], // 34
-  ["Pression hydraulique : beaucoup de manuels exigent >1 bar ; à ≤1,0 bar consulter la notice du modèle exact."], // 35
-  ["Commande de pompe inversée : 0 est la vitesse maximale et 100 l’arrêt."], // 36
-  ["État pompe ; ne prouve pas la chaleur utile et peut agir sans compresseur : comparer au débit."], // 37
-  ["État du circulateur d’un circuit solaire thermique configuré."], // 38
-  ["Vitesse indiquée de la pompe nommée par ce profil."], // 39
-  ["État X10A du fluxostat : ON indique un mouvement détecté, pas des l/min ni le minimum ; certains modèles ne documentent aucun contact physique."], // 40
-  ["Mode hydraulique : arrêt, chauffage, froid, ECS ou combiné ; ne prouve ni compresseur ni transfert."], // 41
-  ["Ordre Smart Grid à quatre états lu par HomeHub ou dérivé de deux contacts X10A ; ce n’est pas le mode chaud/froid."], // 42
-  ["Mode locaux actif chauffage/froid, sans Auto ; ne prouve pas le compresseur et exige l’activité."], // 43
-  ["Sélection HomeHub Auto/chauffage/froid ; configuration, pas état actuel ni preuve d’activité."], // 44
-  ["État extérieur arrêt/chauffage/froid ; peut rester choisi compresseur arrêté et ne prouve pas la chaleur."], // 45
-  ["Dégivrage extérieur ; normal par froid humide, mais ce bit seul ne diagnostique pas des cycles excessifs."], // 46
-  ["Classe de gravité d’un défaut actif : Normal, Erreur, Avertissement ou Prudence."], // 47
-  ["Signification du code de défaut actuellement signalé"], // 48
-  ["Fonctionnement de secours après un défaut de pompe à chaleur."], // 49
-  ["Relais d’alarme de l’unité ; il s’active pour signaler un défaut à une alarme ou supervision externe câblée."], // 50
-  ["Température ambiante cible de la zone principale en chauffage ou froid."], // 51
-  ["Demande interne « thermo ON » ; elle n’identifie pas la charge ni le compresseur, et « Space heating Operation » n’est pas une demande."], // 52
-  ["Sortie électrique « Space H Operation » ; ni activité normale ni preuve du compresseur ou de chaleur."], // 53
-  ["Activité normale chauffage/froid, pas demande ; peut être ON à froid avec compresseur arrêté."], // 54
-  ["Température ambiante cible réglée pour la zone pilotée par le propre capteur de l’unité."], // 55
-  ["Température ambiante mesurée par le capteur intégré ou câblé de l’unité."], // 56
-  ["Protection refoulement : ON/OFF actuel + compteur 0–7 ; seule hausse comparable = activité, pas cause ; seuil/reset/retour 7→0 inconnus."], // 57
-  ["Protection courant onduleur : ON/OFF actuel + compteur 0–7 ; seule hausse comparable = activité, pas cause ; seuil/reset/retour 7→0 inconnus."], // 58
-  ["Protection haute pression : ON/OFF actuel + compteur 0–7 ; seule hausse comparable = activité, pas cause ; seuil/reset/retour 7→0 inconnus."], // 59
-  ["Protection basse pression : ON/OFF actuel + compteur 0–7 ; seule hausse comparable = activité, pas cause ; seuil/reset/retour 7→0 inconnus."], // 60
-  ["Protection thermique onduleur : ON/OFF actuel + compteur 0–7 ; seule hausse comparable = activité, pas cause ; seuil/reset/retour 7→0 inconnus."], // 61
-  ["Bit interne générique de limitation non affecté aux cinq protections nommées."], // 62
-  ["Température d’eau à l’entrée ou à la sortie du PHE, qui transfère la chaleur entre frigorigène et circuit hydraulique."], // 63
-  ["Capteur de l’échangeur extérieur ; <0 °C peut être normal et sans humidité ne prouve pas le givre."], // 64
-  ["Température extérieure mesurée par l’unité, utilisable pour loi d’eau et décisions de fonctionnement."], // 65
-  ["Gaz chaud en sortie compresseur ; dépend de la pression, vitesse, mode et charge. Une valeur ou plage d’une autre famille ne prouve ni défaut ni manque de fluide."], // 66
-  ["Température du gaz frigorigène froid à basse pression revenant au compresseur."], // 67
-  ["Température du fluide frigorigène sur la ligne liquide entre les échangeurs."], // 68
-  ["Température du frigorigène entrant/sortant de l’évaporateur, l’échangeur qui absorbe la chaleur."], // 69
-  ["Température de la ligne d’injection de frigorigène, utilisée en interne pour piloter l’injection et protéger le cycle."], // 70
-  ["Température d’une zone diphasique, liquide et vapeur, du circuit frigorifique."], // 71
-  ["Capteur de dégivrage extérieur ; position et contrôle selon le modèle. Un point ne prouve ni le givre de toute la batterie ni la fin du dégivrage."], // 72
-  ["Température de saturation calculée depuis la pression ; ce n’est ni un capteur séparé ni une pression en bar."], // 73
-  ["Pression haute/basse : juger une tendance stable au même mode/modèle ; démarrage, retour d’huile et dégivrage la changent. Pas de plage universelle."], // 74
-  ["Vitesse compresseur en rps ; dépend du modèle, une hausse demande souvent plus, sans mesurer la chaleur."], // 75
-  ["Commande EEV en pas, sans retour mécanique, ni % ni débit. Seule, elle ne prouve ni mouvement, blocage ni manque de fluide."], // 76
-  ["Température de l’électronique de commande du moteur du ventilateur extérieur."], // 77
-  ["Vitesse du ventilateur extérieur, en étage ou tr/min."], // 78
-  ["Cible interne selon modèle/mode ; comparer à la saturation issue de la pression correspondante. L’écart ne diagnostique ni cause ni charge."], // 79
-  ["Cible interne de température de refoulement/port du compresseur, utilisée par les protections de l’unité."], // 80
-  ["ΔT cible entre départ et retour ; il dépend du modèle et du mode, pas d’une règle universelle de 5 K."], // 81
-  ["Fluide frigorigène chargé, par exemple R32 ou R410A."], // 82
-  ["Température mesurée à un port du compresseur pour sa surveillance et sa protection internes."], // 83
-  ["Mesure de pression du circuit frigorifique de l’unité extérieure."], // 84
-  ["Courant de phase par CT ; l’estimation à 230 V n’est pas étalonnée et ignore tension réelle et facteur de puissance."], // 85
-  ["Courant absorbé par l’onduleur du compresseur, indicateur approximatif de son effort."], // 86
-  ["Température du dissipateur de l’onduleur/électronique de puissance extérieure."], // 87
-  ["Étage(s) actif(s) de l’appoint électrique, exprimés comme niveau de puissance."], // 88
-  ["Puissance BUH : 0=aucune ; un niveau supérieur peut aider par grand froid, dégivrage, ECS ou secours selon réglages."], // 89
-  ["Entrée HomeHub 32 : état ON/OFF de BSH, pas sa puissance ; l’entrée 51 est la consommation de la pompe à chaleur, pas de BSH."], // 90
-  ["BSH du ballon peut chauffer sans compresseur ni pompe ; X10A donne ON/OFF, pas la puissance."], // 91
-  ["État de la chaîne de protection thermique d’un chauffage électrique, destinée à interrompre son fonctionnement à l’ouverture."], // 92
-  ["Antigel des conduites ; il dépend du modèle, exige du courant et ne protège pas pendant une coupure."], // 93
-  ["État antigel X10A ; sans données du modèle il n’identifie ni pompe, ni résistance, ni zone protégée."], // 94
-  ["Circuit géothermique de saumure et sa pompe ; fluide, pression et limites dépendent du plan et de la notice."], // 95
-  ["Source hybride pompe/combinée/chaudière ; c’est une sélection, pas une chaleur mesurée."], // 96
-  ["Cible de départ hybride, pas température mesurée ; à lire avec mode et valeurs réelles."], // 97
-  ["Autorisation/état bivalent ; ON ne prouve pas que la chaudière brûle."], // 98
-  ["Demande chaudière ; ne prouve ni brûleur ni chaleur livrée."], // 99
-  ["Cible d’eau chaudière, pas température mesurée ; dépend de la demande et de l’installation."], // 100
-  ["Valeur bivalente BE_COP ; sens et échelle X10A non documentés, ce n’est pas le COP actuel."], // 101
-  ["Entrée tarif, Smart Grid ou solaire ; l’action dépend du réglage et ON indique seulement le contact."], // 102
-  ["Puissance nominale/classe fixe intérieure ou extérieure, en kW ou code ; pas une mesure actuelle."], // 103
-  ["Le mode silencieux réduit le bruit extérieur selon le niveau choisi et peut diminuer la capacité de chauffage ou de froid."], // 104
-  ["État HomeHub Sans erreur/Défaut/Avertissement ; il n’identifie pas seul la cause."], // 105
-  ["Signification du code de défaut actuellement signalé"], // 106
-  ["Sous-code complémentaire ; valable avec état/code principal, masqué s’il est indisponible."], // 107
-  ["HomeHub donne compresseur ON/OFF, pas vitesse ni puissance ; à lire avec opération et débit."], // 108
-  ["Indique si le fonctionnement ECS normal est actif."], // 109
-  ["Indique si le fonctionnement normal chauffage ou froid des locaux est actif."], // 110
-  ["Sortie PHE avant BUH ; à comparer au retour seulement en circulation pour obtenir le ΔT."], // 111
-  ["Départ après BUH ; une hausse peut être électrique, à confirmer par l’état BUH."], // 112
-  ["Température de l’eau mesurée dans le ballon ECS."], // 113
-  ["Température de ligne liquide ; sa relation dépend du mode et une valeur isolée ne diagnostique pas."], // 114
-  ["Température ambiante de la zone principale signalée par la télécommande."], // 115
-  ["Puissance électrique via HomeHub ; elle dépend du mode et des charges et ne doit pas être attribuée au seul compresseur."], // 116
-  ["Cible départ chauffage HomeHub, en lecture seule : fixe ou climatique ; la baisser n’aide que si la consigne ambiante reste atteinte."], // 117
-  ["Cible départ froid HomeHub, en lecture seule : pertinente si froid permis et actif ; peut rester visible sinon."], // 118
-  ["Indique si le circuit des locaux est autorisé : c’est l’interrupteur, pas l’activité actuelle."], // 119
-  ["Le fonctionnement silencieux réduit le bruit extérieur selon le niveau réglé et peut diminuer la capacité disponible."], // 120
-  ["Cible de réchauffage ECS, pas le seuil de départ ; hystérésis et programme comptent aussi."], // 121
-  ["Correction −10…+10 K de la cible chauffage ; elle ne prouve aucune chaleur sans fonctionnement des locaux."], // 122
-  ["Limite de stockage en Marche recommandée ; la plus basse avec la générale prévaut, sans être la consommation."], // 123
-  ["Plafond général HomeHub, pas consommation ; le baisser restreint tous les modes Smart Grid."], // 124
+  ["Autorisation du réchauffage ECS sur le registre 12 ; ON = autorisé, OFF = désactivé, sans prouver une charge en cours."], // 23
+  ["Demande de montée rapide ECS (booster) sur le registre 13 ; ON = demandé ou actif, OFF = fonctionnement normal."], // 24
+  ["Le réchauffage remonte le ballon à sa consigne après passage sous le seuil de démarrage."], // 25
+  ["Préréglage programmé : Confort emploie la cible haute et Éco la basse."], // 26
+  ["Dans un système hybride, le régulateur demande l’ECS à la chaudière."], // 27
+  ["3WV dirige l’eau vers ECS ou locaux ; 1=ECS et 0=locaux, sans prouver l’activité."], // 28
+  ["Sortie X10A ON/OFF d’une 2WV optionnelle ; elle ne prouve ni mode, ni tension, ni position mécanique."], // 29
+  ["Ouverture de la vanne mélangeuse d’une seconde zone."], // 30
+  ["Cible de départ du mode chauffage ou froid sélectionné."], // 31
+  ["Température de départ mélangée d’une zone secondaire, après sa vanne mélangeuse."], // 32
+  ["Température après BUH, généralement R2T ; elle inclut son apport sans prouver la température aux émetteurs."], // 33
+  ["R1T sort du PHE avant BUH ; avec R4T et débit, estime la puissance par mode, emplacement selon l’unité."], // 34
+  ["Retour R4T au PHE ; évaluer le ΔT avec débit, compresseur et mode, jamais avec 5 K universels."], // 35
+  ["Débit du circuit commun ; le minimum dépend du modèle et du mode, et une valeur basse peut causer 7H."], // 36
+  ["Pression hydraulique : beaucoup de manuels exigent >1 bar ; à ≤1,0 bar consulter la notice du modèle exact."], // 37
+  ["Commande de pompe inversée : 0 est la vitesse maximale et 100 l’arrêt."], // 38
+  ["État pompe ; ne prouve pas la chaleur utile et peut agir sans compresseur : comparer au débit."], // 39
+  ["État du circulateur d’un circuit solaire thermique configuré."], // 40
+  ["Vitesse indiquée de la pompe nommée par ce profil."], // 41
+  ["État X10A du fluxostat : ON indique un mouvement détecté, pas des l/min ni le minimum ; certains modèles ne documentent aucun contact physique."], // 42
+  ["Mode hydraulique : arrêt, chauffage, froid, ECS ou combiné ; ne prouve ni compresseur ni transfert."], // 43
+  ["Ordre Smart Grid à quatre états lu par HomeHub ou dérivé de deux contacts X10A ; ce n’est pas le mode chaud/froid."], // 44
+  ["Mode locaux actif chauffage/froid, sans Auto ; ne prouve pas le compresseur et exige l’activité."], // 45
+  ["Sélection HomeHub Auto/chauffage/froid ; configuration, pas état actuel ni preuve d’activité."], // 46
+  ["État extérieur arrêt/chauffage/froid ; peut rester choisi compresseur arrêté et ne prouve pas la chaleur."], // 47
+  ["Indicateur combiné dégivrage et redémarrage compresseur sur le registre 35 ; OFF = normal, ON = dégivrage ou préparation au redémarrage."], // 48
+  ["Indicateur de démarrage à chaud sur le registre 36 ; OFF = régime établi, ON = bref préchauffage de l’échangeur."], // 49
+  ["Dégivrage extérieur ; normal par froid humide, mais ce bit seul ne diagnostique pas des cycles excessifs."], // 50
+  ["Classe de gravité d’un défaut actif : Normal, Erreur, Avertissement ou Prudence."], // 51
+  ["Signification du code de défaut actuellement signalé"], // 52
+  ["Fonctionnement de secours après un défaut de pompe à chaleur."], // 53
+  ["Relais d’alarme de l’unité ; il s’active pour signaler un défaut à une alarme ou supervision externe câblée."], // 54
+  ["Température ambiante cible de la zone principale en chauffage ou froid."], // 55
+  ["Demande interne « thermo ON » ; elle n’identifie pas la charge ni le compresseur, et « Space heating Operation » n’est pas une demande."], // 56
+  ["Sortie électrique « Space H Operation » ; ni activité normale ni preuve du compresseur ou de chaleur."], // 57
+  ["Activité normale chauffage/froid, pas demande ; peut être ON à froid avec compresseur arrêté."], // 58
+  ["Température ambiante cible réglée pour la zone pilotée par le propre capteur de l’unité."], // 59
+  ["Température ambiante mesurée par le capteur intégré ou câblé de l’unité."], // 60
+  ["Protection refoulement : ON/OFF actuel + compteur 0–7 ; seule hausse comparable = activité, pas cause ; seuil/reset/retour 7→0 inconnus."], // 61
+  ["Protection courant onduleur : ON/OFF actuel + compteur 0–7 ; seule hausse comparable = activité, pas cause ; seuil/reset/retour 7→0 inconnus."], // 62
+  ["Protection haute pression : ON/OFF actuel + compteur 0–7 ; seule hausse comparable = activité, pas cause ; seuil/reset/retour 7→0 inconnus."], // 63
+  ["Protection basse pression : ON/OFF actuel + compteur 0–7 ; seule hausse comparable = activité, pas cause ; seuil/reset/retour 7→0 inconnus."], // 64
+  ["Protection thermique onduleur : ON/OFF actuel + compteur 0–7 ; seule hausse comparable = activité, pas cause ; seuil/reset/retour 7→0 inconnus."], // 65
+  ["Bit interne générique de limitation non affecté aux cinq protections nommées."], // 66
+  ["Température d’eau à l’entrée ou à la sortie du PHE, qui transfère la chaleur entre frigorigène et circuit hydraulique."], // 67
+  ["Capteur de l’échangeur extérieur ; <0 °C peut être normal et sans humidité ne prouve pas le givre."], // 68
+  ["Température extérieure mesurée par l’unité, utilisable pour loi d’eau et décisions de fonctionnement."], // 69
+  ["Gaz chaud en sortie compresseur ; dépend de la pression, vitesse, mode et charge. Une valeur ou plage d’une autre famille ne prouve ni défaut ni manque de fluide."], // 70
+  ["Température du gaz frigorigène froid à basse pression revenant au compresseur."], // 71
+  ["Température du fluide frigorigène sur la ligne liquide entre les échangeurs."], // 72
+  ["Température du frigorigène entrant/sortant de l’évaporateur, l’échangeur qui absorbe la chaleur."], // 73
+  ["Température de la ligne d’injection de frigorigène, utilisée en interne pour piloter l’injection et protéger le cycle."], // 74
+  ["Température d’une zone diphasique, liquide et vapeur, du circuit frigorifique."], // 75
+  ["Capteur de dégivrage extérieur ; position et contrôle selon le modèle. Un point ne prouve ni le givre de toute la batterie ni la fin du dégivrage."], // 76
+  ["Température de saturation calculée depuis la pression ; ce n’est ni un capteur séparé ni une pression en bar."], // 77
+  ["Pression haute/basse : juger une tendance stable au même mode/modèle ; démarrage, retour d’huile et dégivrage la changent. Pas de plage universelle."], // 78
+  ["Vitesse compresseur en rps ; dépend du modèle, une hausse demande souvent plus, sans mesurer la chaleur."], // 79
+  ["Commande EEV en pas, sans retour mécanique, ni % ni débit. Seule, elle ne prouve ni mouvement, blocage ni manque de fluide."], // 80
+  ["Température de l’électronique de commande du moteur du ventilateur extérieur."], // 81
+  ["Vitesse du ventilateur extérieur, en étage ou tr/min."], // 82
+  ["Cible interne selon modèle/mode ; comparer à la saturation issue de la pression correspondante. L’écart ne diagnostique ni cause ni charge."], // 83
+  ["Cible interne de température de refoulement/port du compresseur, utilisée par les protections de l’unité."], // 84
+  ["ΔT cible entre départ et retour ; il dépend du modèle et du mode, pas d’une règle universelle de 5 K."], // 85
+  ["Fluide frigorigène chargé, par exemple R32 ou R410A."], // 86
+  ["Température mesurée à un port du compresseur pour sa surveillance et sa protection internes."], // 87
+  ["Mesure de pression du circuit frigorifique de l’unité extérieure."], // 88
+  ["Courant de phase par CT ; l’estimation à 230 V n’est pas étalonnée et ignore tension réelle et facteur de puissance."], // 89
+  ["Courant absorbé par l’onduleur du compresseur, indicateur approximatif de son effort."], // 90
+  ["Température du dissipateur de l’onduleur/électronique de puissance extérieure."], // 91
+  ["Étage(s) actif(s) de l’appoint électrique, exprimés comme niveau de puissance."], // 92
+  ["Puissance BUH : 0=aucune ; un niveau supérieur peut aider par grand froid, dégivrage, ECS ou secours selon réglages."], // 93
+  ["Entrée HomeHub 32 : état ON/OFF de BSH, pas sa puissance ; l’entrée 51 est la consommation de la pompe à chaleur, pas de BSH."], // 94
+  ["BSH du ballon peut chauffer sans compresseur ni pompe ; X10A donne ON/OFF, pas la puissance."], // 95
+  ["État de la chaîne de protection thermique d’un chauffage électrique, destinée à interrompre son fonctionnement à l’ouverture."], // 96
+  ["Antigel des conduites ; il dépend du modèle, exige du courant et ne protège pas pendant une coupure."], // 97
+  ["État antigel X10A ; sans données du modèle il n’identifie ni pompe, ni résistance, ni zone protégée."], // 98
+  ["Circuit géothermique de saumure et sa pompe ; fluide, pression et limites dépendent du plan et de la notice."], // 99
+  ["Source hybride pompe/combinée/chaudière ; c’est une sélection, pas une chaleur mesurée."], // 100
+  ["Cible de départ hybride, pas température mesurée ; à lire avec mode et valeurs réelles."], // 101
+  ["Autorisation/état bivalent ; ON ne prouve pas que la chaudière brûle."], // 102
+  ["Demande chaudière ; ne prouve ni brûleur ni chaleur livrée."], // 103
+  ["Cible d’eau chaudière, pas température mesurée ; dépend de la demande et de l’installation."], // 104
+  ["Valeur bivalente BE_COP ; sens et échelle X10A non documentés, ce n’est pas le COP actuel."], // 105
+  ["Entrée tarif, Smart Grid ou solaire ; l’action dépend du réglage et ON indique seulement le contact."], // 106
+  ["Puissance nominale/classe fixe intérieure ou extérieure, en kW ou code ; pas une mesure actuelle."], // 107
+  ["Le mode silencieux réduit le bruit extérieur selon le niveau choisi et peut diminuer la capacité de chauffage ou de froid."], // 108
+  ["État HomeHub Sans erreur/Défaut/Avertissement ; il n’identifie pas seul la cause."], // 109
+  ["Signification du code de défaut actuellement signalé"], // 110
+  ["Sous-code complémentaire ; valable avec état/code principal, masqué s’il est indisponible."], // 111
+  ["HomeHub donne compresseur ON/OFF, pas vitesse ni puissance ; à lire avec opération et débit."], // 112
+  ["Indique si le fonctionnement ECS normal est actif."], // 113
+  ["Indique si le fonctionnement normal chauffage ou froid des locaux est actif."], // 114
+  ["Sortie PHE avant BUH ; à comparer au retour seulement en circulation pour obtenir le ΔT."], // 115
+  ["Départ après BUH ; une hausse peut être électrique, à confirmer par l’état BUH."], // 116
+  ["Température de l’eau mesurée dans le ballon ECS."], // 117
+  ["Température de ligne liquide ; sa relation dépend du mode et une valeur isolée ne diagnostique pas."], // 118
+  ["Température ambiante de la zone principale signalée par la télécommande."], // 119
+  ["Puissance électrique via HomeHub ; elle dépend du mode et des charges et ne doit pas être attribuée au seul compresseur."], // 120
+  ["Cible départ chauffage HomeHub, en lecture seule : fixe ou climatique ; la baisser n’aide que si la consigne ambiante reste atteinte."], // 121
+  ["Cible départ froid HomeHub, en lecture seule : pertinente si froid permis et actif ; peut rester visible sinon."], // 122
+  ["Indique si le circuit des locaux est autorisé : c’est l’interrupteur, pas l’activité actuelle."], // 123
+  ["Le fonctionnement silencieux réduit le bruit extérieur selon le niveau réglé et peut diminuer la capacité disponible."], // 124
+  ["Cible de réchauffage ECS, pas le seuil de départ ; hystérésis et programme comptent aussi."], // 125
+  ["Correction −10…+10 K de la cible chauffage ; elle ne prouve aucune chaleur sans fonctionnement des locaux."], // 126
+  ["Correction −10…+10 K de la cible froid ; elle ne prouve aucun froid sans fonctionnement des locaux et mode froid actifs."], // 127
+  ["Limite de stockage en Marche recommandée ; la plus basse avec la générale prévaut, sans être la consommation."], // 128
+  ["Plafond général HomeHub, pas consommation ; le baisser restreint tous les modes Smart Grid."], // 129
 ]);
 
 MODEL_DESCRIPTION_I18N.fr = modelDescriptionValues([

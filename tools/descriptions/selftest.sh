@@ -55,7 +55,7 @@ run_case() {
 echo "== 0. the unpatched tree is clean (otherwise every case below proves nothing) =="
 reset
 run_case "clean tree passes, including every base/native source row" 0 "clean" \
-    "32/32 base rows" "42/42 native rows"
+    "37/37 base rows" "49/49 native rows"
 
 echo "== 1. a NEW catalog label nobody wrote copy for =="
 # The generator emitting one new row is the routine way this gap re-opens.
@@ -212,7 +212,7 @@ assert s.count(old) == 1
 open(p, 'w').write(s.replace(old, '"Native metadata fixture label"', 1))
 PY
 run_case "native offset/profile copy and the unchanged base countercontrol pass" 0 "clean" \
-    "32/32 base rows" "42/42 native rows"
+    "37/37 base rows" "49/49 native rows"
 
 echo "== 13. a native mapping cannot borrow an identically named base explanation =="
 # Current operation mode still matches generic DESCRIPTIONS and is also an EKRHH label. Removing

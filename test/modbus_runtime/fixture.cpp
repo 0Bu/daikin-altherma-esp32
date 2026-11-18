@@ -505,7 +505,7 @@ void seed_cache() {
     s_cache.push_back(cv);
 }
 void snapshot_generation() {
-    REQUIRE(MB_CACHE_MAX_AGE_S == 537); // Derived from the current native full/fallback read plan.
+    REQUIRE(MB_CACHE_MAX_AGE_S == 614); // Derived from the current native full/fallback read plan.
     reset();
     seed_cache();
     CachedValue out[1];
@@ -718,6 +718,8 @@ const CatalogFixture HOMEHUB_WORDS[] = {
     {MbFunc::ReadInput, 31, 0, "0"},
     {MbFunc::ReadInput, 32, 1, "1"},
     {MbFunc::ReadInput, 33, 0, "0"},
+    {MbFunc::ReadInput, 35, 0, "0"},
+    {MbFunc::ReadInput, 36, 1, "1"},
     {MbFunc::ReadInput, 37, 1, "1"},
     {MbFunc::ReadInput, 52, 0, "0"},
     {MbFunc::ReadInput, 53, 1, "1"},
@@ -739,7 +741,10 @@ const CatalogFixture HOMEHUB_WORDS[] = {
     {MbFunc::ReadHolding, 7, 23, "23"},
     {MbFunc::ReadHolding, 9, 1, "1"},
     {MbFunc::ReadHolding, 10, 50, "50"},
+    {MbFunc::ReadHolding, 12, 1, "1"},
+    {MbFunc::ReadHolding, 13, 0, "0"},
     {MbFunc::ReadHolding, 54, static_cast<uint16_t>(-2), "-2"},
+    {MbFunc::ReadHolding, 55, static_cast<uint16_t>(-1), "-1"},
     {MbFunc::ReadHolding, 56, 2, "2"},
     {MbFunc::ReadHolding, 57, 450, "4.5"},
     {MbFunc::ReadHolding, 58, 600, "6.0"},
@@ -750,6 +755,7 @@ const CatalogFixture NATIVE_EXTRA_WORDS[] = {
     {MbFunc::ReadInput, 74, 3550, "35.5"}, {MbFunc::ReadInput, 75, 4900, "49.0"},
     {MbFunc::ReadInput, 76, 5200, "52.0"}, {MbFunc::ReadInput, 77, 4800, "48.0"},
     {MbFunc::ReadInput, 79, 185, "1.85"},  {MbFunc::ReadInput, 80, 3300, "33.0"},
+    {MbFunc::ReadInput, 81, 2450, "24.5"}, {MbFunc::ReadInput, 82, 3, "3"},
     {MbFunc::ReadInput, 83, 3, "3"},
 };
 std::vector<CatalogFixture> catalog_fixture(bool native) {
@@ -793,7 +799,7 @@ const CachedValue& cached_row(const std::vector<CachedValue>& rows, uint16_t off
 }
 void require_catalog_rows(const std::vector<CachedValue>& rows, bool native) {
     const auto fixture = catalog_fixture(native);
-    REQUIRE(rows.size() == (native ? 42u : 32u));
+    REQUIRE(rows.size() == (native ? 49u : 37u));
     REQUIRE(rows.size() == fixture.size());
     const auto* definitions = native ? def::ALTHERMA4_REGS : def::HOMEHUB_REGS;
     const int   count       = native ? def::ALTHERMA4_REG_COUNT : def::HOMEHUB_REG_COUNT;
@@ -820,11 +826,11 @@ void require_request_spans(const std::vector<WireRequest>& requests, bool native
         {MbFunc::ReadHolding, 1, 4},
         {MbFunc::ReadHolding, 6, 2},
         {MbFunc::ReadHolding, 9, 2},
-        {MbFunc::ReadHolding, 54, 1},
-        {MbFunc::ReadHolding, 56, native ? uint16_t{1} : uint16_t{3}},
+        {MbFunc::ReadHolding, 12, 2},
+        {MbFunc::ReadHolding, 54, native ? uint16_t{3} : uint16_t{5}},
         {MbFunc::ReadInput, 21, 3},
         {MbFunc::ReadInput, 30, 4},
-        {MbFunc::ReadInput, 37, 2},
+        {MbFunc::ReadInput, 35, 4},
         {MbFunc::ReadInput, 40, 6},
         {MbFunc::ReadInput, 49, 5},
     };
@@ -832,8 +838,7 @@ void require_request_spans(const std::vector<WireRequest>& requests, bool native
         expected.push_back({MbFunc::ReadHolding, 58, 1});
         expected.push_back({MbFunc::ReadInput, 65, 4});
         expected.push_back({MbFunc::ReadInput, 74, 4});
-        expected.push_back({MbFunc::ReadInput, 79, 2});
-        expected.push_back({MbFunc::ReadInput, 83, 1});
+        expected.push_back({MbFunc::ReadInput, 79, 5});
     }
     const auto less = [](const auto& a, const auto& b) {
         if (a.space != b.space)
@@ -886,7 +891,7 @@ void native_definition_rows() {
     require_catalog_rows(adapter::history_rows, true);
     require_request_spans(peer.requests_snapshot(), true);
     REQUIRE(mb_status().profile == ModbusProfile::Altherma4);
-    REQUIRE(mb_status().values == 42 && MB_PLAN_ALTHERMA4.count == 15);
+    REQUIRE(mb_status().values == 49 && MB_PLAN_ALTHERMA4.count == 14);
     REQUIRE(def::altherma4_find(57) == nullptr);
 }
 void native_enum_case(uint16_t offset, MbFunc space, def::HomeHubValueKind expected_kind,
@@ -981,7 +986,7 @@ void probe_native_promotion() {
         std::vector<WireRequest>(requests.begin() + first_requests, requests.end()), true);
 }
 void probe_homehub_rows() {
-    // An affirmative unsupported-register exception leaves all32 baseline definitions intact.
+    // An affirmative unsupported-register exception leaves all 37 baseline definitions intact.
     for (bool exception : {false, true}) {
         reset();
         auto words = wire_words(false);

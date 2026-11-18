@@ -10,7 +10,8 @@ namespace daik::def {
 // Daikin Altherma 4 Modbus register catalog. Extends the EKRHH/UC3 catalog with native Altherma 4
 // telemetry: demand response mode (65), valve positions (66, 67), pump speed (68), outdoor and
 // valve leaving water temperatures (74, 75), dual tank temperatures (76, 77), water pressure (79),
-// leaving water target (80), and operating state (83).
+// leaving water target (80), additional-zone target (81), user abnormality counter (82), and
+// operating state (83).
 inline constexpr HomeHubReg ALTHERMA4_REGS[] = {
     // ── Faults (input) ──────────────────────────────────────────────────────────────────────────
     {21, MbFunc::ReadInput, MbType::Int16, 1, "", "Unit abnormality",
@@ -24,6 +25,8 @@ inline constexpr HomeHubReg ALTHERMA4_REGS[] = {
     {32, MbFunc::ReadInput, MbType::Int16, 1, "", "Booster heater run", HomeHubValueKind::Binary},
     {33, MbFunc::ReadInput, MbType::Int16, 1, "", "Disinfection operation",
      HomeHubValueKind::Binary},
+    {35, MbFunc::ReadInput, MbType::Int16, 1, "", "Defrost / Restart", HomeHubValueKind::Binary},
+    {36, MbFunc::ReadInput, MbType::Int16, 1, "", "Hot start", HomeHubValueKind::Binary},
     {37, MbFunc::ReadInput, MbType::Int16, 1, "", "3-way valve", HomeHubValueKind::ThreeWayValve},
     {52, MbFunc::ReadInput, MbType::Int16, 1, "", "DHW normal operation", HomeHubValueKind::Binary},
     {53, MbFunc::ReadInput, MbType::Int16, 1, "", "Space heating/cooling normal operation",
@@ -56,7 +59,11 @@ inline constexpr HomeHubReg ALTHERMA4_REGS[] = {
     {9, MbFunc::ReadHolding, MbType::Int16, 1, "", "Quiet mode selection",
      HomeHubValueKind::Altherma4QuietSelection},
     {10, MbFunc::ReadHolding, MbType::Int16, 1, "°C", "DHW reheat setpoint"},
+    {12, MbFunc::ReadHolding, MbType::Int16, 1, "", "DHW reheat ON/OFF", HomeHubValueKind::Binary},
+    {13, MbFunc::ReadHolding, MbType::Int16, 1, "", "DHW booster mode ON/OFF",
+     HomeHubValueKind::Binary},
     {54, MbFunc::ReadHolding, MbType::Int16, 1, "K", "Weather-dependent Main Heating offset"},
+    {55, MbFunc::ReadHolding, MbType::Int16, 1, "K", "Weather-dependent Main Cooling offset"},
     {56, MbFunc::ReadHolding, MbType::Int16, 1, "", "Smart Grid operation mode",
      HomeHubValueKind::SmartGridMode},
     // Holding 57 has no native mapping in §7.2.1; do not inherit the EKRHH-only row.
@@ -75,6 +82,9 @@ inline constexpr HomeHubReg ALTHERMA4_REGS[] = {
     // Retained assumption: 10..600 is printed with bar; the centibar interpretation needs a capture.
     {79, MbFunc::ReadInput, MbType::Int16, 100, "bar", "Water pressure"},
     {80, MbFunc::ReadInput, MbType::Temp16, 1, "°C", "Space heating/cooling target Main zone"},
+    {81, MbFunc::ReadInput, MbType::Temp16, 1, "°C",
+     "Space heating/cooling target Additional zone"},
+    {82, MbFunc::ReadInput, MbType::Int16, 1, "", "User abnormality counter"},
     {83, MbFunc::ReadInput, MbType::Int16, 1, "", "Unit operation mode",
      HomeHubValueKind::Altherma4UnitOperationMode},
 };

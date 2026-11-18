@@ -125,6 +125,10 @@ inline constexpr HomeHubHistory HOMEHUB_HISTORIES[] = {
     {9, "quiet_state", false, true, HOMEHUB_DECODE_HOLDING},
     {56, "smart_grid_mode", false, true, HOMEHUB_DECODE_HOLDING},
     {33, "disinfection_state", true, false, HOMEHUB_DECODE_FLAG},
+    {31, "compressor_state", true, false, HOMEHUB_DECODE_FLAG},
+    {51, "modbus_power", false, false, {MbFunc::ReadInput, MbType::Pow16, 1, "kW"}},
+    {35, "modbus_defrost_state", true, false, HOMEHUB_DECODE_FLAG},
+    {30, "pump_state", false, false, HOMEHUB_DECODE_FLAG},
 };
 inline constexpr size_t HOMEHUB_HISTORY_COUNT =
     sizeof(HOMEHUB_HISTORIES) / sizeof(HOMEHUB_HISTORIES[0]);

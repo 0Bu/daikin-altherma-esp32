@@ -114,6 +114,7 @@ const labels = {
   "hist.none": "Noch keine Messwerte aufgezeichnet.", "hist.title": "Letzte 24 Stunden",
   "hist.now": "jetzt", "hist.nm": "nicht gemessen", "hist.held": "Außeneinheit ruht",
   "hist.retained": "Letzter empfangener Messwert",
+  "state.on": "ON", "state.off": "OFF",
 };
 const context = {
   S, LANG: "de", renderApp() {}, renderCards() {}, renderInspect() {}, renderSettings() {},
@@ -194,6 +195,21 @@ const context = {
     if (key === "hist.valve2_off") return "2WV-Ausgang OFF";
     if (key === "hist.valve2_aria") return `${arg} — Verlauf des 2WV-Ausgangs. ${arg2}`;
     if (key.startsWith("sg.mode")) return ["Freier Betrieb", "Zwangsabschaltung", "Empfehlung ein", "Erzwungen ein"][+key.at(-1)];
+    if (key === "hist.comp_total") return `Verdichter aktiv erfasst · ${arg} · ${arg2} Phasen im 5-Minuten-Raster`;
+    if (key === "hist.comp_none") return "Kein Verdichterlauf erfasst.";
+    if (key === "hist.comp_active") return "Verdichter aktiv";
+    if (key === "hist.comp_inactive") return "Verdichter aus";
+    if (key === "hist.comp_aria") return `${arg} — Verdichterverlauf. ${arg2}`;
+    if (key === "hist.mb_defrost_total") return `Abtauen aktiv erfasst · ${arg} im 5-Minuten-Raster`;
+    if (key === "hist.mb_defrost_none") return "Kein Abtauvorgang erfasst.";
+    if (key === "hist.mb_defrost_active") return "Abtauen aktiv";
+    if (key === "hist.mb_defrost_inactive") return "Abtauen aus";
+    if (key === "hist.mb_defrost_aria") return `${arg} — HomeHub-Abtauverlauf. ${arg2}`;
+    if (key === "hist.pump_total") return `Umwälzpumpe laufend erfasst · ${arg} im 5-Minuten-Raster`;
+    if (key === "hist.pump_none") return "Kein Pumpenlauf erfasst.";
+    if (key === "hist.pump_active") return "Läuft";
+    if (key === "hist.pump_inactive") return "Steht";
+    if (key === "hist.pump_aria") return `${arg} — Umwälzpumpenverlauf. ${arg2}`;
     return labels[key] || key;
   },
   fetch: async (url) => {
@@ -262,35 +278,43 @@ S.hist.set("modbus:dhw_tank", modbus);
   const dated = { t0: 1768720000 };
   S.hist.set("dhw_tank", { ...x10a, ...dated });
   S.hist.set("modbus:dhw_tank", { ...modbus, b0: null, t0: null });
-  assert.deepEqual(Array.from(h.historyView("dhw_tank").separate), ["x10a", "modbus"],
-    "a legacy ring without either clock has no joint cursor with a dated ring");
+  assert.equal(h.historyView("dhw_tank").separate, undefined,
+    "paired sources always share one chart");
+  assert.equal(h.historyView("dhw_tank").t0, null,
+    "a relative overlay does not stamp one instrument's wall clock onto an unanchored peer");
   assert.equal(h.historyView("dhw_tank", "x10a").t0, dated.t0,
     "the dated instrument keeps its own clock in a source-scoped view");
   S.hist.set("dhw_tank", x10a);
   S.hist.set("modbus:dhw_tank", { ...modbus, b0: null, t0: dated.t0 + 3600 });
-  assert.deepEqual(Array.from(h.historyView("dhw_tank").separate), ["x10a", "modbus"],
-    "boot-only and wall-only records cannot be paired by their trailing samples");
-  const separate = h.histHtml("dhw_tank", "", "Tank");
-  assert.deepEqual(Array.from(separate.matchAll(/data-hist="dhw_tank" data-source="([^"]+)"/g), m => m[1]),
-    ["x10a", "modbus"]);
-  assert.match(separate, /<i><\/i>X10A<\/button>/);
+  assert.deepEqual(Array.from(h.historyView("dhw_tank").series, s => s.source), ["x10a", "modbus"],
+    "boot-only and wall-only records still share one chart on a relative axis");
+  assert.equal(h.historyView("dhw_tank").t0, null);
+  const combined = h.histHtml("dhw_tank", "", "Tank");
+  assert.equal((combined.match(/data-hist="dhw_tank"/g) || []).length, 1,
+    "paired sources must render in one shared plot");
+  assert.match(combined, /data-hist-series="x10a" aria-pressed="true" disabled/);
+  assert.match(combined, /data-hist-series="modbus" aria-pressed="false"/);
   assert.equal(h.historyView("dhw_tank", "modbus").t0, dated.t0 + 3600);
   S.hist.set("dhw_tank", { ...x10a, b0: null, ...dated });
-  S.hist.set("modbus:dhw_tank", { ...modbus, b0: null, t0: dated.t0 + 150 });
-  assert.deepEqual(Array.from(h.historyView("dhw_tank").separate), ["x10a", "modbus"],
-    "wall clock alone cannot overlay rings with different raster boundaries");
   S.hist.set("modbus:dhw_tank", { ...modbus, b0: null, t0: dated.t0 + 300 });
-  assert.deepEqual(Array.from(h.historyView("dhw_tank").separate), ["x10a", "modbus"],
-    "a full-bucket wall-clock correction can look aligned without a boot anchor");
+  const wallAligned = h.historyView("dhw_tank");
+  assert.equal(wallAligned.separate, undefined);
+  assert.equal(wallAligned.t0, dated.t0);
+  assert.deepEqual(Array.from(wallAligned.series[0].v), [452, null, 454, null]);
+  assert.deepEqual(Array.from(wallAligned.series[1].v), [null, 453, 455, 456]);
   S.hist.set("dhw_tank", { ...x10a, b0: -2, ...dated, v: [...x10a.v] });
   S.hist.set("modbus:dhw_tank", { ...modbus, b0: -1, t0: dated.t0 + 307, v: [...modbus.v] });
-  assert.deepEqual(Array.from(h.historyView("dhw_tank").separate), ["x10a", "modbus"],
-    "each recorder can have booked a different warm-reset gap before boot");
+  const prebootAligned = h.historyView("dhw_tank");
+  assert.equal(prebootAligned.separate, undefined,
+    "restored pre-boot series must remain together in one chart");
+  assert.equal(prebootAligned.b0, -2);
+  assert.deepEqual(Array.from(prebootAligned.series[0].v), [452, null, 454, null]);
+  assert.deepEqual(Array.from(prebootAligned.series[1].v), [null, 453, 455, 456]);
   assert.deepEqual(Array.from(h.historyView("dhw_tank", "modbus").v), modbus.v);
   const savedUptime = S.status.uptime_s;
   S.status.uptime_s = 86400;
   const currentBoot = h.historyView("dhw_tank");
-  assert.equal(currentBoot.b0, 0, "an expired preboot tail cannot prevent a common current-boot axis");
+  assert.equal(currentBoot.b0, 0, "an expired preboot tail keeps the common current-boot axis");
   assert.deepEqual(Array.from(currentBoot.series[0].v), [454, null]);
   assert.deepEqual(Array.from(currentBoot.series[1].v), [455, 456]);
   const savedNtp = S.status.ntp;
@@ -354,9 +378,10 @@ S.hist.set("modbus:dhw_tank", modbus);
   S.hist.set("env3:" + temp, { ...x10a, b0: -3, t0: 1768720000 });
   S.hist.set("env3:" + humidity, { ...x10a, b0: null, t0: 1768720150, v: [630, 640, 650] });
   const html = h.env3HistHtml();
-  assert.match(html, /data-hist="env3_temperature" data-source="env3"/);
-  assert.match(html, /data-hist="env3_humidity" data-source="env3"/,
-    "independently dated ENV III series remain visible even without a shared plot");
+  assert.match(html, /data-hist="env3_combined"/,
+    "ENV III series remain together in one combined plot");
+  assert.match(html, /env-temperature/);
+  assert.match(html, /env-humidity/);
   S.status.history.env3_rows = priorRows;
   S.hist.delete("env3:" + temp);
   S.hist.delete("env3:" + humidity);
@@ -616,11 +641,6 @@ for (const dated of [false, true]) {
   const far = dated ? { b0: null, t0: a.t0 + 1000 * 300 } : { b0: a.b0 + 1000, t0: null };
   S.hist.set("dhw_tank", { ...x10a, ...a, refreshFailed: true });
   S.hist.set("modbus:dhw_tank", { ...modbus, ...far, v: Array(day).fill(470) });
-  if (dated) {
-    assert.deepEqual(Array.from(h.historyView("dhw_tank").separate), ["x10a", "modbus"]);
-    assert.equal(h.historyView("dhw_tank", "modbus").v.length, day);
-    continue;
-  }
   const bounded = h.historyView("dhw_tank");
   assert.equal(bounded.v.length, day);
   assert.equal(dated ? bounded.t0 : bounded.b0, dated ? far.t0 : far.b0);
@@ -1047,8 +1067,8 @@ S.histPin.delete("outdoor_air");
 }
 
 // Smart-Grid mode is a complete categorical state timeline, not a misleading numeric 0..3 line.
-// X10A and Modbus keep independent, source-labelled lanes. Exact readings remain available in the
-// shared tooltip. Only mode 2 of the authoritative HomeHub ring contributes to the Boost total.
+// X10A stays active when available; HomeHub/Modbus starts hidden and toggles into the same chart.
+// Exact phase ranges appear in the compact tooltip, with time on the lower scale.
 S.hist.set("smart_grid_mode", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000, b0: 200,
   held: [], v: [0, 10, 20, 30, null, 20, 0] });
 S.hist.set("modbus:smart_grid_mode", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000, b0: 200,
@@ -1069,24 +1089,36 @@ assert.match(boostHtml, /Freier Betrieb/);
 assert.match(boostHtml, /Zwangsabschaltung/);
 assert.match(boostHtml, /Empfehlung ein/);
 assert.match(boostHtml, /Erzwungen ein/);
-assert.doesNotMatch(boostHtml, /vhist-state-runs|· Phasen/,
-  "phase details belong to the chart popup, never a long list below it");
-assert.equal((boostHtml.match(/vhist-state-track/g) || []).length, 2,
-  "paired X10A/HomeHub state histories must render two independent tracks");
-assert.match(boostHtml, /vhist-state-lane-label">X10A[\s\S]*vhist-state-track x10a/,
-  "X10A must be the upper status track");
-assert.match(boostHtml, /vhist-state-lane-label mb">Modbus[\s\S]*vhist-state-track modbus/,
-  "Modbus must be the lower status track");
-assert.ok(boostHtml.indexOf('vhist-state-lane-label">X10A') <
-          boostHtml.indexOf('vhist-state-lane-label mb">Modbus'),
-  "the X10A lane must precede the Modbus lane in document and visual order");
+assert.doesNotMatch(boostHtml, /vhist-state-runs|· Phasen|vhist-state-lane-label/,
+  "phase details belong to the compact tooltip and source selection belongs to the legend");
+assert.equal((boostHtml.match(/vhist-state-track/g) || []).length, 1,
+  "X10A track is rendered alone initially while Modbus is hidden by default");
+assert.match(boostHtml, /data-hist-series="x10a" aria-pressed="true" disabled/);
+assert.match(boostHtml, /data-hist-series="modbus" aria-pressed="false"/);
 assert.match(boostHtml, />nicht gemessen</,
-  "gaps in either independent source remain explained in the legend");
+  "gaps in a visible source remain explained in the legend");
 for (const [i, label] of [[0, "Freier Betrieb"], [1, "Zwangsabschaltung"],
                            [2, "Empfehlung ein"], [3, "Erzwungen ein"]])
-  assert.match(h.scrubText(boostView, i),
-    new RegExp(`X10A\\n${label}[\\s\\S]*Modbus\\n${label}`),
-    `the Smart-Grid tooltip must expose both witnesses for ${label}`);
+  assert.match(h.scrubText(boostView, i), new RegExp(`^\\d{2}:\\d{2}–\\d{2}:\\d{2} · ${label}$`),
+    `single visible track shows compact phase range and ${label}`);
+h.histSeriesToggle("smart_grid_mode", "modbus");
+const boostBothHtml = h.histHtml("smart_grid_mode", "", "Smart-Grid-Anforderung");
+assert.equal((boostBothHtml.match(/vhist-state-track/g) || []).length, 2,
+  "enabling Modbus adds the second track inside the same chart");
+assert.ok(boostBothHtml.indexOf("vhist-state-track x10a") <
+          boostBothHtml.indexOf("vhist-state-track modbus"),
+  "the X10A track precedes the Modbus track");
+assert.match(boostBothHtml, /data-hist-series="x10a" aria-pressed="true" disabled/,
+  "X10A remains active even while Modbus is also shown");
+h.histSeriesToggle("smart_grid_mode", "x10a");
+assert.equal(h.histVisibleSeries(h.historyView("smart_grid_mode")).length, 2,
+  "X10A cannot be deactivated on a state chart while X10A is available");
+assert.match(h.scrubText(h.historyView("smart_grid_mode"), 2),
+  /^X10A \d{2}:\d{2}–\d{2}:\d{2} · Empfehlung ein\nModbus \d{2}:\d{2}–\d{2}:\d{2} · Empfehlung ein$/);
+assert.match(h.histReadout(h.historyView("smart_grid_mode"), 2),
+  /<span class="vhist-tip-rows"><span class="vhist-tip-label">X10A<\/span><span class="vhist-tip-val">\d{2}:\d{2}–\d{2}:\d{2} · Empfehlung ein<\/span><span class="vhist-tip-label mb">Modbus<\/span>/);
+h.histSeriesToggle("smart_grid_mode", "modbus");
+S.histHidden.delete("smart_grid_mode");
 
 // A caller can still request a deliberately Modbus-only Smart-Grid history. That filtered view
 // loses the X10A lane and tooltip block, while the schematic inspector above remains dual-source.
@@ -1094,8 +1126,8 @@ const boostModbusView = h.historyView("smart_grid_mode", "modbus");
 const boostModbusHtml = h.histHtml("smart_grid_mode", "", "Smart-Grid-Anforderung", "modbus");
 assert.equal(boostModbusView.series.length, 1);
 assert.equal(boostModbusView.series[0].source, "modbus");
-assert.doesNotMatch(boostModbusHtml, /vhist-state-lane-label">X10A/);
-assert.match(boostModbusHtml, /vhist-state-lane-label mb">Modbus/);
+assert.doesNotMatch(boostModbusHtml, />X10A</);
+assert.match(boostModbusHtml, /vhist-source mb[^>]*><i><\/i>Modbus/);
 assert.match(boostModbusHtml, /data-source="modbus"/,
   "scrubbing and pinning must resolve the same Modbus-only view that the chart renders");
 assert.match(h.scrubText(boostModbusView, 2), /^\d{2}:\d{2}–\d{2}:\d{2} · Empfehlung ein$/);
@@ -1169,8 +1201,8 @@ delete S.otaCached;
   const retained = h.histHtml("smart_grid_mode", "", "Smart-Grid-Anforderung", "modbus");
   assert.match(retained, /vhist-retained[^>]*left:81\.250%/,
     "the retained marker sits inside the last recorded bucket instead of the separate live cap");
-  assert.match(retained, /<span>jetzt<\/span><\/div><\/div>$/,
-    "the separately measured live observation retains its current-time label");
+  assert.match(retained, /<span>jetzt<\/span><\/div><span class="vhist-time vhist-live mono num" hidden><\/span><\/div><\/div>$/,
+    "the separately measured live observation retains its current-time label on the shared lower scale");
   S.hist.set(key, old);
   S.hist.set(key, { ...old, v: [], err: true });
   const liveOnly = h.histHtml("smart_grid_mode", "", "Smart-Grid-Anforderung", "modbus");
@@ -1182,35 +1214,36 @@ delete S.otaCached;
   const currentPair = h.historyView("smart_grid_mode");
   assert.equal(currentPair.series.find(s => s.source === "modbus").v.at(-1), 20,
     "a healthy peer's history cannot suppress independently available current evidence");
+  h.histSeriesToggle("smart_grid_mode", "modbus");
   assert.doesNotMatch(h.histHtml("smart_grid_mode", "", "Smart Grid"), /Boost aktiv · 0/,
     "a current-only primary source cannot present a zero recorded duration");
+  S.histHidden.delete("smart_grid_mode");
   S.hist.delete("smart_grid_mode");
   S.hist.set(key, old);
 }
 delete S._modbus;
 
 // The external circulation witness is a three-outcome history: confirmed running, confirmed
-// stopped, or unavailable evidence. The configured name lives in the Settings row; the chart lane
+// stopped, or unavailable evidence. The configured name lives in the Settings row; the chart legend
 // names its transport and must keep absent MQTT evidence visible instead of colouring it stopped.
 S.hist.set("circulation_state", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000, b0: 200,
   held: [], v: [null, 0, 0, 10, 10, null] });
 const circulationView = h.historyView("circulation_state");
 const circulationHtml = h.histHtml("circulation_state", "", "Warmwasser-Zirkulationspumpe");
 assert.equal(circulationView.series[0].name, "MQTT");
-assert.match(circulationHtml, /vhist-state-lane-label">MQTT/);
+assert.match(circulationHtml, /class="vhist-source"><i><\/i>MQTT<\/span>/);
 assert.match(circulationHtml, /vhist-state-on state-off/);
 assert.match(circulationHtml, /vhist-state-on circulation-on/);
 assert.match(circulationHtml, /vhist-state-gap/);
 for (const label of ["Läuft", "Steht", "Nicht verfügbar"])
   assert.match(circulationHtml, new RegExp(`>${label}<`), `${label} must be an explicit timeline state`);
 assert.match(circulationHtml, /2 Phase · nicht verfügbar/);
-assert.match(h.scrubText(circulationView, 0), /MQTT\nNicht verfügbar/,
+assert.match(h.scrubText(circulationView, 0), /^\d{2}:\d{2}–\d{2}:\d{2} · Nicht verfügbar$/,
   "an absent pump sample must read unavailable, never stopped");
-assert.match(h.scrubText(circulationView, 1), /MQTT\nSteht/);
-assert.match(h.scrubText(circulationView, 3), /MQTT\nLäuft/);
+assert.match(h.scrubText(circulationView, 1), /^\d{2}:\d{2}–\d{2}:\d{2} · Steht$/);
+assert.match(h.scrubText(circulationView, 3), /^\d{2}:\d{2}–\d{2}:\d{2} · Läuft$/);
 
-// BSH is also categorical. Its active buckets render as intervals and the wording calls the sum
-// raster time rather than exact runtime; X10A is the preferred physical-state source.
+// BSH is also categorical. X10A stays active by default and Modbus toggles into the same chart.
 S.hist.set("bsh_state", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000, b0: 200,
   held: [], v: [0, 10, 0, 10] });
 S.hist.set("modbus:bsh_state", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000, b0: 200,
@@ -1222,12 +1255,17 @@ assert.doesNotMatch(bshHtml, /vhist-line/);
 assert.match(bshHtml, /Heizstab aktiv erfasst · 10 min im 5-Minuten-Raster/);
 assert.match(bshHtml, /vhist-state-on state-off/);
 assert.match(bshHtml, /vhist-state-on heater-on/);
-assert.doesNotMatch(bshHtml, /vhist-state-runs|· Phasen/);
-assert.equal((bshHtml.match(/vhist-state-track/g) || []).length, 2);
-assert.match(bshHtml, /vhist-state-lane-label">X10A/);
-assert.match(bshHtml, /vhist-state-lane-label mb">Modbus/);
-assert.match(h.scrubText(bshView, 0), /X10A\nHeizstab aus[\s\S]*Modbus\nHeizstab aus/);
-assert.match(h.scrubText(bshView, 1), /X10A\nHeizstab aktiv[\s\S]*Modbus\nHeizstab aktiv/);
+assert.doesNotMatch(bshHtml, /vhist-state-runs|· Phasen|vhist-state-lane-label/);
+assert.equal((bshHtml.match(/vhist-state-track/g) || []).length, 1);
+assert.match(bshHtml, /data-hist-series="x10a" aria-pressed="true" disabled/);
+assert.match(bshHtml, /data-hist-series="modbus" aria-pressed="false"/);
+assert.match(h.scrubText(bshView, 0), /^\d{2}:\d{2}–\d{2}:\d{2} · OFF$/);
+assert.match(h.scrubText(bshView, 1), /^\d{2}:\d{2}–\d{2}:\d{2} · ON$/);
+h.histSeriesToggle("bsh_state", "modbus");
+assert.equal((h.histHtml("bsh_state", "", "Heizstab").match(/vhist-state-track/g) || []).length, 2);
+assert.match(h.scrubText(h.historyView("bsh_state"), 0), /^X10A \d{2}:\d{2}–\d{2}:\d{2} · OFF\nModbus \d{2}:\d{2}–\d{2}:\d{2} · OFF$/);
+assert.match(h.scrubText(h.historyView("bsh_state"), 1), /^X10A \d{2}:\d{2}–\d{2}:\d{2} · ON\nModbus \d{2}:\d{2}–\d{2}:\d{2} · ON$/);
+S.histHidden.delete("bsh_state");
 
 // The Heizstab schematic inspector keeps the categorical history but narrows it to the authoritative
 // X10A BSH state. The generic value-row chart above remains dual-source for diagnostics.
@@ -1235,10 +1273,9 @@ const bshX10aView = h.historyView("bsh_state", "x10a");
 const bshX10aHtml = h.histHtml("bsh_state", "", "Heizstab", "x10a");
 assert.equal(bshX10aView.series.length, 1);
 assert.equal(bshX10aView.series[0].source, "x10a");
-assert.match(bshX10aHtml, /vhist-state-lane-label">X10A/);
-assert.doesNotMatch(bshX10aHtml, /vhist-state-lane-label mb">Modbus/);
+assert.doesNotMatch(bshX10aHtml, /data-hist-series="modbus"/);
 assert.match(bshX10aHtml, /data-source="x10a"/);
-assert.match(h.scrubText(bshX10aView, 1), /^\d{2}:\d{2}–\d{2}:\d{2} · Aktiv$/);
+assert.match(h.scrubText(bshX10aView, 1), /^\d{2}:\d{2}–\d{2}:\d{2} · ON$/);
 assert.doesNotMatch(h.scrubText(bshX10aView, 1), /X10A|Modbus|Heizstab|ca\.|min/);
 {
   const old = S.hist.get("bsh_state");
@@ -1246,11 +1283,13 @@ assert.doesNotMatch(h.scrubText(bshX10aView, 1), /X10A|Modbus|Heizstab|ca\.|min/
   S.hist.set("bsh_state", { ...old, t0: null, v: [10], refreshFailed: true });
   S.hist.set("modbus:bsh_state", { ...peer, t0: null });
   const retained = h.historyView("bsh_state", "x10a");
-  assert.equal(h.scrubText(retained, 0), "Letzter empfangener Messwert · Aktiv",
+  assert.equal(h.scrubText(retained, 0), "Letzter empfangener Messwert · ON",
     "one undated retained slot shows its last reading once");
+  h.histSeriesToggle("bsh_state", "modbus");
   assert.match(h.scrubText(h.historyView("bsh_state"), 0),
-    /X10A\nHeizstab aktiv\nLetzter empfangener Messwert · ca\. 5 min/,
+    /^X10A Letzter empfangener Messwert · ON\nModbus /,
     "a fresh partner cannot change the retained lane's phase time");
+  S.histHidden.delete("bsh_state");
   S.hist.set("bsh_state", old);
   S.hist.set("modbus:bsh_state", peer);
 }
@@ -1277,7 +1316,7 @@ assert.doesNotMatch(h.scrubText(bshX10aView, 1), /X10A|Modbus|Heizstab|ca\.|min/
 }
 
 // Related does not mean equivalent: X10A tank preheat and HomeHub disinfection retain separate ids,
-// source lanes and state wording. Neither one may be overlaid as the other's second witness.
+// source tracks and state wording. Neither one may be overlaid as the other's second witness.
 S.hist.set("tank_preheat_state", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000,
   b0: 200, held: [], v: [0, 10, 0, 0] });
 S.hist.set("modbus:disinfection_state", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000,
@@ -1288,15 +1327,16 @@ assert.equal(h.hasHist("disinfection_state"), false);
 assert.equal(h.hasModbusHist("disinfection_state"), true);
 const preheatHtml = h.histHtml("tank_preheat_state", "", "Speichervorheizung");
 const disinfectionHtml = h.histHtml("disinfection_state", "", "Speicherdesinfektion");
-assert.match(preheatHtml, /vhist-state-lane-label">X10A/);
+assert.match(preheatHtml, /vhist-state-track x10a/);
 assert.match(preheatHtml, /vhist-state-on preheat-on/);
 assert.doesNotMatch(preheatHtml, /Modbus|Desinfektion aktiv/);
-assert.match(disinfectionHtml, /vhist-state-lane-label mb">Modbus/);
+assert.match(disinfectionHtml, /vhist-state-track modbus/);
+assert.match(disinfectionHtml, /vhist-source mb[^>]*><i><\/i>Modbus/);
 assert.match(disinfectionHtml, /vhist-state-on disinfection-on/);
 assert.doesNotMatch(disinfectionHtml, />X10A<|Speichervorheizung aktiv/);
 
-// Both outdoor pills open categorical timelines. Defrost is event-folded; Quiet keeps its paired
-// witnesses in two independent lanes so gaps and disagreements remain directly visible.
+// Both outdoor pills open categorical timelines. Defrost is event-folded; Quiet toggles its
+// second HomeHub track on demand so gaps and disagreements remain directly inspectable.
 S.hist.set("defrost_state", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000, b0: 200,
   held: [], v: [0, 10, 0, 10] });
 const defrostView = h.historyView("defrost_state");
@@ -1307,7 +1347,7 @@ assert.match(defrostHtml, /Abtauen aktiv erfasst · 10 min im 5-Minuten-Raster/)
 assert.match(defrostHtml, /vhist-state-on state-off/);
 assert.match(defrostHtml, /vhist-state-on defrost-on/);
 assert.doesNotMatch(defrostHtml, /vhist-state-runs|· Phasen/);
-assert.match(h.scrubText(defrostView, 1), /Abtauen aktiv\n.* · ca\. 5 min/);
+assert.match(h.scrubText(defrostView, 1), /^\d{2}:\d{2}–\d{2}:\d{2} · ON$/);
 
 S.hist.set("quiet_state", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000, b0: 200,
   held: [], v: [10, 10, 0, 0] });
@@ -1319,17 +1359,21 @@ assert.equal(quietView.series.length, 2);
 assert.match(quietHtml, /vhist-state-track/);
 assert.doesNotMatch(quietHtml, /vhist-line/);
 assert.match(quietHtml, /Leise-Modus aktiv erfasst · 10 min im 5-Minuten-Raster/);
-assert.equal((quietHtml.match(/vhist-state-track/g) || []).length, 2);
-assert.match(quietHtml, /vhist-state-lane-label">X10A/);
-assert.match(quietHtml, /vhist-state-lane-label mb">Modbus/);
-assert.match(quietHtml, /vhist-state-on state-off/);
-assert.match(quietHtml, /vhist-state-on quiet-on/);
-assert.match(quietHtml, /vhist-state-gap/,
-  "a missing Modbus sample stays hatched only in the Modbus lane");
-assert.doesNotMatch(quietHtml, /vhist-state-runs|· Phasen/);
-assert.match(h.scrubText(quietView, 0), /X10A\nLeise-Modus aktiv[\s\S]*Modbus\nLeise-Modus aktiv/);
-assert.match(h.scrubText(quietView, 1), /X10A\nLeise-Modus aktiv[\s\S]*Modbus\nnicht gemessen/);
-assert.match(h.scrubText(quietView, 3), /X10A\nLeise-Modus aus[\s\S]*Modbus\nLeise-Modus aktiv/);
+assert.equal((quietHtml.match(/vhist-state-track/g) || []).length, 1);
+assert.doesNotMatch(quietHtml, /vhist-state-gap/,
+  "a hidden Modbus gap does not clutter the initial X10A-only state track");
+h.histSeriesToggle("quiet_state", "modbus");
+const quietBothHtml = h.histHtml("quiet_state", "", "Leise-Modus");
+assert.equal((quietBothHtml.match(/vhist-state-track/g) || []).length, 2);
+assert.match(quietBothHtml, /vhist-state-on state-off/);
+assert.match(quietBothHtml, /vhist-state-on quiet-on/);
+assert.match(quietBothHtml, /vhist-state-gap/,
+  "a missing Modbus sample stays hatched in the Modbus lane once enabled");
+assert.doesNotMatch(quietBothHtml, /vhist-state-runs|· Phasen/);
+assert.match(h.scrubText(h.historyView("quiet_state"), 0), /^X10A .* · ON\nModbus .* · ON$/);
+assert.match(h.scrubText(h.historyView("quiet_state"), 1), /^X10A .* · ON\nModbus .* · nicht gemessen$/);
+assert.match(h.scrubText(h.historyView("quiet_state"), 3), /^X10A .* · OFF\nModbus .* · ON$/);
+S.histHidden.delete("quiet_state");
 
 // BUH is one component with two event-folded stage bits. The browser combines both aligned rings
 // into an off/step-1/step-2 timeline; it must not graph either raw bit as a numeric 0/1 curve.
@@ -1350,7 +1394,7 @@ assert.match(buhHtml, /vhist-state-on step1/);
 assert.match(buhHtml, /vhist-state-on step2/);
 assert.match(buhHtml, /vhist-state-on state-off/);
 assert.doesNotMatch(buhHtml, /vhist-state-runs|· Phasen/);
-assert.match(h.scrubText(buhView, 0), /^\d{2}:\d{2}–\d{2}:\d{2} · Aus$/);
+assert.match(h.scrubText(buhView, 0), /^\d{2}:\d{2}–\d{2}:\d{2} · OFF$/);
 assert.match(h.scrubText(buhView, 1), /^\d{2}:\d{2}–\d{2}:\d{2} · Stufe 1$/);
 assert.match(h.scrubText(buhView, 2), /^\d{2}:\d{2}–\d{2}:\d{2} · Stufe 2$/);
 assert.match(h.scrubText(buhView, 5), /^\d{2}:\d{2}–\d{2}:\d{2} · nicht gemessen$/,
@@ -1366,8 +1410,7 @@ await h.ensureDerived("pump_speed");
 assert.deepEqual(Array.from(S.hist.get("pump_speed").v), [0, 300, 1000]);
 assert.match(h.histHtml("pump_speed", "", "Drehzahl der Umwälzpumpe"), /0,0 – 100,0 %/);
 
-// The diverter is categorical too. Both selected branches are named, its two witnesses keep their
-// independent lanes, and no numeric 0/1 curve is drawn.
+// The diverter is categorical too. X10A starts active and Modbus toggles into the same chart.
 S.hist.set("valve_dhw", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000, b0: 200,
   held: [], v: [0, 0, 10, 10, 0, 10] });
 S.hist.set("modbus:valve_dhw", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000, b0: 200,
@@ -1379,12 +1422,14 @@ assert.doesNotMatch(valveHtml, /vhist-line/);
 assert.match(valveHtml, /Warmwasser · 15 min · Raumkreis · 15 min/);
 assert.match(valveHtml, /vhist-state-on valve-space/);
 assert.match(valveHtml, /vhist-state-on valve-dhw/);
-assert.equal((valveHtml.match(/vhist-state-track/g) || []).length, 2);
-assert.match(valveHtml, /vhist-state-lane-label">X10A/);
-assert.match(valveHtml, /vhist-state-lane-label mb">Modbus/);
-assert.doesNotMatch(valveHtml, /vhist-state-runs|· Phasen/);
-assert.match(h.scrubText(valveView, 0), /X10A\nRaumkreis[\s\S]*Modbus\nRaumkreis/);
-assert.match(h.scrubText(valveView, 2), /X10A\nWarmwasser[\s\S]*Modbus\nWarmwasser/);
+assert.equal((valveHtml.match(/vhist-state-track/g) || []).length, 1);
+assert.match(h.scrubText(valveView, 0), /^\d{2}:\d{2}–\d{2}:\d{2} · Raumkreis$/);
+assert.match(h.scrubText(valveView, 2), /^\d{2}:\d{2}–\d{2}:\d{2} · Warmwasser$/);
+h.histSeriesToggle("valve_dhw", "modbus");
+assert.equal((h.histHtml("valve_dhw", "", "3-Wege-Ventil").match(/vhist-state-track/g) || []).length, 2);
+assert.match(h.scrubText(h.historyView("valve_dhw"), 0), /^X10A .* · Raumkreis\nModbus .* · Raumkreis$/);
+assert.match(h.scrubText(h.historyView("valve_dhw"), 2), /^X10A .* · Warmwasser\nModbus .* · Warmwasser$/);
+S.histHidden.delete("valve_dhw");
 
 // The legacy history id `valve_heat` stores the optional 2-way/heating-cooling OUTPUT. It is not the
 // configured/current operating mode, so the timeline must retain ON/OFF and never turn idle periods
@@ -1398,8 +1443,8 @@ assert.match(valve2Html, /2WV-Ausgang ON · 15 min · 2WV-Ausgang OFF · 15 min/
 assert.match(valve2Html, /vhist-state-on state-off/);
 assert.match(valve2Html, /vhist-state-on valve2-on/);
 assert.doesNotMatch(valve2Html, /Kühlstellung|Heizstellung|>Kühlen<|>Heizen</);
-assert.match(h.scrubText(valve2View, 0), /2WV-Ausgang OFF\n.* · ca\. 10 min/);
-assert.match(h.scrubText(valve2View, 2), /2WV-Ausgang ON\n.* · ca\. 10 min/);
+assert.match(h.scrubText(valve2View, 0), /^\d{2}:\d{2}–\d{2}:\d{2} · OFF$/);
+assert.match(h.scrubText(valve2View, 2), /^\d{2}:\d{2}–\d{2}:\d{2} · ON$/);
 
 // Every categorical timeline uses the same live-cap contract, including derived BUH and the MQTT
 // circulation witness. Structural concepts are mandatory; no label matching or cross-source
@@ -1538,16 +1583,16 @@ assert.doesNotMatch(h.scrubText(view, 3), /Boost|Heizstab/, "Sample 3 without ac
   const tank = S.hist.get("dhw_tank");
   const boost = S.hist.get("modbus:smart_grid_mode");
   S.hist.set("dhw_tank", { ...tank, b0: null, t0: 1768720000 });
-  S.hist.set("modbus:smart_grid_mode", { ...boost, b0: null, t0: 1768720150 });
-  assert.doesNotMatch(h.histHtml("dhw_tank", "°C", "Tank"), /vhist-phase-boost/,
-    "a wall-only phase does not move to a different tank bucket");
+  S.hist.set("modbus:smart_grid_mode", { ...boost, b0: null, t0: 1768720000 });
+  assert.match(h.histHtml("dhw_tank", "°C", "Tank"), /vhist-phase-boost/,
+    "wall-aligned auxiliary phases remain overlaid on the shared tank chart");
   S.hist.set("dhw_tank", { ...tank, b0: -4, t0: 1768720000 });
   S.hist.set("modbus:smart_grid_mode", { ...boost, b0: -4, t0: 1768720007 });
-  assert.doesNotMatch(h.histHtml("dhw_tank", "°C", "Tank"), /vhist-phase-boost/,
-    "another recorder's restored phase may have a different gap before boot");
+  assert.match(h.histHtml("dhw_tank", "°C", "Tank"), /Empfehlung ein · Modbus/,
+    "restored pre-boot HomeHub auxiliary phases remain visible on the shared tank chart");
   S.hist.set("smart_grid_mode", { ...boost, b0: -4 });
   assert.match(h.histHtml("dhw_tank", "°C", "Tank"), /Empfehlung ein · X10A/,
-    "the same recorder's restored boot raster preserves its own auxiliary phase");
+    "the X10A restored boot raster also preserves its auxiliary phase");
   S.hist.delete("smart_grid_mode");
   S.hist.set("dhw_tank", tank);
   S.hist.set("modbus:smart_grid_mode", boost);
@@ -1795,6 +1840,46 @@ try {
 } finally {
   vm.runInContext("dhwAuxPhases = originalAuxScan; " +
     "if (this.originalReadout) histReadout = originalReadout;", context);
+}
+
+// Paket 1 Modbus state timelines + phase count and strictly source-isolated Modbus dt / pth derived trends.
+{
+  const prevStatus = JSON.parse(JSON.stringify(S.status));
+  const prevHist = new Map(S.hist);
+  const prevModbus = S._modbus;
+  S.status.hp = { connected: false };
+  S.status.modbus = { enabled: true, connected: true, host: "hub-1" };
+  S.status.history = {
+    rows: [],
+    modbus_rows: ["leaving_water", "return_water", "flow", "compressor_state", "modbus_power",
+                  "modbus_defrost_state", "pump_state"].map((id) => ({ id, label: id })),
+  };
+  h.syncHistSources();
+  S.hist.set("leaving_water", { at: Date.now(), gen: 99, dt: 300, unit: "°C", b0: 10, held: [], v: [900, 900] });
+  S.hist.set(h.histCacheKey("leaving_water", "modbus"), { at: Date.now(), gen: 1, dt: 300, unit: "°C", b0: 10, held: [], v: [350, 350, 360] });
+  S.hist.set(h.histCacheKey("return_water", "modbus"), { at: Date.now(), gen: 1, dt: 300, unit: "°C", b0: 10, held: [], v: [300, 300, 310] });
+  S.hist.set(h.histCacheKey("flow", "modbus"), { at: Date.now(), gen: 1, dt: 300, unit: "L/min", b0: 10, held: [], v: [120, 120, 0] });
+  S.hist.set(h.histCacheKey("compressor_state", "modbus"), { at: Date.now(), gen: 1, dt: 300, unit: "", b0: 10, held: [], v: [10, 0, 10, 10, 0, 10] });
+  S.hist.set(h.histCacheKey("modbus_defrost_state", "modbus"), { at: Date.now(), gen: 1, dt: 300, unit: "", b0: 10, held: [], v: [0, 10, 0] });
+  S.hist.set(h.histCacheKey("pump_state", "modbus"), { at: Date.now(), gen: 1, dt: 300, unit: "", b0: 10, held: [], v: [10, 10, 0] });
+  S.hist.set(h.histCacheKey("modbus_power", "modbus"), { at: Date.now(), gen: 1, dt: 300, unit: "kW", b0: 10, held: [], v: [14, 15, 0] });
+  assert.equal(h.hasModbusHist("dt"), true);
+  assert.equal(h.hasModbusHist("pth"), true);
+  await h.ensureDerived("dt", "modbus");
+  await h.ensureDerived("pth", "modbus");
+  assert.deepEqual(Array.from(S.hist.get(h.histCacheKey("dt", "modbus")).v), [50, 50, 50],
+    "modbus:dt must use only Modbus temperatures without X10A mixing");
+  assert.deepEqual(Array.from(S.hist.get(h.histCacheKey("pth", "modbus")).v.slice(0, 3)), [42, null, 0],
+    "modbus:pth computes power only when compressor_state is active and keeps stopped flow at zero");
+  assert.match(h.histHtml("compressor_state", "", "Verdichter"), /3 Phasen/,
+    "compressor_state summary renders observed active phase count");
+  assert.match(h.histHtml("modbus_defrost_state", "", "Abtauen"), /vhist-state-track modbus/);
+  assert.match(h.histHtml("pump_state", "", "Pumpe"), /vhist-state-track modbus/);
+  assert.match(h.histHtml("modbus_power", "kW", "Leistungsaufnahme"), /data-source="modbus"/);
+  S.status = prevStatus;
+  h.syncHistSources();
+  S.hist = prevHist;
+  S._modbus = prevModbus;
 }
 
 console.log("UI history sources: X10A, Modbus and MQTT room rings align, gap, render and fetch independently");
