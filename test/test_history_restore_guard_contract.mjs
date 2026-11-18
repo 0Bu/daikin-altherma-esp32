@@ -571,4 +571,43 @@ assert.match(sealedNext, /logic::checkup_seal_emits\(slot\.seal_bucket, after_bu
 assert.match(sealedNext, /payload\.checkup = slot\.P\(\)\.ring\.pending; payload\.dhw = slot\.P\(\)\.dhw\.pending;/);
 assert.match(body(checkup, "void persist_wipe("), /slot\.seal_bucket = slot\.seal_end_unix_s = INT64_MIN;/,
   "a wipe leaves no sealed hour to journal");
+
+// Single-sweep X10A `pel` and `cop` capability must come from `poll_once()`'s adjudicated profile
+// pass rather than a second `with_config` / `def::lookup` walk or an unbudgeted `noinline` callee
+// underneath `history_record()`'s 3.1 KiB local arrays on `poll_task`'s 8 KiB stack.
+function verifyPollHistoryStackBoundary(historySrc, pollSrc) {
+  const histRec = body(historySrc, "void history_record(const CachedValue");
+  const evalDerived = body(historySrc, "SweepDerivedSamples evaluate_sweep_derived(");
+  const pollOnce = body(pollSrc, "inline static void poll_once()");
+  if (/derived_coverage_for_target/.test(historySrc)) return "derived_coverage_for_target present";
+  if (/__attribute__\s*\(\(\s*noinline\s*\)\)\s*SweepDerivedSamples/.test(historySrc))
+    return "evaluate_sweep_derived marked noinline";
+  if (!/\[\[gnu::always_inline\]\]\s*inline\s+SweepDerivedSamples\s+evaluate_sweep_derived\b/.test(historySrc))
+    return "evaluate_sweep_derived not always_inline";
+  if (/\b(?:with_config|lookup|adjudicated)\s*\(/.test(histRec) || /\b(?:with_config|lookup|adjudicated)\s*\(/.test(evalDerived))
+    return "Config/profile walk inside history_record";
+  if (!/s_poll_cop_inputs/.test(evalDerived))
+    return "HistoryCopInputs not in static poll scratch";
+  const setCovAt = pollOnce.indexOf("history_set_derived_coverage(history_coverage);");
+  const recAt = pollOnce.indexOf("history_record(fresh.data(), fresh.size(), cycle_generation);");
+  if (setCovAt < 0 || recAt < 0 || setCovAt >= recAt)
+    return "poll_once does not hand off history_coverage before history_record";
+  if (!/logic::history_cover_derived_row\(history_coverage,\s*row\.label,\s*unit_for_row\(row\),\s*row\.reg,\s*row\.offset,\s*row\.conv\);/.test(pollOnce))
+    return "poll_once does not populate history_coverage from adjudicated publishable rows";
+  return "";
+}
+assert.equal(verifyPollHistoryStackBoundary(history, poll), "",
+  "poll_once must pass static derived coverage into always_inline evaluate_sweep_derived without stacking noinline/Config frames on poll_task");
+// Negative controls: reintroducing an unbudgeted noinline child frame, a Config/profile walk, or a
+// missing poll_once handoff must fail this contract check.
+assert.equal(verifyPollHistoryStackBoundary(
+  history.replace("[[gnu::always_inline]] inline SweepDerivedSamples", "__attribute__((noinline)) SweepDerivedSamples"),
+  poll), "evaluate_sweep_derived marked noinline");
+assert.equal(verifyPollHistoryStackBoundary(
+  history.replace("if (!cov.pel_supported()) return out;", "with_config([](const Config&){}); if (!cov.pel_supported()) return out;"),
+  poll), "Config/profile walk inside history_record");
+assert.equal(verifyPollHistoryStackBoundary(
+  history, poll.replace("history_set_derived_coverage(history_coverage);", "")),
+  "poll_once does not hand off history_coverage before history_record");
+
 console.log("history restore guard contract: ok");

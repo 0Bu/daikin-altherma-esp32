@@ -561,6 +561,103 @@ inline void fold_board_locked(const BoardSample& board) {
     }
 }
 
+struct SweepDerivedSamples {
+    HistorySample pel = HISTORY_NO_READING;
+    HistorySample cop = HISTORY_NO_READING;
+};
+
+// Poll-task-only scratch populated by poll_once()'s adjudicated profile pass before
+// history_record() runs, keeping Config/profile lookups and HistoryCopInputs off poll_task's stack.
+logic::HistoryDerivedCoverage s_poll_derived_coverage{};
+logic::HistoryCopInputs       s_poll_cop_inputs{};
+
+[[gnu::always_inline]] inline SweepDerivedSamples
+evaluate_sweep_derived(const CachedValue* v, const char* const* labels, const uint8_t* regs,
+                       const uint8_t* offs, const int16_t* convs, size_t rows,
+                       const logic::HistoryDerivedCoverage& cov, bool rps_known, bool rps_running,
+                       int rps_tenths) {
+    SweepDerivedSamples out;
+    if (!cov.pel_supported()) return out;
+
+    uint8_t ct_valid      = 0;
+    int     ct_sum_tenths = 0;
+    bool    inv_known     = false;
+    int     inv_tenths    = 0;
+    auto&   cop_in        = s_poll_cop_inputs;
+    cop_in                = logic::HistoryCopInputs{};
+    cop_in.rps_known      = rps_known;
+    cop_in.rps_tenths     = rps_tenths;
+
+    const int lwt_i = logic::lwt_select(labels, rows);
+    const int rwt_i = logic::rwt_select(labels, rows);
+    if (lwt_i >= 0 && value_tenths(v[lwt_i].value, cop_in.lwt_tenths)) cop_in.lwt_known = true;
+    if (rwt_i >= 0 && value_tenths(v[rwt_i].value, cop_in.rwt_tenths)) cop_in.rwt_known = true;
+
+    for (size_t i = 0; i < rows; i++) {
+        int tenths = 0;
+        if (!cop_in.post_buh_known && logic::cop_is_post_buh(labels[i], regs[i])) {
+            if (value_tenths(v[i].value, cop_in.post_buh_tenths)) cop_in.post_buh_known = true;
+            continue;
+        }
+        if (logic::history_is_ct_current_label(labels[i])) {
+            if (value_tenths(v[i].value, tenths) && tenths >= 0) {
+                ct_valid++;
+                ct_sum_tenths += tenths;
+            }
+            continue;
+        }
+        if (regs[i] == 0x21 && offs[i] == 0 &&
+            (logic::trend_cstr_eq(v[i].unit, "") || logic::trend_cstr_eq(v[i].unit, "A"))) {
+            if (value_tenths(v[i].value, tenths)) {
+                inv_known  = true;
+                inv_tenths = tenths;
+            }
+            continue;
+        }
+        if (regs[i] == 0x62 && offs[i] == 9 &&
+            (logic::trend_cstr_eq(v[i].unit, "") || logic::trend_cstr_eq(v[i].unit, "L/min"))) {
+            if (value_tenths(v[i].value, tenths)) {
+                cop_in.flow_known  = true;
+                cop_in.flow_tenths = tenths;
+            }
+            continue;
+        }
+        if (regs[i] == 0x10 && offs[i] == 1 && convs[i] == 304) {
+            if (value_tenths(v[i].value, tenths) && (tenths == 0 || tenths == 10)) {
+                cop_in.defrost_known = true;
+                cop_in.defrost_on    = tenths == 10;
+            }
+            continue;
+        }
+        if (regs[i] == 0x60 && offs[i] == 12) {
+            if (!value_tenths(v[i].value, tenths) || (tenths != 0 && tenths != 10)) continue;
+            if (convs[i] == 304) {
+                cop_in.buh1_known = true;
+                cop_in.buh1_on    = tenths == 10;
+            } else if (convs[i] == 303) {
+                cop_in.buh2_known = true;
+                cop_in.buh2_on    = tenths == 10;
+            } else if (convs[i] == 305) {
+                cop_in.bsh_known = true;
+                cop_in.bsh_on    = tenths == 10;
+            } else if (convs[i] == 306) {
+                cop_in.valve_dhw_known = true;
+                cop_in.valve_dhw_on    = tenths == 10;
+            }
+            continue;
+        }
+        if (regs[i] == 0x60 && offs[i] == 2 && convs[i] == 315) {
+            if (logic::history_iu_mode_is_heating(v[i].value.c_str())) cop_in.iu_heating = true;
+        }
+    }
+
+    const logic::HistoryPelEval pel_eval = logic::history_electrical_power(
+        cov, ct_valid, ct_sum_tenths, inv_known, inv_tenths, rps_known, rps_running);
+    out.pel = pel_eval.sample;
+    if (cov.cop_supported()) out.cop = logic::history_cop_sample(cov, pel_eval, cop_in);
+    return out;
+}
+
 inline void reset_circulation_locked(uint32_t bucket) {
     if (!s_circulation_reset_requested.exchange(false)) return;
     const size_t completed = logic::history_completed_samples(bucket);
@@ -1437,6 +1534,10 @@ void history_record_room(bool valid, double temperature_c, uint32_t generation) 
     if (changed) room_seal_locked();
 }
 
+void history_set_derived_coverage(const logic::HistoryDerivedCoverage& cov) noexcept {
+    s_poll_derived_coverage = cov;
+}
+
 void history_record(const CachedValue* v, size_t n, uint32_t source_generation) {
     if (!s_mtx) return;
     if (!v) n = 0;
@@ -1467,23 +1568,29 @@ void history_record(const CachedValue* v, size_t n, uint32_t source_generation) 
     // Resolve every row once before the lock. Besides avoiding a second catalog scan, this lets a
     // changed non-empty label reset ALL X10A plant rings together before any current-bucket sample
     // is folded. Board histories are independent of the heat-pump identity and remain intact.
-    int selected[TREND_COUNT];
+    int16_t selected[TREND_COUNT];
     for (size_t t = 0; t < TREND_COUNT; t++) {
         const logic::TrendDef& d = logic::TRENDS[t];
-        selected[t] = (d.kind == logic::TrendKind::Row ||
-                       d.kind == logic::TrendKind::BinaryState ||
-                       d.kind == logic::TrendKind::BinaryEvent)
-            ? logic::trend_select(d, regs, offs, units, convs, rows) : -1;
+        selected[t] =
+            (d.kind == logic::TrendKind::Row || d.kind == logic::TrendKind::BinaryState ||
+             d.kind == logic::TrendKind::BinaryEvent)
+                ? static_cast<int16_t>(logic::trend_select(d, regs, offs, units, convs, rows))
+                : static_cast<int16_t>(-1);
     }
 
     // The compressor witness decides whether the outdoor pages are still being refreshed. ABSENT is
     // unknown, not stopped (logic/history.hpp) — a profile without the row keeps recording.
     const int rps_i = logic::trend_rps_row(labels, regs, rows);
-    bool rps_known = false, rps_running = false;
-    if (rps_i >= 0) {
-        int rps_tenths = 0;
-        if (value_tenths(v[rps_i].value, rps_tenths)) { rps_known = true; rps_running = rps_tenths > 0; }
+    bool      rps_known = false, rps_running = false;
+    int       rps_tenths = 0;
+    if (rps_i >= 0 && value_tenths(v[rps_i].value, rps_tenths)) {
+        rps_known   = true;
+        rps_running = rps_tenths > 0;
     }
+
+    const logic::HistoryDerivedCoverage& derived_cov = s_poll_derived_coverage;
+    const SweepDerivedSamples            derived     = evaluate_sweep_derived(
+        v, labels, regs, offs, convs, rows, derived_cov, rps_known, rps_running, rps_tenths);
 
     // Smart-Grid mode is one state assembled from TWO contact bits. Resolve both by their structural
     // semantics, never their labels; the generated catalog spells labels for humans, while these
@@ -1571,6 +1678,17 @@ void history_record(const CachedValue* v, size_t n, uint32_t source_generation) 
             if (copy_field(tr.label, sizeof(tr.label), d.label)) s_persist_dirty = true;
             if (copy_field(tr.unit, sizeof(tr.unit), d.unit)) s_persist_dirty = true;
             tr.ring.fold(sg_mode);
+            continue;
+        }
+
+        if (d.kind == logic::TrendKind::ElectricalPower || d.kind == logic::TrendKind::Cop) {
+            const bool supported = d.kind == logic::TrendKind::ElectricalPower
+                                       ? derived_cov.pel_supported()
+                                       : derived_cov.cop_supported();
+            if (!supported) continue;
+            if (copy_field(tr.label, sizeof(tr.label), d.label)) s_persist_dirty = true;
+            if (copy_field(tr.unit, sizeof(tr.unit), d.unit)) s_persist_dirty = true;
+            tr.ring.fold(d.kind == logic::TrendKind::ElectricalPower ? derived.pel : derived.cop);
             continue;
         }
 

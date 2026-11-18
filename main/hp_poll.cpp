@@ -66,6 +66,7 @@ static logic::RefrigerantServiceCoverage s_refrigerant_service_coverage;
 // another ~100 B in poll_task's inlined poll_once frame every second. No other task reads them.
 static logic::RefrigerantServiceCoverage s_refrigerant_service_cycle_coverage;
 static logic::RefrigerantServiceSample   s_refrigerant_service_cycle_sample;
+static logic::HistoryDerivedCoverage     s_history_cycle_coverage;
 static uint8_t                           s_refrigerant_service_seen_registers[32];
 
 // Auto-detect backoff state — poll-task-owned, RAM only (model/detection is never persisted: it is
@@ -295,14 +296,16 @@ static void checkup_record_poll_gap(uint32_t generation, bool profile_confirmed 
     // (see the profile_refrigerant comment below).
     const auto    view = def::resolved(prof);
     logic::CheckupCoverage checkup_coverage;
-    auto& service_coverage = s_refrigerant_service_cycle_coverage;
-    service_coverage = logic::RefrigerantServiceCoverage{};
+    auto&                  service_coverage = s_refrigerant_service_cycle_coverage;
+    auto&                  history_coverage = s_history_cycle_coverage;
+    service_coverage                        = logic::RefrigerantServiceCoverage{};
+    history_coverage                        = logic::HistoryDerivedCoverage{};
     for (uint8_t& value : s_refrigerant_service_seen_registers) value = 0;
     uint32_t service_register_count = 0;
     for (size_t i = 0; i < view.count(); i++) {
         if (!row_publishable(view[i])) continue;
         const ValueDef row                  = logic::adjudicated(view, i);
-        const uint8_t service_register_bit = static_cast<uint8_t>(1U << (row.reg & 7U));
+        const uint8_t  service_register_bit = static_cast<uint8_t>(1U << (row.reg & 7U));
         if (!(s_refrigerant_service_seen_registers[row.reg >> 3U] & service_register_bit)) {
             s_refrigerant_service_seen_registers[row.reg >> 3U] |= service_register_bit;
             service_register_count++;
@@ -310,7 +313,10 @@ static void checkup_record_poll_gap(uint32_t generation, bool profile_confirmed 
         logic::checkup_cover_row(checkup_coverage, row.reg, row.offset, row.conv, row.label);
         logic::refrigerant_service_cover_row(service_coverage, row.reg, row.offset, row.conv,
                                              row.label, logic::fg_is_refrigerant_pressure(view, i));
+        logic::history_cover_derived_row(history_coverage, row.label, unit_for_row(row), row.reg,
+                                         row.offset, row.conv);
     }
+    history_set_derived_coverage(history_coverage);
     // A healthy gap is the fixed sleep plus at most one transport timeout per queried page.  A
     // second poll interval is deliberate scheduling margin; unlike the former universal 3 s rule,
     // this scales with the actual profile and cannot punish a valid large sweep for having more pages.

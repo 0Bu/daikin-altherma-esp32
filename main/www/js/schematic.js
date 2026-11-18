@@ -813,6 +813,7 @@ const PEL_INSPECT = {
     ? { en: "Electrical input (HomeHub)", de: "Stromaufnahme (HomeHub)" }
     : { en: "Electrical input (estimated)", de: "Geschätzte Stromaufnahme" },
   aria: { en: "Electrical input", de: "Stromaufnahme" },
+  trend: () => hasHist("pel") ? "pel" : "",
   what: (d) => pelMeasured(d) ? PEL_MEASURED_WHAT : PEL_ESTIMATED_WHAT,
   head: (d) => (d.pel == null ? "—" : pelApproxText(d) + fmt1(d.pel) + " kW"),
   // Four cases: the measured gateway row, either X10A current source, a held-over inverter row, or
@@ -1130,6 +1131,7 @@ const INSPECT = {
     // The hit target's accessible name — stable, because it is applied once at startup (see
     // labelSchematicHits). Which COP it turns out to be is the panel's to say, not the label's.
     aria: { en: "Efficiency (estimated)", de: "Geschätzte Effizienz" },
+    trend: (d) => d && d.efficiencyKind === "eer" ? "" : "cop",
     what: (d) => d && d.efficiencyKind === "eer"
       ? { en: "Estimated cooling capacity divided by estimated electrical input. The cooling numerator uses internal PHE sensors and is accepted only with a running compressor and R1T below R4T. The result inherits the water/glycol, sensor, voltage and power-factor assumptions of both estimates. Daikin also describes calculated energy figures as estimates whose accuracy is not guaranteed. This is an instantaneous EER, not a seasonal efficiency figure; metered seasonal energy is more meaningful.",
           de: "Geschätzte Kälteleistung geteilt durch geschätzte elektrische Aufnahme. Die Kälteleistung im Zähler nutzt die internen PHE-Fühler und wird nur bei laufendem Verdichter sowie R1T unter R4T gewertet. Das Ergebnis übernimmt alle Annahmen zu Wasser oder Glykol, Fühlern, Spannung und Leistungsfaktor aus beiden Schätzungen. Auch Daikin bezeichnet berechnete Energiewerte als Schätzungen ohne garantierte Genauigkeit. Das ist ein momentaner EER und keine saisonale Effizienzkennzahl; aussagekräftiger ist saisonal gemessene Energie." }
@@ -1763,7 +1765,7 @@ function renderInspectHist(e, row, mode = "") {
   const offered = (id) => trendSource === "modbus" ? hasModbusHist(id)
     : trendSource === "x10a" ? hasHist(id) : hasHist(id) || hasModbusHist(id) || hasRoomHist(id);
   const explicitId = trendId && offered(trendId) ? trendId : "";
-  const mbFallbackId = S.insp === "pel" ? (S.live?.pelSrc === "MB" ? "modbus_power" : "")
+  const mbFallbackId = S.insp === "pel" ? (!explicitId && S.live?.pelSrc === "MB" ? "modbus_power" : "")
     : S.insp === "ou" ? (down ? "compressor_state" : "")
     : (!explicitId || down ? (MB_INSPECT_TREND[S.insp] || "") : "");
   const useMbFallback = !!mbFallbackId && hasModbusHist(mbFallbackId);
@@ -1812,7 +1814,7 @@ function renderInspectHist(e, row, mode = "") {
                         trendSource)
     : row ? histHtml(id, displayUnit(row), chartName || displayReadingLabel(row.label, row), trendSource)
     : pairedId ? histHtml(id, mb ? displayUnit(mb) : "", mb ? displayHomeHubLabel(mb) : inspTitleText(e, null), trendSource)
-               : histHtml(id, DERIVED[id]?.unit || "",
+               : histHtml(id, DERIVED[id]?.unit || h?.unit || mh?.unit || "",
                           e.aria ? inspFieldText(e, "aria", null) : inspTitleText(e, null), trendSource));
   return started;
 }

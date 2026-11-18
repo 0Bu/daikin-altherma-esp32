@@ -388,15 +388,13 @@ Live-only pairings without shared history rings add circulation pump running (`3
 converter `301`, concept `pump_running`), space heating/cooling normal operation (`53` ↔ X10A
 `0x62/2`, converter `303`, concept `space_op`), and — on native Altherma 4 — water pressure (`79` ↔
 X10A `0x62/11`, concept `water_pressure`).
-Native Altherma 4 holding 9 reports selection and is excluded from the `quiet_state` pairing and history. The rest carry no pairing on
-purpose, each for a stated reason: the real power measurement has
-no X10A equivalent at all (X10A estimates it from CT clamps at an assumed 230 V, so pairing a
-measurement with an estimate would hide which is which); other setpoints, modes and faults are not readings.
+Native Altherma 4 holding 9 reports selection and is excluded from the `quiet_state` pairing and history. The rest carry no scalar `HOMEHUB_CONCEPTS` pairing on
+purpose, each for a stated reason: the HomeHub power register (`51`) has no single raw X10A scalar row (X10A estimates electrical input from CT clamps or inverter current at 230 V); other setpoints, modes and faults are not readings.
 Disinfection input `33` is likewise deliberately unpaired: X10A `0x62/8` converter `303` is named
 **Tank preheat**, a preparatory state rather than proof that disinfection is active. Together with
 Smart-Grid mode (`56`), HomeHub buffers **17 rings**: the 11 paired measurements/states, Smart-Grid mode,
-and five standalone Modbus timelines (`disinfection_state` `33`, `compressor_state` `31`,
-`modbus_power` `51`, `modbus_defrost_state` `35` combined defrost/restart flag, and `pump_state` `30`),
+`modbus_power` (`51`, which also joins the electrical-input `pel` inspector chart as an independent source-labelled `Modbus` series when X10A `pel` is offered, without merging live scalar rows), and four standalone Modbus timelines (`disinfection_state` `33`, `compressor_state` `31`,
+`modbus_defrost_state` `35` combined defrost/restart flag, and `pump_state` `30`),
 following the same rule as independent HomeHub histories rather than splicing into X10A `comp_rps`,
 `defrost_state`, or `pump_signal` rings.
 

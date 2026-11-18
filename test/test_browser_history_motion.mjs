@@ -1279,7 +1279,7 @@ export async function assertHistoryMotion(page, server, context) {
       }
       if (key === "tank" && page.assertFlowPaint) await page.assertFlowPaint(label);
       const expected = key === "env3" ? ["env3_temperature", "env3_humidity", "env3_pressure"]
-        : [ "x10a", ...(key !== "bsh" && (MODBUS_HISTORY_ROWS.some(row => row.id === id) || id === "dt" || id === "pth") ? ["modbus"] : []),
+        : [ "x10a", ...(key !== "bsh" && (MODBUS_HISTORY_ROWS.some(row => row.id === id) || id === "pel" || id === "dt" || id === "pth") ? ["modbus"] : []),
           ...(key === "room" ? ["room"] : []) ];
       assert.deepEqual(chart.sources, expected, label + ": preserve independent history sources");
       if (key === "env3") assert.equal(chart.forecast, true, label + ": forecast must accompany real ENV III history");

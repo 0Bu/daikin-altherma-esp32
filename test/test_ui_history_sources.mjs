@@ -1876,6 +1876,33 @@ try {
   assert.match(h.histHtml("modbus_defrost_state", "", "Abtauen"), /vhist-state-track modbus/);
   assert.match(h.histHtml("pump_state", "", "Pumpe"), /vhist-state-track modbus/);
   assert.match(h.histHtml("modbus_power", "kW", "Leistungsaufnahme"), /data-source="modbus"/);
+  // When single-sweep X10A pel and cop trends are offered alongside HomeHub modbus_power,
+  // pel pairs both series onto one shared chart (preserving compressor-idle held-over pauses on
+  // X10A) while cop stays strictly X10A-only.
+  S.status.hp = { connected: true };
+  S.status.history.rows = [
+    { id: "pel", label: "Electrical input (estimated)" },
+    { id: "cop", label: "COP (estimated)" },
+  ];
+  h.syncHistSources();
+  S.hist.set("pel", { at: Date.now(), gen: 1, dt: 300, unit: "kW", b0: 10, held: [[0, 1]], v: [null, 17, 19] });
+  S.hist.set("cop", { at: Date.now(), gen: 1, dt: 300, unit: "", b0: 10, held: [[0, 1]], v: [null, 31, 34] });
+  assert.equal(h.hasHist("pel"), true);
+  assert.equal(h.hasModbusHist("pel"), true);
+  assert.equal(h.hasHist("cop"), true);
+  assert.equal(h.hasModbusHist("cop"), false);
+  const pelView = h.historyView("pel");
+  assert.deepEqual(Array.from(pelView.series, s => s.source), ["x10a", "modbus"],
+    "pel overlays single-sweep X10A estimate and HomeHub modbus_power on one shared chart");
+  assert.deepEqual(Array.from(pelView.series[0].held, r => Array.from(r)), [[0, 1]],
+    "X10A pel preserves compressor-idle held-over pauses");
+  const pelHtml = h.histHtml("pel", "kW", "Stromaufnahme");
+  assert.equal((pelHtml.match(/data-hist="pel"/g) || []).length, 1);
+  assert.match(pelHtml, /data-hist-series="modbus" aria-pressed="false"/);
+  const copView = h.historyView("cop");
+  assert.deepEqual(Array.from(copView.series, s => s.source), ["x10a"]);
+  assert.deepEqual(Array.from(copView.series[0].held, r => Array.from(r)), [[0, 1]],
+    "X10A cop preserves compressor-idle held-over pauses");
   S.status = prevStatus;
   h.syncHistSources();
   S.hist = prevHist;

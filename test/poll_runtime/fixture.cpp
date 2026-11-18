@@ -162,6 +162,7 @@ void stack_watch_sample(StackWatch) noexcept { ++sdk::stack_samples; }
 void heap_guard_sample() {}
 void history_liveness_touch() noexcept {}
 void history_record_board() {}
+void history_set_derived_coverage(const logic::HistoryDerivedCoverage&) noexcept {}
 void history_record(const CachedValue* values, size_t count, uint32_t) {
     ++sdk::history_commits;
     sdk::history_outdoor_values = 0;
