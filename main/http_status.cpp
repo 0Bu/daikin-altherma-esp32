@@ -147,7 +147,7 @@ static esp_err_t network_tls_busy(httpd_req_t* req) {
 // Quote a string for JSON via the shared RFC 8259 encoder (logic/json.hpp) — the same one the MQTT
 // payloads use. Not a local escaper: /scan echoes SSIDs, i.e. arbitrary bytes chosen by any AP in
 // radio range, and a control char in one used to emit unparseable JSON.
-static std::string jstr(std::string_view s) { return json_quote(s); }
+[[maybe_unused]] static std::string jstr(std::string_view s) { return json_quote(s); }
 
 // The same, for the reporter-identifying values `GET /status?redact=1` withholds. Applied where
 // the value is WRITTEN, never as a pass over the finished JSON: this builder runs on the httpd task
@@ -156,8 +156,9 @@ static std::string jstr(std::string_view s) { return json_quote(s); }
 // build that never had it, and "which build produced this?" is the first question a frozen bug
 // report has to answer.
 // redact_identifier, not redact_or: an UNSET identifier is left empty rather than substituted, so
-// "this installation has no HomeHub / no room source / no broker" survives into the report instead of
-// being spelled the same way as "it has one and hid it" (logic/redact.hpp carries the reasoning).
+// "this installation has no HomeHub / no room source / no broker" survives into the report instead
+// of being spelled the same way as "it has one and hid it" (logic/redact.hpp carries the
+// reasoning).
 static std::string jstr_r(const std::string& s, bool redact) {
     return json_quote(redact_identifier(s, redact));
 }
@@ -358,7 +359,6 @@ static void append_status_json(JsonOut& j, bool redact) {
     char elf_sha[65] = {0};
     esp_app_get_elf_sha256(elf_sha, sizeof(elf_sha));
     qfield(",\"app_elf_sha256\":", elf_sha);
-    j += ",";
     // GPIOs the UI offers in the RX/TX pin dropdown. A concrete selected board narrows the generic
     // ESP32-S3 chip-safe set to pads its PCB actually exposes; Custom keeps the generic list
     // because only its owner knows that board's headers. In both cases the live reservation removes
@@ -373,12 +373,11 @@ static void append_status_json(JsonOut& j, bool redact) {
                                            ? board_preset_x10a_pins_offerable(selected_board, pins, BOARD_PINS_MAX,
                                                                               hw_octal_spi(), x10a_used)
                                            : board_pins_offerable(pins, BOARD_PINS_MAX, hw_octal_spi(), x10a_used);
-        j += "\"pins_avail\":[";
+        j += ",\"pins_avail\":[";
         for (int i = 0; i < npins; i++) {
             if (i) j += ",";
             append_json_int(j, pins[i]);
         }
-        j += "],";
     }
     // Board-local hardware: what the indicator + recovery button are configured as, plus the pins
     // they MAY be moved to. A separate list from pins_avail — wider by the dedicated-JTAG pads,
@@ -398,7 +397,7 @@ static void append_status_json(JsonOut& j, bool redact) {
         // a time and takes a bare string literal with no std::string wrapper at all, so it drops
         // the allocations too. Same shape below for the presets, and worth keeping if this block
         // grows again.
-        ufield("\"board\":{\"config_revision\":", c.runtime_revision);
+        ufield("],\"board\":{\"config_revision\":", c.runtime_revision);
         ifield(",\"led_gpio\":", c.led_gpio);
         ifield(",\"led_type\":", c.led_type);
         bfield(",\"led_inverted\":", c.led_inverted);
@@ -464,10 +463,8 @@ static void append_status_json(JsonOut& j, bool redact) {
                 if (k) j += ",";
                 append_json_int(j, bipins[k]);
             }
-            j += "]";
-            j += "}";
+            j += "]}";
         }
-        j += "]},";
     }
     // Independent outdoor-climate observation. These values do not replace the Daikin R1T source:
     // only fresh, whole ENV III samples are exposed as numbers, while stale/error state stays
@@ -495,7 +492,7 @@ static void append_status_json(JsonOut& j, bool redact) {
             std::snprintf(env_hum, sizeof(env_hum), "%.2f", env.humidity_pct);
             std::snprintf(env_press, sizeof(env_press), "%.2f", env.pressure_hpa);
         }
-        j += "\"env3\":{\"type\":\"env_iii\",\"supported\":";
+        j += "]},\"env3\":{\"type\":\"env_iii\",\"supported\":";
         j += env_supported ? "true" : "false";
         bfield(",\"enabled\":", env_enabled);
         ifield(",\"sda\":", c.env3_sda);
@@ -569,7 +566,6 @@ static void append_status_json(JsonOut& j, bool redact) {
         // work, PR legacy-65) — for now it is the API's answer to "did my save actually
         // stick?".
         bfield(",\"rolled_back\":", c.wifi_rolled_back);
-        j += "},";
         // WHICH TRANSPORT carries the device, and what the optional wire is doing. A separate block
         // from "wifi" rather than a widening of it, because the two describe different hardware and
         // a reader must be able to tell "no radio configured" from "no radio because there is a
@@ -590,7 +586,7 @@ static void append_status_json(JsonOut& j, bool redact) {
             snprintf(eth_mac_str, sizeof(eth_mac_str), "%02X:%02X:%02X:%02X:%02X:%02X", eth.mac[0],
                      eth.mac[1], eth.mac[2], eth.mac[3], eth.mac[4], eth.mac[5]);
         const NetLink kind = net_kind();
-        qfield("\"net\":{\"kind\":", net_link_str(kind));
+        qfield("},\"net\":{\"kind\":", net_link_str(kind));
         j += ",\"ip\":";
         j += jstr_r(kind == NetLink::Eth ? eth.ip : kind == NetLink::Wifi ? wi.ip : "", redact);
         bfield(",\"eth\":{\"supported\":", net_eth_pins_valid(eth_pins));
@@ -614,7 +610,6 @@ static void append_status_json(JsonOut& j, bool redact) {
         ifield(",\"cs\":", eth_pins.cs);
         ifield(",\"miso\":", eth_pins.miso);
         ifield(",\"mosi\":", eth_pins.mosi);
-        j += "}}},";
     }
     // has_creds says only WHETHER credentials are stored — never what they are (/status stays
     // secret-free). Read from the CONFIG, not from MqttStatus: creds outlive a disabled broker, and
@@ -622,7 +617,7 @@ static void append_status_json(JsonOut& j, bool redact) {
     // stored credentials" checkbox, which is the only way to reach /set_mqtt's clear_creds.
     {
         const MqttStatus m = mqtt_status();
-        bfield("\"mqtt\":{\"configured\":", m.configured);
+        bfield("}}},\"mqtt\":{\"configured\":", m.configured);
         bfield(",\"connected\":", m.connected);
         bfield(",\"tls\":", m.tls);
         bfield(",\"has_creds\":", !c.mqtt_user.empty() || !c.mqtt_pass.empty());
@@ -716,11 +711,9 @@ static void append_status_json(JsonOut& j, bool redact) {
         j += jstr_r(c.ref_temp_enabled_path, redact);
         j += ",\"hvac_mode_path\":";
         j += jstr_r(c.ref_temp_hvac_mode_path, redact);
-        j += ",\"source_id\":\"";
-        j += REF_ROOM_SOURCE_ID;
-        j += "\"";
-        j += ",\"calibration_k\":0";
-        ifield(",\"temperature_min_c\":", static_cast<int64_t>(REF_ROOM_TEMPERATURE_MIN_C));
+        qfield(",\"source_id\":", REF_ROOM_SOURCE_ID);
+        ifield(",\"calibration_k\":0,\"temperature_min_c\":",
+               static_cast<int64_t>(REF_ROOM_TEMPERATURE_MIN_C));
         ifield(",\"temperature_max_c\":", static_cast<int64_t>(REF_ROOM_TEMPERATURE_MAX_C));
         ufield(",\"max_age_s\":", c.ref_temp_max_age_s);
         bfield(",\"subscribed\":", rt.subscribed);
@@ -781,7 +774,6 @@ static void append_status_json(JsonOut& j, bool redact) {
         ufield(",\"rejections\":", rt.rejections);
         if (!rt.eligibility_error.empty()) qfield(",\"eligibility_error\":", rt.eligibility_error);
         if (!rt.error.empty()) qfield(",\"error\":", rt.error);
-        j += "},";
     }
     // Heating-curve diagnosis v2: raw room error sampled only in confirmed HEATING operation. The
     // absolute timestamp + monotonic sequence is the durable event contract; no actuator-derived
@@ -799,7 +791,7 @@ static void append_status_json(JsonOut& j, bool redact) {
         const bool                        heating_curve_armed = heating_curve_diagnosis_armed(c);
         const logic::HeatingCurveReason heating_curve_reason = logic::heating_curve_reported_reason(
             heating_curve_armed, heating_curve.state, heating_curve.reason);
-        ufield("\"heating_curve\":{\"method_version\":",
+        ufield("},\"heating_curve\":{\"method_version\":",
                logic::HEATING_CURVE_DIAGNOSIS_METHOD_VERSION);
         bfield(",\"armed\":", heating_curve_armed);
         qfield(",\"state\":", logic::heating_curve_state_name(heating_curve.state));
@@ -877,7 +869,6 @@ static void append_status_json(JsonOut& j, bool redact) {
         ufield(",\"samples\":", heating_curve.samples);
         ufield(",\"holds\":", heating_curve.holds);
         ufield(",\"blocks\":", heating_curve.blocks);
-        j += "},";
     }
     // Independent electrical witness for the potable-water circulation pump. Topic/name are
     // identifying installation data and therefore follow the same redaction boundary as the room
@@ -893,7 +884,7 @@ static void append_status_json(JsonOut& j, bool redact) {
             j += '.';
             append_json_uint(j, value % 10u);
         };
-        j += "\"circulation_source\":{\"configured\":";
+        j += "},\"circulation_source\":{\"configured\":";
         j += c.circulation_topic.empty() ? "false" : "true";
         j += ",\"name\":";
         j += jstr_r(c.circulation_name, redact);
@@ -941,7 +932,6 @@ static void append_status_json(JsonOut& j, bool redact) {
         ufield(",\"errors\":", circulation.errors);
         ufield(",\"rejections\":", circulation.rejections);
         if (!circulation.error.empty()) qfield(",\"error\":", circulation.error);
-        j += "},";
     }
     // Direct Open-Meteo forecast. Fetch time is the 90-minute liveness clock; the provider does not
     // expose model-run issue time, so issued_at remains null instead of being fabricated. Failed
@@ -984,9 +974,8 @@ static void append_status_json(JsonOut& j, bool redact) {
             std::snprintf(weather_outdoor, sizeof(weather_outdoor), "%.6g", wf.outdoor_mean_2h_c);
             std::snprintf(weather_solar, sizeof(weather_solar), "%.6g", wf.solar_energy_2h_wh_m2);
         }
-        bfield("\"weather_forecast\":{\"configured\":", weather_configured);
-        j += ",\"provider\":\"open-meteo\"";
-        qfield(",\"model\":", wf.model);
+        bfield("},\"weather_forecast\":{\"configured\":", weather_configured);
+        qfield(",\"provider\":\"open-meteo\",\"model\":", wf.model);
         ufield(",\"fetch_interval_s\":", WEATHER_FETCH_INTERVAL_S);
         ufield(",\"max_age_s\":", WEATHER_MAX_AGE_S);
         bfield(",\"fetching\":", weather_fetching);
@@ -1023,8 +1012,7 @@ static void append_status_json(JsonOut& j, bool redact) {
                 j += '}';
             }
         }
-        j += ']';
-        j += ",\"issued_at\":";
+        j += "],\"issued_at\":";
         if (weather_has_value && wf.issued_unix_s >= 0)
             json_append_quoted(j, rfc3339_utc(wf.issued_unix_s));
         else
@@ -1081,12 +1069,11 @@ static void append_status_json(JsonOut& j, bool redact) {
         j += jstr_r(sy.host, redact);
         ifield(",\"port\":", sy.port);
         if (!sy.error.empty()) qfield(",\"error\":", sy.error);
-        j += "},";
     }
     const HpStats hp = hp_stats();
     {
         const char proto_ch = static_cast<char>(c.proto);
-        qfield("\"hp\":{\"proto\":", std::string_view(&proto_ch, 1));
+        qfield("},\"hp\":{\"proto\":", std::string_view(&proto_ch, 1));
         ifield(",\"rx\":", c.rx_pin);
         ifield(",\"tx\":", c.tx_pin);
         bfield(",\"connected\":", hp.connected);
@@ -1095,11 +1082,9 @@ static void append_status_json(JsonOut& j, bool redact) {
         ifield(",\"values\":", hp.values);
         ufield(",\"crc_err\":", hp.crc_err);
         ufield(",\"timeout_err\":", hp.timeout_err);
-        j += "},";
     }
 
-    qfield("\"profile\":{\"id\":", c.profile);
-    j += "},";
+    qfield("},\"profile\":{\"id\":", c.profile);
 
     // The HomeHub Modbus stack — a SECOND, INDEPENDENT source, never an alternative to the X10A
     // link reported above (docs/MODBUS_PROTOCOL.md). `enabled` reports whether its runtime task
@@ -1109,7 +1094,7 @@ static void append_status_json(JsonOut& j, bool redact) {
     // removed (legacy-294). Successive += with bare literals — the httpd-stack rule the rest of
     // this builder follows.
     const ModbusStatus mb = mb_status();
-    bfield("\"modbus\":{\"enabled\":", mb.enabled);
+    bfield("},\"modbus\":{\"enabled\":", mb.enabled);
     bfield(",\"connected\":", mb.connected);
     bfield(",\"discovering\":", mb.discovering);
     bfield(",\"searched\":", c.mb_discovery_done);
@@ -1153,7 +1138,6 @@ static void append_status_json(JsonOut& j, bool redact) {
         if (mb.last_error_detail >= 0) ifield(",\"error_detail\":", mb.last_error_detail);
         if (mb.last_error_register > 0) ifield(",\"error_register\":", mb.last_error_register);
     }
-    j += "},";
 
     // Which rows carry a 24-hour trend, and at what cadence. The ID is the CONCEPT (GET /history
     // takes it); the LABEL is how the detected profile spells that row, which is what lets the UI
@@ -1162,7 +1146,7 @@ static void append_status_json(JsonOut& j, bool redact) {
     // with successive += like everything else here: a `a + b + c` chain materialises every
     // intermediate at once, all live in one frame on the httpd task's stack (AGENTS.md → Memory,
     // concurrency, and HTTP safety; the v1.0.12 stack overflow happened on THIS task).
-    ufield("\"history\":{\"epoch\":", history_epoch());
+    ufield("},\"history\":{\"epoch\":", history_epoch());
     ufield(",\"dt\":", logic::HISTORY_DT_S);
     // The .noinit-RAM adoption verdict for this boot. "accept" means a compatible reset kept the
     // sealed bytes; every other value names why RAM started empty. This is deliberately independent
@@ -1232,7 +1216,6 @@ static void append_status_json(JsonOut& j, bool redact) {
         j += jstr_r(c.ref_temp_name, redact);
         j += "}";
     }
-    j += "]},";
 
     // ── The rolling on-board plant diagnosis (logic/checkup.hpp) ────────────────────────────────
     // `health` summarizes events and extrema that can be lost in the five-minute trend buckets.
@@ -1264,14 +1247,10 @@ static void append_status_json(JsonOut& j, bool redact) {
             trace_reader.release();
         };
         if (!trace || !trace->unix_s) release_trace();
-        j += "\"health\":{\"source\":";
-        json_append_quoted(j, diagnostics_source_name(diag_effective));
-        j += ",\"covered_s\":";
-        append_json_uint(j, hr.covered_s);
-        j += ",\"span_s\":";
-        append_json_uint(j, hr.span_s);
-        j += ",\"source_fresh\":";
-        j += hr.source_fresh ? "true" : "false";
+        qfield("]},\"health\":{\"source\":", diagnostics_source_name(diag_effective));
+        ufield(",\"covered_s\":", hr.covered_s);
+        ufield(",\"span_s\":", hr.span_s);
+        bfield(",\"source_fresh\":", hr.source_fresh);
         j += ",\"source_age_s\":";
         if (hr.source_age_s == UINT32_MAX)
             j += "null";
@@ -1287,14 +1266,10 @@ static void append_status_json(JsonOut& j, bool redact) {
         json_append_quoted(j, logic::checkup_restore_slug(persist));
         j += ",\"full_span\":";
         j += hr.full_span ? "true" : "false";
-        j += ",\"available\":";
-        append_json_uint(j, hr.available);
-        j += ",\"assessable\":";
-        append_json_uint(j, hr.assessable);
-        j += ",\"evaluated\":";
-        append_json_uint(j, hr.evaluated);
-        j += ",\"status\":";
-        json_append_quoted(j, logic::checkup_verdict_name(hr.overall));
+        ufield(",\"available\":", hr.available);
+        ufield(",\"assessable\":", hr.assessable);
+        ufield(",\"evaluated\":", hr.evaluated);
+        qfield(",\"status\":", logic::checkup_verdict_name(hr.overall));
         j += ",\"checks\":[";
         // An integer field, or null when the check did not establish it.
         // Keep one implementation of the many nullable integer fields in the compact image.
@@ -1362,18 +1337,12 @@ static void append_status_json(JsonOut& j, bool redact) {
             const auto  id = static_cast<logic::CheckupCheck>(i);
             const auto& ck = hr.checks[i];
             if (i) j += ",";
-            j += "{\"id\":";
-            json_append_quoted(j, logic::checkup_check_id(id));
-            j += ",\"evidence\":";
-            json_append_quoted(j, logic::checkup_result_evidence_name(id, ck));
-            j += ",\"verdict\":";
-            json_append_quoted(j, logic::checkup_verdict_name(ck.verdict));
-            j += ",\"reason\":";
-            json_append_quoted(j, logic::checkup_reason_name(ck.reason));
-            j += ",\"observed_s\":";
-            append_json_uint(j, ck.observed_s);
-            j += ",\"required_s\":";
-            append_json_uint(j, ck.required_s);
+            qfield("{\"id\":", logic::checkup_check_id(id));
+            qfield(",\"evidence\":", logic::checkup_result_evidence_name(id, ck));
+            qfield(",\"verdict\":", logic::checkup_verdict_name(ck.verdict));
+            qfield(",\"reason\":", logic::checkup_reason_name(ck.reason));
+            ufield(",\"observed_s\":", ck.observed_s);
+            ufield(",\"required_s\":", ck.required_s);
             // Named per check rather than a generic pair: the browser must not have to carry a
             // table that says what `a` means for which id — that table would be a second definition
             // of the check, free to drift from this one.
@@ -1390,16 +1359,11 @@ static void append_status_json(JsonOut& j, bool redact) {
                     ck.b < 0 ? -1 : static_cast<int>(hr.dhw_quiet_high_windows));
                 num("circulation_on_s", ck.f);
                 num("circulation_known_s", ck.g);
-                j += ",\"candidate_s\":";
-                append_json_uint(j, hr.dhw_candidate_s);
-                j += ",\"settle_remaining_s\":";
-                append_json_uint(j, hr.dhw_settle_remaining_s);
-                j += ",\"aborts\":";
-                append_json_uint(j, hr.dhw_aborts);
-                j += ",\"best_aborted_s\":";
-                append_json_uint(j, hr.dhw_best_aborted_s);
-                j += ",\"blocked\":";
-                j += hr.dhw_blocked ? "true" : "false";
+                ufield(",\"candidate_s\":", hr.dhw_candidate_s);
+                ufield(",\"settle_remaining_s\":", hr.dhw_settle_remaining_s);
+                ufield(",\"aborts\":", hr.dhw_aborts);
+                ufield(",\"best_aborted_s\":", hr.dhw_best_aborted_s);
+                bfield(",\"blocked\":", hr.dhw_blocked);
                 // NAMES, not the raw mask: the browser would otherwise carry a copy of the bit
                 // meanings, which is a second definition of the rule free to drift from
                 // checkup.hpp's. Appended one literal at a time (the stack budget this builder
@@ -1435,61 +1399,42 @@ static void append_status_json(JsonOut& j, bool redact) {
                 num("censored_start_runs", hr.cycling_censored_start_runs);
                 num("classified_runtime_s", hr.cycling_classified_runtime_s);
                 num("censored_runtime_s", hr.cycling_censored_runtime_s);
-                j += ",\"runtime_saturated\":";
-                j += hr.cycling_runtime_saturated ? "true" : "false";
-                j += ",\"split\":";
-                j += hr.cycling_split ? "true" : "false";
+                bfield(",\"runtime_saturated\":", hr.cycling_runtime_saturated);
+                bfield(",\"split\":", hr.cycling_split);
                 outdoor_context(hr.cycling_outdoor);
                 {
-                    j += ",\"hours_epoch\":";
-                    append_json_uint(j, hrs.epoch);
+                    ufield(",\"hours_epoch\":", hrs.epoch);
                     j += ",\"hours\":[";
                     for (size_t hi = 0; hi < hrs.count; ++hi) {
                         if (hi) j += ",";
                         const auto&   hour   = hrs.hours[hi];
                         const int64_t bucket = hrs.bucket_at(hi);
-                        j += "{\"bucket\":";
-                        if (bucket < 0) j += "-";
-                        append_json_uint(j, static_cast<uint64_t>(bucket < 0 ? -bucket : bucket));
-                        if (hrs.end_unix_s[hi]) {
-                            j += ",\"end_unix_s\":";
-                            append_json_uint(j, hrs.end_unix_s[hi]);
-                        }
+                        ifield("{\"bucket\":", bucket);
+                        if (hrs.end_unix_s[hi]) ufield(",\"end_unix_s\":", hrs.end_unix_s[hi]);
                         if (hour.provenance == logic::CheckupCyclingSlot::Restored)
                             j += ",\"restored\":true";
                         else if (hour.provenance == logic::CheckupCyclingSlot::Expired)
                             j += ",\"expired\":true";
                         if (hi + 1 == hrs.count) {
-                            j += ",\"elapsed_s\":";
-                            append_json_uint(j, hrs.pending_elapsed_s);
+                            ufield(",\"elapsed_s\":", hrs.pending_elapsed_s);
                         }
-                        j += ",\"starts\":";
-                        append_json_uint(j, hour.starts);
-                        j += ",\"run_s\":";
-                        append_json_uint(j, hour.run_s);
-                        j += ",\"observed_s\":";
-                        append_json_uint(j, hour.observed_s);
+                        ufield(",\"starts\":", hour.starts);
+                        ufield(",\"run_s\":", hour.run_s);
+                        ufield(",\"observed_s\":", hour.observed_s);
                         if (hour.run_s) {
-                            j += ",\"space_s\":";
-                            append_json_uint(j, hour.space_s);
-                            j += ",\"dhw_s\":";
-                            append_json_uint(j, hour.dhw_s);
+                            ufield(",\"space_s\":", hour.space_s);
+                            ufield(",\"dhw_s\":", hour.dhw_s);
                         }
                         j += "}";
                     }
                 }
                 j += "]";
                 if (trace && trace->unix_s) {
-                    j += ",\"timeline\":{\"unix_s\":";
-                    append_json_uint(j, trace->unix_s);
-                    j += ",\"window_end_s\":";
-                    append_json_uint(j, trace->window_end_s);
-                    j += ",\"observed_end_s\":";
-                    append_json_uint(j, trace->end_s);
-                    j += ",\"boot_s\":";
-                    append_json_uint(j, trace->boot_s);
-                    j += ",\"live\":";
-                    j += trace->live ? "true" : "false";
+                    ufield(",\"timeline\":{\"unix_s\":", trace->unix_s);
+                    ufield(",\"window_end_s\":", trace->window_end_s);
+                    ufield(",\"observed_end_s\":", trace->end_s);
+                    ufield(",\"boot_s\":", trace->boot_s);
+                    bfield(",\"live\":", trace->live);
                     j += ",\"run_edges\":true,\"records\":[";
                     for (size_t i = 0; i < trace->count; ++i) {
                         if (i) j += ",";
@@ -1522,8 +1467,7 @@ static void append_status_json(JsonOut& j, bool redact) {
                     append_json_uint(j, hr.pressure_min_unix_s);
                 else
                     j += "null";
-                j += ",\"confirmed_low\":";
-                j += ck.b > 0 ? "true" : "false";
+                bfield(",\"confirmed_low\":", ck.b > 0);
                 break;
             case logic::CheckupCheck::Flow:
                 tenths("min_l_min", ck.a);
@@ -1588,8 +1532,7 @@ static void append_status_json(JsonOut& j, bool redact) {
                 append_service_limitation("pressure_sides_incomplete");
             if (refrigerant_service.limitation_mask & logic::RefrigerantServiceOutdoorContext)
                 append_service_limitation("outdoor_context_incomplete");
-            j += "]";
-            j += ",\"metrics\":{";
+            j += "],\"metrics\":{";
             auto append_service_metric =
                 [&j](const char* key, const logic::RefrigerantServiceMetricSnapshot& metric) {
                     j += "\"";
@@ -1690,7 +1633,7 @@ static void append_status_json(JsonOut& j, bool redact) {
             j += "\":";
             append_stack_bytes(j, stack_watch_min_free_bytes(field.slot));
         }
-        j += "}},";
+        j += "}},\"ntp\":{\"server\":";
     }
 
     // NTP: its own top-level block (not folded into sys), mirroring syslog{} — it is a runtime-
@@ -1701,7 +1644,6 @@ static void append_status_json(JsonOut& j, bool redact) {
     // null/false until the first SNTP reply of this boot lands.
     {
         const TimeStatus ts = time_status();
-        j += "\"ntp\":{\"server\":";
         j += jstr_r(ts.server, redact);
         bfield(",\"synced\":", ts.synced);
         j += ",\"time\":";
@@ -1709,20 +1651,18 @@ static void append_status_json(JsonOut& j, bool redact) {
             json_append_quoted(j, rfc3339_utc(ts.unix_time));
         else
             j += "null";
-        j += "},";
     }
 
     // Explicit opt-in boundary for optional plant diagnostics and their external source collection.
     // Kept separate from system/link health: X10A, HomeHub and the technical heartbeat remain
     // active.
-    bfield("\"diagnostics\":{\"enabled\":", c.diagnostics_enabled);
+    bfield("},\"diagnostics\":{\"enabled\":", c.diagnostics_enabled);
     qfield(",\"source\":", diagnostics_source_name(c.diagnostics_source));
     qfield(",\"effective_source\":", diagnostics_source_name(diag_effective));
     j += ",\"available_sources\":[";
     if (x10a_diag_avail) j += "\"x10a\"";
     if (x10a_diag_avail && modbus_diag_avail) j += ",";
     if (modbus_diag_avail) j += "\"modbus\"";
-    j += "]},";
 
     // Which OTA feed this device follows (logic/ota_channel.hpp; POST /set_ota). Reported HERE and
     // not only on /ota/status because the Settings screen's ESP32 card renders the selector from
@@ -1731,16 +1671,14 @@ static void append_status_json(JsonOut& j, bool redact) {
     // carries in its "-dev.N" suffix, but a device can be SET to a channel it is not running a
     // build from (that is exactly the state between picking a channel and installing from it), so
     // the setting is reported on its own rather than inferred from the version string.
-    qfield("\"ota\":{\"channel\":", ota_channel_name(c.ota_channel));
-    j += "},";
+    qfield("]},\"ota\":{\"channel\":", ota_channel_name(c.ota_channel));
 
     // The web UI's manual language override (logic/ui_lang.hpp; POST /set_lang). "auto" (the
     // default) means the browser keeps detecting the language on its own; a supported code forces
     // one on every client. Reported here for the same reason as the channel: the ESP32 card's
     // language selector renders from /status, and the browser applies a named language over its
     // navigator.language guess.
-    qfield("\"ui\":{\"lang\":", ui_lang_name(c.ui_lang));
-    j += "},";
+    qfield("},\"ui\":{\"lang\":", ui_lang_name(c.ui_lang));
 
     // Current reset/fault plus optional stored-dump summary of unknown age; null on a clean boot.
     // These distinct facts come from the boot-time CACHE (diag_crash.cpp) — never re-parsed from
@@ -1751,9 +1689,8 @@ static void append_status_json(JsonOut& j, bool redact) {
     // costs one 4-byte flash read — the same read GET /coredump already does per request.
     {
         const CrashInfo crash = diag_crash_info_live();
-        j += "\"last_crash\":";
+        j += "},\"last_crash\":";
         j += (crash_is_notable(crash) ? build_crash_json(crash) : "null");
-        j += ",";
     }
 
     // Auto-detection: proto/model derived from the X10A bus (hp_detect.cpp). The candidate set is
@@ -1764,7 +1701,7 @@ static void append_status_json(JsonOut& j, bool redact) {
     {
         {
             const char proto_ch = static_cast<char>(c.proto);
-            qfield("\"detect\":{\"proto\":", std::string_view(&proto_ch, 1));
+            qfield(",\"detect\":{\"proto\":", std::string_view(&proto_ch, 1));
         }
         ifield(",\"rx\":", c.rx_pin);
         ifield(",\"tx\":", c.tx_pin);
@@ -1866,40 +1803,38 @@ static void append_status_json(JsonOut& j, bool redact) {
         const logic::EstablishedIdentity who =
             logic::established_identity(wm ? wm->name : nullptr, wm ? wm->family : nullptr,
                                         wm ? wm->marketing : nullptr, agree, total);
-        // Successive += with bare literals, like kw_field above: a + chain holds every
-        // intermediate at once on the tight httpd stack.
         auto opt = [&j](const char* s) {
             if (s)
                 json_append_quoted(j, s);
             else
                 j += "null";
         };
-        j += ",\"model\":";
         if (who.any()) {
-            j += "{\"name\":";
+            j += ",\"model\":{\"name\":";
             opt(who.name);
             j += ",\"family\":";
             opt(who.family);
             j += ",\"marketing\":";
             opt(who.marketing);
-            j += "}";
+            j += "}}}";
         } else {
-            j += "null";
+            j += ",\"model\":null}}";
         }
-        j += "}";
     }
-    j += "}";
 }
 
-esp_err_t http_send_status_json(httpd_req_t* req, std::string_view prefix,
-                                std::string_view suffix, bool redact) {
+esp_err_t http_send_status_json(httpd_req_t* req, std::string_view prefix, std::string_view suffix,
+                                bool redact) {
     HttpJsonChunks chunks(HttpChunkEmitter{req});
     httpd_resp_set_type(req, "application/json");
-    return finish_bounded_stream(chunks, [prefix, suffix, redact](auto& out) {
-        out += prefix;
-        append_status_json(out, redact);
-        out += suffix;
-    }) ? ESP_OK : ESP_FAIL;
+    return finish_bounded_stream(chunks,
+                                 [prefix, suffix, redact](auto& out) {
+                                     out += prefix;
+                                     append_status_json(out, redact);
+                                     out += suffix;
+                                 })
+               ? ESP_OK
+               : ESP_FAIL;
 }
 
 // Copies the request's query into `q` ("" when there is none). False when it did not fit: the
@@ -2255,6 +2190,7 @@ static esp_err_t h_active_model_values(httpd_req_t* req) {
     const Config c = config(); // allocate/snapshot before response headers; handle_all maps OOM to 503
     bool fallback = false;
     const def::Profile* profile = probe_catalog_profile(def::profiles, c.profile, fallback);
+
     HttpJsonChunks j(HttpChunkEmitter{req});
     httpd_resp_set_type(req, "application/json");
     // Detection and firmware updates can change the selected definition while this URL stays the
@@ -2265,22 +2201,25 @@ static esp_err_t h_active_model_values(httpd_req_t* req) {
     json_append_quoted(j, c.profile);
     j += ",\"definition\":";
     json_append_quoted(j, profile ? std::string_view(profile->id) : std::string_view{});
-    j += ",\"fallback\":";
-    j += fallback ? "true" : "false";
-    j += ",\"values\":[";
+    j += fallback ? ",\"fallback\":true,\"values\":[" : ",\"fallback\":false,\"values\":[";
     if (profile) {
-        const auto view = def::resolved(*profile);
-        bool comma = false;
+        const auto view  = def::resolved(*profile);
+        bool       comma = false;
         for (size_t i = 0; i < view.count(); i++) {
             const ValueDef& row = view[i];
             if (!probe_catalog_row(row)) continue;
             if (comma) j += ',';
             comma = true;
-            j += "{\"reg\":";    append_json_uint(j, row.reg);
-            j += ",\"offset\":"; append_json_uint(j, row.offset);
-            j += ",\"conv\":";   append_json_uint(j, static_cast<uint64_t>(row.conv));
-            j += ",\"size\":";   append_json_uint(j, row.size);
-            j += ",\"label\":";  json_append_quoted(j, row.label);
+            j += "{\"reg\":";
+            append_json_uint(j, row.reg);
+            j += ",\"offset\":";
+            append_json_uint(j, row.offset);
+            j += ",\"conv\":";
+            append_json_uint(j, static_cast<uint64_t>(row.conv));
+            j += ",\"size\":";
+            append_json_uint(j, row.size);
+            j += ",\"label\":";
+            json_append_quoted(j, row.label);
             j += '}';
         }
     }
@@ -2323,16 +2262,16 @@ static esp_err_t h_history(httpd_req_t* req) {
     // Snapshot/header preparation allocates before transfer. Keep it outside firmware TLS;
     // the finished header and numeric samples then use the shared bounded stream boundary.
     if (ota_download_active()) return network_tls_busy(req);
-    char q[96] = {0};
+    char q[96]  = {0};
     char id[32] = {0};
     if (httpd_req_get_url_query_str(req, q, sizeof(q)) != ESP_OK ||
         httpd_query_key_value(q, "row", id, sizeof(id)) != ESP_OK) {
         httpd_resp_set_status(req, "400 Bad Request");
         return http_send_json(req, "{\"ok\":false,\"error\":\"row required\"}");
     }
-    char source[12] = {0};
-    const bool has_source = httpd_query_key_value(q, "source", source, sizeof(source)) == ESP_OK;
-    const bool modbus = has_source && std::strcmp(source, "modbus") == 0;
+    char       source[12]  = {0};
+    const bool has_source  = httpd_query_key_value(q, "source", source, sizeof(source)) == ESP_OK;
+    const bool modbus      = has_source && std::strcmp(source, "modbus") == 0;
     const bool env3_source = has_source && std::strcmp(source, "env3") == 0;
     const bool room_source = has_source && std::strcmp(source, "room") == 0;
     if (has_source && !modbus && !env3_source && !room_source && std::strcmp(source, "x10a") != 0) {
@@ -2343,13 +2282,15 @@ static esp_err_t h_history(httpd_req_t* req) {
     // An unknown id is a 404, never a defaulted trend: answering with SOME series would look like a
     // working request and quietly attach the wrong sensor's history to whatever asked.
     size_t t = 0;
-    if (def_) { while (t < logic::TREND_COUNT && &logic::TRENDS[t] != def_) t++; }
-    const int mb_t = modbus ? logic::homehub_history_index(id) : -1;
-    const bool    native_modbus    = modbus && mb_active_profile() == ModbusProfile::Altherma4;
-    const int env_t = env3_source ? env3_history_index(id) : -1;
-    bool          env3_configured  = false;
-    uint32_t      room_identity    = 0;
-    char          lbl[80] = {0}, unit[8] = {0};
+    if (def_) {
+        while (t < logic::TREND_COUNT && &logic::TRENDS[t] != def_) t++;
+    }
+    const int  mb_t            = modbus ? logic::homehub_history_index(id) : -1;
+    const bool native_modbus   = modbus && mb_active_profile() == ModbusProfile::Altherma4;
+    const int  env_t           = env3_source ? env3_history_index(id) : -1;
+    bool       env3_configured = false;
+    uint32_t   room_identity   = 0;
+    char       lbl[80] = {0}, unit[8] = {0};
     {
         const Config active_config = config();
         env3_configured = active_config.env3_enabled && env3_board_supported(active_config);
@@ -2360,7 +2301,7 @@ static esp_err_t h_history(httpd_req_t* req) {
     } // Release the configuration snapshot before constructing the streamed history response.
     const bool x10a_unknown =
         !modbus && !env3_source && !room_source && (!def_ || t >= logic::TREND_COUNT);
-    const bool    missing_quiet =
+    const bool missing_quiet =
         native_modbus && mb_t >= 0 && logic::HOMEHUB_HISTORIES[mb_t].offset == 9;
     if (x10a_unknown || (modbus && (mb_t < 0 || missing_quiet)) ||
         (env3_source && (!env3_configured || env_t < 0)) ||
@@ -2369,9 +2310,9 @@ static esp_err_t h_history(httpd_req_t* req) {
         return http_send_json(req, "{\"ok\":false,\"error\":\"unknown trend\"}");
     }
 
-    // Both buffers are function-static rather than stack: this handler runs on the httpd task, whose stack
-    // is the one that overflowed in v1.0.12, and 576 + 576 bytes of locals is not worth the risk.
-    // Safe because esp_http_server dispatches requests one at a time on that single task.
+    // Both buffers are function-static rather than stack: this handler runs on the httpd task,
+    // whose stack is the one that overflowed in v1.0.12, and 576 + 576 bytes of locals is not worth
+    // the risk. Safe because esp_http_server dispatches requests one at a time on that single task.
     static logic::HistorySample samples[logic::HISTORY_SAMPLES];
     static uint16_t             runs[logic::HISTORY_MAX_RUNS][2];
     uint32_t                    history_snapshot_epoch = 0;
@@ -2413,35 +2354,35 @@ static esp_err_t h_history(httpd_req_t* req) {
         history_unit(t, unit, sizeof(unit));
     }
 
-    std::string j = "{\"id\":";
-    j += jstr(modbus        ? logic::HOMEHUB_HISTORIES[mb_t].trend_id
-              : env3_source ? ENV3_HISTORIES[env_t].id
-              : room_source ? "room_temp"
-                            : def_->id);
-    j += ",\"source\":";
+    std::string j = "{\"id\":\"";
+    j += modbus        ? logic::HOMEHUB_HISTORIES[mb_t].trend_id
+         : env3_source ? ENV3_HISTORIES[env_t].id
+         : room_source ? "room_temp"
+                       : def_->id;
     const bool mqtt_source =
         !modbus && !env3_source && !room_source && def_->kind == logic::TrendKind::CirculationState;
-    j += jstr(modbus        ? "modbus"
-              : env3_source ? "env3"
-              : room_source ? "room"
-              : mqtt_source ? "mqtt"
-                            : "x10a");
+    j += "\",\"source\":\"";
+    j += modbus        ? "modbus"
+         : env3_source ? "env3"
+         : room_source ? "room"
+         : mqtt_source ? "mqtt"
+                       : "x10a";
     // Bind the body to the lifetime captured with its samples, not a successor observed while
     // serializing it. The per-boot token also distinguishes equal epochs on different boots.
-    j += ",\"epoch\":";
+    j += "\",\"epoch\":";
     j += std::to_string(history_snapshot_epoch);
     char boot_id[17];
     http_boot_id(boot_id);
-    j += ",\"boot_id\":";
-    json_append_quoted(j, boot_id);
-    j += ",\"label\":";
+    j += ",\"boot_id\":\"";
+    j += boot_id;
+    j += "\",\"label\":";
     json_append_quoted(j, lbl);
     j += ",\"dt\":";
-    j += std::to_string(logic::HISTORY_DT_S);
+    static_assert(logic::HISTORY_DT_S == 300);
     // The ROW's unit, never a hardcoded "°C": the trends mix °C, bar and unitless rows, and the
     // browser prints this string straight into the range readout and the crosshair. A bar row
     // labelled °C is exactly the legacy-35–legacy-39 shape.
-    j += ",\"unit\":";
+    j += "300,\"unit\":";
     json_append_quoted(j, unit);
     if (n && history_meta.newest_commit_us != logic::HISTORY_NO_COMMIT_US) {
         int64_t unix_s;

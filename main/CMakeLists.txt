@@ -314,7 +314,12 @@ add_custom_command(
             --input "${CMAKE_CURRENT_SOURCE_DIR}/www/setup.html"
             --output "${CMAKE_CURRENT_BINARY_DIR}/setup.html.gz"
             --max-gzip-bytes 4096
+            --gzip-encoder zopfli --zopfli-iterations 5
     DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/www/setup.html" "${UI_MINIFIER}" ${UI_MINIFIER_VENDOR}
+            "${UI_ZOPFLI_ROOT}/zopfli_gzip.py"
+            "${UI_ZOPFLI_ROOT}/zopfli_gzip.c"
+            "${UI_ZOPFLI_ROOT}/vendor/zopfli/UPSTREAM.json"
+            ${UI_ZOPFLI_SOURCES}
     COMMENT "Minifying and gzipping setup portal"
     VERBATIM)
 add_custom_target(gen_setup_gz DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/setup.html.gz")
@@ -324,9 +329,16 @@ add_dependencies(${COMPONENT_LIB} gen_setup_gz)
 # The raw DIB-based icon otherwise consumes over 11 KiB of the signed application slot.
 add_custom_command(
     OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/favicon.ico.gz"
-    COMMAND gzip -9 -n -c "${CMAKE_CURRENT_SOURCE_DIR}/www/favicon.ico"
-            > "${CMAKE_CURRENT_BINARY_DIR}/favicon.ico.gz"
+    COMMAND ${PYTHON} -c
+            "import pathlib,sys; sys.path.insert(0, sys.argv[1]); from zopfli_gzip import compress; pathlib.Path(sys.argv[3]).write_bytes(compress(pathlib.Path(sys.argv[2]).read_bytes(), 5))"
+            "${UI_ZOPFLI_ROOT}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/www/favicon.ico"
+            "${CMAKE_CURRENT_BINARY_DIR}/favicon.ico.gz"
     DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/www/favicon.ico"
+            "${UI_ZOPFLI_ROOT}/zopfli_gzip.py"
+            "${UI_ZOPFLI_ROOT}/zopfli_gzip.c"
+            "${UI_ZOPFLI_ROOT}/vendor/zopfli/UPSTREAM.json"
+            ${UI_ZOPFLI_SOURCES}
     COMMENT "Gzipping the unchanged favicon"
     VERBATIM)
 add_custom_target(gen_favicon_gz DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/favicon.ico.gz")
@@ -355,7 +367,12 @@ add_custom_command(
             --input "${CMAKE_CURRENT_BINARY_DIR}/mcp_dashboard_inlined.html"
             --output "${CMAKE_CURRENT_BINARY_DIR}/mcp.html.gz"
             --max-gzip-bytes 8192
+            --gzip-encoder zopfli --zopfli-iterations 5
     DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/mcp_dashboard_inlined.html" "${UI_MINIFIER}" ${UI_MINIFIER_VENDOR}
+            "${UI_ZOPFLI_ROOT}/zopfli_gzip.py"
+            "${UI_ZOPFLI_ROOT}/zopfli_gzip.c"
+            "${UI_ZOPFLI_ROOT}/vendor/zopfli/UPSTREAM.json"
+            ${UI_ZOPFLI_SOURCES}
     COMMENT "Minifying and gzipping MCP dashboard"
     VERBATIM)
 add_custom_target(gen_mcp_gz DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/mcp.html.gz")

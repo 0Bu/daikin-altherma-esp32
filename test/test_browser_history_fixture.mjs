@@ -8,6 +8,7 @@ export const INSPECTOR_TRENDS = Object.freeze({
   out: "outdoor_air", ouhx: "outdoor_heat_exchanger", hp: "circuit_pressure",
   disch: "discharge", eev: "eev", r3t: "refrigerant_liquid", lwt: "leaving_water",
   r2t: "leaving_water_post_buh", rwt: "return_water", dt: "dt", pth: "pth",
+  pel: "pel", cop: "cop",
   buh: "buh_state", bsh: "bsh_state", valve: "valve_dhw", valve2: "valve_heat",
   tank: "dhw_tank", room: "room_temp", pump: "pump_speed",
   defrost: "defrost_state", quiet: "quiet_state", flow: "flow",
@@ -16,7 +17,7 @@ export const INSPECTOR_TRENDS = Object.freeze({
 
 export const NO_HISTORY_INSPECTORS = Object.freeze([
   "status", "ou", "lp", "phe", "heat", "spaceh", "rhot", "rcold", "wsup", "wtank",
-  "wheat", "wret", "pel", "cop",
+  "wheat", "wret",
 ]);
 
 // Tank preheat is an auxiliary raw row outside the schematic; categorical disclosures use the
@@ -61,6 +62,8 @@ export const HISTORY_MOTION_ROWS = Object.freeze([
   { id: "free_heap", label: "Free heap", value: 180, unit: "KiB", kind: "board" },
   { id: "max_alloc", label: "Largest free block", value: 96, unit: "KiB", kind: "board" },
   { id: "circulation_state", label: "DHW circulation pump", value: 1, binary: true, kind: "mqtt" },
+  { id: "pel", label: "Electrical input (estimated)", value: 2.8, unit: "kW", kind: "derived" },
+  { id: "cop", label: "COP (estimated)", value: 3.1, unit: "", kind: "derived" },
 ]);
 
 // HOMEHUB_HISTORIES, not MB_PAIRS, is the offer boundary. In particular, water pressure has a

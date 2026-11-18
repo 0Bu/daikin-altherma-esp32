@@ -14847,9 +14847,9 @@ static void test_history_measurement_units() {
     CHECK(!trend_row_matches(temperature_twin, 0x62, 15, ""));
     // The unit upgrade changed accepted cache metadata, never the catalog bytes used by persisted
     // series ids. The fingerprint moved with the high-side trend's series id (B5,
-    // test_history_identity; 0xa1783c86 was before it) and again from 0x537c75e6 when Paket 1
-    // expanded HOMEHUB_HISTORIES from 13 to 17 rings.
-    CHECK(history_catalog_fingerprint() == 0x15f5f2ebu);
+    // test_history_identity; 0xa1783c86 was before it), from 0x537c75e6 to 0x15f5f2eb when Paket 1
+    // expanded HOMEHUB_HISTORIES from 13 to 17 rings, and to 0x1047fbc2 with X10A pel and cop.
+    CHECK(history_catalog_fingerprint() == 0x1047fbc2u);
 }
 
 static void test_history() {
@@ -15295,6 +15295,8 @@ static void test_history() {
         {"free_heap", 0, 0, 0},
         {"max_alloc", 0, 0, 0},
         {"circulation_state", 0, 0, 0},
+        {"pel", 0, 0, 0},
+        {"cop", 0, 0, 0},
     };
     static_assert(sizeof(kExpect) / sizeof(kExpect[0]) == TREND_COUNT,
                   "every TRENDS entry needs its measured catalog expectation here");
@@ -15424,6 +15426,7 @@ static void test_history() {
     int board_trends       = 0;
     int state_trends       = 0;
     int circulation_trends = 0;
+    int derived_trends     = 0;
     for (size_t t = 0; t < TREND_COUNT; t++) {
         if (TRENDS[t].kind == TrendKind::Row || TRENDS[t].kind == TrendKind::BinaryState ||
             TRENDS[t].kind == TrendKind::BinaryEvent) {
@@ -15439,6 +15442,12 @@ static void test_history() {
         } else if (TRENDS[t].kind == TrendKind::CirculationState) {
             circulation_trends++;
             CHECK(TRENDS[t].unit[0] == '\0');
+        } else if (TRENDS[t].kind == TrendKind::ElectricalPower) {
+            derived_trends++;
+            CHECK(trend_cstr_eq(TRENDS[t].unit, "kW"));
+        } else if (TRENDS[t].kind == TrendKind::Cop) {
+            derived_trends++;
+            CHECK(TRENDS[t].unit[0] == '\0');
         } else {
             board_trends++;
             CHECK(trend_cstr_eq(TRENDS[t].unit, "KiB"));
@@ -15447,17 +15456,303 @@ static void test_history() {
     CHECK(board_trends == 2);
     CHECK(state_trends == 1);
     CHECK(circulation_trends == 1);
+    CHECK(derived_trends == 2);
     {
-        // The locator of a board trend is (0, 0) — which is a REAL byte window. Nothing may make it
-        // match: the kind is checked first, so even a row crafted to look exactly like it is
+        // The locator of a board or derived trend is (0, 0) — which is a REAL byte window. Nothing
+        // may make it match: the kind is checked first, so even a row crafted to look like it is
         // refused.
-        const TrendDef* fh = trend_by_id("free_heap");
+        const TrendDef* fh   = trend_by_id("free_heap");
+        const TrendDef* tpel = trend_by_id("pel");
+        const TrendDef* tcop = trend_by_id("cop");
         CHECK(fh != nullptr && fh->kind == TrendKind::FreeHeap);
-        const uint8_t regs[]  = {0};
-        const uint8_t offs[]  = {0};
-        const char*   units[] = {"KiB"};
-        CHECK(trend_select(*fh, regs, offs, units, 1) == -1);
+        CHECK(tpel != nullptr && tpel->kind == TrendKind::ElectricalPower);
+        CHECK(tcop != nullptr && tcop->kind == TrendKind::Cop);
+        const uint8_t regs[]  = {0, 0, 0};
+        const uint8_t offs[]  = {0, 0, 0};
+        const char*   units[] = {"KiB", "kW", ""};
+        CHECK(trend_select(*fh, regs, offs, units, 3) == -1);
+        CHECK(trend_select(*tpel, regs, offs, units, 3) == -1);
+        CHECK(trend_select(*tcop, regs, offs, units, 3) == -1);
         CHECK(!trend_row_matches(*fh, 0, 0, "KiB"));
+        CHECK(!trend_row_matches(*tpel, 0, 0, "kW"));
+        CHECK(!trend_row_matches(*tcop, 0, 0, ""));
+    }
+
+    // --- single-sweep X10A pel & cop derivation -------------------------------------------------
+    {
+        CHECK(history_is_ct_current_label("Current measured by CT sensor of L1"));
+        CHECK(!history_is_ct_current_label("INV primary current (A)"));
+        CHECK(!history_is_ct_current_label(nullptr));
+        CHECK(history_iu_mode_is_heating(rt("Heating")));
+        CHECK(history_iu_mode_is_heating(rt("Heating + DHW")));
+        CHECK(!history_iu_mode_is_heating(rt("DHW")));
+        CHECK(!history_iu_mode_is_heating(rt("Cooling")));
+        CHECK(!history_iu_mode_is_heating(rt("Cooling + DHW")));
+        CHECK(!history_iu_mode_is_heating(rt("Stop")));
+        CHECK(!history_iu_mode_is_heating(rt<const char*>(nullptr)));
+
+        CHECK(history_amps_tenths_to_kw_tenths(rt(-1)) == HISTORY_NO_READING);
+        CHECK(history_amps_tenths_to_kw_tenths(rt(0)) == 0);
+        CHECK(history_amps_tenths_to_kw_tenths(rt(9)) == 2);    // 0.9 A * 230 V = 0.207 kW -> 0.2
+        CHECK(history_amps_tenths_to_kw_tenths(rt(100)) == 23); // 10.0 A * 230 V = 2.3 kW
+        CHECK(history_amps_tenths_to_kw_tenths(rt(200000)) == INT16_MAX);
+
+        // Profile capability across the catalog: generic supports neither, CT clamps appear in
+        // 3-phase triples on 20 profiles (all carrying BSH), and all 26 page-0x30 profiles support
+        // COP.
+        auto cover_profile = [](const def::Profile& p) {
+            HistoryDerivedCoverage cov;
+            const auto             view = def::resolved(p);
+            for (size_t i = 0; i < view.count(); i++) {
+                const auto row = adjudicated(view, i);
+                if (!row_publishable(row) || !conv_publishable(row.conv)) continue;
+                history_cover_derived_row(cov, row.label, unit_for_row(row), row.reg, row.offset,
+                                          row.conv);
+            }
+            return cov;
+        };
+        const HistoryDerivedCoverage generic_cov = cover_profile(def::lookup("generic"));
+        CHECK(!generic_cov.pel_supported() && !generic_cov.cop_supported());
+        // Exercise both unit spellings ("A"/"", "L/min"/""), wrong-unit refusals, and each
+        // cop_supported() requirement step by step.
+        HistoryDerivedCoverage unit_cov;
+        history_cover_derived_row(unit_cov, "INV primary current (A)", "W", 0x21, 0, 105);
+        CHECK(!unit_cov.has_inv);
+        history_cover_derived_row(unit_cov, "INV primary current (A)", "", 0x21, 0, 105);
+        CHECK(unit_cov.has_inv && !unit_cov.pel_supported());
+        unit_cov.has_inv = false;
+        history_cover_derived_row(unit_cov, "INV primary current (A)", "A", 0x21, 0, 105);
+        CHECK(unit_cov.has_inv);
+        history_cover_derived_row(unit_cov, "INV frequency (rps)", "rps", 0x30, 0, 152);
+        CHECK(unit_cov.pel_supported() && !unit_cov.cop_supported()); // missing flow
+        history_cover_derived_row(unit_cov, "Flow sensor (l/min)", "m3/h", 0x62, 9, 105);
+        CHECK(!unit_cov.has_flow);
+        history_cover_derived_row(unit_cov, "Flow sensor (l/min)", "", 0x62, 9, 105);
+        CHECK(unit_cov.has_flow && !unit_cov.cop_supported()); // missing rwt
+        unit_cov.has_flow = false;
+        history_cover_derived_row(unit_cov, "Flow sensor (l/min)", "L/min", 0x62, 9, 105);
+        CHECK(unit_cov.has_flow);
+        history_cover_derived_row(unit_cov, "Inlet water temp.(R4T)", "°C", 0x61, 8, 105);
+        CHECK(!unit_cov.cop_supported()); // missing lwt/post_buh
+        history_cover_derived_row(unit_cov, "Leaving water temp. after BUH (R2T)", "°C", 0x61, 4,
+                                  105);
+        CHECK(!unit_cov.cop_supported()); // missing valve_dhw/iu_mode
+        history_cover_derived_row(unit_cov, "Not defrost", "", 0x10, 1, 301);
+        CHECK(!unit_cov.has_defrost);
+        history_cover_derived_row(unit_cov, "I/U operation mode", "", 0x60, 2, 315);
+        CHECK(!unit_cov.has_lwt && unit_cov.has_post_buh && !unit_cov.has_valve_dhw &&
+              unit_cov.has_iu_mode);
+        CHECK(unit_cov.pel_supported() && unit_cov.cop_supported());
+
+        int ct_profiles = 0, pel_profiles = 0, cop_profiles = 0;
+        for (const auto& p : def::profiles) {
+            if (!def::is_detection_model(p.id)) continue;
+            const auto cov = cover_profile(p);
+            CHECK(cov.ct_expected == 0 || cov.ct_expected == 3);
+            if (cov.ct_expected > 0) {
+                ct_profiles++;
+                CHECK(cov.has_bsh);
+            }
+            if (cov.pel_supported()) pel_profiles++;
+            if (cov.cop_supported()) cop_profiles++;
+        }
+        CHECK(ct_profiles == 20);
+        CHECK(pel_profiles >= 26);
+        CHECK(cop_profiles == 26);
+
+        // Electrical power evaluation: whole-unit CT vs. unwired-CT fallback to INV vs. partial CT
+        // refusal.
+        HistoryDerivedCoverage ct_cov;
+        ct_cov.ct_expected = 3;
+        ct_cov.has_inv     = true;
+        ct_cov.has_rps     = true;
+        // All 3 phases readable -> CT sum even when compressor is idle (hydronic 0x63 stays live).
+        auto pe = history_electrical_power(ct_cov, rt<uint8_t>(3), rt(30), true, 100, true, false);
+        CHECK(pe.source == PelSource::Ct && pe.sample == 7 && pe.amps_tenths == 30);
+        // Partial CT sweep (e.g. CT-L3 withheld by Bit7MeansAbsent or page 0x63 timeout) -> gap,
+        // never partial sum and never INV fallback.
+        pe = history_electrical_power(ct_cov, rt<uint8_t>(2), rt(20), true, 100, true, true);
+        CHECK(pe.source == PelSource::None && pe.sample == HISTORY_NO_READING);
+        pe = history_electrical_power(ct_cov, rt<uint8_t>(3), rt(-1), true, 100, true, true);
+        CHECK(pe.source == PelSource::None && pe.sample == HISTORY_NO_READING);
+        // Unwired CT clamps (all 3 read 0.0 A) -> fall through to INV, gated on rps witness.
+        pe = history_electrical_power(ct_cov, rt<uint8_t>(3), rt(0), true, 100, true, true);
+        CHECK(pe.source == PelSource::Inv && pe.sample == 23 && pe.amps_tenths == 100);
+        pe = history_electrical_power(ct_cov, rt<uint8_t>(3), rt(0), true, 100, true, false);
+        CHECK(pe.source == PelSource::None && pe.sample == HISTORY_HELD_OVER);
+        pe = history_electrical_power(ct_cov, rt<uint8_t>(3), rt(0), true, 100, false, false);
+        CHECK(pe.source == PelSource::None && pe.sample == HISTORY_NO_READING);
+        pe = history_electrical_power(ct_cov, rt<uint8_t>(3), rt(0), false, 0, true, true);
+        CHECK(pe.source == PelSource::None && pe.sample == HISTORY_NO_READING);
+        pe = history_electrical_power(ct_cov, rt<uint8_t>(3), rt(0), true, rt(-5), true, true);
+        CHECK(pe.source == PelSource::None && pe.sample == HISTORY_NO_READING);
+
+        HistoryDerivedCoverage ct_no_rps;
+        ct_no_rps.ct_expected = 3;
+        ct_no_rps.has_inv     = true;
+        pe = history_electrical_power(ct_no_rps, rt<uint8_t>(3), rt(0), true, 80, false, false);
+        CHECK(pe.source == PelSource::None && pe.sample == HISTORY_NO_READING);
+        CHECK(
+            history_electrical_power(HistoryDerivedCoverage{}, 0, 0, true, 50, true, true).sample ==
+            HISTORY_NO_READING);
+
+        // Single-sweep COP evaluation: boundary pairing, heating-only task, and operating floors.
+        HistoryDerivedCoverage full_cov;
+        full_cov.ct_expected   = 3;
+        full_cov.has_inv       = true;
+        full_cov.has_rps       = true;
+        full_cov.has_flow      = true;
+        full_cov.has_lwt       = true;
+        full_cov.has_rwt       = true;
+        full_cov.has_post_buh  = true;
+        full_cov.has_buh1      = true;
+        full_cov.has_buh2      = true;
+        full_cov.has_bsh       = true;
+        full_cov.has_defrost   = true;
+        full_cov.has_valve_dhw = true;
+        full_cov.has_iu_mode   = true;
+
+        HistoryCopInputs base_in;
+        base_in.rps_known       = true;
+        base_in.rps_tenths      = 320; // 32.0 rps
+        base_in.flow_known      = true;
+        base_in.flow_tenths     = 150; // 15.0 L/min
+        base_in.lwt_known       = true;
+        base_in.lwt_tenths      = 350; // 35.0 °C
+        base_in.rwt_known       = true;
+        base_in.rwt_tenths      = 300; // 30.0 °C -> ΔT 5.0 K, P_th = 5.2325 kW
+        base_in.post_buh_known  = true;
+        base_in.post_buh_tenths = 380; // 38.0 °C -> ΔT 8.0 K, P_th = 8.372 kW
+        base_in.buh1_known      = true;
+        base_in.buh2_known      = true;
+        base_in.bsh_known       = true;
+        base_in.defrost_known   = true;
+        base_in.valve_dhw_known = true;
+        base_in.iu_heating      = true;
+
+        const HistoryPelEval inv_pel{PelSource::Inv, 17, 75}; // 7.5 A * 230 V = 1.725 kW
+        const HistoryPelEval ct_pel{PelSource::Ct, 23, 100};  // 10.0 A * 230 V = 2.300 kW
+        // HeatPump scope (INV): pre-BUH 5.2325 / 1.725 = 3.03 -> 30 tenths, unaffected by heaters.
+        CHECK(history_cop_sample(full_cov, inv_pel, base_in) == 30);
+        {
+            HistoryCopInputs with_heaters = base_in;
+            with_heaters.buh1_on          = true;
+            with_heaters.bsh_on           = true;
+            CHECK(history_cop_sample(full_cov, inv_pel, with_heaters) == 30);
+        }
+        // Plant scope (CT): uses post-BUH 8.372 / 2.300 = 3.64 -> 36 tenths.
+        CHECK(history_cop_sample(full_cov, ct_pel, base_in) == 36);
+        // DHW charging (3-way valve on tank) is a heating task even when iu_mode is "DHW"
+        // (!iu_heating).
+        {
+            HistoryCopInputs dhw_in = base_in;
+            dhw_in.valve_dhw_on     = true;
+            dhw_in.iu_heating       = false;
+            CHECK(history_cop_sample(full_cov, inv_pel, dhw_in) == 30);
+        }
+        // Without a 3-way valve or pre-BUH row, iu_heating + post-BUH R2T qualifies Plant COP.
+        {
+            HistoryCopInputs r2t_only_in = base_in;
+            r2t_only_in.lwt_known        = false;
+            r2t_only_in.valve_dhw_known  = false;
+            CHECK(history_cop_sample(unit_cov, ct_pel, r2t_only_in) == 36);
+            r2t_only_in.iu_heating = false;
+            CHECK(history_cop_sample(unit_cov, ct_pel, r2t_only_in) == HISTORY_NO_READING);
+        }
+
+        // Refusal gates: unsupported, missing/idle/spin-up rps, low flow, defrost, cooling/stop,
+        // low electrical input, BSH tank heater on CT, BUH without R2T on CT, non-positive ΔT,
+        // missing LWT/RWT/R2T, sub-tenth and overflow COP.
+        CHECK(history_cop_sample(generic_cov, inv_pel, base_in) == HISTORY_NO_READING);
+        {
+            HistoryCopInputs no_rps = base_in;
+            no_rps.rps_known        = false;
+            CHECK(history_cop_sample(full_cov, inv_pel, no_rps) == HISTORY_NO_READING);
+        }
+        {
+            HistoryCopInputs idle = base_in;
+            idle.rps_tenths       = 0;
+            CHECK(history_cop_sample(full_cov, inv_pel, idle) == HISTORY_HELD_OVER);
+        }
+        {
+            HistoryCopInputs spinup = base_in;
+            spinup.rps_tenths       = 50; // <= 5.0 rps
+            CHECK(history_cop_sample(full_cov, inv_pel, spinup) == HISTORY_NO_READING);
+            spinup.rps_tenths = 51;
+            CHECK(history_cop_sample(full_cov, inv_pel, spinup) == 30);
+        }
+        {
+            HistoryCopInputs low_flow = base_in;
+            low_flow.flow_known       = false;
+            CHECK(history_cop_sample(full_cov, inv_pel, low_flow) == HISTORY_NO_READING);
+            low_flow.flow_known  = true;
+            low_flow.flow_tenths = 5; // <= 0.5 L/min
+            CHECK(history_cop_sample(full_cov, inv_pel, low_flow) == HISTORY_NO_READING);
+        }
+        {
+            HistoryCopInputs dfr = base_in;
+            dfr.defrost_known    = false;
+            CHECK(history_cop_sample(full_cov, inv_pel, dfr) == HISTORY_NO_READING);
+            dfr.defrost_known = true;
+            dfr.defrost_on    = true;
+            CHECK(history_cop_sample(full_cov, inv_pel, dfr) == HISTORY_NO_READING);
+        }
+        {
+            HistoryCopInputs cooling = base_in;
+            cooling.iu_heating       = false; // Cooling / Stop with valve on space circuit
+            CHECK(history_cop_sample(full_cov, inv_pel, cooling) == HISTORY_NO_READING);
+            cooling.iu_heating      = true;
+            cooling.valve_dhw_known = false;
+            CHECK(history_cop_sample(full_cov, inv_pel, cooling) == HISTORY_NO_READING);
+        }
+        CHECK(history_cop_sample(full_cov, HistoryPelEval{}, base_in) == HISTORY_NO_READING);
+        CHECK(history_cop_sample(full_cov, HistoryPelEval{PelSource::Inv, 2, 8}, base_in) ==
+              HISTORY_NO_READING); // 0.8 A * 230 V = 0.184 kW <= 0.2 kW
+        CHECK(history_cop_sample(full_cov, HistoryPelEval{PelSource::Inv, 2, 9}, base_in) > 0);
+        {
+            HistoryCopInputs tank_htr = base_in;
+            tank_htr.bsh_on           = true;
+            CHECK(history_cop_sample(full_cov, ct_pel, tank_htr) == HISTORY_NO_READING);
+        }
+        {
+            HistoryCopInputs no_r2t = base_in;
+            no_r2t.post_buh_known   = false;
+            no_r2t.buh1_known       = false;
+            CHECK(history_cop_sample(full_cov, ct_pel, no_r2t) == HISTORY_NO_READING);
+            no_r2t.buh1_known = true;
+            no_r2t.buh2_known = false;
+            CHECK(history_cop_sample(full_cov, ct_pel, no_r2t) == HISTORY_NO_READING);
+            no_r2t.buh2_known = true;
+            no_r2t.buh2_on    = true;
+            CHECK(history_cop_sample(full_cov, ct_pel, no_r2t) == HISTORY_NO_READING);
+            no_r2t.buh2_on = false;
+            CHECK(history_cop_sample(full_cov, ct_pel, no_r2t) ==
+                  23); // pre-BUH fallback when BUH off
+            no_r2t.lwt_known = false;
+            CHECK(history_cop_sample(full_cov, ct_pel, no_r2t) == HISTORY_NO_READING);
+        }
+        {
+            HistoryCopInputs missing_rwt = base_in;
+            missing_rwt.rwt_known        = false;
+            CHECK(history_cop_sample(full_cov, inv_pel, missing_rwt) == HISTORY_NO_READING);
+        }
+        {
+            HistoryCopInputs neg_dt = base_in;
+            neg_dt.lwt_tenths       = 300;
+            CHECK(history_cop_sample(full_cov, inv_pel, neg_dt) == HISTORY_NO_READING);
+        }
+        {
+            HistoryCopInputs tiny = base_in;
+            tiny.flow_tenths      = 6;
+            tiny.lwt_tenths       = 301;
+            CHECK(history_cop_sample(full_cov, HistoryPelEval{PelSource::Inv, 230, 1000}, tiny) ==
+                  HISTORY_NO_READING); // rounds to 0.0 -> refused
+            HistoryCopInputs huge = base_in;
+            huge.flow_tenths      = 30000;
+            huge.lwt_tenths       = 1500;
+            CHECK(history_cop_sample(full_cov, HistoryPelEval{PelSource::Inv, 2, 9}, huge) ==
+                  HISTORY_NO_READING); // > INT16_MAX -> refused
+        }
     }
 
     // Bytes → tenths of a KiB, the board trends' storage unit. The clamp is the point: the ring is
@@ -24268,9 +24563,10 @@ static void test_history_persist() {
     // HIST-01/c: the fingerprint is now a fold of every ring's series id, so it moved from the
     // previous generation (legacy-8's catalog). Records of that generation are no
     // longer on the direct fast path; they are read through their manifests
-    // (test_history_identity pins both the mapping and how the old constant was built). B5 and
-    // the 13->17 Modbus ring expansion (0x537c75e6u -> this) moved it to the current value.
-    CHECK(fp == 0x15f5f2ebu);
+    // (test_history_identity pins both the mapping and how the old constant was built). B5,
+    // the 13->17 Modbus ring expansion (0x537c75e6u -> 0x15f5f2ebu), and X10A pel/cop moved it
+    // to the current value.
+    CHECK(fp == 0x1047fbc2u);
     const uint32_t sw = static_cast<uint32_t>(CrashReason::SW);
     CHECK(history_restore_verdict(sw, HISTORY_PERSIST_MAGIC, HISTORY_PERSIST_VERSION, fp, fp, 7,
                                   7) == HistoryRestore::Accept);
@@ -24306,11 +24602,11 @@ static void test_history_persist() {
     CHECK(history_fp_u32(CONFIG_CRC32_INIT, 1) != history_fp_u32(CONFIG_CRC32_INIT, 256));
 
     // --- the official 8 MB append journal -------------------------------------------------------
-    CHECK(HISTORY_FLASH_TOTAL_RINGS == 53);
+    CHECK(HISTORY_FLASH_TOTAL_RINGS == 55);
     CHECK(HISTORY_FLASH_PARTITION_BYTES == 4u * 1024u * 1024u);
     CHECK(HISTORY_FLASH_ERASE_BYTES == 4096);
     CHECK(HISTORY_JOURNAL_HEADER_BYTES == 64);
-    CHECK(HISTORY_JOURNAL_MAX_SOURCE_RINGS == 32);
+    CHECK(HISTORY_JOURNAL_MAX_SOURCE_RINGS == 34);
     CHECK(history_journal_slot_bytes(HISTORY_JOURNAL_HEADER_BYTES + 48 * sizeof(uint32_t)) == 256);
     CHECK(history_journal_slot_bytes(HISTORY_JOURNAL_HEADER_BYTES + 49 * sizeof(uint32_t)) == 512);
     CHECK(history_journal_slot_bytes(256) == 256);
@@ -24319,7 +24615,7 @@ static void test_history_persist() {
     CHECK(HISTORY_JOURNAL_SLOT_BYTES == 256);
     CHECK(HISTORY_JOURNAL_SLOTS_PER_SECTOR == 16);
     CHECK(HISTORY_JOURNAL_SLOT_COUNT == 16384);
-    CHECK(history_journal_source_rings(HistoryJournalSource::X10a) == 32);
+    CHECK(history_journal_source_rings(HistoryJournalSource::X10a) == 34);
     CHECK(history_journal_source_rings(HistoryJournalSource::Modbus) == 17);
     CHECK(history_journal_source_rings(HistoryJournalSource::Env3) == 3);
     CHECK(history_journal_source_rings(HistoryJournalSource::Checkup) == 0);
@@ -25277,9 +25573,9 @@ static void test_history_identity() {
         for (size_t i = 0; i < ENV3_HISTORY_COUNT; i++)
             crc = history_fp_u32(crc, history_series_id(HistoryJournalSource::Env3, i));
         CHECK(history_catalog_fingerprint() == config_crc32_final(crc));
-        // Pinned: this is the generation the flash records of this build carry (was 0x537c75e6u
-        // before 17 Modbus rings).
-        CHECK(history_catalog_fingerprint() == 0x15f5f2ebu);
+        // Pinned: this is the generation the flash records of this build carry (was 0x15f5f2ebu
+        // on 32/17/3 before X10A pel and cop).
+        CHECK(history_catalog_fingerprint() == 0x1047fbc2u);
     }
     {
         // B5: the high-side trend changed what its samples mean on twinless profiles (hydronic
@@ -25326,25 +25622,57 @@ static void test_history_identity() {
         CHECK(history_env3_series_id(unit_a) != history_env3_series_id(unit_b));
     }
     {
-        // The generation before this one stays readable through its manifests. Its fingerprint is
-        // reproduced from the hand-written formula that built it (so the constant is not just
-        // asserted), it no longer matches directly, and its manifest ids map: X10A and ENV III by
-        // unchanged semantic ids, HomeHub not at all (its ids now carry the decode columns, so the
-        // HomeHub history starts empty once).
+        // The 32/17/3 generation immediately before X10A pel/cop (0x15f5f2eb) maps all 32 X10A,
+        // 17 HomeHub (including modbus_power) and 3 ENV III series 1-to-1 through its manifests;
+        // only the newly appended X10A pel and cop series start empty.
+        constexpr size_t kPrev32    = 32;
+        uint32_t         prev32_crc = CONFIG_CRC32_INIT;
+        prev32_crc                  = history_fp_u32(prev32_crc, HISTORY_DT_S);
+        prev32_crc                  = history_fp_u32(prev32_crc, HISTORY_SAMPLES);
+        prev32_crc                  = history_fp_u32(prev32_crc, kPrev32);
+        prev32_crc = history_fp_u32(prev32_crc, static_cast<uint32_t>(HOMEHUB_HISTORY_COUNT));
+        prev32_crc = history_fp_u32(prev32_crc, static_cast<uint32_t>(ENV3_HISTORY_COUNT));
+        uint32_t x10a_prev32[kPrev32]             = {};
+        uint32_t mb_prev17[HOMEHUB_HISTORY_COUNT] = {};
+        for (size_t i = 0; i < kPrev32; i++) {
+            x10a_prev32[i] = history_series_id(HistoryJournalSource::X10a, i);
+            prev32_crc     = history_fp_u32(prev32_crc, x10a_prev32[i]);
+        }
+        for (size_t i = 0; i < HOMEHUB_HISTORY_COUNT; i++) {
+            mb_prev17[i] = history_series_id(HistoryJournalSource::Modbus, i);
+            prev32_crc   = history_fp_u32(prev32_crc, mb_prev17[i]);
+        }
+        for (size_t i = 0; i < ENV3_HISTORY_COUNT; i++)
+            prev32_crc =
+                history_fp_u32(prev32_crc, history_series_id(HistoryJournalSource::Env3, i));
+        CHECK(config_crc32_final(prev32_crc) == 0x15f5f2ebu);
+        CHECK(history_catalog_fingerprint() != 0x15f5f2ebu);
+        for (size_t i = 0; i < TREND_COUNT; i++)
+            CHECK(history_series_index(x10a_prev32, kPrev32,
+                                       history_series_id(HistoryJournalSource::X10a, i)) ==
+                  (i < kPrev32 ? static_cast<int>(i) : -1));
+        for (size_t i = 0; i < HOMEHUB_HISTORY_COUNT; i++)
+            CHECK(history_series_index(mb_prev17, HOMEHUB_HISTORY_COUNT,
+                                       history_series_id(HistoryJournalSource::Modbus, i)) ==
+                  static_cast<int>(i));
+
+        // The earlier hand-written 32/17/3 formula (0x22cedd55) stays readable through its
+        // manifests too.
         const auto previous_catalog_fp = [] {
             uint32_t crc = CONFIG_CRC32_INIT;
             crc          = history_fp_u32(crc, HISTORY_DT_S);
             crc          = history_fp_u32(crc, HISTORY_SAMPLES);
-            crc          = history_fp_u32(crc, static_cast<uint32_t>(TREND_COUNT));
+            crc          = history_fp_u32(crc, kPrev32);
             crc          = history_fp_u32(crc, static_cast<uint32_t>(HOMEHUB_HISTORY_COUNT));
             crc          = history_fp_u32(crc, static_cast<uint32_t>(ENV3_HISTORY_COUNT));
-            for (const auto& d : TRENDS) {
-                crc = history_fp_str(crc, d.id);
-                crc = history_fp_u32(crc, static_cast<uint32_t>(d.kind));
-                crc = history_fp_u32(crc, d.reg);
-                crc = history_fp_u32(crc, d.off);
-                crc = history_fp_str(crc, d.unit);
-                crc = history_fp_u32(crc, static_cast<uint32_t>(d.conv));
+            for (size_t i = 0; i < kPrev32; i++) {
+                const auto& d = TRENDS[i];
+                crc           = history_fp_str(crc, d.id);
+                crc           = history_fp_u32(crc, static_cast<uint32_t>(d.kind));
+                crc           = history_fp_u32(crc, d.reg);
+                crc           = history_fp_u32(crc, d.off);
+                crc           = history_fp_str(crc, d.unit);
+                crc           = history_fp_u32(crc, static_cast<uint32_t>(d.conv));
             }
             for (size_t i = 0; i < HOMEHUB_HISTORY_COUNT; i++) {
                 crc = history_fp_u32(crc, HOMEHUB_HISTORIES[i].offset);
@@ -25372,7 +25700,7 @@ static void test_history_identity() {
         old_record.sequence    = 9;
         old_record.bucket      = 4000;
         old_record.dt_s        = HISTORY_DT_S;
-        old_record.rings[0]    = static_cast<uint16_t>(TREND_COUNT);
+        old_record.rings[0]    = kPrev32;
         old_record.rings[1]    = static_cast<uint16_t>(HOMEHUB_HISTORY_COUNT);
         old_record.rings[2]    = static_cast<uint16_t>(ENV3_HISTORY_COUNT);
         CHECK(history_journal_trend_header_structural_matches(old_record));
@@ -25380,8 +25708,7 @@ static void test_history_identity() {
                                                     static_cast<uint16_t>(TREND_COUNT),
                                                     static_cast<uint16_t>(HOMEHUB_HISTORY_COUNT),
                                                     static_cast<uint16_t>(ENV3_HISTORY_COUNT)));
-        CHECK(history_journal_trend_layout_matches(old_record, previous_fp,
-                                                   static_cast<uint16_t>(TREND_COUNT),
+        CHECK(history_journal_trend_layout_matches(old_record, previous_fp, kPrev32,
                                                    static_cast<uint16_t>(HOMEHUB_HISTORY_COUNT),
                                                    static_cast<uint16_t>(ENV3_HISTORY_COUNT)));
         CHECK(!history_legacy_disinfection_layout_matches(old_record));
