@@ -194,6 +194,7 @@ inline uint32_t checkup_layout_fingerprint() {
     crc = checkup_fp_u32(crc, DHW_LOSS_CIRC_OFF_SETTLE_S);
     crc = checkup_fp_u32(crc, CHECKUP_FLOW_RUNUP_S);
     crc = checkup_fp_u32(crc, static_cast<uint32_t>(CHECKUP_BAR_WARN_TENTHS));
+    crc = checkup_fp_u32(crc, static_cast<uint32_t>(CHECKUP_BAR_CRIT_TENTHS));
     crc = checkup_fp_u32(crc, CHECKUP_PRESSURE_CONFIRM_S);
     return config_crc32_final(crc);
 }
@@ -407,7 +408,8 @@ inline constexpr size_t CHECKUP_JOURNAL_PAYLOAD_BYTES =
 // this source's identity instead, beside every threshold/locator already covered above.
 // The two original layouts shared one fingerprint. Layout 2 cannot supply independently
 // witnessed mode totals. Completed RAM hours retire at boot, and the DHW handoff stays compatible.
-inline constexpr uint32_t CHECKUP_JOURNAL_LAYOUT_VERSION = 3;
+// Layout 4 requires 60 s confirmation before low/critical water pressure enters min_bar.
+inline constexpr uint32_t CHECKUP_JOURNAL_LAYOUT_VERSION = 4;
 
 inline uint32_t checkup_journal_fingerprint() {
     uint32_t crc = CONFIG_CRC32_INIT;

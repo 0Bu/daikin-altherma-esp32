@@ -234,12 +234,14 @@ std::string open_meteo_url(const WeatherConfigSnapshot& cfg) {
     // Only formatter-produced signed decimals enter this URL. `forecast_hours=6` is deliberately
     // larger than the four values normally needed: a request that crosses an hour boundary while
     // TLS is in flight still has two complete future one-hour bins after the next decision instant.
-    return "https://api.open-meteo.com/v1/forecast?latitude=" +
-           weather_coordinate_format_e6(cfg.weather_latitude_e6) +
-           "&longitude=" + weather_coordinate_format_e6(cfg.weather_longitude_e6) +
-           "&hourly=temperature_2m,relative_humidity_2m,surface_pressure,shortwave_radiation"
+    std::string url = "https://api.open-meteo.com/v1/forecast?latitude=";
+    url += weather_coordinate_format_e6(cfg.weather_latitude_e6);
+    url += "&longitude=";
+    url += weather_coordinate_format_e6(cfg.weather_longitude_e6);
+    url += "&hourly=temperature_2m,relative_humidity_2m,surface_pressure,shortwave_radiation"
            "&models=icon_seamless"
            "&forecast_hours=6&timeformat=unixtime&timezone=GMT&temperature_unit=celsius";
+    return url;
 }
 
 // Keep the reviewed Weather task stages as real ELF symbols. The static stack gate deliberately
@@ -310,7 +312,10 @@ __attribute__((noinline)) bool download_json(const WeatherConfigSnapshot& weathe
             } else if (announced < 0) {
                 error = "response_failed";
             } else if (esp_http_client_get_status_code(client) != 200) {
-                error = "http_" + std::to_string(esp_http_client_get_status_code(client));
+                char code[24];
+                std::snprintf(code, sizeof(code), "http_%d",
+                              esp_http_client_get_status_code(client));
+                error = code;
             } else {
                 const int64_t claimed = esp_http_client_get_content_length(client);
                 if (claimed > static_cast<int64_t>(kPayloadMax)) {

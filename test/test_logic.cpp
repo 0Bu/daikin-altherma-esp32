@@ -15167,8 +15167,9 @@ static void test_history_measurement_units() {
     // The unit upgrade changed accepted cache metadata, never the catalog bytes used by persisted
     // series ids. The fingerprint moved with the high-side trend's series id (B5,
     // test_history_identity; 0xa1783c86 was before it), from 0x537c75e6 to 0x15f5f2eb when Paket 1
-    // expanded HOMEHUB_HISTORIES from 13 to 17 rings, and to 0x1047fbc2 with X10A pel and cop.
-    CHECK(history_catalog_fingerprint() == 0x1047fbc2u);
+    // expanded HOMEHUB_HISTORIES from 13 to 17 rings, to 0x1047fbc2 with X10A pel and cop, and to
+    // 0x97235e4f when water_pressure switched to 5-minute minimum folding (min_fold).
+    CHECK(history_catalog_fingerprint() == 0x97235e4fu);
 }
 
 static void test_history() {
@@ -15518,6 +15519,26 @@ static void test_history() {
         r.fold_binary_event(HISTORY_NO_READING);
         r.fold_binary_event(0);
         CHECK(r.pending == 0); // a real OFF beats an initially missing sample
+    }
+    {
+        // Water pressure uses minimum folding so a dip inside a 5-minute bucket survives recovery.
+        TrendRing r;
+        r.fold_min(HISTORY_NO_READING);
+        r.fold_min(15);
+        r.fold_min(8);
+        r.fold_min(16);
+        r.fold_min(HISTORY_NO_READING);
+        CHECK(r.pending == 8);
+        r.commit(0);
+        HistorySample out[2];
+        CHECK(r.snapshot(out, 2) == 1 && out[0] == 8);
+        r.fold_min(HISTORY_HELD_OVER);
+        r.fold_min(HISTORY_NO_READING);
+        CHECK(r.pending == HISTORY_NO_READING);
+        r.fold_min(0);
+        CHECK(r.pending == 0); // real zero beats absence and holds over later recovery
+        r.fold_min(15);
+        CHECK(r.pending == 0);
     }
     {
         // Wrap-around: fill past capacity and the readout must still be oldest-first, dropping only
@@ -16789,17 +16810,22 @@ static void test_checkup_evidence_overhaul() {
     checkup_step(flowing, flows, pump, 62'000'000);
     CHECK(flows.flow_observed_s == 1);
 
-    // An accepted zero remains visible. Its exact time is supplied only by a synchronized clock.
+    // Unconfirmed zero (< 60 s) does not enter min_bar; once confirmed across
+    // CHECKUP_PRESSURE_CONFIRM_S it records min_bar == 0, bar_crit == 1, and its earliest synced
+    // timestamp.
     sample.bar_ok     = true;
     sample.bar_tenths = 0;
     checkup_step(state, bucket, sample, 17'000'000);
-    CHECK(bucket.min_bar == 0 && bucket.min_bar_unix_s == 0);
+    CHECK(bucket.min_bar == CHECKUP_ABSENT && bucket.min_bar_unix_s == 0);
     sample.unix_s = 1'800'000'000u;
     checkup_step(state, bucket, sample, 18'000'000);
-    CHECK(bucket.min_bar == 0 && bucket.min_bar_unix_s == sample.unix_s);
+    CHECK(bucket.min_bar == CHECKUP_ABSENT && bucket.min_bar_unix_s == 0);
+    for (int sec = 19; sec <= 78; sec++)
+        checkup_step(state, bucket, sample, static_cast<int64_t>(sec) * 1'000'000);
+    CHECK(bucket.min_bar == 0 && bucket.bar_crit == 1 && bucket.min_bar_unix_s == sample.unix_s);
     sample.bar_tenths = 15;
     sample.unix_s++;
-    checkup_step(state, bucket, sample, 19'000'000);
+    checkup_step(state, bucket, sample, 79'000'000);
     CHECK(bucket.min_bar_unix_s == 1'800'000'000u);
     CheckupRing ring;
     ring.pending = bucket;
@@ -16922,12 +16948,14 @@ static void test_checkup_evidence_overhaul() {
     CHECK(report[CheckupCheck::Fault].reason == CheckupReason::SourceStale);
     CHECK(report[CheckupCheck::Pressure].verdict == CheckupVerdict::Collecting);
     CHECK(report.evaluated == 0 && report.overall == CheckupVerdict::Collecting);
-    window.min_bar = 0;
-    window.flags   = CHECKUP_F_LOW_BAR;
-    report         = checkup_evaluate(window, cov, FaultClass::Error);
+    window.min_bar  = 0;
+    window.flags    = CHECKUP_F_LOW_BAR;
+    window.bar_crit = true;
+    report          = checkup_evaluate(window, cov, FaultClass::Error);
     checkup_apply_freshness(report, false, 20, CHECKUP_WINDOW_S);
     CHECK(report[CheckupCheck::Pressure].verdict == CheckupVerdict::Warn);
     CHECK(report[CheckupCheck::Pressure].b == 1);
+    CHECK(report[CheckupCheck::Pressure].c == 1);
     CHECK(report[CheckupCheck::Fault].verdict == CheckupVerdict::Info);
     CHECK(report[CheckupCheck::Fault].a == -1 && report.pressure_current_tenths == -1);
 
@@ -18051,23 +18079,117 @@ static void test_checkup() {
         CHECK(b.covered_s == 1 && b.rps_observed_s == 1 && b.bar_observed_s == 1);
     }
     {
-        // A low-pressure sample is always part of the raw minimum; debounce may only control the
-        // warning strength, never rewrite the statistic into a more reassuring number.
+        // Low (<=1.0 bar) and Critical (<=0.5 bar) samples must persist for 60 continuous seconds
+        // before entering min_bar or triggering flags; transient dips leave prior normal min_bar
+        // intact.
         CheckupState  st;
         CheckupBucket b;
+        CheckupSample normal;
+        normal.bar_ok     = true;
+        normal.bar_tenths = 17;
+        checkup_step(st, b, normal, 0);
+        CHECK(b.min_bar == 17);
+
         CheckupSample low;
         low.bar_ok     = true;
-        low.bar_tenths = CHECKUP_BAR_WARN_TENTHS;
-        checkup_step(st, b, low, 0);
-        for (uint32_t second = 1; second < CHECKUP_PRESSURE_CONFIRM_S; second++)
+        low.bar_tenths = 8; // Low tier (0.8 bar)
+        for (uint32_t second = 1; second <= CHECKUP_PRESSURE_CONFIRM_S; second++)
             checkup_step(st, b, low, static_cast<int64_t>(second) * 1'000'000);
-        CHECK(b.bar_observed_s == CHECKUP_PRESSURE_CONFIRM_S - 1);
-        CHECK(b.min_bar == CHECKUP_BAR_WARN_TENTHS);
-        CHECK((b.flags & CHECKUP_F_LOW_BAR) == 0);
-        checkup_step(st, b, low, static_cast<int64_t>(CHECKUP_PRESSURE_CONFIRM_S) * 1'000'000);
         CHECK(b.bar_observed_s == CHECKUP_PRESSURE_CONFIRM_S);
-        CHECK(b.min_bar == CHECKUP_BAR_WARN_TENTHS);
-        CHECK((b.flags & CHECKUP_F_LOW_BAR) != 0);
+        CHECK(b.min_bar == 17); // 59 s continuous low (from t=1..60): not yet confirmed
+        CHECK((b.flags & CHECKUP_F_LOW_BAR) == 0 && b.bar_crit == 0);
+        checkup_step(st, b, low, static_cast<int64_t>(CHECKUP_PRESSURE_CONFIRM_S + 1) * 1'000'000);
+        CHECK(b.bar_observed_s == CHECKUP_PRESSURE_CONFIRM_S + 1);
+        CHECK(b.min_bar == 8);
+        CHECK((b.flags & CHECKUP_F_LOW_BAR) != 0 && b.bar_crit == 0);
+
+        // A 10 s glitch at 0.2 bar after a confirmed 0.8 bar run must NOT trigger Critical or
+        // overwrite min_bar = 8 once pressure recovers.
+        CheckupSample crit;
+        crit.bar_ok     = true;
+        crit.bar_tenths = 2;
+        for (int second = 62; second <= 71; second++)
+            checkup_step(st, b, crit, static_cast<int64_t>(second) * 1'000'000);
+        CHECK(b.min_bar == 8 && b.bar_crit == 0);
+        checkup_step(st, b, normal, 72'000'000);
+        CHECK(b.min_bar == 8 && b.bar_crit == 0);
+
+        // A continuous 60 s drop <= 0.5 bar (0.4 bar, or 0.0 bar) confirms Critical (bar_crit ==
+        // 1).
+        CheckupState  cst;
+        CheckupBucket cb;
+        CheckupSample c4;
+        c4.bar_ok     = true;
+        c4.bar_tenths = 4;
+        for (uint32_t second = 0; second <= CHECKUP_PRESSURE_CONFIRM_S; second++)
+            checkup_step(cst, cb, c4, static_cast<int64_t>(second) * 1'000'000);
+        CHECK(cb.min_bar == 4 && (cb.flags & CHECKUP_F_LOW_BAR) != 0 && cb.bar_crit == 1);
+    }
+    {
+        // Pressure candidate-minimum tracking across unsynced/synced clocks and fluctuating samples
+        // inside continuous Low and Critical windows, plus normal-pressure unix_s backfill.
+        CheckupState  st;
+        CheckupBucket b;
+        CheckupSample norm;
+        norm.bar_ok     = true;
+        norm.bar_tenths = 15;
+        checkup_step(st, b, norm, 0);
+        CHECK(b.min_bar == 15 && b.min_bar_unix_s == 0);
+        norm.unix_s = 0;
+        checkup_step(st, b, norm, 1'000'000);
+        norm.unix_s = 1'800'000'500u;
+        checkup_step(st, b, norm, 2'000'000);
+        norm.unix_s = 1'800'000'501u;
+        checkup_step(st, b, norm, 3'000'000);
+        CHECK(b.min_bar == 15 && b.min_bar_unix_s == 1'800'000'500u);
+
+        CheckupState  lst;
+        CheckupBucket lb;
+        CheckupSample s;
+        s.bar_ok     = true;
+        s.bar_tenths = 9;
+        s.unix_s     = 0;
+        checkup_step(lst, lb, s, 0);
+        checkup_step(lst, lb, s, 1'000'000);
+        s.unix_s = 1'800'001'000u;
+        checkup_step(lst, lb, s, 2'000'000);
+        s.unix_s = 1'800'001'001u;
+        checkup_step(lst, lb, s, 3'000'000);
+        s.bar_tenths = 7;
+        s.unix_s     = 1'800'001'002u;
+        checkup_step(lst, lb, s, 4'000'000);
+        s.bar_tenths = 8;
+        s.unix_s     = 1'800'001'003u;
+        for (int second = 5; second <= 60; second++)
+            checkup_step(lst, lb, s, static_cast<int64_t>(second) * 1'000'000);
+        CHECK((lb.flags & CHECKUP_F_LOW_BAR) != 0);
+        CHECK(lb.bar_crit == 0);
+        CHECK(lb.min_bar == 7);
+        CHECK(lb.min_bar_unix_s == 1'800'001'002u);
+
+        CheckupState  cst2;
+        CheckupBucket cb2;
+        CheckupSample cs;
+        cs.bar_ok     = true;
+        cs.bar_tenths = 5;
+        cs.unix_s     = 0;
+        checkup_step(cst2, cb2, cs, 0);
+        checkup_step(cst2, cb2, cs, 1'000'000);
+        cs.unix_s = 1'800'002'000u;
+        checkup_step(cst2, cb2, cs, 2'000'000);
+        cs.unix_s = 1'800'002'001u;
+        checkup_step(cst2, cb2, cs, 3'000'000);
+        cs.bar_tenths = 3;
+        cs.unix_s     = 1'800'002'002u;
+        checkup_step(cst2, cb2, cs, 4'000'000);
+        cs.bar_tenths = 4;
+        cs.unix_s     = 1'800'002'003u;
+        for (int second = 5; second <= 60; second++)
+            checkup_step(cst2, cb2, cs, static_cast<int64_t>(second) * 1'000'000);
+        CHECK(cb2.bar_crit == 1);
+        CHECK((cb2.flags & CHECKUP_F_LOW_BAR) != 0);
+        CHECK(cb2.min_bar == 3);
+        CHECK(cb2.min_bar_unix_s == 1'800'002'002u);
     }
     {
         // conv 105 is signed, but these hydronic sensors are not bidirectional. A corrupt negative
@@ -18084,8 +18206,8 @@ static void test_checkup() {
         CHECK(b.covered_s == 0);
     }
     {
-        // Recovery above 1.0 bar resets confirmation. Raw minima remain raw across both spells,
-        // while only one uninterrupted minute sets the separate warning fact.
+        // Recovery above 1.0 bar resets confirmation. An unconfirmed 30 s spell does not enter
+        // min_bar; a fresh >=60 s spell confirms cleanly.
         CheckupState  st;
         CheckupBucket b;
         CheckupSample s;
@@ -18096,23 +18218,25 @@ static void test_checkup() {
             checkup_step(st, b, s, static_cast<int64_t>(second) * 1'000'000);
         s.bar_tenths = CHECKUP_BAR_WARN_TENTHS + 7;
         checkup_step(st, b, s, 31'000'000);
-        CHECK(b.min_bar == CHECKUP_BAR_WARN_TENTHS);
+        CHECK(b.min_bar == CHECKUP_BAR_WARN_TENTHS + 7);
         CHECK((b.flags & CHECKUP_F_LOW_BAR) == 0);
 
         s.bar_tenths = CHECKUP_BAR_WARN_TENTHS - 1;
         for (int second = 32; second <= 90; second++)
             checkup_step(st, b, s, static_cast<int64_t>(second) * 1'000'000);
-        CHECK(b.min_bar == CHECKUP_BAR_WARN_TENTHS - 1);
+        CHECK(b.min_bar == CHECKUP_BAR_WARN_TENTHS + 7);
         CHECK((b.flags & CHECKUP_F_LOW_BAR) == 0);
         checkup_step(st, b, s, 91'000'000);
-        CHECK(b.min_bar == CHECKUP_BAR_WARN_TENTHS - 1);
+        CHECK(b.min_bar == CHECKUP_BAR_WARN_TENTHS + 7);
         CHECK((b.flags & CHECKUP_F_LOW_BAR) == 0);
         checkup_step(st, b, s, 92'000'000);
+        CHECK(b.min_bar == CHECKUP_BAR_WARN_TENTHS - 1);
         CHECK((b.flags & CHECKUP_F_LOW_BAR) != 0);
+        CHECK(b.bar_crit == 0);
     }
     {
         // Missing pressure and a long poll gap both break continuity; neither permits two partial
-        // low sequences to be added into a warning.
+        // low sequences to be added into a finding.
         CheckupState  missing_st;
         CheckupBucket missing_b;
         CheckupSample s;
@@ -18126,12 +18250,13 @@ static void test_checkup() {
         s.bar_ok = true;
         for (int second = 32; second <= 90; second++)
             checkup_step(missing_st, missing_b, s, static_cast<int64_t>(second) * 1'000'000);
-        CHECK(missing_b.min_bar == CHECKUP_BAR_WARN_TENTHS);
+        CHECK(missing_b.min_bar == CHECKUP_ABSENT);
         CHECK((missing_b.flags & CHECKUP_F_LOW_BAR) == 0);
         checkup_step(missing_st, missing_b, s, 91'000'000);
-        CHECK(missing_b.min_bar == CHECKUP_BAR_WARN_TENTHS);
+        CHECK(missing_b.min_bar == CHECKUP_ABSENT);
         CHECK((missing_b.flags & CHECKUP_F_LOW_BAR) == 0);
         checkup_step(missing_st, missing_b, s, 92'000'000);
+        CHECK(missing_b.min_bar == CHECKUP_BAR_WARN_TENTHS);
         CHECK((missing_b.flags & CHECKUP_F_LOW_BAR) != 0);
 
         CheckupState  gap_st;
@@ -18144,7 +18269,7 @@ static void test_checkup() {
         checkup_step(gap_st, gap_b, s, after_gap);
         for (uint32_t second = 1; second < CHECKUP_PRESSURE_CONFIRM_S; second++)
             checkup_step(gap_st, gap_b, s, after_gap + static_cast<int64_t>(second) * 1'000'000);
-        CHECK(gap_b.min_bar == CHECKUP_BAR_WARN_TENTHS);
+        CHECK(gap_b.min_bar == CHECKUP_ABSENT);
         CHECK((gap_b.flags & CHECKUP_F_LOW_BAR) == 0);
         checkup_step(gap_st, gap_b, s,
                      after_gap + static_cast<int64_t>(CHECKUP_PRESSURE_CONFIRM_S) * 1'000'000);
@@ -19753,9 +19878,10 @@ static void test_checkup() {
         CHECK(no_denominator.assessable == 2 && no_denominator.evaluated == 2);
     }
     {
-        // Pressure <=1.0 bar violates the documented ">1 bar" boundary. The raw minimum surfaces as
-        // Info immediately; Warn needs one continuous confirmation minute. A clear result still
-        // needs the complete window.
+        // Two-tier confirmed pressure diagnostic: >1.0 bar normal (Ok after full day + 90%
+        // coverage); confirmed <=1.0 bar Low -> Info (ck.b == 1, ck.c == 0); confirmed <=0.5 bar
+        // Critical -> Warn (ck.b == 1, ck.c == 1). Fail-closed guard: unconfirmed min_bar <=1.0
+        // without flags stays Collecting, never Ok.
         CheckupWindow w = day();
         CHECK(checkup_evaluate(w, full, FaultClass::Normal)[CheckupCheck::Pressure].verdict ==
               CheckupVerdict::Ok);
@@ -19763,30 +19889,39 @@ static void test_checkup() {
         CHECK(checkup_evaluate(w, full, FaultClass::Normal)[CheckupCheck::Pressure].verdict ==
               CheckupVerdict::Ok);
         w.min_bar = CHECKUP_BAR_WARN_TENTHS;
+        CHECK(checkup_evaluate(w, full, FaultClass::Normal)[CheckupCheck::Pressure].verdict ==
+              CheckupVerdict::Collecting); // fail closed without confirmation flag
+        w.flags |= CHECKUP_F_LOW_BAR;
+        w.min_bar = 8;
         {
             const CheckupReport r = checkup_evaluate(w, full, FaultClass::Normal);
             CHECK(r[CheckupCheck::Pressure].verdict == CheckupVerdict::Info);
             CHECK(r[CheckupCheck::Pressure].required_s == 0);
+            CHECK(r[CheckupCheck::Pressure].a == 8);
+            CHECK(r[CheckupCheck::Pressure].b == 1);
+            CHECK(r[CheckupCheck::Pressure].c == 0);
         }
-        w.min_bar = CHECKUP_BAR_WARN_TENTHS - 1;
-        CHECK(checkup_evaluate(w, full, FaultClass::Normal)[CheckupCheck::Pressure].verdict ==
-              CheckupVerdict::Info);
-        w.min_bar = 0;
-        CHECK(checkup_evaluate(w, full, FaultClass::Normal)[CheckupCheck::Pressure].verdict ==
-              CheckupVerdict::Info);
-        w.flags |= CHECKUP_F_LOW_BAR;
-        CHECK(checkup_evaluate(w, full, FaultClass::Normal)[CheckupCheck::Pressure].verdict ==
-              CheckupVerdict::Warn);
+        w.bar_crit = true;
+        w.min_bar  = 4;
+        {
+            const CheckupReport r = checkup_evaluate(w, full, FaultClass::Normal);
+            CHECK(r[CheckupCheck::Pressure].verdict == CheckupVerdict::Warn);
+            CHECK(r[CheckupCheck::Pressure].a == 4);
+            CHECK(r[CheckupCheck::Pressure].b == 1);
+            CHECK(r[CheckupCheck::Pressure].c == 1);
+        }
 
         w                = day();
         w.full_span      = false;
         w.bar_observed_s = CHECKUP_MIN_S_PRESSURE;
         CHECK(checkup_evaluate(w, full, FaultClass::Normal)[CheckupCheck::Pressure].verdict ==
               CheckupVerdict::Collecting);
-        w.min_bar = CHECKUP_BAR_WARN_TENTHS;
+        w.flags |= CHECKUP_F_LOW_BAR;
+        w.min_bar = 9;
         CHECK(checkup_evaluate(w, full, FaultClass::Normal)[CheckupCheck::Pressure].verdict ==
               CheckupVerdict::Info);
-        w.flags |= CHECKUP_F_LOW_BAR;
+        w.bar_crit = true;
+        w.min_bar  = 0;
         CHECK(checkup_evaluate(w, full, FaultClass::Normal)[CheckupCheck::Pressure].verdict ==
               CheckupVerdict::Warn);
         w.bar_observed_s = CHECKUP_MIN_S_PRESSURE - 1;
@@ -19794,6 +19929,14 @@ static void test_checkup() {
               CheckupVerdict::Warn);
         w.min_bar = CHECKUP_ABSENT;
         CHECK(checkup_evaluate(w, full, FaultClass::Normal)[CheckupCheck::Pressure].a == -1);
+        w                = day();
+        w.full_span      = true;
+        w.flags          = 0;
+        w.bar_crit       = false;
+        w.bar_observed_s = CHECKUP_REQUIRED_S;
+        w.min_bar        = CHECKUP_BAR_WARN_TENTHS;
+        CHECK(checkup_evaluate(w, full, FaultClass::Normal)[CheckupCheck::Pressure].verdict ==
+              CheckupVerdict::Collecting);
     }
     {
         // FLOW is OBSERVATION ONLY. The manufacturer's minimum is per model — this catalog spans
@@ -23834,7 +23977,7 @@ static void test_checkup_persist() {
     // something else by them. The fingerprint has to be STABLE across calls and SENSITIVE to that.
     CHECK(checkup_layout_fingerprint() == fp);
     CHECK(fp != 0);
-    CHECK(fp == 0x009061a7u); // Core journal layout changes leave the shared method stable.
+    CHECK(fp == 0xe9d3dae2u); // Moved with CHECKUP_BAR_CRIT_TENTHS (<=0.5 bar critical tier).
 
     // The model identity is separate and is compared at detection. Different profile, different
     // window; the same profile re-detected on a fresh boot is the same unit and keeps its day.
@@ -23858,7 +24001,7 @@ static void test_checkup_persist() {
     dhw_handoff.pending.max_loss_tenths_k_h    = 7;
     const uint32_t model_fp                    = checkup_fixture_model("altherma3_r_erga");
     const uint32_t handoff_fp                  = checkup_dhw_handoff_layout_fingerprint();
-    CHECK(handoff_fp == 0x33a0a26eu); // Preserve the previous firmware's separate DHW handoff.
+    CHECK(handoff_fp == 0x89c809a1u); // Embeds checkup_layout_fingerprint().
     const uint32_t handoff_crc = checkup_dhw_handoff_crc(model_fp, dhw_handoff);
     CHECK(checkup_dhw_handoff_valid(CHECKUP_DHW_HANDOFF_MAGIC, CHECKUP_DHW_HANDOFF_VERSION,
                                     handoff_fp, model_fp, model_fp, handoff_crc, dhw_handoff));
@@ -25033,8 +25176,9 @@ static void test_history_persist() {
     // longer on the direct fast path; they are read through their manifests
     // (test_history_identity pins both the mapping and how the old constant was built). B5,
     // the 13->17 Modbus ring expansion (0x537c75e6u -> 0x15f5f2ebu), and X10A pel/cop moved it
+    // B5, 13->17 Modbus ring expansion, X10A pel/cop, and water_pressure min_fold moved it
     // to the current value.
-    CHECK(fp == 0x1047fbc2u);
+    CHECK(fp == 0x97235e4fu);
     const uint32_t sw = static_cast<uint32_t>(CrashReason::SW);
     CHECK(history_restore_verdict(sw, HISTORY_PERSIST_MAGIC, HISTORY_PERSIST_VERSION, fp, fp, 7,
                                   7) == HistoryRestore::Accept);
@@ -26041,14 +26185,14 @@ static void test_history_identity() {
         for (size_t i = 0; i < ENV3_HISTORY_COUNT; i++)
             crc = history_fp_u32(crc, history_series_id(HistoryJournalSource::Env3, i));
         CHECK(history_catalog_fingerprint() == config_crc32_final(crc));
-        // Pinned: this is the generation the flash records of this build carry (was 0x15f5f2ebu
-        // on 32/17/3 before X10A pel and cop).
-        CHECK(history_catalog_fingerprint() == 0x1047fbc2u);
+        // Pinned: this is the generation the flash records of this build carry (was 0x1047fbc2u
+        // before water_pressure switched to 5-minute minimum folding).
+        CHECK(history_catalog_fingerprint() == 0x97235e4fu);
     }
     {
-        // B5: the high-side trend changed what its samples mean on twinless profiles (hydronic
-        // 0x62/15 before, outdoor 0x20/12 now), so its series id moved and the journal's pre-change
-        // column restores into nothing. Every other X10A series keeps its id and its column.
+        // B5 / min_fold: the high-side trend and water_pressure (min_fold) changed what their
+        // samples represent, so their series ids moved and pre-change journal columns restore into
+        // nothing. Every other X10A series keeps its id and its column.
         uint32_t ids[TREND_COUNT];
         CHECK(history_current_series_ids(HistoryJournalSource::X10a, ids, TREND_COUNT) ==
               TREND_COUNT);
@@ -26056,15 +26200,16 @@ static void test_history_identity() {
         for (size_t t = 0; t < TREND_COUNT; t++) {
             TrendDef before  = TRENDS[t];
             before.high_side = false;
+            before.min_fold  = false;
             const int at = history_series_index(ids, TREND_COUNT, history_x10a_series_id(before));
-            if (TRENDS[t].high_side) {
+            if (TRENDS[t].high_side || TRENDS[t].min_fold) {
                 moved++;
                 CHECK(at == -1);
             } else {
                 CHECK(at == static_cast<int>(t));
             }
         }
-        CHECK(moved == 1);
+        CHECK(moved == 2);
     }
     {
         // The defect, reproduced. The hand-written fingerprint hashed the HomeHub offset and trend
@@ -26103,8 +26248,10 @@ static void test_history_identity() {
         uint32_t x10a_prev32[kPrev32]             = {};
         uint32_t mb_prev17[HOMEHUB_HISTORY_COUNT] = {};
         for (size_t i = 0; i < kPrev32; i++) {
-            x10a_prev32[i] = history_series_id(HistoryJournalSource::X10a, i);
-            prev32_crc     = history_fp_u32(prev32_crc, x10a_prev32[i]);
+            TrendDef before = TRENDS[i];
+            before.min_fold = false;
+            x10a_prev32[i]  = history_x10a_series_id(before);
+            prev32_crc      = history_fp_u32(prev32_crc, x10a_prev32[i]);
         }
         for (size_t i = 0; i < HOMEHUB_HISTORY_COUNT; i++) {
             mb_prev17[i] = history_series_id(HistoryJournalSource::Modbus, i);
@@ -26118,7 +26265,7 @@ static void test_history_identity() {
         for (size_t i = 0; i < TREND_COUNT; i++)
             CHECK(history_series_index(x10a_prev32, kPrev32,
                                        history_series_id(HistoryJournalSource::X10a, i)) ==
-                  (i < kPrev32 ? static_cast<int>(i) : -1));
+                  (i < kPrev32 && !TRENDS[i].min_fold ? static_cast<int>(i) : -1));
         for (size_t i = 0; i < HOMEHUB_HISTORY_COUNT; i++)
             CHECK(history_series_index(mb_prev17, HOMEHUB_HISTORY_COUNT,
                                        history_series_id(HistoryJournalSource::Modbus, i)) ==
@@ -26199,16 +26346,15 @@ static void test_history_identity() {
                                        history_series_id(HistoryJournalSource::Env3, i)) ==
                   static_cast<int>(i));
 
-        // X10A: the series-id formula did not move — 30 of today's 32 ids are still the ones the
-        // frozen list holds (the newest trend, and circuit_pressure since B5 gave the high side its
-        // own id) — so the previous manifest maps them. The X10A scope did not move either (block d
-        // below), so those records stay restorable.
+        // X10A: 29 of today's 34 ids still match the frozen pre-manifest list (the newer pel/cop
+        // and circulation trends, circuit_pressure since B5, and water_pressure since min_fold each
+        // carry a distinct semantic id). The other columns remain restorable via manifest.
         size_t mapped_x10a = 0;
         for (size_t i = 0; i < TREND_COUNT; i++)
             if (history_series_index(HISTORY_LEGACY_DISINFECTION_X10A_IDS, 31,
                                      history_series_id(HistoryJournalSource::X10a, i)) >= 0)
                 mapped_x10a++;
-        CHECK(mapped_x10a == 30);
+        CHECK(mapped_x10a == 29);
 
         // HomeHub: the previous build's ids — reproduced with its formula, which is also the one
         // that built the frozen pre-manifest list — match none of today's. Accepted, one-time.
@@ -27221,12 +27367,48 @@ static void test_availability() {
     CHECK(value_available(a0_eev, true, 450.0, a0_live, sizeof(a0_live)));
     CHECK(!value_available(a0_eev, true, 65528.0, a0_live, sizeof(a0_live)));
 
-    // NO OTHER PAGE MAY ACQUIRE ONE. The hydronic pages carry every reading legacy-209 found
-    // correct, and an absence signature on one of them would withhold a whole page of good
-    // measurements at once.
+    // All-zero 0xA0 also fails as absent (even without 0xFFFF in the MPU slot).
+    const uint8_t zero_a0[16] = {};
+    CHECK(page_absent(0xA0, zero_a0, sizeof(zero_a0)));
+
+    // Hydronic pages 0x60..0x62 reject uninitialized all-zero replies while preserving real 0 bar /
+    // 0 °C readings when any witness byte on the page is populated (e.g. Data Enable or pump stop).
+    const ValueDef h60_mode{0x60, 2, 315, 1, -1, "I/U operation mode"};
+    const ValueDef h61_lwt{0x61, 2, 105, 2, 1, "Leaving water temp. before BUH (R1T)"};
+    const ValueDef h62_wp{0x62, 11, 105, 1, 2, "Water pressure"};
+    const uint8_t  zero_60[16] = {};
+    const uint8_t  zero_61[16] = {};
+    const uint8_t  zero_62[17] = {};
+    uint8_t        live_60[16] = {};
+    uint8_t        live_61[16] = {};
+    uint8_t        live_62[17] = {};
+    live_60[0]                 = 0x10; // Data Enable/Disable
+    live_61[0]                 = 0x80; // Data Enable/Disable
+    live_62[12] = 100; // Water pump signal = stopped, water pressure byte 11 = 0 (drained 0.0 bar)
+    CHECK(page_absent(0x60, zero_60, sizeof(zero_60)));
+    CHECK(!page_absent(0x60, zero_60, HYDRONIC_60_PRESENCE_BYTES - 1));
+    CHECK(!page_absent(0x60, live_60, sizeof(live_60)));
+    CHECK(!value_available(h60_mode, false, 0.0, zero_60, sizeof(zero_60)));
+    CHECK(value_available(h60_mode, false, 0.0, live_60, sizeof(live_60)));
+
+    CHECK(page_absent(0x61, zero_61, sizeof(zero_61)));
+    CHECK(!page_absent(0x61, zero_61, HYDRONIC_61_PRESENCE_BYTES - 1));
+    CHECK(!page_absent(0x61, live_61, sizeof(live_61)));
+    CHECK(!value_available(h61_lwt, true, 0.0, zero_61, sizeof(zero_61)));
+    CHECK(value_available(h61_lwt, true, 0.0, live_61, sizeof(live_61)));
+
+    CHECK(page_absent(0x62, zero_62, sizeof(zero_62)));
+    CHECK(!page_absent(0x62, zero_62, HYDRONIC_62_PRESENCE_BYTES - 1));
+    CHECK(!page_absent(0x62, live_62, sizeof(live_62)));
+    CHECK(!value_available(h62_wp, true, 0.0, zero_62, sizeof(zero_62)));
+    CHECK(value_available(h62_wp, true, 0.0, live_62,
+                          sizeof(live_62))); // drained plant stays 0.0 bar
+
+    // Only the documented aux (0xA0/0xA1) and hydronic (0x60..0x62) pages carry absence rules.
+    // Page 0x30 must stay unguarded (an idle compressor + closed EEV legitimately reads all-zero).
     for (int reg = 0; reg <= 0xFF; reg++) {
         const bool has = page_absence_rule(static_cast<uint8_t>(reg)) != nullptr;
-        CHECK(has == (reg == 0xA0 || reg == 0xA1));
+        CHECK(has == (reg == 0x60 || reg == 0x61 || reg == 0x62 || reg == 0xA0 || reg == 0xA1));
     }
 
     // The generated detect-only flag composes with the ledger rather than competing with it: both
@@ -27266,7 +27448,8 @@ static void test_availability() {
     // ── Against the real catalog
     // ──────────────────────────────────────────────────────────────────
     int profiles_total = 0, evap_rows = 0, cond_rows = 0, suppressed = 0, odd_label = 0;
-    int eev_rows = 0, conv151_rows = 0, page_absence_rows = 0, ct_l3_rows = 0;
+    int eev_rows = 0, conv151_rows = 0, page_absence_rows = 0, hydronic_absence_rows = 0,
+        ct_l3_rows = 0;
     int zero_rows = 0, fan1_rows = 0, fan2_rows = 0, cout_rows = 0, geo_shared_rows = 0;
     int liq_rows = 0, liq_brine_rows = 0;
     int header65_rows = 0, header65_m1s = 0, header65_profiles = 0, header65_page_still_read = 0;
@@ -27277,9 +27460,14 @@ static void test_availability() {
         const auto view                = def::resolved(p);
         int        publishable_on_0x10 = 0;
         bool       header65 = false, publishable_on_0x65 = false;
+        size_t     max_end_60 = 0, max_end_61 = 0, max_end_62 = 0;
         for (size_t i = 0; i < view.count(); i++) {
             const ValueDef&          d   = view[i];
             const AvailabilityPolicy pol = availability_policy(d);
+            const size_t             row_end = static_cast<size_t>(d.offset) + d.size;
+            if (d.reg == 0x60 && row_end > max_end_60) max_end_60 = row_end;
+            if (d.reg == 0x61 && row_end > max_end_61) max_end_61 = row_end;
+            if (d.reg == 0x62 && row_end > max_end_62) max_end_62 = row_end;
             if (logic::effective_conv(d.reg, d.offset, d.conv) != d.conv) {
                 suppressed++;
                 evap_rows++;
@@ -27401,18 +27589,38 @@ static void test_availability() {
             // reason the count is taken from the CATALOG rather than from the ledger: a row the
             // generator adds to one of these pages tomorrow is inside it the day it appears.
             if (page_absence_rule(d.reg)) {
-                page_absence_rows++;
-                CHECK(d.reg == 0xA0 || d.reg == 0xA1);
-                CHECK(row_publishable(d)); // entity stays; only the absent-page reply is withheld
-                CHECK(!value_available(d, true, 0.0, absent_a1, sizeof(absent_a1)) ||
-                      d.reg != 0xA1);
-                CHECK(!value_available(d, true, 0.0, absent_a0, sizeof(absent_a0)) ||
-                      d.reg != 0xA0);
+                if (d.reg == 0xA0 || d.reg == 0xA1) {
+                    page_absence_rows++;
+                    CHECK(
+                        row_publishable(d)); // entity stays; only the absent-page reply is withheld
+                    CHECK(!value_available(d, true, 0.0, absent_a1, sizeof(absent_a1)) ||
+                          d.reg != 0xA1);
+                    CHECK(!value_available(d, true, 0.0, absent_a0, sizeof(absent_a0)) ||
+                          d.reg != 0xA0);
+                } else {
+                    CHECK(d.reg == 0x60 || d.reg == 0x61 || d.reg == 0x62);
+                    hydronic_absence_rows++;
+                    const uint8_t* zero_pg = d.reg == 0x60   ? zero_60
+                                             : d.reg == 0x61 ? zero_61
+                                                             : zero_62;
+                    const size_t   zero_sz = d.reg == 0x60   ? sizeof(zero_60)
+                                             : d.reg == 0x61 ? sizeof(zero_61)
+                                                             : sizeof(zero_62);
+                    const uint8_t* live_pg = d.reg == 0x60   ? live_60
+                                             : d.reg == 0x61 ? live_61
+                                                             : live_62;
+                    const size_t   live_sz = d.reg == 0x60   ? sizeof(live_60)
+                                             : d.reg == 0x61 ? sizeof(live_61)
+                                                             : sizeof(live_62);
+                    CHECK(!value_available(d, true, 0.0, zero_pg, zero_sz));
+                    if (d.reg != 0x62 || !(d.offset == 12 && d.conv == 152)) {
+                        CHECK(value_available(d, true, 0.0, live_pg, live_sz));
+                    }
+                }
             }
-            // NO CORE HYDRONIC ROW MAY BE TOUCHED. The audit in legacy-209 is explicit that the
-            // hydronic decode is excellent and must not be collaterally damaged: leaving/return
-            // water, tank, flow, pressure and the setpoints all live on 0x60-0x62, and not one of
-            // them may fall under a rule.
+            // NO CORE HYDRONIC ROW-LEVEL RULE MAY BE TOUCHED. The audit in legacy-209 is explicit
+            // that the hydronic decode is excellent and must not be collaterally damaged by a
+            // row-level rule; only whole-page all-zero replies are withheld.
             if (d.reg >= 0x60 && d.reg <= 0x62) CHECK(pol == AvailabilityPolicy::Always);
             if (d.reg == 0x10 && row_publishable(d)) publishable_on_0x10++;
             // The premise of the page-0x65 verdict: on every other hydronic page no measurement
@@ -27435,6 +27643,9 @@ static void test_availability() {
             }
             if (d.reg == 0x65 && row_publishable(d)) publishable_on_0x65 = true;
         }
+        CHECK(max_end_60 >= HYDRONIC_60_PRESENCE_BYTES);
+        CHECK(max_end_61 >= HYDRONIC_61_PRESENCE_BYTES);
+        CHECK(max_end_62 >= HYDRONIC_62_PRESENCE_BYTES);
         if (header65) header65_profiles++;
         if (header65 && publishable_on_0x65) header65_page_still_read++;
         // Page 0x10 must still be QUERIED on every profile after the quarantine — the error class,
@@ -27494,6 +27705,8 @@ static void test_availability() {
     // generator starts emitting a row on either page, and either is a reason to re-read the
     // adjudication rather than let it silently re-scope itself.
     CHECK(page_absence_rows == 194);
+    // Hydronic pages 0x60..0x62 across all 45 profiles (947 + 307 + 688 base + 2*14 overlay rows).
+    CHECK(hydronic_absence_rows == 1970);
     // The legacy-224 zero verdicts, pinned per quantity so a moved count names WHICH one moved.
     // 19/19/21 are the air-source profiles carrying each row; 44 is Target Cond. Temp. as before,
     // and the sum is every zero verdict in the catalog.

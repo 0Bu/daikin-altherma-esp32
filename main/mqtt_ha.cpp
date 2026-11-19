@@ -159,7 +159,7 @@ static uint32_t                     s_source_cleanup_evidence_drops_reported = 0
 // The task starts one LWT-bearing transport immediately. Definitions live beside its builder;
 // forward declarations
 // keep the publish loop above the configuration/lifecycle glue without duplicating either contract.
-static bool      build_client();
+static bool      build_client(const Config& c);
 static esp_err_t start_client_transport();
 static bool start_current_client();
 // Counted publish wrapper, defined with mqtt_publish_id() below; the OTA pause step precedes both.
@@ -252,12 +252,14 @@ static bool s_ref_subscription_retry = false;      // ownership is distinct from
 static bool                s_ref_subscription_announced = false; // one success line per binding
 static std::array<std::string, 9> s_ref_binding_fields;                 // guarded by s_mtx
 static uint16_t            s_ref_binding_fixed_setpoint_tenths = 0;
-static bool                s_ref_capture_enabled = false; // saved mapping may remain while OFF
-static std::string         s_ref_last_logged_error;       // mqtt_task only; rate-limits bad mappings
-static uint64_t            s_ref_last_error_log_ms = 0;
-static bool reference_topic_owned(const std::string& topic);
+static bool s_ref_capture_enabled = false; // saved mapping may remain while OFF
+static std::array<std::string, 31> s_mqtt_strings;
+static std::string&                s_ref_last_logged_error =
+    s_mqtt_strings[0]; // mqtt_task only; rate-limits bad mappings
+static uint64_t s_ref_last_error_log_ms = 0;
+static bool     reference_topic_owned(const std::string& topic);
 
-static CirculationSourceStatus s_circulation_status;
+static CirculationSourceStatus  s_circulation_status;
 static CirculationPowerTracker s_circulation_tracker;
 static SourceTimestampHighWater s_circulation_source_time; // guarded by s_mtx
 static_assert(std::is_nothrow_move_assignable<CirculationSourceStatus>::value,
@@ -275,15 +277,15 @@ struct CirculationProbeState {
 };
 static CirculationProbeState s_circulation_probe;
 static std::atomic<uint32_t> s_circulation_probe_capture_generation{0};
-static SemaphoreHandle_t s_circulation_probe_sem = nullptr;
-static std::string s_circulation_subscribed_topic;
-static bool                  s_circulation_subscription_retry = false; // mqtt_task only
-static std::string s_circulation_probe_subscribed_topic;
-static uint32_t s_circulation_probe_task_generation = 0;
-static std::string s_circulation_binding_topic;
-static std::string s_circulation_binding_power_path;
-static std::string s_circulation_binding_time_path;
-static bool s_circulation_capture_enabled = false;
+static SemaphoreHandle_t     s_circulation_probe_sem              = nullptr;
+static std::string&          s_circulation_subscribed_topic       = s_mqtt_strings[1];
+static bool                  s_circulation_subscription_retry     = false; // mqtt_task only
+static std::string&          s_circulation_probe_subscribed_topic = s_mqtt_strings[2];
+static uint32_t              s_circulation_probe_task_generation  = 0;
+static std::string&          s_circulation_binding_topic          = s_mqtt_strings[3];
+static std::string&          s_circulation_binding_power_path     = s_mqtt_strings[4];
+static std::string&          s_circulation_binding_time_path      = s_mqtt_strings[5];
+static bool                  s_circulation_capture_enabled        = false;
 static uint32_t s_circulation_runtime_max_age_s = CIRC_SOURCE_MAX_AGE_DEFAULT_S; // guarded by s_mtx
 static uint16_t s_circulation_on_tenths_w = 0, s_circulation_off_tenths_w = 0;
 static uint32_t s_circulation_confirm_s = 0; // applied policy, guarded by s_mtx
@@ -295,14 +297,32 @@ namespace {
 // The ONE unwind-safe mutex guard, shared by every file in this firmware (main/rtos_guard.hpp).
 // This used to be a private copy here; nine of them had drifted into two different shapes.
 using Lock = SemGuard;
-}  // namespace
+} // namespace
 
 // Persisted so the pointers handed to esp-mqtt (and reused by the task) stay valid.
-static std::string s_uri, s_user, s_pass, s_node, s_board, s_base, s_prefix, s_avail, s_x10a_avail,
-    s_x10a, s_modbus, s_weather, s_env3, s_retired_weather, s_retired_modbus_status, s_legacy_state,
-    s_heartbeat, s_heating_curve_topic, s_crash;
-static std::string s_announced_profile;               // profile we last published discovery for (mqtt_task only)
-static std::string s_discovered_profile;              // survives reconnect's reannounce reset
+static std::string& s_uri                   = s_mqtt_strings[6];
+static std::string& s_user                  = s_mqtt_strings[7];
+static std::string& s_pass                  = s_mqtt_strings[8];
+static std::string& s_node                  = s_mqtt_strings[9];
+static std::string& s_board                 = s_mqtt_strings[10];
+static std::string& s_base                  = s_mqtt_strings[11];
+static std::string& s_prefix                = s_mqtt_strings[12];
+static std::string& s_avail                 = s_mqtt_strings[13];
+static std::string& s_x10a_avail            = s_mqtt_strings[14];
+static std::string& s_x10a                  = s_mqtt_strings[15];
+static std::string& s_modbus                = s_mqtt_strings[16];
+static std::string& s_weather               = s_mqtt_strings[17];
+static std::string& s_env3                  = s_mqtt_strings[18];
+static std::string& s_retired_weather       = s_mqtt_strings[19];
+static std::string& s_retired_modbus_status = s_mqtt_strings[20];
+static std::string& s_legacy_state          = s_mqtt_strings[21];
+static std::string& s_heartbeat             = s_mqtt_strings[22];
+static std::string& s_heating_curve_topic   = s_mqtt_strings[23];
+static std::string& s_crash                 = s_mqtt_strings[24];
+static std::string& s_announced_profile =
+    s_mqtt_strings[25]; // profile we last published discovery for (mqtt_task only)
+static std::string& s_discovered_profile =
+    s_mqtt_strings[26]; // survives reconnect's reannounce reset
 // Store provenance never restores Config or detection. Bit 0 records a real scoped predecessor
 // load in this boot; saving a same-boot record cannot claim reboot restoration.
 enum : uint32_t {
@@ -321,17 +341,17 @@ static bool                   s_retirement_store_loaded = false;
 static bool                   s_retirement_store_scoped = false;
 static MqttRetirementRecord   s_retirement_record, s_retirement_staged;
 static int64_t                s_retirement_load_retry_us = 0, s_retirement_save_retry_us = 0;
-static uint32_t               s_retirement_log_state    = UINT32_MAX;
-static constexpr int64_t      RETIREMENT_STORE_RETRY_US = 5 * 1000 * 1000;
-static std::string            s_retiring_profile_target;
+static uint32_t               s_retirement_log_state           = UINT32_MAX;
+static constexpr int64_t      RETIREMENT_STORE_RETRY_US        = 5 * 1000 * 1000;
+static std::string&           s_retiring_profile_target        = s_mqtt_strings[27];
 static size_t                 s_retiring_profile_row           = 0;
 static size_t                 s_retiring_profile_shape         = 0;
 static bool                   s_retiring_current_unpublishable = false;
-static std::string            s_current_profile_retired;
+static std::string&           s_current_profile_retired        = s_mqtt_strings[28];
 static MqttRetirementIdentity s_retiring_identity;
 static MqttRetirementScan     s_retiring_scan;
-static bool                   s_retiring_identity_ready  = false;
-static constexpr size_t       PROFILE_RETIRE_WORK_BUDGET = 128;
+static bool                   s_retiring_identity_ready    = false;
+static constexpr size_t       PROFILE_RETIRE_WORK_BUDGET   = 128;
 static bool        s_periodic_discovery_pending = false, s_periodic_discovery_again = false;
 static uint8_t     s_periodic_discovery_step = 0;
 static void        service_periodic_discovery_retirement();
@@ -376,18 +396,20 @@ static int64_t           s_retired_weather_probe_deadline_us = 0;     // mqtt_ta
 static int64_t           s_crash_probe_deadline_us = 0;               // mqtt_task only
 static bool              s_disabled_weather_cleaned = false;          // mqtt_task only
 // Stale-identity migration (mqtt_task only) — see retract_legacy_fixed / retract_stale_values below.
-static bool        s_legacy_fixed_retracted = false;   // heartbeat + crash entities: once per boot
-static size_t      s_legacy_fixed_step      = 0;
-static std::string s_stale_values_profile;             // value entities: the profile they were
-                                                       // retracted for ("" = not yet). Keyed on the
-                                                       // profile, not a bool, because the row set IS
-                                                       // the profile: a re-detect (POST /detect, or
-                                                       // an ambiguous first fingerprint settling)
-                                                       // brings rows the earlier pass never saw.
-static std::string s_stale_values_pending_profile;
-static size_t      s_stale_values_step = 0;
+static bool         s_legacy_fixed_retracted = false; // heartbeat + crash entities: once per boot
+static size_t       s_legacy_fixed_step      = 0;
+static std::string& s_stale_values_profile =
+    s_mqtt_strings[29]; // value entities: the profile they were
+                        // retracted for ("" = not yet). Keyed on the
+                        // profile, not a bool, because the row set IS
+                        // the profile: a re-detect (POST /detect, or
+                        // an ambiguous first fingerprint settling)
+                        // brings rows the earlier pass never saw.
+static std::string& s_stale_values_pending_profile = s_mqtt_strings[30];
+static size_t       s_stale_values_step            = 0;
 // Written false by the event task on DISCONNECT, written true + read by the publish task -> atomic.
-static std::atomic<bool> s_heartbeat_announced{false}; // diagnostic discovery streamed this connection?
+static std::atomic<bool> s_heartbeat_announced{
+    false}; // diagnostic discovery streamed this connection?
 static bool         s_mqtt_ever_connected = false;     // event-task-only: first connect vs. a RE-connect
 static std::atomic<uint32_t> s_connected_session_epoch{
     0}; // every CONNECT, including same-client reconnect
@@ -2781,21 +2803,21 @@ static __attribute__((noinline)) void service_reference_subscription(const Confi
         return;
     }
 
-    const char* invalid = nullptr;
-    const std::string setpoint_topic = c.ref_temp_setpoint_topic.empty() &&
-            c.ref_temp_fixed_setpoint_tenths == 0 ? c.ref_temp_topic : c.ref_temp_setpoint_topic;
-    const bool        time_mapped =
+    const char*       invalid = nullptr;
+    const std::string setpoint_topic =
+        c.ref_temp_setpoint_topic.empty() && c.ref_temp_fixed_setpoint_tenths == 0
+            ? c.ref_temp_topic
+            : c.ref_temp_setpoint_topic;
+    const bool time_mapped =
         reference_source_time_mapped(c.ref_temp_time_topic, c.ref_temp_time_path);
-    const std::string time_topic = !time_mapped ? "" :
-        (c.ref_temp_time_topic.empty() ? c.ref_temp_topic : c.ref_temp_time_topic);
-    if (!reference_temperature_config_valid(c.ref_temp_name, c.ref_temp_topic,
-                                            c.ref_temp_path, setpoint_topic,
-                                            c.ref_temp_setpoint_path,
-                                            c.ref_temp_fixed_setpoint_tenths,
-                                            time_topic, c.ref_temp_time_path,
-                                            c.ref_temp_enabled_path,
-                                            c.ref_temp_hvac_mode_path,
-                                            c.ref_temp_max_age_s, &invalid)) {
+    const std::string time_topic =
+        !time_mapped ? ""
+                     : (c.ref_temp_time_topic.empty() ? c.ref_temp_topic : c.ref_temp_time_topic);
+    if (!reference_temperature_config_valid(
+            c.ref_temp_name, c.ref_temp_topic, c.ref_temp_path, setpoint_topic,
+            c.ref_temp_setpoint_path, c.ref_temp_fixed_setpoint_tenths, time_topic,
+            c.ref_temp_time_path, c.ref_temp_enabled_path, c.ref_temp_hvac_mode_path,
+            c.ref_temp_max_age_s, &invalid)) {
         s_ref_subscription_retry = !retire_reference_topics({});
         Lock lk(s_mtx);
         if (!reference_request_current_locked(epoch, c)) return;
@@ -3645,8 +3667,7 @@ static void mqtt_task(void*) {
 }
 
 // Validate URI/credentials and build the single broker-LWT transport.
-static bool build_client() {
-    const Config& c = config();
+static bool build_client(const Config& c) {
     s_uri  = c.mqtt_uri;
     s_user = c.mqtt_user;
     s_pass = c.mqtt_pass;
@@ -3769,19 +3790,27 @@ void mqtt_ha_start() {
 
     // Resolved ONCE, here, because every topic root and the HA node id below derive from it — a
     // second copy of the empty-means-default rule is how one of them would end up on another base.
-    s_base            = with_config([](const Config& c) {
-        return mqtt_base_effective(c.mqtt_base, CONFIG_DAIKIN_MQTT_BASE_TOPIC);
-    });
-    s_node   = device_node_id(s_base);   // HA device id: the installation, NOT this board
-    s_board           = board_id(); // complete hardware MAC: MQTT client id + secondary dev.ids
+    s_base  = mqtt_base_effective(c.mqtt_base, CONFIG_DAIKIN_MQTT_BASE_TOPIC);
+    s_node  = device_node_id(s_base); // HA device id: the installation, NOT this board
+    s_board = board_id();             // complete hardware MAC: MQTT client id + secondary dev.ids
     if (s_board.empty()) {
         set_status(false, "board MAC read failed");
         return;
     }
     s_prefix = CONFIG_DAIKIN_MQTT_DISCOVERY_PREFIX;
-    s_discovery_owner_required   = mqtt_preserved_discovery_base(s_base);
-    s_discovery_owner_filters[0] = s_prefix + "/+/" + s_node + "/+/config";
-    s_discovery_owner_filters[1] = s_prefix + "/+/" + s_node + "_modbus/+/config";
+    s_discovery_owner_required = mqtt_preserved_discovery_base(s_base);
+    auto& f0                   = s_discovery_owner_filters[0];
+    f0.clear();
+    f0 += s_prefix;
+    f0 += "/+/";
+    f0 += s_node;
+    f0 += "/+/config";
+    auto& f1 = s_discovery_owner_filters[1];
+    f1.clear();
+    f1 += s_prefix;
+    f1 += "/+/";
+    f1 += s_node;
+    f1 += "_modbus/+/config";
     s_discovery_owner_state.store(s_discovery_owner_required ? DiscoveryOwnerState::Pending
                                                              : DiscoveryOwnerState::Encoded,
                                   std::memory_order_release);
@@ -3797,7 +3826,7 @@ void mqtt_ha_start() {
     s_heartbeat = heartbeat_topic(s_base);
     s_heating_curve_topic = heating_curve_topic(s_base);
     s_crash     = crash_topic(s_base);
-    if (!build_client()) return; // policy error already surfaced
+    if (!build_client(c)) return; // policy error already surfaced
     // The task starts the LWT transport without waiting for any observation source.
     set_status(false, "");
     // Hardware coredump: the 4 KiB task hit the ESP32-S3 stack-end watchpoint while building the

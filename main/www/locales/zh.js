@@ -1,4 +1,4 @@
-// translation-source: 3a15720127279ca3edda45e3c53255972178ba0299b2928ffe49177e6a324af5
+// translation-source: 42a4d77a832a12c84359f017fdcacdd939405dc965a062a922c2d18aafa2ff0e
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
@@ -175,7 +175,7 @@ I18N.zh = localeValues([
   /* check.dhw_loss */ "热水箱降温",
   /* check.cycling */ "压缩机启动",
   /* check.defrost */ "除霜次数",
-  /* check.pressure */ "最低水压",
+  /* check.pressure */ "水压",
   /* check.flow */ "最低流量",
   /* check.heater */ "电加热器",
   /* check.retries */ "保护计数器",
@@ -286,14 +286,14 @@ I18N.zh = localeValues([
   /* check.defrost.last_start */ (date, route, outdoor) => `最近一次观察到的除霜启动 · ${date} · 回路 ${route} · 室外气温 ${outdoor}`,
   /* check.defrost.route_space */ "供暖",
   /* check.defrost.route_dhw */ "热水罐",
-  /* check.detail.pressure.info */ "最低值≤1.0 bar；连续60秒未确认。物理有效性和原因未知。",
-  /* check.detail.pressure.warn */ "记录了连续至少60秒≤1.0 bar；并非当前压力。",
-  /* check.detail.pressure.ok */ "无接受的压力≤项目阈值1.0 bar。",
+  /* check.detail.pressure.info */ "偏低",
+  /* check.detail.pressure.warn */ "危急",
+  /* check.detail.pressure.ok */ "正常",
   /* check.detail.defrost_events_insufficient */ "少于3次配对除霜；不作比例判定。",
   /* check.detail.source_stale */ "无新鲜X10A样本；当前状态未知。保留历史。",
   /* check.detail.no_paired_runtime */ "无配对可读运行时间；仅次数。",
-  /* check.detail.current_label */ "当前水压：",
-  /* check.detail.minimum_time_label */ "最低值记录时间：",
+  /* check.detail.current_label */ "≤1.0 bar 偏低",
+  /* check.detail.minimum_time_label */ "≤0.5 bar 危急",
   /* check.detail.coverage_missing */ (a) => `缺少可读时间：${a} s。`,
   /* check.detail.channel_coverage */ (a, b) => `${a}：覆盖 ${b}`,
   /* check.summary.warnings */ (n) => `${n} 项警告`,
@@ -1288,7 +1288,7 @@ MODEL_DESCRIPTION_I18N.zh = modelDescriptionValues([
   ["R5T：分层水箱单点，非能量。", "项目提示≥0.8 K/h仅适用无水泵/类似取水标记窗口。无标记也可能取水；0 K/h不排除热损失。循环重叠不证明原因。"], // health_dhw_loss
   ["测量有缺口时，部分启动可能漏计。", "启动次数没有固定的正常值。数据充足时，本项检查将已完成的供暖运行平均达到 10 分钟视为时长足够。"], // health_cycling
   ["除霜", "≥3次配对、>15%压缩机运行时间，仅计压缩机及除霜状态均可读时段。项目规则非Daikin限值；缺少湿度及整个盘管温度。"], // health_defrost
-  ["水压", "共同项目规则≤1.0 bar；连续观察60秒后警告。非通用，按该机型手册。"], // health_pressure
+  ["封闭水路24小时水压曲线（X10A，5分钟最小值）。", "曲线说明：>1.0 bar正常，≤1.0 bar偏低，≤0.5 bar危急（连续60秒触发诊断）。允许充注与运行压力取决于具体机型手册及系统高度；单凭读数不能证明漏水或故障。"], // health_pressure
   ["水泵60秒后流量", "限值需同机型/模式/条件；非额定，也不证明不足。"], // health_flow
   ["BUH/BSH的ON时间", "非能量，不证明加热多余。"], // health_heater
   ["5个实验计数器", "可比增长；忽略缺口/重置。稳定不排除限功率，也不证明原因。"], // health_retries

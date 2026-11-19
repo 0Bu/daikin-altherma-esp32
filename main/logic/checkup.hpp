@@ -228,11 +228,12 @@ struct CheckupBucket {
     uint64_t bar_observed_s : 12;
     uint64_t flow_observed_s : 12;
     uint64_t retry_observed_s : 12;
+    uint64_t bar_crit : 1; // <=0.5 bar confirmed for CHECKUP_PRESSURE_CONFIRM_S in this bucket
     constexpr CheckupBucket()
         : covered_s(0), rps_observed_s(0), run_s(0), class_observed_s(0), dfr_observed_s(0),
           space_hour_low(0), dfr_pair_observed_s(0), dfr_run_s(0), defrost_s(0), buh_observed_s(0),
           buh_s(0), flags(0), bsh_observed_s(0), bsh_s(0), bar_observed_s(0), flow_observed_s(0),
-          retry_observed_s(0) {}
+          retry_observed_s(0), bar_crit(0) {}
     // WHICH LOAD a compressor RUN served. RPS lives on 0x30; the 3-way valve and I/U mode live on
     // 0x60, so either page can time out alone. `class_observed_s` is the paired class clock: RPS
     // and valve must be readable together, plus I/U mode whenever the valve points at the room
@@ -620,7 +621,7 @@ struct CheckupState {
     bool     prev_pump_known = false, prev_pump_on    = false;
     bool     prev_buh_known = false, prev_buh_on = false;
     bool     prev_bsh_known = false, prev_bsh_on = false;
-    bool     prev_bar_valid = false, prev_bar_low = false;
+    bool            prev_bar_valid = false, prev_bar_low = false, prev_bar_crit = false;
     bool     prev_flow_valid       = false;
     bool     prev_class_known      = false;
     CheckupRunClass prev_hour_class       = CheckupRunClass::Unknown;
@@ -632,7 +633,12 @@ struct CheckupState {
     bool     last_rps_known = false, last_rps_running = false;
     uint8_t  run_blind_s           = 0;
     uint16_t pump_run_s            = 0;       // continuous known-on time, reset by off/unknown/gap
-    uint16_t bar_low_run_s    = 0;       // consecutive valid samples at/below documented boundary
+    uint16_t bar_low_run_s         = 0;       // consecutive valid samples <= 1.0 bar
+    uint16_t bar_crit_run_s        = 0;       // consecutive valid samples <= 0.5 bar
+    int16_t  bar_low_cand_min      = CHECKUP_ABSENT; // lowest 0.6..1.0 bar sample in open low run
+    uint32_t bar_low_cand_unix_s   = 0;
+    int16_t  bar_crit_cand_min     = CHECKUP_ABSENT; // lowest <= 0.5 bar sample in open crit run
+    uint32_t bar_crit_cand_unix_s  = 0;
     uint8_t  prev_retry_known_mask = 0;
     uint8_t  prev_retry_value[CHECKUP_RETRY_COUNT] = {};
     uint32_t bucket        = 0;
@@ -1292,11 +1298,11 @@ inline void dhw_loss_step(DhwLossState& st, DhwLossBucket& b, const CheckupSampl
 // installation manual.
 constexpr uint32_t CHECKUP_FLOW_RUNUP_S = 60;
 // Daikin Altherma 3 R W installer reference guide 4P496758-1B, §12.3.4, states that pump-inlet
-// pressure must be >1 bar.
-// Confirm a below-boundary state for one continuous minute so one corrupt frame cannot make a
-// day-long red verdict. The raw minimum is still retained and surfaced immediately; this debounce
-// affects only the warning strength, never the measurement statistic.
-constexpr int      CHECKUP_BAR_WARN_TENTHS = 10;
+// pressure must be >1 bar. Two-tier project diagnostic boundaries (<=1.0 bar Low / Info, <=0.5 bar
+// Critical / Warn), both gated on CHECKUP_PRESSURE_CONFIRM_S continuously observed seconds so a
+// transient glitch or corrupt frame neither enters the 24h minimum nor triggers a finding.
+constexpr int      CHECKUP_BAR_WARN_TENTHS    = 10;
+constexpr int      CHECKUP_BAR_CRIT_TENTHS    = 5;
 constexpr uint32_t CHECKUP_PRESSURE_CONFIRM_S = 60;
 
 // Fold one poll cycle into `st.pending`. `now_us` is the monotonic clock. On a continuous hourly
@@ -1391,20 +1397,8 @@ inline bool checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample
             b.bsh_observed_s = checkup_add_hour_s(b.bsh_observed_s, dt);
             if (s.bsh_on && st.prev_bsh_on) b.bsh_s = checkup_add_hour_s(b.bsh_s, dt);
         }
-        if (bar_valid) {
-            if (st.prev_bar_valid) b.bar_observed_s = checkup_add_hour_s(b.bar_observed_s, dt);
-            if (s.bar_tenths <= CHECKUP_BAR_WARN_TENTHS) {
-                st.bar_low_run_s = st.prev_bar_valid && st.prev_bar_low
-                                       ? checkup_add_u16(st.bar_low_run_s, dt)
-                                       : 0;
-                if (st.bar_low_run_s >= CHECKUP_PRESSURE_CONFIRM_S)
-                    b.flags |= CHECKUP_F_LOW_BAR;
-            } else {
-                st.bar_low_run_s = 0;
-            }
-        } else {
-            st.bar_low_run_s = 0;
-        }
+        if (bar_valid && st.prev_bar_valid)
+            b.bar_observed_s = checkup_add_hour_s(b.bar_observed_s, dt);
 
         uint32_t flow_dt = 0;
         if (s.pump_known && s.pump_on) {
@@ -1603,7 +1597,6 @@ inline bool checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample
         // says that an increase occurred inside this observation window.
     } else {
         st.pump_run_s     = 0;
-        st.bar_low_run_s  = 0;
         st.last_rps_known = false; // no edge is read across a real gap
         // A long gap forfeits classification, but does not prove a completion. Keep the candidate
         // until a known OFF rather than counting the same physical run on both sides of the gap.
@@ -1629,14 +1622,75 @@ inline bool checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample
         st.run_blind_s       = 0;
     }
 
-    // ── minima and flags — sampled, not integrated, so they need no continuity ───────────────────
-    // Pressure is the RAW lowest valid sample. The separate CHECKUP_F_LOW_BAR flag above controls
-    // whether a below-boundary sample was persistent enough for Warn; debounce must not rewrite the
-    // measurement into a more reassuring minimum.
-    if (bar_valid && (b.min_bar == CHECKUP_ABSENT || s.bar_tenths < b.min_bar ||
-                      (s.bar_tenths == b.min_bar && b.min_bar_unix_s == 0 && s.unix_s != 0))) {
-        b.min_bar        = static_cast<int16_t>(s.bar_tenths);
-        b.min_bar_unix_s = s.unix_s;
+    // ── minima and flags ─────────────────────────────────────────────────────────────────────────
+    // Normal pressure (> 1.0 bar) updates the rolling minimum immediately. Samples <= 1.0 bar (Low)
+    // and <= 0.5 bar (Critical) must persist continuously for CHECKUP_PRESSURE_CONFIRM_S before
+    // entering b.min_bar or latching CHECKUP_F_LOW_BAR / b.bar_crit, preventing single-poll bus
+    // transients from poisoning the 24h diagnosis.
+    {
+        auto fold_bar_min = [&b](int16_t tenths, uint32_t unix_s) {
+            if (b.min_bar == CHECKUP_ABSENT || tenths < b.min_bar ||
+                (tenths == b.min_bar && b.min_bar_unix_s == 0 && unix_s != 0)) {
+                b.min_bar        = tenths;
+                b.min_bar_unix_s = unix_s;
+            }
+        };
+        auto reset_low = [&st]() {
+            st.bar_low_run_s       = 0;
+            st.bar_low_cand_min    = CHECKUP_ABSENT;
+            st.bar_low_cand_unix_s = 0;
+        };
+        auto reset_crit = [&st]() {
+            st.bar_crit_run_s       = 0;
+            st.bar_crit_cand_min    = CHECKUP_ABSENT;
+            st.bar_crit_cand_unix_s = 0;
+        };
+        if (!bar_valid) {
+            reset_low();
+            reset_crit();
+        } else if (s.bar_tenths > CHECKUP_BAR_WARN_TENTHS) {
+            fold_bar_min(static_cast<int16_t>(s.bar_tenths), s.unix_s);
+            reset_low();
+            reset_crit();
+        } else {
+            if (continuous && st.prev_bar_valid && st.prev_bar_low) {
+                st.bar_low_run_s = checkup_add_u16(st.bar_low_run_s, dt);
+            } else {
+                reset_low();
+            }
+            if (s.bar_tenths <= CHECKUP_BAR_CRIT_TENTHS) {
+                if (continuous && st.prev_bar_valid && st.prev_bar_crit) {
+                    st.bar_crit_run_s = checkup_add_u16(st.bar_crit_run_s, dt);
+                } else {
+                    reset_crit();
+                }
+                if (st.bar_crit_cand_min == CHECKUP_ABSENT || s.bar_tenths < st.bar_crit_cand_min ||
+                    (s.bar_tenths == st.bar_crit_cand_min && st.bar_crit_cand_unix_s == 0 &&
+                     s.unix_s != 0)) {
+                    st.bar_crit_cand_min    = static_cast<int16_t>(s.bar_tenths);
+                    st.bar_crit_cand_unix_s = s.unix_s;
+                }
+            } else {
+                reset_crit();
+                if (st.bar_low_cand_min == CHECKUP_ABSENT || s.bar_tenths < st.bar_low_cand_min ||
+                    (s.bar_tenths == st.bar_low_cand_min && st.bar_low_cand_unix_s == 0 &&
+                     s.unix_s != 0)) {
+                    st.bar_low_cand_min    = static_cast<int16_t>(s.bar_tenths);
+                    st.bar_low_cand_unix_s = s.unix_s;
+                }
+            }
+            if (st.bar_low_run_s >= CHECKUP_PRESSURE_CONFIRM_S) {
+                b.flags |= CHECKUP_F_LOW_BAR;
+                if (st.bar_low_cand_min != CHECKUP_ABSENT) {
+                    fold_bar_min(st.bar_low_cand_min, st.bar_low_cand_unix_s);
+                }
+            }
+            if (st.bar_crit_run_s >= CHECKUP_PRESSURE_CONFIRM_S) {
+                b.bar_crit = 1;
+                b.flags |= CHECKUP_F_LOW_BAR;
+                fold_bar_min(st.bar_crit_cand_min, st.bar_crit_cand_unix_s);
+            }
+        }
     }
 
     // Flow is only a comparable circuit measurement after a continuously-running pump has completed
@@ -1683,6 +1737,7 @@ inline bool checkup_step(CheckupState& st, CheckupBucket& b, const CheckupSample
     st.prev_bsh_on           = s.bsh_on;
     st.prev_bar_valid        = bar_valid;
     st.prev_bar_low          = bar_valid && s.bar_tenths <= CHECKUP_BAR_WARN_TENTHS;
+    st.prev_bar_crit         = bar_valid && s.bar_tenths <= CHECKUP_BAR_CRIT_TENTHS;
     st.prev_flow_valid       = flow_valid;
     st.prev_class_known      = class_state_known;
     st.prev_hour_class       = hour_class;
@@ -1730,6 +1785,7 @@ struct CheckupWindow {
     int      min_flow  = CHECKUP_ABSENT;
     uint32_t min_bar_unix_s      = 0;
     uint8_t  flags     = 0;
+    bool     bar_crit                  = false;
     // Wider count/sum live only on the evaluating stack; the persisted per-hour representation
     // above stays compact while a full 24 h at one sample per second remains representable.
     int      cycling_outdoor_min_tenths = CHECKUP_ABSENT;
@@ -1784,6 +1840,7 @@ inline CheckupWindow checkup_aggregate(const CheckupRing& r) {
         w.defrosts  += b.defrosts;
         w.paired_defrosts += b.paired_defrosts;
         w.flags     |= b.flags;
+        if (b.bar_crit) w.bar_crit = true;
         if (b.cycling_outdoor.samples) {
             w.cycling_outdoor_samples += b.cycling_outdoor.samples;
             w.cycling_outdoor_sum_tenths += b.cycling_outdoor.sum_tenths;
@@ -2043,10 +2100,9 @@ constexpr int      CHECKUP_DEFROST_SHARE_PCT = 15;
 constexpr uint32_t CHECKUP_DEFROST_MIN_COUNT = 3;
 
 // WATER PRESSURE, in tenths of bar. Many current Altherma hydronic-unit manuals require more than
-// 1.0 bar, but the permitted filling and operating range is model-specific. At or below 1.0 bar is
-// therefore a conservative project diagnostic, not a universal Daikin limit: it becomes Info
-// immediately and Warn after CHECKUP_PRESSURE_CONFIRM_S continuously, while the UI points to the
-// exact unit manual. There is deliberately neither an invented "preventive" band nor another band.
+// 1.0 bar, while permitted filling and operating ranges remain model-specific. Confirmed
+// continuous observations (CHECKUP_PRESSURE_CONFIRM_S) classify <=1.0 bar as Low (Info) and
+// <=0.5 bar as Critical (Warn), while the UI guides owners to the exact model manual.
 
 // HEATERS are observation only. Weather, emergency mode, defrost support, installer settings and PV
 // surplus all change legitimate use; X10A does not provide enough context for a universal threshold.
@@ -2332,9 +2388,9 @@ inline void checkup_apply_freshness(CheckupReport& r, bool fresh, uint32_t age_s
 // `fault_now` is the class read on the LAST cycle, not a window aggregate: a fault that is active
 // right now and one that cleared three hours ago are different findings and must not collapse into
 // one badge.
-inline CheckupReport checkup_evaluate(const CheckupWindow& w, const CheckupCoverage& cov,
-                                      FaultClass fault_now, const DhwLossWindow& dhw = {},
-                                      OutdoorSource outdoor_source = OutdoorSource::X10a) {
+inline __attribute__((noinline)) CheckupReport checkup_evaluate(
+    const CheckupWindow& w, const CheckupCoverage& cov, FaultClass fault_now,
+    const DhwLossWindow& dhw = {}, OutdoorSource outdoor_source = OutdoorSource::X10a) {
     CheckupReport r;
     r.covered_s = w.covered_s;
     r.full_span = w.full_span;
@@ -2498,23 +2554,29 @@ inline CheckupReport checkup_evaluate(const CheckupWindow& w, const CheckupCover
                                                 : CheckupReason::TooFewDefrostEvents;
     }
 
-    // The common pressure threshold is a project boundary. Preserve even one accepted zero;
-    // publish its dated observation and whether a continuous minute was actually confirmed.
+    // Two-tier confirmed pressure diagnostic: <= 1.0 bar for >= 60 s -> Info (Low),
+    // <= 0.5 bar for >= 60 s -> Warn (Critical). Unconfirmed transients never populate min_bar.
     r.pressure_min_unix_s = w.min_bar_unix_s;
     if (!cov.pressure) {
         set(CheckupCheck::Pressure, CheckupVerdict::Unavailable, 0, CHECKUP_REQUIRED_S);
     } else if (w.min_bar == CHECKUP_ABSENT) {
         set(CheckupCheck::Pressure, CheckupVerdict::Collecting, w.bar_observed_s,
             CHECKUP_REQUIRED_S);
-    } else if (w.min_bar <= CHECKUP_BAR_WARN_TENTHS) {
-        const bool sustained = (w.flags & CHECKUP_F_LOW_BAR) != 0;
-        set(CheckupCheck::Pressure, sustained ? CheckupVerdict::Warn : CheckupVerdict::Info,
-            w.bar_observed_s, 0, w.min_bar, sustained ? 1 : 0);
     } else {
-        set(CheckupCheck::Pressure,
-            w.full_span && w.bar_observed_s >= CHECKUP_REQUIRED_S ? CheckupVerdict::Ok
-                                                                  : CheckupVerdict::Collecting,
-            w.bar_observed_s, CHECKUP_REQUIRED_S, w.min_bar, 0);
+        const bool confirmed_crit = w.bar_crit;
+        const bool confirmed_low  = confirmed_crit || (w.flags & CHECKUP_F_LOW_BAR) != 0;
+        if (confirmed_crit) {
+            set(CheckupCheck::Pressure, CheckupVerdict::Warn, w.bar_observed_s, 0, w.min_bar, 1, 1);
+        } else if (confirmed_low) {
+            set(CheckupCheck::Pressure, CheckupVerdict::Info, w.bar_observed_s, 0, w.min_bar, 1, 0);
+        } else {
+            set(CheckupCheck::Pressure,
+                w.full_span && w.bar_observed_s >= CHECKUP_REQUIRED_S &&
+                        w.min_bar > CHECKUP_BAR_WARN_TENTHS
+                    ? CheckupVerdict::Ok
+                    : CheckupVerdict::Collecting,
+                w.bar_observed_s, CHECKUP_REQUIRED_S, w.min_bar, 0, 0);
+        }
     }
 
     if (!cov.flow || !cov.pump) {

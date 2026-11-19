@@ -1,4 +1,4 @@
-// translation-source: 3a15720127279ca3edda45e3c53255972178ba0299b2928ffe49177e6a324af5
+// translation-source: 42a4d77a832a12c84359f017fdcacdd939405dc965a062a922c2d18aafa2ff0e
 I18N.ja = localeValues([
   /* sys.nodata */ "データなし",
   /* sys.unreachable */ "接続不可",
@@ -175,7 +175,7 @@ I18N.ja = localeValues([
   /* check.dhw_loss */ "給湯タンク温度低下",
   /* check.cycling */ "圧縮機起動",
   /* check.defrost */ "霜取り回数",
-  /* check.pressure */ "最低水圧",
+  /* check.pressure */ "水圧",
   /* check.flow */ "最低流量",
   /* check.heater */ "電気ヒーター",
   /* check.retries */ "保護カウンタ",
@@ -286,14 +286,14 @@ I18N.ja = localeValues([
   /* check.defrost.last_start */ (date, route, outdoor) => `最後に確認した霜取り開始 · ${date} · 循環先 ${route} · 外気温 ${outdoor}`,
   /* check.defrost.route_space */ "暖房",
   /* check.defrost.route_dhw */ "給湯タンク",
-  /* check.detail.pressure.info */ "最低値1.0 bar以下。連続60秒は未確認。物理的妥当性と原因は不明。",
-  /* check.detail.pressure.warn */ "1.0 bar以下の連続60秒以上を記録。現在の圧力ではありません。",
-  /* check.detail.pressure.ok */ "プロジェクト基準1.0 bar以下の採用圧力なし。",
+  /* check.detail.pressure.info */ "低い",
+  /* check.detail.pressure.warn */ "危険",
+  /* check.detail.pressure.ok */ "正常",
   /* check.detail.defrost_events_insufficient */ "対応除霜3回未満。割合判定なし。",
   /* check.detail.source_stale */ "新鮮なX10A試料なし。現在状態不明。過去記録は保持。",
   /* check.detail.no_paired_runtime */ "対応する読取可能時間なし。回数のみ。",
-  /* check.detail.current_label */ "現在の水圧：",
-  /* check.detail.minimum_time_label */ "最低値の記録時刻：",
+  /* check.detail.current_label */ "≤1.0 bar 低い",
+  /* check.detail.minimum_time_label */ "≤0.5 bar 危険",
   /* check.detail.coverage_missing */ (a) => `不足する読取可能時間：${a} s。`,
   /* check.detail.channel_coverage */ (a, b) => `${a}：網羅 ${b}`,
   /* check.summary.warnings */ (n) => `警告 ${n} 件`,
@@ -1138,7 +1138,7 @@ MODEL_DESCRIPTION_I18N.ja = modelDescriptionValues([
   ["R5T：成層タンク1点。", "エネルギー実測でない。内部基準≥0.8 K/hはポンプ・取湯に似た低下の印がない窓のみ。印なしでも取湯はあり得ます。0 K/hでも熱損失は否定できません。循環の重複は原因を証明しません。"], // health_dhw_loss
   ["測定に欠けがあると、一部の起動が数えられないことがあります。", "起動回数に一律の正常値はありません。データが十分な場合、この診断では完了した暖房運転の平均が10分以上なら十分とみなします。"], // health_cycling
   ["除霜", "対応除霜≥3回、圧縮機と除霜の状態が両方読める圧縮機運転時間の>15%。内部基準、Daikin限界ではありません。湿度とコイル全体の温度なし。"], // health_defrost
-  ["水圧", "共通内部基準1.0 bar以下、連続観測60秒で警告。全機種共通ではなく対象説明書が基準。"], // health_pressure
+  ["密閉水回路の24時間水圧推移（X10A、5分最小値）。", "グラフ目安：1.0 bar超 正常、1.0 bar以下 低い、0.5 bar以下 危険（診断は連続60秒以上で判定）。許容充填圧・運転圧は対象機種の説明書とシステム水頭により異なり、数値のみで漏水や故障は特定できません。"], // health_pressure
   ["ポンプ60秒後の流量", "限界は同機種・モード・条件が必要。設計値や不足の証明ではありません。"], // health_flow
   ["BUH/BSHのON時間", "エネルギーや不要加熱の証明ではありません。"], // health_heater
   ["5つの試験的カウンタ", "比較可能な増加のみ。欠測・リセット除外。安定でも制限を否定せず原因を証明しません。"], // health_retries

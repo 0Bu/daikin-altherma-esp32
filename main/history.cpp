@@ -1722,6 +1722,8 @@ void history_record(const CachedValue* v, size_t n, uint32_t source_generation) 
         const HistorySample sample =
             logic::history_store(has, tenths, regs[idx], rps_known, rps_running);
         if (d.kind == logic::TrendKind::BinaryEvent) tr.ring.fold_binary_event(sample);
+        else if (d.min_fold)
+            tr.ring.fold_min(sample);
         else tr.ring.fold(sample);
     }
     if (circulation_generation == circulation_source_generation())
