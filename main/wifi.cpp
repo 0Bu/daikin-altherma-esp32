@@ -323,15 +323,17 @@ static __attribute__((noinline)) bool wifi_init_sta_driver(bool& rollback_pendin
     esp_event_handler_instance_register(IP_EVENT, ESP_EVENT_ANY_ID, on_wifi, nullptr, &s_h_ip);
 
     wifi_config_t wc = {};
-    const Config& c  = config();
-    wifi_config_field_copy(wc.sta.ssid, sizeof(wc.sta.ssid), c.wifi_ssid);
-    wifi_config_field_copy(wc.sta.password, sizeof(wc.sta.password), c.wifi_pass);
+    with_config([&](const Config& c) {
+        wifi_config_field_copy(wc.sta.ssid, sizeof(wc.sta.ssid), c.wifi_ssid);
+        wifi_config_field_copy(wc.sta.password, sizeof(wc.sta.password), c.wifi_pass);
 
-    // Is this boot the trial run for freshly-changed credentials? Latched BEFORE esp_wifi_start()
-    // below, because the very first STA_DISCONNECTED can arrive before this function reaches its
-    // wait — and the handler reads it to decide whether the boot retry budget still applies.
-    rollback_pending            = c.wifi_rollback_active && !c.wifi_ssid_backup.empty();
-    s_rollback_pending          = rollback_pending;
+        // Is this boot the trial run for freshly-changed credentials? Latched BEFORE
+        // esp_wifi_start() below, because the very first STA_DISCONNECTED can arrive before this
+        // function reaches its wait — and the handler reads it to decide whether the boot retry
+        // budget still applies.
+        rollback_pending = c.wifi_rollback_active && !c.wifi_ssid_backup.empty();
+    });
+    s_rollback_pending = rollback_pending;
 
     // Pick the STRONGEST AP for the SSID, not the first one heard. The IDF default WIFI_FAST_SCAN
     // stops at the first matching BSSID (channel-order/timing dependent), so on a multi-AP network

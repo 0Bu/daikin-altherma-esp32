@@ -1531,6 +1531,7 @@ static void append_status_json(JsonOut& j, bool redact) {
                 append_status_opt_uint(j, ",\"min_unix_s\":", hr.pressure_min_unix_s != 0,
                                        hr.pressure_min_unix_s);
                 bfield(",\"confirmed_low\":", ck.b > 0);
+                bfield(",\"confirmed_critical\":", ck.c > 0);
                 break;
             case logic::CheckupCheck::Flow:
                 tenths("min_l_min", ck.a);

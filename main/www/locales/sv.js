@@ -1,4 +1,4 @@
-// translation-source: 3a15720127279ca3edda45e3c53255972178ba0299b2928ffe49177e6a324af5
+// translation-source: 42a4d77a832a12c84359f017fdcacdd939405dc965a062a922c2d18aafa2ff0e
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -175,7 +175,7 @@ I18N.sv = localeValues([
   /* check.dhw_loss */ "Tankavsvalning",
   /* check.cycling */ "Kompressorstarter",
   /* check.defrost */ "Avfrostningar",
-  /* check.pressure */ "Lägsta vattentryck",
+  /* check.pressure */ "Vattentryck",
   /* check.flow */ "Lägsta vattenflöde",
   /* check.heater */ "Elpatroner",
   /* check.retries */ "Skyddsräknare",
@@ -286,14 +286,14 @@ I18N.sv = localeValues([
   /* check.defrost.last_start */ (date, route, outdoor) => `Senast observerade avfrostningsstart · ${date} · Krets ${route} · Uteluft ${outdoor}`,
   /* check.defrost.route_space */ "Rumsuppvärmning",
   /* check.defrost.route_dhw */ "Varmvattentank",
-  /* check.detail.pressure.info */ "Sparat minimum ≤1,0 bar; sammanhängande 60 s obekräftat. Fysisk giltighet och orsak okända.",
-  /* check.detail.pressure.warn */ "Registrerat sammanhängande ≥60 s ≤1,0 bar; inte trycket nu.",
-  /* check.detail.pressure.ok */ "Inget godkänt värde ≤1,0 bar, projektets tröskel.",
+  /* check.detail.pressure.info */ "Lågt",
+  /* check.detail.pressure.warn */ "Kritiskt",
+  /* check.detail.pressure.ok */ "Normalt",
   /* check.detail.defrost_events_insufficient */ "Färre än tre parade avfrostningar; ingen andelsbedömning.",
   /* check.detail.source_stale */ "Inget färskt X10A-prov; aktuellt tillstånd okänt. Historik behålls.",
   /* check.detail.no_paired_runtime */ "Ingen parad läsbar drifttid; bara antal.",
-  /* check.detail.current_label */ "Aktuellt vattentryck:",
-  /* check.detail.minimum_time_label */ "Minimum registrerat:",
+  /* check.detail.current_label */ "≤1,0 bar lågt",
+  /* check.detail.minimum_time_label */ "≤0,5 bar kritiskt",
   /* check.detail.coverage_missing */ (a) => `Saknad läsbar tid: ${a} s.`,
   /* check.detail.channel_coverage */ (a, b) => `${a}: täckning ${b}`,
   /* check.summary.warnings */ (n) => `${n} ${n === 1 ? "varning" : "varningar"}`,
@@ -1305,7 +1305,7 @@ MODEL_DESCRIPTION_I18N.sv = modelDescriptionValues([
   ["R5T: en punkt i skiktad tank, inte energi.", "Projekttips ≥0,8 K/h utan pump-/tappmarkörer. Tappning möjlig utan markörer; 0 K/h utesluter inte värmeförlust. Cirkulation bevisar inte orsak."], // health_dhw_loss
   ["Vid luckor i mätningarna kan vissa starter saknas i räkningen.", "Det finns inget fast normalt antal starter. Med tillräckliga data bedömer den här kontrollen avslutade värmekörningar på minst 10 minuter i genomsnitt som tillräckligt långa."], // health_cycling
   ["Avfrostning", "≥3 parade, >15% av kompressorns drifttid där både kompressor- och avfrostningsstatus kan läsas. Intern regel, inte Daikin; fuktighet och hela värmeväxlarens temperatur saknas."], // health_defrost
-  ["Tryck", "gemensam intern regel ≤1,0 bar; 60 s kontinuerligt observerat ger varning. Inte universell; modellmanual gäller."], // health_pressure
+  ["24-timmars vattentryckskurva i sluten hydraulkrets (X10A, 5-minutersminima).", "Kurvhänvisning: >1,0 bar normalt, ≤1,0 bar lågt, ≤0,5 bar kritiskt (diagnos vid ≥60 s i följd). Tillåtet påfyllnings- och drifttryck beror på exakt modellmanual och anläggningshöjd; värdet ensamt bevisar varken läckage eller fel."], // health_pressure
   ["Flöde efter 60 s pump", "Gräns kräver samma modell/läge/förhållanden; inte nominellt eller bevis på för lågt flöde."], // health_flow
   ["BUH/BSH ON-tid", "inte energi eller bevis på onödig värme."], // health_heater
   ["5 experimentella räknare", "jämförbara ökningar; luckor/reset utesluts. Stabilitet utesluter inte begränsning eller bevisar orsak."], // health_retries

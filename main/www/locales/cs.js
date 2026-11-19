@@ -1,4 +1,4 @@
-// translation-source: 3a15720127279ca3edda45e3c53255972178ba0299b2928ffe49177e6a324af5
+// translation-source: 42a4d77a832a12c84359f017fdcacdd939405dc965a062a922c2d18aafa2ff0e
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -175,7 +175,7 @@ I18N.cs = localeValues([
   /* check.dhw_loss */ "Chladnutí zásobníku",
   /* check.cycling */ "Starty kompresoru",
   /* check.defrost */ "Cykly odmrazování",
-  /* check.pressure */ "Min. tlak vody",
+  /* check.pressure */ "Tlak vody",
   /* check.flow */ "Min. průtok",
   /* check.heater */ "Topná tělesa",
   /* check.retries */ "Ochranné čítače",
@@ -286,14 +286,14 @@ I18N.cs = localeValues([
   /* check.defrost.last_start */ (date, route, outdoor) => `Poslední zaznamenaný začátek odmrazování · ${date} · Okruh ${route} · Venkovní vzduch ${outdoor}`,
   /* check.defrost.route_space */ "Vytápění",
   /* check.defrost.route_dhw */ "Zásobník teplé vody",
-  /* check.detail.pressure.info */ "Uložené minimum ≤1,0 bar; souvislých 60 s nepotvrzeno. Fyzikální platnost a příčina neznámé.",
-  /* check.detail.pressure.warn */ "Zaznamenáno souvislých ≥60 s ≤1,0 bar; ne aktuální tlak.",
-  /* check.detail.pressure.ok */ "Žádný přijatý tlak ≤1,0 bar, práh projektu.",
+  /* check.detail.pressure.info */ "Nízký",
+  /* check.detail.pressure.warn */ "Kritický",
+  /* check.detail.pressure.ok */ "Normální",
   /* check.detail.defrost_events_insufficient */ "Méně než tři spárovaná odmrazení; bez verdiktu podílu.",
   /* check.detail.source_stale */ "Žádný čerstvý vzorek X10A; aktuální stav neznámý. Historie zachována.",
   /* check.detail.no_paired_runtime */ "Žádná spárovaná čitelná doba; pouze počet.",
-  /* check.detail.current_label */ "Aktuální tlak vody:",
-  /* check.detail.minimum_time_label */ "Minimum zaznamenáno:",
+  /* check.detail.current_label */ "≤1,0 bar nízký",
+  /* check.detail.minimum_time_label */ "≤0,5 bar kritický",
   /* check.detail.coverage_missing */ (a) => `Chybějící čitelná doba: ${a} s.`,
   /* check.detail.channel_coverage */ (a, b) => `${a}: pokrytí ${b}`,
   /* check.summary.warnings */ (n) => `${n} ${n === 1 ? "varování" : "varování"}`,
@@ -1259,7 +1259,7 @@ MODEL_DESCRIPTION_I18N.cs = modelDescriptionValues([
   ["R5T: bod vrstveného zásobníku, ne energie.", "Interní práh ≥0,8 K/h bez značek čerpadla/odběru. Odběr možný i bez značek; 0 K/h nevylučuje ztráty. Cirkulace neprokazuje příčinu."], // health_dhw_loss
   ["Při výpadcích měření mohou některé starty chybět.", "Pevný běžný počet startů neexistuje. Při dostatku dat tato kontrola považuje průměrnou délku dokončených cyklů vytápění alespoň 10 minut za dostatečnou."], // health_cycling
   ["Odmrazení", "≥3 spárovaná, >15% doby chodu kompresoru při čitelném stavu kompresoru i odmrazení. Interní pravidlo, ne Daikin; chybí vlhkost a teplota celého výměníku."], // health_defrost
-  ["Tlak", "společné interní pravidlo ≤1,0 bar; 60 s souvislého pozorování dává varování. Ne univerzální; platí návod modelu."], // health_pressure
+  ["24h průběh tlaku vody v uzavřeném hydraulickém okruhu (X10A, 5min minima).", "Průběh: >1,0 bar normální, ≤1,0 bar nízký, ≤0,5 bar kritický (diagnóza od 60 s souvisle). Přípustný plnicí a provozní tlak určuje přesný návod modelu a výška soustavy; samotný údaj neprokazuje únik ani závadu."], // health_pressure
   ["Průtok po 60 s čerpadla", "Mez vyžaduje stejný model/režim/podmínky; ne jmenovitý ani důkaz malého průtoku."], // health_flow
   ["Doba ON BUH/BSH", "ne energie ani důkaz zbytečného topení."], // health_heater
   ["5 experimentálních čítačů", "srovnatelné nárůsty; mezery/reset vyloučeny. Stabilita nevylučuje omezení ani neprokazuje příčinu."], // health_retries

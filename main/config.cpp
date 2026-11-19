@@ -168,15 +168,14 @@ std::string config_profile() {
     return g_cfg.profile;
 }
 
-static void publish_locked(const Config& requested) {
-    Config c = requested;
+static void publish_locked(Config&& c) {
     c.runtime_revision = config_next_revision(g_cfg.runtime_revision);
-    g_cfg = std::move(c);
+    g_cfg              = std::move(c);
 }
 
-static void publish(const Config& c) {
+static void publish(Config&& c) {
     Lock lk(g_mtx);
-    publish_locked(c);
+    publish_locked(std::move(c));
 }
 
 void config_load() {
@@ -229,94 +228,107 @@ void config_load() {
                     "kept\n");
     }
     if (blob_loaded) {
-        c.wifi_ssid = b.wifi_ssid;                     c.wifi_pass = b.wifi_pass;
-        c.wifi_ssid_backup = b.wifi_ssid_backup;       c.wifi_pass_backup = b.wifi_pass_backup;
-        c.wifi_rollback_active = b.wifi_rollback_active; c.wifi_rolled_back = b.wifi_rolled_back;
-        c.mqtt_uri = b.mqtt_uri;   c.mqtt_user = b.mqtt_user;   c.mqtt_pass = b.mqtt_pass;
+        c.wifi_ssid            = b.wifi_ssid;
+        c.wifi_pass            = b.wifi_pass;
+        c.wifi_ssid_backup     = b.wifi_ssid_backup;
+        c.wifi_pass_backup     = b.wifi_pass_backup;
+        c.wifi_rollback_active = b.wifi_rollback_active;
+        c.wifi_rolled_back     = b.wifi_rolled_back;
+        c.mqtt_uri             = b.mqtt_uri;
+        c.mqtt_user            = b.mqtt_user;
+        c.mqtt_pass            = b.mqtt_pass;
         // Gated on has_mqtt_base only for symmetry with the other appended blocks — a pre-v16 blob
         // decodes the member empty anyway, and empty already MEANS the compile-time default
-        // (logic/mqtt_base.hpp). There is deliberately no Kconfig fallback to apply here: unlike the
-        // board block, "absent" and "default" are the same state for this field.
+        // (logic/mqtt_base.hpp). There is deliberately no Kconfig fallback to apply here: unlike
+        // the board block, "absent" and "default" are the same state for this field.
         if (b.has_mqtt_base) c.mqtt_base = b.mqtt_base;
         if (b.has_ref_temp) {
-            c.ref_temp_name = b.ref_temp_name; c.ref_temp_topic = b.ref_temp_topic;
-            c.ref_temp_path = b.ref_temp_path; c.ref_temp_time_path = b.ref_temp_time_path;
+            c.ref_temp_name          = b.ref_temp_name;
+            c.ref_temp_topic         = b.ref_temp_topic;
+            c.ref_temp_path          = b.ref_temp_path;
+            c.ref_temp_time_path     = b.ref_temp_time_path;
             c.ref_temp_setpoint_path = b.ref_temp_setpoint_path;
-            c.ref_temp_setpoint_topic = b.has_ref_multi_source
-                ? b.ref_temp_setpoint_topic
-                : (b.ref_temp_setpoint_path.empty() ? "" : b.ref_temp_topic);
+            c.ref_temp_setpoint_topic =
+                b.has_ref_multi_source ? b.ref_temp_setpoint_topic
+                                       : (b.ref_temp_setpoint_path.empty() ? "" : b.ref_temp_topic);
             c.ref_temp_time_topic = b.has_ref_multi_source
-                ? b.ref_temp_time_topic
-                : (b.ref_temp_time_path.empty() ? "" : b.ref_temp_topic);
+                                        ? b.ref_temp_time_topic
+                                        : (b.ref_temp_time_path.empty() ? "" : b.ref_temp_topic);
             if (b.has_ref_multi_source && b.ref_temp_fixed_setpoint_tenths <= UINT16_MAX)
                 c.ref_temp_fixed_setpoint_tenths =
                     static_cast<uint16_t>(b.ref_temp_fixed_setpoint_tenths);
-            c.ref_temp_enabled_path = b.ref_temp_enabled_path;
+            c.ref_temp_enabled_path   = b.ref_temp_enabled_path;
             c.ref_temp_hvac_mode_path = b.ref_temp_hvac_mode_path;
-            c.ref_temp_max_age_s = b.ref_temp_max_age_s;
+            c.ref_temp_max_age_s      = b.ref_temp_max_age_s;
             c.ref_temp_generation     = b.ref_temp_generation;
         }
         if (b.has_weather) {
-            c.weather_enabled = b.weather_enabled;
-            c.weather_latitude_e6 = b.weather_latitude_e6;
+            c.weather_enabled      = b.weather_enabled;
+            c.weather_latitude_e6  = b.weather_latitude_e6;
             c.weather_longitude_e6 = b.weather_longitude_e6;
         }
         if (b.has_diagnostics) {
-            c.diagnostics_enabled = b.diagnostics_enabled;
+            c.diagnostics_enabled    = b.diagnostics_enabled;
             c.diagnostics_generation = b.diagnostics_generation;
         }
         if (b.has_diagnostics_source)
             c.diagnostics_source = diagnostics_source_from_int(b.diagnostics_source);
         if (b.has_circulation && b.circulation_on_tenths_w <= UINT16_MAX &&
             b.circulation_off_tenths_w <= UINT16_MAX && b.circulation_confirm_s <= UINT16_MAX) {
-            const uint16_t on_w = static_cast<uint16_t>(b.circulation_on_tenths_w);
-            const uint16_t off_w = static_cast<uint16_t>(b.circulation_off_tenths_w);
+            const uint16_t on_w      = static_cast<uint16_t>(b.circulation_on_tenths_w);
+            const uint16_t off_w     = static_cast<uint16_t>(b.circulation_off_tenths_w);
             const uint16_t confirm_s = static_cast<uint16_t>(b.circulation_confirm_s);
-            const char* why = nullptr;
-            if (circulation_source_config_valid(
-                    b.circulation_name, b.circulation_topic, b.circulation_power_path,
-                    b.circulation_time_path, b.circulation_max_age_s, on_w, off_w,
-                    confirm_s, &why)) {
-                c.circulation_name = b.circulation_name;
-                c.circulation_topic = b.circulation_topic;
-                c.circulation_power_path = b.circulation_power_path;
-                c.circulation_time_path = b.circulation_time_path;
-                c.circulation_max_age_s = b.circulation_max_age_s;
-                c.circulation_on_tenths_w = on_w;
+            const char*    why       = nullptr;
+            if (circulation_source_config_valid(b.circulation_name, b.circulation_topic,
+                                                b.circulation_power_path, b.circulation_time_path,
+                                                b.circulation_max_age_s, on_w, off_w, confirm_s,
+                                                &why)) {
+                c.circulation_name         = b.circulation_name;
+                c.circulation_topic        = b.circulation_topic;
+                c.circulation_power_path   = b.circulation_power_path;
+                c.circulation_time_path    = b.circulation_time_path;
+                c.circulation_max_age_s    = b.circulation_max_age_s;
+                c.circulation_on_tenths_w  = on_w;
                 c.circulation_off_tenths_w = off_w;
-                c.circulation_confirm_s = confirm_s;
+                c.circulation_confirm_s    = confirm_s;
             } else {
                 diag_printf("config: invalid circulation source ignored (%s)\n",
                             why ? why : "invalid config");
             }
         }
-        c.syslog_host = b.syslog_host; c.syslog_port = b.syslog_port; c.ntp_server = b.ntp_server;
+        c.syslog_host = b.syslog_host;
+        c.syslog_port = b.syslog_port;
+        c.ntp_server  = b.ntp_server;
         // has_board is false for a blob written before the board block existed (v1). Those fields
         // were compile-time then, so "absent" must read as the Kconfig default, NOT as disabled —
         // otherwise the OTA that introduces this feature turns a XIAO user's working LED off.
         if (b.has_board) {
-            c.led_gpio = b.led_gpio; c.led_type = b.led_type; c.led_inverted = b.led_inverted;
-            c.btn_gpio = b.btn_gpio; c.btn_active_low = b.btn_active_low;
+            c.led_gpio       = b.led_gpio;
+            c.led_type       = b.led_type;
+            c.led_inverted   = b.led_inverted;
+            c.btn_gpio       = b.btn_gpio;
+            c.btn_active_low = b.btn_active_low;
         } else {
             seed_board_defaults(c);
         }
         // The OTA channel (blob v3). has_ota == false is a blob written before the channel existed,
-        // i.e. a device from the era when there was exactly ONE feed — which is the release channel.
-        // So absent and "release" mean the same thing here (unlike the board block above, where
-        // absent had to fall back to Kconfig); the struct default already says so.
+        // i.e. a device from the era when there was exactly ONE feed — which is the release
+        // channel. So absent and "release" mean the same thing here (unlike the board block above,
+        // where absent had to fall back to Kconfig); the struct default already says so.
         if (b.has_ota) c.ota_channel = ota_channel_from_int(b.ota_channel);
-        // The UI language (blob v4). has_lang == false is a blob written before the override existed;
-        // absent means "auto" (keep letting the browser decide), which the struct default already
-        // says — like the channel above, and unlike the board block, there is no Kconfig fallback.
+        // The UI language (blob v4). has_lang == false is a blob written before the override
+        // existed; absent means "auto" (keep letting the browser decide), which the struct default
+        // already says — like the channel above, and unlike the board block, there is no Kconfig
+        // fallback.
         if (b.has_lang) c.ui_lang = ui_lang_from_int(b.ui_lang);
         // The HomeHub Modbus stack (blob v5/v6 plus the v18 discovery latch). Any pre-v18 blob that
         // already carried this block migrates to discovery_done=true: its empty host may be an
         // explicit deletion and consent cannot be reconstructed. A fresh/pre-v5 device remains
         // pending and gets exactly one automatic search on its first networked boot.
         if (b.has_modbus) {
-            c.mb_host           = b.mb_host;
-            c.mb_port           = b.mb_port;
-            c.mb_unit_id        = b.mb_unit_id;
+            c.mb_host    = b.mb_host;
+            c.mb_port    = b.mb_port;
+            c.mb_unit_id = b.mb_unit_id;
         }
         c.mb_discovery_done = config_modbus_discovery_done_on_load(
             b.has_modbus, b.has_modbus_discovery_state, b.mb_discovery_done);
@@ -360,12 +372,13 @@ void config_load() {
     // button at a floating pad factory-resets the device by itself. The link pins are excluded from
     // this particular check (rx/tx are re-validated separately, just below, by the chip rule; the
     // board parts then yield to the final pair) so the two checks can't reject each other.
+    std::string why;
     {
         Config&   probe    = c;
         const int saved_rx = probe.rx_pin;
         const int saved_tx = probe.tx_pin;
         probe.rx_pin = probe.tx_pin = -1;
-        std::string why;
+        why.clear();
         if (!board_hw_valid(probe, why, SOC_GPIO_PIN_COUNT - 1, hw_octal_spi())) {
             diag_printf("config: persisted board hardware rejected (%s; led=%d type=%d btn=%d) "
                         "— using build defaults\n", why.c_str(), c.led_gpio, c.led_type, c.btn_gpio);
@@ -389,7 +402,7 @@ void config_load() {
         probe.tx_pin = saved_tx;
     }
     {
-        std::string why;
+        why.clear();
         if (!board_identity_valid(c, why)) {
             diag_printf("config: persisted board identity rejected (%s; id=%d) — using Custom\n",
                         why.c_str(), static_cast<int>(c.board_preset_id));
@@ -452,7 +465,7 @@ void config_load() {
     // Optional hardware fails closed on an invalid persisted mapping. Disabling it keeps the UI
     // reachable without claiming or driving a bad pad; the stored pins remain visible for repair.
     {
-        std::string why;
+        why.clear();
         if (!env3_config_valid(c, why, SOC_GPIO_PIN_COUNT - 1, hw_octal_spi())) {
             diag_printf("config: persisted ENV III config rejected (%s; sda=%d scl=%d) — disabled\n",
                         why.c_str(), c.env3_sda, c.env3_scl);
@@ -499,7 +512,7 @@ void config_load() {
     // replaced by the XIAO 44/43 defaults while an ENV mapping already uses them). Optional ENV
     // yields to the primary X10A link; re-check the final pair before either driver starts.
     if (c.env3_enabled) {
-        std::string why;
+        why.clear();
         if (!env3_config_valid(c, why, SOC_GPIO_PIN_COUNT - 1, hw_octal_spi())) {
             diag_printf("config: ENV III disabled after X10A fallback (%s; sda=%d scl=%d)\n",
                         why.c_str(), c.env3_sda, c.env3_scl);
@@ -514,9 +527,9 @@ void config_load() {
     c.fp_pages        = 0;
     c.fp_kw_tenths    = -1;
     c.fp_iu_kw_tenths = -1;
-    c.fp_eeprom       = "";
+    c.fp_eeprom.clear();
     c.fp_valid        = false;
-    publish(c);
+    publish(std::move(c));
 }
 
 // The NVS side of the logic/config_transaction.hpp transactions; esp_err_t is their store code.

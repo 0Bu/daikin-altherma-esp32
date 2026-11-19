@@ -1019,6 +1019,7 @@ inline uint32_t history_x10a_series_id(const TrendDef& d) {
     // locator row was the hydronic 0x62/15 reading, the high side is outdoor 0x20/12. Folded in
     // only when set, so every other series keeps its id and returns from the journal.
     if (d.high_side) crc = history_fp_u32(crc, 0x48494748u); // "HIGH"
+    if (d.min_fold) crc = history_fp_u32(crc, 0x4d494e31u);  // "MIN1"
     return history_series_id_end(crc);
 }
 

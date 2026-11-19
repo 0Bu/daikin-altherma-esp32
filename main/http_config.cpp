@@ -665,17 +665,17 @@ static esp_err_t set_ref_temp(httpd_req_t* req) {
             req, "{\"ok\":true,\"saved\":false,\"reboot\":false,\"room_evidence_reset\":true}");
     }
     const uint32_t previous_room_identity = logic::history_room_identity(c);
-    c.ref_temp_name = in.name;
-    c.ref_temp_topic = in.topic;
-    c.ref_temp_path = in.path;
-    c.ref_temp_setpoint_topic = in.setpoint_topic;
-    c.ref_temp_setpoint_path = in.setpoint_path;
-    c.ref_temp_fixed_setpoint_tenths = in.fixed_setpoint_tenths;
-    c.ref_temp_time_topic = in.time_topic;
-    c.ref_temp_time_path = in.time_path;
-    c.ref_temp_enabled_path = in.enabled_path;
-    c.ref_temp_hvac_mode_path = in.hvac_mode_path;
-    c.ref_temp_max_age_s = in.max_age_s;
+    c.ref_temp_name                       = in.name;
+    c.ref_temp_topic                      = in.topic;
+    c.ref_temp_path                       = in.path;
+    c.ref_temp_setpoint_topic             = in.setpoint_topic;
+    c.ref_temp_setpoint_path              = in.setpoint_path;
+    c.ref_temp_fixed_setpoint_tenths      = in.fixed_setpoint_tenths;
+    c.ref_temp_time_topic                 = in.time_topic;
+    c.ref_temp_time_path                  = in.time_path;
+    c.ref_temp_enabled_path               = in.enabled_path;
+    c.ref_temp_hvac_mode_path             = in.hvac_mode_path;
+    c.ref_temp_max_age_s                  = in.max_age_s;
     if (logic::history_room_identity(c) != previous_room_identity)
         c.ref_temp_generation = diagnostics_next_generation(c.ref_temp_generation, esp_random());
     const uint32_t room_identity = logic::history_room_identity(c);
@@ -877,21 +877,18 @@ static esp_err_t set_circulation(httpd_req_t* req) {
         return http_send_json(req, "{\"ok\":true,\"saved\":false,\"reboot\":false}");
     }
     const bool evidence_mapping_changed =
-        c.circulation_topic != in.topic ||
-        c.circulation_power_path != in.power_path ||
-        c.circulation_time_path != in.time_path ||
-        c.circulation_max_age_s != in.max_age_s ||
+        c.circulation_topic != in.topic || c.circulation_power_path != in.power_path ||
+        c.circulation_time_path != in.time_path || c.circulation_max_age_s != in.max_age_s ||
         c.circulation_on_tenths_w != in.on_tenths_w ||
-        c.circulation_off_tenths_w != in.off_tenths_w ||
-        c.circulation_confirm_s != in.confirm_s;
-    c.circulation_name = in.name;
-    c.circulation_topic = in.topic;
-    c.circulation_power_path = in.power_path;
-    c.circulation_time_path = in.time_path;
-    c.circulation_max_age_s = in.max_age_s;
-    c.circulation_on_tenths_w = in.on_tenths_w;
+        c.circulation_off_tenths_w != in.off_tenths_w || c.circulation_confirm_s != in.confirm_s;
+    c.circulation_name         = in.name;
+    c.circulation_topic        = in.topic;
+    c.circulation_power_path   = in.power_path;
+    c.circulation_time_path    = in.time_path;
+    c.circulation_max_age_s    = in.max_age_s;
+    c.circulation_on_tenths_w  = in.on_tenths_w;
     c.circulation_off_tenths_w = in.off_tenths_w;
-    c.circulation_confirm_s = in.confirm_s;
+    c.circulation_confirm_s    = in.confirm_s;
     if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");
     if (evidence_mapping_changed) mqtt_circulation_reconfigure(!c.circulation_topic.empty());
     diag_printf("mqtt: circulation power mapping saved%s\n", in.topic.empty() ? " (disabled)" : "");
@@ -1081,8 +1078,9 @@ static esp_err_t discover_homehub_now(httpd_req_t* req) {
     if (!mb_discover_homehub(found))
         return send_err(req, "404 Not Found", "No HomeHub found");
     // mb_discover_homehub returns a numeric IPv4 assembled by firmware, never caller text.
-    const std::string body = std::string("{\"ok\":true,\"host\":\"") + found + "\"}";
-    return http_send_json(req, body.c_str());
+    char body[64];
+    std::snprintf(body, sizeof(body), "{\"ok\":true,\"host\":\"%s\"}", found.c_str());
+    return http_send_json(req, body);
 }
 
 static esp_err_t set_syslog(httpd_req_t* req) {
@@ -1467,9 +1465,8 @@ static void probe_append_decode(JsonOut& out, const ProbeDecode& d) {
         json_append_escaped(out, d.text);
         out += '"';
     } else if (d.ok) {
-        char b[32];
-        snprintf(b, sizeof(b), "%.*f", display_decimals(d.conv), d.value);
-        out += ",\"value\":";
+        char b[40];
+        snprintf(b, sizeof(b), ",\"value\":%.*f", display_decimals(d.conv), d.value);
         out += b;
     } else {
         // The converter ran and REFUSED these bytes (conv 405 on a non-positive pressure, 107/114
@@ -1549,26 +1546,24 @@ static esp_err_t hp_query_probe(httpd_req_t* req) {
         }
     }
 
-    char reg_hex[8], hex[3 * 64];
-    snprintf(reg_hex, sizeof(reg_hex), "0x%02X", static_cast<unsigned>(q.reg));
+    char hex[3 * 64];
+    snprintf(hex, sizeof(hex),
+             "{\"reg\":\"0x%02X\",\"proto\":\"%c\",\"rx_pin\":%d,\"tx_pin\":%d,"
+             "\"offset\":%d,\"size\":%d,\"status\":\"",
+             static_cast<unsigned>(q.reg), static_cast<char>(reply.proto), reply.rx_pin,
+             reply.tx_pin, q.offset, q.size);
     HttpJsonChunks out(HttpChunkEmitter{req});
     httpd_resp_set_type(req, "application/json");
-    out += "{\"reg\":\"";
-    out += reg_hex;
-    out += "\",\"proto\":\"";
-    out += static_cast<char>(reply.proto);
-    out += "\",\"rx_pin\":"; probe_append_int(out, reply.rx_pin);
-    out += ",\"tx_pin\":"; probe_append_int(out, reply.tx_pin);
-    out += ",\"offset\":"; probe_append_int(out, q.offset);
-    out += ",\"size\":"; probe_append_int(out, q.size);
-    out += ",\"status\":\"";
+    out += hex;
     out += probe_status_name(status);
     out += '"';
 
     // Preserve every byte that arrived, including NAK, bad-CRC, unexpected-page and partial frames.
     if (reply.frame_len > 0) {
         hex_render(reply.frame, reply.frame_len, hex, static_cast<int>(sizeof(hex)));
-        out += ",\"frame\":\""; out += hex; out += '"';
+        out += ",\"frame\":\"";
+        out += hex;
+        out += '"';
     }
 
     if (reply.status != ProbeStatus::Ok) {
@@ -1578,8 +1573,10 @@ static esp_err_t hp_query_probe(httpd_req_t* req) {
 
     hex_render(reply.frame + reply.payload_off, reply.payload_len, hex,
                static_cast<int>(sizeof(hex)));
-    out += ",\"payload\":\""; out += hex; out += "\",\"payload_len\":";
-    probe_append_int(out, reply.payload_len);
+    out += ",\"payload\":\"";
+    out += hex;
+    snprintf(hex, sizeof(hex), "\",\"payload_len\":%d", reply.payload_len);
+    out += hex;
 
     if (!sliced) {
         // The page is real and shorter than the caller assumed — already reported as out_of_bounds
@@ -1591,17 +1588,16 @@ static esp_err_t hp_query_probe(httpd_req_t* req) {
 
     hex_render(reply.frame + reply.payload_off + q.offset, q.size, hex,
                static_cast<int>(sizeof(hex)));
-    out += ",\"slice\":\""; out += hex; out += '"';
-
-    out += ",\"ok\":true,\"decodes\":[";
+    out += ",\"slice\":\"";
+    out += hex;
+    out += "\",\"ok\":true,\"decodes\":[";
     for (int i = 0; i < decode_count; i++) {
         if (i) out += ',';
         probe_append_decode(out, decodes[i]);
     }
     if (unimplemented) {
-        out += "{\"conv\":";
-        probe_append_int(out, q.conv);
-        out += ",\"unimplemented\":true}";
+        snprintf(hex, sizeof(hex), "{\"conv\":%d,\"unimplemented\":true}", q.conv);
+        out += hex;
     }
     out += "]}";
     return out.finish() ? ESP_OK : ESP_FAIL;
