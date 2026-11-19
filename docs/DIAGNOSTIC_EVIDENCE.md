@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: f7cd5c3de691f3bf1b12a86edaca52328ede43db48b2e711c0c66691673890f5 -->
+<!-- diagnostic-evidence-contract: f52be764a17784b0cab452f0ad9add3096d3d63aa23e91bc52d40faa49d2768c -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -418,24 +418,31 @@ manuals also state at least or above 1 bar, but the permitted filling and operat
 model-specific ([D2], section 8.1.3). Native Altherma 4 Modbus lists water pressure in input
 register 79 with an ambiguous 10–600 bar range note ([D4], section 7.2).
 
-**Firmware rule:** The accepted rolling minimum is retained unchanged, including zero. At or
-below 1.0 bar produces **NOTE**; at least 60 continuously observed seconds at that level produces
-**WARNING**. Confirmation requires readable endpoints and does not rewrite the minimum. The API
-publishes the observed-at timestamp only with synchronized wall time, current pressure only when
-the last fresh sample supplied it, and a separate confirmed-low flag. A reassuring result requires
-a full day and 90% readable pressure time. HomeHub EKRHH exposes no water-pressure register, and
-native Altherma 4 input 79's centibar scaling remains physically unverified, so
+**Firmware rule:** All-zero uninitialized hydronic pages (`0x60`–`0x62`) are withheld at decode time
+before caching, trend history, and diagnostics ([availability.hpp](../main/logic/availability.hpp)).
+The 24-hour `water_pressure` trend folds 5-minute minimums (`TrendRing::fold_min` in
+[history.hpp](../main/logic/history.hpp)). In diagnostics (`checkup_step`), a reading enters
+`min_bar` only after pressure stays continuously readable and at or below **1.0 bar**
+(`CHECKUP_BAR_WARN_TENTHS` -> `confirmed_low` -> **NOTE**) or at or below **0.5 bar**
+(`CHECKUP_BAR_CRIT_TENTHS` -> `confirmed_critical` -> **WARNING**) for **60 continuously observed
+seconds** (`CHECKUP_PRESSURE_CONFIRM_S`); transient single-poll dips do not latch `min_bar` or raise
+a finding, while confirmed 0.0 bar readings are retained unchanged. The API publishes the
+observed-at timestamp only with synchronized wall time, current pressure only when the last fresh
+sample supplied it, and separate `confirmed_low` / `confirmed_critical` flags. A reassuring `Ok`
+result requires a full day and 90% readable pressure time. HomeHub EKRHH exposes no water-pressure
+register, and native Altherma 4 input 79's centibar scaling remains physically unverified, so
 `checkup_modbus_coverage` withholds `pressure` from automated verdicts (`unavailable`, hidden in
-Modbus UI mode). See CHECKUP_BAR_WARN_TENTHS and CHECKUP_PRESSURE_CONFIRM_S in
-[checkup.hpp](../main/logic/checkup.hpp).
+Modbus UI mode). See `CHECKUP_BAR_WARN_TENTHS`, `CHECKUP_BAR_CRIT_TENTHS`, and
+`CHECKUP_PRESSURE_CONFIRM_S` in [checkup.hpp](../main/logic/checkup.hpp).
 
-**Project boundary:** The one-minute confirmation is a project filter. The firmware's common
-1.0-bar threshold is a project diagnostic boundary, not every model's filling specification.
+**Project boundary:** The one-minute confirmation is a project filter, and the 1.0 bar (*Low*) and
+0.5 bar (*Critical*) thresholds are project diagnostic boundaries, not every model's filling
+specification.
 
-**Not established:** A stored low or zero value does not identify water loss, air or an expansion-
-vessel problem. Its timestamp retains neither the raw frame nor the then-current validity context,
-and decoding acceptance does not establish sensor accuracy. A current normal reading cannot erase
-an earlier low observation or explain its cause.
+**Not established:** A confirmed low or zero value does not identify water loss, air, or an
+expansion-vessel problem. Its timestamp retains neither the raw frame nor the then-current validity
+context, and decoding acceptance does not establish sensor accuracy. A current normal reading
+cannot erase an earlier confirmed drop within the 24-hour window or explain its cause.
 
 <a id="diagnosis-flow"></a>
 ### 6. Lowest water flow (`flow`)

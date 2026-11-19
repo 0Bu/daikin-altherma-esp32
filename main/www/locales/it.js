@@ -1,4 +1,4 @@
-// translation-source: 3a15720127279ca3edda45e3c53255972178ba0299b2928ffe49177e6a324af5
+// translation-source: 42a4d77a832a12c84359f017fdcacdd939405dc965a062a922c2d18aafa2ff0e
 I18N.it = localeValues([
   /* sys.nodata */ "Nessun dato",
   /* sys.unreachable */ "Non raggiungibile",
@@ -175,7 +175,7 @@ I18N.it = localeValues([
   /* check.dhw_loss */ "Raffreddamento ACS",
   /* check.cycling */ "Avvii compressore",
   /* check.defrost */ "Sbrinamenti",
-  /* check.pressure */ "Pressione acqua min.",
+  /* check.pressure */ "Pressione acqua",
   /* check.flow */ "Portata min.",
   /* check.heater */ "Resistenze",
   /* check.retries */ "Contatori protezione",
@@ -286,14 +286,14 @@ I18N.it = localeValues([
   /* check.defrost.last_start */ (date, route, outdoor) => `Ultimo avvio di sbrinamento osservato · ${date} · Circuito ${route} · Aria esterna ${outdoor}`,
   /* check.defrost.route_space */ "Riscaldamento",
   /* check.defrost.route_dhw */ "Serbatoio dell’acqua calda",
-  /* check.detail.pressure.info */ "Minimo salvato ≤1,0 bar; 60 s continui non confermati. Validità fisica e causa sconosciute.",
-  /* check.detail.pressure.warn */ "Registrati ≥60 s continui ≤1,0 bar; non indica pressione attuale.",
-  /* check.detail.pressure.ok */ "Nessuna pressione accettata ≤1,0 bar, soglia del progetto.",
+  /* check.detail.pressure.info */ "Bassa",
+  /* check.detail.pressure.warn */ "Critica",
+  /* check.detail.pressure.ok */ "Normale",
   /* check.detail.defrost_events_insufficient */ "Meno di tre sbrinamenti associati; nessun giudizio sulla quota.",
   /* check.detail.source_stale */ "Nessuna lettura X10A recente; stato attuale sconosciuto. Storia conservata.",
   /* check.detail.no_paired_runtime */ "Nessuna durata leggibile associata; solo conteggio.",
-  /* check.detail.current_label */ "Pressione acqua attuale:",
-  /* check.detail.minimum_time_label */ "Minimo registrato il:",
+  /* check.detail.current_label */ "≤1,0 bar bassa",
+  /* check.detail.minimum_time_label */ "≤0,5 bar critica",
   /* check.detail.coverage_missing */ (a) => `Tempo leggibile mancante: ${a} s.`,
   /* check.detail.channel_coverage */ (a, b) => `${a}: copertura ${b}`,
   /* check.summary.warnings */ (n) => `${n} ${n === 1 ? "avviso" : "avvisi"}`,
@@ -1288,7 +1288,7 @@ MODEL_DESCRIPTION_I18N.it = modelDescriptionValues([
   ["R5T: un punto del serbatoio stratificato, non energia.", "Indizio interno ≥0,8 K/h senza segnali pompa/prelievo. Senza segnali, i prelievi restano possibili; 0 K/h non esclude perdite. Circolazione non prova la causa."], // health_dhw_loss
   ["Se mancano misurazioni, alcuni avvii possono sfuggire al conteggio.", "Non esiste un numero fisso di avvii considerato normale. Con dati sufficienti, questo controllo considera adeguata una durata media di almeno 10 minuti per i cicli di riscaldamento conclusi."], // health_cycling
   ["Sbrinamento", "≥3 associati, >15% del tempo di marcia del compressore con stati compressore e sbrinamento leggibili. Regola interna, non Daikin; mancano umidità e temperatura dell’intera batteria."], // health_defrost
-  ["Pressione", "regola interna comune ≤1,0 bar; 60 s continui osservati danno AVVISO. Non universale; vale il manuale del modello."], // health_pressure
+  ["Andamento 24 h della pressione dell’acqua nel circuito idraulico chiuso (X10A, minimi su 5 min).", "Guida al grafico: >1,0 bar normale, ≤1,0 bar bassa, ≤0,5 bar critica (diagnosi da 60 s continui). La pressione di riempimento ed esercizio ammessa dipende dal manuale esatto del modello e dall’altezza dell’impianto; il valore da solo non prova perdite o guasti."], // health_pressure
   ["Portata dopo 60 s di pompa", "Limite per stesso modello/modo/condizioni; non nominale né prova di portata insufficiente."], // health_flow
   ["Tempo ON BUH/BSH", "non energia né prova di calore inutile."], // health_heater
   ["5 contatori sperimentali", "aumenti comparabili; lacune/reset esclusi. Stabilità non esclude limitazione né prova causa."], // health_retries

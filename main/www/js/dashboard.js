@@ -171,8 +171,12 @@ function recoverOpenHistory() {
     return;
   const host = globalThis.document?.getElementById(dashboard ? "valueGroups" : "settingsCards");
   const rows = dashboard ? ".vgroup:not([hidden]) .vitem.open [data-trend]" : ".vitem.open [data-trend]";
-  for (const button of host?.querySelectorAll(rows) || [])
-    if (ensureHistPair(button.dataset.trend, "refresh")) break;
+  for (const button of host?.querySelectorAll(rows) || []) {
+    const started = button.dataset.desc === "model:health_pressure"
+      ? ensureHist(button.dataset.trend, "x10a", "refresh")
+      : ensureHistPair(button.dataset.trend, "refresh");
+    if (started) break;
+  }
 }
 
 // Reconcile navigation against the installed frame, including while a poll is deferred.
@@ -1865,6 +1869,9 @@ function checkupDetailHtml(c, fullSpan = c.full_span === true, report = {}) {
   const base = LANG === "de" && description.de ? description.de : description;
   const what = copy ? copy[0] : base.what;
   const normal = copy ? copy[1] : base.normal;
+  if (c.id === "pressure" && c.verdict !== "unavailable" && hasHist("water_pressure")) {
+    return descNoteHtml(t("normal.label"), normal);
+  }
   let detail;
   // Discard reasons are aggregates, without a per-candidate cause ranking. Missing readings
   // include necessary valve/heater/pump inputs as well as tank temperature; missing X10A/HomeHub
@@ -1936,14 +1943,6 @@ function checkupDetailHtml(c, fullSpan = c.full_span === true, report = {}) {
   const time = [];
   if (Number.isFinite(report.span_s))
     time.push(`${t("check.detail.period_label")} ${checkupDuration(report.span_s)}`);
-  if (c.id === "pressure" && c.min_bar != null) {
-    const when = typeof c.min_unix_s === "number" && c.min_unix_s > 0
-      ? new Date(c.min_unix_s * 1000).toLocaleString(LANG,
-          { dateStyle: "short", timeStyle: "short" }) : t("sys.nodata");
-    time.push(`${t("check.detail.minimum_time_label")} ${when}`);
-    const current = Number.isFinite(c.current_bar) ? `${checkupFmt1(c.current_bar)} bar` : t("sys.nodata");
-    detail += ` ${t("check.detail.current_label")} ${current}.`;
-  }
   if ((report.source_fresh === false || c.reason === "source_stale") && Number.isFinite(report.source_age_s))
     detail += ` ${t("check.detail.age_label")} ${dwellDuration(report.source_age_s)}.`;
   if (c.id === "heater") {
@@ -2073,8 +2072,14 @@ function checkupMetricValue(c) {
       const paired = c.paired_count == null ? "" : t("check.paired_cycles", c.paired_count);
       return checkupWithOutdoor(c, [n, paired, share].filter(Boolean).join(" · "));
     }
-    case "pressure":
-      return !Number.isFinite(c.min_bar) ? "" : `${checkupFmt1(c.min_bar)} bar`;
+    case "pressure": {
+      if (v === "warn" && Number.isFinite(c.min_bar))
+        return `${t("check.detail.pressure.warn")} · ${checkupFmt1(c.min_bar)} bar`;
+      if (v === "info" && Number.isFinite(c.min_bar))
+        return `${t("check.detail.pressure.info")} · ${checkupFmt1(c.min_bar)} bar`;
+      const shown = Number.isFinite(c.current_bar) ? c.current_bar : c.min_bar;
+      return !Number.isFinite(shown) ? "" : `${checkupFmt1(shown)} bar`;
+    }
     case "flow":
       return !Number.isFinite(c.min_l_min) ? "" : `${checkupFmt1(c.min_l_min)} l/min`;
     case "heater": {
@@ -2106,6 +2111,21 @@ function checkupValue(c) {
   return (c.id === "fault" && c.verdict === "collecting") ? st : (checkupMetricValue(c) || st);
 }
 
+const checkupPressureHistoryMarkup = new WeakMap();
+function checkupPressureHistoryHtml(id, unit, label) {
+  const ring = S.hist.get(id);
+  if (!ring) return histHtml(id, unit, label, "x10a", true);
+  const revision = historyRingRevision(ring);
+  const pin = S.histPin.get(id);
+  const cached = checkupPressureHistoryMarkup.get(ring);
+  if (cached?.id === id && cached.label === label && cached.epoch === S.histEpoch &&
+      cached.lang === LANG && cached.pin === pin && cached.revision === revision)
+    return cached.html;
+  const html = histHtml(id, unit, label, "x10a", true);
+  checkupPressureHistoryMarkup.set(ring, { id, label, epoch: S.histEpoch, lang: LANG, pin, revision, html });
+  return html;
+}
+
 const MODBUS_HIDDEN_CHECKS = new Set(["defrost", "pressure", "retries"]);
 function checkupCardHtml(includeHealth = true) {
   const h = includeHealth ? S.status?.health : null;
@@ -2128,9 +2148,15 @@ function checkupCardHtml(includeHealth = true) {
       const key = CHECKUP_ROW[c.id];
       if (!key) continue;                             // a check this UI does not know: skipped, never guessed at
       const tone = CHECKUP_TONE[checkupStatusKey(c)] || "";
+      const isPressure = c.id === "pressure" && c.verdict !== "unavailable" && hasHist("water_pressure");
       healthRows += modelDescRow(`health_${c.id}`, t(key), checkupValue(c),
                                  { cls: `checkup-val${tone ? ` ${tone}` : ""}`,
-                                   bodyHtml: checkupDetailHtml(c, h.full_span === true, h) });
+                                   bodyHtml: checkupDetailHtml(c, h.full_span === true, h),
+                                   trendId: isPressure ? "water_pressure" : "",
+                                   histUnit: isPressure ? "bar" : "",
+                                   paused: isPressure ? ("diagnosis" !== S.dashboardCard) : undefined,
+                                   renderHistory: isPressure ? checkupPressureHistoryHtml : undefined,
+                                   chartFirst: isPressure });
     }
   }
   // This row remains independent of /status.health and is not counted by the badge below.

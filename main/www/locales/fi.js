@@ -1,4 +1,4 @@
-// translation-source: 3a15720127279ca3edda45e3c53255972178ba0299b2928ffe49177e6a324af5
+// translation-source: 42a4d77a832a12c84359f017fdcacdd939405dc965a062a922c2d18aafa2ff0e
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -175,7 +175,7 @@ I18N.fi = localeValues([
   /* check.dhw_loss */ "Varaajan jäähtyminen",
   /* check.cycling */ "Kompressorin startit",
   /* check.defrost */ "Sulatukset",
-  /* check.pressure */ "Alin vedenpaine",
+  /* check.pressure */ "Vedenpaine",
   /* check.flow */ "Alin virtaama",
   /* check.heater */ "Sähkövastukset",
   /* check.retries */ "Suojauslaskurit",
@@ -286,14 +286,14 @@ I18N.fi = localeValues([
   /* check.defrost.last_start */ (date, route, outdoor) => `Viimeisin havaittu sulatuksen aloitus · ${date} · Piiri ${route} · Ulkoilma ${outdoor}`,
   /* check.defrost.route_space */ "Tilalämmitys",
   /* check.defrost.route_dhw */ "Lämminvesivaraaja",
-  /* check.detail.pressure.info */ "Tallennettu minimi ≤1,0 bar; yhtenäinen 60 s vahvistamatta. Fyysinen oikeellisuus ja syy tuntemattomat.",
-  /* check.detail.pressure.warn */ "Tallennettu yhtenäinen ≥60 s ≤1,0 bar; ei nykyistä painetta.",
-  /* check.detail.pressure.ok */ "Ei hyväksyttyä painetta ≤projektin 1,0 bar kynnys.",
+  /* check.detail.pressure.info */ "Matala",
+  /* check.detail.pressure.warn */ "Kriittinen",
+  /* check.detail.pressure.ok */ "Normaali",
   /* check.detail.defrost_events_insufficient */ "Alle kolme yhdistettyä sulatusta; ei osuusarviota.",
   /* check.detail.source_stale */ "Ei tuoretta X10A-näytettä; nykytila tuntematon. Historia säilyy.",
   /* check.detail.no_paired_runtime */ "Ei yhdistettyä luettavaa aikaa; vain määrä.",
-  /* check.detail.current_label */ "Nykyinen vedenpaine:",
-  /* check.detail.minimum_time_label */ "Minimi kirjattu:",
+  /* check.detail.current_label */ "≤1,0 bar matala",
+  /* check.detail.minimum_time_label */ "≤0,5 bar kriittinen",
   /* check.detail.coverage_missing */ (a) => `Puuttuva luettava aika: ${a} s.`,
   /* check.detail.channel_coverage */ (a, b) => `${a}: kattavuus ${b}`,
   /* check.summary.warnings */ (n) => `${n} ${n === 1 ? "varoitus" : "varoitusta"}`,
@@ -1138,7 +1138,7 @@ MODEL_DESCRIPTION_I18N.fi = modelDescriptionValues([
   ["R5T: kerrostuneen varaajan piste, ei energia.", "Projektin vihje ≥0,8 K/h ilman pumppu-/vedenottomerkkejä. Vedenotto mahdollista ilman merkkejä; 0 K/h ei sulje pois lämpöhäviötä. Kierto ei osoita syytä."], // health_dhw_loss
   ["Mittauskatkojen vuoksi osa käynnistyksistä voi jäädä laskematta.", "Käynnistysten määrälle ei ole kiinteää normaaliarvoa. Kun tietoja on riittävästi, tämä tarkistus pitää päättyneiden lämmitysjaksojen vähintään 10 minuutin keskiarvoa riittävänä."], // health_cycling
   ["Sulatus", "≥3 yhdistettyä, >15% kompressorin käyntiajasta, kun sekä kompressorin että sulatuksen tila on luettavissa. Sisäinen sääntö, ei Daikin; kosteus ja koko kennon lämpötila puuttuvat."], // health_defrost
-  ["Paine", "yhteinen sisäinen raja ≤1,0 bar; 60 s jatkuvaa havaintoa antaa varoituksen. Ei yleispätevä; mallin ohje pätee."], // health_pressure
+  ["24 tunnin vedenpainekäyrä suljetussa vesipiirissä (X10A, 5 minuutin minimit).", "Käyrän ohje: >1,0 bar normaali, ≤1,0 bar matala, ≤0,5 bar kriittinen (diagnoosi ≥60 s yhtäjaksoisesti). Sallittu täyttö- ja käyttöpaine riippuu mallin ohjeesta ja järjestelmän korkeudesta; lukema yksin ei todista vuotoa tai vikaa."], // health_pressure
   ["Virtaus 60 s pumpun jälkeen", "Raja vaatii saman mallin/tilan/olosuhteet; ei nimellisarvo tai pienen virtauksen todiste."], // health_flow
   ["BUH/BSH ON-aika", "ei energiaa tai turhan lämmön todiste."], // health_heater
   ["5 kokeellista laskuria", "vertailukelpoiset nousut; aukot/reset pois. Vakaus ei sulje pois rajoitusta eikä todista syytä."], // health_retries

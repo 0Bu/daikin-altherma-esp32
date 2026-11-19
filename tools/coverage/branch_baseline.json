@@ -2090,14 +2090,33 @@
       "source_sha256": "8baa53489350455c43dfe3433b16d338b3b8202dc2542533639732f3cbdd2287",
       "test_source_sha256": "d69f30455e9878aef1545691f9922e7583220b4f653bc5fc5868f16bfe2edfa3",
       "validation_boundary": "Compilers exercised synthetic inputs. The result does not establish plant behavior."
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple Clang 17, arm64",
+        "gcc-13-linux-ubuntu24": "Ubuntu GCC 13.3, pinned ESP-IDF v6.1 Docker, aarch64",
+        "gcc-15-github-linux-ubuntu26": "Ubuntu GCC 15.2, Docker, x86-64",
+        "gcc-15-linux-ubuntu26": "Ubuntu GCC 15.2, Docker, aarch64"
+      },
+      "hosted_confirmation": "The x86-64 Ubuntu 26.04 container measures the hosted profile locally; authoritative GitHub CI confirmation remains separate.",
+      "runner": "scripts/run-mock-tests.sh --coverage on Darwin, ESP-IDF Docker, and Ubuntu 26.04 Coverage Docker",
+      "scope": "Confirmed two-tier 24h water-pressure diagnosis (min_bar_unix_s, 60 s confirmation, confirmed_critical, and history min_bar alignment). Every touched header improves its taken/outcome ratio across Clang 17, GCC 13, and GCC 15 while preserving all other headers and the 95-percent line floor.",
+      "sources": {
+        "main/logic/availability.hpp": "196e5e0ab9c12c42bc805b4271351aea1ebb03911ed76a90c8530e7c57e01550",
+        "main/logic/checkup.hpp": "c8483e956cb2417a923df52b45ae8284c02e6c7ba42e79fcc88ca7c7489cddb5",
+        "main/logic/history.hpp": "063030ee90bb065e5a0911119f55181e160c511c22f4d29edef7adb8466d4457",
+        "main/logic/history_persist.hpp": "384fd18cb31830da96ee0346b4febabbaac2b3d1ea80c4262557483d8b7856dc"
+      },
+      "test_source_sha256": "9d110a5b28f81c6b526447a4a97ae4aceb59489a00b6348a6f55354a8576fae9",
+      "validation_boundary": "Host and container compilers exercised synthetic inputs. Hardware and UI behavior remain separate evidence."
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
   "profiles": {
     "clang-17-darwin": {
       "main/logic/availability.hpp": {
-        "outcomes": 81,
-        "taken": 77
+        "outcomes": 87,
+        "taken": 83
       },
       "main/logic/binary_semantics.hpp": {
         "outcomes": 24,
@@ -2128,8 +2147,8 @@
         "taken": 6
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 1187,
-        "taken": 1114
+        "outcomes": 1231,
+        "taken": 1158
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 353,
@@ -2256,12 +2275,12 @@
         "taken": 14
       },
       "main/logic/history.hpp": {
-        "outcomes": 348,
-        "taken": 339
+        "outcomes": 356,
+        "taken": 347
       },
       "main/logic/history_persist.hpp": {
-        "outcomes": 531,
-        "taken": 476
+        "outcomes": 533,
+        "taken": 478
       },
       "main/logic/homehub_map.hpp": {
         "outcomes": 70,
@@ -2546,8 +2565,8 @@
     },
     "gcc-13-linux-ubuntu24": {
       "main/logic/availability.hpp": {
-        "outcomes": 87,
-        "taken": 85
+        "outcomes": 93,
+        "taken": 91
       },
       "main/logic/binary_semantics.hpp": {
         "outcomes": 24,
@@ -2578,8 +2597,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 1373,
-        "taken": 1279
+        "outcomes": 1417,
+        "taken": 1324
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 415,
@@ -2706,12 +2725,12 @@
         "taken": 16
       },
       "main/logic/history.hpp": {
-        "outcomes": 416,
-        "taken": 410
+        "outcomes": 426,
+        "taken": 420
       },
       "main/logic/history_persist.hpp": {
-        "outcomes": 620,
-        "taken": 559
+        "outcomes": 622,
+        "taken": 561
       },
       "main/logic/homehub_map.hpp": {
         "outcomes": 78,
@@ -2996,8 +3015,8 @@
     },
     "gcc-15-github-linux-ubuntu26": {
       "main/logic/availability.hpp": {
-        "outcomes": 87,
-        "taken": 85
+        "outcomes": 93,
+        "taken": 91
       },
       "main/logic/binary_semantics.hpp": {
         "outcomes": 24,
@@ -3028,8 +3047,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 1373,
-        "taken": 1279
+        "outcomes": 1417,
+        "taken": 1324
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 415,
@@ -3156,12 +3175,12 @@
         "taken": 16
       },
       "main/logic/history.hpp": {
-        "outcomes": 414,
-        "taken": 408
+        "outcomes": 424,
+        "taken": 418
       },
       "main/logic/history_persist.hpp": {
-        "outcomes": 618,
-        "taken": 557
+        "outcomes": 620,
+        "taken": 559
       },
       "main/logic/homehub_map.hpp": {
         "outcomes": 78,
@@ -3446,8 +3465,8 @@
     },
     "gcc-15-linux-ubuntu26": {
       "main/logic/availability.hpp": {
-        "outcomes": 87,
-        "taken": 85
+        "outcomes": 93,
+        "taken": 91
       },
       "main/logic/binary_semantics.hpp": {
         "outcomes": 24,
@@ -3478,8 +3497,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 1373,
-        "taken": 1279
+        "outcomes": 1417,
+        "taken": 1324
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 415,
@@ -3606,12 +3625,12 @@
         "taken": 16
       },
       "main/logic/history.hpp": {
-        "outcomes": 414,
-        "taken": 408
+        "outcomes": 424,
+        "taken": 418
       },
       "main/logic/history_persist.hpp": {
-        "outcomes": 618,
-        "taken": 557
+        "outcomes": 620,
+        "taken": 559
       },
       "main/logic/homehub_map.hpp": {
         "outcomes": 78,

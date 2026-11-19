@@ -1313,8 +1313,20 @@ async function assertPlantDiagnosis(page, context) {
   // Exercise the shipped renderer with independently scoped observations, including a real zero,
   // an absent heater channel and stale-source evidence. These fixtures do not certify a plant.
   await page.evaluate(`(() => {
-    window.__browserDiagnosisOriginal = { status: S.status, open: new Set(S.descOpen), card: S.dashboardCard };
+    window.__browserDiagnosisOriginal = {
+      status: S.status, open: new Set(S.descOpen), card: S.dashboardCard,
+      hist: new Map(S.hist), histPin: new Map(S.histPin),
+      histHidden: new Map(S.histHidden), histEpoch: S.histEpoch,
+      histIdentity: S.histIdentity, histUptime: S.histUptime,
+    };
     S.status = structuredClone(S.status);
+    S.status.history = {
+      ...(S.status.history || {}),
+      rows: [
+        ...((S.status.history?.rows || []).filter(row => row.id !== "water_pressure")),
+        { id: "water_pressure", label: "Water Pressure" },
+      ],
+    };
     S.status.refrigerant_service = {
       state: 'limited', continuous_s: 75, samples: 4, blocker: null,
       special_phases_known: false, limitations: ['pressure_sides_incomplete'],
@@ -1361,9 +1373,9 @@ async function assertPlantDiagnosis(page, context) {
           reason: "defrost_events_insufficient", count: 1, paired_count: 1,
           share_pct: null, defrost_s: 30, run_s: 7200,
           last_observed_start: { unix_s: null, route: "dhw_route", outdoor_c: 0 } },
-        { id: "pressure", verdict: "info", evidence: "heuristic", min_bar: 0,
-          current_bar: 1.5, min_unix_s: 1791871200, confirmed_low: false,
-          observed_s: 77760, required_s: 77760 },
+        { id: "pressure", verdict: "info", evidence: "heuristic", min_bar: 0.8,
+          current_bar: 1.5, min_unix_s: 1791871200, confirmed_low: true,
+          confirmed_critical: false, observed_s: 77760, required_s: 77760 },
         { id: "flow", verdict: "ok", evidence: "observation", min_l_min: 10.7,
           observed_s: 60, required_s: 0 },
         { id: "heater", verdict: "ok", evidence: "observation", buh_s: 43200,
@@ -1373,6 +1385,12 @@ async function assertPlantDiagnosis(page, context) {
           observed_s: 7200, required_s: 0 }
       ]
     };
+    S.status.diagnostics = { ...(S.status.diagnostics || {}), enabled: true };
+    syncHistSources();
+    S.hist.set("water_pressure", {
+      at: Date.now(), receivedAt: Date.now(), gen: 1, dt: 300, unit: "bar", b0: 280,
+      t0: 1791868800, held: [], v: [15, 15, 12, 9, 4, 8, 15, 15],
+    });
     S.descOpen.clear();
     renderApp();
     return true;
@@ -1389,6 +1407,7 @@ async function assertPlantDiagnosis(page, context) {
       window.__browserDiagnosisSummaryOriginal = S.status.health.checks;
       S.status.health.checks = structuredClone(S.status.health.checks);
       S.status.health.checks[0].active = null;
+      Object.assign(S.status.health.checks[4], { verdict: "warn", min_bar: 0.4, confirmed_critical: true });
       Object.assign(S.status.health.checks[6], { buh_s: 59, bsh_s: null, bsh_observed_s: 0 });
       Object.assign(S.status.health.checks[7], { verdict: "ok", seen: 0 });
       renderApp();
@@ -1421,12 +1440,33 @@ async function assertPlantDiagnosis(page, context) {
     assert.equal(blocks.length, 9, `${context}: include the independent refrigerant observation`);
     const normalLabel = await page.evaluate("t('normal.label')");
     for (const block of blocks) {
-      if (block.id === "model:health_cycling") continue;
+      if (block.id === "model:health_cycling" || block.id === "model:health_pressure") continue;
       assert.equal(block.count, 3, `${context}/${block.id}: exactly three blocks`);
       assert.equal(block.firstValue, 'vdesc-n', `${context}/${block.id}: value first`);
       assert.equal(block.normal, normalLabel, `${context}/${block.id}: Normal last`);
       assert.ok(block.text.every(text => text.trim()), `${context}/${block.id}: no empty block`);
     }
+    const pressureExpanded = await page.evaluate(`(() => {
+      const row = document.querySelector("[data-desc='model:health_pressure']").closest(".vitem");
+      const body = row.querySelector(".vdesc-body");
+      return {
+        count: body.children.length,
+        firstIsChart: body.children[0]?.hasAttribute("data-chart"),
+        hasPlot: !!body.children[0]?.querySelector(".vhist svg"),
+        hasLowThresh: !!body.children[0]?.querySelector(".vhist-thresh.low"),
+        hasCritThresh: !!body.children[0]?.querySelector(".vhist-thresh.crit"),
+        hasWarnCurve: !!body.children[0]?.querySelector(".vhist-line.warn"),
+        hasErrCurve: !!body.children[0]?.querySelector(".vhist-line.err"),
+        hasLowLegend: !!body.children[0]?.querySelector(".vhist-legend-low"),
+        hasCritLegend: !!body.children[0]?.querySelector(".vhist-legend-crit"),
+        secondNormal: body.children[1]?.querySelector(".vdesc-n")?.innerText,
+      };
+    })()`);
+    assert.deepEqual(pressureExpanded, {
+      count: 2, firstIsChart: true, hasPlot: true,
+      hasLowThresh: true, hasCritThresh: true, hasWarnCurve: true, hasErrCurve: true,
+      hasLowLegend: true, hasCritLegend: true, secondNormal: normalLabel,
+    }, `${context}/model:health_pressure: graph first with Low/Critical thresholds and only Normal below`);
     const cyclingDetail = () => page.evaluate(`(() => {
       const row = document.querySelector("[data-desc='model:health_cycling']").closest(".vitem");
       const body = row.querySelector(".vdesc-body");
@@ -1579,11 +1619,14 @@ async function assertPlantDiagnosis(page, context) {
     await page.evaluate(`(() => {
       S.status.health = {
         status: 'collecting', full_span: false, span_s: 900,
-        source_fresh: true, source_age_s: 1, available: 2, assessable: 1, evaluated: 0,
+        source_fresh: true, source_age_s: 1, available: 3, assessable: 1, evaluated: 0,
         checks: [
+          { id: 'defrost', verdict: 'collecting', evidence: 'observation', reason: 'day_incomplete',
+            count: 0, paired_count: 0, share_pct: null, defrost_s: 0, run_s: 900,
+            observed_s: 900, required_s: 0 },
           { id: 'pressure', verdict: 'collecting', evidence: 'heuristic', reason: 'input_coverage',
             min_bar: 1.5, current_bar: 1.5, min_unix_s: 1791871200, confirmed_low: false,
-            observed_s: 900, required_s: 77760 },
+            confirmed_critical: false, observed_s: 900, required_s: 77760 },
           { id: 'flow', verdict: 'collecting', evidence: 'observation', reason: 'input_coverage',
             min_l_min: null, observed_s: 0, required_s: 0 }
         ]
@@ -1595,12 +1638,16 @@ async function assertPlantDiagnosis(page, context) {
     assertLayout(await page.evaluate(layoutAudit), `${context}/flow-waiting`);
     await assertAccessibility(page, `${context}/flow-waiting`, { nativeTree: true });
     const missingDay = await page.evaluate("t('check.detail.horizon_wait', '23 h 45 min')");
+    const defrostDetail = await page.evaluate(`document.querySelector("[data-desc='model:health_defrost']")
+      .closest('.vitem').innerText`);
     const pressureDetail = await page.evaluate(`document.querySelector("[data-desc='model:health_pressure']")
       .closest('.vitem').innerText`);
     const flowDetail = await page.evaluate(`document.querySelector("[data-desc='model:health_flow']")
       .closest('.vitem').innerText`);
-    assert.ok(pressureDetail.includes(missingDay),
-      `${context}: collecting pressure must retain its missing-day explanation`);
+    assert.ok(defrostDetail.includes(missingDay),
+      `${context}: collecting daily check must retain its missing-day explanation`);
+    assert.ok(!pressureDetail.includes(missingDay),
+      `${context}: collecting graph-first pressure keeps detail free of missing-day prose`);
     assert.ok(!flowDetail.includes(missingDay),
       `${context}: collecting flow must not require a full day`);
     assert.ok(flowDetail.includes(await page.evaluate("t('check.detail.period_label') + ' 15 min'")),
@@ -1615,6 +1662,12 @@ async function assertPlantDiagnosis(page, context) {
       S.status = window.__browserDiagnosisOriginal.status;
       S.descOpen = window.__browserDiagnosisOriginal.open;
       S.dashboardCard = window.__browserDiagnosisOriginal.card;
+      S.hist = window.__browserDiagnosisOriginal.hist;
+      S.histPin = window.__browserDiagnosisOriginal.histPin;
+      S.histHidden = window.__browserDiagnosisOriginal.histHidden;
+      S.histEpoch = window.__browserDiagnosisOriginal.histEpoch;
+      S.histIdentity = window.__browserDiagnosisOriginal.histIdentity;
+      S.histUptime = window.__browserDiagnosisOriginal.histUptime;
       delete window.__browserDiagnosisOriginal;
       renderApp();
       return true;

@@ -607,6 +607,9 @@ static void setup_populated() {
         adapter::page_lengths[reg] = 40;
     }
     adapter::pages[0x30][0] = 42;
+    adapter::pages[0x60][0] = 0x10; // Data Enable/Disable
+    adapter::pages[0x61][0] = 0x80; // Data Enable/Disable
+    adapter::pages[0x62][0] = 0x80; // Data Enable/Disable
     put16(0x20, 10, 0); // actual liquid row: exactly zero.
     put16(0x62, 15, pressure_for(49.0));
     const auto& profile = daik::def::lookup(adapter::cfg.profile.c_str());

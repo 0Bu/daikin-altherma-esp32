@@ -680,17 +680,52 @@ const HIST_W = 320, HIST_H = 72;
 // in one would leave the crosshair marker sitting off the line it is pointing at, and the drawing
 // would still look perfectly plausible. Returns the mapping, not the numbers, so no caller can
 // re-derive it slightly differently.
-function histScale(pts, sampleCount) {
+function histScale(pts, sampleCount, id = "") {
   const real = pts.filter((x) => x != null);
   const lo = Math.min(...real), hi = Math.max(...real);
+  const isPressure = id === "water_pressure";
   const pad = (hi - lo) < 1 ? 1 : (hi - lo) * 0.12;   // a flat series gets a band, not a divide-by-zero
-  const y0 = lo - pad, y1 = hi + pad;
+  const y0 = isPressure ? Math.min(0, lo - pad) : lo - pad;
+  const y1 = isPressure ? Math.max(2.2, hi + Math.max(0.25, hi * 0.12)) : hi + pad;
   const n = sampleCount || pts.length;
   return {
     lo, hi,
     X: (i) => (n === 1 ? HIST_W : (i * HIST_W) / (n - 1)),
     Y: (v) => HIST_H - ((v - y0) / (y1 - y0)) * HIST_H,
   };
+}
+
+const PRESSURE_LOW_BAR = 1.0;
+const PRESSURE_CRIT_BAR = 0.5;
+function pressureZoneClass(v) {
+  return v <= PRESSURE_CRIT_BAR ? " err" : v <= PRESSURE_LOW_BAR ? " warn" : "";
+}
+function pressureSplitRun(run, pts, X, Y) {
+  const out = [];
+  const pushSeg = (zone, x0, y0, x1, y1) => {
+    const prev = out[out.length - 1];
+    if (prev && prev.zone === zone) prev.pts.push([x1, y1]);
+    else out.push({ zone, pts: [[x0, y0], [x1, y1]] });
+  };
+  for (let k = 0; k < run.length - 1; k++) {
+    const i0 = run[k], i1 = run[k + 1];
+    const x0 = X(i0), v0 = pts[i0], x1 = X(i1), v1 = pts[i1];
+    const cuts = [];
+    for (const thr of [PRESSURE_LOW_BAR, PRESSURE_CRIT_BAR]) {
+      if ((v0 > thr && v1 < thr) || (v0 < thr && v1 > thr)) {
+        const frac = (thr - v0) / (v1 - v0);
+        cuts.push([frac, x0 + frac * (x1 - x0), thr]);
+      }
+    }
+    cuts.sort((a, b) => a[0] - b[0]);
+    let px = x0, pv = v0;
+    for (const [, cx, cv] of cuts) {
+      pushSeg(pressureZoneClass((pv + cv) / 2), px, Y(pv), cx, Y(cv));
+      px = cx; pv = cv;
+    }
+    pushSeg(pressureZoneClass((pv + v1) / 2), px, Y(pv), x1, Y(v1));
+  }
+  return out;
 }
 
 const ENV3_COMBINED_ID = "env3_combined";
@@ -1509,7 +1544,8 @@ function histHtml(id, unit, name, source = "", identifySource = false) {
   // grows with the board; after that every source remains a rolling day. A source that started or
   // changed later contributes explicit null gaps, never a shorter axis or fabricated flat data.
   const full  = n * view.dt >= 23.5 * 3600;
-  const { lo, hi, X, Y } = histScale(allPts, n);
+  const { lo, hi, X, Y } = histScale(allPts, n, id);
+  const isPressure = id === "water_pressure";
 
   // Contiguous runs only: each becomes one light area with its darker upper-edge line, so every
   // numeric trend uses the same visual grammar while a gap remains a real gap. Multiple sources use
@@ -1519,11 +1555,19 @@ function histHtml(id, unit, name, source = "", identifySource = false) {
   for (const s of histVisibleSeries(view)) {
     const pts = s.v.map((x) => x == null ? null : x / 10);
     const sourceCls = histSourceClass(s.source);
+    const splitZones = isPressure && s.source === "x10a";
     let run = [];
     const flush = () => {
       if (!run.length) return;
       if (run.length === 1) {
-        dots += `<circle class="vhist-pt${sourceCls}" cx="${X(run[0]).toFixed(1)}" cy="${Y(pts[run[0]]).toFixed(1)}" r="1.6"/>`;
+        const zoneCls = splitZones ? pressureZoneClass(pts[run[0]]) : "";
+        dots += `<circle class="vhist-pt${sourceCls}${zoneCls}" cx="${X(run[0]).toFixed(1)}" cy="${Y(pts[run[0]]).toFixed(1)}" r="1.6"/>`;
+      } else if (splitZones) {
+        for (const seg of pressureSplitRun(run, pts, X, Y)) {
+          const d = seg.pts.map(([px, py], k) => `${k ? "L" : "M"}${px.toFixed(1)} ${py.toFixed(1)}`).join("");
+          line += `<path class="vhist-line${sourceCls}${seg.zone}" d="${d}" vector-effect="non-scaling-stroke"/>`;
+          area += `<path class="vhist-area${sourceCls}${seg.zone}" d="${d}L${seg.pts[seg.pts.length - 1][0].toFixed(1)} ${HIST_H}L${seg.pts[0][0].toFixed(1)} ${HIST_H}Z"/>`;
+        }
       } else {
         const d = run.map((i, k) => `${k ? "L" : "M"}${X(i).toFixed(1)} ${Y(pts[i]).toFixed(1)}`).join("");
         line += `<path class="vhist-line${sourceCls}" d="${d}" vector-effect="non-scaling-stroke"/>`;
@@ -1541,13 +1585,16 @@ function histHtml(id, unit, name, source = "", identifySource = false) {
   // scale exactly, and stays right whatever width the panel ends up at.
   const nowDots = view.series.map((s) => {
     if (!histVisibleSeries(view).includes(s)) return "";
+    const splitZones = isPressure && s.source === "x10a";
     if (s.raw.refreshFailed || s.raw.aged) {
       const last = lastSample(s.v);
-      return last < 0 ? "" : histRetainedMarker(s, X(last) / HIST_W, histSourceClass(s.source),
+      const zoneCls = splitZones && last >= 0 ? pressureZoneClass(s.v[last] / 10) : "";
+      return last < 0 ? "" : histRetainedMarker(s, X(last) / HIST_W, histSourceClass(s.source) + zoneCls,
         (Y(s.v[last] / 10) / HIST_H) * 100);
     }
     const last = s.v[n - 1];
-    return last == null ? "" : `<span class="vhist-now${histSourceClass(s.source)}"` +
+    const zoneCls = splitZones && last != null ? pressureZoneClass(last / 10) : "";
+    return last == null ? "" : `<span class="vhist-now${histSourceClass(s.source)}${zoneCls}"` +
       ` style="top:${((Y(last / 10) / HIST_H) * 100).toFixed(2)}%"></span>`;
   }).join("");
   const shownUnit = view.unit || unit;
@@ -1570,16 +1617,36 @@ function histHtml(id, unit, name, source = "", identifySource = false) {
     const frac = scrubFrac(pi, n);
     const px = (frac * 100).toFixed(3);
     pinCross = `<span class="vhist-cross vhist-pinned" style="left:${px}%"></span>`;
-    pinMarks = histVisibleSeries(view).map((s) => s.v[pi] == null ? ""
-      : `<span class="vhist-mark vhist-pinned${histSourceClass(s.source)}"` +
-        ` style="left:${px}%;top:${((Y(s.v[pi] / 10) / HIST_H) * 100).toFixed(2)}%"></span>`).join("");
+    pinMarks = histVisibleSeries(view).map((s) => {
+      if (s.v[pi] == null) return "";
+      const zoneCls = isPressure && s.source === "x10a" ? pressureZoneClass(s.v[pi] / 10) : "";
+      return `<span class="vhist-mark vhist-pinned${histSourceClass(s.source)}${zoneCls}"` +
+        ` style="left:${px}%;top:${((Y(s.v[pi] / 10) / HIST_H) * 100).toFixed(2)}%"></span>`;
+    }).join("");
   }
   const aux = id === "dhw_tank" ? dhwAuxPhases(view) : [];
-  let phaseBands = "";
+  let phaseBands = "", threshSvg = "", threshHtml = "";
+  if (isPressure) {
+    const yLow = Y(PRESSURE_LOW_BAR), yCrit = Y(PRESSURE_CRIT_BAR);
+    threshSvg =
+      `<rect class="vhist-band vhist-band-low" x="0" y="${yLow.toFixed(1)}" width="${HIST_W}" height="${Math.max(0, yCrit - yLow).toFixed(1)}"/>` +
+      `<rect class="vhist-band vhist-band-crit" x="0" y="${yCrit.toFixed(1)}" width="${HIST_W}" height="${Math.max(0, HIST_H - yCrit).toFixed(1)}"/>` +
+      `<line class="vhist-thresh low" x1="0" y1="${yLow.toFixed(1)}" x2="${HIST_W}" y2="${yLow.toFixed(1)}" vector-effect="non-scaling-stroke"/>` +
+      `<line class="vhist-thresh crit" x1="0" y1="${yCrit.toFixed(1)}" x2="${HIST_W}" y2="${yCrit.toFixed(1)}" vector-effect="non-scaling-stroke"/>`;
+    threshHtml =
+      `<span class="vhist-thresh-label low mono num" style="top:${((yLow / HIST_H) * 100).toFixed(2)}%" aria-hidden="true">${esc(histFmt1(PRESSURE_LOW_BAR))} bar</span>` +
+      `<span class="vhist-thresh-label crit mono num" style="top:${((yCrit / HIST_H) * 100).toFixed(2)}%" aria-hidden="true">${esc(histFmt1(PRESSURE_CRIT_BAR))} bar</span>`;
+  }
   const legendItems = (identifySource || view.series.length > 1 ||
     ["modbus", "room"].includes(view.series[0].source))
     ? view.series.map((s) => histLegendHtml(view, s, histSourceClass(s.source)))
     : [];
+  if (isPressure) {
+    legendItems.push(
+      `<span class="vhist-source vhist-legend-low"><i></i>${esc(t("check.detail.current_label"))}</span>`,
+      `<span class="vhist-source vhist-legend-crit"><i></i>${esc(t("check.detail.minimum_time_label"))}</span>`,
+    );
+  }
   if (aux.length) {
     const toRuns = (flags) => {
       const out = [];
@@ -1629,8 +1696,8 @@ function histHtml(id, unit, name, source = "", identifySource = false) {
       histTipsHtml(view, pi, pi >= 0 ? scrubFrac(pi, n) : 0, aux) +
       `<div class="vhist-plot" data-hist="${esc(id)}"${sourceAttr}${histRevision(view)} data-n="${n}" tabindex="0" role="img"` +
         ` aria-label="${esc(t(pi >= 0 ? "hist.aria_pinned" : "hist.aria", chartName || id, pi >= 0 ? scrubText(view, pi, true, aux) : ""))}">` +
-        `<svg viewBox="0 0 ${HIST_W} ${HIST_H}" preserveAspectRatio="none" aria-hidden="true">${phaseBands}${area}${line}${dots}</svg>` +
-        nowDots + pinCross + pinMarks +
+        `<svg viewBox="0 0 ${HIST_W} ${HIST_H}" preserveAspectRatio="none" aria-hidden="true">${threshSvg}${phaseBands}${area}${line}${dots}</svg>` +
+        threshHtml + nowDots + pinCross + pinMarks +
         `<span class="vhist-cross vhist-live" hidden></span>` +
         view.series.map((s) => `<span class="vhist-mark vhist-live${histSourceClass(s.source)}" data-source="${s.source}" hidden></span>`).join("") +
       `</div>` + histTimesHtml(view, pi, pi >= 0 ? scrubFrac(pi, n) : 0) +
@@ -2118,7 +2185,16 @@ function numericTipEntries(h, i, aux) {
         dhwPhaseVisible(h, phase.source) &&
         alignAuxSample(h, h.tankAux[j], i, phase.source) === phase.active)).map(dhwPhaseLabel)
     : [];
-  return { multi: visible.length > 1, rows, note: active.join(" + ") };
+  let pressureNote = "";
+  if (h.id === "water_pressure") {
+    const x10a = visible.find((s) => s.source === "x10a");
+    const pv = x10a?.v?.[i];
+    if (pv != null) {
+      if (pv <= PRESSURE_CRIT_BAR * 10) pressureNote = t("check.detail.pressure.warn");
+      else if (pv <= PRESSURE_LOW_BAR * 10) pressureNote = t("check.detail.pressure.info");
+    }
+  }
+  return { multi: visible.length > 1, rows, note: pressureNote || active.join(" + ") };
 }
 
 // Accessibility keeps time and readings together. Visible numeric bubbles omit the selected time;
@@ -2240,7 +2316,7 @@ function scrubMove(plot, i) {
   // marker, never the other one.
   const separateScales = env3ChartId(h.id);
   const allPts = h.series.flatMap((s) => s.v.map((z) => z == null ? null : z / 10));
-  const sharedY = separateScales ? null : histScale(allPts, n).Y;
+  const sharedY = separateScales ? null : histScale(allPts, n, h.id).Y;
   for (const mark of marks) {
     const s = h.series.find((q) => q.source === mark.dataset.source);
     const v = s ? s.v[i] : null;
@@ -2248,6 +2324,9 @@ function scrubMove(plot, i) {
     const spec = forecast && WEATHER_FORECAST_SERIES.find((item) => item.measured === s.source);
     const Y = spec ? forecast.scales[spec.key] : separateScales
       ? histScale(s.v.map(z => z == null ? null : z / 10), n).Y : sharedY;
+    const zone = h.id === "water_pressure" && s.source === "x10a" ? pressureZoneClass(v / 10) : "";
+    mark.classList.toggle("warn", zone === " warn");
+    mark.classList.toggle("err", zone === " err");
     mark.hidden = false;
     mark.style.left = x.toFixed(1) + "px";
     mark.style.top = ((Y(v / 10) / HIST_H) * 100).toFixed(2) + "%";
@@ -2640,11 +2719,14 @@ function displayHomeHubLabel(row) {
 // id is derived ONCE (here, where the body was built) instead of again from the key — which for a
 // board row is not a catalog label and could not be looked up at all.
 function descAccordion(key, label, valHtml, cls, bodyHtml, trendId, unit = "", paused,
-                       renderHistory = histHtml) {
+                       renderHistory = histHtml, chartFirst = false) {
   const open = S.descOpen.has(key);
   const visible = !paused && !(paused === false && S.stage === "settings");
   const chart = open && trendId && visible ? renderHistory(trendId, unit, label) : "";
-  if (trendId) bodyHtml += `<div data-chart="${open && !visible ? 1 : ""}" data-epoch="${S.histEpoch || 0}">${chart}</div>`;
+  const chartHtml = trendId
+    ? `<div data-chart="${open && !visible ? 1 : ""}" data-epoch="${S.histEpoch || 0}">${chart}</div>`
+    : "";
+  const innerBody = chartFirst ? (chartHtml + bodyHtml) : (bodyHtml + chartHtml);
   const diagnosisLabel = key.startsWith("model:health_") || key === "service:refrigerant";
   return `<div class="vitem${open ? " open" : ""}">` +
     `<button class="vrow vrow-desc" type="button" data-desc="${esc(key)}"` +
@@ -2652,7 +2734,7 @@ function descAccordion(key, label, valHtml, cls, bodyHtml, trendId, unit = "", p
     `<span class="vrow-label"${diagnosisLabel ? ` title="${esc(label)}"` : ""}>${esc(label)}</span>` +
     `<span class="vrow-end"><span class="vrow-val ${cls}">${valHtml}</span>${chevIcon}</span>` +
     `</button>` +
-    `<div class="vdesc"><div class="vdesc-inner"><div class="vdesc-body">${bodyHtml}</div></div></div>` +
+    `<div class="vdesc"><div class="vdesc-inner"><div class="vdesc-body">${innerBody}</div></div></div>` +
     `</div>`;
 }
 
@@ -2765,8 +2847,8 @@ const MODEL_DESCRIPTIONS = {
     what: "Defrost starts and their share of compressor runtime with readable compressor and defrost states.",
     normal: "Project hint: ≥3 paired events and >15%. Humidity and whole-coil temperature are unavailable; no Daikin fault limit." },
   health_pressure: {
-    what: "Lowest recorded water pressure.",
-    normal: "Project rule: ≤1.0 bar gives NOTE; 60 continuously observed seconds gives WARNING. This common threshold is not verified for every model; its exact manual applies." },
+    what: "24-hour water-pressure curve in the sealed hydronic circuit (X10A, 5-minute minimums).",
+    normal: "Chart guide: >1.0 bar normal, ≤1.0 bar low, ≤0.5 bar critical (diagnosis flags ≥60 continuous seconds). Permitted filling and operating pressure depends on the exact unit manual and system height; the reading alone does not identify leaks, air or vessel faults." },
   health_flow: {
     what: "Lowest flow after 60 continuously observed seconds of internal pump operation.",
     normal: "No universal normal value. Not nominal flow or proof of part load. Manual limits need the same model, mode and conditions; the value alone cannot establish insufficient flow." },
@@ -2815,10 +2897,12 @@ function modelDescRow(id, label, value, opt = {}) {
   const d = MODEL_DESCRIPTIONS[id];
   if (!d) return vrow(label, value, opt);
   const val = esc(value) + (opt.unit ? `<span class="vrow-unit">${esc(opt.unit)}</span>` : "");
-  // No trend half here: the firmware keeps series for catalog readings, and these rows are model
-  // identity — a nameplate fact, not something that moves.
+  // No trend half here unless a check explicitly passes a trend (such as health_pressure's X10A
+  // 24-hour water-pressure curve).
   return descAccordion(`model:${id}`, label, val, opt.cls || "",
-                       opt.bodyHtml ?? descBodyHtml(d, undefined, modelDescriptionCopy(id)));
+                       opt.bodyHtml ?? descBodyHtml(d, undefined, modelDescriptionCopy(id)),
+                       opt.trendId || "", opt.histUnit || "", opt.paused, opt.renderHistory,
+                       Boolean(opt.chartFirst));
 }
 
 // Toggle a value row's description accordion. Only the LIVE element is flipped here (so the CSS
@@ -2851,12 +2935,17 @@ function toggleDesc(btn) {
   // including a cache hit (ensureHistPair then returns without triggering a repaint).
   if (open && trend && !item.querySelector(".vhist")) {
     const body = item.querySelector("[data-chart]") || item.querySelector(".vdesc-body");
-    replaceHistoryHtml(body, body.innerHTML +
-      histHtml(trend, btn.dataset.unit || "", btn.querySelector(".vrow-label").textContent));
+    const chart = key === "model:health_pressure"
+      ? histHtml(trend, btn.dataset.unit || "", btn.querySelector(".vrow-label").textContent, "x10a", true)
+      : histHtml(trend, btn.dataset.unit || "", btn.querySelector(".vrow-label").textContent);
+    replaceHistoryHtml(body, body.innerHTML + chart);
   }
   // Fetch the trend only once the panel is actually opened — a device that buffers eleven series
   // would otherwise answer a request per row on every page load, for panels nobody looked at.
-  if (open && trend) ensureHistPair(trend);
+  if (open && trend) {
+    if (key === "model:health_pressure") ensureHist(trend, "x10a");
+    else ensureHistPair(trend);
+  }
 }
 
 // Heat-pump value groups (grouped by domain, §6) as card markup. Hidden entirely while the

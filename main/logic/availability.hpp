@@ -228,8 +228,29 @@ inline constexpr size_t A1_PRESENCE_BYTES = 10;
 inline constexpr size_t A0_PRESENCE_BYTES = 14;
 inline constexpr size_t A0_MPU_ID_OFFSET  = 10;  // two bytes
 inline constexpr size_t A0_FLAGS_OFFSET   = 12;  // two bytes
+// Hydronic pages 0x60..0x62 begin with Data Enable/Disable at offset 0 (docs/X10A_PROTOCOL.md §6)
+// and carry setpoints, thermistors, and the inverted pump signal (100 = stop). During an indoor
+// controller transient/re-init after a bus stall, these pages can answer with all-zero bytes where
+// Data Enable is 0 and every setpoint/sensor reads 0. Require the full core row span across all
+// 45 shipped Protocol-I profiles before classifying an all-zero payload as absent; a genuinely
+// depressurized plant reading 0.0 bar at 0x62/11 still reports Data Enable, setpoints, or pump
+// signal = 100 and fails open cleanly.
+inline constexpr size_t HYDRONIC_60_PRESENCE_BYTES = 11;
+inline constexpr size_t HYDRONIC_61_PRESENCE_BYTES = 12;
+inline constexpr size_t HYDRONIC_62_PRESENCE_BYTES = 13;
 
 inline constexpr PageAbsenceRule PAGE_ABSENCE_RULES[] = {
+    // 0x60..0x62 — hydronic pages answering all-zero while Data Enable/Disable is 0.
+    {0x60, PageAbsence::AllBytesZero, HYDRONIC_60_PRESENCE_BYTES,
+     "X10A §6: all-zero 0x60 reply (Data Enable/Disable 0, setpoints/capacity zero) is "
+     "uninitialized"},
+    {0x61, PageAbsence::AllBytesZero, HYDRONIC_61_PRESENCE_BYTES,
+     "X10A §6: all-zero 0x61 reply (Data Enable/Disable 0, all core thermistors zero) is "
+     "uninitialized"},
+    {0x62, PageAbsence::AllBytesZero, HYDRONIC_62_PRESENCE_BYTES,
+     "X10A §6: all-zero 0x62 reply (Data Enable/Disable 0, setpoints and pump signal zero) is "
+     "uninitialized"},
+
     // 0xA1 — the second-outdoor-unit water-HX page, not four independent primary-unit thermistors.
     // On the legacy-209 reference installation the complete reply is 16 zero bytes, including the
     // unit-family setting flags at byte 9, through a real DHW compressor cycle. That complete-page
@@ -282,9 +303,18 @@ inline constexpr bool page_absent(uint8_t reg, const uint8_t* page, size_t page_
                 if (page[i] != 0) return false;
             }
             return true;
-        case PageAbsence::UnidentifiedUnit:
+        case PageAbsence::UnidentifiedUnit: {
+            bool all_zero = true;
+            for (size_t i = 0; i < page_len; i++) {
+                if (page[i] != 0) {
+                    all_zero = false;
+                    break;
+                }
+            }
+            if (all_zero) return true;
             return page[A0_MPU_ID_OFFSET] == 0xFF && page[A0_MPU_ID_OFFSET + 1] == 0xFF &&
                    page[A0_FLAGS_OFFSET] == 0x00 && page[A0_FLAGS_OFFSET + 1] == 0x00;
+        }
     }
     return false;
 }

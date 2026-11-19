@@ -180,8 +180,8 @@ bool net_eth_probe() {
     // Refuse rather than fight. The reservation is built from the LIVE config, so a user who has
     // put X10A on the header pins (or an ENV III, or the indicator) simply has no Ethernet — and
     // keeps a service bus nobody clocked a chip-select onto. See net_eth_probe_allowed().
-    const Config& c = config();
-    const ReservedPins in_use = config_reserved_pins(c).plus(config_link_pins(c));
+    const ReservedPins in_use = with_config(
+        [](const Config& c) { return config_reserved_pins(c).plus(config_link_pins(c)); });
     if (!net_eth_probe_allowed(pins, in_use)) {
         // The configured pins: the X10A link, the sensor and the indicator.
         diag_printf("net: not probing for Ethernet — GPIO%d/%d/%d/%d overlap configured pins\n",

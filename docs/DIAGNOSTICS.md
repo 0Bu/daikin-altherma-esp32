@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: 1b197428300cfa6b1de1289098a3a694d05fb3be5c2e2d9de2c8c9a79756d39f -->
+<!-- user-docs-contract: 164b0c9111ef09cb53da5df799d95a937b3a18e23bc58565e44a940e61a7dc7f -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default (`Off`). Under **Settings → Firmware**, choose **X10A** or **Modbus** for
@@ -172,19 +172,22 @@ water flow and tank charging require separate evidence.
 **Evidence and limits:** [Defrost events](DIAGNOSTIC_EVIDENCE.md#diagnosis-defrost)
 
 <!-- user-docs: health_pressure -->
-### Lowest water pressure
+### Water pressure
 
-**In plain language:** The board reports the lowest accepted pressure, its time when the clock was
-synchronized, and the current pressure if the latest observation supplied it.
+**In plain language:** The card plots the 24-hour X10A water-pressure history using 5-minute
+minimums, alongside the live pressure when fresh or the confirmed Low / Critical state.
 
-**Meaning:** An accepted minimum at or below **1.0 bar** produces **NOTE**. At least **60 continuously
-observed seconds** at or below that boundary produce **WARNING**. This is a common project boundary and filter,
-not the complete permitted range for every Daikin model.
+**Meaning:** Readings above **1.0 bar** are shown as normal. At least **60 continuously observed
+seconds** at or below **1.0 bar** (`0.6–1.0 bar`) produce **NOTE** (*Low*), and at least
+**60 continuously observed seconds** at or below **0.5 bar** produce **WARNING** (*Critical*).
+Single unconfirmed dips do not trigger a diagnosis verdict, and all-zero uninitialized hydronic
+frames are withheld before caching, history, and diagnosis.
 
-**Important limit:** A stored zero remains an accepted reading requiring interpretation; it is not
-converted into missing data or proof of water loss. The stored timestamp does not retain the raw
-frame or establish sensor accuracy. Current pressure is absent when unreadable or stale; a current
-normal value does not erase an earlier low reading.
+**Important limit:** The **1.0 bar** and **0.5 bar** bands and 60-second confirmation are project
+diagnostic rules, not universal filling specifications; permitted pressure depends on the exact
+Daikin manual and building height. A confirmed low or zero reading does not by itself identify water
+loss, air, or a faulty sensor, and a later normal pressure does not erase an earlier confirmed drop
+within the 24-hour window.
 
 **Evidence and limits:** [Lowest water pressure](DIAGNOSTIC_EVIDENCE.md#diagnosis-pressure)
 

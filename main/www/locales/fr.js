@@ -1,4 +1,4 @@
-// translation-source: 3a15720127279ca3edda45e3c53255972178ba0299b2928ffe49177e6a324af5
+// translation-source: 42a4d77a832a12c84359f017fdcacdd939405dc965a062a922c2d18aafa2ff0e
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -175,7 +175,7 @@ I18N.fr = localeValues([
   /* check.dhw_loss */ "Refroidissement ECS",
   /* check.cycling */ "Démarrages compresseur",
   /* check.defrost */ "Dégivrages",
-  /* check.pressure */ "Pression d’eau min.",
+  /* check.pressure */ "Pression d’eau",
   /* check.flow */ "Débit min.",
   /* check.heater */ "Résistances",
   /* check.retries */ "Compteurs de protection",
@@ -286,14 +286,14 @@ I18N.fr = localeValues([
   /* check.defrost.last_start */ (date, route, outdoor) => `Dernier début de dégivrage observé · ${date} · Circuit ${route} · Air extérieur ${outdoor}`,
   /* check.defrost.route_space */ "Chauffage",
   /* check.defrost.route_dhw */ "Ballon d’eau chaude",
-  /* check.detail.pressure.info */ "Minimum mémorisé ≤1,0 bar ; 60 s continues non confirmées. Validité physique et cause inconnues.",
-  /* check.detail.pressure.warn */ "≥60 s continues ≤1,0 bar enregistrées ; pas la pression actuelle.",
-  /* check.detail.pressure.ok */ "Aucune pression admise ≤1,0 bar, seuil du projet.",
+  /* check.detail.pressure.info */ "Basse",
+  /* check.detail.pressure.warn */ "Critique",
+  /* check.detail.pressure.ok */ "Normale",
   /* check.detail.defrost_events_insufficient */ "Moins de trois dégivrages associés ; aucun verdict de part.",
   /* check.detail.source_stale */ "Pas de mesure X10A récente ; état actuel inconnu. Historique conservé.",
   /* check.detail.no_paired_runtime */ "Pas de durée lisible associée ; nombre seulement.",
-  /* check.detail.current_label */ "Pression d’eau actuelle :",
-  /* check.detail.minimum_time_label */ "Minimum enregistré le :",
+  /* check.detail.current_label */ "≤1,0 bar basse",
+  /* check.detail.minimum_time_label */ "≤0,5 bar critique",
   /* check.detail.coverage_missing */ (a) => `Temps lisible manquant : ${a} s.`,
   /* check.detail.channel_coverage */ (a, b) => `${a} : couverture ${b}`,
   /* check.summary.warnings */ (n) => `${n} ${n === 1 ? "avertissement" : "avertissements"}`,
@@ -1288,7 +1288,7 @@ MODEL_DESCRIPTION_I18N.fr = modelDescriptionValues([
   ["R5T : un point du ballon stratifié, pas une énergie.", "Indice interne ≥0,8 K/h sans indice pompe/puisage. Sans indice, un puisage reste possible ; 0 K/h n’exclut pas les pertes. Circulation ne prouve pas la cause."], // health_dhw_loss
   ["Des mesures manquantes peuvent laisser certains démarrages non comptés.", "Il n’existe pas de nombre normal fixe de démarrages. Avec suffisamment de données, ce contrôle considère qu’une durée moyenne d’au moins 10 minutes est suffisante pour les cycles de chauffage terminés."], // health_cycling
   ["Dégivrage ", "≥3 associés, >15% du temps de marche du compresseur si états compresseur et dégivrage lisibles. Règle interne, pas Daikin; humidité et température de toute la batterie absentes."], // health_defrost
-  ["Pression ", "règle interne commune ≤1,0 bar ; 60 s continues observées donnent ALERTE. Pas universelle ; manuel du modèle."], // health_pressure
+  ["Courbe 24 h de la pression d’eau du circuit hydraulique fermé (X10A, minimums sur 5 min).", "Repères sur la courbe : >1,0 bar normale, ≤1,0 bar basse, ≤0,5 bar critique (diagnostic dès 60 s continues). La pression de remplissage et de service admissible dépend du manuel exact de l’appareil et de la hauteur du réseau ; la mesure seule ne prouve ni fuite ni panne."], // health_pressure
   ["Débit après 60 s de pompe", "Seuil selon même modèle/mode/conditions ; pas nominal ni preuve de débit insuffisant."], // health_flow
   ["Temps ON de BUH/BSH ", "pas énergie ni preuve de chaleur inutile."], // health_heater
   ["5 compteurs expérimentaux ", "hausses comparables ; lacunes/reset ignorés. Stabilité n’exclut pas limitation ni ne prouve cause."], // health_retries

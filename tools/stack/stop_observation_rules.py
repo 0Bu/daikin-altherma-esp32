@@ -391,7 +391,7 @@ BODIES = {
     'main/mqtt_ha.cpp': {'publish_heartbeat': '2d659e33a6c5f8bb0f682c4e58bb4ea60b3ce259acef21a27ce6474bf452bacc', 'build_heartbeat_payload': 'bcbdd12bdf734031ae84a182ebd09b442c188881a447d75cf49cba28feb69253', 'mqtt_task': '3fe14df77e5c4d2d90a126b6c5c3219e0e3f489b88b3808a00d8f0f3baba3f9e'},
     'main/hp_poll.cpp': {'checkup_record_poll_gap': '5fb1fd43670b4b4daffd1b4a1cddd3864e7cae719cdcfc11f8d3dddeb9e4ef88', 'poll_task': '6b62392ac706f8b567314ec445351f53176d555843b62169a445ef072a2284e3', 'poll_once': 'acc039d8f0651a1583288a8c98d7014c37cc735dc3058d67bd630030b23b50ae', 'poll_detect': 'ffcdce0117bf432880af0af2f443d531ed82371213f96620e0d5a05be7b56ab6'},
     'main/http_config.cpp': {'read_config_document': '9b8505b7d63f7b8fc63f184a6f5311c77c0e7f56616c4669cc0008069c05a9ca', 'set_wifi': '8f7046c55714e87950573a89dd5ee9fee386b8fba832d667537fe04f3aef8ca9', 'parse_circulation_request': 'f62d40518fdda281234d009179430717ac4c0472c17f2678ac7d67088ec86092', 'set_weather': 'b7bcbccdb1c8f33bbcab2a400ac9aaf65e08c03ab4a681bbf523ab231073ec6c', 'set_board': '8602519fd7bbb0d74d54a5174cf9e89cd5c499aed46cb5bb3ff84595ed1a60e9', 'set_env3': '7adc71d21d348db03da175593d4a0823de6e70f69b670786054eb10dbe171816', 'set_hp': '37c87ccd750fc04e5f8e38890687105eb29569d2c4dcedb77d1b017144fbb6bc', 'set_diagnostics': '3a82b52ebb6e79effc9055fbd2e78f5a299c91391b1d904e43e22087d24823cc', 'do_detect': '22fd9b4a0da0665105a0dad61692cd77c29d2de6e42df36869d0c4e20ebe6b9c'},
-    'main/http_status.cpp': {'http_boot_id': '36ff733fcbab1b90e741d95d0cd9fc8018ab407e48b4c0fe0a9f05f36f9d7ae1', 'append_status_json': '6eee6b5eaac8cd0320f28ec09afc228189c4291bdaa360634ecff5e42adb9bd8', 'h_status': 'd06d3dc6e1be37c7bfa372a10f9e01f6b592ebe2fab4d0b9b74894d5c15c51b3', 'http_send_status_json': 'bd305a86cfd4ac55f17680e2c8e2c1fd0138ea46c58d726cc5a9815fe8d68b5c'},
+    'main/http_status.cpp': {'http_boot_id': '36ff733fcbab1b90e741d95d0cd9fc8018ab407e48b4c0fe0a9f05f36f9d7ae1', 'append_status_json': '5d101c9733700bd494c7c8868ec3079e21d94450c7bbfbc9bec8b9dd277cf081', 'h_status': 'd06d3dc6e1be37c7bfa372a10f9e01f6b592ebe2fab4d0b9b74894d5c15c51b3', 'http_send_status_json': 'bd305a86cfd4ac55f17680e2c8e2c1fd0138ea46c58d726cc5a9815fe8d68b5c'},
     'main/main.cpp': {'boot_sequence': 'aa41bfc816a6bc300ebd6c4c8275aa0d3b148a61cb9a15fec1d141634db6388f'},
     'main/mcp_server.cpp': {'mcp_post': '619f17e24a6be7f967676f27ac84c5441502958638b9fc1d96afc6b3d7d9ef84'},
     'main/logic/stop_context.hpp': {'stop_context_seal': '9a48078c736ae0ae40ffba75e832a62bb86fa7831b6bbff802145d35adef4cc2', 'stop_context_expire': '0c9ac2546bedbcfbb950421742594ac5b6d4813a27fc6a234fc7c5a547f0312a', 'stop_context_step': '1dcf7320eabb145af25dc8b04e307351d45f9ecfc161fda808227fc1e4a3c044'},
@@ -408,7 +408,7 @@ HEADERS = {
     'main/logic/heartbeat.hpp': '9be1025cdadaf0b6ceb2077c9e862708a5721611692b6fb1eeb29cce4d557c2a',
     'main/logic/instrument.hpp': 'd55abe4a7f5b1d99886a866780a50242dfebb03eec2b0d4fbd7e814f9fe4d232',
     'main/stop_observation_store.hpp': 'fbf3232aa5aa6e219464d0cbb0c7d4fba6a9246fcecf79e924298733c3f46af0',
-    'main/logic/history_persist.hpp': '6382d93290074fadd313e5a61c8188cbc0ffcae82e1c31b14b4ff3ba208a648c',
+    'main/logic/history_persist.hpp': 'faea6a959b422006737258ced68a5b3216387a4d7c737bef0aa3a05976bbc8f5',
 }
 
 CALLERS = {

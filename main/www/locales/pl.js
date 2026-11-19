@@ -1,4 +1,4 @@
-// translation-source: 3a15720127279ca3edda45e3c53255972178ba0299b2928ffe49177e6a324af5
+// translation-source: 42a4d77a832a12c84359f017fdcacdd939405dc965a062a922c2d18aafa2ff0e
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -180,7 +180,7 @@ I18N.pl = localeValues([
   /* check.dhw_loss */ "Wychładzanie CWU",
   /* check.cycling */ "Starty sprężarki",
   /* check.defrost */ "Odszraniania",
-  /* check.pressure */ "Min. ciśnienie wody",
+  /* check.pressure */ "Ciśnienie wody",
   /* check.flow */ "Min. przepływ",
   /* check.heater */ "Grzałki",
   /* check.retries */ "Liczniki ochrony",
@@ -291,14 +291,14 @@ I18N.pl = localeValues([
   /* check.defrost.last_start */ (date, route, outdoor) => `Ostatni zaobserwowany początek odszraniania · ${date} · Obieg ${route} · Powietrze zewnętrzne ${outdoor}`,
   /* check.defrost.route_space */ "Ogrzewanie pomieszczeń",
   /* check.defrost.route_dhw */ "Zasobnik ciepłej wody",
-  /* check.detail.pressure.info */ "Zapisane minimum ≤1,0 bar; ciągłe 60 s niepotwierdzone. Fizyczna poprawność i przyczyna nieznane.",
-  /* check.detail.pressure.warn */ "Zapisano ciągłe ≥60 s ≤1,0 bar; nie określa obecnego ciśnienia.",
-  /* check.detail.pressure.ok */ "Brak przyjętego ciśnienia ≤1,0 bar, progu projektu.",
+  /* check.detail.pressure.info */ "Niskie",
+  /* check.detail.pressure.warn */ "Krytyczne",
+  /* check.detail.pressure.ok */ "W normie",
   /* check.detail.defrost_events_insufficient */ "Mniej niż trzy powiązane odszraniania; bez oceny udziału.",
   /* check.detail.source_stale */ "Brak świeżego odczytu X10A; bieżący stan nieznany. Historia zachowana.",
   /* check.detail.no_paired_runtime */ "Brak powiązanego czytelnego czasu; tylko liczba.",
-  /* check.detail.current_label */ "Bieżące ciśnienie wody:",
-  /* check.detail.minimum_time_label */ "Minimum zapisano:",
+  /* check.detail.current_label */ "≤1,0 bar niskie",
+  /* check.detail.minimum_time_label */ "≤0,5 bar krytyczne",
   /* check.detail.coverage_missing */ (a) => `Brakujący czytelny czas: ${a} s.`,
   /* check.detail.channel_coverage */ (a, b) => `${a}: pokrycie ${b}`,
   /* check.summary.warnings */ (n) => `${n} ${n === 1 ? "ostrzeżenie" : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? "ostrzeżenia" : "ostrzeżeń"}`,
@@ -1298,7 +1298,7 @@ MODEL_DESCRIPTION_I18N.pl = modelDescriptionValues([
   ["R5T: punkt warstwowego zbiornika, nie energia.", "Próg projektu ≥0,8 K/h bez oznaczeń pompy/poboru. Pobór możliwy bez oznaczeń; 0 K/h nie wyklucza strat. Cyrkulacja nie dowodzi przyczyny."], // health_dhw_loss
   ["Przy brakujących pomiarach część uruchomień może nie zostać zliczona.", "Nie ma stałej liczby uruchomień uznawanej za normalną. Przy wystarczających danych ta kontrola uznaje średni czas zakończonych cykli ogrzewania wynoszący co najmniej 10 minut za wystarczający."], // health_cycling
   ["Odszranianie", "≥3 powiązane, >15% czasu pracy sprężarki przy czytelnych stanach sprężarki i odszraniania. Reguła projektu, nie Daikin; brak wilgotności i temperatury całego wymiennika."], // health_defrost
-  ["Ciśnienie", "wspólna reguła projektu ≤1,0 bar; 60 s ciągłej obserwacji daje ostrzeżenie. Nie uniwersalna; obowiązuje instrukcja modelu."], // health_pressure
+  ["24-godzinny wykres ciśnienia wody w zamkniętym obiegu hydraulicznym (X10A, minima 5-minutowe).", "Orientacja na wykresie: >1,0 bar w normie, ≤1,0 bar niskie, ≤0,5 bar krytyczne (diagnoza od 60 s ciągle). Dopuszczalne ciśnienie napełniania i pracy określa instrukcja dokładnego modelu oraz wysokość instalacji; sam odczyt nie dowodzi wycieku ani usterki."], // health_pressure
   ["Przepływ po 60 s pompy", "Limit wymaga tego samego modelu/trybu/warunków; nie nominalny ani dowód małego przepływu."], // health_flow
   ["Czas ON BUH/BSH", "nie energia ani dowód zbędnego grzania."], // health_heater
   ["5 eksperymentalnych liczników", "porównywalne wzrosty; luki/reset pomijane. Stabilność nie wyklucza ograniczeń ani nie dowodzi przyczyny."], // health_retries

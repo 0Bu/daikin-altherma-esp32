@@ -270,7 +270,7 @@ evidence is a measurement, not a good/bad assessment. The reading order and main
 | `dhw_loss` | `max_k_h`, `windows`, `high_windows`, `quiet_high_windows`, `draw_windows`, `pump_windows`, `high_with_pump`, `high_pump_off`, `circulation_on_s`, `circulation_known_s`, `candidate_s`, `settle_remaining_s`, `aborts`, `abort_reasons`, `best_aborted_s`, `blocked` |
 | `cycling` | `starts`, `mean_run_s`, `space_runs`, `space_mean_run_s`, `dhw_runs`, `dhw_mean_run_s`, `cooling_runs`, `censored_runs`, `censored_transition_runs`, `censored_handover_runs`, `censored_unreadable_runs`, `censored_restart_runs`, `censored_start_runs`, `classified_runtime_s`, `censored_runtime_s`, `runtime_saturated`, `split`, `hours`, `outdoor_source`, `outdoor_min_c`, `outdoor_mean_c`, `outdoor_samples` |
 | `defrost` | `count`, `share_pct`, `paired_count`, `defrost_s`, `run_s`, `outdoor_source`, `outdoor_min_c`, `outdoor_mean_c`, `outdoor_samples`, `last_observed_start` |
-| `pressure` | `min_bar`, `current_bar`, `min_unix_s`, `confirmed_low` |
+| `pressure` | `min_bar`, `current_bar`, `min_unix_s`, `confirmed_low`, `confirmed_critical` |
 | `flow` | `min_l_min` |
 | `heater` | `buh_min`, `bsh_min`, `buh_s`, `bsh_s`, `buh_observed_s`, `bsh_observed_s` |
 | `retries` | `seen` |
@@ -420,8 +420,10 @@ and each category's `supported` flag is null without source confirmation.
 `min_unix_s` is the pressure minimum's earliest dated occurrence in the retained window, null without
 a synchronized clock; equal minima keep the earliest known time, not an inferred pressure dip.
 It retains no raw frame or validity context. `current_bar` is null when the
-latest sample lacks pressure or the source is stale. `confirmed_low` records whether at least
-60 continuously observed seconds at or below the project boundary were witnessed in the window.
+latest sample lacks pressure or the source is stale. `confirmed_low` and `confirmed_critical`
+record whether at least 60 continuously observed seconds at or below the low (`1.0 bar`, `info`) or
+critical (`0.5 bar`, `warn`) project boundaries were witnessed in the window; unconfirmed transients
+below `1.0 bar` do not enter `min_bar`.
 Positive defrost shares below 1% make the whole-percent `share_pct` null; positive heater runtimes
 below one minute make `buh_min`/`bsh_min` null. Use the seconds fields for these small values.
 `defrost.last_observed_start` is null until a readable X10A defrost OFF-to-ON transition is observed

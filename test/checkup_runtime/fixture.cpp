@@ -248,9 +248,8 @@ void stale_finding() {
     boot();
     auto                     cov = coverage();
     std::vector<CachedValue> rows{fault(1, 1), row(CHECKUP_LOC_PRESSURE, "0.9")};
-    sample(1, rows, cov);
-    sample(11, rows, cov);
-    sdk::now_us = 27000000;
+    for (int64_t t = 1; t <= 61; t += 10) sample(t, rows, cov);
+    sdk::now_us = 77000000;
     auto r      = checkup_report();
     require(!r.source_fresh && r[CheckupCheck::Fault].verdict == CheckupVerdict::Info &&
                 r[CheckupCheck::Fault].a == -1,
@@ -390,8 +389,7 @@ void pending_expiry() {
     boot();
     auto                     cov = coverage();
     std::vector<CachedValue> rows{fault(1, 1), row(CHECKUP_LOC_PRESSURE, "0.9")};
-    sample(100, rows, cov);
-    sample(110, rows, cov);
+    for (int64_t t = 100; t <= 160; t += 10) sample(t, rows, cov);
     sdk::now_us = CHECKUP_WINDOW_US - 1;
     auto before = checkup_report();
     require(before[CheckupCheck::Pressure].a == 9,
@@ -525,7 +523,7 @@ void restored_expiry() {
     p.checkup.covered_s      = 1200;
     p.checkup.bar_observed_s = 1200;
     p.checkup.min_bar        = 9;
-    p.checkup.flags          = CHECKUP_F_FAULT;
+    p.checkup.flags          = CHECKUP_F_FAULT | CHECKUP_F_LOW_BAR;
     p.checkup.rps_observed_s = 1200;
     p.checkup.starts         = 1;
     require(checkup_flash_restore(&record, 1, now) == CheckupFlashRestoreResult::Restored,

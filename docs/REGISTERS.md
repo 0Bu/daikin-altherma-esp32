@@ -551,6 +551,15 @@ and an absent outdoor unit remains absent.
 
 #### Register `0x60`
 
+> **Uninitialized all-zero hydronic frames (`0x60`–`0x62`).** Pages `0x60`–`0x62` begin with
+> `Data Enable/Disable` at byte 0 and also carry active setpoints, indoor/water thermistors, and the
+> inverted pump signal (`100` = stopped). After a bus stall or controller transient, a sweep can
+> return an all-zero payload across `0x60`–`0x62` (all bytes `0x00`, including `Data Enable/Disable`,
+> setpoints, and pump signal). `logic/availability.hpp` (`PAGE_ABSENCE_RULES`, `AllBytesZero` with
+> minimum spans 11, 12, and 13 bytes) withholds those uninitialized all-zero replies. Whenever any byte
+> on the page is non-zero (for example `Data Enable` or `Water pump signal = 100`), a real reading of
+> `0 °C` or `0.0 bar` (a drained circuit) publishes unchanged.
+
 | Off | Len | Conv | Bit | Type | Value |
 |----:|----:|:----:|:---:|:----:|-------|
 | 0 | 1 | 304 | 4 |  | Data Enable/Disable |

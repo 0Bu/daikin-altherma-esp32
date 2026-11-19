@@ -1,4 +1,4 @@
-// translation-source: 3a15720127279ca3edda45e3c53255972178ba0299b2928ffe49177e6a324af5
+// translation-source: 42a4d77a832a12c84359f017fdcacdd939405dc965a062a922c2d18aafa2ff0e
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -175,7 +175,7 @@ I18N.es = localeValues([
   /* check.dhw_loss */ "Enfriamiento ACS",
   /* check.cycling */ "Arranques compresor",
   /* check.defrost */ "Desescarches",
-  /* check.pressure */ "Presión agua mín.",
+  /* check.pressure */ "Presión de agua",
   /* check.flow */ "Caudal mín.",
   /* check.heater */ "Resistencias",
   /* check.retries */ "Contadores protección",
@@ -286,14 +286,14 @@ I18N.es = localeValues([
   /* check.defrost.last_start */ (date, route, outdoor) => `Último inicio de desescarche observado · ${date} · Circuito ${route} · Aire exterior ${outdoor}`,
   /* check.defrost.route_space */ "Calefacción",
   /* check.defrost.route_dhw */ "Depósito de agua caliente",
-  /* check.detail.pressure.info */ "Mínimo guardado ≤1,0 bar; 60 s continuos sin confirmar. Validez física y causa desconocidas.",
-  /* check.detail.pressure.warn */ "Registrados ≥60 s continuos ≤1,0 bar; no indica presión actual.",
-  /* check.detail.pressure.ok */ "Sin presión aceptada ≤1,0 bar, umbral del proyecto.",
+  /* check.detail.pressure.info */ "Baja",
+  /* check.detail.pressure.warn */ "Crítica",
+  /* check.detail.pressure.ok */ "Normal",
   /* check.detail.defrost_events_insufficient */ "Menos de tres desescarches asociados; sin evaluación de porcentaje.",
   /* check.detail.source_stale */ "Sin lectura X10A reciente; estado actual desconocido. Historial conservado.",
   /* check.detail.no_paired_runtime */ "Sin tiempo legible asociado; solo recuento.",
-  /* check.detail.current_label */ "Presión de agua actual:",
-  /* check.detail.minimum_time_label */ "Mínimo registrado en:",
+  /* check.detail.current_label */ "≤1,0 bar baja",
+  /* check.detail.minimum_time_label */ "≤0,5 bar crítica",
   /* check.detail.coverage_missing */ (a) => `Tiempo legible que falta: ${a} s.`,
   /* check.detail.channel_coverage */ (a, b) => `${a}: cobertura ${b}`,
   /* check.summary.warnings */ (n) => `${n} ${n === 1 ? "aviso" : "avisos"}`,
@@ -1304,7 +1304,7 @@ MODEL_DESCRIPTION_I18N.es = modelDescriptionValues([
   ["R5T: un punto del depósito estratificado, no energía.", "Indicio interno ≥0,8 K/h sin señales de bomba/consumo. Consumo posible sin señales; 0 K/h no excluye pérdidas. Circulación no prueba causa."], // health_dhw_loss
   ["Si faltan mediciones, algunos arranques pueden quedar sin contar.", "No hay un número fijo de arranques normal. Con datos suficientes, esta comprobación considera adecuada una duración media de al menos 10 minutos en los ciclos de calefacción terminados."], // health_cycling
   ["Desescarche", "≥3 asociados, >15% del tiempo de marcha del compresor con estados de compresor y desescarche legibles. Regla interna, no Daikin; faltan humedad y temperatura de toda la batería."], // health_defrost
-  ["Presión", "regla interna común ≤1,0 bar; 60 s continuos observados dan AVISO. No universal; rige el manual del modelo."], // health_pressure
+  ["Presión de agua (24 h) en el circuito hidráulico cerrado (X10A, mínimos de 5 min).", "Guía de la curva: >1,0 bar normal, ≤1,0 bar baja, ≤0,5 bar crítica (diagnóstico desde 60 s continuos). La presión de llenado y trabajo admisible depende del manual exacto del equipo y la altura del sistema; la lectura por sí sola no prueba fugas ni avería."], // health_pressure
   ["Caudal tras 60 s de bomba", "El límite exige mismo modelo/modo/condiciones; no nominal ni prueba de flujo insuficiente."], // health_flow
   ["Tiempo ON de BUH/BSH", "no energía ni prueba de calor innecesario."], // health_heater
   ["5 contadores experimentales", "aumentos comparables; ignora huecos/reset. Estabilidad no excluye limitación ni prueba causa."], // health_retries

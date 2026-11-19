@@ -170,6 +170,9 @@ struct TrendDef {
     // The refrigerant high side: resolved by trend_select_high_side() rather than by the locator
     // alone. Part of the persisted series identity: history_x10a_series_id folds it in.
     bool high_side = false;
+    // Bucket minimum folding (retains lowest sample inside each 5-minute bucket instead of
+    // last-wins). Part of the persisted series identity: history_x10a_series_id folds it in.
+    bool min_fold = false;
 };
 
 // Adding a trend is one row here — the ring, the route and the browser are already generic over it.
@@ -185,7 +188,8 @@ inline constexpr TrendDef TRENDS[] = {
     {"return_water", TrendKind::Row, 0x61, 8, "°C", ""},           // Inlet water temp. (R4T)
     {"leaving_water_post_buh", TrendKind::Row, 0x61, 4, "°C", ""}, // post-BUH outlet (R2T)
     {"refrigerant_liquid", TrendKind::Row, 0x61, 6, "°C", ""},     // liquid-side R3T
-    {"water_pressure", TrendKind::Row, 0x62, 11, "bar", ""}, // the WATER circuit, not refrigerant
+    {"water_pressure", TrendKind::Row, 0x62, 11, "bar", "", -1, false,
+     true},                                            // minimum per 5-min bucket
     {"flow", TrendKind::Row, 0x62, 9, "", ""},         // Flow sensor (l/min) — unit in label
     {"pump_signal", TrendKind::Row, 0x62, 12, "", ""}, // INVERTED (0 = max, 100 = stop)
     // The refrigerant HIGH SIDE, the one sensor refrigerant_service.hpp reads for it
@@ -780,6 +784,16 @@ struct TrendRing {
     // nothing was measured at all, and then carries the LAST reason — the one still true at commit.
     void fold(HistorySample s) {
         if (!history_is_absent(s) || history_is_absent(pending)) pending = s;
+    }
+
+    // Minimum-folding for low-water-pressure visibility: retains the lowest valid reading observed
+    // anywhere inside the 5-minute bucket so brief drops are not overwritten by later recovery.
+    void fold_min(HistorySample s) {
+        if (history_is_absent(s)) {
+            if (history_is_absent(pending)) pending = s;
+            return;
+        }
+        if (history_is_absent(pending) || s < pending) pending = s;
     }
 
     // State-event folding: once ON was actually observed in this bucket it cannot be erased by a

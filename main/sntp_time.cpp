@@ -32,7 +32,7 @@ static void on_sync(struct timeval*) {
 }
 
 void sntp_time_start() {
-    s_server = config().ntp_server;
+    s_server              = with_config([](const Config& c) { return c.ntp_server; });
     esp_sntp_config_t cfg = ESP_NETIF_SNTP_DEFAULT_CONFIG(s_server.c_str());
     cfg.sync_cb      = on_sync;
     cfg.wait_for_sync = false;   // nobody blocks on the sync semaphore here — skip allocating one

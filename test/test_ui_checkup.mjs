@@ -43,7 +43,7 @@ for (const key of [
   "classified_runtime_s", "censored_runtime_s", "runtime_saturated", "split", "hours",
   "hours_epoch", "bucket", "end_unix_s", "elapsed_s", "space_s", "dhw_s",
   "outdoor_source", "outdoor_min_c", "outdoor_mean_c", "outdoor_samples",
-  "min_bar", "current_bar", "min_unix_s", "confirmed_low", "min_l_min",
+  "min_bar", "current_bar", "min_unix_s", "confirmed_low", "confirmed_critical", "min_l_min",
   "buh_min", "bsh_min", "buh_s", "bsh_s", "buh_observed_s", "bsh_observed_s", "active", "seen",
   "max_k_h", "windows", "high_windows", "high_with_pump", "high_pump_off",
   "draw_windows", "pump_windows", "quiet_high_windows",
@@ -134,7 +134,10 @@ for (const c of [
   { id: "heater", buh_s: null, bsh_s: null },
 ]) assert.equal(ui.metric({ verdict: "collecting", ...c }), "");
 assert.equal(ui.metric({ id: "pressure", verdict: "unavailable", min_bar: 0 }), "");
+assert.equal(ui.metric({ id: "pressure", verdict: "collecting", min_bar: 0, current_bar: 1.5 }), "1.5 bar");
 assert.equal(ui.metric({ id: "pressure", verdict: "collecting", min_bar: 0 }), "0 bar");
+assert.equal(ui.metric({ id: "pressure", verdict: "info", min_bar: 0.8, confirmed_low: true }), "Low · 0.8 bar");
+assert.equal(ui.metric({ id: "pressure", verdict: "warn", min_bar: 0.4, confirmed_critical: true }), "Critical · 0.4 bar");
 assert.equal(ui.metric({ id: "pressure", verdict: "ok", min_bar: NaN }), "");
 
 // An almost-complete input clock and a partial calendar horizon have different explanations.
@@ -549,25 +552,57 @@ assert.doesNotMatch(detail, /transition 1|restart\/journal|start not witnessed|9
 assert.equal(ui.metric({ id: "flow", verdict: "ok", min_l_min: 6.5 }), "6.5 l/min");
 assert.equal(ui.metric({ id: "flow", verdict: "ok", min_l_min: NaN }), "");
 
-// Minimum, timestamp and current pressure are independent facts. A recovered historical low
-// pressure warning remains a historical warning when the present sample is stale.
+// Water pressure uses 24-hour curve-first diagnosis when X10A history is available, and falls back
+// cleanly to concise threshold state labels when no history buffer is advertised.
 const pressure = {
-  id: "pressure", verdict: "info", evidence: "heuristic", min_bar: 0,
-  current_bar: 1.5, min_unix_s: 1791888000, confirmed_low: false,
+  id: "pressure", verdict: "info", evidence: "heuristic", min_bar: 0.8,
+  current_bar: 1.5, min_unix_s: 1791888000, confirmed_low: true, confirmed_critical: false,
 };
 detail = ui.detail(pressure);
-assert.match(detail, /Retained minimum ≤1.0 bar/);
-assert.match(detail, /continuous 60 s unconfirmed/);
-assert.match(detail, /Current water pressure: 1.5 bar/);
-assert.match(detail, /Minimum recorded at: [^<]+/);
-detail = ui.detail({ ...pressure, verdict: "warn", current_bar: null, min_unix_s: null,
-                     confirmed_low: true }, true,
+assert.match(detail, /24-hour water-pressure curve/);
+assert.match(detail, /Low/);
+assert.doesNotMatch(detail, /NOTE|WARNING|Minimum recorded at/);
+detail = ui.detail({ ...pressure, verdict: "warn", min_bar: 0.4, current_bar: null, min_unix_s: null,
+                     confirmed_low: true, confirmed_critical: true }, true,
                    { span_s: 86400, source_age_s: 900, source_fresh: false });
-assert.match(detail, /Recorded continuous ≥60 s at ≤1.0 bar/);
-assert.match(detail, /not a current-pressure statement/);
+assert.match(detail, /Critical/);
 assert.match(detail, /No fresh X10A sample/);
-assert.match(detail, /Current water pressure: No data/);
-assert.match(detail, /Minimum recorded at: No data/);
+assert.doesNotMatch(detail, /NOTE|WARNING|Minimum recorded at/);
+
+// With water_pressure trend advertised and expanded, checkupCardHtml renders the graph first and
+// only the Normal: reference below — zero prose or label clutter above the curve.
+context.S.stage = "dashboard";
+context.S.dashboardCard = "diagnosis";
+context.S.hist = new Map([["water_pressure", { at: Date.now(), gen: 1, dt: 300, unit: "bar", b0: 380, held: [], v: [15, 12, 9, 4, 8, 15] }]]);
+context.S.histPin = new Map();
+context.S.histHidden = new Map();
+context.S.histBusy = new Set();
+context.S.histRequests = new Map();
+context.S.histEpoch = 1;
+context.S.descOpen = new Set(["model:health_pressure"]);
+context.S.status = {
+  diagnostics: { enabled: true, source: "x10a", effective_source: "x10a", available_sources: ["x10a"] },
+  history: { rows: [{ id: "water_pressure", label: "Water Pressure" }] },
+  health: { status: "info", span_s: 86400, full_span: true, source_fresh: true, source_age_s: 1, checks: [pressure] },
+};
+detail = ui.detail(pressure);
+assert.match(detail, /^<div class="vdesc-p"><span class="vdesc-n">Normal:<\/span>/);
+assert.doesNotMatch(detail, /24-hour water-pressure curve|NOTE|WARNING|Low|Critical/);
+const pressureCard = ui.card(true);
+assert.ok(pressureCard.indexOf("data-chart") < pressureCard.indexOf("Normal:"),
+          "water_pressure chart must appear before Normal note in expanded diagnosis card");
+assert.match(pressureCard, /vhist-thresh low/);
+assert.match(pressureCard, /vhist-thresh crit/);
+assert.match(pressureCard, /vhist-line warn/);
+assert.match(pressureCard, /vhist-line err/);
+assert.match(pressureCard, /vhist-legend-low/);
+assert.match(pressureCard, /vhist-legend-crit/);
+assert.match(pressureCard, /Low · 0\.8 bar/);
+context.S.status = null;
+context.S.descOpen = new Set();
+context.S.hist.clear();
+context.S.histPin.clear();
+delete context.S.dashboardCard;
 
 // Cleared and unreadable-current fault states must not promise automatic resolution or no action.
 detail = ui.detail({ id: "fault", verdict: "info", active: 0 });
@@ -693,8 +728,8 @@ assert.match(ui.detail(dhw), /Beispiel für eine Stunde: 200 l Wasser/);
 assert.match(ui.detail(dhw), /0,28 kWh Wärme/);
 assert.match(ui.detail(dhw), /0,09–0,11 kWh Strom/);
 assert.match(ui.detail({ id: "fault", verdict: "info", active: 0 }), /weder Ursache noch Behebung/);
-assert.equal(ui.metric(pressure), "0 bar");
-assert.match(ui.detail(pressure), /Aktueller Wasserdruck: 1,5 bar/);
+assert.equal(ui.metric(pressure), "Niedrig · 0,8 bar");
+assert.match(ui.detail(pressure), /24-Stunden-Wasserdruckverlauf/);
 assert.equal(ui.metric({ id: "flow", verdict: "ok", min_l_min: 6.5 }), "6,5 l/min");
 assert.equal(ui.value({ id: "fault", verdict: "ok", active: 0 }), "keine");
 assert.equal(ui.value({ ...dhw, max_k_h: 4.8 }), "4,8 K/h");
@@ -758,7 +793,7 @@ for (const copy of [model.health_cycling.what, model.health_cycling.normal,
 }
 assert.match(model.health_defrost.what, /compressor runtime with readable compressor and defrost states/);
 assert.match(descriptionContext.modelDe.health_defrost[0], /Verdichterlaufzeit bei lesbarem Verdichter- und Abtaustatus/);
-assert.match(JSON.stringify(model.health_pressure), /Project rule:.*60 continuously observed seconds/);
+assert.match(JSON.stringify(model.health_pressure), /Chart guide:.*>1\.0 bar.*≤1\.0 bar.*≤0\.5 bar.*60 continuous seconds/);
 assert.match(JSON.stringify(model.health_flow), /Not nominal flow or proof of part load/);
 assert.match(JSON.stringify(model.health_retries), /while stopped or at a compressor-state boundary/);
 assert.match(JSON.stringify(model.health_retries), /Gaps, resets and non-rises do not count/);
