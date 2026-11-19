@@ -1,4 +1,4 @@
-// translation-source: 9d953d5f0a93a5bc4cadd7a97118b6c1a7b766255621d06ab3d6c4c0dc8e2ccf
+// translation-source: 3a15720127279ca3edda45e3c53255972178ba0299b2928ffe49177e6a324af5
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -283,6 +283,9 @@ I18N.fi = localeValues([
   /* check.detail.fault.ok */ "Ei nykyistä tai tallennettua ilmoitusta luettavissa vikasignaaleissa.",
   /* check.detail.defrost.info */ "≥3 yhdistettyä sulatusta ylittää 15% luettavasta kompressoriajasta: projektin vihje.",
   /* check.detail.defrost.ok */ "Ei sulatusosuusvihjettä; sää ja aukot arvioimatta.",
+  /* check.defrost.last_start */ (date, route, outdoor) => `Viimeisin havaittu sulatuksen aloitus · ${date} · Piiri ${route} · Ulkoilma ${outdoor}`,
+  /* check.defrost.route_space */ "Tilalämmitys",
+  /* check.defrost.route_dhw */ "Lämminvesivaraaja",
   /* check.detail.pressure.info */ "Tallennettu minimi ≤1,0 bar; yhtenäinen 60 s vahvistamatta. Fyysinen oikeellisuus ja syy tuntemattomat.",
   /* check.detail.pressure.warn */ "Tallennettu yhtenäinen ≥60 s ≤1,0 bar; ei nykyistä painetta.",
   /* check.detail.pressure.ok */ "Ei hyväksyttyä painetta ≤projektin 1,0 bar kynnys.",

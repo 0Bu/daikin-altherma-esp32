@@ -1,4 +1,4 @@
-// translation-source: 9d953d5f0a93a5bc4cadd7a97118b6c1a7b766255621d06ab3d6c4c0dc8e2ccf
+// translation-source: 3a15720127279ca3edda45e3c53255972178ba0299b2928ffe49177e6a324af5
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -283,6 +283,9 @@ I18N.es = localeValues([
   /* check.detail.fault.ok */ "Sin mensaje actual ni guardado en señales de fallo legibles.",
   /* check.detail.defrost.info */ "≥3 desescarches asociados superan 15% del tiempo legible del compresor: indicio del proyecto.",
   /* check.detail.defrost.ok */ "Sin indicio de porcentaje; clima y huecos no evaluados.",
+  /* check.defrost.last_start */ (date, route, outdoor) => `Último inicio de desescarche observado · ${date} · Circuito ${route} · Aire exterior ${outdoor}`,
+  /* check.defrost.route_space */ "Calefacción",
+  /* check.defrost.route_dhw */ "Depósito de agua caliente",
   /* check.detail.pressure.info */ "Mínimo guardado ≤1,0 bar; 60 s continuos sin confirmar. Validez física y causa desconocidas.",
   /* check.detail.pressure.warn */ "Registrados ≥60 s continuos ≤1,0 bar; no indica presión actual.",
   /* check.detail.pressure.ok */ "Sin presión aceptada ≤1,0 bar, umbral del proyecto.",

@@ -1,4 +1,4 @@
-// translation-source: 9d953d5f0a93a5bc4cadd7a97118b6c1a7b766255621d06ab3d6c4c0dc8e2ccf
+// translation-source: 3a15720127279ca3edda45e3c53255972178ba0299b2928ffe49177e6a324af5
 I18N.ja = localeValues([
   /* sys.nodata */ "データなし",
   /* sys.unreachable */ "接続不可",
@@ -283,6 +283,9 @@ I18N.ja = localeValues([
   /* check.detail.fault.ok */ "読めた異常信号に現在または保存通知はありません。",
   /* check.detail.defrost.info */ "対応除霜3回以上が読めた圧縮機運転時間の15%超：プロジェクト参考値。",
   /* check.detail.defrost.ok */ "除霜割合の参考所見なし。天候と欠測は未評価。",
+  /* check.defrost.last_start */ (date, route, outdoor) => `最後に確認した霜取り開始 · ${date} · 循環先 ${route} · 外気温 ${outdoor}`,
+  /* check.defrost.route_space */ "暖房",
+  /* check.defrost.route_dhw */ "給湯タンク",
   /* check.detail.pressure.info */ "最低値1.0 bar以下。連続60秒は未確認。物理的妥当性と原因は不明。",
   /* check.detail.pressure.warn */ "1.0 bar以下の連続60秒以上を記録。現在の圧力ではありません。",
   /* check.detail.pressure.ok */ "プロジェクト基準1.0 bar以下の採用圧力なし。",

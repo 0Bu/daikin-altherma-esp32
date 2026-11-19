@@ -1,4 +1,4 @@
-// translation-source: 9d953d5f0a93a5bc4cadd7a97118b6c1a7b766255621d06ab3d6c4c0dc8e2ccf
+// translation-source: 3a15720127279ca3edda45e3c53255972178ba0299b2928ffe49177e6a324af5
 I18N.de = localeValues([
   /* sys.nodata */ "Keine Daten",
   /* sys.unreachable */ "Nicht erreichbar",
@@ -283,6 +283,9 @@ I18N.de = localeValues([
   /* check.detail.fault.ok */ "Keine aktuelle oder gespeicherte Meldung in lesbaren Störungssignalen.",
   /* check.detail.defrost.info */ "≥3 zugeordnete Abtauungen über 15 % der lesbaren Verdichterlaufzeit: interner Hinweis.",
   /* check.detail.defrost.ok */ "Kein interner Abtauhinweis; Wetter und Datenlücken bleiben unbewertet.",
+  /* check.defrost.last_start */ (date, route, outdoor) => `Letzter beobachteter Abtaustart · ${date} · Wasserweg ${route} · Außenluft ${outdoor}`,
+  /* check.defrost.route_space */ "Raumheizung",
+  /* check.defrost.route_dhw */ "Warmwasserspeicher",
   /* check.detail.pressure.info */ "Minimum ≤1,0 bar; 60 durchgehende Sekunden nicht bestätigt. Ob der Wert den tatsächlichen Druck wiedergibt, bleibt unklar.",
   /* check.detail.pressure.warn */ "Mindestens 60 durchgehende Sekunden bei ≤1,0 bar erfasst; keine Aussage über den Druck jetzt.",
   /* check.detail.pressure.ok */ "Kein Messwert lag bei 1,0 bar oder darunter.",

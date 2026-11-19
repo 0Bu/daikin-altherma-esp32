@@ -1,4 +1,4 @@
-// translation-source: 9d953d5f0a93a5bc4cadd7a97118b6c1a7b766255621d06ab3d6c4c0dc8e2ccf
+// translation-source: 3a15720127279ca3edda45e3c53255972178ba0299b2928ffe49177e6a324af5
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -283,6 +283,9 @@ I18N.sv = localeValues([
   /* check.detail.fault.ok */ "Inget aktuellt eller sparat meddelande i läsbara felsignaler.",
   /* check.detail.defrost.info */ "≥3 parade avfrostningar överstiger 15% av läsbar kompressortid: projekttips.",
   /* check.detail.defrost.ok */ "Inget avfrostningsandelstips; väder och luckor ej bedömda.",
+  /* check.defrost.last_start */ (date, route, outdoor) => `Senast observerade avfrostningsstart · ${date} · Krets ${route} · Uteluft ${outdoor}`,
+  /* check.defrost.route_space */ "Rumsuppvärmning",
+  /* check.defrost.route_dhw */ "Varmvattentank",
   /* check.detail.pressure.info */ "Sparat minimum ≤1,0 bar; sammanhängande 60 s obekräftat. Fysisk giltighet och orsak okända.",
   /* check.detail.pressure.warn */ "Registrerat sammanhängande ≥60 s ≤1,0 bar; inte trycket nu.",
   /* check.detail.pressure.ok */ "Inget godkänt värde ≤1,0 bar, projektets tröskel.",

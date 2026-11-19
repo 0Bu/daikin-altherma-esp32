@@ -2130,6 +2130,16 @@ inline const char* checkup_result_evidence_name(CheckupCheck c, const CheckupChe
     return checkup_evidence_name(c);
 }
 
+enum class DefrostStartRoute : uint8_t { Unknown, SpaceHeating, Dhw };
+
+struct DefrostStartReport {
+    int64_t           observed_us    = -1;
+    uint32_t          unix_s         = 0;
+    int16_t           outdoor_tenths = CHECKUP_ABSENT;
+    DefrostStartRoute route          = DefrostStartRoute::Unknown;
+};
+static_assert(sizeof(DefrostStartReport) == 16, "defrost start report footprint changed");
+
 struct CheckupOutdoorReport {
     OutdoorSource source = OutdoorSource::None;
     int min_tenths = CHECKUP_ABSENT;

@@ -19,7 +19,7 @@ import path from "node:path";
 import vm from "node:vm";
 import { readAppSource } from "../ui/read_app_source.mjs";
 import { germanModelCopy } from "../ui/model_copy.mjs";
-import { auditEvidenceContract, STOP_CONTEXT_SOURCE_FILES } from "../diagnostic_evidence/evidence_contract.mjs";
+import { auditEvidenceContract, OBSERVATION_SOURCE_FILES } from "../diagnostic_evidence/evidence_contract.mjs";
 import { auditEnglishDocumentation } from "./english_docs.mjs";
 
 let root = process.cwd();
@@ -157,7 +157,7 @@ for (const finding of auditEvidenceContract(evidence, rowIds, evidenceArg)) {
 for (const finding of auditEnglishDocumentation(root)) findings.push(finding);
 
 const fingerprint = crypto.createHash("sha256");
-for (const relative of ["main/logic/checkup.hpp", "main/checkup.cpp", ...STOP_CONTEXT_SOURCE_FILES]) {
+for (const relative of ["main/logic/checkup.hpp", "main/checkup.cpp", ...OBSERVATION_SOURCE_FILES]) {
   fingerprint.update(`${relative}\0`);
   fingerprint.update(read(path.join(root, relative), relative));
   fingerprint.update("\0");

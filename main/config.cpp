@@ -361,7 +361,9 @@ void config_load() {
     // this particular check (rx/tx are re-validated separately, just below, by the chip rule; the
     // board parts then yield to the final pair) so the two checks can't reject each other.
     {
-        Config probe = c;
+        Config&   probe    = c;
+        const int saved_rx = probe.rx_pin;
+        const int saved_tx = probe.tx_pin;
         probe.rx_pin = probe.tx_pin = -1;
         std::string why;
         if (!board_hw_valid(probe, why, SOC_GPIO_PIN_COUNT - 1, hw_octal_spi())) {
@@ -373,7 +375,6 @@ void config_load() {
             // pins the device just refused to drive.
             c.board_user_set = false;
             c.board_preset_id = BoardPresetId::Custom;
-            probe = c;
             probe.rx_pin = probe.tx_pin = -1;
             // A build whose OWN defaults don't validate is a misconfigured Kconfig, not user input.
             // Disable both rather than drive a pin that just failed the safety rule twice.
@@ -384,6 +385,8 @@ void config_load() {
                 c.btn_gpio = -1;
             }
         }
+        probe.rx_pin = saved_rx;
+        probe.tx_pin = saved_tx;
     }
     {
         std::string why;

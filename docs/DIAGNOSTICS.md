@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: 69a357b09dd48e3d8c49cfbede3370cdf02d793998f801d9540334eaeb8ee577 -->
+<!-- user-docs-contract: 1b197428300cfa6b1de1289098a3a694d05fb3be5c2e2d9de2c8c9a79756d39f -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default (`Off`). Under **Settings → Firmware**, choose **X10A** or **Modbus** for
@@ -150,6 +150,11 @@ its recorded time and runtime where available. A bar with zero starts has no num
 
 **In plain language:** The board counts observed defrost starts and the seconds spent defrosting
 while the compressor ran and both signals were readable.
+The detail can show the last start observed this boot, with the heating or hot-water route and
+outdoor air temperature when they were readable and qualified. Missing details remain unknown.
+This start detail expires after 24 hours; pausing diagnostics (`Off`) hides the card and does
+not carry a start transition across the pause. When a factory reset starts forgetting history,
+the board hides the detail for the rest of that boot, including if erasure fails.
 
 **Meaning:** At least **three paired events** and more than **15%** defrost share produce **NOTE**.
 Both are project heuristics. Fewer events or no paired compressor runtime remain **MEASURED**;
@@ -158,7 +163,11 @@ A reassuring assessment additionally needs a full day and 90% paired signal cove
 
 **Important limit:** Temperature, humidity and coil icing affect normal defrost needs. These signals
 do not establish blocked airflow, refrigerant shortage or a sensor defect. Outdoor min/mean and the
-separate live de-icer temperature provide context, without changing the rule.
+separate live de-icer temperature provide context, without changing the rule; geothermal two-phase
+sensors are not treated as an outdoor air coil, and coil temperature spread or post-defrost recovery
+are not evaluated.
+The route describes the mode and valve signal reported by the controller. Physical valve position,
+water flow and tank charging require separate evidence.
 
 **Evidence and limits:** [Defrost events](DIAGNOSTIC_EVIDENCE.md#diagnosis-defrost)
 

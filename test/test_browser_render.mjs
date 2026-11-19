@@ -1358,8 +1358,9 @@ async function assertPlantDiagnosis(page, context) {
             }
           } },
         { id: "defrost", verdict: "ok", evidence: "observation",
-          reason: "defrost_events_insufficient", count: 0, paired_count: 0,
-          share_pct: null, defrost_s: 0, run_s: 7200 },
+          reason: "defrost_events_insufficient", count: 1, paired_count: 1,
+          share_pct: null, defrost_s: 30, run_s: 7200,
+          last_observed_start: { unix_s: null, route: "dhw_route", outdoor_c: 0 } },
         { id: "pressure", verdict: "info", evidence: "heuristic", min_bar: 0,
           current_bar: 1.5, min_unix_s: 1791871200, confirmed_low: false,
           observed_s: 77760, required_s: 77760 },
@@ -1508,6 +1509,11 @@ async function assertPlantDiagnosis(page, context) {
       .closest('.card').querySelector('.section-badge')?.innerText || ''`),
       await page.evaluate("t('check.summary.notes', 4)"),
       `${context}: badge counts findings rather than assessed fractions`);
+    assert.equal(await page.evaluate(`(() => {
+      const row = document.querySelector("[data-desc='model:health_defrost']")?.closest('.vitem');
+      return row?.innerText.includes(t("check.defrost.last_start", t("sys.nodata"),
+        t("check.defrost.route_dhw"), checkupFmt1(0) + " °C"));
+    })()`), true, `${context}: defrost start preserves zero and names the tank route`);
     await captureNativeEvidence(page, `${context}/expanded`);
     for (const id of ["pressure", "dhw_loss", "cycling", "defrost"])
       await captureNativeEvidence(page, `${context}/${id}`,

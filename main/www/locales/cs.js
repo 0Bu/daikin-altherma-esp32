@@ -1,4 +1,4 @@
-// translation-source: 9d953d5f0a93a5bc4cadd7a97118b6c1a7b766255621d06ab3d6c4c0dc8e2ccf
+// translation-source: 3a15720127279ca3edda45e3c53255972178ba0299b2928ffe49177e6a324af5
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -283,6 +283,9 @@ I18N.cs = localeValues([
   /* check.detail.fault.ok */ "Žádné aktuální ani uložené hlášení v čitelných signálech poruch.",
   /* check.detail.defrost.info */ "≥3 spárovaná odmrazení přesahují 15 % čitelné doby kompresoru: upozornění projektu.",
   /* check.detail.defrost.ok */ "Žádné upozornění podílu; počasí a mezery nehodnoceny.",
+  /* check.defrost.last_start */ (date, route, outdoor) => `Poslední zaznamenaný začátek odmrazování · ${date} · Okruh ${route} · Venkovní vzduch ${outdoor}`,
+  /* check.defrost.route_space */ "Vytápění",
+  /* check.defrost.route_dhw */ "Zásobník teplé vody",
   /* check.detail.pressure.info */ "Uložené minimum ≤1,0 bar; souvislých 60 s nepotvrzeno. Fyzikální platnost a příčina neznámé.",
   /* check.detail.pressure.warn */ "Zaznamenáno souvislých ≥60 s ≤1,0 bar; ne aktuální tlak.",
   /* check.detail.pressure.ok */ "Žádný přijatý tlak ≤1,0 bar, práh projektu.",

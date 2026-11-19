@@ -1917,8 +1917,20 @@ function checkupDetailHtml(c, fullSpan = c.full_span === true, report = {}) {
   if (c.id === "dhw_loss" && statusKey !== "collecting" && !c.blocked && Number(c.aborts) > 0)
     detail += t("check.detail.dhw_aborted", Number(c.aborts), checkupDhwReasons(c, isModbus),
                 checkupDuration(c.best_aborted_s));
-  if (c.id === "defrost" && checkupOutdoorContext(c))
-    detail += t("check.detail.outdoor_defrost");
+  if (c.id === "defrost") {
+    if (checkupOutdoorContext(c)) detail += t("check.detail.outdoor_defrost");
+    const start = c.last_observed_start;
+    if (start && typeof start === "object") {
+      const missing = t("sys.nodata");
+      const date = Number.isInteger(start.unix_s) && start.unix_s > 0 && start.unix_s <= 0xffffffff
+        ? new Date(start.unix_s * 1000).toLocaleString(LANG,
+            { dateStyle: "short", timeStyle: "short" }) : missing;
+      const route = start.route === "space_heating" ? t("check.defrost.route_space")
+        : start.route === "dhw_route" ? t("check.defrost.route_dhw") : missing;
+      const outdoor = Number.isFinite(start.outdoor_c) ? `${checkupFmt1(start.outdoor_c)} °C` : missing;
+      detail += ` ${t("check.defrost.last_start", date, route, outdoor)}`;
+    }
+  }
   // Three paragraphs: observation with its real time scope, current interpretation, then normal
   // context. A report window is never a verdict's "since" timestamp.
   const time = [];
