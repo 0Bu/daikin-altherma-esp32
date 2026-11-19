@@ -81,35 +81,38 @@ static void reboot_soon() {
     esp_restart();
 }
 
+// A rejection carrying an optional stable machine `code` beside the English `error`, so the
+// localized UI can translate it while direct API clients still receive a useful explanation. Both
+// arguments are internal literals by contract; neither may ever carry caller-supplied text.
+[[gnu::noinline]] static esp_err_t send_err_code(httpd_req_t* req, const char* status,
+                                                 const char* code, const char* msg) {
+    httpd_resp_set_status(req, status);
+    std::string body = "{\"ok\":false";
+    if (code) {
+        body += ",\"code\":\"";
+        body += code;
+        body += '"';
+    }
+    body += ",\"error\":\"";
+    body += msg;
+    body += "\"}";
+    return http_send_json(req, body.c_str());
+}
+
 // Every write endpoint answers a rejection as {"ok":false,"error":…} (DESIGN.md §8: a 4xx becomes an
 // inline field error). Both callers — the dashboard modals and the setup portal — read `error` out of
 // the JSON. `msg` is always an internal literal here (body/JSON parse failures and the fixed
 // wifi_credentials_valid reasons), so it needs no escaping; never pass caller-supplied text.
 [[gnu::noinline]] static esp_err_t send_err(httpd_req_t* req, const char* status, const char* msg) {
-    httpd_resp_set_status(req, status);
-    std::string body = "{\"ok\":false,\"error\":\"";
-    body += msg;
-    body += "\"}";
-    return http_send_json(req, body.c_str());
+    return send_err_code(req, status, nullptr, msg);
 }
 
 [[gnu::noinline]] static esp_err_t send_bad_req(httpd_req_t* req, const char* msg) {
     return send_err(req, "400 Bad Request", msg);
 }
 
-// A rejection carrying a stable machine `code` beside the English `error`, so the localized UI can
-// translate it while direct API clients still receive a useful explanation. Both arguments are
-// internal literals by contract — like send_err above, this does no escaping, so neither may ever
-// carry caller-supplied text.
-[[gnu::noinline]] static esp_err_t send_err_code(httpd_req_t* req, const char* status,
-                                                 const char* code, const char* msg) {
-    httpd_resp_set_status(req, status);
-    std::string body = "{\"ok\":false,\"code\":\"";
-    body += code;
-    body += "\",\"error\":\"";
-    body += msg;
-    body += "\"}";
-    return http_send_json(req, body.c_str());
+[[gnu::noinline]] static esp_err_t send_write_failed(httpd_req_t* req) {
+    return send_err(req, "500 Internal Server Error", "config write failed");
 }
 
 // ENV III reachability failures were the first users of the coded shape above; the name is kept so
@@ -419,13 +422,13 @@ static bool tcp_port_probe(const struct in_addr& ip, int port, int timeout_ms) {
 static esp_err_t set_mqtt(httpd_req_t* req) {
     const char* parse_error = nullptr;
     JsonGuard   j(read_config_document(req, 512, parse_error));
-    if (!j) return send_err(req, "400 Bad Request", parse_error);
+    if (!j) return send_bad_req(req, parse_error);
     if (const char* error = config_request_field_error(j, HttpConfigFieldType::String,
                                                        {"broker", "user", "pass", "base"}))
-        return send_err(req, "400 Bad Request", error);
+        return send_bad_req(req, error);
     if (const char* error =
             config_request_field_error(j, HttpConfigFieldType::Boolean, {"clear_creds"}))
-        return send_err(req, "400 Bad Request", error);
+        return send_bad_req(req, error);
     std::string broker      = js(j, "broker");
     std::string user        = js(j, "user");
     std::string pass        = js(j, "pass");
@@ -463,14 +466,14 @@ static esp_err_t set_mqtt(httpd_req_t* req) {
         if (!net_is_up()) return send_bad_req(req, "Network not connected");
 
         // 2. Validate scheme / credentials leakage policy
-        std::string test_uri = broker;
-        const bool has_scheme = test_uri.find("://") != std::string::npos;
-        const bool is_tls_check = test_uri.rfind("mqtts://", 0) == 0 || test_uri.rfind("wss://", 0) == 0;
-        const bool has_creds = !user.empty() || !pass.empty();
-        if (!has_scheme) test_uri = "mqtt://" + test_uri;
-
-        if (has_creds && !is_tls_check)
+        const std::string_view uri_sv(broker);
+        const bool             is_tls_check =
+            uri_sv.substr(0, 8) == "mqtts://" || uri_sv.substr(0, 6) == "wss://";
+        if ((!user.empty() || !pass.empty()) && !is_tls_check)
             return send_bad_req(req, "Credentials require mqtts:// or wss://");
+        std::string test_uri;
+        if (uri_sv.find("://") == std::string_view::npos) test_uri = "mqtt://";
+        test_uri += uri_sv;
 
         // 3. Parse host and port
         std::string host;
@@ -547,10 +550,10 @@ static esp_err_t set_mqtt(httpd_req_t* req) {
     {
         Config         c                      = config();
         const uint32_t previous_room_identity = logic::history_room_identity(c);
-        c.mqtt_uri                            = broker;
-        c.mqtt_user                           = user;
-        c.mqtt_pass                           = pass;
-        c.mqtt_base                           = base;
+        c.mqtt_uri                            = std::move(broker);
+        c.mqtt_user                           = std::move(user);
+        c.mqtt_pass                           = std::move(pass);
+        c.mqtt_base                           = std::move(base);
         if (logic::history_room_identity(c) != previous_room_identity)
             c.ref_temp_generation =
                 diagnostics_next_generation(c.ref_temp_generation, esp_random());
@@ -571,6 +574,23 @@ struct RefTempRequest {
     uint32_t max_age_s = REF_TEMP_MAX_AGE_DEFAULT_S;
 };
 
+static bool parse_tenths_bounded(cJSON* root, const char* key, double max_val, uint16_t fallback,
+                                 uint16_t& out, bool* present = nullptr) {
+    cJSON* item = cJSON_GetObjectItem(root, key);
+    if (present) *present = item != nullptr;
+    if (!item) {
+        out = fallback;
+        return true;
+    }
+    if (!cJSON_IsNumber(item) || !std::isfinite(item->valuedouble) || item->valuedouble < 0.0 ||
+        item->valuedouble > max_val)
+        return false;
+    const double tenths = item->valuedouble * 10.0;
+    if (std::fabs(tenths - std::round(tenths)) > 0.000001) return false;
+    out = static_cast<uint16_t>(std::round(tenths));
+    return true;
+}
+
 static const char* parse_ref_temp_request(httpd_req_t* req, RefTempRequest& out) {
     // Three independently escaped MQTT topic/path mappings can exceed 1536 JSON bytes.
     // Keep the bounded body off the HTTP stack; the handler's OOM boundary returns 503.
@@ -582,27 +602,27 @@ static const char* parse_ref_temp_request(httpd_req_t* req, RefTempRequest& out)
             {"name", "topic", "temperature_path", "setpoint_topic", "setpoint_path",
              "timestamp_topic", "timestamp_path", "enabled_path", "hvac_mode_path"}))
         return error;
-    out.name      = js(j, "name");
-    out.topic     = js(j, "topic");
-    out.path      = js(j, "temperature_path");
     const bool has_setpoint_topic = cJSON_HasObjectItem(j, "setpoint_topic");
-    out.setpoint_path = js(j, "setpoint_path");
-    out.setpoint_topic = js(j, "setpoint_topic");
-    const bool has_time_topic = cJSON_HasObjectItem(j, "timestamp_topic");
-    out.time_path = js(j, "timestamp_path");
-    out.time_topic = js(j, "timestamp_topic");
-    out.enabled_path = js(j, "enabled_path");
-    out.hvac_mode_path = js(j, "hvac_mode_path");
-    cJSON* fixed_item = cJSON_GetObjectItem(j, "fixed_setpoint_c");
-    const bool has_fixed_item = fixed_item != nullptr;
-    bool fixed_type_valid = !fixed_item || (cJSON_IsNumber(fixed_item) &&
-                            std::isfinite(fixed_item->valuedouble) &&
-                            fixed_item->valuedouble >= 0.0 && fixed_item->valuedouble <= 35.0);
-    if (fixed_type_valid && fixed_item) {
-        const double tenths = fixed_item->valuedouble * 10.0;
-        fixed_type_valid = std::fabs(tenths - std::round(tenths)) <= 0.000001;
-        if (fixed_type_valid) out.fixed_setpoint_tenths = static_cast<uint16_t>(std::round(tenths));
-    }
+    const bool has_time_topic     = cJSON_HasObjectItem(j, "timestamp_topic");
+    struct RefStringField {
+        const char*  key;
+        std::string* dst;
+    };
+    const RefStringField fields[] = {
+        {"name", &out.name},
+        {"topic", &out.topic},
+        {"temperature_path", &out.path},
+        {"setpoint_topic", &out.setpoint_topic},
+        {"setpoint_path", &out.setpoint_path},
+        {"timestamp_topic", &out.time_topic},
+        {"timestamp_path", &out.time_path},
+        {"enabled_path", &out.enabled_path},
+        {"hvac_mode_path", &out.hvac_mode_path},
+    };
+    for (const RefStringField& f : fields) *f.dst = js(j, f.key);
+    bool       has_fixed_item   = false;
+    const bool fixed_type_valid = parse_tenths_bounded(j, "fixed_setpoint_c", 35.0, 0,
+                                                       out.fixed_setpoint_tenths, &has_fixed_item);
     cJSON* age_item = cJSON_GetObjectItem(j, "max_age_s");
     const bool age_type_valid = !age_item || (cJSON_IsNumber(age_item) &&
                                 age_item->valuedouble == static_cast<double>(age_item->valueint));
@@ -614,14 +634,8 @@ static const char* parse_ref_temp_request(httpd_req_t* req, RefTempRequest& out)
     if (!fixed_type_valid) return "Fixed target temperature must use at most one decimal place";
     if (!age_type_valid) return "Maximum age must be a whole number";
     if (out.topic.empty()) {                             // empty topic is the explicit Off state
-        out.path.clear();
-        out.setpoint_topic.clear();
-        out.setpoint_path.clear();
         out.fixed_setpoint_tenths = 0;
-        out.time_topic.clear();
-        out.time_path.clear();
-        out.enabled_path.clear();
-        out.hvac_mode_path.clear();
+        for (size_t i = 2; i < sizeof(fields) / sizeof(fields[0]); ++i) fields[i].dst->clear();
     }
     // v16 and older API clients only send the one topic. Preserve that request contract while new
     // clients can state each exact value source independently.
@@ -648,41 +662,50 @@ static const char* parse_ref_temp_request(httpd_req_t* req, RefTempRequest& out)
 // visible in /status and keep the write-free SHADOW diagnosis fail-closed.
 static esp_err_t set_ref_temp(httpd_req_t* req) {
     RefTempRequest in;
-    if (const char* error = parse_ref_temp_request(req, in))
-        return send_err(req, "400 Bad Request", error);
+    if (const char* error = parse_ref_temp_request(req, in)) return send_bad_req(req, error);
 
     Config c = config();
-    if (c.ref_temp_name == in.name && c.ref_temp_topic == in.topic && c.ref_temp_path == in.path &&
-        c.ref_temp_setpoint_topic == in.setpoint_topic &&
-        c.ref_temp_setpoint_path == in.setpoint_path && c.ref_temp_time_path == in.time_path &&
-        c.ref_temp_fixed_setpoint_tenths == in.fixed_setpoint_tenths &&
-        c.ref_temp_time_topic == in.time_topic &&
-        c.ref_temp_enabled_path == in.enabled_path &&
-        c.ref_temp_hvac_mode_path == in.hvac_mode_path &&
-        c.ref_temp_max_age_s == in.max_age_s) {
+    struct RefBindingPair {
+        std::string* cur;
+        std::string* next;
+    };
+    const RefBindingPair pairs[] = {
+        {&c.ref_temp_name, &in.name},
+        {&c.ref_temp_topic, &in.topic},
+        {&c.ref_temp_path, &in.path},
+        {&c.ref_temp_setpoint_topic, &in.setpoint_topic},
+        {&c.ref_temp_setpoint_path, &in.setpoint_path},
+        {&c.ref_temp_time_topic, &in.time_topic},
+        {&c.ref_temp_time_path, &in.time_path},
+        {&c.ref_temp_enabled_path, &in.enabled_path},
+        {&c.ref_temp_hvac_mode_path, &in.hvac_mode_path},
+    };
+    bool unchanged = c.ref_temp_fixed_setpoint_tenths == in.fixed_setpoint_tenths &&
+                     c.ref_temp_max_age_s == in.max_age_s;
+    for (const RefBindingPair& p : pairs) {
+        if (*p.cur != *p.next) {
+            unchanged = false;
+            break;
+        }
+    }
+    if (unchanged) {
         mqtt_reference_reconfigure(); // retry the saved mapping and clear old evidence
         return http_send_json(
             req, "{\"ok\":true,\"saved\":false,\"reboot\":false,\"room_evidence_reset\":true}");
     }
+    const bool     mapping_disabled       = in.topic.empty();
     const uint32_t previous_room_identity = logic::history_room_identity(c);
-    c.ref_temp_name                       = in.name;
-    c.ref_temp_topic                      = in.topic;
-    c.ref_temp_path                       = in.path;
-    c.ref_temp_setpoint_topic             = in.setpoint_topic;
-    c.ref_temp_setpoint_path              = in.setpoint_path;
-    c.ref_temp_fixed_setpoint_tenths      = in.fixed_setpoint_tenths;
-    c.ref_temp_time_topic                 = in.time_topic;
-    c.ref_temp_time_path                  = in.time_path;
-    c.ref_temp_enabled_path               = in.enabled_path;
-    c.ref_temp_hvac_mode_path             = in.hvac_mode_path;
-    c.ref_temp_max_age_s                  = in.max_age_s;
+    for (const RefBindingPair& p : pairs) *p.cur = std::move(*p.next);
+    c.ref_temp_fixed_setpoint_tenths = in.fixed_setpoint_tenths;
+    c.ref_temp_max_age_s             = in.max_age_s;
     if (logic::history_room_identity(c) != previous_room_identity)
         c.ref_temp_generation = diagnostics_next_generation(c.ref_temp_generation, esp_random());
     const uint32_t room_identity = logic::history_room_identity(c);
     if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");
     history_room_reset(room_identity);
     mqtt_reference_reconfigure();
-    diag_printf("mqtt: reference temperature mapping saved%s\n", in.topic.empty() ? " (disabled)" : "");
+    diag_printf("mqtt: reference temperature mapping saved%s\n",
+                mapping_disabled ? " (disabled)" : "");
     return http_send_json(req, "{\"ok\":true,\"saved\":true,\"reboot\":false}");
 }
 
@@ -696,14 +719,7 @@ struct CirculationRequest {
 };
 
 static bool parse_tenths_w(cJSON* root, const char* key, uint16_t fallback, uint16_t& out) {
-    cJSON* item = cJSON_GetObjectItem(root, key);
-    if (!item) { out = fallback; return true; }
-    if (!cJSON_IsNumber(item) || !std::isfinite(item->valuedouble) ||
-        item->valuedouble < 0.0 || item->valuedouble > 6553.5) return false;
-    const double tenths = item->valuedouble * 10.0;
-    if (std::fabs(tenths - std::round(tenths)) > 0.000001) return false;
-    out = static_cast<uint16_t>(std::round(tenths));
-    return true;
+    return parse_tenths_bounded(root, key, 6553.5, fallback, out);
 }
 
 static const char* parse_circulation_request(httpd_req_t* req, CirculationRequest& out) {
@@ -760,9 +776,8 @@ static esp_err_t test_circulation(httpd_req_t* req) {
     if (!config_diagnostics_enabled())
         return send_err(req, "409 Conflict", "Enable plant diagnostics before testing this source");
     CirculationRequest in;
-    if (const char* error = parse_circulation_request(req, in))
-        return send_err(req, "400 Bad Request", error);
-    if (in.topic.empty()) return send_err(req, "400 Bad Request", "MQTT topic is required for a test");
+    if (const char* error = parse_circulation_request(req, in)) return send_bad_req(req, error);
+    if (in.topic.empty()) return send_bad_req(req, "MQTT topic is required for a test");
     const CirculationSourceTestResult result =
         mqtt_circulation_test(circulation_test_config(in), 12000);
     if (!result.passed)
@@ -861,37 +876,32 @@ static esp_err_t set_diagnostics(httpd_req_t* req) {
 
 static esp_err_t set_circulation(httpd_req_t* req) {
     CirculationRequest in;
-    if (const char* error = parse_circulation_request(req, in))
-        return send_err(req, "400 Bad Request", error);
+    if (const char* error = parse_circulation_request(req, in)) return send_bad_req(req, error);
     const CirculationSourceTestConfig tested = circulation_test_config(in);
     if (!in.topic.empty() && !mqtt_circulation_test_proof_valid(in.test_proof, tested))
         return send_err(req, "409 Conflict", "Test this MQTT mapping successfully before saving");
 
     Config c = config();
-    if (c.circulation_name == in.name && c.circulation_topic == in.topic &&
-        c.circulation_power_path == in.power_path && c.circulation_time_path == in.time_path &&
-        c.circulation_max_age_s == in.max_age_s &&
-        c.circulation_on_tenths_w == in.on_tenths_w &&
-        c.circulation_off_tenths_w == in.off_tenths_w &&
-        c.circulation_confirm_s == in.confirm_s) {
-        return http_send_json(req, "{\"ok\":true,\"saved\":false,\"reboot\":false}");
-    }
     const bool evidence_mapping_changed =
         c.circulation_topic != in.topic || c.circulation_power_path != in.power_path ||
         c.circulation_time_path != in.time_path || c.circulation_max_age_s != in.max_age_s ||
         c.circulation_on_tenths_w != in.on_tenths_w ||
         c.circulation_off_tenths_w != in.off_tenths_w || c.circulation_confirm_s != in.confirm_s;
-    c.circulation_name         = in.name;
-    c.circulation_topic        = in.topic;
-    c.circulation_power_path   = in.power_path;
-    c.circulation_time_path    = in.time_path;
-    c.circulation_max_age_s    = in.max_age_s;
-    c.circulation_on_tenths_w  = in.on_tenths_w;
-    c.circulation_off_tenths_w = in.off_tenths_w;
-    c.circulation_confirm_s    = in.confirm_s;
-    if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");
+    if (!evidence_mapping_changed && c.circulation_name == in.name) {
+        return http_send_json(req, "{\"ok\":true,\"saved\":false,\"reboot\":false}");
+    }
+    const bool mapping_disabled = in.topic.empty();
+    c.circulation_name          = std::move(in.name);
+    c.circulation_topic         = std::move(in.topic);
+    c.circulation_power_path    = std::move(in.power_path);
+    c.circulation_time_path     = std::move(in.time_path);
+    c.circulation_max_age_s     = in.max_age_s;
+    c.circulation_on_tenths_w   = in.on_tenths_w;
+    c.circulation_off_tenths_w  = in.off_tenths_w;
+    c.circulation_confirm_s     = in.confirm_s;
+    if (!config_save(c)) return send_write_failed(req);
     if (evidence_mapping_changed) mqtt_circulation_reconfigure(!c.circulation_topic.empty());
-    diag_printf("mqtt: circulation power mapping saved%s\n", in.topic.empty() ? " (disabled)" : "");
+    diag_printf("mqtt: circulation power mapping saved%s\n", mapping_disabled ? " (disabled)" : "");
     return http_send_json(req, "{\"ok\":true,\"saved\":true,\"reboot\":false}");
 }
 
@@ -1072,8 +1082,7 @@ static esp_err_t set_hp(httpd_req_t* req) {
 // save anything: the user sees the found IPv4 in the normal host field and decides with Save or
 // Cancel whether it becomes configuration. A bounded miss returns control for manual entry.
 static esp_err_t discover_homehub_now(httpd_req_t* req) {
-    if (!net_is_up())
-        return send_err(req, "400 Bad Request", "Network not connected");
+    if (!net_is_up()) return send_bad_req(req, "Network not connected");
     std::string found;
     if (!mb_discover_homehub(found))
         return send_err(req, "404 Not Found", "No HomeHub found");
@@ -1110,9 +1119,9 @@ static esp_err_t set_syslog(httpd_req_t* req) {
     // a re-save there re-arms the credential-rollback trial.
     if (host == c.syslog_host && port == c.syslog_port)
         return http_send_json(req, "{\"ok\":true,\"reboot\":false}");
-    c.syslog_host = host;
+    c.syslog_host = std::move(host);
     c.syslog_port = port;
-    if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");
+    if (!config_save(c)) return send_write_failed(req);
     http_send_json(req, "{\"ok\":true,\"reboot\":true}");
     reboot_soon();
     return ESP_OK;
@@ -1135,8 +1144,8 @@ static esp_err_t set_ntp(httpd_req_t* req) {
 
     Config c = config();
     if (server == c.ntp_server) return http_send_json(req, "{\"ok\":true,\"reboot\":false}");
-    c.ntp_server = server;
-    if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");
+    c.ntp_server = std::move(server);
+    if (!config_save(c)) return send_write_failed(req);
     http_send_json(req, "{\"ok\":true,\"reboot\":true}");
     reboot_soon();
     return ESP_OK;
@@ -1376,16 +1385,17 @@ static esp_err_t set_ota(httpd_req_t* req) {
     const char* parse_error = nullptr;
     JsonGuard   j(read_config_document(req, 128, parse_error));
     if (!j) return send_bad_req(req, parse_error);
-    std::string channel = js(j, "channel");
+    const std::string_view channel(js(j, "channel"));
+    const bool             valid = ota_channel_valid(channel);
+    const OtaChannel       want  = ota_channel_parse(channel);
     j.reset();
 
-    if (!ota_channel_valid(channel)) return send_bad_req(req, "unknown channel");
+    if (!valid) return send_bad_req(req, "unknown channel");
 
     Config c = config();
-    const OtaChannel want = ota_channel_parse(channel);
     if (want == c.ota_channel) return http_send_json(req, "{\"ok\":true,\"reboot\":false}");
     c.ota_channel = want;
-    if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");
+    if (!config_save(c)) return send_write_failed(req);
     diag_printf("ota: update channel set to %s\n", ota_channel_name(want));
     return http_send_json(req, "{\"ok\":true,\"reboot\":false}");
 }
@@ -1400,16 +1410,17 @@ static esp_err_t set_lang(httpd_req_t* req) {
     const char* parse_error = nullptr;
     JsonGuard   j(read_config_document(req, 128, parse_error));
     if (!j) return send_bad_req(req, parse_error);
-    std::string lang = js(j, "lang");
+    const std::string_view lang(js(j, "lang"));
+    const bool             valid = ui_lang_valid(lang);
+    const UiLang           want  = ui_lang_parse(lang);
     j.reset();
 
-    if (!ui_lang_valid(lang)) return send_bad_req(req, "unknown language");
+    if (!valid) return send_bad_req(req, "unknown language");
 
     Config c = config();
-    const UiLang want = ui_lang_parse(lang);
     if (want == c.ui_lang) return http_send_json(req, "{\"ok\":true,\"reboot\":false}");
     c.ui_lang = want;
-    if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");
+    if (!config_save(c)) return send_write_failed(req);
     diag_printf("ui: language set to %s\n", ui_lang_name(want));
     return http_send_json(req, "{\"ok\":true,\"reboot\":false}");
 }

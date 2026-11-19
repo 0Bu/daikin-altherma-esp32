@@ -23,6 +23,7 @@
 #include <cstddef>
 #include <cstring>
 #include <string>
+#include <string_view>
 
 namespace daik {
 
@@ -39,12 +40,12 @@ inline const char* ota_channel_name(OtaChannel c) { return c == OtaChannel::Dev 
 
 // Accepts only the two names /status and POST /set_ota document. Anything else is REFUSED rather
 // than defaulted: a typo'd channel silently meaning "release" would look like the save worked.
-inline bool ota_channel_valid(const std::string& s) { return s == "release" || s == "dev"; }
+inline bool ota_channel_valid(std::string_view s) { return s == "release" || s == "dev"; }
 
 // Parse a stored/POSTed channel name, falling back to `def` for anything unrecognised. The fallback
 // is for the LOAD path (an NVS blob written by a future build, a corrupt byte); the request path
 // validates with ota_channel_valid first and rejects instead.
-inline OtaChannel ota_channel_parse(const std::string& s, OtaChannel def = OtaChannel::Release) {
+inline OtaChannel ota_channel_parse(std::string_view s, OtaChannel def = OtaChannel::Release) {
     if (s == "dev")     return OtaChannel::Dev;
     if (s == "release") return OtaChannel::Release;
     return def;

@@ -16,6 +16,7 @@
 #include <atomic>
 #include <cstdlib>          // abort() — the fail-stop when the config mutex can't be created
 #include <memory> // unique_ptr — the factory seed builds its Config off the caller's stack
+#include <utility>
 #include <vector>
 
 namespace daik {
@@ -168,14 +169,10 @@ std::string config_profile() {
     return g_cfg.profile;
 }
 
-static void publish_locked(Config&& c) {
+__attribute__((noinline)) static void publish(Config&& c) {
+    Lock lk(g_mtx);
     c.runtime_revision = config_next_revision(g_cfg.runtime_revision);
     g_cfg              = std::move(c);
-}
-
-static void publish(Config&& c) {
-    Lock lk(g_mtx);
-    publish_locked(std::move(c));
 }
 
 void config_load() {
@@ -228,37 +225,38 @@ void config_load() {
                     "kept\n");
     }
     if (blob_loaded) {
-        c.wifi_ssid            = b.wifi_ssid;
-        c.wifi_pass            = b.wifi_pass;
-        c.wifi_ssid_backup     = b.wifi_ssid_backup;
-        c.wifi_pass_backup     = b.wifi_pass_backup;
+        c.wifi_ssid            = std::move(b.wifi_ssid);
+        c.wifi_pass            = std::move(b.wifi_pass);
+        c.wifi_ssid_backup     = std::move(b.wifi_ssid_backup);
+        c.wifi_pass_backup     = std::move(b.wifi_pass_backup);
         c.wifi_rollback_active = b.wifi_rollback_active;
         c.wifi_rolled_back     = b.wifi_rolled_back;
-        c.mqtt_uri             = b.mqtt_uri;
-        c.mqtt_user            = b.mqtt_user;
-        c.mqtt_pass            = b.mqtt_pass;
+        c.mqtt_uri             = std::move(b.mqtt_uri);
+        c.mqtt_user            = std::move(b.mqtt_user);
+        c.mqtt_pass            = std::move(b.mqtt_pass);
         // Gated on has_mqtt_base only for symmetry with the other appended blocks — a pre-v16 blob
         // decodes the member empty anyway, and empty already MEANS the compile-time default
         // (logic/mqtt_base.hpp). There is deliberately no Kconfig fallback to apply here: unlike
         // the board block, "absent" and "default" are the same state for this field.
-        if (b.has_mqtt_base) c.mqtt_base = b.mqtt_base;
+        if (b.has_mqtt_base) c.mqtt_base = std::move(b.mqtt_base);
         if (b.has_ref_temp) {
-            c.ref_temp_name          = b.ref_temp_name;
-            c.ref_temp_topic         = b.ref_temp_topic;
-            c.ref_temp_path          = b.ref_temp_path;
-            c.ref_temp_time_path     = b.ref_temp_time_path;
-            c.ref_temp_setpoint_path = b.ref_temp_setpoint_path;
-            c.ref_temp_setpoint_topic =
-                b.has_ref_multi_source ? b.ref_temp_setpoint_topic
-                                       : (b.ref_temp_setpoint_path.empty() ? "" : b.ref_temp_topic);
-            c.ref_temp_time_topic = b.has_ref_multi_source
-                                        ? b.ref_temp_time_topic
-                                        : (b.ref_temp_time_path.empty() ? "" : b.ref_temp_topic);
+            c.ref_temp_name          = std::move(b.ref_temp_name);
+            c.ref_temp_path          = std::move(b.ref_temp_path);
+            c.ref_temp_time_path     = std::move(b.ref_temp_time_path);
+            c.ref_temp_setpoint_path = std::move(b.ref_temp_setpoint_path);
+            if (b.has_ref_multi_source) {
+                c.ref_temp_setpoint_topic = std::move(b.ref_temp_setpoint_topic);
+                c.ref_temp_time_topic     = std::move(b.ref_temp_time_topic);
+            } else {
+                if (!c.ref_temp_setpoint_path.empty()) c.ref_temp_setpoint_topic = b.ref_temp_topic;
+                if (!c.ref_temp_time_path.empty()) c.ref_temp_time_topic = b.ref_temp_topic;
+            }
+            c.ref_temp_topic = std::move(b.ref_temp_topic);
             if (b.has_ref_multi_source && b.ref_temp_fixed_setpoint_tenths <= UINT16_MAX)
                 c.ref_temp_fixed_setpoint_tenths =
                     static_cast<uint16_t>(b.ref_temp_fixed_setpoint_tenths);
-            c.ref_temp_enabled_path   = b.ref_temp_enabled_path;
-            c.ref_temp_hvac_mode_path = b.ref_temp_hvac_mode_path;
+            c.ref_temp_enabled_path   = std::move(b.ref_temp_enabled_path);
+            c.ref_temp_hvac_mode_path = std::move(b.ref_temp_hvac_mode_path);
             c.ref_temp_max_age_s      = b.ref_temp_max_age_s;
             c.ref_temp_generation     = b.ref_temp_generation;
         }
@@ -283,10 +281,10 @@ void config_load() {
                                                 b.circulation_power_path, b.circulation_time_path,
                                                 b.circulation_max_age_s, on_w, off_w, confirm_s,
                                                 &why)) {
-                c.circulation_name         = b.circulation_name;
-                c.circulation_topic        = b.circulation_topic;
-                c.circulation_power_path   = b.circulation_power_path;
-                c.circulation_time_path    = b.circulation_time_path;
+                c.circulation_name         = std::move(b.circulation_name);
+                c.circulation_topic        = std::move(b.circulation_topic);
+                c.circulation_power_path   = std::move(b.circulation_power_path);
+                c.circulation_time_path    = std::move(b.circulation_time_path);
                 c.circulation_max_age_s    = b.circulation_max_age_s;
                 c.circulation_on_tenths_w  = on_w;
                 c.circulation_off_tenths_w = off_w;
@@ -296,9 +294,9 @@ void config_load() {
                             why ? why : "invalid config");
             }
         }
-        c.syslog_host = b.syslog_host;
+        c.syslog_host = std::move(b.syslog_host);
         c.syslog_port = b.syslog_port;
-        c.ntp_server  = b.ntp_server;
+        c.ntp_server  = std::move(b.ntp_server);
         // has_board is false for a blob written before the board block existed (v1). Those fields
         // were compile-time then, so "absent" must read as the Kconfig default, NOT as disabled —
         // otherwise the OTA that introduces this feature turns a XIAO user's working LED off.
@@ -326,7 +324,7 @@ void config_load() {
         // explicit deletion and consent cannot be reconstructed. A fresh/pre-v5 device remains
         // pending and gets exactly one automatic search on its first networked boot.
         if (b.has_modbus) {
-            c.mb_host    = b.mb_host;
+            c.mb_host    = std::move(b.mb_host);
             c.mb_port    = b.mb_port;
             c.mb_unit_id = b.mb_unit_id;
         }
@@ -391,6 +389,7 @@ void config_load() {
             probe.rx_pin = probe.tx_pin = -1;
             // A build whose OWN defaults don't validate is a misconfigured Kconfig, not user input.
             // Disable both rather than drive a pin that just failed the safety rule twice.
+            why.clear();
             if (!board_hw_valid(probe, why, SOC_GPIO_PIN_COUNT - 1, hw_octal_spi())) {
                 diag_printf("config: build board defaults also rejected (%s) — indicator + button off\n",
                             why.c_str());
@@ -401,13 +400,11 @@ void config_load() {
         probe.rx_pin = saved_rx;
         probe.tx_pin = saved_tx;
     }
-    {
-        why.clear();
-        if (!board_identity_valid(c, why)) {
-            diag_printf("config: persisted board identity rejected (%s; id=%d) — using Custom\n",
-                        why.c_str(), static_cast<int>(c.board_preset_id));
-            c.board_preset_id = BoardPresetId::Custom;
-        }
+    why.clear();
+    if (!board_identity_valid(c, why)) {
+        diag_printf("config: persisted board identity rejected (%s; id=%d) — using Custom\n",
+                    why.c_str(), static_cast<int>(c.board_preset_id));
+        c.board_preset_id = BoardPresetId::Custom;
     }
     // "" (either no ntp_server yet, or an explicit empty save via POST /set_ntp) falls back to the
     // Kconfig default — unlike syslog_host, an empty ntp_server is not a disabled state to preserve.
@@ -464,13 +461,11 @@ void config_load() {
     c.x10a_identity_fp = link_blob_loaded ? link_blob.identity_fp : 0;
     // Optional hardware fails closed on an invalid persisted mapping. Disabling it keeps the UI
     // reachable without claiming or driving a bad pad; the stored pins remain visible for repair.
-    {
-        why.clear();
-        if (!env3_config_valid(c, why, SOC_GPIO_PIN_COUNT - 1, hw_octal_spi())) {
-            diag_printf("config: persisted ENV III config rejected (%s; sda=%d scl=%d) — disabled\n",
-                        why.c_str(), c.env3_sda, c.env3_scl);
-            c.env3_enabled = false;
-        }
+    why.clear();
+    if (!env3_config_valid(c, why, SOC_GPIO_PIN_COUNT - 1, hw_octal_spi())) {
+        diag_printf("config: persisted ENV III config rejected (%s; sda=%d scl=%d) — disabled\n",
+                    why.c_str(), c.env3_sda, c.env3_scl);
+        c.env3_enabled = false;
     }
     // Re-check on the way IN even though the blob is atomic: older per-key layouts, corruption, a
     // different board's NVS image and future format mistakes are all still untrusted. A guard, not

@@ -2109,6 +2109,25 @@
       },
       "test_source_sha256": "9d110a5b28f81c6b526447a4a97ae4aceb59489a00b6348a6f55354a8576fae9",
       "validation_boundary": "Host and container compilers exercised synthetic inputs. Hardware and UI behavior remain separate evidence."
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple Clang 17.0.0, arm64",
+        "gcc-13-linux-ubuntu24": "Ubuntu GCC 13.3.0, pinned ESP-IDF v6.1 Docker, aarch64",
+        "gcc-15-github-linux-ubuntu26": "Ubuntu GCC 15.2.0, Docker, x86-64",
+        "gcc-15-linux-ubuntu26": "Ubuntu GCC 15.2.0, Docker, aarch64"
+      },
+      "hosted_confirmation": "The x86-64 Ubuntu 26.04 container measures the hosted profile locally.",
+      "runner": "scripts/run-mock-tests.sh --coverage on Darwin and the same C++17 CHECK suite with gcov in Docker",
+      "scope": "Bounded SPSC reference MQTT ring helpers in payload_complete.hpp, compact UI language lookup table in ui_lang.hpp, in-place cache commit helper in x10a_snapshot.hpp, and constexpr profile view helpers. Changed branch ratios stay at 100% or increase across Clang 17, GCC 13, and GCC 15.",
+      "sources": {
+        "main/logic/payload_complete.hpp": "044d28385c91ceaffdf6dd8e44d252c085449050ba987478295e3ad328105212",
+        "main/logic/profile_view.hpp": "e04367b6dd9adc00075493aba9f5e001a7758609854b017e1f5ff4443ff50cbc",
+        "main/logic/ui_lang.hpp": "f4c4909e501fb1a1508a00b9b342c028ae1e5758b3a34a08bfd44c93d704882c",
+        "main/logic/x10a_snapshot.hpp": "a25c8950562cc779f955be5390da037dfd4d8c597fb55330706a2253074c1b85"
+      },
+      "test_source_sha256": "626265734d4ec9e3adc6d0b78d977f4139fe97a331c6003fdf972c4303d07fb0",
+      "validation_boundary": "Compilers exercised synthetic inputs. The result does not establish hardware SRAM2 headroom."
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
@@ -2467,8 +2486,8 @@
         "taken": 15
       },
       "main/logic/payload_complete.hpp": {
-        "outcomes": 108,
-        "taken": 108
+        "outcomes": 138,
+        "taken": 138
       },
       "main/logic/profile_table_equal.hpp": {
         "outcomes": 36,
@@ -2531,8 +2550,8 @@
         "taken": 6
       },
       "main/logic/ui_lang.hpp": {
-        "outcomes": 96,
-        "taken": 96
+        "outcomes": 46,
+        "taken": 46
       },
       "main/logic/utf8.hpp": {
         "outcomes": 30,
@@ -2559,8 +2578,8 @@
         "taken": 10
       },
       "main/logic/x10a_snapshot.hpp": {
-        "outcomes": 40,
-        "taken": 33
+        "outcomes": 62,
+        "taken": 52
       }
     },
     "gcc-13-linux-ubuntu24": {
@@ -2917,8 +2936,8 @@
         "taken": 23
       },
       "main/logic/payload_complete.hpp": {
-        "outcomes": 122,
-        "taken": 122
+        "outcomes": 154,
+        "taken": 154
       },
       "main/logic/profile_table_equal.hpp": {
         "outcomes": 40,
@@ -2981,8 +3000,8 @@
         "taken": 6
       },
       "main/logic/ui_lang.hpp": {
-        "outcomes": 98,
-        "taken": 98
+        "outcomes": 46,
+        "taken": 46
       },
       "main/logic/utf8.hpp": {
         "outcomes": 30,
@@ -3009,8 +3028,8 @@
         "taken": 16
       },
       "main/logic/x10a_snapshot.hpp": {
-        "outcomes": 44,
-        "taken": 36
+        "outcomes": 62,
+        "taken": 54
       }
     },
     "gcc-15-github-linux-ubuntu26": {
@@ -3367,8 +3386,8 @@
         "taken": 23
       },
       "main/logic/payload_complete.hpp": {
-        "outcomes": 122,
-        "taken": 122
+        "outcomes": 154,
+        "taken": 154
       },
       "main/logic/profile_table_equal.hpp": {
         "outcomes": 40,
@@ -3431,8 +3450,8 @@
         "taken": 6
       },
       "main/logic/ui_lang.hpp": {
-        "outcomes": 98,
-        "taken": 98
+        "outcomes": 46,
+        "taken": 46
       },
       "main/logic/utf8.hpp": {
         "outcomes": 30,
@@ -3459,8 +3478,8 @@
         "taken": 16
       },
       "main/logic/x10a_snapshot.hpp": {
-        "outcomes": 44,
-        "taken": 36
+        "outcomes": 62,
+        "taken": 54
       }
     },
     "gcc-15-linux-ubuntu26": {
@@ -3817,8 +3836,8 @@
         "taken": 23
       },
       "main/logic/payload_complete.hpp": {
-        "outcomes": 122,
-        "taken": 122
+        "outcomes": 154,
+        "taken": 154
       },
       "main/logic/profile_table_equal.hpp": {
         "outcomes": 40,
@@ -3881,8 +3900,8 @@
         "taken": 6
       },
       "main/logic/ui_lang.hpp": {
-        "outcomes": 98,
-        "taken": 98
+        "outcomes": 46,
+        "taken": 46
       },
       "main/logic/utf8.hpp": {
         "outcomes": 30,
@@ -3909,8 +3928,8 @@
         "taken": 16
       },
       "main/logic/x10a_snapshot.hpp": {
-        "outcomes": 44,
-        "taken": 36
+        "outcomes": 62,
+        "taken": 54
       }
     }
   },

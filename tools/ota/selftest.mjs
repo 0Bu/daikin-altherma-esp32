@@ -628,11 +628,11 @@ try {
         "mqtt_publish(s_avail, \"offline\", 0, 1, 0))")],
     ["the withdrawal intent is read without being consumed", () =>
       replaceOnce("main/mqtt_ha.cpp",
-        "s_transport_pause_withdraws_online.exchange(false, std::memory_order_acq_rel)",
-        "s_transport_pause_withdraws_online.load(std::memory_order_acquire)")],
+        "s_transport_pause_state.fetch_and(~withdraw_bits, std::memory_order_acq_rel)",
+        "s_transport_pause_state.load(std::memory_order_acquire)")],
     ["an unconsumed withdrawal intent outlives its network lease", () =>
       replaceOnce("main/mqtt_ha.cpp",
-        "    s_transport_pause_withdraws_online.store(false, std::memory_order_release);\n", "")],
+        "        if (owners == 1) next &= ~TRANSPORT_PAUSE_WITHDRAW_ARMED;\n", "")],
     ["MQTT transport pause is never acknowledged", () =>
       replaceOnce("main/mqtt_ha.cpp",
         "s_transport_paused.store(true, std::memory_order_release);",
@@ -923,6 +923,26 @@ try {
       replaceOnce("main/main.cpp",
         "        daik::mb_start();\n        daik::mqtt_ha_start();",
         "        daik::mqtt_ha_start();\n        daik::mb_start();")],
+    ["X10A poll_once swaps transient buffers into persistent cache instead of committing in place", () =>
+      replaceOnce("main/hp_poll.cpp",
+        "logic::commit_cached_values_in_place(s_cache, fresh);",
+        "s_cache.swap(fresh);")],
+    ["HomeHub mb_poll_once swaps transient buffers instead of committing in place", () =>
+      replaceOnce("main/hp_modbus.cpp",
+        "logic::commit_cached_values_in_place(s_cache, fresh);",
+        "s_cache.swap(fresh);")],
+    ["overlapping Weather/OTA pause lease releases MQTT pause early", () =>
+      replaceOnce("main/mqtt_ha.cpp",
+        "        if (owners == 1) next &= ~TRANSPORT_PAUSE_WITHDRAW_ARMED;",
+        "        if (owners >= 1) next = 0;")],
+    ["split pause/withdraw atomics reintroduce TOCTOU race across overlapping leases", () =>
+      replaceOnce("main/mqtt_ha.cpp",
+        "static std::atomic<uint32_t> s_transport_pause_state{0};",
+        "static std::atomic<bool> s_transport_pause_requested{false};\nstatic std::atomic<uint32_t> s_transport_pause_state{0};")],
+    ["MQTT inbound queue allocates eight worst-case frame buffers instead of byte-ring descriptors", () =>
+      replaceOnce("main/mqtt_ha.cpp",
+        "s_ref_queue = xQueueCreate(REF_QUEUE_DEPTH, sizeof(ReferenceMqttFrameQueued));",
+        "s_ref_queue = xQueueCreate(REF_QUEUE_DEPTH, sizeof(ReferenceMqttFrame));")],
   ];
 
   let caught = 0;

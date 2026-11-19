@@ -30,6 +30,7 @@
 // decoded DEFENSIVELY on the load path (an unknown stored byte reads as Auto — a garbled byte must
 // not force a language the user never chose).
 #include <string>
+#include <string_view>
 
 namespace daik {
 
@@ -69,33 +70,40 @@ inline const char* ui_lang_name(UiLang l) {
     }
 }
 
+inline bool ui_lang_parse_exact(std::string_view s, UiLang& out) {
+    struct Entry {
+        const char* code;
+        UiLang      lang;
+    };
+    static constexpr Entry kEntries[] = {
+        {"auto", UiLang::Auto}, {"de", UiLang::De}, {"en", UiLang::En}, {"es", UiLang::Es},
+        {"fr", UiLang::Fr},     {"it", UiLang::It}, {"pl", UiLang::Pl}, {"cs", UiLang::Cs},
+        {"uk", UiLang::Uk},     {"zh", UiLang::Zh}, {"ja", UiLang::Ja}, {"nb", UiLang::Nb},
+        {"sv", UiLang::Sv},     {"fi", UiLang::Fi},
+    };
+    for (const auto& entry : kEntries) {
+        if (s == entry.code) {
+            out = entry.lang;
+            return true;
+        }
+    }
+    return false;
+}
+
 // Accepts only the names /status and POST /set_lang document. Anything else is REFUSED rather
 // than defaulted: a typo'd language silently meaning "auto" would look like the save worked.
-inline bool ui_lang_valid(const std::string& s) {
-    return s == "auto" || s == "de" || s == "en" || s == "es" || s == "fr" || s == "it" ||
-           s == "pl" || s == "cs" || s == "uk" || s == "zh" || s == "ja" || s == "nb" ||
-           s == "sv" || s == "fi";
+inline bool ui_lang_valid(std::string_view s) {
+    UiLang parsed = UiLang::Auto;
+    return ui_lang_parse_exact(s, parsed);
 }
 
 // Parse a stored/POSTed language name, falling back to `def` for anything unrecognised. The fallback
 // is for the LOAD path (an NVS blob written by a future build, a corrupt byte); the request path
 // validates with ui_lang_valid first and rejects instead.
-inline UiLang ui_lang_parse(const std::string& s, UiLang def = UiLang::Auto) {
-    if (s == "de")   return UiLang::De;
-    if (s == "en")   return UiLang::En;
-    if (s == "es")   return UiLang::Es;
-    if (s == "fr")   return UiLang::Fr;
-    if (s == "it")   return UiLang::It;
-    if (s == "pl")   return UiLang::Pl;
-    if (s == "cs")   return UiLang::Cs;
-    if (s == "uk")   return UiLang::Uk;
-    if (s == "zh")   return UiLang::Zh;
-    if (s == "ja")   return UiLang::Ja;
-    if (s == "nb")   return UiLang::Nb;
-    if (s == "sv")   return UiLang::Sv;
-    if (s == "fi")   return UiLang::Fi;
-    if (s == "auto") return UiLang::Auto;
-    return def;
+inline UiLang ui_lang_parse(std::string_view s, UiLang def = UiLang::Auto) {
+    UiLang parsed = def;
+    ui_lang_parse_exact(s, parsed);
+    return parsed;
 }
 
 // On-flash encoding (logic/config_store.hpp blob v4). Kept HERE, next to the enum, so the stored byte

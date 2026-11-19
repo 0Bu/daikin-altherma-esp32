@@ -1282,7 +1282,7 @@ const pauseStep = mqtt.slice(pauseStart, holdStart);
 const holdStep = mqtt.slice(holdStart, resumeStart);
 const resumeStep = mqtt.slice(resumeStart, resumeEnd);
 assert.match(pauseStep,
-  /s_transport_pause_requested\.load\(std::memory_order_acquire\)[\s\S]{0,220}?esp_mqtt_client_stop\(s_client\)[\s\S]{0,260}?s_client_running\.store\(false,\s*std::memory_order_release\)[\s\S]{0,260}?s_transport_paused\.store\(true,\s*std::memory_order_release\)/,
+  /transport_pause_requested\(\)[\s\S]{0,260}?esp_mqtt_client_stop\(s_client\)[\s\S]{0,260}?s_client_running\.store\(false,\s*std::memory_order_release\)[\s\S]{0,260}?s_transport_paused\.store\(true,\s*std::memory_order_release\)/,
   "the MQTT owner must stop and acknowledge esp-mqtt before a competing TLS session starts");
 // The clean stop discards the transport LWT, and an OTA install restarts the board while the
 // client is stopped. The connected transport must therefore retain `offline` itself, on the same
@@ -1293,7 +1293,7 @@ assert.ok(withdrawStart >= 0 && withdrawStart < pauseStart,
   "the OTA availability withdrawal must remain a scalar helper ahead of the pause step");
 const withdrawStep = mqtt.slice(withdrawStart, pauseStart);
 assert.match(withdrawStep,
-  /s_transport_pause_withdraws_online\.exchange\(false,\s*std::memory_order_acq_rel\);\s*if\s*\(!mqtt_pause_withdraws_online\(ota_pause,\s*s_client != nullptr,\s*s_connected\.load\(std::memory_order_acquire\)\)\)\s*return;\s*if\s*\(mqtt_publish\(s_avail,\s*"offline",\s*0,\s*1,\s*1\)\)/,
+  /s_transport_pause_state\.fetch_and\(~withdraw_bits,\s*std::memory_order_acq_rel\)[\s\S]{0,120}?if\s*\(!mqtt_pause_withdraws_online\(ota_pause,\s*s_client != nullptr,\s*s_connected\.load\(std::memory_order_acquire\)\)\)\s*return;\s*if\s*\(mqtt_publish\(s_avail,\s*"offline",\s*0,\s*1,\s*1\)\)/,
   "an OTA pause must consume its intent and retain QoS-1 `offline` only from a connected transport");
 assert.doesNotMatch(withdrawStep, /std::string|esp_mqtt_client_(?:stop|start|enqueue)|"online"/,
   "the withdrawal must stay allocation-free on the firmware side and must never claim `online`");
@@ -1304,11 +1304,13 @@ assert.ok(pauseQuiescedAt >= 0 && pauseWithdrawAt > pauseQuiescedAt && pauseStop
   "the withdrawal must run inside the unacknowledged pause, before the clean DISCONNECT");
 assert.equal(occurrences(mqtt, "mqtt_ota_withdraw_online();"), 1,
   "only the network-heap pause stop may withdraw installation availability");
-assert.equal(occurrences(mqtt, "s_transport_pause_withdraws_online.store(true"), 1,
+assert.equal(occurrences(mqtt, "s_transport_pause_state.fetch_or(TRANSPORT_PAUSE_WITHDRAW_STAGED"), 1,
   "only the public OTA entry point may raise the withdrawal intent");
+assert.doesNotMatch(mqtt, /\bs_transport_pause_(?:owners|requested|withdraws_online)\b/,
+  "network-heap pause owners and withdrawal state must share one atomic word without TOCTOU split atomics");
 assert.match(mqtt,
-  /void mqtt_transport_resume_after_network_heap\(\)\s*\{\s*s_transport_pause_withdraws_online\.store\(false,\s*std::memory_order_release\);\s*s_transport_pause_requested\.store\(false,\s*std::memory_order_release\);\s*\}/,
-  "the end of a network lease must discard a withdrawal intent that no stop consumed");
+  /void mqtt_transport_resume_after_network_heap\(\)\s*\{[\s\S]{0,420}?if\s*\(owners\s*==\s*1\)\s*next\s*&=\s*~TRANSPORT_PAUSE_WITHDRAW_ARMED;\s*if\s*\(s_transport_pause_state\.compare_exchange_weak\(/,
+  "the final network lease owner must clear pause state and armed withdrawal intent in one atomic transition");
 assert.match(holdStep,
   /ota_quiesce_step\(quiesce, network_busy\)[\s\S]{0,600}?mqtt_transport_pause_if_requested\(\)[\s\S]{0,180}?s_publish_network_quiesced\.store\(true,\s*std::memory_order_release\)[\s\S]{0,120}?vTaskDelay\([\s\S]{0,100}?return true;/,
   "the held MQTT helper must stop transport, acknowledge quiescence and leave before allocation");
@@ -1430,6 +1432,24 @@ assert.ok(transportPauseStart >= 0 && transportStop >= 0 &&
   "a successful transport stop must release BEFORE_CONNECT activity and paused state caches");
 assert.doesNotMatch(mqtt, /std::string\s+s_last_(?:modbus|weather|env3)_json\b/,
   "MQTT state deduplication must use fixed-size digests rather than heap-backed JSON string caches");
+assert.match(mqtt,
+  /s_ref_queue\s*=\s*xQueueCreate\(REF_QUEUE_DEPTH,\s*sizeof\(ReferenceMqttFrameQueued\)\)/,
+  "inbound MQTT frames must share the static byte ring behind compact queue descriptors");
+const pollOnceBody = poll.slice(poll.indexOf("static void poll_once()"), pollStart);
+const pollStartBody = poll.slice(pollEnd, poll.indexOf("size_t hp_values_capacity(", pollEnd));
+assert.match(pollStartBody,
+  /boot_cache\.reserve\(def::MAX_RESOLVED_PROFILE_ROWS\)[\s\S]{0,160}?s_cache\.swap\(boot_cache\)/,
+  "hp_poll_start must pin the maximum resolved X10A cache capacity in lower DRAM before poll/MQTT tasks start");
+assert.match(pollOnceBody,
+  /logic::commit_cached_values_in_place\(s_cache,\s*fresh\);/,
+  "poll_once must commit into the boot-pinned X10A cache without reallocating or freeing under lock");
+assert.doesNotMatch(pollOnceBody, /s_cache\.swap\s*\(/,
+  "poll_once must not swap transient heap vectors into SRAM2-backed persistent cache storage");
+const modbusStartBody = modbus.slice(
+  modbus.indexOf("void mb_start()"), modbus.indexOf("void mb_reconfigure("));
+assert.match(modbusStartBody,
+  /boot_cache\.reserve\(kMaxModbusCachedValues\)[\s\S]{0,160}?s_cache\.swap\(boot_cache\)/,
+  "mb_start must pin the maximum HomeHub/Altherma4 cache capacity in lower DRAM before workers start");
 assert.ok(appMain.indexOf("daik::weather_forecast_start()") < appMain.indexOf("daik::mqtt_ha_start()") &&
   appMain.indexOf("daik::mb_start()") < appMain.indexOf("daik::mqtt_ha_start()"),
   "boot-permanent Weather and HomeHub workers must allocate before pausable esp-mqtt transport startup");
@@ -1460,6 +1480,11 @@ assert.match(modbusTask.slice(modbusOtaHold, modbusPollCall),
   "the HomeHub network hold must yield at its ordinary cadence");
 assert.match(modbusPoll, /(?:const Config& c = config\(\);|with_config\()[\s\S]*?std::vector/,
   "the allocation-rich HomeHub cycle must still own the Config snapshot and model-sized values");
+assert.match(modbusPoll,
+  /logic::commit_cached_values_in_place\(s_cache,\s*fresh\);/,
+  "mb_poll_once must commit into the boot-pinned Modbus cache in place");
+assert.doesNotMatch(modbusPoll, /s_cache\.swap\s*\(/,
+  "mb_poll_once must not swap transient heap vectors into persistent Modbus cache storage");
 assert.match(modbus,
   /struct\s+MbNetworkActivity[\s\S]{0,220}?s_network_quiesced\.store\(false,\s*std::memory_order_release\)[\s\S]{0,220}?s_network_quiesced\.store\(true,\s*std::memory_order_release\)/,
   "HomeHub cycle ownership must withdraw and restore its acknowledgement by RAII");

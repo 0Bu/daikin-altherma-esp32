@@ -46,6 +46,7 @@
 #include <atomic>
 #include <cstdio>
 #include <exception>
+#include <new>
 #include <utility>
 #include <vector>
 
@@ -352,10 +353,12 @@ static void checkup_record_poll_gap(uint32_t generation, bool profile_confirmed 
     }
 
     std::vector<CachedValue> fresh;
-    fresh.reserve(view.count());  // exact upper bound (<= 1 entry per ValueDef row): one sized allocation
-                                 // instead of ~log2(count) grow/free pairs + the transient old+new
-                                 // buffer coexistence — lowers peak on the WIRED path too. Still under
-                                 // poll_task's try/catch, so an OOM here remains a skipped cycle.
+    fresh.reserve(
+        def::MAX_RESOLVED_PROFILE_ROWS); // match boot-pinned s_cache capacity for in-place commit
+                                         // instead of ~log2(count) grow/free pairs + the transient
+                                         // old+new buffer coexistence — lowers peak on the WIRED
+                                         // path too. Still under poll_task's try/catch, so an OOM
+                                         // here remains a skipped cycle.
     bool      any_ok = false;
     int       regs   = 0;
     uint8_t   seen[256] = {0};
@@ -597,7 +600,7 @@ static void checkup_record_poll_gap(uint32_t generation, bool profile_confirmed 
                                           s_refrigerant_service_cycle_sample,
                                           esp_timer_get_time(), cycle_generation,
                                           service_max_gap_us);
-        s_cache.swap(fresh);
+        logic::commit_cached_values_in_place(s_cache, fresh);
         s_cache_profile    = prof.id;
         s_cache_identity_fp = c.x10a_identity_fp;
         ++s_cache_revision;
@@ -1029,6 +1032,18 @@ void hp_poll_start() {
     s_probe_done = xSemaphoreCreateBinaryStatic(&s_probe_done_storage);
     if (!s_probe_gate || !s_probe_done)
         diag_printf("hp_poll: probe semaphore init failed — POST /hp/query unavailable this boot\n");
+    // Pin the X10A cache capacity in lower DRAM before poll_task and pausable sdk_mqtt start,
+    // preventing post-boot poll_once() allocations from splitting SRAM2's 31 KiB OTA block.
+    if (s_mtx) {
+        try {
+            std::vector<CachedValue> boot_cache;
+            boot_cache.reserve(def::MAX_RESOLVED_PROFILE_ROWS);
+            Lock lk(s_mtx);
+            if (s_cache.capacity() < def::MAX_RESOLVED_PROFILE_ROWS) s_cache.swap(boot_cache);
+        } catch (const std::bad_alloc&) {
+            diag_printf("hp_poll: boot cache reserve failed — falling back to lazy growth\n");
+        }
+    }
     // The poll engine is the core of the device; if its task can't be created there is no heat-pump
     // polling at all. Report it loudly — the web UI + OTA still come up, so the board stays
     // fixable.
