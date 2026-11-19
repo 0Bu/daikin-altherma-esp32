@@ -22,7 +22,7 @@ const end = ota.indexOf("// Stream the optional build notes", start);
 assert.ok(start >= 0 && end > start);
 const body = ota.slice(start, end);
 const statusSource = fs.readFileSync("main/http_status.cpp", "utf8");
-const statusWrapper = statusSource.match(/static std::string jstr_r\([^)]*\) \{[\s\S]*?\n\}/)?.[0];
+const statusWrapper = statusSource.match(/struct RedactedJson \{[\s\S]*?static RedactedJson jstr_r\([^)]*\) noexcept \{[\s\S]*?\n\}/)?.[0];
 const hvacExpression = statusSource.match(/j \+= rt\.has_hvac_mode\s*\?[\s\S]*?: "null";/)?.[0];
 assert.ok(statusWrapper && hvacExpression, "production conditional HVAC serializer is missing");
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "daikin-report-privacy-"));

@@ -256,7 +256,7 @@ a mapped or fixed target is treated as the standing setpoint. Fixed targets cann
 | Object | Fields |
 |---|---|
 | `room` | `source_id:"living_room"`, `calibration_k:0`, `temperature_valid`, `setpoint_valid`, `control_eligible`, nullable `temperature_c`, `setpoint_c`, `error_k`, `source_unix_s`, `age_s`, `reason_code`, `counters.{messages,errors,rejections}`. |
-| `diagnosis` | `method_version:3`, `armed`, `state`, `reason`, `sample_eligible`, `forecast_available`, `outdoor_available`, `outdoor_source`, `outdoor_source_code`, `plant_outdoor_available`, `plant_outdoor_source`, `plant_outdoor_source_code`. |
+| `diagnosis` | `method_version:4`, `armed`, `state`, `reason`, `sample_eligible`, `forecast_available`, `outdoor_available`, `outdoor_source`, `outdoor_source_code`, `plant_outdoor_available`, `plant_outdoor_source`, `plant_outdoor_source_code`. |
 | `diagnosis.gates` | `plant_known`, `plant_active`, `heating_mode_known`, `heating_mode_active`. |
 | `diagnosis.room_evidence` | Nullable `current_error_k`, `source_unix_s`, `age_s`. |
 | `diagnosis.last_sample` | Nullable `room_error_k`, `unix_s`, `outdoor_temperature_c`, `plant_outdoor_temperature_c`; `outdoor_source`, `outdoor_source_code`, `plant_outdoor_source`, `plant_outdoor_source_code`; numeric `sequence`. |
@@ -270,7 +270,8 @@ The same age-projected diagnosis serves HTTP and MQTT: `reason:15` (`evaluation_
 and `sample_eligible:0` mean the owner has not evaluated recently. Current diagnosis evidence is null
 or unavailable, while `last_sample`, counters and independently fresh `room` evidence are preserved.
 Reads neither renew that evaluation nor create events. The project age rule is defined in
-[PLANT.md](PLANT.md#heating-curve-diagnosis); schema 3 and method 3 remain unchanged.
+[PLANT.md](PLANT.md#heating-curve-diagnosis). Method 4 keeps MQTT schema 3. Its outdoor-bin
+projection is available over HTTP. [API.md](API.md#heating-curve-diagnosis) defines the bin fields.
 
 Boolean facts use numeric 1/0; unestablished numbers are null. Source codes are 0 `none`, 1 `x10a`,
 2 `homehub`, 3 `env3`; the two recorded axes use their own current source. HomeHub input 44 must be

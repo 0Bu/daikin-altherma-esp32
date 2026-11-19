@@ -4,17 +4,19 @@
 // The implementation no longer contains a controller: it samples the raw room
 // deviation during confirmed SPACE-HEATING windows. A room-temperature error is an observation, not
 // a calibrated leaving-water-temperature correction; emitter type, water volume, building inertia,
-// valves and the room thermostat all affect that transfer. Nothing here quantizes, clamps, slews or
-// proposes a setpoint, and nothing here can address the plant.
+// valves and the room thermostat all affect that transfer. The sampled room error remains raw.
+// The diagnosis never proposes a setpoint or addresses the plant.
 #include <cmath>
 #include <cstdint>
+#include <limits>
 
+#include "heating_curve_bins.hpp"
 #include "outdoor_evidence.hpp"
 
 namespace daik::logic {
 
-// v3 excludes DHW routing even when the normal-space-operation flag remains active.
-inline constexpr uint8_t HEATING_CURVE_DIAGNOSIS_METHOD_VERSION = 3;
+// v4 adds scoped outdoor bins. Event admission retains the v3 heating and space-route gates.
+inline constexpr uint8_t HEATING_CURVE_DIAGNOSIS_METHOD_VERSION = 4;
 inline constexpr int64_t HEATING_CURVE_SAMPLE_CADENCE_MS = 30 * 60 * 1000;
 // Three nominal MQTT evaluation cycles; mqtt_ha.cpp pins this to its actual poll cadence.
 inline constexpr int64_t HEATING_CURVE_EVALUATION_MAX_AGE_MS = 3000;
@@ -131,6 +133,10 @@ struct HeatingCurveInputs {
     bool armed = false;  // configured MQTT room source; forecast is deliberately optional
     bool room_control_eligible = false;
     double room_error_k = 0.0;
+    // Bin scope requires a usable room target and a proven plant generation. The event does not.
+    double   room_target_c       = std::numeric_limits<double>::quiet_NaN();
+    uint32_t plant_generation    = 0;
+    uint8_t  plant_profile       = 0;
     bool x10a_connected = false;
     bool homehub_connected = false;
     bool plant_gate_known = false;
@@ -201,9 +207,20 @@ struct HeatingCurveSnapshot {
     uint32_t blocks = 0;
 };
 
-class HeatingCurveDiagnosis {
+template <typename BinsStorage = HeatingCurveBins> class HeatingCurveDiagnosisImpl {
 public:
+    HeatingCurveDiagnosisImpl() = default;
+    explicit HeatingCurveDiagnosisImpl(BinsStorage bins) noexcept : outdoor_bins_(bins) {}
+
     const HeatingCurveSnapshot& snapshot() const { return s_; }
+
+    // Use under the same owner lock as evaluate(). A source callback can end the target scope
+    // between evaluations; reporting can observe clock changes while evaluation is paused.
+    void observe_bin_target(double target_c) noexcept { outdoor_bins_.observe_target(target_c); }
+    void observe_bin_clock(int64_t unix_s) noexcept { outdoor_bins_.observe_clock(unix_s); }
+    const HeatingCurveBins& outdoor_bins() const noexcept { return outdoor_bins_; }
+    uint32_t outdoor_bins_generation() const noexcept { return outdoor_bins_generation_; }
+    uint8_t  outdoor_bins_profile() const noexcept { return outdoor_bins_profile_; }
 
     // Reading ages only the current verdict. It neither evaluates inputs nor advances the event
     // cadence/counters; dated samples keep the evidence captured at their original evaluation.
@@ -266,6 +283,25 @@ public:
             return s_;
         }
         s_.evaluations++;
+        // Detect plant endpoint or concrete Modbus profile changes even during a hold or inside the
+        // existing sample cadence. Profile 0 (probing/unspecified) locks in once resolved.
+        if (in.plant_generation != 0) {
+            if (in.plant_generation != outdoor_bins_generation_) {
+                if (outdoor_bins_generation_ != 0) reset_samples();
+                outdoor_bins_.forget();
+                outdoor_bins_generation_ = in.plant_generation;
+                outdoor_bins_profile_    = in.plant_profile;
+            } else if (in.plant_profile != 0) {
+                if (outdoor_bins_profile_ == 0) {
+                    outdoor_bins_profile_ = in.plant_profile;
+                } else if (in.plant_profile != outdoor_bins_profile_) {
+                    outdoor_bins_.forget();
+                    outdoor_bins_profile_ = in.plant_profile;
+                }
+            }
+        }
+        observe_bin_target(in.room_target_c);
+        observe_bin_clock(in.now_unix_s);
 
         // An idle plant is the normal all-summer state. Ask whether space conditioning is running
         // before judging the room source or clock, but never call a COOLING window "heating" merely
@@ -311,6 +347,8 @@ public:
         last_sample_ms_ = in.now_ms;
         s_.sequence++;
         s_.samples++;
+        if (in.plant_generation != 0 && std::isfinite(in.room_target_c))
+            outdoor_bins_.record(in.now_unix_s, in.room_error_k, in.plant_outdoor, in.outdoor);
         s_.reason = in.forecast_available ? HeatingCurveReason::SampleRecorded
                                           : HeatingCurveReason::ForecastUnavailable;
         return s_;
@@ -324,6 +362,9 @@ public:
     // mutex. One out-of-line body serves this boundary and the disarm path above (flash headroom).
     __attribute__((noinline)) void forget_samples() noexcept {
         reset_samples();
+        outdoor_bins_.forget();
+        outdoor_bins_generation_ = 0;
+        outdoor_bins_profile_    = 0;
         last_now_ms_ = -1;
         last_evaluation_ms_ = -1;
     }
@@ -343,7 +384,7 @@ private:
         return s_;
     }
 
-    void reset_samples() noexcept {
+    __attribute__((noinline)) void reset_samples() noexcept {
         last_sample_ms_ = -1;
         s_.has_last_sample = false;
         s_.last_sample_room_error_k = 0.0;
@@ -357,9 +398,14 @@ private:
     }
 
     HeatingCurveSnapshot s_{};
+    BinsStorage          outdoor_bins_;
+    uint32_t             outdoor_bins_generation_ = 0;
+    uint8_t              outdoor_bins_profile_    = 0;
     int64_t last_sample_ms_ = -1;
     int64_t last_now_ms_ = -1;
     int64_t              last_evaluation_ms_ = -1;
 };
+
+using HeatingCurveDiagnosis = HeatingCurveDiagnosisImpl<HeatingCurveBins>;
 
 }  // namespace daik::logic

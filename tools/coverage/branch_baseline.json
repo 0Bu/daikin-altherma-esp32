@@ -2059,6 +2059,22 @@
       "sources": {
         "main/logic/history.hpp": "single-sweep pel and cop trend helpers"
       }
+    },
+    {
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2)",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+        "gcc-15-github-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+      },
+      "hosted_confirmation": "Measured locally across Clang 17 arm64, GCC 13 Ubuntu 24.04, and GCC 15 Ubuntu 26.04; authoritative GitHub CI confirmation remains separate.",
+      "scope": "Source-scoped 7-UTC-day heating-curve outdoor bins, stop-window overlap helper, and Modbus endpoint/profile/target/clock reset boundaries. All changed branch ratios increase across Clang, GCC 13 and GCC 15.",
+      "sources": {
+        "main/logic/heating_curve_bins.hpp": "047189ebab2d617f58706d0deaf5298333c383dbd8ad590f22ebf9833e527f24",
+        "main/logic/heating_curve_diagnosis.hpp": "94c4ee612242a9028c5a066ea8e64024b77a2ed86b95e53d240057a613f48fb6"
+      },
+      "test_source_sha256": "1e82d61287a08800a33e6a10ad6db90d5cfb8dc6d4345d5e8b7bfd6e551aeec6"
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
@@ -2200,9 +2216,13 @@
         "taken": 229,
         "outcomes": 372
       },
+      "main/logic/heating_curve_bins.hpp": {
+        "outcomes": 112,
+        "taken": 99
+      },
       "main/logic/heating_curve_diagnosis.hpp": {
-        "outcomes": 89,
-        "taken": 76
+        "outcomes": 105,
+        "taken": 91
       },
       "main/logic/heating_curve_mqtt.hpp": {
         "outcomes": 310,
@@ -2642,9 +2662,13 @@
         "taken": 315,
         "outcomes": 498
       },
+      "main/logic/heating_curve_bins.hpp": {
+        "outcomes": 104,
+        "taken": 104
+      },
       "main/logic/heating_curve_diagnosis.hpp": {
-        "outcomes": 107,
-        "taken": 93
+        "outcomes": 125,
+        "taken": 110
       },
       "main/logic/heating_curve_mqtt.hpp": {
         "outcomes": 274,
@@ -3084,9 +3108,13 @@
         "taken": 257,
         "outcomes": 418
       },
+      "main/logic/heating_curve_bins.hpp": {
+        "outcomes": 104,
+        "taken": 104
+      },
       "main/logic/heating_curve_diagnosis.hpp": {
-        "outcomes": 107,
-        "taken": 93
+        "outcomes": 125,
+        "taken": 110
       },
       "main/logic/heating_curve_mqtt.hpp": {
         "outcomes": 240,
@@ -3526,9 +3554,13 @@
         "taken": 315,
         "outcomes": 498
       },
+      "main/logic/heating_curve_bins.hpp": {
+        "outcomes": 104,
+        "taken": 104
+      },
       "main/logic/heating_curve_diagnosis.hpp": {
-        "outcomes": 107,
-        "taken": 93
+        "outcomes": 125,
+        "taken": 110
       },
       "main/logic/heating_curve_mqtt.hpp": {
         "outcomes": 274,

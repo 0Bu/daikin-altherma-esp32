@@ -682,7 +682,9 @@ function wireRestOfApp() {
     }
     const res = await r.json().catch(() => ({}));
     idle(); closeRefTemp();
-    toast(t(res.saved === false ? "toast.no_changes" : "ref.saved"), res.saved === false ? "info" : "ok");
+    const notice = res.room_evidence_reset === true ? "ref.evidence_reset"
+      : res.saved === false ? "toast.no_changes" : "ref.saved";
+    toast(t(notice), res.saved === false ? "info" : "ok");
     await refreshStatus();
   });
 

@@ -107,7 +107,8 @@ const locales = ["de", "es", "fr", "it", "pl", "cs", "uk", "zh", "ja", "nb", "sv
 vm.runInContext(readAppSource().replace(/\nboot\(\);\s*$/, "\n") +
   locales.map(readUiLocale).join("") + `
   this.__ui = { S, UI_LANGS, t, esc, renderApp, activateLang, applyStaticI18n, showStage,
-    dynamicControlCardHtml, dynamicStateRow, outdoorAxisRow, plantOutdoorAxisRow, roomSourceStatus };`,
+    dynamicControlCardHtml, dynamicStateRow, outdoorAxisRow, plantOutdoorAxisRow, roomSourceStatus,
+    heatingCurveBinsRow };`,
 context, { filename: "main/www/app.sources" });
 const ui = context.__ui;
 assert.deepEqual(Array.from(ui.UI_LANGS), ["en", ...locales]);
@@ -159,6 +160,7 @@ for (const lang of ui.UI_LANGS) {
   assert.ok(card.includes(ui.esc(ui.t("dyn.state_stale"))));
   assert.ok(card.includes(ui.esc(ui.t("dyn.state_help_stale"))));
   assert.ok(!card.includes(ui.esc(ui.t("dyn.state_help_inactive"))));
+  assert.doesNotMatch(card, /dynamic:outdoor-bins/, `${lang}: no row on older firmware`);
   for (const html of [ui.outdoorAxisRow(d, ui.S.status.env3),
     ui.plantOutdoorAxisRow(d, ui.S.status.modbus)]) {
     assert.ok(html.includes(ui.esc(ui.t("dyn.outdoor_status_idle", "ENV III"))) ||
@@ -173,5 +175,53 @@ for (const lang of ui.UI_LANGS) {
   assert.equal(ui.roomSourceStatus(ui.S.status.reference_temperature, ui.S.status.mqtt).cls, "ok",
     `${lang}: independently fresh room source stays fresh`);
   assert.equal(JSON.stringify(d), event, `${lang}: rendering does not replace the recorded event`);
+
+  d.method_version = 4;
+  d.outdoor_bins = null;
+  const unavailable = ui.heatingCurveBinsRow(d);
+  assert.ok(unavailable.includes(ui.esc(ui.t("dyn.bins_no_scope"))), `${lang}: null bins explain absence`);
+  assert.ok(unavailable.includes(ui.esc(ui.t("sys.nodata"))));
+  assert.ok(!unavailable.includes(ui.esc(ui.t("dyn.bins_count", "0"))),
+    `${lang}: unavailable scope does not display a sample count`);
+
+  const first = 1780000000, last = first + 5400;
+  const homehub = { samples: 2, first_unix_s: first, last_unix_s: last,
+    room_sum_tenths: 12, room_min_tenths: 2, room_max_tenths: 10,
+    outdoor_sum_tenths: -73, outdoor_min_tenths: -48, outdoor_max_tenths: -25 };
+  const env3 = { samples: 1, first_unix_s: null, last_unix_s: null,
+    room_sum_tenths: 0, room_min_tenths: 0, room_max_tenths: 0,
+    outdoor_sum_tenths: 0, outdoor_min_tenths: 0, outdoor_max_tenths: 0 };
+  d.outdoor_bins = { scope_samples: 5, target_c: 21.5,
+    homehub: [homehub, null, null, null], env3: [null, env3, null, null] };
+  const binsCard = ui.dynamicControlCardHtml();
+  const row = ui.heatingCurveBinsRow(d);
+  assert.ok(binsCard.includes(row), `${lang}: recorded bins are part of the existing card`);
+  assert.match(row, /aria-expanded="false" aria-controls="dynamic-outdoor-bins-detail"/);
+  assert.match(row, /id="dynamic-outdoor-bins-detail"/);
+  assert.ok(row.includes(ui.esc(ui.t("dyn.bins_count", "5"))), `${lang}: scope count is not an axis sum`);
+  assert.ok(row.includes(ui.esc(ui.t("dyn.bins_count", "2"))));
+  assert.ok(row.includes(ui.esc(ui.t("dyn.bins_count", "1"))));
+  assert.ok(row.includes(ui.esc("HomeHub · <0 °C")) && row.includes(ui.esc("ENV III · 0–<5 °C")));
+  assert.ok(row.includes(ui.esc(ui.t("dyn.bins_help"))));
+  const num = (x, unit) => `${x.toLocaleString(lang, { minimumFractionDigits: 1,
+    maximumFractionDigits: 1, signDisplay: unit === "K" ? "exceptZero" : "auto" })} ${unit}`;
+  for (const [mean, min, max, unit] of [[.6, .2, 1, "K"], [-3.65, -4.8, -2.5, "°C"],
+    [0, 0, 0, "K"], [0, 0, 0, "°C"]]) {
+    const evidence = ui.t("dyn.bins_stats", num(mean, unit), num(min, unit), num(max, unit));
+    assert.ok(row.includes(ui.esc(evidence)), `${lang}: reports mean, range and genuine zero`);
+  }
+  const localDate = new Intl.DateTimeFormat(lang, { month: "short", day: "numeric", hour: "2-digit",
+    minute: "2-digit", timeZone: "UTC", timeZoneName: "short" });
+  const span = `${localDate.format(first * 1000)} – ${localDate.format(last * 1000)}`;
+  assert.ok(row.includes(ui.esc(span)), `${lang}: actual first and last measurements are shown`);
+  assert.ok(row.includes(ui.esc(ui.t("dyn.bins_no_date"))), `${lang}: missing dates stay unknown`);
+  assert.doesNotMatch(row.slice(row.indexOf('id="dynamic-outdoor-bins-detail"')), /<svg|data-act=/,
+    `${lang}: the details are passive text without a plot`);
+
+  d.outdoor_bins.env3 = [null, null, null, null];
+  const oneAxis = ui.heatingCurveBinsRow(d);
+  assert.ok(oneAxis.includes(ui.esc(ui.t("dyn.bins_no_axis"))), `${lang}: an absent axis is explained`);
+  assert.ok(oneAxis.includes(ui.esc("HomeHub · <0 °C")));
+  assert.ok(!oneAxis.includes(ui.esc("ENV III · 0–<5 °C")), `${lang}: no bin invented for ENV III`);
 }
-console.log(`status truth: ${ui.UI_LANGS.length} locales; literal warnings, navigation/polls and stale evaluation`);
+console.log(`status truth: ${ui.UI_LANGS.length} locales; literal warnings, navigation/polls, stale evaluation and heating bins`);

@@ -19,7 +19,7 @@
     },
     "status_serializer": {
       "pattern": "^void daik::append_status_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, bool\\)$",
-      "max_bytes": 5120
+      "max_bytes": 3200
     },
     "mcp_post": {
       "pattern": "^daik::mcp_post\\(",
@@ -2767,7 +2767,7 @@
     },
     "stop_json_http_number": {
       "pattern": "^daik::append_stop_context_json<daik::BoundedChunkSink<daik::HttpChunkEmitter,\\ 1024u>\\ >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter,\\ 1024u>\\&,\\ daik::StopContextPayloadFields\\ const\\&,\\ bool\\)::\\{lambda\\(unsigned\\ long\\ long,\\ bool\\)\\x232\\}::operator\\(\\)\\(unsigned\\ long\\ long,\\ bool\\)\\ const$",
-      "max_bytes": 64
+      "max_bytes": 256
     },
     "stop_json_http_flag": {
       "pattern": "^daik::append_stop_context_json<daik::BoundedChunkSink<daik::HttpChunkEmitter,\\ 1024u>\\ >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter,\\ 1024u>\\&,\\ daik::StopContextPayloadFields\\ const\\&,\\ bool\\)::\\{lambda\\(bool,\\ bool\\)\\x233\\}::operator\\(\\)\\(bool,\\ bool\\)\\ const$",
@@ -3036,6 +3036,158 @@
     "dhw_loss_step": {
       "pattern": "^daik::logic::dhw_loss_step\\(daik::logic::DhwLossState\\&, daik::logic::DhwLossBucket\\&, daik::logic::CheckupSample const\\&, long long\\)$",
       "max_bytes": 48
+    },
+    "sdk_dtoa": {
+      "pattern": "^__dtoa_engine$",
+      "max_bytes": 192
+    },
+    "sdk_dtoa_mul_shift": {
+      "pattern": "^mulShiftAll64$",
+      "max_bytes": 80
+    },
+    "sdk_dtoa_mul": {
+      "pattern": "^__umul128$",
+      "max_bytes": 48
+    },
+    "rfc3339_utc": {
+      "pattern": "^daik::rfc3339_utc\\[abi:cxx11\\]\\(long long, long\\)$",
+      "max_bytes": 160
+    },
+    "status_rfc3339": {
+      "pattern": "^void daik::append_status_rfc3339<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, char const\\*, bool, long long\\)$",
+      "max_bytes": 192
+    },
+    "status_fixed_double": {
+      "pattern": "^void daik::append_status_fmt_double<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, char const\\*, char const\\*, bool, double\\)$",
+      "max_bytes": 144
+    },
+    "curve_status_json": {
+      "pattern": "^void daik::append_heating_curve_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::Config const&, bool\\)$",
+      "max_bytes": 704
+    },
+    "curve_bins_json": {
+      "pattern": "^void daik::append_heating_curve_bins<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::HeatingCurveBinsReport const&\\)$",
+      "max_bytes": 80
+    },
+    "curve_axis_json": {
+      "pattern": "^auto daik::append_heating_curve_bins<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::HeatingCurveBinsReport const&\\)::\\{lambda\\(auto:1 const&\\)[#]1\\}::operator\\(\\)<std::array<daik::logic::HeatingCurveBinSummary, 4u> >\\(std::array<daik::logic::HeatingCurveBinSummary, 4u> const&\\) const$",
+      "max_bytes": 64
+    },
+    "curve_number_json": {
+      "pattern": "^daik::append_heating_curve_bins<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::HeatingCurveBinsReport const&\\)::\\{lambda\\(char const\\*, long long\\)[#]1\\}::operator\\(\\)\\(char const\\*, long long\\) const$",
+      "max_bytes": 48
+    },
+    "curve_status": {
+      "pattern": "^daik::heating_curve_status\\(daik::HeatingCurveBinsReport\\*\\)$",
+      "max_bytes": 80
+    },
+    "curve_bins_snapshot": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?fill_heating_curve_bins_locked\\(daik::HeatingCurveBinsReport&, daik::ModbusProfile\\)$|_ZN4daik(?:12_GLOBAL__N_1)?L?30fill_heating_curve_bins_locked[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 208
+    },
+    "curve_bin_summary": {
+      "pattern": "^daik::logic::HeatingCurveBins::summary\\(daik::logic::OutdoorSource, unsigned int, long long\\) const$",
+      "max_bytes": 112
+    },
+    "curve_bin_clock": {
+      "pattern": "^daik::logic::HeatingCurveBins::observe_clock\\(long long\\)$",
+      "max_bytes": 48
+    },
+    "curve_bin_clear": {
+      "pattern": "^daik::logic::HeatingCurveBins::forget\\(\\)$",
+      "max_bytes": 48
+    },
+    "curve_bin_add": {
+      "pattern": "^daik::logic::HeatingCurveBins::add\\(std::array<daik::logic::HeatingCurveBins::Bin, 4u>&, daik::logic::OutdoorSource, daik::logic::OutdoorEvidence const&, short, unsigned long\\)$",
+      "max_bytes": 64
+    },
+    "curve_outdoor_valid": {
+      "pattern": "^daik::logic::outdoor_evidence_valid\\(daik::logic::OutdoorEvidence const&\\)$",
+      "max_bytes": 48
+    },
+    "curve_bin_target": {
+      "pattern": "^(?:daik::logic::HeatingCurveDiagnosisImpl<daik::logic::HeatingCurveBins&>::observe_bin_target\\(double\\)$|_ZN4daik5logic25HeatingCurveDiagnosisImplIRNS0_16HeatingCurveBinsEE18observe_bin_targetEd\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 48
+    },
+    "curve_logic_eval": {
+      "pattern": "^daik::logic::HeatingCurveDiagnosisImpl<daik::logic::HeatingCurveBins&>::evaluate\\(daik::logic::HeatingCurveInputs const&\\)$",
+      "max_bytes": 160
+    },
+    "curve_forget_samples": {
+      "pattern": "^daik::logic::HeatingCurveDiagnosisImpl<daik::logic::HeatingCurveBins&>::forget_samples\\(\\)$",
+      "max_bytes": 48
+    },
+    "curve_reset_samples": {
+      "pattern": "^daik::logic::HeatingCurveDiagnosisImpl<daik::logic::HeatingCurveBins&>::reset_samples\\(\\)$",
+      "max_bytes": 48
+    },
+    "curve_reference_reconfigure": {
+      "pattern": "^daik::mqtt_reference_reconfigure\\(\\)$",
+      "max_bytes": 256
+    },
+    "curve_homehub_reset": {
+      "pattern": "^daik::mqtt_heating_curve_homehub_reset\\(\\)$",
+      "max_bytes": 80
+    },
+    "config_ref_temp": {
+      "pattern": "^daik::set_ref_temp\\(httpd_req\\*\\)$",
+      "max_bytes": 1280
+    },
+    "modbus_active_profile": {
+      "pattern": "^daik::mb_active_profile\\(\\)$",
+      "max_bytes": 64
+    },
+    "status_redacted_append": {
+      "pattern": "^(?:void daik::operator\\+=<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::RedactedJson\\)$|_ZN4daikpLINS_16BoundedChunkSinkINS_16HttpChunkEmitterELj1024EEEEEvRT_NS_12RedactedJsonE\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 80
+    },
+    "status_opt_uint": {
+      "pattern": "^void daik::append_status_opt_uint<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, char const\\*, bool, unsigned long long\\)$",
+      "max_bytes": 64
+    },
+    "status_opt_int": {
+      "pattern": "^void daik::append_status_opt_int<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, char const\\*, bool, long long\\)$",
+      "max_bytes": 64
+    },
+    "status_opt_quoted": {
+      "pattern": "^void daik::append_status_opt_quoted<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, char const\\*, bool, std::basic_string_view<char, std::char_traits<char> >\\)$",
+      "max_bytes": 64
+    },
+    "status_tenths_value": {
+      "pattern": "^void daik::append_status_tenths_value<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, int\\)$",
+      "max_bytes": 64
+    },
+    "status_tenths_field": {
+      "pattern": "^void daik::append_status_tenths_field<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, char const\\*, int\\)$",
+      "max_bytes": 64
+    },
+    "status_signed_tenths": {
+      "pattern": "^void daik::append_status_signed_tenths<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, char const\\*, bool, int\\)$",
+      "max_bytes": 64
+    },
+    "status_outdoor_context": {
+      "pattern": "^void daik::append_status_outdoor_context<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::logic::CheckupOutdoorReport const&\\)$",
+      "max_bytes": 96
+    },
+    "status_service_metric": {
+      "pattern": "^void daik::append_status_service_metric<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, char const\\*, daik::logic::RefrigerantServiceMetricSnapshot const&\\)$",
+      "max_bytes": 64
+    },
+    "curve_json_bool": {
+      "pattern": "^daik::append_heating_curve_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::Config const&, bool\\)::\\{lambda\\(char const\\*, bool\\)[#]1\\}::operator\\(\\)\\(char const\\*, bool\\) const$",
+      "max_bytes": 48
+    },
+    "curve_json_uint": {
+      "pattern": "^daik::append_heating_curve_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::Config const&, bool\\)::\\{lambda\\(char const\\*, unsigned long long\\)[#]1\\}::operator\\(\\)\\(char const\\*, unsigned long long\\) const$",
+      "max_bytes": 48
+    },
+    "curve_json_quoted": {
+      "pattern": "^daik::append_heating_curve_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::Config const&, bool\\)::\\{lambda\\(char const\\*, std::basic_string_view<char, std::char_traits<char> >\\)[#]1\\}::operator\\(\\)\\(char const\\*, std::basic_string_view<char, std::char_traits<char> >\\) const$",
+      "max_bytes": 64
+    },
+    "curve_json_source": {
+      "pattern": "^daik::append_heating_curve_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::Config const&, bool\\)::\\{lambda\\(char const\\*, bool, daik::logic::OutdoorSource\\)[#]1\\}::operator\\(\\)\\(char const\\*, bool, daik::logic::OutdoorSource\\) const$",
+      "max_bytes": 64
     }
   },
   "paths": {
@@ -14087,6 +14239,417 @@
       "multipliers": {},
       "base_bytes": 1536,
       "max_bytes": 7168
+    },
+    "httpd_direct_status_rfc3339": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "status_rfc3339",
+        "rfc3339_utc",
+        "sdk_snprintf",
+        "sdk_vfprintf"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_direct_curve_snapshot": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "curve_status_json",
+        "curve_status",
+        "curve_bins_snapshot",
+        "curve_bin_summary",
+        "room_time_now",
+        "mqtt_input_lock",
+        "mqtt_input_unlock",
+        "modbus_active_profile"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_direct_curve_expire": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "curve_status_json",
+        "curve_status",
+        "curve_bins_snapshot",
+        "curve_bin_clock",
+        "curve_bin_clear",
+        "mqtt_input_lock",
+        "mqtt_input_unlock",
+        "modbus_active_profile"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_direct_curve_format_bin": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "curve_status_json",
+        "curve_bins_json",
+        "status_fixed_double",
+        "sdk_snprintf",
+        "sdk_vfprintf",
+        "sdk_dtoa",
+        "sdk_dtoa_mul_shift",
+        "sdk_dtoa_mul"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_direct_curve_axis_number": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "curve_status_json",
+        "curve_bins_json",
+        "curve_axis_json",
+        "curve_number_json",
+        "status_unsigned_number"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_status_rfc3339": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "status_rfc3339",
+        "rfc3339_utc",
+        "sdk_snprintf",
+        "sdk_vfprintf"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_curve_snapshot": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "curve_status_json",
+        "curve_status",
+        "curve_bins_snapshot",
+        "curve_bin_summary",
+        "room_time_now",
+        "mqtt_input_lock",
+        "mqtt_input_unlock",
+        "modbus_active_profile"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_curve_expire": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "curve_status_json",
+        "curve_status",
+        "curve_bins_snapshot",
+        "curve_bin_clock",
+        "curve_bin_clear",
+        "mqtt_input_lock",
+        "mqtt_input_unlock",
+        "modbus_active_profile"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_curve_format_bin": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "curve_status_json",
+        "curve_bins_json",
+        "status_fixed_double",
+        "sdk_snprintf",
+        "sdk_vfprintf",
+        "sdk_dtoa",
+        "sdk_dtoa_mul_shift",
+        "sdk_dtoa_mul"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_curve_axis_number": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "curve_status_json",
+        "curve_bins_json",
+        "curve_axis_json",
+        "curve_number_json",
+        "status_unsigned_number"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_curve_homehub_reset": {
+      "symbols": [
+        "config_hp",
+        "config_document",
+        "curve_homehub_reset",
+        "curve_forget_samples",
+        "curve_reset_samples",
+        "curve_bin_clear",
+        "mqtt_input_lock",
+        "mqtt_input_unlock"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_ref_temp_reset": {
+      "symbols": [
+        "config_ref_temp",
+        "config_document",
+        "curve_reference_reconfigure",
+        "curve_forget_samples",
+        "curve_reset_samples",
+        "curve_bin_clear",
+        "mqtt_input_lock",
+        "mqtt_input_unlock"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "mqtt_reference_bin_target": {
+      "symbols": [
+        "mqtt_task",
+        "reference_dispatch",
+        "reference_frame",
+        "reference_apply",
+        "curve_bin_target",
+        "curve_bin_clear",
+        "mqtt_input_lock",
+        "mqtt_input_unlock"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_curve_record": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_curve_evaluate",
+        "curve_logic_eval",
+        "curve_bin_add",
+        "curve_outdoor_valid",
+        "mqtt_input_lock",
+        "mqtt_input_unlock"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_curve_expire": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_curve_evaluate",
+        "curve_logic_eval",
+        "curve_bin_clock",
+        "curve_bin_target",
+        "curve_forget_samples",
+        "curve_reset_samples",
+        "curve_bin_clear",
+        "mqtt_input_lock",
+        "mqtt_input_unlock"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_curve_status_read": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_curve_builder",
+        "curve_status",
+        "mqtt_input_lock",
+        "mqtt_input_unlock",
+        "modbus_active_profile"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "mqtt_curve_format_double": {
+      "symbols": [
+        "mqtt_task",
+        "mqtt_curve_builder",
+        "mqtt_curve_payload",
+        "double_string",
+        "dynamic_double_string"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "httpd_direct_status_redacted": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "status_redacted_append",
+        "status_quoted_string",
+        "status_escaped_string",
+        "status_utf8_sequence_length"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_direct_status_opt_quoted": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "status_opt_quoted",
+        "status_quoted_string",
+        "status_escaped_string",
+        "status_utf8_sequence_length"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_direct_status_outdoor_context": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "status_outdoor_context",
+        "status_signed_tenths",
+        "status_tenths_field",
+        "status_tenths_value",
+        "status_unsigned_number"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_direct_status_service_metric": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "status_service_metric",
+        "status_tenths_value",
+        "status_unsigned_number"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_direct_curve_scalar_fields": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "curve_status_json",
+        "curve_json_bool",
+        "curve_json_uint",
+        "curve_json_quoted",
+        "curve_json_source",
+        "status_opt_uint",
+        "status_opt_int",
+        "status_quoted_string",
+        "status_escaped_string",
+        "status_utf8_sequence_length",
+        "status_unsigned_number"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_status_redacted": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "status_redacted_append",
+        "status_quoted_string",
+        "status_escaped_string",
+        "status_utf8_sequence_length"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_status_opt_quoted": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "status_opt_quoted",
+        "status_quoted_string",
+        "status_escaped_string",
+        "status_utf8_sequence_length"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_status_outdoor_context": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "status_outdoor_context",
+        "status_signed_tenths",
+        "status_tenths_field",
+        "status_tenths_value",
+        "status_unsigned_number"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_status_service_metric": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "status_service_metric",
+        "status_tenths_value",
+        "status_unsigned_number"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_curve_scalar_fields": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "curve_status_json",
+        "curve_json_bool",
+        "curve_json_uint",
+        "curve_json_quoted",
+        "curve_json_source",
+        "status_opt_uint",
+        "status_opt_int",
+        "status_quoted_string",
+        "status_escaped_string",
+        "status_utf8_sequence_length",
+        "status_unsigned_number"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
     }
   },
   "tasks": {
@@ -14373,7 +14936,29 @@
         "httpd_shutdown_syslog_cycling_append_owner",
         "httpd_shutdown_ntp_cycling_append_owner",
         "httpd_shutdown_board_cycling_append_owner",
-        "httpd_shutdown_env3_cycling_append_owner"
+        "httpd_shutdown_env3_cycling_append_owner",
+        "httpd_direct_status_rfc3339",
+        "httpd_direct_curve_snapshot",
+        "httpd_direct_curve_expire",
+        "httpd_direct_curve_format_bin",
+        "httpd_direct_curve_axis_number",
+        "httpd_mcp_status_rfc3339",
+        "httpd_mcp_curve_snapshot",
+        "httpd_mcp_curve_expire",
+        "httpd_mcp_curve_format_bin",
+        "httpd_mcp_curve_axis_number",
+        "httpd_curve_homehub_reset",
+        "httpd_ref_temp_reset",
+        "httpd_direct_status_redacted",
+        "httpd_direct_status_opt_quoted",
+        "httpd_direct_status_outdoor_context",
+        "httpd_direct_status_service_metric",
+        "httpd_direct_curve_scalar_fields",
+        "httpd_mcp_status_redacted",
+        "httpd_mcp_status_opt_quoted",
+        "httpd_mcp_status_outdoor_context",
+        "httpd_mcp_status_service_metric",
+        "httpd_mcp_curve_scalar_fields"
       ]
     },
     "main": {
@@ -14490,7 +15075,12 @@
         "mqtt_stop_json_mqtt",
         "mqtt_stop_suppression",
         "mqtt_stop_unavailable",
-        "mqtt_stop_store_suppression"
+        "mqtt_stop_store_suppression",
+        "mqtt_reference_bin_target",
+        "mqtt_curve_record",
+        "mqtt_curve_expire",
+        "mqtt_curve_status_read",
+        "mqtt_curve_format_double"
       ]
     },
     "poll": {

@@ -178,15 +178,16 @@ outdoor_temperature_c, outdoor_source, last_sample_outdoor_temperature_c,
 last_sample_outdoor_source, plant_outdoor_temperature_c, plant_outdoor_source,
 last_sample_plant_outdoor_temperature_c, last_sample_plant_outdoor_source,
 forecast_available, plant_gate_known, plant_gate_active, heating_mode_known,
-heating_mode_active, room_source_unix_s, room_age_s, sequence, evaluations, samples, holds, blocks
+heating_mode_active, room_source_unix_s, room_age_s, sequence, evaluations, samples, holds, blocks,
+outdoor_bins
 ```
 
 `heating_curve.plant_gate_*` reports the combined input-53/space-route prerequisite defined in
 [PLANT.md](PLANT.md#heating-curve-diagnosis); `modbus.plant_gate_*` remains the raw input-53 fact.
-Method version 3 adds the independently fresh space-route requirement; the payload shape is unchanged.
+Method version 4 retains the independent space-route requirement and adds `outdoor_bins`.
 
 States: `off`, `recording`, `hold`, `degraded`, `blocked`. Reasons: `disabled`, `sample_recorded`,
-`sampling_interval`, `room_unavailable`, `x10a_unavailable` (retained wire code; Method 3 does not require X10A), `homehub_unavailable`, `plant_gate_unknown`,
+`sampling_interval`, `room_unavailable`, `x10a_unavailable` (retained wire code; Methods 3–4 do not require X10A), `homehub_unavailable`, `plant_gate_unknown`,
 `plant_inactive`, `forecast_unavailable`, `clock_invalid`, `heating_mode_unknown`, `non_heating_mode`,
 `sampler_inactive`, `evaluation_stale`. Numeric codes are stable; retired 3/4 are unused. `sampler_inactive`
 (14) means configuration is armed but the MQTT sampler is not running: safe mode, the boot window or a
@@ -195,7 +196,7 @@ failed MQTT start.
 `evaluation_stale` (15) reports a previously armed evaluation that is no longer current: state
 `blocked`, `sample_eligible:false`, current error/source time/age and outdoor readings null,
 current source names null, forecast/known/active flags false. Dated samples and counters remain
-unchanged. [PLANT.md](PLANT.md#heating-curve-diagnosis) owns the evaluation-age rule; method 3 is unchanged.
+unchanged. [PLANT.md](PLANT.md#heating-curve-diagnosis) owns the evaluation-age rule.
 
 Arming requires diagnostics consent, a configured MQTT broker, an MQTT room path with a fixed or
 mapped target, and a configured HomeHub host; forecast is optional. Recording requires fresh room-time evidence.
@@ -204,6 +205,21 @@ Error values are null unless established. Sequence plus absolute time identifies
 The legacy outdoor pair is fresh/plausible ENV III; `plant_*` is HomeHub input 44 from the current
 session. Current and recorded-event values remain separate and name their source. Both are optional
 context, never sampling gates. An absent sample clears the corresponding prior event value.
+
+`outdoor_bins` covers this boot's observations on the current UTC date and the six preceding UTC
+dates. Redacted status omits the field. In normal status, null means the current source scope or
+reporting clock is unavailable. An object with `scope_samples:0` means the reporting scope is known
+and contains no recorded events in those dates. The object contains `target_c`, `scope_samples`,
+and the two arrays `homehub` and `env3`. Their four positions represent outdoor air below 0 °C, 0 to
+below 5 °C, 5 to below 10 °C, and at least 10 °C. A null entry
+means that axis has no observations in the band. Each populated entry contains `samples`,
+`first_unix_s`, `last_unix_s`, and the `sum_tenths`, `min_tenths` and `max_tenths` fields prefixed by
+`room_` or `outdoor_`. The first and last times are UTC Unix seconds from the sampler when it
+admitted those observations. They describe the span of the recorded events. Room quantities
+are signed differences in tenths of a kelvin. Outdoor quantities use tenths of a degree Celsius.
+Divide each sum by the bin count and by 10 for its mean.
+`scope_samples` counts each event admitted to the current bin scope once, including events
+without outdoor readings.
 
 ### History and 24-hour checks
 
@@ -674,8 +690,10 @@ Exact topics (no wildcards), bounded dotted JSON paths, integer max age 10–360
 mapping or fixed target 5.0–35.0 °C at 0.1 °C precision are required for a non-empty source.
 `fixed_setpoint_c:0` selects an MQTT target rather than a usable fixed temperature.
 Old clients' setpoint/timestamp
-paths fall back to their single topic. Save/rebind is live with no proof step. An unchanged mapping
-still reevaluates binding and returns `saved:false,reboot:false`. Empty topic clears all mapping
+paths fall back to their single topic. Save/rebind is live with no proof step. Saving an unchanged
+mapping retries the binding and returns `saved:false,reboot:false,room_evidence_reset:true`.
+This clears the current room reading and the heating-curve sample memory, cadence and outdoor bins.
+The heating-curve counters, sequence and room history remain available. Empty topic clears all mapping
 fields and captured state even if the old source is broken.
 An empty temperature path can decode a numeric scalar, but does not arm heating-curve diagnosis.
 Arming needs a non-empty temperature path and a non-empty target path unless the target is fixed.

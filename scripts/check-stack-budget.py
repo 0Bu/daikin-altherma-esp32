@@ -71,7 +71,6 @@ PACKED_ENTRY_SYMBOLS = frozenset({
     'daik::discovery_owner_block()',
     'daik::do_detect(httpd_req*)',
     'daik::http_send_values_json(httpd_req*, std::basic_string_view<char, std::char_traits<char> >, std::basic_string_view<char, std::char_traits<char> >)',
-    'daik::take_values_snapshot()',
     'daik::dns_task(void*)',
     'daik::mcp_post(httpd_req*)',
     'daik::reboot_soon()',
@@ -951,6 +950,82 @@ def validate_status_diagnosis_paths(budgets: dict[str, Any], sources: dict[str, 
         "httpd_direct_quoted_field": ["http_send_status_json", "status_serializer",
                                       "status_quoted_field", "status_quoted_string",
                                       "status_escaped_string", "status_utf8_sequence_length"],
+        "httpd_mcp_status_rfc3339": ["mcp_post", "http_send_status_json", "status_serializer",
+                                     "status_rfc3339", "rfc3339_utc", "sdk_snprintf", "sdk_vfprintf"],
+        "httpd_direct_status_rfc3339": ["http_send_status_json", "status_serializer",
+                                        "status_rfc3339", "rfc3339_utc", "sdk_snprintf", "sdk_vfprintf"],
+        "httpd_mcp_curve_snapshot": ["mcp_post", "http_send_status_json", "status_serializer",
+                                     "curve_status_json", "curve_status", "curve_bins_snapshot",
+                                     "curve_bin_summary", "room_time_now",
+                                     "mqtt_input_lock", "mqtt_input_unlock",
+                                     "modbus_active_profile"],
+        "httpd_direct_curve_snapshot": ["http_send_status_json", "status_serializer",
+                                        "curve_status_json", "curve_status", "curve_bins_snapshot",
+                                        "curve_bin_summary", "room_time_now",
+                                        "mqtt_input_lock", "mqtt_input_unlock",
+                                        "modbus_active_profile"],
+        "httpd_mcp_curve_expire": ["mcp_post", "http_send_status_json", "status_serializer",
+                                   "curve_status_json", "curve_status", "curve_bins_snapshot",
+                                   "curve_bin_clock", "curve_bin_clear",
+                                   "mqtt_input_lock", "mqtt_input_unlock",
+                                   "modbus_active_profile"],
+        "httpd_direct_curve_expire": ["http_send_status_json", "status_serializer",
+                                      "curve_status_json", "curve_status", "curve_bins_snapshot",
+                                      "curve_bin_clock", "curve_bin_clear",
+                                      "mqtt_input_lock", "mqtt_input_unlock",
+                                      "modbus_active_profile"],
+        "httpd_mcp_curve_format_bin": ["mcp_post", "http_send_status_json", "status_serializer",
+                                       "curve_status_json", "curve_bins_json", "status_fixed_double",
+                                       "sdk_snprintf", "sdk_vfprintf", "sdk_dtoa",
+                                       "sdk_dtoa_mul_shift", "sdk_dtoa_mul"],
+        "httpd_direct_curve_format_bin": ["http_send_status_json", "status_serializer",
+                                          "curve_status_json", "curve_bins_json", "status_fixed_double",
+                                          "sdk_snprintf", "sdk_vfprintf", "sdk_dtoa",
+                                          "sdk_dtoa_mul_shift", "sdk_dtoa_mul"],
+        "httpd_mcp_curve_axis_number": ["mcp_post", "http_send_status_json", "status_serializer",
+                                        "curve_status_json", "curve_bins_json", "curve_axis_json",
+                                        "curve_number_json", "status_unsigned_number"],
+        "httpd_direct_curve_axis_number": ["http_send_status_json", "status_serializer",
+                                           "curve_status_json", "curve_bins_json", "curve_axis_json",
+                                           "curve_number_json", "status_unsigned_number"],
+        "httpd_mcp_status_redacted": ["mcp_post", "http_send_status_json", "status_serializer",
+                                      "status_redacted_append", "status_quoted_string",
+                                      "status_escaped_string", "status_utf8_sequence_length"],
+        "httpd_direct_status_redacted": ["http_send_status_json", "status_serializer",
+                                         "status_redacted_append", "status_quoted_string",
+                                         "status_escaped_string", "status_utf8_sequence_length"],
+        "httpd_mcp_status_opt_quoted": ["mcp_post", "http_send_status_json", "status_serializer",
+                                        "status_opt_quoted", "status_quoted_string",
+                                        "status_escaped_string", "status_utf8_sequence_length"],
+        "httpd_direct_status_opt_quoted": ["http_send_status_json", "status_serializer",
+                                           "status_opt_quoted", "status_quoted_string",
+                                           "status_escaped_string", "status_utf8_sequence_length"],
+        "httpd_mcp_status_outdoor_context": ["mcp_post", "http_send_status_json", "status_serializer",
+                                             "status_outdoor_context", "status_signed_tenths",
+                                             "status_tenths_field", "status_tenths_value",
+                                             "status_unsigned_number"],
+        "httpd_direct_status_outdoor_context": ["http_send_status_json", "status_serializer",
+                                                "status_outdoor_context", "status_signed_tenths",
+                                                "status_tenths_field", "status_tenths_value",
+                                                "status_unsigned_number"],
+        "httpd_mcp_status_service_metric": ["mcp_post", "http_send_status_json", "status_serializer",
+                                            "status_service_metric", "status_tenths_value",
+                                            "status_unsigned_number"],
+        "httpd_direct_status_service_metric": ["http_send_status_json", "status_serializer",
+                                               "status_service_metric", "status_tenths_value",
+                                               "status_unsigned_number"],
+        "httpd_mcp_curve_scalar_fields": ["mcp_post", "http_send_status_json", "status_serializer",
+                                          "curve_status_json", "curve_json_bool", "curve_json_uint",
+                                          "curve_json_quoted", "curve_json_source",
+                                          "status_opt_uint", "status_opt_int",
+                                          "status_quoted_string", "status_escaped_string",
+                                          "status_utf8_sequence_length", "status_unsigned_number"],
+        "httpd_direct_curve_scalar_fields": ["http_send_status_json", "status_serializer",
+                                             "curve_status_json", "curve_json_bool", "curve_json_uint",
+                                             "curve_json_quoted", "curve_json_source",
+                                             "status_opt_uint", "status_opt_int",
+                                             "status_quoted_string", "status_escaped_string",
+                                             "status_utf8_sequence_length", "status_unsigned_number"],
     }
     http_paths = set(budgets["tasks"]["httpd"]["paths"])
     for name, members in expected.items():
@@ -1878,7 +1953,7 @@ def validate_mqtt_discovery_paths(budgets: dict[str, Any], mqtt_source: str,
 
 CONFIG_DOCUMENT_OWNERS = frozenset({
     "config_hp", "config_mqtt", "config_board", "config_env3", "config_weather",
-    "config_diagnostics", "config_circulation", "circulation_parser", "hp_query_probe",
+    "config_diagnostics", "config_circulation", "config_ref_temp", "circulation_parser", "hp_query_probe",
     "config_wifi", "config_syslog", "config_ntp",
 })
 CONFIG_DOCUMENT_PATHS = frozenset({
@@ -1888,7 +1963,7 @@ CONFIG_DOCUMENT_PATHS = frozenset({
     "httpd_mqtt_tls",
     "httpd_i2c_read", "httpd_i2c_write", "httpd_i2c_receive",
     "httpd_board_i2c_read", "httpd_board_i2c_write", "httpd_board_i2c_receive",
-    "httpd_checkup_schema",
+    "httpd_checkup_schema", "httpd_curve_homehub_reset", "httpd_ref_temp_reset",
     *(f"httpd_shutdown_{name}_{phase}" for name in SHUTDOWN_HTTP_CALLERS
       for phase in ("journal", "checkup", "cycling_snapshot", "cycling_reset_check",
                     "cycling_build_crc", "cycling_build_shape", "cycling_append_shape",
@@ -2127,7 +2202,7 @@ def validate_packed_config_inventory(disassembly: str) -> None:
     names = [match.group(2) for line in disassembly.splitlines()
              if (match := FUNCTION_RE.match(line))]
     if any(names.count(name) != 1 for name in CONFIG_PACKED_SYMBOLS):
-        raise BudgetError("packed config inventory: all six exact reviewed bodies are required")
+        raise BudgetError("packed config inventory: all exact reviewed bodies are required")
     bodies = function_instructions(disassembly)
     if any(not instruction or instruction.startswith('.') or
            instruction.split()[0] in {'ill', 'ill.n', 'unknown'}
@@ -2847,7 +2922,7 @@ def self_test() -> None:
 00000002 <daik::http_send_status_json(httpd_req*, int)>:
    2: 004136          entry a1, 128
 00000003 <void daik::append_status_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, bool)>:
-   3: 004136          entry a1, 4848
+   3: 004136          entry a1, 2976
 00000004 <daik::mqtt_task(void*)>:
    4: 004136          entry a1, 1120
 00000005 <daik::(anonymous namespace)::ota_task(void*)>:
@@ -2936,6 +3011,44 @@ def self_test() -> None:
   29: 004136          entry a1, 32
 """
     extra_frames = {
+        '__dtoa_engine': 176,
+        'mulShiftAll64': 64,
+        '__umul128': 32,
+        'daik::rfc3339_utc[abi:cxx11](long long, long)': 128,
+        'void daik::append_status_rfc3339<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, char const*, bool, long long)': 144,
+        'void daik::append_status_fmt_double<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, char const*, char const*, bool, double)': 112,
+        'void daik::append_heating_curve_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::Config const&, bool)': 608,
+        'void daik::append_heating_curve_bins<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::HeatingCurveBinsReport const&)': 48,
+        'auto daik::append_heating_curve_bins<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::HeatingCurveBinsReport const&)::{lambda(auto:1 const&)\x231}::operator()<std::array<daik::logic::HeatingCurveBinSummary, 4u> >(std::array<daik::logic::HeatingCurveBinSummary, 4u> const&) const': 32,
+        'daik::append_heating_curve_bins<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::HeatingCurveBinsReport const&)::{lambda(char const*, long long)\x231}::operator()(char const*, long long) const': 32,
+        'daik::heating_curve_status(daik::HeatingCurveBinsReport*)': 48,
+        'daik::fill_heating_curve_bins_locked(daik::HeatingCurveBinsReport&, daik::ModbusProfile)': 176,
+        'daik::logic::HeatingCurveBins::summary(daik::logic::OutdoorSource, unsigned int, long long) const': 80,
+        'daik::logic::HeatingCurveBins::observe_clock(long long)': 32,
+        'daik::logic::HeatingCurveBins::forget()': 32,
+        'daik::logic::HeatingCurveBins::add(std::array<daik::logic::HeatingCurveBins::Bin, 4u>&, daik::logic::OutdoorSource, daik::logic::OutdoorEvidence const&, short, unsigned long)': 32,
+        'daik::logic::outdoor_evidence_valid(daik::logic::OutdoorEvidence const&)': 32,
+        '_ZN4daik5logic25HeatingCurveDiagnosisImplIRNS0_16HeatingCurveBinsEE18observe_bin_targetEd$isra$0': 32,
+        'daik::logic::HeatingCurveDiagnosisImpl<daik::logic::HeatingCurveBins&>::evaluate(daik::logic::HeatingCurveInputs const&)': 112,
+        'daik::logic::HeatingCurveDiagnosisImpl<daik::logic::HeatingCurveBins&>::forget_samples()': 32,
+        'daik::logic::HeatingCurveDiagnosisImpl<daik::logic::HeatingCurveBins&>::reset_samples()': 32,
+        'daik::mqtt_reference_reconfigure()': 208,
+        'daik::mqtt_heating_curve_homehub_reset()': 48,
+        'daik::set_ref_temp(httpd_req*)': 1104,
+        'daik::mb_active_profile()': 48,
+        '_ZN4daikpLINS_16BoundedChunkSinkINS_16HttpChunkEmitterELj1024EEEEEvRT_NS_12RedactedJsonE$isra$0': 64,
+        'void daik::append_status_opt_uint<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, char const*, bool, unsigned long long)': 48,
+        'void daik::append_status_opt_int<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, char const*, bool, long long)': 32,
+        'void daik::append_status_opt_quoted<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, char const*, bool, std::basic_string_view<char, std::char_traits<char> >)': 48,
+        'void daik::append_status_tenths_value<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, int)': 32,
+        'void daik::append_status_tenths_field<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, char const*, int)': 32,
+        'void daik::append_status_signed_tenths<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, char const*, bool, int)': 32,
+        'void daik::append_status_outdoor_context<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::logic::CheckupOutdoorReport const&)': 64,
+        'void daik::append_status_service_metric<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, char const*, daik::logic::RefrigerantServiceMetricSnapshot const&)': 32,
+        'daik::append_heating_curve_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::Config const&, bool)::{lambda(char const*, bool)\x231}::operator()(char const*, bool) const': 32,
+        'daik::append_heating_curve_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::Config const&, bool)::{lambda(char const*, unsigned long long)\x231}::operator()(char const*, unsigned long long) const': 32,
+        'daik::append_heating_curve_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::Config const&, bool)::{lambda(char const*, std::basic_string_view<char, std::char_traits<char> >)\x231}::operator()(char const*, std::basic_string_view<char, std::char_traits<char> >) const': 48,
+        'daik::append_heating_curve_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::Config const&, bool)::{lambda(char const*, bool, daik::logic::OutdoorSource)\x231}::operator()(char const*, bool, daik::logic::OutdoorSource) const': 48,
         'daik::(anonymous namespace)::flash_cycling_owned(daik::logic::HistoryJournalHeader const&)': 32,
         'daik::(anonymous namespace)::flash_record_valid(daik::(anonymous namespace)::FlashJournalRecord const&)': 32,
         'daik::checkup_cycling_checkpoint_appended(unsigned long, daik::DiagnosticsSource)': 32,
@@ -3617,8 +3730,8 @@ def self_test() -> None:
 """
     number_calls = "".join(f"{0x3003 + offset:x}: fff7a5 call8 3000 <{STATUS_HEALTH_NUMBER_SYMBOL}>\n"
                            for offset in range(35))
-    fixture = fixture.replace("   3: 004136          entry a1, 4848\n",
-                              "   3: 004136          entry a1, 4848\n" + number_calls)
+    fixture = fixture.replace("   3: 004136          entry a1, 2976\n",
+                              "   3: 004136          entry a1, 2976\n" + number_calls)
     budgets = load_budgets(DEFAULT_BUDGETS)
     validate_packed_config_inventory(fixture)
     packed_inventory_controls = 0
@@ -3677,40 +3790,52 @@ def self_test() -> None:
     selected = evaluate(frames, budgets)
     validate_shutdown_inlining(fixture, budgets)
     validate_status_numeric_calls(fixture, budgets)
-    assert selected["status_serializer"] == 4848
-    assert selected["path:httpd_mcp_status"] == 8192
-    assert selected["path:httpd_direct_status"] == 6960
-    assert selected["path:httpd_mcp_checkup"] == 7952
-    assert selected["path:httpd_direct_checkup"] == 6720
-    assert selected["path:httpd_mcp_checkup_expire_fingerprint"] == 7984
-    assert selected["path:httpd_direct_checkup_expire_fingerprint"] == 6752
+    assert selected["status_serializer"] == 2976
+    assert selected["path:httpd_mcp_status"] == 6320
+    assert selected["path:httpd_direct_status"] == 5088
+    assert selected["path:httpd_mcp_checkup"] == 6080
+    assert selected["path:httpd_direct_checkup"] == 4848
+    assert selected["path:httpd_mcp_checkup_expire_fingerprint"] == 6112
+    assert selected["path:httpd_direct_checkup_expire_fingerprint"] == 4880
     assert selected["path:mqtt_cycling_evidence"] == 2944
     assert selected["path:mqtt_cycling_expire"] == 2992
     assert selected["path:mqtt_cycling_expire_fingerprint"] == 3024
-    assert selected["path:httpd_mcp_cycling_hours"] == 8112
-    assert selected["path:httpd_direct_cycling_hours"] == 6880
-    assert selected["path:httpd_mcp_checkup_aggregate"] == 7904
-    assert selected["path:httpd_direct_checkup_aggregate"] == 6672
-    assert selected["path:httpd_mcp_checkup_evaluate"] == 7952
-    assert selected["path:httpd_direct_checkup_evaluate"] == 6720
-    assert selected["path:httpd_mcp_checkup_dhw_progress"] == 7888
-    assert selected["path:httpd_direct_checkup_dhw_progress"] == 6656
-    assert selected["path:httpd_mcp_checkup_dhw_fold"] == 7840
-    assert selected["path:httpd_direct_checkup_dhw_fold"] == 6608
-    assert selected["path:httpd_mcp_checkup_freshness"] == 7872
-    assert selected["path:httpd_direct_checkup_freshness"] == 6640
-    assert selected["path:httpd_mcp_cycling_hours_builder"] == 8096
-    assert selected["path:httpd_direct_cycling_hours_builder"] == 6864
-    assert selected["path:httpd_mcp_health_number"] == 7840
-    assert selected["path:httpd_direct_health_number"] == 6608
-    assert selected["path:httpd_mcp_bool_field"] == 7776
-    assert selected["path:httpd_direct_bool_field"] == 6544
-    assert selected["path:httpd_mcp_uint_field"] == 7840
-    assert selected["path:httpd_direct_uint_field"] == 6608
-    assert selected["path:httpd_mcp_int_field"] == 7840
-    assert selected["path:httpd_direct_int_field"] == 6608
-    assert selected["path:httpd_mcp_quoted_field"] == 7952
-    assert selected["path:httpd_direct_quoted_field"] == 6720
+    assert selected["path:httpd_mcp_cycling_hours"] == 6240
+    assert selected["path:httpd_direct_cycling_hours"] == 5008
+    assert selected["path:httpd_mcp_checkup_aggregate"] == 6032
+    assert selected["path:httpd_direct_checkup_aggregate"] == 4800
+    assert selected["path:httpd_mcp_checkup_evaluate"] == 6080
+    assert selected["path:httpd_direct_checkup_evaluate"] == 4848
+    assert selected["path:httpd_mcp_checkup_dhw_progress"] == 6016
+    assert selected["path:httpd_direct_checkup_dhw_progress"] == 4784
+    assert selected["path:httpd_mcp_checkup_dhw_fold"] == 5968
+    assert selected["path:httpd_direct_checkup_dhw_fold"] == 4736
+    assert selected["path:httpd_mcp_checkup_freshness"] == 6000
+    assert selected["path:httpd_direct_checkup_freshness"] == 4768
+    assert selected["path:httpd_mcp_cycling_hours_builder"] == 6224
+    assert selected["path:httpd_direct_cycling_hours_builder"] == 4992
+    assert selected["path:httpd_mcp_health_number"] == 5968
+    assert selected["path:httpd_direct_health_number"] == 4736
+    assert selected["path:httpd_mcp_bool_field"] == 5904
+    assert selected["path:httpd_direct_bool_field"] == 4672
+    assert selected["path:httpd_mcp_uint_field"] == 5968
+    assert selected["path:httpd_direct_uint_field"] == 4736
+    assert selected["path:httpd_mcp_int_field"] == 5968
+    assert selected["path:httpd_direct_int_field"] == 4736
+    assert selected["path:httpd_mcp_quoted_field"] == 6080
+    assert selected["path:httpd_direct_quoted_field"] == 4848
+    assert selected["path:httpd_mcp_curve_format_bin"] <= 8192
+    assert selected["path:mqtt_curve_expire"] <= 5120
+    unoutlined_status = fixture.replace("   3: 004136          entry a1, 2976",
+                                        "   3: 004136          entry a1, 4848")
+    relaxed_serializer = json.loads(json.dumps(budgets))
+    relaxed_serializer["symbols"]["status_serializer"]["max_bytes"] = 5120
+    try:
+        evaluate(parse_frames(unoutlined_status), relaxed_serializer)
+    except BudgetError as exc:
+        assert "httpd_mcp_curve_format_bin" in str(exc)
+    else:
+        raise AssertionError("self-test accepted unoutlined status_serializer + curve_format_bin stack")
     assert selected["ota_task"] == 2608
     assert selected["path:httpd_ota_status"] == 6624
     assert selected["path:ota_task_manifest_fetch"] == 4672

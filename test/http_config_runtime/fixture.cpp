@@ -1319,9 +1319,15 @@ void room_history_lifetime() {
     check(send(daik::set_ref_temp, target).status == "200 OK" && generation() == first &&
               room_history_resets == 1,
           "target-only edit must preserve actual room-temperature history");
-    check(send(daik::set_ref_temp, target).status == "200 OK" && generation() == first &&
-              room_history_resets == 1,
-          "unchanged retry must preserve the historical lifetime");
+    const auto prior_runtime_changes = runtime_changes;
+    const auto prior_saves           = saves;
+    const auto retry                 = send(daik::set_ref_temp, target);
+    check(retry.status == "200 OK" &&
+              retry.response ==
+                  R"({"ok":true,"saved":false,"reboot":false,"room_evidence_reset":true})" &&
+              runtime_changes == prior_runtime_changes + 1 && saves == prior_saves &&
+              generation() == first && room_history_resets == 1,
+          "unchanged retry must acknowledge the runtime reset and preserve stored room history");
     check(send(daik::set_ref_temp, R"({"topic":""})").status == "200 OK" &&
               generation() == first + 1 && room_history_identity == 0 && room_history_resets == 2,
           "source deletion must durably retire only its history");

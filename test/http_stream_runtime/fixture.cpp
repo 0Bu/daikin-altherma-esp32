@@ -73,6 +73,8 @@ inline int                            scan_count = 0, scan_failure = 0;
 inline unsigned                       scan_calls             = 0;
 inline size_t                         scan_first_allocations = 0;
 inline daik::CheckupStopContextReport stop_report{};
+inline daik::HeatingCurveBinsReport     curve_bins;
+inline bool                             curve_bins_available = false;
 inline daik::logic::CheckupCyclingHours cycling_hours{};
 inline daik::logic::CheckupCyclingTrace cycling_trace{};
 inline daik::logic::CheckupRestore      checkup_persist     = daik::logic::CheckupRestore::NoRecord;
@@ -116,6 +118,8 @@ void reset() {
     scan_calls                = 0;
     scan_first_allocations    = 0;
     stop_report               = {};
+    curve_bins                 = {};
+    curve_bins_available       = false;
     cycling_hours             = {};
     checkup_persist           = daik::logic::CheckupRestore::NoRecord;
     reset_after_checkup       = false;
@@ -322,7 +326,13 @@ MqttStatus                  mqtt_status() { return {}; }
 MqttSkipStats               mqtt_skip_stats() { return {}; }
 uint32_t                    mqtt_retirement_evidence() noexcept { return 0; }
 ReferenceTemperatureStatus  reference_temperature_status(const Config&) { return {}; }
-logic::HeatingCurveSnapshot heating_curve_status() { return {}; }
+logic::HeatingCurveSnapshot heating_curve_status(HeatingCurveBinsReport* out) {
+    if (out) {
+        *out       = fixture::curve_bins;
+        out->valid = fixture::curve_bins_available;
+    }
+    return {};
+}
 CirculationSourceStatus     circulation_source_status(const Config&) { return {}; }
 CirculationPumpSample       circulation_pump_sample() { return {}; }
 WeatherForecastStatus       weather_forecast_status() { return {}; }
@@ -637,6 +647,45 @@ int main(int argc, char** argv) {
               "unreadable diagnosis status failed");
         successful(req);
         emit(req, "checkup-persist-unknown");
+    });
+    run("heating_curve_bins_wire", [] {
+        current.diagnostics_enabled            = true;
+        current.mqtt_uri                       = "mqtt://fixture";
+        current.ref_temp_topic                 = "room";
+        current.ref_temp_path                  = "temperature";
+        current.ref_temp_fixed_setpoint_tenths = 215;
+        current.mb_host                        = "homehub-fixture";
+        curve_bins_available                   = true;
+        curve_bins.target_c                    = 21.5;
+        curve_bins.homehub[0].scope_samples    = 3;
+        auto& bin                              = curve_bins.homehub[1];
+        bin.samples                            = 2;
+        bin.first_unix_s                       = 1700000000;
+        bin.last_unix_s                        = 1700001800;
+        bin.room_min_tenths                    = -7;
+        bin.room_max_tenths                    = 7;
+        bin.outdoor_sum_tenths                 = 20;
+        bin.outdoor_max_tenths                 = 20;
+        auto req                               = request();
+        check(invoke(req, "/status", daik::h_status) == ESP_OK, "curve bins status failed");
+        check(req.response.find("\"outdoor_bins\":{\"target_c\":21.500000,\"scope_samples\":3") !=
+                  std::string::npos,
+              "curve bins retain the scope and denominator");
+        check(req.response.find("\"room_min_tenths\":-7,\"room_max_tenths\":7") !=
+                  std::string::npos,
+              "curve bins preserve signed range");
+        check(req.response.find("\"env3\":[null,null,null,null]") != std::string::npos,
+              "missing ENV III bins are not zero");
+        req = request();
+        check(invoke(req, "/status?redact=1", daik::h_status) == ESP_OK,
+              "redacted bins status failed");
+        check(req.response.find("\"outdoor_bins\"") == std::string::npos,
+              "redacted status omits exact outdoor-bin evidence");
+        curve_bins_available = false;
+        req                  = request();
+        check(invoke(req, "/status", daik::h_status) == ESP_OK, "unavailable bins status failed");
+        check(req.response.find("\"outdoor_bins\":null") != std::string::npos,
+              "unavailable scope has no fabricated bins");
     });
     run("stop_context_absent", [] {
         for (const bool confirmed : {false, true}) {
