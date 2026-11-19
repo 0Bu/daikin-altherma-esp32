@@ -409,11 +409,20 @@ S.hist.set("modbus:dhw_tank", modbus);
   const retained = h.histHtml("dhw_tank", "", "Tank");
   assert.match(retained, /vhist-retained[^>]*aria-label="X10A · Letzter empfangener Messwert"[^>]*left:0\.000%/,
     "the last received marker points at the measurement before the trailing gaps");
+  assert.doesNotMatch(retained.slice(retained.indexOf('vhist-legend'), retained.indexOf('vhist-graph')),
+    /Letzter empfangener Messwert/,
+    "source legend keeps short names and relies on the graphical retained ring marker");
+  assert.doesNotMatch(h.histHtml("dhw_tank", "", "Tank", "x10a"), /vhist-legend/,
+    "single-source retained X10A chart omits an unneeded legend");
   h.histSeriesToggle("dhw_tank", "modbus");
   const retainedOnly = h.histHtml("dhw_tank", "", "Tank");
-  assert.match(retainedOnly, /<div class="vhist-axis"><span>Aufzeichnung/);
-  assert.doesNotMatch(retainedOnly.slice(retainedOnly.indexOf('<div class="vhist-axis">')), /jetzt/,
-    "a hidden fresh ring cannot label the retained plot as current");
+  assert.match(retainedOnly, /<div class="vhist-axis"><span><\/span><span><\/span><\/div>/,
+    "an undated retained chart does not repeat Aufzeichnung or claim jetzt on the axis");
+  S.hist.set("dhw_tank", { ...S.hist.get("dhw_tank"), t0: 1768720000 });
+  const retainedDated = h.histHtml("dhw_tank", "", "Tank", "x10a");
+  assert.match(retainedDated, /<div class="vhist-axis"><span>\d{2}:\d{2}<\/span><span>\d{2}:\d{2}<\/span><\/div>/,
+    "a dated multi-slot retained chart shows wall-clock bounds instead of repeating Aufzeichnung or claiming jetzt");
+  S.hist.set("dhw_tank", { ...S.hist.get("dhw_tank"), t0: null });
   const retainedView = h.historyView("dhw_tank");
   assert.match(h.scrubText(retainedView, 0), /^Letzter empfangener Messwert · /,
     "an undated cursor uses the last sample of the visible retained curve");
@@ -1572,13 +1581,32 @@ assert.match(dhwHtml, /vhist-legend-bsh/, "DHW legend must display BSH indicator
 assert.match(dhwHtml, /10 min/, "DHW legend must include Boost duration");
 assert.match(dhwHtml, /5 min/, "DHW legend must include BSH duration");
 {
-  const key = "modbus:smart_grid_mode";
-  const ring = S.hist.get(key);
-  S.hist.set(key, { ...ring, refreshFailed: true });
-  assert.match(h.histHtml("dhw_tank", "°C", "Tank"), /Empfehlung ein · Modbus · Letzter empfangener Messwert/);
-  S.hist.set(key, { err: true, v: [] });
-  assert.match(h.histHtml("dhw_tank", "°C", "Tank"), /Empfehlung ein · Modbus · Verlauf nicht verfügbar/);
-  S.hist.set(key, ring);
+  const sgKey = "modbus:smart_grid_mode";
+  const bshKey = "modbus:bsh_state";
+  const sgRing = S.hist.get(sgKey);
+  const bshRing = S.hist.get(bshKey);
+  S.hist.set(sgKey, { dt: 300, b0: 100, v: [0, 0, 0, 0], refreshFailed: true });
+  S.hist.set(bshKey, { dt: 300, b0: 100, v: [0, 0, 0, 0], refreshFailed: true });
+  const inactiveRetained = h.histHtml("dhw_tank", "°C", "Tank");
+  assert.doesNotMatch(inactiveRetained, /Empfehlung ein|Heizstab aktiv|Letzter empfangener Messwert|Verlauf nicht verfügbar/,
+    "inactive retained auxiliary rings must not add prose or legend items");
+  S.hist.set(sgKey, { err: true, v: [] });
+  S.hist.set(bshKey, { err: true, v: [] });
+  const erroredAux = h.histHtml("dhw_tank", "°C", "Tank");
+  assert.doesNotMatch(erroredAux, /Empfehlung ein|Heizstab aktiv|Letzter empfangener Messwert|Verlauf nicht verfügbar/,
+    "errored auxiliary rings must not pollute the DHW tank legend");
+  S.hist.set(sgKey, { ...sgRing, refreshFailed: true });
+  S.hist.set(bshKey, bshRing);
+  const activeRetained = h.histHtml("dhw_tank", "°C", "Tank");
+  const activeRetainedLegend = activeRetained.slice(
+    activeRetained.indexOf("vhist-legend"),
+    activeRetained.indexOf("vhist-graph"),
+  );
+  assert.equal((activeRetainedLegend.match(/Empfehlung ein · Modbus/g) || []).length, 1,
+    "active retained auxiliary phase appears once with its colour swatch and duration");
+  assert.doesNotMatch(activeRetained, /Letzter empfangener Messwert/,
+    "active retained auxiliary phase does not repeat retained status prose");
+  S.hist.set(sgKey, sgRing);
 }
 
 // Verify tooltips include active phases
@@ -1628,6 +1656,30 @@ assert.doesNotMatch(h.scrubText(view, 3), /Boost|Heizstab/, "Sample 3 without ac
   assert.match(h.scrubText(independent, 1), /Empfehlung ein · X10A \+ Empfehlung ein · Modbus \+ Heizstab aktiv · X10A$/);
   assert.match(h.scrubText(independent, 2), /Empfehlung ein · Modbus \+ Heizstab aktiv · Modbus$/,
     "an inactive X10A bucket cannot conceal an active HomeHub heater sample");
+
+  // When both X10A and Modbus tank temperature curves exist, toggling Modbus off hides its phase
+  // bands, legend swatches, and readout notes while keeping X10A phases visible.
+  S.hist.set("modbus:dhw_tank", { dt: 300, unit: "°C", b0: 100, v: [450, 460, 470, 480], held: [] });
+  h.histSeriesToggle("dhw_tank", "modbus");
+  const modbusHiddenHtml = h.histHtml("dhw_tank", "°C", "Tank");
+  assert.match(modbusHiddenHtml, /Empfehlung ein · X10A <small[^>]+>\(10 min\)/);
+  assert.match(modbusHiddenHtml, /Heizstab aktiv · X10A <small[^>]+>\(5 min\)/);
+  assert.doesNotMatch(modbusHiddenHtml, /Empfehlung ein · Modbus|Heizstab aktiv · Modbus/,
+    "hiding Modbus in the tank legend hides Modbus phase bands and swatches");
+  assert.doesNotMatch(modbusHiddenHtml, /vhist-phase-outline/,
+    "unpaired visible Boost phase drops the concurrent-lane outline");
+  const modbusHiddenView = h.historyView("dhw_tank");
+  assert.doesNotMatch(h.scrubText(modbusHiddenView, 1), /Modbus/);
+  assert.match(h.scrubText(modbusHiddenView, 1), /Empfehlung ein · X10A \+ Heizstab aktiv · X10A$/);
+  assert.equal(h.histReadout(modbusHiddenView, 2), "47,0 °C",
+    "hiding Modbus omits Modbus phase notes at slot 2");
+  h.histSeriesToggle("dhw_tank", "modbus");
+  const restoredHtml = h.histHtml("dhw_tank", "°C", "Tank");
+  assert.match(restoredHtml, /Empfehlung ein · Modbus <small[^>]+>\(10 min\)/);
+  assert.match(restoredHtml, /Heizstab aktiv · Modbus <small[^>]+>\(5 min\)/);
+
+  S.histHidden.delete("dhw_tank");
+  S.hist.delete("modbus:dhw_tank");
   S.hist.delete("smart_grid_mode");
   S.hist.delete("bsh_state");
 }

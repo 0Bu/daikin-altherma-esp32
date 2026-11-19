@@ -2360,6 +2360,7 @@ async function assertHistoryReadouts(page, context) {
           const button=source=>host.querySelector('[data-hist-series="' + source + '"]');
           const initialActive=sources.every(source => button(source).getAttribute("aria-pressed") === "true" && !button(source).disabled);
           let gapBehavior=true;
+          let auxBehavior=true;
           if (id === "dhw_tank") {
             const axisClean=!host.querySelector(".vhist-axis .vhist-gap, .vhist-axis .vhist-idle");
             scrubMove(host.querySelector("[data-hist]"), 7);
@@ -2373,6 +2374,29 @@ async function assertHistoryReadouts(page, context) {
             const soleHidesEmptyTip=soleGapTip.hidden && !soleGapTime.hidden;
             button("modbus").click(); window.__browserHistoryRender();
             gapBehavior=axisClean && dualOmitsMissing && soleHidesEmptyTip;
+
+            const xRing=S.hist.get("dhw_tank"), mbAuxKey=histCacheKey("smart_grid_mode","modbus"),
+              mbRing=S.hist.get(histCacheKey("dhw_tank","modbus"));
+            const sgV=Array.from({length:20},(_,i) => i >= 2 && i < 5 ? 20 : 0);
+            S.hist.set("smart_grid_mode",{...xRing,unit:"",held:[],v:sgV});
+            S.hist.set(mbAuxKey,{...mbRing,unit:"",held:[],v:sgV,refreshFailed:true});
+            window.__browserHistoryRender();
+            const boostLegend = () => [...host.querySelectorAll(".vhist-legend .vhist-legend-boost")];
+            const noRetainedText = !(host.querySelector(".vhist-legend")?.textContent || "").includes(t("hist.retained"));
+            const bothBoostShown = boostLegend().length === 2 &&
+              boostLegend().some(el => el.textContent.includes("Modbus")) &&
+              boostLegend().some(el => el.textContent.includes("X10A"));
+            button("modbus").click(); window.__browserHistoryRender();
+            const modbusHidden = boostLegend().length === 1 &&
+              !boostLegend().some(el => el.textContent.includes("Modbus")) &&
+              boostLegend().some(el => el.textContent.includes("X10A")) &&
+              !host.querySelector(".vhist-phase-boost.vhist-phase-outline");
+            button("modbus").click(); window.__browserHistoryRender();
+            const modbusRestored = boostLegend().length === 2 &&
+              !!host.querySelector(".vhist-phase-boost.vhist-phase-outline");
+            S.hist.delete("smart_grid_mode"); S.hist.delete(mbAuxKey);
+            window.__browserHistoryRender();
+            auxBehavior = noRetainedText && bothBoostShown && modbusHidden && modbusRestored;
           }
           const changed=[];
           for (const source of sources.slice(1)) {
@@ -2395,13 +2419,13 @@ async function assertHistoryReadouts(page, context) {
           beforePoll.focus(); S.clickHold=false;
           setHtml(host.id,host.innerHTML + "<!-- changed poll -->");
           const pollFocus=button(sources[1]) !== beforePoll && document.activeElement === button(sources[1]);
-          return {initialActive,gapBehavior,hidden:changed.every(Boolean),protectedLast,unchanged,
+          return {initialActive,gapBehavior,auxBehavior,hidden:changed.every(Boolean),protectedLast,unchanged,
             pollFocus,
             restored:sources.every(source=>button(source).getAttribute("aria-pressed") === "true" && !button(source).disabled) &&
               sources.slice(1).every(source=>!!host.querySelector(".vhist-line." + pathClass[source])),
             ringsUnchanged:JSON.stringify(Array.from(S.hist)) === rings};
         })()`);
-        assert.deepEqual(legend,{initialActive:true,gapBehavior:true,hidden:true,protectedLast:true,unchanged:true,pollFocus:true,restored:true,ringsUnchanged:true},
+        assert.deepEqual(legend,{initialActive:true,gapBehavior:true,auxBehavior:true,hidden:true,protectedLast:true,unchanged:true,pollFocus:true,restored:true,ringsUnchanged:true},
           `${context}/${id}: legend clicks hide and restore independent series while retaining the final curve and source history`);
       } else {
         const stateLegend = await page.evaluate(`(() => {

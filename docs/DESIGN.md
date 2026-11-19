@@ -328,7 +328,9 @@ Defrost retain any observed activation in their open five-minute bucket. Smart G
 four states. Disinfection and X10A Tank preheat remain different facts. Totals are sampled raster
 time; events between sweeps may be missed.
 The tank-temperature chart distinguishes the Smart Grid “Recommended on” request from observed
-booster-heater operation. Bands, sampled durations and readouts identify X10A and Modbus separately.
+booster-heater operation. Phase bands, sampled-duration legend swatches, and readouts appear only
+for active intervals, identify X10A and Modbus separately, and follow visible source selection when
+paired.
 
 Rings use five-minute slots on an elapsed or rolling-day axis showing the domain bounds without gap or
 idle counters. A newly resolved row or changed source
