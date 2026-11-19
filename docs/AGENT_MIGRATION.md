@@ -161,9 +161,10 @@ fails closed on both missing and extra project skills.
   lab-HIL shape is deliberately not admitted as an ordinary agent command and is not invoked by the
   release workflow.
 - Explicitly authorized local tests use the separate direct, unchained `scripts/dev-ota-upload.py`
-  command. It binds a signed local image and the current production identity, requires the saved
-  `dev` channel and permits one upload before merge or publication. Its default is read-only
-  preflight; `--execute` writes. See [the local-test procedure](MAINTENANCE.md#local-dev-ota-tests).
+  command. It binds a signed local image and the selected board identity (`bench`, `production`, or
+  explicit board IP/hostname), requires saved `dev` and permits one upload without Codex or a source
+  receipt. Its default is read-only preflight; `--execute` writes. See
+  [the local-test procedure](MAINTENANCE.md#local-dev-ota-tests).
 - Heap-sensitive changed-file paths make the SHA-stamped `$heap-safety-review` PR record mandatory.
   That record comes from the independent read-only `heap_safety_reviewer`; project and domain
   reviews remain independently required on every local/manual merge and every PR outside the narrow
@@ -274,12 +275,6 @@ The process exit status alone does not prove that the selected reviewer complete
 review record must identify the actual named role, verified read-only mode, exact base/head and scope,
 local changes included, findings and completed review. Check that evidence independently before
 recording a review; the launcher never checks PR boxes or creates an acceptance stamp.
-
-Source-bound local OTA evidence uses a separate mode: the launcher loads the selected canonical
-profile's developer instructions directly into one independent session and forbids another spawn.
-The helper verifies the actual CLI thread identity, profile digest, source/build binding and
-completed findings; actual permissions still require inspection. Follow the
-[local-test procedure](MAINTENANCE.md#local-dev-ota-tests) for its entry point and retained evidence.
 
 The formatter records a correlated pre-edit state only for eligible project source files and
 computes formatting in memory. It emits a bounded suggestion, never writes a source file.

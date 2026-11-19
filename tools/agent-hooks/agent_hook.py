@@ -1026,8 +1026,18 @@ def canonical_scoped_ota_review(payload: dict[str, Any], command: str) -> bool:
     return True
 
 
+def valid_dev_ota_target(target: str, expected_mac: str | None) -> bool:
+    if re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?", target) is None or ".." in target:
+        return False
+    if target.lower() in {"localhost", "daikin-altherma-esp32-setup", "daikin-altherma-esp32-setup.local"}:
+        return False
+    if target.lower() in {"daikin-altherma-esp32", "daikin-altherma-esp32.local"} and expected_mac is None:
+        return False
+    return True
+
+
 def canonical_dev_ota_command(payload: dict[str, Any], command: str) -> bool:
-    """Only the reviewed inventory-bound local-test uploader may bypass official promotion."""
+    """Only the reviewed target- and artifact-bound local-test uploader may use /ota/upload."""
     if "\n" in command or re.search(r"[;&|`<>$*?\[\]{}]", command):
         return False
     try:
@@ -1045,8 +1055,9 @@ def canonical_dev_ota_command(payload: dict[str, Any], command: str) -> bool:
         return False
     if tokens[1:] == ["--help"]:
         return True
-    expected = {"--confirm-production-test", "--image", "--expected-app-sha256",
-                "--expected-current-version", "--expected-current-elf", "--evidence", "--expected-source-sha256"}
+    required = {"--target", "--image", "--expected-app-sha256"}
+    optional = {"--expected-mac"}
+    allowed = required | optional
     values: dict[str, str] = {}
     execute = False
     index = 1
@@ -1056,57 +1067,16 @@ def canonical_dev_ota_command(payload: dict[str, Any], command: str) -> bool:
             execute = True
             index += 1
             continue
-        if token not in expected or token in values or index + 1 >= len(tokens):
+        if token not in allowed or token in values or index + 1 >= len(tokens):
             return False
         values[token] = tokens[index + 1]
         index += 2
-    return set(values) == expected and values["--confirm-production-test"] == "production" and \
-        Path(values["--image"]).is_absolute() and values["--image"].endswith(".bin") and \
-        Path(values["--evidence"]).is_absolute() and values["--evidence"].endswith(".json") and \
-        re.fullmatch(r"[0-9a-f]{64}", values["--expected-source-sha256"]) is not None and \
-        re.fullmatch(r"[0-9a-f]{64}", values["--expected-app-sha256"]) is not None and \
-        re.fullmatch(r"[0-9A-Za-z._+-]+", values["--expected-current-version"]) is not None and \
-        re.fullmatch(r"[0-9a-f]{9}", values["--expected-current-elf"]) is not None
-
-
-def canonical_local_ota_evidence_command(payload: dict[str, Any], command: str) -> bool:
-    """The local evidence runner owns fixed read/check/review operations, never a device write."""
-    if "\n" in command or re.search(r"[;&|`<>$*?\[\]{}]", command):
+    expected_mac = values.get("--expected-mac")
+    if expected_mac is not None and re.fullmatch(r"(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", expected_mac) is None:
         return False
-    try:
-        tokens = shlex.split(command, posix=True)
-    except ValueError:
-        return False
-    cwd, error = effective_shell_cwd(payload)
-    if error or not tokens:
-        return False
-    executable = Path(tokens[0]).expanduser()
-    if not executable.is_absolute():
-        executable = cwd / executable
-    canonical = HOOK_ROOT / "scripts/local-ota-evidence.py"
-    if Path(os.path.abspath(executable)) != canonical or canonical.is_symlink():
-        return False
-    if tokens[1:] == ["--help"]:
-        return True
-    if len(tokens) < 4 or tokens[1] != "--evidence" or not Path(tokens[2]).is_absolute() or \
-       not tokens[2].endswith(".json"):
-        return False
-    action, args = tokens[3], tokens[4:]
-    if action == "snapshot":
-        return len(args) == 2 and args[0] == "--coordinator-id" and \
-            re.fullmatch(r"[0-9A-Za-z_./:-]{1,160}", args[1]) is not None
-    if action == "check":
-        return len(args) == 2 and args[0] == "--check" and re.fullmatch(r"[a-z-]{1,32}", args[1]) is not None
-    if action == "verify":
-        return len(args) == 4 and args[0] == "--signed-image" and Path(args[1]).is_absolute() and \
-            args[1].endswith(".bin") and args[2] == "--expected-source-sha256" and \
-            re.fullmatch(r"[0-9a-f]{64}", args[3]) is not None
-    if action != "review" or len(args) < 6 or args[:1] != ["--role"] or \
-       args[1] not in {"doc_drift_checker", "heap_safety_reviewer", "x10a_decode_reviewer"} or \
-       args[2] != "--scope" or args[-2] != "--intent" or not args[-1].strip() or len(args[-1].encode()) > 4096:
-        return False
-    return all(path and not path.startswith("-") and not Path(path).is_absolute() and
-               ".." not in Path(path).parts for path in args[3:-2])
+    return required.issubset(values) and valid_dev_ota_target(values["--target"], expected_mac) and \
+        Path(values["--image"]).is_absolute() and Path(values["--image"]).suffix == ".bin" and \
+        re.fullmatch(r"[0-9a-f]{64}", values["--expected-app-sha256"]) is not None
 
 
 def possible_ota_update_route(command: str) -> bool:
@@ -1546,8 +1516,6 @@ def production_ota_violation(payload: dict[str, Any]) -> str | None:
         return None
     if canonical_scoped_ota_review(payload, command):
         return None
-    if canonical_local_ota_evidence_command(payload, command):
-        return None
     if canonical_ota_source_staging(payload, command):
         return None
     compact = re.sub(r"[\s'\"+\\]", "", unquote(unquote(command)).lower())
@@ -1563,7 +1531,8 @@ def production_ota_violation(payload: dict[str, Any]) -> str | None:
     )
     names_upload = names_upload or (
         re.search(r"[$`]", command) is not None and
-        ("--confirm-production-test" in compact or ("dev-ota-" in compact and "upload.py" in compact))
+        (all(option in compact for option in ("--target", "--image", "--expected-app-sha256")) or
+         ("dev-ota-" in compact and "upload.py" in compact))
     )
     names_gate = names_gate or (
         re.search(r"[$`]", command) is not None
@@ -1586,7 +1555,7 @@ def production_ota_violation(payload: dict[str, Any]) -> str | None:
     read_only_inspection = read_only_gate_inspection(command)
     if (names_upload or aliases_canonical_ota_gate(payload, command, "dev-ota-upload.py")) and \
        not read_only_inspection:
-        return "local dev OTA requires the canonical direct, unchained inventory- and artifact-bound uploader"
+        return "local dev OTA requires the canonical direct, unchained target- and artifact-bound uploader"
     if (aliases_canonical_ota_gate(payload, command) and not read_only_inspection) or \
        (names_gate and not read_only_inspection):
         return "the OTA gate is not a canonical direct, unchained, role- and artifact-bound command"

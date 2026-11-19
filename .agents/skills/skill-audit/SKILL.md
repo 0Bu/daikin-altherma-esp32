@@ -142,6 +142,10 @@ skill/reviewer asserts:
   `scripts/run-esp-idf-matrix-audit.sh`.
 - **`$flash-esp32`** — host USB flash preserving NVS. Verify target `esp32s3`, `scripts/idf-docker.sh`,
   `scripts/require-signed.sh`, MAC identity via `esptool chip-id`, and `partitions.csv` (`nvs@0x9000` preserved).
+- **`$ota`** — quick signed local HTTP upload (`/ota/upload`) via `scripts/dev-ota-upload.py` to any
+  requested board (`bench`, `production`, or explicit IP/hostname) on saved channel `dev`, without
+  requiring Codex or a source receipt. Verify [Local dev OTA tests](../../../docs/MAINTENANCE.md#local-dev-ota-tests),
+  one upload attempt per signed image, and reboot/probation verification.
 - **`$pr-hygiene-review`** — screens commit messages and PR text for personal information and non-English
   prose. Verify against `scripts/run-pr-hygiene-audit.sh` and `tools/pr_hygiene/audit_exceptions.txt`.
 - **`$project-review`** — whole-firmware coherence review. Verify doc drift checks (`AGENTS.md`, `docs/README.md`,

@@ -194,6 +194,8 @@ async function installHooks(page, mutation) {
       if (window.__motionObserve && (S.scrub || S.clickHold)) window.__motionHolds++;
       const result = original.renderApp(...args);
       if (!window.__motionObserve) return result;
+      if (window.__motionBody && document.getElementById("inspBody")?.innerHTML !== window.__motionBody.html)
+        window.__motionBody.changed = true;
       window.__motionRenders.push({ started, duration: performance.now() - started });
       if (window.__motionInactive?.some(({ node }) =>
         node.getAnimations().some(animation => animation instanceof CSSAnimation)))
@@ -493,7 +495,7 @@ async function observe(page, server, context, selectors, { inspector = false, st
       throw new Error("history focus and visibility must settle before polling observation");
     window.__motionFocused = document.activeElement;
     const body = document.getElementById("inspBody");
-    window.__motionBody = { node: body.firstChild, html: body.innerHTML };
+    window.__motionBody = { node: body.firstChild, html: body.innerHTML, changed: false };
     window.__motionLive = { flow: S.live?.flow, pump: S.live?.pump, rps: S.live?.rps,
       mbFields: [...(S.live?.mbFields || [])] };
     // Settings hides the entire schematic; its nonessential CSS animations legitimately stop.
@@ -607,7 +609,7 @@ async function observe(page, server, context, selectors, { inspector = false, st
         ...window.__motionInspectorRows.finish(), children: rows.childNodes.length,
         freshText: rows.textContent === expectedRows.content.textContent,
       } : null,
-      bodyUnchanged: body.innerHTML === window.__motionBody.html,
+      bodyUnchanged: !window.__motionBody.changed && body.innerHTML === window.__motionBody.html,
       sameBody: body.firstChild === window.__motionBody.node,
       animations: window.__motionAnimations.map(({ id, node, animation, time, initial }) => ({
         id, same: node.getAnimations().includes(animation), running: animation?.playState === "running",

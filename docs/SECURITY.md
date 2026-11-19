@@ -180,11 +180,10 @@ recover the original handoff or publish the next version.
 Official bench and production gates separately bind inventory roles, exact artifacts, source,
 current version, observed verifier/heap/stack evidence, probation and pressure. The canonical
 commands and their abort behavior are in [MAINTENANCE.md](MAINTENANCE.md#role-pinned-ota).
-An explicitly authorized local dev upload follows the separate test procedure there and does not
-waive the PR gates or establish acceptance of a later published artifact.
-Its receipt binds the complete local source, check/review transcripts, isolated unsigned build and
-signed-image correspondence. Transcript binding does not prove a review's meaning or effective
-permissions; the coordinator verifies the actual independent read-only runtime before upload.
+An explicitly authorized local dev upload follows
+[MAINTENANCE.md](MAINTENANCE.md#local-dev-ota-tests): it binds the signed application bytes/SHA-256,
+saved `dev` channel, target MAC across reboot, an exclusive `.upload-attempt` marker and a private
+upload journal, without requiring a source/review receipt or waiving PR gates or official promotion.
 Running version plus ELF build id is not cryptographic readback of complete flash. Host/CI,
 artifact identity, injection, reboot, API and rendered UI evidence must be reported separately.
 

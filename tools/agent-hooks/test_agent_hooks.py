@@ -191,26 +191,43 @@ class AgentHookFastTests(unittest.TestCase):
                 self.assertIsNotNone(agent_hook.production_ota_violation(payload(value)))
 
     def test_local_dev_upload_requires_canonical_bound_command(self):
-        command = ("scripts/dev-ota-upload.py --confirm-production-test production --image /tmp/app.bin "
-                   "--expected-app-sha256 " + "b" * 64 +
-                   " --expected-current-version 1.2.3-dev.4 --expected-current-elf abc123def"
-                   " --evidence /tmp/receipt.json --expected-source-sha256 " + "c" * 64)
+        command = ("scripts/dev-ota-upload.py --target production --image /tmp/app.bin "
+                   "--expected-app-sha256 " + "b" * 64)
         def payload(value):
             return {"cwd": str(ROOT), "tool_name": "exec_command", "tool_input": {"cmd": value}}
-        for value in (command, command + " --execute", "scripts/dev-ota-upload.py --help"):
-            self.assertTrue(agent_hook.canonical_dev_ota_command(payload(value), value))
-            self.assertEqual(self.run_pre_tool(payload(value)), (0, ""))
-        for value in ("python3 " + command, "env " + command, command + "; true",
-                      command + " --execute --execute", command + " --host unrelated.invalid",
-                      command.replace("production --image", "bench --image"),
-                      command.replace("/tmp/app.bin", "app.bin"),
-                      command.replace("abc123def", "unknown"),
-                      command.replace("scripts/dev-ota-upload.py", "/tmp/dev-ota-upload.py"),
-                      command.replace("/tmp/app.bin", "$IMAGE")):
-            with self.subTest(value=value):
+        for value in (
+            command,
+            command + " --execute",
+            command.replace("production", "bench") + " --execute",
+            command.replace("production", "192.0.2.170") + " --execute",
+            command.replace("production", "daikin-altherma-esp32-ab12.local") + " --execute",
+            command.replace("production", "daikin-altherma-esp32.local") +
+            " --expected-mac 02:11:22:33:44:55 --execute",
+            "scripts/dev-ota-upload.py --help",
+        ):
+            with self.subTest(allowed=value):
+                self.assertTrue(agent_hook.canonical_dev_ota_command(payload(value), value))
+                self.assertEqual(self.run_pre_tool(payload(value)), (0, ""))
+        for value in (
+            "python3 " + command,
+            "env " + command,
+            command + "; true",
+            command + " --execute --execute",
+            command + " --host unrelated.invalid",
+            command + " --target bench",
+            command.replace("production", "localhost"),
+            command.replace("production", "daikin-altherma-esp32.local"),
+            command.replace("production", "bad..host"),
+            command + " --expected-mac invalid-mac",
+            command.replace("/tmp/app.bin", "app.bin"),
+            command.replace("b" * 64, "unknown"),
+            command.replace("scripts/dev-ota-upload.py", "/tmp/dev-ota-upload.py"),
+            command.replace("/tmp/app.bin", "$IMAGE"),
+        ):
+            with self.subTest(denied=value):
                 self.assertFalse(agent_hook.canonical_dev_ota_command(payload(value), value))
                 self.assertIsNotNone(agent_hook.production_ota_violation(payload(value)))
-        for flag, value in (("--evidence", "/tmp/receipt.json"), ("--expected-source-sha256", "c" * 64)):
+        for flag, value in (("--target", "production"), ("--expected-app-sha256", "b" * 64)):
             candidate = command.replace(" " + flag + " " + value, "")
             self.assertFalse(agent_hook.canonical_dev_ota_command(payload(candidate), candidate))
         with tempfile.TemporaryDirectory() as directory:
@@ -221,18 +238,6 @@ class AgentHookFastTests(unittest.TestCase):
             for path in (copied, linked):
                 value = command.replace("scripts/dev-ota-upload.py", str(path))
                 self.assertIsNotNone(agent_hook.production_ota_violation(payload(value)))
-
-    def test_local_evidence_runner_accepts_only_fixed_non_write_actions(self):
-        command = ("scripts/local-ota-evidence.py --evidence /tmp/receipt.json review --role heap_safety_reviewer "
-                   "--scope main scripts/dev-ota-upload.py --intent 'Review the complete local candidate'")
-        def payload(value):
-            return {"cwd": str(ROOT), "tool_name": "exec_command", "tool_input": {"cmd": value}}
-        self.assertTrue(agent_hook.canonical_local_ota_evidence_command(payload(command), command))
-        self.assertEqual(self.run_pre_tool(payload(command)), (0, ""))
-        for candidate in ("env " + command, command + "; true", command.replace("review --role", "upload --role"),
-                          command.replace("heap_safety_reviewer", "default"), command.replace("--scope main", "--scope ../foreign")):
-            self.assertFalse(agent_hook.canonical_local_ota_evidence_command(payload(candidate), candidate))
-            self.assertIsNotNone(agent_hook.production_ota_violation(payload(candidate)))
 
     def test_upload_route_shares_direct_write_evasion_protection(self):
         commands = [
