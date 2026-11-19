@@ -85,17 +85,24 @@ static void reboot_soon() {
 // inline field error). Both callers — the dashboard modals and the setup portal — read `error` out of
 // the JSON. `msg` is always an internal literal here (body/JSON parse failures and the fixed
 // wifi_credentials_valid reasons), so it needs no escaping; never pass caller-supplied text.
-static esp_err_t send_err(httpd_req_t* req, const char* status, const char* msg) {
+[[gnu::noinline]] static esp_err_t send_err(httpd_req_t* req, const char* status, const char* msg) {
     httpd_resp_set_status(req, status);
-    return http_send_json(req, (std::string("{\"ok\":false,\"error\":\"") + msg + "\"}").c_str());
+    std::string body = "{\"ok\":false,\"error\":\"";
+    body += msg;
+    body += "\"}";
+    return http_send_json(req, body.c_str());
+}
+
+[[gnu::noinline]] static esp_err_t send_bad_req(httpd_req_t* req, const char* msg) {
+    return send_err(req, "400 Bad Request", msg);
 }
 
 // A rejection carrying a stable machine `code` beside the English `error`, so the localized UI can
 // translate it while direct API clients still receive a useful explanation. Both arguments are
 // internal literals by contract — like send_err above, this does no escaping, so neither may ever
 // carry caller-supplied text.
-static esp_err_t send_err_code(httpd_req_t* req, const char* status,
-                               const char* code, const char* msg) {
+[[gnu::noinline]] static esp_err_t send_err_code(httpd_req_t* req, const char* status,
+                                                 const char* code, const char* msg) {
     httpd_resp_set_status(req, status);
     std::string body = "{\"ok\":false,\"code\":\"";
     body += code;
@@ -138,7 +145,7 @@ static esp_err_t env3_save_preflight(httpd_req_t* req, const Config& current,
     std::string reason;
     if (!env3_config_valid(proposed, reason, SOC_GPIO_PIN_COUNT - 1, hw_octal_spi(),
                            net_eth_reserved_pins())) {
-        return send_err(req, "400 Bad Request", reason.c_str());
+        return send_bad_req(req, reason.c_str());
     }
     switch (env3_save_check(current, proposed)) {
         case Env3SaveCheck::None:
@@ -264,16 +271,16 @@ __attribute__((noinline)) static cJSON* read_config_document(httpd_req_t* req, s
 static esp_err_t set_wifi(httpd_req_t* req) {
     const char* parse_error = nullptr;
     JsonGuard   j(read_config_document(req, 512, parse_error));
-    if (!j) return send_err(req, "400 Bad Request", parse_error);
+    if (!j) return send_bad_req(req, parse_error);
     if (const char* error =
             config_request_field_error(j, HttpConfigFieldType::String, {"ssid", "pass"}))
-        return send_err(req, "400 Bad Request", error);
+        return send_bad_req(req, error);
     std::string ssid = js(j, "ssid");
     std::string pass = js(j, "pass");
     std::string reason;
     if (!wifi_credentials_valid(ssid, pass, reason)) {
         j.reset();
-        return send_err(req, "400 Bad Request", reason.c_str());
+        return send_bad_req(req, reason.c_str());
     }
     Config c = config();
     if (!c.wifi_ssid.empty()) {
@@ -697,8 +704,9 @@ static esp_err_t set_ref_temp(httpd_req_t* req) {
         c.ref_temp_enabled_path == in.enabled_path &&
         c.ref_temp_hvac_mode_path == in.hvac_mode_path &&
         c.ref_temp_max_age_s == in.max_age_s) {
-        mqtt_reference_reconfigure();                 // retry the saved mapping and clear old evidence
-        return http_send_json(req, "{\"ok\":true,\"saved\":false,\"reboot\":false}");
+        mqtt_reference_reconfigure(); // retry the saved mapping and clear old evidence
+        return http_send_json(
+            req, "{\"ok\":true,\"saved\":false,\"reboot\":false,\"room_evidence_reset\":true}");
     }
     const uint32_t previous_room_identity = logic::history_room_identity(c);
     c.ref_temp_name = in.name;
@@ -1124,11 +1132,11 @@ static esp_err_t discover_homehub_now(httpd_req_t* req) {
 static esp_err_t set_syslog(httpd_req_t* req) {
     const char* parse_error = nullptr;
     JsonGuard   j(read_config_document(req, 512, parse_error));
-    if (!j) return send_err(req, "400 Bad Request", parse_error);
+    if (!j) return send_bad_req(req, parse_error);
     if (const char* error = config_request_field_error(j, HttpConfigFieldType::String, {"host"}))
-        return send_err(req, "400 Bad Request", error);
+        return send_bad_req(req, error);
     if (const char* error = config_request_field_error(j, HttpConfigFieldType::Integer, {"port"}))
-        return send_err(req, "400 Bad Request", error);
+        return send_bad_req(req, error);
     std::string host = js(j, "host");
     int port = ji(j, "port", 514);
     j.reset();
@@ -1171,9 +1179,9 @@ static esp_err_t set_syslog(httpd_req_t* req) {
 static esp_err_t set_ntp(httpd_req_t* req) {
     const char* parse_error = nullptr;
     JsonGuard   j(read_config_document(req, 256, parse_error));
-    if (!j) return send_err(req, "400 Bad Request", parse_error);
+    if (!j) return send_bad_req(req, parse_error);
     if (const char* error = config_request_field_error(j, HttpConfigFieldType::String, {"server"}))
-        return send_err(req, "400 Bad Request", error);
+        return send_bad_req(req, error);
     std::string server = js(j, "server");
     j.reset();
 
@@ -1198,26 +1206,26 @@ static esp_err_t set_ntp(httpd_req_t* req) {
 static esp_err_t set_weather(httpd_req_t* req) {
     const char* parse_error = nullptr;
     JsonGuard   j(read_config_document(req, 256, parse_error));
-    if (!j) return send_err(req, "400 Bad Request", parse_error);
+    if (!j) return send_bad_req(req, parse_error);
     if (const char* error =
             config_request_field_error(j, HttpConfigFieldType::String, {"latitude", "longitude"}))
-        return send_err(req, "400 Bad Request", error);
+        return send_bad_req(req, error);
     const std::string latitude = js(j, "latitude");
     const std::string longitude = js(j, "longitude");
     cJSON*            refresh_item = cJSON_GetObjectItemCaseSensitive(j, "refresh");
     if (refresh_item && !cJSON_IsBool(refresh_item)) {
         j.reset();
-        return send_err(req, "400 Bad Request", "refresh must be boolean");
+        return send_bad_req(req, "refresh must be boolean");
     }
     const bool refresh = cJSON_IsTrue(refresh_item);
     j.reset();
     const WeatherLocationParse location = weather_location_parse(latitude, longitude);
     if (!location.valid) {
         if (std::strcmp(location.reason, "both_coordinates_required") == 0)
-            return send_err(req, "400 Bad Request", "latitude and longitude are both required");
+            return send_bad_req(req, "latitude and longitude are both required");
         if (std::strcmp(location.reason, "invalid_latitude") == 0)
-            return send_err(req, "400 Bad Request", "latitude must be between -90 and 90");
-        return send_err(req, "400 Bad Request", "longitude must be between -180 and 180");
+            return send_bad_req(req, "latitude must be between -90 and 90");
+        return send_bad_req(req, "longitude must be between -180 and 180");
     }
     Config c = config();
     const bool weather_was_enabled = c.weather_enabled;
@@ -1269,17 +1277,17 @@ static esp_err_t set_weather(httpd_req_t* req) {
 static esp_err_t set_board(httpd_req_t* req) {
     const char* parse_error = nullptr;
     JsonGuard   j(read_config_document(req, 512, parse_error));
-    if (!j) return send_err(req, "400 Bad Request", parse_error);
+    if (!j) return send_bad_req(req, parse_error);
     if (const char* error =
             config_request_field_error(j, HttpConfigFieldType::String, {"preset_id", "boot_id"}))
-        return send_err(req, "400 Bad Request", error);
+        return send_bad_req(req, error);
     if (const char* error = config_request_field_error(
             j, HttpConfigFieldType::Integer,
             {"led_gpio", "led_type", "btn_gpio", "env3_sda", "env3_scl"}))
-        return send_err(req, "400 Bad Request", error);
+        return send_bad_req(req, error);
     if (const char* error = config_request_field_error(
             j, HttpConfigFieldType::Boolean, {"led_inverted", "btn_active_low", "env3_enabled"}))
-        return send_err(req, "400 Bad Request", error);
+        return send_bad_req(req, error);
     const cJSON* const boot           = cJSON_GetObjectItem(j, "boot_id");
     const cJSON* const revision       = cJSON_GetObjectItem(j, "config_revision");
     const bool         revision_bound = revision != nullptr;
@@ -1293,8 +1301,7 @@ static esp_err_t set_board(httpd_req_t* req) {
         if (!boot || !cJSON_IsNumber(revision) ||
             !(revision->valuedouble >= 0 && revision->valuedouble <= UINT32_MAX) ||
             revision->valuedouble != static_cast<uint32_t>(revision->valuedouble))
-            return send_err(req, "400 Bad Request",
-                            "boot_id and config_revision must be supplied together");
+            return send_bad_req(req, "boot_id and config_revision must be supplied together");
         char current_boot[17];
         http_boot_id(current_boot);
         if (std::strcmp(boot->valuestring, current_boot) != 0 ||
@@ -1327,13 +1334,12 @@ static esp_err_t set_board(httpd_req_t* req) {
         c.board_preset_id = BoardPresetId::Custom;
     } else {
         const BoardPreset* preset = board_preset_by_key(preset_key);
-        if (!preset) return send_err(req, "400 Bad Request", "board preset is unknown");
+        if (!preset) return send_bad_req(req, "board preset is unknown");
         c.board_preset_id = preset->id;
     }
 
     std::string reason;
-    if (!board_identity_valid(c, reason))
-        return send_err(req, "400 Bad Request", reason.c_str());
+    if (!board_identity_valid(c, reason)) return send_bad_req(req, reason.c_str());
 
     // ENV III is an M5Stack-board feature. Switching to a Seeed or Custom board retires the optional
     // sensor in this same atomic save; its controls disappear as soon as the pending selection is no
@@ -1344,7 +1350,7 @@ static esp_err_t set_board(httpd_req_t* req) {
     // side can steal the other's GPIO whichever endpoint is called second (logic/config_model.hpp).
     if (!board_hw_valid(c, reason, SOC_GPIO_PIN_COUNT - 1, hw_octal_spi(),
                         net_eth_reserved_pins()))
-        return send_err(req, "400 Bad Request", reason.c_str());
+        return send_bad_req(req, reason.c_str());
 
     bool env_allowed = false;
     const esp_err_t env_result = env3_save_preflight(req, cur, c, env_allowed);
@@ -1387,13 +1393,13 @@ static esp_err_t set_board(httpd_req_t* req) {
 static esp_err_t set_env3(httpd_req_t* req) {
     const char* parse_error = nullptr;
     JsonGuard   j(read_config_document(req, 256, parse_error));
-    if (!j) return send_err(req, "400 Bad Request", parse_error);
+    if (!j) return send_bad_req(req, parse_error);
     if (const char* error =
             config_request_field_error(j, HttpConfigFieldType::Boolean, {"enabled"}))
-        return send_err(req, "400 Bad Request", error);
+        return send_bad_req(req, error);
     if (const char* error =
             config_request_field_error(j, HttpConfigFieldType::Integer, {"sda", "scl"}))
-        return send_err(req, "400 Bad Request", error);
+        return send_bad_req(req, error);
     const Config cur = config();
     Config c = cur;
     c.env3_enabled = jb(j, "enabled", c.env3_enabled);
@@ -1424,11 +1430,11 @@ static esp_err_t set_env3(httpd_req_t* req) {
 static esp_err_t set_ota(httpd_req_t* req) {
     const char* parse_error = nullptr;
     JsonGuard   j(read_config_document(req, 128, parse_error));
-    if (!j) return send_err(req, "400 Bad Request", parse_error);
+    if (!j) return send_bad_req(req, parse_error);
     std::string channel = js(j, "channel");
     j.reset();
 
-    if (!ota_channel_valid(channel)) return send_err(req, "400 Bad Request", "unknown channel");
+    if (!ota_channel_valid(channel)) return send_bad_req(req, "unknown channel");
 
     Config c = config();
     const OtaChannel want = ota_channel_parse(channel);
@@ -1448,11 +1454,11 @@ static esp_err_t set_ota(httpd_req_t* req) {
 static esp_err_t set_lang(httpd_req_t* req) {
     const char* parse_error = nullptr;
     JsonGuard   j(read_config_document(req, 128, parse_error));
-    if (!j) return send_err(req, "400 Bad Request", parse_error);
+    if (!j) return send_bad_req(req, parse_error);
     std::string lang = js(j, "lang");
     j.reset();
 
-    if (!ui_lang_valid(lang)) return send_err(req, "400 Bad Request", "unknown language");
+    if (!ui_lang_valid(lang)) return send_bad_req(req, "unknown language");
 
     Config c = config();
     const UiLang want = ui_lang_parse(lang);
@@ -1531,7 +1537,7 @@ static void probe_append_decode(JsonOut& out, const ProbeDecode& d) {
 static esp_err_t hp_query_probe(httpd_req_t* req) {
     const char* parse_error = nullptr;
     JsonGuard   j(read_config_document(req, 192, parse_error));
-    if (!j) return send_err(req, "400 Bad Request", parse_error);
+    if (!j) return send_bad_req(req, parse_error);
     ProbeRequest q;
     const auto   read_integer = [&](const char* key, int fallback, int& out) {
         const cJSON* item = cJSON_GetObjectItem(j, key);
@@ -1542,20 +1548,19 @@ static esp_err_t hp_query_probe(httpd_req_t* req) {
         return cJSON_IsNumber(item) && probe_integer_value(item->valuedouble, out);
     };
     if (!read_integer("reg", -1, q.reg))
-        return send_err(req, "400 Bad Request", probe_reject_name(ProbeReject::Register));
+        return send_bad_req(req, probe_reject_name(ProbeReject::Register));
     if (!read_integer("offset", 0, q.offset))
-        return send_err(req, "400 Bad Request", probe_reject_name(ProbeReject::Offset));
+        return send_bad_req(req, probe_reject_name(ProbeReject::Offset));
     if (!read_integer("size", 1, q.size))
-        return send_err(req, "400 Bad Request", probe_reject_name(ProbeReject::Size));
+        return send_bad_req(req, probe_reject_name(ProbeReject::Size));
     // No converter named = sweep. That is the DEFAULT on purpose: requiring an id before any value
     // is visible would ask the user to answer the question they came here to ask.
     if (!read_integer("conv", PROBE_SWEEP, q.conv))
-        return send_err(req, "400 Bad Request", probe_reject_name(ProbeReject::Converter));
+        return send_bad_req(req, probe_reject_name(ProbeReject::Converter));
     j.reset();
 
     const ProbeReject reject = probe_validate(q);
-    if (reject != ProbeReject::None)
-        return send_err(req, "400 Bad Request", probe_reject_name(reject));
+    if (reject != ProbeReject::None) return send_bad_req(req, probe_reject_name(reject));
 
     HpProbeReply reply;
     // 3 s: the poll cadence is 1 s and one sweep of a resolved profile can hold the bus for several

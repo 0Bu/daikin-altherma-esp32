@@ -114,6 +114,7 @@ IDs are stable and never reused; gaps identify retired entries. Each feature is 
 | 106 | Native Altherma 4 read-only 49-row Modbus subset; snapshot semantics and pressure-probe heuristic, physical/scaling acceptance pending | 🟡 🧪 | [`logic/modbus_catalog.hpp`](../main/logic/modbus_catalog.hpp), [`logic/modbus_profile.hpp`](../main/logic/modbus_profile.hpp), [`def/altherma4.hpp`](../main/def/altherma4.hpp), [`MODBUS_PROTOCOL.md`](MODBUS_PROTOCOL.md) |
 | 107 | Bounded MQTT frames/start recovery; circulation mapping proof binds probe generation and original source age | ✅ 🧪 | [`logic/payload_complete.hpp`](../main/logic/payload_complete.hpp), [`logic/circulation_source.hpp`](../main/logic/circulation_source.hpp), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`API.md`](API.md) |
 | 108 | Physical-instrument registry resolves stop-context inputs per profile; supported, absent, withheld and ambiguous remain distinct | ✅ 🧪 | [`logic/instrument.hpp`](../main/logic/instrument.hpp), [`logic/stop_context_input.hpp`](../main/logic/stop_context_input.hpp) |
+| 109 | Boot-local heating-curve observations grouped by outdoor temperature and sensor | ✅ 🧪 | [`logic/heating_curve_bins.hpp`](../main/logic/heating_curve_bins.hpp), [`PLANT.md`](PLANT.md#heating-curve-diagnosis) |
 
 The HTTP guard returns 503 before emission and rejects allocation-rich requests during OTA or
 below a 6144 B internal contiguous block. Status, values, history, diagnostic logs and MCP use

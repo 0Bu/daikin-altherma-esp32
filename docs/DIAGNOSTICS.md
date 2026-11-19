@@ -267,6 +267,11 @@ or plant fault. [PLANT.md](PLANT.md#heating-curve-diagnosis) owns its age and ev
 [the evidence boundary](DIAGNOSTIC_EVIDENCE.md#heating-curve-evaluation-freshness) separates this
 project rule from plant conclusions.
 
+The **Outdoor temperature ranges** detail groups recorded room errors by the outdoor reading.
+The two outdoor sensors have separate results. The count and range give context for the average.
+A small average can include readings from times when the room was too cold or too warm. [Heating-curve
+observations](PLANT.md#heating-curve-diagnosis) describes the window and when it resets.
+
 ## What the diagnosis cannot do
 
 The card cannot establish refrigerant charge, hydraulic balancing, mechanical wear, the cause of

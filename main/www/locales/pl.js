@@ -1,4 +1,4 @@
-// translation-source: 7868c79654d72277f20939757ce97fa1a10e51ae6f225d939d15f7dd6f917646
+// translation-source: 9d953d5f0a93a5bc4cadd7a97118b6c1a7b766255621d06ab3d6c4c0dc8e2ccf
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -630,11 +630,21 @@ I18N.pl = localeValues([
   /* dyn.outdoor_status_absent */ (source) => `${source} nie jest skonfigurowane. Zdarzenia są nadal rejestrowane bez tej osi.`,
   /* dyn.outdoor_status_idle */ (source) => `${source} jest skonfigurowane, ale obecnie nic nie jest rejestrowane. Powyższy wiersz stanu podaje przyczynę.`,
   /* dyn.outdoor_sample_none */ "Zarejestrowano bez wartości zewnętrznej",
-  /* dyn.outdoor_help_axis */ "Temperatura zewnętrzna pozwala zinterpretować zarejestrowane odchylenie temperatury pomieszczenia. Bez niej +0,5 K przy −5 °C i +0,5 K przy +12 °C wyglądają tak samo, choć pierwsze wskazuje na zbyt stromą krzywą, a drugie na krzywą ustawioną zbyt wysoko. Jest opcjonalna: rejestrowanie trwa bez niej, a wartość nigdy nie decyduje o zarejestrowaniu zdarzenia.",
+  /* dyn.outdoor_help_axis */ "Temperatura zewnętrzna pomaga zinterpretować każde zarejestrowane odchylenie temperatury pokojowej. Ocena krzywej grzewczej wymaga trendu widocznego w kilku obserwacjach i dodatkowych danych. Pomiary w pomieszczeniu można dalej zapisywać, gdy brakuje temperatury zewnętrznej.",
   /* dyn.outdoor_help_placement */ "Jest to wartość mierzona przez czujnik w miejscu montażu. Firmware nie może określić, gdzie się znajduje — obok jednostki wewnętrznej mierzy powietrze w pomieszczeniu, w zacienionym miejscu na zewnątrz rzeczywiste powietrze zewnętrzne, i tylko ten drugi wariant nadaje porównaniu sens.",
   /* dyn.outdoor_help_setup */ "Dane może dostarczać M5Stack ENV III podłączony do portu Grove płytki. Zamontowany na zewnątrz, w cieniu, stale mierzy powietrze zewnętrzne — w przeciwieństwie do czujnika pompy ciepła, który przestaje być odświeżany, gdy jednostka zewnętrzna odpoczywa. Konfiguruje się go w ESP32 → Sprzęt razem z płytką, do której jest podłączony.",
   /* dyn.plant_outdoor */ "Powietrze zewnętrzne instalacji",
   /* dyn.plant_outdoor_help */ "To wejście HomeHub 44, czyli własna wartość powietrza zewnętrznego pompy ciepła. Jest pobierana z tego samego bieżącego cyklu Modbus co warunki okna ogrzewania, a jej źródło jest zapisywane ze zdarzeniem. Pozostaje oddzielna od ENV III i nigdy nie zmienia decyzji o zarejestrowaniu zdarzenia.",
+  /* dyn.bins */ "Zakresy temperatury zewnętrznej",
+  /* dyn.bins_count */ (n) => `Pomiary w pomieszczeniu · ${n}`,
+  /* dyn.bins_no_scope */ "Brak datowanych pomiarów w pomieszczeniu w bieżącym okresie.",
+  /* dyn.bins_no_axis */ "Brak zapisanych odczytów zewnętrznych dla tego źródła.",
+  /* dyn.bins_room */ "Odchylenie temperatury w pomieszczeniu",
+  /* dyn.bins_air */ "Odczyt zewnętrzny",
+  /* dyn.bins_stats */ (mean, min, max) => `średnia ${mean}, zakres od ${min} do ${max}`,
+  /* dyn.bins_period */ "Zaobserwowano",
+  /* dyn.bins_no_date */ "Daty obserwacji niedostępne",
+  /* dyn.bins_help */ "Od ostatniego uruchomienia, za dziś i sześć poprzednich dni (UTC). Dodatnie odchylenie oznacza, że w pomieszczeniu było chłodniej niż wskazywała temperatura docelowa. Między pierwszym i ostatnim odczytem mogą być przerwy. Ustalenie przyczyn i odpowiednich ustawień wymaga innych danych.",
   /* dyn.shadow_strategy */ "Surowe odchylenie temperatury pomieszczenia · 30 min",
   /* dyn.card_help */ "Co 30 minut podczas jednoznacznie rozpoznanego ogrzewania pomieszczeń firmware rejestruje odchylenie temperatury pomieszczenia referencyjnego od wartości docelowej wraz z temperaturą zewnętrzną w tej chwili, jeśli dostarcza ją czujnik. W połączeniu z czasem pracy, minimalnymi ograniczeniami temperatury wody zasilającej i aktywnością termostatu długoterminowy przebieg może wskazać, czy krzywa grzewcza jest zwykle zbyt wysoka lub zbyt niska. Odchylenie temperatury pomieszczenia o 1 K nie oznacza automatycznie zmiany temperatury wody zasilającej o 1 K. Ta funkcja tylko odczytuje dane i nie zapisuje niczego do pompy ciepła.",
   /* dyn.state_help_recording */ "Potwierdzone ogrzewanie pomieszczeń działa, a dane z pomieszczenia są prawidłowe, dlatego rejestrowane są surowe próbki błędu temperatury. Oceniaj przebieg sezonu wraz z czasem pracy i danymi o ograniczeniach; pojedyncza próbka nie jest werdyktem.",
@@ -690,6 +700,7 @@ I18N.pl = localeValues([
   /* ref.ago */ (s) => `${s} s temu`,
   /* ref.age_unknown */ "nieznany",
   /* ref.saved */ "Zapisano źródło temperatury pomieszczenia",
+  /* ref.evidence_reset */ "Wyczyszczono aktualny odczyt pokojowy i obserwacje krzywej grzewczej",
   /* ref.detail.status_label */ "Stan:",
   /* ref.detail.diagnosis_label */ "Diagnostyka krzywej grzewczej:",
   /* ref.status.measurement_valid */ "Pomiar prawidłowy",

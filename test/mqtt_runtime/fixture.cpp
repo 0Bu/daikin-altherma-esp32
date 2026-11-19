@@ -219,8 +219,9 @@ HpX10aJsonCopyResult hp_values_x10a_json_copy(std::string& out, size_t, uint64_t
     out = adapter::x10a_payload;
     return HpX10aJsonCopyResult::Ok;
 }
-bool         mb_target_enabled() noexcept { return adapter::modbus_enabled; }
-ModbusStatus mb_status() { return adapter::modbus; }
+bool          mb_target_enabled() noexcept { return adapter::modbus_enabled; }
+ModbusStatus  mb_status() { return adapter::modbus; }
+ModbusProfile mb_active_profile() { return adapter::modbus.profile; }
 size_t       mb_values_capacity() { return adapter::modbus_values.size(); }
 size_t       mb_values_snapshot(CachedValue* out, size_t capacity, bool& live) {
     live               = adapter::modbus_live;
@@ -1788,7 +1789,7 @@ void outgoing_curve() {
         wire_number(room, "age_s", 0, "CURVE_FRESH_ROOM_AGE_ON_WIRE");
         cJSON* diagnosis = cJSON_GetObjectItemCaseSensitive(root.get(), "diagnosis");
         require(cJSON_IsObject(diagnosis), "CURVE_DIAGNOSIS_IS_INDEPENDENT_OBJECT");
-        wire_number(diagnosis, "method_version", 3, "CURVE_METHOD_VERSION_ON_WIRE");
+        wire_number(diagnosis, "method_version", 4, "CURVE_METHOD_VERSION_ON_WIRE");
         wire_number(diagnosis, "armed", 0, "CURVE_UNEVALUATED_DIAGNOSIS_DOES_NOT_CLAIM_ARMED");
     }
     adapter::cfg.diagnostics_enabled = false;
@@ -2130,6 +2131,93 @@ void curve_homehub_boundary_during_evaluation() {
             "CURVE_HOMEHUB_BOUNDARY_DURING_EVALUATION_RECORDS_NOTHING");
     require(now.sequence == 1 && now.samples == 1 && now.evaluations == 2,
             "CURVE_BOUNDARY_KEEPS_SEQUENCE_AND_COUNTERS");
+    // A new evaluation can already see the requested generation while the reset is still waiting
+    // for the owner mutex. Its otherwise fresh input must not reacquire the prior scope.
+    daik::s_heating_curve_homehub_epoch.fetch_add(1, std::memory_order_acq_rel);
+    const auto pending = daik::evaluate_heating_curve(adapter::cfg, true);
+    require(!pending.has_last_sample && pending.sequence == now.sequence &&
+                pending.samples == now.samples && pending.evaluations == now.evaluations,
+            "CURVE_PENDING_HOMEHUB_RESET_CANNOT_EVALUATE");
+}
+void curve_bins_scopes() {
+    initial_config();
+    adapter::hp.connected         = false; // X10A is deliberately offline throughout
+    adapter::modbus.profile       = daik::ModbusProfile::HomeHub;
+    adapter::modbus.plant_outdoor = daik::logic::outdoor_homehub_evidence(true, true, 0.0);
+    curve_first_scope_event();
+    daik::HeatingCurveBinsReport report;
+    const auto                   original = daik::heating_curve_status(&report);
+    require(original.samples == 1 && report.valid && report.target_c == 22.0 &&
+                report.homehub[1].samples == 1 && report.homehub[1].outdoor_sum_tenths == 0 &&
+                report.homehub[1].scope_samples == 1 && report.env3[1].samples == 0,
+            "CURVE_BINS_REPORT_CURRENT_HOMEHUB_ZERO");
+
+    const auto before = sdk::ticks;
+    sdk::ticks += 8 * 24 * 3600 * 1000;
+    daik::heating_curve_status(&report);
+    require(report.valid && report.homehub[1].scope_samples == 0,
+            "CURVE_BINS_REPORT_AGING_WITHOUT_EVALUATION");
+    sdk::ticks = before;
+    daik::heating_curve_status(&report);
+    require(report.valid && report.homehub[1].samples == 0,
+            "CURVE_BINS_REPORT_CLOCK_ROLLBACK_CANNOT_RESTORE_EXPIRED_BINS");
+
+    adapter::on_env3_status = [] { sdk::ticks = 0; };
+    const auto future_room  = daik::evaluate_heating_curve(adapter::cfg, false);
+    require(future_room.reason == daik::logic::HeatingCurveReason::RoomUnavailable &&
+                future_room.samples == original.samples,
+            "CURVE_BINS_ROOM_FRESHNESS_USES_THE_EVENT_CLOCK");
+
+    sdk::ticks = 1900 * 1000;
+    feed("room", R"({"temperature":20.5,"time":1700001900,"enabled":true})");
+    daik::service_reference_frames(adapter::cfg);
+    daik::evaluate_heating_curve(adapter::cfg, false);
+    daik::heating_curve_status(&report);
+    require(report.valid && report.homehub[1].scope_samples == 1,
+            "CURVE_BINS_RECORDS_SECOND_SAMPLE_WITHOUT_X10A");
+
+    // Concrete Modbus profile promotion withdraws prior-profile bins before the next evaluation,
+    // clears outdoor_bins while preserving the 30-minute cadence, and then opens its own scope.
+    adapter::modbus.profile = daik::ModbusProfile::Altherma4;
+    daik::heating_curve_status(&report);
+    require(!report.valid, "CURVE_BINS_WITHDRAW_BEFORE_NEW_MODBUS_PROFILE_EVALUATION");
+
+    sdk::ticks += 1000;
+    feed("room", R"({"temperature":20.0,"time":1700001901,"enabled":true})");
+    daik::service_reference_frames(adapter::cfg);
+    const auto within_cadence = daik::evaluate_heating_curve(adapter::cfg, false);
+    daik::heating_curve_status(&report);
+    require(within_cadence.reason == daik::logic::HeatingCurveReason::SamplingInterval &&
+                within_cadence.has_last_sample && within_cadence.samples == 2 && report.valid &&
+                report.homehub[1].scope_samples == 0,
+            "CURVE_NEW_MODBUS_PROFILE_CLEARS_BINS_WITHOUT_BREAKING_CADENCE");
+
+    sdk::ticks += daik::logic::HEATING_CURVE_SAMPLE_CADENCE_MS;
+    feed("room", R"({"temperature":20.0,"time":1700003701,"enabled":true})");
+    daik::service_reference_frames(adapter::cfg);
+    const auto promoted = daik::evaluate_heating_curve(adapter::cfg, false);
+    daik::heating_curve_status(&report);
+    require(report.valid && promoted.samples == 3 && report.homehub[1].scope_samples == 1 &&
+                report.homehub[1].room_sum_tenths == 20,
+            "CURVE_NEW_MODBUS_PROFILE_OPENS_ITS_OWN_SCOPE");
+
+    // Inbound MQTT target updates end the bin scope immediately between evaluations.
+    adapter::cfg.ref_temp_fixed_setpoint_tenths = 0;
+    adapter::cfg.ref_temp_setpoint_path         = "setpoint";
+    daik::mqtt_reference_reconfigure();
+    daik::service_reference_subscription(adapter::cfg, daik::s_ref_requested_epoch.load());
+    sdk::ticks += 1000;
+    feed("room", R"({"temperature":20.0,"setpoint":21.5,"time":1700003702,"enabled":true})");
+    daik::service_reference_frames(adapter::cfg);
+    daik::evaluate_heating_curve(adapter::cfg, false);
+    daik::heating_curve_status(&report);
+    require(report.valid && report.target_c == 21.5 && report.homehub[1].scope_samples == 1,
+            "CURVE_MQTT_TARGET_ESTABLISHES_SCOPE");
+    feed("room", R"({"temperature":20.0,"setpoint":21.0,"time":1700003703,"enabled":true})");
+    daik::service_reference_frames(adapter::cfg);
+    daik::heating_curve_status(&report);
+    require(report.valid && report.target_c == 21.0 && report.homehub[1].scope_samples == 0,
+            "CURVE_MQTT_TARGET_CHANGE_CLEARS_BINS_AT_ONCE");
 }
 void scalar_snapshot_helpers() {
     initial_config();
@@ -4526,6 +4614,8 @@ int main(int argc, char** argv) {
             curve_homehub_boundary();
         else if (std::strcmp(scenario, "curve_homehub_boundary_during_evaluation") == 0)
             curve_homehub_boundary_during_evaluation();
+        else if (std::strcmp(scenario, "curve_bins_scopes") == 0)
+            curve_bins_scopes();
         else if (std::strcmp(scenario, "scalar_snapshot_helpers") == 0)
             scalar_snapshot_helpers();
         else if (std::strcmp(scenario, "real_json_consumers") == 0)

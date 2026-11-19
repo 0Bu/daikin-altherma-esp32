@@ -160,6 +160,8 @@ const fetch = async (url, options = {}) => {
       error: "Base topic violates a rule this UI predates",
     }, 400);
   if (fetchState.mode === "reject") return response(false, { error: "rejected by test" });
+  if (fetchState.mode === "room_evidence_reset" && url === "/set_ref_temp")
+    return response(true, { ok: true, reboot: false, saved: false, room_evidence_reset: true });
   if (fetchState.mode === "reboot" && url === "/set_ntp")
     return response(true, { reboot: true, saved: true });
   if (url === "/status") return response(true, fetchState.status || {});
@@ -244,13 +246,14 @@ const source = readAppFragments(["i18n.js"]) + readUiLocale("de") + retirement +
   readAppFragments(["app_state.js", "settings.js", "bootstrap.js"])
     .replace(/\nboot\(\);\s*$/, "\n");
 vm.runInContext(`${source}
-  toast = () => {};
+  const notices = [];
+  toast = (message, type) => { notices.push({ message, type }); };
   renderApp = () => {};
   const productionRefreshStatus = refreshStatus;
   refreshStatus = async () => true;
   collectBugReport = async () => ({ text: "redacted report", failed: false });
   this.__ui = {
-    S, MODALS, ROUTED_MODALS, TRANSIENT_MODALS, POPUP_ROUTES, wire, initNavigation,
+    S, MODALS, ROUTED_MODALS, TRANSIENT_MODALS, POPUP_ROUTES, notices, wire, initNavigation,
     applyRouteFromLocation, hydrateRoutedPopup, askOtaInstall, settleOtaDecision,
     otaFail, paintOtaAlert, dismissOtaAlert,
     openWifi, openMqtt, openRefTemp, openCirculation, openWeather, openSyslog,
@@ -843,6 +846,22 @@ for (const mapping of roundtripMappings) {
   assert.equal(document.getElementById("refTempModal").hidden, true);
 }
 ui.S.status.reference_temperature = roomSourceBeforeRoundtrips;
+
+for (const [mode, expected] of [
+  ["room_evidence_reset", "Aktueller Raumwert und Beobachtungen zur Heizkurve wurden gelöscht"],
+  ["ok", "Keine Änderungen"],
+]) {
+  fetchState.mode = mode;
+  fetchState.calls.length = 0;
+  ui.notices.length = 0;
+  open(roundtripSource);
+  await document.getElementById("refTempForm").fire("submit");
+  assert.deepEqual(fetchState.calls.map((call) => call.url), ["/set_ref_temp"]);
+  assert.equal(ui.notices.length, 1);
+  assert.equal(ui.notices[0].message, expected);
+  assert.equal(ui.notices[0].type, "info");
+  assert.equal(document.getElementById("refTempModal").hidden, true);
+}
 
 // The displayed escape grammar must also work when entered manually, instead of relying only on
 // the formatter's prefilled text. A changed mapping deliberately drops invisible old gates.

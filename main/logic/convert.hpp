@@ -119,6 +119,11 @@ inline const char* on_off_number(const char* text) {
 }
 
 // Convert one value. `data` points at the value's bytes inside the reply payload.
+#if defined(__GNUC__) && !defined(__clang__)
+[[gnu::noinline, gnu::noclone]]
+#else
+[[gnu::noinline]]
+#endif
 inline Reading convert(const ValueDef& def, const uint8_t* data, int rtype = 0) {
     Reading   r;
     const int n = def.size;

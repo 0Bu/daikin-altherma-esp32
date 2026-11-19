@@ -67,7 +67,7 @@ assert.doesNotMatch(referenceFrames, /s_ref_status\.[a-z_]+\s*=/,
   "no field of the committed raw aggregate may change before all throwing staging has finished");
 const referenceGetter = mqtt.slice(
   mqtt.indexOf("ReferenceTemperatureStatus reference_temperature_status(const Config&"),
-  mqtt.indexOf("logic::HeatingCurveSnapshot heating_curve_status()"));
+  mqtt.indexOf("logic::HeatingCurveSnapshot heating_curve_status("));
 assert.match(referenceGetter,
   /Lock lk\(s_mtx\);[\s\S]*?reference_request_current_locked\(requested, expected\)[\s\S]*?return s_ref_status/,
   "the room getter must bind raw observations to the caller's exact Config and applied request");
@@ -789,10 +789,11 @@ assert.match(status, /static_cast<unsigned>\(heating_curve_reason\)/,
 // no room source, no witness, no HomeHub and no collector read exactly like one that has all four
 // and hid them. mqtt.broker is the sharpest case — empty IS the disabled state.
 assert.match(redact,
-  /inline std::string redact_identifier\(const std::string& value, bool on\) \{\s*\n\s*return on && !value\.empty\(\)/,
-  "the identifier wrapper must leave an unset value alone");
-assert.match(status, /static std::string jstr_r\(const std::string& s, bool redact\) \{\s*\n\s*return json_quote\(redact_identifier\(s, redact\)\);/,
-  "the /status builder's identifier wrapper must use redact_identifier, not the raw primitive");
+  /inline std::string_view redact_identifier_view\(std::string_view value, bool on\) \{\s*\n\s*return on && !value\.empty\(\)/,
+  "the streamed identifier wrapper must leave an unset value alone");
+assert.match(status,
+  /static RedactedJson jstr_r\(std::string_view s, bool redact\) noexcept \{\s*\n\s*return \{redact_identifier_view\(s, redact\), true\};/,
+  "the /status builder's identifier wrapper must use redact_identifier_view, not the raw primitive");
 
 // ── 6. An ABSENT array and an EMPTY one are different claims ────────────────────────────────────
 // Only absence says "no current reading". /values omits the HomeHub key entirely when that link is

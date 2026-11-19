@@ -14,7 +14,7 @@ const read = rel => fs.readFileSync(path.join(root, rel), "utf8");
 
 const diagnosis = read("main/logic/heating_curve_diagnosis.hpp");
 assert.match(diagnosis, /class HeatingCurveDiagnosis/);
-assert.match(diagnosis, /HEATING_CURVE_DIAGNOSIS_METHOD_VERSION\s*=\s*3/);
+assert.match(diagnosis, /HEATING_CURVE_DIAGNOSIS_METHOD_VERSION\s*=\s*4/);
 assert.doesNotMatch(diagnosis,
   /DYNAMIC_LWT_P_GAIN|DYNAMIC_LWT_DEADBAND|DYNAMIC_LWT_OFFSET_(?:MIN|MAX)|DYNAMIC_LWT_MAX_STEP|\brequested_offset_k\b|\bp_term_k\b|\bbounded_offset_k\b|\brate_limited\b/,
   "diagnosis must sample raw room error, not retain actuator shaping");
@@ -78,13 +78,13 @@ assert.match(evaluator, /in\.plant_gate_known\s*=\s*plant_gate\.known\s*;/);
 assert.match(evaluator, /in\.plant_gate_active\s*=\s*plant_gate\.active\s*;/);
 assert.doesNotMatch(evaluator, /in\.plant_gate_(?:known|active)\s*=\s*mbs\.plant_gate_(?:known|active)/,
   "raw operation53 cannot bypass the independent valve-route qualifier");
-assert.match(evaluator, /heating_mode_known = mbs\.heating_mode_known/);
-assert.match(evaluator, /heating_mode_active = mbs\.heating_mode_active/);
+assert.match(evaluator, /heating_mode_known\s*=\s*mbs\.heating_mode_known/);
+assert.match(evaluator, /heating_mode_active\s*=\s*mbs\.heating_mode_active/);
 assert.match(evaluator, /outdoor_env3_evidence\(/,
   "ENV III must use the shared provenance/freshness contract");
 assert.match(evaluator, /outdoor_homehub_evidence\(/,
   "plant outdoor context must use the same shared contract with HomeHub freshness");
-assert.match(evaluator, /now_unix_s = now_unix_s/,
+assert.match(evaluator, /time_now\(in\.now_unix_s, now_sub_ms\)/,
   "every sample needs an absolute event timestamp, not only boot-monotonic milliseconds");
 assert.doesNotMatch(evaluator, /mb_request|LwtOffsetIntent|\.offer\s*\(/,
   "runtime diagnosis may observe the plant but never offer an intent");
@@ -143,7 +143,7 @@ assert.equal((mqtt.match(/s_heating_curve_diagnosis\.forget_samples\(\);/g) || [
 assert.ok(evaluator.indexOf("s_heating_curve_homehub_epoch.load") < evaluator.indexOf("mb_status()"),
   "the evaluator captures the HomeHub scope before reading the endpoint's status");
 assert.match(evaluator,
-  /Lock lk\(s_mtx\);\s*if \(s_ref_requested_epoch\.load\([^)]*\) != scope_epoch\)\s*return s_heating_curve_diagnosis\.snapshot\(\);[^\n]*\n\s*if \(s_heating_curve_homehub_epoch\.load\([^)]*\) != homehub_epoch\)\s*return s_heating_curve_diagnosis\.snapshot\(\);/,
+  /Lock lk\(s_mtx\);\s*if \(s_ref_requested_epoch\.load\([^)]*\) != scope_epoch\)\s*return s_heating_curve_diagnosis\.snapshot\(\);[^\n]*\n\s*if \(s_heating_curve_homehub_epoch\.load\([^)]*\) != homehub_epoch\s*\|\|\s*s_heating_curve_homehub_applied_epoch != homehub_epoch\)\s*return s_heating_curve_diagnosis\.snapshot\(\);/,
   "a cycle that straddles either scope change records nothing");
 const setHp = httpConfig.slice(httpConfig.indexOf("if (reset_mb_history) {"));
 assert.match(setHp, /^if \(reset_mb_history\) \{[^}]*mb_reconfigure\(modbus_enabled\);[^}]*mqtt_heating_curve_homehub_reset\(\);/,
@@ -164,12 +164,15 @@ const telemetryPublish = task.indexOf("publish_heating_curve_telemetry(ref_confi
 assert.ok(heartbeatPublish > publishGate && telemetryPublish > heartbeatPublish,
   "technical heartbeat and bounded heating-curve telemetry must share the independent transport cadence");
 
-const statusGetter = mqtt.slice(mqtt.indexOf("logic::HeatingCurveSnapshot heating_curve_status()"),
+const statusGetter = mqtt.slice(mqtt.indexOf("logic::HeatingCurveSnapshot heating_curve_status("),
   mqtt.indexOf("void mqtt_reference_reconfigure()"));
 assert.match(statusGetter, /snapshot_at\(esp_timer_get_time\(\)\s*\/\s*1000\)/,
   "all diagnosis readers must age the same snapshot against monotonic evaluation time");
 assert.doesNotMatch(statusGetter, /\.evaluate\(/,
   "a status read must neither evaluate inputs nor create a heating-curve event");
+assert.match(statusGetter,
+  /Lock\s+lk\(s_mtx\);[\s\S]*?fill_heating_curve_bins_locked\(\*bins,\s*current_profile\)[\s\S]*?snapshot_at\(/,
+  "HTTP bins and the legacy diagnosis must be copied under one owner lock");
 assert.match(mqtt, /const logic::HeatingCurveSnapshot diagnosis = heating_curve_status\(\);/,
   "MQTT must publish the same age-projected diagnosis as HTTP");
 

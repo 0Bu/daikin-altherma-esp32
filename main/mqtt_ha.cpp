@@ -237,11 +237,15 @@ static_assert(std::is_nothrow_move_assignable<ReferenceTemperatureStatus>::value
               "reference status commits must not allocate or throw");
 static std::atomic<uint32_t>        s_ref_requested_epoch{1}; // also sampled by the MQTT event task
 static uint32_t                     s_ref_applied_epoch = 0;  // guarded by s_mtx
-static logic::HeatingCurveDiagnosis s_heating_curve_diagnosis;  // guarded by s_mtx
+static logic::HeatingCurveBins
+    s_heating_curve_bins; // zero-only startup image stays in BSS; guarded by s_mtx
+static logic::HeatingCurveDiagnosisImpl<logic::HeatingCurveBins&> s_heating_curve_diagnosis{
+    s_heating_curve_bins}; // guarded by s_mtx
 // Bumped when the HomeHub endpoint (host, port or unit) changes: the sampler's gates and plant
 // outdoor axis then belong to another instrument, exactly like a room-source change.
 static std::atomic<uint32_t> s_heating_curve_homehub_epoch{1};
-inline constexpr size_t REF_VALUE_TOPIC_COUNT = 3;
+static uint32_t              s_heating_curve_homehub_applied_epoch = 1; // guarded by s_mtx
+inline constexpr size_t      REF_VALUE_TOPIC_COUNT                 = 3;
 using ReferenceTopicSet = std::array<std::string, REF_VALUE_TOPIC_COUNT>;
 static ReferenceTopicSet s_ref_subscribed_topics;  // mqtt_task only
 static bool s_ref_subscription_retry = false;      // ownership is distinct from current acceptance
@@ -1827,83 +1831,83 @@ static logic::HeatingCurveSnapshot evaluate_heating_curve(const Config& cfg, boo
     // Every input below belongs to the consent/room-source and HomeHub endpoint scope current at
     // these loads. A reconfiguration before the evaluation lock forgets that scope's cadence, so
     // evaluating these reads afterwards would record an old reading as the new scope's first event.
-    const uint32_t scope_epoch = s_ref_requested_epoch.load(std::memory_order_acquire);
+    const uint32_t scope_epoch   = s_ref_requested_epoch.load(std::memory_order_acquire);
     const uint32_t homehub_epoch = s_heating_curve_homehub_epoch.load(std::memory_order_acquire);
-    const ReferenceTemperatureStatus rt         = reference_temperature_status(cfg);
-    const uint64_t now_ms = static_cast<uint64_t>(esp_timer_get_time() / 1000);
-    int64_t now_unix_s = -1;
-    int32_t now_sub_ms = 0;
-    time_now(now_unix_s, now_sub_ms);
-    const ReferenceFreshness freshness = reference_room_freshness(
-        reference_source_time_mapped(cfg.ref_temp_time_topic, cfg.ref_temp_time_path), rt.has_value,
-        rt.retained, rt.has_source_time, rt.source_unix_s, rt.received_ms, now_unix_s, now_ms,
-        cfg.ref_temp_max_age_s);
-    ReferenceRoomRaw room_raw;
-    room_raw.configured = !cfg.ref_temp_topic.empty();
+    const ReferenceTemperatureStatus rt = reference_temperature_status(cfg);
+    ReferenceRoomRaw                 room_raw;
+    room_raw.configured      = !cfg.ref_temp_topic.empty();
     room_raw.has_temperature = rt.has_value;
-    room_raw.payload_valid = rt.error.empty();
-    room_raw.temperature_c = rt.temperature_c;
+    room_raw.payload_valid   = rt.error.empty();
+    room_raw.temperature_c   = rt.temperature_c;
     room_raw.has_source_time = rt.has_source_time;
     room_raw.setpoint_mapped = cfg.ref_temp_fixed_setpoint_tenths != 0 ||
                                !cfg.ref_temp_setpoint_topic.empty() ||
                                !cfg.ref_temp_setpoint_path.empty();
-    room_raw.has_setpoint = rt.has_setpoint;
-    room_raw.setpoint_c = rt.setpoint_c;
-    room_raw.enabled_mapped = !cfg.ref_temp_enabled_path.empty();
-    room_raw.has_enabled = rt.has_enabled;
-    room_raw.enabled = rt.enabled;
-    room_raw.hvac_mode_mapped = !cfg.ref_temp_hvac_mode_path.empty();
-    room_raw.has_hvac_mode = rt.has_hvac_mode;
-    room_raw.hvac_mode = rt.hvac_mode;
-    room_raw.payload_reason = rt.rejection_reason;
-    const ReferenceRoomSample room = reference_room_sample(room_raw, freshness);
-
-    const ModbusStatus mbs = mb_status();
-    const WeatherForecastStatus wx = weather_forecast_status();
-    WeatherFreshness wx_freshness = weather_freshness(
-        cfg.weather_enabled && wx.has_value, wx.fetched_unix_s, now_unix_s, WEATHER_MAX_AGE_S);
-    if (!wx.available) wx_freshness.fresh = false;
+    room_raw.has_setpoint           = rt.has_setpoint;
+    room_raw.setpoint_c             = rt.setpoint_c;
+    room_raw.enabled_mapped         = !cfg.ref_temp_enabled_path.empty();
+    room_raw.has_enabled            = rt.has_enabled;
+    room_raw.enabled                = rt.enabled;
+    room_raw.hvac_mode_mapped       = !cfg.ref_temp_hvac_mode_path.empty();
+    room_raw.has_hvac_mode          = rt.has_hvac_mode;
+    room_raw.hvac_mode              = rt.hvac_mode;
+    room_raw.payload_reason         = rt.rejection_reason;
+    const ModbusStatus          mbs = mb_status();
+    const WeatherForecastStatus wx  = weather_forecast_status();
 
     logic::HeatingCurveInputs in;
-    in.armed = heating_curve_diagnosis_armed(cfg);
-    in.room_control_eligible = room.control_eligible;
-    in.room_error_k = room.room_error_k;
-    in.x10a_connected        = x10a_connected;
-    in.homehub_connected = mbs.connected;
-    const auto plant_gate    = logic::heating_curve_space_operation_gate(
+    in.armed              = heating_curve_diagnosis_armed(cfg);
+    in.x10a_connected     = x10a_connected;
+    in.homehub_connected  = mbs.connected;
+    const auto plant_gate = logic::heating_curve_space_operation_gate(
         mbs.plant_gate_known, mbs.plant_gate_active, mbs.space_route_known, mbs.space_route_active);
     in.plant_gate_known    = plant_gate.known;
     in.plant_gate_active   = plant_gate.active;
-    in.heating_mode_known = mbs.heating_mode_known;
+    in.heating_mode_known  = mbs.heating_mode_known;
     in.heating_mode_active = mbs.heating_mode_active;
-    in.forecast_available = cfg.weather_enabled && wx.available && wx_freshness.fresh;
     // Optional local outdoor-air axis for the recorded event. Gated on the SAME two conditions the
     // ENV III MQTT document uses (fresh AND plausible), so a reading this firmware refuses to
     // publish can never be attached to a sample instead. Absent sensor -> absent field; sampling
     // itself is unaffected, which is why nothing here touches `armed` or any gate.
     const Env3Status env3 = env3_status();
-    in.outdoor = logic::outdoor_env3_evidence(
-        env3.fresh,
-        env3_sample_plausible(env3.temperature_c, env3.humidity_pct, env3.pressure_hpa),
+    in.outdoor            = logic::outdoor_env3_evidence(
+        env3.fresh, env3_sample_plausible(env3.temperature_c, env3.humidity_pct, env3.pressure_hpa),
         static_cast<double>(env3.temperature_c));
     // HomeHub input 44 is decoded from an explicit fast-context batch in the SAME current cycle as
     // the gates. Requiring both the evidence object's current-session seal and the link's current
     // connected state prevents an old successful cycle from being attached to a later event after
     // the socket drops.
-    in.plant_outdoor = logic::outdoor_homehub_evidence(
-        mbs.plant_outdoor.available, mbs.connected,
-        mbs.plant_outdoor.temperature_c);
-    in.now_ms = static_cast<int64_t>(now_ms);
-    in.now_unix_s = now_unix_s;
+    in.plant_outdoor = logic::outdoor_homehub_evidence(mbs.plant_outdoor.available, mbs.connected,
+                                                       mbs.plant_outdoor.temperature_c);
     in.room_has_source_time = rt.has_value && rt.has_source_time;
-    in.room_source_unix_s = rt.source_unix_s;
-    in.room_age_known = freshness.age_known;
-    in.room_age_s = freshness.age_s;
+    in.room_source_unix_s   = rt.source_unix_s;
+
     Lock lk(s_mtx);
     if (s_ref_requested_epoch.load(std::memory_order_acquire) != scope_epoch)
         return s_heating_curve_diagnosis.snapshot(); // stale scope: record nothing this cycle
-    if (s_heating_curve_homehub_epoch.load(std::memory_order_acquire) != homehub_epoch)
+    if (s_heating_curve_homehub_epoch.load(std::memory_order_acquire) != homehub_epoch ||
+        s_heating_curve_homehub_applied_epoch != homehub_epoch)
         return s_heating_curve_diagnosis.snapshot(); // likewise across a HomeHub endpoint change
+    // Room freshness and the event use one clock ordered with the HTTP bins projection.
+    const int64_t now_us = esp_timer_get_time();
+    in.now_ms            = now_us / 1000;
+    int32_t now_sub_ms   = 0;
+    time_now(in.now_unix_s, now_sub_ms);
+    const ReferenceFreshness freshness = reference_room_freshness(
+        reference_source_time_mapped(cfg.ref_temp_time_topic, cfg.ref_temp_time_path), rt.has_value,
+        rt.retained, rt.has_source_time, rt.source_unix_s, rt.received_ms, in.now_unix_s,
+        static_cast<uint64_t>(in.now_ms), cfg.ref_temp_max_age_s);
+    const ReferenceRoomSample room = reference_room_sample(room_raw, freshness);
+    in.room_control_eligible       = room.control_eligible;
+    in.room_error_k                = room.room_error_k;
+    if (room.setpoint_valid) in.room_target_c = room.setpoint_c;
+    in.plant_generation   = homehub_epoch;
+    in.plant_profile      = static_cast<uint8_t>(mbs.profile);
+    in.room_age_known     = freshness.age_known;
+    in.room_age_s         = freshness.age_s;
+    in.forecast_available = weather_freshness(cfg.weather_enabled && wx.available && wx.has_value,
+                                              wx.fetched_unix_s, in.now_unix_s, WEATHER_MAX_AGE_S)
+                                .fresh;
     return s_heating_curve_diagnosis.evaluate(in);
 }
 
@@ -3069,6 +3073,10 @@ apply_reference_frame(const ReferenceMqttFrame& frame, const Config& c,
         if (!reference_request_current_locked(frame.reference_epoch, c)) return;
         // All allocating work, including raw/eligibility/error strings and error-log staging,
         // completed. Commit the complete status and watermark together without allocation.
+        if (!rejection && decoded.setpoint_updated && candidate.has_setpoint &&
+            candidate.setpoint_c >= REF_ROOM_SETPOINT_MIN_C &&
+            candidate.setpoint_c <= REF_ROOM_SETPOINT_MAX_C)
+            s_heating_curve_diagnosis.observe_bin_target(candidate.setpoint_c);
         s_ref_status      = std::move(candidate);
         s_ref_source_time = candidate_watermark;
     }
@@ -3867,9 +3875,37 @@ ReferenceTemperatureStatus reference_temperature_status(const Config& expected) 
     return s_ref_status;
 }
 
-logic::HeatingCurveSnapshot heating_curve_status() {
+[[gnu::noinline]] static void fill_heating_curve_bins_locked(HeatingCurveBinsReport& out,
+                                                             ModbusProfile current_profile) {
+    const auto generation    = s_heating_curve_diagnosis.outdoor_bins_generation();
+    const auto bins_profile  = s_heating_curve_diagnosis.outdoor_bins_profile();
+    const auto live_profile  = static_cast<uint8_t>(current_profile);
+    const auto homehub_epoch = s_heating_curve_homehub_applied_epoch;
+    if (generation == 0 || generation != homehub_epoch ||
+        homehub_epoch != s_heating_curve_homehub_epoch.load(std::memory_order_acquire) ||
+        (live_profile != 0 && bins_profile != 0 && live_profile != bins_profile))
+        return;
+    int64_t unix_s = -1;
+    int32_t sub_ms = 0;
+    time_now(unix_s, sub_ms);
+    s_heating_curve_diagnosis.observe_bin_clock(unix_s);
+    const auto& bins = s_heating_curve_diagnosis.outdoor_bins();
+    if (unix_s < 0 || !std::isfinite(bins.target_c())) return;
+    out.target_c = bins.target_c();
+    for (size_t band = 0; band < logic::HEATING_CURVE_BIN_COUNT; ++band) {
+        out.homehub[band] = bins.summary(logic::OutdoorSource::HomeHub, band, unix_s);
+        out.env3[band]    = bins.summary(logic::OutdoorSource::Env3, band, unix_s);
+    }
+    out.valid = homehub_epoch == s_heating_curve_homehub_epoch.load(std::memory_order_acquire);
+}
+
+logic::HeatingCurveSnapshot heating_curve_status(HeatingCurveBinsReport* bins) {
     static_assert(logic::HEATING_CURVE_EVALUATION_MAX_AGE_MS == 3 * POLL_INTERVAL_S * 1000);
-    Lock lk(s_mtx);
+    if (bins) bins->valid = false;
+    const ModbusProfile current_profile = bins ? mb_active_profile() : ModbusProfile::Auto;
+    Lock                lk(s_mtx);
+    if (!lk.acquired()) return {};
+    if (bins) fill_heating_curve_bins_locked(*bins, current_profile);
     return s_heating_curve_diagnosis.snapshot_at(esp_timer_get_time() / 1000);
 }
 
@@ -3894,13 +3930,17 @@ void mqtt_reference_reconfigure() {
 }
 
 void mqtt_heating_curve_homehub_reset() noexcept {
+    // An early configuration change cannot invalidate samples before the sampler exists.
+    if (!s_mtx) return;
     // Bump first: an evaluation that read endpoint A's status before this point and locks after it
-    // records nothing; one that locked before it is forgotten below. Without the mutex no task
-    // ever evaluated the sampler, so nothing is forgotten.
+    // records nothing; one that locked before it is forgotten below.
     s_heating_curve_homehub_epoch.fetch_add(1, std::memory_order_acq_rel);
     Lock lk(s_mtx);
     if (!lk.acquired()) return;
+    const auto requested = s_heating_curve_homehub_epoch.load(std::memory_order_acquire);
+    if (requested == s_heating_curve_homehub_applied_epoch) return;
     forget_heating_curve_scope();
+    s_heating_curve_homehub_applied_epoch = requested;
 }
 
 CirculationSourceStatus circulation_source_status(const Config& c) {
