@@ -153,23 +153,29 @@ function assertPersistentBannerRepaints(name, status) {
     rps: null, compressorOn: false, pumpOn: false, flow: 0, bsh: false,
   });
   assert.equal(idleModbus.mode, "mode.dhw", "the HomeHub DHW flag remains the mode headline");
-  assert.equal(idleModbus.status, "sys.standby · sys.mb_source",
-    "Modbus-only DHW with every activity witness off must say that the plant is not running");
+  assert.equal(idleModbus.status, "sys.standby",
+    "Modbus-only DHW with every activity witness off must say that the plant is not running without repeating header pill status");
   assert.equal(idleModbus.tone, "idle",
     "Modbus-only DHW standby must mute the dot instead of treating a known mode as active");
 
   const runningModbus = api.modbusStatusView("mode.dhw", {
     rps: null, compressorOn: true, pumpOn: true, flow: 14, bsh: false,
   });
-  assert.equal(runningModbus.status, "sys.operating · sys.mb_source");
+  assert.equal(runningModbus.status, "sys.operating");
   assert.equal(runningModbus.tone, "", "a running HomeHub compressor keeps the active green tone");
 
   const unknownMode = api.modbusStatusView(null, {
     rps: null, compressorOn: false, pumpOn: false, flow: 0, bsh: false,
   });
-  assert.equal(unknownMode.mode, "sys.x10a_down");
-  assert.equal(unknownMode.status, "sys.mb_carrying");
+  assert.equal(unknownMode.mode, "dyn.state_mode");
+  assert.equal(unknownMode.status, "sys.standby");
   assert.equal(unknownMode.tone, "warn", "an unknown Modbus mode keeps the existing warning state");
+
+  const unknownBoth = api.modbusStatusView(null, {
+    rps: null, compressorOn: null, pumpOn: null, flow: null,
+  });
+  assert.deepEqual({ ...unknownBoth }, { mode: "dyn.state_mode", status: "dyn.state_gate", tone: "warn" },
+    "missing mode and activity witnesses must keep distinct headline and status lines without X10A-offline prose");
 }
 
 // A tone that can be RETURNED must be DRAWABLE. The block above pinned that "warn" is produced, and
