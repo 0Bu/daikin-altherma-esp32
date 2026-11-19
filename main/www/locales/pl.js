@@ -1,4 +1,4 @@
-// translation-source: 42a4d77a832a12c84359f017fdcacdd939405dc965a062a922c2d18aafa2ff0e
+// translation-source: d65d3b16aadf37eb87ecbe27037b388b04d755399b25c0257655dd6a6be12909
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -266,6 +266,21 @@ I18N.pl = localeValues([
   /* check.fault_none */ "Brak aktywnych",
   /* check.fault_unknown */ "Stan nieznany",
   /* check.fault_past_unknown */ "Była · stan nieznany",
+  /* check.fault_since_short */ (d) => `od ${d}`,
+  /* check.fault_ago_short */ (d) => `${d} temu`,
+  /* check.fault_hero_ok */ (d) => `Brak zgłoszonych usterek lub ostrzeżeń w ciągu ${d} z 24 h obserwacji.`,
+  /* check.fault_latched_only */ "Pompa ciepła zgłasza zapisaną flagę usterki; w zarejestrowanym oknie 24 h nie mieści się żaden epizod ze znacznikiem czasu.",
+  /* check.fault_unit_outdoor */ "Jednostka zewnętrzna",
+  /* check.fault_unit_indoor */ "Jednostka wewnętrzna",
+  /* check.fault_unit_both */ "Zewnętrzna + wewnętrzna",
+  /* check.fault_secondary */ (s) => `Aktywne także: ${s}`,
+  /* check.fault_stop_ongoing */ "aktywna",
+  /* check.fault_stop_unknown */ "niejasne",
+  /* check.fault_col_code */ "Kod",
+  /* check.fault_col_meaning */ "Znaczenie",
+  /* check.fault_ok_label */ "Bez usterek",
+  /* check.fault_gap_label */ "Brak pomiaru",
+  /* check.fault_severity_caution */ "Uwaga",
   /* check.retry_seen */ "Wzrost",
   /* check.retry_none */ "Bez wzrostu",
   /* service.metric.comp */ "Sprężarka",
@@ -1294,7 +1309,7 @@ DESCRIPTION_I18N.pl = descriptionValues([
 ]);
 
 MODEL_DESCRIPTION_I18N.pl = modelDescriptionValues([
-  ["Komunikaty pompy", "nie dowodzą przyczyny ani naprawy."], // health_fault
+  ["Pokazuje kody błędów i ostrzeżeń zgłaszane przez pompę ciepła; krótkie opisy to ogólne wskazówki Daikin, a zniknięcie kodu nie dowodzi usunięcia przyczyny."], // health_fault
   ["R5T: punkt warstwowego zbiornika, nie energia.", "Próg projektu ≥0,8 K/h bez oznaczeń pompy/poboru. Pobór możliwy bez oznaczeń; 0 K/h nie wyklucza strat. Cyrkulacja nie dowodzi przyczyny."], // health_dhw_loss
   ["Przy brakujących pomiarach część uruchomień może nie zostać zliczona.", "Nie ma stałej liczby uruchomień uznawanej za normalną. Przy wystarczających danych ta kontrola uznaje średni czas zakończonych cykli ogrzewania wynoszący co najmniej 10 minut za wystarczający."], // health_cycling
   ["Odszranianie", "≥3 powiązane, >15% czasu pracy sprężarki przy czytelnych stanach sprężarki i odszraniania. Reguła projektu, nie Daikin; brak wilgotności i temperatury całego wymiennika."], // health_defrost

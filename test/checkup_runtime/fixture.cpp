@@ -1082,6 +1082,92 @@ void modbus_dual_source() {
                 !checkup_has_data(DiagnosticsSource::Modbus),
             "new_generation_clears_both_sources_and_advances_epoch");
 }
+
+void x10a_modbus_fault_trace_lifecycle() {
+    const char*                profile = "altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw";
+    const uint32_t             wall    = static_cast<uint32_t>(adapter::unix_origin + 1);
+    const CyclingTraceIdentity x10a_id{
+        checkup_model_fingerprint(profile, def::lookup_view(profile)), 0x12345678, 23};
+
+    CheckupFaultTrace saved;
+    saved.unix_s       = wall - 900;
+    saved.window_end_s = CHECKUP_FAULT_WINDOW_S;
+    saved.end_s        = 86390;
+    saved.push(86000, {FaultTraceKind::Normal});
+    saved.push(86010, {FaultTraceKind::Error, FaultUnitOrigin::Outdoor, fault_code_pack("U4"), 0});
+    saved.push(86040, {FaultTraceKind::Normal});
+
+    boot();
+    auto cov = coverage();
+    require(checkup_fault_restore(saved, x10a_id, wall, 0) == CheckupFlashRestoreResult::Restored,
+            "fault_flash_restored_after_confirm");
+    sample(2, {fault(0, 0), fault(1, 0)}, cov);
+    const auto rep_restored = checkup_report();
+    require(rep_restored[CheckupCheck::Fault].verdict == CheckupVerdict::Info,
+            "restored_fault_raises_checkup_info");
+
+    const auto code_row = [](uint8_t reg, uint8_t off, const char* txt) {
+        CachedValue v;
+        v.reg   = reg;
+        v.off   = off;
+        v.conv  = 204;
+        v.label = "Error Code";
+        v.value = txt;
+        return v;
+    };
+    const std::vector<CachedValue> both_active{
+        fault(0, 1),
+        code_row(0x10, 5, "U4: Comm error"),
+        fault(1, 2),
+        code_row(0x60, 3, "7H"),
+    };
+    sample(10, both_active, cov);
+    sample(25, {fault(0, 0), fault(1, 0)}, cov);
+
+    CheckupFaultTrace trace_snap;
+    require(checkup_fault_timeline_snapshot(trace_snap), "fault_timeline_snapshot_present");
+    const auto latest = checkup_fault_latest_extract(trace_snap, true);
+    require(latest.present && !latest.ongoing && latest.code == fault_code_pack("U4") &&
+                latest.unit == FaultUnitOrigin::Outdoor && latest.duration_s == 15,
+            "x10a_primary_outdoor_latest_extracted");
+    FaultTraceKind sec_k = FaultTraceKind::Gap;
+    uint16_t       sec_c = 0;
+    require(fault_aux_get_secondary(latest.aux, sec_k, sec_c) && sec_k == FaultTraceKind::Warning &&
+                sec_c == fault_code_pack("7H"),
+            "x10a_secondary_indoor_encoded");
+
+    const uint32_t mb_src = 0x55AA1234u;
+    const uint32_t mb_ep  = checkup_consent_epoch();
+    checkup_modbus_confirm_source(ModbusProfile::HomeHub, mb_src);
+    const auto mb_val = [](uint8_t off, const char* txt) {
+        CachedValue v;
+        v.reg   = def::HOMEHUB_GROUP_REG;
+        v.off   = off;
+        v.value = txt;
+        return v;
+    };
+    sdk::now_us = 30'000'000;
+    const std::vector<CachedValue> mb_rows{mb_val(21, "1"), mb_val(22, "7H"), mb_val(23, "2")};
+    checkup_record_modbus(mb_rows.data(), mb_rows.size(), ModbusProfile::HomeHub,
+                          adapter::mb_target_generation, mb_ep, true);
+    const auto mb_st = checkup_fault_latest_status(DiagnosticsSource::Modbus, true);
+    require(mb_st.diagnostics_enabled && mb_st.latest.present && mb_st.latest.ongoing &&
+                mb_st.latest.code == fault_code_pack("7H") &&
+                fault_aux_get_subcode(mb_st.latest.aux) == 2,
+            "modbus_fault_subcode_tracked_independently");
+
+    checkup_reset();
+    CyclingTraceIdentity bar_id{};
+    uint32_t             bar_tok = 0;
+    require(checkup_fault_checkpoint(trace_snap, bar_id, bar_tok, 0, false, false) && bar_tok &&
+                !trace_snap.count && !bar_id.model_fp,
+            "fault_reset_emits_barrier");
+    checkup_fault_checkpoint_appended(bar_tok);
+    require(!checkup_fault_checkpoint(trace_snap, bar_id, bar_tok, 0, false, false),
+            "fault_barrier_acked");
+    checkup_fault_forget();
+    require(!checkup_fault_timeline_snapshot(trace_snap), "fault_forget_withholds_timeline");
+}
 } // namespace
 int main(int argc, char** argv) {
     std::string name = argc == 2 ? argv[1] : "";
@@ -1129,6 +1215,8 @@ int main(int argc, char** argv) {
             late_restore(name == "late_restore_clock_behind");
         else if (name == "modbus_dual_source")
             modbus_dual_source();
+        else if (name == "x10a_modbus_fault_trace_lifecycle")
+            x10a_modbus_fault_trace_lifecycle();
         else if (name.rfind("consent_lock_", 0) == 0 || name.rfind("consent_sampling_", 0) == 0 ||
                  name.rfind("consent_caller_", 0) == 0)
             consent_staged_sample(name);

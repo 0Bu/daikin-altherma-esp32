@@ -1,4 +1,4 @@
-// translation-source: 42a4d77a832a12c84359f017fdcacdd939405dc965a062a922c2d18aafa2ff0e
+// translation-source: d65d3b16aadf37eb87ecbe27037b388b04d755399b25c0257655dd6a6be12909
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -261,6 +261,21 @@ I18N.fi = localeValues([
   /* check.fault_none */ "Ei aktiivisia",
   /* check.fault_unknown */ "Tuntematon",
   /* check.fault_past_unknown */ "Aiemmin · tuntematon",
+  /* check.fault_since_short */ (d) => `${d} ajan`,
+  /* check.fault_ago_short */ (d) => `${d} sitten`,
+  /* check.fault_hero_ok */ (d) => `Ei ilmoitettuja vikoja tai varoituksia ${d} aikana 24 h seurannassa.`,
+  /* check.fault_latched_only */ "Lämpöpumppu ilmoittaa tallennetun vikatilan; aikaleimattua jaksoa ei osunut tallennettuun 24 tunnin ikkunaan.",
+  /* check.fault_unit_outdoor */ "Ulkoyksikkö",
+  /* check.fault_unit_indoor */ "Sisäyksikkö",
+  /* check.fault_unit_both */ "Ulko + sisä",
+  /* check.fault_secondary */ (s) => `Myös aktiivinen: ${s}`,
+  /* check.fault_stop_ongoing */ "aktiivinen",
+  /* check.fault_stop_unknown */ "epäselvä",
+  /* check.fault_col_code */ "Koodi",
+  /* check.fault_col_meaning */ "Merkitys",
+  /* check.fault_ok_label */ "Virheetön",
+  /* check.fault_gap_label */ "Mittaamaton",
+  /* check.fault_severity_caution */ "Huomio",
   /* check.retry_seen */ "Nousu",
   /* check.retry_none */ "Ei nousua",
   /* service.metric.comp */ "Kompressori",
@@ -1134,7 +1149,7 @@ DESCRIPTION_I18N.fi = descriptionValues([
 ]);
 
 MODEL_DESCRIPTION_I18N.fi = modelDescriptionValues([
-  ["Laitteen ilmoitukset", "eivät todista syytä tai ratkaisua."], // health_fault
+  ["Näyttää lämpöpumpun ilmoittamat vika- ja varoituskoodit; lyhyet kuvaukset ovat yleisiä Daikin-vihjeitä eikä kuittaantunut koodi todista syyn poistuneen."], // health_fault
   ["R5T: kerrostuneen varaajan piste, ei energia.", "Projektin vihje ≥0,8 K/h ilman pumppu-/vedenottomerkkejä. Vedenotto mahdollista ilman merkkejä; 0 K/h ei sulje pois lämpöhäviötä. Kierto ei osoita syytä."], // health_dhw_loss
   ["Mittauskatkojen vuoksi osa käynnistyksistä voi jäädä laskematta.", "Käynnistysten määrälle ei ole kiinteää normaaliarvoa. Kun tietoja on riittävästi, tämä tarkistus pitää päättyneiden lämmitysjaksojen vähintään 10 minuutin keskiarvoa riittävänä."], // health_cycling
   ["Sulatus", "≥3 yhdistettyä, >15% kompressorin käyntiajasta, kun sekä kompressorin että sulatuksen tila on luettavissa. Sisäinen sääntö, ei Daikin; kosteus ja koko kennon lämpötila puuttuvat."], // health_defrost

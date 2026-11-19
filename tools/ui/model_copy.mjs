@@ -37,7 +37,9 @@ export function germanModelCopy(source, app, model) {
                                     { LANG: "de", MODEL_DESCRIPTION_I18N: { de: decode(values) } });
   for (const id of Object.keys(model)) {
     const copy = select(id);
-    if (copy) selected[id] = { what: copy[0], normal: copy[1] };
+    if (copy) selected[id] = copy.length > 1 && copy[1] !== undefined
+      ? { what: copy[0], normal: copy[1] }
+      : { what: copy[0] };
   }
   return selected;
 }

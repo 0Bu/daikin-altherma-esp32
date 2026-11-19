@@ -266,7 +266,7 @@ evidence is a measurement, not a good/bad assessment. The reading order and main
 
 | Id | Evidence fields |
 |---|---|
-| `fault` | `active` |
+| `fault` | `active`, optional `latest`, optional `timeline` |
 | `dhw_loss` | `max_k_h`, `windows`, `high_windows`, `quiet_high_windows`, `draw_windows`, `pump_windows`, `high_with_pump`, `high_pump_off`, `circulation_on_s`, `circulation_known_s`, `candidate_s`, `settle_remaining_s`, `aborts`, `abort_reasons`, `best_aborted_s`, `blocked` |
 | `cycling` | `starts`, `mean_run_s`, `space_runs`, `space_mean_run_s`, `dhw_runs`, `dhw_mean_run_s`, `cooling_runs`, `censored_runs`, `censored_transition_runs`, `censored_handover_runs`, `censored_unreadable_runs`, `censored_restart_runs`, `censored_start_runs`, `classified_runtime_s`, `censored_runtime_s`, `runtime_saturated`, `split`, `hours`, `outdoor_source`, `outdoor_min_c`, `outdoor_mean_c`, `outdoor_samples` |
 | `defrost` | `count`, `share_pct`, `paired_count`, `defrost_s`, `run_s`, `outdoor_source`, `outdoor_min_c`, `outdoor_mean_c`, `outdoor_samples`, `last_observed_start` |
@@ -417,6 +417,16 @@ and `persistence_pending` are false. Those flags describe withdrawn work; they d
 successful restoration or erasure. `saturated` is null without a confirmed readable population,
 and each category's `supported` flag is null without source confirmation.
 
+`fault.latest` and `fault.timeline` are optional on the `fault` check. Unredacted status snapshots the
+rolling fault timeline under the values/TLS admission guard into `latest` (present whenever an
+active or retained episode exists: `code`, `base_code`, `state`, optional `subcode`, optional
+`unit`, optional `secondary_code`/`secondary_state`, `ongoing`, `stop_unknown`, `age_s`,
+`duration_s`, plus `start_unix_s` and non-ongoing `end_unix_s` when clock-synchronized) and
+`timeline` (`unix_s`, `window_end_s`, `observed_end_s`, `boot_s`, `live`, `segments[]` of `{t, k}`
+for `"gap"`, `"ok"`, `"err"`, `"warn"`, `"caution"` plus compact active fields `c`, optional `b`,
+optional `sub`, optional `u`, optional `sc`/`sk`). `/status?redact=1` omits `fault.timeline` and
+wall-clock `start_unix_s`/`end_unix_s` while keeping relative `latest` timing (`age_s`, `duration_s`)
+when available.
 `min_unix_s` is the pressure minimum's earliest dated occurrence in the retained window, null without
 a synchronized clock; equal minima keep the earliest known time, not an inferred pressure dip.
 It retains no raw frame or validity context. `current_bar` is null when the

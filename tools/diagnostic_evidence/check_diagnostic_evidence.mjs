@@ -96,6 +96,12 @@ if (pollContract.split("\n").filter(Boolean).length < 5) {
 fingerprintText("main/hp_poll.cpp:checkup-contract", pollContract);
 
 const httpStatus = read(path.join(root, "main/http_status.cpp"), "main/http_status.cpp");
+const faultJsonStart = httpStatus.indexOf("append_status_fault_check_json(");
+const faultJsonEnd = httpStatus.indexOf("template <typename JsonOut>\nstatic void append_status_json(", faultJsonStart);
+if (faultJsonStart < 0 || faultJsonEnd < 0) {
+  die(2, "cannot isolate the /status.health fault JSON contract — refusing to pass vacuously");
+}
+fingerprintText("main/http_status.cpp:fault-json", httpStatus.slice(faultJsonStart, faultJsonEnd));
 const healthJsonStart = httpStatus.indexOf("// ── The rolling on-board plant diagnosis");
 const healthJsonEnd = httpStatus.indexOf("// System health:", healthJsonStart);
 if (healthJsonStart < 0 || healthJsonEnd < 0) {

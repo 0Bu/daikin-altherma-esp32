@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: 164b0c9111ef09cb53da5df799d95a937b3a18e23bc58565e44a940e61a7dc7f -->
+<!-- user-docs-contract: d6cdd20a86daab0dcf12c8febef80509e10590f091e1e4f6f147b1872df0afc0 -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default (`Off`). Under **Settings → Firmware**, choose **X10A** or **Modbus** for
@@ -64,14 +64,22 @@ compressor runs or quiet tank hours, and a day of observations is not a controll
 <!-- user-docs: health_fault -->
 ### Unit-reported faults
 
-**In plain language:** The board reads the heat pump's supported fault, warning and caution classes.
-An earlier reported event remains visible for up to 24 hours.
+**In plain language:** The board records supported heat-pump fault, warning and caution states at
+second resolution across a rolling 24-hour timeline, together with each episode's fault code, unit
+origin when reported, start time, stop status and duration. When no active or recent fault is
+present, the collapsed row stays quiet; when an active or past fault is retained, the collapsed
+row shows its code with active duration or time since clearing (`Unknown` when stale, falling back to status text without a code). Expanding the row shows
+a hero summary of the latest episode, the 24-hour categorical pill bar (fault-free time in grey,
+unmeasured intervals hatched, and distinct colors per fault code), filter chips and a newest-first
+episode table revealed when you tap a chip or nearby bar segment.
 
-**Meaning:** A current fault produces **WARNING**. A past event remains a **NOTE**. If the current
-rows are unreadable, the board cannot establish that an earlier fault has cleared.
+**Meaning:** A current fault produces **WARNING**. Active warnings/cautions and earlier retained
+episodes produce **NOTE**. If current fault rows are unreadable, the board cannot establish that an
+earlier fault has cleared.
 
-**Important limit:** No supported fault class reported is not proof that every component is healthy.
-The observation establishes neither a cause nor why a message stopped appearing.
+**Important limit:** Showing error and warning codes covers only what the heat pump exposes; short
+descriptions are general Daikin hints, and a cleared code does not prove the underlying cause was
+fixed. No generic normal target is shown for faults.
 
 **Evidence and limits:** [Unit-reported faults](DIAGNOSTIC_EVIDENCE.md#diagnosis-fault)
 

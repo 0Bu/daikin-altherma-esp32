@@ -38,6 +38,9 @@ const S = {
   cyclingScope: null,
   cyclingPin: null,
   cyclingHover: null,
+  faultCodes: new Set(),
+  faultSnapKeys: null,
+  faultHoverIdx: null,
   // Browser-only legend choices survive renders and are shared by both views of a chart.
   histHidden: new Map(),
   // The label of the row whose trend is being scrubbed right now (mouse hover or finger down), or
@@ -113,6 +116,7 @@ const S = {
 // Retire all chart/pin leases together; derived charts can depend on several source rings.
 function cancelHistoryGesture() {
   S.scrub = null;
+  S.faultHoverIdx = null;
   if (S.trendPointer) scrubEnd(S.trendPointer.plot);
   if (S.cancelCyclingDrag) S.cancelCyclingDrag();
 }
@@ -128,6 +132,9 @@ function invalidateHistSources() {
   S.histRequests?.clear();
   (S.histAwait ||= new Map()).clear();
   S.histPin.clear();
+  S.faultCodes?.clear();
+  S.faultSnapKeys = null;
+  S.faultHoverIdx = null;
   cancelHistoryGesture();
   S.inspHistSig = "";
   // Retire mounted charts even when a poll or click is holding their containers.

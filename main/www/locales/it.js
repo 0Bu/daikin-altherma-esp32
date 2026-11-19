@@ -1,4 +1,4 @@
-// translation-source: 42a4d77a832a12c84359f017fdcacdd939405dc965a062a922c2d18aafa2ff0e
+// translation-source: d65d3b16aadf37eb87ecbe27037b388b04d755399b25c0257655dd6a6be12909
 I18N.it = localeValues([
   /* sys.nodata */ "Nessun dato",
   /* sys.unreachable */ "Non raggiungibile",
@@ -261,6 +261,21 @@ I18N.it = localeValues([
   /* check.fault_none */ "Nessuno attivo",
   /* check.fault_unknown */ "Sconosciuto",
   /* check.fault_past_unknown */ "Passato · incerto",
+  /* check.fault_since_short */ (d) => `da ${d}`,
+  /* check.fault_ago_short */ (d) => `${d} fa`,
+  /* check.fault_hero_ok */ (d) => `Nessun guasto o avviso segnalato in ${d} di osservazione su 24 h.`,
+  /* check.fault_latched_only */ "Segnale di guasto memorizzato comunicato dalla pompa di calore; nessun episodio datato rientra nelle 24 h registrate.",
+  /* check.fault_unit_outdoor */ "Unità esterna",
+  /* check.fault_unit_indoor */ "Unità interna",
+  /* check.fault_unit_both */ "Esterna + interna",
+  /* check.fault_secondary */ (s) => `Attivo anche: ${s}`,
+  /* check.fault_stop_ongoing */ "attivo",
+  /* check.fault_stop_unknown */ "incerto",
+  /* check.fault_col_code */ "Codice",
+  /* check.fault_col_meaning */ "Significato",
+  /* check.fault_ok_label */ "Senza guasti",
+  /* check.fault_gap_label */ "Non misurato",
+  /* check.fault_severity_caution */ "Attenzione",
   /* check.retry_seen */ "Aumento",
   /* check.retry_none */ "Nessun aumento",
   /* service.metric.comp */ "Compressore",
@@ -1284,7 +1299,7 @@ DESCRIPTION_I18N.it = descriptionValues([
 ]);
 
 MODEL_DESCRIPTION_I18N.it = modelDescriptionValues([
-  ["Messaggi della pompa", "non provano causa né risoluzione."], // health_fault
+  ["Mostra i codici di errore e avviso segnalati dalla pompa di calore; le brevi descrizioni sono indicazioni generali Daikin e la scomparsa di un codice non dimostra la risoluzione della causa."], // health_fault
   ["R5T: un punto del serbatoio stratificato, non energia.", "Indizio interno ≥0,8 K/h senza segnali pompa/prelievo. Senza segnali, i prelievi restano possibili; 0 K/h non esclude perdite. Circolazione non prova la causa."], // health_dhw_loss
   ["Se mancano misurazioni, alcuni avvii possono sfuggire al conteggio.", "Non esiste un numero fisso di avvii considerato normale. Con dati sufficienti, questo controllo considera adeguata una durata media di almeno 10 minuti per i cicli di riscaldamento conclusi."], // health_cycling
   ["Sbrinamento", "≥3 associati, >15% del tempo di marcia del compressore con stati compressore e sbrinamento leggibili. Regola interna, non Daikin; mancano umidità e temperatura dell’intera batteria."], // health_defrost

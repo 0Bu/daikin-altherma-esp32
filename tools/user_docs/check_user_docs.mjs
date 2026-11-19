@@ -85,11 +85,14 @@ const add = (code, subject, message) => findings.push({ code, subject, message }
 
 for (const key of requiredKeys) {
   if (!model[key]) { add("U001", key, "visible diagnosis row has no explainer"); continue; }
-  const fields = ["what", "normal"];
+  const fields = key === "health_fault" ? ["what"] : ["what", "normal"];
   for (const [language, copy] of [["en", model[key]], ["de", model[key].de]]) {
     if (!copy || typeof copy !== "object") {
       add("U002", `${key}.${language}`, "language block is missing");
       continue;
+    }
+    if (key === "health_fault" && Object.prototype.hasOwnProperty.call(copy, "normal") && copy.normal != null) {
+      add("U016", `${key}.${language}.normal`, "unit-fault explainer must not carry a generic Normal paragraph");
     }
     for (const field of fields) {
       if (typeof copy[field] !== "string" || copy[field].trim().length < 30) {

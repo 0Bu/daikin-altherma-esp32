@@ -1,4 +1,4 @@
-// translation-source: 42a4d77a832a12c84359f017fdcacdd939405dc965a062a922c2d18aafa2ff0e
+// translation-source: d65d3b16aadf37eb87ecbe27037b388b04d755399b25c0257655dd6a6be12909
 I18N.ja = localeValues([
   /* sys.nodata */ "データなし",
   /* sys.unreachable */ "接続不可",
@@ -261,6 +261,21 @@ I18N.ja = localeValues([
   /* check.fault_none */ "現在なし",
   /* check.fault_unknown */ "不明",
   /* check.fault_past_unknown */ "発生済み・現在不明",
+  /* check.fault_since_short */ (d) => `${d}間`,
+  /* check.fault_ago_short */ (d) => `${d}前`,
+  /* check.fault_hero_ok */ (d) => `24時間の監視のうち ${d} 間で異常や警告の報告はありません。`,
+  /* check.fault_latched_only */ "ヒートポンプから記憶された異常フラグが報告されていますが、記録された24時間枠内に時刻付きイベントはありません。",
+  /* check.fault_unit_outdoor */ "室外機",
+  /* check.fault_unit_indoor */ "室内機",
+  /* check.fault_unit_both */ "室外＋室内",
+  /* check.fault_secondary */ (s) => `同時発生: ${s}`,
+  /* check.fault_stop_ongoing */ "継続中",
+  /* check.fault_stop_unknown */ "不明確",
+  /* check.fault_col_code */ "コード",
+  /* check.fault_col_meaning */ "意味",
+  /* check.fault_ok_label */ "異常なし",
+  /* check.fault_gap_label */ "未計測",
+  /* check.fault_severity_caution */ "注意",
   /* check.retry_seen */ "増加あり",
   /* check.retry_none */ "増加なし",
   /* service.metric.comp */ "圧縮機",
@@ -1134,7 +1149,7 @@ DESCRIPTION_I18N.ja = descriptionValues([
 ]);
 
 MODEL_DESCRIPTION_I18N.ja = modelDescriptionValues([
-  ["機器の通知", "原因や解決の証明ではありません。"], // health_fault
+  ["ヒートポンプから報告されたエラーおよび警告コードを表示します。簡潔な説明はダイキンの一般的な目安であり、コード消去は原因解消の証明にはなりません。"], // health_fault
   ["R5T：成層タンク1点。", "エネルギー実測でない。内部基準≥0.8 K/hはポンプ・取湯に似た低下の印がない窓のみ。印なしでも取湯はあり得ます。0 K/hでも熱損失は否定できません。循環の重複は原因を証明しません。"], // health_dhw_loss
   ["測定に欠けがあると、一部の起動が数えられないことがあります。", "起動回数に一律の正常値はありません。データが十分な場合、この診断では完了した暖房運転の平均が10分以上なら十分とみなします。"], // health_cycling
   ["除霜", "対応除霜≥3回、圧縮機と除霜の状態が両方読める圧縮機運転時間の>15%。内部基準、Daikin限界ではありません。湿度とコイル全体の温度なし。"], // health_defrost

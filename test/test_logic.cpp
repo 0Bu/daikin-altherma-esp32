@@ -94,6 +94,8 @@
 #include "logic/history.hpp"
 #include "logic/checkup_persist.hpp"
 #include "logic/cycling_persist.hpp"
+#include "logic/fault_trace.hpp"
+#include "logic/fault_persist.hpp"
 #include "logic/history_persist.hpp"
 #include "logic/lwt_select.hpp"
 #include "logic/rwt_select.hpp"
@@ -25420,7 +25422,7 @@ static void test_history_persist() {
     }
     CHECK(HISTORY_FLASH_FUTURE_HOURS == 72);
     CHECK(HISTORY_FLASH_FUTURE_SAMPLES == 864);
-    CHECK(HISTORY_FLASH_FUTURE_RECORDS == 15552);
+    CHECK(HISTORY_FLASH_FUTURE_RECORDS == 16128);
     CHECK(HISTORY_JOURNAL_SLOT_COUNT >= HISTORY_FLASH_FUTURE_RECORDS);
     CHECK(HISTORY_FLASH_PARTITION_OFFSET == 0x400000);
 
@@ -31987,6 +31989,383 @@ static void test_stop_context() {
     test_deterministic_trace_safety();
 }
 
+static void test_fault_trace() {
+    // 1. Code packing, unpacking, and subcode formatting
+    CHECK(fault_code_pack(nullptr) == 0);
+    CHECK(fault_code_pack("") == 0);
+    CHECK(fault_code_pack("0") == 0);
+    CHECK(fault_code_pack("00") == 0);
+    CHECK(fault_code_pack("-") == 0);
+    CHECK(fault_code_pack("--") == 0);
+    CHECK(fault_code_pack("?") == 0);
+    CHECK(fault_code_pack("Normal") == 0);
+    CHECK(fault_code_pack("Error") == 0);
+
+    const uint16_t u4 = fault_code_pack("U4: Indoor/outdoor unit communication problem");
+    const uint16_t h7 = fault_code_pack(" 7H");
+    const uint16_t c9 = fault_code_pack("9");
+    const uint16_t a5 = fault_code_pack("a5");
+    CHECK(u4 > 0 && h7 > 0 && c9 > 0 && a5 > 0);
+    CHECK(u4 != h7 && u4 != c9 && h7 != c9);
+
+    char code_buf[3]{};
+    CHECK(fault_code_unpack(u4, code_buf) && std::strcmp(code_buf, "U4") == 0);
+    CHECK(fault_code_unpack(h7, code_buf) && std::strcmp(code_buf, "7H") == 0);
+    CHECK(fault_code_unpack(c9, code_buf) && std::strcmp(code_buf, "9") == 0);
+    CHECK(fault_code_unpack(a5, code_buf) && std::strcmp(code_buf, "A5") == 0);
+    CHECK(!fault_code_unpack(0, code_buf));
+    CHECK(!fault_code_unpack(36u * 37u + 37u, code_buf));
+
+    char fmt_buf[10]{};
+    CHECK(fault_code_format(h7, fault_aux_subcode(0), fmt_buf) == 2 &&
+          std::strcmp(fmt_buf, "7H") == 0);
+    CHECK(fault_code_format(h7, fault_aux_subcode(1), fmt_buf) == 5 &&
+          std::strcmp(fmt_buf, "7H-01") == 0);
+    CHECK(fault_code_format(u4, fault_aux_subcode(120), fmt_buf) == 6 &&
+          std::strcmp(fmt_buf, "U4-120") == 0);
+    CHECK(fault_code_format(0, fault_aux_subcode(1), fmt_buf) == 0);
+
+    // Secondary X10A aux encoding and decoding
+    const uint16_t sec_aux = fault_aux_secondary(FaultTraceKind::Warning, u4);
+    CHECK(sec_aux != 0 && (sec_aux & ~FAULT_AUX_WIRE_MASK) == 0);
+    CHECK(fault_aux_get_subcode(sec_aux) == 0);
+    FaultTraceKind sec_kind = FaultTraceKind::Gap;
+    uint16_t       sec_code = 0;
+    CHECK(fault_aux_get_secondary(sec_aux, sec_kind, sec_code) &&
+          sec_kind == FaultTraceKind::Warning && sec_code == u4);
+    CHECK(!fault_aux_get_secondary(fault_aux_subcode(3), sec_kind, sec_code));
+
+    // 2. Second-resolution trace coalescing, sub-minute episodes, consecutive distinct codes, gaps
+    CheckupFaultTrace       trace;
+    const FaultSampleDetail s_normal{FaultTraceKind::Normal};
+    const FaultSampleDetail s_7h{FaultTraceKind::Error, FaultUnitOrigin::Indoor, h7, 0};
+    const FaultSampleDetail s_u4{FaultTraceKind::Warning, FaultUnitOrigin::Outdoor, u4, 0};
+    const FaultSampleDetail s_gap{FaultTraceKind::Gap};
+
+    CHECK(!trace.record(10'000'000, s_gap));
+    CHECK(trace.record(20'000'000, s_normal));
+    CHECK(!trace.record(21'000'000, s_normal));
+    CHECK(trace.record(30'000'000, s_7h)); // 12 s 7H episode starts at 30 s
+    CHECK(!trace.record(40'000'000, s_7h));
+    CHECK(trace.record(42'000'000, s_u4)); // transitions directly to U4 at 42 s
+    CHECK(trace.record(50'000'000, s_normal));
+    // Bus gap > CHECKUP_FAULT_GAP_S (15 s) injects Gap at 50 s before resuming at 100 s
+    CHECK(trace.record(100'000'000, s_normal));
+    CHECK(trace.count == 6 && trace.end_s == 100);
+    CHECK(trace.at(0).kind == FaultTraceKind::Normal && trace.at(0).sec == 20);
+    CHECK(trace.at(1).kind == FaultTraceKind::Error && trace.at(1).code == h7 &&
+          trace.at(1).sec == 30);
+    CHECK(trace.at(2).kind == FaultTraceKind::Warning && trace.at(2).code == u4 &&
+          trace.at(2).sec == 42);
+    CHECK(trace.at(3).kind == FaultTraceKind::Normal && trace.at(3).sec == 50);
+    CHECK(trace.at(4).kind == FaultTraceKind::Gap && trace.at(4).sec == 50);
+    CHECK(trace.at(5).kind == FaultTraceKind::Normal && trace.at(5).sec == 100);
+
+    // 3. Window eviction keeps most recent boundary before 24 h cutoff
+    CheckupFaultTrace roll;
+    roll.push(1, s_7h);
+    roll.push(5, s_normal);
+    roll.push(90'000, s_u4);
+    roll.end_s = 90'000;
+    roll.observe_window(90'000);
+    CHECK(roll.count == 2);
+    CHECK(roll.at(0).kind == FaultTraceKind::Normal && roll.at(0).sec == 5);
+    CHECK(roll.at(1).kind == FaultTraceKind::Warning && roll.at(1).code == u4 &&
+          roll.at(1).sec == 90'000);
+
+    // 4. Snapshot + latest extraction (wall clock, unsynced warm .noinit seam, stop_unknown,
+    // ongoing)
+    const uint32_t    wall = 1'795'000'000u;
+    CheckupFaultTrace saved_wall;
+    saved_wall.unix_s       = wall - 3600;
+    saved_wall.window_end_s = CHECKUP_FAULT_WINDOW_S;
+    saved_wall.end_s        = 86390;
+    saved_wall.push(80000, s_normal);
+    saved_wall.push(86000, s_7h);
+    saved_wall.push(86012, s_normal);
+
+    CheckupFaultTrace cur;
+    cur.record(10'000'000, s_normal);
+    cur.record(20'000'000, s_u4);
+
+    CheckupFaultTrace snap;
+    checkup_fault_snapshot(snap, saved_wall, cur, wall + 30, 30, wall - 86400);
+    CHECK(snap.unix_s == wall + 30 && snap.live && snap.end_s == 86390);
+    CHECK(checkup_fault_window_flags(snap) == (CHECKUP_FAULT_FLAG_ERR | CHECKUP_FAULT_FLAG_WRN));
+
+    auto latest_live = checkup_fault_latest_extract(snap, true);
+    CHECK(latest_live.present && latest_live.ongoing && !latest_live.stop_unknown);
+    CHECK(latest_live.code == u4 && latest_live.unit == FaultUnitOrigin::Outdoor);
+    CHECK(latest_live.duration_s == 0 && latest_live.age_s == 10);
+    CHECK(latest_live.start_unix_s == wall + 20 && latest_live.end_unix_s == 0);
+
+    // Advance live clock so U4 runs for 15 s and stays active at window_end
+    cur.record(35'000'000, s_u4);
+    checkup_fault_snapshot(snap, saved_wall, cur, wall + 35, 35, wall - 86400);
+    latest_live = checkup_fault_latest_extract(snap, true);
+    CHECK(latest_live.ongoing && latest_live.duration_s == 15 && latest_live.age_s == 15);
+    // When source goes stale, ongoing flips to false with stop_unknown = true
+    const auto latest_stale = checkup_fault_latest_extract(snap, false);
+    CHECK(!latest_stale.ongoing && latest_stale.stop_unknown && latest_stale.duration_s == 15);
+
+    // Clear U4 back to Normal -> past episode with exact start/stop/duration
+    cur.record(40'000'000, s_normal);
+    checkup_fault_snapshot(snap, saved_wall, cur, wall + 45, 45, wall - 86400);
+    const auto latest_past = checkup_fault_latest_extract(snap, true);
+    CHECK(latest_past.present && !latest_past.ongoing && !latest_past.stop_unknown);
+    CHECK(latest_past.code == u4 && latest_past.duration_s == 20 && latest_past.age_s == 5);
+    CHECK(latest_past.start_unix_s == wall + 20 && latest_past.end_unix_s == wall + 40);
+
+    // Single-poll fault immediately followed by Gap -> preserved with duration 0 and stop_unknown
+    CheckupFaultTrace spike;
+    spike.window_end_s = CHECKUP_FAULT_WINDOW_S;
+    spike.end_s        = 86400;
+    spike.live         = true;
+    spike.push(86000, s_normal);
+    spike.push(86010, s_7h);
+    spike.push(86010, s_gap);
+    spike.push(86100, s_normal);
+    const auto latest_spike = checkup_fault_latest_extract(spike, true);
+    CHECK(latest_spike.present && !latest_spike.ongoing && latest_spike.stop_unknown);
+    CHECK(latest_spike.code == h7 && latest_spike.duration_s == 0 && latest_spike.age_s == 390);
+
+    // Unsynced warm .noinit handoff preserves saved trace across reboot gap without merging
+    CheckupFaultTrace warm_saved;
+    warm_saved.unix_s       = 0;
+    warm_saved.window_end_s = CHECKUP_FAULT_WINDOW_S;
+    warm_saved.end_s        = 500;
+    warm_saved.push(100, s_7h);
+    warm_saved.push(130, s_normal);
+    CheckupFaultTrace warm_cur;
+    warm_cur.record(10'000'000, s_normal);
+    CheckupFaultTrace warm_snap;
+    checkup_fault_snapshot(warm_snap, warm_saved, warm_cur, 0, 20, 0, 5);
+    CHECK(warm_snap.unix_s == 0 && warm_snap.live);
+    const auto warm_latest = checkup_fault_latest_extract(warm_snap, true);
+    CHECK(warm_latest.present && !warm_latest.ongoing && !warm_latest.stop_unknown);
+    CHECK(warm_latest.code == h7 && warm_latest.duration_s == 30 && warm_latest.start_unix_s == 0 &&
+          warm_latest.end_unix_s == 0);
+    CHECK(warm_latest.age_s == 20 + 5 + (500 - 130));
+
+    // 5. Single-page flash encode/decode, truncation to newest 28 events, barrier & handoff CRC
+    CheckupFaultTrace many;
+    for (uint32_t i = 0; i < 40; ++i) {
+        const FaultSampleDetail d = (i % 2 == 0) ? s_7h : s_normal;
+        many.record(static_cast<int64_t>(80000 + i * 10) * 1000000LL, d);
+    }
+    CheckupFaultTrace many_snap;
+    checkup_fault_snapshot(many_snap, CheckupFaultTrace{}, many, wall, 80400, wall - 86400);
+    CHECK(many_snap.count == 40);
+
+    FaultTracePageInfo page_info{};
+    page_info.identity = CyclingTraceIdentity{111, 222, 333};
+    page_info.unix_s   = many_snap.unix_s;
+    page_info.end_s    = many_snap.end_s;
+    uint8_t page_bytes[FAULT_TRACE_MAX_EVENTS * FAULT_TRACE_EVENT_BYTES]{};
+    CHECK(fault_trace_encode_page(many_snap, page_info, page_bytes));
+    CHECK(page_info.count == FAULT_TRACE_MAX_EVENTS);
+
+    HistoryJournalHeader fh{};
+    fh.magic       = HISTORY_JOURNAL_MAGIC;
+    fh.version     = HISTORY_JOURNAL_VERSION;
+    fh.source      = static_cast<uint8_t>(HistoryJournalSource::Checkup);
+    fh.catalog_fp  = FAULT_TRACE_SCHEMA;
+    fh.slot_bytes  = HISTORY_JOURNAL_SLOT_BYTES;
+    fh.sequence    = 99;
+    fh.bucket      = page_info.unix_s / CHECKUP_DT_S;
+    fh.dt_s        = CHECKUP_DT_S;
+    fh.value_count = FAULT_TRACE_PAGE_BYTES / sizeof(HistorySample);
+    fh.rings[0] = fh.rings[1] = fh.rings[2] = 1;
+    fh.commit                               = HISTORY_JOURNAL_COMMITTED;
+    CHECK(fault_trace_header_matches(fh, false));
+    CHECK(!fault_trace_header_matches(fh, true));
+    CHECK(fault_trace_page_valid(fh, page_info, false));
+
+    CheckupFaultTrace decoded;
+    CHECK(fault_trace_decode_page(decoded, page_info, page_bytes));
+    CHECK(decoded.count == FAULT_TRACE_MAX_EVENTS && decoded.unix_s == many_snap.unix_s &&
+          decoded.end_s == many_snap.end_s);
+    CHECK(decoded.at(0).sec == many_snap.at(40 - FAULT_TRACE_MAX_EVENTS).sec);
+    CHECK(decoded.at(decoded.count - 1).sec == many_snap.at(many_snap.count - 1).sec);
+
+    // Modbus subcode round-trips through Flash pack/unpack
+    CheckupFaultTrace       mb_trace;
+    const FaultSampleDetail mb_det{FaultTraceKind::Error, FaultUnitOrigin::Unspecified, h7,
+                                   fault_aux_subcode(7)};
+    mb_trace.window_end_s = CHECKUP_FAULT_WINDOW_S;
+    mb_trace.unix_s       = wall;
+    mb_trace.end_s        = 86000;
+    mb_trace.push(85900, mb_det);
+    FaultTracePageInfo mb_info{};
+    mb_info.identity = CyclingTraceIdentity{444, 555, 666};
+    mb_info.unix_s   = wall;
+    mb_info.end_s    = 86000;
+    CHECK(fault_trace_encode_page(mb_trace, mb_info, page_bytes));
+    CheckupFaultTrace mb_decoded;
+    CHECK(fault_trace_decode_page(mb_decoded, mb_info, page_bytes));
+    CHECK(mb_decoded.count == 1 && fault_aux_get_subcode(mb_decoded.at(0).aux) == 7);
+    fh.catalog_fp = FAULT_MODBUS_TRACE_SCHEMA;
+    CHECK(fault_trace_header_matches(fh, true));
+    CHECK(!fault_trace_header_matches(fh, false));
+    fh.catalog_fp = FAULT_MODBUS_TRACE_BARRIER_SCHEMA;
+    FaultTracePageInfo barrier_info{};
+    barrier_info.unix_s = wall;
+    CHECK(fault_trace_header_matches(fh, true));
+    CHECK(fault_trace_page_valid(fh, barrier_info, true));
+    CHECK(!fault_trace_page_valid(fh, mb_info, true));
+
+    // Warm handoff encode + CRC validation
+    FaultHandoffPayload hp{};
+    CHECK(checkup_fault_handoff_encode(warm_snap, 0xABCDu, 7u, hp));
+    const uint32_t hp_crc = checkup_fault_handoff_crc(0x1111u, hp);
+    CHECK(checkup_fault_handoff_valid(CHECKUP_FAULT_HANDOFF_MAGIC, CHECKUP_FAULT_HANDOFF_VERSION,
+                                      0x1111u, 0x1111u, 0xABCDu, 7u, hp_crc, hp));
+    CHECK(!checkup_fault_handoff_valid(CHECKUP_FAULT_HANDOFF_MAGIC, CHECKUP_FAULT_HANDOFF_VERSION,
+                                       0x1111u, 0x2222u, 0xABCDu, 7u, hp_crc, hp));
+    CHECK(!checkup_fault_handoff_valid(CHECKUP_FAULT_HANDOFF_MAGIC, CHECKUP_FAULT_HANDOFF_VERSION,
+                                       0x1111u, 0x1111u, 0xABCDu, 8u, hp_crc, hp));
+    hp.events[0] ^= 1u;
+    CHECK(!checkup_fault_handoff_valid(CHECKUP_FAULT_HANDOFF_MAGIC, CHECKUP_FAULT_HANDOFF_VERSION,
+                                       0x1111u, 0x1111u, 0xABCDu, 7u, hp_crc, hp));
+
+    // Zero-stack handoff pair encoder matches checkup_fault_snapshot + checkup_fault_handoff_encode
+    FaultHandoffPayload hp_synced{}, hp_pair_synced{};
+    CHECK(checkup_fault_handoff_encode(snap, 0xABCDu, 7u, hp_synced));
+    uint32_t tail_gap_synced = 999;
+    CHECK(checkup_fault_handoff_encode_pair(saved_wall, cur, wall + 45, 45, wall - 86400, -1,
+                                            0xABCDu, 7u, hp_pair_synced, tail_gap_synced));
+    CHECK(tail_gap_synced == 0);
+    CHECK(std::memcmp(&hp_synced, &hp_pair_synced, sizeof(FaultHandoffPayload)) == 0);
+
+    FaultHandoffPayload hp_warm_ref{}, hp_warm_pair{};
+    CHECK(checkup_fault_handoff_encode(warm_snap, 0xABCDu, 7u, hp_warm_ref));
+    uint32_t tail_gap_warm = 0;
+    CHECK(checkup_fault_handoff_encode_pair(warm_saved, warm_cur, 0, 20, 0, 5, 0xABCDu, 7u,
+                                            hp_warm_pair, tail_gap_warm));
+    CHECK(tail_gap_warm == CHECKUP_FAULT_WINDOW_S - warm_snap.end_s);
+    CHECK(std::memcmp(&hp_warm_ref, &hp_warm_pair, sizeof(FaultHandoffPayload)) == 0);
+
+    // Zero-stack saved-window flag helper matches snapshot flags and drops aged-out events
+    CHECK(checkup_fault_saved_window_flags(saved_wall, wall + 45, 45, wall - 86400, -1) ==
+          CHECKUP_FAULT_FLAG_ERR);
+    CHECK(checkup_fault_saved_window_flags(saved_wall, wall + 87000, 45, wall + 87000 - 86400,
+                                           -1) == 0);
+
+    // 6. Same-second Gap / Normal breaks episode merge (can_merge guard) + contiguous merge control
+    {
+        CheckupFaultTrace split_gap;
+        split_gap.window_end_s = CHECKUP_FAULT_WINDOW_S;
+        split_gap.end_s        = 86400;
+        split_gap.live         = true;
+        split_gap.push(86370, s_7h);
+        split_gap.push(86380, s_gap);
+        split_gap.push(86380, s_7h);
+        const auto lg = checkup_fault_latest_extract(split_gap, true);
+        CHECK(lg.present && lg.ongoing && !lg.stop_unknown);
+        CHECK(lg.start_s == 86380 && lg.stop_s == 86400 && lg.duration_s == 20 && lg.age_s == 20);
+
+        CheckupFaultTrace split_norm;
+        split_norm.window_end_s = CHECKUP_FAULT_WINDOW_S;
+        split_norm.end_s        = 30;
+        split_norm.live         = true;
+        split_norm.push(10, s_7h);
+        split_norm.push(10, s_normal);
+        split_norm.push(10, s_7h);
+        const auto ln = checkup_fault_latest_extract(split_norm, true);
+        CHECK(ln.present && ln.start_s == 10 && ln.stop_s == 30 && ln.duration_s == 20);
+
+        CheckupFaultTrace contig;
+        contig.window_end_s = CHECKUP_FAULT_WINDOW_S;
+        contig.end_s        = 86400;
+        contig.live         = true;
+        contig.push(86370, s_7h);
+        contig.push(86380, s_7h);
+        const auto lc = checkup_fault_latest_extract(contig, true);
+        CHECK(lc.present && lc.start_s == 86370 && lc.stop_s == 86400 && lc.duration_s == 30);
+    }
+
+    // 7. Pure X10A / Modbus fault-detail classifiers, FLR1 barrier, flags & ceiling round-trip
+    {
+        const auto d_out = checkup_x10a_fault_detail(FaultClass::Error, FaultClass::Error, h7,
+                                                     FaultClass::Normal, 0, 0);
+        CHECK(d_out.kind == FaultTraceKind::Error && d_out.unit == FaultUnitOrigin::Outdoor &&
+              d_out.code == h7 && d_out.aux == 0);
+
+        const auto d_in = checkup_x10a_fault_detail(FaultClass::Warning, FaultClass::Normal, 0,
+                                                    FaultClass::Warning, u4, 0);
+        CHECK(d_in.kind == FaultTraceKind::Warning && d_in.unit == FaultUnitOrigin::Indoor &&
+              d_in.code == u4 && d_in.aux == 0);
+
+        const auto d_both = checkup_x10a_fault_detail(FaultClass::Error, FaultClass::Error, h7,
+                                                      FaultClass::Error, h7, 0);
+        CHECK(d_both.kind == FaultTraceKind::Error && d_both.unit == FaultUnitOrigin::Both &&
+              d_both.code == h7 && d_both.aux == 0);
+
+        const auto d_dual = checkup_x10a_fault_detail(FaultClass::Error, FaultClass::Caution, u4,
+                                                      FaultClass::Error, h7, 0);
+        FaultTraceKind dk = FaultTraceKind::Gap;
+        uint16_t       dc = 0;
+        CHECK(d_dual.kind == FaultTraceKind::Error && d_dual.unit == FaultUnitOrigin::Indoor &&
+              d_dual.code == h7);
+        CHECK(fault_aux_get_secondary(d_dual.aux, dk, dc) && dk == FaultTraceKind::Caution &&
+              dc == u4);
+
+        const auto d_unspec = checkup_x10a_fault_detail(FaultClass::Caution, FaultClass::Normal, 0,
+                                                        FaultClass::Normal, 0, c9);
+        CHECK(d_unspec.kind == FaultTraceKind::Caution &&
+              d_unspec.unit == FaultUnitOrigin::Unspecified && d_unspec.code == c9);
+
+        const auto d_norm = checkup_x10a_fault_detail(FaultClass::Normal, FaultClass::Normal, 0,
+                                                      FaultClass::Normal, 0, 0);
+        CHECK(d_norm.kind == FaultTraceKind::Normal && d_norm.code == 0 && d_norm.aux == 0);
+
+        const auto d_unk = checkup_x10a_fault_detail(FaultClass::Unknown, FaultClass::Error, h7,
+                                                     FaultClass::Normal, 0, 0);
+        CHECK(d_unk.kind == FaultTraceKind::Gap);
+
+        const auto m_err = checkup_modbus_fault_detail(FaultClass::Error, h7, 15);
+        CHECK(m_err.kind == FaultTraceKind::Error && m_err.unit == FaultUnitOrigin::Unspecified &&
+              m_err.code == h7 && fault_aux_get_subcode(m_err.aux) == 15);
+        const auto m_warn = checkup_modbus_fault_detail(FaultClass::Caution, u4, 9);
+        CHECK(m_warn.kind == FaultTraceKind::Warning && m_warn.code == u4 &&
+              fault_aux_get_subcode(m_warn.aux) == 9);
+        CHECK(checkup_modbus_fault_detail(FaultClass::Normal, h7, 1).kind ==
+              FaultTraceKind::Normal);
+        CHECK(checkup_modbus_fault_detail(FaultClass::Unknown, h7, 1).kind == FaultTraceKind::Gap);
+
+        fh.catalog_fp = FAULT_TRACE_BARRIER_SCHEMA;
+        CHECK(fault_trace_header_matches(fh, false));
+        CHECK(!fault_trace_header_matches(fh, true));
+        CHECK(fault_trace_page_valid(fh, barrier_info, false));
+        CHECK(!fault_trace_page_valid(fh, page_info, false));
+
+        CheckupFaultRecord rec_caut{};
+        rec_caut.kind = FaultTraceKind::Caution;
+        CHECK(checkup_fault_record_flags(rec_caut) == CHECKUP_FAULT_FLAG_WRN);
+        rec_caut.aux = fault_aux_secondary(FaultTraceKind::Error, h7);
+        CHECK(checkup_fault_record_flags(rec_caut) ==
+              (CHECKUP_FAULT_FLAG_WRN | CHECKUP_FAULT_FLAG_ERR));
+
+        const uint16_t max_code = fault_code_pack("ZZ");
+        CHECK(max_code == 1368);
+        CheckupFaultRecord rec_max{86399u, FaultTraceKind::Error, FaultUnitOrigin::Outdoor,
+                                   max_code, fault_aux_secondary(FaultTraceKind::Error, max_code)};
+        uint8_t            packed_rec[FAULT_TRACE_EVENT_BYTES]{};
+        fault_trace_pack_record(rec_max, packed_rec);
+        CheckupFaultRecord unpacked_rec = fault_trace_unpack_record(packed_rec);
+        CHECK(unpacked_rec.sec == 86399u && unpacked_rec.kind == FaultTraceKind::Error &&
+              unpacked_rec.unit == FaultUnitOrigin::Outdoor && unpacked_rec.code == max_code);
+        CHECK(fault_aux_get_secondary(unpacked_rec.aux, dk, dc) && dk == FaultTraceKind::Error &&
+              dc == max_code);
+
+        CheckupFaultRecord rec_sub{123u, FaultTraceKind::Warning, FaultUnitOrigin::Unspecified,
+                                   max_code, fault_aux_subcode(999)};
+        fault_trace_pack_record(rec_sub, packed_rec);
+        unpacked_rec = fault_trace_unpack_record(packed_rec);
+        CHECK(unpacked_rec.code == max_code && fault_aux_get_subcode(unpacked_rec.aux) == 999);
+    }
+}
+
 int main() {
     test_stop_context();
     test_stop_context_inputs();
@@ -32125,6 +32504,7 @@ int main() {
     test_instrument_registry();
     test_state_dwell();
     test_checkup_persist();
+    test_fault_trace();
     test_checkup_decoder_identity();
     test_room_history();
     test_checkup_journal_revisions();

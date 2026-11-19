@@ -383,9 +383,12 @@ not establish identical readings. Translated Model rows have stable explanation 
 The optional 24-hour Plant diagnostics rows appear only after Firmware opt-in and while the active
 source (`X10A` or `Modbus`) is live or has retained/confirmed window state. Firmware supplies verdict, evidence class, coverage and limits; the browser adds no thresholds.
 Rows cover fault, tank loss, starts, defrost, water pressure, steady flow, heater runtime and retry
-changes. Collapsed rows show the primary measured value when available (or checking, no window, measured, tentative and N/A).
+changes. Collapsed rows show the primary measured value when available (or checking, no window, measured, tentative and N/A); the collapsed `fault` row stays visually quiet when no active or retained fault exists (retaining an accessible label) and otherwise renders `<code> · <duration>` (or `<code> · Unknown` when stale, falling back to status text without a code).
 Expanders usually show the reading and its time, an interpretation, and expected conditions or
-assessment limits. The compressor-start expander gives the observed start count and completed runs
+assessment limits. The fault expander shows a hero summary of the latest episode, a second-resolution
+24-hour categorical pill bar (`min-width: 3px`, fault-free grey, unmeasured hatch, distinct colors
+per fault code), filter chips and bar tap (`±20 px`) revealing a newest-first episode table on
+demand, and one description paragraph below without a generic Normal target. The compressor-start expander gives the observed start count and completed runs
 by purpose, one short assessment of average heating-run duration, and the 24-hour chart. Keep the
 observed start count available when classification inputs are unsupported. Distinguish unsupported
 inputs from temporarily insufficient readings. Label elapsed time as the observation window and

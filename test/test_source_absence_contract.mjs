@@ -1100,3 +1100,20 @@ assert.match(historySource, /compare_exchange_weak[\s\S]*?memory_order_release/)
   assert.doesNotMatch(mqttHeader, /\b(reference_temperature_status|circulation_source_status)\(\);/,
     "room/circulation status getters must not regain a Config-copying no-argument overload");
 }
+
+// Dual-source fault timeline isolation and redaction contracts:
+// X10A and Modbus maintain separate fault traces/resets, shutdown saves respect fault_forgotten,
+// and ?redact=1 omits timeline coordinates plus wall-clock start/end timestamps.
+assert.match(checkup,
+  /checkup_fault_forget\(\)[\s\S]{0,400}?s_x10a\.fault_forgotten\.store\(true[\s\S]{0,120}?s_modbus\.fault_forgotten\.store\(true/,
+  "checkup_fault_forget must suppress both independent fault sources");
+assert.match(checkup,
+  /fault_save_handoff_locked[\s\S]{0,200}?slot\.fault_forgotten\.load\(std::memory_order_acquire\)/,
+  "shutdown fault handoff must respect factory-reset suppression");
+const faultStatusAt = status.indexOf("append_status_fault_check_json(");
+const faultStatusEnd = status.indexOf("static void append_status_json(", faultStatusAt);
+assert.ok(faultStatusAt >= 0 && faultStatusEnd > faultStatusAt);
+const faultStatusFn = status.slice(faultStatusAt, faultStatusEnd);
+assert.match(faultStatusFn,
+  /if \(!redact && latest\.start_unix_s > 0\)[\s\S]*?if \(!redact\) \{[\s\S]*?checkup_fault_timeline_snapshot\(/,
+  "/status?redact=1 must omit fault timeline segments and wall-clock timestamps while keeping X10A/Modbus isolation");
