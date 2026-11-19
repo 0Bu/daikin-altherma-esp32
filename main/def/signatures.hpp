@@ -15,13 +15,26 @@ namespace daik::def {
 // on X10A, shows up as a false candidate for a 4-8 kW Altherma split. `generic` (the fallback) and
 // `altherma3_r_erga` (the hand-written host-test fixture, a duplicate of the real ERGA-E profile) are
 // likewise not detection candidates.
-inline bool is_detection_model(const char* id) {
-    if (std::strcmp(id, "generic") == 0 || std::strcmp(id, "altherma3_r_erga") == 0) return false;
-    return std::strncmp(id, "altherma", 8) == 0;   // Altherma-only; drops minichiller_*
+constexpr bool sig_str_eq(const char* a, const char* b) {
+    size_t i = 0;
+    while (a[i] != '\0' && a[i] == b[i]) ++i;
+    return a[i] == b[i];
+}
+
+constexpr bool sig_starts_with(const char* s, const char* prefix) {
+    for (size_t i = 0; prefix[i] != '\0'; ++i) {
+        if (s[i] != prefix[i]) return false;
+    }
+    return true;
+}
+
+inline constexpr bool is_detection_model(const char* id) {
+    if (sig_str_eq(id, "generic") || sig_str_eq(id, "altherma3_r_erga")) return false;
+    return sig_starts_with(id, "altherma"); // Altherma-only; drops minichiller_*
 }
 
 // Fill out[] (capacity `max`) with one Signature per Altherma detection model; returns the count.
-inline int build_signatures(Signature* out, int max) {
+inline constexpr int build_signatures(Signature* out, int max) {
     int n = 0;
     for (const auto& p : profiles) {
         if (!is_detection_model(p.id)) continue;
@@ -36,12 +49,24 @@ inline int build_signatures(Signature* out, int max) {
     return n;
 }
 
-// Lazily-built shared signature array for device use (built once on first call).
+struct SignatureTable {
+    static constexpr size_t kCap = sizeof(profiles) / sizeof(profiles[0]);
+    Signature               entries[kCap]{};
+    int                     count = 0;
+};
+
+constexpr SignatureTable make_signature_table() {
+    SignatureTable t{};
+    t.count = build_signatures(t.entries, static_cast<int>(SignatureTable::kCap));
+    return t;
+}
+
+inline constexpr SignatureTable kSignatureTable = make_signature_table();
+
+// Compile-time signature table in .rodata (no .bss copy or static-init guard).
 inline const Signature* signatures(int& count) {
-    static Signature s[sizeof(profiles) / sizeof(profiles[0])];
-    static const int n = build_signatures(s, static_cast<int>(sizeof(s) / sizeof(s[0])));
-    count = n;
-    return s;
+    count = kSignatureTable.count;
+    return kSignatureTable.entries;
 }
 
 } // namespace daik::def

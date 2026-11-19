@@ -1328,7 +1328,7 @@ static void mb_poll_once() {
         // Re-check while owning the store. If /set_hp bumped the target before waiting for this lock,
         // refuse the old buffer; if it bumps afterwards, mb_reconfigure waits and clears it itself.
         if (s_target_generation.load(std::memory_order_acquire) == cycle_target_generation) {
-            s_cache = std::move(fresh);            // move-assign: steals the buffer, cannot throw
+            s_cache.swap(fresh); // swap: frees previous buffer outside s_cache_mtx
             s_cache_generation = cycle_generation;
             s_cache_target_generation = cycle_target_generation;
             s_cache_commit_ms         = cache_commit_ms;

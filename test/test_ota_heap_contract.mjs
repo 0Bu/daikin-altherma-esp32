@@ -1427,7 +1427,12 @@ const transportStop = transportPause.indexOf("esp_mqtt_client_stop(s_client)");
 assert.ok(transportPauseStart >= 0 && transportStop >= 0 &&
   transportPause.indexOf("s_transport_connecting.store(false, std::memory_order_release)", transportStop) > transportStop &&
   transportPause.indexOf("release_paused_state_caches()", transportStop) > transportStop,
-  "a successful transport stop must release BEFORE_CONNECT activity and paused state JSON caches");
+  "a successful transport stop must release BEFORE_CONNECT activity and paused state caches");
+assert.doesNotMatch(mqtt, /std::string\s+s_last_(?:modbus|weather|env3)_json\b/,
+  "MQTT state deduplication must use fixed-size digests rather than heap-backed JSON string caches");
+assert.ok(appMain.indexOf("daik::weather_forecast_start()") < appMain.indexOf("daik::mqtt_ha_start()") &&
+  appMain.indexOf("daik::mb_start()") < appMain.indexOf("daik::mqtt_ha_start()"),
+  "boot-permanent Weather and HomeHub workers must allocate before pausable esp-mqtt transport startup");
 
 // The live plant also runs HomeHub and Syslog. Both used to allocate after the OTA flag rose:
 // HomeHub copied the string-owning Config and periodically reserved a fresh values vector; every
@@ -1657,8 +1662,10 @@ assert.match(diagHandler, /finish_bounded_stream\(\s*chunks,/,
   "redacted /diag must abort post-emission failures without a replacement response");
 assert.doesNotMatch(diagHandler, /\bbuf\s*\[\s*6144\s*\]/,
   "/diag must not keep a static 6 KiB ring copy alongside streaming cursor support");
-assert.match(diagHandler, /static\s+char\s+buf\[1024\]/,
-  "/diag must stream through a bounded 1 KiB chunk buffer");
+assert.match(httpStatus, /char\s+diag_buf\[1024\]/,
+  "httpd route scratch must bound /diag chunk storage to 1 KiB");
+assert.match(diagHandler, /auto\s*\(&buf\)\[1024\]\s*=\s*s_httpd_route_scratch\.diag_buf/,
+  "/diag must stream through the shared bounded 1 KiB httpd route scratch");
 assert.match(diagHandler,
   /ota_download_active\(\)\s*\?\s*512\s*:\s*kDiagRingBytes/,
   "plain /diag must clamp ring dump to 512 B during active OTA to prevent multi-pbuf lwIP heap fragmentation");
