@@ -402,13 +402,14 @@ assert.equal(ui.histPinIndex("dhw_tank", ui.historyView("dhw_tank")), -1, "legen
 const bootOnly = { ...undated, b0: 100 };
 ui.S.histHidden.delete("dhw_tank");
 ui.S.hist.set("dhw_tank", bootOnly);
-ui.S.hist.set(ui.histCacheKey("dhw_tank", "modbus"), { ...bootOnly, v: [431, 434] });
+ui.S.hist.set(ui.histCacheKey("dhw_tank", "modbus"), { ...bootOnly, v: [431, null] });
 ui.histPinToggle("dhw_tank", 1);
 assert.equal(ui.histPinIndex("dhw_tank", ui.historyView("dhw_tank")), 1);
 await status(disconnected);
-assert.equal(ui.S.histPin.has("dhw_tank"), false, "status failover retires an unscoped boot pin");
+assert.equal(ui.S.histPin.has("dhw_tank"), false, "status failover retires an unscoped X10A-only boot pin");
 await status(fixture());
 assert.equal(ui.histPinIndex("dhw_tank", ui.historyView("dhw_tank")), -1);
+ui.S.hist.set(ui.histCacheKey("dhw_tank", "modbus"), { ...bootOnly, v: [431, 434] });
 
 {
   const inspector = { trend: "dhw_tank", aria: "Tank" };
