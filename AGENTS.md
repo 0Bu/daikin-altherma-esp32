@@ -24,9 +24,8 @@ measurements, incident history, and field-by-field reference material in the lin
 - An explicit `$deploy-test` or `$flash-esp32` request, and a `$deploy-test` run inside a
   `$deploy-prod` chain, authorizes the unchained key-by-path signing command and the unchanged
   repository flash plan described below.
-- An explicit local HTTP OTA test request authorizes building, key-by-path signing and the
-  requested upload to the inventory production board, only while its saved channel is `dev`.
-  It can precede merge and publication; it does not authorize changing the channel, merging or publishing.
+- An explicit local HTTP OTA test authorizes building, key-by-path signing and uploading to the
+  requested board on saved `dev`. It does not authorize channel changes, merging or publishing.
 - A standalone `$deploy-test` authorizes scoped fixes and host checks, but commits require separate
   explicit authorization. Repeat hardware testing only after an authorized clean fix head exists;
   the inherited `$deploy-prod` chain already authorizes its fix commits.
@@ -90,6 +89,7 @@ conditional workflows and are not necessarily PR checkbox gates.
 | `$diagnostic-evidence-review`, `$user-docs-review` | Diagnoses, thresholds, evidence, visible meaning or owner actions change. |
 | `$ui-gif` | Mechanical freshness is a hard merge block; GIF/stamp changes also require current-head visual review. Re-record only locally. |
 | `$pr-hygiene-review` | Before PR creation and ordinary merge; inspect commit range and PR prose for privacy and non-English text. |
+| `$ota` | Explicitly requested local signed HTTP OTA to a board on saved `dev`. |
 | `$flash-esp32` | Explicitly requested signed build-and-flash. |
 | `$deploy-test` | Explicit exact-head pre-merge bench test, signed NVS-preserving USB, health and changed behavior. |
 | `$deploy-prod` | Authorized gates, PR merge, CI artifact, bench and production promotion; every fix head re-enters `$deploy-test`. |
@@ -195,14 +195,12 @@ This attribution request does not add conditions to the MIT License.
   the distinct `--confirm-production production --execute` transaction. Each mode binds the signed
   artifact, official feed and source without changing the saved channel, permits one un-retried
   target POST, and requires probation and stress; follow [the runbook](docs/MAINTENANCE.md#role-pinned-ota).
-- Exception for an explicitly requested local test: `POST /ota/upload` can install a locally built,
-  signed image on the inventory production board while the saved channel is `dev`, before merge
-  or feed publication. Use direct, unchained `scripts/dev-ota-upload.py` with its explicit
-  `--confirm-production-test production --execute` mode, following the
-  [local test procedure](docs/MAINTENANCE.md#local-dev-ota-tests). Require current source/check/review/build
-  evidence without requiring a commit. Bind target identity, retain signing/health checks and report
-  local test evidence. MCP only advertises this HTTP capability. PR gates and official promotion
-  stay required.
+- Exception for an explicitly requested local test: `POST /ota/upload` installs a local signed image
+  on any named board (`bench`, `production` or IP/host) on saved `dev` via direct, unchained
+  `scripts/dev-ota-upload.py` (`--target ... --execute`); follow
+  [local dev OTA](docs/MAINTENANCE.md#local-dev-ota-tests). No Codex CLI, source receipt or review
+  is required before upload; verify reboot/probation. MCP only advertises the route; PR gates and
+  official promotion stay required.
 - Signed, NVS-preserving USB writes to the inventory roles are limited to bootstrap, recovery, and
   the explicitly requested pre-merge test of an exact local head on the bench (`$deploy-test`, or
   `$flash-esp32` naming the bench under the same rules). Production takes USB only for bootstrap and

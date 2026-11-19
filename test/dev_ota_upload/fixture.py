@@ -20,6 +20,7 @@ gate = upload.gate
 BOARD = {"host": "production.invalid", "mac": "02:11:22:33:44:55"}
 VERSION = "1.2.3-dev.4"
 ELF = "abc123def"
+SAFE_TMP = str(Path("/tmp").resolve())
 
 
 def image():
@@ -79,13 +80,12 @@ class UploadTests(unittest.TestCase):
         self.artifact = {**upload.image_metadata(io.BytesIO(self.binary), len(self.binary)),
                          "sha256": hashlib.sha256(self.binary).hexdigest()}
         self.args = argparse.Namespace(image=Path("/tmp/fixture.bin"), expected_app_sha256=self.artifact["sha256"],
-                                       expected_current_version=VERSION, expected_current_elf=ELF, execute=True,
-                                       evidence=Path("/tmp/fixture-evidence.json"), expected_source_sha256="c" * 64)
+                                       target="production", expected_mac=None, execute=True)
         Connection.instances.clear()
         Journal.calls.clear()
 
     def test_snapshot_binds_exact_bytes_and_project_without_a_private_key(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory(dir=SAFE_TMP) as directory:
             path = Path(directory).resolve() / "app.bin"
             path.write_bytes(self.binary)
             with patch.object(upload, "require_signature") as signature:
@@ -104,6 +104,16 @@ class UploadTests(unittest.TestCase):
             with self.assertRaises(gate.GateError):
                 with upload.image_snapshot(path, self.artifact["sha256"]):
                     self.fail("unsigned-size image accepted")
+            linked_file = Path(directory).resolve() / "linked.bin"
+            linked_file.symlink_to(path)
+            with self.assertRaises(gate.GateError):
+                with upload.image_snapshot(linked_file, self.artifact["sha256"]):
+                    self.fail("symlinked file accepted")
+            linked_dir = Path(directory).resolve() / "linked-dir"
+            linked_dir.symlink_to(Path(directory).resolve())
+            with self.assertRaises(gate.GateError):
+                with upload.image_snapshot(linked_dir / "app.bin", self.artifact["sha256"]):
+                    self.fail("symlinked directory accepted")
 
     def test_wrong_chip_project_and_descriptor_are_rejected(self):
         for offset, replacement in ((0, b"x"), (12, b"\0\0"), (32, b"xxxx"), (80, b"another")):
@@ -113,7 +123,7 @@ class UploadTests(unittest.TestCase):
                 upload.image_metadata(io.BytesIO(body), len(body))
 
     def test_signature_failure_precedes_all_board_contact(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory(dir=SAFE_TMP) as directory:
             path = Path(directory).resolve() / "app.bin"
             path.write_bytes(self.binary)
             self.args.image = path
@@ -124,19 +134,31 @@ class UploadTests(unittest.TestCase):
                 inventory.assert_not_called()
 
     def test_preflight_refuses_wrong_channel_mac_build_and_probation(self):
-        bad_statuses = [status(ota={"channel": "release"}), status(version="wrong"),
+        bad_statuses = [status(ota={"channel": "release"}), status(version=None),
                         status(wifi={"mac": "AA:11:22:33:44:55", "connected": True}),
-                        status(boot_id=None), status(app_elf_sha256="000000000")]
+                        status(boot_id=None), status(app_elf_sha256="bad")]
         for current in bad_statuses:
             with self.subTest(current=current), patch.object(gate, "request_status_deadline", return_value=current), \
                  patch.object(gate, "request_json_deadline", return_value=ota()), \
                  self.assertRaises(gate.GateError):
-                upload.preflight(self.endpoint, BOARD, VERSION, ELF)
-        for candidate in (ota(channel="release"), ota(busy=True), ota(rollback_pending=True), ota(image_state="unarmed")):
+                upload.preflight(self.endpoint, dict(BOARD), production=True)
+        for production in (True, False):
+            for candidate in (ota(channel="release"), ota(busy=True), ota(rollback_pending=True)):
+                with self.subTest(candidate=candidate, production=production), \
+                     patch.object(gate, "request_status_deadline", return_value=status()), \
+                     patch.object(gate, "request_json_deadline", return_value=candidate), \
+                     self.assertRaises(gate.GateError):
+                    upload.preflight(self.endpoint, dict(BOARD), production=production)
+
+    def test_non_production_board_accepts_writable_start_without_ota_history_and_pins_live_mac(self):
+        for candidate in (ota(image_state="unarmed"), ota(image_state="unknown", rollback_pending=None)):
+            board = {"host": "192.0.2.170", "mac": None}
             with self.subTest(candidate=candidate), patch.object(gate, "request_status_deadline", return_value=status()), \
-                 patch.object(gate, "request_json_deadline", return_value=candidate), \
-                 self.assertRaises(gate.GateError):
-                upload.preflight(self.endpoint, BOARD, VERSION, ELF)
+                 patch.object(gate, "request_json_deadline", return_value=candidate):
+                self.assertEqual(upload.preflight(self.endpoint, board, production=False), status())
+                self.assertEqual(board["mac"], BOARD["mac"])
+                with self.assertRaises(gate.GateError):
+                    upload.preflight(self.endpoint, dict(BOARD), production=True)
 
     def test_one_streamed_post_and_fixed_framing(self):
         payload = self.binary + b"x" * (upload.CHUNK_BYTES * 2)
@@ -171,75 +193,92 @@ class UploadTests(unittest.TestCase):
             self.assertTrue(Connection.instances[0].closed)
             self.assertEqual(Connection.instances[0].connects, 1)
 
-    def run_fixture(self, *, execute=True, current=None, upload_error=None):
-        self.args.execute = execute
-        patches = [patch.object(upload, "image_snapshot"), patch.object(gate, "load_inventory", return_value={"production": BOARD}),
-                   patch.object(gate, "resolve_http_endpoint", return_value=self.endpoint),
-                   patch.object(upload, "preflight", side_effect=[(status(), ota()), (current or status(), ota())]),
-                   patch.object(upload, "upload_once", side_effect=upload_error, return_value={"ok": True, "generation": 7}),
-                   patch.object(upload, "observe_boot", return_value={"image_state": "valid"}),
-                   patch.object(gate, "request_json_deadline", return_value=ota()), patch.object(gate, "GateJournal", Journal)]
-        with patch.object(upload.evidence, "verify_evidence", return_value={"source_sha256": "c" * 64}), \
-             patch.object(upload.evidence, "require_upload_unused"), patch.object(upload.evidence, "claim_upload_attempt"), \
-             patches[0] as snapshot, patches[1], patches[2], patches[3], patches[4] as writer, \
-             patches[5] as observer, patches[6], patches[7]:
-            snapshot.return_value.__enter__.return_value = (io.BytesIO(self.binary), self.artifact)
-            if upload_error or (current and current["boot_id"] != status()["boot_id"]):
-                with self.assertRaises(gate.GateError if not upload_error else type(upload_error)):
-                    upload.run(self.args)
-                observer.assert_not_called()
-            else:
-                result = upload.run(self.args)
+    def test_inventory_and_arbitrary_host_targets_work_without_codex_receipt(self):
+        bench = {"host": "bench.invalid", "mac": "02:11:22:33:44:66"}
+        custom_mac = "02:11:22:33:44:77"
+        for target, expected_host, expected_role, has_inventory, execute in (
+            ("production", BOARD["host"], "production", True, False),
+            ("production", BOARD["host"], "production", True, True),
+            ("bench", bench["host"], "bench", True, True),
+            ("192.0.2.170", "192.0.2.170", "host", False, True),
+        ):
+            live_status = status(wifi={"mac": custom_mac if target == "192.0.2.170" else BOARD["mac"],
+                                       "connected": True, "rolled_back": False})
+            with self.subTest(target=target, execute=execute), \
+                 patch.object(upload, "image_snapshot") as snapshot, \
+                 patch.object(gate, "INVENTORY_PATH", Path("/nonexistent/inventory.json") if not has_inventory else Path("/tmp")), \
+                 patch.object(gate, "load_inventory", return_value={"production": BOARD, "bench": bench}) as inv_loader, \
+                 patch.object(gate, "resolve_http_endpoint", return_value=self.endpoint) as resolve, \
+                 patch.object(upload, "preflight", return_value=live_status) as preflight, \
+                 patch.object(upload, "claim_upload_attempt") as claim, \
+                 patch.object(upload, "upload_once", return_value={"ok": True, "generation": 7}) as writer, \
+                 patch.object(gate, "request_json_deadline", return_value=ota()), \
+                 patch.object(upload, "observe_boot", return_value={"image_state": "valid"}) as observe, \
+                 patch.object(gate, "GateJournal", Journal):
+                snapshot.return_value.__enter__.return_value = (io.BytesIO(self.binary), self.artifact)
+                args = upload.parse_args(["--target", target, "--image", "/tmp/fixture.bin",
+                                          "--expected-app-sha256", self.artifact["sha256"],
+                                          *(["--execute"] if execute else [])])
+                result = upload.run(args)
                 self.assertEqual(result["executed"], execute)
-            return writer.call_count
+                self.assertEqual(result["target"], expected_role)
+                if not has_inventory:
+                    inv_loader.assert_not_called()
+                resolve.assert_called_once_with(expected_host)
+                self.assertEqual(preflight.call_count, 1)
+                self.assertEqual(writer.call_count, int(execute))
+                self.assertEqual(claim.call_count, int(execute))
+                self.assertEqual(observe.call_count, int(execute))
 
-    def test_dry_run_has_no_write_and_execute_uses_one_write(self):
-        self.assertEqual(self.run_fixture(execute=False), 0)
-        self.assertEqual(self.run_fixture(), 1)
-        self.assertEqual(self.run_fixture(upload_error=TimeoutError()), 1)
-        self.assertEqual(self.run_fixture(current=status(boot_id="b" * 16)), 0)
+    def test_shared_mdns_requires_expected_mac_and_ip_matching_production_mac_keeps_production_rules(self):
+        with self.assertRaises(SystemExit):
+            upload.parse_args(["--target", "daikin-altherma-esp32.local", "--image", "/tmp/fixture.bin",
+                               "--expected-app-sha256", self.artifact["sha256"]])
+        parsed = upload.parse_args(["--target", "daikin-altherma-esp32.local", "--expected-mac", "02:11:22:33:44:77",
+                                    "--image", "/tmp/fixture.bin", "--expected-app-sha256", self.artifact["sha256"]])
+        self.assertEqual(parsed.expected_mac, "02:11:22:33:44:77")
+        with tempfile.TemporaryDirectory(dir=SAFE_TMP) as directory:
+            inv_file = Path(directory) / "production-ota.json"
+            inv_file.write_text("{}")
+            bench = {"host": "bench.invalid", "mac": "02:11:22:33:44:66"}
+            with patch.object(gate, "INVENTORY_PATH", inv_file), \
+                 patch.object(gate, "load_inventory", return_value={"production": BOARD, "bench": bench}), \
+                 patch.object(gate, "request_status_deadline", return_value=status()), \
+                 patch.object(gate, "request_json_deadline", return_value=ota(image_state="unarmed")):
+                board, role, production, prod_mac = upload.resolve_target("192.0.2.99", None)
+                self.assertEqual(role, "host")
+                self.assertFalse(production)
+                with self.assertRaises(gate.GateError):
+                    upload.preflight(self.endpoint, board, production=production, production_mac=prod_mac)
 
-    def test_evidence_is_required_before_contact_and_rechecked_before_post(self):
+    def test_failed_preflight_never_posts(self):
         with patch.object(upload, "image_snapshot") as snapshot, \
-             patch.object(upload.evidence, "verify_evidence", side_effect=upload.evidence.EvidenceError("stale")), \
-             patch.object(gate, "load_inventory") as inventory:
-            snapshot.return_value.__enter__.return_value = (io.BytesIO(self.binary), self.artifact)
-            with self.assertRaises(upload.evidence.EvidenceError):
-                upload.run(self.args)
-            inventory.assert_not_called()
-        with patch.object(upload, "image_snapshot") as snapshot, \
-             patch.object(upload.evidence, "verify_evidence", side_effect=[{}, upload.evidence.EvidenceError("changed before POST")]) as verifier, \
-             patch.object(upload.evidence, "require_upload_unused"), \
-             patch.object(gate, "load_inventory", return_value={"production": BOARD}), \
+             patch.object(gate, "load_inventory", return_value={"production": BOARD, "bench": {"host": "b.invalid", "mac": "02:00:00:00:00:01"}}), \
              patch.object(gate, "resolve_http_endpoint", return_value=self.endpoint), \
-             patch.object(upload, "preflight", return_value=(status(), ota())), \
+             patch.object(upload, "preflight", side_effect=gate.GateError("wrong target")), \
              patch.object(upload, "upload_once") as writer:
             snapshot.return_value.__enter__.return_value = (io.BytesIO(self.binary), self.artifact)
-            with self.assertRaises(upload.evidence.EvidenceError):
+            with self.assertRaises(gate.GateError):
                 upload.run(self.args)
-            self.assertEqual(verifier.call_count, 2)
             writer.assert_not_called()
 
-    def test_timeout_consumes_receipt_and_second_execute_has_no_second_post(self):
-        with tempfile.TemporaryDirectory() as directory:
-            self.args.evidence = Path(directory).resolve() / "receipt.json"
-            self.args.evidence.write_text('{"fixture":"bound evidence"}')
-            self.args.evidence.chmod(0o600)
-            binding = {"source_sha256": "c" * 64,
-                       "receipt_sha256": hashlib.sha256(self.args.evidence.read_bytes()).hexdigest()}
+    def test_timeout_consumes_image_path_and_second_execute_has_no_second_post(self):
+        with tempfile.TemporaryDirectory(dir=SAFE_TMP) as directory:
+            self.args.image = Path(directory).resolve() / "signed.bin"
+            marker = self.args.image.with_suffix(".upload-attempt")
             with patch.object(upload, "image_snapshot") as snapshot, \
-                 patch.object(upload.evidence, "verify_evidence", return_value=binding), \
-                 patch.object(gate, "load_inventory", return_value={"production": BOARD}), \
+                 patch.object(gate, "load_inventory", return_value={"production": BOARD, "bench": {"host": "b.invalid", "mac": "02:00:00:00:00:01"}}), \
                  patch.object(gate, "resolve_http_endpoint", return_value=self.endpoint), \
-                 patch.object(upload, "preflight", return_value=(status(), ota())), \
+                 patch.object(upload, "preflight", return_value=status()), \
                  patch.object(gate, "GateJournal", Journal), \
                  patch.object(upload, "upload_once", side_effect=TimeoutError()) as writer:
                 snapshot.return_value.__enter__.return_value = (io.BytesIO(self.binary), self.artifact)
                 with self.assertRaises(TimeoutError):
                     upload.run(self.args)
-                with self.assertRaises(upload.evidence.EvidenceError):
+                self.assertEqual(marker.read_text().strip(), self.artifact["sha256"])
+                with self.assertRaisesRegex(gate.GateError, "already owns a write attempt"):
                     upload.run(self.args)
-                self.assertEqual(writer.call_count, 1)
+                writer.assert_called_once()
 
     def test_same_build_needs_distinct_boot_and_no_second_reboot(self):
         clock = [0.0]
@@ -250,7 +289,7 @@ class UploadTests(unittest.TestCase):
         with patch.object(upload.time, "monotonic", lambda: clock[0]), patch.object(upload.time, "sleep", sleep), \
              patch.object(gate, "request_status_deadline", side_effect=[status(), first, final, final]), \
              patch.object(gate, "request_json_deadline", side_effect=[ota(image_state="pending_verify", rollback_pending=True), ota()]):
-            result = upload.observe_boot(self.endpoint, BOARD, self.artifact, "a" * 16)
+            result = upload.observe_boot(self.endpoint, BOARD, self.artifact, "a" * 16, production=True)
             self.assertEqual(result["image_state"], "valid")
             self.assertEqual(result["boot_id"], "b" * 16)
             self.assertIs(result["probation_observed"], True)
@@ -259,13 +298,13 @@ class UploadTests(unittest.TestCase):
              patch.object(gate, "request_status_deadline", side_effect=[first, status(boot_id="c" * 16)]), \
              patch.object(gate, "request_json_deadline", return_value=ota(image_state="pending_verify", rollback_pending=True)), \
              self.assertRaises(gate.GateError):
-            upload.observe_boot(self.endpoint, BOARD, self.artifact, "a" * 16)
+            upload.observe_boot(self.endpoint, BOARD, self.artifact, "a" * 16, production=True)
 
     def test_first_seen_valid_boot_cannot_prove_same_build_probation_or_exclude_rollback(self):
         with patch.object(gate, "request_status_deadline", return_value=status(boot_id="b" * 16)), \
              patch.object(gate, "request_json_deadline", return_value=ota()), \
              self.assertRaisesRegex(gate.GateError, "probation was not observed"):
-            upload.observe_boot(self.endpoint, BOARD, self.artifact, "a" * 16)
+            upload.observe_boot(self.endpoint, BOARD, self.artifact, "a" * 16, production=True)
 
     def test_rollback_between_status_and_ota_state_cannot_inherit_pending_boot(self):
         with patch.object(upload.time, "sleep"), \
@@ -275,7 +314,22 @@ class UploadTests(unittest.TestCase):
              patch.object(gate, "request_json_deadline", side_effect=[
                  ota(image_state="pending_verify", rollback_pending=True), ota()]), \
              self.assertRaisesRegex(gate.GateError, "boot changed during probation acceptance"):
-            upload.observe_boot(self.endpoint, BOARD, self.artifact, "a" * 16)
+            upload.observe_boot(self.endpoint, BOARD, self.artifact, "a" * 16, production=True)
+
+    def test_unwired_board_can_complete_probation_but_production_cannot(self):
+        for production in (True, False):
+            unwired = status(boot_id="b" * 16, mqtt={"configured": True, "connected": False},
+                             hp={**status()["hp"], "connected": False, "values": 0})
+            with self.subTest(production=production), patch.object(upload.time, "sleep"), \
+                 patch.object(gate, "request_status_deadline", return_value=unwired), \
+                 patch.object(gate, "request_json_deadline", side_effect=[
+                     ota(image_state="pending_verify", rollback_pending=True), ota()]):
+                if production:
+                    with self.assertRaisesRegex(gate.GateError, "runtime health"):
+                        upload.observe_boot(self.endpoint, BOARD, self.artifact, "a" * 16, production=True)
+                else:
+                    self.assertTrue(upload.observe_boot(self.endpoint, BOARD, self.artifact,
+                                                        "a" * 16, production=False)["probation_observed"])
 
 
 if __name__ == "__main__":
