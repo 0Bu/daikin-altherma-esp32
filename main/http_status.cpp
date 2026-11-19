@@ -2234,6 +2234,18 @@ static esp_err_t h_models(httpd_req_t* req) {
     return http_send_json(req, def::MODELS_JSON);
 }
 
+// esp_http_server dispatches requests one at a time on its single httpd worker task, so /history
+// and /diag never execute concurrently and share one static scratch block off the httpd stack.
+union HttpdRouteScratch {
+    struct {
+        logic::HistorySample samples[logic::HISTORY_SAMPLES];
+        uint16_t             runs[logic::HISTORY_MAX_RUNS][2];
+    } history;
+    char diag_buf[1024];
+    constexpr HttpdRouteScratch() : diag_buf{} {}
+};
+static HttpdRouteScratch s_httpd_route_scratch;
+
 // GET /history?row=<trend id>[&source=x10a|modbus|env3|room] — one 24-hour series, oldest first.
 // X10A is the backwards-compatible default; the external circulation witness identifies itself as
 // MQTT, Modbus carries paired HomeHub measurements/state timelines, and ENV III owns three
@@ -2310,11 +2322,11 @@ static esp_err_t h_history(httpd_req_t* req) {
         return http_send_json(req, "{\"ok\":false,\"error\":\"unknown trend\"}");
     }
 
-    // Both buffers are function-static rather than stack: this handler runs on the httpd task,
-    // whose stack is the one that overflowed in v1.0.12, and 576 + 576 bytes of locals is not worth
-    // the risk. Safe because esp_http_server dispatches requests one at a time on that single task.
-    static logic::HistorySample samples[logic::HISTORY_SAMPLES];
-    static uint16_t             runs[logic::HISTORY_MAX_RUNS][2];
+    // Shared httpd-task-only scratch rather than stack: this handler runs on the httpd task, whose
+    // stack overflowed in v1.0.12, and 576 + 580 bytes of locals is not worth the risk. Safe
+    // because esp_http_server dispatches requests one at a time on that single task.
+    auto(&samples)[logic::HISTORY_SAMPLES]             = s_httpd_route_scratch.history.samples;
+    auto(&runs)[logic::HISTORY_MAX_RUNS][2]            = s_httpd_route_scratch.history.runs;
     uint32_t                    history_snapshot_epoch = 0;
     // The newest-sample age and sample zero's bucket come back from the SAME critical section as
     // the samples (HIST-01/e). Asked for afterwards, each took the lock again, and a bucket commit
@@ -2469,7 +2481,7 @@ static esp_err_t h_diag(httpd_req_t* req) {
     // Plain diagnostics stream from static 1 KiB storage. Redacted per-line strings require
     // their own OTA admission check before the bounded stream starts.
     if (redact && ota_download_active()) return network_tls_busy(req);
-    static char             buf[1024];
+    auto(&buf)[1024] = s_httpd_route_scratch.diag_buf;
     static DiagStreamCursor cursor;
     const size_t            max_dump = ota_download_active() ? 512 : kDiagRingBytes;
     cursor                           = diag_stream_open(max_dump);

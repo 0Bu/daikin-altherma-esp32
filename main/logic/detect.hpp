@@ -29,7 +29,7 @@ inline constexpr bool is_transport_error(HpReplyKind kind) {
 // reference participate — 0x11 (O/U EEPROM) is probed for its digits but deliberately NOT in the
 // mask, since no profile decodes it and its presence would break exact page matching. Returns -1
 // for a register we do not fingerprint on.
-inline int page_bit(uint8_t reg) {
+inline constexpr int page_bit(uint8_t reg) {
     switch (reg) {
     case 0x00:
         return 0;
@@ -72,7 +72,7 @@ inline int page_bit(uint8_t reg) {
     }
 }
 
-inline uint32_t page_mask_bit(uint8_t reg) {
+inline constexpr uint32_t page_mask_bit(uint8_t reg) {
     const int b = page_bit(reg);
     return b < 0 ? 0u : (1u << b);
 }
@@ -113,10 +113,10 @@ struct Signature {
 // match writes -1/-1 and returns false. Hand-rolled (no <regex>/<cctype>) so it is identical on
 // host and device: find the trailing "kw" token, then read one or two underscore-separated integer
 // groups immediately before it. Model codes like "12p30_50" never end in "kw" so they never match.
-inline bool parse_kw_class(const char* id, int& lo_tenths, int& hi_tenths) {
+inline constexpr bool parse_kw_class(const char* id, int& lo_tenths, int& hi_tenths) {
     lo_tenths = hi_tenths = -1;
     if (!id) return false;
-    const int len = static_cast<int>(std::strlen(id));
+    const int len = static_cast<int>(__builtin_strlen(id));
 
     // Locate the last "kw".
     int kw = -1;

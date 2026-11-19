@@ -719,19 +719,19 @@ const modbusPublishStart = mqtt.indexOf("static bool publish_modbus_state(bool& 
 const modbusPublishEnd = mqtt.indexOf("\n}\n\nstruct RetainedCleanupCycle", modbusPublishStart) + 2;
 const modbusPublish = mqtt.slice(modbusPublishStart, modbusPublishEnd);
 assert.match(modbusPublish,
-  /if \(js != s_last_modbus_json\) \{\s*if \(!mqtt_publish\(s_modbus,[\s\S]*?\)\) return false;\s*s_last_modbus_json = js;\s*\}/,
+  /if \(!s_last_modbus_digest\.matches\(js\)\) \{\s*if \(!mqtt_publish\(s_modbus,[\s\S]*?\)\) return false;\s*s_last_modbus_digest\.record\(js\);\s*\}/,
   "HomeHub dedup may advance only after the broker accepts current state");
 const weatherPublishStart = mqtt.indexOf("void publish_weather_state(");
 const weatherPublishEnd = mqtt.indexOf("\n}\n\n// ENV III", weatherPublishStart) + 2;
 const weatherPublish = mqtt.slice(weatherPublishStart, weatherPublishEnd);
 assert.match(weatherPublish,
-  /if \(js != s_last_weather_json &&\s*mqtt_publish\(s_weather,[\s\S]*?\)\) \{\s*s_last_weather_json\.swap\(js\);\s*\}/,
+  /if \(!s_last_weather_digest\.matches\(js\) &&\s*mqtt_publish\(s_weather,[\s\S]*?\)\) \{\s*s_last_weather_digest\.record\(js\);\s*\}/,
   "Weather dedup may advance only after the broker accepts current state");
 const env3PublishStart = mqtt.indexOf("static void publish_env3_state()");
 const env3PublishEnd = mqtt.indexOf("\n}\n\n// Stream one retained", env3PublishStart) + 2;
 const env3Publish = mqtt.slice(env3PublishStart, env3PublishEnd);
 assert.match(env3Publish,
-  /if \(new_sample \|\| js != s_last_env3_json\) \{\s*if \(mqtt_publish\(s_env3,[\s\S]*?\)\) \{\s*s_last_env3_json\s*=\s*js;\s*s_last_env3_samples\s*=\s*env\.samples;\s*\}\s*\}/,
+  /if \(new_sample \|\| !s_last_env3_digest\.matches\(js\)\) \{\s*if \(mqtt_publish\(s_env3,[\s\S]*?\)\) \{\s*s_last_env3_digest\.record\(js\);\s*s_last_env3_samples\s*=\s*env\.samples;\s*\}\s*\}/,
   "ENV III value and sample acknowledgements must advance only after publish success");
 assert.match(mqtt,
   /static bool publish_env3_discovery\(\)[\s\S]*?if \(!mqtt_publish\([^;]*\)\) ok = false[\s\S]*?return ok/,
@@ -863,7 +863,7 @@ assert.match(poll, /if \((?:config\(\)\.profile|config_profile\(\)) == "auto"\)[
 const dwellCheckupAt = poll.indexOf("checkup_record(fresh.data()");
 const dwellTokenAt = poll.indexOf("HpValuesIdentity pending_cache_identity;", dwellCheckupAt);
 const dwellFoldAt = poll.indexOf("dwell_record(fresh.data()", dwellTokenAt);
-const commitAt = poll.search(/s_cache\s*=\s*std::move\(fresh\)/);
+const commitAt = poll.search(/s_cache\.swap\(fresh\)/);
 assert.ok(dwellCheckupAt >= 0 && dwellTokenAt > dwellCheckupAt && dwellFoldAt > dwellTokenAt &&
           commitAt > dwellFoldAt,
   "poll must stage the next cache identity, fold dwell from fresh rows, then commit those rows");
@@ -874,8 +874,8 @@ assert.match(poll.slice(dwellFoldAt, commitAt),
   /dwell_record\(fresh\.data\(\), fresh\.size\(\),\s*cycle_generation,\s*static_cast<uint32_t>\(\(service_max_gap_us \+ 999999\) \/ 1000000\),\s*&pending_cache_identity\);/,
   "the normal dwell fold must preserve fresh-row absence, the service-gap bound and its cache token");
 assert.match(poll.slice(commitAt),
-  /s_cache\s*=\s*std::move\(fresh\);\s*s_cache_profile\s*= prof\.id;\s*s_cache_identity_fp\s*= c\.x10a_identity_fp;\s*\+\+s_cache_revision;\s*s_cache_source_generation = cycle_generation;/,
-  "the committed cache must publish the same profile, source generation and staged next revision");
+  /s_cache\.swap\(fresh\);\s*s_cache_profile\s*= prof\.id;\s*s_cache_identity_fp\s*= c\.x10a_identity_fp;\s*\+\+s_cache_revision;\s*s_cache_source_generation = cycle_generation;/,
+  "the committed cache must swap rows (freeing old storage outside s_mtx) and publish the same profile, source generation and staged next revision");
 
 // ── 8. `known == false` renders as an ABSENT key, never as a zero ───────────────────────────────
 // Section 6's rule one field down. A dwell of 0 is a real reading ("it changed just now"); a row the

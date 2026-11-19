@@ -4552,6 +4552,42 @@ static void test_mqtt_group() {
     CHECK(fnv1a64("") == 0xcbf29ce484222325ULL);
     CHECK(fnv1a64("a") == 0xaf63dc4c8601ec8cULL);
     CHECK(fnv1a64("foobar") == 0x85944171f73967e8ULL);
+    {
+        MqttPayloadDigest d;
+        CHECK(d.empty());
+        CHECK(!d.matches(""));
+        CHECK(!d.matches("{}"));
+        MqttPayloadDigest d2;
+        CHECK(d == d2);
+        const std::string empty_json = "{}";
+        d.record(empty_json);
+        CHECK(!d.empty());
+        CHECK(d.matches(empty_json));
+        CHECK(d.matches("{}"));
+        CHECK(!d.matches("{\"a\":1}"));
+        CHECK(d != d2);
+        d2.record("{}");
+        CHECK(d == d2);
+        CHECK(!(d != d2));
+        d2.record("{\"a\":1}");
+        CHECK(d != d2);
+        d.clear();
+        CHECK(d.empty());
+        CHECK(!d.matches("{}"));
+    }
+    static_assert(def::kSignatureTable.count > 0, "constexpr signature table must be populated");
+    {
+        Signature        runtime_sigs[def::SignatureTable::kCap]{};
+        volatile int     cap = static_cast<int>(def::SignatureTable::kCap);
+        volatile uint8_t r11 = 0x11, r54 = 0x54;
+        CHECK(def::build_signatures(runtime_sigs, cap) == def::kSignatureTable.count);
+        CHECK(page_bit(r11) < 0 && page_mask_bit(r11) == 0 && page_mask_bit(r54) != 0);
+    }
+    static_assert(!def::is_detection_model("generic") &&
+                      !def::is_detection_model("altherma3_r_erga") &&
+                      !def::is_detection_model("minichiller_5kw") &&
+                      def::is_detection_model("altherma_lt_ca_05_07kw"),
+                  "constexpr detection model filter");
     CHECK(X10A_GROUPED_JSON_MAX_BYTES == 12u * 1024u);
     CHECK(X10A_FORMATTED_VALUE_MAX_BYTES == 96u);
     for (const ErrorCodeEntry& entry : ERROR_CODE_TABLE)

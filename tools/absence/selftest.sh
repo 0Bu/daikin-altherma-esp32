@@ -937,7 +937,7 @@ s = open(p).read()
 start = s.index("static void apply_source_cleanup_completion(")
 end = s.index("static void service_source_cleanup_evidence", start)
 body = s[start:end]
-mutated = body.replace("        s_last_weather_json.clear();\n", "", 1)
+mutated = body.replace("        s_last_weather_digest.clear();\n", "", 1)
 assert mutated != body, "seed 47 did not apply — Weather cache clear moved"
 open(p, "w").write(s[:start] + mutated + s[end:])
 PY4
@@ -1123,9 +1123,9 @@ python3 - "$TMP/main/mqtt_ha.cpp" <<'PY4'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-old = ('    if (js != s_last_weather_json &&\n'
+old = ('    if (!s_last_weather_digest.matches(js) &&\n'
        '        mqtt_publish(s_weather, js.c_str(), static_cast<int>(js.size()), 0, 1)) {\n')
-new = ('    if (js != s_last_weather_json) {\n'
+new = ('    if (!s_last_weather_digest.matches(js)) {\n'
        '        mqtt_publish(s_weather, js.c_str(), static_cast<int>(js.size()), 0, 1);\n')
 seed = s.replace(old, new, 1)
 assert seed != s, "seed 60 did not apply — Weather publish acknowledgement moved"
@@ -1356,7 +1356,7 @@ s = open(p).read()
 start = s.index("static void apply_source_cleanup_completion(")
 end = s.index("static void service_source_cleanup_evidence", start)
 body = s[start:end]
-mutated = body.replace("        s_last_modbus_json.clear();\n", "", 1)
+mutated = body.replace("        s_last_modbus_digest.clear();\n", "", 1)
 assert mutated != body, "seed 75 did not apply — HomeHub cache clear moved"
 open(p, "w").write(s[:start] + mutated + s[end:])
 PY4
@@ -1371,7 +1371,7 @@ s = open(p).read()
 start = s.index("static void apply_source_cleanup_completion(")
 end = s.index("static void service_source_cleanup_evidence", start)
 body = s[start:end]
-mutated = body.replace("        s_last_env3_json.clear();\n", "", 1)
+mutated = body.replace("        s_last_env3_digest.clear();\n", "", 1)
 assert mutated != body, "seed 76 did not apply — ENV III cache clear moved"
 open(p, "w").write(s[:start] + mutated + s[end:])
 PY4

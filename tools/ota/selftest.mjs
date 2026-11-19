@@ -910,12 +910,19 @@ try {
       replaceOnce("main/ota_update.cpp", "Lock lk(s_mtx, 0);",
         "Lock lk(s_mtx);")],
     ["plain /diag reintroduces its static 6 KiB ring copy", () =>
-      replaceOnce("main/http_status.cpp", /static\s+char\s+buf\[1024\];/,
+      replaceOnce("main/http_status.cpp", /auto\s*\(&buf\)\[1024\]\s*=\s*s_httpd_route_scratch\.diag_buf;/,
         "static char buf[6144];")],
     ["paused MQTT keeps its last state JSON caches on heap", () =>
       replaceOnce("main/mqtt_ha.cpp",
         "        release_paused_state_caches();\n        diag_printf(\"mqtt: transport paused for network heap\\n\");",
         "        diag_printf(\"mqtt: transport paused for network heap\\n\");")],
+    ["MQTT reintroduces a persistent heap-backed state JSON cache", () =>
+      replaceOnce("main/mqtt_ha.cpp", "static MqttPayloadDigest s_last_modbus_digest;",
+        "static std::string s_last_modbus_json;")],
+    ["boot starts pausable esp-mqtt before permanent Weather/HomeHub workers", () =>
+      replaceOnce("main/main.cpp",
+        "        daik::mb_start();\n        daik::mqtt_ha_start();",
+        "        daik::mqtt_ha_start();\n        daik::mb_start();")],
   ];
 
   let caught = 0;

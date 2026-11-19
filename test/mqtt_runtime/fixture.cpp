@@ -1694,8 +1694,7 @@ void outgoing_weather() {
     adapter::weather.successes                                         = 2;
     adapter::weather.errors                                            = 1;
     adapter::weather.state                                             = "ready";
-    std::string fresh_cache;
-    daik::s_last_weather_json.swap(fresh_cache);
+    daik::s_last_weather_digest.clear();
     sdk::reject_new_after_publish = true;
     bool threw                    = false;
     try {
@@ -1710,7 +1709,7 @@ void outgoing_weather() {
                     std::string(80, 'm') + "/weather/openmeteo/forecast" &&
                 sdk::published[0].qos == 0 && sdk::published[0].retain == 1,
             "WEATHER_EMITS_OWN_RETAINED_FORECAST_TOPIC");
-    require(daik::s_last_weather_json == sdk::published[0].payload.data(),
+    require(daik::s_last_weather_digest.matches(sdk::published[0].payload.data()),
             "WEATHER_ACCEPTED_PAYLOAD_COMMITTED_TO_CACHE");
     require(!threw && refusal_armed && sdk::failed_news == 0,
             "WEATHER_CACHE_COMMIT_DOES_NOT_ALLOCATE_AFTER_SDK_ACCEPT");
@@ -1734,7 +1733,7 @@ void outgoing_weather() {
                     !cJSON_GetObjectItemCaseSensitive(root.get(), "longitude"),
                 "WEATHER_FORECAST_WIRE_EXCLUDES_LOCATION_CONFIGURATION");
     }
-    const std::string accepted_cache = daik::s_last_weather_json;
+    const daik::MqttPayloadDigest accepted_cache = daik::s_last_weather_digest;
     daik::publish_weather_state(true);
     require(sdk::publish_calls == 1, "WEATHER_UNCHANGED_ACCEPTED_PAYLOAD_SUPPRESSES_REPEAT");
     adapter::weather.outdoor_mean_2h_c = 8.75;
@@ -1742,21 +1741,21 @@ void outgoing_weather() {
     sdk::reject_next_publish           = true;
     daik::publish_weather_state(true);
     require(sdk::publish_calls == 2 && !sdk::published[1].accepted &&
-                daik::s_last_weather_json == accepted_cache,
+                daik::s_last_weather_digest == accepted_cache,
             "WEATHER_REJECTED_SDK_PUBLISH_RETAINS_LAST_ACCEPTED_CACHE");
     daik::publish_weather_state(true);
     require(sdk::publish_calls == 3 && sdk::published[2].accepted &&
-                daik::s_last_weather_json == sdk::published[2].payload.data(),
+                daik::s_last_weather_digest.matches(sdk::published[2].payload.data()),
             "WEATHER_REJECTED_PAYLOAD_RETRIES_UNTIL_ACCEPTED");
     {
         daik::JsonGuard root(parse_wire(sdk::published[2]));
         wire_number(root.get(), "outdoor_mean_2h_c", 8.75, "WEATHER_NEW_TEMPERATURE_ON_WIRE");
         wire_number(root.get(), "successes", 3, "WEATHER_NEW_SUCCESS_COUNT_ON_WIRE");
     }
-    const std::string new_cache = daik::s_last_weather_json;
+    const daik::MqttPayloadDigest new_cache = daik::s_last_weather_digest;
     daik::publish_weather_state(false);
     require(sdk::publish_calls == 3 && daik::s_weather_cleanup_requested.load() &&
-                daik::s_last_weather_json == new_cache,
+                daik::s_last_weather_digest == new_cache,
             "WEATHER_DISABLE_REQUESTS_CLEANUP_WITHOUT_SYNTHETIC_FORECAST_OR_CACHE_RESET");
     require(daik::s_mqtt_pub_ok == 2 && daik::s_mqtt_pub_fail == 1 && sdk::resets == 3 &&
                 json_witness::live == 0,

@@ -597,7 +597,7 @@ static void checkup_record_poll_gap(uint32_t generation, bool profile_confirmed 
                                           s_refrigerant_service_cycle_sample,
                                           esp_timer_get_time(), cycle_generation,
                                           service_max_gap_us);
-        s_cache            = std::move(fresh);
+        s_cache.swap(fresh);
         s_cache_profile    = prof.id;
         s_cache_identity_fp = c.x10a_identity_fp;
         ++s_cache_revision;

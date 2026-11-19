@@ -167,11 +167,12 @@ static void boot_sequence() {
     daik::http_start();  // esp_http_server on :80 (web UI + config + OTA + MCP)
     if (!daik::safe_mode_active()) {
         daik::env3_start();              // optional outdoor climate sensor (no-op unless configured)
-        // Start the X10A owner before MQTT. The bridge starts one LWT transport immediately;
-        // X10A source availability requires fresh bus evidence while other sources stay
-        // independent.
+        // Start permanent source/forecast workers before MQTT. esp-mqtt's transport task (sdk_mqtt,
+        // 6 KiB) stops and restarts across Weather/OTA TLS windows; creating all boot-permanent
+        // tasks first packs them contiguously at the base of DRAM and leaves sdk_mqtt at the open
+        // heap tail instead of opening a sandwiched 6 KiB hole that later spills into the 31 KiB
+        // contiguous block. hp_poll still precedes mqtt_ha_start for X10A availability gating.
         daik::hp_poll_start();           // X10A poll engine
-        daik::mqtt_ha_start();           // HA MQTT-Discovery bridge (no-op if mqtt_uri empty)
         daik::weather_forecast_start();  // worker stays dormant without location + diagnostics
                                          // consent
         // The HomeHub Modbus stack — a SECOND, INDEPENDENT source (docs/MODBUS_PROTOCOL.md), not an
@@ -182,6 +183,7 @@ static void boot_sequence() {
         // Skipped in safe mode for the same reason the consumers above are: a boot-looping board is being
         // recovered through the web UI, and every optional consumer stays out of the way.
         daik::mb_start();
+        daik::mqtt_ha_start(); // HA MQTT-Discovery bridge (no-op if mqtt_uri empty)
     } else {
         // Recovery goes through the web UI, which safe mode keeps up.
         ESP_LOGW(TAG, "SAFE MODE: ENV III, X10A, HomeHub, MQTT and weather skipped");
