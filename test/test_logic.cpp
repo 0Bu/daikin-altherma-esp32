@@ -4726,6 +4726,46 @@ static void test_x10a_snapshot_align() {
           logic::X10aSnapshotAlignResult::ValueTooLarge);
     CHECK(layout[0].value == before[0] && layout[1].value == before[1] &&
           layout[2].value == before[2]);
+
+    // In-place cache commit preserves the pre-reserved backing pointer across grow/equal/shrink
+    // transitions and falls back to swap when either vector lacks capacity.
+    std::vector<Row> pinned;
+    pinned.reserve(4);
+    const Row* const pinned_ptr = pinned.data();
+    std::vector<Row> sweep1;
+    sweep1.reserve(4);
+    sweep1.push_back({"A", "Heating", 0x10, 0, false, 217});
+    sweep1.push_back({"B", "10.0", 0x20, 2, false, 105});
+    logic::commit_cached_values_in_place(pinned, sweep1);
+    CHECK(pinned.data() == pinned_ptr && pinned.size() == 2 && pinned[0].value == "Heating" &&
+          pinned[1].value == "10.0" && sweep1.size() == 2 && sweep1[0].value.empty());
+
+    std::vector<Row> sweep2;
+    sweep2.reserve(4);
+    sweep2.push_back({"A", "Stop", 0x10, 0, false, 217});
+    sweep2.push_back({"B", "11.0", 0x20, 2, true, 105});
+    logic::commit_cached_values_in_place(pinned, sweep2);
+    CHECK(pinned.data() == pinned_ptr && pinned.size() == 2 && pinned[0].value == "Stop" &&
+          pinned[1].value == "11.0" && pinned[1].held && sweep2[0].value == "Heating");
+
+    std::vector<Row> sweep3;
+    sweep3.reserve(4);
+    sweep3.push_back({"A", "DHW", 0x10, 0, false, 217});
+    logic::commit_cached_values_in_place(pinned, sweep3);
+    CHECK(pinned.data() == pinned_ptr && pinned.size() == 1 && pinned[0].value == "DHW" &&
+          sweep3.size() == 2 && sweep3[1].value == "11.0");
+
+    std::vector<Row> unreserved;
+    std::vector<Row> small_fresh;
+    small_fresh.push_back({"A", "fallback-1", 0x10, 0, false, 217});
+    small_fresh.push_back({"B", "fallback-2", 0x20, 2, false, 105});
+    logic::commit_cached_values_in_place(unreserved, small_fresh);
+    CHECK(unreserved.size() == 2 && unreserved[1].value == "fallback-2");
+    std::vector<Row> small_fresh2;
+    small_fresh2.reserve(1);
+    small_fresh2.push_back({"A", "fallback-3", 0x10, 0, false, 217});
+    logic::commit_cached_values_in_place(unreserved, small_fresh2);
+    CHECK(unreserved.size() == 1 && unreserved[0].value == "fallback-3");
 }
 
 // ── The published JSON TYPE of every converter (legacy-209 defect 3, the telemetry-contract
@@ -5069,6 +5109,33 @@ static void test_weather_fetch_headroom() {
     CHECK(!mqtt_fragment_fits(3, 3, 5, 3, 5, 1024));
     CHECK(!mqtt_fragment_fits(INT_MAX, INT_MAX, 5, INT_MAX, 5, 1024));
     CHECK(!mqtt_fragment_fits(0, INT_MAX, 5, 0, 5, 1024));
+
+    // Bounded SPSC inbound byte ring: capacity checks, wrap-around writes/reads, and null/size
+    // guards.
+    CHECK(mqtt_ring_can_reserve(0, 16, 16));
+    CHECK(!mqtt_ring_can_reserve(0, 16, 0));
+    CHECK(!mqtt_ring_can_reserve(0, 16, 17));
+    CHECK(!mqtt_ring_can_reserve(17, 16, 1));
+    CHECK(!mqtt_ring_can_reserve(10, 16, 7));
+    uint8_t ring[8]{};
+    uint8_t out[8]{};
+    CHECK(mqtt_ring_write(nullptr, 8, 0, "abc", 3) == 0);
+    CHECK(mqtt_ring_write(ring, 8, 0, nullptr, 3) == 0);
+    CHECK(mqtt_ring_write(ring, 0, 0, "abc", 3) == 0);
+    CHECK(mqtt_ring_write(ring, 8, 0, "abc", 0) == 0);
+    CHECK(mqtt_ring_write(ring, 8, 0, "abcdefghi", 9) == 0);
+    CHECK(mqtt_ring_read(nullptr, 8, 0, out, 3) == 0);
+    CHECK(mqtt_ring_read(ring, 8, 0, nullptr, 3) == 0);
+    CHECK(mqtt_ring_read(ring, 0, 0, out, 3) == 0);
+    CHECK(mqtt_ring_read(ring, 8, 0, out, 0) == 0);
+    CHECK(mqtt_ring_read(ring, 8, 0, out, 9) == 0);
+    const size_t pos1 = mqtt_ring_write(ring, sizeof(ring), 2, "AB", 2);
+    CHECK(pos1 == 4);
+    const size_t pos2 =
+        mqtt_ring_write(ring, sizeof(ring), 6, "WXYZ", 4); // wraps across end -> [0..2)
+    CHECK(pos2 == 2);
+    CHECK(mqtt_ring_read(ring, sizeof(ring), 2, out, 2) == 4 && std::memcmp(out, "AB", 2) == 0);
+    CHECK(mqtt_ring_read(ring, sizeof(ring), 6, out, 4) == 2 && std::memcmp(out, "WXYZ", 4) == 0);
     CHECK(http_body_complete(128, 128, true));
     CHECK(!http_body_complete(128, 127, true));
     CHECK(!http_body_complete(128, 129, true));
@@ -28904,6 +28971,8 @@ static void test_observability_class() {
     b[1].label = "Fan 1 (10 rpm)"; // ERGA D DJ's generated spelling: a different generated table
                                    // (label_override.hpp later publishes it as "Fan 1 (step)")
     CHECK(!value_rows_identical(a, 2, b, 2));
+    b[1].label = "Fan 1 (step) "; // same prefix with different length must also fail equality
+    CHECK(!value_rows_identical(a, 2, b, 2));
     b[1].label = "Fan 1 (step)";
     b[1].conv  = 153;
     CHECK(!value_rows_identical(a, 2, b, 2));
@@ -28931,8 +29000,8 @@ static void test_observability_class() {
     b[0].size = 1;
     CHECK(value_rows_identical(a, 2, b, 2));
     // Two distinct tables whose rows carry no label at all are still the same table.
-    const ValueDef nolabel_a[] = {{0x10, 0, 217, 1, -1}};
-    const ValueDef nolabel_b[] = {{0x10, 0, 217, 1, -1}};
+    ValueDef nolabel_a[] = {{0x10, 0, 217, 1, -1}};
+    ValueDef nolabel_b[] = {{0x10, 0, 217, 1, -1}};
     CHECK(value_rows_identical(nolabel_a, 1, nolabel_b, 1));
 
     // The class in the real catalog: exactly the reference id and the ERGA E table it duplicates.
@@ -28951,6 +29020,9 @@ static void test_observability_class() {
     CHECK(members == 2);
     CHECK(has_ebla && has_erga_e);
     CHECK(!def::observability_applies(def::lookup(erga_d))); // one re-spelled fan label
+    CHECK(def::observability_applies(def::lookup_constexpr(ebla)));
+    for (const auto& p : def::profiles)
+        CHECK(def::resolved(p).count() <= def::MAX_RESOLVED_PROFILE_ROWS);
     CHECK(def::resolved(def::lookup(erga_d)).extra2_count == 0);
 
     // Both members publish the same resolved view, overlay included: a detection that one day reads

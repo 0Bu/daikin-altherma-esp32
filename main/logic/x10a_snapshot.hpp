@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <utility>
 
 namespace daik::logic {
 
@@ -65,6 +66,28 @@ inline X10aSnapshotAlignResult x10a_snapshot_align(Row* out, size_t count,
         }
     }
     return X10aSnapshotAlignResult::Ok;
+}
+
+// Update a boot-pinned vector cache in place so steady-state polls neither allocate a new buffer
+// in SRAM2 nor free the previous buffer while holding the cache mutex. Falls back to swap only
+// when either vector lacks capacity (for example in unit callers without boot pre-reservation).
+template <typename Vec> inline void commit_cached_values_in_place(Vec& cache, Vec& fresh) noexcept {
+    if (cache.capacity() < fresh.size() || fresh.capacity() < cache.size()) {
+        cache.swap(fresh);
+        return;
+    }
+    const size_t cache_n = cache.size();
+    const size_t fresh_n = fresh.size();
+    const size_t shared  = cache_n < fresh_n ? cache_n : fresh_n;
+    for (size_t i = 0; i < shared; ++i) std::swap(cache[i], fresh[i]);
+    if (cache_n < fresh_n) {
+        for (size_t i = shared; i < fresh_n; ++i) cache.push_back(std::move(fresh[i]));
+    } else if (cache_n > fresh_n) {
+        // Move surplus cached rows into `fresh`'s pre-reserved storage so heap-backed strings
+        // are destroyed after the mutex scope ends.
+        for (size_t i = shared; i < cache_n; ++i) fresh.push_back(std::move(cache[i]));
+        cache.erase(cache.begin() + static_cast<std::ptrdiff_t>(shared), cache.end());
+    }
 }
 
 }  // namespace daik::logic

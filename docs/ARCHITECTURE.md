@@ -154,8 +154,9 @@ Overlay eligibility follows row-identical generated tables, not the selected pro
 
 One task owns the X10A UART. Each sweep builds the deduplicated page set from the resolved profile,
 reads and CRC-checks each reply, converts in-range values and stages errors locally. A failed page
-does not stall the remaining pages. The task commits the complete cache, revision and statistics
-under one mutex, using non-allocating moves/swaps. Readers snapshot under the same RAII lock.
+does not stall the remaining pages. Both X10A and Modbus caches pre-reserve maximum capacity at
+startup and commit updates in place under one mutex without allocating or freeing under the lock.
+Readers snapshot under the same RAII lock.
 
 History, duration evidence and plant diagnosis consume the task-owned sweep before the cache
 commit and outside its mutex. Avoid nested history/cache locks. The poll task is subscribed to the
@@ -442,7 +443,7 @@ mutex, then checks profile, observation identity and revision before encoding wi
 Revision drift defers the cycle. Missing/held rows are skipped without constructing another vector.
 The 12 KiB payload limit is a refusal ceiling, not a permanent reservation. Release the local payload
 after synchronous QoS0 submission; commit the digest only after publish acceptance so `-1` is retried.
-HomeHub, Weather and ENV III state topics likewise retain only an 8-byte FNV-1a digest (`MqttPayloadDigest`) after accepted submission.
+HomeHub, Weather and ENV III state topics likewise retain only an 8-byte FNV-1a digest (`MqttPayloadDigest`) after accepted submission, inbound source frames share a 3.5 KiB SPSC byte ring behind an 8-descriptor queue, and competing network-heap pauses are reference-counted across Weather and OTA.
 
 Room and circulation inputs decode on the owning MQTT client. Configuration/source epochs reject
 queued frames from an earlier binding. A configured room timestamp mapping is the sole age authority;

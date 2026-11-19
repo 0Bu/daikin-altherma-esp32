@@ -195,7 +195,7 @@
     },
     "reference_dispatch": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?service_reference_frames\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?24service_reference_frames[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
-      "max_bytes": 32
+      "max_bytes": 48
     },
     "reference_decode": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?decode_reference_frame\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?22decode_reference_frame[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
@@ -2119,7 +2119,7 @@
     },
     "mqtt_input_capture": {
       "pattern": "^daik::capture_reference_frame\\(",
-      "max_bytes": 64
+      "max_bytes": 80
     },
     "mqtt_input_filter": {
       "pattern": "^daik::discovery_topic_is_current_input\\((?!.*\\{lambda)",

@@ -214,6 +214,7 @@ static void oracle(bool pass, const char* name) {
 static uint32_t                       good_revision;
 static uint32_t                       good_generation;
 static size_t                         good_rows;
+static const daik::CachedValue*       good_cache_ptr = nullptr;
 static unsigned                       good_queries;
 static int64_t                        good_time;
 static uint64_t                       good_digest;
@@ -238,6 +239,8 @@ static void after_delay(TickType_t ticks) {
     if (sdk::delay_count == 1) {
         oracle(s_stats.connected && s_cache.size() > 0 && hp_link_connected(),
                "initial_successful_commit");
+        oracle(s_cache.capacity() == def::MAX_RESOLVED_PROFILE_ROWS, "boot_cache_capacity_pinned");
+        good_cache_ptr         = s_cache.data();
         good_revision          = s_cache_revision;
         good_generation        = hp_cache_generation();
         good_rows              = s_cache.size();
@@ -249,8 +252,7 @@ static void after_delay(TickType_t ticks) {
     } else if (sdk::delay_count == 2) {
         oracle(hp_skipped_cycles() == 1 && sdk::failures == 1 && sdk::skipped_logs == 1,
                "allocation_failure_caught_once");
-        oracle(sdk::failed_bytes ==
-                   def::lookup_view(adapter::cfg.profile.c_str()).count() * sizeof(CachedValue),
+        oracle(sdk::failed_bytes == def::MAX_RESOLVED_PROFILE_ROWS * sizeof(CachedValue),
                "real_production_fresh_reserve_failed");
         oracle(sdk::failed_lock_depth == 0, "poll_allocation_outside_cache_mutex");
         oracle(cache_preserved() && s_cache_revision == good_revision &&
@@ -286,7 +288,8 @@ static void after_delay(TickType_t ticks) {
         sdk::ota_active = false;
     } else if (sdk::delay_count == 5) {
         oracle(sdk::queries > good_queries && s_cache_revision == good_revision + 1 &&
-                   hp_cache_generation() == good_generation + 1 && hp_link_connected(),
+                   hp_cache_generation() == good_generation + 1 && hp_link_connected() &&
+                   s_cache.data() == good_cache_ptr,
                "subsequent_iteration_recovers");
         oracle(!hp_poll_network_quiesced() && !hp_poll_ota_quiesced(),
                "quiescence_released_after_hold");
@@ -316,7 +319,7 @@ static void after_delay(TickType_t ticks) {
         sdk::fail_poll_reserve = false;
     } else if (sdk::delay_count == 7) {
         oracle(s_cache_revision == good_revision + 2 && hp_link_connected() &&
-                   !hp_poll_network_quiesced(),
+                   !hp_poll_network_quiesced() && s_cache.data() == good_cache_ptr,
                "new_episode_recovers");
         oracle(hp_skipped_cycles() == 3 && sdk::skipped_logs == 2 && sdk::history_commits == 3 &&
                    sdk::takes == sdk::gives && sdk::stack_samples == 7,

@@ -2387,6 +2387,63 @@ void callback_queue_full() {
     require(daik::s_ref_status.messages == daik::REF_QUEUE_DEPTH &&
                 daik::s_ref_status.temperature_c == 20 && sdk::queue.count == 0,
             "QUEUE_OVERFLOW_PRESERVES_QUEUED_EVIDENCE_AND_NORMAL_DRAIN");
+
+    // Max-size frames fill the static 3,584 B SPSC ring without padding waste; exceeding the ring
+    // fails closed and advances s_ref_dropped before wrap-around drain restores full capacity.
+    std::string padded = R"({"temperature":22,"time":1700000102,"enabled":true,"pad":")";
+    padded.append(daik::REF_TEMP_PAYLOAD_MAX - padded.size() - 2, 'x');
+    padded += "\"}";
+    require(padded.size() == daik::REF_TEMP_PAYLOAD_MAX, "PADDED_MAX_FRAME_FITS_BOUND");
+    for (int i = 0; i < 3; ++i) feed("room", padded.c_str());
+    require(sdk::queue.count == 3 && daik::s_ref_dropped.load() == 1,
+            "THREE_MAX_FRAMES_FIT_SPSC_RING");
+    feed("room", padded.c_str());
+    require(sdk::queue.count == 3 && daik::s_ref_dropped.load() == 2,
+            "RING_FULL_DROPS_FOURTH_MAX_FRAME");
+    daik::service_reference_frames(adapter::cfg);
+    require(sdk::queue.count == 0 &&
+                daik::s_ref_ring_consumed.load() == daik::s_ref_ring_produced &&
+                daik::s_ref_status.temperature_c == 22,
+            "RING_DRAIN_RELEASES_ALL_CONSUMED_BYTES");
+    feed("room", R"({"temperature":24,"time":1700000103,"enabled":true})");
+    daik::service_reference_frames(adapter::cfg);
+    require(daik::s_ref_status.messages == daik::REF_QUEUE_DEPTH + 4 &&
+                daik::s_ref_status.temperature_c == 24,
+            "RING_WRAP_PRESERVES_SUBSEQUENT_FRAME");
+
+    // Overlapping network-heap pause owners must keep pause/withdrawal armed until the final owner
+    // exits.
+    daik::mqtt_transport_pause_for_network_heap();
+    daik::mqtt_transport_withdraw_online_on_pause();
+    daik::mqtt_transport_pause_for_network_heap();
+    daik::mqtt_transport_resume_after_network_heap();
+    require(daik::transport_pause_requested() &&
+                (daik::s_transport_pause_state.load() & daik::TRANSPORT_PAUSE_WITHDRAW_ARMED) != 0,
+            "OVERLAPPING_PAUSE_LEASE_KEEPS_WITHDRAWAL_WHILE_SECOND_OWNER_ACTIVE");
+    daik::mqtt_transport_resume_after_network_heap();
+    require(daik::s_transport_pause_state.load() == 0,
+            "FINAL_PAUSE_OWNER_RELEASES_PAUSE_AND_WITHDRAWAL");
+
+    // Preempted OTA acquisition between withdraw() and pause() must survive an exiting Weather
+    // owner without losing either pause_requested or the armed withdrawal intent.
+    daik::mqtt_transport_pause_for_network_heap();
+    daik::mqtt_transport_withdraw_online_on_pause();
+    daik::mqtt_transport_resume_after_network_heap();
+    require(!daik::transport_pause_requested() &&
+                (daik::s_transport_pause_state.load() & daik::TRANSPORT_PAUSE_WITHDRAW_STAGED) != 0,
+            "EXITING_OWNER_PRESERVES_STAGED_OTA_WITHDRAWAL");
+    daik::mqtt_transport_pause_for_network_heap();
+    require(daik::transport_pause_requested() &&
+                (daik::s_transport_pause_state.load() & daik::TRANSPORT_PAUSE_WITHDRAW_ARMED) != 0,
+            "PREEMPTED_OTA_ACQUIRE_PROMOTES_STAGED_WITHDRAWAL_WITHOUT_LOSS");
+    daik::mqtt_ota_withdraw_online();
+    require(daik::transport_pause_requested() && (daik::s_transport_pause_state.load() &
+                                                  (daik::TRANSPORT_PAUSE_WITHDRAW_ARMED |
+                                                   daik::TRANSPORT_PAUSE_WITHDRAW_STAGED)) == 0,
+            "OTA_WITHDRAW_CONSUMES_ONLY_WITHDRAWAL_BITS");
+    daik::mqtt_transport_resume_after_network_heap();
+    require(daik::s_transport_pause_state.load() == 0,
+            "FINAL_PREEMPTED_OTA_RESUME_CLEARS_PAUSE_STATE");
 }
 void callback_timestamp_order() {
     prepare_inbound();

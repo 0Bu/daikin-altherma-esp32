@@ -864,7 +864,7 @@ assert.match(poll, /if \((?:config\(\)\.profile|config_profile\(\)) == "auto"\)[
 const dwellCheckupAt = poll.indexOf("checkup_record(fresh.data()");
 const dwellTokenAt = poll.indexOf("HpValuesIdentity pending_cache_identity;", dwellCheckupAt);
 const dwellFoldAt = poll.indexOf("dwell_record(fresh.data()", dwellTokenAt);
-const commitAt = poll.search(/s_cache\.swap\(fresh\)/);
+const commitAt = poll.search(/logic::commit_cached_values_in_place\(s_cache,\s*fresh\)/);
 assert.ok(dwellCheckupAt >= 0 && dwellTokenAt > dwellCheckupAt && dwellFoldAt > dwellTokenAt &&
           commitAt > dwellFoldAt,
   "poll must stage the next cache identity, fold dwell from fresh rows, then commit those rows");
@@ -875,8 +875,8 @@ assert.match(poll.slice(dwellFoldAt, commitAt),
   /dwell_record\(fresh\.data\(\), fresh\.size\(\),\s*cycle_generation,\s*static_cast<uint32_t>\(\(service_max_gap_us \+ 999999\) \/ 1000000\),\s*&pending_cache_identity\);/,
   "the normal dwell fold must preserve fresh-row absence, the service-gap bound and its cache token");
 assert.match(poll.slice(commitAt),
-  /s_cache\.swap\(fresh\);\s*s_cache_profile\s*= prof\.id;\s*s_cache_identity_fp\s*= c\.x10a_identity_fp;\s*\+\+s_cache_revision;\s*s_cache_source_generation = cycle_generation;/,
-  "the committed cache must swap rows (freeing old storage outside s_mtx) and publish the same profile, source generation and staged next revision");
+  /logic::commit_cached_values_in_place\(s_cache,\s*fresh\);\s*s_cache_profile\s*= prof\.id;\s*s_cache_identity_fp\s*= c\.x10a_identity_fp;\s*\+\+s_cache_revision;\s*s_cache_source_generation = cycle_generation;/,
+  "the committed cache must update rows in place (freeing excess storage outside s_mtx) and publish the same profile, source generation and staged next revision");
 
 // ── 8. `known == false` renders as an ABSENT key, never as a zero ───────────────────────────────
 // Section 6's rule one field down. A dwell of 0 is a real reading ("it changed just now"); a row the

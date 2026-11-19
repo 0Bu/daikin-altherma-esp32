@@ -165,17 +165,26 @@ static_assert(observability_rows_are_safe(),
 // name, but that is a different table the audit never covered — so it stays outside, as does every
 // table the audit never saw. Today the class is the reference id plus
 // altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw, pinned by test_observability_class().
-inline bool observability_applies(const Profile& p) {
-    if (std::strcmp(p.id, OBSERVABILITY_PROFILE) == 0) return true;
-    const Profile& ref = lookup(OBSERVABILITY_PROFILE);
-    if (std::strcmp(ref.id, OBSERVABILITY_PROFILE) != 0) return false; // renamed: fail closed
-    return logic::value_rows_identical(p.values, p.count, ref.values, ref.count);
+inline constexpr const Profile& lookup_constexpr(const char* id) {
+    for (const auto& p : profiles)
+        if (id && __builtin_strcmp(p.id, id) == 0) return p;
+    return profiles[0];
+}
+
+inline constexpr const Profile& OBSERVABILITY_REF_PROFILE = lookup_constexpr(OBSERVABILITY_PROFILE);
+static_assert(__builtin_strcmp(OBSERVABILITY_REF_PROFILE.id, OBSERVABILITY_PROFILE) == 0,
+              "OBSERVABILITY_PROFILE missing from generated registry");
+
+inline constexpr bool observability_applies(const Profile& p) {
+    if (__builtin_strcmp(p.id, OBSERVABILITY_PROFILE) == 0) return true;
+    return logic::value_rows_identical(p.values, p.count, OBSERVABILITY_REF_PROFILE.values,
+                                       OBSERVABILITY_REF_PROFILE.count);
 }
 
 // The rows the firmware actually decodes, announces and sizes its buffers from: this model's
 // generated table plus the block above when the model already reads page 0x10 (it does on all 43
 // generated profiles and on `generic`; the rule is enforced, not assumed).
-inline logic::ProfileView resolved(const Profile& p) {
+inline constexpr logic::ProfileView resolved(const Profile& p) {
     logic::ProfileView v =
         logic::profile_view(p.values, p.count, retry_rows, RETRY_ROW_COUNT, OVERLAY_PAGE);
     v.profile_id = p.id;
@@ -183,6 +192,19 @@ inline logic::ProfileView resolved(const Profile& p) {
     return logic::profile_view_extend_existing_pages(v, observability_rows,
                                                      OBSERVABILITY_ROW_COUNT);
 }
+
+inline constexpr size_t max_resolved_profile_rows() {
+    size_t max_rows = 0;
+    for (const auto& p : profiles) {
+        const size_t n = resolved(p).count();
+        if (n > max_rows) max_rows = n;
+    }
+    return max_rows;
+}
+
+inline constexpr size_t MAX_RESOLVED_PROFILE_ROWS = max_resolved_profile_rows();
+static_assert(MAX_RESOLVED_PROFILE_ROWS >= 131 && MAX_RESOLVED_PROFILE_ROWS <= 160,
+              "boot-pinned X10A cache capacity must cover the largest resolved profile");
 
 // lookup() + resolved() — the one accessor every consumer should call. Using lookup() directly and
 // iterating `.values` is what would let a consumer see a different row set than its neighbours.

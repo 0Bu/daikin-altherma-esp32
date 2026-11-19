@@ -192,6 +192,7 @@ static bool mqtt_publish(const std::string& topic, const char* payload, int len,
 static constexpr size_t REF_QUEUE_DEPTH = 8;
 static constexpr size_t REF_TEMP_PAYLOAD_MAX = 1024;
 static constexpr size_t DISCOVERY_OWNER_PAYLOAD_MAX = 2048;
+static constexpr size_t REF_PAYLOAD_RING_BYTES      = 3584;
 struct ReferenceMqttFrame {
     char   topic[REF_TEMP_TOPIC_MAX + 1] = {0};
     char   payload[REF_TEMP_PAYLOAD_MAX + 1] = {0};
@@ -203,7 +204,29 @@ struct ReferenceMqttFrame {
     uint32_t probe_generation                  = 0;
     bool   retained = false;
 };
-static QueueHandle_t       s_ref_queue = nullptr;
+// Variable-length inbound topics and payloads share one static SPSC ring rather than allocating
+// eight worst-case 1,256-byte frames in internal heap (~6 KiB net DRAM reclaimed).
+// Zero default init keeps static scratch metadata descriptors in BSS; callers populate all fields.
+struct ReferenceMqttFrameQueued {
+    int64_t  received_unix_s   = 0;
+    uint64_t received_ms       = 0;
+    uint32_t reference_epoch   = 0;
+    uint32_t circulation_epoch = 0;
+    uint32_t probe_generation  = 0;
+    uint16_t ring_offset       = 0;
+    uint16_t topic_len         = 0;
+    uint16_t payload_len       = 0;
+    bool     retained          = false;
+};
+static_assert(sizeof(ReferenceMqttFrameQueued) <= 48,
+              "inbound frame queue descriptor must stay compact");
+static QueueHandle_t            s_ref_queue = nullptr;
+static uint8_t                  s_ref_payload_ring[REF_PAYLOAD_RING_BYTES]{};
+static uint32_t                 s_ref_ring_produced = 0; // esp-mqtt event task only
+static size_t                   s_ref_ring_pos      = 0; // esp-mqtt event task only
+static std::atomic<uint32_t>    s_ref_ring_consumed{0};  // mqtt_task updates, event task acquires
+static ReferenceMqttFrameQueued s_ref_rx_meta{};         // esp-mqtt event task only
+static ReferenceMqttFrameQueued s_ref_task_meta{};       // mqtt_task only
 // These scratch objects are never consumed before the event path fills their metadata or the
 // task receives a complete frame from its queue. A zero-only startup image keeps their buffers in
 // BSS; time_now always replaces the event timestamp, including -1 before clock synchronization.
@@ -614,14 +637,22 @@ static std::atomic<uint32_t> s_mqtt_quiesced{0};
 static std::atomic<bool> s_x10a_publish_required{false};
 static std::atomic<bool> s_x10a_publish_proven{false};
 static std::atomic<bool> s_publish_network_quiesced{true};
-static std::atomic<bool> s_transport_connecting{false};
-static std::atomic<bool> s_transport_pause_requested{false};
-// Raised by the OTA lease before its pause request; consumed by the stop that it precedes.
-static std::atomic<bool> s_transport_pause_withdraws_online{false};
-static std::atomic<bool> s_transport_paused{false};
-static std::atomic<bool> s_client_running{false};
-static_assert(std::atomic<bool>::is_always_lock_free,
+static std::atomic<bool>     s_transport_connecting{false};
+inline constexpr uint32_t    TRANSPORT_PAUSE_OWNER_MASK      = 0x3fffffffu;
+inline constexpr uint32_t    TRANSPORT_PAUSE_WITHDRAW_STAGED = 0x40000000u;
+inline constexpr uint32_t    TRANSPORT_PAUSE_WITHDRAW_ARMED  = 0x80000000u;
+// Single atomic word packing owner count + staged/armed OTA availability withdrawal intent so
+// overlapping Weather/OTA pause/resume transitions cannot clobber each other across preemption.
+static std::atomic<uint32_t> s_transport_pause_state{0};
+static std::atomic<bool>     s_transport_paused{false};
+static std::atomic<bool>     s_client_running{false};
+static_assert(std::atomic<bool>::is_always_lock_free && std::atomic<uint32_t>::is_always_lock_free,
               "MQTT network quiesce acknowledgement must remain allocation- and lock-free");
+
+static bool transport_pause_requested() noexcept {
+    return (s_transport_pause_state.load(std::memory_order_acquire) & TRANSPORT_PAUSE_OWNER_MASK) !=
+           0;
+}
 
 // The held branch publishes the acknowledgement directly. Every non-held cycle owns this guard,
 // so the bit returns to true even when an allocation throws into the task's exception boundary.
@@ -748,8 +779,11 @@ static __attribute__((noinline)) void release_paused_state_caches() {
 // the session without DISCONNECT, so the broker fires the LWT instead; a refused publish only
 // leaves the previous, unwithdrawn behaviour.
 static __attribute__((noinline)) void mqtt_ota_withdraw_online() {
+    constexpr uint32_t withdraw_bits =
+        TRANSPORT_PAUSE_WITHDRAW_ARMED | TRANSPORT_PAUSE_WITHDRAW_STAGED;
     const bool ota_pause =
-        s_transport_pause_withdraws_online.exchange(false, std::memory_order_acq_rel);
+        (s_transport_pause_state.fetch_and(~withdraw_bits, std::memory_order_acq_rel) &
+         withdraw_bits) != 0;
     if (!mqtt_pause_withdraws_online(ota_pause, s_client != nullptr,
                                      s_connected.load(std::memory_order_acquire)))
         return;
@@ -766,8 +800,9 @@ static __attribute__((noinline)) void mqtt_ota_withdraw_online() {
 // state after mqtt_task stopped publishing. This helper is deliberately scalar-only and is called
 // before the held path publishes s_publish_network_quiesced=true.
 static __attribute__((noinline)) void mqtt_transport_pause_if_requested() {
-    if (!s_transport_pause_requested.load(std::memory_order_acquire) ||
-        !s_client_running.load(std::memory_order_acquire) || !s_client) return;
+    if (!transport_pause_requested() || !s_client_running.load(std::memory_order_acquire) ||
+        !s_client)
+        return;
 
     s_publish_network_quiesced.store(false, std::memory_order_release);
     mqtt_ota_withdraw_online();
@@ -840,8 +875,9 @@ static __attribute__((noinline)) bool mqtt_network_hold_step(OtaQuiesceState& qu
 // exponential backoff instead of churning the fragmented heap once per second.
 static __attribute__((noinline)) bool mqtt_transport_resume_step(MqttTransportResumeState& state,
                                                                  int delay_s) {
-    if (!s_transport_paused.load(std::memory_order_acquire) ||
-        s_transport_pause_requested.load(std::memory_order_acquire) || !s_client) return true;
+    if (!s_transport_paused.load(std::memory_order_acquire) || transport_pause_requested() ||
+        !s_client)
+        return true;
 
     if (state.wait_s > 0) {
         --state.wait_s;
@@ -1065,21 +1101,45 @@ static std::vector<GroupedValue> current_modbus_values(bool& live) {
     return out;
 }
 
+[[gnu::noinline]] static void build_ha_config_topic(std::string& out, const char* component,
+                                                    const char* group, const char* key) {
+    out.clear();
+    out.reserve(s_prefix.size() + std::strlen(component) + s_node.size() +
+                (group ? std::strlen(group) + 1 : 0) + std::strlen(key) + 10);
+    out += s_prefix;
+    out += '/';
+    out += component;
+    out += '/';
+    out += s_node;
+    out += '/';
+    if (group) {
+        out += group;
+        out += '_';
+    }
+    out += key;
+    out += "/config";
+}
+
 // Frozen obsolete board-diagnostic entities under the CURRENT installation namespace only.
 // A short-MAC-era topic cannot prove which physical board owns it; operator migration handles
 // those ambiguous namespaces rather than automatically deleting another installation's entities.
 static bool retract_legacy_fixed() {
     constexpr size_t count = RETIRED_HEARTBEAT_SENSOR_COUNT + RETIRED_CRASH_SENSOR_COUNT;
     for (size_t budget = 0; budget < 8 && s_legacy_fixed_step < count; ++budget) {
-        const size_t i = s_legacy_fixed_step;
-        std::string  topic;
+        const size_t i         = s_legacy_fixed_step;
+        const char*  component = nullptr;
+        const char*  obj_id    = nullptr;
         if (i < RETIRED_HEARTBEAT_SENSOR_COUNT) {
             const auto& sensor = RETIRED_HEARTBEAT_SENSORS[i];
-            topic = heartbeat_discovery_topic(s_prefix, sensor.component, s_node, sensor.object_id);
+            component          = sensor.component;
+            obj_id             = sensor.object_id;
         } else {
             const auto& sensor = RETIRED_CRASH_SENSORS[i - RETIRED_HEARTBEAT_SENSOR_COUNT];
-            topic = crash_discovery_topic(s_prefix, sensor.component, s_node, sensor.object_id);
+            component          = sensor.component;
+            obj_id             = sensor.object_id;
         }
+        std::string topic;
+        build_ha_config_topic(topic, component, nullptr, obj_id);
         if (!retire_exact_topic(MqttRetirementOwner::LegacyFixed, topic)) return false;
         ++s_legacy_fixed_step;
     }
@@ -1289,10 +1349,14 @@ static bool retract_profile_cutover(const std::string& profile_id) {
              s_retiring_scan.result == MqttRetirementPresence::Absent)) {
             if (!work) return false;
             --work;
-            const std::string topic =
-                shape == 0 ? discovery_topic(s_prefix, s_node, d)
-                           : companion_discovery_topic(s_prefix, s_node, group_for_page(d.reg),
-                                                       FAULT_COMPANIONS[shape - 1].key);
+            std::string topic;
+            if (shape == 0) {
+                const std::string slug = object_id(d.label);
+                build_ha_config_topic(topic, ha_component(d), group_for_page(d.reg), slug.c_str());
+            } else {
+                build_ha_config_topic(topic, "binary_sensor", group_for_page(d.reg),
+                                      FAULT_COMPANIONS[shape - 1].key);
+            }
             if (!retire_exact_topic(MqttRetirementOwner::Profile, topic)) return false;
         }
         s_retiring_identity_ready = false;
@@ -1396,7 +1460,8 @@ static bool publish_x10a_discovery() {
         if (!conv_publishable(d.conv)) continue;
         const std::string obj = object_id(d.label);
         if (obj.empty()) continue;
-        const std::string ct  = discovery_topic(s_prefix, s_node, d);
+        std::string ct;
+        build_ha_config_topic(ct, ha_component(d), group_for_page(d.reg), obj.c_str());
         const std::string cfg = discovery_config(s_node, s_board, s_x10a, s_avail, d);
         accepted              = mqtt_publish(ct, cfg.c_str(), 0, 0, 1) && accepted; // retained
         // The DERIVED numeric fault flags that ride beside a textual error class (legacy-209 defect
@@ -1407,7 +1472,8 @@ static bool publish_x10a_discovery() {
             const std::string group = group_for_page(d.reg);
             for (size_t k = 0; k < FAULT_COMPANION_COUNT; k++) {
                 const FaultCompanion& c = FAULT_COMPANIONS[k];
-                accepted = mqtt_publish(companion_discovery_topic(s_prefix, s_node, group, c.key),
+                build_ha_config_topic(ct, "binary_sensor", group.c_str(), c.key);
+                accepted = mqtt_publish(ct,
                                         companion_discovery_config(s_node, s_board, s_x10a, s_avail,
                                                                    group, c)
                                             .c_str(),
@@ -1555,9 +1621,12 @@ static std::string source_cleanup_topic(const MqttCleanupAction& action) {
     }
     if (action.topic == MqttCleanupTopic::RetiredDiscovery) {
         if (action.source == MqttCleanupSource::Weather &&
-            action.index < RETIRED_WEATHER_HA_SENSOR_COUNT)
-            return retired_weather_discovery_topic(s_prefix, s_node,
-                                                   RETIRED_WEATHER_HA_SENSORS[action.index]);
+            action.index < RETIRED_WEATHER_HA_SENSOR_COUNT) {
+            const auto& s = RETIRED_WEATHER_HA_SENSORS[action.index];
+            std::string out;
+            build_ha_config_topic(out, s.component, nullptr, s.object_id);
+            return out;
+        }
         if (action.source == MqttCleanupSource::Modbus &&
             action.index < RETIRED_MODBUS_HA_SENSOR_COUNT)
             return retired_modbus_discovery_topic(s_prefix, s_node,
@@ -1739,13 +1808,14 @@ static void publish_env3_state() {
 // the ESP32 board + X10A link itself, not a heat-pump value, so — unlike X10A discovery —
 // they don't wait on profile detection: WiFi signal and free heap are meaningful even while
 // profile == "auto".
-static bool publish_heartbeat_discovery() {
+[[gnu::noinline]] static bool publish_heartbeat_discovery() {
     if (!discovery_mutation_allowed()) return false;
     if (!s_legacy_fixed_retracted && !retract_legacy_fixed()) return false;
     bool accepted = true;
     for (int i = 0; i < HEARTBEAT_SENSOR_COUNT; i++) {
         const HeartbeatSensor& s = HEARTBEAT_SENSORS[i];
-        const std::string ct  = heartbeat_discovery_topic(s_prefix, s_node, s);
+        std::string            ct;
+        build_ha_config_topic(ct, s.component, nullptr, s.object_id);
         const std::string cfg = heartbeat_discovery_config(s_node, s_board, s_heartbeat, s_avail, s);
         accepted = mqtt_publish(ct, cfg.c_str(), 0, 0, 1) && accepted; // retained
     }
@@ -1768,9 +1838,10 @@ static void publish_crash(bool discovery = true) {
     if (discovery && discovery_mutation_allowed()) {
         if (!s_legacy_fixed_retracted && !retract_legacy_fixed()) return;
         for (int i = 0; i < CRASH_SENSOR_COUNT; i++) {
-            const CrashSensor& s   = CRASH_SENSORS[i];
-            const std::string  ct  = crash_discovery_topic(s_prefix, s_node, s);
-            const std::string  cfg = crash_discovery_config(s_node, s_board, s_crash, s_avail, s);
+            const CrashSensor& s = CRASH_SENSORS[i];
+            std::string        ct;
+            build_ha_config_topic(ct, s.component, nullptr, s.object_id);
+            const std::string cfg = crash_discovery_config(s_node, s_board, s_crash, s_avail, s);
             mqtt_publish(ct, cfg.c_str(), 0, 0, 1); // retained
         }
     }
@@ -2202,8 +2273,34 @@ static void capture_reference_frame(esp_mqtt_event_handle_t e) {
     s_ref_rx_received += static_cast<size_t>(e->data_len);
     if (s_ref_rx_received == s_ref_rx.payload_len) {
         s_ref_rx.payload[s_ref_rx.payload_len] = '\0';
-        if (xQueueSend(s_ref_queue, &s_ref_rx, 0) != pdTRUE)
-            s_ref_dropped.fetch_add(1, std::memory_order_relaxed);
+        const size_t   topic_len               = std::strlen(s_ref_rx.topic);
+        const size_t   total_len               = topic_len + s_ref_rx.payload_len;
+        const uint32_t consumed = s_ref_ring_consumed.load(std::memory_order_acquire);
+        const uint32_t used     = s_ref_ring_produced - consumed;
+        bool           enqueued = false;
+        if (topic_len > 0 && topic_len <= REF_TEMP_TOPIC_MAX &&
+            mqtt_ring_can_reserve(used, REF_PAYLOAD_RING_BYTES, total_len)) {
+            const size_t after_topic = mqtt_ring_write(s_ref_payload_ring, REF_PAYLOAD_RING_BYTES,
+                                                       s_ref_ring_pos, s_ref_rx.topic, topic_len);
+            const size_t after_payload =
+                mqtt_ring_write(s_ref_payload_ring, REF_PAYLOAD_RING_BYTES, after_topic,
+                                s_ref_rx.payload, s_ref_rx.payload_len);
+            s_ref_rx_meta.received_unix_s   = s_ref_rx.received_unix_s;
+            s_ref_rx_meta.received_ms       = s_ref_rx.received_ms;
+            s_ref_rx_meta.reference_epoch   = s_ref_rx.reference_epoch;
+            s_ref_rx_meta.circulation_epoch = s_ref_rx.circulation_epoch;
+            s_ref_rx_meta.probe_generation  = s_ref_rx.probe_generation;
+            s_ref_rx_meta.ring_offset       = static_cast<uint16_t>(s_ref_ring_pos);
+            s_ref_rx_meta.topic_len         = static_cast<uint16_t>(topic_len);
+            s_ref_rx_meta.payload_len       = static_cast<uint16_t>(s_ref_rx.payload_len);
+            s_ref_rx_meta.retained          = s_ref_rx.retained;
+            if (xQueueSend(s_ref_queue, &s_ref_rx_meta, 0) == pdTRUE) {
+                s_ref_ring_pos = after_payload;
+                s_ref_ring_produced += static_cast<uint32_t>(total_len);
+                enqueued = true;
+            }
+        }
+        if (!enqueued) s_ref_dropped.fetch_add(1, std::memory_order_relaxed);
         s_ref_rx_active = false;
     }
 }
@@ -3155,7 +3252,29 @@ static __attribute__((noinline)) void service_reference_frames(const Config& c) 
                     static_cast<unsigned long>(dropped - s_ref_dropped_reported));
         s_ref_dropped_reported = dropped;
     }
-    while (xQueueReceive(s_ref_queue, &s_ref_task_frame, 0) == pdTRUE) {
+    while (xQueueReceive(s_ref_queue, &s_ref_task_meta, 0) == pdTRUE) {
+        if (s_ref_task_meta.topic_len == 0 || s_ref_task_meta.topic_len > REF_TEMP_TOPIC_MAX ||
+            s_ref_task_meta.payload_len == 0 ||
+            s_ref_task_meta.payload_len > REF_TEMP_PAYLOAD_MAX ||
+            s_ref_task_meta.ring_offset >= REF_PAYLOAD_RING_BYTES)
+            continue;
+        const size_t after_topic =
+            mqtt_ring_read(s_ref_payload_ring, REF_PAYLOAD_RING_BYTES, s_ref_task_meta.ring_offset,
+                           s_ref_task_frame.topic, s_ref_task_meta.topic_len);
+        s_ref_task_frame.topic[s_ref_task_meta.topic_len] = '\0';
+        (void)mqtt_ring_read(s_ref_payload_ring, REF_PAYLOAD_RING_BYTES, after_topic,
+                             s_ref_task_frame.payload, s_ref_task_meta.payload_len);
+        s_ref_task_frame.payload[s_ref_task_meta.payload_len] = '\0';
+        s_ref_task_frame.payload_len                          = s_ref_task_meta.payload_len;
+        s_ref_task_frame.received_ms                          = s_ref_task_meta.received_ms;
+        s_ref_task_frame.received_unix_s                      = s_ref_task_meta.received_unix_s;
+        s_ref_task_frame.reference_epoch                      = s_ref_task_meta.reference_epoch;
+        s_ref_task_frame.circulation_epoch                    = s_ref_task_meta.circulation_epoch;
+        s_ref_task_frame.probe_generation                     = s_ref_task_meta.probe_generation;
+        s_ref_task_frame.retained                             = s_ref_task_meta.retained;
+        s_ref_ring_consumed.fetch_add(static_cast<uint32_t>(s_ref_task_meta.topic_len) +
+                                          static_cast<uint32_t>(s_ref_task_meta.payload_len),
+                                      std::memory_order_release);
         if (!c.diagnostics_enabled) continue;
         service_circulation_probe_frame(s_ref_task_frame);
         service_circulation_frame(s_ref_task_frame, c);
@@ -3675,7 +3794,7 @@ static bool build_client(const Config& c) {
     const bool has_scheme = s_uri.find("://") != std::string::npos;
     const bool is_tls     = s_uri.rfind("mqtts://", 0) == 0 || s_uri.rfind("wss://", 0) == 0;
     const bool has_creds  = !s_user.empty() || !s_pass.empty();
-    if (!has_scheme) s_uri = "mqtt://" + s_uri;                // bare host:port -> plaintext scheme
+    if (!has_scheme) s_uri.insert(0, "mqtt://"); // bare host:port -> plaintext scheme
 
     // Credentials must never travel in cleartext (docs/SECURITY.md) — require mqtts, no fallback.
     if (has_creds && !is_tls) {
@@ -3778,7 +3897,11 @@ void mqtt_ha_start() {
         diag_printf("mqtt: circulation-source test semaphore alloc failed\n");
     if (!s_status.configured) return;
 
-    s_ref_queue = xQueueCreate(REF_QUEUE_DEPTH, sizeof(ReferenceMqttFrame));
+    s_transport_pause_state.store(0, std::memory_order_release);
+    s_ref_ring_produced = 0;
+    s_ref_ring_pos      = 0;
+    s_ref_ring_consumed.store(0, std::memory_order_release);
+    s_ref_queue = xQueueCreate(REF_QUEUE_DEPTH, sizeof(ReferenceMqttFrameQueued));
     if (!s_ref_queue) {
         Lock lk(s_mtx);
         s_ref_status.error = "receive queue alloc failed";
@@ -3799,33 +3922,39 @@ void mqtt_ha_start() {
     }
     s_prefix = CONFIG_DAIKIN_MQTT_DISCOVERY_PREFIX;
     s_discovery_owner_required = mqtt_preserved_discovery_base(s_base);
-    auto& f0                   = s_discovery_owner_filters[0];
-    f0.clear();
-    f0 += s_prefix;
-    f0 += "/+/";
-    f0 += s_node;
-    f0 += "/+/config";
-    auto& f1 = s_discovery_owner_filters[1];
-    f1.clear();
-    f1 += s_prefix;
-    f1 += "/+/";
-    f1 += s_node;
-    f1 += "_modbus/+/config";
+    for (size_t k = 0; k < 2; ++k) {
+        auto& f = s_discovery_owner_filters[k];
+        f       = s_prefix;
+        f += "/+/";
+        f += s_node;
+        f += k ? "_modbus/+/config" : "/+/config";
+    }
     s_discovery_owner_state.store(s_discovery_owner_required ? DiscoveryOwnerState::Pending
                                                              : DiscoveryOwnerState::Encoded,
                                   std::memory_order_release);
-    s_avail     = availability_topic(s_base);
-    s_x10a_avail            = x10a_availability_topic(s_base);
-    s_x10a      = x10a_topic(s_base);
-    s_modbus    = modbus_topic(s_base);
-    s_weather   = weather_forecast_topic(s_base);
-    s_env3      = env3_topic(s_base);
-    s_retired_weather = retired_weather_forecast_topic(s_base);
-    s_retired_modbus_status = retired_modbus_status_topic(s_base);
-    s_legacy_state = legacy_state_topic(s_base);
-    s_heartbeat = heartbeat_topic(s_base);
-    s_heating_curve_topic = heating_curve_topic(s_base);
-    s_crash     = crash_topic(s_base);
+    struct BaseTopicInit {
+        uint8_t     slot;
+        const char* suffix;
+    };
+    static constexpr BaseTopicInit kBaseTopics[] = {
+        {13, "/status"},                     // s_avail
+        {14, "/x10a/status"},                // s_x10a_avail
+        {15, "/x10a"},                       // s_x10a
+        {16, "/modbus"},                     // s_modbus
+        {17, "/weather/openmeteo/forecast"}, // s_weather
+        {19, "/weather_forecast"},           // s_retired_weather
+        {20, "/modbus/status"},              // s_retired_modbus_status
+        {21, "/state"},                      // s_legacy_state
+        {22, "/heartbeat"},                  // s_heartbeat
+        {23, "/heating_curve"},              // s_heating_curve_topic
+        {24, "/crash"},                      // s_crash
+    };
+    for (const auto& t : kBaseTopics) {
+        std::string& dst = s_mqtt_strings[t.slot];
+        dst              = s_base;
+        dst += t.suffix;
+    }
+    s_env3 = env3_topic(s_base);
     if (!build_client(c)) return; // policy error already surfaced
     // The task starts the LWT transport without waiting for any observation source.
     set_status(false, "");
@@ -3877,16 +4006,33 @@ bool mqtt_publish_network_quiesced() {
 }
 
 void mqtt_transport_pause_for_network_heap() {
-    s_transport_pause_requested.store(true, std::memory_order_release);
+    uint32_t cur = s_transport_pause_state.load(std::memory_order_acquire);
+    for (;;) {
+        const uint32_t owners = cur & TRANSPORT_PAUSE_OWNER_MASK;
+        if (owners == TRANSPORT_PAUSE_OWNER_MASK) return;
+        uint32_t next = (cur & ~TRANSPORT_PAUSE_OWNER_MASK) | (owners + 1);
+        if (next & TRANSPORT_PAUSE_WITHDRAW_STAGED)
+            next = (next & ~TRANSPORT_PAUSE_WITHDRAW_STAGED) | TRANSPORT_PAUSE_WITHDRAW_ARMED;
+        if (s_transport_pause_state.compare_exchange_weak(cur, next, std::memory_order_acq_rel,
+                                                          std::memory_order_acquire))
+            return;
+    }
 }
 
 void mqtt_transport_resume_after_network_heap() {
-    s_transport_pause_withdraws_online.store(false, std::memory_order_release);
-    s_transport_pause_requested.store(false, std::memory_order_release);
+    uint32_t cur = s_transport_pause_state.load(std::memory_order_acquire);
+    while ((cur & TRANSPORT_PAUSE_OWNER_MASK) > 0) {
+        const uint32_t owners = cur & TRANSPORT_PAUSE_OWNER_MASK;
+        uint32_t       next   = (cur & ~TRANSPORT_PAUSE_OWNER_MASK) | (owners - 1);
+        if (owners == 1) next &= ~TRANSPORT_PAUSE_WITHDRAW_ARMED;
+        if (s_transport_pause_state.compare_exchange_weak(cur, next, std::memory_order_acq_rel,
+                                                          std::memory_order_acquire))
+            return;
+    }
 }
 
 void mqtt_transport_withdraw_online_on_pause() {
-    s_transport_pause_withdraws_online.store(true, std::memory_order_release);
+    s_transport_pause_state.fetch_or(TRANSPORT_PAUSE_WITHDRAW_STAGED, std::memory_order_acq_rel);
 }
 
 bool mqtt_transport_network_quiesced() {

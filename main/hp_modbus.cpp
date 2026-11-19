@@ -31,6 +31,7 @@
 #include "logic/modbus_plan.hpp"      // WHICH requests a cycle issues — batching + the gate cadence
 #include "logic/modbus_profile.hpp"   // auto-detection state machine and extended registers
 #include "logic/modbus_snapshot.hpp"  // a cache is live only for the TCP session that committed it
+#include "logic/x10a_snapshot.hpp"    // allocation-free in-place cache commit helper
 
 #include "esp_netif.h"
 #include "esp_netif_ip_addr.h"
@@ -49,12 +50,18 @@
 #include <cstdio>
 #include <cstring>
 #include <exception>
+#include <new>
 #include <string>
 #include <vector>
 #include "logic/ota_quiesce.hpp"
 #include "ota_update.hpp"
 
 namespace daik {
+
+static constexpr size_t
+    kMaxModbusCachedValues = def::HOMEHUB_REG_COUNT > def::ALTHERMA4_REG_COUNT
+                                 ? static_cast<size_t>(def::HOMEHUB_REG_COUNT)
+                                 : static_cast<size_t>(def::ALTHERMA4_REG_COUNT);
 
 // Whole-reply budget for one register read. Each recv CALL is bounded by SO_RCVTIMEO below; this
 // bounds the reassembly of the entire ADU, which is the part the Task Watchdog cares about (the poll
@@ -962,7 +969,7 @@ static void mb_poll_once() {
     const bool full = logic::mb_cycle_is_full(s_cycle_tick);
 
     std::vector<CachedValue> fresh;
-    if (full) fresh.reserve(def::ALTHERMA4_REG_COUNT);
+    if (full) fresh.reserve(kMaxModbusCachedValues);
     MbFailure first_failure;
     // One capture in take_row instead of nine independent references. Keeping these small facts
     // together avoids growing the poll frame each time an admission operand is added.
@@ -1328,7 +1335,8 @@ static void mb_poll_once() {
         // Re-check while owning the store. If /set_hp bumped the target before waiting for this lock,
         // refuse the old buffer; if it bumps afterwards, mb_reconfigure waits and clears it itself.
         if (s_target_generation.load(std::memory_order_acquire) == cycle_target_generation) {
-            s_cache.swap(fresh); // swap: frees previous buffer outside s_cache_mtx
+            // Update in place; excess strings free outside the cache lock.
+            logic::commit_cached_values_in_place(s_cache, fresh);
             s_cache_generation = cycle_generation;
             s_cache_target_generation = cycle_target_generation;
             s_cache_commit_ms         = cache_commit_ms;
@@ -1562,6 +1570,15 @@ void mb_start() {
     if (!s_mtx || !s_cache_mtx) {
         diag_printf("modbus: mutex alloc failed — HomeHub stack disabled this boot\n");
         return;
+    }
+    // Pin HomeHub cache capacity in lower DRAM before mb_task and pausable sdk_mqtt start.
+    try {
+        std::vector<CachedValue> boot_cache;
+        boot_cache.reserve(kMaxModbusCachedValues);
+        Lock lk(s_cache_mtx);
+        if (s_cache.capacity() < kMaxModbusCachedValues) s_cache.swap(boot_cache);
+    } catch (const std::bad_alloc&) {
+        diag_printf("modbus: boot cache reserve failed — falling back to lazy growth\n");
     }
     // Boot is still allowed to take a Config snapshot. The no-allocation requirement begins only
     // after a request has crossed its durable save boundary; mb_reconfigure() receives POD there.
