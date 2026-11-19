@@ -1,4 +1,4 @@
-// translation-source: 9d953d5f0a93a5bc4cadd7a97118b6c1a7b766255621d06ab3d6c4c0dc8e2ccf
+// translation-source: 3a15720127279ca3edda45e3c53255972178ba0299b2928ffe49177e6a324af5
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -283,6 +283,9 @@ I18N.nb = localeValues([
   /* check.detail.fault.ok */ "Ingen aktuell eller lagret melding i lesbare feilsignaler.",
   /* check.detail.defrost.info */ "≥3 parede avriminger overstiger 15% av lesbar kompressortid: prosjekthint.",
   /* check.detail.defrost.ok */ "Ingen avrimingsandelshint; vær og hull ikke vurdert.",
+  /* check.defrost.last_start */ (date, route, outdoor) => `Siste observerte avrimingsstart · ${date} · Krets ${route} · Uteluft ${outdoor}`,
+  /* check.defrost.route_space */ "Romoppvarming",
+  /* check.defrost.route_dhw */ "Varmtvannstank",
   /* check.detail.pressure.info */ "Lagret minimum ≤1,0 bar; sammenhengende 60 s ubekreftet. Fysisk gyldighet og årsak ukjent.",
   /* check.detail.pressure.warn */ "Registrert sammenhengende ≥60 s ≤1,0 bar; ikke nåtrykket.",
   /* check.detail.pressure.ok */ "Ingen godtatt verdi ≤1,0 bar, prosjektterskelen.",

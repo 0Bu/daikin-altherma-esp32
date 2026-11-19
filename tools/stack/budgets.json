@@ -3188,6 +3188,18 @@
     "curve_json_source": {
       "pattern": "^daik::append_heating_curve_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::Config const&, bool\\)::\\{lambda\\(char const\\*, bool, daik::logic::OutdoorSource\\)[#]1\\}::operator\\(\\)\\(char const\\*, bool, daik::logic::OutdoorSource\\) const$",
       "max_bytes": 64
+    },
+    "defrost_start_copy": {
+      "pattern": "^daik::copy_defrost_start_locked\\(daik::logic::DefrostStartReport&, long long\\)$",
+      "max_bytes": 80
+    },
+    "defrost_poll_generation": {
+      "pattern": "^daik::hp_poll_generation\\(\\)$",
+      "max_bytes": 32
+    },
+    "defrost_air_schema": {
+      "pattern": "^daik::defrost_air_supported\\(daik::logic::ProfileView const&\\)$",
+      "max_bytes": 64
     }
   },
   "paths": {
@@ -14650,6 +14662,83 @@
       "multipliers": {},
       "base_bytes": 1536,
       "max_bytes": 8192
+    },
+    "httpd_direct_defrost_start_fence": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "checkup_report",
+        "defrost_start_copy",
+        "stop_stop_observation_suppressed"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_defrost_start_fence": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "checkup_report",
+        "defrost_start_copy",
+        "stop_stop_observation_suppressed"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_direct_defrost_start_generation": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "checkup_report",
+        "defrost_start_copy",
+        "defrost_poll_generation"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_defrost_start_generation": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "checkup_report",
+        "defrost_start_copy",
+        "defrost_poll_generation"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "poll_defrost_air_schema": {
+      "symbols": [
+        "poll_task",
+        "checkup_detect_schema",
+        "defrost_air_schema",
+        "stop_instrument_",
+        "stop_profileview_const__",
+        "checkup_schema_adjudicated_view"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "httpd_defrost_air_schema": {
+      "symbols": [
+        "config_hp",
+        "config_document",
+        "checkup_detect_schema",
+        "defrost_air_schema",
+        "stop_instrument_",
+        "stop_profileview_const__",
+        "checkup_schema_adjudicated_view"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
     }
   },
   "tasks": {
@@ -14958,7 +15047,12 @@
         "httpd_mcp_status_opt_quoted",
         "httpd_mcp_status_outdoor_context",
         "httpd_mcp_status_service_metric",
-        "httpd_mcp_curve_scalar_fields"
+        "httpd_mcp_curve_scalar_fields",
+        "httpd_direct_defrost_start_fence",
+        "httpd_mcp_defrost_start_fence",
+        "httpd_direct_defrost_start_generation",
+        "httpd_mcp_defrost_start_generation",
+        "httpd_defrost_air_schema"
       ]
     },
     "main": {
@@ -15172,7 +15266,8 @@
         "poll_cycling_append_ack",
         "poll_shutdown_cycling_append_owner",
         "poll_cycling_append_owner",
-        "poll_cycling_trend_filter"
+        "poll_cycling_trend_filter",
+        "poll_defrost_air_schema"
       ]
     },
     "modbus": {

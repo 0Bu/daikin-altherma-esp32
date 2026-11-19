@@ -1,4 +1,4 @@
-// translation-source: 9d953d5f0a93a5bc4cadd7a97118b6c1a7b766255621d06ab3d6c4c0dc8e2ccf
+// translation-source: 3a15720127279ca3edda45e3c53255972178ba0299b2928ffe49177e6a324af5
 I18N.it = localeValues([
   /* sys.nodata */ "Nessun dato",
   /* sys.unreachable */ "Non raggiungibile",
@@ -283,6 +283,9 @@ I18N.it = localeValues([
   /* check.detail.fault.ok */ "Nessun messaggio attuale o salvato nei segnali di guasto leggibili.",
   /* check.detail.defrost.info */ "≥3 sbrinamenti associati superano 15% del tempo leggibile del compressore: indizio del progetto.",
   /* check.detail.defrost.ok */ "Nessun indizio sulla quota; meteo e lacune non valutati.",
+  /* check.defrost.last_start */ (date, route, outdoor) => `Ultimo avvio di sbrinamento osservato · ${date} · Circuito ${route} · Aria esterna ${outdoor}`,
+  /* check.defrost.route_space */ "Riscaldamento",
+  /* check.defrost.route_dhw */ "Serbatoio dell’acqua calda",
   /* check.detail.pressure.info */ "Minimo salvato ≤1,0 bar; 60 s continui non confermati. Validità fisica e causa sconosciute.",
   /* check.detail.pressure.warn */ "Registrati ≥60 s continui ≤1,0 bar; non indica pressione attuale.",
   /* check.detail.pressure.ok */ "Nessuna pressione accettata ≤1,0 bar, soglia del progetto.",

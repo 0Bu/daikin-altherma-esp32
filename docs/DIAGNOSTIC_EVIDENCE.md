@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 9436ac1b94144b36436ac9063a57b1a3833ef51d54882071f65bd7260b1a249b -->
+<!-- diagnostic-evidence-contract: f7cd5c3de691f3bf1b12a86edaca52328ede43db48b2e711c0c66691673890f5 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -372,6 +372,23 @@ hidden in Modbus UI mode). See CHECKUP_DEFROST_MIN_COUNT and CHECKUP_DEFROST_SHA
 The X10A outdoor minimum, mean and sample count use fresh outdoor readings from the paired
 running-compressor population, including intervals with defrost off. They do not alter the rule.
 The separately reported de-icer temperature does not enter this population.
+
+The optional last-start detail tracks the latest readable OFF-to-ON defrost transition across
+consecutive X10A samples at most 15 seconds apart. Its time belongs to the ON sample. A readable
+transition is recorded when its route or temperature is unknown. Route context requires both
+X10A samples to show a running compressor and the same route, classified from the controller's
+valve and mode signals.
+Space heating requires heating mode and the space route valve signal. The tank route requires the
+tank route valve signal and heating or hot-water mode; cooling and held-over or unknown compressor
+states leave the route null. Outside air comes from a fresh, supported profile reading in the ON
+sample of a qualified transition, preserving physical `0.0 °C` without a zero-is-absent rule.
+Unreadable route or air evidence stays unknown. Outdoor coil context uses `Instrument::OutdoorHeatExchanger`
+(`0x20/2`, converter `105` with `"heat exch"` / `"deicer"` labels), which excludes geothermal
+`2 phase thermistor (R4T)` shares on `0x20/2` and leaves outdoor-to-coil spread and post-defrost
+recovery unevaluated. The report exposes only starts less than 24 hours old in the current source
+and diagnostics generation; pausing (`Off`) resets edge tracking without bridging paused time.
+The latest record remains in RAM until replacement or reset. A history-forget request hides
+the detail and stops collection for the rest of the boot, even if clearing the journal fails.
 
 **Field observation:** On 14 November 2026 at 18:55–19:02 UTC, official dev firmware 1.0.16-dev.8
 with the EBLA/EDLA D-series 4–8 kW profile recorded one defrost event on the hot-water route. The

@@ -219,7 +219,11 @@ def validate_suppression(sources, error):
     expiry = normalized(body(checkup, 'checkup_stop_context_expire', error))
     getter = normalized(body(checkup, 'checkup_stop_context_report', error))
     shutdown = normalized(body(checkup, 'checkup_reboot_save', error))
-    if ('if(!stop_context_suppressed_locked()&&s_source_confirmed&&s_stop_inputs.schema_fp&&' not in reducer
+    defrost = reducer.find('s_defrost_start.observe(')
+    stop_fence = reducer.find('if(now>=s_stop_read_fence_us){')
+    if ('if(!stop_context_suppressed_locked()&&s_source_confirmed&&s_stop_inputs.schema_fp){' not in reducer
+            or defrost < 0 or stop_fence <= defrost
+            or reducer.find('stop_context_step(') <= stop_fence
             or 'if(stop_context_suppressed_locked())return;' not in expiry
             or getter.count('stop_context_suppressed_locked()') != 2
             or not getter.startswith('CheckupStopContextReportr;if(!s_mtx){'

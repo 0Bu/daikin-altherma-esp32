@@ -745,14 +745,16 @@ def validate_shutdown_inlining(disassembly: str, budgets: dict[str, Any]) -> Non
 
 
 def validate_poll_inlining(disassembly: str) -> None:
-    """The poll budget measures sweep locals inside the task frame, never as a nested frame."""
+    """Keep sweep and detection embedded in poll_task, and defrost in its modeled callers."""
     for line in disassembly.splitlines():
         if header := FUNCTION_RE.match(line):
             name = header.group(2)
-            nominal = re.match(r"^daik::(?:\(anonymous namespace\)::)?poll_once\(", name)
-            raw_clone = re.match(r"^_ZN4daik(?:12_GLOBAL__N_1)?L?9poll_onceE", name)
+            nominal = re.match(r"^daik::(?:\(anonymous namespace\)::)?poll_(?:once|detect)\(", name)
+            raw_clone = re.match(r"^_ZN4daik(?:12_GLOBAL__N_1)?L?(?:9poll_once|11poll_detect)E", name)
             if "{lambda" not in name and (nominal or raw_clone):
                 raise BudgetError(f"poll inlining: outlined sweep {name} needs frame accounting")
+            if re.search(r"DefrostStartTracker|defrost_start_route", name):
+                raise BudgetError(f"defrost inlining: outlined helper {name} needs frame accounting")
 
 
 def validate_status_numeric_calls(disassembly: str, budgets: dict[str, Any]) -> None:
@@ -916,6 +918,8 @@ def validate_status_diagnosis_paths(budgets: dict[str, Any], sources: dict[str, 
         "cycling_hours_builder": ["checkup_cycling_hours_locked", "checkup_cycling_hours_build"],
         "cycling_trace": ["cycling_trace_snapshot", "cycling_trace_emit", "cycling_trace_push",
                           "room_time_now"],
+        "defrost_start_fence": ["defrost_start_copy", "stop_stop_observation_suppressed"],
+        "defrost_start_generation": ["defrost_start_copy", "defrost_poll_generation"],
     }
     report_paths = {
         f"httpd_{transport}_{name}": [*prefix, *report, *tail]
@@ -1067,8 +1071,9 @@ def validate_status_diagnosis_paths(budgets: dict[str, Any], sources: dict[str, 
                              r"std::unique_ptr<Trace, decltype\(&std::free\)> trace\(\s*"
                              r"trace_storage \? new \(trace_storage\) Trace : nullptr, std::free\);\s*"
                              r"logic::CheckupRestore\s+persist;\s*"
+                             r"logic::DefrostStartReport\s+defrost_start;\s*"
                              r"const logic::CheckupReport hr\s*=\s*"
-                             r"checkup_report\(&hrs, trace\.get\(\), &persist, diag_effective\);",
+                             r"checkup_report\(&hrs, trace\.get\(\), &persist, diag_effective,\s*&defrost_start\);",
                              status)
             or re.search(r"\bcheckup_cycling_hours(?:_locked)?\s*\(", status)
             or len(re.findall(r"\bappend_status_json\(out, redact\)", status)) != 1
@@ -3101,7 +3106,10 @@ def self_test() -> None:
      'daik::hp_query_detailed(unsigned char, daik::Protocol, unsigned char*, unsigned int, daik::HpQueryLogPolicy)': 64,
      'daik::hp_format(daik::ValueDef const&, unsigned char const*, int, int, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >&, daik::ValueDef const*, unsigned int, daik::SaturationWitness)': 64,
      'daik::history_record(daik::CachedValue const*, unsigned int, unsigned long)': 64,
-     'daik::checkup_report(daik::logic::CheckupCyclingHours*, daik::logic::CheckupCyclingTrace*, daik::logic::CheckupRestore*, daik::DiagnosticsSource)': 64,
+     'daik::checkup_report(daik::logic::CheckupCyclingHours*, daik::logic::CheckupCyclingTrace*, daik::logic::CheckupRestore*, daik::DiagnosticsSource, daik::logic::DefrostStartReport*)': 64,
+     'daik::copy_defrost_start_locked(daik::logic::DefrostStartReport&, long long)': 80,
+     'daik::hp_poll_generation()': 32,
+     'daik::defrost_air_supported(daik::logic::ProfileView const&)': 64,
      'daik::checkup_cycling_hours_locked(daik::(anonymous namespace)::CheckupSlot const&, long long)': 256,
      'daik::logic::checkup_cycling_hours(daik::logic::CheckupRing const&, bool)': 32,
      'daik::logic::checkup_evaluate(daik::logic::CheckupWindow const&, daik::logic::CheckupCoverage const&, daik::FaultClass, daik::logic::DhwLossWindow const&, daik::logic::OutdoorSource)': 80,
@@ -4110,7 +4118,7 @@ def self_test() -> None:
     diagnosis_controls += 1
     for name, before, after in (
         ("main/http_status.cpp", "return http_send_status_json(req, {}, {}, redact);", "return ESP_FAIL;"),
-        ("main/http_status.cpp", "checkup_report(&hrs, trace.get(), &persist, diag_effective)", "checkup_report(nullptr)"),
+        ("main/http_status.cpp", "checkup_report(&hrs, trace.get(), &persist, diag_effective, &defrost_start)", "checkup_report(nullptr)"),
         ("main/mcp_server.cpp", "return http_send_status_json(req, response, suffix, false);", "return ESP_FAIL;"),
         ("main/mqtt_ha.cpp", "publish_heartbeat();", "other_heartbeat();"),
         ("main/checkup.cpp", "p.layout_fp              = logic::checkup_layout_fingerprint();",
@@ -4364,11 +4372,26 @@ def self_test() -> None:
         'daik::poll_once() [clone .constprop.0]',
         '_ZN4daikL9poll_onceEv$constprop$0',
         '_ZN4daikL9poll_onceEv$isra$0',
+        'daik::poll_detect()',
+        'daik::(anonymous namespace)::poll_detect() [clone .constprop.0]',
+        '_ZN4daikL11poll_detectEv$isra$0',
     ):
         reject_disassembly("outlined poll sweep " + name, fixture +
                            f"\n00003000 <{name}>:\n3000: 004136 entry a1, 1568\n",
                            "poll inlining")
         poll_inlining_controls += 1
+
+    for name in (
+        'daik::logic::DefrostStartTracker::observe(daik::logic::StopContextSample const&, int, long long, unsigned long, unsigned long)',
+        'daik::logic::DefrostStartTracker::snapshot(long long, unsigned long) const [clone .isra.0]',
+        '_ZNK4daik5logic19DefrostStartTracker8snapshotExm$isra$0',
+        'daik::logic::defrost_start_route(daik::logic::StopContextSample const&)',
+        '_ZN4daik5logic19defrost_start_routeERKNS0_17StopContextSampleE$constprop$0',
+    ):
+        reject_disassembly("outlined defrost helper " + name, fixture +
+                           f"\n00003000 <{name}>:\n3000: 004136 entry a1, 32\n",
+                           "defrost inlining")
+        diagnosis_controls += 1
 
     shutdown_optimizer_controls = 0
     for name in (

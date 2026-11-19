@@ -111,6 +111,9 @@ const mutations=[
     before:"failed_ = true;\n            return;",after:"buffer_.clear(); return;"},
   {name:"omitted-final-send",file:"chunks",scenario:"completed_oracles",
     before:"if (!failed_ && !emit_(std::string_view(), true)) failed_ = true;",after:"/* omitted final send */"},
+  {name:"defrost-start-zero-is-missing",file:"status",scenario:"defrost_start_wire",
+    before:"start.outdoor_tenths != logic::CHECKUP_ABSENT",
+    after:"start.outdoor_tenths != logic::CHECKUP_ABSENT && start.outdoor_tenths != 0"},
   {name:"leaked-values-reader",file:"status",scenario:"weather_and_ota_admission",
     before:"if (!weather_tls) weather_values_reader_leave();",after:"/* mutation: keep a refused reader counted */"},
   {name:"history-epoch-bypass",file:"status",scenario:"history_epoch_refusal",
@@ -166,7 +169,7 @@ try {
   const compiler=execute(cxx,["--version"]).stdout.trim();
   const baseline=execute(compile("production"),[]);
   const caseCount=Number(baseline.stdout.match(/^PASS total=(\d+)$/m)?.[1]);
-  assert.equal(caseCount,27);
+  assert.equal(caseCount,28);
   assert.equal(caseCount,[...baseline.stdout.matchAll(/^PASS (?!total=)\S+$/gm)].length);
   const wires=[]; const decoder=new TextDecoder("utf-8",{fatal:true});
   const configCases=new Map([

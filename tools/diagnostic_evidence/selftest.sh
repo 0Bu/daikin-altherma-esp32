@@ -22,7 +22,7 @@ reset() {
     cp main/logic/fault_state.hpp "$WORK/main/logic/fault_state.hpp"
     cp main/checkup.cpp "$WORK/main/checkup.cpp"
     cp main/logic/stop_context.hpp main/logic/stop_context_input.hpp \
-       main/logic/observation_hourly.hpp main/logic/instrument.hpp main/logic/heartbeat.hpp \
+       main/logic/observation_hourly.hpp main/logic/instrument.hpp main/logic/heartbeat.hpp main/logic/defrost_start.hpp \
        "$WORK/main/logic/"
     cp main/stop_observation_store.hpp main/stop_observation_store.cpp main/history.cpp "$WORK/main/"
     cp main/hp_poll.cpp "$WORK/main/hp_poll.cpp"
@@ -157,6 +157,11 @@ echo "== 11. persistence changed without evidence review =="
 reset
 printf '\n// selftest: changed restore semantics\n' >> "$WORK/main/logic/checkup_persist.hpp"
 run_case "changed persistence contract is caught" 1 "E010 docs/DIAGNOSTIC_EVIDENCE.md"
+
+echo "== Defrost start rules changed without evidence review =="
+reset
+printf '\n// selftest: changed defrost start admission\n' >> "$WORK/main/logic/defrost_start.hpp"
+run_case "changed defrost start admission is caught" 1 "E010 docs/DIAGNOSTIC_EVIDENCE.md"
 
 echo "== 12. published evidence fields changed without review =="
 reset

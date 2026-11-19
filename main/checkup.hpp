@@ -106,13 +106,15 @@ void checkup_dhw_reset();
 // True when the requested source has non-empty live or restored evidence in its slot.
 bool checkup_has_data(DiagnosticsSource source);
 
-// Copy the judged window, optional chart hours and trace, and restore provenance under one lock.
+// Copy the judged window, optional chart hours and trace, restore provenance, and the last
+// observed defrost start under one lock.
 // GET /status and MCP use this snapshot. Its POD storage does not allocate under the lock.
 // An unreadable snapshot has unknown provenance and carries no accumulated evidence.
 logic::CheckupReport checkup_report(logic::CheckupCyclingHours* hours   = nullptr,
                                     logic::CheckupCyclingTrace* trace   = nullptr,
                                     logic::CheckupRestore*      persist = nullptr,
-                                    DiagnosticsSource           source  = DiagnosticsSource::X10a);
+                                    DiagnosticsSource           source  = DiagnosticsSource::X10a,
+                                    logic::DefrostStartReport*  defrost = nullptr);
 
 // Compact completed-run evidence for MQTT. Shares the evaluator's pure projection, without
 // constructing the full eight-check report on the MQTT task's stack. No allocation under its lock.

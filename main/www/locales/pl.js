@@ -1,4 +1,4 @@
-// translation-source: 9d953d5f0a93a5bc4cadd7a97118b6c1a7b766255621d06ab3d6c4c0dc8e2ccf
+// translation-source: 3a15720127279ca3edda45e3c53255972178ba0299b2928ffe49177e6a324af5
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -288,6 +288,9 @@ I18N.pl = localeValues([
   /* check.detail.fault.ok */ "Brak bieżącego lub zapisanego komunikatu w czytelnych sygnałach usterek.",
   /* check.detail.defrost.info */ "≥3 powiązane odszraniania przekraczają 15% czytelnego czasu sprężarki: wskazówka projektu.",
   /* check.detail.defrost.ok */ "Bez wskazówki udziału; pogoda i luki nieocenione.",
+  /* check.defrost.last_start */ (date, route, outdoor) => `Ostatni zaobserwowany początek odszraniania · ${date} · Obieg ${route} · Powietrze zewnętrzne ${outdoor}`,
+  /* check.defrost.route_space */ "Ogrzewanie pomieszczeń",
+  /* check.defrost.route_dhw */ "Zasobnik ciepłej wody",
   /* check.detail.pressure.info */ "Zapisane minimum ≤1,0 bar; ciągłe 60 s niepotwierdzone. Fizyczna poprawność i przyczyna nieznane.",
   /* check.detail.pressure.warn */ "Zapisano ciągłe ≥60 s ≤1,0 bar; nie określa obecnego ciśnienia.",
   /* check.detail.pressure.ok */ "Brak przyjętego ciśnienia ≤1,0 bar, progu projektu.",

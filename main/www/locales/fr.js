@@ -1,4 +1,4 @@
-// translation-source: 9d953d5f0a93a5bc4cadd7a97118b6c1a7b766255621d06ab3d6c4c0dc8e2ccf
+// translation-source: 3a15720127279ca3edda45e3c53255972178ba0299b2928ffe49177e6a324af5
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -283,6 +283,9 @@ I18N.fr = localeValues([
   /* check.detail.fault.ok */ "Aucun message actuel ou mémorisé dans les signaux de défaut lisibles.",
   /* check.detail.defrost.info */ "≥3 dégivrages associés dépassent 15 % du temps lisible du compresseur : indice du projet.",
   /* check.detail.defrost.ok */ "Aucun indice de part ; météo et lacunes non évaluées.",
+  /* check.defrost.last_start */ (date, route, outdoor) => `Dernier début de dégivrage observé · ${date} · Circuit ${route} · Air extérieur ${outdoor}`,
+  /* check.defrost.route_space */ "Chauffage",
+  /* check.defrost.route_dhw */ "Ballon d’eau chaude",
   /* check.detail.pressure.info */ "Minimum mémorisé ≤1,0 bar ; 60 s continues non confirmées. Validité physique et cause inconnues.",
   /* check.detail.pressure.warn */ "≥60 s continues ≤1,0 bar enregistrées ; pas la pression actuelle.",
   /* check.detail.pressure.ok */ "Aucune pression admise ≤1,0 bar, seuil du projet.",

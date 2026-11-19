@@ -73,6 +73,7 @@ inline int                            scan_count = 0, scan_failure = 0;
 inline unsigned                       scan_calls             = 0;
 inline size_t                         scan_first_allocations = 0;
 inline daik::CheckupStopContextReport stop_report{};
+inline daik::logic::DefrostStartReport  defrost_start{};
 inline daik::HeatingCurveBinsReport     curve_bins;
 inline bool                             curve_bins_available = false;
 inline daik::logic::CheckupCyclingHours cycling_hours{};
@@ -118,6 +119,7 @@ void reset() {
     scan_calls                = 0;
     scan_first_allocations    = 0;
     stop_report               = {};
+    defrost_start              = {};
     curve_bins                 = {};
     curve_bins_available       = false;
     cycling_hours             = {};
@@ -456,12 +458,24 @@ bool checkup_has_data(DiagnosticsSource source) {
 }
 logic::CheckupReport checkup_report(logic::CheckupCyclingHours* hours,
                                     logic::CheckupCyclingTrace* trace,
-                                    logic::CheckupRestore* persist, DiagnosticsSource source) {
+                                    logic::CheckupRestore* persist, DiagnosticsSource source,
+                                    logic::DefrostStartReport* defrost_context) {
     fixture::last_checkup_report_source = source;
     if (hours) *hours = fixture::cycling_hours;
     if (trace) *trace = fixture::cycling_trace;
     if (persist) *persist = fixture::checkup_persist;
     logic::CheckupReport report{};
+    if (source == DiagnosticsSource::X10a) {
+        if (defrost_context) *defrost_context = fixture::defrost_start;
+        auto& defrost = report.checks[static_cast<size_t>(logic::CheckupCheck::Defrost)];
+        defrost.a     = 3;
+        defrost.e     = 3;
+        defrost.b     = 15;
+        defrost.c     = 151;
+        defrost.d     = 1000;
+    } else if (defrost_context) {
+        *defrost_context = {};
+    }
     if (fixture::reset_after_checkup) {
         if (fixture::checkup_persist == logic::CheckupRestore::Flash) report.covered_s = 1200;
         // Model a producer reset immediately after the captured report releases its lock.
@@ -756,6 +770,28 @@ int main(int argc, char** argv) {
                                     "\"evaluable\":null,\"complete\":null}") != std::string::npos,
                   "unsupported defrost leaked stored counts or fabricated zero");
             emit(req, redact ? "stop-populated-redacted" : "stop-populated");
+        }
+    });
+    run("defrost_start_wire", [] {
+        for (const auto& [sample, result] :
+             std::initializer_list<std::pair<daik::logic::DefrostStartReport, const char*>>{
+                 {{}, "null"},
+                 {{5000000, 0, daik::logic::CHECKUP_ABSENT,
+                   daik::logic::DefrostStartRoute::Unknown},
+                  "{\"unix_s\":null,\"route\":null,\"outdoor_c\":null}"},
+                 {{5000000, 2000000000, 0, daik::logic::DefrostStartRoute::Dhw},
+                  "{\"unix_s\":2000000000,\"route\":\"dhw_route\",\"outdoor_c\":0.0}"},
+                 {{5000000, 2000000000, -25, daik::logic::DefrostStartRoute::SpaceHeating},
+                  "{\"unix_s\":2000000000,\"route\":\"space_heating\",\"outdoor_c\":-2.5}"}}) {
+            defrost_start = sample;
+            auto req      = request();
+            check(invoke(req, "/status", daik::h_status) == ESP_OK, "defrost start status failed");
+            successful(req);
+            const auto expected = std::string{"\"last_observed_start\":"} + result;
+            check(req.response.find(expected) != std::string::npos, "defrost start fields changed");
+            check(req.response.find("\"count\":3,\"paired_count\":3,\"share_pct\":15,"
+                                    "\"defrost_s\":151,\"run_s\":1000") != std::string::npos,
+                  "defrost start changed the legacy ratio fields");
         }
     });
     run("allocation_failures", [] {

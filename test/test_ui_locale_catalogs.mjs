@@ -62,7 +62,7 @@ const lazyDomainCodes = ["es", "fr", "it", "pl", "cs", "uk", "zh", "ja", "nb", "
 const annotatedDomainCodes = ["zh", "ja", "nb", "sv", "fi"];
 const englishKeys = Object.keys(catalog.en).sort();
 const englishKeyOrder = Object.keys(catalog.en);
-assert.equal(englishKeys.length, 995, "the test must track the complete current UI catalog");
+assert.equal(englishKeys.length, 998, "the test must track the complete current UI catalog");
 for (const [code, source] of localeSources) {
   const sections = [`INSPECT_I18N.${code}`, `MODEL_DESCRIPTION_I18N.${code}`]
     .map(marker => source.indexOf(marker)).filter(index => index >= 0);
@@ -94,6 +94,15 @@ for (const code of codes) {
   assert.equal(savedTime.match(/12:34/g)?.length, 1, `${code} preserves the supplied saved time`);
   assert.notEqual(savedTime, dict["check.hour.ending"]("12:34"),
     `${code} distinguishes saved times from interval ends`);
+  const startArgs = ["12:34", dict["check.defrost.route_dhw"], "0 °C"];
+  const start = dict["check.defrost.last_start"](...startArgs);
+  for (const arg of startArgs) {
+    assert.ok(arg.trim(), `${code} defrost start argument is empty`);
+    assert.equal(start.split(arg).length, 2, `${code} defrost start must render ${arg} exactly once`);
+  }
+  assert.ok(dict["check.defrost.route_space"].trim(), `${code} space-heating route is empty`);
+  assert.notEqual(dict["check.defrost.route_space"], dict["check.defrost.route_dhw"],
+    `${code} distinguishes space heating from the hot-water tank route`);
   if (code !== "en") {
     assert.ok(translatedStrings > stringCount * 0.65,
       `${code} translates too little of the catalog (${translatedStrings}/${stringCount})`);

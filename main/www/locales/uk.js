@@ -1,4 +1,4 @@
-// translation-source: 9d953d5f0a93a5bc4cadd7a97118b6c1a7b766255621d06ab3d6c4c0dc8e2ccf
+// translation-source: 3a15720127279ca3edda45e3c53255972178ba0299b2928ffe49177e6a324af5
 I18N.uk = localeValues([
   /* sys.nodata */ "Немає даних",
   /* sys.unreachable */ "Недоступно",
@@ -283,6 +283,9 @@ I18N.uk = localeValues([
   /* check.detail.fault.ok */ "Немає поточного чи збереженого повідомлення в читабельних сигналах несправностей.",
   /* check.detail.defrost.info */ "≥3 пов’язані розморожування перевищують 15% читабельного часу компресора: орієнтир проєкту.",
   /* check.detail.defrost.ok */ "Без ознак частки; погода й прогалини не оцінені.",
+  /* check.defrost.last_start */ (date, route, outdoor) => `Останній зафіксований початок відтавання · ${date} · Контур ${route} · Зовнішнє повітря ${outdoor}`,
+  /* check.defrost.route_space */ "Опалення приміщень",
+  /* check.defrost.route_dhw */ "Бак гарячої води",
   /* check.detail.pressure.info */ "Збережений мінімум ≤1,0 bar; безперервні 60 s не підтверджені. Фізична достовірність і причина невідомі.",
   /* check.detail.pressure.warn */ "Зафіксовано безперервні ≥60 s ≤1,0 bar; не поточний тиск.",
   /* check.detail.pressure.ok */ "Немає прийнятого тиску ≤1,0 bar, порогу проєкту.",
