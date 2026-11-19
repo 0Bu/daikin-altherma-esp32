@@ -40,6 +40,18 @@ bool read_optional_header(httpd_req_t* req, const char* name,
     return true;
 }
 
+[[gnu::noinline]] esp_err_t send_ota_json_err(httpd_req_t* req, const char* status,
+                                              const char* body) {
+    httpd_resp_set_status(req, status);
+    return http_send_json(req, body);
+}
+
+[[gnu::noinline]] esp_err_t send_ota_text_err(httpd_req_t* req, const char* status,
+                                              const char* msg) {
+    httpd_resp_set_status(req, status);
+    return httpd_resp_send(req, msg, HTTPD_RESP_USE_STRLEN);
+}
+
 } // namespace
 
 static esp_err_t ota_check(httpd_req_t* req) {
@@ -58,8 +70,8 @@ static esp_err_t ota_check(httpd_req_t* req) {
                               manifest_len) ||
         !read_optional_header(req, "X-Daikin-HIL-Firmware-Base-URL", hil_feed.firmware_base,
                               firmware_base_present, firmware_base_len)) {
-        httpd_resp_set_status(req, "400 Bad Request");
-        return http_send_json(req, "{\"ok\":false,\"error\":\"invalid release HIL feed headers\"}");
+        return send_ota_json_err(req, "400 Bad Request",
+                                 "{\"ok\":false,\"error\":\"invalid release HIL feed headers\"}");
     }
 
     const OtaHilFeedHeaderResult feed_result = ota_hil_feed_headers(
@@ -68,8 +80,8 @@ static esp_err_t ota_check(httpd_req_t* req) {
         hil_feed);
     if (feed_result == OtaHilFeedHeaderResult::PartialPair ||
         feed_result == OtaHilFeedHeaderResult::InvalidUrl) {
-        httpd_resp_set_status(req, "400 Bad Request");
-        return http_send_json(req, "{\"ok\":false,\"error\":\"invalid release HIL feed headers\"}");
+        return send_ota_json_err(req, "400 Bad Request",
+                                 "{\"ok\":false,\"error\":\"invalid release HIL feed headers\"}");
     }
 
     // SECURITY / SSRF BOUNDARY: these headers intentionally let the isolated release-HIL runner or
@@ -114,17 +126,17 @@ static esp_err_t ota_do(httpd_req_t* req) {
         httpd_query_key_value(q, "channel", channel, sizeof(channel)) != ESP_OK ||
         httpd_query_key_value(q, "version", version, sizeof(version)) != ESP_OK ||
         httpd_query_key_value(q, "sha256", app_sha256, sizeof(app_sha256)) != ESP_OK) {
-        httpd_resp_set_status(req, "400 Bad Request");
-        return http_send_json(
-            req, "{\"ok\":false,\"error\":\"checked OTA artifact identity required\"}");
+        return send_ota_json_err(
+            req, "400 Bad Request",
+            "{\"ok\":false,\"error\":\"checked OTA artifact identity required\"}");
     }
     if (httpd_query_key_value(q, "downgrade", downgrade_text, sizeof(downgrade_text)) == ESP_OK)
         downgrade = query_flag_on(downgrade_text);
     char*                    after_end   = nullptr;
     const unsigned long long after_value = std::strtoull(after_text, &after_end, 10);
     if (!after_value || after_value > UINT32_MAX || !after_end || *after_end != '\0') {
-        httpd_resp_set_status(req, "400 Bad Request");
-        return http_send_json(req, "{\"ok\":false,\"error\":\"invalid OTA check generation\"}");
+        return send_ota_json_err(req, "400 Bad Request",
+                                 "{\"ok\":false,\"error\":\"invalid OTA check generation\"}");
     }
     const uint32_t generation = ota_update_async(static_cast<uint32_t>(after_value), channel,
                                                  version, app_sha256, downgrade);
@@ -157,27 +169,26 @@ static void upload_complete(void* context, bool installed, uint32_t generation) 
 
 static esp_err_t ota_upload(httpd_req_t* req) {
     if (config_ota_channel() != OtaChannel::Dev) {
-        httpd_resp_set_status(req, "403 Forbidden");
-        return http_send_json(req, "{\"ok\":false,\"error\":\"dev channel required\"}");
+        return send_ota_json_err(req, "403 Forbidden",
+                                 "{\"ok\":false,\"error\":\"dev channel required\"}");
     }
     char query[80] = {}, sha256[65] = {};
     if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK ||
         httpd_query_key_value(query, "sha256", sha256, sizeof(sha256)) != ESP_OK ||
         !ota_sha256_hex_valid(sha256) || req->content_len == 0) {
-        httpd_resp_set_status(req, "400 Bad Request");
-        return http_send_json(req,
-                              "{\"ok\":false,\"error\":\"image length and SHA-256 required\"}");
+        return send_ota_json_err(req, "400 Bad Request",
+                                 "{\"ok\":false,\"error\":\"image length and SHA-256 required\"}");
     }
 
     httpd_req_t* copy = nullptr;
     if (http_begin_ota_upload(req, &copy) != ESP_OK) {
-        httpd_resp_set_status(req, "503 Service Unavailable");
-        return http_send_json(req, "{\"ok\":false,\"error\":\"upload worker unavailable\"}");
+        return send_ota_json_err(req, "503 Service Unavailable",
+                                 "{\"ok\":false,\"error\":\"upload worker unavailable\"}");
     }
     const OtaUploadSource source{copy, req->content_len, upload_read, upload_complete};
     if (!ota_upload_async(source, sha256)) {
-        httpd_resp_set_status(copy, "503 Service Unavailable");
-        (void)http_send_json(copy, "{\"ok\":false,\"error\":\"upload not accepted\"}");
+        (void)send_ota_json_err(copy, "503 Service Unavailable",
+                                "{\"ok\":false,\"error\":\"upload not accepted\"}");
         http_complete_ota_upload(copy);
     }
     return HTTP_ASYNC_ACCEPTED;
@@ -275,22 +286,19 @@ static esp_err_t ota_changelog(httpd_req_t* req) {
     char after_text[16] = {0};
     if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK ||
         httpd_query_key_value(query, "after", after_text, sizeof(after_text)) != ESP_OK) {
-        httpd_resp_set_status(req, "400 Bad Request");
-        return httpd_resp_send(req, "OTA check generation required", HTTPD_RESP_USE_STRLEN);
+        return send_ota_text_err(req, "400 Bad Request", "OTA check generation required");
     }
     char*                    after_end   = nullptr;
     const unsigned long long after_value = std::strtoull(after_text, &after_end, 10);
     if (!after_value || after_value > UINT32_MAX || !after_end || *after_end != '\0') {
-        httpd_resp_set_status(req, "400 Bad Request");
-        return httpd_resp_send(req, "Invalid OTA check generation", HTTPD_RESP_USE_STRLEN);
+        return send_ota_text_err(req, "400 Bad Request", "Invalid OTA check generation");
     }
 
     const uint32_t generation = static_cast<uint32_t>(after_value);
     size_t         total      = 0;
     size_t         copied     = 0;
     if (!ota_changelog_chunk(generation, 0, nullptr, 0, total, copied)) {
-        httpd_resp_set_status(req, "409 Conflict");
-        return httpd_resp_send(req, "OTA offer changed", HTTPD_RESP_USE_STRLEN);
+        return send_ota_text_err(req, "409 Conflict", "OTA offer changed");
     }
     // Notes are one-shot courtesy data. Whichever response path follows — success, 204, or a broken
     // client connection — releases the exact retained text; a static 60 s timer covers clients that

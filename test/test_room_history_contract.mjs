@@ -230,7 +230,7 @@ const char* esp_err_to_name(int){return "fixture";}
 bool time_synced(){return true;}
 void time_now(int64_t& sec,int32_t& ms){sec=300000;ms=0;}
 void persist_seal_locked(){}
-logic::TrendRing* ring_at(HistorySource src,size_t index){return src==HistorySource::Room&&index==0?&R().ring:nullptr;}
+logic::TrendRingView ring_at(HistorySource src,size_t index){return src==HistorySource::Room&&index==0?R().ring.view():logic::TrendRingView{};}
 int64_t source_anchor_bucket_locked(HistorySource){return 1000;}
 bool seed_source_timeline_locked(HistorySource,int64_t,int64_t&){throw std::runtime_error("unexpected seed");}
 void deferred_reset(){history_room_reset(202);}

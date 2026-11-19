@@ -222,38 +222,46 @@ DetectResult hp_detect_run() {
             if (had_transport_error && reg != 0x11 && reg != 0x56) probe_transport_errors++;
             continue;
         }
-        if (reg == 0x11) {
-            len11 = paylen;
-            for (int i = 0; i < paylen && i < static_cast<int>(sizeof(page11)); i++)
-                page11[i] = pay[i];
-            continue; // 0x11 is not a fingerprint page bit
+        uint8_t* dst = nullptr;
+        int*     len = nullptr;
+        int      cap = 32;
+        switch (reg) {
+        case 0x11:
+            dst = page11;
+            len = &len11;
+            cap = static_cast<int>(sizeof(page11));
+            break;
+        case 0x00:
+            dst = page00;
+            len = &len00;
+            break;
+        case 0x60:
+            dst = page60;
+            len = &len60;
+            break;
+        case 0x10:
+            dst = page10;
+            len = &len10;
+            break;
+        case 0x20:
+            dst = page20;
+            len = &len20;
+            break;
+        case 0xA0:
+            dst = pageA0;
+            len = &lenA0;
+            break;
+        case 0xA1:
+            dst = pageA1;
+            len = &lenA1;
+            break;
         }
+        if (dst) {
+            *len = paylen;
+            for (int i = 0; i < paylen && i < cap; i++) dst[i] = pay[i];
+        }
+        if (reg == 0x11) continue; // 0x11 is not a fingerprint page bit
         fp.page_mask |= page_mask_bit(reg);
-        if (reg == 0x00) {
-            len00 = paylen;
-            for (int i = 0; i < paylen && i < static_cast<int>(sizeof(page00)); i++)
-                page00[i] = pay[i];
-        } else if (reg == 0x60) {
-            len60 = paylen;
-            for (int i = 0; i < paylen && i < static_cast<int>(sizeof(page60)); i++)
-                page60[i] = pay[i];
-        } else if (reg == 0x10) {
-            len10 = paylen;
-            for (int i = 0; i < paylen && i < static_cast<int>(sizeof(page10)); i++)
-                page10[i] = pay[i];
-        } else if (reg == 0x20) {
-            len20 = paylen;
-            for (int i = 0; i < paylen && i < static_cast<int>(sizeof(page20)); i++)
-                page20[i] = pay[i];
-        } else if (reg == 0xA0) {
-            lenA0 = paylen;
-            for (int i = 0; i < paylen && i < static_cast<int>(sizeof(pageA0)); i++)
-                pageA0[i] = pay[i];
-        } else if (reg == 0xA1) {
-            lenA1 = paylen;
-            for (int i = 0; i < paylen && i < static_cast<int>(sizeof(pageA1)); i++)
-                pageA1[i] = pay[i];
-        }
     }
 
     // 2b. RAW payload dump for the pages whose LAYOUT is still an open question. HTTP exposes only

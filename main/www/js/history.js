@@ -1,8 +1,8 @@
 // ── 24-hour trend (a historied value row's explainer carries a sparkline under the text) ──────
 // WHICH rows have a trend is the FIRMWARE's answer. /status.history.rows names X10A rings;
-// modbus_rows names the seventeen HomeHub rings (paired measurements/states, Smart-Grid, plus the
-// standalone disinfection, compressor, power, defrost/restart, and pump timelines); env3_rows names
-// temperature, humidity and pressure from the independent outdoor sensor.
+// modbus_rows names the thirty-five HomeHub rings (paired measurements/states, Smart-Grid, plus the
+// standalone active-state, mode, abnormality, enable, setpoint, offset, power-limit, and telemetry
+// timelines); env3_rows names temperature, humidity and pressure from the independent outdoor sensor.
 // The device keeps every source at one fixed cadence and reports the labels each source owns. The
 // browser never pattern-matches its own candidates: offering a trend the device isn't buffering
 // would be an empty chart by design.
@@ -26,18 +26,10 @@ function histFmt1(n) {
 // (free_heap, max_alloc) is drawn on the Settings ESP32 card, whose row labels are TRANSLATED, so
 // there is no label to match on at all; it attaches by id like the firmware always intended.
 function histSpec() { const h = S.status && S.status.history; return h && Array.isArray(h.rows) ? h : null; }
-function modbusHistRows() {
-  const h = histSpec();
-  return h && Array.isArray(h.modbus_rows) ? h.modbus_rows : [];
-}
-function env3HistRows() {
-  const h = histSpec();
-  return h && Array.isArray(h.env3_rows) ? h.env3_rows : [];
-}
-function roomHistRows() {
-  const h = histSpec();
-  return h && Array.isArray(h.room_rows) ? h.room_rows : [];
-}
+const histRowsOf = (k) => { const a = histSpec()?.[k]; return Array.isArray(a) ? a : []; };
+const modbusHistRows = () => histRowsOf("modbus_rows");
+const env3HistRows = () => histRowsOf("env3_rows");
+const roomHistRows = () => histRowsOf("room_rows");
 function roomHistName() {
   const name = roomHistRows().find((r) => r && r.id === "room_temp")?.label
     || S.status?.reference_temperature?.name;
@@ -52,7 +44,12 @@ function histIdFor(label) { const r = histFor(label); return r ? r.id : ""; }
 // Is the device keeping this series? Asked by ID — a board row has no catalog label to look up, and
 // a firmware that predates a trend simply reports fewer rows, so its card draws no chart at all
 // rather than an empty one.
-const modbusHistRowId = (id) => id === "pel" ? "modbus_power" : id;
+const MB_HIST_WIRE_ID = Object.freeze({
+  pel: "modbus_power",
+  x10a_pump_state: "pump_state",
+  x10a_space_state: "modbus_space_state",
+});
+const modbusHistRowId = (id) => MB_HIST_WIRE_ID[id] || id;
 function hasDeviceHist(id) { return !!id && !!histSpec() && histSpec().rows.some((r) => r && r.id === id); }
 function hasDeviceModbusHist(id) {
   const mid = modbusHistRowId(id);
@@ -125,24 +122,15 @@ const DERIVED = {
   pth: {
     unit: "kW", ins: ["flow", "leaving_water", "return_water", "comp_rps"],
     ready: (h) => h.flow && h.leaving_water && h.return_water && h.comp_rps,
-    fn: (s) => {
-      if (s.flow == null) return null;
-      if (!(s.flow > 0.5)) return 0;
-      if (s.leaving_water == null || s.return_water == null || s.comp_rps == null) return null;
-      if (!(s.comp_rps > 5)) return null;
-      return (s.flow / 60) * 4.186 * (s.leaving_water - s.return_water);
-    },
+    fn: (s) => pthCalc(s, s.comp_rps != null && s.comp_rps > 5),
     mbIns: ["flow", "leaving_water", "return_water", "compressor_state"],
     mbReady: (h) => h.flow && h.leaving_water && h.return_water && h.compressor_state,
-    mbFn: (s) => {
-      if (s.flow == null) return null;
-      if (!(s.flow > 0.5)) return 0;
-      if (s.leaving_water == null || s.return_water == null || s.compressor_state == null) return null;
-      if (!(s.compressor_state > 0)) return null;
-      return (s.flow / 60) * 4.186 * (s.leaving_water - s.return_water);
-    },
+    mbFn: (s) => pthCalc(s, s.compressor_state != null && s.compressor_state > 0),
   },
 };
+const pthCalc = (s, run) => s.flow == null ? null : !(s.flow > 0.5) ? 0
+  : s.leaving_water == null || s.return_water == null || !run ? null
+  : (s.flow / 60) * 4.186 * (s.leaving_water - s.return_water);
 
 // Was sample `i` absent because the outdoor unit was ASLEEP rather than because something failed to
 // measure? The firmware decides it (logic/history.hpp — pages 0x20/0x21 keep answering with the last
@@ -731,22 +719,15 @@ function pressureSplitRun(run, pts, X, Y) {
 const ENV3_COMBINED_ID = "env3_combined";
 const ENV3_FORECAST_ID = "env3_forecast";
 const env3ChartId = id => id === ENV3_COMBINED_ID || id === ENV3_FORECAST_ID;
-const ENV3_COMBINED_SERIES = Object.freeze([
-  { id: "env3_temperature", label: "env.temperature" },
-  { id: "env3_humidity", label: "env.humidity" },
-  { id: "env3_pressure", label: "env.pressure" },
-]);
+const ENV3_COMBINED_SERIES = Object.freeze(
+  ["temperature", "humidity", "pressure"].map((k) => ({ id: "env3_" + k, label: "env." + k }))
+);
 const WEATHER_FORECAST_SERIES = Object.freeze([
-  { key: "temperature", api: "temperature_c", env: "temperature_c", measured: "env3_temperature",
-    source: "weather_forecast_temperature", cls: "env-forecast-temperature",
-    label: "env.temperature", unit: "°C" },
-  { key: "humidity", api: "humidity_pct", env: "humidity_pct", measured: "env3_humidity",
-    source: "weather_forecast_humidity", cls: "env-forecast-humidity",
-    label: "env.humidity", unit: "%" },
-  { key: "pressure", api: "pressure_hpa", env: "pressure_hpa", measured: "env3_pressure",
-    source: "weather_forecast_pressure", cls: "env-forecast-pressure",
-    label: "env.pressure", unit: "hPa" },
-]);
+  ["temperature", "c", "°C"], ["humidity", "pct", "%"], ["pressure", "hpa", "hPa"],
+].map(([key, sfx, unit]) => ({
+  key, api: `${key}_${sfx}`, env: `${key}_${sfx}`, measured: `env3_${key}`,
+  source: `weather_forecast_${key}`, cls: `env-forecast-${key}`, label: `env.${key}`, unit,
+})));
 
 // A forecast is FUTURE data, not another sampled sensor. Provider timestamps place each point to
 // the right of "now"; stale, incomplete or malformed responses disappear instead of being drawn as
@@ -808,16 +789,6 @@ function alignedHistoryView(id, raw) {
   const span = mode === "tail" ? end + 1 : Math.round((end - start) / step) + 1;
   const n = Math.min(span, HIST_MAX_SAMPLES);
   start = mode === "time" ? end - (n - 1) * dt : start + (span - n) * step;
-  const toRuns = (flags) => {
-    const out = [];
-    for (let i = 0; i < flags.length; i++) {
-      if (!flags[i]) continue;
-      const from = i;
-      while (i + 1 < flags.length && flags[i + 1]) i++;
-      out.push([from, i - from + 1]);
-    }
-    return out;
-  };
   const series = raw.map((s) => {
     const off = mode === "bucket" ? s.h.b0 - start
               : mode === "time" ? Math.round((s.h.t0 - start) / dt)
@@ -828,7 +799,7 @@ function alignedHistoryView(id, raw) {
       heldFlags[off + i] = histHeld(s.h, i);
     }
     return { source: s.source, name: s.name, unit: s.h.unit || "", v, offset: off,
-             held: toRuns(heldFlags), raw: s.h };
+             held: boolRuns(heldFlags), raw: s.h };
   });
   const primary = series.find((s) => s.source === "x10a") ||
                   series.find((s) => s.source === "env3") || series[0];
@@ -1004,198 +975,113 @@ function historyView(id, source = "", forecast) {
 // draw one outlined lane per source, so colour means STATE while the outline/label means SOURCE.
 // Durations are explicitly sampled RASTER time. Event-folded BSH, BUH and defrost buckets keep an ON
 // observed during a five-minute bucket; they are not presented as second-accurate runtime.
+const isBinTenths = (v) => v === 0 || v === 10;
+const binStateHist = (primary, cls, extra = {}) => {
+  const active = extra.active || "state.on", inactive = extra.inactive || "state.off";
+  return {
+    classify: (v) => isBinTenths(v) ? v === 10 : null,
+    primary, run: "hist.state_phase_run", active, inactive,
+    levels: [
+      { match: (v) => isBinTenths(v) ? v === 0 : null, cls: extra.offCls || "state-off", label: inactive },
+      { match: (v) => isBinTenths(v) ? v === 10 : null, cls, label: active },
+    ],
+    ...extra,
+  };
+};
+const namedBinHist = (primary, cls, p, onOff = false, extra = {}) => binStateHist(primary, cls, {
+  total: `hist.${p}_total`, aria: `hist.${p}_aria`,
+  active: `hist.${p}_${onOff ? "on" : "active"}`,
+  inactive: `hist.${p}_${onOff ? "off" : "inactive"}`,
+  ...(onOff === "compact" ? { compactValueLabel: (v) => v === 0 ? `hist.${p}_off` : v === 10 ? `hist.${p}_on` : "" } : {}),
+  ...extra,
+});
+const enumStateHist = (primary, levels, extra = {}) => {
+  const byVal = new Map(levels.map((l) => [l.val, l]));
+  const wire = new Map(levels.filter((l) => l.wire || l.raw).map((l) => [l.wire || l.raw, l.val]));
+  return {
+    classify: (v) => byVal.has(v) ? !byVal.get(v).idle : null,
+    primary, run: "hist.state_phase_run", summaryLevels: true, wire,
+    compactValueLabel: (v) => byVal.get(v)?.label || "",
+    rawLabel: (v) => byVal.get(v)?.raw || "",
+    levels: levels.map((l) => ({ ...l, match: (v) => byVal.has(v) ? v === l.val : null })),
+    ...extra,
+  };
+};
+const OU_EXTRA_OP_MODES = Object.freeze([
+  ..."Ventilation|Auto Cool|Auto Heat|Dry|Aux.|Cooling Storage|Heating Storage".split("|"),
+  ...["cl", "ht"].flatMap((k) => [1, 2, 3, 4].map((n) => `UseStrdThrm(${k})${n}`)),
+].map((raw, i) => ({ val: (i + 4) * 10, cls: "quiet-on", raw, optional: true })));
+
 const STATE_HIST = Object.freeze({
-  tank_preheat_state: {
-    classify: (v) => [0, 10].includes(v) ? v === 10 : null,
-    primary: "x10a", total: "hist.preheat_total", run: "hist.state_phase_run",
-    none: "hist.preheat_none", active: "hist.preheat_active", inactive: "hist.preheat_inactive",
-    aria: "hist.preheat_aria",
-    levels: [
-      { match: (v) => [0, 10].includes(v) ? v === 0 : null,
-        cls: "state-off", label: "hist.preheat_inactive" },
-      { match: (v) => [0, 10].includes(v) ? v === 10 : null,
-        cls: "preheat-on", label: "hist.preheat_active" },
-    ],
-  },
-  disinfection_state: {
-    classify: (v) => [0, 10].includes(v) ? v === 10 : null,
-    primary: "modbus", total: "hist.disinfection_total", run: "hist.state_phase_run",
-    none: "hist.disinfection_none", active: "hist.disinfection_active",
-    inactive: "hist.disinfection_inactive", aria: "hist.disinfection_aria",
-    levels: [
-      { match: (v) => [0, 10].includes(v) ? v === 0 : null,
-        cls: "state-off", label: "hist.disinfection_inactive" },
-      { match: (v) => [0, 10].includes(v) ? v === 10 : null,
-        cls: "disinfection-on", label: "hist.disinfection_active" },
-    ],
-  },
-  defrost_state: {
-    classify: (v) => [0, 10].includes(v) ? v === 10 : null,
-    primary: "x10a", total: "hist.defrost_total", run: "hist.state_phase_run",
-    none: "hist.defrost_none", active: "hist.defrost_active", inactive: "hist.defrost_inactive",
-    aria: "hist.defrost_aria",
-    levels: [
-      { match: (v) => [0, 10].includes(v) ? v === 0 : null,
-        cls: "state-off", label: "hist.defrost_inactive" },
-      { match: (v) => [0, 10].includes(v) ? v === 10 : null,
-        cls: "defrost-on", label: "hist.defrost_active" },
-    ],
-  },
-  quiet_state: {
-    classify: (v) => [0, 10].includes(v) ? v === 10 : null,
-    primary: "x10a", total: "hist.quiet_total", run: "hist.state_phase_run",
-    none: "hist.quiet_none", active: "hist.quiet_active", inactive: "hist.quiet_inactive",
-    aria: "hist.quiet_aria",
-    levels: [
-      { match: (v) => [0, 10].includes(v) ? v === 0 : null,
-        cls: "state-off", label: "hist.quiet_inactive" },
-      { match: (v) => [0, 10].includes(v) ? v === 10 : null,
-        cls: "quiet-on", label: "hist.quiet_active" },
-    ],
-  },
-  smart_grid_mode: {
-    classify: (v) => [0, 10, 20, 30].includes(v) ? v === 20 : null,
-    primary: "modbus", total: "hist.boost_total", run: "hist.state_phase_run",
-    compactTooltip: true,
-    compactValueLabel: (v) => {
-      const mode = v / 10;
-      return Number.isInteger(mode) && mode >= 0 && mode <= 3 ? `sg.mode${mode}` : "";
-    },
-    none: "hist.boost_none", active: "hist.boost_active", inactive: "hist.boost_inactive",
-    aria: "hist.boost_aria",
-    // BOOST itself is mode 2, but a Boost inspector that paints modes 0, 1 and 3 as one identical
-    // "off" bar hides whether the controller was free, inhibited or forced on. Paint the complete
-    // four-state Smart-Grid enum and list every HomeHub phase; the Boost total above remains the
-    // sampled amount of mode 2 so the permanent BOOST pill and its history keep the same contract.
-    levels: [
-      { match: (v) => [0, 10, 20, 30].includes(v) ? v === 0 : null,
-        cls: "sg-free", label: "sg.mode0" },
-      { match: (v) => [0, 10, 20, 30].includes(v) ? v === 10 : null,
-        cls: "sg-forced-off", label: "sg.mode1" },
-      { match: (v) => [0, 10, 20, 30].includes(v) ? v === 20 : null,
-        cls: "sg-recommended", label: "sg.mode2" },
-      { match: (v) => [0, 10, 20, 30].includes(v) ? v === 30 : null,
-        cls: "sg-forced-on", label: "sg.mode3" },
-    ],
-  },
-  bsh_state: {
-    classify: (v) => [0, 10].includes(v) ? v === 10 : null,
-    primary: "x10a", total: "hist.heater_total", run: "hist.state_phase_run",
-    compactTooltip: true,
-    none: "hist.heater_none", active: "hist.heater_active", inactive: "hist.heater_inactive",
-    aria: "hist.heater_aria",
-    levels: [
-      { match: (v) => [0, 10].includes(v) ? v === 0 : null,
-        cls: "state-off", label: "hist.heater_inactive" },
-      { match: (v) => [0, 10].includes(v) ? v === 10 : null,
-        cls: "heater-on", label: "hist.heater_active" },
-    ],
-  },
-  buh_state: {
-    classify: (v) => [0, 10, 20].includes(v) ? v > 0 : null,
-    primary: "x10a", total: "hist.buh_total", run: "hist.state_phase_run",
-    compactTooltip: true,
-    none: "hist.buh_none", active: "hist.buh_active", inactive: "hist.buh_inactive",
-    aria: "hist.buh_aria",
-    valueLabel: (v) => v === 0 ? "hist.buh_inactive"
-      : v === 10 ? "hist.buh_step1" : v === 20 ? "hist.buh_step2" : "",
-    compactValueLabel: (v) => v === 0 ? "state.off"
-      : v === 10 ? "hist.buh_step1" : v === 20 ? "hist.buh_step2" : "",
-    levels: [
-      { match: (v) => [0, 10, 20].includes(v) ? v === 0 : null,
-        cls: "state-off", label: "hist.buh_inactive" },
-      { match: (v) => [0, 10, 20].includes(v) ? v === 10 : null,
-        cls: "step1", label: "hist.buh_step1" },
-      { match: (v) => [0, 10, 20].includes(v) ? v === 20 : null,
-        cls: "step2", label: "hist.buh_step2" },
-    ],
-  },
-  valve_dhw: {
-    classify: (v) => [0, 10].includes(v) ? v === 10 : null,
-    primary: "x10a", total: "hist.valve_dhw_total", inactiveTotal: "hist.valve_space_total",
-    run: "hist.state_phase_run", none: "hist.valve_none",
-    active: "hist.valve_dhw", inactive: "hist.valve_space", aria: "hist.valve_aria",
-    compactValueLabel: (v) => v === 0 ? "hist.valve_space" : v === 10 ? "hist.valve_dhw" : "",
-    levels: [
-      { match: (v) => [0, 10].includes(v) ? v === 0 : null,
-        cls: "valve-space", label: "hist.valve_space" },
-      { match: (v) => [0, 10].includes(v) ? v === 10 : null,
-        cls: "valve-dhw", label: "hist.valve_dhw" },
-    ],
-  },
-  circulation_state: {
-    classify: (v) => [0, 10].includes(v) ? v === 10 : null,
-    primary: "x10a", total: "hist.circ_total", run: "hist.state_phase_run",
-    none: "hist.circ_none", active: "hist.circ_on", inactive: "hist.circ_off",
-    missing: "hist.circ_unavailable", aria: "hist.circ_aria",
-    compactValueLabel: (v) => v === 0 ? "hist.circ_off" : v === 10 ? "hist.circ_on" : "",
-    levels: [
-      { match: (v) => [0, 10].includes(v) ? v === 0 : null,
-        cls: "state-off", label: "hist.circ_off" },
-      { match: (v) => [0, 10].includes(v) ? v === 10 : null,
-        cls: "circulation-on", label: "hist.circ_on" },
-    ],
-  },
-  valve_heat: {
-    classify: (v) => [0, 10].includes(v) ? v === 10 : null,
-    primary: "x10a", total: "hist.valve2_on_total", inactiveTotal: "hist.valve2_off_total",
-    run: "hist.state_phase_run", none: "hist.valve2_none",
-    active: "hist.valve2_on", inactive: "hist.valve2_off", aria: "hist.valve2_aria",
-    levels: [
-      { match: (v) => [0, 10].includes(v) ? v === 0 : null,
-        cls: "state-off", label: "hist.valve2_off" },
-      { match: (v) => [0, 10].includes(v) ? v === 10 : null,
-        cls: "valve2-on", label: "hist.valve2_on" },
-    ],
-  },
-  water_flow_switch: {
-    classify: (v) => [0, 10].includes(v) ? v === 10 : null,
-    primary: "x10a", total: "hist.flow_switch_total", run: "hist.state_phase_run",
-    none: "hist.flow_switch_none", active: "hist.flow_switch_on", inactive: "hist.flow_switch_off",
-    aria: "hist.flow_switch_aria",
-    levels: [
-      { match: (v) => [0, 10].includes(v) ? v === 0 : null,
-        cls: "state-off", label: "hist.flow_switch_off" },
-      { match: (v) => [0, 10].includes(v) ? v === 10 : null,
-        cls: "flow-switch-on", label: "hist.flow_switch_on" },
-    ],
-  },
-  compressor_state: {
-    classify: (v) => [0, 10].includes(v) ? v === 10 : null,
-    primary: "modbus", total: "hist.comp_total", showRuns: true, run: "hist.state_phase_run",
-    none: "hist.comp_none", active: "hist.comp_active", inactive: "hist.comp_inactive",
-    aria: "hist.comp_aria",
-    levels: [
-      { match: (v) => [0, 10].includes(v) ? v === 0 : null,
-        cls: "state-off", label: "hist.comp_inactive" },
-      { match: (v) => [0, 10].includes(v) ? v === 10 : null,
-        cls: "comp-on", label: "hist.comp_active" },
-    ],
-  },
-  modbus_defrost_state: {
-    classify: (v) => [0, 10].includes(v) ? v === 10 : null,
-    primary: "modbus", total: "hist.mb_defrost_total", run: "hist.state_phase_run",
-    none: "hist.mb_defrost_none", active: "hist.mb_defrost_active",
-    inactive: "hist.mb_defrost_inactive", aria: "hist.mb_defrost_aria",
-    levels: [
-      { match: (v) => [0, 10].includes(v) ? v === 0 : null,
-        cls: "state-off", label: "hist.mb_defrost_inactive" },
-      { match: (v) => [0, 10].includes(v) ? v === 10 : null,
-        cls: "defrost-on", label: "hist.mb_defrost_active" },
-    ],
-  },
-  pump_state: {
-    classify: (v) => [0, 10].includes(v) ? v === 10 : null,
-    primary: "modbus", total: "hist.pump_total", run: "hist.state_phase_run",
-    none: "hist.pump_none", active: "hist.pump_active", inactive: "hist.pump_inactive",
-    aria: "hist.pump_aria",
-    levels: [
-      { match: (v) => [0, 10].includes(v) ? v === 0 : null,
-        cls: "state-off", label: "hist.pump_inactive" },
-      { match: (v) => [0, 10].includes(v) ? v === 10 : null,
-        cls: "circulation-on", label: "hist.pump_active" },
-    ],
-  },
+  tank_preheat_state: namedBinHist("x10a", "preheat-on", "preheat"),
+  disinfection_state: namedBinHist("modbus", "disinfection-on", "disinfection"),
+  defrost_state: namedBinHist("x10a", "defrost-on", "defrost"),
+  quiet_state: namedBinHist("x10a", "quiet-on", "quiet"),
+  // BOOST itself is mode 2, but a Boost inspector that paints modes 0, 1 and 3 as one identical
+  // "off" bar hides whether the controller was free, inhibited or forced on. Paint the complete
+  // four-state Smart-Grid enum and list every HomeHub phase; the Boost total above remains the
+  // sampled amount of mode 2 so the permanent BOOST pill and its history keep the same contract.
+  smart_grid_mode: enumStateHist("modbus",
+    ["sg-free", "sg-forced-off", "sg-recommended", "sg-forced-on"].map((cls, i) => ({ val: i * 10, cls, label: `sg.mode${i}` })),
+    { classify: (v) => [0, 10, 20, 30].includes(v) ? v === 20 : null, summaryLevels: false,
+      total: "hist.boost_total", active: "hist.boost_active", inactive: "hist.boost_inactive", aria: "hist.boost_aria" }),
+  bsh_state: namedBinHist("x10a", "heater-on", "heater"),
+  buh_state: enumStateHist("x10a", [
+    { val: 0, idle: true, cls: "state-off", label: "hist.buh_inactive" },
+    { val: 10, cls: "step1", label: "hist.buh_step1" },
+    { val: 20, cls: "step2", label: "hist.buh_step2" },
+  ], { summaryLevels: false, total: "hist.buh_total", active: "hist.buh_active", inactive: "hist.buh_inactive",
+       aria: "hist.buh_aria", compactValueLabel: (v) => v === 0 ? "state.off" : v === 10 ? "hist.buh_step1" : v === 20 ? "hist.buh_step2" : "" }),
+  valve_dhw: binStateHist("x10a", "valve-dhw", { offCls: "valve-space", total: "hist.valve_dhw_total",
+    inactiveTotal: "hist.valve_space_total", active: "hist.valve_dhw", inactive: "hist.valve_space",
+    aria: "hist.valve_aria", compactValueLabel: (v) => v === 0 ? "hist.valve_space" : v === 10 ? "hist.valve_dhw" : "" }),
+  circulation_state: namedBinHist("x10a", "circulation-on", "circ", "compact", { missing: "hist.circ_unavailable" }),
+  valve_heat: binStateHist("x10a", "valve2-on", { total: "hist.valve2_on_total", inactiveTotal: "hist.valve2_off_total",
+    active: "hist.valve2_on", inactive: "hist.valve2_off", aria: "hist.valve2_aria" }),
+  water_flow_switch: namedBinHist("x10a", "flow-switch-on", "flow_switch", true),
+  compressor_state: namedBinHist("modbus", "comp-on", "comp", false, { showRuns: true }),
+  modbus_defrost_state: namedBinHist("modbus", "defrost-on", "mb_defrost"),
+  pump_state: namedBinHist("modbus", "circulation-on", "pump"),
+  ...Object.fromEntries([
+    ["modbus", "heater-on", ["modbus_hot_start_state", "modbus_dhw_booster_state"]],
+    ["modbus", "valve-dhw", ["modbus_dhw_state", "modbus_dhw_reheat_state"]],
+    ["modbus", "comp-on", ["modbus_space_state", "modbus_space_enable_state"]],
+    ["x10a", "comp-on", ["thermostat_state", "x10a_space_state"]],
+    ["x10a", "circulation-on", ["x10a_pump_state"]],
+    ["x10a", "valve-dhw", ["dhw_reheat_state"]],
+    ["x10a", "heater-on", ["dhw_powerful_state"]],
+  ].flatMap(([p, c, ids]) => ids.map((id) => [id, binStateHist(p, c)]))),
+  modbus_current_op_mode: enumStateHist("modbus", [
+    { val: 0, idle: true, cls: "state-off", label: "enum.none", optional: true,
+      show: () => S.status?.modbus?.profile === "altherma4" },
+    { val: 10, cls: "heater-on", label: "enum.heating" },
+    { val: 20, cls: "defrost-on", label: "enum.cooling" },
+  ]),
+  modbus_op_mode: enumStateHist("modbus", [
+    { val: 0, idle: true, cls: "sg-recommended", label: "enum.auto" },
+    { val: 10, cls: "heater-on", label: "enum.heating" },
+    { val: 20, cls: "defrost-on", label: "enum.cooling" },
+  ]),
+  modbus_abnormality_state: enumStateHist("modbus", [
+    { val: 0, idle: true, cls: "circulation-on", label: "enum.no_error" },
+    { val: 20, cls: "heater-on", label: "enum.warning" },
+    { val: 10, cls: "sg-forced-off", label: "enum.fault" },
+  ]),
+  ou_op_mode: enumStateHist("x10a", [
+    { val: 0, idle: true, cls: "state-off", label: "mode.stop", wire: "Stop" },
+    { val: 10, cls: "heater-on", label: "enum.heating", wire: "Heating" },
+    { val: 20, cls: "defrost-on", label: "enum.cooling", wire: "Cooling" },
+    { val: 30, cls: "sg-recommended", label: "enum.auto", wire: "Auto" },
+    ...OU_EXTRA_OP_MODES,
+  ]),
+  iu_op_mode: enumStateHist("x10a", [
+    { val: 0, idle: true, cls: "state-off", label: "mode.stop", wire: "Stop" },
+    { val: 10, cls: "heater-on", label: "mode.heat", wire: "Heating" },
+    { val: 20, cls: "defrost-on", label: "mode.cool", wire: "Cooling" },
+    { val: 40, cls: "valve-dhw", label: "mode.dhw", wire: "DHW" },
+    { val: 50, cls: "comp-on", label: "mode.heat_dhw", wire: "Heating + DHW", optional: true },
+    { val: 60, cls: "quiet-on", label: "mode.cool_dhw", wire: "Cooling + DHW", optional: true },
+  ]),
 });
 
 // The rings contain COMPLETED five-minute buckets. Their right edge used to be labelled "now"
@@ -1213,19 +1099,29 @@ const currentBinaryTenths = (row) => {
   return raw === "1" ? 10 : raw === "0" ? 0 : null;
 };
 
+const MB_ENUM_RANGE = Object.freeze({
+  three_way_valve: [0, 1],
+  smart_grid_mode: [0, 3],
+  operation_mode: [0, 2],
+  current_operation_mode: [1, 2],
+  altherma4_current_operation_mode: [0, 2],
+  unit_abnormality: [0, 2],
+});
+
 function stateHistoryCurrent(id, source) {
   if (S.otaCached) return { present: false, value: null };
   if (source === "modbus") {
     if (S.status?.modbus?.connected === false) return { present: true, value: null };
     if (!Array.isArray(S._modbus)) return { present: false, value: null };
-    if (id === "smart_grid_mode") {
-      const row = S._modbus.find((r) => r && r.off === 56 && r.enum === "smart_grid_mode");
-      if (!row || row.value == null) return { present: true, value: null };
+    const wireId = modbusHistRowId(id);
+    const row = S._modbus.find((r) => r && (r.history === wireId || r.concept === wireId ||
+      (wireId === "smart_grid_mode" && r.off === 56 && r.enum === "smart_grid_mode")));
+    const range = row?.enum ? MB_ENUM_RANGE[row.enum] : null;
+    if (range && row.value != null) {
       const raw = String(row.value).trim();
-      const mode = /^\d$/.test(raw) ? Number(raw) : -1;
-      return { present: true, value: mode >= 0 && mode <= 3 ? mode * 10 : null };
+      const mode = /^\d+$/.test(raw) ? Number(raw) : -1;
+      return { present: true, value: mode >= range[0] && mode <= range[1] ? mode * 10 : null };
     }
-    const row = S._modbus.find((r) => r && (r.history === id || r.concept === id));
     return { present: true, value: currentBinaryTenths(row) };
   }
 
@@ -1255,7 +1151,14 @@ function stateHistoryCurrent(id, source) {
     const value = step1 == null || step2 == null ? null : step2 === 10 ? 20 : step1;
     return { present: true, value };
   }
-  const row = S._values.find((r) => r && r.concept === id);
+  const cid = id === "x10a_pump_state" ? "pump_running"
+            : id === "x10a_space_state" ? "space_op" : id;
+  const row = S._values.find((r) => r && r.concept === cid);
+  const wire = STATE_HIST[id]?.wire;
+  if (wire?.size) {
+    const raw = row?.value == null ? "" : String(row.value).trim();
+    return { present: true, value: wire.has(raw) ? wire.get(raw) : null };
+  }
   return { present: true, value: currentBinaryTenths(row) };
 }
 
@@ -1284,6 +1187,9 @@ function stateRuns(series, wanted, classify) {
   }
   return out;
 }
+const boolRuns = (flags) => stateRuns({ v: flags }, true, Boolean);
+const fmtUnixHm = (sec) =>
+  new Date(sec * 1000).toLocaleTimeString(LANG, { hour: "2-digit", minute: "2-digit" });
 
 // `bound` renders a LOWER BOUND rather than a measurement, and the difference is not cosmetic.
 // Rounding to nearest is right for a phase duration off the chart — that is a measured span and the
@@ -1359,9 +1265,7 @@ function dwellNoteHtml(v, stateText) {
 }
 function stateRunWhen(view, from, count, series) {
   if (view.t0 != null) {
-    const clock = (i) => new Date((view.t0 + i * view.dt) * 1000)
-      .toLocaleTimeString(LANG, { hour: "2-digit", minute: "2-digit" });
-    return `${clock(from)}–${clock(from + count)}`;
+    return `${fmtUnixHm(view.t0 + from * view.dt)}–${fmtUnixHm(view.t0 + (from + count) * view.dt)}`;
   }
   const n = view.recordedN ?? view.v.length;
   if (histRetained(series.raw)) {
@@ -1419,9 +1323,12 @@ function stateHistHtml(id, name, view, wrap, cfg) {
     : (view.series[0]?.source === "modbus" || id === "circulation_state")
       ? view.series.map((s) => `<span class="vhist-source${histSourceClass(s.source)}"><i></i>${esc(histSeriesLabel(s))}</span>`)
       : [];
-  const levelItems = cfg.levels
+  const levelText = (level) => level.raw || t(level.label);
+  const shownLevels = cfg.levels?.filter((level) =>
+    !level.optional || level.show?.() || visible.some((s) => s.v.some((v) => level.match(v) === true)));
+  const levelItems = shownLevels
     ? [
-        ...cfg.levels.map((level) => `<span class="vhist-level ${level.cls}"><i></i>${esc(t(level.label))}</span>`),
+        ...shownLevels.map((level) => `<span class="vhist-level ${level.cls}"><i></i>${esc(levelText(level))}</span>`),
         ...(hasMissing ? [`<span class="vhist-level state-unavailable"><i></i>${esc(t(cfg.missing || "hist.nm"))}</span>`] : []),
       ]
     : [];
@@ -1438,10 +1345,19 @@ function stateHistHtml(id, name, view, wrap, cfg) {
     pinCross = `<span class="vhist-cross vhist-pinned" style="left:${px}%"></span>`;
   }
   const totalText = primaryMeasured
-    ? (cfg.showRuns ? t(cfg.total, histDuration(total), active.length)
-                    : t(cfg.total, histDuration(total))) +
-      (cfg.inactiveTotal ? ` · ${t(cfg.inactiveTotal, histDuration(inactiveSeconds))}` : "")
+    ? cfg.summaryLevels
+      ? cfg.levels.map((level) => {
+          const sec = stateRuns(recordedPrimary, true, level.match)
+            .reduce((sum, r) => sum + r[1] * view.dt, 0);
+          return sec ? `${levelText(level)} · ${histDuration(sec)}` : "";
+        }).filter(Boolean).join(" · ")
+      : (cfg.showRuns ? t(cfg.total, histDuration(total), active.length)
+                      : cfg.total ? t(cfg.total, histDuration(total))
+                                  : `${t(cfg.active)} · ${histDuration(total)}`) +
+        (cfg.inactiveTotal ? ` · ${t(cfg.inactiveTotal, histDuration(inactiveSeconds))}` : "")
     : "";
+  const aria = cfg.aria ? t(cfg.aria, name || id, totalText)
+    : t("hist.aria", totalText ? `${name || id} (${totalText})` : (name || id));
   const axis = `<div class="vhist-axis"><span>${recordedN ? esc(histAxisStart(view, spanH)) : ""}</span>` +
     `<span>${esc(view.liveIndex == null ? histAxisEnd(view) : t("hist.now"))}</span></div>`;
   return wrap(
@@ -1450,7 +1366,7 @@ function stateHistHtml(id, name, view, wrap, cfg) {
     `<div class="vhist-graph vhist-state-graph">` +
       histTipsHtml(view, pi, pi >= 0 ? stateSampleFraction(pi, n) : 0) +
       `<div class="vhist-plot vhist-state-plot" data-hist="${esc(id)}"${sourceAttr}${histRevision(view)} data-n="${n}" tabindex="0" role="img"` +
-        ` aria-label="${esc(t(cfg.aria, name || id, totalText))}">` + tracks + pinCross +
+        ` aria-label="${esc(aria)}">` + tracks + pinCross +
         `<span class="vhist-cross vhist-live" hidden></span>` +
       `</div>` + axis + histTimesHtml(view, pi, pi >= 0 ? stateSampleFraction(pi, n) : 0) +
     `</div>` +
@@ -1648,16 +1564,6 @@ function histHtml(id, unit, name, source = "", identifySource = false) {
     );
   }
   if (aux.length) {
-    const toRuns = (flags) => {
-      const out = [];
-      for (let i = 0; i < flags.length; i++) {
-        if (!flags[i]) continue;
-        const from = i;
-        while (i + 1 < flags.length && flags[i + 1]) i++;
-        out.push([from, i - from + 1]);
-      }
-      return out;
-    };
     const step = n > 1 ? HIST_W / (n - 1) : HIST_W;
     const renderRuns = (runs, cls, y, height) => {
       let s = "";
@@ -1678,7 +1584,7 @@ function histHtml(id, unit, name, source = "", identifySource = false) {
         const y = (phase.kind === "boost" ? 0 : HIST_H / 2) +
           (paired && phase.source === "modbus" ? height : 0);
         const outline = paired && phase.source === "x10a" ? " vhist-phase-outline" : "";
-        phaseBands += renderRuns(toRuns(phase.flags), `vhist-phase-${phase.kind}${outline}`, y, height);
+        phaseBands += renderRuns(boolRuns(phase.flags), `vhist-phase-${phase.kind}${outline}`, y, height);
         legendItems.push(
           `<span class="vhist-source vhist-legend-${phase.kind}${outline}"><i></i>${esc(dhwPhaseLabel(phase))}` +
           ` <small class="mono num">(${histDuration(phase.count * view.dt)})</small></span>`
@@ -2050,10 +1956,7 @@ function histPinToggle(id, i, source = "", captured) {
 }
 
 // Selected time belongs on the axis, including relative ages when the source has no wall clock.
-function histAxisClock(h, index) {
-  return new Date((h.t0 + index * h.dt) * 1000)
-    .toLocaleTimeString(LANG, { hour: "2-digit", minute: "2-digit" });
-}
+function histAxisClock(h, index) { return fmtUnixHm(h.t0 + index * h.dt); }
 
 function histAxisStart(h, spanH) {
   if (!histAxisRetained(h)) return t("hist.ago", spanH);
@@ -2083,8 +1986,7 @@ function scrubTime(h, i) {
   const point = env3ChartId(h.id) && i >= h.v.length
     ? forecastScrubView(h)?.points[i - h.v.length] : null;
   const stamp = point ? point.time : h.t0 != null ? h.t0 + i * h.dt : null;
-  if (stamp != null) return new Date(stamp * 1000)
-    .toLocaleTimeString(LANG, { hour: "2-digit", minute: "2-digit" });
+  if (stamp != null) return fmtUnixHm(stamp);
   const end = h.recordedN ?? h.v.length;
   if (histAxisRetained(h)) {
     const last = Math.max(-1, ...histPinSeries(h).map(s => lastSample(s.v, end)));
@@ -2140,6 +2042,8 @@ function env3TipData(h, i, allSeries = false) {
 function stateTipEntries(h, i, cfg) {
   const stateStatus = (v) => {
     if (v == null) return null;
+    const raw = cfg.rawLabel ? cfg.rawLabel(v) : "";
+    if (raw) return raw;
     const key = cfg.compactValueLabel ? cfg.compactValueLabel(v) : "";
     if (key) return t(key);
     const state = cfg.classify(v);
@@ -2237,15 +2141,14 @@ function histReadout(h, i, aux) {
         `<span class="${r.cls}">${esc(r.label)}</span><span class="${r.cls}">${esc(r.val)}</span>`
       ).join("") + `</span>`;
   }
+  const tipRows = (rows, tail = "") => `<span class="vhist-tip-rows">${rows.map((r) =>
+    `<span class="vhist-tip-label${histSourceClass(r.source)}">${esc(r.label)}</span><span class="vhist-tip-val">${esc(r.text)}</span>`
+  ).join("")}${tail}</span>`;
   const cfg = STATE_HIST[h.id];
   if (cfg) {
     const { multi, rows } = stateTipEntries(h, i, cfg);
     if (!rows.length) return "";
-    if (!multi) return esc(rows[0].text);
-    return `<span class="vhist-tip-rows">` + rows.map((r) =>
-      `<span class="vhist-tip-label${histSourceClass(r.source)}">${esc(r.label)}</span>` +
-      `<span class="vhist-tip-val">${esc(r.text)}</span>`
-    ).join("") + `</span>`;
+    return multi ? tipRows(rows) : esc(rows[0].text);
   }
   const { multi, rows, note } = numericTipEntries(h, i, aux);
   if (!rows.length && !note) return "";
@@ -2253,10 +2156,7 @@ function histReadout(h, i, aux) {
     const single = rows[0]?.text || "";
     return esc(note ? (single ? `${single} · ${note}` : note) : single);
   }
-  return `<span class="vhist-tip-rows">` + rows.map((r) =>
-    `<span class="vhist-tip-label${histSourceClass(r.source)}">${esc(r.label)}</span>` +
-    `<span class="vhist-tip-val">${esc(r.text)}</span>`
-  ).join("") + (note ? `<span class="vhist-tip-note">${esc(note)}</span>` : "") + `</span>`;
+  return tipRows(rows, note ? `<span class="vhist-tip-note">${esc(note)}</span>` : "");
 }
 
 function placeScrubReadout(graph, h, i, frac) {
@@ -2744,6 +2644,8 @@ function descAccordion(key, label, valHtml, cls, bodyHtml, trendId, unit = "", p
 // unchanged row. Most catalog labels are unique within a render; the reused set carries its X10A
 // group from the server below. A derived row supplies its own key and visual label while keeping its
 // canonical label for description matching.
+const CONCEPT_MB_HIST = Object.freeze({ pump_running: "pump_state", space_op: "modbus_space_state" });
+
 function vDescRow(v, paused) {
   const label = v.label || "";
   const shownLabel = v.displayLabel || displayReadingLabel(label, v);
@@ -2752,13 +2654,19 @@ function vDescRow(v, paused) {
   // prefixing those keys preserves every existing key while making the colliding rows independent.
   const key = v.key || (v.x10a_group ? `${v.x10a_group}:${label}` : label);
   let cls = v.state || v.class || "";
-  const hid = histIdFor(label);          // this profile's spelling -> the concept the device buffers
   // The SECOND source for this row, if the HomeHub carries the same quantity (paired on the concept
   // the firmware resolved — see mbByConcept). Two distinct uses, and they must not be confused:
   //   `mb`  — the comparison shown inside the explainer while BOTH sources are up.
   //   `fb`  — the stand-in shown IN PLACE of the X10A value while the X10A bus is down.
   const mb = mbByConcept(v.concept);
   const fb = mbStandInFor(v);
+  const mbHist = (fb || mb)?.history || CONCEPT_MB_HIST[v.concept] || "";
+  let rawHid = (v.concept && hasHist(v.concept)) ? v.concept : histIdFor(label);
+  if (rawHid === "thermostat_state" &&
+      ((v.x10a_group && v.x10a_group !== "hydronic") || (v.reg != null && v.reg !== 0x60))) {
+    rawHid = "";
+  }
+  const hid = rawHid || (hasModbusHist(mbHist) ? mbHist : ""); // X10A trend or paired Modbus timeline
   // A row stops being a reading for two reasons — the X10A bus is silent, or the outdoor unit is no
   // longer refreshing this page — and both get the same treatment: the HomeHub reading stands in
   // where it carries the same quantity, marked as such, and where it does not the row shows nothing
@@ -3043,8 +2951,10 @@ function modbusOnlyGroupHtml(all) {
   // two register catalogs use the same label for different states or measurements.
   //
   // A paired schematic measurement keeps its OWN Modbus ring even when this profile has no X10A row
-  // to host it. Unpaired rows still have no chart. Where copy is missing the row degrades to the same
-  // plain line it was before, rather than an empty panel that opens onto nothing.
+  // to host it. Historied Modbus setpoints, offsets, power limits, modes, abnormality and ON/OFF
+  // states get their own 24-hour charts too; non-trended fault code rows still have no chart. Where
+  // copy is missing the row degrades to the same plain line it was before, rather than an empty
+  // panel that opens onto nothing.
   const html = rows.map((m) => {
     const label = m.label || "", shown = displayHomeHubLabel(m);
     const unit = displayUnit(m);

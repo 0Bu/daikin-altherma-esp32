@@ -275,7 +275,8 @@ void boot(bool clear_flash = true) {
     history_start();
     stop_observation_bind(101, 202, 404, 7);
     require(s_flash_scan_ok, "complete_history_scan");
-    for (unsigned i = 0; i < 20; ++i) history_service_flash_restore();
+    for (unsigned i = 0; i < HISTORY_FLASH_TOTAL_RINGS / 4 + 6; ++i)
+        history_service_flash_restore();
     require(s_flash_restore_done, "complete_trend_restore");
     require(s_flash_checkup_restore_done, "complete_core_restore");
     require(s_flash_mb_checkup.restore_done, "complete_modbus_core_restore");

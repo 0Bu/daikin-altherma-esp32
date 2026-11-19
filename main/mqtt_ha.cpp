@@ -1125,6 +1125,7 @@ static std::vector<GroupedValue> current_modbus_values(bool& live) {
 // those ambiguous namespaces rather than automatically deleting another installation's entities.
 static bool retract_legacy_fixed() {
     constexpr size_t count = RETIRED_HEARTBEAT_SENSOR_COUNT + RETIRED_CRASH_SENSOR_COUNT;
+    std::string      topic;
     for (size_t budget = 0; budget < 8 && s_legacy_fixed_step < count; ++budget) {
         const size_t i         = s_legacy_fixed_step;
         const char*  component = nullptr;
@@ -1138,7 +1139,6 @@ static bool retract_legacy_fixed() {
             component          = sensor.component;
             obj_id             = sensor.object_id;
         }
-        std::string topic;
         build_ha_config_topic(topic, component, nullptr, obj_id);
         if (!retire_exact_topic(MqttRetirementOwner::LegacyFixed, topic)) return false;
         ++s_legacy_fixed_step;
@@ -1151,6 +1151,18 @@ static bool retract_legacy_fixed() {
 // Frozen ungrouped and pre-override label configs in this installation namespace. Each exact
 // tombstone advances its bounded cursor only after PUBACK; current grouped identities are kept.
 // Ambiguous board/slug predecessors require operator migration; recorder history is not guaranteed.
+[[gnu::noinline]] static bool build_stale_topic(std::string& topic, size_t shape,
+                                                const ValueDef& d) {
+    const std::string obj = object_id(d.label);
+    if (obj.empty()) return false;
+    const std::string key = shape == 2 ? row_object_id(d) : obj;
+    build_ha_config_topic(topic,
+                          shape == 2 ? ha_component(d)
+                                     : (shape == 1 || shape == 4 ? "binary_sensor" : "sensor"),
+                          nullptr, key.c_str());
+    return true;
+}
+
 static bool retract_stale_values(const std::string& profile_id) {
     if (s_stale_values_pending_profile.empty()) {
         s_stale_values_pending_profile = profile_id; // prepare before any SDK effect
@@ -1162,24 +1174,20 @@ static bool retract_stale_values(const std::string& profile_id) {
     constexpr size_t nodes  = 1; // only the current installation namespace is owned
     const size_t     count  = prof.count() * shapes * nodes;
     size_t           budget = 0;
+    std::string      topic;
     while (budget < 8 && s_stale_values_step < count) {
-        const size_t       shape = s_stale_values_step % shapes;
-        const size_t       entry = s_stale_values_step / shapes;
-        const ValueDef     raw   = prof[entry % prof.count()];
-        const ValueDef     d     = shape < 2 ? logic::adjudicated(raw, prof.profile_id) : raw;
-        const std::string& node  = s_node;
-        const bool         relabeled =
+        const size_t   shape = s_stale_values_step % shapes;
+        const size_t   entry = s_stale_values_step / shapes;
+        const ValueDef raw   = prof[entry % prof.count()];
+        const ValueDef d     = shape < 2 ? logic::adjudicated(raw, prof.profile_id) : raw;
+        const bool     relabeled =
             !logic::label_str_eq(raw.label, logic::adjudicated(raw, prof.profile_id).label);
-        if (!conv_publishable(d.conv) || object_id(d.label).empty() || (shape >= 2 && !relabeled) ||
-            ((shape == 1 || shape == 4) && !conv_is_binary(d.conv))) {
+        if (!conv_publishable(d.conv) || (shape >= 2 && !relabeled) ||
+            ((shape == 1 || shape == 4) && !conv_is_binary(d.conv)) ||
+            !build_stale_topic(topic, shape, d)) {
             ++s_stale_values_step;
             continue;
         }
-        const std::string topic =
-            shape == 2
-                ? discovery_topic(s_prefix, node, d)
-                : ungrouped_discovery_topic(
-                      s_prefix, node, shape == 1 || shape == 4 ? "binary_sensor" : "sensor", d);
         if (!retire_exact_topic(MqttRetirementOwner::StaleValues, topic)) return false;
         ++s_stale_values_step;
         ++budget;
@@ -1302,9 +1310,10 @@ static bool retract_profile_cutover(const std::string& profile_id) {
         s_retiring_identity_ready = false;
         s_retiring_scan           = {};
     }
-    const auto target   = def::resolved(def::lookup(s_retiring_profile_target.c_str()));
-    const auto previous = def::resolved(def::lookup(s_discovered_profile.c_str()));
-    size_t     work     = PROFILE_RETIRE_WORK_BUDGET;
+    const auto  target   = def::resolved(def::lookup(s_retiring_profile_target.c_str()));
+    const auto  previous = def::resolved(def::lookup(s_discovered_profile.c_str()));
+    size_t      work     = PROFILE_RETIRE_WORK_BUDGET;
+    std::string topic;
     while (work) {
         const auto& prof = s_retiring_current_unpublishable ? target : previous;
         if (s_retiring_profile_row >= prof.count()) {
@@ -1349,7 +1358,6 @@ static bool retract_profile_cutover(const std::string& profile_id) {
              s_retiring_scan.result == MqttRetirementPresence::Absent)) {
             if (!work) return false;
             --work;
-            std::string topic;
             if (shape == 0) {
                 const std::string slug = object_id(d.label);
                 build_ha_config_topic(topic, ha_component(d), group_for_page(d.reg), slug.c_str());
@@ -1423,6 +1431,11 @@ static void service_discovery_admission_reset() {
     s_discovery_owner_skipped = false;
 }
 
+[[gnu::noinline]] static bool mqtt_publish_retained_str(const std::string& topic,
+                                                        const std::string& payload) {
+    return mqtt_publish(topic, payload.c_str(), 0, 0, 1);
+}
+
 // Stream one retained discovery config per value of the active profile. Every entity points at the
 // X10A topic (s_x10a) and pulls its value out via a value_template. A bit-flag row lands
 // under the binary_sensor component, everything else under sensor (logic/discovery.hpp ha_component).
@@ -1449,7 +1462,8 @@ static bool publish_x10a_discovery() {
     std::string discovered = profile_id;
     if (!save_retirement_provenance(profile_id)) return false;
     s_discovered_profile.swap(discovered);
-    bool accepted = true;
+    bool        accepted = true;
+    std::string ct;
     for (size_t i = 0; i < prof.count(); i++) {
         const ValueDef d = logic::adjudicated(prof, i); // wire truth, not the generator label
         // The confirmed pre-pass already removed current quarantined/detect-only configs and
@@ -1460,10 +1474,10 @@ static bool publish_x10a_discovery() {
         if (!conv_publishable(d.conv)) continue;
         const std::string obj = object_id(d.label);
         if (obj.empty()) continue;
-        std::string ct;
         build_ha_config_topic(ct, ha_component(d), group_for_page(d.reg), obj.c_str());
-        const std::string cfg = discovery_config(s_node, s_board, s_x10a, s_avail, d);
-        accepted              = mqtt_publish(ct, cfg.c_str(), 0, 0, 1) && accepted; // retained
+        accepted =
+            mqtt_publish_retained_str(ct, discovery_config(s_node, s_board, s_x10a, s_avail, d)) &&
+            accepted; // retained
         // The DERIVED numeric fault flags that ride beside a textual error class (legacy-209 defect
         // 4). Announced here, from the same row loop that publishes the class itself, so the entity
         // set and the payload cannot drift apart — the direct cache encoder emits these keys for
@@ -1473,11 +1487,9 @@ static bool publish_x10a_discovery() {
             for (size_t k = 0; k < FAULT_COMPANION_COUNT; k++) {
                 const FaultCompanion& c = FAULT_COMPANIONS[k];
                 build_ha_config_topic(ct, "binary_sensor", group.c_str(), c.key);
-                accepted = mqtt_publish(ct,
-                                        companion_discovery_config(s_node, s_board, s_x10a, s_avail,
-                                                                   group, c)
-                                            .c_str(),
-                                        0, 0, 1) &&
+                accepted = mqtt_publish_retained_str(ct, companion_discovery_config(s_node, s_board,
+                                                                                    s_x10a, s_avail,
+                                                                                    group, c)) &&
                            accepted; // retained
             }
         }
@@ -1811,13 +1823,14 @@ static void publish_env3_state() {
 [[gnu::noinline]] static bool publish_heartbeat_discovery() {
     if (!discovery_mutation_allowed()) return false;
     if (!s_legacy_fixed_retracted && !retract_legacy_fixed()) return false;
-    bool accepted = true;
+    bool        accepted = true;
+    std::string ct;
     for (int i = 0; i < HEARTBEAT_SENSOR_COUNT; i++) {
         const HeartbeatSensor& s = HEARTBEAT_SENSORS[i];
-        std::string            ct;
         build_ha_config_topic(ct, s.component, nullptr, s.object_id);
-        const std::string cfg = heartbeat_discovery_config(s_node, s_board, s_heartbeat, s_avail, s);
-        accepted = mqtt_publish(ct, cfg.c_str(), 0, 0, 1) && accepted; // retained
+        accepted = mqtt_publish_retained_str(
+                       ct, heartbeat_discovery_config(s_node, s_board, s_heartbeat, s_avail, s)) &&
+                   accepted; // retained
     }
     return accepted;
 }
@@ -1837,12 +1850,12 @@ static void publish_env3_state() {
 static void publish_crash(bool discovery = true) {
     if (discovery && discovery_mutation_allowed()) {
         if (!s_legacy_fixed_retracted && !retract_legacy_fixed()) return;
+        std::string ct;
         for (int i = 0; i < CRASH_SENSOR_COUNT; i++) {
             const CrashSensor& s = CRASH_SENSORS[i];
-            std::string        ct;
             build_ha_config_topic(ct, s.component, nullptr, s.object_id);
-            const std::string cfg = crash_discovery_config(s_node, s_board, s_crash, s_avail, s);
-            mqtt_publish(ct, cfg.c_str(), 0, 0, 1); // retained
+            mqtt_publish_retained_str(
+                ct, crash_discovery_config(s_node, s_board, s_crash, s_avail, s)); // retained
         }
     }
     // _live(): read `coredump` from flash, not the boot-time cache — a dump pulled + cleared via

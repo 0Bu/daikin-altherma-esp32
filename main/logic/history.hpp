@@ -3,9 +3,10 @@
 // rather than a repeat of one.
 //
 // The firmware keeps a fixed-cadence ring per trended X10A/board row and serves it from GET
-// /history; history.cpp also instantiates seventeen rings for the HomeHub histories in
-// homehub_map.hpp: eleven paired measurements/states, Smart-Grid mode, and the five standalone
-// Modbus timelines (disinfection, compressor, power, defrost/restart, and pump). The web UI draws
+// /history; history.cpp also instantiates thirty-five rings for the HomeHub histories in
+// homehub_map.hpp: eleven paired measurements/states, Smart-Grid mode, and twenty-three standalone
+// Modbus timelines (active states, modes, abnormality, enable flags, setpoints, offsets, limits,
+// and telemetry). The web UI draws
 // either or both under a value row's explainer. Everything that decides *what* is trended and
 // *whether an X10A sample counts* lives here rather than at the call site, for the same reason
 // lwt_select.hpp and ou_stale.hpp do: the rule runs against the generated def/ profile tables,
@@ -60,6 +61,7 @@
 #include <cstdlib>
 #include <cmath>
 
+#include "logic/convert.hpp" // IU_MODE / OP_MODE — single enum vocabulary for converters 217/315
 #include "logic/cop_scope.hpp"  // cop_is_post_buh / cop_plan — single-sweep COP boundary pairing
 #include "logic/lwt_select.hpp" // lwt_ci_contains / lwt_select — leaving-water and witness rules
 #include "logic/ou_stale.hpp"     // ou_reading_held_over — the held-over rule, composed not copied
@@ -97,12 +99,75 @@ inline HistorySample history_room_sample(bool valid, double temperature_c) {
 }
 
 // The whole point of the memory analysis, stated where a future trend addition will see it: one
-// trend costs 576 bytes. Put the buffers in static storage, never on the heap — free heap is not
-// the binding limit on this board, the largest CONTIGUOUS block is, and a static array does not
-// compete for it. On target, `history.cpp` places the rings inside `__NOINIT_ATTR` unions
-// (`NOLOAD`).
+// int16 trend costs 576 bytes, a 1-byte enum timeline 288 bytes, and a 2-bit binary timeline
+// 72 bytes. Put the buffers in static storage, never on the heap — free heap is not the binding
+// limit on this board, the largest CONTIGUOUS block is, and a static array does not compete for
+// it. On target, `history.cpp` places the rings inside `__NOINIT_ATTR` unions (`NOLOAD`).
 constexpr size_t HISTORY_BYTES_PER_TREND = HISTORY_SAMPLES * sizeof(HistorySample);
 static_assert(HISTORY_BYTES_PER_TREND == 576, "trend cost changed — re-check the memory budget");
+
+enum class HistoryRingEncoding : uint8_t {
+    Int16  = 0, // 288 x int16_t = 576 B
+    State8 = 1, // 288 x int8_t  = 288 B (-2 NoReading, -1 HeldOver, 0..125 -> 0..1250 tenths)
+    Bit2   = 2, // 288 x 2-bit   =  72 B (0 NoReading, 1 HeldOver, 2 -> 0, 3 -> 10)
+};
+constexpr size_t HISTORY_BYTES_STATE8 = HISTORY_SAMPLES;
+constexpr size_t HISTORY_BYTES_BIT2   = HISTORY_SAMPLES / 4;
+static_assert(HISTORY_SAMPLES % 4 == 0, "2-bit packed history requires multiple-of-4 samples");
+
+constexpr size_t history_ring_storage_bytes(HistoryRingEncoding enc) {
+    return enc == HistoryRingEncoding::Bit2     ? HISTORY_BYTES_BIT2
+           : enc == HistoryRingEncoding::State8 ? HISTORY_BYTES_STATE8
+                                                : HISTORY_BYTES_PER_TREND;
+}
+
+inline HistorySample history_packed_read(const uint8_t* bytes, HistoryRingEncoding enc,
+                                         size_t slot) {
+    if (!bytes || slot >= HISTORY_SAMPLES) return HISTORY_NO_READING;
+    if (enc == HistoryRingEncoding::Bit2) {
+        static constexpr HistorySample kBit2Dec[4] = {HISTORY_NO_READING, HISTORY_HELD_OVER, 0, 10};
+        return kBit2Dec[(bytes[slot >> 2] >> ((slot & 3u) * 2u)) & 0x03u];
+    }
+    if (enc == HistoryRingEncoding::State8) {
+        const int8_t raw = static_cast<int8_t>(bytes[slot]);
+        if (raw == -1) return HISTORY_HELD_OVER;
+        if (raw >= 0 && raw <= 125) return static_cast<HistorySample>(static_cast<int>(raw) * 10);
+        return HISTORY_NO_READING;
+    }
+    HistorySample s = HISTORY_NO_READING;
+    __builtin_memcpy(&s, bytes + slot * sizeof(HistorySample), sizeof(s));
+    return s;
+}
+
+inline void history_packed_write(uint8_t* bytes, HistoryRingEncoding enc, size_t slot,
+                                 HistorySample s) {
+    if (!bytes || slot >= HISTORY_SAMPLES) return;
+    if (enc == HistoryRingEncoding::Bit2) {
+        uint8_t code = 0u;
+        if (s == HISTORY_HELD_OVER)
+            code = 1u;
+        else if (s == 0)
+            code = 2u;
+        else if (s == 10)
+            code = 3u;
+        const uint8_t shift = static_cast<uint8_t>((slot & 3u) * 2u);
+        uint8_t&      cell  = bytes[slot >> 2];
+        cell                = static_cast<uint8_t>((cell & ~(0x03u << shift)) | (code << shift));
+        return;
+    }
+    if (enc == HistoryRingEncoding::State8) {
+        int8_t v = -2;
+        if (s == HISTORY_HELD_OVER) {
+            v = -1;
+        } else if (s >= 0 && s <= 1250) {
+            const int q = s / 10;
+            if (q * 10 == s) v = static_cast<int8_t>(q);
+        }
+        bytes[slot] = static_cast<uint8_t>(v);
+        return;
+    }
+    __builtin_memcpy(bytes + slot * sizeof(HistorySample), &s, sizeof(s));
+}
 
 // Byte-for-byte C-string equality, constexpr and dependency-free (this header is IDF-free and the
 // host tests build it standalone). Both the id lookup and the unit half of the locator use it.
@@ -145,6 +210,7 @@ enum class TrendKind : uint8_t {
     CirculationState, // external MQTT power witness, latest confirmed ON/OFF
     ElectricalPower,  // single-sweep X10A electrical input estimate (I x 230 V, kW)
     Cop,              // single-sweep X10A heating/DHW COP estimate (cop_plan boundary pairing)
+    EnumState,        // categorical text enum row encoded as tenths (index * 10)
 };
 
 // `reg`/`off`/`unit` are the LOCATOR for an ordinary Row (see the header note). BinaryState and
@@ -278,32 +344,47 @@ inline constexpr TrendDef TRENDS[] = {
     // sweeps from different instants inside one 5-minute bucket.
     {"pel", TrendKind::ElectricalPower, 0, 0, "kW", "Electrical input (estimated)"},
     {"cop", TrendKind::Cop, 0, 0, "", "COP (estimated)"},
+    // Central X10A mode and binary operating-state rows for categorical state timelines.
+    {"ou_op_mode", TrendKind::EnumState, 0x10, 0, "", "", 217},
+    {"iu_op_mode", TrendKind::EnumState, 0x60, 2, "", "", 315},
+    {"thermostat_state", TrendKind::BinaryState, 0x60, 2, "", "", 303},
+    {"x10a_pump_state", TrendKind::BinaryState, 0x60, 12, "", "", 301},
+    {"x10a_space_state", TrendKind::BinaryState, 0x62, 2, "", "", 303},
+    {"dhw_reheat_state", TrendKind::BinaryState, 0x62, 2, "", "", 307},
+    {"dhw_powerful_state", TrendKind::BinaryEvent, 0x62, 2, "", "", 304},
 };
 constexpr size_t TREND_COUNT = sizeof(TRENDS) / sizeof(TRENDS[0]);
-// 34 trends = 19584 bytes of ring (plus ~78 bytes of label/unit/counters each in history.cpp). The
-// ceiling is a deliberate stop sign, not a hardware limit: .bss does not compete for the largest
-// CONTIGUOUS free block, which is what actually binds on this board, so the cost of a trend is a
-// few per cent of free heap and nothing at all of the fragmentation budget. Raise it only with the
-// same arithmetic in hand, and measure /status.sys (free_heap, max_alloc) on a real board after —
-// which is now a thing the device itself will draw you a curve of.
+
+constexpr HistoryRingEncoding trend_ring_encoding(const TrendDef& d) {
+    return (d.kind == TrendKind::BinaryState || d.kind == TrendKind::BinaryEvent ||
+            d.kind == TrendKind::CirculationState)
+               ? HistoryRingEncoding::Bit2
+           : (d.kind == TrendKind::SmartGridMode || d.kind == TrendKind::EnumState)
+               ? HistoryRingEncoding::State8
+               : HistoryRingEncoding::Int16;
+}
+
+constexpr size_t trend_ring_offset(size_t idx) {
+    size_t off = 0;
+    for (size_t i = 0; i < idx && i < TREND_COUNT; ++i)
+        off += history_ring_storage_bytes(trend_ring_encoding(TRENDS[i]));
+    return off;
+}
+
+inline constexpr size_t TREND_POOL_BYTES = trend_ring_offset(TREND_COUNT);
+
+// 41 trends in a packed `.noinit` sample pool: 23 x 576 B int16 + 3 x 288 B State8 + 15 x 72 B
+// Bit2 = 15,192 bytes of sample buffer (plus compact metadata/label/unit per entry in history.cpp).
+// The ceiling is a deliberate stop sign, not a hardware limit: `.noinit` static storage does not
+// compete for the largest CONTIGUOUS free heap block, while still consuming total internal DRAM.
+// Raise it only with the same arithmetic in hand, and measure /status.sys (free_heap, max_alloc)
+// and /ota/check on a real board after.
 //
-// It was raised from 7168 (11 trends) once the rule became "every numeric reading the SCHEMATIC
-// draws has a 24-hour curve" rather than a hand-picked working set. That rule is also the reason
-// the ceiling can stay this low: the drawing holds ~16 numeric pills, not the ~66 numeric rows a
-// profile publishes, and ringing all of those would cost ~38 KB — about a third of the low-water
-// free heap measured on the reference board (101 KB), spent on curves nobody opened. The pills are
-// the values someone is looking at; the value LIST reaches the rest through the same explainer and
-// gets a chart only where a trend already exists.
-//
-// MEASURED, not derived: `idf.py size` across that historical 7-trend addition moved DRAM by
-// +4576 bytes, matching 7 x 576 of ring plus 7 x ~78 of per-trend label/unit/counters. Today the
-// target store (`PersistedHistory` in `main/history.cpp`) lives in a `__NOINIT_ATTR` union
-// (`NOLOAD`), so each ring still costs static DIRAM (never competing with the largest contiguous
-// heap block) without duplicating its bytes into the flash image. Worth knowing before anyone adds
-// trends by the dozen.
-static_assert(
-    TREND_COUNT * HISTORY_BYTES_PER_TREND <= 19584,
-    "trend buffers are static data on a heap-tight board — justify growth before raising this");
+// MEASURED: packing categorical state and enum timelines from 576 B to 72 B (Bit2) and 288 B
+// (State8) reclaims ~16.6 KiB across X10A and HomeHub combined so OTA TLS maintains >= 56 KiB free
+// internal heap without dropping any trend series.
+static_assert(TREND_POOL_BYTES == 15192,
+              "X10A packed trend pool changed — re-check the memory budget");
 
 // A board metric in bytes, as the ring stores it: tenths of a KiB (~102-byte resolution, finer than
 // anything worth reading off a 24-hour chart). CLAMPED, never wrapped: the ring is int16, so this
@@ -339,7 +420,7 @@ constexpr bool trend_unit_matches(const TrendDef& d, const char* unit) {
 constexpr bool trend_row_matches(const TrendDef& d, unsigned reg, unsigned off, const char* unit,
                                  int conv = -1) {
     const bool row_kind = d.kind == TrendKind::Row || d.kind == TrendKind::BinaryState ||
-                          d.kind == TrendKind::BinaryEvent;
+                          d.kind == TrendKind::BinaryEvent || d.kind == TrendKind::EnumState;
     return row_kind && reg == d.reg && off == d.off && trend_unit_matches(d, unit) &&
            (d.conv < 0 || conv == d.conv);
 }
@@ -751,6 +832,95 @@ inline bool history_parse_tenths(const char* s, int& out) {
     return true;
 }
 
+// Encode canonical English enum labels from converters 217 and 315 into tenths (index * 10) for
+// TrendKind::EnumState rings, keeping unknown/empty values absent.
+constexpr bool history_enum_tenths(int conv, const char* s, int& out) {
+    if (!s || !*s) return false;
+    const char* const* tbl = nullptr;
+    size_t             n   = 0;
+    if (conv == 315) {
+        tbl = IU_MODE;
+        n   = sizeof(IU_MODE) / sizeof(IU_MODE[0]);
+    } else if (conv == 217) {
+        tbl = OP_MODE;
+        n   = static_cast<size_t>(OP_MODE_COUNT - 1); // omit duplicate trailing "Aux."
+    }
+    for (size_t i = 0; i < n; ++i) {
+        if (tbl[i][0] && trend_cstr_eq(s, tbl[i])) {
+            out = static_cast<int>(i * 10u);
+            return true;
+        }
+    }
+    return false;
+}
+
+constexpr void history_fold_pending(HistorySample& pending, HistorySample s) {
+    if (!history_is_absent(s) || history_is_absent(pending)) pending = s;
+}
+
+constexpr void history_fold_min_pending(HistorySample& pending, HistorySample s) {
+    if (history_is_absent(s)) {
+        if (history_is_absent(pending)) pending = s;
+        return;
+    }
+    if (history_is_absent(pending) || s < pending) pending = s;
+}
+
+constexpr void history_fold_event_pending(HistorySample& pending, HistorySample s) {
+    constexpr HistorySample on = 10; // public binary 1 (or abnormality Fault) in tenths
+    if (pending == on) return;
+    if (s == on || (pending > 0 && s > 0) ||
+        (pending <= 0 && (!history_is_absent(s) || history_is_absent(pending))))
+        pending = s;
+}
+
+inline void history_packed_push(uint8_t* bytes, HistoryRingEncoding enc, uint16_t& count,
+                                uint16_t& head, HistorySample s) {
+    if (!bytes) return;
+    const uint16_t slot = static_cast<uint16_t>(head % HISTORY_SAMPLES);
+    history_packed_write(bytes, enc, slot, s);
+    head = static_cast<uint16_t>((slot + 1u) % HISTORY_SAMPLES);
+    if (count > HISTORY_SAMPLES) count = HISTORY_SAMPLES;
+    if (count < HISTORY_SAMPLES) count++;
+}
+
+inline size_t history_packed_snapshot(const uint8_t* bytes, HistoryRingEncoding enc, uint16_t count,
+                                      uint16_t head, HistorySample* out, size_t max) {
+    if (!bytes || !out || !max) return 0;
+    const size_t avail  = count < HISTORY_SAMPLES ? count : HISTORY_SAMPLES;
+    const size_t n      = avail < max ? avail : max;
+    const size_t oldest = (avail < HISTORY_SAMPLES) ? 0 : (head % HISTORY_SAMPLES);
+    for (size_t i = 0; i < n; i++)
+        out[i] = history_packed_read(bytes, enc, (oldest + i) % HISTORY_SAMPLES);
+    return n;
+}
+
+struct TrendRingView {
+    uint8_t*            bytes   = nullptr;
+    uint16_t*           count   = nullptr;
+    uint16_t*           head    = nullptr;
+    HistorySample*      pending = nullptr;
+    HistoryRingEncoding enc     = HistoryRingEncoding::Int16;
+
+    explicit operator bool() const { return bytes && count && head && pending; }
+
+    inline void reset() const {
+        if (!*this) return;
+        *count   = 0;
+        *head    = 0;
+        *pending = HISTORY_NO_READING;
+    }
+
+    inline void push(HistorySample s) const {
+        if (!*this) return;
+        history_packed_push(bytes, enc, *count, *head, s);
+    }
+
+    inline size_t snapshot(HistorySample* out, size_t max) const {
+        return *this ? history_packed_snapshot(bytes, enc, *count, *head, out, max) : 0;
+    }
+};
+
 // ── The ring itself ─────────────────────────────────────────────────────────────────────────────
 // Here rather than in history.cpp because it IS logic — bucket folding, wrap-around ordering and
 // skipped-bucket filling are exactly the kind of off-by-one that only shows up as a subtly wrong
@@ -782,28 +952,17 @@ struct TrendRing {
     // Fold one poll cycle into the open bucket. A real reading anywhere in the 5 minutes beats
     // absence, and a later reading beats an earlier one; absence survives only a bucket in which
     // nothing was measured at all, and then carries the LAST reason — the one still true at commit.
-    void fold(HistorySample s) {
-        if (!history_is_absent(s) || history_is_absent(pending)) pending = s;
-    }
+    void fold(HistorySample s) { history_fold_pending(pending, s); }
 
     // Minimum-folding for low-water-pressure visibility: retains the lowest valid reading observed
     // anywhere inside the 5-minute bucket so brief drops are not overwritten by later recovery.
-    void fold_min(HistorySample s) {
-        if (history_is_absent(s)) {
-            if (history_is_absent(pending)) pending = s;
-            return;
-        }
-        if (history_is_absent(pending) || s < pending) pending = s;
-    }
+    void fold_min(HistorySample s) { history_fold_min_pending(pending, s); }
 
-    // State-event folding: once ON was actually observed in this bucket it cannot be erased by a
-    // later OFF. This keeps a short heater run visible on the 5-minute raster without pretending its
-    // duration is known more precisely than the bucket. Unknown still yields to any real state.
-    void fold_binary_event(HistorySample s) {
-        constexpr HistorySample on = 10; // public binary 1 stored in the common tenths wire format
-        if (pending == on) return;
-        if (s == on || !history_is_absent(s) || history_is_absent(pending)) pending = s;
-    }
+    // State-event folding: once ON/Fault (10) was actually observed in this bucket it cannot be
+    // erased by a later lower severity or OFF; for multi-state abnormalities, Warning (20)
+    // similarly outranks Normal (0) while yielding to Fault (10). Unknown still yields to any real
+    // state.
+    void fold_binary_event(HistorySample s) { history_fold_event_pending(pending, s); }
 
     // Close the open bucket and open the next. `skipped` is how many buckets went by with no cycle
     // at all (a sweep that blocked for minutes on a dead bus); they are filled with NO_READING so
@@ -842,6 +1001,11 @@ struct TrendRing {
         const size_t newest = (static_cast<size_t>(head) + HISTORY_SAMPLES - 1) % HISTORY_SAMPLES;
         out = buf[(newest + HISTORY_SAMPLES - age) % HISTORY_SAMPLES];
         return true;
+    }
+
+    [[gnu::always_inline]] TrendRingView view() {
+        return {reinterpret_cast<uint8_t*>(buf), &count, &head, &pending,
+                HistoryRingEncoding::Int16};
     }
 };
 

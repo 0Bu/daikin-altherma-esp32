@@ -424,6 +424,15 @@ struct OtaUpdateResources {
         buffer = nullptr;
     }
 
+    [[gnu::noinline]] void abort_transfer() noexcept {
+        if (ota_open) {
+            esp_ota_abort(ota_handle);
+            ota_open = false;
+        }
+        release_buffer();
+        close_http_client(client, socket_deadline);
+    }
+
     ~OtaUpdateResources() {
         release_buffer();
         close_http_client(client, socket_deadline);
@@ -502,6 +511,21 @@ void set_state(const char* state, const char* message = "") {
     s_status.message = message;
 }
 
+[[gnu::noinline]] void set_error(const char* message) { set_state("error", message); }
+
+[[gnu::noinline]] bool quiesce_fail_diag(const char* name, bool weather = false) {
+    const OtaHeapSample sample = ota_heap_sample();
+    diag_printf(weather ? "ota: %s did not quiesce (free=%u B largest=%u B)\n"
+                        : "ota: %s did not acknowledge quiesce (free=%u B largest=%u B)\n",
+                name, static_cast<unsigned>(sample.free_bytes),
+                static_cast<unsigned>(sample.largest_internal_block));
+    return false;
+}
+
+[[gnu::noinline]] void quiesce_start_diag(const char* what) {
+    diag_printf("ota: waiting for the %s to release heap\n", what);
+}
+
 void set_progress(int pct) {
     // One sample per percentage point records a representative transfer low-water series without
     // turning every 2 KiB flash write into telemetry work. It cannot see allocations created and
@@ -512,89 +536,47 @@ void set_progress(int pct) {
     s_status.progress = pct;
 }
 
-bool wait_for_weather_quiesce() {
-    if (!weather_fetch_active()) return true;
-    diag_printf("ota: waiting for the %s to release heap\n", "in-flight weather TLS client");
+[[gnu::noinline]] bool wait_for_quiesce(bool (*ready)(), const char* start_what,
+                                        const char* fail_name, TickType_t limit = kPollQuiesceWait,
+                                        bool weather = false) {
+    if (ready()) return true;
+    quiesce_start_diag(start_what);
     const TickType_t started = xTaskGetTickCount();
-    while (weather_fetch_active() && xTaskGetTickCount() - started < kWeatherWait)
-        vTaskDelay(kAllocatorRetryDelay);
-    if (!weather_fetch_active()) return true;
-    const OtaHeapSample sample = ota_heap_sample();
-    diag_printf("ota: weather TLS client did not quiesce (free=%u B largest=%u B)\n",
-                static_cast<unsigned>(sample.free_bytes),
-                static_cast<unsigned>(sample.largest_internal_block));
-    return false;
+    while (!ready() && xTaskGetTickCount() - started < limit) vTaskDelay(kAllocatorRetryDelay);
+    return ready() || quiesce_fail_diag(fail_name, weather);
+}
+
+bool wait_for_weather_quiesce() {
+    return wait_for_quiesce([]() { return !weather_fetch_active(); },
+                            "in-flight weather TLS client", "weather TLS client", kWeatherWait,
+                            true);
 }
 
 bool wait_for_poll_quiesce() {
     if (hp_poll_ota_quiesced()) return true;
-    diag_printf("ota: waiting for the %s to release heap\n", "in-flight X10A poll cycle");
+    quiesce_start_diag("in-flight X10A poll cycle");
     const TickType_t started = xTaskGetTickCount();
     while (!hp_poll_ota_quiesced() && xTaskGetTickCount() - started < kPollQuiesceWait)
         vTaskDelay(kAllocatorRetryDelay);
-    if (hp_poll_ota_quiesced()) return true;
-    const OtaHeapSample sample = ota_heap_sample();
-    diag_printf("ota: %s did not acknowledge quiesce (free=%u B largest=%u B)\n", "X10A poll task",
-                static_cast<unsigned>(sample.free_bytes),
-                static_cast<unsigned>(sample.largest_internal_block));
-    return false;
+    return hp_poll_ota_quiesced() || quiesce_fail_diag("X10A poll task");
 }
 
 bool wait_for_mqtt_quiesce() {
-    if (mqtt_publish_network_quiesced()) return true;
-    diag_printf("ota: waiting for the %s to release heap\n", "MQTT publish cycle");
-    const TickType_t started = xTaskGetTickCount();
-    while (!mqtt_publish_network_quiesced() && xTaskGetTickCount() - started < kPollQuiesceWait)
-        vTaskDelay(kAllocatorRetryDelay);
-    if (mqtt_publish_network_quiesced()) return true;
-    const OtaHeapSample sample = ota_heap_sample();
-    diag_printf("ota: %s did not acknowledge quiesce (free=%u B largest=%u B)\n", "MQTT publisher",
-                static_cast<unsigned>(sample.free_bytes),
-                static_cast<unsigned>(sample.largest_internal_block));
-    return false;
+    return wait_for_quiesce(mqtt_publish_network_quiesced, "MQTT publish cycle", "MQTT publisher");
 }
 
 bool wait_for_mqtt_transport_quiesce() {
-    if (mqtt_transport_network_quiesced()) return true;
-    diag_printf("ota: waiting for the %s to release heap\n", "esp-mqtt transport");
-    const TickType_t started = xTaskGetTickCount();
-    while (!mqtt_transport_network_quiesced() && xTaskGetTickCount() - started < kPollQuiesceWait)
-        vTaskDelay(kAllocatorRetryDelay);
-    if (mqtt_transport_network_quiesced()) return true;
-    const OtaHeapSample sample = ota_heap_sample();
-    diag_printf("ota: %s did not acknowledge quiesce (free=%u B largest=%u B)\n",
-                "esp-mqtt transport", static_cast<unsigned>(sample.free_bytes),
-                static_cast<unsigned>(sample.largest_internal_block));
-    return false;
+    return wait_for_quiesce(mqtt_transport_network_quiesced, "esp-mqtt transport",
+                            "esp-mqtt transport");
 }
 
 bool wait_for_modbus_quiesce() {
-    if (mb_network_quiesced() && hp_modbus_ota_quiesced()) return true;
-    diag_printf("ota: waiting for the %s to release heap\n", "in-flight HomeHub cycle");
-    const TickType_t started = xTaskGetTickCount();
-    while ((!mb_network_quiesced() || !hp_modbus_ota_quiesced()) &&
-           xTaskGetTickCount() - started < kPollQuiesceWait)
-        vTaskDelay(kAllocatorRetryDelay);
-    if (mb_network_quiesced() && hp_modbus_ota_quiesced()) return true;
-    const OtaHeapSample sample = ota_heap_sample();
-    diag_printf("ota: %s did not acknowledge quiesce (free=%u B largest=%u B)\n", "HomeHub task",
-                static_cast<unsigned>(sample.free_bytes),
-                static_cast<unsigned>(sample.largest_internal_block));
-    return false;
+    return wait_for_quiesce([]() { return mb_network_quiesced() && hp_modbus_ota_quiesced(); },
+                            "in-flight HomeHub cycle", "HomeHub task");
 }
 
 bool wait_for_syslog_quiesce() {
-    if (syslog_network_quiesced()) return true;
-    diag_printf("ota: waiting for the %s to release heap\n", "in-flight Syslog cycle");
-    const TickType_t started = xTaskGetTickCount();
-    while (!syslog_network_quiesced() && xTaskGetTickCount() - started < kPollQuiesceWait)
-        vTaskDelay(kAllocatorRetryDelay);
-    if (syslog_network_quiesced()) return true;
-    const OtaHeapSample sample = ota_heap_sample();
-    diag_printf("ota: %s did not acknowledge quiesce (free=%u B largest=%u B)\n", "Syslog task",
-                static_cast<unsigned>(sample.free_bytes),
-                static_cast<unsigned>(sample.largest_internal_block));
-    return false;
+    return wait_for_quiesce(syslog_network_quiesced, "in-flight Syslog cycle", "Syslog task");
 }
 
 // Resolve the ordinary CONFIG feed once, at check acceptance, into the same fixed representation as
@@ -941,6 +923,18 @@ ChangelogBuffer fetch_changelog(const std::string& manifest_url, const char* run
     return retained;
 }
 
+[[gnu::noinline]] void clear_check_error(const char* err) {
+    Lock lk(s_mtx);
+    s_status.state            = "error";
+    s_status.message          = err;
+    s_status.update_available = false;
+    s_status.downgrade        = false;
+    s_status.available.clear();
+    s_status.available_sha256.fill('\0');
+    s_status.available_channel.clear();
+    clear_offer_feed_locked();
+}
+
 void run_check(const OtaTaskArgs& request) {
     set_state("checking");
     const std::string running = esp_app_get_description()->version;
@@ -951,15 +945,7 @@ void run_check(const OtaTaskArgs& request) {
     const char*         err = "Update check failed";
     if (!fetch_manifest_identity(url, offer, err)) {
         diag_printf("ota: check failed (%s channel): %s\n", ota_channel_name(ch), err);
-        Lock lk(s_mtx);
-        s_status.state            = "error";
-        s_status.message          = err;
-        s_status.update_available = false;
-        s_status.downgrade        = false;
-        s_status.available.clear();
-        s_status.available_sha256.fill('\0');
-        s_status.available_channel.clear();
-        clear_offer_feed_locked();
+        clear_check_error(err);
         return;
     }
 
@@ -984,15 +970,7 @@ void run_check(const OtaTaskArgs& request) {
                                offer.app_sha256, request.offer.feed)) {
         diag_printf("ota: check refused an invalid effective feed binding (%s channel)\n",
                     ota_channel_name(ch));
-        Lock lk(s_mtx);
-        s_status.state            = "error";
-        s_status.message          = "No usable update feed configured";
-        s_status.update_available = false;
-        s_status.downgrade        = false;
-        s_status.available.clear();
-        s_status.available_sha256.fill('\0');
-        s_status.available_channel.clear();
-        clear_offer_feed_locked();
+        clear_check_error("No usable update feed configured");
         return;
     }
 
@@ -1068,7 +1046,7 @@ void activate_update(OtaUpdateResources& resources, const esp_partition_t* updat
             esp_ota_abort(ota_handle);
             ota_open = false;
         }
-        set_state("error", "Not enough memory to verify the update — retry after reboot");
+        set_error("Not enough memory to verify the update — retry after reboot");
         return;
     }
 
@@ -1090,12 +1068,12 @@ void activate_update(OtaUpdateResources& resources, const esp_partition_t* updat
                         static_cast<unsigned>(verify_heap.largest_internal_block),
                         static_cast<unsigned>(after.free_bytes),
                         static_cast<unsigned>(after.largest_internal_block));
-            set_state("error", "Update rejected: image validation failed");
+            set_error("Update rejected: image validation failed");
         } else {
             diag_printf("ota: %s failed (%s; free=%u B largest=%u B)\n", "esp_ota_end",
                         esp_err_to_name(e), static_cast<unsigned>(after.free_bytes),
                         static_cast<unsigned>(after.largest_internal_block));
-            set_state("error", "Couldn't install the update");
+            set_error("Couldn't install the update");
         }
         return;
     }
@@ -1107,7 +1085,7 @@ void activate_update(OtaUpdateResources& resources, const esp_partition_t* updat
     OtaHeapSample selection_heap{};
     if (!wait_for_ota_headroom("boot selection", OTA_VALIDATION_HEADROOM,
                                kValidationHeadroomMaxAttempts, selection_heap)) {
-        set_state("error", "Not enough memory to activate the update — retry after reboot");
+        set_error("Not enough memory to activate the update — retry after reboot");
         return;
     }
     e = esp_ota_set_boot_partition(update_partition);
@@ -1117,9 +1095,8 @@ void activate_update(OtaUpdateResources& resources, const esp_partition_t* updat
                     "validated image but boot selection", esp_err_to_name(e),
                     static_cast<unsigned>(after.free_bytes),
                     static_cast<unsigned>(after.largest_internal_block));
-        set_state("error", e == ESP_ERR_OTA_VALIDATE_FAILED
-                               ? "Update rejected: image validation failed"
-                               : "Couldn't activate the update");
+        set_error(e == ESP_ERR_OTA_VALIDATE_FAILED ? "Update rejected: image validation failed"
+                                                   : "Couldn't activate the update");
         return;
     }
 
@@ -1153,7 +1130,7 @@ void run_upload(const OtaTaskArgs& request, OtaUploadRequest& upload) {
     // busy guard refuses HTTP configuration writes throughout the accepted operation.
     if (!partition || !ota_upload_allowed(config_ota_channel(), request.upload.length,
                                           partition->size, request.offer.app_sha256.data())) {
-        set_state("error", "Upload requires the dev channel and a fitting signed image");
+        set_error("Upload requires the dev channel and a fitting signed image");
         return;
     }
     set_state("updating", "Receiving a local test image");
@@ -1169,7 +1146,7 @@ void run_upload(const OtaTaskArgs& request, OtaUploadRequest& upload) {
     resources.buffer =
         static_cast<uint8_t*>(heap_caps_malloc(kOtaBufSize, MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL));
     if (!resources.buffer) {
-        set_state("error", "Not enough memory for the upload — retry after reboot");
+        set_error("Not enough memory for the upload — retry after reboot");
         return;
     }
     constexpr size_t probe_size =
@@ -1189,7 +1166,7 @@ void run_upload(const OtaTaskArgs& request, OtaUploadRequest& upload) {
     while (received < probe_size) {
         const int n = read(received, probe_size - received);
         if (n < 0) {
-            set_state("error", "Upload interrupted or timed out");
+            set_error("Upload interrupted or timed out");
             return;
         }
         received += static_cast<size_t>(n);
@@ -1204,19 +1181,19 @@ void run_upload(const OtaTaskArgs& request, OtaUploadRequest& upload) {
         image.magic_word != ESP_APP_DESC_MAGIC_WORD ||
         std::memcmp(image.project_name, running->project_name, sizeof(image.project_name)) != 0 ||
         image.version[0] == '\0' || !std::memchr(image.version, '\0', sizeof(image.version))) {
-        set_state("error", "Upload rejected: wrong project or invalid image header");
+        set_error("Upload rejected: wrong project or invalid image header");
         return;
     }
     // Local test images intentionally allow equal and older versions; this never changes feed
     // policy.
     esp_err_t e = esp_ota_begin(partition, OTA_WITH_SEQUENTIAL_WRITES, &resources.ota_handle);
     if (e != ESP_OK) {
-        set_state("error", "Upload could not start; check firmware probation and memory");
+        set_error("Upload could not start; check firmware probation and memory");
         return;
     }
     resources.ota_open = true;
     if (psa_hash_setup(&resources.hash_operation, PSA_ALG_SHA_256) != PSA_SUCCESS) {
-        set_state("error", "Upload hash could not start");
+        set_error("Upload hash could not start");
         return;
     }
     resources.hash_active = true;
@@ -1224,7 +1201,7 @@ void run_upload(const OtaTaskArgs& request, OtaUploadRequest& upload) {
     for (;;) {
         if (psa_hash_update(&resources.hash_operation, resources.buffer, received) != PSA_SUCCESS ||
             esp_ota_write(resources.ota_handle, resources.buffer, received) != ESP_OK) {
-            set_state("error", "Upload could not be written or hashed");
+            set_error("Upload could not be written or hashed");
             return;
         }
         written += received;
@@ -1237,7 +1214,7 @@ void run_upload(const OtaTaskArgs& request, OtaUploadRequest& upload) {
         const int n =
             read(0, std::min(static_cast<size_t>(kOtaBufSize), request.upload.length - written));
         if (n < 0) {
-            set_state("error", "Upload interrupted or timed out");
+            set_error("Upload interrupted or timed out");
             return;
         }
         received = static_cast<size_t>(n);
@@ -1251,10 +1228,18 @@ void run_upload(const OtaTaskArgs& request, OtaUploadRequest& upload) {
     resources.release_buffer();
     if (hash != PSA_SUCCESS || digest_length != sizeof(digest) ||
         !ota_sha256_matches(digest, request.offer.app_sha256.data())) {
-        set_state("error", "Upload rejected: SHA-256 mismatch");
+        set_error("Upload rejected: SHA-256 mismatch");
         return;
     }
     activate_update(resources, partition, image.version, &upload);
+}
+
+[[gnu::noinline]] void set_offer_error(const char* message, const char* avail = nullptr) {
+    Lock lk(s_mtx);
+    s_status.state   = "error";
+    s_status.message = message;
+    if (avail) s_status.available = avail;
+    s_status.update_available = false;
 }
 
 void run_update(const OtaTaskArgs& request) {
@@ -1297,15 +1282,12 @@ void run_update(const OtaTaskArgs& request) {
     if (!ota_install_allowed(running, avail, allow_downgrade)) {
         diag_printf("ota: refusing %s while running %s (%s)\n", avail, running,
                     allow_downgrade ? "not a different version" : "not strictly newer");
-        Lock lk(s_mtx);
-        s_status.state = "error";
         // With the downgrade flag set, "no NEWER firmware" would be a wrong diagnosis: the only way
         // to land here is an equal (or unparseable) version, i.e. the channel already serves what
         // is running — which is the ordinary outcome of switching to a channel you are already on.
-        s_status.message   = allow_downgrade ? "This channel already serves the running build"
-                                             : "No newer firmware available";
-        s_status.available = avail;
-        s_status.update_available = false;
+        set_offer_error(allow_downgrade ? "This channel already serves the running build"
+                                        : "No newer firmware available",
+                        avail);
         return;
     }
 
@@ -1319,9 +1301,9 @@ void run_update(const OtaTaskArgs& request) {
         s_status.message          = "";
     }
 
-    const std::string url =
-        ota_url_join(request.offer.feed.firmware_base.data(),
-                     std::string("daikin-altherma-esp32") + ota_img_suffix() + ".bin");
+    char bin_name[48];
+    std::snprintf(bin_name, sizeof(bin_name), "daikin-altherma-esp32%s.bin", ota_img_suffix());
+    const std::string url = ota_url_join(request.offer.feed.firmware_base.data(), bin_name);
     if (url.empty()) {
         diag_printf("ota: no firmware URL configured for the %s channel\n", ota_channel_name(ch));
         set_state("error", "No update URL configured");
@@ -1385,7 +1367,7 @@ void run_update(const OtaTaskArgs& request) {
     if (e != ESP_OK) {
         const HttpClientOpenFailure failure =
             http_client_log_open_failure("ota", client, e, before);
-        close_http_client(client, socket_deadline);
+        resources.abort_transfer();
         diag_printf("ota: firmware stream failed (status=%d, err=%s, tls=0x%lx)\n", status,
                     esp_err_to_name(e), static_cast<unsigned long>(failure.tls_error));
         const bool allocator_failure =
@@ -1408,7 +1390,7 @@ void run_update(const OtaTaskArgs& request) {
     buffer =
         static_cast<uint8_t*>(heap_caps_malloc(kOtaBufSize, MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL));
     if (!buffer) {
-        close_http_client(client, socket_deadline);
+        resources.abort_transfer();
         const OtaHeapSample failed = ota_heap_sample();
         diag_printf("ota: %s-buffer allocation failed (free=%u B largest=%u B)\n", "download",
                     static_cast<unsigned>(failed.free_bytes),
@@ -1419,8 +1401,7 @@ void run_update(const OtaTaskArgs& request) {
 
     const esp_partition_t* update_partition = esp_ota_get_next_update_partition(nullptr);
     if (!update_partition || (total > 0 && static_cast<uint64_t>(total) > update_partition->size)) {
-        resources.release_buffer();
-        close_http_client(client, socket_deadline);
+        resources.abort_transfer();
         diag_printf("ota: no suitable update partition (image=%lld B)\n",
                     static_cast<long long>(total));
         set_state("error", "Update image does not fit this device");
@@ -1436,8 +1417,7 @@ void run_update(const OtaTaskArgs& request) {
     e = esp_ota_begin(update_partition, OTA_WITH_SEQUENTIAL_WRITES, &ota_handle);
     if (e == ESP_OK) ota_open = true;
     if (e != ESP_OK) {
-        resources.release_buffer();
-        close_http_client(client, socket_deadline);
+        resources.abort_transfer();
         diag_printf("ota: esp_ota_begin failed (%s)\n", esp_err_to_name(e));
         set_state("error", e == ESP_ERR_NO_MEM
                                ? "Not enough memory for the update download — retry after reboot"
@@ -1474,12 +1454,7 @@ void run_update(const OtaTaskArgs& request) {
         read_timeouts = 0;
     }
     if (probe_len != kImageProbeSize) {
-        if (ota_open) {
-            esp_ota_abort(ota_handle);
-            ota_open = false;
-        }
-        resources.release_buffer();
-        close_http_client(client, socket_deadline);
+        resources.abort_transfer();
         diag_printf("ota: incomplete image header (%u/%u B)\n", static_cast<unsigned>(probe_len),
                     static_cast<unsigned>(kImageProbeSize));
         set_state("error",
@@ -1495,12 +1470,7 @@ void run_update(const OtaTaskArgs& request) {
     if (image_header.magic != ESP_IMAGE_HEADER_MAGIC ||
         image_header.chip_id != CONFIG_IDF_FIRMWARE_CHIP_ID ||
         img.magic_word != ESP_APP_DESC_MAGIC_WORD) {
-        if (ota_open) {
-            esp_ota_abort(ota_handle);
-            ota_open = false;
-        }
-        resources.release_buffer();
-        close_http_client(client, socket_deadline);
+        resources.abort_transfer();
         diag_printf("ota: image header rejected (magic=0x%02x chip=%u desc=0x%08lx)\n",
                     image_header.magic, static_cast<unsigned>(image_header.chip_id),
                     static_cast<unsigned long>(img.magic_word));
@@ -1525,33 +1495,17 @@ void run_update(const OtaTaskArgs& request) {
     // two strings from one stamped value (ci-build-all.sh reads the built image back), so in the
     // field a mismatch is a stale cache, a broken host or an attack.
     if (!ota_artifact_versions_match(avail, imgver)) {
-        if (ota_open) {
-            esp_ota_abort(ota_handle);
-            ota_open = false;
-        }
-        resources.release_buffer();
-        close_http_client(client, socket_deadline);
+        resources.abort_transfer();
         diag_printf("ota: REFUSING image v%s: manifest claimed %s (artifact mismatch)\n", imgver,
                     avail);
-        Lock lk(s_mtx);
-        s_status.state            = "error";
-        s_status.message          = "Update rejected: manifest and image versions differ";
-        s_status.update_available = false;
+        set_offer_error("Update rejected: manifest and image versions differ");
         return;
     }
     if (!ota_install_allowed(running, imgver, allow_downgrade)) {
-        if (ota_open) {
-            esp_ota_abort(ota_handle);
-            ota_open = false;
-        }
-        resources.release_buffer();
-        close_http_client(client, socket_deadline);
+        resources.abort_transfer();
         diag_printf("ota: REFUSING image v%s while running v%s (manifest claimed %s)\n", imgver,
                     running, avail);
-        Lock lk(s_mtx);
-        s_status.state            = "error";
-        s_status.message          = "Update rejected: not newer than the running firmware";
-        s_status.update_available = false;
+        set_offer_error("Update rejected: not newer than the running firmware");
         return;
     }
 
@@ -1564,12 +1518,7 @@ void run_update(const OtaTaskArgs& request) {
     bool&                 hash_active    = resources.hash_active;
     hash_active                          = hash_status == PSA_SUCCESS;
     if (!hash_active) {
-        if (ota_open) {
-            esp_ota_abort(ota_handle);
-            ota_open = false;
-        }
-        resources.release_buffer();
-        close_http_client(client, socket_deadline);
+        resources.abort_transfer();
         diag_printf("ota: exact-artifact hash setup failed (%ld)\n",
                     static_cast<long>(hash_status));
         set_state("error", "Couldn't verify the exact update artifact");

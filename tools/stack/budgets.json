@@ -379,7 +379,7 @@
     },
     "modbus_history": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?history_record_modbus\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?21history_record_modbus[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
-      "max_bytes": 112
+      "max_bytes": 160
     },
     "modbus_read": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?mb_read\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?7mb_read[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",

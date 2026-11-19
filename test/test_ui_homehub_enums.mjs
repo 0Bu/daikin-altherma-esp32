@@ -319,6 +319,62 @@ assert.doesNotMatch(en.vDescRow(UNKNOWN_AGE), /may be from the last run/,
   "and stops once the HomeHub's compressor flag has settled it");
 en.state.live = null;
 en.state._values = [];
+{
+  const prevHistory = en.state.status.history;
+  const prevModbus = en.state._modbus;
+  const pumpRow = { label: "Water pump operation", value: "1", unit: "", reg: 0x60,
+                    binary: true, concept: "pump_running" };
+  const spaceRow = { label: "Space heating Operation ON/OFF", value: "1", unit: "", reg: 0x62,
+                     binary: true, concept: "space_op" };
+  en.state.status.history = {
+    rows: [],
+    modbus_rows: [
+      { id: "pump_state", label: "Circulation pump running" },
+      { id: "modbus_space_state", label: "Space heating/cooling normal operation" },
+    ],
+    env3_rows: [],
+  };
+  en.state._modbus = [
+    { off: 30, label: "Circulation pump running", value: "1", unit: "", binary: true,
+      concept: "pump_running", history: "pump_state" },
+    { off: 53, label: "Space heating/cooling normal operation", value: "1", unit: "", binary: true,
+      concept: "space_op", history: "modbus_space_state" },
+  ];
+  assert.match(en.vDescRow(pumpRow), /data-trend="pump_state"/,
+    "paired X10A pump row opens Modbus pump_state timeline when no X10A ring exists");
+  assert.match(en.vDescRow(spaceRow), /data-trend="modbus_space_state"/,
+    "paired X10A space-op row opens Modbus modbus_space_state timeline when no X10A ring exists");
+  en.state.status.history = { rows: [], modbus_rows: [], env3_rows: [] };
+  en.state._modbus = [];
+  assert.doesNotMatch(en.vDescRow(pumpRow), /data-trend=/,
+    "unconfigured HomeHub keeps paired pump row without a synthetic trend");
+  assert.doesNotMatch(en.vDescRow(spaceRow), /data-trend=/,
+    "unconfigured HomeHub keeps paired space-op row without a synthetic trend");
+  en.state.status.history = {
+    rows: [
+      { id: "x10a_pump_state", label: "Water pump operation" },
+      { id: "x10a_space_state", label: "Space heating Operation ON/OFF" },
+      { id: "thermostat_state", label: "Thermostat ON/OFF" },
+    ],
+    modbus_rows: [
+      { id: "pump_state", label: "Circulation pump running" },
+      { id: "modbus_space_state", label: "Space heating/cooling normal operation" },
+    ],
+    env3_rows: [],
+  };
+  assert.match(en.vDescRow(pumpRow), /data-trend="x10a_pump_state"/,
+    "offered X10A pump trend attaches x10a_pump_state even when HomeHub pump_state is also present");
+  assert.match(en.vDescRow(spaceRow), /data-trend="x10a_space_state"/,
+    "offered X10A space-op trend attaches x10a_space_state even when HomeHub modbus_space_state is also present");
+  assert.match(en.vDescRow({ label: "Thermostat ON/OFF", value: "1", reg: 0x60, binary: true,
+    x10a_group: "hydronic", concept: "thermostat_state" }), /data-trend="thermostat_state"/,
+    "hydronic Thermostat ON/OFF attaches thermostat_state");
+  assert.doesNotMatch(en.vDescRow({ label: "Thermostat ON/OFF", value: "0", reg: 0x10, binary: true,
+    x10a_group: "outdoor_state" }), /data-trend=/,
+    "outdoor-controller Thermostat ON/OFF on page 0x10 must not borrow hydronic 0x60 thermostat history");
+  en.state.status.history = prevHistory;
+  en.state._modbus = prevModbus;
+}
 const modelLabels = {
   capacity: "Nennleistung der Außeneinheit",
   capacity_iu: "Nennleistung der Inneneinheit",

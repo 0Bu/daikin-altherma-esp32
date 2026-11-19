@@ -305,10 +305,13 @@ Heat output retains signed balance across heating, cooling and defrost; the live
 current mode and useful-direction gates. Measured no flow records zero. Moving water needs a running
 compressor speed or HomeHub `compressor_state` (`modbus` source), so a profile without a
 compressor witness omits heat-output curves and stopped-compressor pump overrun leaves a gap. Raw
-current-transformer phases and inverter current retain their own histories, while HomeHub provides
-its own `modbus_power` (`51`, HomeHub electrical input), `compressor_state` (`31`, including
-contiguous active-phase count across the 24-hour five-minute raster), `modbus_defrost_state`
-(`35`), and `pump_state` (`30`) timelines without splicing into X10A series. Because a five-minute
+current-transformer phases and inverter current retain their own histories, while HomeHub keeps
+independent 24-hour rings across its 35 buffered registers — including `modbus_power` (`51`),
+`compressor_state` (`31`, including contiguous active-phase count across the 24-hour five-minute
+raster), `modbus_defrost_state` (`35`), setpoints/offsets/power limits, and mode, abnormality and
+binary timelines ([MODBUS_PROTOCOL.md](MODBUS_PROTOCOL.md)) — without splicing into X10A series;
+`pump_state` (`30`) and `modbus_space_state` (`53`) pair onto the same state chart as X10A
+`x10a_pump_state` and `x10a_space_state` when offered. Because a five-minute
 bucket can combine raw rings from different sweeps, X10A electrical input (`pel`) and heating/DHW
 COP (`cop`) are evaluated per sweep into dedicated firmware rings: partial CT sweeps leave a gap,
 all-zero CTs fall back to witnessed inverter current (held-over at `0 rps`), and `cop` is held-over
@@ -322,9 +325,12 @@ concept.
 
 Categorical histories share one compact plot with distinct state colours, hatching only for missing
 samples, X10A active when available and paired Modbus active by default and toggleable in the legend; the bubble states
-the phase range and state while the selected instant appears on the lower time scale. Valve and
-Quiet use latest sampled state; BSH, BUH stages and
-Defrost retain any observed activation in their open five-minute bucket. Smart Grid retains all
+the phase range and state while the selected instant appears on the lower time scale. Valve, Quiet,
+Thermostat, Pump, Space/DHW-operation, enable/reheat and multi-state operation-mode (`ou_op_mode`,
+`iu_op_mode`, `modbus_current_op_mode`, `modbus_op_mode`) timelines use latest sampled state, hiding
+unused optional enum levels; BSH, BUH stages, Defrost, Hot-start, DHW powerful/booster and
+Disinfection retain any observed activation in their open five-minute bucket, and HomeHub
+`modbus_abnormality_state` (`21`) folds by severity (Fault > Warning > Normal). Smart Grid retains all
 four states. Disinfection and X10A Tank preheat remain different facts. Totals are sampled raster
 time; events between sweeps may be missed.
 The tank-temperature chart distinguishes the Smart Grid “Recommended on” request from observed
