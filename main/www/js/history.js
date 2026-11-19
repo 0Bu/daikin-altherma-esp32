@@ -235,8 +235,7 @@ function histLegendLast(h, visible, s) {
 }
 
 function histSeriesLabel(series) {
-  return histRetained(series.raw) && series.v.some(v => v != null)
-    ? `${series.name} · ${t("hist.retained")}` : series.name;
+  return series.name;
 }
 
 function lastSample(values, end = values.length) {
@@ -1382,7 +1381,7 @@ function stateHistHtml(id, name, view, wrap, cfg) {
   const hasMissing = visible.some((s) => stateRuns(s, null, cfg.classify).length > 0);
   const sourceItems = view.series.length > 1
     ? view.series.map((s) => histLegendHtml(view, s, histSourceClass(s.source)))
-    : (histRetained(view) || view.series[0]?.source === "modbus" || id === "circulation_state")
+    : (view.series[0]?.source === "modbus" || id === "circulation_state")
       ? view.series.map((s) => `<span class="vhist-source${histSourceClass(s.source)}"><i></i>${esc(histSeriesLabel(s))}</span>`)
       : [];
   const levelItems = cfg.levels
@@ -1451,19 +1450,22 @@ function tankAuxHistories() {
 }
 
 const tankAuxRevision = histories => histories?.map(h =>
-  h ? `${h.gen}:${h.expired || 0}:${!!histRetained(h)}:${!!h.err}` : "").join(",");
+  h ? `${h.gen || 0}:${h.expired || 0}` : "").join(",");
 
 const dhwPhaseLabel = (phase) => `${t(phase.label)} · ${phase.source === "modbus" ? "Modbus" : "X10A"}`;
 
+function dhwPhaseVisible(view, source) {
+  if (view?.scope) return view.scope === source;
+  if (!view?.series?.some((s) => s.source === source)) return true;
+  return histVisibleSeries(view).some((s) => s.source === source);
+}
+
 function dhwAuxPhases(view) {
   return (view?.tankAux || []).flatMap((h, i) => {
-    if (!h) return [];
     const phase = DHW_PHASE_SERIES[i];
-    const values = view.v.map((_, j) => alignAuxSample(view, h, j, phase.source));
-    const flags = values.map(v => v === phase.active);
-    const status = h.err ? "hist.err" : histRetained(h)
-      ? values.some(v => v != null) ? "hist.retained" : "hist.err" : "";
-    return [{ ...phase, flags, count: flags.filter(Boolean).length, status }];
+    if (!h || !dhwPhaseVisible(view, phase.source)) return [];
+    const flags = view.v.map((_, j) => alignAuxSample(view, h, j, phase.source) === phase.active);
+    return [{ ...phase, flags, count: flags.filter(Boolean).length }];
   });
 }
 
@@ -1575,7 +1577,7 @@ function histHtml(id, unit, name, source = "", identifySource = false) {
   const aux = id === "dhw_tank" ? dhwAuxPhases(view) : [];
   let phaseBands = "";
   const legendItems = (identifySource || view.series.length > 1 ||
-    histRetained(view) || ["modbus", "room"].includes(view.series[0].source))
+    ["modbus", "room"].includes(view.series[0].source))
     ? view.series.map((s) => histLegendHtml(view, s, histSourceClass(s.source)))
     : [];
   if (aux.length) {
@@ -1615,9 +1617,6 @@ function histHtml(id, unit, name, source = "", identifySource = false) {
           ` <small class="mono num">(${histDuration(phase.count * view.dt)})</small></span>`
         );
       }
-      if (phase.status) legendItems.push(
-        `<span class="vhist-source">${esc(dhwPhaseLabel(phase))} · ${esc(t(phase.status))}</span>`
-      );
     }
   }
   const legend = legendItems.length
@@ -1984,12 +1983,21 @@ function histPinToggle(id, i, source = "", captured) {
 }
 
 // Selected time belongs on the axis, including relative ages when the source has no wall clock.
+function histAxisClock(h, index) {
+  return new Date((h.t0 + index * h.dt) * 1000)
+    .toLocaleTimeString(LANG, { hour: "2-digit", minute: "2-digit" });
+}
+
 function histAxisStart(h, spanH) {
-  return histAxisRetained(h) ? t("hist.recorded", spanH) : t("hist.ago", spanH);
+  if (!histAxisRetained(h)) return t("hist.ago", spanH);
+  const end = h.recordedN ?? h.v.length;
+  return h.t0 != null && end > 0 ? histAxisClock(h, 0) : "";
 }
 
 function histAxisEnd(h) {
-  return histAxisRetained(h) ? "" : t("hist.now");
+  if (!histAxisRetained(h)) return t("hist.now");
+  const end = h.recordedN ?? h.v.length;
+  return h.t0 != null && end > 1 ? histAxisClock(h, end - 1) : "";
 }
 
 function histAxisRetained(h) {
@@ -2107,6 +2115,7 @@ function numericTipEntries(h, i, aux) {
   }
   const active = h.tankAux
     ? (aux ? aux.filter((phase) => phase.flags[i]) : DHW_PHASE_SERIES.filter((phase, j) =>
+        dhwPhaseVisible(h, phase.source) &&
         alignAuxSample(h, h.tankAux[j], i, phase.source) === phase.active)).map(dhwPhaseLabel)
     : [];
   return { multi: visible.length > 1, rows, note: active.join(" + ") };
