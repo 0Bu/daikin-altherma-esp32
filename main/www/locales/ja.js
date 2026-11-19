@@ -1,4 +1,4 @@
-// translation-source: 8d39ceba8be704e3a02e1f3012fba8f388b32c4e1e353afc033c83be08bee81f
+// translation-source: 7868c79654d72277f20939757ce97fa1a10e51ae6f225d939d15f7dd6f917646
 I18N.ja = localeValues([
   /* sys.nodata */ "データなし",
   /* sys.unreachable */ "接続不可",
@@ -1285,6 +1285,8 @@ INSPECT_I18N.ja = inspectValues(
     ["水流量", "水流量", "共通水回路の流量です。必要最小値は機種とモードで異なります。"], // flow
     ["流量スイッチ", "流量スイッチ状態", "X10Aの2値状態です。l/minを測らず、機種の最小流量も確認しません。", (d) => d.flowSwitch == null ? null : d.flowSwitch ? `X10A 入。ポンプと ${fmt1(d.flow)} l/minを比較してください。` : `X10A 切。ポンプ運転中は ${fmt1(d.flow)} l/minと7H/C0異常を確認してください。`], // flow_switch
     ["水圧", "水圧", "閉じた水回路の圧力です。許容範囲は機種、高低差、膨張タンクで異なるため取扱説明書を参照してください。"], // wp
+    ["X10Aサービスポート", "X10Aデータソース", "有線・読み取り専用のX10A接続。測定値は青色で表示されます。"], // x10a
+    ["Modbus TCP", "Modbusデータソース", "独立した読み取り専用のModbus TCP接続（HomeHub/Altherma 4）。値はペトロール色です。"], // modbus
   ],
 );
 

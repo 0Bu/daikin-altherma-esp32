@@ -1,4 +1,4 @@
-// translation-source: 8d39ceba8be704e3a02e1f3012fba8f388b32c4e1e353afc033c83be08bee81f
+// translation-source: 7868c79654d72277f20939757ce97fa1a10e51ae6f225d939d15f7dd6f917646
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -1108,6 +1108,8 @@ INSPECT_I18N.sv = inspectValues(
     ["Vattenflöde", 0, "Gemensamt vattenflöde; miniminivån beror på modell och ska tolkas med pump/tryck."], // flow
     ["Flödesvakt", 0, "Binär X10A-status; mäter inte l/min eller bekräftar minimiflöde.", (d) => d.flowSwitch == null ? null : d.flowSwitch ? d.flow == null ? "X10A-status aktiv; flödesmätning saknas." : `X10A-status aktiv; jämför pump och ${fmt1(d.flow)} l/min.` : d.flow == null ? "X10A-status inaktiv; flödesmätning saknas." : `X10A-status inaktiv; jämför ${fmt1(d.flow)} l/min och 7H/C0.`], // flow_switch
     ["Vattentryck", 0, "Vattentryck, inte köldmedietryck; tillåtet intervall beror på modell/installation."], // wp
+    ["X10A-serviceport", "X10A-datakälla", "Trådbunden skrivskyddad X10A-anslutning; värden visas i blått."], // x10a
+    ["Modbus TCP", "Modbus-datakälla", "Oberoende skrivskyddad Modbus TCP-anslutning (HomeHub/Altherma 4); värden i petrol."], // modbus
   ],
 );
 

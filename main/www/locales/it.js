@@ -1,4 +1,4 @@
-// translation-source: 8d39ceba8be704e3a02e1f3012fba8f388b32c4e1e353afc033c83be08bee81f
+// translation-source: 7868c79654d72277f20939757ce97fa1a10e51ae6f225d939d15f7dd6f917646
 I18N.it = localeValues([
   /* sys.nodata */ "Nessun dato",
   /* sys.unreachable */ "Non raggiungibile",
@@ -1091,6 +1091,8 @@ INSPECT_I18N.it = inspectValues(
     ["Portata", "Portata acqua", "Portata del circuito comune. Il minimo dipende dal modello; leggerla con pompa e pressione."], // flow
     ["Stato flussostato", 0, "Ingresso binario X10A; non misura l/min né conferma la portata minima.", (d) => d.flowSwitch == null ? null : d.flowSwitch ? `X10A attivo; confrontare con pompa e ${fmt1(d.flow)} l/min.` : `X10A inattivo; con pompa attiva confrontare ${fmt1(d.flow)} l/min e guasti 7H/C0.`], // flow_switch
     ["Pressione acqua", 0, "Pressione del circuito idraulico, non del refrigerante. L’intervallo ammesso dipende da modello e impianto; consultare il manuale esatto."], // wp
+    ["Porta di servizio X10A", "Sorgente dati X10A", "Collegamento X10A in sola lettura; i suoi valori compaiono in blu."], // x10a
+    ["Modbus TCP", "Sorgente dati Modbus", "Collegamento Modbus TCP indipendente in sola lettura (HomeHub/Altherma 4); valori in petrolio."], // modbus
   ],
 );
 
@@ -1283,4 +1285,75 @@ MODEL_DESCRIPTION_I18N.it = modelDescriptionValues([
   ["Più famiglie Daikin condividono registri e capacità, quindi il nome esatto non è distinguibile; i valori restano validi e la targa identifica il modello."], // candidates
   ["Senza capacità esterna i candidati possono differire; il firmware usa la miglior corrispondenza interna senza certezza, da verificare sulla targa."], // candidates_nocap
   ["Byte identificativi dell’unità esterna senza mappa pubblica dei nomi; in caso ambiguo confrontarli con la targa."], // oueeprom
+]);
+
+FAULT_CODE_I18N.it = faultCodeValues([
+  "Problema di portata dell’acqua", // 7H
+  "Guasto del sensore temperatura di ritorno", // 80
+  "Guasto del sensore temperatura di mandata", // 81
+  "Protezione antigelo dello scambiatore attivata", // 89
+  "Aumento anomalo della temperatura in uscita ACS", // 8F
+  "Aumento anomalo della temperatura di mandata", // 8H
+  "Guasto del rilevamento del passaggio per lo zero", // A1
+  "Problema di limitazione alta pressione o protezione antigelo", // A5
+  "Riscaldatore ausiliario surriscaldato o non collegato", // AA
+  "Resistenza del bollitore surriscaldata", // AC
+  "Disinfezione antilegionella del bollitore non completata", // AH
+  "Tempo di riscaldamento ACS superato", // AJ
+  "Guasto del sensore di portata", // C0
+  "Guasto del sensore temperatura dello scambiatore", // C4
+  "Guasto di un sensore dello scambiatore", // C5
+  "Guasto del sensore temperatura ambiente", // CJ
+  "Scheda elettronica dell’unità esterna guasta", // E1
+  "Guasto del rilevamento corrente di dispersione", // E2
+  "Pressostato di alta dell’unità esterna intervenuto", // E3
+  "Guasto della pressione di aspirazione", // E4
+  "Motore del compressore inverter esterno surriscaldato", // E5
+  "Mancato avvio del compressore esterno", // E6
+  "Guasto del motore ventilatore esterno", // E7
+  "Sovratensione all’ingresso dell’unità esterna", // E8
+  "Guasto della valvola di espansione elettronica", // E9
+  "Problema di commutazione raffrescamento/riscaldamento dell’unità esterna", // EA
+  "Aumento anomalo della temperatura del bollitore", // EC
+  "Guasto temperatura del tubo di mandata dell’unità esterna", // F3
+  "Pressione anormalmente alta dell’unità esterna in raffrescamento", // F6
+  "Pressione esterna anormalmente alta; pressostato di alta intervenuto", // FA
+  "Guasto del sensore di tensione o corrente esterno", // H0
+  "Guasto di un sensore temperatura esterno", // H1
+  "Guasto del pressostato di alta esterno", // H3
+  "Guasto della protezione da sovraccarico del compressore", // H5
+  "Guasto del sensore di rilevamento posizione esterno", // H6
+  "Guasto del sistema CT d’ingresso del compressore esterno", // H8
+  "Guasto del sensore aria esterna dell’unità esterna", // H9
+  "Guasto del sensore temperatura del bollitore", // HC
+  "Guasto del sensore pressione acqua", // HJ
+  "Guasto del sensore del tubo di mandata esterno", // J3
+  "Guasto del sensore dello scambiatore esterno", // J6
+  "Guasto del sensore di alta pressione esterno", // JA
+  "Guasto della scheda inverter", // L1
+  "Aumento anomalo della temperatura nel quadro di controllo esterno", // L3
+  "Aumento anomalo della temperatura del dissipatore inverter esterno", // L4
+  "Sovracorrente DC rilevata nell’inverter esterno", // L5
+  "Protezione termica della scheda inverter intervenuta", // L8
+  "Protezione dal blocco del compressore intervenuta", // L9
+  "Guasto del sistema di comunicazione esterno", // LC
+  "Squilibrio o perdita di fase dell’alimentazione", // P1
+  "Tensione DC anomala rilevata", // P3
+  "Guasto del sensore temperatura del dissipatore esterno", // P4
+  "Impostazione della capacità non compatibile", // PJ
+  "Refrigerante insufficiente nell’unità esterna", // U0
+  "Sequenza fasi invertita o perdita di fase", // U1
+  "Guasto della tensione di rete dell’unità esterna", // U2
+  "Asciugatura del massetto radiante non completata correttamente", // U3
+  "Problema di comunicazione tra unità interna ed esterna", // U4
+  "Problema di comunicazione con l’interfaccia utente", // U5
+  "Guasto di trasmissione tra CPU principale e CPU inverter esterna", // U7
+  "Problema di comunicazione con adattatore LAN, termostato ambiente o USB", // U8
+  "Combinazione o compatibilità errata tra unità", // UA
+  "Tubazioni invertite o cablaggio di comunicazione difettoso", // UF
+], "Non viene trasmesso alcun codice di guasto.", "Non è disponibile una breve descrizione per questo codice.");
+
+MB_DELTA_I18N.it = mbDeltaValues([
+  "a compressore fermo X10A conserva il valore dell’ultimo ciclo; il registro HomeHub continua a essere letto, ma non ha un orario di misura", // outdoor_air
+  "i due valori provengono da regolatori ambiente diversi", // room_temp
 ]);

@@ -1,4 +1,4 @@
-// translation-source: 8d39ceba8be704e3a02e1f3012fba8f388b32c4e1e353afc033c83be08bee81f
+// translation-source: 7868c79654d72277f20939757ce97fa1a10e51ae6f225d939d15f7dd6f917646
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -1285,6 +1285,8 @@ INSPECT_I18N.fi = inspectValues(
     ["Vesivirtaama", "Vesivirtaama", "Yhteisen piirin virtaama; vaadittu minimi riippuu mallista ja tilasta."], // flow
     ["Virtauskytkimen tila", "Virtauskytkimen tila", "X10A:n binääritila; ei mittaa l/min-arvoa eikä vahvista mallin minimivirtaamaa.", (d) => d.flowSwitch == null ? null : d.flowSwitch ? `X10A PÄÄLLÄ; vertaa pumppuun ja arvoon ${fmt1(d.flow)} l/min.` : `X10A POIS; pumpun käydessä vertaa arvoa ${fmt1(d.flow)} l/min ja vikaa 7H/C0.`], // flow_switch
     ["Vedenpaine", "Vedenpaine", "Suljetun vesipiirin paine. Sallittu alue riippuu mallista, korkeuserosta ja paisuntasäiliöstä; katso ohjekirja."], // wp
+    ["X10A-huoltoportti", "X10A-tietolähde", "Langallinen vain luku -X10A-yhteys; arvot näkyvät sinisenä."], // x10a
+    ["Modbus TCP", "Modbus-tietolähde", "Itsenäinen vain luku -Modbus TCP -yhteys (HomeHub/Altherma 4); arvot petroolina."], // modbus
   ],
 );
 

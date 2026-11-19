@@ -603,6 +603,94 @@ function renderEnv3Pill() {
   if (title) title.textContent = label;
 }
 
+function modbusSourceConfigured(s = S.status) {
+  const mb = s?.modbus;
+  return !!(mb && (mb.host || mb.enabled === true || mb.connected === true));
+}
+
+function x10aSourceConfigured(s = S.status) {
+  if (!s) return false;
+  const hp = s.hp || {};
+  if (hp.connected === true) return true;
+  if (typeof hp.last_ok_s === "number" && hp.last_ok_s >= 0) return true;
+  if (s.profile?.id && s.profile.id !== "auto") return true;
+  if (Array.isArray(s.diagnostics?.available_sources) &&
+      s.diagnostics.available_sources.includes("x10a")) return true;
+  if ((s.history?.rows || []).some((r) =>
+      r.id !== "free_heap" && r.id !== "max_alloc" && r.id !== "circulation_state")) return true;
+  return !modbusSourceConfigured(s);
+}
+
+function sourcePillState(isMb, s = S.status) {
+  const mb = s?.modbus || {}, hp = s?.hp || {};
+  const live = !S.transportUnavailable && (isMb ? mb.enabled === true && mb.connected === true : hp.connected === true);
+  const offKey = isMb ? "conn.offline" : "card.offline";
+  if (S.transportUnavailable) return { live: false, cls: "dim", text: t("sys.nodata"), detail: "" };
+  if (live) return { live: true, cls: "ok", text: t(isMb ? "conn.connected" : "card.online"), detail: "" };
+  if (s?.sys?.safe_mode === true)
+    return { live: false, cls: "warn", text: `${t(offKey)} · ${t("recovery.title")}`, detail: "" };
+  const detail = isMb && mb.enabled === true && typeof modbusErrorText === "function" ? modbusErrorText(mb) : "";
+  return { live: false, cls: "err", text: t(offKey), detail };
+}
+
+const syncAttr = (el, k, v) => {
+  if (!el) return;
+  if (v == null) { if (!el.getAttribute || el.getAttribute(k) !== null) el.removeAttribute?.(k); }
+  else if (!el.getAttribute || el.getAttribute(k) !== v) el.setAttribute?.(k, v);
+};
+
+function renderOneSourcePill(groupId, inspKey, configured, state, fallbackLabel) {
+  const g = $(groupId);
+  if (!g) return;
+  const disp = configured ? "" : "none";
+  if (g.style && g.style.display !== disp) g.style.display = disp;
+  syncAttr(g, "tabindex", configured ? "0" : "-1");
+  if (!configured) {
+    syncAttr(g, "aria-hidden", "true");
+    g.classList?.remove("live");
+    if (S.insp === inspKey) { cancelHistoryGesture(); S.insp = S.inspSig = S.inspHistSig = null; }
+    return;
+  }
+  syncAttr(g, "aria-hidden", null);
+  if (g.classList && g.classList.contains("live") !== state.live) g.classList.toggle("live", state.live);
+  const e = INSPECT?.[inspKey];
+  const base = e && (e.aria || INSPECT_I18N[LANG]?.[inspKey]?.aria) ? inspFieldText(e, "aria", null) : fallbackLabel;
+  const label = `${base}: ${state.detail ? t("conn.error", state.detail) : state.text}`;
+  syncAttr(g, "aria-label", label);
+  const title = g.querySelector?.(":scope > title");
+  if (title && title.textContent !== label) title.textContent = label;
+}
+
+function renderSourcePills() {
+  renderOneSourcePill("gX10a", "x10a", x10aSourceConfigured(), sourcePillState(false), "X10A");
+  renderOneSourcePill("gModbus", "modbus", modbusSourceConfigured(), sourcePillState(true), "Modbus");
+}
+
+const HEADER_PILLS = [
+  ["gX10a", 496, 48], ["gModbus", 552, 64], ["gEnv3", 624, 74], ["gSgRequest", 706, 60],
+];
+
+function fitSchematicModeHeadline(leftX = 496) {
+  const m = $("svMode");
+  if (!m?.style) return;
+  const avail = leftX - 62, est = (m.textContent || "").length * 13.2;
+  const next = avail > 0 && est > avail ? `${Math.max(14, Math.floor((24 * avail / est) * 10) / 10)}px` : "";
+  if (m.style.fontSize !== next) m.style.fontSize = next;
+}
+
+function layoutHeaderPills() {
+  let right = 766, leftX = 766;
+  for (let i = HEADER_PILLS.length - 1; i >= 0; i--) {
+    const [id, baseX, w] = HEADER_PILLS[i], el = $(id);
+    if (!el || el.style?.display === "none") continue;
+    const x = right - w;
+    syncAttr(el, "transform", x === baseX ? null : `translate(${x - baseX} 0)`);
+    leftX = x; right = x - 8;
+  }
+  S._headerPillLeftX = leftX;
+  fitSchematicModeHeadline(leftX);
+}
+
 // An independent MQTT room source keeps its history reachable during plant or sensor outages.
 function roomReferencePresent() {
   return S.status?.reference_temperature?.configured === true && hasRoomHist("room_temp");
@@ -650,6 +738,8 @@ function renderLive() {
   // snapshot and cannot disagree about whether the plant is running. The inspector reads it too, so
   // an open explainer follows the live values.
   renderEnv3Pill();
+  renderSourcePills();
+  layoutHeaderPills();
   const d = S.live;
   // Mark every pill this cycle drew from the Modbus stack, and unmark the rest. Done in ONE pass over
   // the known pill set rather than per setTxt, so a pill that stops being Modbus-sourced cannot keep
@@ -1466,6 +1556,24 @@ const INSPECT = {
     re: /^water pressure$/i, sample: "Water pressure",
     rows: [/^water pressure$/i, /flow sensor/i],
   },
+  x10a: {
+    t: { en: "X10A service port", de: "X10A-Serviceschnittstelle" },
+    aria: { en: "X10A data source", de: "Datenquelle X10A" },
+    what: {
+      en: "Wired read-only X10A link; its values appear in blue.",
+      de: "Rein lesende X10A-Verbindung; ihre Werte erscheinen blau.",
+    },
+    sourceLink: "x10a",
+  },
+  modbus: {
+    t: { en: "Modbus TCP", de: "Modbus TCP" },
+    aria: { en: "Modbus data source", de: "Datenquelle Modbus" },
+    what: {
+      en: "Independent read-only Modbus TCP link (HomeHub/Altherma 4); values appear in petrol.",
+      de: "Unabhängige, rein lesende Modbus-TCP-Verbindung (HomeHub/Altherma 4); Werte in Petrol.",
+    },
+    sourceLink: "modbus",
+  },
 };
 
 // Locale modules mirror only the human-facing fields of INSPECT, keyed by this stable target id.
@@ -1683,6 +1791,15 @@ function inspectSig(e) {
     return [LANG, S.insp, S.transportUnavailable === "status", env.supported, env.enabled, env.fresh, env.error || "",
             env.temperature_c, env.humidity_pct, env.pressure_hpa].join("|");
   }
+  if (e.sourceLink) {
+    const hp = S.status?.hp || {}, mb = S.status?.modbus || {};
+    return [LANG, S.insp, !!S.transportUnavailable, !!S.status?.sys?.safe_mode,
+            e.sourceLink === "modbus"
+              ? [mb.enabled, mb.connected, mb.profile, mb.host, mb.port, mb.unit_id, mb.values,
+                 (S._modbus || []).length, mb.error_code, mb.error_detail, mb.error_register, mb.error]
+              : [hp.connected, hp.proto, hp.rx, hp.tx, hp.values, (S._values || []).length, hp.last_ok_s]
+           ].flat().join("|");
+  }
   const d = S.live;
   const room = S.insp === "room" ? S.status?.reference_temperature || {} : {};
   const roomSig = S.insp === "room" ? JSON.stringify([
@@ -1850,11 +1967,10 @@ function renderInspect(mode = "") {
   }
   document.querySelectorAll("#schem .sc-hit").forEach((el) => el.classList.toggle("sel", el.dataset.insp === S.insp));
   if (!e) return;
+  const kvRow = (l, v) => `<div class="inspect-row"><span>${esc(l)}</span><span>${esc(v)}</span></div>`;
   if (e.env3) {
     const env = S.status?.env3 || {};
     const state = env3State(env);
-    const valueRow = (label, value) =>
-      `<div class="inspect-row"><span>${esc(label)}</span><span>${esc(value)}</span></div>`;
     setTxt("inspTitle", inspTitleText(e, null));
     setHtml("inspSrc", "ENV III", false);
     $("inspSrc").hidden = false;
@@ -1868,11 +1984,35 @@ function renderInspect(mode = "") {
       `<div class="inspect-env-state ${state.cls}">${esc(t("env.sensor_state"))}: ${esc(state.text)}</div>` +
       `<div class="vdesc-p">${esc(t("env.history_help"))}</div>` +
       `<div class="inspect-rows inspect-env-values">` +
-        valueRow(t("env.temperature"), env3Value(env, "temperature_c", 1, "°C")) +
-        valueRow(t("env.humidity"), env3Value(env, "humidity_pct", 0, "%")) +
-        valueRow(t("env.pressure"), env3Value(env, "pressure_hpa", 0, "hPa")) +
+        kvRow(t("env.temperature"), env3Value(env, "temperature_c", 1, "°C")) +
+        kvRow(t("env.humidity"), env3Value(env, "humidity_pct", 0, "%")) +
+        kvRow(t("env.pressure"), env3Value(env, "pressure_hpa", 0, "hPa")) +
       `</div>`, false);
     setHtml("inspRows", "", false);
+    return;
+  }
+  if (e.sourceLink) {
+    const isMb = e.sourceLink === "modbus", hp = S.status?.hp || {}, mb = S.status?.modbus || {};
+    const st = sourcePillState(isMb), proto = hp.proto === "I" ? "X10A-I" : hp.proto === "S" ? "X10A-S" : "—";
+    setTxt("inspTitle", inspTitleText(e, null));
+    setHtml("inspSrc", isMb
+      ? `${esc(mb.profile === "altherma4" ? "Altherma 4" : t("conn.homehub"))} <span class="mb-tag">${esc(t("src.modbus_tag"))}</span>`
+      : esc(st.live && proto !== "—" ? proto : "X10A"), false);
+    $("inspSrc").hidden = $("inspNow").hidden = false;
+    inspectSourceStyle(isMb && st.live);
+    setTxt("inspNow", S.transportUnavailable ? t("sys.nodata")
+      : st.live ? t(isMb ? "conn.connected" : "card.online") : t(isMb ? "conn.offline" : "card.offline"));
+    const line = isMb ? (st.detail ? t("conn.error", st.detail) : st.text)
+      : st.text + (st.live && typeof hp.last_ok_s === "number" && hp.last_ok_s >= 0 ? ` · ${t("sys.polled", hp.last_ok_s)}` : "");
+    setHtml("inspBody",
+      `<div class="inspect-env-state ${st.cls}">${esc(t(isMb ? "homehub.title" : "card.hplink"))}: ${esc(line)}</div>` +
+      `<div class="vdesc-p">${esc(inspFieldText(e, "what", null))}</div>`, false);
+    setHtml("inspRows", (isMb
+      ? kvRow(t("syslog.hostport"), mb.host ? `${mb.host}:${mb.port || 502}` : "—") +
+        kvRow(t("homehub.unit"), mb.unit_id ? String(mb.unit_id) : "1")
+      : kvRow(t("card.protocol"), st.live ? proto : "—") +
+        kvRow(`${t("card.rxpin")} / ${t("card.txpin")}`, hp.rx != null && hp.tx != null ? `${hp.rx} / ${hp.tx}` : "—")) +
+      kvRow(t("group.Values"), st.live ? String((isMb ? mb.values ?? (S._modbus || []).length : hp.values ?? (S._values || []).length)) : "—"), false);
     return;
   }
   // `d` is the drawing's snapshot and is NOT null merely because X10A is silent — liveData() still
@@ -2010,6 +2150,9 @@ function labelSchematicHits() {
   });
   $("inspClose").setAttribute("aria-label", t("insp.close"));
   updateSchematicStateA11y(S.live);
+  renderEnv3Pill();
+  renderSourcePills();
+  layoutHeaderPills();
 }
 
 // Tap a hit target: select it, or close it when it is already open (tapping the same thing twice is

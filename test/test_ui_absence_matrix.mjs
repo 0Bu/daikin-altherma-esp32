@@ -96,7 +96,8 @@ const context = vm.createContext({
 vm.runInContext(`${readAppSource().replace(/\nboot\(\);\s*$/, "\n")}
   this.__ui = { S, t, esp32CardHtml, dynamicControlCardHtml, circulationSettingsCardHtml,
                 refrigerantServiceRowHtml, connLinks, liveData, histHtml, INSPECT, roomSourceStatus,
-                hasRoomHist, roomReferencePresent, roomReferenceValue };`, context,
+                hasRoomHist, roomReferencePresent, roomReferenceValue, renderEnv3Pill,
+                renderSourcePills, layoutHeaderPills, renderInspect };`, context,
   { filename: "main/www/app.sources" });
 const ui = context.__ui;
 
@@ -566,6 +567,41 @@ for (const scenario of SCENARIOS) {
       `${scenario.name}: current plant outdoor evidence must render with provenance`);
     checks += 2;
   }
+
+  // RULE 10 — the X10A and MODBUS schematic header pills follow source configuration/use, never
+  // task liveness alone. An unconfigured Modbus host hides #gModbus; a pure Modbus setup where
+  // X10A was never detected hides #gX10a; safe mode keeps configured pills visible as offline and
+  // names recovery mode in their accessible labels and inspectors rather than blaming wiring.
+  ui.renderEnv3Pill();
+  ui.renderSourcePills();
+  ui.layoutHeaderPills();
+  const gX10a = context.document.getElementById("gX10a");
+  const gModbus = context.document.getElementById("gModbus");
+  const expectModbusPill = !scenario.remove.includes("homehub");
+  const expectX10aPill = !scenario.remove.includes("x10a") || scenario.remove.includes("homehub");
+  assert.equal(gModbus.style.display, expectModbusPill ? "" : "none",
+    `${scenario.name}: MODBUS pill visibility must follow configured Modbus presence`);
+  assert.equal(gX10a.style.display, expectX10aPill ? "" : "none",
+    `${scenario.name}: X10A pill must hide only on a pure Modbus setup with no X10A evidence`);
+  if (expectModbusPill) {
+    assert.equal(gModbus.classList.contains("live"),
+      !scenario.remove.includes("safeMode") && status.modbus.connected === true,
+      `${scenario.name}: MODBUS pill live state must match active connection`);
+    if (scenario.remove.includes("safeMode")) {
+      assert.ok(gModbus.getAttribute("aria-label").includes(ui.t("recovery.title")),
+        `${scenario.name}: safe-mode MODBUS pill must name recovery mode`);
+    }
+  }
+  if (expectX10aPill) {
+    assert.equal(gX10a.classList.contains("live"),
+      !scenario.remove.includes("safeMode") && status.hp.connected === true,
+      `${scenario.name}: X10A pill live state must match active connection`);
+    if (scenario.remove.includes("safeMode")) {
+      assert.ok(gX10a.getAttribute("aria-label").includes(ui.t("recovery.title")),
+        `${scenario.name}: safe-mode X10A pill must name recovery mode`);
+    }
+  }
+  checks += 4;
 }
 
 // The board's own memory trends are the case that must survive EVERY plant absence: they describe

@@ -1,4 +1,4 @@
-// translation-source: 8d39ceba8be704e3a02e1f3012fba8f388b32c4e1e353afc033c83be08bee81f
+// translation-source: 7868c79654d72277f20939757ce97fa1a10e51ae6f225d939d15f7dd6f917646
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -1091,6 +1091,8 @@ INSPECT_I18N.fr = inspectValues(
     ["Débit", "Débit d’eau", "Débit du circuit commun. Le minimum dépend du modèle ; à lire avec pompe et pression."], // flow
     ["État du fluxostat", 0, "Entrée binaire X10A ; elle ne mesure pas les l/min ni le débit minimal.", (d) => d.flowSwitch == null ? null : d.flowSwitch ? `X10A actif ; comparer avec pompe et ${fmt1(d.flow)} l/min.` : `X10A inactif ; pompe active, comparer ${fmt1(d.flow)} l/min et défauts 7H/C0.`], // flow_switch
     ["Pression d’eau", 0, "Pression du circuit hydraulique, pas du fluide frigorigène. La plage admise dépend du modèle et de l’installation ; consulter le manuel exact."], // wp
+    ["Port de service X10A", "Source de données X10A", "Liaison filaire X10A en lecture seule ; ses valeurs s’affichent en bleu."], // x10a
+    ["Modbus TCP", "Source de données Modbus", "Liaison Modbus TCP indépendante en lecture seule (HomeHub/Altherma 4) ; valeurs en pétrole."], // modbus
   ],
 );
 
@@ -1283,4 +1285,75 @@ MODEL_DESCRIPTION_I18N.fr = modelDescriptionValues([
   ["Plusieurs familles partagent registres et puissance : les valeurs restent valides, mais le modèle exact exige de comparer l’ID à la plaque."], // candidates
   ["Sans puissance extérieure les candidats peuvent différer ; la meilleure correspondance intérieure est utilisée sans certitude, à vérifier sur la plaque."], // candidates_nocap
   ["Octets d’identification extérieure sans table publique des noms ; en cas d’ambiguïté, les comparer à la plaque."], // oueeprom
+]);
+
+FAULT_CODE_I18N.fr = faultCodeValues([
+  "Problème de débit d’eau", // 7H
+  "Défaut du capteur de température de retour", // 80
+  "Défaut du capteur de température de départ", // 81
+  "Protection antigel de l’échangeur activée", // 89
+  "Hausse anormale de la température de sortie ECS", // 8F
+  "Hausse anormale de la température de départ", // 8H
+  "Défaut de détection du passage par zéro", // A1
+  "Problème de limitation haute pression ou de protection antigel", // A5
+  "Chauffage d’appoint surchauffé ou non raccordé", // AA
+  "Résistance d’appoint du ballon surchauffée", // AC
+  "Désinfection antillégionelle du ballon non terminée", // AH
+  "Temps de chauffe ECS dépassé", // AJ
+  "Défaut du capteur de débit", // C0
+  "Défaut du capteur de température de l’échangeur", // C4
+  "Défaut d’un capteur de l’échangeur", // C5
+  "Défaut du capteur de température ambiante", // CJ
+  "Carte électronique de l’unité extérieure défectueuse", // E1
+  "Défaut de détection du courant de fuite", // E2
+  "Pressostat haute pression de l’unité extérieure déclenché", // E3
+  "Défaut de pression d’aspiration", // E4
+  "Surchauffe du moteur du compresseur inverter extérieur", // E5
+  "Échec du démarrage du compresseur extérieur", // E6
+  "Défaut du moteur du ventilateur extérieur", // E7
+  "Surtension d’entrée de l’unité extérieure", // E8
+  "Défaut du détendeur électronique", // E9
+  "Problème de commutation froid/chauffage de l’unité extérieure", // EA
+  "Hausse anormale de la température du ballon", // EC
+  "Défaut de température du tuyau de refoulement extérieur", // F3
+  "Pression anormalement élevée de l’unité extérieure en refroidissement", // F6
+  "Pression extérieure anormalement élevée ; pressostat haute pression déclenché", // FA
+  "Défaut du capteur de tension ou de courant extérieur", // H0
+  "Défaut d’un capteur de température externe", // H1
+  "Défaut du pressostat haute pression extérieur", // H3
+  "Défaut de protection contre la surcharge du compresseur", // H5
+  "Défaut du capteur de détection de position extérieur", // H6
+  "Défaut du système CT d’entrée du compresseur extérieur", // H8
+  "Défaut du capteur d’air extérieur de l’unité extérieure", // H9
+  "Défaut du capteur de température du ballon", // HC
+  "Défaut du capteur de pression d’eau", // HJ
+  "Défaut du capteur du tuyau de refoulement extérieur", // J3
+  "Défaut du capteur de l’échangeur extérieur", // J6
+  "Défaut du capteur haute pression extérieur", // JA
+  "Défaut de la carte inverter", // L1
+  "Hausse anormale de température du coffret de commande extérieur", // L3
+  "Hausse anormale de température du dissipateur inverter extérieur", // L4
+  "Surintensité DC détectée dans l’inverter extérieur", // L5
+  "Protection thermique de la carte inverter déclenchée", // L8
+  "Protection contre le blocage du compresseur déclenchée", // L9
+  "Défaut du système de communication extérieur", // LC
+  "Déséquilibre ou perte de phase d’alimentation", // P1
+  "Tension DC anormale détectée", // P3
+  "Défaut du capteur de température du dissipateur extérieur", // P4
+  "Réglage de puissance incompatible", // PJ
+  "Manque de fluide frigorigène dans l’unité extérieure", // U0
+  "Inversion ou perte de phase", // U1
+  "Défaut de tension secteur de l’unité extérieure", // U2
+  "Séchage de chape du plancher chauffant mal terminé", // U3
+  "Problème de communication entre unités intérieure et extérieure", // U4
+  "Problème de communication avec l’interface utilisateur", // U5
+  "Défaut de transmission entre CPU principale et CPU inverter extérieure", // U7
+  "Problème de communication avec adaptateur LAN, thermostat d’ambiance ou USB", // U8
+  "Combinaison ou compatibilité incorrecte entre unités", // UA
+  "Tuyauterie inversée ou câblage de communication défectueux", // UF
+], "Aucun code de défaut n’est transmis.", "Aucune description courte n’est enregistrée pour ce code.");
+
+MB_DELTA_I18N.fr = mbDeltaValues([
+  "compresseur arrêté, X10A conserve la valeur du dernier cycle ; le registre HomeHub continue d’être lu, mais sans horodatage de mesure", // outdoor_air
+  "les deux valeurs proviennent de régulateurs d’ambiance différents", // room_temp
 ]);

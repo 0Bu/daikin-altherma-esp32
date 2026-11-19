@@ -1,4 +1,4 @@
-// translation-source: 8d39ceba8be704e3a02e1f3012fba8f388b32c4e1e353afc033c83be08bee81f
+// translation-source: 7868c79654d72277f20939757ce97fa1a10e51ae6f225d939d15f7dd6f917646
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -1107,6 +1107,8 @@ INSPECT_I18N.es = inspectValues(
     ["Caudal", "Caudal de agua", "Caudal del circuito común. El mínimo depende del modelo; interprétalo con bomba y presión."], // flow
     ["Estado del flujostato", 0, "Entrada binaria X10A; no mide l/min ni confirma el caudal mínimo.", (d) => d.flowSwitch == null ? null : d.flowSwitch ? `X10A activo; compáralo con bomba y ${fmt1(d.flow)} l/min.` : `X10A inactivo; con bomba activa, compara ${fmt1(d.flow)} l/min y fallos 7H/C0.`], // flow_switch
     ["Presión de agua", 0, "Presión del circuito hidráulico, no del refrigerante. El intervalo permitido depende del modelo y de la instalación; compárala con el manual exacto."], // wp
+    ["Puerto de servicio X10A", "Fuente de datos X10A", "Enlace cableado X10A de solo lectura; sus valores se muestran en azul."], // x10a
+    ["Modbus TCP", "Fuente de datos Modbus", "Enlace Modbus TCP independiente de solo lectura (HomeHub/Altherma 4); valores en petróleo."], // modbus
   ],
 );
 
@@ -1299,4 +1301,75 @@ MODEL_DESCRIPTION_I18N.es = modelDescriptionValues([
   ["Varias familias comparten registros y capacidad: las lecturas son válidas, pero el modelo exacto requiere comparar la ID con la placa."], // candidates
   ["Sin capacidad exterior los candidatos pueden diferir; se usa la mejor coincidencia interior sin certeza, a verificar en la placa."], // candidates_nocap
   ["Bytes de identificación exterior sin mapa público de nombres; si hay ambigüedad, compáralos con la placa."], // oueeprom
+]);
+
+FAULT_CODE_I18N.es = faultCodeValues([
+  "Problema de caudal de agua", // 7H
+  "Fallo del sensor de temperatura de retorno", // 80
+  "Fallo del sensor de temperatura de impulsión", // 81
+  "Protección antihielo del intercambiador activada", // 89
+  "Subida anómala de temperatura en la salida de ACS", // 8F
+  "Subida anómala de la temperatura de impulsión", // 8H
+  "Fallo de detección de cruce por cero", // A1
+  "Problema de limitación de alta presión o protección antihielo", // A5
+  "Calentador auxiliar sobrecalentado o desconectado", // AA
+  "Resistencia del depósito sobrecalentada", // AC
+  "Desinfección antilegionela del depósito no completada", // AH
+  "Tiempo de calentamiento de ACS excedido", // AJ
+  "Fallo del sensor de caudal", // C0
+  "Fallo del sensor de temperatura del intercambiador", // C4
+  "Fallo de un sensor del intercambiador", // C5
+  "Fallo del sensor de temperatura ambiente", // CJ
+  "Placa electrónica de la unidad exterior defectuosa", // E1
+  "Fallo de detección de corriente de fuga", // E2
+  "Presostato de alta de la unidad exterior activado", // E3
+  "Fallo de presión de aspiración", // E4
+  "Motor del compresor inverter exterior sobrecalentado", // E5
+  "El compresor exterior no arranca", // E6
+  "Fallo del motor del ventilador exterior", // E7
+  "Sobretensión de entrada en la unidad exterior", // E8
+  "Fallo de la válvula de expansión electrónica", // E9
+  "Problema de conmutación frío/calor en la unidad exterior", // EA
+  "Subida anómala de temperatura del depósito", // EC
+  "Fallo de temperatura en la tubería de descarga exterior", // F3
+  "Presión exterior anormalmente alta durante refrigeración", // F6
+  "Presión exterior anormalmente alta; presostato de alta activado", // FA
+  "Fallo del sensor de tensión o corriente exterior", // H0
+  "Fallo de un sensor de temperatura externo", // H1
+  "Fallo del presostato de alta exterior", // H3
+  "Fallo de protección contra sobrecarga del compresor", // H5
+  "Fallo del sensor de detección de posición exterior", // H6
+  "Fallo del sistema CT de entrada del compresor exterior", // H8
+  "Fallo del sensor de aire exterior de la unidad exterior", // H9
+  "Fallo del sensor de temperatura del depósito", // HC
+  "Fallo del sensor de presión de agua", // HJ
+  "Fallo del sensor de la tubería de descarga exterior", // J3
+  "Fallo del sensor del intercambiador exterior", // J6
+  "Fallo del sensor de alta presión exterior", // JA
+  "Fallo de la placa del inverter", // L1
+  "Subida anómala de temperatura en la caja de control exterior", // L3
+  "Subida anómala de temperatura del disipador inverter exterior", // L4
+  "Sobrecorriente DC detectada en el inverter exterior", // L5
+  "Protección térmica de la placa inverter activada", // L8
+  "Protección contra bloqueo del compresor activada", // L9
+  "Fallo del sistema de comunicación exterior", // LC
+  "Desequilibrio o pérdida de fase de alimentación", // P1
+  "Tensión DC anómala detectada", // P3
+  "Fallo del sensor de temperatura del disipador exterior", // P4
+  "Ajuste de capacidad incompatible", // PJ
+  "Falta de refrigerante en la unidad exterior", // U0
+  "Secuencia de fases invertida o pérdida de fase", // U1
+  "Fallo de tensión de red de la unidad exterior", // U2
+  "Secado de recrecido del suelo radiante no completado correctamente", // U3
+  "Problema de comunicación entre unidades interior y exterior", // U4
+  "Problema de comunicación con la interfaz de usuario", // U5
+  "Fallo de transmisión entre CPU principal e inverter exterior", // U7
+  "Problema de comunicación con adaptador LAN, termostato ambiente o USB", // U8
+  "Combinación o compatibilidad incorrecta entre unidades", // UA
+  "Tuberías invertidas o cableado de comunicación defectuoso", // UF
+], "No se transmite ningún código de fallo.", "No hay una descripción breve para este código.");
+
+MB_DELTA_I18N.es = mbDeltaValues([
+  "con el compresor parado, X10A conserva el valor del último ciclo; el registro HomeHub se sigue consultando, pero no incluye la hora de medición", // outdoor_air
+  "los dos valores proceden de controladores de ambiente distintos", // room_temp
 ]);
