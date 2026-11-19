@@ -1,1 +1,1 @@
-{"version":"1.0.19-dev.1","changelog":"v1.0.19-dev.1 — Add X10A pel/cop trends and pair Modbus power chart"}
+{"version":"1.0.19-dev.2","changelog":"v1.0.19-dev.1 — Add X10A pel/cop trends and pair Modbus power chart\nv1.0.19-dev.2 — Reclaim static DRAM and prevent 31 KiB block fragmentation for OTA"}
