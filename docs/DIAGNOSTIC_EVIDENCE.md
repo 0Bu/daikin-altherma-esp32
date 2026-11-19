@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: cc39983f342f20957f9cfb7c472ef6820681ab407344bb73a59a7a09218e0ad6 -->
+<!-- diagnostic-evidence-contract: 9436ac1b94144b36436ac9063a57b1a3833ef51d54882071f65bd7260b1a249b -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -570,6 +570,12 @@ therefore temporarily report **Not evaluated recently**.
 
 **Not established:** This status identifies no transport, sensor, broker or plant failure, and does
 not change the freshness of the independently observed room source or prove heating-season behavior.
+
+Method 4 summarizes admitted events in a boot-local date window. It reports
+each outdoor axis independently against the same count of admitted room observations. The
+boundaries at 0, 5 and 10 °C are display groups. The counts show sample coverage, and the extrema
+show observed spread. These summaries cannot establish continuous heating, thermostat action or a
+causal curve defect. [PLANT.md](PLANT.md#heating-curve-diagnosis) specifies sources and resets.
 
 ## Maintenance rule
 

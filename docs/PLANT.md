@@ -213,10 +213,10 @@ Source-specific publication/availability is in [MQTT.md](MQTT.md#env-iii).
 
 ## Heating-curve diagnosis
 
-This read-only sampler records **target room temperature − actual room temperature**, unchanged,
-at most once per 30 minutes during genuine heating windows. Positive means too cold, negative too
-warm. Room kelvin is not a calibrated leaving-water correction; the firmware does not calculate or
-apply a heat-pump command.
+This read-only sampler records **target room temperature − actual room temperature** during genuine
+heating windows. Between resets it records at most once per 30 minutes. A positive value means the
+room is colder than its target. A negative value means it is warmer. The firmware issues no
+heat-pump command from this difference.
 
 Enable plant diagnostics, configure the broker/room source and keep the HomeHub source active.
 Under **Room-temperature source**, enter the exact temperature `topic$path`, a fixed target or
@@ -233,16 +233,17 @@ With no timestamp mapping, only live non-retained arrival time is accepted; a re
 trusted source time. Actual/target range is 5–35 °C and optional enabled/HVAC mappings must pass.
 [MQTT.md](MQTT.md#room-input-and-heating-curve-evidence) defines freshness, reason codes and payloads.
 
-Method 3 first establishes HomeHub connectivity, active normal space operation (input 53) with
-space routing (input 37 = 0), then Heating rather than Cooling (input 38), before room and clock
-evidence. The [EKRHH Installer reference guide, 4P744838-1E (2026.01), §9.2.2, page 43](https://www.daikin.eu/content/dam/document-library/Installer-reference-guide/heat/accessories/ekrhh/EKRHH_Installer%20reference%20guide_4PEN744838-1E_English.pdf)
+Method 4 retains method 3 admission. It first establishes HomeHub connectivity, active normal space
+operation (input 53), space routing (input 37 = 0), and Heating mode (input 38) before checking
+room and clock evidence; X10A connectivity is not required. The [EKRHH Installer reference guide, 4P744838-1E (2026.01), §9.2.2, page 43](https://www.daikin.eu/content/dam/document-library/Installer-reference-guide/heat/accessories/ekrhh/EKRHH_Installer%20reference%20guide_4PEN744838-1E_English.pdf)
 defines the valve independently; normal-operation flags do not establish exclusive routing.
-Each prerequisite needs its own current-session reply within the seven-second project bound.
-Known inactivity, DHW routing or Cooling yields neutral **HOLD**; otherwise unknown/stale
-prerequisites yield **BLOCK**. A transient hold/block
-preserves the sample cadence and last event. Saving the room source or the diagnostics consent, or
-changing the HomeHub host, port or unit, clears sample memory and cadence at once, even inside one
-sampler cycle; deleting the room source/HomeHub or disabling plant diagnostics also disarms.
+Each of the three HomeHub registers needs its own current-session reply within the seven-second
+project bound. Known inactivity, DHW routing or Cooling yields neutral **HOLD**; otherwise
+unknown/stale prerequisites yield **BLOCK**. A transient hold or block preserves cadence and the
+last event. Changing diagnostics consent or the HomeHub host, port or unit, or saving the room
+source, clears the last event, cadence and outdoor bins. Saving unchanged diagnostics consent keeps
+the existing evidence. Deleting the room source or HomeHub endpoint, or disabling diagnostics,
+disarms the sampler.
 
 Current evaluation has a separate **three-second project age bound**, three nominal one-second MQTT
 task cycles, inclusive of the boundary. Each real evaluation renews it, including HOLD/BLOCK; reads
@@ -256,10 +257,27 @@ and invalidates the current evaluation until its owner runs again.
 
 Each event can store two distinct optional outdoor axes: HomeHub input 44 from the current
 cycle/session, and fresh/plausible ENV III from its actual placement. Missing context is null and
-never gates an event. Without outdoor context, room error cannot distinguish a steep curve from an
-overall high/low shift. A room thermostat/zone valve can clip the error at its target, so near-zero
+never gates an event. Assessing the curve requires a pattern across multiple observations and
+other evidence. A room thermostat/zone valve can clip the error at its target, so near-zero
 samples do not prove the curve is correct. Interpret them with actual leaving-water clipping and
 zone-demand duty where independent evidence exists.
+
+Open **Outdoor temperature ranges** in the heating-curve card in Settings. It groups admitted
+events by outdoor temperature, separately for HomeHub and ENV III.
+The window covers the current UTC date and six previous UTC dates from this boot. Counts and
+first/last event times describe reported samples. A 30-minute cadence does not establish continuous
+heating. Values are grouped before rounding to tenths, so an extremum rounded for display can
+equal a band boundary. A mean close to zero can include both cold-room and warm-room readings.
+Rolling 24-hour X10A stop windows live on an independent source and horizon and only apply where
+proven X10A stop evidence overlaps a bin's UTC span.
+
+A changed room target, a changed concrete Modbus profile, or an invalid or backwards wall clock
+clears the bins while keeping the last event, cadence and event counters. Restarting starts an empty window. Room error without outdoor context cannot distinguish
+a wrong curve slope from an overall shift. A physical swap on the same Modbus endpoint and profile,
+or a manual change to the heating curve or sensor placement, cannot be detected automatically.
+After changing either or swapping a unit, save the existing room-temperature source settings again.
+The save clears the current room reading and restarts the heating-curve evidence window while
+preserving the stored room-temperature trend.
 
 The Settings card names the recording/degraded/hold/block state and missing input. The emitted
 `heating_curve` evidence preserves current room values separately from the last recorded event.

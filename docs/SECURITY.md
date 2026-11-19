@@ -258,8 +258,9 @@ source text is hidden without changing control evaluation.
 For these substitutions, unset strings remain empty, unset coordinates stay null, and field keys,
 types and configured-source evidence are preserved. The redaction audit compares the ordered
 contract in `main/logic/redact.hpp` with this table and the serializer.
-Redacted status omits the optional compressor cycling `timeline` because it contains individual
-event timing. The dashboard and the LAN MCP `get_status` tool use ordinary unredacted status.
+Redacted status omits the optional compressor cycling `timeline` and heating-curve `outdoor_bins`.
+These contain event timing or the exact room target. The dashboard and
+the LAN MCP `get_status` tool use ordinary unredacted status.
 
 <!-- redacted-status-fields:start -->
 | Field | Why it goes |

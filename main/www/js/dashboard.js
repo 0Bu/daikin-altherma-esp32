@@ -1114,6 +1114,54 @@ function plantOutdoorAxisRow(d, modbus) {
     source ? outdoorSourceLabel(source) : t("dyn.not_configured"), live !== null ? "ok" : "dim", body);
 }
 
+function heatingCurveBinsRow(d) {
+  const bins = d.outdoor_bins;
+  if (bins === undefined) return ""; // Earlier firmware does not offer this detail.
+  const count = n => t("dyn.bins_count", n.toLocaleString(LANG));
+  const populated = Number.isSafeInteger(bins?.scope_samples) && bins.scope_samples > 0;
+  let body = Number.isFinite(bins?.target_c)
+    ? descNoteHtml(t("ref.target"), `${bins.target_c.toLocaleString(LANG, { maximumFractionDigits: 2 })} °C`)
+    : "";
+  if (!populated) {
+    body += descParaHtml(esc(t("dyn.bins_no_scope")));
+  } else {
+    const bands = ["<0", "0–<5", "5–<10", "≥10"];
+    const when = new Intl.DateTimeFormat(LANG, { month: "short", day: "numeric",
+      hour: "2-digit", minute: "2-digit", timeZone: "UTC", timeZoneName: "short" });
+    const dated = s => Number.isSafeInteger(s) && s >= 0 && s <= 8.64e12;
+    const stats = (n, sum, min, max, unit) => {
+      if (![sum, min, max].every(Number.isFinite) || min > max) return t("sys.nodata");
+      const fmt = x => `${x.toLocaleString(LANG, { minimumFractionDigits: 1,
+        maximumFractionDigits: 1, signDisplay: unit === "K" ? "exceptZero" : "auto" })} ${unit}`;
+      return t("dyn.bins_stats", fmt(sum / (n * 10)), fmt(min / 10), fmt(max / 10));
+    };
+    for (const source of ["homehub", "env3"]) {
+      const axis = bins[source];
+      const name = outdoorSourceLabel(source);
+      let detail = "";
+      for (const [i, band] of bands.entries()) {
+        const bin = axis?.[i];
+        const n = bin?.samples;
+        if (!Number.isSafeInteger(n) || n <= 0) continue;
+        const first = bin.first_unix_s, last = bin.last_unix_s;
+        let period = t("dyn.bins_no_date");
+        if (dated(first) && dated(last) && first <= last)
+          period = first === last ? when.format(first * 1000)
+            : `${when.format(first * 1000)} – ${when.format(last * 1000)}`;
+        const room = stats(n, bin.room_sum_tenths, bin.room_min_tenths, bin.room_max_tenths, "K");
+        const air = stats(n, bin.outdoor_sum_tenths, bin.outdoor_min_tenths, bin.outdoor_max_tenths, "°C");
+        const lines = [[t("dyn.bins_room"), room], [t("dyn.bins_air"), air], [t("dyn.bins_period"), period]];
+        detail += descParaHtml(`<span class="vdesc-n">${esc(`${name} · ${band} °C`)}</span> · ${esc(count(n))}` +
+          lines.map(([label, value]) => `<br>${esc(label)} · ${esc(value)}`).join(""));
+      }
+      body += detail || descNoteHtml(name, t("dyn.bins_no_axis"));
+    }
+  }
+  body += descParaHtml(esc(t("dyn.bins_help")));
+  return dynamicInfoRow("outdoor-bins", t("dyn.bins"),
+    populated ? count(bins.scope_samples) : t("sys.nodata"), populated ? "" : "dim", body);
+}
+
 function dynamicControlCardHtml() {
   const r = S.status?.reference_temperature || {};
   const w = S.status?.weather_forecast || {};
@@ -1179,6 +1227,7 @@ function dynamicControlCardHtml() {
   // ENV III remains a second, placement-dependent comparison and is never silently replaced.
   rows += plantOutdoorAxisRow(d, modbus);
   rows += outdoorAxisRow(d, S.status?.env3 || {});
+  rows += heatingCurveBinsRow(d);
 
   rows += dynamicInfoRow("strategy", t("dyn.strategy"), t("dyn.shadow_strategy"), "",
     `<div class="vdesc-p">${esc(t("dyn.strategy_help"))}</div>`);

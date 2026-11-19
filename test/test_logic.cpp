@@ -47,6 +47,7 @@
 #include "logic/detect_backoff.hpp"
 #include "logic/detect_identity.hpp"
 #include "logic/discovery.hpp"
+#include "logic/heating_curve_bins.hpp"
 #include "logic/heating_curve_diagnosis.hpp"
 #include "logic/heating_curve_mqtt.hpp"
 #include "logic/error_codes.hpp"
@@ -12792,6 +12793,116 @@ static void test_circulation_source() {
     CHECK(tracker.confirmed == CirculationPowerState::Off);
 }
 
+static void test_heating_curve_bins() {
+    using namespace daik::logic;
+    constexpr int64_t day     = HEATING_CURVE_SECONDS_PER_DAY;
+    constexpr auto    hub     = OutdoorSource::HomeHub;
+    constexpr auto    env     = OutdoorSource::Env3;
+    const auto        plant   = [](double c) { return outdoor_homehub_evidence(true, true, c); };
+    const auto        local   = [](double c) { return outdoor_env3_evidence(true, true, c); };
+    const double      unknown = std::numeric_limits<double>::quiet_NaN();
+    HeatingCurveBins  bins;
+
+    CHECK(!std::isfinite(bins.target_c()));
+    bins.record(day, 0.5, plant(0), local(0));
+    CHECK(bins.summary(hub, 1, day).samples == 0);
+    bins.observe_target(21.0);
+    bins.record(day, -1.0, plant(-0.01), local(9.0));
+    bins.record(day + 1800, 1.0, plant(0.0), local(10.0));
+    bins.record(day + 3600, 1.0, plant(5.0), {});
+    bins.record(day + 5400, -1.0, plant(10.0), plant(10.0)); // wrong source for second axis
+    bins.record(2 * day, -1.0, plant(0.5), local(5.0));
+    const auto middle = bins.summary(hub, 1, 2 * day);
+    CHECK(middle.samples == 2 && middle.scope_samples == 5);
+    CHECK(middle.first_unix_s == day + 1800 && middle.last_unix_s == 2 * day);
+    // Opposite room errors (-1.0 K and +1.0 K) yield mean 0.0 K while preserving [-1.0 K, +1.0 K]
+    // spread.
+    CHECK(middle.room_sum_tenths == 0 && middle.room_min_tenths == -10 &&
+          middle.room_max_tenths == 10);
+    CHECK(middle.outdoor_sum_tenths == 5 && middle.outdoor_min_tenths == 0 &&
+          middle.outdoor_max_tenths == 5);
+    CHECK(bins.summary(hub, 0, 2 * day).samples == 1);
+    CHECK(bins.summary(hub, 2, 2 * day).samples == 1);
+    CHECK(bins.summary(hub, 3, 2 * day).samples == 1);
+    CHECK(bins.summary(env, 0, 2 * day).samples == 0);
+    CHECK(bins.summary(env, 2, 2 * day).outdoor_sum_tenths == 140);
+    CHECK(bins.summary(env, 3, 2 * day).samples == 1);
+    CHECK(bins.summary(OutdoorSource::X10a, 1, 2 * day).samples == 0);
+    CHECK(bins.summary(hub, HEATING_CURVE_BIN_COUNT, 2 * day).samples == 0);
+
+    // Rolling 24-hour X10A compressor-stop windows are rejected when source identity is
+    // unproven/mismatched or when their UTC horizon does not overlap the 7-day bin's span.
+    CHECK(!heating_curve_stop_window_overlaps({}, true, day, 2 * day));
+    CHECK(!heating_curve_stop_window_overlaps(middle, false, day + 1800, 2 * day));
+    CHECK(!heating_curve_stop_window_overlaps(middle, true, -1, 2 * day));
+    CHECK(!heating_curve_stop_window_overlaps(middle, true, 2 * day, day + 1800));
+    CHECK(!heating_curve_stop_window_overlaps(middle, true, 6 * day,
+                                              7 * day)); // later 24 h stop window
+    CHECK(!heating_curve_stop_window_overlaps(middle, true, 0,
+                                              day + 1799)); // earlier 24 h stop window
+    CHECK(heating_curve_stop_window_overlaps(middle, true, day + 1700,
+                                             day + 1800));                     // exact start touch
+    CHECK(heating_curve_stop_window_overlaps(middle, true, 2 * day, 3 * day)); // exact end touch
+    CHECK(heating_curve_stop_window_overlaps(middle, true, day + 2400,
+                                             day + 7200)); // interior overlap
+    HeatingCurveBinSummary malformed_bin = middle;
+    malformed_bin.first_unix_s           = -1;
+    CHECK(!heating_curve_stop_window_overlaps(malformed_bin, true, day, 2 * day));
+    malformed_bin              = middle;
+    malformed_bin.first_unix_s = middle.last_unix_s + 1;
+    CHECK(!heating_curve_stop_window_overlaps(malformed_bin, true, day, 3 * day));
+
+    CHECK(bins.summary(hub, 1, 8 * day - 1).samples == 2);
+    CHECK(bins.summary(hub, 1, 8 * day).samples == 1);
+    CHECK(bins.summary(hub, 1, 9 * day).samples == 0);
+    bins.record(8 * day, 0.0, plant(4.99), {});
+    const auto ring = bins.summary(hub, 1, 8 * day);
+    CHECK(ring.samples == 2 && ring.first_unix_s == 2 * day);
+    CHECK(ring.outdoor_max_tenths == 50 && ring.room_max_tenths == 0);
+    CHECK(bins.summary(hub, 1, -1).samples == 0);
+    CHECK(bins.summary(hub, 1, 8 * day - 1).samples == 0);
+    bins.observe_clock(7 * day);
+    CHECK(bins.target_c() == 21.0 && bins.summary(hub, 1, 8 * day).samples == 0);
+    bins.record(7 * day, 0.0, plant(0.0), {});
+    bins.observe_target(unknown);
+    bins.observe_target(21.0);
+    CHECK(bins.summary(hub, 1, 7 * day).samples == 1);
+    bins.observe_target(21.5);
+    CHECK(bins.target_c() == 21.5 && bins.summary(hub, 1, 7 * day).samples == 0);
+    bins.observe_target(21.0);
+    CHECK(bins.summary(hub, 1, 7 * day).samples == 0); // a returned target starts an empty scope
+    bins.record(-1, 0.0, plant(0.0), local(0.0));
+    CHECK(bins.summary(hub, 1, 7 * day).scope_samples == 0);
+    bins.record(7 * day, unknown, plant(0.0), {});
+    bins.record(7 * day, 0.0, plant(4000.0), local(unknown));
+    bins.record(7 * day, 0.0, {false, hub, 0.0}, local(-4000.0));
+    const auto no_axis = bins.summary(hub, 1, 7 * day);
+    CHECK(no_axis.samples == 0 && no_axis.scope_samples == 2);
+    CHECK(bins.summary(env, 0, 7 * day).samples == 0);
+    bins.record(7 * day, 0.0, plant(0.0), local(0.0));
+    bins.observe_clock(-1);
+    CHECK(bins.target_c() == 21.0 && bins.summary(env, 1, 7 * day).samples == 0);
+
+    bins.record(10 * day, 0.0, plant(2.0), {true, env, unknown});
+    bins.record(10 * day + 1800, -0.5, plant(1.0), {});
+    bins.record(10 * day + 3600, 0.5, plant(3.0), {});
+    bins.record(11 * day, -1.0, plant(0.5), {});
+    bins.record(11 * day + 1800, 1.0, plant(4.0), {});
+    const auto range = bins.summary(hub, 1, 11 * day + 1800);
+    CHECK(range.samples == 5 && range.last_unix_s == 11 * day + 1800);
+    CHECK(range.room_min_tenths == -10 && range.room_max_tenths == 10);
+    CHECK(range.outdoor_min_tenths == 5 && range.outdoor_max_tenths == 40);
+    CHECK(bins.summary(env, 1, 11 * day + 1800).samples == 0);
+
+    const uint16_t limit = std::numeric_limits<uint16_t>::max();
+    for (uint32_t i = 0; i <= limit; ++i) bins.record(13 * day + i, -3276.7, plant(3276.7), {});
+    const auto full = bins.summary(hub, 3, 14 * day - 1);
+    CHECK(full.samples == limit && full.last_unix_s == 13 * day + limit - 1);
+    CHECK(full.room_sum_tenths == -32767LL * limit && full.outdoor_sum_tenths == 32767LL * limit);
+    bins.forget();
+    CHECK(!std::isfinite(bins.target_c()) && bins.summary(hub, 3, 14 * day).samples == 0);
+}
+
 static void test_heating_curve_diagnosis() {
     using namespace daik::logic;
 
@@ -12830,6 +12941,177 @@ static void test_heating_curve_diagnosis() {
         in.room_age_s            = 5;
         return in;
     };
+
+    // Only admitted events contribute to the bins, without requiring X10A connectivity. A missing
+    // outdoor axis leaves the room event and denominator intact without inheriting an older
+    // reading.
+    {
+        HeatingCurveDiagnosis binned;
+        HeatingCurveInputs    bi = ready();
+        bi.x10a_connected        = false;
+        bi.room_target_c         = 21.0;
+        bi.plant_generation      = 17;
+        bi.plant_profile         = 0; // initial Modbus probing locks in once resolved
+        bi.outdoor               = outdoor_env3_evidence(true, true, 6.5);
+        bi.plant_outdoor         = outdoor_homehub_evidence(true, true, 4.0);
+        const auto homehub       = [&] {
+            return binned.outdoor_bins().summary(OutdoorSource::HomeHub, 1, bi.now_unix_s);
+        };
+        const auto env3 = [&] {
+            return binned.outdoor_bins().summary(OutdoorSource::Env3, 2, bi.now_unix_s);
+        };
+        const auto first = binned.evaluate(bi);
+        CHECK(first.reason == HeatingCurveReason::SampleRecorded && first.samples == 1);
+        CHECK(binned.outdoor_bins_generation() == 17 && binned.outdoor_bins_profile() == 0 &&
+              binned.outdoor_bins().target_c() == 21.0);
+        CHECK(homehub().samples == 1 && homehub().scope_samples == 1 &&
+              homehub().room_sum_tenths == 6 && homehub().outdoor_sum_tenths == 40);
+        CHECK(env3().samples == 1 && env3().scope_samples == 1 && env3().outdoor_sum_tenths == 65);
+
+        bi.now_ms        = 1000;
+        bi.plant_profile = 1; // probing settles to HomeHub without discarding the session's sample
+        bi.now_unix_s++;
+        bi.room_error_k     = 1.25;
+        bi.outdoor          = outdoor_env3_evidence(true, true, 10.0);
+        const auto repeated = binned.evaluate(bi);
+        CHECK(repeated.reason == HeatingCurveReason::SamplingInterval && repeated.samples == 1 &&
+              repeated.last_sample_room_error_k == first.last_sample_room_error_k);
+        CHECK(binned.outdoor_bins_profile() == 1 && homehub().scope_samples == 1 &&
+              env3().samples == 1 &&
+              binned.outdoor_bins().summary(OutdoorSource::Env3, 3, bi.now_unix_s).samples == 0);
+
+        bi.now_ms               = HEATING_CURVE_SAMPLE_CADENCE_MS;
+        bi.now_unix_s           = first.last_sample_unix_s + 1800;
+        bi.plant_outdoor        = {};
+        bi.outdoor              = {};
+        const auto axis_missing = binned.evaluate(bi);
+        CHECK(axis_missing.reason == HeatingCurveReason::SampleRecorded &&
+              axis_missing.samples == 2 && axis_missing.last_sample_room_error_k == 1.25 &&
+              !axis_missing.has_last_sample_outdoor && !axis_missing.has_last_sample_plant_outdoor);
+        CHECK(homehub().scope_samples == 2 && homehub().samples == 1 && env3().samples == 1);
+
+        bi.now_ms += HEATING_CURVE_SAMPLE_CADENCE_MS;
+        bi.now_unix_s += 1800;
+        bi.plant_generation = 0;
+        CHECK(binned.evaluate(bi).samples == 3);
+        CHECK(binned.outdoor_bins_generation() == 17 && homehub().scope_samples == 2);
+
+        bi.now_ms += HEATING_CURVE_SAMPLE_CADENCE_MS;
+        bi.now_unix_s += 1800;
+        bi.plant_generation = 17;
+        bi.room_target_c    = std::numeric_limits<double>::quiet_NaN();
+        CHECK(binned.evaluate(bi).samples == 4);
+        CHECK(binned.outdoor_bins().target_c() == 21.0 && homehub().scope_samples == 2);
+    }
+
+    // Target, UTC, HomeHub generation and concrete Modbus profile boundaries clear bins
+    // immediately, including while holding or inside cadence.
+    {
+        HeatingCurveDiagnosis binned;
+        HeatingCurveInputs    bi = ready();
+        bi.room_target_c         = 21.0;
+        bi.plant_generation      = 17;
+        bi.plant_profile         = 1;
+        bi.plant_outdoor         = outdoor_homehub_evidence(true, true, 4.0);
+        const auto count         = [&](int64_t now_unix_s) {
+            return binned.outdoor_bins().summary(OutdoorSource::HomeHub, 1, now_unix_s).samples;
+        };
+        const auto first = binned.evaluate(bi);
+        CHECK(count(bi.now_unix_s) == 1);
+
+        binned.observe_bin_target(21.5);
+        CHECK(binned.outdoor_bins().target_c() == 21.5 && count(bi.now_unix_s) == 0);
+        binned.observe_bin_target(21.0);
+        CHECK(binned.outdoor_bins().target_c() == 21.0 && count(bi.now_unix_s) == 0 &&
+              binned.snapshot().last_sample_unix_s == first.last_sample_unix_s);
+        bi.now_ms++;
+        CHECK(binned.evaluate(bi).reason == HeatingCurveReason::SamplingInterval);
+
+        bi.now_ms = HEATING_CURVE_SAMPLE_CADENCE_MS;
+        bi.now_unix_s += 1800;
+        const auto second = binned.evaluate(bi);
+        CHECK(second.samples == 2 && count(bi.now_unix_s) == 1);
+        bi.now_ms++;
+        bi.now_unix_s--;
+        const auto rollback = binned.evaluate(bi);
+        CHECK(rollback.reason == HeatingCurveReason::SamplingInterval && rollback.samples == 2 &&
+              rollback.sequence == second.sequence &&
+              rollback.evaluations == second.evaluations + 1 &&
+              rollback.last_sample_unix_s == second.last_sample_unix_s);
+        CHECK(count(second.last_sample_unix_s) == 0 && binned.outdoor_bins().target_c() == 21.0);
+
+        bi.now_ms     = 2 * HEATING_CURVE_SAMPLE_CADENCE_MS;
+        bi.now_unix_s = second.last_sample_unix_s + 1800;
+        CHECK(binned.evaluate(bi).samples == 3 && count(bi.now_unix_s) == 1);
+        binned.observe_bin_clock(bi.now_unix_s +
+                                 HEATING_CURVE_BIN_DAYS * HEATING_CURVE_SECONDS_PER_DAY);
+        binned.observe_bin_clock(bi.now_unix_s);
+        CHECK(count(bi.now_unix_s) == 0 && binned.snapshot().last_sample_unix_s == bi.now_unix_s);
+
+        bi.now_ms += HEATING_CURVE_SAMPLE_CADENCE_MS;
+        bi.now_unix_s += 1800;
+        CHECK(binned.evaluate(bi).samples == 4 && count(bi.now_unix_s) == 1);
+        const int64_t last_event = bi.now_unix_s;
+        bi.plant_gate_active     = false;
+        bi.now_ms++;
+        bi.now_unix_s = -1;
+        CHECK(binned.evaluate(bi).reason == HeatingCurveReason::PlantInactive);
+        CHECK(count(last_event) == 0 && binned.snapshot().last_sample_unix_s == last_event);
+
+        bi.plant_gate_active = true;
+        bi.now_ms            = 4 * HEATING_CURVE_SAMPLE_CADENCE_MS;
+        bi.now_unix_s        = last_event + 1800;
+        CHECK(binned.evaluate(bi).samples == 5 && count(bi.now_unix_s) == 1);
+
+        // Endpoint generation change clears both last sample/cadence and bins even while
+        // disconnected.
+        bi.plant_generation  = 18;
+        bi.homehub_connected = false;
+        bi.now_ms++;
+        bi.now_unix_s++;
+        const auto replaced = binned.evaluate(bi);
+        CHECK(replaced.reason == HeatingCurveReason::HomeHubUnavailable && replaced.samples == 5 &&
+              !replaced.has_last_sample);
+        CHECK(binned.outdoor_bins_generation() == 18 && count(bi.now_unix_s) == 0);
+
+        bi.homehub_connected = true;
+        bi.now_ms++;
+        bi.now_unix_s++;
+        CHECK(binned.evaluate(bi).samples == 6 && count(bi.now_unix_s) == 1);
+
+        // Concrete Modbus profile change (HomeHub -> Altherma4) on the same endpoint clears bins
+        // immediately while preserving the prior event and 30-minute cadence.
+        bi.plant_profile = 2;
+        bi.now_ms++;
+        bi.now_unix_s++;
+        const auto promoted_hold = binned.evaluate(bi);
+        CHECK(promoted_hold.reason == HeatingCurveReason::SamplingInterval &&
+              promoted_hold.samples == 6 && promoted_hold.has_last_sample &&
+              binned.outdoor_bins_profile() == 2 && count(bi.now_unix_s) == 0);
+
+        bi.now_ms += HEATING_CURVE_SAMPLE_CADENCE_MS;
+        bi.now_unix_s += 1800;
+        const auto promoted = binned.evaluate(bi);
+        CHECK(
+            promoted.samples == 7 && binned.outdoor_bins_profile() == 2 &&
+            count(bi.now_unix_s) == 1 &&
+            binned.outdoor_bins().summary(OutdoorSource::HomeHub, 1, bi.now_unix_s).scope_samples ==
+                1);
+
+        bi.room_target_c = 20.5;
+        bi.now_ms++;
+        CHECK(binned.evaluate(bi).reason == HeatingCurveReason::SamplingInterval);
+        CHECK(binned.outdoor_bins().target_c() == 20.5 && count(bi.now_unix_s) == 0);
+
+        bi.now_ms += HEATING_CURVE_SAMPLE_CADENCE_MS;
+        bi.now_unix_s += 1800;
+        CHECK(binned.evaluate(bi).samples == 8 && count(bi.now_unix_s) == 1);
+        binned.forget_samples();
+        CHECK(binned.outdoor_bins_generation() == 0 && binned.outdoor_bins_profile() == 0 &&
+              !std::isfinite(binned.outdoor_bins().target_c()) && count(bi.now_unix_s) == 0);
+        CHECK(!binned.snapshot().has_last_sample && binned.snapshot().samples == 8 &&
+              binned.snapshot().sequence == 8);
+    }
 
     // Current diagnosis expires independently of the 30-minute event cadence, even when every
     // consumer keeps reading it. Time zero is a real evaluation time, not an uninitialized marker.
@@ -31290,6 +31572,7 @@ int main() {
     test_reference_binding_epochs();
     test_reference_temperature_config();
     test_circulation_source();
+    test_heating_curve_bins();
     test_heating_curve_diagnosis();
     test_weather_config_snapshot();
     test_open_meteo_epoch_seconds();

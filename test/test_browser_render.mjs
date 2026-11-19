@@ -432,6 +432,7 @@ async function assertStatusTruth(page, context) {
   await page.evaluate(`(() => {
     window.__statusTruthPrevious = { status: S.status, open: new Set(S.descOpen) };
     S.descOpen.delete("dynamic:outdoor"); S.descOpen.delete("dynamic:plant-outdoor");
+    S.descOpen.delete("dynamic:outdoor-bins");
     S.status = { ...S.status, sys: { ...S.status.sys, config_unreadable: true },
       reference_temperature: { configured: true, name: "Example room", topic: "room/state",
         has_value: true, temperature_c: 21.5, has_setpoint: true, setpoint_c: 22, age_s: 1,
@@ -483,6 +484,32 @@ async function assertStatusTruth(page, context) {
       assertLayout(await page.evaluate(layoutAudit), `${context}/${id}`);
       await assertAccessibility(page, `${context}/${id}`, { nativeTree: true });
     }
+    const binsSelector = '[data-desc="dynamic:outdoor-bins"]';
+    assert.equal(await page.evaluate(`document.querySelector(${JSON.stringify(binsSelector)}) === null`),
+      true, `${context}: older firmware has no outdoor-bin row`);
+    await page.waitFor("!S.clickHold");
+    await page.evaluate(`(() => {
+      const band = (samples, outdoor) => ({ samples, first_unix_s: 1780000000,
+        last_unix_s: samples === 1 ? 1780000000 : 1780001800, room_sum_tenths: 0,
+        room_min_tenths: 0, room_max_tenths: 0, outdoor_sum_tenths: samples * outdoor,
+        outdoor_min_tenths: outdoor, outdoor_max_tenths: outdoor });
+      S.status.heating_curve.outdoor_bins = { scope_samples: 3, target_c: 22,
+        homehub: [band(2, -40), null, null, null], env3: [null, band(1, 0), null, null] };
+      renderApp();
+      return true;
+    })()`);
+    await clickDisclosure(page, binsSelector);
+    assert.equal(await page.evaluate(`(() => {
+      const row = document.querySelector(${JSON.stringify(binsSelector)});
+      const detail = document.getElementById(row.getAttribute("aria-controls"));
+      const labels = Array.from(detail.querySelectorAll(".vdesc-n"), (node) => node.textContent);
+      return row.getAttribute("aria-expanded") === "true" && row.innerText.includes(t("dyn.bins_count", "3")) &&
+        labels.includes("HomeHub · <0 °C") && labels.includes("ENV III · 0–<5 °C") &&
+        detail.innerText.includes(t("dyn.bins_period")) && detail.innerText.includes(t("dyn.bins_help")) &&
+        !detail.querySelector("button, input, a, svg, canvas");
+    })()`), true, `${context}: source-specific bands render as read-only observations`);
+    assertLayout(await page.evaluate(layoutAudit), `${context}/outdoor-bins`);
+    await assertAccessibility(page, `${context}/outdoor-bins`, { nativeTree: true });
   } finally {
     await page.evaluate(`S.status = window.__statusTruthPrevious.status;
       S.descOpen = window.__statusTruthPrevious.open; delete window.__statusTruthPrevious;
@@ -2617,6 +2644,16 @@ try {
     console.log(`focused card prototype rendering passed: 2 locales; 2 themes; ${focusedViewports.map(viewport => viewport.width).join("/")} px`);
   } else if (process.argv.includes("--setup-only")) {
     for (const viewport of viewports) await assertSetup(page, server, viewport);
+  } else if (process.argv.includes("--status-truth-only")) {
+    for (const viewport of viewports) {
+      await page.viewport(viewport.width, viewport.height);
+      for (const locale of browserLocales) {
+        await activateLocale(page, locale);
+        await assertStatusTruth(page, `${viewport.name}/${locale}/status-truth`);
+      }
+    }
+    assert.deepEqual(page.diagnostics, [], "status observations must emit no browser errors");
+    console.log(`focused status rendering passed: ${browserLocales.length} locales; ${viewports.length} viewports`);
   } else if (process.argv.includes("--diagnosis-only")) {
     // A focused rendering pass for diagnosis-copy iterations. The default full matrix below and
     // the supervisor's independent mutation controls remain unchanged.

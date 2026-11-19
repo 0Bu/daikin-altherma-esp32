@@ -6,9 +6,11 @@
 // discovery entities (temperature, humidity, pressure). Read-only: no command subscriptions —
 // optional exact inbound subscriptions assemble one configured room sample and never actuate the
 // heat pump. No-op if mqtt_uri is empty.
+#include <array>
 #include <cstdint>
 #include <string>
 #include "logic/heating_curve_diagnosis.hpp"
+#include "logic/heating_curve_bins.hpp"
 #include "logic/circulation_source.hpp"
 #include "logic/reference_temperature.hpp"
 
@@ -80,9 +82,16 @@ struct ReferenceTemperatureStatus {
 // predecessor's raw sample while subscription work is pending, paused or failed.
 ReferenceTemperatureStatus reference_temperature_status(const Config& expected);
 
-// MQTT-owned diagnosis, projected against monotonic evaluation age under its status mutex.
-// Stale current context is withheld; dated events survive. Reading never evaluates or samples.
-logic::HeatingCurveSnapshot heating_curve_status();
+struct HeatingCurveBinsReport {
+    std::array<logic::HeatingCurveBinSummary, logic::HEATING_CURVE_BIN_COUNT> homehub{};
+    std::array<logic::HeatingCurveBinSummary, logic::HEATING_CURVE_BIN_COUNT> env3{};
+    double                                                                    target_c = 0.0;
+    bool                                                                      valid    = false;
+};
+
+// Copy the aged diagnosis and optional outdoor bins under one owner lock, without allocating
+// or producing an event. Reporting ages the window even while collection is paused.
+logic::HeatingCurveSnapshot heating_curve_status(HeatingCurveBinsReport* bins = nullptr);
 
 // Wake the existing MQTT task after POST /set_ref_temp. Topic changes are re-evaluated live without
 // a second MQTT client or reboot, but subscription/decoding remains gated by the v19 diagnostics

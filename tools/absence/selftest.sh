@@ -272,8 +272,8 @@ python3 - "$TMP/main/http_status.cpp" <<'PY'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-seed = s.replace('return json_quote(redact_identifier(s, redact));',
-                 'return json_quote(redact_or(s, redact));', 1)
+seed = s.replace('return {redact_identifier_view(s, redact), true};',
+                 'return {redact ? std::string_view(REDACTED) : s, true};', 1)
 assert seed != s, "seed 4 did not apply — the wrapper moved"
 open(p, "w").write(seed)
 PY

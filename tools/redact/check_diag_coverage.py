@@ -142,7 +142,7 @@ def status_redaction_sites():
     """
     out = []
     for n, line in enumerate(STATUS.read_text().splitlines(), 1):
-        if re.search(r"std::string\s+jstr_r\s*\(", line):
+        if re.search(r"(?:std::string|RedactedJson)\s+jstr_r\s*\(", line):
             continue
         out += [n for _ in re.finditer(r"\b(?:jstr_r|redact_or)\s*\(", line)]
     return out

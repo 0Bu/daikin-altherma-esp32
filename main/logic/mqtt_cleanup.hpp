@@ -49,7 +49,7 @@ enum class MqttCleanupDeliveryOutcome : uint8_t { Published, Deleted };
 
 struct MqttCleanupDeliveryEvidence {
     uint32_t                   client_epoch = 0;
-    int                        msg_id       = -1;
+    int                        msg_id       = 0;
     MqttCleanupDeliveryOutcome outcome      = MqttCleanupDeliveryOutcome::Published;
 };
 
