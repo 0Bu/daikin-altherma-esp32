@@ -34,7 +34,7 @@ CASES = [
     "stop_forget_record_lock", "stop_forget_expiry", "stop_forget_shutdown",
     "stop_forget_during_report",
     "stop_forget_before_checkup_start", "stop_forget_report_lock_failure",
-    "stop_forget_checkup_alloc_failure", "stop_unstarted_report_pending",
+    "stop_forget_checkup_alloc_failure", "stop_unstarted_report_pending", "defrost_start_context",
     "modbus_dual_source",
 ]
 
@@ -327,6 +327,12 @@ mutations.append(("omit_stop_forget_expiry_guard",
                   source_text[:expire_start] + expire_body.replace(expiry_guard, "") +
                   source_text[expire_end:],
                   "stop_forget_expiry", "stop_forget_retires_private_producer"))
+defrost_observe = "s_defrost_start.observe(stop_sample, defrost_air, now, s.unix_s, source_generation);"
+if source_text.count(defrost_observe) != 1:
+    raise RuntimeError("Expected one defrost start producer")
+mutations.append(("gate_defrost_with_stop_read_fence",
+                  source_text.replace(defrost_observe, "if (now >= s_stop_read_fence_us) " + defrost_observe),
+                  "defrost_start_context", "defrost_start_sees_unreadable_sample_during_stop_read_fence"))
 negative_controls = []
 mutant_hashes = {}
 for name, contents, case, oracle in mutations:

@@ -1,4 +1,4 @@
-// translation-source: 9d953d5f0a93a5bc4cadd7a97118b6c1a7b766255621d06ab3d6c4c0dc8e2ccf
+// translation-source: 3a15720127279ca3edda45e3c53255972178ba0299b2928ffe49177e6a324af5
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
@@ -283,6 +283,9 @@ I18N.zh = localeValues([
   /* check.detail.fault.ok */ "可读故障信号中无当前或保存的消息。",
   /* check.detail.defrost.info */ "至少3次配对除霜超过可读压缩机运行时间的15%：项目提示。",
   /* check.detail.defrost.ok */ "无项目除霜比例提示；天气和缺口未评估。",
+  /* check.defrost.last_start */ (date, route, outdoor) => `最近一次观察到的除霜启动 · ${date} · 回路 ${route} · 室外气温 ${outdoor}`,
+  /* check.defrost.route_space */ "供暖",
+  /* check.defrost.route_dhw */ "热水罐",
   /* check.detail.pressure.info */ "最低值≤1.0 bar；连续60秒未确认。物理有效性和原因未知。",
   /* check.detail.pressure.warn */ "记录了连续至少60秒≤1.0 bar；并非当前压力。",
   /* check.detail.pressure.ok */ "无接受的压力≤项目阈值1.0 bar。",

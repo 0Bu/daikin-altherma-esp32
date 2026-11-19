@@ -589,6 +589,13 @@ assert.match(ui.detail({ ...defrost, verdict: "ok", evidence: "observation",
                         reason: "defrost_events_insufficient" }), /Fewer than three paired defrosts/);
 assert.match(ui.detail({ id: "defrost", verdict: "ok", evidence: "observation",
                          reason: "no_paired_runtime", count: 3 }), /event count only/);
+assert.match(ui.detail({ ...defrost, last_observed_start: {
+  unix_s: null, route: "dhw_route", outdoor_c: 0,
+} }), /Last observed defrost start.*Hot-water tank.*0 °C/);
+assert.match(ui.detail({ ...defrost, last_observed_start: {
+  unix_s: null, route: null, outdoor_c: null,
+} }), /Last observed defrost start.*Outdoor air No data/);
+assert.doesNotMatch(ui.detail({ ...defrost, last_observed_start: null }), /Last observed defrost start/);
 assert.equal(ui.value({ id: "retries", verdict: "ok", evidence: "experimental", seen: 0 }), "No increase");
 assert.equal(ui.value({ id: "retries", verdict: "info", evidence: "experimental", seen: 1 }), "Increase");
 assert.equal(ui.value({ id: "retries", verdict: "ok", evidence: "experimental" }), "TENTATIVE");

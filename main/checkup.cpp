@@ -7,6 +7,7 @@
 #include "logic/checkup.hpp"
 #include "logic/checkup_persist.hpp"  // WHEN a persisted window may be believed
 #include "logic/crashinfo.hpp"        // crash_reason_slug — one reset vocabulary
+#include "logic/defrost_start.hpp"
 #include "logic/history.hpp"     // history_parse_tenths — the ONE parse of a cached value
 #include "logic/stop_context_input.hpp"
 #include "safe_mode.hpp"         // safe_mode_active — nothing ages the window there
@@ -164,6 +165,8 @@ CheckupSlot& slot_for(DiagnosticsSource source) {
 
 logic::StopContextState     s_stop_context;
 logic::StopContextInputPlan s_stop_inputs;
+logic::DefrostStartTracker         s_defrost_start;
+bool                               s_defrost_air_supported = false;
 uint32_t                    s_stop_generation    = 0;
 bool                        s_stop_allow_restore = true;
 int64_t                     s_stop_read_fence_us = -1;
@@ -354,6 +357,7 @@ void persist_wipe(CheckupSlot& slot, bool keep_handoff = false) {
     slot.P().dhw.reset();
     slot.cycling_trace.reset();
     slot.cycling_restored.reset();
+    if (!slot.is_modbus) s_defrost_start = {};
     slot.cycling_restore_anchor = 0;
     for (auto& expiry : slot.slot_times.expiry_us) expiry = 0;
     for (auto& end : slot.slot_times.restored_end_unix_s) end = 0;
@@ -648,6 +652,7 @@ void slot_set_diagnostics(CheckupSlot& slot, bool enabled, bool generation_chang
     const uint32_t run_start = slot.state.run_start_bucket;
     if (logic::checkup_pause_state(slot.state, slot.P().ring.pending, &slot.P().ring))
         logic::checkup_journal_revision_arm(slot.revision, run_open, run_start);
+    if (!slot.is_modbus) s_defrost_start.pause();
     slot.dhw_state      = kFreshDhwLossState;
     slot.fault_now      = daik::FaultClass::Unknown;
     slot.pressure_now   = -1;
@@ -671,6 +676,8 @@ void checkup_start(bool diagnostics_enabled, uint32_t diagnostics_generation) {
     }
     s_stop_context       = {};
     s_stop_inputs        = {};
+    s_defrost_start         = {};
+    s_defrost_air_supported = false;
     s_stop_generation    = 0;
     s_stop_allow_restore = true;
     s_stop_read_fence_us = -1;
@@ -721,6 +728,8 @@ void checkup_reset() {
     s_stop_inputs        = {};
     s_stop_allow_restore = false;
     stop_observation_reset();
+    s_defrost_start         = {};
+    s_defrost_air_supported = false;
     // Consuming the reset on an unidentified cycle must not let the journal re-admit the old link.
     s_x10a.source_confirmed = false;
     s_x10a.source_fp        = 0;
@@ -746,10 +755,19 @@ void checkup_modbus_reset() {
 // selection establishes the decoding contract for future samples, without proving a bus reply.
 // Startup cached identity is only an expectation for a separately sealed handoff. Explicit resets
 // retire pending journal adoption for this boot, even if selection names the same profile/link.
+// Keep the additional scan outside the profile-binding frame.
+[[gnu::noinline]] static bool defrost_air_supported(const logic::ProfileView& view) {
+    const auto air = logic::instrument_resolve(view, logic::Instrument::OutdoorAir);
+    if (air.state != logic::InstrumentState::Supported) return false;
+    const auto row = logic::adjudicated(view, static_cast<size_t>(air.row));
+    return logic::checkup_row_matches(logic::CHECKUP_LOC_OUTDOOR, row.reg, row.offset, row.conv);
+}
+
 void checkup_reset_on_detect(const char* profile_id, uint32_t source_fp) {
     const auto     view        = def::lookup_view(profile_id);
     const uint32_t fp          = logic::checkup_model_fingerprint(profile_id, view);
     const auto     stop_inputs = logic::stop_context_input_plan(profile_id, view);
+    const bool     defrost_air = defrost_air_supported(view);
     if (!s_mtx) return;
     Lock lk(s_mtx);
     if (!lk.acquired()) return;
@@ -759,6 +777,8 @@ void checkup_reset_on_detect(const char* profile_id, uint32_t source_fp) {
     s_x10a.source_fp        = source_fp;
     s_stop_context          = {};
     s_stop_inputs           = stop_inputs;
+    s_defrost_start         = {};
+    s_defrost_air_supported = defrost_air;
     s_stop_generation       = hp_poll_generation();
     if (!first) {
         s_stop_allow_restore = false;
@@ -878,7 +898,10 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
     // witness. In particular, `held == false` with unknown RPS is not freshness.
     const int outdoor_row = find_row(v, n, logic::CHECKUP_LOC_OUTDOOR);
     int outdoor_tenths = 0;
+    bool      fresh_outdoor  = false;
     if (outdoor_row >= 0 && tenths(v[static_cast<size_t>(outdoor_row)], outdoor_tenths)) {
+        const auto& outdoor_value = v[static_cast<size_t>(outdoor_row)];
+        fresh_outdoor             = !outdoor_value.held && !outdoor_value.held_unknown;
         s.outdoor = logic::outdoor_x10a_evidence(
             true, rps_known, rps_running, static_cast<double>(outdoor_tenths) / 10.0);
     }
@@ -940,22 +963,27 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
     // that new-link poll B continues. Dropping at most the first new sample is the conservative side.
     if (apply_reset_locked(s_x10a)) return;
     const bool s_source_confirmed = s_x10a.source_confirmed;
-    if (!stop_context_suppressed_locked() && s_source_confirmed && s_stop_inputs.schema_fp &&
-        now >= s_stop_read_fence_us) {
-        // Bind a newly admitted live generation before consuming any of its inputs. No event from
-        // the preceding source is admitted into the replacement lifecycle.
-        if (source_generation != s_stop_generation) {
-            s_stop_context       = {};
-            s_stop_generation    = source_generation;
-            s_stop_allow_restore = false;
-            stop_observation_bind(s_x10a.source_fp, s_x10a.model_fp, s_stop_inputs.schema_fp,
-                                  source_generation, false);
-        }
+    if (!stop_context_suppressed_locked() && s_source_confirmed && s_stop_inputs.schema_fp) {
         const auto stop_sample =
             logic::stop_context_collect(s_stop_inputs, v, n, rps_known, rps_running);
-        const auto stop_event =
-            logic::stop_context_step(s_stop_context, stop_sample, now, source_generation);
-        stop_observation_record(now, stop_sample.rps_known, stop_event);
+        const int defrost_air = s_defrost_air_supported && fresh_outdoor && s.outdoor.available
+                                    ? outdoor_tenths
+                                    : logic::CHECKUP_ABSENT;
+        s_defrost_start.observe(stop_sample, defrost_air, now, s.unix_s, source_generation);
+        if (now >= s_stop_read_fence_us) {
+            // The stop reader may retire that observer while a poll waits for the mutex. The
+            // defrost tracker still needs this sample, including an unreadable defrost witness.
+            if (source_generation != s_stop_generation) {
+                s_stop_context       = {};
+                s_stop_generation    = source_generation;
+                s_stop_allow_restore = false;
+                stop_observation_bind(s_x10a.source_fp, s_x10a.model_fp, s_stop_inputs.schema_fp,
+                                      source_generation, false);
+            }
+            const auto stop_event =
+                logic::stop_context_step(s_stop_context, stop_sample, now, source_generation);
+            stop_observation_record(now, stop_sample.rps_known, stop_event);
+        }
     }
     const bool discard_dhw_sample = apply_dhw_reset_locked(s_x10a) ||
                                     dhw_generation != s_dhw_identity_generation.load() ||
@@ -1228,15 +1256,23 @@ logic::CheckupCyclingEvidence checkup_cycling_evidence(DiagnosticsSource source)
                                                        window.class_observed_s > 0);
 }
 
+[[gnu::noinline]] static void copy_defrost_start_locked(logic::DefrostStartReport& out,
+                                                        int64_t                    now_us) {
+    if (s_x10a.source_confirmed && !stop_observation_suppressed())
+        out = s_defrost_start.snapshot(now_us, hp_poll_generation());
+}
+
 logic::CheckupReport checkup_report(logic::CheckupCyclingHours* hours,
                                     logic::CheckupCyclingTrace* trace,
-                                    logic::CheckupRestore* persist, DiagnosticsSource source) {
+                                    logic::CheckupRestore* persist, DiagnosticsSource source,
+                                    logic::DefrostStartReport* defrost) {
     if (hours) {
         hours->count = 0;
         hours->epoch = 0;
     }
     if (trace) trace->unix_s = 0;
     if (persist) *persist = logic::CheckupRestore::Unknown;
+    if (defrost) *defrost = {};
     CheckupSlot& slot              = slot_for(source);
     const auto&  s_persist_verdict = slot.persist_verdict;
     if (!s_mtx) return logic::CheckupReport{};
@@ -1254,6 +1290,7 @@ logic::CheckupReport checkup_report(logic::CheckupCyclingHours* hours,
     const int64_t now_us = esp_timer_get_time();
     if (hours) *hours = checkup_cycling_hours_locked(slot, now_us);
     if (trace && !cycling_snapshot_locked(slot, *trace, now_us)) trace->unix_s = 0;
+    if (defrost && !slot.is_modbus) copy_defrost_start_locked(*defrost, now_us);
     const bool     have_source   = slot.source_last_us >= 0 && now_us >= slot.source_last_us;
     const int64_t  source_gap_us = have_source ? now_us - slot.source_last_us : 0;
     const uint32_t source_age_s =

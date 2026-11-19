@@ -269,7 +269,7 @@ evidence is a measurement, not a good/bad assessment. The reading order and main
 | `fault` | `active` |
 | `dhw_loss` | `max_k_h`, `windows`, `high_windows`, `quiet_high_windows`, `draw_windows`, `pump_windows`, `high_with_pump`, `high_pump_off`, `circulation_on_s`, `circulation_known_s`, `candidate_s`, `settle_remaining_s`, `aborts`, `abort_reasons`, `best_aborted_s`, `blocked` |
 | `cycling` | `starts`, `mean_run_s`, `space_runs`, `space_mean_run_s`, `dhw_runs`, `dhw_mean_run_s`, `cooling_runs`, `censored_runs`, `censored_transition_runs`, `censored_handover_runs`, `censored_unreadable_runs`, `censored_restart_runs`, `censored_start_runs`, `classified_runtime_s`, `censored_runtime_s`, `runtime_saturated`, `split`, `hours`, `outdoor_source`, `outdoor_min_c`, `outdoor_mean_c`, `outdoor_samples` |
-| `defrost` | `count`, `share_pct`, `paired_count`, `defrost_s`, `run_s`, `outdoor_source`, `outdoor_min_c`, `outdoor_mean_c`, `outdoor_samples` |
+| `defrost` | `count`, `share_pct`, `paired_count`, `defrost_s`, `run_s`, `outdoor_source`, `outdoor_min_c`, `outdoor_mean_c`, `outdoor_samples`, `last_observed_start` |
 | `pressure` | `min_bar`, `current_bar`, `min_unix_s`, `confirmed_low` |
 | `flow` | `min_l_min` |
 | `heater` | `buh_min`, `bsh_min`, `buh_s`, `bsh_s`, `buh_observed_s`, `bsh_observed_s` |
@@ -424,6 +424,18 @@ latest sample lacks pressure or the source is stale. `confirmed_low` records whe
 60 continuously observed seconds at or below the project boundary were witnessed in the window.
 Positive defrost shares below 1% make the whole-percent `share_pct` null; positive heater runtimes
 below one minute make `buh_min`/`bsh_min` null. Use the seconds fields for these small values.
+`defrost.last_observed_start` is null until a readable X10A defrost OFF-to-ON transition is observed
+across consecutive samples at most 15 seconds apart. Its `unix_s` is the ON sample's
+wall-clock timestamp, or null without a synchronized clock. `route` is `space_heating`,
+`dhw_route` or null. A start can have a timestamp without a route or outdoor temperature.
+To populate the route, both X10A samples must report a running compressor and the same route
+as classified from the controller's valve and mode signals. `outdoor_c` is the signed X10A
+outdoor-air temperature from the ON sample for a qualified route, or null. A valid 0 °C remains
+a measurement. Pausing diagnostics (`Off`) hides the row and prevents transitions across the
+pause while preserving a start less than 24 hours old; this optional observation ages out after
+24 hours and clears on reboot, source replacement or a new diagnostics generation.
+When a factory reset starts forgetting history, this field becomes null and collection stops
+until reboot, including when flash erasure fails.
 Heater coverage is reported separately for each supported signal; an unread signal has null runtime.
 Complete rules, coverage and experimental boundaries are in
 [DIAGNOSTIC_EVIDENCE.md](DIAGNOSTIC_EVIDENCE.md); owner wording is in [DIAGNOSTICS.md](DIAGNOSTICS.md).

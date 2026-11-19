@@ -629,11 +629,9 @@ append_status_outdoor_context(JsonOut& j, const logic::CheckupOutdoorReport& con
 
 template <typename JsonOut>
 [[gnu::noinline]] static void
-append_status_service_metric(JsonOut& j, const char* key,
+append_status_service_metric(JsonOut& j, const char* prefix,
                              const logic::RefrigerantServiceMetricSnapshot& metric) {
-    j += "\"";
-    j += key;
-    j += "\":";
+    j += prefix;
     if (!metric.available) {
         j += "null";
         return;
@@ -835,7 +833,6 @@ static void append_status_json(JsonOut& j, bool redact) {
             ifield(",\"scl\":", epresets[i]->scl);
             j += "}";
         }
-        j += "]},";
     }
     {
         const WifiInfo wi            = wifi_info();
@@ -847,7 +844,7 @@ static void append_status_json(JsonOut& j, bool redact) {
         }
         snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X", wi.mac[0], wi.mac[1],
                  wi.mac[2], wi.mac[3], wi.mac[4], wi.mac[5]);
-        append_status_redacted(j, "\"wifi\":{\"ssid\":", jstr_r(c.wifi_ssid, redact));
+        append_status_redacted(j, "]},\"wifi\":{\"ssid\":", jstr_r(c.wifi_ssid, redact));
         append_status_redacted(j, ",\"ip\":", jstr_r(wi.ip, redact));
         append_status_opt_int(j, ",\"rssi\":", wi.connected, wi.rssi);
         bfield(",\"connected\":", wi.connected);
@@ -1039,12 +1036,7 @@ static void append_status_json(JsonOut& j, bool redact) {
     // identifying installation data and therefore follow the same redaction boundary as the room
     // source. Power and source-time remain non-secret diagnostic evidence.
     {
-        const CirculationSourceStatus circulation     = circulation_source_status(c);
-        auto append_tenths_w = [&j](uint16_t value) {
-            append_json_uint(j, value / 10u);
-            j += '.';
-            append_json_uint(j, value % 10u);
-        };
+        const CirculationSourceStatus circulation = circulation_source_status(c);
         j += "},\"circulation_source\":{\"configured\":";
         j += c.circulation_topic.empty() ? "false" : "true";
         append_status_redacted(j, ",\"name\":", jstr_r(c.circulation_name, redact));
@@ -1052,10 +1044,8 @@ static void append_status_json(JsonOut& j, bool redact) {
         append_status_redacted(j, ",\"power_path\":", jstr_r(c.circulation_power_path, redact));
         append_status_redacted(j, ",\"timestamp_path\":", jstr_r(c.circulation_time_path, redact));
         ufield(",\"max_age_s\":", c.circulation_max_age_s);
-        j += ",\"on_threshold_w\":";
-        append_tenths_w(c.circulation_on_tenths_w);
-        j += ",\"off_threshold_w\":";
-        append_tenths_w(c.circulation_off_tenths_w);
+        append_status_signed_tenths(j, "on_threshold_w", true, c.circulation_on_tenths_w);
+        append_status_signed_tenths(j, "off_threshold_w", true, c.circulation_off_tenths_w);
         ufield(",\"confirm_s\":", c.circulation_confirm_s);
         bfield(",\"subscribed\":", circulation.subscribed);
         bfield(",\"has_value\":", circulation.has_value);
@@ -1167,15 +1157,11 @@ static void append_status_json(JsonOut& j, bool redact) {
         ufield(",\"refresh_success_token\":", wf.refresh_success_token);
         j += ",\"task_stack_min_free_bytes\":";
         append_stack_bytes(j, stack_watch_min_free_bytes(StackWatch::Weather));
-        if (!weather_configured) {
-            j += ",\"reason\":\"not_configured\"";
-        } else if (weather_safe_mode) {
-            j += ",\"reason\":\"safe_mode\"";
-        } else if (!c.diagnostics_enabled) {
-            j += ",\"reason\":\"diagnostics_disabled\"";
-        } else if (!wf.reason.empty()) {
-            qfield(",\"reason\":", wf.reason);
-        }
+        const std::string_view wf_reason = !weather_configured      ? "not_configured"
+                                           : weather_safe_mode      ? "safe_mode"
+                                           : !c.diagnostics_enabled ? "diagnostics_disabled"
+                                                                    : std::string_view(wf.reason);
+        if (!wf_reason.empty()) qfield(",\"reason\":", wf_reason);
         if (weather_source_active && !wf.error.empty()) qfield(",\"error\":", wf.error);
         j += "},";
     }
@@ -1344,7 +1330,9 @@ static void append_status_json(JsonOut& j, bool redact) {
         std::unique_ptr<Trace, decltype(&std::free)> trace(
             trace_storage ? new (trace_storage) Trace : nullptr, std::free);
         logic::CheckupRestore      persist;
-        const logic::CheckupReport hr = checkup_report(&hrs, trace.get(), &persist, diag_effective);
+        logic::DefrostStartReport  defrost_start;
+        const logic::CheckupReport hr =
+            checkup_report(&hrs, trace.get(), &persist, diag_effective, &defrost_start);
         const auto                 release_trace = [&] {
             trace.reset();
             trace_reader.release();
@@ -1520,6 +1508,21 @@ static void append_status_json(JsonOut& j, bool redact) {
                 num("defrost_s", ck.c);
                 num("run_s", ck.d);
                 outdoor_context(hr.defrost_outdoor);
+                const auto& start = defrost_start;
+                if (start.observed_us < 0) {
+                    j += ",\"last_observed_start\":null";
+                    break;
+                }
+                append_status_opt_uint(
+                    j, ",\"last_observed_start\":{\"unix_s\":", start.unix_s != 0, start.unix_s);
+                append_status_opt_quoted(
+                    j, ",\"route\":", start.route != logic::DefrostStartRoute::Unknown,
+                    start.route == logic::DefrostStartRoute::SpaceHeating ? "space_heating"
+                                                                          : "dhw_route");
+                append_status_signed_tenths(j, "outdoor_c",
+                                            start.outdoor_tenths != logic::CHECKUP_ABSENT,
+                                            start.outdoor_tenths);
+                j += '}';
                 break;
             }
             case logic::CheckupCheck::Pressure:
@@ -1593,19 +1596,14 @@ static void append_status_json(JsonOut& j, bool redact) {
             if (refrigerant_service.limitation_mask & logic::RefrigerantServiceOutdoorContext)
                 append_service_limitation("outdoor_context_incomplete");
             j += "],\"metrics\":{";
-            auto append_service_metric =
-                [&j](const char* key, const logic::RefrigerantServiceMetricSnapshot& metric) {
-                    append_status_service_metric(j, key, metric);
-                };
-            append_service_metric("compressor_rps", refrigerant_service.rps);
-            j += ",";
-            append_service_metric("discharge_c", refrigerant_service.discharge);
-            j += ",";
-            append_service_metric("eev_command_pls", refrigerant_service.eev_command);
-            j += ",";
-            append_service_metric("high_pressure_bar", refrigerant_service.high_pressure);
-            j += ",";
-            append_service_metric("low_pressure_bar", refrigerant_service.low_pressure);
+            append_status_service_metric(j, "\"compressor_rps\":", refrigerant_service.rps);
+            append_status_service_metric(j, ",\"discharge_c\":", refrigerant_service.discharge);
+            append_status_service_metric(j,
+                                         ",\"eev_command_pls\":", refrigerant_service.eev_command);
+            append_status_service_metric(
+                j, ",\"high_pressure_bar\":", refrigerant_service.high_pressure);
+            append_status_service_metric(
+                j, ",\"low_pressure_bar\":", refrigerant_service.low_pressure);
             j += "}},";
         }
     }
@@ -1720,12 +1718,10 @@ static void append_status_json(JsonOut& j, bool redact) {
     // POST /coredump/clear leaves a banner with no download unless this is refreshed. Refreshing it
     // costs one 4-byte flash read — the same read GET /coredump already does per request.
     {
-        const CrashInfo crash = diag_crash_info_live();
-        j += "},\"last_crash\":";
-        if (crash_is_notable(crash))
-            j += build_crash_json(crash);
-        else
-            j += "null";
+        const CrashInfo crash     = diag_crash_info_live();
+        const bool      has_crash = crash_is_notable(crash);
+        j += has_crash ? "},\"last_crash\":" : "},\"last_crash\":null";
+        if (has_crash) j += build_crash_json(crash);
     }
 
     // Auto-detection: proto/model derived from the X10A bus (hp_detect.cpp). The candidate set is

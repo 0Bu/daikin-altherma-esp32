@@ -724,6 +724,60 @@ std::vector<CachedValue> stop_rows(bool running, bool request = true, bool targe
     return v;
 }
 
+void defrost_start_case() {
+    boot();
+    const auto read_start = [](DiagnosticsSource src = DiagnosticsSource::X10a) {
+        DefrostStartReport report;
+        checkup_report(nullptr, nullptr, nullptr, src, &report);
+        return report;
+    };
+    const auto cov = coverage();
+    auto       off = stop_rows(true);
+    off.push_back(row(CHECKUP_LOC_OUTDOOR, "8"));
+    auto on         = off;
+    on[3].value     = "1";
+    on.back().value = "0";
+    sample(1, off, cov, true, true);
+    sample(2, on, cov, true, true);
+    const auto start = read_start();
+    require(start.observed_us == 2000000 && start.route == DefrostStartRoute::SpaceHeating &&
+                start.outdoor_tenths == 0,
+            "defrost_start_uses_fresh_zero");
+    require(read_start(DiagnosticsSource::Modbus).observed_us < 0,
+            "defrost_start_modbus_stays_empty");
+
+    // Same-generation pause hides the field while disabled, keeps <24 h evidence on resume,
+    // and refuses to bridge an OFF->ON transition across the paused interval.
+    sample(3, off, cov, true, true);
+    checkup_set_diagnostics(false, 23);
+    require(read_start().observed_us < 0, "defrost_start_hidden_while_paused");
+    checkup_set_diagnostics(true, 23);
+    require(read_start().observed_us == 2000000, "defrost_start_preserved_across_same_gen_pause");
+    sample(4, on, cov, true, true);
+    require(read_start().observed_us == 2000000, "defrost_start_pause_breaks_edge_bridge");
+
+    sample(5, off, cov, true, true);
+    on.back().held_unknown = true;
+    sample(6, on, cov, true, true);
+    const auto held = read_start();
+    require(held.observed_us == 6000000 && held.outdoor_tenths == CHECKUP_ABSENT,
+            "defrost_start_withholds_held_outdoor");
+    ++adapter::poll_generation;
+    require(read_start().observed_us < 0, "defrost_start_hidden_before_new_source_poll");
+    sample(7, on, cov, true, true, true, adapter::poll_generation);
+    require(read_start().observed_us < 0, "defrost_start_does_not_cross_source_generation");
+
+    sample(8, off, cov, true, true, true, adapter::poll_generation);
+    auto unreadable = off;
+    unreadable.erase(unreadable.begin() + 3);
+    // A stop-only read fence arrives after this poll captured its time, before it held Checkup.
+    sdk::before_take = [] { s_stop_read_fence_us = 9500000; };
+    sample(9, unreadable, cov, true, true, true, adapter::poll_generation);
+    sample(10, on, cov, true, true, true, adapter::poll_generation);
+    require(read_start().observed_us < 0,
+            "defrost_start_sees_unreadable_sample_during_stop_read_fence");
+}
+
 void stop_context_case(const std::string& name) {
     if (name == "stop_unstarted_report_pending") {
         require(checkup_stop_context_report().observation.restore_pending,
@@ -1045,6 +1099,8 @@ int main(int argc, char** argv) {
             fault_case(name);
         else if (name == "source_freshness")
             source_freshness();
+        else if (name == "defrost_start_context")
+            defrost_start_case();
         else if (name == "stale_finding")
             stale_finding();
         else if (name == "backwards_clock")

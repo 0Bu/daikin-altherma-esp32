@@ -52,6 +52,7 @@
 #include "logic/heating_curve_mqtt.hpp"
 #include "logic/error_codes.hpp"
 #include "logic/checkup.hpp"
+#include "logic/defrost_start.hpp"
 #include "logic/stop_context_input.hpp"
 #include "logic/observation_hourly.hpp"
 #include "checkup_population_fixture.hpp"
@@ -16979,6 +16980,155 @@ static void test_checkup_evidence_overhaul() {
                                     90'002'000'000LL)); // old last-sample rule
 }
 
+static void test_defrost_start_context() {
+    using namespace daik::logic;
+    constexpr int64_t second = 1000000;
+    StopContextSample off;
+    off.rps_known = off.rps_running = true;
+    off.defrost                     = StopContextBit::Off;
+    off.route                       = StopContextRoute::Space;
+    off.mode                        = StopContextMode::Heating;
+    auto on                         = off;
+    on.defrost                      = StopContextBit::On;
+    constexpr int       zero        = 0;
+    constexpr int       old         = 80;
+    DefrostStartTracker t;
+
+    auto unqualified      = off;
+    unqualified.rps_known = false;
+    CHECK(defrost_start_route(unqualified) == DefrostStartRoute::Unknown);
+    unqualified.rps_known = true;
+    unqualified.mode      = StopContextMode::Cooling;
+    CHECK(defrost_start_route(unqualified) == DefrostStartRoute::Unknown);
+    unqualified.route = StopContextRoute::Unknown;
+    CHECK(defrost_start_route(unqualified) == DefrostStartRoute::Unknown);
+    unqualified.route = StopContextRoute::Dhw;
+    unqualified.mode  = StopContextMode::Heating;
+    CHECK(defrost_start_route(unqualified) == DefrostStartRoute::Dhw);
+
+    CHECK(t.snapshot(0, 0).observed_us < 0);
+    t.observe(off, old, second, 0, 0);
+    CHECK(t.previous_us < 0);
+    t.observe(off, old, -1, 0, 1);
+    CHECK(t.previous_us < 0);
+    t.observe(on, zero, second, 0, 1);
+    CHECK(t.snapshot(second, 1).observed_us < 0); // already active when observation began
+    t.observe(off, old, 2 * second, 0, 1);
+    t.observe(on, zero, 17 * second, 123, 1);
+    const auto heat = t.snapshot(17 * second, 1);
+    CHECK(heat.unix_s == 123 && heat.route == DefrostStartRoute::SpaceHeating);
+    CHECK(heat.outdoor_tenths == 0);                   // the ON sweep's physical zero
+    CHECK(t.snapshot(17 * second, 2).observed_us < 0); // source withdrawal before the next poll
+    CHECK(t.snapshot(17 * second - 1, 1).observed_us < 0);
+    CHECK(t.snapshot(17 * second + CHECKUP_WINDOW_US - 1, 1).observed_us == 17 * second);
+    CHECK(t.snapshot(17 * second + CHECKUP_WINDOW_US, 1).observed_us < 0);
+
+    t.observe(off, old, 18 * second, 0, 1);
+    auto stopped        = on;
+    stopped.rps_running = false;
+    t.observe(stopped, CHECKUP_ABSENT, 19 * second, 0, 1);
+    const auto unknown = t.snapshot(19 * second, 1);
+    CHECK(unknown.observed_us == 19 * second && unknown.unix_s == 0);
+    CHECK(unknown.route == DefrostStartRoute::Unknown && unknown.outdoor_tenths == CHECKUP_ABSENT);
+
+    off.route = on.route = StopContextRoute::Dhw;
+    off.mode = on.mode = StopContextMode::Dhw;
+    t.observe(off, old, 20 * second, 0, 1);
+    t.observe(on, CHECKUP_ABSENT, 21 * second, 0, 1);
+    CHECK(t.last.route == DefrostStartRoute::Dhw && t.last.outdoor_tenths == CHECKUP_ABSENT);
+    auto cooling = on;
+    cooling.mode = StopContextMode::Cooling;
+    t.observe(off, old, 22 * second, 0, 1);
+    t.observe(cooling, zero, 23 * second, 0, 1);
+    CHECK(t.last.route == DefrostStartRoute::Unknown && t.last.outdoor_tenths == CHECKUP_ABSENT);
+
+    t.observe(off, old, 24 * second, 0, 1);
+    t.observe(on, zero, 39 * second + 1, 0, 1);
+    CHECK(t.last.observed_us == 23 * second); // unobserved transition across the gap
+    t.observe(off, old, 40 * second, 0, 1);
+    t.observe({}, CHECKUP_ABSENT, 41 * second, 0, 1);
+    t.observe(on, zero, 42 * second, 0, 1);
+    CHECK(t.last.observed_us == 23 * second);
+    t.observe(off, old, 43 * second, 0, 1);
+    t.observe(on, zero, 44 * second, 0, 2);
+    CHECK(t.last.observed_us < 0);
+    t.observe(off, old, 45 * second, 0, 2);
+    t.observe(on, 3277, 46 * second, 0, 2); // outside the selected sensor's wire range
+    CHECK(t.last.route == DefrostStartRoute::Dhw && t.last.outdoor_tenths == CHECKUP_ABSENT);
+    t.observe(on, zero, 44 * second, 0, 2);
+    CHECK(t.last.observed_us < 0);
+
+    off.route = StopContextRoute::Space;
+    off.mode  = StopContextMode::Heating;
+    t.observe(off, old, 45 * second, 0, 2);
+    t.observe(on, zero, 46 * second, 0, 2);
+    CHECK(t.last.observed_us == 46 * second && t.last.route == DefrostStartRoute::Unknown);
+
+    // Same-generation pause resets edge state without wiping a valid <24 h last start.
+    t.observe(off, old, 47 * second, 0, 2);
+    t.pause();
+    CHECK(t.previous_us < 0 && t.previous_defrost == StopContextBit::Unknown &&
+          t.previous_route == DefrostStartRoute::Unknown);
+    t.observe(on, zero, 48 * second, 999, 2);
+    CHECK(t.snapshot(48 * second, 2).observed_us == 46 * second);
+
+    // Card 1: zero-event incomplete coverage stays observation-only and never claims a heuristic
+    // all-clear; three-event low share with incomplete span/coverage stays Collecting.
+    CheckupCoverage cov{};
+    cov.defrost = cov.rps = true;
+    CheckupWindow partial{};
+    partial.dfr_observed_s             = 600;
+    partial.dfr_pair_observed_s        = 600;
+    partial.dfr_run_s                  = 300;
+    partial.defrost_outdoor_samples    = 2;
+    partial.defrost_outdoor_min_tenths = 0;
+    partial.defrost_outdoor_sum_tenths = 0;
+    const auto zero_partial            = checkup_evaluate(partial, cov, FaultClass::Normal);
+    CHECK(zero_partial[CheckupCheck::Defrost].a == 0 &&
+          zero_partial[CheckupCheck::Defrost].e == 0 &&
+          zero_partial[CheckupCheck::Defrost].observation_only &&
+          zero_partial[CheckupCheck::Defrost].reason == CheckupReason::TooFewDefrostEvents);
+    CHECK(zero_partial.evaluated == 0);
+    CHECK(zero_partial.defrost_outdoor.samples == 2 &&
+          zero_partial.defrost_outdoor.min_tenths == 0 &&
+          zero_partial.defrost_outdoor.mean_tenths == 0); // physical 0.0 C preserved
+
+    partial.defrosts        = CHECKUP_DEFROST_MIN_COUNT;
+    partial.paired_defrosts = CHECKUP_DEFROST_MIN_COUNT;
+    partial.defrost_s       = 30;
+    CHECK(checkup_evaluate(partial, cov, FaultClass::Normal)[CheckupCheck::Defrost].verdict ==
+          CheckupVerdict::Collecting);
+
+    // Card 2: geothermal profiles share 0x20/2 conv 105 for a two-phase thermistor (R4T) and must
+    // resolve Instrument::OutdoorHeatExchanger as Absent; withheld/duplicate rows stay
+    // non-Supported.
+    for (const char* geo_name :
+         {"altherma_egsah_x_ewsah_x_d_series_6_10kw_geo3", "altherma_egsqh_a_series_10kw_geo2",
+          "altherma_gshp", "altherma_gshp2"}) {
+        const auto view = def::resolved(def::lookup(geo_name));
+        CHECK(view.count() > 0);
+        bool has_shared_0x20_2 = false;
+        for (size_t i = 0; i < view.count(); ++i) {
+            if (view[i].reg == 0x20 && view[i].offset == 2 && view[i].conv == 105) {
+                has_shared_0x20_2 = true;
+                break;
+            }
+        }
+        CHECK(has_shared_0x20_2);
+        CHECK(instrument_resolve(view, Instrument::OutdoorHeatExchanger).state ==
+              InstrumentState::Absent);
+    }
+    const daik::ValueDef dup_coil[] = {{0x20, 2, 105, 2, 1, "O/U Heat Exch. Temp."},
+                                       {0x20, 2, 105, 2, 1, "R4T-Deicer temp."}};
+    CHECK(instrument_resolve(profile_view(dup_coil, 2, nullptr, 0, 0),
+                             Instrument::OutdoorHeatExchanger)
+              .state == InstrumentState::Ambiguous);
+    const daik::ValueDef withheld_coil[] = {{0x20, 2, 105, 2, 1, "O/U Heat Exch. Temp.", true}};
+    CHECK(instrument_resolve(profile_view(withheld_coil, 1, nullptr, 0, 0),
+                             Instrument::OutdoorHeatExchanger)
+              .state == InstrumentState::Withheld);
+}
+
 static void test_checkup() {
     using namespace logic;
 
@@ -31601,6 +31751,7 @@ int main() {
     test_published_kind();
     test_history_measurement_units();
     test_history();
+    test_defrost_start_context();
     test_checkup();
     test_checkup_population();
     test_checkup_evidence_overhaul();

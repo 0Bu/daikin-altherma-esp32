@@ -302,8 +302,7 @@ static esp_err_t set_wifi(httpd_req_t* req) {
     // A failed save leaves NVS *and* RAM on the old credentials, so rebooting would silently drop
     // the user back onto the old network behind an {"ok":true} — say so and stay up instead.
     if (!config_save(c)) {
-        httpd_resp_set_status(req, "500 Internal Server Error");
-        return http_send_json(req, "{\"ok\":false,\"error\":\"config write failed\"}");
+        return send_err(req, "500 Internal Server Error", "config write failed");
     }
     http_send_json(req, "{\"ok\":true,\"reboot\":true}");
     reboot_soon();
@@ -437,42 +436,31 @@ static esp_err_t set_mqtt(httpd_req_t* req) {
     std::string base        = js(j, "base");
     j.reset();
 
-    Config c = config();
-    if (!base_given) base = c.mqtt_base;
     {
-        // Refused BEFORE the broker pre-flight: this check is free and local, while the pre-flight
-        // costs a DNS lookup, a TCP probe and up to ~8 s of the httpd task. Rejecting the cheap way
-        // round also means a bad base topic never spends a TLS session to be told so.
-        MqttBaseRefusal refusal;
-        if (!mqtt_base_valid(base, &refusal))
-            return send_err_code(req, "400 Bad Request", refusal.code, refusal.message);
-    }
-    // The modal never prefills credentials (/status deliberately doesn't expose them), so the fields
-    // come back empty whenever the user didn't retype them. An empty user AND pass therefore means
-    // "keep the stored credentials" — NOT "clear them". Without this, editing only the broker would
-    // silently wipe a working username/password (and the pre-flight below would connect anonymously
-    // and either destroy the creds or reject a broker the real creds would have accepted).
-    //
-    // That default alone left NO way to clear them: disabling MQTT and re-adding the broker both
-    // arrive with empty creds, so both KEEP — and every later plain mqtt:// save is then rejected
-    // "Credentials require mqtts://" by the kept creds. Migrating an authenticated mqtts:// broker to
-    // an anonymous one needed a flash erase. `clear_creds:true` (the modal's "remove stored
-    // credentials" checkbox) is the explicit signal for the other meaning of empty. A non-empty
-    // user/pass is an explicit SET and wins regardless — the flag only disambiguates the empty case.
-    if (user.empty() && pass.empty() && !clear_creds) {
-        user = c.mqtt_user;
-        pass = c.mqtt_pass;
-    }
-    if (broker == c.mqtt_uri && user == c.mqtt_user && pass == c.mqtt_pass && base == c.mqtt_base) {
-        return http_send_json(req, "{\"ok\":true,\"reboot\":false}");
+        const Config existing = config();
+        if (!base_given) base = existing.mqtt_base;
+        {
+            // Refused BEFORE the broker pre-flight: this check is free and local, while the
+            // pre-flight costs a DNS lookup, a TCP probe and up to ~8 s of the httpd task.
+            // Rejecting the cheap way round also means a bad base topic never spends a TLS session
+            // to be told so.
+            MqttBaseRefusal refusal;
+            if (!mqtt_base_valid(base, &refusal))
+                return send_err_code(req, "400 Bad Request", refusal.code, refusal.message);
+        }
+        if (user.empty() && pass.empty() && !clear_creds) {
+            user = existing.mqtt_user;
+            pass = existing.mqtt_pass;
+        }
+        if (broker == existing.mqtt_uri && user == existing.mqtt_user &&
+            pass == existing.mqtt_pass && base == existing.mqtt_base) {
+            return http_send_json(req, "{\"ok\":true,\"reboot\":false}");
+        }
     }
 
     if (!broker.empty()) {
         // 1. Transport-neutral connectivity check (the broker is equally reachable over Ethernet)
-        if (!net_is_up()) {
-            httpd_resp_set_status(req, "400 Bad Request");
-            return http_send_json(req, "{\"ok\":false,\"error\":\"Network not connected\"}");
-        }
+        if (!net_is_up()) return send_bad_req(req, "Network not connected");
 
         // 2. Validate scheme / credentials leakage policy
         std::string test_uri = broker;
@@ -481,21 +469,16 @@ static esp_err_t set_mqtt(httpd_req_t* req) {
         const bool has_creds = !user.empty() || !pass.empty();
         if (!has_scheme) test_uri = "mqtt://" + test_uri;
 
-        if (has_creds && !is_tls_check) {
-            httpd_resp_set_status(req, "400 Bad Request");
-            return http_send_json(
-                req, "{\"ok\":false,\"error\":\"Credentials require mqtts:// or wss://\"}");
-        }
+        if (has_creds && !is_tls_check)
+            return send_bad_req(req, "Credentials require mqtts:// or wss://");
 
         // 3. Parse host and port
         std::string host;
         int port = 0;
         bool is_tls = false;
         const char* uri_err = "Invalid broker URI";
-        if (!parse_mqtt_uri(test_uri, host, port, is_tls, &uri_err)) {
-            httpd_resp_set_status(req, "400 Bad Request");
-            return http_send_json(req, (std::string("{\"ok\":false,\"error\":\"") + uri_err + "\"}").c_str());
-        }
+        if (!parse_mqtt_uri(test_uri, host, port, is_tls, &uri_err))
+            return send_bad_req(req, uri_err);
 
         // 4. Resolve DNS
         struct addrinfo hints{}, *res = nullptr;
@@ -504,27 +487,16 @@ static esp_err_t set_mqtt(httpd_req_t* req) {
         char port_str[16];
         std::snprintf(port_str, sizeof(port_str), "%d", port);
         int err = getaddrinfo(host.c_str(), port_str, &hints, &res);
-        if (err != 0 || res == nullptr) {
-            httpd_resp_set_status(req, "400 Bad Request");
-            return http_send_json(req, "{\"ok\":false,\"error\":\"DNS lookup failed\"}");
-        }
+        if (err != 0 || res == nullptr) return send_bad_req(req, "DNS lookup failed");
         struct sockaddr_in target_addr;
         std::memcpy(&target_addr, res->ai_addr, sizeof(struct sockaddr_in));
         freeaddrinfo(res);
 
         // 5. TCP connection probe
-        if (!tcp_port_probe(target_addr.sin_addr, port, 3000)) {
-            httpd_resp_set_status(req, "400 Bad Request");
-            return http_send_json(req, "{\"ok\":false,\"error\":\"Broker port unreachable\"}");
-        }
+        if (!tcp_port_probe(target_addr.sin_addr, port, 3000))
+            return send_bad_req(req, "Broker port unreachable");
 
         // 6. Connect and authenticate with credentials — but only if the heap can afford it.
-        // A TLS client spins up a full mbedTLS session (~16 KB in-buf + 4 KB out-buf, each ONE
-        // contiguous block) ON TOP of the live bridge's own session. On a fragmented heap that second
-        // session can exceed the largest free block and reboot the device. If we can't fit it, reject
-        // this attempt WITHOUT persisting and let the UI offer a retry. DNS + an open TCP port do not
-        // prove MQTT CONNECT/authentication; saving after only those two checks would break this
-        // endpoint's test-before-persist contract. Threshold is generous for the TLS case.
         const size_t need = is_tls ? 48u * 1024u : 12u * 1024u;
         MqttValidateCtx ctx{};                       // error_msg zero-inits to nullptr
         ctx.sem = xSemaphoreCreateBinary();
@@ -545,15 +517,11 @@ static esp_err_t set_mqtt(httpd_req_t* req) {
         esp_mqtt_client_handle_t client = esp_mqtt_client_init(&cfg);
         if (!client) {
             vSemaphoreDelete(ctx.sem);
-            httpd_resp_set_status(req, "500 Internal Server Error");
-            return http_send_json(req, "{\"ok\":false,\"error\":\"MQTT init failed\"}");
+            return send_err(req, "500 Internal Server Error", "MQTT init failed");
         }
 
         const esp_err_t registration_rc = esp_mqtt_client_register_event(
             client, static_cast<esp_mqtt_event_id_t>(MQTT_EVENT_ANY), on_mqtt_validate, &ctx);
-        // A failed start never produces an event, so waiting on the semaphore would burn the full
-        // 5 s and then blame a "connection timeout" — report the real cause immediately instead.
-        // Registration rejection short-circuits start; neither case needs stop().
         if (registration_rc != ESP_OK || esp_mqtt_client_start(client) != ESP_OK) {
             esp_mqtt_client_destroy(client);
             vSemaphoreDelete(ctx.sem);
@@ -570,42 +538,30 @@ static esp_err_t set_mqtt(httpd_req_t* req) {
         esp_mqtt_client_destroy(client);
         vSemaphoreDelete(ctx.sem);
 
-        if (!finished) {
-            httpd_resp_set_status(req, "400 Bad Request");
-            return http_send_json(req, "{\"ok\":false,\"error\":\"MQTT connection timeout\"}");
-        }
+        if (!finished) return send_err(req, "400 Bad Request", "MQTT connection timeout");
         if (!ctx.connected) {
-            // error_msg is a string literal by construction (see MqttValidateCtx) — never broker
-            // text, so it satisfies send_err's no-escaping precondition.
             return send_err(req, "400 Bad Request", ctx.error_msg ? ctx.error_msg : "MQTT connection refused");
         }
     }
 
-    c = config();
-    const uint32_t previous_room_identity = logic::history_room_identity(c);
-    c.mqtt_uri  = broker;
-    c.mqtt_user = user;
-    c.mqtt_pass = pass;
-    // Applies on the reboot below, like the broker itself: mqtt_ha.cpp resolves the base ONCE at
-    // bridge start and derives every topic root plus the HA node id from it, so there is nothing to
-    // re-point live. The retained topics under the PREVIOUS base are deliberately NOT retracted —
-    // the old base is gone by the time a new bridge could delete anything, and a board that no
-    // longer owns a topic must not be the thing that deletes it (docs/HOME_ASSISTANT.md carries the
-    // broker-side sweep, the same manual step a board swap already needs).
-    c.mqtt_base = base;
-    if (logic::history_room_identity(c) != previous_room_identity)
-        c.ref_temp_generation = diagnostics_next_generation(c.ref_temp_generation, esp_random());
-    const uint32_t room_identity = logic::history_room_identity(c);
-    // The broker just pre-flighted clean, so a failure here is NVS, not the user's input — don't
-    // reboot into the old broker while telling them the new one was accepted.
-    if (!config_save(c)) {
-        httpd_resp_set_status(req, "500 Internal Server Error");
-        return http_send_json(req, "{\"ok\":false,\"error\":\"config write failed\"}");
+    {
+        Config         c                      = config();
+        const uint32_t previous_room_identity = logic::history_room_identity(c);
+        c.mqtt_uri                            = broker;
+        c.mqtt_user                           = user;
+        c.mqtt_pass                           = pass;
+        c.mqtt_base                           = base;
+        if (logic::history_room_identity(c) != previous_room_identity)
+            c.ref_temp_generation =
+                diagnostics_next_generation(c.ref_temp_generation, esp_random());
+        const uint32_t room_identity = logic::history_room_identity(c);
+        if (!config_save(c))
+            return send_err(req, "500 Internal Server Error", "config write failed");
+        history_room_reset(room_identity);
+        http_send_json(req, "{\"ok\":true,\"reboot\":true}");
+        reboot_soon();
+        return ESP_OK;
     }
-    history_room_reset(room_identity);
-    http_send_json(req, "{\"ok\":true,\"reboot\":true}");
-    reboot_soon();
-    return ESP_OK;
 }
 
 struct RefTempRequest {
@@ -1146,10 +1102,7 @@ static esp_err_t set_syslog(httpd_req_t* req) {
     // so the request path never blocks on a network probe. (/set_mqtt is the deliberate exception: it
     // pre-flights the broker connect synchronously so a bad address/credential is rejected at Save
     // rather than silently failing after the reboot — syslog is fire-and-forget UDP, MQTT is not.)
-    if (!host.empty() && (port < 1 || port > 65535)) {
-        httpd_resp_set_status(req, "400 Bad Request");
-        return http_send_json(req, "{\"ok\":false,\"error\":\"port out of range\"}");
-    }
+    if (!host.empty() && (port < 1 || port > 65535)) return send_bad_req(req, "port out of range");
 
     Config c = config();
     // Unchanged settings short-circuit — no NVS write, no reboot — exactly like /set_mqtt and
@@ -1161,10 +1114,7 @@ static esp_err_t set_syslog(httpd_req_t* req) {
         return http_send_json(req, "{\"ok\":true,\"reboot\":false}");
     c.syslog_host = host;
     c.syslog_port = port;
-    if (!config_save(c)) {
-        httpd_resp_set_status(req, "500 Internal Server Error");
-        return http_send_json(req, "{\"ok\":false,\"error\":\"config write failed\"}");
-    }
+    if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");
     http_send_json(req, "{\"ok\":true,\"reboot\":true}");
     reboot_soon();
     return ESP_OK;
@@ -1188,10 +1138,7 @@ static esp_err_t set_ntp(httpd_req_t* req) {
     Config c = config();
     if (server == c.ntp_server) return http_send_json(req, "{\"ok\":true,\"reboot\":false}");
     c.ntp_server = server;
-    if (!config_save(c)) {
-        httpd_resp_set_status(req, "500 Internal Server Error");
-        return http_send_json(req, "{\"ok\":false,\"error\":\"config write failed\"}");
-    }
+    if (!config_save(c)) return send_err(req, "500 Internal Server Error", "config write failed");
     http_send_json(req, "{\"ok\":true,\"reboot\":true}");
     reboot_soon();
     return ESP_OK;
@@ -1590,9 +1537,8 @@ static esp_err_t hp_query_probe(httpd_req_t* req) {
     int decode_count = 0;
     bool unimplemented = false;
     if (sliced) {
-        const Config c = config();
-        const def::Profile& prof = def::lookup(c.profile.c_str());
-        const int rtype = profile_refrigerant(prof.values, prof.count);
+        const def::Profile& prof    = def::lookup(config().profile.c_str());
+        const int           rtype   = profile_refrigerant(prof.values, prof.count);
         const uint8_t* payload = reply.frame + reply.payload_off;
         if (q.conv == PROBE_SWEEP) {
             decode_count = probe_sweep(payload, reply.payload_len, q.offset, q.size,

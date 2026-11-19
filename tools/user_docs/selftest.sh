@@ -20,7 +20,7 @@ reset() {
     cp main/logic/checkup.hpp "$WORK/main/logic/checkup.hpp"
     cp main/checkup.cpp "$WORK/main/checkup.cpp"
     cp main/logic/stop_context.hpp main/logic/stop_context_input.hpp \
-       main/logic/observation_hourly.hpp main/logic/instrument.hpp main/logic/heartbeat.hpp \
+       main/logic/observation_hourly.hpp main/logic/instrument.hpp main/logic/heartbeat.hpp main/logic/defrost_start.hpp \
        "$WORK/main/logic/"
     cp main/stop_observation_store.hpp main/stop_observation_store.cpp main/history.cpp "$WORK/main/"
     cp docs/DIAGNOSTICS.md "$WORK/docs/DIAGNOSTICS.md"
