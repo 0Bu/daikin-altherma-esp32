@@ -245,7 +245,10 @@ flow-direction arrow. Direction belongs to pipe dashes.
 Quiet/Defrost pills remain grey while inactive/unknown and blue while active. E-heater stays grey
 or orange; its accessible name and inspector state ON/OFF/unknown. Native Altherma 4 holding 9
 reports Off/Automatic/Manual quiet selection, not activity: Quiet stays unknown without independent
-X10A activity evidence and has no native activity timeline. The permanent BOOST face says
+X10A activity evidence and has no native activity timeline. Left of optional ENV III and BOOST,
+configured/used heat-pump links show compact X10A and MODBUS header pills (blue and petrol while
+connected, grey while disconnected, omitted when unused) that pack flush right and open link-status
+inspectors. The permanent BOOST face says
 only BOOST: Recommended on is petrol, other/unknown states grey. Its four-state timeline retains
 Free running, Forced off, Recommended on and Forced on. Only Recommended on contributes to Boost
 time. HomeHub's live network request outranks physical X10A SG contacts for this subject; the

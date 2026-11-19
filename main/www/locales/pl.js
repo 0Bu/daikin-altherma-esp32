@@ -1,4 +1,4 @@
-// translation-source: 8d39ceba8be704e3a02e1f3012fba8f388b32c4e1e353afc033c83be08bee81f
+// translation-source: 7868c79654d72277f20939757ce97fa1a10e51ae6f225d939d15f7dd6f917646
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -1101,6 +1101,8 @@ INSPECT_I18N.pl = inspectValues(
     ["Przepływ wody", 0, "Przepływ wspólnego obiegu; wymagane minimum zależy od modelu i trybu."], // flow
     ["Stan styku przepływu", 0, "Stan binarny X10A; nie mierzy l/min ani nie potwierdza minimum modelu.", (d) => d.flowSwitch == null ? null : d.flowSwitch ? `X10A WŁ.; porównaj z pompą i ${fmt1(d.flow)} l/min.` : `X10A WYŁ.; przy pracy pompy porównaj ${fmt1(d.flow)} l/min i błąd 7H/C0.`], // flow_switch
     ["Ciśnienie wody", 0, "Ciśnienie w zamkniętym obiegu hydraulicznym. Dozwolony zakres zależy od modelu, wysokości instalacji i naczynia przeponowego; porównaj z instrukcją urządzenia."], // wp
+    ["Port serwisowy X10A", "Źródło danych X10A", "Przewodowe łącze X10A tylko do odczytu; wartości na niebiesko."], // x10a
+    ["Modbus TCP", "Źródło danych Modbus", "Niezależne łącze Modbus TCP tylko do odczytu (HomeHub/Altherma 4); wartości w kolorze morskim."], // modbus
   ],
 );
 
@@ -1293,4 +1295,75 @@ MODEL_DESCRIPTION_I18N.pl = modelDescriptionValues([
   ["Ta sama klasa i rejestry: wybór reprezentanta nie zmienia dekodowanych wartości."], // 12
   ["Kilka rodzin Daikin udostępnia te same rejestry, więc interfejs nie rozróżnia nazwy handlowej. Nagłówek pozostaje „Daikin Altherma”, bez zgadywania. Jednostka zewnętrzna nie podaje mocy, więc kandydaci mogą mieć różne klasy. Firmware dekoduje wariant najlepiej pasujący do wewnętrznej, ale bez pełnej pewności. Porównaj identyfikator z tabliczką."], // 13
   ["Surowe bajty ID bez publicznej tabeli nazw; przy niejasności porównaj je znak po znaku z tabliczką."], // 14
+]);
+
+FAULT_CODE_I18N.pl = faultCodeValues([
+  "Problem z przepływem wody", // 7H
+  "Usterka czujnika temperatury powrotu", // 80
+  "Usterka czujnika temperatury zasilania", // 81
+  "Włączona ochrona wymiennika przed zamarzaniem", // 89
+  "Nietypowy wzrost temperatury na wyjściu CWU", // 8F
+  "Nietypowy wzrost temperatury zasilania", // 8H
+  "Błąd wykrywania przejścia przez zero", // A1
+  "Problem z ograniczeniem wysokiego ciśnienia lub ochroną przeciwzamrożeniową", // A5
+  "Grzałka wspomagająca przegrzana lub niepodłączona", // AA
+  "Grzałka zasobnika przegrzana", // AC
+  "Dezynfekcja antylegionellowa zasobnika niezakończona", // AH
+  "Przekroczony czas nagrzewania CWU", // AJ
+  "Usterka czujnika przepływu", // C0
+  "Usterka czujnika temperatury wymiennika", // C4
+  "Usterka czujnika wymiennika", // C5
+  "Usterka czujnika temperatury pomieszczenia", // CJ
+  "Usterka płyty elektroniki jednostki zewnętrznej", // E1
+  "Błąd wykrywania prądu upływowego", // E2
+  "Zadziałał presostat wysokiego ciśnienia jednostki zewnętrznej", // E3
+  "Błąd ciśnienia ssania", // E4
+  "Przegrzanie silnika sprężarki inwerterowej jednostki zewnętrznej", // E5
+  "Sprężarka jednostki zewnętrznej nie uruchamia się", // E6
+  "Usterka silnika wentylatora jednostki zewnętrznej", // E7
+  "Przepięcie na wejściu jednostki zewnętrznej", // E8
+  "Usterka elektronicznego zaworu rozprężnego", // E9
+  "Problem przełączania chłodzenie/grzanie w jednostce zewnętrznej", // EA
+  "Nietypowy wzrost temperatury zasobnika", // EC
+  "Błąd temperatury rury tłocznej jednostki zewnętrznej", // F3
+  "Nietypowo wysokie ciśnienie jednostki zewnętrznej podczas chłodzenia", // F6
+  "Nietypowo wysokie ciśnienie; zadziałał presostat wysokiego ciśnienia", // FA
+  "Usterka czujnika napięcia lub prądu jednostki zewnętrznej", // H0
+  "Usterka zewnętrznego czujnika temperatury", // H1
+  "Usterka presostatu wysokiego ciśnienia jednostki zewnętrznej", // H3
+  "Usterka zabezpieczenia przeciążeniowego sprężarki", // H5
+  "Usterka czujnika położenia jednostki zewnętrznej", // H6
+  "Usterka układu CT prądu wejściowego sprężarki zewnętrznej", // H8
+  "Usterka czujnika temperatury zewnętrznej jednostki zewnętrznej", // H9
+  "Usterka czujnika temperatury zasobnika", // HC
+  "Usterka czujnika ciśnienia wody", // HJ
+  "Usterka czujnika rury tłocznej jednostki zewnętrznej", // J3
+  "Usterka czujnika wymiennika jednostki zewnętrznej", // J6
+  "Usterka czujnika wysokiego ciśnienia jednostki zewnętrznej", // JA
+  "Usterka płyty inwertera", // L1
+  "Nietypowy wzrost temperatury w skrzynce sterującej jednostki zewnętrznej", // L3
+  "Nietypowy wzrost temperatury radiatora inwertera jednostki zewnętrznej", // L4
+  "Wykryto przetężenie DC inwertera jednostki zewnętrznej", // L5
+  "Zadziałało zabezpieczenie termiczne płyty inwertera", // L8
+  "Zadziałało zabezpieczenie przed zablokowaniem sprężarki", // L9
+  "Usterka systemu komunikacji jednostki zewnętrznej", // LC
+  "Asymetria lub zanik fazy zasilania", // P1
+  "Wykryto nieprawidłowe napięcie DC", // P3
+  "Usterka czujnika temperatury radiatora jednostki zewnętrznej", // P4
+  "Niezgodne ustawienie wydajności", // PJ
+  "Niedobór czynnika chłodniczego w jednostce zewnętrznej", // U0
+  "Odwrócona kolejność lub zanik fazy", // U1
+  "Błąd napięcia sieciowego jednostki zewnętrznej", // U2
+  "Program suszenia jastrychu ogrzewania podłogowego nie zakończył się prawidłowo", // U3
+  "Problem komunikacji jednostki wewnętrznej z zewnętrzną", // U4
+  "Problem komunikacji z panelem sterowania", // U5
+  "Błąd transmisji między głównym CPU a CPU inwertera jednostki zewnętrznej", // U7
+  "Problem komunikacji z adapterem LAN, termostatem pokojowym lub USB", // U8
+  "Nieprawidłowe połączenie lub zgodność jednostek", // UA
+  "Wykryto zamienione rury lub błędne okablowanie komunikacji", // UF
+], "Nie jest przesyłany żaden kod błędu.", "Brak krótkiego opisu tego kodu.");
+
+MB_DELTA_I18N.pl = mbDeltaValues([
+  "przy zatrzymanej sprężarce X10A zachowuje wartość z ostatniej pracy; rejestr HomeHub jest nadal odczytywany, ale nie ma czasu pomiaru", // outdoor_air
+  "oba odczyty pochodzą z różnych regulatorów pomieszczenia", // room_temp
 ]);

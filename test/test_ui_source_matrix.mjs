@@ -460,9 +460,9 @@ const X_2WV = (on) => ({ label: "2way valve(On:Heat_Off:Cool)", value: on ? "1" 
     [X("Indoor ambient temp. (R1T)", "20.0", "room_temp"),
      M(50, "Remote controller room temperature Main", "21.0", "room_temp")],
   ];
-  // These eight remain inline in MB_DELTA_WHY. The five later lazy packs are structurally and
+  // English and German remain inline in MB_DELTA_WHY. The eleven lazy packs are structurally and
   // renderer-gated by test_ui_locale_catalogs.mjs after their locale script registers MB_DELTA_I18N.
-  for (const lang of ["en", "de", "es", "fr", "it", "pl", "cs", "uk"]) {
+  for (const lang of ["en", "de"]) {
     c.setTxLang(lang);
     for (const [x10a, homehub] of deltaPairs) {
       const expected = c.MB_DELTA_WHY[x10a.concept][lang];

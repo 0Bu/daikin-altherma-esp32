@@ -58,7 +58,8 @@ vm.runInContext(
   catalogContext,
 );
 const catalog = catalogContext.__catalog;
-const lazyDomainCodes = ["zh", "ja", "nb", "sv", "fi"];
+const lazyDomainCodes = ["es", "fr", "it", "pl", "cs", "uk", "zh", "ja", "nb", "sv", "fi"];
+const annotatedDomainCodes = ["zh", "ja", "nb", "sv", "fi"];
 const englishKeys = Object.keys(catalog.en).sort();
 const englishKeyOrder = Object.keys(catalog.en);
 assert.equal(englishKeys.length, 984, "the test must track the complete current UI catalog");
@@ -229,7 +230,7 @@ assert.equal(catalog.de["check.cycling.normal"], "Die Heizläufe dauern im Schni
 // concise explanation; HomeHub register names are keyed by their stable offset, never by prose.
 const index = fs.readFileSync(path.join(root, "main/www/index.html"), "utf8");
 const inspectKeys = [...new Set([...index.matchAll(/data-insp="([^"]+)"/g)].map((m) => m[1]))].sort();
-assert.equal(inspectKeys.length, 40, "specialist-copy gate must track every schematic target");
+assert.equal(inspectKeys.length, 42, "specialist-copy gate must track every schematic target");
 const inspectNowKeys = new Set(["sgrequest", "ou", "phe", "dt", "pth", "cop", "buh", "bsh",
   "valve", "valve2", "heat", "pump", "pel", "defrost", "quiet", "rhot", "rcold", "wsup",
   "wtank", "wheat", "wret", "flow_switch"]);
@@ -296,7 +297,7 @@ for (const code of lazyDomainCodes) {
 // The five latest packs also carry fault/Modbus prose and were authored as one positional unit.
 // Pin every source annotation there; older packs predate readable per-row annotations, while their
 // runtime shape/fingerprint contracts remain covered below.
-for (const code of lazyDomainCodes) {
+for (const code of annotatedDomainCodes) {
   const source = localeSources.get(code);
   assert.deepEqual(lineAnnotations(sourceAssignment(source, `INSPECT_I18N.${code}`, "\n);")),
     Array.from(catalogContext.__inspectLocaleKeys),
