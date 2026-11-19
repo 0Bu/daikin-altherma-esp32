@@ -292,8 +292,9 @@ S.hist.set("modbus:dhw_tank", modbus);
   const combined = h.histHtml("dhw_tank", "", "Tank");
   assert.equal((combined.match(/data-hist="dhw_tank"/g) || []).length, 1,
     "paired sources must render in one shared plot");
-  assert.match(combined, /data-hist-series="x10a" aria-pressed="true" disabled/);
-  assert.match(combined, /data-hist-series="modbus" aria-pressed="false"/);
+  assert.match(combined, /data-hist-series="x10a" aria-pressed="true"/);
+  assert.match(combined, /data-hist-series="modbus" aria-pressed="true"/);
+  assert.doesNotMatch(combined, /data-hist-series="(?:x10a|modbus)" aria-pressed="true" disabled/);
   assert.equal(h.historyView("dhw_tank", "modbus").t0, dated.t0 + 3600);
   S.hist.set("dhw_tank", { ...x10a, b0: null, ...dated });
   S.hist.set("modbus:dhw_tank", { ...modbus, b0: null, t0: dated.t0 + 300 });
@@ -340,6 +341,7 @@ S.hist.set("modbus:dhw_tank", modbus);
     "rendering the unrelated plot cannot remove the X10A pin");
   S.histPin.delete("dhw_tank");
 
+  h.histSeriesToggle("dhw_tank", "modbus");
   h.histPinToggle("dhw_tank", 0);
   assert.equal(h.histPinIndex("dhw_tank", h.historyView("dhw_tank", "x10a")), 0,
     "the combined plot shares a pin when both plots show the pinned instrument");
@@ -352,16 +354,20 @@ S.hist.set("modbus:dhw_tank", modbus);
   assert.equal(S.histPin.has("dhw_tank"), false);
 
   S.histHidden.delete("dhw_tank");
+  S.hist.set("modbus:dhw_tank", { ...modbus, ...dated, v: [null, 455, 456] });
   h.histPinToggle("dhw_tank", 0);
+  S.hist.set("modbus:dhw_tank", { ...modbus, ...dated });
   S.status.hp = { connected: false };
   assert.equal(h.histPinIndex("dhw_tank", h.historyView("dhw_tank")), -1,
-    "failover to HomeHub cannot render an X10A pin against different readings");
+    "failover to HomeHub cannot render an X10A-only pin against different readings");
   assert.equal(h.histPinIndex("dhw_tank", h.historyView("dhw_tank", "x10a")), 0,
     "the X10A inspector can still show the original recorded reading");
   delete S.status.hp;
   S.histPin.delete("dhw_tank");
 
+  S.hist.set("modbus:dhw_tank", { ...modbus, ...dated, v: [null, 455, 456] });
   h.histPinToggle("dhw_tank", 0);
+  S.hist.set("modbus:dhw_tank", { ...modbus, ...dated });
   S.hist.set("dhw_tank", { ...x10a, b0: x10a.b0 + 1, t0: dated.t0 + 300 });
   assert.equal(h.histPinIndex("dhw_tank", h.historyView("dhw_tank")), -1,
     "a peer retaining the bucket cannot keep an original measurement that rolled out");
@@ -400,7 +406,6 @@ S.hist.set("modbus:dhw_tank", modbus);
     "a failed source is identified while its independent peer plots");
   S.hist.set("dhw_tank", { ...x10a, at: 0, v: [452, null, null] });
   await h.ensureHist("dhw_tank");
-  h.histSeriesToggle("dhw_tank", "modbus");
   const retained = h.histHtml("dhw_tank", "", "Tank");
   assert.match(retained, /vhist-retained[^>]*aria-label="X10A · Letzter empfangener Messwert"[^>]*left:0\.000%/,
     "the last received marker points at the measurement before the trailing gaps");
@@ -414,7 +419,9 @@ S.hist.set("modbus:dhw_tank", modbus);
     "an undated cursor uses the last sample of the visible retained curve");
   assert.doesNotMatch(h.scrubText(retainedView, 2), /jetzt/,
     "the last slot cannot borrow freshness from a hidden curve");
-  h.histSeriesToggle("dhw_tank", "modbus");
+  assert.equal(h.histReadout(retainedView, 2), "",
+    "an empty retained slot hides the tooltip bubble instead of showing missing prose");
+  S.histHidden.delete("dhw_tank");
   const recentStatus = S.status.uptime_s;
   S.hist.set("dhw_tank", { ...S.hist.get("dhw_tank"), t0: 1768720000 });
   h.histPinToggle("dhw_tank", 0, "x10a");
@@ -650,53 +657,55 @@ for (const dated of [false, true]) {
 S.hist.set("dhw_tank", x10a);
 S.hist.set("modbus:dhw_tank", modbus);
 
-// Modbus is initially deactivated; only X10A is shown, so label is omitted and only value is rendered
-assert.equal(h.histVisibleSeries(view).length, 1);
-assert.equal(h.histVisibleSeries(view)[0].source, "x10a");
-{
-  h.histPinToggle("dhw_tank", 0);
-  S.hist.set("modbus:dhw_tank", { ...modbus, gen: 2, v: [461, 462, 463] });
-  assert.equal(h.histPinIndex("dhw_tank", h.historyView("dhw_tank")), 0,
-    "a hidden peer refreshing the same grid cannot retire a plotted sample's pin");
-  S.hist.set("modbus:dhw_tank", { ...modbus, gen: 3, b0: modbus.b0 - 1 });
-  assert.equal(h.histPinIndex("dhw_tank", h.historyView("dhw_tank")), 1,
-    "a boot-relative pin stays with its sample when the aligned view starts earlier");
-  S.histPin.delete("dhw_tank");
-  S.hist.set("modbus:dhw_tank", modbus);
-}
-assert.equal(h.scrubText(view, 1, false), "nicht gemessen",
-  "a single visible curve omits its source label in tooltip readout");
-assert.equal(h.histReadout(view, 1), "nicht gemessen");
-
-const initialHtml = h.histHtml("dhw_tank", "°C", "Tank");
-assert.doesNotMatch(initialHtml, /class="vhist-line mb"/,
-  "Modbus curve is initially hidden");
-assert.match(initialHtml, /data-hist-series="modbus" aria-pressed="false"/,
-  "Modbus legend button is initially inactive");
-assert.match(initialHtml, /data-hist-series="x10a" aria-pressed="true" disabled/,
-  "the only visible source cannot be disabled");
-
-// Tapping Modbus activates it: both curves shown, tabular tooltip with labels and values
-h.histSeriesToggle("dhw_tank", "modbus");
+// Both X10A and Modbus are initially active; both curves render and missing values are omitted from tooltips
 assert.equal(h.histVisibleSeries(view).length, 2);
-assert.match(h.scrubText(view, 1), /X10A nicht gemessen/);
-assert.match(h.scrubText(view, 1), /Modbus 45,5 °C/,
-  "the same cursor instant reads both instruments and preserves the X10A gap");
-assert.equal(h.scrubText(view, 1, false), "X10A nicht gemessen\nModbus 45,5 °C",
-  "visible bubbles list one source per row and leave selected time to the axis");
+assert.deepEqual(Array.from(h.histVisibleSeries(view), s => s.source), ["x10a", "modbus"]);
+assert.equal(h.scrubText(view, 0, false), "X10A 45,2 °C\nModbus 45,3 °C",
+  "both visible instruments render one row each when both measured at the selected instant");
+assert.equal(h.scrubText(view, 1, false), "Modbus 45,5 °C",
+  "a gap in X10A omits X10A from the tooltip instead of printing missing prose");
 assert.match(h.histReadout(view, 1), /class="vhist-tip-rows"/,
   "multiple visible series render tabular grid rows in tooltip");
-assert.match(h.histReadout(view, 1), /<span class="vhist-tip-label">X10A<\/span><span class="vhist-tip-val">nicht gemessen<\/span>/);
+assert.doesNotMatch(h.histReadout(view, 1), /<span class="vhist-tip-label">X10A<\/span>/,
+  "unmeasured X10A row is omitted from tabular tooltip");
 assert.match(h.histReadout(view, 1), /<span class="vhist-tip-label mb">Modbus<\/span><span class="vhist-tip-val">45,5 °C<\/span>/);
 
+const initialHtml = h.histHtml("dhw_tank", "°C", "Tank");
+assert.match(initialHtml, /class="vhist-line mb"/,
+  "Modbus curve is initially shown alongside X10A");
+assert.match(initialHtml, /data-hist-series="modbus" aria-pressed="true"/,
+  "Modbus legend button is initially active");
+assert.match(initialHtml, /data-hist-series="x10a" aria-pressed="true"/,
+  "X10A legend button is initially active");
+assert.doesNotMatch(initialHtml, /data-hist-series="(?:x10a|modbus)" aria-pressed="true" disabled/,
+  "when both sources are active neither legend toggle is disabled");
+
+// Tapping Modbus hides it: only X10A remains, label is omitted, and a lone gap leaves no tooltip bubble
 {
   h.histSeriesToggle("dhw_tank", "modbus");
+  {
+    h.histPinToggle("dhw_tank", 0);
+    S.hist.set("modbus:dhw_tank", { ...modbus, gen: 2, v: [461, 462, 463] });
+    assert.equal(h.histPinIndex("dhw_tank", h.historyView("dhw_tank")), 0,
+      "a hidden peer refreshing the same grid cannot retire a plotted sample's pin");
+    S.hist.set("modbus:dhw_tank", { ...modbus, gen: 3, b0: modbus.b0 - 1 });
+    assert.equal(h.histPinIndex("dhw_tank", h.historyView("dhw_tank")), 1,
+      "a boot-relative pin stays with its sample when the aligned view starts earlier");
+    S.histPin.delete("dhw_tank");
+    S.hist.set("modbus:dhw_tank", modbus);
+  }
   const hidden = h.histHtml("dhw_tank", "°C", "Tank");
   assert.doesNotMatch(hidden, /class="vhist-line mb"/);
   assert.match(hidden, /data-hist-series="modbus" aria-pressed="false"/);
   assert.match(hidden, /data-hist-series="x10a" aria-pressed="true" disabled/,
     "the last visible source cannot be disabled");
-  assert.doesNotMatch(h.scrubText(view, 1, false), /Modbus/);
+  assert.equal(h.scrubText(view, 0, false), "45,2 °C",
+    "a single visible curve omits its source label in tooltip readout");
+  assert.equal(h.scrubText(view, 1, false), "",
+    "an unmeasured sample on the sole visible curve produces no tooltip text");
+  assert.equal(h.histReadout(view, 1), "",
+    "an unmeasured sample on the sole visible curve leaves the tooltip empty");
+  assert.doesNotMatch(h.scrubText(view, 1, false), /Modbus|nicht gemessen/);
   h.histSeriesToggle("dhw_tank", "x10a");
   assert.match(h.histHtml("dhw_tank", "°C", "Tank"), /class="vhist-pt"/,
     "a stale or programmatic click cannot hide the last visible curve");
@@ -711,6 +720,7 @@ assert.match(h.histReadout(view, 1), /<span class="vhist-tip-label mb">Modbus<\/
   assert.match(h.histHtml("dhw_tank", "°C", "Tank"), /class="vhist-line mb"/);
   assert.equal(S.hist.get("modbus:dhw_tank"), modbus,
     "legend choices never discard the recorded source history");
+  S.histHidden.delete("dhw_tank");
 }
 
 const html = h.histHtml("dhw_tank", "°C", "Warmwasserspeichertemperatur");
@@ -773,7 +783,6 @@ S.hist.set("leaving_water", { at: 1, gen: 1, dt: 300, unit: "°C", t0: null, b0:
   held: [], v: [400, 410, 420] });
 S.hist.set("modbus:leaving_water", { at: 1, gen: 1, dt: 300, unit: "°C", t0: null, b0: 100,
   held: [], v: [401, 411, 421] });
-h.histSeriesToggle("leaving_water", "modbus");
 const pairedAreaHtml = h.histHtml("leaving_water", "°C", "Vorlauftemperatur");
 assert.match(pairedAreaHtml, /^<div class="vhist vhist-multi">/,
   "overlaid numeric trends must opt into the reduced-opacity paint contract");
@@ -808,7 +817,9 @@ const roomView = h.historyView("room_temp");
 assert.equal(roomView.series.length, 3);
 assert.equal(roomView.series[2].source, "room");
 assert.deepEqual(Array.from(roomView.series[2].v), [235, null, 236]);
-assert.match(h.scrubText(roomView, 1), /Meross .* · MQTT nicht gemessen/);
+assert.match(h.scrubText(roomView, 0), /Meross .* · MQTT 23,5 °C/);
+assert.equal(h.scrubText(roomView, 1, false), "X10A 20,0 °C\nModbus 20,5 °C",
+  "a missing MQTT sample is omitted from the tooltip rather than printing missing prose");
 const roomHtml = h.histHtml("room_temp", "°C", "Raumtemperatur");
 assert.match(roomHtml, /20,0 – 23,6 °C/);
 assert.match(roomHtml, /vhist-source room/);
@@ -817,7 +828,8 @@ assert.doesNotMatch(roomHtml, /<img/);
 assert.match(roomHtml, /vhist-pt room/);
 assert.match(roomHtml, /vhist-now room/);
 assert.match(roomHtml, /vhist-mark vhist-live room/);
-assert.match(roomHtml, /1 Lücke/);
+assert.doesNotMatch(roomHtml, /Lücke|vhist-gap|vhist-idle/,
+  "the lower time axis must not display gap or resting explanations");
 {
   const x = S.hist.get("room_temp"), mb = S.hist.get("modbus:room_temp");
   const mqtt = S.hist.get("room:room_temp");
@@ -983,11 +995,12 @@ S.hist.set("outdoor_air", { at: 1, gen: 1, dt: 300, unit: "°C", t0: 1768720000,
   held: [[1, 3]], v: [205, null, null, null] });
 S.hist.set("modbus:outdoor_air", { at: 1, gen: 1, dt: 300, unit: "°C", t0: 1768720000, b0: 200,
   held: [], v: [205, 205, 205, 295] });
-h.histSeriesToggle("outdoor_air", "modbus");
 const outdoorView = h.historyView("outdoor_air");
 const outdoorHtml = h.histHtml("outdoor_air", "°C", "Außentemperatur");
-assert.doesNotMatch(outdoorHtml.slice(outdoorHtml.indexOf('<div class="vhist-axis">')), /Messalter unbekannt/,
-  "the freshness qualification must not become another static line below the chart");
+assert.doesNotMatch(outdoorHtml.slice(outdoorHtml.indexOf('<div class="vhist-axis">')), /Messalter unbekannt|Stillstand|nicht gemessen|vhist-idle|vhist-gap/,
+  "neither freshness qualification nor resting/gap explanations belong on the time axis");
+assert.doesNotMatch(h.scrubText(outdoorView, 1, false), /X10A|Außeneinheit ruht/,
+  "a held X10A pause must be omitted from the tooltip alongside an active Modbus reading");
 assert.match(h.scrubText(outdoorView, 1),
   /Modbus 20,5 °C · Register unverändert .* ca\. 15 min · Messalter unbekannt/,
   "the popup distinguishes a repeated register value from a proven fresh measurement");
@@ -1067,7 +1080,7 @@ S.histPin.delete("outdoor_air");
 }
 
 // Smart-Grid mode is a complete categorical state timeline, not a misleading numeric 0..3 line.
-// X10A stays active when available; HomeHub/Modbus starts hidden and toggles into the same chart.
+// X10A and paired HomeHub/Modbus start active when available and can be toggled via the source legend.
 // Exact phase ranges appear in the compact tooltip, with time on the lower scale.
 S.hist.set("smart_grid_mode", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000, b0: 200,
   held: [], v: [0, 10, 20, 30, null, 20, 0] });
@@ -1091,33 +1104,33 @@ assert.match(boostHtml, /Empfehlung ein/);
 assert.match(boostHtml, /Erzwungen ein/);
 assert.doesNotMatch(boostHtml, /vhist-state-runs|· Phasen|vhist-state-lane-label/,
   "phase details belong to the compact tooltip and source selection belongs to the legend");
-assert.equal((boostHtml.match(/vhist-state-track/g) || []).length, 1,
-  "X10A track is rendered alone initially while Modbus is hidden by default");
-assert.match(boostHtml, /data-hist-series="x10a" aria-pressed="true" disabled/);
-assert.match(boostHtml, /data-hist-series="modbus" aria-pressed="false"/);
+assert.equal((boostHtml.match(/vhist-state-track/g) || []).length, 2,
+  "both X10A and Modbus tracks are rendered together initially");
+assert.ok(boostHtml.indexOf("vhist-state-track x10a") <
+          boostHtml.indexOf("vhist-state-track modbus"),
+  "the X10A track precedes the Modbus track");
+assert.match(boostHtml, /data-hist-series="x10a" aria-pressed="true" disabled/,
+  "X10A remains active and locked even while Modbus is also shown");
+assert.match(boostHtml, /data-hist-series="modbus" aria-pressed="true"/,
+  "Modbus legend button is initially active alongside X10A");
 assert.match(boostHtml, />nicht gemessen</,
   "gaps in a visible source remain explained in the legend");
+h.histSeriesToggle("smart_grid_mode", "x10a");
+assert.equal(h.histVisibleSeries(h.historyView("smart_grid_mode")).length, 2,
+  "X10A cannot be deactivated on a state chart while X10A is available");
+assert.match(h.scrubText(boostView, 2),
+  /^X10A \d{2}:\d{2}–\d{2}:\d{2} · Empfehlung ein\nModbus \d{2}:\d{2}–\d{2}:\d{2} · Empfehlung ein$/);
+assert.match(h.histReadout(boostView, 2),
+  /<span class="vhist-tip-rows"><span class="vhist-tip-label">X10A<\/span><span class="vhist-tip-val">\d{2}:\d{2}–\d{2}:\d{2} · Empfehlung ein<\/span><span class="vhist-tip-label mb">Modbus<\/span>/);
+h.histSeriesToggle("smart_grid_mode", "modbus");
+const boostSingleHtml = h.histHtml("smart_grid_mode", "", "Smart-Grid-Anforderung");
+assert.equal((boostSingleHtml.match(/vhist-state-track/g) || []).length, 1,
+  "toggling Modbus off leaves only the X10A track");
+assert.match(boostSingleHtml, /data-hist-series="modbus" aria-pressed="false"/);
 for (const [i, label] of [[0, "Freier Betrieb"], [1, "Zwangsabschaltung"],
                            [2, "Empfehlung ein"], [3, "Erzwungen ein"]])
   assert.match(h.scrubText(boostView, i), new RegExp(`^\\d{2}:\\d{2}–\\d{2}:\\d{2} · ${label}$`),
     `single visible track shows compact phase range and ${label}`);
-h.histSeriesToggle("smart_grid_mode", "modbus");
-const boostBothHtml = h.histHtml("smart_grid_mode", "", "Smart-Grid-Anforderung");
-assert.equal((boostBothHtml.match(/vhist-state-track/g) || []).length, 2,
-  "enabling Modbus adds the second track inside the same chart");
-assert.ok(boostBothHtml.indexOf("vhist-state-track x10a") <
-          boostBothHtml.indexOf("vhist-state-track modbus"),
-  "the X10A track precedes the Modbus track");
-assert.match(boostBothHtml, /data-hist-series="x10a" aria-pressed="true" disabled/,
-  "X10A remains active even while Modbus is also shown");
-h.histSeriesToggle("smart_grid_mode", "x10a");
-assert.equal(h.histVisibleSeries(h.historyView("smart_grid_mode")).length, 2,
-  "X10A cannot be deactivated on a state chart while X10A is available");
-assert.match(h.scrubText(h.historyView("smart_grid_mode"), 2),
-  /^X10A \d{2}:\d{2}–\d{2}:\d{2} · Empfehlung ein\nModbus \d{2}:\d{2}–\d{2}:\d{2} · Empfehlung ein$/);
-assert.match(h.histReadout(h.historyView("smart_grid_mode"), 2),
-  /<span class="vhist-tip-rows"><span class="vhist-tip-label">X10A<\/span><span class="vhist-tip-val">\d{2}:\d{2}–\d{2}:\d{2} · Empfehlung ein<\/span><span class="vhist-tip-label mb">Modbus<\/span>/);
-h.histSeriesToggle("smart_grid_mode", "modbus");
 S.histHidden.delete("smart_grid_mode");
 
 // A caller can still request a deliberately Modbus-only Smart-Grid history. That filtered view
@@ -1214,7 +1227,6 @@ delete S.otaCached;
   const currentPair = h.historyView("smart_grid_mode");
   assert.equal(currentPair.series.find(s => s.source === "modbus").v.at(-1), 20,
     "a healthy peer's history cannot suppress independently available current evidence");
-  h.histSeriesToggle("smart_grid_mode", "modbus");
   assert.doesNotMatch(h.histHtml("smart_grid_mode", "", "Smart Grid"), /Boost aktiv · 0/,
     "a current-only primary source cannot present a zero recorded duration");
   S.histHidden.delete("smart_grid_mode");
@@ -1237,13 +1249,16 @@ assert.match(circulationHtml, /vhist-state-on circulation-on/);
 assert.match(circulationHtml, /vhist-state-gap/);
 for (const label of ["Läuft", "Steht", "Nicht verfügbar"])
   assert.match(circulationHtml, new RegExp(`>${label}<`), `${label} must be an explicit timeline state`);
-assert.match(circulationHtml, /2 Phase · nicht verfügbar/);
-assert.match(h.scrubText(circulationView, 0), /^\d{2}:\d{2}–\d{2}:\d{2} · Nicht verfügbar$/,
-  "an absent pump sample must read unavailable, never stopped");
+assert.doesNotMatch(circulationHtml, /nicht verfügbar|Lücke|vhist-gap|vhist-idle/,
+  "lower time axis omits unavailable-interval counters");
+assert.equal(h.scrubText(circulationView, 0), "",
+  "an absent pump sample omits unavailable text from tooltip");
+assert.equal(h.histReadout(circulationView, 0), "",
+  "an absent pump sample leaves the tooltip bubble empty");
 assert.match(h.scrubText(circulationView, 1), /^\d{2}:\d{2}–\d{2}:\d{2} · Steht$/);
 assert.match(h.scrubText(circulationView, 3), /^\d{2}:\d{2}–\d{2}:\d{2} · Läuft$/);
 
-// BSH is also categorical. X10A stays active by default and Modbus toggles into the same chart.
+// BSH is also categorical. X10A and Modbus start active and Modbus toggles off/on inside the same chart.
 S.hist.set("bsh_state", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000, b0: 200,
   held: [], v: [0, 10, 0, 10] });
 S.hist.set("modbus:bsh_state", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000, b0: 200,
@@ -1256,15 +1271,15 @@ assert.match(bshHtml, /Heizstab aktiv erfasst · 10 min im 5-Minuten-Raster/);
 assert.match(bshHtml, /vhist-state-on state-off/);
 assert.match(bshHtml, /vhist-state-on heater-on/);
 assert.doesNotMatch(bshHtml, /vhist-state-runs|· Phasen|vhist-state-lane-label/);
-assert.equal((bshHtml.match(/vhist-state-track/g) || []).length, 1);
+assert.equal((bshHtml.match(/vhist-state-track/g) || []).length, 2);
 assert.match(bshHtml, /data-hist-series="x10a" aria-pressed="true" disabled/);
-assert.match(bshHtml, /data-hist-series="modbus" aria-pressed="false"/);
-assert.match(h.scrubText(bshView, 0), /^\d{2}:\d{2}–\d{2}:\d{2} · OFF$/);
-assert.match(h.scrubText(bshView, 1), /^\d{2}:\d{2}–\d{2}:\d{2} · ON$/);
+assert.match(bshHtml, /data-hist-series="modbus" aria-pressed="true"/);
+assert.match(h.scrubText(bshView, 0), /^X10A \d{2}:\d{2}–\d{2}:\d{2} · OFF\nModbus \d{2}:\d{2}–\d{2}:\d{2} · OFF$/);
+assert.match(h.scrubText(bshView, 1), /^X10A \d{2}:\d{2}–\d{2}:\d{2} · ON\nModbus \d{2}:\d{2}–\d{2}:\d{2} · ON$/);
 h.histSeriesToggle("bsh_state", "modbus");
-assert.equal((h.histHtml("bsh_state", "", "Heizstab").match(/vhist-state-track/g) || []).length, 2);
-assert.match(h.scrubText(h.historyView("bsh_state"), 0), /^X10A \d{2}:\d{2}–\d{2}:\d{2} · OFF\nModbus \d{2}:\d{2}–\d{2}:\d{2} · OFF$/);
-assert.match(h.scrubText(h.historyView("bsh_state"), 1), /^X10A \d{2}:\d{2}–\d{2}:\d{2} · ON\nModbus \d{2}:\d{2}–\d{2}:\d{2} · ON$/);
+assert.equal((h.histHtml("bsh_state", "", "Heizstab").match(/vhist-state-track/g) || []).length, 1);
+assert.match(h.scrubText(h.historyView("bsh_state"), 0), /^\d{2}:\d{2}–\d{2}:\d{2} · OFF$/);
+assert.match(h.scrubText(h.historyView("bsh_state"), 1), /^\d{2}:\d{2}–\d{2}:\d{2} · ON$/);
 S.histHidden.delete("bsh_state");
 
 // The Heizstab schematic inspector keeps the categorical history but narrows it to the authoritative
@@ -1285,7 +1300,6 @@ assert.doesNotMatch(h.scrubText(bshX10aView, 1), /X10A|Modbus|Heizstab|ca\.|min/
   const retained = h.historyView("bsh_state", "x10a");
   assert.equal(h.scrubText(retained, 0), "Letzter empfangener Messwert · ON",
     "one undated retained slot shows its last reading once");
-  h.histSeriesToggle("bsh_state", "modbus");
   assert.match(h.scrubText(h.historyView("bsh_state"), 0),
     /^X10A Letzter empfangener Messwert · ON\nModbus /,
     "a fresh partner cannot change the retained lane's phase time");
@@ -1359,20 +1373,22 @@ assert.equal(quietView.series.length, 2);
 assert.match(quietHtml, /vhist-state-track/);
 assert.doesNotMatch(quietHtml, /vhist-line/);
 assert.match(quietHtml, /Leise-Modus aktiv erfasst · 10 min im 5-Minuten-Raster/);
-assert.equal((quietHtml.match(/vhist-state-track/g) || []).length, 1);
-assert.doesNotMatch(quietHtml, /vhist-state-gap/,
-  "a hidden Modbus gap does not clutter the initial X10A-only state track");
+assert.equal((quietHtml.match(/vhist-state-track/g) || []).length, 2);
+assert.match(quietHtml, /vhist-state-on state-off/);
+assert.match(quietHtml, /vhist-state-on quiet-on/);
+assert.match(quietHtml, /vhist-state-gap/,
+  "a missing Modbus sample stays hatched in the visible Modbus lane by default");
+assert.doesNotMatch(quietHtml, /vhist-state-runs|· Phasen/);
+assert.match(h.scrubText(quietView, 0), /^X10A .* · ON\nModbus .* · ON$/);
+assert.match(h.scrubText(quietView, 1), /^X10A .* · ON$/,
+  "a missing Modbus state sample is omitted from the dual-source tooltip");
+assert.doesNotMatch(h.scrubText(quietView, 1), /Modbus|nicht gemessen/);
+assert.match(h.scrubText(quietView, 3), /^X10A .* · OFF\nModbus .* · ON$/);
 h.histSeriesToggle("quiet_state", "modbus");
-const quietBothHtml = h.histHtml("quiet_state", "", "Leise-Modus");
-assert.equal((quietBothHtml.match(/vhist-state-track/g) || []).length, 2);
-assert.match(quietBothHtml, /vhist-state-on state-off/);
-assert.match(quietBothHtml, /vhist-state-on quiet-on/);
-assert.match(quietBothHtml, /vhist-state-gap/,
-  "a missing Modbus sample stays hatched in the Modbus lane once enabled");
-assert.doesNotMatch(quietBothHtml, /vhist-state-runs|· Phasen/);
-assert.match(h.scrubText(h.historyView("quiet_state"), 0), /^X10A .* · ON\nModbus .* · ON$/);
-assert.match(h.scrubText(h.historyView("quiet_state"), 1), /^X10A .* · ON\nModbus .* · nicht gemessen$/);
-assert.match(h.scrubText(h.historyView("quiet_state"), 3), /^X10A .* · OFF\nModbus .* · ON$/);
+const quietSingleHtml = h.histHtml("quiet_state", "", "Leise-Modus");
+assert.equal((quietSingleHtml.match(/vhist-state-track/g) || []).length, 1);
+assert.doesNotMatch(quietSingleHtml, /vhist-state-gap/,
+  "toggling Modbus off hides the hatched Modbus lane");
 S.histHidden.delete("quiet_state");
 
 // BUH is one component with two event-folded stage bits. The browser combines both aligned rings
@@ -1393,12 +1409,14 @@ assert.match(buhHtml, /Zusatzheizer aktiv erfasst · 15 min im 5-Minuten-Raster/
 assert.match(buhHtml, /vhist-state-on step1/);
 assert.match(buhHtml, /vhist-state-on step2/);
 assert.match(buhHtml, /vhist-state-on state-off/);
-assert.doesNotMatch(buhHtml, /vhist-state-runs|· Phasen/);
+assert.doesNotMatch(buhHtml, /vhist-state-runs|· Phasen|Lücke|vhist-gap|vhist-idle/);
 assert.match(h.scrubText(buhView, 0), /^\d{2}:\d{2}–\d{2}:\d{2} · OFF$/);
 assert.match(h.scrubText(buhView, 1), /^\d{2}:\d{2}–\d{2}:\d{2} · Stufe 1$/);
 assert.match(h.scrubText(buhView, 2), /^\d{2}:\d{2}–\d{2}:\d{2} · Stufe 2$/);
-assert.match(h.scrubText(buhView, 5), /^\d{2}:\d{2}–\d{2}:\d{2} · nicht gemessen$/,
-  "a BUH gap remains explicit without adding source or duration prose");
+assert.equal(h.scrubText(buhView, 5), "",
+  "a BUH gap omits missing text from tooltip");
+assert.equal(h.histReadout(buhView, 5), "",
+  "a BUH gap hides the tooltip bubble");
 for (const i of [0, 1, 2, 5])
   assert.doesNotMatch(h.scrubText(buhView, i), /X10A|Modbus|Zusatzheizer|ca\.|min/);
 
@@ -1410,7 +1428,7 @@ await h.ensureDerived("pump_speed");
 assert.deepEqual(Array.from(S.hist.get("pump_speed").v), [0, 300, 1000]);
 assert.match(h.histHtml("pump_speed", "", "Drehzahl der Umwälzpumpe"), /0,0 – 100,0 %/);
 
-// The diverter is categorical too. X10A starts active and Modbus toggles into the same chart.
+// The diverter is categorical too. X10A and Modbus start active and Modbus toggles off/on inside the same chart.
 S.hist.set("valve_dhw", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000, b0: 200,
   held: [], v: [0, 0, 10, 10, 0, 10] });
 S.hist.set("modbus:valve_dhw", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000, b0: 200,
@@ -1422,13 +1440,13 @@ assert.doesNotMatch(valveHtml, /vhist-line/);
 assert.match(valveHtml, /Warmwasser · 15 min · Raumkreis · 15 min/);
 assert.match(valveHtml, /vhist-state-on valve-space/);
 assert.match(valveHtml, /vhist-state-on valve-dhw/);
-assert.equal((valveHtml.match(/vhist-state-track/g) || []).length, 1);
-assert.match(h.scrubText(valveView, 0), /^\d{2}:\d{2}–\d{2}:\d{2} · Raumkreis$/);
-assert.match(h.scrubText(valveView, 2), /^\d{2}:\d{2}–\d{2}:\d{2} · Warmwasser$/);
+assert.equal((valveHtml.match(/vhist-state-track/g) || []).length, 2);
+assert.match(h.scrubText(valveView, 0), /^X10A .* · Raumkreis\nModbus .* · Raumkreis$/);
+assert.match(h.scrubText(valveView, 2), /^X10A .* · Warmwasser\nModbus .* · Warmwasser$/);
 h.histSeriesToggle("valve_dhw", "modbus");
-assert.equal((h.histHtml("valve_dhw", "", "3-Wege-Ventil").match(/vhist-state-track/g) || []).length, 2);
-assert.match(h.scrubText(h.historyView("valve_dhw"), 0), /^X10A .* · Raumkreis\nModbus .* · Raumkreis$/);
-assert.match(h.scrubText(h.historyView("valve_dhw"), 2), /^X10A .* · Warmwasser\nModbus .* · Warmwasser$/);
+assert.equal((h.histHtml("valve_dhw", "", "3-Wege-Ventil").match(/vhist-state-track/g) || []).length, 1);
+assert.match(h.scrubText(h.historyView("valve_dhw"), 0), /^\d{2}:\d{2}–\d{2}:\d{2} · Raumkreis$/);
+assert.match(h.scrubText(h.historyView("valve_dhw"), 2), /^\d{2}:\d{2}–\d{2}:\d{2} · Warmwasser$/);
 S.histHidden.delete("valve_dhw");
 
 // The legacy history id `valve_heat` stores the optional 2-way/heating-cooling OUTPUT. It is not the
@@ -1539,6 +1557,7 @@ S.status.history.modbus_rows = [
   { id: "smart_grid_mode", label: "Smart Grid operation mode" },
   { id: "bsh_state", label: "Booster heater run" },
 ];
+S.hist.delete("modbus:dhw_tank");
 S.hist.set("dhw_tank", { dt: 300, unit: "°C", b0: 100, v: [450, 460, 470, 480], held: [] });
 S.hist.set("modbus:smart_grid_mode", { dt: 300, b0: 100, v: [0, 20, 20, 0] }); // Mode 2 = Boost (2 buckets = 10 min)
 S.hist.set("modbus:bsh_state", { dt: 300, b0: 100, v: [0, 0, 10, 0] });        // BSH active (1 bucket = 5 min)
@@ -1571,7 +1590,6 @@ assert.equal(h.histReadout(view, 1), "46,0 °C · Empfehlung ein · Modbus",
   "a single visible curve appends active phase to value readout");
 {
   S.hist.set("modbus:dhw_tank", { dt: 300, unit: "°C", b0: 100, v: [450, 460, 470, 480], held: [] });
-  h.histSeriesToggle("dhw_tank", "modbus");
   const pairedView = h.historyView("dhw_tank");
   assert.match(h.histReadout(pairedView, 1), /<span class="vhist-tip-note">Empfehlung ein · Modbus<\/span>/,
     "active auxiliary phase renders as note row below tabular values when multiple series are shown");
@@ -1898,7 +1916,11 @@ try {
     "X10A pel preserves compressor-idle held-over pauses");
   const pelHtml = h.histHtml("pel", "kW", "Stromaufnahme");
   assert.equal((pelHtml.match(/data-hist="pel"/g) || []).length, 1);
-  assert.match(pelHtml, /data-hist-series="modbus" aria-pressed="false"/);
+  assert.match(pelHtml, /data-hist-series="modbus" aria-pressed="true"/);
+  assert.match(pelHtml, /class="vhist-line mb"/);
+  assert.doesNotMatch(pelHtml, /Stillstand|nicht gemessen|vhist-idle|vhist-gap/);
+  assert.equal(h.scrubText(pelView, 0, false), "Modbus 1,4 kW",
+    "held X10A compressor-idle slot is omitted while active Modbus power remains in the tooltip");
   const copView = h.historyView("cop");
   assert.deepEqual(Array.from(copView.series, s => s.source), ["x10a"]);
   assert.deepEqual(Array.from(copView.series[0].held, r => Array.from(r)), [[0, 1]],

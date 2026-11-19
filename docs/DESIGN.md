@@ -294,7 +294,7 @@ when its numeric values do not change.
 A trended reading has a 24-hour sparkline in its inspector and value expander, with no separate
 history card or range picker. Numeric charts share a light area/darker line grammar; gaps break both,
 and a lone sample is a dot. Paired X10A and Modbus series share one chart, axis and cursor, with
-blue/petrol source legends; Modbus starts hidden when X10A is available and toggles on demand.
+blue/petrol source legends; paired Modbus starts active when available and toggles in the legend.
 Room temperature can add the configured MQTT source as a third, separately coloured
 series with its name and MQTT attribution, including when no device room sensor is available.
 The device sensor and MQTT source keep distinct current values and explanations. Source replacement
@@ -316,12 +316,12 @@ at `0 rps` while leaving a gap during defrost, non-heating tasks, `≤ 5 rps`, `
 `≤ 0.2 kW`, non-positive ΔT or unmatched heater boundaries. When X10A `pel` is offered, HomeHub
 `modbus_power` (`51`) pairs onto the same electrical-input chart as an independent toggleable
 Modbus series; cooling EER omits COP history. In browser-derived curves, missing inputs leave a
-gap, marked held-over on X10A only when every missing input was held. A successful empty series shows “No readings recorded yet.” An unavailable series reports
+gap, marked held-over in internal X10A slot metadata only when every missing input was held. A successful empty series shows “No readings recorded yet.” An unavailable series reports
 an error, with its source named if the other series can still draw. Chart titles name the stable
 concept.
 
 Categorical histories share one compact plot with distinct state colours, hatching only for missing
-samples, X10A active when available and paired Modbus toggleable in the legend; the bubble states
+samples, X10A active when available and paired Modbus active by default and toggleable in the legend; the bubble states
 the phase range and state while the selected instant appears on the lower time scale. Valve and
 Quiet use latest sampled state; BSH, BUH stages and
 Defrost retain any observed activation in their open five-minute bucket. Smart Grid retains all
@@ -330,7 +330,8 @@ time; events between sweeps may be missed.
 The tank-temperature chart distinguishes the Smart Grid “Recommended on” request from observed
 booster-heater operation. Bands, sampled durations and readouts identify X10A and Modbus separately.
 
-Rings use five-minute slots on an elapsed or rolling-day axis. A newly resolved row or changed source
+Rings use five-minute slots on an elapsed or rolling-day axis showing the domain bounds without gap or
+idle counters. A newly resolved row or changed source
 identity leaves earlier gaps. Flash restoration waits for a synchronized clock and can be partial.
 Compatible RAM histories can survive a warm restart before clock sync. Independent recorders book
 their warm-reset gaps separately. Open buckets and incompatible records can be lost, including the
@@ -358,7 +359,8 @@ A recorded pin without a boot-relative bucket expires when the plotted series or
 changes. A forecast pin stays while its timestamp remains selectable on the same chart.
 Closing the inspector preserves a pin for an open
 value row. Collapsing the value panel clears it. Bubbles share one reserved row above the plot, with
-one measurement per line. The moving bubble paints over the pinned bubble with an opaque surface
+one measurement per line, omitting series without a sample at the selected instant and hiding the
+bubble when no visible series was measured there. The moving bubble paints over the pinned bubble with an opaque surface
 when they overlap. Both selected times
 share the time axis below the plot; the moving time likewise paints over the pinned time. Comparisons
 do not add height or move the plot or pinned time. Phase intervals remain in categorical readouts.

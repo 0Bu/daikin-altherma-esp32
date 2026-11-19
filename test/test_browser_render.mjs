@@ -1970,8 +1970,8 @@ async function assertHybridRoom(page, context, locale) {
       legend: ["X10A", "Modbus", "Meross MTS200B · MQTT"],
       roomLine: true, roomArea: true, gap: null,
     }, `${context}: the additional MQTT curve retains all three instruments and the device headline`);
-    assert.ok(await page.evaluate('scrubText(historyView("room_temp"), 142).includes("Meross MTS200B · MQTT " + t("hist.nm"))'),
-      `${context}: a missing MQTT sample is named independently in the common cursor readout`);
+    assert.ok(await page.evaluate('!scrubText(historyView("room_temp"), 142, false).includes("Meross MTS200B · MQTT") && !scrubText(historyView("room_temp"), 142, false).includes(t("hist.nm")) && scrubText(historyView("room_temp"), 145, false).includes("Meross MTS200B · MQTT")'),
+      `${context}: a missing MQTT sample is omitted from the common cursor readout while recorded samples name it`);
     assertLayout(await page.evaluate(layoutAudit), `${context}/mqtt-room-paired`);
     await captureNativeEvidence(page, `${context}/mqtt-room-paired`, "inspect");
 
@@ -2169,9 +2169,18 @@ async function assertHistoryReadouts(page, context) {
         const ring = (v, unit = "°C") => ({at:Date.now(),gen:1,dt:300,b0:100,
           t0:end - 5700,unit,held:[],v});
         S.hist.clear(); S.histPin.clear(); S.histHidden.clear(); S.scrub = null;
+        S.status.hp = { ...(S.status.hp || {}), connected:true };
+        S.status.modbus = { ...(S.status.modbus || {}), enabled:true, connected:true, host:"192.0.2.10", port:502, unit_id:1 };
         S.status.history = {rows:[{id,label:id}],modbus_rows:[{id,label:id}],env3_rows:[]};
         S.status.uptime_s = 36000;
         S.status.ntp = {synced:true,time:"2026-08-12T10:00:00Z"};
+        S._values = id === "valve_dhw" ? [{concept:"valve_dhw",binary:true,value:"1"}]
+          : id === "smart_grid_mode" ? [
+              {binary_semantic:"smart_grid_contact_1",binary:true,value:"1"},
+              {binary_semantic:"smart_grid_contact_2",binary:true,value:"0"},
+            ] : [];
+        S._modbus = id === "valve_dhw" ? [{history:"valve_dhw",binary:true,value:"1"}]
+          : id === "smart_grid_mode" ? [{off:56,enum:"smart_grid_mode",value:2}] : [];
         if (id === ENV3_COMBINED_ID) {
           S.status.history.rows = []; S.status.history.modbus_rows = [];
           S.status.history.env3_rows = ENV3_COMBINED_SERIES.map(s => ({id:s.id,label:s.id}));
@@ -2349,10 +2358,22 @@ async function assertHistoryReadouts(page, context) {
           const pathClass={modbus:"mb",env3_humidity:"env-humidity",env3_pressure:"env-pressure"};
           const rings=JSON.stringify(Array.from(S.hist));
           const button=source=>host.querySelector('[data-hist-series="' + source + '"]');
-          const initialInactive=id === "dhw_tank"
-            ? (button("modbus").getAttribute("aria-pressed") === "false" && button("x10a").disabled)
-            : true;
-          if (id === "dhw_tank") { button("modbus").click(); window.__browserHistoryRender(); }
+          const initialActive=sources.every(source => button(source).getAttribute("aria-pressed") === "true" && !button(source).disabled);
+          let gapBehavior=true;
+          if (id === "dhw_tank") {
+            const axisClean=!host.querySelector(".vhist-axis .vhist-gap, .vhist-axis .vhist-idle");
+            scrubMove(host.querySelector("[data-hist]"), 7);
+            const dualGapTip=host.querySelector(".vhist-tip.vhist-live");
+            const dualOmitsMissing=!dualGapTip.hidden &&
+              dualGapTip.textContent.includes("Modbus") && !dualGapTip.textContent.includes("X10A");
+            button("modbus").click(); window.__browserHistoryRender();
+            scrubMove(host.querySelector("[data-hist]"), 7);
+            const soleGapTip=host.querySelector(".vhist-tip.vhist-live");
+            const soleGapTime=host.querySelector(".vhist-time.vhist-live");
+            const soleHidesEmptyTip=soleGapTip.hidden && !soleGapTime.hidden;
+            button("modbus").click(); window.__browserHistoryRender();
+            gapBehavior=axisClean && dualOmitsMissing && soleHidesEmptyTip;
+          }
           const changed=[];
           for (const source of sources.slice(1)) {
             const name=historyView(id).series.find(s=>s.source === source).name;
@@ -2374,13 +2395,13 @@ async function assertHistoryReadouts(page, context) {
           beforePoll.focus(); S.clickHold=false;
           setHtml(host.id,host.innerHTML + "<!-- changed poll -->");
           const pollFocus=button(sources[1]) !== beforePoll && document.activeElement === button(sources[1]);
-          return {initialInactive,hidden:changed.every(Boolean),protectedLast,unchanged,
+          return {initialActive,gapBehavior,hidden:changed.every(Boolean),protectedLast,unchanged,
             pollFocus,
             restored:sources.every(source=>button(source).getAttribute("aria-pressed") === "true" && !button(source).disabled) &&
               sources.slice(1).every(source=>!!host.querySelector(".vhist-line." + pathClass[source])),
             ringsUnchanged:JSON.stringify(Array.from(S.hist)) === rings};
         })()`);
-        assert.deepEqual(legend,{initialInactive:true,hidden:true,protectedLast:true,unchanged:true,pollFocus:true,restored:true,ringsUnchanged:true},
+        assert.deepEqual(legend,{initialActive:true,gapBehavior:true,hidden:true,protectedLast:true,unchanged:true,pollFocus:true,restored:true,ringsUnchanged:true},
           `${context}/${id}: legend clicks hide and restore independent series while retaining the final curve and source history`);
       } else {
         const stateLegend = await page.evaluate(`(() => {
@@ -2389,44 +2410,54 @@ async function assertHistoryReadouts(page, context) {
           const rect=el=>{const r=el.getBoundingClientRect();return {left:r.left,right:r.right,
             top:r.top+scrollY,bottom:r.bottom+scrollY,height:r.height,width:r.width};};
           const button=source=>host.querySelector('[data-hist-series="' + source + '"]');
-          const initialPlot=rect(host.querySelector(".vhist-state-plot"));
-          const axis=rect(host.querySelector(".vhist-axis")),pinTime=rect(host.querySelector(".vhist-time.vhist-pinned"));
-          const initial={
-            singleTrack:host.querySelectorAll(".vhist-state-track").length === 1 &&
-              !!host.querySelector(".vhist-state-track.x10a") && !host.querySelector(".vhist-state-lane-label"),
-            compactPlot:Math.abs(initialPlot.height - 14) < 1.5,
-            sharedScale:Math.abs(axis.top - pinTime.top) < 2,
-            x10aLocked:button("x10a").getAttribute("aria-pressed") === "true" && button("x10a").disabled,
-            modbusOff:button("modbus").getAttribute("aria-pressed") === "false" && !button("modbus").disabled,
-          };
-          button("x10a").click(); window.__browserHistoryRender();
-          const stillSingle=host.querySelectorAll(".vhist-state-track").length === 1;
-          button("modbus").click(); window.__browserHistoryRender();
           const plot=host.querySelector("[data-hist]");
           scrubMove(plot,+plot.dataset.n - 1);
           const pairedPlot=rect(plot),liveTip=rect(host.querySelector(".vhist-tip.vhist-live")),clip=rect(host);
+          const axis=rect(host.querySelector(".vhist-axis")),pinTime=rect(host.querySelector(".vhist-time.vhist-pinned"));
           const labels=[...host.querySelectorAll(".vhist-tip.vhist-live .vhist-tip-label")].map(el=>el.textContent);
-          const paired={
+          const initial={
+            axisClean:!host.querySelector(".vhist-axis .vhist-gap, .vhist-axis .vhist-idle"),
             twoTracks:host.querySelectorAll(".vhist-state-track").length === 2 &&
               !!host.querySelector(".vhist-state-track.x10a") && !!host.querySelector(".vhist-state-track.modbus"),
             pairedHeight:Math.abs(pairedPlot.height - 33) < 2,
-            x10aStillLocked:button("x10a").getAttribute("aria-pressed") === "true" && button("x10a").disabled,
+            sharedScale:Math.abs(axis.top - pinTime.top) < 2,
+            x10aLocked:button("x10a").getAttribute("aria-pressed") === "true" && button("x10a").disabled,
             modbusOn:button("modbus").getAttribute("aria-pressed") === "true" && !button("modbus").disabled,
             dualTip:labels.length === 2 && labels[0] === "X10A" && labels[1] === "Modbus",
             abovePlot:liveTip.bottom <= pairedPlot.top - 8,
             inside:liveTip.left >= clip.left - 1 && liveTip.right <= clip.right + 1,
           };
+          button("x10a").click(); window.__browserHistoryRender();
+          const stillTwoTracks=host.querySelectorAll(".vhist-state-track").length === 2;
           button("modbus").click(); window.__browserHistoryRender();
-          return { ...initial, stillSingle, ...paired,
-            collapsedAgain:host.querySelectorAll(".vhist-state-track").length === 1 &&
-              button("modbus").getAttribute("aria-pressed") === "false",
+          const collapsedPlot=rect(host.querySelector(".vhist-state-plot"));
+          const collapsed={
+            singleTrack:host.querySelectorAll(".vhist-state-track").length === 1 &&
+              !!host.querySelector(".vhist-state-track.x10a") && !host.querySelector(".vhist-state-lane-label"),
+            compactPlot:Math.abs(collapsedPlot.height - 14) < 1.5,
+            x10aStillLocked:button("x10a").getAttribute("aria-pressed") === "true" && button("x10a").disabled,
+            modbusOff:button("modbus").getAttribute("aria-pressed") === "false" && !button("modbus").disabled,
+          };
+          button("modbus").click(); window.__browserHistoryRender();
+          const restoredTwoTracks=host.querySelectorAll(".vhist-state-track").length === 2 &&
+            button("modbus").getAttribute("aria-pressed") === "true";
+          const prevValues=S._values, prevModbus=S._modbus;
+          S._values=[]; S._modbus=[]; window.__browserHistoryRender();
+          const emptyPlot=host.querySelector("[data-hist]");
+          scrubMove(emptyPlot,+emptyPlot.dataset.n - 1);
+          const emptyCapHidesTip=host.querySelector(".vhist-tip.vhist-live").hidden &&
+            !host.querySelector(".vhist-time.vhist-live").hidden;
+          S._values=prevValues; S._modbus=prevModbus; window.__browserHistoryRender();
+          return { ...initial, stillTwoTracks, ...collapsed,
+            restoredTwoTracks, emptyCapHidesTip,
             ringsUnchanged:JSON.stringify(Array.from(S.hist)) === rings };
         })()`);
         assert.deepEqual(stateLegend,{
-          singleTrack:true,compactPlot:true,sharedScale:true,x10aLocked:true,modbusOff:true,
-          stillSingle:true,twoTracks:true,pairedHeight:true,x10aStillLocked:true,modbusOn:true,
-          dualTip:true,abovePlot:true,inside:true,collapsedAgain:true,ringsUnchanged:true,
-        },`${context}/${id}: state timeline keeps X10A active, toggles Modbus in one compact chart and shares the lower time scale`);
+          axisClean:true,twoTracks:true,pairedHeight:true,sharedScale:true,x10aLocked:true,modbusOn:true,
+          dualTip:true,abovePlot:true,inside:true,stillTwoTracks:true,
+          singleTrack:true,compactPlot:true,x10aStillLocked:true,modbusOff:true,
+          restoredTwoTracks:true,emptyCapHidesTip:true,ringsUnchanged:true,
+        },`${context}/${id}: state timeline keeps X10A active, starts Modbus active, toggles Modbus cleanly and shares the lower time scale`);
       }
     }
     assert.deepEqual(page.diagnostics,[],`${context}: history interactions must emit no browser errors`);

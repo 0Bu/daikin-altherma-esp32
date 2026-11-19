@@ -192,9 +192,8 @@ function histHiddenSet(h) {
   if (!h.series || h.series.length <= 1 || !h.series.some((s) => s.source === "modbus")) {
     return new Set();
   }
-  return h.series.some((s) => s.source === "x10a")
-    ? (histX10aAvailable(h) ? new Set(["modbus"]) : new Set(["x10a"]))
-    : new Set();
+  return h.series.some((s) => s.source === "x10a") && !histX10aAvailable(h)
+    ? new Set(["x10a"]) : new Set();
 }
 
 function histVisibleSeries(h) {
@@ -639,7 +638,8 @@ async function ensureDerived(id, source = "x10a") {
       // A gap inherits its REASON, and only when EVERY missing input carries it: "the outdoor unit
       // was resting" is a statement that nothing failed, so one input that genuinely failed to
       // measure has to outrank it. Blaming an idle compressor for a real dropout is the same class
-      // of wrong here as it is on the pill — and the chart's axis prints the two differently.
+      // of wrong here as it is on the pill — and internal slot metadata retains the distinction for
+      // witnessed pin preservation.
       if (out == null && missing > 0 && heldMissing === missing) {
         const last = heldRuns[heldRuns.length - 1];
         if (last && last[0] + last[1] === i) last[1]++; else heldRuns.push([i, 1]);
@@ -1093,7 +1093,7 @@ const STATE_HIST = Object.freeze({
     classify: (v) => [0, 10].includes(v) ? v === 10 : null,
     primary: "x10a", total: "hist.circ_total", run: "hist.state_phase_run",
     none: "hist.circ_none", active: "hist.circ_on", inactive: "hist.circ_off",
-    missing: "hist.circ_unavailable", gaps: "hist.circ_gaps", aria: "hist.circ_aria",
+    missing: "hist.circ_unavailable", aria: "hist.circ_aria",
     compactValueLabel: (v) => v === 0 ? "hist.circ_off" : v === 10 ? "hist.circ_on" : "",
     levels: [
       { match: (v) => [0, 10].includes(v) ? v === 0 : null,
@@ -1366,7 +1366,7 @@ function stateHistHtml(id, name, view, wrap, cfg) {
   const pct = (i) => ((i / n) * 100).toFixed(3);
   const current = view.liveIndex == null ? ""
     : `<span class="vhist-state-current" style="left:${pct(view.liveIndex)}%;width:${pct(1)}%"></span>`;
-  // X10A stays active when available; HomeHub/Modbus can be toggled on via the source legend.
+  // X10A and paired HomeHub/Modbus start active when available and can be toggled via the source legend.
   const tracks = visible.map((s) => {
     const levels = cfg.levels || [{ match: cfg.classify, cls: "" }];
     const on = levels.flatMap((level) => stateRuns(s, true, level.match).map(([from, count]) =>
@@ -1379,7 +1379,6 @@ function stateHistHtml(id, name, view, wrap, cfg) {
     return `<div class="vhist-state-track ${s.source}" aria-hidden="true">${on}${missing}${current}` +
       (last >= 0 ? histRetainedMarker(s, (last + 0.5) / n) : "") + `</div>`;
   }).join("");
-  const gaps = stateRuns(recordedPrimary, null, cfg.classify).length;
   const hasMissing = visible.some((s) => stateRuns(s, null, cfg.classify).length > 0);
   const sourceItems = view.series.length > 1
     ? view.series.map((s) => histLegendHtml(view, s, histSourceClass(s.source)))
@@ -1410,7 +1409,6 @@ function stateHistHtml(id, name, view, wrap, cfg) {
       (cfg.inactiveTotal ? ` · ${t(cfg.inactiveTotal, histDuration(inactiveSeconds))}` : "")
     : "";
   const axis = `<div class="vhist-axis"><span>${recordedN ? esc(histAxisStart(view, spanH)) : ""}</span>` +
-    (gaps ? `<span class="vhist-gap">${esc(t(cfg.gaps || "hist.gaps", gaps))}</span>` : "") +
     `<span>${esc(view.liveIndex == null ? histAxisEnd(view) : t("hist.now"))}</span></div>`;
   return wrap(
     `<div class="vhist-head"><span class="vhist-t">${esc(!recordedN ? t("hist.now") : full ? t("hist.title") : t("hist.recorded", spanH))}</span>` +
@@ -1515,7 +1513,7 @@ function histHtml(id, unit, name, source = "", identifySource = false) {
   // numeric trend uses the same visual grammar while a gap remains a real gap. Multiple sources use
   // the same geometry and are made more transparent by the wrapper class below. A run of ONE sample
   // still gets a dot because there is no interval whose area or upper edge could honestly be drawn.
-  let line = "", area = "", dots = "", gaps = 0, held = 0;
+  let line = "", area = "", dots = "";
   for (const s of histVisibleSeries(view)) {
     const pts = s.v.map((x) => x == null ? null : x / 10);
     const sourceCls = histSourceClass(s.source);
@@ -1531,27 +1529,11 @@ function histHtml(id, unit, name, source = "", identifySource = false) {
       }
       run = [];
     };
-    let prevGap = false;
     for (let i = 0; i < n; i++) {
-      if (pts[i] == null) {
-        // Held-over belongs to X10A. MQTT sensor gaps use the ordinary missing-measurement count.
-        if (s.source === "x10a" || s.source === "env3" || s.source === "room") {
-          if (histHeld(s, i)) { held++; prevGap = false; }
-          else { if (!prevGap) gaps++; prevGap = true; }
-        }
-        flush();
-      } else { prevGap = false; run.push(i); }
+      if (pts[i] == null) flush(); else run.push(i);
     }
     flush();
   }
-  // Absence is counted in TWO buckets, because they mean different things and the axis says which:
-  // a HELD sample is the outdoor unit resting (nothing failed — see histHeld), a GAP is a register
-  // that didn't answer or a value reading_plausible() refused. Blaming an idle compressor on the bus
-  // is the same class of wrong as drawing its last-run value as live.
-  // `gaps` counts contiguous RUNS (one dropout is one gap, however many samples it spans); `held`
-  // counts SAMPLES, because what matters there is how much of the day the unit spent asleep, not
-  // how many naps it took. prevGap tracks run boundaries so a held stretch between two dropouts
-  // doesn't merge them into one.
   // The "now" marker is an HTML element, not an SVG circle: the SVG is stretched non-uniformly, so
   // a circle in it would render as an ellipse. Percentage positioning maps onto the same 0..HIST_H
   // scale exactly, and stays right whatever width the panel ends up at.
@@ -1655,10 +1637,6 @@ function histHtml(id, unit, name, source = "", identifySource = false) {
       `</div>` + histTimesHtml(view, pi, pi >= 0 ? scrubFrac(pi, n) : 0) +
     `</div>` +
     `<div class="vhist-axis"><span>${esc(histAxisStart(view, spanH))}</span>` +
-      // Idle time is reported ahead of dropouts: on an outdoor-air trend it is normally the larger
-      // share of the day and the one that explains the shape of the chart.
-      (held ? `<span class="vhist-idle">${esc(t("hist.heldnote", histFmt1((held * view.dt) / 3600)))}</span>` : "") +
-      (gaps ? `<span class="vhist-gap">${esc(t("hist.gaps", gaps))}</span>` : "") +
       `<span>${esc(histAxisEnd(view))}</span></div>` + histUnavailableHtml(view),
     view.series.length > 1 ? "vhist-multi" : ""
   );
@@ -1768,10 +1746,6 @@ function env3HistHtml(view = historyView(ENV3_COMBINED_ID)) {
     if (forecastAreas) futureH = Math.max(1, Math.round((futureEnd - forecast.now) / 3600));
   }
 
-  let gaps = 0, inGap = false;
-  for (const v of view.v) {
-    if (v == null) { if (!inGap) gaps++; inGap = true; } else inGap = false;
-  }
   // Units belong to readings, not series names. They stay in every measured/forecast tooltip, so
   // repeating them in this always-visible legend adds ink without adding meaning.
   const legend = `<div class="vhist-legend">${(geometry ? view.series : plotted).map((s) =>
@@ -1829,7 +1803,6 @@ function env3HistHtml(view = historyView(ENV3_COMBINED_ID)) {
           `<span class="vhist-axis-now">${esc(t("hist.now"))}</span>` +
           `<span>${esc(t("hist.in_hours", futureH))}</span></div>`
       : `<div class="vhist-axis"><span>${esc(histAxisStart(view, spanH))}</span>` +
-          (gaps ? `<span class="vhist-gap">${esc(t("hist.gaps", gaps))}</span>` : "") +
           `<span>${esc(histAxisEnd(view))}</span></div>`) + histUnavailableHtml(view),
     "vhist-multi"
   );
@@ -2051,12 +2024,13 @@ function scrubTime(h, i) {
 // The reserved row stays present, so a comparison never moves the plot or its time labels.
 function histTipsHtml(h, pi, frac, aux = dhwAuxPhases(h)) {
   // One auxiliary scan per rendered view, not one full-day scan for every sample's readout.
-  const shapes = new Set(Array.from({length:h.v.length + (forecastScrubView(h)?.points.length || 0)},
-    (_, i) => histReadout(h, i, aux).replace(/\d/g, "8")));
-  return `<div class="vhist-tips"><div class="vhist-tip vhist-reserve mono num" aria-hidden="true">` +
-    [...shapes].map(html => `<span>${html}</span>`).join("") +
-    `</div><div class="vhist-tip vhist-live mono num" hidden></div>` + (pi >= 0
-      ? `<div class="vhist-tip vhist-pinned mono num" style="--tip-p:${(frac * 100).toFixed(3)}">${histReadout(h, pi, aux)}</div>`
+  const shapes = [...new Set(Array.from({length:h.v.length + (forecastScrubView(h)?.points.length || 0)},
+    (_, i) => histReadout(h, i, aux).replace(/\d/g, "8")))].filter(Boolean);
+  const pinned = pi >= 0 ? histReadout(h, pi, aux) : "";
+  return `<div class="vhist-tips"><div class="vhist-tip vhist-reserve mono num"${shapes.length ? "" : ' style="display:none"'} aria-hidden="true">` +
+    shapes.map(html => `<span>${html}</span>`).join("") +
+    `</div><div class="vhist-tip vhist-live mono num" hidden></div>` + (pinned
+      ? `<div class="vhist-tip vhist-pinned mono num" style="--tip-p:${(frac * 100).toFixed(3)}">${pinned}</div>`
       : "") + `</div>`;
 }
 
@@ -2066,91 +2040,101 @@ function histTimesHtml(h, pi, frac) {
     : "") + `<span class="vhist-time vhist-live mono num" hidden></span>`;
 }
 
+function env3TipData(h, i, allSeries = false) {
+  if (i >= h.v.length) {
+    const point = forecastScrubView(h)?.points[i - h.v.length];
+    if (!point) return null;
+    const specs = allSeries ? WEATHER_FORECAST_SERIES
+      : WEATHER_FORECAST_SERIES.filter((spec) => histVisibleSeries(h).some((s) => s.source === spec.measured));
+    const rows = specs.filter((spec) => point[spec.key] != null).map((spec) => ({
+      cls: env3SeriesClass(spec.measured),
+      label: t(spec.label),
+      val: `${histFmt1(point[spec.key])} ${spec.unit}`,
+    }));
+    return { meta: rows.length ? t("hist.forecast") : "", rows };
+  }
+  const series = allSeries ? h.series : histVisibleSeries(h);
+  const rows = series.filter((s) => s.v[i] != null).map((s) => ({
+    cls: env3SeriesClass(s.source),
+    label: s.name,
+    val: histFmt1(s.v[i] / 10) + (s.unit ? " " + s.unit : ""),
+  }));
+  return { meta: "", rows };
+}
+
+function stateTipEntries(h, i, cfg) {
+  const stateStatus = (v) => {
+    if (v == null) return null;
+    const key = cfg.compactValueLabel ? cfg.compactValueLabel(v) : "";
+    if (key) return t(key);
+    const state = cfg.classify(v);
+    return state == null ? null : t(state ? "state.on" : "state.off");
+  };
+  const phaseText = (s, status) => {
+    if (h.liveIndex === i) return `${t("hist.now")} · ${status}`;
+    const [from, count] = sampleRunAt(
+      h.liveIndex == null ? s.v : s.v.slice(0, h.recordedN), i);
+    const when = stateRunWhen(h, from, count, s);
+    return when ? `${when} · ${status}` : status;
+  };
+  const visible = histVisibleSeries(h);
+  const rows = [];
+  for (const s of visible) {
+    const status = stateStatus(s.v[i]);
+    if (status != null) rows.push({
+      source: s.source,
+      label: s.source === "modbus" ? "Modbus" : s.name,
+      text: phaseText(s, status),
+    });
+  }
+  return { multi: visible.length > 1, rows };
+}
+
+function numericTipEntries(h, i, aux) {
+  const visible = histVisibleSeries(h);
+  const rows = [];
+  for (const s of visible) {
+    const v = s.v?.[i];
+    if (v == null) continue;
+    let text = histFmt1(v / 10) + (s.unit ? " " + s.unit : "");
+    // The HomeHub outdoor register has no source timestamp, so its popup also states the complete
+    // observed plateau and the unknown measurement age.
+    if (h.id === "outdoor_air" && s.source === "modbus") {
+      const [from, count] = sampleRunAt(s.v, i);
+      text += ` · ${t("hist.modbus_plateau", stateRunWhen(h, from, count, s), histDuration(count * h.dt))}`;
+    }
+    rows.push({ source: s.source, label: s.source === "modbus" ? "Modbus" : s.name, text });
+  }
+  const active = h.tankAux
+    ? (aux ? aux.filter((phase) => phase.flags[i]) : DHW_PHASE_SERIES.filter((phase, j) =>
+        alignAuxSample(h, h.tankAux[j], i, phase.source) === phase.active)).map(dhwPhaseLabel)
+    : [];
+  return { multi: visible.length > 1, rows, note: active.join(" + ") };
+}
+
 // Accessibility keeps time and readings together. Visible numeric bubbles omit the selected time;
 // state phase intervals remain evidence about the whole phase, distinct from the selected instant.
+// Missing values are omitted rather than printed in the tooltip; if no visible source has a
+// sample at the selected instant, the bubble stays hidden while the axis still shows the time.
 function scrubText(h, i, includeTime = true, aux) {
-  if (env3ChartId(h.id) && i >= h.v.length) {
-    const forecast = forecastScrubView(h);
-    const point = forecast?.points[i - h.v.length];
-    if (!point) return "";
-    const specs = includeTime ? WEATHER_FORECAST_SERIES
-      : WEATHER_FORECAST_SERIES.filter((spec) => histVisibleSeries(h).some((s) => s.source === spec.measured));
-    return (includeTime ? scrubTime(h, i) + "\n" : "") + t("hist.forecast") + specs.map((spec) =>
-      `\n${t(spec.label)}  ${histFmt1(point[spec.key])} ${spec.unit}`).join("");
-  }
-  const valueText = (s) => {
-    const v = s.v[i];
-    const cfg = STATE_HIST[h.id];
-    if (cfg && v != null) {
-      const state = cfg.classify(v);
-      if (state == null) return t("hist.nm");
-      if (cfg.valueLabel) {
-        const key = cfg.valueLabel(v);
-        return key ? t(key) : t("hist.nm");
-      }
-      const label = t(state ? cfg.active : cfg.inactive);
-      if (h.id !== "smart_grid_mode") return label;
-      const mode = v / 10;
-      return Number.isInteger(mode) && mode >= 0 && mode <= 3
-        ? `${t(`sg.mode${mode}`)}${mode === 2 ? ` · ${label}` : ""}` : t("hist.nm");
-    }
-    return v != null ? histFmt1(v / 10) + (s.unit ? " " + s.unit : "")
-         : histHeld(s, i) ? t("hist.held") : cfg?.missing ? t(cfg.missing) : t("hist.nm");
-  };
   if (env3ChartId(h.id)) {
-    const rows = (includeTime ? h.series : histVisibleSeries(h)).map((s) =>
-      `${s.name}  ${s.v[i] == null ? t("hist.nm") : valueText(s)}`);
-    return (includeTime ? [scrubTime(h, i), ...rows] : rows).join("\n");
+    const tip = env3TipData(h, i, includeTime);
+    if (!tip) return "";
+    const lines = tip.rows.map((r) => `${r.label}  ${r.val}`);
+    if (tip.meta) lines.unshift(tip.meta);
+    if (includeTime) lines.unshift(scrubTime(h, i));
+    return lines.join("\n");
   }
   const cfg = STATE_HIST[h.id];
   if (cfg) {
-    const stateStatus = (v) => {
-      if (v == null) return t(cfg.missing || "hist.nm");
-      const key = cfg.compactValueLabel ? cfg.compactValueLabel(v) : "";
-      if (key) return t(key);
-      const state = cfg.classify(v);
-      return state == null ? t(cfg.missing || "hist.nm") : t(state ? "state.on" : "state.off");
-    };
-    const phaseText = (s) => {
-      const status = stateStatus(s.v[i]);
-      if (h.liveIndex === i) return `${t("hist.now")} · ${status}`;
-      const [from, count] = sampleRunAt(
-        h.liveIndex == null ? s.v : s.v.slice(0, h.recordedN), i);
-      const when = stateRunWhen(h, from, count, s);
-      return when ? `${when} · ${status}` : status;
-    };
-    const visible = histVisibleSeries(h);
-    if (visible.length <= 1) {
-      const s = visible[0] || h.series.find((q) => q.source === cfg.primary) || h.series[0];
-      return s ? phaseText(s) : "";
-    }
-    return visible.map((s) =>
-      `${s.source === "modbus" ? "Modbus" : s.name} ${phaseText(s)}`
-    ).join("\n");
+    const { multi, rows } = stateTipEntries(h, i, cfg);
+    if (!rows.length) return "";
+    return multi ? rows.map((r) => `${r.label} ${r.text}`).join("\n") : rows[0].text;
   }
-  // With two lines the readout names both instruments at the SAME instant. A gap in either remains
-  // visible as words rather than borrowing its neighbour's value. The HomeHub outdoor register has
-  // no source timestamp, so its popup also states the complete observed plateau and the unknown
-  // measurement age — a fresh TCP read must not be mislabeled as a fresh sensor observation.
-  const sourceText = (s, withName = true) => {
-    let out = (withName ? `${s.source === "modbus" ? "Modbus" : s.name} ` : "") + valueText(s);
-    if (h.id === "outdoor_air" && s.source === "modbus" && s.v?.[i] != null) {
-      const [from, count] = sampleRunAt(s.v, i);
-      out += ` · ${t("hist.modbus_plateau", stateRunWhen(h, from, count, s), histDuration(count * h.dt))}`;
-    }
-    return out;
-  };
-  const visible = histVisibleSeries(h);
-  const val = visible.length > 1
-    ? visible.map((s) => sourceText(s, true)).join("\n")
-    : sourceText(visible[0] || (h.series ? h.series[0] : h), false);
-  let res = (includeTime ? scrubTime(h, i) + " · " : "") + val;
-  if (h.tankAux) {
-    const active = (aux ? aux.filter(phase => phase.flags[i]) : DHW_PHASE_SERIES.filter((phase, j) =>
-      alignAuxSample(h, h.tankAux[j], i, phase.source) === phase.active)).map(dhwPhaseLabel);
-    if (active.length) res += (visible.length > 1 ? "\n" : " · ") + active.join(" + ");
-  }
-  return res;
+  const { multi, rows, note } = numericTipEntries(h, i, aux);
+  let val = rows.map((r) => (multi ? `${r.label} ` : "") + r.text).join("\n");
+  if (note) val += (val ? (multi ? "\n" : " · ") : "") + note;
+  return !includeTime ? val : val ? `${scrubTime(h, i)} · ${val}` : scrubTime(h, i);
 }
 
 // The combined ENV III tooltip is the one place where three independently scaled instruments are
@@ -2161,41 +2145,46 @@ function scrubText(h, i, includeTime = true, aux) {
 // injection path through translations, units or device data.
 function histReadout(h, i, aux) {
   if (env3ChartId(h.id)) {
-    const text = scrubText(h, i, false, aux);
-    if (!text) return "";
-    const lines = text.split("\n");
-    // Forecast provenance precedes the coloured measurement rows; measured bubbles need no header.
-    const meta = i >= h.v.length ? lines.shift() : "";
-    return (meta ? `<span class="vhist-tip-meta">${esc(meta)}</span>` : "") +
-      `<span class="vhist-tip-rows">` + histVisibleSeries(h).map((s, index) =>
-        lines[index].split("  ").map(cell =>
-          `<span class="${env3SeriesClass(s.source)}">${esc(cell)}</span>`).join("")
+    const tip = env3TipData(h, i, false);
+    if (!tip || !tip.rows.length) return "";
+    return (tip.meta ? `<span class="vhist-tip-meta">${esc(tip.meta)}</span>` : "") +
+      `<span class="vhist-tip-rows">` + tip.rows.map((r) =>
+        `<span class="${r.cls}">${esc(r.label)}</span><span class="${r.cls}">${esc(r.val)}</span>`
       ).join("") + `</span>`;
   }
   const cfg = STATE_HIST[h.id];
-  const visible = histVisibleSeries(h);
-  if (visible.length <= 1) return esc(scrubText(h, i, false, aux));
-  const lines = scrubText(h, i, false, aux).split("\n");
-  const note = !cfg && lines.length > visible.length ? lines.pop() : "";
-  const rows = visible.map((s, idx) => {
-    const label = s.source === "modbus" ? "Modbus" : s.name;
-    const val = lines[idx] ? lines[idx].slice(label.length + 1) : "";
-    const cls = histSourceClass(s.source);
-    return `<span class="vhist-tip-label${cls}">${esc(label)}</span><span class="vhist-tip-val">${esc(val)}</span>`;
-  }).join("");
-  return `<span class="vhist-tip-rows">${rows}` +
-    (note ? `<span class="vhist-tip-note">${esc(note)}</span>` : "") + `</span>`;
+  if (cfg) {
+    const { multi, rows } = stateTipEntries(h, i, cfg);
+    if (!rows.length) return "";
+    if (!multi) return esc(rows[0].text);
+    return `<span class="vhist-tip-rows">` + rows.map((r) =>
+      `<span class="vhist-tip-label${histSourceClass(r.source)}">${esc(r.label)}</span>` +
+      `<span class="vhist-tip-val">${esc(r.text)}</span>`
+    ).join("") + `</span>`;
+  }
+  const { multi, rows, note } = numericTipEntries(h, i, aux);
+  if (!rows.length && !note) return "";
+  if (!multi) {
+    const single = rows[0]?.text || "";
+    return esc(note ? (single ? `${single} · ${note}` : note) : single);
+  }
+  return `<span class="vhist-tip-rows">` + rows.map((r) =>
+    `<span class="vhist-tip-label${histSourceClass(r.source)}">${esc(r.label)}</span>` +
+    `<span class="vhist-tip-val">${esc(r.text)}</span>`
+  ).join("") + (note ? `<span class="vhist-tip-note">${esc(note)}</span>` : "") + `</span>`;
 }
 
 function placeScrubReadout(graph, h, i, frac) {
   const tip = graph.querySelector(".vhist-tip.vhist-live");
   const time = graph.querySelector(".vhist-time.vhist-live");
-  tip.innerHTML = histReadout(h, i);
+  const html = histReadout(h, i);
+  const pct = (frac * 100).toFixed(3);
+  tip.innerHTML = html;
+  tip.style.setProperty("--tip-p", pct);
+  tip.hidden = !html;
   time.textContent = scrubTime(h, i);
-  for (const el of [tip, time]) {
-    el.style.setProperty("--tip-p", (frac * 100).toFixed(3));
-    el.hidden = false;
-  }
+  time.style.setProperty("--tip-p", pct);
+  time.hidden = false;
 }
 
 // Paint the crosshair for sample `i` on the existing nodes. A drag never rebuilds the plot;
