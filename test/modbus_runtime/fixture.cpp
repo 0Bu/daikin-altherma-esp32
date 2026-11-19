@@ -1343,8 +1343,11 @@ void profile_cutover() {
 }
 void cache_count() {
     reset();
-    Peer peer;
+    REQUIRE(s_cache.capacity() == kMaxModbusCachedValues);
+    const CachedValue* const pinned_ptr = s_cache.data();
+    Peer                     peer;
     mb_poll_once();
+    REQUIRE(s_cache.data() == pinned_ptr);
     const auto committed_count = s_cache.size();
     sdk::clock_us.fetch_add((MB_CACHE_MAX_AGE_S + 1) * 1000000LL);
     mb_poll_once();
@@ -1356,6 +1359,9 @@ void cache_count() {
               << " live=" << live << " reply-age=" << mb_reply_age_locked() << "s\n";
     REQUIRE(!live && st.connected);
     REQUIRE(st.values == 0 && n == committed_count);
+    s_cycle_tick = 0;
+    mb_poll_once();
+    REQUIRE(s_cache.data() == pinned_ptr && s_cache.capacity() == kMaxModbusCachedValues);
 }
 void fallback_watchdog() {
     reset();

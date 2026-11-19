@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <string_view>
 
 namespace daik {
@@ -18,6 +19,41 @@ inline bool mqtt_fragment_fits(int offset, int length, int total, size_t receive
     const size_t bytes    = static_cast<size_t>(length);
     return static_cast<size_t>(total) == expected_total && position == received &&
            position <= expected_total && bytes <= expected_total - position;
+}
+
+// Bounded SPSC byte-ring helpers for variable-length MQTT ingress frames.
+inline bool mqtt_ring_can_reserve(size_t used, size_t capacity, size_t needed) noexcept {
+    return needed > 0 && needed <= capacity && used <= capacity && needed <= capacity - used;
+}
+
+inline size_t mqtt_ring_write(uint8_t* ring, size_t capacity, size_t offset, const void* src,
+                              size_t len) noexcept {
+    if (!ring || !src || capacity == 0 || len == 0 || len > capacity) return offset;
+    const size_t start = offset % capacity;
+    const size_t first = capacity - start;
+    const auto*  bytes = static_cast<const uint8_t*>(src);
+    if (len <= first) {
+        std::memcpy(ring + start, bytes, len);
+    } else {
+        std::memcpy(ring + start, bytes, first);
+        std::memcpy(ring, bytes + first, len - first);
+    }
+    return (start + len) % capacity;
+}
+
+inline size_t mqtt_ring_read(const uint8_t* ring, size_t capacity, size_t offset, void* dst,
+                             size_t len) noexcept {
+    if (!ring || !dst || capacity == 0 || len == 0 || len > capacity) return offset;
+    const size_t start = offset % capacity;
+    const size_t first = capacity - start;
+    auto*        bytes = static_cast<uint8_t*>(dst);
+    if (len <= first) {
+        std::memcpy(bytes, ring + start, len);
+    } else {
+        std::memcpy(bytes, ring + start, first);
+        std::memcpy(bytes + first, ring, len - first);
+    }
+    return (start + len) % capacity;
 }
 
 inline bool http_body_complete(int64_t content_length, size_t received_bytes,

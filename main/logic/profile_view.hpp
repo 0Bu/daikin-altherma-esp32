@@ -31,7 +31,8 @@ namespace daik::logic {
 // saw stays a different table. def/overlay.hpp uses this to give rows audited against one generated
 // table to every profile that is that table under another id, instead of to whichever id detection
 // happened to read the audited unit with.
-inline bool value_rows_identical(const ValueDef* a, size_t na, const ValueDef* b, size_t nb) {
+inline constexpr bool value_rows_identical(const ValueDef* a, size_t na, const ValueDef* b,
+                                           size_t nb) {
     if (na != nb) return false;
     if (a == b) return true;
     for (size_t i = 0; i < na; i++) {
@@ -41,13 +42,13 @@ inline bool value_rows_identical(const ValueDef* a, size_t na, const ValueDef* b
             x.type != y.type || x.no_publish != y.no_publish)
             return false;
         if ((x.label == nullptr) != (y.label == nullptr)) return false;
-        if (x.label && std::strcmp(x.label, y.label) != 0) return false;
+        if (x.label && __builtin_strcmp(x.label, y.label) != 0) return false;
     }
     return true;
 }
 
 // Does this table already reference `page`? (Linear over a few dozen rows, called once per resolve.)
-inline bool profile_has_page(const ValueDef* v, size_t n, uint8_t page) {
+inline constexpr bool profile_has_page(const ValueDef* v, size_t n, uint8_t page) {
     for (size_t i = 0; i < n; i++)
         if (v[i].reg == page) return true;
     return false;
@@ -68,9 +69,9 @@ struct ProfileView {
     uint16_t extra_count  = 0;
     uint16_t extra2_count = 0;
 
-    size_t count() const { return base_count + extra_count + extra2_count; }
+    constexpr size_t count() const { return base_count + extra_count + extra2_count; }
 
-    const ValueDef& operator[](size_t i) const {
+    constexpr const ValueDef& operator[](size_t i) const {
         if (i < base_count) return base[i];
         i -= base_count;
         return i < extra_count ? extra[i] : extra2[i - extra_count];
@@ -102,8 +103,8 @@ static_assert(sizeof(ProfileView) <= 6 * sizeof(const ValueDef*),
 // Single-page blocks by construction: `extra_page` is the page ALL of `extra`'s rows sit on. A second
 // supplement on a different page is a second call, not a mixed array — mixing pages would make the
 // gate above per-row and this function would quietly become a filter.
-inline ProfileView profile_view(const ValueDef* base, size_t n,
-                                const ValueDef* extra, size_t m, uint8_t extra_page) {
+inline constexpr ProfileView profile_view(const ValueDef* base, size_t n, const ValueDef* extra,
+                                          size_t m, uint8_t extra_page) {
     ProfileView v;
     v.base       = base;
     v.base_count = n;
@@ -119,8 +120,8 @@ inline ProfileView profile_view(const ValueDef* base, size_t n,
 // all-or-nothing: a generator/profile mismatch withholds the whole observational block instead of
 // publishing an accidental subset, and checking only the base table means one supplement can never
 // justify a page introduced by another supplement.
-inline ProfileView profile_view_extend_existing_pages(ProfileView v,
-                                                       const ValueDef* extra, size_t m) {
+inline constexpr ProfileView profile_view_extend_existing_pages(ProfileView     v,
+                                                                const ValueDef* extra, size_t m) {
     if (!extra || m == 0 || m > UINT16_MAX || v.extra2 || v.extra2_count) return v;
     for (size_t i = 0; i < m; i++)
         if (!profile_has_page(v.base, v.base_count, extra[i].reg)) return v;
