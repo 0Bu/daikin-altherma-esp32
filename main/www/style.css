@@ -991,8 +991,8 @@ button.vhist-source:focus-visible { outline: 2px solid var(--brand); outline-off
 .vhist-source.mb { --vhist-colour: var(--src-mb); }
 .vhist-source.room { --vhist-colour: var(--src-room); overflow-wrap: anywhere; }
 .vhist-source small { color: inherit; font-size: 10.5px; }
-/* Component states are categorical timelines, not numeric curves. X10A stays active when
-   available and HomeHub/Modbus can be toggled on via the source legend; exact phase ranges
+/* Component states are categorical timelines, not numeric curves. X10A and paired
+   HomeHub/Modbus start active when available and can be toggled via the source legend; exact phase ranges
    appear in the compact tooltip above the bar while the selected time sits directly on the
    lower time scale. */
 .vhist-state .vhist-head { margin-bottom: 4px; }
@@ -1214,13 +1214,6 @@ button.vhist-source:focus-visible { outline: 2px solid var(--brand); outline-off
 .vhist-axis.vhist-axis-future { position: relative; min-height: 18px; }
 .vhist-axis-future .vhist-axis-now { position: absolute; left: calc(var(--now-p) * 1%);
   transform: translateX(-50%); color: var(--muted); font-weight: 700; }
-/* Gaps are named in words, not drawn as a shaded band: the count belongs with the axis, and a band
-   would read as a measured region. */
-.vhist-gap { color: var(--warn); }
-/* Idle time is NOT a warning — the compressor resting is the normal state of a heat pump for most
-   of a mild day. It stays --muted so the axis doesn't cry fault over a healthy unit; only a real
-   dropout (.vhist-gap) earns the attention colour. */
-.vhist-idle { color: var(--muted); }
 /* The global reduced-motion rule (line ~127) kills `animation` only — these shared tongue and
    chevron movements are transitions, so they need their own explicit opt-out (DESIGN.md §9). */
 @media (prefers-reduced-motion: reduce) {
