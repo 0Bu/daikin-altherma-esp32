@@ -114,7 +114,7 @@ const labels = {
   "hist.none": "Noch keine Messwerte aufgezeichnet.", "hist.title": "Letzte 24 Stunden",
   "hist.now": "jetzt", "hist.nm": "nicht gemessen", "hist.held": "Außeneinheit ruht",
   "hist.retained": "Letzter empfangener Messwert",
-  "state.on": "ON", "state.off": "OFF",
+  "state.on": "An", "state.off": "Aus",
 };
 const context = {
   S, LANG: "de", renderApp() {}, renderCards() {}, renderInspect() {}, renderSettings() {},
@@ -188,11 +188,11 @@ const context = {
     if (key === "hist.circ_unavailable") return "Nicht verfügbar";
     if (key === "hist.circ_gaps") return `${arg} Phase · nicht verfügbar`;
     if (key === "hist.circ_aria") return `${arg} — Zirkulationsverlauf. ${arg2}`;
-    if (key === "hist.valve2_on_total") return `2WV-Ausgang ON · ${arg}`;
-    if (key === "hist.valve2_off_total") return `2WV-Ausgang OFF · ${arg}`;
-    if (key === "hist.valve2_none") return "Kein ON-Zustand des 2WV-Ausgangs erfasst.";
-    if (key === "hist.valve2_on") return "2WV-Ausgang ON";
-    if (key === "hist.valve2_off") return "2WV-Ausgang OFF";
+    if (key === "hist.valve2_on_total") return `2WV-Ausgang An · ${arg}`;
+    if (key === "hist.valve2_off_total") return `2WV-Ausgang Aus · ${arg}`;
+    if (key === "hist.valve2_none") return "Kein An-Zustand des 2WV-Ausgangs erfasst.";
+    if (key === "hist.valve2_on") return "2WV-Ausgang An";
+    if (key === "hist.valve2_off") return "2WV-Ausgang Aus";
     if (key === "hist.valve2_aria") return `${arg} — Verlauf des 2WV-Ausgangs. ${arg2}`;
     if (key.startsWith("sg.mode")) return ["Freier Betrieb", "Zwangsabschaltung", "Empfehlung ein", "Erzwungen ein"][+key.at(-1)];
     if (key === "hist.comp_total") return `Verdichter aktiv erfasst · ${arg} · ${arg2} Phasen im 5-Minuten-Raster`;
@@ -1283,12 +1283,12 @@ assert.doesNotMatch(bshHtml, /vhist-state-runs|· Phasen|vhist-state-lane-label/
 assert.equal((bshHtml.match(/vhist-state-track/g) || []).length, 2);
 assert.match(bshHtml, /data-hist-series="x10a" aria-pressed="true" disabled/);
 assert.match(bshHtml, /data-hist-series="modbus" aria-pressed="true"/);
-assert.match(h.scrubText(bshView, 0), /^X10A \d{2}:\d{2}–\d{2}:\d{2} · OFF\nModbus \d{2}:\d{2}–\d{2}:\d{2} · OFF$/);
-assert.match(h.scrubText(bshView, 1), /^X10A \d{2}:\d{2}–\d{2}:\d{2} · ON\nModbus \d{2}:\d{2}–\d{2}:\d{2} · ON$/);
+assert.match(h.scrubText(bshView, 0), /^X10A \d{2}:\d{2}–\d{2}:\d{2} · Aus\nModbus \d{2}:\d{2}–\d{2}:\d{2} · Aus$/);
+assert.match(h.scrubText(bshView, 1), /^X10A \d{2}:\d{2}–\d{2}:\d{2} · An\nModbus \d{2}:\d{2}–\d{2}:\d{2} · An$/);
 h.histSeriesToggle("bsh_state", "modbus");
 assert.equal((h.histHtml("bsh_state", "", "Heizstab").match(/vhist-state-track/g) || []).length, 1);
-assert.match(h.scrubText(h.historyView("bsh_state"), 0), /^\d{2}:\d{2}–\d{2}:\d{2} · OFF$/);
-assert.match(h.scrubText(h.historyView("bsh_state"), 1), /^\d{2}:\d{2}–\d{2}:\d{2} · ON$/);
+assert.match(h.scrubText(h.historyView("bsh_state"), 0), /^\d{2}:\d{2}–\d{2}:\d{2} · Aus$/);
+assert.match(h.scrubText(h.historyView("bsh_state"), 1), /^\d{2}:\d{2}–\d{2}:\d{2} · An$/);
 S.histHidden.delete("bsh_state");
 
 // The Heizstab schematic inspector keeps the categorical history but narrows it to the authoritative
@@ -1299,7 +1299,7 @@ assert.equal(bshX10aView.series.length, 1);
 assert.equal(bshX10aView.series[0].source, "x10a");
 assert.doesNotMatch(bshX10aHtml, /data-hist-series="modbus"/);
 assert.match(bshX10aHtml, /data-source="x10a"/);
-assert.match(h.scrubText(bshX10aView, 1), /^\d{2}:\d{2}–\d{2}:\d{2} · ON$/);
+assert.match(h.scrubText(bshX10aView, 1), /^\d{2}:\d{2}–\d{2}:\d{2} · An$/);
 assert.doesNotMatch(h.scrubText(bshX10aView, 1), /X10A|Modbus|Heizstab|ca\.|min/);
 {
   const old = S.hist.get("bsh_state");
@@ -1307,10 +1307,10 @@ assert.doesNotMatch(h.scrubText(bshX10aView, 1), /X10A|Modbus|Heizstab|ca\.|min/
   S.hist.set("bsh_state", { ...old, t0: null, v: [10], refreshFailed: true });
   S.hist.set("modbus:bsh_state", { ...peer, t0: null });
   const retained = h.historyView("bsh_state", "x10a");
-  assert.equal(h.scrubText(retained, 0), "Letzter empfangener Messwert · ON",
+  assert.equal(h.scrubText(retained, 0), "Letzter empfangener Messwert · An",
     "one undated retained slot shows its last reading once");
   assert.match(h.scrubText(h.historyView("bsh_state"), 0),
-    /^X10A Letzter empfangener Messwert · ON\nModbus /,
+    /^X10A Letzter empfangener Messwert · An\nModbus /,
     "a fresh partner cannot change the retained lane's phase time");
   S.histHidden.delete("bsh_state");
   S.hist.set("bsh_state", old);
@@ -1370,7 +1370,7 @@ assert.match(defrostHtml, /Abtauen aktiv erfasst · 10 min im 5-Minuten-Raster/)
 assert.match(defrostHtml, /vhist-state-on state-off/);
 assert.match(defrostHtml, /vhist-state-on defrost-on/);
 assert.doesNotMatch(defrostHtml, /vhist-state-runs|· Phasen/);
-assert.match(h.scrubText(defrostView, 1), /^\d{2}:\d{2}–\d{2}:\d{2} · ON$/);
+assert.match(h.scrubText(defrostView, 1), /^\d{2}:\d{2}–\d{2}:\d{2} · An$/);
 
 S.hist.set("quiet_state", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000, b0: 200,
   held: [], v: [10, 10, 0, 0] });
@@ -1388,11 +1388,11 @@ assert.match(quietHtml, /vhist-state-on quiet-on/);
 assert.match(quietHtml, /vhist-state-gap/,
   "a missing Modbus sample stays hatched in the visible Modbus lane by default");
 assert.doesNotMatch(quietHtml, /vhist-state-runs|· Phasen/);
-assert.match(h.scrubText(quietView, 0), /^X10A .* · ON\nModbus .* · ON$/);
-assert.match(h.scrubText(quietView, 1), /^X10A .* · ON$/,
+assert.match(h.scrubText(quietView, 0), /^X10A .* · An\nModbus .* · An$/);
+assert.match(h.scrubText(quietView, 1), /^X10A .* · An$/,
   "a missing Modbus state sample is omitted from the dual-source tooltip");
 assert.doesNotMatch(h.scrubText(quietView, 1), /Modbus|nicht gemessen/);
-assert.match(h.scrubText(quietView, 3), /^X10A .* · OFF\nModbus .* · ON$/);
+assert.match(h.scrubText(quietView, 3), /^X10A .* · Aus\nModbus .* · An$/);
 h.histSeriesToggle("quiet_state", "modbus");
 const quietSingleHtml = h.histHtml("quiet_state", "", "Leise-Modus");
 assert.equal((quietSingleHtml.match(/vhist-state-track/g) || []).length, 1);
@@ -1419,7 +1419,7 @@ assert.match(buhHtml, /vhist-state-on step1/);
 assert.match(buhHtml, /vhist-state-on step2/);
 assert.match(buhHtml, /vhist-state-on state-off/);
 assert.doesNotMatch(buhHtml, /vhist-state-runs|· Phasen|Lücke|vhist-gap|vhist-idle/);
-assert.match(h.scrubText(buhView, 0), /^\d{2}:\d{2}–\d{2}:\d{2} · OFF$/);
+assert.match(h.scrubText(buhView, 0), /^\d{2}:\d{2}–\d{2}:\d{2} · Aus$/);
 assert.match(h.scrubText(buhView, 1), /^\d{2}:\d{2}–\d{2}:\d{2} · Stufe 1$/);
 assert.match(h.scrubText(buhView, 2), /^\d{2}:\d{2}–\d{2}:\d{2} · Stufe 2$/);
 assert.equal(h.scrubText(buhView, 5), "",
@@ -1466,12 +1466,12 @@ S.hist.set("valve_heat", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000, b0:
 const valve2View = h.historyView("valve_heat");
 const valve2Html = h.histHtml("valve_heat", "", "Ausgang 2-Wege-/Absperrventil");
 assert.equal(valve2View.series.length, 1);
-assert.match(valve2Html, /2WV-Ausgang ON · 15 min · 2WV-Ausgang OFF · 15 min/);
+assert.match(valve2Html, /2WV-Ausgang An · 15 min · 2WV-Ausgang Aus · 15 min/);
 assert.match(valve2Html, /vhist-state-on state-off/);
 assert.match(valve2Html, /vhist-state-on valve2-on/);
 assert.doesNotMatch(valve2Html, /Kühlstellung|Heizstellung|>Kühlen<|>Heizen</);
-assert.match(h.scrubText(valve2View, 0), /^\d{2}:\d{2}–\d{2}:\d{2} · OFF$/);
-assert.match(h.scrubText(valve2View, 2), /^\d{2}:\d{2}–\d{2}:\d{2} · ON$/);
+assert.match(h.scrubText(valve2View, 0), /^\d{2}:\d{2}–\d{2}:\d{2} · Aus$/);
+assert.match(h.scrubText(valve2View, 2), /^\d{2}:\d{2}–\d{2}:\d{2} · An$/);
 
 // Every categorical timeline uses the same live-cap contract, including derived BUH and the MQTT
 // circulation witness. Structural concepts are mandatory; no label matching or cross-source
