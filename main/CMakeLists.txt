@@ -182,6 +182,29 @@ set_source_files_properties(http_status.cpp PROPERTIES COMPILE_OPTIONS "-Os")
 set_source_files_properties(mqtt_ha.cpp PROPERTIES COMPILE_OPTIONS
     "-fno-inline-functions-called-once;-Werror=frame-larger-than=2048")
 
+# Strictly allocation-free, non-throwing translation units that never unwind C++ exceptions across
+# their frames: omit EH cleanup pads and .eh_frame/.gcc_except_table metadata to reclaim flash
+# headroom under the 64 KiB MMU / Secure Boot v2 padding step.
+set_source_files_properties(
+    captive_dns.cpp
+    checkup.cpp
+    diag_log.cpp
+    heap_guard.cpp
+    hp_comm.cpp
+    http_client_diag.cpp
+    http_deadline.cpp
+    http_ota.cpp
+    http_server.cpp
+    mqtt_retirement_store.cpp
+    provisioning.cpp
+    safe_mode.cpp
+    stack_watch.cpp
+    state_dwell.cpp
+    stop_observation_store.cpp
+    PROPERTIES COMPILE_OPTIONS
+        "-fno-exceptions;-fno-unwind-tables;-fno-asynchronous-unwind-tables"
+)
+
 # Assemble, minify and pre-compress the web UI at build time. The sources are split for edit locality —
 # www/index.html, www/style.css and the ordered JavaScript fragments in www/app.sources — and
 # inline_assets.cmake splices them back into the ONE self-contained page the device serves.

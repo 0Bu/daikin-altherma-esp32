@@ -729,6 +729,7 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .vrow-val { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--fg); white-space: nowrap; }
 .vrow-val.ok { color: var(--ok); } .vrow-val.warn { color: var(--warn); } .vrow-val.err { color: var(--err); }
 .vrow-val.dim { color: var(--muted); }
+.vrow-val:empty { display: none; }
 /* Keep each diagnosis reading and chevron together beside the label at the shared row font sizes. */
 [data-dashboard-card="diagnosis"] .vrow-desc {
   display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 8px;
@@ -1586,6 +1587,81 @@ html.modal-open, body.modal-open { overflow: hidden; overscroll-behavior: none; 
    in its own group at the very end of the list. */
 :root { --src-mb:#0E8A8A; --src-mb-soft:rgba(14,138,138,.10); --src-room:#B56B27; }
 @media (prefers-color-scheme: dark) { :root { --src-mb:#3FB6B6; --src-mb-soft:rgba(63,182,182,.15); --src-room:#E6A460; } }
+
+/* ── Unit fault 24 h timeline & progressive disclosure table ───────────────────────────── */
+.fault-tone-0 { --fault-c:#D23B3B; }
+.fault-tone-1 { --fault-c:#D97706; }
+.fault-tone-2 { --fault-c:#7C3AED; }
+.fault-tone-3 { --fault-c:#0891B2; }
+.fault-tone-4 { --fault-c:#DB2777; }
+.fault-tone-5 { --fault-c:#2563EB; }
+@media (prefers-color-scheme: dark) {
+  .fault-tone-0 { --fault-c:#F87171; }
+  .fault-tone-1 { --fault-c:#FBBF24; }
+  .fault-tone-2 { --fault-c:#A78BFA; }
+  .fault-tone-3 { --fault-c:#22D3EE; }
+  .fault-tone-4 { --fault-c:#F472B6; }
+  .fault-tone-5 { --fault-c:#60A5FA; }
+}
+.checkup-fault-panel { display: grid; gap: 10px; }
+.checkup-fault-hero { display: grid; gap: 5px; }
+.checkup-fault-hero-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 7px; }
+.fault-code-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 1px 8px; border-radius: 999px; font-family: var(--font-mono);
+  font-size: 12.5px; font-weight: 700; color: var(--fg);
+  background: color-mix(in srgb, var(--fault-c, var(--err)) 15%, var(--soft));
+  border: 1px solid color-mix(in srgb, var(--fault-c, var(--err)) 45%, var(--line));
+}
+.fault-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--fault-c, var(--err)); flex: none; display: inline-block; }
+.checkup-fault-meaning { font-weight: 600; color: var(--fg); }
+.checkup-fault-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12.5px; color: var(--muted); }
+.checkup-fault-chart { display: grid; gap: 5px; }
+.checkup-fault-track { cursor: pointer; touch-action: manipulation; }
+.checkup-fault-track:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.vhist-state-ok { position: absolute; inset-block: 0; background: var(--pipe); }
+.checkup-fault-track .vhist-state-seg[data-fault-seg] {
+  position: absolute; inset-block: 0; background: var(--fault-c, var(--err));
+  min-width: 3px; z-index: 1; border-radius: 2px;
+}
+.checkup-fault-chart.is-filtered .checkup-fault-track .vhist-state-seg[data-fault-seg]:not(.is-match) { opacity: .28; }
+.checkup-fault-track .vhist-state-seg[data-fault-seg].is-snapped {
+  box-shadow: 0 0 0 1.5px var(--card), 0 0 0 3px var(--fg); z-index: 2;
+}
+.checkup-fault-readout { font-size: 12px; color: var(--muted); min-height: 1.4em; overflow-wrap: anywhere; }
+.checkup-fault-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+button.fault-chip {
+  display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px;
+  border-radius: 999px; border: 1px solid var(--line); background: var(--soft);
+  color: var(--fg); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+}
+button.fault-chip:hover { border-color: var(--fault-c, var(--brand)); }
+button.fault-chip:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+button.fault-chip[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--fault-c, var(--err)) 16%, var(--card));
+  border-color: var(--fault-c, var(--err));
+}
+.checkup-fault-table-wrap { width: 100%; overflow-x: hidden; border-top: 1px solid var(--line); padding-top: 8px; }
+.checkup-fault-table { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
+.checkup-fault-table th, .checkup-fault-table td {
+  padding: 5px 4px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+.checkup-fault-table th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .03em; }
+.checkup-fault-table th:nth-child(1) { width: 17%; }
+.checkup-fault-table th:nth-child(2) { width: 32%; }
+.checkup-fault-table th:nth-child(3) { width: 19%; }
+.checkup-fault-table th:nth-child(4) { width: 18%; }
+.checkup-fault-table th:nth-child(5) { width: 14%; }
+.checkup-fault-table td.num, .checkup-fault-table th.num { white-space: normal; }
+.checkup-fault-table tr.is-snapped td { background: color-mix(in srgb, var(--brand-sky) 14%, transparent); }
+.checkup-fault-sub { display: block; font-size: 11px; color: var(--muted); margin-top: 2px; }
+.checkup-fault-boundary { margin: 2px 0 0; }
+@media (max-width: 440px) {
+  .checkup-fault-table { font-size: 11px; }
+  .checkup-fault-table th, .checkup-fault-table td { padding: 4px 2px; }
+  .checkup-fault-table th { font-size: 10px; letter-spacing: 0; }
+}
 
 /* The second source inside a value-row accordion is one plain line at the end of its explainer.
    Schematic inspectors instead put the same reading in their divided values section after the

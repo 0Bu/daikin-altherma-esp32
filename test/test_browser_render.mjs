@@ -7,6 +7,7 @@ import { launchBrowser } from "../tools/browser/cdp_browser.mjs";
 import { startFixtureServer } from "../tools/browser/fixture_server.mjs";
 import { assertHistoryMotion, HISTORY_MOTION_MUTATIONS } from "./test_browser_history_motion.mjs";
 import { assertCyclingChart } from "./test_browser_cycling.mjs";
+import { assertFaultChart } from "./test_browser_fault.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const pageFile = process.env.DAIKIN_BROWSER_PAGE;
@@ -1291,6 +1292,14 @@ async function assertDiagnosisSummaryRows(page, context) {
       const end = row.querySelector('.vrow-end').getBoundingClientRect();
       const value = row.querySelector('.vrow-val');
       const box = value.getBoundingClientRect();
+      if (row.dataset.desc === 'model:health_fault' && value.textContent === '') {
+        const hiddenVal = getComputedStyle(value).display === 'none';
+        const aria = (row.getAttribute('aria-label') || '').trim();
+        const separateLine = label.bottom <= end.top || end.bottom <= label.top;
+        const overflow = end.right > bounds.right + 1 || label.left < bounds.left - 1;
+        return !hiddenVal || !aria || separateLine || overflow
+          ? [{ id: row.dataset.desc, value: '', hiddenVal, aria, separateLine, overflow }] : [];
+      }
       const range = document.createRange();
       range.selectNodeContents(value);
       const fragments = Array.from(range.getClientRects()).filter(rect => rect.width && rect.height);
@@ -1441,6 +1450,12 @@ async function assertPlantDiagnosis(page, context) {
     const normalLabel = await page.evaluate("t('normal.label')");
     for (const block of blocks) {
       if (block.id === "model:health_cycling" || block.id === "model:health_pressure") continue;
+      if (block.id === "model:health_fault") {
+        assert.ok(block.text.every(text => text.trim()), `${context}/${block.id}: no empty block`);
+        assert.ok(!block.text.some(text => text.includes(normalLabel)),
+          `${context}/${block.id}: unit fault must not render a generic Normal block`);
+        continue;
+      }
       assert.equal(block.count, 3, `${context}/${block.id}: exactly three blocks`);
       assert.equal(block.firstValue, 'vdesc-n', `${context}/${block.id}: value first`);
       assert.equal(block.normal, normalLabel, `${context}/${block.id}: Normal last`);
@@ -2775,6 +2790,9 @@ try {
       await page.viewport(viewport.width, viewport.height);
       await activateLocale(page, "en");
       await assertCyclingChart(page, server, `${viewport.name}/diagnosis/cycling`);
+      await assertFaultChart(page, `${viewport.name}/diagnosis/fault/en`, viewport.name);
+      await activateLocale(page, "de");
+      await assertFaultChart(page, `${viewport.name}/diagnosis/fault/de`, viewport.name);
       for (const locale of browserLocales) {
         await activateLocale(page, locale);
         await page.evaluate("showStage('dashboard'); window.scrollTo(0, 0); true");
@@ -2822,6 +2840,9 @@ try {
       await assertDashboardCardNavigation(page, `${viewport.name}/${locale}/card-navigation`, viewport);
       await assertFlowSwitchWords(page, `${viewport.name}/${locale}/flow-switch`);
       await assertPlantDiagnosis(page, `${viewport.name}/${locale}/diagnosis`);
+      if (!mutation && (locale === "en" || locale === "de")) {
+        await assertFaultChart(page, `${viewport.name}/${locale}/fault`, viewport.name);
+      }
       await assertStatusTruth(page, `${viewport.name}/${locale}/status-truth`);
       await assertNativeAltherma4(page, `${viewport.name}/${locale}/native-altherma4`);
       nativeAltherma4Checks++;

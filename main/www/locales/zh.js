@@ -1,4 +1,4 @@
-// translation-source: 42a4d77a832a12c84359f017fdcacdd939405dc965a062a922c2d18aafa2ff0e
+// translation-source: d65d3b16aadf37eb87ecbe27037b388b04d755399b25c0257655dd6a6be12909
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
@@ -261,6 +261,21 @@ I18N.zh = localeValues([
   /* check.fault_none */ "当前无故障",
   /* check.fault_unknown */ "未知",
   /* check.fault_past_unknown */ "曾有报警 · 当前未知",
+  /* check.fault_since_short */ (d) => `已持续 ${d}`,
+  /* check.fault_ago_short */ (d) => `${d}前`,
+  /* check.fault_hero_ok */ (d) => `24 小时观测中的 ${d} 内未报告故障或警告。`,
+  /* check.fault_latched_only */ "热泵报告了已锁存的故障标志；记录的 24 小时窗口内没有带时间戳的时段。",
+  /* check.fault_unit_outdoor */ "室外机",
+  /* check.fault_unit_indoor */ "室内机",
+  /* check.fault_unit_both */ "室外 + 室内",
+  /* check.fault_secondary */ (s) => `同时有效：${s}`,
+  /* check.fault_stop_ongoing */ "进行中",
+  /* check.fault_stop_unknown */ "不明确",
+  /* check.fault_col_code */ "代码",
+  /* check.fault_col_meaning */ "含义",
+  /* check.fault_ok_label */ "无故障",
+  /* check.fault_gap_label */ "未监测",
+  /* check.fault_severity_caution */ "注意",
   /* check.retry_seen */ "有增加",
   /* check.retry_none */ "无增加",
   /* service.metric.comp */ "压缩机",
@@ -1284,7 +1299,7 @@ DESCRIPTION_I18N.zh = descriptionValues([
 ]);
 
 MODEL_DESCRIPTION_I18N.zh = modelDescriptionValues([
-  ["机组消息", "不证明原因或已解决。"], // health_fault
+  ["显示热泵报告的故障和警告代码；简短说明为大金通用提示，代码清除并不证明原因已排除。"], // health_fault
   ["R5T：分层水箱单点，非能量。", "项目提示≥0.8 K/h仅适用无水泵/类似取水标记窗口。无标记也可能取水；0 K/h不排除热损失。循环重叠不证明原因。"], // health_dhw_loss
   ["测量有缺口时，部分启动可能漏计。", "启动次数没有固定的正常值。数据充足时，本项检查将已完成的供暖运行平均达到 10 分钟视为时长足够。"], // health_cycling
   ["除霜", "≥3次配对、>15%压缩机运行时间，仅计压缩机及除霜状态均可读时段。项目规则非Daikin限值；缺少湿度及整个盘管温度。"], // health_defrost

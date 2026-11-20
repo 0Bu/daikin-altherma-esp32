@@ -41,17 +41,17 @@ component or direct managed dependency keys audited by `scripts/run-esp-idf-matr
 |---|---|---|---|---|---|---|
 | U01 | Build system, ESP32-S3 target and reproducible application metadata | ✅ Direct | IDF core | One `main` component, C++17, 8 MiB flash, a fixed 240 MHz CPU clock for software certificate checks and a target/version-pinned build with reproducible application metadata; a release dispatch performs one signed build | [`CMakeLists.txt`](../CMakeLists.txt), [`sdkconfig.defaults`](../sdkconfig.defaults), [`dependencies.lock`](../dependencies.lock) | [Build system](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-guides/build-system.html) |
 | U02 | FreeRTOS kernel | ✅ Direct | IDF core | Tasks, queues, semaphores, event groups, stack high-water marks, a boot-static socket-deadline worker and ELF frame/path budgets | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`http_deadline.cpp`](../main/http_deadline.cpp), [`stack_watch.cpp`](../main/stack_watch.cpp), [`check-stack-budget.py`](../scripts/check-stack-budget.py) | [FreeRTOS](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/system/freertos.html) |
-| U03 | System, heap, logging and MAC APIs | ✅ Direct | IDF core | Reset/restart state, boot-local random identity, internal-heap telemetry, logs and MAC-derived identity | [`main.cpp`](../main/main.cpp), [`heap_guard.cpp`](../main/heap_guard.cpp), [`net.cpp`](../main/net.cpp) | [System API](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/system/misc_system_api.html), [memory allocation](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/system/mem_alloc.html), [logging](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/system/log.html) |
+| U03 | System, heap, logging and MAC APIs | ✅ Direct | IDF core | Reset/restart state, boot-local random identity, internal-heap telemetry, logs and MAC-derived identity | [`main.cpp`](../main/main.cpp), [`heap_guard.cpp`](../main/heap_guard.cpp), [`net.cpp`](../main/net.cpp), [`sdkconfig.defaults`](../sdkconfig.defaults) | [System API](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/system/misc_system_api.html), [memory allocation](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/system/mem_alloc.html), [logging](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/system/log.html) |
 | U04 | High-resolution timer and Task Watchdog | ✅ Direct | `esp_timer` | Poll timing, deadlines, one boot-created absolute HTTP timer plus static notifier task, and watchdog coverage for blocking workers | [`hp_poll.cpp`](../main/hp_poll.cpp), [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`http_deadline.cpp`](../main/http_deadline.cpp), [`sdkconfig.defaults`](../sdkconfig.defaults) | [ESP Timer](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/system/esp_timer.html), [watchdogs](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/system/wdts.html) |
 | U05 | Non-volatile storage | ✅ Direct | `nvs_flash` | Atomic configuration/link cache, separate bounded retirement provenance; initialization errors preserve the partition | [`nvs_storage.cpp`](../main/nvs_storage.cpp), [`config.cpp`](../main/config.cpp), [`mqtt_retirement_store.cpp`](../main/mqtt_retirement_store.cpp), [`logic/mqtt_retirement_store.hpp`](../main/logic/mqtt_retirement_store.hpp) | [NVS Flash](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/storage/nvs_flash.html) |
 | U06 | Partition API and custom flash layout | ✅ Direct | `esp_partition` | Raw power-loss-safe history journal, coredump streaming and running-slot lookup | [`history.cpp`](../main/history.cpp), [`partitions.csv`](../partitions.csv) | [Partition API](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/storage/partition.html) |
-| U07 | Core dump to flash | ✅ Direct | `espcoredump` | Flash-guarded summary, preserved foreign evidence, strict offline provenance and explicit dismissal | [`diag_crash.cpp`](../main/diag_crash.cpp), [`http_status.cpp`](../main/http_status.cpp) | [Core dump](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-guides/core_dump.html) |
-| U08 | Wi-Fi station and SoftAP | ✅ Direct | `esp_wifi` | Strongest-AP selection, reconnect, setup AP and RAM credentials; driver NVS disabled before init only if NVS failed | [`wifi.cpp`](../main/wifi.cpp), [`provisioning.cpp`](../main/provisioning.cpp) | [Wi-Fi](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/network/esp_wifi.html) |
+| U07 | Core dump to flash | ✅ Direct | `espcoredump` | Flash-guarded summary, preserved foreign evidence, strict offline provenance and explicit dismissal | [`diag_crash.cpp`](../main/diag_crash.cpp), [`http_status.cpp`](../main/http_status.cpp), [`sdkconfig.defaults`](../sdkconfig.defaults) | [Core dump](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-guides/core_dump.html) |
+| U08 | Wi-Fi station and SoftAP | ✅ Direct | `esp_wifi` | Strongest-AP selection, reconnect, setup AP and RAM credentials; driver NVS disabled before init only if NVS failed | [`wifi.cpp`](../main/wifi.cpp), [`provisioning.cpp`](../main/provisioning.cpp), [`sdkconfig.defaults`](../sdkconfig.defaults) | [Wi-Fi](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/network/esp_wifi.html) |
 | U09 | Event loop and network interfaces | ✅ Direct | `esp_event`, `esp_netif` | Shared Wi-Fi/Ethernet lifecycle, DHCP identity and interface state | [`main.cpp`](../main/main.cpp), [`net.cpp`](../main/net.cpp), [`wifi.cpp`](../main/wifi.cpp) | [Event loop](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/system/esp_event.html), [ESP-NETIF](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/network/esp_netif.html) |
-| U10 | lwIP sockets, ICMP echo and SNTP | ✅ Direct | `lwip` | Captive DNS, read-only Modbus TCP, syslog, ping, SNTP, boot-primed OTA sockets and download interruption | [`captive_dns.cpp`](../main/captive_dns.cpp), [`hp_modbus.cpp`](../main/hp_modbus.cpp), [`sntp_time.cpp`](../main/sntp_time.cpp), [`http_deadline.cpp`](../main/http_deadline.cpp), [`ota_update.cpp`](../main/ota_update.cpp) | [lwIP](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-guides/lwip.html), [ICMP echo](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/protocols/icmp_echo.html), [ESP-NETIF SNTP](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/network/esp_netif_programming.html#sntp-service) |
+| U10 | lwIP sockets, ICMP echo and SNTP | ✅ Direct | `lwip` | Captive DNS, read-only Modbus TCP, syslog, ping, SNTP, boot-primed OTA sockets and download interruption | [`captive_dns.cpp`](../main/captive_dns.cpp), [`hp_modbus.cpp`](../main/hp_modbus.cpp), [`sntp_time.cpp`](../main/sntp_time.cpp), [`http_deadline.cpp`](../main/http_deadline.cpp), [`ota_update.cpp`](../main/ota_update.cpp), [`sdkconfig.defaults`](../sdkconfig.defaults) | [lwIP](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-guides/lwip.html), [ICMP echo](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/protocols/icmp_echo.html), [ESP-NETIF SNTP](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/network/esp_netif_programming.html#sntp-service) |
 | U11 | External W5500 Ethernet over SPI | ✅ Direct + 📦 Managed | `esp_eth`, `esp_driver_spi`, `espressif/w5500` | Optional wired transport detected at boot; W5500 MAC/PHY comes from the registry component | [`net.cpp`](../main/net.cpp), [`idf_component.yml`](../main/idf_component.yml) | [Ethernet](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/network/esp_eth.html), [W5500 component](https://components.espressif.com/components/espressif/w5500) |
-| U12 | HTTP server | ✅ Direct | `esp_http_server` | 10 KiB worker with 2 KiB ELF path reserve; LAN/API and restricted AP, typed bounded ingress/streams, redaction and async OTA request ownership. Receive budgets are 30 s normally or 300 s for admitted dev uploads, plus one five-second receive | [`http_server.cpp`](../main/http_server.cpp), [`http_common.cpp`](../main/http_common.cpp), [`http_ota.cpp`](../main/http_ota.cpp), [`redact.hpp`](../main/logic/redact.hpp) | [HTTP server](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/protocols/esp_http_server.html) |
-| U13 | HTTP client, TLS and certificate bundle | ✅ Direct + 🧩 Backend | `esp_http_client`, `esp-tls` | HTTPS OTA/weather downloads, verified public-root TLS transport and public socket access for joined header/body deadline enforcement after open | [`ota_update.cpp`](../main/ota_update.cpp), [`weather_forecast.cpp`](../main/weather_forecast.cpp), [`http_deadline.cpp`](../main/http_deadline.cpp) | [HTTP client](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/protocols/esp_http_client.html), [ESP-TLS](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/protocols/esp_tls.html), [certificate bundle](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/protocols/esp_crt_bundle.html) |
+| U12 | HTTP server | ✅ Direct | `esp_http_server` | 10 KiB worker with 2 KiB ELF path reserve; LAN/API and restricted AP, typed bounded ingress/streams, redaction and async OTA request ownership. Receive budgets are 30 s normally or 300 s for admitted dev uploads, plus one five-second receive | [`http_server.cpp`](../main/http_server.cpp), [`http_common.cpp`](../main/http_common.cpp), [`http_ota.cpp`](../main/http_ota.cpp), [`redact.hpp`](../main/logic/redact.hpp), [`sdkconfig.defaults`](../sdkconfig.defaults) | [HTTP server](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/protocols/esp_http_server.html) |
+| U13 | HTTP client, TLS and certificate bundle | ✅ Direct + 🧩 Backend | `esp_http_client`, `esp-tls` | HTTPS OTA/weather downloads, verified public-root TLS transport and public socket access for joined header/body deadline enforcement after open | [`ota_update.cpp`](../main/ota_update.cpp), [`weather_forecast.cpp`](../main/weather_forecast.cpp), [`http_deadline.cpp`](../main/http_deadline.cpp), [`sdkconfig.defaults`](../sdkconfig.defaults) | [HTTP client](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/protocols/esp_http_client.html), [ESP-TLS](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/protocols/esp_tls.html), [certificate bundle](https://docs.espressif.com/projects/esp-idf/en/v6.1.1/esp32s3/api-reference/protocols/esp_crt_bundle.html) |
 | U14 | MQTT client | ✅ Direct + 📦 Managed | `mqtt`, `espressif/mqtt` | Checked callbacks, bounded recovery/queues, retained ownership admission, expiring proofs and PUBACK/expiry retirement | [`mqtt_ha.cpp`](../main/mqtt_ha.cpp), [`mqtt_discovery_owner.hpp`](../main/logic/mqtt_discovery_owner.hpp), [`mqtt_cleanup.hpp`](../main/logic/mqtt_cleanup.hpp), [`sdkconfig.defaults`](../sdkconfig.defaults), [`idf_component.yml`](../main/idf_component.yml) | [ESP-MQTT component](https://components.espressif.com/components/espressif/mqtt) |
 | U15 | Multicast DNS | ✅ Direct + 📦 Managed | `mdns`, `espressif/mdns` | Device HTTP service advertisement and bounded one-shot HomeHub discovery; the unused interactive console and continuous browse daemon are omitted | [`net.cpp`](../main/net.cpp), [`hp_modbus.cpp`](../main/hp_modbus.cpp), [`sdkconfig.defaults`](../sdkconfig.defaults) | [mDNS component](https://components.espressif.com/components/espressif/mdns) |
 | U16 | cJSON | ✅ Direct + 📦 Managed | `espressif/cjson` | Depth-16, single-document config/MQTT/weather parsing; large output remains streamed | [`json_guard.hpp`](../main/json_guard.hpp), [`logic/payload_complete.hpp`](../main/logic/payload_complete.hpp), [`weather_forecast.cpp`](../main/weather_forecast.cpp) | [cJSON component](https://components.espressif.com/components/espressif/cjson) |
@@ -132,18 +132,21 @@ to a used feature row.
 | `CONFIG_LWIP_MAX_SOCKETS` | `16` | U10 |
 | `CONFIG_LWIP_DHCP_DISABLE_VENDOR_CLASS_ID` | `n` | U10 |
 | `CONFIG_LWIP_DHCP_OPTIONS_LEN` | `109` | U10 |
+| `CONFIG_LWIP_DHCPS_STATIC_ENTRIES` | `n` | U10 |
 | `CONFIG_LWIP_TCP_SND_BUF_DEFAULT` | `5760` | U10 |
 | `CONFIG_LWIP_TCP_WND_DEFAULT` | `11520` | U10 |
 | `CONFIG_ESP_MAIN_TASK_STACK_SIZE` | `6144` | U02 |
 | `CONFIG_FREERTOS_WATCHPOINT_END_OF_STACK` | `y` | U02 |
 | `CONFIG_LOG_DEFAULT_LEVEL_INFO` | `y` | U03 |
+| `CONFIG_LOG_TAG_LEVEL_IMPL_NONE` | `y` | U03 |
+| `CONFIG_VFS_SUPPORT_DIR` | `n` | U03 |
 | `CONFIG_HTTPD_WS_SUPPORT` | `n` | U12 |
+| `CONFIG_HTTPD_ENABLE_EVENTS` | `n` | U12 |
 | `CONFIG_COMPILER_OPTIMIZATION_SIZE` | `y` | U01 |
 | `CONFIG_MBEDTLS_ERROR_STRINGS` | `n` | U18 |
 | `CONFIG_MBEDTLS_TLS_CLIENT_ONLY` | `y` | U18 |
 | `CONFIG_MBEDTLS_CLIENT_SSL_SESSION_TICKETS` | `n` | U18 |
 | `CONFIG_MBEDTLS_SERVER_SSL_SESSION_TICKETS` | `n` | U18 |
-| `CONFIG_MBEDTLS_FS_IO` | `n` | U18 |
 | `CONFIG_MBEDTLS_AES_FEWER_TABLES` | `y` | U18 |
 | `CONFIG_MBEDTLS_CIPHER_MODE_CFB` | `n` | U18 |
 | `CONFIG_MBEDTLS_CIPHER_MODE_OFB` | `n` | U18 |
@@ -157,6 +160,13 @@ to a used feature row.
 | `CONFIG_MBEDTLS_ECP_DP_BP256R1_ENABLED` | `n` | U18 |
 | `CONFIG_MBEDTLS_ECP_DP_BP384R1_ENABLED` | `n` | U18 |
 | `CONFIG_MBEDTLS_ECP_DP_BP512R1_ENABLED` | `n` | U18 |
+| `CONFIG_MBEDTLS_VERSION_C` | `n` | U18 |
+| `CONFIG_MBEDTLS_SELF_TEST` | `n` | U18 |
+| `CONFIG_MBEDTLS_PEM_WRITE_C` | `n` | U18 |
+| `CONFIG_MBEDTLS_X509_CSR_PARSE_C` | `n` | U18 |
+| `CONFIG_MBEDTLS_SSL_CACHE_C` | `n` | U18 |
+| `CONFIG_MBEDTLS_HARDWARE_RSA_DS_PERIPHERAL` | `n` | U18 |
+| `CONFIG_ESP_TLS_USE_DS_PERIPHERAL` | `n` | U13 |
 | `CONFIG_MBEDTLS_DYNAMIC_BUFFER` | `y` | U18 |
 | `CONFIG_MBEDTLS_DYNAMIC_FREE_CONFIG_DATA` | `n` | U18 |
 | `CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_CMN` | `y` | U13 |
@@ -167,12 +177,17 @@ to a used feature row.
 | `CONFIG_ESP_WIFI_ENABLE_SAE_PK` | `n` | U08 |
 | `CONFIG_ESP_WIFI_SOFTAP_SAE_SUPPORT` | `n` | U08 |
 | `CONFIG_ESP_WIFI_ENTERPRISE_SUPPORT` | `n` | U08 |
+| `CONFIG_ESP_WIFI_GMAC_SUPPORT` | `n` | U08 |
+| `CONFIG_ESP_PHY_ENABLE_VERSION_PRINT` | `n` | U08 |
 | `CONFIG_MDNS_ENABLE_CONSOLE_CLI` | `n` | U15 |
 | `CONFIG_MDNS_ENABLE_BROWSE` | `n` | U15 |
+| `CONFIG_MDNS_MULTIPLE_INSTANCE` | `n` | U15 |
+| `CONFIG_MDNS_PREDEF_NETIF_AP` | `n` | U15 |
 | `CONFIG_MDNS_ACTION_QUEUE_LEN` | `8` | U15 |
 | `CONFIG_COMPILER_CXX_EXCEPTIONS` | `y` | U01 |
 | `CONFIG_ESP_COREDUMP_ENABLE` | `y` | U07 |
 | `CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH` | `y` | U07 |
+| `CONFIG_ESP_COREDUMP_LOGS` | `n` | U07 |
 | `CONFIG_ESP_TASK_WDT_EN` | `y` | U04 |
 | `CONFIG_ESP_TASK_WDT_INIT` | `y` | U04 |
 | `CONFIG_ESP_TASK_WDT_TIMEOUT_S` | `20` | U04 |

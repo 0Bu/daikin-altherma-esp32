@@ -1,4 +1,4 @@
-// translation-source: 42a4d77a832a12c84359f017fdcacdd939405dc965a062a922c2d18aafa2ff0e
+// translation-source: d65d3b16aadf37eb87ecbe27037b388b04d755399b25c0257655dd6a6be12909
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -261,6 +261,21 @@ I18N.cs = localeValues([
   /* check.fault_none */ "Nic není aktivní",
   /* check.fault_unknown */ "Neznámý",
   /* check.fault_past_unknown */ "Dříve · stav neznámý",
+  /* check.fault_since_short */ (d) => `už ${d}`,
+  /* check.fault_ago_short */ (d) => `před ${d}`,
+  /* check.fault_hero_ok */ (d) => `Během ${d} ze 24 h pozorování nebyla hlášena žádná porucha ani varování.`,
+  /* check.fault_latched_only */ "Tepelné čerpadlo hlásí uložený příznak poruchy; do zaznamenaného 24h okna nespadla žádná časově určená epizoda.",
+  /* check.fault_unit_outdoor */ "Venkovní jednotka",
+  /* check.fault_unit_indoor */ "Vnitřní jednotka",
+  /* check.fault_unit_both */ "Venkovní + vnitřní",
+  /* check.fault_secondary */ (s) => `Současně aktivní: ${s}`,
+  /* check.fault_stop_ongoing */ "aktivní",
+  /* check.fault_stop_unknown */ "nejasné",
+  /* check.fault_col_code */ "Kód",
+  /* check.fault_col_meaning */ "Význam",
+  /* check.fault_ok_label */ "Bez poruchy",
+  /* check.fault_gap_label */ "Neměřeno",
+  /* check.fault_severity_caution */ "Upozornění",
   /* check.retry_seen */ "Nárůst",
   /* check.retry_none */ "Bez nárůstu",
   /* service.metric.comp */ "Kompresor",
@@ -1255,7 +1270,7 @@ DESCRIPTION_I18N.cs = descriptionValues([
 ]);
 
 MODEL_DESCRIPTION_I18N.cs = modelDescriptionValues([
-  ["Hlášení čerpadla", "neprokazují příčinu ani opravu."], // health_fault
+  ["Zobrazuje chybové a výstražné kódy hlášené tepelným čerpadlem; krátké popisy jsou obecné pokyny Daikin a zmizení kódu neprokazuje odstranění příčiny."], // health_fault
   ["R5T: bod vrstveného zásobníku, ne energie.", "Interní práh ≥0,8 K/h bez značek čerpadla/odběru. Odběr možný i bez značek; 0 K/h nevylučuje ztráty. Cirkulace neprokazuje příčinu."], // health_dhw_loss
   ["Při výpadcích měření mohou některé starty chybět.", "Pevný běžný počet startů neexistuje. Při dostatku dat tato kontrola považuje průměrnou délku dokončených cyklů vytápění alespoň 10 minut za dostatečnou."], // health_cycling
   ["Odmrazení", "≥3 spárovaná, >15% doby chodu kompresoru při čitelném stavu kompresoru i odmrazení. Interní pravidlo, ne Daikin; chybí vlhkost a teplota celého výměníku."], // health_defrost

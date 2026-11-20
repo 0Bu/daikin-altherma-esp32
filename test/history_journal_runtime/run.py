@@ -230,11 +230,25 @@ if not args.expect_red:
     transport_evidence.append({"path": str(mb_transport), "sha256": digest(mb_transport),
                                "bytes": mb_transport.stat().st_size,
                                "only_cross_process_state": "synthetic NOR partition bytes"})
+    fault_transport = OUT / "fault-trace.synthetic-nor.bin"
+    for case in ["seed_fault_journal", "restore_fault_journal", "verify_fault_barrier_journal"]:
+        result = execute(baseline, case, case, [fault_transport])
+        expected = result.returncode == 0 and "PASS case=" + case + " " in result.stdout
+        results.append({"case": case, "exit_code": result.returncode,
+                        "stdout": result.stdout, "stderr": result.stderr, "pass": expected})
+        print(result.stdout, end="", flush=True)
+        if not expected:
+            (OUT / "failure.json").write_text(json.dumps(results[-1], indent=2) + "\n")
+            raise RuntimeError("Unexpected fault journal outcome: " + case)
+    transport_evidence.append({"path": str(fault_transport), "sha256": digest(fault_transport),
+                               "bytes": fault_transport.stat().st_size,
+                               "only_cross_process_state": "synthetic NOR partition bytes"})
 unknowns = []
 for case in ["unknown_case", "data_unknown", "barrier_unknown",
              "seed_late_correction", "restore_late_correction",
              "seed_modbus_checkup_journal", "restore_modbus_checkup_journal",
-             "verify_modbus_barrier_journal"]:
+             "verify_modbus_barrier_journal",
+             "seed_fault_journal", "restore_fault_journal", "verify_fault_barrier_journal"]:
     result = execute(baseline, case, case)
     ok = oracle_failed(result, case, "unknown_case")
     unknowns.append({"case": case, "pass": ok})

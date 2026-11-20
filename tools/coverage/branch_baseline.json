@@ -2128,6 +2128,24 @@
       },
       "test_source_sha256": "626265734d4ec9e3adc6d0b78d977f4139fe97a331c6003fdf972c4303d07fb0",
       "validation_boundary": "Compilers exercised synthetic inputs. The result does not establish hardware SRAM2 headroom."
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2)",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+        "gcc-15-github-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+      },
+      "hosted_confirmation": "Measured locally across Apple Clang 17 arm64, GCC 13 Ubuntu 24.04 arm64, and GCC 15 Ubuntu 26.04 x86-64 coverage Docker; authoritative GitHub CI confirmation remains separate.",
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "scope": "Second-resolution 24h CheckupFaultTrace state transitions, secondary faults, subcode formatting, latest-episode extraction, and single-page 256 B FLT1/FLR1/FLM1/FMB1 fault persistence codec in fault_trace.hpp, fault_persist.hpp, and history_persist.hpp.",
+      "sources": {
+        "main/logic/fault_persist.hpp": "cf70393cc8dbf22e3ad141ba48bf254d1ad2ed49753c53fedaa0a5ee5f6311f2",
+        "main/logic/fault_trace.hpp": "1be0e8384882e77d8383031ff21b5281f2ec334d0ac9fa6ca12ba71d474bf622",
+        "main/logic/history_persist.hpp": "19e7ebd7794f4748580e000df1fa7bb2deebe89e22ba1efbde5641f4db9ab0be"
+      },
+      "test_source_sha256": "ec62280cb41722bac04d8c64bf70e1f719ff4cff3e454a2151933f65df7c4005",
+      "validation_boundary": "Host and container compilers exercised synthetic inputs. Hardware and UI behavior remain separate evidence."
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
@@ -2249,9 +2267,17 @@
         "outcomes": 12,
         "taken": 9
       },
+      "main/logic/fault_persist.hpp": {
+        "outcomes": 120,
+        "taken": 77
+      },
       "main/logic/fault_state.hpp": {
         "outcomes": 18,
         "taken": 18
+      },
+      "main/logic/fault_trace.hpp": {
+        "outcomes": 330,
+        "taken": 232
       },
       "main/logic/feature_gate.hpp": {
         "outcomes": 34,
@@ -2699,9 +2725,17 @@
         "outcomes": 14,
         "taken": 10
       },
+      "main/logic/fault_persist.hpp": {
+        "outcomes": 142,
+        "taken": 92
+      },
       "main/logic/fault_state.hpp": {
         "outcomes": 20,
         "taken": 20
+      },
+      "main/logic/fault_trace.hpp": {
+        "outcomes": 358,
+        "taken": 248
       },
       "main/logic/feature_gate.hpp": {
         "outcomes": 38,
@@ -3149,9 +3183,17 @@
         "outcomes": 14,
         "taken": 10
       },
+      "main/logic/fault_persist.hpp": {
+        "outcomes": 142,
+        "taken": 92
+      },
       "main/logic/fault_state.hpp": {
         "outcomes": 20,
         "taken": 20
+      },
+      "main/logic/fault_trace.hpp": {
+        "outcomes": 358,
+        "taken": 248
       },
       "main/logic/feature_gate.hpp": {
         "outcomes": 38,
@@ -3599,9 +3641,17 @@
         "outcomes": 14,
         "taken": 10
       },
+      "main/logic/fault_persist.hpp": {
+        "outcomes": 142,
+        "taken": 92
+      },
       "main/logic/fault_state.hpp": {
         "outcomes": 20,
         "taken": 20
+      },
+      "main/logic/fault_trace.hpp": {
+        "outcomes": 358,
+        "taken": 248
       },
       "main/logic/feature_gate.hpp": {
         "outcomes": 38,

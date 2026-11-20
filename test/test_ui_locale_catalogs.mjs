@@ -62,7 +62,7 @@ const lazyDomainCodes = ["es", "fr", "it", "pl", "cs", "uk", "zh", "ja", "nb", "
 const annotatedDomainCodes = ["zh", "ja", "nb", "sv", "fi"];
 const englishKeys = Object.keys(catalog.en).sort();
 const englishKeyOrder = Object.keys(catalog.en);
-assert.equal(englishKeys.length, 998, "the test must track the complete current UI catalog");
+assert.equal(englishKeys.length, 1013, "the test must track the complete current UI catalog");
 for (const [code, source] of localeSources) {
   const sections = [`INSPECT_I18N.${code}`, `MODEL_DESCRIPTION_I18N.${code}`]
     .map(marker => source.indexOf(marker)).filter(index => index >= 0);
@@ -355,6 +355,8 @@ assert.deepEqual([...sourceAssignment(localeSources.get("de"), "MODEL_DESCRIPTIO
   "German model-copy comments must preserve the canonical key order");
 checkLocalizedRows("de", Object.values(catalogContext.__modelDescriptionCopy.de),
   Object.values(modelSchema), "model-description");
+assert.equal(catalogContext.__modelDescriptionCopy.de.health_fault.length, 1,
+  "de health_fault must not retain a generic normal sentence");
 assert.equal(vm.runInContext("localeReady('de')", catalogContext), true);
 assert.equal(vm.runInContext(`(() => {
   const saved = MODEL_DESCRIPTION_I18N.de;
@@ -393,6 +395,8 @@ for (const code of codes.slice(2)) {
   const modelCopy = catalogContext.__modelDescriptionCopy[code] || {};
   const modelRows = Object.values(modelCopy);
   checkLocalizedRows(code, modelRows, Object.values(modelSchema), "model-description");
+  assert.equal(modelCopy.health_fault.length, 1,
+    `${code} health_fault must not retain a generic normal sentence`);
   const joined = (id) => modelCopy[id].join(" ");
   assert.match(joined("health_dhw_loss"), /0[,.]8/, `${code} loses the 0.8 K/h project threshold`);
   assert.doesNotMatch(joined("health_dhw_loss"), /1[,.]85/,

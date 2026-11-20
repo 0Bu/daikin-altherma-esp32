@@ -5,10 +5,16 @@
 #include "logic/diag_tail.hpp"
 #include <cstddef>
 
+#ifdef ESP_PLATFORM
+#define DAIK_DIAG_NOTHROW noexcept
+#else
+#define DAIK_DIAG_NOTHROW
+#endif
+
 namespace daik {
 
 void   diag_log_init();
-void   diag_printf(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
+void   diag_printf(const char* fmt, ...) DAIK_DIAG_NOTHROW __attribute__((format(printf, 1, 2)));
 void   diag_set_verbose(bool on);
 bool   diag_verbose();
 // Copy up to `max` bytes of the ring (oldest→newest) into out; returns bytes written.

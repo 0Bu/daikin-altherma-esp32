@@ -1,4 +1,4 @@
-// translation-source: 42a4d77a832a12c84359f017fdcacdd939405dc965a062a922c2d18aafa2ff0e
+// translation-source: d65d3b16aadf37eb87ecbe27037b388b04d755399b25c0257655dd6a6be12909
 I18N.uk = localeValues([
   /* sys.nodata */ "Немає даних",
   /* sys.unreachable */ "Недоступно",
@@ -261,6 +261,21 @@ I18N.uk = localeValues([
   /* check.fault_none */ "Активних немає",
   /* check.fault_unknown */ "Невідомо",
   /* check.fault_past_unknown */ "Була · стан невідомий",
+  /* check.fault_since_short */ (d) => `вже ${d}`,
+  /* check.fault_ago_short */ (d) => `${d} тому`,
+  /* check.fault_hero_ok */ (d) => `За ${d} з 24 год спостереження несправностей чи попереджень не зафіксовано.`,
+  /* check.fault_latched_only */ "Тепловий насос повідомляє збережений прапорець несправності; жоден епізод із міткою часу не потрапив у записане 24-год вікно.",
+  /* check.fault_unit_outdoor */ "Зовнішній блок",
+  /* check.fault_unit_indoor */ "Внутрішній блок",
+  /* check.fault_unit_both */ "Зовнішній + внутрішній",
+  /* check.fault_secondary */ (s) => `Також активне: ${s}`,
+  /* check.fault_stop_ongoing */ "активна",
+  /* check.fault_stop_unknown */ "неясно",
+  /* check.fault_col_code */ "Код",
+  /* check.fault_col_meaning */ "Значення",
+  /* check.fault_ok_label */ "Без несправностей",
+  /* check.fault_gap_label */ "Без виміру",
+  /* check.fault_severity_caution */ "Застереження",
   /* check.retry_seen */ "Зростання",
   /* check.retry_none */ "Без зростання",
   /* service.metric.comp */ "Компресор",
@@ -1255,7 +1270,7 @@ DESCRIPTION_I18N.uk = descriptionValues([
 ]);
 
 MODEL_DESCRIPTION_I18N.uk = modelDescriptionValues([
-  ["Повідомлення насоса", "не доводять причину чи усунення."], // health_fault
+  ["Показує коди помилок і попереджень, про які повідомляє тепловий насос; короткі описи є загальними підказками Daikin, а зникнення коду не доводить усунення причини."], // health_fault
   ["R5T: точка стратифікованого бака, не енергія.", "Поріг проєкту ≥0,8 K/h без позначок насоса/водорозбору. Водорозбір можливий і без позначок; 0 K/h не виключає втрат. Циркуляція не доводить причини."], // health_dhw_loss
   ["Через пропуски вимірювань деякі запуски можуть залишитися неврахованими.", "Фіксованої норми кількості запусків немає. За достатньої кількості даних ця перевірка вважає середню тривалість завершених циклів опалення від 10 хвилин достатньою."], // health_cycling
   ["Розморожування", "≥3 пов’язані, >15% часу роботи компресора з читабельними станами компресора й розморожування. Правило проєкту, не Daikin; немає вологості й температури всього теплообмінника."], // health_defrost

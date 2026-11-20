@@ -1155,16 +1155,22 @@ const FAULT_CODE_UNKNOWN = Object.freeze({
   en: "No short explanation is stored for this code.",
   de: "Keine Kurzbeschreibung für diesen Code hinterlegt.",
 });
+function faultCodeMeaning(baseCode) {
+  const code = String(baseCode == null ? "" : baseCode).trim().toUpperCase().split("-")[0];
+  if (!/^[0-9A-Z]{2}$/.test(code)) return "";
+  const localePack = FAULT_CODE_I18N[LANG];
+  const index = DAIKIN_FAULT_CODES.findIndex((candidate) => candidate.code === code);
+  const entry = index >= 0 ? DAIKIN_FAULT_CODES[index] : null;
+  return entry ? (localePack?.values[index] || entry[LANG] || entry.en)
+               : (localePack?.unknown || FAULT_CODE_UNKNOWN[LANG] || FAULT_CODE_UNKNOWN.en);
+}
 function faultCodeDetailHtml(currentValue) {
   const raw = String(currentValue == null ? "" : currentValue).trim();
   const match = raw.match(/^([0-9A-Z]{2})(?=$|[:\s-])/i);
   const localePack = FAULT_CODE_I18N[LANG];
   if (!match) return descParaHtml(esc(localePack?.none || FAULT_CODE_NONE[LANG] || FAULT_CODE_NONE.en));
   const code = match[1].toUpperCase();
-  const index = DAIKIN_FAULT_CODES.findIndex((candidate) => candidate.code === code);
-  const entry = index >= 0 ? DAIKIN_FAULT_CODES[index] : null;
-  const meaning = entry ? (localePack?.values[index] || entry[LANG] || entry.en)
-                        : (localePack?.unknown || FAULT_CODE_UNKNOWN[LANG] || FAULT_CODE_UNKNOWN.en);
+  const meaning = faultCodeMeaning(code);
   return `<div class="fault-code-current"><code>${esc(code)}</code><span>${esc(meaning)}</span></div>`;
 }
 

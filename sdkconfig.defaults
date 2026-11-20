@@ -92,6 +92,7 @@ CONFIG_LWIP_MAX_SOCKETS=16
 # check-sdkconfig-defaults.py can then prove that a generated config has room for the added option.
 CONFIG_LWIP_DHCP_DISABLE_VENDOR_CLASS_ID=n
 CONFIG_LWIP_DHCP_OPTIONS_LEN=109
+CONFIG_LWIP_DHCPS_STATIC_ENTRIES=n
 
 # LWIP TCP windows — double the default send/receive windows (8xMSS).  The dashboard has a strict
 # gzip build limit (UI_GZIP_MAX_BYTES); reducing the artefact is safer than growing
@@ -116,6 +117,10 @@ CONFIG_FREERTOS_WATCHPOINT_END_OF_STACK=y
 
 # Logging
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+CONFIG_LOG_TAG_LEVEL_IMPL_NONE=y
+# No filesystem directories: certs/keys use CA bundle and NVS, so MBEDTLS_FS_IO is also omitted.
+CONFIG_VFS_SUPPORT_DIR=n
+CONFIG_ESP_PHY_ENABLE_VERSION_PRINT=n
 
 # WebSockets support: OFF, and stated explicitly rather than left to the Kconfig default, because
 # this firmware DELIBERATELY has no live-push surface. The web UI polls /status and /values; the
@@ -125,6 +130,7 @@ CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 # CONFIG_HTTPD_QUEUE_WORK_BLOCKING (added as the legacy-238 backstop) is gone with it — an inert setting
 # reads as a live safeguard.
 CONFIG_HTTPD_WS_SUPPORT=n
+CONFIG_HTTPD_ENABLE_EVENTS=n
 
 # ── Firmware size reduction ──
 # Optimize the release image for size. The complete host suite plus the signed hardware acceptance
@@ -142,8 +148,6 @@ CONFIG_MBEDTLS_TLS_CLIENT_ONLY=y
 # long-lived connections where resumption buys nothing. ~1.8 KB.
 CONFIG_MBEDTLS_CLIENT_SSL_SESSION_TICKETS=n
 CONFIG_MBEDTLS_SERVER_SSL_SESSION_TICKETS=n
-# No filesystem: certs/keys come from the CA bundle and NVS, never a VFS path. ~1.2 KB.
-CONFIG_MBEDTLS_FS_IO=n
 # Unused mbedTLS block modes, CRL/encrypted-key/explicit-EC parsing, full software AES tables,
 # optional TLS alert/MFLN extensions, and non-WebPKI curves: TLS 1.2 and WPA2/WPA3 use
 # GCM/CCM/CBC/ECB/CMAC with ESP32-S3 hardware AES and dynamic record buffers, esp_crt_bundle uses
@@ -163,6 +167,13 @@ CONFIG_MBEDTLS_ECP_DP_SECP256K1_ENABLED=n
 CONFIG_MBEDTLS_ECP_DP_BP256R1_ENABLED=n
 CONFIG_MBEDTLS_ECP_DP_BP384R1_ENABLED=n
 CONFIG_MBEDTLS_ECP_DP_BP512R1_ENABLED=n
+CONFIG_MBEDTLS_VERSION_C=n
+CONFIG_MBEDTLS_SELF_TEST=n
+CONFIG_MBEDTLS_PEM_WRITE_C=n
+CONFIG_MBEDTLS_X509_CSR_PARSE_C=n
+CONFIG_MBEDTLS_SSL_CACHE_C=n
+CONFIG_MBEDTLS_HARDWARE_RSA_DS_PERIPHERAL=n
+CONFIG_ESP_TLS_USE_DS_PERIPHERAL=n
 # Keep CA verification for MQTTS, OTA and forecasts, but use ESP-IDF's common-root subset. It
 # retains roughly 99% public-root coverage at about half the flash cost of the full Mozilla set;
 # brokers chained only to a rare excluded root need a certificate chain rooted in this subset.
@@ -191,14 +202,17 @@ CONFIG_ESP_WIFI_ENABLE_WPA3_OWE_SOFTAP=n
 CONFIG_ESP_WIFI_ENABLE_SAE_PK=n
 CONFIG_ESP_WIFI_SOFTAP_SAE_SUPPORT=n
 # Provisioning stores a PSK station only; no path configures an EAP identity, certificate or
-# WPA2/WPA3-Enterprise network, so the supplicant's enterprise methods are unreachable.
+# WPA2/WPA3-Enterprise network, so the supplicant's enterprise and Suite-B GMAC paths are unreachable.
 CONFIG_ESP_WIFI_ENTERPRISE_SUPPORT=n
+CONFIG_ESP_WIFI_GMAC_SUPPORT=n
 
 # The HomeHub lookup uses bounded one-shot mdns_query_ptr calls. It never registers the component's
 # interactive console or continuous mdns_browse_* daemon, so keep those optional 1.12.0 paths out of
 # the firmware while retaining service advertisement and one-shot queries.
 CONFIG_MDNS_ENABLE_CONSOLE_CLI=n
 CONFIG_MDNS_ENABLE_BROWSE=n
+CONFIG_MDNS_MULTIPLE_INSTANCE=n
+CONFIG_MDNS_PREDEF_NETIF_AP=n
 # The mDNS task runs at priority 1 and keeps every received packet, together with its WiFi RX
 # buffer, in this action queue until it gets the CPU. A higher-priority task that computes for
 # seconds (Weather's TLS certificate verification takes ~2.7 s) therefore filled the default
@@ -224,6 +238,7 @@ CONFIG_COMPILER_CXX_EXCEPTIONS=y
 # while doing nothing.
 CONFIG_ESP_COREDUMP_ENABLE=y
 CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+CONFIG_ESP_COREDUMP_LOGS=n
 
 # ── Task Watchdog Timer (TWDT) ──
 # Turn a genuinely-wedged worker task into a clean, automatic REBOOT instead of a silent hang. The

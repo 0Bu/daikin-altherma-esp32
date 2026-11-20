@@ -5,6 +5,7 @@
 #include "checkup.hpp"                // fourth journal source: exact hourly diagnostic buckets
 #include "stop_observation_store.hpp" // independent logical hourly source, same physical envelope
 #include "logic/cycling_persist.hpp"
+#include "logic/fault_persist.hpp"
 #include "config.hpp"
 #include "diag_log.hpp"
 #include "def/homehub.hpp"
@@ -806,7 +807,9 @@ constexpr size_t kStopObservationSource    = kJournalSources;
 constexpr size_t kCyclingTraceSource       = kJournalSources + 1;
 constexpr size_t kCheckupModbusSource      = kJournalSources + 2;
 constexpr size_t kCyclingModbusTraceSource = kJournalSources + 3;
-constexpr size_t kJournalServiceSources    = kJournalSources + 4;
+constexpr size_t kFaultTraceSource         = kJournalSources + 4;
+constexpr size_t kFaultModbusTraceSource   = kJournalSources + 5;
+constexpr size_t kJournalServiceSources    = kJournalSources + 6;
 constexpr size_t kRestoreRingsPerTick = 4;
 
 // Flash-lock owned. Restore and append staging are mutually exclusive per source stream.
@@ -868,6 +871,45 @@ struct CyclingFlashStream {
 
 CyclingFlashStream s_flash_cycling{};
 CyclingFlashStream s_flash_cycling_modbus{};
+
+constexpr size_t         kFaultTracePages = 8;
+logic::CheckupFaultTrace s_flash_fault_trace{};
+CyclingTraceOwner        s_flash_fault_trace_owner = CyclingTraceOwner::None;
+
+struct FaultFlashStream {
+    CyclingFinalPage            pages[kFaultTracePages]{};
+    logic::CyclingTraceIdentity identity{};
+    uint64_t                    fence            = 0;
+    int64_t                     last_offer_us    = 0;
+    uint32_t                    reset_token      = 0;
+    size_t                      restore_index    = 0;
+    bool                        has_offer        = false;
+    bool                        restore_done     = false;
+    bool                        decoded          = false;
+    bool                        pending          = false;
+    bool                        shutdown_offered = false;
+
+    void reset_for_scan() {
+        for (auto& p : pages) p = {};
+        fence = 0;
+    }
+
+    void reset_after_forget() {
+        reset_for_scan();
+        identity         = {};
+        last_offer_us    = 0;
+        reset_token      = 0;
+        restore_index    = 0;
+        has_offer        = false;
+        restore_done     = true;
+        decoded          = false;
+        pending          = false;
+        shutdown_offered = false;
+    }
+};
+
+FaultFlashStream s_flash_fault{};
+FaultFlashStream s_flash_fault_modbus{};
 
 struct CheckupModbusFlashState {
     int64_t                    last_bucket                                     = INT64_MIN;
@@ -1038,7 +1080,7 @@ void history_start() {
     // adopted. app_main calls this ahead of hp_poll_start()/mqtt_start(), which is what makes the
     // whole decision single-threaded and lock-free.
     const uint32_t want_fp = logic::history_catalog_fingerprint();
-    const Config& boot_config = config();
+    const Config&  boot_config = config();
     s_x10a_target_fp.store(boot_config.x10a_identity_fp);
     const uint32_t want_mb_target_fp = current_mb_target_fp(boot_config);
     s_mb_target_fp.store(want_mb_target_fp);
@@ -2248,6 +2290,22 @@ bool flash_cycling_owned(const logic::HistoryJournalHeader& h) {
     return flash_x10a_cycling_owned(h) || flash_modbus_cycling_owned(h);
 }
 
+bool flash_x10a_fault_owned(const logic::HistoryJournalHeader& h) {
+    return h.source == static_cast<uint8_t>(logic::HistoryJournalSource::Checkup) &&
+           (h.catalog_fp == logic::FAULT_TRACE_SCHEMA ||
+            h.catalog_fp == logic::FAULT_TRACE_BARRIER_SCHEMA);
+}
+
+bool flash_modbus_fault_owned(const logic::HistoryJournalHeader& h) {
+    return h.source == static_cast<uint8_t>(logic::HistoryJournalSource::Checkup) &&
+           (h.catalog_fp == logic::FAULT_MODBUS_TRACE_SCHEMA ||
+            h.catalog_fp == logic::FAULT_MODBUS_TRACE_BARRIER_SCHEMA);
+}
+
+bool flash_fault_owned(const logic::HistoryJournalHeader& h) {
+    return flash_x10a_fault_owned(h) || flash_modbus_fault_owned(h);
+}
+
 bool flash_modbus_checkup_owned(const logic::HistoryJournalHeader& h) {
     return h.source == static_cast<uint8_t>(logic::HistoryJournalSource::Checkup) &&
            logic::history_journal_header_matches(
@@ -2261,7 +2319,7 @@ bool flash_record_valid(const FlashJournalRecord& r) {
     if (flash_is_manifest(h)) return false;
     // Its physical envelope remains visible to older head discovery, but these bytes can never
     // reach core Checkup restore/append handlers or share their cursor.
-    if (logic::observation_header_matches(h) || flash_cycling_owned(h) ||
+    if (logic::observation_header_matches(h) || flash_cycling_owned(h) || flash_fault_owned(h) ||
         flash_modbus_checkup_owned(h))
         return false;
     if (h.source == static_cast<uint8_t>(logic::HistoryJournalSource::Checkup))
@@ -2376,6 +2434,58 @@ bool flash_decode_cycling_group(CyclingFlashStream& cs, const CyclingFinalPage& 
     return true;
 }
 
+bool flash_fault_page_for(const FlashJournalRecord& r, logic::FaultTracePageInfo& page,
+                          bool is_modbus) {
+    if (!logic::fault_trace_header_matches(r.header, is_modbus) ||
+        r.header.crc !=
+            logic::history_journal_crc_bytes(r.header, r.payload, logic::FAULT_TRACE_PAGE_BYTES))
+        return false;
+    std::memcpy(&page, r.payload, sizeof(page));
+    return logic::fault_trace_page_valid(r.header, page, is_modbus);
+}
+
+void flash_index_fault_page(const FlashJournalRecord& r, uint16_t slot) {
+    const auto& h         = r.header;
+    const bool  is_modbus = flash_modbus_fault_owned(h);
+    if (!is_modbus && !flash_x10a_fault_owned(h)) return;
+    FaultFlashStream& cs = is_modbus ? s_flash_fault_modbus : s_flash_fault;
+    const uint32_t    barrier_schema =
+        is_modbus ? logic::FAULT_MODBUS_TRACE_BARRIER_SCHEMA : logic::FAULT_TRACE_BARRIER_SCHEMA;
+    if (h.catalog_fp == barrier_schema) {
+        if (h.magic == logic::HISTORY_JOURNAL_MAGIC &&
+            h.commit == logic::HISTORY_JOURNAL_COMMITTED && h.sequence > cs.fence)
+            cs.fence = h.sequence;
+        return;
+    }
+    logic::FaultTracePageInfo page;
+    if (!flash_fault_page_for(r, page, is_modbus)) return;
+    for (size_t i = 0; i < kFaultTracePages; ++i) {
+        if (h.sequence < cs.pages[i].sequence) continue;
+        if (h.sequence == cs.pages[i].sequence) return;
+        for (size_t j = kFaultTracePages - 1; j > i; --j) cs.pages[j] = cs.pages[j - 1];
+        cs.pages[i] = {h.sequence, slot};
+        return;
+    }
+}
+
+bool flash_decode_fault_page(FaultFlashStream& cs, const CyclingFinalPage& indexed,
+                             bool is_modbus) {
+    const uint32_t schema =
+        is_modbus ? logic::FAULT_MODBUS_TRACE_SCHEMA : logic::FAULT_TRACE_SCHEMA;
+    auto&                     r = *new (s_flash_sector) FlashJournalRecord;
+    logic::FaultTracePageInfo page;
+    if (indexed.sequence <= cs.fence || flash_read_record(indexed.slot, r) != ESP_OK ||
+        r.header.sequence != indexed.sequence || r.header.catalog_fp != schema ||
+        !flash_fault_page_for(r, page, is_modbus))
+        return false;
+    auto& trace               = s_flash_fault_trace;
+    s_flash_fault_trace_owner = CyclingTraceOwner::None;
+    if (!logic::fault_trace_decode_page(trace, page, r.payload + sizeof(page))) return false;
+    cs.identity               = page.identity;
+    s_flash_fault_trace_owner = cycling_trace_owner_for(is_modbus);
+    return true;
+}
+
 bool flash_read_stop_observation(uint16_t slot, int64_t& bucket, uint64_t& sequence,
                                  logic::ObservationHourlyPayload& payload) {
     // Flash-owner only: this scratch has no live scan/restore view while an observation reader
@@ -2445,6 +2555,8 @@ bool flash_journal_scan() {
     stop_observation_flash_index_reset();
     s_flash_cycling.reset_for_scan();
     s_flash_cycling_modbus.reset_for_scan();
+    s_flash_fault.reset_for_scan();
+    s_flash_fault_modbus.reset_for_scan();
     s_flash_mb_checkup.reset_scan();
     for (size_t src = 0; src < kJournalSources; src++) {
         s_flash_last_bucket[src] = INT64_MIN;
@@ -2469,6 +2581,7 @@ bool flash_journal_scan() {
             std::memcpy(&r, raw, sizeof(r));
             flash_index_stop_observation_record(r, static_cast<uint16_t>(slot));
             flash_index_cycling_page(r, static_cast<uint16_t>(slot));
+            flash_index_fault_page(r, static_cast<uint16_t>(slot));
             if (!flash_record_physically_valid(r)) {
                 if (r.header.magic == logic::HISTORY_JOURNAL_MAGIC &&
                     r.header.commit == logic::HISTORY_JOURNAL_COMMITTED &&
@@ -2995,6 +3108,102 @@ void flash_cycling_appended(uint16_t slot, uint64_t sequence, bool is_modbus) {
                                                                       : DiagnosticsSource::X10a);
 }
 
+[[gnu::noinline]] bool flash_build_next_fault(FlashJournalRecord& out, TickType_t wait_ticks,
+                                              bool shutdown, bool is_modbus = false) {
+    FaultFlashStream&       cs    = is_modbus ? s_flash_fault_modbus : s_flash_fault;
+    const FaultFlashStream& other = is_modbus ? s_flash_fault : s_flash_fault_modbus;
+    const DiagnosticsSource diag_src =
+        is_modbus ? DiagnosticsSource::Modbus : DiagnosticsSource::X10a;
+    const bool reset_pending = checkup_fault_reset_pending(diag_src);
+    const bool restore_done  = s_flash_restore_done && cs.restore_done;
+    if (!restore_done && !reset_pending) return false;
+    if (cs.pending && !cs.reset_token && reset_pending) {
+        cs.pending = false;
+        if (s_flash_fault_trace_owner == cycling_trace_owner_for(is_modbus))
+            s_flash_fault_trace_owner = CyclingTraceOwner::None;
+    }
+    if (other.pending) return false;
+    const CyclingTraceOwner want_owner = cycling_trace_owner_for(is_modbus);
+    auto&                   trace      = s_flash_fault_trace;
+    if (cs.pending && s_flash_fault_trace_owner != want_owner) cs.pending = false;
+    if (!cs.pending) {
+        const int64_t now_us = esp_timer_get_time();
+        const bool    periodic_due =
+            restore_done &&
+            (shutdown
+                 ? !cs.shutdown_offered
+                 : (!cs.has_offer ||
+                    now_us - cs.last_offer_us >=
+                        static_cast<int64_t>(logic::HISTORY_FLASH_FAULT_INTERVAL_S) * 1000000LL));
+        const bool dirty_due = restore_done && !shutdown &&
+                               (!cs.has_offer || now_us - cs.last_offer_us >= 60LL * 1000000LL);
+        cs.reset_token            = 0;
+        s_flash_fault_trace_owner = CyclingTraceOwner::None;
+        if (!checkup_fault_checkpoint(trace, cs.identity, cs.reset_token, wait_ticks, periodic_due,
+                                      dirty_due, diag_src))
+            return false;
+        if (!cs.reset_token) {
+            cs.last_offer_us    = now_us;
+            cs.has_offer        = true;
+            cs.shutdown_offered = shutdown;
+        }
+        cs.pending                = true;
+        s_flash_fault_trace_owner = want_owner;
+    }
+
+    std::memset(&out, 0xff, sizeof(out));
+    auto& h       = out.header;
+    h.magic       = logic::HISTORY_JOURNAL_MAGIC;
+    h.version     = logic::HISTORY_JOURNAL_VERSION;
+    h.source      = static_cast<uint8_t>(logic::HistoryJournalSource::Checkup);
+    h.flags       = 0;
+    h.catalog_fp  = cs.reset_token
+                        ? (is_modbus ? logic::FAULT_MODBUS_TRACE_BARRIER_SCHEMA
+                                     : logic::FAULT_TRACE_BARRIER_SCHEMA)
+                        : (is_modbus ? logic::FAULT_MODBUS_TRACE_SCHEMA : logic::FAULT_TRACE_SCHEMA);
+    h.crc         = 0;
+    h.commit      = logic::HISTORY_JOURNAL_ERASED;
+    h.value_count = logic::FAULT_TRACE_PAGE_BYTES / sizeof(logic::HistorySample);
+    h.slot_bytes  = logic::HISTORY_JOURNAL_SLOT_BYTES;
+    h.sequence    = s_flash_next_sequence;
+    h.bucket      = trace.unix_s / logic::CHECKUP_DT_S;
+    h.dt_s        = logic::CHECKUP_DT_S;
+    h.rings[0]    = TREND_COUNT;
+    h.rings[1]    = HOMEHUB_HISTORY_COUNT;
+    h.rings[2]    = ENV3_HISTORY_COUNT;
+
+    auto& page    = *new (out.payload) logic::FaultTracePageInfo{};
+    page.identity = cs.identity;
+    page.unix_s   = trace.unix_s;
+    page.end_s    = trace.end_s;
+    page.count    = 0;
+    page.reserved = 0;
+    if (!cs.reset_token) {
+        if (!logic::fault_trace_encode_page(trace, page, out.payload + sizeof(page))) {
+            cs.pending                = false;
+            s_flash_fault_trace_owner = CyclingTraceOwner::None;
+            return false;
+        }
+    }
+    if (!logic::fault_trace_page_valid(h, page, is_modbus)) {
+        cs.pending                = false;
+        s_flash_fault_trace_owner = CyclingTraceOwner::None;
+        return false;
+    }
+    h.crc = logic::history_journal_crc_bytes(h, out.payload, logic::FAULT_TRACE_PAGE_BYTES);
+    return true;
+}
+
+void flash_fault_appended(bool is_modbus) {
+    FaultFlashStream& cs = is_modbus ? s_flash_fault_modbus : s_flash_fault;
+    cs.pending           = false;
+    if (s_flash_fault_trace_owner == cycling_trace_owner_for(is_modbus))
+        s_flash_fault_trace_owner = CyclingTraceOwner::None;
+    if (cs.reset_token)
+        checkup_fault_checkpoint_appended(cs.reset_token, is_modbus ? DiagnosticsSource::Modbus
+                                                                    : DiagnosticsSource::X10a);
+}
+
 // One attempt to append `r`. After sequence admission, `slot` identifies the targeted slot even
 // on failure, so the caller can account for it. Invalid or exhausted sequences perform no I/O.
 esp_err_t flash_append_record_at(FlashJournalRecord& r, size_t& slot) {
@@ -3034,6 +3243,8 @@ esp_err_t flash_append_record_at(FlashJournalRecord& r, size_t& slot) {
     } else if (flash_cycling_owned(verify.header)) {
         flash_cycling_appended(static_cast<uint16_t>(slot), verify.header.sequence,
                                flash_modbus_cycling_owned(verify.header));
+    } else if (flash_fault_owned(verify.header)) {
+        flash_fault_appended(flash_modbus_fault_owned(verify.header));
     } else if (flash_modbus_checkup_owned(verify.header)) {
         s_flash_mb_checkup.last_bucket   = r.header.bucket;
         s_flash_mb_checkup.newest_bucket = r.header.bucket;
@@ -3133,9 +3344,12 @@ esp_err_t flash_append_record(FlashJournalRecord& r) {
         // The ONLY place an ahead-of-the-clock episode ends: the source appended data again. A
         // manifest says nothing about the cursor, and a "no longer ahead" observation must not
         // end it either (see s_flash_ahead_logged).
-        if (!flash_is_manifest(r.header) && !stop_owned && !flash_cycling_owned(r.header))
-            s_flash_ahead_logged[flash_modbus_checkup_owned(r.header) ? kCheckupModbusSource
-                                                                      : r.header.source] = false;
+        if (!flash_is_manifest(r.header) && !stop_owned && !flash_cycling_owned(r.header)) {
+            if (!flash_fault_owned(r.header))
+                s_flash_ahead_logged[flash_modbus_checkup_owned(r.header) ? kCheckupModbusSource
+                                                                          : r.header.source] =
+                    false;
+        }
     } else {
         if (stop_owned) stop_observation_flash_failed();
         flash_note_append_failure(slot, e, r.header);
@@ -3182,6 +3396,8 @@ void flash_note_restore_ahead(size_t src_i, int64_t newest, int64_t wall_bucket)
     if (src_i == kCyclingTraceSource || src_i == kCyclingModbusTraceSource)
         return flash_build_next_cycling(r, wait_ticks, shutdown,
                                         src_i == kCyclingModbusTraceSource);
+    if (src_i == kFaultTraceSource || src_i == kFaultModbusTraceSource)
+        return flash_build_next_fault(r, wait_ticks, shutdown, src_i == kFaultModbusTraceSource);
     FutureCursorNote note;
     const bool       built =
         (src_i == static_cast<size_t>(logic::HistoryJournalSource::Checkup) ||
@@ -3299,6 +3515,42 @@ void history_restore_cycling_flash(TickType_t wait_ticks) {
     }
 }
 
+void history_restore_fault_flash(TickType_t wait_ticks) {
+    if (s_flash_fault.restore_done && s_flash_fault_modbus.restore_done) return;
+    int64_t unix_s = -1;
+    int32_t ms     = 0;
+    time_now(unix_s, ms);
+    if (unix_s < 0) return;
+    for (bool is_modbus : {false, true}) {
+        FaultFlashStream&       cs    = is_modbus ? s_flash_fault_modbus : s_flash_fault;
+        const FaultFlashStream& other = is_modbus ? s_flash_fault : s_flash_fault_modbus;
+        if (cs.restore_done || other.pending) continue;
+        const CyclingTraceOwner want_owner = cycling_trace_owner_for(is_modbus);
+        if (!cs.decoded || s_flash_fault_trace_owner != want_owner) {
+            cs.decoded = false;
+            if (cs.restore_index < kFaultTracePages &&
+                cs.pages[cs.restore_index].sequence > cs.fence) {
+                if (!flash_decode_fault_page(cs, cs.pages[cs.restore_index], is_modbus)) {
+                    ++cs.restore_index;
+                    continue;
+                }
+            } else {
+                s_flash_fault_trace.reset();
+                s_flash_fault_trace.unix_s = 0;
+                cs.identity                = {};
+                s_flash_fault_trace_owner  = want_owner;
+            }
+            cs.decoded = true;
+        }
+        const auto result =
+            checkup_fault_restore(s_flash_fault_trace, cs.identity, unix_s, wait_ticks,
+                                  is_modbus ? DiagnosticsSource::Modbus : DiagnosticsSource::X10a);
+        cs.restore_done = result != CheckupFlashRestoreResult::Deferred;
+        if (cs.restore_done && s_flash_fault_trace_owner == want_owner)
+            s_flash_fault_trace_owner = CyclingTraceOwner::None;
+    }
+}
+
 // Restore at most four rings per poll tick. Each batch reads a source's indexed records once and
 // transposes four values into ring-shaped blocks: at most HISTORY_SAMPLES slot reads of
 // HISTORY_JOURNAL_SLOT_BYTES (~74 KiB), reused sector scratch and no heap allocation. A source
@@ -3315,6 +3567,7 @@ void history_service_flash_restore() {
     stop_observation_flash_service(flash_read_stop_observation);
     history_restore_checkup_flash();
     history_restore_cycling_flash(0);
+    history_restore_fault_flash(0);
     if (s_flash_restore_done) return;
     if (s_flash_restore_ring >= kTotalRings) { s_flash_restore_done = true; return; }
 
@@ -3435,6 +3688,9 @@ static size_t history_flash_service_journal(size_t max_records, TickType_t wait_
         // without publishing observations before time sync or trend restoration.
         if (shutdown && checkup_cycling_reset_pending(DiagnosticsSource::Modbus)) {
             max_records = 0;
+        } else if (shutdown && (checkup_fault_reset_pending(DiagnosticsSource::X10a) ||
+                                checkup_fault_reset_pending(DiagnosticsSource::Modbus))) {
+            max_records = 0;
         } else {
             if (!shutdown || !checkup_cycling_reset_pending()) return 0;
             max_records = 0;
@@ -3444,6 +3700,7 @@ static size_t history_flash_service_journal(size_t max_records, TickType_t wait_
         // independent archives before asking their producers for records.
         stop_observation_flash_service(flash_read_stop_observation);
         if (shutdown) history_restore_cycling_flash(wait_ticks);
+        if (shutdown) history_restore_fault_flash(wait_ticks);
     }
     // A failure episode that spent its abandon budget pauses the whole journal (the cursor is one
     // shared position): one attempt per HISTORY_JOURNAL_PAUSED_RETRY_S, none in between.
@@ -3466,6 +3723,16 @@ static size_t history_flash_service_journal(size_t max_records, TickType_t wait_
             if (s_flash_cycling_trace_owner == CyclingTraceOwner::Modbus)
                 s_flash_cycling_trace_owner = CyclingTraceOwner::None;
         }
+        if (!s_flash_fault.reset_token) {
+            s_flash_fault.pending = false;
+            if (s_flash_fault_trace_owner == CyclingTraceOwner::X10a)
+                s_flash_fault_trace_owner = CyclingTraceOwner::None;
+        }
+        if (!s_flash_fault_modbus.reset_token) {
+            s_flash_fault_modbus.pending = false;
+            if (s_flash_fault_trace_owner == CyclingTraceOwner::Modbus)
+                s_flash_fault_trace_owner = CyclingTraceOwner::None;
+        }
         const size_t cycling_budget = max_records ? 2 * logic::HISTORY_FLASH_CYCLING_MAX_PARTS : 1;
         const size_t order[2]       = {
             s_flash_cycling_modbus.pending ? kCyclingModbusTraceSource : kCyclingTraceSource,
@@ -3477,12 +3744,22 @@ static size_t history_flash_service_journal(size_t max_records, TickType_t wait_
                 ++written;
             }
         }
+        const size_t fault_order[2] = {
+            s_flash_fault_modbus.pending ? kFaultModbusTraceSource : kFaultTraceSource,
+            s_flash_fault_modbus.pending ? kFaultTraceSource : kFaultModbusTraceSource};
+        for (size_t fault_src : fault_order) {
+            if (!flash_build_for_service(fault_src, r, wait_ticks, true)) continue;
+            if (flash_append_record(r) != ESP_OK) return written;
+            ++written;
+        }
     }
     while (max_records) {
         bool appended = false;
         for (size_t try_src = 0; try_src < kJournalServiceSources; ++try_src) {
             const size_t src_i = (s_flash_service_source + try_src) % kJournalServiceSources;
-            if ((src_i == kCyclingTraceSource || src_i == kCyclingModbusTraceSource) && shutdown)
+            if ((src_i == kCyclingTraceSource || src_i == kCyclingModbusTraceSource ||
+                 src_i == kFaultTraceSource || src_i == kFaultModbusTraceSource) &&
+                shutdown)
                 continue;
             // Profile detection can legitimately take minutes while X10A is unavailable. Keep the
             // independent trend sources durable during that wait, but never append a diagnostic
@@ -3614,6 +3891,11 @@ bool history_flash_forget() {
         s_flash_cycling_trace.reset();
         s_flash_cycling_trace.unix_s = 0;
         s_flash_cycling_trace_owner  = CyclingTraceOwner::None;
+        s_flash_fault.reset_after_forget();
+        s_flash_fault_modbus.reset_after_forget();
+        s_flash_fault_trace.reset();
+        s_flash_fault_trace.unix_s = 0;
+        s_flash_fault_trace_owner  = CyclingTraceOwner::None;
         flash_manifest_cache_reset();
         s_flash_restore_done         = true;
         s_flash_checkup_restore_done = true;

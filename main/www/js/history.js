@@ -2719,7 +2719,7 @@ function displayHomeHubLabel(row) {
 // id is derived ONCE (here, where the body was built) instead of again from the key — which for a
 // board row is not a catalog label and could not be looked up at all.
 function descAccordion(key, label, valHtml, cls, bodyHtml, trendId, unit = "", paused,
-                       renderHistory = histHtml, chartFirst = false) {
+                       renderHistory = histHtml, chartFirst = false, ariaValue = "") {
   const open = S.descOpen.has(key);
   const visible = !paused && !(paused === false && S.stage === "settings");
   const chart = open && trendId && visible ? renderHistory(trendId, unit, label) : "";
@@ -2728,9 +2728,11 @@ function descAccordion(key, label, valHtml, cls, bodyHtml, trendId, unit = "", p
     : "";
   const innerBody = chartFirst ? (chartHtml + bodyHtml) : (bodyHtml + chartHtml);
   const diagnosisLabel = key.startsWith("model:health_") || key === "service:refrigerant";
+  const aria = ariaValue ? ` aria-label="${esc(`${label}: ${ariaValue}`)}"` : "";
   return `<div class="vitem${open ? " open" : ""}">` +
     `<button class="vrow vrow-desc" type="button" data-desc="${esc(key)}"` +
-    (trendId ? ` data-trend="${esc(trendId)}" data-unit="${esc(unit)}"` : "") + ` aria-expanded="${open ? "true" : "false"}">` +
+    (trendId ? ` data-trend="${esc(trendId)}" data-unit="${esc(unit)}"` : "") +
+    `${aria} aria-expanded="${open ? "true" : "false"}">` +
     `<span class="vrow-label"${diagnosisLabel ? ` title="${esc(label)}"` : ""}>${esc(label)}</span>` +
     `<span class="vrow-end"><span class="vrow-val ${cls}">${valHtml}</span>${chevIcon}</span>` +
     `</button>` +
@@ -2835,8 +2837,7 @@ const MODEL_DESCRIPTIONS = {
   // are not on this bus — and a reader who assumes the firmware is asserting more than it is will draw
   // the wrong conclusion from a correct number.
   health_fault: {
-    what: "Current and remembered fault messages reported by the heat pump.",
-    normal: "No reported fault message. A message does not identify its cause; disappearance does not prove resolution." },
+    what: "Shows error and warning codes reported by the heat pump; short descriptions are general Daikin hints, and a cleared code does not prove the cause was fixed." },
   health_dhw_loss: {
     what: "Largest accepted hourly temperature drop at tank sensor R5T.",
     normal: "Project hint ≥0.8 K/h without pump/draw-like markers. R5T is one point in a stratified tank, not measured tank energy. Missing markers do not prove no draw; zero net cooling does not exclude heat loss. Circulation overlap is correlation, not cause." },
@@ -2902,7 +2903,7 @@ function modelDescRow(id, label, value, opt = {}) {
   return descAccordion(`model:${id}`, label, val, opt.cls || "",
                        opt.bodyHtml ?? descBodyHtml(d, undefined, modelDescriptionCopy(id)),
                        opt.trendId || "", opt.histUnit || "", opt.paused, opt.renderHistory,
-                       Boolean(opt.chartFirst));
+                       Boolean(opt.chartFirst), opt.ariaValue || "");
 }
 
 // Toggle a value row's description accordion. Only the LIVE element is flipped here (so the CSS
@@ -2920,7 +2921,15 @@ function toggleDesc(btn) {
   item.classList.toggle("open", open);
   btn.setAttribute("aria-expanded", open ? "true" : "false");
   if (open) S.descOpen.add(key);
-  else { S.descOpen.delete(key); S.histPin.delete(trend); }
+  else {
+    S.descOpen.delete(key);
+    S.histPin.delete(trend);
+    if (key === "model:health_fault") {
+      S.faultCodes.clear();
+      S.faultSnapKeys = null;
+      S.faultHoverIdx = null;
+    }
+  }
   // This native toggle changes DOM outside setHtml. A cached open/close between polls must not
   // let the saved closed markup suppress the next render and retain its hidden history SVG.
   const owner = btn.closest("#valueGroups, #settingsCards");

@@ -21,6 +21,7 @@ reset() {
     cp main/checkup.cpp "$WORK/main/checkup.cpp"
     cp main/logic/stop_context.hpp main/logic/stop_context_input.hpp \
        main/logic/observation_hourly.hpp main/logic/instrument.hpp main/logic/heartbeat.hpp main/logic/defrost_start.hpp \
+       main/logic/fault_trace.hpp main/logic/fault_persist.hpp \
        "$WORK/main/logic/"
     cp main/stop_observation_store.hpp main/stop_observation_store.cpp main/history.cpp "$WORK/main/"
     cp docs/DIAGNOSTICS.md "$WORK/docs/DIAGNOSTICS.md"
@@ -89,7 +90,7 @@ reset
 patch_file "$WORK/main/www/locales/de.js" <<'PY'
 import sys
 p = sys.argv[1]; s = open(p).read()
-old = 'Keine gemeldete Störung. Eine Meldung belegt keine Ursache; ihr Verschwinden belegt keine Behebung.'
+old = '24-Stunden-Wasserdruckverlauf im geschlossenen Hydraulikkreis (X10A, 5-Minuten-Minima).'
 assert s.count(old) == 1
 open(p, 'w').write(s.replace(old, old + ' Die Anlage ist in Ordnung.', 1))
 PY
@@ -164,6 +165,17 @@ echo "== 12. German prose without umlauts =="
 reset
 printf '\nDiese Dokumentation ist nicht in englischer Sprache.\n' > "$WORK/docs/ASCII_GERMAN.md"
 run_case "ASCII-only German documentation is caught" 1 "U014 docs/ASCII_GERMAN.md:2"
+
+echo "== 13. health_fault must not carry a generic Normal paragraph =="
+reset
+patch_file "$WORK/main/www/js/history.js" <<'PY'
+import sys
+p = sys.argv[1]; s = open(p).read(); old = '  health_fault: {\n'
+if s.count(old) != 1: sys.exit(1)
+new = old + '    normal: "No fault reported.",\n'
+open(p, 'w').write(s.replace(old, new, 1))
+PY
+run_case "generic Normal paragraph on health_fault is caught" 1 "U016 health_fault.en.normal"
 
 echo
 if [ "$fail" -eq 0 ]; then

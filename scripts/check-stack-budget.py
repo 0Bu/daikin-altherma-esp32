@@ -68,6 +68,7 @@ PACKED_ENTRY_SYMBOLS = frozenset({
     'calculate_rinv',
     'calloc',
     'ccm_auth_crypt',
+    'void daik::append_status_fault_check_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::DiagnosticsSource, bool, bool, bool)',
     'daik::discovery_owner_block()',
     'daik::do_detect(httpd_req*)',
     'daik::http_send_values_json(httpd_req*, std::basic_string_view<char, std::char_traits<char> >, std::basic_string_view<char, std::char_traits<char> >)',
@@ -769,11 +770,11 @@ def validate_status_numeric_calls(disassembly: str, budgets: dict[str, Any]) -> 
     serializer = re.compile(budgets["symbols"]["status_serializer"]["pattern"])
     direct = re.compile(r"^\s*[0-9a-f]+:\s+[0-9a-f]+\s+call8\s+[0-9a-f]+\s+<"
                         + re.escape(STATUS_HEALTH_NUMBER_SYMBOL) + r">\s*$")
-    # The compiler merges two branch tails from the 37 source invocations into 35 calls.
-    if (len(references) != 35
+    # The compiler merges one branch tail from the 37 source invocations into 36 calls.
+    if (len(references) != 36
             or any(not serializer.search(caller) or not direct.match(line)
                    for caller, line in references)):
-        raise BudgetError("diagnosis numeric calls: 35 direct serializer calls require review")
+        raise BudgetError("diagnosis numeric calls: 36 direct serializer calls require review")
 
 
 def parse_frames(disassembly: str, budgets: dict[str, Any] | None = None) -> dict[str, int]:
@@ -806,9 +807,13 @@ def parse_frames(disassembly: str, budgets: dict[str, Any] | None = None) -> dic
                                                     "flash_index_cycling_page",
                                                     "flash_cycling_appended",
                                                     "flash_decode_cycling_group",
-                                                    "cycling_trace_decode_part")):
+                                                    "cycling_trace_decode_part",
+                                                    "flash_index_fault_page",
+                                                    "flash_fault_appended",
+                                                    "flash_decode_fault_page",
+                                                    "fault_trace_encode_page")):
                 raise BudgetError(f"cycling journal: unmodeled outlined helper {current}")
-            for helper, key in CYCLING_TRACKED_HELPERS.items():
+            for helper, key in (*CYCLING_TRACKED_HELPERS.items(), *FAULT_TRACKED_HELPERS.items()):
                 if helper in current and not re.fullmatch(budgets["symbols"][key]["pattern"], current):
                     raise BudgetError(f"cycling journal: unmodeled helper clone {current}")
             for name in INLINED_MQTT_HELPERS:
@@ -920,6 +925,8 @@ def validate_status_diagnosis_paths(budgets: dict[str, Any], sources: dict[str, 
                           "room_time_now"],
         "defrost_start_fence": ["defrost_start_copy", "stop_stop_observation_suppressed"],
         "defrost_start_generation": ["defrost_start_copy", "defrost_poll_generation"],
+        "checkup_fault_flags": ["fault_saved_flags", "fault_saved_window_flags"],
+        "checkup_fault_flags_clock": ["fault_saved_flags", "room_time_now"],
     }
     report_paths = {
         f"httpd_{transport}_{name}": [*prefix, *report, *tail]
@@ -1028,6 +1035,52 @@ def validate_status_diagnosis_paths(budgets: dict[str, Any], sources: dict[str, 
                                              "curve_status_json", "curve_json_bool", "curve_json_uint",
                                              "curve_json_quoted", "curve_json_source",
                                              "status_opt_uint", "status_opt_int",
+                                             "status_quoted_string", "status_escaped_string",
+                                             "status_utf8_sequence_length", "status_unsigned_number"],
+        "httpd_mcp_fault_timeline": ["mcp_post", "http_send_status_json", "status_serializer",
+                                     "fault_status_json", "fault_timeline_snapshot",
+                                     "fault_snapshot_locked", "fault_walk_pair", "fault_walk_feed",
+                                     "fault_walk_emit", "fault_snapshot_emit", "fault_trace_push"],
+        "httpd_direct_fault_timeline": ["http_send_status_json", "status_serializer",
+                                        "fault_status_json", "fault_timeline_snapshot",
+                                        "fault_snapshot_locked", "fault_walk_pair", "fault_walk_feed",
+                                        "fault_walk_emit", "fault_snapshot_emit", "fault_trace_push"],
+        "httpd_mcp_fault_snapshot_clock": ["mcp_post", "http_send_status_json", "status_serializer",
+                                           "fault_status_json", "fault_timeline_snapshot",
+                                           "fault_snapshot_locked", "room_time_now"],
+        "httpd_direct_fault_snapshot_clock": ["http_send_status_json", "status_serializer",
+                                              "fault_status_json", "fault_timeline_snapshot",
+                                              "fault_snapshot_locked", "room_time_now"],
+        "httpd_mcp_fault_fallback": ["mcp_post", "http_send_status_json", "status_serializer",
+                                     "fault_status_json", "fault_latest_status",
+                                     "fault_snapshot_locked", "fault_walk_pair", "fault_walk_feed",
+                                     "fault_walk_emit", "fault_snapshot_emit", "fault_trace_push"],
+        "httpd_direct_fault_fallback": ["http_send_status_json", "status_serializer",
+                                        "fault_status_json", "fault_latest_status",
+                                        "fault_snapshot_locked", "fault_walk_pair", "fault_walk_feed",
+                                        "fault_walk_emit", "fault_snapshot_emit", "fault_trace_push"],
+        "httpd_mcp_fault_fallback_clock": ["mcp_post", "http_send_status_json", "status_serializer",
+                                           "fault_status_json", "fault_latest_status",
+                                           "fault_snapshot_locked", "room_time_now"],
+        "httpd_direct_fault_fallback_clock": ["http_send_status_json", "status_serializer",
+                                              "fault_status_json", "fault_latest_status",
+                                              "fault_snapshot_locked", "room_time_now"],
+        "httpd_mcp_fault_format_snprintf": ["mcp_post", "http_send_status_json", "status_serializer",
+                                            "fault_status_json", "fault_emit_latest", "fault_emit_meta",
+                                            "sdk_snprintf", "sdk_vfprintf"],
+        "httpd_direct_fault_format_snprintf": ["http_send_status_json", "status_serializer",
+                                               "fault_status_json", "fault_emit_latest", "fault_emit_meta",
+                                               "sdk_snprintf", "sdk_vfprintf"],
+        "httpd_mcp_fault_format_quoted": ["mcp_post", "http_send_status_json", "status_serializer",
+                                          "fault_status_json", "fault_emit_latest", "fault_emit_meta",
+                                          "fault_json_bool", "fault_json_uint", "fault_json_quoted",
+                                          "fault_code_unpack", "fault_aux_subcode",
+                                          "status_quoted_string", "status_escaped_string",
+                                          "status_utf8_sequence_length", "status_unsigned_number"],
+        "httpd_direct_fault_format_quoted": ["http_send_status_json", "status_serializer",
+                                             "fault_status_json", "fault_emit_latest", "fault_emit_meta",
+                                             "fault_json_bool", "fault_json_uint", "fault_json_quoted",
+                                             "fault_code_unpack", "fault_aux_subcode",
                                              "status_quoted_string", "status_escaped_string",
                                              "status_utf8_sequence_length", "status_unsigned_number"],
     }
@@ -1172,12 +1225,24 @@ def shutdown_path_members() -> dict[str, list[str]]:
     for name, prefix in SHUTDOWN_CALLERS.items():
         paths[name + "_journal"] = prefix + ["history_shutdown", "history_journal", "history_append"]
         paths[name + "_checkup"] = prefix + ["checkup_shutdown", "checkup_shutdown_reset"]
+        paths[name + "_checkup_fault_handoff"] = prefix + [
+            "checkup_shutdown", "fault_save_handoff", "fault_walk_pair", "fault_walk_feed",
+            "fault_walk_emit", "fault_handoff_pack_emit"]
+        paths[name + "_checkup_fault_handoff_clock"] = prefix + [
+            "checkup_shutdown", "fault_save_handoff", "room_time_now"]
+        paths[name + "_checkup_fault_handoff_crc"] = prefix + [
+            "checkup_shutdown", "fault_save_handoff", "fault_handoff_crc",
+            "fault_handoff_u32", "history_config_crc"]
         journal = prefix + ["history_shutdown", "history_journal"]
         for phase, tail in CYCLING_WRITE_STACK.items():
             paths[name + "_cycling_" + ("snapshot" if phase == "checkpoint" else phase)] = (
                 journal + tail)
         for phase, tail in CYCLING_RESTORE_STACK.items():
             paths[name + "_cycling_" + phase] = journal + tail
+        for phase, tail in FAULT_WRITE_STACK.items():
+            paths[name + "_fault_" + phase] = journal + tail
+        for phase, tail in FAULT_RESTORE_STACK.items():
+            paths[name + "_fault_" + phase] = journal + tail
     # A successful factory reset has already forgotten the journal; the liveness touch and
     # independently registered checkup handler still run. Keep that exclusion source-bound.
     paths["button_shutdown_history_touch"] = ["button_task", "sdk_restart", "history_shutdown"]
@@ -1262,6 +1327,84 @@ def validate_cycling_flash_paths(budgets: dict[str, Any], sources: dict[str, str
     ]:
         if len(re.findall(r"\b" + callee + r"\s*\(", stack_function_body(source, caller))) != 1:
             raise BudgetError(f"cycling journal source: {caller}/{callee} changed")
+
+
+FAULT_WRITE_STACK = {
+    "snapshot": ["fault_flash_build", "fault_checkpoint", "fault_snapshot_locked",
+                 "fault_walk_pair", "fault_walk_feed", "fault_walk_emit",
+                 "fault_snapshot_emit", "fault_trace_push"],
+    "snapshot_clock": ["fault_flash_build", "fault_checkpoint", "fault_snapshot_locked",
+                       "room_time_now"],
+    "reset_check": ["fault_flash_build", "fault_reset_pending"],
+    "build_crc": ["fault_flash_build", "cycling_flash_crc", "history_config_crc"],
+    "build_shape": ["fault_flash_build", "fault_page_valid"],
+    "append_ack": ["history_append", "fault_checkpoint_acked"],
+    "append_owner": ["history_append", "fault_record_owner"],
+}
+FAULT_RESTORE_STACK = {
+    "read": ["fault_flash_restore", "cycling_flash_record_read", "sdk_partition_read"],
+    "validate": ["fault_flash_restore", "fault_flash_page", "cycling_flash_crc",
+                 "history_config_crc"],
+    "shape": ["fault_flash_restore", "fault_flash_page", "fault_page_valid"],
+    "decode": ["fault_flash_restore", "fault_page_decode", "fault_trace_push"],
+    "adopt": ["fault_flash_restore", "fault_trace_restore"],
+}
+FAULT_TRACKED_HELPERS = {
+    "flash_build_next_fault": "fault_flash_build",
+    "checkup_fault_reset_pending": "fault_reset_pending",
+    "checkup_fault_checkpoint_appended": "fault_checkpoint_acked",
+    "flash_fault_owned": "fault_record_owner",
+    "fault_trace_page_valid": "fault_page_valid",
+}
+
+
+def validate_fault_flash_paths(budgets: dict[str, Any], sources: dict[str, str]) -> None:
+    tasks = {
+        "poll": {
+            **{f"poll_fault_{phase}": ["poll_task", "history_board", "history_journal", *tail]
+               for phase, tail in FAULT_WRITE_STACK.items()},
+            **{f"poll_fault_{phase}": ["poll_task", "history_board", "history_flash_restore", *tail]
+               for phase, tail in FAULT_RESTORE_STACK.items()},
+            "poll_fault_trend_filter": ["poll_task", "history_board", "history_flash_restore",
+                                        "history_record_scope", "fault_record_owner"],
+        },
+        "main": {
+            "main_fault_scan": ["main_task", "boot_sequence", "history_start", "fault_flash_page",
+                                "cycling_flash_crc", "history_config_crc"],
+            "main_fault_scan_shape": ["main_task", "boot_sequence", "history_start",
+                                      "fault_flash_page", "fault_page_valid"],
+            "main_fault_scan_owner": ["main_task", "boot_sequence", "history_start",
+                                      "history_record_scope", "fault_record_owner"],
+        },
+    }
+    for owner, paths in tasks.items():
+        task = budgets["tasks"][owner]
+        maximum = task["stack_bytes"] - task["reserve_bytes"]
+        for name, members in paths.items():
+            rule = {"symbols": members, "multipliers": {}, "base_bytes": 1536, "max_bytes": maximum}
+            if name not in task["paths"] or budgets["paths"].get(name) != rule:
+                raise BudgetError(f"fault journal path {name}: reviewed stack accounting changed")
+    history = stack_source_code(sources["main/history.cpp"])
+    checkup = stack_source_code(sources["main/checkup.cpp"])
+    for source, caller, callee in [
+        (history, "flash_journal_scan", "flash_index_fault_page"),
+        (history, "history_service_flash_restore", "history_restore_fault_flash"),
+        (history, "history_flash_service_journal", "history_restore_fault_flash"),
+        (history, "history_restore_fault_flash", "flash_decode_fault_page"),
+        (history, "history_restore_fault_flash", "checkup_fault_restore"),
+        (history, "flash_build_for_service", "flash_build_next_fault"),
+        (history, "flash_build_next_fault", "checkup_fault_checkpoint"),
+        (history, "flash_build_next_fault", "checkup_fault_reset_pending"),
+        (history, "flash_build_next_fault", "history_journal_crc_bytes"),
+        (checkup, "checkup_fault_checkpoint", "fault_snapshot_locked"),
+        (checkup, "checkup_cycling_forget", "checkup_fault_forget"),
+    ]:
+        if len(re.findall(r"\b" + callee + r"\s*\(", stack_function_body(source, caller))) != 1:
+            raise BudgetError(f"fault journal source: {caller}/{callee} changed")
+    reboot = stack_function_body(checkup, "checkup_reboot_save")
+    if not re.search(r"if\s*\(slot->fault_forgotten\.load\(std::memory_order_acquire\)\)[\s\S]*?"
+                     r"else\s*\{\s*fault_save_handoff_locked\(\*slot,\s*stop_now\);\s*\}", reboot):
+        raise BudgetError("fault journal source: checkup_reboot_save factory-reset handoff suppression changed")
 
 
 def stack_source_code(source: str) -> str:
@@ -1538,10 +1681,17 @@ def validate_task_stacks(budgets: dict[str, Any], sources: dict[str, str]) -> No
             expected = {"http_deadline_watchdog": "deadline", "ota_health_gate": "ota_health",
                         "ota_health_shutdown_journal": "ota_health",
                         "ota_health_shutdown_checkup": "ota_health"}.get(path)
-            if path in {f"ota_health_shutdown_cycling_{phase}"
-                        for phase in ("snapshot", "reset_check", "build_crc", "build_shape",
-                                      "append_shape", "append_ack", "append_owner",
-                                      *CYCLING_RESTORE_STACK)}:
+            if path in {
+                "ota_health_shutdown_checkup_fault_handoff",
+                "ota_health_shutdown_checkup_fault_handoff_clock",
+                "ota_health_shutdown_checkup_fault_handoff_crc",
+                *(f"ota_health_shutdown_cycling_{phase}"
+                  for phase in ("snapshot", "reset_check", "build_crc", "build_shape",
+                                "append_shape", "append_ack", "append_owner",
+                                *CYCLING_RESTORE_STACK)),
+                *(f"ota_health_shutdown_fault_{phase}"
+                  for phase in (*FAULT_WRITE_STACK, *FAULT_RESTORE_STACK)),
+            }:
                 expected = "ota_health"
             if path in stop_stack.PATHS:
                 expected = stop_stack.PATHS[path][0]
@@ -1970,10 +2120,15 @@ CONFIG_DOCUMENT_PATHS = frozenset({
     "httpd_board_i2c_read", "httpd_board_i2c_write", "httpd_board_i2c_receive",
     "httpd_checkup_schema", "httpd_curve_homehub_reset", "httpd_ref_temp_reset",
     *(f"httpd_shutdown_{name}_{phase}" for name in SHUTDOWN_HTTP_CALLERS
-      for phase in ("journal", "checkup", "cycling_snapshot", "cycling_reset_check",
+      for phase in ("journal", "checkup",
+                    "checkup_fault_handoff", "checkup_fault_handoff_clock",
+                    "checkup_fault_handoff_crc",
+                    "cycling_snapshot", "cycling_reset_check",
                     "cycling_build_crc", "cycling_build_shape", "cycling_append_shape",
                     "cycling_append_ack", "cycling_append_owner",
-                    *(f"cycling_{part}" for part in CYCLING_RESTORE_STACK))),
+                    *(f"cycling_{part}" for part in CYCLING_RESTORE_STACK),
+                    *(f"fault_{part}" for part in FAULT_WRITE_STACK),
+                    *(f"fault_{part}" for part in FAULT_RESTORE_STACK))),
 })
 CONFIG_DOCUMENT_PATHS |= frozenset(
     name for name, (owner, rule) in stop_stack.PATHS.items()
@@ -2112,6 +2267,7 @@ CHECKUP_SCHEMA_CHAIN = [
     "checkup_schema_availability", "checkup_schema_rps", "checkup_schema_contains",
     "checkup_schema_crc", "checkup_schema_profile_lookup", "checkup_schema_profile_view",
     "cycling_seal", "cycling_crc",
+    "fault_handoff_decode", "fault_page_decode",
 ]
 
 
@@ -2170,6 +2326,7 @@ def validate_source_contract(budgets: dict[str, Any]) -> None:
     validate_room_history_paths(budgets, sources)
     validate_shutdown_paths(budgets, sources)
     validate_cycling_flash_paths(budgets, sources)
+    validate_fault_flash_paths(budgets, sources)
     validate_ota_upload_paths(budgets, sources)
     validate_json_recursion(
         budgets, (REPO / "main/logic/payload_complete.hpp").read_text(encoding="utf-8"),
@@ -2606,6 +2763,51 @@ def restore_raw_detect(disassembly: str, data: bytes, elf: Path, objdump: str) -
     return "".join(lines[:start]) + replacement + "".join(lines[end:])
 
 
+def elf_function_ends(data: bytes) -> dict[int, int]:
+    """Map each defined STT_FUNC ELF32 symbol start address to its exclusive extent end."""
+    def bounded(offset: int, length: int) -> bytes:
+        if offset < 0 or length < 0 or offset + length > len(data):
+            raise BudgetError("stack extent check: truncated ELF range")
+        return data[offset:offset + length]
+
+    if len(data) < 52 or data[:7] != b"\x7fELF\x01\x01\x01":
+        raise BudgetError("stack extent check: ELF32 little-endian image is required")
+    header = struct.unpack("<16sHHIIIIIHHHHHH", bounded(0, 52))
+    if (header[1:4] != (2, 94, 1) or header[8] != 52 or header[11] != 40
+            or not header[12] or header[13] >= header[12]):
+        raise BudgetError("stack extent check: unsupported Xtensa executable ELF header")
+    sections = list(struct.iter_unpack("<IIIIIIIIII", bounded(header[6], 40 * header[12])))
+    ends: dict[int, int] = {}
+    for section in sections:
+        if section[1] != 2:
+            continue
+        if section[9] != 16 or section[5] % 16:
+            raise BudgetError("stack extent check: malformed ELF symbol table")
+        for _, addr, size, info, _, shndx in struct.iter_unpack("<IIIBBH", bounded(section[4], section[5])):
+            if shndx != 0 and (info & 0x0F) == 2 and addr > 0 and size > 0:
+                ends[addr] = max(ends.get(addr, 0), addr + size)
+    return ends
+
+
+def trim_elf_function_extents(disassembly: str, data: bytes) -> str:
+    """Drop objdump-decoded trailing literal-pool bytes outside each STT_FUNC extent."""
+    ends = elf_function_ends(data)
+    out: list[str] = []
+    limit: int | None = None
+    for line in disassembly.splitlines(keepends=True):
+        if SECTION_RE.match(line):
+            limit = None
+            out.append(line)
+        elif header := FUNCTION_RE.match(line):
+            limit = ends.get(int(header.group(1), 16))
+            out.append(line)
+        elif limit is not None and (inst := INSTRUCTION_RE.match(line)) and int(inst.group(1), 16) >= limit:
+            continue
+        else:
+            out.append(line)
+    return "".join(out)
+
+
 def disassemble(elf: Path, objdump: str) -> str:
     try:
         data = elf.read_bytes()
@@ -2614,6 +2816,7 @@ def disassemble(elf: Path, objdump: str) -> str:
     before = hashlib.sha256(data).digest()
     try:
         text = stack_tool_output([objdump, "-d", "-C", str(elf)])
+        text = trim_elf_function_extents(text, data)
         text = restore_raw_detect(text, data, elf, objdump)
         return restore_packed_config(text, data, elf, objdump, stack_tool_output, raw_detect_body, BudgetError)
     finally:
@@ -2775,6 +2978,31 @@ def raw_detect_self_test(fixture: str, budgets: dict[str, Any]) -> int:
         f"{address + 3:x}: 101800 movsp a1, a8\n{address + 6:x}: 1df0 retw.n\n")
     reject("dynamic stack after valid ENTRY", "unreviewed dynamic stack", elf_bytes=image(dynamic),
            standard=packed(dynamic), nm_text=nm.replace("00000005", "00000008"), decoded=dynamic_raw)
+    trailing_standard = (
+        fixture[:anchor.start()]
+        + f"{address:08x} <{RAW_DETECT_NAME}>:\n"
+          f"{address:x}: 00b536 entry a1, 1456\n"
+          f"{address + len(code):x}: 001110 movsp a1, a1\n"
+          "Disassembly of section .fixture-rest:\n"
+        + fixture[anchor.end():]
+    )
+    trimmed_result, trimmed_calls = exercise(standard=trailing_standard)
+    assert trimmed_calls == ["standard"]
+    assert "movsp a1, a1" not in trimmed_result
+    evaluate(parse_frames(trimmed_result, budgets), budgets)
+    controls += 1
+    interior_standard = (
+        fixture[:anchor.start()]
+        + f"{address:08x} <{RAW_DETECT_NAME}>:\n"
+          f"{address:x}: 00b536 entry a1, 1456\n"
+          f"{address + 3:x}: 101800 movsp a1, a8\n"
+          "Disassembly of section .fixture-rest:\n"
+        + fixture[anchor.end():]
+    )
+    assert "movsp a1, a8" in trim_elf_function_extents(interior_standard, image(dynamic))
+    reject("interior movsp preserved across ELF extent trimming", "unreviewed dynamic stack",
+           elf_bytes=image(dynamic), standard=interior_standard,
+           nm_text=nm.replace("00000005", "00000008"), decoded=dynamic_raw)
     reject("unknown packed application", "first prologue", standard=fixture.replace(
         "   2: 004136          entry a1, 128", "   2: 00006136"))
     return controls
@@ -3070,6 +3298,39 @@ def self_test() -> None:
         'daik::(anonymous namespace)::flash_cycling_page_for(daik::(anonymous namespace)::FlashJournalRecord const&, daik::logic::CyclingTracePageInfo&, bool)': 112,
         'daik::logic::history_journal_crc_bytes(daik::logic::HistoryJournalHeader, void const*, unsigned int)': 32,
         'daik::checkup_cycling_restore(daik::logic::CheckupCyclingTrace const&, daik::logic::CyclingTraceIdentity const&, long long, unsigned long, daik::DiagnosticsSource)': 64,
+        'void daik::append_status_fault_check_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::DiagnosticsSource, bool, bool, bool)': 160,
+        'daik::append_status_fault_check_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::DiagnosticsSource, bool, bool, bool)::{lambda(char const*, bool)\x231}::operator()(char const*, bool) const': 32,
+        'daik::append_status_fault_check_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::DiagnosticsSource, bool, bool, bool)::{lambda(char const*, unsigned long long)\x231}::operator()(char const*, unsigned long long) const': 32,
+        'daik::append_status_fault_check_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::DiagnosticsSource, bool, bool, bool)::{lambda(char const*, char const*)\x231}::operator()(char const*, char const*) const': 48,
+        '_ZZN4daikL30append_status_fault_check_jsonINS_16BoundedChunkSinkINS_16HttpChunkEmitterELj1024EEEEEvRT_NS_17DiagnosticsSourceEbbbENKUlRKNS_5logic18CheckupFaultLatestEE_clESA_$part$0': 32,
+        'daik::append_status_fault_check_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::DiagnosticsSource, bool, bool, bool)::{lambda(unsigned short, unsigned short, daik::logic::FaultUnitOrigin, daik::logic::FaultTraceKind, bool)\x231}::operator()(unsigned short, unsigned short, daik::logic::FaultUnitOrigin, daik::logic::FaultTraceKind, bool) const': 48,
+        'daik::logic::fault_code_unpack(unsigned short, char*)': 32,
+        'daik::logic::fault_aux_get_subcode(unsigned short)': 32,
+        'daik::checkup_fault_timeline_snapshot(daik::logic::CheckupFaultTrace&, daik::DiagnosticsSource)': 48,
+        'daik::checkup_fault_latest_status(daik::DiagnosticsSource, bool)': 112,
+        'daik::(anonymous namespace)::fault_snapshot_locked(daik::(anonymous namespace)::CheckupSlot&, daik::logic::CheckupFaultTrace&, long long, bool)': 112,
+        'daik::(anonymous namespace)::fault_saved_flags_locked(daik::(anonymous namespace)::CheckupSlot&, long long)': 80,
+        'daik::logic::checkup_fault_saved_window_flags(daik::logic::CheckupFaultTrace const&, unsigned long, unsigned long, long long, long long)': 64,
+        'daik::logic::checkup_fault_walk_pair(daik::logic::CheckupFaultTrace const&, daik::logic::CheckupFaultTrace const&, unsigned long, unsigned long, long long, long long, void (*)(void*, unsigned long, daik::logic::FaultSampleDetail const&), void*, unsigned long&, bool&)': 64,
+        'daik::logic::checkup_fault_walk_pair(daik::logic::CheckupFaultTrace const&, daik::logic::CheckupFaultTrace const&, unsigned long, unsigned long, long long, long long, void (*)(void*, unsigned long, daik::logic::FaultSampleDetail const&), void*, unsigned long&, bool&)::{lambda(daik::logic::CheckupFaultTrace const&, long long, long long)\x232}::operator()(daik::logic::CheckupFaultTrace const&, long long, long long) const': 64,
+        'daik::logic::checkup_fault_walk_pair(daik::logic::CheckupFaultTrace const&, daik::logic::CheckupFaultTrace const&, unsigned long, unsigned long, long long, long long, void (*)(void*, unsigned long, daik::logic::FaultSampleDetail const&), void*, unsigned long&, bool&)::{lambda(unsigned long, daik::logic::FaultSampleDetail const&)\x231}::operator()(unsigned long, daik::logic::FaultSampleDetail const&) const': 32,
+        'daik::logic::checkup_fault_snapshot_emit(void*, unsigned long, daik::logic::FaultSampleDetail const&)': 32,
+        'daik::logic::CheckupFaultTrace::push(unsigned long, daik::logic::FaultSampleDetail const&)': 32,
+        'daik::(anonymous namespace)::fault_save_handoff_locked(daik::(anonymous namespace)::CheckupSlot&, long long)': 176,
+        'daik::logic::checkup_fault_handoff_pack_emit(void*, unsigned long, daik::logic::FaultSampleDetail const&)': 48,
+        'daik::logic::checkup_fault_handoff_crc(unsigned long, daik::logic::FaultHandoffPayload const&)': 32,
+        'daik::logic::fault_handoff_u32(unsigned long, unsigned long)': 48,
+        'daik::(anonymous namespace)::flash_build_next_fault(daik::(anonymous namespace)::FlashJournalRecord&, unsigned long, bool, bool)': 160,
+        'daik::checkup_fault_checkpoint(daik::logic::CheckupFaultTrace&, daik::logic::CyclingTraceIdentity&, unsigned long&, unsigned long, bool, bool, daik::DiagnosticsSource)': 64,
+        'daik::checkup_fault_reset_pending(daik::DiagnosticsSource)': 32,
+        'daik::logic::fault_trace_page_valid(daik::logic::HistoryJournalHeader const&, daik::logic::FaultTracePageInfo const&, bool)': 32,
+        'daik::checkup_fault_checkpoint_appended(unsigned long, daik::DiagnosticsSource)': 32,
+        'daik::(anonymous namespace)::flash_fault_owned(daik::logic::HistoryJournalHeader const&)': 32,
+        'daik::history_restore_fault_flash(unsigned long)': 96,
+        'daik::(anonymous namespace)::flash_fault_page_for(daik::(anonymous namespace)::FlashJournalRecord const&, daik::logic::FaultTracePageInfo&, bool)': 112,
+        'daik::logic::fault_trace_decode_page(daik::logic::CheckupFaultTrace&, daik::logic::FaultTracePageInfo const&, unsigned char const*)': 112,
+        'daik::checkup_fault_restore(daik::logic::CheckupFaultTrace const&, daik::logic::CyclingTraceIdentity const&, long long, unsigned long, daik::DiagnosticsSource)': 64,
+        'daik::logic::checkup_fault_handoff_decode(daik::logic::CheckupFaultTrace&, daik::logic::FaultHandoffPayload const&)': 64,
         'daik::checkup_modbus_confirm_source(daik::ModbusProfile, unsigned long)': 48,
         'unsigned long daik::logic::checkup_modbus_model_fingerprint<daik::def::HomeHubReg>(daik::ModbusProfile, daik::def::HomeHubReg const*, int)': 96,
         'daik::logic::dhw_loss_adopt(daik::logic::DhwLossState&, daik::logic::DhwLossCarry const&, long long)': 128,
@@ -3737,7 +3998,7 @@ def self_test() -> None:
 229: fff7a5 call8 200 <{double_body}>
 """
     number_calls = "".join(f"{0x3003 + offset:x}: fff7a5 call8 3000 <{STATUS_HEALTH_NUMBER_SYMBOL}>\n"
-                           for offset in range(35))
+                           for offset in range(36))
     fixture = fixture.replace("   3: 004136          entry a1, 2976\n",
                               "   3: 004136          entry a1, 2976\n" + number_calls)
     budgets = load_budgets(DEFAULT_BUDGETS)

@@ -40,7 +40,7 @@ static void append(const char* p, size_t n) {
     }
 }
 
-void diag_printf(const char* fmt, ...) {
+void diag_printf(const char* fmt, ...) DAIK_DIAG_NOTHROW {
     char line[256];
     // Uptime prefix, e.g. "[   123.456] " (seconds.milliseconds since boot) — kept even now that
     // SNTP (sntp_time.cpp) gives the device a wall clock, since it is what device-triage's boot-

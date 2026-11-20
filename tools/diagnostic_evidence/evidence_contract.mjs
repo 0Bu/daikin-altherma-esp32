@@ -12,6 +12,7 @@ const SOURCE_ID = /\[((?:D|E|R)\d+)\]/g;
 export const OBSERVATION_SOURCE_FILES = Object.freeze([
   "main/logic/stop_context.hpp", "main/logic/stop_context_input.hpp",
   "main/logic/observation_hourly.hpp", "main/logic/instrument.hpp", "main/logic/heartbeat.hpp",
+  "main/logic/fault_trace.hpp", "main/logic/fault_persist.hpp",
   "main/stop_observation_store.hpp", "main/stop_observation_store.cpp", "main/history.cpp",
   "main/logic/defrost_start.hpp",
 ]);

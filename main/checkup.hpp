@@ -21,6 +21,8 @@
 #include "logic/checkup_persist.hpp"
 #include "logic/config_model.hpp"
 #include "logic/cycling_persist.hpp"
+#include "logic/fault_persist.hpp"
+#include "logic/fault_trace.hpp"
 #include "stop_observation_store.hpp"
 
 #include <cstddef>
@@ -46,6 +48,29 @@ CheckupFlashRestoreResult
                                                   const logic::CyclingTraceIdentity& identity, int64_t now_unix_s,
                                                   TickType_t wait_ticks, DiagnosticsSource source = DiagnosticsSource::X10a);
 void                      checkup_cycling_forget();
+
+struct CheckupFaultStatus {
+    bool                      diagnostics_enabled = false;
+    bool                      source_live         = false;
+    logic::CheckupFaultLatest latest{};
+};
+
+CheckupFaultStatus checkup_fault_latest_status(DiagnosticsSource source = DiagnosticsSource::X10a,
+                                               bool              source_fresh = false);
+bool               checkup_fault_timeline_snapshot(logic::CheckupFaultTrace& out,
+                                                   DiagnosticsSource         source = DiagnosticsSource::X10a);
+bool               checkup_fault_checkpoint(logic::CheckupFaultTrace&    trace,
+                                            logic::CyclingTraceIdentity& identity, uint32_t& reset_token,
+                                            TickType_t wait_ticks, bool periodic_due, bool dirty_due,
+                                            DiagnosticsSource source = DiagnosticsSource::X10a);
+bool               checkup_fault_reset_pending(DiagnosticsSource source = DiagnosticsSource::X10a);
+void               checkup_fault_checkpoint_appended(uint32_t          reset_token,
+                                                     DiagnosticsSource source = DiagnosticsSource::X10a);
+CheckupFlashRestoreResult checkup_fault_restore(const logic::CheckupFaultTrace&    trace,
+                                                const logic::CyclingTraceIdentity& identity,
+                                                int64_t now_unix_s, TickType_t wait_ticks,
+                                                DiagnosticsSource source = DiagnosticsSource::X10a);
+void                      checkup_fault_forget();
 
 // Capture before collecting a poll's inputs, not after the sweep. Admission rejects a token from
 // before any diagnostics transition; this live epoch is independent of the saved generation.

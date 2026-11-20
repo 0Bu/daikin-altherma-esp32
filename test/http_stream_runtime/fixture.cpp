@@ -78,6 +78,9 @@ inline daik::HeatingCurveBinsReport     curve_bins;
 inline bool                             curve_bins_available = false;
 inline daik::logic::CheckupCyclingHours cycling_hours{};
 inline daik::logic::CheckupCyclingTrace cycling_trace{};
+inline daik::CheckupFaultStatus         fault_status{};
+inline daik::logic::CheckupFaultTrace   fault_trace{};
+inline bool                             fault_trace_present = false;
 inline daik::logic::CheckupRestore      checkup_persist     = daik::logic::CheckupRestore::NoRecord;
 inline bool                             reset_after_checkup = false;
 inline unsigned                         stop_report_calls   = 0;
@@ -123,6 +126,9 @@ void reset() {
     curve_bins                 = {};
     curve_bins_available       = false;
     cycling_hours             = {};
+    fault_status               = {};
+    fault_trace.reset();
+    fault_trace_present        = false;
     checkup_persist           = daik::logic::CheckupRestore::NoRecord;
     reset_after_checkup       = false;
     stop_report_calls         = 0;
@@ -483,6 +489,24 @@ logic::CheckupReport checkup_report(logic::CheckupCyclingHours* hours,
         fixture::cycling_hours   = {};
     }
     return report;
+}
+CheckupFaultStatus checkup_fault_latest_status(DiagnosticsSource, bool source_fresh) {
+    if (fixture::fault_trace_present) {
+        CheckupFaultStatus st;
+        st.diagnostics_enabled = fixture::current.diagnostics_enabled;
+        st.source_live         = fixture::fault_trace.live && source_fresh;
+        st.latest = logic::checkup_fault_latest_extract(fixture::fault_trace, source_fresh);
+        return st;
+    }
+    return fixture::fault_status;
+}
+bool checkup_fault_timeline_snapshot(logic::CheckupFaultTrace& out, DiagnosticsSource) {
+    if (!fixture::current.diagnostics_enabled || !fixture::fault_trace_present) {
+        out.reset();
+        return false;
+    }
+    out = fixture::fault_trace;
+    return out.count > 0;
 }
 CheckupStopContextReport checkup_stop_context_report() {
     ++fixture::stop_report_calls;
@@ -1185,6 +1209,53 @@ int main(int argc, char** argv) {
                       "\"modbus\",\"available_sources\":[\"modbus\"]}") != std::string::npos &&
                   req.response.find("\"stop_context\":{\"confirmed\":false") != std::string::npos,
               "status payload missing modbus diagnostics provenance or empty stop_context");
+    });
+    run("status_fault_timeline", [] {
+        current.diagnostics_enabled = true;
+        fault_trace.reset();
+        fault_trace.window_end_s = daik::logic::CHECKUP_FAULT_WINDOW_S;
+        fault_trace.unix_s       = 1795000000u;
+        fault_trace.boot_s       = 500;
+        fault_trace.end_s        = 86390;
+        fault_trace.live         = true;
+        fault_trace.push(80000, {daik::logic::FaultTraceKind::Normal});
+        fault_trace.push(86000,
+                         {daik::logic::FaultTraceKind::Error, daik::logic::FaultUnitOrigin::Indoor,
+                          daik::logic::fault_code_pack("7H"), daik::logic::fault_aux_subcode(1)});
+        fault_trace.push(86025, {daik::logic::FaultTraceKind::Normal});
+        fault_trace_present = true;
+
+        auto req = request();
+        check(invoke(req, "/status", daik::h_status) == ESP_OK, "status fault unredacted failed");
+        successful(req);
+        check(req.response.find("\"latest\":{\"code\":\"7H-01\",\"base_code\":\"7H\","
+                                "\"state\":\"fault\",\"subcode\":1,\"unit\":\"indoor\","
+                                "\"ongoing\":false,\"stop_unknown\":false") != std::string::npos &&
+                  req.response.find("\"start_unix_s\":1794999600,\"end_unix_s\":1794999625") !=
+                      std::string::npos &&
+                  req.response.find("\"timeline\":{\"unix_s\":1795000000,"
+                                    "\"window_end_s\":86400,\"observed_end_s\":86390") !=
+                      std::string::npos,
+              "unredacted /status missing fault latest or timeline");
+
+        req = request();
+        check(invoke(req, "/status?redact=1", daik::h_status) == ESP_OK,
+              "status fault redacted failed");
+        successful(req);
+        check(req.response.find("\"latest\":{\"code\":\"7H-01\"") != std::string::npos &&
+                  req.response.find("\"start_unix_s\"") == std::string::npos &&
+                  req.response.find("\"end_unix_s\"") == std::string::npos &&
+                  req.response.find("\"timeline\":{\"unix_s\":1795000000") == std::string::npos,
+              "redacted /status leaked fault timeline or wall timestamps");
+
+        fail_trace_snapshot = true;
+        req                 = request();
+        const esp_err_t rc  = invoke(req, "/status", daik::h_status);
+        fail_trace_snapshot = false;
+        check(rc == ESP_OK, "fault trace OOM fallback must degrade cleanly without 500");
+        successful(req);
+        check(req.response.find("\"latest\":{\"code\":\"7H-01\"") != std::string::npos,
+              "fault trace OOM fallback lost latest summary");
     });
     check(count > 0, "unknown oracle");
     std::printf("PASS total=%u\n", count);

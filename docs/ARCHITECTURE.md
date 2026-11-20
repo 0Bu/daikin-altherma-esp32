@@ -324,6 +324,15 @@ orderly shutdown can save the undated fence even before time sync or trend resto
 observations are admitted by that fence-only drain. Restored observations keep
 their saved times and age with a monotonic floor. The journal retains its existing geometry.
 
+Unit-reported fault traces ([`fault_trace.hpp`](../main/logic/fault_trace.hpp),
+[`fault_persist.hpp`](../main/logic/fault_persist.hpp)) record X10A and Modbus fault, warning,
+caution, normal, and gap transitions independently at second resolution in separate 24-hour buffers.
+Compatible warm restarts transfer the trace via `.noinit` handoff; cold boots restore from single-page
+256-byte flash checkpoints (`FLT1`/`FLM1`) after synchronized time and identity verification; scoped
+source or model resets queue independent reset fences (`FLR1`/`FMB1`) without cross-source
+coupling, while factory history forgetting latches boot-local suppression on both slots and erases
+the history partition.
+
 Hourly diagnosis state grows by source, not by bucket. Each byte added to `CheckupBucket` or
 `DhwLossBucket` is held 24 times in `.noinit` (23 completed hours and the open one) and once per
 journal record, and 23 stored records must still fit the 4 KiB sector scratch (see Memory

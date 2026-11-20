@@ -1,4 +1,4 @@
-// translation-source: 42a4d77a832a12c84359f017fdcacdd939405dc965a062a922c2d18aafa2ff0e
+// translation-source: d65d3b16aadf37eb87ecbe27037b388b04d755399b25c0257655dd6a6be12909
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -261,6 +261,21 @@ I18N.es = localeValues([
   /* check.fault_none */ "Ninguno activo",
   /* check.fault_unknown */ "Desconocido",
   /* check.fault_past_unknown */ "Previo · sin dato",
+  /* check.fault_since_short */ (d) => `desde hace ${d}`,
+  /* check.fault_ago_short */ (d) => `hace ${d}`,
+  /* check.fault_hero_ok */ (d) => `Sin fallos ni avisos en ${d} de observación de 24 h.`,
+  /* check.fault_latched_only */ "La bomba de calor indica un fallo almacenado; ningún episodio con marca temporal cayó en las 24 h registradas.",
+  /* check.fault_unit_outdoor */ "Unidad exterior",
+  /* check.fault_unit_indoor */ "Unidad interior",
+  /* check.fault_unit_both */ "Exterior + interior",
+  /* check.fault_secondary */ (s) => `También activo: ${s}`,
+  /* check.fault_stop_ongoing */ "activo",
+  /* check.fault_stop_unknown */ "incierto",
+  /* check.fault_col_code */ "Código",
+  /* check.fault_col_meaning */ "Significado",
+  /* check.fault_ok_label */ "Sin fallos",
+  /* check.fault_gap_label */ "Sin medición",
+  /* check.fault_severity_caution */ "Precaución",
   /* check.retry_seen */ "Aumento",
   /* check.retry_none */ "Sin aumento",
   /* service.metric.comp */ "Compresor",
@@ -1300,7 +1315,7 @@ DESCRIPTION_I18N.es = descriptionValues([
 ]);
 
 MODEL_DESCRIPTION_I18N.es = modelDescriptionValues([
-  ["Mensajes de la bomba", "no prueban causa ni resolución."], // health_fault
+  ["Muestra los códigos de error y aviso comunicados por la bomba de calor; las descripciones breves son indicaciones generales de Daikin y que desaparezca un código no demuestra que se haya corregido la causa."], // health_fault
   ["R5T: un punto del depósito estratificado, no energía.", "Indicio interno ≥0,8 K/h sin señales de bomba/consumo. Consumo posible sin señales; 0 K/h no excluye pérdidas. Circulación no prueba causa."], // health_dhw_loss
   ["Si faltan mediciones, algunos arranques pueden quedar sin contar.", "No hay un número fijo de arranques normal. Con datos suficientes, esta comprobación considera adecuada una duración media de al menos 10 minutos en los ciclos de calefacción terminados."], // health_cycling
   ["Desescarche", "≥3 asociados, >15% del tiempo de marcha del compresor con estados de compresor y desescarche legibles. Regla interna, no Daikin; faltan humedad y temperatura de toda la batería."], // health_defrost

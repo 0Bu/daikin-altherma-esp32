@@ -67,7 +67,7 @@ function wire() {
     // A scrub that ended on the plot must not fall through to the accordion header and collapse the
     // very panel the user was reading. On touch screens the gesture may start on the tooltip strip
     // above the plot, so the whole graph is part of this guard rather than only [data-hist].
-    if (e.target.closest(".vhist-graph")) return;
+    if (e.target.closest(".vhist-graph, .checkup-fault-chart, .checkup-fault-table-wrap")) return;
     const desc = e.target.closest("[data-desc]");
     if (desc) toggleDesc(desc);
   });
@@ -94,6 +94,7 @@ function wire() {
   }
   for (const host of ["valueGroups", "inspCard", "settingsCards"]) wireTrendScrub($(host));
   wireCyclingChart($("valueGroups"));
+  wireFaultChart($("valueGroups"));
 
   // Schematic inspector: the SVG hit targets are <g> elements, so Enter/Space need handling by hand
   // (a <g role="button"> gets no native activation). Delegated, because the SVG is static DOM.
@@ -295,6 +296,100 @@ function wireCyclingChart(host) {
   });
 }
 
+function wireFaultChart(host) {
+  const nearestFaultSegs = (track, clientX, radius = 20) => {
+    const segs = [...track.querySelectorAll("[data-fault-seg]")];
+    let min = Infinity;
+    const within = [];
+    for (const seg of segs) {
+      const r = seg.getBoundingClientRect();
+      const d = clientX < r.left ? r.left - clientX : clientX > r.right ? clientX - r.right : 0;
+      if (d < min) min = d;
+      if (d <= radius) within.push({ seg, d });
+    }
+    return { min, within };
+  };
+  const setReadout = (panel, text) => {
+    const out = panel?.querySelector(".checkup-fault-readout");
+    if (!out) return;
+    const next = text != null ? text : (out.dataset.faultDefault || "");
+    if (out.textContent !== next) out.textContent = next;
+  };
+  const sameSet = (a, b) => !!a && !!b && a.size === b.size && [...a].every(v => b.has(v));
+  host.addEventListener("click", (e) => {
+    const chip = e.target.closest("button.fault-chip[data-fault-chip]");
+    if (chip) {
+      e.preventDefault();
+      e.stopPropagation();
+      const panel = chip.closest("[data-checkup-fault]");
+      const code = chip.dataset.faultChip;
+      if (S.faultCodes.has(code)) S.faultCodes.delete(code);
+      else S.faultCodes.add(code);
+      syncCheckupFaultPanel(panel);
+      delete _html[host.id];
+      return;
+    }
+    const track = e.target.closest(".checkup-fault-track");
+    if (!track) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const panel = track.closest("[data-checkup-fault]");
+    if (e.detail === 0) {
+      const first = track.querySelector("[data-fault-seg]");
+      if (!first) return;
+      const next = new Set([first.dataset.faultSeg]);
+      S.faultSnapKeys = sameSet(S.faultSnapKeys, next) ? null : next;
+      setReadout(panel, S.faultSnapKeys ? first.dataset.faultTip : null);
+      syncCheckupFaultPanel(panel);
+      delete _html[host.id];
+      return;
+    }
+    const { min, within } = nearestFaultSegs(track, e.clientX, 20);
+    if (min <= 20 && within.length) {
+      within.sort((a, b) => a.d - b.d);
+      const next = new Set(within.map(w => w.seg.dataset.faultSeg));
+      S.faultSnapKeys = sameSet(S.faultSnapKeys, next) ? null : next;
+      setReadout(panel, S.faultSnapKeys ? within[0].seg.dataset.faultTip : null);
+    } else {
+      S.faultSnapKeys = null;
+      setReadout(panel, null);
+    }
+    syncCheckupFaultPanel(panel);
+    delete _html[host.id];
+  });
+  host.addEventListener("pointermove", (e) => {
+    const track = e.target.closest(".checkup-fault-track");
+    if (!track || track.closest("[hidden], [inert]")) return;
+    const panel = track.closest("[data-checkup-fault]");
+    const { min, within } = nearestFaultSegs(track, e.clientX, 20);
+    if (min <= 20 && within.length) {
+      within.sort((a, b) => a.d - b.d);
+      setReadout(panel, within[0].seg.dataset.faultTip);
+      return;
+    }
+    const span = [...track.querySelectorAll("[data-fault-tip]")].find((el) => {
+      const r = el.getBoundingClientRect();
+      return e.clientX >= r.left && e.clientX <= r.right;
+    });
+    setReadout(panel, span ? span.dataset.faultTip : null);
+  });
+  host.addEventListener("pointerout", (e) => {
+    const track = e.target.closest(".checkup-fault-track");
+    if (!track || track.contains(e.relatedTarget)) return;
+    setReadout(track.closest("[data-checkup-fault]"), null);
+  });
+  host.addEventListener("keydown", (e) => {
+    const track = e.target.closest(".checkup-fault-track");
+    if (!track) return;
+    if (e.key === "Escape") {
+      S.faultSnapKeys = null;
+      setReadout(track.closest("[data-checkup-fault]"), null);
+      syncCheckupFaultPanel(track.closest("[data-checkup-fault]"));
+      delete _html[host.id];
+    }
+  });
+}
+
 function wireTrendScrub(gv) {
   gv.addEventListener("click", (e) => {
     const button = e.target.closest("[data-hist-series]");
@@ -402,7 +497,7 @@ function wireRestOfApp() {
   $("settingsCards").addEventListener("click", (e) => {
     // A scrub that ended on a memory row's chart must not fall through to the accordion header and
     // collapse the panel the user was reading — the same guard #valueGroups carries.
-    if (e.target.closest(".vhist-graph")) return;
+    if (e.target.closest(".vhist-graph, .checkup-fault-chart, .checkup-fault-table-wrap")) return;
     const desc = e.target.closest("[data-desc]");
     if (desc) {
       const probe = desc.dataset.desc === "protocol:diagnosis";
