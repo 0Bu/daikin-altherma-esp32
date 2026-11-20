@@ -82,7 +82,7 @@ const nativeModes = [
   ["altherma4_unit_operation_mode", 2, "Space heating", "Raumheizung"],
   ["altherma4_unit_operation_mode", 3, "Space cooling", "Raumkühlung"],
   ["altherma4_unit_operation_mode", 4, "Actuator", "Stellantrieb"],
-  ["altherma4_quiet_selection", 0, "OFF", "OFF"],
+  ["altherma4_quiet_selection", 0, "OFF", "Aus"],
   ["altherma4_quiet_selection", 1, "Automatic", "Automatisch"],
   ["altherma4_quiet_selection", 2, "Manual", "Manuell"],
 ];
@@ -173,14 +173,16 @@ assert.equal(en.sgBoostText(), "BOOST", "English boost marker is compact and sou
 assert.equal(de.sgBoostText(), "BOOST", "German boost marker is compact and source-free");
 
 assert.equal(en.displayValue({ value: "1", binary: true }), "ON", "a real binary 1 remains ON");
-assert.equal(de.displayValue({ value: "0", binary: true }), "OFF", "a real binary 0 remains OFF");
+assert.equal(en.displayValue({ value: "0", binary: true }), "OFF", "a real binary 0 remains OFF");
+assert.equal(de.displayValue({ value: "1", binary: true }), "An", "a real binary 1 becomes German An");
+assert.equal(de.displayValue({ value: "0", binary: true }), "Aus", "a real binary 0 becomes German Aus");
 const selectorStates = [
   ["valve_dhw", "0", "Space heating", "Raumheizung"],
   ["valve_dhw", "1", "DHW", "Brauchwarmwasser"],
   // `valve_heat` is the legacy stable id for an optional shut-off-valve OUTPUT. It is not the
   // independently configured/current heating-cooling mode and therefore stays electrical ON/OFF.
-  ["valve_heat", "0", "OFF", "OFF"],
-  ["valve_heat", "1", "ON", "ON"],
+  ["valve_heat", "0", "OFF", "Aus"],
+  ["valve_heat", "1", "ON", "An"],
 ];
 for (const [semantic, value, english, german] of selectorStates) {
   const row = { value, binary: true, binary_semantic: semantic };
@@ -191,11 +193,11 @@ const heatingMode = { value: 1, enum: "operation_mode" };
 const idleValve = { value: "0", binary: true, binary_semantic: "valve_heat" };
 assert.equal(de.displayValue(heatingMode), "Heizen",
   "the configured HomeHub mode remains Heating while space operation is idle");
-assert.equal(de.displayValue(idleValve), "OFF",
-  "the independent 2WV output remains OFF and must not invent Cooling");
+assert.equal(de.displayValue(idleValve), "Aus",
+  "the independent 2WV output remains Aus and must not invent Cooling");
 assert.notEqual(de.displayValue(idleValve), "Kühlen");
 assert.equal(de.displayValue({ value: "1", binary: true, binary_semantic: "smart_grid_contact_1" }),
-  "ON", "an individual Smart-Grid contact remains an electrical ON/OFF fact");
+  "An", "an individual Smart-Grid contact remains an electrical An/Aus fact");
 assert.equal(en.displayValue({ value: "0", binary: true, binary_semantic: "unknown_future" }),
   "OFF", "an unknown semantic id fails back to the ordinary flag contract");
 assert.equal(de.displayValue({ value: "1" }), "1", "an untyped numeric one is never guessed to be a switch");
