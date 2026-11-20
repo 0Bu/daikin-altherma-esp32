@@ -131,15 +131,17 @@ function api({ lang = "en", x10a = true, values = [] } = {}) {
 // ── Both languages, and the seconds tier ────────────────────────────────────────────────────────
 {
   const de = api({ lang: "de" });
-  assert.match(txt(de.dwellNoteHtml(ROW({ dwell_s: 12000 }), "OFF")), /OFF seit 3 h 20 min/);
-  assert.match(txt(de.dwellNoteHtml(ROW({ dwell_s: 12000, dwell_min: true }), "OFF")),
-    /OFF ≥ 3 h 20 min/, "the weaker claim must survive translation");
+  assert.match(txt(de.dwellNoteHtml(ROW({ dwell_s: 12000 }), "Aus")), /Aus seit 3 h 20 min/);
+  assert.match(txt(de.dwellNoteHtml(ROW({ dwell_s: 12000, dwell_min: true }), "Aus")),
+    /Aus ≥ 3 h 20 min/, "the weaker claim must survive translation");
   // The relation symbol is language-neutral, so both dictionaries carry the identical form — but it
   // must still be PRESENT in both, or a missing key would fall back to English and read the same by
   // accident, hiding the omission from every check.
-  assert.match(txt(de.dwellNoteHtml(ROW({ dwell_s: 1710, dwell_min: true }), "OFF")), /OFF ≥ 28 min/);
-  assert.match(txt(de.dwellNoteHtml(ROW({ dwell_s: 12000, dwell_blind_s: 600 }), "OFF")),
+  assert.match(txt(de.dwellNoteHtml(ROW({ dwell_s: 1710, dwell_min: true }), "Aus")), /Aus ≥ 28 min/);
+  assert.match(txt(de.dwellNoteHtml(ROW({ dwell_s: 12000, dwell_blind_s: 600 }), "Aus")),
     /davon 10 min nicht beobachtet/);
+  assert.match(txt(de.vDescRow(ROW({ dwell_s: 12000 }))), /Aus seit 3 h 20 min/,
+    "the German row integrates displayValue and dwellNoteHtml");
   // Sub-minute resolution exists only here: a flag that switched twenty seconds ago is the case a
   // reader is most likely looking at, and the chart raster's "0 min" makes a live number look dead.
   assert.equal(de.dwellDuration(20), "20 s");

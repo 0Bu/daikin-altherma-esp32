@@ -1301,7 +1301,7 @@ const INSPECT = {
       : on
         ? { en: "Electric tank heater active.", de: "Heizstab aktiv." }
         : { en: "Off — the tank is not using its electric immersion heater.",
-            de: "OFF — der Heizstab im Speicher ist nicht aktiv." };
+            de: "Aus — der Heizstab im Speicher ist nicht aktiv." };
     },
   },
   valve: {
@@ -1320,9 +1320,9 @@ const INSPECT = {
     head: (d) => d.valve2On == null ? "—" : t(d.valve2On ? "state.on" : "state.off"),
     now: (d) => d.valve2On == null ? null : d.valve2On
       ? { en: "X10A reports the 2-way-valve output ON. This alone proves neither active Heating nor the mechanical valve position; check operating mode and space operation separately.",
-          de: "X10A meldet für den 2WV-Ausgang ON. Das allein beweist weder aktiven Heizbetrieb noch die mechanische Ventilstellung; Betriebsart und Raumbetrieb separat prüfen." }
+          de: "X10A meldet für den 2WV-Ausgang An. Das allein beweist weder aktiven Heizbetrieb noch die mechanische Ventilstellung; Betriebsart und Raumbetrieb separat prüfen." }
       : { en: "X10A reports the 2-way-valve output OFF. This alone does not mean Cooling or contradict a configured Heating mode, especially while space operation is idle.",
-          de: "X10A meldet für den 2WV-Ausgang OFF. Daraus allein folgt weder Kühlbetrieb noch ein Widerspruch zur eingestellten Betriebsart Heizen – besonders wenn der Raumbetrieb ruht." },
+          de: "X10A meldet für den 2WV-Ausgang Aus. Daraus allein folgt weder Kühlbetrieb noch ein Widerspruch zur eingestellten Betriebsart Heizen – besonders wenn der Raumbetrieb ruht." },
   },
   tank: {
     t: { en: "DHW tank / thermal store", de: "Warmwasser-/Wärmespeicher" },
@@ -1398,9 +1398,9 @@ const INSPECT = {
       : d.pumpOn === true
         ? d.flow != null
           ? { en: `The pump status is ON, but the flow sensor reports only ${fmt1(d.flow)} l/min; water circulation is not established.`,
-              de: `Der Pumpenstatus ist ON, der Durchflusssensor meldet jedoch nur ${fmt1(d.flow)} l/min; Wasserzirkulation ist damit nicht belegt.` }
+              de: `Der Pumpenstatus ist An, der Durchflusssensor meldet jedoch nur ${fmt1(d.flow)} l/min; Wasserzirkulation ist damit nicht belegt.` }
           : { en: "The pump status is ON, but no flow measurement is available; water circulation is not confirmed.",
-              de: "Der Pumpenstatus ist ON, ein Durchflussmesswert fehlt jedoch; Wasserzirkulation ist damit nicht bestätigt." }
+              de: "Der Pumpenstatus ist An, ein Durchflussmesswert fehlt jedoch; Wasserzirkulation ist damit nicht bestätigt." }
       : d.pumpOn === false || d.pump === 0
         ? d.flow != null
           ? { en: `The pump reports stopped; the flow sensor reports ${fmt1(d.flow)} l/min. These readings do not establish water circulation.`,
@@ -1546,9 +1546,9 @@ const INSPECT = {
     head: (d) => d.flowSwitch == null ? "—" : t(d.flowSwitch ? "state.on" : "state.off"),
     now: (d) => d.flowSwitch == null ? null : d.flowSwitch
       ? { en: `The X10A binary status is ON. It is not a flow-rate measurement or proof that the model-specific minimum is met; compare it with the pump and ${fmt1(d.flow)} l/min flow reading.`,
-          de: `Der binäre X10A-Status ist ON. Er ist weder eine Durchflussmessung noch ein Nachweis des modellspezifischen Mindestwerts; mit Pumpe und dem Messwert von ${fmt1(d.flow)} l/min vergleichen.` }
+          de: `Der binäre X10A-Status ist An. Er ist weder eine Durchflussmessung noch ein Nachweis des modellspezifischen Mindestwerts; mit Pumpe und dem Messwert von ${fmt1(d.flow)} l/min vergleichen.` }
       : { en: `The X10A binary status is OFF. That is normally expected with a stopped pump; if the pump runs, compare it with the ${fmt1(d.flow)} l/min flow reading and any 7H/C0 fault.`,
-          de: `Der binäre X10A-Status ist OFF. Bei stehender Pumpe ist das normalerweise zu erwarten; läuft die Pumpe, mit dem Messwert von ${fmt1(d.flow)} l/min und einer möglichen 7H-/C0-Störung vergleichen.` },
+          de: `Der binäre X10A-Status ist Aus. Bei stehender Pumpe ist das normalerweise zu erwarten; läuft die Pumpe, mit dem Messwert von ${fmt1(d.flow)} l/min und einer möglichen 7H-/C0-Störung vergleichen.` },
     rows: [/water flow switch/i, /flow sensor/i, /water pump operation/i],
   },
   wp: {

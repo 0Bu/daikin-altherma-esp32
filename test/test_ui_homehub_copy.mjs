@@ -133,11 +133,15 @@ for (const row of rows) {
     const de = `${d.de.what} ${d.de.normal || ""}`;
     for (const state of ["ON", "OFF"]) {
       assert.match(en, new RegExp(`\\b${state}\\b`), `${row.label}: English must name ${state}`);
+    }
+    for (const state of ["An", "Aus"]) {
       assert.match(de, new RegExp(`\\b${state}\\b`), `${row.label}: German must name ${state}`);
     }
+    assert.doesNotMatch(de, /\b(?:ON|OFF)\b/,
+      `${row.label}: German status prose must use the visible An/Aus states`);
     assert.doesNotMatch(de,
-      /standardmäßig\s+(?:ein|aus)|\b(?:Status|Wert|Modus)\s+(?:ist|steht auf)\s+(?:ein|aus)|\b(?:eingeschaltet|ausgeschaltet)\b/i,
-      `${row.label}: German status prose must use the visible ON/OFF states`);
+      /standardmäßig\s+(?:ein|aus)|\b(?:Status|Wert|Modus)\s+(?:ist|steht auf)\s+ein\b|\b(?:eingeschaltet|ausgeschaltet)\b/i,
+      `${row.label}: German status prose must use the visible An/Aus states`);
   }
 }
 
