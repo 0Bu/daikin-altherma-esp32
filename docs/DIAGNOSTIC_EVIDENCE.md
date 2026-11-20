@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: f52be764a17784b0cab452f0ad9add3096d3d63aa23e91bc52d40faa49d2768c -->
+<!-- diagnostic-evidence-contract: ee5fb61ae14381f73f1abbd8b16387945790f15788a9997d03dae3daaa0a950e -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -153,17 +153,25 @@ not established by any field reading; on the Monobloc CA it rests on the project
 
 **External evidence:** Daikin's Altherma 3 R W installer reference states that the user interface
 shows a short and long description when a malfunction occurs. Its error-code table includes
-refrigerant-circuit, electronics, and 7H water-flow faults ([D1], section 12.4, printed pages 89–90).
-HomeHub EKRHH Modbus exposes a single general unit-error state in input register 21 ([D3], Modbus
-input registers).
+refrigerant-circuit, electronics, and 7H water-flow faults with main codes and subcodes ([D1],
+section 12.4, printed pages 89–90). HomeHub EKRHH and Altherma 4 Modbus expose unit abnormality in
+input register 21 alongside the error code in input register 22 and subcode in input register 23
+([D3], Modbus input registers; [D4], section 7.2).
 
 **Firmware rule:** A currently readable error class produces **WARNING** immediately; warnings and
-cautions produce **NOTE**. An earlier observed error/warning flag remains a **NOTE** in the rolling
+cautions produce **NOTE**. Supported faults, warnings, cautions, normal readings, and unreadable
+gaps are recorded independently for X10A (`0x10`/`0x60`, converters 203/204) and Modbus (input
+registers 21–23) in a second-resolution rolling 24-hour trace (`CheckupFaultTrace`), preserved across
+compatible warm restarts via `.noinit` handoff (`PersistedFaultHandoff`) and persisted across
+power cycles via single-page flash checkpoints and reset fences (`FLT1`/`FLR1` for X10A,
+`FLM1`/`FMB1` for Modbus). An earlier retained episode remains a **NOTE** in the rolling 24-hour
 window. Normal requires every fault-class row supplied by the profile to be readable and normal.
-Missing current rows cannot establish that a retained fault has cleared. X10A and Modbus track
-independent fault histories (`checkup_modbus_coverage` supplies 1 fault row on Modbus). See the
-Fault branch of [checkup_evaluate()](../main/logic/checkup.hpp) and
-[fault_state.hpp](../main/logic/fault_state.hpp).
+Missing current rows cannot establish that a retained fault has cleared. Redacted `/status?redact=1`
+omits `timeline` and wall-clock `start_unix_s`/`end_unix_s` timestamps while retaining relative
+`latest` episode state (`age_s`, `duration_s`) when present. See the Fault branch of
+[checkup_evaluate()](../main/logic/checkup.hpp), [fault_state.hpp](../main/logic/fault_state.hpp),
+[fault_trace.hpp](../main/logic/fault_trace.hpp), and
+[fault_persist.hpp](../main/logic/fault_persist.hpp).
 
 **Not established:** The supported classes are not a comprehensive plant-health test. No root
 cause, spontaneous recovery, absence of intervention or code-specific service conclusion is inferred.
@@ -538,9 +546,10 @@ cannot be reconstructed from the retained flag.
 
 - **[D3]** Daikin, *EKRHH Daikin HomeHub – Installer reference guide*, model
   EKRHH, document **4P744838-1E**, revision 2026-01:
-  [official PDF][D3-pdf]. Sections used: Modbus input registers (unit fault 21, internal pump 30,
-  compressor 31, tank booster heater BSH 32, 3-way valve 37, operation mode 38, DHW sensor R5T 43,
-  outdoor ambient 44, and leaving water flow rate 49 scaled by 1/100).
+  [official PDF][D3-pdf]. Sections used: Modbus input registers (unit fault 21, error code 22,
+  subcode 23, internal pump 30, compressor 31, tank booster heater BSH 32, 3-way valve 37,
+  operation mode 38, DHW sensor R5T 43, outdoor ambient 44, and leaving water flow rate 49 scaled
+  by 1/100).
 
 <a id="source-d4"></a>
 

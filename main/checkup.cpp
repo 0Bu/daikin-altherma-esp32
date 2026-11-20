@@ -26,6 +26,10 @@
 #include "rtos_guard.hpp"   // SemGuard — the ONE unwind-safe mutex guard
 
 #include <atomic>
+#include <cstdlib>
+#include <cstring>
+#include <memory>
+#include <new>
 
 namespace daik {
 
@@ -46,6 +50,16 @@ struct PersistedDhwHandoff {
     logic::DhwLossHandoffPayload payload;
 };
 
+struct PersistedFaultHandoff {
+    uint32_t                   magic;
+    uint16_t                   version;
+    uint16_t                   reserved;
+    uint32_t                   tail_gap_s;
+    uint32_t                   model_fp;
+    uint32_t                   crc;
+    logic::FaultHandoffPayload payload;
+};
+
 struct PersistedCheckup {
     uint32_t magic;
     uint16_t version;
@@ -62,7 +76,8 @@ struct PersistedCheckup {
     // One-shot checkpoint written by esp_restart's shutdown handler.  It has its own seal because
     // ring integrity must remain usable to validate the handoff while this open state is changing.
     // checkup_start consumes it before any producer exists and retires all completed RAM hours.
-    PersistedDhwHandoff dhw_handoff;
+    PersistedDhwHandoff   dhw_handoff;
+    PersistedFaultHandoff fault_handoff;
 };
 
 // UNINITIALISED STORAGE, and the UNION is what makes it that — history.cpp's PersistStore carries
@@ -130,6 +145,19 @@ struct CheckupSlot {
     std::atomic<uint32_t>          cycling_reset_acked{0};
     uint32_t                       cycling_hours_epoch   = 0;
     int32_t                        cycling_newest_bucket = 0;
+    logic::CheckupFaultTrace       fault_trace{};
+    logic::CheckupFaultTrace       fault_restored{};
+    uint32_t                       fault_restore_anchor = 0;
+    int64_t                        fault_warm_gap_s     = -1;
+    logic::FaultHandoffPayload     fault_boot_handoff{};
+    uint32_t                       fault_boot_handoff_model      = 0;
+    uint32_t                       fault_boot_handoff_tail_gap_s = 0;
+    bool                           fault_boot_handoff_valid      = false;
+    bool                           fault_trace_dirty             = false;
+    bool                           fault_restore_allowed         = false;
+    std::atomic<bool>              fault_forgotten{false};
+    std::atomic<uint32_t>          fault_reset_token{0};
+    std::atomic<uint32_t>          fault_reset_acked{0};
     // Capability of the CURRENT confirmed profile.
     logic::CheckupCoverage cov{};
     daik::FaultClass       fault_now      = daik::FaultClass::Unknown;
@@ -204,6 +232,64 @@ void retire_cycling_locked(CheckupSlot& slot) {
     slot.cycling_restored.reset();
     const uint32_t next = slot.cycling_reset_token.load(std::memory_order_relaxed) + 1u;
     slot.cycling_reset_token.store(next ? next : 1u, std::memory_order_release);
+}
+
+void retire_fault_locked(CheckupSlot& slot) {
+    slot.fault_restore_allowed = false;
+    slot.fault_restored.reset();
+    slot.fault_restore_anchor = 0;
+    slot.fault_warm_gap_s     = -1;
+    slot.fault_trace_dirty    = false;
+    const uint32_t next       = slot.fault_reset_token.load(std::memory_order_relaxed) + 1u;
+    slot.fault_reset_token.store(next ? next : 1u, std::memory_order_release);
+}
+
+[[gnu::noinline]] bool fault_snapshot_locked(CheckupSlot& slot, logic::CheckupFaultTrace& out,
+                                             int64_t now_us, bool require_wall_clock) {
+    if (slot.fault_forgotten.load(std::memory_order_acquire) || !slot.source_confirmed ||
+        (!slot.fault_trace.count && !slot.fault_restored.count) || now_us < 0 ||
+        now_us / 1000000 > logic::CheckupFaultTrace::max_second)
+        return false;
+    int64_t unix_s = -1;
+    int32_t ms     = 0;
+    time_now(unix_s, ms);
+    const auto     boot_s = static_cast<uint32_t>(now_us / 1000000);
+    const uint32_t wall =
+        logic::checkup_cycling_end_unix_s(now_us - now_us % 1000000, now_us, unix_s, ms);
+    if (require_wall_clock && wall <= boot_s) return false;
+    const uint32_t eff_wall = wall > boot_s ? wall : 0;
+    if (eff_wall > boot_s)
+        slot.fault_restore_anchor = std::max(slot.fault_restore_anchor, eff_wall - boot_s);
+    const int64_t oldest_saved_unix = eff_wall > boot_s
+                                          ? static_cast<int64_t>(slot.fault_restore_anchor) +
+                                                boot_s - logic::CHECKUP_FAULT_WINDOW_S
+                                          : 0;
+    logic::checkup_fault_snapshot(out, slot.fault_restored, slot.fault_trace, eff_wall, boot_s,
+                                  oldest_saved_unix, slot.fault_warm_gap_s);
+    if (require_wall_clock && !out.unix_s) return false;
+    return out.count > 0 && !slot.fault_forgotten.load(std::memory_order_acquire);
+}
+
+[[gnu::noinline]] uint8_t fault_saved_flags_locked(CheckupSlot& slot, int64_t now_us) {
+    if (slot.fault_forgotten.load(std::memory_order_acquire) || !slot.source_confirmed ||
+        !slot.fault_restored.count || now_us < 0 ||
+        now_us / 1000000 > logic::CheckupFaultTrace::max_second)
+        return 0;
+    int64_t unix_s = -1;
+    int32_t ms     = 0;
+    time_now(unix_s, ms);
+    const auto     boot_s = static_cast<uint32_t>(now_us / 1000000);
+    const uint32_t wall =
+        logic::checkup_cycling_end_unix_s(now_us - now_us % 1000000, now_us, unix_s, ms);
+    const uint32_t eff_wall = wall > boot_s ? wall : 0;
+    if (eff_wall > boot_s)
+        slot.fault_restore_anchor = std::max(slot.fault_restore_anchor, eff_wall - boot_s);
+    const int64_t oldest_saved_unix = eff_wall > boot_s
+                                          ? static_cast<int64_t>(slot.fault_restore_anchor) +
+                                                boot_s - logic::CHECKUP_FAULT_WINDOW_S
+                                          : 0;
+    return logic::checkup_fault_saved_window_flags(slot.fault_restored, eff_wall, boot_s,
+                                                   oldest_saved_unix, slot.fault_warm_gap_s);
 }
 
 [[gnu::noinline]] bool cycling_snapshot_locked(CheckupSlot& slot, logic::CheckupCyclingTrace& out,
@@ -359,11 +445,19 @@ void persist_wipe(CheckupSlot& slot, bool keep_handoff = false) {
     slot.cycling_restored.reset();
     if (!slot.is_modbus) s_defrost_start = {};
     slot.cycling_restore_anchor = 0;
+    slot.fault_trace.reset();
+    slot.fault_restored.reset();
+    slot.fault_restore_anchor = 0;
+    slot.fault_warm_gap_s     = -1;
+    slot.fault_trace_dirty    = false;
     for (auto& expiry : slot.slot_times.expiry_us) expiry = 0;
     for (auto& end : slot.slot_times.restored_end_unix_s) end = 0;
     ++slot.cycling_hours_epoch;
     slot.cycling_newest_bucket = 0;
-    if (!keep_handoff) slot.P().dhw_handoff.magic = 0;
+    if (!keep_handoff) {
+        slot.P().dhw_handoff.magic   = 0;
+        slot.P().fault_handoff.magic = 0;
+    }
     slot.P().boots_since_commit =
         0; // reserved integrity counter; no completed RAM hours are adopted
     slot.last_commit_us    = kNoCommitUs;
@@ -381,7 +475,8 @@ void persist_wipe(CheckupSlot& slot, bool keep_handoff = false) {
 
 bool apply_reset_locked(CheckupSlot& slot) {
     if (!slot.reset_requested.exchange(false)) return false;
-    slot.boot_handoff_valid = false;
+    slot.boot_handoff_valid       = false;
+    slot.fault_boot_handoff_valid = false;
     slot.dhw_reset_requested.store(false);
     slot.state     = logic::CheckupState{};
     slot.dhw_state = kFreshDhwLossState;
@@ -538,6 +633,40 @@ bool sealed_flash_next_locked(const CheckupSlot& slot, int64_t after_bucket, int
     return logic::checkup_journal_bucket(payload.end_unix_s) == bucket;
 }
 
+[[gnu::noinline]] void fault_save_handoff_locked(CheckupSlot& slot, int64_t now_us) {
+    PersistedFaultHandoff& fh = slot.P().fault_handoff;
+    fh.magic                  = 0;
+    if (!slot.source_confirmed || slot.fault_forgotten.load(std::memory_order_acquire) ||
+        (!slot.fault_trace.count && !slot.fault_restored.count) || now_us < 0 ||
+        now_us / 1000000 > logic::CheckupFaultTrace::max_second)
+        return;
+    int64_t unix_s = -1;
+    int32_t ms     = 0;
+    time_now(unix_s, ms);
+    const auto     boot_s = static_cast<uint32_t>(now_us / 1000000);
+    const uint32_t wall =
+        logic::checkup_cycling_end_unix_s(now_us - now_us % 1000000, now_us, unix_s, ms);
+    const uint32_t eff_wall = wall > boot_s ? wall : 0;
+    if (eff_wall > boot_s)
+        slot.fault_restore_anchor = std::max(slot.fault_restore_anchor, eff_wall - boot_s);
+    const int64_t oldest_saved = eff_wall > boot_s
+                                     ? static_cast<int64_t>(slot.fault_restore_anchor) + boot_s -
+                                           logic::CHECKUP_FAULT_WINDOW_S
+                                     : 0;
+    uint32_t      tail_gap_s   = 0;
+    if (!logic::checkup_fault_handoff_encode_pair(slot.fault_restored, slot.fault_trace, eff_wall,
+                                                  boot_s, oldest_saved, slot.fault_warm_gap_s,
+                                                  slot.source_fp, s_diagnostics_generation,
+                                                  fh.payload, tail_gap_s))
+        return;
+    fh.magic      = logic::CHECKUP_FAULT_HANDOFF_MAGIC;
+    fh.version    = logic::CHECKUP_FAULT_HANDOFF_VERSION;
+    fh.reserved   = 0;
+    fh.tail_gap_s = tail_gap_s;
+    fh.model_fp   = slot.model_fp;
+    fh.crc        = logic::checkup_fault_handoff_crc(fh.model_fp, fh.payload);
+}
+
 // Best-effort intentional-reboot handoff, attempted once after OTA installation or during
 // shutdown. Further shutdown work can follow. Bounded-lock failure may lose one candidate;
 // waiting forever could strand a device that already switched its boot partition.
@@ -556,17 +685,19 @@ void checkup_reboot_save() {
     apply_dhw_reset_locked(s_x10a);
     apply_reset_locked(s_modbus);
     apply_dhw_reset_locked(s_modbus);
+    const int64_t stop_now = esp_timer_get_time();
     if (!stop_context_suppressed_locked()) {
-        const int64_t stop_now   = esp_timer_get_time();
-        const auto    stop_event = logic::stop_context_seal(s_stop_context);
+        const auto stop_event = logic::stop_context_seal(s_stop_context);
         if (stop_event.valid) stop_observation_record(stop_now, false, stop_event);
         stop_observation_seal();
     }
-    for (CheckupSlot* slot : {&s_x10a, &s_modbus}) {
+    for (int si = 0; si < 2; ++si) {
+        CheckupSlot* const slot = si ? &s_modbus : &s_x10a;
         seal_open_hour_locked(*slot);
 
         if (!s_diagnostics_enabled.load(std::memory_order_acquire)) {
-            slot->P().dhw_handoff.magic = 0;
+            slot->P().dhw_handoff.magic   = 0;
+            slot->P().fault_handoff.magic = 0;
             continue;
         }
         PersistedDhwHandoff& h  = slot->P().dhw_handoff;
@@ -575,19 +706,25 @@ void checkup_reboot_save() {
         h.reserved              = 0;
         h.layout_fp             = logic::checkup_dhw_handoff_layout_fingerprint();
         h.model_fp              = slot->model_fp;
-        h.payload.candidate     = logic::dhw_loss_checkpoint(slot->dhw_state, esp_timer_get_time());
+        h.payload.candidate     = logic::dhw_loss_checkpoint(slot->dhw_state, stop_now);
         h.payload.source_fp     = slot->source_confirmed ? slot->source_fp : 0;
         h.payload.dhw_source_fp = slot->dhw_source_fp;
         // Completed counters in the open hour have no durable age; never carry them across a boot.
         h.payload.pending = kEmptyDhwLossBucket;
         h.crc             = logic::checkup_dhw_handoff_crc(h.model_fp, h.payload);
 
-        const logic::DhwLossProgress p =
-            logic::dhw_loss_progress(slot->dhw_state, esp_timer_get_time());
-        diag_printf("%s: DHW reboot handoff saved (%u min candidate, %u completed window(s))\n",
-                    slot->is_modbus ? "checkup(modbus)" : "checkup",
-                    static_cast<unsigned>(p.candidate_observed_s / 60),
-                    static_cast<unsigned>(h.payload.pending.windows));
+        if (slot->fault_forgotten.load(std::memory_order_acquire)) {
+            slot->P().fault_handoff.magic = 0;
+        } else {
+            fault_save_handoff_locked(*slot, stop_now);
+        }
+
+        diag_printf(
+            "%s: DHW reboot handoff saved (%u min candidate, %u completed window(s))\n",
+            slot->is_modbus ? "checkup(modbus)" : "checkup",
+            static_cast<unsigned>(
+                logic::dhw_loss_progress(slot->dhw_state, stop_now).candidate_observed_s / 60),
+            0u);
     }
 }
 
@@ -597,6 +734,7 @@ void slot_start(CheckupSlot& slot, bool diagnostics_enabled, uint32_t diagnostic
     slot.live_commit_count       = 0;
     slot.dhw_source_fp           = dhw_fp;
     slot.cycling_restore_allowed = !safe_mode_active();
+    slot.fault_restore_allowed   = !safe_mode_active();
     const uint32_t want_fp       = logic::checkup_layout_fingerprint();
     const uint32_t reason        = static_cast<uint32_t>(esp_reset_reason());
     slot.persist_verdict         = logic::checkup_restore_verdict(
@@ -617,11 +755,24 @@ void slot_start(CheckupSlot& slot, bool diagnostics_enabled, uint32_t diagnostic
         slot.boot_handoff.pending = kEmptyDhwLossBucket;
         slot.boot_handoff_model   = slot.P().model_fp;
     }
+    slot.fault_boot_handoff_valid =
+        logic::checkup_restore_keeps_dhw_handoff(integrity) && slot.P().source_fp != 0 &&
+        slot.P().fault_handoff.payload.source_fp == slot.P().source_fp &&
+        logic::checkup_fault_handoff_valid(
+            slot.P().fault_handoff.magic, slot.P().fault_handoff.version,
+            slot.P().fault_handoff.model_fp, slot.P().model_fp, slot.P().source_fp,
+            diagnostics_generation, slot.P().fault_handoff.crc, slot.P().fault_handoff.payload);
+    if (slot.fault_boot_handoff_valid) {
+        slot.fault_boot_handoff            = slot.P().fault_handoff.payload;
+        slot.fault_boot_handoff_model      = slot.P().model_fp;
+        slot.fault_boot_handoff_tail_gap_s = slot.P().fault_handoff.tail_gap_s;
+    }
     // Consume before any producer or detection exists. A second panic cannot replay the handoff.
-    slot.P().dhw_handoff.magic = 0;
-    slot.source_confirmed      = false;
-    slot.model_fp              = 0;
-    slot.source_fp             = 0;
+    slot.P().dhw_handoff.magic   = 0;
+    slot.P().fault_handoff.magic = 0;
+    slot.source_confirmed        = false;
+    slot.model_fp                = 0;
+    slot.source_fp               = 0;
     persist_wipe(slot);
     slot.flash_pending   = flash_pending;
     slot.persist_verdict = logic::checkup_restore_route(integrity);
@@ -634,9 +785,11 @@ void slot_start(CheckupSlot& slot, bool diagnostics_enabled, uint32_t diagnostic
 }
 
 void slot_set_diagnostics(CheckupSlot& slot, bool enabled, bool generation_changed) {
-    slot.boot_handoff_valid = false;
+    slot.boot_handoff_valid       = false;
+    slot.fault_boot_handoff_valid = false;
     if (generation_changed) {
         retire_cycling_locked(slot);
+        retire_fault_locked(slot);
         slot.reset_requested.store(false);
         slot.dhw_reset_requested.store(false);
         slot.state     = logic::CheckupState{};
@@ -653,6 +806,9 @@ void slot_set_diagnostics(CheckupSlot& slot, bool enabled, bool generation_chang
     if (logic::checkup_pause_state(slot.state, slot.P().ring.pending, &slot.P().ring))
         logic::checkup_journal_revision_arm(slot.revision, run_open, run_start);
     if (!slot.is_modbus) s_defrost_start.pause();
+    if (!enabled)
+        slot.fault_trace.record(esp_timer_get_time(),
+                                logic::FaultSampleDetail{logic::FaultTraceKind::Gap});
     slot.dhw_state      = kFreshDhwLossState;
     slot.fault_now      = daik::FaultClass::Unknown;
     slot.pressure_now   = -1;
@@ -722,7 +878,9 @@ void checkup_reset() {
     Lock lk(s_mtx);
     if (!lk.acquired()) return;
     retire_cycling_locked(s_x10a);
-    s_x10a.boot_handoff_valid = false;
+    retire_fault_locked(s_x10a);
+    s_x10a.boot_handoff_valid       = false;
+    s_x10a.fault_boot_handoff_valid = false;
     // An explicit /detect or automatic-profile rewiring withdraws the old confirmation immediately.
     s_stop_context       = {};
     s_stop_inputs        = {};
@@ -743,11 +901,13 @@ void checkup_modbus_reset() {
     Lock lk(s_mtx);
     if (!lk.acquired()) return;
     retire_cycling_locked(s_modbus);
-    s_modbus.boot_handoff_valid = false;
-    s_modbus.source_confirmed   = false;
-    s_modbus.source_fp          = 0;
-    s_modbus.model_fp           = 0;
-    s_modbus.persist_verdict    = logic::CheckupRestore::ModelChanged;
+    retire_fault_locked(s_modbus);
+    s_modbus.boot_handoff_valid       = false;
+    s_modbus.fault_boot_handoff_valid = false;
+    s_modbus.source_confirmed         = false;
+    s_modbus.source_fp                = 0;
+    s_modbus.model_fp                 = 0;
+    s_modbus.persist_verdict          = logic::CheckupRestore::ModelChanged;
     s_modbus.reset_requested.store(true);
 }
 
@@ -798,13 +958,29 @@ void checkup_reset_on_detect(const char* profile_id, uint32_t source_fp) {
             diag_printf("checkup: scoped DHW filter checkpoint applied; undated completed counters "
                         "discarded\n");
         }
-        s_x10a.boot_handoff_valid = false;
+        if (s_x10a.source_confirmed && s_x10a.fault_boot_handoff_valid &&
+            !s_x10a.reset_requested.load() &&
+            s_diagnostics_enabled.load(std::memory_order_acquire) &&
+            s_x10a.fault_boot_handoff_model == fp &&
+            s_x10a.fault_boot_handoff.source_fp == source_fp &&
+            logic::checkup_fault_handoff_decode(s_x10a.fault_restored, s_x10a.fault_boot_handoff)) {
+            s_x10a.fault_warm_gap_s =
+                s_x10a.fault_restored.unix_s > 0
+                    ? -1
+                    : static_cast<int64_t>(s_x10a.fault_boot_handoff_tail_gap_s) + 3;
+            diag_printf("checkup: scoped fault trace handoff applied (%u event(s))\n",
+                        static_cast<unsigned>(s_x10a.fault_restored.count));
+        }
+        s_x10a.boot_handoff_valid       = false;
+        s_x10a.fault_boot_handoff_valid = false;
         checkup_persist_seal(s_x10a);
         return;
     }
-    s_x10a.boot_handoff_valid = false;
-    s_x10a.persist_verdict    = logic::CheckupRestore::ModelChanged;
+    s_x10a.boot_handoff_valid       = false;
+    s_x10a.fault_boot_handoff_valid = false;
+    s_x10a.persist_verdict          = logic::CheckupRestore::ModelChanged;
     retire_cycling_locked(s_x10a);
+    retire_fault_locked(s_x10a);
     s_x10a.reset_requested.store(true);
 }
 
@@ -837,13 +1013,30 @@ void checkup_modbus_confirm_source(ModbusProfile profile, uint32_t source_fp) {
             diag_printf("checkup(modbus): scoped DHW filter checkpoint applied; undated completed "
                         "counters discarded\n");
         }
-        s_modbus.boot_handoff_valid = false;
+        if (s_modbus.source_confirmed && s_modbus.fault_boot_handoff_valid &&
+            !s_modbus.reset_requested.load() &&
+            s_diagnostics_enabled.load(std::memory_order_acquire) &&
+            s_modbus.fault_boot_handoff_model == fp &&
+            s_modbus.fault_boot_handoff.source_fp == source_fp &&
+            logic::checkup_fault_handoff_decode(s_modbus.fault_restored,
+                                                s_modbus.fault_boot_handoff)) {
+            s_modbus.fault_warm_gap_s =
+                s_modbus.fault_restored.unix_s > 0
+                    ? -1
+                    : static_cast<int64_t>(s_modbus.fault_boot_handoff_tail_gap_s) + 3;
+            diag_printf("checkup(modbus): scoped fault trace handoff applied (%u event(s))\n",
+                        static_cast<unsigned>(s_modbus.fault_restored.count));
+        }
+        s_modbus.boot_handoff_valid       = false;
+        s_modbus.fault_boot_handoff_valid = false;
         checkup_persist_seal(s_modbus);
         return;
     }
-    s_modbus.boot_handoff_valid = false;
-    s_modbus.persist_verdict    = logic::CheckupRestore::ModelChanged;
+    s_modbus.boot_handoff_valid       = false;
+    s_modbus.fault_boot_handoff_valid = false;
+    s_modbus.persist_verdict          = logic::CheckupRestore::ModelChanged;
     retire_cycling_locked(s_modbus);
+    retire_fault_locked(s_modbus);
     s_modbus.reset_requested.store(true);
 }
 
@@ -918,7 +1111,10 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
     // Fault class is matched by converter because a profile carries it on the outdoor page AND the
     // hydronic one. Retry counters use exact page/offset/converter identities because conv 311 also
     // names unrelated values elsewhere. For faults the WORST readable class wins.
-    uint8_t fault_rows_read = 0;
+    uint8_t    fault_rows_read = 0;
+    FaultClass out_cls = FaultClass::Unknown, in_cls = FaultClass::Unknown,
+               other_cls = FaultClass::Unknown;
+    uint16_t out_code = 0, in_code = 0, other_code = 0;
     for (size_t i = 0; i < n; i++) {
         const CachedValue& cv = v[i];
         if (logic::checkup_is_fault_class(cv.conv)) {
@@ -927,6 +1123,25 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
             if (fault_error_active(c)) s.fault = FaultClass::Error;
             else if (fault_warning_active(c) && !fault_error_active(s.fault)) s.fault = c;
             else if (c == FaultClass::Normal && s.fault == FaultClass::Unknown) s.fault = c;
+            if (cv.reg == 0x10u) {
+                out_cls = c;
+            } else if (cv.reg == 0x60u) {
+                in_cls = c;
+            } else if (c != FaultClass::Unknown) {
+                if (fault_error_active(c) ||
+                    (fault_warning_active(c) && !fault_error_active(other_cls)) ||
+                    other_cls == FaultClass::Unknown)
+                    other_cls = c;
+            }
+        } else if (cv.conv == 204) {
+            const uint16_t pc = logic::fault_code_pack(cv.value.c_str());
+            if (cv.reg == 0x10u) {
+                if (pc) out_code = pc;
+            } else if (cv.reg == 0x60u) {
+                if (pc) in_code = pc;
+            } else if (cv.reg != 0x55u && pc && !other_code) {
+                other_code = pc;
+            }
         }
         const int retry = logic::checkup_retry_index(cv.reg, cv.off, cv.conv);
         if (retry >= 0) {
@@ -945,6 +1160,9 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
     if (!fault_error_active(s.fault) && !fault_warning_active(s.fault) &&
         fault_rows_read < coverage.fault_rows)
         s.fault = FaultClass::Unknown;
+
+    const logic::FaultSampleDetail x10a_fault =
+        logic::checkup_x10a_fault_detail(s.fault, out_cls, out_code, in_cls, in_code, other_code);
 
     const int64_t  now    = esp_timer_get_time();
     const uint32_t bucket = logic::checkup_bucket(now);
@@ -994,6 +1212,13 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
     s_x10a.fault_now    = s.fault;
     s_x10a.pressure_now = s.bar_ok && s.bar_tenths >= 0 ? s.bar_tenths : -1;
     if (n) s_x10a.source_last_us = now;
+    if (s_x10a.source_confirmed && now >= 0) {
+        const bool was_active = logic::fault_trace_kind_active(s_x10a.fault_trace.state.kind);
+        const bool now_active = logic::fault_trace_kind_active(x10a_fault.kind);
+        if (s_x10a.fault_trace.record(now, x10a_fault) && (was_active || now_active))
+            s_x10a.fault_trace_dirty = true;
+        s_x10a.fault_trace.observe_window(static_cast<uint32_t>(now / 1000000));
+    }
     commit_and_fold_locked(s_x10a, s, now, bucket, discard_dhw_sample);
 }
 
@@ -1012,6 +1237,8 @@ void checkup_record_modbus(const CachedValue* v, size_t n, ModbusProfile profile
     if (unix_s > 0 && unix_s <= UINT32_MAX) s.unix_s = static_cast<uint32_t>(unix_s);
     s.x10a_blind = !n;
 
+    uint16_t mb_fault_code = 0;
+    int      mb_fault_sub  = 0;
     for (size_t i = 0; i < n; ++i) {
         const CachedValue&     cv  = v[i];
         const def::HomeHubReg* row = modbus_row_for_cv(cv, profile);
@@ -1027,6 +1254,12 @@ void checkup_record_modbus(const CachedValue* v, size_t n, ModbusProfile profile
                 else if (val == 2)
                     s.fault = FaultClass::Warning;
             }
+            break;
+        case 22:
+            mb_fault_code = logic::fault_code_pack(cv.value.c_str());
+            break;
+        case 23:
+            if (exact_int(cv, val) && val > 0 && val <= 999) mb_fault_sub = val;
             break;
         case 30:
             if (exact_int(cv, val) && (val == 0 || val == 1)) {
@@ -1107,6 +1340,15 @@ void checkup_record_modbus(const CachedValue* v, size_t n, ModbusProfile profile
     s_modbus.fault_now    = s.fault;
     s_modbus.pressure_now = -1;
     if (n) s_modbus.source_last_us = now;
+    if (s_modbus.source_confirmed && now >= 0) {
+        const logic::FaultSampleDetail mb_fault =
+            logic::checkup_modbus_fault_detail(s.fault, mb_fault_code, mb_fault_sub);
+        const bool was_active = logic::fault_trace_kind_active(s_modbus.fault_trace.state.kind);
+        const bool now_active = logic::fault_trace_kind_active(mb_fault.kind);
+        if (s_modbus.fault_trace.record(now, mb_fault) && (was_active || now_active))
+            s_modbus.fault_trace_dirty = true;
+        s_modbus.fault_trace.observe_window(static_cast<uint32_t>(now / 1000000));
+    }
     commit_and_fold_locked(s_modbus, s, now, bucket, discard_dhw_sample);
 }
 
@@ -1306,6 +1548,7 @@ logic::CheckupReport checkup_report(logic::CheckupCyclingHours* hours,
     const uint32_t span_s    = static_cast<uint32_t>(std::min<int64_t>(
         logic::CHECKUP_WINDOW_S, live_span_us / 1000000 + slot.P().ring.carried_span_us / 1000000));
     auto           window    = logic::checkup_aggregate(slot.P().ring);
+    window.flags = static_cast<uint8_t>(window.flags | fault_saved_flags_locked(slot, now_us));
     window.full_span         = span_s >= logic::CHECKUP_WINDOW_S;
     logic::DhwLossWindow dhw = slot.dhw_reset_requested.load()
                                    ? logic::DhwLossWindow{}
@@ -1572,6 +1815,116 @@ CheckupFlashRestoreResult checkup_cycling_restore(const logic::CheckupCyclingTra
 void checkup_cycling_forget() {
     s_x10a.cycling_forgotten.store(true, std::memory_order_release);
     s_modbus.cycling_forgotten.store(true, std::memory_order_release);
+    checkup_fault_forget();
+}
+
+CheckupFaultStatus checkup_fault_latest_status(DiagnosticsSource source, bool source_fresh) {
+    CheckupFaultStatus st;
+    if (!s_mtx || !s_diagnostics_enabled.load(std::memory_order_acquire)) return st;
+    std::unique_ptr<logic::CheckupFaultTrace> snap(new (std::nothrow) logic::CheckupFaultTrace);
+    if (!snap) return st;
+
+    CheckupSlot& slot = slot_for(source);
+    Lock         lk(s_mtx);
+    if (!lk.acquired() || !s_diagnostics_enabled.load(std::memory_order_acquire) ||
+        slot.reset_requested.load())
+        return st;
+    st.diagnostics_enabled = true;
+    const int64_t now_us   = esp_timer_get_time();
+    if (!fault_snapshot_locked(slot, *snap, now_us, false)) return st;
+    st.source_live = snap->live && source_fresh;
+    st.latest      = logic::checkup_fault_latest_extract(*snap, source_fresh);
+    return st;
+}
+
+bool checkup_fault_timeline_snapshot(logic::CheckupFaultTrace& out, DiagnosticsSource source) {
+    out.reset();
+    if (!s_mtx || !s_diagnostics_enabled.load(std::memory_order_acquire)) return false;
+    CheckupSlot& slot = slot_for(source);
+    Lock         lk(s_mtx);
+    if (!lk.acquired() || !s_diagnostics_enabled.load(std::memory_order_acquire) ||
+        slot.reset_requested.load())
+        return false;
+    if (!fault_snapshot_locked(slot, out, esp_timer_get_time(), false)) {
+        out.reset();
+        return false;
+    }
+    return true;
+}
+
+bool checkup_fault_checkpoint(logic::CheckupFaultTrace&    trace,
+                              logic::CyclingTraceIdentity& identity, uint32_t& reset_token,
+                              TickType_t wait_ticks, bool periodic_due, bool dirty_due,
+                              DiagnosticsSource source) {
+    CheckupSlot& slot = slot_for(source);
+    if (!s_mtx || slot.fault_forgotten.load(std::memory_order_acquire)) return false;
+    Lock lk(s_mtx, wait_ticks);
+    if (!lk.acquired() || slot.fault_forgotten.load(std::memory_order_acquire)) return false;
+    reset_token            = 0;
+    const uint32_t pending = slot.fault_reset_token.load(std::memory_order_relaxed);
+    if (pending != slot.fault_reset_acked.load(std::memory_order_acquire)) {
+        trace.reset();
+        trace.window_end_s = logic::CHECKUP_FAULT_WINDOW_S;
+        trace.unix_s       = 1;
+        trace.live         = false;
+        identity           = {};
+        reset_token        = pending;
+        return true;
+    }
+    const bool allow_checkpoint = s_diagnostics_enabled.load(std::memory_order_acquire) ||
+                                  s_reboot_saved_this_boot.load(std::memory_order_acquire);
+    const bool want = periodic_due || (dirty_due && slot.fault_trace_dirty);
+    if (!want || !allow_checkpoint || s_diagnostics_generation == 0 ||
+        slot.reset_requested.load() || !slot.fault_trace.count ||
+        !fault_snapshot_locked(slot, trace, esp_timer_get_time(), true))
+        return false;
+    slot.fault_trace_dirty = false;
+    identity               = {slot.model_fp, slot.source_fp, s_diagnostics_generation};
+    return true;
+}
+
+bool checkup_fault_reset_pending(DiagnosticsSource source) {
+    const CheckupSlot& slot = slot_for(source);
+    return slot.fault_reset_token.load(std::memory_order_acquire) !=
+           slot.fault_reset_acked.load(std::memory_order_acquire);
+}
+
+void checkup_fault_checkpoint_appended(uint32_t reset_token, DiagnosticsSource source) {
+    if (reset_token)
+        slot_for(source).fault_reset_acked.store(reset_token, std::memory_order_release);
+}
+
+CheckupFlashRestoreResult checkup_fault_restore(const logic::CheckupFaultTrace&    trace,
+                                                const logic::CyclingTraceIdentity& identity,
+                                                int64_t now_unix_s, TickType_t wait_ticks,
+                                                DiagnosticsSource source) {
+    using Result      = CheckupFlashRestoreResult;
+    CheckupSlot& slot = slot_for(source);
+    if (slot.fault_forgotten.load(std::memory_order_acquire)) return Result::Ignored;
+    if (!s_mtx) return Result::Deferred;
+    Lock lk(s_mtx, wait_ticks);
+    if (!lk.acquired()) return Result::Deferred;
+    if (!trace.count || !slot.fault_restore_allowed || s_diagnostics_generation == 0 ||
+        slot.reset_requested.load() || slot.fault_forgotten.load(std::memory_order_acquire))
+        return Result::Ignored;
+    if (!slot.source_confirmed || now_unix_s <= 0) return Result::Deferred;
+    const int64_t observed_unix_s =
+        static_cast<int64_t>(trace.unix_s) + trace.end_s - trace.window_end_s;
+    if (slot.model_fp != identity.model_fp || slot.source_fp != identity.source_fp ||
+        s_diagnostics_generation != identity.diagnostics_generation || trace.unix_s > now_unix_s ||
+        observed_unix_s <= now_unix_s - logic::CHECKUP_FAULT_WINDOW_S)
+        return Result::Ignored;
+    if (slot.fault_restored.count && slot.fault_restored.unix_s > 0 &&
+        slot.fault_restored.unix_s >= trace.unix_s)
+        return Result::Restored;
+    slot.fault_restored   = trace;
+    slot.fault_warm_gap_s = -1;
+    return Result::Restored;
+}
+
+void checkup_fault_forget() {
+    s_x10a.fault_forgotten.store(true, std::memory_order_release);
+    s_modbus.fault_forgotten.store(true, std::memory_order_release);
 }
 
 } // namespace daik

@@ -1,4 +1,4 @@
-// translation-source: 42a4d77a832a12c84359f017fdcacdd939405dc965a062a922c2d18aafa2ff0e
+// translation-source: d65d3b16aadf37eb87ecbe27037b388b04d755399b25c0257655dd6a6be12909
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -261,6 +261,21 @@ I18N.sv = localeValues([
   /* check.fault_none */ "Ingen nu",
   /* check.fault_unknown */ "Okänd",
   /* check.fault_past_unknown */ "Tidigare · okänt",
+  /* check.fault_since_short */ (d) => `i ${d}`,
+  /* check.fault_ago_short */ (d) => `för ${d} sedan`,
+  /* check.fault_hero_ok */ (d) => `Inga fel eller varningar rapporterades under ${d} av 24 timmars observation.`,
+  /* check.fault_latched_only */ "Lagrad felflagga rapporterad av värmepumpen; ingen tidsstämplad händelse föll inom det registrerade 24-timmarsfönstret.",
+  /* check.fault_unit_outdoor */ "Utomhusdel",
+  /* check.fault_unit_indoor */ "Inomhusdel",
+  /* check.fault_unit_both */ "Ute + innedel",
+  /* check.fault_secondary */ (s) => `Även aktivt: ${s}`,
+  /* check.fault_stop_ongoing */ "aktiv",
+  /* check.fault_stop_unknown */ "oklart",
+  /* check.fault_col_code */ "Kod",
+  /* check.fault_col_meaning */ "Betydelse",
+  /* check.fault_ok_label */ "Felfri",
+  /* check.fault_gap_label */ "Omätt",
+  /* check.fault_severity_caution */ "Aktsamhet",
   /* check.retry_seen */ "Ökning",
   /* check.retry_none */ "Ingen ökning",
   /* service.metric.comp */ "Kompressor",
@@ -1301,7 +1316,7 @@ DESCRIPTION_I18N.sv = descriptionValues([
 ]);
 
 MODEL_DESCRIPTION_I18N.sv = modelDescriptionValues([
-  ["Enhetens meddelanden", "inga bevis på orsak eller lösning."], // health_fault
+  ["Visar fel- och varningskoder som värmepumpen rapporterat; korta beskrivningar är allmänna Daikin-råd och en rensad kod bevisar inte att orsaken åtgärdats."], // health_fault
   ["R5T: en punkt i skiktad tank, inte energi.", "Projekttips ≥0,8 K/h utan pump-/tappmarkörer. Tappning möjlig utan markörer; 0 K/h utesluter inte värmeförlust. Cirkulation bevisar inte orsak."], // health_dhw_loss
   ["Vid luckor i mätningarna kan vissa starter saknas i räkningen.", "Det finns inget fast normalt antal starter. Med tillräckliga data bedömer den här kontrollen avslutade värmekörningar på minst 10 minuter i genomsnitt som tillräckligt långa."], // health_cycling
   ["Avfrostning", "≥3 parade, >15% av kompressorns drifttid där både kompressor- och avfrostningsstatus kan läsas. Intern regel, inte Daikin; fuktighet och hela värmeväxlarens temperatur saknas."], // health_defrost

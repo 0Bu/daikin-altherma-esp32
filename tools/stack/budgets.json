@@ -2643,7 +2643,7 @@
     },
     "stop_checkupcoverage_const___unsigned_long__unsigned_long__bool_": {
       "pattern": "^daik::checkup_record\\(daik::CachedValue\\ const\\*,\\ unsigned\\ int,\\ bool,\\ bool,\\ daik::logic::CheckupCoverage\\ const\\&,\\ unsigned\\ long,\\ unsigned\\ long,\\ bool\\)$",
-      "max_bytes": 416
+      "max_bytes": 448
     },
     "stop_dated": {
       "pattern": "^daik::\\(anonymous\\ namespace\\)::dated\\(long\\ long\\)$",
@@ -2939,7 +2939,7 @@
     },
     "cycling_trace_snapshot": {
       "pattern": "^daik::\\(anonymous namespace\\)::cycling_snapshot_locked\\(daik::\\(anonymous namespace\\)::CheckupSlot\\&, daik::logic::CheckupCyclingTrace\\&, long long\\)$",
-      "max_bytes": 64
+      "max_bytes": 80
     },
     "cycling_trace_emit": {
       "pattern": "^(?:daik::logic::checkup_cycling_snapshot\\(daik::logic::CheckupCyclingTrace\\&, daik::logic::CheckupCyclingTrace const\\&, daik::logic::CheckupCyclingTrace const\\&, unsigned long, unsigned long, long long\\)::\\{lambda\\(daik::logic::CheckupCyclingTrace const\\&, long long, long long\\)\\x231\\}::operator\\(\\)\\(daik::logic::CheckupCyclingTrace const\\&, long long, long long\\) const|_ZZN4daik5logic24checkup_cycling_snapshot[^\\n]*\\$isra\\$[0-9]+)$",
@@ -3015,7 +3015,7 @@
     },
     "modbus_checkup_record": {
       "pattern": "^daik::checkup_record_modbus\\(daik::CachedValue const\\*, unsigned int, daik::ModbusProfile, unsigned long, unsigned long, bool\\)$",
-      "max_bytes": 192
+      "max_bytes": 208
     },
     "modbus_checkup_coverage": {
       "pattern": "^daik::logic::checkup_modbus_coverage\\(daik::ModbusProfile\\)$",
@@ -3199,6 +3199,138 @@
     },
     "defrost_air_schema": {
       "pattern": "^daik::defrost_air_supported\\(daik::logic::ProfileView const&\\)$",
+      "max_bytes": 64
+    },
+    "fault_status_json": {
+      "pattern": "^void daik::append_status_fault_check_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::DiagnosticsSource, bool, bool, bool\\)$",
+      "max_bytes": 160
+    },
+    "fault_json_bool": {
+      "pattern": "^daik::append_status_fault_check_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::DiagnosticsSource, bool, bool, bool\\)::\\{lambda\\(char const\\*, bool\\)[#]1\\}::operator\\(\\)\\(char const\\*, bool\\) const$",
+      "max_bytes": 32
+    },
+    "fault_json_uint": {
+      "pattern": "^daik::append_status_fault_check_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::DiagnosticsSource, bool, bool, bool\\)::\\{lambda\\(char const\\*, unsigned long long\\)[#]1\\}::operator\\(\\)\\(char const\\*, unsigned long long\\) const$",
+      "max_bytes": 32
+    },
+    "fault_json_quoted": {
+      "pattern": "^daik::append_status_fault_check_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::DiagnosticsSource, bool, bool, bool\\)::\\{lambda\\(char const\\*, char const\\*\\)[#]1\\}::operator\\(\\)\\(char const\\*, char const\\*\\) const$",
+      "max_bytes": 48
+    },
+    "fault_emit_latest": {
+      "pattern": "^(?:daik::append_status_fault_check_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::DiagnosticsSource, bool, bool, bool\\)::\\{lambda\\(daik::logic::CheckupFaultLatest const&\\)\\x231\\}::operator\\(\\)\\(daik::logic::CheckupFaultLatest const&\\) const|_ZZN4daikL30append_status_fault_check_json[^\\n]*CheckupFaultLatest[^\\n]*)$",
+      "max_bytes": 32
+    },
+    "fault_emit_meta": {
+      "pattern": "^daik::append_status_fault_check_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::DiagnosticsSource, bool, bool, bool\\)::\\{lambda\\(unsigned short, unsigned short, daik::logic::FaultUnitOrigin, daik::logic::FaultTraceKind, bool\\)\\x231\\}::operator\\(\\)\\(unsigned short, unsigned short, daik::logic::FaultUnitOrigin, daik::logic::FaultTraceKind, bool\\) const$",
+      "max_bytes": 48
+    },
+    "fault_code_unpack": {
+      "pattern": "^daik::logic::fault_code_unpack\\(unsigned short, char\\*\\)$",
+      "max_bytes": 32
+    },
+    "fault_aux_subcode": {
+      "pattern": "^daik::logic::fault_aux_get_subcode\\(unsigned short\\)$",
+      "max_bytes": 32
+    },
+    "fault_timeline_snapshot": {
+      "pattern": "^daik::checkup_fault_timeline_snapshot\\(daik::logic::CheckupFaultTrace&, daik::DiagnosticsSource\\)$",
+      "max_bytes": 48
+    },
+    "fault_latest_status": {
+      "pattern": "^daik::checkup_fault_latest_status\\(daik::DiagnosticsSource, bool\\)$",
+      "max_bytes": 112
+    },
+    "fault_snapshot_locked": {
+      "pattern": "^daik::\\(anonymous namespace\\)::fault_snapshot_locked\\(daik::\\(anonymous namespace\\)::CheckupSlot&, daik::logic::CheckupFaultTrace&, long long, bool\\)$",
+      "max_bytes": 112
+    },
+    "fault_saved_flags": {
+      "pattern": "^daik::\\(anonymous namespace\\)::fault_saved_flags_locked\\(daik::\\(anonymous namespace\\)::CheckupSlot&, long long\\)$",
+      "max_bytes": 80
+    },
+    "fault_saved_window_flags": {
+      "pattern": "^daik::logic::checkup_fault_saved_window_flags\\(daik::logic::CheckupFaultTrace const&, unsigned long, unsigned long, long long, long long\\)$",
+      "max_bytes": 64
+    },
+    "fault_walk_pair": {
+      "pattern": "^daik::logic::checkup_fault_walk_pair\\(daik::logic::CheckupFaultTrace const&, daik::logic::CheckupFaultTrace const&, unsigned long, unsigned long, long long, long long, void \\(\\*\\)\\(void\\*, unsigned long, daik::logic::FaultSampleDetail const&\\), void\\*, unsigned long&, bool&\\)$",
+      "max_bytes": 64
+    },
+    "fault_walk_feed": {
+      "pattern": "^daik::logic::checkup_fault_walk_pair\\(daik::logic::CheckupFaultTrace const&, daik::logic::CheckupFaultTrace const&, unsigned long, unsigned long, long long, long long, void \\(\\*\\)\\(void\\*, unsigned long, daik::logic::FaultSampleDetail const&\\), void\\*, unsigned long&, bool&\\)::\\{lambda\\(daik::logic::CheckupFaultTrace const&, long long, long long\\)\\x232\\}::operator\\(\\)\\(daik::logic::CheckupFaultTrace const&, long long, long long\\) const$",
+      "max_bytes": 64
+    },
+    "fault_walk_emit": {
+      "pattern": "^daik::logic::checkup_fault_walk_pair\\(daik::logic::CheckupFaultTrace const&, daik::logic::CheckupFaultTrace const&, unsigned long, unsigned long, long long, long long, void \\(\\*\\)\\(void\\*, unsigned long, daik::logic::FaultSampleDetail const&\\), void\\*, unsigned long&, bool&\\)::\\{lambda\\(unsigned long, daik::logic::FaultSampleDetail const&\\)\\x231\\}::operator\\(\\)\\(unsigned long, daik::logic::FaultSampleDetail const&\\) const$",
+      "max_bytes": 32
+    },
+    "fault_snapshot_emit": {
+      "pattern": "^daik::logic::checkup_fault_snapshot_emit\\(void\\*, unsigned long, daik::logic::FaultSampleDetail const&\\)$",
+      "max_bytes": 32
+    },
+    "fault_trace_push": {
+      "pattern": "^(?:daik::logic::CheckupFaultTrace::push\\(unsigned long, daik::logic::FaultSampleDetail const&\\)|_ZN4daik5logic17CheckupFaultTrace4push[^\\n]*\\$part\\$[0-9]+)$",
+      "max_bytes": 32
+    },
+    "fault_save_handoff": {
+      "pattern": "^daik::\\(anonymous namespace\\)::fault_save_handoff_locked\\(daik::\\(anonymous namespace\\)::CheckupSlot&, long long\\)$",
+      "max_bytes": 176
+    },
+    "fault_handoff_pack_emit": {
+      "pattern": "^daik::logic::checkup_fault_handoff_pack_emit\\(void\\*, unsigned long, daik::logic::FaultSampleDetail const&\\)$",
+      "max_bytes": 48
+    },
+    "fault_handoff_crc": {
+      "pattern": "^daik::logic::checkup_fault_handoff_crc\\(unsigned long, daik::logic::FaultHandoffPayload const&\\)$",
+      "max_bytes": 32
+    },
+    "fault_handoff_u32": {
+      "pattern": "^daik::logic::fault_handoff_u32\\(unsigned long, unsigned long\\)$",
+      "max_bytes": 48
+    },
+    "fault_flash_build": {
+      "pattern": "^daik::\\(anonymous namespace\\)::flash_build_next_fault\\(daik::\\(anonymous namespace\\)::FlashJournalRecord&, unsigned long, bool, bool\\)$",
+      "max_bytes": 160
+    },
+    "fault_checkpoint": {
+      "pattern": "^daik::checkup_fault_checkpoint\\(daik::logic::CheckupFaultTrace&, daik::logic::CyclingTraceIdentity&, unsigned long&, unsigned long, bool, bool, daik::DiagnosticsSource\\)$",
+      "max_bytes": 64
+    },
+    "fault_reset_pending": {
+      "pattern": "^daik::checkup_fault_reset_pending\\(daik::DiagnosticsSource\\)$",
+      "max_bytes": 32
+    },
+    "fault_page_valid": {
+      "pattern": "^daik::logic::fault_trace_page_valid\\(daik::logic::HistoryJournalHeader const&, daik::logic::FaultTracePageInfo const&, bool\\)$",
+      "max_bytes": 32
+    },
+    "fault_checkpoint_acked": {
+      "pattern": "^daik::checkup_fault_checkpoint_appended\\(unsigned long, daik::DiagnosticsSource\\)$",
+      "max_bytes": 32
+    },
+    "fault_record_owner": {
+      "pattern": "^daik::\\(anonymous namespace\\)::flash_fault_owned\\(daik::logic::HistoryJournalHeader const&\\)$",
+      "max_bytes": 32
+    },
+    "fault_flash_restore": {
+      "pattern": "^daik::history_restore_fault_flash\\(unsigned long\\)$",
+      "max_bytes": 96
+    },
+    "fault_flash_page": {
+      "pattern": "^daik::\\(anonymous namespace\\)::flash_fault_page_for\\(daik::\\(anonymous namespace\\)::FlashJournalRecord const&, daik::logic::FaultTracePageInfo&, bool\\)$",
+      "max_bytes": 112
+    },
+    "fault_page_decode": {
+      "pattern": "^daik::logic::fault_trace_decode_page\\(daik::logic::CheckupFaultTrace&, daik::logic::FaultTracePageInfo const&, unsigned char const\\*\\)$",
+      "max_bytes": 112
+    },
+    "fault_trace_restore": {
+      "pattern": "^daik::checkup_fault_restore\\(daik::logic::CheckupFaultTrace const&, daik::logic::CyclingTraceIdentity const&, long long, unsigned long, daik::DiagnosticsSource\\)$",
+      "max_bytes": 64
+    },
+    "fault_handoff_decode": {
+      "pattern": "^daik::logic::checkup_fault_handoff_decode\\(daik::logic::CheckupFaultTrace&, daik::logic::FaultHandoffPayload const&\\)$",
       "max_bytes": 64
     }
   },
@@ -7386,7 +7518,9 @@
         "checkup_schema_profile_lookup",
         "checkup_schema_profile_view",
         "cycling_seal",
-        "cycling_crc"
+        "cycling_crc",
+        "fault_handoff_decode",
+        "fault_page_decode"
       ],
       "multipliers": {},
       "base_bytes": 1536,
@@ -7409,7 +7543,9 @@
         "checkup_schema_profile_lookup",
         "checkup_schema_profile_view",
         "cycling_seal",
-        "cycling_crc"
+        "cycling_crc",
+        "fault_handoff_decode",
+        "fault_page_decode"
       ],
       "multipliers": {},
       "base_bytes": 1536,
@@ -14739,6 +14875,2779 @@
       "multipliers": {},
       "base_bytes": 1536,
       "max_bytes": 8192
+    },
+    "httpd_direct_checkup_fault_flags": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "checkup_report",
+        "fault_saved_flags",
+        "fault_saved_window_flags"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_direct_checkup_fault_flags_clock": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "checkup_report",
+        "fault_saved_flags",
+        "room_time_now"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_direct_fault_timeline": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "fault_status_json",
+        "fault_timeline_snapshot",
+        "fault_snapshot_locked",
+        "fault_walk_pair",
+        "fault_walk_feed",
+        "fault_walk_emit",
+        "fault_snapshot_emit",
+        "fault_trace_push"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_direct_fault_snapshot_clock": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "fault_status_json",
+        "fault_timeline_snapshot",
+        "fault_snapshot_locked",
+        "room_time_now"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_direct_fault_fallback": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "fault_status_json",
+        "fault_latest_status",
+        "fault_snapshot_locked",
+        "fault_walk_pair",
+        "fault_walk_feed",
+        "fault_walk_emit",
+        "fault_snapshot_emit",
+        "fault_trace_push"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_direct_fault_fallback_clock": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "fault_status_json",
+        "fault_latest_status",
+        "fault_snapshot_locked",
+        "room_time_now"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_direct_fault_format_snprintf": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "fault_status_json",
+        "fault_emit_latest",
+        "fault_emit_meta",
+        "sdk_snprintf",
+        "sdk_vfprintf"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_direct_fault_format_quoted": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "fault_status_json",
+        "fault_emit_latest",
+        "fault_emit_meta",
+        "fault_json_bool",
+        "fault_json_uint",
+        "fault_json_quoted",
+        "fault_code_unpack",
+        "fault_aux_subcode",
+        "status_quoted_string",
+        "status_escaped_string",
+        "status_utf8_sequence_length",
+        "status_unsigned_number"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_checkup_fault_flags": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "checkup_report",
+        "fault_saved_flags",
+        "fault_saved_window_flags"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_checkup_fault_flags_clock": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "checkup_report",
+        "fault_saved_flags",
+        "room_time_now"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_fault_timeline": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "fault_status_json",
+        "fault_timeline_snapshot",
+        "fault_snapshot_locked",
+        "fault_walk_pair",
+        "fault_walk_feed",
+        "fault_walk_emit",
+        "fault_snapshot_emit",
+        "fault_trace_push"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_fault_snapshot_clock": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "fault_status_json",
+        "fault_timeline_snapshot",
+        "fault_snapshot_locked",
+        "room_time_now"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_fault_fallback": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "fault_status_json",
+        "fault_latest_status",
+        "fault_snapshot_locked",
+        "fault_walk_pair",
+        "fault_walk_feed",
+        "fault_walk_emit",
+        "fault_snapshot_emit",
+        "fault_trace_push"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_fault_fallback_clock": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "fault_status_json",
+        "fault_latest_status",
+        "fault_snapshot_locked",
+        "room_time_now"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_fault_format_snprintf": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "fault_status_json",
+        "fault_emit_latest",
+        "fault_emit_meta",
+        "sdk_snprintf",
+        "sdk_vfprintf"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_fault_format_quoted": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "fault_status_json",
+        "fault_emit_latest",
+        "fault_emit_meta",
+        "fault_json_bool",
+        "fault_json_uint",
+        "fault_json_quoted",
+        "fault_code_unpack",
+        "fault_aux_subcode",
+        "status_quoted_string",
+        "status_escaped_string",
+        "status_utf8_sequence_length",
+        "status_unsigned_number"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "poll_fault_snapshot": {
+      "symbols": [
+        "poll_task",
+        "history_board",
+        "history_journal",
+        "fault_flash_build",
+        "fault_checkpoint",
+        "fault_snapshot_locked",
+        "fault_walk_pair",
+        "fault_walk_feed",
+        "fault_walk_emit",
+        "fault_snapshot_emit",
+        "fault_trace_push"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_fault_snapshot_clock": {
+      "symbols": [
+        "poll_task",
+        "history_board",
+        "history_journal",
+        "fault_flash_build",
+        "fault_checkpoint",
+        "fault_snapshot_locked",
+        "room_time_now"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_fault_reset_check": {
+      "symbols": [
+        "poll_task",
+        "history_board",
+        "history_journal",
+        "fault_flash_build",
+        "fault_reset_pending"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_fault_build_crc": {
+      "symbols": [
+        "poll_task",
+        "history_board",
+        "history_journal",
+        "fault_flash_build",
+        "cycling_flash_crc",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_fault_build_shape": {
+      "symbols": [
+        "poll_task",
+        "history_board",
+        "history_journal",
+        "fault_flash_build",
+        "fault_page_valid"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_fault_append_ack": {
+      "symbols": [
+        "poll_task",
+        "history_board",
+        "history_journal",
+        "history_append",
+        "fault_checkpoint_acked"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_fault_append_owner": {
+      "symbols": [
+        "poll_task",
+        "history_board",
+        "history_journal",
+        "history_append",
+        "fault_record_owner"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_fault_read": {
+      "symbols": [
+        "poll_task",
+        "history_board",
+        "history_flash_restore",
+        "fault_flash_restore",
+        "cycling_flash_record_read",
+        "sdk_partition_read"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_fault_validate": {
+      "symbols": [
+        "poll_task",
+        "history_board",
+        "history_flash_restore",
+        "fault_flash_restore",
+        "fault_flash_page",
+        "cycling_flash_crc",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_fault_shape": {
+      "symbols": [
+        "poll_task",
+        "history_board",
+        "history_flash_restore",
+        "fault_flash_restore",
+        "fault_flash_page",
+        "fault_page_valid"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_fault_decode": {
+      "symbols": [
+        "poll_task",
+        "history_board",
+        "history_flash_restore",
+        "fault_flash_restore",
+        "fault_page_decode",
+        "fault_trace_push"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_fault_adopt": {
+      "symbols": [
+        "poll_task",
+        "history_board",
+        "history_flash_restore",
+        "fault_flash_restore",
+        "fault_trace_restore"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_fault_trend_filter": {
+      "symbols": [
+        "poll_task",
+        "history_board",
+        "history_flash_restore",
+        "history_record_scope",
+        "fault_record_owner"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "main_fault_scan": {
+      "symbols": [
+        "main_task",
+        "boot_sequence",
+        "history_start",
+        "fault_flash_page",
+        "cycling_flash_crc",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "main_fault_scan_shape": {
+      "symbols": [
+        "main_task",
+        "boot_sequence",
+        "history_start",
+        "fault_flash_page",
+        "fault_page_valid"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "main_fault_scan_owner": {
+      "symbols": [
+        "main_task",
+        "boot_sequence",
+        "history_start",
+        "history_record_scope",
+        "fault_record_owner"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 5120
+    },
+    "httpd_shutdown_wifi_checkup_fault_handoff": {
+      "symbols": [
+        "config_wifi",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "checkup_shutdown",
+        "fault_save_handoff",
+        "fault_walk_pair",
+        "fault_walk_feed",
+        "fault_walk_emit",
+        "fault_handoff_pack_emit"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_wifi_checkup_fault_handoff_clock": {
+      "symbols": [
+        "config_wifi",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "checkup_shutdown",
+        "fault_save_handoff",
+        "room_time_now"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_wifi_checkup_fault_handoff_crc": {
+      "symbols": [
+        "config_wifi",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "checkup_shutdown",
+        "fault_save_handoff",
+        "fault_handoff_crc",
+        "fault_handoff_u32",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_wifi_fault_snapshot": {
+      "symbols": [
+        "config_wifi",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "fault_checkpoint",
+        "fault_snapshot_locked",
+        "fault_walk_pair",
+        "fault_walk_feed",
+        "fault_walk_emit",
+        "fault_snapshot_emit",
+        "fault_trace_push"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_wifi_fault_snapshot_clock": {
+      "symbols": [
+        "config_wifi",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "fault_checkpoint",
+        "fault_snapshot_locked",
+        "room_time_now"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_wifi_fault_reset_check": {
+      "symbols": [
+        "config_wifi",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "fault_reset_pending"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_wifi_fault_build_crc": {
+      "symbols": [
+        "config_wifi",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "cycling_flash_crc",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_wifi_fault_build_shape": {
+      "symbols": [
+        "config_wifi",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "fault_page_valid"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_wifi_fault_append_ack": {
+      "symbols": [
+        "config_wifi",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "fault_checkpoint_acked"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_wifi_fault_append_owner": {
+      "symbols": [
+        "config_wifi",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "fault_record_owner"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_wifi_fault_read": {
+      "symbols": [
+        "config_wifi",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "cycling_flash_record_read",
+        "sdk_partition_read"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_wifi_fault_validate": {
+      "symbols": [
+        "config_wifi",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "fault_flash_page",
+        "cycling_flash_crc",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_wifi_fault_shape": {
+      "symbols": [
+        "config_wifi",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "fault_flash_page",
+        "fault_page_valid"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_wifi_fault_decode": {
+      "symbols": [
+        "config_wifi",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "fault_page_decode",
+        "fault_trace_push"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_wifi_fault_adopt": {
+      "symbols": [
+        "config_wifi",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "fault_trace_restore"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_mqtt_checkup_fault_handoff": {
+      "symbols": [
+        "config_mqtt",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "checkup_shutdown",
+        "fault_save_handoff",
+        "fault_walk_pair",
+        "fault_walk_feed",
+        "fault_walk_emit",
+        "fault_handoff_pack_emit"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_mqtt_checkup_fault_handoff_clock": {
+      "symbols": [
+        "config_mqtt",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "checkup_shutdown",
+        "fault_save_handoff",
+        "room_time_now"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_mqtt_checkup_fault_handoff_crc": {
+      "symbols": [
+        "config_mqtt",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "checkup_shutdown",
+        "fault_save_handoff",
+        "fault_handoff_crc",
+        "fault_handoff_u32",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_mqtt_fault_snapshot": {
+      "symbols": [
+        "config_mqtt",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "fault_checkpoint",
+        "fault_snapshot_locked",
+        "fault_walk_pair",
+        "fault_walk_feed",
+        "fault_walk_emit",
+        "fault_snapshot_emit",
+        "fault_trace_push"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_mqtt_fault_snapshot_clock": {
+      "symbols": [
+        "config_mqtt",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "fault_checkpoint",
+        "fault_snapshot_locked",
+        "room_time_now"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_mqtt_fault_reset_check": {
+      "symbols": [
+        "config_mqtt",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "fault_reset_pending"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_mqtt_fault_build_crc": {
+      "symbols": [
+        "config_mqtt",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "cycling_flash_crc",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_mqtt_fault_build_shape": {
+      "symbols": [
+        "config_mqtt",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "fault_page_valid"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_mqtt_fault_append_ack": {
+      "symbols": [
+        "config_mqtt",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "fault_checkpoint_acked"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_mqtt_fault_append_owner": {
+      "symbols": [
+        "config_mqtt",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "fault_record_owner"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_mqtt_fault_read": {
+      "symbols": [
+        "config_mqtt",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "cycling_flash_record_read",
+        "sdk_partition_read"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_mqtt_fault_validate": {
+      "symbols": [
+        "config_mqtt",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "fault_flash_page",
+        "cycling_flash_crc",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_mqtt_fault_shape": {
+      "symbols": [
+        "config_mqtt",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "fault_flash_page",
+        "fault_page_valid"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_mqtt_fault_decode": {
+      "symbols": [
+        "config_mqtt",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "fault_page_decode",
+        "fault_trace_push"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_mqtt_fault_adopt": {
+      "symbols": [
+        "config_mqtt",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "fault_trace_restore"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_syslog_checkup_fault_handoff": {
+      "symbols": [
+        "config_syslog",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "checkup_shutdown",
+        "fault_save_handoff",
+        "fault_walk_pair",
+        "fault_walk_feed",
+        "fault_walk_emit",
+        "fault_handoff_pack_emit"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_syslog_checkup_fault_handoff_clock": {
+      "symbols": [
+        "config_syslog",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "checkup_shutdown",
+        "fault_save_handoff",
+        "room_time_now"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_syslog_checkup_fault_handoff_crc": {
+      "symbols": [
+        "config_syslog",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "checkup_shutdown",
+        "fault_save_handoff",
+        "fault_handoff_crc",
+        "fault_handoff_u32",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_syslog_fault_snapshot": {
+      "symbols": [
+        "config_syslog",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "fault_checkpoint",
+        "fault_snapshot_locked",
+        "fault_walk_pair",
+        "fault_walk_feed",
+        "fault_walk_emit",
+        "fault_snapshot_emit",
+        "fault_trace_push"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_syslog_fault_snapshot_clock": {
+      "symbols": [
+        "config_syslog",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "fault_checkpoint",
+        "fault_snapshot_locked",
+        "room_time_now"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_syslog_fault_reset_check": {
+      "symbols": [
+        "config_syslog",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "fault_reset_pending"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_syslog_fault_build_crc": {
+      "symbols": [
+        "config_syslog",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "cycling_flash_crc",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_syslog_fault_build_shape": {
+      "symbols": [
+        "config_syslog",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "fault_page_valid"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_syslog_fault_append_ack": {
+      "symbols": [
+        "config_syslog",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "fault_checkpoint_acked"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_syslog_fault_append_owner": {
+      "symbols": [
+        "config_syslog",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "fault_record_owner"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_syslog_fault_read": {
+      "symbols": [
+        "config_syslog",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "cycling_flash_record_read",
+        "sdk_partition_read"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_syslog_fault_validate": {
+      "symbols": [
+        "config_syslog",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "fault_flash_page",
+        "cycling_flash_crc",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_syslog_fault_shape": {
+      "symbols": [
+        "config_syslog",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "fault_flash_page",
+        "fault_page_valid"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_syslog_fault_decode": {
+      "symbols": [
+        "config_syslog",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "fault_page_decode",
+        "fault_trace_push"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_syslog_fault_adopt": {
+      "symbols": [
+        "config_syslog",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "fault_trace_restore"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_ntp_checkup_fault_handoff": {
+      "symbols": [
+        "config_ntp",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "checkup_shutdown",
+        "fault_save_handoff",
+        "fault_walk_pair",
+        "fault_walk_feed",
+        "fault_walk_emit",
+        "fault_handoff_pack_emit"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_ntp_checkup_fault_handoff_clock": {
+      "symbols": [
+        "config_ntp",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "checkup_shutdown",
+        "fault_save_handoff",
+        "room_time_now"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_ntp_checkup_fault_handoff_crc": {
+      "symbols": [
+        "config_ntp",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "checkup_shutdown",
+        "fault_save_handoff",
+        "fault_handoff_crc",
+        "fault_handoff_u32",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_ntp_fault_snapshot": {
+      "symbols": [
+        "config_ntp",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "fault_checkpoint",
+        "fault_snapshot_locked",
+        "fault_walk_pair",
+        "fault_walk_feed",
+        "fault_walk_emit",
+        "fault_snapshot_emit",
+        "fault_trace_push"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_ntp_fault_snapshot_clock": {
+      "symbols": [
+        "config_ntp",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "fault_checkpoint",
+        "fault_snapshot_locked",
+        "room_time_now"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_ntp_fault_reset_check": {
+      "symbols": [
+        "config_ntp",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "fault_reset_pending"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_ntp_fault_build_crc": {
+      "symbols": [
+        "config_ntp",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "cycling_flash_crc",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_ntp_fault_build_shape": {
+      "symbols": [
+        "config_ntp",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "fault_page_valid"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_ntp_fault_append_ack": {
+      "symbols": [
+        "config_ntp",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "fault_checkpoint_acked"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_ntp_fault_append_owner": {
+      "symbols": [
+        "config_ntp",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "fault_record_owner"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_ntp_fault_read": {
+      "symbols": [
+        "config_ntp",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "cycling_flash_record_read",
+        "sdk_partition_read"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_ntp_fault_validate": {
+      "symbols": [
+        "config_ntp",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "fault_flash_page",
+        "cycling_flash_crc",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_ntp_fault_shape": {
+      "symbols": [
+        "config_ntp",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "fault_flash_page",
+        "fault_page_valid"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_ntp_fault_decode": {
+      "symbols": [
+        "config_ntp",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "fault_page_decode",
+        "fault_trace_push"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_ntp_fault_adopt": {
+      "symbols": [
+        "config_ntp",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "fault_trace_restore"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_board_checkup_fault_handoff": {
+      "symbols": [
+        "config_board",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "checkup_shutdown",
+        "fault_save_handoff",
+        "fault_walk_pair",
+        "fault_walk_feed",
+        "fault_walk_emit",
+        "fault_handoff_pack_emit"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_board_checkup_fault_handoff_clock": {
+      "symbols": [
+        "config_board",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "checkup_shutdown",
+        "fault_save_handoff",
+        "room_time_now"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_board_checkup_fault_handoff_crc": {
+      "symbols": [
+        "config_board",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "checkup_shutdown",
+        "fault_save_handoff",
+        "fault_handoff_crc",
+        "fault_handoff_u32",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_board_fault_snapshot": {
+      "symbols": [
+        "config_board",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "fault_checkpoint",
+        "fault_snapshot_locked",
+        "fault_walk_pair",
+        "fault_walk_feed",
+        "fault_walk_emit",
+        "fault_snapshot_emit",
+        "fault_trace_push"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_board_fault_snapshot_clock": {
+      "symbols": [
+        "config_board",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "fault_checkpoint",
+        "fault_snapshot_locked",
+        "room_time_now"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_board_fault_reset_check": {
+      "symbols": [
+        "config_board",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "fault_reset_pending"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_board_fault_build_crc": {
+      "symbols": [
+        "config_board",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "cycling_flash_crc",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_board_fault_build_shape": {
+      "symbols": [
+        "config_board",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "fault_page_valid"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_board_fault_append_ack": {
+      "symbols": [
+        "config_board",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "fault_checkpoint_acked"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_board_fault_append_owner": {
+      "symbols": [
+        "config_board",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "fault_record_owner"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_board_fault_read": {
+      "symbols": [
+        "config_board",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "cycling_flash_record_read",
+        "sdk_partition_read"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_board_fault_validate": {
+      "symbols": [
+        "config_board",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "fault_flash_page",
+        "cycling_flash_crc",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_board_fault_shape": {
+      "symbols": [
+        "config_board",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "fault_flash_page",
+        "fault_page_valid"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_board_fault_decode": {
+      "symbols": [
+        "config_board",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "fault_page_decode",
+        "fault_trace_push"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_board_fault_adopt": {
+      "symbols": [
+        "config_board",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "fault_trace_restore"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_env3_checkup_fault_handoff": {
+      "symbols": [
+        "config_env3",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "checkup_shutdown",
+        "fault_save_handoff",
+        "fault_walk_pair",
+        "fault_walk_feed",
+        "fault_walk_emit",
+        "fault_handoff_pack_emit"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_env3_checkup_fault_handoff_clock": {
+      "symbols": [
+        "config_env3",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "checkup_shutdown",
+        "fault_save_handoff",
+        "room_time_now"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_env3_checkup_fault_handoff_crc": {
+      "symbols": [
+        "config_env3",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "checkup_shutdown",
+        "fault_save_handoff",
+        "fault_handoff_crc",
+        "fault_handoff_u32",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_env3_fault_snapshot": {
+      "symbols": [
+        "config_env3",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "fault_checkpoint",
+        "fault_snapshot_locked",
+        "fault_walk_pair",
+        "fault_walk_feed",
+        "fault_walk_emit",
+        "fault_snapshot_emit",
+        "fault_trace_push"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_env3_fault_snapshot_clock": {
+      "symbols": [
+        "config_env3",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "fault_checkpoint",
+        "fault_snapshot_locked",
+        "room_time_now"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_env3_fault_reset_check": {
+      "symbols": [
+        "config_env3",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "fault_reset_pending"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_env3_fault_build_crc": {
+      "symbols": [
+        "config_env3",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "cycling_flash_crc",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_env3_fault_build_shape": {
+      "symbols": [
+        "config_env3",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "fault_page_valid"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_env3_fault_append_ack": {
+      "symbols": [
+        "config_env3",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "fault_checkpoint_acked"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_env3_fault_append_owner": {
+      "symbols": [
+        "config_env3",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "fault_record_owner"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_env3_fault_read": {
+      "symbols": [
+        "config_env3",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "cycling_flash_record_read",
+        "sdk_partition_read"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_env3_fault_validate": {
+      "symbols": [
+        "config_env3",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "fault_flash_page",
+        "cycling_flash_crc",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_env3_fault_shape": {
+      "symbols": [
+        "config_env3",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "fault_flash_page",
+        "fault_page_valid"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_env3_fault_decode": {
+      "symbols": [
+        "config_env3",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "fault_page_decode",
+        "fault_trace_push"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_shutdown_env3_fault_adopt": {
+      "symbols": [
+        "config_env3",
+        "config_document",
+        "http_reboot",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "fault_trace_restore"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "poll_shutdown_checkup_fault_handoff": {
+      "symbols": [
+        "poll_task",
+        "heap_guard",
+        "sdk_restart",
+        "checkup_shutdown",
+        "fault_save_handoff",
+        "fault_walk_pair",
+        "fault_walk_feed",
+        "fault_walk_emit",
+        "fault_handoff_pack_emit"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_shutdown_checkup_fault_handoff_clock": {
+      "symbols": [
+        "poll_task",
+        "heap_guard",
+        "sdk_restart",
+        "checkup_shutdown",
+        "fault_save_handoff",
+        "room_time_now"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_shutdown_checkup_fault_handoff_crc": {
+      "symbols": [
+        "poll_task",
+        "heap_guard",
+        "sdk_restart",
+        "checkup_shutdown",
+        "fault_save_handoff",
+        "fault_handoff_crc",
+        "fault_handoff_u32",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_shutdown_fault_snapshot": {
+      "symbols": [
+        "poll_task",
+        "heap_guard",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "fault_checkpoint",
+        "fault_snapshot_locked",
+        "fault_walk_pair",
+        "fault_walk_feed",
+        "fault_walk_emit",
+        "fault_snapshot_emit",
+        "fault_trace_push"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_shutdown_fault_snapshot_clock": {
+      "symbols": [
+        "poll_task",
+        "heap_guard",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "fault_checkpoint",
+        "fault_snapshot_locked",
+        "room_time_now"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_shutdown_fault_reset_check": {
+      "symbols": [
+        "poll_task",
+        "heap_guard",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "fault_reset_pending"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_shutdown_fault_build_crc": {
+      "symbols": [
+        "poll_task",
+        "heap_guard",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "cycling_flash_crc",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_shutdown_fault_build_shape": {
+      "symbols": [
+        "poll_task",
+        "heap_guard",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "fault_page_valid"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_shutdown_fault_append_ack": {
+      "symbols": [
+        "poll_task",
+        "heap_guard",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "fault_checkpoint_acked"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_shutdown_fault_append_owner": {
+      "symbols": [
+        "poll_task",
+        "heap_guard",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "fault_record_owner"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_shutdown_fault_read": {
+      "symbols": [
+        "poll_task",
+        "heap_guard",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "cycling_flash_record_read",
+        "sdk_partition_read"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_shutdown_fault_validate": {
+      "symbols": [
+        "poll_task",
+        "heap_guard",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "fault_flash_page",
+        "cycling_flash_crc",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_shutdown_fault_shape": {
+      "symbols": [
+        "poll_task",
+        "heap_guard",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "fault_flash_page",
+        "fault_page_valid"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_shutdown_fault_decode": {
+      "symbols": [
+        "poll_task",
+        "heap_guard",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "fault_page_decode",
+        "fault_trace_push"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_shutdown_fault_adopt": {
+      "symbols": [
+        "poll_task",
+        "heap_guard",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "fault_trace_restore"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "eth_shutdown_checkup_fault_handoff": {
+      "symbols": [
+        "eth_task",
+        "sdk_restart",
+        "checkup_shutdown",
+        "fault_save_handoff",
+        "fault_walk_pair",
+        "fault_walk_feed",
+        "fault_walk_emit",
+        "fault_handoff_pack_emit"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "eth_shutdown_checkup_fault_handoff_clock": {
+      "symbols": [
+        "eth_task",
+        "sdk_restart",
+        "checkup_shutdown",
+        "fault_save_handoff",
+        "room_time_now"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "eth_shutdown_checkup_fault_handoff_crc": {
+      "symbols": [
+        "eth_task",
+        "sdk_restart",
+        "checkup_shutdown",
+        "fault_save_handoff",
+        "fault_handoff_crc",
+        "fault_handoff_u32",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "eth_shutdown_fault_snapshot": {
+      "symbols": [
+        "eth_task",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "fault_checkpoint",
+        "fault_snapshot_locked",
+        "fault_walk_pair",
+        "fault_walk_feed",
+        "fault_walk_emit",
+        "fault_snapshot_emit",
+        "fault_trace_push"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "eth_shutdown_fault_snapshot_clock": {
+      "symbols": [
+        "eth_task",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "fault_checkpoint",
+        "fault_snapshot_locked",
+        "room_time_now"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "eth_shutdown_fault_reset_check": {
+      "symbols": [
+        "eth_task",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "fault_reset_pending"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "eth_shutdown_fault_build_crc": {
+      "symbols": [
+        "eth_task",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "cycling_flash_crc",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "eth_shutdown_fault_build_shape": {
+      "symbols": [
+        "eth_task",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "fault_page_valid"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "eth_shutdown_fault_append_ack": {
+      "symbols": [
+        "eth_task",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "fault_checkpoint_acked"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "eth_shutdown_fault_append_owner": {
+      "symbols": [
+        "eth_task",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "fault_record_owner"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "eth_shutdown_fault_read": {
+      "symbols": [
+        "eth_task",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "cycling_flash_record_read",
+        "sdk_partition_read"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "eth_shutdown_fault_validate": {
+      "symbols": [
+        "eth_task",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "fault_flash_page",
+        "cycling_flash_crc",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "eth_shutdown_fault_shape": {
+      "symbols": [
+        "eth_task",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "fault_flash_page",
+        "fault_page_valid"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "eth_shutdown_fault_decode": {
+      "symbols": [
+        "eth_task",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "fault_page_decode",
+        "fault_trace_push"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "eth_shutdown_fault_adopt": {
+      "symbols": [
+        "eth_task",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "fault_trace_restore"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "ota_shutdown_checkup_fault_handoff": {
+      "symbols": [
+        "ota_task",
+        "ota_activate",
+        "sdk_restart",
+        "checkup_shutdown",
+        "fault_save_handoff",
+        "fault_walk_pair",
+        "fault_walk_feed",
+        "fault_walk_emit",
+        "fault_handoff_pack_emit"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "ota_shutdown_checkup_fault_handoff_clock": {
+      "symbols": [
+        "ota_task",
+        "ota_activate",
+        "sdk_restart",
+        "checkup_shutdown",
+        "fault_save_handoff",
+        "room_time_now"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "ota_shutdown_checkup_fault_handoff_crc": {
+      "symbols": [
+        "ota_task",
+        "ota_activate",
+        "sdk_restart",
+        "checkup_shutdown",
+        "fault_save_handoff",
+        "fault_handoff_crc",
+        "fault_handoff_u32",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "ota_shutdown_fault_snapshot": {
+      "symbols": [
+        "ota_task",
+        "ota_activate",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "fault_checkpoint",
+        "fault_snapshot_locked",
+        "fault_walk_pair",
+        "fault_walk_feed",
+        "fault_walk_emit",
+        "fault_snapshot_emit",
+        "fault_trace_push"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "ota_shutdown_fault_snapshot_clock": {
+      "symbols": [
+        "ota_task",
+        "ota_activate",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "fault_checkpoint",
+        "fault_snapshot_locked",
+        "room_time_now"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "ota_shutdown_fault_reset_check": {
+      "symbols": [
+        "ota_task",
+        "ota_activate",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "fault_reset_pending"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "ota_shutdown_fault_build_crc": {
+      "symbols": [
+        "ota_task",
+        "ota_activate",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "cycling_flash_crc",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "ota_shutdown_fault_build_shape": {
+      "symbols": [
+        "ota_task",
+        "ota_activate",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "fault_page_valid"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "ota_shutdown_fault_append_ack": {
+      "symbols": [
+        "ota_task",
+        "ota_activate",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "fault_checkpoint_acked"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "ota_shutdown_fault_append_owner": {
+      "symbols": [
+        "ota_task",
+        "ota_activate",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "fault_record_owner"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "ota_shutdown_fault_read": {
+      "symbols": [
+        "ota_task",
+        "ota_activate",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "cycling_flash_record_read",
+        "sdk_partition_read"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "ota_shutdown_fault_validate": {
+      "symbols": [
+        "ota_task",
+        "ota_activate",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "fault_flash_page",
+        "cycling_flash_crc",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "ota_shutdown_fault_shape": {
+      "symbols": [
+        "ota_task",
+        "ota_activate",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "fault_flash_page",
+        "fault_page_valid"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "ota_shutdown_fault_decode": {
+      "symbols": [
+        "ota_task",
+        "ota_activate",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "fault_page_decode",
+        "fault_trace_push"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "ota_shutdown_fault_adopt": {
+      "symbols": [
+        "ota_task",
+        "ota_activate",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "fault_trace_restore"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 10752
+    },
+    "ota_health_shutdown_checkup_fault_handoff": {
+      "symbols": [
+        "ota_health_task",
+        "sdk_restart",
+        "checkup_shutdown",
+        "fault_save_handoff",
+        "fault_walk_pair",
+        "fault_walk_feed",
+        "fault_walk_emit",
+        "fault_handoff_pack_emit"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "ota_health_shutdown_checkup_fault_handoff_clock": {
+      "symbols": [
+        "ota_health_task",
+        "sdk_restart",
+        "checkup_shutdown",
+        "fault_save_handoff",
+        "room_time_now"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "ota_health_shutdown_checkup_fault_handoff_crc": {
+      "symbols": [
+        "ota_health_task",
+        "sdk_restart",
+        "checkup_shutdown",
+        "fault_save_handoff",
+        "fault_handoff_crc",
+        "fault_handoff_u32",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "ota_health_shutdown_fault_snapshot": {
+      "symbols": [
+        "ota_health_task",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "fault_checkpoint",
+        "fault_snapshot_locked",
+        "fault_walk_pair",
+        "fault_walk_feed",
+        "fault_walk_emit",
+        "fault_snapshot_emit",
+        "fault_trace_push"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "ota_health_shutdown_fault_snapshot_clock": {
+      "symbols": [
+        "ota_health_task",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "fault_checkpoint",
+        "fault_snapshot_locked",
+        "room_time_now"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "ota_health_shutdown_fault_reset_check": {
+      "symbols": [
+        "ota_health_task",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "fault_reset_pending"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "ota_health_shutdown_fault_build_crc": {
+      "symbols": [
+        "ota_health_task",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "cycling_flash_crc",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "ota_health_shutdown_fault_build_shape": {
+      "symbols": [
+        "ota_health_task",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_build",
+        "fault_page_valid"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "ota_health_shutdown_fault_append_ack": {
+      "symbols": [
+        "ota_health_task",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "fault_checkpoint_acked"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "ota_health_shutdown_fault_append_owner": {
+      "symbols": [
+        "ota_health_task",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "history_append",
+        "fault_record_owner"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "ota_health_shutdown_fault_read": {
+      "symbols": [
+        "ota_health_task",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "cycling_flash_record_read",
+        "sdk_partition_read"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "ota_health_shutdown_fault_validate": {
+      "symbols": [
+        "ota_health_task",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "fault_flash_page",
+        "cycling_flash_crc",
+        "history_config_crc"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "ota_health_shutdown_fault_shape": {
+      "symbols": [
+        "ota_health_task",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "fault_flash_page",
+        "fault_page_valid"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "ota_health_shutdown_fault_decode": {
+      "symbols": [
+        "ota_health_task",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "fault_page_decode",
+        "fault_trace_push"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
+    },
+    "ota_health_shutdown_fault_adopt": {
+      "symbols": [
+        "ota_health_task",
+        "sdk_restart",
+        "history_shutdown",
+        "history_journal",
+        "fault_flash_restore",
+        "fault_trace_restore"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 3072
     }
   },
   "tasks": {
@@ -15052,7 +17961,113 @@
         "httpd_mcp_defrost_start_fence",
         "httpd_direct_defrost_start_generation",
         "httpd_mcp_defrost_start_generation",
-        "httpd_defrost_air_schema"
+        "httpd_defrost_air_schema",
+        "httpd_direct_checkup_fault_flags",
+        "httpd_direct_checkup_fault_flags_clock",
+        "httpd_direct_fault_timeline",
+        "httpd_direct_fault_snapshot_clock",
+        "httpd_direct_fault_fallback",
+        "httpd_direct_fault_fallback_clock",
+        "httpd_direct_fault_format_snprintf",
+        "httpd_direct_fault_format_quoted",
+        "httpd_mcp_checkup_fault_flags",
+        "httpd_mcp_checkup_fault_flags_clock",
+        "httpd_mcp_fault_timeline",
+        "httpd_mcp_fault_snapshot_clock",
+        "httpd_mcp_fault_fallback",
+        "httpd_mcp_fault_fallback_clock",
+        "httpd_mcp_fault_format_snprintf",
+        "httpd_mcp_fault_format_quoted",
+        "httpd_shutdown_wifi_checkup_fault_handoff",
+        "httpd_shutdown_wifi_checkup_fault_handoff_clock",
+        "httpd_shutdown_wifi_checkup_fault_handoff_crc",
+        "httpd_shutdown_wifi_fault_snapshot",
+        "httpd_shutdown_wifi_fault_snapshot_clock",
+        "httpd_shutdown_wifi_fault_reset_check",
+        "httpd_shutdown_wifi_fault_build_crc",
+        "httpd_shutdown_wifi_fault_build_shape",
+        "httpd_shutdown_wifi_fault_append_ack",
+        "httpd_shutdown_wifi_fault_append_owner",
+        "httpd_shutdown_wifi_fault_read",
+        "httpd_shutdown_wifi_fault_validate",
+        "httpd_shutdown_wifi_fault_shape",
+        "httpd_shutdown_wifi_fault_decode",
+        "httpd_shutdown_wifi_fault_adopt",
+        "httpd_shutdown_mqtt_checkup_fault_handoff",
+        "httpd_shutdown_mqtt_checkup_fault_handoff_clock",
+        "httpd_shutdown_mqtt_checkup_fault_handoff_crc",
+        "httpd_shutdown_mqtt_fault_snapshot",
+        "httpd_shutdown_mqtt_fault_snapshot_clock",
+        "httpd_shutdown_mqtt_fault_reset_check",
+        "httpd_shutdown_mqtt_fault_build_crc",
+        "httpd_shutdown_mqtt_fault_build_shape",
+        "httpd_shutdown_mqtt_fault_append_ack",
+        "httpd_shutdown_mqtt_fault_append_owner",
+        "httpd_shutdown_mqtt_fault_read",
+        "httpd_shutdown_mqtt_fault_validate",
+        "httpd_shutdown_mqtt_fault_shape",
+        "httpd_shutdown_mqtt_fault_decode",
+        "httpd_shutdown_mqtt_fault_adopt",
+        "httpd_shutdown_syslog_checkup_fault_handoff",
+        "httpd_shutdown_syslog_checkup_fault_handoff_clock",
+        "httpd_shutdown_syslog_checkup_fault_handoff_crc",
+        "httpd_shutdown_syslog_fault_snapshot",
+        "httpd_shutdown_syslog_fault_snapshot_clock",
+        "httpd_shutdown_syslog_fault_reset_check",
+        "httpd_shutdown_syslog_fault_build_crc",
+        "httpd_shutdown_syslog_fault_build_shape",
+        "httpd_shutdown_syslog_fault_append_ack",
+        "httpd_shutdown_syslog_fault_append_owner",
+        "httpd_shutdown_syslog_fault_read",
+        "httpd_shutdown_syslog_fault_validate",
+        "httpd_shutdown_syslog_fault_shape",
+        "httpd_shutdown_syslog_fault_decode",
+        "httpd_shutdown_syslog_fault_adopt",
+        "httpd_shutdown_ntp_checkup_fault_handoff",
+        "httpd_shutdown_ntp_checkup_fault_handoff_clock",
+        "httpd_shutdown_ntp_checkup_fault_handoff_crc",
+        "httpd_shutdown_ntp_fault_snapshot",
+        "httpd_shutdown_ntp_fault_snapshot_clock",
+        "httpd_shutdown_ntp_fault_reset_check",
+        "httpd_shutdown_ntp_fault_build_crc",
+        "httpd_shutdown_ntp_fault_build_shape",
+        "httpd_shutdown_ntp_fault_append_ack",
+        "httpd_shutdown_ntp_fault_append_owner",
+        "httpd_shutdown_ntp_fault_read",
+        "httpd_shutdown_ntp_fault_validate",
+        "httpd_shutdown_ntp_fault_shape",
+        "httpd_shutdown_ntp_fault_decode",
+        "httpd_shutdown_ntp_fault_adopt",
+        "httpd_shutdown_board_checkup_fault_handoff",
+        "httpd_shutdown_board_checkup_fault_handoff_clock",
+        "httpd_shutdown_board_checkup_fault_handoff_crc",
+        "httpd_shutdown_board_fault_snapshot",
+        "httpd_shutdown_board_fault_snapshot_clock",
+        "httpd_shutdown_board_fault_reset_check",
+        "httpd_shutdown_board_fault_build_crc",
+        "httpd_shutdown_board_fault_build_shape",
+        "httpd_shutdown_board_fault_append_ack",
+        "httpd_shutdown_board_fault_append_owner",
+        "httpd_shutdown_board_fault_read",
+        "httpd_shutdown_board_fault_validate",
+        "httpd_shutdown_board_fault_shape",
+        "httpd_shutdown_board_fault_decode",
+        "httpd_shutdown_board_fault_adopt",
+        "httpd_shutdown_env3_checkup_fault_handoff",
+        "httpd_shutdown_env3_checkup_fault_handoff_clock",
+        "httpd_shutdown_env3_checkup_fault_handoff_crc",
+        "httpd_shutdown_env3_fault_snapshot",
+        "httpd_shutdown_env3_fault_snapshot_clock",
+        "httpd_shutdown_env3_fault_reset_check",
+        "httpd_shutdown_env3_fault_build_crc",
+        "httpd_shutdown_env3_fault_build_shape",
+        "httpd_shutdown_env3_fault_append_ack",
+        "httpd_shutdown_env3_fault_append_owner",
+        "httpd_shutdown_env3_fault_read",
+        "httpd_shutdown_env3_fault_validate",
+        "httpd_shutdown_env3_fault_shape",
+        "httpd_shutdown_env3_fault_decode",
+        "httpd_shutdown_env3_fault_adopt"
       ]
     },
     "main": {
@@ -15078,7 +18093,10 @@
         "main_stop_pending_release",
         "main_cycling_scan",
         "main_cycling_scan_shape",
-        "main_cycling_scan_owner"
+        "main_cycling_scan_owner",
+        "main_fault_scan",
+        "main_fault_scan_shape",
+        "main_fault_scan_owner"
       ]
     },
     "mqtt": {
@@ -15267,7 +18285,35 @@
         "poll_shutdown_cycling_append_owner",
         "poll_cycling_append_owner",
         "poll_cycling_trend_filter",
-        "poll_defrost_air_schema"
+        "poll_defrost_air_schema",
+        "poll_fault_snapshot",
+        "poll_fault_snapshot_clock",
+        "poll_fault_reset_check",
+        "poll_fault_build_crc",
+        "poll_fault_build_shape",
+        "poll_fault_append_ack",
+        "poll_fault_append_owner",
+        "poll_fault_read",
+        "poll_fault_validate",
+        "poll_fault_shape",
+        "poll_fault_decode",
+        "poll_fault_adopt",
+        "poll_fault_trend_filter",
+        "poll_shutdown_checkup_fault_handoff",
+        "poll_shutdown_checkup_fault_handoff_clock",
+        "poll_shutdown_checkup_fault_handoff_crc",
+        "poll_shutdown_fault_snapshot",
+        "poll_shutdown_fault_snapshot_clock",
+        "poll_shutdown_fault_reset_check",
+        "poll_shutdown_fault_build_crc",
+        "poll_shutdown_fault_build_shape",
+        "poll_shutdown_fault_append_ack",
+        "poll_shutdown_fault_append_owner",
+        "poll_shutdown_fault_read",
+        "poll_shutdown_fault_validate",
+        "poll_shutdown_fault_shape",
+        "poll_shutdown_fault_decode",
+        "poll_shutdown_fault_adopt"
       ]
     },
     "modbus": {
@@ -15420,7 +18466,22 @@
         "eth_shutdown_cycling_decode",
         "eth_shutdown_cycling_append_shape",
         "eth_shutdown_cycling_append_ack",
-        "eth_shutdown_cycling_append_owner"
+        "eth_shutdown_cycling_append_owner",
+        "eth_shutdown_checkup_fault_handoff",
+        "eth_shutdown_checkup_fault_handoff_clock",
+        "eth_shutdown_checkup_fault_handoff_crc",
+        "eth_shutdown_fault_snapshot",
+        "eth_shutdown_fault_snapshot_clock",
+        "eth_shutdown_fault_reset_check",
+        "eth_shutdown_fault_build_crc",
+        "eth_shutdown_fault_build_shape",
+        "eth_shutdown_fault_append_ack",
+        "eth_shutdown_fault_append_owner",
+        "eth_shutdown_fault_read",
+        "eth_shutdown_fault_validate",
+        "eth_shutdown_fault_shape",
+        "eth_shutdown_fault_decode",
+        "eth_shutdown_fault_adopt"
       ]
     },
     "dns": {
@@ -15490,7 +18551,22 @@
         "ota_shutdown_cycling_decode",
         "ota_shutdown_cycling_append_shape",
         "ota_shutdown_cycling_append_ack",
-        "ota_shutdown_cycling_append_owner"
+        "ota_shutdown_cycling_append_owner",
+        "ota_shutdown_checkup_fault_handoff",
+        "ota_shutdown_checkup_fault_handoff_clock",
+        "ota_shutdown_checkup_fault_handoff_crc",
+        "ota_shutdown_fault_snapshot",
+        "ota_shutdown_fault_snapshot_clock",
+        "ota_shutdown_fault_reset_check",
+        "ota_shutdown_fault_build_crc",
+        "ota_shutdown_fault_build_shape",
+        "ota_shutdown_fault_append_ack",
+        "ota_shutdown_fault_append_owner",
+        "ota_shutdown_fault_read",
+        "ota_shutdown_fault_validate",
+        "ota_shutdown_fault_shape",
+        "ota_shutdown_fault_decode",
+        "ota_shutdown_fault_adopt"
       ]
     },
     "ota_health": {
@@ -15530,7 +18606,22 @@
         "ota_health_shutdown_cycling_decode",
         "ota_health_shutdown_cycling_append_shape",
         "ota_health_shutdown_cycling_append_ack",
-        "ota_health_shutdown_cycling_append_owner"
+        "ota_health_shutdown_cycling_append_owner",
+        "ota_health_shutdown_checkup_fault_handoff",
+        "ota_health_shutdown_checkup_fault_handoff_clock",
+        "ota_health_shutdown_checkup_fault_handoff_crc",
+        "ota_health_shutdown_fault_snapshot",
+        "ota_health_shutdown_fault_snapshot_clock",
+        "ota_health_shutdown_fault_reset_check",
+        "ota_health_shutdown_fault_build_crc",
+        "ota_health_shutdown_fault_build_shape",
+        "ota_health_shutdown_fault_append_ack",
+        "ota_health_shutdown_fault_append_owner",
+        "ota_health_shutdown_fault_read",
+        "ota_health_shutdown_fault_validate",
+        "ota_health_shutdown_fault_shape",
+        "ota_health_shutdown_fault_decode",
+        "ota_health_shutdown_fault_adopt"
       ]
     },
     "deadline": {

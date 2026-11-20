@@ -157,7 +157,7 @@ function renderCards(hold = true) {
   // A source change can select a card whose charts were paused in this frame.
   if (S.dashboardCard !== card) renderCards(false);
   else {
-    for (const slot of selected?.querySelectorAll("[data-chart][inert], [data-checkup-hours][inert]") || [])
+    for (const slot of selected?.querySelectorAll("[data-chart][inert], [data-checkup-hours][inert], [data-checkup-fault][inert]") || [])
       slot.inert = false;
     syncCheckupCyclingChart(selected);
   }
@@ -242,7 +242,7 @@ function selectDashboardCard(key) {
   // geometry cannot select a sample from the newer cache before the next complete paint.
   if (_pollBusy) {
     const selected = syncDashboardCards();
-    for (const slot of selected?.querySelectorAll("[data-chart], [data-checkup-hours]") || [])
+    for (const slot of selected?.querySelectorAll("[data-chart], [data-checkup-hours], [data-checkup-fault]") || [])
       slot.inert = true;
   } else renderCards(false);
 }
@@ -1794,6 +1794,276 @@ function checkupCyclingChartHtml(c) {
   return html;
 }
 
+function checkupFaultDuration(s) {
+  const sec = Math.max(0, Math.round(Number(s) || 0));
+  return sec < 60 ? dwellDuration(sec) : checkupDuration(sec);
+}
+function checkupFaultExactDuration(s) {
+  const sec = Math.max(0, Math.round(Number(s) || 0));
+  return sec >= 60 && sec < 3600 ? checkupCyclingDuration(sec) : checkupFaultDuration(sec);
+}
+function checkupFaultStateLabel(kind) {
+  if (kind === "fault" || kind === "err") return t("enum.fault");
+  if (kind === "caution") return t("check.fault_severity_caution");
+  return t("enum.warning");
+}
+function checkupFaultUnitLabel(unit) {
+  if (unit === "outdoor" || unit === "indoor" || unit === "both") return t(`check.fault_unit_${unit}`);
+  return "";
+}
+function checkupFaultClock(unixS, ageS) {
+  const u = Number(unixS);
+  if (Number.isFinite(u) && u > 0) {
+    return new Intl.DateTimeFormat(LANG, {
+      month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit",
+    }).format(u * 1000);
+  }
+  const age = Number(ageS);
+  return Number.isFinite(age) && age >= 0 ? t("check.fault_ago_short", checkupFaultDuration(age)) : t("sys.nodata");
+}
+function extractFaultEpisodes(timeline, sourceFresh) {
+  const segs = Array.isArray(timeline?.segments) ? timeline.segments : [];
+  const winEnd = Number(timeline?.window_end_s) > 0 ? Number(timeline.window_end_s) : 86400;
+  const winStart = Math.max(0, winEnd - 86400);
+  const obsEnd = Math.max(winStart, Math.min(winEnd, Number(timeline?.observed_end_s) || 0));
+  const unixEnd = Number(timeline?.unix_s) > winEnd ? Number(timeline.unix_s) : 0;
+  const isFaultSeg = k => k === "err" || k === "warn" || k === "caution";
+  const toneMap = new Map();
+  const spans = [];
+  const episodes = [];
+  const totals = new Map();
+
+  if (segs.length && Number(segs[0]?.t) > winStart) {
+    spans.push({ kind: "gap", startS: winStart, endS: Math.min(winEnd, Number(segs[0].t)) });
+  }
+  for (let i = 0; i < segs.length; i++) {
+    const seg = segs[i];
+    const startS = Math.max(winStart, Math.min(winEnd, Number(seg?.t) || 0));
+    const nextT = i + 1 < segs.length ? Number(segs[i + 1]?.t) : obsEnd;
+    const endS = Math.max(startS, Math.min(winEnd, Number.isFinite(nextT) ? nextT : obsEnd));
+    if (!isFaultSeg(seg?.k)) {
+      if (endS > startS) spans.push({ kind: seg?.k === "ok" ? "ok" : "gap", startS, endS });
+      continue;
+    }
+    const code = String(seg.c || "?").trim() || "?";
+    if (!toneMap.has(code)) toneMap.set(code, toneMap.size % 6);
+    const tone = toneMap.get(code);
+    const baseCode = String(seg.b || code.split("-")[0]).trim().toUpperCase();
+    const lastEp = episodes[episodes.length - 1];
+    const contiguous = lastEp && lastEp._lastIdx === i - 1 && lastEp.stopS === startS &&
+      lastEp.kindKey === seg.k && lastEp.code === code && lastEp.unitRaw === (seg.u || "") &&
+      lastEp.sub === (seg.sub || 0) && lastEp.sc === (seg.sc || "") && lastEp.sk === (seg.sk || "");
+    let ep;
+    if (contiguous) {
+      ep = lastEp;
+      ep._lastIdx = i;
+      ep.stopS = endS;
+      ep.durationS = Math.max(0, ep.stopS - ep.startS);
+    } else {
+      ep = {
+        idx: episodes.length,
+        _lastIdx: i,
+        kindKey: seg.k,
+        code,
+        baseCode,
+        meaning: faultCodeMeaning(baseCode),
+        unitRaw: seg.u || "",
+        sub: Number(seg.sub) || 0,
+        sc: String(seg.sc || "").trim(),
+        sk: String(seg.sk || "").trim(),
+        tone,
+        startS,
+        stopS: endS,
+        durationS: Math.max(0, endS - startS),
+      };
+      episodes.push(ep);
+    }
+    totals.set(code, (totals.get(code) || 0) + Math.max(0, endS - startS));
+    spans.push({ kind: seg.k, startS, endS, code, baseCode, tone, epIdx: ep.idx });
+  }
+  if (obsEnd < winEnd && segs.length) {
+    spans.push({ kind: "gap", startS: obsEnd, endS: winEnd });
+  }
+  for (const ep of episodes) {
+    const atEnd = ep._lastIdx + 1 === segs.length;
+    const isLive = atEnd && sourceFresh !== false && timeline?.live === true && (winEnd - obsEnd <= 300);
+    ep.ongoing = isLive;
+    ep.stopUnknown = !isLive && (!atEnd ? (segs[ep._lastIdx + 1]?.k !== "ok") : true);
+    ep.startUnixS = unixEnd ? unixEnd - (winEnd - ep.startS) : 0;
+    ep.endUnixS = !ep.ongoing && unixEnd ? unixEnd - (winEnd - ep.stopS) : 0;
+    ep.startAgeS = Math.max(0, winEnd - ep.startS);
+    ep.stopAgeS = Math.max(0, winEnd - ep.stopS);
+  }
+  return { episodes, spans, toneMap, totals, winStart, winEnd, obsEnd };
+}
+function faultSecNoteHtml(secCode, secState) {
+  if (!secCode) return "";
+  const m = faultCodeMeaning(secCode);
+  const label = `${secCode}${m ? ` (${m})` : ""}` + (secState ? ` · ${checkupFaultStateLabel(secState)}` : "");
+  return t("check.fault_secondary", label);
+}
+function checkupFaultDetailHtml(c, report = {}) {
+  const stale = report?.source_fresh === false || c.reason === "source_stale";
+  const isModbus = report?.source === "modbus";
+  const timeline = c.timeline && Array.isArray(c.timeline.segments) ? c.timeline : null;
+  const parsed = timeline ? extractFaultEpisodes(timeline, report?.source_fresh) : null;
+  const toneFor = (code, kind) => {
+    if (parsed && parsed.toneMap.has(code)) return parsed.toneMap.get(code);
+    return (kind === "fault" || kind === "err") ? 0 : 1;
+  };
+  let heroHtml = "";
+  if (c.latest && c.latest.code) {
+    const lt = c.latest;
+    const tone = toneFor(lt.code, lt.state);
+    const meaning = faultCodeMeaning(lt.base_code || lt.code);
+    const startAge = lt.ongoing ? lt.age_s : Number(lt.age_s || 0) + Number(lt.duration_s || 0);
+    const startTxt = checkupFaultClock(lt.start_unix_s, startAge);
+    const stopTxt = lt.ongoing ? t("check.fault_stop_ongoing")
+                  : lt.stop_unknown ? t("check.fault_stop_unknown")
+                  : checkupFaultClock(lt.end_unix_s, lt.age_s);
+    const metaParts = [
+      checkupFaultStateLabel(lt.state),
+      checkupFaultUnitLabel(lt.unit),
+      faultSecNoteHtml(lt.secondary_code, lt.secondary_state),
+    ].filter(Boolean);
+    const timeLine = `${t("check.cycling.run_start")}: ${startTxt} · ${t("check.cycling.run_stop")}: ${stopTxt} · ` +
+      `${t("check.cycling.run_duration")}: ${checkupFaultExactDuration(lt.duration_s)}`;
+    heroHtml = `<div class="checkup-fault-hero">` +
+      `<div class="checkup-fault-hero-head">` +
+      `<span class="fault-code-badge fault-tone-${tone}"><i class="fault-dot" aria-hidden="true"></i>${esc(lt.code)}</span>` +
+      `<span class="checkup-fault-meaning">${esc(meaning)}</span>` +
+      `</div>` +
+      (metaParts.length ? `<div class="checkup-fault-meta">${esc(metaParts.join(" · "))}</div>` : "") +
+      `<div class="checkup-fault-meta num">${esc(timeLine)}</div>` +
+      (stale ? `<div class="checkup-fault-meta">${esc(t(isModbus ? "check.detail.source_stale_modbus" : "check.detail.source_stale"))}</div>` : "") +
+      `</div>`;
+  } else if (c.saved === 1) {
+    heroHtml = `<div class="checkup-fault-hero"><div class="vdesc-p">${esc(t("check.fault_latched_only"))}</div></div>`;
+  } else if (c.verdict === "ok" && c.active === 0) {
+    const okMsg = Number.isFinite(c.observed_s) && c.observed_s > 0
+      ? t("check.fault_hero_ok", checkupDuration(c.observed_s)) : t("check.fault_none");
+    heroHtml = `<div class="checkup-fault-hero"><div class="vdesc-p">${esc(okMsg)}</div></div>`;
+  } else {
+    const statusKey = checkupStatusKey(c);
+    const msg = statusKey === "collecting"
+      ? (c.required_s > 0 ? t("check.detail.collecting", checkupDuration(c.observed_s), checkupDuration(c.required_s))
+                          : t("check.detail.collecting_unknown"))
+      : t(checkupDetailKey(c, statusKey));
+    const staleNote = stale ? ` ${t(isModbus ? "check.detail.source_stale_modbus" : "check.detail.source_stale")}` : "";
+    heroHtml = `<div class="checkup-fault-hero"><div class="vdesc-p"><span class="vdesc-n">${esc(checkupStatusText(c))}</span> — ${esc(msg + staleNote)}</div></div>`;
+  }
+
+  let chartHtml = "";
+  let tableHtml = "";
+  if (parsed && parsed.spans.length) {
+    const validCodes = new Set(parsed.toneMap.keys());
+    for (const active of [...S.faultCodes]) if (!validCodes.has(active)) S.faultCodes.delete(active);
+    const validEpSet = new Set(parsed.episodes.map(ep => String(ep.idx)));
+    if (S.faultSnapKeys) {
+      for (const k of [...S.faultSnapKeys]) if (!validEpSet.has(k)) S.faultSnapKeys.delete(k);
+      if (!S.faultSnapKeys.size) S.faultSnapKeys = null;
+    }
+    const hasFilter = S.faultCodes.size > 0 || (S.faultSnapKeys && S.faultSnapKeys.size > 0);
+    const pct = v => (v / 864).toFixed(4) + "%";
+    const segsHtml = parsed.spans.map((sp) => {
+      const left = pct(sp.startS - parsed.winStart);
+      const width = pct(sp.endS - sp.startS);
+      if (sp.kind === "gap") {
+        const msg = `${t("check.fault_gap_label")} · ${checkupFaultExactDuration(sp.endS - sp.startS)}`;
+        return `<span class="vhist-state-gap" style="left:${left};width:${width}" data-fault-tip="${esc(msg)}"></span>`;
+      }
+      if (sp.kind === "ok") {
+        const msg = `${t("check.fault_ok_label")} · ${checkupFaultExactDuration(sp.endS - sp.startS)}`;
+        return `<span class="vhist-state-ok" style="left:${left};width:${width}" data-fault-tip="${esc(msg)}"></span>`;
+      }
+      const ep = parsed.episodes[sp.epIdx];
+      const match = !hasFilter || S.faultCodes.has(sp.code) || S.faultSnapKeys?.has(String(sp.epIdx));
+      const snapped = S.faultSnapKeys?.has(String(sp.epIdx));
+      const tip = `${sp.code} (${ep.meaning}) · ${checkupFaultExactDuration(sp.endS - sp.startS)}`;
+      return `<span class="vhist-state-seg fault-tone-${sp.tone}${match ? " is-match" : ""}${snapped ? " is-snapped" : ""}"` +
+        ` data-fault-seg="${sp.epIdx}" data-fault-code="${esc(sp.code)}" data-fault-tip="${esc(tip)}"` +
+        ` style="left:${left};width:${width}"></span>`;
+    }).join("");
+    const chipsHtml = parsed.toneMap.size
+      ? `<div class="checkup-fault-chips">` +
+        [...parsed.toneMap.entries()].map(([code, tone]) => {
+          const pressed = S.faultCodes.has(code);
+          const tot = parsed.totals.get(code) || 0;
+          return `<button type="button" class="fault-chip fault-tone-${tone}" data-fault-chip="${esc(code)}"` +
+            ` aria-pressed="${pressed ? "true" : "false"}">` +
+            `<i class="fault-dot" aria-hidden="true"></i><span class="mono">${esc(code)}</span>` +
+            `<span class="num">· ${esc(checkupFaultDuration(tot))}</span></button>`;
+        }).join("") + `</div>`
+      : "";
+    const axisHtml = `<div class="vhist-axis"><span>${esc(t("check.hour.earlier", 24))}</span><span>${esc(t("check.hour.latest"))}</span></div>`;
+    const defaultTip = parsed.episodes.length ? "" : t("check.fault_none");
+    chartHtml = `<div class="checkup-fault-chart${hasFilter ? " is-filtered" : ""}" role="group" aria-label="${esc(t("hist.aria", t("check.fault")))}">` +
+      `<div class="vhist-state-track checkup-fault-track" tabindex="0">${segsHtml}</div>` +
+      axisHtml +
+      `<div class="checkup-fault-readout num" data-fault-default="${esc(defaultTip)}">${esc(defaultTip)}</div>` +
+      chipsHtml + `</div>`;
+
+    if (parsed.episodes.length) {
+      const rows = parsed.episodes.slice().reverse().map((ep) => {
+        const show = hasFilter && (S.faultCodes.has(ep.code) || S.faultSnapKeys?.has(String(ep.idx)));
+        const snapped = S.faultSnapKeys?.has(String(ep.idx));
+        const startStr = checkupFaultClock(ep.startUnixS, ep.startAgeS);
+        const stopStr = ep.ongoing ? t("check.fault_stop_ongoing")
+                      : ep.stopUnknown ? t("check.fault_stop_unknown")
+                      : checkupFaultClock(ep.endUnixS, ep.stopAgeS);
+        const sub = ep.sc ? `<span class="checkup-fault-sub">${esc(faultSecNoteHtml(ep.sc, ep.sk))}</span>` : "";
+        return `<tr data-fault-row-ep="${ep.idx}" data-fault-code="${esc(ep.code)}"` +
+          `${snapped ? ' class="is-snapped"' : ""}${show ? "" : " hidden"}>` +
+          `<td class="mono"><span class="fault-tone-${ep.tone}"><i class="fault-dot" aria-hidden="true"></i> ${esc(ep.code)}</span></td>` +
+          `<td>${esc(ep.meaning)}${sub}</td>` +
+          `<td class="num">${esc(startStr)}</td>` +
+          `<td class="num">${esc(stopStr)}</td>` +
+          `<td class="num">${esc(checkupFaultExactDuration(ep.durationS))}</td></tr>`;
+      }).join("");
+      tableHtml = `<div class="checkup-fault-table-wrap"${hasFilter ? "" : " hidden"}>` +
+        `<table class="checkup-fault-table"><thead><tr>` +
+        `<th>${esc(t("check.fault_col_code"))}</th>` +
+        `<th>${esc(t("check.fault_col_meaning"))}</th>` +
+        `<th>${esc(t("check.cycling.run_start"))}</th>` +
+        `<th>${esc(t("check.cycling.run_stop"))}</th>` +
+        `<th>${esc(t("check.cycling.run_duration"))}</th>` +
+        `</tr></thead><tbody>${rows}</tbody></table></div>`;
+    }
+  }
+  const copy = modelDescriptionCopy("health_fault");
+  const what = copy ? copy[0] : MODEL_DESCRIPTIONS.health_fault.what;
+  return `<div class="checkup-fault-panel" data-checkup-fault>${heroHtml}${chartHtml}${tableHtml}` +
+    `<p class="vdesc-p checkup-fault-boundary">${esc(what)}</p></div>`;
+}
+function syncCheckupFaultPanel(panel) {
+  if (!panel) return;
+  const hasFilter = S.faultCodes.size > 0 || (S.faultSnapKeys && S.faultSnapKeys.size > 0);
+  const chart = panel.querySelector(".checkup-fault-chart");
+  if (chart) {
+    chart.classList.toggle("is-filtered", !!hasFilter);
+    for (const seg of chart.querySelectorAll("[data-fault-seg]")) {
+      const ep = seg.dataset.faultSeg;
+      const code = seg.dataset.faultCode;
+      seg.classList.toggle("is-match", !hasFilter || S.faultCodes.has(code) || !!S.faultSnapKeys?.has(ep));
+      seg.classList.toggle("is-snapped", !!S.faultSnapKeys?.has(ep));
+    }
+    for (const chip of chart.querySelectorAll("button.fault-chip[data-fault-chip]")) {
+      chip.setAttribute("aria-pressed", S.faultCodes.has(chip.dataset.faultChip) ? "true" : "false");
+    }
+  }
+  const wrap = panel.querySelector(".checkup-fault-table-wrap");
+  if (wrap) {
+    wrap.hidden = !hasFilter;
+    for (const tr of wrap.querySelectorAll("tr[data-fault-row-ep]")) {
+      const ep = tr.dataset.faultRowEp;
+      const code = tr.dataset.faultCode;
+      const show = hasFilter && (S.faultCodes.has(code) || !!S.faultSnapKeys?.has(ep));
+      tr.hidden = !show;
+      tr.classList.toggle("is-snapped", !!S.faultSnapKeys?.has(ep));
+    }
+  }
+}
+
 function checkupStatusKey(c) {
   const verdict = typeof c === "string" ? c : c?.verdict;
   // Older firmware reported this completed, unsuccessful day as collecting. Keep its
@@ -1857,6 +2127,7 @@ function checkupDhwReasons(c, isModbus = false) {
 
 const checkupFmt1 = (n) => n.toLocaleString(LANG, { maximumFractionDigits: 1 });
 function checkupDetailHtml(c, fullSpan = c.full_span === true, report = {}) {
+  if (c.id === "fault") return checkupFaultDetailHtml(c, report);
   if (c.id === "cycling") return checkupCyclingDetailHtml(c, report);
   const isModbus = report?.source === "modbus";
   const statusKey = checkupStatusKey(c);
@@ -2095,8 +2366,25 @@ function checkupMetricValue(c) {
   return "";
 }
 
+function checkupFaultRow(c) {
+  if (!c || c.verdict === "unavailable" || c.verdict === "collecting")
+    return { text: checkupStatusText(c), aria: "" };
+  if (c.verdict === "ok" && c.active === 0)
+    return { text: "", aria: t("check.fault_none") };
+  if (c.latest && c.latest.code) {
+    if (c.active === 1)
+      return { text: `${c.latest.code} · ${t("check.fault_since_short", checkupFaultDuration(c.latest.duration_s))}`, aria: "" };
+    if (c.active === 0 && c.verdict === "info")
+      return { text: `${c.latest.code} · ${t("check.fault_ago_short", checkupFaultDuration(c.latest.age_s))}`, aria: "" };
+    if (c.active == null)
+      return { text: `${c.latest.code} · ${t("check.fault_unknown")}`, aria: "" };
+  }
+  return { text: checkupMetricValue(c) || checkupStatusText(c), aria: "" };
+}
+
 function checkupValue(c) {
   const st = checkupStatusText(c);
+  if (c?.id === "fault") return checkupFaultRow(c).text;
   if (!c || c.verdict === "unavailable" || (c.id === "dhw_loss" && c.blocked === true)) return st;
   if (c.id === "dhw_loss")
     return checkupDhwHasRate(c) ? `${checkupFmt1(c.max_k_h)} K/h` : st;
@@ -2149,8 +2437,10 @@ function checkupCardHtml(includeHealth = true) {
       if (!key) continue;                             // a check this UI does not know: skipped, never guessed at
       const tone = CHECKUP_TONE[checkupStatusKey(c)] || "";
       const isPressure = c.id === "pressure" && c.verdict !== "unavailable" && hasHist("water_pressure");
-      healthRows += modelDescRow(`health_${c.id}`, t(key), checkupValue(c),
+      const rowVal = c.id === "fault" ? checkupFaultRow(c) : { text: checkupValue(c), aria: "" };
+      healthRows += modelDescRow(`health_${c.id}`, t(key), rowVal.text,
                                  { cls: `checkup-val${tone ? ` ${tone}` : ""}`,
+                                   ariaValue: rowVal.aria,
                                    bodyHtml: checkupDetailHtml(c, h.full_span === true, h),
                                    trendId: isPressure ? "water_pressure" : "",
                                    histUnit: isPressure ? "bar" : "",

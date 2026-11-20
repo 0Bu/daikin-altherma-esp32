@@ -582,16 +582,19 @@ inline constexpr bool history_journal_retry_due(bool paused, int64_t now_us,
 // per hour: each hour once when it completes, and at most once more in a late-completion replay.
 // The independent stop-context logical source adds four records/hour: close, seam coverage, late
 // stop revision, and one reset barrier. Both cycling traces add up to four slots per three-minute
-// checkpoint. Repeated explicit resets or shutdowns consume wear reserve and can shorten retention.
+// checkpoint, and both fault traces add one slot per fifteen-minute checkpoint. Repeated explicit
+// resets or shutdowns consume wear reserve and can shorten retention.
 inline constexpr size_t HISTORY_FLASH_CYCLING_MAX_PARTS  = 4;
 inline constexpr size_t HISTORY_FLASH_CYCLING_INTERVAL_S = 180;
+inline constexpr size_t HISTORY_FLASH_FAULT_INTERVAL_S   = 900;
 inline constexpr size_t HISTORY_FLASH_FUTURE_HOURS       = 72;
 inline constexpr size_t HISTORY_FLASH_FUTURE_SAMPLES =
     HISTORY_FLASH_FUTURE_HOURS * 60u * 60u / HISTORY_DT_S;
 inline constexpr size_t HISTORY_FLASH_FUTURE_RECORDS =
     HISTORY_FLASH_FUTURE_SAMPLES * 4u +
     (2u + 2u + 4u +
-     2u * (3600u / HISTORY_FLASH_CYCLING_INTERVAL_S * HISTORY_FLASH_CYCLING_MAX_PARTS)) *
+     2u * (3600u / HISTORY_FLASH_CYCLING_INTERVAL_S * HISTORY_FLASH_CYCLING_MAX_PARTS) +
+     2u * (3600u / HISTORY_FLASH_FAULT_INTERVAL_S)) *
         HISTORY_FLASH_FUTURE_HOURS;
 static_assert(HISTORY_FLASH_FUTURE_SAMPLES == 864,
               "72 hours at the five-minute raster must contain 864 samples per ring");

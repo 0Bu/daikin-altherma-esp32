@@ -1,4 +1,4 @@
-// translation-source: 42a4d77a832a12c84359f017fdcacdd939405dc965a062a922c2d18aafa2ff0e
+// translation-source: d65d3b16aadf37eb87ecbe27037b388b04d755399b25c0257655dd6a6be12909
 I18N.de = localeValues([
   /* sys.nodata */ "Keine Daten",
   /* sys.unreachable */ "Nicht erreichbar",
@@ -261,6 +261,21 @@ I18N.de = localeValues([
   /* check.fault_none */ "keine",
   /* check.fault_unknown */ "Unbekannt",
   /* check.fault_past_unknown */ "Früher · unklar",
+  /* check.fault_since_short */ (d) => `seit ${d}`,
+  /* check.fault_ago_short */ (d) => `vor ${d}`,
+  /* check.fault_hero_ok */ (d) => `In ${d} der 24-h-Beobachtung keine Störung oder Warnung gemeldet.`,
+  /* check.fault_latched_only */ "Gespeichertes Störungsflag der Wärmepumpe; im erfassten 24-h-Fenster lag keine Episode mit Zeitstempel.",
+  /* check.fault_unit_outdoor */ "Außeneinheit",
+  /* check.fault_unit_indoor */ "Inneneinheit",
+  /* check.fault_unit_both */ "Außen- + Inneneinheit",
+  /* check.fault_secondary */ (s) => `Zudem aktiv: ${s}`,
+  /* check.fault_stop_ongoing */ "aktiv",
+  /* check.fault_stop_unknown */ "unklar",
+  /* check.fault_col_code */ "Code",
+  /* check.fault_col_meaning */ "Bedeutung",
+  /* check.fault_ok_label */ "Störungsfrei",
+  /* check.fault_gap_label */ "Unbeobachtet",
+  /* check.fault_severity_caution */ "Hinweis",
   /* check.retry_seen */ "Anstieg",
   /* check.retry_none */ "Kein Anstieg",
   /* service.metric.comp */ "Verdichter",
@@ -1002,7 +1017,7 @@ I18N.de = localeValues([
 
 // Unchanged German specialist copy, loaded with the existing German locale asset.
 MODEL_DESCRIPTION_I18N.de = modelDescriptionValues([
-  /* health_fault */ ["Aktuelle und gespeicherte Störungsmeldungen der Wärmepumpe.","Keine gemeldete Störung. Eine Meldung belegt keine Ursache; ihr Verschwinden belegt keine Behebung."],
+  /* health_fault */ ["Zeigt Fehler- und Warncodes der Wärmepumpe; Kurzbeschreibungen sind allgemeine Daikin-Hinweise, und ein verschwundener Code belegt nicht die Behebung der Ursache."],
   /* health_dhw_loss */ ["Stärkste erfasste Abkühlung pro Stunde am Speichersensor R5T.","Interner Hinweis ≥0,8 K/h ohne Pumpen-/Zapfmerkmale. R5T misst einen Punkt, keine Energie oder den ganzen Speicher. Fehlende Merkmale belegen keine Zapffreiheit; null Nettoabkühlung schließt Wärmeverlust nicht aus. Zirkulationsüberschneidung belegt keine Ursache."],
   /* health_cycling */ ["Bei Messlücken können Starts fehlen.", "Eine feste normale Startzahl gibt es nicht. Bei genügend Messdaten gelten Heizläufe hier als unauffällig, wenn die abgeschlossenen Läufe im Schnitt mindestens 10 Minuten dauern."],
   /* health_defrost */ ["Abtaustarts und ihr Anteil an der Verdichterlaufzeit bei lesbarem Verdichter- und Abtaustatus.","Interne Regel: ≥3 zugeordnete Vorgänge und >15 %. Luftfeuchte und Temperatur der gesamten Wärmetauscherfläche fehlen; kein Daikin-Störungsgrenzwert."],

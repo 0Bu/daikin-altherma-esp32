@@ -1,4 +1,4 @@
-// translation-source: 42a4d77a832a12c84359f017fdcacdd939405dc965a062a922c2d18aafa2ff0e
+// translation-source: d65d3b16aadf37eb87ecbe27037b388b04d755399b25c0257655dd6a6be12909
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -261,6 +261,21 @@ I18N.fr = localeValues([
   /* check.fault_none */ "Aucun actif",
   /* check.fault_unknown */ "Inconnu",
   /* check.fault_past_unknown */ "Passé · inconnu",
+  /* check.fault_since_short */ (d) => `depuis ${d}`,
+  /* check.fault_ago_short */ (d) => `il y a ${d}`,
+  /* check.fault_hero_ok */ (d) => `Aucun défaut ni avertissement signalé sur ${d} d'observation en 24 h.`,
+  /* check.fault_latched_only */ "Indicateur de défaut mémorisé signalé par la pompe à chaleur ; aucun épisode horodaté ne figure dans les 24 h enregistrées.",
+  /* check.fault_unit_outdoor */ "Unité extérieure",
+  /* check.fault_unit_indoor */ "Unité intérieure",
+  /* check.fault_unit_both */ "Extérieure + intérieure",
+  /* check.fault_secondary */ (s) => `Également actif : ${s}`,
+  /* check.fault_stop_ongoing */ "actif",
+  /* check.fault_stop_unknown */ "incertain",
+  /* check.fault_col_code */ "Code",
+  /* check.fault_col_meaning */ "Signification",
+  /* check.fault_ok_label */ "Sans défaut",
+  /* check.fault_gap_label */ "Non mesuré",
+  /* check.fault_severity_caution */ "Prudence",
   /* check.retry_seen */ "Hausse",
   /* check.retry_none */ "Aucune hausse",
   /* service.metric.comp */ "Compresseur",
@@ -1284,7 +1299,7 @@ DESCRIPTION_I18N.fr = descriptionValues([
 ]);
 
 MODEL_DESCRIPTION_I18N.fr = modelDescriptionValues([
-  ["Messages de la pompe ", "ni cause ni résolution prouvées."], // health_fault
+  ["Affiche les codes d'erreur et d'avertissement signalés par la pompe à chaleur ; les descriptions courtes sont des indications générales Daikin et la disparition d'un code ne prouve pas que la cause soit corrigée."], // health_fault
   ["R5T : un point du ballon stratifié, pas une énergie.", "Indice interne ≥0,8 K/h sans indice pompe/puisage. Sans indice, un puisage reste possible ; 0 K/h n’exclut pas les pertes. Circulation ne prouve pas la cause."], // health_dhw_loss
   ["Des mesures manquantes peuvent laisser certains démarrages non comptés.", "Il n’existe pas de nombre normal fixe de démarrages. Avec suffisamment de données, ce contrôle considère qu’une durée moyenne d’au moins 10 minutes est suffisante pour les cycles de chauffage terminés."], // health_cycling
   ["Dégivrage ", "≥3 associés, >15% du temps de marche du compresseur si états compresseur et dégivrage lisibles. Règle interne, pas Daikin; humidité et température de toute la batterie absentes."], // health_defrost

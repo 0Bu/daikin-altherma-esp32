@@ -37,6 +37,15 @@ uint32_t                         mb_cycling_offer_unix_s = 0;
 uint32_t                         mb_cycling_reset_token  = 0;
 uint32_t                         mb_cycling_ack          = 0;
 daik::logic::CheckupCyclingTrace mb_cycling_restored;
+uint32_t                         fault_offer_unix_s = 0;
+uint32_t                         fault_reset_token  = 0;
+uint32_t                         fault_ack          = 0;
+bool                             fault_forgotten    = false;
+daik::logic::CheckupFaultTrace   fault_restored;
+uint32_t                         mb_fault_offer_unix_s = 0;
+uint32_t                         mb_fault_reset_token  = 0;
+uint32_t                         mb_fault_ack          = 0;
+daik::logic::CheckupFaultTrace   mb_fault_restored;
 }
 const esp_partition_t* esp_partition_find_first(int, int, const char* label) {
     if (auto hook = std::exchange(journal_sdk::during_find, nullptr)) hook();
@@ -193,7 +202,64 @@ CheckupFlashRestoreResult checkup_cycling_restore(const logic::CheckupCyclingTra
         cycling_restored = trace;
     return CheckupFlashRestoreResult::Restored;
 }
-void checkup_cycling_forget() { cycling_forgotten = true; }
+void checkup_cycling_forget() {
+    cycling_forgotten = true;
+    fault_forgotten   = true;
+}
+bool checkup_fault_checkpoint(logic::CheckupFaultTrace& trace, logic::CyclingTraceIdentity& id,
+                              uint32_t& token, TickType_t, bool periodic_due, bool,
+                              DiagnosticsSource source) {
+    const bool     is_mb      = source == DiagnosticsSource::Modbus;
+    const uint32_t offer_unix = is_mb ? mb_fault_offer_unix_s : fault_offer_unix_s;
+    const uint32_t reset_tok  = is_mb ? mb_fault_reset_token : fault_reset_token;
+    if (fault_forgotten || (!reset_tok && (!periodic_due || !offer_unix))) return false;
+    token = reset_tok;
+    trace.reset();
+    trace.unix_s       = token ? 1 : offer_unix;
+    trace.window_end_s = logic::CHECKUP_FAULT_WINDOW_S;
+    id                 = {};
+    if (!token) {
+        trace.push(86000, {logic::FaultTraceKind::Normal});
+        trace.push(86010, {logic::FaultTraceKind::Error, logic::FaultUnitOrigin::Indoor,
+                           logic::fault_code_pack("7H"), 0});
+        trace.push(86035, {logic::FaultTraceKind::Normal});
+        trace.end_s = 86100;
+        id          = is_mb ? logic::CyclingTraceIdentity{mb_cycling_model, mb_cycling_source,
+                                                 cycling_generation}
+                            : logic::CyclingTraceIdentity{cycling_offer_model, cycling_source,
+                                                 cycling_generation};
+    }
+    return true;
+}
+bool checkup_fault_reset_pending(DiagnosticsSource source) {
+    return (source == DiagnosticsSource::Modbus ? mb_fault_reset_token : fault_reset_token) != 0;
+}
+void checkup_fault_checkpoint_appended(uint32_t reset_token, DiagnosticsSource source) {
+    if (source == DiagnosticsSource::Modbus) {
+        mb_fault_ack         = reset_token;
+        mb_fault_reset_token = 0;
+        return;
+    }
+    fault_ack         = reset_token;
+    fault_reset_token = 0;
+}
+CheckupFlashRestoreResult checkup_fault_restore(const logic::CheckupFaultTrace&    trace,
+                                                const logic::CyclingTraceIdentity& id, int64_t,
+                                                TickType_t, DiagnosticsSource source) {
+    const bool     is_mb = source == DiagnosticsSource::Modbus;
+    const uint32_t exp_m = is_mb ? mb_cycling_model : cycling_model;
+    const uint32_t exp_s = is_mb ? mb_cycling_source : cycling_source;
+    if (!trace.count || fault_forgotten || id.model_fp != exp_m)
+        return CheckupFlashRestoreResult::Ignored;
+    if (id.source_fp != exp_s || id.diagnostics_generation != cycling_generation)
+        throw std::runtime_error("fault adapter received foreign physical source or consent");
+    if (is_mb)
+        mb_fault_restored = trace;
+    else
+        fault_restored = trace;
+    return CheckupFlashRestoreResult::Restored;
+}
+void checkup_fault_forget() { fault_forgotten = true; }
 } // namespace daik
 namespace {
 using namespace daik;
@@ -879,6 +945,32 @@ void verify_modbus_barrier_journal(const char* nor_path) {
                 journal_sdk::core_restore == 0,
             "modbus_cycling_barrier_retires_prior_checkpoint");
 }
+void seed_fault_journal(const char* nor_path) {
+    boot();
+    fault_offer_unix_s    = static_cast<uint32_t>(journal_sdk::unix_origin);
+    mb_fault_offer_unix_s = static_cast<uint32_t>(journal_sdk::unix_origin + 5);
+    while (history_flash_service_journal(4, 0) > 0) {}
+    write_nor_file(nor_path);
+}
+void restore_fault_journal(const char* nor_path) {
+    read_nor_file(nor_path);
+    boot(false);
+    require(fault_restored.count == 3 && fault_restored.at(1).code == fault_code_pack("7H") &&
+                fault_restored.unix_s == static_cast<uint32_t>(journal_sdk::unix_origin) &&
+                mb_fault_restored.count == 3 &&
+                mb_fault_restored.unix_s == static_cast<uint32_t>(journal_sdk::unix_origin + 5),
+            "fault_flash_restores_x10a_and_modbus_independently");
+    fault_reset_token = 9;
+    require(history_flash_service_journal(1, 0) == 1 && fault_ack == 9 && mb_fault_reset_token == 0,
+            "fault_barrier_retires_x10a_without_touching_modbus");
+    write_nor_file(nor_path);
+}
+void verify_fault_barrier_journal(const char* nor_path) {
+    read_nor_file(nor_path);
+    boot(false);
+    require(fault_restored.count == 0 && mb_fault_restored.count == 3,
+            "fault_barrier_retires_x10a_while_modbus_survives");
+}
 } // namespace
 int main(int argc, char** argv) {
     const std::string name = argc >= 2 ? argv[1] : "unknown_case";
@@ -893,6 +985,12 @@ int main(int argc, char** argv) {
             restore_modbus_checkup_journal(argv[2]);
         else if (name == "verify_modbus_barrier_journal" && argc == 3)
             verify_modbus_barrier_journal(argv[2]);
+        else if (name == "seed_fault_journal" && argc == 3)
+            seed_fault_journal(argv[2]);
+        else if (name == "restore_fault_journal" && argc == 3)
+            restore_fault_journal(argv[2]);
+        else if (name == "verify_fault_barrier_journal" && argc == 3)
+            verify_fault_barrier_journal(argv[2]);
         else if (name == "seed_cycling" && argc == 4)
             seed_cycling(argv[2], argv[3]);
         else if (name == "restore_cycling" && argc == 4)

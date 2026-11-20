@@ -646,6 +646,116 @@ append_status_service_metric(JsonOut& j, const char* prefix,
 }
 
 template <typename JsonOut>
+[[gnu::noinline]] static void
+append_status_fault_check_json(JsonOut& j, DiagnosticsSource source, bool source_fresh,
+                               bool diagnostics_enabled, bool redact) {
+    if (!diagnostics_enabled) return;
+
+    auto bf = [&j](const char* prefix, bool v) __attribute__((noinline)) {
+        j += prefix;
+        j += v ? "true" : "false";
+    };
+    auto uf = [&j](const char* prefix, uint64_t v) __attribute__((noinline)) {
+        j += prefix;
+        append_json_uint(j, v);
+    };
+    auto qf = [&j](const char* prefix, const char* v) __attribute__((noinline)) {
+        j += prefix;
+        json_append_quoted(j, v);
+    };
+
+    auto emit_meta = [&](uint16_t code, uint16_t aux, logic::FaultUnitOrigin unit,
+                         logic::FaultTraceKind kind, bool compact) {
+        char code_buf[10] = {};
+        char base_buf[3]  = {};
+        logic::fault_code_format(code, aux, code_buf);
+        logic::fault_code_unpack(code, base_buf);
+        const uint16_t sub = logic::fault_aux_get_subcode(aux);
+        qf(compact ? ",\"c\":" : "\"code\":", code_buf);
+        if (!compact || sub > 0) qf(compact ? ",\"b\":" : ",\"base_code\":", base_buf);
+        if (!compact) {
+            const char* state_str = kind == logic::FaultTraceKind::Error     ? "fault"
+                                    : kind == logic::FaultTraceKind::Caution ? "caution"
+                                                                             : "warning";
+            qf(",\"state\":", state_str);
+        }
+        if (sub > 0) uf(compact ? ",\"sub\":" : ",\"subcode\":", sub);
+        const char* ustr = logic::fault_unit_origin_name(unit);
+        if (ustr[0] != '\0') qf(compact ? ",\"u\":" : ",\"unit\":", ustr);
+        logic::FaultTraceKind sec_kind = logic::FaultTraceKind::Gap;
+        uint16_t              sec_code = 0;
+        if (logic::fault_aux_get_secondary(aux, sec_kind, sec_code)) {
+            char sec_buf[3] = {};
+            logic::fault_code_unpack(sec_code, sec_buf);
+            if (sec_buf[0] != '\0') {
+                qf(compact ? ",\"sc\":" : ",\"secondary_code\":", sec_buf);
+                qf(compact ? ",\"sk\":" : ",\"secondary_state\":",
+                   sec_kind == logic::FaultTraceKind::Error ? (compact ? "err" : "fault")
+                                                            : (compact ? "warn" : "warning"));
+            }
+        }
+    };
+
+    auto emit_latest = [&](const logic::CheckupFaultLatest& latest) {
+        if (!latest.present) return;
+        j += ",\"latest\":{";
+        emit_meta(latest.code, latest.aux, latest.unit, latest.kind, false);
+        bf(",\"ongoing\":", latest.ongoing);
+        bf(",\"stop_unknown\":", latest.stop_unknown);
+        uf(",\"age_s\":", latest.age_s);
+        uf(",\"duration_s\":", latest.duration_s);
+        if (!redact && latest.start_unix_s > 0) {
+            uf(",\"start_unix_s\":", latest.start_unix_s);
+            if (!latest.ongoing && latest.end_unix_s > 0) uf(",\"end_unix_s\":", latest.end_unix_s);
+        }
+        j += "}";
+    };
+
+    ValuesTlsReader fault_reader;
+    fault_reader.admitted = weather_values_reader_enter();
+    if (!fault_reader.admitted) return;
+
+    if (!redact) {
+        struct FaultTraceBuf {
+            logic::CheckupFaultTrace* p = nullptr;
+            ~FaultTraceBuf() { std::free(p); }
+        } ftrace;
+        ftrace.p = static_cast<logic::CheckupFaultTrace*>(
+            heap_caps_malloc(sizeof(logic::CheckupFaultTrace), MALLOC_CAP_8BIT));
+        if (ftrace.p) {
+            std::memset(ftrace.p, 0, sizeof(*ftrace.p));
+            if (!checkup_fault_timeline_snapshot(*ftrace.p, source)) return;
+            const logic::CheckupFaultLatest latest =
+                logic::checkup_fault_latest_extract(*ftrace.p, source_fresh);
+            emit_latest(latest);
+            uf(",\"timeline\":{\"unix_s\":", ftrace.p->unix_s);
+            uf(",\"window_end_s\":", ftrace.p->window_end_s);
+            uf(",\"observed_end_s\":", ftrace.p->end_s);
+            uf(",\"boot_s\":", ftrace.p->boot_s);
+            bf(",\"live\":", ftrace.p->live);
+            j += ",\"segments\":[";
+            static constexpr const char* kKindNames[5] = {"gap", "ok", "caution", "warn", "err"};
+            for (size_t i = 0; i < ftrace.p->count; ++i) {
+                const auto& r = ftrace.p->at(i);
+                if (i) j += ",";
+                uf("{\"t\":", r.sec);
+                const size_t ki = static_cast<size_t>(r.kind);
+                qf(",\"k\":", ki < 5 ? kKindNames[ki] : "gap");
+                if (logic::fault_trace_kind_active(r.kind)) {
+                    emit_meta(r.code, r.aux, r.unit, r.kind, true);
+                }
+                j += "}";
+            }
+            j += "]}";
+            return;
+        }
+    }
+
+    const CheckupFaultStatus fst = checkup_fault_latest_status(source, source_fresh);
+    if (fst.diagnostics_enabled) emit_latest(fst.latest);
+}
+
+template <typename JsonOut>
 static void append_status_json(JsonOut& j, bool redact) {
     const Config&      c              = config();
     const BoardPreset* selected_board = board_selected_preset(c);
@@ -1546,6 +1656,8 @@ static void append_status_json(JsonOut& j, bool redact) {
                 break;
             case logic::CheckupCheck::Fault:
                 num("active", ck.a);
+                append_status_fault_check_json(j, diag_effective, hr.source_fresh,
+                                               c.diagnostics_enabled, redact);
                 break;
             case logic::CheckupCheck::Retries:
                 num("seen", ck.a);

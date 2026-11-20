@@ -163,7 +163,7 @@ assert.match(appendFn,
   /const bool\s+stop_owned = logic::observation_append_owned\(r\.header\);[\s\S]*flash_append_record_at\(r, slot\)/,
   "append dispatch captures builder ownership before the separate commit transaction");
 assert.match(appendFn,
-  /flash_note_append_success\(slot\);[\s\S]*if \(!flash_is_manifest\(r\.header\) && !stop_owned && !flash_cycling_owned\(r\.header\)\)\s+s_flash_ahead_logged\[flash_modbus_checkup_owned\(r\.header\)\s*\?\s*kCheckupModbusSource\s*:\s*r\.header\.source\]\s*=\s*false;/,
+  /flash_note_append_success\(slot\);[\s\S]*if \(!flash_is_manifest\(r\.header\) && !stop_owned && !flash_cycling_owned\(r\.header\)\)\s*\{\s*if \(!flash_fault_owned\(r\.header\)\)\s+s_flash_ahead_logged\[flash_modbus_checkup_owned\(r\.header\)\s*\?\s*kCheckupModbusSource\s*:\s*r\.header\.source\]\s*=\s*false;/,
   "only appending a source's own data releases its ahead-of-clock latch");
 assert.match(appendFn, /if \(stop_owned\) stop_observation_flash_failed\(\);/,
   "a failed builder-owned observation releases its reservation without a committed read header");

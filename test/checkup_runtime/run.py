@@ -35,7 +35,7 @@ CASES = [
     "stop_forget_during_report",
     "stop_forget_before_checkup_start", "stop_forget_report_lock_failure",
     "stop_forget_checkup_alloc_failure", "stop_unstarted_report_pending", "defrost_start_context",
-    "modbus_dual_source",
+    "modbus_dual_source", "x10a_modbus_fault_trace_lifecycle",
 ]
 
 parser = argparse.ArgumentParser(description=__doc__)

@@ -45,6 +45,9 @@ for (const key of [
   "outdoor_source", "outdoor_min_c", "outdoor_mean_c", "outdoor_samples",
   "min_bar", "current_bar", "min_unix_s", "confirmed_low", "confirmed_critical", "min_l_min",
   "buh_min", "bsh_min", "buh_s", "bsh_s", "buh_observed_s", "bsh_observed_s", "active", "seen",
+  "latest", "base_code", "subcode", "ongoing", "stop_unknown", "start_unix_s", "secondary_code",
+  "secondary_state", "timeline", "unix_s", "window_end_s", "observed_end_s", "boot_s", "live",
+  "segments",
   "max_k_h", "windows", "high_windows", "high_with_pump", "high_pump_off",
   "draw_windows", "pump_windows", "quiet_high_windows",
   "circulation_on_s", "circulation_known_s", "candidate_s", "settle_remaining_s",
@@ -91,7 +94,7 @@ assert.match(modbusPollSource,
              "the Modbus task must close the race where an old cycle consumes the HTTP reset");
 
 const context = {
-  S: { status: null, descOpen: new Set() },
+  S: { status: null, descOpen: new Set(), faultCodes: new Set(), faultSnapKeys: null, faultHoverIdx: null },
   document: { getElementById: () => null },
   fetch: () => { throw new Error("unexpected fetch in checkup test"); },
   localStorage: { getItem: () => "en", setItem: () => {} },
@@ -634,7 +637,13 @@ assert.doesNotMatch(ui.detail({ ...defrost, last_observed_start: null }), /Last 
 assert.equal(ui.value({ id: "retries", verdict: "ok", evidence: "experimental", seen: 0 }), "No increase");
 assert.equal(ui.value({ id: "retries", verdict: "info", evidence: "experimental", seen: 1 }), "Increase");
 assert.equal(ui.value({ id: "retries", verdict: "ok", evidence: "experimental" }), "TENTATIVE");
-assert.equal(ui.value({ id: "fault", verdict: "ok", active: 0 }), "None active");
+assert.equal(ui.value({ id: "fault", verdict: "ok", active: 0 }), "");
+assert.equal(ui.value({ id: "fault", verdict: "warn", active: 1, latest: { code: "7H-01", duration_s: 120, age_s: 0 } }),
+  "7H-01 · for 2 min");
+assert.equal(ui.value({ id: "fault", verdict: "info", active: 0, latest: { code: "U4", duration_s: 90, age_s: 10800 } }),
+  "U4 · 3 h ago");
+assert.equal(ui.value({ id: "fault", verdict: "info", active: null, latest: { code: "U4", duration_s: 90 } }),
+  "U4 · Unknown");
 assert.equal(ui.value({ id: "defrost", verdict: "ok", evidence: "observation", count: 3, defrost_s: 200, run_s: 1000 }), "20 %");
 assert.equal(ui.value({ id: "flow", verdict: "ok", evidence: "observation" }), "MEASURED");
 assert.equal(ui.value({ id: "heater", verdict: "ok", evidence: "observation" }), "MEASURED");
@@ -731,7 +740,11 @@ assert.match(ui.detail({ id: "fault", verdict: "info", active: 0 }), /weder Ursa
 assert.equal(ui.metric(pressure), "Niedrig · 0,8 bar");
 assert.match(ui.detail(pressure), /24-Stunden-Wasserdruckverlauf/);
 assert.equal(ui.metric({ id: "flow", verdict: "ok", min_l_min: 6.5 }), "6,5 l/min");
-assert.equal(ui.value({ id: "fault", verdict: "ok", active: 0 }), "keine");
+assert.equal(ui.value({ id: "fault", verdict: "ok", active: 0 }), "");
+assert.equal(ui.value({ id: "fault", verdict: "warn", active: 1, latest: { code: "7H-01", duration_s: 120, age_s: 0 } }),
+  "7H-01 · seit 2 min");
+assert.equal(ui.value({ id: "fault", verdict: "info", active: 0, latest: { code: "U4", duration_s: 90, age_s: 10800 } }),
+  "U4 · vor 3 h");
 assert.equal(ui.value({ ...dhw, max_k_h: 4.8 }), "4,8 K/h");
 assert.equal(ui.value({ ...cycling, starts: 19 }), "≥19");
 
@@ -803,7 +816,7 @@ assert.doesNotMatch(JSON.stringify(model.health_retries), /with the compressor r
 // Execute the real card/body builders. Generic diagnoses retain three ordered blocks in each
 // locale. Cycling adds completed runs and its lazy 24-hour chart around the same explanation.
 const renderedContext = vm.createContext({
-  S: { descOpen: new Set() }, document: { getElementById: () => null },
+  S: { descOpen: new Set(), faultCodes: new Set(), faultSnapKeys: null, faultHoverIdx: null }, document: { getElementById: () => null },
   localStorage: { getItem: () => "en", setItem: () => {} }, navigator: { language: "en" },
 });
 vm.runInContext(`${i18nSource}${dashboardSource}${explanationSource}
@@ -820,7 +833,13 @@ for (const lang of locales) {
       const c = { ...pressure, id: id.slice(7), verdict };
       const body = renderedContext.rendered.detail(c, false, partialReport);
       const diagnosis = renderedContext.rendered.model(id, "Diagnosis", "NOTE", { bodyHtml: body });
-      if (id === "health_cycling") {
+      if (id === "health_fault") {
+        assert.ok(body.startsWith('<div class="checkup-fault-panel" data-checkup-fault><div class="checkup-fault-hero">'),
+          `${lang}/${id}: panel wraps hero first`);
+        assert.ok(!body.includes(ui.text(lang, "normal.label")),
+          `${lang}/${id}: must not render a generic Normal block`);
+        assert.doesNotMatch(body, /check\.fault_/);
+      } else if (id === "health_cycling") {
         assert.match(diagnosis, /checkup-cycling-assessment/);
         assert.match(diagnosis, /data-checkup-hours/);
         const normal = `<span class="vdesc-n">${ui.text(lang, "normal.label")}</span>`;
@@ -835,7 +854,7 @@ for (const lang of locales) {
         assert.ok(body.includes(`<span class="vdesc-n">${ui.text(lang, "normal.label")}</span>`),
                   `${lang}/${id}: Normal block`);
       }
-      assert.doesNotMatch(body, /undefined|NaN|check\.detail\./);
+      assert.doesNotMatch(body, /undefined|NaN|check\.detail\.|check\.fault_/);
     }
   }
   if (["en", "de"].includes(lang)) {
@@ -943,5 +962,67 @@ assert.equal(ui.ready({
   hp: { connected: false }, modbus: { connected: false },
   health: { source: "modbus", covered_s: 0, available: 0, persist: "unknown" },
 }), true, "unreadable restore must remain visible instead of hiding the card");
+
+// Redesigned Unit fault row: healthy stays quiet (empty value + ariaValue), active/past surface
+// code + duration (without duplicating -XX subcodes), expanded view places hero -> chart ->
+// hidden-by-default newest-first table -> what explainer, and omits any generic Normal target.
+{
+  ui.setLang("en");
+  renderedContext.rendered.lang("en");
+  const unixEnd = 1791900000;
+  const faultCheck = {
+    id: "fault", verdict: "warn", evidence: "manufacturer", active: 1, observed_s: 3600,
+    latest: {
+      code: "7H-01", base_code: "7H", subcode: 1, state: "fault", unit: "outdoor",
+      ongoing: true, stop_unknown: false, age_s: 0, duration_s: 120,
+      start_unix_s: unixEnd - 120, secondary_code: "U4", secondary_state: "warning",
+    },
+    timeline: {
+      unix_s: unixEnd, window_end_s: 86400, observed_end_s: 86400, boot_s: 86400, live: true,
+      segments: [
+        { t: 0, k: "gap" },
+        { t: 80000, k: "ok" },
+        { t: 81000, k: "warn", c: "U4", b: "U4", u: "outdoor" },
+        { t: 81600, k: "ok" },
+        { t: 86280, k: "err", c: "7H-01", b: "7H", sub: 1, u: "outdoor", sc: "U4", sk: "warn" },
+      ],
+    },
+  };
+  context.S.status = {
+    health: { source: "x10a", status: "warn", persist: "fresh", source_fresh: true, checks: [faultCheck] },
+  };
+  const cardActive = ui.card();
+  assert.match(cardActive, /7H-01 · for 2 min/);
+  assert.doesNotMatch(cardActive, /7H-01-01/);
+  const detailEn = renderedContext.rendered.detail(faultCheck, true, { source: "x10a", source_fresh: true });
+  assert.doesNotMatch(detailEn, /Normal:|7H-01-01|check\.fault_/);
+  assert.ok(detailEn.indexOf("checkup-fault-hero") < detailEn.indexOf("checkup-fault-chart"));
+  assert.ok(detailEn.indexOf("checkup-fault-chart") < detailEn.indexOf("checkup-fault-table-wrap\" hidden"));
+  assert.ok(detailEn.indexOf("checkup-fault-table-wrap") < detailEn.indexOf("Shows error and warning codes"));
+  const tableSlice = detailEn.slice(detailEn.indexOf("<table"));
+  assert.ok(tableSlice.indexOf('data-fault-code="7H-01"') < tableSlice.indexOf('data-fault-code="U4"'),
+    "fault table rows must render newest-first");
+  assert.equal((detailEn.match(/checkup-fault-table-wrap" hidden/g) || []).length, 1,
+    "fault table must remain hidden until filtered or bar-tapped");
+
+  context.S.status.health = {
+    source: "x10a", status: "ok", persist: "fresh", source_fresh: true,
+    checks: [{ id: "fault", verdict: "ok", evidence: "manufacturer", active: 0, observed_s: 3600 }],
+  };
+  const cardOk = ui.card();
+  assert.match(cardOk, /data-desc="model:health_fault"[^>]*aria-label="[^"]*None active"/);
+  assert.match(cardOk, /<span class="vrow-val checkup-val ok"><\/span>/);
+
+  for (const lang of locales) {
+    renderedContext.rendered.lang(lang);
+    ui.setLang(lang);
+    const localizedDetail = renderedContext.rendered.detail(faultCheck, true, { source: "x10a", source_fresh: true });
+    assert.ok(!localizedDetail.includes(ui.text(lang, "normal.label")),
+      `${lang} expanded fault view must omit Normal:`);
+    assert.doesNotMatch(localizedDetail, /undefined|NaN|check\.fault_|7H-01-01/);
+  }
+  ui.setLang("en");
+  renderedContext.rendered.lang("en");
+}
 
 console.log("plant-diagnostics UI contract: evidence, lifecycle, localized claims and counterexamples verified");
