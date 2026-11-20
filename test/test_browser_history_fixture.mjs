@@ -4,19 +4,19 @@ import fs from "node:fs";
 // Full-day, source-qualified telemetry for the live-poll history matrix. These expected inspector
 // classifications are independent of INSPECT so a new production entry cannot silently evade it.
 export const INSPECTOR_TRENDS = Object.freeze({
-  env3: "env3_combined", sgrequest: "smart_grid_mode", comp: "comp_rps",
+  status: "iu_op_mode", env3: "env3_combined", sgrequest: "smart_grid_mode", comp: "comp_rps",
   out: "outdoor_air", ouhx: "outdoor_heat_exchanger", hp: "circuit_pressure",
   disch: "discharge", eev: "eev", r3t: "refrigerant_liquid", lwt: "leaving_water",
   r2t: "leaving_water_post_buh", rwt: "return_water", dt: "dt", pth: "pth",
   pel: "pel", cop: "cop",
   buh: "buh_state", bsh: "bsh_state", valve: "valve_dhw", valve2: "valve_heat",
-  tank: "dhw_tank", room: "room_temp", pump: "pump_speed",
+  tank: "dhw_tank", spaceh: "x10a_space_state", room: "room_temp", pump: "pump_speed",
   defrost: "defrost_state", quiet: "quiet_state", flow: "flow",
   flow_switch: "water_flow_switch", wp: "water_pressure",
 });
 
 export const NO_HISTORY_INSPECTORS = Object.freeze([
-  "status", "x10a", "modbus", "ou", "lp", "phe", "heat", "spaceh", "rhot", "rcold", "wsup", "wtank",
+  "x10a", "modbus", "ou", "lp", "phe", "heat", "rhot", "rcold", "wsup", "wtank",
   "wheat", "wret",
 ]);
 
@@ -64,6 +64,13 @@ export const HISTORY_MOTION_ROWS = Object.freeze([
   { id: "circulation_state", label: "DHW circulation pump", value: 1, binary: true, kind: "mqtt" },
   { id: "pel", label: "Electrical input (estimated)", value: 2.8, unit: "kW", kind: "derived" },
   { id: "cop", label: "COP (estimated)", value: 3.1, unit: "", kind: "derived" },
+  { id: "ou_op_mode", label: "Operation Mode", value: "Heating", reg: 0x10, enum: "ou_op_mode" },
+  { id: "iu_op_mode", label: "I/U operation mode", value: "Heating + DHW", reg: 0x60, enum: "iu_op_mode" },
+  { id: "thermostat_state", label: "Thermostat ON/OFF", value: 1, reg: 0x60, binary: true },
+  { id: "x10a_pump_state", concept: "pump_running", label: "Water pump operation", value: 1, reg: 0x60, binary: true },
+  { id: "x10a_space_state", concept: "space_op", label: "Space heating Operation ON/OFF", value: 1, reg: 0x62, binary: true },
+  { id: "dhw_reheat_state", label: "Reheat ON/OFF", value: 1, reg: 0x62, binary: true },
+  { id: "dhw_powerful_state", label: "Powerful DHW Operation. ON/OFF", value: 0, reg: 0x62, binary: true },
 ]);
 
 // HOMEHUB_HISTORIES, not MB_PAIRS, is the offer boundary. In particular, water pressure has a
@@ -85,7 +92,25 @@ export const MODBUS_HISTORY_ROWS = Object.freeze([
   { id: "compressor_state", label: "Compressor running", off: 31, value: 1, binary: true },
   { id: "modbus_power", label: "Heat pump power consumption", off: 51, value: 2.1, unit: "kW" },
   { id: "modbus_defrost_state", label: "Defrost / Restart", off: 35, value: 0, binary: true },
-  { id: "pump_state", label: "Circulation pump running", off: 30, value: 1, binary: true },
+  { id: "pump_state", concept: "pump_running", label: "Circulation pump running", off: 30, value: 1, binary: true },
+  { id: "modbus_hot_start_state", label: "Hot start", off: 36, value: 0, binary: true },
+  { id: "modbus_dhw_state", label: "DHW normal operation", off: 52, value: 1, binary: true },
+  { id: "modbus_space_state", concept: "space_op", label: "Space heating/cooling normal operation", off: 53, value: 1, binary: true },
+  { id: "modbus_lwt_heat_setpoint", label: "Leaving water Main Heating setpoint", off: 1, value: 35, unit: "°C" },
+  { id: "modbus_lwt_cool_setpoint", label: "Leaving water Main Cooling setpoint", off: 2, value: 20, unit: "°C" },
+  { id: "modbus_room_heat_setpoint", label: "Room thermostat control Heating setpoint Main", off: 6, value: 21, unit: "°C" },
+  { id: "modbus_room_cool_setpoint", label: "Room thermostat control Cooling setpoint Main", off: 7, value: 24, unit: "°C" },
+  { id: "modbus_dhw_setpoint", label: "DHW reheat setpoint", off: 10, value: 48, unit: "°C" },
+  { id: "modbus_dhw_booster_state", label: "DHW booster mode ON/OFF", off: 13, value: 0, binary: true },
+  { id: "modbus_lwt_heat_offset", label: "Leaving water Main Heating offset", off: 54, value: 0, unit: "K" },
+  { id: "modbus_lwt_cool_offset", label: "Leaving water Main Cooling offset", off: 55, value: 0, unit: "K" },
+  { id: "modbus_buffering_power_limit", label: "Power limit during Recommended on / buffering", off: 57, value: 4.5, unit: "kW" },
+  { id: "modbus_general_power_limit", label: "General power limit", off: 58, value: 6.0, unit: "kW" },
+  { id: "modbus_current_op_mode", label: "Current operation mode", off: 38, reg: "input", value: 1, enum: "current_operation_mode" },
+  { id: "modbus_op_mode", label: "Operation mode", off: 3, reg: "holding", value: 1, enum: "operation_mode" },
+  { id: "modbus_space_enable_state", label: "Space heating/cooling", off: 4, reg: "holding", value: 1, binary: true },
+  { id: "modbus_dhw_reheat_state", label: "DHW reheat", off: 12, reg: "holding", value: 1, binary: true },
+  { id: "modbus_abnormality_state", label: "Unit abnormality", off: 21, reg: "input", value: 0, enum: "unit_abnormality" },
 ]);
 
 export const ENV3_HISTORY_ROWS = Object.freeze([
@@ -110,6 +135,11 @@ function ring(row, source) {
     v: Array.from({ length: 288 }, (_, index) => {
       if ((index + seed) % gapPeriod === 17) return null;
       if (row.enum === "smart_grid_mode") return (Math.floor(index / 18) % 4) * 10;
+      if (row.enum === "current_operation_mode") return [10, 20][Math.floor((index + seed) / 24) % 2];
+      if (row.enum === "operation_mode") return (Math.floor((index + seed) / 18) % 3) * 10;
+      if (row.enum === "unit_abnormality") return [0, 20, 10][Math.floor((index + seed) / 24) % 3];
+      if (row.enum === "iu_op_mode") return [0, 10, 40, 50][Math.floor((index + seed) / 18) % 4];
+      if (row.enum === "ou_op_mode") return [0, 10, 20][Math.floor((index + seed) / 18) % 3];
       if (state) return Math.floor((index + seed) / 24) % 2 ? 10 : 0;
       const amplitude = Math.max(0.2, Math.min(Math.abs(base) * 0.01, 1.5));
       return Math.round((base + amplitude * Math.sin((index + seed) / 13)) * 10);
@@ -119,9 +149,9 @@ function ring(row, source) {
 
 function reading(row, tick) {
   const { id, value, kind: _kind, ...metadata } = row;
-  const vary = row.unit && !["rps", "pls", "%", "KiB"].includes(row.unit);
-  return { ...metadata, concept: id,
-    value: String(value + (vary ? (tick % 10) / 100 : 0)), unit: row.unit || "" };
+  const vary = typeof value === "number" && row.unit && !["rps", "pls", "%", "KiB"].includes(row.unit);
+  return { ...metadata, concept: row.concept || id,
+    value: String(vary ? value + (tick % 10) / 100 : value), unit: row.unit || "" };
 }
 
 export function makeHistoryMotionFixture(originalStatus, lang = "en") {
@@ -174,8 +204,6 @@ export function makeHistoryMotionFixture(originalStatus, lang = "en") {
 
   const values = (tick = 0) => ({
     values: [
-      { label: "I/U operation mode", value: "Heating + DHW", reg: 0x60 },
-      { label: "Operation Mode", value: "Heating", reg: 0x10 },
       ...HISTORY_MOTION_ROWS.filter(row => !row.kind).map(row => reading(row, tick)),
       { label: "High Pressure", value: "32", unit: "bar", reg: 0x20 },
       { label: "Low Pressure", value: "5", unit: "bar", reg: 0x20 },
@@ -183,10 +211,6 @@ export function makeHistoryMotionFixture(originalStatus, lang = "en") {
       { label: "DHW setpoint", value: "48", unit: "°C", reg: 0x60 },
       { label: "LW setpoint (main)", value: "45", unit: "°C", reg: 0x60 },
       { label: "RT setpoint", value: "21", unit: "°C", reg: 0x60 },
-      { label: "Water pump operation", value: "1", unit: "", reg: 0x60,
-        binary: true, concept: "pump_running" },
-      { label: "Space heating Operation ON/OFF", value: "1", unit: "", reg: 0x62,
-        binary: true, concept: "space_op" },
       { label: "Smart Grid contact 1", value: "1", unit: "", reg: 0x60,
         binary: true, binary_semantic: "smart_grid_contact_1" },
       { label: "Smart Grid contact 2", value: "0", unit: "", reg: 0x60,
@@ -198,9 +222,6 @@ export function makeHistoryMotionFixture(originalStatus, lang = "en") {
         return { ...value, value: Number(value.value), history: row.id,
           reg: 0xee, profile: "homehub" };
       }),
-      { label: "DHW normal operation", value: 1, unit: "", off: 52, binary: true },
-      { label: "Space heating/cooling normal operation", value: 1, unit: "", off: 53, binary: true },
-      { label: "Current operation mode", value: 1, unit: "", off: 38, enum: "current_operation_mode" },
     ],
   });
   return { status, histories, values };

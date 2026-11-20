@@ -8280,9 +8280,9 @@ static void test_homehub_map() {
         CHECK(homehub_concept_index(c.concept_id) == static_cast<int>(i));
     }
     // The history set repeats the paired concepts, adds the derived Smart-Grid state, then the
-    // Modbus-only disinfection, compressor, power, defrost/restart and pump series. Every entry
+    // Modbus-only active states, setpoints, offsets, power limits and telemetry series. Every entry
     // names a real register; only an entry declared as an X10A timeline may share a real TRENDS id.
-    CHECK(HOMEHUB_HISTORY_COUNT == HOMEHUB_CONCEPT_COUNT + 6);
+    CHECK(HOMEHUB_HISTORY_COUNT == HOMEHUB_CONCEPT_COUNT + 24);
     for (size_t i = 0; i < HOMEHUB_HISTORY_COUNT; i++) {
         const auto& h          = HOMEHUB_HISTORIES[i];
         bool        reg_exists = false;
@@ -8294,7 +8294,31 @@ static void test_homehub_map() {
         CHECK(reg_exists);
         CHECK((trend_by_id(h.trend_id) != nullptr) == h.has_x10a);
         CHECK(homehub_history_index(h.trend_id) == static_cast<int>(i));
+        const auto* hr = daik::def::homehub_find(h.offset);
+        CHECK(hr != nullptr);
+        const bool is_bit2 = hr->kind == daik::def::HomeHubValueKind::Binary ||
+                             hr->kind == daik::def::HomeHubValueKind::ThreeWayValve;
+        const bool is_enum = daik::def::homehub_is_enum(hr->kind) &&
+                             hr->kind != daik::def::HomeHubValueKind::ThreeWayValve;
+        CHECK(h.encoding == (is_bit2   ? HistoryRingEncoding::Bit2
+                             : is_enum ? HistoryRingEncoding::State8
+                                       : HistoryRingEncoding::Int16));
+        if (!h.base_only) {
+            const auto* a4 = daik::def::altherma4_find(h.offset);
+            CHECK(a4 != nullptr);
+            const bool a4_bit2 = a4->kind == daik::def::HomeHubValueKind::Binary ||
+                                 a4->kind == daik::def::HomeHubValueKind::ThreeWayValve;
+            const bool a4_enum = daik::def::homehub_is_enum(a4->kind) &&
+                                 a4->kind != daik::def::HomeHubValueKind::ThreeWayValve;
+            CHECK(h.encoding == (a4_bit2   ? HistoryRingEncoding::Bit2
+                                 : a4_enum ? HistoryRingEncoding::State8
+                                           : HistoryRingEncoding::Int16));
+        }
     }
+    CHECK(HOMEHUB_POOL_BYTES == 12456);
+    CHECK(homehub_ring_offset(HOMEHUB_HISTORY_COUNT) == HOMEHUB_POOL_BYTES);
+    CHECK(homehub_ring_offset(HOMEHUB_HISTORY_COUNT + 1) == HOMEHUB_POOL_BYTES);
+    CHECK(homehub_ring_offset(0) == 0);
     CHECK(std::string(HOMEHUB_HISTORIES[HOMEHUB_CONCEPT_COUNT + 1].trend_id) ==
           "disinfection_state");
     CHECK(HOMEHUB_HISTORIES[HOMEHUB_CONCEPT_COUNT + 1].offset == 33);
@@ -8317,6 +8341,41 @@ static void test_homehub_map() {
     CHECK(HOMEHUB_HISTORIES[HOMEHUB_CONCEPT_COUNT + 5].offset == 30);
     CHECK(!HOMEHUB_HISTORIES[HOMEHUB_CONCEPT_COUNT + 5].event);
     CHECK(!HOMEHUB_HISTORIES[HOMEHUB_CONCEPT_COUNT + 5].has_x10a);
+    struct ExpectedModbusHist {
+        uint16_t    off;
+        const char* id;
+        bool        event;
+        bool        base_only;
+    };
+    const ExpectedModbusHist added_histories[] = {
+        {36, "modbus_hot_start_state", true, false},
+        {52, "modbus_dhw_state", false, false},
+        {53, "modbus_space_state", false, false},
+        {1, "modbus_lwt_heat_setpoint", false, false},
+        {2, "modbus_lwt_cool_setpoint", false, false},
+        {6, "modbus_room_heat_setpoint", false, false},
+        {7, "modbus_room_cool_setpoint", false, false},
+        {10, "modbus_dhw_setpoint", false, false},
+        {13, "modbus_dhw_booster_state", true, false},
+        {54, "modbus_lwt_heat_offset", false, false},
+        {55, "modbus_lwt_cool_offset", false, false},
+        {57, "modbus_buffering_power_limit", false, true},
+        {58, "modbus_general_power_limit", false, false},
+        {38, "modbus_current_op_mode", false, false},
+        {3, "modbus_op_mode", false, false},
+        {4, "modbus_space_enable_state", false, false},
+        {12, "modbus_dhw_reheat_state", false, false},
+        {21, "modbus_abnormality_state", true, false},
+    };
+    for (size_t k = 0; k < sizeof(added_histories) / sizeof(added_histories[0]); k++) {
+        const auto& h = HOMEHUB_HISTORIES[HOMEHUB_CONCEPT_COUNT + 6 + k];
+        CHECK(std::string(h.trend_id) == added_histories[k].id);
+        CHECK(h.offset == added_histories[k].off);
+        CHECK(h.event == added_histories[k].event);
+        CHECK(!h.has_x10a);
+        CHECK(h.base_only == added_histories[k].base_only);
+        CHECK(std::string(homehub_history_for(added_histories[k].off)) == added_histories[k].id);
+    }
     CHECK(homehub_history_index("valve_dhw") >= 0);
     CHECK(homehub_history_index("quiet_state") >= 0);
     CHECK(homehub_history_index("disinfection_state") >= 0);
@@ -8325,7 +8384,6 @@ static void test_homehub_map() {
     CHECK(std::string(homehub_history_for(51)) == "modbus_power");
     CHECK(std::string(homehub_history_for(35)) == "modbus_defrost_state");
     CHECK(std::string(homehub_history_for(30)) == "pump_state");
-    CHECK(homehub_history_for(54) == nullptr);
     CHECK(homehub_history_index("heat_pump_power") == -1);
     CHECK(homehub_history_index(nullptr) == -1);
     // Lookup both ways.
@@ -8342,7 +8400,13 @@ static void test_homehub_map() {
     CHECK(homehub_concept_for(51) ==
           nullptr); // power: X10A has no equivalent, deliberately unpaired
     for (uint16_t off : {31, 35, 36, 12, 13, 55}) CHECK(homehub_concept_for(off) == nullptr);
-    for (uint16_t off : {36, 12, 13, 55}) CHECK(homehub_history_for(off) == nullptr);
+    for (uint16_t off : {21, 22, 23, 3, 4, 12, 38}) {
+        CHECK(homehub_concept_for(off) == nullptr);
+        if (off == 22 || off == 23)
+            CHECK(homehub_history_for(off) == nullptr);
+        else
+            CHECK(homehub_history_for(off) != nullptr);
+    }
     CHECK(homehub_concept_for(999) == nullptr);
     std::string unk_concept = "heat_pump_power";
     CHECK(homehub_concept_index(unk_concept.c_str()) == -1);
@@ -8421,9 +8485,17 @@ static void test_homehub_map() {
     // THE TRAP, asserted directly: same page, same offset, different converter → different concept.
     CHECK(std::string(x10a_concept_for(0x60, 12, "", 306)) == "valve_dhw");
     CHECK(std::string(x10a_concept_for(0x60, 12, "", 301)) == "pump_running");
+    CHECK(std::string(x10a_concept_for(0x62, 2, "", 303)) == "space_op");
     CHECK(x10a_concept_for(0x60, 12, "", 302) ==
           nullptr); // another bit sharing the byte stays unpaired
-    CHECK(x10a_concept_for(0x62, 2, "", 304) == nullptr); // the DHW BOOST is deliberately unpaired
+    // Powerful DHW carries an independent X10A history id, never a HomeHub DHW-normal pairing.
+    CHECK(std::string(x10a_concept_for(0x62, 2, "", 304)) == "dhw_powerful_state");
+    CHECK(homehub_history_index("dhw_powerful_state") == -1);
+    CHECK(std::string(x10a_concept_for(0x10, 0, "", 217)) == "ou_op_mode");
+    CHECK(std::string(x10a_concept_for(0x60, 2, "", 315)) == "iu_op_mode");
+    CHECK(std::string(x10a_concept_for(0x60, 2, "", 303)) == "thermostat_state");
+    CHECK(x10a_concept_for(0x10, 0, "", 303) == nullptr); // outdoor thermostat stays unpaired
+    CHECK(std::string(x10a_concept_for(0x62, 2, "", 307)) == "dhw_reheat_state");
     // The high-side trend's row is a profile fact, so no single row carries its concept.
     CHECK(x10a_concept_for(0x62, 15, "bar", 105) == nullptr);
     CHECK(x10a_concept_for(0x20, 12, "bar", 105) == nullptr);
@@ -8537,6 +8609,14 @@ static void test_altherma4() {
     volatile bool native_quiet_activity = false;
     CHECK(
         homehub_history_decode_matches(ALTHERMA4_REGS, ALTHERMA4_REG_COUNT, native_quiet_activity));
+    const auto& limit57_history =
+        HOMEHUB_HISTORIES[homehub_history_index("modbus_buffering_power_limit")];
+    CHECK(limit57_history.base_only);
+    CHECK(homehub_history_row_matches(limit57_history, *homehub_find(57), base_quiet_activity));
+    CHECK(!homehub_history_row_matches(limit57_history, *homehub_find(57), native_quiet_activity));
+    CHECK(std::string(homehub_history_for(57, base_quiet_activity)) ==
+          "modbus_buffering_power_limit");
+    CHECK(homehub_history_for(57, native_quiet_activity) == nullptr);
     HomeHubReg incompatible = *homehub_find(9);
     incompatible.space      = MbFunc::ReadInput;
     CHECK(!homehub_history_row_matches(quiet_history, incompatible));
@@ -15236,9 +15316,10 @@ static void test_history_measurement_units() {
     // The unit upgrade changed accepted cache metadata, never the catalog bytes used by persisted
     // series ids. The fingerprint moved with the high-side trend's series id (B5,
     // test_history_identity; 0xa1783c86 was before it), from 0x537c75e6 to 0x15f5f2eb when Paket 1
-    // expanded HOMEHUB_HISTORIES from 13 to 17 rings, to 0x1047fbc2 with X10A pel and cop, and to
-    // 0x97235e4f when water_pressure switched to 5-minute minimum folding (min_fold).
-    CHECK(history_catalog_fingerprint() == 0x97235e4fu);
+    // 0x97235e4f when water_pressure switched to 5-minute minimum folding (min_fold), and
+    // 0x95fd4696u when X10A mode/binary trends (34->41) and HomeHub mode/binary/abnormality
+    // timelines (17->35) landed.
+    CHECK(history_catalog_fingerprint() == 0x95fd4696u);
 }
 
 static void test_history() {
@@ -15369,6 +15450,33 @@ static void test_history() {
     CHECK(history_smart_grid_mode(true, true, true, true) == 30);
     CHECK(history_smart_grid_mode(false, false, true, false) == HISTORY_NO_READING);
     CHECK(history_smart_grid_mode(true, false, false, false) == HISTORY_NO_READING);
+
+    // Enum-to-tenths mapping for X10A indoor/outdoor operation modes (`conv 315` and `conv 217`).
+    {
+        constexpr bool ce = []() {
+            int v = -1;
+            return history_enum_tenths(315, "Heating", v) && v == 10;
+        }();
+        static_assert(ce);
+        int out = -1;
+        CHECK(history_enum_tenths(rt(315), rt("Stop"), out) && out == 0);
+        CHECK(history_enum_tenths(rt(315), rt("Heating"), out) && out == 10);
+        CHECK(history_enum_tenths(rt(315), rt("Cooling"), out) && out == 20);
+        CHECK(history_enum_tenths(rt(315), rt("DHW"), out) && out == 40);
+        CHECK(history_enum_tenths(rt(315), rt("Heating + DHW"), out) && out == 50);
+        CHECK(history_enum_tenths(rt(315), rt("Cooling + DHW"), out) && out == 60);
+        CHECK(!history_enum_tenths(rt(315), rt(""), out));
+        CHECK(!history_enum_tenths(rt(315), rt("?"), out));
+        CHECK(!history_enum_tenths(rt(315), rt(static_cast<const char*>(nullptr)), out));
+
+        CHECK(history_enum_tenths(rt(217), rt("Stop"), out) && out == 0);
+        CHECK(history_enum_tenths(rt(217), rt("Heating"), out) && out == 10);
+        CHECK(history_enum_tenths(rt(217), rt("Cooling"), out) && out == 20);
+        CHECK(history_enum_tenths(rt(217), rt("Auto"), out) && out == 30);
+        CHECK(history_enum_tenths(rt(217), rt("UseStrdThrm(ht)4"), out) && out == 180);
+        CHECK(!history_enum_tenths(rt(217), rt("?"), out));
+        CHECK(!history_enum_tenths(rt(999), rt("Heating"), out));
+    }
 
     // --- the compressor witness ----------------------------------------------------------------
     {
@@ -15588,6 +15696,26 @@ static void test_history() {
         r.fold_binary_event(HISTORY_NO_READING);
         r.fold_binary_event(0);
         CHECK(r.pending == 0); // a real OFF beats an initially missing sample
+
+        // 3-state event severity for Modbus abnormality (`0` Normal < `20` Warning < `10` Fault):
+        // warning survives returning to 0, fault overrides warning, and subsequent warning cannot
+        // downgrade an already latched fault within the same five-minute bucket.
+        r.commit(0);
+        r.fold_binary_event(0);
+        r.fold_binary_event(HISTORY_NO_READING);
+        CHECK(r.pending == 0);
+        r.fold_binary_event(20);
+        r.fold_binary_event(20);
+        r.fold_binary_event(0);
+        r.fold_binary_event(HISTORY_NO_READING);
+        CHECK(r.pending == 20);
+        r.fold_binary_event(10);
+        r.fold_binary_event(20);
+        CHECK(r.pending == 10);
+        r.commit(0);
+        r.fold_binary_event(HISTORY_HELD_OVER);
+        r.fold_binary_event(HISTORY_NO_READING);
+        CHECK(r.pending == HISTORY_NO_READING);
     }
     {
         // Water pressure uses minimum folding so a dip inside a 5-minute bucket survives recovery.
@@ -15650,6 +15778,124 @@ static void test_history() {
         for (size_t i = 0; i < HISTORY_SAMPLES; i++)
             CHECK(out[i] == HISTORY_NO_READING); // 100 aged out
     }
+    {
+        // Packed Bit2 / State8 / Int16 ring encoding & wraparound helpers.
+        CHECK(trend_ring_offset(0) == 0);
+        CHECK(trend_ring_offset(TREND_COUNT) == TREND_POOL_BYTES);
+        CHECK(trend_ring_offset(TREND_COUNT + 1) == TREND_POOL_BYTES);
+        CHECK(TREND_POOL_BYTES == 15192);
+        CHECK(history_ring_storage_bytes(HistoryRingEncoding::Bit2) == 72);
+        CHECK(history_ring_storage_bytes(HistoryRingEncoding::State8) == 288);
+        CHECK(history_ring_storage_bytes(HistoryRingEncoding::Int16) == 576);
+        for (size_t i = 0; i < TREND_COUNT; ++i) (void)trend_ring_encoding(TRENDS[i]);
+        CHECK(trend_ring_encoding(TRENDS[0]) == HistoryRingEncoding::Int16);
+        CHECK(trend_ring_encoding(TRENDS[19]) == HistoryRingEncoding::Bit2);
+        CHECK(trend_ring_encoding(TRENDS[28]) == HistoryRingEncoding::State8);
+        CHECK(trend_ring_encoding(TRENDS[29]) == HistoryRingEncoding::Int16);
+        CHECK(trend_ring_encoding(TRENDS[31]) == HistoryRingEncoding::Bit2);
+        CHECK(trend_ring_encoding(TRENDS[32]) == HistoryRingEncoding::Int16);
+        CHECK(trend_ring_encoding(TRENDS[34]) == HistoryRingEncoding::State8);
+
+        // Null / out-of-range fail closed.
+        CHECK(history_packed_read(nullptr, HistoryRingEncoding::Bit2, 0) == HISTORY_NO_READING);
+        history_packed_write(nullptr, HistoryRingEncoding::Bit2, 0, 10);
+        uint16_t      cnt = 0, hd = 0;
+        HistorySample pend = HISTORY_NO_READING;
+        history_packed_push(nullptr, HistoryRingEncoding::Bit2, cnt, hd, 10);
+        CHECK(cnt == 0 && hd == 0);
+
+        uint8_t bit2_buf[HISTORY_BYTES_BIT2]{};
+        CHECK(history_packed_read(bit2_buf, HistoryRingEncoding::Bit2, HISTORY_SAMPLES) ==
+              HISTORY_NO_READING);
+        history_packed_write(bit2_buf, HistoryRingEncoding::Bit2, HISTORY_SAMPLES, 10);
+        const HistorySample bit2_cases[] = {HISTORY_NO_READING, HISTORY_HELD_OVER, 0, 10};
+        for (size_t i = 0; i < 4; ++i) {
+            history_packed_write(bit2_buf, HistoryRingEncoding::Bit2, i, bit2_cases[i]);
+            CHECK(history_packed_read(bit2_buf, HistoryRingEncoding::Bit2, i) == bit2_cases[i]);
+        }
+        history_packed_write(bit2_buf, HistoryRingEncoding::Bit2, 4, 20);
+        CHECK(history_packed_read(bit2_buf, HistoryRingEncoding::Bit2, 4) == HISTORY_NO_READING);
+
+        uint8_t             s8_buf[HISTORY_BYTES_STATE8]{};
+        const HistorySample s8_cases[] = {HISTORY_NO_READING, HISTORY_HELD_OVER, 0, 30, 180, 1250};
+        for (size_t i = 0; i < sizeof(s8_cases) / sizeof(s8_cases[0]); ++i) {
+            history_packed_write(s8_buf, HistoryRingEncoding::State8, i, s8_cases[i]);
+            CHECK(history_packed_read(s8_buf, HistoryRingEncoding::State8, i) == s8_cases[i]);
+        }
+        for (HistorySample bad : {static_cast<HistorySample>(-10), static_cast<HistorySample>(15),
+                                  static_cast<HistorySample>(1260)}) {
+            history_packed_write(s8_buf, HistoryRingEncoding::State8, 10, bad);
+            CHECK(history_packed_read(s8_buf, HistoryRingEncoding::State8, 10) ==
+                  HISTORY_NO_READING);
+        }
+        s8_buf[11] = static_cast<uint8_t>(static_cast<int8_t>(-3));
+        CHECK(history_packed_read(s8_buf, HistoryRingEncoding::State8, 11) == HISTORY_NO_READING);
+        s8_buf[11] = static_cast<uint8_t>(static_cast<int8_t>(126));
+        CHECK(history_packed_read(s8_buf, HistoryRingEncoding::State8, 11) == HISTORY_NO_READING);
+
+        uint8_t i16_buf[HISTORY_BYTES_PER_TREND]{};
+        for (HistorySample v :
+             {HISTORY_NO_READING, HISTORY_HELD_OVER, static_cast<HistorySample>(-255),
+              static_cast<HistorySample>(32767)}) {
+            history_packed_write(i16_buf, HistoryRingEncoding::Int16, 7, v);
+            CHECK(history_packed_read(i16_buf, HistoryRingEncoding::Int16, 7) == v);
+        }
+
+        // Packed push: normal, wrapped, and count saturation; snapshot: null/empty/partial/wrapped.
+        static HistorySample snap_out[HISTORY_SAMPLES];
+        CHECK(history_packed_snapshot(nullptr, HistoryRingEncoding::State8, 1, 1, snap_out, 4) ==
+              0);
+        CHECK(history_packed_snapshot(s8_buf, HistoryRingEncoding::State8, 1, 1, nullptr, 4) == 0);
+        CHECK(history_packed_snapshot(s8_buf, HistoryRingEncoding::State8, 1, 1, snap_out, 0) == 0);
+        CHECK(history_packed_snapshot(s8_buf, HistoryRingEncoding::State8, 0, 0, snap_out, 4) == 0);
+
+        cnt = 0;
+        hd  = 0;
+        history_packed_push(s8_buf, HistoryRingEncoding::State8, cnt, hd, 10);
+        history_packed_push(s8_buf, HistoryRingEncoding::State8, cnt, hd, 20);
+        history_packed_push(s8_buf, HistoryRingEncoding::State8, cnt, hd, 30);
+        CHECK(cnt == 3 && hd == 3);
+        CHECK(history_packed_snapshot(s8_buf, HistoryRingEncoding::State8, cnt, hd, snap_out, 8) ==
+              3);
+        CHECK(snap_out[0] == 10 && snap_out[2] == 30);
+
+        for (size_t i = 0; i < HISTORY_SAMPLES; ++i) {
+            history_packed_push(s8_buf, HistoryRingEncoding::State8, cnt, hd,
+                                static_cast<HistorySample>((i % 4) * 10));
+        }
+        CHECK(cnt == HISTORY_SAMPLES);
+        uint16_t over_cnt = HISTORY_SAMPLES + 5, over_hd = 2;
+        history_packed_push(bit2_buf, HistoryRingEncoding::Bit2, over_cnt, over_hd, 10);
+        CHECK(over_cnt == HISTORY_SAMPLES && over_hd == 3);
+        CHECK(history_packed_snapshot(s8_buf, HistoryRingEncoding::State8, HISTORY_SAMPLES + 2, hd,
+                                      snap_out, HISTORY_SAMPLES) == HISTORY_SAMPLES);
+        CHECK(snap_out[0] == 0 && snap_out[HISTORY_SAMPLES - 1] == 30);
+
+        // TrendRingView: all 4 null arms, no-op methods on invalid view, and reset/push/snapshot.
+        const TrendRingView bad_views[] = {
+            {nullptr, &cnt, &hd, &pend},
+            {i16_buf, nullptr, &hd, &pend},
+            {i16_buf, &cnt, nullptr, &pend},
+            {i16_buf, &cnt, &hd, nullptr},
+        };
+        for (const auto& bv : bad_views) {
+            CHECK(!bv);
+            bv.reset();
+            bv.push(10);
+            CHECK(bv.snapshot(snap_out, 4) == 0);
+        }
+
+        TrendRing tr;
+        tr.fold(123);
+        tr.commit(0);
+        const TrendRingView tv = tr.view();
+        CHECK(static_cast<bool>(tv));
+        CHECK(tv.snapshot(snap_out, 4) == 1 && snap_out[0] == 123);
+        tv.reset();
+        CHECK(tr.count == 0 && tr.head == 0 && tr.pending == HISTORY_NO_READING);
+        tv.push(456);
+        CHECK(tr.count == 1 && tv.snapshot(snap_out, 4) == 1 && snap_out[0] == 456);
+    }
 
     // --- catalog conformance ------------------------------------------------------------------
     // The locator is only worth anything if it addresses ONE row, on EVERY profile that carries the
@@ -15706,6 +15952,13 @@ static void test_history() {
         {"circulation_state", 0, 0, 0},
         {"pel", 0, 0, 0},
         {"cop", 0, 0, 0},
+        {"ou_op_mode", 39, -1, 1},
+        {"iu_op_mode", 39, -1, 1},
+        {"thermostat_state", 39, -1, 1},
+        {"x10a_pump_state", 39, -1, 1},
+        {"x10a_space_state", 39, -1, 1},
+        {"dhw_reheat_state", 39, -1, 1},
+        {"dhw_powerful_state", 39, -1, 1},
     };
     static_assert(sizeof(kExpect) / sizeof(kExpect[0]) == TREND_COUNT,
                   "every TRENDS entry needs its measured catalog expectation here");
@@ -15776,6 +16029,7 @@ static void test_history() {
             const bool frozen = ou_page_holds_over(regs[picked[t]]);
             CHECK(history_store(true, 190, regs[picked[t]], true, false) ==
                   (frozen ? HISTORY_HELD_OVER : 190));
+            CHECK(std::strlen(labels[picked[t]]) < 48);
         }
 
         // No two trends may buffer the same row — 576 bytes spent twice on one sensor, under two
@@ -15838,7 +16092,7 @@ static void test_history() {
     int derived_trends     = 0;
     for (size_t t = 0; t < TREND_COUNT; t++) {
         if (TRENDS[t].kind == TrendKind::Row || TRENDS[t].kind == TrendKind::BinaryState ||
-            TRENDS[t].kind == TrendKind::BinaryEvent) {
+            TRENDS[t].kind == TrendKind::BinaryEvent || TRENDS[t].kind == TrendKind::EnumState) {
             CHECK(TRENDS[t].label[0] ==
                   '\0'); // a row's label is the PROFILE's, discovered at runtime
             continue;
@@ -25244,10 +25498,10 @@ static void test_history_persist() {
     // previous generation (legacy-8's catalog). Records of that generation are no
     // longer on the direct fast path; they are read through their manifests
     // (test_history_identity pins both the mapping and how the old constant was built). B5,
-    // the 13->17 Modbus ring expansion (0x537c75e6u -> 0x15f5f2ebu), and X10A pel/cop moved it
-    // B5, 13->17 Modbus ring expansion, X10A pel/cop, and water_pressure min_fold moved it
-    // to the current value.
-    CHECK(fp == 0x97235e4fu);
+    // the 13->17 Modbus ring expansion (0x537c75e6u -> 0x15f5f2ebu), X10A pel/cop (0x1047fbc2u),
+    // water_pressure min_fold (0x97235e4fu), and the 34/17 -> 41/35 expansion moved it to the
+    // current value.
+    CHECK(fp == 0x95fd4696u);
     const uint32_t sw = static_cast<uint32_t>(CrashReason::SW);
     CHECK(history_restore_verdict(sw, HISTORY_PERSIST_MAGIC, HISTORY_PERSIST_VERSION, fp, fp, 7,
                                   7) == HistoryRestore::Accept);
@@ -25283,11 +25537,11 @@ static void test_history_persist() {
     CHECK(history_fp_u32(CONFIG_CRC32_INIT, 1) != history_fp_u32(CONFIG_CRC32_INIT, 256));
 
     // --- the official 8 MB append journal -------------------------------------------------------
-    CHECK(HISTORY_FLASH_TOTAL_RINGS == 55);
+    CHECK(HISTORY_FLASH_TOTAL_RINGS == 80);
     CHECK(HISTORY_FLASH_PARTITION_BYTES == 4u * 1024u * 1024u);
     CHECK(HISTORY_FLASH_ERASE_BYTES == 4096);
     CHECK(HISTORY_JOURNAL_HEADER_BYTES == 64);
-    CHECK(HISTORY_JOURNAL_MAX_SOURCE_RINGS == 34);
+    CHECK(HISTORY_JOURNAL_MAX_SOURCE_RINGS == 41);
     CHECK(history_journal_slot_bytes(HISTORY_JOURNAL_HEADER_BYTES + 48 * sizeof(uint32_t)) == 256);
     CHECK(history_journal_slot_bytes(HISTORY_JOURNAL_HEADER_BYTES + 49 * sizeof(uint32_t)) == 512);
     CHECK(history_journal_slot_bytes(256) == 256);
@@ -25296,8 +25550,8 @@ static void test_history_persist() {
     CHECK(HISTORY_JOURNAL_SLOT_BYTES == 256);
     CHECK(HISTORY_JOURNAL_SLOTS_PER_SECTOR == 16);
     CHECK(HISTORY_JOURNAL_SLOT_COUNT == 16384);
-    CHECK(history_journal_source_rings(HistoryJournalSource::X10a) == 34);
-    CHECK(history_journal_source_rings(HistoryJournalSource::Modbus) == 17);
+    CHECK(history_journal_source_rings(HistoryJournalSource::X10a) == 41);
+    CHECK(history_journal_source_rings(HistoryJournalSource::Modbus) == 35);
     CHECK(history_journal_source_rings(HistoryJournalSource::Env3) == 3);
     CHECK(history_journal_source_rings(HistoryJournalSource::Checkup) == 0);
     CHECK(HISTORY_JOURNAL_SOURCE_COUNT == 5);
@@ -26254,9 +26508,10 @@ static void test_history_identity() {
         for (size_t i = 0; i < ENV3_HISTORY_COUNT; i++)
             crc = history_fp_u32(crc, history_series_id(HistoryJournalSource::Env3, i));
         CHECK(history_catalog_fingerprint() == config_crc32_final(crc));
-        // Pinned: this is the generation the flash records of this build carry (was 0x1047fbc2u
-        // before water_pressure switched to 5-minute minimum folding).
-        CHECK(history_catalog_fingerprint() == 0x97235e4fu);
+        // Pinned: this is the generation the flash records of this build carry (was 0x15f5f2ebu
+        // on 32/17/3 before X10A pel and cop, 0x1047fbc2u on 34/17/3 before min_fold, and
+        // 0x97235e4fu on 34/17/3 with min_fold).
+        CHECK(history_catalog_fingerprint() == 0x95fd4696u);
     }
     {
         // B5 / min_fold: the high-side trend and water_pressure (min_fold) changed what their
@@ -26304,25 +26559,100 @@ static void test_history_identity() {
         CHECK(history_env3_series_id(unit_a) != history_env3_series_id(unit_b));
     }
     {
+        // The 34/17/3 generation with water_pressure min_fold (0x97235e4f, immediately before the
+        // 34->41 X10A and 17->35 Modbus expansion) maps all 34 X10A and 17 HomeHub series 1-to-1
+        // through its manifests; newly appended X10A and Modbus series start empty.
+        constexpr size_t kPrev34    = 34;
+        constexpr size_t kPrevMb17  = 17;
+        uint32_t         prev34_crc = CONFIG_CRC32_INIT;
+        prev34_crc                  = history_fp_u32(prev34_crc, HISTORY_DT_S);
+        prev34_crc                  = history_fp_u32(prev34_crc, HISTORY_SAMPLES);
+        prev34_crc                  = history_fp_u32(prev34_crc, kPrev34);
+        prev34_crc                  = history_fp_u32(prev34_crc, kPrevMb17);
+        prev34_crc = history_fp_u32(prev34_crc, static_cast<uint32_t>(ENV3_HISTORY_COUNT));
+        uint32_t x10a_prev34[kPrev34] = {};
+        uint32_t mb_prev17[kPrevMb17] = {};
+        for (size_t i = 0; i < kPrev34; i++) {
+            x10a_prev34[i] = history_series_id(HistoryJournalSource::X10a, i);
+            prev34_crc     = history_fp_u32(prev34_crc, x10a_prev34[i]);
+        }
+        for (size_t i = 0; i < kPrevMb17; i++) {
+            mb_prev17[i] = history_series_id(HistoryJournalSource::Modbus, i);
+            prev34_crc   = history_fp_u32(prev34_crc, mb_prev17[i]);
+        }
+        for (size_t i = 0; i < ENV3_HISTORY_COUNT; i++)
+            prev34_crc =
+                history_fp_u32(prev34_crc, history_series_id(HistoryJournalSource::Env3, i));
+        CHECK(config_crc32_final(prev34_crc) == 0x97235e4fu);
+        CHECK(history_catalog_fingerprint() != 0x97235e4fu);
+        for (size_t i = 0; i < TREND_COUNT; i++)
+            CHECK(history_series_index(x10a_prev34, kPrev34,
+                                       history_series_id(HistoryJournalSource::X10a, i)) ==
+                  (i < kPrev34 ? static_cast<int>(i) : -1));
+        for (size_t i = 0; i < HOMEHUB_HISTORY_COUNT; i++)
+            CHECK(history_series_index(mb_prev17, kPrevMb17,
+                                       history_series_id(HistoryJournalSource::Modbus, i)) ==
+                  (i < kPrevMb17 ? static_cast<int>(i) : -1));
+    }
+    {
+        // The earlier 34/17/3 generation before water_pressure min_fold (0x1047fbc2) maps all 33
+        // non-moved X10A and 17 HomeHub series 1-to-1 through its manifest; newly appended series
+        // and min_fold start empty.
+        constexpr size_t kPrev34    = 34;
+        constexpr size_t kPrevMb17  = 17;
+        uint32_t         prev34_crc = CONFIG_CRC32_INIT;
+        prev34_crc                  = history_fp_u32(prev34_crc, HISTORY_DT_S);
+        prev34_crc                  = history_fp_u32(prev34_crc, HISTORY_SAMPLES);
+        prev34_crc                  = history_fp_u32(prev34_crc, kPrev34);
+        prev34_crc                  = history_fp_u32(prev34_crc, kPrevMb17);
+        prev34_crc = history_fp_u32(prev34_crc, static_cast<uint32_t>(ENV3_HISTORY_COUNT));
+        uint32_t x10a_prev34[kPrev34] = {};
+        uint32_t mb_prev17[kPrevMb17] = {};
+        for (size_t i = 0; i < kPrev34; i++) {
+            TrendDef before = TRENDS[i];
+            before.min_fold = false;
+            x10a_prev34[i]  = history_x10a_series_id(before);
+            prev34_crc      = history_fp_u32(prev34_crc, x10a_prev34[i]);
+        }
+        for (size_t i = 0; i < kPrevMb17; i++) {
+            mb_prev17[i] = history_series_id(HistoryJournalSource::Modbus, i);
+            prev34_crc   = history_fp_u32(prev34_crc, mb_prev17[i]);
+        }
+        for (size_t i = 0; i < ENV3_HISTORY_COUNT; i++)
+            prev34_crc =
+                history_fp_u32(prev34_crc, history_series_id(HistoryJournalSource::Env3, i));
+        CHECK(config_crc32_final(prev34_crc) == 0x1047fbc2u);
+        CHECK(history_catalog_fingerprint() != 0x1047fbc2u);
+        for (size_t i = 0; i < TREND_COUNT; i++)
+            CHECK(history_series_index(x10a_prev34, kPrev34,
+                                       history_series_id(HistoryJournalSource::X10a, i)) ==
+                  (i < kPrev34 && !TRENDS[i].min_fold ? static_cast<int>(i) : -1));
+        for (size_t i = 0; i < HOMEHUB_HISTORY_COUNT; i++)
+            CHECK(history_series_index(mb_prev17, kPrevMb17,
+                                       history_series_id(HistoryJournalSource::Modbus, i)) ==
+                  (i < kPrevMb17 ? static_cast<int>(i) : -1));
+    }
+    {
         // The 32/17/3 generation immediately before X10A pel/cop (0x15f5f2eb) maps all 32 X10A,
         // 17 HomeHub (including modbus_power) and 3 ENV III series 1-to-1 through its manifests;
-        // only the newly appended X10A pel and cop series start empty.
+        // only the newly appended X10A pel and cop series and newer Modbus series start empty.
         constexpr size_t kPrev32    = 32;
+        constexpr size_t kPrevMb17  = 17;
         uint32_t         prev32_crc = CONFIG_CRC32_INIT;
         prev32_crc                  = history_fp_u32(prev32_crc, HISTORY_DT_S);
         prev32_crc                  = history_fp_u32(prev32_crc, HISTORY_SAMPLES);
         prev32_crc                  = history_fp_u32(prev32_crc, kPrev32);
-        prev32_crc = history_fp_u32(prev32_crc, static_cast<uint32_t>(HOMEHUB_HISTORY_COUNT));
+        prev32_crc                  = history_fp_u32(prev32_crc, kPrevMb17);
         prev32_crc = history_fp_u32(prev32_crc, static_cast<uint32_t>(ENV3_HISTORY_COUNT));
-        uint32_t x10a_prev32[kPrev32]             = {};
-        uint32_t mb_prev17[HOMEHUB_HISTORY_COUNT] = {};
+        uint32_t x10a_prev32[kPrev32] = {};
+        uint32_t mb_prev17[kPrevMb17] = {};
         for (size_t i = 0; i < kPrev32; i++) {
             TrendDef before = TRENDS[i];
             before.min_fold = false;
             x10a_prev32[i]  = history_x10a_series_id(before);
             prev32_crc      = history_fp_u32(prev32_crc, x10a_prev32[i]);
         }
-        for (size_t i = 0; i < HOMEHUB_HISTORY_COUNT; i++) {
+        for (size_t i = 0; i < kPrevMb17; i++) {
             mb_prev17[i] = history_series_id(HistoryJournalSource::Modbus, i);
             prev32_crc   = history_fp_u32(prev32_crc, mb_prev17[i]);
         }
@@ -26336,9 +26666,9 @@ static void test_history_identity() {
                                        history_series_id(HistoryJournalSource::X10a, i)) ==
                   (i < kPrev32 && !TRENDS[i].min_fold ? static_cast<int>(i) : -1));
         for (size_t i = 0; i < HOMEHUB_HISTORY_COUNT; i++)
-            CHECK(history_series_index(mb_prev17, HOMEHUB_HISTORY_COUNT,
+            CHECK(history_series_index(mb_prev17, kPrevMb17,
                                        history_series_id(HistoryJournalSource::Modbus, i)) ==
-                  static_cast<int>(i));
+                  (i < kPrevMb17 ? static_cast<int>(i) : -1));
 
         // The earlier hand-written 32/17/3 formula (0x22cedd55) stays readable through its
         // manifests too.
@@ -26347,7 +26677,7 @@ static void test_history_identity() {
             crc          = history_fp_u32(crc, HISTORY_DT_S);
             crc          = history_fp_u32(crc, HISTORY_SAMPLES);
             crc          = history_fp_u32(crc, kPrev32);
-            crc          = history_fp_u32(crc, static_cast<uint32_t>(HOMEHUB_HISTORY_COUNT));
+            crc          = history_fp_u32(crc, kPrevMb17);
             crc          = history_fp_u32(crc, static_cast<uint32_t>(ENV3_HISTORY_COUNT));
             for (size_t i = 0; i < kPrev32; i++) {
                 const auto& d = TRENDS[i];
@@ -26358,7 +26688,7 @@ static void test_history_identity() {
                 crc           = history_fp_str(crc, d.unit);
                 crc           = history_fp_u32(crc, static_cast<uint32_t>(d.conv));
             }
-            for (size_t i = 0; i < HOMEHUB_HISTORY_COUNT; i++) {
+            for (size_t i = 0; i < kPrevMb17; i++) {
                 crc = history_fp_u32(crc, HOMEHUB_HISTORIES[i].offset);
                 crc = history_fp_str(crc, HOMEHUB_HISTORIES[i].trend_id);
             }
@@ -26385,15 +26715,14 @@ static void test_history_identity() {
         old_record.bucket      = 4000;
         old_record.dt_s        = HISTORY_DT_S;
         old_record.rings[0]    = kPrev32;
-        old_record.rings[1]    = static_cast<uint16_t>(HOMEHUB_HISTORY_COUNT);
+        old_record.rings[1]    = kPrevMb17;
         old_record.rings[2]    = static_cast<uint16_t>(ENV3_HISTORY_COUNT);
         CHECK(history_journal_trend_header_structural_matches(old_record));
         CHECK(!history_journal_trend_layout_matches(old_record, history_catalog_fingerprint(),
                                                     static_cast<uint16_t>(TREND_COUNT),
                                                     static_cast<uint16_t>(HOMEHUB_HISTORY_COUNT),
                                                     static_cast<uint16_t>(ENV3_HISTORY_COUNT)));
-        CHECK(history_journal_trend_layout_matches(old_record, previous_fp, kPrev32,
-                                                   static_cast<uint16_t>(HOMEHUB_HISTORY_COUNT),
+        CHECK(history_journal_trend_layout_matches(old_record, previous_fp, kPrev32, kPrevMb17,
                                                    static_cast<uint16_t>(ENV3_HISTORY_COUNT)));
         CHECK(!history_legacy_disinfection_layout_matches(old_record));
 
@@ -26435,13 +26764,13 @@ static void test_history_identity() {
             return history_series_id_end(crc);
         };
         uint32_t prev_mb[HISTORY_MANIFEST_MAX_IDS] = {};
-        for (size_t i = 0; i < HOMEHUB_HISTORY_COUNT; i++) {
+        for (size_t i = 0; i < kPrevMb17; i++) {
             prev_mb[i] = previous_modbus_id(HOMEHUB_HISTORIES[i]);
             if (i < 12) CHECK(prev_mb[i] == HISTORY_LEGACY_DISINFECTION_MODBUS_IDS[i]);
         }
-        CHECK(history_series_ids_valid(prev_mb, HOMEHUB_HISTORY_COUNT));
+        CHECK(history_series_ids_valid(prev_mb, kPrevMb17));
         for (size_t i = 0; i < HOMEHUB_HISTORY_COUNT; i++)
-            CHECK(history_series_index(prev_mb, HOMEHUB_HISTORY_COUNT,
+            CHECK(history_series_index(prev_mb, kPrevMb17,
                                        history_series_id(HistoryJournalSource::Modbus, i)) == -1);
     }
 

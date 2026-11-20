@@ -1381,10 +1381,11 @@ static void append_status_json(JsonOut& j, bool redact) {
         append_status_id_label(j, first_trend, logic::TRENDS[t].id, lbl);
     }
     j += "],\"modbus_rows\":[";
-    // Paired HomeHub measurements/states get a second ring; Smart Grid and disinfection add
-    // explicit state timelines without inventing a one-row X10A twin. Other states and setpoints
-    // remain live rows without a chart. Keep the list empty when this installation has no HomeHub
-    // stack, so old/no-gateway devices do not offer permanently empty series in the browser.
+    // Paired HomeHub measurements/states get a second ring; Smart Grid plus standalone Modbus
+    // active states, modes, setpoints, offsets and power limits add independent timelines without
+    // inventing a one-row X10A twin. Fault-code rows (22, 23) remain live rows without a chart.
+    // Keep the list empty when this installation has no HomeHub stack, so old/no-gateway devices
+    // do not offer permanently empty series in the browser.
     bool first_mb_trend = true;
     if (mb.enabled) {
         for (size_t mt = 0; mt < logic::HOMEHUB_HISTORY_COUNT; mt++) {
@@ -2096,13 +2097,9 @@ static void append_values_array(JsonOut& j, const std::vector<CachedValue>& v,
     // concurrency, and HTTP safety; the v1.0.12 stack overflow).
     for (size_t i = 0; i < v.size(); i++) {
         if (i) j += ",";
-        j += "{\"label\":";
-        json_append_quoted(j, v[i].label);
-        j += ",\"value\":";
-        if (v[i].value.empty()) j += "null";
-        else json_append_quoted(j, v[i].value);
-        j += ",\"unit\":";
-        json_append_quoted(j, v[i].unit);
+        append_status_opt_quoted(j, "{\"label\":", true, v[i].label);
+        append_status_opt_quoted(j, ",\"value\":", !v[i].value.empty(), v[i].value);
+        append_status_opt_quoted(j, ",\"unit\":", true, v[i].unit);
         j += ",\"reg\":";
         append_json_uint(j, v[i].reg);
         // A small audited set of catalog labels occurs on more than one register page. They are not duplicate
@@ -2114,8 +2111,7 @@ static void append_values_array(JsonOut& j, const std::vector<CachedValue>& v,
         // The marker is sparse (only ambiguous rows carry it), so ordinary /values frames do not
         // pay a group-name payload cost for every reading.
         if (i < ambiguous.size() && ambiguous[i]) {
-            j += ",\"x10a_group\":";
-            json_append_quoted(j, group_for_page(v[i].reg));
+            append_status_opt_quoted(j, ",\"x10a_group\":", true, group_for_page(v[i].reg));
         }
         // Keep the value itself at the firmware-wide numeric 0/1 boundary. The structural marker
         // is intentionally emitted only for binary rows: it lets the browser render ON/OFF without
@@ -2128,7 +2124,7 @@ static void append_values_array(JsonOut& j, const std::vector<CachedValue>& v,
             // Emit only the four catalog identities with documented non-boolean semantics; all
             // ordinary flags retain the compact payload and the familiar ON/OFF presentation.
             if (const char* sid = logic::binary_semantic_for(v[i].reg, v[i].off, v[i].conv))
-                { j += ",\"binary_semantic\":"; json_append_quoted(j, sid); }
+                append_status_opt_quoted(j, ",\"binary_semantic\":", true, sid);
         }
         // The DEVICE's own answer to "is this reading still current?" — logic/ou_stale.hpp applied
         // on the poll task (legacy-209 defect 5), emitted only when true so the many live rows cost
@@ -2172,10 +2168,7 @@ static void append_values_array(JsonOut& j, const std::vector<CachedValue>& v,
                 j += ",\"dwell_s\":";
                 append_json_uint(j, dw.since_s);
                 if (!dw.exact) j += ",\"dwell_min\":true";
-                if (dw.blind_s) {
-                    j += ",\"dwell_blind_s\":";
-                    append_json_uint(j, dw.blind_s);
-                }
+                if (dw.blind_s) append_status_opt_uint(j, ",\"dwell_blind_s\":", true, dw.blind_s);
             }
         }
         // The row's CONCEPT — the structural id logic/homehub_map.hpp pairs the two independent
@@ -2189,7 +2182,7 @@ static void append_values_array(JsonOut& j, const std::vector<CachedValue>& v,
         // byte 0x60/12 and differ only in which bit their converter masks, so without it the diverter
         // and the circulation pump are one row.
         if (const char* cid = logic::x10a_concept_for(v[i].reg, v[i].off, v[i].unit, v[i].conv))
-            { j += ",\"concept\":"; json_append_quoted(j, cid); }
+            append_status_opt_quoted(j, ",\"concept\":", true, cid);
         j += "}";
     }
     j += "]";
@@ -2207,17 +2200,18 @@ static void append_modbus_values_array(JsonOut& j, const std::vector<CachedValue
         const def::HomeHubReg* reg = def::homehub_definition(v[i].modbus_definition);
         if (reg && reg->offset != v[i].off) reg = nullptr;
         if (i) j += ",";
-        j += "{\"label\":";
-        json_append_quoted(j, v[i].label);
+        append_status_opt_quoted(j, "{\"label\":", true, v[i].label);
         j += ",\"value\":";
-        if (v[i].value.empty() || !reg) j += "null";
-        else if (def::homehub_is_text(*reg)) json_append_quoted(j, v[i].value);
-        else if (is_json_number(v[i].value)) j += v[i].value;
-        else j += "null";  // fail closed: never repair a broken numeric contract by quoting it
-        j += ",\"unit\":";
-        json_append_quoted(j, v[i].unit);
-        j += ",\"off\":";
-        append_json_uint(j, v[i].off);
+        if (v[i].value.empty() || !reg)
+            j += "null";
+        else if (def::homehub_is_text(*reg))
+            json_append_quoted(j, v[i].value);
+        else if (is_json_number(v[i].value))
+            j += v[i].value;
+        else
+            j += "null"; // fail closed: never repair a broken numeric contract by quoting it
+        append_status_opt_quoted(j, ",\"unit\":", true, v[i].unit);
+        append_status_opt_uint(j, ",\"off\":", true, v[i].off);
         if (reg && def::homehub_is_binary(*reg)) j += ",\"binary\":true";
         if (reg && def::homehub_definition_is_altherma4(v[i].modbus_definition))
             j += ",\"profile\":\"altherma4\"";
@@ -2225,21 +2219,17 @@ static void append_modbus_values_array(JsonOut& j, const std::vector<CachedValue
         // last-mile rendering, so profile-specific state names never become transport values.
         if (reg)
             if (const char* eid = def::homehub_enum_id(reg->kind))
-                { j += ",\"enum\":"; json_append_quoted(j, eid); }
+                append_status_opt_quoted(j, ",\"enum\":", true, eid);
         if (const char* cid =
                 reg ? logic::homehub_concept_for(reg->offset, def::homehub_has_quiet_activity(*reg))
-                    : nullptr) {
-            j += ",\"concept\":";
-            json_append_quoted(j, cid);
-        }
+                    : nullptr)
+            append_status_opt_quoted(j, ",\"concept\":", true, cid);
         // History metadata is wider than source pairing: a Modbus-only timeline must be attachable
         // to this row without pretending that it has an X10A `concept` twin.
         if (const char* hid =
                 reg ? logic::homehub_history_for(reg->offset, def::homehub_has_quiet_activity(*reg))
-                    : nullptr) {
-            j += ",\"history\":";
-            json_append_quoted(j, hid);
-        }
+                    : nullptr)
+            append_status_opt_quoted(j, ",\"history\":", true, hid);
         j += "}";
     }
     j += "]";
@@ -2326,10 +2316,9 @@ static esp_err_t h_active_model_values(httpd_req_t* req) {
     // same. A cached unresolved response would leave the expert picker empty after the device has
     // newer rows, so this live, installation-specific catalog must never be reused.
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    j += "{\"profile\":";
-    json_append_quoted(j, c.profile);
-    j += ",\"definition\":";
-    json_append_quoted(j, profile ? std::string_view(profile->id) : std::string_view{});
+    append_status_opt_quoted(j, "{\"profile\":", true, c.profile);
+    append_status_opt_quoted(j, ",\"definition\":", true,
+                             profile ? std::string_view(profile->id) : std::string_view{});
     j += fallback ? ",\"fallback\":true,\"values\":[" : ",\"fallback\":false,\"values\":[";
     if (profile) {
         const auto view  = def::resolved(*profile);
@@ -2339,14 +2328,10 @@ static esp_err_t h_active_model_values(httpd_req_t* req) {
             if (!probe_catalog_row(row)) continue;
             if (comma) j += ',';
             comma = true;
-            j += "{\"reg\":";
-            append_json_uint(j, row.reg);
-            j += ",\"offset\":";
-            append_json_uint(j, row.offset);
-            j += ",\"conv\":";
-            append_json_uint(j, static_cast<uint64_t>(row.conv));
-            j += ",\"size\":";
-            append_json_uint(j, row.size);
+            append_status_opt_uint(j, "{\"reg\":", true, row.reg);
+            append_status_opt_uint(j, ",\"offset\":", true, row.offset);
+            append_status_opt_uint(j, ",\"conv\":", true, static_cast<uint64_t>(row.conv));
+            append_status_opt_uint(j, ",\"size\":", true, row.size);
             j += ",\"label\":";
             json_append_quoted(j, row.label);
             j += '}';
@@ -2399,6 +2384,22 @@ static HttpdRouteScratch s_httpd_route_scratch;
 // Sent in CHUNKS. The body is ~1.5 KB — smaller than the model-dependent /values body — but it is a
 // new allocation on a heap where the largest contiguous block is the binding limit, and chunking
 // costs nothing here.
+[[gnu::noinline]] static esp_err_t send_status_json_err(httpd_req_t* req, const char* status,
+                                                        const char* body) {
+    httpd_resp_set_status(req, status);
+    return http_send_json(req, body);
+}
+
+[[gnu::noinline]] static void copy_bounded_str(char* dst, size_t max, const char* src) noexcept {
+    if (!dst || !max) return;
+    if (!src) {
+        dst[0] = '\0';
+        return;
+    }
+    std::strncpy(dst, src, max - 1);
+    dst[max - 1] = '\0';
+}
+
 static esp_err_t h_history(httpd_req_t* req) {
     // Snapshot/header preparation allocates before transfer. Keep it outside firmware TLS;
     // the finished header and numeric samples then use the shared bounded stream boundary.
@@ -2407,8 +2408,8 @@ static esp_err_t h_history(httpd_req_t* req) {
     char id[32] = {0};
     if (httpd_req_get_url_query_str(req, q, sizeof(q)) != ESP_OK ||
         httpd_query_key_value(q, "row", id, sizeof(id)) != ESP_OK) {
-        httpd_resp_set_status(req, "400 Bad Request");
-        return http_send_json(req, "{\"ok\":false,\"error\":\"row required\"}");
+        return send_status_json_err(req, "400 Bad Request",
+                                    "{\"ok\":false,\"error\":\"row required\"}");
     }
     char       source[12]  = {0};
     const bool has_source  = httpd_query_key_value(q, "source", source, sizeof(source)) == ESP_OK;
@@ -2416,8 +2417,8 @@ static esp_err_t h_history(httpd_req_t* req) {
     const bool env3_source = has_source && std::strcmp(source, "env3") == 0;
     const bool room_source = has_source && std::strcmp(source, "room") == 0;
     if (has_source && !modbus && !env3_source && !room_source && std::strcmp(source, "x10a") != 0) {
-        httpd_resp_set_status(req, "400 Bad Request");
-        return http_send_json(req, "{\"ok\":false,\"error\":\"unknown source\"}");
+        return send_status_json_err(req, "400 Bad Request",
+                                    "{\"ok\":false,\"error\":\"unknown source\"}");
     }
     const logic::TrendDef* def_ = logic::trend_by_id(id);
     // An unknown id is a 404, never a defaulted trend: answering with SOME series would look like a
@@ -2428,6 +2429,11 @@ static esp_err_t h_history(httpd_req_t* req) {
     }
     const int  mb_t            = modbus ? logic::homehub_history_index(id) : -1;
     const bool native_modbus   = modbus && mb_active_profile() == ModbusProfile::Altherma4;
+    const uint16_t mb_offset = modbus && mb_t >= 0 ? logic::HOMEHUB_HISTORIES[mb_t].offset : 0;
+    const def::HomeHubReg* mb_reg =
+        modbus && mb_t >= 0
+            ? (native_modbus ? def::altherma4_find(mb_offset) : def::homehub_find(mb_offset))
+            : nullptr;
     const int  env_t           = env3_source ? env3_history_index(id) : -1;
     bool       env3_configured = false;
     uint32_t   room_identity   = 0;
@@ -2437,18 +2443,18 @@ static esp_err_t h_history(httpd_req_t* req) {
         env3_configured = active_config.env3_enabled && env3_board_supported(active_config);
         if (room_source && active_config.diagnostics_enabled && !safe_mode_active()) {
             room_identity = logic::history_room_identity(active_config);
-            std::snprintf(lbl, sizeof(lbl), "%s", active_config.ref_temp_name.c_str());
+            copy_bounded_str(lbl, sizeof(lbl), active_config.ref_temp_name.c_str());
         }
     } // Release the configuration snapshot before constructing the streamed history response.
     const bool x10a_unknown =
         !modbus && !env3_source && !room_source && (!def_ || t >= logic::TREND_COUNT);
-    const bool missing_quiet =
-        native_modbus && mb_t >= 0 && logic::HOMEHUB_HISTORIES[mb_t].offset == 9;
-    if (x10a_unknown || (modbus && (mb_t < 0 || missing_quiet)) ||
+    const bool missing_modbus_profile =
+        modbus && mb_t >= 0 && (!mb_reg || !def::homehub_has_quiet_activity(*mb_reg));
+    if (x10a_unknown || (modbus && (mb_t < 0 || missing_modbus_profile)) ||
         (env3_source && (!env3_configured || env_t < 0)) ||
         (room_source && (!room_identity || std::strcmp(id, "room_temp") != 0))) {
-        httpd_resp_set_status(req, "404 Not Found");
-        return http_send_json(req, "{\"ok\":false,\"error\":\"unknown trend\"}");
+        return send_status_json_err(req, "404 Not Found",
+                                    "{\"ok\":false,\"error\":\"unknown trend\"}");
     }
 
     // Shared httpd-task-only scratch rather than stack: this handler runs on the httpd task, whose
@@ -2479,17 +2485,13 @@ static esp_err_t h_history(httpd_req_t* req) {
                              ? 0
                              : logic::history_held_runs(samples, n, runs, logic::HISTORY_MAX_RUNS);
 
-    if (modbus) {
-        const uint16_t         offset = logic::HOMEHUB_HISTORIES[mb_t].offset;
-        const def::HomeHubReg* r =
-            native_modbus ? def::altherma4_find(offset) : def::homehub_find(offset);
-        std::snprintf(lbl, sizeof(lbl), "%s", r ? r->label : "");
-        std::snprintf(unit, sizeof(unit), "%s", r ? r->unit : "");
-    } else if (env3_source) {
-        std::snprintf(lbl, sizeof(lbl), "%s", ENV3_HISTORIES[env_t].label);
-        std::snprintf(unit, sizeof(unit), "%s", ENV3_HISTORIES[env_t].unit);
+    const char* unit_str = unit;
+    if (modbus || env3_source) {
+        copy_bounded_str(lbl, sizeof(lbl),
+                         modbus ? (mb_reg ? mb_reg->label : "") : ENV3_HISTORIES[env_t].label);
+        unit_str = modbus ? (mb_reg ? mb_reg->unit : "") : ENV3_HISTORIES[env_t].unit;
     } else if (room_source) {
-        std::snprintf(unit, sizeof(unit), "%s", "°C");
+        unit_str = "°C";
     } else {
         history_label(t, lbl, sizeof(lbl));
         history_unit(t, unit, sizeof(unit));
@@ -2524,7 +2526,7 @@ static esp_err_t h_history(httpd_req_t* req) {
     // browser prints this string straight into the range readout and the crosshair. A bar row
     // labelled °C is exactly the legacy-35–legacy-39 shape.
     j += "300,\"unit\":";
-    json_append_quoted(j, unit);
+    json_append_quoted(j, unit_str);
     if (n && history_meta.newest_commit_us != logic::HISTORY_NO_COMMIT_US) {
         int64_t unix_s;
         int32_t wall_ms;
@@ -2552,12 +2554,12 @@ static esp_err_t h_history(httpd_req_t* req) {
     // Epoch 0 means no snapshot identity at all (no history mutex, or its lock was not obtained);
     // that is reported as unavailable, not as a change a retry would resolve.
     if (history_snapshot_epoch == 0) {
-        httpd_resp_set_status(req, "503 Service Unavailable");
-        return http_send_json(req, "{\"ok\":false,\"error\":\"history unavailable\"}");
+        return send_status_json_err(req, "503 Service Unavailable",
+                                    "{\"ok\":false,\"error\":\"history unavailable\"}");
     }
     if (history_snapshot_epoch != history_epoch()) {
-        httpd_resp_set_status(req, "503 Service Unavailable");
-        return http_send_json(req, "{\"ok\":false,\"error\":\"history changed; retry\"}");
+        return send_status_json_err(req, "503 Service Unavailable",
+                                    "{\"ok\":false,\"error\":\"history changed; retry\"}");
     }
     HttpJsonChunks chunks(HttpChunkEmitter{req});
     httpd_resp_set_type(req, "application/json");
@@ -2728,8 +2730,8 @@ static esp_err_t h_coredump_clear(httpd_req_t* req) {
 // (docs/REPORTING.md), so it must not be reachable by a link, a prefetch or a crawler.
 static esp_err_t h_crash_dismiss(httpd_req_t* req) {
     if (!diag_crash_dismiss()) {
-        httpd_resp_set_status(req, "500 Internal Server Error");
-        return http_send_json(req, "{\"ok\":false,\"error\":\"coredump erase failed\"}");
+        return send_status_json_err(req, "500 Internal Server Error",
+                                    "{\"ok\":false,\"error\":\"coredump erase failed\"}");
     }
     return http_send_json(req, "{\"ok\":true}");
 }

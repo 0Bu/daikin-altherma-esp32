@@ -31,6 +31,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
@@ -234,7 +235,9 @@ std::string open_meteo_url(const WeatherConfigSnapshot& cfg) {
     // Only formatter-produced signed decimals enter this URL. `forecast_hours=6` is deliberately
     // larger than the four values normally needed: a request that crosses an hour boundary while
     // TLS is in flight still has two complete future one-hour bins after the next decision instant.
-    std::string url = "https://api.open-meteo.com/v1/forecast?latitude=";
+    std::string url;
+    url.reserve(240);
+    url += "https://api.open-meteo.com/v1/forecast?latitude=";
     url += weather_coordinate_format_e6(cfg.weather_latitude_e6);
     url += "&longitude=";
     url += weather_coordinate_format_e6(cfg.weather_longitude_e6);
@@ -292,48 +295,49 @@ __attribute__((noinline)) bool download_json(const WeatherConfigSnapshot& weathe
     };
 
     bool             ok               = false;
+    const char*      err              = nullptr;
+    char             code_buf[24];
     const TickType_t download_started = xTaskGetTickCount();
     const esp_err_t  opened           = esp_http_client_open(client, 0);
     if (opened != ESP_OK) {
         http_client_log_open_failure("weather", client, opened, before);
-        error = http_deadline_reached_at(download_started, xTaskGetTickCount(), kDownloadDeadline)
-                    ? "download_timeout"
-                    : "connect_failed";
+        err = http_deadline_reached_at(download_started, xTaskGetTickCount(), kDownloadDeadline)
+                  ? "download_timeout"
+                  : "connect_failed";
     } else if (!set_timeout_to_deadline(download_started)) {
-        error = "download_timeout";
+        err = "download_timeout";
     } else {
         const esp_err_t arm_err = socket_deadline.arm(client, download_started, kDownloadDeadline);
         if (arm_err != ESP_OK) {
-            error = arm_err == ESP_ERR_TIMEOUT ? "download_timeout" : "deadline_unavailable";
+            err = arm_err == ESP_ERR_TIMEOUT ? "download_timeout" : "deadline_unavailable";
         } else {
             const int64_t announced = esp_http_client_fetch_headers(client);
             if (socket_deadline.expired()) {
-                error = "download_timeout";
+                err = "download_timeout";
             } else if (announced < 0) {
-                error = "response_failed";
-            } else if (esp_http_client_get_status_code(client) != 200) {
-                char code[24];
-                std::snprintf(code, sizeof(code), "http_%d",
-                              esp_http_client_get_status_code(client));
-                error = code;
+                err = "response_failed";
+            } else if (const int status_code = esp_http_client_get_status_code(client);
+                       status_code != 200) {
+                std::snprintf(code_buf, sizeof(code_buf), "http_%d", status_code);
+                err = code_buf;
             } else {
                 const int64_t claimed = esp_http_client_get_content_length(client);
                 if (claimed > static_cast<int64_t>(kPayloadMax)) {
-                    error = "payload_too_large";
+                    err = "payload_too_large";
                 } else {
                     char chunk[256];
                     while (out.size() <= kPayloadMax) {
                         if (!set_timeout_to_deadline(download_started)) {
-                            error = "download_timeout";
+                            err = "download_timeout";
                             break;
                         }
                         const int n = esp_http_client_read(client, chunk, sizeof(chunk));
                         if (socket_deadline.expired()) {
-                            error = "download_timeout";
+                            err = "download_timeout";
                             break;
                         }
                         if (n < 0) {
-                            error = "read_failed";
+                            err = "read_failed";
                             break;
                         }
                         if (n == 0) {
@@ -341,15 +345,15 @@ __attribute__((noinline)) bool download_json(const WeatherConfigSnapshot& weathe
                                 claimed, out.size(),
                                 esp_http_client_is_complete_data_received(client));
                             if (!complete) {
-                                error = "incomplete_payload";
+                                err = "incomplete_payload";
                                 break;
                             }
                             ok = !out.empty();
-                            if (!ok) error = "empty_payload";
+                            if (!ok) err = "empty_payload";
                             break;
                         }
                         if (out.size() + static_cast<size_t>(n) > kPayloadMax) {
-                            error = "payload_too_large";
+                            err = "payload_too_large";
                             break;
                         }
                         out.append(chunk, static_cast<size_t>(n));
@@ -360,9 +364,10 @@ __attribute__((noinline)) bool download_json(const WeatherConfigSnapshot& weathe
     }
     // Stop or join before returning into JSON parsing and before HttpClientCleanup closes the fd.
     if (socket_deadline.disarm()) {
-        ok    = false;
-        error = "download_timeout";
+        ok  = false;
+        err = "download_timeout";
     }
+    if (err) error = err;
     return ok;
 }
 
@@ -431,10 +436,24 @@ __attribute__((noinline)) bool parse_forecast(const std::string& payload, int64_
             break;
         }
         // Fail closed if the provider ever changes units despite the explicit query parameters.
-        if (!json_unit(units, "time", "unixtime") || !json_unit(units, "temperature_2m", "°C") ||
-            !json_unit(units, "relative_humidity_2m", "%") ||
-            !json_unit(units, "surface_pressure", "hPa") ||
-            !json_unit(units, "shortwave_radiation", "W/m²")) {
+        constexpr struct {
+            const char* k;
+            const char* v;
+        } kUnits[] = {
+            {"time", "unixtime"},
+            {"temperature_2m", "°C"},
+            {"relative_humidity_2m", "%"},
+            {"surface_pressure", "hPa"},
+            {"shortwave_radiation", "W/m²"},
+        };
+        bool units_ok = true;
+        for (const auto& u : kUnits) {
+            if (!json_unit(units, u.k, u.v)) {
+                units_ok = false;
+                break;
+            }
+        }
+        if (!units_ok) {
             error = "unit_mismatch";
             break;
         }
@@ -443,11 +462,21 @@ __attribute__((noinline)) bool parse_forecast(const std::string& payload, int64_
         std::vector<double>  humidity;
         std::vector<double>  pressure;
         std::vector<double>  shortwave;
-        if (!json_time_array(hourly, times) ||
-            !json_number_array(hourly, "temperature_2m", temperature) ||
-            !json_number_array(hourly, "relative_humidity_2m", humidity) ||
-            !json_number_array(hourly, "surface_pressure", pressure) ||
-            !json_number_array(hourly, "shortwave_radiation", shortwave)) {
+        const struct {
+            const char*          k;
+            std::vector<double>* v;
+        } kSeries[] = {
+            {"temperature_2m", &temperature},
+            {"relative_humidity_2m", &humidity},
+            {"surface_pressure", &pressure},
+            {"shortwave_radiation", &shortwave},
+        };
+        bool series_ok = json_time_array(hourly, times);
+        for (const auto& s : kSeries) {
+            if (!series_ok) break;
+            series_ok = json_number_array(hourly, s.k, *s.v);
+        }
+        if (!series_ok) {
             error = "payload_shape_invalid";
             break;
         }
@@ -548,6 +577,18 @@ struct WeatherCycleWait {
     bool       delay = false;
 };
 
+[[gnu::noinline]] bool set_waiting_if_gen(uint32_t gen, const char* reason, bool clear_available,
+                                          bool clear_error) {
+    Lock lk(s_mtx);
+    if (s_source_generation.load(std::memory_order_acquire) != gen) return false;
+    s_status.fetching = false;
+    if (clear_available) s_status.available = false;
+    s_status.state  = "waiting";
+    s_status.reason = reason;
+    if (clear_error) s_status.error.clear();
+    return true;
+}
+
 // Keep transient request allocations off the sleeping task's frame and inside network ownership.
 // The separate frame is also included in both reviewed static stack paths.
 __attribute__((noinline)) WeatherCycleWait weather_cycle(uint32_t               source_generation,
@@ -588,14 +629,10 @@ __attribute__((noinline)) WeatherCycleWait weather_cycle(uint32_t               
     }
     const bool network_up = net_is_up();
     if (!network_up || !time_synced()) {
-        {
-            Lock lk(s_mtx);
-            if (s_source_generation.load(std::memory_order_acquire) != source_generation) return {};
-            s_status.fetching  = false;
-            s_status.available = false;
-            s_status.state     = "waiting";
-            s_status.reason    = !network_up ? "network_unavailable" : "clock_unsynced";
-        }
+        if (!set_waiting_if_gen(source_generation,
+                                !network_up ? "network_unavailable" : "clock_unsynced", true,
+                                false))
+            return {};
         return {pdMS_TO_TICKS(60000), false};
     }
 
@@ -705,14 +742,7 @@ __attribute__((noinline)) WeatherCycleWait weather_cycle(uint32_t               
     }
     if (s_source_generation.load(std::memory_order_acquire) != source_generation) return {};
     if (ota_preempted) {
-        {
-            Lock lk(s_mtx);
-            if (s_source_generation.load(std::memory_order_acquire) != source_generation) return {};
-            s_status.fetching = false;
-            s_status.state    = "waiting";
-            s_status.reason   = "ota_active";
-            s_status.error.clear();
-        }
+        if (!set_waiting_if_gen(source_generation, "ota_active", false, true)) return {};
         // OTA is a peer serialization owner, not a Weather result. Keep the exact explicit
         // token outstanding so this task reclaims it after OTA releases the shared heap.
         refresh_attempt.defer();
@@ -729,17 +759,14 @@ __attribute__((noinline)) WeatherCycleWait weather_cycle(uint32_t               
                                             : "HTTP/MCP snapshot reader",
                     static_cast<unsigned>(blocked.free_internal),
                     static_cast<unsigned>(blocked.largest_internal));
-        {
-            Lock lk(s_mtx);
-            if (s_source_generation.load(std::memory_order_acquire) != source_generation) return {};
-            s_status.fetching = false;
-            s_status.state    = "waiting";
-            s_status.reason   = poll_quiesce_failed     ? "x10a_busy"
+        if (!set_waiting_if_gen(source_generation,
+                                poll_quiesce_failed     ? "x10a_busy"
                                 : mqtt_quiesce_failed   ? "mqtt_busy"
                                 : modbus_quiesce_failed ? "homehub_busy"
                                 : syslog_quiesce_failed ? "syslog_busy"
-                                                        : "http_busy";
-        }
+                                                        : "http_busy",
+                                false, false))
+            return {};
         refresh_attempt.finish(false);
         return {pdMS_TO_TICKS(WEATHER_RETRY_INTERVAL_S * 1000u), false};
     }

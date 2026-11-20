@@ -1460,7 +1460,7 @@ static void probe_append_int(JsonOut& out, int value) {
 }
 
 template <typename JsonOut>
-static void probe_append_decode(JsonOut& out, const ProbeDecode& d) {
+[[gnu::noinline]] static void probe_append_decode(JsonOut& out, const ProbeDecode& d) {
     out += "{\"conv\":";
     probe_append_int(out, d.conv);
     if (d.alias_count > 0) {
@@ -1476,8 +1476,9 @@ static void probe_append_decode(JsonOut& out, const ProbeDecode& d) {
         json_append_escaped(out, d.text);
         out += '"';
     } else if (d.ok) {
-        char b[40];
-        snprintf(b, sizeof(b), ",\"value\":%.*f", display_decimals(d.conv), d.value);
+        char b[32];
+        snprintf(b, sizeof(b), "%.*f", display_decimals(d.conv), d.value);
+        out += ",\"value\":";
         out += b;
     } else {
         // The converter ran and REFUSED these bytes (conv 405 on a non-positive pressure, 107/114
@@ -1586,8 +1587,8 @@ static esp_err_t hp_query_probe(httpd_req_t* req) {
                static_cast<int>(sizeof(hex)));
     out += ",\"payload\":\"";
     out += hex;
-    snprintf(hex, sizeof(hex), "\",\"payload_len\":%d", reply.payload_len);
-    out += hex;
+    out += "\",\"payload_len\":";
+    probe_append_int(out, reply.payload_len);
 
     if (!sliced) {
         // The page is real and shorter than the caller assumed — already reported as out_of_bounds
@@ -1607,8 +1608,9 @@ static esp_err_t hp_query_probe(httpd_req_t* req) {
         probe_append_decode(out, decodes[i]);
     }
     if (unimplemented) {
-        snprintf(hex, sizeof(hex), "{\"conv\":%d,\"unimplemented\":true}", q.conv);
-        out += hex;
+        out += "{\"conv\":";
+        probe_append_int(out, q.conv);
+        out += ",\"unimplemented\":true}";
     }
     out += "]}";
     return out.finish() ? ESP_OK : ESP_FAIL;

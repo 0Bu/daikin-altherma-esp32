@@ -35,8 +35,9 @@ by evidence strength, not by whether they are visible:
 | P1 control/safety | System OFF; Main/Add. RT Heat/Cool; power-limit bits 1–4; BUH Q1L protector and output capacity; detailed error code; Startup, Restart standby, Oil Return and Pressure equalising; 4-way valve; crankcase heater; PHE heater | compact Dwell for the 17 binary rows; numeric rows have no state age | MQTT → VictoriaMetrics/Grafana |
 | P2 observational | Outdoor thermostat, Demand Signal, Low noise; Hot-gas/LP-bypass/Y3S; Solar input; floor-loop shut-off | neutral raw-bit Dwell for all eight; duration does not establish polarity/meaning | MQTT → VictoriaMetrics/Grafana, neutral ON/OFF only |
 
-No additional 24-hour history rings are allocated: the fixed ring budget is full, and these series
-belong in VictoriaMetrics. `HP Forced FG` is deliberately still absent. It aliases bit 7 of the
+No 24-hour history rings are allocated for these supplement rows: the 41-ring X10A ceiling is
+reserved for core measurements, modes and states, and diagnostic supplement series belong in
+VictoriaMetrics. `HP Forced FG` is deliberately still absent. It aliases bit 7 of the
 existing one-byte CT-L3 current field at `0x63/16`; the intrinsic full-byte converter would add a
 fictitious 64 A. The availability ledger now withholds CT-L3 while bit 7 is asserted. The flag and a
 simultaneous current remain unavailable until raw-data or documented mask evidence exists.

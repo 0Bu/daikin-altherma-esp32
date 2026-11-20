@@ -59,6 +59,8 @@ function extract(source, anchor) {
 }
 
 const uintBody = extract(httpSource, "template <typename JsonOut>\nstatic void append_json_uint(");
+const optUintBody = extract(httpSource, "template <typename JsonOut>\n[[gnu::noinline]] static void append_status_opt_uint(");
+const optQuotedBody = extract(httpSource, "template <typename JsonOut>\n[[gnu::noinline]] static void append_status_opt_quoted(");
 const httpBody = extract(httpSource, "template <typename JsonOut>\nstatic void append_modbus_values_array(");
 const mqttBody = extract(mqttSource, "static std::vector<GroupedValue> current_modbus_values(");
 
@@ -75,7 +77,7 @@ function execute(command, args) {
 function compile(name, http = httpBody, mqtt = mqttBody) {
   const httpHeader = path.join(temp, `${name}-http.hpp`);
   const mqttHeader = path.join(temp, `${name}-mqtt.hpp`);
-  fs.writeFileSync(httpHeader, `${uintBody}\n\n${http}\n`);
+  fs.writeFileSync(httpHeader, `${uintBody}\n\n${optUintBody}\n\n${optQuotedBody}\n\n${http}\n`);
   fs.writeFileSync(mqttHeader, `${mqtt}\n`);
   const binary = path.join(temp, name);
   execute(process.env.CXX || "c++", [
@@ -122,9 +124,11 @@ const oracles = {
   "http-same-offset": (rows) => {
     assert.equal(rows.length, 6);
     assert.equal(rows[0].enum, "current_operation_mode");
+    assert.equal(rows[0].history, "modbus_current_op_mode");
     assert.equal(rows[0].value, 1);
     absent(rows[0], "profile", "binary");
     assert.equal(rows[1].enum, "altherma4_current_operation_mode");
+    assert.equal(rows[1].history, "modbus_current_op_mode");
     assert.equal(rows[1].value, 0);
     assert.equal(rows[1].profile, "altherma4");
     absent(rows[1], "binary");
@@ -137,10 +141,20 @@ const oracles = {
     assert.equal(rows[3].value, 1);
     absent(rows[3], "binary", "concept", "history");
     assert.equal(rows[4].label, "General power limit");
+    assert.equal(rows[4].history, "modbus_general_power_limit");
     assert.equal(rows[5].label, "Imposed power limit");
+    assert.equal(rows[5].history, "modbus_general_power_limit");
     assert.equal(rows[4].value, 2.5);
     assert.equal(rows[5].value, 2.5);
     assert.equal(rows[5].profile, "altherma4");
+  },
+  "http-timeline-history": (rows) => {
+    assert.deepEqual(rows.slice(0, 4).map((row) => row.history), [
+      "modbus_op_mode", "modbus_space_enable_state", "modbus_dhw_reheat_state",
+      "modbus_abnormality_state",
+    ]);
+    absent(rows[4], "history", "concept");
+    absent(rows[5], "history", "concept");
   },
   "http-typed": (rows) => {
     assert.deepEqual(rows.slice(0, 3).map((row) => [row.value, row.enum]), [
@@ -170,6 +184,7 @@ const oracles = {
     assert.equal(rows[1].enum, "altherma4_current_operation_mode");
     assert.equal(rows[1].value, 0);
     assert.equal(rows[2].label, "Imposed power limit");
+    assert.equal(rows[2].history, "modbus_general_power_limit");
     assert.equal(rows[3].label, "Heat pump power consumption");
     for (const row of rows) assert.equal(row.profile, "altherma4");
     assert.equal(rows[6].value, "12");
@@ -267,7 +282,7 @@ try {
       `${path.relative(root, file)} changed during the production consumer test`);
   const hash = (source) => createHash("sha256").update(source).digest("hex");
   console.log(`Modbus metadata production consumers: ${passed} cases, ${controls.length + 2} detected mutation controls`);
-  console.log(`Extracted append_json_uint + append_modbus_values_array: ${hash(`${uintBody}\n\n${httpBody}\n`)}`);
+  console.log(`Extracted append_json_uint + opt helpers + append_modbus_values_array: ${hash(`${uintBody}\n\n${optUintBody}\n\n${optQuotedBody}\n\n${httpBody}\n`)}`);
   console.log(`Extracted current_modbus_values: ${hash(mqttBody)}`);
 } finally {
   fs.rmSync(temp, { recursive: true, force: true });

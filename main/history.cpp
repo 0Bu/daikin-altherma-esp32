@@ -50,9 +50,70 @@ using logic::TREND_COUNT;
 
 namespace {
 
-// Long enough for every label in the generated catalog (the longest is well under 48 chars); a
-// truncated copy would only ever cost a spurious ring reset, never a wrong reading.
-constexpr size_t kLabelMax = 64;
+// Long enough for every trended label in the generated catalog (longest trended is 46 chars; max
+// label buffer keeps sizeof(Trend) == 64 so slot stride uses a single shift). A truncated copy
+// would only ever cost a spurious ring reset, never a wrong reading.
+constexpr size_t kLabelMax = 48;
+
+struct CompactRingSpec {
+    uint16_t                   offset;
+    logic::HistoryRingEncoding enc;
+};
+constexpr size_t kCompactRingCount = TREND_COUNT + HOMEHUB_HISTORY_COUNT;
+static_assert((logic::TREND_POOL_BYTES + logic::HOMEHUB_POOL_BYTES) / logic::HISTORY_BYTES_BIT2 <=
+                  0x3fffu,
+              "packed ring offset exceeds 14 bits");
+
+struct CompactRingSpecTable {
+    uint16_t packed[kCompactRingCount]{};
+};
+
+constexpr CompactRingSpecTable build_compact_ring_specs() {
+    CompactRingSpecTable t{};
+    for (size_t i = 0; i < TREND_COUNT; ++i) {
+        const size_t                     off = logic::trend_ring_offset(i);
+        const logic::HistoryRingEncoding enc = logic::trend_ring_encoding(logic::TRENDS[i]);
+        t.packed[i] = static_cast<uint16_t>((off / logic::HISTORY_BYTES_BIT2) |
+                                            (static_cast<uint16_t>(enc) << 14));
+    }
+    for (size_t i = 0; i < HOMEHUB_HISTORY_COUNT; ++i) {
+        const size_t off = logic::TREND_POOL_BYTES + logic::homehub_ring_offset(i);
+        const logic::HistoryRingEncoding enc = logic::HOMEHUB_HISTORIES[i].encoding;
+        t.packed[TREND_COUNT + i] = static_cast<uint16_t>((off / logic::HISTORY_BYTES_BIT2) |
+                                                          (static_cast<uint16_t>(enc) << 14));
+    }
+    return t;
+}
+
+inline constexpr CompactRingSpecTable kCompactRingSpecs = build_compact_ring_specs();
+
+constexpr CompactRingSpec compact_spec_unpack(uint16_t raw) noexcept {
+    return {static_cast<uint16_t>((raw & 0x3fffu) * logic::HISTORY_BYTES_BIT2),
+            static_cast<logic::HistoryRingEncoding>(raw >> 14)};
+}
+
+struct CompactRing {
+    uint16_t      count   = 0;
+    uint16_t      head    = 0;
+    HistorySample pending = HISTORY_NO_READING;
+    uint16_t      pad     = 0;
+
+    inline void reset() {
+        count   = 0;
+        head    = 0;
+        pending = HISTORY_NO_READING;
+    }
+    inline void fold(HistorySample s) { logic::history_fold_pending(pending, s); }
+    inline void fold_min(HistorySample s) { logic::history_fold_min_pending(pending, s); }
+    inline void fold_binary_event(HistorySample s) {
+        logic::history_fold_event_pending(pending, s);
+    }
+    inline void              reset_with_gaps(size_t completed) noexcept;
+    inline void              commit(uint32_t skipped) noexcept;
+    inline void              append_gaps(uint32_t n) noexcept;
+    [[gnu::noinline]] size_t snapshot(HistorySample* out, size_t max) const noexcept;
+};
+static_assert(sizeof(CompactRing) == 8, "CompactRing must stay 8 bytes for bit-shift indexing");
 
 // The ring mechanics live in logic/history.hpp (host-tested); this pairs one with the row it is
 // recording. The label is a COPY — it cannot be a pointer into the poll cache, whose std::strings
@@ -60,12 +121,14 @@ constexpr size_t kLabelMax = 64;
 // DISCARDS the buffer: the same trend on a different profile is a different sensor, and continuing
 // the line would splice two units' data into one curve.
 struct Trend {
-    logic::TrendRing ring;
-    char             label[kLabelMax] = {0};
+    CompactRing ring;
+    char        label[kLabelMax] = {0};
     // Current display unit copied from the poll cache, including explicit L/min, rps and A.
     // This is separate from the frozen TrendDef.unit used by persisted series identity.
-    char             unit[8] = {0};
+    char unit[8] = {0};
 };
+static_assert(offsetof(Trend, ring) == 0 && sizeof(Trend) == 64,
+              "Trend must stay 64 bytes with ring at offset 0 for bit-shift indexing");
 
 // ── The persisted region ────────────────────────────────────────────────────────────────────────
 // Every ring in the firmware, in ONE struct, so it can be sealed and re-adopted as a unit — and so
@@ -110,17 +173,21 @@ struct PersistedHistory {
     int32_t residual_us[logic::HISTORY_LIVENESS_RASTERS];
 
     Trend ring[TREND_COUNT];
-    // Eleven paired HomeHub measurements/states plus Smart-Grid and the five standalone Modbus
-    // timelines (disinfection, compressor, power, defrost/restart, and pump) get a second ring.
+    // Eleven paired HomeHub measurements/states plus Smart-Grid and twenty-three standalone Modbus
+    // timelines (active states, modes, abnormality, enable flags, setpoints, offsets, limits, and
+    // telemetry) share the packed sample pool below.
     // Unlike X10A trends, their labels/units are fixed by def/homehub.hpp, so this side needs no
     // per-ring string buffers.
-    logic::TrendRing mb_ring[HOMEHUB_HISTORY_COUNT];
+    CompactRing      mb_ring[HOMEHUB_HISTORY_COUNT];
     logic::TrendRing env3_ring[ENV3_HISTORY_COUNT];
+    alignas(HistorySample) uint8_t sample_pool[logic::TREND_POOL_BYTES + logic::HOMEHUB_POOL_BYTES];
 };
-static_assert(HOMEHUB_HISTORY_COUNT * logic::HISTORY_BYTES_PER_TREND == 9792,
-              "seventeen HomeHub histories should cost exactly 9792 bytes");
+static_assert(logic::TREND_POOL_BYTES + logic::HOMEHUB_POOL_BYTES == 27648,
+              "packed X10A and HomeHub sample pool should cost 27648 bytes");
 static_assert(ENV3_HISTORY_COUNT * logic::HISTORY_BYTES_PER_TREND == 1728,
               "three ENV III histories should cost exactly 1728 bytes");
+static_assert(sizeof(PersistedHistory) <= 32768,
+              "persisted trend store exceeded packed DRAM ceiling");
 
 // UNINITIALISED STORAGE, and the union is what makes it that. `Trend`/`TrendRing` carry non-static
 // data member initialisers (`pending` starts at the non-zero HISTORY_NO_READING, which is why the
@@ -142,6 +209,52 @@ __NOINIT_ATTR PersistStore s_store;
 
 // One name for the region, so no call site has to know about the union.
 inline PersistedHistory& P() { return s_store.v; }
+
+[[gnu::noinline]] CompactRingSpec compact_ring_spec(const CompactRing& r) noexcept {
+    const uintptr_t addr   = reinterpret_cast<uintptr_t>(&r);
+    const uintptr_t x0     = reinterpret_cast<uintptr_t>(&P().ring[0].ring);
+    const uintptr_t x_last = reinterpret_cast<uintptr_t>(&P().ring[TREND_COUNT - 1].ring);
+    const uintptr_t m0     = reinterpret_cast<uintptr_t>(&P().mb_ring[0]);
+    const size_t    slot   = (addr >= x0 && addr <= x_last)
+                                 ? static_cast<size_t>((addr - x0) >> 6)
+                                 : TREND_COUNT + static_cast<size_t>((addr - m0) >> 3);
+    return compact_spec_unpack(kCompactRingSpecs.packed[slot]);
+}
+
+// mode: 0 = append_gaps (only if non-empty), 1 = commit pending + gaps, 2 = reset + gaps
+[[gnu::noinline]] void compact_push_batch(CompactRing& r, uint8_t mode, uint32_t n) noexcept {
+    if (mode == 2)
+        r.reset();
+    else if (mode == 0 && !r.count)
+        return;
+    const CompactRingSpec spec  = compact_ring_spec(r);
+    uint8_t* const        buf   = P().sample_pool + spec.offset;
+    const uint32_t        cap   = n < HISTORY_SAMPLES ? n : HISTORY_SAMPLES;
+    const uint32_t        total = mode == 1 ? cap + 1u : cap;
+    for (uint32_t k = 0; k < total; ++k) {
+        const HistorySample s = (mode == 1 && k == 0) ? r.pending : HISTORY_NO_READING;
+        logic::history_packed_push(buf, spec.enc, r.count, r.head, s);
+    }
+    if (mode == 1) r.pending = HISTORY_NO_READING;
+}
+
+inline void CompactRing::reset_with_gaps(size_t completed) noexcept {
+    compact_push_batch(*this, 2,
+                       completed < HISTORY_SAMPLES ? static_cast<uint32_t>(completed)
+                                                   : static_cast<uint32_t>(HISTORY_SAMPLES));
+}
+
+inline void CompactRing::commit(uint32_t skipped) noexcept {
+    compact_push_batch(*this, 1, skipped);
+}
+
+inline void CompactRing::append_gaps(uint32_t n) noexcept { compact_push_batch(*this, 0, n); }
+
+[[gnu::noinline]] size_t CompactRing::snapshot(HistorySample* out, size_t max) const noexcept {
+    const CompactRingSpec spec = compact_ring_spec(*this);
+    return logic::history_packed_snapshot(P().sample_pool + spec.offset, spec.enc, count, head, out,
+                                          max);
+}
 
 // A fourth, independent raster must not alter the retained layout of the original three sources.
 // Its small sealed store and liveness record are adopted independently, including when X10A has
@@ -276,6 +389,22 @@ inline bool value_tenths(const std::string& s, int& out) {
     return logic::history_parse_tenths(s.c_str(), out);
 }
 
+[[gnu::noinline]] void parse_opt_tenths(const std::string& val, bool& known, int& dst) noexcept {
+    int t = 0;
+    if (value_tenths(val, t)) {
+        known = true;
+        dst   = t;
+    }
+}
+
+[[gnu::noinline]] void parse_bit_flag(const std::string& val, bool& known, bool& on) noexcept {
+    int t = 0;
+    if (value_tenths(val, t) && (t == 0 || t == 10)) {
+        known = true;
+        on    = t == 10;
+    }
+}
+
 // Copy a fixed string into one of the Trend's own buffers, always NUL-terminated. Returns whether
 // the bytes actually MOVED, which is what keeps the persistence seal cheap: the fold loop rewrites
 // every label once a second with the identical text, and re-sealing ~30 KB for that would cost a
@@ -289,6 +418,18 @@ inline bool copy_field(char* dst, size_t max, const char* src) {
 
 // ── Sealing the region, and adopting it again ───────────────────────────────────────────────────
 bool                  s_persist_dirty = false;
+
+[[gnu::noinline]] void set_trend_meta_locked(Trend& tr, const char* lbl,
+                                             const char* unit) noexcept {
+    if (copy_field(tr.label, sizeof(tr.label), lbl)) s_persist_dirty = true;
+    if (copy_field(tr.unit, sizeof(tr.unit), unit)) s_persist_dirty = true;
+}
+
+[[gnu::noinline]] void reset_mb_rings_gaps_locked(uint32_t bucket) noexcept {
+    const size_t completed = logic::history_completed_samples(bucket);
+    for (auto& ring : P().mb_ring) ring.reset_with_gaps(completed);
+    s_persist_dirty = true;
+}
 // Status reads this standalone verdict without the History lock while Forget can replace it.
 std::atomic<logic::HistoryRestore> s_persist_verdict{logic::HistoryRestore::NoRecord};
 static_assert(decltype(s_persist_verdict)::is_always_lock_free);
@@ -310,6 +451,15 @@ bool s_detect_seen = false;
 // five minutes was never a completed sample.
 inline uint32_t persist_crc_ring(uint32_t crc, const logic::TrendRing& r) {
     crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(r.buf), sizeof(r.buf));
+    crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(&r.count), sizeof(r.count));
+    crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(&r.head), sizeof(r.head));
+    return crc;
+}
+
+using PersistCrcU32 = uint32_t;
+[[gnu::always_inline]] inline PersistCrcU32 persist_crc_ring(uint32_t crc, const CompactRing& r) {
+    if (&r == &P().mb_ring[0])
+        crc = config_crc32_update(crc, P().sample_pool, sizeof(P().sample_pool));
     crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(&r.count), sizeof(r.count));
     crc = config_crc32_update(crc, reinterpret_cast<const uint8_t*>(&r.head), sizeof(r.head));
     return crc;
@@ -375,7 +525,7 @@ inline void persist_seal_locked() {
     s_persist_dirty = false;
 }
 
-inline bool rings_have_samples(const logic::TrendRing* r, size_t n) {
+template <typename Ring> inline bool rings_have_samples(const Ring* r, size_t n) {
     for (size_t i = 0; i < n; i++) if (r[i].count) return true;
     return false;
 }
@@ -591,13 +741,13 @@ evaluate_sweep_derived(const CachedValue* v, const char* const* labels, const ui
 
     const int lwt_i = logic::lwt_select(labels, rows);
     const int rwt_i = logic::rwt_select(labels, rows);
-    if (lwt_i >= 0 && value_tenths(v[lwt_i].value, cop_in.lwt_tenths)) cop_in.lwt_known = true;
-    if (rwt_i >= 0 && value_tenths(v[rwt_i].value, cop_in.rwt_tenths)) cop_in.rwt_known = true;
+    if (lwt_i >= 0) parse_opt_tenths(v[lwt_i].value, cop_in.lwt_known, cop_in.lwt_tenths);
+    if (rwt_i >= 0) parse_opt_tenths(v[rwt_i].value, cop_in.rwt_known, cop_in.rwt_tenths);
 
     for (size_t i = 0; i < rows; i++) {
         int tenths = 0;
         if (!cop_in.post_buh_known && logic::cop_is_post_buh(labels[i], regs[i])) {
-            if (value_tenths(v[i].value, cop_in.post_buh_tenths)) cop_in.post_buh_known = true;
+            parse_opt_tenths(v[i].value, cop_in.post_buh_known, cop_in.post_buh_tenths);
             continue;
         }
         if (logic::history_is_ct_current_label(labels[i])) {
@@ -609,42 +759,35 @@ evaluate_sweep_derived(const CachedValue* v, const char* const* labels, const ui
         }
         if (regs[i] == 0x21 && offs[i] == 0 &&
             (logic::trend_cstr_eq(v[i].unit, "") || logic::trend_cstr_eq(v[i].unit, "A"))) {
-            if (value_tenths(v[i].value, tenths)) {
-                inv_known  = true;
-                inv_tenths = tenths;
-            }
+            parse_opt_tenths(v[i].value, inv_known, inv_tenths);
             continue;
         }
         if (regs[i] == 0x62 && offs[i] == 9 &&
             (logic::trend_cstr_eq(v[i].unit, "") || logic::trend_cstr_eq(v[i].unit, "L/min"))) {
-            if (value_tenths(v[i].value, tenths)) {
-                cop_in.flow_known  = true;
-                cop_in.flow_tenths = tenths;
-            }
+            parse_opt_tenths(v[i].value, cop_in.flow_known, cop_in.flow_tenths);
             continue;
         }
         if (regs[i] == 0x10 && offs[i] == 1 && convs[i] == 304) {
-            if (value_tenths(v[i].value, tenths) && (tenths == 0 || tenths == 10)) {
-                cop_in.defrost_known = true;
-                cop_in.defrost_on    = tenths == 10;
-            }
+            parse_bit_flag(v[i].value, cop_in.defrost_known, cop_in.defrost_on);
             continue;
         }
         if (regs[i] == 0x60 && offs[i] == 12) {
-            if (!value_tenths(v[i].value, tenths) || (tenths != 0 && tenths != 10)) continue;
+            bool* k = nullptr;
+            bool* b = nullptr;
             if (convs[i] == 304) {
-                cop_in.buh1_known = true;
-                cop_in.buh1_on    = tenths == 10;
+                k = &cop_in.buh1_known;
+                b = &cop_in.buh1_on;
             } else if (convs[i] == 303) {
-                cop_in.buh2_known = true;
-                cop_in.buh2_on    = tenths == 10;
+                k = &cop_in.buh2_known;
+                b = &cop_in.buh2_on;
             } else if (convs[i] == 305) {
-                cop_in.bsh_known = true;
-                cop_in.bsh_on    = tenths == 10;
+                k = &cop_in.bsh_known;
+                b = &cop_in.bsh_on;
             } else if (convs[i] == 306) {
-                cop_in.valve_dhw_known = true;
-                cop_in.valve_dhw_on    = tenths == 10;
+                k = &cop_in.valve_dhw_known;
+                b = &cop_in.valve_dhw_on;
             }
+            if (k) parse_bit_flag(v[i].value, *k, *b);
             continue;
         }
         if (regs[i] == 0x60 && offs[i] == 2 && convs[i] == 315) {
@@ -713,18 +856,48 @@ enum class HistorySource : uint8_t { X10a = 0, Modbus = 1, Env3 = 2, Room = 4 };
 // The snapshot machinery (flash and MQTT alike) is generic over the source, so it needs one way to
 // reach a ring. Deliberately NOT a merge of the three: they keep separate liveness and separate
 // rasters, exactly as /values keeps two arrays.
-logic::TrendRing* ring_at(HistorySource src, size_t idx) {
+[[gnu::noinline]] logic::TrendRingView ring_at(HistorySource src, size_t idx) noexcept {
     switch (src) {
     case HistorySource::X10a:
-        return idx < TREND_COUNT ? &P().ring[idx].ring : nullptr;
-    case HistorySource::Modbus:
-        return idx < HOMEHUB_HISTORY_COUNT ? &P().mb_ring[idx] : nullptr;
-    case HistorySource::Env3:
-        return idx < ENV3_HISTORY_COUNT ? &P().env3_ring[idx] : nullptr;
-    case HistorySource::Room:
-        return idx == 0 ? &R().ring : nullptr;
+    case HistorySource::Modbus: {
+        const size_t limit = src == HistorySource::X10a ? TREND_COUNT : HOMEHUB_HISTORY_COUNT;
+        if (idx >= limit) return logic::TrendRingView{};
+        CompactRing& r = src == HistorySource::X10a ? P().ring[idx].ring : P().mb_ring[idx];
+        const CompactRingSpec spec = compact_spec_unpack(
+            kCompactRingSpecs.packed[src == HistorySource::X10a ? idx : TREND_COUNT + idx]);
+        return {P().sample_pool + spec.offset, &r.count, &r.head, &r.pending, spec.enc};
     }
-    return nullptr;
+    case HistorySource::Env3:
+        return idx < ENV3_HISTORY_COUNT ? P().env3_ring[idx].view() : logic::TrendRingView{};
+    case HistorySource::Room:
+        return idx == 0 ? R().ring.view() : logic::TrendRingView{};
+    }
+    return {};
+}
+
+[[gnu::noinline]] uint16_t ring_count_at(HistorySource src, size_t idx) noexcept {
+    switch (src) {
+    case HistorySource::X10a:
+        return idx < TREND_COUNT ? P().ring[idx].ring.count : 0;
+    case HistorySource::Modbus:
+        return idx < HOMEHUB_HISTORY_COUNT ? P().mb_ring[idx].count : 0;
+    case HistorySource::Env3:
+        return idx < ENV3_HISTORY_COUNT ? P().env3_ring[idx].count : 0;
+    case HistorySource::Room:
+        return idx == 0 ? R().ring.count : 0;
+    }
+    return 0;
+}
+
+[[gnu::noinline]] HistorySample ring_sample_age_at(HistorySource src, size_t idx,
+                                                   size_t age) noexcept {
+    const logic::TrendRingView v = ring_at(src, idx);
+    if (!v) return HISTORY_NO_READING;
+    const size_t avail = *v.count < HISTORY_SAMPLES ? *v.count : HISTORY_SAMPLES;
+    if (age >= avail) return HISTORY_NO_READING;
+    const size_t newest = ((*v.head % HISTORY_SAMPLES) + HISTORY_SAMPLES - 1) % HISTORY_SAMPLES;
+    return logic::history_packed_read(v.bytes, v.enc,
+                                      (newest + HISTORY_SAMPLES - age) % HISTORY_SAMPLES);
 }
 
 int64_t source_last_commit_us(HistorySource src) {
@@ -792,8 +965,10 @@ static_assert(logic::CHECKUP_JOURNAL_PAYLOAD_BYTES <= sizeof(FlashJournalRecord:
 
 const esp_partition_t* s_flash_part = nullptr;
 SemaphoreHandle_t      s_flash_mtx = nullptr; // serialises poll service, shutdown and factory erase
-std::atomic<bool>      s_flash_shutdown_started{false}; // claim the shutdown drain once
-std::atomic<bool>      s_flash_forgotten{false}; // factory reset crosses button/poll/shutdown tasks
+std::atomic<bool>      s_flash_shutdown_started{false};
+// claim the shutdown drain once
+std::atomic<bool> s_flash_forgotten{false};
+// factory reset crosses button/poll/shutdown tasks
 bool                   s_flash_restore_done         = false;
 bool                   s_flash_checkup_restore_done = false;
 bool s_flash_scan_ok = false;
@@ -1626,7 +1801,7 @@ void history_record(const CachedValue* v, size_t n, uint32_t source_generation) 
         const logic::TrendDef& d = logic::TRENDS[t];
         selected[t] =
             (d.kind == logic::TrendKind::Row || d.kind == logic::TrendKind::BinaryState ||
-             d.kind == logic::TrendKind::BinaryEvent)
+             d.kind == logic::TrendKind::BinaryEvent || d.kind == logic::TrendKind::EnumState)
                 ? static_cast<int16_t>(logic::trend_select(d, regs, offs, units, convs, rows))
                 : static_cast<int16_t>(-1);
     }
@@ -1664,11 +1839,7 @@ void history_record(const CachedValue* v, size_t n, uint32_t source_generation) 
             supported = &sg_c2_supported; known = &sg_c2_known; on = &sg_c2_on;
         } else continue;
         *supported = true;
-        int tenths = 0;
-        if (value_tenths(v[i].value, tenths) && (tenths == 0 || tenths == 10)) {
-            *known = true;
-            *on = tenths == 10;
-        }
+        parse_bit_flag(v[i].value, *known, *on);
     }
     const bool sg_supported = sg_c1_supported && sg_c2_supported;
     const HistorySample sg_mode = logic::history_smart_grid_mode(
@@ -1728,8 +1899,7 @@ void history_record(const CachedValue* v, size_t n, uint32_t source_generation) 
                 // model/link change arrives through history_reset() above.
                 continue;
             }
-            if (copy_field(tr.label, sizeof(tr.label), d.label)) s_persist_dirty = true;
-            if (copy_field(tr.unit, sizeof(tr.unit), d.unit)) s_persist_dirty = true;
+            set_trend_meta_locked(tr, d.label, d.unit);
             tr.ring.fold(sg_mode);
             continue;
         }
@@ -1739,8 +1909,7 @@ void history_record(const CachedValue* v, size_t n, uint32_t source_generation) 
                                        ? derived_cov.pel_supported()
                                        : derived_cov.cop_supported();
             if (!supported) continue;
-            if (copy_field(tr.label, sizeof(tr.label), d.label)) s_persist_dirty = true;
-            if (copy_field(tr.unit, sizeof(tr.unit), d.unit)) s_persist_dirty = true;
+            set_trend_meta_locked(tr, d.label, d.unit);
             tr.ring.fold(d.kind == logic::TrendKind::ElectricalPower ? derived.pel : derived.cop);
             continue;
         }
@@ -1756,11 +1925,12 @@ void history_record(const CachedValue* v, size_t n, uint32_t source_generation) 
         // Missing in this sweep means NO READING, not NO FEATURE. Keep the established label, unit
         // and ring; pending is already NO_READING and the bucket commit will preserve the gap.
         if (idx < 0) continue;
-        if (copy_field(tr.label, sizeof(tr.label), labels[idx])) s_persist_dirty = true;
-        if (copy_field(tr.unit, sizeof(tr.unit), v[idx].unit)) s_persist_dirty = true;
+        set_trend_meta_locked(tr, labels[idx], v[idx].unit);
 
         int tenths = 0;
-        const bool has = value_tenths(v[idx].value, tenths);
+        const bool          has    = d.kind == logic::TrendKind::EnumState
+                                         ? logic::history_enum_tenths(d.conv, v[idx].value.c_str(), tenths)
+                                         : value_tenths(v[idx].value, tenths);
         const HistorySample sample =
             logic::history_store(has, tenths, regs[idx], rps_known, rps_running);
         if (d.kind == logic::TrendKind::BinaryEvent) tr.ring.fold_binary_event(sample);
@@ -1806,8 +1976,7 @@ void history_record_modbus(const CachedValue* v, size_t n, uint32_t identity_gen
     if (identity_generation == 0 || identity_generation != s_mb_identity_generation.load()) return;
     if (!s_mb_have_bucket) {
         const size_t completed = logic::history_completed_samples(bucket);
-        for (auto& ring : P().mb_ring) ring.reset_with_gaps(completed);
-        s_persist_dirty = true;
+        reset_mb_rings_gaps_locked(bucket);
         if (completed) {
             s_mb_last_commit_us = static_cast<int64_t>(bucket) * logic::HISTORY_DT_S * 1000000;
             s_mb_last_commit_bucket = static_cast<int64_t>(bucket) - 1;
@@ -1826,11 +1995,9 @@ void history_record_modbus(const CachedValue* v, size_t n, uint32_t identity_gen
     s_mb_bucket = bucket;
     s_mb_have_bucket = true;
     if (s_mb_reset_requested.exchange(false)) {
-        const size_t completed = logic::history_completed_samples(bucket);
-        for (auto& ring : P().mb_ring) ring.reset_with_gaps(completed);
+        reset_mb_rings_gaps_locked(bucket);
         P().mb_target_fp = s_mb_target_fp.load();
         P().residual_us[static_cast<size_t>(logic::HistoryJournalSource::Modbus)] = 0;
-        s_persist_dirty = true;
     }
     for (size_t t = 0; t < HOMEHUB_HISTORY_COUNT; t++) {
         if (homehub_event_ring(t)) P().mb_ring[t].fold_binary_event(sample[t]);
@@ -1892,7 +2059,7 @@ void history_record_env3(bool valid, float temperature_c, float humidity_pct, fl
 // again; a bucket commit between the copy and the getter shifted sample zero by one bucket under a
 // t0/b0 that still described the old ring. Every caller below holds s_mtx, copies the samples and
 // fills `meta` before releasing it, and nothing in here allocates.
-static void clear_snapshot_meta(logic::HistoryMeta* meta) {
+static void clear_snapshot_meta(logic::HistoryMeta* meta) noexcept {
     if (!meta) return;
     meta->newest_age_s     = -1;
     meta->oldest_bucket    = logic::HISTORY_NO_BUCKET;
@@ -1900,7 +2067,7 @@ static void clear_snapshot_meta(logic::HistoryMeta* meta) {
 }
 
 static void fill_snapshot_meta_locked(logic::HistoryMeta* meta, int64_t last_commit_us,
-                                      int64_t last_commit_bucket, size_t n) {
+                                      int64_t last_commit_bucket, size_t n) noexcept {
     if (!meta || last_commit_us == kNoCommitUs) return;
     meta->newest_commit_us = logic::history_raster_boundary_us(last_commit_us);
     meta->newest_age_s =
@@ -1968,7 +2135,7 @@ size_t history_room_snapshot(HistorySample* out, size_t max, uint32_t expected_i
 
 // Copied out under the lock rather than returning the pointer: the poll task rewrites these buffers
 // on a model change, and a caller holding the pointer would read one mid-write.
-static size_t copy_under_lock(const char* src, char* out, size_t max) {
+static size_t copy_under_lock(const char* src, char* out, size_t max) noexcept {
     std::strncpy(out, src, max - 1);
     out[max - 1] = '\0';
     return std::strlen(out);
@@ -1984,11 +2151,13 @@ namespace {
 // Replace a ring's committed contents, keeping the bucket currently being folded. `pending` is not
 // part of the splice: it belongs to a bucket that has not closed, and the older snapshot has nothing
 // to say about it.
-void ring_replace_locked(logic::TrendRing& r, const HistorySample* v, size_t n) {
-    const HistorySample pending = r.pending;
+[[gnu::noinline]] void ring_replace_locked(logic::TrendRingView r, const HistorySample* v,
+                                           size_t n) noexcept {
+    if (!r) return;
+    const HistorySample pending = *r.pending;
     r.reset();
     for (size_t i = 0; i < n; i++) r.push(v[i]);
-    r.pending = pending;
+    *r.pending = pending;
 }
 
 // Give a source that has not closed a bucket in this boot an honest present-day endpoint. The
@@ -2072,14 +2241,14 @@ bool seed_source_timeline_locked(HistorySource src, int64_t stored_anchor, int64
 
 bool splice_locked(HistorySource src, size_t idx, const HistorySample* v, size_t n, uint32_t stride,
                    int64_t newest_bucket) {
-    logic::TrendRing* r = ring_at(src, idx);
+    logic::TrendRingView r = ring_at(src, idx);
     if (!r || !v || !n || newest_bucket == INT64_MIN) return false;
 
     int64_t live_anchor = source_anchor_bucket_locked(src);
     if (live_anchor == INT64_MIN && !seed_source_timeline_locked(src, newest_bucket, live_anchor))
         return false;
     auto* const  scratch = reinterpret_cast<FlashTrendRestoreScratch*>(s_flash_sector);
-    const size_t live_n  = r->snapshot(scratch->splice_live, HISTORY_SAMPLES);
+    const size_t live_n  = r.snapshot(scratch->splice_live, HISTORY_SAMPLES);
 
     logic::HistorySnapshotView view;
     view.v             = v;
@@ -2089,7 +2258,7 @@ bool splice_locked(HistorySource src, size_t idx, const HistorySample* v, size_t
     const size_t len   = logic::history_splice(view, scratch->splice_live, live_n, live_anchor,
                                                scratch->splice_out, HISTORY_SAMPLES);
     if (len <= live_n) return false; // nothing older survived the window — not an error
-    ring_replace_locked(*r, scratch->splice_out, len);
+    ring_replace_locked(r, scratch->splice_out, len);
     if (src == HistorySource::Room)
         room_seal_locked();
     else
@@ -2128,24 +2297,22 @@ static bool history_splice_snapshot(HistorySource src, size_t idx, const logic::
     return ok;
 }
 
-size_t history_label(size_t t, char* out, size_t max) {
+static size_t history_trend_field(size_t t, char* out, size_t max, bool want_unit) noexcept {
     if (!out || !max) return 0;
     out[0] = '\0';
     if (t >= TREND_COUNT || !s_mtx) return 0;
     Lock lk(s_mtx);
     if (!lk.acquired() || (s_reset_requested.load() && !independent_trend(logic::TRENDS[t])) ||
         (s_circulation_reset_requested.load() && circulation_trend(logic::TRENDS[t]))) return 0;
-    return copy_under_lock(P().ring[t].label, out, max);
+    return copy_under_lock(want_unit ? P().ring[t].unit : P().ring[t].label, out, max);
+}
+
+size_t history_label(size_t t, char* out, size_t max) {
+    return history_trend_field(t, out, max, false);
 }
 
 size_t history_unit(size_t t, char* out, size_t max) {
-    if (!out || !max) return 0;
-    out[0] = '\0';
-    if (t >= TREND_COUNT || !s_mtx) return 0;
-    Lock lk(s_mtx);
-    if (!lk.acquired() || (s_reset_requested.load() && !independent_trend(logic::TRENDS[t])) ||
-        (s_circulation_reset_requested.load() && circulation_trend(logic::TRENDS[t]))) return 0;
-    return copy_under_lock(P().ring[t].unit, out, max);
+    return history_trend_field(t, out, max, true);
 }
 
 // ── History flash journal: scan, restore, append ─────────────────────────────────────────────────
@@ -2214,7 +2381,7 @@ bool flash_manifest_cache_add(const FlashJournalRecord& r) {
     out.schema_fp = logic::history_journal_schema_fingerprint(h);
     out.sequence = h.sequence;
     out.bucket = h.bucket;
-    for (auto& index : out.stored_index) index = -1;
+    std::memset(out.stored_index, 0xff, sizeof(out.stored_index));
     const auto source = static_cast<logic::HistoryJournalSource>(h.source);
     const size_t current_count = logic::history_journal_source_rings(source);
     for (size_t current = 0; current < current_count; ++current) {
@@ -2274,16 +2441,20 @@ bool flash_record_physically_valid(const FlashJournalRecord& r) {
         logic::history_journal_crc_bytes(h, r.payload, payload_bytes);
 }
 
-bool flash_x10a_cycling_owned(const logic::HistoryJournalHeader& h) {
+inline bool flash_checkup_schema_matches(const logic::HistoryJournalHeader& h, uint32_t a,
+                                         uint32_t b) noexcept {
     return h.source == static_cast<uint8_t>(logic::HistoryJournalSource::Checkup) &&
-           (h.catalog_fp == logic::CYCLING_TRACE_SCHEMA ||
-            h.catalog_fp == logic::CYCLING_TRACE_BARRIER_SCHEMA);
+           (h.catalog_fp == a || h.catalog_fp == b);
+}
+
+bool flash_x10a_cycling_owned(const logic::HistoryJournalHeader& h) {
+    return flash_checkup_schema_matches(h, logic::CYCLING_TRACE_SCHEMA,
+                                        logic::CYCLING_TRACE_BARRIER_SCHEMA);
 }
 
 bool flash_modbus_cycling_owned(const logic::HistoryJournalHeader& h) {
-    return h.source == static_cast<uint8_t>(logic::HistoryJournalSource::Checkup) &&
-           (h.catalog_fp == logic::CYCLING_MODBUS_TRACE_SCHEMA ||
-            h.catalog_fp == logic::CYCLING_MODBUS_TRACE_BARRIER_SCHEMA);
+    return flash_checkup_schema_matches(h, logic::CYCLING_MODBUS_TRACE_SCHEMA,
+                                        logic::CYCLING_MODBUS_TRACE_BARRIER_SCHEMA);
 }
 
 bool flash_cycling_owned(const logic::HistoryJournalHeader& h) {
@@ -2291,15 +2462,22 @@ bool flash_cycling_owned(const logic::HistoryJournalHeader& h) {
 }
 
 bool flash_x10a_fault_owned(const logic::HistoryJournalHeader& h) {
-    return h.source == static_cast<uint8_t>(logic::HistoryJournalSource::Checkup) &&
-           (h.catalog_fp == logic::FAULT_TRACE_SCHEMA ||
-            h.catalog_fp == logic::FAULT_TRACE_BARRIER_SCHEMA);
+    return flash_checkup_schema_matches(h, logic::FAULT_TRACE_SCHEMA,
+                                        logic::FAULT_TRACE_BARRIER_SCHEMA);
 }
 
 bool flash_modbus_fault_owned(const logic::HistoryJournalHeader& h) {
-    return h.source == static_cast<uint8_t>(logic::HistoryJournalSource::Checkup) &&
-           (h.catalog_fp == logic::FAULT_MODBUS_TRACE_SCHEMA ||
-            h.catalog_fp == logic::FAULT_MODBUS_TRACE_BARRIER_SCHEMA);
+    return flash_checkup_schema_matches(h, logic::FAULT_MODBUS_TRACE_SCHEMA,
+                                        logic::FAULT_MODBUS_TRACE_BARRIER_SCHEMA);
+}
+
+[[gnu::noinline]] bool flash_note_barrier_fence(const logic::HistoryJournalHeader& h,
+                                                uint32_t barrier_schema, uint64_t& fence) noexcept {
+    if (h.catalog_fp != barrier_schema) return false;
+    if (h.magic == logic::HISTORY_JOURNAL_MAGIC && h.commit == logic::HISTORY_JOURNAL_COMMITTED &&
+        h.sequence > fence)
+        fence = h.sequence;
+    return true;
 }
 
 bool flash_fault_owned(const logic::HistoryJournalHeader& h) {
@@ -2366,6 +2544,17 @@ bool flash_cycling_page_for(const FlashJournalRecord& r, logic::CyclingTracePage
     return logic::cycling_trace_page_valid(r.header, page, is_modbus);
 }
 
+[[gnu::noinline]] void flash_insert_ranked_slot(CyclingFinalPage* pages, size_t count, uint64_t seq,
+                                                uint16_t slot) noexcept {
+    for (size_t i = 0; i < count; ++i) {
+        if (seq < pages[i].sequence) continue;
+        if (seq == pages[i].sequence) return;
+        for (size_t j = count - 1; j > i; --j) pages[j] = pages[j - 1];
+        pages[i] = {seq, slot};
+        return;
+    }
+}
+
 void flash_index_cycling_page(const FlashJournalRecord& r, uint16_t slot) {
     const auto& h         = r.header;
     const bool  is_modbus = flash_modbus_cycling_owned(h);
@@ -2373,25 +2562,12 @@ void flash_index_cycling_page(const FlashJournalRecord& r, uint16_t slot) {
     CyclingFlashStream& cs             = is_modbus ? s_flash_cycling_modbus : s_flash_cycling;
     const uint32_t      barrier_schema = is_modbus ? logic::CYCLING_MODBUS_TRACE_BARRIER_SCHEMA
                                                    : logic::CYCLING_TRACE_BARRIER_SCHEMA;
-    if (h.catalog_fp == barrier_schema) {
-        // A recognizable committed reset with damaged payload cannot establish that older
-        // snapshots remain eligible. Its sequence still withdraws them.
-        if (h.magic == logic::HISTORY_JOURNAL_MAGIC &&
-            h.commit == logic::HISTORY_JOURNAL_COMMITTED && h.sequence > cs.fence)
-            cs.fence = h.sequence;
-        return;
-    }
+    if (flash_note_barrier_fence(h, barrier_schema, cs.fence)) return;
     logic::CyclingTracePageInfo page;
     if (!flash_cycling_page_for(r, page, is_modbus) ||
         page.part + 1u != logic::cycling_trace_part_count(page.count))
         return;
-    for (size_t i = 0; i < kCyclingFinalPages; ++i) {
-        if (h.sequence < cs.finals[i].sequence) continue;
-        if (h.sequence == cs.finals[i].sequence) return;
-        for (size_t j = kCyclingFinalPages - 1; j > i; --j) cs.finals[j] = cs.finals[j - 1];
-        cs.finals[i] = {h.sequence, slot};
-        return;
-    }
+    flash_insert_ranked_slot(cs.finals, kCyclingFinalPages, h.sequence, slot);
 }
 
 bool flash_decode_cycling_group(CyclingFlashStream& cs, const CyclingFinalPage& indexed,
@@ -2451,21 +2627,10 @@ void flash_index_fault_page(const FlashJournalRecord& r, uint16_t slot) {
     FaultFlashStream& cs = is_modbus ? s_flash_fault_modbus : s_flash_fault;
     const uint32_t    barrier_schema =
         is_modbus ? logic::FAULT_MODBUS_TRACE_BARRIER_SCHEMA : logic::FAULT_TRACE_BARRIER_SCHEMA;
-    if (h.catalog_fp == barrier_schema) {
-        if (h.magic == logic::HISTORY_JOURNAL_MAGIC &&
-            h.commit == logic::HISTORY_JOURNAL_COMMITTED && h.sequence > cs.fence)
-            cs.fence = h.sequence;
-        return;
-    }
+    if (flash_note_barrier_fence(h, barrier_schema, cs.fence)) return;
     logic::FaultTracePageInfo page;
     if (!flash_fault_page_for(r, page, is_modbus)) return;
-    for (size_t i = 0; i < kFaultTracePages; ++i) {
-        if (h.sequence < cs.pages[i].sequence) continue;
-        if (h.sequence == cs.pages[i].sequence) return;
-        for (size_t j = kFaultTracePages - 1; j > i; --j) cs.pages[j] = cs.pages[j - 1];
-        cs.pages[i] = {h.sequence, slot};
-        return;
-    }
+    flash_insert_ranked_slot(cs.pages, kFaultTracePages, h.sequence, slot);
 }
 
 bool flash_decode_fault_page(FaultFlashStream& cs, const CyclingFinalPage& indexed,
@@ -2762,6 +2927,28 @@ struct FutureCursorNote {
     int64_t bound  = INT64_MIN; // the newest bucket its clock vouches for
 };
 
+[[gnu::noinline]] void init_journal_trend_header(logic::HistoryJournalHeader& h, HistorySource src,
+                                                 uint8_t flags, size_t value_count,
+                                                 int64_t bucket) noexcept {
+    const bool room = src == HistorySource::Room;
+    h.magic         = logic::HISTORY_JOURNAL_MAGIC;
+    h.version       = logic::HISTORY_JOURNAL_VERSION;
+    h.source        = static_cast<uint8_t>(journal_source(src));
+    h.flags         = flags;
+    h.catalog_fp    = room ? logic::HISTORY_ROOM_SCHEMA : P().catalog_fp;
+    h.crc           = 0;
+    h.commit        = logic::HISTORY_JOURNAL_ERASED;
+    h.value_count   = static_cast<uint16_t>(value_count);
+    h.slot_bytes    = static_cast<uint16_t>(logic::HISTORY_JOURNAL_SLOT_BYTES);
+    h.sequence      = s_flash_next_sequence;
+    h.bucket        = bucket;
+    h.dt_s          = logic::HISTORY_DT_S;
+    h.rings[0]      = room ? 1 : static_cast<uint16_t>(TREND_COUNT);
+    h.rings[1]      = room ? 1 : static_cast<uint16_t>(HOMEHUB_HISTORY_COUNT);
+    h.rings[2]      = room ? 1 : static_cast<uint16_t>(ENV3_HISTORY_COUNT);
+    h.reserved      = 0xffff;
+}
+
 // Builds the next trend record of `src`. Returns false when there is nothing to append — or when
 // the cursor is ahead of the source's own live anchor (`note`), which the builder only reports:
 // rewinding it here would assume the CURRENT clock is the right one, and a boot that synchronised
@@ -2810,8 +2997,8 @@ bool flash_build_next_record(HistorySource src, FlashJournalRecord& out, TickTyp
 
     size_t max_count = 0;
     for (size_t i = 0; i < value_count; i++) {
-        const logic::TrendRing* r = ring_at(src, i);
-        if (r && r->count > max_count) max_count = r->count;
+        const uint16_t cnt = ring_count_at(src, i);
+        if (cnt > max_count) max_count = cnt;
     }
     if (!max_count) return false;
 
@@ -2844,26 +3031,12 @@ bool flash_build_next_record(HistorySource src, FlashJournalRecord& out, TickTyp
     if (target > anchor) return false;
     const size_t age = static_cast<size_t>(anchor - target);
 
-    auto& h = out.header;
-    h.magic = logic::HISTORY_JOURNAL_MAGIC;
-    h.version = logic::HISTORY_JOURNAL_VERSION;
-    h.source = static_cast<uint8_t>(journal_source(src));
-    h.flags =
+    const uint8_t flags =
         (src == HistorySource::X10a || src == HistorySource::Modbus || src == HistorySource::Room)
             ? logic::HISTORY_JOURNAL_FLAG_TARGET_SCOPED
             : 0;
-    h.catalog_fp  = src == HistorySource::Room ? logic::HISTORY_ROOM_SCHEMA : P().catalog_fp;
-    h.crc = 0;
-    h.commit = logic::HISTORY_JOURNAL_ERASED;
-    h.value_count = static_cast<uint16_t>(value_count);
-    h.slot_bytes = static_cast<uint16_t>(logic::HISTORY_JOURNAL_SLOT_BYTES);
-    h.sequence = s_flash_next_sequence;
-    h.bucket = target;
-    h.dt_s = logic::HISTORY_DT_S;
-    h.rings[0]    = src == HistorySource::Room ? 1 : static_cast<uint16_t>(TREND_COUNT);
-    h.rings[1]    = src == HistorySource::Room ? 1 : static_cast<uint16_t>(HOMEHUB_HISTORY_COUNT);
-    h.rings[2]    = src == HistorySource::Room ? 1 : static_cast<uint16_t>(ENV3_HISTORY_COUNT);
-    h.reserved = 0xffff;
+    auto& h = out.header;
+    init_journal_trend_header(h, src, flags, value_count, target);
     if (src == HistorySource::X10a) {
         logic::history_journal_set_scope(h, s_x10a_target_fp.load());
         // HIST-01/b: name the witness the circulation COLUMN of this record was recorded under —
@@ -2878,9 +3051,7 @@ bool flash_build_next_record(HistorySource src, FlashJournalRecord& out, TickTyp
         logic::history_journal_set_scope(h, s_room_identity.load());
     }
     for (size_t i = 0; i < value_count; i++) {
-        HistorySample sample = HISTORY_NO_READING;
-        const logic::TrendRing* r = ring_at(src, i);
-        if (r) (void)r->sample_from_newest(age, sample);
+        const HistorySample sample = ring_sample_age_at(src, i, age);
         std::memcpy(out.payload + i * sizeof(sample), &sample, sizeof(sample));
     }
     h.crc = logic::history_journal_crc_bytes(
@@ -2905,22 +3076,8 @@ bool flash_build_manifest_record(HistorySource src, int64_t bucket, FlashJournal
         return false;
 
     auto& h = out.header;
-    h.magic = logic::HISTORY_JOURNAL_MAGIC;
-    h.version = logic::HISTORY_JOURNAL_VERSION;
-    h.source = static_cast<uint8_t>(source);
-    h.flags = logic::HISTORY_JOURNAL_FLAG_CATALOG_MANIFEST;
-    h.catalog_fp = P().catalog_fp;
-    h.crc = 0;
-    h.commit = logic::HISTORY_JOURNAL_ERASED;
-    h.value_count = static_cast<uint16_t>(value_count);
-    h.slot_bytes = static_cast<uint16_t>(logic::HISTORY_JOURNAL_SLOT_BYTES);
-    h.sequence = s_flash_next_sequence;
-    h.bucket = bucket;
-    h.dt_s = logic::HISTORY_DT_S;
-    h.rings[0] = static_cast<uint16_t>(TREND_COUNT);
-    h.rings[1] = static_cast<uint16_t>(HOMEHUB_HISTORY_COUNT);
-    h.rings[2] = static_cast<uint16_t>(ENV3_HISTORY_COUNT);
-    h.reserved = 0xffff;
+    init_journal_trend_header(h, src, logic::HISTORY_JOURNAL_FLAG_CATALOG_MANIFEST, value_count,
+                              bucket);
     logic::history_journal_set_schema_fingerprint(
         h, logic::history_series_list_fingerprint(source, ids, value_count));
     h.crc = logic::history_journal_crc_bytes(

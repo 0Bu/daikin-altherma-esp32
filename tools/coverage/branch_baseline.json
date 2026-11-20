@@ -2146,6 +2146,24 @@
       },
       "test_source_sha256": "ec62280cb41722bac04d8c64bf70e1f719ff4cff3e454a2151933f65df7c4005",
       "validation_boundary": "Host and container compilers exercised synthetic inputs. Hardware and UI behavior remain separate evidence."
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple Clang 17, arm64",
+        "gcc-13-linux-ubuntu24": "Ubuntu GCC 13.3, pinned ESP-IDF v6.1 Docker, aarch64",
+        "gcc-15-github-linux-ubuntu26": "Ubuntu GCC 15.2, Docker, x86-64",
+        "gcc-15-linux-ubuntu26": "Ubuntu GCC 15.2, Docker, aarch64"
+      },
+      "hosted_confirmation": "Measured locally across Clang 17 arm64, GCC 13 ESP-IDF v6.1 Docker, and Ubuntu 26.04 GCC 15 x86-64 Docker; hosted CI confirmation remains separate.",
+      "runner": "scripts/run-mock-tests.sh --coverage on Darwin, ESP-IDF Docker, and Ubuntu 26.04 Coverage Docker",
+      "scope": "Packed categorical 24h rings (Int16/State8/Bit2), HomeHub Modbus expansion (17->35 rings, base_only offsets 9 and 57, homehub_ring_offset), and X10A timelines (34->41 rings, TrendKind::EnumState, 3-state fold_binary_event). main/logic/history.hpp rises from 347/356 to 443/452 (Clang 17), 420/426 to 532/536 (GCC 13), and 418/424 to 530/534 (GCC 15), while main/logic/homehub_map.hpp stays at 100% (70/70 Clang 17, 82/82 GCC 13 and GCC 15).",
+      "sources": {
+        "main/logic/history.hpp": "408093e28ca192adbbeb16c9646527f7115c3905f1d817f20298eb06c18de235",
+        "main/logic/homehub_map.hpp": "9d028881dc0f29bd0662c3d2cbb5695e8783947f51b310bd49ee6b7f556cb5b7",
+        "main/logic/modbus.hpp": "ead59ba341c89049050814f5a12bdc8e14838a155c2c7a48c151b1a61a619a9a"
+      },
+      "test_source_sha256": "c0e004a6d6c8d2e3291b26ae525b4cc9899aef3d7ab2e1ca6acb760d6272d50a",
+      "validation_boundary": "Host and container compilers exercised synthetic inputs. Hardware and UI behavior remain separate evidence."
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
@@ -2320,8 +2338,8 @@
         "taken": 14
       },
       "main/logic/history.hpp": {
-        "outcomes": 356,
-        "taken": 347
+        "outcomes": 452,
+        "taken": 443
       },
       "main/logic/history_persist.hpp": {
         "outcomes": 533,
@@ -2778,16 +2796,16 @@
         "taken": 16
       },
       "main/logic/history.hpp": {
-        "outcomes": 426,
-        "taken": 420
+        "outcomes": 536,
+        "taken": 532
       },
       "main/logic/history_persist.hpp": {
         "outcomes": 622,
         "taken": 561
       },
       "main/logic/homehub_map.hpp": {
-        "outcomes": 78,
-        "taken": 78
+        "outcomes": 82,
+        "taken": 82
       },
       "main/logic/hp_probe.hpp": {
         "outcomes": 151,
@@ -3236,16 +3254,16 @@
         "taken": 16
       },
       "main/logic/history.hpp": {
-        "outcomes": 424,
-        "taken": 418
+        "outcomes": 534,
+        "taken": 530
       },
       "main/logic/history_persist.hpp": {
         "outcomes": 620,
         "taken": 559
       },
       "main/logic/homehub_map.hpp": {
-        "outcomes": 78,
-        "taken": 78
+        "outcomes": 82,
+        "taken": 82
       },
       "main/logic/hp_probe.hpp": {
         "outcomes": 151,
@@ -3694,16 +3712,16 @@
         "taken": 16
       },
       "main/logic/history.hpp": {
-        "outcomes": 424,
-        "taken": 418
+        "outcomes": 534,
+        "taken": 530
       },
       "main/logic/history_persist.hpp": {
         "outcomes": 620,
         "taken": 559
       },
       "main/logic/homehub_map.hpp": {
-        "outcomes": 78,
-        "taken": 78
+        "outcomes": 82,
+        "taken": 82
       },
       "main/logic/hp_probe.hpp": {
         "outcomes": 151,

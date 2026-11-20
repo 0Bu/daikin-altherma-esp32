@@ -231,7 +231,7 @@ inline bool mb_reg_at(const MbResponse& r, int index, uint16_t& out_val) {
 }
 
 // ── Value codecs ────────────────────────────────────────────────────────────────────────────────
-enum class MbType { Int16, Temp16, Pow16, Text16 };
+enum class MbType : uint8_t { Int16, Temp16, Pow16, Text16 };
 
 struct MbValue {
     bool   ok      = false;   // a real value is present

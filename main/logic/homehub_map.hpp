@@ -53,8 +53,10 @@ struct HomeHubConcept {
 //                       ESTIMATES it from CT clamps at an assumed 230 V. Deliberately unpaired —
 //                       pairing a measurement with an estimate would hide which one is which.
 //   1/2/6/7/10/57/58, 3, 4, 21/22/23 — setpoints, other modes and faults. No paired measurement
-//                       concept exists for them. Offsets 9 and 37 are exact state pairs below;
-//                       offset 56 is the unpaired Smart-Grid state-timeline exception.
+//                       concept exists for them (though setpoints, offsets, power limits and active
+//                       operation states have independent Modbus histories below). Offsets 9 and 37
+//                       are exact state pairs below; offset 56 is the unpaired Smart-Grid
+//                       state-timeline exception.
 inline constexpr HomeHubConcept HOMEHUB_CONCEPTS[] = {
     { 40, "leaving_water" },   // LWT PHE     ↔ 0x61/2  pre-BUH heat-exchanger outlet
     { 41, "leaving_water_post_buh" }, // LWT BUH ↔ 0x61/4 post-BUH outlet (R2T)
@@ -83,15 +85,21 @@ inline constexpr size_t HOMEHUB_CONCEPT_COUNT =
 struct HomeHubDecode {
     MbFunc      space; // ReadInput (FC04) or ReadHolding (FC03)
     MbType      type;  // logic/modbus.hpp codec
-    int         scale; // divisor applied after the codec (Int16 flow is L/min x100 -> 100)
+    int16_t     scale; // divisor applied after the codec (Int16 flow is L/min x100 -> 100)
     const char* unit;  // display unit ("" = none)
 };
 inline constexpr HomeHubDecode HOMEHUB_DECODE_TEMP{MbFunc::ReadInput, MbType::Temp16, 1, "°C"};
 inline constexpr HomeHubDecode HOMEHUB_DECODE_FLAG{MbFunc::ReadInput, MbType::Int16, 1, ""};
 inline constexpr HomeHubDecode HOMEHUB_DECODE_HOLDING{MbFunc::ReadHolding, MbType::Int16, 1, ""};
+inline constexpr HomeHubDecode HOMEHUB_DECODE_HOLDING_TEMP{MbFunc::ReadHolding, MbType::Int16, 1,
+                                                           "°C"};
+inline constexpr HomeHubDecode HOMEHUB_DECODE_HOLDING_OFFSET{MbFunc::ReadHolding, MbType::Int16, 1,
+                                                             "K"};
+inline constexpr HomeHubDecode HOMEHUB_DECODE_HOLDING_POW{MbFunc::ReadHolding, MbType::Pow16, 1,
+                                                          "kW"};
 
-// Histories are a slightly wider contract than source PAIRING. The eight measurements and three exact
-// state flags/selectors above are still paired one-for-one, while Smart-Grid mode is
+// Histories are a slightly wider contract than source PAIRING. The eight measurements and three
+// exact state flags/selectors above are still paired one-for-one, while Smart-Grid mode is
 // assembled from TWO X10A contacts and
 // therefore cannot honestly be attached to either source row as its twin. It can still share one
 // history concept: both sources report the same documented 0..3 enum, and the UI draws their state
@@ -101,15 +109,17 @@ inline constexpr HomeHubDecode HOMEHUB_DECODE_HOLDING{MbFunc::ReadHolding, MbTyp
 // only "Tank preheat". They receive separate ids and charts so correlation remains possible without
 // turning a preparatory phase into false evidence that disinfection itself ran.
 //
-// Keep this explicit rather than accepting any HomeHub number by label or kind. A state/setpoint
-// costs a 576-byte HomeHub ring by being named here; only a real X10A counterpart also appears in
-// TRENDS.
+// Keep this explicit rather than accepting any HomeHub number by label or kind. Each numeric entry
+// costs a 576-byte ring, each enum State8 costs 288 bytes, and each binary Bit2 costs 72 bytes in
+// history.cpp's packed pool; only a real X10A counterpart also appears in TRENDS.
 struct HomeHubHistory {
-    uint16_t    offset;
-    const char* trend_id;
-    bool        event = false;      // retain any observed ON within the open five-minute bucket
-    bool        has_x10a = true;    // id must exist in TRENDS and may be overlaid as a second source
-    HomeHubDecode decode; // see HomeHubDecode — part of the series identity, no default
+    uint16_t      offset;
+    const char*   trend_id;
+    bool          event    = false; // retain any observed ON within the open five-minute bucket
+    bool          has_x10a = true; // id must exist in TRENDS and may be overlaid as a second source
+    HomeHubDecode decode;          // see HomeHubDecode — part of the series identity, no default
+    bool base_only = false; // EKRHH-only history (9, 57) absent/unhistoried on native Altherma 4
+    HistoryRingEncoding encoding = HistoryRingEncoding::Int16;
 };
 inline constexpr HomeHubHistory HOMEHUB_HISTORIES[] = {
     {40, "leaving_water", false, true, HOMEHUB_DECODE_TEMP},
@@ -120,18 +130,53 @@ inline constexpr HomeHubHistory HOMEHUB_HISTORIES[] = {
     {45, "refrigerant_liquid", false, true, HOMEHUB_DECODE_TEMP},
     {49, "flow", false, true, {MbFunc::ReadInput, MbType::Int16, 100, "L/min"}},
     {50, "room_temp", false, true, HOMEHUB_DECODE_TEMP},
-    {32, "bsh_state", true, true, HOMEHUB_DECODE_FLAG},
-    {37, "valve_dhw", false, true, HOMEHUB_DECODE_FLAG},
-    {9, "quiet_state", false, true, HOMEHUB_DECODE_HOLDING},
-    {56, "smart_grid_mode", false, true, HOMEHUB_DECODE_HOLDING},
-    {33, "disinfection_state", true, false, HOMEHUB_DECODE_FLAG},
-    {31, "compressor_state", true, false, HOMEHUB_DECODE_FLAG},
+    {32, "bsh_state", true, true, HOMEHUB_DECODE_FLAG, false, HistoryRingEncoding::Bit2},
+    {37, "valve_dhw", false, true, HOMEHUB_DECODE_FLAG, false, HistoryRingEncoding::Bit2},
+    {9, "quiet_state", false, true, HOMEHUB_DECODE_HOLDING, true, HistoryRingEncoding::Bit2},
+    {56, "smart_grid_mode", false, true, HOMEHUB_DECODE_HOLDING, false,
+     HistoryRingEncoding::State8},
+    {33, "disinfection_state", true, false, HOMEHUB_DECODE_FLAG, false, HistoryRingEncoding::Bit2},
+    {31, "compressor_state", true, false, HOMEHUB_DECODE_FLAG, false, HistoryRingEncoding::Bit2},
     {51, "modbus_power", false, false, {MbFunc::ReadInput, MbType::Pow16, 1, "kW"}},
-    {35, "modbus_defrost_state", true, false, HOMEHUB_DECODE_FLAG},
-    {30, "pump_state", false, false, HOMEHUB_DECODE_FLAG},
+    {35, "modbus_defrost_state", true, false, HOMEHUB_DECODE_FLAG, false,
+     HistoryRingEncoding::Bit2},
+    {30, "pump_state", false, false, HOMEHUB_DECODE_FLAG, false, HistoryRingEncoding::Bit2},
+    {36, "modbus_hot_start_state", true, false, HOMEHUB_DECODE_FLAG, false,
+     HistoryRingEncoding::Bit2},
+    {52, "modbus_dhw_state", false, false, HOMEHUB_DECODE_FLAG, false, HistoryRingEncoding::Bit2},
+    {53, "modbus_space_state", false, false, HOMEHUB_DECODE_FLAG, false, HistoryRingEncoding::Bit2},
+    {1, "modbus_lwt_heat_setpoint", false, false, HOMEHUB_DECODE_HOLDING_TEMP},
+    {2, "modbus_lwt_cool_setpoint", false, false, HOMEHUB_DECODE_HOLDING_TEMP},
+    {6, "modbus_room_heat_setpoint", false, false, HOMEHUB_DECODE_HOLDING_TEMP},
+    {7, "modbus_room_cool_setpoint", false, false, HOMEHUB_DECODE_HOLDING_TEMP},
+    {10, "modbus_dhw_setpoint", false, false, HOMEHUB_DECODE_HOLDING_TEMP},
+    {13, "modbus_dhw_booster_state", true, false, HOMEHUB_DECODE_HOLDING, false,
+     HistoryRingEncoding::Bit2},
+    {54, "modbus_lwt_heat_offset", false, false, HOMEHUB_DECODE_HOLDING_OFFSET},
+    {55, "modbus_lwt_cool_offset", false, false, HOMEHUB_DECODE_HOLDING_OFFSET},
+    {57, "modbus_buffering_power_limit", false, false, HOMEHUB_DECODE_HOLDING_POW, true},
+    {58, "modbus_general_power_limit", false, false, HOMEHUB_DECODE_HOLDING_POW},
+    {38, "modbus_current_op_mode", false, false, HOMEHUB_DECODE_FLAG, false,
+     HistoryRingEncoding::State8},
+    {3, "modbus_op_mode", false, false, HOMEHUB_DECODE_HOLDING, false, HistoryRingEncoding::State8},
+    {4, "modbus_space_enable_state", false, false, HOMEHUB_DECODE_HOLDING, false,
+     HistoryRingEncoding::Bit2},
+    {12, "modbus_dhw_reheat_state", false, false, HOMEHUB_DECODE_HOLDING, false,
+     HistoryRingEncoding::Bit2},
+    {21, "modbus_abnormality_state", true, false, HOMEHUB_DECODE_FLAG, false,
+     HistoryRingEncoding::State8},
 };
 inline constexpr size_t HOMEHUB_HISTORY_COUNT =
     sizeof(HOMEHUB_HISTORIES) / sizeof(HOMEHUB_HISTORIES[0]);
+
+constexpr size_t homehub_ring_offset(size_t idx) {
+    size_t off = 0;
+    for (size_t i = 0; i < idx && i < HOMEHUB_HISTORY_COUNT; ++i)
+        off += history_ring_storage_bytes(HOMEHUB_HISTORIES[i].encoding);
+    return off;
+}
+inline constexpr size_t HOMEHUB_POOL_BYTES = homehub_ring_offset(HOMEHUB_HISTORY_COUNT);
+static_assert(HOMEHUB_POOL_BYTES == 12456, "HomeHub packed history pool should cost 12456 bytes");
 
 // Does a register table (def::HOMEHUB_REGS or def::ALTHERMA4_REGS — either feeds these histories,
 // depending on the detected gateway) decode every history register exactly as the columns above
@@ -140,8 +185,8 @@ inline constexpr size_t HOMEHUB_HISTORY_COUNT =
 template <typename Reg>
 constexpr bool homehub_history_row_matches(const HomeHubHistory& h, const Reg& r,
                                            bool quiet_activity = true) {
-    return !(h.offset == 9 && !quiet_activity) && r.offset == h.offset &&
-           r.space == h.decode.space && r.type == h.decode.type && r.scale == h.decode.scale &&
+    return !(h.base_only && !quiet_activity) && r.offset == h.offset && r.space == h.decode.space &&
+           r.type == h.decode.type && r.scale == h.decode.scale &&
            trend_cstr_eq(r.unit, h.decode.unit);
 }
 
@@ -149,7 +194,7 @@ template <typename Reg>
 constexpr bool homehub_history_decode_matches(const Reg* regs, int count,
                                               bool quiet_activity = true) {
     for (const auto& h : HOMEHUB_HISTORIES) {
-        if (h.offset == 9 && !quiet_activity) continue;
+        if (h.base_only && !quiet_activity) continue;
         const Reg* r = nullptr;
         for (int i = 0; i < count; i++)
             if (regs[i].offset == h.offset) {
@@ -180,21 +225,21 @@ inline constexpr int homehub_history_index(const char* trend_id) {
 // History id carried by a HomeHub value row. Unlike `homehub_concept_for`, this includes honest
 // Modbus-only timelines and therefore must never be used to pair or substitute an X10A value.
 inline const char* homehub_history_for(uint16_t offset, bool quiet_activity = true) {
-    if (offset == 9 && !quiet_activity) return nullptr;
     for (const auto& h : HOMEHUB_HISTORIES)
-        if (h.offset == offset) return h.trend_id;
+        if (h.offset == offset) return (h.base_only && !quiet_activity) ? nullptr : h.trend_id;
     return nullptr;
 }
 
-// ── OTHER STATES: live pairings that do not need their own history ─────────────────────────────
-// BSH, the 3-way valve and Quiet belong above because they are trended. The remaining plant states — pump
-// running and space heating/cooling operation — are paired live without spending another history
-// ring: both sources report them plainly, and a reader looking at a state is owed the gateway's
-// answer too.
+// ── OTHER STATES: live pairings whose Modbus history stays separate ────────────────────────────
+// BSH, the 3-way valve and Quiet belong above because their timelines pair with X10A. The remaining
+// paired plant states — pump running (`pump_state`) and space heating/cooling operation
+// (`modbus_space_state`) — keep independent Modbus-only history rings while pairing live here:
+// both sources report them plainly, and a reader looking at a state is owed the gateway's answer
+// too without merging the two instruments' histories.
 //
 // They need their own table because they need a WIDER KEY. `3way valve`, `2way valve`, `BSH`,
-// `BUH Step1`, `BUH Step2` and `Water pump operation` all live in ONE dimensionless byte — 0x60/12 —
-// and differ ONLY in which bit their converter masks. The key here is therefore (reg, offset,
+// `BUH Step1`, `BUH Step2` and `Water pump operation` all live in ONE dimensionless byte — 0x60/12
+// — and differ ONLY in which bit their converter masks. The key here is therefore (reg, offset,
 // CONVERTER), the same discriminator the BSH BinaryEvent trend and logic/checkup.hpp use.
 //
 // Measured over the detectable shipped catalog, each locator below appears on 39 profiles and no
@@ -248,10 +293,10 @@ inline const char* homehub_concept_for(uint16_t offset, bool quiet_activity = tr
 // profile (trend_select_high_side), and one row alone cannot say. It has no HomeHub counterpart
 // either.
 inline const char* x10a_concept_for(unsigned reg, unsigned off, const char* unit, int conv) {
-    for (const auto& d : TRENDS)
-        if (!d.high_side && trend_row_matches(d, reg, off, unit, conv)) return d.id;
     for (const auto& s : HOMEHUB_STATES)
         if (s.reg == reg && s.off == off && s.conv == static_cast<unsigned>(conv)) return s.concept_id;
+    for (const auto& d : TRENDS)
+        if (!d.high_side && trend_row_matches(d, reg, off, unit, conv)) return d.id;
     return nullptr;
 }
 
