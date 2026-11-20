@@ -387,16 +387,22 @@ booster-heater run (HomeHub input `32` ↔ X10A BSH converter `305`), 3-way-valv
 Live-only pairings without shared history rings add circulation pump running (`30` ↔ X10A `0x60/12`,
 converter `301`, concept `pump_running`), space heating/cooling normal operation (`53` ↔ X10A
 `0x62/2`, converter `303`, concept `space_op`), and — on native Altherma 4 — water pressure (`79` ↔
-X10A `0x62/11`, concept `water_pressure`).
-Native Altherma 4 holding 9 reports selection and is excluded from the `quiet_state` pairing and history. The rest carry no scalar `HOMEHUB_CONCEPTS` pairing on
+X10A `0x62/11`, concept `water_pressure`), with `30` (`pump_state`) and `53` (`modbus_space_state`)
+pairing on the chart with X10A `x10a_pump_state` (`0x60/12`, converter `301`) and `x10a_space_state`
+(`0x62/2`, converter `303`) while keeping independent Modbus rings rather than merging into X10A series.
+Native Altherma 4 holding 9 reports selection and is excluded from the `quiet_state` pairing and history; EKRHH-only holding `57` is likewise omitted on Altherma 4. The rest carry no scalar `HOMEHUB_CONCEPTS` pairing on
 purpose, each for a stated reason: the HomeHub power register (`51`) has no single raw X10A scalar row (X10A estimates electrical input from CT clamps or inverter current at 230 V); other setpoints, modes and faults are not readings.
 Disinfection input `33` is likewise deliberately unpaired: X10A `0x62/8` converter `303` is named
 **Tank preheat**, a preparatory state rather than proof that disinfection is active. Together with
-Smart-Grid mode (`56`), HomeHub buffers **17 rings**: the 11 paired measurements/states, Smart-Grid mode,
-`modbus_power` (`51`, which also joins the electrical-input `pel` inspector chart as an independent source-labelled `Modbus` series when X10A `pel` is offered, without merging live scalar rows), and four standalone Modbus timelines (`disinfection_state` `33`, `compressor_state` `31`,
-`modbus_defrost_state` `35` combined defrost/restart flag, and `pump_state` `30`),
+Smart-Grid mode (`56`), HomeHub buffers **35 rings** (all 35 non-fault-code EKRHH registers): the 11 paired measurements/states, Smart-Grid mode,
+`modbus_power` (`51`, which also joins the electrical-input `pel` inspector chart as an independent source-labelled `Modbus` series when X10A `pel` is offered, without merging live scalar rows), thirteen standalone or chart-paired Modbus state/mode/binary timelines (`disinfection_state` `33`, `compressor_state` `31`,
+`modbus_defrost_state` `35` combined defrost/restart flag, `pump_state` `30`, `modbus_hot_start_state` `36`,
+`modbus_dhw_state` `52`, `modbus_space_state` `53`, `modbus_dhw_booster_state` `13`, `modbus_current_op_mode` `38`,
+`modbus_op_mode` `3`, `modbus_space_enable_state` `4`, `modbus_dhw_reheat_state` `12`, and event-folded
+`modbus_abnormality_state` `21`), and nine
+numeric read-back setpoint/offset/power-limit curves (`1`, `2`, `6`, `7`, `10`, `54`, `55`, EKRHH-only `57`, and `58`),
 following the same rule as independent HomeHub histories rather than splicing into X10A `comp_rps`,
-`defrost_state`, or `pump_signal` rings.
+`defrost_state`, `ou_op_mode`, or `pump_signal` rings. Raw/ASCII fault-code registers (`22`–`23`) and Altherma-4-only registers (`65`–`83`) are not buffered.
 
 ## Where the readings go
 

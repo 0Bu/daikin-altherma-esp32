@@ -115,6 +115,10 @@ const labels = {
   "hist.now": "jetzt", "hist.nm": "nicht gemessen", "hist.held": "Außeneinheit ruht",
   "hist.retained": "Letzter empfangener Messwert",
   "state.on": "An", "state.off": "Aus",
+  "enum.none": "Keine", "enum.heating": "Heizen", "enum.cooling": "Kühlen", "enum.auto": "Auto",
+  "enum.no_error": "Kein Fehler", "enum.warning": "Warnung", "enum.fault": "Fehler",
+  "mode.stop": "Stopp", "mode.heat": "Heizen", "mode.cool": "Kühlen",
+  "mode.dhw": "Warmwasser", "mode.heat_dhw": "Heizen + Warmwasser", "mode.cool_dhw": "Kühlen + Warmwasser",
 };
 const context = {
   S, LANG: "de", renderApp() {}, renderCards() {}, renderInspect() {}, renderSettings() {},
@@ -225,7 +229,7 @@ vm.createContext(context);
 const lifecycleSource = appState.slice(appState.indexOf("// ── History source lifecycle"),
   appState.indexOf("// ── Navigation (dashboard ⇄ Settings)"));
 vm.runInContext(lifecycleSource + readAppFragments(["history.js"]) +
-  "\nthis.__api = { hasHist, hasModbusHist, hasRoomHist, histCacheKey, historyView, histHtml, env3HistHtml, scrubText, histReadout, histVisibleSeries," +
+  "\nthis.__api = { t, hasHist, hasModbusHist, hasRoomHist, histCacheKey, historyView, histHtml, env3HistHtml, scrubText, histReadout, histVisibleSeries," +
   " histTipsHtml, scrubMove, scrubIndex, histPinToggle, histPinIndex, expireLiveHistoryPins, expiredHistSlots, readHistoryJson, histViewRevision, histSeriesToggle, ensureHist, ensureHistPair, ensureDerived, DERIVED, syncHistSources, invalidateHistSources };", context,
   { filename: "main/www/js/history.js" });
 const h = context.__api;
@@ -1977,6 +1981,194 @@ try {
   assert.deepEqual(Array.from(copView.series, s => s.source), ["x10a"]);
   assert.deepEqual(Array.from(copView.series[0].held, r => Array.from(r)), [[0, 1]],
     "X10A cop preserves compressor-idle held-over pauses");
+  const copHtml = h.histHtml("cop", "", "COP");
+  assert.equal((copHtml.match(/data-hist="cop"/g) || []).length, 1);
+
+  // Added Modbus numeric setpoints/offsets/power limits and categorical active-state timelines.
+  S.status.history.modbus_rows = [
+    ...S.status.history.modbus_rows,
+    ...["modbus_lwt_heat_setpoint", "modbus_lwt_heat_offset", "modbus_general_power_limit",
+      "modbus_dhw_state", "modbus_space_state", "modbus_hot_start_state", "modbus_dhw_booster_state"]
+      .map((id) => ({ id, label: id })),
+  ];
+  h.syncHistSources();
+  S.hist.set(h.histCacheKey("modbus_lwt_heat_setpoint", "modbus"),
+    { at: Date.now(), gen: 1, dt: 300, unit: "°C", b0: 10, held: [], v: [350, 360, 350] });
+  S.hist.set(h.histCacheKey("modbus_lwt_heat_offset", "modbus"),
+    { at: Date.now(), gen: 1, dt: 300, unit: "K", b0: 10, held: [], v: [-20, 0, 20] });
+  S.hist.set(h.histCacheKey("modbus_general_power_limit", "modbus"),
+    { at: Date.now(), gen: 1, dt: 300, unit: "kW", b0: 10, held: [], v: [60, 45, 60] });
+  for (const id of ["modbus_dhw_state", "modbus_space_state", "modbus_hot_start_state", "modbus_dhw_booster_state"]) {
+    S.hist.set(h.histCacheKey(id, "modbus"),
+      { at: Date.now(), gen: 1, dt: 300, unit: "", b0: 10, held: [], v: [0, 10, 0] });
+  }
+  S._modbus = [
+    { off: 52, history: "modbus_dhw_state", binary: true, value: 1 },
+    { off: 53, history: "modbus_space_state", binary: true, value: 0 },
+    { off: 36, history: "modbus_hot_start_state", binary: true, value: 1 },
+    { off: 13, history: "modbus_dhw_booster_state", binary: true, value: 0 },
+  ];
+  const spHtml = h.histHtml("modbus_lwt_heat_setpoint", "°C", "Heiz-Vorlaufsollwert der Hauptzone");
+  assert.match(spHtml, /data-source="modbus"/);
+  assert.match(spHtml, /35,0 – 36,0 °C/);
+  const offHtml = h.histHtml("modbus_lwt_heat_offset", "K", "Vorlaufkorrektur der Haupt-Heizzone");
+  assert.match(offHtml, /data-source="modbus"/);
+  assert.match(offHtml, /-2,0 – 2,0 K/);
+  assert.match(h.histHtml("modbus_general_power_limit", "kW", "Allgemeine Leistungsgrenze"),
+    /data-source="modbus"/);
+  for (const [id, title, cls, liveOn] of [
+    ["modbus_dhw_state", "Warmwasserbetrieb", "valve-dhw", true],
+    ["modbus_space_state", "Raumheiz- oder Kühlbetrieb", "comp-on", false],
+    ["modbus_hot_start_state", "Warmstart", "heater-on", true],
+    ["modbus_dhw_booster_state", "Warmwasser-Booster-Modus", "heater-on", false],
+  ]) {
+    const stateHtml = h.histHtml(id, "", title);
+    assert.match(stateHtml, /vhist-state-track modbus/, `${id} renders Modbus track`);
+    assert.match(stateHtml, new RegExp(`class="vhist-state-on ${cls}"`), `${id} uses ${cls}`);
+    assert.match(stateHtml, /vhist-state-current/, `${id} appends live cap from S._modbus`);
+    assert.match(stateHtml, new RegExp(`${h.t("state.on")} · 5 min`), `${id} formats default ON duration`);
+    assert.match(stateHtml, new RegExp(`aria-label="${title} \\(${h.t("state.on")} · 5 min\\) — 24-Stunden-Verlauf"`),
+      `${id} formats localized aria-label`);
+    const v = h.historyView(id);
+    assert.equal(v.series[0].v.at(-1), liveOn ? 10 : 0, `${id} live cap reflects S._modbus`);
+  }
+
+  // Round-2: 3-way valve enum live-cap fix + Modbus mode/binary/abnormality timelines + paired X10A timelines.
+  {
+    const prevRows = S.status.history.rows;
+    const prevMbRows = S.status.history.modbus_rows;
+    const prevValues = S._values;
+    const prevHp = S.status.hp;
+    const prevMb = { ...S.status.modbus };
+
+    // 1. Enum-backed three_way_valve live cap on valve_dhw must read raw value 0/1 as 0/10, not gap.
+    S.status.hp = { connected: false };
+    S.status.history.rows = [];
+    S.status.history.modbus_rows = [
+      ...prevMbRows,
+      { id: "valve_dhw", label: "3-way valve" },
+      { id: "modbus_current_op_mode", label: "Current operation mode" },
+      { id: "modbus_op_mode", label: "Operation mode" },
+      { id: "modbus_space_enable_state", label: "Space heating/cooling ON/OFF" },
+      { id: "modbus_dhw_reheat_state", label: "DHW reheat ON/OFF" },
+      { id: "modbus_abnormality_state", label: "Unit abnormality" },
+    ];
+    h.syncHistSources();
+    S.hist.set(h.histCacheKey("valve_dhw", "modbus"),
+      { at: Date.now(), gen: 1, dt: 300, unit: "", b0: 10, held: [], v: [0, 10, 0] });
+    S._modbus = [{ off: 37, concept: "valve_dhw", enum: "three_way_valve", value: 1 }];
+    const enumValveView = h.historyView("valve_dhw");
+    assert.equal(enumValveView.series[0].v.at(-1), 10,
+      "three_way_valve enum=1 resolves to live cap 10 instead of a hatched missing tail");
+    S._modbus = [{ off: 37, concept: "valve_dhw", enum: "three_way_valve", value: 0 }];
+    assert.equal(h.historyView("valve_dhw").series[0].v.at(-1), 0,
+      "three_way_valve enum=0 resolves to live cap 0");
+
+    // 2. Added Modbus categorical state/enum timelines.
+    S.hist.set(h.histCacheKey("modbus_current_op_mode", "modbus"),
+      { at: Date.now(), gen: 1, dt: 300, unit: "", b0: 10, held: [], v: [10, 20, 10] });
+    S.hist.set(h.histCacheKey("modbus_op_mode", "modbus"),
+      { at: Date.now(), gen: 1, dt: 300, unit: "", b0: 10, held: [], v: [0, 10, 20] });
+    S.hist.set(h.histCacheKey("modbus_space_enable_state", "modbus"),
+      { at: Date.now(), gen: 1, dt: 300, unit: "", b0: 10, held: [], v: [0, 10, 0] });
+    S.hist.set(h.histCacheKey("modbus_dhw_reheat_state", "modbus"),
+      { at: Date.now(), gen: 1, dt: 300, unit: "", b0: 10, held: [], v: [10, 0, 10] });
+    S.hist.set(h.histCacheKey("modbus_abnormality_state", "modbus"),
+      { at: Date.now(), gen: 1, dt: 300, unit: "", b0: 10, held: [], v: [0, 20, 10] });
+    S._modbus = [
+      { off: 38, history: "modbus_current_op_mode", enum: "current_operation_mode", value: 2 },
+      { off: 3, history: "modbus_op_mode", enum: "operation_mode", value: 0 },
+      { off: 4, history: "modbus_space_enable_state", binary: true, value: 1 },
+      { off: 12, history: "modbus_dhw_reheat_state", binary: true, value: 0 },
+      { off: 21, history: "modbus_abnormality_state", enum: "unit_abnormality", value: 2 },
+    ];
+    S.status.modbus.profile = "homehub";
+    const ekCurHtml = h.histHtml("modbus_current_op_mode", "", "Aktueller Heiz- oder Kühlmodus");
+    assert.match(ekCurHtml, /Heizen · 10 min · Kühlen · 5 min/);
+    assert.doesNotMatch(ekCurHtml, />Keine</, "EKRHH hides optional None legend item");
+    assert.equal(h.historyView("modbus_current_op_mode").series[0].v.at(-1), 20);
+    S._modbus[0] = { off: 38, history: "modbus_current_op_mode", enum: "altherma4_current_operation_mode", profile: "altherma4", value: 0 };
+    S.status.modbus.profile = "altherma4";
+    const a4CurHtml = h.histHtml("modbus_current_op_mode", "", "Aktueller Heiz- oder Kühlmodus");
+    assert.match(a4CurHtml, />Keine</, "Altherma 4 shows optional None legend item");
+    assert.equal(h.historyView("modbus_current_op_mode").series[0].v.at(-1), 0);
+    S.status.modbus.profile = "homehub";
+    assert.match(h.histHtml("modbus_op_mode", "", "Betriebsart"), /Auto · 5 min · Heizen · 5 min · Kühlen · 5 min/);
+    assert.equal(h.historyView("modbus_op_mode").series[0].v.at(-1), 0);
+    assert.match(h.histHtml("modbus_space_enable_state", "", "Raumheizung/-kühlung"), new RegExp(`${h.t("state.on")} · 5 min`));
+    assert.equal(h.historyView("modbus_space_enable_state").series[0].v.at(-1), 10);
+    assert.match(h.histHtml("modbus_dhw_reheat_state", "", "Speicher-Nachheizung"), new RegExp(`${h.t("state.on")} · 10 min`));
+    assert.equal(h.historyView("modbus_dhw_reheat_state").series[0].v.at(-1), 0);
+    const abnHtml = h.histHtml("modbus_abnormality_state", "", "Störungszustand");
+    assert.match(abnHtml, /Kein Fehler · 5 min · Warnung · 5 min · Fehler · 5 min/);
+    assert.equal(h.historyView("modbus_abnormality_state").series[0].v.at(-1), 20);
+
+    // 3. Added X10A mode/binary timelines & paired X10A+Modbus pump/space-op lanes (paired Modbus lanes active by default).
+    S.status.hp = { connected: true };
+    S.status.history.rows = [
+      "ou_op_mode", "iu_op_mode", "thermostat_state", "x10a_pump_state",
+      "x10a_space_state", "dhw_reheat_state", "dhw_powerful_state",
+    ].map((id) => ({ id, label: id }));
+    S.status.history.modbus_rows = [
+      ...S.status.history.modbus_rows,
+      { id: "modbus_space_state", label: "Space heating/cooling normal operation" },
+    ];
+    h.syncHistSources();
+    S.hist.set("ou_op_mode", { at: Date.now(), gen: 1, dt: 300, unit: "", b0: 10, held: [], v: [0, 10, 70] });
+    S.hist.set("iu_op_mode", { at: Date.now(), gen: 1, dt: 300, unit: "", b0: 10, held: [], v: [10, 40, 50] });
+    S.hist.set("thermostat_state", { at: Date.now(), gen: 1, dt: 300, unit: "", b0: 10, held: [], v: [0, 10, 10] });
+    S.hist.set("x10a_pump_state", { at: Date.now(), gen: 1, dt: 300, unit: "", b0: 10, held: [], v: [10, 0, 10] });
+    S.hist.set(h.histCacheKey("pump_state", "modbus"),
+      { at: Date.now(), gen: 1, dt: 300, unit: "", b0: 10, held: [], v: [10, 10, 0] });
+    S.hist.set("x10a_space_state", { at: Date.now(), gen: 1, dt: 300, unit: "", b0: 10, held: [], v: [0, 10, 0] });
+    S.hist.set(h.histCacheKey("modbus_space_state", "modbus"),
+      { at: Date.now(), gen: 1, dt: 300, unit: "", b0: 10, held: [], v: [10, 10, 0] });
+    S.hist.set("dhw_reheat_state", { at: Date.now(), gen: 1, dt: 300, unit: "", b0: 10, held: [], v: [0, 10, 0] });
+    S.hist.set("dhw_powerful_state", { at: Date.now(), gen: 1, dt: 300, unit: "", b0: 10, held: [], v: [0, 0, 10] });
+    S._values = [
+      { concept: "ou_op_mode", value: "Cooling", reg: 0x10 },
+      { concept: "iu_op_mode", value: "DHW", reg: 0x60 },
+      { concept: "thermostat_state", binary: true, value: 1, reg: 0x60 },
+      { concept: "pump_running", binary: true, value: 0, reg: 0x60 },
+      { concept: "space_op", binary: true, value: 1, reg: 0x62 },
+      { concept: "dhw_reheat_state", binary: true, value: 1, reg: 0x62 },
+      { concept: "dhw_powerful_state", binary: true, value: 0, reg: 0x62 },
+    ];
+    S._modbus = [
+      { off: 30, concept: "pump_running", history: "pump_state", binary: true, value: 1 },
+      { off: 53, concept: "space_op", history: "modbus_space_state", binary: true, value: 0 },
+    ];
+    const ouHtml = h.histHtml("ou_op_mode", "", "Betriebsart Außeneinheit");
+    assert.match(ouHtml, />Dry</, "optional extra OU mode legend appears when present in ring");
+    assert.equal(h.historyView("ou_op_mode").series[0].v.at(-1), 20);
+    const iuHtml = h.histHtml("iu_op_mode", "", "I/U-Betriebsart");
+    assert.match(iuHtml, /Heizen \+ Warmwasser · 5 min/, "optional I/U combined mode appears when present");
+    assert.equal(h.historyView("iu_op_mode").series[0].v.at(-1), 40);
+    assert.equal(h.historyView("thermostat_state").series[0].v.at(-1), 10);
+    assert.equal(h.historyView("dhw_reheat_state").series[0].v.at(-1), 10);
+    assert.equal(h.historyView("dhw_powerful_state").series[0].v.at(-1), 0);
+
+    const pairedPumpView = h.historyView("x10a_pump_state");
+    assert.deepEqual(Array.from(pairedPumpView.series, (s) => s.source), ["x10a", "modbus"]);
+    assert.equal(pairedPumpView.series[0].v.at(-1), 0);
+    assert.equal(pairedPumpView.series[1].v.at(-1), 10);
+    const pairedPumpHtml = h.histHtml("x10a_pump_state", "", "Umwälzpumpe");
+    assert.equal((pairedPumpHtml.match(/vhist-state-track/g) || []).length, 2,
+      "paired x10a_pump_state shows both X10A and Modbus lanes active by default");
+    assert.match(pairedPumpHtml, /data-hist-series="modbus" aria-pressed="true"/);
+
+    const pairedSpaceView = h.historyView("x10a_space_state");
+    assert.deepEqual(Array.from(pairedSpaceView.series, (s) => s.source), ["x10a", "modbus"]);
+    assert.equal(pairedSpaceView.series[0].v.at(-1), 10);
+    assert.equal(pairedSpaceView.series[1].v.at(-1), 0);
+
+    S.status.history.rows = prevRows;
+    S.status.history.modbus_rows = prevMbRows;
+    S._values = prevValues;
+    S.status.hp = prevHp;
+    S.status.modbus = prevMb;
+  }
+
   S.status = prevStatus;
   h.syncHistSources();
   S.hist = prevHist;

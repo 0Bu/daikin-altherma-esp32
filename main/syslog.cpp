@@ -336,6 +336,13 @@ static bool syslog_replay_boot(int& sock, const struct sockaddr_in& dest) {
     }
 }
 
+[[gnu::noinline]] static void close_syslog_sock(int& sock) noexcept {
+    if (sock >= 0) {
+        close(sock);
+        sock = -1;
+    }
+}
+
 void syslog_init() {
     s_ping.done  = xSemaphoreCreateBinary();
     s_queue = xQueueCreate(32, sizeof(SyslogMsg));
@@ -403,10 +410,7 @@ void syslog_init() {
                         const bool network_up = net_is_up();
 
                         if (!configured) {
-                            if (sock >= 0) {
-                                close(sock);
-                                sock = -1;
-                            }
+                            close_syslog_sock(sock);
                             if (resolved || reachable) {
                                 resolved = reachable = false;
                                 set_status(false, false, "");
@@ -420,10 +424,7 @@ void syslog_init() {
                         }
 
                         if (!network_up) {
-                            if (sock >= 0) {
-                                close(sock);
-                                sock = -1;
-                            }
+                            close_syslog_sock(sock);
                             if (resolved) {
                                 resolved  = false;
                                 reachable = false;
@@ -436,10 +437,7 @@ void syslog_init() {
 
                         // Config changed → re-resolve now.
                         if (syslog_host != last_host || syslog_port != last_port) {
-                            if (sock >= 0) {
-                                close(sock);
-                                sock = -1;
-                            }
+                            close_syslog_sock(sock);
                             resolved     = false;
                             reachable    = false;
                             last_host    = syslog_host;
@@ -486,10 +484,7 @@ void syslog_init() {
                                 // the backlog rather than trailing it.
                                 if (!replayed) replayed = syslog_replay_boot(sock, dest_addr);
                             } else {
-                                if (sock >= 0) {
-                                    close(sock);
-                                    sock = -1;
-                                }
+                                close_syslog_sock(sock);
                                 resolved  = false;
                                 reachable = false;
                                 set_status(false, false, "DNS lookup failed");
@@ -534,18 +529,12 @@ void syslog_init() {
                         }
                         failures.succeeded();
                     } catch (const std::exception& e) {
-                        if (sock >= 0) {
-                            close(sock);
-                            sock = -1;
-                        }
+                        close_syslog_sock(sock);
                         if (failures.first_failure())
                             diag_printf("syslog: task cycle skipped (%s)\n", e.what());
                         vTaskDelay(pdMS_TO_TICKS(1000));
                     } catch (...) {
-                        if (sock >= 0) {
-                            close(sock);
-                            sock = -1;
-                        }
+                        close_syslog_sock(sock);
                         if (failures.first_failure())
                             diag_printf("syslog: task cycle skipped (oom?)\n");
                         vTaskDelay(pdMS_TO_TICKS(1000));

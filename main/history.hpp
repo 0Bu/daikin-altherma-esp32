@@ -1,15 +1,18 @@
 #pragma once
 // The 24-hour trend rings. One fixed-cadence buffer per entry in logic/history.hpp's TRENDS, fed by
-// the X10A poll task, seventeen rings fed by the independent HomeHub task and three rings fed by
+// the X10A poll task, thirty-five rings fed by the independent HomeHub task and three rings fed by
 // ENV III, and an independent MQTT room-temperature ring, read by GET /history. The HomeHub set is
 // eight paired measurements plus BSH, 3-way-valve, Quiet and Smart-Grid state timelines, and the
-// Modbus-only disinfection, compressor, power, defrost/restart and circulation-pump series.
+// Modbus-only disinfection, compressor, power, defrost/restart, pump, hot-start, DHW/space
+// operation, DHW booster, heating/cooling mode, enable, abnormality, setpoint, offset and
+// power-limit series.
 //
 // The buffers are STATIC storage, never heap: on this board the binding limit is the largest
 // CONTIGUOUS free block, not free heap, and a static array does not compete for it. They occupy one
 // `.noinit` region so the LIVE arrays themselves survive a power-kept reset; there is no shadow
-// copy. Thirty-four X10A/board/state/derived rings cost 19584 bytes, seventeen HomeHub rings
-// another 9792 bytes and three ENV III rings 1728 bytes — see logic/history.hpp's
+// copy. Forty-one X10A/board/state/derived rings occupy 15192 bytes in the packed sample pool,
+// thirty-five HomeHub rings occupy 12456 bytes in the same pool (binary tracks at 2 bits/slot,
+// small enums at 8 bits/slot), and three ENV III rings cost 1728 bytes — see logic/history.hpp's
 // HISTORY_BYTES_PER_TREND and the ceiling asserts beside the arrays.
 //
 // NOT in NVS, and that has not changed: a 576-byte blob rewritten every 5 minutes is ~100k writes a
@@ -115,10 +118,10 @@ void   history_room_reset(uint32_t identity) noexcept;
 size_t history_room_snapshot(logic::HistorySample* out, size_t max, uint32_t expected_identity,
                              uint32_t* epoch = nullptr, logic::HistoryMeta* meta = nullptr);
 
-// Feed one HomeHub cycle. The eleven paired measurements/states, Smart-Grid, and the five
-// standalone Modbus timelines named in logic/homehub_map.hpp (seventeen rings total) are buffered;
-// other states and setpoints do not acquire a chart. An empty cycle advances the source's time
-// raster with gaps, so an outage does not make the last Modbus point slide to "now".
+// Feed one HomeHub cycle. The eleven paired measurements/states, Smart-Grid, and the twenty-three
+// standalone Modbus timelines named in logic/homehub_map.hpp (thirty-five rings total) are
+// buffered; non-trended fault-code rows do not acquire a chart. An empty cycle advances the
+// source's time raster with gaps, so an outage does not make the last Modbus point slide to "now".
 void history_record_modbus(const CachedValue* v, size_t n, uint32_t identity_generation);
 
 // Snapshot the current HomeHub history identity before starting a poll. A configuration change

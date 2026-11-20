@@ -752,31 +752,27 @@ static const char* failure_code(MbFailureType type) {
 }
 
 static std::string failure_message(const MbFailure& f) {
-    char msg[176];
+    char        msg[176];
+    const char* reg_fmt = nullptr;
+    const char* err_fmt = nullptr;
     switch (f.type) {
         case MbFailureType::RequestBuild:
-            std::snprintf(msg, sizeof(msg), "could not build Modbus request for register %u",
-                          static_cast<unsigned>(f.reg));
+            reg_fmt = "could not build Modbus request for register %u";
             break;
         case MbFailureType::SendTimeout:
-            std::snprintf(msg, sizeof(msg), "Modbus request send timed out at register %u",
-                          static_cast<unsigned>(f.reg));
+            reg_fmt = "Modbus request send timed out at register %u";
             break;
         case MbFailureType::SendFailed:
-            std::snprintf(msg, sizeof(msg), "Modbus request send failed at register %u (errno %d: %s)",
-                          static_cast<unsigned>(f.reg), f.detail, std::strerror(f.detail));
+            err_fmt = "Modbus request send failed at register %u (errno %d: %s)";
             break;
         case MbFailureType::ResponseTimeout:
-            std::snprintf(msg, sizeof(msg), "HomeHub response timed out at register %u",
-                          static_cast<unsigned>(f.reg));
+            reg_fmt = "HomeHub response timed out at register %u";
             break;
         case MbFailureType::ConnectionClosed:
-            std::snprintf(msg, sizeof(msg), "HomeHub closed the connection at register %u",
-                          static_cast<unsigned>(f.reg));
+            reg_fmt = "HomeHub closed the connection at register %u";
             break;
         case MbFailureType::ReceiveFailed:
-            std::snprintf(msg, sizeof(msg), "HomeHub receive failed at register %u (errno %d: %s)",
-                          static_cast<unsigned>(f.reg), f.detail, std::strerror(f.detail));
+            err_fmt = "HomeHub receive failed at register %u (errno %d: %s)";
             break;
         case MbFailureType::InvalidResponse: {
             const char* reason = f.detail >= static_cast<int>(MbParse::TooShort) &&
@@ -796,6 +792,10 @@ static std::string failure_message(const MbFailure& f) {
             msg[0] = '\0';
             break;
     }
+    if (reg_fmt) std::snprintf(msg, sizeof(msg), reg_fmt, static_cast<unsigned>(f.reg));
+    if (err_fmt)
+        std::snprintf(msg, sizeof(msg), err_fmt, static_cast<unsigned>(f.reg), f.detail,
+                      std::strerror(f.detail));
     return msg;
 }
 

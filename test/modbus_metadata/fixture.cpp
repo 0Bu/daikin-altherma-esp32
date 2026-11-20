@@ -114,8 +114,14 @@ static std::vector<CachedValue> native_rows() {
             row(true, 65, 3), row(true, 83, 7), row(true, 22, 0x3132)};
 }
 
+static std::vector<CachedValue> timeline_rows() {
+    return {row(false, 3, 1),  row(false, 4, 1),       row(false, 12, 1),
+            row(false, 21, 0), row(false, 22, 0x4131), row(false, 23, 3)};
+}
+
 static void http_cases() {
     http("http-same-offset", same_offset_rows());
+    http("http-timeline-history", timeline_rows());
     // Each source is tested separately for MQTT because its flat key namespace intentionally
     // replaces repeated keys. HTTP can observe both exact defining rows in one array.
     http("http-typed", typed_rows());
