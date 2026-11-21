@@ -132,10 +132,13 @@ time. When the total includes saved hourly counts from before a restart, the exp
 how many came from those hours.
 
 The caption counts the starts with a recorded time across the chart. Each block shows the count
-for its hour. The `≥` sign means at least that many starts. A blank marks an hour with unavailable
-data and no timed start. Colors mark the modes seen in the hour. Hatching marks hours with gaps,
-including older readings that have dropped off the chart. It does not measure how long a gap lasted.
-A readable diagnosis update without new chart data can keep the open chart and hatch the new gap.
+for its hour. The `≥` sign means at least that many starts. A blank count marks an hour with
+unavailable data and no timed start. Transparent, full-height backgrounds show Heating, Hot water
+or Unknown. Unknown combines unassigned runtime and missing readings in one gray category;
+readable off-time stays uncolored. Mixed colors blend softly without showing duration, order or
+exact mode-change times. The step line remains in front, with breaks where readings are missing.
+A readable diagnosis update without new chart data can keep the open chart and mark the new gap
+as Unknown.
 An unreadable diagnosis shows **No data** and hides the chart. If the status request itself fails,
 the chart can stay at the last successful update. The list then shows the stop and duration as
 unknown for any run that was still open.
@@ -149,7 +152,8 @@ that reading. If a gap or restart interrupts a run, its stop and total duration 
 The chart can restore saved readings and run times after a restart, including a firmware update.
 The board adds new measurements as polling resumes and shows the downtime as a gap. When the
 timed chart is unavailable, the entire chart can show hourly totals. Tap a bar in that view to see
-its recorded time and runtime where available. A bar with zero starts has no number above it.
+its recorded time, runtime and coverage where available. These durations do not size the color
+fills. An hourly-total bar with zero starts has no count label.
 
 **Evidence and limits:** [Compressor cycling](DIAGNOSTIC_EVIDENCE.md#diagnosis-cycling)
 
