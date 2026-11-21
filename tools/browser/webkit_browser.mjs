@@ -60,6 +60,7 @@ export async function launchWebKit({ viewport, allowedOrigin, timeoutMs = 30000 
         await handle.dispose();
       },
       async frame() { await native.evaluate("document.documentElement.getBoundingClientRect().width"); },
+      async colorScheme(scheme) { await native.emulateMedia({ colorScheme: scheme }); },
       async bringToFront() { await native.bringToFront(); },
       async focusEmulation(enabled) { if (enabled) await native.bringToFront(); },
       async nativeClick(x, y) {

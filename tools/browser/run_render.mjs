@@ -41,6 +41,10 @@ if (!/^[1-9][0-9]*$/.test(timeout) || Number(timeout) > 3600000) {
     // their descendants remain in that group, so a terminated Node cannot orphan the browser.
     const env = { ...process.env };
     delete env.DAIKIN_BROWSER_HISTORY_BARRIER;
+    delete env.DAIKIN_BROWSER_CYCLING_LOCK;
+    if (engine === "chromium" && script === worker && process.env.DAIKIN_BROWSER_PARALLEL !== "0") {
+      env.DAIKIN_BROWSER_CYCLING_LOCK = path.join(work, "cycling-appearance.lock");
+    }
     const nonce = barrierViewport ? randomBytes(16).toString("hex") : null;
     if (barrierViewport)
       env.DAIKIN_BROWSER_HISTORY_BARRIER = JSON.stringify({ viewport: barrierViewport, nonce });

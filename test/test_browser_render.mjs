@@ -1610,8 +1610,8 @@ async function assertPlantDiagnosis(page, context) {
       24, `${context}: one cycling column for each hour`);
     const [neutral, heating] = await page.evaluate(`Array.from(document.querySelectorAll(
       ".checkup-chart-cols > button"), col => ({
-        parts: Array.from(col.querySelectorAll("s > i"), part => part.className),
-        color: getComputedStyle(col.querySelector("s > i")).backgroundColor,
+        parts: col.querySelector("s").dataset.modes.split(" ").filter(Boolean),
+        color: getComputedStyle(col.querySelector("s")).backgroundColor,
         label: col.getAttribute("aria-label")
       }))`);
     assert.deepEqual(neutral.parts, ["other"], `${context}: unassigned runtime has its own segment`);

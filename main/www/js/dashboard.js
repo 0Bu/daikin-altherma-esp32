@@ -1583,6 +1583,25 @@ function checkupCyclingRunsHtml(runs, wall) {
   return `<table class="checkup-run-table"><thead><tr>${heads.join("")}</tr></thead><tbody>${rows.join("")}</tbody></table>`;
 }
 
+// These are visual categories, not durations. The shared localized Unknown label also covers
+// unassigned runtime and missing readings. Readable off-time adds no colour.
+const CHECKUP_CYCLING_MODES = [
+  ["space", "mode.heat", "--flow-hot"],
+  ["dhw", "mode.dhw", "--brand"],
+  ["other", "check.fault_unknown", "--muted"],
+];
+function checkupCyclingFillHtml(modes) {
+  // Canonical order and one colour per category: neither order nor duration changes the mixture.
+  const palette = CHECKUP_CYCLING_MODES.filter(([mode]) => modes.has(mode));
+  const colors = palette.map(([, , color], i) => `--cycling-${"abc"[i]}:var(${color})`).join(";");
+  return `<s class="checkup-chart-fill${palette.length > 1 ? " mixed" : ""}" aria-hidden="true"` +
+    ` data-modes="${palette.map(([mode]) => mode).join(" ")}"${colors ? ` style="${colors}"` : ""}></s>`;
+}
+function checkupCyclingLegendHtml() {
+  return CHECKUP_CYCLING_MODES.map(([mode, label]) =>
+    `<span class="checkup-chart-key"><i class="${mode}" aria-hidden="true"></i>${esc(t(label))}</span>`).join("");
+}
+
 // Geometry uses seconds in the trace's frame and labels use its wall-clock anchor.
 // A dated frame can include older boots, with a gap record standing between observations.
 function checkupCyclingTimelineHtml(trace, scope) {
@@ -1681,22 +1700,21 @@ function checkupCyclingTimelineHtml(trace, scope) {
       : `${clock(from)}–${clock(to)}`;
     const countLabel = !gap || starts.length
       ? checkupCyclingCountPrefix(starts.length) + t("check.starts", starts.length) : "";
-    const labels = [...modes].map(mode => t({ space: "mode.heat", dhw: "mode.dhw", other: "check.hour.other" }[mode]));
-    if (gap) labels.push(t("sys.nodata"));
+    const labels = CHECKUP_CYCLING_MODES.filter(([mode]) => modes.has(mode))
+      .map(([mode, label]) => t(mode === "other" ? "check.cycling.unclear" : label));
+    if (gap) labels.push(t(observed || starts.length ? "check.hour.gap" : "sys.nodata"));
+    const fill = new Set(modes);
+    if (gap) fill.add("other");
     const value = starts.length || !gap ? starts.length : "";
     cols += `<button type="button" class="checkup-chart-col" data-bucket="${i}" data-span="${esc(span)}"` +
       (offsetChange ? " data-offset-change" : "") +
       (runEdges && observed ? " data-run-observed" : "") +
       ` tabindex="${i === 23 ? 0 : -1}" aria-pressed="false" aria-label="${esc([date.format(wall(from)), span, countLabel, ...labels].filter(Boolean).join(" · "))}">` +
-      `<b>${value}</b><s${gap && modes.size ? ' class="mixed-gap"' : ""}>${gap ? '<i class="gap"></i>' : ""}` +
-      [...modes].map(mode => `<i class="${mode}"></i>`).join("") + "</s></button>";
+      `<b>${value}</b>${checkupCyclingFillHtml(fill)}</button>`;
     if (runs.length) details += `<template data-hour-runs="${i}">${checkupCyclingRunsHtml(runs, wall)}</template>`;
   });
   const axis = [0, 6, 12, 18, 24].map(i => `<span>${esc(clock(start + i * 3600))}</span>`).join("");
-  const legend = [["space", "mode.heat"], ["dhw", "mode.dhw"], ["other", "check.hour.other"], ["gap", "sys.nodata"]]
-    .filter(([mode]) => hours.some(h => mode === "gap" ? h.gap : h.modes.has(mode)))
-    .map(([mode, label]) => `<span class="checkup-chart-key"><i class="${mode}" aria-hidden="true"></i>${esc(t(label))}</span>`)
-    .join("");
+  const legend = checkupCyclingLegendHtml();
   const total = readable.length || count
     ? t("check.cycling.timed_starts", checkupCyclingCountPrefix(count) + t("check.starts", count))
     : t("sys.nodata");
@@ -1742,12 +1760,11 @@ function checkupCyclingChartHtml(c) {
   const key = JSON.stringify([LANG, hourlyScope, hrs]);
   if (cyclingMarkup[0] === key) return cyclingMarkup[1];
   const pad = 24 - hrs.length;
-  let sumS = 0, sumR = 0, cols = "", hasObservation = false, hasGap = false;
+  let sumS = 0, sumR = 0, cols = "", hasObservation = false;
   const stamp = new Intl.DateTimeFormat(LANG, { month: "short", day: "numeric", hour: "2-digit",
     minute: "2-digit", timeZoneName: "shortOffset" });
   const duration = checkupCyclingDuration;
   const startsText = n => checkupCyclingCountPrefix(n) + t("check.starts", n);
-  const percent = s => (s / 36).toFixed(3) + "%";
   for (let i = 0; i < 24; i++) {
     const h = hrs[i - pad];
     if (!h || h.expired === true) {
@@ -1774,33 +1791,29 @@ function checkupCyclingChartHtml(c) {
         possible = h.elapsed_s;
     }
     const missing = possible == null ? 0 : possible - observed;
-    hasGap ||= missing > 0;
     const valid = identified && [h.space_s, h.dhw_s].every(v => Number.isInteger(v) && v >= 0) &&
       h.space_s + h.dhw_s <= r;
     const space = valid ? h.space_s : 0, dhw = valid ? h.dhw_s : 0;
     const modes = [[space, "space", "mode.heat"], [dhw, "dhw", "mode.dhw"],
-      [r - space - dhw, "other", "check.hour.other"]].filter(([seconds]) => seconds > 0);
+      [r - space - dhw, "other", "check.fault_unknown"]].filter(([seconds]) => seconds > 0);
     const tip = [when, observed || s ? startsText(s) : t("sys.nodata")];
     if (observed) tip.push(duration(r));
     for (const [seconds, , label] of modes) tip.push(`${t(label)} ${duration(seconds)}`);
     tip.push(t("check.hour.coverage", duration(observed), possible == null ? "" : duration(possible)));
-    const gap = missing ? `<i class="gap" style="top:${percent(3600 - possible)};height:${percent(missing)}"></i>` : "";
+    const fill = new Set(modes.map(([, mode]) => mode));
+    if (missing > 0 || (possible == null && !observed)) fill.add("other");
     cols += `<button type="button" class="checkup-chart-col"` +
       ` data-bucket="${identified ? h.bucket : i}" tabindex="${n ? -1 : 0}" aria-pressed="false"` +
-      ` aria-label="${esc(tip.join(" · "))}"><b${s > 2 ? ' class="warn"' : ""}>${s || ""}</b><s>` +
-      modes.map(([seconds, mode]) => `<i class="${mode}" style="height:${percent(seconds)}"></i>`).join("") +
-      gap + `</s></button>`;
+      ` aria-label="${esc(tip.join(" · "))}"><b${s > 2 ? ' class="warn"' : ""}>${s || ""}</b>` +
+      `${checkupCyclingFillHtml(fill)}</button>`;
   }
   let meta = hasObservation || sumS ? startsText(sumS) : t("sys.nodata");
   if (hasObservation) meta += ` · ${checkupDuration(sumR)}`;
-  const gapKey = hasGap ? `<span class="checkup-chart-key checkup-gap-key"><i class="gap" aria-hidden="true"></i>${esc(t("check.hour.gap"))}</span>` : "";
-  const legend = [["space", "mode.heat"], ["dhw", "mode.dhw"], ["other", "check.hour.other"]]
-    .map(([mode, label]) => `<span class="checkup-chart-key"><i class="${mode}" aria-hidden="true"></i>${esc(t(label))}</span>`)
-    .join("");
+  const legend = checkupCyclingLegendHtml();
   const html = `<div class="vhist checkup-cycling-chart" role="group" aria-label="${esc(t("hist.aria", t("check.cycling")))}"` +
     ` data-cycling="${esc(hourlyScope)}" data-tip="${esc(meta)}">` +
     `<div class="checkup-chart-cols">${cols}</div>` +
-    `<div class="vhist-axis"><span>${esc(t("check.hour.earlier", 23))}</span>${gapKey}<span>${esc(t("check.hour.latest"))}</span></div>` +
+    `<div class="vhist-axis"><span>${esc(t("check.hour.earlier", 23))}</span><span>${esc(t("check.hour.latest"))}</span></div>` +
     `<div class="checkup-chart-legend">${legend}</div>` +
     `<div class="vhist-range mono num">${esc(meta)}</div><div class="checkup-run-details" hidden></div></div>`;
   cyclingMarkup = [key, html];

@@ -25,13 +25,25 @@ const server = http.createServer((request, response) => {
       stall(response, mode === "list-body" ? "[" : "");
       record.stallReached = mode;
       save();
+    } else if (mode === "delayed-page-target") {
+      record.listRequests = (record.listRequests || 0) + 1;
+      save();
+      const targets = record.listRequests <= 101 ? [] : [{ type: "page" }];
+      if (record.listRequests >= 103) {
+        targets.push({ type: "page", webSocketDebuggerUrl: `ws://127.0.0.1:${port}/page` });
+      }
+      response.end(JSON.stringify(targets));
     } else {
       response.end(JSON.stringify([{ type: "page", webSocketDebuggerUrl: `ws://127.0.0.1:${port}/page` }]));
     }
   } else if (request.url === "/json/version") {
     record.versionReached = true;
-    stall(response, mode === "version-body" ? "{" : "");
-    record.stallReached = mode;
+    if (mode === "delayed-page-target") {
+      response.end(JSON.stringify({ Browser: "Delayed Chromium fixture" }));
+    } else {
+      stall(response, mode === "version-body" ? "{" : "");
+      record.stallReached = mode;
+    }
     save();
   }
 });
