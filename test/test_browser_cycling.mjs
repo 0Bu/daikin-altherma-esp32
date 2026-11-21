@@ -33,8 +33,8 @@ export async function withChromiumAppearanceSlot(lock, run, closeBrowser) {
     }
   }
   return withCyclingCleanup(run, async () => {
-    await closeBrowser();
-    if (lock) fs.rmdirSync(lock);
+    const closed = await closeBrowser();
+    if (lock && closed) fs.rmdirSync(lock);
   });
 }
 
@@ -174,7 +174,13 @@ async function assertCyclingAppearance(parent, server, context) {
     }
     assert.deepEqual(page.diagnostics, [], context + ": isolated appearance must emit no browser errors");
   };
-  await withCyclingCleanup(() => withChromiumAppearanceSlot(lock, sweep, () => isolated?.close()),
+  const closeBrowser = async () => {
+    // Failed startup may also have failed to stop Chromium. The supervisor ends both workers.
+    if (!isolated) return false;
+    await isolated.close();
+    return true;
+  };
+  await withCyclingCleanup(() => withChromiumAppearanceSlot(lock, sweep, closeBrowser),
     () => parent.focusEmulation(true));
 }
 

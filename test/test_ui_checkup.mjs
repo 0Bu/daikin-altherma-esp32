@@ -1107,13 +1107,19 @@ assert.equal(ui.ready({
     const first = withChromiumAppearanceSlot(lock, () => {}, async () => {
       await closing;
       firstClosed = true;
+      return true;
     });
     const second = withChromiumAppearanceSlot(lock, () => {
       assert.equal(firstClosed, true, "the next Chromium launch waits for the previous browser to exit");
-    }, () => {});
+    }, () => true);
     finishClose();
     await Promise.all([first, second]);
     assert.equal(fs.existsSync(lock), false, "successful close releases the slot");
+    const launchError = new Error("no browser handle after a failed start");
+    await assert.rejects(withChromiumAppearanceSlot(lock, () => { throw launchError; }, () => false),
+      error => error === launchError);
+    assert.ok(fs.existsSync(lock), "failed startup must keep the slot when cleanup is unconfirmed");
+    fs.rmdirSync(lock);
     const closeError = new Error("browser still owns resources");
     await assert.rejects(withChromiumAppearanceSlot(lock, () => {}, () => { throw closeError; }),
       error => error === closeError);
