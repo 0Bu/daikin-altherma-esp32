@@ -3,8 +3,11 @@
 // whole-plant health claim while the C++ report remains technically conservative.
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import vm from "node:vm";
 import { readAppFragments, readUiLocale } from "../tools/ui/read_app_source.mjs";
+import { cyclingPollStopped, withChromiumAppearanceSlot, withCyclingCleanup } from "./test_browser_cycling.mjs";
 
 const i18nBase = readAppFragments(["i18n.js"]);
 const shippedLocales = JSON.parse(i18nBase.match(/const UI_LANGS = Object.freeze\((\[[^\n]+\])\)/)[1]);
@@ -109,6 +112,7 @@ vm.runInContext(
      status: checkupStatusText,
      detail: checkupDetailHtml,
      chart: checkupCyclingChartHtml,
+     timeline: checkupCyclingTimelineHtml,
      card: checkupCardHtml,
      ready: checkupSourceReadyFor,
      copy: I18N,
@@ -445,14 +449,16 @@ assert.doesNotMatch(detail, /type="range"/, "hour buttons own selection");
 assert.match(detail, /data-bucket="-1"/, "restored logical bucket identifiers may be negative");
 const hourMarkup = (html, bucket) => html.match(
   new RegExp(`<button[^>]*data-bucket="${bucket}"[^>]*>.*?</button>`))?.[0] || "";
-const modeSegments = (hour) => [...hour.matchAll(/<i class="(space|dhw|other)"/g)].map(match => match[1]);
-assert.deepEqual(modeSegments(hourMarkup(detail, -1)), ["space", "dhw", "other"],
+const fillMarkup = hour => hour.match(/<s\b[^>]*><\/s>/)?.[0] || "";
+const fillModes = hour => (hour.match(/data-modes="([^"]*)"/)?.[1] || "").split(" ").filter(Boolean);
+assert.deepEqual(fillModes(hourMarkup(detail, -1)), ["space", "dhw", "other"],
   "a mixed hour keeps each positively observed mode and its unassigned remainder");
-assert.deepEqual(modeSegments(hourMarkup(detail, 0)), [],
-  "an observed zero does not create a runtime segment");
+assert.deepEqual(fillModes(hourMarkup(detail, 0)), [],
+  "an observed zero does not invent running or missing data");
 const openHour = hourMarkup(detail, 1);
-assert.match(openHour, /<i class="gap"/, "elapsed unread time appears as a separate gap");
-assert.doesNotMatch(openHour, /<i class="future"/, "unelapsed time leaves the bar unfilled");
+assert.deepEqual(fillModes(openHour), ["other"], "missing and unassigned time share one Unknown fill");
+assert.doesNotMatch(openHour, /height:|<i\b/, "time lengths never size or stack the category colours");
+assert.match(openHour, /20 min of 30 min observed/, "the exact coverage remains accessible");
 hasAssessment(ui.detail(cyclingWithHours), "en", "waiting");
 assert.doesNotMatch(detail, /Incomplete classification|90% covered/);
 const qualifiedHours = ui.chart({ ...cyclingWithHours, starts: 5, hours: [
@@ -467,27 +473,27 @@ assert.match(qualifiedHours, /data-tip="≥5 starts · 1 h 10 min"/,
   "the chart readout reports the sum of witnessed starts as a lower bound");
 assert.match(unassigned, /<b class="warn">3<\/b>/);
 assert.doesNotMatch(unassigned, /Ø/, "hourly runtime and starts do not establish an average");
-assert.deepEqual(modeSegments(unassigned), ["other"]);
-assert.deepEqual(modeSegments(hourMarkup(qualifiedHours, 1)), ["dhw"]);
-assert.deepEqual(modeSegments(hourMarkup(qualifiedHours, 2)), ["space"]);
-assert.deepEqual(modeSegments(hourMarkup(qualifiedHours, 3)), ["other"],
+assert.deepEqual(fillModes(unassigned), ["other"]);
+assert.deepEqual(fillModes(hourMarkup(qualifiedHours, 1)), ["dhw"]);
+assert.deepEqual(fillModes(hourMarkup(qualifiedHours, 2)), ["space"]);
+assert.deepEqual(fillModes(hourMarkup(qualifiedHours, 3)), ["other"],
   "a malformed mode pair leaves observed runtime unassigned");
 for (const html of [detail, qualifiedHours])
   assert.doesNotMatch(html, /checkup-stop-box|witnessed stops|Stop context/,
     "stop telemetry does not expand the cycling card");
 const legacyOpen = hourMarkup(ui.chart({ ...cyclingWithHours, hours_epoch: undefined,
   hours: [{ starts: 2, run_s: 600, observed_s: 1200, space_s: 600, end_unix_s: 1792887600 }] }), 23);
-assert.doesNotMatch(legacyOpen, /<i class="space"/,
-  "legacy mode fields cannot establish witnessed heating");
-assert.match(legacyOpen, /<i class="other"/, "retain observed legacy runtime without assigning it to heating");
-assert.doesNotMatch(legacyOpen, /<i class="gap"/, "legacy open hour cannot establish elapsed unread time");
+assert.deepEqual(fillModes(legacyOpen), ["other"],
+  "legacy mode fields cannot establish witnessed heating; observed runtime stays Unknown");
+assert.match(legacyOpen, /20 min observed · elapsed time unknown/,
+  "legacy open hour cannot establish elapsed unread time");
 const legacyHours = ui.chart({ ...cyclingWithHours, hours_epoch: undefined, hours: [
   { starts: 1, run_s: 120, observed_s: 120 },
   { starts: 0, run_s: 0, observed_s: 0 },
 ] });
 const legacyClosed = hourMarkup(legacyHours, 22);
 assert.match(legacyClosed, /2 min observed · elapsed time unknown/);
-assert.deepEqual(modeSegments(legacyClosed), ["other"],
+assert.deepEqual(fillModes(legacyClosed), ["other"],
   "a legacy closed record shows its witnessed runtime without an inferred gap");
 assert.doesNotMatch(legacyHours, /checkup-gap-key/);
 const startup = ui.chart({ ...cyclingWithHours, hours_epoch: 2,
@@ -496,12 +502,17 @@ assert.equal((startup.match(/<button[^>]*data-bucket=/g) || []).length, 1,
   "an incomplete ring leaves older positions unavailable to keyboard selection");
 const startupHour = hourMarkup(startup, 0);
 assert.match(startupHour, /No data/, "zero elapsed time and no start witness establish no count");
-assert.doesNotMatch(startupHour, /<i class="gap"/, "the newly opened hour has no elapsed gap");
+assert.deepEqual(fillModes(startupHour), [], "a just-opened hour has no elapsed time to mark Unknown");
+assert.match(startupHour, /0 s of 0 s observed/, "the new hour has no fabricated elapsed time");
 assert.match(startup, /data-tip="No data"/, "no readable time or start witness establishes no chart total");
 assert.equal((startup.match(/<span class="checkup-chart-col" aria-hidden="true" inert><\/span>/g) || []).length,
   23, "positions outside the retained ring are blank and inert without tracks");
-assert.doesNotMatch(startup, /class="gap"|checkup-gap-key/,
-  "padding does not imply elapsed time or a sampling gap");
+assert.equal((startup.match(/data-modes=/g) || []).length, 1,
+  "padding never creates an Unknown fill or implies elapsed time");
+const unreadOpenHour = ui.chart({ ...cyclingWithHours, hours_epoch: 2,
+  hours: [{ bucket: 0, starts: 0, run_s: 0, observed_s: 0, elapsed_s: 1 }] });
+assert.deepEqual(fillModes(hourMarkup(unreadOpenHour, 0)), ["other"],
+  "a positive elapsed interval without readings is Unknown");
 const expiredHour = ui.chart({ ...cyclingWithHours, hours: [
   { bucket: 0, expired: true, starts: 9, run_s: 1200, observed_s: 1800, space_s: 1200, dhw_s: 0 },
   { bucket: 1, starts: 1, run_s: 120, observed_s: 300, elapsed_s: 300, space_s: 120, dhw_s: 0 },
@@ -511,11 +522,15 @@ assert.equal((expiredHour.match(/<span class="checkup-chart-col" aria-hidden="tr
   23, "expired evidence leaves its chart position blank like unused positions");
 assert.match(hourMarkup(expiredHour, 1), /tabindex="0"/, "the open hour remains the keyboard entry");
 assert.match(expiredHour, /data-tip="≥1 start · 2 min"/, "only unexpired evidence contributes to the chart total");
-assert.doesNotMatch(expiredHour, /class="gap"|checkup-gap-key/, "expired evidence does not establish a sampling gap");
+assert.equal((expiredHour.match(/data-modes=/g) || []).length, 1,
+  "expired evidence does not create an Unknown fill");
+assert.deepEqual(fillModes(hourMarkup(expiredHour, 1)), ["space"], "the current fully observed slot has no invented gap");
 const edgeOnly = { id: "cycling", verdict: "collecting", starts: 1, observed_s: 0, hours_epoch: 2,
   hours: [{ bucket: 0, starts: 1, run_s: 0, observed_s: 0, elapsed_s: 0 }] };
 assert.match(ui.chart(edgeOnly), /data-tip="≥1 start"/,
   "the chart reports its witnessed starts as a lower bound and omits unobserved runtime");
+assert.deepEqual(fillModes(hourMarkup(ui.chart(edgeOnly), 0)), [],
+  "a start at the hour boundary does not imply a missing interval");
 assert.equal(ui.value(edgeOnly), "≥1");
 assert.match(ui.detail(edgeOnly), /≥1 start/);
 assert.equal(ui.value({ ...edgeOnly, observed_s: 60 }), "≥1");
@@ -536,9 +551,61 @@ const restoredHour = hourMarkup(restored, -1);
 assert.match(restoredHour, /Saved time.*3 min observed · elapsed time unknown/,
   "a dated restore gives the saved time and readable duration but no elapsed duration");
 assert.doesNotMatch(restoredHour, /Interval end/);
-assert.deepEqual(modeSegments(restoredHour), ["space"], "restoration retains positively attributed runtime");
-assert.doesNotMatch(restored, /class="gap"|checkup-gap-key/,
+assert.deepEqual(fillModes(restoredHour), ["space"], "restoration retains positively attributed runtime");
+assert.equal(fillModes(restoredHour).includes("other"), false,
   "a short restored record does not imply missing time before its end");
+
+// Colour is a set of categories, never a second duration or event-timing measurement.
+const hourlyMix = (space, dhw, other = 0, observed = 3600) => hourMarkup(ui.chart({
+  ...cyclingWithHours, hours: [{ bucket: 0, starts: 1, run_s: space + dhw + other,
+    observed_s: observed, elapsed_s: 3600, space_s: space, dhw_s: dhw }],
+}), 0);
+const mostlyWater = hourlyMix(1, 3599), mostlyHeating = hourlyMix(3599, 1);
+assert.deepEqual(fillModes(mostlyWater), ["space", "dhw"]);
+assert.equal(fillMarkup(mostlyWater), fillMarkup(mostlyHeating),
+  "swapping one-second and 3599-second modes leaves the visual mixture identical");
+assert.notEqual(mostlyWater.match(/aria-label="([^"]*)"/)[1], mostlyHeating.match(/aria-label="([^"]*)"/)[1],
+  "actual mode durations remain distinct in accessible readouts");
+assert.deepEqual(fillModes(hourlyMix(60, 60, 60, 180)), ["space", "dhw", "other"],
+  "unassigned runtime plus a sampling gap contributes gray only once");
+assert.equal(fillMarkup(hourlyMix(60, 60, 60, 180)), fillMarkup(hourlyMix(1200, 1200, 1200)),
+  "gap and runtime lengths cannot change a three-category mixture");
+assert.deepEqual(fillModes(hourMarkup(observedZero, 0)), [], "observed off-time stays uncolored");
+
+const timedChart = records => ui.timeline({ unix_s: 1794582660,
+  window_end_s: 86400, observed_end_s: 86400, run_edges: true,
+  records: records.map(([at, kind]) => at * 8 + kind),
+}, "presence-test");
+const heatThenWater = timedChart([[0, 1], [82800, 3], [82801, 4]]);
+const waterThenHeat = timedChart([[0, 1], [82800, 4], [86399, 3]]);
+assert.equal(fillMarkup(hourMarkup(heatThenWater, 23)), fillMarkup(hourMarkup(waterThenHeat, 23)),
+  "timed mode order and unequal durations cannot change the visual mixture");
+assert.equal(fillMarkup(hourMarkup(heatThenWater, 23)), fillMarkup(mostlyWater),
+  "timed and hourly-total charts share one category-fill contract");
+const mixedTrace = timedChart([[0, 1], [82800, 3], [83400, 2], [84000, 0], [84600, 4]]);
+const mixedTimedHour = hourMarkup(mixedTrace, 23);
+assert.deepEqual(fillModes(mixedTimedHour), ["space", "dhw", "other"],
+  "the timed trace deduplicates Other and Gap before blending");
+assert.match(mixedTimedHour, /Unclear purpose.*Sampling gap/,
+  "the accessible name distinguishes observed unassigned runtime from missing samples");
+assert.doesNotMatch(mixedTimedHour, /No data/, "the hour has readable samples");
+const idleTimed = hourMarkup(heatThenWater, 0);
+assert.deepEqual(fillModes(idleTimed), []);
+assert.match(idleTimed, /0 starts/, "readable off-time retains its observed zero");
+assert.doesNotMatch(idleTimed, /No data/, "readable off-time is never turned into missing evidence");
+const missingTimed = hourMarkup(timedChart([[82800, 3]]), 0);
+assert.deepEqual(fillModes(missingTimed), ["other"]);
+assert.match(missingTimed, /No data/, "a gray unread bin retains its missing-evidence name");
+assert.match(missingTimed, /<b><\/b>/, "an unread bin cannot fabricate a zero count");
+for (const lang of locales) {
+  ui.setLang(lang);
+  const chart = ui.chart(cyclingWithHours);
+  const legend = [...chart.matchAll(/<span class="checkup-chart-key"><i[^>]*><\/i>([^<]+)<\/span>/g)]
+    .map(match => match[1]);
+  assert.deepEqual(legend, ["mode.heat", "mode.dhw", "check.fault_unknown"].map(key =>
+    escapeText(ui.text(lang, key))), `${lang}: exactly Heating, Hot water and Unknown, with no gap key`);
+}
+ui.setLang("en");
 
 // Low-level evidence remains readable by API consumers. The card shows only the completed
 // run count, one explanation for unclear purpose, and a brief assessment.
@@ -1023,6 +1090,64 @@ assert.equal(ui.ready({
   }
   ui.setLang("en");
   renderedContext.rendered.lang("en");
+}
+
+// Exercise the real browser fixture's cleanup scope without launching any browser on the host.
+{
+  assert.equal(cyclingPollStopped(null, false), true);
+  assert.equal(cyclingPollStopped(null, true), false, "an in-flight request with no timer is not stopped");
+  assert.equal(cyclingPollStopped(17, false), false);
+  assert.equal(cyclingPollStopped(17, true), false);
+  const supervisor = fs.mkdtempSync(path.join(os.tmpdir(), "daikin-cycling-slot-"));
+  const lock = path.join(supervisor, "cycling-appearance.lock");
+  try {
+    let finishClose;
+    let firstClosed = false;
+    const closing = new Promise(resolve => { finishClose = resolve; });
+    const first = withChromiumAppearanceSlot(lock, () => {}, async () => {
+      await closing;
+      firstClosed = true;
+      return true;
+    });
+    const second = withChromiumAppearanceSlot(lock, () => {
+      assert.equal(firstClosed, true, "the next Chromium launch waits for the previous browser to exit");
+    }, () => true);
+    finishClose();
+    await Promise.all([first, second]);
+    assert.equal(fs.existsSync(lock), false, "successful close releases the slot");
+    const launchError = new Error("no browser handle after a failed start");
+    await assert.rejects(withChromiumAppearanceSlot(lock, () => { throw launchError; }, () => false),
+      error => error === launchError);
+    assert.ok(fs.existsSync(lock), "failed startup must keep the slot when cleanup is unconfirmed");
+    fs.rmdirSync(lock);
+    const closeError = new Error("browser still owns resources");
+    await assert.rejects(withChromiumAppearanceSlot(lock, () => {}, () => { throw closeError; }),
+      error => error === closeError);
+    assert.ok(fs.existsSync(lock), "failed close must keep the slot until supervisor cancellation");
+  } finally {
+    fs.rmSync(supervisor, { recursive: true, force: true });
+  }
+  const order = [];
+  assert.equal(await withCyclingCleanup(async () => 26,
+    async () => order.push("browser"), async () => order.push("parent-focus")), 26);
+  assert.deepEqual(order, ["browser", "parent-focus"]);
+  for (const phase of ["matrix assertion", "pause wait"]) {
+    const primary = new Error(phase), cleanup = new Error("browser close");
+    const attempted = [];
+    await assert.rejects(withCyclingCleanup(async () => { throw primary; },
+      async () => { attempted.push("browser"); throw cleanup; },
+      async () => attempted.push("parent-focus")), error => {
+        assert.ok(error instanceof AggregateError);
+        assert.deepEqual(error.errors, [primary, cleanup]);
+        return true;
+      });
+    assert.deepEqual(attempted, ["browser", "parent-focus"]);
+    await assert.rejects(withCyclingCleanup(async () => { throw primary; }, async () => {}),
+      error => error === primary, "a lone original error must retain its identity");
+  }
+  const cleanupOnly = new Error("parent focus");
+  await assert.rejects(withCyclingCleanup(async () => {}, async () => { throw cleanupOnly; }),
+    error => error === cleanupOnly, "a lone cleanup failure must not be hidden");
 }
 
 console.log("plant-diagnostics UI contract: evidence, lifecycle, localized claims and counterexamples verified");

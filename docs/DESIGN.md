@@ -644,28 +644,34 @@ and value labels keep their defined share. Split Settings actions own their padd
 overlap when stacked. Measure every shipped locale at 320 px.
 
 The rolling cycling disclosure uses a step for each directly observed start and one row of
-hourly blocks showing start counts and observed modes. Each block is selectable through the full
-plot height. The caption sits above the selection highlight. The selected hour replaces time
-labels with its range and lists the runs that started in it. Keep mixed-hour gaps visible alongside
-modes, including the gap between restored evidence and new readings. During a drag, preview the
-highlight and range while keeping the run list tied to the selection. Restore the selected
-highlight and range on release. If a readable diagnosis snapshot omits the trace, retain the
-chart while the boot ID, `history.epoch` and `cycling.hours_epoch` all match. Mark the time
-after the last sample as missing until a new trace arrives. An unreadable snapshot shows **No data**.
+hourly blocks showing start counts and observed modes. Both the timed chart and hourly fallback
+use highly transparent full-plot-height category fills, with counts below. The timed chart keeps
+its opaque step line in front. Heating is orange, DHW blue. Unassigned runtime and missing readings
+share one gray Unknown category. Readable off-time contributes no color, so a fully observed
+off-only hour has no fill. Mixed categories use static, soft overlapping gradients in canonical
+order, without duration-scaled or chronological segments. Gaps still break the step line. Each
+timed hour button's accessible name distinguishes missing readings from unassigned runtime.
+Each block is selectable through the full plot height. The caption sits above the selection
+highlight. The selected hour replaces time labels with its range and lists the runs that started
+in it when the trace carries individual run times. During a drag, preview the highlight and range
+while keeping the run list tied to the selection. Restore the selected highlight and range on
+release. If a readable diagnosis snapshot omits the trace, retain the chart while the diagnosis
+source, boot ID, `history.epoch` and `cycling.hours_epoch` all match. Mark the time after the
+last sample as missing until a new trace arrives. An unreadable snapshot shows **No data**.
 A status transport failure can leave the graph visible from the last update. Mark an open run's
 stop and duration unknown while its live evidence is stale. See the
 [status contract](API.md#history-and-24-hour-checks).
-Above each rolling block, show the number of retained timed starts. Leave it blank if there is
+Below each rolling block, show the number of retained timed starts. Leave it blank if there is
 missing trace time and no timed start. Use the lower-bound prefix
 for positive totals and accessible readouts. Update the chart in its own slot and defer it while
 its card is hidden.
 
 When neither a fresh nor a usable cached trace exists, use the available hourly totals for the
 entire chart. Show **No history yet** if those totals are absent too. Leave leading padding and
-expired slots empty. Hatch missing elapsed time where duration is known. Restored and legacy
-slots show readable time with unknown elapsed duration. Label restored timestamps as saved time.
-Leave the unelapsed part of the open hour unfilled. The default readout uses one hourly snapshot
-and omits runtime without readable compressor seconds.
+expired slots empty. The fill shows category presence in the retained slot. A just-opened hour
+with zero elapsed time has no fill. Restored and legacy slots keep unknown elapsed duration in
+their readouts. Label restored timestamps as saved time. The default readout uses one hourly
+snapshot and omits runtime without readable compressor seconds.
 
 Use logical keyboard order, visible focus, Enter/Space activation, Escape at the innermost layer,
 modal focus return and scroll lock. Background controls are unavailable while a dialog is open.

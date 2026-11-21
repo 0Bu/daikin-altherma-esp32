@@ -1,5 +1,45 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import { makeHistoryMotionFixture } from "./test_browser_history_fixture.mjs";
+import { launchBrowser } from "../tools/browser/cdp_browser.mjs";
+import { launchWebKit } from "../tools/browser/webkit_browser.mjs";
+
+// Every owned resource is released even if setup, the assertion, or another cleanup fails.
+export async function withCyclingCleanup(run, ...cleanups) {
+  const errors = [];
+  let result;
+  try { result = await run(); } catch (error) { errors.push(error); }
+  for (const cleanup of cleanups) {
+    try { await cleanup(); } catch (error) { errors.push(error); }
+  }
+  if (errors.length === 1) throw errors[0];
+  if (errors.length) throw new AggregateError(errors, "Cycling assertion and cleanup failures");
+  return result;
+}
+
+// The supervisor owns the lock's parent directory and bounds both parallel workers. Keep the slot
+// until the disposable browser has exited so a failed close cannot start another Chromium process.
+export async function withChromiumAppearanceSlot(lock, run, closeBrowser) {
+  if (lock) {
+    for (;;) {
+      try {
+        fs.mkdirSync(lock);
+        break;
+      } catch (error) {
+        if (error.code !== "EEXIST") throw error;
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+    }
+  }
+  return withCyclingCleanup(run, async () => {
+    const closed = await closeBrowser();
+    if (lock && closed) fs.rmdirSync(lock);
+  });
+}
+
+// A live tick clears its timer while awaiting HTTP; no timer alone is not a stopped caller.
+export function cyclingPollStopped(timer, busy) { return timer === null && !busy; }
 
 const ROW = "button[data-desc='model:health_cycling']";
 const DIAGNOSIS = '[data-dashboard-card="diagnosis"]';
@@ -45,6 +85,103 @@ async function tap(page, selector, fraction, height) {
 async function key(page, name, code) {
   await page.nativeKey("rawKeyDown", name, name, code);
   await page.nativeKey("keyUp", name, name, code);
+}
+
+async function captureCyclingEvidence(page, context) {
+  const directory = process.env.DAIKIN_BROWSER_EVIDENCE_DIR;
+  if (!directory) return;
+  assert.ok(path.isAbsolute(directory), "cycling evidence directory must be absolute");
+  const clip = await page.evaluate(`(() => {
+    const row = document.querySelector("${CHART}").closest(".vitem");
+    row.scrollIntoView({block: "center", behavior: "instant"});
+    const r = row.getBoundingClientRect();
+    return {x: r.left + scrollX, y: r.top + scrollY, width: r.width, height: r.height};
+  })()`);
+  const image = page.screenshotClip ? await page.screenshotClip(clip) : Buffer.from((await page.send(
+    "Page.captureScreenshot", {format: "png", captureBeyondViewport: true, clip: {...clip, scale: 1}})).data, "base64");
+  fs.mkdirSync(directory, {recursive: true});
+  fs.writeFileSync(path.join(directory, context.replaceAll("/", "-") + ".png"), image);
+}
+
+async function assertCyclingAppearance(parent, server, context) {
+  const view = await parent.evaluate(`({width: innerWidth, height: innerHeight,
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone})`);
+  let isolated;
+  const touch = parent.inputMode === "touch";
+  const lock = touch ? undefined : process.env.DAIKIN_BROWSER_CYCLING_LOCK;
+  const sweep = async () => {
+    // Language caches, media overrides and polling belong to this disposable browser, never to
+    // the page that will subsequently measure live history motion.
+    isolated = await (touch
+      ? launchWebKit({viewport: {width: view.width, height: view.height}, allowedOrigin: new URL(server.url).origin})
+      : launchBrowser());
+    const page = isolated.page;
+    if (!touch) {
+      await page.viewport(view.width, view.height);
+      await page.send("Emulation.setTimezoneOverride", {timezoneId: view.timeZone});
+    }
+    await page.navigate(server.url);
+    await page.waitFor("typeof S !== 'undefined' && S.status && Array.isArray(S._values)");
+    await page.focusEmulation(true);
+    await page.evaluate("pollStop(); true");
+    await page.waitFor("!_pollBusy");
+    await page.evaluate(`pollStop(); S.descOpen = new Set(); S.dashboardCard = "diagnosis";
+      showStage("dashboard"); renderApp(); true`);
+    await tap(page, ROW);
+    await page.waitFor(`document.querySelector("${CHART}") && !S.clickHold`);
+    const locales = await page.evaluate("UI_LANGS");
+    const theme = scheme => page.colorScheme ? page.colorScheme(scheme) : page.send(
+      "Emulation.setEmulatedMedia", {features: [{name: "prefers-color-scheme", value: scheme}]});
+    for (const scheme of ["light", "dark"]) {
+      await theme(scheme);
+      for (const locale of locales) {
+        await evaluate(page, async locale => { await setLang(locale); renderApp(); }, locale);
+        await page.waitFor(`(() => {
+          const row = document.querySelector("${CHART}").closest(".vitem");
+          return row.getAnimations({subtree:true}).every(a => !(a instanceof CSSTransition) || a.playState !== "running");
+        })()`);
+        const visual = await page.evaluate(`(() => {
+          const chart = document.querySelector("${CHART}"), plot = chart.querySelector("svg");
+          const cols = chart.querySelector(".checkup-chart-cols"), fill = chart.querySelector('[data-bucket="22"] s');
+          const box = chart.getBoundingClientRect(), s = getComputedStyle(fill);
+          const line = getComputedStyle(plot.querySelector("path"));
+          return {lang: document.documentElement.lang, dark: matchMedia("(prefers-color-scheme: dark)").matches,
+            fits: box.left >= 0 && box.right <= innerWidth && chart.scrollWidth <= chart.clientWidth + 1,
+            legend: [...chart.querySelectorAll(".checkup-chart-key")].map(n => n.textContent),
+            expected: [t("mode.heat"), t("mode.dhw"), t("check.fault_unknown")],
+            fillHeight: fill.getBoundingClientRect().height, plotHeight: plot.getBoundingClientRect().height,
+            fillOpacity: Number(s.opacity), gradient: s.backgroundImage, modes: fill.dataset.modes,
+            lineAbove: Number(getComputedStyle(plot).zIndex) > Number(getComputedStyle(cols).zIndex),
+            lineOpacity: Number(line.opacity), svgOpacity: Number(getComputedStyle(plot).opacity),
+            lineWidth: line.strokeWidth, pointerEvents: getComputedStyle(plot).pointerEvents};
+        })()`);
+        const label = `${context}/${scheme}/${locale}`;
+        assert.equal(visual.lang, locale, label + ": the real locale catalog must load");
+        assert.equal(visual.dark, scheme === "dark", label + ": use the actual color-scheme media query");
+        assert.equal(visual.fits, true, label + ": translated chart and legend must fit");
+        assert.deepEqual(visual.legend, visual.expected, label + ": exactly three localized categories");
+        assert.equal(visual.modes, "space dhw other", label + ": deduplicated category set");
+        assert.ok(visual.fillHeight >= 90 && Math.abs(visual.fillHeight - visual.plotHeight) < 1,
+          label + ": full plot-height plasma, not a miniature strip");
+        assert.ok(visual.fillOpacity > 0 && visual.fillOpacity <= .25, label + ": highly transparent backgrounds");
+        assert.ok(visual.gradient.includes("radial-gradient"), label + ": soft overlapping color fields");
+        assert.equal(visual.lineAbove, true, label + ": the step line paints above all category backgrounds");
+        assert.equal(visual.lineOpacity * visual.svgOpacity, 1, label + ": the step line stays opaque");
+        assert.equal(visual.lineWidth, "2px", label + ": the established line weight is preserved");
+        assert.equal(visual.pointerEvents, "none", label + ": the foreground line cannot steal hour selection");
+        if (["en", "de"].includes(locale)) await captureCyclingEvidence(page, label);
+      }
+    }
+    assert.deepEqual(page.diagnostics, [], context + ": isolated appearance must emit no browser errors");
+  };
+  const closeBrowser = async () => {
+    // Failed startup may also have failed to stop Chromium. The supervisor ends both workers.
+    if (!isolated) return false;
+    await isolated.close();
+    return true;
+  };
+  await withCyclingCleanup(() => withChromiumAppearanceSlot(lock, sweep, closeBrowser),
+    () => parent.focusEmulation(true));
 }
 
 export async function assertCyclingChart(page, server, context) {
@@ -108,32 +245,41 @@ export async function assertCyclingChart(page, server, context) {
   const cells = bucket => evaluate(page, selector => {
     const cell = document.querySelector(selector);
     const count = cell.querySelector("b");
-    const bar = cell.querySelector("s");
-    const box = bar.getBoundingClientRect();
-    const segments = Object.fromEntries(Array.from(bar.querySelectorAll("i"), part => {
-      const bounds = part.getBoundingClientRect();
-      const hatched = [getComputedStyle(part), getComputedStyle(part, "::before")].some(style =>
-        /gradient\(/.test(style.backgroundImage));
-      return [part.className, { share: bounds.height / box.height, top: bounds.top, bottom: bounds.bottom,
-        hatched }];
-    }));
-    const ordered = Object.values(segments).sort((a, b) => a.top - b.top);
-    const disjoint = ordered.every((part, i) => !i || part.top >= ordered[i - 1].bottom - 0.5);
+    const bar = cell.querySelector(".checkup-chart-fill");
+    const box = bar.getBoundingClientRect(), style = getComputedStyle(bar);
     const text = document.createRange();
     text.selectNodeContents(count);
     const textVisible = getComputedStyle(count).visibility === "visible" &&
       Array.from(text.getClientRects()).some(rect => rect.width > 0 && rect.height > 0);
-    return { text: count.textContent.trim(), textVisible, segments, disjoint,
-      countAbove: count.getBoundingClientRect().bottom <= box.top + 0.5 };
+    const plot = cell.closest(".checkup-chart-graph")?.querySelector("svg");
+    const expectedHeight = plot?.getBoundingClientRect().height || cell.getBoundingClientRect().height - 16;
+    const modes = bar.dataset.modes.split(" ").filter(Boolean);
+    const legendSwatch = modes.length === 1
+      ? cell.closest(".checkup-cycling-chart").querySelector(".checkup-chart-key i." + modes[0]) : null;
+    return { text: count.textContent.trim(), textVisible, modes, height: box.height, expectedHeight,
+      opacity: Number(style.opacity), background: style.backgroundImage, color: style.backgroundColor,
+      legendColor: legendSwatch ? getComputedStyle(legendSwatch).backgroundColor : null,
+      countBelow: count.getBoundingClientRect().top >= box.bottom - 0.5,
+      children: bar.children.length, animations: bar.getAnimations().length };
   }, hour(bucket));
-  const assertSegments = async (bucket, expected, what) => {
-    const { segments, disjoint } = await cells(bucket);
-    assert.deepEqual(Object.keys(segments).sort(), Object.keys(expected).sort(), context + ": " + what);
-    assert.equal(disjoint, true, `${context}: ${what}, runtime and coverage segments cannot overlap`);
-    for (const [part, seconds] of Object.entries(expected))
-      assert.ok(segments[part].share > 0 && Math.abs(segments[part].share - seconds / 3600) < 0.02,
-        `${context}: ${what}, ${part} share was ${segments[part].share}`);
-    if (expected.gap) assert.equal(segments.gap.hatched, true, context + ": elapsed gap is visually hatched");
+  const assertFill = async (bucket, expected, what) => {
+    const fill = await cells(bucket);
+    assert.deepEqual(fill.modes, expected, context + ": " + what);
+    assert.ok(fill.height >= 90 && Math.abs(fill.height - fill.expectedHeight) < 1,
+      `${context}: full plot-height category fill, not a miniature strip: ${JSON.stringify(fill)}`);
+    assert.ok(fill.opacity > 0 && fill.opacity <= 0.25, context + ": category fills stay highly transparent");
+    assert.equal(fill.children, 0, context + ": no stacked duration or gap segments");
+    assert.equal(fill.animations, 0, context + ": plasma is a static category mix, not time-varying evidence");
+    if (expected.length > 1) {
+      assert.ok(fill.background.includes("radial-gradient"), context + ": mixed categories use soft gradients");
+    } else {
+      assert.equal(fill.background, "none", context + ": a transparent or solid fill has no background image");
+    }
+    const transparent = "rgba(0, 0, 0, 0)";
+    if (expected.length === 1) assert.notEqual(fill.color, transparent, context + ": a witnessed category has a solid color");
+    assert.equal(fill.color, expected.length === 1 ? fill.legendColor : transparent,
+      context + ": the solid fill matches its legend color, and an empty category set stays transparent");
+    assert.ok(!fill.background.includes("repeating-"), context + ": Unknown has no separate gap hatching");
   };
   const live = () => page.evaluate(`window.__cyclingChart.isConnected &&
     window.__cyclingChart === document.querySelector('${CHART}') &&
@@ -188,29 +334,26 @@ export async function assertCyclingChart(page, server, context) {
       [t("mode.heat"), t("check.cycling.runs", 3) + " · " + t("check.cycling.mean", "8 min")],
       [t("mode.dhw"), t("check.cycling.runs", 2) + " · " + t("check.cycling.mean", "15 min")],
       t("check.cycling.waiting") + " " + MODEL_DESCRIPTIONS.health_cycling.what,
-      [t("mode.heat"), t("mode.dhw"), t("check.hour.other")]
+      [t("mode.heat"), t("mode.dhw"), t("check.fault_unknown")]
     ]`);
     assert.deepEqual(rendered.purposeRows, copy.slice(0, 2),
       context + ": completed runs and their means have separate heating and hot-water rows");
     assert.equal(rendered.assessment, copy[2], context + ": incomplete evidence gets a short assessment");
-    assert.deepEqual(rendered.legend, copy[3], context + ": the chart labels its colored segments");
+    assert.deepEqual(rendered.legend, copy[3], context + ": the chart labels exactly three visual categories");
     assert.equal(rendered.meanVisible, true, context + ": the completed-run mean has a visible text box");
     const edge = await cells(EDGE), last = await cells(LAST);
     assert.equal(edge.text, "1", context + ": a witnessed start remains visible without paired runtime");
-    assert.equal(last.text, "3", context + ": the observed count is printed above the selected hour bar");
-    assert.ok(edge.textVisible && last.textVisible && edge.countAbove && last.countAbove,
-      context + ": printed counts appear in their own columns above the bars");
-    await assertSegments(ZERO, {}, "observed zero runtime has no missing or running segment");
-    await assertSegments(MISSING, { gap: 3600 }, "an unread closed slot is entirely hatched");
-    await assertSegments(SHORT_GAP, { space: 3598, gap: 2 },
-      "a two-second sampling gap does not cover witnessed runtime");
-    const { segments: short } = await cells(SHORT_GAP);
-    assert.ok(short.gap.bottom - short.space.top <= 0.05,
-      context + ": a subpixel sampling gap stays within its own interval");
+    assert.equal(last.text, "3", context + ": the observed count is printed below the selected hour fill");
+    assert.ok(edge.textVisible && last.textVisible && edge.countBelow && last.countBelow,
+      context + ": printed counts remain legible in their own columns below the fills");
+    await assertFill(ZERO, [], "observed off-time does not invent a running mode or missing data");
+    await assertFill(MISSING, ["other"], "an unread retained slot uses the neutral Unknown fill");
+    await assertFill(SHORT_GAP, ["space", "other"],
+      "even a short sampling gap contributes Unknown without sizing a duration segment");
     assert.ok((await label(SHORT_GAP)).includes(await page.evaluate(
       "t('check.hour.coverage', t('check.min', '59:58'), dwellDuration(3600))")),
       context + ": the short-gap readout retains second-level precision");
-    await assertSegments(RESTORED, { space: 180 }, "a short restored slot does not infer a sampling gap");
+    await assertFill(RESTORED, ["space"], "a short restored slot does not infer a sampling gap");
     assert.ok((await label(RESTORED)).includes(
       await page.evaluate("t('check.hour.coverage', dwellDuration(180), '')")),
     context + ": the restored slot retains readable time and reports unknown elapsed time");
@@ -218,11 +361,11 @@ export async function assertCyclingChart(page, server, context) {
     assert.match(saved, /^Saved time .+ · /, context + ": dated restoration labels its saved timestamp");
     await tap(page, hour(RESTORED));
     assert.equal(await readout(), saved, context + ": the visible readout gives the same saved timestamp");
-    await assertSegments(PREVIOUS, { other: 600 }, "unassigned runtime keeps a neutral colour");
-    await assertSegments(LAST, { space: 600, dhw: 300, other: 900, gap: 300 },
-      "only evidenced mode durations colour a partly observed slot");
-    await assertSegments(OPEN, { dhw: 120 },
-      "a fully observed open slot leaves the future portion empty");
+    await assertFill(PREVIOUS, ["other"], "unassigned runtime keeps the same neutral Unknown colour");
+    await assertFill(LAST, ["space", "dhw", "other"],
+      "unassigned runtime and sampling gaps share one Unknown contributor");
+    await assertFill(OPEN, ["dhw"],
+      "an open slot shows category presence without inventing future or missing duration");
     assert.doesNotMatch((await label(OPEN)).split(" · ")[0], /\d:\d{2}/,
       context + ": no absolute time is invented for the open hour");
     assert.ok((await label(ZERO)).includes(" · " + await page.evaluate("t('check.starts', 0)") + " · "),
@@ -231,6 +374,7 @@ export async function assertCyclingChart(page, server, context) {
       context + ": an unread interval has no established start count");
     assert.ok((await label(EDGE)).includes("≥" + await page.evaluate("t('check.starts', 1)")),
       context + ": readout reports a witnessed edge without runtime as a lower bound");
+    await captureCyclingEvidence(page, context + "/hourly");
 
     await tap(page, hour(PREVIOUS));
     assert.deepEqual(await pinned(), [PREVIOUS], context + ": native tap pins the hour column");
@@ -273,8 +417,8 @@ export async function assertCyclingChart(page, server, context) {
 
     hours[OPEN].elapsed_s = 360;
     await poll("2026-10-25T01:26:00Z");
-    await assertSegments(OPEN, { dhw: 120, gap: 120 },
-      "only elapsed unread time is hatched in the open slot");
+    await assertFill(OPEN, ["dhw", "other"],
+      "new elapsed unread time adds Unknown to the existing hot-water fill");
     assert.equal(await focusBucket(), LAST, context + ": changing gap geometry preserves focused bucket");
     assert.deepEqual(await pinned(), [LAST], context + ": changing gap geometry preserves the selected bucket");
     assert.equal(await label(LAST), chosen, context + ": a dated hour retains its measurement label");
@@ -330,9 +474,10 @@ export async function assertCyclingChart(page, server, context) {
     assert.deepEqual(await pinned(), [LAST],
       context + ": selected interval follows its bucket ID when the window advances");
     assert.equal(await focusBucket(), LAST, context + ": hour rollover retains focus by bucket");
-    await assertSegments(OPEN + 1, {}, "an hour with zero elapsed time has no hatch");
+    await assertFill(OPEN + 1, [], "the new hour is unfilled at zero elapsed time");
     const expiredIndex = hours.findIndex(h => h.bucket === LAST);
     hours[expiredIndex] = { bucket: LAST, expired: true, starts: 0, run_s: 0, observed_s: 0 };
+    hours[hours.length - 1].elapsed_s = 1;
     await poll("2026-10-25T02:20:01Z");
     assert.equal(await evaluate(page, ({ cols, index }) => {
       const slot = document.querySelector(cols)?.children[index];
@@ -340,7 +485,8 @@ export async function assertCyclingChart(page, server, context) {
     }, { cols: COLS, index: expiredIndex }), true, context + ": an expired bucket leaves a blank inert position");
     assert.deepEqual(await pinned(), [], context + ": an expired bucket clears its pin");
     assert.equal(await focusBucket(), OPEN + 1, context + ": expiry moves focus to the current hour");
-    await assertSegments(OPEN, { dhw: 120, gap: 3360 }, "a newer hour retains observed runtime and its real gap");
+    await assertFill(OPEN + 1, ["other"], "elapsed time without readings adds the Unknown fill");
+    await assertFill(OPEN, ["dhw", "other"], "a newer hour retains observed modes and Unknown presence");
     await key(page, "Home", 36);
     assert.equal(await focusBucket(), 1, context + ": Home focuses the earliest remaining hour");
     await key(page, "End", 35);
@@ -362,10 +508,10 @@ export async function assertCyclingChart(page, server, context) {
     context + ": padding in a new observation is not keyboard-selectable");
     assert.equal(await evaluate(page, cols =>
       document.querySelectorAll(cols + " > span[inert][aria-hidden='true']:empty").length, COLS),
-    23, context + ": blank padding has no tracks, runtime or hatch segments");
+    23, context + ": blank padding has no category fills or fabricated readings");
     assert.equal(await evaluate(page, chart => !!document.querySelector(chart + " .checkup-gap-key"), CHART),
       false, context + ": padding does not introduce a sampling-gap legend");
-    await assertSegments(1, {}, "the new observation does not hatch its unelapsed hour");
+    await assertFill(1, [], "a boundary start retains its count without adding a missing interval");
     assert.equal(await readout(), "≥" + await page.evaluate("t('check.starts', 1)"),
       context + ": the default readout reports a lower bound without invented runtime");
     const totals = () => evaluate(page, row => {
@@ -428,7 +574,7 @@ export async function assertCyclingChart(page, server, context) {
         context + ": the first start stays a lower bound when paired time begins");
     }
     await tap(page, '#cardNav [data-card="diagnosis"]');
-    await assertSegments(1, { space: 60, gap: 120 }, "reopening the diagnosis card catches up the still-expanded chart");
+    await assertFill(1, ["space", "other"], "reopening the diagnosis card catches up the still-expanded chart");
     assert.deepEqual(await evaluate(page, row => Array.from(document.querySelector(row).closest(".vitem")
       .querySelectorAll(".checkup-cycling-grid .inspect-row"), item => Array.from(item.children, cell => cell.textContent)), ROW),
     await page.evaluate(`[[t("mode.heat"), t("check.cycling.runs", 1) + " · " + t("check.cycling.mean", "1 min")],
@@ -458,19 +604,66 @@ export async function assertCyclingChart(page, server, context) {
       const chart = document.querySelector(".checkup-cycling-timeline");
       return {
         line: chart.querySelector("path").getAttribute("d"),
-        modes: [...chart.querySelectorAll('[data-bucket="22"] i:not(.gap)')].map(node => node.className),
+        modes: chart.querySelector('[data-bucket="22"] s').dataset.modes.split(" "),
         counts: [22, 23].map(i => chart.querySelector('[data-bucket="' + i + '"] b').textContent),
-        gap: !!chart.querySelector('[data-bucket="8"] i.gap'),
-        mixedGapHeight: chart.querySelector('[data-bucket="22"] .mixed-gap i.gap').getBoundingClientRect().height,
+        unknown: chart.querySelector('[data-bucket="8"] s').dataset.modes,
+        legend: [...chart.querySelectorAll('.checkup-chart-key')].map(node => node.textContent),
         span: chart.querySelector('[data-bucket="22"]').dataset.span,
       };
     })()`);
     const jumps = [...timed.line.matchAll(/H ([\d.]+) V/g)].map(match => Number(match[1]));
     assert.deepEqual(jumps, [1.67, 2201.67, 2211.67, 2230, 2250], context + ": jumps use individual event seconds");
-    assert.deepEqual(timed.modes.sort(), ["dhw", "space"]);
+    assert.deepEqual(timed.modes, ["space", "dhw", "other"]);
     assert.deepEqual(timed.counts, ["4", "0"]);
-    assert.equal(timed.gap, true);
-    assert.ok(timed.mixedGapHeight > 0 && timed.mixedGapHeight < 10, context + ": hatching has its own visible band");
+    assert.equal(timed.unknown, "other");
+    assert.deepEqual(timed.legend, copy[3], context + ": gap and unassigned modes share the Unknown legend");
+    await assertFill(22, ["space", "dhw", "other"], "the timed chart uses the same full-height plasma fill");
+    await assertFill(8, ["other"], "a complete timeline gap is neutral, not a separate hatch");
+    assert.match(await label(22), /Sampling gap/, context + ": a partly observed hour exposes the gap");
+    assert.doesNotMatch(await label(22), /No data/, context + ": an observed mode is available in that hour");
+    assert.match(await label(8), /No data/, context + ": the fully unread hour exposes missing data");
+    await assertFill(12, [], "readable off-time remains uncolored in the timed chart");
+    // Prove that the geometry check rejects the old miniature-strip layout, rather than just
+    // checking a class name. The control changes only real CSS and must fail for its height.
+    await page.evaluate(`(() => {
+      const style = document.createElement("style"); style.id = "cycling-strip-control";
+      style.textContent = ".checkup-cycling-timeline .checkup-chart-fill {top:auto!important;height:10px!important}";
+      document.head.append(style); return true;
+    })()`);
+    try {
+      await assert.rejects(() => assertFill(22, ["space", "dhw", "other"], "old strip control"),
+        /full plot-height category fill/, context + ": the former ten-pixel strip must fail");
+    } finally {
+      await page.evaluate('document.getElementById("cycling-strip-control").remove(); true');
+    }
+    const languageCache = await page.evaluate("localStorage.getItem('uiLang')");
+    await withCyclingCleanup(async () => {
+      // The fixture owns this real polling chain. A disposable appearance sweep must not restart
+      // a stopped caller, fill an absent language cache, or replace its current chart.
+      await page.evaluate("pollStop(); localStorage.removeItem('uiLang'); true");
+      await page.waitFor("!_pollBusy");
+      await page.evaluate(`pollStop(); window.__cyclingAppearanceParent = {lang: LANG,
+        dark: matchMedia("(prefers-color-scheme: dark)").matches,
+        chart: document.querySelector("${CHART}")}; true`);
+      await assertCyclingAppearance(page, server, context);
+      const isolation = await page.evaluate(`(() => {
+        const before = window.__cyclingAppearanceParent;
+        return {lang: LANG === before.lang,
+          dark: matchMedia("(prefers-color-scheme: dark)").matches === before.dark,
+          chart: document.querySelector("${CHART}") === before.chart,
+          stopped: (${cyclingPollStopped})(_pollTimer, _pollBusy), languageCache: localStorage.getItem("uiLang")};
+      })()`);
+      assert.deepEqual(isolation, {lang: true, dark: true, chart: true, stopped: true, languageCache: null},
+        context + ": appearance matrix must leave its parent page untouched");
+    }, () => evaluate(page, cached => {
+      try {
+        if (cached === null) localStorage.removeItem("uiLang");
+        else localStorage.setItem("uiLang", cached);
+      } finally {
+        delete window.__cyclingAppearanceParent;
+        pollSchedule(POLL_VALUES_MS);
+      }
+    }, languageCache));
     const layout = () => page.evaluate(`(() => {
       const chart = document.querySelector(".checkup-cycling-timeline");
       const graph = chart.querySelector(".checkup-chart-graph");
@@ -661,7 +854,7 @@ export async function assertCyclingChart(page, server, context) {
     assert.deepEqual((await runDetails()).rows, [[observedIso(85800), "Stop unknown", "—"]],
       context + ": a stale cached run does not claim the compressor is still running");
     assert.equal(await focusBucket(), 22, context + ": temporary omission keeps keyboard focus");
-    assert.equal(await page.evaluate(`!!document.querySelector('.checkup-cycling-timeline [data-bucket="23"] i.gap')`), true,
+    assert.equal(await page.evaluate(`document.querySelector('.checkup-cycling-timeline [data-bucket="23"] s').dataset.modes.includes("other")`), true,
       context + ": time after the last retained sample is marked as missing");
     Object.assign(timeline, { window_end_s: 86580, observed_end_s: 86580, unix_s: timeline.unix_s + 60 });
     status.health.checks[0].timeline = timeline;
@@ -816,7 +1009,7 @@ export async function assertCyclingChart(page, server, context) {
       context + ": a temporarily omitted dated trace advances its hour from boot uptime");
     assert.deepEqual((await runDetails()).rows, finishedRuns,
       context + ": the cached dated trace retains both boots without shifting any recorded clock time");
-    assert.equal(await evaluate(page, selector => !!document.querySelector(selector + " i.gap"), hour(23)), true,
+    assert.equal(await evaluate(page, selector => document.querySelector(selector + " s").dataset.modes.includes("other"), hour(23)), true,
       context + ": the dated trace cannot extend measured data into a temporarily omitted span");
 
     status.history.epoch++;

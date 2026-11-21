@@ -377,17 +377,19 @@ export async function launchBrowser({ timeoutMs = 30000 } = {}) {
     const endpoint = new URL(browserWs);
     const listUrl = `http://${endpoint.host}/json/list`;
     let target;
-    for (let attempt = 0; attempt < 100 && !target; attempt++) {
+    while (!target) {
+      controller.signal.throwIfAborted();
+      if (childExited(child)) throw new Error("Chrome exited before exposing a page target");
       try {
         const targets = await json(listUrl);
-        target = targets.find((item) => item.type === "page");
-      } catch (error) {
-        if (controller.signal.aborted) throw controller.signal.reason;
-        // The browser endpoint can precede creation of the initial page by a few milliseconds.
+        target = targets.find((item) => item?.type === "page" &&
+          typeof item.webSocketDebuggerUrl === "string" && item.webSocketDebuggerUrl.length > 0);
+      } catch {
+        controller.signal.throwIfAborted();
+        // The browser endpoint can be available before the initial page is ready.
       }
-      if (!target) await delay(25);
+      if (!target) await abortable(delay(25), controller.signal);
     }
-    if (!target?.webSocketDebuggerUrl) throw new Error("Chrome did not expose a page target");
     socket = await connectSocket(target.webSocketDebuggerUrl, controller.signal);
     const page = new CdpPage(socket);
     await abortable(page.enable(), controller.signal);
