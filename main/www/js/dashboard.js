@@ -1584,7 +1584,7 @@ function checkupCyclingRunsHtml(runs, wall) {
 }
 
 // These are visual categories, not durations. The shared localized Unknown label also covers
-// unassigned runtime and missing readings; readable off-time stays uncoloured.
+// unassigned runtime and missing readings. Readable off-time adds no colour.
 const CHECKUP_CYCLING_MODES = [
   ["space", "mode.heat", "--flow-hot"],
   ["dhw", "mode.dhw", "--brand"],
@@ -1700,8 +1700,9 @@ function checkupCyclingTimelineHtml(trace, scope) {
       : `${clock(from)}–${clock(to)}`;
     const countLabel = !gap || starts.length
       ? checkupCyclingCountPrefix(starts.length) + t("check.starts", starts.length) : "";
-    const labels = CHECKUP_CYCLING_MODES.filter(([mode]) => modes.has(mode)).map(([, label]) => t(label));
-    if (gap) labels.push(t("sys.nodata"));
+    const labels = CHECKUP_CYCLING_MODES.filter(([mode]) => modes.has(mode))
+      .map(([mode, label]) => t(mode === "other" ? "check.cycling.unclear" : label));
+    if (gap) labels.push(t(observed || starts.length ? "check.hour.gap" : "sys.nodata"));
     const fill = new Set(modes);
     if (gap) fill.add("other");
     const value = starts.length || !gap ? starts.length : "";
@@ -1800,7 +1801,7 @@ function checkupCyclingChartHtml(c) {
     for (const [seconds, , label] of modes) tip.push(`${t(label)} ${duration(seconds)}`);
     tip.push(t("check.hour.coverage", duration(observed), possible == null ? "" : duration(possible)));
     const fill = new Set(modes.map(([, mode]) => mode));
-    if (missing > 0 || !observed) fill.add("other");
+    if (missing > 0 || (possible == null && !observed)) fill.add("other");
     cols += `<button type="button" class="checkup-chart-col"` +
       ` data-bucket="${identified ? h.bucket : i}" tabindex="${n ? -1 : 0}" aria-pressed="false"` +
       ` aria-label="${esc(tip.join(" · "))}"><b${s > 2 ? ' class="warn"' : ""}>${s || ""}</b>` +

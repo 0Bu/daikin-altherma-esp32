@@ -224,9 +224,12 @@ export async function assertCyclingChart(page, server, context) {
       Array.from(text.getClientRects()).some(rect => rect.width > 0 && rect.height > 0);
     const plot = cell.closest(".checkup-chart-graph")?.querySelector("svg");
     const expectedHeight = plot?.getBoundingClientRect().height || cell.getBoundingClientRect().height - 16;
-    return { text: count.textContent.trim(), textVisible,
-      modes: bar.dataset.modes.split(" ").filter(Boolean), height: box.height, expectedHeight,
-      opacity: Number(style.opacity), background: style.backgroundImage,
+    const modes = bar.dataset.modes.split(" ").filter(Boolean);
+    const legendSwatch = modes.length === 1
+      ? cell.closest(".checkup-cycling-chart").querySelector(".checkup-chart-key i." + modes[0]) : null;
+    return { text: count.textContent.trim(), textVisible, modes, height: box.height, expectedHeight,
+      opacity: Number(style.opacity), background: style.backgroundImage, color: style.backgroundColor,
+      legendColor: legendSwatch ? getComputedStyle(legendSwatch).backgroundColor : null,
       countBelow: count.getBoundingClientRect().top >= box.bottom - 0.5,
       children: bar.children.length, animations: bar.getAnimations().length };
   }, hour(bucket));
@@ -238,8 +241,15 @@ export async function assertCyclingChart(page, server, context) {
     assert.ok(fill.opacity > 0 && fill.opacity <= 0.25, context + ": category fills stay highly transparent");
     assert.equal(fill.children, 0, context + ": no stacked duration or gap segments");
     assert.equal(fill.animations, 0, context + ": plasma is a static category mix, not time-varying evidence");
-    assert.equal(fill.background.includes("radial-gradient"), expected.length > 1,
-      context + ": multiple categories use soft plasma-like gradients");
+    if (expected.length > 1) {
+      assert.ok(fill.background.includes("radial-gradient"), context + ": mixed categories use soft gradients");
+    } else {
+      assert.equal(fill.background, "none", context + ": a transparent or solid fill has no background image");
+    }
+    const transparent = "rgba(0, 0, 0, 0)";
+    if (expected.length === 1) assert.notEqual(fill.color, transparent, context + ": a witnessed category has a solid color");
+    assert.equal(fill.color, expected.length === 1 ? fill.legendColor : transparent,
+      context + ": the solid fill matches its legend color, and an empty category set stays transparent");
     assert.ok(!fill.background.includes("repeating-"), context + ": Unknown has no separate gap hatching");
   };
   const live = () => page.evaluate(`window.__cyclingChart.isConnected &&
@@ -435,9 +445,10 @@ export async function assertCyclingChart(page, server, context) {
     assert.deepEqual(await pinned(), [LAST],
       context + ": selected interval follows its bucket ID when the window advances");
     assert.equal(await focusBucket(), LAST, context + ": hour rollover retains focus by bucket");
-    await assertFill(OPEN + 1, ["other"], "an unread new hour is neutral without inventing elapsed time");
+    await assertFill(OPEN + 1, [], "the new hour is unfilled at zero elapsed time");
     const expiredIndex = hours.findIndex(h => h.bucket === LAST);
     hours[expiredIndex] = { bucket: LAST, expired: true, starts: 0, run_s: 0, observed_s: 0 };
+    hours[hours.length - 1].elapsed_s = 1;
     await poll("2026-10-25T02:20:01Z");
     assert.equal(await evaluate(page, ({ cols, index }) => {
       const slot = document.querySelector(cols)?.children[index];
@@ -445,6 +456,7 @@ export async function assertCyclingChart(page, server, context) {
     }, { cols: COLS, index: expiredIndex }), true, context + ": an expired bucket leaves a blank inert position");
     assert.deepEqual(await pinned(), [], context + ": an expired bucket clears its pin");
     assert.equal(await focusBucket(), OPEN + 1, context + ": expiry moves focus to the current hour");
+    await assertFill(OPEN + 1, ["other"], "elapsed time without readings adds the Unknown fill");
     await assertFill(OPEN, ["dhw", "other"], "a newer hour retains observed modes and Unknown presence");
     await key(page, "Home", 36);
     assert.equal(await focusBucket(), 1, context + ": Home focuses the earliest remaining hour");
@@ -470,7 +482,7 @@ export async function assertCyclingChart(page, server, context) {
     23, context + ": blank padding has no category fills or fabricated readings");
     assert.equal(await evaluate(page, chart => !!document.querySelector(chart + " .checkup-gap-key"), CHART),
       false, context + ": padding does not introduce a sampling-gap legend");
-    await assertFill(1, ["other"], "a start without readable runtime has an Unknown category");
+    await assertFill(1, [], "a boundary start retains its count without adding a missing interval");
     assert.equal(await readout(), "≥" + await page.evaluate("t('check.starts', 1)"),
       context + ": the default readout reports a lower bound without invented runtime");
     const totals = () => evaluate(page, row => {
@@ -578,6 +590,9 @@ export async function assertCyclingChart(page, server, context) {
     assert.deepEqual(timed.legend, copy[3], context + ": gap and unassigned modes share the Unknown legend");
     await assertFill(22, ["space", "dhw", "other"], "the timed chart uses the same full-height plasma fill");
     await assertFill(8, ["other"], "a complete timeline gap is neutral, not a separate hatch");
+    assert.match(await label(22), /Sampling gap/, context + ": a partly observed hour exposes the gap");
+    assert.doesNotMatch(await label(22), /No data/, context + ": an observed mode is available in that hour");
+    assert.match(await label(8), /No data/, context + ": the fully unread hour exposes missing data");
     await assertFill(12, [], "readable off-time remains uncolored in the timed chart");
     // Prove that the geometry check rejects the old miniature-strip layout, rather than just
     // checking a class name. The control changes only real CSS and must fail for its height.

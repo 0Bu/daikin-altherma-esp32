@@ -133,19 +133,19 @@ how many came from those hours.
 
 The caption counts the starts with a recorded time across the chart. Each block shows the count
 for its hour. The `≥` sign means at least that many starts. A blank count marks an hour with
-unavailable data and no timed start. Transparent, full-height backgrounds show Heating, Hot water
-or Unknown. Unknown combines unassigned runtime and missing readings in one gray category;
-readable off-time stays uncolored. Mixed colors blend softly without showing duration, order or
-exact mode-change times. The step line remains in front, with breaks where readings are missing.
-A readable diagnosis update without new chart data can keep the open chart and mark the new gap
-as Unknown.
+unavailable data and no timed start. Colors show Heating, Hot water and Unknown. Gray covers
+unassigned runtime and missing readings. An hour observed entirely at rest has no color.
+A blend shows which categories occurred during the hour. Breaks in the line mark missing readings.
+A readable update from the same source can retain the open chart and mark time after its last
+sample as Unknown.
 An unreadable diagnosis shows **No data** and hides the chart. If the status request itself fails,
 the chart can stay at the last successful update. The list then shows the stop and duration as
 unknown for any run that was still open.
 
 Tap anywhere in the graph above an hourly block, or tap the block itself, to select that hour.
-The list below the graph shows the observed start, stop and duration for runs that started in the
-selected hour, even if they stopped later. The times mark the first readings in the new state.
+When individual run times are available, the list below the graph shows the observed start, stop
+and duration for runs that started in the selected hour, even if they stopped later. The times
+mark the first readings in the new state.
 If a recent reading still shows the run in progress, the list gives the elapsed time through
 that reading. If a gap or restart interrupts a run, its stop and total duration are unknown.
 
@@ -153,7 +153,8 @@ The chart can restore saved readings and run times after a restart, including a 
 The board adds new measurements as polling resumes and shows the downtime as a gap. When the
 timed chart is unavailable, the entire chart can show hourly totals. Tap a bar in that view to see
 its recorded time, runtime and coverage where available. These durations do not size the color
-fills. An hourly-total bar with zero starts has no count label.
+fills. A just-opened hour has no fill until time has elapsed. An hourly-total bar with zero starts
+has no count label.
 
 **Evidence and limits:** [Compressor cycling](DIAGNOSTIC_EVIDENCE.md#diagnosis-cycling)
 

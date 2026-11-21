@@ -500,13 +500,17 @@ assert.equal((startup.match(/<button[^>]*data-bucket=/g) || []).length, 1,
   "an incomplete ring leaves older positions unavailable to keyboard selection");
 const startupHour = hourMarkup(startup, 0);
 assert.match(startupHour, /No data/, "zero elapsed time and no start witness establish no count");
-assert.deepEqual(fillModes(startupHour), ["other"], "the retained unread startup slot is visually Unknown");
+assert.deepEqual(fillModes(startupHour), [], "a just-opened hour has no elapsed time to mark Unknown");
 assert.match(startupHour, /0 s of 0 s observed/, "the new hour has no fabricated elapsed time");
 assert.match(startup, /data-tip="No data"/, "no readable time or start witness establishes no chart total");
 assert.equal((startup.match(/<span class="checkup-chart-col" aria-hidden="true" inert><\/span>/g) || []).length,
   23, "positions outside the retained ring are blank and inert without tracks");
 assert.equal((startup.match(/data-modes=/g) || []).length, 1,
   "padding never creates an Unknown fill or implies elapsed time");
+const unreadOpenHour = ui.chart({ ...cyclingWithHours, hours_epoch: 2,
+  hours: [{ bucket: 0, starts: 0, run_s: 0, observed_s: 0, elapsed_s: 1 }] });
+assert.deepEqual(fillModes(hourMarkup(unreadOpenHour, 0)), ["other"],
+  "a positive elapsed interval without readings is Unknown");
 const expiredHour = ui.chart({ ...cyclingWithHours, hours: [
   { bucket: 0, expired: true, starts: 9, run_s: 1200, observed_s: 1800, space_s: 1200, dhw_s: 0 },
   { bucket: 1, starts: 1, run_s: 120, observed_s: 300, elapsed_s: 300, space_s: 120, dhw_s: 0 },
@@ -523,6 +527,8 @@ const edgeOnly = { id: "cycling", verdict: "collecting", starts: 1, observed_s: 
   hours: [{ bucket: 0, starts: 1, run_s: 0, observed_s: 0, elapsed_s: 0 }] };
 assert.match(ui.chart(edgeOnly), /data-tip="≥1 start"/,
   "the chart reports its witnessed starts as a lower bound and omits unobserved runtime");
+assert.deepEqual(fillModes(hourMarkup(ui.chart(edgeOnly), 0)), [],
+  "a start at the hour boundary does not imply a missing interval");
 assert.equal(ui.value(edgeOnly), "≥1");
 assert.match(ui.detail(edgeOnly), /≥1 start/);
 assert.equal(ui.value({ ...edgeOnly, observed_s: 60 }), "≥1");
@@ -575,8 +581,12 @@ assert.equal(fillMarkup(hourMarkup(heatThenWater, 23)), fillMarkup(hourMarkup(wa
 assert.equal(fillMarkup(hourMarkup(heatThenWater, 23)), fillMarkup(mostlyWater),
   "timed and hourly-total charts share one category-fill contract");
 const mixedTrace = timedChart([[0, 1], [82800, 3], [83400, 2], [84000, 0], [84600, 4]]);
-assert.deepEqual(fillModes(hourMarkup(mixedTrace, 23)), ["space", "dhw", "other"],
+const mixedTimedHour = hourMarkup(mixedTrace, 23);
+assert.deepEqual(fillModes(mixedTimedHour), ["space", "dhw", "other"],
   "the timed trace deduplicates Other and Gap before blending");
+assert.match(mixedTimedHour, /Unclear purpose.*Sampling gap/,
+  "the accessible name distinguishes observed unassigned runtime from missing samples");
+assert.doesNotMatch(mixedTimedHour, /No data/, "the hour has readable samples");
 const idleTimed = hourMarkup(heatThenWater, 0);
 assert.deepEqual(fillModes(idleTimed), []);
 assert.match(idleTimed, /0 starts/, "readable off-time retains its observed zero");
