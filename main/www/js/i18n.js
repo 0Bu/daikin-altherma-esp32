@@ -965,6 +965,8 @@ const I18N = {
     "lang.saved": "Language saved",
     "check.detail.dhw_reason.blind_modbus": "readings missing: Modbus silent or polling paused",
     "check.detail.source_stale_modbus": "No fresh Modbus sample; current state unknown. History retained.",
+    "mb.flow_scale_help": "Unverified /100 flow scaling (probe pending/fallback); compare L/min with unit display. Excluded from pipe motion, ΔT, heat output and 24-hour check.",
+    "hist.modbus_flow_unverified": "Unverified /100 Modbus scaling (pending/fallback); compare L/min with unit.",
   },
 };
 function t(k, ...a) {

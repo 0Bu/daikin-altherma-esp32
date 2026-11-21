@@ -239,8 +239,12 @@ The 3-way valve selects the animated hydraulic branch. Water flow has mode-aware
 pump-only circulation is neutral. Cooling/defrost reverse refrigerant motion. Active BUH uses the
 warning tint; active BSH turns the tank's perimeter dashes a fixed orange, distinct from the
 red/blue hydronic charge.
-Rotors stay centred on their hubs, rotate clockwise only when running, and carry no rotating
-flow-direction arrow. Direction belongs to pipe dashes.
+Rotors stay centred on their hubs and carry no rotating flow-direction arrow (direction belongs
+to pipe dashes): the outdoor fan turns when the compressor runs outside defrost, while the
+circulation pump rotor turns strictly on reported pump ON/OFF (`d.pumpOn === true`)
+independently of measured water flow, and water pipes animate solely from qualified flow
+(`waterMoving`). Raw X10A pump signals outside `[0, 100]` stay unknown (`null`, never clamped to
+`0 %`/`100 %`), and `0`/`100` (max/stop command) neither proves RPM, rotation, head nor flow.
 
 Quiet/Defrost pills remain grey while inactive/unknown and blue while active. E-heater stays grey
 or orange; its accessible name and inspector state ON/OFF/unknown. Native Altherma 4 holding 9
@@ -284,10 +288,13 @@ Explain what the quantity is, its bounded normal context, then current state or 
 cannot reappear in a headline, members or state sentence. A fallback pressure row must own headline,
 source line and history together. Only rerender changed content so polling does not destroy a text
 selection. The same quantity uses the same underlying description as the value table. Native Altherma 4
-flow/pressure have unverified conversion limits and must not show numeric agreement/difference.
-Source-qualified native help takes precedence over generic compact inspector copy in every locale,
-including a stand-in under an X10A row. Definition-metadata changes invalidate the comparison even
-when its numeric values do not change.
+flow/pressure and any Modbus Input 49 row marked `flow_scale_unverified` (`Probing`, `Fallback`, or
+`Altherma4` sweeps) have unverified conversion limits: unverified flow displays provisionally on
+the pill and unified 24-hour chart with its caveat without driving `waterMoving`, ΔT, thermal power,
+or numeric agreement/difference. Source-qualified native or scaling limits take precedence over
+generic compact inspector copy in every locale, including a stand-in or paired X10A row.
+Definition-metadata and `flow_scale_unverified` changes invalidate the comparison even when its
+numeric values do not change.
 
 **History**
 

@@ -1,4 +1,4 @@
-// translation-source: 6ad3c45290781dc0a395bafd68b5e19c396820339bbc4d56c5d12abbc20af1fb
+// translation-source: aa3abf8d6b7cd47b6adfa6bc6f918e3a1dbe62e1de7c6d8deffda21d1fb75661
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -1006,6 +1006,8 @@ I18N.nb = localeValues([
   /* lang.saved */ "Språk lagret",
   /* check.detail.dhw_reason.blind_modbus */ "avlesninger mangler: Modbus svarer ikke eller avspørring satt på pause",
   /* check.detail.source_stale_modbus */ "Ingen fersk Modbus-prøve; aktuell tilstand ukjent. Historikk beholdt.",
+  /* mb.flow_scale_help */ "Ubekreftet /100-skalering (sondering/reserve); sammenlign L/min med enheten. Utelatt fra bevegelse, ΔT, varmeeffekt og 24h-sjekk.",
+  /* hist.modbus_flow_unverified */ "Ubekreftet Modbus /100-skalering (venter/reserve); sammenlign med enheten.",
 ]);
 
 INSPECT_I18N.nb = inspectValues(
@@ -1101,13 +1103,7 @@ INSPECT_I18N.nb = inspectValues(
       : "Pumpe og vannmengde bekrefter ikke sirkulasjon i romgrenen."], // heat
     ["Romdrift aktiv", "Romoppvarming/-kjøling", "Signal for normal romdrift. Ikke termostatbehov og bekrefter ikke alene kompressor."], // spaceh
     ["Romtemperatur", 0, "Temperatur og mål for referansesonen; avhenger av sensorplassering."], // room
-    ["Sirkulasjonspumpe", "Hastighet på sirkulasjonspumpe", "Flytter vann i felleskretsen og grenen valgt av 3WV. Kan gå etter kompressorstopp for etterløp, vern eller utjevning; tolk hastighet og vannmengde sammen.", (d) => d.pump == null && d.flow == null && d.pumpOn == null ? null
-      : pumpFlowConflict(d) ? `Intern pumpe melder stopp, men sensoren måler ${fmt1(d.flow)} l/min. Ekstern sirkulasjon, etterløp eller motstridende signaler er mulig.`
-      : d.pump != null && d.pump > 0 ? d.flow != null ? `Hastighet ${fmt0(d.pump)} %; målt ${fmt1(d.flow)} l/min.` : `Hastighet ${fmt0(d.pump)} %, men vannmengde mangler; sirkulasjon er ikke bekreftet.`
-      : waterMoving(d) ? `Sensoren måler ${fmt1(d.flow)} l/min uten brukbar pumpehastighet.`
-      : d.pumpOn === true ? d.flow != null ? `Pumpe aktiv, men bare ${fmt1(d.flow)} l/min; sirkulasjon er ikke bekreftet.` : "Pumpe aktiv, men vannmengde mangler; sirkulasjon er ikke bekreftet."
-      : d.pumpOn === false || d.pump === 0 ? d.flow != null ? `Pumpe stoppet; sensoren viser ${fmt1(d.flow)} l/min. Signalene bekrefter ikke sirkulasjon.` : "Pumpe stoppet uten vannmengdemåling."
-      : `Ingen pålitelig pumpestatus; ${fmt1(d.flow)} l/min alene bekrefter ikke sirkulasjon.`], // pump
+    ["Sirkulasjonspumpe", "Sirkulasjonspumpe", "Invertert X10A-signal (0 = maks, 100 = stopp, [0, 100] → 100–0 %) beviser verken RPM, rotasjon, løftehøyde eller vannmengde; les PÅ/AV og vannmengde hver for seg.", (d) => pumpNowText(d, [(n) => `Pumpekommando ${n} %.`, "Pumpestatus er PÅ.", "Pumpen rapporterer stopp (AV).", "Pumpens PÅ/AV-status er ukjent.", (n) => `Målt vannmengde ${n} l/min.`, "Ingen vannmengdemåling.", "Rapportert AV strider mot vannmengden; ekstern sirkulasjon, etterløp eller utdatert signal er mulig.", "Sirkulasjon er ikke bekreftet."])], // pump
     [(d) => pelMeasured(d) ? "Strømforbruk · HomeHub" : "Anslått strømforbruk", "Strømforbruk", (d) => pelMeasured(d)
       ? "Forbruk fra HomeHub-inngang 51. UI beregner det ikke, men offentlig dokumentasjon beviser ikke kalibrering, målepunkt eller hvilke varmere som inngår; ikke en sertifisert anleggsmåler."
       : "Anslag for COP/EER. CT summerer oppgitte faser med antatt strøm × 230 V; virkelig spenning og effektfaktor er ukjent. Inverterstrøm dekker bare kompressoren.", (d) => d.pelHeld ? "Kompressoren står; inverterstrømmen er fra siste syklus, så forbruk/virkningsgrad kan ikke vises."
@@ -1214,7 +1210,7 @@ DESCRIPTION_I18N.nb = descriptionValues([
   ["R4T-retur til PHE; vurder ΔT med vannmengde, kompressor og modus, ikke en universell 5 K-regel."], // 35
   ["Vannmengde i felleskretsen; minimum avhenger av modell/modus, og lav verdi kan utløse 7H."], // 36
   ["Hydraulikktrykk: mange håndbøker krever >1 bar; ved ≤1,0 bar, bruk håndboken for nøyaktig modell."], // 37
-  ["Invertert pumpekommando: 0 er maksimal hastighet, 100 er stopp."], // 38
+  ["Invertert X10A-kommando: 0 = maks, 100 = stopp ([0, 100] → 100–0 %). Måler ingen RPM og beviser ikke rotasjon, løftehøyde eller vannmengde; les PÅ/AV og mengde hver for seg."], // 38
   ["Pumpestatus; beviser ikke nyttig varme og kan være aktiv uten kompressor. Sammenlign vannmengde."], // 39
   ["Status for pumpen i en konfigurert solvarmekrets."], // 40
   ["Oppgitt hastighet for pumpen som profilen navngir."], // 41

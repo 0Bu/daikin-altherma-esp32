@@ -1,4 +1,4 @@
-// translation-source: 6ad3c45290781dc0a395bafd68b5e19c396820339bbc4d56c5d12abbc20af1fb
+// translation-source: aa3abf8d6b7cd47b6adfa6bc6f918e3a1dbe62e1de7c6d8deffda21d1fb75661
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -1006,6 +1006,8 @@ I18N.cs = localeValues([
   /* lang.saved */ "Jazyk uložen",
   /* check.detail.dhw_reason.blind_modbus */ "chybí údaje: Modbus neodpovídá nebo je dotazování pozastaveno",
   /* check.detail.source_stale_modbus */ "Žádný čerstvý vzorek Modbus; aktuální stav neznámý. Historie zachována.",
+  /* mb.flow_scale_help */ "Neověřené škálování /100 (čeká sonda/náhradní profil); porovnejte L/min s displejem. Bez animace, ΔT, výkonu a 24h kontroly.",
+  /* hist.modbus_flow_unverified */ "Neověřené škálování Modbus /100 (čeká sonda/náhradní profil); porovnejte s displejem.",
 ]);
 INSPECT_I18N.cs = inspectValues(
   ["Chybí aktuální hodnota:", "kompresor stojí a venkovní jednotka obnovuje své snímače jen za chodu. Hodnota z minulého běhu je skryta, aby nepůsobila jako aktuální měření.", "Otáčky kompresoru nelze přečíst, takže hodnoty venkovní jednotky mohou být z minulého běhu."],
@@ -1062,13 +1064,7 @@ INSPECT_I18N.cs = inspectValues(
       : waterMoving(d) ? d.thermalMode === "cool" && !compressorRunning(d, 5) && d.pthRaw != null && d.pthRaw > 0 ? `Zbytkově teplá voda proudí do domu. R1T ${degC(d.lwt)}; za spotřebiči není snímač. Nejde o aktivní chlazení.` : `Voda proudí do ${activeSpaceKind(d) === "cool" ? "chladicího" : activeSpaceKind(d) === "heat" ? "topného" : "domovního"} okruhu. R1T ${degC(d.lwt)}; za spotřebiči není snímač.` : "Čerpadlo a průtok nepotvrzují oběh domem."], // heat
     ["Provoz vytápění/chlazení domu", "Provoz vytápění nebo chlazení domu", "Stav běžného provozu domu. Není to požadavek termostatu a sám nepotvrzuje kompresor."], // spaceh
     ["Teplota místnosti", 0, "Teplota referenční zóny; porovnejte ji s nastavením a režimem."], // room
-    ["Oběhové čerpadlo", "Otáčky oběhového čerpadla", "Pohání vodu společným okruhem a cestou zvolenou 3WV. Může běžet při stojícím kompresoru kvůli doběhu nebo ochraně; otáčky samy nepotvrzují průtok.", (d) => d.pump == null && d.flow == null && d.pumpOn == null ? null
-      : pumpFlowConflict(d) ? `Čerpadlo hlásí stání, ale snímač ${fmt1(d.flow)} l/min. Možný je vnější oběh, doběh nebo rozporný/starý signál; ověřte oba údaje.`
-      : d.pump != null && d.pump > 0 ? d.flow != null ? `Otáčky ${fmt0(d.pump)} %; průtok ${fmt1(d.flow)} l/min.` : `Otáčky ${fmt0(d.pump)} %, ale průtok chybí; oběh není potvrzen.`
-      : waterMoving(d) ? `Průtok ${fmt1(d.flow)} l/min při chybějící použitelné hodnotě otáček.`
-      : d.pumpOn === true ? d.flow != null ? `Čerpadlo ZAP, ale průtok jen ${fmt1(d.flow)} l/min; oběh není potvrzen.` : "Čerpadlo ZAP, ale průtok chybí; oběh není potvrzen."
-      : d.pumpOn === false || d.pump === 0 ? d.flow != null ? `Čerpadlo stojí; snímač ${fmt1(d.flow)} l/min. Hodnoty oběh nepotvrzují.` : "Čerpadlo stojí a průtok chybí."
-      : `Spolehlivý stav čerpadla chybí; ${fmt1(d.flow)} l/min nepotvrzuje oběh.`], // pump
+    ["Oběhové čerpadlo", "Oběhové čerpadlo", "Obrácený signál X10A (0 = max, 100 = stop, [0, 100] → 100–0 %) neměří RPM ani neprokazuje otáčení, výtlak nebo průtok; čtěte ZAP/VYP a průtok zvlášť, i v klidu.", (d) => pumpNowText(d, [(n) => `Povel čerpadla ${n} %.`, "Stav čerpadla je ZAP.", "Čerpadlo hlásí zastavení (VYP).", "Stav čerpadla ZAP/VYP neznámý.", (n) => `Měřený průtok ${n} l/min.`, "Žádné měření průtoku.", "Hlášené VYP je v rozporu s průtokem; možný vnější oběh, doběh nebo zastaralý signál.", "Oběh vody není prokázán."])], // pump
     [(d) => pelMeasured(d) ? "Elektrický příkon (HomeHub)" : "Elektrický příkon (odhad)", "Elektrický příkon", (d) => pelMeasured(d) ? "Příkon z registru HomeHub 51. Dokumentace nepotvrzuje kalibraci, bod měření ani zahrnutí všech těles; nejde o certifikovaný elektroměr soustavy." : "Odhad pro COP/EER: součet fází CT × předpokládaných 230 V. Napětí a účiník nejsou známy; proud měniče zahrnuje jen kompresor a rozsah CT určuje zapojení.", (d) => d.pelHeld ? "Kompresor stojí, takže proud měniče je z minulého běhu, ne aktuální; příkon ani účinnost nelze uvést."
       : d.pel == null ? "Profil nemá aktuální proud, proto nelze odvodit COP/EER."
       : d.pelSrc === "MB" ? "Hodnota z registru HomeHub 51; přesná hranice měření není zdokumentována."
@@ -1168,7 +1164,7 @@ DESCRIPTION_I18N.cs = descriptionValues([
   ["R4T je společná vratka do PHE; R1T−R4T je ΔT PHE, ne přímo otopných těles."], // 35
   ["Rychlost oběhu vody ve společném okruhu vytápění/chlazení a TUV."], // 36
   ["Tlak vody; rozsah závisí na modelu, při ≤1,0 bar použijte přesný návod."], // 37
-  ["Povel rychlosti oběhového čerpadla s obrácenou stupnicí: 0 = plná rychlost, 100 = stojí."], // 38
+  ["Obrácený X10A povel: 0 = max, 100 = stop ([0, 100] → 100–0 %). Neměří RPM ani neprokazuje otáčení, výtlak nebo průtok; čtěte ZAP/VYP a průtok zvlášť."], // 38
   ["Běh oběhového čerpadla nedokazuje přenos tepla; potvrďte jej průtokem."], // 39
   ["Stav čerpadla nakonfigurovaného solárního termického okruhu."], // 40
   ["Hlášená rychlost čerpadla pojmenovaného profilem."], // 41

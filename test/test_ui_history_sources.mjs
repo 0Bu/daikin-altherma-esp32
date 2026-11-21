@@ -1440,6 +1440,11 @@ S.hist.set("pump_signal", { at: Date.now(), gen: 1, dt: 300, unit: "", t0: 17687
 await h.ensureDerived("pump_speed");
 assert.deepEqual(Array.from(S.hist.get("pump_speed").v), [0, 300, 1000]);
 assert.match(h.histHtml("pump_speed", "", "Drehzahl der Umwälzpumpe"), /0,0 – 100,0 %/);
+assert.equal(h.DERIVED.pump_speed.fn({ pump_signal: 25.5 }), 74.5);
+for (const invalid of [-1, 101, 255, Infinity, -Infinity]) {
+  assert.equal(h.DERIVED.pump_speed.fn({ pump_signal: invalid }), null,
+    `out-of-range pump_signal ${String(invalid)} stays a gap`);
+}
 
 // The diverter is categorical too. X10A and Modbus start active and Modbus toggles off/on inside the same chart.
 S.hist.set("valve_dhw", { at: 1, gen: 1, dt: 300, unit: "", t0: 1768720000, b0: 200,
@@ -1922,7 +1927,7 @@ try {
   const prevHist = new Map(S.hist);
   const prevModbus = S._modbus;
   S.status.hp = { connected: false };
-  S.status.modbus = { enabled: true, connected: true, host: "hub-1" };
+  S.status.modbus = { enabled: true, connected: true, host: "hub-1", profile: "homehub", profile_basis: "affirmative" };
   S.status.history = {
     rows: [],
     modbus_rows: ["leaving_water", "return_water", "flow", "compressor_state", "modbus_power",
@@ -1945,6 +1950,42 @@ try {
     "modbus:dt must use only Modbus temperatures without X10A mixing");
   assert.deepEqual(Array.from(S.hist.get(h.histCacheKey("pth", "modbus")).v.slice(0, 3)), [42, null, 0],
     "modbus:pth computes power only when compressor_state is active and keeps stopped flow at zero");
+  const pthKey = h.histCacheKey("pth", "modbus");
+  const verifiedHist = new Map(S.hist);
+  const verifiedPth = S.hist.get(pthKey);
+  const verifiedModbus = { ...S.status.modbus };
+  const verifiedRows = S._modbus;
+  for (const [label, mbStatus, mbRows] of [
+    ["altherma4 fallback", { enabled: true, connected: true, host: "hub-1", profile: "altherma4", profile_basis: "fallback" },
+      [{ off: 49, profile: "altherma4", flow_scale_unverified: true }]],
+    ["auto probing", { enabled: true, connected: true, host: "hub-1", profile: "auto", profile_basis: "probing" }, []],
+    ["homehub fallback", { enabled: true, connected: true, host: "hub-1", profile: "homehub", profile_basis: "fallback" }, []],
+    ["sweep-bound unverified row49", { enabled: true, connected: true, host: "hub-1", profile: "homehub", profile_basis: "affirmative" },
+      [{ off: 49, profile: "homehub", flow_scale_unverified: true }]],
+  ]) {
+    S.status.modbus = mbStatus;
+    h.syncHistSources();
+    S._modbus = mbRows;
+    S.hist.clear();
+    for (const [k, v] of verifiedHist) S.hist.set(k, v);
+    S.hist.set(pthKey, verifiedPth);
+    assert.equal(h.hasModbusHist("pth"), false, `${label}: modbus:pth must be withheld`);
+    assert.equal(h.hasModbusHist("flow"), true, `${label}: modbus:flow remains offered`);
+    assert.match(h.histHtml("flow", "L/min", "Flow rate", "modbus"), /vhist-note/,
+      `${label}: modbus:flow renders unverified scaling caveat`);
+    const pthView = h.historyView("pth");
+    assert.equal(pthView?.series?.some((s) => s.source === "modbus") ?? false, false,
+      `${label}: historyView("pth") excludes modbus even with stale cache`);
+    S.hist.delete(pthKey);
+    await h.ensureDerived("pth", "modbus");
+    assert.equal(S.hist.has(pthKey), false,
+      `${label}: ensureDerived("pth", "modbus") refuses to repopulate S.hist`);
+  }
+  S.status.modbus = verifiedModbus;
+  h.syncHistSources();
+  S._modbus = verifiedRows;
+  S.hist.clear();
+  for (const [k, v] of verifiedHist) S.hist.set(k, v);
   assert.match(h.histHtml("compressor_state", "", "Verdichter"), /3 Phasen/,
     "compressor_state summary renders observed active phase count");
   assert.match(h.histHtml("modbus_defrost_state", "", "Abtauen"), /vhist-state-track modbus/);
@@ -2161,6 +2202,25 @@ try {
     assert.deepEqual(Array.from(pairedSpaceView.series, (s) => s.source), ["x10a", "modbus"]);
     assert.equal(pairedSpaceView.series[0].v.at(-1), 10);
     assert.equal(pairedSpaceView.series[1].v.at(-1), 0);
+
+    // 4. Unified flow 24h chart carries the unverified Modbus caveat only when Input 49 is unverified.
+    S.status.history.rows = [];
+    S.status.history.modbus_rows = [{ id: "flow", label: "Flow rate" }];
+    S.status.modbus = { enabled: true, connected: true, profile: "homehub", profile_basis: "fallback" };
+    S._modbus = [{ off: 49, concept: "flow", history: "flow", value: "12.3", unit: "L/min",
+      flow_scale_unverified: true }];
+    h.syncHistSources();
+    S.hist.set(h.histCacheKey("flow", "modbus"),
+      { at: Date.now(), gen: 1, dt: 300, unit: "L/min", b0: 10, held: [], v: [120, 123] });
+    const unverifiedFlowHtml = h.histHtml("flow", "L/min", "Volumenstrom", "modbus");
+    assert.ok(unverifiedFlowHtml.includes(h.t("hist.modbus_flow_unverified")),
+      "unverified Modbus flow 24h chart includes explicit scaling caveat");
+
+    S.status.modbus = { enabled: true, connected: true, profile: "homehub", profile_basis: "affirmative" };
+    S._modbus = [{ off: 49, concept: "flow", history: "flow", value: "12.3", unit: "L/min" }];
+    const verifiedFlowHtml = h.histHtml("flow", "L/min", "Volumenstrom", "modbus");
+    assert.ok(!verifiedFlowHtml.includes(h.t("hist.modbus_flow_unverified")),
+      "verified EKRHH Modbus flow 24h chart omits unverified scaling caveat");
 
     S.status.history.rows = prevRows;
     S.status.history.modbus_rows = prevMbRows;

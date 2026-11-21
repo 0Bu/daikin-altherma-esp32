@@ -9050,13 +9050,29 @@ static void test_modbus_profile() {
     CHECK(dec.is_definitive);
     CHECK(dec.is_affirmative);
 
-    // Negative failure detail on Exception confirms HomeHub
+    // Negative failure detail (synthetic transport/internal sentinel) still confirms HomeHub
     dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::Exception, -1, 79, 0);
     CHECK(dec.next_profile == ModbusProfile::HomeHub);
     CHECK(dec.link_ok);
     CHECK(!dec.count_failure);
     CHECK(dec.is_definitive);
     CHECK(dec.is_affirmative);
+
+    // Wire Modbus exception 0x00 (failure_detail == 0) must stay non-affirmative through retry
+    // exhaustion so it falls back cleanly rather than posing as affirmatively confirmed HomeHub.
+    dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::Exception, 0x00, 79, 0, 0);
+    CHECK(dec.next_profile == ModbusProfile::Auto);
+    CHECK(dec.link_ok);
+    CHECK(!dec.count_failure);
+    CHECK(!dec.is_definitive);
+    CHECK(!dec.is_affirmative);
+
+    dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::Exception, 0x00, 79, 0, 3);
+    CHECK(dec.next_profile == ModbusProfile::HomeHub);
+    CHECK(dec.link_ok);
+    CHECK(!dec.count_failure);
+    CHECK(dec.is_definitive);
+    CHECK(!dec.is_affirmative);
 
     // Invalid raw value (0 bar) with 3 retries falls back to HomeHub
     dec = evaluate_probe_result(ModbusProfile::Auto, MbFailureType::None, 0, 79, 0, 3);
@@ -9139,8 +9155,25 @@ static void test_modbus_profile() {
         CHECK(tracker.affirmative_profile == ModbusProfile::HomeHub);
         CHECK(tracker.on_socket_open("192.0.2.51", 502, 2) == ModbusProfile::HomeHub);
 
+        // Wire exception 0x00 stays Probing across retries, then falls back without becoming
+        // affirmative (regression guard against `failure_detail <= 0`).
+        CHECK(tracker.on_socket_open("192.0.2.52", 502, 1) == ModbusProfile::Auto);
+        for (int attempt = 1; attempt <= 2; ++attempt) {
+            d = tracker.evaluate_probe(MbFailureType::Exception, 0x00, 79, 0, 100);
+            CHECK(!d.is_definitive && !d.is_affirmative);
+            CHECK(d.next_profile == ModbusProfile::Auto);
+            CHECK(tracker.profile_basis == ModbusProfileBasis::Probing);
+            CHECK(tracker.consecutive_failures == attempt);
+        }
+        d = tracker.evaluate_probe(MbFailureType::Exception, 0x00, 79, 0, 100);
+        CHECK(d.is_definitive && !d.is_affirmative);
+        CHECK(d.next_profile == ModbusProfile::HomeHub);
+        CHECK(tracker.active_profile == ModbusProfile::HomeHub);
+        CHECK(tracker.affirmative_profile == ModbusProfile::Auto);
+        CHECK(tracker.profile_basis == ModbusProfileBasis::Fallback);
+
         // Port change resets target
-        CHECK(tracker.on_socket_open("192.0.2.51", 503, 2) == ModbusProfile::Auto);
+        CHECK(tracker.on_socket_open("192.0.2.52", 503, 1) == ModbusProfile::Auto);
 
         // Affirmative MB_UNSUPPORTED on tracker
         d = tracker.evaluate_probe(MbFailureType::None, 0, 79, MB_UNSUPPORTED);
@@ -9161,7 +9194,7 @@ static void test_modbus_profile() {
         CHECK(d.is_affirmative);
         CHECK(tracker.active_profile == ModbusProfile::Altherma4);
 
-        // Exception with failure_detail <= 0 confirms HomeHub
+        // Synthetic negative failure_detail (< 0) confirms HomeHub (wire 0x00 stays Fallback)
         CHECK(tracker.on_socket_open("192.0.2.54", 502, 1) == ModbusProfile::Auto);
         d = tracker.evaluate_probe(MbFailureType::Exception, -1, 79, 0);
         CHECK(d.is_definitive);
@@ -24459,6 +24492,14 @@ static void test_checkup_persist() {
     CHECK(hh_cov.rps && hh_cov.valve && hh_cov.mode && hh_cov.bsh && hh_cov.pump && hh_cov.r5t &&
           hh_cov.fault && hh_cov.fault_rows == 1 && hh_cov.flow && !hh_cov.defrost && !hh_cov.buh &&
           !hh_cov.pressure && !hh_cov.retries);
+    const CheckupCoverage hh_fallback_cov =
+        checkup_modbus_coverage(rt(ModbusProfile::HomeHub), ModbusProfileBasis::Fallback);
+    CHECK(hh_fallback_cov.rps && hh_fallback_cov.valve && hh_fallback_cov.mode &&
+          hh_fallback_cov.bsh && hh_fallback_cov.pump && hh_fallback_cov.r5t &&
+          hh_fallback_cov.fault && !hh_fallback_cov.flow);
+    const CheckupCoverage hh_probing_cov =
+        checkup_modbus_coverage(rt(ModbusProfile::HomeHub), ModbusProfileBasis::Probing);
+    CHECK(!hh_probing_cov.rps && !hh_probing_cov.fault && !hh_probing_cov.flow);
     const CheckupCoverage a4_cov = checkup_modbus_coverage(rt(ModbusProfile::Altherma4));
     CHECK(a4_cov.rps && a4_cov.valve && a4_cov.mode && a4_cov.bsh && a4_cov.pump && a4_cov.r5t &&
           a4_cov.fault && a4_cov.fault_rows == 1 && !a4_cov.flow && !a4_cov.defrost &&

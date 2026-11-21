@@ -1,4 +1,4 @@
-// translation-source: 6ad3c45290781dc0a395bafd68b5e19c396820339bbc4d56c5d12abbc20af1fb
+// translation-source: aa3abf8d6b7cd47b6adfa6bc6f918e3a1dbe62e1de7c6d8deffda21d1fb75661
 I18N.de = localeValues([
   /* sys.nodata */ "Keine Daten",
   /* sys.unreachable */ "Nicht erreichbar",
@@ -1006,6 +1006,8 @@ I18N.de = localeValues([
   /* lang.saved */ "Sprache gespeichert",
   /* check.detail.dhw_reason.blind_modbus */ "Messwerte fehlen: Modbus schweigt oder Abfrage pausiert",
   /* check.detail.source_stale_modbus */ "Keine frische Modbus-Abfrage; aktueller Zustand unbekannt. Historie bleibt erhalten.",
+  /* mb.flow_scale_help */ "Unbestätigte /100-Skalierung (Prüfung/Fallback); L/min am Gerät prüfen. Aus Bewegung, ΔT, Leistung und 24h-Check ausgeschlossen.",
+  /* hist.modbus_flow_unverified */ "Unbestätigte /100-Skalierung (Prüfung/Fallback); am Gerät prüfen.",
 ]);
 
 // Unchanged German specialist copy, loaded with the existing German locale asset.

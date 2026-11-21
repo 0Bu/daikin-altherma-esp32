@@ -1,4 +1,4 @@
-// translation-source: 6ad3c45290781dc0a395bafd68b5e19c396820339bbc4d56c5d12abbc20af1fb
+// translation-source: aa3abf8d6b7cd47b6adfa6bc6f918e3a1dbe62e1de7c6d8deffda21d1fb75661
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
@@ -1006,6 +1006,8 @@ I18N.zh = localeValues([
   /* lang.saved */ "语言已保存",
   /* check.detail.dhw_reason.blind_modbus */ "读数缺失：Modbus 无响应或轮询暂停",
   /* check.detail.source_stale_modbus */ "无新鲜Modbus样本；当前状态未知。保留历史。",
+  /* mb.flow_scale_help */ "未确认的 /100 流量换算（待定/回退）；请对照机组显示 L/min。已从流向、ΔT、热功率和 24h 检查中排除。",
+  /* hist.modbus_flow_unverified */ "未确认的 Modbus /100 换算（待定/回退）；请对照机组显示。",
 ]);
 INSPECT_I18N.zh = inspectValues(
   ["无当前读数：", "压缩机已停；仅运行时更新的室外传感器会隐藏旧值。", "无法读取压缩机转速，室外机读数可能来自上次运行。"],
@@ -1084,13 +1086,7 @@ INSPECT_I18N.zh = inspectValues(
       : "泵/流量未证明空间支路循环。"], // heat
     ["空间运行", "空间供暖或制冷运行", "空间冷暖运行信号；不是温控需求或压缩机证明。"], // spaceh
     ["室温", "室温", "参考区域温度与目标；含义取决于位置。"], // room
-    ["循环泵", "循环泵速度", "驱动公共回路及 3WV 支路；停机后也可延时/保护运行，须结合流量。", (d) => d.pump == null && d.flow == null && d.pumpOn == null ? null
-      : pumpFlowConflict(d) ? `水泵报停但测得 ${fmt1(d.flow)} l/min；可能为外泵、延时或信号冲突。`
-      : d.pump != null && d.pump > 0 ? d.flow != null ? `${fmt0(d.pump)}%；${fmt1(d.flow)} l/min。` : `${fmt0(d.pump)}%，无流量；循环未确认。`
-      : waterMoving(d) ? `无泵速；测得 ${fmt1(d.flow)} l/min。`
-      : d.pumpOn === true ? d.flow != null ? `泵启动但仅 ${fmt1(d.flow)} l/min；循环未确认。` : "泵启动但无流量。"
-      : d.pumpOn === false || d.pump === 0 ? d.flow != null ? `泵停止；显示 ${fmt1(d.flow)} l/min，未证明循环。` : "泵停止，无流量。"
-      : `泵状态不可靠；${fmt1(d.flow)} l/min 未证明循环。`], // pump
+    ["循环泵", "循环泵", "反向 X10A 信号（0 = 最大，100 = 停机，[0, 100] → 100–0 %）不测量 RPM，也不证明旋转、扬程或流量；开关状态与流量分开查看。", (d) => pumpNowText(d, [(n) => `水泵指令 ${n} %。`, "泵状态为开启。", "水泵报告停机。", "水泵开关状态未知。", (n) => `实测流量 ${n} l/min。`, "无流量数据。", "报告停机与实测流量矛盾，可能存在外泵、延时停机或旧信号。", "尚不能确认水循环。"])], // pump
     [(d) => pelMeasured(d) ? "电功率 · HomeHub" : "电功率估算", "电功率", (d) => pelMeasured(d)
       ? "HomeHub 输入 51 的耗电；校准、测点和所含加热器未公开，不是认证总表。"
       : "COP/EER 输入估算：CT 按声明相与 230 V，未知真实电压/功率因数；逆变器电流仅含压缩机。", (d) => d.pelHeld ? "停机后逆变器电流是旧值，不能显示耗电/效率。"
@@ -1197,7 +1193,7 @@ DESCRIPTION_I18N.zh = descriptionValues([
   ["PHE 回水 R4T；须结合流量/压缩机/模式，无统一 5 K。"], // 35
   ["公共水流量；最低值随型号/模式，过低可触发 7H。"], // 36
   ["水压；许多手册要求 >1 bar，≤1.0 bar 时查确切型号手册。"], // 37
-  ["反向水泵速度命令：0 表示最高转速，100 表示停止。"], // 38
+  ["反向 X10A 指令：0 = 最大，100 = 停机（[0, 100] → 100–0 %）。不测 RPM 也不证明旋转、扬程或流量；请分开查看开关状态与流量。"], // 38
   ["泵状态；须结合流量，运行不证明换热。"], // 39
   ["太阳能回路泵状态；不同于热泵水路泵。"], // 40
   ["配置所命名泵速；刻度/回路随型号。"], // 41

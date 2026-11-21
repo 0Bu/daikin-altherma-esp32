@@ -67,6 +67,7 @@ int      config_reads = 0, config_saves = 0, history_calls = 0, history_gaps = 0
 int      checkup_calls = 0, checkup_live_calls = 0, checkup_confirm_calls = 0, checkup_resets = 0;
 uint32_t history_generation = 1, checkup_consent_epoch_val = 1;
 daik::ModbusProfile            checkup_last_profile = daik::ModbusProfile::Auto;
+daik::ModbusProfileBasis       checkup_last_basis   = daik::ModbusProfileBasis::Probing;
 std::function<void()>    history_hook;
 std::vector<std::string> logs;
 std::vector<daik::CachedValue> history_rows;
@@ -113,10 +114,11 @@ void     checkup_modbus_confirm_source(ModbusProfile profile, uint32_t) {
     adapter::checkup_last_profile = profile;
 }
 void checkup_record_modbus(const CachedValue*, size_t, ModbusProfile profile, uint32_t, uint32_t,
-                           bool source_confirmed) {
+                           bool source_confirmed, ModbusProfileBasis basis) {
     ++adapter::checkup_calls;
     if (source_confirmed) ++adapter::checkup_live_calls;
     adapter::checkup_last_profile = profile;
+    adapter::checkup_last_basis   = basis;
 }
 void     checkup_modbus_reset() { ++adapter::checkup_resets; }
 uint32_t history_modbus_generation() { return adapter::history_generation; }
@@ -220,6 +222,7 @@ void reset() {
     adapter::checkup_resets            = 0;
     adapter::checkup_consent_epoch_val = 1;
     adapter::checkup_last_profile      = ModbusProfile::Auto;
+    adapter::checkup_last_basis        = ModbusProfileBasis::Probing;
     adapter::history_hook              = {};
     adapter::logs.clear();
     adapter::history_rows.clear();
@@ -608,6 +611,7 @@ struct Peer {
     std::atomic<bool>     break_link{false};
     std::atomic<bool>     batch_exception{false};
     std::atomic<bool>         probe_exception{false};
+    std::atomic<uint8_t>      probe_exception_code{2};
     std::atomic<bool>         space_route_exception{false};
     std::mutex                response_mutex;
     std::vector<RegisterWord> words;
@@ -662,9 +666,12 @@ struct Peer {
                 std::vector<uint8_t> r;
                 if ((batch_exception && qty > 1) ||
                     (space_route_exception && req[7] == 4 && addr == 36 && qty == 1) ||
-                    (probe_exception && req[7] == 4 && addr == 78 && qty == 1))
-                    r = {req[0], req[1], 0, 0, 0, 3, req[6], uint8_t(req[7] | 0x80), 2};
-                else {
+                    (probe_exception && req[7] == 4 && addr == 78 && qty == 1)) {
+                    const uint8_t exc = (probe_exception && req[7] == 4 && addr == 78 && qty == 1)
+                                            ? probe_exception_code.load()
+                                            : uint8_t{2};
+                    r = {req[0], req[1], 0, 0, 0, 3, req[6], uint8_t(req[7] | 0x80), exc};
+                } else {
                     std::vector<uint16_t> response_words;
                     for (uint16_t i = 0; i < qty; ++i) {
                         const uint16_t off = addr + i + 1;
@@ -797,7 +804,8 @@ const CachedValue& cached_row(const std::vector<CachedValue>& rows, uint16_t off
                           [=](const auto& value) { return value.off == offset; }) == 1);
     return *row;
 }
-void require_catalog_rows(const std::vector<CachedValue>& rows, bool native) {
+void require_catalog_rows(const std::vector<CachedValue>& rows, bool native,
+                          bool expected_flow_unverified) {
     const auto fixture = catalog_fixture(native);
     REQUIRE(rows.size() == (native ? 49u : 37u));
     REQUIRE(rows.size() == fixture.size());
@@ -809,6 +817,8 @@ void require_catalog_rows(const std::vector<CachedValue>& rows, bool native) {
         const auto* resolved   = def::homehub_definition(row.modbus_definition);
         REQUIRE(resolved == &definition);
         REQUIRE(def::homehub_definition_is_altherma4(row.modbus_definition) == native);
+        REQUIRE(row.modbus_flow_scale_unverified ==
+                (definition.offset == 49 && expected_flow_unverified));
         REQUIRE(row.reg == def::HOMEHUB_GROUP_REG && !row.held);
         REQUIRE(row.label == definition.label && row.unit == definition.unit);
         REQUIRE(row.conv == (definition.type == MbType::Text16                  ? 204
@@ -820,6 +830,9 @@ void require_catalog_rows(const std::vector<CachedValue>& rows, bool native) {
         REQUIRE(expected != fixture.end());
         REQUIRE(row.value == expected->formatted);
     }
+}
+void require_catalog_rows(const std::vector<CachedValue>& rows, bool native) {
+    require_catalog_rows(rows, native, native);
 }
 void require_request_spans(const std::vector<WireRequest>& requests, bool native) {
     std::vector<WireRequest> expected = {
@@ -1008,12 +1021,54 @@ void probe_homehub_rows() {
         words.push_back({MbFunc::ReadInput, 79, raw});
         Peer peer(false, ModbusProfile::Auto, words);
         mb_poll_once();
-        require_catalog_rows(snapshot_rows(), false);
+        require_catalog_rows(snapshot_rows(), false, true);
         REQUIRE(mb_status().profile == ModbusProfile::Auto);
         REQUIRE(mb_status().profile_basis == ModbusProfileBasis::Probing);
         REQUIRE(peer.requests == MB_PLAN.count + 1);
         REQUIRE(adapter::checkup_confirm_calls == 0 && adapter::checkup_live_calls == 0);
+        REQUIRE(cached_row(snapshot_rows(), 49).modbus_flow_scale_unverified);
     }
+}
+void probe_0x00_and_flow_scale() {
+    reset();
+    Peer peer(false, ModbusProfile::Auto, wire_words(false));
+    peer.probe_exception      = true;
+    peer.probe_exception_code = 0x00;
+
+    // Retries 1..2 with wire exception 0x00 must stay Auto/Probing and mark Input 49 unverified.
+    for (int i = 0; i < 2; ++i) {
+        s_cycle_tick = 0;
+        mb_poll_once();
+        REQUIRE(mb_status().profile == ModbusProfile::Auto);
+        REQUIRE(mb_status().profile_basis == ModbusProfileBasis::Probing);
+        REQUIRE(adapter::checkup_calls == 0);
+        const auto rows = snapshot_rows();
+        REQUIRE(cached_row(rows, 49).modbus_flow_scale_unverified);
+    }
+
+    // Retry 3 falls back to HomeHub (Fallback, never Affirmative) and keeps Input 49 unverified.
+    s_cycle_tick = 0;
+    mb_poll_once();
+    REQUIRE(mb_status().profile == ModbusProfile::HomeHub);
+    REQUIRE(mb_status().profile_basis == ModbusProfileBasis::Fallback);
+    REQUIRE(s_probe_tracker.affirmative_profile == ModbusProfile::Auto);
+    REQUIRE(adapter::checkup_live_calls == 1 &&
+            adapter::checkup_last_basis == ModbusProfileBasis::Fallback);
+    const auto fallback_snap = snapshot_rows();
+    REQUIRE(cached_row(fallback_snap, 49).modbus_flow_scale_unverified);
+
+    // Periodic re-probe succeeds with Exception 02 -> Affirmative HomeHub qualifies future sweeps
+    // without mutating already-committed snapshot rows.
+    sdk::clock_us.fetch_add(int64_t{logic::MODBUS_PROBE_INITIAL_BACKOFF_S + 5} * 1000000LL);
+    peer.probe_exception_code = 0x02;
+    s_cycle_tick              = 0;
+    mb_poll_once();
+    REQUIRE(mb_status().profile == ModbusProfile::HomeHub);
+    REQUIRE(mb_status().profile_basis == ModbusProfileBasis::Affirmative);
+    REQUIRE(adapter::checkup_last_basis == ModbusProfileBasis::Affirmative);
+    const auto verified_snap = snapshot_rows();
+    REQUIRE(!cached_row(verified_snap, 49).modbus_flow_scale_unverified);
+    REQUIRE(cached_row(fallback_snap, 49).modbus_flow_scale_unverified);
 }
 void definition_snapshot_cutover() {
     for (const auto profile : {ModbusProfile::HomeHub, ModbusProfile::Altherma4}) {
@@ -1542,6 +1597,7 @@ int main(int argc, char** argv) {
                     {"native_power_label", test::native_power_label},
                     {"probe_native_promotion", test::probe_native_promotion},
                     {"probe_homehub_rows", test::probe_homehub_rows},
+                    {"probe_0x00_and_flow_scale", test::probe_0x00_and_flow_scale},
                     {"definition_snapshot_cutover", test::definition_snapshot_cutover},
                     {"poll_full_fast_break", test::poll_full_fast_break},
                     {"poll_batch_fallback", test::poll_batch_fallback},

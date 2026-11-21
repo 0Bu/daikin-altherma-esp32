@@ -1,4 +1,4 @@
-// translation-source: 6ad3c45290781dc0a395bafd68b5e19c396820339bbc4d56c5d12abbc20af1fb
+// translation-source: aa3abf8d6b7cd47b6adfa6bc6f918e3a1dbe62e1de7c6d8deffda21d1fb75661
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -1006,6 +1006,8 @@ I18N.fr = localeValues([
   /* lang.saved */ "Langue enregistrée",
   /* check.detail.dhw_reason.blind_modbus */ "relevés manquants : Modbus sans réponse ou interrogation en pause",
   /* check.detail.source_stale_modbus */ "Pas de mesure Modbus récente ; état actuel inconnu. Historique conservé.",
+  /* mb.flow_scale_help */ "Échelle /100 non confirmée (sonde/repli) ; comparez L/min à l’afficheur. Exclu du flux, ΔT, puissance et bilan 24 h.",
+  /* hist.modbus_flow_unverified */ "Échelle Modbus /100 non vérifiée (sonde/repli) ; comparez à l’unité.",
 ]);
 INSPECT_I18N.fr = inspectValues(
   ["Aucun relevé actuel :", "le compresseur est arrêté et l’unité extérieure n’actualise ses propres capteurs qu’en fonctionnement. La valeur du dernier cycle est masquée pour ne pas la présenter comme actuelle.", "Vitesse du compresseur illisible : les valeurs de l’unité extérieure peuvent venir du dernier cycle."],
@@ -1084,13 +1086,7 @@ INSPECT_I18N.fr = inspectValues(
       : "Pompe et débit actuels ne prouvent aucune circulation dans la branche locaux."], // heat
     ["Fonctionnement des locaux", "Fonctionnement chauffage ou froid des locaux", "Signal de fonctionnement normal chauffage/froid des locaux. Ce n’est pas la demande du thermostat et il ne prouve pas à lui seul le fonctionnement du compresseur."], // spaceh
     ["Température ambiante", 0, "Température et consigne de la zone de référence ; elles dépendent du placement du capteur."], // room
-    ["Circulateur", "Vitesse du circulateur", "Fait circuler l’eau dans la boucle commune et la branche choisie par la 3WV. Il peut rester actif compresseur arrêté pour post-circulation, protection ou égalisation ; vitesse et débit se lisent ensemble.", (d) => d.pump == null && d.flow == null && d.pumpOn == null ? null
-      : pumpFlowConflict(d) ? `La pompe interne se dit arrêtée, mais le capteur mesure ${fmt1(d.flow)} l/min. Circulation externe, post-circulation ou signaux divergents sont possibles ; vérifier les deux.`
-      : d.pump != null && d.pump > 0 ? d.flow != null ? `Vitesse ${fmt0(d.pump)} % ; débit mesuré ${fmt1(d.flow)} l/min.` : `Vitesse ${fmt0(d.pump)} %, mais aucun débit ; circulation non confirmée.`
-      : waterMoving(d) ? `Le capteur mesure ${fmt1(d.flow)} l/min sans vitesse de pompe exploitable.`
-      : d.pumpOn === true ? d.flow != null ? `Pompe active, mais seulement ${fmt1(d.flow)} l/min ; circulation non établie.` : "Pompe active, mais débit absent ; circulation non confirmée."
-      : d.pumpOn === false || d.pump === 0 ? d.flow != null ? `Pompe arrêtée ; capteur à ${fmt1(d.flow)} l/min. Ces signaux ne prouvent aucune circulation.` : "Pompe arrêtée et aucun débit disponible."
-      : `État pompe non fiable ; ${fmt1(d.flow)} l/min ne suffit pas à prouver la circulation.`], // pump
+    ["Circulateur", "Circulateur", "Signal X10A inversé (0 = max, 100 = arrêt, [0, 100] → 100–0 %) ; ne prouve ni RPM, ni rotation, hauteur ou débit. Lisez ON/OFF et débit séparément, même à l’arrêt.", (d) => pumpNowText(d, [(n) => `Commande pompe ${n} %.`, "État pompe ON.", "La pompe signale l’arrêt (OFF).", "État ON/OFF de la pompe inconnu.", (n) => `Débit mesuré ${n} l/min.`, "Aucune mesure de débit.", "L’état OFF signalé contredit le débit ; circulation externe, post-circulation ou signal obsolète possibles.", "Circulation non établie."])], // pump
     [(d) => pelMeasured(d) ? "Puissance électrique · HomeHub" : "Puissance électrique estimée", "Puissance électrique", (d) => pelMeasured(d)
       ? "Consommation annoncée par l’entrée HomeHub 51. L’UI ne la calcule pas, mais le guide public ne prouve ni étalonnage, ni point de mesure, ni appoints inclus ; ce n’est pas un compteur certifié de l’installation."
       : "Estimation pour COP/EER. Avec CT, toutes les phases déclarées sont sommées puis multipliées par 230 V supposés ; tension et facteur de puissance réels sont inconnus. Le courant d’onduleur ne couvre que le compresseur.", (d) => d.pelHeld ? "Compresseur arrêté : le courant d’onduleur vient du dernier cycle et n’est pas actuel ; puissance et rendement ne peuvent être indiqués."
@@ -1197,7 +1193,7 @@ DESCRIPTION_I18N.fr = descriptionValues([
   ["Retour R4T au PHE ; évaluer le ΔT avec débit, compresseur et mode, jamais avec 5 K universels."], // 35
   ["Débit du circuit commun ; le minimum dépend du modèle et du mode, et une valeur basse peut causer 7H."], // 36
   ["Pression hydraulique : beaucoup de manuels exigent >1 bar ; à ≤1,0 bar consulter la notice du modèle exact."], // 37
-  ["Commande de pompe inversée : 0 est la vitesse maximale et 100 l’arrêt."], // 38
+  ["Commande X10A inversée : 0 = max, 100 = arrêt ([0, 100] → 100–0 %). Ne mesure pas les RPM ni ne prouve rotation, hauteur ou débit ; lisez ON/OFF et débit séparément."], // 38
   ["État pompe ; ne prouve pas la chaleur utile et peut agir sans compresseur : comparer au débit."], // 39
   ["État du circulateur d’un circuit solaire thermique configuré."], // 40
   ["Vitesse indiquée de la pompe nommée par ce profil."], // 41

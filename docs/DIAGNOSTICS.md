@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: 5d7c45d6674889bb7be91ae259a41d44ecbe355b0025e17bffbdaa036b4e0fe0 -->
+<!-- user-docs-contract: a9a61f6ca631da6074c22dc30839ac017e09fb1436505a16d0c060b5dfc46ff8 -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default (`Off`). Under **Settings → Firmware**, choose **X10A** or **Modbus** for
@@ -12,8 +12,9 @@ source is available, only that option and **Off** are shown). Switching between 
 room, forecast and circulation collection, and hides the Diagnostics name and card (Model becomes
 the default card when available). Re-enabling resumes into the preserved 24 h window without
 bridging the paused interval or carrying an unfinished run/candidate across pausing.
-In **Modbus** mode, X10A-only checks (`defrost`, `pressure`, `retries`, `flow` on Altherma 4
-Modbus, and passive **Refrigerant (heating)**) are unavailable and omitted from the card.
+In **Modbus** mode, X10A-only checks (`defrost`, `pressure`, `retries`, `flow` on `Altherma4`,
+`Probing`, or `Fallback` sweeps, and passive **Refrigerant (heating)**) are unavailable and omitted
+from the card.
 
 Select **Diagnostics** below the schematic to show the **Plant diagnostics · 24 h** card.
 Open a row to see what was measured and what the result means. The observation window describes
@@ -211,7 +212,9 @@ within the 24-hour window.
 continuously for at least sixty seconds.
 
 **Meaning:** The result is **MEASURED**. It filters pump-off and initial run-up values; it does
-not establish part load or retain the operating mode of the minimum.
+not establish part load or retain the operating mode of the minimum. When operating solely over
+Modbus, this check stays unavailable on `Altherma4`, `Probing`, or `Fallback` sweeps until `/100`
+HomeHub Input 49 scaling is affirmatively confirmed.
 
 **Important limit:** Required flow differs by model, heating, cooling, DHW and defrost conditions.
 The minimum is not a design-flow measurement or a diagnosis of restricted flow.

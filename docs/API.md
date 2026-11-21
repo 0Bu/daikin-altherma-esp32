@@ -249,8 +249,9 @@ empty pause/failure callbacks cannot renew it. `source_fresh` applies the 15-sec
 bound at read time. A stale source
 withholds current fault-clear/current pressure and reassuring assessments; dated findings remain.
 The serializer captures `health.persist`, the judged window and Cycling hours together.
-In `"modbus"` mode, `defrost`, `pressure`, `retries`, and (on Altherma 4 Modbus) `flow` report
-`unavailable` (`checkup_modbus_coverage`), and `cycling.stop_context` emits the placeholder
+In `"modbus"` mode, `defrost`, `pressure`, `retries`, and (on Altherma 4, `Probing`, or `Fallback`
+sweeps where Input 49 scaling is unverified) `flow` report `unavailable` (`checkup_modbus_coverage`),
+and `cycling.stop_context` emits the placeholder
 `confirmed:false` object; independently collected Stop context remains X10A-only.
 `health.persist:"flash_pending"` means flash recovery has yet to establish whether compatible
 hours exist. It can wait for clock or source confirmation. A replay read error is logged and
@@ -497,9 +498,13 @@ Dwell metadata must match the copied cache revision, source identity and decoded
 is unknown rather than a duration borrowed from another reading.
 
 Modbus rows contain `label`, `value`, `unit`, `off`, with applicable `binary`, `enum`, `profile`, `concept`,
-`history`. Numeric, flag and enum `value` fields are JSON numbers or null; text values are strings or
+`history`, `flow_scale_unverified`. Numeric, flag and enum `value` fields are JSON numbers or null; text values are strings or
 null. `off` belongs to the selected catalog; native rows include `profile:"altherma4"` and do not
-borrow HomeHub enum meanings. Native quiet-policy selection proves no active quiet state/history.
+borrow HomeHub enum meanings. Offset 49 emits `"flow_scale_unverified":true` when `/100` scaling is
+not affirmatively verified for that snapshot (`Altherma4`, `Auto/Probing`, or `Fallback`); UI and
+checkups treat unverified Input 49 provisionally (pill and 24-hour chart caveat only; withheld from
+hydraulic animation, ΔT, thermal power, deltas, and checkup `flow`). Native quiet-policy selection
+proves no active quiet state/history.
 The full-cache limit is 614 seconds and individual reply-age limit seven seconds; these transport
 bounds cannot prove simultaneity. Native promotion first exposes only its pressure probe until a
 full sweep. History additionally requires matching space/offset/codec/scale/unit provenance.

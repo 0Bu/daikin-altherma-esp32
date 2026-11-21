@@ -1977,11 +1977,15 @@ inline void checkup_cover_row(CheckupCoverage& c, unsigned reg, unsigned off, in
 }
 
 // Structural capability matrix for the independent Modbus source (EKRHH 4P744838-1E §9.2 and
-// Altherma 4 4P773396-1C §7.2). Native Altherma 4 flow/pressure scaling remains physically
-// unverified and is therefore withheld from automated checkup verdicts until verified on hardware.
-inline constexpr CheckupCoverage checkup_modbus_coverage(ModbusProfile profile) {
+// Altherma 4 4P773396-1C §7.2). Native Altherma 4 flow/pressure scaling and probing/fallback
+// HomeHub sweeps whose probe did not affirmatively confirm EKRHH remain physically unverified and
+// are therefore withheld from automated checkup verdicts until confirmed on hardware.
+inline constexpr CheckupCoverage
+checkup_modbus_coverage(ModbusProfile      profile,
+                        ModbusProfileBasis basis = ModbusProfileBasis::Affirmative) {
     CheckupCoverage c;
     if (profile != ModbusProfile::HomeHub && profile != ModbusProfile::Altherma4) return c;
+    if (basis == ModbusProfileBasis::Probing) return c;
     c.rps        = true; // Input 31: compressor running
     c.valve      = true; // Input 37: 3-way valve (0 = space, 1 = DHW)
     c.mode       = true; // Input 38: current operation mode (1 = heating, 2 = cooling, 0 = none)
@@ -1990,7 +1994,9 @@ inline constexpr CheckupCoverage checkup_modbus_coverage(ModbusProfile profile) 
     c.r5t        = true; // Input 43: DHW tank temperature
     c.fault      = true; // Input 21: unit abnormality (0 normal, 1 fault, 2 warning)
     c.fault_rows = 1;
-    c.flow       = (profile == ModbusProfile::HomeHub); // Input 49 (/100 verified on EKRHH only)
+    // Input 49 (/100 verified on affirmatively confirmed EKRHH only; never
+    // Probing/Fallback/Altherma4).
+    c.flow = (profile == ModbusProfile::HomeHub && basis == ModbusProfileBasis::Affirmative);
     return c;
 }
 
