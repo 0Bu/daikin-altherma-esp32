@@ -183,8 +183,32 @@ try {
     }
   }
 
-  const signalMarker = path.join(work, "signal.json");
   const library = path.join(root, "tools/browser/cdp_browser.mjs");
+  const delayedMarker = path.join(work, "delayed-page-target.json");
+  const delayed = spawn(process.execPath, ["--input-type=module", "-e", `
+    import assert from "node:assert/strict";
+    import { launchBrowser } from ${JSON.stringify(library)};
+    const browser = await launchBrowser();
+    try {
+      assert.equal(browser.product, "Delayed Chromium fixture");
+    } finally {
+      await browser.close();
+    }
+  `], {
+    env: { ...process.env, DAIKIN_BROWSER_BIN: browserShim,
+      DAIKIN_BROWSER_STALL_MODE: "delayed-page-target", DAIKIN_BROWSER_STALL_MARKER: delayedMarker },
+    stdio: ["ignore", "inherit", "inherit"],
+  });
+  assert.equal((await stopped(delayed)).code, 0,
+    "page-target discovery must wait past 100 polls and ignore targets without a WebSocket URL");
+  const delayedRecord = JSON.parse(fs.readFileSync(delayedMarker, "utf8"));
+  assert.equal(delayedRecord.listRequests, 103);
+  assert.equal(delayedRecord.versionReached, true);
+  assert.equal(Boolean(active(delayedRecord.pid)), false, "successful delayed startup must join the owned browser");
+  assert.equal(fs.existsSync(delayedRecord.profile), false, "successful delayed startup must remove its profile");
+  console.log("browser cleanup selftest: late page target is discovered within the launch deadline");
+
+  const signalMarker = path.join(work, "signal.json");
   const interrupted = spawn(process.execPath, ["--input-type=module", "-e",
     `import { launchBrowser } from ${JSON.stringify(library)}; await launchBrowser();`], {
     env: { ...process.env, DAIKIN_BROWSER_BIN: browserShim,
