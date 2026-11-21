@@ -2,6 +2,24 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { makeHistoryMotionFixture } from "./test_browser_history_fixture.mjs";
+import { launchBrowser } from "../tools/browser/cdp_browser.mjs";
+import { launchWebKit } from "../tools/browser/webkit_browser.mjs";
+
+// Every owned resource is released even if setup, the assertion, or another cleanup fails.
+export async function withCyclingCleanup(run, ...cleanups) {
+  const errors = [];
+  let result;
+  try { result = await run(); } catch (error) { errors.push(error); }
+  for (const cleanup of cleanups) {
+    try { await cleanup(); } catch (error) { errors.push(error); }
+  }
+  if (errors.length === 1) throw errors[0];
+  if (errors.length) throw new AggregateError(errors, "Cycling assertion and cleanup failures");
+  return result;
+}
+
+// A live tick clears its timer while awaiting HTTP; no timer alone is not a stopped caller.
+export function cyclingPollStopped(timer, busy) { return timer === null && !busy; }
 
 const ROW = "button[data-desc='model:health_cycling']";
 const DIAGNOSIS = '[data-dashboard-card="diagnosis"]';
@@ -65,15 +83,34 @@ async function captureCyclingEvidence(page, context) {
   fs.writeFileSync(path.join(directory, context.replaceAll("/", "-") + ".png"), image);
 }
 
-async function assertCyclingAppearance(page, context) {
-  const original = await page.evaluate(`({lang: LANG, dark: matchMedia("(prefers-color-scheme: dark)").matches})`);
-  const locales = await page.evaluate("UI_LANGS");
-  const theme = scheme => page.colorScheme ? page.colorScheme(scheme) : page.send(
-    "Emulation.setEmulatedMedia", {features: [{name: "prefers-color-scheme", value: scheme}]});
-  await page.evaluate("pollStop(); true");
-  await page.waitFor("!_pollBusy");
-  await page.evaluate("pollStop(); true");
-  try {
+async function assertCyclingAppearance(parent, server, context) {
+  const view = await parent.evaluate(`({width: innerWidth, height: innerHeight,
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone})`);
+  let isolated;
+  await withCyclingCleanup(async () => {
+    // Language caches, media overrides and polling belong to this disposable browser, never to
+    // the page that will subsequently measure live history motion.
+    const touch = parent.inputMode === "touch";
+    isolated = await (touch
+      ? launchWebKit({viewport: {width: view.width, height: view.height}, allowedOrigin: new URL(server.url).origin})
+      : launchBrowser());
+    const page = isolated.page;
+    if (!touch) {
+      await page.viewport(view.width, view.height);
+      await page.send("Emulation.setTimezoneOverride", {timezoneId: view.timeZone});
+    }
+    await page.navigate(server.url);
+    await page.waitFor("typeof S !== 'undefined' && S.status && Array.isArray(S._values)");
+    await page.focusEmulation(true);
+    await page.evaluate("pollStop(); true");
+    await page.waitFor("!_pollBusy");
+    await page.evaluate(`pollStop(); S.descOpen = new Set(); S.dashboardCard = "diagnosis";
+      showStage("dashboard"); renderApp(); true`);
+    await tap(page, ROW);
+    await page.waitFor(`document.querySelector("${CHART}") && !S.clickHold`);
+    const locales = await page.evaluate("UI_LANGS");
+    const theme = scheme => page.colorScheme ? page.colorScheme(scheme) : page.send(
+      "Emulation.setEmulatedMedia", {features: [{name: "prefers-color-scheme", value: scheme}]});
     for (const scheme of ["light", "dark"]) {
       await theme(scheme);
       for (const locale of locales) {
@@ -114,11 +151,8 @@ async function assertCyclingAppearance(page, context) {
         if (["en", "de"].includes(locale)) await captureCyclingEvidence(page, label);
       }
     }
-  } finally {
-    await theme(original.dark ? "dark" : "light");
-    await evaluate(page, async lang => { await setLang(lang); renderApp(); }, original.lang);
-    await page.evaluate("pollSchedule(POLL_VALUES_MS); true");
-  }
+    assert.deepEqual(page.diagnostics, [], context + ": isolated appearance must emit no browser errors");
+  }, () => isolated?.close(), () => parent.focusEmulation(true));
 }
 
 export async function assertCyclingChart(page, server, context) {
@@ -558,7 +592,34 @@ export async function assertCyclingChart(page, server, context) {
     } finally {
       await page.evaluate('document.getElementById("cycling-strip-control").remove(); true');
     }
-    await assertCyclingAppearance(page, context);
+    const languageCache = await page.evaluate("localStorage.getItem('uiLang')");
+    await withCyclingCleanup(async () => {
+      // The fixture owns this real polling chain. A disposable appearance sweep must not restart
+      // a stopped caller, fill an absent language cache, or replace its current chart.
+      await page.evaluate("pollStop(); localStorage.removeItem('uiLang'); true");
+      await page.waitFor("!_pollBusy");
+      await page.evaluate(`pollStop(); window.__cyclingAppearanceParent = {lang: LANG,
+        dark: matchMedia("(prefers-color-scheme: dark)").matches,
+        chart: document.querySelector("${CHART}")}; true`);
+      await assertCyclingAppearance(page, server, context);
+      const isolation = await page.evaluate(`(() => {
+        const before = window.__cyclingAppearanceParent;
+        return {lang: LANG === before.lang,
+          dark: matchMedia("(prefers-color-scheme: dark)").matches === before.dark,
+          chart: document.querySelector("${CHART}") === before.chart,
+          stopped: (${cyclingPollStopped})(_pollTimer, _pollBusy), languageCache: localStorage.getItem("uiLang")};
+      })()`);
+      assert.deepEqual(isolation, {lang: true, dark: true, chart: true, stopped: true, languageCache: null},
+        context + ": appearance matrix must leave its parent page untouched");
+    }, () => evaluate(page, cached => {
+      try {
+        if (cached === null) localStorage.removeItem("uiLang");
+        else localStorage.setItem("uiLang", cached);
+      } finally {
+        delete window.__cyclingAppearanceParent;
+        pollSchedule(POLL_VALUES_MS);
+      }
+    }, languageCache));
     const layout = () => page.evaluate(`(() => {
       const chart = document.querySelector(".checkup-cycling-timeline");
       const graph = chart.querySelector(".checkup-chart-graph");

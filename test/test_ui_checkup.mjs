@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 import { readAppFragments, readUiLocale } from "../tools/ui/read_app_source.mjs";
+import { cyclingPollStopped, withCyclingCleanup } from "./test_browser_cycling.mjs";
 
 const i18nBase = readAppFragments(["i18n.js"]);
 const shippedLocales = JSON.parse(i18nBase.match(/const UI_LANGS = Object.freeze\((\[[^\n]+\])\)/)[1]);
@@ -1077,6 +1078,35 @@ assert.equal(ui.ready({
   }
   ui.setLang("en");
   renderedContext.rendered.lang("en");
+}
+
+// Exercise the real browser fixture's cleanup scope without launching any browser on the host.
+{
+  assert.equal(cyclingPollStopped(null, false), true);
+  assert.equal(cyclingPollStopped(null, true), false, "an in-flight request with no timer is not stopped");
+  assert.equal(cyclingPollStopped(17, false), false);
+  assert.equal(cyclingPollStopped(17, true), false);
+  const order = [];
+  assert.equal(await withCyclingCleanup(async () => 26,
+    async () => order.push("browser"), async () => order.push("parent-focus")), 26);
+  assert.deepEqual(order, ["browser", "parent-focus"]);
+  for (const phase of ["matrix assertion", "pause wait"]) {
+    const primary = new Error(phase), cleanup = new Error("browser close");
+    const attempted = [];
+    await assert.rejects(withCyclingCleanup(async () => { throw primary; },
+      async () => { attempted.push("browser"); throw cleanup; },
+      async () => attempted.push("parent-focus")), error => {
+        assert.ok(error instanceof AggregateError);
+        assert.deepEqual(error.errors, [primary, cleanup]);
+        return true;
+      });
+    assert.deepEqual(attempted, ["browser", "parent-focus"]);
+    await assert.rejects(withCyclingCleanup(async () => { throw primary; }, async () => {}),
+      error => error === primary, "a lone original error must retain its identity");
+  }
+  const cleanupOnly = new Error("parent focus");
+  await assert.rejects(withCyclingCleanup(async () => {}, async () => { throw cleanupOnly; }),
+    error => error === cleanupOnly, "a lone cleanup failure must not be hidden");
 }
 
 console.log("plant-diagnostics UI contract: evidence, lifecycle, localized claims and counterexamples verified");
