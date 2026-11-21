@@ -94,7 +94,8 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
 // Feed one confirmed HomeHub/Modbus full poll cycle into the independent Modbus checkup slot.
 void checkup_record_modbus(const CachedValue* v, size_t n, ModbusProfile profile,
                            uint32_t source_generation, uint32_t consent_epoch,
-                           bool source_confirmed = true);
+                           bool               source_confirmed = true,
+                           ModbusProfileBasis basis            = ModbusProfileBasis::Affirmative);
 
 // Judge the previous boot's handoff integrity and retire completed RAM hours. app_main calls ONCE,
 // before any producer task exists, which is what makes the decision single-threaded and lock-free.

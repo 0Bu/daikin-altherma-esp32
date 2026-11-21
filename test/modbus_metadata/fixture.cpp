@@ -126,6 +126,15 @@ static void http_cases() {
     // replaces repeated keys. HTTP can observe both exact defining rows in one array.
     http("http-typed", typed_rows());
     http("http-invalid", invalid_rows());
+    auto flow_verified                              = row(false, 49, 1234);
+    auto flow_unverified_hh                         = row(false, 49, 1234);
+    flow_unverified_hh.modbus_flow_scale_unverified = true;
+    auto flow_unverified_a4                         = row(true, 49, 1234);
+    flow_unverified_a4.modbus_flow_scale_unverified = true;
+    auto non_flow_poisoned                          = row(false, 44, 1500);
+    non_flow_poisoned.modbus_flow_scale_unverified  = true;
+    http("http-flow-scale",
+         {flow_verified, flow_unverified_hh, flow_unverified_a4, non_flow_poisoned});
     fixture_rows                 = native_rows();
     current_profile              = ModbusProfile::Altherma4;
     const auto retained_snapshot = fixture_rows;

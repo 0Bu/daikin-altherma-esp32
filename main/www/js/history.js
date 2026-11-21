@@ -84,6 +84,22 @@ function hasHist(id) {
 // `ins` = every series to fetch. `ready(has)` = may this figure be offered at all on this profile
 // (feature_gate.hpp's DISABLE-NEVER-DEGRADE: no honest inputs, no curve — never a substitute one).
 // `fn(s)` = one sample from one bucket's values, null for a gap.
+// X10A "Water pump signal" is an inverted percentage command on [0, 100]: 0 = max command,
+// 100 = stop command. Out-of-range or non-finite values are rejected instead of clamped to 0 % or
+// 100 %, and fractional precision is preserved for callers.
+function pumpCommandPercent(signal) {
+  return typeof signal === "number" && Number.isFinite(signal) && signal >= 0 && signal <= 100
+    ? 100 - signal : null;
+}
+
+function modbusFlowScaleUnverified() {
+  const row49 = (S._modbus || []).find((m) => m && m.off === 49);
+  if (row49) return row49.flow_scale_unverified === true || row49.profile === "altherma4";
+  const mb = S.status?.modbus || {};
+  return mb.profile === "altherma4" || mb.profile === "auto" ||
+    mb.profile_basis === "probing" || mb.profile_basis === "fallback";
+}
+
 const DERIVED = {
   // Both BUH stages are event-folded by the firmware before they get here: an ON observed anywhere
   // in the open five-minute bucket survives a later OFF. Combine those aligned, structurally
@@ -96,13 +112,12 @@ const DERIVED = {
       : s.buh_step2 > 0 ? 2 : s.buh_step1 > 0 ? 1 : 0,
   },
   // The X10A row is an inverted control signal: 0 = maximum and 100 = stop. The schematic instead
-  // shows the intuitive speed percentage, so its chart must transform every sample by the exact same
-  // clamped expression as liveData(). Drawing the raw row would make an idle pump look maximal.
+  // shows the intuitive command percentage, so its chart transforms every valid sample via the
+  // same helper as liveData(). Out-of-range values remain gaps rather than being clamped.
   pump_speed: {
     unit: "%", ins: ["pump_signal"],
     ready: (h) => h.pump_signal,
-    fn: (s) => s.pump_signal == null ? null
-      : Math.min(100, Math.max(0, 100 - s.pump_signal)),
+    fn: (s) => pumpCommandPercent(s.pump_signal),
   },
   dt: {
     unit: "K", ins: ["leaving_water", "return_water"],
@@ -124,7 +139,7 @@ const DERIVED = {
     ready: (h) => h.flow && h.leaving_water && h.return_water && h.comp_rps,
     fn: (s) => pthCalc(s, s.comp_rps != null && s.comp_rps > 5),
     mbIns: ["flow", "leaving_water", "return_water", "compressor_state"],
-    mbReady: (h) => h.flow && h.leaving_water && h.return_water && h.compressor_state,
+    mbReady: (h) => h.flow && h.leaving_water && h.return_water && h.compressor_state && !modbusFlowScaleUnverified(),
     mbFn: (s) => pthCalc(s, s.compressor_state != null && s.compressor_state > 0),
   },
 };
@@ -545,6 +560,7 @@ async function ensureDerived(id, source = "x10a") {
   const epoch = syncHistSources();
   const D = DERIVED[id];
   const isMb = source === "modbus";
+  if (isMb && !hasModbusHist(id)) return;
   const key = histCacheKey(id, source);
   if (S.histBusy.has(key)) return S.histRequests.get(key)?.done;
   if (histAwaiting(key, epoch)) return;
@@ -1433,6 +1449,12 @@ function histUnavailableHtml(view) {
     : "";
 }
 
+function modbusFlowUnverified(view) {
+  return !!view && view.id === "flow" &&
+    histVisibleSeries(view).some((s) => s.source === "modbus") &&
+    modbusFlowScaleUnverified();
+}
+
 // Draw each registered source on its own raster. Null samples break the line instead of inventing
 // a measurement across a timeout or a reading the source refused.
 function histHtml(id, unit, name, source = "", identifySource = false) {
@@ -1609,7 +1631,8 @@ function histHtml(id, unit, name, source = "", identifySource = false) {
       `</div>` + histTimesHtml(view, pi, pi >= 0 ? scrubFrac(pi, n) : 0) +
     `</div>` +
     `<div class="vhist-axis"><span>${esc(histAxisStart(view, spanH))}</span>` +
-      `<span>${esc(histAxisEnd(view))}</span></div>` + histUnavailableHtml(view),
+      `<span>${esc(histAxisEnd(view))}</span></div>` + histUnavailableHtml(view) +
+      (modbusFlowUnverified(view) ? `<div class="vhist-note">${esc(t("hist.modbus_flow_unverified"))}</div>` : ""),
     view.series.length > 1 ? "vhist-multi" : ""
   );
 }
@@ -2675,10 +2698,11 @@ function vDescRow(v, paused) {
   // current row while the pill above it, the inspector, the chart and MQTT all refuse it.
   const notCurrent = x10aDown() || rowNotMeasuring(v);
   const src = fb || v;
-  // A native stand-in needs its own interpretation limits, rather than the unavailable X10A
-  // instrument's explanation. Baseline HomeHub and ordinary X10A copy retain their established path.
-  const nativeFallback = fb?.profile === "altherma4";
-  const d = descFor(nativeFallback ? fb.label : label, nativeFallback ? fb : v);
+  // An unverified stand-in (Altherma 4 or probing/fallback flow) needs its own scaling
+  // caveat rather than the unavailable X10A instrument's explanation. Baseline EKRHH retains
+  // its established path.
+  const sourceFallback = fb?.profile === "altherma4" || (fb?.off === 49 && fb?.flow_scale_unverified === true);
+  const d = descFor(sourceFallback ? fb.label : label, sourceFallback ? fb : v);
   if (fb) cls = (cls ? cls + " " : "") + "src-val-mb";
   const unit = displayUnit(src);
   const val = (notCurrent && !fb)

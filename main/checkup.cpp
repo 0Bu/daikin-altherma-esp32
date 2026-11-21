@@ -1224,12 +1224,12 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
 
 void checkup_record_modbus(const CachedValue* v, size_t n, ModbusProfile profile,
                            uint32_t source_generation, uint32_t consent_epoch,
-                           bool source_confirmed) {
+                           bool source_confirmed, ModbusProfileBasis basis) {
     if (!s_diagnostics_enabled.load(std::memory_order_acquire)) return;
     if (!s_mtx) return;
     if (!v && n) return;
 
-    const logic::CheckupCoverage cov = logic::checkup_modbus_coverage(profile);
+    const logic::CheckupCoverage cov = logic::checkup_modbus_coverage(profile, basis);
     logic::CheckupSample         s;
     int64_t                      unix_s  = -1;
     int32_t                      unix_ms = 0;
@@ -1309,7 +1309,7 @@ void checkup_record_modbus(const CachedValue* v, size_t n, ModbusProfile profile
             break;
         }
         case 49:
-            if (cov.flow) s.flow_ok = tenths(cv, s.flow_tenths);
+            if (cov.flow && !cv.modbus_flow_scale_unverified) s.flow_ok = tenths(cv, s.flow_tenths);
             break;
         default:
             break;

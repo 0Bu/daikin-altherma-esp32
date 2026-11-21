@@ -35,7 +35,7 @@ CASES = [
     "stop_forget_during_report",
     "stop_forget_before_checkup_start", "stop_forget_report_lock_failure",
     "stop_forget_checkup_alloc_failure", "stop_unstarted_report_pending", "defrost_start_context",
-    "modbus_dual_source", "x10a_modbus_fault_trace_lifecycle",
+    "modbus_dual_source", "x10a_modbus_fault_trace_lifecycle", "modbus_flow_scale_gate",
 ]
 
 parser = argparse.ArgumentParser(description=__doc__)
@@ -333,6 +333,18 @@ if source_text.count(defrost_observe) != 1:
 mutations.append(("gate_defrost_with_stop_read_fence",
                   source_text.replace(defrost_observe, "if (now >= s_stop_read_fence_us) " + defrost_observe),
                   "defrost_start_context", "defrost_start_sees_unreadable_sample_during_stop_read_fence"))
+cov_call = "const logic::CheckupCoverage cov = logic::checkup_modbus_coverage(profile, basis);"
+if source_text.count(cov_call) != 1:
+    raise RuntimeError("Expected one Modbus coverage call with profile basis")
+mutations.append(("omit_modbus_basis_from_flow_coverage",
+                  source_text.replace(cov_call, "const logic::CheckupCoverage cov = logic::checkup_modbus_coverage(profile);"),
+                  "modbus_flow_scale_gate", "fallback_basis_withholds_flow_check"))
+unverified_guard = "if (cov.flow && !cv.modbus_flow_scale_unverified) s.flow_ok = tenths(cv, s.flow_tenths);"
+if source_text.count(unverified_guard) != 1:
+    raise RuntimeError("Expected one Modbus unverified flow row guard")
+mutations.append(("admit_unverified_modbus_flow_row",
+                  source_text.replace(unverified_guard, "if (cov.flow) s.flow_ok = tenths(cv, s.flow_tenths);"),
+                  "modbus_flow_scale_gate", "unverified_row_49_never_enters_flow_min"))
 negative_controls = []
 mutant_hashes = {}
 for name, contents, case, oracle in mutations:

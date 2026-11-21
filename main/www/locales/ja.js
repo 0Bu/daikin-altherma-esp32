@@ -1,4 +1,4 @@
-// translation-source: 6ad3c45290781dc0a395bafd68b5e19c396820339bbc4d56c5d12abbc20af1fb
+// translation-source: aa3abf8d6b7cd47b6adfa6bc6f918e3a1dbe62e1de7c6d8deffda21d1fb75661
 I18N.ja = localeValues([
   /* sys.nodata */ "データなし",
   /* sys.unreachable */ "接続不可",
@@ -1006,6 +1006,8 @@ I18N.ja = localeValues([
   /* lang.saved */ "言語を保存しました",
   /* check.detail.dhw_reason.blind_modbus */ "未読取：Modbus応答なしまたはポーリング一時停止",
   /* check.detail.source_stale_modbus */ "新鮮なModbus試料なし。現在状態不明。過去記録は保持。",
+  /* mb.flow_scale_help */ "未確認の /100 換算（判別中/フォールバック）。L/min を機器表示と比較してください。動画・ΔT・熱出力・24h診断から除外。",
+  /* hist.modbus_flow_unverified */ "未確認の Modbus /100 換算（判別中/フォールバック）。機器表示と比較してください。",
 ]);
 
 DESCRIPTION_I18N.ja = descriptionValues([
@@ -1047,7 +1049,7 @@ DESCRIPTION_I18N.ja = descriptionValues([
   ["PHE共通戻りのR4T。R1T−R4TはPHEのΔTで、放熱器のΔTではなく一律5 K基準も使えません。"], // 35
   ["共通水回路の流量。必要最小値は機種とモードで異なり、低流量は7Hの原因になり得ます。"], // 36
   ["閉水回路の圧力。許容範囲は機種依存で、≤1.0 barなら該当機種の説明書を確認します。"], // 37
-  ["循環ポンプ速度指令は逆目盛です。0＝全速、100＝停止。"], // 38
+  ["反転 X10A 指令：生値 0 = 最大、100 = 停止（[0, 100] → 100–0 %）。RPM を測らず回転・揚程・流量を証明しません。入/切と流量を別に確認。"], // 38
   ["水循環ポンプの状態。運転だけでは有効な熱移動を証明せず、実流量と照合します。"], // 39
   ["設定済み太陽熱回路のポンプ状態。ヒートポンプ側の水循環ポンプとは別です。"], // 40
   ["このプロファイルのポンプ速度。目盛と対象回路は機種依存で、実流量は別値です。"], // 41
@@ -1285,13 +1287,7 @@ INSPECT_I18N.ja = inspectValues(
       : waterMoving(d) ? d.thermalMode === "cool" && !compressorRunning(d, 5) && d.pthRaw != null && d.pthRaw > 0 ? `残熱水が室内へ循環。R1T ${degC(d.lwt)}、端末後センサーなし。能動冷房ではありません。` : `水は${activeSpaceKind(d) === "cool" ? "冷房" : activeSpaceKind(d) === "heat" ? "暖房" : "室内"}回路へ。R1T ${degC(d.lwt)}、端末後センサーなし。` : "ポンプと流量が室内回路の循環を確認していません。"], // heat
     ["室内空調運転", "室内暖房または冷房運転", "室内回路の通常運転状態です。サーモスタット要求ではなく、単独で圧縮機運転を確認しません。"], // spaceh
     ["室温", "室温", "基準ゾーンの温度です。設定温度とモードと合わせて見ます。"], // room
-    ["循環ポンプ", "循環ポンプ速度", "共通水回路と3WVで選んだ経路を循環させます。圧縮機停止中も余熱や保護で動き、速度だけでは流量を確認しません。", (d) => d.pump == null && d.flow == null && d.pumpOn == null ? null
-      : pumpFlowConflict(d) ? `ポンプは停止報告ですが流量 ${fmt1(d.flow)} l/min。外部循環、余運転、矛盾または古い信号があり得るため両方を確認してください。`
-      : d.pump != null && d.pump > 0 ? d.flow != null ? `速度 ${fmt0(d.pump)} %、流量 ${fmt1(d.flow)} l/min。` : `速度 ${fmt0(d.pump)} %、流量測定なし。循環未確認です。`
-      : waterMoving(d) ? `有効なポンプ速度なし、流量 ${fmt1(d.flow)} l/min。`
-      : d.pumpOn === true ? d.flow != null ? `ポンプ 入、流量は ${fmt1(d.flow)} l/minのみ。循環未確認です。` : "ポンプ 入、流量測定なし。循環未確認です。"
-      : d.pumpOn === false || d.pump === 0 ? d.flow != null ? `ポンプ停止、センサー ${fmt1(d.flow)} l/min。循環を確認できません。` : "ポンプ停止、流量測定なし。"
-      : `信頼できるポンプ状態なし。${fmt1(d.flow)} l/minだけでは循環を確認できません。`], // pump
+    ["循環ポンプ", "循環ポンプ", "反転 X10A 信号（0 = 最大、100 = 停止、[0, 100] → 100–0 %）で、RPM・回転・揚程・流量は証明しません。入/切と流量を別に確認。", (d) => pumpNowText(d, [(n) => `ポンプ指令 ${n} %。`, "ポンプ状態は入です。", "ポンプは停止（切）を報告しています。", "ポンプの入/切状態は不明です。", (n) => `実測流量 ${n} l/min。`, "流量データはありません。", "停止報告と流量が矛盾しています（外部循環・余運転・古い信号の可能性）。", "循環は確認できません。"])], // pump
     [(d) => pelMeasured(d) ? "電力 · HomeHub" : "電力（推定）", "電力", (d) => pelMeasured(d) ? "HomeHubレジスタ51の電力です。資料では校正、測定点、全ヒーターを含むか確認できず、認証済み設備メーターではありません。" : "COP/EER用推定: CT各相の合計 × 仮定230 V。実電圧と力率は不明で、インバータ電流は圧縮機のみ、CT境界は配線次第です。", (d) => d.pelHeld ? "圧縮機停止中のインバータ電流は前回値です。電力と効率を示せません。"
       : d.pel == null ? "現在の電流測定がなく、COP/EERを算出できません。"
       : d.pelSrc === "MB" ? "HomeHubレジスタ51の値。正確な測定境界は未記載です。"

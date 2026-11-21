@@ -1,4 +1,4 @@
-// translation-source: 6ad3c45290781dc0a395bafd68b5e19c396820339bbc4d56c5d12abbc20af1fb
+// translation-source: aa3abf8d6b7cd47b6adfa6bc6f918e3a1dbe62e1de7c6d8deffda21d1fb75661
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -1006,6 +1006,8 @@ I18N.es = localeValues([
   /* lang.saved */ "Idioma guardado",
   /* check.detail.dhw_reason.blind_modbus */ "faltan lecturas: Modbus sin respuesta o consultas en pausa",
   /* check.detail.source_stale_modbus */ "Sin lectura Modbus reciente; estado actual desconocido. Historial conservado.",
+  /* mb.flow_scale_help */ "Escala /100 sin verificar (sondeo/reserva); compare L/min con la pantalla. Excluido de animación, ΔT, potencia y 24 h.",
+  /* hist.modbus_flow_unverified */ "Escala Modbus /100 sin verificar (sondeo/reserva); compare con la unidad.",
 ]);
 INSPECT_I18N.es = inspectValues(
   ["Sin lectura actual:", "el compresor está parado y la unidad exterior solo actualiza sus sensores cuando funciona. Se oculta el valor del último ciclo para no presentarlo como una medición actual.", "No se puede leer la velocidad del compresor; los valores de la unidad exterior pueden ser del último ciclo."],
@@ -1100,13 +1102,7 @@ INSPECT_I18N.es = inspectValues(
       : "Bomba y caudal actuales no demuestran circulación por el ramal de climatización."], // heat
     ["Climatización activa", "Funcionamiento de climatización", "Señal de funcionamiento normal de calefacción/refrigeración de espacios. No es demanda de termostato ni demuestra por sí sola que el compresor esté activo."], // spaceh
     ["Temperatura ambiente", 0, "Temperatura y consigna de la zona de referencia; dependen de la ubicación del sensor."], // room
-    ["Bomba de circulación", "Velocidad de la bomba de circulación", "Mueve agua por el circuito común y el ramal elegido por la 3WV. Puede seguir funcionando con el compresor parado por postcirculación, protección o igualación; velocidad y caudal deben interpretarse juntos.", (d) => d.pump == null && d.flow == null && d.pumpOn == null ? null
-      : pumpFlowConflict(d) ? `La bomba interna indica parada, pero el sensor mide ${fmt1(d.flow)} l/min. Puede haber circulación externa, postcirculación o señales discrepantes; revisa ambas.`
-      : d.pump != null && d.pump > 0 ? d.flow != null ? `Velocidad ${fmt0(d.pump)} %; caudal medido ${fmt1(d.flow)} l/min.` : `Velocidad ${fmt0(d.pump)} %, pero falta el caudal; la circulación no está confirmada.`
-      : waterMoving(d) ? `El sensor mide ${fmt1(d.flow)} l/min aunque no hay una velocidad de bomba utilizable.`
-      : d.pumpOn === true ? d.flow != null ? `Bomba activa, pero solo ${fmt1(d.flow)} l/min; no se demuestra circulación.` : "Bomba activa, pero falta el caudal; la circulación no está confirmada."
-      : d.pumpOn === false || d.pump === 0 ? d.flow != null ? `Bomba parada; el sensor indica ${fmt1(d.flow)} l/min. Estas señales no demuestran circulación.` : "Bomba parada y sin medición de caudal."
-      : `No hay un estado fiable de la bomba; ${fmt1(d.flow)} l/min no basta para demostrar circulación.`], // pump
+    ["Bomba de circulación", "Bomba de circulación", "Señal X10A invertida (0 = máx, 100 = paro, [0, 100] → 100–0 %); no mide RPM ni prueba giro, altura ni caudal. Lee ON/OFF y caudal por separado, incluso parada.", (d) => pumpNowText(d, [(n) => `Orden de bomba ${n} %.`, "El estado de la bomba es ON.", "La bomba informa parada (OFF).", "Estado ON/OFF de la bomba desconocido.", (n) => `Caudal medido ${n} l/min.`, "Sin medición de caudal.", "El estado OFF informado contradice el caudal; es posible circulación externa, postcirculación o señales desactualizadas.", "La circulación no está confirmada."])], // pump
     [(d) => pelMeasured(d) ? "Consumo eléctrico · HomeHub" : "Consumo eléctrico estimado", "Consumo eléctrico", (d) => pelMeasured(d)
       ? "Valor de consumo comunicado por HomeHub entrada 51. La UI no lo calcula, pero la guía pública no demuestra calibración, punto de medida ni qué calentadores incluye; no es un contador certificado de toda la instalación."
       : "Estimación para COP/EER. Con CT suma todas las fases declaradas y usa corriente × 230 V supuestos; tensión y factor de potencia reales son desconocidos. La corriente del inversor cubre solo el compresor.", (d) => d.pelHeld ? "El compresor está parado; la corriente del inversor pertenece al último ciclo y no es actual, por lo que no puede indicarse consumo ni eficiencia."
@@ -1213,7 +1209,7 @@ DESCRIPTION_I18N.es = descriptionValues([
   ["Retorno R4T al PHE; evalúa el ΔT con caudal, compresor y modo, no con 5 K universales."], // 35
   ["Caudal del circuito común; el mínimo depende de modelo y modo, y un valor bajo puede causar 7H."], // 36
   ["Presión hidráulica: muchos manuales exigen >1 bar, pero a ≤1,0 bar consulta el manual del modelo exacto."], // 37
-  ["Orden de bomba invertida: 0 es velocidad máxima y 100 es parada."], // 38
+  ["Orden X10A invertida: 0 = máx, 100 = paro ([0, 100] → 100–0 %). No mide RPM ni prueba giro, altura ni caudal; lee ON/OFF y caudal por separado."], // 38
   ["Estado de bomba; no prueba calor útil y puede actuar sin compresor: compáralo con caudal."], // 39
   ["Estado de la bomba de un circuito solar térmico configurado."], // 40
   ["Velocidad indicada de la bomba nombrada por este perfil."], // 41

@@ -277,10 +277,8 @@ const DESCRIPTIONS = [
     de: { what: "Wasserdruck im geschlossenen Hydraulikkreis.",
           normal: "Viele aktuelle Altherma-Handbücher verlangen am Pumpeneintritt mehr als 1 bar. Zulässiger Betriebs- und Fülldruck hängen jedoch von Modell, Anlagenhöhe und Ausdehnungsgefäß ab. Bei 1,0 bar oder weniger die Anleitung des genauen Geräts prüfen, statt einen allgemeinen Nachfüllwert anzunehmen." } },
   { re: /water pump signal/i,
-    what: "The speed command sent to the circulation pump. Note it is inverted — 0 means full speed, 100 means stopped (per the label).",
-    normal: "a low number (fast pump) while heating, cooling or making DHW; 100 (stopped) when idle.",
-    de: { what: "Der Drehzahlbefehl an die Umwälzpumpe ist umgekehrt skaliert: 0 bedeutet volle Drehzahl, 100 bedeutet Stillstand.",
-          normal: "eine niedrige Zahl und damit schnelle Pumpendrehzahl beim Heizen, Kühlen oder Warmwasserbereiten; 100 im Leerlauf." } },
+    what: "Inverted X10A pump command: raw 0 = max, 100 = stop (schematic maps [0, 100] to 100–0 %). Proves no RPM, rotation, head or flow; read ON/OFF and flow separately, even stopped.",
+    de: { what: "Invertierter X10A-Pumpenbefehl: roh 0 = Maximum, 100 = Stopp (Schema rechnet [0, 100] in 100–0 % um). Belegt weder RPM noch Rotation, Förderhöhe oder Durchfluss; An/Aus und Durchfluss getrennt lesen, auch im Stillstand." } },
   { exact: true, re: /^(?:water pump operation|circulation pump (?:operation|running))$/i,
     what: "Status of the hydronic circulation pump. It moves water through the branch selected by the hydraulic controls; pump operation alone does not prove useful heat transfer.",
     normal: "ON means the controller reports pump operation; OFF means it reports the pump stopped. It can run for heating, cooling, DHW, defrost, air purge, frost protection, a test run or pump overrun. Compare the state with measured flow; the compressor may legitimately be stopped.",
@@ -1034,6 +1032,9 @@ function descFor(label, row = null) {
       83: "a4.operation_help"})[row.off];
     if (key) return { what: t(key), sourceQualified: true };
   }
+  if (row?.off === 49 && row?.flow_scale_unverified === true) {
+    return { what: t("mb.flow_scale_help"), sourceQualified: true };
+  }
   const l = label || "";
   const source = row && row.off != null ? "modbus" : row ? "x10a" : "";
   for (const d of DESCRIPTIONS) {
@@ -1119,9 +1120,10 @@ const MB_DELTA_WHY = {
 // comparing two numbers wants to know whether they agree, and "1.7 K apart, and here is why" is a
 // different statement from two numbers left side by side to be squinted at.
 function mbDeltaHtml(row, mb) {
-  // A numeric difference would assume verified common units. Keep the native conversion limit
+  // A numeric difference would assume verified common units. Keep unverified scaling limits
   // visible beside the second source instead, even when X10A supplies the primary reading.
-  if (mb?.profile === "altherma4" && [49, 68, 79].includes(mb.off)) {
+  if ((mb?.profile === "altherma4" && [49, 68, 79].includes(mb.off)) ||
+      (mb?.off === 49 && mb?.flow_scale_unverified === true)) {
     const limit = descFor(mb.label, mb)?.what;
     if (limit) return descParaHtml(esc(limit));
   }

@@ -190,6 +190,16 @@ const oracles = {
     assert.equal(rows[6].value, "12");
   },
   "http-profile-calls": (count) => assert.equal(count, 0),
+  "http-flow-scale": (rows) => {
+    assert.equal(rows.length, 4);
+    absent(rows[0], "flow_scale_unverified", "profile");
+    assert.equal(rows[0].value, 12.3);
+    assert.equal(rows[1].flow_scale_unverified, true);
+    absent(rows[1], "profile");
+    assert.equal(rows[2].flow_scale_unverified, true);
+    assert.equal(rows[2].profile, "altherma4");
+    absent(rows[3], "flow_scale_unverified");
+  },
   "mqtt-base": (value) => assert.deepEqual(value, {
     current_operation_mode: 1, quiet_mode_operation: 1, general_power_limit: 2.5,
   }),
@@ -254,6 +264,9 @@ try {
     { name: "mqtt-current-profile", consumer: "mqtt", oracle: "mqtt-owned-snapshot",
       before: "def::homehub_definition(cache[i].modbus_definition)",
       after: "(mb_active_profile() == ModbusProfile::Altherma4 ? def::altherma4_find(cache[i].off) : def::homehub_find(cache[i].off))" },
+    { name: "http-flow-scale-unverified-omitted", consumer: "http", oracle: "http-flow-scale",
+      before: "if (reg && reg->offset == 49 && v[i].modbus_flow_scale_unverified)",
+      after: "if (false && reg && reg->offset == 49 && v[i].modbus_flow_scale_unverified)" },
   ];
   for (const control of controls) {
     const body = mutate(control.consumer === "http" ? httpBody : mqttBody,

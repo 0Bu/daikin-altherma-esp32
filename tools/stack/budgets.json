@@ -3018,11 +3018,11 @@
       "max_bytes": 128
     },
     "modbus_checkup_record": {
-      "pattern": "^daik::checkup_record_modbus\\(daik::CachedValue const\\*, unsigned int, daik::ModbusProfile, unsigned long, unsigned long, bool\\)$",
+      "pattern": "^daik::checkup_record_modbus\\(daik::CachedValue const\\*, unsigned int, daik::ModbusProfile, unsigned long, unsigned long, bool, daik::ModbusProfileBasis\\)$",
       "max_bytes": 208
     },
     "modbus_checkup_coverage": {
-      "pattern": "^daik::logic::checkup_modbus_coverage\\(daik::ModbusProfile\\)$",
+      "pattern": "^daik::logic::checkup_modbus_coverage\\(daik::ModbusProfile, daik::ModbusProfileBasis\\)$",
       "max_bytes": 64
     },
     "checkup_commit_and_fold": {

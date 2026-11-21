@@ -62,7 +62,7 @@ const lazyDomainCodes = ["es", "fr", "it", "pl", "cs", "uk", "zh", "ja", "nb", "
 const annotatedDomainCodes = ["zh", "ja", "nb", "sv", "fi"];
 const englishKeys = Object.keys(catalog.en).sort();
 const englishKeyOrder = Object.keys(catalog.en);
-assert.equal(englishKeys.length, 1006, "the test must track the complete current UI catalog");
+assert.equal(englishKeys.length, 1008, "the test must track the complete current UI catalog");
 for (const [code, source] of localeSources) {
   const sections = [`INSPECT_I18N.${code}`, `MODEL_DESCRIPTION_I18N.${code}`]
     .map(marker => source.indexOf(marker)).filter(index => index >= 0);
@@ -420,6 +420,10 @@ for (const code of codes.slice(2)) {
   assert.match(joined("free_heap"), /5/, `${code} loses the five-minute flash-bucket context`);
   assert.match(joined("max_alloc"), /TLS/, `${code} loses the contiguous-block TLS context`);
   assert.match(joined("max_alloc"), /OTA/, `${code} loses the contiguous-block OTA context`);
+  const pumpDesc = catalogContext.__descriptionCopy[code][38]?.[0] || "";
+  assert.match(pumpDesc, /\b0\b/, `${code} pump-signal description loses raw 0 max command`);
+  assert.match(pumpDesc, /\b100\b/, `${code} pump-signal description loses raw 100 stop command`);
+  assert.match(pumpDesc, /RPM/i, `${code} pump-signal description loses no-RPM clarification`);
 }
 
 // Registration alone is insufficient: the screenshot regression was a native row heading whose
