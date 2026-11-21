@@ -3,9 +3,11 @@
 // whole-plant health claim while the C++ report remains technically conservative.
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import vm from "node:vm";
 import { readAppFragments, readUiLocale } from "../tools/ui/read_app_source.mjs";
-import { cyclingPollStopped, withCyclingCleanup } from "./test_browser_cycling.mjs";
+import { cyclingPollStopped, withChromiumAppearanceSlot, withCyclingCleanup } from "./test_browser_cycling.mjs";
 
 const i18nBase = readAppFragments(["i18n.js"]);
 const shippedLocales = JSON.parse(i18nBase.match(/const UI_LANGS = Object.freeze\((\[[^\n]+\])\)/)[1]);
@@ -1096,6 +1098,29 @@ assert.equal(ui.ready({
   assert.equal(cyclingPollStopped(null, true), false, "an in-flight request with no timer is not stopped");
   assert.equal(cyclingPollStopped(17, false), false);
   assert.equal(cyclingPollStopped(17, true), false);
+  const supervisor = fs.mkdtempSync(path.join(os.tmpdir(), "daikin-cycling-slot-"));
+  const lock = path.join(supervisor, "cycling-appearance.lock");
+  try {
+    let finishClose;
+    let firstClosed = false;
+    const closing = new Promise(resolve => { finishClose = resolve; });
+    const first = withChromiumAppearanceSlot(lock, () => {}, async () => {
+      await closing;
+      firstClosed = true;
+    });
+    const second = withChromiumAppearanceSlot(lock, () => {
+      assert.equal(firstClosed, true, "the next Chromium launch waits for the previous browser to exit");
+    }, () => {});
+    finishClose();
+    await Promise.all([first, second]);
+    assert.equal(fs.existsSync(lock), false, "successful close releases the slot");
+    const closeError = new Error("browser still owns resources");
+    await assert.rejects(withChromiumAppearanceSlot(lock, () => {}, () => { throw closeError; }),
+      error => error === closeError);
+    assert.ok(fs.existsSync(lock), "failed close must keep the slot until supervisor cancellation");
+  } finally {
+    fs.rmSync(supervisor, { recursive: true, force: true });
+  }
   const order = [];
   assert.equal(await withCyclingCleanup(async () => 26,
     async () => order.push("browser"), async () => order.push("parent-focus")), 26);

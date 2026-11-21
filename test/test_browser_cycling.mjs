@@ -18,6 +18,26 @@ export async function withCyclingCleanup(run, ...cleanups) {
   return result;
 }
 
+// The supervisor owns the lock's parent directory and bounds both parallel workers. Keep the slot
+// until the disposable browser has exited so a failed close cannot start another Chromium process.
+export async function withChromiumAppearanceSlot(lock, run, closeBrowser) {
+  if (lock) {
+    for (;;) {
+      try {
+        fs.mkdirSync(lock);
+        break;
+      } catch (error) {
+        if (error.code !== "EEXIST") throw error;
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+    }
+  }
+  return withCyclingCleanup(run, async () => {
+    await closeBrowser();
+    if (lock) fs.rmdirSync(lock);
+  });
+}
+
 // A live tick clears its timer while awaiting HTTP; no timer alone is not a stopped caller.
 export function cyclingPollStopped(timer, busy) { return timer === null && !busy; }
 
@@ -87,10 +107,11 @@ async function assertCyclingAppearance(parent, server, context) {
   const view = await parent.evaluate(`({width: innerWidth, height: innerHeight,
     timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone})`);
   let isolated;
-  await withCyclingCleanup(async () => {
+  const touch = parent.inputMode === "touch";
+  const lock = touch ? undefined : process.env.DAIKIN_BROWSER_CYCLING_LOCK;
+  const sweep = async () => {
     // Language caches, media overrides and polling belong to this disposable browser, never to
     // the page that will subsequently measure live history motion.
-    const touch = parent.inputMode === "touch";
     isolated = await (touch
       ? launchWebKit({viewport: {width: view.width, height: view.height}, allowedOrigin: new URL(server.url).origin})
       : launchBrowser());
@@ -152,7 +173,9 @@ async function assertCyclingAppearance(parent, server, context) {
       }
     }
     assert.deepEqual(page.diagnostics, [], context + ": isolated appearance must emit no browser errors");
-  }, () => isolated?.close(), () => parent.focusEmulation(true));
+  };
+  await withCyclingCleanup(() => withChromiumAppearanceSlot(lock, sweep, () => isolated?.close()),
+    () => parent.focusEmulation(true));
 }
 
 export async function assertCyclingChart(page, server, context) {
