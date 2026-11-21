@@ -437,6 +437,10 @@
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?config_load\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?11config_load[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
       "max_bytes": 2384
     },
+    "config_blob_load_issue": {
+      "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?log_blob_load_issue\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?19log_blob_load_issue[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
+      "max_bytes": 64
+    },
     "history_start": {
       "pattern": "^(?:daik::(?:\\(anonymous namespace\\)::)?history_start\\((?![^\\n]*\\{lambda)[^\\n]*\\)(?: \\[clone .+\\])?$|_ZN4daik(?:12_GLOBAL__N_1)?L?13history_start[^\\n]*\\$(?:constprop|isra|part)\\$[0-9]+$)",
       "max_bytes": 1632
@@ -3173,6 +3177,10 @@
       "pattern": "^void daik::append_status_service_metric<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, char const\\*, daik::logic::RefrigerantServiceMetricSnapshot const&\\)$",
       "max_bytes": 64
     },
+    "status_service_meta": {
+      "pattern": "^void daik::append_status_service_meta<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, char const\\*, daik::logic::RefrigerantServiceMetricSnapshot const&, daik::logic::RefrigerantServiceSource const&\\)$",
+      "max_bytes": 64
+    },
     "curve_json_bool": {
       "pattern": "^daik::append_heating_curve_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::Config const&, bool\\)::\\{lambda\\(char const\\*, bool\\)[#]1\\}::operator\\(\\)\\(char const\\*, bool\\) const$",
       "max_bytes": 48
@@ -4231,7 +4239,8 @@
       "symbols": [
         "main_task",
         "boot_sequence",
-        "config_load"
+        "config_load",
+        "config_blob_load_issue"
       ],
       "multipliers": {},
       "base_bytes": 1536,
@@ -14702,6 +14711,17 @@
       "base_bytes": 1536,
       "max_bytes": 8192
     },
+    "httpd_direct_status_service_meta": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "status_service_meta",
+        "status_unsigned_number"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
     "httpd_direct_curve_scalar_fields": {
       "symbols": [
         "http_send_status_json",
@@ -14772,6 +14792,18 @@
         "status_serializer",
         "status_service_metric",
         "status_tenths_value",
+        "status_unsigned_number"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_status_service_meta": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "status_service_meta",
         "status_unsigned_number"
       ],
       "multipliers": {},
@@ -17951,11 +17983,13 @@
         "httpd_direct_status_opt_quoted",
         "httpd_direct_status_outdoor_context",
         "httpd_direct_status_service_metric",
+        "httpd_direct_status_service_meta",
         "httpd_direct_curve_scalar_fields",
         "httpd_mcp_status_redacted",
         "httpd_mcp_status_opt_quoted",
         "httpd_mcp_status_outdoor_context",
         "httpd_mcp_status_service_metric",
+        "httpd_mcp_status_service_meta",
         "httpd_mcp_curve_scalar_fields",
         "httpd_direct_defrost_start_fence",
         "httpd_mcp_defrost_start_fence",

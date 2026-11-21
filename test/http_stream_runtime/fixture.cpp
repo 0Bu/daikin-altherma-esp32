@@ -87,7 +87,9 @@ inline unsigned                         stop_report_calls   = 0;
 inline bool                             checkup_x10a_has_data      = false;
 inline bool                             checkup_modbus_has_data    = false;
 inline daik::DiagnosticsSource          last_checkup_report_source = daik::DiagnosticsSource::X10a;
-inline std::string                      log;
+inline daik::logic::RefrigerantServiceSnapshot refrigerant_report{};
+inline unsigned                                refrigerant_report_calls = 0;
+inline std::string                             log;
 [[noreturn]] void                     fail(const char* message) {
     std::fprintf(stderr, "FAIL %s: %s\n", oracle.c_str(), message);
     std::exit(1);
@@ -130,8 +132,10 @@ void reset() {
     fault_trace.reset();
     fault_trace_present        = false;
     checkup_persist           = daik::logic::CheckupRestore::NoRecord;
-    reset_after_checkup       = false;
-    stop_report_calls         = 0;
+    reset_after_checkup        = false;
+    stop_report_calls          = 0;
+    refrigerant_report         = {};
+    refrigerant_report_calls   = 0;
     checkup_x10a_has_data      = false;
     checkup_modbus_has_data    = false;
     last_checkup_report_source = daik::DiagnosticsSource::X10a;
@@ -242,6 +246,41 @@ void configure_stop_context() {
     c.censored       = 2;
     c.target_changed = 1;
     c.saturated      = true;
+}
+void configure_refrigerant() {
+    // This shaped service snapshot is a wire adapter, not a simulated poll/accumulator.
+    current.fp_valid                        = true;
+    refrigerant_report                      = {};
+    refrigerant_report.state                = daik::logic::RefrigerantServiceState::Limited;
+    refrigerant_report.blocker              = daik::logic::RefrigerantServiceBlocker::None;
+    refrigerant_report.mode                 = daik::logic::RefrigerantServiceMode::Heating;
+    refrigerant_report.limitation_mask      = daik::logic::RefrigerantServicePressureSides;
+    refrigerant_report.coverage_evaluated   = true;
+    refrigerant_report.special_phases_known = true;
+    refrigerant_report.continuous_s         = 30;
+    refrigerant_report.samples              = 7;
+    refrigerant_report.source_generation    = 31;
+    refrigerant_report.rps                  = {true, 7, 200, 250, 300};
+    refrigerant_report.discharge            = {true, 7, 601, 652, 703};
+    refrigerant_report.eev_command          = {true, 7, 1000, 1200, 1400};
+    // Three paired sweeps, three high-only sweeps and one low-only sweep.
+    refrigerant_report.high_pressure = {true, 6, 121, 142, 163};
+    refrigerant_report.low_pressure  = {true, 4, 11, 22, 33};
+    refrigerant_report.sources       = {{true, 0x30, 0, 152},
+                                        {true, 0x20, 4, 105},
+                                        {true, 0x30, 3, 151},
+                                        {true, 0x62, 15, 105},
+                                        {true, 0x20, 14, 105}};
+}
+void clear_refrigerant_metrics() {
+    refrigerant_report.samples         = 0;
+    refrigerant_report.continuous_s    = 0;
+    refrigerant_report.rps             = {};
+    refrigerant_report.discharge       = {};
+    refrigerant_report.eev_command     = {};
+    refrigerant_report.high_pressure   = {};
+    refrigerant_report.low_pressure    = {};
+    refrigerant_report.limitation_mask = daik::logic::RefrigerantServiceNoLimitation;
 }
 void allocation_sweep(const char* uri, esp_err_t (*handler)(httpd_req_t*)) {
     auto baseline = request();
@@ -355,7 +394,10 @@ void         weather_values_reader_leave() noexcept { --fixture::values_readers;
 SyslogStatus syslog_status() { return {}; }
 HpStats      hp_stats() { return {}; }
 uint32_t     hp_skipped_cycles() { return 0; }
-logic::RefrigerantServiceSnapshot refrigerant_service_status() { return {}; }
+logic::RefrigerantServiceSnapshot refrigerant_service_status() {
+    ++fixture::refrigerant_report_calls;
+    return fixture::refrigerant_report;
+}
 ModbusStatus                      mb_status() {
     ModbusStatus s;
     s.connected = fixture::modbus_live;
@@ -818,9 +860,119 @@ int main(int argc, char** argv) {
                   "defrost start changed the legacy ratio fields");
         }
     });
+    run("refrigerant_metadata", [] {
+        configure_refrigerant();
+        for (const bool redact : {false, true}) {
+            auto           req   = request();
+            const unsigned calls = refrigerant_report_calls;
+            check(invoke(req, redact ? "/status?redact=1" : "/status", daik::h_status) == ESP_OK,
+                  "populated refrigerant status failed");
+            successful(req);
+            check(refrigerant_report_calls == calls + 1,
+                  "status must copy exactly one typed refrigerant snapshot");
+            check(req.response.find("\"high_pressure_bar\":{\"samples\":6,\"source\":{"
+                                    "\"kind\":\"x10a\",\"reg\":98,\"offset\":15,\"conv\":105}}") !=
+                          std::string::npos &&
+                      req.response.find(
+                          "\"low_pressure_bar\":{\"samples\":4,\"source\":{"
+                          "\"kind\":\"x10a\",\"reg\":32,\"offset\":14,\"conv\":105}}") !=
+                          std::string::npos,
+                  "refrigerant per-input count or selected source differs from the snapshot");
+            emit(req, redact ? "refrigerant-populated-redacted" : "refrigerant-populated");
+        }
+    });
+    run("refrigerant_selected_unread", [] {
+        configure_refrigerant();
+        refrigerant_report.high_pressure        = {};
+        refrigerant_report.low_pressure.samples = refrigerant_report.samples;
+        for (const bool redact : {false, true}) {
+            auto req = request();
+            check(invoke(req, redact ? "/status?redact=1" : "/status", daik::h_status) == ESP_OK,
+                  "selected but unread refrigerant status failed");
+            successful(req);
+            check(req.response.find("\"high_pressure_bar\":null") != std::string::npos &&
+                      req.response.find(
+                          "\"high_pressure_bar\":{\"samples\":0,\"source\":{"
+                          "\"kind\":\"x10a\",\"reg\":98,\"offset\":15,\"conv\":105}}") !=
+                          std::string::npos &&
+                      req.response.find(
+                          "\"low_pressure_bar\":{\"samples\":7,\"source\":{"
+                          "\"kind\":\"x10a\",\"reg\":32,\"offset\":14,\"conv\":105}}") !=
+                          std::string::npos,
+                  "one-sided window lost its unread selected source or readable low side");
+            emit(req,
+                 redact ? "refrigerant-selected-unread-redacted" : "refrigerant-selected-unread");
+        }
+    });
+    run("refrigerant_missing", [] {
+        configure_refrigerant();
+        refrigerant_report.high_pressure.samples         = refrigerant_report.samples;
+        refrigerant_report.low_pressure                  = {};
+        refrigerant_report.sources.low_pressure.selected = false;
+        auto req                                         = request();
+        check(invoke(req, "/status", daik::h_status) == ESP_OK,
+              "missing refrigerant input status failed");
+        successful(req);
+        check(req.response.find("\"low_pressure_bar\":null") != std::string::npos,
+              "missing low pressure fabricated measured zero");
+        check(req.response.find("\"high_pressure_bar\":{\"samples\":7,\"source\":{"
+                                "\"kind\":\"x10a\",\"reg\":98,\"offset\":15,\"conv\":105}}") !=
+                      std::string::npos &&
+                  req.response.find("\"low_pressure_bar\":{\"samples\":0,\"source\":null}") !=
+                      std::string::npos,
+              "one-sided window lost the available input or invented a low-side source");
+        emit(req, "refrigerant-missing");
+    });
+    run("refrigerant_resets", [] {
+        configure_refrigerant();
+        clear_refrigerant_metrics();
+        refrigerant_report.state   = daik::logic::RefrigerantServiceState::Interrupted;
+        refrigerant_report.blocker = daik::logic::RefrigerantServiceBlocker::PollGap;
+        auto req                   = request();
+        check(invoke(req, "/status", daik::h_status) == ESP_OK,
+              "interrupted refrigerant status failed");
+        successful(req);
+        check(req.response.find("\"high_pressure_bar\":{\"samples\":0,\"source\":{"
+                                "\"kind\":\"x10a\",\"reg\":98,\"offset\":15,\"conv\":105}}") !=
+                  std::string::npos,
+              "interruption lost the selected source while clearing its sample population");
+        emit(req, "refrigerant-gap");
+        refrigerant_report.state   = daik::logic::RefrigerantServiceState::Waiting;
+        refrigerant_report.blocker = daik::logic::RefrigerantServiceBlocker::MissingFreshData;
+        refrigerant_report.source_generation     = 32;
+        refrigerant_report.sources.high_pressure = {true, 0x20, 12, 105};
+        req                                      = request();
+        check(invoke(req, "/status", daik::h_status) == ESP_OK,
+              "new-source refrigerant status failed");
+        successful(req);
+        emit(req, "refrigerant-new-source");
+    });
+    run("refrigerant_omission", [] {
+        configure_refrigerant();
+        refrigerant_report.coverage_evaluated = false;
+        auto req                              = request();
+        check(invoke(req, "/status", daik::h_status) == ESP_OK,
+              "unevaluated refrigerant status failed");
+        successful(req);
+        check(req.response.find("\"refrigerant_service\":") == std::string::npos,
+              "unevaluated source invented a refrigerant observation");
+        emit(req, "refrigerant-unevaluated");
+        refrigerant_report.coverage_evaluated = true;
+        current.fp_valid                      = false;
+        req                                   = request();
+        check(invoke(req, "/status", daik::h_status) == ESP_OK,
+              "undetected refrigerant status failed");
+        successful(req);
+        check(req.response.find("\"refrigerant_service\":") == std::string::npos,
+              "undetected profile invented a refrigerant observation");
+        emit(req, "refrigerant-undetected");
+    });
     run("allocation_failures", [] {
         allocation_sweep("/status", daik::h_status);
         config_unreadable = true;
+        allocation_sweep("/status?redact=1", daik::h_status);
+        configure_refrigerant();
+        allocation_sweep("/status", daik::h_status);
         allocation_sweep("/status?redact=1", daik::h_status);
         config_unreadable = false;
         allocation_sweep("/values", daik::h_values);
@@ -833,6 +985,9 @@ int main(int argc, char** argv) {
     run("chunk_failures", [] {
         chunk_sweep("/status", daik::h_status);
         config_unreadable = true;
+        chunk_sweep("/status?redact=1", daik::h_status);
+        configure_refrigerant();
+        chunk_sweep("/status", daik::h_status);
         chunk_sweep("/status?redact=1", daik::h_status);
         config_unreadable = false;
         chunk_sweep("/values", daik::h_values);

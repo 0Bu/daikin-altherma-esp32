@@ -139,8 +139,21 @@ function checkupSourceReadyFor(status = S.status) {
     ? status?.modbus?.connected === true
     : status?.hp?.connected === true) || hasRetainedHealth;
 }
+const refrigerantStatusUnavailable = () => S.otaCached || S.transportUnavailable === "status";
 function renderCards(hold = true) {
-  if (S.otaCached || S.transportUnavailable === "status") markCyclingStale();
+  if (refrigerantStatusUnavailable()) {
+    markCyclingStale();
+    // A click or scrub may defer rebuilding the card. Hide its retired status immediately.
+    const item = $("valueGroups")?.querySelector?.('[data-desc="service:refrigerant"]')?.closest(".vitem");
+    if (item && !item.hidden) {
+      const focused = item.contains(document.activeElement);
+      item.hidden = true;
+      if (focused) $("cardNav")?.querySelector('[aria-pressed="true"]')?.focus({ preventScroll: true });
+      S.descOpen.delete("service:refrigerant");
+      // If removal is held and the next frame is byte-identical, rebuild to remove hidden.
+      delete _html.valueGroups;
+    }
+  }
   // Freeze trend hosts during a scrub so structural updates cannot replace the captured plot.
   // Rows catch up when scrubEnd resumes rendering.
   if (S.scrub || (hold && S.clickHold)) return;
@@ -2472,6 +2485,7 @@ function checkupCardHtml(includeHealth = true) {
 // threshold decision.  It is rendered as the same expandable status/description row used by the
 // eight diagnoses, inside their card. Older firmware omits the object and gets no placeholder row.
 function refrigerantServiceRowHtml() {
+  if (refrigerantStatusUnavailable()) return "";
   const service = S.status?.refrigerant_service;
   if (!service || typeof service !== "object" || Array.isArray(service)) return "";
 
@@ -2497,15 +2511,28 @@ function refrigerantServiceRowHtml() {
     ["eev_command_pls", "eev", "pls"], ["high_pressure_bar", "hp", "bar"],
     ["low_pressure_bar", "lp", "bar"],
   ];
+  let hasMetricMeta = false;
   for (const [key, inspectorKey, unit] of metricKeys) {
     const metric = service.metrics?.[key];
-    if (!metric || ![metric.min, metric.mean, metric.max].every(n => typeof n === "number" && Number.isFinite(n)))
-      continue;
+    const readable = metric && [metric.min, metric.mean, metric.max].every(Number.isFinite);
+    const meta = service.metric_meta?.[key];
+    const counted = meta && Number.isInteger(meta.samples) && meta.samples >= 0 && meta.samples <= 0xffffffff;
+    // With no qualifying window, the existing blocker already explains the absence. Within an
+    // observed window, a zero-count optional input remains visible beside the populated ranges.
+    if (!readable && (!counted || !Number.isInteger(samples) || samples <= 0)) continue;
     const number = n => n.toLocaleString(LANG, { maximumFractionDigits: 1 });
     const label = t(`service.metric.${inspectorKey}`);
-    detail.push(`${label}: ${t("service.metric.range", number(metric.min),
-                              number(metric.mean), number(metric.max), unit)}`);
+    let text = `${label}: ${readable ? t("service.metric.range", number(metric.min),
+                              number(metric.mean), number(metric.max), unit) : t("sys.nodata")}`;
+    if (counted) {
+      hasMetricMeta = true;
+      text += ` · ${t("service.metric.samples", meta.samples)}`;
+      // Only the unselected state is named; a selected input with zero readings stays "no data".
+      if (meta.source === null) text += ` · ${t("service.metric.input_none")}`;
+    }
+    detail.push(text);
   }
+  if (hasMetricMeta) detail.push(t("service.metric.meta_limit"));
   const limitations = Array.isArray(service.limitations) ? service.limitations : [];
   const knownLimitations = ["special_phases_unavailable", "temperature_context_incomplete",
                            "pressure_sides_incomplete", "outdoor_context_incomplete"];
@@ -2524,7 +2551,9 @@ function refrigerantServiceRowHtml() {
   const body = descParaHtml(`<span class="vdesc-n">${esc(status)}</span>` +
                  (time.length ? ` · ${esc(time.join(" · "))}` : "") +
                  ` — ${esc(t(helpKey || "service.title"))}`) +
-               descParaHtml(esc(detail.length ? detail.join(" · ") : t("sys.nodata"))) +
+               descParaHtml(detail.length
+                 ? hasMetricMeta ? detail.map(esc).join("<br>") : esc(detail.join(" · "))
+                 : esc(t("sys.nodata"))) +
                descNoteHtml(t("normal.label"), t("service.common"));
   return descAccordion("service:refrigerant", t("service.title"), esc(status),
                        `checkup-val${tones[state] ? ` ${tones[state]}` : ""}`, body);

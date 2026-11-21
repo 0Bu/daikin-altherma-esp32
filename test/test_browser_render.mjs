@@ -1337,11 +1337,21 @@ async function assertPlantDiagnosis(page, context) {
       ],
     };
     S.status.refrigerant_service = {
-      state: 'limited', continuous_s: 75, samples: 4, blocker: null,
-      special_phases_known: false, limitations: ['pressure_sides_incomplete'],
+      kind: 'observation', mode: 'heating', state: 'limited', continuous_s: 15,
+      samples: 4, source_generation: 71, blocker: null,
+      special_phases_known: true, limitations: ['pressure_sides_incomplete'],
       metrics: { compressor_rps: { min: 20, mean: 27.5, max: 40 },
         discharge_c: { min: 46.5, mean: 60.5, max: 81.4 },
-        eev_command_pls: { min: 200, mean: 230.5, max: 250 } }
+        eev_command_pls: { min: 200, mean: 230.5, max: 250 },
+        high_pressure_bar: { min: 7.3, mean: 14.6, max: 21.9 },
+        low_pressure_bar: { min: 3.2, mean: 4.1, max: 5 } },
+      metric_meta: {
+        compressor_rps: { samples: 4, source: { kind: 'x10a', reg: 48, offset: 0, conv: 152 } },
+        discharge_c: { samples: 4, source: { kind: 'x10a', reg: 32, offset: 4, conv: 105 } },
+        eev_command_pls: { samples: 4, source: { kind: 'x10a', reg: 48, offset: 3, conv: 151 } },
+        high_pressure_bar: { samples: 2, source: { kind: 'x10a', reg: 98, offset: 15, conv: 105 } },
+        low_pressure_bar: { samples: 4, source: { kind: 'x10a', reg: 32, offset: 14, conv: 105 } }
+      }
     };
     S.status.health = {
       status: "info", full_span: true, span_s: 86400, source_fresh: true, source_age_s: 1,
@@ -1460,6 +1470,104 @@ async function assertPlantDiagnosis(page, context) {
       assert.equal(block.firstValue, 'vdesc-n', `${context}/${block.id}: value first`);
       assert.equal(block.normal, normalLabel, `${context}/${block.id}: Normal last`);
       assert.ok(block.text.every(text => text.trim()), `${context}/${block.id}: no empty block`);
+    }
+    const refrigerantText = () => page.evaluate(`document.querySelector("[data-desc='service:refrigerant']")
+      .closest('.vitem').innerText`);
+    for (const [key, args] of [["samples", [2]], ["samples", [4]], ["meta_limit", []]]) {
+      const expected = await page.evaluate(`t(${JSON.stringify("service.metric." + key)},
+        ...${JSON.stringify(args)})`);
+      assert.ok((await refrigerantText()).includes(expected),
+        `${context}: actual expanded service retains localized metadata ${key}/${args.join()}`);
+    }
+    assert.doesNotMatch(await refrigerantText(), /0x62|0x20|source_generation|"conv"/,
+      `${context}: raw source coordinates stay outside the owner-facing explanation`);
+    assert.ok(!(await refrigerantText()).includes(await page.evaluate("t('service.metric.input_none')")),
+      `${context}: populated selected metrics do not add a generic source sentence`);
+    if (context.split("/")[1] === "en") {
+      const serviceRow = "[data-desc='service:refrigerant']";
+      await page.evaluate(`(() => {
+        const fetchLive = window.fetch;
+        const live = S.status;
+        const values = { values: S._values, modbus: S._modbus };
+        window.__servicePoll = { fetchLive, live, phase: "recording", requests: [],
+          valuesRequest: S.valuesRequest, statusRequest: S.statusRequest,
+          statusAcceptedRequest: S.statusAcceptedRequest, transportUnavailable: S.transportUnavailable,
+          transportBusy: S.transportBusy, values: S._values, modbus: S._modbus,
+          statusDue: _statusDue, pollFails: _pollFails, otaCached: S.otaCached };
+        const fixture = window.__servicePoll;
+        window.fetch = (url, options) => {
+          if (url === "/status") {
+            fixture.requests.push(url);
+            if (fixture.phase === "unreachable") return Promise.resolve(new Response(null, { status: 500 }));
+            const interrupted = fixture.phase === "interrupted";
+            return Promise.resolve(Response.json({ ...live, hp: { ...live.hp, connected: !interrupted },
+              refrigerant_service: interrupted
+                ? { kind: "observation", state: "interrupted", blocker: "poll_gap",
+                    continuous_s: 0, samples: 0 }
+                : { ...live.refrigerant_service, state: "observing" } }));
+          }
+          if (url === "/values") {
+            fixture.requests.push(url);
+            return Promise.resolve(Response.json(fixture.phase === "interrupted" ? { values: [] } : values));
+          }
+          return fetchLive(url, options);
+        };
+        return true;
+      })()`);
+      const poll = (phase) => page.evaluate(`(async () => {
+        window.__servicePoll.phase = ${JSON.stringify(phase)};
+        _statusDue = 0;
+        await pollTick();
+        return window.__servicePoll.requests.slice();
+      })()`);
+      try {
+        assert.deepEqual(await poll("recording"), ["/status", "/values"]);
+        assert.match(await refrigerantText(), /RECORDING.*4 readings/s);
+        const expanded = await page.evaluate(`(() => {
+          const row = document.querySelector(${JSON.stringify(serviceRow)});
+          row.focus();
+          S.clickHold = true;
+          return row === document.activeElement && row.getAttribute("aria-expanded") === "true";
+        })()`);
+        assert.equal(expanded, true);
+        assert.deepEqual(await poll("unreachable"), ["/status", "/values", "/status"]);
+        assert.equal(await page.evaluate(`(() => {
+          const row = document.querySelector(${JSON.stringify(serviceRow)});
+          return S.status.refrigerant_service.state === "observing" &&
+            S.transportUnavailable === "status" && row.closest(".vitem").hidden &&
+            document.activeElement?.dataset.card === "diagnosis";
+        })()`), true, `${context}: a failed status retires the expanded and focused recording immediately`);
+        await page.evaluate("S.clickHold = false; renderApp(); true");
+        assert.equal(await page.evaluate(`!!document.querySelector(${JSON.stringify(serviceRow)})`), false);
+        assert.deepEqual(await poll("interrupted"), ["/status", "/values", "/status", "/status", "/values"]);
+        assert.deepEqual(await page.evaluate(`(() => {
+          const row = document.querySelector(${JSON.stringify(serviceRow)});
+          return { value: row.querySelector(".vrow-val").innerText, open: row.getAttribute("aria-expanded") };
+        })()`), { value: "PAUSED", open: "false" },
+          `${context}: current HTTP status reports X10A interruption without reopening stale content`);
+        await clickDisclosure(page, serviceRow);
+        await page.waitFor("!S.clickHold");
+        assert.match(await refrigerantText(), /0 readings/);
+        assert.doesNotMatch(await refrigerantText(), /4 readings|27\.5/);
+        await page.evaluate("S.otaCached = true; renderApp(); true");
+        assert.equal(await page.evaluate(`!!document.querySelector(${JSON.stringify(serviceRow)})`), false,
+          `${context}: an OTA snapshot cannot show a current refrigerant row`);
+      } finally {
+        await page.evaluate(`(() => {
+          const saved = window.__servicePoll;
+          window.fetch = saved.fetchLive;
+          _statusDue = saved.statusDue; _pollFails = saved.pollFails;
+          Object.assign(S, { status: saved.live, _values: saved.values, _modbus: saved.modbus,
+            valuesRequest: saved.valuesRequest, statusRequest: saved.statusRequest,
+            statusAcceptedRequest: saved.statusAcceptedRequest, otaCached: saved.otaCached,
+            transportUnavailable: saved.transportUnavailable, transportBusy: saved.transportBusy,
+            clickHold: false });
+          S.descOpen.add("service:refrigerant");
+          delete window.__servicePoll;
+          renderApp();
+          return true;
+        })()`);
+      }
     }
     const pressureExpanded = await page.evaluate(`(() => {
       const row = document.querySelector("[data-desc='model:health_pressure']").closest(".vitem");
@@ -1611,6 +1719,52 @@ async function assertPlantDiagnosis(page, context) {
     await captureNativeEvidence(page, `${context}/dhw-no-window`,
       "[data-desc='model:health_dhw_loss']", ".vitem");
     await captureNativeEvidence(page, `${context}/refrigerant`,
+      "[data-desc='service:refrigerant']", ".vitem");
+    // An optional input may contribute no readings while the other pressure side admits the
+    // window. Its selected source is retained, but zero accepted samples cannot create a range.
+    await page.evaluate(`(() => {
+      const service = S.status.refrigerant_service;
+      service.source_generation = 72;
+      service.metrics.high_pressure_bar = null;
+      service.metric_meta.high_pressure_bar.samples = 0;
+      renderApp(); return true;
+    })()`);
+    await page.frame();
+    assertLayout(await page.evaluate(layoutAudit), `${context}/refrigerant-zero`);
+    await assertAccessibility(page, `${context}/refrigerant-zero`, { nativeTree: true });
+    for (const [key, args] of [["samples", [0]], ["meta_limit", []]]) {
+      const expected = await page.evaluate(`t(${JSON.stringify("service.metric." + key)},
+        ...${JSON.stringify(args)})`);
+      assert.ok((await refrigerantText()).includes(expected),
+        `${context}: zero-count service retains localized metadata ${key}`);
+    }
+    assert.ok(!(await refrigerantText()).includes(await page.evaluate("t('service.metric.input_none')")),
+      `${context}: a selected zero-count input is not described as unselected`);
+    const unavailableInputCount = await page.evaluate(`(() => {
+      const text = document.querySelector("[data-desc='service:refrigerant']").closest('.vitem').innerText;
+      return text.split(t('sys.nodata')).length - 1;
+    })()`);
+    assert.ok(unavailableInputCount >= 1,
+      `${context}: the selected zero-count pressure input stays unavailable rather than displaying measured zero`);
+    await captureNativeEvidence(page, `${context}/refrigerant-zero`,
+      "[data-desc='service:refrigerant']", ".vitem");
+    // A different profile has a selected high side and no assigned low side. This is distinct
+    // from the selected-but-unread input above, without inventing a low-side measurement.
+    await page.evaluate(`(() => {
+      const service = S.status.refrigerant_service;
+      service.source_generation = 73;
+      service.metrics.high_pressure_bar = { min: 7.3, mean: 14.6, max: 21.9 };
+      service.metric_meta.high_pressure_bar = { samples: 4,
+        source: { kind: 'x10a', reg: 32, offset: 12, conv: 105 } };
+      service.metrics.low_pressure_bar = null;
+      service.metric_meta.low_pressure_bar = { samples: 0, source: null };
+      renderApp(); return true;
+    })()`);
+    await page.frame();
+    assertLayout(await page.evaluate(layoutAudit), `${context}/refrigerant-unselected`);
+    assert.ok((await refrigerantText()).includes(await page.evaluate("t('service.metric.input_none')")),
+      `${context}: an unselected low side is explicitly distinguished from a selected unread input`);
+    await captureNativeEvidence(page, `${context}/refrigerant-unselected`,
       "[data-desc='service:refrigerant']", ".vitem");
     await page.evaluate(`(() => {
       const h = S.status.health;

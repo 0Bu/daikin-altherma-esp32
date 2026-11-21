@@ -247,11 +247,12 @@ changes or their cause.
 <a id="refrigerant-service-observation"></a>
 ## Refrigerant (heating)
 
-This expandable row is technical context, **not a ninth health diagnosis**. It watches existing
-read-only X10A traffic automatically without Plant diagnostics opt-in or a service mode (the row is
-X10A-only and hidden when the card displays **Modbus**). Until this
-boot detects a profile and evaluates its signal coverage—including safe mode—the row/status object
-is absent. It does not affect `/status.health` or the eight-row summary.
+Enable **Plant diagnostics** (`X10A`) under **Settings → Firmware** and open **Diagnostics** to see
+this expandable row (the row is X10A-only and hidden when the card displays **Modbus**). The
+observation itself collects ordinary read-only X10A traffic independently of that setting and works
+without a service mode. The row and its API object need a detected profile with evaluated signal
+coverage in the current boot. The observation sits outside `/status.health` and leaves the eight-row
+summary unchanged.
 
 A window admits only fresh same-sweep values with a running space-heating compressor, non-DHW valve,
 no defrost, readable normal fault rows, no active profile-provided startup/restart/oil-return/pressure-
@@ -270,6 +271,12 @@ heating-specific. Optional missing comparison data remains an explicit limitatio
 Duration and min/mean/max describe **one uninterrupted window**. The permitted poll gap depends on
 profile pages and transport timeout; there is no universal three-second/twenty-minute service rule.
 Source-generation changes also reset continuity.
+
+Each range shows how many readings contributed. A pressure input that was unreadable during part
+of the window can have fewer readings than the total number of sweeps. These counts describe the
+sample population. The range stays unavailable when zero readings qualified. The X10A input shown
+in the API is the profile's selected source, which can be unreadable and needs independent
+physical validation.
 
 **Important limit:** It assigns no normal range, refrigerant-charge verdict, full-load state or
 settling claim. EEV pulses are a controller command, not proof of mechanical valve movement.

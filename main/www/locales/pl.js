@@ -1,4 +1,4 @@
-// translation-source: 001d3369c40a56cb50c75b43d6dd468806ca590e178443d5f7e64b3f26d6222a
+// translation-source: 6ad3c45290781dc0a395bafd68b5e19c396820339bbc4d56c5d12abbc20af1fb
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -7,10 +7,7 @@ const plNoun = (n, one, few, many) => {
 I18N.pl = localeValues([
   /* sys.nodata */ "Brak danych",
   /* sys.unreachable */ "Nieosiągalne",
-  /* sys.x10a_down */ "X10A poza siecią",
-  /* sys.mb_carrying */ "Nieznany tryb pracy — odczyty z Modbus",
   /* sys.mb_only */ "X10A poza siecią — odczyty z Modbus",
-  /* sys.mb_source */ "X10A poza siecią · Modbus",
   /* mode.stop */ "Zatrzymanie",
   /* mode.heat */ "Ogrzewanie",
   /* mode.cool */ "Chłodzenie",
@@ -67,7 +64,6 @@ I18N.pl = localeValues([
   /* bug.title */ "Zgłoś błąd",
   /* bug.intro */ "Krótko opisz problem. Urządzenie doda swój stan, odczyty i dziennik po usunięciu nazw sieci, adresów i nazw serwerów.",
   /* bug.what */ "Co się dzieje",
-  /* bug.what_ph */ "Od rana temperatura zbiornika wskazuje 12800 °C w Home Assistant.",
   /* bug.need_text */ "Najpierw opisz, co się dzieje — wystarczy jedno lub dwa zdania.",
   /* bug.continue */ "Przygotuj raport",
   /* bug.step2_title */ "Sprawdź raport",
@@ -91,7 +87,6 @@ I18N.pl = localeValues([
   /* src.delta */ (d, u) => `Różnica ${d}${u ? " " + u : ""}`,
   /* src.disagree */ "Oba źródła podają różny stan",
   /* conn.homehub */ "HomeHub",
-  /* conn.searching */ "Wyszukiwanie…",
   /* group.Modbus */ "Modbus",
   /* conn.title */ "Połączenia",
   /* conn.offline */ "Poza siecią",
@@ -160,8 +155,6 @@ I18N.pl = localeValues([
   /* service.state.observing */ "ZAPIS",
   /* service.state.limited */ "CZĘŚCIOWO",
   /* service.state.interrupted */ "PAUZA",
-  /* service.row.window */ "Zarejestrowano dotąd",
-  /* service.row.reason */ "Dlaczego ten stan?",
   /* service.reason.unsupported_profile */ "Ten model nie udostępnia wszystkich potrzebnych odczytów.",
   /* service.reason.compressor_not_running */ "Sprężarka nie pracuje.",
   /* service.reason.unsupported_or_unknown_mode */ "Normalne ogrzewanie pomieszczeń niepotwierdzone.",
@@ -289,6 +282,9 @@ I18N.pl = localeValues([
   /* service.metric.hp */ "Wysokie ciśnienie",
   /* service.metric.lp */ "Niskie ciśnienie",
   /* service.metric.range */ (a, b, c, d) => `min. ${a} · średnia ${b} · maks. ${c} ${d}`,
+  /* service.metric.samples */ n => `Liczba przyjętych odczytów: ${n}`,
+  /* service.metric.input_none */ "Brak wybranego wejścia",
+  /* service.metric.meta_limit */ "Liczby to przyjęte odczyty, a nie pokrycie czasu. Wybrane wejście nie potwierdza bieżącego odczytu.",
   /* service.limit.special_phases_unavailable */ "Fazy sterownika",
   /* service.limit.temperature_context_incomplete */ "Kontekst temperatur",
   /* service.limit.pressure_sides_incomplete */ "Strona/y ciśnienia",
@@ -788,7 +784,6 @@ I18N.pl = localeValues([
   /* wx.longitude */ "Długość geograficzna",
   /* wx.waiting */ "Oczekiwanie na prognozę",
   /* wx.fetching */ "Pobieranie prognozy Open-Meteo…",
-  /* wx.unavailable */ "Niedostępne",
   /* wx.error */ "Błąd prognozy Open-Meteo",
   /* wx.detail.status */ "Stan:",
   /* wx.status.fresh */ "Aktualna",
@@ -872,7 +867,6 @@ I18N.pl = localeValues([
   /* board.btninv */ "Aktywny stan niski (przycisk zwiera pin do GND)",
   /* board.hint */ "Reset fabryczny: przytrzymaj przycisk przez 5 s. Jeśli dziennik historii nie jest gotowy, żadne dane nie zostaną usunięte. Usuwa ustawienia Wi-Fi i inne ustawienia, zapisaną historię, czasy trwania stanów, surowy zrzut pamięci po awarii i zapisany rekord do czyszczenia MQTT. Ustawienia płytki, diody LED i przycisku pozostają, jeśli to możliwe. Błąd podczas kasowania może sprawić, że tylko część danych zostanie usunięta. Urządzenie uruchomi się ponownie tylko po pomyślnym wykonaniu wszystkich kroków kasowania. Jeśli reset się nie rozpocznie lub nie zakończy, sprawdź /diag. Bez podłączonego przycisku wybierz „Brak”.",
   /* card.hardware */ "Sprzęt",
-  /* card.hw_off */ "Brak",
   /* card.hw_led */ (pin, kind) => `GPIO${pin} · ${kind}`,
   /* card.hw_btn */ (pin) => `GPIO${pin}`,
   /* card.hw_board_m5stack */ "M5Stack AtomS3 Lite to kompaktowa płytka ESP32-S3 z wbudowaną diodą stanu RGB WS2812.",
@@ -901,7 +895,6 @@ I18N.pl = localeValues([
   /* card.diagnostics */ "Diagnostyka instalacji",
   /* card.diagnostics_help */ "Włącza 24-godzinną kontrolę instalacji, diagnostykę krzywej grzewczej oraz dodatkowe źródła, takie jak temperatura pomieszczenia, prognoza pogody i moc pompy cyrkulacyjnej.",
   /* diagnostics.off */ "Wyłączona",
-  /* diagnostics.on */ "Włączona",
   /* diagnostics.saved_on */ "Włączono diagnostykę instalacji — zbieranie rozpoczyna się teraz",
   /* diagnostics.saved_off */ "Wyłączono diagnostykę instalacji — zbieranie zatrzymane",
   /* probe.toggle */ "Diagnostyka protokołu",

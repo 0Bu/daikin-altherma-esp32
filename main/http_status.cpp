@@ -647,6 +647,29 @@ append_status_service_metric(JsonOut& j, const char* prefix,
 
 template <typename JsonOut>
 [[gnu::noinline]] static void
+append_status_service_meta(JsonOut& j, const char* prefix,
+                           const logic::RefrigerantServiceMetricSnapshot& metric,
+                           const logic::RefrigerantServiceSource&         source) {
+    j += prefix;
+    j += "{\"samples\":";
+    append_json_uint(j, metric.samples);
+    j += ",\"source\":";
+    if (source.selected) {
+        j += "{\"kind\":\"x10a\",\"reg\":";
+        append_json_uint(j, source.reg);
+        j += ",\"offset\":";
+        append_json_uint(j, source.off);
+        j += ",\"conv\":";
+        append_json_uint(j, source.conv);
+        j += "}";
+    } else {
+        j += "null";
+    }
+    j += "}";
+}
+
+template <typename JsonOut>
+[[gnu::noinline]] static void
 append_status_fault_check_json(JsonOut& j, DiagnosticsSource source, bool source_fresh,
                                bool diagnostics_enabled, bool redact) {
     if (!diagnostics_enabled) return;
@@ -1683,6 +1706,7 @@ static void append_status_json(JsonOut& j, bool redact) {
             json_append_quoted(j, logic::refrigerant_service_state_name(refrigerant_service.state));
             ufield(",\"continuous_s\":", refrigerant_service.continuous_s);
             ufield(",\"samples\":", refrigerant_service.samples);
+            ufield(",\"source_generation\":", refrigerant_service.source_generation);
             qfield(",\"mode\":", logic::refrigerant_service_mode_name(refrigerant_service.mode));
             const bool has_blocker =
                 refrigerant_service.blocker != logic::RefrigerantServiceBlocker::None;
@@ -1695,29 +1719,46 @@ static void append_status_json(JsonOut& j, bool redact) {
             // observes ordinary traffic and an EEV command.  It neither establishes a
             // settled/full-load condition nor receives independent mechanical valve feedback.
             j += ",\"load_proven\":false,\"eev_feedback\":false,\"limitations\":[";
-            bool service_limitation_separator = false;
-            auto append_service_limitation = [&j, &service_limitation_separator](const char* name) {
-                if (service_limitation_separator) j += ",";
-                json_append_quoted(j, name);
-                service_limitation_separator = true;
+            static constexpr struct {
+                uint8_t     mask;
+                const char* item;
+            } kServiceLimits[] = {
+                {logic::RefrigerantServiceSpecialPhases, "\"special_phases_unavailable\""},
+                {logic::RefrigerantServiceTemperatures, "\"temperature_context_incomplete\""},
+                {logic::RefrigerantServicePressureSides, "\"pressure_sides_incomplete\""},
+                {logic::RefrigerantServiceOutdoorContext, "\"outdoor_context_incomplete\""},
             };
-            if (refrigerant_service.limitation_mask & logic::RefrigerantServiceSpecialPhases)
-                append_service_limitation("special_phases_unavailable");
-            if (refrigerant_service.limitation_mask & logic::RefrigerantServiceTemperatures)
-                append_service_limitation("temperature_context_incomplete");
-            if (refrigerant_service.limitation_mask & logic::RefrigerantServicePressureSides)
-                append_service_limitation("pressure_sides_incomplete");
-            if (refrigerant_service.limitation_mask & logic::RefrigerantServiceOutdoorContext)
-                append_service_limitation("outdoor_context_incomplete");
+            bool service_limitation_separator = false;
+            for (const auto& lim : kServiceLimits) {
+                if (!(refrigerant_service.limitation_mask & lim.mask)) continue;
+                if (service_limitation_separator) j += ",";
+                j += lim.item;
+                service_limitation_separator = true;
+            }
+            struct ServiceMetricField {
+                const char*                             prefix;
+                logic::RefrigerantServiceMetricSnapshot logic::RefrigerantServiceSnapshot::*metric;
+                logic::RefrigerantServiceSource logic::RefrigerantServiceSources::*source;
+            };
+            static constexpr ServiceMetricField kServiceMetricFields[] = {
+                {"\"compressor_rps\":", &logic::RefrigerantServiceSnapshot::rps,
+                 &logic::RefrigerantServiceSources::rps},
+                {",\"discharge_c\":", &logic::RefrigerantServiceSnapshot::discharge,
+                 &logic::RefrigerantServiceSources::discharge},
+                {",\"eev_command_pls\":", &logic::RefrigerantServiceSnapshot::eev_command,
+                 &logic::RefrigerantServiceSources::eev_command},
+                {",\"high_pressure_bar\":", &logic::RefrigerantServiceSnapshot::high_pressure,
+                 &logic::RefrigerantServiceSources::high_pressure},
+                {",\"low_pressure_bar\":", &logic::RefrigerantServiceSnapshot::low_pressure,
+                 &logic::RefrigerantServiceSources::low_pressure},
+            };
             j += "],\"metrics\":{";
-            append_status_service_metric(j, "\"compressor_rps\":", refrigerant_service.rps);
-            append_status_service_metric(j, ",\"discharge_c\":", refrigerant_service.discharge);
-            append_status_service_metric(j,
-                                         ",\"eev_command_pls\":", refrigerant_service.eev_command);
-            append_status_service_metric(
-                j, ",\"high_pressure_bar\":", refrigerant_service.high_pressure);
-            append_status_service_metric(
-                j, ",\"low_pressure_bar\":", refrigerant_service.low_pressure);
+            for (const auto& field : kServiceMetricFields)
+                append_status_service_metric(j, field.prefix, refrigerant_service.*(field.metric));
+            j += "},\"metric_meta\":{";
+            for (const auto& field : kServiceMetricFields)
+                append_status_service_meta(j, field.prefix, refrigerant_service.*(field.metric),
+                                           refrigerant_service.sources.*(field.source));
             j += "}},";
         }
     }

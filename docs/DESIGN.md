@@ -415,9 +415,10 @@ all rule details are maintained in [DIAGNOSTICS.md](DIAGNOSTICS.md) and its evid
 A separate neutral **Refrigerant (heating)** row uses passive fresh-sweep observation.
 Its collection needs no 24-hour opt-in and contributes no badge/count/verdict. The whole diagnosis
 card is hidden when Plant diagnostics is off, and this X10A row is hidden when `Modbus` is the
-active display source. When `X10A` is displayed with opt-in, the row appears after signal coverage
-is evaluated this boot, may remain waiting/paused with limits, offers no action and is cleanly
-absent on older firmware. Copy says ordinary polling cannot command full load, prove
+active display source. When `X10A` is displayed with opt-in, the row uses the current HTTP status
+after signal coverage is evaluated this boot. A failed status fetch or an OTA snapshot hides it.
+A current status can report waiting or interrupted with limits, including loss of X10A. Older
+firmware omits the row. Copy says ordinary polling cannot command full load, prove
 settling/charge, establish a universal range or confirm mechanical EEV motion. EEV pulses describe
 a command, not measured valve position.
 
