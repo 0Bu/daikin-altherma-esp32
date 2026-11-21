@@ -859,6 +859,7 @@ void weather_task(void*) {
         stack_watch_sample(StackWatch::Weather);
         const uint32_t source_generation = s_source_generation.load(std::memory_order_acquire);
         RefreshRequestAttempt refresh_attempt;
+        const char*           exception_error = nullptr;
         try {
             const WeatherCycleWait wait = weather_cycle(source_generation, refresh_attempt);
             failures.succeeded();
@@ -868,24 +869,7 @@ void weather_task(void*) {
                 ulTaskNotifyTake(pdTRUE, wait.ticks);
         } catch (const std::exception& e) {
             if (failures.first_failure()) diag_printf("weather: task exception: %s\n", e.what());
-            // These three assignments run while the original throw was most likely a bad_alloc, and
-            // they are safe only because "error" (5), "fetch_failed" (12) and "out_of_memory" (13)
-            // all fit libstdc++'s 15-char SSO buffer and therefore cannot allocate. That is
-            // load-bearing: a 16-character reason string here turns this handler into a re-throw
-            // out of the task, i.e. std::terminate and a reboot.
-            {
-                Lock lk(s_mtx);
-                if (s_source_generation.load(std::memory_order_acquire) != source_generation)
-                    continue;
-                s_status.fetching  = false;
-                s_status.available = false;
-                s_status.state     = "error";
-                s_status.reason    = "fetch_failed";
-                s_status.error     = "out_of_memory";
-                s_status.errors++;
-            }
-            refresh_attempt.finish(false);
-            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(WEATHER_RETRY_INTERVAL_S * 1000u));
+            exception_error = "out_of_memory";
         } catch (...) {
             // The task boundary is a C frame boundary: an escaping non-std throw is std::terminate
             // and a reboot. Nothing in the fetch path throws a non-std type today (the HTTP client
@@ -893,6 +877,13 @@ void weather_task(void*) {
             // GUARANTEE, which every other task loop here already has (mqtt_task, poll_task,
             // mb_task, syslog_task, status_led_task) and which this one was missing.
             if (failures.first_failure()) diag_printf("weather: task exception (non-std)\n");
+            exception_error = "internal_error";
+        }
+        if (exception_error) {
+            // These three assignments run while the original throw was most likely a bad_alloc, and
+            // they are safe only because "error" (5), "fetch_failed" (12), "out_of_memory" (13) and
+            // "internal_error" (14) all fit libstdc++'s 15-char SSO buffer and therefore cannot
+            // allocate. A 16-char reason string here turns recovery into a re-throw and reboot.
             {
                 Lock lk(s_mtx);
                 if (s_source_generation.load(std::memory_order_acquire) != source_generation)
@@ -901,7 +892,7 @@ void weather_task(void*) {
                 s_status.available = false;
                 s_status.state     = "error";
                 s_status.reason    = "fetch_failed";
-                s_status.error     = "internal_error";
+                s_status.error     = exception_error;
                 s_status.errors++;
             }
             refresh_attempt.finish(false);

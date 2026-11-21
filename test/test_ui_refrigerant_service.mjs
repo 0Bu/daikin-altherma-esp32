@@ -20,6 +20,7 @@ const normalizedStatus = statusSource.replaceAll("\\\"", "\"");
 for (const key of [
   "refrigerant_service", "kind", "state", "continuous_s", "samples", "mode", "blocker",
   "special_phases_known", "load_proven", "eev_feedback", "limitations", "metrics",
+  "source_generation", "metric_meta", "source", "reg", "offset", "conv",
   "compressor_rps", "discharge_c", "eev_command_pls", "high_pressure_bar", "low_pressure_bar",
 ]) assert.match(normalizedStatus, new RegExp(`"${key}"`), `missing service status key ${key}`);
 assert.match(normalizedStatus, /"load_proven":false,"eev_feedback":false/,
@@ -57,7 +58,13 @@ vm.runInContext(
    this.__service = {
      row: refrigerantServiceRowHtml,
      card: () => checkupCardHtml(false),
-     set: (value) => { S.status = value == null ? null : { refrigerant_service: value }; },
+     set: (value, extra = {}) => {
+       S.status = value == null ? null : { ...extra, refrigerant_service: value };
+     },
+     transport: (reason, otaCached = false) => {
+       S.transportUnavailable = reason;
+       S.otaCached = otaCached;
+     },
      lang: (value) => { LANG = value; },
    };`,
   sandbox,
@@ -71,13 +78,13 @@ assert.equal(ui.card(), "");
 ui.set({ state: "waiting", continuous_s: null, samples: null });
 assert.doesNotMatch(ui.row(), /0 min|0 readings/, "missing time must not become a measured zero");
 const observed = {
-  kind: "observation", state: "observing", continuous_s: 75, samples: 4,
+  kind: "observation", state: "observing", continuous_s: 15, samples: 4,
   mode: "heating", blocker: null, special_phases_known: true,
   load_proven: false, eev_feedback: false, limitations: [],
   metrics: {
-    compressor_rps: { min: 0, mean: 27.5, max: 40 },
+    compressor_rps: { min: 20, mean: 27.5, max: 40 },
     discharge_c: { min: 46.5, mean: 60.5, max: 81.4 },
-    eev_command_pls: { min: 200, mean: 230.5, max: 250 },
+    eev_command_pls: { min: 0, mean: 125, max: 250 },
     high_pressure_bar: { min: 18, mean: 20, max: 22 },
     low_pressure_bar: { min: 4, mean: 5, max: 6 },
   },
@@ -87,18 +94,96 @@ let html = ui.card();
 assert.match(html, /Plant diagnostics · 24 h/);
 assert.match(html, /Refrigerant \(heating\)/);
 assert.match(html, />RECORDING</);
-assert.match(html, /1 min · 4 readings/);
+assert.match(html, /&lt;1 min · 4 readings/);
 assert.match(html, /One space-heating run, separate from 24-hour checks/);
 assert.match(html, /No refrigerant-charge or normal-range diagnosis/);
 assert.match(html, /command, not measured position/);
-assert.match(html, /Compressor: min 0 · mean 27.5 · max 40 rps/);
+assert.match(html, /Compressor: min 20 · mean 27.5 · max 40 rps/);
 assert.match(html, /Discharge temperature: min 46.5 · mean 60.5 · max 81.4 °C/);
-assert.match(html, /Expansion-valve command: min 200 · mean 230.5 · max 250 pls/);
+assert.match(html, /Expansion-valve command: min 0 · mean 125 · max 250 pls/);
 assert.match(html, /High pressure: min 18 · mean 20 · max 22 bar/);
 assert.match(html, /Low pressure: min 4 · mean 5 · max 6 bar/);
 assert.match(html, /class="vrow vrow-desc"[^>]*data-desc="service:refrigerant"/);
 assert.equal((html.match(/<div class="card">/g) || []).length, 1);
 assert.doesNotMatch(html, /data-action=|<form|<input|>OK</);
+for (const [reason, otaCached] of [["status", false], [null, true]]) {
+  ui.transport(reason, otaCached);
+  assert.equal(ui.row(), "", "retained status cannot present a current recording");
+  assert.equal(ui.card(), "", "an otherwise empty card must disappear");
+}
+ui.transport("values");
+assert.match(ui.row(), />RECORDING</, "a values failure does not invalidate accepted status");
+ui.transport(null);
+ui.set({ state: "interrupted", blocker: "poll_gap", continuous_s: 0, samples: 0 });
+assert.match(ui.row(), />PAUSED</);
+assert.doesNotMatch(ui.row(), /27\.5|60\.5|4 readings/);
+
+// New metadata is separate from legacy ranges. Counts belong to each actual accepted population,
+// and an identified input does not turn a missing reading into a zero-valued measurement.
+const counted = {
+  ...observed, state: "limited", source_generation: 777,
+  limitations: ["pressure_sides_incomplete"],
+  metrics: { ...observed.metrics },
+  metric_meta: {
+    compressor_rps: { samples: 4, source: { kind: "x10a", reg: 0x30, offset: 0, conv: 152 } },
+    discharge_c: { samples: 4, source: { kind: "x10a", reg: 0x20, offset: 4, conv: 105 } },
+    eev_command_pls: { samples: 4, source: { kind: "x10a", reg: 0x30, offset: 3, conv: 151 } },
+    high_pressure_bar: { samples: 3, source: { kind: "x10a", reg: 0x62, offset: 15, conv: 105 } },
+    low_pressure_bar: { samples: 4, source: { kind: "x10a", reg: 0x20, offset: 14, conv: 105 } },
+  },
+};
+ui.set(counted);
+html = ui.card();
+assert.match(html, /High pressure: min 18 · mean 20 · max 22 bar · 3 accepted readings/);
+assert.match(html, /Low pressure: min 4 · mean 5 · max 6 bar · 4 accepted readings/);
+assert.doesNotMatch(html, /selected input ·|No selected input/,
+                    "populated ranges do not repeat a generic source phrase");
+assert.match(html, /<br>Discharge temperature:/,
+             "each metric remains readable as its own line inside the existing explanation block");
+assert.match(html, /not time coverage/);
+assert.match(html, /does not prove a current reading/);
+assert.doesNotMatch(html, /777|0x62|converter|Low pressure: min 0/,
+                    "wire-level identity belongs in the API, not the owner-facing row");
+ui.set(counted, { diagnostics: { effective_source: "modbus" } });
+assert.equal(ui.card(), "", "Modbus display must hide the X10A-only refrigerant observation row");
+const oneSided = {
+  ...counted,
+  metrics: { ...counted.metrics, low_pressure_bar: null },
+  metric_meta: {
+    ...counted.metric_meta,
+    high_pressure_bar: { ...counted.metric_meta.high_pressure_bar, samples: 4 },
+    low_pressure_bar: { samples: 0, source: null },
+  },
+};
+ui.set(oneSided);
+assert.match(ui.card(), /Low pressure: No data · 0 accepted readings · No selected input/);
+ui.set({ ...oneSided, metric_meta: {
+  ...oneSided.metric_meta, low_pressure_bar: { ...counted.metric_meta.low_pressure_bar, samples: 0 },
+} });
+html = ui.card();
+// A selected input without accepted readings stays distinct from the unselected state above.
+assert.match(html, /Low pressure: No data · 0 accepted readings(?:<br>|$)/);
+assert.doesNotMatch(html, /No selected input/);
+assert.doesNotMatch(html, /Low pressure: min 0/);
+ui.set({ ...counted, state: "waiting", samples: 0, continuous_s: 0,
+  blocker: "compressor_not_running", metrics: {},
+  metric_meta: Object.fromEntries(Object.entries(counted.metric_meta)
+    .map(([key, meta]) => [key, { ...meta, samples: 0 }])) });
+html = ui.card();
+assert.match(html, /The compressor is not running/);
+assert.doesNotMatch(html, /accepted readings|No selected input|not time coverage/,
+                    "an empty waiting window needs its blocker, not five empty metric lines");
+
+// Absent/malformed metadata is not an accepted zero count or a selected input. Old firmware's
+// legitimate measured zero and its original five ranges continue to render without metadata.
+ui.set({ ...observed, metric_meta: {
+  compressor_rps: { samples: null, source: null },
+  high_pressure_bar: { samples: -1, source: null },
+  low_pressure_bar: { samples: "0", source: null },
+} });
+html = ui.card();
+assert.match(html, /Expansion-valve command: min 0 · mean 125 · max 250 pls/);
+assert.doesNotMatch(html, /accepted readings|selected input|not time coverage/);
 
 // Unknown/null/incomplete metric data cannot become a zero or partially plausible range.
 ui.set({ ...observed, metrics: {
@@ -108,7 +193,7 @@ ui.set({ ...observed, metrics: {
 } });
 html = ui.card();
 assert.doesNotMatch(html, /Compressor:|Discharge temperature:|High pressure:|Low pressure:/);
-assert.doesNotMatch(html, /min 0|NaN|undefined/);
+assert.doesNotMatch(html, /NaN|undefined/);
 
 ui.set({ ...observed, state: "limited", special_phases_known: false,
   limitations: ["special_phases_unavailable", "temperature_context_incomplete",
@@ -149,13 +234,21 @@ for (const locale of localeNames) {
   for (const unit of ["rps", "°C", "pls", "bar"]) assert.ok(html.includes(unit), `${locale} ${unit}`);
   assert.doesNotMatch(html, />OK</);
   assert.equal((html.match(/class="vdesc-p"/g) || []).length, 3, `${locale}: exactly three blocks`);
+
+  ui.set(oneSided);
+  const metadata = ui.card();
+  assert.doesNotMatch(metadata, /service\.(?:metric|limit|common)|undefined|NaN|0x62|777/, locale);
+  if (locale !== "en") {
+    assert.doesNotMatch(metadata, /accepted readings|Profile-selected X10A input|No selected input|not time coverage/,
+                       `${locale}: metadata and its limit must be localized`);
+  }
 }
 ui.lang("de");
 ui.set({ ...observed, state: "limited", special_phases_known: false,
   limitations: ["pressure_sides_incomplete"] });
 html = ui.card();
 assert.match(html, />LÜCKENHAFT</);
-assert.match(html, /Verdichter: min. 0 · Mittel 27,5 · max. 40 rps/);
+assert.match(html, /Verdichter: min. 20 · Mittel 27,5 · max. 40 rps/);
 assert.match(html, /Druckseite\(n\)/);
 assert.match(html, /unabhängig von der 24-h-Diagnose/);
 assert.match(html, /Ventil: Befehl, keine gemessene Stellung/);

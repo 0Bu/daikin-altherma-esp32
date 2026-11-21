@@ -1025,6 +1025,10 @@ def validate_status_diagnosis_paths(budgets: dict[str, Any], sources: dict[str, 
         "httpd_direct_status_service_metric": ["http_send_status_json", "status_serializer",
                                                "status_service_metric", "status_tenths_value",
                                                "status_unsigned_number"],
+        "httpd_mcp_status_service_meta": ["mcp_post", "http_send_status_json", "status_serializer",
+                                          "status_service_meta", "status_unsigned_number"],
+        "httpd_direct_status_service_meta": ["http_send_status_json", "status_serializer",
+                                             "status_service_meta", "status_unsigned_number"],
         "httpd_mcp_curve_scalar_fields": ["mcp_post", "http_send_status_json", "status_serializer",
                                           "curve_status_json", "curve_json_bool", "curve_json_uint",
                                           "curve_json_quoted", "curve_json_source",
@@ -3278,6 +3282,7 @@ def self_test() -> None:
         'void daik::append_status_signed_tenths<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, char const*, bool, int)': 32,
         'void daik::append_status_outdoor_context<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::logic::CheckupOutdoorReport const&)': 64,
         'void daik::append_status_service_metric<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, char const*, daik::logic::RefrigerantServiceMetricSnapshot const&)': 32,
+        'void daik::append_status_service_meta<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, char const*, daik::logic::RefrigerantServiceMetricSnapshot const&, daik::logic::RefrigerantServiceSource const&)': 32,
         'daik::append_heating_curve_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::Config const&, bool)::{lambda(char const*, bool)\x231}::operator()(char const*, bool) const': 32,
         'daik::append_heating_curve_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::Config const&, bool)::{lambda(char const*, unsigned long long)\x231}::operator()(char const*, unsigned long long) const': 32,
         'daik::append_heating_curve_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >(daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u>&, daik::Config const&, bool)::{lambda(char const*, std::basic_string_view<char, std::char_traits<char> >)\x231}::operator()(char const*, std::basic_string_view<char, std::char_traits<char> >) const': 48,
@@ -3436,6 +3441,7 @@ def self_test() -> None:
      'daik::eth_fallback_task(void*)': 64,
      'daik::dns_task(void*)': 64,
      'daik::config_load()': 64,
+     '_ZN4daikL19log_blob_load_issueENS_17ConfigLoadVerdictERKSt6vectorIhSaIhEEPKcS7_ttS7_$constprop$0': 48,
      'daik::history_start()': 64,
      'daik::mb_autodiscover_initial()': 64,
      'daik::http_send_values_json(httpd_req*, std::basic_string_view<char, std::char_traits<char> >, std::basic_string_view<char, std::char_traits<char> >)': 64,
@@ -4330,7 +4336,9 @@ def self_test() -> None:
                          ("httpd_direct_quoted_field", "status_quoted_field"),
                          ("httpd_direct_quoted_field", "status_quoted_string"),
                          ("httpd_direct_quoted_field", "status_escaped_string"),
-                         ("httpd_direct_quoted_field", "status_utf8_sequence_length")):
+                         ("httpd_direct_quoted_field", "status_utf8_sequence_length"),
+                         ("httpd_direct_status_service_meta", "status_service_meta"),
+                         ("httpd_mcp_status_service_meta", "status_service_meta")):
         changed = json.loads(json.dumps(budgets))
         changed["paths"][name]["symbols"].remove(member)
         try:
@@ -4354,7 +4362,7 @@ def self_test() -> None:
                    "checkup_dhw_fold", "checkup_cycling_hours_build", "cycling_layout_fingerprint",
                    "status_bool_field", "status_uint_field", "status_int_field",
                    "status_quoted_field", "status_quoted_string", "status_escaped_string",
-                   "status_utf8_sequence_length"):
+                   "status_utf8_sequence_length", "status_service_meta"):
         rule = budgets["symbols"][member]
         pattern = re.compile(rule["pattern"])
         for grown in (False, True):

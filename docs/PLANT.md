@@ -14,7 +14,8 @@ as room and circulation 24-hour histories (all of which keep aging out after 24 
 forecast evidence is cleared). Re-enabling resumes inside the same generation without bridging the
 paused interval; `X10A`/`Modbus` chooses which independent store the dashboard card displays while
 both continue recording. Saved source mappings remain dormant across pauses, ready for resume.
-Only a factory reset or source/endpoint/mapping change clears the affected store.
+Only a factory reset or source/endpoint/mapping change clears the affected store. The passive
+refrigerant observation uses existing X10A sweeps independently of the setting.
 
 | Feature | Requires diagnostics opt-in | Inputs / boundary |
 |---|---|---|
@@ -153,21 +154,10 @@ even when the device later restores compatible saved trends.
 <a id="refrigerant-service-observation"></a>
 ## Refrigerant (heating)
 
-A separate passive row records one continuous ordinary space-heating run. It is not a ninth health
-check and starts without a service mode or plant-diagnostics opt-in. Until this boot detects a
-profile and evaluates its coverage—including safe mode—the row/status object is absent.
-
-A window needs fresh values in the same sweep: running compressor, space-heating mode, non-DHW
-valve, no defrost, readable normal fault rows, no active profile-provided special phase, discharge
-temperature, EEV command and at least one structurally identified refrigerant-pressure side.
-Optional missing comparison signals are reported separately. A required reading/phase witness or
-sequence gap ends the window; the next suitable run begins at zero.
-
-`/status.refrigerant_service` reports duration, sample count, limits and min/mean/max values.
-It assigns no health verdict, normal range, settling/full-load condition, completion threshold or
-refrigerant-charge conclusion. The EEV reading is a controller command, not mechanical feedback.
-See [the row guide](DIAGNOSTICS.md#refrigerant-service-observation) and
-[its evidence boundary](DIAGNOSTIC_EVIDENCE.md#refrigerant-service-observation).
+The passive refrigerant observation collects independently of the Plant diagnostics setting.
+Enable **Plant diagnostics** (`X10A`) to see the row in the Diagnostics card (hidden when displaying
+`Modbus`). The [row guide](DIAGNOSTICS.md#refrigerant-service-observation) explains when a window
+qualifies, what its readings mean and what remains unknown.
 
 ## Open-Meteo forecast on the device
 
