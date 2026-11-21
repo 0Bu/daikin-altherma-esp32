@@ -2164,6 +2164,23 @@
       },
       "test_source_sha256": "c0e004a6d6c8d2e3291b26ae525b4cc9899aef3d7ab2e1ca6acb760d6272d50a",
       "validation_boundary": "Host and container compilers exercised synthetic inputs. Hardware and UI behavior remain separate evidence."
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple Clang 17, arm64",
+        "gcc-13-linux-ubuntu24": "Ubuntu GCC 13.3, pinned ESP-IDF v6.1 Docker, aarch64",
+        "gcc-15-github-linux-ubuntu26": "Ubuntu GCC 15.2, Docker, x86-64",
+        "gcc-15-linux-ubuntu26": "Ubuntu GCC 15.2, Docker, aarch64"
+      },
+      "hosted_confirmation": "Measured locally across Apple Clang 17 arm64, ESP-IDF v6.1 Docker GCC 13.3 aarch64, and Ubuntu 26.04 GCC 15.2 x86-64 Docker; hosted CI confirmation remains separate.",
+      "runner": "scripts/run-mock-tests.sh --coverage on Darwin, ESP-IDF Docker, and Ubuntu 26.04 Coverage Docker",
+      "scope": "Sweep-bound flow_scale_unverified qualification for Modbus Input 49 (checkup_modbus_coverage basis gate and non-affirmative 0x00 probe exception retention): main/logic/checkup.hpp rises from 1158/1231 to 1162/1235 on Clang 17 and 1324/1417 to 1330/1423 on GCC 13/15, while main/logic/modbus_profile.hpp remains at 100% (82/82 Clang 17, 90/90 GCC 13/15).",
+      "sources": {
+        "main/logic/checkup.hpp": "7ff351e9c1e7ff91d6e18f343fb3ec1c437891a6f7280b1610a1aed2c825ee11",
+        "main/logic/modbus_profile.hpp": "c4a8e83d348af7b40c733f6c744f361c44947f0deefc2f2d4497fce465025901"
+      },
+      "test_source_sha256": "aeda39ec13fa0a62c80166fab0248120d2fde6753283d3b8de590b3a675c6295",
+      "validation_boundary": "Host and container compilers exercised synthetic inputs; hosted gcc-15-github-linux-ubuntu26 CI confirmation remains separate."
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
@@ -2202,8 +2219,8 @@
         "taken": 6
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 1231,
-        "taken": 1158
+        "outcomes": 1235,
+        "taken": 1162
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 353,
@@ -2660,8 +2677,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 1417,
-        "taken": 1324
+        "outcomes": 1423,
+        "taken": 1330
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 415,
@@ -3118,8 +3135,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 1417,
-        "taken": 1324
+        "outcomes": 1423,
+        "taken": 1330
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 415,
@@ -3576,8 +3593,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 1417,
-        "taken": 1324
+        "outcomes": 1423,
+        "taken": 1330
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 415,

@@ -1168,6 +1168,62 @@ void x10a_modbus_fault_trace_lifecycle() {
     checkup_fault_forget();
     require(!checkup_fault_timeline_snapshot(trace_snap), "fault_forget_withholds_timeline");
 }
+
+void modbus_flow_scale_gate() {
+    boot();
+    checkup_modbus_confirm_source(ModbusProfile::HomeHub, 0x22334455U);
+    const uint32_t epoch = checkup_consent_epoch();
+
+    const auto make_rows = [](bool unverified) {
+        auto flow                         = mb_row(49, "12.0");
+        flow.modbus_flow_scale_unverified = unverified;
+        return std::vector<CachedValue>{
+            mb_row(21, "0"),    mb_row(30, "1"),   mb_row(31, "1"),
+            mb_row(32, "0"),    mb_row(37, "0"),   mb_row(38, "1"),
+            mb_row(43, "48.0"), mb_row(44, "5.0"), flow,
+        };
+    };
+
+    // Fallback sweeps must never admit Input 49 into the 24-hour flow check even if row flags vary.
+    const auto fallback_rows = make_rows(true);
+    for (int t = 10; t <= 90; t += 10) {
+        sdk::now_us = static_cast<int64_t>(t) * 1000000LL;
+        checkup_record_modbus(fallback_rows.data(), fallback_rows.size(), ModbusProfile::HomeHub,
+                              adapter::mb_target_generation, epoch, true,
+                              ModbusProfileBasis::Fallback);
+    }
+    const auto fallback_rep = checkup_report(nullptr, nullptr, nullptr, DiagnosticsSource::Modbus);
+    require(fallback_rep[CheckupCheck::Flow].verdict == CheckupVerdict::Unavailable,
+            "fallback_basis_withholds_flow_check");
+
+    // Even in Affirmative HomeHub, an individual unverified row 49 cannot populate flow_min.
+    const auto unverified_rows = make_rows(true);
+    for (int t = 100; t <= 180; t += 10) {
+        sdk::now_us = static_cast<int64_t>(t) * 1000000LL;
+        checkup_record_modbus(unverified_rows.data(), unverified_rows.size(),
+                              ModbusProfile::HomeHub, adapter::mb_target_generation, epoch, true,
+                              ModbusProfileBasis::Affirmative);
+    }
+    const auto unverified_rep =
+        checkup_report(nullptr, nullptr, nullptr, DiagnosticsSource::Modbus);
+    require(unverified_rep[CheckupCheck::Flow].verdict == CheckupVerdict::Collecting &&
+                unverified_rep[CheckupCheck::Flow].observed_s == 0 &&
+                unverified_rep[CheckupCheck::Flow].a < 0,
+            "unverified_row_49_never_enters_flow_min");
+
+    // Verified Affirmative HomeHub sweep with pump ON for >= 60s produces Ok and 12.0 L/min.
+    const auto verified_rows = make_rows(false);
+    for (int t = 190; t <= 270; t += 10) {
+        sdk::now_us = static_cast<int64_t>(t) * 1000000LL;
+        checkup_record_modbus(verified_rows.data(), verified_rows.size(), ModbusProfile::HomeHub,
+                              adapter::mb_target_generation, epoch, true,
+                              ModbusProfileBasis::Affirmative);
+    }
+    const auto verified_rep = checkup_report(nullptr, nullptr, nullptr, DiagnosticsSource::Modbus);
+    require(verified_rep[CheckupCheck::Flow].verdict == CheckupVerdict::Ok &&
+                verified_rep[CheckupCheck::Flow].a == 120,
+            "verified_affirmative_homehub_admits_flow");
+}
 } // namespace
 int main(int argc, char** argv) {
     std::string name = argc == 2 ? argv[1] : "";
@@ -1215,6 +1271,8 @@ int main(int argc, char** argv) {
             late_restore(name == "late_restore_clock_behind");
         else if (name == "modbus_dual_source")
             modbus_dual_source();
+        else if (name == "modbus_flow_scale_gate")
+            modbus_flow_scale_gate();
         else if (name == "x10a_modbus_fault_trace_lifecycle")
             x10a_modbus_fault_trace_lifecycle();
         else if (name.rfind("consent_lock_", 0) == 0 || name.rfind("consent_sampling_", 0) == 0 ||

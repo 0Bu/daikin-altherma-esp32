@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 9fa325e4f7746eba26ea134f8ec7b400b66e737e88f26a74f7fc9303e5f2b9f1 -->
+<!-- diagnostic-evidence-contract: b3caa2b7ff2bc787aca4d6ee3d822d3f92ad4f511b56ea8d5b18e6e642fd0450 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -479,8 +479,10 @@ registers). One firmware-wide good/bad limit would therefore be incorrect.
 
 **Firmware rule:** The row reports the lowest accepted flow after the internal pump ran
 continuously for at least 60 seconds. It assigns no good/bad assessment. On Modbus,
-`checkup_modbus_coverage` enables `flow` only for the `HomeHub` EKRHH profile (input 49 `/100`);
-native `Altherma4` Modbus leaves `flow` unsupported (`unavailable`, hidden in Modbus UI mode). See
+`checkup_modbus_coverage` enables `flow` only when `HomeHub` EKRHH scaling is affirmatively
+verified (`ModbusProfileBasis::Affirmative` via probe register 79)
+and the committed row carries `!cv.modbus_flow_scale_unverified`; `Probing`, `Fallback`, and native
+`Altherma4` sweeps leave `flow` unsupported (`unavailable`, withheld from Modbus checkups). See
 CHECKUP_FLOW_RUNUP_S and the Flow branch in [checkup.hpp](../main/logic/checkup.hpp).
 
 **Project boundary:** Sixty seconds is a pump run-up filter, not a manufacturer limit. The filter

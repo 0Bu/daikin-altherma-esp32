@@ -1845,7 +1845,10 @@ async function assertPlantDiagnosis(page, context) {
   }
 }
 
-async function assertNativeAltherma4(page, context) {
+async function assertNativeAltherma4(page, context, locale = "en") {
+  const expectedFlow = new Intl.NumberFormat(locale, {
+    minimumFractionDigits: 1, maximumFractionDigits: 1,
+  }).format(12.3);
   try {
     await page.evaluate(`(() => {
       window.__browserNativeAltherma4Original = { ...S };
@@ -2037,6 +2040,34 @@ async function assertNativeAltherma4(page, context) {
           `${context}/inspector-${target}-${connected ? "paired" : "replacement"}`, "inspect");
       }
     }
+    await page.waitFor("!S.clickHold");
+    await page.evaluate(`(() => {
+      S.status.hp.connected = false;
+      S.status.modbus = { ...S.status.modbus, host: "fallback.fixture.invalid", enabled: true,
+        connected: true, profile: "homehub", profile_basis: "fallback" };
+      S._values = [{ label: "Flow sensor", value: "2.5", unit: "L/min", reg: 0x61, concept: "flow" }];
+      S._modbus = [
+        { off: 49, label: "Flow rate", value: 12.3, unit: "L/min", concept: "flow",
+          flow_scale_unverified: true },
+        { off: 30, label: "Circulation pump running", value: 1, unit: "", binary: true,
+          concept: "pump_running" },
+      ];
+      S.insp = "flow";
+      S.inspSig = null;
+      S.inspHistSig = null;
+      renderApp();
+    })()`);
+    assert.deepEqual(await page.evaluate(`(() => ({
+      flowPill: document.getElementById("svFlow").textContent,
+      dtPill: document.getElementById("svDt").textContent,
+      pumpOn: document.getElementById("schem").classList.contains("pump-on"),
+      waterFlowOn: document.getElementById("fPhe").classList.contains("on"),
+      help: document.getElementById("inspBody").innerText.includes(t("mb.flow_scale_help")),
+      deltas: document.getElementById("inspRows").querySelectorAll(".mb-delta").length,
+    }))()`), {
+      flowPill: expectedFlow, dtPill: "—", pumpOn: true, waterFlowOn: false, help: true, deltas: 0,
+    }, `${context}/unverified-modbus-flow: renders provisional pill + caveat without hydraulic motion or numeric delta`);
+    assertLayout(await page.evaluate(layoutAudit), `${context}/unverified-modbus-flow`);
   } finally {
     // The last real click holds per-poll rebuilds briefly. Restore only after that production lease
     // releases, so the next fixture cannot be rendered against stale native-card markup.
@@ -2998,7 +3029,7 @@ try {
         await assertFaultChart(page, `${viewport.name}/${locale}/fault`, viewport.name);
       }
       await assertStatusTruth(page, `${viewport.name}/${locale}/status-truth`);
-      await assertNativeAltherma4(page, `${viewport.name}/${locale}/native-altherma4`);
+      await assertNativeAltherma4(page, `${viewport.name}/${locale}/native-altherma4`, locale);
       nativeAltherma4Checks++;
       await assertHybridRoom(page, `${viewport.name}/${locale}/hybrid-room`, locale);
       hybridRoomChecks++;

@@ -1,4 +1,4 @@
-// translation-source: 6ad3c45290781dc0a395bafd68b5e19c396820339bbc4d56c5d12abbc20af1fb
+// translation-source: aa3abf8d6b7cd47b6adfa6bc6f918e3a1dbe62e1de7c6d8deffda21d1fb75661
 I18N.it = localeValues([
   /* sys.nodata */ "Nessun dato",
   /* sys.unreachable */ "Non raggiungibile",
@@ -1006,6 +1006,8 @@ I18N.it = localeValues([
   /* lang.saved */ "Lingua salvata",
   /* check.detail.dhw_reason.blind_modbus */ "letture mancanti: Modbus senza risposta o interrogazione in pausa",
   /* check.detail.source_stale_modbus */ "Nessuna lettura Modbus recente; stato attuale sconosciuto. Storia conservata.",
+  /* mb.flow_scale_help */ "Scala /100 non confermata (verifica/ripiego); confrontare L/min con il display. Esclusa da moto, ΔT, potenza e verifica 24 h.",
+  /* hist.modbus_flow_unverified */ "Scala Modbus /100 non verificata (verifica/ripiego); confrontare con l'unità.",
 ]);
 INSPECT_I18N.it = inspectValues(
   ["Nessuna lettura attuale:", "il compressore è fermo e l’unità esterna aggiorna i propri sensori solo durante il funzionamento. Il valore dell’ultimo ciclo viene nascosto per non mostrarlo come attuale.", "Velocità del compressore non leggibile: i valori dell’unità esterna possono essere dell’ultimo ciclo."],
@@ -1084,13 +1086,7 @@ INSPECT_I18N.it = inspectValues(
       : "Pompa e portata attuali non dimostrano circolazione nel ramo ambienti."], // heat
     ["Funzionamento ambienti", "Funzionamento caldo o freddo degli ambienti", "Segnale di normale funzionamento caldo/freddo degli ambienti. Non è la richiesta del termostato e non dimostra da solo che il compressore sia attivo."], // spaceh
     ["Temperatura ambiente", 0, "Temperatura e obiettivo della zona di riferimento; dipendono dalla posizione del sensore."], // room
-    ["Pompa di circolazione", "Velocità pompa di circolazione", "Muove l’acqua nell’anello comune e nel ramo scelto dalla 3WV. Può restare attiva con compressore fermo per post-circolazione, protezione o equalizzazione; velocità e portata vanno lette insieme.", (d) => d.pump == null && d.flow == null && d.pumpOn == null ? null
-      : pumpFlowConflict(d) ? `La pompa interna risulta ferma, ma il sensore misura ${fmt1(d.flow)} l/min. Sono possibili circolazione esterna, post-circolazione o segnali discordanti; verificare entrambi.`
-      : d.pump != null && d.pump > 0 ? d.flow != null ? `Velocità ${fmt0(d.pump)} %; portata misurata ${fmt1(d.flow)} l/min.` : `Velocità ${fmt0(d.pump)} %, ma manca la portata; circolazione non confermata.`
-      : waterMoving(d) ? `Il sensore misura ${fmt1(d.flow)} l/min senza una velocità pompa utilizzabile.`
-      : d.pumpOn === true ? d.flow != null ? `Pompa attiva, ma solo ${fmt1(d.flow)} l/min; circolazione non dimostrata.` : "Pompa attiva, ma manca la portata; circolazione non confermata."
-      : d.pumpOn === false || d.pump === 0 ? d.flow != null ? `Pompa ferma; il sensore indica ${fmt1(d.flow)} l/min. I segnali non dimostrano circolazione.` : "Pompa ferma e nessuna misura di portata."
-      : `Stato pompa non affidabile; ${fmt1(d.flow)} l/min non basta a dimostrare circolazione.`], // pump
+    ["Pompa di circolazione", "Pompa di circolazione", "Segnale X10A invertito (0 = max, 100 = stop, [0, 100] → 100–0 %); non misura RPM né prova rotazione, prevalenza o portata. Leggere ON/OFF e portata a parte.", (d) => pumpNowText(d, [(n) => `Comando pompa ${n} %.`, "Stato pompa ON.", "La pompa segnala arresto (OFF).", "Stato ON/OFF della pompa sconosciuto.", (n) => `Portata misurata ${n} l/min.`, "Nessuna misura di portata.", "Lo stato OFF segnalato contrasta con la portata; possibili circolazione esterna, post-circolazione o segnali obsoleti.", "Circolazione non confermata."])], // pump
     [(d) => pelMeasured(d) ? "Assorbimento elettrico · HomeHub" : "Assorbimento elettrico stimato", "Assorbimento elettrico", (d) => pelMeasured(d)
       ? "Consumo comunicato dall’ingresso HomeHub 51. La UI non lo calcola, ma la guida pubblica non prova calibrazione, punto di misura o riscaldatori inclusi; non è un contatore certificato dell’impianto."
       : "Stima per COP/EER. Con CT somma tutte le fasi dichiarate e usa corrente × 230 V presunti; tensione e fattore di potenza reali sono ignoti. La corrente inverter copre solo il compressore.", (d) => d.pelHeld ? "Compressore fermo: la corrente inverter è dell’ultimo ciclo e non è attuale; assorbimento ed efficienza non possono essere indicati."
@@ -1197,7 +1193,7 @@ DESCRIPTION_I18N.it = descriptionValues([
   ["Temperatura R4T in ingresso PHE sul ritorno comune; il ΔT va valutato col modo, non con 5 K universali."], // 35
   ["Portata nel circuito idronico comune; il minimo dipende da modello e modo e una portata bassa può causare 7H."], // 36
   ["Pressione del circuito idronico; molti manuali richiedono >1 bar, ma a ≤1,0 bar va consultato il modello esatto."], // 37
-  ["Comando velocità pompa invertito: 0 significa piena velocità e 100 arresto."], // 38
+  ["Comando X10A invertito: 0 = max, 100 = stop ([0, 100] → 100–0 %). Non misura RPM né prova rotazione, prevalenza o portata; leggere ON/OFF e portata a parte."], // 38
   ["Stato della pompa idronica; il funzionamento non prova da solo uno scambio termico utile."], // 39
   ["Stato della pompa di un circuito solare termico, distinta dalla pompa idronica della pompa di calore."], // 40
   ["Velocità indicata della pompa nominata dal profilo; scala e circuito dipendono dal modello."], // 41

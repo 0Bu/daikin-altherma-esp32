@@ -23,7 +23,9 @@ import fs from "node:fs";
 import vm from "node:vm";
 import { readAppFragments } from "../tools/ui/read_app_source.mjs";
 
-const SOURCE = readAppFragments(["descriptions.js", "schematic.js"]);
+const historySource = readAppFragments(["history.js"]);
+const pumpCommandSource = historySource.match(/function pumpCommandPercent\(signal\) \{[\s\S]*?\n\}/)[0];
+const SOURCE = pumpCommandSource + "\n" + readAppFragments(["descriptions.js", "schematic.js"]);
 const index = fs.readFileSync(new URL("../main/www/index.html", import.meta.url), "utf8");
 const style = fs.readFileSync(new URL("../main/www/style.css", import.meta.url), "utf8");
 const demo = fs.readFileSync(new URL("../tools/uigif/scenes.js", import.meta.url), "utf8");
@@ -95,7 +97,7 @@ function ctx({ x10a, mbEnabled, mbConnected, values = [], modbus = [], elements 
     " SMART_GRID_MODE_VALUE, x10aSmartGridModeFrom, x10aSmartGridMode, x10aSmartGridRow," +
     " sgModeText, mbNoteHtml, mbDeltaHtml, descFor, inspCurRow, inspMember," +
     " inspMembers, inspValues, inspComparisonHtml, inspHeld, liveData, compressorRunning," +
-    " waterMoving, pumpFlowConflict, waterThermalKind, activeSpaceKind, ouReadingText, updateSchematicStateA11y, INSPECT," +
+    " waterMoving, pumpFlowConflict, waterThermalKind, activeSpaceKind, ouReadingText, updateSchematicStateA11y, INSPECT, pumpCommandPercent, pumpNowText, inspectModbusSignature," +
     " pelMeasured, pelApproxText, PEL_INSPECT, vRow, vNum, highSideRow, inspHeldHtml, inspUnknownAge," +
     " inspFieldText, inspNowText, heldUnknownText, OUTDOOR_HX_RE };",
     context, { filename: "main/www/app.sources" });
@@ -478,15 +480,15 @@ const X_2WV = (on) => ({ label: "2way valve(On:Heat_Off:Cool)", value: on ? "1" 
   assert.equal(c.waterMoving({ pumpOn: true, flow: null }), null,
     "pump ON without a flow reading must remain unknown, not measured circulation");
   assert.match(c.INSPECT.pump.now({ pump: 0, pumpOn: false, flow: 5 }).en,
-    /pump reports stopped, but the flow sensor reports/i);
+    /Pump reports stopped \(OFF\)\. Measured flow 5\.0 l\/min\. Reported OFF conflicts with flow/i);
   const pumpOnNoFlow = c.INSPECT.pump.now({ pump: null, pumpOn: true, flow: null }).en;
-  assert.match(pumpOnNoFlow, /pump status is ON.*no flow measurement/i);
-  assert.doesNotMatch(pumpOnNoFlow, /pump reports stopped|measured flow is/i);
+  assert.match(pumpOnNoFlow, /Pump status is ON\..*No flow reading\./i);
+  assert.doesNotMatch(pumpOnNoFlow, /pump reports stopped|measured flow/i);
   const pumpUnknown = c.INSPECT.pump.now({ pump: null, pumpOn: null, flow: 0 }).en;
-  assert.match(pumpUnknown, /No reliable pump state/i);
+  assert.match(pumpUnknown, /Pump ON\/OFF is unknown\..*Measured flow 0\.0 l\/min\./i);
   assert.doesNotMatch(pumpUnknown, /pump reports stopped/i);
   assert.match(c.INSPECT.pump.now({ pump: 45, pumpOn: true, flow: null }).en,
-    /no flow measurement is available; circulation is not confirmed/i);
+    /No flow reading\..*Circulation is not established\./i);
   assert.doesNotMatch(c.INSPECT.wtank.now({ valveDhw: true, pumpOn: false, flow: 0,
                                             lwt: 40, tank: 35 }).en, /Charging the tank/i,
     "a selected valve route alone must not be called an active tank charge");
@@ -1760,6 +1762,70 @@ assert.doesNotMatch(SOURCE, /chip\.demand_(?:on|off)|schem\.to_heat/);
   silentAlone.S.insp = "out";
   assert.equal(silentAlone.inspUnknownAge(silentAlone.INSPECT.out, silentAlone.S.live), false,
     "and a retained row on it is no reading whose age could be in doubt");
+}
+
+// ── Pump command validation, rotor vs flow separation, and provisional Modbus Input 49 ─────────
+{
+  const unverifiedFlow = M(49, "Flow rate", "12.3", "flow", { unit: "L/min", flow_scale_unverified: true });
+  const verifiedFlow = M(49, "Flow rate", "12.3", "flow", { unit: "L/min" });
+  const lwtMb = M(40, "Outlet water heat exchanger temp.", "35.0", "leaving_water");
+  const rwtMb = M(42, "Inlet water temp.", "30.0", "return_water");
+  const modeHeat = { off: 38, label: "Current operation mode", value: 1, unit: "", enum: "current_operation_mode" };
+  const compOnMb = M_FLAG(31, "Compressor active", true);
+  const pumpOnMb = M_FLAG(30, "Circulation pump running", true, "pump_running");
+
+  const nodes = new Map();
+  const elements = new Proxy({}, { get: (_, id) => {
+    if (!nodes.has(id)) {
+      const classes = new Set();
+      nodes.set(id, { textContent: "", setAttribute() {}, closest: () => null, querySelectorAll: () => [],
+        classList: { add: (c) => classes.add(c), remove: (c) => classes.delete(c),
+          contains: (c) => classes.has(c),
+          toggle: (c, on) => { if (on) classes.add(c); else classes.delete(c); } } });
+    }
+    return nodes.get(id);
+  } });
+
+  const prov = ctx({ x10a: false, mbEnabled: true, mbConnected: true, elements,
+                     modbus: [unverifiedFlow, lwtMb, rwtMb, modeHeat, compOnMb, pumpOnMb] });
+  prov.S.live = prov.liveData();
+  prov.renderLiveFixture();
+  assert.equal(prov.S.live.flow, null, "unverified Input 49 never populates qualified flow");
+  assert.equal(prov.S.live.provisionalFlow, 12.3, "unverified Input 49 stays available as provisional flow");
+  assert.equal(prov.S.live.mbFields.has("flow"), true);
+  assert.equal(prov.waterMoving(prov.S.live), null, "unverified Input 49 never activates waterMoving");
+  assert.equal(prov.S.live.dtStale, true, "unverified Input 49 withholds derived working-point ΔT");
+  assert.equal(prov.S.live.pth, null, "unverified Input 49 withholds thermal power");
+  assert.equal(nodes.get("svFlow").textContent, "12.3");
+  assert.equal(nodes.get("svDt").textContent, "—");
+  assert.equal(nodes.get("schem").classList.contains("pump-on"), true,
+    "reported Modbus pump ON spins rotor even when flow is unverified");
+  assert.equal(nodes.get("fPhe").classList.contains("on"), false,
+    "unverified Input 49 never animates hydraulic pipes");
+
+  const qual = ctx({ x10a: false, mbEnabled: true, mbConnected: true, elements,
+                     modbus: [verifiedFlow, lwtMb, rwtMb, modeHeat, compOnMb, pumpOnMb] });
+  qual.S.live = qual.liveData();
+  qual.renderLiveFixture();
+  assert.equal(qual.S.live.flow, 12.3);
+  assert.equal(qual.S.live.provisionalFlow, null);
+  assert.equal(qual.waterMoving(qual.S.live), true);
+  assert.equal(qual.S.live.dtStale, false);
+
+  assert.notEqual(prov.inspectModbusSignature(unverifiedFlow), prov.inspectModbusSignature(verifiedFlow),
+    "inspectModbusSignature must distinguish verified vs unverified Input 49 scaling");
+
+  assert.equal(prov.pumpCommandPercent(25.5), 74.5);
+  assert.equal(prov.pumpCommandPercent(-1), null);
+  assert.equal(prov.pumpCommandPercent(101), null);
+  assert.equal(prov.pumpCommandPercent(255), null);
+  assert.equal(prov.pumpCommandPercent(Infinity), null);
+  assert.equal(prov.pumpCommandPercent(-Infinity), null);
+
+  const stopUnknownText = prov.pumpNowText({ pump: 0, pumpOn: null, flow: null }, [
+    (c) => `cmd:${c}`, "on", "stopped", "unknown", (f) => `flow:${f}`, "no-flow", "conflict", "idle",
+  ]);
+  assert.equal(stopUnknownText, "cmd:0.0 unknown no-flow idle");
 }
 
 console.log("UI source matrix: arbitration, Smart-Grid and mode-aware cooling semantics correct");
