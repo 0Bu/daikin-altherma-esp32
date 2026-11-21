@@ -31,6 +31,24 @@ function stopped(child, timeout = 8000) {
     child.once("close", (code, signal) => { clearTimeout(timer); resolve({ code, signal }); });
   });
 }
+async function repairBrowserFixture(runner, marker, name) {
+  const recorded = fs.existsSync(marker) ? JSON.parse(fs.readFileSync(marker, "utf8")) : {};
+  if (recorded.pid) assert.equal(recorded.parentPid, runner.pid, "repair must retain original child ownership");
+  for (const pid of [runner.pid, recorded.pid].filter(Number.isInteger)) {
+    const observed = inspectProcess(pid);
+    if (observed.present) {
+      assert.ok(observed.parent === (pid === runner.pid ? process.pid : runner.pid) ||
+        (pid === recorded.pid && observed.parent === 1), "repair must only kill the owned fixture tree");
+      try { process.kill(pid, "SIGKILL"); } catch (error) { if (error.code !== "ESRCH") throw error; }
+    }
+    await until(() => !inspectProcess(pid).present, `${name}: owned fixture PID ${pid} must be reaped`);
+  }
+  if (recorded.profile) {
+    assert.equal(path.dirname(recorded.profile), os.tmpdir());
+    assert.match(path.basename(recorded.profile), /^daikin-browser-gate-[A-Za-z0-9]+$/);
+    fs.rmSync(recorded.profile, { recursive: true, force: true });
+  }
+}
 const shellQuote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
 
 // A real local HTTP/WebSocket child acts as Chrome's DevTools endpoint. It deliberately stalls
@@ -102,22 +120,7 @@ try {
       if (expected) assert.match(output, expected, `${name}: control must fail for its intended setup witness`);
       console.log(`browser cleanup selftest: ${name} stall arming, deadline and cleanup observed`);
     } finally {
-      const recorded = fs.existsSync(marker) ? JSON.parse(fs.readFileSync(marker, "utf8")) : {};
-      if (recorded.pid) assert.equal(recorded.parentPid, runner.pid, "repair must retain original child ownership");
-      for (const pid of [runner.pid, recorded.pid].filter(Number.isInteger)) {
-        const observed = inspectProcess(pid);
-        if (observed.present) {
-          assert.ok(observed.parent === (pid === runner.pid ? process.pid : runner.pid) ||
-            (pid === recorded.pid && observed.parent === 1), "repair must only kill the owned fixture tree");
-          try { process.kill(pid, "SIGKILL"); } catch (error) { if (error.code !== "ESRCH") throw error; }
-        }
-        await until(() => !inspectProcess(pid).present, `${name}: owned fixture PID ${pid} must be reaped`);
-      }
-      if (recorded.profile) {
-        assert.equal(path.dirname(recorded.profile), os.tmpdir());
-        assert.match(path.basename(recorded.profile), /^daikin-browser-gate-[A-Za-z0-9]+$/);
-        fs.rmSync(recorded.profile, { recursive: true, force: true });
-      }
+      await repairBrowserFixture(runner, marker, name);
     }
   }
 
@@ -199,14 +202,19 @@ try {
       DAIKIN_BROWSER_STALL_MODE: "delayed-page-target", DAIKIN_BROWSER_STALL_MARKER: delayedMarker },
     stdio: ["ignore", "inherit", "inherit"],
   });
-  assert.equal((await stopped(delayed)).code, 0,
-    "page-target discovery must wait past 100 polls and ignore targets without a WebSocket URL");
-  const delayedRecord = JSON.parse(fs.readFileSync(delayedMarker, "utf8"));
-  assert.equal(delayedRecord.listRequests, 103);
-  assert.equal(delayedRecord.versionReached, true);
-  assert.equal(Boolean(active(delayedRecord.pid)), false, "successful delayed startup must join the owned browser");
-  assert.equal(fs.existsSync(delayedRecord.profile), false, "successful delayed startup must remove its profile");
-  console.log("browser cleanup selftest: late page target is discovered within the launch deadline");
+  try {
+    // Allow the launcher's 30-second deadline and its own bounded cleanup to finish first.
+    assert.equal((await stopped(delayed, 40000)).code, 0,
+      "page-target discovery must wait past 100 polls and ignore targets without a WebSocket URL");
+    const delayedRecord = JSON.parse(fs.readFileSync(delayedMarker, "utf8"));
+    assert.equal(delayedRecord.listRequests, 103);
+    assert.equal(delayedRecord.versionReached, true);
+    assert.equal(Boolean(active(delayedRecord.pid)), false, "successful delayed startup must join the owned browser");
+    assert.equal(fs.existsSync(delayedRecord.profile), false, "successful delayed startup must remove its profile");
+    console.log("browser cleanup selftest: late page target is discovered within the launch deadline");
+  } finally {
+    await repairBrowserFixture(delayed, delayedMarker, "late page target");
+  }
 
   const signalMarker = path.join(work, "signal.json");
   const interrupted = spawn(process.execPath, ["--input-type=module", "-e",
