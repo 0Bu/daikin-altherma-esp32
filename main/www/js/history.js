@@ -2403,6 +2403,10 @@ function replaceHistoryHtml(host, html) {
       host.replaceChildren(template.content);
     } finally { S.trendRebuilding = rebuilding; }
   }
+  if (host.hasAttribute?.("data-checkup-hours") && typeof paintCyclingChart === "function") {
+    const chart = host.querySelector("[data-cycling]");
+    if (chart) paintCyclingChart(chart);
+  }
   if (focused && active.isConnected) active.focus({ preventScroll: true });
   else if (focused && (hist || histSeries))
     [...host.querySelectorAll(hist ? "[data-hist]" : "[data-hist-series]")].find(node =>
@@ -2413,15 +2417,14 @@ function replaceHistoryHtml(host, html) {
   else if (focused && (cycling || active?.dataset?.desc)) {
     const chart = cycling && host.querySelector("[data-cycling]");
     const sameScope = chart && chart.dataset.cycling === cycling.dataset.cycling;
-    const next = sameScope && (chart.querySelector(`[data-bucket="${active.dataset.bucket}"]`) ||
-      chart.querySelector("[tabindex='0']"));
+    const next = sameScope && (
+      (active.dataset.runRow && chart.querySelector(`tr[data-run-row="${active.dataset.runRow}"]`)) ||
+      (active.dataset.bucket != null && chart.querySelector(`[data-bucket="${active.dataset.bucket}"]`)) ||
+      chart.querySelector("[tabindex='0']")
+    );
     (next || [...host.querySelectorAll("[data-desc]")].find(button => button.dataset.desc === focusedOwner) ||
       host.closest?.(".vitem")?.querySelector("[data-desc]"))
       ?.focus({ preventScroll: true });
-  }
-  if (host.hasAttribute?.("data-checkup-hours") && typeof paintCyclingChart === "function") {
-    const chart = host.querySelector("[data-cycling]");
-    if (chart) paintCyclingChart(chart);
   }
 }
 
