@@ -198,7 +198,12 @@ function paintCyclingChart(chart, focus = document.activeElement) {
       const key = JSON.stringify([scope, LANG, pinnedRange[0], pinnedRange[1], model.rev]);
       if (details._rangeKey !== key) {
         details._rangeKey = key;
+        const focusedRow = details.contains(document.activeElement)
+          ? document.activeElement.closest?.("tr[data-run-row]")?.dataset.runRow : null;
         details.innerHTML = cyclingPeriodDetailsHtml(model, pinnedRange[0], pinnedRange[1]);
+        if (focusedRow) {
+          details.querySelector(`tr[data-run-row="${focusedRow}"]`)?.focus({ preventScroll: true });
+        }
       }
     } else {
       details._rangeKey = "";
@@ -251,12 +256,12 @@ function wireCyclingChart(host) {
     paintCyclingChart(chart);
   };
   const toggleRunRow = (chart, row) => {
-    const startId = Number(row.dataset.runRow);
-    const sub = chart.querySelector(`[data-run-sub="${startId}"]`);
+    const runKey = row.dataset.runRow;
+    const sub = runKey && chart.querySelector(`[data-run-sub="${runKey}"]`);
     if (!sub) return;
-    S.cyclingExpandedRun = S.cyclingExpandedRun === startId ? null : startId;
+    S.cyclingExpandedRun = S.cyclingExpandedRun === runKey ? null : runKey;
     for (const tr of chart.querySelectorAll("tr[data-run-row]")) {
-      const open = Number(tr.dataset.runRow) === S.cyclingExpandedRun;
+      const open = tr.dataset.runRow === S.cyclingExpandedRun;
       tr.setAttribute("aria-expanded", String(open));
       const s = chart.querySelector(`[data-run-sub="${tr.dataset.runRow}"]`);
       if (s) s.hidden = !open;

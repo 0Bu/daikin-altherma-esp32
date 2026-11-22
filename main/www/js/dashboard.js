@@ -1858,7 +1858,8 @@ function cyclingPeriodDetailsHtml(model, from, to) {
     const stopCellHtml = r.stop != null
       ? esc(stopTxt || t("check.cycling.run_stop_unknown"))
       : (r.latest == null ? unknownStop : ongoing(esc(t("check.cycling.run_ongoing")), unknownStop));
-    const isOpen = !!ctx && S.cyclingExpandedRun === r.start;
+    const rowKey = r.key ?? `s:${r.start}`;
+    const isOpen = !!ctx && S.cyclingExpandedRun === rowKey;
     let subHtml = "";
     if (ctx) {
       const prev = model.prevRunByStart.get(r.start);
@@ -1866,10 +1867,10 @@ function cyclingPeriodDetailsHtml(model, from, to) {
       const fromExact = fullClock.format(fromD);
       const toExact = toD ? fullClock.format(toD) : "?";
       const explain = cyclingRunExplainHtml(r, fromExact, toExact, priorPauseS, model.flowTypical);
-      subHtml = `<tr class="checkup-run-sub" data-run-sub="${r.start}"${isOpen ? "" : " hidden"}><td colspan="3">` +
+      subHtml = `<tr class="checkup-run-sub" data-run-sub="${esc(rowKey)}"${isOpen ? "" : " hidden"}><td colspan="3">` +
         `<p class="checkup-run-explain">${explain}</p></td></tr>`;
     }
-    return `<tr class="checkup-run-row"${ctx ? ` data-run-row="${r.start}" tabindex="0" aria-expanded="${isOpen}"` : ""}>` +
+    return `<tr class="checkup-run-row"${ctx ? ` data-run-row="${esc(rowKey)}" tabindex="0" aria-expanded="${isOpen}"` : ""}>` +
       `<td><span class="checkup-run-start"><i class="mode-dot ${dotMode}" aria-hidden="true" title="${esc(modeLabel(dotMode))}"></i>` +
       `<time datetime="${fromD.toISOString()}">${esc(shortClock.format(fromD))}</time></span></td>` +
       `<td>${durHtml}</td>` +
@@ -1896,6 +1897,12 @@ function checkupCyclingTimelineHtml(trace, scope, checkObj) {
         observedEnd > 86400 || typeof trace.live !== "boolean")) ||
       !Array.isArray(records) || !records.length || records.length > 192) return "";
   const start = end - 86400;
+  const runKey = at => {
+    if (boot !== undefined) {
+      return at >= end - boot ? `b:${at + boot - end}` : `u:${unix + at - end}`;
+    }
+    return `s:${at}`;
+  };
   const hours = Array.from({ length: 24 }, (_, idx) => ({
     starts: [], runs: [], modes: new Set(), segments: [], gap: false, observed: false,
     fromSec: start + 3600 * idx, toSec: start + 3600 * (idx + 1), isCycling: false,
@@ -1940,7 +1947,7 @@ function checkupCyclingTimelineHtml(trace, scope, checkObj) {
         const hour = hours[Math.min(23, Math.floor((at - start) / 3600))];
         hour.starts.push(at);
         if (runEdges) {
-          run = { start: at };
+          run = { start: at, key: runKey(at) };
           hour.runs.push(run);
         }
       }
@@ -2071,13 +2078,19 @@ function checkupCyclingChartHtml(c) {
     const elapsed = Math.max(0, uptime - (previous.boot_s ?? previous.window_end_s));
     // A temporarily omitted snapshot carries no new readings. Move both anchors so
     // the chart advances but the wall time of each retained record stays the same.
-    trace = { ...previous, window_end_s: previous.window_end_s + elapsed, unix_s: previous.unix_s + elapsed };
+    trace = {
+      ...previous,
+      ...(previous.boot_s !== undefined ? { boot_s: previous.boot_s + elapsed } : {}),
+      window_end_s: previous.window_end_s + elapsed,
+      unix_s: previous.unix_s + elapsed,
+    };
   }
   if (trace) {
+    const cachedCtx = trace !== c?.timeline;
     const mergedCheck = c ? {
       ...c,
-      run_contexts: c.run_contexts ?? cyclingTrace?.run_contexts,
-      flow_typical_l_min: c.flow_typical_l_min ?? cyclingTrace?.flow_typical_l_min,
+      run_contexts: c.run_contexts ?? (cachedCtx ? cyclingTrace?.run_contexts : undefined),
+      flow_typical_l_min: c.flow_typical_l_min ?? (cachedCtx ? cyclingTrace?.flow_typical_l_min : undefined),
     } : c;
     const key = JSON.stringify([LANG, scope, trace, mergedCheck?.run_contexts, mergedCheck?.flow_typical_l_min]);
     if (cyclingMarkup[0] === key) return cyclingMarkup[1];
