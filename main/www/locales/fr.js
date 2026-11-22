@@ -1,4 +1,4 @@
-// translation-source: 75c4b0dca9e335fd33cb9bea7544497fd100bd900de18c41b7e3680e77100dc6
+// translation-source: 3a5add9912946b8cfda4203d0021a3fc68549843dcdf74fe50ee364b268f985c
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -1177,8 +1177,6 @@ INSPECT_I18N.fr = inspectValues(
     ["Débit", "Débit d’eau", "Débit du circuit commun. Le minimum dépend du modèle ; à lire avec pompe et pression."], // flow
     ["État du fluxostat", 0, "Entrée binaire X10A ; elle ne mesure pas les l/min ni le débit minimal.", (d) => d.flowSwitch == null ? null : d.flowSwitch ? `X10A actif ; comparer avec pompe et ${fmt1(d.flow)} l/min.` : `X10A inactif ; pompe active, comparer ${fmt1(d.flow)} l/min et défauts 7H/C0.`], // flow_switch
     ["Pression d’eau", 0, "Pression du circuit hydraulique, pas du fluide frigorigène. La plage admise dépend du modèle et de l’installation ; consulter le manuel exact."], // wp
-    ["Port de service X10A", "Source de données X10A", "Liaison filaire X10A en lecture seule ; ses valeurs s’affichent en bleu."], // x10a
-    ["Modbus TCP", "Source de données Modbus", "Liaison Modbus TCP indépendante en lecture seule (HomeHub/Altherma 4) ; valeurs en pétrole."], // modbus
   ],
 );
 

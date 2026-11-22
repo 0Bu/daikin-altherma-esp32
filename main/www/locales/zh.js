@@ -1,4 +1,4 @@
-// translation-source: 75c4b0dca9e335fd33cb9bea7544497fd100bd900de18c41b7e3680e77100dc6
+// translation-source: 3a5add9912946b8cfda4203d0021a3fc68549843dcdf74fe50ee364b268f985c
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
@@ -1177,8 +1177,6 @@ INSPECT_I18N.zh = inspectValues(
     ["流量", "水流量", "公共水路流量；最低值随型号，须结合泵和压力。"], // flow
     ["流量开关状态", "流量开关状态", "X10A 二进制输入；不测 l/min 或确认最低流量。", (d) => d.flowSwitch == null ? null : d.flowSwitch ? `X10A 启动；结合泵和 ${fmt1(d.flow)} l/min。` : `X10A 未启动；结合 ${fmt1(d.flow)} l/min 与 7H/C0。`], // flow_switch
     ["水压", "水路压力", "水压，非制冷剂压力；范围取决于型号/安装。"], // wp
-    ["X10A 服务端口", "X10A 数据源", "有线只读 X10A 连接；读数显示为蓝色。"], // x10a
-    ["Modbus TCP", "Modbus 数据源", "独立只读 Modbus TCP 连接（HomeHub/Altherma 4）；读数显示为青蓝色。"], // modbus
   ],
 );
 

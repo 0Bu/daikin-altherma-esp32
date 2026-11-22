@@ -16,7 +16,7 @@ export const INSPECTOR_TRENDS = Object.freeze({
 });
 
 export const NO_HISTORY_INSPECTORS = Object.freeze([
-  "x10a", "modbus", "ou", "lp", "phe", "heat", "rhot", "rcold", "wsup", "wtank",
+  "ou", "lp", "phe", "heat", "rhot", "rcold", "wsup", "wtank",
   "wheat", "wret",
 ]);
 

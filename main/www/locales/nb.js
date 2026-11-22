@@ -1,4 +1,4 @@
-// translation-source: 75c4b0dca9e335fd33cb9bea7544497fd100bd900de18c41b7e3680e77100dc6
+// translation-source: 3a5add9912946b8cfda4203d0021a3fc68549843dcdf74fe50ee364b268f985c
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -1194,8 +1194,6 @@ INSPECT_I18N.nb = inspectValues(
     ["Vannmengde", "Vannmengde", "Vannmengde i felleskretsen. Minstekravet avhenger av modell; tolk med pumpe og trykk."], // flow
     ["Strømningsbryter", 0, "Binær X10A-status; måler ikke l/min og bekrefter ikke minste vannmengde.", (d) => d.flowSwitch == null ? null : d.flowSwitch ? `X10A aktiv; sammenlign med pumpe og ${fmt1(d.flow)} l/min.` : `X10A inaktiv; med aktiv pumpe, sammenlign ${fmt1(d.flow)} l/min og feil 7H/C0.`], // flow_switch
     ["Vanntrykk", 0, "Trykk i vannkretsen, ikke kjølemediet. Tillatt område avhenger av modell/anlegg; bruk riktig håndbok."], // wp
-    ["X10A-serviceport", "X10A-datakilde", "Kablet skrivebeskyttet X10A-forbindelse; verdier vises i blått."], // x10a
-    ["Modbus TCP", "Modbus-datakilde", "Uavhengig skrivebeskyttet Modbus TCP-forbindelse (HomeHub/Altherma 4); verdier i petrol."], // modbus
   ],
 );
 
