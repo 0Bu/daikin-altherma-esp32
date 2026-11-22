@@ -238,6 +238,41 @@ assert.equal(catalog.de["check.cycling.short"], "Die Heizläufe sind im Schnitt 
 assert.equal(catalog.en["check.cycling.normal"], "Heating runs are long enough on average.");
 assert.equal(catalog.de["check.cycling.normal"], "Die Heizläufe dauern im Schnitt lang genug.");
 
+const cyclingExplainSampleArgs = {
+  "check.cycling.pause_tag": ["5 min"],
+  "check.cycling.cond_tag": ["39 °C", "41 °C"],
+  "check.cycling.from_tag": ["39 °C"],
+  "check.cycling.rwt_tag": ["34 °C"],
+  "check.cycling.typ_tag": ["~17 L/min"],
+  "check.cycling.s_cool": ["17:41:30", " after 5 min pause", "39 °C", "41 °C"],
+  "check.cycling.s_req": ["17:41:30", " after 5 min pause", " · 39 °C"],
+  "check.cycling.s_tgt": ["17:41:30", " after 5 min pause", " from 39 °C", "41 °C", " · 39 °C"],
+  "check.cycling.s_defrost_after": ["17:41:30", " after 5 min pause", " · 39 °C"],
+  "check.cycling.s_dhw_after": ["17:41:30", " after 5 min pause", " · 39 °C"],
+  "check.cycling.s_defrost": ["17:41:30", " after 5 min pause"],
+  "check.cycling.s_dhw": ["17:41:30", " after 5 min pause", " · 39 °C"],
+  "check.cycling.s_gen": ["17:41:30", " after 5 min pause", " · 39 °C"],
+  "check.cycling.e_low_flow": ["17:45:20", "45 °C", "41 °C", ", return 41 °C", "8 L/min", ", typ. ~17 L/min"],
+  "check.cycling.e_low_rps": ["17:45:20", "45 °C", "41 °C", ", return 41 °C", "17 L/min", "19 rps"],
+  "check.cycling.e_req": ["17:45:20", " · 45 °C"],
+  "check.cycling.e_tgt": ["17:45:20", " from 41 °C", "39 °C", " · 45 °C"],
+  "check.cycling.e_defrost_run": ["17:45:20", " · 24 °C"],
+  "check.cycling.e_defrost_pause": ["17:45:20", " · 33 °C"],
+  "check.cycling.e_dhw": ["17:45:20", " · 35 °C"],
+  "check.cycling.e_norm": ["17:45:20", " · 34 °C"],
+};
+for (const code of codes) {
+  const dict = catalog[code];
+  for (const [key, args] of Object.entries(cyclingExplainSampleArgs)) {
+    const rendered = dict[key](...args);
+    assert.ok(rendered.trim(), `${code}/${key} is non-empty`);
+    assert.doesNotMatch(rendered, /[()（）]/, `${code}/${key} omits parentheses: ${rendered}`);
+  }
+  const lwtOnly = dict["check.cycling.cond_tag"]("39 °C", "");
+  assert.ok(lwtOnly.includes("39 °C"), `${code} cond_tag keeps flow temperature when target is empty`);
+  assert.doesNotMatch(lwtOnly, /[()（），,]/, `${code} cond_tag omits target separator when target is empty: ${lwtOnly}`);
+}
+
 // The specialist copy visible under the schematic remains lazy, but it is no longer allowed to
 // fall back to English for any added language. Every diagram target gets a native title and a
 // concise explanation; HomeHub register names are keyed by their stable offset, never by prose.

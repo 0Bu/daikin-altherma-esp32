@@ -469,6 +469,76 @@ try {
   ui.setExpandedRun(null);
 }
 
+const fluentCheck = {
+  hours_epoch: 1,
+  flow_typical_l_min: 17.6,
+  timeline: {
+    unix_s: 1794582660,
+    window_end_s: 86400,
+    observed_end_s: 86400,
+    run_edges: true,
+    records: [
+      [1, 1],
+      [79260, 5], [79260, 3], [79428, 1], [79428, 6],
+      [79600, 5], [79600, 3], [79750, 1], [79750, 6],
+      [79900, 5], [79900, 3], [80080, 1], [80080, 6],
+      [80200, 5], [80200, 3], [80380, 1], [80380, 6],
+      [80500, 5], [80500, 3], [80680, 1], [80680, 6],
+      [80800, 5], [80800, 2], [80920, 1], [80920, 6],
+      [81100, 5], [81100, 3], [81280, 1], [81280, 6],
+      [82900, 5], [82900, 3], [83100, 1], [83100, 6],
+      [83300, 5], [83300, 4],
+    ].map(([at, kind]) => at * 8 + kind),
+  },
+  run_contexts: [
+    { at: 79260, stop: 79428, mode: "space", start_kind: "cooldown_restart", stop_kind: "request_withdrawal",
+      start_lwt_c: 39.1, start_target_c: 41.1, lwt_c: 45.1, rwt_c: 41.9, target_c: 41.1, flow_l_min: 15.0 },
+    { at: 79600, stop: 79750, mode: "space", start_kind: "target_raised", stop_kind: "target_changed",
+      start_lwt_c: 38.6, start_target_c: 40.0, start_target_prev_c: 39.5, lwt_c: 43.7, rwt_c: 41.0, target_c: 39.5, target_prev_c: 40.0, flow_l_min: 15.4 },
+    { at: 79900, stop: 80080, mode: "space", start_kind: "request_on", stop_kind: "low_rps_above_target",
+      start_lwt_c: 29.0, start_target_c: 32.0, lwt_c: 35.1, rwt_c: 33.6, target_c: 32.0, flow_l_min: 8.2, min_rps: 18.0 },
+    { at: 80200, stop: 80380, mode: "space", start_kind: "after_defrost", stop_kind: "low_rps_above_target",
+      start_lwt_c: 30.0, start_target_c: 33.0, lwt_c: 36.2, rwt_c: 34.4, target_c: 33.0, flow_l_min: 17.2, min_rps: 19.0 },
+    { at: 80500, stop: 80680, mode: "space", start_kind: "after_dhw", stop_kind: "normal",
+      start_lwt_c: 31.0, start_target_c: 34.0, lwt_c: 34.2, rwt_c: 31.5, target_c: 34.0, flow_l_min: 16.8 },
+    { at: 80800, stop: 80920, mode: "other", start_kind: "defrost_start", stop_kind: "defrost",
+      lwt_c: 24.0, rwt_c: 23.0, flow_l_min: 18.0 },
+    { at: 81100, stop: 81280, mode: "space", start_kind: "request_on", stop_kind: "defrost",
+      start_lwt_c: 31.0, start_target_c: 34.0, lwt_c: 33.0, rwt_c: 30.5, target_c: 34.0, flow_l_min: 17.0 },
+    { at: 82900, stop: 83100, mode: "space", start_kind: "unknown", stop_kind: "dhw_transition",
+      start_lwt_c: 32.0, start_target_c: 35.0, lwt_c: 35.0, rwt_c: 32.1, target_c: 35.0, flow_l_min: 16.2 },
+    { at: 83300, mode: "dhw", start_kind: "dhw_start", start_lwt_c: 41.0 },
+  ],
+};
+const extractRunExplains = html => [...html.matchAll(/<p class="checkup-run-explain">([\s\S]*?)<\/p>/g)]
+  .map(([, inner]) => inner.replace(/<[^>]+>/g, ""));
+try {
+  for (const lang of locales) {
+    ui.setLang(lang);
+    const explains = extractRunExplains(ui.periodDetails(fluentCheck.timeline, fluentCheck, 22, 23));
+    assert.equal(explains.length, fluentCheck.run_contexts.length, `${lang} renders every run explanation`);
+    for (const explain of explains) {
+      assert.doesNotMatch(explain, /[()（）]/, `${lang} run explanation avoids parentheses: ${explain}`);
+    }
+  }
+  ui.setLang("de");
+  const deExplains = extractRunExplains(ui.periodDetails(fluentCheck.timeline, fluentCheck, 22, 23));
+  assert.match(deExplains[0], /^Start \d{2}:\d{2}:\d{2}: Vorlauf 39,1 °C, Ziel 41,1 °C, Anforderung an\. Stopp \d{2}:\d{2}:\d{2}: Anforderung aus · Vorlauf 45,1 °C, Ziel 41,1 °C, Rücklauf 41,9 °C, 15,0 L\/min\.$/);
+  assert.match(deExplains[1], /^Start \d{2}:\d{2}:\d{2} nach 2:52 min Pause: Ziel von 39,5 °C auf 40,0 °C erhöht · Vorlauf 38,6 °C\. Stopp \d{2}:\d{2}:\d{2}: Ziel von 40,0 °C auf 39,5 °C gesenkt · Vorlauf 43,7 °C, Rücklauf 41,0 °C, 15,4 L\/min\.$/);
+  for (const text of deExplains) {
+    assert.doesNotMatch(text, /; Stopp\.|Anford\.|[()（）]/, `de concise wording avoids abbreviations/parentheses: ${text}`);
+  }
+  ui.setLang("en");
+  const enExplains = extractRunExplains(ui.periodDetails(fluentCheck.timeline, fluentCheck, 22, 23));
+  assert.match(enExplains[0], /^Started \d{2}:\d{2}:\d{2}: flow 39\.1 °C, target 41\.1 °C, request on\. Stopped \d{2}:\d{2}:\d{2}: request off · flow 45\.1 °C, target 41\.1 °C, return 41\.9 °C, 15\.0 L\/min\.$/);
+  assert.match(enExplains[1], /^Started \d{2}:\d{2}:\d{2} after 2:52 min pause: target raised from 39\.5 °C to 40\.0 °C · flow 38\.6 °C\. Stopped \d{2}:\d{2}:\d{2}: target lowered from 40\.0 °C to 39\.5 °C · flow 43\.7 °C, return 41\.0 °C, 15\.4 L\/min\.$/);
+  for (const text of enExplains) {
+    assert.doesNotMatch(text, /; stopped\.|\breq\.|[()（）]/, `en concise wording avoids abbreviations/parentheses: ${text}`);
+  }
+} finally {
+  ui.setLang("en");
+}
+
 const restoredCycling = { ...cycling, starts: 27, hours: [
   { starts: 22, restored: true }, { starts: 5 }, { starts: 9, restored: true, expired: true },
 ] };
