@@ -119,7 +119,13 @@ struct ip_addr_t {
     } u_addr;
 };
 constexpr int IPADDR_TYPE_V4 = 0;
-inline int    ipaddr_aton(const char* text, ip_addr_t* ip) {
+inline const ip4_addr_t* ip_2_ip4(const ip_addr_t* ip) { return &ip->u_addr.ip4; }
+inline ip4_addr_t*       ip_2_ip4(ip_addr_t* ip) { return &ip->u_addr.ip4; }
+inline void              ip_addr_set_ip4_u32(ip_addr_t* ip, uint32_t addr) {
+    ip->type            = IPADDR_TYPE_V4;
+    ip->u_addr.ip4.addr = addr;
+}
+inline int ipaddr_aton(const char* text, ip_addr_t* ip) {
     return inet_pton(AF_INET, text, &ip->u_addr.ip4.addr);
 }
 struct netif {

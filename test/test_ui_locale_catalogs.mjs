@@ -59,10 +59,11 @@ vm.runInContext(
 );
 const catalog = catalogContext.__catalog;
 const lazyDomainCodes = ["es", "fr", "it", "pl", "cs", "uk", "zh", "ja", "nb", "sv", "fi"];
+const faultCodePackCodes = ["de", ...lazyDomainCodes];
 const annotatedDomainCodes = ["zh", "ja", "nb", "sv", "fi"];
 const englishKeys = Object.keys(catalog.en).sort();
 const englishKeyOrder = Object.keys(catalog.en);
-assert.equal(englishKeys.length, 1008, "the test must track the complete current UI catalog");
+assert.equal(englishKeys.length, 1014, "the test must track the complete current UI catalog");
 for (const [code, source] of localeSources) {
   const sections = [`INSPECT_I18N.${code}`, `MODEL_DESCRIPTION_I18N.${code}`]
     .map(marker => source.indexOf(marker)).filter(index => index >= 0);
@@ -144,11 +145,14 @@ for (const code of ["ja", "fi", "zh"]) {
 assert.doesNotMatch(catalog.ja["check.detail.collecting"]("2 h", "24 h"), /(?:h|min)件/,
   "Japanese collecting progress must describe elapsed time, not item counts");
 
-for (const code of lazyDomainCodes) {
+for (const code of faultCodePackCodes) {
   const faults = catalogContext.__faultCodeCopy[code];
   assert.equal(faults?.values?.length, 63, `${code} must register all fault-code meanings`);
   assert.ok(faults.none?.trim() && faults.unknown?.trim(), `${code} needs both fault-code fallbacks`);
-  assert.deepEqual(Object.keys(catalogContext.__mbDeltaCopy[code] || {}).sort(),
+}
+for (const code of lazyDomainCodes) {
+  const mbDeltas = catalogContext.__mbDeltaCopy[code];
+  assert.deepEqual(Object.keys(mbDeltas || {}).sort(),
     ["outdoor_air", "room_temp"], `${code} must register both source-difference explanations`);
 }
 
@@ -295,7 +299,7 @@ const defrostDenominators = {
   sv: [/både kompressor- och avfrostningsstatus kan läsas/, /kompressorns drifttid/],
   fi: [/sekä kompressorin että sulatuksen tila on luettavissa/, /kompressorin käyntiajasta/],
 };
-for (const code of lazyDomainCodes) {
+for (const code of faultCodePackCodes) {
   const source = localeSources.get(code);
   const block = source.match(new RegExp(
     `FAULT_CODE_I18N\\.${code}\\s*=\\s*faultCodeValues\\(\\[([\\s\\S]*?)\\],`))?.[1] || "";
@@ -365,6 +369,13 @@ assert.equal(vm.runInContext(`(() => {
   MODEL_DESCRIPTION_I18N.de = saved;
   return ready;
 })()`, catalogContext), false, "an incomplete German module must retain the English fallback");
+assert.equal(vm.runInContext(`(() => {
+  const saved = FAULT_CODE_I18N.de;
+  FAULT_CODE_I18N.de = null;
+  const ready = localeReady('de');
+  FAULT_CODE_I18N.de = saved;
+  return ready;
+})()`, catalogContext), false, "German must not mark ready without its external fault-code table");
 for (const code of codes.slice(2)) {
   const inspect = catalogContext.__inspectCopy[code];
   assert.ok(inspect, `${code} specialist inspector copy did not register itself`);
@@ -458,11 +469,13 @@ for (const code of codes.slice(2)) {
       assert.ok(html.includes(api.esc(localized[0])),
         `${code} model-description ${id} renderer did not use its native text`);
     }
-    if (lazyDomainCodes.includes(code)) {
+    if (faultCodePackCodes.includes(code)) {
       const fault = api.FAULT_CODE_I18N[code];
       const u4 = api.DAIKIN_FAULT_CODES.findIndex((entry) => entry.code === "U4");
       assert.ok(api.faultCodeDetailHtml("U4").includes(api.esc(fault.values[u4])),
         `${code} fault-code renderer did not use its lazy native meaning`);
+    }
+    if (lazyDomainCodes.includes(code)) {
       const reason = api.MB_DELTA_I18N[code].outdoor_air;
       assert.ok(api.mbDeltaHtml({ concept: "outdoor_air", value: "--" }, { value: "--" })
         .includes(api.esc(reason)), `${code} source-difference renderer did not use its lazy native reason`);

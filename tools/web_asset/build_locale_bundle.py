@@ -18,6 +18,12 @@ ROOT = Path(__file__).resolve().parent
 VENDOR = ROOT / "vendor" / "lzma-js"
 PREFIX = bytes((255, 76, 90, 77, 65, 1))  # invalid UTF-8 lead, LZMA, schema 1
 DICTIONARY_BYTES = 512 * 1024
+LZMA_POSITION_BITS = 0
+LZMA_NICE_LENGTH = 128
+# ASCII text locales have no byte-aligned 32-bit binary records: pb=0 removes position-state bit
+# modelling (properties = lc + 9*lp + 45*pb = 3), trading negligible ratio on raw LZMA for lower
+# entropy under gzip and a higher nice length. Keep lc=3, lp=0 and the 512 KiB dictionary.
+LZMA_PROPERTIES = bytes((3, 0, 0, 8, 0))
 MAX_DECODED_BYTES = 1024 * 1024
 MAX_BUNDLE_GZIP_BYTES = 289792
 MAX_SOURCE_GZIP_BYTES = 32768
@@ -45,8 +51,10 @@ def encode_frame(frame: bytes) -> bytes:
         raise ValueError("decoded locale frame exceeds its 1 MiB bound")
     packed = lzma.compress(frame, format=lzma.FORMAT_ALONE,
                            filters=[{"id": lzma.FILTER_LZMA1, "preset": 6,
-                                     "dict_size": DICTIONARY_BYTES}])
-    if packed[:5] != bytes((0x5D, 0, 0, 8, 0)) or packed[5:13] != b"\xff" * 8:
+                                     "dict_size": DICTIONARY_BYTES,
+                                     "pb": LZMA_POSITION_BITS,
+                                     "nice_len": LZMA_NICE_LENGTH}])
+    if packed[:5] != LZMA_PROPERTIES or packed[5:13] != b"\xff" * 8:
         raise ValueError("unexpected locale LZMA properties")
     # The upstream decoder enforces outSize. Do not leave the stdlib's unknown-size marker in
     # the served frame: corrupt streams must not grow an unbounded numeric output array.
@@ -67,7 +75,7 @@ def render_wrapper(packed: bytes, source_bytes: int, source_crc32: int,
     if source_bytes < 0 or source_bytes + len(PREFIX) > MAX_DECODED_BYTES:
         raise ValueError("decoded locale source exceeds its 1 MiB bound")
     encoded = base64.b64encode(packed).decode("ascii")
-    header = bytes((0x5D, 0, 0, 8, 0)) + (source_bytes + len(PREFIX)).to_bytes(8, "little")
+    header = LZMA_PROPERTIES + (source_bytes + len(PREFIX)).to_bytes(8, "little")
     header_values = json.dumps(list(header), separators=(",", ":"))
     return (
         "(()=>{if(typeof window===\"undefined\"||!window.document)throw Error(\"window required\");"

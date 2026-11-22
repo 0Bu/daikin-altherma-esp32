@@ -1,4 +1,4 @@
-// translation-source: aa3abf8d6b7cd47b6adfa6bc6f918e3a1dbe62e1de7c6d8deffda21d1fb75661
+// translation-source: f982a05344b9ece7dec235d585ceb16879699f0cadc0c452af38729b31d32a37
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -276,6 +276,12 @@ I18N.cs = localeValues([
   /* service.metric.eev */ "Povel expanzního ventilu",
   /* service.metric.hp */ "Vysoký tlak",
   /* service.metric.lp */ "Nízký tlak",
+  /* check.hydronic.labels */ "Rozdíl teplot vody|Povel čerpadla|Pozorováno / způsobilé / kvalifikované|Časy důkazů|Kvalifikované časy|Nyní|Populace|Hodinové úseky|Cílový rozdíl teplot vody",
+  /* check.hydronic.reasons */ "Kvalifikováno filtrem projektu|Diagnostika vypnuta|Chybí aktuální zdroj|Neplatný údaj|Čerpadlo vypnuto|Větev teplé vody|Přídavný ohřívač hlášen zapnutý|Zbývající rozběh|Hodiny pozorování nedostupné|Zdroj změněn|Souhlas s diagnostikou změněn|Dosažen limit čítače|Vypnuto pro tento běh zařízení|Kvalifikace neznámá",
+  /* check.hydronic.limits */ "Fáze regulátoru nelze pozorovat|Povel čerpadla není dostupný|Čeká se na obnovení",
+  /* check.hydronic.counts */ (w, c) => `Údaje vody ${w} · údaje povelu ${c}`,
+  /* check.hydronic.states */ "Nepotvrzený zdroj|S datem|Bez data|Neúplných 24 h|Čeká na uložení|Čítače na limitu: dolní meze",
+  /* check.hydronic.loss */ (n) => `Hlášení o ztrátě při ukládání ${n}`,
   /* service.metric.range */ (a, b, c, d) => `min. ${a} · průměr ${b} · max. ${c} ${d}`,
   /* service.metric.samples */ n => `Počet přijatých odečtů: ${n}`,
   /* service.metric.input_none */ "Žádný zvolený vstup",
@@ -1264,7 +1270,7 @@ MODEL_DESCRIPTION_I18N.cs = modelDescriptionValues([
   ["Při výpadcích měření mohou některé starty chybět.", "Pevný běžný počet startů neexistuje. Při dostatku dat tato kontrola považuje průměrnou délku dokončených cyklů vytápění alespoň 10 minut za dostatečnou."], // health_cycling
   ["Odmrazení", "≥3 spárovaná, >15% doby chodu kompresoru při čitelném stavu kompresoru i odmrazení. Interní pravidlo, ne Daikin; chybí vlhkost a teplota celého výměníku."], // health_defrost
   ["24h průběh tlaku vody v uzavřeném hydraulickém okruhu (X10A, 5min minima).", "Průběh: >1,0 bar normální, ≤1,0 bar nízký, ≤0,5 bar kritický (diagnóza od 60 s souvisle). Přípustný plnicí a provozní tlak určuje přesný návod modelu a výška soustavy; samotný údaj neprokazuje únik ani závadu."], // health_pressure
-  ["Průtok po 60 s čerpadla", "Mez vyžaduje stejný model/režim/podmínky; ne jmenovitý ani důkaz malého průtoku."], // health_flow
+  ["Nejnižší průtok po 60 s souvislého chodu vnitřního čerpadla; samostatně: podle vzorků vážené statistiky rozdílu teplot vody, průtoku a povelu čerpadla po 600 s náběhu vytápění.", "Není jmenovitý průtok ani důkaz částečného zatížení. Platí pro společný vodní výměník tepla. Povel čerpadla není otáčkami ani dopravní výškou. Projektový filtr 600 s (mezery ≤15 s) neprokazuje ustálený stav; bez srovnání s cílem či hydraulické příčiny."], // health_flow
   ["Doba ON BUH/BSH", "ne energie ani důkaz zbytečného topení."], // health_heater
   ["5 experimentálních čítačů", "srovnatelné nárůsty; mezery/reset vyloučeny. Stabilita nevylučuje omezení ani neprokazuje příčinu."], // health_retries
   ["RAM 24 h stabilní, poklesy mizí; trvalý pokles: možný únik; napájený kompatibilní restart: průběh RAM možný. Jinak jen datované kompatibilní 5 min z flash žurnálu po seřízení hodin. Rastr 5 min může skrýt krátké pauzy; otevřené/nové neuložené mohou chybět."], // 8

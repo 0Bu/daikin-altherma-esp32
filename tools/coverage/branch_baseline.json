@@ -2181,6 +2181,30 @@
       },
       "test_source_sha256": "aeda39ec13fa0a62c80166fab0248120d2fde6753283d3b8de590b3a675c6295",
       "validation_boundary": "Host and container compilers exercised synthetic inputs; hosted gcc-15-github-linux-ubuntu26 CI confirmation remains separate."
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple Clang 17, arm64",
+        "gcc-13-linux-ubuntu24": "Ubuntu GCC 13.3, pinned ESP-IDF v6.1.1 Docker, aarch64",
+        "gcc-15-github-linux-ubuntu26": "Ubuntu GCC 15.2, Docker, x86-64"
+      },
+      "hosted_confirmation": "Measured locally across Apple Clang 17 arm64, ESP-IDF v6.1.1 Docker GCC 13.3 aarch64, and Ubuntu 26.04 GCC 15.2 x86-64 Docker (97.14%, 12262/12623 across 123 files); hosted GitHub CI and aarch64 gcc-15-linux-ubuntu26 confirmation remain separate.",
+      "measurement_limits": [
+        "gcc-15-linux-ubuntu26 (aarch64) remains at HEAD pending an arm64 Ubuntu 26.04 GCC 15 container run."
+      ],
+      "runner": "scripts/run-mock-tests.sh --coverage on Darwin, ESP-IDF v6.1.1 Docker, and Ubuntu 26.04 Coverage Docker",
+      "scope": "Core H1 qualified hydronic flow and water-temperature spread observations (hydronic_hourly.hpp, hydronic_input.hpp, hydronic_observation.hpp, hydronic_payload.hpp) plus heartbeat hydronic reservation (heartbeat.hpp rises from 229/372 to 233/378 on Clang 17, 315/498 to 318/502 on GCC 13, and 257/418 to 260/422 on x86-64 GCC 15).",
+      "sources": {
+        "main/logic/config_store.hpp": "68620a85a76f3e09d973b76b91620c6646539285e641a04de736d2b6d5def29a",
+        "main/logic/heartbeat.hpp": "f52d2c3ca5d7618d5a68bc3ffc7d5191e27c21467082a62b07faae6ec598143f",
+        "main/logic/history_persist.hpp": "f939216e8abb61416a159a9dab6016c541e659a7d7cbcd827f7e73b27dc1af2a",
+        "main/logic/hydronic_hourly.hpp": "938809c2d77016f87ff3ff00932a8e406f075e09f4cbef99a90244c1493220d7",
+        "main/logic/hydronic_input.hpp": "74571dfd6bbc2320dc515915c1dbf9790396be298c7694eda5c1b99048674084",
+        "main/logic/hydronic_observation.hpp": "5241e5b7716bc550b37f7bd543d0b166ad31ac08a82e7277891453f1ddef0b0a",
+        "main/logic/hydronic_payload.hpp": "ae5d979d6c74d46b7b5b06d5c92bb8ee65b58ef1b1cde3da3d0d77037e958944"
+      },
+      "test_source_sha256": "cbc3f2b2bd0fe8d17c2fa4e383f358665c9e395b8017803732739a632e6bb638",
+      "validation_boundary": "Host and container compilers exercised synthetic inputs; hosted gcc-15-github-linux-ubuntu26 and aarch64 gcc-15-linux-ubuntu26 confirmation remain separate."
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
@@ -2335,8 +2359,8 @@
         "taken": 22
       },
       "main/logic/heartbeat.hpp": {
-        "outcomes": 372,
-        "taken": 229
+        "outcomes": 378,
+        "taken": 233
       },
       "main/logic/heating_curve_bins.hpp": {
         "outcomes": 112,
@@ -2405,6 +2429,22 @@
       "main/logic/http_values_wait.hpp": {
         "outcomes": 8,
         "taken": 8
+      },
+      "main/logic/hydronic_hourly.hpp": {
+        "outcomes": 204,
+        "taken": 152
+      },
+      "main/logic/hydronic_input.hpp": {
+        "outcomes": 122,
+        "taken": 118
+      },
+      "main/logic/hydronic_observation.hpp": {
+        "outcomes": 162,
+        "taken": 161
+      },
+      "main/logic/hydronic_payload.hpp": {
+        "outcomes": 103,
+        "taken": 72
       },
       "main/logic/instrument.hpp": {
         "outcomes": 104,
@@ -2793,8 +2833,8 @@
         "taken": 24
       },
       "main/logic/heartbeat.hpp": {
-        "outcomes": 498,
-        "taken": 315
+        "outcomes": 502,
+        "taken": 318
       },
       "main/logic/heating_curve_bins.hpp": {
         "outcomes": 104,
@@ -2863,6 +2903,22 @@
       "main/logic/http_values_wait.hpp": {
         "outcomes": 12,
         "taken": 12
+      },
+      "main/logic/hydronic_hourly.hpp": {
+        "outcomes": 234,
+        "taken": 170
+      },
+      "main/logic/hydronic_input.hpp": {
+        "outcomes": 174,
+        "taken": 158
+      },
+      "main/logic/hydronic_observation.hpp": {
+        "outcomes": 172,
+        "taken": 171
+      },
+      "main/logic/hydronic_payload.hpp": {
+        "outcomes": 315,
+        "taken": 176
       },
       "main/logic/instrument.hpp": {
         "outcomes": 122,
@@ -3251,8 +3307,8 @@
         "taken": 24
       },
       "main/logic/heartbeat.hpp": {
-        "outcomes": 418,
-        "taken": 257
+        "outcomes": 422,
+        "taken": 260
       },
       "main/logic/heating_curve_bins.hpp": {
         "outcomes": 104,
@@ -3321,6 +3377,22 @@
       "main/logic/http_values_wait.hpp": {
         "outcomes": 12,
         "taken": 12
+      },
+      "main/logic/hydronic_hourly.hpp": {
+        "outcomes": 234,
+        "taken": 170
+      },
+      "main/logic/hydronic_input.hpp": {
+        "outcomes": 174,
+        "taken": 158
+      },
+      "main/logic/hydronic_observation.hpp": {
+        "outcomes": 172,
+        "taken": 171
+      },
+      "main/logic/hydronic_payload.hpp": {
+        "outcomes": 315,
+        "taken": 176
       },
       "main/logic/instrument.hpp": {
         "outcomes": 122,

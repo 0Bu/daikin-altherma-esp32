@@ -309,12 +309,14 @@ if not args.expect_red:
         ("omit_failure_callback", "        if (stop_owned) stop_observation_flash_failed();",
          "        (void)stop_owned;", ["data_commit", "barrier_commit"],
          "failed_append_releases_claim_for_real_service_retry"),
-        ("old_read_classifier", "const bool      stop_owned = logic::observation_append_owned(r.header);",
-         "const bool      stop_owned = logic::observation_header_matches(r.header);",
+        ("old_read_classifier", "const bool      stop_owned     = logic::observation_append_owned(r.header);",
+         "const bool      stop_owned     = logic::observation_header_matches(r.header);",
          ["data_commit", "barrier_commit"], "failed_append_releases_claim_for_real_service_retry"),
         ("clear_core_ahead_on_stop_success",
-         "if (!flash_is_manifest(r.header) && !stop_owned && !flash_cycling_owned(r.header))",
-         "if (!flash_is_manifest(r.header) && !flash_cycling_owned(r.header))", ["core_ahead"],
+         "if (!flash_is_manifest(r.header) && !stop_owned && !hydronic_owned &&\n"
+         "            !flash_cycling_owned(r.header))",
+         "if (!flash_is_manifest(r.header) && !hydronic_owned &&\n"
+         "            !flash_cycling_owned(r.header))", ["core_ahead"],
          "stop_success_preserves_core_ahead_episode"),
         ("trust_write_error_over_valid_readback",
          "const bool committed = read_e == ESP_OK && flash_record_physically_valid(verify) &&",

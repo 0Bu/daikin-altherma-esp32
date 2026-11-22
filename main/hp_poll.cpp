@@ -280,6 +280,9 @@ static void checkup_record_poll_gap(uint32_t generation, bool profile_confirmed 
 // Overlay sweep locals with the task's other branches instead of stacking both frames. The
 // target stack gate rejects an outlined sweep, including optimizer-generated clones.
 [[gnu::always_inline]] inline static void poll_once() {
+    // Only the polling task owns this timestamp, including across its blocking register reads.
+    static int64_t sweep_started_us;
+    sweep_started_us                = esp_timer_get_time();
     const uint32_t consent_epoch    = checkup_consent_epoch();
     const uint32_t cycle_generation = hp_poll_generation();
     const Config&  c                = config();
@@ -564,7 +567,7 @@ static void checkup_record_poll_gap(uint32_t generation, bool profile_confirmed 
     // state is handed over rather than re-derived, so the checkup and the held-over marking above
     // can never disagree about whether the unit was running.
     checkup_record(fresh.data(), fresh.size(), rps_known, rps_running, checkup_coverage,
-                   cycle_generation, consent_epoch);
+                   cycle_generation, consent_epoch, true, sweep_started_us);
 
     // And how long each switched row has read what it reads (logic/state_dwell.hpp). Here for
     // the reasons above and one of its own: a row that did not answer is simply ABSENT from

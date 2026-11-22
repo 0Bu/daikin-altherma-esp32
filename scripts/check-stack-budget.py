@@ -321,7 +321,7 @@ INTEGER_DIGITS_SYMBOL = (
 INTEGER_TO_CHARS_SYMBOL = (
     "std::to_chars_result std::__detail::__to_chars_10<unsigned long long>(char*, char*, unsigned long long)")
 INTEGER_BUILDERS = {
-    "daik::build_heartbeat_json[abi:cxx11](daik::HeartbeatFields const&)": 41,
+    "daik::build_heartbeat_json[abi:cxx11](daik::HeartbeatFields const&, unsigned int)": 41,
     "daik::build_heating_curve_mqtt_json[abi:cxx11](daik::HeatingCurveMqttFields const&)": 21,
 }
 STATUS_HEALTH_NUMBER_SYMBOL = (
@@ -3363,7 +3363,7 @@ def self_test() -> None:
      'daik::publish_weather_state(bool)': 64,
      'daik::build_weather_mqtt_json[abi:cxx11](daik::WeatherMqttSnapshot const&, long long)': 64,
      'daik::publish_heartbeat()': 64,
-     'daik::build_heartbeat_json[abi:cxx11](daik::HeartbeatFields const&)': 64,
+     'daik::build_heartbeat_json[abi:cxx11](daik::HeartbeatFields const&, unsigned int)': 64,
      'daik::publish_crash()': 64,
      'daik::publish_heating_curve_telemetry(daik::Config const&)': 64,
      '_ZN4daikL22evaluate_heating_curveERKNS_6ConfigERKNS_7HpStatsE$isra$0': 64,

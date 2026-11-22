@@ -120,7 +120,7 @@ inline std::array<std::array<char, 256>, 16> live_topics{};
 inline std::function<void(const char*, int)> on_subscribe;
 struct PublishTrace {
     std::array<char, 1024> topic{};
-    std::array<char, 4096> payload{};
+    std::array<char, 8192> payload{};
     int                    length = 0, qos = 0, retain = 0;
     bool                   accepted = false, enqueued = false;
 };

@@ -406,13 +406,24 @@ append_cycling_heartbeat_json(std::string&                         j, const char
 // its block name + "_" prefix (wifi_connected, mqtt_count, bus_rx_received, …). A flat map is what a
 // Telegraf/InfluxDB line-protocol consumer and an HA value_template both want — no per-consumer
 // nesting to subscript through — and it keeps every heartbeat key a plain snake_case identifier.
-inline std::string build_heartbeat_json(const HeartbeatFields& f) {
+__attribute__((noinline)) inline void heartbeat_reserve(std::string& j, const HeartbeatFields& f,
+                                                        size_t extra_bytes) {
+    if (!extra_bytes) return;
+    constexpr size_t fixed_wire_bytes = 3500;
+    const size_t     mac_bytes        = f.wifi_mac.size() + f.wifi_bssid.size() + 8;
+    j.reserve(fixed_wire_bytes + json_escaped_size(f.version) + json_escaped_size(f.platform) +
+              json_escaped_size(f.reset_reason) + mac_bytes + extra_bytes);
+}
+
+inline std::string build_heartbeat_json(const HeartbeatFields& f, size_t extra_bytes = 0) {
     const uint32_t uptime_s = static_cast<uint32_t>(f.uptime_ms / 1000);
-    // mqtt_pub has to build this on a small FreeRTOS stack. Keep every append sequential: expressions
-    // such as `literal + std::to_string(value) + literal` retain multiple temporary std::strings in
-    // one frame. A hardware core dump caught that exact shape at the stack-end watchpoint even though
-    // the heap allocation itself was only 31 bytes.
-    std::string j = "{";
+    // mqtt_pub has to build this on a small FreeRTOS stack. Keep every append sequential:
+    // expressions such as `literal + std::to_string(value) + literal` retain multiple temporary
+    // std::strings in one frame. A hardware core dump caught that exact shape at the stack-end
+    // watchpoint even though the heap allocation itself was only 31 bytes.
+    std::string j;
+    heartbeat_reserve(j, f, extra_bytes);
+    j += "{";
     j += "\"version\":\"";
     json_append_escaped(j, f.version);
     j += "\",\"platform\":\"";

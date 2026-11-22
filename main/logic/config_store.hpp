@@ -41,7 +41,7 @@ namespace daik {
 // concatenation, which is the whole property a caller relies on.
 inline constexpr uint32_t CONFIG_CRC32_INIT = 0xFFFFFFFFu;
 
-inline uint32_t config_crc32_update(uint32_t crc, const uint8_t* data, size_t len) {
+inline constexpr uint32_t config_crc32_update(uint32_t crc, const uint8_t* data, size_t len) {
     for (size_t i = 0; i < len; i++) {
         crc ^= data[i];
         for (int b = 0; b < 8; b++)
@@ -50,9 +50,9 @@ inline uint32_t config_crc32_update(uint32_t crc, const uint8_t* data, size_t le
     return crc;
 }
 
-inline uint32_t config_crc32_final(uint32_t crc) { return crc ^ 0xFFFFFFFFu; }
+inline constexpr uint32_t config_crc32_final(uint32_t crc) { return crc ^ 0xFFFFFFFFu; }
 
-inline uint32_t config_crc32(const uint8_t* data, size_t len) {
+inline constexpr uint32_t config_crc32(const uint8_t* data, size_t len) {
     return config_crc32_final(config_crc32_update(CONFIG_CRC32_INIT, data, len));
 }
 

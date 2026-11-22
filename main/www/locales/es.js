@@ -1,4 +1,4 @@
-// translation-source: aa3abf8d6b7cd47b6adfa6bc6f918e3a1dbe62e1de7c6d8deffda21d1fb75661
+// translation-source: f982a05344b9ece7dec235d585ceb16879699f0cadc0c452af38729b31d32a37
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -276,6 +276,12 @@ I18N.es = localeValues([
   /* service.metric.eev */ "Orden de válvula de expansión",
   /* service.metric.hp */ "Alta presión",
   /* service.metric.lp */ "Baja presión",
+  /* check.hydronic.labels */ "Salto térmico del agua|Orden de bomba|Observado / apto / cualificado|Fechas de evidencia|Fechas cualificadas|Actual|Población|Bloques horarios|Diferencia objetivo de temperatura del agua",
+  /* check.hydronic.reasons */ "Cualificado por el filtro del proyecto|Diagnóstico desactivado|Sin fuente actual|Lectura no válida|Bomba apagada|Circuito de ACS|Apoyo eléctrico indicado encendido|Arranque restante|Reloj de observación no disponible|Fuente cambiada|Permiso de diagnóstico cambiado|Límite del contador alcanzado|Desactivado durante este arranque|Cualificación desconocida",
+  /* check.hydronic.limits */ "Fases del controlador no observables|Orden de bomba no disponible|Restauración pendiente",
+  /* check.hydronic.counts */ (w, c) => `Lecturas de agua ${w} · lecturas de orden ${c}`,
+  /* check.hydronic.states */ "Fuente sin confirmar|Con fecha|Sin fecha|24 h incompletas|Almacenamiento pendiente|Contadores saturados: cotas inferiores",
+  /* check.hydronic.loss */ (n) => `Avisos de pérdida en el almacenamiento ${n}`,
   /* service.metric.range */ (a, b, c, d) => `mín. ${a} · media ${b} · máx. ${c} ${d}`,
   /* service.metric.samples */ n => `${n} ${n === 1 ? "lectura admitida" : "lecturas admitidas"}`,
   /* service.metric.input_none */ "Ninguna entrada seleccionada",
@@ -1309,7 +1315,7 @@ MODEL_DESCRIPTION_I18N.es = modelDescriptionValues([
   ["Si faltan mediciones, algunos arranques pueden quedar sin contar.", "No hay un número fijo de arranques normal. Con datos suficientes, esta comprobación considera adecuada una duración media de al menos 10 minutos en los ciclos de calefacción terminados."], // health_cycling
   ["Desescarche", "≥3 asociados, >15% del tiempo de marcha del compresor con estados de compresor y desescarche legibles. Regla interna, no Daikin; faltan humedad y temperatura de toda la batería."], // health_defrost
   ["Presión de agua (24 h) en el circuito hidráulico cerrado (X10A, mínimos de 5 min).", "Guía de la curva: >1,0 bar normal, ≤1,0 bar baja, ≤0,5 bar crítica (diagnóstico desde 60 s continuos). La presión de llenado y trabajo admisible depende del manual exacto del equipo y la altura del sistema; la lectura por sí sola no prueba fugas ni avería."], // health_pressure
-  ["Caudal tras 60 s de bomba", "El límite exige mismo modelo/modo/condiciones; no nominal ni prueba de flujo insuficiente."], // health_flow
+  ["Caudal mínimo tras 60 s de marcha continua de la bomba interna; aparte: estadísticas ponderadas por muestra de salto térmico del agua, caudal y orden de bomba tras 600 s de arranque en calefacción.", "No es caudal nominal ni prueba de carga parcial. Cubre el intercambiador de agua común. La orden de bomba no mide velocidad ni altura disponible. Filtro del proyecto de 600 s (huecos ≤15 s), sin probar régimen estable, objetivo ni causa hidráulica."], // health_flow
   ["Tiempo ON de BUH/BSH", "no energía ni prueba de calor innecesario."], // health_heater
   ["5 contadores experimentales", "aumentos comparables; ignora huecos/reset. Estabilidad no excluye limitación ni prueba causa."], // health_retries
   ["RAM 24 h: estable o bajadas recuperadas; caída continua, posible fuga. Reinicio compatible alimentado: curva RAM posible; si no, solo 5 min fechados compatibles del registro flash tras ajustar hora; pasos de 5 min pueden ocultar pausas breves; abierto/últimos sin guardar pueden faltar."], // free_heap

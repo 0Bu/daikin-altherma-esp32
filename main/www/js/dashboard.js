@@ -158,8 +158,8 @@ function renderCards(hold = true) {
   // Rows catch up when scrubEnd resumes rendering.
   if (S.scrub || (hold && S.clickHold)) return;
   // The opt-in controls the entire diagnosis card and its navigation entry. Its 24-hour rows
-  // follow the active diagnostics source (X10A or Modbus); passive refrigerant observations keep
-  // their independent X10A collection.
+  // follow the active diagnostics source (X10A or Modbus). During X10A loss, independent dated
+  // water evidence and passive refrigerant observations keep only those X10A rows visible.
   const checkupSourceReady = checkupSourceReadyFor();
   const checkup = S.status?.diagnostics?.enabled === true
     ? checkupCardHtml(checkupSourceReady) : "";
@@ -2090,6 +2090,76 @@ function syncCheckupFaultPanel(panel) {
   }
 }
 
+// H1 is an independent dated population, not a new verdict or a replacement for min_l_min.
+function checkupHydronicKnown(h) {
+  return h?.method === 1 && h.confirmed === true && h.dated === true &&
+    typeof h.first_evidence_unix_s === "number" && Number.isFinite(h.first_evidence_unix_s) &&
+    h.first_evidence_unix_s >= 0 && typeof h.last_evidence_unix_s === "number" &&
+    Number.isFinite(h.last_evidence_unix_s) && h.last_evidence_unix_s >= h.first_evidence_unix_s &&
+    h.last_evidence_unix_s <= 8640000000000;
+}
+
+function checkupHydronicHtml(c, isModbus = false) {
+  const h = !isModbus && c.id === "flow" ? c.hydronic : null;
+  if (!h || typeof h !== "object") return ["", ""];
+  const labels = t("check.hydronic.labels").split("|");
+  const reasons = t("check.hydronic.reasons").split("|");
+  const limits = t("check.hydronic.limits").split("|");
+  const state = t("check.hydronic.states").split("|");
+  const nd = t("sys.nodata");
+  const row = (l, v) => `${l}: ${v}`;
+  const html = r => "<br>" + r.map(esc).join("<br>");
+  if (h.method !== 1) return ["", html([row(labels[5], reasons[13])])];
+  const known = checkupHydronicKnown(h);
+  const num = n => typeof n === "number" && Number.isFinite(n);
+  const cnt = n => num(n) && Number.isSafeInteger(n) && n >= 0;
+  const fmt = (n, p = 3) => n.toLocaleString(LANG, { maximumFractionDigits: p });
+  const pre = h.population_saturated === true ? "≥" : "";
+  const val = n => known && cnt(n) ? pre + fmt(n) : nd;
+  const dur = n => known && num(n) && n >= 0 ? pre + t("hist.duration_sec", fmt(n, 6)) : nd;
+  const rng = (r, n, u) => known && cnt(n) && n > 0 && r && [r.min, r.mean, r.max].every(num)
+    ? t("service.metric.range", fmt(r.min), fmt(r.mean), fmt(r.max), u) : nd;
+  const dt = n => known && num(n) && n >= 0 && Number.isFinite(n * 1000) && n <= 8640000000000
+    ? new Date(n * 1000).toLocaleString(LANG, { dateStyle: "short", timeStyle: "short", timeZone: "UTC" }) + " UTC" : nd;
+  const meas = [
+    row(labels[0], rng(h.spread_k, h.samples, "K")),
+    row(t("schem.flow_rate"), rng(h.flow_l_min, h.samples, "l/min")),
+    row(labels[1], rng(h.pump_command_pct, h.command_samples, "%")),
+    t("check.hydronic.counts", val(h.samples), val(h.command_samples)),
+    row(labels[2], [h.observed_s, h.candidate_s, h.qualified_s].map(dur).join(" / ")),
+    row(labels[3], `${dt(h.first_evidence_unix_s)} – ${dt(h.last_evidence_unix_s)}`),
+    row(labels[4], `${dt(h.first_accepted_unix_s)} – ${dt(h.last_accepted_unix_s)}`),
+    row(labels[7], val(h.observed_hours)),
+    row(labels[8], nd),
+  ];
+  const sr = k => t(`service.reason.${k}`);
+  const code = Number.isInteger(h.reason_code) && h.reason_code >= 0 && h.reason_code <= 19 ? h.reason_code : -1;
+  const reason = [reasons[0], sr("unsupported_profile"), reasons[1], reasons[2],
+    sr("missing_fresh_signal"), reasons[3], reasons[4],
+    sr("compressor_not_running"), sr("unsupported_or_unknown_mode"),
+    reasons[5], sr("defrost"), reasons[6],
+    sr("special_controller_phase"), reasons[7], sr("poll_gap"),
+    reasons[8], reasons[9], reasons[10], reasons[11], reasons[12]][code];
+  // A retained pump/valve/run-up reason is not a fresh current state after a source gap.
+  const fresh = h.current === true && h.confirmed === true;
+  const cur = fresh || [1, 2, 3, 14, 15, 16, 17, 18, 19].includes(code) ? reason || reasons[13] : reasons[13];
+  const settle = fresh && code === 13 && num(h.settling_remaining_s) &&
+    h.settling_remaining_s > 0 && h.settling_remaining_s <= 600
+    ? ` ${t("hist.duration_sec", fmt(h.settling_remaining_s))}` : "";
+  const flags = m => cnt(m) && m <= 7
+    ? [limits[0], limits[1], state[5]].filter((_, i) => m & (1 << i)).join(" · ") : nd;
+  const pop = [known ? state[1] : h.dated === false ? state[2] : nd];
+  if (h.confirmed === false) pop.push(state[0]);
+  if (h.coverage_partial === true) pop.push(state[3]);
+  if (h.restore_pending === true) pop.push(limits[2]);
+  if (h.persistence_pending === true) pop.push(state[4]);
+  if (h.population_saturated === true && !(known && cnt(h.population_limitations_mask) && h.population_limitations_mask <= 7 && (h.population_limitations_mask & 4))) pop.push(state[5]);
+  if (known) pop.push(flags(h.population_limitations_mask));
+  if (cnt(h.dropped)) pop.push(t("check.hydronic.loss", `≥${fmt(h.dropped)}`));
+  return [html(meas), html([row(labels[5], [cur + settle, fresh ? flags(h.current_limitations_mask) : nd].filter(Boolean).join(" · ")),
+    row(labels[6], pop.filter(Boolean).join(" · "))])];
+}
+
 function checkupStatusKey(c) {
   const verdict = typeof c === "string" ? c : c?.verdict;
   // Older firmware reported this completed, unsuccessful day as collecting. Keep its
@@ -2208,7 +2278,9 @@ function checkupDetailHtml(c, fullSpan = c.full_span === true, report = {}) {
         : t("check.detail.collecting_unknown");
     }
   } else if (!detail) {
-    detail = t(checkupDetailKey(c, statusKey));
+    const hydronicEvidence = !isModbus && c.id === "flow" && checkupHydronicKnown(c.hydronic);
+    detail = t(statusKey === "unavailable" && hydronicEvidence
+      ? "check.detail.observation" : checkupDetailKey(c, statusKey));
   }
   // The reason is selected by firmware, not inferred from missing numbers in the browser.
   const reasonKey = {
@@ -2269,9 +2341,11 @@ function checkupDetailHtml(c, fullSpan = c.full_span === true, report = {}) {
     const energy = checkupDhwEnergy(c);
     if (energy) detail += ` ${energy}`;
   }
+  const [hydronicMeasurements, hydronicContext] = checkupHydronicHtml(c, isModbus);
   return descParaHtml(`<span class="vdesc-n">${esc(value)}</span>` +
-           (time.length ? ` · ${esc(time.join(" · "))}` : "") + ` — ${esc(what)}`) +
-         descParaHtml(esc(detail)) +
+           (time.length ? ` · ${esc(time.join(" · "))}` : "") + ` — ${esc(what)}` +
+           hydronicMeasurements) +
+         descParaHtml(esc(detail) + hydronicContext) +
          descNoteHtml(t("normal.label"), normal);
 }
 
@@ -2442,7 +2516,7 @@ function checkupPressureHistoryHtml(id, unit, label) {
 
 const MODBUS_HIDDEN_CHECKS = new Set(["defrost", "pressure", "retries"]);
 function checkupCardHtml(includeHealth = true) {
-  const h = includeHealth ? S.status?.health : null;
+  const h = S.status?.health;
   const source = h?.source || S.status?.diagnostics?.effective_source || "x10a";
   const isModbus = source === "modbus";
   const avail = S.status?.diagnostics?.available_sources;
@@ -2451,10 +2525,13 @@ function checkupCardHtml(includeHealth = true) {
                   : dualAvail ? `${t("card.checkup")} · X10A`
                   : t("card.checkup");
   let healthRows = "";
-  const unreadable = h?.persist === "unknown";
+  const unreadable = includeHealth && h?.persist === "unknown";
   const visibleChecks = Array.isArray(h?.checks)
-    ? h.checks.filter((c) => !isModbus ||
-        (!MODBUS_HIDDEN_CHECKS.has(c.id) && !(c.id === "flow" && c.verdict === "unavailable")))
+    ? h.checks.filter((c) => {
+        if (isModbus && (MODBUS_HIDDEN_CHECKS.has(c.id) || (c.id === "flow" && c.verdict === "unavailable")))
+          return false;
+        return includeHealth || (!isModbus && c.id === "flow" && checkupHydronicKnown(c.hydronic));
+      })
     : [];
   if (unreadable) healthRows = `<span class="empty">${esc(t("sys.nodata"))}</span>`;
   if (!unreadable && visibleChecks.length) {
@@ -2479,7 +2556,7 @@ function checkupCardHtml(includeHealth = true) {
   // renderCards() gates the whole card on the diagnostics opt-in, including this observation.
   const rows = healthRows + (isModbus ? "" : refrigerantServiceRowHtml());
   if (!rows) return "";                               // older firmware — no card rather than an empty one
-  if (unreadable || !healthRows)
+  if (unreadable || !healthRows || !includeHealth)
     return vcard(cardTitle, rows, "", "", "diagnosis", t("nav.diagnosis"));
   // Findings are counts of serialized verdicts, not a health score or a second threshold rule.
   const warnings = visibleChecks.filter(c => c.verdict === "warn").length;

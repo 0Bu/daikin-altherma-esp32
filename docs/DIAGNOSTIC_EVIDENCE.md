@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: b3caa2b7ff2bc787aca4d6ee3d822d3f92ad4f511b56ea8d5b18e6e642fd0450 -->
+<!-- diagnostic-evidence-contract: ada396271cc9c5028eab789a9fd5ed3cddc88557b37db4fc66bfac55b6bc1462 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -477,20 +477,49 @@ the listed Altherma 3 R W units (sections 6.4.3, 9.4.1, and 12.4). An Altherma 3
 exposes leaving-water flow rate in input register 49 scaled by 1/100 to `l/min` ([D3], Modbus input
 registers). One firmware-wide good/bad limit would therefore be incorrect.
 
+The [Altherma 3 R W installer guide, 4P629085-1E, 2024.04][h1-split-guide], sections 10.6.3 and
+16.2, distinguishes the heating controller difference (leaving-water setpoint minus return)
+from a measured difference. Its 10 K radiator case and startup, backup-heater and zone-priority
+exceptions are tied to the listed ERGA04–08E and EHBH/EHBX04–08E models. The split-unit drawing
+places R1T at the water outlet of the plate heat exchanger and R4T at its inlet, with R2T after
+the backup heater. The [Altherma 3 M manual, 4P620239-1B, 2022.05][h1-mono-guide], section 11,
+pp. 48–49, establishes the corresponding water-side sensor roles for EBLA09–14D and EDLA09–14D.
+Both editions were checked on 14 November 2026.
+
 **Firmware rule:** The row reports the lowest accepted flow after the internal pump ran
 continuously for at least 60 seconds. It assigns no good/bad assessment. On Modbus,
 `checkup_modbus_coverage` enables `flow` only when `HomeHub` EKRHH scaling is affirmatively
 verified (`ModbusProfileBasis::Affirmative` via probe register 79)
 and the committed row carries `!cv.modbus_flow_scale_unverified`; `Probing`, `Fallback`, and native
-`Altherma4` sweeps leave `flow` unsupported (`unavailable`, withheld from Modbus checkups). See
-CHECKUP_FLOW_RUNUP_S and the Flow branch in [checkup.hpp](../main/logic/checkup.hpp).
+`Altherma4` sweeps leave `flow` unsupported (`unavailable`, withheld from Modbus checkups), and
+Modbus mode leaves `flow.hydronic` unpopulated (`confirmed:false`, `dated:false`, `reason_code:0`,
+null metrics). See CHECKUP_FLOW_RUNUP_S and the Flow branch in [checkup.hpp](../main/logic/checkup.hpp).
 
-**Project boundary:** Sixty seconds is a pump run-up filter, not a manufacturer limit. The filter
-does not establish part load or exclude later valve movements.
+The independent X10A hydronic population uses the same completed X10A sweep for measured pre-heater
+leaving water, return water, flow and the required operating witnesses. Readable endpoints count
+toward observed time. Eligible endpoints additionally require positive flow, an active pump and
+compressor, Heating mode, the space route, both backup-heater steps off and defrost off. A declared
+special-phase witness must be readable and inactive. An ambiguous phase identity excludes the
+profile; an absent or withheld phase limits the population. Invalid witnesses, a gap or sweep longer
+than 15 seconds, a source or consent change or a monotonic clock discontinuity reset run-up.
+Toggling diagnostics off and back on within the same diagnostics generation preserves completed
+24-hour buckets while resetting live run-up continuity so paused time is never bridged.
+
+The first sample after 600 continuous eligible seconds enters the ranges. Qualified time requires
+two qualified endpoints. The signed spread is measured leaving water minus return. Water ranges
+are sample-weighted. Effort is 100 minus a valid, finite 0–100 pump command, with its own sample
+count. Dated hours use the shared journal with independent method, schema, model, source and
+consent identity. Clock loss and incomplete replay are exposed separately. See [the API
+contract](API.md#qualified-water-circuit-observations).
+
+**Project boundary:** Sixty seconds, 600 seconds and 15 seconds are project filters. No validated
+active-zone controller target is available in current queryable profiles. No 900-second pattern
+classifier, 9 K alarm or model minimum compressor speed is inferred.
 
 **Not established:** The minimum has no retained operating-mode context and is not a design-flow
 measurement. It cannot be compared generally with a model manual's commissioning minimum or
-identify a hydraulic restriction.
+identify a hydraulic restriction. The hydronic ranges do not establish steady operation, emitter
+output, bypass, restriction, sensor calibration or available pump head.
 
 <a id="diagnosis-heater"></a>
 ### 7. Electric backup and booster heaters (`heater`)
@@ -673,3 +702,5 @@ prove that a source is technically applicable; that remains the human part of th
 [R2-doi]: https://doi.org/10.1016/j.applthermaleng.2009.01.003
 [stop-guide-de]: https://www.daikin.de/content/dam/document-library/Installer-reference-guide/heat/air-to-water-heat-pump-low-temperature/erga-ev7/EHBH-E%286V.9W%29.EHBX-E%286V.9W%29.ERGA04-08EVA.ERGA-EV%287.H.H7%29_Installer%20reference%20guide_4PDE629085-1E_German.pdf
 [stop-guide-en]: https://www.daikin.eu/content/dam/document-library/Installer-reference-guide/heat/air-to-water-heat-pump-low-temperature/erga-ev7/EHBH-E%286V.9W%29.EHBX-E%286V.9W%29.ERGA04-08EVA.ERGA-EV%287.H.H7%29_Installer%20reference%20guide_4PEN629085-1E_English.pdf
+[h1-split-guide]: https://www.daikin.eu/content/dam/document-library/Installer-reference-guide/heat/air-to-water-heat-pump-low-temperature/erga-ev7/EHBH-E%286V.9W%29.EHBX-E%286V.9W%29.ERGA04-08EVA.ERGA-EV%287.H.H7%29_Installer%20reference%20guide_4PEN629085-1E_English.pdf
+[h1-mono-guide]: https://www.daikin.co.uk/content/dam/document-library/installation-manuals/heat/air-to-water-heat-pump-low-temperature/ebla09-14dv3/EB_DLA09-14D3V3_W1_EB_DLA-D3V3_W1_Installation%20manual_4PEN620239-1B_English.pdf
