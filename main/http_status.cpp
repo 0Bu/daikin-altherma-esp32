@@ -642,6 +642,22 @@ static __attribute__((noinline)) void append_hydronic_status(JsonOut&          j
     }
     j += ",\"hydronic\":";
     append_hydronic_json(j, report);
+    const auto& secondary = report.secondary;
+    j += ",\"secondary_supply\":";
+    if (!report.current || !secondary.samples || !secondary.source.conv) {
+        j += "null";
+        return;
+    }
+    auto sink = detail::json_output(j);
+    j += "{\"delta_k\":";
+    hydronic_json_decimal(sink, secondary.sum_milli, secondary.samples, true);
+    j += ",\"duration_s\":";
+    hydronic_json_seconds(sink, secondary.duration_us, true);
+    append_status_opt_uint(j, ",\"samples\":", true, secondary.samples);
+    append_status_opt_uint(j, ",\"source\":{\"reg\":", true, secondary.source.reg);
+    append_status_opt_uint(j, ",\"offset\":", true, secondary.source.off);
+    append_status_opt_uint(j, ",\"conv\":", true, secondary.source.conv);
+    j += "},\"zone_context\":\"unknown\"}";
 }
 
 template <typename JsonOut>

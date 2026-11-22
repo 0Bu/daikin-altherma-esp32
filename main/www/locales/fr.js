@@ -1,4 +1,4 @@
-// translation-source: 8f61724438aa05c39fd87d41010d01814a248a9d1f18758ce7721d9db606954e
+// translation-source: d246ab37989033acccc61553571267bd477b8c1b2151bfc0c3471de471a873b4
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -323,6 +323,7 @@ I18N.fr = localeValues([
   /* check.hydronic.counts */ (w, c) => `Mesures d’eau ${w} · mesures de commande ${c}`,
   /* check.hydronic.states */ "Source non confirmée|Daté|Non daté|Couverture de 24 h incomplète|Enregistrement en attente|Compteurs saturés : bornes inférieures",
   /* check.hydronic.loss */ (n) => `Signalements de perte de stockage ${n}`,
+  /* check.hydronic.secondary */ (d, s, n) => `Écart de température de départ (pompe à chaleur moins circuit mélangé) : ${d} · ${s} · mesures : ${n}. But inconnu ; pertes de chaleur : plus de mesures requises.`,
   /* service.metric.range */ (a, b, c, d) => `min. ${a} · moyenne ${b} · max. ${c} ${d}`,
   /* service.metric.samples */ n => `${n} ${n === 1 ? "mesure retenue" : "mesures retenues"}`,
   /* service.metric.input_none */ "Aucune entrée sélectionnée",

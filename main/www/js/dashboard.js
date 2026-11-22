@@ -2490,6 +2490,12 @@ function checkupHydronicHtml(c, isModbus = false) {
     reasons[8], reasons[9], reasons[10], reasons[11], reasons[12]][code];
   // A retained pump/valve/run-up reason is not a fresh current state after a source gap.
   const fresh = h.current === true && h.confirmed === true;
+  const sec = c.secondary_supply;
+  if (fresh && sec?.zone_context === "unknown" && num(sec.delta_k) &&
+      num(sec.duration_s) && sec.duration_s >= 0 && cnt(sec.samples) && sec.samples > 0) {
+    meas.push(t("check.hydronic.secondary", (sec.delta_k > 0 ? "+" : "") + fmt(sec.delta_k) + " K",
+      t("hist.duration_sec", fmt(sec.duration_s, 6)), fmt(sec.samples)));
+  }
   const cur = fresh || [1, 2, 3, 14, 15, 16, 17, 18, 19].includes(code) ? reason || reasons[13] : reasons[13];
   const settle = fresh && code === 13 && num(h.settling_remaining_s) &&
     h.settling_remaining_s > 0 && h.settling_remaining_s <= 600

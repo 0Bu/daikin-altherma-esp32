@@ -40,7 +40,31 @@ struct HydronicInputPlan {
     CheckupLocator  rows[HYDRONIC_INPUTS]   = {};
     InstrumentState states[HYDRONIC_INPUTS] = {};
     uint32_t        schema_fp               = 0;
+    CheckupLocator  secondary_supply{}, secondary_pump{}, secondary_heating_input{};
 };
+
+inline void fill_secondary_supply_plan(HydronicInputPlan& p, const ProfileView& v) {
+    // Daikin 4P759885-1C §6.2.3 locates the EKMIK mixing station in the main zone of
+    // this ECH2O installation. A model sharing its catalog table isn't installation proof.
+    if (!v.profile_id ||
+        std::strcmp(v.profile_id, "altherma_erra_e_elsh_x_12p30_50_ef_series_8_12kw_ech2o") != 0)
+        return;
+    const auto supply  = instrument_resolve(v, Instrument::MixedWaterEkmik);
+    const auto pump    = instrument_resolve(v, Instrument::MainZonePump);
+    const auto heating = instrument_resolve(v, Instrument::MainZoneRoomHeatingInput);
+    if (supply.state != InstrumentState::Supported || pump.state != InstrumentState::Supported ||
+        heating.state != InstrumentState::Supported)
+        return;
+    const auto sensor = adjudicated(v, static_cast<size_t>(supply.row));
+    if (sensor.offset != 4) return;
+    const auto locator = [&](int index) {
+        const auto row = adjudicated(v, static_cast<size_t>(index));
+        return CheckupLocator{row.reg, row.offset, row.conv};
+    };
+    p.secondary_supply        = locator(supply.row);
+    p.secondary_pump          = locator(pump.row);
+    p.secondary_heating_input = locator(heating.row);
+}
 
 // The four established refrigerant-service phase coordinates are not registry instruments yet.
 // Apply the registry's uniqueness, publishability and overlapping-bit rule, never a label search.
@@ -88,6 +112,7 @@ inline void fill_hydronic_input_plan(HydronicInputPlan& p, const char* profile_i
     }
     p.schema_fp = config_crc32_final(crc);
     if (!p.schema_fp) p.schema_fp = 1;
+    fill_secondary_supply_plan(p, v);
 }
 inline HydronicInputPlan hydronic_input_plan(const char* profile_id, const ProfileView& v) {
     HydronicInputPlan p;
@@ -99,11 +124,9 @@ inline bool hydronic_input_supported(const HydronicInputPlan& p, HydronicInput i
     return k < HYDRONIC_INPUTS && p.schema_fp && p.states[k] == InstrumentState::Supported;
 }
 template <class Row>
-inline const Row* hydronic_input_row(const HydronicInputPlan& p, HydronicInput input,
-                                     const Row* rows, size_t count) {
-    if (!rows || !hydronic_input_supported(p, input)) return nullptr;
-    const auto& key   = p.rows[static_cast<size_t>(input)];
-    const Row*  found = nullptr;
+inline const Row* hydronic_fresh_row(const CheckupLocator& key, const Row* rows, size_t count) {
+    if (!rows || !key.conv) return nullptr;
+    const Row* found = nullptr;
     for (size_t i = 0; i < count; ++i) {
         const auto& r = rows[i];
         if (!checkup_row_matches(key, r.reg, r.off, r.conv)) continue;
@@ -111,6 +134,13 @@ inline const Row* hydronic_input_row(const HydronicInputPlan& p, HydronicInput i
         found = &r;
     }
     return found;
+}
+template <class Row>
+inline const Row* hydronic_input_row(const HydronicInputPlan& p, HydronicInput input,
+                                     const Row* rows, size_t count) {
+    return hydronic_input_supported(p, input)
+               ? hydronic_fresh_row(p.rows[static_cast<size_t>(input)], rows, count)
+               : nullptr;
 }
 template <class Row>
 inline HydronicSample hydronic_collect(const HydronicInputPlan& p, const Row* rows, size_t count,
@@ -121,9 +151,8 @@ inline HydronicSample hydronic_collect(const HydronicInputPlan& p, const Row* ro
         if (k != static_cast<size_t>(HydronicInput::Command) &&
             !hydronic_input_supported(p, static_cast<HydronicInput>(k)))
             s.supported = false;
-    s.command_supported = hydronic_input_supported(p, HydronicInput::Command);
-    const auto numeric  = [&](HydronicInput input, double& value) {
-        const Row* r = hydronic_input_row(p, input, rows, count);
+    s.command_supported      = hydronic_input_supported(p, HydronicInput::Command);
+    const auto parse_numeric = [](const Row* r, double& value) {
         if (!r || r->value.empty()) return false;
         const char* text = r->value.c_str();
         if (!((*text >= '0' && *text <= '9') || *text == '-' || *text == '+')) return false;
@@ -131,12 +160,17 @@ inline HydronicSample hydronic_collect(const HydronicInputPlan& p, const Row* ro
         value     = std::strtod(text, &end);
         return end != text && end == text + r->value.size() && std::isfinite(value);
     };
-    const auto bit = [&](HydronicInput input) {
-        const Row* r = hydronic_input_row(p, input, rows, count);
+    const auto numeric = [&](HydronicInput input, double& value) {
+        return parse_numeric(hydronic_input_row(p, input, rows, count), value);
+    };
+    const auto parse_bit = [](const Row* r) {
         if (!r || r->value.size() != 1) return HydronicBit::Unknown;
         return r->value[0] == '1'   ? HydronicBit::On
                : r->value[0] == '0' ? HydronicBit::Off
                                     : HydronicBit::Unknown;
+    };
+    const auto bit = [&](HydronicInput input) {
+        return parse_bit(hydronic_input_row(p, input, rows, count));
     };
     s.leaving_known = numeric(HydronicInput::Leaving, s.leaving_c);
     s.return_known  = numeric(HydronicInput::Return, s.return_c);
@@ -170,6 +204,11 @@ inline HydronicSample hydronic_collect(const HydronicInputPlan& p, const Row* ro
         if (p.states[11 + k] == InstrumentState::Ambiguous) s.phase_ambiguous = true;
         s.phase[k] = bit(input);
     }
+    if (p.secondary_supply.conv &&
+        parse_bit(hydronic_fresh_row(p.secondary_pump, rows, count)) == HydronicBit::On &&
+        parse_bit(hydronic_fresh_row(p.secondary_heating_input, rows, count)) == HydronicBit::On)
+        s.secondary_known =
+            parse_numeric(hydronic_fresh_row(p.secondary_supply, rows, count), s.secondary_c);
     return s;
 }
 

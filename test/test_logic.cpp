@@ -23235,6 +23235,8 @@ static void test_instrument_registry() {
         {Instrument::PowerLimit2, 2, 0},
         {Instrument::PowerLimit3, 2, 0},
         {Instrument::PowerLimit4, 2, 0},
+        {Instrument::MainZonePump, 0, 0},
+        {Instrument::MainZoneRoomHeatingInput, 2, 0},
     };
     // Every label at every locator coordinate and converter, whether the locator accepts it, and
     // in how many detectable profiles it occurs. A new spelling, a moved row or a changed count
@@ -23330,6 +23332,7 @@ static void test_instrument_registry() {
         {"power_limit_2", 0x62, 7, "Pwr consumption limit 2", true, 2},
         {"power_limit_3", 0x62, 7, "Pwr consumption limit 3", true, 2},
         {"power_limit_4", 0x62, 7, "Pwr consumption limit 4", true, 2},
+        {"main_zone_room_heating_input", 0x62, 7, "Main RT Heating", true, 2},
     };
     constexpr size_t kSpellings          = sizeof(kSpelling) / sizeof(kSpelling[0]);
     int              spelled[kSpellings] = {0};
@@ -33337,6 +33340,8 @@ static void test_inputs() {
     for (const auto& profile : daik::def::profiles) {
         const auto v = daik::def::lookup_view(profile.id);
         const auto p = hydronic_input_plan(profile.id, v);
+        CHECK(!p.secondary_supply.conv && !p.secondary_pump.conv &&
+              !p.secondary_heating_input.conv);
         for (size_t k = 0; k < 11; ++k)
             CHECK(p.states[k] == instrument_resolve(v, HYDRONIC_INSTRUMENTS[k]).state);
         if (hydronic_input_supported(p, HydronicInput::Leaving) &&
@@ -33345,6 +33350,175 @@ static void test_inputs() {
             ++supported_profiles;
     }
     CHECK(supported_profiles > 20); // genuinely cross-profile, never a single-label fixture
+}
+
+static void test_secondary_supply_inputs() {
+    constexpr const char* id     = "altherma_erra_e_elsh_x_12p30_50_ef_series_8_12kw_ech2o";
+    constexpr const char* alias  = "altherma_erra_e_elv12_elb12_elvz12_ef_ej_series_8_12kw";
+    daik::ValueDef        defs[] = {
+        {0x65, 4, 105, 2, -1, "[EKMIK] Bizone kit mixed leaving water temperature R1T"},
+        {0x64, 9, 301, 1, -1, "Main pump"},
+        {0x62, 7, 304, 1, -1, "Main RT Heating"},
+        {0x61, 2, 105, 2, -1, "Leaving water temp. before BUH (R1T)"},
+    };
+    ProfileView v;
+    v.profile_id    = id;
+    v.base          = defs;
+    v.base_count    = std::size(defs);
+    const auto plan = hydronic_input_plan(id, v);
+    CHECK(checkup_row_matches(plan.secondary_supply, 0x65, 4, 105));
+    CHECK(checkup_row_matches(plan.secondary_pump, 0x64, 9, 301));
+    CHECK(checkup_row_matches(plan.secondary_heating_input, 0x62, 7, 304));
+
+    Row        rows[]  = {{0x65, 4, 105, false, false, "47.5"},
+                          {0x64, 9, 301, false, false, "1"},
+                          {0x62, 7, 304, false, false, "1"},
+                          {0x61, 2, 105, false, false, "45"},
+                          {}};
+    const auto collect = [&] { return hydronic_collect(plan, rows, std::size(rows), true, true); };
+    auto       witness = collect();
+    CHECK(witness.secondary_known && witness.secondary_c == 47.5);
+    CHECK(witness.leaving_known && witness.leaving_c == 45);
+    for (auto& row : rows) {
+        if (!row.conv) break;
+        row.held  = true;
+        auto held = collect();
+        CHECK(row.reg == 0x61 ? !held.leaving_known : !held.secondary_known);
+        row.held         = false;
+        row.held_unknown = true;
+        auto unknown     = collect();
+        CHECK(row.reg == 0x61 ? !unknown.leaving_known : !unknown.secondary_known);
+        row.held_unknown = false;
+        rows[4]          = row;
+        auto duplicate   = collect();
+        CHECK(row.reg == 0x61 ? !duplicate.leaving_known : !duplicate.secondary_known);
+        rows[4] = {};
+    }
+    for (const unsigned i : {1u, 2u}) {
+        rows[i].value = "0";
+        CHECK(!collect().secondary_known);
+        rows[i].value = "";
+        CHECK(!collect().secondary_known);
+        rows[i].value = "1";
+    }
+    for (unsigned i = 0; i < 3; ++i) {
+        auto original      = defs[i];
+        defs[i].no_publish = true;
+        CHECK(!hydronic_input_plan(id, v).secondary_supply.conv);
+        defs[i]       = original;
+        v.extra       = &defs[i];
+        v.extra_count = 1;
+        CHECK(!hydronic_input_plan(id, v).secondary_supply.conv);
+        v.extra       = nullptr;
+        v.extra_count = 0;
+    }
+    auto supply    = defs[0];
+    defs[0].offset = 0; // No generic mixed sensor at another coordinate.
+    CHECK(!hydronic_input_plan(id, v).secondary_supply.conv);
+    defs[0] = {0x64, 10, 118, 2, 1, "Mixed water temp."}; // detect-only 0x64/10 never qualifies
+    CHECK(!hydronic_input_plan(id, v).secondary_supply.conv);
+    defs[0]       = supply;
+    defs[0].label = "Other temperature sensor";
+    CHECK(!hydronic_input_plan(id, v).secondary_supply.conv);
+    defs[0]      = supply;
+    v.profile_id = alias;
+    CHECK(!hydronic_input_plan(alias, v).secondary_supply.conv);
+    HydronicInputPlan no_id_plan = plan;
+    fill_secondary_supply_plan(no_id_plan, ProfileView{});
+    CHECK(hydronic_fresh_row(CheckupLocator{}, rows, std::size(rows)) == nullptr);
+    v.profile_id = "auto";
+    CHECK(!hydronic_input_plan("auto", v).schema_fp);
+    Row        plus_rows[] = {{0x65, 4, 105, false, false, "+47.5"},
+                              {0x64, 9, 301, false, false, "1"},
+                              {0x62, 7, 304, false, false, "1"}};
+    const auto plus        = hydronic_collect(plan, plus_rows, std::size(plus_rows), false, false);
+    CHECK(plus.secondary_known && plus.secondary_c == 47.5);
+    plus_rows[0].value = "47.5x";
+    CHECK(!hydronic_collect(plan, plus_rows, std::size(plus_rows), false, false).secondary_known);
+    for (const auto& loc : INSTRUMENT_LOCATORS) {
+        if (loc.id == Instrument::MixedWaterEkmik)
+            CHECK(loc.reg == 0x65 && loc.conv == 105 && (loc.off == 0 || loc.off == 4));
+    }
+}
+
+static void test_secondary_supply_continuity() {
+    auto            s = sample();
+    HydronicTracker t;
+    settle(t, s); // A settled primary side does not settle the secondary circuit.
+    CHECK(t.secondary.samples == 0);
+    s.secondary_known = true;
+    s.secondary_c     = 47.5;
+    for (int64_t now = 601; now <= 1186; now += 15) {
+        CHECK(record(t, s, now * SECOND).accepted);
+        CHECK(t.secondary.samples == 0);
+    }
+    CHECK(record(t, s, 1201 * SECOND - 1).accepted && t.secondary.samples == 0);
+    CHECK(record(t, s, 1201 * SECOND).accepted);
+    CHECK(t.secondary.samples == 1 && t.secondary.sum_milli == -2500);
+    CHECK(t.secondary.duration_us == 0);
+
+    s.secondary_c = 44.25;
+    CHECK(hydronic_record(t, s, 1202 * SECOND, 14 * SECOND, 1, 1, true).accepted);
+    CHECK(t.secondary.samples == 2 && t.secondary.sum_milli == -1750);
+    CHECK(t.secondary.duration_us == SECOND);
+    CHECK(t.secondary.current(1203 * SECOND));
+    CHECK(!t.secondary.current(1203 * SECOND + 1));
+    CHECK(!t.secondary.current(1188 * SECOND - 1));
+    CHECK(!(SecondarySupplyComparison{-1, -1, -1, 0, 0, 1}.current(0)));
+    const auto populated = t;
+
+    {
+        auto saturated_cmp              = populated;
+        saturated_cmp.secondary.samples = UINT32_MAX;
+        CHECK(record(saturated_cmp, s, 1203 * SECOND).accepted);
+        CHECK(saturated_cmp.secondary.samples == UINT32_MAX);
+    }
+
+    // Direct regression control: unknown or non-finite leaving_c must never default to 0 and
+    // fabricate a signed spread.
+    {
+        auto direct_cmp          = populated.secondary;
+        auto no_leaving          = s;
+        no_leaving.leaving_known = false;
+        no_leaving.leaving_c     = 0;
+        hydronic_record_secondary(direct_cmp, no_leaving, true, true, 1203 * SECOND, 0);
+        CHECK(direct_cmp.samples == 0 && direct_cmp.since_us < 0 && direct_cmp.sum_milli == 0);
+
+        direct_cmp            = populated.secondary;
+        auto bad_leaving      = s;
+        bad_leaving.leaving_c = std::numeric_limits<double>::quiet_NaN();
+        hydronic_record_secondary(direct_cmp, bad_leaving, true, true, 1203 * SECOND, 0);
+        CHECK(direct_cmp.samples == 0 && direct_cmp.since_us < 0 && direct_cmp.sum_milli == 0);
+    }
+
+    s.secondary_known = false;
+    CHECK(record(t, s, 1203 * SECOND).accepted);
+    CHECK(t.secondary.samples == 0 && t.secondary.since_us < 0);
+    s.secondary_known = true;
+    CHECK(record(t, s, 1204 * SECOND).accepted && t.secondary.samples == 0);
+    s.secondary_c = 5000;
+    CHECK(record(t, s, 1205 * SECOND).accepted && t.secondary.since_us < 0);
+    s.secondary_c = 47.5;
+
+    t         = populated;
+    s.defrost = HydronicBit::On;
+    CHECK(!record(t, s, 1203 * SECOND).accepted && t.secondary.samples == 0);
+    s.defrost = HydronicBit::Off;
+    t         = populated;
+    hydronic_poll_gap(t);
+    CHECK(t.secondary.samples == 0);
+    t = populated;
+    CHECK(!record(t, s, 1203 * SECOND + HYDRONIC_MAX_GAP_US).accepted);
+    CHECK(t.secondary.samples == 0);
+    t = populated;
+    CHECK(!hydronic_record(t, s, 1203 * SECOND, 0, 2, 1, true).accepted);
+    CHECK(t.secondary.samples == 0);
+    t = populated;
+    CHECK(!hydronic_record(t, s, 1203 * SECOND, 0, 1, 2, false).accepted);
+    CHECK(t.secondary.samples == 0 && t.secondary.since_us < 0);
+    t = populated;
+    CHECK(record(t, s, 1201 * SECOND).reason == HydronicReason::Clock);
+    CHECK(!t.secondary.current(1202 * SECOND));
 }
 
 static void test_hourly_wire_and_population() {
@@ -34052,6 +34226,8 @@ int main() {
     hydronic_host_tests::test_barriers_and_saturation();
     hydronic_host_tests::test_clock_epoch_after_interruptions();
     hydronic_host_tests::test_inputs();
+    hydronic_host_tests::test_secondary_supply_inputs();
+    hydronic_host_tests::test_secondary_supply_continuity();
     test_cycling_run_context();
     test_stop_context();
     test_stop_context_inputs();

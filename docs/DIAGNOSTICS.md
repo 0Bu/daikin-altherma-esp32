@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: f61cd826566b203c151b45846314f33a8c1105d0d36f145f2aa26de635c03728 -->
+<!-- user-docs-contract: b2ad68ec4a6b8ff90680b943a039e95aa4bc1d861132f482b571e71ddf647a0d -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default (`Off`). Under **Settings → Firmware**, choose **X10A** or **Modbus** for
@@ -218,17 +218,21 @@ heating summarize water-temperature spread, flow and commanded pump effort.
 **Meaning:** **MEASURED**. The two observations have separate coverage: minimum flow filters
 pump-off and initial run-up values without retaining the operating mode, while the heating
 statistics show when their readings were collected and how many qualified, remain visible during a
-link interruption, and keep water ranges available when optional pump command is missing. When
+link interruption, and keep water ranges available when optional pump command is missing. With fresh
+readings from a supported mixed heating circuit, the same row can show the average difference
+between the heat-pump supply and the mixed supply, how long they were compared and how many
+readings qualified. A negative difference means the measured mixed supply was warmer. When
 operating solely over Modbus, `flow` stays unavailable on `Altherma4`, `Probing`, or `Fallback`
 sweeps until `/100` HomeHub Input 49 scaling is affirmatively confirmed, and X10A hydronic
-spread/flow/command ranges remain unpopulated.
+spread/flow/command ranges and secondary comparison remain unpopulated.
 
 **Important limit:** Required flow differs by model, heating, cooling, DHW and defrost conditions.
 The minimum does not identify the operating mode or tell you the design flow. The spread concerns
 the heat exchanger's water circuit, the pump percentage reports the controller command, and these
 readings do not measure room emitters, pump speed, or available head. The ten-minute filter does
 not establish steady operation or diagnose a bypass or restriction, and the controller's target
-spread is unavailable.
+spread is unavailable. The optional comparison leaves the reason for mixing open, and estimating
+heat loss requires more measurements.
 
 **Evidence and limits:** [Lowest water flow](DIAGNOSTIC_EVIDENCE.md#diagnosis-flow)
 

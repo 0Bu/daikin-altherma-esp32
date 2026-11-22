@@ -28,6 +28,7 @@
 #include "stop_observation_store.hpp"
 
 #include <cstddef>
+#include <cstdint>
 
 namespace daik {
 
@@ -164,7 +165,14 @@ struct CheckupStopContextReport {
 CheckupStopContextReport checkup_stop_context_report();
 
 struct CheckupHydronicReport {
+    struct SecondarySupply {
+        int64_t               sum_milli   = 0;
+        uint64_t              duration_us = 0;
+        uint32_t              samples     = 0;
+        logic::CheckupLocator source{};
+    };
     HydronicObservationReport observation;
+    SecondarySupply           secondary;
     logic::HydronicReason     reason            = logic::HydronicReason::NoSource;
     uint32_t                  source_generation = 0, schema_fp = 0;
     uint32_t                  settling_remaining_s = 0;

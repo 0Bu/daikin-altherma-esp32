@@ -1645,6 +1645,11 @@ CheckupHydronicReport checkup_hydronic_report() {
                 s_hydronic.last_us >= 0 && now >= s_hydronic.last_us &&
                 now - s_hydronic.last_us <= logic::HYDRONIC_MAX_GAP_US;
     r.limitations = r.current ? s_hydronic_limitations : 0;
+    if (r.current && s_hydronic.secondary.current(now)) {
+        const auto& sample = s_hydronic.secondary;
+        r.secondary        = {sample.sum_milli, sample.duration_us, sample.samples,
+                              s_hydronic_inputs.secondary_supply};
+    }
     if (s_x10a.seal_bucket != INT64_MIN) r.reason = logic::HydronicReason::PollGap;
     if (r.current && r.reason == logic::HydronicReason::Settling &&
         s_hydronic.eligible_since_us >= 0 && now >= s_hydronic.eligible_since_us) {

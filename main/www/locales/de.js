@@ -1,4 +1,4 @@
-// translation-source: 8f61724438aa05c39fd87d41010d01814a248a9d1f18758ce7721d9db606954e
+// translation-source: d246ab37989033acccc61553571267bd477b8c1b2151bfc0c3471de471a873b4
 I18N.de = localeValues([
   /* sys.nodata */ "Keine Daten",
   /* sys.unreachable */ "Nicht erreichbar",
@@ -323,6 +323,7 @@ I18N.de = localeValues([
   /* check.hydronic.counts */ (w, c) => `Wasserwerte ${w} · Ansteuerungswerte ${c}`,
   /* check.hydronic.states */ "Quelle nicht bestätigt|Datiert|Undatiert|24-Stunden-Abdeckung unvollständig|Speicherung ausstehend|Zählergrenze erreicht: Untergrenzen",
   /* check.hydronic.loss */ (n) => `Speicherverlustmeldungen ${n}`,
+  /* check.hydronic.secondary */ (d, s, n) => `Vorlauftemperaturdifferenz (Wärmepumpe minus Mischkreis): ${d} · ${s} · Messwerte: ${n}. Mischzweck unbekannt; Wärmeverlust braucht mehr Daten.`,
   /* service.metric.range */ (a, b, c, d) => `min. ${a} · Mittel ${b} · max. ${c} ${d}`,
   /* service.metric.samples */ n => `${n} ${n === 1 ? "berücksichtigter Messwert" : "berücksichtigte Messwerte"}`,
   /* service.metric.input_none */ "Kein gewählter Eingang",
