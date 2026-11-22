@@ -1,4 +1,4 @@
-// translation-source: 8f61724438aa05c39fd87d41010d01814a248a9d1f18758ce7721d9db606954e
+// translation-source: d246ab37989033acccc61553571267bd477b8c1b2151bfc0c3471de471a873b4
 I18N.ja = localeValues([
   /* sys.nodata */ "データなし",
   /* sys.unreachable */ "接続不可",
@@ -323,6 +323,7 @@ I18N.ja = localeValues([
   /* check.hydronic.counts */ (w, c) => `水側読取 ${w} · 指令読取 ${c}`,
   /* check.hydronic.states */ "データ源未確認|日時あり|日時なし|24時間の一部のみ|保存待ち|カウンター上限到達：下限値",
   /* check.hydronic.loss */ (n) => `保存時の欠損報告 ${n} 件`,
+  /* check.hydronic.secondary */ (d, s, n) => `往き水温差（ヒートポンプ − 混合回路）：${d} · ${s} · 測定${n}回。混合目的は不明、熱損失には追加測定が必要です。`,
   /* service.metric.range */ (a, b, c, d) => `最小 ${a} · 平均 ${b} · 最大 ${c} ${d}`,
   /* service.metric.samples */ n => `採用した測定値 ${n} 件`,
   /* service.metric.input_none */ "選択された入力なし",

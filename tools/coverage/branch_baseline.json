@@ -2221,6 +2221,27 @@
       },
       "test_source_sha256": "40065cf3c39cfd59e3eb4fbbcba5931795cfdf6aecee6e6b40d66b027615bde9",
       "validation_boundary": "Host and container compilers exercised synthetic inputs; hosted gcc-15-github-linux-ubuntu26 CI confirmation remains separate."
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple Clang 17, arm64",
+        "gcc-13-linux-ubuntu24": "Ubuntu GCC 13.3, pinned ESP-IDF v6.1.1 Docker, aarch64",
+        "gcc-15-github-linux-ubuntu26": "Ubuntu GCC 15.2, Docker, x86-64"
+      },
+      "hosted_confirmation": "Measured locally across Apple Clang 17 arm64 (98.39%, 13698/13922 across 124 files), ESP-IDF v6.1.1 Docker GCC 13.3 aarch64, and Ubuntu 26.04 GCC 15.2 x86-64 Docker (97.23%, 12725/13087 across 124 files); hosted GitHub CI and aarch64 gcc-15-linux-ubuntu26 confirmation remain separate.",
+      "measurement_limits": [
+        "gcc-15-linux-ubuntu26 (aarch64) remains unchanged pending an arm64 Ubuntu 26.04 GCC 15 container run."
+      ],
+      "runner": "scripts/run-mock-tests.sh --coverage on Darwin, ESP-IDF Docker, and Ubuntu 26.04 Coverage Docker",
+      "scope": "Qualified primary-to-secondary supply-temperature difference (hydronic_input.hpp: 118/122->139/142 Clang 17, 158/174->180/196 GCC 13/15; hydronic_observation.hpp: 161/162->187/188 Clang 17, 171/172->201/202 GCC 13/15; hydronic_payload.hpp: 72/103->74/105 Clang 17, 176/315->146/253 GCC 13/15; instrument.hpp branch inventory unchanged).",
+      "sources": {
+        "main/logic/hydronic_input.hpp": "fcb5902b1baf62da1ed0156567afb9ad671bc61a409d74bd1dc8db23e7460179",
+        "main/logic/hydronic_observation.hpp": "afffa289bdb099df576b46c1dfbe853e74cdfcd11e3acdf56e79c85dc2e4df33",
+        "main/logic/hydronic_payload.hpp": "9f64ded9f761ce288f559ccd5e0e5cf9ae8c676ef634c690917418e7427d6ba2",
+        "main/logic/instrument.hpp": "53f7609d255872c295a7b6e9310a51546d498b6e8788913912d59b07aac4a020"
+      },
+      "test_source_sha256": "101b5edb6289ba72192532509a936b1bbdd59aa2c9a60770e9abd4f7a81527ed",
+      "validation_boundary": "Host and container compilers exercised synthetic inputs; hosted gcc-15-github-linux-ubuntu26 and aarch64 gcc-15-linux-ubuntu26 confirmation remain separate."
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
@@ -2455,16 +2476,16 @@
         "taken": 152
       },
       "main/logic/hydronic_input.hpp": {
-        "outcomes": 122,
-        "taken": 118
+        "outcomes": 142,
+        "taken": 139
       },
       "main/logic/hydronic_observation.hpp": {
-        "outcomes": 162,
-        "taken": 161
+        "outcomes": 188,
+        "taken": 187
       },
       "main/logic/hydronic_payload.hpp": {
-        "outcomes": 103,
-        "taken": 72
+        "outcomes": 105,
+        "taken": 74
       },
       "main/logic/instrument.hpp": {
         "outcomes": 104,
@@ -2933,16 +2954,16 @@
         "taken": 170
       },
       "main/logic/hydronic_input.hpp": {
-        "outcomes": 174,
-        "taken": 158
+        "outcomes": 196,
+        "taken": 180
       },
       "main/logic/hydronic_observation.hpp": {
-        "outcomes": 172,
-        "taken": 171
+        "outcomes": 202,
+        "taken": 201
       },
       "main/logic/hydronic_payload.hpp": {
-        "outcomes": 315,
-        "taken": 176
+        "outcomes": 253,
+        "taken": 146
       },
       "main/logic/instrument.hpp": {
         "outcomes": 122,
@@ -3411,16 +3432,16 @@
         "taken": 170
       },
       "main/logic/hydronic_input.hpp": {
-        "outcomes": 174,
-        "taken": 158
+        "outcomes": 196,
+        "taken": 180
       },
       "main/logic/hydronic_observation.hpp": {
-        "outcomes": 172,
-        "taken": 171
+        "outcomes": 202,
+        "taken": 201
       },
       "main/logic/hydronic_payload.hpp": {
-        "outcomes": 315,
-        "taken": 176
+        "outcomes": 253,
+        "taken": 146
       },
       "main/logic/instrument.hpp": {
         "outcomes": 122,

@@ -1,4 +1,4 @@
-// translation-source: 8f61724438aa05c39fd87d41010d01814a248a9d1f18758ce7721d9db606954e
+// translation-source: d246ab37989033acccc61553571267bd477b8c1b2151bfc0c3471de471a873b4
 I18N.cs = localeValues([
   /* sys.nodata */ "Žádná data",
   /* sys.unreachable */ "Nedostupné",
@@ -323,6 +323,7 @@ I18N.cs = localeValues([
   /* check.hydronic.counts */ (w, c) => `Údaje vody ${w} · údaje povelu ${c}`,
   /* check.hydronic.states */ "Nepotvrzený zdroj|S datem|Bez data|Neúplných 24 h|Čeká na uložení|Čítače na limitu: dolní meze",
   /* check.hydronic.loss */ (n) => `Hlášení o ztrátě při ukládání ${n}`,
+  /* check.hydronic.secondary */ (d, s, n) => `Rozdíl teplot přívodu (tepelné čerpadlo minus směšovaný okruh): ${d} · ${s} · měření: ${n}. Účel směšování neznámý; tepelná ztráta vyžaduje více dat.`,
   /* service.metric.range */ (a, b, c, d) => `min. ${a} · průměr ${b} · max. ${c} ${d}`,
   /* service.metric.samples */ n => `Počet přijatých odečtů: ${n}`,
   /* service.metric.input_none */ "Žádný zvolený vstup",

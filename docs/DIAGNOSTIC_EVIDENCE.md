@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 1d28ada5211bfe7a5d63432b38895242c0ba2812cd96c06b9a902c3567a3b0fb -->
+<!-- diagnostic-evidence-contract: da72aaffbb53328c47522f1083ae9965c6abcff664c20a99a57f28827fe4bc66 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -504,7 +504,11 @@ exceptions are tied to the listed ERGA04–08E and EHBH/EHBX04–08E models. The
 places R1T at the water outlet of the plate heat exchanger and R4T at its inlet, with R2T after
 the backup heater. The [Altherma 3 M manual, 4P620239-1B, 2022.05][h1-mono-guide], section 11,
 pp. 48–49, establishes the corresponding water-side sensor roles for EBLA09–14D and EDLA09–14D.
-Both editions were checked on 14 November 2026.
+Both editions were checked on 14 November 2026. The [Altherma 3 R MT ECH₂O installer guide,
+4P759885-1C, 2025.11][secondary-supply-guide], section 6.2.3, pp. 47–50, places the EKMIK mixing
+station and its separate pump in the lower-temperature main heating zone. Its layouts include
+systems with and without hydraulic separators. The guide describes the equipment and control
+topology. The X10A input mapping comes from the project catalog.
 
 **Firmware rule:** The row reports the lowest accepted flow after the internal pump ran
 continuously for at least 60 seconds. It assigns no good/bad assessment. On Modbus,
@@ -532,14 +536,27 @@ count. Dated hours use the shared journal with independent method, schema, model
 consent identity. Clock loss and incomplete replay are exposed separately. See [the API
 contract](API.md#qualified-water-circuit-observations).
 
+The optional secondary comparison additionally requires the exact ERRA08–12E + ELSH/X(B) ECH₂O
+profile, an unambiguous publishable EKMIK temperature at `0x65/4` and current main-zone pump
+and external heating-request witnesses in the same sweep. It uses the water-circuit heating
+admission above and 600 seconds of continuous secondary evidence. The sample-weighted mean of
+R1T minus EKMIK retains its sign. Only consecutive accepted endpoints contribute duration.
+An interrupted, paused, clock-reversed or stale run clears the comparison. The HTTP view also
+withholds the comparison when more than 15 seconds have elapsed since the start of the latest
+accepted sweep, and Modbus diagnostics leaves it null. The live comparison adds no journal fields.
+No shipped profile currently provides this complete input set.
+
 **Project boundary:** Sixty seconds, 600 seconds and 15 seconds are project filters. No validated
 active-zone controller target is available in current queryable profiles. No 900-second pattern
-classifier, 9 K alarm or model minimum compressor speed is inferred.
+classifier, 9 K alarm or model minimum compressor speed is inferred. The secondary comparison
+keeps zone intent unknown even where multiple setpoints are visible.
 
 **Not established:** The minimum has no retained operating-mode context and is not a design-flow
 measurement. It cannot be compared generally with a model manual's commissioning minimum or
 identify a hydraulic restriction. The hydronic ranges do not establish steady operation, emitter
-output, bypass, restriction, sensor calibration or available pump head.
+output, bypass, restriction, sensor calibration or available pump head. The secondary temperature
+difference alone establishes neither flow through a separator nor heat lost from a buffer or
+extra electricity use.
 
 <a id="diagnosis-heater"></a>
 ### 7. Electric backup and booster heaters (`heater`)
@@ -722,5 +739,6 @@ prove that a source is technically applicable; that remains the human part of th
 [R2-doi]: https://doi.org/10.1016/j.applthermaleng.2009.01.003
 [stop-guide-de]: https://www.daikin.de/content/dam/document-library/Installer-reference-guide/heat/air-to-water-heat-pump-low-temperature/erga-ev7/EHBH-E%286V.9W%29.EHBX-E%286V.9W%29.ERGA04-08EVA.ERGA-EV%287.H.H7%29_Installer%20reference%20guide_4PDE629085-1E_German.pdf
 [stop-guide-en]: https://www.daikin.eu/content/dam/document-library/Installer-reference-guide/heat/air-to-water-heat-pump-low-temperature/erga-ev7/EHBH-E%286V.9W%29.EHBX-E%286V.9W%29.ERGA04-08EVA.ERGA-EV%287.H.H7%29_Installer%20reference%20guide_4PEN629085-1E_English.pdf
+[secondary-supply-guide]: https://www.daikin.eu/content/dam/document-library/Installer-reference-guide/heat/air-to-water-heat-pump-medium-temperature/elsh-e/ELSH%28B%29-E.ELSX%28B%29-E.ERRA-EV37.ERRA-EW17.ERRA08-12EV3.ERRA08-12EW1_Installer%20reference%20guide_4PEN759885-1C_English.pdf#page=49
 [h1-split-guide]: https://www.daikin.eu/content/dam/document-library/Installer-reference-guide/heat/air-to-water-heat-pump-low-temperature/erga-ev7/EHBH-E%286V.9W%29.EHBX-E%286V.9W%29.ERGA04-08EVA.ERGA-EV%287.H.H7%29_Installer%20reference%20guide_4PEN629085-1E_English.pdf
 [h1-mono-guide]: https://www.daikin.co.uk/content/dam/document-library/installation-manuals/heat/air-to-water-heat-pump-low-temperature/ebla09-14dv3/EB_DLA09-14D3V3_W1_EB_DLA-D3V3_W1_Installation%20manual_4PEN620239-1B_English.pdf

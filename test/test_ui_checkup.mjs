@@ -56,6 +56,7 @@ for (const key of [
   "draw_windows", "pump_windows", "quiet_high_windows",
   "circulation_on_s", "circulation_known_s", "candidate_s", "settle_remaining_s",
   "aborts", "best_aborted_s", "blocked", "abort_reasons",
+  "secondary_supply", "delta_k", "zone_context",
 ]) {
   assert.match(normalizedStatusSource, new RegExp(`"${key}"`),
                `missing /status.health key ${key}`);
@@ -75,17 +76,19 @@ for (const key of [
   "first_evidence_unix_s", "last_evidence_unix_s", "first_accepted_unix_s", "last_accepted_unix_s",
   "target_delta_k", "target_supported",
 ]) {
-  assert.ok(hydronicSource.includes(`key("${key}")`), `missing hydronic serializer key ${key}`);
+  assert.match(hydronicSource,
+               new RegExp(`(?:w\\.(?:flag|u64|sec|ts|key)|\\{)\\s*\\(?\\s*"${key}"`),
+               `missing hydronic serializer key ${key}`);
 }
 assert.match(hydronicSource,
              /const bool\s+known\s*=\s*confirmed\s*&&\s*observation\.dated\s*&&\s*totals\.first_evidence_unix_us\s*>=\s*0;/,
              "hydronic JSON ranges and dates must stay gated on confirmed dated history");
 assert.match(hydronicSource,
-             /range\("spread_k",\s*"spread",\s*"k",\s*totals\.spread,\s*totals\.samples\)/);
+             /w\.range\("spread_k",\s*"spread",\s*"k",\s*totals\.spread,\s*totals\.samples,\s*known\)/);
 assert.match(hydronicSource,
-             /range\("flow_l_min",\s*"flow",\s*"l_min",\s*totals\.flow,\s*totals\.samples\)/);
+             /w\.range\("flow_l_min",\s*"flow",\s*"l_min",\s*totals\.flow,\s*totals\.samples,\s*known\)/);
 assert.match(hydronicSource,
-             /range\("pump_command_pct",\s*"pump_command",\s*"pct",\s*totals\.command,\s*totals\.command_samples\)/);
+             /w\.range\("pump_command_pct",\s*"pump_command",\s*"pct",\s*totals\.command,\s*totals\.command_samples,\s*known\)/);
 assert.match(statusSource, /if\s*\(v\s*<\s*0\)\s*\{\s*j\s*\+=\s*"null";\s*return;\s*\}/,
              "unestablished check numbers must serialize as null");
 assert.match(style, /\.vrow-val\.dim\s*\{[^}]*color:\s*var\(--muted\)/s,
@@ -753,6 +756,22 @@ assert.match(hydroDetail({ qualified_s: 0.000001 }), /0\.000001 s/,
              "microsecond qualified duration must not round down to 0 s");
 assert.match(hydroDetail({ method: 2 }), /Current: Qualification unknown/);
 assert.doesNotMatch(hydroDetail({ method: 2 }), /Water spread:/);
+const secondarySupply = {
+  delta_k: -2.5, duration_s: 15, samples: 4,
+  source: { reg: 0x65, offset: 4, conv: 105 }, zone_context: "unknown",
+};
+const secondaryDetail = (comparison, hydronic = hydronicFlow.hydronic) =>
+  ui.detail({ ...hydronicFlow, hydronic, secondary_supply: comparison });
+assert.match(secondaryDetail(secondarySupply), /Supply temperature difference .* -2\.5 K/);
+assert.match(secondaryDetail({ ...secondarySupply, delta_k: 2.5 }), /Supply temperature difference .* \+2\.5 K/);
+for (const unavailable of [null, { ...secondarySupply, delta_k: null }, { ...secondarySupply, delta_k: NaN },
+  { ...secondarySupply, samples: 0 }, { ...secondarySupply, duration_s: -1 },
+  { ...secondarySupply, zone_context: "other" }])
+  assert.doesNotMatch(secondaryDetail(unavailable), /Supply temperature difference/);
+assert.doesNotMatch(secondaryDetail(secondarySupply, { ...hydronicFlow.hydronic, current: false }),
+  /Supply temperature difference/);
+assert.doesNotMatch(secondaryDetail(secondarySupply, { ...hydronicFlow.hydronic, confirmed: false, current: true }),
+  /Supply temperature difference/);
 for (const bad of [null, undefined, NaN, Infinity, -1, "0"]) {
   const badHtml = hydroDetail({
     samples: bad, command_samples: bad, observed_hours: bad,
@@ -764,6 +783,9 @@ for (const bad of [null, undefined, NaN, Infinity, -1, "0"]) {
 }
 for (const lang of locales) {
   ui.setLang(lang);
+  assert.ok(secondaryDetail(secondarySupply).includes(escapeText(ui.text(lang,
+    "check.hydronic.secondary", (-2.5).toLocaleString(lang) + " K",
+    ui.text(lang, "hist.duration_sec", "15"), "4"))), `${lang}: signed secondary observation`);
   for (let code = 0; code <= 20; code++) {
     const body = hydroDetail({ reason_code: code, reason: "raw_reason_must_not_leak" });
     assert.equal((body.match(/class="vdesc-p"/g) || []).length, 3, `${lang}/H1/${code}`);
@@ -1164,8 +1186,9 @@ context.S.status.health.checks = modbusChecks.map((c) =>
   c.id === "flow" ? { id: "flow", verdict: "unavailable", observed_s: 0, hydronic: hydronicFlow.hydronic } : c);
 cardHtml = ui.card(true);
 assert.ok(!cardHtml.includes("health_flow"), "Altherma 4 Modbus mode must hide unavailable flow row");
-assert.doesNotMatch(ui.detail(hydronicFlow, false, { source: "modbus", source_fresh: true }),
-                    /Water spread:|Pump command:|Evidence dates:|Hourly buckets:/);
+assert.doesNotMatch(ui.detail({ ...hydronicFlow, secondary_supply: secondarySupply }, false,
+                               { source: "modbus", source_fresh: true }),
+                    /Water spread:|Pump command:|Evidence dates:|Hourly buckets:|Supply temperature difference/);
 context.S.status.health.checks = modbusChecks.map((c) =>
   c.id === "flow" ? { id: "flow", verdict: "unavailable", observed_s: 0, hydronic: hydronicFlow.hydronic } : c);
 assert.ok(!ui.card(false).includes("health_flow"),

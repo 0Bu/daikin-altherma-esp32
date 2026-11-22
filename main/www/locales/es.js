@@ -1,4 +1,4 @@
-// translation-source: 8f61724438aa05c39fd87d41010d01814a248a9d1f18758ce7721d9db606954e
+// translation-source: d246ab37989033acccc61553571267bd477b8c1b2151bfc0c3471de471a873b4
 I18N.es = localeValues([
   /* sys.nodata */ "Sin datos",
   /* sys.unreachable */ "No accesible",
@@ -323,6 +323,7 @@ I18N.es = localeValues([
   /* check.hydronic.counts */ (w, c) => `Lecturas de agua ${w} · lecturas de orden ${c}`,
   /* check.hydronic.states */ "Fuente sin confirmar|Con fecha|Sin fecha|24 h incompletas|Almacenamiento pendiente|Contadores saturados: cotas inferiores",
   /* check.hydronic.loss */ (n) => `Avisos de pérdida en el almacenamiento ${n}`,
+  /* check.hydronic.secondary */ (d, s, n) => `Diferencia de impulsión (bomba de calor menos circuito mezclado): ${d} · ${s} · lecturas: ${n}. Motivo de mezcla desconocido; pérdida de calor requiere más datos.`,
   /* service.metric.range */ (a, b, c, d) => `mín. ${a} · media ${b} · máx. ${c} ${d}`,
   /* service.metric.samples */ n => `${n} ${n === 1 ? "lectura admitida" : "lecturas admitidas"}`,
   /* service.metric.input_none */ "Ninguna entrada seleccionada",

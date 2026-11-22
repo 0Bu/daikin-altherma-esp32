@@ -187,6 +187,9 @@ const mutations=[
     before:"append_json_uint(j, source.reg);",after:"append_json_uint(j, source.off);"},
   {name:"refrigerant-selection-from-availability",file:"status",scenario:"refrigerant_selected_unread",
     before:"if (source.selected) {",after:"if (source.selected && metric.available) {"},
+  {name:"stale-secondary-supply",file:"status",scenario:"hydronic_status",
+    before:"!report.current || !secondary.samples || !secondary.source.conv",
+    after:"!secondary.samples || !secondary.source.conv"},
 ];
 try {
   const compiler=execute(cxx,["--version"]).stdout.trim();
@@ -212,6 +215,14 @@ try {
   const roomName='Example sensor Café "quote"\\line\n';
   const stopWires=new Set(["stop-unconfirmed","stop-unreadable","stop-covered-zero",
     "stop-populated","stop-populated-redacted"]);
+  const secondaryWires=new Map([
+    ["secondary-unavailable",null],
+    ["secondary-current",{
+      delta_k:-0.875,duration_s:15.000001,samples:2,
+      source:{reg:101,offset:4,conv:105},zone_context:"unknown",
+    }],
+    ["secondary-expired",null],
+  ]);
   const cyclingWires=new Map([
     ["cycling-partial",{bucket:0,elapsed_s:450,starts:1,run_s:180,observed_s:420,space_s:0,dhw_s:60}],
     ["cycling-edge",{bucket:0,elapsed_s:0,starts:1,run_s:0,observed_s:0}],
@@ -329,6 +340,17 @@ try {
       assert.deepEqual(cycling.hours,[],name);
       assert.equal(cycling.timeline,undefined,name);
       persistUnknownSeen=true;
+    }
+    if(secondaryWires.has(name)) {
+      const flow=doc.health.checks.find(check=>check.id==="flow");
+      assert.equal(doc.health.checks.length,8,name);
+      assert.equal(flow?.min_l_min,6.5,name);
+      assert.deepEqual(flow.secondary_supply,secondaryWires.get(name),name);
+      secondaryWires.delete(name);
+    }
+    if(name==="status-modbus-diagnostics") {
+      const flow=doc.health.checks.find(check=>check.id==="flow");
+      assert.equal(flow?.secondary_supply,null,name);
     }
     if(stopWires.has(name)) {
       const cycling=doc.health.checks.find(check=>check.id==="cycling");
@@ -477,6 +499,7 @@ try {
   assert.equal(persistWires.size,0,"plain, redacted and framed diagnosis snapshots must run");
   assert.ok(persistUnknownSeen,"unreadable diagnosis snapshot must run");
   assert.equal(refrigerantWires.size,0,"all populated, missing, reset and omitted refrigerant wire oracles must run");
+  assert.equal(secondaryWires.size,0,"all secondary-supply wire cases must be present");
   const controls=[];
   if(!process.argv.includes("--no-mutations")) for(const mutation of mutations) {
     const result=execute(compile(mutation.name,mutation),[mutation.scenario],false);

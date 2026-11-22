@@ -1313,7 +1313,8 @@ void hydronic_case(const std::string& name) {
                 "hydronic_optional_command_preserves_joint_thermal_population");
         const auto core = checkup_report();
         require(CHECKUP_CHECK_COUNT == 8 && core[CheckupCheck::Flow].a == 100 &&
-                    core[CheckupCheck::Flow].verdict == CheckupVerdict::Ok,
+                    core[CheckupCheck::Flow].verdict == CheckupVerdict::Ok &&
+                    r.secondary.samples == 0 && !r.secondary.source.conv,
                 "hydronic_preserves_eight_checks_and_old_flow_minimum");
         return;
     }

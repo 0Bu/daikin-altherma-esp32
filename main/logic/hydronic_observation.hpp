@@ -60,6 +60,8 @@ struct HydronicSample {
     HydronicBit  phase[4]       = {}; // restart standby, startup, oil return, pressure equalizing
     bool         command_known  = false;
     double       command_signal = 0; // inverted controller command, never measured speed
+    bool         secondary_known = false;
+    double       secondary_c     = 0;
 };
 
 struct HydronicDecision {
@@ -159,20 +161,53 @@ struct HydronicDelta {
     HydronicReason reason      = HydronicReason::Unsupported;
     uint8_t        limitations = HydronicNoLimitation;
 };
+struct SecondarySupplyComparison {
+    int64_t  since_us = -1, first_accepted_us = -1, latest_sweep_start_us = -1;
+    int64_t  sum_milli   = 0;
+    uint64_t duration_us = 0;
+    uint32_t samples     = 0;
+
+    bool current(int64_t now_us) const {
+        return samples && latest_sweep_start_us >= 0 && now_us >= latest_sweep_start_us &&
+               now_us - latest_sweep_start_us <= HYDRONIC_MAX_GAP_US;
+    }
+};
 struct HydronicTracker {
-    HydronicCounters counters;
-    uint32_t         source_generation = 0, consent_generation = 0;
-    int64_t          last_us = -1, eligible_since_us = -1;
-    int64_t          last_completion_us = -1; // epoch guard survives continuity interruptions
+    HydronicCounters          counters;
+    SecondarySupplyComparison secondary;
+    uint32_t                  source_generation = 0, consent_generation = 0;
+    int64_t                   last_us = -1, eligible_since_us = -1;
+    int64_t        last_completion_us = -1; // epoch guard survives continuity interruptions
     bool           previous_observed = false, previous_eligible = false, previous_qualified = false;
     bool           consent = false, bound = false;
     HydronicReason reason = HydronicReason::Unsupported;
     void           reset_continuity() {
         last_us = eligible_since_us = -1;
         previous_observed = previous_eligible = previous_qualified = false;
+        secondary                                                  = {};
     }
     void reset() { *this = HydronicTracker{}; }
 };
+
+inline void hydronic_record_secondary(SecondarySupplyComparison& comparison,
+                                      const HydronicSample& sample, bool eligible, bool accepted,
+                                      int64_t now_us, int64_t sweep_us) {
+    if (!eligible || !sample.leaving_known || !sample.secondary_known ||
+        !hydronic_temperature_valid(sample.leaving_c) ||
+        !hydronic_temperature_valid(sample.secondary_c)) {
+        comparison = {};
+        return;
+    }
+    if (comparison.since_us < 0) comparison.since_us = now_us;
+    if (!accepted || now_us - comparison.since_us < HYDRONIC_SETTLE_US ||
+        comparison.samples == UINT32_MAX)
+        return;
+    if (comparison.first_accepted_us < 0) comparison.first_accepted_us = now_us;
+    comparison.latest_sweep_start_us = now_us - sweep_us;
+    comparison.duration_us           = static_cast<uint64_t>(now_us - comparison.first_accepted_us);
+    comparison.sum_milli += hydronic_milli(sample.leaving_c - sample.secondary_c);
+    ++comparison.samples;
+}
 
 inline void hydronic_add_time(uint64_t& total, uint64_t delta, bool& saturated) {
     if (delta > UINT64_MAX - total) {
@@ -272,6 +307,7 @@ inline HydronicDelta hydronic_record(HydronicTracker& t, const HydronicSample& s
         t.counters.limitations |= d.limitations;
     } else if (d.eligible)
         out.reason = HydronicReason::Settling;
+    hydronic_record_secondary(t.secondary, s, d.eligible, out.accepted, now_us, sweep_us);
     if (barrier != HydronicReason::None) out.reason = barrier;
     if (t.counters.saturated) {
         out.limitations |= HydronicCounterSaturated;

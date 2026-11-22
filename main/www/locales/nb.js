@@ -1,4 +1,4 @@
-// translation-source: 8f61724438aa05c39fd87d41010d01814a248a9d1f18758ce7721d9db606954e
+// translation-source: d246ab37989033acccc61553571267bd477b8c1b2151bfc0c3471de471a873b4
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -323,6 +323,7 @@ I18N.nb = localeValues([
   /* check.hydronic.counts */ (w, c) => `Vannavlesninger ${w} · kommandoavlesninger ${c}`,
   /* check.hydronic.states */ "Ubekreftet kilde|Datert|Udatert|Ufullstendige 24 t|Venter på lagring|Tellergrense nådd: nedre grenser",
   /* check.hydronic.loss */ (n) => `Meldinger om lagringstap ${n}`,
+  /* check.hydronic.secondary */ (d, s, n) => `Turtemperaturforskjell (varmepumpe minus blandekrets): ${d} · ${s} · målinger: ${n}. Blandeformål ukjent; varmetap krever flere målinger.`,
   /* service.metric.range */ (a, b, c, d) => `min. ${a} · snitt ${b} · maks. ${c} ${d}`,
   /* service.metric.samples */ n => `${n} ${n === 1 ? "inkludert måling" : "inkluderte målinger"}`,
   /* service.metric.input_none */ "Ingen valgt inngang",

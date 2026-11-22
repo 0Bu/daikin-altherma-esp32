@@ -459,6 +459,7 @@ const I18N = {
     "check.hydronic.counts": (w, c) => `Water readings ${w} · command readings ${c}`,
     "check.hydronic.states": "Unconfirmed source|Dated|Undated|Partial 24 h|Storage pending|Saturated: lower bounds",
     "check.hydronic.loss": (n) => `Storage loss notices ${n}`,
+    "check.hydronic.secondary": (d, s, n) => `Supply temperature difference (heat pump minus mixed circuit): ${d} · ${s} · readings: ${n}. Mixing purpose unknown; heat loss needs more data.`,
     "service.metric.range": (a, b, c, d) => `min ${a} · mean ${b} · max ${c} ${d}`,
     "service.metric.samples": (n) => `${n} accepted ${n === 1 ? "reading" : "readings"}`,
     "service.metric.input_none": "No selected input",
