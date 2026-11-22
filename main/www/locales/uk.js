@@ -1,4 +1,4 @@
-// translation-source: 8f61724438aa05c39fd87d41010d01814a248a9d1f18758ce7721d9db606954e
+// translation-source: d246ab37989033acccc61553571267bd477b8c1b2151bfc0c3471de471a873b4
 I18N.uk = localeValues([
   /* sys.nodata */ "Немає даних",
   /* sys.unreachable */ "Недоступно",
@@ -323,6 +323,7 @@ I18N.uk = localeValues([
   /* check.hydronic.counts */ (w, c) => `Покази води ${w} · покази команди ${c}`,
   /* check.hydronic.states */ "Джерело не підтверджено|З датою|Без дати|Неповні 24 год|Очікує на збереження|Лічильники насичені: нижні межі",
   /* check.hydronic.loss */ (n) => `Повідомлення про втрати під час збереження ${n}`,
+  /* check.hydronic.secondary */ (d, s, n) => `Різниця подачі (тепловий насос мінус змішаний контур): ${d} · ${s} · вимірювань: ${n}. Мета змішування невідома; тепловтрати потребують більше даних.`,
   /* service.metric.range */ (a, b, c, d) => `мін. ${a} · середнє ${b} · макс. ${c} ${d}`,
   /* service.metric.samples */ n => `Кількість прийнятих показів: ${n}`,
   /* service.metric.input_none */ "Вхід не вибрано",

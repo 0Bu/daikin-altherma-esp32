@@ -1,4 +1,4 @@
-// translation-source: 8f61724438aa05c39fd87d41010d01814a248a9d1f18758ce7721d9db606954e
+// translation-source: d246ab37989033acccc61553571267bd477b8c1b2151bfc0c3471de471a873b4
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -323,6 +323,7 @@ I18N.fi = localeValues([
   /* check.hydronic.counts */ (w, c) => `Vesilukemia ${w} · ohjauslukemia ${c}`,
   /* check.hydronic.states */ "Lähdettä ei vahvistettu|Aikaleima tiedossa|Aikaleima puuttuu|Vajaa 24 h|Tallennus odottaa|Laskurit täynnä: alarajat",
   /* check.hydronic.loss */ (n) => `Tallennushäviöilmoitukset ${n}`,
+  /* check.hydronic.secondary */ (d, s, n) => `Menoveden lämpötilaero (lämpöpumppu miinus sekoituspiiri): ${d} · ${s} · lukemia: ${n}. Sekoituksen syy tuntematon; lämpöhäviö vaatii lisää mittauksia.`,
   /* service.metric.range */ (a, b, c, d) => `min. ${a} · keskiarvo ${b} · maks. ${c} ${d}`,
   /* service.metric.samples */ n => `Hyväksyttyjä lukemia: ${n}`,
   /* service.metric.input_none */ "Ei valittua tuloa",

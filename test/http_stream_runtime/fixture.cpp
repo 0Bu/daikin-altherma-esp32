@@ -1388,7 +1388,9 @@ int main(int argc, char** argv) {
         hydronic_report.observation.totals.samples                = 2;
         hydronic_report.observation.totals.first_evidence_unix_us = 2000000000000000;
         hydronic_report.observation.totals.spread                 = {6500, 3000, 3500};
-        const unsigned before_stop_calls                          = stop_report_calls;
+        hydronic_report.current                                   = true;
+        hydronic_report.secondary        = {-1750, 15000001, 2, {0x65, 4, 105}};
+        const unsigned before_stop_calls = stop_report_calls;
         const unsigned before_hydronic_calls                      = hydronic_report_calls;
         auto           req                                        = request();
         check(invoke(req, "/status", daik::h_status) == ESP_OK, "modbus diagnostics status failed");
@@ -1417,7 +1419,8 @@ int main(int argc, char** argv) {
                 in_hydronic("\"coverage_partial\":false") &&
                 in_hydronic("\"restore_pending\":false") &&
                 in_hydronic("\"reason_code\":0,\"reason\":\"none\"") &&
-                in_hydronic("\"spread_k\":{\"min\":null,\"mean\":null,\"max\":null}"),
+                in_hydronic("\"spread_k\":{\"min\":null,\"mean\":null,\"max\":null}") &&
+                req.response.find("\"secondary_supply\":null", hydronic_end) != std::string::npos,
             "status payload missing modbus diagnostics provenance or empty stop_context/hydronic");
     });
     run("hydronic_status", [] {
@@ -1447,7 +1450,34 @@ int main(int argc, char** argv) {
                       "\"pump_command_pct\":{\"min\":null,\"mean\":null,\"max\":null}") !=
                       std::string::npos,
                   "unreadable optional command must remain null");
+            check(req.response.find("\"secondary_supply\":null") != std::string::npos,
+                  "an unqualified secondary circuit must remain null");
+            if (dated) emit(req, "secondary-unavailable");
         }
+        hydronic_report.observation.totals.spread = {-3, -2, -1};
+        hydronic_report.current                   = true;
+        hydronic_report.secondary                 = {-1750, 15000001, 2, {0x65, 4, 105}};
+        auto req                                  = request();
+        check(invoke(req, "/status", daik::h_status) == ESP_OK,
+              "signed water-circuit status failed");
+        successful(req);
+        check(req.response.find("\"spread_k\":{\"min\":-0.002,\"mean\":-0.002,\"max\":-0.001}") !=
+                  std::string::npos,
+              "a negative half milli must round away from zero");
+        check(req.response.find(
+                  "\"secondary_supply\":{\"delta_k\":-0.875,\"duration_s\":15.000001,\"samples\":2,"
+                  "\"source\":{\"reg\":101,\"offset\":4,\"conv\":105},\"zone_context\":"
+                  "\"unknown\"}") != std::string::npos,
+              "the signed secondary comparison must remain a distinct observation");
+        emit(req, "secondary-current");
+        hydronic_report.current = false;
+        auto expired            = request();
+        check(invoke(expired, "/status", daik::h_status) == ESP_OK,
+              "expired secondary status failed");
+        successful(expired);
+        check(expired.response.find("\"secondary_supply\":null") != std::string::npos,
+              "a stale run must not publish its comparison");
+        emit(expired, "secondary-expired");
     });
     run("status_fault_timeline", [] {
         current.diagnostics_enabled = true;

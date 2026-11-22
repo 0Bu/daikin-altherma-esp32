@@ -62,7 +62,8 @@ inline const char* hydronic_reason_id(logic::HydronicReason reason) {
 }
 
 template <typename JsonOut>
-inline void hydronic_json_unsigned(JsonOut& out, uint64_t value, bool known = true) {
+__attribute__((noinline)) inline void hydronic_json_unsigned(JsonOut& out, uint64_t value,
+                                                             bool known = true) {
     if (!known) {
         out += "null";
         return;
@@ -77,7 +78,8 @@ inline void hydronic_json_unsigned(JsonOut& out, uint64_t value, bool known = tr
 }
 
 template <typename JsonOut>
-inline void hydronic_json_decimal(JsonOut& out, int64_t sum_milli, uint64_t count, bool known) {
+__attribute__((noinline)) inline void hydronic_json_decimal(JsonOut& out, int64_t sum_milli,
+                                                            uint64_t count, bool known) {
     if (!known || !count) {
         out += "null";
         return;
@@ -100,7 +102,8 @@ inline void hydronic_json_decimal(JsonOut& out, int64_t sum_milli, uint64_t coun
 }
 
 template <typename JsonOut>
-inline void hydronic_json_seconds(JsonOut& out, uint64_t micros, bool known) {
+__attribute__((noinline)) inline void hydronic_json_seconds(JsonOut& out, uint64_t micros,
+                                                            bool known) {
     hydronic_json_unsigned(out, micros / 1000000, known);
     if (!known || micros % 1000000 == 0) return;
     uint32_t remainder = static_cast<uint32_t>(micros % 1000000);
@@ -118,16 +121,13 @@ inline void hydronic_json_seconds(JsonOut& out, uint64_t micros, bool known) {
 // HTTP owns one object. Flat MQTT appends comma-prefixed hydronic_* members to an existing
 // object, as append_stop_context_json does. Both projections share every numeric/known gate.
 namespace detail {
-template <typename Report>
-__attribute__((noinline)) inline void append_hydronic_json_impl(JsonOutput&   out,
-                                                                const Report& report, bool flat) {
-    const auto& observation = report.observation;
-    const auto& totals      = observation.totals;
-    const bool  confirmed   = observation.confirmed;
-    const bool  known       = confirmed && observation.dated && totals.first_evidence_unix_us >= 0;
-    bool        first       = true;
-    const auto  key         = [&](const char* name, const char* metric = nullptr,
-                         const char* unit = nullptr) {
+struct HydronicJsonWriter {
+    JsonOutput& out;
+    bool        flat;
+    bool        first = true;
+
+    [[gnu::noinline]] void key(const char* name, const char* metric = nullptr,
+                               const char* unit = nullptr) {
         if (flat || !first) out += ",";
         first = false;
         out += "\"";
@@ -142,16 +142,26 @@ __attribute__((noinline)) inline void append_hydronic_json_impl(JsonOutput&   ou
             out += unit;
         }
         out += "\":";
-    };
-    const auto flag = [&](bool value, bool present = true) {
+    }
+    [[gnu::noinline]] void flag(const char* name, bool value, bool present = true) {
+        key(name);
         out += !present ? "null" : flat ? (value ? "1" : "0") : (value ? "true" : "false");
-    };
-    const auto timestamp = [&](int64_t unix_us, bool present) {
+    }
+    [[gnu::noinline]] void u64(const char* name, uint64_t value, bool known = true) {
+        key(name);
+        hydronic_json_unsigned(out, value, known);
+    }
+    [[gnu::noinline]] void sec(const char* name, uint64_t micros, bool known) {
+        key(name);
+        hydronic_json_seconds(out, micros, known);
+    }
+    [[gnu::noinline]] void ts(const char* name, int64_t unix_us, bool present) {
+        key(name);
         hydronic_json_unsigned(out, unix_us >= 0 ? static_cast<uint64_t>(unix_us) / 1000000 : 0,
                                present && unix_us >= 0);
-    };
-    const auto range = [&](const char* nested_name, const char* metric, const char* unit,
-                           const logic::HydronicRange& values, uint64_t count) {
+    }
+    [[gnu::noinline]] void range(const char* nested_name, const char* metric, const char* unit,
+                                 const logic::HydronicRange& values, uint64_t count, bool known) {
         const bool present = known && count > 0;
         if (flat)
             key("min", metric, unit);
@@ -171,87 +181,75 @@ __attribute__((noinline)) inline void append_hydronic_json_impl(JsonOutput&   ou
             out += ",\"max\":";
         hydronic_json_decimal(out, values.max_milli, 1, present);
         if (!flat) out += "}";
-    };
+    }
+};
+
+template <typename Report>
+__attribute__((noinline)) inline void append_hydronic_json_impl(JsonOutput&   out,
+                                                                const Report& report, bool flat) {
+    const auto&        observation = report.observation;
+    const auto&        totals      = observation.totals;
+    const bool         confirmed   = observation.confirmed;
+    const bool         known = confirmed && observation.dated && totals.first_evidence_unix_us >= 0;
+    HydronicJsonWriter w{out, flat};
 
     if (!flat) out += "{";
-    key("confirmed");
-    flag(confirmed);
-    key("current");
-    flag(report.current);
-    key("dated");
-    flag(observation.dated);
-    key("coverage_partial");
-    flag(observation.partial);
-    key("restore_pending");
-    flag(observation.restore_pending);
-    key("persistence_pending");
-    flag(observation.persistence_pending);
-    key("dropped");
-    hydronic_json_unsigned(out, observation.dropped, confirmed);
-    key("observed_hours");
-    hydronic_json_unsigned(out, observation.observed_hours, confirmed);
-    key("method");
-    hydronic_json_unsigned(out, logic::HYDRONIC_METHOD);
-    key("window_s");
-    hydronic_json_unsigned(out, logic::OBSERVATION_DAY_US / 1000000);
-    key("settling_s");
-    hydronic_json_unsigned(out, logic::HYDRONIC_SETTLE_US / 1000000);
-    key("max_gap_s");
-    hydronic_json_unsigned(out, logic::HYDRONIC_MAX_GAP_US / 1000000);
-    key("reason_code");
-    hydronic_json_unsigned(out, static_cast<uint8_t>(report.reason));
+    w.flag("confirmed", confirmed);
+    w.flag("current", report.current);
+    w.flag("dated", observation.dated);
+    w.flag("coverage_partial", observation.partial);
+    w.flag("restore_pending", observation.restore_pending);
+    w.flag("persistence_pending", observation.persistence_pending);
+    w.u64("dropped", observation.dropped, confirmed);
+    w.u64("observed_hours", observation.observed_hours, confirmed);
+    static constexpr struct {
+        const char* name;
+        uint64_t    value;
+    } kConstants[4] = {
+        {"method", logic::HYDRONIC_METHOD},
+        {"window_s", logic::OBSERVATION_DAY_US / 1000000},
+        {"settling_s", logic::HYDRONIC_SETTLE_US / 1000000},
+        {"max_gap_s", logic::HYDRONIC_MAX_GAP_US / 1000000},
+    };
+    for (const auto& c : kConstants) w.u64(c.name, c.value);
+    w.u64("reason_code", static_cast<uint8_t>(report.reason));
     if (!flat) {
-        key("reason");
+        w.key("reason");
         out += "\"";
         out += hydronic_reason_id(report.reason);
         out += "\"";
-        key("scope");
+        w.key("scope");
         out += "\"unit_water_heat_exchanger\"";
-        key("weighting");
+        w.key("weighting");
         out += "\"sample\"";
     }
     const bool settling_known = report.current &&
                                 report.reason == logic::HydronicReason::Settling &&
                                 report.settling_remaining_s > 0 &&
                                 report.settling_remaining_s <= logic::HYDRONIC_SETTLE_US / 1000000;
-    key("settling_remaining_s");
-    hydronic_json_unsigned(out, report.settling_remaining_s, settling_known);
-    key("source_generation");
-    hydronic_json_unsigned(out, report.source_generation,
-                           confirmed && report.source_generation != 0);
-    key("schema_fp");
-    hydronic_json_unsigned(out, report.schema_fp, confirmed && report.schema_fp != 0);
-    key("current_limitations_mask");
-    hydronic_json_unsigned(out, report.limitations, report.current);
-    key("population_limitations_mask");
-    hydronic_json_unsigned(out, totals.limitations, known);
-    key("population_saturated");
-    flag(totals.saturated, known);
-    key("observed_s");
-    hydronic_json_seconds(out, totals.observed_us, known);
-    key("candidate_s");
-    hydronic_json_seconds(out, totals.candidate_us, known);
-    key("qualified_s");
-    hydronic_json_seconds(out, totals.qualified_us, known);
-    key("samples");
-    hydronic_json_unsigned(out, totals.samples, known);
-    key("command_samples");
-    hydronic_json_unsigned(out, totals.command_samples, known);
-    key("first_evidence_unix_s");
-    timestamp(totals.first_evidence_unix_us, known);
-    key("last_evidence_unix_s");
-    timestamp(totals.last_evidence_unix_us, known);
-    key("first_accepted_unix_s");
-    timestamp(totals.first_accepted_unix_us, known && totals.samples > 0);
-    key("last_accepted_unix_s");
-    timestamp(totals.last_accepted_unix_us, known && totals.samples > 0);
-    range("spread_k", "spread", "k", totals.spread, totals.samples);
-    range("flow_l_min", "flow", "l_min", totals.flow, totals.samples);
-    range("pump_command_pct", "pump_command", "pct", totals.command, totals.command_samples);
-    key("target_delta_k");
+    w.u64("settling_remaining_s", report.settling_remaining_s, settling_known);
+    w.u64("source_generation", report.source_generation,
+          confirmed && report.source_generation != 0);
+    w.u64("schema_fp", report.schema_fp, confirmed && report.schema_fp != 0);
+    w.u64("current_limitations_mask", report.limitations, report.current);
+    w.u64("population_limitations_mask", totals.limitations, known);
+    w.flag("population_saturated", totals.saturated, known);
+    w.sec("observed_s", totals.observed_us, known);
+    w.sec("candidate_s", totals.candidate_us, known);
+    w.sec("qualified_s", totals.qualified_us, known);
+    w.u64("samples", totals.samples, known);
+    w.u64("command_samples", totals.command_samples, known);
+    w.ts("first_evidence_unix_s", totals.first_evidence_unix_us, known);
+    w.ts("last_evidence_unix_s", totals.last_evidence_unix_us, known);
+    w.ts("first_accepted_unix_s", totals.first_accepted_unix_us, known && totals.samples > 0);
+    w.ts("last_accepted_unix_s", totals.last_accepted_unix_us, known && totals.samples > 0);
+    w.range("spread_k", "spread", "k", totals.spread, totals.samples, known);
+    w.range("flow_l_min", "flow", "l_min", totals.flow, totals.samples, known);
+    w.range("pump_command_pct", "pump_command", "pct", totals.command, totals.command_samples,
+            known);
+    w.key("target_delta_k");
     out += "null";
-    key("target_supported");
-    flag(false);
+    w.flag("target_supported", false);
     if (!flat) out += "}";
 }
 

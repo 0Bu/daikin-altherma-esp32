@@ -1,4 +1,4 @@
-"""Exact, complete ELF-body decoding for seven reviewed local HTTP/config functions.
+"""Exact, complete ELF-body decoding for ten reviewed local HTTP/config functions.
 
 The main checker supplies its existing gap-free raw decoder and BudgetError.  This module adds
 no wildcard packed exception: the nm/ELF names, local function binding and display names below
@@ -18,6 +18,9 @@ _RAW_NAMES = {
     "_ZN4daikL20read_config_documentEP9httpd_reqjRPKc$constprop$0":
         "_ZN4daikL20read_config_documentEP9httpd_reqjRPKc$constprop$0",
     "daik::set_wifi(httpd_req*)": "_ZN4daikL8set_wifiEP9httpd_req",
+    "daik::set_hp(httpd_req*)": "_ZN4daikL6set_hpEP9httpd_req",
+    "daik::set_ntp(httpd_req*)": "_ZN4daikL7set_ntpEP9httpd_req",
+    "daik::set_syslog(httpd_req*)": "_ZN4daikL10set_syslogEP9httpd_req",
     "daik::parse_circulation_request(httpd_req*, daik::CirculationRequest&)":
         "_ZN4daikL25parse_circulation_requestEP9httpd_reqRNS_18CirculationRequestE",
     "daik::set_weather(httpd_req*)": "_ZN4daikL11set_weatherEP9httpd_req",

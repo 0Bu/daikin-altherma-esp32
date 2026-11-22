@@ -1,4 +1,4 @@
-// translation-source: 8f61724438aa05c39fd87d41010d01814a248a9d1f18758ce7721d9db606954e
+// translation-source: d246ab37989033acccc61553571267bd477b8c1b2151bfc0c3471de471a873b4
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
@@ -323,6 +323,7 @@ I18N.zh = localeValues([
   /* check.hydronic.counts */ (w, c) => `水侧读数 ${w} · 指令读数 ${c}`,
   /* check.hydronic.states */ "来源未确认|有时间戳|无时间戳|24 小时覆盖不完整|等待保存|计数器已达上限：显示下限",
   /* check.hydronic.loss */ (n) => `存储丢失报告 ${n} 次`,
+  /* check.hydronic.secondary */ (d, s, n) => `供水温差（热泵减混水）：${d} · ${s} · 读数${n}次。混水目的未知，热损失需更多测量。`,
   /* service.metric.range */ (a, b, c, d) => `最小 ${a} · 平均 ${b} · 最大 ${c} ${d}`,
   /* service.metric.samples */ n => `已纳入读数：${n}`,
   /* service.metric.input_none */ "未选定输入",

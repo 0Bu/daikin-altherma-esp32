@@ -109,6 +109,8 @@ enum class Instrument : uint8_t {
     PowerLimit2,
     PowerLimit3,
     PowerLimit4,
+    MainZonePump,
+    MainZoneRoomHeatingInput,
     Count
 };
 
@@ -207,6 +209,9 @@ inline constexpr InstrumentLocator INSTRUMENT_LOCATORS[] = {
     {Instrument::PowerLimit2, 0x62, 7, 301, InstrumentIdentity::Coordinate, nullptr, nullptr},
     {Instrument::PowerLimit3, 0x62, 7, 302, InstrumentIdentity::Coordinate, nullptr, nullptr},
     {Instrument::PowerLimit4, 0x62, 7, 303, InstrumentIdentity::Coordinate, nullptr, nullptr},
+    {Instrument::MainZonePump, 0x64, 9, 301, InstrumentIdentity::LabelToken, "main pump", nullptr},
+    {Instrument::MainZoneRoomHeatingInput, 0x62, 7, 304, InstrumentIdentity::LabelToken,
+     "main rt heating", nullptr},
 };
 
 // Stable identifiers for tests and documentation; never shown to users. In enum order, which the
@@ -270,6 +275,8 @@ inline constexpr InstrumentName INSTRUMENT_NAMES[] = {
     {Instrument::PowerLimit2, "power_limit_2"},
     {Instrument::PowerLimit3, "power_limit_3"},
     {Instrument::PowerLimit4, "power_limit_4"},
+    {Instrument::MainZonePump, "main_zone_pump"},
+    {Instrument::MainZoneRoomHeatingInput, "main_zone_room_heating_input"},
 };
 
 inline constexpr bool instrument_names_in_enum_order() {

@@ -1,4 +1,4 @@
-// translation-source: 8f61724438aa05c39fd87d41010d01814a248a9d1f18758ce7721d9db606954e
+// translation-source: d246ab37989033acccc61553571267bd477b8c1b2151bfc0c3471de471a873b4
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -323,6 +323,7 @@ I18N.sv = localeValues([
   /* check.hydronic.counts */ (w, c) => `Vattenavläsningar ${w} · kommandoavläsningar ${c}`,
   /* check.hydronic.states */ "Obekräftad källa|Daterad|Odaterad|Ofullständiga 24 h|Väntar på lagring|Räknare mättade: undre gränser",
   /* check.hydronic.loss */ (n) => `Rapporter om lagringsförlust ${n}`,
+  /* check.hydronic.secondary */ (d, s, n) => `Framledningsskillnad (värmepump minus blandad krets): ${d} · ${s} · mätvärden: ${n}. Blandningssyfte okänt; värmeförlust kräver fler mätvärden.`,
   /* service.metric.range */ (a, b, c, d) => `min. ${a} · medel ${b} · max. ${c} ${d}`,
   /* service.metric.samples */ n => `${n} ${n === 1 ? "inkluderad avläsning" : "inkluderade avläsningar"}`,
   /* service.metric.input_none */ "Ingen vald ingång",

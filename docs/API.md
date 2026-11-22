@@ -251,8 +251,8 @@ withholds current fault-clear/current pressure and reassuring assessments; dated
 The serializer captures `health.persist`, the judged window and Cycling hours together.
 In `"modbus"` mode, `defrost`, `pressure`, `retries`, and (on Altherma 4, `Probing`, or `Fallback`
 sweeps where Input 49 scaling is unverified) `flow` report `unavailable` (`checkup_modbus_coverage`),
-and both `cycling.stop_context` and `flow.hydronic` emit placeholder `confirmed:false` objects
-(`dated:false`, `reason_code:0`, null metrics); independently collected Stop and Hydronic
+and `cycling.stop_context`, `flow.hydronic` emit placeholder `confirmed:false` objects
+(`dated:false`, `reason_code:0`, null metrics) while `flow.secondary_supply` stays null; independently collected Stop and Hydronic
 observations remain X10A-only.
 `health.persist:"flash_pending"` means flash recovery has yet to establish whether compatible
 hours exist. It can wait for clock or source confirmation. A replay read error is logged and
@@ -273,7 +273,7 @@ evidence is a measurement, not a good/bad assessment. The reading order and main
 | `cycling` | `starts`, `mean_run_s`, `space_runs`, `space_mean_run_s`, `dhw_runs`, `dhw_mean_run_s`, `cooling_runs`, `censored_runs`, `censored_transition_runs`, `censored_handover_runs`, `censored_unreadable_runs`, `censored_restart_runs`, `censored_start_runs`, `classified_runtime_s`, `censored_runtime_s`, `runtime_saturated`, `split`, `hours`, `outdoor_source`, `outdoor_min_c`, `outdoor_mean_c`, `outdoor_samples`, optional `timeline`, optional `run_contexts`, optional `flow_typical_l_min`, `stop_context` |
 | `defrost` | `count`, `share_pct`, `paired_count`, `defrost_s`, `run_s`, `outdoor_source`, `outdoor_min_c`, `outdoor_mean_c`, `outdoor_samples`, `last_observed_start` |
 | `pressure` | `min_bar`, `current_bar`, `min_unix_s`, `confirmed_low`, `confirmed_critical` |
-| `flow` | `min_l_min`, independent `hydronic` observation |
+| `flow` | `min_l_min`, independent `hydronic` and optional `secondary_supply` observations |
 | `heater` | `buh_min`, `bsh_min`, `buh_s`, `bsh_s`, `buh_observed_s`, `bsh_observed_s` |
 | `retries` | `seen` |
 
@@ -495,8 +495,26 @@ circuit. The ranges use `weighting: "sample"`.
 
 Durations and counts are null until evidence is dated and its source is confirmed. Once dated,
 a population can have zero qualified samples and null ranges. Modbus diagnostics leaves `flow.hydronic`
-unpopulated (`confirmed:false`, `dated:false`, `reason_code:0`, null metrics). See the
+unpopulated (`confirmed:false`, `dated:false`, `reason_code:0`, null metrics) and
+`flow.secondary_supply` null. See the
 [flow evidence ledger](DIAGNOSTIC_EVIDENCE.md#diagnosis-flow) for the admission rules.
+
+### Secondary supply-temperature comparison
+
+`flow.secondary_supply` is null until an uninterrupted heating run qualifies. The same completed
+X10A sweep must contain the two temperatures, an active pump for the mixed main zone and that
+zone's active external heating request. Both the water-circuit admission and 600 seconds of
+continuous secondary evidence are required. A missing or stale witness, source change, diagnostic
+pause or restart clears the run. The comparison is withheld whenever the start of the latest
+accepted sweep is more than 15 seconds old, and Modbus diagnostics always leaves it null. No shipped
+profile currently supplies the complete input set.
+
+When available, `delta_k` is the sample-weighted mean of the signed primary supply temperature
+before the electric backup heater (R1T) minus the mixed main-zone supply temperature (EKMIK).
+`duration_s` counts seconds between accepted endpoints and `samples` counts accepted pairs.
+`source` holds the secondary X10A locator (`reg`, `offset`, `conv`). `zone_context` is
+`"unknown"`. The comparison is live and RAM-only. It leaves the flow verdict and minimum
+independent. See the [flow evidence ledger](DIAGNOSTIC_EVIDENCE.md#diagnosis-flow).
 
 ### Refrigerant observation
 

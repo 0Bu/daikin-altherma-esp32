@@ -1,4 +1,4 @@
-// translation-source: 8f61724438aa05c39fd87d41010d01814a248a9d1f18758ce7721d9db606954e
+// translation-source: d246ab37989033acccc61553571267bd477b8c1b2151bfc0c3471de471a873b4
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -328,6 +328,7 @@ I18N.pl = localeValues([
   /* check.hydronic.counts */ (w, c) => `Odczyty wody ${w} · odczyty wysterowania ${c}`,
   /* check.hydronic.states */ "Źródło niepotwierdzone|Z datą|Bez daty|Niepełne 24 h|Oczekuje na zapis|Nasycenie liczników: dolne granice",
   /* check.hydronic.loss */ (n) => `Zgłoszenia utraty podczas zapisu ${n}`,
+  /* check.hydronic.secondary */ (d, s, n) => `Różnica temp. zasilania (pompa ciepła minus obieg mieszany): ${d} · ${s} · odczyty: ${n}. Cel mieszania nieznany; straty ciepła wymagają więcej danych.`,
   /* service.metric.range */ (a, b, c, d) => `min. ${a} · średnia ${b} · maks. ${c} ${d}`,
   /* service.metric.samples */ n => `Liczba przyjętych odczytów: ${n}`,
   /* service.metric.input_none */ "Brak wybranego wejścia",
