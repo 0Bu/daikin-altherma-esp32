@@ -123,6 +123,8 @@ CONFIG_FREERTOS_WATCHPOINT_END_OF_STACK=y
 # Logging
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 CONFIG_LOG_TAG_LEVEL_IMPL_NONE=y
+# Application never calls esp_log_level_set() at runtime; omit dynamic log-level lookup tables.
+CONFIG_LOG_DYNAMIC_LEVEL_CONTROL=n
 # No filesystem directories: certs/keys use CA bundle and NVS, so MBEDTLS_FS_IO is also omitted.
 CONFIG_VFS_SUPPORT_DIR=n
 CONFIG_ESP_PHY_ENABLE_VERSION_PRINT=n
@@ -163,6 +165,8 @@ CONFIG_MBEDTLS_AES_FEWER_TABLES=y
 CONFIG_MBEDTLS_CIPHER_MODE_CFB=n
 CONFIG_MBEDTLS_CIPHER_MODE_OFB=n
 CONFIG_MBEDTLS_CIPHER_MODE_XTS=n
+# Omit unused X.509 debug info tables (`PK_WRITE_C` and `SSL_ALPN` remain required by IDF 6.1.1 wpa_supplicant and esp_http_client).
+CONFIG_MBEDTLS_X509_REMOVE_INFO=y
 CONFIG_MBEDTLS_X509_CRL_PARSE_C=n
 CONFIG_MBEDTLS_PKCS5_C=n
 CONFIG_MBEDTLS_PK_PARSE_EC_EXTENDED=n
@@ -195,9 +199,10 @@ CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY=n
 # reconnect path to register them again and is a separate, riskier optimisation.
 CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
 CONFIG_MBEDTLS_DYNAMIC_FREE_CONFIG_DATA=n
-# Silent asserts — keep the abort()/reboot on a failed assertion (so a bad state still
-# reverts via the rollback gate) but drop the assert string tables. ~5 KB.
+# Silent asserts & IDF check macros — keep the abort()/reboot or error return path intact while
+# omitting embedded format/assert string tables from ESP-IDF drivers (`main/` uses neither macro).
 CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_SILENT=y
+CONFIG_COMPILER_OPTIMIZATION_CHECKS_SILENT=y
 # Keep WPA3-SAE + H2E for joined home networks, but omit modes this firmware never enters:
 # provisioning.cpp always creates an open setup AP, and the STA path neither uses OWE nor SAE-PK.
 # These explicit settings keep ESP-IDF 6.1's larger WiFi defaults inside the fixed OTA slot without

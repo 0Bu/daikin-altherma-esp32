@@ -796,6 +796,79 @@ append_status_fault_check_json(JsonOut& j, DiagnosticsSource source, bool source
 }
 
 template <typename JsonOut>
+[[gnu::noinline]] static void append_cycling_run_contexts_json(JsonOut& j, uint32_t boot_s,
+                                                               DiagnosticsSource source) {
+    static_assert(std::is_trivially_destructible_v<logic::CheckupRunContextSnapshot>);
+    if (source != DiagnosticsSource::X10a || !checkup_has_cycling_run_contexts(source)) return;
+    ValuesTlsReader reader;
+    reader.admitted = weather_values_reader_enter();
+    if (!reader.admitted) return;
+
+    struct RunCtxBuf {
+        logic::CheckupRunContextSnapshot* p = nullptr;
+        ~RunCtxBuf() { std::free(p); }
+    } buf;
+    buf.p = static_cast<logic::CheckupRunContextSnapshot*>(
+        heap_caps_malloc(sizeof(logic::CheckupRunContextSnapshot), MALLOC_CAP_8BIT));
+    if (!buf.p) return;
+    new (buf.p) logic::CheckupRunContextSnapshot;
+    if (!checkup_cycling_run_contexts(*buf.p, boot_s, source) || !buf.p->count) return;
+
+    if (buf.p->flow_typical_tenths != logic::CHECKUP_ABSENT && buf.p->flow_typical_tenths > 0) {
+        j += ",\"flow_typical_l_min\":";
+        append_status_tenths_value(j, buf.p->flow_typical_tenths);
+    }
+    auto opt_signed = [&j](const char* name, int16_t v) __attribute__((noinline)) {
+        if (v == logic::CHECKUP_ABSENT) return;
+        j += ",\"";
+        j += name;
+        j += "\":";
+        append_status_tenths_value(j, v);
+    };
+    j += ",\"run_contexts\":[";
+    for (uint8_t i = 0; i < buf.p->count; ++i) {
+        const auto& e = buf.p->entries[i];
+        if (i) j += ",";
+        j += "{\"at\":";
+        append_json_uint(j, e.start_s);
+        j += ",\"mode\":";
+        json_append_quoted(
+            j, logic::cycling_run_mode_name(static_cast<logic::CyclingRunMode>(e.mode)));
+        j += ",\"start_kind\":";
+        json_append_quoted(
+            j, logic::cycling_start_kind_name(static_cast<logic::CyclingStartKind>(e.start_kind)));
+        if (e.flags & logic::RUN_CTX_F_STOPPED) {
+            j += ",\"stop\":";
+            append_json_uint(j, e.stop_s);
+            j += ",\"stop_kind\":";
+            json_append_quoted(
+                j, logic::cycling_stop_kind_name(static_cast<logic::CyclingStopKind>(e.stop_kind)));
+        }
+        opt_signed("start_lwt_c", e.start_lwt_tenths);
+        opt_signed("start_target_c", e.start_tgt_tenths);
+        opt_signed("start_target_prev_c", e.start_tgt_prev_tenths);
+        opt_signed("lwt_c", e.stop_lwt_tenths);
+        opt_signed("rwt_c", e.stop_rwt_tenths);
+        opt_signed("target_c", e.stop_tgt_tenths);
+        opt_signed("target_prev_c", e.stop_tgt_prev_tenths);
+        if (e.flow_tenths != logic::CHECKUP_ABSENT && e.flow_tenths >= 0) {
+            j += ",\"flow_l_min\":";
+            append_status_tenths_value(j, e.flow_tenths);
+        }
+        opt_signed("outdoor_c", e.outdoor_tenths);
+        if (e.min_rps_tenths > 0) {
+            j += ",\"min_rps\":";
+            append_status_tenths_value(j, static_cast<int>(e.min_rps_tenths));
+        }
+        if (e.flags & logic::RUN_CTX_F_LOW_RPS_ABOVE_TGT) {
+            j += ",\"low_rps_above_target\":true";
+        }
+        j += "}";
+    }
+    j += "]";
+}
+
+template <typename JsonOut>
 static void append_status_json(JsonOut& j, bool redact) {
     const Config&      c              = config();
     const BoardPreset* selected_board = board_selected_preset(c);
@@ -1584,7 +1657,7 @@ static void append_status_json(JsonOut& j, bool redact) {
                 }
                 j += "]";
                 break;
-            case logic::CheckupCheck::Cycling:
+            case logic::CheckupCheck::Cycling: {
                 // Keep legacy names; the pooled mean is null. Only complete heating runs judge.
                 num("starts", ck.a);
                 num("mean_run_s", ck.b);
@@ -1631,7 +1704,9 @@ static void append_status_json(JsonOut& j, bool redact) {
                     }
                 }
                 j += "]";
-                if (trace && trace->unix_s) {
+                const bool     have_trace   = trace && trace->unix_s != 0;
+                const uint32_t trace_boot_s = have_trace ? trace->boot_s : 0;
+                if (have_trace) {
                     ufield(",\"timeline\":{\"unix_s\":", trace->unix_s);
                     ufield(",\"window_end_s\":", trace->window_end_s);
                     ufield(",\"observed_end_s\":", trace->end_s);
@@ -1645,12 +1720,16 @@ static void append_status_json(JsonOut& j, bool redact) {
                     j += "]}";
                 }
                 release_trace();
+                if (!redact && have_trace && diag_effective == DiagnosticsSource::X10a) {
+                    append_cycling_run_contexts_json(j, trace_boot_s, diag_effective);
+                }
                 j += ",\"stop_context\":";
                 append_stop_context_json(
                     j, diag_effective == DiagnosticsSource::Modbus
                            ? StopContextPayloadFields{}
                            : stop_context_payload_fields(checkup_stop_context_report()));
                 break;
+            }
             case logic::CheckupCheck::Defrost: {
                 num("count", ck.a);
                 num("paired_count", ck.e);

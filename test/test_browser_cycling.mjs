@@ -162,9 +162,9 @@ async function assertCyclingAppearance(parent, server, context) {
         assert.deepEqual(visual.legend, visual.expected, label + ": exactly three localized categories");
         assert.equal(visual.modes, "space dhw other", label + ": deduplicated category set");
         assert.ok(visual.fillHeight >= 90 && Math.abs(visual.fillHeight - visual.plotHeight) < 1,
-          label + ": full plot-height plasma, not a miniature strip");
-        assert.ok(visual.fillOpacity > 0 && visual.fillOpacity <= .25, label + ": highly transparent backgrounds");
-        assert.ok(visual.gradient.includes("radial-gradient"), label + ": soft overlapping color fields");
+          label + ": full plot-height segment fill, not a miniature strip");
+        assert.ok(visual.fillOpacity > 0.25 && visual.fillOpacity <= 0.4, label + ": translucent category backgrounds");
+        assert.ok(visual.gradient.includes("linear-gradient"), label + ": proportional vertical category bands");
         assert.equal(visual.lineAbove, true, label + ": the step line paints above all category backgrounds");
         assert.equal(visual.lineOpacity * visual.svgOpacity, 1, label + ": the step line stays opaque");
         assert.equal(visual.lineWidth, "2px", label + ": the established line weight is preserved");
@@ -267,11 +267,11 @@ export async function assertCyclingChart(page, server, context) {
     assert.deepEqual(fill.modes, expected, context + ": " + what);
     assert.ok(fill.height >= 90 && Math.abs(fill.height - fill.expectedHeight) < 1,
       `${context}: full plot-height category fill, not a miniature strip: ${JSON.stringify(fill)}`);
-    assert.ok(fill.opacity > 0 && fill.opacity <= 0.25, context + ": category fills stay highly transparent");
-    assert.equal(fill.children, 0, context + ": no stacked duration or gap segments");
-    assert.equal(fill.animations, 0, context + ": plasma is a static category mix, not time-varying evidence");
+    assert.ok(fill.opacity > 0.25 && fill.opacity <= 0.4, context + ": category fills stay translucent");
+    assert.equal(fill.children, 0, context + ": no stacked child DOM nodes");
+    assert.equal(fill.animations, 0, context + ": category bands are static proportional gradients");
     if (expected.length > 1) {
-      assert.ok(fill.background.includes("radial-gradient"), context + ": mixed categories use soft gradients");
+      assert.ok(fill.background.includes("linear-gradient"), context + ": mixed categories use proportional vertical gradients");
     } else {
       assert.equal(fill.background, "none", context + ": a transparent or solid fill has no background image");
     }
@@ -866,17 +866,21 @@ export async function assertCyclingChart(page, server, context) {
     if (mouse) {
       const start = await point(page, hour(22)), end = await point(page, hour(21));
       const preview = await page.evaluate(`document.querySelector('.checkup-cycling-timeline [data-bucket="21"]').dataset.span`);
+      const rangeSpan = preview.split("–")[0] + "–" + resumed.split("–")[1];
       await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", ...start });
       await page.send("Input.dispatchMouseEvent", { type: "mousePressed", button: "left", buttons: 1, clickCount: 1, ...start });
       try {
         await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", button: "left", buttons: 1, ...end });
-        assert.equal((await readAxis()).label, preview, context + ": dragging previews the rolling hour");
+        assert.equal((await readAxis()).label, rangeSpan, context + ": dragging previews the contiguous hour range");
         await poll("2026-11-13T15:14:02Z");
-        assert.equal((await readAxis()).label, preview, context + ": polling retains the drag preview");
+        assert.equal((await readAxis()).label, rangeSpan, context + ": polling retains the drag preview");
       } finally {
         await page.send("Input.dispatchMouseEvent", { type: "mouseReleased", button: "left", buttons: 0, clickCount: 1, ...end });
       }
-      assert.equal((await readAxis()).label, resumed, context + ": release restores the selected hour");
+      assert.deepEqual(await pinned(), [21, 22], context + ": release commits the dragged hour range");
+      assert.equal((await readAxis()).label, rangeSpan, context + ": release keeps the selected range readout");
+      await tap(page, hour(22));
+      await page.waitFor("!S.clickHold");
     }
     await tap(page, hour(22));
     assert.deepEqual(await readAxis(), { label: "", normalHidden: false, extra: false });
@@ -1011,6 +1015,127 @@ export async function assertCyclingChart(page, server, context) {
       context + ": the cached dated trace retains both boots without shifting any recorded clock time");
     assert.equal(await evaluate(page, selector => document.querySelector(selector + " s").dataset.modes.includes("other"), hour(23)), true,
       context + ": the dated trace cannot extend measured data into a temporarily omitted span");
+
+    // Cause-analysis UI: proportional fills, episode auto-selection, 3-col table, expandable explanations.
+    status.boot_id = "cycling-cause-analysis";
+    status.uptime_s = 86400;
+    const h20s = 20 * 3600, h21s = 21 * 3600, h22s = 22 * 3600;
+    cycling.space_runs = 6;
+    cycling.space_mean_run_s = 210;
+    cycling.flow_typical_l_min = 17.6;
+    cycling.timeline = {
+      boot_s: 86400, live: true, unix_s: datedBase + 200,
+      window_end_s: 86400, observed_end_s: 86400, run_edges: true,
+      records: [
+        [0, 1],
+        // Hour 20: 20% space -> 30% dhw -> 50% space chronological fill test
+        [h20s, 3], [h20s + 720, 4], [h20s + 1800, 3],
+        // Hour 21: 2 short space runs
+        [h21s + 60, 5], [h21s + 60, 3], [h21s + 240, 1], [h21s + 240, 6],
+        [h21s + 720, 5], [h21s + 720, 3], [h21s + 960, 1], [h21s + 960, 6],
+        // Hour 22: 2 short space runs + 1 defrost + ongoing DHW
+        [h22s + 60, 5], [h22s + 60, 3], [h22s + 180, 1], [h22s + 180, 6],
+        [h22s + 400, 5], [h22s + 400, 3], [h22s + 580, 1], [h22s + 580, 6],
+        [h22s + 900, 5], [h22s + 900, 2], [h22s + 1020, 1], [h22s + 1020, 6],
+        [h22s + 1200, 5], [h22s + 1200, 4],
+      ].map(([at, kind]) => at * 8 + kind),
+    };
+    cycling.run_contexts = [
+      { at: h21s + 60, mode: "space", start_kind: "cooldown_restart", stop: h21s + 240, stop_kind: "low_rps_above_target",
+        start_lwt_c: 29.0, start_target_c: 32.0, lwt_c: 35.1, rwt_c: 33.6, target_c: 32.0, flow_l_min: 8.2, min_rps: 18.0, low_rps_above_target: true },
+      { at: h21s + 720, mode: "space", start_kind: "target_raised", stop: h21s + 960, stop_kind: "low_rps_above_target",
+        start_lwt_c: 30.0, start_target_c: 33.0, start_target_prev_c: 30.0, lwt_c: 36.2, rwt_c: 34.4, target_c: 33.0, flow_l_min: 17.2, min_rps: 19.0, low_rps_above_target: true },
+      { at: h22s + 60, mode: "space", start_kind: "request_on", stop: h22s + 180, stop_kind: "request_withdrawal",
+        start_lwt_c: 30.5, start_target_c: 32.0, lwt_c: 33.0, rwt_c: 30.0, target_c: 32.0, flow_l_min: 16.0 },
+      { at: h22s + 400, mode: "space", start_kind: "after_defrost", stop: h22s + 580, stop_kind: "target_changed",
+        start_lwt_c: 28.0, start_target_c: 34.0, lwt_c: 32.5, rwt_c: 30.2, target_c: 30.0, target_prev_c: 34.0, flow_l_min: 16.5 },
+      { at: h22s + 900, mode: "other", start_kind: "defrost_start", stop: h22s + 1020, stop_kind: "defrost",
+        lwt_c: 24.0, rwt_c: 23.0, flow_l_min: 18.0 },
+      { at: h22s + 1200, mode: "dhw", start_kind: "dhw_start", start_lwt_c: 41.0 },
+    ];
+    await poll(datedIso(200));
+    const causeState = await page.evaluate(`(() => {
+      const h20Fill = document.querySelector('.checkup-cycling-timeline [data-bucket="20"] .checkup-chart-fill');
+      const cols = [...document.querySelectorAll('.checkup-cycling-timeline [data-bucket]')];
+      const warnCols = cols.filter(c => c.querySelector('b.warn')).map(c => Number(c.dataset.bucket));
+      const activeCols = cols.filter(c => c.getAttribute('aria-pressed') === 'true').map(c => Number(c.dataset.bucket));
+      const headers = [...document.querySelectorAll('.checkup-run-table.has-cause th')].map(th => th.textContent);
+      const finding = document.querySelector('.checkup-period-finding')?.textContent;
+      const heatRow = [...document.querySelectorAll('.checkup-cycling-grid .inspect-row')]
+        .find(r => r.textContent.includes('Heating'))?.textContent;
+      return { fillStyle: h20Fill?.getAttribute('style') || '', warnCols, activeCols, headers, finding, heatRow };
+    })()`);
+    assert.match(causeState.fillStyle, /var\(--flow-hot\) 0\.00%, var\(--flow-hot\) 20\.00%, var\(--brand\) 20\.00%, var\(--brand\) 50\.00%, var\(--flow-hot\) 50\.00%, var\(--flow-hot\) 100\.00%/,
+      context + ": proportional 20/30/50 vertical category fill");
+    assert.deepEqual(causeState.warnCols, [21, 22], context + ": warns mark cycling hours");
+    assert.deepEqual(causeState.activeCols, [21, 22], context + ": auto-selects latest cycling episode");
+    assert.deepEqual(causeState.headers, ["Start", "Duration", "Why it stopped"],
+      context + ": quiet 3-column cause-analysis table");
+    assert.match(causeState.finding, /Short runs, low flow:.*8\.2 L\/min.*typ\. ~17\.6 L\/min/,
+      context + ": period finding summarizes low flow with typical baseline");
+    assert.match(causeState.heatRow, /4 < 5 min/, context + ": heating row shows < 5 min count");
+
+    await tap(page, `.checkup-run-row[data-run-row="${h21s + 60}"]`);
+    const expandedRun = await page.evaluate(`(() => {
+      const row = document.querySelector('.checkup-run-row[data-run-row="${h21s + 60}"]');
+      const sub = document.querySelector('[data-run-sub="${h21s + 60}"]');
+      return {
+        expanded: row?.getAttribute('aria-expanded'),
+        hidden: sub?.hidden,
+        nestedTables: sub?.querySelectorAll('table').length,
+        text: sub?.querySelector('.checkup-run-explain')?.textContent,
+      };
+    })()`);
+    assert.equal(expandedRun.expanded, "true", context + ": clicking run row expands inline explanation");
+    assert.equal(expandedRun.hidden, false, context + ": subrow becomes visible");
+    assert.equal(expandedRun.nestedTables, 0, context + ": no nested table inside explanation");
+    assert.match(expandedRun.text, /35\.1 °C > 32\.0 °C, return 33\.6 °C at 8\.2 L\/min \(typ\. ~17\.6 L\/min\)/,
+      context + ": explanation preserves start and stop measurements without fabricating hardware faults");
+
+    await evaluate(page, sel => document.querySelector(sel).focus(), `.checkup-run-row[data-run-row="${h21s + 720}"]`);
+    await key(page, "Enter", 13);
+    assert.equal(await page.evaluate(`document.querySelector('[data-run-sub="${h21s + 720}"]')?.hidden`), false,
+      context + ": Enter expands the focused run row");
+    assert.equal(await page.evaluate(`document.querySelector('[data-run-sub="${h21s + 60}"]')?.hidden`), true,
+      context + ": expanding another row collapses the previous one");
+
+    await evaluate(page, sel => document.querySelector(sel).focus(), hour(22));
+    await key(page, "Escape", 27);
+    assert.deepEqual(await pinned(), [], context + ": Escape dismisses episode selection");
+    assert.equal((await runDetails()).hidden, true, context + ": Escape hides run details");
+
+    await tap(page, hour(22));
+    await page.waitFor("!S.clickHold");
+    assert.match(await page.evaluate(`(() => {
+      const rows = [...document.querySelectorAll('.checkup-run-row')];
+      const liveRow = rows.at(-1);
+      return [...liveRow.querySelectorAll('.checkup-run-live')].map(n => n.textContent).join('|');
+    })()`), /Running/, context + ": ongoing contextual run displays live status");
+    await page.evaluate("S.otaCached = true; renderApp(); true");
+    assert.equal(await page.evaluate(`(() => {
+      const liveCell = [...document.querySelectorAll('.checkup-run-row')].at(-1).querySelector('td:last-child .checkup-stop-text');
+      const liveVis = [...liveCell.querySelectorAll('.checkup-run-live')].map(n => getComputedStyle(n).display);
+      const staleVis = [...liveCell.querySelectorAll('.checkup-run-stale')].map(n => getComputedStyle(n).display);
+      return { liveVis, staleVis };
+    })()`).then(s => s.liveVis[0] === "none" && s.staleVis[0] !== "none"), true,
+      context + ": OTA stale state swaps ongoing live text via CSS");
+    await page.evaluate("S.otaCached = false; renderApp(); true");
+    if (mouse) {
+      const p20 = await point(page, hour(20));
+      await page.send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "Shift", code: "ShiftLeft", modifiers: 8 });
+      try {
+        for (const type of ["mousePressed", "mouseReleased"]) {
+          await page.send("Input.dispatchMouseEvent", { type, button: "left", clickCount: 1, modifiers: 8, ...p20 });
+        }
+      } finally {
+        await page.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Shift", code: "ShiftLeft", modifiers: 0 });
+      }
+      await page.waitFor("!S.clickHold");
+      assert.deepEqual(await pinned(), [20, 21, 22], context + ": Shift+click extends selection contiguously");
+    }
+    delete cycling.run_contexts;
+    delete cycling.flow_typical_l_min;
+    delete cycling.timeline;
 
     status.history.epoch++;
     cycling.hours = [];

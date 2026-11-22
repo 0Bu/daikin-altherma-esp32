@@ -25,6 +25,7 @@ LZMA_NICE_LENGTH = 128
 # entropy under gzip and a higher nice length. Keep lc=3, lp=0 and the 512 KiB dictionary.
 LZMA_PROPERTIES = bytes((3, 0, 0, 8, 0))
 MAX_DECODED_BYTES = 1024 * 1024
+MAX_LOCALE_DECODED_BYTES = 1536 * 1024
 MAX_BUNDLE_GZIP_BYTES = 289792
 MAX_SOURCE_GZIP_BYTES = 32768
 
@@ -46,9 +47,9 @@ def load_decoder(vendor: Path = VENDOR) -> tuple[str, str, dict]:
             (vendor / "LICENSE").read_text(encoding="utf-8"), manifest)
 
 
-def encode_frame(frame: bytes) -> bytes:
-    if not frame or len(frame) > MAX_DECODED_BYTES:
-        raise ValueError("decoded locale frame exceeds its 1 MiB bound")
+def encode_frame(frame: bytes, max_decoded_bytes: int = MAX_LOCALE_DECODED_BYTES) -> bytes:
+    if not frame or len(frame) > max_decoded_bytes:
+        raise ValueError("decoded locale frame exceeds its 1.5 MiB bound")
     packed = lzma.compress(frame, format=lzma.FORMAT_ALONE,
                            filters=[{"id": lzma.FILTER_LZMA1, "preset": 6,
                                      "dict_size": DICTIONARY_BYTES,
@@ -72,8 +73,8 @@ def render_wrapper(packed: bytes, source_bytes: int, source_crc32: int,
     Uint8Array and taking a view avoids an additional numeric-array copy and its UTF-8 string
     builder. No browser worker, Blob, eval, global decoder export or message handler is installed.
     """
-    if source_bytes < 0 or source_bytes + len(PREFIX) > MAX_DECODED_BYTES:
-        raise ValueError("decoded locale source exceeds its 1 MiB bound")
+    if source_bytes < 0 or source_bytes + len(PREFIX) > MAX_LOCALE_DECODED_BYTES:
+        raise ValueError("decoded locale source exceeds its 1.5 MiB bound")
     encoded = base64.b64encode(packed).decode("ascii")
     header = LZMA_PROPERTIES + (source_bytes + len(PREFIX)).to_bytes(8, "little")
     header_values = json.dumps(list(header), separators=(",", ":"))
@@ -131,8 +132,8 @@ def build_bundle(locale_dir: Path, locales: list[str], source_limit: int,
     # Preserve every original formatter and capture its module helpers in this single scope.
     source = b"(()=>{\n" + b";\n".join(sources) + b"\n})();"
     framed = PREFIX + source
-    if len(framed) > MAX_DECODED_BYTES:
-        raise ValueError("decoded locale source exceeds its 1 MiB bound")
+    if len(framed) > MAX_LOCALE_DECODED_BYTES:
+        raise ValueError("decoded locale source exceeds its 1.5 MiB bound")
     crc = zlib.crc32(source)
     packed = encode_frame(framed)
     wrapper = render_wrapper(packed, len(source), crc, decoder, license_text)

@@ -39,6 +39,7 @@ CASES = [
     "hydronic_waiting", "hydronic_population", "hydronic_age", "hydronic_expiry",
     "hydronic_consent_lock", "hydronic_source_lock", "hydronic_shared_witness", "hydronic_shutdown",
     "hydronic_reader_generation", "hydronic_pause_resume",
+    "x10a_cycling_run_contexts",
 ]
 
 parser = argparse.ArgumentParser(description=__doc__)

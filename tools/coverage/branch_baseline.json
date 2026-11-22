@@ -2205,6 +2205,22 @@
       },
       "test_source_sha256": "cbc3f2b2bd0fe8d17c2fa4e383f358665c9e395b8017803732739a632e6bb638",
       "validation_boundary": "Host and container compilers exercised synthetic inputs; hosted gcc-15-github-linux-ubuntu26 and aarch64 gcc-15-linux-ubuntu26 confirmation remain separate."
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple Clang 17, arm64",
+        "gcc-13-linux-ubuntu24": "Ubuntu GCC 13.3, pinned ESP-IDF v6.1 Docker, aarch64",
+        "gcc-15-github-linux-ubuntu26": "Ubuntu GCC 15.2, Docker, x86-64",
+        "gcc-15-linux-ubuntu26": "Ubuntu GCC 15.2, Docker, aarch64"
+      },
+      "hosted_confirmation": "Measured locally across Apple Clang 17 arm64, ESP-IDF v6.1 Docker GCC 13.3 aarch64, and Ubuntu 26.04 GCC 15.2 x86-64 Docker; hosted CI confirmation remains separate.",
+      "runner": "scripts/run-mock-tests.sh --coverage on Darwin, ESP-IDF Docker, and Ubuntu 26.04 Coverage Docker",
+      "scope": "RAM-only X10A per-run cycling cause-analysis reducer and snapshot helper (main/logic/cycling_run_context.hpp): 354/419 outcomes on Clang 17 arm64 and 383/457 outcomes on GCC 13/15.",
+      "sources": {
+        "main/logic/cycling_run_context.hpp": "a0e9e31bc346c6ed091023fd2c05d4f89726810861d9c9a19cf98d0dd35e7849"
+      },
+      "test_source_sha256": "40065cf3c39cfd59e3eb4fbbcba5931795cfdf6aecee6e6b40d66b027615bde9",
+      "validation_boundary": "Host and container compilers exercised synthetic inputs; hosted gcc-15-github-linux-ubuntu26 CI confirmation remains separate."
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
@@ -2293,6 +2309,10 @@
       "main/logic/cycling_persist.hpp": {
         "outcomes": 88,
         "taken": 60
+      },
+      "main/logic/cycling_run_context.hpp": {
+        "outcomes": 419,
+        "taken": 354
       },
       "main/logic/defrost_start.hpp": {
         "outcomes": 28,
@@ -2768,6 +2788,10 @@
         "outcomes": 104,
         "taken": 72
       },
+      "main/logic/cycling_run_context.hpp": {
+        "outcomes": 457,
+        "taken": 383
+      },
       "main/logic/defrost_start.hpp": {
         "outcomes": 48,
         "taken": 48
@@ -3242,6 +3266,10 @@
         "outcomes": 104,
         "taken": 72
       },
+      "main/logic/cycling_run_context.hpp": {
+        "outcomes": 457,
+        "taken": 383
+      },
       "main/logic/defrost_start.hpp": {
         "outcomes": 48,
         "taken": 48
@@ -3715,6 +3743,10 @@
       "main/logic/cycling_persist.hpp": {
         "outcomes": 104,
         "taken": 72
+      },
+      "main/logic/cycling_run_context.hpp": {
+        "outcomes": 457,
+        "taken": 383
       },
       "main/logic/defrost_start.hpp": {
         "outcomes": 48,

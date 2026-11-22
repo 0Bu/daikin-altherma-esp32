@@ -892,16 +892,12 @@ button.checkup-chart-col:hover, button.checkup-chart-col:focus-visible { backgro
 button.checkup-chart-col:focus-visible { outline: 2px solid var(--brand-strong); outline-offset: -1px; }
 .checkup-chart-col b { font-size: 10px; line-height: 12px; height: 12px; color: var(--fg); font-weight: 600; text-align: center; }
 .checkup-chart-col b.warn { color: var(--warn); font-weight: 700; }
-/* Full-height category wash, never a duration stack. Static overlapping gradients blend the
-   colours without implying a chronology; only the foreground step line encodes event times. */
+/* Full-height chronological mode bands in the background: each active segment fills proportionally
+   from bottom to top over active time, leaving readable off-time clear while keeping the foreground
+   step line readable above. */
 .checkup-chart-fill { position: absolute; top: 0; bottom: 16px; width: 100%; border-radius: 2px;
-  background: var(--cycling-a, transparent); opacity: .18; pointer-events: none; }
-.checkup-chart-fill.mixed {
-  background: radial-gradient(ellipse at 0% 10%, var(--cycling-a), transparent 70%),
-    radial-gradient(ellipse at 100% 50%, var(--cycling-b), transparent 70%),
-    radial-gradient(ellipse at 10% 100%, var(--cycling-c, var(--cycling-a)), transparent 70%),
-    linear-gradient(160deg, var(--cycling-b), var(--cycling-c, var(--cycling-a)));
-}
+  background: var(--cycling-a, transparent); opacity: .34; pointer-events: none; }
+.checkup-chart-fill.segmented { background: var(--cycling-fill, transparent); }
 .checkup-cycling-chart i.space { background: var(--flow-hot); }
 .checkup-cycling-chart i.dhw { background: var(--brand); }
 .checkup-chart-legend i.other { background: var(--muted); }
@@ -911,7 +907,8 @@ button.checkup-chart-col:focus-visible { outline: 2px solid var(--brand-strong);
 .checkup-chart-graph { position: relative; isolation: isolate; }
 .has-selected-hour .checkup-chart-graph::before {
   content: ""; position: absolute; top: 0; bottom: 0; z-index: 1; pointer-events: none;
-  left: calc(var(--checkup-hour) * 100% / 24); width: calc(100% / 24);
+  left: calc(var(--checkup-hour-start, var(--checkup-hour, 0)) * 100% / 24);
+  width: calc(var(--checkup-hour-span, 1) * 100% / 24);
   background: color-mix(in srgb, var(--brand-sky) 22%, transparent);
   box-shadow: inset 0 0 0 1px var(--brand); border-radius: 2px;
 }
@@ -930,16 +927,35 @@ button.checkup-chart-col:focus-visible { outline: 2px solid var(--brand-strong);
 .has-selected-hour .checkup-chart-ticks { visibility: hidden; }
 .checkup-chart-span {
   position: relative; justify-self: start; white-space: nowrap; transform: translateX(-50%);
-  left: clamp(4em, calc((var(--checkup-hour) + .5) * 100% / 24), calc(100% - 4em));
+  left: clamp(4em, calc((var(--checkup-hour-start, var(--checkup-hour, 0)) + var(--checkup-hour-span, 1) / 2) * 100% / 24), calc(100% - 4em));
 }
 .checkup-chart-span.wide { left: 50%; }
 .checkup-run-details { margin-top: 8px; font-size: 12px; }
 .checkup-run-stale, [data-cycling-stale="true"] .checkup-run-live { display: none; }
 [data-cycling-stale="true"] .checkup-run-stale { display: inline; }
+.checkup-period-finding { margin: 0 0 8px; font-size: 12px; line-height: 1.45; color: var(--muted); }
+.checkup-period-finding .vdesc-n { color: var(--fg); font-weight: 600; }
 .checkup-run-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 .checkup-run-table th, .checkup-run-table td {
   padding: 4px 4px 4px 0; border-top: 1px solid var(--line); text-align: start; vertical-align: top;
 }
+.checkup-run-table.has-cause th:nth-child(1) { width: 20%; }
+.checkup-run-table.has-cause th:nth-child(2) { width: 22%; }
+.checkup-run-table.has-cause th:nth-child(3) { width: 58%; }
+.checkup-run-row { cursor: pointer; }
+.checkup-run-row:hover .checkup-run-chev { color: var(--brand-strong); }
+.checkup-run-row:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
+.checkup-run-start { display: inline-flex; align-items: center; gap: 6px; }
+.mode-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; display: inline-block; background: var(--muted); }
+.mode-dot.space { background: var(--flow-hot); }
+.mode-dot.dhw { background: var(--brand); }
+.checkup-stop-cell { display: flex; align-items: center; justify-content: space-between; gap: 6px; color: var(--fg); }
+.checkup-stop-text { min-width: 0; }
+.checkup-run-chev { flex: none; color: var(--muted); font-size: 14px; line-height: 1; transition: transform .15s ease; }
+.checkup-run-row[aria-expanded="true"] .checkup-run-chev { transform: rotate(90deg); color: var(--brand-strong); }
+.checkup-run-sub td { border-top: 0; padding: 2px 0 10px 13px; font-size: 12px; line-height: 1.45; color: var(--muted); }
+.checkup-run-explain { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.48; }
+.checkup-run-explain strong { color: var(--fg); font-weight: 600; }
 
 /* HOW LONG THE ROW HAS READ WHAT IT READS needs no rule of its own. Its state word reuses .vdesc-n
    above — the panel's lead-in-in-stronger-ink token — and everything after it is plain .vdesc-body
