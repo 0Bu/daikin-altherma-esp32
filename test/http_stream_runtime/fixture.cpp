@@ -63,16 +63,18 @@ inline bool                             change_history_epoch      = false;
 inline bool                             history_restored          = false;
 inline uint32_t                         epoch                     = 42;
 inline uint32_t                         room_identity             = 0;
-inline bool                           room_snapshot_unavailable = false;
-inline unsigned                       room_snapshot_calls       = 0;
-inline int                            failure = 0, stage_race = 0;
-inline unsigned                       stack_samples = 0;
-inline unsigned                       wifi_calls    = 0;
-inline daik::WifiScanEntry            scan_rows[20]{};
-inline int                            scan_count = 0, scan_failure = 0;
-inline unsigned                       scan_calls             = 0;
-inline size_t                         scan_first_allocations = 0;
-inline daik::CheckupStopContextReport stop_report{};
+inline bool                             room_snapshot_unavailable = false;
+inline unsigned                         room_snapshot_calls       = 0;
+inline int                              failure = 0, stage_race = 0;
+inline unsigned                         stack_samples = 0;
+inline unsigned                         wifi_calls    = 0;
+inline daik::WifiScanEntry              scan_rows[20]{};
+inline int                              scan_count = 0, scan_failure = 0;
+inline unsigned                         scan_calls             = 0;
+inline size_t                           scan_first_allocations = 0;
+inline daik::CheckupStopContextReport   stop_report{};
+inline daik::CheckupHydronicReport      hydronic_report{};
+inline int                              flow_min_tenths = -1;
 inline daik::logic::DefrostStartReport  defrost_start{};
 inline daik::HeatingCurveBinsReport     curve_bins;
 inline bool                             curve_bins_available = false;
@@ -84,6 +86,7 @@ inline bool                             fault_trace_present = false;
 inline daik::logic::CheckupRestore      checkup_persist     = daik::logic::CheckupRestore::NoRecord;
 inline bool                             reset_after_checkup = false;
 inline unsigned                         stop_report_calls   = 0;
+inline unsigned                         hydronic_report_calls      = 0;
 inline bool                             checkup_x10a_has_data      = false;
 inline bool                             checkup_modbus_has_data    = false;
 inline daik::DiagnosticsSource          last_checkup_report_source = daik::DiagnosticsSource::X10a;
@@ -124,6 +127,8 @@ void reset() {
     scan_calls                = 0;
     scan_first_allocations    = 0;
     stop_report               = {};
+    hydronic_report            = {};
+    flow_min_tenths            = -1;
     defrost_start              = {};
     curve_bins                 = {};
     curve_bins_available       = false;
@@ -134,6 +139,7 @@ void reset() {
     checkup_persist           = daik::logic::CheckupRestore::NoRecord;
     reset_after_checkup        = false;
     stop_report_calls          = 0;
+    hydronic_report_calls      = 0;
     refrigerant_report         = {};
     refrigerant_report_calls   = 0;
     checkup_x10a_has_data      = false;
@@ -521,6 +527,9 @@ logic::CheckupReport checkup_report(logic::CheckupCyclingHours* hours,
         defrost.b     = 15;
         defrost.c     = 151;
         defrost.d     = 1000;
+        if (fixture::flow_min_tenths >= 0)
+            report.checks[static_cast<size_t>(logic::CheckupCheck::Flow)].a =
+                fixture::flow_min_tenths;
     } else if (defrost_context) {
         *defrost_context = {};
     }
@@ -531,6 +540,10 @@ logic::CheckupReport checkup_report(logic::CheckupCyclingHours* hours,
         fixture::cycling_hours   = {};
     }
     return report;
+}
+CheckupHydronicReport checkup_hydronic_report() {
+    ++fixture::hydronic_report_calls;
+    return fixture::hydronic_report;
 }
 CheckupFaultStatus checkup_fault_latest_status(DiagnosticsSource, bool source_fresh) {
     if (fixture::fault_trace_present) {
@@ -1345,25 +1358,77 @@ int main(int argc, char** argv) {
         current.diagnostics_enabled = true;
         current.diagnostics_source  = daik::DiagnosticsSource::X10a;
         rows.clear();
-        checkup_x10a_has_data               = false;
-        checkup_modbus_has_data             = true;
-        stop_report.observation.readable_us = 10000000;
-        stop_report.observation.confirmed   = true;
-        stop_report.capability_mask         = 31;
-        const unsigned before_stop_calls    = stop_report_calls;
-        auto           req                  = request();
+        checkup_x10a_has_data                                     = false;
+        checkup_modbus_has_data                                   = true;
+        stop_report.observation.readable_us                       = 10000000;
+        stop_report.observation.confirmed                         = true;
+        stop_report.capability_mask                               = 31;
+        hydronic_report.observation.confirmed                     = true;
+        hydronic_report.observation.dated                         = true;
+        hydronic_report.observation.totals.observed_us            = 14500001;
+        hydronic_report.observation.totals.samples                = 2;
+        hydronic_report.observation.totals.first_evidence_unix_us = 2000000000000000;
+        hydronic_report.observation.totals.spread                 = {6500, 3000, 3500};
+        const unsigned before_stop_calls                          = stop_report_calls;
+        const unsigned before_hydronic_calls                      = hydronic_report_calls;
+        auto           req                                        = request();
         check(invoke(req, "/status", daik::h_status) == ESP_OK, "modbus diagnostics status failed");
         successful(req);
         emit(req, "status-modbus-diagnostics");
         check(last_checkup_report_source == daik::DiagnosticsSource::Modbus &&
-                  stop_report_calls == before_stop_calls,
-              "modbus diagnostics view must read modbus slot without stop_context");
-        check(req.response.find("\"health\":{\"source\":\"modbus\"") != std::string::npos &&
-                  req.response.find(
-                      "\"diagnostics\":{\"enabled\":true,\"source\":\"x10a\",\"effective_source\":"
-                      "\"modbus\",\"available_sources\":[\"modbus\"]}") != std::string::npos &&
-                  req.response.find("\"stop_context\":{\"confirmed\":false") != std::string::npos,
-              "status payload missing modbus diagnostics provenance or empty stop_context");
+                  stop_report_calls == before_stop_calls &&
+                  hydronic_report_calls == before_hydronic_calls,
+              "modbus diagnostics view must read modbus slot without stop_context or hydronic");
+        const size_t hydronic_pos = req.response.find("\"hydronic\":{\"confirmed\":false");
+        const size_t hydronic_end =
+            hydronic_pos == std::string::npos
+                ? std::string::npos
+                : req.response.find("\"target_supported\":false}", hydronic_pos);
+        auto in_hydronic = [&](const char* needle) {
+            const size_t pos = req.response.find(needle, hydronic_pos);
+            return pos != std::string::npos && pos < hydronic_end;
+        };
+        check(
+            req.response.find("\"health\":{\"source\":\"modbus\"") != std::string::npos &&
+                req.response.find(
+                    "\"diagnostics\":{\"enabled\":true,\"source\":\"x10a\",\"effective_source\":"
+                    "\"modbus\",\"available_sources\":[\"modbus\"]}") != std::string::npos &&
+                req.response.find("\"stop_context\":{\"confirmed\":false") != std::string::npos &&
+                hydronic_pos != std::string::npos && hydronic_end != std::string::npos &&
+                in_hydronic("\"coverage_partial\":false") &&
+                in_hydronic("\"restore_pending\":false") &&
+                in_hydronic("\"reason_code\":0,\"reason\":\"none\"") &&
+                in_hydronic("\"spread_k\":{\"min\":null,\"mean\":null,\"max\":null}"),
+            "status payload missing modbus diagnostics provenance or empty stop_context/hydronic");
+    });
+    run("hydronic_status", [] {
+        flow_min_tenths = 65;
+        for (bool dated : {false, true}) {
+            auto& o                         = hydronic_report.observation;
+            o.confirmed                     = dated;
+            o.dated                         = dated;
+            o.totals.first_evidence_unix_us = dated ? 2000000000000000 : -1;
+            o.totals.observed_us            = 14500001;
+            o.totals.samples                = 2;
+            o.totals.spread                 = {6500, 3000, 3500};
+            auto req                        = request();
+            check(invoke(req, "/status", daik::h_status) == ESP_OK, "water-circuit status failed");
+            successful(req);
+            check(req.response.find("\"min_l_min\":6.5") != std::string::npos,
+                  "legacy flow minimum changed");
+            check(req.response.find(dated ? "\"observed_s\":14.500001" : "\"samples\":null") !=
+                      std::string::npos,
+                  "water-circuit coverage must depend on dated evidence");
+            check(req.response.find(
+                      dated ? "\"spread_k\":{\"min\":3,\"mean\":3.25,\"max\":3.5}"
+                            : "\"spread_k\":{\"min\":null,\"mean\":null,\"max\":null}") !=
+                      std::string::npos,
+                  "water spread must use the same known sample population");
+            check(req.response.find(
+                      "\"pump_command_pct\":{\"min\":null,\"mean\":null,\"max\":null}") !=
+                      std::string::npos,
+                  "unreadable optional command must remain null");
+        }
     });
     run("status_fault_timeline", [] {
         current.diagnostics_enabled = true;

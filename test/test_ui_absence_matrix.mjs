@@ -95,9 +95,10 @@ const context = vm.createContext({
 
 vm.runInContext(`${readAppSource().replace(/\nboot\(\);\s*$/, "\n")}
   this.__ui = { S, t, esp32CardHtml, dynamicControlCardHtml, circulationSettingsCardHtml,
-                refrigerantServiceRowHtml, connLinks, liveData, histHtml, INSPECT, roomSourceStatus,
-                hasRoomHist, roomReferencePresent, roomReferenceValue, renderEnv3Pill,
-                renderSourcePills, layoutHeaderPills, renderInspect };`, context,
+                refrigerantServiceRowHtml, checkupCardHtml, checkupDetailHtml, connLinks, liveData,
+                histHtml, INSPECT, roomSourceStatus, hasRoomHist, roomReferencePresent,
+                roomReferenceValue, renderEnv3Pill, renderSourcePills, layoutHeaderPills,
+                renderInspect };`, context,
   { filename: "main/www/app.sources" });
 const ui = context.__ui;
 
@@ -676,6 +677,37 @@ assert.notEqual(ui.t("conn.eth_no_cable"), ui.t("conn.eth_no_lease"),
     assert.ok(!card.includes(ui.t("ref.ago", 10)),
       `${reason}: the arrival age must not stand in for the reading age`);
   }
+  checks++;
+}
+
+// Modbus-only diagnostics and unavailable flow never surface X10A hydronic observation details
+// or keep an unavailable flow row visible via a hydronic placeholder or stale X10A payload.
+{
+  const hydronicPlaceholder = {
+    confirmed: false, current: false, dated: false, coverage_partial: false,
+    restore_pending: false, persistence_pending: false, method: 1, reason_code: 0,
+    reason: "none", spread_k: { min: null, mean: null, max: null },
+  };
+  const modbusOnly = build(["x10a"]);
+  modbusOnly.diagnostics = { enabled: true, source: "modbus", effective_source: "modbus",
+    available_sources: ["modbus"] };
+  modbusOnly.health = { source: "modbus", status: "ok", persist: "no_record", source_fresh: true,
+    covered_s: 3600, span_s: 3600, full_span: false, available: 4, assessable: 4, evaluated: 4,
+    checks: [{ id: "flow", verdict: "unavailable", observed_s: 0, min_l_min: null,
+      hydronic: hydronicPlaceholder }] };
+  ui.S.status = modbusOnly;
+  assert.ok(!ui.checkupCardHtml(true).includes("health_flow"),
+    "Modbus diagnostics must hide unavailable flow even with hydronic placeholder");
+  assert.equal(ui.checkupCardHtml(false), "",
+    "offline Modbus card must not expose hydronic flow row");
+  const modbusOkFlow = { id: "flow", verdict: "ok", evidence: "observation", min_l_min: 11.4,
+    hydronic: { ...hydronicPlaceholder, confirmed: true, dated: true,
+      first_evidence_unix_s: 1791880000, last_evidence_unix_s: 1791880020,
+      samples: 4, spread_k: { min: 1.0, mean: 2.0, max: 3.0 } } };
+  modbusOnly.health.checks = [modbusOkFlow];
+  const spreadLabel = ui.t("check.hydronic.labels").split("|")[0];
+  assert.ok(!ui.checkupDetailHtml(modbusOkFlow, false, modbusOnly.health).includes(spreadLabel),
+    "Modbus flow detail must omit X10A hydronic population rows");
   checks++;
 }
 

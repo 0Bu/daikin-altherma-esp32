@@ -74,6 +74,7 @@
 #include "logic/ha_device.hpp"
 #include "logic/heating_curve_mqtt.hpp"
 #include "logic/heartbeat.hpp"
+#include "logic/hydronic_payload.hpp"
 #include "logic/mqtt_base.hpp"   // mqtt_base_effective — the installation's base topic, host-tested
 #include "logic/mqtt_cleanup.hpp"
 #include "logic/mqtt_discovery_owner.hpp"
@@ -2099,11 +2100,19 @@ static __attribute__((noinline)) std::string build_heartbeat_payload() {
     f.cycling                     = checkup_cycling_evidence();
     f.modbus_cycling              = checkup_cycling_evidence(DiagnosticsSource::Modbus);
     f.stop_context                = stop_context_payload_fields(checkup_stop_context_report());
-    return build_heartbeat_json(f);
+    return build_heartbeat_json(f, HYDRONIC_FLAT_JSON_MAX_BYTES);
+}
+
+static __attribute__((noinline)) void append_heartbeat_hydronic(std::string& js) {
+    if (js.empty() || js.back() != '}') return;
+    js.pop_back(); // the base builder returns one complete object
+    append_hydronic_json(js, checkup_hydronic_report(), true);
+    js.push_back('}');
 }
 
 static __attribute__((noinline)) void publish_heartbeat() {
-    const std::string js = build_heartbeat_payload();
+    std::string js = build_heartbeat_payload();
+    append_heartbeat_hydronic(js);
     mqtt_publish(s_heartbeat, js.c_str(), static_cast<int>(js.size()), 0, 0);   // not retained
 }
 

@@ -4,6 +4,7 @@
 // touch a converter / CRC / the config model / a discovery payload — the riskiest, silently-wrong
 // parts.
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <cstdint>
@@ -53,6 +54,9 @@
 #include "logic/error_codes.hpp"
 #include "logic/checkup.hpp"
 #include "logic/defrost_start.hpp"
+#include "logic/hydronic_hourly.hpp"
+#include "logic/hydronic_input.hpp"
+#include "logic/hydronic_payload.hpp"
 #include "logic/stop_context_input.hpp"
 #include "logic/observation_hourly.hpp"
 #include "checkup_population_fixture.hpp"
@@ -5518,6 +5522,9 @@ static void test_heartbeat() {
           "\"modbus_cycling_classified_runtime_s\":null,"
           "\"modbus_cycling_censored_runtime_s\":null,"
           "\"modbus_cycling_runtime_saturated\":null}");
+    const std::string j_reserved = build_heartbeat_json(f, daik::HYDRONIC_FLAT_JSON_MAX_BYTES);
+    CHECK(j_reserved == j);
+    CHECK(j_reserved.capacity() >= j.size() + daik::HYDRONIC_FLAT_JSON_MAX_BYTES);
     HeartbeatFields      cycling_fields;
     logic::CheckupWindow cycling_window;
     cycling_fields.cycling = checkup_cycling_evidence(cycling_window, true);
@@ -25791,7 +25798,7 @@ static void test_history_persist() {
     }
     CHECK(HISTORY_FLASH_FUTURE_HOURS == 72);
     CHECK(HISTORY_FLASH_FUTURE_SAMPLES == 864);
-    CHECK(HISTORY_FLASH_FUTURE_RECORDS == 16128);
+    CHECK(HISTORY_FLASH_FUTURE_RECORDS == 13536);
     CHECK(HISTORY_JOURNAL_SLOT_COUNT >= HISTORY_FLASH_FUTURE_RECORDS);
     CHECK(HISTORY_FLASH_PARTITION_OFFSET == 0x400000);
 
@@ -32810,7 +32817,777 @@ static void test_fault_trace() {
     }
 }
 
+namespace hydronic_host_tests {
+using namespace daik::logic;
+constexpr int64_t SECOND = 1000000;
+
+static HydronicSample sample() {
+    HydronicSample s;
+    s.supported = s.command_supported = true;
+    s.leaving_known = s.return_known = s.flow_known = s.rps_known = true;
+    s.leaving_c                                                   = 45;
+    s.return_c                                                    = 35;
+    s.flow_l_min                                                  = 10;
+    s.rps                                                         = 12;
+    s.pump                                                        = HydronicBit::On;
+    s.valve_dhw = s.defrost = s.buh1 = s.buh2 = HydronicBit::Off;
+    s.mode                                    = HydronicMode::Heating;
+    s.phase_supported                         = HYDRONIC_ALL_PHASES;
+    for (auto& phase : s.phase) phase = HydronicBit::Off;
+    s.command_known  = true;
+    s.command_signal = 59.55;
+    return s;
+}
+static HydronicDelta record(HydronicTracker& t, const HydronicSample& s, int64_t now) {
+    return hydronic_record(t, s, now, 0, 1, 1, true);
+}
+static void settle(HydronicTracker& t, const HydronicSample& s, int64_t start = 0) {
+    for (int64_t offset = 0; offset <= HYDRONIC_SETTLE_US; offset += 15 * SECOND)
+        record(t, s, start + offset);
+}
+
+static void test_population_and_boundaries() {
+    auto            s = sample();
+    HydronicTracker t;
+    for (int64_t now = 0; now <= 585 * SECOND; now += 15 * SECOND) {
+        const auto d = record(t, s, now);
+        CHECK(!d.accepted && d.reason == HydronicReason::Settling);
+    }
+    CHECK(!record(t, s, 600 * SECOND - 1).accepted);
+    auto d = record(t, s, 600 * SECOND);
+    CHECK(d.accepted && d.command_accepted && d.reason == HydronicReason::None);
+    CHECK(d.candidate_us == 1 && d.qualified_us == 0);
+    CHECK(d.spread_milli == 10000 && d.flow_milli == 10000 && d.command_milli == 40450);
+    CHECK(t.counters.samples == 1 && t.counters.command_samples == 1);
+    CHECK(t.counters.observed_us == 600 * SECOND && t.counters.candidate_us == 600 * SECOND);
+    CHECK(t.counters.qualified_us == 0 && t.counters.first_accepted_us == 600 * SECOND);
+    // Ten kelvin and small/negative spreads have identical descriptive eligibility. There is no
+    // controller delta-T target (an LWT setpoint is not one), 9 K alarm, or 900 s pattern rule.
+    s.leaving_c      = 36.8;
+    s.flow_l_min     = 20;
+    s.command_signal = 37.5;
+    d                = record(t, s, 601 * SECOND);
+    CHECK(d.accepted && d.spread_milli == 1800 && d.command_milli == 62500);
+    CHECK(d.qualified_us == SECOND && d.from_us == 600 * SECOND && d.to_us == 601 * SECOND);
+    CHECK(t.counters.samples == 2 && t.counters.command_samples == 2);
+    CHECK(approx(t.counters.spread.mean(t.counters.samples), 5.9));
+    CHECK(approx(t.counters.flow.mean(t.counters.samples), 15));
+    CHECK(approx(t.counters.command.mean(t.counters.command_samples), 51.475));
+    CHECK(t.counters.spread.min_milli == 1800 && t.counters.spread.max_milli == 10000);
+    CHECK(t.counters.first_accepted_us == 600 * SECOND &&
+          t.counters.last_accepted_us == 601 * SECOND);
+    s.leaving_c     = 34.5;
+    s.command_known = false;
+    d               = record(t, s, 616 * SECOND); // exactly 15 s is continuous
+    CHECK(d.accepted && !d.command_accepted && d.spread_milli == -500);
+    CHECK(d.qualified_us == 15 * SECOND && t.counters.samples == 3);
+    CHECK(t.counters.command_samples == 2 && (d.limitations & HydronicCommandUnavailable));
+    d = record(t, s, 631 * SECOND + 1); // one microsecond too far: no duration or sample
+    CHECK(!d.accepted && d.reason == HydronicReason::PollGap);
+    CHECK(d.observed_us == 0 && d.candidate_us == 0 && d.qualified_us == 0);
+    CHECK(t.eligible_since_us == 631 * SECOND + 1 && t.counters.samples == 3);
+    CHECK(t.counters.qualified_us == 16 * SECOND);
+    CHECK(approx(HydronicRange{}.mean(0), 0));
+}
+
+static void test_witnesses_and_ranges() {
+    const auto good = sample();
+    CHECK(hydronic_decide(good).eligible);
+    for (int k = 0; k < 18; ++k) {
+        auto s = good;
+        switch (k) {
+        case 0:
+            s.leaving_known = false;
+            break;
+        case 1:
+            s.return_known = false;
+            break;
+        case 2:
+            s.flow_known = false;
+            break;
+        case 3:
+            s.rps_known = false;
+            break;
+        case 4:
+            s.pump = HydronicBit::Unknown;
+            break;
+        case 5:
+            s.valve_dhw = HydronicBit::Unknown;
+            break;
+        case 6:
+            s.defrost = HydronicBit::Unknown;
+            break;
+        case 7:
+            s.buh1 = HydronicBit::Unknown;
+            break;
+        case 8:
+            s.buh2 = HydronicBit::Unknown;
+            break;
+        case 9:
+            s.mode = HydronicMode::Unknown;
+            break;
+        case 10:
+            s.pump = HydronicBit::Off;
+            break;
+        case 11:
+            s.rps = 0;
+            break;
+        case 12:
+            s.mode = HydronicMode::Cooling;
+            break;
+        case 13:
+            s.mode = HydronicMode::Other;
+            break;
+        case 14:
+            s.valve_dhw = HydronicBit::On;
+            break;
+        case 15:
+            s.defrost = HydronicBit::On;
+            break;
+        case 16:
+            s.buh1 = HydronicBit::On;
+            break;
+        case 17:
+            s.buh2 = HydronicBit::On;
+            break;
+        }
+        const auto d = hydronic_decide(s);
+        CHECK(!d.eligible);
+        CHECK(d.observed == (k >= 10));
+        HydronicTracker t;
+        settle(t, good);
+        CHECK(t.counters.samples == 1);
+        CHECK(!record(t, s, 601 * SECOND).accepted && t.eligible_since_us == -1);
+        CHECK(!record(t, good, 602 * SECOND).accepted && t.eligible_since_us == 602 * SECOND);
+        CHECK(t.counters.samples == 1 && t.counters.qualified_us == 0);
+    }
+    for (const double value :
+         {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity(),
+          -3276.8, 3276.7, TEMP_MIN_C - 0.01, TEMP_MAX_C + 0.01}) {
+        auto s      = good;
+        s.leaving_c = value;
+        CHECK(!hydronic_decide(s).observed && !hydronic_decide(s).eligible);
+        s          = good;
+        s.return_c = value;
+        CHECK(!hydronic_decide(s).eligible);
+    }
+    for (const double value : {TEMP_MIN_C, TEMP_MAX_C}) {
+        auto s      = good;
+        s.leaving_c = s.return_c = value;
+        CHECK(hydronic_decide(s).eligible && hydronic_decide(s).spread_milli == 0);
+    }
+    for (const double value :
+         {-0.01, HYDRONIC_FLOW_MAX_L_MIN + 0.01, std::numeric_limits<double>::quiet_NaN(),
+          std::numeric_limits<double>::infinity()}) {
+        auto s       = good;
+        s.flow_l_min = value;
+        CHECK(!hydronic_decide(s).observed && !hydronic_decide(s).eligible);
+    }
+    // Zero flow during active circulating Heating stays observed+InvalidReading, whereas
+    // standby pump-off with zero flow stays PumpOff (7bb71dd6 semantics).
+    auto s       = good;
+    s.flow_l_min = 0;
+    CHECK(hydronic_decide(s).observed && !hydronic_decide(s).eligible &&
+          hydronic_decide(s).reason == HydronicReason::InvalidReading);
+    s.pump = HydronicBit::Off;
+    CHECK(hydronic_decide(s).observed && !hydronic_decide(s).eligible &&
+          hydronic_decide(s).reason == HydronicReason::PumpOff);
+    s            = good;
+    s.flow_l_min = HYDRONIC_FLOW_MAX_L_MIN;
+    CHECK(hydronic_decide(s).eligible);
+    for (const double value : {-1.0, 65536.0, std::numeric_limits<double>::infinity()}) {
+        s     = good;
+        s.rps = value;
+        CHECK(!hydronic_decide(s).eligible);
+    }
+    for (const double value : {-0.01, 100.01, std::numeric_limits<double>::quiet_NaN(),
+                               std::numeric_limits<double>::infinity()}) {
+        s                = good;
+        s.command_signal = value;
+        const auto d     = hydronic_decide(s);
+        CHECK(d.eligible && !d.command_valid && (d.limitations & HydronicCommandUnavailable));
+    }
+    for (const double value : {0.0, 100.0, 37.5}) {
+        s                = good;
+        s.command_signal = value;
+        const auto d     = hydronic_decide(s);
+        CHECK(d.command_valid && d.command_milli == hydronic_milli(100 - value));
+    }
+    for (unsigned k = 0; k < 4; ++k) {
+        s          = good;
+        s.phase[k] = HydronicBit::On;
+        CHECK(hydronic_decide(s).reason == HydronicReason::SpecialPhase);
+        s.phase[k] = HydronicBit::Unknown;
+        CHECK(hydronic_decide(s).reason == HydronicReason::MissingWitness);
+        s.phase_supported &= ~(1u << k);
+        const auto d = hydronic_decide(s);
+        CHECK(d.eligible && (d.limitations & HydronicUnobservablePhase));
+        HydronicTracker t;
+        settle(t, s);
+        CHECK(t.counters.samples == 1 && (t.counters.limitations & HydronicUnobservablePhase));
+        s          = good;
+        s.phase[k] = HydronicBit::Unknown;
+        CHECK(!record(t, s, 601 * SECOND).accepted && t.eligible_since_us == -1);
+    }
+    s                 = good;
+    s.phase_ambiguous = true;
+    CHECK(hydronic_decide(s).reason == HydronicReason::Unsupported);
+    s           = good;
+    s.supported = false;
+    CHECK(!hydronic_decide(s).eligible);
+}
+
+static void test_barriers_and_saturation() {
+    const auto      s = sample();
+    HydronicTracker t;
+    settle(t, s);
+    auto d = hydronic_record(t, s, 601 * SECOND, 0, 2, 1, true);
+    CHECK(d.identity_changed && !d.accepted && d.reason == HydronicReason::SourceChanged);
+    CHECK(t.counters.samples == 0 && t.eligible_since_us == 601 * SECOND);
+    d = hydronic_record(t, s, 602 * SECOND, 0, 2, 2, true);
+    CHECK(d.identity_changed && d.reason == HydronicReason::ConsentChanged && !d.accepted);
+    d = hydronic_record(t, s, 603 * SECOND, 0, 2, 2, false);
+    CHECK(d.identity_changed && d.reason == HydronicReason::NoConsent && t.last_us == -1);
+    CHECK(hydronic_record(t, s, 604 * SECOND, 0, 0, 2, true).reason == HydronicReason::NoSource);
+    t.reset();
+    settle(t, s);
+    CHECK(record(t, s, 600 * SECOND).reason == HydronicReason::Clock); // repeated clock
+    CHECK(t.last_us == -1 && t.eligible_since_us == -1 && t.counters.samples == 0);
+    CHECK(!record(t, s, 601 * SECOND).accepted);
+    CHECK(record(t, s, -1).reason == HydronicReason::Clock);
+    CHECK(hydronic_record(t, s, 602 * SECOND, -1, 1, 1, true).reason == HydronicReason::Clock);
+    CHECK(hydronic_record(t, s, 0, 1, 1, 1, true).reason == HydronicReason::Clock);
+    CHECK(hydronic_record(t, s, 602 * SECOND, 15 * SECOND + 1, 1, 1, true).reason ==
+          HydronicReason::PollGap);
+    t.reset();
+    settle(t, s);
+    CHECK(hydronic_record(t, s, 615 * SECOND, 15 * SECOND, 1, 1, true).accepted);
+    hydronic_poll_gap(t);
+    CHECK(t.reason == HydronicReason::PollGap && t.eligible_since_us == -1);
+    CHECK(!record(t, s, 616 * SECOND).accepted && t.counters.samples == 2);
+    // Same-generation pause/resume continuity reset discards active settle/last_us without clearing
+    // samples.
+    t.reset_continuity();
+    CHECK(t.counters.samples == 2 && t.last_us == -1 && t.eligible_since_us == -1);
+    t.reset();
+    CHECK(t.counters.samples == 0 && !t.bound);
+    settle(t, s);
+    t.counters.samples = UINT32_MAX;
+    const auto old_sum = t.counters.spread.sum_milli;
+    d                  = record(t, s, 601 * SECOND);
+    CHECK(!d.accepted && d.reason == HydronicReason::Overflow && t.counters.saturated);
+    CHECK(t.counters.spread.sum_milli == old_sum && t.counters.samples == UINT32_MAX);
+    t.reset();
+    settle(t, s);
+    t.counters.command_samples = UINT32_MAX;
+    d                          = record(t, s, 601 * SECOND);
+    CHECK(d.accepted && !d.command_accepted && t.counters.command_samples == UINT32_MAX);
+    CHECK(t.counters.samples == 2 && (d.limitations & HydronicCounterSaturated));
+    t.counters.observed_us  = UINT64_MAX;
+    t.counters.candidate_us = UINT64_MAX - 1;
+    t.counters.qualified_us = UINT64_MAX;
+    d                       = record(t, s, 602 * SECOND);
+    CHECK(t.counters.observed_us == UINT64_MAX && t.counters.candidate_us == UINT64_MAX);
+    CHECK(t.counters.qualified_us == UINT64_MAX && t.counters.saturated);
+    CHECK(d.qualified_us == SECOND); // honest step delta remains usable by the hourly owner
+    t.reset();
+    auto off = s;
+    off.pump = HydronicBit::Off;
+    record(t, off, 0);
+    d = record(t, off, SECOND);
+    CHECK(d.observed_us == SECOND && d.candidate_us == 0 && d.qualified_us == 0);
+    off.pump = HydronicBit::Unknown;
+    CHECK(record(t, off, 2 * SECOND).observed_us == 0);
+    CHECK(record(t, s, 3 * SECOND).observed_us == 0); // no interpolation through unknown
+    CHECK(record(t, s, 4 * SECOND).candidate_us == SECOND);
+    t.reset();
+    settle(t, s, 1000 * SECOND);
+    CHECK(t.counters.first_accepted_us == 1600 * SECOND);
+    CHECK(record(t, s, 0).reason == HydronicReason::Clock);
+    settle(t, s, SECOND);
+    CHECK(t.counters.samples == 1 && t.counters.first_accepted_us == 601 * SECOND &&
+          t.counters.last_accepted_us == 601 * SECOND); // replacement clock has its own lifespan
+}
+
+static void test_clock_epoch_after_interruptions() {
+    const auto s = sample();
+    for (unsigned interruption = 0; interruption < 4; ++interruption) {
+        HydronicTracker t;
+        settle(t, s, 1000 * SECOND);
+        CHECK(t.counters.samples == 1 && t.last_completion_us == 1600 * SECOND);
+        if (interruption == 0) {
+            hydronic_poll_gap(t);
+            CHECK(t.last_completion_us == 1600 * SECOND);
+        } else {
+            const int64_t duration = interruption == 1   ? -1
+                                     : interruption == 2 ? HYDRONIC_MAX_GAP_US + 1
+                                                         : 1601 * SECOND + 1;
+            const auto    d        = hydronic_record(t, s, 1601 * SECOND, duration, 1, 1, true);
+            CHECK(!d.accepted && d.observed_us == 0 && d.candidate_us == 0 && d.qualified_us == 0);
+            CHECK(d.reason ==
+                  (interruption == 2 ? HydronicReason::PollGap : HydronicReason::Clock));
+            CHECK(t.last_completion_us == 1601 * SECOND);
+        }
+        CHECK(t.last_us == -1 && t.eligible_since_us == -1);
+        CHECK(t.counters.samples == 1 && t.counters.first_accepted_us == 1600 * SECOND &&
+              t.counters.last_accepted_us == 1600 * SECOND); // ordinary interruption retains data
+        const auto d = record(t, s, SECOND); // replacement clock hidden behind the interruption
+        CHECK(d.reason == HydronicReason::Clock && !d.accepted && !d.command_accepted);
+        CHECK(d.from_us == -1 && d.observed_us == 0 && d.candidate_us == 0 && d.qualified_us == 0);
+        CHECK(t.counters.samples == 0 && t.counters.command_samples == 0 &&
+              t.counters.first_accepted_us == -1 && t.counters.last_accepted_us == -1);
+        CHECK(t.last_completion_us == SECOND && t.last_us == -1);
+        settle(t, s, 2 * SECOND);
+        CHECK(t.counters.samples == 1 && t.counters.first_accepted_us == 602 * SECOND &&
+              t.counters.last_accepted_us == 602 * SECOND);
+        CHECK(t.counters.candidate_us == 600 * SECOND && t.counters.qualified_us == 0);
+        CHECK(record(t, s, 603 * SECOND).accepted);
+        CHECK(t.counters.samples == 2 && t.counters.last_accepted_us == 603 * SECOND &&
+              t.counters.first_accepted_us <= t.counters.last_accepted_us);
+        t.reset_continuity();
+        CHECK(t.last_completion_us == 603 * SECOND);
+        CHECK(record(t, s, 603 * SECOND).reason == HydronicReason::Clock); // repeated after reset
+        CHECK(t.counters.samples == 0);
+        t.reset();
+        CHECK(t.last_completion_us == -1);
+    }
+    HydronicTracker t;
+    settle(t, s, 1000 * SECOND);
+    auto d = hydronic_record(t, s, 0, 0, 2, 1, true);
+    CHECK(d.reason == HydronicReason::SourceChanged && t.last_completion_us == 0);
+    d = hydronic_record(t, s, 0, 0, 2, 2, true);
+    CHECK(d.reason == HydronicReason::ConsentChanged && t.last_completion_us == 0);
+}
+
+struct Row {
+    uint8_t     reg = 0, off = 0;
+    uint16_t    conv = 0;
+    bool        held = false, held_unknown = false;
+    std::string value;
+};
+static void test_inputs() {
+    const char* id   = "altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw";
+    const auto  view = daik::def::lookup_view(id);
+    const auto  plan = hydronic_input_plan(id, view);
+    CHECK(plan.schema_fp != 0);
+    Row            rows[HYDRONIC_INPUTS + 1];
+    const char*    values[] = {"45", "35", "10", "59.55", "1", "12", "Heating", "0",
+                               "0",  "0",  "0",  "0",     "0", "0",  "0"};
+    daik::ValueDef defs[HYDRONIC_INPUTS];
+    for (size_t k = 0; k < HYDRONIC_INPUTS; ++k) {
+        CHECK(hydronic_input_supported(plan, static_cast<HydronicInput>(k)));
+        const auto& key = plan.rows[k];
+        rows[k]    = {key.reg, key.off, static_cast<uint16_t>(key.conv), false, false, values[k]};
+        bool found = false;
+        for (size_t j = 0; j < view.count(); ++j) {
+            const auto def = adjudicated(view, j);
+            if (checkup_row_matches(key, def.reg, def.offset, def.conv)) {
+                defs[k] = def;
+                found   = true;
+            }
+        }
+        CHECK(found);
+    }
+    const auto collect = [&] { return hydronic_collect(plan, rows, HYDRONIC_INPUTS, true, true); };
+    CHECK(hydronic_decide(collect()).eligible);
+    CHECK(hydronic_decide(collect()).command_milli == 40450);
+    // The collector consumes the already-derived compressor witness. Current numeric RPS
+    // validates it, rather than supplying a second independent answer to compressor state.
+    for (const bool running : {false, true}) {
+        const auto unknown = hydronic_collect(plan, rows, HYDRONIC_INPUTS, false, running);
+        CHECK(!unknown.rps_known &&
+              hydronic_decide(unknown).reason == HydronicReason::MissingWitness);
+    }
+    auto compressor = hydronic_collect(plan, rows, HYDRONIC_INPUTS, true, false);
+    CHECK(!compressor.rps_known &&
+          hydronic_decide(compressor).reason == HydronicReason::MissingWitness);
+    for (const std::string& bad : {std::string("0"), std::string("-1"), std::string("65536"),
+                                   std::string("NaN"), std::string("inf"), std::string("12junk")}) {
+        rows[5].value = bad;
+        compressor    = hydronic_collect(plan, rows, HYDRONIC_INPUTS, true, true);
+        CHECK(!compressor.rps_known &&
+              hydronic_decide(compressor).reason == HydronicReason::MissingWitness);
+        if (bad == "0") {
+            compressor = hydronic_collect(plan, rows, HYDRONIC_INPUTS, true, false);
+            CHECK(compressor.rps_known &&
+                  hydronic_decide(compressor).reason == HydronicReason::CompressorOff);
+        }
+    }
+    rows[5].value = "12";
+    rows[5].held  = true;
+    compressor    = hydronic_collect(plan, rows, HYDRONIC_INPUTS, true, true);
+    CHECK(!compressor.rps_known &&
+          hydronic_decide(compressor).reason == HydronicReason::MissingWitness);
+    rows[5].held         = false;
+    rows[5].held_unknown = true;
+    compressor           = hydronic_collect(plan, rows, HYDRONIC_INPUTS, true, true);
+    CHECK(!compressor.rps_known &&
+          hydronic_decide(compressor).reason == HydronicReason::MissingWitness);
+    rows[5].held_unknown = false;
+    CHECK(plan.rows[0].reg == 0x61 && plan.rows[0].off == 2 && plan.rows[0].conv == 105);
+    CHECK(plan.rows[1].reg == 0x61 && plan.rows[1].off == 8 && plan.rows[1].conv == 105);
+    CHECK(plan.rows[2].reg == 0x62 && plan.rows[2].off == 9 && plan.rows[2].conv == 105);
+    CHECK(plan.rows[3].reg == 0x62 && plan.rows[3].off == 12 && plan.rows[3].conv == 152);
+    CHECK(!hydronic_input_supported(plan, HydronicInput::Count));
+    CHECK(!hydronic_collect(plan, static_cast<const Row*>(nullptr), 0, true, true).leaving_known);
+    CHECK(hydronic_input_row(plan, HydronicInput::Flow, rows, 2) == nullptr);
+    for (size_t k = 0; k < HYDRONIC_INPUTS; ++k) {
+        const auto input = static_cast<HydronicInput>(k);
+        rows[k].held     = true;
+        CHECK(hydronic_input_row(plan, input, rows, HYDRONIC_INPUTS) == nullptr);
+        rows[k].held         = false;
+        rows[k].held_unknown = true;
+        CHECK(hydronic_input_row(plan, input, rows, HYDRONIC_INPUTS) == nullptr);
+        rows[k].held_unknown  = false;
+        rows[HYDRONIC_INPUTS] = rows[k];
+        CHECK(hydronic_input_row(plan, input, rows, HYDRONIC_INPUTS + 1) == nullptr);
+    }
+    for (const size_t k : {size_t(0), size_t(1), size_t(2), size_t(3), size_t(5)}) {
+        const auto original = rows[k].value;
+        for (const std::string& invalid :
+             {std::string(""), std::string("?"), std::string("NaN"), std::string("inf"),
+              std::string(" 12"), std::string("12 "), std::string("12junk"),
+              std::string("12\0x", 4)}) {
+            rows[k].value = invalid;
+            const auto d  = hydronic_decide(collect());
+            CHECK(d.eligible == (k == 3)); // optional command cannot erase thermometry
+            if (k == 3) CHECK(!d.command_valid);
+        }
+        rows[k].value = original;
+    }
+    for (const size_t k : {size_t(4), size_t(7), size_t(8), size_t(9), size_t(10), size_t(11),
+                           size_t(12), size_t(13), size_t(14)}) {
+        const auto original = rows[k].value;
+        for (const std::string& invalid :
+             {std::string("0.0"), std::string("1.0"), std::string("ON"), std::string("2"),
+              std::string("0\0x", 3)}) {
+            rows[k].value = invalid;
+            CHECK(!hydronic_decide(collect()).eligible);
+        }
+        rows[k].value = original;
+    }
+    for (const std::string& mode :
+         {std::string("Cooling"), std::string("DHW"), std::string("Heating + DHW"),
+          std::string("Cooling + DHW"), std::string("Stop"), std::string("Auto"),
+          std::string("Heating\0x", 9)}) {
+        rows[6].value = mode;
+        CHECK(!hydronic_decide(collect()).eligible);
+    }
+    rows[6].value = "Heating";
+    CHECK(hydronic_input_plan(nullptr, view).schema_fp == 0);
+    CHECK(hydronic_input_plan("", view).schema_fp == 0);
+    CHECK(hydronic_input_plan("auto", view).schema_fp == 0);
+    CHECK(hydronic_input_plan("wrong", view).schema_fp == 0);
+    CHECK(hydronic_input_plan(id, {}).schema_fp == 0);
+    ProfileView minimal;
+    minimal.profile_id = id;
+    minimal.base       = defs;
+    minimal.base_count = HYDRONIC_INPUTS;
+    const auto full    = hydronic_input_plan(id, minimal);
+    CHECK(hydronic_decide(hydronic_collect(full, rows, HYDRONIC_INPUTS, true, true)).eligible);
+    std::reverse(std::begin(defs), std::end(defs));
+    CHECK(hydronic_input_plan(id, minimal).schema_fp == full.schema_fp);
+    std::reverse(std::begin(defs), std::end(defs));
+    for (size_t k = 0; k < HYDRONIC_INPUTS; ++k) {
+        defs[k].no_publish  = true;
+        const auto withheld = hydronic_input_plan(id, minimal);
+        const auto d =
+            hydronic_decide(hydronic_collect(withheld, rows, HYDRONIC_INPUTS, true, true));
+        CHECK(!hydronic_input_supported(withheld, static_cast<HydronicInput>(k)));
+        CHECK(d.eligible == (k == 3 || k >= 11));
+        if (k >= 11) CHECK(d.limitations & HydronicUnobservablePhase);
+        defs[k].no_publish = false;
+    }
+    // A structurally absent phase is limited, an offered phase lost this sweep is blocking.
+    minimal.base_count      = 11;
+    const auto absent_phase = hydronic_input_plan(id, minimal);
+    auto       d            = hydronic_decide(hydronic_collect(absent_phase, rows, 11, true, true));
+    CHECK(d.eligible && (d.limitations & HydronicUnobservablePhase));
+    CHECK(!hydronic_decide(hydronic_collect(full, rows, 11, true, true)).eligible);
+    minimal.base_count       = HYDRONIC_INPUTS;
+    daik::ValueDef duplicate = defs[0];
+    minimal.extra            = &duplicate;
+    minimal.extra_count      = 1;
+    CHECK(hydronic_input_plan(id, minimal).states[0] == InstrumentState::Ambiguous);
+    duplicate                  = defs[11];
+    const auto ambiguous_phase = hydronic_input_plan(id, minimal);
+    CHECK(ambiguous_phase.states[11] == InstrumentState::Ambiguous);
+    CHECK(!hydronic_decide(hydronic_collect(ambiguous_phase, rows, HYDRONIC_INPUTS, true, true))
+               .eligible);
+    duplicate = {0x10, 1, 152, 1, -1, "overlapping byte"};
+    CHECK(hydronic_phase_resolve(minimal, 306).state == InstrumentState::Ambiguous);
+    minimal.extra       = nullptr;
+    minimal.extra_count = 0;
+    defs[0].label       = "arbitrary localized label";
+    CHECK(hydronic_input_supported(hydronic_input_plan(id, minimal), HydronicInput::Leaving));
+    defs[0].offset = 4; // post-BUH is never a pre-BUH fallback, regardless of its label
+    CHECK(!hydronic_input_supported(hydronic_input_plan(id, minimal), HydronicInput::Leaving));
+    CHECK(hydronic_input_row(HydronicInputPlan{}, HydronicInput::Flow, rows, HYDRONIC_INPUTS) ==
+          nullptr);
+    for (unsigned malformed = 0; malformed < 3; ++malformed) {
+        ProfileView v;
+        v.profile_id = id;
+        if (malformed == 0) v.base_count = 1;
+        if (malformed == 1) v.extra_count = 1;
+        if (malformed == 2) v.extra2_count = 1;
+        CHECK(hydronic_input_plan(id, v).schema_fp == 0);
+    }
+    unsigned supported_profiles = 0;
+    for (const auto& profile : daik::def::profiles) {
+        const auto v = daik::def::lookup_view(profile.id);
+        const auto p = hydronic_input_plan(profile.id, v);
+        for (size_t k = 0; k < 11; ++k)
+            CHECK(p.states[k] == instrument_resolve(v, HYDRONIC_INSTRUMENTS[k]).state);
+        if (hydronic_input_supported(p, HydronicInput::Leaving) &&
+            hydronic_input_supported(p, HydronicInput::Return) &&
+            hydronic_input_supported(p, HydronicInput::Flow))
+            ++supported_profiles;
+    }
+    CHECK(supported_profiles > 20); // genuinely cross-profile, never a single-label fixture
+}
+
+static void test_hourly_wire_and_population() {
+    constexpr int64_t     bucket = 1000;
+    HydronicHourlyPayload p;
+    p.identity               = {0x04030201, 2, 3, 23};
+    p.first_unix_us          = bucket * OBSERVATION_HOUR_US;
+    p.last_unix_us           = p.first_unix_us + SECOND;
+    p.first_accepted_unix_us = p.last_accepted_unix_us = p.last_unix_us;
+    p.observed_us = p.candidate_us = SECOND;
+    p.duration_edges               = HYDRONIC_DUR_FIRST;
+    p.samples = p.command_samples = 1;
+    p.spread                      = {10000, 10000, 10000};
+    p.flow                        = {10000, 10000, 10000};
+    p.command                     = {40450, 40450, 40450};
+    CHECK(hydronic_hourly_valid(p, bucket));
+    CHECK(HYDRONIC_PAYLOAD_BYTES == 124 && HYDRONIC_WORDS == 62);
+    CHECK(HYDRONIC_PAYLOAD_BYTES <= HISTORY_JOURNAL_PAYLOAD_BYTES);
+    CHECK(HISTORY_JOURNAL_SOURCE_COUNT == 5); // logical sources do not become physical source bytes
+    CHECK(hydronic_fingerprint() != observation_fingerprint());
+    CHECK(hydronic_fingerprint() != checkup_journal_fingerprint());
+
+    std::array<uint8_t, HYDRONIC_PAYLOAD_BYTES + 1> bytes;
+    bytes.fill(0xa5);
+    hydronic_encode(p, bytes.data());
+    CHECK(bytes[0] == 1 && bytes[1] == 2 && bytes[2] == 3 && bytes[3] == 4);
+    CHECK(bytes[122] == HYDRONIC_DUR_FIRST && bytes[123] == 0);
+    CHECK(bytes[HYDRONIC_PAYLOAD_BYTES] == 0xa5);
+    HydronicHourlyPayload decoded;
+    CHECK(hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, bucket, decoded));
+    CHECK(decoded.samples == 1 && decoded.command_samples == 1);
+    CHECK(decoded.duration_edges == HYDRONIC_DUR_FIRST);
+    CHECK(decoded.command.sum_milli == 40450 && decoded.first_accepted_unix_us == p.last_unix_us);
+    CHECK(!hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES - 1, bucket, decoded));
+    CHECK(!hydronic_decode(nullptr, HYDRONIC_PAYLOAD_BYTES, bucket, decoded));
+    bytes[HYDRONIC_PAYLOAD_BYTES - 1] = 1;
+    CHECK(!hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, bucket, decoded));
+    bytes[HYDRONIC_PAYLOAD_BYTES - 1] = 0;
+    bytes[122]                        = 0x80;
+    CHECK(!hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, bucket, decoded));
+
+    auto q          = p;
+    q.first_unix_us = p.last_unix_us;
+    q.last_unix_us += SECOND;
+    q.first_accepted_unix_us = q.last_accepted_unix_us = q.last_unix_us;
+    q.qualified_us                                     = SECOND;
+    q.spread                                           = {-500, -500, -500};
+    q.flow                                             = {20000, 20000, 20000};
+    q.command_samples                                  = 0;
+    q.command                                          = {};
+    q.limitations                                      = HydronicCommandUnavailable;
+    CHECK(hydronic_hourly_valid(q, bucket));
+    hydronic_encode(q, bytes.data());
+    CHECK(hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, bucket, decoded));
+    CHECK(decoded.spread.sum_milli == -500 && decoded.spread.min_milli == -500);
+    auto merged = p;
+    CHECK(hydronic_hourly_merge(merged, q));
+    CHECK(merged.samples == 2 && merged.command_samples == 1);
+    CHECK(merged.observed_us == 2 * SECOND && merged.qualified_us == SECOND);
+    CHECK(approx(merged.spread.mean(merged.samples), 4.75));
+    CHECK(approx(merged.flow.mean(merged.samples), 15));
+    CHECK(approx(merged.command.mean(merged.command_samples), 40.45));
+    CHECK(merged.spread.min_milli == -500 && merged.spread.max_milli == 10000);
+    CHECK(merged.first_accepted_unix_us == p.last_unix_us &&
+          merged.last_accepted_unix_us == q.last_unix_us);
+    CHECK(merged.duration_edges == HYDRONIC_DUR_FIRST);
+    auto overlap = q;
+    overlap.first_unix_us -= SECOND / 2;
+    auto duplicate                   = q;
+    duplicate.first_accepted_unix_us = duplicate.last_accepted_unix_us = p.last_unix_us;
+    --duplicate.last_unix_us;
+    duplicate.duration_edges = HYDRONIC_DUR_BOTH;
+    CHECK(hydronic_hourly_valid(overlap, bucket) && hydronic_hourly_valid(duplicate, bucket));
+    std::array<uint8_t, HYDRONIC_PAYLOAD_BYTES> original{}, preserved{};
+    hydronic_encode(p, original.data());
+    for (const auto& conflicting : {overlap, duplicate}) {
+        auto untouched = p;
+        CHECK(!hydronic_hourly_merge(untouched, conflicting));
+        hydronic_encode(untouched, preserved.data());
+        CHECK(original == preserved);
+    }
+    auto timed_edge = p;
+    // A hole leaves one spare tick in the span even though both fragments own the shared tick.
+    timed_edge.duration_edges = HYDRONIC_DUR_BOTH;
+    CHECK(hydronic_hourly_valid(timed_edge, bucket));
+    hydronic_encode(timed_edge, original.data());
+    CHECK(!hydronic_hourly_merge(timed_edge, q));
+    hydronic_encode(timed_edge, preserved.data());
+    CHECK(original == preserved);
+    auto point          = p;
+    point.first_unix_us = point.last_unix_us;
+    point.observed_us = point.candidate_us = point.qualified_us = 0;
+    point.duration_edges                                        = 0;
+    CHECK(hydronic_hourly_valid(point, bucket));
+    auto point_merge = q;
+    CHECK(hydronic_hourly_merge(point_merge, point));
+    CHECK(point_merge.samples == 2 && point_merge.observed_us == SECOND &&
+          point_merge.duration_edges == HYDRONIC_DUR_FIRST);
+    auto one_tick           = point;
+    one_tick.observed_us    = 1;
+    one_tick.duration_edges = HYDRONIC_DUR_BOTH;
+    CHECK(hydronic_hourly_valid(one_tick, bucket));
+    one_tick.duration_edges = HYDRONIC_DUR_FIRST;
+    CHECK(!hydronic_hourly_valid(one_tick, bucket));
+    auto reverse = q;
+    CHECK(hydronic_hourly_merge(reverse, p));
+    hydronic_encode(reverse, original.data());
+    hydronic_encode(merged, preserved.data());
+    CHECK(original == preserved);
+    auto wrong = q;
+    wrong.identity.schema_fp++;
+    const auto sum_before = merged.flow.sum_milli;
+    CHECK(!hydronic_hourly_merge(merged, wrong));
+    CHECK(merged.flow.sum_milli == sum_before && merged.samples == 2);
+    wrong                = q;
+    wrong.flow.min_milli = 0;
+    CHECK(!hydronic_hourly_valid(wrong, bucket));
+    wrong             = q;
+    wrong.observed_us = 2 * SECOND; // cannot exceed its actual one-second evidence interval
+    CHECK(!hydronic_hourly_valid(wrong, bucket));
+    wrong = q;
+    ++wrong.observed_us; // the last tick belongs solely to a sample
+    CHECK(!hydronic_hourly_valid(wrong, bucket));
+
+    HydronicTotals totals;
+    hydronic_totals_add(totals, p);
+    hydronic_totals_add(totals, q);
+    CHECK(totals.samples == 2 && totals.command_samples == 1);
+    CHECK(totals.first_evidence_unix_us == p.first_unix_us &&
+          totals.last_evidence_unix_us == q.last_unix_us);
+    CHECK(totals.first_accepted_unix_us == p.last_unix_us &&
+          totals.last_accepted_unix_us == q.last_unix_us);
+    CHECK(totals.limitations & HydronicCommandUnavailable);
+    CHECK(totals.flow.sum_milli == 30000 && totals.command.sum_milli == 40450);
+    CHECK(totals.duration_edges == HYDRONIC_DUR_FIRST);
+
+    HydronicHourlyPayload fence;
+    fence.identity      = p.identity;
+    fence.kind          = HydronicHourlyKind::Fence;
+    fence.first_unix_us = fence.last_unix_us = p.last_unix_us;
+    CHECK(hydronic_hourly_valid(fence, bucket));
+    hydronic_encode(fence, bytes.data());
+    CHECK(hydronic_decode(bytes.data(), HYDRONIC_PAYLOAD_BYTES, bucket, decoded));
+    CHECK(decoded.first_accepted_unix_us == -1 && decoded.last_accepted_unix_us == -1);
+    CHECK(hydronic_signed64(UINT64_MAX) == -1 && hydronic_signed64(1ULL << 63) == INT64_MIN);
+    CHECK(hydronic_signed32(UINT32_MAX) == -1 && hydronic_signed32(1u << 31) == INT32_MIN);
+
+    HistoryJournalHeader h{};
+    h.magic       = HISTORY_JOURNAL_MAGIC;
+    h.version     = HISTORY_JOURNAL_VERSION;
+    h.source      = static_cast<uint8_t>(HistoryJournalSource::Checkup);
+    h.catalog_fp  = hydronic_fingerprint();
+    h.commit      = HISTORY_JOURNAL_COMMITTED;
+    h.value_count = HYDRONIC_WORDS;
+    h.slot_bytes  = HISTORY_JOURNAL_SLOT_BYTES;
+    h.sequence    = 1;
+    h.bucket      = bucket;
+    h.dt_s        = 3600;
+    h.rings[0]    = TREND_COUNT;
+    h.rings[1]    = HOMEHUB_HISTORY_COUNT;
+    h.rings[2]    = ENV3_HISTORY_COUNT;
+    CHECK(hydronic_header_recognizable(h) && hydronic_header_matches(h));
+    CHECK(hydronic_append_owned(h));
+    CHECK(!observation_append_owned(h));
+    h.catalog_fp = 3490136859u; // preceding H1 fingerprint without explicit duration edges
+    CHECK(!hydronic_header_recognizable(h) && !hydronic_header_matches(h) &&
+          !hydronic_append_owned(h));
+    h.catalog_fp = hydronic_fingerprint();
+    h.commit     = HISTORY_JOURNAL_ERASED;
+    CHECK(!hydronic_header_matches(h));
+    CHECK(hydronic_append_owned(h));
+    h.commit = 0;
+    CHECK(!hydronic_header_matches(h));
+    CHECK(hydronic_append_owned(h));
+    h.commit = HISTORY_JOURNAL_COMMITTED;
+    CHECK(!observation_header_matches(h));
+    h.source = static_cast<uint8_t>(HistoryJournalSource::X10a);
+    CHECK(hydronic_header_recognizable(h) && !hydronic_header_matches(h));
+    CHECK(!hydronic_append_owned(h));
+    h.source     = static_cast<uint8_t>(HistoryJournalSource::Checkup);
+    h.catalog_fp = observation_fingerprint();
+    CHECK(!hydronic_append_owned(h));
+    h.catalog_fp = hydronic_fingerprint();
+    h.commit     = HISTORY_JOURNAL_ERASED;
+    CHECK(!hydronic_header_recognizable(h));
+
+    // Verify JSON decimal rounding and dual HTTP/MQTT projection without target_delta fabrication.
+    struct FakeReport {
+        struct Obs {
+            HydronicTotals totals;
+            uint32_t       dropped        = 0;
+            uint8_t        observed_hours = 0;
+            bool           confirmed = false, dated = false, partial = false;
+            bool           restore_pending = false, persistence_pending = false;
+        } observation;
+        HydronicReason reason               = HydronicReason::NoSource;
+        uint32_t       source_generation    = 0;
+        uint32_t       schema_fp            = 0;
+        uint32_t       settling_remaining_s = 0;
+        uint8_t        limitations          = 0;
+        bool           current              = false;
+    } rep;
+    std::string nested, flat = "{";
+    daik::append_hydronic_json(nested, rep, false);
+    daik::append_hydronic_json(flat, rep, true);
+    flat.push_back('}');
+    CHECK(nested.find("\"confirmed\":false") != std::string::npos);
+    CHECK(nested.find("\"reason\":\"no_source\"") != std::string::npos);
+    CHECK(nested.find("\"target_delta_k\":null") != std::string::npos);
+    CHECK(nested.find("\"target_supported\":false") != std::string::npos);
+    CHECK(nested.find("\"secondary") == std::string::npos);
+    CHECK(flat.find("\"hydronic_confirmed\":0") != std::string::npos);
+    CHECK(flat.find("\"hydronic_target_supported\":0") != std::string::npos);
+    CHECK(flat.size() <= daik::HYDRONIC_FLAT_JSON_MAX_BYTES);
+
+    rep.observation.confirmed      = true;
+    rep.observation.dated          = true;
+    rep.observation.observed_hours = 1;
+    rep.observation.totals         = totals;
+    rep.current                    = true;
+    rep.reason                     = HydronicReason::None;
+    rep.source_generation          = 1;
+    rep.schema_fp                  = 2;
+    std::string populated_nested, populated_flat = "{";
+    daik::append_hydronic_json(populated_nested, rep, false);
+    daik::append_hydronic_json(populated_flat, rep, true);
+    populated_flat.push_back('}');
+    CHECK(populated_nested.find("\"spread_k\":{\"min\":-0.5,\"mean\":4.75,\"max\":10}") !=
+          std::string::npos);
+    CHECK(populated_nested.find(
+              "\"pump_command_pct\":{\"min\":40.45,\"mean\":40.45,\"max\":40.45}") !=
+          std::string::npos);
+    CHECK(populated_flat.find("\"hydronic_spread_mean_k\":4.75") != std::string::npos);
+    CHECK(populated_flat.size() <= daik::HYDRONIC_FLAT_JSON_MAX_BYTES);
+}
+} // namespace hydronic_host_tests
+
 int main() {
+    hydronic_host_tests::test_hourly_wire_and_population();
+    hydronic_host_tests::test_population_and_boundaries();
+    hydronic_host_tests::test_witnesses_and_ranges();
+    hydronic_host_tests::test_barriers_and_saturation();
+    hydronic_host_tests::test_clock_epoch_after_interruptions();
+    hydronic_host_tests::test_inputs();
     test_stop_context();
     test_stop_context_inputs();
     test_stop_context_output();

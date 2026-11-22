@@ -1,4 +1,4 @@
-// translation-source: aa3abf8d6b7cd47b6adfa6bc6f918e3a1dbe62e1de7c6d8deffda21d1fb75661
+// translation-source: f982a05344b9ece7dec235d585ceb16879699f0cadc0c452af38729b31d32a37
 I18N.it = localeValues([
   /* sys.nodata */ "Nessun dato",
   /* sys.unreachable */ "Non raggiungibile",
@@ -276,6 +276,12 @@ I18N.it = localeValues([
   /* service.metric.eev */ "Comando valvola di espansione",
   /* service.metric.hp */ "Alta pressione",
   /* service.metric.lp */ "Bassa pressione",
+  /* check.hydronic.labels */ "Salto termico acqua|Comando pompa|Osservato / idoneo / qualificato|Date delle evidenze|Date qualificate|Attuale|Popolazione|Blocchi orari|Differenza obiettivo di temperatura dell’acqua",
+  /* check.hydronic.reasons */ "Qualificato dal filtro del progetto|Diagnostica disattivata|Nessuna fonte attuale|Lettura non valida|Pompa spenta|Percorso ACS|Resistenza ausiliaria segnalata accesa|Avviamento residuo|Orologio di osservazione non disponibile|Fonte cambiata|Consenso diagnostico cambiato|Limite contatore raggiunto|Disabilitato per questo avvio|Qualificazione sconosciuta",
+  /* check.hydronic.limits */ "Fasi del regolatore non osservabili|Comando pompa non disponibile|Ripristino in attesa",
+  /* check.hydronic.counts */ (w, c) => `Letture acqua ${w} · letture comando ${c}`,
+  /* check.hydronic.states */ "Fonte non confermata|Con data|Senza data|Copertura di 24 h parziale|Salvataggio in attesa|Contatori saturi: limiti inferiori",
+  /* check.hydronic.loss */ (n) => `Segnalazioni di perdita in memoria ${n}`,
   /* service.metric.range */ (a, b, c, d) => `min. ${a} · media ${b} · max. ${c} ${d}`,
   /* service.metric.samples */ n => `${n} ${n === 1 ? "lettura ammessa" : "letture ammesse"}`,
   /* service.metric.input_none */ "Nessun ingresso selezionato",
@@ -1293,7 +1299,7 @@ MODEL_DESCRIPTION_I18N.it = modelDescriptionValues([
   ["Se mancano misurazioni, alcuni avvii possono sfuggire al conteggio.", "Non esiste un numero fisso di avvii considerato normale. Con dati sufficienti, questo controllo considera adeguata una durata media di almeno 10 minuti per i cicli di riscaldamento conclusi."], // health_cycling
   ["Sbrinamento", "≥3 associati, >15% del tempo di marcia del compressore con stati compressore e sbrinamento leggibili. Regola interna, non Daikin; mancano umidità e temperatura dell’intera batteria."], // health_defrost
   ["Andamento 24 h della pressione dell’acqua nel circuito idraulico chiuso (X10A, minimi su 5 min).", "Guida al grafico: >1,0 bar normale, ≤1,0 bar bassa, ≤0,5 bar critica (diagnosi da 60 s continui). La pressione di riempimento ed esercizio ammessa dipende dal manuale esatto del modello e dall’altezza dell’impianto; il valore da solo non prova perdite o guasti."], // health_pressure
-  ["Portata dopo 60 s di pompa", "Limite per stesso modello/modo/condizioni; non nominale né prova di portata insufficiente."], // health_flow
+  ["Portata minima dopo 60 s di marcia continua della pompa interna; a parte: statistiche ponderate per campione di salto termico acqua, portata e comando pompa dopo 600 s di avviamento in riscaldamento.", "Non è portata nominale né prova di carico parziale. Riguarda lo scambiatore lato acqua comune. Il comando pompa non misura giri o prevalenza. Filtro di progetto 600 s (lacune ≤15 s): non prova regime stazionario, confronto con obiettivo o causa idraulica."], // health_flow
   ["Tempo ON BUH/BSH", "non energia né prova di calore inutile."], // health_heater
   ["5 contatori sperimentali", "aumenti comparabili; lacune/reset esclusi. Stabilità non esclude limitazione né prova causa."], // health_retries
   ["RAM 24 h: stabile o cali recuperati; calo continuo, possibile perdita; riavvio compatibile alimentato: curva RAM possibile; altrimenti solo 5 min datati compatibili del registro flash a ora sincronizzata. Passi di 5 min possono celare pause brevi; aperto/recenti non salvati possono mancare."], // free_heap

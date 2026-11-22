@@ -266,6 +266,9 @@ def strip_html_comments(markup: str) -> str:
             f"markup shell has {openers} '<!--' but {removed} closed comments; "
             "an unterminated comment would swallow real markup"
         )
+    # Collapse leading/trailing line indentation while keeping one newline separator so inline
+    # element spacing remains unchanged; raw-text (<textarea>/<pre>) spans are restored afterwards.
+    stripped = re.sub(r"[ \t]*\n(?:[ \t]*\n)*[ \t]*", "\n", stripped)
 
     for index, raw in enumerate(protected):
         stripped = stripped.replace(f"\x00RAWTEXT{index}\x00", raw, 1)
@@ -324,9 +327,8 @@ def minify_page(page: str) -> str:
         "inline script",
     )
     # Markup LAST, so the two asset blocks are already reduced and are skipped by span rather than
-    # by a second parse of the source shape.  Indentation is deliberately left alone: whitespace
-    # between inline elements is significant in HTML, and collapsing it is worth ~1.1 KB gzipped
-    # against a class of layout defects that render perfectly on the machine that made the change.
+    # by a second parse of the source shape.  Line-leading/trailing indentation is collapsed to a
+    # single newline outside raw-text tags while preserving whitespace tokens between inline tags.
     return minify_markup_shell(page, strip_html_comments)
 
 

@@ -24,8 +24,12 @@ reset() {
     cp main/logic/stop_context.hpp main/logic/stop_context_input.hpp \
        main/logic/observation_hourly.hpp main/logic/instrument.hpp main/logic/heartbeat.hpp main/logic/defrost_start.hpp \
        main/logic/fault_trace.hpp main/logic/fault_persist.hpp \
+       main/logic/hydronic_observation.hpp main/logic/hydronic_input.hpp \
+       main/logic/hydronic_hourly.hpp main/logic/hydronic_payload.hpp \
        "$WORK/main/logic/"
-    cp main/stop_observation_store.hpp main/stop_observation_store.cpp main/history.cpp "$WORK/main/"
+    cp main/stop_observation_store.hpp main/stop_observation_store.cpp \
+       main/hydronic_observation_store.hpp main/hydronic_observation_store.cpp \
+       main/history.cpp "$WORK/main/"
     cp main/hp_poll.cpp "$WORK/main/hp_poll.cpp"
     cp main/http_status.cpp "$WORK/main/http_status.cpp"
     cp main/def/overlay.hpp "$WORK/main/def/overlay.hpp"

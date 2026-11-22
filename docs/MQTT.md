@@ -46,6 +46,12 @@ Eight parallel `modbus_cycling_*` flat integer fields (`modbus_cycling_censored_
 `modbus_cycling_runtime_saturated`) track the independent HomeHub/Altherma 4 Modbus cycling store
 with identical semantics, while `cycling_*` and `stop_context_*` remain X10A-only.
 
+The heartbeat also carries the numeric `hydronic_*` fields from the independent
+[`flow.hydronic` observation](API.md#qualified-water-circuit-observations). Flags use 0/1 and missing
+values remain null. Range fields include `hydronic_spread_mean_k`, `hydronic_flow_min_l_min` and
+`hydronic_pump_command_mean_pct`. MQTT uses the numeric qualification reason. No HA discovery
+entities subscribe to these fields.
+
 An initial transport-start rejection retains the initialized client and retries with bounded
 backoff. Failed event registration prevents transport start and reports an explicit error.
 

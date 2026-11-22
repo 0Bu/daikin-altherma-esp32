@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: a9a61f6ca631da6074c22dc30839ac017e09fb1436505a16d0c060b5dfc46ff8 -->
+<!-- user-docs-contract: edb99429d3fe54a36033a6bdebfe5d7e32c893d772dd5090e6b549390b45e24d -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default (`Off`). Under **Settings → Firmware**, choose **X10A** or **Modbus** for
@@ -209,15 +209,23 @@ within the 24-hour window.
 ### Lowest water flow
 
 **In plain language:** The board reports the lowest accepted flow after the internal pump has run
-continuously for at least sixty seconds.
+continuously for at least sixty seconds. Separately, readings taken after ten minutes of eligible
+heating summarize water-temperature spread, flow and commanded pump effort.
 
-**Meaning:** The result is **MEASURED**. It filters pump-off and initial run-up values; it does
-not establish part load or retain the operating mode of the minimum. When operating solely over
-Modbus, this check stays unavailable on `Altherma4`, `Probing`, or `Fallback` sweeps until `/100`
-HomeHub Input 49 scaling is affirmatively confirmed.
+**Meaning:** **MEASURED**. The two observations have separate coverage: minimum flow filters
+pump-off and initial run-up values without retaining the operating mode, while the heating
+statistics show when their readings were collected and how many qualified, remain visible during a
+link interruption, and keep water ranges available when optional pump command is missing. When
+operating solely over Modbus, `flow` stays unavailable on `Altherma4`, `Probing`, or `Fallback`
+sweeps until `/100` HomeHub Input 49 scaling is affirmatively confirmed, and X10A hydronic
+spread/flow/command ranges remain unpopulated.
 
 **Important limit:** Required flow differs by model, heating, cooling, DHW and defrost conditions.
-The minimum is not a design-flow measurement or a diagnosis of restricted flow.
+The minimum does not identify the operating mode or tell you the design flow. The spread concerns
+the heat exchanger's water circuit, the pump percentage reports the controller command, and these
+readings do not measure room emitters, pump speed, or available head. The ten-minute filter does
+not establish steady operation or diagnose a bypass or restriction, and the controller's target
+spread is unavailable.
 
 **Evidence and limits:** [Lowest water flow](DIAGNOSTIC_EVIDENCE.md#diagnosis-flow)
 

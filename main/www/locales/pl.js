@@ -1,4 +1,4 @@
-// translation-source: aa3abf8d6b7cd47b6adfa6bc6f918e3a1dbe62e1de7c6d8deffda21d1fb75661
+// translation-source: f982a05344b9ece7dec235d585ceb16879699f0cadc0c452af38729b31d32a37
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -281,6 +281,12 @@ I18N.pl = localeValues([
   /* service.metric.eev */ "Polecenie zaworu rozprężnego",
   /* service.metric.hp */ "Wysokie ciśnienie",
   /* service.metric.lp */ "Niskie ciśnienie",
+  /* check.hydronic.labels */ "Różnica temperatur wody|Wysterowanie pompy|Obserwowane / dopuszczone / zakwalifikowane|Daty dowodów|Daty zakwalifikowane|Teraz|Populacja|Przedziały godzinowe|Docelowa różnica temperatur wody",
+  /* check.hydronic.reasons */ "Zakwalifikowane filtrem projektu|Diagnostyka wyłączona|Brak bieżącego źródła|Nieprawidłowy odczyt|Pompa wyłączona|Tor ciepłej wody|Grzałka wspomagająca zgłasza włączenie|Pozostały rozruch|Brak zegara obserwacji|Zmieniono źródło|Zmieniono zgodę diagnostyczną|Osiągnięto limit licznika|Wyłączone do końca tego uruchomienia|Kwalifikacja nieznana",
+  /* check.hydronic.limits */ "Fazy sterownika nieobserwowalne|Wysterowanie pompy niedostępne|Oczekiwanie na odtworzenie",
+  /* check.hydronic.counts */ (w, c) => `Odczyty wody ${w} · odczyty wysterowania ${c}`,
+  /* check.hydronic.states */ "Źródło niepotwierdzone|Z datą|Bez daty|Niepełne 24 h|Oczekuje na zapis|Nasycenie liczników: dolne granice",
+  /* check.hydronic.loss */ (n) => `Zgłoszenia utraty podczas zapisu ${n}`,
   /* service.metric.range */ (a, b, c, d) => `min. ${a} · średnia ${b} · maks. ${c} ${d}`,
   /* service.metric.samples */ n => `Liczba przyjętych odczytów: ${n}`,
   /* service.metric.input_none */ "Brak wybranego wejścia",
@@ -1303,7 +1309,7 @@ MODEL_DESCRIPTION_I18N.pl = modelDescriptionValues([
   ["Przy brakujących pomiarach część uruchomień może nie zostać zliczona.", "Nie ma stałej liczby uruchomień uznawanej za normalną. Przy wystarczających danych ta kontrola uznaje średni czas zakończonych cykli ogrzewania wynoszący co najmniej 10 minut za wystarczający."], // health_cycling
   ["Odszranianie", "≥3 powiązane, >15% czasu pracy sprężarki przy czytelnych stanach sprężarki i odszraniania. Reguła projektu, nie Daikin; brak wilgotności i temperatury całego wymiennika."], // health_defrost
   ["24-godzinny wykres ciśnienia wody w zamkniętym obiegu hydraulicznym (X10A, minima 5-minutowe).", "Orientacja na wykresie: >1,0 bar w normie, ≤1,0 bar niskie, ≤0,5 bar krytyczne (diagnoza od 60 s ciągle). Dopuszczalne ciśnienie napełniania i pracy określa instrukcja dokładnego modelu oraz wysokość instalacji; sam odczyt nie dowodzi wycieku ani usterki."], // health_pressure
-  ["Przepływ po 60 s pompy", "Limit wymaga tego samego modelu/trybu/warunków; nie nominalny ani dowód małego przepływu."], // health_flow
+  ["Najniższy przepływ po 60 s ciągłej pracy pompy wewnętrznej; osobno: ważone próbkami statystyki różnicy temperatur wody, przepływu i wysterowania pompy po 600 s rozruchu grzania.", "Nie przepływ nominalny ani dowód pracy częściowej. Dotyczy wspólnego wymiennika wodnego. Wysterowanie pompy to nie obroty ani wysokość podnoszenia. Filtr projektu 600 s (luki ≤15 s) nie dowodzi stanu ustalonego, porównania z celem ani przyczyny hydraulicznej."], // health_flow
   ["Czas ON BUH/BSH", "nie energia ani dowód zbędnego grzania."], // health_heater
   ["5 eksperymentalnych liczników", "porównywalne wzrosty; luki/reset pomijane. Stabilność nie wyklucza ograniczeń ani nie dowodzi przyczyny."], // health_retries
   ["RAM 24 h: stabilna lub spadki z odbiciem; stały spadek, możliwy wyciek; zgodny restart z zasilaniem: możliwy wykres RAM. Inaczej tylko zgodne datowane 5 min dziennika flash po synchronizacji czasu. Co 5 min krótka przerwa może pozostać niewidoczna; otwarty/ostatnie niezapisane mogą zniknąć."], // 8

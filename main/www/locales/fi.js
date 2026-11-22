@@ -1,4 +1,4 @@
-// translation-source: aa3abf8d6b7cd47b6adfa6bc6f918e3a1dbe62e1de7c6d8deffda21d1fb75661
+// translation-source: f982a05344b9ece7dec235d585ceb16879699f0cadc0c452af38729b31d32a37
 I18N.fi = localeValues([
   /* sys.nodata */ "Ei tietoja",
   /* sys.unreachable */ "Ei tavoiteta",
@@ -276,6 +276,12 @@ I18N.fi = localeValues([
   /* service.metric.eev */ "Paisuntaventtiilin ohjaus",
   /* service.metric.hp */ "Korkeapaine",
   /* service.metric.lp */ "Matalapaine",
+  /* check.hydronic.labels */ "Veden lämpötilaero|Pumpun ohjaus|Havaittu / kelvollinen / hyväksytty|Havaintojen ajat|Hyväksyttyjen tietojen ajat|Nyt|Otosjoukko|Tuntilohkot|Veden lämpötilaeron tavoite",
+  /* check.hydronic.reasons */ "Hyväksytty projektisuodattimella|Diagnostiikka pois|Ei nykyistä lähdettä|Virheellinen lukema|Pumppu pois|Käyttövesireitti|Lisälämmitin ilmoittaa olevansa päällä|Käynnistymistä jäljellä|Havaintokello puuttuu|Lähde vaihtunut|Diagnostiikkasuostumus muuttunut|Laskurin raja saavutettu|Poistettu käytöstä tämän käynnistyksen ajaksi|Kelpoisuus tuntematon",
+  /* check.hydronic.limits */ "Säätimen vaiheita ei voi havaita|Pumpun ohjaus puuttuu|Palautus odottaa",
+  /* check.hydronic.counts */ (w, c) => `Vesilukemia ${w} · ohjauslukemia ${c}`,
+  /* check.hydronic.states */ "Lähdettä ei vahvistettu|Aikaleima tiedossa|Aikaleima puuttuu|Vajaa 24 h|Tallennus odottaa|Laskurit täynnä: alarajat",
+  /* check.hydronic.loss */ (n) => `Tallennushäviöilmoitukset ${n}`,
   /* service.metric.range */ (a, b, c, d) => `min. ${a} · keskiarvo ${b} · maks. ${c} ${d}`,
   /* service.metric.samples */ n => `Hyväksyttyjä lukemia: ${n}`,
   /* service.metric.input_none */ "Ei valittua tuloa",
@@ -1149,7 +1155,7 @@ MODEL_DESCRIPTION_I18N.fi = modelDescriptionValues([
   ["Mittauskatkojen vuoksi osa käynnistyksistä voi jäädä laskematta.", "Käynnistysten määrälle ei ole kiinteää normaaliarvoa. Kun tietoja on riittävästi, tämä tarkistus pitää päättyneiden lämmitysjaksojen vähintään 10 minuutin keskiarvoa riittävänä."], // health_cycling
   ["Sulatus", "≥3 yhdistettyä, >15% kompressorin käyntiajasta, kun sekä kompressorin että sulatuksen tila on luettavissa. Sisäinen sääntö, ei Daikin; kosteus ja koko kennon lämpötila puuttuvat."], // health_defrost
   ["24 tunnin vedenpainekäyrä suljetussa vesipiirissä (X10A, 5 minuutin minimit).", "Käyrän ohje: >1,0 bar normaali, ≤1,0 bar matala, ≤0,5 bar kriittinen (diagnoosi ≥60 s yhtäjaksoisesti). Sallittu täyttö- ja käyttöpaine riippuu mallin ohjeesta ja järjestelmän korkeudesta; lukema yksin ei todista vuotoa tai vikaa."], // health_pressure
-  ["Virtaus 60 s pumpun jälkeen", "Raja vaatii saman mallin/tilan/olosuhteet; ei nimellisarvo tai pienen virtauksen todiste."], // health_flow
+  ["Alin virtaus 60 s jatkuvan sisäisen pumpun käynnin jälkeen; erikseen: näytteillä painotetut veden lämpötilaeron, virtauksen ja pumpun ohjauksen tilastot 600 s lämmityksen alkujakson jälkeen.", "Ei nimellisvirtaus eikä osakuorman todiste. Koskee yhteistä vesipuolen lämmönvaihdinta. Pumpun ohjaus ei ole pyörimisnopeus eikä nostokorkeus. 600 s projektisuodatin (katkot ≤15 s) ei todista vakaata käyntiä, tavoitevertailua eikä hydraulista syytä."], // health_flow
   ["BUH/BSH ON-aika", "ei energiaa tai turhan lämmön todiste."], // health_heater
   ["5 kokeellista laskuria", "vertailukelpoiset nousut; aukot/reset pois. Vakaus ei sulje pois rajoitusta eikä todista syytä."], // health_retries
   ["RAM 24 h vakaa, laskut palautuvat; jatkuva lasku: ehkä vuoto; sopiva käynnistys virta päällä voi säilyttää RAM-käyrän. Muuten vain flash-lokin sopivat päivätyt 5 min aikasynkin jälkeen; 5 min välein lyhyt katko ei aina näy; avoin/uusimmat tallentamatta voivat puuttua."], // free_heap

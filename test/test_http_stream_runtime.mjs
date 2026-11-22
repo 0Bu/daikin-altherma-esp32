@@ -172,6 +172,9 @@ const mutations=[
   {name:"omitted-stop-context",file:"status",scenario:"stop_context_populated",
     before:/append_stop_context_json\(\s*j,\s*diag_effective == DiagnosticsSource::Modbus\s*\?\s*StopContextPayloadFields\{\}\s*:\s*stop_context_payload_fields\(checkup_stop_context_report\(\)\)\);/,
     after:'j += "null";'},
+  {name:"leaked-x10a-hydronic-on-modbus",file:"status",scenario:"status_modbus_diagnostics",
+    before:/CheckupHydronicReport\s+report\{\};\s*if\s*\(diag_effective == DiagnosticsSource::Modbus\)\s*\{[\s\S]*?\}\s*else\s*\{\s*report\s*=\s*checkup_hydronic_report\(\);\s*\}/,
+    after:"const CheckupHydronicReport report = checkup_hydronic_report();"},
   {name:"unsupported-stop-count-leak",file:"heartbeat",scenario:"stop_context_populated",
     before:"number(c.positive[k], known && supported);",after:"number(c.positive[k], known);"},
   {name:"elapsed-on-closed-hour",file:"status",scenario:"cycling_hours_wire",
@@ -189,7 +192,7 @@ try {
   const compiler=execute(cxx,["--version"]).stdout.trim();
   const baseline=execute(compile("production"),[]);
   const caseCount=Number(baseline.stdout.match(/^PASS total=(\d+)$/m)?.[1]);
-  assert.equal(caseCount,34);
+  assert.equal(caseCount,35);
   assert.equal(caseCount,[...baseline.stdout.matchAll(/^PASS (?!total=)\S+$/gm)].length);
   const wires=[]; const decoder=new TextDecoder("utf-8",{fatal:true});
   const configCases=new Map([

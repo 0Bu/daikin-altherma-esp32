@@ -129,7 +129,8 @@ function localeReady(lang) {
   if (!I18N[lang]) return false;
   if (lang === "en") return true;
   if (lang === "de") return !!MODEL_DESCRIPTION_I18N.de &&
-    MODEL_DESCRIPTION_LOCALE_KEYS.every(key => !!MODEL_DESCRIPTION_I18N.de[key]);
+    MODEL_DESCRIPTION_LOCALE_KEYS.every(key => !!MODEL_DESCRIPTION_I18N.de[key]) &&
+    !!FAULT_CODE_I18N.de && FAULT_CODE_I18N.de.values.length === FAULT_CODE_LOCALE_COUNT;
   const inspect = INSPECT_I18N[lang], homehub = HOMEHUB_LABEL_I18N[lang];
   const descriptions = DESCRIPTION_I18N[lang], models = MODEL_DESCRIPTION_I18N[lang];
   const faultCodes = FAULT_CODE_I18N[lang], mbDeltas = MB_DELTA_I18N[lang];
@@ -411,6 +412,12 @@ const I18N = {
     "service.metric.eev": "Expansion-valve command",
     "service.metric.hp": "High pressure",
     "service.metric.lp": "Low pressure",
+    "check.hydronic.labels": "Water spread|Pump command|Observed / eligible / qualified|Evidence dates|Qualified dates|Current|Population|Hourly buckets|Target water temperature difference",
+    "check.hydronic.reasons": "Qualified by project filter|Diagnostics off|No current source|Invalid reading|Pump off|Hot-water path|Backup heater reported on|Run-up remaining|Observation clock unavailable|Source changed|Diagnostics changed|Counter limit reached|Disabled for this boot|Qualification unknown",
+    "check.hydronic.limits": "Controller phases unobservable|Pump command unavailable|Restoration pending",
+    "check.hydronic.counts": (w, c) => `Water readings ${w} · command readings ${c}`,
+    "check.hydronic.states": "Unconfirmed source|Dated|Undated|Partial 24 h|Storage pending|Saturated: lower bounds",
+    "check.hydronic.loss": (n) => `Storage loss notices ${n}`,
     "service.metric.range": (a, b, c, d) => `min ${a} · mean ${b} · max ${c} ${d}`,
     "service.metric.samples": (n) => `${n} accepted ${n === 1 ? "reading" : "readings"}`,
     "service.metric.input_none": "No selected input",

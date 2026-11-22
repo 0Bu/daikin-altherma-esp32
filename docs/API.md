@@ -251,8 +251,9 @@ withholds current fault-clear/current pressure and reassuring assessments; dated
 The serializer captures `health.persist`, the judged window and Cycling hours together.
 In `"modbus"` mode, `defrost`, `pressure`, `retries`, and (on Altherma 4, `Probing`, or `Fallback`
 sweeps where Input 49 scaling is unverified) `flow` report `unavailable` (`checkup_modbus_coverage`),
-and `cycling.stop_context` emits the placeholder
-`confirmed:false` object; independently collected Stop context remains X10A-only.
+and both `cycling.stop_context` and `flow.hydronic` emit placeholder `confirmed:false` objects
+(`dated:false`, `reason_code:0`, null metrics); independently collected Stop and Hydronic
+observations remain X10A-only.
 `health.persist:"flash_pending"` means flash recovery has yet to establish whether compatible
 hours exist. It can wait for clock or source confirmation. A replay read error is logged and
 stops that attempt for the current boot.
@@ -272,7 +273,7 @@ evidence is a measurement, not a good/bad assessment. The reading order and main
 | `cycling` | `starts`, `mean_run_s`, `space_runs`, `space_mean_run_s`, `dhw_runs`, `dhw_mean_run_s`, `cooling_runs`, `censored_runs`, `censored_transition_runs`, `censored_handover_runs`, `censored_unreadable_runs`, `censored_restart_runs`, `censored_start_runs`, `classified_runtime_s`, `censored_runtime_s`, `runtime_saturated`, `split`, `hours`, `outdoor_source`, `outdoor_min_c`, `outdoor_mean_c`, `outdoor_samples` |
 | `defrost` | `count`, `share_pct`, `paired_count`, `defrost_s`, `run_s`, `outdoor_source`, `outdoor_min_c`, `outdoor_mean_c`, `outdoor_samples`, `last_observed_start` |
 | `pressure` | `min_bar`, `current_bar`, `min_unix_s`, `confirmed_low`, `confirmed_critical` |
-| `flow` | `min_l_min` |
+| `flow` | `min_l_min`, independent `hydronic` observation |
 | `heater` | `buh_min`, `bsh_min`, `buh_s`, `bsh_s`, `buh_observed_s`, `bsh_observed_s` |
 | `retries` | `seen` |
 
@@ -452,6 +453,32 @@ until reboot, including when flash erasure fails.
 Heater coverage is reported separately for each supported signal; an unread signal has null runtime.
 Complete rules, coverage and experimental boundaries are in
 [DIAGNOSTIC_EVIDENCE.md](DIAGNOSTIC_EVIDENCE.md); owner wording is in [DIAGNOSTICS.md](DIAGNOSTICS.md).
+
+### Qualified water-circuit observations
+
+The independent `flow.hydronic` object preserves the existing `min_l_min` and verdict.
+`method: 1` identifies the current rules. `scope: "unit_water_heat_exchanger"` names the measured
+circuit. The ranges use `weighting: "sample"`.
+
+| Fields | Meaning |
+|---|---|
+| `confirmed`, `current`, `dated` | Bound source, recent completed sweep and usable UTC dating. |
+| `coverage_partial`, `restore_pending`, `persistence_pending` | Incomplete coverage, pending archive replay, and waiting revisions or reset markers. An open hour can still be RAM-only. |
+| `dropped`, `observed_hours` | Lower bounds for loss notices and represented hours; null without a confirmed source. |
+| `window_s`, `settling_s`, `max_gap_s` | Up to 86400 seconds with whole-hour expiry, 600 seconds of settling and 15 seconds maximum continuity gap. |
+| `reason`, `reason_code`, `settling_remaining_s` | Current qualification and its numeric code. Remaining time is null outside a current run-up. |
+| `source_generation`, `schema_fp` | Source epoch and resolved input schema; null without confirmed identity. |
+| `current_limitations_mask`, `population_limitations_mask`, `population_saturated` | Mask bits 1, 2 and 4 denote unobservable phases, unavailable pump command and saturated counters. A stale current mask is null. |
+| `observed_s`, `candidate_s`, `qualified_s` | Time from readable endpoint pairs, eligible time including run-up and qualified time. |
+| `samples`, `command_samples` | Accepted water and pump-command counts. Each mean uses its own denominator. |
+| `first_evidence_unix_s`, `last_evidence_unix_s`, `first_accepted_unix_s`, `last_accepted_unix_s` | Whole UTC seconds. Missing dates remain null. |
+| `spread_k`, `flow_l_min`, `pump_command_pct` | Ranges with nullable `min`, `mean` and `max`. |
+| `target_supported`, `target_delta_k` | `false` and `null` for the current profiles. |
+
+Durations and counts are null until evidence is dated and its source is confirmed. Once dated,
+a population can have zero qualified samples and null ranges. Modbus diagnostics leaves `flow.hydronic`
+unpopulated (`confirmed:false`, `dated:false`, `reason_code:0`, null metrics). See the
+[flow evidence ledger](DIAGNOSTIC_EVIDENCE.md#diagnosis-flow) for the admission rules.
 
 ### Refrigerant observation
 

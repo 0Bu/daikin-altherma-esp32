@@ -189,7 +189,7 @@ void checkup_set_diagnostics(bool, uint32_t) {
 }
 void checkup_record(const CachedValue* values, size_t       count, bool, bool,
                     const logic::CheckupCoverage&, uint32_t generation, uint32_t consent_epoch,
-                    bool profile_confirmed) {
+                    bool profile_confirmed, int64_t) {
     if (adapter::checkup_call_count < 4)
         adapter::checkup_calls[adapter::checkup_call_count] = {count, generation, consent_epoch};
     ++adapter::checkup_call_count;

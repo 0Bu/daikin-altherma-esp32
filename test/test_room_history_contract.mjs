@@ -152,7 +152,7 @@ const sourceEnum = source.match(/^enum class HistorySource[^\n]+/m)?.[0];
 assert.ok(journalStart >= 0 && journalEnd > journalStart && sourceEnum);
 let restoreFixture = fixture.slice(0, fixture.indexOf("\nvoid runtime_boot("));
 assert.ok(restoreFixture.endsWith('throw std::runtime_error(why); }'));
-restoreFixture = '#include "logic/config_model.hpp"\n#include "logic/checkup_persist.hpp"\n#include "stop_observation_store.hpp"\n' + restoreFixture;
+restoreFixture = '#include "logic/config_model.hpp"\n#include "logic/checkup_persist.hpp"\n#include "stop_observation_store.hpp"\n#include "hydronic_observation_store.hpp"\n' + restoreFixture;
 const lockModel = String.raw`
 int flash_depth=0, history_depth=0, owned_reads=0;
 bool flash_contended=false;
@@ -224,7 +224,7 @@ struct FlashTrendRestoreScratch {
  HistorySample splice_out[HISTORY_SAMPLES];
 };
 FlashJournalRecord stored[4];
-int flash_reads=0,checkup_calls=0,stop_expirations=0,stop_services=0; bool queue_reset=false;
+int flash_reads=0,checkup_calls=0,stop_expirations=0,stop_services=0,hydronic_expirations=0,hydronic_services=0; bool queue_reset=false;
 void diag_printf(const char*,...){}
 const char* esp_err_to_name(int){return "fixture";}
 bool time_synced(){return true;}
@@ -269,6 +269,17 @@ void stop_observation_flash_service(StopObservationReader reader){
  need(flash_depth==1&&history_depth==0,"stop restore service without sole flash owner");
  need(reader==flash_read_stop_observation,"stop restore received a different reader");++stop_services;
 }
+void checkup_hydronic_expire(int64_t sample_us){
+ need(flash_depth==0&&history_depth==0,"hydronic expiry acquired under a journal/history owner");
+ need(sample_us==now_us,"hydronic expiry must receive the current monotonic time");++hydronic_expirations;
+}
+HydronicReadResult flash_read_hydronic_observation(uint16_t,int64_t&,uint64_t&,logic::HydronicHourlyPayload&){
+ throw std::runtime_error("unexpected hydronic observation read in room-only fixture");
+}
+void hydronic_observation_flash_service(HydronicObservationReader reader){
+ need(flash_depth==1&&history_depth==0,"hydronic restore service without sole flash owner");
+ need(reader==flash_read_hydronic_observation,"hydronic restore received a different reader");++hydronic_services;
+}
 void history_restore_cycling_flash(uint32_t wait){
  need(flash_depth==1&&history_depth==0&&wait==0,"cycling restore must use the nonblocking flash owner");
 }
@@ -279,7 +290,7 @@ void history_restore_fault_flash(uint32_t wait){
 void prepare_restore(){
  need(flash_depth==0&&history_depth==0,"fixture leaked owner");
  flash_contended=false;after_flash_release=nullptr;queue_reset=false;
- flash_reads=checkup_calls=stop_expirations=stop_services=0;
+ flash_reads=checkup_calls=stop_expirations=stop_services=hydronic_expirations=hydronic_services=0;
  Lock flash(s_flash_mtx);room_wipe_locked(101);s_room_identity.store(101);
  s_flash_scan_ok=true;s_flash_restore_done=false;s_flash_checkup_restore_done=false;
  s_flash_mb_checkup.restore_done=false;s_flash_mb_checkup.restore_slot_count=0;s_flash_mb_checkup.newest_bucket=INT64_MIN;
@@ -306,6 +317,7 @@ void run_restore(){
  prepare_restore();history_service_flash_restore();
  need(flash_depth==0&&history_depth==0,"restore released all locks");
  need(stop_expirations==1&&stop_services==1,"independent stop boundary serviced exactly once");
+ need(hydronic_expirations==1&&hydronic_services==1,"independent hydronic boundary serviced exactly once");
  need(flash_reads==3&&checkup_calls==1,"checkup and room scanned once without recursive flash acquisition");
  HistorySample value=0;need(R().ring.count==2,"actual source block restored");
  need(R().ring.sample_from_newest(0,value)&&value==240,"actual latest sample restored");
@@ -314,6 +326,7 @@ void run_restore(){
  prepare_restore();queue_reset=true;history_service_flash_restore();
  need(flash_depth==0&&history_depth==0,"concurrent reset releases all locks");
  need(stop_expirations==1&&stop_services==1,"source reset cannot skip independent stop boundary");
+ need(hydronic_expirations==1&&hydronic_services==1,"source reset cannot skip independent hydronic boundary");
  need(R().identity==202&&R().ring.count==0,"queued actual source reset retires entire restored block");
  {Lock flash(s_flash_mtx);const size_t room=static_cast<size_t>(HistoryJournalSource::Room);
   need(s_flash_newest_bucket[room]==INT64_MIN&&s_flash_oldest_bucket[room]==INT64_MIN,"reset endpoints remain cleared");
@@ -324,6 +337,7 @@ void run_restore(){
  history_service_flash_restore();
  need(owned_reads==before&&flash_reads==0&&checkup_calls==0,"nonblocking restore touches no owned metadata on contention");
  need(stop_expirations==1&&stop_services==0,"contention keeps expiry outside flash and refuses observation service");
+ need(hydronic_expirations==1&&hydronic_services==0,"contention keeps hydronic expiry outside flash and refuses observation service");
  flash_contended=false;need(flash_depth==0&&history_depth==0,"contended restore owns nothing");
 }
 }
@@ -365,6 +379,12 @@ try {
     ["stop-service-before-flash-lock",
       "void history_service_flash_restore() {",
       "void history_service_flash_restore() { stop_observation_flash_service(flash_read_stop_observation);"],
+    ["hydronic-expiry-under-flash-lock",
+      "    hydronic_observation_flash_service(flash_read_hydronic_observation);",
+      "    checkup_hydronic_expire(esp_timer_get_time());\n    hydronic_observation_flash_service(flash_read_hydronic_observation);"],
+    ["hydronic-service-before-flash-lock",
+      "void history_service_flash_restore() {",
+      "void history_service_flash_restore() { hydronic_observation_flash_service(flash_read_hydronic_observation);"],
   ]) {
     assert.equal(restoreFixture.split(before).length,2,`one restore mutation site ${name}`);
     const bad=run(restoreFixture.replace(before,after),name);
@@ -374,6 +394,8 @@ try {
       "recursive-checkup-flash": /recursive flash acquisition/,
       "stop-expiry-under-flash-lock": /stop expiry acquired under a journal\/history owner/,
       "stop-service-before-flash-lock": /stop restore service without sole flash owner/,
+      "hydronic-expiry-under-flash-lock": /hydronic expiry acquired under a journal\/history owner/,
+      "hydronic-service-before-flash-lock": /hydronic restore service without sole flash owner/,
     }[name];
     assert.match(bad.stderr,diagnostic);
   }

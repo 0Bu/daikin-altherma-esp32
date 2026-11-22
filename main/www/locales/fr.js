@@ -1,4 +1,4 @@
-// translation-source: aa3abf8d6b7cd47b6adfa6bc6f918e3a1dbe62e1de7c6d8deffda21d1fb75661
+// translation-source: f982a05344b9ece7dec235d585ceb16879699f0cadc0c452af38729b31d32a37
 I18N.fr = localeValues([
   /* sys.nodata */ "Aucune donnée",
   /* sys.unreachable */ "Injoignable",
@@ -276,6 +276,12 @@ I18N.fr = localeValues([
   /* service.metric.eev */ "Commande de vanne de détente",
   /* service.metric.hp */ "Haute pression",
   /* service.metric.lp */ "Basse pression",
+  /* check.hydronic.labels */ "Écart thermique de l’eau|Commande de pompe|Observé / admissible / qualifié|Dates des preuves|Dates qualifiées|Actuel|Ensemble retenu|Tranches horaires|Écart cible de température de l’eau",
+  /* check.hydronic.reasons */ "Qualifié par le filtre du projet|Diagnostic désactivé|Aucune source actuelle|Mesure invalide|Pompe arrêtée|Circuit ECS|Appoint électrique signalé actif|Démarrage restant|Horloge d’observation indisponible|Source modifiée|Autorisation de diagnostic modifiée|Limite du compteur atteinte|Désactivé pour ce démarrage|Qualification inconnue",
+  /* check.hydronic.limits */ "Phases du régulateur non observables|Commande de pompe indisponible|Restauration en attente",
+  /* check.hydronic.counts */ (w, c) => `Mesures d’eau ${w} · mesures de commande ${c}`,
+  /* check.hydronic.states */ "Source non confirmée|Daté|Non daté|Couverture de 24 h incomplète|Enregistrement en attente|Compteurs saturés : bornes inférieures",
+  /* check.hydronic.loss */ (n) => `Signalements de perte de stockage ${n}`,
   /* service.metric.range */ (a, b, c, d) => `min. ${a} · moyenne ${b} · max. ${c} ${d}`,
   /* service.metric.samples */ n => `${n} ${n === 1 ? "mesure retenue" : "mesures retenues"}`,
   /* service.metric.input_none */ "Aucune entrée sélectionnée",
@@ -1293,7 +1299,7 @@ MODEL_DESCRIPTION_I18N.fr = modelDescriptionValues([
   ["Des mesures manquantes peuvent laisser certains démarrages non comptés.", "Il n’existe pas de nombre normal fixe de démarrages. Avec suffisamment de données, ce contrôle considère qu’une durée moyenne d’au moins 10 minutes est suffisante pour les cycles de chauffage terminés."], // health_cycling
   ["Dégivrage ", "≥3 associés, >15% du temps de marche du compresseur si états compresseur et dégivrage lisibles. Règle interne, pas Daikin; humidité et température de toute la batterie absentes."], // health_defrost
   ["Courbe 24 h de la pression d’eau du circuit hydraulique fermé (X10A, minimums sur 5 min).", "Repères sur la courbe : >1,0 bar normale, ≤1,0 bar basse, ≤0,5 bar critique (diagnostic dès 60 s continues). La pression de remplissage et de service admissible dépend du manuel exact de l’appareil et de la hauteur du réseau ; la mesure seule ne prouve ni fuite ni panne."], // health_pressure
-  ["Débit après 60 s de pompe", "Seuil selon même modèle/mode/conditions ; pas nominal ni preuve de débit insuffisant."], // health_flow
+  ["Débit minimal après 60 s de marche continue de la pompe interne ; séparément : statistiques pondérées par échantillon d’écart thermique de l’eau, débit et commande de pompe après 600 s de mise en chauffe.", "Ni débit nominal ni preuve de charge partielle. Couvre l’échangeur à eau commun. La commande de pompe ne mesure ni vitesse ni hauteur manométrique. Filtre projet de 600 s (lacunes ≤15 s), sans prouver régime établi, comparaison cible ni cause hydraulique."], // health_flow
   ["Temps ON de BUH/BSH ", "pas énergie ni preuve de chaleur inutile."], // health_heater
   ["5 compteurs expérimentaux ", "hausses comparables ; lacunes/reset ignorés. Stabilité n’exclut pas limitation ni ne prouve cause."], // health_retries
   ["RAM 24 h stable, creux résorbés; baisse durable: fuite possible. Redémarrage compatible alimenté: courbe RAM possible. Sinon, journal flash requis: 5 min datées compatibles après synchro. Le pas de 5 min peut cacher un bref arrêt. Ouvert/récents non sauvés peuvent manquer."], // free_heap

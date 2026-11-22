@@ -2646,7 +2646,7 @@
       "max_bytes": 128
     },
     "stop_checkupcoverage_const___unsigned_long__unsigned_long__bool_": {
-      "pattern": "^daik::checkup_record\\(daik::CachedValue\\ const\\*,\\ unsigned\\ int,\\ bool,\\ bool,\\ daik::logic::CheckupCoverage\\ const\\&,\\ unsigned\\ long,\\ unsigned\\ long,\\ bool\\)$",
+      "pattern": "^daik::checkup_record\\(daik::CachedValue\\ const\\*,\\ unsigned\\ int,\\ bool,\\ bool,\\ daik::logic::CheckupCoverage\\ const\\&,\\ unsigned\\ long,\\ unsigned\\ long,\\ bool,\\ long\\ long\\)$",
       "max_bytes": 448
     },
     "stop_dated": {

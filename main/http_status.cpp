@@ -43,7 +43,8 @@
 #include "logic/weather_forecast.hpp"
 #include "weather_forecast.hpp"
 #include "logic/redact.hpp"
-#include "logic/heartbeat.hpp"   // append_stack_bytes — ONE never-sampled rendering rule
+#include "logic/heartbeat.hpp" // append_stack_bytes — ONE never-sampled rendering rule
+#include "logic/hydronic_payload.hpp"
 #include "logic/reset_reason.hpp"
 #include "logic/timestamp.hpp"
 #include "mqtt_ha.hpp"
@@ -625,6 +626,22 @@ append_status_outdoor_context(JsonOut& j, const logic::CheckupOutdoorReport& con
         append_json_uint(j, context.samples);
     else
         j += "null";
+}
+
+template <typename JsonOut>
+static __attribute__((noinline)) void append_hydronic_status(JsonOut&          j,
+                                                             DiagnosticsSource diag_effective) {
+    CheckupHydronicReport report{};
+    if (diag_effective == DiagnosticsSource::Modbus) {
+        report.observation.partial         = false;
+        report.observation.restore_pending = false;
+        // reason_code: 0 per docs/API.md
+        report.reason = logic::HydronicReason::None;
+    } else {
+        report = checkup_hydronic_report();
+    }
+    j += ",\"hydronic\":";
+    append_hydronic_json(j, report);
 }
 
 template <typename JsonOut>
@@ -1669,6 +1686,7 @@ static void append_status_json(JsonOut& j, bool redact) {
                 break;
             case logic::CheckupCheck::Flow:
                 tenths("min_l_min", ck.a);
+                append_hydronic_status(j, diag_effective);
                 break;
             case logic::CheckupCheck::Heater:
                 num("buh_min", whole_minutes(ck.a));

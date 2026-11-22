@@ -1,4 +1,4 @@
-// translation-source: aa3abf8d6b7cd47b6adfa6bc6f918e3a1dbe62e1de7c6d8deffda21d1fb75661
+// translation-source: f982a05344b9ece7dec235d585ceb16879699f0cadc0c452af38729b31d32a37
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
@@ -276,6 +276,12 @@ I18N.zh = localeValues([
   /* service.metric.eev */ "膨胀阀指令",
   /* service.metric.hp */ "高压",
   /* service.metric.lp */ "低压",
+  /* check.hydronic.labels */ "水温差|水泵指令|已观测／候选／已采用|证据时间|已采用数据时间|当前|样本总体|小时分组|目标水温差",
+  /* check.hydronic.reasons */ "已通过项目筛选|诊断已关闭|无当前数据源|读数无效|水泵已关闭|生活热水路径|辅助加热器报告开启|剩余启动时间|观测时钟不可用|数据源已变更|诊断授权已变更|已达计数上限|本次启动期间已禁用|资格未知",
+  /* check.hydronic.limits */ "无法观测控制器阶段|水泵指令不可用|等待恢复",
+  /* check.hydronic.counts */ (w, c) => `水侧读数 ${w} · 指令读数 ${c}`,
+  /* check.hydronic.states */ "来源未确认|有时间戳|无时间戳|24 小时覆盖不完整|等待保存|计数器已达上限：显示下限",
+  /* check.hydronic.loss */ (n) => `存储丢失报告 ${n} 次`,
   /* service.metric.range */ (a, b, c, d) => `最小 ${a} · 平均 ${b} · 最大 ${c} ${d}`,
   /* service.metric.samples */ n => `已纳入读数：${n}`,
   /* service.metric.input_none */ "未选定输入",
@@ -1293,7 +1299,7 @@ MODEL_DESCRIPTION_I18N.zh = modelDescriptionValues([
   ["测量有缺口时，部分启动可能漏计。", "启动次数没有固定的正常值。数据充足时，本项检查将已完成的供暖运行平均达到 10 分钟视为时长足够。"], // health_cycling
   ["除霜", "≥3次配对、>15%压缩机运行时间，仅计压缩机及除霜状态均可读时段。项目规则非Daikin限值；缺少湿度及整个盘管温度。"], // health_defrost
   ["封闭水路24小时水压曲线（X10A，5分钟最小值）。", "曲线说明：>1.0 bar正常，≤1.0 bar偏低，≤0.5 bar危急（连续60秒触发诊断）。允许充注与运行压力取决于具体机型手册及系统高度；单凭读数不能证明漏水或故障。"], // health_pressure
-  ["水泵60秒后流量", "限值需同机型/模式/条件；非额定，也不证明不足。"], // health_flow
+  ["内置水泵连续运行 60 秒后的最低流量；另附供暖启动 600 秒后按样本加权的水温差、流量与水泵指令统计。", "非额定流量，也不证明部分负荷。仅覆盖公共水侧换热器。水泵指令不代表转速或扬程。600 秒项目筛选（允许 ≤15 秒间隔）不证明稳定运行，也不作目标对比或水力成因判断。"], // health_flow
   ["BUH/BSH的ON时间", "非能量，不证明加热多余。"], // health_heater
   ["5个实验计数器", "可比增长；忽略缺口/重置。稳定不排除限功率，也不证明原因。"], // health_retries
   ["RAM 24小时曲线稳定或回升正常；持续下降可能泄漏。兼容通电重启可保留RAM曲线。5分钟粒度可能隐藏短暂停机。否则，须时间同步，闪存仅恢复日志内带时间的兼容区间。未完/最近未存区间可能丢失。"], // free_heap

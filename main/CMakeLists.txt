@@ -21,6 +21,7 @@ idf_component_register(
         "env3.cpp"
         "history.cpp"
         "checkup.cpp"
+        "hydronic_observation_store.cpp"
         "stop_observation_store.cpp"
         "state_dwell.cpp"
         "http_server.cpp"
@@ -195,6 +196,7 @@ set_source_files_properties(
     http_deadline.cpp
     http_ota.cpp
     http_server.cpp
+    hydronic_observation_store.cpp
     mqtt_retirement_store.cpp
     provisioning.cpp
     safe_mode.cpp

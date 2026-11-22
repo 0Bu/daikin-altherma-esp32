@@ -20,6 +20,7 @@ const checkupSource = fs.readFileSync(new URL("../main/checkup.cpp", import.meta
 const pollSource = fs.readFileSync(new URL("../main/hp_poll.cpp", import.meta.url), "utf8");
 const modbusPollSource = fs.readFileSync(new URL("../main/hp_modbus.cpp", import.meta.url), "utf8");
 const configSource = fs.readFileSync(new URL("../main/http_config.cpp", import.meta.url), "utf8");
+const hydronicSource = fs.readFileSync(new URL("../main/logic/hydronic_payload.hpp", import.meta.url), "utf8");
 
 // The executable card navigation test covers diagnosis opt-in and its order before Model.
 // GROUP_ORDER, independent of match precedence, determines the order of the live-value groups.
@@ -59,6 +60,32 @@ for (const key of [
   assert.match(normalizedStatusSource, new RegExp(`"${key}"`),
                `missing /status.health key ${key}`);
 }
+assert.match(statusSource,
+             /case logic::CheckupCheck::Flow:\s*tenths\("min_l_min", ck\.a\);\s*append_hydronic_status\(j, diag_effective\);/,
+             "flow check serializer must retain min_l_min and delegate hydronic details");
+assert.match(statusSource,
+             /if\s*\(diag_effective == DiagnosticsSource::Modbus\)\s*\{[\s\S]*?report\.observation\.partial\s*=\s*false;[\s\S]*?report\.observation\.restore_pending\s*=\s*false;[\s\S]*?report\.reason\s*=\s*logic::HydronicReason::None;[\s\S]*?\}\s*else\s*\{\s*report\s*=\s*checkup_hydronic_report\(\);\s*\}/,
+             "Modbus diagnostics mode must serialize an empty hydronic observation with reason_code 0 instead of leaking X10A data");
+for (const key of [
+  "confirmed", "current", "dated", "coverage_partial", "restore_pending", "persistence_pending",
+  "dropped", "observed_hours", "method", "window_s", "settling_s", "max_gap_s", "reason_code",
+  "reason", "scope", "weighting", "settling_remaining_s", "source_generation", "schema_fp",
+  "current_limitations_mask", "population_limitations_mask", "population_saturated",
+  "observed_s", "candidate_s", "qualified_s", "samples", "command_samples",
+  "first_evidence_unix_s", "last_evidence_unix_s", "first_accepted_unix_s", "last_accepted_unix_s",
+  "target_delta_k", "target_supported",
+]) {
+  assert.ok(hydronicSource.includes(`key("${key}")`), `missing hydronic serializer key ${key}`);
+}
+assert.match(hydronicSource,
+             /const bool\s+known\s*=\s*confirmed\s*&&\s*observation\.dated\s*&&\s*totals\.first_evidence_unix_us\s*>=\s*0;/,
+             "hydronic JSON ranges and dates must stay gated on confirmed dated history");
+assert.match(hydronicSource,
+             /range\("spread_k",\s*"spread",\s*"k",\s*totals\.spread,\s*totals\.samples\)/);
+assert.match(hydronicSource,
+             /range\("flow_l_min",\s*"flow",\s*"l_min",\s*totals\.flow,\s*totals\.samples\)/);
+assert.match(hydronicSource,
+             /range\("pump_command_pct",\s*"pump_command",\s*"pct",\s*totals\.command,\s*totals\.command_samples\)/);
 assert.match(statusSource, /if\s*\(v\s*<\s*0\)\s*\{\s*j\s*\+=\s*"null";\s*return;\s*\}/,
              "unestablished check numbers must serialize as null");
 assert.match(style, /\.vrow-val\.dim\s*\{[^}]*color:\s*var\(--muted\)/s,
@@ -622,6 +649,95 @@ assert.doesNotMatch(detail, /transition 1|restart\/journal|start not witnessed|9
 assert.equal(ui.metric({ id: "flow", verdict: "ok", min_l_min: 6.5 }), "6.5 l/min");
 assert.equal(ui.metric({ id: "flow", verdict: "ok", min_l_min: NaN }), "");
 
+// Core H1 hydronic spread/flow/command observation tests (X10A flow check): independent dated population,
+// strict gating, sub-second duration preservation, locale translation completeness, and target-delta absence.
+const hydronicFlow = {
+  id: "flow", verdict: "ok", evidence: "observation", min_l_min: 8.4,
+  hydronic: {
+    confirmed: true, current: true, dated: true, coverage_partial: false,
+    restore_pending: false, persistence_pending: false, dropped: 0, observed_hours: 1,
+    method: 1, window_s: 86400, settling_s: 600, max_gap_s: 15,
+    reason_code: 0, reason: "none", scope: "unit_water_heat_exchanger", weighting: "sample",
+    settling_remaining_s: null, source_generation: 3, schema_fp: 0x12345678,
+    current_limitations_mask: 0, population_limitations_mask: 0, population_saturated: false,
+    observed_s: 20, candidate_s: 20, qualified_s: 20, samples: 4, command_samples: 3,
+    first_evidence_unix_s: 1791880000, last_evidence_unix_s: 1791880020,
+    first_accepted_unix_s: 1791880005, last_accepted_unix_s: 1791880020,
+    spread_k: { min: -0.5, mean: 1.2, max: 3.4 },
+    flow_l_min: { min: 7.5, mean: 8.2, max: 9.1 },
+    pump_command_pct: { min: 40, mean: 55, max: 70 },
+    target_delta_k: null, target_supported: false,
+  },
+};
+const hydroDetail = (patch = {}, extra = {}) =>
+  ui.detail({ ...hydronicFlow, ...extra, hydronic: { ...hydronicFlow.hydronic, ...patch } });
+detail = hydroDetail();
+assert.match(detail, /Water spread: min -0\.5 · mean 1\.2 · max 3\.4 K/);
+assert.match(detail, /flow: min 7\.5 · mean 8\.2 · max 9\.1 l\/min/);
+assert.match(detail, /Pump command: min 40 · mean 55 · max 70 %/);
+assert.match(detail, /Water readings 4 · command readings 3/);
+assert.match(detail, /Observed \/ eligible \/ qualified: 20 s \/ 20 s \/ 20 s/);
+assert.match(detail, /Evidence dates: .* – .* UTC/);
+assert.match(detail, /Qualified dates: .* – .* UTC/);
+assert.match(detail, /Hourly buckets: 1/);
+assert.match(detail, /Current: Qualified by project filter/);
+assert.match(detail, /Population: Dated/);
+assert.match(detail, /Target water temperature difference: No data/);
+assert.doesNotMatch(detail, /Supply temperature difference|No assessable signal in this profile/);
+assert.match(hydroDetail({ target_supported: true }), /Target water temperature difference: No data/);
+
+const saturatedDetail = hydroDetail({
+  coverage_partial: true, restore_pending: true, persistence_pending: true,
+  population_saturated: true, dropped: 2,
+  current_limitations_mask: 3, population_limitations_mask: 7,
+});
+assert.match(saturatedDetail, /Water spread: min -0\.5 · mean 1\.2 · max 3\.4 K/);
+assert.match(saturatedDetail, /Water readings ≥4 · command readings ≥3/);
+assert.match(saturatedDetail, /Observed \/ eligible \/ qualified: ≥20 s \/ ≥20 s \/ ≥20 s/);
+assert.match(saturatedDetail, /Hourly buckets: ≥1/);
+assert.match(saturatedDetail, /Controller phases unobservable · Pump command unavailable · Saturated: lower bounds/);
+assert.match(saturatedDetail, /Dated · Partial 24 h · Restoration pending · Storage pending · Controller phases unobservable · Pump command unavailable · Saturated: lower bounds/);
+const saturatedPop = saturatedDetail.match(/Population: [^<]*/)?.[0] || "";
+assert.equal((saturatedPop.match(/Saturated: lower bounds/g) || []).length, 1,
+             "Population row must print Saturated: lower bounds once when both population_saturated and mask bit 4 are set");
+const saturatedOnlyPop = hydroDetail({ population_saturated: true, population_limitations_mask: 3 }).match(/Population: [^<]*/)?.[0] || "";
+assert.equal((saturatedOnlyPop.match(/Saturated: lower bounds/g) || []).length, 1,
+             "Population row must keep Saturated: lower bounds when mask bit 4 is unset");
+assert.match(saturatedDetail, /Storage loss notices ≥2/);
+
+assert.match(hydroDetail({ reason_code: 13, current: true, settling_remaining_s: 45 }), /Run-up remaining 45 s/);
+assert.match(hydroDetail({ reason_code: 13, current: false, settling_remaining_s: 45 }), /Current: Qualification unknown · No data/);
+assert.doesNotMatch(hydroDetail({ reason_code: 13, current: false, settling_remaining_s: 45 }), /Run-up remaining/);
+assert.ok(hydroDetail({ reason_code: 14, current: false }).includes(ui.text("en", "service.reason.poll_gap")),
+          "poll-gap code must keep its explanation even when current is false");
+
+const epoch0Date = new Date(0).toLocaleString("en", { dateStyle: "short", timeStyle: "short", timeZone: "UTC" }) + " UTC";
+assert.ok(hydroDetail({ first_evidence_unix_s: 0, last_evidence_unix_s: 60 }).includes(epoch0Date),
+          "Unix epoch 0 is a valid dated timestamp and must not turn into No data");
+assert.match(hydroDetail({ qualified_s: 0.000001 }), /0\.000001 s/,
+             "microsecond qualified duration must not round down to 0 s");
+assert.match(hydroDetail({ method: 2 }), /Current: Qualification unknown/);
+assert.doesNotMatch(hydroDetail({ method: 2 }), /Water spread:/);
+for (const bad of [null, undefined, NaN, Infinity, -1, "0"]) {
+  const badHtml = hydroDetail({
+    samples: bad, command_samples: bad, observed_hours: bad,
+    observed_s: bad, candidate_s: bad, qualified_s: bad,
+    spread_k: { min: bad, mean: bad, max: bad },
+  });
+  assert.doesNotMatch(badHtml, /undefined|NaN|Infinity|-1\b/);
+  assert.match(badHtml, /Water spread: No data/);
+}
+for (const lang of locales) {
+  ui.setLang(lang);
+  for (let code = 0; code <= 20; code++) {
+    const body = hydroDetail({ reason_code: code, reason: "raw_reason_must_not_leak" });
+    assert.equal((body.match(/class="vdesc-p"/g) || []).length, 3, `${lang}/H1/${code}`);
+    assert.doesNotMatch(body, /check\.hydronic|service\.reason|raw_reason_must_not_leak|undefined|NaN|Infinity/,
+                        `${lang}/H1/${code}: raw key or non-finite leak`);
+  }
+}
+ui.setLang("en");
+
 // Water pressure uses 24-hour curve-first diagnosis when X10A history is available, and falls back
 // cleanly to concise threshold state labels when no history buffer is advertised.
 const pressure = {
@@ -754,6 +870,41 @@ context.S.status.health = { status: "collecting", checks: [collecting] };
 assert.match(ui.card(), />Collecting data<\/span>/);
 context.S.status.health.checks = [{ id: "future_check", verdict: "warn", opaque: "<must-not-render>" }];
 assert.equal(ui.card(), "");
+
+// Retained dated H1 population keeps the offline X10A flow row visible without overriding badge status
+// or spilling onto unconfirmed / undated / method!=1 records.
+context.S.status = {
+  hp: { connected: false },
+  diagnostics: { enabled: true, source: "x10a", effective_source: "x10a", available_sources: ["x10a"] },
+  health: {
+    status: "unavailable",
+    checks: [
+      { id: "fault", verdict: "unavailable", active: null },
+      { ...hydronicFlow, verdict: "unavailable", min_l_min: null,
+        hydronic: { ...hydronicFlow.hydronic, current: false, reason_code: 14 } },
+    ],
+  },
+};
+const offlineHydroCard = ui.card(false);
+assert.ok(offlineHydroCard.includes("health_flow"),
+          "offline X10A card must retain confirmed dated H1 flow row");
+assert.ok(!offlineHydroCard.includes("health_fault"),
+          "H1 retention must not fabricate visibility for unrelated unavailable checks");
+assert.match(offlineHydroCard, /class="vrow-val checkup-val dim">N\/A<\/span>/);
+assert.doesNotMatch(offlineHydroCard, /badge|No hint|0\/0|>OK</);
+for (const unconfirmed of [
+  { method: 2 },
+  { confirmed: false },
+  { dated: false },
+  { first_evidence_unix_s: null },
+]) {
+  context.S.status.health.checks = [{
+    ...hydronicFlow, verdict: "unavailable", min_l_min: null,
+    hydronic: { ...hydronicFlow.hydronic, ...unconfirmed },
+  }];
+  assert.equal(ui.card(false), "", "offline X10A card must omit unconfirmed/undated H1 records");
+}
+context.S.status.health = { status: "ok", persist: "fresh", checks: [] };
 
 // Every shipped language must have dynamic copies for the changed states, not English fallback keys.
 for (const lang of locales) {
@@ -976,9 +1127,15 @@ for (const hidden of ["health_defrost", "health_pressure", "health_retries", "re
   assert.ok(!cardHtml.includes(hidden), `Modbus card must hide ${hidden}`);
 
 context.S.status.health.checks = modbusChecks.map((c) =>
-  c.id === "flow" ? { id: "flow", verdict: "unavailable", observed_s: 0 } : c);
+  c.id === "flow" ? { id: "flow", verdict: "unavailable", observed_s: 0, hydronic: hydronicFlow.hydronic } : c);
 cardHtml = ui.card(true);
 assert.ok(!cardHtml.includes("health_flow"), "Altherma 4 Modbus mode must hide unavailable flow row");
+assert.doesNotMatch(ui.detail(hydronicFlow, false, { source: "modbus", source_fresh: true }),
+                    /Water spread:|Pump command:|Evidence dates:|Hourly buckets:/);
+context.S.status.health.checks = modbusChecks.map((c) =>
+  c.id === "flow" ? { id: "flow", verdict: "unavailable", observed_s: 0, hydronic: hydronicFlow.hydronic } : c);
+assert.ok(!ui.card(false).includes("health_flow"),
+          "offline Modbus card with unavailable flow must not become visible via X10A hydronic history");
 
 context.S.status.diagnostics = { enabled: true, source: "x10a", effective_source: "x10a", available_sources: ["x10a", "modbus"] };
 context.S.status.health = { source: "x10a", status: "ok", persist: "no_record", source_fresh: true, checks: modbusChecks };
