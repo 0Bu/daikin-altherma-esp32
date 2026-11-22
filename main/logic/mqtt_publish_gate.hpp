@@ -121,4 +121,11 @@ inline constexpr bool mqtt_pause_withdraws_online(bool ota_pause, bool publisher
     return ota_pause && publisher_client && mqtt_connected;
 }
 
+// If OTA or Weather already claimed the network heap while mqtt_ha_start() was initializing,
+// defer the initial esp_mqtt_client_start() to mqtt_transport_resume_step() instead of spawning
+// and immediately stopping a transport task inside the competing TLS window.
+inline constexpr bool mqtt_initial_start_deferred(bool pause_requested, bool competing_tls_active) {
+    return pause_requested || competing_tls_active;
+}
+
 } // namespace daik
