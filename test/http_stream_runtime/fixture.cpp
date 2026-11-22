@@ -1514,10 +1514,19 @@ int main(int argc, char** argv) {
         hydronic_report.observation.totals.first_evidence_unix_us = 2000000000000000;
         hydronic_report.observation.totals.spread                 = {6500, 3000, 3500};
         hydronic_report.current                                   = true;
-        hydronic_report.secondary            = {-1750, 15000001, 2, {0x65, 4, 105}};
-        const unsigned before_stop_calls     = stop_report_calls;
-        const unsigned before_hydronic_calls = hydronic_report_calls;
-        auto           req                   = request();
+        hydronic_report.secondary                            = {-1750, 15000001, 2, {0x65, 4, 105}};
+        hydronic_report.agree_reason                         = daik::logic::AgreementReason::None;
+        hydronic_report.r1_r4_supported                      = true;
+        hydronic_report.r2_r1_supported                      = true;
+        hydronic_report.agree_limitations                    = daik::logic::AgreementDhwRoute;
+        hydronic_report.observation.totals.agree_limitations = daik::logic::AgreementDhwRoute;
+        hydronic_report.observation.totals.r1_r4_qualified_us = 35000001;
+        hydronic_report.observation.totals.r1_r4_windows      = 1;
+        hydronic_report.observation.totals.r1_r4_samples      = 2;
+        hydronic_report.observation.totals.r1_r4              = {-500, -300, -100};
+        const unsigned before_stop_calls                      = stop_report_calls;
+        const unsigned before_hydronic_calls                  = hydronic_report_calls;
+        auto           req                                    = request();
         check(invoke(req, "/status", daik::h_status) == ESP_OK, "modbus diagnostics status failed");
         successful(req);
         emit(req, "status-modbus-diagnostics");
@@ -1545,10 +1554,12 @@ int main(int argc, char** argv) {
                 in_hydronic("\"restore_pending\":false") &&
                 in_hydronic("\"reason_code\":0,\"reason\":\"none\"") &&
                 in_hydronic("\"spread_k\":{\"min\":null,\"mean\":null,\"max\":null}") &&
-                req.response.find("\"secondary_supply\":null", hydronic_end) != std::string::npos,
+                req.response.find("\"secondary_supply\":null", hydronic_end) != std::string::npos &&
+                req.response.find("\"water_agreement\":null", hydronic_end) != std::string::npos,
             "status payload missing modbus diagnostics provenance or empty stop_context/hydronic");
     });
     run("hydronic_status", [] {
+        hydronic_report = {};
         flow_min_tenths = 65;
         for (bool dated : {false, true}) {
             auto& o                         = hydronic_report.observation;
@@ -1577,12 +1588,63 @@ int main(int argc, char** argv) {
                   "unreadable optional command must remain null");
             check(req.response.find("\"secondary_supply\":null") != std::string::npos,
                   "an unqualified secondary circuit must remain null");
+            check(req.response.find(dated ? "\"water_agreement\":{\"method\":2,"
+                                          : "\"water_agreement\":null") != std::string::npos,
+                  "water agreement object must stay gated on confirmed observation");
             if (dated) emit(req, "secondary-unavailable");
         }
-        hydronic_report.observation.totals.spread = {-3, -2, -1};
-        hydronic_report.current                   = true;
-        hydronic_report.secondary                 = {-1750, 15000001, 2, {0x65, 4, 105}};
-        auto req                                  = request();
+        {
+            auto& o                                    = hydronic_report.observation;
+            o.confirmed                                = true;
+            o.dated                                    = false;
+            o.totals.first_evidence_unix_us            = -1;
+            o.totals.r1_r4_qualified_us                = 35000001;
+            o.totals.r1_r4_windows                     = 1;
+            o.totals.r1_r4_samples                     = 2;
+            o.totals.r1_r4                             = {-500, -300, -100};
+            hydronic_report.current                    = true;
+            hydronic_report.agree_reason               = daik::logic::AgreementReason::Settling;
+            hydronic_report.agree_settling_remaining_s = 420;
+            hydronic_report.agree_limitations          = daik::logic::AgreementDhwRoute;
+            auto req                                   = request();
+            check(invoke(req, "/status", daik::h_status) == ESP_OK,
+                  "undated agreement settling status failed");
+            successful(req);
+            const size_t agree_pos = req.response.find("\"water_agreement\":{");
+            check(agree_pos != std::string::npos &&
+                      req.response.find("\"reason\":\"settling\"", agree_pos) !=
+                          std::string::npos &&
+                      req.response.find("\"settling_remaining_s\":420", agree_pos) !=
+                          std::string::npos &&
+                      req.response.find("\"qualified_s\":null", agree_pos) != std::string::npos &&
+                      req.response.find("\"delta_k\":{\"min\":null,\"mean\":null,\"max\":null}",
+                                        agree_pos) != std::string::npos,
+                  "undated water agreement must null totals and ranges while reporting live "
+                  "settling");
+        }
+        auto& o                         = hydronic_report.observation;
+        o.confirmed                     = true;
+        o.dated                         = true;
+        o.totals.first_evidence_unix_us = 2000000000000000;
+        o.totals.spread                 = {-3, -2, -1};
+        o.totals.agree_limitations =
+            daik::logic::AgreementDhwRoute | daik::logic::AgreementR2tUnavailable;
+        o.totals.r1_r4_qualified_us                = 35000001;
+        o.totals.r1_r4_windows                     = 1;
+        o.totals.r1_r4_samples                     = 2;
+        o.totals.r1_r4                             = {-500, -300, -100};
+        o.totals.r2_r1_qualified_us                = 15000000;
+        o.totals.r2_r1_windows                     = 1;
+        o.totals.r2_r1_samples                     = 3;
+        o.totals.r2_r1                             = {900, 200, 400};
+        hydronic_report.current                    = true;
+        hydronic_report.secondary                  = {-1750, 15000001, 2, {0x65, 4, 105}};
+        hydronic_report.r1_r4_supported            = true;
+        hydronic_report.r2_r1_supported            = true;
+        hydronic_report.agree_reason               = daik::logic::AgreementReason::None;
+        hydronic_report.agree_settling_remaining_s = 0;
+        hydronic_report.agree_limitations          = daik::logic::AgreementDhwRoute;
+        auto req                                   = request();
         check(invoke(req, "/status", daik::h_status) == ESP_OK,
               "signed water-circuit status failed");
         successful(req);
@@ -1602,6 +1664,13 @@ int main(int argc, char** argv) {
         successful(expired);
         check(expired.response.find("\"secondary_supply\":null") != std::string::npos,
               "a stale run must not publish its comparison");
+        const size_t expired_agree = expired.response.find("\"water_agreement\":{");
+        check(expired_agree != std::string::npos &&
+                  expired.response.find("\"current_limitations_mask\":null", expired_agree) !=
+                      std::string::npos &&
+                  expired.response.find("\"settling_remaining_s\":null", expired_agree) !=
+                      std::string::npos,
+              "a stale run must null agreement current state while retaining dated totals");
         emit(expired, "secondary-expired");
     });
     run("status_fault_timeline", [] {

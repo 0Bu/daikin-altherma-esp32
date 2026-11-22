@@ -1,4 +1,4 @@
-// translation-source: c7de29a481f17e11a35ea248d888ac416d34b79cb23bafa5bcba8f20a50dc331
+// translation-source: eceea7ddd6ed641798b2f04b3048352f8ee2c044ab186c3c4c20fc20c05eef5b
 I18N.zh = localeValues([
   /* sys.nodata */ "无数据",
   /* sys.unreachable */ "无法访问",
@@ -358,6 +358,10 @@ I18N.zh = localeValues([
   /* service.metric.eev */ "膨胀阀指令",
   /* service.metric.hp */ "高压",
   /* service.metric.lp */ "低压",
+  /* check.hydronic.agree_labels */ "仅水泵 R1T−R4T|仅水泵 R2T−R1T|一致状态|一致限制",
+  /* check.hydronic.agree_reasons */ "流量低于 5.0 l/min|压缩机运行中|电辅热启用或不明|三通阀已切换|温度未稳态",
+  /* check.hydronic.agree_limits */ "R2T 不可用|含生活热水路径",
+  /* check.hydronic.agree_meta */ "窗口|读数|仅被动温差一致；非传感器校准；未排除外部热源。",
   /* service.metric.range */ (a, b, c, d) => `最小 ${a} · 平均 ${b} · 最大 ${c} ${d}`,
   /* service.metric.samples */ n => `已纳入读数：${n}`,
   /* service.metric.input_none */ "未选定输入",

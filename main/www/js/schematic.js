@@ -1802,7 +1802,7 @@ function renderInspect(mode = "") {
   // Compare the inspector signature before rendering changed live readings; unchanged polls need
   // no DOM writes and preserve the reader's text selection.
   const sig = inspectSig(e) + (flow ? JSON.stringify([
-    flow.source, flow.minimum, flow.locationsMissing, flow.unsupported,
+    flow.source, flow.minimum, flow.locationsMissing, flow.unsupported, flow.agreement,
   ]) : "");
   if (sig === S.inspSig) return;
   S.inspSig = sig;

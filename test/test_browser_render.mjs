@@ -1514,7 +1514,7 @@ async function assertFlowInspector(page, context, missingDay) {
     const report = S.status.health.checks.find(c => c.id === "flow");
     Object.assign(report, {
       verdict: "collecting", min_l_min: 5.9, observed_s: 60,
-      hydronic: { confirmed: true, current: true, dated: true, method: 1, samples: 12, reason_code: 0,
+      hydronic: { confirmed: true, current: true, dated: true, method: 2, samples: 12, reason_code: 0,
         first_evidence_unix_s: ${hour}, last_evidence_unix_s: ${hour + 3600},
         flow_l_min: { min: 11, mean: 12, max: 13 } },
     });
@@ -1657,6 +1657,43 @@ async function assertFlowInspector(page, context, missingDay) {
   `${context}: opting out hides diagnostic evidence and keeps the ordinary flow readings`);
   await page.evaluate("S.status.diagnostics.enabled = true; renderInspect(); true");
   assert.equal(await bandCount(), intervals.length, `${context}: opting in restores the dated heating bands`);
+  await page.evaluate(`(() => {
+    const report = S.status.health.checks.find(c => c.id === "flow");
+    report.water_agreement = {
+      method: 2, settling_s: 600, stable_window_s: 300, max_drift_k: 0.5,
+      min_flow_l_min: 5, max_gap_s: 15, reason_code: 0, reason: "qualified",
+      settling_remaining_s: null, current_limitations_mask: 2, population_limitations_mask: 3,
+      r1_r4: { supported: true, qualified_s: 35, windows: 1, samples: 4,
+        delta_k: { min: -0.3, mean: -0.25, max: -0.1 } },
+      r2_r1: { supported: true, qualified_s: 15, windows: 2, samples: 3,
+        delta_k: { min: 0.2, mean: 0.3, max: 0.4 } },
+    };
+    renderInspect();
+    return true;
+  })()`);
+  const agreementCheck = await page.evaluate(`(() => {
+    const brief = document.getElementById("inspFlowDiagnosis");
+    const card = document.getElementById("inspCard");
+    const labels = t("check.hydronic.agree_labels").split("|");
+    const limits = t("check.hydronic.agree_limits").split("|");
+    const meta = t("check.hydronic.agree_meta").split("|");
+    const text = brief.innerText;
+    return {
+      r1r4: text.includes(labels[0]),
+      r2r1: text.includes(labels[1]),
+      status: text.includes(labels[2]) && text.includes(t("check.status.ok")) && text.includes(limits[1]),
+      limits: text.includes(labels[3]) && text.includes(limits[0]),
+      caveat: text.includes(meta[2]),
+      briefOverflow: brief.scrollWidth <= brief.clientWidth + 1,
+      cardOverflow: card.scrollWidth <= card.clientWidth + 1,
+    };
+  })()`);
+  assert.deepEqual(agreementCheck, {
+    r1r4: true, r2r1: true, status: true, limits: true, caveat: true,
+    briefOverflow: true, cardOverflow: true,
+  }, `${context}: localized water-temperature agreement renders without overflow`);
+  assertLayout(await page.evaluate(layoutAudit), `${context}/agreement`);
+  await assertAccessibility(page, `${context}/agreement`, { nativeTree: true });
   await page.evaluate(`(() => {
     S.status.health.source = "modbus";
     S.status.health.checks.find(c => c.id === "flow").min_l_min = 7.3;

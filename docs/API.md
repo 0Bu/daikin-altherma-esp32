@@ -165,7 +165,7 @@ snapshot under the same checkup lock.
 In `"modbus"` mode, `defrost`, `pressure`, `retries`, and (on Altherma 4, `Probing`, or `Fallback`
 sweeps where Input 49 scaling is unverified) `flow` report `unavailable` (`checkup_modbus_coverage`),
 and `cycling.stop_context`, `flow.hydronic` emit placeholder `confirmed:false` objects
-(`dated:false`, `reason_code:0`, null metrics) while `flow.secondary_supply` stays null; independently collected Stop and Hydronic
+(`dated:false`, `reason_code:0`, null metrics) while `flow.secondary_supply` and `flow.water_agreement` stay null; independently collected Stop and Hydronic
 observations remain X10A-only.
 `health.persist:"flash_pending"` means flash recovery has yet to establish whether compatible
 hours exist. It can wait for clock or source confirmation. A replay read error is logged and
@@ -186,7 +186,7 @@ evidence is a measurement, not a good/bad assessment. The reading order and main
 | `cycling` | `starts`, `mean_run_s`, `space_runs`, `space_mean_run_s`, `dhw_runs`, `dhw_mean_run_s`, `cooling_runs`, `censored_runs`, `censored_transition_runs`, `censored_handover_runs`, `censored_unreadable_runs`, `censored_restart_runs`, `censored_start_runs`, `classified_runtime_s`, `censored_runtime_s`, `runtime_saturated`, `split`, `hours`, `outdoor_source`, `outdoor_min_c`, `outdoor_mean_c`, `outdoor_samples`, optional `timeline`, optional `run_contexts`, optional `flow_typical_l_min`, `stop_context` |
 | `defrost` | `count`, `share_pct`, `paired_count`, `defrost_s`, `run_s`, `outdoor_source`, `outdoor_min_c`, `outdoor_mean_c`, `outdoor_samples`, `last_observed_start` |
 | `pressure` | `min_bar`, `current_bar`, `min_unix_s`, `confirmed_low`, `confirmed_critical` |
-| `flow` | `min_l_min`, independent `hydronic` observations, nullable `minimum_windows` and nullable `secondary_supply` |
+| `flow` | `min_l_min`, independent `hydronic`, nullable `minimum_windows`, nullable `water_agreement` and nullable `secondary_supply` observations |
 | `heater` | `buh_min`, `bsh_min`, `buh_s`, `bsh_s`, `buh_observed_s`, `bsh_observed_s` |
 | `retries` | `seen` |
 
@@ -460,8 +460,10 @@ Complete rules, coverage and experimental boundaries are in
 ### Qualified water-circuit observations
 
 The independent `flow.hydronic` object preserves the existing `min_l_min` and verdict.
-`method: 1` identifies the current rules. `scope: "unit_water_heat_exchanger"` names the measured
-circuit. The ranges use `weighting: "sample"`.
+`method: 2` identifies the current `HYDR` v2 rules (`178 B` / `89` words inside the unchanged
+256-byte `HistoryJournalSource::Checkup` slot, with automatic fail-closed schema migration from v1
+`124 B` records). `scope: "unit_water_heat_exchanger"` names the measured circuit. The ranges use
+`weighting: "sample"`.
 
 | Fields | Meaning |
 |---|---|
@@ -480,7 +482,8 @@ circuit. The ranges use `weighting: "sample"`.
 
 Durations and counts are null until evidence is dated and its source is confirmed. Once dated,
 a population can have zero qualified samples and null ranges. Modbus diagnostics leaves `flow.hydronic`
-unpopulated (`confirmed:false`, `dated:false`, `reason_code:0`, null metrics). See the
+unpopulated (`confirmed:false`, `dated:false`, `reason_code:0`, null metrics) and leaves
+`flow.minimum_windows`, `flow.secondary_supply` and `flow.water_agreement` null. See the
 [flow evidence ledger](DIAGNOSTIC_EVIDENCE.md#diagnosis-flow) for the admission rules.
 
 In unredacted HTTP status, `flow.minimum_windows` locates the minimum in `flow.hydronic.flow_l_min`.
@@ -508,6 +511,32 @@ before the electric backup heater (R1T) minus the mixed main-zone supply tempera
 `source` holds the secondary X10A locator (`reg`, `offset`, `conv`). `zone_context` is
 `"unknown"`. The comparison is live and RAM-only. It leaves the flow verdict and minimum
 independent. See the [flow evidence ledger](DIAGNOSTIC_EVIDENCE.md#diagnosis-flow).
+
+### Water-temperature agreement during qualified circulation
+
+`flow.water_agreement` is null on Modbus diagnostics and whenever X10A is unconfirmed or
+suppressed. When X10A is confirmed, it emits `{method:2, settling_s:600, stable_window_s:300,
+max_drift_k:0.5, min_flow_l_min:5, max_gap_s:15, reason_code, reason, settling_remaining_s,
+current_limitations_mask, population_limitations_mask, r1_r4, r2_r1}` inside `flow`.
+
+The shared pump-only quiescent gate requires readable valid base hydronic witnesses (`observed`
+with continuity gap `<= 15 s`), `pump == On`, `flow >= 5.0 l/min`, `rps == 0`, `buh1 == Off`,
+`buh2 == Off`, `defrost == Off`, `(!bsh_supported || bsh == Off)` (unreadable supported `BSH` ->
+`missing_witness`; ambiguous `BSH` with `valve_dhw == On` -> `heater_active`), and readable
+unchanged `valve_dhw` (a mid-run flip reports `valve_changed` and resets settling and stability).
+`Restart standby` (`0x10/1/306`) and `IuOperationMode == Stop`/`Other` are allowed.
+
+`r1_r4` (`R1T - R4T`, signed K) and `r2_r1` (`R2T - R1T`, signed K) are tracked independently
+with 10 x 30 s sub-buckets. Once `>= 600 s` quiescent settling holds and a pair has `>= 300 s`
+continuous quiescent sub-bucket span with peak-to-peak excursion `<= 0.5 K` on both sensors of that
+pair, samples enter its range; otherwise, once settled, `reason` reports `not_stationary`. Absent,
+invalid, missing, or ambiguous `R2T` (`0x61/4/105`) resets only `r2_r1` and sets limitation bit 1
+(`AgreementR2tUnavailable`) without disturbing `r1_r4`. Limitation bit 2 (`AgreementDhwRoute`) marks
+admitted `valve_dhw == On` circulation; bit 4 (`AgreementCounterSaturated`) marks counter saturation.
+`r1_r4` and `r2_r1` each expose `{supported, qualified_s, windows, samples, delta_k:{min,mean,max}}`
+with `windows` incremented once per continuous quiescent run on first stationary admission (including
+across UTC hour boundaries), and durations/counts/ranges null-gated identically to `flow.hydronic`.
+These values are passive observations only, never sensor calibration, and never modify raw telemetry.
 
 ### Refrigerant observation
 

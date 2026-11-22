@@ -12,17 +12,17 @@
 
 namespace daik::logic {
 
-constexpr uint32_t HYDRONIC_METHOD          = 1;
-constexpr size_t   HYDRONIC_PAYLOAD_BYTES   = 124;
-constexpr size_t   HYDRONIC_WORDS           = HYDRONIC_PAYLOAD_BYTES / 2;
+constexpr uint32_t HYDRONIC_METHOD                   = 2;
+constexpr size_t   HYDRONIC_PAYLOAD_BYTES            = 178;
+constexpr size_t   HYDRONIC_WORDS                    = HYDRONIC_PAYLOAD_BYTES / 2;
 constexpr size_t   HYDRONIC_WINDOW_HOURS             = OBSERVATION_DAY_US / OBSERVATION_HOUR_US;
 constexpr int64_t  HYDRONIC_MINIMUM_SLOT_US          = 300000000;
 constexpr uint16_t HYDRONIC_MINIMUM_SLOTS            = (1u << 12) - 1;
 constexpr uint16_t HYDRONIC_MINIMUM_LOCATION_MISSING = 1u << 12;
 constexpr uint16_t HYDRONIC_LEGACY_MINIMUM_EVIDENCE  = UINT16_MAX;
-constexpr uint16_t HYDRONIC_HOUR_PARTIAL    = 1u;
-constexpr uint16_t HYDRONIC_HOUR_QUEUE_LOSS = 2u;
-constexpr uint16_t HYDRONIC_HOUR_CLOCK_LOSS = 4u;
+constexpr uint16_t HYDRONIC_HOUR_PARTIAL             = 1u;
+constexpr uint16_t HYDRONIC_HOUR_QUEUE_LOSS          = 2u;
+constexpr uint16_t HYDRONIC_HOUR_CLOCK_LOSS          = 4u;
 constexpr uint8_t  HYDRONIC_DUR_FIRST = 1u, HYDRONIC_DUR_LAST = 2u;
 constexpr uint8_t  HYDRONIC_DUR_BOTH = HYDRONIC_DUR_FIRST | HYDRONIC_DUR_LAST;
 constexpr uint8_t  HYDRONIC_KNOWN_LIMITATIONS =
@@ -37,25 +37,36 @@ struct HydronicHourlyPayload {
     int64_t             first_unix_us = -1, last_unix_us = -1; // dated evidence in this hour only
     int64_t             first_accepted_unix_us = -1, last_accepted_unix_us = -1;
     HydronicRange       spread, flow, command;
+    HydronicRange       r1_r4, r2_r1;
     uint32_t            observed_us = 0, candidate_us = 0, qualified_us = 0;
     uint32_t            samples = 0, command_samples = 0;
+    uint32_t            r1_r4_qualified_us = 0, r2_r1_qualified_us = 0;
+    uint32_t            r1_r4_samples = 0, r2_r1_samples = 0;
     uint16_t            flags = 0, dropped = 0;
     uint16_t            flow_min_evidence = 0;
-    uint8_t             limitations    = HydronicNoLimitation;
-    HydronicHourlyKind  kind           = HydronicHourlyKind::Data;
-    uint8_t             duration_edges = 0;
+    uint16_t            r1_r4_windows = 0, r2_r1_windows = 0;
+    uint8_t             limitations       = HydronicNoLimitation;
+    uint8_t             agree_limitations = AgreementNoLimitation;
+    HydronicHourlyKind  kind              = HydronicHourlyKind::Data;
+    uint8_t             duration_edges    = 0;
 };
 // Rolling totals exceed a single hour's uint32 duration and sample budgets. These timestamps
 // are explicit UTC dates, unlike HydronicCounters' live monotonic timestamps.
 struct HydronicTotals {
     uint64_t      observed_us = 0, candidate_us = 0, qualified_us = 0;
     uint64_t      samples = 0, command_samples = 0;
+    uint64_t      r1_r4_qualified_us = 0, r2_r1_qualified_us = 0;
+    uint64_t      r1_r4_samples = 0, r2_r1_samples = 0;
+    uint32_t      r1_r4_windows = 0, r2_r1_windows = 0;
     HydronicRange spread, flow, command;
+    HydronicRange r1_r4, r2_r1;
     int64_t       first_evidence_unix_us = -1, last_evidence_unix_us = -1;
     int64_t       first_accepted_unix_us = -1, last_accepted_unix_us = -1;
-    uint8_t       limitations    = HydronicNoLimitation;
-    bool          saturated      = false;
-    uint8_t       duration_edges = 0;
+    uint8_t       limitations       = HydronicNoLimitation;
+    uint8_t       agree_limitations = AgreementNoLimitation;
+    bool          saturated         = false;
+    bool          agree_saturated   = false;
+    uint8_t       duration_edges    = 0;
 };
 
 // Every set bin has at least one admitted endpoint with the exact rolling minimum. Anchoring
@@ -99,14 +110,22 @@ inline bool hydronic_hourly_valid(const HydronicHourlyPayload& p, int64_t bucket
         observation_bucket(p.last_unix_us) != bucket ||
         p.observed_us > static_cast<uint64_t>(OBSERVATION_HOUR_US) ||
         p.candidate_us > p.observed_us || p.qualified_us > p.candidate_us ||
-        p.command_samples > p.samples ||
+        p.command_samples > p.samples || p.r1_r4_qualified_us > p.observed_us ||
+        p.r2_r1_qualified_us > p.observed_us || p.r1_r4_windows > p.r1_r4_samples ||
+        p.r2_r1_windows > p.r2_r1_samples ||
         (p.flags &
          ~(HYDRONIC_HOUR_PARTIAL | HYDRONIC_HOUR_QUEUE_LOSS | HYDRONIC_HOUR_CLOCK_LOSS)) ||
-        (p.limitations & ~HYDRONIC_KNOWN_LIMITATIONS) || (p.duration_edges & ~HYDRONIC_DUR_BOTH) ||
+        (p.limitations & ~HYDRONIC_KNOWN_LIMITATIONS) ||
+        (p.agree_limitations & ~AGREEMENT_KNOWN_LIMITATIONS) ||
+        (p.duration_edges & ~HYDRONIC_DUR_BOTH) ||
         !hydronic_range_valid(p.spread, p.samples, -HYDRONIC_SPREAD_MAX_MILLI,
                               HYDRONIC_SPREAD_MAX_MILLI) ||
         !hydronic_range_valid(p.flow, p.samples, 1, HYDRONIC_FLOW_MAX_MILLI) ||
-        !hydronic_range_valid(p.command, p.command_samples, 0, HYDRONIC_COMMAND_MAX_MILLI))
+        !hydronic_range_valid(p.command, p.command_samples, 0, HYDRONIC_COMMAND_MAX_MILLI) ||
+        !hydronic_range_valid(p.r1_r4, p.r1_r4_samples, -HYDRONIC_SPREAD_MAX_MILLI,
+                              HYDRONIC_SPREAD_MAX_MILLI) ||
+        !hydronic_range_valid(p.r2_r1, p.r2_r1_samples, -HYDRONIC_SPREAD_MAX_MILLI,
+                              HYDRONIC_SPREAD_MAX_MILLI))
         return false;
     if (!p.samples) {
         if (p.first_accepted_unix_us != -1 || p.last_accepted_unix_us != -1 || p.flow_min_evidence)
@@ -128,8 +147,12 @@ inline bool hydronic_hourly_valid(const HydronicHourlyPayload& p, int64_t bucket
     if (p.kind == HydronicHourlyKind::Fence)
         return p.first_unix_us == p.last_unix_us && !p.observed_us && !p.candidate_us &&
                !p.qualified_us && !p.samples && !p.command_samples && !p.dropped &&
-               !p.limitations && !p.duration_edges && !(p.flags & HYDRONIC_HOUR_QUEUE_LOSS);
-    if (p.kind != HydronicHourlyKind::Data || (!p.observed_us && !p.samples) ||
+               !p.limitations && !p.duration_edges && !(p.flags & HYDRONIC_HOUR_QUEUE_LOSS) &&
+               !p.r1_r4_qualified_us && !p.r1_r4_samples && !p.r1_r4_windows &&
+               !p.r2_r1_qualified_us && !p.r2_r1_samples && !p.r2_r1_windows &&
+               !p.agree_limitations;
+    const bool any_agreement = p.r1_r4_samples > 0 || p.r2_r1_samples > 0;
+    if (p.kind != HydronicHourlyKind::Data || (!p.observed_us && !p.samples && !any_agreement) ||
         (p.dropped && !(p.flags & HYDRONIC_HOUR_QUEUE_LOSS)))
         return false;
     const bool first_timed = (p.duration_edges & HYDRONIC_DUR_FIRST) != 0;
@@ -138,8 +161,8 @@ inline bool hydronic_hourly_valid(const HydronicHourlyPayload& p, int64_t bucket
     // Each inclusive edge belongs to duration, an accepted sample, or both. A one-tick span
     // names the same edge twice. Count only distinct timed ticks toward the duration bounds.
     if ((!two_edges && first_timed != last_timed) ||
-        (!first_timed && p.first_accepted_unix_us != p.first_unix_us) ||
-        (!last_timed && p.last_accepted_unix_us != p.last_unix_us))
+        (!first_timed && p.first_accepted_unix_us != p.first_unix_us && !any_agreement) ||
+        (!last_timed && p.last_accepted_unix_us != p.last_unix_us && !any_agreement))
         return false;
     const unsigned timed_edges = first_timed + (two_edges && last_timed);
     const auto     span        = static_cast<uint64_t>(p.last_unix_us - p.first_unix_us) + 1;
@@ -169,7 +192,7 @@ inline bool hydronic_evidence_before(int64_t last, int64_t last_sample, uint8_t 
                                      int64_t first, int64_t first_sample, uint8_t first_edges) {
     return last < first ||
            (last == first &&
-            !((last_edges & HYDRONIC_DUR_LAST) && (first_edges & HYDRONIC_DUR_FIRST)) &&
+            ((last_edges & HYDRONIC_DUR_LAST) != 0) != ((first_edges & HYDRONIC_DUR_FIRST) != 0) &&
             (last_sample != last || first_sample != first));
 }
 
@@ -192,7 +215,11 @@ inline bool hydronic_hourly_merge(HydronicHourlyPayload& into, const HydronicHou
         into.kind != HydronicHourlyKind::Data || add.kind != HydronicHourlyKind::Data ||
         !observation_identity_equal(into.identity, add.identity) ||
         add.samples > UINT32_MAX - into.samples ||
-        add.command_samples > UINT32_MAX - into.command_samples)
+        add.command_samples > UINT32_MAX - into.command_samples ||
+        add.r1_r4_samples > UINT32_MAX - into.r1_r4_samples ||
+        add.r2_r1_samples > UINT32_MAX - into.r2_r1_samples ||
+        add.r1_r4_windows > UINT16_MAX - into.r1_r4_windows ||
+        add.r2_r1_windows > UINT16_MAX - into.r2_r1_windows)
         return false;
     const bool before =
         hydronic_evidence_before(into.last_unix_us, into.last_accepted_unix_us, into.duration_edges,
@@ -217,6 +244,8 @@ inline bool hydronic_hourly_merge(HydronicHourlyPayload& into, const HydronicHou
     hydronic_range_merge(into.spread, into.samples, add.spread, add.samples);
     hydronic_range_merge(into.flow, into.samples, add.flow, add.samples);
     hydronic_range_merge(into.command, into.command_samples, add.command, add.command_samples);
+    hydronic_range_merge(into.r1_r4, into.r1_r4_samples, add.r1_r4, add.r1_r4_samples);
+    hydronic_range_merge(into.r2_r1, into.r2_r1_samples, add.r2_r1, add.r2_r1_samples);
     if (add.samples) {
         if (!into.samples || add.first_accepted_unix_us < into.first_accepted_unix_us)
             into.first_accepted_unix_us = add.first_accepted_unix_us;
@@ -230,8 +259,15 @@ inline bool hydronic_hourly_merge(HydronicHourlyPayload& into, const HydronicHou
     into.qualified_us += add.qualified_us;
     into.samples += add.samples;
     into.command_samples += add.command_samples;
+    into.r1_r4_qualified_us += add.r1_r4_qualified_us;
+    into.r2_r1_qualified_us += add.r2_r1_qualified_us;
+    into.r1_r4_samples += add.r1_r4_samples;
+    into.r2_r1_samples += add.r2_r1_samples;
+    into.r1_r4_windows += add.r1_r4_windows;
+    into.r2_r1_windows += add.r2_r1_windows;
     into.flags |= add.flags;
     into.limitations |= add.limitations;
+    into.agree_limitations |= add.agree_limitations;
     if (add.dropped > into.dropped) into.dropped = add.dropped;
     return true;
 }
@@ -242,6 +278,8 @@ inline void hydronic_totals_add(HydronicTotals& into, const HydronicHourlyPayloa
     hydronic_range_merge(into.spread, into.samples, p.spread, p.samples);
     hydronic_range_merge(into.flow, into.samples, p.flow, p.samples);
     hydronic_range_merge(into.command, into.command_samples, p.command, p.command_samples);
+    hydronic_range_merge(into.r1_r4, into.r1_r4_samples, p.r1_r4, p.r1_r4_samples);
+    hydronic_range_merge(into.r2_r1, into.r2_r1_samples, p.r2_r1, p.r2_r1_samples);
     if (p.samples) {
         if (!into.samples || p.first_accepted_unix_us < into.first_accepted_unix_us)
             into.first_accepted_unix_us = p.first_accepted_unix_us;
@@ -253,14 +291,34 @@ inline void hydronic_totals_add(HydronicTotals& into, const HydronicHourlyPayloa
     into.qualified_us += p.qualified_us;
     into.samples += p.samples;
     into.command_samples += p.command_samples;
+    hydronic_add_time(into.r1_r4_qualified_us, p.r1_r4_qualified_us, into.agree_saturated);
+    hydronic_add_time(into.r2_r1_qualified_us, p.r2_r1_qualified_us, into.agree_saturated);
+    hydronic_add_time(into.r1_r4_samples, p.r1_r4_samples, into.agree_saturated);
+    hydronic_add_time(into.r2_r1_samples, p.r2_r1_samples, into.agree_saturated);
+    if (p.r1_r4_windows > UINT32_MAX - into.r1_r4_windows) {
+        into.r1_r4_windows   = UINT32_MAX;
+        into.agree_saturated = true;
+    } else {
+        into.r1_r4_windows += p.r1_r4_windows;
+    }
+    if (p.r2_r1_windows > UINT32_MAX - into.r2_r1_windows) {
+        into.r2_r1_windows   = UINT32_MAX;
+        into.agree_saturated = true;
+    } else {
+        into.r2_r1_windows += p.r2_r1_windows;
+    }
     into.limitations |= p.limitations;
     into.saturated |= (p.limitations & HydronicCounterSaturated) != 0;
+    into.agree_limitations |= p.agree_limitations;
+    into.agree_saturated |= (p.agree_limitations & AgreementCounterSaturated) != 0;
+    if (into.agree_saturated) into.agree_limitations |= AgreementCounterSaturated;
 }
 
 // Explicit little-endian fields never expose ABI padding, native enum widths or endianness.
-// Keep the complete older payload. Byte 122 carries duration edge membership and byte 123
-// remains reserved. Type-specific header pad[8..9] carries minimum evidence and remains inside
-// the existing CRC span. Older HYDR readers check the CRC and ignore the pad's interpretation.
+// Byte 122 carries duration edge membership; bytes 123..175 carry water-temperature agreement;
+// bytes 176..177 remain reserved zeros. Type-specific header pad[8..9] carries minimum evidence
+// and remains inside the existing CRC span. Older HYDR readers check the CRC and ignore the pad's
+// interpretation.
 inline constexpr void hydronic_put(uint8_t*& at, uint64_t value, unsigned bytes) {
     for (unsigned i = 0; i < bytes; ++i) {
         *at++ = static_cast<uint8_t>(value);
@@ -308,7 +366,20 @@ inline void hydronic_encode(const HydronicHourlyPayload& p, void* destination,
     hydronic_put(at, p.limitations, 1);
     hydronic_put(at, static_cast<uint8_t>(p.kind), 1);
     hydronic_put(at, p.duration_edges, 1);
-    hydronic_put(at, 0, 1);
+    hydronic_put(at, p.r1_r4_qualified_us, 4);
+    hydronic_put(at, p.r1_r4_samples, 4);
+    hydronic_put(at, p.r1_r4_windows, 2);
+    hydronic_put(at, static_cast<uint64_t>(p.r1_r4.sum_milli), 8);
+    hydronic_put(at, static_cast<uint32_t>(p.r1_r4.min_milli), 4);
+    hydronic_put(at, static_cast<uint32_t>(p.r1_r4.max_milli), 4);
+    hydronic_put(at, p.r2_r1_qualified_us, 4);
+    hydronic_put(at, p.r2_r1_samples, 4);
+    hydronic_put(at, p.r2_r1_windows, 2);
+    hydronic_put(at, static_cast<uint64_t>(p.r2_r1.sum_milli), 8);
+    hydronic_put(at, static_cast<uint32_t>(p.r2_r1.min_milli), 4);
+    hydronic_put(at, static_cast<uint32_t>(p.r2_r1.max_milli), 4);
+    hydronic_put(at, p.agree_limitations, 1);
+    hydronic_put(at, 0, 2);
 }
 inline bool hydronic_decode(const void* source, size_t bytes, const HistoryJournalHeader& h,
                             HydronicHourlyPayload& p) {
@@ -332,12 +403,25 @@ inline bool hydronic_decode(const void* source, size_t bytes, const HistoryJourn
         r->min_milli = hydronic_signed32(static_cast<uint32_t>(hydronic_get(at, 4)));
         r->max_milli = hydronic_signed32(static_cast<uint32_t>(hydronic_get(at, 4)));
     }
-    p.flags          = static_cast<uint16_t>(hydronic_get(at, 2));
-    p.dropped        = static_cast<uint16_t>(hydronic_get(at, 2));
-    p.limitations    = static_cast<uint8_t>(hydronic_get(at, 1));
-    p.kind           = static_cast<HydronicHourlyKind>(hydronic_get(at, 1));
-    p.duration_edges = static_cast<uint8_t>(hydronic_get(at, 1));
-    if (hydronic_get(at, 1) != 0) return false;
+    p.flags              = static_cast<uint16_t>(hydronic_get(at, 2));
+    p.dropped            = static_cast<uint16_t>(hydronic_get(at, 2));
+    p.limitations        = static_cast<uint8_t>(hydronic_get(at, 1));
+    p.kind               = static_cast<HydronicHourlyKind>(hydronic_get(at, 1));
+    p.duration_edges     = static_cast<uint8_t>(hydronic_get(at, 1));
+    p.r1_r4_qualified_us = static_cast<uint32_t>(hydronic_get(at, 4));
+    p.r1_r4_samples      = static_cast<uint32_t>(hydronic_get(at, 4));
+    p.r1_r4_windows      = static_cast<uint16_t>(hydronic_get(at, 2));
+    p.r1_r4.sum_milli    = hydronic_signed64(hydronic_get(at, 8));
+    p.r1_r4.min_milli    = hydronic_signed32(static_cast<uint32_t>(hydronic_get(at, 4)));
+    p.r1_r4.max_milli    = hydronic_signed32(static_cast<uint32_t>(hydronic_get(at, 4)));
+    p.r2_r1_qualified_us = static_cast<uint32_t>(hydronic_get(at, 4));
+    p.r2_r1_samples      = static_cast<uint32_t>(hydronic_get(at, 4));
+    p.r2_r1_windows      = static_cast<uint16_t>(hydronic_get(at, 2));
+    p.r2_r1.sum_milli    = hydronic_signed64(hydronic_get(at, 8));
+    p.r2_r1.min_milli    = hydronic_signed32(static_cast<uint32_t>(hydronic_get(at, 4)));
+    p.r2_r1.max_milli    = hydronic_signed32(static_cast<uint32_t>(hydronic_get(at, 4)));
+    p.agree_limitations  = static_cast<uint8_t>(hydronic_get(at, 1));
+    if (hydronic_get(at, 2) != 0) return false;
     p.flow_min_evidence = static_cast<uint16_t>(h.pad[8] | (h.pad[9] << 8));
     if (p.flow_min_evidence == HYDRONIC_LEGACY_MINIMUM_EVIDENCE)
         p.flow_min_evidence = p.samples ? HYDRONIC_MINIMUM_LOCATION_MISSING : 0;
@@ -345,19 +429,24 @@ inline bool hydronic_decode(const void* source, size_t bytes, const HistoryJourn
 }
 inline constexpr uint32_t hydronic_fingerprint() {
     constexpr uint32_t fingerprint = [] {
-        const uint32_t rules[] = {
-            0x48594452u,
-            HYDRONIC_METHOD,
-            HYDRONIC_PAYLOAD_BYTES,
-            static_cast<uint32_t>(HYDRONIC_SETTLE_US),
-            static_cast<uint32_t>(HYDRONIC_MAX_GAP_US),
-            HYDRONIC_SPREAD_MAX_MILLI,
-            HYDRONIC_FLOW_MAX_MILLI,
-            HYDRONIC_COMMAND_MAX_MILLI,
-            HYDRONIC_KNOWN_LIMITATIONS,
-            2u}; // inclusive duration edge membership / sample-weighted ranges
-        uint8_t bytes[sizeof(rules)]{};
-        auto*   at = bytes;
+        const uint32_t rules[] = {0x48594452u,
+                                  HYDRONIC_METHOD,
+                                  HYDRONIC_PAYLOAD_BYTES,
+                                  static_cast<uint32_t>(HYDRONIC_SETTLE_US),
+                                  static_cast<uint32_t>(HYDRONIC_MAX_GAP_US),
+                                  HYDRONIC_SPREAD_MAX_MILLI,
+                                  HYDRONIC_FLOW_MAX_MILLI,
+                                  HYDRONIC_COMMAND_MAX_MILLI,
+                                  HYDRONIC_KNOWN_LIMITATIONS,
+                                  2u, // inclusive duration edge membership / sample-weighted ranges
+                                  static_cast<uint32_t>(AGREEMENT_SETTLE_US),
+                                  static_cast<uint32_t>(AGREEMENT_STABLE_WINDOW_US),
+                                  static_cast<uint32_t>(AGREEMENT_STABLE_SUB_US),
+                                  AGREEMENT_DRIFT_MAX_MILLI,
+                                  AGREEMENT_FLOW_MIN_MILLI,
+                                  AGREEMENT_KNOWN_LIMITATIONS};
+        uint8_t        bytes[sizeof(rules)]{};
+        auto*          at = bytes;
         for (uint32_t rule : rules) hydronic_put(at, rule, 4);
         const uint32_t fp =
             config_crc32_final(config_crc32_update(CONFIG_CRC32_INIT, bytes, sizeof(bytes)));

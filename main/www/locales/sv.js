@@ -1,4 +1,4 @@
-// translation-source: c7de29a481f17e11a35ea248d888ac416d34b79cb23bafa5bcba8f20a50dc331
+// translation-source: eceea7ddd6ed641798b2f04b3048352f8ee2c044ab186c3c4c20fc20c05eef5b
 I18N.sv = localeValues([
   /* sys.nodata */ "Inga data",
   /* sys.unreachable */ "Inte tillgänglig",
@@ -358,6 +358,10 @@ I18N.sv = localeValues([
   /* service.metric.eev */ "Expansionsventilkommando",
   /* service.metric.hp */ "Högtryck",
   /* service.metric.lp */ "Lågtryck",
+  /* check.hydronic.agree_labels */ "Endast pump R1T−R4T|Endast pump R2T−R1T|Överensstämmelse|Begränsningar",
+  /* check.hydronic.agree_reasons */ "Flöde under 5,0 l/min|Kompressor igång|Värmare aktiv eller oklar|3-vägsventil ändrad|Temperaturer ej stabila",
+  /* check.hydronic.agree_limits */ "R2T ej tillgänglig|VV-väg inkluderad",
+  /* check.hydronic.agree_meta */ "fönster|mätvärden|Endast passiv jämförelse; ej kalibrering; extern värme ej utesluten.",
   /* service.metric.range */ (a, b, c, d) => `min. ${a} · medel ${b} · max. ${c} ${d}`,
   /* service.metric.samples */ n => `${n} ${n === 1 ? "inkluderad avläsning" : "inkluderade avläsningar"}`,
   /* service.metric.input_none */ "Ingen vald ingång",
