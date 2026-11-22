@@ -1775,14 +1775,16 @@ function cyclingRunExplainHtml(r, fromExact, toExact, priorPauseS, flowTypical) 
   const lwt = f1(ctx.lwt_c, "°C"), tgt = f1(ctx.target_c, "°C"), rwt = f1(ctx.rwt_c, "°C");
   const flow = f1(ctx.flow_l_min, "L/min");
   const typ = Number.isFinite(flowTypical) && flowTypical > 0 ? `${histFmt1(flowTypical)} L/min` : null;
+  const sep = LANG === "ja" ? "、" : LANG === "zh" ? "，" : ", ";
   const startLwt = f1(ctx.start_lwt_c, "°C");
   const startTgt = f1(ctx.start_target_c, "°C") || tgt || null;
   const startPrev = f1(ctx.start_target_prev_c, "°C");
-  const startCond = startLwt && startTgt ? t("check.cycling.cond_tag", startLwt, startTgt) : startLwt ? ` (${startLwt})` : "";
+  const startCond = startLwt ? t("check.cycling.cond_tag", startLwt, startTgt || "") : "";
+  const startLwtOnly = startLwt ? t("check.cycling.cond_tag", startLwt, "") : "";
   const pauseItem = { raw: esc(pauseStr) };
-  const startCondItem = { raw: esc(startCond) };
+  const startCondItem = { raw: startCond ? esc(` · ${startCond}`) : "" };
   const fromPrevItem = { raw: startPrev ? esc(t("check.cycling.from_tag", startPrev)) : "" };
-  const startOpt = { raw: startLwt ? esc(` (${startLwt})`) : "" };
+  const startOpt = { raw: startLwtOnly ? esc(` · ${startLwtOnly}`) : "" };
 
   let startHtml;
   switch (ctx.start_kind) {
@@ -1802,9 +1804,12 @@ function cyclingRunExplainHtml(r, fromExact, toExact, priorPauseS, flowTypical) 
       `<span class="checkup-run-stale">${esc(t("check.cycling.run_stop_unknown"))}</span>`;
   }
 
-  const metricParts = [lwt && tgt ? `${lwt} / ${tgt}` : lwt, rwt && t("check.cycling.rwt_tag", rwt), flow].filter(Boolean);
-  const valsItem = { raw: metricParts.length ? esc(` (${metricParts.join(" · ")})`) : "" };
-  const rwtItem = { raw: rwt ? esc(`, ${t("check.cycling.rwt_tag", rwt)}`) : "" };
+  const stopTemp = lwt
+    ? t("check.cycling.cond_tag", lwt, ctx.stop_kind === "target_changed" ? "" : (tgt || ""))
+    : null;
+  const metricParts = [stopTemp, rwt && t("check.cycling.rwt_tag", rwt), flow].filter(Boolean);
+  const valsItem = { raw: metricParts.length ? esc(` · ${metricParts.join(sep)}`) : "" };
+  const rwtItem = { raw: rwt ? esc(`${sep}${t("check.cycling.rwt_tag", rwt)}`) : "" };
   const typItem = { raw: typ ? esc(t("check.cycling.typ_tag", `~${typ}`)) : "" };
   const prevItem = { raw: Number.isFinite(ctx.target_prev_c) ? esc(t("check.cycling.from_tag", `${histFmt1(ctx.target_prev_c)} °C`)) : "" };
 

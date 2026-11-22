@@ -1105,8 +1105,9 @@ export async function assertCyclingChart(page, server, context) {
     assert.equal(expandedRun.expanded, "true", context + ": clicking run row expands inline explanation");
     assert.equal(expandedRun.hidden, false, context + ": subrow becomes visible");
     assert.equal(expandedRun.nestedTables, 0, context + ": no nested table inside explanation");
-    assert.match(expandedRun.text, /35\.1 °C > 32\.0 °C, return 33\.6 °C at 8\.2 L\/min \(typ\. ~17\.6 L\/min\)/,
+    assert.match(expandedRun.text, /flow 35\.1 °C above target 32\.0 °C, return 33\.6 °C at 8\.2 L\/min, typ\. ~17\.6 L\/min/,
       context + ": explanation preserves start and stop measurements without fabricating hardware faults");
+    assert.doesNotMatch(expandedRun.text, /[()（）]/, context + ": run explanation omits parentheses");
 
     await evaluate(page, sel => document.querySelector(sel).focus(), `.checkup-run-row[data-run-row="${rowKey2}"]`);
     await key(page, "Enter", 13);
@@ -1134,7 +1135,7 @@ export async function assertCyclingChart(page, server, context) {
     assert.equal(duringOmission.hidden, false, context + ": inline explanation stays visible during temporary timeline omission");
     assert.equal(duringOmission.focused, true, context + ": expanded row keeps focus during temporary timeline omission");
 
-    applyCauseShift(8);
+    applyCauseShift(16);
     await poll(datedIso(200 + causeShift));
     const afterResume = await readRowState(rowKey2);
     assert.equal(afterResume.expanded, "true", context + ": expanded row stays open when live timeline resumes");
