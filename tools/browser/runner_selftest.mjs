@@ -157,6 +157,10 @@ async function assertWebKitPaintScope() {
     export async function assertWebKitFlowPaint(page,context){record("paint",context);
       if(process.env.DAIKIN_BROWSER_MUTATION==="history-paint-freeze")
         throw new Error("WebKit painted flow must change across native screenshots");}`);
+  // Stub the DHW DOM suite and verify that positive workers invoke it.
+  fs.writeFileSync(path.join(fixture, "test/test_browser_dhw.mjs"), `
+    import {record} from "../record.mjs";
+    export async function assertDhwTimeline(page,server,context){record("dhw",context);}`);
   const page = path.join(fixture, "index.html");
   fs.writeFileSync(page, "<!doctype html><title>synthetic paint scope</title>");
   function check(label, workerSource, mutation, expectedPaint) {
@@ -174,10 +178,13 @@ async function assertWebKitPaintScope() {
       label + ": actual worker must select each expected orientation");
     assert.deepEqual(events.filter(event => event.type === "paint").map(event => event.context), expectedPaint,
       label + ": expected paint captures");
+    assert.deepEqual(events.filter(event => event.type === "dhw").map(event => event.context),
+      mutation ? [] : orientations.map(orientation => "webkit/" + orientation + "/dhw"),
+      label + ": positive workers must run the DHW timeline suite in both orientations");
     const lifecycle = orientations.flatMap(orientation => {
       const context = "webkit/" + orientation + "/history-motion";
       return ["server-open", "browser-open", "motion", ...(expectedPaint.includes(context) ? ["paint"] : []),
-        "browser-close", "server-close"];
+        ...(!mutation ? ["dhw"] : []), "browser-close", "server-close"];
     });
     assert.deepEqual(events.map(event => event.type), lifecycle, label + ": finally must close browser then server");
     if (mutation) assert.ok(output.includes(mutation === "history-paint-freeze"

@@ -1175,6 +1175,17 @@ for (const lang of locales) {
         assert.ok(body.startsWith('<div class="vdesc-p checkup-cycling-total"><span class="vdesc-n">'));
         assert.ok(body.indexOf("checkup-cycling-assessment") < body.indexOf("data-checkup-hours"));
         assert.doesNotMatch(diagnosis, /checkup-stop-box|checkup-cycling-chart/);
+      } else if (id === "health_dhw_loss") {
+        assert.ok(body.startsWith('<div class="checkup-dhw-detail" inert><div class="checkup-dhw-hero">'),
+          `${lang}/${id}: dedicated hero leads the lazily mounted timeline`);
+        assert.match(body, /data-checkup-dhw/);
+        assert.doesNotMatch(body, /data-dhw-window=/, `${lang}/${id}: collapsed rows build no chart`);
+        assert.ok(body.indexOf("checkup-dhw-value") < body.indexOf("checkup-dhw-assessment"));
+        assert.ok(body.indexOf("checkup-dhw-assessment") < body.indexOf("data-checkup-dhw"));
+        assert.match(body, /<details class="checkup-dhw-disclosure" data-dhw-disclosure="basis"><summary>/,
+          `${lang}/${id}: detailed evidence starts collapsed`);
+        assert.ok(body.includes(ui.text(lang, "check.dhw.limit")), `${lang}/${id}: primary claim limit stays visible`);
+        assert.doesNotMatch(body, /check\.dhw\./, `${lang}/${id}: complete dedicated copy`);
       } else {
         assert.equal((diagnosis.match(/class="vdesc-p"/g) || []).length, 3, `${lang}/${id}/${verdict}`);
         assert.ok(body.startsWith('<div class="vdesc-p"><span class="vdesc-n">'), `${lang}/${id}: value first`);
@@ -1190,15 +1201,20 @@ for (const lang of locales) {
     assert.match(renderedContext.rendered.value(), /<span class="vdesc-n">Normal:<\/span>/);
   }
 }
-// Exercise the full production accordion, including the model interpretation that owns
-// the DHW rule and its limits. The compact measurement prefix must not duplicate it.
+// Exercise the full production accordion: the DHW rule stays reachable in collapsed
+// data details, and the independent energy illustration is explicitly a collapsed example.
 for (const lang of locales) {
   renderedContext.rendered.lang(lang);
   ui.setLang(lang);
   const diagnosis = renderedContext.rendered.model("health_dhw_loss", "DHW", ui.value(dhw),
     { bodyHtml: ui.detail(dhw) });
-  assert.equal((diagnosis.match(/class="vdesc-p"/g) || []).length, 3,
-               `${lang} energy illustration stays inside the three-block explanation`);
+  assert.match(diagnosis, /data-dhw-disclosure="basis"><summary>/,
+    `${lang} rule and detailed evidence start collapsed`);
+  assert.match(diagnosis, /data-dhw-disclosure="energy"><summary>/,
+    `${lang} energy illustration has its own collapsed disclosure`);
+  const energyBody = diagnosis.slice(diagnosis.indexOf('data-dhw-disclosure="energy"'));
+  assert.match(energyBody, /200[\s\S]*COP[\s\S]*kWh|200[\s\S]*kWh[\s\S]*COP/,
+    `${lang} assumed volume, heat and electricity remain inside the example`);
   assert.match(diagnosis, /0[,.]8/, `${lang} expanded diagnosis retains its project threshold`);
   assert.match(diagnosis, /200/, `${lang} expanded diagnosis retains the example volume`);
   assert.match(diagnosis, /COP/, `${lang} expanded diagnosis retains its electricity assumption`);

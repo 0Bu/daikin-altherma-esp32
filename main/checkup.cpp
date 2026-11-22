@@ -181,6 +181,11 @@ struct CheckupSlot {
     int64_t                       seal_end_unix_s      = INT64_MIN;
     bool                          flash_pending        = false;
 
+    // Append optional runtime detail so existing field offsets and stack budgets stay unchanged.
+    // Exact windows never enter PersistedCheckup or its journal layout/fingerprint.
+    logic::DhwLossTrace dhw_trace{};
+    std::atomic<bool>   dhw_trace_forgotten{false};
+
     CheckupSlot(PersistStore* st, uint32_t magic, bool mb)
         : store(st), persist_magic(magic), is_modbus(mb) {}
 };
@@ -482,6 +487,7 @@ void reset_run_ctx_locked() {
 void persist_wipe(CheckupSlot& slot, bool keep_handoff = false) {
     slot.P().ring.reset();
     slot.P().dhw.reset();
+    slot.dhw_trace.reset();
     slot.cycling_trace.reset();
     slot.cycling_restored.reset();
     if (!slot.is_modbus) {
@@ -538,6 +544,7 @@ bool apply_dhw_reset_locked(CheckupSlot& slot) {
     if (!slot.dhw_reset_requested.exchange(false)) return false;
     slot.boot_handoff_valid = false;
     slot.P().dhw.reset();
+    slot.dhw_trace.reset();
     // The independent reset retires values, not the shared hourly geometry. Losing head/count
     // would suppress even unrelated journal writes until both rings saturated again.
     slot.P().dhw.head          = slot.P().ring.head;
@@ -622,10 +629,20 @@ void commit_and_fold_locked(CheckupSlot& slot, const logic::CheckupSample& s, in
         checkup_persist_seal(slot);
         if (continuous_boundary) slot.state.last_us = now; // dt=0, edge witnesses kept
         fold_checkup_locked(slot, s, now);
-        if (!discard_dhw_sample) logic::dhw_loss_step(slot.dhw_state, slot.P().dhw.pending, s, now);
+        if (!discard_dhw_sample) {
+            auto* const dhw_trace = slot.dhw_trace_forgotten.load(std::memory_order_acquire)
+                                        ? nullptr
+                                        : &slot.dhw_trace;
+            logic::dhw_loss_step_traced(slot.dhw_state, slot.P().dhw.pending, s, dhw_trace, now);
+        }
     } else {
         fold_checkup_locked(slot, s, now);
-        if (!discard_dhw_sample) logic::dhw_loss_step(slot.dhw_state, slot.P().dhw.pending, s, now);
+        if (!discard_dhw_sample) {
+            auto* const dhw_trace = slot.dhw_trace_forgotten.load(std::memory_order_acquire)
+                                        ? nullptr
+                                        : &slot.dhw_trace;
+            logic::dhw_loss_step_traced(slot.dhw_state, slot.P().dhw.pending, s, dhw_trace, now);
+        }
     }
     if (!slot.state.have_bucket && slot.P().ring.count &&
         slot.cycling_newest_bucket != static_cast<int32_t>(bucket))
@@ -1763,10 +1780,33 @@ logic::CheckupCyclingEvidence checkup_cycling_evidence(DiagnosticsSource source)
         out = s_defrost_start.snapshot(now_us, hp_poll_generation());
 }
 
+// Keep optional wall-clock locals out of the common report frame. The caller owns the lock/output.
+static __attribute__((noinline)) void copy_dhw_trace_locked(CheckupSlot&            slot,
+                                                            logic::DhwLossTimeline* dhw_trace,
+                                                            int64_t now_us, bool source_fresh) {
+    if (dhw_trace && slot.source_confirmed && !slot.dhw_reset_requested.load() &&
+        !slot.dhw_trace_forgotten.load(std::memory_order_acquire) && slot.cov.r5t &&
+        slot.cov.valve && slot.cov.pump && slot.cov.bsh &&
+        slot.dhw_trace.snapshot(*dhw_trace, now_us, logic::CHECKUP_MAX_GAP_S)) {
+        dhw_trace->live         = dhw_trace->live && source_fresh;
+        int64_t       unix_s    = -1;
+        int32_t       ms        = 0;
+        const int64_t before_us = esp_timer_get_time();
+        time_now(unix_s, ms);
+        const int64_t after_us = esp_timer_get_time();
+        dhw_trace->unix_s =
+            logic::dhw_loss_wall_anchor_s(dhw_trace->window_end_s, before_us, after_us, unix_s, ms);
+    }
+    // Forget can latch without this mutex while the clock read is in flight.
+    if (dhw_trace && slot.dhw_trace_forgotten.load(std::memory_order_acquire)) dhw_trace->clear();
+}
+
 logic::CheckupReport checkup_report(logic::CheckupCyclingHours* hours,
                                     logic::CheckupCyclingTrace* trace,
                                     logic::CheckupRestore* persist, DiagnosticsSource source,
-                                    logic::DefrostStartReport* defrost) {
+                                    logic::DefrostStartReport* defrost,
+                                    logic::DhwLossTimeline*    dhw_trace) {
+    if (dhw_trace) dhw_trace->clear();
     if (hours) {
         hours->count = 0;
         hours->epoch = 0;
@@ -1809,15 +1849,20 @@ logic::CheckupReport checkup_report(logic::CheckupCyclingHours* hours,
     auto           window    = logic::checkup_aggregate(slot.P().ring);
     window.flags = static_cast<uint8_t>(window.flags | fault_saved_flags_locked(slot, now_us));
     window.full_span         = span_s >= logic::CHECKUP_WINDOW_S;
-    logic::DhwLossWindow dhw = slot.dhw_reset_requested.load()
-                                   ? logic::DhwLossWindow{}
-                                   : logic::dhw_loss_aggregate(slot.P().dhw);
-    dhw.full_span = logic::dhw_loss_scope_full(window.full_span, slot.dhw_scope_us, now_us);
+    if (dhw_trace) copy_dhw_trace_locked(slot, dhw_trace, now_us, source_fresh);
+    // The circulation reset can latch during the optional clock read. Fence the timeline,
+    // aggregate, scope age and progress together; only the producer consumes the reset.
+    const bool dhw_reset_pending = slot.dhw_reset_requested.load();
+    if (dhw_reset_pending && dhw_trace) dhw_trace->clear();
+    logic::DhwLossWindow dhw =
+        dhw_reset_pending ? logic::DhwLossWindow{} : logic::dhw_loss_aggregate(slot.P().dhw);
+    dhw.full_span = !dhw_reset_pending &&
+                    logic::dhw_loss_scope_full(window.full_span, slot.dhw_scope_us, now_us);
     logic::CheckupReport report = logic::checkup_evaluate(
         window, slot.cov, source_fresh ? slot.fault_now : FaultClass::Unknown, dhw,
         slot.is_modbus ? logic::OutdoorSource::HomeHub : logic::OutdoorSource::X10a);
     report.pressure_current_tenths = source_fresh ? slot.pressure_now : -1;
-    if (source_fresh && !slot.dhw_reset_requested.load()) {
+    if (source_fresh && !dhw_reset_pending) {
         const int64_t progress_us =
             slot.dhw_state.last_us >= 0 ? std::min(now_us, slot.dhw_state.last_us) : now_us;
         const logic::DhwLossProgress p = logic::dhw_loss_progress(slot.dhw_state, progress_us);
@@ -2074,6 +2119,10 @@ CheckupFlashRestoreResult checkup_cycling_restore(const logic::CheckupCyclingTra
 void checkup_cycling_forget() {
     s_x10a.cycling_forgotten.store(true, std::memory_order_release);
     s_modbus.cycling_forgotten.store(true, std::memory_order_release);
+    // Factory forgetting also withdraws ordinary-RAM DHW detail immediately, without requiring
+    // the producer mutex or allowing the next poll to repopulate it before the scheduled reboot.
+    s_x10a.dhw_trace_forgotten.store(true, std::memory_order_release);
+    s_modbus.dhw_trace_forgotten.store(true, std::memory_order_release);
     checkup_fault_forget();
 }
 

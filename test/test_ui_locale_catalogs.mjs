@@ -63,7 +63,7 @@ const faultCodePackCodes = ["de", ...lazyDomainCodes];
 const annotatedDomainCodes = ["zh", "ja", "nb", "sv", "fi"];
 const englishKeys = Object.keys(catalog.en).sort();
 const englishKeyOrder = Object.keys(catalog.en);
-assert.equal(englishKeys.length, 1056, "the test must track the complete current UI catalog");
+assert.equal(englishKeys.length, 1076, "the test must track the complete current UI catalog");
 for (const [code, source] of localeSources) {
   const sections = [`INSPECT_I18N.${code}`, `MODEL_DESCRIPTION_I18N.${code}`]
     .map(marker => source.indexOf(marker)).filter(index => index >= 0);
@@ -561,8 +561,8 @@ assert.match(dashboard,
   /descBodyHtml\(d,\s*undefined,\s*modelDescriptionCopy\(id\)\)/,
   "the ESP32 free-heap and largest-block accordions must pass their localized model copy");
 
-// Locale modules are not part of the startup response, and each compressed asset has its own tight
-// gate. Execute the same minifier CMake uses.
+// Locale modules are separate from the startup response. Apply the per-source cap with CMake's
+// pinned encoder, and use zlib on the same minified bytes as the compression comparison.
 const app = readAppSource();
 for (const code of codes.slice(1)) assert.doesNotMatch(app, new RegExp(`I18N\\.${code}\\s*=`));
 const work = fs.mkdtempSync(path.join(os.tmpdir(), "daikin-locales-"));
@@ -572,38 +572,26 @@ let bundleGzipTotal = 0;
 try {
   const tool = path.join(root, "tools/web_asset/minify_js_and_gzip.py");
   for (const code of codes.slice(1)) {
-    const output = path.join(work, `${code}.js.gz`);
-    const run = childProcess.spawnSync("python3", [
-      tool, "--input", path.join(root, `main/www/locales/${code}.js`), "--output", output,
-      "--max-gzip-bytes", "32768",
+    const packed = path.join(work, `${code}.zopfli.js.gz`);
+    const encode = () => childProcess.spawnSync("python3", [
+      tool, "--input", path.join(root, `main/www/locales/${code}.js`), "--output", packed,
+      "--gzip-encoder", "zopfli", "--max-gzip-bytes", "32768",
     ], { cwd: root, encoding: "utf8" });
-    assert.equal(run.status, 0, run.stderr || run.stdout);
-    const gzipBytes = fs.statSync(output).size;
-    localeGzipTotal += gzipBytes;
-    assert.ok(gzipBytes <= 32768, `${code} locale exceeds its gzip budget`);
-    const minified = zlib.gunzipSync(fs.readFileSync(output)).toString("utf8");
-    assert.doesNotThrow(() => new vm.Script(minified, { filename: `${code}.min.js` }),
+    const first = encode();
+    assert.equal(first.status, 0, first.stderr || first.stdout);
+    const bytes = fs.readFileSync(packed);
+    assert.ok(bytes.length <= 32768, `${code} locale exceeds its production gzip budget`);
+    firmwareLocaleGzipTotal += bytes.length;
+    const minified = zlib.gunzipSync(bytes);
+    assert.doesNotThrow(() => new vm.Script(minified.toString("utf8"), { filename: `${code}.min.js` }),
       `${code} minified locale must still parse`);
-    {
-      // Keep both independent per-source encoders checked even though the firmware embeds one
-      // joint bundle. Neither encoding may change any minified source byte or exceed 32 KiB.
-      const packed = path.join(work, `${code}.zopfli.js.gz`);
-      const encode = () => childProcess.spawnSync("python3", [
-        tool, "--input", path.join(root, `main/www/locales/${code}.js`), "--output", packed,
-        "--gzip-encoder", "zopfli", "--max-gzip-bytes", "32768",
-      ], { cwd: root, encoding: "utf8" });
-      const first = encode();
-      assert.equal(first.status, 0, first.stderr || first.stdout);
-      const bytes = fs.readFileSync(packed);
-      firmwareLocaleGzipTotal += bytes.length;
-      assert.equal(zlib.gunzipSync(bytes).toString("utf8"), minified,
-        "firmware locale compression must preserve every minified source byte");
-      assert.ok(bytes.length < gzipBytes, "the pinned encoder must reduce the embedded locale");
-      if (code === "de") {
-        const second = encode();
-        assert.equal(second.status, 0, second.stderr || second.stdout);
-        assert.deepEqual(fs.readFileSync(packed), bytes, "locale encoding must be deterministic");
-      }
+    const reference = zlib.gzipSync(minified, { level: 9 });
+    localeGzipTotal += reference.length;
+    assert.ok(bytes.length < reference.length, "the pinned encoder must beat the zlib comparison");
+    if (code === "de") {
+      const second = encode();
+      assert.equal(second.status, 0, second.stderr || second.stdout);
+      assert.deepEqual(fs.readFileSync(packed), bytes, "locale encoding must be deterministic");
     }
   }
   const bundle = path.join(work, "locale-bundle.js.gz");

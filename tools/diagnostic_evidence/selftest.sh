@@ -23,7 +23,7 @@ reset() {
     cp main/checkup.cpp "$WORK/main/checkup.cpp"
     cp main/logic/stop_context.hpp main/logic/stop_context_input.hpp \
        main/logic/observation_hourly.hpp main/logic/instrument.hpp main/logic/heartbeat.hpp main/logic/defrost_start.hpp \
-       main/logic/fault_trace.hpp main/logic/fault_persist.hpp main/logic/cycling_run_context.hpp \
+       main/logic/fault_trace.hpp main/logic/fault_persist.hpp main/logic/cycling_run_context.hpp main/logic/dhw_loss_trace.hpp \
        main/logic/hydronic_observation.hpp main/logic/hydronic_input.hpp \
        main/logic/hydronic_hourly.hpp main/logic/hydronic_payload.hpp \
        "$WORK/main/logic/"
@@ -152,6 +152,10 @@ echo "== 9. implementation changed without evidence review =="
 reset
 printf '\n// selftest: changed diagnostic meaning\n' >> "$WORK/main/logic/checkup.hpp"
 run_case "stale review fingerprint is caught" 1 "E010 docs/DIAGNOSTIC_EVIDENCE.md"
+
+reset
+printf '\n// selftest: changed DHW timed-window retention\n' >> "$WORK/main/logic/dhw_loss_trace.hpp"
+run_case "changed DHW timeline source is caught" 1 "E010 docs/DIAGNOSTIC_EVIDENCE.md"
 
 echo "== 10. changed register evidence without review =="
 reset

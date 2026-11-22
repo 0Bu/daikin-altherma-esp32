@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: b2ad68ec4a6b8ff90680b943a039e95aa4bc1d861132f482b571e71ddf647a0d -->
+<!-- user-docs-contract: 2aa732605d5e4e158e4251f34e1172908bfc16326c1868ad0e73110c422c0ab9 -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default (`Off`). Under **Settings → Firmware**, choose **X10A** or **Modbus** for
@@ -31,7 +31,7 @@ the installation's health.
 | **NOTE** | A notable accepted observation or unit-reported warning; it does not identify a defect or cause. |
 | **WARNING** | A current unit-reported fault, or pressure confirmed continuously at or below the project's boundary during the window. |
 | **CHECKING** | A required day, signal coverage or eligible observation is missing. |
-| **NO WINDOW** | A full day of tank-cooling evidence produced no completed hour; the detail names the exclusions. |
+| **NO WINDOW** | The current tank-cooling window spans a full day without a completed hour. Recorded exclusions appear in the details when available. |
 | **MEASURED** | A measurement or event population without enough evidence for a good/bad assessment. |
 | **TENTATIVE** | An experimental counter comparison whose complete manufacturer semantics are unknown. |
 | **N/A** | The active profile does not supply the required signals. |
@@ -87,32 +87,42 @@ fixed. No generic normal target is shown for faults.
 <!-- user-docs: health_dhw_loss -->
 ### Domestic-hot-water tank cooling
 
-**In plain language:** The board shows the largest net temperature drop at tank sensor R5T during
-completed one-hour windows, in **K/h** (one kelvin of cooling equals one degree Celsius). It also
-shows how many windows reached **0.8 K/h** and how many contained internal water-pump activity or
-a draw-like drop. Those counts cover all windows and may overlap; they do not describe the maximum
-window individually. Rapid continuous cooling remains visible even when it resembles water use;
-endpoint confirmation rejects isolated jumps larger than 0.2 K. Smaller excursions can still
-affect the rate and the project's note threshold. If the closing reading cannot be confirmed
-within 30 seconds after the hour, that candidate is discarded instead of becoming a longer average.
+**In plain language:** After at least one completed one-hour window, the board shows the largest
+net temperature drop at tank sensor R5T in **K/h** (one kelvin of cooling equals one degree
+Celsius). When timed detail is available, the expanded row plots windows completed in the last
+24 hours and after the most recent restart or reset. Tap a window for its time range, rate, readable
+time and markers.
+Separate lanes mark the presence of internal water-pump activity and a draw-like temperature
+pattern. The optional external hot-water circulation uses a separate witness.
 
-**Meaning:** **NOTE** needs at least one window at or above the project's 0.8 K/h threshold without
-either marker. Other completed windows are **MEASURED**, including marked high rates. Without a
-completed window the board shows **CHECKING**, progress or settling time. After a full day of DHW
-scope without a completed hour it says **NO WINDOW**, including when no candidate could open.
-That describes missing measurements, not a tank defect or complete signal coverage.
+Blank intervals mean no completed timed record is available, not zero cooling or a known reason.
+A completed zero-rate window still has a bar. The chart selects the newest retained window when an
+earlier selection expires. It uses relative times if a reliable clock reading is unavailable.
+Bars do not return after a restart, although saved hourly evidence can still inform the maximum
+and totals. Bar counts and hourly totals can differ because they expire differently. If diagnosis
+updates stop or the tank-cooling inputs become stale, the last bars can remain visible as historical.
+A fresh diagnosis update can restore the chart's live state while the current readings panel is
+unavailable. An update without timeline data removes earlier bars. **Data details** explains the
+measurement basis and what the markers count.
 
-**Energy example:** For an assumed uniformly cooling **200 l** tank, **1.2 K/h** corresponds to
-about **0.28 kWh of heat per hour**. Replacing that heat at an assumed COP (heat delivered per
-unit of electricity) of **2.5–3** would require **0.09–0.11 kWh of electricity**. The UI recalculates
-this example from the displayed maximum; it is neither your measured consumption nor a daily sum.
+**Meaning:** **NOTE** needs at least one window at or above the project's **0.8 K/h** threshold
+without either marker. Other completed windows are **MEASURED**, including marked high rates.
+Without a completed window the board shows **CHECKING**, progress or settling time. After the
+current tank-cooling observation window spans a full day without a completed hour, it says
+**NO WINDOW**, even if no candidate could open. That describes missing measurements, not a tank
+defect or complete signal coverage.
+
+**Energy example:** When a maximum is available, **Calculation example** assumes uniformly cooling **200 l** of
+water. At **1.2 K/h**, this means about **0.28 kWh of heat per hour**. Replacing it at an assumed COP
+(heat delivered per unit of electricity) of **2.5–3** would need **0.09–0.11 kWh of electricity**.
+The example follows the displayed maximum; it is not measured consumption or a daily sum.
 
 **Important limit:** One sensor in a stratified tank cannot measure whole-tank loss. Water use can
 remove useful heat; zero net cooling does not prove zero loss. Neither a missing draw marker nor
-a valve command proves an undisturbed tank, and optional external circulation overlap proves no
-cause. Charging, its 45-minute settle, a fresh filter's 45-minute hold, invalid temperatures and
-excessive missing readings exclude time; unread charge witnesses extend the wait. A compatible
-software restart preserves the remaining settling time, but unseen charging can still affect a window.
+a valve command proves an undisturbed tank, and circulation overlap proves no cause. Charging,
+settling, invalid temperatures and missing readings can exclude windows; blank chart time does not
+identify which occurred. A compatible software restart can preserve the settling timer, but unseen
+charging can still affect a later window.
 
 **Evidence and limits:** [Tank cooling](DIAGNOSTIC_EVIDENCE.md#diagnosis-dhw-loss)
 
@@ -221,8 +231,9 @@ statistics show when their readings were collected and how many qualified, remai
 link interruption, and keep water ranges available when optional pump command is missing. With fresh
 readings from a supported mixed heating circuit, the same row can show the average difference
 between the heat-pump supply and the mixed supply, how long they were compared and how many
-readings qualified. A negative difference means the measured mixed supply was warmer. When
-operating solely over Modbus, `flow` stays unavailable on `Altherma4`, `Probing`, or `Fallback`
+readings qualified. A negative difference means the measured mixed supply was warmer. The current
+shipped X10A profiles leave this comparison empty because each lacks at least one required reading.
+When operating solely over Modbus, `flow` stays unavailable on `Altherma4`, `Probing`, or `Fallback`
 sweeps until `/100` HomeHub Input 49 scaling is affirmatively confirmed, and X10A hydronic
 spread/flow/command ranges and secondary comparison remain unpopulated.
 

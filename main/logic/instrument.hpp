@@ -318,7 +318,8 @@ inline constexpr uint8_t instrument_bit_mask(uint16_t conv) {
 
 // Bytes a row decodes. The refrigerant-type identifiers read no payload byte, and conv 0 /
 // 995-999 are layout markers without a value.
-inline constexpr unsigned instrument_byte_count(const ValueDef& d) {
+// Keep the measured runtime call boundary when the catalog row layout changes.
+[[gnu::noinline]] inline constexpr unsigned instrument_byte_count(const ValueDef& d) {
     if (d.conv == 0 || (d.conv >= 801 && d.conv <= 805) || (d.conv >= 995 && d.conv <= 999))
         return 0;
     return d.size;

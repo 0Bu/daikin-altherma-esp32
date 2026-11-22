@@ -40,6 +40,9 @@ CASES = [
     "hydronic_consent_lock", "hydronic_source_lock", "hydronic_shared_witness", "hydronic_shutdown",
     "hydronic_reader_generation", "hydronic_pause_resume",
     "x10a_cycling_run_contexts",
+    "dhw_trace_capture", "dhw_trace_pause", "dhw_trace_source_reset",
+    "dhw_trace_circulation_reset", "dhw_trace_forget", "dhw_trace_forget_before_start",
+    "dhw_trace_unavailable", "dhw_trace_forget_during_snapshot", "dhw_trace_reset_during_snapshot",
 ]
 
 parser = argparse.ArgumentParser(description=__doc__)
@@ -198,7 +201,8 @@ def build(source, digest, tag):
 
 baseline = build(SOURCE, source_digest, "baseline")
 vacuity_controls = []
-for case in ["buh_unknown_case", "fault_unknown_case", "consent_sampling_unknown_case",
+for case in ["buh_unknown_case", "fault_unknown_case", "dhw_trace_unknown_case",
+             "consent_sampling_unknown_case",
              "consent_caller_unknown_case", "hydronic_unknown_case"]:
     result = command([str(baseline), case], timeout=15)
     if result.returncode != 1 or "FAIL oracle=unknown_case case=" + case not in result.stdout:
@@ -414,6 +418,47 @@ mutations += [
      source_text.replace(hydronic_pause_reset, "        /* omitted pause continuity reset */"),
      "hydronic_pause_resume", "hydronic_same_gen_resume_restores_24h_population"),
 ]
+
+# Exercise the actual production trace wiring and privacy fences, not a parallel implementation.
+for name, needle, replacement, occurrences, case, oracle in [
+    ("omit_dhw_trace_producer", "dhw_loss_step_traced(slot.dhw_state, slot.P().dhw.pending, s, dhw_trace, now);",
+     "dhw_loss_step_traced(slot.dhw_state, slot.P().dhw.pending, s, nullptr, now);", 2,
+     "dhw_trace_capture", "dhw_trace_both_real_source_windows"),
+    ("omit_dhw_trace_circulation_reset",
+     "    slot.P().dhw.reset();\n    slot.dhw_trace.reset();\n    // The independent reset",
+     "    slot.P().dhw.reset();\n    // The independent reset", 1,
+     "dhw_trace_circulation_reset", "dhw_trace_dhw_reset_discards_consuming_sample"),
+    ("omit_dhw_trace_producer_forget",
+     "auto* const dhw_trace = slot.dhw_trace_forgotten.load(std::memory_order_acquire)",
+     "auto* const dhw_trace = false", 2,
+     "dhw_trace_forget_before_start", "dhw_trace_forget_before_start_suppresses_both_producers"),
+    ("omit_dhw_trace_initial_output_clear", "    if (dhw_trace) dhw_trace->clear();\n", "", 1,
+     "dhw_trace_unavailable", "dhw_trace_absent_mutex_clears_output"),
+    ("ignore_dhw_wall_anchor_bracket",
+     "dhw_trace->window_end_s, before_us, after_us, unix_s, ms",
+     "dhw_trace->window_end_s, after_us, after_us, unix_s, ms", 1,
+     "dhw_trace_capture", "dhw_trace_ambiguous_clock_bracket_keeps_relative_window"),
+    ("omit_dhw_trace_final_withdrawal_guard",
+     "if (dhw_trace && slot.dhw_trace_forgotten.load(std::memory_order_acquire))", "if (false)", 1,
+     "dhw_trace_forget_during_snapshot", "dhw_trace_withdrawal_during_clock_read_clears_captured_output"),
+    ("reuse_full_old_dhw_scope_while_reset_pending",
+     "!dhw_reset_pending &&\n                    logic::dhw_loss_scope_full(",
+     "logic::dhw_loss_scope_full(", 1,
+     "dhw_trace_circulation_reset", "dhw_pending_reset_collects_despite_full_old_scope"),
+]:
+    if source_text.count(needle) != occurrences:
+        raise RuntimeError("Expected production DHW mutation anchor: " + name)
+    mutations.append((name, source_text.replace(needle, replacement), case, oracle))
+
+dhw_snapshot_call = "    if (dhw_trace) copy_dhw_trace_locked(slot, dhw_trace, now_us, source_fresh);\n"
+apply_freshness = "    logic::checkup_apply_freshness(report, source_fresh, source_age_s, span_s);\n"
+if source_text.count(dhw_snapshot_call) != 1 or source_text.count(apply_freshness) != 1:
+    raise RuntimeError("Expected production DHW snapshot and report freshness anchors")
+mutations.append(("read_dhw_snapshot_after_aggregate",
+                  source_text.replace(dhw_snapshot_call, "").replace(
+                      apply_freshness, dhw_snapshot_call + apply_freshness),
+                  "dhw_trace_reset_during_snapshot",
+                  "dhw_reset_during_clock_read_retires_aggregate_and_progress"))
 negative_controls = []
 mutant_hashes = {}
 for name, contents, case, oracle in mutations:

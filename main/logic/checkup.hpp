@@ -75,6 +75,7 @@
 #include <cstdint>
 #include <cstdlib>
 
+#include "dhw_loss_trace.hpp" // optional exact completed-window detail, independent of persisted buckets
 #include "fault_state.hpp"   // FaultClass — the fault check composes conv 203's own class table
 #include "modbus_profile.hpp" // ModbusProfile — structural capability selection for HomeHub/Altherma 4
 #include "ou_stale.hpp"      // ou_is_rps_witness — the compressor witness, called not restated
@@ -882,6 +883,8 @@ struct DhwLossState {
 };
 
 constexpr uint32_t DHW_LOSS_WINDOW_S      = 3600; // R5T resolves only 0.1 K
+static_assert(DHW_LOSS_WINDOW_S * DHW_LOSS_TRACE_CAPACITY == DHW_LOSS_TRACE_WINDOW_S,
+              "Recheck exact-window trace capacity when changing the evaluator window");
 // Two normal polling intervals allow one isolated bad endpoint and its confirmation to recover.
 // Never reinterpret an arbitrarily long candidate as one hourly observation.
 constexpr uint32_t DHW_LOSS_CLOSE_GRACE_S = 2 * CHECKUP_MAX_GAP_S;
@@ -1073,8 +1076,15 @@ inline DhwLossProgress dhw_loss_progress(const DhwLossState& st, int64_t now_us)
     return p;
 }
 
-inline void dhw_loss_step(DhwLossState& st, DhwLossBucket& b, const CheckupSample& s,
-                          int64_t now_us) {
+// One domain rule, compiled with or without optional detail. The traced instantiation is called
+// only with a non-null output; the aggregate-only instantiation has no trace pointer live range.
+template <bool Timed>
+[[gnu::always_inline]] inline void dhw_loss_step_impl(DhwLossState& st, DhwLossBucket& b,
+                                                      const CheckupSample& s, DhwLossTrace* trace,
+                                                      int64_t now_us) {
+    if constexpr (Timed)
+        trace->observe(now_us, s.r5t_ok && s.r5t_tenths >= 0 && s.r5t_tenths <= 900 &&
+                                   s.valve_known && s.pump_known && s.bsh_known);
     uint32_t dt = 0;
     uint32_t gap_s = 0;
     bool continuous = false;
@@ -1276,6 +1286,14 @@ inline void dhw_loss_step(DhwLossState& st, DhwLossBucket& b, const CheckupSampl
             b.high_pump_off = checkup_add_u8(b.high_pump_off, 1);
     }
 
+    // An adopted candidate's pre-reboot start is an age estimate, not an exact timestamp in this
+    // boot. Keep its aggregate evidence, but never manufacture a timeline window from that age.
+    if constexpr (Timed) {
+        if (!st.segment_carried_s)
+            trace->record(st.segment_start_us, now_us, loss_tenths_k_h, observed_s,
+                          st.segment_pump_on, st.segment_draw_like);
+    }
+
     // Adjacent, non-overlapping one-hour windows preserve the sensor resolution and keep every
     // completed statistic inside exactly one hourly retention bucket.
     st.segment_start_us = now_us;
@@ -1291,6 +1309,23 @@ inline void dhw_loss_step(DhwLossState& st, DhwLossBucket& b, const CheckupSampl
     st.draw_anchor_us        = now_us;
     st.draw_anchor_carried_s = 0;
     st.draw_anchor_tenths    = s.r5t_tenths;
+}
+
+// Keep the real aggregate-only evaluator independently bounded, not a wrapper around traced work.
+[[gnu::noinline]] inline void dhw_loss_step(DhwLossState& st, DhwLossBucket& b,
+                                            const CheckupSample& s, int64_t now_us) {
+    dhw_loss_step_impl<false>(st, b, s, nullptr, now_us);
+}
+
+// The optional pointer precedes the aligned clock so all arguments fit Xtensa's registers.
+[[gnu::noinline]] inline void dhw_loss_step_traced(DhwLossState& st, DhwLossBucket& b,
+                                                   const CheckupSample& s, DhwLossTrace* trace,
+                                                   int64_t now_us) {
+    if (!trace) {
+        dhw_loss_step(st, b, s, now_us);
+        return;
+    }
+    dhw_loss_step_impl<true>(st, b, s, trace, now_us);
 }
 
 // Do not sample a pump's first minute as the day's hydraulic minimum. Ramp-up, valve motion and air

@@ -2242,6 +2242,114 @@
       },
       "test_source_sha256": "101b5edb6289ba72192532509a936b1bbdd59aa2c9a60770e9abd4f7a81527ed",
       "validation_boundary": "Host and container compilers exercised synthetic inputs; hosted gcc-15-github-linux-ubuntu26 and aarch64 gcc-15-linux-ubuntu26 confirmation remain separate."
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple Clang 17, arm64",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, ESP-IDF v6.1 Docker, aarch64",
+        "gcc-15-github-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, Ubuntu26.04 Docker, x86-64",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, Ubuntu26.04 Docker, aarch64"
+      },
+      "hosted_confirmation": "The x86-64 Docker result is a locally measured hosted candidate, not a GitHub CI run. Authoritative hosted confirmation remains separate.",
+      "runner": "scripts/run-mock-tests.sh --coverage on Darwin, plus the same GCC compile, gcov extraction and versioned inventory checker in containers with read-only source and independent outputs.",
+      "scope": "Runtime-only exact DHW completed-window capture with separate aggregate-only and traced evaluator instantiations. checkup.hpp: Clang 1308/1379 (previous 1158/1231); all GCC profiles 1496/1595 (previous 1324/1417). New dhw_loss_trace.hpp: Clang 60/60, GCC 62/62. Covers actual subsecond endpoints, 24-record retention and expiry, zero rates, presence markers, readability, reset, clock rollback and exclusion of reboot-carried candidates. Other per-file inventories and coverage floors are unchanged.",
+      "sources": {
+        "main/logic/checkup.hpp": "a7e6475fc711e064adf081fcea6ed23ffef1a93f154e41964bffa50ddd2a877b",
+        "main/logic/dhw_loss_trace.hpp": "083c3f99e185c70b8fd665d94add05e7bc0c9c91a4ac680583a7cc97c9707697"
+      },
+      "test_source_sha256": "2935afc530a8f45d1b5665a62dca9d7b0f6728038c5a1b6e35c736da72da0584",
+      "validation_boundary": "Local host and controlled-container synthetic inputs only. API/runtime, rendered browser, target ELF and physical-device evidence are separate."
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple Clang 17, arm64",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, ESP-IDF v6.1 Docker, aarch64",
+        "gcc-15-github-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, Ubuntu26.04 Docker, x86-64",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, Ubuntu26.04 Docker, aarch64"
+      },
+      "hosted_confirmation": "The x86-64 Ubuntu result is a local candidate for the hosted profile.",
+      "runner": "scripts/run-mock-tests.sh --coverage on Darwin, with matching GCC/gcov invocations for the three local Linux profiles.",
+      "scope": "Checked scalar ranges for the compact X10A catalog row and rejection of an unrepresentable probe converter. value_def.hpp: Clang 19/20, GCC 21/22. hp_probe.hpp: Clang 132/145 (previous 130/143), GCC 140/153 (previous 138/151). The untaken ValueDef path is the constructor's invariant abort. Other branch inventories and floors are retained.",
+      "sources": {
+        "main/logic/hp_probe.hpp": "8ebb336298c36972b03aa4aa8f4ef3408bc0acf02929ab9a2e6e41c835461307",
+        "main/logic/value_def.hpp": "252f260343b8ae653982d5ff5c466b6a753acd8dd4a54cd0f31b7c68161ee924"
+      },
+      "test_source_sha256": "7790717a76369f31644123c86699001eab17d736cb1ce29d82b3580f14936bb0",
+      "validation_boundary": "Compiler coverage of synthetic inputs. Linked size, target frames and hardware behavior require separate verification."
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple Clang 17, arm64",
+        "gcc-13-linux-ubuntu24": "GCC 13 in pinned ESP-IDF v6.1.1 Docker, aarch64",
+        "gcc-15-github-linux-ubuntu26": "GCC 15 in pinned release-coverage Docker, x86-64",
+        "gcc-15-linux-ubuntu26": "GCC 15 in Ubuntu 26.04 Docker, aarch64"
+      },
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "scope": "Compose timed DHW loss windows with the current hydronic and cycling diagnostics. Combined checkup.hpp counts are Clang 1312/1383 and GCC 1502/1601. The Linux ARM GCC 15 profile also records the previously unlisted hydronic headers and measured heartbeat coverage already exercised by the main-branch tests.",
+      "sources": {
+        "main/logic/checkup.hpp": "0f034f4fb43ecde704bb019477f8011da27976fa189b99205e77e323e6847cf2",
+        "main/logic/heartbeat.hpp": "f52d2c3ca5d7618d5a68bc3ffc7d5191e27c21467082a62b07faae6ec598143f",
+        "main/logic/hydronic_hourly.hpp": "938809c2d77016f87ff3ff00932a8e406f075e09f4cbef99a90244c1493220d7",
+        "main/logic/hydronic_input.hpp": "74571dfd6bbc2320dc515915c1dbf9790396be298c7694eda5c1b99048674084",
+        "main/logic/hydronic_observation.hpp": "5241e5b7716bc550b37f7bd543d0b166ad31ac08a82e7277891453f1ddef0b0a",
+        "main/logic/hydronic_payload.hpp": "ae5d979d6c74d46b7b5b06d5c92bb8ee65b58ef1b1cde3da3d0d77037e958944"
+      },
+      "test_source_sha256": "39daec2767f34085373c8b189d1aa65ea8d2645e8cab0c986f8193876c20a83f",
+      "validation_boundary": "Measured local branch outcome inventories against the composed source. The x86-64 measurement uses the repository release-coverage image."
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2), arm64",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, aarch64",
+        "gcc-15-github-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, x86_64",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, aarch64"
+      },
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "scope": "DHW timeline liveness uses exact readable observation age while the API retains whole-second timestamps. Checks cover equality, the first stale microsecond, backwards time within an exported second and an incomplete later sample.",
+      "sources": {
+        "main/logic/checkup.hpp": "0f034f4fb43ecde704bb019477f8011da27976fa189b99205e77e323e6847cf2",
+        "main/logic/dhw_loss_trace.hpp": "1beb44fb47d92f5991b21cbab7eed0b1ebeb85b5c5a90d7afc92d6c49852865a"
+      },
+      "test_source_sha256": "f80a7ec7e5052fd78da5704a0b752261ccc234e9a6f7223e9ff87165c6407316",
+      "validation_boundary": "Exact local branch outcome inventories across the native compiler and pinned Linux profiles. This records host test coverage."
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2), arm64",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, aarch64",
+        "gcc-15-github-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, x86_64",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, aarch64"
+      },
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "scope": "DHW lifecycle compares original monotonic microseconds during observation, recording and snapshot. The optional whole-second wall anchor is published only when both ends of the bracket give the same timestamp, including sub-millisecond precision lost in the wall read. Exercise successful single and sweep probe extraction at a nonzero offset.",
+      "sources": {
+        "main/logic/checkup.hpp": "0f034f4fb43ecde704bb019477f8011da27976fa189b99205e77e323e6847cf2",
+        "main/logic/dhw_loss_trace.hpp": "4041dddb3c13ad8d7de36f85bcce9545de59598eb5c4298929506a4552a6ef52",
+        "main/logic/hp_probe.hpp": "8ebb336298c36972b03aa4aa8f4ef3408bc0acf02929ab9a2e6e41c835461307"
+      },
+      "test_source_sha256": "a8a3673fa1acc09e693d3000ac13a4cc88fbd6be53eb54c4b2c942ded7284a74",
+      "validation_boundary": "Exact local branch outcome inventories across the native compiler and pinned Linux profiles. This records host test coverage."
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2), arm64",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, aarch64",
+        "gcc-15-github-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, x86_64",
+        "gcc-15-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, aarch64"
+      },
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "scope": "Merged timed DHW cooling windows and qualified secondary supply temperature comparison. Measure all four combined profiles, including the previously pending ARM GCC 15 hydronic counts.",
+      "sources": {
+        "main/logic/checkup.hpp": "0f034f4fb43ecde704bb019477f8011da27976fa189b99205e77e323e6847cf2",
+        "main/logic/dhw_loss_trace.hpp": "4041dddb3c13ad8d7de36f85bcce9545de59598eb5c4298929506a4552a6ef52",
+        "main/logic/hp_probe.hpp": "8ebb336298c36972b03aa4aa8f4ef3408bc0acf02929ab9a2e6e41c835461307",
+        "main/logic/hydronic_input.hpp": "fcb5902b1baf62da1ed0156567afb9ad671bc61a409d74bd1dc8db23e7460179",
+        "main/logic/hydronic_observation.hpp": "afffa289bdb099df576b46c1dfbe853e74cdfcd11e3acdf56e79c85dc2e4df33",
+        "main/logic/hydronic_payload.hpp": "9f64ded9f761ce288f559ccd5e0e5cf9ae8c676ef634c690917418e7427d6ba2",
+        "main/logic/instrument.hpp": "ab5735b5774842be5102ee8e190715ec179af4d670e517f2440f97eae9dbffca"
+      },
+      "test_source_sha256": "0e3b901193b1e49494037c98e7ba4c62c6faa1f29e968f1a193617267109ce45",
+      "validation_boundary": "Local host and offline compiler profile measurements. The x86-64 run uses the pinned repository release-coverage image."
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
@@ -2280,8 +2388,8 @@
         "taken": 6
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 1235,
-        "taken": 1162
+        "outcomes": 1383,
+        "taken": 1312
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 353,
@@ -2350,6 +2458,10 @@
       "main/logic/detect_identity.hpp": {
         "outcomes": 30,
         "taken": 29
+      },
+      "main/logic/dhw_loss_trace.hpp": {
+        "outcomes": 76,
+        "taken": 76
       },
       "main/logic/diag_tail.hpp": {
         "outcomes": 184,
@@ -2432,8 +2544,8 @@
         "taken": 70
       },
       "main/logic/hp_probe.hpp": {
-        "outcomes": 143,
-        "taken": 130
+        "outcomes": 145,
+        "taken": 132
       },
       "main/logic/hp_query_log.hpp": {
         "outcomes": 4,
@@ -2699,6 +2811,10 @@
         "outcomes": 30,
         "taken": 30
       },
+      "main/logic/value_def.hpp": {
+        "outcomes": 20,
+        "taken": 19
+      },
       "main/logic/values_identity.hpp": {
         "outcomes": 16,
         "taken": 14
@@ -2758,8 +2874,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 1423,
-        "taken": 1330
+        "outcomes": 1601,
+        "taken": 1502
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 415,
@@ -2828,6 +2944,10 @@
       "main/logic/detect_identity.hpp": {
         "outcomes": 32,
         "taken": 31
+      },
+      "main/logic/dhw_loss_trace.hpp": {
+        "outcomes": 78,
+        "taken": 78
       },
       "main/logic/diag_tail.hpp": {
         "outcomes": 206,
@@ -2910,8 +3030,8 @@
         "taken": 82
       },
       "main/logic/hp_probe.hpp": {
-        "outcomes": 151,
-        "taken": 138
+        "outcomes": 153,
+        "taken": 140
       },
       "main/logic/hp_query_log.hpp": {
         "outcomes": 6,
@@ -3177,6 +3297,10 @@
         "outcomes": 30,
         "taken": 30
       },
+      "main/logic/value_def.hpp": {
+        "outcomes": 22,
+        "taken": 21
+      },
       "main/logic/values_identity.hpp": {
         "outcomes": 14,
         "taken": 14
@@ -3236,8 +3360,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 1423,
-        "taken": 1330
+        "outcomes": 1601,
+        "taken": 1502
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 415,
@@ -3306,6 +3430,10 @@
       "main/logic/detect_identity.hpp": {
         "outcomes": 32,
         "taken": 31
+      },
+      "main/logic/dhw_loss_trace.hpp": {
+        "outcomes": 78,
+        "taken": 78
       },
       "main/logic/diag_tail.hpp": {
         "outcomes": 206,
@@ -3388,8 +3516,8 @@
         "taken": 82
       },
       "main/logic/hp_probe.hpp": {
-        "outcomes": 151,
-        "taken": 138
+        "outcomes": 153,
+        "taken": 140
       },
       "main/logic/hp_query_log.hpp": {
         "outcomes": 6,
@@ -3655,6 +3783,10 @@
         "outcomes": 30,
         "taken": 30
       },
+      "main/logic/value_def.hpp": {
+        "outcomes": 22,
+        "taken": 21
+      },
       "main/logic/values_identity.hpp": {
         "outcomes": 14,
         "taken": 14
@@ -3714,8 +3846,8 @@
         "taken": 8
       },
       "main/logic/checkup.hpp": {
-        "outcomes": 1423,
-        "taken": 1330
+        "outcomes": 1601,
+        "taken": 1502
       },
       "main/logic/checkup_persist.hpp": {
         "outcomes": 415,
@@ -3785,6 +3917,10 @@
         "outcomes": 32,
         "taken": 31
       },
+      "main/logic/dhw_loss_trace.hpp": {
+        "outcomes": 78,
+        "taken": 78
+      },
       "main/logic/diag_tail.hpp": {
         "outcomes": 206,
         "taken": 206
@@ -3834,8 +3970,8 @@
         "taken": 24
       },
       "main/logic/heartbeat.hpp": {
-        "outcomes": 498,
-        "taken": 315
+        "outcomes": 502,
+        "taken": 318
       },
       "main/logic/heating_curve_bins.hpp": {
         "outcomes": 104,
@@ -3866,8 +4002,8 @@
         "taken": 82
       },
       "main/logic/hp_probe.hpp": {
-        "outcomes": 151,
-        "taken": 138
+        "outcomes": 153,
+        "taken": 140
       },
       "main/logic/hp_query_log.hpp": {
         "outcomes": 6,
@@ -3904,6 +4040,22 @@
       "main/logic/http_values_wait.hpp": {
         "outcomes": 12,
         "taken": 12
+      },
+      "main/logic/hydronic_hourly.hpp": {
+        "outcomes": 234,
+        "taken": 170
+      },
+      "main/logic/hydronic_input.hpp": {
+        "outcomes": 196,
+        "taken": 180
+      },
+      "main/logic/hydronic_observation.hpp": {
+        "outcomes": 202,
+        "taken": 201
+      },
+      "main/logic/hydronic_payload.hpp": {
+        "outcomes": 253,
+        "taken": 146
       },
       "main/logic/instrument.hpp": {
         "outcomes": 122,
@@ -4116,6 +4268,10 @@
       "main/logic/utf8.hpp": {
         "outcomes": 30,
         "taken": 30
+      },
+      "main/logic/value_def.hpp": {
+        "outcomes": 22,
+        "taken": 21
       },
       "main/logic/values_identity.hpp": {
         "outcomes": 14,

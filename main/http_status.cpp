@@ -1569,14 +1569,22 @@ static void append_status_json(JsonOut& j, bool redact) {
             trace_reader.admitted ? heap_caps_malloc(sizeof(Trace), MALLOC_CAP_8BIT) : nullptr;
         std::unique_ptr<Trace, decltype(&std::free)> trace(
             trace_storage ? new (trace_storage) Trace : nullptr, std::free);
+        // A separate <=416-byte optional allocation avoids putting exact DHW windows into the
+        // shared report/task stack. Both chart buffers use the same admission lease and snapshot.
+        using DhwTrace = logic::DhwLossTimeline;
+        void* dhw_storage =
+            trace_reader.admitted ? heap_caps_malloc(sizeof(DhwTrace), MALLOC_CAP_8BIT) : nullptr;
+        std::unique_ptr<DhwTrace, decltype(&std::free)> dhw_trace(
+            dhw_storage ? new (dhw_storage) DhwTrace : nullptr, std::free);
         logic::CheckupRestore      persist;
         logic::DefrostStartReport  defrost_start;
-        const logic::CheckupReport hr =
-            checkup_report(&hrs, trace.get(), &persist, diag_effective, &defrost_start);
+        const logic::CheckupReport hr = checkup_report(&hrs, trace.get(), &persist, diag_effective,
+                                                       &defrost_start, dhw_trace.get());
         const auto                 release_trace = [&] {
             trace.reset();
-            trace_reader.release();
+            if (!dhw_trace) trace_reader.release();
         };
+        if (!dhw_trace || !dhw_trace->epoch) dhw_trace.reset();
         if (!trace || !trace->unix_s) release_trace();
         qfield("]},\"health\":{\"source\":", diagnostics_source_name(diag_effective));
         ufield(",\"covered_s\":", hr.covered_s);
@@ -1672,6 +1680,30 @@ static void append_status_json(JsonOut& j, bool redact) {
                     }
                 }
                 j += "]";
+                if (dhw_trace && dhw_trace->epoch) {
+                    ufield(",\"timeline\":{\"epoch\":", dhw_trace->epoch);
+                    ufield(",\"window_end_s\":", dhw_trace->window_end_s);
+                    ufield(",\"since_s\":", dhw_trace->since_s);
+                    append_status_opt_uint(j, ",\"observed_end_s\":", dhw_trace->observed,
+                                           dhw_trace->observed_end_s);
+                    if (dhw_trace->unix_s) ufield(",\"unix_s\":", dhw_trace->unix_s);
+                    bfield(",\"live\":", dhw_trace->live);
+                    j += ",\"windows\":[";
+                    for (size_t wi = 0; wi < dhw_trace->count; ++wi) {
+                        if (wi) j += ",";
+                        const auto& w = dhw_trace->windows[wi];
+                        ufield("{\"start_s\":", w.start_s);
+                        ufield(",\"end_s\":", w.end_s);
+                        tenths("rate_k_h", w.rate_tenths);
+                        ufield(",\"observed_s\":", w.observed_s);
+                        bfield(",\"pump_marker\":", w.pump_marker);
+                        bfield(",\"draw_marker\":", w.draw_marker);
+                        j += "}";
+                    }
+                    j += "]}";
+                }
+                dhw_trace.reset();
+                if (!trace) trace_reader.release();
                 break;
             case logic::CheckupCheck::Cycling: {
                 // Keep legacy names; the pooled mean is null. Only complete heating runs judge.

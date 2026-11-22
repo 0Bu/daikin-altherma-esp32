@@ -182,6 +182,26 @@ const mutations=[
   {name:"late-checkup-persist-read",file:"status",scenario:"checkup_persist_snapshot",
     before:"json_append_quoted(j, logic::checkup_restore_slug(persist));",
     after:"json_append_quoted(j, checkup_persist_state());"},
+  {name:"dhw-zero-rate-is-missing",file:"status",scenario:"dhw_timeline_wire",
+    before:'tenths("rate_k_h", w.rate_tenths);',
+    after:'tenths("rate_k_h", w.rate_tenths ? w.rate_tenths : -1);'},
+  {name:"dhw-zero-observed-is-missing",file:"status",scenario:"dhw_timeline_wire",
+    before:String.raw`append_status_opt_uint(j, ",\"observed_end_s\":", dhw_trace->observed,`,
+    after:String.raw`append_status_opt_uint(j, ",\"observed_end_s\":", dhw_trace->observed && dhw_trace->observed_end_s != 0,`},
+  {name:"dhw-lost-draw-marker",file:"status",scenario:"dhw_timeline_wire",
+    before:String.raw`bfield(",\"draw_marker\":", w.draw_marker);`,
+    after:String.raw`bfield(",\"draw_marker\":", false);`},
+  {name:"dhw-redaction-detail-leak",file:"status",scenario:"dhw_timeline_wire",
+    before:"trace_reader.admitted = !redact && c.diagnostics_enabled && weather_values_reader_enter();",
+    after:"trace_reader.admitted = c.diagnostics_enabled && weather_values_reader_enter();"},
+  {name:"dhw-refused-trace-admission",file:"status",scenario:"dhw_timeline_wire",
+    before:"trace_reader.admitted = !redact && c.diagnostics_enabled && weather_values_reader_enter();",
+    after:"trace_reader.admitted = !redact && c.diagnostics_enabled && (weather_values_reader_enter(), true);"},
+  {name:"dhw-dropped-shared-reader",file:"status",scenario:"dhw_timeline_wire",
+    before:"if (!dhw_trace) trace_reader.release();",after:"trace_reader.release();"},
+  {name:"overlapping-chart-and-cycling-context-leases",file:"status",scenario:"status_cycling_run_contexts",
+    before:/release_trace\(\);\s*(?=if \(!redact && have_trace && diag_effective == DiagnosticsSource::X10a\))/,
+    after:""},
   {name:"refrigerant-total-as-input-count",special:"refrigerant-total-count",scenario:"refrigerant_metadata"},
   {name:"refrigerant-coordinate-swap",file:"status",scenario:"refrigerant_metadata",
     before:"append_json_uint(j, source.reg);",after:"append_json_uint(j, source.off);"},
@@ -195,7 +215,7 @@ try {
   const compiler=execute(cxx,["--version"]).stdout.trim();
   const baseline=execute(compile("production"),[]);
   const caseCount=Number(baseline.stdout.match(/^PASS total=(\d+)$/m)?.[1]);
-  assert.equal(caseCount,36);
+  assert.equal(caseCount,37);
   assert.equal(caseCount,[...baseline.stdout.matchAll(/^PASS (?!total=)\S+$/gm)].length);
   const wires=[]; const decoder=new TextDecoder("utf-8",{fatal:true});
   const configCases=new Map([
@@ -232,6 +252,71 @@ try {
   ]);
   const persistWires=new Set(["checkup-persist-plain","checkup-persist-redacted",
     "checkup-persist-framed"]);
+  // Independently specified real endpoints, rates and paired context; not generated from the
+  // fixture's modulo expressions, hourly aggregate count, hero maximum or evenly spaced bars.
+  const dhwWindows=[
+    [86369,90000,0,3599,false,false],
+    [90000,93600,0.7,3581,true,false],
+    [93600,97200,1.4,3562,false,true],
+    [97200,100800,2.1,3543,true,false],
+    [100800,104400,0.3,3524,false,false],
+    [104400,108000,1,3600,true,true],
+    [108000,111600,1.7,3581,false,false],
+    [111600,115200,2.4,3562,true,false],
+    [115200,118800,0.6,3543,false,true],
+    [118800,122400,1.3,3524,true,false],
+    [122400,126000,2,3600,false,false],
+    [126000,129600,0.2,3581,true,true],
+    [129600,133200,0.9,3562,false,false],
+    [133200,136800,1.6,3543,true,false],
+    [136800,140400,2.3,3524,false,true],
+    [140400,144000,0.5,3600,true,false],
+    [144000,147600,1.2,3581,false,false],
+    [147600,151200,1.9,3562,true,true],
+    [151200,154800,0.1,3543,false,false],
+    [154800,158400,0.8,3524,true,false],
+    [158400,162000,1.5,3600,false,true],
+    [162000,165600,2.2,3581,true,false],
+    [165600,169200,0.4,3562,false,false],
+    [169200,172800,1.1,3543,true,true],
+  ].map(([start_s,end_s,rate_k_h,observed_s,pump_marker,draw_marker])=>
+    ({start_s,end_s,rate_k_h,observed_s,pump_marker,draw_marker}));
+  const dhwX10a={epoch:71,window_end_s:172800,since_s:80000,observed_end_s:172799,
+    unix_s:2000000000,live:true,windows:dhwWindows};
+  const dhwModbus={epoch:83,window_end_s:174000,since_s:166000,observed_end_s:173999,
+    unix_s:1999999993,live:false,windows:[
+      {start_s:169400,end_s:173000,rate_k_h:3.3,observed_s:3581,pump_marker:false,draw_marker:true},
+    ]};
+  const dhwUnsynced={epoch:71,window_end_s:172800,since_s:80000,observed_end_s:172799,
+    live:true,windows:dhwWindows};
+  const dhwAggregate={id:"dhw_loss",evidence:"heuristic",verdict:"info",reason:"",
+    observed_s:28000,required_s:0,max_k_h:4.5,windows:8,high_windows:3,high_with_pump:2,
+    high_pump_off:1,draw_windows:4,pump_windows:5,quiet_high_windows:1,circulation_on_s:600,
+    circulation_known_s:7200,candidate_s:137,settle_remaining_s:19,aborts:2,best_aborted_s:119,
+    blocked:false,abort_reasons:["reading","blind"]};
+  const dhwCases=new Map([
+    ["dhw-x10a",{timeline:dhwX10a}],
+    ["dhw-mcp-x10a",{timeline:dhwX10a,mcp:true}],
+    ["dhw-modbus",{timeline:dhwModbus,source:"modbus"}],
+    ["dhw-mcp-modbus",{timeline:dhwModbus,source:"modbus",mcp:true}],
+    ["dhw-no-sntp",{timeline:dhwUnsynced,unsynced:true}],
+    ["dhw-empty-unobserved",{timeline:{epoch:73,window_end_s:1800,since_s:0,
+      observed_end_s:null,live:false,windows:[]},unsynced:true}],
+    ["dhw-empty-observed-zero",{timeline:{epoch:74,window_end_s:0,since_s:0,
+      observed_end_s:0,live:false,windows:[]},unsynced:true}],
+    ["dhw-epoch-zero",{}],
+    ["dhw-disabled",{disabled:true}],
+    ["dhw-redacted",{redact:true}],
+    ["dhw-all-trace-oom",{}],
+    ["dhw-only-oom",{cycling:true}],
+    ["dhw-mcp-only-oom",{cycling:true,mcp:true}],
+    ["dhw-cycling-oom",{timeline:dhwX10a}],
+    ["dhw-weather",{}],
+    ["dhw-refused-admission",{}],
+    ["dhw-mcp-refused-admission",{mcp:true}],
+    ["dhw-recovered",{timeline:dhwX10a,cycling:true}],
+  ]);
+  const dhwSeen=new Set();
   let persistUnknownSeen=false;
   const stopIds=["low_rps_above_main_target","request_withdrawal","defrost",
     "dhw_transition","route_mode_transition"];
@@ -320,6 +405,88 @@ try {
           .map(([time, kind]) => time * 8 + kind),
       });
       cyclingWires.delete(name);
+    }
+    if(name.startsWith("dhw-")) {
+      assert.ok(dhwCases.has(name),`${name}: unexpected DHW wire case`);
+      assert.ok(!dhwSeen.has(name),`${name}: duplicate DHW wire case`);
+      dhwSeen.add(name);
+      const expected=dhwCases.get(name);
+      const status=expected.mcp?doc.result.structuredContent:doc;
+      if(expected.mcp) {
+        assert.deepEqual(Object.keys(doc),["jsonrpc","id","result"],name);
+        assert.equal(doc.jsonrpc,"2.0",name);
+        assert.equal(doc.id,73,name);
+        assert.deepEqual(Object.keys(doc.result),["content","structuredContent","isError"],name);
+        assert.deepEqual(doc.result.content,[{type:"text",text:"Current device and heat-pump status."}],name);
+        assert.equal(doc.result.isError,false,name);
+      }
+      assert.equal(status.version,"fixture-version",name);
+      assert.equal(status.health.source,expected.source??"x10a",name);
+      assert.equal(status.diagnostics.source,expected.source??"x10a",name);
+      assert.equal(status.diagnostics.effective_source,expected.source??"x10a",name);
+      assert.equal(status.diagnostics.enabled,!expected.disabled,name);
+      assert.equal(status.ntp.synced,!expected.unsynced,name);
+      if(expected.unsynced) assert.equal(status.ntp.time,null,name);
+      assert.equal(status.health.checks.length,8,`${name}: retain the eight diagnosis rows`);
+      const dhw=status.health.checks.find(check=>check.id==="dhw_loss");
+      assert.ok(dhw,`${name}: DHW row must remain present without optional detail`);
+      const {timeline,...aggregate}=dhw;
+      assert.deepEqual(aggregate,dhwAggregate,`${name}: optional detail cannot replace aggregate evidence`);
+      assert.equal(Object.hasOwn(dhw,"timeline"),expected.timeline!==undefined,
+        `${name}: refusal means absent, not null or an empty substitute`);
+      assert.deepEqual(timeline,expected.timeline,`${name}: exact DHW frame, endpoints, rates and context`);
+      const rawRates=[...text.matchAll(/"rate_k_h":([^,}\]]+)/g)].map(match=>match[1]);
+      assert.deepEqual(rawRates,(expected.timeline?.windows??[]).map(window=>window.rate_k_h.toFixed(1)),
+        `${name}: rates must be numeric with exactly one decimal, including 0.0`);
+      if(timeline) {
+        assert.ok(timeline.epoch>0&&timeline.windows.length<=24,name);
+        for(const key of ["epoch","window_end_s","since_s","observed_end_s","unix_s"])
+          if(timeline[key]!==undefined&&timeline[key]!==null)
+            assert.ok(Number.isInteger(timeline[key])&&timeline[key]>=0&&timeline[key]<=0xffffffff,
+              `${name}/${key}: unsigned monotonic metadata or trusted anchor`);
+        const rawWindows=timeline.windows.map(window=>
+          `{"start_s":${window.start_s},"end_s":${window.end_s},"rate_k_h":${window.rate_k_h.toFixed(1)},`+
+          `"observed_s":${window.observed_s},"pump_marker":${window.pump_marker},"draw_marker":${window.draw_marker}}`);
+        assert.ok(text.includes('"windows":['+rawWindows.join(",")+"]"),
+          `${name}: completed records must stream compactly without invented metadata`);
+        for(const [index,window] of timeline.windows.entries()) {
+          assert.ok(Number.isInteger(window.start_s)&&Number.isInteger(window.end_s),name);
+          // Real elapsed evaluations are 3600..3630 s. Independently floored endpoint timestamps
+          // can differ by 3631 s, so rejecting that wire span would discard real evidence.
+          assert.ok(window.end_s-window.start_s>=3600&&window.end_s-window.start_s<=3631,name);
+          assert.ok(window.start_s>=timeline.since_s&&window.end_s<=timeline.window_end_s,name);
+          assert.ok(window.end_s>timeline.window_end_s-86400,`${name}: retain by completion, not start`);
+          if(index) assert.ok(timeline.windows[index-1].end_s<=window.start_s,
+            `${name}: chronological, non-overlapping windows`);
+          assert.ok(Number.isFinite(window.rate_k_h)&&window.rate_k_h>=0,name);
+          assert.ok(Number.isInteger(window.observed_s)&&window.observed_s>=0&&
+            window.observed_s<=window.end_s-window.start_s,name);
+          assert.equal(typeof window.pump_marker,"boolean",name);
+          assert.equal(typeof window.draw_marker,"boolean",name);
+        }
+        if(timeline.windows.length===24) {
+          assert.equal(timeline.windows[0].end_s-timeline.windows[0].start_s,3631,name);
+          assert.ok(timeline.windows[0].start_s<timeline.window_end_s-86400,name);
+          assert.equal(Math.max(...timeline.windows.map(window=>window.rate_k_h)),2.4,name);
+          assert.ok(dhw.windows<timeline.windows.length,`${name}: no clamping timed records to aggregate count`);
+        }
+        if(expected.source==="modbus") {
+          assert.equal(timeline.windows[0].rate_k_h,3.3,name);
+          assert.ok(dhw.windows>timeline.windows.length,`${name}: no synthetic bars for aggregate-only windows`);
+        }
+      }
+      const cycling=status.health.checks.find(check=>check.id==="cycling");
+      assert.equal(cycling.hours_epoch,17,name);
+      assert.deepEqual(cycling.hours,[
+        {bucket:-1,starts:2,run_s:1800,observed_s:3600,space_s:900,dhw_s:900},
+        {bucket:0,elapsed_s:137,starts:1,run_s:60,observed_s:120,space_s:0,dhw_s:60},
+      ],`${name}: admission or DHW OOM must not lose compact cycling hours`);
+      assert.equal(Object.hasOwn(cycling,"timeline"),!!expected.cycling,name);
+      if(expected.cycling) assert.deepEqual(cycling.timeline,{
+        unix_s:2000000000,window_end_s:86400,observed_end_s:86399,boot_s:451,live:true,
+        run_edges:true,records:[86359*8+1,86369*8+3],
+      },`${name}: DHW-only OOM must retain the independent cycling snapshot`);
+      if(expected.redact) assert.equal(status.wifi.ssid,"<redacted>",name);
     }
     if(persistWires.delete(name)) {
       const health=(name==="checkup-persist-framed"?doc.result:doc).health;
@@ -496,6 +663,8 @@ try {
   assert.equal(roomWires.size,0,"all room-history and room-label wire oracles must run");
   assert.equal(stopWires.size,0,"all unknown, covered-zero and populated stop-context wire oracles must run");
   assert.equal(cyclingWires.size,0,"both partially elapsed and start-edge cycling frames must run");
+  assert.deepEqual([...dhwSeen].sort(),[...dhwCases.keys()].sort(),
+    "all DHW source, frame, admission, OOM, redaction and MCP wire oracles must run exactly once");
   assert.equal(persistWires.size,0,"plain, redacted and framed diagnosis snapshots must run");
   assert.ok(persistUnknownSeen,"unreadable diagnosis snapshot must run");
   assert.equal(refrigerantWires.size,0,"all populated, missing, reset and omitted refrigerant wire oracles must run");
@@ -533,6 +702,8 @@ try {
       hashes[path.relative(root,original)]=hash;
     }
   }
+  for(const file of ["main/logic/dhw_loss_trace.hpp","main/logic/mcp.hpp"])
+    assert.ok(Object.hasOwn(hashes,file),`new DHW/framing input must appear in compiler dependency hashes: ${file}`);
   for(const file of ["main/hp_poll.cpp","test/http_stream_runtime/legacy_handlers.json","test/test_http_stream_runtime.mjs"])
     hashes[file]=createHash("sha256").update(fs.readFileSync(path.join(root,file))).digest("hex");
   const record={compiler,sanitizer:sanitizer?"undefined-no-recover":"none",sanitizerControl,commands,hashes,compiledInputs,wires,controls,
@@ -540,6 +711,7 @@ try {
     limits:["Complete unextracted http_common.cpp/http_status.cpp/state_dwell.cpp execute. Unrelated handlers are link-discarded.",
       "Snapshots and SDK transports use shaped adapters; every observed C++ new position and stream chunk/final failure is injected independently. Adapter transport allocations are excluded.",
       "Dwell producer and batch-reader execute; UART poll/cache provider is a controlled immutable-snapshot adapter.",
+      "DHW source-specific report snapshots are controlled adapters. Production HTTP serialization and MCP framing helpers execute, not the MCP dispatcher or DHW producer/lifecycle/persistence.",
       "Refrigerant metadata uses controlled typed snapshots, with independent full JSON field oracles. Producer eligibility, source selection and resets are tested separately; these wires do not prove them or physical sensor pairing.",
       "Source/header hashes bind local evidence. Hardware scheduling, target heap/stack and source truth are separate."]};
   if(process.env.HTTP_STREAM_RECORD) fs.writeFileSync(process.env.HTTP_STREAM_RECORD,JSON.stringify(record,null,2)+"\n");

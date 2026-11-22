@@ -28,10 +28,19 @@ void  operator delete[](void* memory) noexcept { std::free(memory); }
 void  operator delete(void* memory, size_t) noexcept { std::free(memory); }
 void  operator delete[](void* memory, size_t) noexcept { std::free(memory); }
 
-static bool fail_trace_snapshot = false;
+static bool   fail_trace_snapshot = false;
+static size_t fail_trace_size = 0, trace_caps_calls = 0, trace_caps_failures = 0;
+static size_t largest_caps_allocation = 0, trace_caps_sizes[8]{};
 
 void* heap_caps_malloc(size_t size, unsigned) {
-    return fail_trace_snapshot ? nullptr : std::malloc(size);
+    largest_caps_allocation = std::max(largest_caps_allocation, size);
+    if (trace_caps_calls < 8) trace_caps_sizes[trace_caps_calls] = size;
+    ++trace_caps_calls;
+    if (fail_trace_snapshot || (fail_trace_size && size == fail_trace_size)) {
+        ++trace_caps_failures;
+        return nullptr;
+    }
+    return std::malloc(size);
 }
 
 #include HTTP_COMMON_SOURCE
@@ -49,6 +58,7 @@ constexpr int64_t history_t0(int64_t now_unix, uint32_t age, size_t n, uint32_t 
 #endif
 #include HTTP_STATUS_SOURCE
 #include STATE_DWELL_SOURCE
+#include "logic/mcp.hpp"
 
 namespace fixture {
 inline std::string                    oracle;
@@ -58,6 +68,8 @@ inline daik::HpValuesIdentity         identity{"generic", 0x1234, 7, 11};
 inline bool                           ota = false, weather = false, modbus_live = false;
 // Weather's TLS phase is `weather`; readers counts admitted /values snapshots in that exclusion.
 inline int                              values_readers = 0, values_readers_peak = 0;
+inline bool                                   refuse_values_admission = false, clock_synced = true;
+inline httpd_req_t*                           active_request            = nullptr;
 inline bool                             config_unreadable         = false;
 inline bool                             change_history_epoch      = false;
 inline bool                             history_restored          = false;
@@ -82,6 +94,10 @@ inline daik::logic::CheckupCyclingHours       cycling_hours{};
 inline daik::logic::CheckupCyclingTrace       cycling_trace{};
 inline daik::logic::CheckupRunContextSnapshot cycling_run_contexts{};
 inline bool                                   cycling_run_contexts_present = false;
+inline daik::logic::DhwLossTimeline           dhw_timelines[2]{};
+inline unsigned                               dhw_snapshot_calls[2]{}, checkup_report_calls = 0;
+inline bool                                   dhw_evidence_case = false, dhw_lease_witness = false;
+inline unsigned                               dhw_lease_witnesses = 0, dhw_snapshot_chunks = 0;
 inline daik::CheckupFaultStatus         fault_status{};
 inline daik::logic::CheckupFaultTrace   fault_trace{};
 inline bool                             fault_trace_present = false;
@@ -112,12 +128,17 @@ void reset() {
     sdk::allocations = sdk::fail_allocation = 0;
     sdk::largest_allocation                 = 0;
     sdk::after_chunk                        = nullptr;
+    fail_trace_snapshot                     = false;
+    fail_trace_size = trace_caps_calls = trace_caps_failures = largest_caps_allocation = 0;
     current                                 = {};
     current.profile                         = "generic";
     current.wifi_ssid                       = "Café \"quoted\"\\line\n";
     current.mqtt_base                       = "daikin-altherma-esp32";
     ota = weather = modbus_live = change_history_epoch = history_restored = false;
     values_readers = values_readers_peak = 0;
+    refuse_values_admission              = false;
+    clock_synced                         = true;
+    active_request                       = nullptr;
     config_unreadable                    = false;
     epoch                                = 42;
     room_identity                        = 0;
@@ -131,14 +152,18 @@ void reset() {
     stop_report               = {};
     hydronic_report            = {};
     flow_min_tenths            = -1;
-    defrost_start              = {};
-    curve_bins                 = {};
+    defrost_start                = {};
+    curve_bins                   = {};
     curve_bins_available         = false;
     cycling_hours                = {};
     cycling_trace                = {};
     cycling_run_contexts         = {};
     cycling_run_contexts_present = false;
-    fault_status                 = {};
+    for (auto& timeline : dhw_timelines) timeline.clear();
+    dhw_snapshot_calls[0] = dhw_snapshot_calls[1] = checkup_report_calls = 0;
+    dhw_evidence_case = dhw_lease_witness = false;
+    dhw_lease_witnesses = dhw_snapshot_chunks = 0;
+    fault_status                              = {};
     fault_trace.reset();
     fault_trace_present        = false;
     checkup_persist           = daik::logic::CheckupRestore::NoRecord;
@@ -192,8 +217,11 @@ esp_err_t invoke(httpd_req_t& req, const char* uri, esp_err_t (*handler)(httpd_r
     sdk::allocations        = 0;
     sdk::largest_allocation = 0;
     sdk::fail_allocation    = fail_at;
+    trace_caps_calls = trace_caps_failures = largest_caps_allocation = 0;
     sdk::track_allocations  = true;
+    active_request                                                   = &req;
     const auto result       = daik::handle_then_settle_body(&req);
+    active_request          = nullptr;
     sdk::track_allocations  = false;
     sdk::fail_allocation    = 0;
     return result;
@@ -208,6 +236,14 @@ void successful(const httpd_req_t& req) {
     check(req.status == "200 OK" && req.final_chunks == 1 && req.max_chunk <= 1024 &&
               req.replacement_responses == 0 && req.late_status_changes == 0,
           "completed stream is unbounded or replaced");
+}
+std::string_view checkup_wire(const httpd_req_t& req, const char* id) {
+    const auto key   = std::string{"{\"id\":\""} + id + "\"";
+    const auto start = req.response.find(key);
+    check(start != std::string::npos, "status omitted the requested check row");
+    const auto end = req.response.find(",{\"id\":", start + key.size());
+    check(end != std::string::npos, "check-row oracle did not find its next row boundary");
+    return std::string_view(req.response).substr(start, end - start);
 }
 void maximum_scan() {
     scan_count = 20;
@@ -396,12 +432,25 @@ CirculationPumpSample       circulation_pump_sample() { return {}; }
 WeatherForecastStatus       weather_forecast_status() { return {}; }
 bool                        weather_fetch_active() { return fixture::weather; }
 bool                        weather_values_reader_enter() noexcept {
-    if (fixture::weather) return false;
+    if (fixture::weather || fixture::refuse_values_admission) return false;
     fixture::values_readers_peak =
         std::max(fixture::values_readers_peak, ++fixture::values_readers);
     return true;
 }
-void         weather_values_reader_leave() noexcept { --fixture::values_readers; }
+void weather_values_reader_leave() noexcept {
+    if (fixture::dhw_lease_witness && fixture::values_readers == 1) {
+        // The existing first-chunk hook fires before the diagnosis snapshot. Observe the last
+        // reader's release instead: multiple DHW chunks must already be on this real transport.
+        // Fault's nested reader may leave sooner, but must not release this shared chart lease.
+        const auto* req = fixture::active_request;
+        fixture::check(req && req->chunks >= fixture::dhw_snapshot_chunks + 2 &&
+                           req->response.find("\"start_s\":86369") != std::string::npos &&
+                           req->response.find("\"rate_k_h\":0.0") != std::string::npos,
+                       "shared chart reader left before bounded DHW windows streamed");
+        ++fixture::dhw_lease_witnesses;
+    }
+    --fixture::values_readers;
+}
 SyslogStatus syslog_status() { return {}; }
 HpStats      hp_stats() { return {}; }
 uint32_t     hp_skipped_cycles() { return 0; }
@@ -500,13 +549,13 @@ size_t history_room_snapshot(logic::HistorySample* out, size_t max, uint32_t exp
 }
 TimeStatus time_status() {
     TimeStatus s;
-    s.synced    = true;
-    s.unix_time = 2000000000;
+    s.synced    = fixture::clock_synced;
+    s.unix_time = fixture::clock_synced ? 2000000000 : 0;
     return s;
 }
 void time_now(int64_t& seconds, int32_t& ms) {
-    seconds = fixture::history_restored ? 2000000100 : 2000000000;
-    ms      = fixture::history_restored ? 100 : 0;
+    seconds = !fixture::clock_synced ? 0 : fixture::history_restored ? 2000000100 : 2000000000;
+    ms      = fixture::clock_synced && fixture::history_restored ? 100 : 0;
 }
 const char* checkup_persist_state() {
     return logic::checkup_restore_slug(fixture::checkup_persist);
@@ -518,12 +567,45 @@ bool checkup_has_data(DiagnosticsSource source) {
 logic::CheckupReport checkup_report(logic::CheckupCyclingHours* hours,
                                     logic::CheckupCyclingTrace* trace,
                                     logic::CheckupRestore* persist, DiagnosticsSource source,
-                                    logic::DefrostStartReport* defrost_context) {
+                                    logic::DefrostStartReport* defrost_context,
+                                    logic::DhwLossTimeline*    dhw_trace) {
+    ++fixture::checkup_report_calls;
     fixture::last_checkup_report_source = source;
     if (hours) *hours = fixture::cycling_hours;
     if (trace) *trace = fixture::cycling_trace;
     if (persist) *persist = fixture::checkup_persist;
+    if (dhw_trace) {
+        fixture::check(fixture::values_readers == 1,
+                       "DHW snapshot was copied without the one shared chart reader");
+        const auto slot = source == DiagnosticsSource::Modbus ? 1 : 0;
+        ++fixture::dhw_snapshot_calls[slot];
+        *dhw_trace = fixture::dhw_timelines[slot];
+        if (fixture::active_request) fixture::dhw_snapshot_chunks = fixture::active_request->chunks;
+    }
     logic::CheckupReport report{};
+    if (fixture::dhw_evidence_case) {
+        // Deliberately unlike the timed records: hourly/restored aggregate maxima and counts are
+        // a separate population. Neither endpoint times nor bar heights may be reconstructed.
+        auto& dhw               = report.checks[static_cast<size_t>(logic::CheckupCheck::DhwLoss)];
+        dhw.verdict             = logic::CheckupVerdict::Info;
+        dhw.reason              = logic::CheckupReason::None;
+        dhw.observed_s          = 28000;
+        dhw.a                   = 45;
+        dhw.b                   = 8;
+        dhw.c                   = 3;
+        dhw.d                   = 2;
+        dhw.e                   = 1;
+        dhw.f                   = 600;
+        dhw.g                   = 7200;
+        report.dhw_draw_windows = 4;
+        report.dhw_pump_windows = 5;
+        report.dhw_quiet_high_windows = 1;
+        report.dhw_candidate_s        = 137;
+        report.dhw_settle_remaining_s = 19;
+        report.dhw_aborts             = 2;
+        report.dhw_best_aborted_s     = 119;
+        report.dhw_abort_reasons      = logic::DHW_ABORT_READING | logic::DHW_ABORT_BLIND;
+    }
     if (source == DiagnosticsSource::X10a) {
         if (defrost_context) *defrost_context = fixture::defrost_start;
         auto& defrost = report.checks[static_cast<size_t>(logic::CheckupCheck::Defrost)];
@@ -583,6 +665,8 @@ bool checkup_cycling_run_contexts(daik::logic::CheckupRunContextSnapshot& out, u
         out.reset();
         return false;
     }
+    fixture::check(fixture::values_readers == 1,
+                   "cycling run contexts overlap the completed chart reader");
     out = fixture::cycling_run_contexts;
     return out.count > 0;
 }
@@ -724,6 +808,212 @@ int main(int argc, char** argv) {
         check(invoke(req, "/status", daik::h_status) == ESP_OK, "expired cycling status failed");
         successful(req);
         emit(req, "cycling-expired");
+    });
+    run("dhw_timeline_wire", [] {
+        using Timeline = daik::logic::DhwLossTimeline;
+        using Trace    = daik::logic::CheckupCyclingTrace;
+        check(sizeof(Timeline) == 408 && sizeof(daik::logic::DhwLossTraceWindow) == 16,
+              "DHW optional snapshot exceeded its bounded wire-test budget");
+        current.diagnostics_enabled = true;
+        current.mb_host             = "homehub-fixture";
+        checkup_x10a_has_data = checkup_modbus_has_data = true;
+        dhw_evidence_case                               = true;
+        cycling_hours.epoch                             = 17;
+        cycling_hours.count                             = 2;
+        cycling_hours.pending_elapsed_s                 = 137;
+        cycling_hours.hours[0]                          = {3600, 1800, 900, 900, 2};
+        cycling_hours.hours[1]                          = {120, 60, 0, 60, 1};
+
+        auto& x10a          = dhw_timelines[0];
+        x10a.epoch          = 71;
+        x10a.window_end_s   = 172800;
+        x10a.since_s        = 80000;
+        x10a.observed_end_s = 172799;
+        x10a.unix_s         = 2000000000;
+        x10a.observed = x10a.live = true;
+        x10a.count                = 24;
+        for (uint32_t i = 0; i < x10a.count; ++i) {
+            // The first independently floored endpoint pair is 3631 s wide. Its completion is
+            // retained even though its real start precedes the frame's 86400 s left edge.
+            x10a.windows[i] = {i ? 86400 + i * 3600 : 86369,
+                               90000 + i * 3600,
+                               static_cast<uint16_t>((i * 7) % 25),
+                               static_cast<uint16_t>(i ? 3600 - (i % 5) * 19 : 3599),
+                               i % 2 != 0,
+                               i % 3 == 2};
+        }
+        const auto full       = x10a;
+        auto&      modbus     = dhw_timelines[1];
+        modbus.epoch          = 83;
+        modbus.window_end_s   = 174000;
+        modbus.since_s        = 166000;
+        modbus.observed_end_s = 173999;
+        modbus.unix_s         = 1999999993;
+        modbus.observed       = true;
+        modbus.live           = false;
+        modbus.count          = 1;
+        modbus.windows[0]     = {169400, 173000, 33, 3581, false, true};
+
+        const auto framed = +[](httpd_req_t* req) {
+            // The same pure framing helpers used by MCP get_status, not a second serializer.
+            std::string prefix, suffix;
+            daik::mcp_result_begin(prefix, "73");
+            daik::mcp_tool_result_begin(prefix, "Current device and heat-pump status.");
+            daik::mcp_tool_result_end(suffix);
+            daik::mcp_result_end(suffix);
+            return daik::http_send_status_json(req, prefix, suffix, false);
+        };
+        auto send = [&](const char* name, bool visible, bool copied, bool mcp = false,
+                        bool redact = false) {
+            const auto     source          = current.diagnostics_source;
+            const auto     slot            = source == daik::DiagnosticsSource::Modbus ? 1 : 0;
+            const unsigned snapshots       = dhw_snapshot_calls[slot];
+            const unsigned other_snapshots = dhw_snapshot_calls[1 - slot];
+            const unsigned reports         = checkup_report_calls;
+            auto           req             = request();
+            check(invoke(req,
+                         mcp      ? "/mcp"
+                         : redact ? "/status?redact=1"
+                                  : "/status",
+                         mcp ? framed : daik::h_status) == ESP_OK,
+                  "DHW status or shared MCP builder failed");
+            successful(req);
+            check(values_readers == 0 && checkup_report_calls == reports + 1 &&
+                      last_checkup_report_source == source &&
+                      dhw_snapshot_calls[slot] == snapshots + (copied ? 1 : 0) &&
+                      dhw_snapshot_calls[1 - slot] == other_snapshots,
+                  "DHW snapshot mixed sources, copied after refusal, or leaked its reader");
+            const auto row = checkup_wire(req, "dhw_loss");
+            check((row.find("\"timeline\":") != std::string_view::npos) == visible,
+                  "DHW timeline must be an optional object, not null, empty or leaked on refusal");
+            check(row.find("\"max_k_h\":4.5,\"windows\":8") != std::string_view::npos &&
+                      checkup_wire(req, "cycling").find("\"hours_epoch\":17,\"hours\":[") !=
+                          std::string_view::npos,
+                  "optional DHW detail changed aggregate evidence or lost cycling hours");
+            check(sdk::largest_allocation <= 2048 && largest_caps_allocation <= 1024,
+                  "DHW status materialized an unbounded body or optional allocation");
+            emit(req, name);
+            return req;
+        };
+
+        dhw_lease_witness = true; // Cycling's absent wall anchor must not drop the DHW lease.
+        auto maximum      = send("dhw-x10a", true, true);
+        dhw_lease_witness = false;
+        check(dhw_lease_witnesses == 1, "DHW streaming lease witness was not exercised");
+        const auto maximum_row = checkup_wire(maximum, "dhw_loss");
+        check(
+            maximum_row.find("{\"start_s\":86369,\"end_s\":90000,\"rate_k_h\":0.0,"
+                             "\"observed_s\":3599,\"pump_marker\":false,\"draw_marker\":false}") !=
+                    std::string_view::npos &&
+                maximum_row.find(
+                    "\"observed_s\":3581,\"pump_marker\":true,\"draw_marker\":false}") !=
+                    std::string_view::npos &&
+                maximum_row.find(
+                    "\"observed_s\":3562,\"pump_marker\":false,\"draw_marker\":true}") !=
+                    std::string_view::npos,
+            "DHW wire lost a real 3631-second endpoint, numeric zero, coverage or paired markers");
+        size_t records = 0;
+        for (size_t pos = 0;
+             (pos = maximum_row.find("\"start_s\":", pos)) != std::string_view::npos; ++pos)
+            ++records;
+        unsigned dhw_allocations = 0;
+        check(trace_caps_calls <= 8, "optional allocation witness overflowed");
+        for (size_t i = 0; i < trace_caps_calls; ++i)
+            if (trace_caps_sizes[i] == sizeof(Timeline)) ++dhw_allocations;
+        check(records == 24 && maximum_row.size() > 3 * 1024 && dhw_allocations == 1,
+              "maximum DHW detail was truncated, synthesized, or not one bounded snapshot");
+        std::printf("DHW records=%zu row_bytes=%zu chunks=%u max_chunk=%zu "
+                    "largest_allocation=%zu largest_caps_allocation=%zu snapshot_bytes=%zu "
+                    "lease_witnesses=%u\n",
+                    records, maximum_row.size(), maximum.chunks, maximum.max_chunk,
+                    sdk::largest_allocation, largest_caps_allocation, sizeof(Timeline),
+                    dhw_lease_witnesses);
+        send("dhw-mcp-x10a", true, true, true);
+        current.diagnostics_source = daik::DiagnosticsSource::Modbus;
+        send("dhw-modbus", true, true);
+        send("dhw-mcp-modbus", true, true, true);
+        current.diagnostics_source = daik::DiagnosticsSource::X10a;
+
+        clock_synced  = false;
+        x10a.unix_s   = 0;
+        auto unsynced = send("dhw-no-sntp", true, true);
+        check(checkup_wire(unsynced, "dhw_loss").find("\"unix_s\":") == std::string_view::npos,
+              "DHW serializer invented a wall-clock anchor without SNTP");
+        x10a.clear();
+        x10a.epoch           = 73;
+        x10a.window_end_s    = 1800;
+        x10a.observed_end_s  = 1234; // Unknown flag wins over a residual scalar.
+        auto       empty     = send("dhw-empty-unobserved", true, true);
+        const auto empty_row = checkup_wire(empty, "dhw_loss");
+        check(empty_row.find("\"observed_end_s\":null,\"live\":false,\"windows\":[]}") !=
+                  std::string_view::npos,
+              "an eligible empty DHW frame must preserve unknown observation time");
+        check(maximum.response.size() > empty.response.size() + 2048 &&
+                  maximum.chunks >= empty.chunks + 2,
+              "24 DHW windows did not traverse multiple bounded transport chunks");
+        x10a.epoch        = 74;
+        x10a.window_end_s = x10a.observed_end_s = 0;
+        x10a.observed                           = true;
+        auto zero                               = send("dhw-empty-observed-zero", true, true);
+        check(checkup_wire(zero, "dhw_loss").find("\"observed_end_s\":0,") !=
+                  std::string_view::npos,
+              "known boot-time DHW observation zero became unknown");
+        x10a         = full;
+        x10a.epoch   = 0; // Even residual records cannot make an ineligible snapshot visible.
+        clock_synced = true;
+        send("dhw-epoch-zero", false, true);
+        x10a                        = full;
+        current.diagnostics_enabled = false;
+        send("dhw-disabled", false, false);
+        check(trace_caps_calls == 0, "disabled diagnosis allocated optional trace buffers");
+        current.diagnostics_enabled = true;
+        send("dhw-redacted", false, false, false, true);
+        check(trace_caps_calls == 0, "redacted status allocated optional trace buffers");
+
+        cycling_trace.unix_s       = 2000000000;
+        cycling_trace.window_end_s = 86400;
+        cycling_trace.end_s        = 86399;
+        cycling_trace.boot_s       = 451;
+        cycling_trace.live         = true;
+        cycling_trace.push(86359, Trace::Off);
+        cycling_trace.push(86369, Trace::Heat);
+        fail_trace_snapshot = true;
+        auto all_oom        = send("dhw-all-trace-oom", false, false);
+        check(trace_caps_failures >= 2 &&
+                  checkup_wire(all_oom, "cycling").find("\"timeline\":") == std::string_view::npos,
+              "all optional trace OOM did not preserve only the compact status");
+        fail_trace_snapshot = false;
+        fail_trace_size     = sizeof(Timeline);
+        auto dhw_oom        = send("dhw-only-oom", false, false);
+        check(trace_caps_failures == 1 &&
+                  checkup_wire(dhw_oom, "cycling").find("\"timeline\":{") != std::string_view::npos,
+              "DHW-only OOM removed the independently available cycling timeline");
+        send("dhw-mcp-only-oom", false, false, true);
+        fail_trace_size   = sizeof(Trace);
+        dhw_lease_witness = true;
+        auto cycling_oom  = send("dhw-cycling-oom", true, true);
+        dhw_lease_witness = false;
+        check(trace_caps_failures == 1 && dhw_lease_witnesses == 2 &&
+                  checkup_wire(cycling_oom, "cycling").find("\"timeline\":") ==
+                      std::string_view::npos,
+              "cycling-only OOM dropped the surviving DHW snapshot or shared reader");
+        fail_trace_size = 0;
+        weather         = true;
+        send("dhw-weather", false, false);
+        check(trace_caps_calls == 0 && fixture_ticks == 0,
+              "Weather refusal waited or allocated optional trace buffers");
+        weather                 = false;
+        refuse_values_admission = true;
+        send("dhw-refused-admission", false, false);
+        check(trace_caps_calls == 0 && fixture_ticks == 0,
+              "refused values admission still allocated or waited for DHW detail");
+        send("dhw-mcp-refused-admission", false, false, true);
+        refuse_values_admission = false;
+        send("dhw-recovered", true, true);
+        allocation_sweep("/status", daik::h_status);
+        chunk_sweep("/status", daik::h_status);
+        allocation_sweep("/mcp", framed);
+        chunk_sweep("/mcp", framed);
     });
     run("checkup_persist_snapshot", [] {
         const auto framed = +[](httpd_req_t* req) {
@@ -1537,6 +1827,12 @@ int main(int argc, char** argv) {
         cycling_trace.boot_s       = 500;
         cycling_trace.live         = true;
         cycling_trace.push(86000, daik::logic::CheckupCyclingTrace::Heat);
+        auto& dhw        = dhw_timelines[0];
+        dhw.epoch        = 29;
+        dhw.window_end_s = dhw.observed_end_s = 86390;
+        dhw.observed = dhw.live = true;
+        dhw.count               = 1;
+        dhw.windows[0]          = {82000, 85600, 12, 3600, false, false};
         cycling_run_contexts.reset();
         cycling_run_contexts.flow_typical_tenths = 176;
         auto& e                                  = cycling_run_contexts.entries[0];
@@ -1562,6 +1858,8 @@ int main(int argc, char** argv) {
         check(invoke(req, "/status", daik::h_status) == ESP_OK, "run_contexts unredacted failed");
         successful(req);
         emit(req, "status-cycling-run-contexts");
+        check(checkup_wire(req, "dhw_loss").find("\"epoch\":29,") != std::string_view::npos,
+              "status dropped DHW detail when a cycling run context is available");
         check(req.response.find("\"flow_typical_l_min\":17.6,\"run_contexts\":[{\"at\":86000,"
                                 "\"mode\":\"space\",\"start_kind\":\"cooldown_restart\","
                                 "\"stop\":86168,\"stop_kind\":\"low_rps_above_target\","
@@ -1576,8 +1874,9 @@ int main(int argc, char** argv) {
               "run_contexts redacted failed");
         successful(req);
         check(req.response.find("\"run_contexts\"") == std::string::npos &&
-                  req.response.find("\"flow_typical_l_min\"") == std::string::npos,
-              "redacted /status leaked cycling run_contexts");
+                  req.response.find("\"flow_typical_l_min\"") == std::string::npos &&
+                  checkup_wire(req, "dhw_loss").find("\"timeline\":") == std::string_view::npos,
+              "redacted /status leaked DHW detail or cycling run contexts");
 
         current.mb_host            = "192.0.2.50";
         current.diagnostics_source = daik::DiagnosticsSource::Modbus;

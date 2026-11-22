@@ -921,12 +921,20 @@ def validate_status_diagnosis_paths(budgets: dict[str, Any], sources: dict[str, 
         "checkup_freshness": ["checkup_summarize", "checkup_evidence_name"],
         "cycling_hours": ["checkup_cycling_hours_locked", "room_time_now"],
         "cycling_hours_builder": ["checkup_cycling_hours_locked", "checkup_cycling_hours_build"],
+        "cycling_hours_anchor": ["checkup_cycling_hours_locked", "checkup_cycling_anchor"],
         "cycling_trace": ["cycling_trace_snapshot", "cycling_trace_emit", "cycling_trace_push",
                           "room_time_now"],
         "defrost_start_fence": ["defrost_start_copy", "stop_stop_observation_suppressed"],
         "defrost_start_generation": ["defrost_start_copy", "defrost_poll_generation"],
         "checkup_fault_flags": ["fault_saved_flags", "fault_saved_window_flags"],
         "checkup_fault_flags_clock": ["fault_saved_flags", "room_time_now"],
+        # Optional DHW output is caller-owned heap storage. Snapshot expiry, both monotonic
+        # reads, the libc clock and final withdrawal loads are sequential siblings.
+        # The DHW wall projection is inlined into the measured copy frame.
+        "dhw_trace_expire": ["dhw_trace_copy", "dhw_trace_expire"],
+        "dhw_trace_clock": ["dhw_trace_copy", "room_time_now"],
+        "dhw_trace_monotonic": ["dhw_trace_copy", "dhw_trace_monotonic"],
+        "dhw_trace_guard": ["dhw_trace_copy", "stop_atomic_bool_load"],
     }
     report_paths = {
         f"httpd_{transport}_{name}": [*prefix, *report, *tail]
@@ -1127,10 +1135,16 @@ def validate_status_diagnosis_paths(budgets: dict[str, Any], sources: dict[str, 
                              r"heap_caps_malloc\(sizeof\(Trace\), MALLOC_CAP_8BIT\)\s*: nullptr;\s*"
                              r"std::unique_ptr<Trace, decltype\(&std::free\)> trace\(\s*"
                              r"trace_storage \? new \(trace_storage\) Trace : nullptr, std::free\);\s*"
+                             r"using DhwTrace\s*=\s*logic::DhwLossTimeline;\s*"
+                             r"void\* dhw_storage\s*=\s*trace_reader.admitted\s*\?\s*"
+                             r"heap_caps_malloc\(sizeof\(DhwTrace\), MALLOC_CAP_8BIT\)\s*: nullptr;\s*"
+                             r"std::unique_ptr<DhwTrace, decltype\(&std::free\)> dhw_trace\(\s*"
+                             r"dhw_storage \? new \(dhw_storage\) DhwTrace : nullptr, std::free\);\s*"
                              r"logic::CheckupRestore\s+persist;\s*"
                              r"logic::DefrostStartReport\s+defrost_start;\s*"
                              r"const logic::CheckupReport hr\s*=\s*"
-                             r"checkup_report\(&hrs, trace\.get\(\), &persist, diag_effective,\s*&defrost_start\);",
+                             r"checkup_report\(&hrs, trace\.get\(\), &persist, diag_effective,\s*"
+                             r"&defrost_start, dhw_trace\.get\(\)\);",
                              status)
             or re.search(r"\bcheckup_cycling_hours(?:_locked)?\s*\(", status)
             or len(re.findall(r"\bappend_status_json\(out, redact\)", status)) != 1
@@ -3381,7 +3395,7 @@ def self_test() -> None:
      'daik::hp_query_detailed(unsigned char, daik::Protocol, unsigned char*, unsigned int, daik::HpQueryLogPolicy)': 64,
      'daik::hp_format(daik::ValueDef const&, unsigned char const*, int, int, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >&, daik::ValueDef const*, unsigned int, daik::SaturationWitness)': 64,
      'daik::history_record(daik::CachedValue const*, unsigned int, unsigned long)': 64,
-     'daik::checkup_report(daik::logic::CheckupCyclingHours*, daik::logic::CheckupCyclingTrace*, daik::logic::CheckupRestore*, daik::DiagnosticsSource, daik::logic::DefrostStartReport*)': 64,
+     'daik::checkup_report(daik::logic::CheckupCyclingHours*, daik::logic::CheckupCyclingTrace*, daik::logic::CheckupRestore*, daik::DiagnosticsSource, daik::logic::DefrostStartReport*, daik::logic::DhwLossTimeline*)': 64,
      'daik::copy_defrost_start_locked(daik::logic::DefrostStartReport&, long long)': 80,
      'daik::hp_poll_generation()': 32,
      'daik::defrost_air_supported(daik::logic::ProfileView const&)': 64,
@@ -3427,7 +3441,7 @@ def self_test() -> None:
      'daik::history_flash_save()': 48,
      'daik::(anonymous namespace)::checkup_reboot_save()': 80,
      'daik::(anonymous namespace)::apply_reset_locked()': 112,
-     'daik::(anonymous namespace)::apply_dhw_reset_locked()': 112,
+     'daik::(anonymous namespace)::apply_dhw_reset_locked(daik::(anonymous namespace)::CheckupSlot&)': 32,
      'daik::set_wifi(httpd_req*)': 64,
      'daik::set_syslog(httpd_req*)': 64,
      'daik::set_ntp(httpd_req*)': 64,
@@ -3904,8 +3918,10 @@ def self_test() -> None:
     # stop frames and the complete caller sums are checked against the real ELF, not these bytes.
     for key, rule in stop_stack.SYMBOLS.items():
         name = exact_symbol_name(rule["pattern"])
-        # These five newly outlined index helpers use their measured target ENTRY fixtures.
-        extra_frames[name] = rule["max_bytes"] if key.startswith("stop_index_") else 32
+        # The five index helpers and distinct DHW functions use their measured ENTRY fixtures.
+        # In particular, the real pure evaluator stays48; the new traced frame is separately64.
+        extra_frames[name] = (rule["max_bytes"] if key.startswith(("stop_index_", "dhw_trace_"))
+                              or key == "dhw_loss_step" else 32)
 
     # Exact final-ELF anchors for the shared verifier and asynchronous HTTP upload.
     extra_frames.update({
@@ -4396,7 +4412,14 @@ def self_test() -> None:
     diagnosis_controls += 1
     for name, before, after in (
         ("main/http_status.cpp", "return http_send_status_json(req, {}, {}, redact);", "return ESP_FAIL;"),
-        ("main/http_status.cpp", "checkup_report(&hrs, trace.get(), &persist, diag_effective, &defrost_start)", "checkup_report(nullptr)"),
+        ("main/http_status.cpp", "checkup_report(&hrs, trace.get(), &persist, diag_effective,",
+         "other_report(&hrs, trace.get(), &persist, diag_effective,"),
+        ("main/http_status.cpp", "&defrost_start, dhw_trace.get())", "&defrost_start, nullptr)"),
+        ("main/http_status.cpp", "trace_reader.admitted ? heap_caps_malloc(sizeof(DhwTrace), MALLOC_CAP_8BIT) : nullptr",
+         "heap_caps_malloc(sizeof(DhwTrace), MALLOC_CAP_8BIT)"),
+        ("main/http_status.cpp", "using DhwTrace = logic::DhwLossTimeline;",
+         "logic::DhwLossTimeline dhw_stack{}; using DhwTrace = logic::DhwLossTimeline;"),
+        ("main/http_status.cpp", "void* dhw_storage =", "weather_values_reader_enter(); void* dhw_storage ="),
         ("main/mcp_server.cpp", "return http_send_status_json(req, response, suffix, false);", "return ESP_FAIL;"),
         ("main/mqtt_ha.cpp", "publish_heartbeat();", "other_heartbeat();"),
         ("main/checkup.cpp", "p.layout_fp              = logic::checkup_layout_fingerprint();",

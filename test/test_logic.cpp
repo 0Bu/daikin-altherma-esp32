@@ -168,7 +168,8 @@ template <typename T> static T rt(T v) {
 using namespace daik;
 
 static void test_value_def_layout() {
-    CHECK(sizeof(ValueDef) == 8 + sizeof(const char*));
+    CHECK(offsetof(ValueDef, label) == alignof(const char*));
+    CHECK(sizeof(ValueDef) == alignof(const char*) + sizeof(const char*));
     const ValueDef empty;
     CHECK(empty.reg == 0 && empty.offset == 0 && empty.conv == 0 && empty.size == 0 &&
           empty.type == 0 && !empty.no_publish && empty.label == nullptr);
@@ -180,6 +181,14 @@ static void test_value_def_layout() {
     CHECK(detect_only.reg == row.reg && detect_only.offset == row.offset &&
           detect_only.conv == row.conv && detect_only.size == row.size &&
           detect_only.type == row.type && detect_only.no_publish && detect_only.label == label);
+    constexpr ValueDef edge{255, 63, 1023, 7, -8, "edge", true};
+    CHECK(edge.reg == 255 && edge.offset == 63 && edge.conv == 1023 && edge.size == 7 &&
+          edge.type == -8 && edge.no_publish);
+    const int invalid[][5] = {
+        {-1, 0, 0, 0, 0},   {256, 0, 0, 0, 0}, {0, -1, 0, 0, 0}, {0, 64, 0, 0, 0}, {0, 0, -1, 0, 0},
+        {0, 0, 1024, 0, 0}, {0, 0, 0, -1, 0},  {0, 0, 0, 8, 0},  {0, 0, 0, 0, -9}, {0, 0, 0, 0, 8}};
+    for (const auto& v : invalid)
+        CHECK(!ValueDef::representable(rt(v[0]), rt(v[1]), rt(v[2]), rt(v[3]), rt(v[4])));
 }
 
 static void test_http_cache() {
@@ -10134,9 +10143,16 @@ static void test_hp_probe() {
     bool        unimpl = false;
     CHECK(probe_decode_one(two, 2, 0, 2, 105, single, unimpl) && !unimpl);
     CHECK(single.conv == 105 && single.value == 26.6 && single.alias_count == 0);
+    const uint8_t payload[] = {0x2A, 0x0A, 0x01, 0x77};
+    CHECK(probe_decode_one(payload, sizeof(payload), 1, 2, 105, single, unimpl) && !unimpl &&
+          single.conv == 105 && single.ok && single.value == 26.6);
+    const int shifted_rows = probe_sweep(payload, sizeof(payload), 1, 2, d, PROBE_MAX_DECODES);
+    const ProbeDecode* shifted_temperature = probe_find(d, shifted_rows, 105);
+    CHECK(shifted_temperature && shifted_temperature->ok && shifted_temperature->value == 26.6);
     // An id the catalog documents but this firmware has not ported reports UNIMPLEMENTED — a real
     // answer for a contributor holding a converter id from the reference tables.
     CHECK(!probe_decode_one(two, 2, 0, 2, 462, single, unimpl) && unimpl);
+    CHECK(!probe_decode_one(two, 2, 0, 2, 1024, single, unimpl) && unimpl);
     CHECK(!probe_decode_one(two, 2, 1, 2, 105, single, unimpl) && !unimpl);
     CHECK(!probe_decode_one(nullptr, 2, 0, 2, 105, single, unimpl));
     // A converter that runs and refuses is a successful decode with ok=false, not a failure.
@@ -16503,6 +16519,269 @@ static logic::DhwLossState dhw_past_hold() {
     return st;
 }
 
+static void test_dhw_loss_trace() {
+    using namespace logic;
+    constexpr int64_t us = 1000000;
+    CHECK(sizeof(DhwLossTraceWindow) == 16);
+    CHECK(sizeof(DhwLossTrace) <= 416 && sizeof(DhwLossTimeline) <= 416);
+    CHECK(DHW_LOSS_WINDOW_S * DHW_LOSS_TRACE_CAPACITY == DHW_LOSS_TRACE_WINDOW_S);
+    // No persisted layout was enlarged to store the new runtime-only detail.
+    CHECK(sizeof(DhwLossBucket) == 20 && sizeof(CheckupJournalPayload) == 128);
+
+    constexpr int64_t frame_us = 100 * us;
+    constexpr int64_t unix_s   = 1'700'000'100;
+    CHECK(dhw_loss_wall_anchor_s(100, frame_us + 200000, frame_us + 450000, unix_s, 600) == unix_s);
+    CHECK(!dhw_loss_wall_anchor_s(100, frame_us, frame_us + 5 * us, unix_s + 5, 0));
+    // Even when monotonic reads agree, the time source's millisecond can straddle a second.
+    CHECK(!dhw_loss_wall_anchor_s(100, frame_us + 100500, frame_us + 100500, unix_s, 100));
+    CHECK(dhw_loss_wall_anchor_s(100, frame_us, frame_us, UINT32_MAX, 999) == UINT32_MAX);
+    CHECK(!dhw_loss_wall_anchor_s(100, frame_us - 1, frame_us, unix_s, 0));
+    CHECK(!dhw_loss_wall_anchor_s(100, frame_us + 1, frame_us, unix_s, 0));
+    CHECK(!dhw_loss_wall_anchor_s(100, frame_us, frame_us, -1, 0));
+    CHECK(!dhw_loss_wall_anchor_s(100, frame_us, frame_us, int64_t{UINT32_MAX} + 1, 0));
+    CHECK(!dhw_loss_wall_anchor_s(100, frame_us, frame_us, unix_s, -1));
+    CHECK(!dhw_loss_wall_anchor_s(100, frame_us, frame_us, unix_s, 1000));
+    CHECK(!dhw_loss_wall_anchor_s(100, frame_us + us, frame_us + us, 1, 0));
+
+    DhwLossTrace trace;
+    // Compact fixture notation below uses end+duration; production admission receives real
+    // endpoints.
+    auto record = [&trace](int64_t end_us, uint32_t duration_s, int rate, uint32_t observed,
+                           bool pump, bool draw) {
+        return trace.record(end_us - static_cast<int64_t>(duration_s) * 1000000, end_us, rate,
+                            observed, pump, draw);
+    };
+    DhwLossTimeline out;
+    out.epoch = 99;
+    out.count = 24;
+    CHECK(!trace.snapshot(out, 0, CHECKUP_MAX_GAP_S));
+    CHECK(out.epoch == 0 && out.count == 0 && !out.observed && !out.live);
+    CHECK(!record(3600 * us, 3600, 45, 3600, true, true));
+    trace.observe(-1, true);
+    trace.observe((int64_t{UINT32_MAX} + 1) * us, true);
+    CHECK(!trace.begun);
+    trace.observe(100 * us, false);
+    CHECK(trace.snapshot(out, 100 * us, CHECKUP_MAX_GAP_S));
+    CHECK(out.epoch == 1 && out.since_s == 100 && out.count == 0 && !out.observed);
+    CHECK(!trace.snapshot(out, -1, CHECKUP_MAX_GAP_S));
+    CHECK(!trace.snapshot(out, (int64_t{UINT32_MAX} + 1) * us, CHECKUP_MAX_GAP_S));
+    CHECK(!trace.snapshot(out, 99 * us, CHECKUP_MAX_GAP_S));
+    trace.observe(101 * us, true);
+    CHECK(trace.snapshot(out, 116 * us, CHECKUP_MAX_GAP_S) && out.live);
+    CHECK(out.observed && out.observed_end_s == 101);
+    CHECK(trace.snapshot(out, 117 * us, CHECKUP_MAX_GAP_S) && !out.live);
+
+    constexpr int64_t fractional_read_us = 118 * us + us / 4;
+    constexpr int64_t fresh_deadline_us  = fractional_read_us + CHECKUP_MAX_GAP_S * us;
+    trace.observe(fractional_read_us, true);
+    CHECK(!trace.snapshot(out, fractional_read_us - 1, CHECKUP_MAX_GAP_S));
+    CHECK(!out.epoch && !out.live);
+    trace.observe(fresh_deadline_us - us, false); // A more recent incomplete sweep earns no time.
+    CHECK(trace.snapshot(out, fresh_deadline_us, CHECKUP_MAX_GAP_S) && out.live);
+    CHECK(trace.snapshot(out, fresh_deadline_us + 1, CHECKUP_MAX_GAP_S) && !out.live);
+    CHECK(out.observed && out.observed_end_s == 118 && out.window_end_s == 133);
+
+    trace.observe(50 * us, false); // monotonic rollback retires, never re-dates, old evidence
+    CHECK(trace.epoch == 2 && trace.count == 0 && trace.since_s == 50 && !trace.observed);
+    trace.epoch = UINT32_MAX;
+    trace.reset();
+    CHECK(trace.epoch == 1 && !trace.begun && trace.count == 0);
+
+    trace.observe(0, true);
+    trace.observe(3600 * us, true);
+    CHECK(!record(-1, 3600, 45, 3600, false, false));
+    CHECK(!record((int64_t{UINT32_MAX} + 1) * us, 3600, 45, 3600, false, false));
+    CHECK(!record(3600 * us, 3599, 45, 3599, false, false));
+    CHECK(!record(3600 * us, UINT16_MAX + 1u, 45, 3600, false, false));
+    CHECK(!record(3600 * us, 3600, -1, 3600, false, false));
+    CHECK(!record(3600 * us, 3600, 901, 3600, false, false));
+    CHECK(!record(3600 * us, 3600, 45, 3601, false, false));
+    CHECK(!record(3599 * us, 3600, 45, 3600, false, false));
+    CHECK(!record(3601 * us, 3600, 45, 3600, false, false));
+    CHECK(record(3600 * us, 3600, 0, 3590, false, false)); // zero is measured, not absent
+    CHECK(!record(3600 * us, 3600, 45, 3600, true, true)); // duplicate/overlap
+    CHECK(trace.snapshot(out, 3600 * us, CHECKUP_MAX_GAP_S));
+    CHECK(out.count == 1 && out.windows[0].start_s == 0 && out.windows[0].end_s == 3600);
+    CHECK(out.windows[0].rate_tenths == 0 && out.windows[0].observed_s == 3590);
+    CHECK(!out.windows[0].pump_marker && !out.windows[0].draw_marker);
+    trace.reset();
+    trace.observe(100 * us, true);
+    trace.observe(3600 * us, true);
+    CHECK(!record(3600 * us, 3600, 45, 3600, false, false)); // before this epoch
+    CHECK(!trace.record(2 * us, us, 45, 0, false, false));   // reversed endpoints
+    trace.observe((UINT16_MAX + 1LL) * us, true);
+    CHECK(!trace.record(0, (UINT16_MAX + 1LL) * us, 45, 3600, false, false));
+
+    // Real subsecond endpoints must stay adjacent after independent whole-second quantization.
+    trace.reset();
+    trace.observe(1900000, true);
+    trace.observe(3602100001LL, true);
+    CHECK(!trace.record(1900000, 3602100000LL, 45, 3600, true, false));
+    trace.reset();
+    trace.observe(1900000, true);
+    trace.observe(3602100000LL, true);
+    CHECK(trace.record(1900000, 3602100000LL, 45, 3600, true, false));
+    trace.observe(7202200000LL, true);
+    CHECK(trace.record(3602100000LL, 7202200000LL, 44, 3600, false, true));
+    CHECK(trace.snapshot(out, 7202200000LL, CHECKUP_MAX_GAP_S));
+    CHECK(out.windows[0].start_s == 1 && out.windows[0].end_s == 3602);
+    CHECK(out.windows[1].start_s == out.windows[0].end_s && out.windows[1].end_s == 7202);
+    CHECK(out.windows[0].observed_s == 3600 && out.windows[0].rate_tenths == 45);
+    const uint32_t epoch_before_rollback = trace.epoch;
+    trace.observe(7202199999LL, false);
+    CHECK(trace.epoch != epoch_before_rollback && !trace.count && !trace.observed);
+    trace.reset();
+    trace.observe(1900000, true);
+    trace.observe(3632800000LL, true);
+    CHECK(trace.record(1900000, 3632800000LL, 44, 3630, false, false));
+    CHECK(trace.snapshot(out, 3632800000LL, CHECKUP_MAX_GAP_S));
+    CHECK(out.windows[0].end_s - out.windows[0].start_s == 3631); // evaluator duration is 3630
+
+    // More than a day of adjacent completions wraps without overwriting an unexpired window.
+    trace.reset();
+    trace.observe(0, true);
+    for (uint32_t hour = 1; hour <= 48; ++hour) {
+        trace.observe(hour * 3600LL * us, true);
+        CHECK(record(hour * 3600LL * us, 3600, static_cast<int>(hour), 3600, hour % 2 == 0,
+                     hour % 3 == 0));
+        CHECK(trace.count == std::min<uint32_t>(hour, 24));
+    }
+    CHECK(trace.snapshot(out, 48 * 3600LL * us, CHECKUP_MAX_GAP_S));
+    CHECK(out.count == 24 && out.windows[0].end_s == 25 * 3600);
+    CHECK(out.windows[23].end_s == 48 * 3600 && out.windows[23].rate_tenths == 48);
+    CHECK(out.windows[23].pump_marker && out.windows[23].draw_marker);
+    // An exact cutoff is excluded; stopped producers age on reads, not just the next poll.
+    CHECK(trace.snapshot(out, (49 * 3600LL - 1) * us, CHECKUP_MAX_GAP_S) && out.count == 24);
+    CHECK(trace.snapshot(out, 49 * 3600LL * us, CHECKUP_MAX_GAP_S) && out.count == 23);
+    CHECK(trace.snapshot(out, 72 * 3600LL * us, CHECKUP_MAX_GAP_S) && out.count == 0);
+    CHECK(!out.live && out.observed_end_s == 48 * 3600);
+    // Capacity rejection is defensive for inconsistent/fuzzed state; a real >=1h stream cannot hit
+    // it.
+    trace.reset();
+    trace.observe(0, true);
+    trace.observe(3600 * us, true);
+    trace.count             = 24;
+    trace.windows[23].end_s = 0; // corrupt-count fixture reaches the capacity guard, not overlap
+    CHECK(!record(3600 * us, 3600, 45, 3600, false, false));
+    trace.reset();
+
+    auto readable = [] {
+        CheckupSample s;
+        s.r5t_ok = s.valve_known = s.pump_known = s.bsh_known = true;
+        s.r5t_tenths                                          = 500;
+        return s;
+    };
+    // Null optional detail dispatches to the real aggregate-only evaluator, not an early no-op.
+    {
+        auto          st = dhw_past_hold();
+        DhwLossBucket b;
+        dhw_loss_step_traced(st, b, readable(), nullptr, 0);
+        dhw_loss_step_traced(st, b, readable(), nullptr, us);
+        CHECK(st.last_us == us && st.segment_start_us == us && b.windows == 0);
+    }
+    for (unsigned missing = 0; missing < 4; ++missing) {
+        auto          st = dhw_past_hold();
+        DhwLossBucket b;
+        DhwLossTrace  exact;
+        auto          sample = readable();
+        if (missing == 0) sample.r5t_tenths = -1;
+        if (missing == 1) sample.valve_known = false;
+        if (missing == 2) sample.pump_known = false;
+        if (missing == 3) sample.bsh_known = false;
+        dhw_loss_step_traced(st, b, sample, &exact, 0);
+        CHECK(exact.snapshot(out, 0, CHECKUP_MAX_GAP_S) && !out.observed && !out.live);
+        CHECK(exact.count == 0);
+    }
+    // Capture exactly where acceptance occurs, before context/start are reset for the next hour.
+    {
+        auto          st = dhw_past_hold();
+        DhwLossBucket b;
+        DhwLossTrace  exact;
+        auto          sample = readable();
+        for (int sec = 0; sec <= 7201; ++sec) {
+            sample.r5t_tenths = 500 - std::min(3600, std::max(0, sec - 1)) * 45 / 3600;
+            sample.pump_on    = sec == 100;
+            dhw_loss_step_traced(st, b, sample, &exact, sec * us);
+        }
+        CHECK(b.windows == 2 && exact.count == 2);
+        CHECK(b.max_loss_tenths_k_h == 45 && b.pump_windows == 1 && b.draw_windows == 1);
+        CHECK(exact.snapshot(out, 7201 * us, CHECKUP_MAX_GAP_S));
+        const auto& first = out.windows[0];
+        CHECK(first.start_s == 1 && first.end_s == 3601 && first.rate_tenths == 45);
+        CHECK(first.observed_s == 3600 && first.pump_marker && first.draw_marker);
+        const auto& second = out.windows[1];
+        CHECK(second.start_s == first.end_s && second.end_s == 7201);
+        CHECK(second.rate_tenths == 0 && !second.pump_marker && !second.draw_marker);
+    }
+    // Endpoint grace is the existing evaluator's actual interval, not a forced 60-minute bar.
+    for (bool late : {false, true}) {
+        auto          st = dhw_past_hold();
+        DhwLossBucket b;
+        DhwLossTrace  exact;
+        auto          sample = readable();
+        const int     finish = late ? 3632 : 3631;
+        for (int sec = 0; sec <= finish; ++sec) {
+            sample.r5t_tenths = 500 - std::min(3600, std::max(0, sec - 1)) * 12 / 3600;
+            sample.r5t_ok     = sec < 3601 || sec >= (late ? 3631 : 3630);
+            dhw_loss_step_traced(st, b, sample, &exact, sec * us);
+        }
+        CHECK(exact.count == (late ? 0 : 1));
+        CHECK(b.windows == exact.count);
+        if (!late) {
+            CHECK(exact.snapshot(out, finish * us, CHECKUP_MAX_GAP_S));
+            CHECK(out.windows[0].end_s - out.windows[0].start_s == 3630);
+            CHECK(out.windows[0].observed_s == b.observed_s);
+            CHECK(out.windows[0].rate_tenths == b.max_loss_tenths_k_h);
+        } else {
+            CHECK(b.aborts == 1 && (b.abort_reasons & DHW_ABORT_READING));
+        }
+    }
+    {
+        auto          st = dhw_past_hold();
+        DhwLossBucket b;
+        DhwLossTrace  exact;
+        auto          sample = readable();
+        dhw_loss_step_traced(st, b, sample, &exact, 0);
+        dhw_loss_step_traced(st, b, sample, &exact, us);
+        sample.valve_dhw = true;
+        dhw_loss_step_traced(st, b, sample, &exact, 2 * us);
+        CHECK(b.aborts == 1 && exact.count == 0);
+        sample.valve_dhw  = false;
+        sample.r5t_tenths = 901;
+        dhw_loss_step_traced(st, b, sample, &exact, 3 * us);
+        CHECK(exact.count == 0);
+    }
+    {
+        auto          st = dhw_past_hold();
+        DhwLossBucket b;
+        DhwLossTrace  exact;
+        auto          sample = readable();
+        for (int sec = 0; sec <= 500; ++sec) {
+            sample.r5t_ok = sec < 2;
+            dhw_loss_step_traced(st, b, sample, &exact, sec * us);
+        }
+        CHECK(b.aborts == 1 && (b.abort_reasons & DHW_ABORT_BLIND));
+        CHECK(exact.count == 0);
+    }
+    {
+        auto          prior = dhw_past_hold();
+        DhwLossBucket b;
+        auto          sample = readable();
+        for (int sec = 0; sec <= 1801; ++sec) dhw_loss_step(prior, b, sample, sec * us);
+        const auto   carry = dhw_loss_checkpoint(prior, 1801 * us);
+        DhwLossState adopted;
+        dhw_loss_adopt(adopted, carry, 100 * us);
+        CHECK(adopted.segment_carried_s > 0);
+        DhwLossTrace exact;
+        for (int sec = 100; sec <= 5400; ++sec)
+            dhw_loss_step_traced(adopted, b, sample, &exact, sec * us);
+        CHECK(b.windows == 2 && exact.count == 1); // carried hour has no fabricated same-boot start
+        CHECK(exact.snapshot(out, 5400 * us, CHECKUP_MAX_GAP_S));
+        CHECK(out.windows[0].start_s >= 100 &&
+              out.windows[0].end_s - out.windows[0].start_s == 3600);
+    }
+}
+
 // ── The rolling X10A operating observation (logic/checkup.hpp, issue legacy-208)
 // ───────────────────── Three things are worth testing here and one of them is worth most of the
 // file:
@@ -17521,8 +17800,22 @@ static void test_defrost_start_context() {
               .state == InstrumentState::Withheld);
 }
 
-static void test_checkup() {
+static void test_checkup(bool with_trace) {
     using namespace logic;
+    // The unchanged physics matrix below must exercise both compiled forms of the one rule.
+    // Detail may independently expire/backclock across fixtures; it must never affect aggregates.
+    // Static test-only context is visible inside the existing noncapturing fixture lambdas too.
+    static DhwLossTrace physics_trace;
+    static bool         traced = false;
+    traced                     = with_trace;
+    physics_trace.reset();
+    static const auto dhw_loss_step = [](DhwLossState& st, DhwLossBucket& bucket,
+                                         const CheckupSample& sample, int64_t now_us) {
+        if (traced)
+            logic::dhw_loss_step_traced(st, bucket, sample, &physics_trace, now_us);
+        else
+            logic::dhw_loss_step(st, bucket, sample, now_us);
+    };
 
     // --- the locator, and the collision it exists for ------------------------------------------
     {
@@ -18976,6 +19269,43 @@ static void test_checkup() {
         CHECK(r.buf[0].starts == 0 && (r.buf[0].flags & CHECKUP_F_FAULT) == 0);
     }
 
+    {
+        // A backwards clock is not continuous off-pump evidence in either compiled evaluator.
+        auto          st = dhw_past_hold();
+        DhwLossBucket b;
+        CheckupSample s;
+        s.r5t_ok = s.valve_known = s.pump_known = s.bsh_known = true;
+        s.r5t_tenths                                          = 500;
+        s.circulation_configured = s.circulation_known = true;
+        dhw_loss_step(st, b, s, 10'000'000);
+        dhw_loss_step(st, b, s, 11'000'000);
+        CHECK(st.segment_start_us == 11'000'000 && st.circulation_off_run_s == 1);
+        dhw_loss_step(st, b, s, 10'000'000);
+        CHECK(st.last_us == 10'000'000 && st.circulation_off_run_s == 0 && b.windows == 0 &&
+              b.observed_s == 0);
+    }
+    {
+        // A configured but unread external pump grants neither off/on nor known evidence seconds.
+        auto          st = dhw_past_hold();
+        DhwLossBucket b;
+        CheckupSample s;
+        s.r5t_ok = s.valve_known = s.pump_known = s.bsh_known = true;
+        s.r5t_tenths                                          = 500;
+        s.circulation_configured = s.circulation_known = true;
+        for (int sec = 0; sec <= 2; ++sec) dhw_loss_step(st, b, s, int64_t{sec} * 1'000'000);
+        CHECK(st.circulation_off_run_s == 2 && st.segment_circulation_known_s == 1);
+        s.circulation_known = false;
+        s.circulation_on =
+            true; // an unread stale value is not a current witness in either direction
+        dhw_loss_step(st, b, s, 3'000'000);
+        CHECK(st.circulation_off_run_s == 0 && st.segment_circulation_known_s == 1 &&
+              st.segment_circulation_on_s == 0 && st.segment_blind_s == 0);
+        // A numerically invalid tank reading on a continuous sample ends, never completes, it.
+        s.r5t_tenths = -1;
+        dhw_loss_step(st, b, s, 4'000'000);
+        CHECK(st.segment_start_us < 0 && b.aborts == 1 &&
+              (b.abort_reasons & DHW_ABORT_READING) != 0 && b.windows == 0 && b.observed_s == 0);
+    }
     {
         // DHW cooling is built from clean, non-overlapping one-hour R5T windows. With actual Shelly
         // power known OFF continuously, a 1.0 K/h decline becomes attributable only after the
@@ -34278,7 +34608,9 @@ int main() {
     test_history_measurement_units();
     test_history();
     test_defrost_start_context();
-    test_checkup();
+    test_checkup(false);
+    test_checkup(true);
+    test_dhw_loss_trace();
     test_checkup_population();
     test_checkup_evidence_overhaul();
     test_no_publish();

@@ -883,6 +883,61 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .vdesc-p { margin-top: 11px; }
 .vdesc-p:first-child { margin-top: 0; }
 .vdesc-n { color: var(--fg); font-weight: 600; }
+/* DHW shares the card's type ramp, ink and disclosure spacing. Only its primary measurement
+   is enlarged; ordinary labels/prose keep the same roles as the neighbouring diagnosis rows. */
+.checkup-dhw-heading { color: var(--muted); }
+.checkup-dhw-value { color: var(--fg); font-weight: 600; }
+.checkup-dhw-value.has-rate { display: flex; align-items: baseline; gap: 8px; font-size: 2em; line-height: 1.25; }
+.checkup-dhw-unit { font-size: .5em; color: var(--muted); font-weight: 500; }
+.checkup-dhw-assessment { margin-top: 8px; }
+.checkup-dhw-stale { display: none; }
+[data-dhw-stale="true"] .checkup-dhw-stale { display: block; }
+.checkup-dhw-grid { display: grid; grid-template-columns: minmax(0, 5.5em) minmax(0, 1fr); gap: 5px 8px; }
+.checkup-dhw-y { display: flex; flex-direction: column; justify-content: space-between; align-items: flex-end;
+  font-size: .85em; font-variant-numeric: tabular-nums; line-height: 1; }
+.checkup-dhw-plot { position: relative; height: 9em; min-width: 0; touch-action: pan-y; isolation: isolate;
+  background: linear-gradient(var(--line), var(--line)) top / 100% 1px no-repeat,
+    linear-gradient(var(--line), var(--line)) center / 100% 1px no-repeat,
+    linear-gradient(var(--line), var(--line)) bottom / 100% 1px no-repeat; }
+.checkup-dhw-window { position: absolute; top: 0; bottom: 0; min-width: 0; padding: 0 1px;
+  display: flex; align-items: flex-end; border: 0; border-radius: 2px; background: none;
+  cursor: pointer; touch-action: pan-y; -webkit-tap-highlight-color: transparent; }
+.checkup-dhw-window:hover { background: color-mix(in srgb, var(--brand-sky) 12%, transparent); }
+.checkup-dhw-window.active { background: color-mix(in srgb, var(--brand-sky) 18%, transparent);
+  box-shadow: inset 0 0 0 1px var(--brand); }
+.checkup-dhw-window:focus-visible { outline: 2px solid var(--brand-strong); outline-offset: -1px; z-index: 2; }
+.checkup-dhw-bar { display: block; width: 100%; background: var(--brand-sky); opacity: .7; border-radius: 2px 2px 0 0;
+  pointer-events: none; }
+.checkup-dhw-window.active .checkup-dhw-bar { opacity: 1; }
+.checkup-dhw-window.is-zero .checkup-dhw-bar { min-height: 2px; }
+.checkup-dhw-before, .checkup-dhw-unread { position: absolute; top: 0; bottom: 0; pointer-events: none; z-index: -1; }
+.checkup-dhw-before { left: 0; background: var(--soft); opacity: .7; }
+.checkup-dhw-unread { background: repeating-linear-gradient(135deg, transparent 0 4px, var(--line) 4px 5px); opacity: .6; }
+.checkup-dhw-axis.vhist-axis { gap: 3px; font-size: .8em; white-space: nowrap; }
+@media (max-width: 359px) { .checkup-dhw-axis [data-dhw-axis="12"] { display: none; } }
+.checkup-dhw-lane-label { color: var(--muted); font-size: .85em; line-height: 1.3; overflow-wrap: anywhere; }
+.checkup-dhw-lane { position: relative; min-width: 0; min-height: 16px; align-self: center; }
+/* Fixed-size symbols encode presence only: their width is never a pump/draw runtime. */
+.checkup-dhw-marker { position: absolute; top: 6px; transform: translateX(-50%); }
+.checkup-dhw-marker.pump { width: 8px; height: 4px; border-radius: 2px; background: var(--flow-hot); }
+.checkup-dhw-marker.draw { width: 4px; height: 4px; border: 1px solid var(--fg); transform: translateX(-50%) rotate(45deg); }
+.checkup-dhw-caption { font-size: .85em; margin-top: 8px; }
+.checkup-dhw-window-details { display: grid; grid-template-columns: 32px minmax(0, 1fr) 32px;
+  align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: var(--r-tile); margin-top: 11px; padding: 5px 0; }
+.checkup-dhw-readout { min-width: 0; font-size: .9em; overflow-wrap: anywhere; }
+.checkup-dhw-window-details button { align-self: stretch; min-height: 40px; padding: 0; border: 0; background: none;
+  color: var(--muted); font: inherit; font-size: 1.5em; cursor: pointer; border-radius: var(--r-tile); }
+.checkup-dhw-window-details button:hover { color: var(--brand-strong); background: var(--soft); }
+.checkup-dhw-window-details button:focus-visible, .checkup-dhw-disclosure > summary:focus-visible {
+  outline: 2px solid var(--brand-strong); outline-offset: -2px; }
+.checkup-dhw-window-details button:disabled { opacity: .35; cursor: default; }
+.checkup-dhw-disclosure { border-top: 1px solid var(--line); margin-top: 11px; }
+.checkup-dhw-disclosure > summary { display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  list-style: none; cursor: pointer; padding: 11px 0; color: var(--fg); }
+.checkup-dhw-disclosure > summary::-webkit-details-marker { display: none; }
+.checkup-dhw-disclosure > summary .vrow-chev { transform: none; }
+.checkup-dhw-disclosure[open] > summary .vrow-chev { transform: rotate(90deg); }
+.checkup-dhw-disclosure-body { padding-bottom: 3px; }
 .checkup-cycling-chart .vhist-range { margin-top: 4px; font-size: 11px; white-space: normal; }
 .checkup-chart-cols { display: grid; grid-template-columns: repeat(24, minmax(0, 1fr)); gap: 2px; height: 110px; touch-action: pan-y; }
 .checkup-chart-col { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; min-width: 0; padding: 0; border: 0; border-radius: 2px; background: none; }

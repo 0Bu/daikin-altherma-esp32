@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: da72aaffbb53328c47522f1083ae9965c6abcff664c20a99a57f28827fe4bc66 -->
+<!-- diagnostic-evidence-contract: 8bd085bb45d34154fb53879b4e86f124adde71c6bfef939455211062e759d5f7 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -222,6 +222,10 @@ row is **CHECKING**; after a full DHW scope day with no completed window it beco
 even if no candidate could open. This states missing hourly measurements, not full signal coverage,
 a cause or a promise that more waiting will produce a measurement.
 
+The optional timed chart plots individual accepted windows whose endpoints are known. Each bar
+pairs that window's measured rate, readable seconds and pump and draw-like markers. The aggregate
+diagnosis can include a window carried across a restart, for which the original start is estimated.
+
 **Project boundary:** These thresholds, endpoint confirmation with a 30-second closing grace,
 one-hour intervals and settling filters are project choices,
 not Daikin limits or the EU standing-loss test. Candidates tolerate at most 120 consecutive blind
@@ -239,16 +243,16 @@ The maximum is never multiplied by the window count or labelled measured daily c
 whole-tank heat loss, wasted energy, actual replacement electricity, a failed valve or a cause.
 Draws may remove useful hot water; stratification, circulation and thermosiphoning can also change
 this temperature. Zero net cooling does not mean zero heat transfer. No marker proves hydraulic
-isolation, and no accepted window excludes losses in discarded intervals. Unseen charging can
-still affect a later window. Missing replies or polling pauses establish no wiring defect.
+isolation, and no accepted window excludes losses in discarded intervals. Markers establish
+presence, not duration or cause. The timeline records no per-interval exclusion cause; aggregate
+abort reasons cannot label individual blanks, which mean only no timed completed window. Neither
+its lifecycle start nor the last complete input sample establishes continuous coverage. Unseen
+charging can still affect a later window. Missing replies or polling pauses establish no wiring defect.
 
-Changing circulation identity retires DHW evidence independently. X10A and Modbus maintain
-separate 24 h DHW-loss stores without merging; switching the displayed card source preserves both,
-and pausing diagnostics preserves completed hours and existing abort counts while discarding any open
-live candidate/settle filter without incrementing aborts. Saved cooling hours use the core
-journal's layout and schema checks. An unfinished candidate has a separate handoff compatibility
-check. See the [restart and admission rules](PLANT.md#reboot-and-persistence) and
-[evidence fields](API.md).
+Changing circulation identity retires DHW evidence independently. A pause under the same consent
+keeps completed evidence and abort counts and discards the open candidate without recording an
+abort. See the [restart and admission rules](PLANT.md#reboot-and-persistence) and the
+[timeline contract](API.md#dhw-cooling-timeline) for retention and display scope.
 
 <a id="diagnosis-cycling"></a>
 ### 3. Compressor cycling (`cycling`)
