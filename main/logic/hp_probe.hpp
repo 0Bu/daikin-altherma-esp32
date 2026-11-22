@@ -441,8 +441,7 @@ inline int probe_sweep(const uint8_t* payload, int payload_len, int offset, int 
     int n = 0;
     for (int i = 0; i < PROBE_CANDIDATE_COUNT; i++) {
         if (PROBE_CANDIDATES[i].size != size) continue;
-        const ValueDef def{static_cast<uint8_t>(0), static_cast<uint8_t>(offset),
-                           PROBE_CANDIDATES[i].conv, static_cast<uint8_t>(size), -1, ""};
+        const ValueDef def{0, 0, PROBE_CANDIDATES[i].conv, size, -1, ""};
         const Reading r = convert(def, payload + offset, rtype);
         // An unimplemented id contributes nothing: it is not an answer, and printing it as one
         // would put an empty row beside a real decode with no way to tell them apart.
@@ -487,8 +486,11 @@ inline bool probe_decode_one(const uint8_t* payload, int payload_len, int offset
                              int conv, ProbeDecode& out, bool& unimpl, int rtype = 0) {
     unimpl = false;
     if (!payload || !probe_slice_fits(offset, size, payload_len)) return false;
-    const ValueDef def{static_cast<uint8_t>(0), static_cast<uint8_t>(offset), conv,
-                       static_cast<uint8_t>(size), -1, ""};
+    if (!ValueDef::representable(0, 0, conv, size, -1)) {
+        unimpl = true;
+        return false;
+    }
+    const ValueDef def{0, 0, conv, size, -1, ""};
     const Reading r = convert(def, payload + offset, rtype);
     if (r.unimpl) { unimpl = true; return false; }
     out         = ProbeDecode{};

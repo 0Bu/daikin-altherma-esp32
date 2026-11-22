@@ -18,6 +18,7 @@ unsigned                    circulation_samples = 0;
 void (*on_circulation)()                        = nullptr;
 void (*on_time)()                               = nullptr;
 int64_t unix_origin                             = 1700000000;
+bool    clock_synced                            = true;
 } // namespace adapter
 namespace daik {
 namespace detail {
@@ -29,15 +30,15 @@ void diag_printf(const char*, ...) {}
 bool history_checkup_flash_pending() { return adapter::journal_pending; }
 bool history_modbus_checkup_flash_pending() { return adapter::mb_journal_pending; }
 bool safe_mode_active() { return false; }
-bool time_synced() { return true; }
+bool time_synced() { return adapter::clock_synced; }
 void time_now(int64_t& s, int32_t& ms) {
     if (adapter::on_time) {
         const auto f     = adapter::on_time;
         adapter::on_time = nullptr;
         f();
     }
-    s  = adapter::unix_origin + sdk::now_us / 1000000;
-    ms = 0;
+    s  = adapter::clock_synced ? adapter::unix_origin + sdk::now_us / 1000000 : -1;
+    ms = adapter::clock_synced ? static_cast<int32_t>(sdk::now_us % 1000000 / 1000) : 0;
 }
 bool     hp_poll_generation_matches(uint32_t g) { return g == adapter::poll_generation; }
 uint32_t hp_poll_generation() { return adapter::poll_generation; }
@@ -968,6 +969,220 @@ CachedValue mb_row(uint8_t offset, const char* value) {
     v.value = value;
     return v;
 }
+void dhw_trace_case(const std::string& name) {
+    require(name == "dhw_trace_capture" || name == "dhw_trace_pause" ||
+                name == "dhw_trace_source_reset" || name == "dhw_trace_circulation_reset" ||
+                name == "dhw_trace_forget" || name == "dhw_trace_forget_before_start" ||
+                name == "dhw_trace_forget_during_snapshot" ||
+                name == "dhw_trace_reset_during_snapshot" || name == "dhw_trace_unavailable",
+            "unknown_case");
+    auto take = [](DiagnosticsSource source, DhwLossTimeline& out) {
+        return checkup_report(nullptr, nullptr, nullptr, source, nullptr, &out);
+    };
+    DhwLossTimeline x, m;
+    if (name == "dhw_trace_unavailable") {
+        x.epoch = 99;
+        x.count = 24;
+        take(DiagnosticsSource::X10a, x);
+        require(!x.epoch && !x.count, "dhw_trace_absent_mutex_clears_output");
+    }
+    if (name == "dhw_trace_forget_before_start") checkup_cycling_forget();
+    boot();
+    checkup_modbus_confirm_source(ModbusProfile::HomeHub, 0x11223344U);
+    const auto cov  = coverage();
+    auto       rows = heater("1", "0", "0");
+    rows.push_back(row(CHECKUP_LOC_PUMP, "0"));
+    rows.push_back(row(CHECKUP_LOC_VALVE, "0"));
+    rows.push_back(row(CHECKUP_LOC_R5T, "50.0"));
+    const std::vector<CachedValue> mb_rows{mb_row(30, "1"), mb_row(31, "0"), mb_row(32, "0"),
+                                           mb_row(37, "0"), mb_row(43, "48.0")};
+    auto                           mb_sample = [&](int64_t at_s) {
+        sdk::now_us = at_s * 1000000;
+        checkup_record_modbus(mb_rows.data(), mb_rows.size(), ModbusProfile::HomeHub,
+                                                        adapter::mb_target_generation, checkup_consent_epoch(), true);
+    };
+    for (int64_t sec = 1; sec <= 7201; sec += 10) {
+        sample(sec, rows, cov);
+        mb_sample(sec);
+    }
+    const auto before = take(DiagnosticsSource::X10a, x);
+    take(DiagnosticsSource::Modbus, m);
+    if (name == "dhw_trace_forget_before_start") {
+        require(!x.epoch && !m.epoch && !s_x10a.dhw_trace.begun && !s_modbus.dhw_trace.begun,
+                "dhw_trace_forget_before_start_suppresses_both_producers");
+        return;
+    }
+    require(x.epoch && m.epoch && x.count == 1 && m.count == 1,
+            "dhw_trace_both_real_source_windows");
+    require(x.windows[0].rate_tenths == 0 && !x.windows[0].pump_marker &&
+                m.windows[0].pump_marker && !x.windows[0].draw_marker,
+            "dhw_trace_context_is_source_specific");
+    require(before[CheckupCheck::DhwLoss].b == 1 && before[CheckupCheck::Heater].a > 6000,
+            "dhw_trace_does_not_change_aggregate_or_core");
+    const uint32_t xepoch = x.epoch, mepoch = m.epoch;
+    if (name == "dhw_trace_capture") {
+        require(x.live && x.observed && x.observed_end_s == 7201 && x.since_s == 1 &&
+                    x.windows[0].end_s - x.windows[0].start_s == 3600,
+                "dhw_trace_exact_window_and_collection_scope");
+        adapter::clock_synced = false;
+        take(DiagnosticsSource::X10a, x);
+        require(x.epoch == xepoch && x.count == 1 && !x.unix_s,
+                "dhw_trace_unsynced_clock_keeps_uptime_detail");
+        adapter::clock_synced = true;
+        for (int step : {86400, -86400}) {
+            adapter::unix_origin += step;
+            take(DiagnosticsSource::X10a, x);
+            require(x.count == 1 && x.unix_s == adapter::unix_origin + 7201,
+                    "dhw_trace_wall_steps_do_not_retime_or_expire_records");
+        }
+        sdk::now_us += 200000;
+        adapter::on_time = [] { sdk::now_us += 250000; };
+        take(DiagnosticsSource::X10a, x);
+        require(x.window_end_s == 7201 && x.unix_s == adapter::unix_origin + 7201,
+                "dhw_trace_agreeing_clock_bracket_keeps_wall_label");
+        adapter::on_time = [] { sdk::now_us += 5000000; };
+        take(DiagnosticsSource::X10a, x);
+        require(x.window_end_s == 7201 && x.count == 1 && !x.unix_s,
+                "dhw_trace_ambiguous_clock_bracket_keeps_relative_window");
+        sdk::before_take = [] { sdk::now_us += 20000000; };
+        take(DiagnosticsSource::X10a, x);
+        require(x.window_end_s == 7226 && !x.live && x.observed_end_s == 7201,
+                "dhw_trace_snapshot_clock_is_read_after_lock");
+        sdk::now_us = (static_cast<int64_t>(x.windows[0].end_s) + 86400) * 1000000;
+        take(DiagnosticsSource::X10a, x);
+        require(x.epoch == xepoch && !x.count && !x.live,
+                "dhw_trace_stopped_producer_expires_at_exact_cutoff");
+    } else if (name == "dhw_trace_pause") {
+        checkup_set_diagnostics(false, 23);
+        take(DiagnosticsSource::X10a, x);
+        require(!x.epoch && !x.count && s_x10a.dhw_trace.count == 1,
+                "dhw_trace_same_generation_pause_hides_without_erasing");
+        checkup_set_diagnostics(true, 23);
+        take(DiagnosticsSource::X10a, x);
+        require(x.epoch == xepoch && x.count == 1 && !x.live,
+                "dhw_trace_same_generation_resume_preserves_completed_only");
+        for (int64_t sec = 7211; sec <= 10811; sec += 10) sample(sec, rows, cov);
+        take(DiagnosticsSource::X10a, x);
+        require(x.count == 1, "dhw_trace_pause_does_not_bridge_unfinished_candidate");
+        checkup_set_diagnostics(true, 24);
+        take(DiagnosticsSource::X10a, x);
+        take(DiagnosticsSource::Modbus, m);
+        require(!x.epoch && !m.epoch && !s_x10a.dhw_trace.count && !s_modbus.dhw_trace.count,
+                "dhw_trace_new_consent_generation_clears_both_sources");
+        sample(10821, rows, cov);
+        take(DiagnosticsSource::X10a, x);
+        require(x.epoch != xepoch && x.since_s == 10821 && !x.count,
+                "dhw_trace_new_generation_begins_its_own_epoch");
+    } else if (name == "dhw_trace_source_reset") {
+        checkup_modbus_reset();
+        take(DiagnosticsSource::Modbus, m);
+        take(DiagnosticsSource::X10a, x);
+        require(!m.epoch && x.epoch == xepoch && x.count == 1,
+                "dhw_trace_modbus_reset_preserves_x10a_completion");
+        checkup_modbus_confirm_source(ModbusProfile::HomeHub, 0x22334455U);
+        mb_sample(7211); // reset-consuming old/new boundary is deliberately discarded
+        take(DiagnosticsSource::Modbus, m);
+        require(!m.epoch, "dhw_trace_full_reset_discards_consuming_sample");
+        mb_sample(7221);
+        take(DiagnosticsSource::Modbus, m);
+        require(m.epoch && m.epoch != mepoch && !m.count && m.since_s == 7221,
+                "dhw_trace_source_reconfirmation_starts_fresh_detail");
+        checkup_reset();
+        take(DiagnosticsSource::X10a, x);
+        DhwLossTimeline independent;
+        take(DiagnosticsSource::Modbus, independent);
+        require(!x.epoch && independent.epoch == m.epoch && independent.since_s == m.since_s,
+                "dhw_trace_x10a_reset_preserves_modbus_epoch");
+    } else if (name == "dhw_trace_circulation_reset") {
+        checkup_dhw_reset();
+        const auto pending = take(DiagnosticsSource::X10a, x);
+        take(DiagnosticsSource::Modbus, m);
+        require(!x.epoch && !m.epoch && pending[CheckupCheck::DhwLoss].b == 0 &&
+                    pending[CheckupCheck::Heater].a == before[CheckupCheck::Heater].a,
+                "dhw_trace_circulation_reset_hides_both_traces_only");
+        sample(7211, rows, cov);
+        mb_sample(7211);
+        take(DiagnosticsSource::X10a, x);
+        take(DiagnosticsSource::Modbus, m);
+        require(!x.epoch && !m.epoch, "dhw_trace_dhw_reset_discards_consuming_sample");
+        sample(7221, rows, cov);
+        mb_sample(7221);
+        take(DiagnosticsSource::X10a, x);
+        take(DiagnosticsSource::Modbus, m);
+        require(x.epoch && m.epoch && x.epoch != xepoch && m.epoch != mepoch && !x.count &&
+                    !m.count && x.since_s == 7221 && m.since_s == 7221,
+                "dhw_trace_circulation_reset_restarts_independent_epochs");
+        // Fill a complete day after the first DHW-only reset, while the core clocks keep running.
+        constexpr int64_t full_scope_s = 7211 + CHECKUP_WINDOW_S + 30;
+        for (int64_t sec = 7231; sec <= full_scope_s; sec += 10) {
+            sample(sec, rows, cov);
+            mb_sample(sec);
+        }
+        const auto x_full = take(DiagnosticsSource::X10a, x);
+        const auto m_full = take(DiagnosticsSource::Modbus, m);
+        require(x_full.full_span && m_full.full_span && x.count && m.count &&
+                    x_full.dhw_candidate_s > 0 && m_full.dhw_candidate_s > 0,
+                "dhw_trace_fixture_has_full_prior_scope_and_active_candidates");
+        checkup_dhw_reset();
+        const auto x_pending = take(DiagnosticsSource::X10a, x);
+        const auto m_pending = take(DiagnosticsSource::Modbus, m);
+        for (const auto* report : {&x_pending, &m_pending}) {
+            const auto& dhw = (*report)[CheckupCheck::DhwLoss];
+            require(report->full_span && report->source_fresh && !report->dhw_blocked &&
+                        dhw.verdict == CheckupVerdict::Collecting && dhw.b == 0 &&
+                        !report->dhw_candidate_s && !report->dhw_settle_remaining_s,
+                    "dhw_pending_reset_collects_despite_full_old_scope");
+        }
+        require(!x.epoch && !m.epoch &&
+                    x_pending[CheckupCheck::Heater].a == x_full[CheckupCheck::Heater].a &&
+                    s_x10a.dhw_reset_requested.load() && s_modbus.dhw_reset_requested.load(),
+                "dhw_pending_reset_hides_detail_without_consuming_reset_or_retiring_core");
+        sample(full_scope_s + 10, rows, cov);
+        mb_sample(full_scope_s + 10);
+        const auto x_reset = take(DiagnosticsSource::X10a, x);
+        const auto m_reset = take(DiagnosticsSource::Modbus, m);
+        require(!x.epoch && !m.epoch && !x_reset.dhw_blocked && !m_reset.dhw_blocked &&
+                    x_reset[CheckupCheck::DhwLoss].verdict == CheckupVerdict::Collecting &&
+                    m_reset[CheckupCheck::DhwLoss].verdict == CheckupVerdict::Collecting,
+                "dhw_consumed_reset_starts_new_scope_despite_full_core");
+    } else if (name == "dhw_trace_forget_during_snapshot" ||
+               name == "dhw_trace_reset_during_snapshot") {
+        adapter::on_time  = name == "dhw_trace_forget_during_snapshot"
+                                ? +[] { checkup_cycling_forget(); }
+                                : +[] { checkup_dhw_reset(); };
+        const auto during = take(DiagnosticsSource::X10a, x);
+        take(DiagnosticsSource::Modbus, m);
+        if (name == "dhw_trace_reset_during_snapshot") {
+            require(during[CheckupCheck::DhwLoss].b == 0 &&
+                        during[CheckupCheck::DhwLoss].observed_s == 0 && !during.dhw_candidate_s &&
+                        !during.dhw_settle_remaining_s &&
+                        during[CheckupCheck::Heater].a == before[CheckupCheck::Heater].a,
+                    "dhw_reset_during_clock_read_retires_aggregate_and_progress");
+        }
+        require(!x.epoch && !m.epoch && !x.count && !m.count,
+                "dhw_trace_withdrawal_during_clock_read_clears_captured_output");
+    } else if (name == "dhw_trace_forget") {
+        checkup_cycling_forget();
+        const int64_t prior_end = s_x10a.dhw_trace.last_us;
+        sample(7211, rows, cov);
+        mb_sample(7211);
+        take(DiagnosticsSource::X10a, x);
+        take(DiagnosticsSource::Modbus, m);
+        require(!x.epoch && !m.epoch && s_x10a.dhw_trace.last_us == prior_end &&
+                    s_modbus.dhw_trace.last_us == prior_end,
+                "dhw_trace_forget_immediately_suppresses_producer_and_report");
+    } else {
+        sdk::fail_take_once = true;
+        take(DiagnosticsSource::X10a, x);
+        require(!x.epoch && !x.count, "dhw_trace_lock_failure_clears_prior_output");
+        auto unsupported = cov;
+        unsupported.r5t  = false;
+        sample(7211, rows, unsupported);
+        take(DiagnosticsSource::X10a, x);
+        require(!x.epoch && !x.count, "dhw_trace_unsupported_profile_withholds_detail");
+    }
+}
+
 void modbus_dual_source() {
     boot();
     require(s_x10a.persist_magic == CHECKUP_PERSIST_MAGIC &&
@@ -1615,6 +1830,8 @@ int main(int argc, char** argv) {
             independent_heaters();
         else if (name.rfind("fault_", 0) == 0)
             fault_case(name);
+        else if (name.rfind("dhw_trace_", 0) == 0)
+            dhw_trace_case(name);
         else if (name == "source_freshness")
             source_freshness();
         else if (name == "defrost_start_context")

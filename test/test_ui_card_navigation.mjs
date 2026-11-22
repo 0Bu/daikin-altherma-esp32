@@ -48,8 +48,8 @@ class Element {
     if (selector === ".vgroup[data-dashboard-card]")
       return this.children.filter(child => child.dataset.dashboardCard != null);
     if (selector === "[data-card]") return this.children.filter(child => child.dataset.card != null);
-    if (selector === "[data-chart][inert], [data-checkup-hours][inert], [data-checkup-fault][inert]" ||
-        selector === "[data-chart], [data-checkup-hours], [data-checkup-fault]") return [];
+    if (selector === "[data-chart][inert], [data-checkup-hours][inert], [data-checkup-dhw][inert], [data-checkup-fault][inert]" ||
+        selector === "[data-chart], [data-checkup-hours], [data-checkup-dhw], [data-checkup-fault]") return [];
     throw new Error(`unhandled card-navigation selector: ${selector}`);
   }
 }

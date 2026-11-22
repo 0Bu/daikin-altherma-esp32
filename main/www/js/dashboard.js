@@ -141,6 +141,7 @@ function checkupSourceReadyFor(status = S.status) {
 }
 const refrigerantStatusUnavailable = () => S.otaCached || S.transportUnavailable === "status";
 function renderCards(hold = true) {
+  retireCheckupDhwTimeline();
   if (refrigerantStatusUnavailable()) {
     markCyclingStale();
     // A click or scrub may defer rebuilding the card. Hide its retired status immediately.
@@ -170,9 +171,10 @@ function renderCards(hold = true) {
   // A source change can select a card whose charts were paused in this frame.
   if (S.dashboardCard !== card) renderCards(false);
   else {
-    for (const slot of selected?.querySelectorAll("[data-chart][inert], [data-checkup-hours][inert], [data-checkup-fault][inert]") || [])
+    for (const slot of selected?.querySelectorAll("[data-chart][inert], [data-checkup-hours][inert], [data-checkup-dhw][inert], [data-checkup-fault][inert]") || [])
       slot.inert = false;
     syncCheckupCyclingChart(selected);
+    syncCheckupDhwChart(selected);
   }
 }
 
@@ -233,7 +235,7 @@ function retireMountedHistory() {
   try {
     const settings = document.getElementById("settingsCards");
     const inspector = document.getElementById("inspHist");
-    const slots = [...host.querySelectorAll("[data-chart], [data-checkup-hours]"),
+    const slots = [...host.querySelectorAll("[data-chart], [data-checkup-hours], [data-checkup-dhw]"),
       ...(settings?.querySelectorAll("[data-chart]") || [])];
     if (inspector) slots.push(inspector);
     for (const plot of settings?.querySelectorAll("#diagnostics-circulation-detail .vhist") || [])
@@ -241,6 +243,7 @@ function retireMountedHistory() {
     for (const slot of slots) {
       slot.textContent = "";
       delete slot._checkupMarkup;
+      delete slot._dhwKey;
     }
   } finally { S.trendRebuilding = rebuilding; }
 }
@@ -255,7 +258,7 @@ function selectDashboardCard(key) {
   // geometry cannot select a sample from the newer cache before the next complete paint.
   if (_pollBusy) {
     const selected = syncDashboardCards();
-    for (const slot of selected?.querySelectorAll("[data-chart], [data-checkup-hours], [data-checkup-fault]") || [])
+    for (const slot of selected?.querySelectorAll("[data-chart], [data-checkup-hours], [data-checkup-dhw], [data-checkup-fault]") || [])
       slot.inert = true;
   } else renderCards(false);
 }
@@ -2561,6 +2564,316 @@ function checkupDhwEnergy(c) {
     fmt(c.max_k_h, 1), fmt(heat, 2), fmt(heat / 3, 2), fmt(heat / 2.5, 2));
 }
 
+// Timed DHW windows are separate from the persisted diagnosis totals. No scalar, journal
+// bucket or previous snapshot can reconstruct a missing current-boot timeline.
+function checkupDhwTimeline(c) {
+  const trace = c?.timeline;
+  const uint = n => Number.isInteger(n) && n >= 0 && n <= 0xffffffff;
+  if (!trace || !uint(trace.epoch) || !trace.epoch || !uint(trace.window_end_s) ||
+      !uint(trace.since_s) || trace.since_s > trace.window_end_s ||
+      !(trace.observed_end_s === null || (uint(trace.observed_end_s) &&
+        trace.observed_end_s >= trace.since_s && trace.observed_end_s <= trace.window_end_s)) ||
+      (trace.unix_s != null && (!uint(trace.unix_s) || !trace.unix_s)) ||
+      typeof trace.live !== "boolean" || (trace.live && trace.observed_end_s === null) ||
+      !Array.isArray(trace.windows) || trace.windows.length > 24)
+    return null;
+  let end = trace.since_s;
+  for (const w of trace.windows) {
+    if (!w || !uint(w.start_s) || !uint(w.end_s) || w.start_s < end ||
+        w.end_s - w.start_s < 3600 || w.end_s - w.start_s > 3631 ||
+        w.end_s <= trace.window_end_s - 86400 || w.end_s > trace.window_end_s ||
+        !Number.isFinite(w.rate_k_h) || w.rate_k_h < 0 ||
+        !uint(w.observed_s) || w.observed_s > w.end_s - w.start_s ||
+        typeof w.pump_marker !== "boolean" || typeof w.draw_marker !== "boolean") return null;
+    end = w.end_s;
+  }
+  return trace;
+}
+function checkupDhwScope(trace, report = S.status?.health) {
+  return JSON.stringify([S.status?.boot_id, S.status?.history?.epoch,
+    report?.source || "x10a", trace?.epoch ?? null]);
+}
+let dhwSelection = { scope: "", end: null }, dhwExpiry;
+function markCheckupDhwStale(stale = true) {
+  if (dhwExpiry != null) clearTimeout(dhwExpiry);
+  dhwExpiry = undefined;
+  const host = globalThis.document?.getElementById?.("valueGroups"), state = String(stale);
+  if (host?.getAttribute?.("data-dhw-stale") !== state) host?.setAttribute?.("data-dhw-stale", state);
+}
+function checkupDhwFreshAge(trace, report, check) {
+  if (report?.source_fresh === false || check?.reason === "source_stale" ||
+      S.otaCached || S.transportUnavailable === "status") return Infinity;
+  // DHW comes entirely from /status. An omitted or rejected timeline leaves freshness unknown.
+  if (!trace) return NaN;
+  if (!trace.live) return Infinity;
+  // The device times are whole seconds. Include their uncertainty and the request age.
+  return historyClock() - S.statusRequestedAt + 1000 * (trace.window_end_s - trace.observed_end_s + 1);
+}
+function syncCheckupDhwFreshness(trace, report, check) {
+  const age = checkupDhwFreshAge(trace, report, check);
+  markCheckupDhwStale(age >= 15000);
+  if (age >= 0 && age < 15000)
+    dhwExpiry = setTimeout(markCheckupDhwStale, 15000 - age);
+}
+// Called at status adoption as well as rendering: a held click/gesture cannot leave the
+// previous source or reset epoch's evidence interactive while its replacement is pending.
+function retireCheckupDhwTimeline() {
+  const slot = globalThis.document?.getElementById?.("valueGroups")?.querySelector?.("[data-checkup-dhw]");
+  if (!slot) return;
+  const report = S.status?.health, check = report?.checks?.find(c => c.id === "dhw_loss");
+  const trace = checkupDhwTimeline(check), scope = checkupDhwScope(trace, report);
+  syncCheckupDhwFreshness(trace, report, check);
+  if (slot.dataset.dhwScope !== scope) {
+    if (S.cancelDhwDrag) S.cancelDhwDrag();
+    const focused = slot.contains?.(globalThis.document?.activeElement);
+    slot.textContent = "";
+    delete slot._dhwKey;
+    slot.dataset.dhwScope = scope;
+    dhwSelection = { scope, end: null };
+    if (focused) slot.closest(".vitem")?.querySelector('[data-desc="model:health_dhw_loss"]')
+      ?.focus({ preventScroll: true });
+  }
+}
+function syncCheckupDhwChart(card) {
+  if (S.stage !== "dashboard" || S.scrub || card?.dataset.dashboardCard !== "diagnosis" ||
+      !S.descOpen.has("model:health_dhw_loss")) return;
+  const slot = card.querySelector(".vitem.open [data-checkup-dhw]");
+  if (slot) renderCheckupDhwChart(slot);
+}
+function renderCheckupDhwChart(slot, open = true) {
+  const panel = slot.closest(".checkup-dhw-detail");
+  if (panel) panel.inert = !open;
+  if (!open) {
+    if (S.cancelDhwDrag) S.cancelDhwDrag();
+    slot.textContent = "";
+    delete slot._dhwKey;
+    return;
+  }
+  const report = S.status?.health || {};
+  const c = report.checks?.find(c => c.id === "dhw_loss");
+  const trace = checkupDhwTimeline(c), scope = checkupDhwScope(trace, report);
+  if (dhwSelection.scope !== scope) dhwSelection = { scope, end: null };
+  slot.dataset.dhwScope = scope;
+  // Frame/freshness scalars are patched on connected nodes. Only actual record, locale or
+  // lifecycle changes construct a chart; ordinary polling never detaches its bars or controls.
+  const key = JSON.stringify([LANG, scope, trace?.windows ?? null]);
+  if (slot._dhwKey !== key) {
+    replaceHistoryHtml(slot, checkupDhwChartHtml(trace, scope));
+    slot._dhwKey = key;
+  }
+  const chart = slot.querySelector("[data-dhw-timeline]");
+  if (chart) {
+    chart._dhwTrace = trace;
+    updateCheckupDhwGeometry(chart, trace);
+    paintCheckupDhwChart(chart);
+    wireCheckupDhwChart(chart);
+  }
+  const item = slot.closest(".vitem");
+  if (item && !item._dhwDisclosures) {
+    item._dhwDisclosures = true;
+    item.addEventListener("toggle", e => {
+      const key = e.target.dataset?.dhwDisclosure;
+      if (!key) return;
+      const id = `dhw:${key}`;
+      if (e.target.open) S.descOpen.add(id); else S.descOpen.delete(id);
+      delete _html.valueGroups;
+    }, true);
+  }
+  syncCheckupDhwFreshness(trace, report, c);
+}
+function checkupDhwWindowTime(trace, w) {
+  if (!trace.unix_s) {
+    const before = s => t("check.dhw.before_snapshot", checkupCyclingDuration(trace.window_end_s - s));
+    return `${before(w.start_s)} – ${before(w.end_s)}`;
+  }
+  const stamp = new Intl.DateTimeFormat(LANG, { month: "short", day: "numeric",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23", timeZoneName: "shortOffset" });
+  const at = s => stamp.format(new Date((trace.unix_s + s - trace.window_end_s) * 1000));
+  return `${at(w.start_s)} – ${at(w.end_s)}`;
+}
+function checkupDhwMarkerText(w) {
+  const marker = present => t(`check.dhw.marker_${present ? "yes" : "no"}`);
+  return `${t("check.dhw.pump")}: ${marker(w.pump_marker)} · ${t("check.dhw.draw")}: ${marker(w.draw_marker)}`;
+}
+function checkupDhwChartHtml(trace, scope) {
+  if (!trace) return `<div class="vdesc-p checkup-dhw-empty">${esc(t("check.dhw.timeline_unavailable"))}</div>`;
+  const scale = Math.max(1, ...trace.windows.map(w => w.rate_k_h));
+  const bars = trace.windows.map(w =>
+    `<button type="button" class="checkup-dhw-window${w.rate_k_h === 0 ? " is-zero" : ""}"` +
+    ` data-dhw-window="${w.end_s}" data-start-s="${w.start_s}" data-end-s="${w.end_s}"` +
+    ` data-rate="${w.rate_k_h}" tabindex="-1" aria-pressed="false">` +
+    `<span class="checkup-dhw-bar" aria-hidden="true" style="height:${w.rate_k_h / scale * 100}%"></span></button>`).join("");
+  const lane = name => `<div class="checkup-dhw-lane" data-dhw-lane="${name}" aria-hidden="true">` +
+    trace.windows.filter(w => w[`${name}_marker`]).map(w =>
+      `<span data-dhw-marker="${w.end_s}" class="checkup-dhw-marker ${name}"></span>`).join("") + `</div>`;
+  const readout = trace.windows.length ?
+    `<div class="checkup-dhw-window-details">` +
+    `<button type="button" data-dhw-action="previous" aria-label="${esc(t("check.dhw.previous"))}">‹</button>` +
+    `<div class="checkup-dhw-readout" aria-live="off" aria-atomic="true">` +
+    `<div class="vdesc-n num" data-dhw-readout="rate"></div><div data-dhw-readout="time"></div>` +
+    `<div data-dhw-readout="coverage"></div><div data-dhw-readout="markers"></div></div>` +
+    `<button type="button" data-dhw-action="next" aria-label="${esc(t("check.dhw.next"))}">›</button></div>` :
+    `<div class="vdesc-p checkup-dhw-empty">${esc(t("check.dhw.timeline_empty"))}</div>`;
+  return `<div class="vhist checkup-dhw-chart" data-dhw-timeline="${esc(scope)}" role="group"` +
+    ` aria-label="${esc(t("hist.aria", t("check.dhw_loss")))}">` +
+    `<div class="vhist-head"><span class="vhist-t">${esc(t("check.dhw.chart_title"))}</span><span>K/h</span></div>` +
+    `<div class="checkup-dhw-grid"><div class="checkup-dhw-y" aria-hidden="true"><span>${esc(checkupFmt1(scale))}</span><span>0</span></div>` +
+    `<div class="checkup-dhw-plot"><span class="checkup-dhw-before" aria-hidden="true"></span>` +
+    `<span class="checkup-dhw-unread" aria-hidden="true"></span>${bars}</div>` +
+    `<div></div><div class="vhist-axis checkup-dhw-axis" aria-hidden="true">` +
+    `<span data-dhw-axis="0"></span><span data-dhw-axis="12"></span><span data-dhw-axis="24"></span></div>` +
+    `<span class="checkup-dhw-lane-label">${esc(t("check.dhw.pump"))}</span>${lane("pump")}` +
+    `<span class="checkup-dhw-lane-label">${esc(t("check.dhw.draw"))}</span>${lane("draw")}</div>` +
+    `<div class="checkup-dhw-caption">${esc(t("check.dhw.timed_scope", trace.windows.length))}</div>` +
+    `<div class="checkup-dhw-caption">${esc(t("check.dhw.blank"))}</div>` + readout + `</div>`;
+}
+function checkupDhwText(node, value) {
+  if (!node || node.textContent === value) return;
+  if (node.childNodes?.length === 1 && node.firstChild?.nodeType === 3)
+    node.firstChild.nodeValue = value;
+  else node.textContent = value;
+}
+function updateCheckupDhwGeometry(chart, trace) {
+  chart.dataset.dhwClock = trace.unix_s ? "wall" : "relative";
+  const start = trace.window_end_s - 86400;
+  const pct = s => Math.max(0, Math.min(100, (s - start) * 100 / 86400));
+  for (const w of trace.windows) {
+    const button = chart.querySelector(`[data-dhw-window="${w.end_s}"]`);
+    button.style.left = `${pct(w.start_s)}%`;
+    button.style.width = `${pct(w.end_s) - pct(w.start_s)}%`;
+    const label = `${checkupDhwWindowTime(trace, w)} · ${checkupFmt1(w.rate_k_h)} K/h · ${checkupDhwMarkerText(w)}`;
+    if (button.getAttribute("aria-label") !== label) button.setAttribute("aria-label", label);
+    for (const marker of chart.querySelectorAll(`[data-dhw-marker="${w.end_s}"]`))
+      marker.style.left = `${(pct(w.start_s) + pct(w.end_s)) / 2}%`;
+  }
+  chart.querySelector(".checkup-dhw-before").style.width = `${pct(trace.since_s)}%`;
+  const last = trace.observed_end_s ?? trace.since_s;
+  const unread = chart.querySelector(".checkup-dhw-unread");
+  unread.style.left = `${pct(last)}%`;
+  unread.style.width = `${100 - pct(last)}%`;
+  const clock = trace.unix_s && new Intl.DateTimeFormat(LANG, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+  for (const h of [0, 12, 24]) checkupDhwText(chart.querySelector(`[data-dhw-axis="${h}"]`), clock
+    ? clock.format(new Date((trace.unix_s - (24 - h) * 3600) * 1000))
+    : h === 24 ? t("check.dhw.snapshot") : `−${24 - h} h`);
+}
+function paintCheckupDhwChart(chart, end = dhwSelection.end, announce = false) {
+  // Announce deliberate window exploration, never every scalar poll's relative-time update.
+  chart.querySelector(".checkup-dhw-readout")?.setAttribute("aria-live", announce ? "polite" : "off");
+  const trace = chart._dhwTrace;
+  if (!trace) return;
+  const windows = trace.windows;
+  const chosen = windows.find(w => String(w.end_s) === String(end)) || windows.at(-1);
+  dhwSelection = { scope: chart.dataset.dhwTimeline, end: chosen?.end_s ?? null };
+  for (const button of chart.querySelectorAll("[data-dhw-window]")) {
+    const selected = button.dataset.dhwWindow === String(chosen?.end_s);
+    button.classList.toggle("active", selected);
+    button.setAttribute("aria-pressed", String(selected));
+    button.tabIndex = selected ? 0 : -1;
+  }
+  if (!chosen) return;
+  const text = (key, value) => checkupDhwText(chart.querySelector(`[data-dhw-readout="${key}"]`), value);
+  text("rate", `${checkupFmt1(chosen.rate_k_h)} K/h`);
+  text("time", checkupDhwWindowTime(trace, chosen));
+  text("coverage", t("check.hour.coverage", checkupCyclingDuration(chosen.observed_s),
+    checkupCyclingDuration(chosen.end_s - chosen.start_s)));
+  text("markers", checkupDhwMarkerText(chosen));
+  const index = windows.indexOf(chosen);
+  chart.querySelector('[data-dhw-action="previous"]').disabled = index === 0;
+  chart.querySelector('[data-dhw-action="next"]').disabled = index === windows.length - 1;
+}
+function wireCheckupDhwChart(chart) {
+  if (chart._dhwWired) return;
+  chart._dhwWired = true;
+  const buttons = () => [...chart.querySelectorAll("[data-dhw-window]")];
+  const select = (button, focus = false) => {
+    if (!button || chart.closest("[hidden], [inert]")) return;
+    paintCheckupDhwChart(chart, button.dataset.dhwWindow, true);
+    if (focus) button.focus({ preventScroll: true });
+  };
+  chart.addEventListener("click", e => {
+    const action = e.target.closest("[data-dhw-action]");
+    if (action) {
+      const list = buttons(), index = list.findIndex(b => b.getAttribute("aria-pressed") === "true");
+      select(list[index + (action.dataset.dhwAction === "previous" ? -1 : 1)]);
+    } else select(e.target.closest("[data-dhw-window]"));
+  });
+  chart.addEventListener("keydown", e => {
+    if (!e.target.matches("[data-dhw-window]")) return;
+    const list = buttons(), i = list.indexOf(e.target);
+    const index = { ArrowLeft: i - 1, ArrowRight: i + 1, Home: 0, End: list.length - 1,
+      Escape: list.length - 1 }[e.key];
+    if (!Number.isInteger(index)) return; // Enter/Space retain the native button action.
+    e.preventDefault();
+    e.stopPropagation();
+    select(list[Math.max(0, Math.min(list.length - 1, index))], true);
+  });
+  chart.addEventListener("focusin", e => select(e.target.closest("[data-dhw-window]")));
+  let drag, watchdog;
+  const finish = e => {
+    if (!drag || (e?.pointerId != null && e.pointerId !== drag.id)) return;
+    const id = drag.id;
+    drag = null;
+    clearTimeout(watchdog);
+    for (const event of ["pointerup", "pointercancel"]) document.removeEventListener(event, finish);
+    if (S.scrub === "checkup-dhw") S.scrub = null;
+    try { chart.releasePointerCapture(id); } catch {}
+  };
+  S.cancelDhwDrag = finish;
+  chart.addEventListener("pointerdown", e => {
+    if (e.button !== 0 || S.scrub || !e.target.closest("[data-dhw-window]")) return;
+    drag = { id: e.pointerId, x: e.clientX, y: e.clientY };
+    S.scrub = "checkup-dhw";
+    for (const event of ["pointerup", "pointercancel"]) document.addEventListener(event, finish);
+    watchdog = setTimeout(finish, SCRUB_MAX_MS);
+  });
+  chart.addEventListener("pointermove", e => {
+    if (!drag || drag.id !== e.pointerId) return;
+    const dx = Math.abs(e.clientX - drag.x), dy = Math.abs(e.clientY - drag.y);
+    if (!drag.moved && dy > dx && dy > 6) return finish(); // Leave vertical touch scrolling native.
+    if (!drag.moved && dx <= 6) return;
+    drag.moved = true;
+    S.scrub = "checkup-dhw";
+    e.preventDefault();
+    try { chart.setPointerCapture(e.pointerId); } catch {}
+    const plot = chart.querySelector(".checkup-dhw-plot").getBoundingClientRect();
+    const at = chart._dhwTrace.window_end_s - 86400 + (e.clientX - plot.left) * 86400 / plot.width;
+    const w = chart._dhwTrace.windows.find(w => w.start_s <= at && at <= w.end_s);
+    // A blank interval is not a zero window and cannot select neighbouring evidence.
+    if (w) select(chart.querySelector(`[data-dhw-window="${w.end_s}"]`));
+  });
+  for (const event of ["pointerup", "pointercancel", "lostpointercapture", "pointerleave"])
+    chart.addEventListener(event, finish);
+}
+function checkupDhwDetailHtml(c, fullSpan, report) {
+  const hasRate = checkupDhwHasRate(c), scope = checkupDhwScope(checkupDhwTimeline(c), report);
+  const count = Number.isInteger(c.windows) && c.windows >= 0 ? c.windows.toLocaleString(LANG) : "—";
+  let assessment = hasRate ? t("check.dhw.measurement")
+    : c.blocked ? t("check.detail.dhw_blocked", 0, "", "")
+    : c.verdict === "unavailable" ? t("check.detail.unavailable")
+    : Number(c.settle_remaining_s) > 0
+      ? t("check.detail.dhw_settling", count, "", checkupDuration(c.settle_remaining_s))
+    : Number(c.candidate_s) > 0
+      ? t("check.detail.dhw_candidate", count, "", checkupDuration(c.candidate_s), checkupDuration(3600))
+      : t("check.detail.dhw_waiting", count, "");
+  if (hasRate && c.evidence === "heuristic" && ["info", "warn"].includes(c.verdict))
+    assessment += ` ${t("check.dhw.hint")}`;
+  const value = hasRate ? `${esc(checkupFmt1(c.max_k_h))}<span class="checkup-dhw-unit">K/h</span>`
+    : esc(checkupStatusText(c));
+  const energy = checkupDhwEnergy(c);
+  const disclosure = (key, label, body) => `<details class="checkup-dhw-disclosure" data-dhw-disclosure="${key}"` +
+    `${S.descOpen.has(`dhw:${key}`) ? " open" : ""}><summary>${esc(t(label))}${chevIcon}</summary>` +
+    `<div class="checkup-dhw-disclosure-body">${body}</div></details>`;
+  return `<div class="checkup-dhw-detail"${S.descOpen.has("model:health_dhw_loss") ? "" : " inert"}><div class="checkup-dhw-hero">` +
+    (hasRate ? `<div class="checkup-dhw-heading">${esc(t("check.dhw.maximum"))}</div>` : "") +
+    `<div class="checkup-dhw-value num${hasRate ? " has-rate" : ""}">${value}</div>` +
+    `<div class="vdesc-p checkup-dhw-assessment">${esc(assessment)}</div></div>` +
+    `<div class="vdesc-p checkup-dhw-stale">${esc(t("check.dhw.stale"))}</div>` +
+    `<div data-checkup-dhw data-dhw-scope="${esc(scope)}"></div>` +
+    `<div class="vdesc-p checkup-dhw-limit">${esc(t("check.dhw.limit"))}</div>` +
+    disclosure("basis", "check.dhw.basis", checkupGenericDetailHtml(c, fullSpan, report)) +
+    (energy ? disclosure("energy", "check.dhw.energy", descParaHtml(esc(energy))) : "") + `</div>`;
+}
+
 // Fault copy follows the unit’s reported class. A remembered message does not establish
 // its cause, resolution or current severity when the source is unreadable.
 function checkupDetailKey(c, statusKey) {
@@ -2592,6 +2905,10 @@ const checkupFmt1 = (n) => n.toLocaleString(LANG, { maximumFractionDigits: 1 });
 function checkupDetailHtml(c, fullSpan = c.full_span === true, report = {}) {
   if (c.id === "fault") return checkupFaultDetailHtml(c, report);
   if (c.id === "cycling") return checkupCyclingDetailHtml(c, report);
+  if (c.id === "dhw_loss") return checkupDhwDetailHtml(c, fullSpan, report);
+  return checkupGenericDetailHtml(c, fullSpan, report);
+}
+function checkupGenericDetailHtml(c, fullSpan, report) {
   const isModbus = report?.source === "modbus";
   const statusKey = checkupStatusKey(c);
   const metric = checkupMetricValue(c);
@@ -2656,7 +2973,7 @@ function checkupDetailHtml(c, fullSpan = c.full_span === true, report = {}) {
     no_paired_runtime: "no_paired_runtime",
   }[c.reason];
   if (reasonKey) detail += ` ${t(`check.detail.${reasonKey}`)}`;
-  if (compactMetric && parts.length) detail += ` ${parts.join(" · ")}.`;
+  if (compactMetric && c.id !== "dhw_loss" && parts.length) detail += ` ${parts.join(" · ")}.`;
   if (c.id === "dhw_loss" && statusKey !== "collecting" && !c.blocked && Number(c.aborts) > 0)
     detail += t("check.detail.dhw_aborted", Number(c.aborts), checkupDhwReasons(c, isModbus),
                 checkupDuration(c.best_aborted_s));
@@ -2704,10 +3021,12 @@ function checkupDetailHtml(c, fullSpan = c.full_span === true, report = {}) {
     detail += ` ${t("check.detail.dhw_context",
       c.pump_windows.toLocaleString(LANG), c.draw_windows.toLocaleString(LANG),
       c.quiet_high_windows.toLocaleString(LANG))}`;
-  if (c.id === "dhw_loss") {
-    const energy = checkupDhwEnergy(c);
-    if (energy) detail += ` ${energy}`;
-  }
+  // DHW's value and short interpretation lead its panel; the longer evidence remains in
+  // the collapsed basis. Its separately collapsed energy example is never part of the chart.
+  if (c.id === "dhw_loss")
+    return (time.length ? descParaHtml(esc(time.join(" · "))) : "") +
+      (metric ? descParaHtml(esc(metric)) : "") + descParaHtml(esc(detail)) +
+      descNoteHtml(t("normal.label"), normal);
   const [hydronicMeasurements, hydronicContext] = checkupHydronicHtml(c, isModbus);
   return descParaHtml(`<span class="vdesc-n">${esc(value)}</span>` +
            (time.length ? ` · ${esc(time.join(" · "))}` : "") + ` — ${esc(what)}` +

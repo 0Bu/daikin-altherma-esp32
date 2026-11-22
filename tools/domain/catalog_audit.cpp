@@ -488,11 +488,13 @@ void check_spec_conv(const std::vector<Row>& rows, const std::vector<SpecRow>& s
     for (const auto& r : rows) {
         if (is_refrigerant_const(r.def.conv)) continue;            // the id is the model's datum
         auto it = by_label.find(hex2(r.def.reg) + r.nlabel);
-        if (it == by_label.end()) continue;                        // spec doesn't name it -> silent
+        if (it == by_label.end()) continue; // spec doesn't name it -> silent
         const auto& cands = it->second;
-        bool ok = std::any_of(cands.begin(), cands.end(), [&](const SpecRow* s) {
+        bool        ok    = std::any_of(cands.begin(), cands.end(), [&](const SpecRow* s) {
             if (s->len != r.def.size || s->type != r.def.type) return false;
-            ValueDef sd{r.def.reg, r.def.offset, s->conv, static_cast<uint8_t>(s->len), s->type, r.def.label};
+            if (!ValueDef::representable(r.def.reg, r.def.offset, s->conv, s->len, s->type))
+                return false;
+            ValueDef sd{r.def.reg, r.def.offset, s->conv, s->len, s->type, r.def.label};
             return converters_equivalent(sd, r.def, rtype_of(r.profile));
         });
         if (ok) continue;
@@ -511,9 +513,11 @@ void check_spec_conv(const std::vector<Row>& rows, const std::vector<SpecRow>& s
                                std::to_string(s->len) + " type " + type_name(s->type) +
                                "  (docs/REGISTERS.md:" + std::to_string(s->line) + ", off " +
                                std::to_string(s->off) + ")");
-        ValueDef wd{static_cast<uint8_t>(want->reg), static_cast<uint8_t>(want->off), want->conv,
-                    static_cast<uint8_t>(want->len), want->type, want->label.c_str()};
-        add_witness(f, wd, r.def, rtype_of(r.profile));
+        if (ValueDef::representable(want->reg, want->off, want->conv, want->len, want->type)) {
+            ValueDef wd{want->reg, want->off,  want->conv,
+                        want->len, want->type, want->label.c_str()};
+            add_witness(f, wd, r.def, rtype_of(r.profile));
+        }
         out.push_back(f);
     }
 }

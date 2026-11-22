@@ -61,6 +61,7 @@ export async function launchWebKit({ viewport, allowedOrigin, timeoutMs = 30000 
       },
       async frame() { await native.evaluate("document.documentElement.getBoundingClientRect().width"); },
       async colorScheme(scheme) { await native.emulateMedia({ colorScheme: scheme }); },
+      async key(key) { await native.keyboard.press(key); },
       async bringToFront() { await native.bringToFront(); },
       async focusEmulation(enabled) { if (enabled) await native.bringToFront(); },
       async nativeClick(x, y) {
@@ -80,6 +81,7 @@ export async function launchWebKit({ viewport, allowedOrigin, timeoutMs = 30000 
         else if (type === "keyUp") await native.keyboard.up(name);
         else throw new Error("unknown native key event: " + type);
       },
+      viewport: (width, height) => native.setViewportSize({ width, height }),
       screenshotClip: clip => native.screenshot({ type: "png", clip, animations: "allow", caret: "hide", scale: "css" }),
       touchWitness: () => native.evaluate("({...window.__webkitTrusted})"),
       touchTimings: () => [...touchDurations],

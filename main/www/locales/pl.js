@@ -1,4 +1,4 @@
-// translation-source: d246ab37989033acccc61553571267bd477b8c1b2151bfc0c3471de471a873b4
+// translation-source: 6680172c658e88b10995bffb650decd027c49dc5b49c8c11a74bbd604d427a8b
 const plNoun = (n, one, few, many) => {
   const value = Math.abs(Number(n)), mod10 = value % 10, mod100 = value % 100;
   return value === 1 ? one
@@ -185,6 +185,26 @@ I18N.pl = localeValues([
   /* check.status.experimental */ "TESTOWO",
   /* check.status.unavailable */ "N/D",
   /* check.status.no_window */ "BRAK OKNA",
+  /* check.dhw.maximum */ "Zarejestrowane maksimum",
+  /* check.dhw.measurement */ "Godzinne chłodzenie netto w punkcie czujnika R5T zasobnika.",
+  /* check.dhw.hint */ "Godzina bez zarejestrowanych oznak pompy lub poboru osiągnęła próg orientacyjny projektu.",
+  /* check.dhw.before_snapshot */ (d) => `${d} przed zapisem stanu`,
+  /* check.dhw.marker_yes */ "zarejestrowano",
+  /* check.dhw.marker_no */ "nie zarejestrowano",
+  /* check.dhw.pump */ "Pompa wewnętrzna",
+  /* check.dhw.draw */ "Spadek podobny do poboru",
+  /* check.dhw.previous */ "Poprzednie ukończone okno",
+  /* check.dhw.next */ "Następne ukończone okno",
+  /* check.dhw.timeline_unavailable */ "Brak okien z czasami. Historia nie jest odtwarzana z sum.",
+  /* check.dhw.timeline_empty */ "Brak ukończonych okien z danymi czasowymi w tym widoku 24 h.",
+  /* check.dhw.chart_title */ "Chłodzenie w ukończonym oknie",
+  /* check.dhw.timed_scope */ (n) => `Okna z czasami od restartu/wyzerowania: ${n}, do 24 h. Maksimum i liczniki mogą też opierać się na zapisanych danych godzinowych, nie tylko na oknach wykresu.`,
+  /* check.dhw.blank */ "Puste miejsce: brak dostępnego ukończonego okna z danymi czasowymi, nie zerowe chłodzenie. Znaki oznaczają obecność, nie czas trwania.",
+  /* check.dhw.snapshot */ "Stan danych",
+  /* check.dhw.stale */ "Bieżące odczyty do oceny wychładzania zasobnika CWU są niedostępne lub nieaktualne; zakończone okna pozostają obserwacjami historycznymi.",
+  /* check.dhw.limit */ "R5T mierzy jeden punkt warstwowego zasobnika, nie jego energię. Oznaki pompy i poboru nie dowodzą ani przyczyny, ani poboru wody.",
+  /* check.dhw.basis */ "Szczegóły danych",
+  /* check.dhw.energy */ "Przykład obliczeń · nie pomiar energii",
   /* check.detail.dhw_energy */ (a, b, c, d) => `Przykład jednej godziny: 200 l wody stygnącej równomiernie o ${a} K/h → ${b} kWh ciepła; uzupełnienie ${c}–${d} kWh prądu przy założonym COP 2,5–3 (ciepło ÷ prąd). Nie jest to pomiar energii.`,
   /* check.detail.dhw_context */ (a, b, c) => `Okna: pompa wewnętrzna ${a}; spadek podobny do poboru ${b}; bez oznaczeń ≥0,8 K/h ${c}. Mogą się pokrywać.`,
   /* check.detail.value_label */ "Wartość:",
