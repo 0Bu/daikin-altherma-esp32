@@ -153,22 +153,6 @@
                   <text class="sc-mode" id="svMode" x="50" y="34">—</text>
                   <text class="sc-status" id="svStatus" x="50" y="56"></text>
                 </g>
-                <!-- Heat-pump data-source pills: X10A (blue when connected) and Modbus (petrol when
-                     connected), grey when a configured/used source is disconnected, and absent when
-                     not configured/used. Visible header pills pack flush right toward BOOST so an
-                     omitted optional source leaves no gap. -->
-                <g id="gX10a" class="sc-x10a sc-hit" data-insp="x10a" role="button" tabindex="0"
-                   style="display:none">
-                  <rect class="sc-x10a-box" x="496" y="16" width="48" height="24" rx="12"/>
-                  <text class="sc-val" x="520" y="32" text-anchor="middle"
-                        style="font-size:9.5px">X10A</text>
-                </g>
-                <g id="gModbus" class="sc-modbus sc-hit" data-insp="modbus" role="button" tabindex="0"
-                   style="display:none">
-                  <rect class="sc-modbus-box" x="552" y="16" width="64" height="24" rx="12"/>
-                  <text class="sc-val" x="584" y="32" text-anchor="middle"
-                        style="font-size:9.5px">MODBUS</text>
-                </g>
                 <!-- Independent outdoor climate from the optional ENV III. It is not a Daikin
                      outdoor-unit reading and therefore sits in the schematic header rather than
                      on the unit itself. The group stays absent until the configured sensor exists;

@@ -197,20 +197,6 @@ svg .sc-sg-request .sc-val { fill: var(--muted); font-weight: 700; letter-spacin
   transition: fill .3s; }
 .sg-boost-on .sc-sg-request-box { fill: var(--src-mb-soft); stroke: var(--src-mb); }
 .sg-boost-on .sc-sg-request .sc-val { fill: var(--src-mb); }
-/* Heat-pump data-source pills in the schematic header (#gX10a, #gModbus). Configured/used sources
-   appear beside ENV III and Boost; unconfigured sources remain absent. Disconnected uses the shared
-   light-grey resting badge, while a connected source uses its provenance colour (measurement blue for
-   X10A, petrol for Modbus). Accessible names and the inspector state connection status in words. */
-svg .sc-x10a-box, svg .sc-modbus-box {
-  fill: var(--hatch); stroke: var(--pipe); transition: fill .3s, stroke .3s;
-}
-svg .sc-x10a .sc-val, svg .sc-modbus .sc-val {
-  fill: var(--muted); font-weight: 700; letter-spacing: .02em; transition: fill .3s;
-}
-svg .sc-x10a.live .sc-x10a-box { fill: var(--brand-tint); stroke: var(--brand); }
-svg .sc-x10a.live .sc-val { fill: var(--brand-strong); }
-svg .sc-modbus.live .sc-modbus-box { fill: var(--src-mb-soft); stroke: var(--src-mb); }
-svg .sc-modbus.live .sc-val { fill: var(--src-mb); }
 /* Optional ENV III lives beside the permanent Boost state rather than as another dashboard card.
    The face carries only its primary reading; all three instruments and their common timeline are
    one tap away in the standard schematic inspector. A configured but stale sensor remains visible
@@ -360,8 +346,6 @@ svg .sc-hit:hover .sc-sg-request-box { stroke: var(--brand); }
 svg .sc-hit.sel .sc-sg-request-box { stroke: var(--brand); stroke-width: 2.5; }
 svg .sc-hit:hover .sc-env3-box { stroke: var(--brand); }
 svg .sc-hit.sel .sc-env3-box { stroke: var(--brand); stroke-width: 2.5; }
-svg .sc-hit:hover :is(.sc-x10a-box, .sc-modbus-box) { stroke: var(--brand); }
-svg .sc-hit.sel :is(.sc-x10a-box, .sc-modbus-box) { stroke: var(--brand); stroke-width: 2.5; }
 svg .sc-hit.sel .sc-tie { stroke: var(--brand); }
 /* Pipes: a 3.5–5 px stroke is far too thin to tap, so each run carries an invisible fat hit line.
    `pointer-events: stroke` is deliberate — it hit-tests the stroke area regardless of the paint
@@ -444,7 +428,6 @@ svg .sc-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px
 .inspect-env-state.ok { color: var(--ok); }
 .inspect-env-state.warn { color: var(--warn); }
 .inspect-env-state.err { color: var(--err); }
-.inspect-env-state.dim { color: var(--muted); }
 .inspect-env-values { margin-top: 10px; }
 /* Description first, trend second, values last. Every value — including a Modbus twin of the
    headline — enters this one divided list instead of interrupting the prose above the chart. */

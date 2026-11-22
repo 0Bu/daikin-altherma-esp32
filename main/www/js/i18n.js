@@ -49,7 +49,7 @@ function localeValues(values) {
 }
 const INSPECT_LOCALE_KEYS = ("status env3 sgrequest ou comp out ouhx hp disch lp eev r3t phe lwt " +
   "r2t rwt dt pth cop buh bsh valve valve2 tank heat spaceh room pump pel defrost quiet rhot " +
-  "rcold wsup wtank wheat wret flow flow_switch wp x10a modbus").split(" ");
+  "rcold wsup wtank wheat wret flow flow_switch wp").split(" ");
 const HOMEHUB_LOCALE_OFFSETS =
   "1 2 3 4 6 7 9 10 12 13 21 22 23 30 31 32 33 35 36 37 38 40 41 42 43 44 45 49 50 51 52 53 54 55 56 57 58".split(" ");
 const DESCRIPTION_LOCALE_COUNT = 130;

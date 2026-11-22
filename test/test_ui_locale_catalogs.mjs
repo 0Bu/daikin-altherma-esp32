@@ -278,7 +278,7 @@ for (const code of codes) {
 // concise explanation; HomeHub register names are keyed by their stable offset, never by prose.
 const index = fs.readFileSync(path.join(root, "main/www/index.html"), "utf8");
 const inspectKeys = [...new Set([...index.matchAll(/data-insp="([^"]+)"/g)].map((m) => m[1]))].sort();
-assert.equal(inspectKeys.length, 42, "specialist-copy gate must track every schematic target");
+assert.equal(inspectKeys.length, 40, "specialist-copy gate must track every schematic target");
 const inspectNowKeys = new Set(["sgrequest", "ou", "phe", "dt", "pth", "cop", "buh", "bsh",
   "valve", "valve2", "heat", "pump", "pel", "defrost", "quiet", "rhot", "rcold", "wsup",
   "wtank", "wheat", "wret", "flow_switch"]);

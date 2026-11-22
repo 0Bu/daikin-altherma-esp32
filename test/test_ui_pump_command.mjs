@@ -58,7 +58,7 @@ function harness(lang = "en", mutate = null) {
     "S.status = { hp: { connected: true }, modbus: { enabled: false, connected: false }, " +
     "history: { rows: [], modbus_rows: [], env3_rows: [] } }; " +
     "S._values = []; S._modbus = []; S.insp = null; " +
-    "renderEnv3Pill = () => {}; renderSourcePills = () => {}; layoutHeaderPills = () => {}; renderInspect = () => {}; " +
+    "renderEnv3Pill = () => {}; renderInspect = () => {}; " +
     "this.__api = { S, I18N, INSPECT, INSPECT_I18N, DESCRIPTIONS, DESCRIPTION_I18N, DERIVED, " +
     "pumpCommandPercent, waterMoving, pumpFlowConflict, pumpNowText, liveData, renderLive, " +
     "descFor, inspFieldText, setLang: (l) => { LANG = l; } };",
