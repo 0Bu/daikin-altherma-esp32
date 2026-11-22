@@ -144,6 +144,13 @@ vm.runInContext(
      chart: checkupCyclingChartHtml,
      timeline: checkupCyclingTimelineHtml,
      periodDetails: (trace, checkObj, from, to) => { checkupCyclingTimelineHtml(trace, "test-scope", checkObj); return cyclingPeriodDetailsHtml(_cyclingModels.get("test-scope"), from, to); },
+     chartPeriodDetails: (c, from, to) => {
+       checkupCyclingChartHtml(c);
+       const model = _cyclingModels.values().next().value;
+       return model ? cyclingPeriodDetailsHtml(model, from, to) : "";
+     },
+     setStatus: (st) => { S.status = st; },
+     setExpandedRun: (key) => { S.cyclingExpandedRun = key; },
      card: checkupCardHtml,
      ready: checkupSourceReadyFor,
      copy: I18N,
@@ -415,6 +422,52 @@ const evictedRunHtml = ui.periodDetails(
 assert.match(evictedRunHtml, /Stop unknown/);
 assert.match(evictedRunHtml, /Normal stop/);
 assert.doesNotMatch(evictedRunHtml.split("83600")[0], /Normal stop/);
+
+const makeRollingCheck = (shift) => ({
+  hours_epoch: 1,
+  timeline: {
+    boot_s: 6000 + shift,
+    live: true,
+    unix_s: 1794582660 + shift,
+    window_end_s: 86400,
+    observed_end_s: 86400,
+    run_edges: true,
+    records: [
+      [1, 1],
+      [79260 - shift, 5], [79260 - shift, 3], [79440 - shift, 1], [79440 - shift, 6],
+      [83600 - shift, 5], [83600 - shift, 3], [83900 - shift, 1], [83900 - shift, 6],
+    ].map(([at, kind]) => at * 8 + kind),
+  },
+  run_contexts: [
+    { at: 79260 - shift, stop: 79440 - shift, mode: "space", start_kind: "request_on", stop_kind: "normal" },
+    { at: 83600 - shift, stop: 83900 - shift, mode: "space", start_kind: "request_on", stop_kind: "normal" },
+  ],
+});
+try {
+  const initialCheck = makeRollingCheck(0);
+  const shiftedCheck = makeRollingCheck(8);
+  const assertRowOpen = (html, rowKey, label) => {
+    assert.match(html, new RegExp(`data-run-row="${rowKey}"[^>]*aria-expanded="true"`), `${label}: row ${rowKey} expanded`);
+    assert.match(html, new RegExp(`data-run-sub="${rowKey}"><td`), `${label}: subrow ${rowKey} visible`);
+  };
+  ui.setExpandedRun("b:3200");
+  assertRowOpen(ui.periodDetails(initialCheck.timeline, initialCheck, 22, 23), "b:3200", "initial boot run");
+  assertRowOpen(ui.periodDetails(shiftedCheck.timeline, shiftedCheck, 22, 23), "b:3200", "shifted boot run");
+
+  const restoredKey = `u:${1794582660 + 79260 - 86400}`;
+  ui.setExpandedRun(restoredKey);
+  assertRowOpen(ui.periodDetails(initialCheck.timeline, initialCheck, 22, 23), restoredKey, "initial restored run");
+  assertRowOpen(ui.periodDetails(shiftedCheck.timeline, shiftedCheck, 22, 23), restoredKey, "shifted restored run");
+
+  ui.setExpandedRun("b:3200");
+  ui.setStatus({ boot_id: "rolling-omit-test", uptime_s: 6008, health: { source: "x10a" }, history: { epoch: 1 } });
+  assertRowOpen(ui.chartPeriodDetails(shiftedCheck, 22, 23), "b:3200", "live chart before omission");
+  ui.setStatus({ boot_id: "rolling-omit-test", uptime_s: 6016, health: { source: "x10a" }, history: { epoch: 1 } });
+  assertRowOpen(ui.chartPeriodDetails({ hours_epoch: 1 }, 22, 23), "b:3200", "extrapolated chart during omission");
+} finally {
+  ui.setStatus(null);
+  ui.setExpandedRun(null);
+}
 
 const restoredCycling = { ...cycling, starts: 27, hours: [
   { starts: 22, restored: true }, { starts: 5 }, { starts: 9, restored: true, expired: true },

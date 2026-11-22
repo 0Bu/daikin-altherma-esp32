@@ -1018,29 +1018,21 @@ export async function assertCyclingChart(page, server, context) {
 
     // Cause-analysis UI: proportional fills, episode auto-selection, 3-col table, expandable explanations.
     status.boot_id = "cycling-cause-analysis";
-    status.uptime_s = 86400;
     const h20s = 20 * 3600, h21s = 21 * 3600, h22s = 22 * 3600;
-    cycling.space_runs = 6;
-    cycling.space_mean_run_s = 210;
-    cycling.flow_typical_l_min = 17.6;
-    cycling.timeline = {
-      boot_s: 86400, live: true, unix_s: datedBase + 200,
-      window_end_s: 86400, observed_end_s: 86400, run_edges: true,
-      records: [
-        [0, 1],
-        // Hour 20: 20% space -> 30% dhw -> 50% space chronological fill test
-        [h20s, 3], [h20s + 720, 4], [h20s + 1800, 3],
-        // Hour 21: 2 short space runs
-        [h21s + 60, 5], [h21s + 60, 3], [h21s + 240, 1], [h21s + 240, 6],
-        [h21s + 720, 5], [h21s + 720, 3], [h21s + 960, 1], [h21s + 960, 6],
-        // Hour 22: 2 short space runs + 1 defrost + ongoing DHW
-        [h22s + 60, 5], [h22s + 60, 3], [h22s + 180, 1], [h22s + 180, 6],
-        [h22s + 400, 5], [h22s + 400, 3], [h22s + 580, 1], [h22s + 580, 6],
-        [h22s + 900, 5], [h22s + 900, 2], [h22s + 1020, 1], [h22s + 1020, 6],
-        [h22s + 1200, 5], [h22s + 1200, 4],
-      ].map(([at, kind]) => at * 8 + kind),
-    };
-    cycling.run_contexts = [
+    const rawCauseRecords = [
+      [0, 1],
+      // Hour 20: 20% space -> 30% dhw -> 50% space chronological fill test
+      [h20s, 3], [h20s + 720, 4], [h20s + 1800, 3],
+      // Hour 21: 2 short space runs
+      [h21s + 60, 5], [h21s + 60, 3], [h21s + 240, 1], [h21s + 240, 6],
+      [h21s + 720, 5], [h21s + 720, 3], [h21s + 960, 1], [h21s + 960, 6],
+      // Hour 22: 2 short space runs + 1 defrost + ongoing DHW
+      [h22s + 60, 5], [h22s + 60, 3], [h22s + 180, 1], [h22s + 180, 6],
+      [h22s + 400, 5], [h22s + 400, 3], [h22s + 580, 1], [h22s + 580, 6],
+      [h22s + 900, 5], [h22s + 900, 2], [h22s + 1020, 1], [h22s + 1020, 6],
+      [h22s + 1200, 5], [h22s + 1200, 4],
+    ];
+    const rawCauseContexts = [
       { at: h21s + 60, mode: "space", start_kind: "cooldown_restart", stop: h21s + 240, stop_kind: "low_rps_above_target",
         start_lwt_c: 29.0, start_target_c: 32.0, lwt_c: 35.1, rwt_c: 33.6, target_c: 32.0, flow_l_min: 8.2, min_rps: 18.0, low_rps_above_target: true },
       { at: h21s + 720, mode: "space", start_kind: "target_raised", stop: h21s + 960, stop_kind: "low_rps_above_target",
@@ -1053,6 +1045,25 @@ export async function assertCyclingChart(page, server, context) {
         lwt_c: 24.0, rwt_c: 23.0, flow_l_min: 18.0 },
       { at: h22s + 1200, mode: "dhw", start_kind: "dhw_start", start_lwt_c: 41.0 },
     ];
+    cycling.space_runs = 6;
+    cycling.space_mean_run_s = 210;
+    cycling.flow_typical_l_min = 17.6;
+    let causeShift = 0;
+    const applyCauseShift = (delta) => {
+      causeShift += delta;
+      status.uptime_s = 86400 + causeShift;
+      cycling.timeline = {
+        boot_s: 86400 + causeShift, live: true, unix_s: datedBase + 200 + causeShift,
+        window_end_s: 86400, observed_end_s: 86400, run_edges: true,
+        records: rawCauseRecords.map(([at, kind]) => Math.max(0, at - causeShift) * 8 + kind),
+      };
+      cycling.run_contexts = rawCauseContexts.map(rc => ({
+        ...rc,
+        at: rc.at - causeShift,
+        ...(rc.stop !== undefined ? { stop: rc.stop - causeShift } : {}),
+      }));
+    };
+    applyCauseShift(0);
     await poll(datedIso(200));
     const causeState = await page.evaluate(`(() => {
       const h20Fill = document.querySelector('.checkup-cycling-timeline [data-bucket="20"] .checkup-chart-fill');
@@ -1075,29 +1086,81 @@ export async function assertCyclingChart(page, server, context) {
       context + ": period finding summarizes low flow with typical baseline");
     assert.match(causeState.heatRow, /4 < 5 min/, context + ": heating row shows < 5 min count");
 
-    await tap(page, `.checkup-run-row[data-run-row="${h21s + 60}"]`);
-    const expandedRun = await page.evaluate(`(() => {
-      const row = document.querySelector('.checkup-run-row[data-run-row="${h21s + 60}"]');
-      const sub = document.querySelector('[data-run-sub="${h21s + 60}"]');
+    const rowKey1 = `b:${h21s + 60}`, rowKey2 = `b:${h21s + 720}`, liveKey = `b:${h22s + 1200}`;
+    const readRowState = (runKey) => page.evaluate(`(() => {
+      const row = document.querySelector('.checkup-run-row[data-run-row="${runKey}"]');
+      const sub = document.querySelector('[data-run-sub="${runKey}"]');
       return {
         expanded: row?.getAttribute('aria-expanded'),
         hidden: sub?.hidden,
+        focused: !!row && document.activeElement === row,
         nestedTables: sub?.querySelectorAll('table').length,
         text: sub?.querySelector('.checkup-run-explain')?.textContent,
+        duration: row?.cells?.[1]?.textContent,
       };
     })()`);
+
+    await tap(page, `.checkup-run-row[data-run-row="${rowKey1}"]`);
+    const expandedRun = await readRowState(rowKey1);
     assert.equal(expandedRun.expanded, "true", context + ": clicking run row expands inline explanation");
     assert.equal(expandedRun.hidden, false, context + ": subrow becomes visible");
     assert.equal(expandedRun.nestedTables, 0, context + ": no nested table inside explanation");
     assert.match(expandedRun.text, /35\.1 °C > 32\.0 °C, return 33\.6 °C at 8\.2 L\/min \(typ\. ~17\.6 L\/min\)/,
       context + ": explanation preserves start and stop measurements without fabricating hardware faults");
 
-    await evaluate(page, sel => document.querySelector(sel).focus(), `.checkup-run-row[data-run-row="${h21s + 720}"]`);
+    await evaluate(page, sel => document.querySelector(sel).focus(), `.checkup-run-row[data-run-row="${rowKey2}"]`);
     await key(page, "Enter", 13);
-    assert.equal(await page.evaluate(`document.querySelector('[data-run-sub="${h21s + 720}"]')?.hidden`), false,
+    assert.equal((await readRowState(rowKey2)).hidden, false,
       context + ": Enter expands the focused run row");
-    assert.equal(await page.evaluate(`document.querySelector('[data-run-sub="${h21s + 60}"]')?.hidden`), true,
+    assert.equal((await readRowState(rowKey1)).hidden, true,
       context + ": expanding another row collapses the previous one");
+
+    await page.waitFor("!S.clickHold");
+    applyCauseShift(8);
+    await poll(datedIso(200 + causeShift));
+    const afterRoll = await readRowState(rowKey2);
+    assert.equal(afterRoll.expanded, "true", context + ": expanded row stays open across rolling status poll");
+    assert.equal(afterRoll.hidden, false, context + ": inline explanation stays visible across rolling status poll");
+    assert.equal(afterRoll.focused, true, context + ": expanded row keeps focus across rolling status poll");
+    assert.equal((await readRowState(rowKey1)).hidden, true,
+      context + ": closed row remains closed across rolling status poll");
+
+    delete cycling.timeline;
+    delete cycling.run_contexts;
+    status.uptime_s = 86400 + causeShift + 8;
+    await poll(datedIso(200 + causeShift + 8));
+    const duringOmission = await readRowState(rowKey2);
+    assert.equal(duringOmission.expanded, "true", context + ": expanded row stays open during temporary timeline omission");
+    assert.equal(duringOmission.hidden, false, context + ": inline explanation stays visible during temporary timeline omission");
+    assert.equal(duringOmission.focused, true, context + ": expanded row keeps focus during temporary timeline omission");
+
+    applyCauseShift(8);
+    await poll(datedIso(200 + causeShift));
+    const afterResume = await readRowState(rowKey2);
+    assert.equal(afterResume.expanded, "true", context + ": expanded row stays open when live timeline resumes");
+    assert.equal(afterResume.hidden, false, context + ": inline explanation stays visible when live timeline resumes");
+
+    await tap(page, `.checkup-run-row[data-run-row="${liveKey}"]`);
+    await page.waitFor("!S.clickHold");
+    const liveBeforePoll = await readRowState(liveKey);
+    assert.equal(liveBeforePoll.expanded, "true", context + ": ongoing contextual run expands on tap");
+    assert.equal(liveBeforePoll.hidden, false, context + ": ongoing run explanation is visible");
+    applyCauseShift(8);
+    await poll(datedIso(200 + causeShift));
+    const liveAfterPoll = await readRowState(liveKey);
+    assert.equal(liveAfterPoll.expanded, "true", context + ": ongoing run stays open across rolling status poll");
+    assert.equal(liveAfterPoll.hidden, false, context + ": ongoing run explanation stays visible across rolling poll");
+    assert.notEqual(liveAfterPoll.duration, liveBeforePoll.duration,
+      context + ": ongoing run updates duration while remaining expanded");
+
+    await tap(page, `.checkup-run-row[data-run-row="${liveKey}"]`);
+    await page.waitFor("!S.clickHold");
+    assert.equal((await readRowState(liveKey)).expanded, "false", context + ": second tap closes the open run row");
+    assert.equal((await readRowState(liveKey)).hidden, true, context + ": second tap hides the subrow");
+    applyCauseShift(8);
+    await poll(datedIso(200 + causeShift));
+    assert.equal((await readRowState(liveKey)).expanded, "false", context + ": closed row stays closed on subsequent poll");
+    assert.equal((await readRowState(liveKey)).hidden, true, context + ": closed subrow stays hidden on subsequent poll");
 
     await evaluate(page, sel => document.querySelector(sel).focus(), hour(22));
     await key(page, "Escape", 27);
