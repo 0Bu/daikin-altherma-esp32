@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: 8bd085bb45d34154fb53879b4e86f124adde71c6bfef939455211062e759d5f7 -->
+<!-- diagnostic-evidence-contract: d5c39a480774e3f42a576bcb063cd648e26e03f5b386f1a2fff91d3075a45c44 -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -383,10 +383,15 @@ pause on the hot-water route. Its timing does not establish a space-heating star
 **Per-run RAM context (`run_contexts`):** [`cycling_run_context.hpp`](../main/logic/cycling_run_context.hpp)
 retains up to 48 X10A runs in volatile RAM alongside the timed cycling trace using the same
 provisional rules (`22 rps`, `+2 K` leaving-water-minus-target with `30 s` target stability and
-`30 s` post-stop refinement, `15 s` max sample gap), optional `Instrument::ReturnWater` capture,
+`30 s` post-stop refinement, `15 s` max sample gap — bridging `<= 15 s` single-poll unreadable-RPS
+interruptions without sampling the blind cycle while resetting `> 15 s` gaps without fabricating a
+stop, aligned with `stop_context.hpp`), optional `Instrument::ReturnWater` capture,
 settled flow (`>= 30 s` pump warm-up, falling back to full-run average or stop-sample flow on shorter
 runs), settled minimum speed (`>= 30 s` warm-up, falling back to full-run minimum speed), and a median
-typical heating flow (`flow_typical_l_min`) across completed `>= 600 s` space-heating runs in RAM. Stop
+typical heating flow (`flow_typical_l_min`) across completed `>= 600 s` space-heating runs in RAM. A
+transient `defrost == On` startup tail lasting at most `30 s` from run start reclassifies to Space
+Heating or DHW once `defrost == Off` holds continuously for `>= 15 s` in that mode (promoting
+`DefrostStart` to `DhwStart`, `AfterDefrost` after a defrost within `10 min`, or `Unknown`). Stop
 precedence orders defrost > DHW transition > target lowered > low speed above target > request withdrawal >
 normal stop (wire tokens and field units are defined in
 [API.md](API.md#history-and-24-hour-checks)); any target change withdraws `low_rps_above_target` even

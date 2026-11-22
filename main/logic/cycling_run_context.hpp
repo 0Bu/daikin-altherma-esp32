@@ -13,12 +13,14 @@ namespace daik::logic {
 // Per-run diagnostic context retained in RAM alongside CheckupCyclingTrace for X10A runs.
 // Uses the same boot-relative monotonic second frame and provisional observation thresholds as
 // stop_context.hpp without touching persisted flash-journal schemas.
-constexpr size_t   CYCLING_RUN_CONTEXT_CAP       = 48;
-constexpr int64_t  CYCLING_RUN_AFTER_DEFROST_US  = 600000000LL; // 10 min
-constexpr int64_t  CYCLING_RUN_AFTER_DHW_US      = 900000000LL; // 15 min
-constexpr int64_t  CYCLING_RUN_START_EVENT_US    = 30000000LL;  // 30 s pre-start window
-constexpr int64_t  CYCLING_RUN_FLOW_WARMUP_US    = 30000000LL;  // 30 s pump/flow settling
-constexpr int64_t  CYCLING_RUN_POST_REFINE_US    = STOP_CONTEXT_WINDOW_US;
+constexpr size_t   CYCLING_RUN_CONTEXT_CAP         = 48;
+constexpr int64_t  CYCLING_RUN_AFTER_DEFROST_US    = 600000000LL; // 10 min
+constexpr int64_t  CYCLING_RUN_AFTER_DHW_US        = 900000000LL; // 15 min
+constexpr int64_t  CYCLING_RUN_START_EVENT_US      = 30000000LL;  // 30 s pre-start window
+constexpr int64_t  CYCLING_RUN_FLOW_WARMUP_US      = 30000000LL;  // 30 s pump/flow settling
+constexpr int64_t  CYCLING_RUN_POST_REFINE_US      = STOP_CONTEXT_WINDOW_US;
+constexpr int64_t  CYCLING_RUN_DEFROST_TAIL_MAX_US = 30000000LL; // 30 s startup tail cap
+constexpr int64_t  CYCLING_RUN_DEFROST_CLEAR_US = 15000000LL; // 15 s continuous defrost-off confirm
 constexpr uint32_t CYCLING_RUN_TYPICAL_MIN_DUR_S = 600; // >=10 min heating runs for typical flow
 
 enum class CyclingRunMode : uint8_t { Unknown = 0, Space = 1, Dhw = 2, Cooling = 3, Other = 4 };
@@ -189,50 +191,52 @@ struct CheckupRunContextSnapshot {
 };
 
 struct CyclingRunContextTracker {
-    int64_t          last_sample_us    = 0;
-    int64_t          last_rps_us       = 0;
-    int64_t          request_on_us     = 0;
-    int64_t          request_us        = 0;
-    int64_t          target_us         = 0;
-    int64_t          target_stable_us  = 0;
-    int64_t          target_raised_us  = 0;
-    int64_t          last_stop_us      = 0;
-    int64_t          run_start_us      = 0;
-    int64_t          pending_stop_us   = 0;
-    int64_t          run_defrost_us    = 0;
-    int64_t          run_dhw_hand_us   = 0;
-    int64_t          run_tgt_drop_us   = 0;
-    int64_t          run_req_off_us    = 0;
-    int64_t          run_low_rps_us    = 0;
-    uint32_t         source_generation = 0;
-    uint32_t         run_flow_sum      = 0;
-    uint16_t         run_flow_cnt      = 0;
-    uint32_t         all_flow_sum      = 0;
-    uint16_t         all_flow_cnt      = 0;
-    uint16_t         min_rps_settled   = 0;
-    uint16_t         min_rps_any       = 0;
-    int16_t          last_lwt_tenths   = 0;
-    int16_t          last_rwt_tenths   = 0;
-    int16_t          last_tgt_tenths   = 0;
-    int16_t          raised_prev_t     = 0;
-    int16_t          raised_to_t       = 0;
-    int16_t          drop_prev_t       = 0;
-    int16_t          drop_new_t        = 0;
-    int16_t          last_outdoor_t    = 0;
-    uint8_t          last_stop_mode    = 0;
-    uint8_t          last_stop_kind    = 0;
-    StopContextBit   last_request      = StopContextBit::Unknown;
-    StopContextRoute last_route        = StopContextRoute::Unknown;
-    StopContextMode  last_mode         = StopContextMode::Unknown;
-    bool             initialized       = false;
-    bool             have_generation   = false;
-    bool             prev_rps_known    = false;
-    bool             prev_rps_running  = false;
-    bool             last_rps_running  = false;
-    bool             armed_off         = false;
-    bool             run_active        = false;
-    bool             run_defrost_seen  = false;
-    bool             run_saw_space     = false;
+    int64_t          last_sample_us            = 0;
+    int64_t          last_rps_us               = 0;
+    int64_t          request_on_us             = 0;
+    int64_t          request_us                = 0;
+    int64_t          target_us                 = 0;
+    int64_t          target_stable_us          = 0;
+    int64_t          target_raised_us          = 0;
+    int64_t          last_stop_us              = 0;
+    int64_t          run_start_us              = 0;
+    int64_t          pending_stop_us           = 0;
+    int64_t          run_defrost_us            = 0;
+    int64_t          run_defrost_off_us        = 0;
+    int64_t          run_dhw_hand_us           = 0;
+    int64_t          run_tgt_drop_us           = 0;
+    int64_t          run_req_off_us            = 0;
+    int64_t          run_low_rps_us            = 0;
+    uint32_t         source_generation         = 0;
+    uint32_t         run_flow_sum              = 0;
+    uint16_t         run_flow_cnt              = 0;
+    uint32_t         all_flow_sum              = 0;
+    uint16_t         all_flow_cnt              = 0;
+    uint16_t         min_rps_settled           = 0;
+    uint16_t         min_rps_any               = 0;
+    int16_t          last_lwt_tenths           = 0;
+    int16_t          last_rwt_tenths           = 0;
+    int16_t          last_tgt_tenths           = 0;
+    int16_t          raised_prev_t             = 0;
+    int16_t          raised_to_t               = 0;
+    int16_t          drop_prev_t               = 0;
+    int16_t          drop_new_t                = 0;
+    int16_t          last_outdoor_t            = 0;
+    uint8_t          last_stop_mode            = 0;
+    uint8_t          last_stop_kind            = 0;
+    StopContextBit   last_request              = StopContextBit::Unknown;
+    StopContextRoute last_route                = StopContextRoute::Unknown;
+    StopContextMode  last_mode                 = StopContextMode::Unknown;
+    bool             initialized               = false;
+    bool             have_generation           = false;
+    bool             prev_rps_known            = false;
+    bool             prev_rps_running          = false;
+    bool             last_rps_running          = false;
+    bool             armed_off                 = false;
+    bool             run_active                = false;
+    bool             run_defrost_seen          = false;
+    bool             run_started_after_defrost = false;
+    bool             run_saw_space             = false;
 
     void reset(uint32_t generation = 0, bool keep_gen = false) noexcept {
         std::memset(this, 0, sizeof(*this));
@@ -247,30 +251,31 @@ static_assert(std::is_trivially_copyable<CyclingRunContextTracker>::value &&
               "CyclingRunContextTracker must stay POD");
 
 inline void cycling_run_context_init_fields(CyclingRunContextTracker& st) noexcept {
-    st.last_sample_us   = -1;
-    st.last_rps_us      = -1;
-    st.request_on_us    = -1;
-    st.request_us       = -1;
-    st.target_us        = -1;
-    st.target_stable_us = -1;
-    st.target_raised_us = -1;
-    st.last_stop_us     = -1;
-    st.run_start_us     = -1;
-    st.pending_stop_us  = -1;
-    st.run_defrost_us   = -1;
-    st.run_dhw_hand_us  = -1;
-    st.run_tgt_drop_us  = -1;
-    st.run_req_off_us   = -1;
-    st.run_low_rps_us   = -1;
-    st.last_lwt_tenths  = CHECKUP_ABSENT;
-    st.last_rwt_tenths  = CHECKUP_ABSENT;
-    st.last_tgt_tenths  = CHECKUP_ABSENT;
-    st.raised_prev_t    = CHECKUP_ABSENT;
-    st.raised_to_t      = CHECKUP_ABSENT;
-    st.drop_prev_t      = CHECKUP_ABSENT;
-    st.drop_new_t       = CHECKUP_ABSENT;
-    st.last_outdoor_t   = CHECKUP_ABSENT;
-    st.initialized      = true;
+    st.last_sample_us     = -1;
+    st.last_rps_us        = -1;
+    st.request_on_us      = -1;
+    st.request_us         = -1;
+    st.target_us          = -1;
+    st.target_stable_us   = -1;
+    st.target_raised_us   = -1;
+    st.last_stop_us       = -1;
+    st.run_start_us       = -1;
+    st.pending_stop_us    = -1;
+    st.run_defrost_us     = -1;
+    st.run_defrost_off_us = -1;
+    st.run_dhw_hand_us    = -1;
+    st.run_tgt_drop_us    = -1;
+    st.run_req_off_us     = -1;
+    st.run_low_rps_us     = -1;
+    st.last_lwt_tenths    = CHECKUP_ABSENT;
+    st.last_rwt_tenths    = CHECKUP_ABSENT;
+    st.last_tgt_tenths    = CHECKUP_ABSENT;
+    st.raised_prev_t      = CHECKUP_ABSENT;
+    st.raised_to_t        = CHECKUP_ABSENT;
+    st.drop_prev_t        = CHECKUP_ABSENT;
+    st.drop_new_t         = CHECKUP_ABSENT;
+    st.last_outdoor_t     = CHECKUP_ABSENT;
+    st.initialized        = true;
 }
 
 inline void cycling_run_context_reset_and_init(CyclingRunContextTracker& st, uint32_t generation,
@@ -292,23 +297,25 @@ inline CyclingRunMode cycling_run_classify_mode(const StopContextSample& s) noex
 }
 
 inline void cycling_run_clear_active(CyclingRunContextTracker& st) noexcept {
-    st.run_active       = false;
-    st.run_start_us     = -1;
-    st.run_defrost_us   = -1;
-    st.run_dhw_hand_us  = -1;
-    st.run_tgt_drop_us  = -1;
-    st.run_req_off_us   = -1;
-    st.run_low_rps_us   = -1;
-    st.run_flow_sum     = 0;
-    st.run_flow_cnt     = 0;
-    st.all_flow_sum     = 0;
-    st.all_flow_cnt     = 0;
-    st.min_rps_settled  = 0;
-    st.min_rps_any      = 0;
-    st.drop_prev_t      = CHECKUP_ABSENT;
-    st.drop_new_t       = CHECKUP_ABSENT;
-    st.run_defrost_seen = false;
-    st.run_saw_space    = false;
+    st.run_active                = false;
+    st.run_start_us              = -1;
+    st.run_defrost_us            = -1;
+    st.run_defrost_off_us        = -1;
+    st.run_dhw_hand_us           = -1;
+    st.run_tgt_drop_us           = -1;
+    st.run_req_off_us            = -1;
+    st.run_low_rps_us            = -1;
+    st.run_flow_sum              = 0;
+    st.run_flow_cnt              = 0;
+    st.all_flow_sum              = 0;
+    st.all_flow_cnt              = 0;
+    st.min_rps_settled           = 0;
+    st.min_rps_any               = 0;
+    st.drop_prev_t               = CHECKUP_ABSENT;
+    st.drop_new_t                = CHECKUP_ABSENT;
+    st.run_defrost_seen          = false;
+    st.run_started_after_defrost = false;
+    st.run_saw_space             = false;
 }
 
 inline uint8_t cycling_stop_priority(CyclingStopKind k) noexcept {
@@ -371,8 +378,8 @@ inline void cycling_run_context_step(CyclingRunContextTracker& st, CheckupRunCon
     const StopContextSample& b     = s.base;
     const bool               start = !gap && b.rps_known && b.rps_running && st.prev_rps_known &&
                        !st.prev_rps_running && st.armed_off;
-    const bool stop = !gap && st.run_active && b.rps_known && !b.rps_running && st.prev_rps_known &&
-                      st.prev_rps_running;
+    const bool stop = !gap && st.run_active && b.rps_known && !b.rps_running &&
+                      st.last_rps_us >= 0 && st.last_rps_running;
 
     // Update target & request edges before judging `start` so same-poll events register on the run.
     bool req_off_edge = false;
@@ -444,6 +451,7 @@ inline void cycling_run_context_step(CyclingRunContextTracker& st, CheckupRunCon
             stop_context_recent(st.last_stop_us, now_us, CYCLING_RUN_AFTER_DEFROST_US) &&
             (st.last_stop_mode == static_cast<uint8_t>(CyclingRunMode::Other) ||
              st.last_stop_kind == static_cast<uint8_t>(CyclingStopKind::Defrost));
+        st.run_started_after_defrost = after_defrost;
         const bool after_dhw =
             st.last_stop_us >= 0 &&
             stop_context_recent(st.last_stop_us, now_us, CYCLING_RUN_AFTER_DHW_US) &&
@@ -480,8 +488,29 @@ inline void cycling_run_context_step(CyclingRunContextTracker& st, CheckupRunCon
 
     if (st.run_active && b.rps_known && b.rps_running) {
         if (b.defrost == StopContextBit::On) {
-            st.run_defrost_seen = true;
-            st.run_defrost_us   = now_us;
+            st.run_defrost_seen   = true;
+            st.run_defrost_us     = now_us;
+            st.run_defrost_off_us = -1;
+        } else if (st.run_defrost_seen && b.defrost == StopContextBit::Off) {
+            if (st.run_defrost_off_us < 0) st.run_defrost_off_us = now_us;
+            if ((cur_mode == CyclingRunMode::Space || cur_mode == CyclingRunMode::Dhw) &&
+                st.run_defrost_us >= st.run_start_us &&
+                (st.run_defrost_us - st.run_start_us) <= CYCLING_RUN_DEFROST_TAIL_MAX_US &&
+                (now_us - st.run_defrost_off_us) >= CYCLING_RUN_DEFROST_CLEAR_US) {
+                st.run_defrost_seen   = false;
+                st.run_defrost_us     = -1;
+                st.run_defrost_off_us = -1;
+                if (CyclingRunContext* cur = trace.latest_mut()) {
+                    cur->mode = static_cast<uint8_t>(cur_mode);
+                    if (cur->start_kind == static_cast<uint8_t>(CyclingStartKind::DefrostStart)) {
+                        cur->start_kind = static_cast<uint8_t>(
+                            cur_mode == CyclingRunMode::Dhw
+                                ? CyclingStartKind::DhwStart
+                                : (st.run_started_after_defrost ? CyclingStartKind::AfterDefrost
+                                                                : CyclingStartKind::Unknown));
+                    }
+                }
+            }
         }
         if (cur_mode == CyclingRunMode::Space) st.run_saw_space = true;
         if (st.run_saw_space &&
@@ -630,11 +659,6 @@ inline void cycling_run_context_step(CyclingRunContextTracker& st, CheckupRunCon
         } else {
             st.pending_stop_us = -1;
         }
-    }
-
-    if (st.run_active && !b.rps_known) {
-        // An unreadable RPS sample interrupts the trace's continuous run interval.
-        cycling_run_clear_active(st);
     }
 
     if (b.route != StopContextRoute::Unknown) st.last_route = b.route;

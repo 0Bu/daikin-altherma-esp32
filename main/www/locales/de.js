@@ -1,4 +1,4 @@
-// translation-source: 3a5add9912946b8cfda4203d0021a3fc68549843dcdf74fe50ee364b268f985c
+// translation-source: a0b77e6154de7503df1d2d35e17a9324cefe13632b5b9c0d926440af9661d87b
 I18N.de = localeValues([
   /* sys.nodata */ "Keine Daten",
   /* sys.unreachable */ "Nicht erreichbar",
@@ -294,6 +294,8 @@ I18N.de = localeValues([
   /* check.cycling.e_dhw */ (to, vals) => `Stopp ${to}: Wechsel auf Warmwasser${vals}.`,
   /* check.cycling.e_norm */ (to, vals) => `Ende ${to}${vals}.`,
   /* check.cycling.e_ongoing */ "Bei letzter Messung noch aktiv.",
+  /* check.cycling.cause_unavailable */ "Keine Details",
+  /* check.cycling.cause_since_boot */ "Ursachen für Start und Stopp werden erst ab dem letzten Neustart erfasst.",
   /* check.outdoor_one */ (source, mean) => `${source} ${mean} °C`,
   /* check.outdoor_range */ (source, min, mean) => `${source} min. ${min} °C · Mittel ${mean} °C`,
   /* check.min */ (m) => `${m} min`,

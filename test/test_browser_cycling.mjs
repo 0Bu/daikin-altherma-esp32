@@ -1197,6 +1197,61 @@ export async function assertCyclingChart(page, server, context) {
       await page.waitFor("!S.clickHold");
       assert.deepEqual(await pinned(), [20, 21, 22], context + ": Shift+click extends selection contiguously");
     }
+
+    // Non-episode contextual auto-selection and <=15s gap bridging across live polls.
+    status.boot_id = "cycling-contextual-non-episode";
+    status.uptime_s = 3600;
+    const h23Run = 23 * 3600 + 300;
+    const h23Dhw = 23 * 3600 + 600;
+    cycling.space_runs = 0;
+    cycling.dhw_runs = 0;
+    cycling.timeline = {
+      boot_s: 3600, live: true, unix_s: datedBase + 300,
+      window_end_s: 86400, observed_end_s: 86400, run_edges: true,
+      records: [
+        [0, 1], [82800, 1],
+        [h23Run, 5], [h23Run, 2], [h23Run + 120, 1], [h23Run + 120, 6],
+        [h23Dhw, 5], [h23Dhw, 4], [h23Dhw + 60, 0], [h23Dhw + 65, 4],
+      ].map(([at, kind]) => at * 8 + kind),
+    };
+    cycling.run_contexts = [
+      { at: h23Run, mode: "space", start_kind: "after_defrost", stop: h23Run + 120, stop_kind: "normal",
+        start_lwt_c: 32.0, start_target_c: 35.0, lwt_c: 34.5, target_c: 35.0, flow_l_min: 17.5 },
+      { at: h23Dhw, mode: "dhw", start_kind: "dhw_start", start_lwt_c: 38.0 },
+    ];
+    await poll(datedIso(300));
+    assert.deepEqual(await pinned(), [23], context + ": auto-selects latest contextual hour without short-cycling episode");
+    assert.match(await page.evaluate(`(() => {
+      const rows = [...document.querySelectorAll('.checkup-run-row')];
+      return rows.at(-1)?.innerText || '';
+    })()`), /Running/, context + ": <=15s intra-boot gap preserves live DHW run status");
+
+    const rowKey = `b:${h23Run - (86400 - 3600)}`;
+    await tap(page, `.checkup-run-row[data-run-row="${rowKey}"]`);
+    await page.waitFor("!S.clickHold");
+    assert.equal(await page.evaluate(`document.querySelector('[data-run-sub="${rowKey}"]')?.hidden`), false,
+      context + ": non-episode contextual row opens");
+    status.uptime_s = 3610;
+    cycling.timeline = {
+      boot_s: 3610, live: true, unix_s: datedBase + 310,
+      window_end_s: 86400, observed_end_s: 86400, run_edges: true,
+      records: [
+        [0, 1], [82790, 1],
+        [h23Run - 10, 5], [h23Run - 10, 2], [h23Run + 110, 1], [h23Run + 110, 6],
+        [h23Dhw - 10, 5], [h23Dhw - 10, 4], [h23Dhw + 50, 0], [h23Dhw + 55, 4],
+      ].map(([at, kind]) => at * 8 + kind),
+    };
+    cycling.run_contexts = [
+      { at: h23Run - 10, mode: "space", start_kind: "after_defrost", stop: h23Run + 110, stop_kind: "normal",
+        start_lwt_c: 32.0, start_target_c: 35.0, lwt_c: 34.5, target_c: 35.0, flow_l_min: 17.5 },
+      { at: h23Dhw - 10, mode: "dhw", start_kind: "dhw_start", start_lwt_c: 38.0 },
+    ];
+    await poll(datedIso(310));
+    assert.equal(await page.evaluate(`document.querySelector('[data-run-sub="${rowKey}"]')?.hidden`), false,
+      context + ": non-episode expanded explanation stays open across live polls as window offsets shift");
+    assert.equal(await page.evaluate(`document.querySelector('.checkup-run-row[data-run-row="${rowKey}"]')?.getAttribute('aria-expanded')`),
+      "true", context + ": non-episode expanded row keeps aria-expanded across live polls");
+
     delete cycling.run_contexts;
     delete cycling.flow_typical_l_min;
     delete cycling.timeline;

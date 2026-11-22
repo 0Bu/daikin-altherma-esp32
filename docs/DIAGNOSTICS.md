@@ -1,6 +1,6 @@
 # Plant diagnostics in plain language
 
-<!-- user-docs-contract: 2aa732605d5e4e158e4251f34e1172908bfc16326c1868ad0e73110c422c0ab9 -->
+<!-- user-docs-contract: 335265e8c5809c8e5828027b6d062274c223bf76e14409bb8cd828d9a3474053 -->
 
 Plant diagnostics **reads measurements and counts events; it does not control the heat pump**.
 It is off by default (`Off`). Under **Settings → Firmware**, choose **X10A** or **Modbus** for
@@ -156,12 +156,16 @@ unknown for any run that was still open.
 
 Tap an hourly block, Shift-click, or drag across blocks to select an hour or contiguous multi-hour
 period. When per-run X10A context from the current boot is available, the latest short-cycling
-episode auto-selects when opened and the list shows Start, Duration and why the run stopped alongside
+episode (or the latest recorded hour with start/stop details when no episode is present)
+auto-selects when opened and the list shows Start, Duration and why the run stopped alongside
 a one-sentence period summary; tapping a row expands its observed start and stop temperatures, target
-changes and flow rate. When per-run context is unavailable (for example after a restart or on Modbus),
-the list falls back to Start, Stop and Duration.
+changes and flow rate. When per-run context is unavailable (for example before or right after a
+restart or on Modbus), the list falls back to Start, Stop and Duration, and notes on X10A runs from
+before the restart that start and stop details are recorded only from the last restart onward.
 If a recent reading still shows the run in progress, the list gives the elapsed time through
-that reading. If a gap or restart interrupts a run, its stop and total duration are unknown.
+that reading. A brief single-poll interruption within the same boot (up to 15 seconds) keeps the
+run continuous, whereas a longer gap or restart interrupts it and leaves its stop and total duration
+unknown.
 
 The chart can restore saved readings and run times after a restart, including a firmware update.
 The board adds new measurements as polling resumes and shows the downtime as a gap. When the

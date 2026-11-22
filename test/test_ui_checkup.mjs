@@ -143,7 +143,11 @@ vm.runInContext(
      detail: checkupDetailHtml,
      chart: checkupCyclingChartHtml,
      timeline: checkupCyclingTimelineHtml,
-     periodDetails: (trace, checkObj, from, to) => { checkupCyclingTimelineHtml(trace, "test-scope", checkObj); return cyclingPeriodDetailsHtml(_cyclingModels.get("test-scope"), from, to); },
+     periodDetails: (trace, checkObj, from, to, source = "x10a") => {
+       checkupCyclingTimelineHtml(trace, "test-scope", checkObj, source);
+       return cyclingPeriodDetailsHtml(_cyclingModels.get("test-scope"), from, to);
+     },
+     shortRuns: checkupCyclingShortRunCount,
      chartPeriodDetails: (c, from, to) => {
        checkupCyclingChartHtml(c);
        const model = _cyclingModels.values().next().value;
@@ -419,9 +423,40 @@ const evictedRunHtml = ui.periodDetails(
   23,
   23,
 );
-assert.match(evictedRunHtml, /Stop unknown/);
+assert.match(evictedRunHtml, /No cause details/);
 assert.match(evictedRunHtml, /Normal stop/);
 assert.doesNotMatch(evictedRunHtml.split("83600")[0], /Normal stop/);
+
+// Pre-reboot / gap-bridging run details contracts
+{
+  const preBootTrace = {
+    unix_s: 1794582660, window_end_s: 86400, observed_end_s: 86400, boot_s: 2000, live: true, run_edges: true,
+    records: [
+      1 * 8 + 1, 79500 * 8 + 5, 79500 * 8 + 3, 79800 * 8 + 1, 79800 * 8 + 6,
+      80100 * 8 + 5, 80100 * 8 + 3, 80160 * 8 + 0,
+      86000 * 8 + 5, 86000 * 8 + 3, 86010 * 8 + 0, 86015 * 8 + 3, 86120 * 8 + 1, 86120 * 8 + 6,
+      86150 * 8 + 5, 86150 * 8 + 3, 86160 * 8 + 0, 86180 * 8 + 3, 86220 * 8 + 1, 86220 * 8 + 6,
+    ],
+  };
+  const x10aPreBootNoCtx = ui.periodDetails(preBootTrace, {}, 22, 22, "x10a");
+  assert.match(x10aPreBootNoCtx, /Start and stop details are recorded from the last restart onward\./);
+  assert.doesNotMatch(ui.periodDetails(preBootTrace, {}, 22, 22, "modbus"), /last restart onward/);
+  const withCtxPreBoot22 = ui.periodDetails(preBootTrace, {
+    run_contexts: [{ at: 86000, stop: 86120, mode: "space", start_kind: "request_on", stop_kind: "normal" }],
+  }, 22, 22, "x10a");
+  assert.match(withCtxPreBoot22, /Start and stop details are recorded from the last restart onward\./);
+  assert.match(withCtxPreBoot22, /No cause details/);
+  assert.match(withCtxPreBoot22, /Stop unknown/);
+  assert.doesNotMatch(withCtxPreBoot22, /data-run-row/);
+  const withCtxPostBoot23 = ui.periodDetails(preBootTrace, {
+    run_contexts: [{ at: 86000, stop: 86120, mode: "space", start_kind: "request_on", stop_kind: "normal" }],
+  }, 23, 23, "x10a");
+  assert.match(withCtxPostBoot23, /2 min.*Normal stop/);
+  assert.match(withCtxPostBoot23, /Stop unknown/);
+  assert.equal(ui.shortRuns({
+    timeline: preBootTrace,
+  }), 1, "<=15s intra-boot gap bridges short run while >15s gap stays censored");
+}
 
 const makeRollingCheck = (shift) => ({
   hours_epoch: 1,
