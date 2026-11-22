@@ -1968,30 +1968,6 @@ PY4
 expect_red "configured independent room history omitted" run_ui
 restore
 
-# 116. Keying the MODBUS header pill on runtime task enablement hides a saved address in safe mode.
-python3 - "$TMP/main/www/js/schematic.js" <<'PY4'
-import sys
-p = sys.argv[1]
-s = open(p).read()
-old = 'return !!(mb && (mb.host || mb.enabled === true || mb.connected === true));'
-assert s.count(old) == 1, "seed 116 did not apply - modbusSourceConfigured moved"
-open(p, "w").write(s.replace(old, 'return !!(mb && mb.enabled === true);', 1))
-PY4
-expect_red "configured MODBUS header pill hidden when task is inactive" run_ui
-restore
-
-# 117. Drawing the X10A header pill unconditionally shows an unused source on a Modbus-only setup.
-python3 - "$TMP/main/www/js/schematic.js" <<'PY4'
-import sys
-p = sys.argv[1]
-s = open(p).read()
-old = 'return !modbusSourceConfigured(s);'
-assert s.count(old) == 1, "seed 117 did not apply - x10aSourceConfigured moved"
-open(p, "w").write(s.replace(old, 'return true;', 1))
-PY4
-expect_red "unused X10A header pill shown on a pure Modbus setup" run_ui
-restore
-
 if [ "$fail" -ne 0 ]; then
   echo
   echo "The source-absence matrix no longer catches a defect it was built for."
