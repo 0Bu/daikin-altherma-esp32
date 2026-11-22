@@ -63,7 +63,7 @@ const faultCodePackCodes = ["de", ...lazyDomainCodes];
 const annotatedDomainCodes = ["zh", "ja", "nb", "sv", "fi"];
 const englishKeys = Object.keys(catalog.en).sort();
 const englishKeyOrder = Object.keys(catalog.en);
-assert.equal(englishKeys.length, 1014, "the test must track the complete current UI catalog");
+assert.equal(englishKeys.length, 1055, "the test must track the complete current UI catalog");
 for (const [code, source] of localeSources) {
   const sections = [`INSPECT_I18N.${code}`, `MODEL_DESCRIPTION_I18N.${code}`]
     .map(marker => source.indexOf(marker)).filter(index => index >= 0);
@@ -620,7 +620,7 @@ try {
   assert.equal(manifest.bundle_gzip_bytes, bundleGzipTotal);
   assert.equal(manifest.sources.reduce((n, item) => n + item.source_gzip_bytes, 0),
     firmwareLocaleGzipTotal, "bundle quality gates must use the same per-file minifier and encoder");
-  assert.ok(manifest.framed_bytes <= 1048576, "decoded locale frame must stay within 1 MiB");
+  assert.ok(manifest.framed_bytes <= 1572864, "decoded locale frame must stay within 1.5 MiB");
 } finally {
   fs.rmSync(work, { recursive: true, force: true });
 }

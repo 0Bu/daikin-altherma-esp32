@@ -53,6 +53,7 @@
 #include "logic/heating_curve_mqtt.hpp"
 #include "logic/error_codes.hpp"
 #include "logic/checkup.hpp"
+#include "logic/cycling_run_context.hpp"
 #include "logic/defrost_start.hpp"
 #include "logic/hydronic_hourly.hpp"
 #include "logic/hydronic_input.hpp"
@@ -33581,6 +33582,469 @@ static void test_hourly_wire_and_population() {
 }
 } // namespace hydronic_host_tests
 
+void test_cycling_run_context() {
+    using namespace daik::logic;
+    // Enum helper coverage
+    CHECK(std::strcmp(cycling_run_mode_name(CyclingRunMode::Space), "space") == 0);
+    CHECK(std::strcmp(cycling_run_mode_name(CyclingRunMode::Dhw), "dhw") == 0);
+    CHECK(std::strcmp(cycling_run_mode_name(CyclingRunMode::Cooling), "cooling") == 0);
+    CHECK(std::strcmp(cycling_run_mode_name(CyclingRunMode::Other), "other") == 0);
+    CHECK(std::strcmp(cycling_run_mode_name(CyclingRunMode::Unknown), "unknown") == 0);
+
+    CHECK(std::strcmp(cycling_start_kind_name(CyclingStartKind::CooldownRestart),
+                      "cooldown_restart") == 0);
+    CHECK(std::strcmp(cycling_start_kind_name(CyclingStartKind::RequestOn), "request_on") == 0);
+    CHECK(std::strcmp(cycling_start_kind_name(CyclingStartKind::TargetRaised), "target_raised") ==
+          0);
+    CHECK(std::strcmp(cycling_start_kind_name(CyclingStartKind::AfterDefrost), "after_defrost") ==
+          0);
+    CHECK(std::strcmp(cycling_start_kind_name(CyclingStartKind::AfterDhw), "after_dhw") == 0);
+    CHECK(std::strcmp(cycling_start_kind_name(CyclingStartKind::DefrostStart), "defrost_start") ==
+          0);
+    CHECK(std::strcmp(cycling_start_kind_name(CyclingStartKind::DhwStart), "dhw_start") == 0);
+    CHECK(std::strcmp(cycling_start_kind_name(CyclingStartKind::Unknown), "unknown") == 0);
+
+    CHECK(std::strcmp(cycling_stop_kind_name(CyclingStopKind::LowRpsAboveTarget),
+                      "low_rps_above_target") == 0);
+    CHECK(std::strcmp(cycling_stop_kind_name(CyclingStopKind::RequestWithdrawal),
+                      "request_withdrawal") == 0);
+    CHECK(std::strcmp(cycling_stop_kind_name(CyclingStopKind::TargetChanged), "target_changed") ==
+          0);
+    CHECK(std::strcmp(cycling_stop_kind_name(CyclingStopKind::Defrost), "defrost") == 0);
+    CHECK(std::strcmp(cycling_stop_kind_name(CyclingStopKind::DhwTransition), "dhw_transition") ==
+          0);
+    CHECK(std::strcmp(cycling_stop_kind_name(CyclingStopKind::Normal), "normal") == 0);
+    CHECK(std::strcmp(cycling_stop_kind_name(CyclingStopKind::Unknown), "unknown") == 0);
+
+    CHECK(!cycling_run_tenths_valid(CHECKUP_ABSENT));
+    CHECK(cycling_run_tenths_valid(INT16_MAX));
+    CHECK(cycling_run_tenths_valid(-50));
+
+    auto mk = [](bool rps_known, bool rps_run, uint16_t rps, StopContextMode mode,
+                 StopContextRoute route, int16_t lwt, int16_t rwt, int16_t tgt, int16_t flow,
+                 StopContextBit req = StopContextBit::On,
+                 StopContextBit dfr = StopContextBit::Off) {
+        CyclingRunSample s;
+        s.base.rps_known       = rps_known;
+        s.base.rps_running     = rps_run;
+        s.base.rps_value_known = rps_known;
+        s.base.rps_tenths      = rps;
+        s.base.mode            = mode;
+        s.base.route           = route;
+        s.base.lwt_known       = lwt != CHECKUP_ABSENT;
+        s.base.lwt_tenths      = lwt;
+        s.base.target_known    = tgt != CHECKUP_ABSENT;
+        s.base.target_tenths   = tgt;
+        s.base.request         = req;
+        s.base.defrost         = dfr;
+        s.rwt_ok               = rwt != CHECKUP_ABSENT;
+        s.rwt_tenths           = rwt;
+        s.flow_ok              = flow >= 0;
+        s.flow_tenths          = flow >= 0 ? flow : 0;
+        s.outdoor_ok           = true;
+        s.outdoor_tenths       = 110;
+        return s;
+    };
+
+    // Classify mode branches
+    CHECK(cycling_run_classify_mode(mk(true, true, 200, StopContextMode::Cooling,
+                                       StopContextRoute::Space, 200, 220, 180, 150)
+                                        .base) == CyclingRunMode::Cooling);
+    CHECK(cycling_run_classify_mode(mk(true, true, 200, StopContextMode::Other,
+                                       StopContextRoute::Space, 200, 220, 180, 150)
+                                        .base) == CyclingRunMode::Other);
+    CHECK(cycling_run_classify_mode(mk(true, true, 200, StopContextMode::Unknown,
+                                       StopContextRoute::Unknown, 200, 220, 180, 150)
+                                        .base) == CyclingRunMode::Unknown);
+
+    CyclingRunContextTracker st_uninit;
+    cycling_run_context_expire(st_uninit, 1000000);
+    CHECK(!st_uninit.initialized);
+
+    CyclingRunContextTracker st;
+    CheckupRunContextTrace   tr;
+    const uint32_t           gen = 7;
+
+    // 1) CooldownRestart + LowRpsAboveTarget + settled flow + post-stop refine must NOT overwrite
+    // LowRpsAboveTarget with steady-Off or On->Off request withdrawal.
+    auto step = [&](int64_t sec, const CyclingRunSample& s, uint32_t g = 7) {
+        cycling_run_context_step(st, tr, s, sec * 1000000LL, g);
+    };
+    step(10,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 290, 270, 320, 0));
+    step(15,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 285, 268, 320, 0));
+    step(20, mk(true, true, 250, StopContextMode::Heating, StopContextRoute::Space, 285, 268, 320,
+                160));
+    step(35,
+         mk(true, true, 240, StopContextMode::Heating, StopContextRoute::Space, 315, 285, 320, 82));
+    step(45,
+         mk(true, true, 200, StopContextMode::Heating, StopContextRoute::Space, 330, 305, 320, 82));
+    step(55,
+         mk(true, true, 180, StopContextMode::Heating, StopContextRoute::Space, 342, 325, 320, 82));
+    step(65,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 351, 336, 320, 82));
+    step(70, mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 348, 335, 320, 0,
+                StopContextBit::Off)); // On->Off in post-stop must not override LowRpsAboveTarget
+    step(75, mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 345, 334, 320, 0,
+                StopContextBit::Off)); // steady Off ignored
+    CHECK(tr.count == 1);
+    {
+        const auto& r = tr.at(0);
+        CHECK(r.start_s == 20 && r.stop_s == 65);
+        CHECK(r.start_kind == static_cast<uint8_t>(CyclingStartKind::CooldownRestart));
+        CHECK(r.stop_kind == static_cast<uint8_t>(CyclingStopKind::LowRpsAboveTarget));
+        CHECK((r.flags & RUN_CTX_F_STOPPED) != 0);
+        CHECK((r.flags & RUN_CTX_F_LOW_RPS_ABOVE_TGT) != 0);
+        CHECK(r.flow_tenths == 82 && r.min_rps_tenths == 180);
+        CHECK(r.start_lwt_tenths == 285 && r.stop_lwt_tenths == 351 && r.stop_rwt_tenths == 336);
+    }
+
+    // 2) RequestOn -> stop Normal -> post-stop RequestWithdrawal refinement
+    step(105, mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 290, 270, 320,
+                 0, StopContextBit::Off));
+    step(110, mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 290, 270, 320,
+                 0, StopContextBit::On));
+    step(115, mk(true, true, 260, StopContextMode::Heating, StopContextRoute::Space, 295, 272, 320,
+                 140));
+    step(130,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 318, 295, 320, 140));
+    step(135, mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 315, 294, 320,
+                 0, StopContextBit::Off));
+    CHECK(tr.count == 2);
+    CHECK(tr.at(1).start_kind == static_cast<uint8_t>(CyclingStartKind::RequestOn));
+    CHECK(tr.at(1).stop_kind == static_cast<uint8_t>(CyclingStopKind::RequestWithdrawal));
+    CHECK(tr.at(1).flow_tenths == 140);
+
+    // 3) TargetRaised -> LowRpsAboveTarget withdrawn by post-stop TargetChanged
+    cycling_run_context_expire(st, 175 * 1000000LL);
+    CHECK(!st.initialized);
+    step(180,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 330, 300, 310, 0));
+    step(185,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 330, 300, 340, 0));
+    step(190, mk(true, true, 200, StopContextMode::Heating, StopContextRoute::Space, 330, 300, 340,
+                 170));
+    step(205, mk(true, true, 195, StopContextMode::Heating, StopContextRoute::Space, 345, 318, 340,
+                 170));
+    step(220, mk(true, true, 190, StopContextMode::Heating, StopContextRoute::Space, 355, 330, 340,
+                 170));
+    step(230, mk(true, true, 180, StopContextMode::Heating, StopContextRoute::Space, 365, 340, 340,
+                 170));
+    step(240,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 368, 342, 340, 170));
+    CHECK(tr.at(2).stop_kind == static_cast<uint8_t>(CyclingStopKind::LowRpsAboveTarget));
+    step(245,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 365, 341, 300, 0));
+    CHECK(tr.at(2).start_kind == static_cast<uint8_t>(CyclingStartKind::TargetRaised));
+    CHECK(tr.at(2).start_tgt_prev_tenths == 310 && tr.at(2).start_tgt_tenths == 340);
+    CHECK(tr.at(2).stop_kind == static_cast<uint8_t>(CyclingStopKind::TargetChanged));
+    CHECK(tr.at(2).stop_tgt_prev_tenths == 340 && tr.at(2).stop_tgt_tenths == 300);
+    CHECK((tr.at(2).flags & RUN_CTX_F_LOW_RPS_ABOVE_TGT) == 0);
+
+    // 4) DefrostStart -> Defrost stop -> AfterDefrost start; then DhwTransition handover + DhwStart
+    // -> AfterDhw
+    step(275,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 310, 290, 330, 0));
+    step(280, mk(true, true, 240, StopContextMode::Heating, StopContextRoute::Space, 300, 280, 330,
+                 160, StopContextBit::On, StopContextBit::On));
+    step(290, mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 250, 240, 330,
+                 160, StopContextBit::On, StopContextBit::Off));
+    CHECK(tr.at(3).start_kind == static_cast<uint8_t>(CyclingStartKind::DefrostStart));
+    CHECK(tr.at(3).mode == static_cast<uint8_t>(CyclingRunMode::Other));
+    CHECK(tr.at(3).stop_kind == static_cast<uint8_t>(CyclingStopKind::Defrost));
+
+    step(300, mk(true, true, 260, StopContextMode::Heating, StopContextRoute::Space, 270, 250, 330,
+                 180));
+    step(310,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 330, 300, 330, 180));
+    step(315, mk(true, false, 0, StopContextMode::Dhw, StopContextRoute::Dhw, 330, 300, 480, 0));
+    CHECK(tr.at(4).start_kind == static_cast<uint8_t>(CyclingStartKind::AfterDefrost));
+    CHECK(tr.at(4).stop_kind == static_cast<uint8_t>(CyclingStopKind::DhwTransition));
+
+    step(325,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 320, 295, 330, 0));
+    step(330, mk(true, true, 300, StopContextMode::Dhw, StopContextRoute::Dhw, 420, 390, 500, 150));
+    step(340, mk(true, false, 0, StopContextMode::Dhw, StopContextRoute::Dhw, 490, 460, 500, 150));
+    CHECK(tr.at(5).start_kind == static_cast<uint8_t>(CyclingStartKind::DhwStart));
+    CHECK(tr.at(5).mode == static_cast<uint8_t>(CyclingRunMode::Dhw));
+    CHECK(tr.at(5).stop_kind == static_cast<uint8_t>(CyclingStopKind::Normal));
+
+    step(350, mk(true, true, 220, StopContextMode::Heating, StopContextRoute::Space, 310, 290, 330,
+                 175));
+    step(990,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 335, 310, 330, 175));
+    // Note gap > 15s re-baselines cleanly without closing the active run; let's add two continuous
+    // >=600s runs
+    CHECK(tr.count == 7);
+    CHECK(tr.at(6).start_kind == static_cast<uint8_t>(CyclingStartKind::AfterDhw));
+    CHECK((tr.at(6).flags & RUN_CTX_F_STOPPED) == 0); // aborted at gap!
+
+    // Unreadable RPS mid-run clears active without fabricating stop, plus negative/overflow clock
+    // guards
+    step(1000,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 300, 280, 330, 0));
+    step(1005, mk(true, true, 210, StopContextMode::Heating, StopContextRoute::Space, 305, 282, 330,
+                  160));
+    step(1010, mk(false, false, 0, StopContextMode::Heating, StopContextRoute::Space, 310, 285, 330,
+                  160));
+    CHECK(!st.run_active);
+    step(995,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 310, 285, 330, 0));
+    CHECK(st.last_sample_us == -1);
+    step(static_cast<int64_t>(CheckupCyclingTrace::max_second) + 10,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 310, 285, 330, 0));
+    CHECK(st.last_sample_us == -1);
+
+    // Expire across gap & clock inversion preserves completed trace entries
+    step(1100,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 300, 280, 330, 0));
+    cycling_run_context_expire(st, -1);
+    CHECK(!st.initialized);
+    step(1105,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 300, 280, 330, 0));
+    cycling_run_context_expire(st, 1130 * 1000000LL);
+    CHECK(!st.initialized);
+
+    // Fresh trace for snapshot median flow (even & odd count) + wrap > 48 entries + boot_s clamping
+    step(2000,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 300, 280, 330, 0),
+         gen + 1);
+    CHECK(tr.count == 0);
+    int64_t t              = 2010;
+    auto    push_space_run = [&](int dur_s, int16_t flow) {
+        step(
+            t,
+            mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 290, 270, 330, 0),
+            gen + 1);
+        t += 5;
+        step(t,
+                mk(true, true, 220, StopContextMode::Heating, StopContextRoute::Space, 295, 275, 330,
+                   flow),
+                gen + 1);
+        for (int elapsed = 10; elapsed < dur_s; elapsed += 10) {
+            t += 10;
+            step(t,
+                    mk(true, true, 220, StopContextMode::Heating, StopContextRoute::Space, 310, 285,
+                       330, flow),
+                    gen + 1);
+        }
+        t += 5;
+        step(t,
+                mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 330, 305, 330,
+                   flow),
+                gen + 1);
+        t += 10;
+    };
+    push_space_run(620, 180);
+    push_space_run(620, 160);
+    CheckupRunContextSnapshot snap;
+    cycling_run_context_snapshot(snap, tr, static_cast<uint32_t>(t));
+    CHECK(snap.count == 2 && snap.flow_typical_tenths == 170);
+
+    push_space_run(620, 200);
+    cycling_run_context_snapshot(snap, tr, static_cast<uint32_t>(t));
+    CHECK(snap.count == 3 && snap.flow_typical_tenths == 180);
+
+    // Future-stop run with boot_s in middle strips stopped flag safely
+    const uint32_t open_boot = static_cast<uint32_t>(tr.at(2).start_s + 10);
+    cycling_run_context_snapshot(snap, tr, open_boot);
+    CHECK(snap.count == 3 && (snap.entries[2].flags & RUN_CTX_F_STOPPED) == 0);
+
+    // Snapshot edge cases: missing flow on >=600s space run, non-space >=600s DHW run,
+    // open/unstopped run, and future-start run excluded against boot_s.
+    {
+        CheckupRunContextTrace snap_tr;
+        CyclingRunContext      r1 = cycling_run_context_empty();
+        r1.start_s                = 100;
+        r1.stop_s                 = 800;
+        r1.mode                   = static_cast<uint8_t>(CyclingRunMode::Space);
+        r1.flags                  = RUN_CTX_F_STOPPED;
+        snap_tr.push(r1);
+
+        CyclingRunContext r2 = cycling_run_context_empty();
+        r2.start_s           = 900;
+        r2.stop_s            = 1600;
+        r2.mode              = static_cast<uint8_t>(CyclingRunMode::Dhw);
+        r2.flow_tenths       = 150;
+        r2.flags             = RUN_CTX_F_STOPPED;
+        snap_tr.push(r2);
+
+        CyclingRunContext r3 = cycling_run_context_empty();
+        r3.start_s           = 1700;
+        r3.mode              = static_cast<uint8_t>(CyclingRunMode::Space);
+        snap_tr.push(r3);
+
+        CyclingRunContext r4 = cycling_run_context_empty();
+        r4.start_s           = 2000;
+        r4.mode              = static_cast<uint8_t>(CyclingRunMode::Space);
+        snap_tr.push(r4);
+
+        cycling_run_context_snapshot(snap, snap_tr, 1800);
+        CHECK(snap.count == 3 && snap.flow_typical_tenths == CHECKUP_ABSENT);
+        CHECK((snap.entries[2].flags & RUN_CTX_F_STOPPED) == 0);
+    }
+
+    // Additional state branches: late LWT/target backfill <=5s, Unknown->DhwStart <=15s, flow on
+    // stop sample, in-run target drop / request withdrawal / defrost transition, post-stop defrost
+    // upgrade, and target_known=false clearing target_stable_us.
+    step(t,
+         mk(true, false, 0, StopContextMode::Unknown, StopContextRoute::Unknown, CHECKUP_ABSENT,
+            CHECKUP_ABSENT, CHECKUP_ABSENT, -1),
+         gen + 2);
+    t += 5;
+    step(t,
+         mk(true, true, 240, StopContextMode::Unknown, StopContextRoute::Unknown, CHECKUP_ABSENT,
+            CHECKUP_ABSENT, CHECKUP_ABSENT, -1),
+         gen + 2);
+    t += 4;
+    step(t, mk(true, true, 240, StopContextMode::Dhw, StopContextRoute::Dhw, 410, 380, 500, -1),
+         gen + 2);
+    t += 4;
+    step(t,
+         mk(true, false, 0, StopContextMode::Dhw, StopContextRoute::Dhw, 420, 390, CHECKUP_ABSENT,
+            145),
+         gen + 2);
+    CHECK(tr.count == 1 && tr.at(0).start_lwt_tenths == 410 && tr.at(0).start_tgt_tenths == 500 &&
+          tr.at(0).start_kind == static_cast<uint8_t>(CyclingStartKind::DhwStart) &&
+          tr.at(0).flow_tenths == 145 && st.target_stable_us == -1);
+    t += 5;
+    step(t,
+         mk(true, false, 0, StopContextMode::Dhw, StopContextRoute::Dhw, 415, 385, 500, 0,
+            StopContextBit::On, StopContextBit::On),
+         gen + 2);
+    CHECK(tr.at(0).stop_kind == static_cast<uint8_t>(CyclingStopKind::Defrost));
+    t += 35; // expire pending_stop_us via step (> 30s while keeping <= 15s steps)
+    step(t - 20,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 300, 280, 340, 0,
+            StopContextBit::On, StopContextBit::Off),
+         gen + 2);
+    step(t - 5,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 300, 280, 340, 0),
+         gen + 2);
+    step(t, mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 300, 280, 340, 0),
+         gen + 2);
+    CHECK(st.pending_stop_us == -1);
+
+    // Unknown mode start -> Unknown->DefrostStart <=15s
+    t += 5;
+    step(t,
+         mk(true, false, 0, StopContextMode::Unknown, StopContextRoute::Unknown, CHECKUP_ABSENT,
+            CHECKUP_ABSENT, CHECKUP_ABSENT, 0, StopContextBit::Off),
+         gen + 2);
+    t += 5;
+    step(t,
+         mk(true, true, 200, StopContextMode::Unknown, StopContextRoute::Unknown, CHECKUP_ABSENT,
+            CHECKUP_ABSENT, CHECKUP_ABSENT, 160, StopContextBit::Off),
+         gen + 2);
+    t += 5;
+    step(t,
+         mk(true, true, 200, StopContextMode::Heating, StopContextRoute::Space, 300, 280, 330, 160,
+            StopContextBit::On, StopContextBit::On),
+         gen + 2);
+    t += 5;
+    step(t,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 270, 260, 330, 160,
+            StopContextBit::On, StopContextBit::On),
+         gen + 2);
+    CHECK(tr.at(1).start_kind == static_cast<uint8_t>(CyclingStartKind::DefrostStart) &&
+          tr.at(1).stop_kind == static_cast<uint8_t>(CyclingStopKind::Defrost));
+
+    // In-run target drop stop, in-run request withdrawal stop, Unknown->Unknown stop, expire
+    // timeout
+    t += 10;
+    step(t, mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 300, 280, 340, 0),
+         gen + 2);
+    t += 5;
+    step(t,
+         mk(true, true, 220, StopContextMode::Heating, StopContextRoute::Space, 305, 285, 340, 170),
+         gen + 2);
+    t += 5;
+    step(t,
+         mk(true, true, 200, StopContextMode::Heating, StopContextRoute::Space, 320, 295, 310, 170),
+         gen + 2);
+    t += 5;
+    step(t,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 325, 300, 310, 170),
+         gen + 2);
+    CHECK(tr.at(2).stop_kind == static_cast<uint8_t>(CyclingStopKind::TargetChanged));
+
+    t += 5;
+    step(t,
+         mk(true, true, 220, StopContextMode::Heating, StopContextRoute::Space, 305, 285, 340, 170),
+         gen + 2);
+    t += 5;
+    step(t,
+         mk(true, true, 200, StopContextMode::Heating, StopContextRoute::Space, 315, 290, 340, 170,
+            StopContextBit::Off),
+         gen + 2);
+    t += 5;
+    step(t,
+         mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 315, 290, 340, 170,
+            StopContextBit::Off),
+         gen + 2);
+    CHECK(tr.at(3).stop_kind == static_cast<uint8_t>(CyclingStopKind::RequestWithdrawal));
+
+    // In-run space->DHW transition before stop
+    t += 5;
+    step(t, mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 305, 285, 340, 0),
+         gen + 2);
+    t += 5;
+    step(t,
+         mk(true, true, 220, StopContextMode::Heating, StopContextRoute::Space, 310, 290, 340, 170),
+         gen + 2);
+    t += 5;
+    step(t, mk(true, true, 260, StopContextMode::Dhw, StopContextRoute::Dhw, 420, 390, 500, 150),
+         gen + 2);
+    t += 5;
+    step(t, mk(true, false, 0, StopContextMode::Dhw, StopContextRoute::Dhw, 480, 450, 500, 150),
+         gen + 2);
+    CHECK(tr.at(4).stop_kind == static_cast<uint8_t>(CyclingStopKind::DhwTransition));
+
+    t += 5;
+    step(t, mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 320, 300, 340, 0),
+         gen + 2);
+    t += 12;
+    step(t, mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 320, 300, 340, 0),
+         gen + 2);
+    cycling_run_context_expire(st, (t + 14) * 1000000LL);
+    CHECK(st.pending_stop_us == -1);
+
+    // Expire clears after last_rps_us timeout and clears pending_stop_us at >= 30s
+    t += 10;
+    step(t, mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 310, 290, 340, 0),
+         gen + 2);
+    t += 5;
+    step(t,
+         mk(false, false, 0, StopContextMode::Heating, StopContextRoute::Space, 310, 290, 340, 0),
+         gen + 2);
+    cycling_run_context_expire(st, (t + 20) * 1000000LL);
+    CHECK(!st.initialized);
+
+    // >48 runs wrap cleanly
+    t += 30;
+    for (int k = 0; k < 50; ++k) push_space_run(40, 150);
+    CHECK(tr.count == CYCLING_RUN_CONTEXT_CAP);
+    cycling_run_context_snapshot(snap, tr, static_cast<uint32_t>(t));
+    CHECK(snap.count == CYCLING_RUN_CONTEXT_CAP);
+
+    // Pause resets active tracker/pending window while preserving generation and retained runs.
+    const uint16_t count_before_pause = tr.count;
+    const uint32_t last_start_before  = tr.at(tr.count - 1).start_s;
+    st.pause();
+    CHECK(!st.initialized && st.have_generation && st.source_generation == gen + 1);
+    CHECK(tr.count == count_before_pause);
+    t += 5;
+    step(t, mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 300, 280, 340, 0),
+         gen + 1);
+    CHECK(st.initialized && tr.count == count_before_pause &&
+          tr.at(tr.count - 1).start_s == last_start_before);
+    t += 5;
+    step(t, mk(true, false, 0, StopContextMode::Heating, StopContextRoute::Space, 300, 280, 340, 0),
+         gen + 2);
+    CHECK(tr.count == 0);
+}
+
 int main() {
     hydronic_host_tests::test_hourly_wire_and_population();
     hydronic_host_tests::test_population_and_boundaries();
@@ -33588,6 +34052,7 @@ int main() {
     hydronic_host_tests::test_barriers_and_saturation();
     hydronic_host_tests::test_clock_epoch_after_interruptions();
     hydronic_host_tests::test_inputs();
+    test_cycling_run_context();
     test_stop_context();
     test_stop_context_inputs();
     test_stop_context_output();

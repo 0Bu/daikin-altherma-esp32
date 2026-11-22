@@ -78,8 +78,10 @@ inline int                              flow_min_tenths = -1;
 inline daik::logic::DefrostStartReport  defrost_start{};
 inline daik::HeatingCurveBinsReport     curve_bins;
 inline bool                             curve_bins_available = false;
-inline daik::logic::CheckupCyclingHours cycling_hours{};
-inline daik::logic::CheckupCyclingTrace cycling_trace{};
+inline daik::logic::CheckupCyclingHours       cycling_hours{};
+inline daik::logic::CheckupCyclingTrace       cycling_trace{};
+inline daik::logic::CheckupRunContextSnapshot cycling_run_contexts{};
+inline bool                                   cycling_run_contexts_present = false;
 inline daik::CheckupFaultStatus         fault_status{};
 inline daik::logic::CheckupFaultTrace   fault_trace{};
 inline bool                             fault_trace_present = false;
@@ -131,9 +133,12 @@ void reset() {
     flow_min_tenths            = -1;
     defrost_start              = {};
     curve_bins                 = {};
-    curve_bins_available       = false;
-    cycling_hours             = {};
-    fault_status               = {};
+    curve_bins_available         = false;
+    cycling_hours                = {};
+    cycling_trace                = {};
+    cycling_run_contexts         = {};
+    cycling_run_contexts_present = false;
+    fault_status                 = {};
     fault_trace.reset();
     fault_trace_present        = false;
     checkup_persist           = daik::logic::CheckupRestore::NoRecord;
@@ -566,6 +571,20 @@ bool checkup_fault_timeline_snapshot(logic::CheckupFaultTrace& out, DiagnosticsS
 CheckupStopContextReport checkup_stop_context_report() {
     ++fixture::stop_report_calls;
     return fixture::stop_report;
+}
+bool checkup_has_cycling_run_contexts(DiagnosticsSource source) {
+    return source == DiagnosticsSource::X10a && fixture::current.diagnostics_enabled &&
+           fixture::cycling_run_contexts_present && fixture::cycling_run_contexts.count > 0;
+}
+bool checkup_cycling_run_contexts(daik::logic::CheckupRunContextSnapshot& out, uint32_t,
+                                  DiagnosticsSource                       source) {
+    if (source != DiagnosticsSource::X10a || !fixture::current.diagnostics_enabled ||
+        !fixture::cycling_run_contexts_present) {
+        out.reset();
+        return false;
+    }
+    out = fixture::cycling_run_contexts;
+    return out.count > 0;
 }
 size_t diag_dump(char* out, size_t cap) {
     const size_t n = std::min(cap, fixture::log.size());
@@ -1476,6 +1495,69 @@ int main(int argc, char** argv) {
         successful(req);
         check(req.response.find("\"latest\":{\"code\":\"7H-01\"") != std::string::npos,
               "fault trace OOM fallback lost latest summary");
+    });
+    run("status_cycling_run_contexts", [] {
+        current.diagnostics_enabled = true;
+        current.diagnostics_source  = daik::DiagnosticsSource::X10a;
+        checkup_x10a_has_data       = true;
+        cycling_trace.reset();
+        cycling_trace.unix_s       = 1795000000u;
+        cycling_trace.window_end_s = daik::logic::CHECKUP_WINDOW_S;
+        cycling_trace.end_s        = 86390;
+        cycling_trace.boot_s       = 500;
+        cycling_trace.live         = true;
+        cycling_trace.push(86000, daik::logic::CheckupCyclingTrace::Heat);
+        cycling_run_contexts.reset();
+        cycling_run_contexts.flow_typical_tenths = 176;
+        auto& e                                  = cycling_run_contexts.entries[0];
+        e                                        = daik::logic::cycling_run_context_empty();
+        e.start_s                                = 86000;
+        e.stop_s                                 = 86168;
+        e.start_lwt_tenths                       = 284;
+        e.start_tgt_tenths                       = 320;
+        e.stop_lwt_tenths                        = 351;
+        e.stop_rwt_tenths                        = 336;
+        e.stop_tgt_tenths                        = 320;
+        e.flow_tenths                            = 82;
+        e.outdoor_tenths                         = 64;
+        e.min_rps_tenths                         = 180;
+        e.mode       = static_cast<uint8_t>(daik::logic::CyclingRunMode::Space);
+        e.start_kind = static_cast<uint8_t>(daik::logic::CyclingStartKind::CooldownRestart);
+        e.stop_kind  = static_cast<uint8_t>(daik::logic::CyclingStopKind::LowRpsAboveTarget);
+        e.flags      = daik::logic::RUN_CTX_F_STOPPED | daik::logic::RUN_CTX_F_LOW_RPS_ABOVE_TGT;
+        cycling_run_contexts.count   = 1;
+        cycling_run_contexts_present = true;
+
+        auto req = request();
+        check(invoke(req, "/status", daik::h_status) == ESP_OK, "run_contexts unredacted failed");
+        successful(req);
+        emit(req, "status-cycling-run-contexts");
+        check(req.response.find("\"flow_typical_l_min\":17.6,\"run_contexts\":[{\"at\":86000,"
+                                "\"mode\":\"space\",\"start_kind\":\"cooldown_restart\","
+                                "\"stop\":86168,\"stop_kind\":\"low_rps_above_target\","
+                                "\"start_lwt_c\":28.4,\"start_target_c\":32.0,\"lwt_c\":35.1,"
+                                "\"rwt_c\":33.6,\"target_c\":32.0,\"flow_l_min\":8.2,"
+                                "\"outdoor_c\":6.4,\"min_rps\":18.0,"
+                                "\"low_rps_above_target\":true}]") != std::string::npos,
+              "status payload missing or malformed cycling run_contexts");
+
+        req = request();
+        check(invoke(req, "/status?redact=1", daik::h_status) == ESP_OK,
+              "run_contexts redacted failed");
+        successful(req);
+        check(req.response.find("\"run_contexts\"") == std::string::npos &&
+                  req.response.find("\"flow_typical_l_min\"") == std::string::npos,
+              "redacted /status leaked cycling run_contexts");
+
+        current.mb_host            = "192.0.2.50";
+        current.diagnostics_source = daik::DiagnosticsSource::Modbus;
+        checkup_modbus_has_data    = true;
+        req                        = request();
+        check(invoke(req, "/status", daik::h_status) == ESP_OK, "modbus run_contexts failed");
+        successful(req);
+        check(req.response.find("\"run_contexts\"") == std::string::npos &&
+                  req.response.find("\"flow_typical_l_min\"") == std::string::npos,
+              "modbus /status leaked X10A cycling run_contexts");
     });
     check(count > 0, "unknown oracle");
     std::printf("PASS total=%u\n", count);

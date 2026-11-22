@@ -650,32 +650,40 @@ on one line and put the full observation in the disclosure. Inspector headings w
 and value labels keep their defined share. Split Settings actions own their padding and cannot
 overlap when stacked. Measure every shipped locale at 320 px.
 
-The rolling cycling disclosure uses a step for each directly observed start and one row of
-hourly blocks showing start counts and observed modes. Both the timed chart and hourly fallback
-use highly transparent full-plot-height category fills, with counts below. The timed chart keeps
+The rolling cycling disclosure omits the separate `Normal:` footer and can append a `< 5 min` count
+to completed heating runs when timed short runs are present. Its timeline uses a step for each directly
+observed start and one row of hourly blocks showing start counts and observed modes. Both the timed
+chart and hourly fallback use `.34`-opacity full-plot-height vertical fills stacked bottom-to-top
+proportionally across active and unassigned/gap duration in the hour, with counts below. The timed chart keeps
 its opaque step line in front. Heating is orange, DHW blue. Unassigned runtime and missing readings
 share one gray Unknown category. Readable off-time contributes no color, so a fully observed
-off-only hour has no fill. Mixed categories use static, soft overlapping gradients in canonical
-order, without duration-scaled or chronological segments. Gaps still break the step line. Each
+off-only hour has no fill. The timed chart orders mixed categories chronologically using bottom-to-top linear stops (`linear-gradient(to top, ...)`), while the hourly fallback lacks intra-hour timestamps and stacks heating, DHW, then unknown proportionally in canonical order (omitting missing/unknown time on restored or legacy slots whose elapsed duration is unavailable unless observed time is zero). Gaps still break the step line. Each
 timed hour button's accessible name distinguishes missing readings from unassigned runtime.
 Each block is selectable through the full plot height. The caption sits above the selection
-highlight. The selected hour replaces time labels with its range and lists the runs that started
-in it when the trace carries individual run times. During a drag, preview the highlight and range
-while keeping the run list tied to the selection. Restore the selected highlight and range on
-release. If a readable diagnosis snapshot omits the trace, retain the chart while the diagnosis
+highlight. Shift-clicking or dragging across any timed chart selects a contiguous multi-hour range.
+On timed charts with `run_contexts`, the latest contiguous episode of short heating runs
+auto-selects on open unless overridden, and selection replaces time labels with the selected span
+and renders a flat period summary plus a quiet 3-column table (`Start`, `Duration`, `Why it stopped`)
+with borderless tap-to-expand start and stop telemetry prose (marking stopped runs without retained RAM
+context as unknown stop). Charts without `run_contexts` omit the period summary and fall back to
+`Start`, `Stop`, `Duration`. During a timed-chart drag, the highlight and range follow the pointer and
+commit the dragged range on release (hourly fallback previews the hovered hour readout on drag while preserving
+the pinned hour on release).
+If a readable diagnosis snapshot omits the trace, retain the chart while the diagnosis
 source, boot ID, `history.epoch` and `cycling.hours_epoch` all match. Mark the time after the
 last sample as missing until a new trace arrives. An unreadable snapshot shows **No data**.
 A status transport failure can leave the graph visible from the last update. Mark an open run's
 stop and duration unknown while its live evidence is stale. See the
 [status contract](API.md#history-and-24-hour-checks).
-Below each rolling block, show the number of retained timed starts. Leave it blank if there is
+Below each rolling block, show the number of retained timed starts (amber `.warn` on hours with
+at least two timed short heating runs `< 10 min`). Leave it blank if there is
 missing trace time and no timed start. Use the lower-bound prefix
 for positive totals and accessible readouts. Update the chart in its own slot and defer it while
 its card is hidden.
 
 When neither a fresh nor a usable cached trace exists, use the available hourly totals for the
 entire chart. Show **No history yet** if those totals are absent too. Leave leading padding and
-expired slots empty. The fill shows category presence in the retained slot. A just-opened hour
+expired slots empty. A just-opened hour
 with zero elapsed time has no fill. Restored and legacy slots keep unknown elapsed duration in
 their readouts. Label restored timestamps as saved time. The default readout uses one hourly
 snapshot and omits runtime without readable compressor seconds.

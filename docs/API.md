@@ -270,7 +270,7 @@ evidence is a measurement, not a good/bad assessment. The reading order and main
 |---|---|
 | `fault` | `active`, optional `latest`, optional `timeline` |
 | `dhw_loss` | `max_k_h`, `windows`, `high_windows`, `quiet_high_windows`, `draw_windows`, `pump_windows`, `high_with_pump`, `high_pump_off`, `circulation_on_s`, `circulation_known_s`, `candidate_s`, `settle_remaining_s`, `aborts`, `abort_reasons`, `best_aborted_s`, `blocked` |
-| `cycling` | `starts`, `mean_run_s`, `space_runs`, `space_mean_run_s`, `dhw_runs`, `dhw_mean_run_s`, `cooling_runs`, `censored_runs`, `censored_transition_runs`, `censored_handover_runs`, `censored_unreadable_runs`, `censored_restart_runs`, `censored_start_runs`, `classified_runtime_s`, `censored_runtime_s`, `runtime_saturated`, `split`, `hours`, `outdoor_source`, `outdoor_min_c`, `outdoor_mean_c`, `outdoor_samples` |
+| `cycling` | `starts`, `mean_run_s`, `space_runs`, `space_mean_run_s`, `dhw_runs`, `dhw_mean_run_s`, `cooling_runs`, `censored_runs`, `censored_transition_runs`, `censored_handover_runs`, `censored_unreadable_runs`, `censored_restart_runs`, `censored_start_runs`, `classified_runtime_s`, `censored_runtime_s`, `runtime_saturated`, `split`, `hours`, `outdoor_source`, `outdoor_min_c`, `outdoor_mean_c`, `outdoor_samples`, optional `timeline`, optional `run_contexts`, optional `flow_typical_l_min`, `stop_context` |
 | `defrost` | `count`, `share_pct`, `paired_count`, `defrost_s`, `run_s`, `outdoor_source`, `outdoor_min_c`, `outdoor_mean_c`, `outdoor_samples`, `last_observed_start` |
 | `pressure` | `min_bar`, `current_bar`, `min_unix_s`, `confirmed_low`, `confirmed_critical` |
 | `flow` | `min_l_min`, independent `hydronic` observation |
@@ -365,6 +365,24 @@ records within the 24-hour window if it fills. The opening state is unknown unti
 retained interval boundary unless the trace establishes a state at the left edge. The chart counts
 individual starts at or after its cutoff. The diagnosis total expires whole hourly slots and can
 include inferred and restored counts. The two totals can differ in either direction.
+
+When X10A diagnostics are active and the snapshot carries an unredacted `timeline`, `/status` may
+also include optional RAM-only per-run start/stop telemetry in `cycling.run_contexts` (up to 48
+entries on the `timeline` boot-aligned window `s` coordinate frame) and `cycling.flow_typical_l_min`
+(median settled flow rate in `L/min` across completed `>= 600 s` space-heating runs in RAM, emitted
+when `> 0`). Each `run_contexts[]` entry carries `at` (`s`), `mode` (`space`, `dhw`, `cooling`,
+`other`, `unknown`) and `start_kind` (`cooldown_restart`, `request_on`, `target_raised`,
+`after_defrost`, `after_dhw`, `defrost_start`, `dhw_start`, `unknown`), plus optional `stop` (`s`) and
+`stop_kind` (`low_rps_above_target`, `request_withdrawal`, `target_changed`, `defrost`,
+`dhw_transition`, `normal`, `unknown`) once stopped, optional endpoint/pre-start temperatures in `°C`
+(`start_lwt_c`, `start_target_c`, `start_target_prev_c`, `lwt_c`, `rwt_c`, `target_c`, `target_prev_c`,
+`outdoor_c`), settled average run flow in `L/min` (`flow_l_min`, `>= 0`, `>= 30 s` warm-up with
+full-run or stop-sample fallback on shorter runs), settled minimum compressor speed in `rps`
+(`min_rps`, `> 0`, `>= 30 s` warm-up with full-run fallback), and `low_rps_above_target:true` when
+active. `stop_kind: "target_changed"` records only target drops, whereas any target change withdraws
+the in-run `low_rps_above_target` flag. `run_contexts` and `flow_typical_l_min` are omitted when
+empty, on Modbus, in redacted reports, during active Weather TLS admission, on allocation failure, or
+after reset/forget; neither field alters completed-run verdicts or persisted journal schemas.
 
 `cycling.stop_context` is an independent observation object; it changes no legacy cycling field or
 verdict. `denominator` names `witnessed_stops_recent_heating`, the separately counted witnessed

@@ -192,13 +192,17 @@ CheckupSlot& slot_for(DiagnosticsSource source) {
     return source == DiagnosticsSource::Modbus ? s_modbus : s_x10a;
 }
 
-logic::StopContextState     s_stop_context;
-logic::StopContextInputPlan s_stop_inputs;
+logic::StopContextState            s_stop_context;
+logic::StopContextInputPlan        s_stop_inputs;
 logic::DefrostStartTracker         s_defrost_start;
+logic::CyclingRunContextTracker    s_run_ctx_tracker;
+logic::CheckupRunContextTrace      s_run_ctx_trace;
+logic::CheckupLocator              s_rwt_locator{};
 bool                               s_defrost_air_supported = false;
-uint32_t                    s_stop_generation    = 0;
-bool                        s_stop_allow_restore = true;
-int64_t                     s_stop_read_fence_us = -1;
+bool                               s_rwt_supported         = false;
+uint32_t                           s_stop_generation       = 0;
+bool                               s_stop_allow_restore    = true;
+int64_t                            s_stop_read_fence_us    = -1;
 constexpr logic::StopContextState  kEmptyStopContext{};
 constexpr CheckupStopContextReport kEmptyStopReport{};
 
@@ -468,6 +472,11 @@ void checkup_persist_seal(CheckupSlot& slot) {
     p.crc                    = checkup_persist_crc(slot);
 }
 
+void reset_run_ctx_locked() {
+    s_run_ctx_tracker.reset();
+    s_run_ctx_trace.reset();
+}
+
 // `keep_handoff` spares the one-shot DHW checkpoint. Startup consumes it once and holds a
 // compatible filter until current-source confirmation; every other wipe clears its record.
 void persist_wipe(CheckupSlot& slot, bool keep_handoff = false) {
@@ -475,7 +484,10 @@ void persist_wipe(CheckupSlot& slot, bool keep_handoff = false) {
     slot.P().dhw.reset();
     slot.cycling_trace.reset();
     slot.cycling_restored.reset();
-    if (!slot.is_modbus) s_defrost_start = {};
+    if (!slot.is_modbus) {
+        s_defrost_start = {};
+        reset_run_ctx_locked();
+    }
     slot.cycling_restore_anchor = 0;
     slot.fault_trace.reset();
     slot.fault_restored.reset();
@@ -875,7 +887,10 @@ void slot_set_diagnostics(CheckupSlot& slot, bool enabled, bool generation_chang
     const uint32_t run_start = slot.state.run_start_bucket;
     if (logic::checkup_pause_state(slot.state, slot.P().ring.pending, &slot.P().ring))
         logic::checkup_journal_revision_arm(slot.revision, run_open, run_start);
-    if (!slot.is_modbus) s_defrost_start.pause();
+    if (!slot.is_modbus) {
+        s_defrost_start.pause();
+        s_run_ctx_tracker.pause();
+    }
     if (!enabled)
         slot.fault_trace.record(esp_timer_get_time(),
                                 logic::FaultSampleDetail{logic::FaultTraceKind::Gap});
@@ -890,6 +905,38 @@ void slot_set_diagnostics(CheckupSlot& slot, bool enabled, bool generation_chang
     checkup_persist_seal(slot);
 }
 
+[[gnu::noinline]] void
+record_cycling_run_context_locked(const logic::StopContextSample& stop_sample, const CachedValue* v,
+                                  size_t n, const logic::CheckupSample& s, int outdoor_tenths,
+                                  bool fresh_outdoor, int64_t now, uint32_t source_generation) {
+    if (s_x10a.cycling_forgotten.load(std::memory_order_acquire)) {
+        reset_run_ctx_locked();
+        return;
+    }
+    int        rwt_t   = 0;
+    const int  rwt_row = s_rwt_supported ? find_row(v, n, s_rwt_locator) : -1;
+    const bool rwt_ok  = rwt_row >= 0 && !v[static_cast<size_t>(rwt_row)].held &&
+                        !v[static_cast<size_t>(rwt_row)].held_unknown &&
+                        tenths(v[static_cast<size_t>(rwt_row)], rwt_t) &&
+                        logic::cycling_run_tenths_valid(rwt_t);
+    const int  flow_row = find_row(v, n, logic::CHECKUP_LOC_FLOW);
+    const bool flow_ok  = s.flow_ok && flow_row >= 0 && !v[static_cast<size_t>(flow_row)].held &&
+                         !v[static_cast<size_t>(flow_row)].held_unknown &&
+                         logic::cycling_run_tenths_valid(s.flow_tenths);
+    const bool out_ok =
+        fresh_outdoor && s.outdoor.available && logic::cycling_run_tenths_valid(outdoor_tenths);
+    logic::CyclingRunSample run_sample;
+    run_sample.base           = stop_sample;
+    run_sample.rwt_ok         = rwt_ok;
+    run_sample.rwt_tenths     = rwt_ok ? static_cast<int16_t>(rwt_t) : 0;
+    run_sample.flow_ok        = flow_ok;
+    run_sample.flow_tenths    = flow_ok ? static_cast<int16_t>(s.flow_tenths) : 0;
+    run_sample.outdoor_ok     = out_ok;
+    run_sample.outdoor_tenths = out_ok ? static_cast<int16_t>(outdoor_tenths) : 0;
+    logic::cycling_run_context_step(s_run_ctx_tracker, s_run_ctx_trace, run_sample, now,
+                                    source_generation);
+}
+
 } // namespace
 
 // Judge what the previous boot left in .noinit. Called from app_main BEFORE any producer task
@@ -900,10 +947,13 @@ void checkup_start(bool diagnostics_enabled, uint32_t diagnostics_generation) {
         s_mtx = xSemaphoreCreateMutex();
         if (!s_mtx) diag_printf("checkup: mutex alloc failed — observation disabled this boot\n");
     }
-    s_stop_context       = {};
-    s_stop_inputs        = {};
+    s_stop_context          = {};
+    s_stop_inputs           = {};
     s_defrost_start         = {};
+    reset_run_ctx_locked();
+    s_rwt_locator           = {};
     s_defrost_air_supported = false;
+    s_rwt_supported         = false;
     s_stop_generation    = 0;
     s_stop_allow_restore = true;
     s_stop_read_fence_us = -1;
@@ -989,7 +1039,10 @@ void checkup_reset() {
     s_hydronic_allow_restore = false;
     hydronic_observation_reset();
     s_defrost_start         = {};
+    reset_run_ctx_locked();
+    s_rwt_locator           = {};
     s_defrost_air_supported = false;
+    s_rwt_supported         = false;
     // Consuming the reset on an unidentified cycle must not let the journal re-admit the old link.
     s_x10a.source_confirmed = false;
     s_x10a.source_fp        = 0;
@@ -1039,11 +1092,19 @@ __attribute__((noinline)) void reset_hydronic_on_detect_locked(const char* profi
                               s_hydronic_allow_restore);
 }
 
+[[gnu::noinline]] static logic::CheckupLocator resolve_rwt_locator(const logic::ProfileView& view) {
+    const auto rwt = logic::instrument_resolve(view, logic::Instrument::ReturnWater);
+    if (rwt.state != logic::InstrumentState::Supported) return {0, 0, -1};
+    const auto row = logic::adjudicated(view, static_cast<size_t>(rwt.row));
+    return {row.reg, row.offset, row.conv};
+}
+
 void checkup_reset_on_detect(const char* profile_id, uint32_t source_fp) {
-    const auto     view        = def::lookup_view(profile_id);
-    const uint32_t fp          = logic::checkup_model_fingerprint(profile_id, view);
-    const auto     stop_inputs = logic::stop_context_input_plan(profile_id, view);
-    const bool     defrost_air = defrost_air_supported(view);
+    const auto                  view        = def::lookup_view(profile_id);
+    const uint32_t              fp          = logic::checkup_model_fingerprint(profile_id, view);
+    const auto                  stop_inputs = logic::stop_context_input_plan(profile_id, view);
+    const bool                  defrost_air = defrost_air_supported(view);
+    const logic::CheckupLocator rwt_loc     = resolve_rwt_locator(view);
     if (!s_mtx) return;
     Lock lk(s_mtx);
     if (!lk.acquired()) return;
@@ -1054,7 +1115,10 @@ void checkup_reset_on_detect(const char* profile_id, uint32_t source_fp) {
     s_stop_context          = kEmptyStopContext;
     s_stop_inputs           = stop_inputs;
     s_defrost_start         = {};
+    reset_run_ctx_locked();
+    s_rwt_locator           = rwt_loc;
     s_defrost_air_supported = defrost_air;
+    s_rwt_supported         = rwt_loc.conv >= 0;
     s_stop_generation       = hp_poll_generation();
     reset_hydronic_on_detect_locked(profile_id, source_fp, fp, first);
     if (!first) {
@@ -1305,6 +1369,8 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
                                     ? outdoor_tenths
                                     : logic::CHECKUP_ABSENT;
         s_defrost_start.observe(stop_sample, defrost_air, now, s.unix_s, source_generation);
+        record_cycling_run_context_locked(stop_sample, v, n, s, outdoor_tenths, fresh_outdoor, now,
+                                          source_generation);
         if (now >= s_stop_read_fence_us) {
             // The stop reader may retire that observer while a poll waits for the mutex. The
             // defrost tracker still needs this sample, including an unreadable defrost witness.
@@ -1482,6 +1548,7 @@ void checkup_stop_context_expire(int64_t) {
     // A history tick may have waited behind a newer poll. Read time after admission so a stale
     // caller timestamp cannot masquerade as a regressed monotonic clock.
     const int64_t now_us = esp_timer_get_time();
+    logic::cycling_run_context_expire(s_run_ctx_tracker, now_us);
     const auto    event  = logic::stop_context_expire(s_stop_context, now_us);
     if (event.valid) {
         stop_observation_record(now_us, false, event);
@@ -2003,6 +2070,36 @@ void checkup_cycling_forget() {
     s_x10a.cycling_forgotten.store(true, std::memory_order_release);
     s_modbus.cycling_forgotten.store(true, std::memory_order_release);
     checkup_fault_forget();
+}
+
+bool checkup_has_cycling_run_contexts(DiagnosticsSource source) {
+    if (source != DiagnosticsSource::X10a || !s_mtx ||
+        !s_diagnostics_enabled.load(std::memory_order_acquire))
+        return false;
+    Lock lk(s_mtx);
+    return lk.acquired() && s_diagnostics_enabled.load(std::memory_order_acquire) &&
+           !s_x10a.reset_requested.load() && s_x10a.source_confirmed &&
+           !s_x10a.cycling_forgotten.load(std::memory_order_acquire) && s_run_ctx_trace.count > 0;
+}
+
+bool checkup_cycling_run_contexts(logic::CheckupRunContextSnapshot& out, uint32_t boot_s,
+                                  DiagnosticsSource source) {
+    out.reset();
+    if (source != DiagnosticsSource::X10a || !s_mtx ||
+        !s_diagnostics_enabled.load(std::memory_order_acquire))
+        return false;
+    Lock lk(s_mtx);
+    if (!lk.acquired() || !s_diagnostics_enabled.load(std::memory_order_acquire) ||
+        s_x10a.reset_requested.load() || !s_x10a.source_confirmed)
+        return false;
+    if (s_x10a.cycling_forgotten.load(std::memory_order_acquire)) {
+        reset_run_ctx_locked();
+        return false;
+    }
+    logic::cycling_run_context_expire(s_run_ctx_tracker, esp_timer_get_time());
+    if (!s_run_ctx_trace.count) return false;
+    logic::cycling_run_context_snapshot(out, s_run_ctx_trace, boot_s);
+    return out.count > 0;
 }
 
 CheckupFaultStatus checkup_fault_latest_status(DiagnosticsSource source, bool source_fresh) {

@@ -3340,6 +3340,46 @@
     "fault_handoff_decode": {
       "pattern": "^daik::logic::checkup_fault_handoff_decode\\(daik::logic::CheckupFaultTrace&, daik::logic::FaultHandoffPayload const&\\)$",
       "max_bytes": 64
+    },
+    "cycling_run_status_json": {
+      "pattern": "^(?:(?:void )?daik::append_cycling_run_contexts_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\((?![^\\n]*\\{lambda)[^\\n]*\\)|_ZN4daikL32append_cycling_run_contexts_jsonINS_16BoundedChunkSinkINS_16HttpChunkEmitterELj1024EEEEEvRT_mNS_17DiagnosticsSourceE(?:\\$(?:constprop|isra|part)\\$[0-9]+)?)$",
+      "max_bytes": 128
+    },
+    "cycling_run_status_opt": {
+      "pattern": "^daik::append_cycling_run_contexts_json<daik::BoundedChunkSink<daik::HttpChunkEmitter, 1024u> >\\([^\\n]*\\)::\\{lambda\\(char const\\*, short\\)[#]1\\}::operator\\(\\)\\(char const\\*, short\\) const$",
+      "max_bytes": 64
+    },
+    "cycling_run_has_contexts": {
+      "pattern": "^daik::checkup_has_cycling_run_contexts\\(daik::DiagnosticsSource\\)$",
+      "max_bytes": 96
+    },
+    "cycling_run_contexts_fetch": {
+      "pattern": "^daik::checkup_cycling_run_contexts\\(daik::logic::CheckupRunContextSnapshot&, unsigned long, daik::DiagnosticsSource\\)$",
+      "max_bytes": 128
+    },
+    "cycling_run_expire": {
+      "pattern": "^daik::logic::cycling_run_context_expire\\(daik::logic::CyclingRunContextTracker&, long long\\)$",
+      "max_bytes": 96
+    },
+    "cycling_run_snapshot": {
+      "pattern": "^daik::logic::cycling_run_context_snapshot\\(daik::logic::CheckupRunContextSnapshot&, daik::logic::CheckupRunContextTrace const&, unsigned long\\)$",
+      "max_bytes": 256
+    },
+    "cycling_run_checkup_record": {
+      "pattern": "^daik::checkup_record\\(daik::CachedValue const\\*, unsigned int, bool, bool, daik::logic::CheckupCoverage const&, unsigned long, unsigned long, bool, long long\\)$",
+      "max_bytes": 512
+    },
+    "cycling_run_record_locked": {
+      "pattern": "^daik::\\(anonymous namespace\\)::record_cycling_run_context_locked\\(daik::logic::StopContextSample const&, daik::CachedValue const\\*, unsigned int, daik::logic::CheckupSample const&, int, bool, long long, unsigned long\\)$",
+      "max_bytes": 160
+    },
+    "cycling_run_step": {
+      "pattern": "^daik::logic::cycling_run_context_step\\(daik::logic::CyclingRunContextTracker&, daik::logic::CheckupRunContextTrace&, daik::logic::CyclingRunSample const&, long long, unsigned long\\)$",
+      "max_bytes": 192
+    },
+    "cycling_run_rwt_locator": {
+      "pattern": "^daik::resolve_rwt_locator\\(daik::logic::ProfileView const&\\)$",
+      "max_bytes": 128
     }
   },
   "paths": {
@@ -17680,6 +17720,147 @@
       "multipliers": {},
       "base_bytes": 1536,
       "max_bytes": 3072
+    },
+    "httpd_mcp_cycling_run_contexts": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "cycling_run_status_json",
+        "cycling_run_contexts_fetch",
+        "cycling_run_snapshot"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_direct_cycling_run_contexts": {
+      "symbols": [
+        "http_send_status_json",
+        "status_serializer",
+        "cycling_run_status_json",
+        "cycling_run_contexts_fetch",
+        "cycling_run_snapshot"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_cycling_run_emit": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "cycling_run_status_json",
+        "cycling_run_status_opt",
+        "status_tenths_value",
+        "status_unsigned_number"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_cycling_run_expire": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "cycling_run_status_json",
+        "cycling_run_contexts_fetch",
+        "cycling_run_expire"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_cycling_run_has": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "cycling_run_status_json",
+        "cycling_run_has_contexts"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "poll_cycling_run_record": {
+      "symbols": [
+        "poll_task",
+        "cycling_run_checkup_record",
+        "cycling_run_record_locked",
+        "cycling_run_step"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_cycling_run_detect": {
+      "symbols": [
+        "poll_task",
+        "checkup_detect_schema",
+        "cycling_run_rwt_locator",
+        "stop_instrument_",
+        "stop_profileview_const__",
+        "checkup_schema_adjudicated_view"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "httpd_cycling_run_detect": {
+      "symbols": [
+        "config_hp",
+        "config_document",
+        "checkup_detect_schema",
+        "cycling_run_rwt_locator",
+        "stop_instrument_",
+        "stop_profileview_const__",
+        "checkup_schema_adjudicated_view"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "httpd_mcp_cycling_run_quoted": {
+      "symbols": [
+        "mcp_post",
+        "http_send_status_json",
+        "status_serializer",
+        "cycling_run_status_json",
+        "status_quoted_string",
+        "status_escaped_string",
+        "status_utf8_sequence_length",
+        "status_unsigned_number"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 8192
+    },
+    "poll_cycling_run_expire": {
+      "symbols": [
+        "poll_task",
+        "history_board",
+        "history_flash_restore",
+        "stop_checkup_stop_context_expire",
+        "cycling_run_expire"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
+    },
+    "poll_cycling_run_gap": {
+      "symbols": [
+        "poll_task",
+        "stop_checkup_record_poll_gap",
+        "cycling_run_checkup_record",
+        "cycling_run_record_locked",
+        "cycling_run_step"
+      ],
+      "multipliers": {},
+      "base_bytes": 1536,
+      "max_bytes": 7168
     }
   },
   "tasks": {
@@ -18101,7 +18282,14 @@
         "httpd_shutdown_env3_fault_validate",
         "httpd_shutdown_env3_fault_shape",
         "httpd_shutdown_env3_fault_decode",
-        "httpd_shutdown_env3_fault_adopt"
+        "httpd_shutdown_env3_fault_adopt",
+        "httpd_mcp_cycling_run_contexts",
+        "httpd_direct_cycling_run_contexts",
+        "httpd_mcp_cycling_run_emit",
+        "httpd_mcp_cycling_run_expire",
+        "httpd_mcp_cycling_run_has",
+        "httpd_cycling_run_detect",
+        "httpd_mcp_cycling_run_quoted"
       ]
     },
     "main": {
@@ -18347,7 +18535,11 @@
         "poll_shutdown_fault_validate",
         "poll_shutdown_fault_shape",
         "poll_shutdown_fault_decode",
-        "poll_shutdown_fault_adopt"
+        "poll_shutdown_fault_adopt",
+        "poll_cycling_run_record",
+        "poll_cycling_run_detect",
+        "poll_cycling_run_expire",
+        "poll_cycling_run_gap"
       ]
     },
     "modbus": {

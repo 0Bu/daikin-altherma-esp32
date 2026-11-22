@@ -1633,7 +1633,7 @@ async function assertPlantDiagnosis(page, context) {
     assert.deepEqual(cycling.order.slice(0, 2),
       ["vdesc-p checkup-cycling-total", "vdesc-p checkup-cycling-assessment"],
       `${context}: cycling starts with the value, then the current assessment`);
-    assert.equal(cycling.normal, normalLabel, `${context}: cycling shares the Normal block`);
+    assert.equal(cycling.normal, undefined, `${context}: cycling omits redundant Normal block`);
     assert.equal(cycling.oldStopBox, false, `${context}: cycling detail omits the technical stop table`);
     await captureNativeEvidence(page, `${context}/cycling-with-starts`,
       "[data-desc='model:health_cycling']", ".vitem");
