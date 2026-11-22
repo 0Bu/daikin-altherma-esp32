@@ -1457,6 +1457,31 @@ function modbusFlowUnverified(view) {
 
 // Draw each registered source on its own raster. Null samples break the line instead of inventing
 // a measurement across a timeout or a reading the source refused.
+function histRuns(pts, n, X, Y, cls, r, splitZones = false) {
+  let line = "", area = "", dots = "", run = [];
+  const flush = () => {
+    if (!run.length) return;
+    if (run.length === 1) {
+      const z = splitZones ? pressureZoneClass(pts[run[0]]) : "";
+      dots += `<circle class="vhist-pt${cls}${z}" cx="${X(run[0]).toFixed(1)}" cy="${Y(pts[run[0]]).toFixed(1)}" r="${r}"/>`;
+    } else if (splitZones) {
+      for (const seg of pressureSplitRun(run, pts, X, Y)) {
+        const d = seg.pts.map(([px, py], k) => `${k ? "L" : "M"}${px.toFixed(1)} ${py.toFixed(1)}`).join("");
+        line += `<path class="vhist-line${cls}${seg.zone}" d="${d}" vector-effect="non-scaling-stroke"/>`;
+        area += `<path class="vhist-area${cls}${seg.zone}" d="${d}L${seg.pts.at(-1)[0].toFixed(1)} ${HIST_H}L${seg.pts[0][0].toFixed(1)} ${HIST_H}Z"/>`;
+      }
+    } else {
+      const d = run.map((i, k) => `${k ? "L" : "M"}${X(i).toFixed(1)} ${Y(pts[i]).toFixed(1)}`).join("");
+      line += `<path class="vhist-line${cls}" d="${d}" vector-effect="non-scaling-stroke"/>`;
+      area += `<path class="vhist-area${cls}" d="${d}L${X(run.at(-1)).toFixed(1)} ${HIST_H}L${X(run[0]).toFixed(1)} ${HIST_H}Z"/>`;
+    }
+    run = [];
+  };
+  for (let i = 0; i < n; i++) if (pts[i] == null) flush(); else run.push(i);
+  flush();
+  return [line, area, dots];
+}
+
 function histHtml(id, unit, name, source = "", identifySource = false) {
   const offeredX = (!source || source === "x10a") && hasHist(id);
   const offeredM = (!source || source === "modbus") && hasModbusHist(id);
@@ -1492,31 +1517,8 @@ function histHtml(id, unit, name, source = "", identifySource = false) {
   let line = "", area = "", dots = "";
   for (const s of histVisibleSeries(view)) {
     const pts = s.v.map((x) => x == null ? null : x / 10);
-    const sourceCls = histSourceClass(s.source);
-    const splitZones = isPressure && s.source === "x10a";
-    let run = [];
-    const flush = () => {
-      if (!run.length) return;
-      if (run.length === 1) {
-        const zoneCls = splitZones ? pressureZoneClass(pts[run[0]]) : "";
-        dots += `<circle class="vhist-pt${sourceCls}${zoneCls}" cx="${X(run[0]).toFixed(1)}" cy="${Y(pts[run[0]]).toFixed(1)}" r="1.6"/>`;
-      } else if (splitZones) {
-        for (const seg of pressureSplitRun(run, pts, X, Y)) {
-          const d = seg.pts.map(([px, py], k) => `${k ? "L" : "M"}${px.toFixed(1)} ${py.toFixed(1)}`).join("");
-          line += `<path class="vhist-line${sourceCls}${seg.zone}" d="${d}" vector-effect="non-scaling-stroke"/>`;
-          area += `<path class="vhist-area${sourceCls}${seg.zone}" d="${d}L${seg.pts[seg.pts.length - 1][0].toFixed(1)} ${HIST_H}L${seg.pts[0][0].toFixed(1)} ${HIST_H}Z"/>`;
-        }
-      } else {
-        const d = run.map((i, k) => `${k ? "L" : "M"}${X(i).toFixed(1)} ${Y(pts[i]).toFixed(1)}`).join("");
-        line += `<path class="vhist-line${sourceCls}" d="${d}" vector-effect="non-scaling-stroke"/>`;
-        area += `<path class="vhist-area${sourceCls}" d="${d}L${X(run[run.length - 1]).toFixed(1)} ${HIST_H}L${X(run[0]).toFixed(1)} ${HIST_H}Z"/>`;
-      }
-      run = [];
-    };
-    for (let i = 0; i < n; i++) {
-      if (pts[i] == null) flush(); else run.push(i);
-    }
-    flush();
+    const [l, a, d] = histRuns(pts, n, X, Y, histSourceClass(s.source), 1.6, isPressure && s.source === "x10a");
+    line += l; area += a; dots += d;
   }
   // The "now" marker is an HTML element, not an SVG circle: the SVG is stretched non-uniformly, so
   // a circle in it would render as an ellipse. Percentage positioning maps onto the same 0..HIST_H
@@ -1684,25 +1686,8 @@ function env3HistHtml(view = historyView(ENV3_COMBINED_ID)) {
     const Y = scaleY(s);
     const X = sampleX;
     const cls = env3SeriesClass(s.source);
-    let run = [];
-    const flush = () => {
-      if (!run.length) return;
-      if (run.length === 1) {
-        dots += `<circle class="vhist-pt ${cls}" cx="${X(run[0]).toFixed(1)}" ` +
-          `cy="${Y(pts[run[0]]).toFixed(1)}" r="1.8"/>`;
-      } else {
-        const d = run.map((i, k) => `${k ? "L" : "M"}${X(i).toFixed(1)} ${Y(pts[i]).toFixed(1)}`).join("");
-        const first = run[0], last = run.at(-1);
-        areas += `<path class="vhist-area ${cls}" d="${d}L${X(last).toFixed(1)} ${HIST_H}` +
-          `L${X(first).toFixed(1)} ${HIST_H}Z"/>`;
-        lines += `<path class="vhist-line ${cls}" d="${d}" vector-effect="non-scaling-stroke"/>`;
-      }
-      run = [];
-    };
-    for (let i = 0; i < n; i++) {
-      if (pts[i] == null) flush(); else run.push(i);
-    }
-    flush();
+    const [l, a, d] = histRuns(pts, n, X, Y, " " + cls, 1.8);
+    lines += l; areas += a; dots += d;
     if (histRetained(s.raw)) {
       const last = lastSample(s.v);
       nowDots += histRetainedMarker(s, X(last) / HIST_W, " " + cls, (Y(pts[last]) / HIST_H) * 100);
@@ -2783,8 +2768,8 @@ const MODEL_DESCRIPTIONS = {
     what: "24-hour water-pressure curve in the sealed hydronic circuit (X10A, 5-minute minimums).",
     normal: "Chart guide: >1.0 bar normal, ≤1.0 bar low, ≤0.5 bar critical (diagnosis flags ≥60 continuous seconds). Permitted filling and operating pressure depends on the exact unit manual and system height; the reading alone does not identify leaks, air or vessel faults." },
   health_flow: {
-    what: "Lowest flow after 60 continuously observed seconds of internal pump operation.",
-    normal: "No universal normal value. Not nominal flow or proof of part load. Manual limits need the same model, mode and conditions; the value alone cannot establish insufficient flow." },
+    what: "Lowest flow after 60 seconds of continuous internal pump operation. Separate water spread, flow and pump command statistics use samples after the 600-second heating run-up.",
+    normal: "Not nominal flow or proof of part load. These readings cover the unit’s common water-side heat exchanger. Pump command does not measure speed or available head. The project filter allows gaps of up to 15 seconds. Its results establish neither steady operation nor a hydraulic cause." },
   health_heater: {
     what: "Observed ON time of the circuit heater (BUH) and tank heater (BSH).",
     normal: "There is no fixed normal runtime; it depends on heating and hot-water demand. Runtime is not energy consumption and cannot establish unnecessary heating." },

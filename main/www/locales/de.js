@@ -1,4 +1,4 @@
-// translation-source: aa3abf8d6b7cd47b6adfa6bc6f918e3a1dbe62e1de7c6d8deffda21d1fb75661
+// translation-source: f982a05344b9ece7dec235d585ceb16879699f0cadc0c452af38729b31d32a37
 I18N.de = localeValues([
   /* sys.nodata */ "Keine Daten",
   /* sys.unreachable */ "Nicht erreichbar",
@@ -276,6 +276,12 @@ I18N.de = localeValues([
   /* service.metric.eev */ "Expansionsventil-Befehl",
   /* service.metric.hp */ "Hochdruck",
   /* service.metric.lp */ "Niederdruck",
+  /* check.hydronic.labels */ "Wasserspreizung|Pumpenansteuerung|Beobachtet / geeignet / qualifiziert|Belegzeitraum|Qualifizierter Zeitraum|Aktuell|Datenbestand|Stundenblöcke|Soll-Wasserspreizung",
+  /* check.hydronic.reasons */ "Nach Projektfilter qualifiziert|Diagnose aus|Keine aktuelle Quelle|Ungültiger Messwert|Pumpe aus|Warmwasserpfad|Zusatzheizer als An gemeldet|Verbleibende Anlaufzeit|Beobachtungsuhr fehlt|Quelle gewechselt|Diagnosefreigabe geändert|Zählergrenze erreicht|Für diesen Start deaktiviert|Qualifikation unbekannt",
+  /* check.hydronic.limits */ "Reglerphasen nicht beobachtbar|Pumpenansteuerung fehlt|Wiederherstellung ausstehend",
+  /* check.hydronic.counts */ (w, c) => `Wasserwerte ${w} · Ansteuerungswerte ${c}`,
+  /* check.hydronic.states */ "Quelle nicht bestätigt|Datiert|Undatiert|24-Stunden-Abdeckung unvollständig|Speicherung ausstehend|Zählergrenze erreicht: Untergrenzen",
+  /* check.hydronic.loss */ (n) => `Speicherverlustmeldungen ${n}`,
   /* service.metric.range */ (a, b, c, d) => `min. ${a} · Mittel ${b} · max. ${c} ${d}`,
   /* service.metric.samples */ n => `${n} ${n === 1 ? "berücksichtigter Messwert" : "berücksichtigte Messwerte"}`,
   /* service.metric.input_none */ "Kein gewählter Eingang",
@@ -1017,7 +1023,7 @@ MODEL_DESCRIPTION_I18N.de = modelDescriptionValues([
   /* health_cycling */ ["Bei Messlücken können Starts fehlen.", "Eine feste normale Startzahl gibt es nicht. Bei genügend Messdaten gelten Heizläufe hier als unauffällig, wenn die abgeschlossenen Läufe im Schnitt mindestens 10 Minuten dauern."],
   /* health_defrost */ ["Abtaustarts und ihr Anteil an der Verdichterlaufzeit bei lesbarem Verdichter- und Abtaustatus.","Interne Regel: ≥3 zugeordnete Vorgänge und >15 %. Luftfeuchte und Temperatur der gesamten Wärmetauscherfläche fehlen; kein Daikin-Störungsgrenzwert."],
   /* health_pressure */ ["24-Stunden-Wasserdruckverlauf im geschlossenen Hydraulikkreis (X10A, 5-Minuten-Minima).","Orientierung im Verlauf: >1,0 bar Normal, ≤1,0 bar Niedrig, ≤0,5 bar Kritisch (Diagnosebefund ab 60 s durchgehend). Zulässiger Füll- und Betriebsdruck richtet sich nach dem genauen Gerätehandbuch und der Anlagenhöhe; der Messwert allein belegt weder Leckage noch Defekt."],
-  /* health_flow */ ["Niedrigster Durchfluss nach 60 durchgehend beobachteten Sekunden mit laufender interner Pumpe.","Kein allgemeiner Normalwert. Kein Nenndurchfluss oder Teillastnachweis. Anleitungsgrenzen benötigen dasselbe Modell, dieselbe Betriebsart und Bedingungen; der Wert allein belegt keine Unterversorgung."],
+  /* health_flow */ ["Minimum nach 60 s durchgehendem Betrieb der internen Pumpe; separat: nach Stichproben gewichtete Wasserspreizung, Durchfluss und Pumpenansteuerung nach 600 s Heiz-Anlauf laut Projektregel.", "Kein allgemeiner Normalwert. Kein Nenndurchfluss oder Teillastnachweis. Werte am gemeinsamen wasserseitigen Wärmetauscher. Die Ansteuerung ist keine gemessene Drehzahl oder Förderhöhe. 600-s-Projektfilter (Lücken ≤15 s), kein Beharrungsnachweis. Kein Sollvergleich oder hydraulischer Ursachennachweis aus diesen Werten."],
   /* health_heater */ ["Beobachtete An-Zeit des Zusatzheizers (BUH) und Speicherheizstabs (BSH).","Es gibt keine feste normale Laufzeit; sie hängt vom Heiz- und Warmwasserbedarf ab. Laufzeit ist kein Energieverbrauch und belegt kein unnötiges Heizen."],
   /* health_retries */ ["Vergleichbare Anstiege in fünf experimentellen Zählern, auch im Stillstand oder an Verdichter-Zustandsgrenzen.","Für diese experimentellen Zähler ist kein Normalbereich belegt. Lücken, Rücksetzungen und fehlende Anstiege zählen nicht. Stabile Zähler schließen Begrenzung nicht aus und belegen keine Ursache."],
   /* free_heap */ ["Arbeitsspeicher, den die Firmware gerade nicht verwendet. Kurze Schwankungen sind normal, weil WLAN, MQTT und Web-Anfragen vorübergehend Speicher belegen; der 24-Stunden-Verlauf ist aussagekräftiger als ein Einzelwert.","eine stabile Linie mit Einbrüchen, die sich erholen; dauerhafter Rückgang kann auf nicht freigegebenen Speicher hinweisen. Ein kompatibler Neustart bei erhaltener Spannung kann den RAM-Verlauf bewahren. Wenn der RAM nicht übernommen werden kann, kommen nur passende, datierte 5-Minuten-Intervalle aus dem Flash-Journal nach dem Zeitabgleich zurück. Das 5-Minuten-Raster kann kurze Unterbrechungen verbergen; längere können Lücken hinterlassen. Offene und jüngste ungespeicherte Intervalle können fehlen; ohne Journal gibt es keine Flash-Wiederherstellung."],
@@ -1028,3 +1034,69 @@ MODEL_DESCRIPTION_I18N.de = modelDescriptionValues([
   /* candidates_nocap */ ["Mehrere Daikin-Modellfamilien liefern auf der Serviceschnittstelle dieselben Register. Deshalb lässt sich der genaue Handelsname dort nicht unterscheiden. Die Überschrift bleibt bewusst „Daikin Altherma“, statt ein Modell zu raten.","diese Außeneinheit meldet ihre eigene Nennleistung nicht; die Kandidaten können deshalb verschiedenen Leistungsklassen angehören. Die Firmware dekodiert die Werte mit der anhand der Inneneinheit am besten passenden Variante, aber nicht mit voller Gewissheit. Vergleiche die Außengeräte-Kennung unten mit dem Typenschild."],
   /* oueeprom */ ["Die Kennungsbytes der Außeneinheit, unverändert von der Serviceschnittstelle angezeigt. Da keine öffentliche Zuordnung zu Handelsnamen bekannt ist, zeigt die Firmware die Kennung, statt daraus einen Modellnamen zu raten.","bei einer mehrdeutigen Erkennung Zeichen für Zeichen mit dem Typenschild der Außeneinheit vergleichen."],
 ]);
+
+FAULT_CODE_I18N.de = faultCodeValues([
+  "Problem mit dem Wasserdurchfluss", // 7H
+  "Fehler am Rücklauftemperaturfühler", // 80
+  "Fehler am Vorlauftemperaturfühler", // 81
+  "Frostschutz des Wärmetauschers ausgelöst", // 89
+  "Ungewöhnlicher Temperaturanstieg am Warmwasseraustritt", // 8F
+  "Ungewöhnlicher Anstieg der Vorlauftemperatur", // 8H
+  "Fehler der Nulldurchgangserkennung", // A1
+  "Problem mit Hochdruckbegrenzung oder Frostschutz", // A5
+  "Zusatzheizer überhitzt oder nicht angeschlossen", // AA
+  "Speicherheizstab überhitzt", // AC
+  "Speicherdesinfektion zum Legionellenschutz nicht abgeschlossen", // AH
+  "Aufheizzeit für Warmwasser überschritten", // AJ
+  "Fehler am Volumenstromsensor", // C0
+  "Fehler am Temperaturfühler des Wärmetauschers", // C4
+  "Fehler an einem Wärmetauscherfühler", // C5
+  "Fehler am Raumtemperaturfühler", // CJ
+  "Platine der Außeneinheit defekt", // E1
+  "Fehler der Fehlerstromerkennung", // E2
+  "Hochdruckschalter der Außeneinheit ausgelöst", // E3
+  "Fehler beim Kältemittel-Saugdruck", // E4
+  "Inverter-Verdichtermotor der Außeneinheit überhitzt", // E5
+  "Verdichter der Außeneinheit startet nicht", // E6
+  "Fehler am Lüftermotor der Außeneinheit", // E7
+  "Überspannung am Eingang der Außeneinheit", // E8
+  "Fehler am elektronischen Expansionsventil", // E9
+  "Umschaltproblem zwischen Kühlen und Heizen an der Außeneinheit", // EA
+  "Ungewöhnlicher Temperaturanstieg im Speicher", // EC
+  "Temperaturfehler an der Heißgasleitung der Außeneinheit", // F3
+  "Ungewöhnlich hoher Druck der Außeneinheit beim Kühlen", // F6
+  "Ungewöhnlich hoher Druck der Außeneinheit; Hochdruckschalter ausgelöst", // FA
+  "Fehler am Spannungs- oder Stromsensor der Außeneinheit", // H0
+  "Fehler an einem externen Temperaturfühler", // H1
+  "Fehler am Hochdruckschalter der Außeneinheit", // H3
+  "Fehler am Überlastschutz des Verdichters", // H5
+  "Fehler am Positionserkennungssensor der Außeneinheit", // H6
+  "Fehler am CT-Strommesssystem des Außeneinheit-Verdichters", // H8
+  "Fehler am Außentemperaturfühler der Außeneinheit", // H9
+  "Fehler am Speichertemperaturfühler", // HC
+  "Fehler am Wasserdrucksensor", // HJ
+  "Fehler am Heißgasleitungsfühler der Außeneinheit", // J3
+  "Fehler am Wärmetauscherfühler der Außeneinheit", // J6
+  "Fehler am Hochdrucksensor der Außeneinheit", // JA
+  "Fehler an der Inverterplatine", // L1
+  "Unzulässiger Temperaturanstieg im Schaltkasten der Außeneinheit", // L3
+  "Unzulässiger Temperaturanstieg am Inverter-Kühlkörper der Außeneinheit", // L4
+  "Gleichstrom-Überstrom am Inverter der Außeneinheit erkannt", // L5
+  "Thermoschutz der Inverterplatine ausgelöst", // L8
+  "Blockierschutz des Verdichters ausgelöst", // L9
+  "Fehler im Kommunikationssystem der Außeneinheit", // LC
+  "Phasenunsymmetrie oder Phasenausfall der Stromversorgung", // P1
+  "Ungewöhnliche Gleichspannung erkannt", // P3
+  "Fehler am Kühlkörper-Temperaturfühler der Außeneinheit", // P4
+  "Leistungseinstellung passt nicht zur Anlage", // PJ
+  "Kältemittelmangel an der Außeneinheit", // U0
+  "Phasenfolgefehler oder Phasenausfall", // U1
+  "Netzspannungsfehler der Außeneinheit", // U2
+  "Estrichtrocknungsprogramm der Fußbodenheizung nicht korrekt abgeschlossen", // U3
+  "Kommunikationsproblem zwischen Innen- und Außeneinheit", // U4
+  "Kommunikationsproblem mit der Bedieneinheit", // U5
+  "Übertragungsfehler zwischen Haupt-CPU und Inverter-CPU der Außeneinheit", // U7
+  "Kommunikationsproblem mit LAN-Adapter, Raumthermostat oder USB-Gerät", // U8
+  "Innen- und Außeneinheit sind falsch kombiniert oder nicht kompatibel", // UA
+  "Vertauschte Rohrleitungen oder fehlerhafte Kommunikationsverdrahtung erkannt", // UF
+], "Aktuell wird kein Fehlercode übertragen.", "Keine Kurzbeschreibung für diesen Code hinterlegt.");

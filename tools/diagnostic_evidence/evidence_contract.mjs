@@ -13,8 +13,11 @@ export const OBSERVATION_SOURCE_FILES = Object.freeze([
   "main/logic/stop_context.hpp", "main/logic/stop_context_input.hpp",
   "main/logic/observation_hourly.hpp", "main/logic/instrument.hpp", "main/logic/heartbeat.hpp",
   "main/logic/fault_trace.hpp", "main/logic/fault_persist.hpp",
-  "main/stop_observation_store.hpp", "main/stop_observation_store.cpp", "main/history.cpp",
-  "main/logic/defrost_start.hpp",
+  "main/stop_observation_store.hpp", "main/stop_observation_store.cpp",
+  "main/logic/hydronic_observation.hpp", "main/logic/hydronic_input.hpp",
+  "main/logic/hydronic_hourly.hpp", "main/logic/hydronic_payload.hpp",
+  "main/hydronic_observation_store.hpp", "main/hydronic_observation_store.cpp",
+  "main/history.cpp", "main/logic/defrost_start.hpp",
 ]);
 
 function occurrences(text, needle) {

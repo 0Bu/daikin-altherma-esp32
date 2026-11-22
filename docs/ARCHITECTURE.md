@@ -310,7 +310,7 @@ and freezes it. The drain then offers it after every live hour as a short record
 (`checkup_seal_*` in `checkup_persist.hpp`). `PLANT.md` owns when it is skipped.
 
 The rolling compressor trace uses the dated journal with a separate payload fingerprint. The writer
-can offer an eligible checkpoint at most once every 180 seconds, with up to 192 records in four
+can offer an eligible checkpoint at most once every 240 seconds, with up to 192 records in four
 journal slots. The bounded shutdown flush can save a newer trace. Restoration checks a
 bounded set of groups newer than the last committed reset fence, newest first. A damaged or
 incomplete group can fall back to an older candidate. The first structurally complete group

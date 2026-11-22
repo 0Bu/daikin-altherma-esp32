@@ -8,7 +8,8 @@
 #include "logic/checkup_persist.hpp"  // WHEN a persisted window may be believed
 #include "logic/crashinfo.hpp"        // crash_reason_slug — one reset vocabulary
 #include "logic/defrost_start.hpp"
-#include "logic/history.hpp"     // history_parse_tenths — the ONE parse of a cached value
+#include "logic/history.hpp" // history_parse_tenths — the ONE parse of a cached value
+#include "logic/hydronic_input.hpp"
 #include "logic/stop_context_input.hpp"
 #include "safe_mode.hpp"         // safe_mode_active — nothing ages the window there
 #include "mqtt_ha.hpp"           // independent circulation-pump electrical witness
@@ -207,6 +208,37 @@ bool stop_context_suppressed_locked() {
     if (!stop_observation_suppressed()) return false;
     s_stop_context = kEmptyStopContext;
     return true;
+}
+
+logic::HydronicTracker             s_hydronic;
+logic::HydronicInputPlan           s_hydronic_inputs;
+uint32_t                           s_hydronic_generation    = 0;
+bool                               s_hydronic_allow_restore = true;
+int64_t                            s_hydronic_read_fence_us = -1;
+uint8_t                            s_hydronic_limitations   = 0;
+constexpr logic::HydronicTracker   kFreshHydronic{};
+constexpr logic::HydronicInputPlan kEmptyHydronicInputs{};
+
+__attribute__((noinline)) void clear_hydronic_runtime_locked() {
+    s_hydronic = kFreshHydronic;
+    // A selected capable plan is waiting for witnesses; it is not an unsupported model merely
+    // because no sweep has arrived. Use the same collector's capability rules as admission.
+    const auto empty = logic::hydronic_collect(
+        s_hydronic_inputs, static_cast<const CachedValue*>(nullptr), 0, false, false);
+    s_hydronic.reason        = logic::hydronic_decide(empty).reason;
+    s_hydronic_read_fence_us = -1;
+    s_hydronic_limitations   = 0;
+}
+
+void expire_hydronic_locked(int64_t now_us) {
+    // Retained dated statistics do not extend a live qualification through an unread interval.
+    // Expire once per completed observation; repeated readers must not keep advancing the fence.
+    if (s_hydronic.last_us >= 0 &&
+        (now_us < s_hydronic.last_us || now_us - s_hydronic.last_us > logic::HYDRONIC_MAX_GAP_US)) {
+        logic::hydronic_poll_gap(s_hydronic);
+        s_hydronic_read_fence_us = now_us;
+        s_hydronic_limitations   = 0;
+    }
 }
 
 std::atomic<uint32_t> s_requested_dhw_source_fp{0};
@@ -480,7 +512,10 @@ bool apply_reset_locked(CheckupSlot& slot) {
     slot.dhw_reset_requested.store(false);
     slot.state     = logic::CheckupState{};
     slot.dhw_state = kFreshDhwLossState;
-    if (!slot.is_modbus) s_stop_context = {};
+    if (!slot.is_modbus) {
+        s_stop_context = {};
+        clear_hydronic_runtime_locked();
+    }
     slot.cov       = logic::CheckupCoverage{};
     slot.fault_now = daik::FaultClass::Unknown;
     persist_wipe(slot); // clears both rings and the checkpoint to withdraw the previous scope
@@ -691,6 +726,7 @@ void checkup_reboot_save() {
         if (stop_event.valid) stop_observation_record(stop_now, false, stop_event);
         stop_observation_seal();
     }
+    hydronic_observation_seal();
     for (int si = 0; si < 2; ++si) {
         CheckupSlot* const slot = si ? &s_modbus : &s_x10a;
         seal_open_hour_locked(*slot);
@@ -725,6 +761,40 @@ void checkup_reboot_save() {
             static_cast<unsigned>(
                 logic::dhw_loss_progress(slot->dhw_state, stop_now).candidate_observed_s / 60),
             0u);
+    }
+}
+
+__attribute__((noinline)) void record_hydronic_locked(const CachedValue* values, size_t count,
+                                                      bool rps_known, bool rps_running,
+                                                      uint32_t source_generation,
+                                                      int64_t  sweep_started_us) {
+    if (hydronic_observation_suppressed() || !s_x10a.source_confirmed ||
+        !s_hydronic_inputs.schema_fp)
+        return;
+    if (source_generation != s_hydronic_generation) {
+        clear_hydronic_runtime_locked();
+        s_hydronic_generation    = source_generation;
+        s_hydronic_allow_restore = false;
+        hydronic_observation_bind(s_x10a.source_fp, s_x10a.model_fp, s_hydronic_inputs.schema_fp,
+                                  source_generation, false);
+    }
+    // Age includes the sweep and admission wait. A reader expiry also fences a sweep which
+    // began before it: completing an old read cannot establish the first new observation.
+    const int64_t accepted_us = esp_timer_get_time();
+    if (!count || sweep_started_us < 0 || sweep_started_us > accepted_us ||
+        sweep_started_us < s_hydronic_read_fence_us ||
+        accepted_us - sweep_started_us > logic::HYDRONIC_MAX_GAP_US) {
+        logic::hydronic_poll_gap(s_hydronic);
+        s_hydronic_read_fence_us = accepted_us;
+        s_hydronic_limitations   = 0;
+    } else {
+        const auto sample =
+            logic::hydronic_collect(s_hydronic_inputs, values, count, rps_known, rps_running);
+        const auto delta = logic::hydronic_record(
+            s_hydronic, sample, accepted_us, accepted_us - sweep_started_us, source_generation,
+            s_diagnostics_generation, s_diagnostics_enabled.load(std::memory_order_acquire));
+        s_hydronic_limitations = delta.limitations;
+        hydronic_observation_record(delta);
     }
 }
 
@@ -838,6 +908,11 @@ void checkup_start(bool diagnostics_enabled, uint32_t diagnostics_generation) {
     s_stop_allow_restore = true;
     s_stop_read_fence_us = -1;
     stop_observation_start(diagnostics_enabled, diagnostics_generation);
+    clear_hydronic_runtime_locked();
+    s_hydronic_inputs        = kEmptyHydronicInputs;
+    s_hydronic_generation    = 0;
+    s_hydronic_allow_restore = true;
+    if (s_mtx) hydronic_observation_start(diagnostics_enabled, diagnostics_generation);
     const uint32_t dhw_fp = circulation_identity();
     s_requested_dhw_source_fp.store(dhw_fp);
     s_diagnostics_enabled.store(diagnostics_enabled, std::memory_order_release);
@@ -850,6 +925,28 @@ void checkup_start(bool diagnostics_enabled, uint32_t diagnostics_generation) {
     if (shutdown_err != ESP_OK)
         diag_printf("checkup: DHW shutdown handler not registered (%s)\n",
                     esp_err_to_name(shutdown_err));
+}
+
+__attribute__((noinline)) void set_hydronic_diagnostics_locked(bool enabled, uint32_t generation,
+                                                               bool generation_changed) {
+    if (generation_changed) {
+        clear_hydronic_runtime_locked();
+        s_hydronic_allow_restore = false;
+    } else {
+        s_hydronic.reset_continuity();
+        s_hydronic_read_fence_us = -1;
+        s_hydronic_limitations   = 0;
+        const auto empty_decide  = logic::hydronic_decide(logic::hydronic_collect(
+            s_hydronic_inputs, static_cast<const CachedValue*>(nullptr), 0, false, false));
+        s_hydronic.reason        = empty_decide.reason == logic::HydronicReason::Unsupported
+                                       ? logic::HydronicReason::Unsupported
+                                       : logic::HydronicReason::PollGap;
+    }
+    hydronic_observation_set_diagnostics(enabled, generation);
+    if (s_x10a.source_confirmed && (generation_changed || s_hydronic_allow_restore))
+        hydronic_observation_bind(s_x10a.source_fp, s_x10a.model_fp, s_hydronic_inputs.schema_fp,
+                                  s_hydronic_generation,
+                                  !generation_changed && s_hydronic_allow_restore);
 }
 
 void checkup_set_diagnostics(bool enabled, uint32_t generation) {
@@ -866,6 +963,7 @@ void checkup_set_diagnostics(bool enabled, uint32_t generation) {
     if (s_x10a.source_confirmed)
         stop_observation_bind(s_x10a.source_fp, s_x10a.model_fp, s_stop_inputs.schema_fp,
                               s_stop_generation, !generation_changed && s_stop_allow_restore);
+    set_hydronic_diagnostics_locked(enabled, generation, generation_changed);
     slot_set_diagnostics(s_x10a, enabled, generation_changed);
     slot_set_diagnostics(s_modbus, enabled, generation_changed);
 }
@@ -886,6 +984,10 @@ void checkup_reset() {
     s_stop_inputs        = {};
     s_stop_allow_restore = false;
     stop_observation_reset();
+    clear_hydronic_runtime_locked();
+    s_hydronic_inputs        = kEmptyHydronicInputs;
+    s_hydronic_allow_restore = false;
+    hydronic_observation_reset();
     s_defrost_start         = {};
     s_defrost_air_supported = false;
     // Consuming the reset on an unidentified cycle must not let the journal re-admit the old link.
@@ -923,6 +1025,20 @@ void checkup_modbus_reset() {
     return logic::checkup_row_matches(logic::CHECKUP_LOC_OUTDOOR, row.reg, row.offset, row.conv);
 }
 
+__attribute__((noinline)) void reset_hydronic_on_detect_locked(const char* profile_id,
+                                                               uint32_t source_fp, uint32_t fp,
+                                                               bool first) {
+    logic::fill_hydronic_input_plan(s_hydronic_inputs, profile_id, def::lookup_view(profile_id));
+    clear_hydronic_runtime_locked();
+    s_hydronic_generation = s_stop_generation;
+    if (!first) {
+        s_hydronic_allow_restore = false;
+        hydronic_observation_reset();
+    }
+    hydronic_observation_bind(source_fp, fp, s_hydronic_inputs.schema_fp, s_hydronic_generation,
+                              s_hydronic_allow_restore);
+}
+
 void checkup_reset_on_detect(const char* profile_id, uint32_t source_fp) {
     const auto     view        = def::lookup_view(profile_id);
     const uint32_t fp          = logic::checkup_model_fingerprint(profile_id, view);
@@ -935,16 +1051,17 @@ void checkup_reset_on_detect(const char* profile_id, uint32_t source_fp) {
     s_x10a.source_confirmed = source_fp != 0 && fp != 0;
     s_x10a.model_fp         = fp;
     s_x10a.source_fp        = source_fp;
-    s_stop_context          = {};
+    s_stop_context          = kEmptyStopContext;
     s_stop_inputs           = stop_inputs;
     s_defrost_start         = {};
     s_defrost_air_supported = defrost_air;
     s_stop_generation       = hp_poll_generation();
+    reset_hydronic_on_detect_locked(profile_id, source_fp, fp, first);
     if (!first) {
         s_stop_allow_restore = false;
         stop_observation_reset();
     }
-    stop_observation_bind(source_fp, fp, stop_inputs.schema_fp, s_stop_generation,
+    stop_observation_bind(source_fp, fp, s_stop_inputs.schema_fp, s_stop_generation,
                           s_stop_allow_restore);
     if (first) {
         // The stored startup scope was only an expectation. This call confirms the current source.
@@ -1053,7 +1170,7 @@ uint32_t checkup_consent_epoch() { return s_diagnostics_epoch.load(std::memory_o
 
 void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_running,
                     const logic::CheckupCoverage& coverage, uint32_t source_generation,
-                    uint32_t consent_epoch, bool profile_confirmed) {
+                    uint32_t consent_epoch, bool profile_confirmed, int64_t sweep_started_us) {
     if (!s_diagnostics_enabled.load(std::memory_order_acquire)) return;
     if (!s_mtx) return;   // checkup_start() creates it; absent means its alloc failed -> no observation
     if (!v && n) return;
@@ -1203,6 +1320,7 @@ void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_run
             stop_observation_record(now, stop_sample.rps_known, stop_event);
         }
     }
+    record_hydronic_locked(v, n, rps_known, rps_running, source_generation, sweep_started_us);
     const bool discard_dhw_sample = apply_dhw_reset_locked(s_x10a) ||
                                     dhw_generation != s_dhw_identity_generation.load() ||
                                     circulation_generation != circulation_source_generation();
@@ -1403,6 +1521,75 @@ CheckupStopContextReport checkup_stop_context_report() {
     if (stop_context_suppressed_locked()) {
         r                             = kEmptyStopReport;
         r.observation.restore_pending = false;
+    }
+    return r;
+}
+
+void checkup_hydronic_expire(int64_t) {
+    if (!s_mtx) return;
+    Lock lk(s_mtx);
+    if (!lk || hydronic_observation_suppressed() ||
+        !s_diagnostics_enabled.load(std::memory_order_acquire) || s_x10a.reset_requested.load() ||
+        s_x10a.seal_bucket != INT64_MIN)
+        return;
+    expire_hydronic_locked(esp_timer_get_time());
+}
+
+CheckupHydronicReport checkup_hydronic_report() {
+    CheckupHydronicReport r;
+    if (hydronic_observation_suppressed()) {
+        r.observation.restore_pending = false;
+        r.reason                      = logic::HydronicReason::Forgotten;
+        return r;
+    }
+    if (!s_mtx) {
+        r.observation.restore_pending = false;
+        return r;
+    }
+    Lock lk(s_mtx);
+    if (hydronic_observation_suppressed()) {
+        r.observation.restore_pending = false;
+        r.reason                      = logic::HydronicReason::Forgotten;
+        return r;
+    }
+    if (!lk) return r;
+    if (!s_diagnostics_enabled.load(std::memory_order_acquire) || s_x10a.reset_requested.load()) {
+        r.observation           = hydronic_observation_report();
+        r.observation.confirmed = false;
+        r.reason                = !s_diagnostics_enabled.load(std::memory_order_acquire)
+                                      ? logic::HydronicReason::NoConsent
+                                      : logic::HydronicReason::NoSource;
+        return r;
+    }
+    // Invalidation bumps the poll epoch before its caller can acquire this owner for reset.
+    // A reader in that gap must not present the previous population as current. Leave retained
+    // storage untouched; the admitted reset/new producer owns its durable identity barrier.
+    if (s_x10a.source_confirmed && !hp_poll_generation_matches(s_hydronic_generation)) {
+        r.reason = logic::HydronicReason::SourceChanged;
+        return r;
+    }
+    const int64_t now = esp_timer_get_time();
+    expire_hydronic_locked(now);
+    r.observation = hydronic_observation_report();
+    r.reason      = s_x10a.source_confirmed ? s_hydronic.reason : logic::HydronicReason::NoSource;
+    r.source_generation = s_x10a.source_confirmed ? s_hydronic_generation : 0;
+    r.schema_fp         = s_x10a.source_confirmed ? s_hydronic_inputs.schema_fp : 0;
+    r.current           = s_x10a.source_confirmed && s_x10a.seal_bucket == INT64_MIN &&
+                s_hydronic.last_us >= 0 && now >= s_hydronic.last_us &&
+                now - s_hydronic.last_us <= logic::HYDRONIC_MAX_GAP_US;
+    r.limitations = r.current ? s_hydronic_limitations : 0;
+    if (s_x10a.seal_bucket != INT64_MIN) r.reason = logic::HydronicReason::PollGap;
+    if (r.current && r.reason == logic::HydronicReason::Settling &&
+        s_hydronic.eligible_since_us >= 0 && now >= s_hydronic.eligible_since_us) {
+        const int64_t elapsed = now - s_hydronic.eligible_since_us;
+        if (elapsed < logic::HYDRONIC_SETTLE_US)
+            r.settling_remaining_s =
+                static_cast<uint32_t>((logic::HYDRONIC_SETTLE_US - elapsed + 999999) / 1000000);
+    }
+    if (hydronic_observation_suppressed()) {
+        r                             = {};
+        r.observation.restore_pending = false;
+        r.reason                      = logic::HydronicReason::Forgotten;
     }
     return r;
 }

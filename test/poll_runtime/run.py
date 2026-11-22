@@ -150,9 +150,9 @@ mutations = {
         ['', 'const Config& c = config(); const uint32_t consent_epoch = checkup_consent_epoch();'],
         'poll_consent_token_precedes_config', 'consent_before_config'),
     'recapture_consent_at_submission': (
-        ['checkup_record(fresh.data(), fresh.size(), rps_known, rps_running, checkup_coverage, cycle_generation, consent_epoch);',
+        ['checkup_record(fresh.data(), fresh.size(), rps_known, rps_running, checkup_coverage,\n                   cycle_generation, consent_epoch, true, sweep_started_us);',
          'checkup_record(nullptr, 0, false, false, checkup_coverage, cycle_generation, consent_epoch);'],
-        ['checkup_record(fresh.data(), fresh.size(), rps_known, rps_running, checkup_coverage, cycle_generation, checkup_consent_epoch());',
+        ['checkup_record(fresh.data(), fresh.size(), rps_known, rps_running, checkup_coverage,\n                   cycle_generation, checkup_consent_epoch(), true, sweep_started_us);',
          'checkup_record(nullptr, 0, false, false, checkup_coverage, cycle_generation, checkup_consent_epoch());'],
         'poll_consent_forwards_original_token', 'consent_after_history'),
     'omit_outdoor_hx_profile_context': (

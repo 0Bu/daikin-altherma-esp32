@@ -4,6 +4,7 @@
 #include "history.hpp"
 #include "checkup.hpp"                // fourth journal source: exact hourly diagnostic buckets
 #include "stop_observation_store.hpp" // independent logical hourly source, same physical envelope
+#include "hydronic_observation_store.hpp"
 #include "logic/cycling_persist.hpp"
 #include "logic/fault_persist.hpp"
 #include "config.hpp"
@@ -962,6 +963,8 @@ static_assert(std::is_trivially_copyable<FlashJournalRecord>::value,
               "sector scratch records must not retain resources or references");
 static_assert(logic::CHECKUP_JOURNAL_PAYLOAD_BYTES <= sizeof(FlashJournalRecord::payload),
               "one diagnostic hour must fit the shared journal slot");
+static_assert(logic::HYDRONIC_PAYLOAD_BYTES <= sizeof(FlashJournalRecord::payload),
+              "one hydronic hour must fit the unchanged shared journal slot");
 
 const esp_partition_t* s_flash_part = nullptr;
 SemaphoreHandle_t      s_flash_mtx = nullptr; // serialises poll service, shutdown and factory erase
@@ -982,10 +985,16 @@ constexpr size_t kStopObservationSource    = kJournalSources;
 constexpr size_t kCyclingTraceSource       = kJournalSources + 1;
 constexpr size_t kCheckupModbusSource      = kJournalSources + 2;
 constexpr size_t kCyclingModbusTraceSource = kJournalSources + 3;
-constexpr size_t kFaultTraceSource         = kJournalSources + 4;
-constexpr size_t kFaultModbusTraceSource   = kJournalSources + 5;
-constexpr size_t kJournalServiceSources    = kJournalSources + 6;
-constexpr size_t kRestoreRingsPerTick = 4;
+constexpr size_t kFaultTraceSource          = kJournalSources + 4;
+constexpr size_t kFaultModbusTraceSource    = kJournalSources + 5;
+constexpr size_t kHydronicObservationSource = kJournalSources + 6;
+constexpr size_t kJournalServiceSources     = kJournalSources + 7;
+constexpr size_t kRestoreRingsPerTick       = 4;
+
+// Flash-owner only. Readers, indexers, builders and readback use it in disjoint transactions;
+// stores copy its fields before returning and never retain a reference. Keep it off shutdown
+// stacks.
+logic::HydronicHourlyPayload s_hydronic_flash_payload;
 
 // Flash-lock owned. Restore and append staging are mutually exclusive per source stream.
 struct CyclingFinalPage {
@@ -2497,8 +2506,8 @@ bool flash_record_valid(const FlashJournalRecord& r) {
     if (flash_is_manifest(h)) return false;
     // Its physical envelope remains visible to older head discovery, but these bytes can never
     // reach core Checkup restore/append handlers or share their cursor.
-    if (logic::observation_header_matches(h) || flash_cycling_owned(h) || flash_fault_owned(h) ||
-        flash_modbus_checkup_owned(h))
+    if (logic::observation_header_matches(h) || logic::hydronic_header_matches(h) ||
+        flash_cycling_owned(h) || flash_fault_owned(h) || flash_modbus_checkup_owned(h))
         return false;
     if (h.source == static_cast<uint8_t>(logic::HistoryJournalSource::Checkup))
         return logic::history_journal_header_matches(
@@ -2687,6 +2696,38 @@ void flash_index_stop_observation_record(const FlashJournalRecord& record, uint1
     stop_observation_flash_index(h.bucket, h.sequence, slot, payload);
 }
 
+HydronicReadResult flash_read_hydronic_observation(uint16_t slot, int64_t& bucket,
+                                                   uint64_t&                     sequence,
+                                                   logic::HydronicHourlyPayload& payload) {
+    auto& record = *new (s_flash_sector) FlashJournalRecord;
+    if (flash_read_record(slot, record) != ESP_OK) return HydronicReadResult::Retry;
+    if (!logic::hydronic_header_matches(record.header) ||
+        record.header.crc != logic::history_journal_crc_bytes(record.header, record.payload,
+                                                              logic::HYDRONIC_PAYLOAD_BYTES) ||
+        !logic::hydronic_decode(record.payload, logic::HYDRONIC_PAYLOAD_BYTES, record.header.bucket,
+                                payload))
+        return HydronicReadResult::Invalid;
+    bucket   = record.header.bucket;
+    sequence = record.header.sequence;
+    return HydronicReadResult::Valid;
+}
+
+void flash_index_hydronic_observation_record(const FlashJournalRecord& record, uint16_t slot) {
+    const auto& h = record.header;
+    if (!logic::hydronic_header_recognizable(h)) return;
+    auto& payload = s_hydronic_flash_payload;
+    if (!logic::hydronic_header_matches(h) ||
+        h.crc !=
+            logic::history_journal_crc_bytes(h, record.payload, logic::HYDRONIC_PAYLOAD_BYTES) ||
+        !logic::hydronic_decode(record.payload, logic::HYDRONIC_PAYLOAD_BYTES, h.bucket, payload)) {
+        // A recognizable damaged record could be a reset fence. An empty restored population
+        // cannot be certified until a complete physical reindex resolves this uncertainty.
+        hydronic_observation_flash_index_incomplete();
+        return;
+    }
+    hydronic_observation_flash_index(h.bucket, h.sequence, slot, payload);
+}
+
 [[gnu::always_inline]] inline void
 clip_checkup_index(const logic::CheckupJournalIndex& ix, uint16_t* slots, uint16_t& count,
                    int64_t& oldest_bucket, int64_t& newest_bucket, int64_t& last_bucket) {
@@ -2718,6 +2759,7 @@ bool flash_journal_scan() {
     size_t bad_records = 0;
     flash_manifest_cache_reset();
     stop_observation_flash_index_reset();
+    hydronic_observation_flash_index_reset();
     s_flash_cycling.reset_for_scan();
     s_flash_cycling_modbus.reset_for_scan();
     s_flash_fault.reset_for_scan();
@@ -2745,6 +2787,7 @@ bool flash_journal_scan() {
             FlashJournalRecord r;
             std::memcpy(&r, raw, sizeof(r));
             flash_index_stop_observation_record(r, static_cast<uint16_t>(slot));
+            flash_index_hydronic_observation_record(r, static_cast<uint16_t>(slot));
             flash_index_cycling_page(r, static_cast<uint16_t>(slot));
             flash_index_fault_page(r, static_cast<uint16_t>(slot));
             if (!flash_record_physically_valid(r)) {
@@ -3165,6 +3208,34 @@ bool flash_build_next_stop_observation(FlashJournalRecord& out) {
     return true;
 }
 
+bool flash_build_next_hydronic_observation(FlashJournalRecord& out) {
+    auto&   payload = s_hydronic_flash_payload;
+    int64_t bucket  = INT64_MIN;
+    if (!hydronic_observation_flash_next(flash_read_hydronic_observation, bucket, payload))
+        return false;
+    std::memset(&out, 0xff, sizeof(out));
+    auto& h       = out.header;
+    h.magic       = logic::HISTORY_JOURNAL_MAGIC;
+    h.version     = logic::HISTORY_JOURNAL_VERSION;
+    h.source      = static_cast<uint8_t>(logic::HistoryJournalSource::Checkup);
+    h.flags       = 0;
+    h.catalog_fp  = logic::hydronic_fingerprint();
+    h.crc         = 0;
+    h.commit      = logic::HISTORY_JOURNAL_ERASED;
+    h.value_count = logic::HYDRONIC_WORDS;
+    h.slot_bytes  = logic::HISTORY_JOURNAL_SLOT_BYTES;
+    h.sequence    = s_flash_next_sequence;
+    h.bucket      = bucket;
+    h.dt_s        = logic::CHECKUP_DT_S;
+    h.rings[0]    = TREND_COUNT;
+    h.rings[1]    = HOMEHUB_HISTORY_COUNT;
+    h.rings[2]    = ENV3_HISTORY_COUNT;
+    h.reserved    = 0xffff;
+    logic::hydronic_encode(payload, out.payload);
+    h.crc = logic::history_journal_crc_bytes(h, out.payload, logic::HYDRONIC_PAYLOAD_BYTES);
+    return true;
+}
+
 [[gnu::noinline]] bool flash_build_next_cycling(FlashJournalRecord& out, TickType_t wait_ticks,
                                                 bool shutdown, bool is_modbus = false) {
     CyclingFlashStream&       cs    = is_modbus ? s_flash_cycling_modbus : s_flash_cycling;
@@ -3361,6 +3432,8 @@ void flash_fault_appended(bool is_modbus) {
                                                                     : DiagnosticsSource::X10a);
 }
 
+void flash_hydronic_appended(const FlashJournalRecord& verify, uint16_t slot);
+
 // One attempt to append `r`. After sequence admission, `slot` identifies the targeted slot even
 // on failure, so the caller can account for it. Invalid or exhausted sequences perform no I/O.
 esp_err_t flash_append_record_at(FlashJournalRecord& r, size_t& slot) {
@@ -3397,6 +3470,8 @@ esp_err_t flash_append_record_at(FlashJournalRecord& r, size_t& slot) {
         std::memcpy(&payload, verify.payload, sizeof(payload));
         stop_observation_flash_appended(verify.header.bucket, verify.header.sequence,
                                         static_cast<uint16_t>(slot), payload);
+    } else if (logic::hydronic_header_matches(verify.header)) {
+        flash_hydronic_appended(verify, static_cast<uint16_t>(slot));
     } else if (flash_cycling_owned(verify.header)) {
         flash_cycling_appended(static_cast<uint16_t>(slot), verify.header.sequence,
                                flash_modbus_cycling_owned(verify.header));
@@ -3493,15 +3568,17 @@ void flash_note_append_success(size_t slot) {
 }
 
 esp_err_t flash_append_record(FlashJournalRecord& r) {
-    const bool      stop_owned = logic::observation_append_owned(r.header);
-    size_t          slot       = 0;
-    const esp_err_t e          = flash_append_record_at(r, slot);
+    const bool      stop_owned     = logic::observation_append_owned(r.header);
+    const bool      hydronic_owned = logic::hydronic_append_owned(r.header);
+    size_t          slot           = 0;
+    const esp_err_t e              = flash_append_record_at(r, slot);
     if (e == ESP_OK) {
         flash_note_append_success(slot);
         // The ONLY place an ahead-of-the-clock episode ends: the source appended data again. A
         // manifest says nothing about the cursor, and a "no longer ahead" observation must not
         // end it either (see s_flash_ahead_logged).
-        if (!flash_is_manifest(r.header) && !stop_owned && !flash_cycling_owned(r.header)) {
+        if (!flash_is_manifest(r.header) && !stop_owned && !hydronic_owned &&
+            !flash_cycling_owned(r.header)) {
             if (!flash_fault_owned(r.header))
                 s_flash_ahead_logged[flash_modbus_checkup_owned(r.header) ? kCheckupModbusSource
                                                                           : r.header.source] =
@@ -3509,6 +3586,7 @@ esp_err_t flash_append_record(FlashJournalRecord& r) {
         }
     } else {
         if (stop_owned) stop_observation_flash_failed();
+        if (hydronic_owned) hydronic_observation_flash_failed();
         flash_note_append_failure(slot, e, r.header);
     }
     return e;
@@ -3544,12 +3622,29 @@ void flash_note_restore_ahead(size_t src_i, int64_t newest, int64_t wall_bucket)
                 static_cast<long long>(wall_bucket));
 }
 
+__attribute__((noinline)) void flash_hydronic_appended(const FlashJournalRecord& verify,
+                                                       uint16_t                  slot) {
+    auto& payload = s_hydronic_flash_payload;
+    if (logic::hydronic_decode(verify.payload, logic::HYDRONIC_PAYLOAD_BYTES, verify.header.bucket,
+                               payload)) {
+        hydronic_observation_flash_appended(verify.header.bucket, verify.header.sequence, slot,
+                                            payload);
+    } else {
+        // A physically committed sequence still advances the shared head. Withdraw this
+        // logical source instead of retrying that sequence or admitting malformed evidence.
+        hydronic_observation_flash_index_incomplete();
+        hydronic_observation_flash_failed();
+        diag_printf("history: committed HYDR payload is invalid; evidence withheld\n");
+    }
+}
+
 // The next record of source `src_i` for the journal service, or false. A cursor that is ahead of
 // the source's clock yields false and one report (flash_note_cursor_ahead) — no rewind, no walk.
 [[gnu::always_inline]] inline bool flash_build_for_service(size_t src_i, FlashJournalRecord& r,
                                                            TickType_t wait_ticks,
                                                            bool       shutdown = false) {
     if (src_i == kStopObservationSource) return flash_build_next_stop_observation(r);
+    if (src_i == kHydronicObservationSource) return flash_build_next_hydronic_observation(r);
     if (src_i == kCyclingTraceSource || src_i == kCyclingModbusTraceSource)
         return flash_build_next_cycling(r, wait_ticks, shutdown,
                                         src_i == kCyclingModbusTraceSource);
@@ -3716,12 +3811,14 @@ void history_restore_fault_flash(TickType_t wait_ticks) {
 void history_service_flash_restore() {
     // Expiration belongs to the reducer owner and must precede flash -> observation locking.
     checkup_stop_context_expire(esp_timer_get_time());
+    checkup_hydronic_expire(esp_timer_get_time());
     if (!s_flash_mtx || !time_synced()) return;
     // Resets and factory forget mutate the same endpoints/index. Keep their snapshot, record
     // selection and final splice in one nonblocking flash transaction (flash -> history).
     Lock flash_lk(s_flash_mtx, 0);
     if (!flash_lk.acquired() || s_flash_forgotten.load() || !s_flash_scan_ok) return;
     stop_observation_flash_service(flash_read_stop_observation);
+    hydronic_observation_flash_service(flash_read_hydronic_observation);
     history_restore_checkup_flash();
     history_restore_cycling_flash(0);
     history_restore_fault_flash(0);
@@ -3856,6 +3953,7 @@ static size_t history_flash_service_journal(size_t max_records, TickType_t wait_
         // The drain can be the first service after source confirmation/seal. Settle the
         // independent archives before asking their producers for records.
         stop_observation_flash_service(flash_read_stop_observation);
+        hydronic_observation_flash_service(flash_read_hydronic_observation);
         if (shutdown) history_restore_cycling_flash(wait_ticks);
         if (shutdown) history_restore_fault_flash(wait_ticks);
     }
@@ -3955,6 +4053,8 @@ static size_t history_flash_service_journal(size_t max_records, TickType_t wait_
             // the append transaction would spend the small shutdown tasks' stack reserve twice.
             if (src_i == kStopObservationSource)
                 stop_observation_flash_service(flash_read_stop_observation);
+            if (src_i == kHydronicObservationSource)
+                hydronic_observation_flash_service(flash_read_hydronic_observation);
             written++;
             appended = true;
             --max_records;
@@ -3997,6 +4097,7 @@ bool history_flash_forget_ready() { return s_flash_forget_ready.load(std::memory
 bool history_flash_forget() {
     s_flash_forgotten.store(true);
     stop_observation_forget();
+    hydronic_observation_forget();
     checkup_cycling_forget();
     // Readers are suppressed immediately, even if the subsequent physical erase fails. Retire
     // browser leases at that privacy boundary rather than letting them display the forgotten data.

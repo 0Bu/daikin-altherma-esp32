@@ -1224,11 +1224,297 @@ void modbus_flow_scale_gate() {
                 verified_rep[CheckupCheck::Flow].a == 120,
             "verified_affirmative_homehub_admits_flow");
 }
+
+constexpr int64_t     HYDR_SECOND  = 1000000;
+constexpr const char* HYDR_PROFILE = "altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw";
+
+std::vector<CachedValue> hydronic_rows() {
+    const auto  plan     = hydronic_input_plan(HYDR_PROFILE, def::lookup_view(HYDR_PROFILE));
+    const char* values[] = {"45", "35", "10", "59.55", "1", "12", "Heating", "0",
+                            "0",  "0",  "0",  "0",     "0", "0",  "0"};
+    std::vector<CachedValue> rows;
+    for (size_t i = 0; i < HYDRONIC_INPUTS; ++i) {
+        require(hydronic_input_supported(plan, static_cast<HydronicInput>(i)),
+                "hydronic_fixture_registered_inputs");
+        rows.push_back(row(plan.rows[i], values[i]));
+    }
+    // Independent hard-coordinate checks prevent a self-consistent resolver/fixture substitution.
+    require(rows.size() == 15 && rows[0].reg == 0x61 && rows[0].off == 2 && rows[0].conv == 105 &&
+                rows[1].reg == 0x61 && rows[1].off == 8 && rows[1].conv == 105 &&
+                rows[2].reg == 0x62 && rows[2].off == 9 && rows[2].conv == 105,
+            "hydronic_fixture_pre_buh_return_flow_identity");
+    return rows;
+}
+void hydronic_sample(int64_t now, const std::vector<CachedValue>& rows, const CheckupCoverage& cov,
+                     int64_t started, bool known = true, bool running = true,
+                     uint32_t generation = 7) {
+    sdk::now_us      = now;
+    const auto epoch = checkup_consent_epoch();
+    checkup_record(rows.data(), rows.size(), known, running, cov, generation, epoch, true, started);
+}
+void hydronic_settle(const std::vector<CachedValue>& rows, const CheckupCoverage& cov) {
+    for (int64_t t = 1; t <= 601; t += 15)
+        hydronic_sample(t * HYDR_SECOND, rows, cov, t * HYDR_SECOND);
+}
+void hydronic_case(const std::string& name) {
+    require(name == "hydronic_waiting" || name == "hydronic_population" || name == "hydronic_age" ||
+                name == "hydronic_expiry" || name == "hydronic_consent_lock" ||
+                name == "hydronic_source_lock" || name == "hydronic_shared_witness" ||
+                name == "hydronic_reader_generation" || name == "hydronic_shutdown" ||
+                name == "hydronic_pause_resume",
+            "unknown_case");
+    boot();
+    const auto cov  = coverage();
+    auto       rows = hydronic_rows();
+    if (name == "hydronic_waiting") {
+        const auto r = checkup_hydronic_report();
+        require(!r.current && r.reason == HydronicReason::MissingWitness && r.schema_fp != 0 &&
+                    r.source_generation == 7 && r.observation.confirmed,
+                "hydronic_capable_waits_for_first_witness");
+        require(r.observation.totals.samples == 0 && r.observation.totals.observed_us == 0,
+                "hydronic_waiting_has_no_fabricated_population");
+        return;
+    }
+    if (name == "hydronic_population") {
+        for (int64_t t = 1; t <= 586; t += 15)
+            hydronic_sample(t * HYDR_SECOND, rows, cov, t * HYDR_SECOND);
+        hydronic_sample(601 * HYDR_SECOND - 1, rows, cov, 601 * HYDR_SECOND - 1);
+        auto r = checkup_hydronic_report();
+        require(r.current && r.reason == HydronicReason::Settling && r.settling_remaining_s == 1 &&
+                    r.observation.totals.samples == 0,
+                "hydronic_not_before_600s");
+        require(r.observation.totals.observed_us == 600 * HYDR_SECOND - 1 &&
+                    r.observation.totals.candidate_us == 600 * HYDR_SECOND - 1 &&
+                    r.observation.totals.qualified_us == 0,
+                "hydronic_eligible_duration_is_actual_elapsed");
+        hydronic_sample(601 * HYDR_SECOND, rows, cov, 601 * HYDR_SECOND);
+        r                 = checkup_hydronic_report();
+        const auto& first = r.observation.totals;
+        require(r.current && r.reason == HydronicReason::None && r.settling_remaining_s == 0 &&
+                    first.samples == 1 && first.command_samples == 1 &&
+                    first.observed_us == 600 * HYDR_SECOND &&
+                    first.candidate_us == 600 * HYDR_SECOND && first.qualified_us == 0,
+                "hydronic_first_sample_exact_600s_no_retrobook");
+        require(first.spread.min_milli == 10000 && first.spread.max_milli == 10000 &&
+                    first.spread.sum_milli == 10000 && first.flow.sum_milli == 10000 &&
+                    first.command.sum_milli == 40450 &&
+                    first.first_accepted_unix_us == (adapter::unix_origin + 601) * HYDR_SECOND &&
+                    first.last_accepted_unix_us == first.first_accepted_unix_us,
+                "hydronic_actual_dated_values_and_fractional_command");
+        rows.erase(rows.begin() + static_cast<size_t>(HydronicInput::Command));
+        hydronic_sample(602 * HYDR_SECOND, rows, cov, 602 * HYDR_SECOND);
+        r = checkup_hydronic_report();
+        require(r.observation.totals.samples == 2 && r.observation.totals.command_samples == 1 &&
+                    r.observation.totals.qualified_us == HYDR_SECOND &&
+                    r.observation.totals.observed_us == 601 * HYDR_SECOND &&
+                    r.observation.totals.candidate_us == 601 * HYDR_SECOND &&
+                    (r.limitations & HydronicCommandUnavailable) &&
+                    r.observation.totals.spread.sum_milli == 20000,
+                "hydronic_optional_command_preserves_joint_thermal_population");
+        const auto core = checkup_report();
+        require(CHECKUP_CHECK_COUNT == 8 && core[CheckupCheck::Flow].a == 100 &&
+                    core[CheckupCheck::Flow].verdict == CheckupVerdict::Ok,
+                "hydronic_preserves_eight_checks_and_old_flow_minimum");
+        return;
+    }
+    if (name == "hydronic_age") {
+        hydronic_sample(16 * HYDR_SECOND, rows, cov, HYDR_SECOND);
+        require(checkup_hydronic_report().current, "hydronic_exact_15s_sweep_allowed");
+        hydronic_sample(31 * HYDR_SECOND, rows, cov, 16 * HYDR_SECOND);
+        auto r = checkup_hydronic_report();
+        require(r.observation.totals.candidate_us == 15 * HYDR_SECOND,
+                "hydronic_exact_15s_continuity_allowed");
+        hydronic_sample(46 * HYDR_SECOND + 1, rows, cov, 31 * HYDR_SECOND);
+        r = checkup_hydronic_report();
+        require(!r.current && r.reason == HydronicReason::PollGap &&
+                    r.observation.totals.candidate_us == 15 * HYDR_SECOND,
+                "hydronic_15s_plus_microsecond_sweep_rejected");
+        sdk::now_us = 48 * HYDR_SECOND;
+        checkup_record(rows.data(), rows.size(), true, true, cov, 7, checkup_consent_epoch(), true);
+        require(!checkup_hydronic_report().current, "hydronic_legacy_omitted_start_cannot_qualify");
+        hydronic_sample(49 * HYDR_SECOND, rows, cov, 49 * HYDR_SECOND + 1);
+        require(!checkup_hydronic_report().current, "hydronic_future_start_rejected");
+        hydronic_sample(50 * HYDR_SECOND, {}, cov, 50 * HYDR_SECOND);
+        require(!checkup_hydronic_report().current, "hydronic_empty_sweep_cannot_qualify");
+        hydronic_sample(51 * HYDR_SECOND, rows, cov, 51 * HYDR_SECOND);
+        sdk::before_take = [] { sdk::now_us = 67 * HYDR_SECOND; };
+        hydronic_sample(61 * HYDR_SECOND, rows, cov, 51 * HYDR_SECOND);
+        r = checkup_hydronic_report();
+        require(!r.current && r.reason == HydronicReason::PollGap &&
+                    r.observation.totals.candidate_us == 15 * HYDR_SECOND,
+                "hydronic_admission_clock_after_lock");
+        return;
+    }
+    if (name == "hydronic_shared_witness") {
+        hydronic_sample(HYDR_SECOND, rows, cov, HYDR_SECOND, false, true);
+        require(checkup_hydronic_report().reason == HydronicReason::MissingWitness &&
+                    checkup_hydronic_report().observation.totals.samples == 0,
+                "hydronic_unknown_shared_witness_blocks");
+        hydronic_sample(2 * HYDR_SECOND, rows, cov, 2 * HYDR_SECOND, true, false);
+        require(checkup_hydronic_report().reason == HydronicReason::MissingWitness,
+                "hydronic_positive_rps_shared_off_contradiction");
+        rows[static_cast<size_t>(HydronicInput::Rps)].value = "0";
+        hydronic_sample(3 * HYDR_SECOND, rows, cov, 3 * HYDR_SECOND, true, true);
+        require(checkup_hydronic_report().reason == HydronicReason::MissingWitness,
+                "hydronic_zero_rps_shared_on_contradiction");
+        hydronic_sample(4 * HYDR_SECOND, rows, cov, 4 * HYDR_SECOND, true, false);
+        hydronic_sample(5 * HYDR_SECOND, rows, cov, 5 * HYDR_SECOND, true, false);
+        auto r = checkup_hydronic_report();
+        require(r.reason == HydronicReason::CompressorOff &&
+                    r.observation.totals.observed_us == HYDR_SECOND &&
+                    r.observation.totals.candidate_us == 0,
+                "hydronic_consistent_off_is_observed_not_eligible");
+        rows[static_cast<size_t>(HydronicInput::Rps)].value = "12";
+        hydronic_sample(6 * HYDR_SECOND, rows, cov, 6 * HYDR_SECOND);
+        hydronic_sample(21 * HYDR_SECOND, rows, cov, 21 * HYDR_SECOND);
+        r = checkup_hydronic_report();
+        require(r.reason == HydronicReason::Settling && r.settling_remaining_s == 585 &&
+                    r.observation.totals.candidate_us == 15 * HYDR_SECOND &&
+                    r.observation.totals.observed_us == 17 * HYDR_SECOND,
+                "hydronic_consistent_running_starts_new_settling");
+        rows[static_cast<size_t>(HydronicInput::Rps)].held = true;
+        hydronic_sample(22 * HYDR_SECOND, rows, cov, 22 * HYDR_SECOND);
+        require(checkup_hydronic_report().reason == HydronicReason::MissingWitness &&
+                    checkup_hydronic_report().observation.totals.candidate_us == 15 * HYDR_SECOND,
+                "hydronic_held_rps_cannot_bridge_shared_witness");
+        return;
+    }
+    hydronic_settle(rows, cov);
+    hydronic_sample(602 * HYDR_SECOND, rows, cov, 602 * HYDR_SECOND);
+    const auto before = checkup_hydronic_report();
+    require(before.observation.totals.samples == 2 &&
+                before.observation.totals.qualified_us == HYDR_SECOND,
+            "hydronic_fixture_actual_qualified_population");
+    if (name == "hydronic_pause_resume") {
+        sdk::now_us = 603 * HYDR_SECOND;
+        checkup_set_diagnostics(false, 23);
+        hydronic_sample(604 * HYDR_SECOND, rows, cov, 604 * HYDR_SECOND);
+        auto r = checkup_hydronic_report();
+        require(!r.current && r.reason == HydronicReason::NoConsent && !r.observation.confirmed &&
+                    r.observation.totals.samples == 0,
+                "hydronic_pause_withholds_live_and_population_while_off");
+        sdk::now_us = 608 * HYDR_SECOND;
+        checkup_set_diagnostics(true, 23);
+        r = checkup_hydronic_report();
+        require(!r.current && r.reason == HydronicReason::PollGap && r.observation.confirmed &&
+                    r.observation.totals.samples == 2 &&
+                    r.observation.totals.observed_us == 601 * HYDR_SECOND &&
+                    r.observation.totals.qualified_us == HYDR_SECOND,
+                "hydronic_same_gen_resume_restores_24h_population");
+        hydronic_sample(610 * HYDR_SECOND, rows, cov, 610 * HYDR_SECOND);
+        r = checkup_hydronic_report();
+        require(r.current && r.reason == HydronicReason::Settling &&
+                    r.settling_remaining_s == 600 && r.observation.totals.samples == 2 &&
+                    r.observation.totals.observed_us == 601 * HYDR_SECOND &&
+                    r.observation.totals.qualified_us == HYDR_SECOND,
+                "hydronic_pause_resume_resets_settling_and_never_bridges_pause");
+        hydronic_sample(625 * HYDR_SECOND, rows, cov, 625 * HYDR_SECOND);
+        r = checkup_hydronic_report();
+        require(r.current && r.reason == HydronicReason::Settling &&
+                    r.settling_remaining_s == 585 &&
+                    r.observation.totals.observed_us == 616 * HYDR_SECOND &&
+                    r.observation.totals.samples == 2,
+                "hydronic_resume_restarts_settling_countdown");
+        return;
+    }
+    if (name == "hydronic_reader_generation") {
+        // HTTP advances the poll epoch before it can acquire the Checkup mutex for reset.
+        // Stop precisely there: no reset, detection callback or new producer has run.
+        ++adapter::poll_generation;
+        const auto r = checkup_hydronic_report();
+        require(!r.current && !r.observation.confirmed &&
+                    r.reason == HydronicReason::SourceChanged &&
+                    r.observation.totals.samples == 0 && r.observation.totals.observed_us == 0,
+                "hydronic_source_epoch_reader_withdraws_before_reset");
+        const auto retained = hydronic_observation_report();
+        require(retained.confirmed && retained.totals.samples == 2 &&
+                    retained.totals.qualified_us == HYDR_SECOND,
+                "hydronic_source_epoch_reader_does_not_mutate_store");
+        return;
+    }
+    if (name == "hydronic_consent_lock" || name == "hydronic_source_lock") {
+        if (name == "hydronic_consent_lock") {
+            consent_restore_generation = 23;
+            sdk::before_take           = consent_off_on;
+        } else {
+            sdk::before_take = [] {
+                ++adapter::poll_generation;
+                checkup_reset_on_detect(HYDR_PROFILE, 0x87654321);
+            };
+        }
+        hydronic_sample(603 * HYDR_SECOND, rows, cov, 603 * HYDR_SECOND);
+        auto r = checkup_hydronic_report();
+        require(!r.current && r.observation.totals.samples == 0 &&
+                    r.observation.totals.observed_us == 0 && r.observation.persistence_pending,
+                name == "hydronic_consent_lock" ? "hydronic_consent_discards_staged_sample"
+                                                : "hydronic_source_discards_staged_sample");
+        // Source replacement conservatively discards the reset-consuming new sweep as well.
+        if (name == "hydronic_source_lock")
+            hydronic_sample(604 * HYDR_SECOND, rows, cov, 604 * HYDR_SECOND, true, true, 8);
+        hydronic_sample(605 * HYDR_SECOND, rows, cov, 605 * HYDR_SECOND, true, true,
+                        adapter::poll_generation);
+        r = checkup_hydronic_report();
+        require(r.current && r.reason == HydronicReason::Settling &&
+                    r.settling_remaining_s == 600 && r.observation.totals.samples == 0 &&
+                    r.observation.totals.candidate_us == 0,
+                "hydronic_replacement_first_new_sweep_is_baseline");
+        return;
+    }
+    if (name == "hydronic_expiry") {
+        sdk::now_us      = 616 * HYDR_SECOND;
+        sdk::before_take = [] { sdk::now_us = 618 * HYDR_SECOND; };
+        checkup_hydronic_expire(616 * HYDR_SECOND);
+        auto r = checkup_hydronic_report();
+        require(!r.current && r.reason == HydronicReason::PollGap &&
+                    r.observation.totals.samples == 2 &&
+                    r.observation.totals.qualified_us == HYDR_SECOND,
+                "hydronic_reader_expiry_after_lock_retains_dated_population");
+        sdk::now_us = 619 * HYDR_SECOND;
+        checkup_hydronic_report();
+        hydronic_sample(620 * HYDR_SECOND, rows, cov, 617 * HYDR_SECOND);
+        r = checkup_hydronic_report();
+        require(!r.current && r.observation.totals.samples == 2 &&
+                    r.observation.totals.candidate_us == 601 * HYDR_SECOND,
+                "hydronic_expiry_fences_inflight");
+        sdk::now_us = 622 * HYDR_SECOND;
+        checkup_hydronic_report(); // this reader must not move the fence beyond fresh start 621
+        checkup_hydronic_expire(622 * HYDR_SECOND);
+        hydronic_sample(623 * HYDR_SECOND, rows, cov, 621 * HYDR_SECOND);
+        r = checkup_hydronic_report();
+        require(r.current && r.reason == HydronicReason::Settling &&
+                    r.settling_remaining_s == 600 && r.observation.totals.samples == 2,
+                "hydronic_repeat_expiry_does_not_starve_fresh_sweep");
+        for (int64_t t = 638; t <= 1223; t += 15)
+            hydronic_sample(t * HYDR_SECOND, rows, cov, t * HYDR_SECOND);
+        r = checkup_hydronic_report();
+        require(r.observation.totals.samples == 3 &&
+                    r.observation.totals.candidate_us == 1201 * HYDR_SECOND &&
+                    r.observation.totals.qualified_us == HYDR_SECOND,
+                "hydronic_after_expiry_settles_again_without_blind_credit");
+        return;
+    }
+    require(sdk::shutdown != nullptr, "hydronic_shutdown_hook_registered");
+    sdk::now_us = 604 * HYDR_SECOND;
+    sdk::shutdown();
+    auto r = checkup_hydronic_report();
+    require(!r.current && r.reason == HydronicReason::PollGap &&
+                r.observation.totals.samples == before.observation.totals.samples &&
+                r.observation.totals.observed_us == before.observation.totals.observed_us &&
+                r.observation.totals.qualified_us == before.observation.totals.qualified_us &&
+                r.observation.persistence_pending,
+            "hydronic_shutdown_seals_without_fabricated_duration");
+    hydronic_sample(605 * HYDR_SECOND, rows, cov, 605 * HYDR_SECOND);
+    require(!checkup_hydronic_report().current &&
+                checkup_hydronic_report().observation.totals.samples == 2,
+            "hydronic_sealed_producer_does_not_reopen_population");
+}
 } // namespace
 int main(int argc, char** argv) {
     std::string name = argc == 2 ? argv[1] : "";
     try {
-        if (name.rfind("stop_", 0) == 0)
+        if (name.rfind("hydronic_", 0) == 0)
+            hydronic_case(name);
+        else if (name.rfind("stop_", 0) == 0)
             stop_context_case(name);
         else if (name.rfind("buh_", 0) == 0 || name == "heaters_both_on" ||
                  name == "legacy_text_unknown" || name == "single_declared_buh_step")

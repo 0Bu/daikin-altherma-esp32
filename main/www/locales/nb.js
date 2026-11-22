@@ -1,4 +1,4 @@
-// translation-source: aa3abf8d6b7cd47b6adfa6bc6f918e3a1dbe62e1de7c6d8deffda21d1fb75661
+// translation-source: f982a05344b9ece7dec235d585ceb16879699f0cadc0c452af38729b31d32a37
 I18N.nb = localeValues([
   /* sys.nodata */ "Ingen data",
   /* sys.unreachable */ "Ikke tilgjengelig",
@@ -276,6 +276,12 @@ I18N.nb = localeValues([
   /* service.metric.eev */ "Ekspansjonsventilkommando",
   /* service.metric.hp */ "Høytrykk",
   /* service.metric.lp */ "Lavtrykk",
+  /* check.hydronic.labels */ "Temperaturdifferanse vann|Pumpekommando|Observert / egnet / kvalifisert|Tidspunkter for datagrunnlag|Kvalifiserte tidspunkter|Nå|Populasjon|Timeblokker|Mål for vanntemperaturforskjell",
+  /* check.hydronic.reasons */ "Kvalifisert av prosjektfilter|Diagnostikk av|Ingen aktuell kilde|Ugyldig avlesning|Pumpe av|Varmtvannsbane|Tilleggsvarmer meldt på|Gjenstående oppstart|Observasjonsklokke utilgjengelig|Kilde endret|Diagnostikksamtykke endret|Tellergrense nådd|Deaktivert for denne oppstarten|Kvalifisering ukjent",
+  /* check.hydronic.limits */ "Regulatorfaser kan ikke observeres|Pumpekommando utilgjengelig|Venter på gjenoppretting",
+  /* check.hydronic.counts */ (w, c) => `Vannavlesninger ${w} · kommandoavlesninger ${c}`,
+  /* check.hydronic.states */ "Ubekreftet kilde|Datert|Udatert|Ufullstendige 24 t|Venter på lagring|Tellergrense nådd: nedre grenser",
+  /* check.hydronic.loss */ (n) => `Meldinger om lagringstap ${n}`,
   /* service.metric.range */ (a, b, c, d) => `min. ${a} · snitt ${b} · maks. ${c} ${d}`,
   /* service.metric.samples */ n => `${n} ${n === 1 ? "inkludert måling" : "inkluderte målinger"}`,
   /* service.metric.input_none */ "Ingen valgt inngang",
@@ -1310,7 +1316,7 @@ MODEL_DESCRIPTION_I18N.nb = modelDescriptionValues([
   ["Ved hull i målingene kan enkelte starter mangle i tellingen.", "Det finnes ikke et fast normalt antall starter. Med nok data regner denne kontrollen fullførte varmekjøringer med et snitt på minst 10 minutter som lange nok."], // health_cycling
   ["Avriming", "≥3 parede, >15% av kompressorens driftstid der både kompressor- og avrimingsstatus er lesbar. Intern regel, ikke Daikin; fuktighet og hele varmevekslerens temperatur mangler."], // health_defrost
   ["24-timers vanntrykkurve i lukket hydraulikkrets (X10A, 5-minutters minimumsverdier).", "Kurveveiledning: >1,0 bar normalt, ≤1,0 bar lavt, ≤0,5 bar kritisk (diagnose ved ≥60 s kontinuerlig). Tillatt fylle- og driftstrykk avhenger av nøyaktig modellmanual og anleggshøyde; verdien alene beviser verken lekkasje eller feil."], // health_pressure
-  ["Strømning etter 60 s pumpe", "Grense krever samme modell/modus/forhold; ikke nominell eller lavstrømningsbevis."], // health_flow
+  ["Laveste strømning etter 60 s kontinuerlig drift av intern pumpe; separat: prøvevektet statistikk for temperaturdifferanse vann, strømning og pumpekommando etter 600 s oppvarmingsinnkjøring.", "Ikke nominell strømning eller bevis på dellast. Gjelder felles vannside-varmeveksler. Pumpekommando måler ikke turtall eller løftehøyde. 600 s prosjektfilter (hull ≤15 s) beviser ikke stabil drift; ingen målsammenligning eller hydraulisk årsak."], // health_flow
   ["BUH/BSH ON-tid", "ikke energi eller bevis på unødig varme."], // health_heater
   ["5 eksperimentelle tellere", "sammenlignbare økninger; hull/reset utelates. Stabilitet utelukker ikke begrensning eller beviser årsak."], // health_retries
   ["RAM 24 h: stabil, fall snur; varig fall: mulig lekkasje; kompatibel omstart med strøm: RAM-kurve mulig; ellers kun daterte kompatible 5 min fra flashjournal etter tidssynk. 5 min oppløsning kan skjule korte stopp; åpne/siste ulagrede kan mangle."], // free_heap

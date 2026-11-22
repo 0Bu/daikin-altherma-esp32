@@ -223,7 +223,7 @@ try {
   assert.ok(literal, "the served bytes must contain their exact offline payload");
   const framed = Uint8Array.from(decoder.decompress(Buffer.from(JSON.parse(literal), "base64")));
   const encodedFrame = Buffer.from(JSON.parse(literal), "base64");
-  assert.equal(encodedFrame[0], 0x5d);
+  assert.equal(encodedFrame[0], 3, "LZMA header pins lc=3, lp=0 and pb=0");
   assert.equal(encodedFrame.readUInt32LE(1), 524288);
   assert.equal(encodedFrame.readBigUInt64LE(5), BigInt(info.framed_bytes));
   assert.deepEqual(Array.from(framed.subarray(0, 6)), [255, 76, 90, 77, 65, 1]);

@@ -255,6 +255,7 @@ logic::CheckupCyclingEvidence checkup_cycling_evidence(DiagnosticsSource source)
     return source == DiagnosticsSource::Modbus ? adapter::modbus_cycling : adapter::cycling;
 }
 CheckupStopContextReport      checkup_stop_context_report() { return adapter::stop_context; }
+CheckupHydronicReport         checkup_hydronic_report() { return {}; }
 CrashInfo             diag_crash_info() { return adapter::boot; }
 CrashInfo             diag_crash_info_live() { return adapter::live_crash; }
 WifiInfo              wifi_info() { return adapter::wifi; }
@@ -1611,6 +1612,10 @@ void outgoing_heartbeat() {
             "HEARTBEAT_EMIT_RETURNS_WITHOUT_CPP_ALLOCATION_AFTER_SDK_ACCEPT");
     {
         daik::JsonGuard root(parse_wire(sdk::published[0]));
+        require(cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(root.get(), "hydronic_samples")),
+                "HYDRONIC_ABSENT_SAMPLE_COUNT_NULL");
+        wire_number(root.get(), "hydronic_settling_s", 600, "HYDRONIC_SETTLING_FILTER_ON_WIRE");
+        wire_number(root.get(), "hydronic_target_supported", 0, "HYDRONIC_TARGET_NOT_AVAILABLE");
         wire_text(root.get(), "version", "host-witness", "HEARTBEAT_DEVICE_VERSION_ON_WIRE");
         wire_text(root.get(), "platform", "esp32s3", "HEARTBEAT_PLATFORM_ON_WIRE");
         wire_text(root.get(), "uptime", "000+00:02:03.456", "HEARTBEAT_UPTIME_ON_WIRE");

@@ -23,6 +23,7 @@
 #include "logic/cycling_persist.hpp"
 #include "logic/fault_persist.hpp"
 #include "logic/fault_trace.hpp"
+#include "hydronic_observation_store.hpp"
 #include "stop_observation_store.hpp"
 
 #include <cstddef>
@@ -87,9 +88,14 @@ uint32_t checkup_consent_epoch();
 // `profile_confirmed` refers to the supplied capability metadata. Temporary allocation/TLS gaps
 // pass false to retain the current profile, while an unresolved profile explicitly supplies empty
 // metadata. Neither an empty sample nor that flag establishes a successful bus observation.
+// `sweep_started_us` is captured before the actual poll begins. Only the independent hydronic
+// population uses it to refuse inputs older than its 15 s allowance; unavailable timing (-1)
+// cannot qualify that population. Existing minimum-flow and other diagnosis contracts are
+// unchanged.
 void checkup_record(const CachedValue* v, size_t n, bool rps_known, bool rps_running,
                     const logic::CheckupCoverage& coverage, uint32_t source_generation,
-                    uint32_t consent_epoch, bool profile_confirmed = true);
+                    uint32_t consent_epoch, bool profile_confirmed = true,
+                    int64_t sweep_started_us = -1);
 
 // Feed one confirmed HomeHub/Modbus full poll cycle into the independent Modbus checkup slot.
 void checkup_record_modbus(const CachedValue* v, size_t n, ModbusProfile profile,
@@ -155,6 +161,20 @@ struct CheckupStopContextReport {
 
 // Independent, bounded observation population; never changes the completed-run verdict.
 CheckupStopContextReport checkup_stop_context_report();
+
+struct CheckupHydronicReport {
+    HydronicObservationReport observation;
+    logic::HydronicReason     reason            = logic::HydronicReason::NoSource;
+    uint32_t                  source_generation = 0, schema_fp = 0;
+    uint32_t                  settling_remaining_s = 0;
+    uint8_t                   limitations          = 0;
+    bool                      current              = false;
+};
+
+// Current qualification and dated populations have independent clocks. Neither changes the
+// existing flow minimum or the eight-check verdict. History calls expiry before its flash lock.
+CheckupHydronicReport checkup_hydronic_report();
+void                  checkup_hydronic_expire(int64_t now_us);
 
 // Copy the next completed hourly pair after `after_bucket` into a journal payload. `now_unix_s`
 // supplies the wall-clock anchor; no record is produced before time is synced or before one hour

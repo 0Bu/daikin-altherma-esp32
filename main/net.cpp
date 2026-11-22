@@ -568,6 +568,11 @@ EthInfo net_eth_info() {
 // so this task does not exist on any device without a PoE base. See logic/net_link.hpp for why the
 // verdict is a reboot rather than starting a station here.
 
+// Release the OTA snapshot before the task enters the synchronous restart handlers.
+static __attribute__((noinline)) bool eth_fallback_ota_updating() {
+    return ota_status().state == "updating";
+}
+
 static void eth_fallback_task(void*) {
     EthFallbackWatch watch{};
     for (;;) {
@@ -585,7 +590,7 @@ static void eth_fallback_task(void*) {
             // An OTA in flight owns the device: interrupting a download re-runs it from scratch,
             // and interrupting an INSTALL is the one moment a reboot can leave a half-written
             // slot. The watch has already been spent, so this simply re-earns its verdict.
-            if (ota_status().state == "updating") {
+            if (eth_fallback_ota_updating()) {
                 diag_printf("net: Ethernet still down, but an OTA is running — deferring the "
                             "reboot\n");
                 continue;
