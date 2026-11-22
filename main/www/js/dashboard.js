@@ -1482,19 +1482,46 @@ function checkupDuration(s) {
   return remainder ? `${hours} h ${remainder} min` : `${hours} h`;
 }
 
+function checkupCyclingShortRunCount(c) {
+  const rec = c?.timeline?.records;
+  if (c?.timeline?.run_edges !== true || !Array.isArray(rec)) return 0;
+  const ctxByStart = new Map();
+  if (Array.isArray(c.run_contexts)) {
+    for (const rc of c.run_contexts) ctxByStart.set(rc.at, rc);
+  }
+  let shortN = 0, run = null;
+  for (const r of rec) {
+    const at = r >>> 3, k = r & 7;
+    if (k === 5) {
+      run = { start: at, mode: ctxByStart.get(at)?.mode || null };
+    } else if (k === 6) {
+      if (run && run.mode === "space" && at >= run.start && at - run.start < 300) shortN++;
+      run = null;
+    } else if (k === 0) {
+      run = null;
+    } else if (run && !ctxByStart.has(run.start)) {
+      if (k === 3) run.mode = "space";
+      else if (k === 2 || k === 4) run.mode = "other";
+    }
+  }
+  return shortN;
+}
+
 function checkupCyclingDetailHtml(c, report) {
   const starts = checkupMetricValue(c);
   const count = n => Number.isInteger(n) && n >= 0;
+  const shortHeat = checkupCyclingShortRunCount(c);
   const runs = [
-    ["mode.heat", c.space_runs, c.space_mean_run_s],
-    ["mode.dhw", c.dhw_runs, c.dhw_mean_run_s],
-    ["mode.cool", c.cooling_runs > 0 ? c.cooling_runs : null],
-    ["check.cycling.unclear", c.censored_runs > 0 ? c.censored_runs : null],
+    ["mode.heat", c.space_runs, c.space_mean_run_s, shortHeat],
+    ["mode.dhw", c.dhw_runs, c.dhw_mean_run_s, 0],
+    ["mode.cool", c.cooling_runs > 0 ? c.cooling_runs : null, null, 0],
+    ["check.cycling.unclear", c.censored_runs > 0 ? c.censored_runs : null, null, 0],
   ];
   const rows = c.verdict === "unavailable" ? "" : runs.filter(([, n]) => count(n))
-    .map(([label, n, mean]) => {
-      const value = t("check.cycling.runs", n) + (n > 0 && Number.isFinite(mean) && mean >= 0
+    .map(([label, n, mean, shortN]) => {
+      let value = t("check.cycling.runs", n) + (n > 0 && Number.isFinite(mean) && mean >= 0
         ? ` · ${t("check.cycling.mean", checkupDuration(mean))}` : "");
+      if (shortN > 0) value += ` · ${t("check.cycling.short_runs", shortN)}`;
       return `<div class="inspect-row"><span>${esc(t(label))}</span><span>${esc(value)}</span></div>`;
     }).join("");
   let assessment = "waiting";
@@ -1506,7 +1533,7 @@ function checkupCyclingDetailHtml(c, report) {
   else if (c.reason === "heating_runs_insufficient" && starts) assessment = "few";
 
   const description = MODEL_DESCRIPTIONS.health_cycling;
-  const [what, normal] = modelDescriptionCopy("health_cycling") || [description.what, description.normal];
+  const [what] = modelDescriptionCopy("health_cycling") || [description.what];
   const saved = Array.isArray(c.hours) ? c.hours.reduce((sum, h) => sum +
     (h?.restored && !h.expired && count(h.starts) ? h.starts : 0), 0) : 0;
   const detail = [t(`check.cycling.${assessment}`)];
@@ -1521,8 +1548,7 @@ function checkupCyclingDetailHtml(c, report) {
     `<div class="vdesc-p checkup-cycling-assessment">${esc(detail.join(" "))}</div>` +
     (rows ? `<div class="vdesc-p">${esc(t("check.cycling.completed"))}</div>` +
       `<div class="inspect-rows checkup-cycling-grid">${rows}</div>` : "") +
-    `<div data-checkup-hours></div>` +
-    descNoteHtml(t("normal.label"), normal);
+    `<div data-checkup-hours></div>`;
 }
 
 function syncCheckupCyclingChart(card) {
@@ -1538,6 +1564,9 @@ function renderCheckupCyclingChart(slot, open = true) {
   if (slot._checkupMarkup !== html) {
     replaceHistoryHtml(slot, html);
     slot._checkupMarkup = html;
+  } else if (typeof paintCyclingChart === "function") {
+    const chart = slot.querySelector("[data-cycling]");
+    if (chart) paintCyclingChart(chart);
   }
   const trace = check?.timeline;
   // Both device timestamps are rounded down. Use the upper bound on the sample age.
@@ -1583,28 +1612,282 @@ function checkupCyclingRunsHtml(runs, wall) {
   return `<table class="checkup-run-table"><thead><tr>${heads.join("")}</tr></thead><tbody>${rows.join("")}</tbody></table>`;
 }
 
-// These are visual categories, not durations. The shared localized Unknown label also covers
-// unassigned runtime and missing readings. Readable off-time adds no colour.
+// These are visual categories filled bottom-to-top proportionally across active + unknown segments
+// within an hour. Readable off-time adds no colour.
 const CHECKUP_CYCLING_MODES = [
   ["space", "mode.heat", "--flow-hot"],
   ["dhw", "mode.dhw", "--brand"],
   ["other", "check.fault_unknown", "--muted"],
 ];
-function checkupCyclingFillHtml(modes) {
-  // Canonical order and one colour per category: neither order nor duration changes the mixture.
-  const palette = CHECKUP_CYCLING_MODES.filter(([mode]) => modes.has(mode));
-  const colors = palette.map(([, , color], i) => `--cycling-${"abc"[i]}:var(${color})`).join(";");
-  return `<s class="checkup-chart-fill${palette.length > 1 ? " mixed" : ""}" aria-hidden="true"` +
-    ` data-modes="${palette.map(([mode]) => mode).join(" ")}"${colors ? ` style="${colors}"` : ""}></s>`;
+const _cyclingModels = new Map();
+let cyclingModelRev = 0;
+
+function checkupCyclingFillHtml(segments) {
+  const merged = [];
+  for (const s of segments || []) {
+    if (!s || !(s.dur > 0)) continue;
+    const prev = merged.at(-1);
+    if (prev && prev.cat === s.cat) prev.dur += s.dur;
+    else merged.push({ cat: s.cat, dur: s.dur });
+  }
+  const total = merged.reduce((sum, s) => sum + s.dur, 0);
+  if (total <= 0) return `<s class="checkup-chart-fill" aria-hidden="true" data-modes=""></s>`;
+  const colorMap = Object.fromEntries(CHECKUP_CYCLING_MODES.map(([m, , c]) => [m, `var(${c})`]));
+  const present = CHECKUP_CYCLING_MODES.filter(([m]) => merged.some(s => s.cat === m));
+  const modesAttr = present.map(([m]) => m).join(" ");
+  if (present.length === 1) {
+    return `<s class="checkup-chart-fill" aria-hidden="true" data-modes="${modesAttr}" style="--cycling-a:${colorMap[present[0][0]]}"></s>`;
+  }
+  let acc = 0;
+  const stops = [];
+  for (const seg of merged) {
+    const p0 = (acc / total * 100).toFixed(2);
+    acc += seg.dur;
+    const p1 = (acc / total * 100).toFixed(2);
+    const col = colorMap[seg.cat] || colorMap.other;
+    stops.push(`${col} ${p0}%`, `${col} ${p1}%`);
+  }
+  return `<s class="checkup-chart-fill segmented" aria-hidden="true" data-modes="${modesAttr}" style="--cycling-fill:linear-gradient(to top, ${stops.join(", ")})"></s>`;
 }
 function checkupCyclingLegendHtml() {
   return CHECKUP_CYCLING_MODES.map(([mode, label]) =>
     `<span class="checkup-chart-key"><i class="${mode}" aria-hidden="true"></i>${esc(t(label))}</span>`).join("");
 }
 
+function cyclingRichText(fn, ...items) {
+  const tokens = items.map((item, idx) => `\u0003${idx}\u0004`);
+  let out = esc(fn(...tokens));
+  items.forEach((item, idx) => {
+    const ph = `\u0003${idx}\u0004`;
+    const repl = item && typeof item === "object" && "raw" in item
+      ? item.raw : `<strong>${esc(item == null ? "" : String(item))}</strong>`;
+    out = out.replaceAll(ph, repl);
+  });
+  return out;
+}
+
+function cyclingIsLowFlow(ctx, flowTypical) {
+  return Number.isFinite(ctx?.flow_l_min) && Number.isFinite(flowTypical) &&
+    flowTypical > 0 && ctx.flow_l_min <= flowTypical * 0.65;
+}
+
+const CYCLING_STOP_KEYS = {
+  request_withdrawal: "stop_req_off",
+  target_changed: "stop_tgt_drop",
+  dhw_transition: "stop_dhw",
+};
+function cyclingStopSummaryText(r, flowTypical) {
+  const ctx = r.ctx;
+  const mode = ctx?.mode || r.mode || "space";
+  if (!ctx) return null;
+  if (!ctx.stop_kind) return null;
+  if (ctx.stop_kind === "low_rps_above_target") {
+    return t(cyclingIsLowFlow(ctx, flowTypical) ? "check.cycling.stop_low_flow" : "check.cycling.stop_low_rps");
+  }
+  if (ctx.stop_kind === "defrost") return t(mode === "other" ? "check.cycling.stop_defrost_done" : "check.cycling.stop_defrost");
+  if (ctx.stop_kind === "normal") return t(mode === "dhw" ? "check.cycling.stop_normal_dhw" : "check.cycling.stop_normal");
+  const k = CYCLING_STOP_KEYS[ctx.stop_kind];
+  return t(k ? `check.cycling.${k}` : "check.cycling.run_stop_unknown");
+}
+
+function collectPeriodRuns(model, from, to) {
+  const runs = [];
+  for (let i = from; i <= to; ++i) {
+    for (const r of model.hours[i].runs) {
+      runs.push({ ...r, ctx: model.runContextByStart.get(r.start) || null });
+    }
+  }
+  return runs.sort((a, b) => a.start - b.start);
+}
+
+function cyclingPeriodFindingHtml(model, from, to) {
+  const runs = collectPeriodRuns(model, from, to);
+  const startsTotal = model.hours.slice(from, to + 1).reduce((s, h) => s + h.starts.length, 0);
+  if (!runs.length && startsTotal === 0) return esc(t("check.cycling.no_timed_runs"));
+  if (!runs.length) return esc(t("check.cycling.run_details_unavailable"));
+
+  const heating = runs.filter(r => (r.ctx?.mode || r.mode) === "space");
+  const completedHeat = heating.filter(r => r.stop != null);
+  const shortHeat = completedHeat.filter(r => (r.stop - r.start) < 600).length;
+  const isCycling = model.hours.slice(from, to + 1).some(h => h.isCycling) || shortHeat >= 2;
+
+  let lowRps = 0, reqOff = 0, tgtDrop = 0, defrost = 0, dhwTrans = 0;
+  for (const r of runs) {
+    const sk = r.ctx?.stop_kind;
+    if (sk === "low_rps_above_target") ++lowRps;
+    else if (sk === "request_withdrawal") ++reqOff;
+    else if (sk === "target_changed") ++tgtDrop;
+    else if (sk === "defrost" || r.ctx?.start_kind === "defrost_start") ++defrost;
+    else if (sk === "dhw_transition") ++dhwTrans;
+  }
+
+  const outVals = runs.map(r => r.ctx?.outdoor_c).filter(Number.isFinite);
+  const outdoorMean = outVals.length
+    ? outVals.reduce((a, b) => a + b, 0) / outVals.length
+    : (Number.isFinite(model.outdoorMean) ? model.outdoorMean : null);
+  const outCond = outdoorMean != null ? t("check.cycling.out_cond", `${histFmt1(outdoorMean)} °C`) : "";
+
+  const flowVals = completedHeat.map(r => r.ctx?.flow_l_min).filter(v => Number.isFinite(v) && v > 0);
+  const minFlow = flowVals.length ? Math.min(...flowVals) : null;
+  const meanFlow = flowVals.length ? flowVals.reduce((a, b) => a + b, 0) / flowVals.length : null;
+  const typ = model.flowTypical;
+  const lowFlow = minFlow != null && typ != null && typ > 0 && minFlow <= typ * 0.65;
+
+  const fmtFind = (key, ...args) => {
+    const raw = String(t(key, ...args));
+    const colon = raw.search(/[:：]/);
+    if (colon > 0 && colon < 72) {
+      return `<span class="vdesc-n">${esc(raw.slice(0, colon + 1))}</span>${esc(raw.slice(colon + 1))}`;
+    }
+    return esc(raw);
+  };
+
+  if (isCycling && lowRps >= 2 && lowFlow) {
+    const typTag = typ != null ? t("check.cycling.typ_tag", `~${histFmt1(typ)} L/min`) : "";
+    return fmtFind("check.cycling.find_low_flow", `${histFmt1(minFlow)} L/min`, typTag);
+  }
+  if (isCycling && lowRps >= 2) {
+    const flowStr = meanFlow != null ? `${histFmt1(meanFlow)} L/min` : t("check.fault_unknown");
+    return fmtFind("check.cycling.find_low_rps", flowStr, outCond);
+  }
+  if (isCycling && reqOff + tgtDrop >= 2) return fmtFind("check.cycling.find_control");
+  if (defrost > 0 && dhwTrans > 0) return fmtFind("check.cycling.find_defrost_dhw", outCond);
+  if (defrost > 0) return fmtFind("check.cycling.find_defrost", outCond);
+  if (dhwTrans > 0) return fmtFind("check.cycling.find_dhw");
+  const meanHeatS = completedHeat.length
+    ? completedHeat.reduce((s, r) => s + (r.stop - r.start), 0) / completedHeat.length : 0;
+  if (completedHeat.length > 0 && meanHeatS >= 600) {
+    return fmtFind("check.cycling.find_steady", minFlow != null ? `${histFmt1(minFlow)} L/min` : "");
+  }
+  return esc(t("check.starts", startsTotal));
+}
+
+function cyclingRunExplainHtml(r, fromExact, toExact, priorPauseS, flowTypical) {
+  const ctx = r.ctx;
+  const rich = (k, ...a) => cyclingRichText(I18N[LANG]?.[`check.cycling.${k}`] || I18N.en[`check.cycling.${k}`], ...a);
+  const f1 = (v, u) => Number.isFinite(v) ? `${histFmt1(v)} ${u}` : null;
+  const pauseStr = priorPauseS != null && priorPauseS >= 0 && priorPauseS <= 7200
+    ? t("check.cycling.pause_tag", priorPauseS < 1800 ? checkupCyclingDuration(priorPauseS) : checkupDuration(priorPauseS))
+    : "";
+  const lwt = f1(ctx.lwt_c, "°C"), tgt = f1(ctx.target_c, "°C"), rwt = f1(ctx.rwt_c, "°C");
+  const flow = f1(ctx.flow_l_min, "L/min");
+  const typ = Number.isFinite(flowTypical) && flowTypical > 0 ? `${histFmt1(flowTypical)} L/min` : null;
+  const startLwt = f1(ctx.start_lwt_c, "°C");
+  const startTgt = f1(ctx.start_target_c, "°C") || tgt || null;
+  const startPrev = f1(ctx.start_target_prev_c, "°C");
+  const startCond = startLwt && startTgt ? t("check.cycling.cond_tag", startLwt, startTgt) : startLwt ? ` (${startLwt})` : "";
+  const pauseItem = { raw: esc(pauseStr) };
+  const startCondItem = { raw: esc(startCond) };
+  const fromPrevItem = { raw: startPrev ? esc(t("check.cycling.from_tag", startPrev)) : "" };
+  const startOpt = { raw: startLwt ? esc(` (${startLwt})`) : "" };
+
+  let startHtml;
+  switch (ctx.start_kind) {
+    case "cooldown_restart": startHtml = rich("s_cool", fromExact, pauseItem, startLwt || "—", startTgt || "—"); break;
+    case "request_on": startHtml = rich("s_req", fromExact, pauseItem, startCondItem); break;
+    case "target_raised": startHtml = rich("s_tgt", fromExact, pauseItem, fromPrevItem, startTgt || "—", startOpt); break;
+    case "after_defrost": startHtml = rich("s_defrost_after", fromExact, pauseItem, startCondItem); break;
+    case "after_dhw": startHtml = rich("s_dhw_after", fromExact, pauseItem, startCondItem); break;
+    case "defrost_start": startHtml = rich("s_defrost", fromExact, pauseItem); break;
+    case "dhw_start": startHtml = rich("s_dhw", fromExact, pauseItem, startOpt); break;
+    default: startHtml = rich("s_gen", fromExact, pauseItem, startCondItem); break;
+  }
+
+  if (!ctx.stop_kind) {
+    if (r.latest == null) return `${startHtml} ${esc(t("check.cycling.run_stop_unknown"))}`;
+    return `${startHtml} <span class="checkup-run-live">${esc(t("check.cycling.e_ongoing"))}</span>` +
+      `<span class="checkup-run-stale">${esc(t("check.cycling.run_stop_unknown"))}</span>`;
+  }
+
+  const metricParts = [lwt && tgt ? `${lwt} / ${tgt}` : lwt, rwt && t("check.cycling.rwt_tag", rwt), flow].filter(Boolean);
+  const valsItem = { raw: metricParts.length ? esc(` (${metricParts.join(" · ")})`) : "" };
+  const rwtItem = { raw: rwt ? esc(`, ${t("check.cycling.rwt_tag", rwt)}`) : "" };
+  const typItem = { raw: typ ? esc(t("check.cycling.typ_tag", `~${typ}`)) : "" };
+  const prevItem = { raw: Number.isFinite(ctx.target_prev_c) ? esc(t("check.cycling.from_tag", `${histFmt1(ctx.target_prev_c)} °C`)) : "" };
+
+  let stopHtml;
+  switch (ctx.stop_kind) {
+    case "low_rps_above_target":
+      stopHtml = cyclingIsLowFlow(ctx, flowTypical)
+        ? rich("e_low_flow", toExact, lwt || "—", tgt || "—", rwtItem, flow || "—", typItem)
+        : rich("e_low_rps", toExact, lwt || "—", tgt || "—", rwtItem, flow || "—", Number.isFinite(ctx.min_rps) && ctx.min_rps > 0 ? `${histFmt1(ctx.min_rps)} rps` : "—");
+      break;
+    case "request_withdrawal": stopHtml = rich("e_req", toExact, valsItem); break;
+    case "target_changed": stopHtml = rich("e_tgt", toExact, prevItem, tgt || "—", valsItem); break;
+    case "defrost": stopHtml = rich(ctx.mode === "other" ? "e_defrost_run" : "e_defrost_pause", toExact, valsItem); break;
+    case "dhw_transition": stopHtml = rich("e_dhw", toExact, valsItem); break;
+    default: stopHtml = rich("e_norm", toExact, valsItem); break;
+  }
+  return `${startHtml} ${stopHtml}`;
+}
+
+function cyclingPeriodDetailsHtml(model, from, to) {
+  const runs = collectPeriodRuns(model, from, to);
+
+  if (!model.hasContext) {
+    if (runs.length) return checkupCyclingRunsHtml(runs, model.wall);
+    const anyObserved = model.runEdges && model.hours.slice(from, to + 1).some(h => h.observed);
+    return esc(t(anyObserved ? "check.cycling.no_timed_runs" : "check.cycling.run_details_unavailable"));
+  }
+
+  const findingHtml = `<p class="vdesc-p checkup-period-finding">${cyclingPeriodFindingHtml(model, from, to)}</p>`;
+  if (!runs.length) {
+    const anyObserved = model.runEdges && model.hours.slice(from, to + 1).some(h => h.observed);
+    const startsTotal = model.hours.slice(from, to + 1).reduce((s, h) => s + h.starts.length, 0);
+    const emptyMsg = t(startsTotal > 0 || !anyObserved ? "check.cycling.run_details_unavailable" : "check.cycling.no_timed_runs");
+    return `${findingHtml}<div class="vdesc-p">${esc(emptyMsg)}</div>`;
+  }
+
+  const clockOptions = { hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" };
+  const fullClock = new Intl.DateTimeFormat(LANG, clockOptions);
+  const shortClock = new Intl.DateTimeFormat(LANG, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+  const modeLabel = m => t({ space: "mode.heat", dhw: "mode.dhw" }[m] || "check.fault_unknown");
+  const ongoing = (live, stale) => `<span class="checkup-run-live">${live}</span><span class="checkup-run-stale">${stale}</span>`;
+  const unknownStop = esc(t("check.cycling.run_stop_unknown"));
+
+  const rowsHtml = runs.map((r) => {
+    const ctx = r.ctx;
+    const rawMode = ctx?.mode || r.mode || "space";
+    const dotMode = rawMode === "space" || rawMode === "dhw" ? rawMode : "other";
+    const fromD = new Date(model.wall(r.start));
+    const toD = r.stop != null ? new Date(model.wall(r.stop)) : null;
+    const durHtml = r.stop != null
+      ? esc(checkupCyclingDuration(r.stop - r.start))
+      : (r.latest == null ? "—" : ongoing(esc(checkupCyclingDuration(r.latest - r.start)), "—"));
+    const stopTxt = ctx ? cyclingStopSummaryText(r, model.flowTypical) : null;
+    const stopCellHtml = r.stop != null
+      ? esc(stopTxt || t("check.cycling.run_stop_unknown"))
+      : (r.latest == null ? unknownStop : ongoing(esc(t("check.cycling.run_ongoing")), unknownStop));
+    const isOpen = !!ctx && S.cyclingExpandedRun === r.start;
+    let subHtml = "";
+    if (ctx) {
+      const prev = model.prevRunByStart.get(r.start);
+      const priorPauseS = prev && prev.stop != null && r.start > prev.stop ? r.start - prev.stop : null;
+      const fromExact = fullClock.format(fromD);
+      const toExact = toD ? fullClock.format(toD) : "?";
+      const explain = cyclingRunExplainHtml(r, fromExact, toExact, priorPauseS, model.flowTypical);
+      subHtml = `<tr class="checkup-run-sub" data-run-sub="${r.start}"${isOpen ? "" : " hidden"}><td colspan="3">` +
+        `<p class="checkup-run-explain">${explain}</p></td></tr>`;
+    }
+    return `<tr class="checkup-run-row"${ctx ? ` data-run-row="${r.start}" tabindex="0" aria-expanded="${isOpen}"` : ""}>` +
+      `<td><span class="checkup-run-start"><i class="mode-dot ${dotMode}" aria-hidden="true" title="${esc(modeLabel(dotMode))}"></i>` +
+      `<time datetime="${fromD.toISOString()}">${esc(shortClock.format(fromD))}</time></span></td>` +
+      `<td>${durHtml}</td>` +
+      `<td><div class="checkup-stop-cell"><span class="checkup-stop-text">${stopCellHtml}</span>` +
+      (ctx ? `<span class="checkup-run-chev" aria-hidden="true">›</span>` : "") +
+      `</div></td></tr>${subHtml}`;
+  }).join("");
+
+  return `${findingHtml}<table class="checkup-run-table has-cause"><thead><tr>` +
+    `<th scope="col">${esc(t("check.cycling.run_start"))}</th>` +
+    `<th scope="col">${esc(t("check.cycling.run_duration"))}</th>` +
+    `<th scope="col">${esc(t("check.cycling.col_stop"))}</th>` +
+    `</tr></thead><tbody>${rowsHtml}</tbody></table>`;
+}
+
 // Geometry uses seconds in the trace's frame and labels use its wall-clock anchor.
 // A dated frame can include older boots, with a gap record standing between observations.
-function checkupCyclingTimelineHtml(trace, scope) {
+function checkupCyclingTimelineHtml(trace, scope, checkObj) {
   const end = trace?.window_end_s, observedEnd = trace?.observed_end_s, unix = trace?.unix_s;
   const records = trace?.records, boot = trace?.boot_s;
   if (![end, observedEnd, unix].every(Number.isSafeInteger) || end > 0x1fffffff || end < observedEnd ||
@@ -1613,7 +1896,10 @@ function checkupCyclingTimelineHtml(trace, scope) {
         observedEnd > 86400 || typeof trace.live !== "boolean")) ||
       !Array.isArray(records) || !records.length || records.length > 192) return "";
   const start = end - 86400;
-  const hours = Array.from({ length: 24 }, () => ({ starts: [], runs: [], modes: new Set(), gap: false, observed: false }));
+  const hours = Array.from({ length: 24 }, (_, idx) => ({
+    starts: [], runs: [], modes: new Set(), segments: [], gap: false, observed: false,
+    fromSec: start + 3600 * idx, toSec: start + 3600 * (idx + 1), isCycling: false,
+  }));
   const readable = [];
   const modes = ["", "", "other", "space", "dhw"];
   const runEdges = trace.run_edges === true;
@@ -1626,12 +1912,22 @@ function checkupCyclingTimelineHtml(trace, scope) {
       if (previous?.[1] === from) previous[1] = until;
       else readable.push([from, until]);
     }
-    const first = Math.floor((from - start) / 3600);
-    const last = Math.ceil((until - start) / 3600);
+    const cat = state === 3 ? "space" : state === 4 ? "dhw" : (state === 0 || state === 2) ? "other" : null;
+    const first = Math.max(0, Math.floor((from - start) / 3600));
+    const last = Math.min(24, Math.ceil((until - start) / 3600));
     for (let i = first; i < last; ++i) {
       if (state === 0) hours[i].gap = true;
       else hours[i].observed = true;
       if (modes[state]) hours[i].modes.add(modes[state]);
+      const segFrom = Math.max(from, start + 3600 * i);
+      const segUntil = Math.min(until, start + 3600 * (i + 1));
+      const dur = segUntil - segFrom;
+      if (cat && dur > 0) {
+        const segs = hours[i].segments;
+        const prev = segs.at(-1);
+        if (prev && prev.cat === cat) prev.dur += dur;
+        else segs.push({ cat, dur });
+      }
     }
   };
   for (const record of records) {
@@ -1657,6 +1953,7 @@ function checkupCyclingTimelineHtml(trace, scope) {
     }
     // A later stop cannot establish that the same run continued through a gap.
     if (next === 0) run = undefined;
+    if (run && !run.mode && (next === 2 || next === 3 || next === 4)) run.mode = modes[next];
     if (at > cursor) cover(cursor, at, kind);
     cursor = Math.max(at, start);
     kind = next;
@@ -1665,6 +1962,36 @@ function checkupCyclingTimelineHtml(trace, scope) {
   cover(cursor, last, kind);
   cover(last, end, 0);
   if (run && trace.live !== false && end - observedEnd <= 15) run.latest = observedEnd;
+
+  const runContextByStart = new Map();
+  const hasContext = Array.isArray(checkObj?.run_contexts) && checkObj.run_contexts.length > 0;
+  if (hasContext) {
+    for (const rc of checkObj.run_contexts) runContextByStart.set(rc.at, rc);
+  }
+  for (const h of hours) {
+    let shortHeating = 0;
+    for (const r of h.runs) {
+      const mode = runContextByStart.get(r.start)?.mode || r.mode;
+      if (mode === "space" && r.stop != null && (r.stop - r.start) < 600) ++shortHeating;
+    }
+    h.isCycling = shortHeating >= 2;
+  }
+  const episodes = [];
+  let openEp = null;
+  for (let i = 0; i < 24; ++i) {
+    if (hours[i].isCycling) {
+      if (!openEp) openEp = { from: i, to: i };
+      else openEp.to = i;
+    } else if (openEp) {
+      episodes.push(openEp);
+      openEp = null;
+    }
+  }
+  if (openEp) episodes.push(openEp);
+  const allRuns = hours.flatMap(h => h.runs).sort((a, b) => a.start - b.start);
+  const prevRunByStart = new Map();
+  for (let i = 1; i < allRuns.length; ++i) prevRunByStart.set(allRuns[i].start, allRuns[i - 1]);
+
   const count = hours.reduce((n, h) => n + h.starts.length, 0);
   const x = sec => ((sec - start) / 86400 * 2400).toFixed(2);
   const y = n => (96 - n * 90 / Math.max(count, 1)).toFixed(2);
@@ -1692,8 +2019,17 @@ function checkupCyclingTimelineHtml(trace, scope) {
     path += `M ${x(events[n])} ${y(n)} V ${y(n + 1)} `;
     ++n;
   }
-  let cols = "", details = "";
-  hours.forEach(({ starts, runs, modes, gap, observed }, i) => {
+
+  _cyclingModels.clear();
+  _cyclingModels.set(scope, {
+    hours, wall, clock, offsetStamp, episodes, runContextByStart, prevRunByStart, hasContext,
+    runEdges, rev: ++cyclingModelRev,
+    flowTypical: Number.isFinite(checkObj?.flow_typical_l_min) ? checkObj.flow_typical_l_min : null,
+    outdoorMean: Number.isFinite(checkObj?.outdoor_mean_c) ? checkObj.outdoor_mean_c : null,
+  });
+
+  let cols = "";
+  hours.forEach(({ starts, modes, segments, gap, observed, isCycling }, i) => {
     const from = start + 3600 * i, to = from + 3600;
     const offsetChange = new Date(wall(from)).getTimezoneOffset() !== new Date(wall(to)).getTimezoneOffset();
     const span = offsetChange ? `${offsetStamp.format(wall(from))}–${offsetStamp.format(wall(to))}`
@@ -1703,15 +2039,12 @@ function checkupCyclingTimelineHtml(trace, scope) {
     const labels = CHECKUP_CYCLING_MODES.filter(([mode]) => modes.has(mode))
       .map(([mode, label]) => t(mode === "other" ? "check.cycling.unclear" : label));
     if (gap) labels.push(t(observed || starts.length ? "check.hour.gap" : "sys.nodata"));
-    const fill = new Set(modes);
-    if (gap) fill.add("other");
     const value = starts.length || !gap ? starts.length : "";
     cols += `<button type="button" class="checkup-chart-col" data-bucket="${i}" data-span="${esc(span)}"` +
       (offsetChange ? " data-offset-change" : "") +
       (runEdges && observed ? " data-run-observed" : "") +
       ` tabindex="${i === 23 ? 0 : -1}" aria-pressed="false" aria-label="${esc([date.format(wall(from)), span, countLabel, ...labels].filter(Boolean).join(" · "))}">` +
-      `<b>${value}</b>${checkupCyclingFillHtml(fill)}</button>`;
-    if (runs.length) details += `<template data-hour-runs="${i}">${checkupCyclingRunsHtml(runs, wall)}</template>`;
+      `<b${isCycling ? ' class="warn"' : ""}>${value}</b>${checkupCyclingFillHtml(segments)}</button>`;
   });
   const axis = [0, 6, 12, 18, 24].map(i => `<span>${esc(clock(start + i * 3600))}</span>`).join("");
   const legend = checkupCyclingLegendHtml();
@@ -1719,11 +2052,11 @@ function checkupCyclingTimelineHtml(trace, scope) {
     ? t("check.cycling.timed_starts", checkupCyclingCountPrefix(count) + t("check.starts", count))
     : t("sys.nodata");
   return `<div class="vhist checkup-cycling-chart checkup-cycling-timeline" role="group" aria-label="${esc(t("hist.aria", t("check.cycling")))}"` +
-    ` data-cycling="${esc(scope)}"><div class="checkup-chart-total mono num">${esc(total)}</div>` +
+    ` data-cycling="${esc(scope)}"${hasContext ? ' data-has-context="true"' : ""}><div class="checkup-chart-total mono num">${esc(total)}</div>` +
     `<div class="checkup-chart-graph"><svg class="checkup-chart-plot" viewBox="0 0 2400 100" preserveAspectRatio="none" aria-hidden="true"><path d="${path}"/></svg>` +
     `<div class="checkup-chart-cols">${cols}</div></div><div class="vhist-axis checkup-chart-axis">` +
     `<div class="checkup-chart-ticks">${axis}</div><span class="checkup-chart-span" aria-live="polite" hidden></span></div>` +
-    `<div class="checkup-chart-legend">${legend}</div><div class="checkup-run-details" hidden></div>${details}</div>`;
+    `<div class="checkup-chart-legend">${legend}</div><div class="checkup-run-details" hidden></div></div>`;
 }
 
 function checkupCyclingChartHtml(c) {
@@ -1741,11 +2074,22 @@ function checkupCyclingChartHtml(c) {
     trace = { ...previous, window_end_s: previous.window_end_s + elapsed, unix_s: previous.unix_s + elapsed };
   }
   if (trace) {
-    const key = JSON.stringify([LANG, scope, trace]);
+    const mergedCheck = c ? {
+      ...c,
+      run_contexts: c.run_contexts ?? cyclingTrace?.run_contexts,
+      flow_typical_l_min: c.flow_typical_l_min ?? cyclingTrace?.flow_typical_l_min,
+    } : c;
+    const key = JSON.stringify([LANG, scope, trace, mergedCheck?.run_contexts, mergedCheck?.flow_typical_l_min]);
     if (cyclingMarkup[0] === key) return cyclingMarkup[1];
-    const timeline = checkupCyclingTimelineHtml(trace, scope);
+    const timeline = checkupCyclingTimelineHtml(trace, scope, mergedCheck);
     if (timeline) {
-      if (trace === c.timeline) cyclingTrace = { scope, trace };
+      if (trace === c.timeline) {
+        cyclingTrace = {
+          scope, trace,
+          run_contexts: c.run_contexts,
+          flow_typical_l_min: c.flow_typical_l_min,
+        };
+      }
       cyclingMarkup = [key, timeline];
       return timeline;
     }
@@ -1794,18 +2138,22 @@ function checkupCyclingChartHtml(c) {
     const valid = identified && [h.space_s, h.dhw_s].every(v => Number.isInteger(v) && v >= 0) &&
       h.space_s + h.dhw_s <= r;
     const space = valid ? h.space_s : 0, dhw = valid ? h.dhw_s : 0;
+    const otherActive = r - space - dhw;
     const modes = [[space, "space", "mode.heat"], [dhw, "dhw", "mode.dhw"],
-      [r - space - dhw, "other", "check.fault_unknown"]].filter(([seconds]) => seconds > 0);
+      [otherActive, "other", "check.fault_unknown"]].filter(([seconds]) => seconds > 0);
     const tip = [when, observed || s ? startsText(s) : t("sys.nodata")];
     if (observed) tip.push(duration(r));
     for (const [seconds, , label] of modes) tip.push(`${t(label)} ${duration(seconds)}`);
     tip.push(t("check.hour.coverage", duration(observed), possible == null ? "" : duration(possible)));
-    const fill = new Set(modes.map(([, mode]) => mode));
-    if (missing > 0 || (possible == null && !observed)) fill.add("other");
+    const segments = [];
+    if (space > 0) segments.push({ cat: "space", dur: space });
+    if (dhw > 0) segments.push({ cat: "dhw", dur: dhw });
+    const otherTotal = otherActive + (missing > 0 ? missing : (possible == null && !observed ? 1 : 0));
+    if (otherTotal > 0) segments.push({ cat: "other", dur: otherTotal });
     cols += `<button type="button" class="checkup-chart-col"` +
       ` data-bucket="${identified ? h.bucket : i}" tabindex="${n ? -1 : 0}" aria-pressed="false"` +
       ` aria-label="${esc(tip.join(" · "))}"><b${s > 2 ? ' class="warn"' : ""}>${s || ""}</b>` +
-      `${checkupCyclingFillHtml(fill)}</button>`;
+      `${checkupCyclingFillHtml(segments)}</button>`;
   }
   let meta = hasObservation || sumS ? startsText(sumS) : t("sys.nodata");
   if (hasObservation) meta += ` · ${checkupDuration(sumR)}`;

@@ -21,6 +21,7 @@
 #include "logic/checkup_persist.hpp"
 #include "logic/config_model.hpp"
 #include "logic/cycling_persist.hpp"
+#include "logic/cycling_run_context.hpp"
 #include "logic/fault_persist.hpp"
 #include "logic/fault_trace.hpp"
 #include "hydronic_observation_store.hpp"
@@ -175,6 +176,13 @@ struct CheckupHydronicReport {
 // existing flow minimum or the eight-check verdict. History calls expiry before its flash lock.
 CheckupHydronicReport checkup_hydronic_report();
 void                  checkup_hydronic_expire(int64_t now_us);
+
+// Return true when volatile X10A cycling run contexts are populated for the current session.
+bool checkup_has_cycling_run_contexts(DiagnosticsSource source = DiagnosticsSource::X10a);
+
+// Copy recent RAM-only X10A cycling run start/stop contexts projected onto the timeline frame.
+bool checkup_cycling_run_contexts(logic::CheckupRunContextSnapshot& out, uint32_t boot_s,
+                                  DiagnosticsSource source = DiagnosticsSource::X10a);
 
 // Copy the next completed hourly pair after `after_bucket` into a journal payload. `now_unix_s`
 // supplies the wall-clock anchor; no record is produced before time is synced or before one hour

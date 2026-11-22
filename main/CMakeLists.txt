@@ -28,8 +28,10 @@ idf_component_register(
         "http_common.cpp"
         "http_client_diag.cpp"
         "http_deadline.cpp"
-        "http_status.cpp"
+        # Place http_status.cpp past Xtensa's 256 KiB l32r literal-pool island so its status
+        # helpers remain natively decoded by objdump while packed_config.py decodes http_config.cpp.
         "http_config.cpp"
+        "http_status.cpp"
         "http_ota.cpp"
         "mcp_server.cpp"
         "provisioning.cpp"
@@ -237,7 +239,7 @@ set(UI_MINIFIER_VENDOR
     "${CMAKE_CURRENT_SOURCE_DIR}/../tools/web_asset/vendor/rcssmin.py")
 # Browsers do not consistently negotiate Brotli on this trusted-LAN HTTP origin. Keep gzip so the
 # payload's Content-Encoding is usable by every supported browser, and gate the measured response.
-set(UI_GZIP_MAX_BYTES 170240)
+set(UI_GZIP_MAX_BYTES 176128)
 idf_build_get_property(PYTHON PYTHON)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${APP_JS_MANIFEST}")
 file(STRINGS "${APP_JS_MANIFEST}" APP_JS_ENTRIES ENCODING UTF-8)

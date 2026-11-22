@@ -1508,6 +1508,97 @@ void hydronic_case(const std::string& name) {
                 checkup_hydronic_report().observation.totals.samples == 2,
             "hydronic_sealed_producer_does_not_reopen_population");
 }
+
+void x10a_cycling_run_contexts() {
+    boot();
+    const auto cov      = coverage();
+    const auto ctx_rows = [](const char* rps, const char* lwt, const char* rwt, const char* tgt,
+                             const char* flow, const char* req = "1") {
+        return std::vector<CachedValue>{
+            row({0x30, 0, 152}, rps),
+            row({0x61, 2, 105}, lwt),
+            row({0x61, 8, 105}, rwt),
+            row({0x60, 9, 105}, tgt),
+            row(CHECKUP_LOC_FLOW, flow),
+            row({0x60, 2, 303}, req),
+            row(CHECKUP_LOC_DEFROST, "0"),
+            row(CHECKUP_LOC_VALVE, "0"),
+            row(CHECKUP_LOC_IU_MODE, "Heating"),
+        };
+    };
+
+    // Run 1: >= 600 s space heating -> sets typical flow = 18.0 L/min, stops on RequestWithdrawal.
+    sample(10, ctx_rows("0", "28.0", "26.0", "35.0", "0.0", "0"), cov, true, false);
+    sample(20, ctx_rows("25.0", "28.5", "26.5", "35.0", "18.0", "1"), cov, true, true);
+    for (int t = 30; t <= 630; t += 10) {
+        sample(t, ctx_rows("25.0", "32.0", "29.0", "35.0", "18.0", "1"), cov, true, true);
+    }
+    sample(640, ctx_rows("0", "34.0", "31.0", "35.0", "18.0", "0"), cov, true, false);
+
+    // Pause > 30 s with request already On, then short run stopping with LowRpsAboveTarget.
+    sample(650, ctx_rows("0", "32.5", "30.0", "35.0", "0.0", "0"), cov, true, false);
+    for (int t = 660; t <= 700; t += 10) {
+        sample(t, ctx_rows("0", "30.0", "28.0", "35.0", "0.0", "1"), cov, true, false);
+    }
+    sample(710, ctx_rows("24.0", "30.5", "28.5", "35.0", "16.5", "1"), cov, true, true);
+    for (int t = 720; t <= 760; t += 10) {
+        sample(t, ctx_rows("16.0", "37.5", "34.5", "35.0", "16.5", "1"), cov, true, true);
+    }
+    sample(770, ctx_rows("0", "38.2", "35.2", "35.0", "16.5", "1"), cov, true, false);
+
+    sdk::now_us = 780LL * 1000000LL;
+    CheckupRunContextSnapshot snap;
+    require(checkup_cycling_run_contexts(snap, 780, DiagnosticsSource::X10a),
+            "run_context_snapshot_present");
+    require(snap.count == 2 && snap.flow_typical_tenths == 180, "run_context_typical_flow");
+    require(snap.entries[0].start_kind == static_cast<uint8_t>(CyclingStartKind::RequestOn) &&
+                snap.entries[0].stop_kind ==
+                    static_cast<uint8_t>(CyclingStopKind::RequestWithdrawal) &&
+                snap.entries[0].stop_rwt_tenths == 310 && snap.entries[0].flow_tenths == 180,
+            "run_context_first_run");
+    require(snap.entries[1].start_kind == static_cast<uint8_t>(CyclingStartKind::CooldownRestart) &&
+                snap.entries[1].stop_kind ==
+                    static_cast<uint8_t>(CyclingStopKind::LowRpsAboveTarget) &&
+                snap.entries[1].stop_rwt_tenths == 352 && snap.entries[1].flow_tenths == 165,
+            "run_context_second_run");
+
+    checkup_set_diagnostics(false, 23);
+    require(!checkup_has_cycling_run_contexts(DiagnosticsSource::X10a),
+            "run_context_hidden_while_paused");
+    require(!checkup_cycling_run_contexts(snap, 780, DiagnosticsSource::X10a) && snap.count == 0,
+            "run_context_snapshot_blocked_while_paused");
+    checkup_set_diagnostics(true, 23);
+    sample(785, ctx_rows("0", "32.0", "29.5", "35.0", "0.0", "0"), cov, true, false);
+    sdk::now_us = 790LL * 1000000LL;
+    require(checkup_has_cycling_run_contexts(DiagnosticsSource::X10a),
+            "run_context_preserved_after_pause_resume");
+    require(checkup_cycling_run_contexts(snap, 790, DiagnosticsSource::X10a) && snap.count == 2 &&
+                snap.flow_typical_tenths == 180,
+            "run_context_entries_survive_pause_resume");
+
+    CheckupRunContextSnapshot mb_snap;
+    require(!checkup_cycling_run_contexts(mb_snap, 780, DiagnosticsSource::Modbus) &&
+                mb_snap.count == 0,
+            "modbus_run_context_isolated");
+
+    checkup_reset();
+    require(!checkup_cycling_run_contexts(snap, 780, DiagnosticsSource::X10a) && snap.count == 0,
+            "checkup_reset_clears_run_contexts");
+
+    checkup_reset_on_detect("altherma_erga_e_ehv_ehb_ehvz_e_ej_series_04_08kw", 0x12345678);
+    // First post-reset sample consumes the reset barrier and is conservatively discarded.
+    sample(800, ctx_rows("0", "28.0", "26.0", "35.0", "0.0", "0"), cov, true, false);
+    sample(810, ctx_rows("0", "28.0", "26.0", "35.0", "0.0", "1"), cov, true, false);
+    sample(820, ctx_rows("22.0", "29.0", "27.0", "35.0", "15.0", "1"), cov, true, true);
+    sample(830, ctx_rows("0", "32.0", "29.0", "35.0", "15.0", "0"), cov, true, false);
+    sdk::now_us = 840LL * 1000000LL;
+    require(checkup_cycling_run_contexts(snap, 840, DiagnosticsSource::X10a) && snap.count == 1,
+            "run_context_restarted_after_detect");
+
+    checkup_cycling_forget();
+    require(!checkup_cycling_run_contexts(snap, 840, DiagnosticsSource::X10a) && snap.count == 0,
+            "cycling_forget_withholds_run_contexts");
+}
 } // namespace
 int main(int argc, char** argv) {
     std::string name = argc == 2 ? argv[1] : "";
@@ -1561,6 +1652,8 @@ int main(int argc, char** argv) {
             modbus_flow_scale_gate();
         else if (name == "x10a_modbus_fault_trace_lifecycle")
             x10a_modbus_fault_trace_lifecycle();
+        else if (name == "x10a_cycling_run_contexts")
+            x10a_cycling_run_contexts();
         else if (name.rfind("consent_lock_", 0) == 0 || name.rfind("consent_sampling_", 0) == 0 ||
                  name.rfind("consent_caller_", 0) == 0)
             consent_staged_sample(name);

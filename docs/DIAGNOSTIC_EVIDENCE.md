@@ -1,6 +1,6 @@
 # Evidence and limits of the plant diagnostics
 
-<!-- diagnostic-evidence-contract: ada396271cc9c5028eab789a9fd5ed3cddc88557b37db4fc66bfac55b6bc1462 -->
+<!-- diagnostic-evidence-contract: 1d28ada5211bfe7a5d63432b38895242c0ba2812cd96c06b9a902c3567a3b0fb -->
 
 For every row in the **Plant diagnostics · 24 h** card, this page answers four questions:
 
@@ -375,6 +375,26 @@ The observed run population and its outdoor context do not establish building lo
 or continuous weather coverage. A compressor pause around defrost can split an operating sequence
 into separate recorded runs. The [production observation below](#diagnosis-defrost) recorded such a
 pause on the hot-water route. Its timing does not establish a space-heating start or stop.
+
+**Per-run RAM context (`run_contexts`):** [`cycling_run_context.hpp`](../main/logic/cycling_run_context.hpp)
+retains up to 48 X10A runs in volatile RAM alongside the timed cycling trace using the same
+provisional rules (`22 rps`, `+2 K` leaving-water-minus-target with `30 s` target stability and
+`30 s` post-stop refinement, `15 s` max sample gap), optional `Instrument::ReturnWater` capture,
+settled flow (`>= 30 s` pump warm-up, falling back to full-run average or stop-sample flow on shorter
+runs), settled minimum speed (`>= 30 s` warm-up, falling back to full-run minimum speed), and a median
+typical heating flow (`flow_typical_l_min`) across completed `>= 600 s` space-heating runs in RAM. Stop
+precedence orders defrost > DHW transition > target lowered > low speed above target > request withdrawal >
+normal stop (wire tokens and field units are defined in
+[API.md](API.md#history-and-24-hour-checks)); any target change withdraws `low_rps_above_target` even
+though target-changed stop attribution records only target drops. The dashboard flags
+`low_rps_above_target` stops (and short-cycling period summaries with `>= 2` such stops) as low flow
+in its explanatory copy when a run's flow is `<= 0.65 × flow_typical_l_min`. Like `stop_context`, these
+telemetry summaries prove neither minimum modulation, closed valves, an external thermostat,
+oversizing, nor the physical root cause of a stop; display fields (`run_contexts`,
+`flow_typical_l_min`) are omitted in Modbus mode while X10A RAM tracking continues in parallel,
+pausing (`enabled: false`) resets only the active tracker and pending post-stop refinement window, and
+retained trace entries clear on reboot, recovery forgetting, source/generation reset, or ring
+overwrite (`> 48` runs).
 
 <a id="diagnosis-defrost"></a>
 ### 4. Defrost events (`defrost`)

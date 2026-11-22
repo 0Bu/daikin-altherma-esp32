@@ -63,7 +63,7 @@ def pack_startup_script(page: str) -> str:
         raise ValueError("startup script frame must be nonempty and fit the 1 MiB decoded bound")
     decoder, license_text, _ = load_decoder()
     try:
-        packed = encode_frame(frame)
+        packed = encode_frame(frame, MAX_DECODED_BYTES)
     except lzma.LZMAError as error:
         raise ValueError(f"startup script LZMA encoding failed: {error}") from error
 

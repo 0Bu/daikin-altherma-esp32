@@ -140,6 +140,7 @@ vm.runInContext(
      detail: checkupDetailHtml,
      chart: checkupCyclingChartHtml,
      timeline: checkupCyclingTimelineHtml,
+     periodDetails: (trace, checkObj, from, to) => { checkupCyclingTimelineHtml(trace, "test-scope", checkObj); return cyclingPeriodDetailsHtml(_cyclingModels.get("test-scope"), from, to); },
      card: checkupCardHtml,
      ready: checkupSourceReadyFor,
      copy: I18N,
@@ -382,7 +383,35 @@ assert.ok(detail.indexOf("checkup-cycling-assessment") < detail.indexOf("checkup
 assert.ok(detail.indexOf("checkup-cycling-grid") < detail.indexOf("data-checkup-hours"));
 assert.match(detail, /Heating runs are short on average\./);
 assert.match(detail, /Gaps in the readings can leave some starts uncounted\./);
-assert.match(detail, /Normal:<\/span> There is no fixed normal number of starts\./);
+assert.doesNotMatch(detail, /Normal:<\/span>/);
+
+const timedShortDetail = ui.detail({
+  ...cycling,
+  timeline: {
+    unix_s: 1794582660, window_end_s: 86400, observed_end_s: 86400, run_edges: true,
+    records: [
+      1 * 8 + 1, 82810 * 8 + 5, 82810 * 8 + 3, 82990 * 8 + 1, 82995 * 8 + 6,
+      83200 * 8 + 5, 83200 * 8 + 3, 83400 * 8 + 1, 83405 * 8 + 6,
+    ],
+  },
+});
+assert.match(timedShortDetail, /12 runs · avg\. 5 min · 2 &lt; 5 min/);
+
+const evictedRunHtml = ui.periodDetails(
+  {
+    unix_s: 1794582660, window_end_s: 86400, observed_end_s: 86400, run_edges: true,
+    records: [
+      1 * 8 + 1, 82810 * 8 + 5, 82810 * 8 + 3, 83000 * 8 + 1, 83000 * 8 + 6,
+      83600 * 8 + 5, 83600 * 8 + 3, 83900 * 8 + 1, 83900 * 8 + 6,
+    ],
+  },
+  { run_contexts: [{ at: 83600, stop: 83900, mode: "space", start_kind: "request_on", stop_kind: "normal" }] },
+  23,
+  23,
+);
+assert.match(evictedRunHtml, /Stop unknown/);
+assert.match(evictedRunHtml, /Normal stop/);
+assert.doesNotMatch(evictedRunHtml.split("83600")[0], /Normal stop/);
 
 const restoredCycling = { ...cycling, starts: 27, hours: [
   { starts: 22, restored: true }, { starts: 5 }, { starts: 9, restored: true, expired: true },
@@ -582,21 +611,25 @@ assert.deepEqual(fillModes(restoredHour), ["space"], "restoration retains positi
 assert.equal(fillModes(restoredHour).includes("other"), false,
   "a short restored record does not imply missing time before its end");
 
-// Colour is a set of categories, never a second duration or event-timing measurement.
+// Chronological proportional segments: each active band fills bottom-to-top by duration share.
 const hourlyMix = (space, dhw, other = 0, observed = 3600) => hourMarkup(ui.chart({
   ...cyclingWithHours, hours: [{ bucket: 0, starts: 1, run_s: space + dhw + other,
     observed_s: observed, elapsed_s: 3600, space_s: space, dhw_s: dhw }],
 }), 0);
 const mostlyWater = hourlyMix(1, 3599), mostlyHeating = hourlyMix(3599, 1);
 assert.deepEqual(fillModes(mostlyWater), ["space", "dhw"]);
-assert.equal(fillMarkup(mostlyWater), fillMarkup(mostlyHeating),
-  "swapping one-second and 3599-second modes leaves the visual mixture identical");
+assert.notEqual(fillMarkup(mostlyWater), fillMarkup(mostlyHeating),
+  "swapping one-second and 3599-second modes produces distinct proportional fills");
+assert.match(fillMarkup(mostlyWater),
+  /linear-gradient\(to top, var\(--flow-hot\) 0\.00%, var\(--flow-hot\) 0\.03%, var\(--brand\) 0\.03%, var\(--brand\) 100\.00%\)/);
+assert.match(fillMarkup(mostlyHeating),
+  /linear-gradient\(to top, var\(--flow-hot\) 0\.00%, var\(--flow-hot\) 99\.97%, var\(--brand\) 99\.97%, var\(--brand\) 100\.00%\)/);
 assert.notEqual(mostlyWater.match(/aria-label="([^"]*)"/)[1], mostlyHeating.match(/aria-label="([^"]*)"/)[1],
   "actual mode durations remain distinct in accessible readouts");
 assert.deepEqual(fillModes(hourlyMix(60, 60, 60, 180)), ["space", "dhw", "other"],
   "unassigned runtime plus a sampling gap contributes gray only once");
-assert.equal(fillMarkup(hourlyMix(60, 60, 60, 180)), fillMarkup(hourlyMix(1200, 1200, 1200)),
-  "gap and runtime lengths cannot change a three-category mixture");
+assert.notEqual(fillMarkup(hourlyMix(60, 60, 60, 180)), fillMarkup(hourlyMix(1200, 1200, 1200)),
+  "gap and runtime lengths proportionally determine the category shares");
 assert.deepEqual(fillModes(hourMarkup(observedZero, 0)), [], "observed off-time stays uncolored");
 
 const timedChart = records => ui.timeline({ unix_s: 1794582660,
@@ -605,10 +638,12 @@ const timedChart = records => ui.timeline({ unix_s: 1794582660,
 }, "presence-test");
 const heatThenWater = timedChart([[0, 1], [82800, 3], [82801, 4]]);
 const waterThenHeat = timedChart([[0, 1], [82800, 4], [86399, 3]]);
-assert.equal(fillMarkup(hourMarkup(heatThenWater, 23)), fillMarkup(hourMarkup(waterThenHeat, 23)),
-  "timed mode order and unequal durations cannot change the visual mixture");
-assert.equal(fillMarkup(hourMarkup(heatThenWater, 23)), fillMarkup(mostlyWater),
-  "timed and hourly-total charts share one category-fill contract");
+assert.notEqual(fillMarkup(hourMarkup(heatThenWater, 23)), fillMarkup(hourMarkup(waterThenHeat, 23)),
+  "timed mode order and durations remain distinct in chronological proportional segments");
+const sandwichTimed = hourMarkup(timedChart([[0, 1], [82800, 3], [83520, 4], [84600, 3]]), 23);
+assert.match(fillMarkup(sandwichTimed),
+  /linear-gradient\(to top, var\(--flow-hot\) 0\.00%, var\(--flow-hot\) 20\.00%, var\(--brand\) 20\.00%, var\(--brand\) 50\.00%, var\(--flow-hot\) 50\.00%, var\(--flow-hot\) 100\.00%\)/,
+  "alternating 20% space -> 30% DHW -> 50% space fills chronologically in bottom-to-top order");
 const mixedTrace = timedChart([[0, 1], [82800, 3], [83400, 2], [84000, 0], [84600, 4]]);
 const mixedTimedHour = hourMarkup(mixedTrace, 23);
 assert.deepEqual(fillModes(mixedTimedHour), ["space", "dhw", "other"],
@@ -1061,10 +1096,9 @@ for (const lang of locales) {
         assert.match(diagnosis, /checkup-cycling-assessment/);
         assert.match(diagnosis, /data-checkup-hours/);
         const normal = `<span class="vdesc-n">${ui.text(lang, "normal.label")}</span>`;
-        assert.ok(body.includes(normal), `${lang}/${id}: Normal block`);
+        assert.ok(!body.includes(normal), `${lang}/${id}: cycling omits redundant Normal block`);
         assert.ok(body.startsWith('<div class="vdesc-p checkup-cycling-total"><span class="vdesc-n">'));
         assert.ok(body.indexOf("checkup-cycling-assessment") < body.indexOf("data-checkup-hours"));
-        assert.ok(body.indexOf("data-checkup-hours") < body.indexOf(normal));
         assert.doesNotMatch(diagnosis, /checkup-stop-box|checkup-cycling-chart/);
       } else {
         assert.equal((diagnosis.match(/class="vdesc-p"/g) || []).length, 3, `${lang}/${id}/${verdict}`);
