@@ -8,6 +8,7 @@ import { startFixtureServer } from "../tools/browser/fixture_server.mjs";
 import { assertHistoryMotion, HISTORY_MOTION_MUTATIONS } from "./test_browser_history_motion.mjs";
 import { assertCyclingChart } from "./test_browser_cycling.mjs";
 import { assertFaultChart } from "./test_browser_fault.mjs";
+import { assertDhwTimeline } from "./test_browser_dhw.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const pageFile = process.env.DAIKIN_BROWSER_PAGE;
@@ -1460,6 +1461,35 @@ async function assertPlantDiagnosis(page, context) {
     const normalLabel = await page.evaluate("t('normal.label')");
     for (const block of blocks) {
       if (block.id === "model:health_cycling" || block.id === "model:health_pressure") continue;
+      if (block.id === "model:health_dhw_loss") {
+        const dhw = await page.evaluate(`(() => {
+          const body = document.querySelector("[data-desc='model:health_dhw_loss']").closest('.vitem').querySelector('.vdesc-body');
+          const detail = body.querySelector('.checkup-dhw-detail');
+          const basis = detail?.querySelector('[data-dhw-disclosure="basis"]');
+          return { wrapper: body.firstElementChild === detail, heroFirst: detail?.firstElementChild?.classList.contains('checkup-dhw-hero'),
+            value: detail?.querySelector('.checkup-dhw-value')?.firstChild?.textContent.trim(),
+            unit: detail?.querySelector('.checkup-dhw-unit')?.textContent,
+            assessment: detail?.querySelector('.checkup-dhw-assessment')?.textContent,
+            disclosures: Array.from(detail?.querySelectorAll('details[data-dhw-disclosure]') || [], node =>
+              ({key:node.dataset.dhwDisclosure,tag:node.tagName,open:node.open,named:!!node.querySelector('summary')?.textContent.trim()})),
+            normal: basis?.querySelector('.vdesc-n')?.textContent,
+            empty: detail?.querySelector('[data-checkup-dhw] .checkup-dhw-empty')?.textContent,
+            fabricated: detail?.querySelectorAll('.checkup-dhw-chart, [data-dhw-window], [data-dhw-lane]').length };
+        })()`);
+        assert.equal(block.count, 1, `${context}/${block.id}: one dedicated detail wrapper, not the generic three blocks`);
+        assert.equal(dhw.wrapper && dhw.heroFirst, true, `${context}/${block.id}: the measurement hero leads the detail`);
+        assert.equal(dhw.value, "1", `${context}/${block.id}: hero retains the aggregate sensor rate without timed records`);
+        assert.equal(dhw.unit, "K/h", `${context}/${block.id}: separate cooling-rate unit`);
+        assert.equal(dhw.assessment, await page.evaluate("t('check.dhw.measurement') + ' ' + t('check.dhw.hint')"),
+          `${context}/${block.id}: sensor observation and bounded project hint remain distinct`);
+        assert.deepEqual(dhw.disclosures, ["basis", "energy"].map(key => ({key,tag:"DETAILS",open:false,named:true})),
+          `${context}/${block.id}: supporting basis and energy are named native disclosures, initially collapsed`);
+        assert.equal(dhw.normal, normalLabel, `${context}/${block.id}: Normal context is retained inside the basis`);
+        assert.equal(dhw.empty, await page.evaluate("t('check.dhw.timeline_unavailable')"),
+          `${context}/${block.id}: aggregate-only firmware explicitly lacks timed evidence`);
+        assert.equal(dhw.fabricated, 0, `${context}/${block.id}: totals cannot fabricate chart bars or marker lanes`);
+        continue;
+      }
       if (block.id === "model:health_fault") {
         assert.ok(block.text.every(text => text.trim()), `${context}/${block.id}: no empty block`);
         assert.ok(!block.text.some(text => text.includes(normalLabel)),
@@ -1666,8 +1696,27 @@ async function assertPlantDiagnosis(page, context) {
     })()`);
     const dhwText = () => page.evaluate(`document.querySelector("[data-desc='model:health_dhw_loss']")
       .closest('.vitem').innerText`);
+    const dhwEnergyText = () => page.evaluate(`document.querySelector(
+      '.checkup-dhw-detail [data-dhw-disclosure="energy"] .checkup-dhw-disclosure-body')?.innerText.trim() || ''`);
+    const expectedDhwEnergy = numbers => page.evaluate(`t('check.detail.dhw_energy',
+      ...${JSON.stringify(numbers)}.map((value,index) => value.toLocaleString(LANG,
+        {minimumFractionDigits:index ? 2 : 1,maximumFractionDigits:index ? 2 : 1})))`);
+    // The new layout deliberately hides long evidence and the energy example until their own
+    // native summaries are activated. Test their actions before inspecting visible content.
+    for (const name of ["basis", "energy"]) {
+      const disclosure = `.checkup-dhw-detail details[data-dhw-disclosure="${name}"]`;
+      await clickElement(page, disclosure + " > summary");
+      await page.waitFor(`document.querySelector(${JSON.stringify(disclosure)}).open === true`);
+    }
+    await page.waitFor("!S.clickHold && !S.scrub");
+    assertLayout(await page.evaluate(layoutAudit), `${context}/dhw-supporting-details`);
+    const openedEnergy = await dhwEnergyText();
+    assert.equal(openedEnergy, await expectedDhwEnergy([1, 0.23, 0.08, 0.09]),
+      `${context}: opened energy example retains the one-hour 200 l and assumed-COP calculation`);
+    for (const assumption of ["200", "COP", "kWh"])
+      assert.ok(openedEnergy.includes(assumption), `${context}: energy assumptions retain ${assumption}`);
     assert.ok((await dhwText()).includes(discardedContext),
-      `${context}: a NOTE retains discarded reading-gap evidence`);
+      `${context}: opened basis retains discarded reading-gap evidence for the NOTE`);
     assert.equal(await page.evaluate(`document.querySelector("[data-desc='model:health_pressure']")
       .closest('.card').querySelector('.section-badge')?.innerText || ''`),
       await page.evaluate("t('check.summary.notes', 4)"),
@@ -1696,6 +1745,10 @@ async function assertPlantDiagnosis(page, context) {
       `${context}: marked rapid cooling shows its measured rate`);
     assert.ok((await page.evaluate(`document.querySelector("[data-desc='model:health_dhw_loss']").closest('.vitem').innerText`))
       .includes('kWh'), `${context}: measured cooling has the energy illustration`);
+    assert.equal(await page.evaluate(`document.querySelector('.checkup-dhw-detail [data-dhw-disclosure="energy"]').open`), true,
+      `${context}: changing the measured scalar preserves the opened native energy disclosure`);
+    assert.equal(await dhwEnergyText(), await expectedDhwEnergy([6, 1.40, 0.47, 0.56]),
+      `${context}: the energy illustration updates the one-hour calculation, not a daily extrapolation`);
     assert.ok((await dhwText()).includes(discardedContext),
       `${context}: MEASURED retains discarded reading-gap evidence`);
     await captureNativeEvidence(page, `${context}/dhw-net-cooling`,
@@ -1716,6 +1769,8 @@ async function assertPlantDiagnosis(page, context) {
       `${context}: a blocked day must not promise ongoing checking`);
     assert.ok(!(await page.evaluate(`document.querySelector("[data-desc='model:health_dhw_loss']").closest('.vitem').innerText`))
       .includes('kWh'), `${context}: no measured rate means no energy number`);
+    assert.equal(await page.evaluate(`document.querySelectorAll('.checkup-dhw-detail [data-dhw-disclosure="energy"]').length`), 0,
+      `${context}: a blocked day removes the numeric energy disclosure rather than merely collapsing it`);
     await captureNativeEvidence(page, `${context}/dhw-no-window`,
       "[data-desc='model:health_dhw_loss']", ".vitem");
     await captureNativeEvidence(page, `${context}/refrigerant`,
@@ -2968,6 +3023,13 @@ try {
     }
     assert.deepEqual(page.diagnostics, [], "status observations must emit no browser errors");
     console.log(`focused status rendering passed: ${browserLocales.length} locales; ${viewports.length} viewports`);
+  } else if (process.argv.includes("--dhw-only")) {
+    for (const viewport of viewports) {
+      await page.viewport(viewport.width, viewport.height);
+      await activateLocale(page, "en");
+      await assertDhwTimeline(page, server, `${viewport.name}/dhw`, { locales: viewport.name === "phone" });
+    }
+    assert.deepEqual(page.diagnostics, [], "DHW timeline states must emit no browser errors");
   } else if (process.argv.includes("--diagnosis-only")) {
     // A focused rendering pass for diagnosis-copy iterations. The default full matrix below and
     // the supervisor's independent mutation controls remain unchanged.
@@ -2975,6 +3037,7 @@ try {
       await page.viewport(viewport.width, viewport.height);
       await activateLocale(page, "en");
       await assertCyclingChart(page, server, `${viewport.name}/diagnosis/cycling`);
+      await assertDhwTimeline(page, server, `${viewport.name}/diagnosis/dhw`, { locales: viewport.name === "phone" });
       await assertFaultChart(page, `${viewport.name}/diagnosis/fault/en`, viewport.name);
       await activateLocale(page, "de");
       await assertFaultChart(page, `${viewport.name}/diagnosis/fault/de`, viewport.name);
@@ -3025,6 +3088,9 @@ try {
       await assertDashboardCardNavigation(page, `${viewport.name}/${locale}/card-navigation`, viewport);
       await assertFlowSwitchWords(page, `${viewport.name}/${locale}/flow-switch`);
       await assertPlantDiagnosis(page, `${viewport.name}/${locale}/diagnosis`);
+      if (!mutation && locale === "en") {
+        await assertDhwTimeline(page, server, `${viewport.name}/${locale}/dhw`, { locales: viewport.name === "phone" });
+      }
       if (!mutation && (locale === "en" || locale === "de")) {
         await assertFaultChart(page, `${viewport.name}/${locale}/fault`, viewport.name);
       }

@@ -56,6 +56,8 @@ For host test organization and new logic coverage use [test/README.md](../test/R
 ## Logic and value definitions
 
 A `ValueDef` locates bytes by page, offset and width and names the converter, label and unit.
+Its scalar fields fit one word, keeping the label pointer naturally aligned and the full row at
+8 bytes on ESP32-S3. Catalog rows that exceed the field ranges fail constant evaluation.
 `def::resolved` combines a generated per-model table with supported supplements. Detection, the
 poller, discovery, HTTP and MQTT must all iterate that same resolved view; a shorter sizing or
 publishing table silently truncates observations.
@@ -290,6 +292,14 @@ under the checkup mutex. A transition rejects the old sample even if the saved g
 X10A, Modbus, and circulation epochs remain independent. Same-boot journal creation is not proof of reboot
 restoration. `DIAGNOSTICS.md` explains
 results; `PLANT.md` owns lifecycle.
+
+Exact completed tank-cooling windows use separate ordinary static RAM per source
+([`dhw_loss_trace.hpp`](../main/logic/dhw_loss_trace.hpp)), not `.noinit` or the history journal.
+The recorder copies accepted results without changing diagnostic rules or the `CheckupReport` layout.
+Existing persisted structs, fingerprints, journal payloads and NVS remain unchanged. The
+[timeline API](API.md#dhw-cooling-timeline) defines retention, collection resets and client
+invalidation.
+
 A run completion is booked to its retained start hour. If the journal cursor has reached that
 hour, the writer schedules a replay from it through later live hours. The boot index keeps each
 hour's newest saved copy, including the older-sequence tail of a replay cut by a restart
@@ -398,7 +408,7 @@ backs off to 30 seconds while unreachable, and suspends ordinary polling while h
 `/events` route or WebSocket broadcaster; building HTTP state never runs on the UART owner.
 [DESIGN.md](DESIGN.md) owns user-visible states and modal behavior.
 
-English and the application code remain in the startup page, capped at 176,128 gzip bytes.
+English and the application code remain in the startup page, capped at 181,248 gzip bytes.
 The build packs the minified script into an LZMA frame with a 512 KiB dictionary and a 1 MiB
 decoded-size limit. The inline loader verifies the header, decoded length, prefix, CRC and UTF-8
 before inserting the classic script synchronously at the end of the body. A validation failure
@@ -655,6 +665,12 @@ Hours this boot already completed are described by their ring position and label
 and the rings are rebuilt in place around them (`checkup_journal_rebuild` in
 `main/logic/checkup_persist.hpp`). These geometry figures do not replace the ESP32-S3 ELF's full
 static-memory and call-path budgets.
+
+Static assertions cap each DHW ring and snapshot at 416 bytes. `/status` allocates
+the snapshot before the checkup mutex and copies it with verdict/cycling detail under that same
+lock, without allocating there. Cycling and DHW share one `ValuesTlsReader` admission lease until
+both buffers are released; redaction, TLS reservation or allocation failure omits optional detail.
+No DHW window array is added to the shared `CheckupReport` or its callers' stacks.
 
 <a id="the-stack-the-second-budget-and-how-it-was-measured"></a>
 ### Stack verification

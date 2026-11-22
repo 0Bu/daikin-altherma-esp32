@@ -6,6 +6,7 @@ import { launchWebKit } from "../tools/browser/webkit_browser.mjs";
 import { startFixtureServer } from "../tools/browser/fixture_server.mjs";
 import { assertHistoryMotion, HISTORY_MOTION_MUTATIONS } from "./test_browser_history_motion.mjs";
 import { assertWebKitFlowPaint } from "./test_browser_webkit_paint.mjs";
+import { assertDhwTimeline } from "./test_browser_dhw.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const pageFile = process.env.DAIKIN_BROWSER_PAGE;
@@ -35,15 +36,22 @@ for (const name of selected) {
     await page.navigate(server.url);
     await page.waitFor("typeof S !== 'undefined' && S.status && Array.isArray(S._values) && document.querySelector('#settingsCards .vgroup')");
     await page.evaluate("pollStop(); window.__browserPollSchedule=pollSchedule; pollSchedule=()=>{}; true");
+    if (process.argv.includes("--dhw-only")) {
+      await assertDhwTimeline(page, server, "webkit/" + name + "/dhw");
+      assert.deepEqual(page.diagnostics, [], "WebKit DHW timeline must emit no browser errors");
+      continue;
+    }
     if (process.argv.includes("--diagnosis-only")) {
       const { assertCyclingChart } = await import("./test_browser_cycling.mjs");
       await assertCyclingChart(page, server, "webkit/" + name + "/diagnosis/cycling");
+      await assertDhwTimeline(page, server, "webkit/" + name + "/diagnosis/dhw");
       assert.deepEqual(page.diagnostics, [], "WebKit cycling diagnosis must emit no browser errors");
       continue;
     }
     if (!mutation || mutation === "history-paint-freeze")
       page.assertFlowPaint = context => assertWebKitFlowPaint(page, context);
     await assertHistoryMotion(page, server, "webkit/" + name + "/history-motion");
+    if (!mutation) await assertDhwTimeline(page, server, "webkit/" + name + "/dhw");
     const touch = await page.touchWitness();
     assert.ok(touch.touchstart >= 2 && touch.touchend === touch.touchstart &&
       touch.pointerdown === touch.touchstart && touch.pointerup === touch.touchstart,

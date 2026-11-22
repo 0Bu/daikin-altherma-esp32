@@ -123,6 +123,7 @@ function cancelHistoryGesture() {
   S.faultHoverIdx = null;
   if (S.trendPointer) scrubEnd(S.trendPointer.plot);
   if (S.cancelCyclingDrag) S.cancelCyclingDrag();
+  if (S.cancelDhwDrag) S.cancelDhwDrag();
 }
 
 function invalidateHistSources() {
@@ -496,6 +497,7 @@ function invalidateLiveReadings(reason, busy = false) {
   S._values = []; S._modbus = []; S.live = null;
   S.transportUnavailable = reason;
   S.transportBusy = busy;
+  if (reason === "status" && typeof markCheckupDhwStale === "function") markCheckupDhwStale();
   if (typeof expireLiveHistoryPins === "function") expireLiveHistoryPins();
   renderApp();
 }
@@ -535,6 +537,9 @@ async function readStatusFrame(paint = true, timeout, quiet = false) {
   S.status = s;
   S.statusRequestedAt = requestedAt;
   S.statusReceivedAt = receivedAt;
+  // A successful status read resolves the status outage while values are still unavailable.
+  if (S.transportUnavailable === "status") { S.transportUnavailable = "values"; S.transportBusy = false; }
+  if (typeof retireCheckupDhwTimeline === "function") retireCheckupDhwTimeline();
   if (typeof expireLiveHistoryPins === "function") expireLiveHistoryPins();
   cyclingStatusAt = requestedAt;
   // A new frame can report a stop before the following /values request lets the chart repaint.
@@ -548,7 +553,6 @@ async function readStatusFrame(paint = true, timeout, quiet = false) {
     invalidateLiveReadings("values");
   } else if (wasX10aDown !== (s?.hp?.connected === false) &&
              typeof expireFallbackHistoryPins === "function") expireFallbackHistoryPins();
-  if (S.transportUnavailable === "status") { S.transportUnavailable = "values"; S.transportBusy = false; }
   const profile = s?.profile?.id || "";
   if (hpProbeIsOpen() && profile !== S.hpProbeCatalogProfile && !S.hpProbeCatalogBusy)
     loadHpProbeCatalog(profile);

@@ -2306,6 +2306,43 @@ function historyRowOwner(node, host) {
     ?.querySelector("[data-desc]")?.dataset.desc;
 }
 
+// A DHW aggregate can expire independently of its timed windows. Keep the chart AND its
+// painting ancestors connected when hero/energy, verdict badges or sibling rows change shape.
+function preserveCheckupDhwIsland(host, fresh, slot, nextSlot, compatible, attrs) {
+  if (!slot || !nextSlot || !slot.dataset.dhwScope ||
+      slot.dataset.dhwScope !== nextSlot.dataset.dhwScope) return false;
+  const path = (node, root) => {
+    const result = [];
+    for (; node && node !== root; node = node.parentNode) result.unshift(node);
+    return node === root ? result : null;
+  };
+  const oldPath = path(slot, host), newPath = path(nextSlot, fresh);
+  if (!oldPath || !newPath || oldPath.length !== newPath.length ||
+      oldPath.some((node, i) => node.nodeName !== newPath[i].nodeName)) return false;
+  for (let i = 0; i < oldPath.length; i++) {
+    const a = oldPath[i], b = newPath[i];
+    for (const attr of attrs(a)) if (!b.hasAttribute(attr.name)) a.removeAttribute(attr.name);
+    for (const attr of attrs(b)) if (a.getAttribute(attr.name) !== attr.value)
+      a.setAttribute(attr.name, attr.value);
+  }
+  oldPath.unshift(host); newPath.unshift(fresh);
+  for (let i = 0; i < oldPath.length - 1; i++) {
+    const a = oldPath[i], b = newPath[i], keep = oldPath[i + 1], nextKeep = newPath[i + 1];
+    let cursor = a.firstChild;
+    for (const node of [...b.childNodes]) {
+      if (node === nextKeep) {
+        while (cursor !== keep) { const old = cursor; cursor = old.nextSibling; old.remove(); }
+        cursor = keep.nextSibling;
+      } else if (cursor && cursor !== keep && compatible(cursor, node)) cursor = cursor.nextSibling;
+      else if (cursor && cursor !== keep) {
+        const old = cursor; cursor = old.nextSibling; old.replaceWith(node);
+      } else a.insertBefore(node, cursor);
+    }
+    while (cursor) { const old = cursor; cursor = old.nextSibling; old.remove(); }
+  }
+  return true;
+}
+
 // Structural poll updates may replace card containers or an inspector's history. Preserve the
 // active control in either path so keyboard users can continue exploring the same series.
 function replaceHistoryHtml(host, html) {
@@ -2317,6 +2354,7 @@ function replaceHistoryHtml(host, html) {
     ? "model:health_cycling" : owner(node), node.outerHTML]);
   const focusedOwner = owner(active);
   const cycling = active?.closest?.("[data-cycling]");
+  const dhw = active?.closest?.("[data-dhw-timeline]");
   const focused = host.contains?.(active);
   const diagnosisCard = host.getAttribute?.("data-dashboard-card") === "diagnosis";
   // Also reconcile plain read-only rows. Other hosts without charts keep full writes:
@@ -2354,6 +2392,9 @@ function replaceHistoryHtml(host, html) {
           nextAttrs.some(attr => a.getAttribute(attr.name) !== attr.value))) return false;
       // The live cycling chart owns its slot and updates independently of value rows.
       if (a.getAttribute("data-checkup-hours") !== null) return true;
+      // DHW patches its frame and readout on connected nodes. The scope attribute above
+      // must still agree before the slot can outlive a source/boot/reset change.
+      if (a.getAttribute("data-checkup-dhw") !== null) return true;
       const before = text.length;
       if (a.childNodes.length === b.childNodes.length &&
           [...a.childNodes].every((node, index) => same(node, b.childNodes[index]))) return true;
@@ -2385,6 +2426,8 @@ function replaceHistoryHtml(host, html) {
       }
       const slot = (host.id === "valueGroups" || diagnosisCard) && host.querySelector("[data-checkup-hours]");
       if (slot) template.content.querySelector("[data-checkup-hours]")?.replaceWith(slot);
+      const dhwSlot = (host.id === "valueGroups" || diagnosisCard) && host.querySelector("[data-checkup-dhw]");
+      const nextDhwSlot = dhwSlot && template.content.querySelector("[data-checkup-dhw]");
       if (host.id === "valueGroups" || host.id === "settingsCards") {
         // A paused slot has no generated markup. Keep its previous chart only for the same
         // disclosure and series in the same card.
@@ -2400,7 +2443,21 @@ function replaceHistoryHtml(host, html) {
           next.replaceWith(old);
         }
       }
-      host.replaceChildren(template.content);
+      text.length = scopedUpdates.length = 0;
+      const compatible = (a, b) => {
+        const before = text.length, updates = scopedUpdates.length;
+        if (same(a, b)) return true;
+        text.length = before; scopedUpdates.length = updates;
+        return false;
+      };
+      if (preserveCheckupDhwIsland(host, template.content, dhwSlot, nextDhwSlot, compatible, attrs)) {
+        for (const [node, value] of text) node.nodeValue = value;
+        for (const [a, b] of scopedUpdates) replaceHistoryHtml(a, b.innerHTML);
+      } else {
+        if (dhwSlot && nextDhwSlot && dhwSlot.dataset.dhwScope === nextDhwSlot.dataset.dhwScope)
+          nextDhwSlot.replaceWith(dhwSlot);
+        host.replaceChildren(template.content);
+      }
     } finally { S.trendRebuilding = rebuilding; }
   }
   if (host.hasAttribute?.("data-checkup-hours") && typeof paintCyclingChart === "function") {
@@ -2414,6 +2471,16 @@ function replaceHistoryHtml(host, html) {
         ? node.dataset.hist === hist && (node.dataset.source || "") === source
         : node.dataset.histId === histId && node.dataset.histSeries === histSeries))
       ?.focus({ preventScroll: true });
+  else if (focused && dhw) {
+    const chart = host.querySelector("[data-dhw-timeline]");
+    const sameScope = chart && chart.dataset.dhwTimeline === dhw.dataset.dhwTimeline;
+    const next = sameScope && (active.dataset.dhwAction
+      ? chart.querySelector(`[data-dhw-action="${active.dataset.dhwAction}"]`)
+      : chart.querySelector(`[data-dhw-window="${active.dataset.dhwWindow}"]`));
+    (next || (sameScope && chart.querySelector("[data-dhw-window][tabindex='0']")) ||
+      [...host.querySelectorAll("[data-desc]")].find(button => button.dataset.desc === focusedOwner) ||
+      host.closest?.(".vitem")?.querySelector("[data-desc]"))?.focus({ preventScroll: true });
+  }
   else if (focused && (cycling || active?.dataset?.desc)) {
     const chart = cycling && host.querySelector("[data-cycling]");
     const sameScope = chart && chart.dataset.cycling === cycling.dataset.cycling;
@@ -2837,7 +2904,8 @@ function toggleDesc(btn) {
   const trend = btn.dataset.trend || "";
   const open = !item.classList.contains("open");
   if (!open && ((S.trendPointer && item.contains(S.trendPointer.plot)) ||
-      (key === "model:health_cycling" && S.scrub === "checkup-cycling"))) cancelHistoryGesture();
+      (key === "model:health_cycling" && S.scrub === "checkup-cycling") ||
+      (key === "model:health_dhw_loss" && S.scrub === "checkup-dhw"))) cancelHistoryGesture();
   item.classList.toggle("open", open);
   btn.setAttribute("aria-expanded", open ? "true" : "false");
   if (open) S.descOpen.add(key);
@@ -2854,6 +2922,11 @@ function toggleDesc(btn) {
   // let the saved closed markup suppress the next render and retain its hidden history SVG.
   const owner = btn.closest("#valueGroups, #settingsCards");
   if (owner) delete _html[owner.id];
+  if (key === "model:health_dhw_loss") {
+    const slot = item.querySelector("[data-checkup-dhw]");
+    if (slot && (!open || (S.stage === "dashboard" && !item.closest("[hidden]"))))
+      renderCheckupDhwChart(slot, open);
+  }
   if (key === "model:health_cycling") {
     const slot = item.querySelector("[data-checkup-hours]");
     if (slot && (!open || (S.stage === "dashboard" && !item.closest("[hidden]"))))

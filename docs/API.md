@@ -235,9 +235,10 @@ blind time itself, so its verdict can be `accept` beside trend age refusals.
 `health` fields: `source`, `covered_s`, `span_s`, `source_fresh`, `source_age_s`, `persist`, `full_span`,
 `available`, `assessable`, `evaluated`, `status`, `checks`. `health.source` is the active display
 source (`"x10a"` or `"modbus"`, matching `diagnostics.effective_source`); X10A and HomeHub Modbus
-accumulate separate 24 h stores in parallel. Disabled diagnostics, a pending reset
-or an unreadable snapshot produce placeholder checks with no accumulated diagnosis or Cycling
-chart evidence. Use `persist` and `diagnostics.enabled` to interpret them.
+accumulate separate 24 h stores in parallel. Disabled diagnostics, a pending whole-source reset or
+an unreadable checkup snapshot yield placeholder checks and suppress cycling and tank-cooling
+charts. Fault history is captured separately. Use `persist` and `diagnostics.enabled` to interpret
+placeholder checks.
 `span_s` combines time since the active store's current diagnostics window first accepted a sampling callback
 with any carried restore duration, capped at 24 hours. A callback can start the clock without
 readable data. Restore estimates the earlier span from one nominal hour before the earliest
@@ -248,7 +249,8 @@ that source;
 empty pause/failure callbacks cannot renew it. `source_fresh` applies the 15-second observation-age
 bound at read time. A stale source
 withholds current fault-clear/current pressure and reassuring assessments; dated findings remain.
-The serializer captures `health.persist`, the judged window and Cycling hours together.
+The serializer captures `health.persist`, the judged window, Cycling hours and the DHW chart
+snapshot under the same checkup lock.
 In `"modbus"` mode, `defrost`, `pressure`, `retries`, and (on Altherma 4, `Probing`, or `Fallback`
 sweeps where Input 49 scaling is unverified) `flow` report `unavailable` (`checkup_modbus_coverage`),
 and `cycling.stop_context`, `flow.hydronic` emit placeholder `confirmed:false` objects
@@ -269,11 +271,11 @@ evidence is a measurement, not a good/bad assessment. The reading order and main
 | Id | Evidence fields |
 |---|---|
 | `fault` | `active`, optional `latest`, optional `timeline` |
-| `dhw_loss` | `max_k_h`, `windows`, `high_windows`, `quiet_high_windows`, `draw_windows`, `pump_windows`, `high_with_pump`, `high_pump_off`, `circulation_on_s`, `circulation_known_s`, `candidate_s`, `settle_remaining_s`, `aborts`, `abort_reasons`, `best_aborted_s`, `blocked` |
+| `dhw_loss` | `max_k_h`, `windows`, `high_windows`, `quiet_high_windows`, `draw_windows`, `pump_windows`, `high_with_pump`, `high_pump_off`, `circulation_on_s`, `circulation_known_s`, `candidate_s`, `settle_remaining_s`, `aborts`, `abort_reasons`, `best_aborted_s`, `blocked`, optional `timeline` |
 | `cycling` | `starts`, `mean_run_s`, `space_runs`, `space_mean_run_s`, `dhw_runs`, `dhw_mean_run_s`, `cooling_runs`, `censored_runs`, `censored_transition_runs`, `censored_handover_runs`, `censored_unreadable_runs`, `censored_restart_runs`, `censored_start_runs`, `classified_runtime_s`, `censored_runtime_s`, `runtime_saturated`, `split`, `hours`, `outdoor_source`, `outdoor_min_c`, `outdoor_mean_c`, `outdoor_samples`, optional `timeline`, optional `run_contexts`, optional `flow_typical_l_min`, `stop_context` |
 | `defrost` | `count`, `share_pct`, `paired_count`, `defrost_s`, `run_s`, `outdoor_source`, `outdoor_min_c`, `outdoor_mean_c`, `outdoor_samples`, `last_observed_start` |
 | `pressure` | `min_bar`, `current_bar`, `min_unix_s`, `confirmed_low`, `confirmed_critical` |
-| `flow` | `min_l_min`, independent `hydronic` and optional `secondary_supply` observations |
+| `flow` | `min_l_min`, independent `hydronic` observations and nullable `secondary_supply` |
 | `heater` | `buh_min`, `bsh_min`, `buh_s`, `bsh_s`, `buh_observed_s`, `bsh_observed_s` |
 | `retries` | `seen` |
 
@@ -285,6 +287,55 @@ with `unavailable`/`no_eligible_windows` means a full DHW evidence day without a
 even if no candidate could open. It does not establish signal coverage or a cause. The `reading`
 abort reason includes invalid temperatures and an unconfirmed closing endpoint after a 30-second
 grace. An unsupported profile also uses `unavailable`, with `blocked:false`.
+
+<a id="dhw-cooling-timeline"></a>
+**DHW cooling timeline.** Optional `dhw_loss.timeline` contains current-boot completed windows,
+not a reconstruction from hourly sums. It needs unredacted status, enabled diagnostics, a confirmed
+supported source, started collection and an admitted caller-owned snapshot allocation. It shares
+the cycling chart's values/TLS admission guard, but does not require a synchronized clock.
+
+| Timeline field | Contract |
+|---|---|
+| `epoch` | Nonzero uint32 collection/reset generation, scoped to this boot and source. |
+| `window_end_s` | uint32 uptime at the snapshot's right edge, in whole seconds. |
+| `since_s` | uint32 uptime when this collection lifecycle began; not continuous coverage or the first completed window. |
+| `observed_end_s` | uint32 uptime of the last sample with plausible R5T, valve, internal-pump and tank-heater inputs readable, or null before one exists; not the end of a completed window. |
+| `unix_s` | Optional synchronized Unix-seconds anchor **at `window_end_s`**. The two monotonic bounds around the clock read must map to the same wall second. |
+| `live` | Boolean freshness of complete DHW inputs and the source, checked against the 15-second limit before rounding timestamps. |
+| `windows` | Array of at most 24 completed windows, oldest first, with no overlaps. |
+
+Each `timeline.windows` entry has `start_s` and `end_s` (uint32 uptime seconds), `rate_k_h`
+(nonnegative net sensor cooling, serialized with one decimal), `observed_s` (readable seconds,
+excluding tolerated blind time), and boolean `pump_marker` and `draw_marker`. The pump marker is
+internal hydronic-pump presence, **not** the external circulation witness. The draw marker is a
+temperature-shape observation, **not** proven water use. Neither marker measures duration or cause.
+
+Actual endpoints are independently quantized to whole seconds. The evaluator accepts 3600–3630
+elapsed whole seconds; the quantized endpoint difference can therefore be 3600–3631 seconds.
+Rate and observed seconds retain the evaluator's original calculation. Retention uses completion
+ends in `(window_end_s - 86400, window_end_s]`,
+including on reads after polling stops; a retained start may precede the left edge. With `unix_s`,
+map uptime `s` to `unix_s - window_end_s + s`; otherwise use relative time, never invented dates.
+Wall-clock corrections change labels, not monotonic retention.
+
+`windows:[]` means eligible collection has begun but no accepted timed completion is retained.
+An absent timeline can mean unsupported, reset, disabled, redacted, allocation-denied or unreadable
+state; it is not zero cooling. Scope UI state to `boot_id`, `history.epoch`, `health.source` and
+`timeline.epoch`. Clear the previous chart when the timeline is absent or invalid, the diagnosis
+snapshot is unreadable, or any scope key changes; unlike cycling, omission cannot reuse a cache.
+Blank intervals mean no timed completed window, not zero cooling or a recorded exclusion cause.
+
+Exact completion-end retention and aggregate hourly expiry differ, so timed and aggregate counts
+can differ in either direction. Saved aggregate hours do not supply bars. A candidate carried
+across a reboot can still contribute aggregate evidence under existing rules, but never a timed
+bar: its original start is not exact in this boot. Source/profile, circulation-identity and consent
+generation resets clear the detail. While a circulation reset is pending, snapshots exclude the
+previous DHW scope's evidence and progress. Other checks continue reporting.
+Same-generation pause/resume preserves retained completed
+windows without bridging the pause. No timed windows survive a reboot. When both source slots
+observe the factory-forget latch, they stop recording timed samples for that boot, even if erasure
+fails. The snapshot checks the latch before returning timed detail. A response already holding
+that checked snapshot can finish sending it. See [method and claim limits](DIAGNOSTIC_EVIDENCE.md#diagnosis-dhw-loss).
 
 Unestablished numeric evidence is null. `reason` is empty when no qualification applies; otherwise:
 `unsupported`, `day_incomplete`, `input_coverage`, `no_eligible_windows`, `class_unavailable`,
