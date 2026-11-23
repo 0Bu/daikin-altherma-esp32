@@ -3477,8 +3477,12 @@ static void mqtt_task(void*) {
     MqttTransportResumeState transport_resume;
     TaskFailureEpisode       failures;
 
-    // Start one LWT-bearing transport immediately; X10A never owns its lifecycle.
-    if (!start_current_client()) {
+    // Start one LWT-bearing transport immediately unless OTA/Weather already claimed the network
+    // heap during startup; in that case mark the transport paused so mqtt_transport_resume_step()
+    // starts it cleanly after the competing TLS window releases.
+    if (mqtt_initial_start_deferred(transport_pause_requested(), competing_tls_active())) {
+        s_transport_paused.store(true, std::memory_order_release);
+    } else if (!start_current_client()) {
         transport_resume.wait_s = transport_resume.backoff_s;
     }
     for (;;) {
@@ -3919,7 +3923,8 @@ void mqtt_ha_start() {
         diag_printf("mqtt: circulation-source test semaphore alloc failed\n");
     if (!s_status.configured) return;
 
-    s_transport_pause_state.store(0, std::memory_order_release);
+    // Preserve any concurrent OTA/Weather lease in s_transport_pause_state (statically
+    // zero-initialized at boot): http_start() and weather_forecast_start() are already active.
     s_ref_ring_produced = 0;
     s_ref_ring_pos      = 0;
     s_ref_ring_consumed.store(0, std::memory_order_release);

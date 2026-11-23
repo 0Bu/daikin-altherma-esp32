@@ -104,6 +104,7 @@ daik::HpStats               hp;
 daik::WifiInfo              wifi{};
 daik::ModbusStatus          modbus;
 bool                           modbus_enabled = false, modbus_live = false;
+bool                           ota_active = false, weather_active = false;
 uint32_t                       modbus_generation = 0, x10a_generation = 0;
 std::vector<daik::CachedValue> modbus_values;
 daik::Env3Status               env;
@@ -175,8 +176,8 @@ void          config_lock() { ++adapter::config_locks; }
 void          config_unlock() { --adapter::config_locks; }
 const Config& config_ref_locked() { return adapter::cfg; }
 } // namespace detail
-bool ota_download_active() { return false; }
-bool weather_fetch_active() { return false; }
+bool ota_download_active() { return adapter::ota_active; }
+bool weather_fetch_active() { return adapter::weather_active; }
 void diag_printf(const char* format, ...) {
     // Production contract: diag_printf is bounded/no-throw and does not allocate.
     char    line[512];
@@ -425,6 +426,44 @@ void startup_failure_recovery() {
     } catch (const std::runtime_error&) {
         require(false, "START_FAILURE_KEEPS_PUBLISH_TASK_ALIVE");
     }
+}
+
+void startup_preserves_concurrent_pause() {
+    adapter::cfg.mqtt_uri = "mqtt://host-witness";
+    adapter::on_config    = []() {
+        adapter::weather_active = true;
+        daik::mqtt_transport_withdraw_online_on_pause();
+        daik::mqtt_transport_pause_for_network_heap();
+    };
+    daik::mqtt_ha_start();
+    require(sdk::task_fn != nullptr, "MQTT_TASK_CREATED");
+    require(daik::transport_pause_requested() &&
+                (daik::s_transport_pause_state.load() & daik::TRANSPORT_PAUSE_WITHDRAW_ARMED) != 0,
+            "STARTUP_PRESERVES_CONCURRENT_PAUSE_LEASE");
+    sdk::on_delay = [](TickType_t delay) {
+        require(delay == 1000 && sdk::locks == 0 && !sdk::mutex.held && sdk::takes == sdk::gives &&
+                    adapter::config_locks == 0,
+                "STARTUP_DEFERRED_WAIT_RELEASES_LOCKS");
+        if (sdk::delays == 1) {
+            require(sdk::start_calls == 0 && !daik::s_client_running.load() &&
+                        daik::s_transport_paused.load(),
+                    "STARTUP_DEFERS_CLIENT_START_WHILE_TLS_ACTIVE");
+            require(daik::mqtt_publish_network_quiesced() &&
+                        daik::mqtt_transport_network_quiesced(),
+                    "STARTUP_DEFERRED_TRANSPORT_ACKNOWLEDGES_QUIESCE");
+            daik::mqtt_transport_resume_after_network_heap();
+            adapter::weather_active = false;
+        } else if (sdk::delays == 2) {
+            check_cycle(delay);
+            require(sdk::start_calls == 1 && daik::s_client_running.load() &&
+                        !daik::s_transport_paused.load() && daik::mqtt_status().connected,
+                    "STARTUP_DEFERRED_TRANSPORT_RESUMES_AFTER_TLS_WINDOW");
+            throw StopTask{};
+        }
+    };
+    try {
+        sdk::task_fn(nullptr);
+    } catch (const StopTask&) {}
 }
 
 void event_registration_failure() {
@@ -4596,6 +4635,8 @@ int main(int argc, char** argv) {
             probe_proof_expiry();
         else if (std::strcmp(scenario, "startup_failure_recovery") == 0)
             startup_failure_recovery();
+        else if (std::strcmp(scenario, "startup_preserves_concurrent_pause") == 0)
+            startup_preserves_concurrent_pause();
         else if (std::strcmp(scenario, "event_registration_failure") == 0)
             event_registration_failure();
         else if (std::strcmp(scenario, "ref_oom_recovery") == 0)

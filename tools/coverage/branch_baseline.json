@@ -2350,6 +2350,23 @@
       },
       "test_source_sha256": "0e3b901193b1e49494037c98e7ba4c62c6faa1f29e968f1a193617267109ce45",
       "validation_boundary": "Local host and offline compiler profile measurements. The x86-64 run uses the pinned repository release-coverage image."
+    },
+    {
+      "compilers": {
+        "clang-17-darwin": "Apple clang version 17.0.0 (clang-1700.6.4.2), arm64",
+        "gcc-13-linux-ubuntu24": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, ESP-IDF v6.1.1 Docker, aarch64",
+        "gcc-15-github-linux-ubuntu26": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, Ubuntu 26.04 Docker, x86_64"
+      },
+      "measurement_limits": [
+        "gcc-15-linux-ubuntu26 (aarch64) remains unchanged pending an arm64 Ubuntu 26.04 GCC 15 container run."
+      ],
+      "runner": "scripts/run-mock-tests.sh --coverage",
+      "scope": "Add mqtt_initial_start_deferred() pure decision helper and runtime-boolean unit checks covering all four input combinations. mqtt_publish_gate.hpp: Clang 17 20/20 -> 22/22, GCC 13 and GCC 15 (x86_64) 35/36 -> 39/40. Unchanged per-file inventories and the 95-percent line floor are retained.",
+      "sources": {
+        "main/logic/mqtt_publish_gate.hpp": "8624037bfd6c625e1f58c1abf061cf2620402d1f87a34bf3f5ec80f7b34ad66b"
+      },
+      "test_source_sha256": "20ec08fc26970722c248dc3edf481137029166aa38dfcac77c76a9f483019c36",
+      "validation_boundary": "Measured locally on Darwin Clang 17, ESP-IDF v6.1.1 Docker GCC 13, and Ubuntu 26.04 x86-64 release-coverage Docker GCC 15; authoritative hosted GitHub CI confirmation and arm64 gcc-15-linux-ubuntu26 remain separate."
     }
   ],
   "method": "Exact taken/outcome inventories are measured by scripts/run-mock-tests.sh --coverage and bound to compiler family, major version and platform; hosted profiles additionally bind the runner image. The gate rejects inventory mismatches and any historical ratio decrease. Updated hosted inventories require authoritative CI confirmation. Historical measurement notes remain in Git; profiles contain the enforced counts. Measurements below identify changed sources and local compiler provenance without changing checker rules or the 95-percent executable-line floor.",
@@ -2668,8 +2685,8 @@
         "taken": 264
       },
       "main/logic/mqtt_publish_gate.hpp": {
-        "outcomes": 20,
-        "taken": 20
+        "outcomes": 22,
+        "taken": 22
       },
       "main/logic/mqtt_retirement.hpp": {
         "outcomes": 40,
@@ -3154,8 +3171,8 @@
         "taken": 381
       },
       "main/logic/mqtt_publish_gate.hpp": {
-        "outcomes": 36,
-        "taken": 35
+        "outcomes": 40,
+        "taken": 39
       },
       "main/logic/mqtt_retirement.hpp": {
         "outcomes": 46,
@@ -3640,8 +3657,8 @@
         "taken": 381
       },
       "main/logic/mqtt_publish_gate.hpp": {
-        "outcomes": 36,
-        "taken": 35
+        "outcomes": 40,
+        "taken": 39
       },
       "main/logic/mqtt_retirement.hpp": {
         "outcomes": 46,
